@@ -22,6 +22,8 @@ app.get("/", (req, res) => {
 
 // ================== CONFIG ==================
 let config = {
+  ativa: true,
+  intervalo: "*/10 * * * *", // padrão 10 min
   plataformas: {
     shopee: { ativo: false, cookie: "" },
     aliexpress: { ativo: false, key: "", secret: "" },
@@ -31,10 +33,45 @@ let config = {
   destinos: []
 };
 
+// ================== ROTAS ==================
+
+// 🔥 ESSA É A PRINCIPAL (resolve seu erro)
+app.get("/automacao", (req, res) => {
+  res.json({
+    ativa: config.ativa,
+    intervalo: config.intervalo,
+    destinos: config.destinos.length,
+    plataformas: config.plataformas
+  });
+});
+
+// atualizar config geral
 app.post("/config", (req, res) => {
   config = { ...config, ...req.body };
   console.log("⚙️ CONFIG ATUALIZADA");
+  restartCron();
   res.json({ ok: true });
+});
+
+// ligar/desligar automação
+app.post("/automacao/toggle", (req, res) => {
+  config.ativa = !config.ativa;
+  console.log("🔁 Automação:", config.ativa ? "ATIVA" : "DESLIGADA");
+  res.json({ ativa: config.ativa });
+});
+
+// mudar intervalo (ex: */3 * * * *)
+app.post("/automacao/intervalo", (req, res) => {
+  const { intervalo } = req.body;
+
+  if (!intervalo) {
+    return res.status(400).json({ erro: "Intervalo obrigatório" });
+  }
+
+  config.intervalo = intervalo;
+  restartCron();
+
+  res.json({ intervalo });
 });
 
 // ================== WHATSAPP ==================
@@ -137,7 +174,7 @@ function montarMensagem(p) {
 
 // ================== ENVIO ==================
 async function enviar(msg) {
-  if (!sock) return;
+  if (!sock || !config.ativa) return;
 
   for (let destino of config.destinos) {
     try {
@@ -150,23 +187,38 @@ async function enviar(msg) {
   }
 }
 
-// ================== AUTOMAÇÃO ==================
-cron.schedule("*/10 * * * *", async () => {
-  console.log("🚀 Rodando automação...");
+// ================== CRON CONTROLADO ==================
+let task;
 
-  let lista = [];
+function startCron() {
+  if (task) task.stop();
 
-  lista.push(...await buscarShopee());
-  lista.push(...await buscarAliExpress());
-  lista.push(...await buscarAmazon());
-  lista.push(...await buscarMercadoLivre());
+  task = cron.schedule(config.intervalo, async () => {
+    if (!config.ativa) return;
 
-  lista = filtrar(lista);
+    console.log("🚀 Rodando automação...");
 
-  for (let p of lista) {
-    await enviar(montarMensagem(p));
-  }
-});
+    let lista = [];
+
+    lista.push(...await buscarShopee());
+    lista.push(...await buscarAliExpress());
+    lista.push(...await buscarAmazon());
+    lista.push(...await buscarMercadoLivre());
+
+    lista = filtrar(lista);
+
+    for (let p of lista) {
+      await enviar(montarMensagem(p));
+    }
+  });
+
+  console.log("⏱️ Cron iniciado:", config.intervalo);
+}
+
+function restartCron() {
+  console.log("🔄 Reiniciando cron...");
+  startCron();
+}
 
 // ================== START ==================
 const PORT = process.env.PORT || 3000;
@@ -175,4 +227,5 @@ app.listen(PORT, () => {
   console.log("🌐 API ON na porta", PORT);
 });
 
+startCron();
 iniciarWhatsApp();
