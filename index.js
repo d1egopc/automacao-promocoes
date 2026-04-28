@@ -1,6 +1,7 @@
 const cron = require("node-cron");
 const qrcode = require("qrcode-terminal");
 const express = require("express");
+const cors = require("cors"); // ✅ ADICIONADO
 const axios = require("axios");
 
 const {
@@ -11,6 +12,8 @@ const {
 
 // ================== API ==================
 const app = express();
+
+app.use(cors()); // ✅ ADICIONADO
 app.use(express.json());
 
 app.get("/", (req, res) => {
