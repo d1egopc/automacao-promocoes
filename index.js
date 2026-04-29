@@ -14,21 +14,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔥 ROUTE PRINCIPAL (EVITA ERRO DO LOVABLE)
+// ================== HEALTH CHECK ==================
 app.get("/", (req, res) => {
   res.json({ status: "API ONLINE" });
 });
 
-// 🔥 NOVA ROTA QUE ESTAVA FALTANDO
 app.get("/automacao", (req, res) => {
-  res.json({
-    status: "ok",
-    message: "Automação WhatsApp online",
-    version: "1.0"
-  });
+  res.json({ status: "ok", message: "Automação WhatsApp online" });
 });
 
-// ================== ESTRUTURA ==================
+// ================== MEMORY ==================
 let sessoes = {};
 let qrCodes = {};
 let statusSessao = {};
@@ -44,7 +39,7 @@ app.post("/conectar", async (req, res) => {
 
   iniciarWhatsApp(id);
 
-  res.json({ ok: true, mensagem: "Iniciando conexão..." });
+  res.json({ ok: true, mensagem: "Conectando WhatsApp..." });
 });
 
 // ================== STATUS ==================
@@ -57,20 +52,20 @@ app.get("/status/:id", (req, res) => {
   });
 });
 
-// ================== QR (CORRIGIDO PRA JSON) ==================
+// ================== QR (IMPORTANTE) ==================
 app.get("/qr/:id", (req, res) => {
   const { id } = req.params;
 
   if (!qrCodes[id]) {
     return res.json({
-      qr: null,
-      status: "aguardando_qr"
+      status: "loading",
+      qr: null
     });
   }
 
-  res.json({
-    qr: qrCodes[id],
-    status: "qr_disponivel"
+  return res.json({
+    status: "ready",
+    qr: qrCodes[id]
   });
 });
 
@@ -103,7 +98,7 @@ app.post("/destinos/:id", (req, res) => {
   const { id } = req.params;
   const { destinos } = req.body;
 
-  destinosPorSessao[id] = destinos;
+  destinosPorSessao[id] = destinos || [];
 
   res.json({ ok: true });
 });
@@ -125,7 +120,7 @@ app.post("/test-send/:id", async (req, res) => {
   }
 
   if (destinos.length === 0) {
-    return res.status(400).json({ erro: "Nenhum destino cadastrado" });
+    return res.status(400).json({ erro: "Nenhum destino selecionado" });
   }
 
   try {
@@ -142,48 +137,62 @@ app.post("/test-send/:id", async (req, res) => {
   }
 });
 
-// ================== WHATSAPP ==================
+// ================== WHATSAPP CORE ==================
 async function iniciarWhatsApp(id) {
   try {
+    console.log("🚀 Iniciando sessão:", id);
+
     const { state, saveCreds } = await useMultiFileAuthState("auth_" + id);
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
       version,
-      auth: state
+      auth: state,
+      printQRInTerminal: false
     });
 
     sessoes[id] = sock;
     statusSessao[id] = "connecting";
+    qrCodes[id] = null;
 
     sock.ev.on("creds.update", saveCreds);
 
     sock.ev.on("connection.update", async (update) => {
       const { connection, qr } = update;
 
+      // 🔥 QR GERADO
       if (qr) {
-        qrCodes[id] = await qrcode.toDataURL(qr);
+        console.log("📲 QR GERADO:", id);
+
+        try {
+          qrCodes[id] = await qrcode.toDataURL(qr);
+        } catch (err) {
+          console.log("Erro QR encode:", err.message);
+        }
       }
 
+      // 🔥 CONECTADO
       if (connection === "open") {
+        console.log("✅ CONECTADO:", id);
         statusSessao[id] = "open";
         qrCodes[id] = null;
       }
 
+      // 🔥 DESCONECTADO
       if (connection === "close") {
+        console.log("❌ DESCONECTADO:", id);
         statusSessao[id] = "closed";
-        setTimeout(() => iniciarWhatsApp(id), 5000);
       }
     });
 
   } catch (err) {
-    console.log("Erro sessão:", err.message);
+    console.log("🔥 ERRO WHATSAPP:", err.message);
   }
 }
 
 // ================== CRON ==================
 cron.schedule("*/10 * * * *", async () => {
-  console.log("⏱️ Rodando automação...");
+  console.log("⏱️ Automação rodando...");
 
   for (let id in sessoes) {
     const sock = sessoes[id];
