@@ -1,0 +1,21 @@
+{
+  "name": "automacao-promocoes",
+  "version": "1.0.0",
+  "description": "Automação de ofertas com WhatsApp",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "axios": "^1.15.2",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "node-cron": "^4.2.1",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
