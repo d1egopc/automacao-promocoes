@@ -1,6 +1,3 @@
-﻿```json
-// package.json
-
 {
   "name": "whatsapp-api",
   "version": "1.0.0",
@@ -19,8 +16,6 @@
     "jsonwebtoken": "^9.0.2",
     "node-cron": "^3.0.3",
     "pino": "^9.3.2",
-    "pino-pretty": "^11.2.2",
     "qrcode": "^1.5.4"
   }
 }
-```
