@@ -1,5 +1,6 @@
 require("dotenv").config();
 
+const fs = require("fs");
 const express = require("express");
 const cors = require("cors");
 const qrcode = require("qrcode");
@@ -38,13 +39,13 @@ function gerarToken() {
 }
 
 function auth(req, res, next) {
-  // Rotas públicas temporárias para destravar QR
   if (
     req.path === "/" ||
     req.path === "/login" ||
     req.path === "/conectar" ||
     req.path.startsWith("/qr") ||
-    req.path.startsWith("/status")
+    req.path.startsWith("/status") ||
+    req.path.startsWith("/reset")
   ) {
     return next();
   }
@@ -61,7 +62,7 @@ function auth(req, res, next) {
   try {
     jwt.verify(token, JWT_SECRET);
     next();
-  } catch (e) {
+  } catch {
     return res.status(401).json({ erro: "Não autorizado" });
   }
 }
@@ -92,6 +93,38 @@ app.get("/", (req, res) => {
     status: "API ONLINE",
     uptime: process.uptime()
   });
+});
+
+app.post("/reset/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    if (sessoes[id]) {
+      try {
+        await sessoes[id].logout();
+      } catch {}
+
+      try {
+        sessoes[id].end?.();
+      } catch {}
+
+      delete sessoes[id];
+    }
+
+    delete qrCodes[id];
+    delete statusSessao[id];
+
+    fs.rmSync("auth_" + id, { recursive: true, force: true });
+
+    return res.json({
+      ok: true,
+      message: "Sessão resetada",
+      id
+    });
+  } catch (e) {
+    console.error("ERRO /reset:", e);
+    return res.status(500).json({ erro: e.message });
+  }
 });
 
 app.post("/conectar", async (req, res) => {
@@ -156,7 +189,8 @@ async function iniciarWhatsApp(id) {
     auth: state,
     printQRInTerminal: false,
     syncFullHistory: false,
-    markOnlineOnConnect: false
+    markOnlineOnConnect: false,
+    browser: ["Chrome", "Desktop", "1.0.0"]
   });
 
   sessoes[id] = sock;
@@ -181,8 +215,9 @@ async function iniciarWhatsApp(id) {
     }
 
     if (connection === "close") {
+      const motivo = lastDisconnect?.error?.output?.statusCode;
       console.log("❌ WHATSAPP DESCONECTADO:", id);
-      console.log("Motivo:", lastDisconnect?.error?.output?.statusCode);
+      console.log("Motivo:", motivo);
 
       statusSessao[id] = "closed";
       qrCodes[id] = null;
