@@ -18,17 +18,14 @@ const {
 } = require("@whiskeysockets/baileys");
 
 const app = express();
+const logger = pino();
 
-const logger = pino({
-  transport: {
-    target: "pino-pretty"
-  }
-});
+// ================= CONFIG =================
 
 app.use(helmet());
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "*",
+  origin: "*",
   credentials: true
 }));
 
@@ -60,7 +57,7 @@ const ADMIN_PASS_HASH = bcrypt.hashSync("123456", 10);
 function gerarToken() {
   return jwt.sign(
     { admin: true },
-    process.env.JWT_SECRET,
+    process.env.JWT_SECRET || "segredo",
     { expiresIn: "7d" }
   );
 }
@@ -77,7 +74,7 @@ function auth(req, res, next) {
   }
 
   try {
-    jwt.verify(token, process.env.JWT_SECRET);
+    jwt.verify(token, process.env.JWT_SECRET || "segredo");
     next();
   } catch {
     return res.status(401).json({ erro: "Não autorizado" });
@@ -121,20 +118,12 @@ app.get("/", (req, res) => {
 app.get("/automacao", (req, res) => {
   res.json({
     ok: true,
-    ativa: automacaoState.ativa,
-    ligadaEm: automacaoState.ligadaEm,
-    desligadaEm: automacaoState.desligadaEm,
+    ativa: automacaoState.ativa
   });
 });
 
 app.post("/automacao/toggle", (req, res) => {
   automacaoState.ativa = !automacaoState.ativa;
-
-  if (automacaoState.ativa) {
-    automacaoState.ligadaEm = new Date().toISOString();
-  } else {
-    automacaoState.desligadaEm = new Date().toISOString();
-  }
 
   logger.info("AUTOMACAO: " + automacaoState.ativa);
 
@@ -153,11 +142,9 @@ app.post("/conectar", async (req, res) => {
     return res.status(400).json({ erro: "ID obrigatório" });
   }
 
-  if (sessoes[id]) {
-    return res.json({ ok: true });
+  if (!sessoes[id]) {
+    iniciarWhatsApp(id);
   }
-
-  iniciarWhatsApp(id);
 
   res.json({ ok: true });
 });
@@ -268,11 +255,13 @@ async function iniciarWhatsApp(id) {
     if (connection === "open") {
       statusSessao[id] = "open";
       qrCodes[id] = null;
+      logger.info("WHATSAPP CONECTADO: " + id);
     }
 
     if (connection === "close") {
       statusSessao[id] = "closed";
       delete sessoes[id];
+      logger.warn("WHATSAPP DESCONECTADO: " + id);
     }
   });
 }
