@@ -1,6 +1,3 @@
-﻿```js
-// index.js
-
 require("dotenv").config();
 
 const express = require("express");
@@ -37,22 +34,10 @@ app.use(cors({
 
 app.use(express.json({ limit: "10mb" }));
 
-const limiter = rateLimit({
+app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 300
-});
-
-app.use(limiter);
-
-// ================= SAFE =================
-
-process.on("uncaughtException", (err) => {
-  logger.error(err);
-});
-
-process.on("unhandledRejection", (err) => {
-  logger.error(err);
-});
+}));
 
 // ================= MEMÓRIA =================
 
@@ -81,30 +66,21 @@ function gerarToken() {
 }
 
 function auth(req, res, next) {
-
-  if (req.path === "/") {
-    return next();
-  }
-
-  if (req.path === "/login") {
+  if (req.path === "/" || req.path === "/login") {
     return next();
   }
 
   const token = req.headers.authorization?.split(" ")[1];
 
   if (!token) {
-    return res.status(401).json({
-      erro: "Token inválido"
-    });
+    return res.status(401).json({ erro: "Token inválido" });
   }
 
   try {
     jwt.verify(token, process.env.JWT_SECRET);
     next();
   } catch {
-    return res.status(401).json({
-      erro: "Não autorizado"
-    });
+    return res.status(401).json({ erro: "Não autorizado" });
   }
 }
 
@@ -113,31 +89,21 @@ app.use(auth);
 // ================= LOGIN =================
 
 app.post("/login", async (req, res) => {
-
   const { user, pass } = req.body;
 
   if (user !== ADMIN_USER) {
-    return res.status(401).json({
-      erro: "Usuário inválido"
-    });
+    return res.status(401).json({ erro: "Usuário inválido" });
   }
 
-  const ok = await bcrypt.compare(
-    pass,
-    ADMIN_PASS_HASH
-  );
+  const ok = await bcrypt.compare(pass, ADMIN_PASS_HASH);
 
   if (!ok) {
-    return res.status(401).json({
-      erro: "Senha inválida"
-    });
+    return res.status(401).json({ erro: "Senha inválida" });
   }
-
-  const token = gerarToken();
 
   res.json({
     ok: true,
-    token
+    token: gerarToken()
   });
 });
 
@@ -153,7 +119,6 @@ app.get("/", (req, res) => {
 // ================= AUTOMAÇÃO =================
 
 app.get("/automacao", (req, res) => {
-
   res.json({
     ok: true,
     ativa: automacaoState.ativa,
@@ -163,21 +128,15 @@ app.get("/automacao", (req, res) => {
 });
 
 app.post("/automacao/toggle", (req, res) => {
-
-  automacaoState.ativa =
-    !automacaoState.ativa;
+  automacaoState.ativa = !automacaoState.ativa;
 
   if (automacaoState.ativa) {
-    automacaoState.ligadaEm =
-      new Date().toISOString();
+    automacaoState.ligadaEm = new Date().toISOString();
   } else {
-    automacaoState.desligadaEm =
-      new Date().toISOString();
+    automacaoState.desligadaEm = new Date().toISOString();
   }
 
-  logger.info(
-    `AUTOMACAO: ${automacaoState.ativa}`
-  );
+  logger.info("AUTOMACAO: " + automacaoState.ativa);
 
   res.json({
     ok: true,
@@ -188,33 +147,24 @@ app.post("/automacao/toggle", (req, res) => {
 // ================= CONECTAR =================
 
 app.post("/conectar", async (req, res) => {
-
   const { id } = req.body;
 
   if (!id) {
-    return res.status(400).json({
-      erro: "ID obrigatório"
-    });
+    return res.status(400).json({ erro: "ID obrigatório" });
   }
 
   if (sessoes[id]) {
-    return res.json({
-      ok: true,
-      message: "Sessão já conectada"
-    });
+    return res.json({ ok: true });
   }
 
   iniciarWhatsApp(id);
 
-  res.json({
-    ok: true
-  });
+  res.json({ ok: true });
 });
 
 // ================= STATUS =================
 
 app.get("/status/:id", (req, res) => {
-
   const { id } = req.params;
 
   res.json({
@@ -226,326 +176,111 @@ app.get("/status/:id", (req, res) => {
 // ================= QR =================
 
 app.get("/qr/:id", (req, res) => {
-
   const { id } = req.params;
 
   if (!qrCodes[id]) {
-    return res.json({
-      status: "loading",
-      qr: null
-    });
+    return res.json({ status: "loading", qr: null });
   }
 
-  res.json({
-    status: "ready",
-    qr: qrCodes[id]
-  });
+  res.json({ status: "ready", qr: qrCodes[id] });
 });
 
 // ================= GRUPOS =================
 
 app.get("/grupos/:id", async (req, res) => {
-
   const sock = sessoes[req.params.id];
 
   if (!sock) {
-    return res.status(400).json({
-      erro: "Sem sessão"
-    });
+    return res.status(400).json({ erro: "Sem sessão" });
   }
 
   try {
+    const grupos = await sock.groupFetchAllParticipating();
 
-    const grupos =
-      await sock.groupFetchAllParticipating();
-
-    const lista =
-      Object.entries(grupos).map(([id, g]) => ({
-        id,
-        nome: g.subject
-      }));
+    const lista = Object.entries(grupos).map(([id, g]) => ({
+      id,
+      nome: g.subject
+    }));
 
     res.json(lista);
-
   } catch (e) {
-
     logger.error(e);
-
-    res.status(500).json({
-      erro: e.message
-    });
+    res.status(500).json({ erro: e.message });
   }
 });
 
 // ================= DESTINOS =================
 
 app.post("/destinos/:id", (req, res) => {
-
-  if (!Array.isArray(req.body.destinos)) {
-    return res.status(400).json({
-      erro: "destinos deve ser array"
-    });
-  }
-
-  destinosPorSessao[req.params.id] =
-    req.body.destinos;
-
-  res.json({
-    ok: true
-  });
+  destinosPorSessao[req.params.id] = req.body.destinos || [];
+  res.json({ ok: true });
 });
-
-app.get("/destinos/:id", (req, res) => {
-
-  res.json(
-    destinosPorSessao[req.params.id] || []
-  );
-});
-
-// ================= DELAY =================
-
-function randomDelay() {
-
-  const min =
-    Number(process.env.MIN_DELAY || 4000);
-
-  const max =
-    Number(process.env.MAX_DELAY || 9000);
-
-  return Math.floor(
-    Math.random() * (max - min + 1)
-  ) + min;
-}
-
-function sleep(ms) {
-  return new Promise(resolve =>
-    setTimeout(resolve, ms)
-  );
-}
 
 // ================= TEST SEND =================
 
 app.post("/test-send/:id", async (req, res) => {
-
   const sock = sessoes[req.params.id];
-
-  const destinos =
-    destinosPorSessao[req.params.id] || [];
+  const destinos = destinosPorSessao[req.params.id] || [];
 
   if (!sock) {
-    return res.status(400).json({
-      erro: "Sem sessão"
-    });
+    return res.status(400).json({ erro: "Sem sessão" });
   }
 
   for (const d of destinos) {
-
     try {
-
       await sock.sendMessage(d, {
-        text:
-          "🧪 TESTE " +
-          new Date().toLocaleTimeString()
+        text: "🧪 TESTE " + new Date().toLocaleTimeString()
       });
 
-      logger.info(
-        `Mensagem enviada para ${d}`
-      );
-
-      await sleep(randomDelay());
-
+      await new Promise(r => setTimeout(r, 3000));
     } catch (e) {
-
       logger.error(e);
     }
   }
 
-  res.json({
-    ok: true
-  });
+  res.json({ ok: true });
 });
 
 // ================= WHATSAPP =================
 
 async function iniciarWhatsApp(id) {
+  const { state, saveCreds } = await useMultiFileAuthState("auth_" + id);
+  const { version } = await fetchLatestBaileysVersion();
 
-  try {
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    printQRInTerminal: false
+  });
 
-    logger.info(`INICIANDO ${id}`);
+  sessoes[id] = sock;
+  statusSessao[id] = "connecting";
 
-    const {
-      state,
-      saveCreds
-    } = await useMultiFileAuthState(
-      "auth_" + id
-    );
+  sock.ev.on("creds.update", saveCreds);
 
-    const {
-      version
-    } = await fetchLatestBaileysVersion();
+  sock.ev.on("connection.update", async (update) => {
+    const { connection, qr } = update;
 
-    const sock = makeWASocket({
-      version,
-      auth: state,
-      printQRInTerminal: false,
-      syncFullHistory: false,
-      markOnlineOnConnect: false
-    });
+    if (qr) {
+      qrCodes[id] = await qrcode.toDataURL(qr);
+    }
 
-    sessoes[id] = sock;
+    if (connection === "open") {
+      statusSessao[id] = "open";
+      qrCodes[id] = null;
+    }
 
-    statusSessao[id] = "connecting";
-
-    qrCodes[id] = null;
-
-    sock.ev.on(
-      "creds.update",
-      saveCreds
-    );
-
-    sock.ev.on(
-      "connection.update",
-      async (update) => {
-
-        const {
-          connection,
-          qr,
-          lastDisconnect
-        } = update;
-
-        if (qr) {
-
-          try {
-
-            qrCodes[id] =
-              await qrcode.toDataURL(qr);
-
-          } catch (e) {
-
-            logger.error(e);
-          }
-        }
-
-        if (connection === "open") {
-
-          logger.info(
-            `CONECTADO ${id}`
-          );
-
-          statusSessao[id] = "open";
-
-          qrCodes[id] = null;
-        }
-
-        if (connection === "close") {
-
-          const reason =
-            lastDisconnect?.error?.output
-              ?.statusCode;
-
-          logger.warn(
-            `DESCONECTADO ${id}`
-          );
-
-          statusSessao[id] = "closed";
-
-          qrCodes[id] = null;
-
-          delete sessoes[id];
-
-          if (
-            reason !==
-            DisconnectReason.loggedOut
-          ) {
-
-            setTimeout(() => {
-
-              iniciarWhatsApp(id);
-
-            }, 8000);
-          }
-        }
-      }
-    );
-
-  } catch (err) {
-
-    logger.error(err);
-  }
+    if (connection === "close") {
+      statusSessao[id] = "closed";
+      delete sessoes[id];
+    }
+  });
 }
-
-// ================= CRON =================
-
-cron.schedule("*/10 * * * *", async () => {
-
-  if (!automacaoState.ativa) {
-
-    logger.info(
-      "AUTOMAÇÃO DESLIGADA"
-    );
-
-    return;
-  }
-
-  logger.info(
-    "AUTOMAÇÃO RODANDO"
-  );
-
-  for (const id in sessoes) {
-
-    const sock = sessoes[id];
-
-    const destinos =
-      destinosPorSessao[id] || [];
-
-    if (
-      !sock ||
-      statusSessao[id] !== "open"
-    ) {
-      continue;
-    }
-
-    for (const d of destinos) {
-
-      try {
-
-        await sock.sendMessage(d, {
-          text:
-            "🔥 Promo automática " +
-            new Date().toLocaleTimeString()
-        });
-
-        logger.info(
-          `Enviado para ${d}`
-        );
-
-        await sleep(randomDelay());
-
-      } catch (e) {
-
-        logger.error(e);
-      }
-    }
-  }
-});
-
-// ================= HEARTBEAT =================
-
-setInterval(() => {
-
-  logger.info("SERVER ALIVE");
-
-}, 30000);
 
 // ================= START =================
 
-const PORT =
-  process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-
-  logger.info(
-    `API ONLINE NA PORTA ${PORT}`
-  );
+  logger.info("API ONLINE NA PORTA " + PORT);
 });
-```
