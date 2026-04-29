@@ -7,7 +7,6 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-const pino = require("pino");
 
 const {
   default: makeWASocket,
@@ -16,9 +15,9 @@ const {
 } = require("@whiskeysockets/baileys");
 
 const app = express();
-const logger = pino();
 
-// CONFIG
+// ================= CONFIG =================
+
 app.use(helmet());
 app.use(cors({ origin: "*", credentials: true }));
 app.use(express.json());
@@ -28,12 +27,14 @@ app.use(rateLimit({
   max: 300
 }));
 
-// MEMÓRIA
+// ================= MEMÓRIA =================
+
 let sessoes = {};
 let qrCodes = {};
 let statusSessao = {};
 
-// AUTH
+// ================= AUTH =================
+
 const ADMIN_USER = "admin";
 const ADMIN_PASS_HASH = bcrypt.hashSync("123456", 10);
 
@@ -44,7 +45,6 @@ function gerarToken() {
 }
 
 function auth(req, res, next) {
-  // ROTAS PÚBLICAS
   if (
     req.path === "/" ||
     req.path === "/login" ||
@@ -70,7 +70,8 @@ function auth(req, res, next) {
 
 app.use(auth);
 
-// LOGIN
+// ================= LOGIN =================
+
 app.post("/login", async (req, res) => {
   const { user, pass } = req.body;
 
@@ -84,18 +85,17 @@ app.post("/login", async (req, res) => {
     return res.status(401).json({ erro: "Senha inválida" });
   }
 
-  res.json({
-    ok: true,
-    token: gerarToken()
-  });
+  res.json({ ok: true, token: gerarToken() });
 });
 
-// HEALTH
+// ================= HEALTH =================
+
 app.get("/", (req, res) => {
   res.json({ status: "API ONLINE" });
 });
 
-// CONECTAR
+// ================= CONECTAR =================
+
 app.post("/conectar", async (req, res) => {
   const { id } = req.body;
 
@@ -103,14 +103,17 @@ app.post("/conectar", async (req, res) => {
     return res.status(400).json({ erro: "ID obrigatório" });
   }
 
-  if (!sessoes[id]) {
-    iniciarWhatsApp(id);
+  try {
+    await iniciarWhatsApp(id);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("ERRO AO CONECTAR:", e);
+    res.status(500).json({ erro: e.message });
   }
-
-  res.json({ ok: true });
 });
 
-// STATUS
+// ================= STATUS =================
+
 app.get("/status/:id", (req, res) => {
   const { id } = req.params;
 
@@ -120,7 +123,8 @@ app.get("/status/:id", (req, res) => {
   });
 });
 
-// QR
+// ================= QR =================
+
 app.get("/qr/:id", (req, res) => {
   const { id } = req.params;
 
@@ -131,8 +135,11 @@ app.get("/qr/:id", (req, res) => {
   res.json({ status: "ready", qr: qrCodes[id] });
 });
 
-// WHATSAPP
+// ================= WHATSAPP =================
+
 async function iniciarWhatsApp(id) {
+  console.log("🚀 Iniciando sessão:", id);
+
   const { state, saveCreds } = await useMultiFileAuthState("auth_" + id);
   const { version } = await fetchLatestBaileysVersion();
 
@@ -148,28 +155,36 @@ async function iniciarWhatsApp(id) {
   sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("connection.update", async (update) => {
+    console.log("📡 UPDATE:", update);
+
     const { connection, qr } = update;
 
     if (qr) {
+      console.log("🔥 QR RECEBIDO!");
+
       qrCodes[id] = await qrcode.toDataURL(qr);
     }
 
     if (connection === "open") {
+      console.log("✅ WHATSAPP CONECTADO");
+
       statusSessao[id] = "open";
       qrCodes[id] = null;
-      logger.info("WHATSAPP CONECTADO");
     }
 
     if (connection === "close") {
+      console.log("❌ WHATSAPP DESCONECTADO");
+
       statusSessao[id] = "closed";
       delete sessoes[id];
     }
   });
 }
 
-// START
+// ================= START =================
+
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  logger.info("API ONLINE NA PORTA " + PORT);
+  console.log("🔥 API ONLINE NA PORTA " + PORT);
 });
