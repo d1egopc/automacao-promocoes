@@ -16,61 +16,57 @@ const {
 
 const app = express();
 
-// ================= CONFIG =================
-
 app.use(helmet());
 app.use(cors({ origin: "*", credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 300
 }));
 
-// ================= MEMÓRIA =================
-
 let sessoes = {};
 let qrCodes = {};
 let statusSessao = {};
 
-// ================= AUTH =================
-
 const ADMIN_USER = "admin";
 const ADMIN_PASS_HASH = bcrypt.hashSync("123456", 10);
+const JWT_SECRET = process.env.JWT_SECRET || "segredo";
 
 function gerarToken() {
-  return jwt.sign({ admin: true }, process.env.JWT_SECRET || "segredo", {
-    expiresIn: "7d"
-  });
+  return jwt.sign({ admin: true }, JWT_SECRET, { expiresIn: "7d" });
 }
 
 function auth(req, res, next) {
+  // Rotas públicas temporárias para destravar QR
   if (
     req.path === "/" ||
     req.path === "/login" ||
+    req.path === "/conectar" ||
     req.path.startsWith("/qr") ||
     req.path.startsWith("/status")
   ) {
     return next();
   }
 
-  const token = req.headers.authorization?.split(" ")[1];
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7)
+    : null;
 
   if (!token) {
     return res.status(401).json({ erro: "Token inválido" });
   }
 
   try {
-    jwt.verify(token, process.env.JWT_SECRET || "segredo");
+    jwt.verify(token, JWT_SECRET);
     next();
-  } catch {
+  } catch (e) {
     return res.status(401).json({ erro: "Não autorizado" });
   }
 }
 
 app.use(auth);
-
-// ================= LOGIN =================
 
 app.post("/login", async (req, res) => {
   const { user, pass } = req.body;
@@ -85,16 +81,18 @@ app.post("/login", async (req, res) => {
     return res.status(401).json({ erro: "Senha inválida" });
   }
 
-  res.json({ ok: true, token: gerarToken() });
+  return res.json({
+    ok: true,
+    token: gerarToken()
+  });
 });
-
-// ================= HEALTH =================
 
 app.get("/", (req, res) => {
-  res.json({ status: "API ONLINE" });
+  res.json({
+    status: "API ONLINE",
+    uptime: process.uptime()
+  });
 });
-
-// ================= CONECTAR =================
 
 app.post("/conectar", async (req, res) => {
   const { id } = req.body;
@@ -104,15 +102,20 @@ app.post("/conectar", async (req, res) => {
   }
 
   try {
-    await iniciarWhatsApp(id);
-    res.json({ ok: true });
+    if (!sessoes[id]) {
+      iniciarWhatsApp(id);
+    }
+
+    return res.json({
+      ok: true,
+      message: "Sessão iniciada",
+      id
+    });
   } catch (e) {
-    console.error("ERRO AO CONECTAR:", e);
-    res.status(500).json({ erro: e.message });
+    console.error("ERRO /conectar:", e);
+    return res.status(500).json({ erro: e.message });
   }
 });
-
-// ================= STATUS =================
 
 app.get("/status/:id", (req, res) => {
   const { id } = req.params;
@@ -123,22 +126,27 @@ app.get("/status/:id", (req, res) => {
   });
 });
 
-// ================= QR =================
-
 app.get("/qr/:id", (req, res) => {
   const { id } = req.params;
 
   if (!qrCodes[id]) {
-    return res.json({ status: "loading", qr: null });
+    return res.json({
+      status: "loading",
+      qr: null
+    });
   }
 
-  res.json({ status: "ready", qr: qrCodes[id] });
+  return res.json({
+    status: "ready",
+    qr: qrCodes[id]
+  });
 });
-
-// ================= WHATSAPP =================
 
 async function iniciarWhatsApp(id) {
   console.log("🚀 Iniciando sessão:", id);
+
+  statusSessao[id] = "connecting";
+  qrCodes[id] = null;
 
   const { state, saveCreds } = await useMultiFileAuthState("auth_" + id);
   const { version } = await fetchLatestBaileysVersion();
@@ -146,42 +154,42 @@ async function iniciarWhatsApp(id) {
   const sock = makeWASocket({
     version,
     auth: state,
-    printQRInTerminal: false
+    printQRInTerminal: false,
+    syncFullHistory: false,
+    markOnlineOnConnect: false
   });
 
   sessoes[id] = sock;
-  statusSessao[id] = "connecting";
 
   sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("connection.update", async (update) => {
     console.log("📡 UPDATE:", update);
 
-    const { connection, qr } = update;
+    const { connection, qr, lastDisconnect } = update;
 
     if (qr) {
-      console.log("🔥 QR RECEBIDO!");
-
+      console.log("🔥 QR RECEBIDO");
       qrCodes[id] = await qrcode.toDataURL(qr);
+      statusSessao[id] = "qr";
     }
 
     if (connection === "open") {
-      console.log("✅ WHATSAPP CONECTADO");
-
+      console.log("✅ WHATSAPP CONECTADO:", id);
       statusSessao[id] = "open";
       qrCodes[id] = null;
     }
 
     if (connection === "close") {
-      console.log("❌ WHATSAPP DESCONECTADO");
+      console.log("❌ WHATSAPP DESCONECTADO:", id);
+      console.log("Motivo:", lastDisconnect?.error?.output?.statusCode);
 
       statusSessao[id] = "closed";
+      qrCodes[id] = null;
       delete sessoes[id];
     }
   });
 }
-
-// ================= START =================
 
 const PORT = process.env.PORT || 3000;
 
