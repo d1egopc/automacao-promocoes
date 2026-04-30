@@ -12,7 +12,8 @@ const bcrypt = require("bcryptjs");
 const {
   default: makeWASocket,
   useMultiFileAuthState,
-  fetchLatestBaileysVersion
+  fetchLatestBaileysVersion,
+  DisconnectReason
 } = require("@whiskeysockets/baileys");
 
 const app = express();
@@ -30,6 +31,7 @@ let sessoes = {};
 let qrCodes = {};
 let statusSessao = {};
 let destinosPorSessao = {};
+let reconectando = {};
 
 const ADMIN_USER = "admin";
 const ADMIN_PASS_HASH = bcrypt.hashSync("123456", 10);
@@ -100,6 +102,8 @@ app.post("/reset/:id", async (req, res) => {
   const { id } = req.params;
 
   try {
+    reconectando[id] = false;
+
     if (sessoes[id]) {
       try {
         await sessoes[id].logout();
@@ -193,7 +197,7 @@ app.get("/grupos/:id", async (req, res) => {
 
     const lista = Object.entries(grupos).map(([id, g]) => ({
       id,
-      nome: g.subject
+      nome: g.subject || "Grupo sem nome"
     }));
 
     return res.json(lista);
@@ -278,6 +282,7 @@ async function iniciarWhatsApp(id) {
 
   statusSessao[id] = "connecting";
   qrCodes[id] = null;
+  reconectando[id] = false;
 
   const { state, saveCreds } = await useMultiFileAuthState("auth_" + id);
   const { version } = await fetchLatestBaileysVersion();
@@ -310,6 +315,7 @@ async function iniciarWhatsApp(id) {
       console.log("✅ WHATSAPP CONECTADO:", id);
       statusSessao[id] = "open";
       qrCodes[id] = null;
+      reconectando[id] = false;
     }
 
     if (connection === "close") {
@@ -318,9 +324,30 @@ async function iniciarWhatsApp(id) {
       console.log("❌ WHATSAPP DESCONECTADO:", id);
       console.log("Motivo:", motivo);
 
-      statusSessao[id] = "closed";
       qrCodes[id] = null;
       delete sessoes[id];
+
+      if (motivo === DisconnectReason.loggedOut) {
+        console.log("🚪 Sessão deslogada. Precisa resetar e escanear QR novamente.");
+        statusSessao[id] = "loggedOut";
+        reconectando[id] = false;
+        return;
+      }
+
+      statusSessao[id] = "reconnecting";
+
+      if (!reconectando[id]) {
+        reconectando[id] = true;
+
+        setTimeout(() => {
+          console.log("🔄 Tentando reconectar sessão:", id);
+          iniciarWhatsApp(id).catch((e) => {
+            console.error("ERRO AO RECONECTAR:", e);
+            statusSessao[id] = "offline";
+            reconectando[id] = false;
+          });
+        }, 5000);
+      }
     }
   });
 }
