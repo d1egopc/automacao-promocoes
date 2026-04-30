@@ -229,6 +229,26 @@ app.get("/destinos/:id", (req, res) => {
   });
 });
 
+function corrigirImagemUrl(imagem) {
+  if (!imagem || typeof imagem !== "string") {
+    return null;
+  }
+
+  let imagemFinal = imagem.trim();
+
+  if (!imagemFinal.startsWith("http")) {
+    return null;
+  }
+
+  // Mercado Livre costuma retornar .webp.
+  // Para WhatsApp/Baileys, .jpg costuma funcionar melhor.
+  if (imagemFinal.includes(".webp")) {
+    imagemFinal = imagemFinal.replace(".webp", ".jpg");
+  }
+
+  return imagemFinal;
+}
+
 app.post("/test-send/:id", async (req, res) => {
   const { id } = req.params;
   const sock = sessoes[id];
@@ -250,28 +270,37 @@ app.post("/test-send/:id", async (req, res) => {
     req.body?.mensagem ||
     "🧪 TESTE " + new Date().toLocaleTimeString();
 
-  const imagem = req.body?.imagem;
+  const imagemOriginal = req.body?.imagem;
+  const imagemFinal = corrigirImagemUrl(imagemOriginal);
 
   const resultados = [];
 
   for (const destino of destinos) {
     try {
-      if (imagem && imagem.startsWith("http")) {
+      if (imagemFinal) {
         await sock.sendMessage(destino, {
-          image: { url: imagem },
+          image: { url: imagemFinal },
           caption: mensagem
+        });
+
+        resultados.push({
+          destino,
+          ok: true,
+          tipo: "imagem_com_legenda",
+          imagemOriginal,
+          imagemEnviada: imagemFinal
         });
       } else {
         await sock.sendMessage(destino, {
           text: mensagem
         });
-      }
 
-      resultados.push({
-        destino,
-        ok: true,
-        tipo: imagem ? "imagem_com_legenda" : "texto"
-      });
+        resultados.push({
+          destino,
+          ok: true,
+          tipo: "texto"
+        });
+      }
 
       await new Promise((resolve) => setTimeout(resolve, 3000));
     } catch (e) {
@@ -353,6 +382,7 @@ async function iniciarWhatsApp(id) {
 
         setTimeout(() => {
           console.log("🔄 Tentando reconectar sessão:", id);
+
           iniciarWhatsApp(id).catch((e) => {
             console.error("ERRO AO RECONECTAR:", e);
             statusSessao[id] = "offline";
