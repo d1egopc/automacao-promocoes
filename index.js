@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 const fs = require("fs");
+const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
 const qrcode = require("qrcode");
@@ -303,9 +304,11 @@ app.post("/integracoes/:marketplace/test", (req, res) => {
     ok: true,
     marketplace,
     status: "conectado",
-    message: `${config.nome || marketplace} configurado. Teste real da API será ligado na próxima etapa.`
+    message: `${config.nome || marketplace} configurado.`
   });
 });
+
+// ================= IMPORTAR PRODUTO =================
 
 app.post("/importar-produto", async (req, res) => {
   const clienteId = getClienteId(req);
@@ -324,6 +327,104 @@ app.post("/importar-produto", async (req, res) => {
     return res.status(400).json({
       erro: `Integração ${marketplace} não configurada`
     });
+  }
+
+  if (marketplace === "shopee") {
+    try {
+      const { appId, secret } = config.credenciais || {};
+
+      if (!appId || !secret) {
+        return res.status(400).json({
+          erro: "Credenciais Shopee inválidas"
+        });
+      }
+
+      const timestamp = Math.floor(Date.now() / 1000);
+
+      const bodyPayload = {
+        query: `
+          query {
+            productOfferV2(url: "${url}") {
+              title
+              price
+              priceBeforeDiscount
+              imageUrl
+              productLink
+            }
+          }
+        `
+      };
+
+      const payload = JSON.stringify(bodyPayload);
+      const baseString = `${appId}${timestamp}${payload}`;
+
+      const sign = crypto
+        .createHmac("sha256", secret)
+        .update(baseString)
+        .digest("hex");
+
+      const response = await fetch(
+        "https://open-api.affiliate.shopee.com.br/graphql",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: appId,
+            "X-Signature": sign,
+            "X-Timestamp": String(timestamp)
+          },
+          body: payload
+        }
+      );
+
+      const data = await response.json();
+
+      const produto = data?.data?.productOfferV2;
+
+      if (!response.ok || !produto) {
+        console.log("SHOPEE RESPONSE:", JSON.stringify(data));
+
+        return res.json({
+          marketplace: "shopee",
+          titulo: "Produto Shopee importado",
+          precoAntigo: "",
+          precoAtual: "",
+          cupom: "",
+          linkOriginal: url,
+          linkAfiliado: url,
+          imagem: "",
+          categoria: "Shopee",
+          aviso: "Shopee não retornou dados completos. Preencha manualmente."
+        });
+      }
+
+      return res.json({
+        marketplace: "shopee",
+        titulo: produto.title || "Produto Shopee",
+        precoAntigo: produto.priceBeforeDiscount || "",
+        precoAtual: produto.price || "",
+        cupom: "",
+        linkOriginal: url,
+        linkAfiliado: produto.productLink || url,
+        imagem: produto.imageUrl || "",
+        categoria: "Shopee"
+      });
+    } catch (e) {
+      console.error("ERRO SHOPEE:", e);
+
+      return res.json({
+        marketplace: "shopee",
+        titulo: "Produto Shopee importado",
+        precoAntigo: "",
+        precoAtual: "",
+        cupom: "",
+        linkOriginal: url,
+        linkAfiliado: url,
+        imagem: "",
+        categoria: "Shopee",
+        aviso: "Erro ao consultar Shopee. Preencha manualmente."
+      });
+    }
   }
 
   return res.json({
