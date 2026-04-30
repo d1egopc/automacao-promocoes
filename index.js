@@ -76,9 +76,7 @@ function auth(req, res, next) {
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
-  if (!token) {
-    return res.status(401).json({ erro: "Token inválido" });
-  }
+  if (!token) return res.status(401).json({ erro: "Token inválido" });
 
   try {
     jwt.verify(token, JWT_SECRET);
@@ -118,7 +116,7 @@ app.get("/", (req, res) => {
   });
 });
 
-// ================= INTEGRAÇÕES SAAS =================
+// ================= INTEGRAÇÕES =================
 
 const marketplaceRules = {
   shopee: {
@@ -158,30 +156,24 @@ const marketplaceRules = {
 
 function limparCredencial(config, allowed) {
   const clean = {};
-
   for (const field of allowed) {
     if (config[field] !== undefined && config[field] !== null) {
       clean[field] = String(config[field]).trim();
     }
   }
-
   return clean;
 }
 
 function validarIntegracao(marketplace, body) {
   const rule = marketplaceRules[marketplace];
 
-  if (!rule) {
-    return { ok: false, erro: "Marketplace não suportado" };
-  }
+  if (!rule) return { ok: false, erro: "Marketplace não suportado" };
 
   if (marketplace === "amazon") {
     const modo = body.modo || "api";
     const modeRule = rule.modes[modo];
 
-    if (!modeRule) {
-      return { ok: false, erro: "Modo Amazon inválido" };
-    }
+    if (!modeRule) return { ok: false, erro: "Modo Amazon inválido" };
 
     const missing = modeRule.required.filter((field) => !body[field]);
 
@@ -235,7 +227,6 @@ function mascararIntegracao(config) {
 app.get("/integracoes", (req, res) => {
   const clienteId = getClienteId(req);
   const data = integracoesPorCliente[clienteId] || {};
-
   const resposta = {};
 
   for (const [marketplace, config] of Object.entries(data)) {
@@ -262,9 +253,7 @@ app.post("/integracoes/:marketplace", (req, res) => {
 
   const validacao = validarIntegracao(marketplace, req.body);
 
-  if (!validacao.ok) {
-    return res.status(400).json(validacao);
-  }
+  if (!validacao.ok) return res.status(400).json(validacao);
 
   if (!integracoesPorCliente[clienteId]) {
     integracoesPorCliente[clienteId] = {};
@@ -290,7 +279,6 @@ app.post("/integracoes/:marketplace", (req, res) => {
 app.post("/integracoes/:marketplace/test", (req, res) => {
   const clienteId = getClienteId(req);
   const marketplace = req.params.marketplace.toLowerCase();
-
   const config = integracoesPorCliente[clienteId]?.[marketplace];
 
   if (!config) {
@@ -307,6 +295,145 @@ app.post("/integracoes/:marketplace/test", (req, res) => {
     message: `${config.nome || marketplace} configurado.`
   });
 });
+
+// ================= HELPERS DE IMPORTAÇÃO =================
+
+function htmlDecode(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&quot;/g, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&amp;/g, "&")
+    .replace(/&#38;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
+function extrairMeta(html, property) {
+  const patterns = [
+    new RegExp(`<meta[^>]+property=["']${property}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${property}["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+name=["']${property}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${property}["'][^>]*>`, "i")
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) return htmlDecode(match[1]);
+  }
+
+  return "";
+}
+
+function extrairJsonLd(html) {
+  const matches = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+
+  for (const match of matches) {
+    try {
+      const raw = htmlDecode(match[1]);
+      const data = JSON.parse(raw);
+
+      if (Array.isArray(data)) {
+        const product = data.find((x) => x["@type"] === "Product");
+        if (product) return product;
+      }
+
+      if (data["@type"] === "Product") return data;
+
+      if (data["@graph"]) {
+        const product = data["@graph"].find((x) => x["@type"] === "Product");
+        if (product) return product;
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+function limparPreco(valor) {
+  if (!valor) return "";
+  let texto = String(valor).trim();
+
+  texto = texto
+    .replace("R$", "")
+    .replace(/\s/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+
+  const numero = Number(texto);
+
+  if (!Number.isFinite(numero)) return String(valor);
+
+  return numero.toFixed(2).replace(".", ",");
+}
+
+function corrigirImagemUrl(imagem) {
+  if (!imagem || typeof imagem !== "string") return null;
+
+  let imagemFinal = imagem.trim();
+
+  if (!imagemFinal.startsWith("http")) return null;
+
+  if (imagemFinal.includes(".webp")) {
+    imagemFinal = imagemFinal.replace(".webp", ".jpg");
+  }
+
+  return imagemFinal;
+}
+
+async function importarMercadoLivre(url, config) {
+  const cookies = config?.credenciais?.cookies || "";
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+      "Accept":
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+      "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+      "Cookie": cookies
+    }
+  });
+
+  const html = await response.text();
+
+  const jsonLd = extrairJsonLd(html);
+
+  const titulo =
+    jsonLd?.name ||
+    extrairMeta(html, "og:title") ||
+    extrairMeta(html, "twitter:title") ||
+    "Produto Mercado Livre";
+
+  let preco =
+    jsonLd?.offers?.price ||
+    extrairMeta(html, "product:price:amount") ||
+    extrairMeta(html, "og:price:amount") ||
+    "";
+
+  const imagem =
+    (Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image) ||
+    extrairMeta(html, "og:image") ||
+    extrairMeta(html, "twitter:image") ||
+    "";
+
+  preco = limparPreco(preco);
+
+  return {
+    marketplace: "mercadolivre",
+    titulo: htmlDecode(titulo).replace(" | MercadoLivre", "").replace(" | Mercado Livre", ""),
+    precoAntigo: "",
+    precoAtual: preco,
+    cupom: "",
+    linkOriginal: url,
+    linkAfiliado: url,
+    imagem: corrigirImagemUrl(imagem) || imagem,
+    categoria: "Mercado Livre"
+  };
+}
 
 // ================= IMPORTAR PRODUTO =================
 
@@ -327,6 +454,44 @@ app.post("/importar-produto", async (req, res) => {
     return res.status(400).json({
       erro: `Integração ${marketplace} não configurada`
     });
+  }
+
+  if (marketplace === "mercadolivre") {
+    try {
+      const produto = await importarMercadoLivre(url, config);
+
+      if (!produto.titulo || produto.titulo === "Produto Mercado Livre") {
+        return res.json({
+          marketplace: "mercadolivre",
+          titulo: "Produto importado de Mercado Livre",
+          precoAntigo: "",
+          precoAtual: "",
+          cupom: "",
+          linkOriginal: url,
+          linkAfiliado: url,
+          imagem: "",
+          categoria: "Mercado Livre",
+          aviso: "Dados não encontrados automaticamente. Preencha manualmente."
+        });
+      }
+
+      return res.json(produto);
+    } catch (e) {
+      console.error("ERRO MERCADO LIVRE:", e);
+
+      return res.json({
+        marketplace: "mercadolivre",
+        titulo: "Produto importado de Mercado Livre",
+        precoAntigo: "",
+        precoAtual: "",
+        cupom: "",
+        linkOriginal: url,
+        linkAfiliado: url,
+        imagem: "",
+        categoria: "Mercado Livre",
+        aviso: "Erro ao consultar Mercado Livre. Preencha manualmente."
+      });
+    }
   }
 
   if (marketplace === "shopee") {
@@ -356,7 +521,6 @@ app.post("/importar-produto", async (req, res) => {
       };
 
       const payload = JSON.stringify(bodyPayload);
-
       const baseString = `${appId}${timestamp}${payload}${secret}`;
 
       const sign = crypto
@@ -448,14 +612,8 @@ app.post("/reset/:id", async (req, res) => {
     reconectando[id] = false;
 
     if (sessoes[id]) {
-      try {
-        await sessoes[id].logout();
-      } catch {}
-
-      try {
-        sessoes[id].end?.();
-      } catch {}
-
+      try { await sessoes[id].logout(); } catch {}
+      try { sessoes[id].end?.(); } catch {}
       delete sessoes[id];
     }
 
@@ -478,13 +636,9 @@ app.post("/reset/:id", async (req, res) => {
 app.post("/conectar", async (req, res) => {
   const { id } = req.body;
 
-  if (!id) {
-    return res.status(400).json({ erro: "ID obrigatório" });
-  }
+  if (!id) return res.status(400).json({ erro: "ID obrigatório" });
 
-  if (!sessoes[id]) {
-    iniciarWhatsApp(id);
-  }
+  if (!sessoes[id]) iniciarWhatsApp(id);
 
   return res.json({
     ok: true,
@@ -521,9 +675,7 @@ app.get("/qr/:id", (req, res) => {
 app.get("/grupos/:id", async (req, res) => {
   const sock = sessoes[req.params.id];
 
-  if (!sock) {
-    return res.status(400).json({ erro: "Sem sessão" });
-  }
+  if (!sock) return res.status(400).json({ erro: "Sem sessão" });
 
   if (statusSessao[req.params.id] !== "open") {
     return res.status(400).json({ erro: "WhatsApp não conectado" });
@@ -565,28 +717,12 @@ app.get("/destinos/:id", (req, res) => {
   });
 });
 
-function corrigirImagemUrl(imagem) {
-  if (!imagem || typeof imagem !== "string") return null;
-
-  let imagemFinal = imagem.trim();
-
-  if (!imagemFinal.startsWith("http")) return null;
-
-  if (imagemFinal.includes(".webp")) {
-    imagemFinal = imagemFinal.replace(".webp", ".jpg");
-  }
-
-  return imagemFinal;
-}
-
 app.post("/test-send/:id", async (req, res) => {
   const { id } = req.params;
   const sock = sessoes[id];
   const destinos = destinosPorSessao[id] || [];
 
-  if (!sock) {
-    return res.status(400).json({ erro: "Sem sessão" });
-  }
+  if (!sock) return res.status(400).json({ erro: "Sem sessão" });
 
   if (statusSessao[id] !== "open") {
     return res.status(400).json({ erro: "WhatsApp não conectado" });
