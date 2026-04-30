@@ -250,15 +250,27 @@ app.post("/test-send/:id", async (req, res) => {
     req.body?.mensagem ||
     "🧪 TESTE " + new Date().toLocaleTimeString();
 
+  const imagem = req.body?.imagem;
+
   const resultados = [];
 
   for (const destino of destinos) {
     try {
-      await sock.sendMessage(destino, { text: mensagem });
+      if (imagem && imagem.startsWith("http")) {
+        await sock.sendMessage(destino, {
+          image: { url: imagem },
+          caption: mensagem
+        });
+      } else {
+        await sock.sendMessage(destino, {
+          text: mensagem
+        });
+      }
 
       resultados.push({
         destino,
-        ok: true
+        ok: true,
+        tipo: imagem ? "imagem_com_legenda" : "texto"
       });
 
       await new Promise((resolve) => setTimeout(resolve, 3000));
