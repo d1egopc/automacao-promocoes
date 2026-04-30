@@ -32,13 +32,32 @@ let qrCodes = {};
 let statusSessao = {};
 let destinosPorSessao = {};
 let reconectando = {};
+let integracoesPorCliente = {};
 
 const ADMIN_USER = "admin";
 const ADMIN_PASS_HASH = bcrypt.hashSync("123456", 10);
 const JWT_SECRET = process.env.JWT_SECRET || "segredo";
 
 function gerarToken() {
-  return jwt.sign({ admin: true }, JWT_SECRET, { expiresIn: "7d" });
+  return jwt.sign(
+    { admin: true, clienteId: "admin" },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+}
+
+function getClienteId(req) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+  if (!token) return "admin";
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    return decoded.clienteId || "admin";
+  } catch {
+    return "admin";
+  }
 }
 
 function auth(req, res, next) {
@@ -54,9 +73,7 @@ function auth(req, res, next) {
   }
 
   const authHeader = req.headers.authorization || "";
-  const token = authHeader.startsWith("Bearer ")
-    ? authHeader.slice(7)
-    : null;
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
   if (!token) {
     return res.status(401).json({ erro: "Token inválido" });
@@ -71,6 +88,8 @@ function auth(req, res, next) {
 }
 
 app.use(auth);
+
+// ================= LOGIN =================
 
 app.post("/login", async (req, res) => {
   const { user, pass } = req.body;
@@ -97,6 +116,230 @@ app.get("/", (req, res) => {
     uptime: process.uptime()
   });
 });
+
+// ================= INTEGRAÇÕES SAAS =================
+
+const marketplaceRules = {
+  shopee: {
+    nome: "Shopee",
+    required: ["appId", "secret"],
+    allowed: ["appId", "secret"]
+  },
+  amazon: {
+    nome: "Amazon",
+    modes: {
+      api: {
+        required: ["appId", "accessKey", "secretKey"],
+        allowed: ["modo", "appId", "accessKey", "secretKey"]
+      },
+      cookies: {
+        required: ["cookies"],
+        allowed: ["modo", "appId", "cookies"]
+      }
+    }
+  },
+  mercadolivre: {
+    nome: "Mercado Livre",
+    required: ["clientId", "cookies"],
+    allowed: ["clientId", "cookies"]
+  },
+  aliexpress: {
+    nome: "AliExpress",
+    required: ["appKey", "secret", "trackingId"],
+    allowed: ["appKey", "secret", "trackingId"]
+  },
+  awin: {
+    nome: "Awin",
+    required: ["appId", "secret"],
+    allowed: ["appId", "secret"]
+  }
+};
+
+function limparCredencial(config, allowed) {
+  const clean = {};
+
+  for (const field of allowed) {
+    if (config[field] !== undefined && config[field] !== null) {
+      clean[field] = String(config[field]).trim();
+    }
+  }
+
+  return clean;
+}
+
+function validarIntegracao(marketplace, body) {
+  const rule = marketplaceRules[marketplace];
+
+  if (!rule) {
+    return { ok: false, erro: "Marketplace não suportado" };
+  }
+
+  if (marketplace === "amazon") {
+    const modo = body.modo || "api";
+    const modeRule = rule.modes[modo];
+
+    if (!modeRule) {
+      return { ok: false, erro: "Modo Amazon inválido" };
+    }
+
+    const missing = modeRule.required.filter((field) => !body[field]);
+
+    if (missing.length) {
+      return {
+        ok: false,
+        erro: "Campos obrigatórios ausentes",
+        campos: missing
+      };
+    }
+
+    return {
+      ok: true,
+      modo,
+      clean: limparCredencial({ ...body, modo }, modeRule.allowed)
+    };
+  }
+
+  const missing = rule.required.filter((field) => !body[field]);
+
+  if (missing.length) {
+    return {
+      ok: false,
+      erro: "Campos obrigatórios ausentes",
+      campos: missing
+    };
+  }
+
+  return {
+    ok: true,
+    clean: limparCredencial(body, rule.allowed)
+  };
+}
+
+function mascararIntegracao(config) {
+  const masked = { ...config };
+
+  for (const key of Object.keys(masked)) {
+    if (
+      key.toLowerCase().includes("secret") ||
+      key.toLowerCase().includes("key") ||
+      key.toLowerCase().includes("cookies")
+    ) {
+      masked[key] = "•••••••• configurado";
+    }
+  }
+
+  return masked;
+}
+
+app.get("/integracoes", (req, res) => {
+  const clienteId = getClienteId(req);
+  const data = integracoesPorCliente[clienteId] || {};
+
+  const resposta = {};
+
+  for (const [marketplace, config] of Object.entries(data)) {
+    resposta[marketplace] = {
+      marketplace,
+      nome: marketplaceRules[marketplace]?.nome || marketplace,
+      configurado: true,
+      status: config.status || "configurado",
+      credenciais: mascararIntegracao(config.credenciais || {}),
+      atualizadoEm: config.atualizadoEm
+    };
+  }
+
+  return res.json({
+    ok: true,
+    clienteId,
+    integracoes: resposta
+  });
+});
+
+app.post("/integracoes/:marketplace", (req, res) => {
+  const clienteId = getClienteId(req);
+  const marketplace = req.params.marketplace.toLowerCase();
+
+  const validacao = validarIntegracao(marketplace, req.body);
+
+  if (!validacao.ok) {
+    return res.status(400).json(validacao);
+  }
+
+  if (!integracoesPorCliente[clienteId]) {
+    integracoesPorCliente[clienteId] = {};
+  }
+
+  integracoesPorCliente[clienteId][marketplace] = {
+    marketplace,
+    nome: marketplaceRules[marketplace]?.nome || marketplace,
+    modo: validacao.modo || req.body.modo || null,
+    credenciais: validacao.clean,
+    status: "configurado",
+    atualizadoEm: new Date().toISOString()
+  };
+
+  return res.json({
+    ok: true,
+    message: `${marketplace} configurado com sucesso`,
+    marketplace,
+    status: "configurado"
+  });
+});
+
+app.post("/integracoes/:marketplace/test", (req, res) => {
+  const clienteId = getClienteId(req);
+  const marketplace = req.params.marketplace.toLowerCase();
+
+  const config = integracoesPorCliente[clienteId]?.[marketplace];
+
+  if (!config) {
+    return res.status(400).json({
+      ok: false,
+      erro: "Integração não configurada"
+    });
+  }
+
+  return res.json({
+    ok: true,
+    marketplace,
+    status: "conectado",
+    message: `${config.nome || marketplace} configurado. Teste real da API será ligado na próxima etapa.`
+  });
+});
+
+app.post("/importar-produto", async (req, res) => {
+  const clienteId = getClienteId(req);
+  const marketplace = String(req.body.marketplace || "").toLowerCase();
+  const { url } = req.body;
+
+  if (!marketplace || !url) {
+    return res.status(400).json({
+      erro: "marketplace e url obrigatórios"
+    });
+  }
+
+  const config = integracoesPorCliente[clienteId]?.[marketplace];
+
+  if (!config) {
+    return res.status(400).json({
+      erro: `Integração ${marketplace} não configurada`
+    });
+  }
+
+  return res.json({
+    marketplace,
+    titulo: `Produto importado de ${config.nome || marketplace}`,
+    precoAntigo: "",
+    precoAtual: "",
+    cupom: "",
+    linkOriginal: url,
+    linkAfiliado: url,
+    imagem: "",
+    categoria: config.nome || marketplace
+  });
+});
+
+// ================= WHATSAPP =================
 
 app.post("/reset/:id", async (req, res) => {
   const { id } = req.params;
@@ -128,7 +371,6 @@ app.post("/reset/:id", async (req, res) => {
       id
     });
   } catch (e) {
-    console.error("ERRO /reset:", e);
     return res.status(500).json({ erro: e.message });
   }
 });
@@ -140,20 +382,15 @@ app.post("/conectar", async (req, res) => {
     return res.status(400).json({ erro: "ID obrigatório" });
   }
 
-  try {
-    if (!sessoes[id]) {
-      iniciarWhatsApp(id);
-    }
-
-    return res.json({
-      ok: true,
-      message: "Sessão iniciada",
-      id
-    });
-  } catch (e) {
-    console.error("ERRO /conectar:", e);
-    return res.status(500).json({ erro: e.message });
+  if (!sessoes[id]) {
+    iniciarWhatsApp(id);
   }
+
+  return res.json({
+    ok: true,
+    message: "Sessão iniciada",
+    id
+  });
 });
 
 app.get("/status/:id", (req, res) => {
@@ -202,7 +439,6 @@ app.get("/grupos/:id", async (req, res) => {
 
     return res.json(lista);
   } catch (e) {
-    console.error("ERRO /grupos:", e);
     return res.status(500).json({ erro: e.message });
   }
 });
@@ -230,18 +466,12 @@ app.get("/destinos/:id", (req, res) => {
 });
 
 function corrigirImagemUrl(imagem) {
-  if (!imagem || typeof imagem !== "string") {
-    return null;
-  }
+  if (!imagem || typeof imagem !== "string") return null;
 
   let imagemFinal = imagem.trim();
 
-  if (!imagemFinal.startsWith("http")) {
-    return null;
-  }
+  if (!imagemFinal.startsWith("http")) return null;
 
-  // Mercado Livre costuma retornar .webp.
-  // Para WhatsApp/Baileys, .jpg costuma funcionar melhor.
   if (imagemFinal.includes(".webp")) {
     imagemFinal = imagemFinal.replace(".webp", ".jpg");
   }
@@ -287,7 +517,6 @@ app.post("/test-send/:id", async (req, res) => {
           destino,
           ok: true,
           tipo: "imagem_com_legenda",
-          imagemOriginal,
           imagemEnviada: imagemFinal
         });
       } else {
@@ -342,8 +571,6 @@ async function iniciarWhatsApp(id) {
   sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("connection.update", async (update) => {
-    console.log("📡 UPDATE:", update);
-
     const { connection, qr, lastDisconnect } = update;
 
     if (qr) {
@@ -369,7 +596,6 @@ async function iniciarWhatsApp(id) {
       delete sessoes[id];
 
       if (motivo === DisconnectReason.loggedOut) {
-        console.log("🚪 Sessão deslogada. Precisa resetar e escanear QR novamente.");
         statusSessao[id] = "loggedOut";
         reconectando[id] = false;
         return;
@@ -381,8 +607,6 @@ async function iniciarWhatsApp(id) {
         reconectando[id] = true;
 
         setTimeout(() => {
-          console.log("🔄 Tentando reconectar sessão:", id);
-
           iniciarWhatsApp(id).catch((e) => {
             console.error("ERRO AO RECONECTAR:", e);
             statusSessao[id] = "offline";
