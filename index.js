@@ -29,6 +29,7 @@ app.use(rateLimit({
 let sessoes = {};
 let qrCodes = {};
 let statusSessao = {};
+let destinosPorSessao = {};
 
 const ADMIN_USER = "admin";
 const ADMIN_PASS_HASH = bcrypt.hashSync("123456", 10);
@@ -113,6 +114,7 @@ app.post("/reset/:id", async (req, res) => {
 
     delete qrCodes[id];
     delete statusSessao[id];
+    delete destinosPorSessao[id];
 
     fs.rmSync("auth_" + id, { recursive: true, force: true });
 
@@ -175,6 +177,102 @@ app.get("/qr/:id", (req, res) => {
   });
 });
 
+app.get("/grupos/:id", async (req, res) => {
+  const sock = sessoes[req.params.id];
+
+  if (!sock) {
+    return res.status(400).json({ erro: "Sem sessão" });
+  }
+
+  if (statusSessao[req.params.id] !== "open") {
+    return res.status(400).json({ erro: "WhatsApp não conectado" });
+  }
+
+  try {
+    const grupos = await sock.groupFetchAllParticipating();
+
+    const lista = Object.entries(grupos).map(([id, g]) => ({
+      id,
+      nome: g.subject
+    }));
+
+    return res.json(lista);
+  } catch (e) {
+    console.error("ERRO /grupos:", e);
+    return res.status(500).json({ erro: e.message });
+  }
+});
+
+app.post("/destinos/:id", (req, res) => {
+  const { destinos } = req.body;
+
+  if (!Array.isArray(destinos)) {
+    return res.status(400).json({ erro: "destinos deve ser array" });
+  }
+
+  destinosPorSessao[req.params.id] = destinos;
+
+  return res.json({
+    ok: true,
+    destinos
+  });
+});
+
+app.get("/destinos/:id", (req, res) => {
+  return res.json({
+    ok: true,
+    destinos: destinosPorSessao[req.params.id] || []
+  });
+});
+
+app.post("/test-send/:id", async (req, res) => {
+  const { id } = req.params;
+  const sock = sessoes[id];
+  const destinos = destinosPorSessao[id] || [];
+
+  if (!sock) {
+    return res.status(400).json({ erro: "Sem sessão" });
+  }
+
+  if (statusSessao[id] !== "open") {
+    return res.status(400).json({ erro: "WhatsApp não conectado" });
+  }
+
+  if (!destinos.length) {
+    return res.status(400).json({ erro: "Nenhum destino selecionado" });
+  }
+
+  const mensagem =
+    req.body?.mensagem ||
+    "🧪 TESTE " + new Date().toLocaleTimeString();
+
+  const resultados = [];
+
+  for (const destino of destinos) {
+    try {
+      await sock.sendMessage(destino, { text: mensagem });
+
+      resultados.push({
+        destino,
+        ok: true
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    } catch (e) {
+      resultados.push({
+        destino,
+        ok: false,
+        erro: e.message
+      });
+    }
+  }
+
+  return res.json({
+    ok: true,
+    resultados
+  });
+});
+
 async function iniciarWhatsApp(id) {
   console.log("🚀 Iniciando sessão:", id);
 
@@ -216,6 +314,7 @@ async function iniciarWhatsApp(id) {
 
     if (connection === "close") {
       const motivo = lastDisconnect?.error?.output?.statusCode;
+
       console.log("❌ WHATSAPP DESCONECTADO:", id);
       console.log("Motivo:", motivo);
 
