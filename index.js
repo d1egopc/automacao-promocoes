@@ -356,10 +356,11 @@ app.post("/importar-produto", async (req, res) => {
       };
 
       const payload = JSON.stringify(bodyPayload);
-      const baseString = `${appId}${timestamp}${payload}`;
+
+      const baseString = `${appId}${timestamp}${payload}${secret}`;
 
       const sign = crypto
-        .createHmac("sha256", secret)
+        .createHash("sha256")
         .update(baseString)
         .digest("hex");
 
@@ -369,9 +370,7 @@ app.post("/importar-produto", async (req, res) => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: appId,
-            "X-Signature": sign,
-            "X-Timestamp": String(timestamp)
+            Authorization: `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${sign}`
           },
           body: payload
         }
@@ -379,11 +378,11 @@ app.post("/importar-produto", async (req, res) => {
 
       const data = await response.json();
 
+      console.log("SHOPEE RESPONSE:", JSON.stringify(data));
+
       const produto = data?.data?.productOfferV2;
 
       if (!response.ok || !produto) {
-        console.log("SHOPEE RESPONSE:", JSON.stringify(data));
-
         return res.json({
           marketplace: "shopee",
           titulo: "Produto Shopee importado",
