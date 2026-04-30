@@ -154,44 +154,42 @@ const marketplaceRules = {
   }
 };
 
-function limparCredencial(config, allowed) {
-  const clean = {};
-  for (const field of allowed) {
-    if (config[field] !== undefined && config[field] !== null) {
-      clean[field] = String(config[field]).trim();
-    }
+function limparPreco(valor) {
+  if (!valor) return "";
+
+  let texto = String(valor).trim();
+
+  texto = texto
+    .replace("R$", "")
+    .replace(/\s/g, "");
+
+  // Se vier 50.99, vira 50,99
+  if (/^\d+\.\d{2}$/.test(texto)) {
+    const numero = Number(texto);
+    return numero.toFixed(2).replace(".", ",");
   }
-  return clean;
+
+  // Se vier 50,99, mantém correto
+  if (texto.includes(",")) {
+    texto = texto.replace(/\./g, "").replace(",", ".");
+    const numero = Number(texto);
+    if (!Number.isFinite(numero)) return "";
+    return numero.toFixed(2).replace(".", ",");
+  }
+
+  // Se vier 5099, vira 50,99
+  texto = texto.replace(/\D/g, "");
+
+  if (!texto) return "";
+
+  let numero = Number(texto);
+
+  if (numero > 1000) {
+    numero = numero / 100;
+  }
+
+  return numero.toFixed(2).replace(".", ",");
 }
-
-function validarIntegracao(marketplace, body) {
-  const rule = marketplaceRules[marketplace];
-
-  if (!rule) return { ok: false, erro: "Marketplace não suportado" };
-
-  if (marketplace === "amazon") {
-    const modo = body.modo || "api";
-    const modeRule = rule.modes[modo];
-
-    if (!modeRule) return { ok: false, erro: "Modo Amazon inválido" };
-
-    const missing = modeRule.required.filter((field) => !body[field]);
-
-    if (missing.length) {
-      return {
-        ok: false,
-        erro: "Campos obrigatórios ausentes",
-        campos: missing
-      };
-    }
-
-    return {
-      ok: true,
-      modo,
-      clean: limparCredencial({ ...body, modo }, modeRule.allowed)
-    };
-  }
-
   const missing = rule.required.filter((field) => !body[field]);
 
   if (missing.length) {
