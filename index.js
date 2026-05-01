@@ -361,10 +361,10 @@ function limparPreco(valor) {
     .replace("R$", "")
     .replace(/\s/g, "");
 
-  if (/^\d+\.\d{2}$/.test(texto)) {
-    const numero = Number(texto);
-    return numero.toFixed(2).replace(".", ",");
-  }
+  if (/^\d+\.\d{1,2}$/.test(texto)) {
+  const numero = Number(texto);
+  return numero.toFixed(2).replace(".", ",");
+}
 
   if (texto.includes(",")) {
     texto = texto.replace(/\./g, "").replace(",", ".");
@@ -379,9 +379,9 @@ function limparPreco(valor) {
 
   let numero = Number(texto);
 
-  if (numero > 1000) {
-    numero = numero / 100;
-  }
+  if (numero > 10000) {
+  numero = numero / 100;
+}
 
   return numero.toFixed(2).replace(".", ",");
 }
