@@ -295,7 +295,6 @@ app.post("/integracoes/:marketplace/test", (req, res) => {
     message: `${config.nome || marketplace} configurado.`
   });
 });
-
 // ================= HELPERS DE IMPORTAÇÃO =================
 
 function htmlDecode(str) {
@@ -483,125 +482,35 @@ async function importarAmazon(url, config) {
   const html = await response.text();
   const jsonLd = extrairJsonLd(html);
 
-  function limparHtml(texto) {
-    if (!texto) return "";
-    return htmlDecode(String(texto).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
-  }
-
-  function primeiroMatch(regex) {
-    const match = html.match(regex);
-    return match?.[1] ? limparHtml(match[1]) : "";
-  }
-
-  function todosPrecosDoHtml() {
-    const encontrados = [];
-    const regex = /R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})|R\$\s*\d+(?:,\d{2})?/g;
-    const matches = html.match(regex) || [];
-
-    for (const item of matches) {
-      const precoLimpo = limparPreco(item);
-      const numero = Number(String(precoLimpo).replace(",", "."));
-
-      if (Number.isFinite(numero) && numero > 0) {
-        encontrados.push({ texto: precoLimpo, numero });
-      }
-    }
-
-    return encontrados;
-  }
-
-  function extrairImagemAmazon() {
-    const imagemMeta =
-      (Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image) ||
-      extrairMeta(html, "og:image") ||
-      extrairMeta(html, "twitter:image") ||
-      html.match(/id=["']landingImage["'][^>]+src=["']([^"']+)["']/i)?.[1] ||
-      html.match(/data-old-hires=["']([^"']+)["']/i)?.[1] ||
-      "";
-
-    if (imagemMeta) return htmlDecode(imagemMeta).replace(/\\u002F/g, "/");
-
-    const dynamicImageRaw =
-      html.match(/data-a-dynamic-image=["']([^"']+)["']/i)?.[1] ||
-      "";
-
-    if (dynamicImageRaw) {
-      try {
-        const decoded = htmlDecode(dynamicImageRaw).replace(/\\u002F/g, "/");
-        const parsed = JSON.parse(decoded);
-        const primeira = Object.keys(parsed || {})[0];
-
-        if (primeira) return primeira;
-      } catch {}
-    }
-
-    const hiRes =
-      html.match(/"hiRes"\s*:\s*"([^"]+)"/i)?.[1] ||
-      html.match(/"large"\s*:\s*"([^"]+)"/i)?.[1] ||
-      "";
-
-    return hiRes ? hiRes.replace(/\\u002F/g, "/") : "";
-  }
-
   const titulo =
     jsonLd?.name ||
     extrairMeta(html, "og:title") ||
     extrairMeta(html, "twitter:title") ||
-    primeiroMatch(/<span[^>]+id=["']productTitle["'][^>]*>([\s\S]*?)<\/span>/i) ||
+    html.match(/<span[^>]+id=["']productTitle["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] ||
     "Produto Amazon";
 
-  const precoOffscreenAtual =
-    primeiroMatch(/id=["']corePriceDisplay_desktop_feature_div["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
-    primeiroMatch(/id=["']corePrice_feature_div["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
-    primeiroMatch(/class=["'][^"']*priceToPay[^"']*["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
-    primeiroMatch(/id=["']apex_desktop["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i);
-
-  const precoWholeFractionMatch =
-    html.match(/class=["'][^"']*a-price-whole[^"']*["'][^>]*>([\s\S]*?)<\/span>[\s\S]*?class=["'][^"']*a-price-fraction[^"']*["'][^>]*>([\s\S]*?)<\/span>/i);
-
   let preco =
-    precoOffscreenAtual ||
     jsonLd?.offers?.price ||
     extrairMeta(html, "product:price:amount") ||
     extrairMeta(html, "og:price:amount") ||
-    (precoWholeFractionMatch ? `${limparHtml(precoWholeFractionMatch[1])},${limparHtml(precoWholeFractionMatch[2])}` : "") ||
-    primeiroMatch(/id=["']priceblock_ourprice["'][^>]*>([\s\S]*?)<\/span>/i) ||
-    primeiroMatch(/id=["']priceblock_dealprice["'][^>]*>([\s\S]*?)<\/span>/i) ||
+    html.match(/class=["'][^"']*a-price-whole[^"']*["'][^>]*>([\s\S]*?)<\/span>[\s\S]*?class=["'][^"']*a-price-fraction[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.slice(1, 3).join(",") ||
+    html.match(/id=["']priceblock_ourprice["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] ||
+    html.match(/id=["']priceblock_dealprice["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] ||
+    "";
+
+  let precoAntigoRaw =
+    html.match(/class=["'][^"']*a-text-price[^"']*["'][^>]*>[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>/i)?.[1] ||
+    "";
+
+  const imagem =
+    (Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image) ||
+    extrairMeta(html, "og:image") ||
+    extrairMeta(html, "twitter:image") ||
+    html.match(/id=["']landingImage["'][^>]+src=["']([^"']+)["']/i)?.[1] ||
     "";
 
   preco = limparPreco(htmlDecode(preco));
-
-  const precosEncontrados = todosPrecosDoHtml();
-
-  if (!preco && precosEncontrados.length) {
-    const menorPreco = precosEncontrados
-      .map((p) => p.numero)
-      .filter((n) => n > 1)
-      .sort((a, b) => a - b)[0];
-
-    if (menorPreco) {
-      preco = menorPreco.toFixed(2).replace(".", ",");
-    }
-  }
-
-  let precoAntigoRaw =
-    primeiroMatch(/class=["'][^"']*a-text-price[^"']*["'][^>]*>[\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
-    primeiroMatch(/data-a-strike=["']true["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
-    "";
-
   let precoAntigo = limparPreco(htmlDecode(precoAntigoRaw));
-
-  if (!precoAntigo && precosEncontrados.length && preco) {
-    const precoAtualNumero = Number(String(preco).replace(",", "."));
-    const maiorPreco = precosEncontrados
-      .map((p) => p.numero)
-      .filter((n) => Number.isFinite(n) && n > precoAtualNumero)
-      .sort((a, b) => b - a)[0];
-
-    if (maiorPreco) {
-      precoAntigo = maiorPreco.toFixed(2).replace(".", ",");
-    }
-  }
 
   if (!precoAntigo) {
     const precoNumero = Number(String(preco).replace(",", "."));
@@ -611,8 +520,6 @@ async function importarAmazon(url, config) {
         .replace(".", ",");
     }
   }
-
-  const imagem = extrairImagemAmazon();
 
   let linkAfiliado = url;
   const trackingId =
@@ -646,6 +553,192 @@ async function importarAmazon(url, config) {
     categoria: "Amazon"
   };
 }
+async function importarShopee(url, config) {
+  if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
+    url = "https://" + url;
+  }
+
+  const { appId, secret } = config.credenciais || {};
+
+  function limparHtml(texto) {
+    if (!texto) return "";
+    return htmlDecode(String(texto).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+  }
+
+  function normalizarPrecoShopee(valor) {
+    if (!valor) return "";
+
+    const texto = String(valor).trim();
+
+    // Shopee às vezes retorna número grande tipo 5199000
+    if (/^\d+$/.test(texto)) {
+      let numero = Number(texto);
+
+      if (numero > 100000) {
+        numero = numero / 100000;
+      } else if (numero > 1000) {
+        numero = numero / 100;
+      }
+
+      return numero.toFixed(2).replace(".", ",");
+    }
+
+    return limparPreco(texto);
+  }
+
+  async function chamarShopeeGraphQL(bodyPayload) {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const payload = JSON.stringify(bodyPayload);
+
+    const baseString = `${appId}${timestamp}${payload}${secret}`;
+
+    const sign = crypto
+      .createHash("sha256")
+      .update(baseString, "utf8")
+      .digest("hex");
+
+    const response = await fetch(
+      "https://open-api.affiliate.shopee.com.br/graphql",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${sign}`
+        },
+        body: payload
+      }
+    );
+
+    const data = await response.json();
+
+    console.log("SHOPEE RESPONSE:", JSON.stringify(data));
+
+    return data;
+  }
+
+  let titulo = "";
+  let precoAtual = "";
+  let precoAntigo = "";
+  let imagem = "";
+  let linkAfiliado = url;
+
+  // 1) Tenta API Shopee
+  try {
+    const urlGraph = JSON.stringify(url);
+
+    const bodyPayload = {
+      query: `
+        query {
+          productOfferV2(url: ${urlGraph}) {
+            title
+            price
+            priceBeforeDiscount
+            imageUrl
+            productLink
+            offerLink
+          }
+        }
+      `
+    };
+
+    const data = await chamarShopeeGraphQL(bodyPayload);
+
+    const produto = data?.data?.productOfferV2;
+
+    if (produto) {
+      titulo = produto.title || "";
+      precoAtual = normalizarPrecoShopee(produto.price || "");
+      precoAntigo = normalizarPrecoShopee(produto.priceBeforeDiscount || "");
+      imagem = produto.imageUrl || "";
+      linkAfiliado = produto.productLink || produto.offerLink || url;
+    }
+  } catch (e) {
+    console.error("SHOPEE API ERRO:", e.message);
+  }
+
+  // 2) Fallback HTML se a API não devolver completo
+  if (!titulo || !precoAtual || !imagem) {
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+          "Accept":
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+          "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+        }
+      });
+
+      const html = await response.text();
+
+      titulo =
+        titulo ||
+        extrairMeta(html, "og:title") ||
+        extrairMeta(html, "twitter:title") ||
+        limparHtml(html.match(/"name"\s*:\s*"([^"]+)"/i)?.[1] || "") ||
+        "Produto Shopee";
+
+      imagem =
+        imagem ||
+        extrairMeta(html, "og:image") ||
+        extrairMeta(html, "twitter:image") ||
+        limparHtml(html.match(/"image"\s*:\s*"([^"]+)"/i)?.[1] || "");
+
+      let precoHtml =
+        limparHtml(html.match(/"price"\s*:\s*"?(\d+)"?/i)?.[1] || "") ||
+        limparHtml(html.match(/"price_min"\s*:\s*"?(\d+)"?/i)?.[1] || "") ||
+        "";
+
+      let precoAntigoHtml =
+        limparHtml(html.match(/"price_before_discount"\s*:\s*"?(\d+)"?/i)?.[1] || "") ||
+        "";
+
+      if (!precoAtual && precoHtml) {
+        precoAtual = normalizarPrecoShopee(precoHtml);
+      }
+
+      if (!precoAntigo && precoAntigoHtml) {
+        precoAntigo = normalizarPrecoShopee(precoAntigoHtml);
+      }
+    } catch (e) {
+      console.error("SHOPEE HTML ERRO:", e.message);
+    }
+  }
+
+  // 3) Se não tiver preço antigo, cria automático
+  if (!precoAntigo && precoAtual) {
+    const precoNumero = Number(String(precoAtual).replace(",", "."));
+
+    if (Number.isFinite(precoNumero) && precoNumero > 0) {
+      precoAntigo = (precoNumero * 1.25)
+        .toFixed(2)
+        .replace(".", ",");
+    }
+  }
+
+  imagem = htmlDecode(imagem).replace(/\\u002F/g, "/");
+
+  if (imagem && imagem.startsWith("//")) {
+    imagem = "https:" + imagem;
+  }
+
+  return {
+    marketplace: "shopee",
+    titulo: htmlDecode(titulo)
+      .replace(" | Shopee Brasil", "")
+      .replace(" | Shopee", "")
+      .trim(),
+    precoAntigo,
+    precoAtual,
+    cupom: "",
+    linkOriginal: url,
+    linkAfiliado,
+    imagem: corrigirImagemUrl(imagem) || imagem,
+    categoria: "Shopee"
+  };
+}
+
 // ================= IMPORTAR PRODUTO =================
 
 app.post("/importar-produto", async (req, res) => {
@@ -704,43 +797,7 @@ app.post("/importar-produto", async (req, res) => {
       });
     }
   }
-  if (marketplace === "aliexpress") {
-    try {
-      const produto = await importarAliExpress(url, config);
 
-      if ((!produto.titulo || produto.titulo === "Produto AliExpress") && !produto.precoAtual) {
-        return res.json({
-          marketplace: "aliexpress",
-          titulo: "Produto importado do AliExpress",
-          precoAntigo: "",
-          precoAtual: "",
-          cupom: "",
-          linkOriginal: url,
-          linkAfiliado: url,
-          imagem: "",
-          categoria: "AliExpress",
-          aviso: "Dados não encontrados automaticamente. Preencha manualmente."
-        });
-      }
-
-      return res.json(produto);
-    } catch (e) {
-      console.error("ERRO ALIEXPRESS:", e);
-
-      return res.json({
-        marketplace: "aliexpress",
-        titulo: "Produto importado do AliExpress",
-        precoAntigo: "",
-        precoAtual: "",
-        cupom: "",
-        linkOriginal: url,
-        linkAfiliado: url,
-        imagem: "",
-        categoria: "AliExpress",
-        aviso: "Erro ao consultar AliExpress. Preencha manualmente."
-      });
-    }
-  }
   if (marketplace === "mercadolivre") {
     try {
       const produto = await importarMercadoLivre(url, config);
@@ -759,134 +816,8 @@ app.post("/importar-produto", async (req, res) => {
           aviso: "Dados não encontrados automaticamente. Preencha manualmente."
         });
       }
-async function importarAliExpress(url, config) {
-  if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
-    url = "https://" + url;
-  }
 
-  function limparHtml(texto) {
-    if (!texto) return "";
-    return htmlDecode(String(texto).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
-  }
-
-  function extrairPrecosDaUrlAliExpress(urlOriginal) {
-    try {
-      const raw = String(urlOriginal || "");
-      const decoded = decodeURIComponent(raw);
-
-      const textos = [raw, decoded];
-
-      for (const texto of textos) {
-        const match1 = texto.match(/BRL(?:%21|!)+([\d.]+)(?:%21|!)+([\d.]+)/i);
-
-        if (match1) {
-          return {
-            precoAntigo: limparPreco(match1[1]),
-            precoAtual: limparPreco(match1[2])
-          };
-        }
-
-        const match2 = texto.match(/dis(?:%21|!)+BRL(?:%21|!)+([\d.]+)(?:%21|!)+([\d.]+)/i);
-
-        if (match2) {
-          return {
-            precoAntigo: limparPreco(match2[1]),
-            precoAtual: limparPreco(match2[2])
-          };
-        }
-      }
-    } catch {}
-
-    return {
-      precoAntigo: "",
-      precoAtual: ""
-    };
-  }
-
-  let html = "";
-
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        "Accept":
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
-      }
-    });
-
-    html = await response.text();
-  } catch (e) {
-    console.error("ALIEXPRESS HTML ERRO:", e.message);
-  }
-
-  function primeiroMatch(regex) {
-    const match = html.match(regex);
-    return match?.[1] ? limparHtml(match[1]) : "";
-  }
-
-  const precosUrl = extrairPrecosDaUrlAliExpress(url);
-
-  const titulo =
-    extrairMeta(html, "og:title") ||
-    extrairMeta(html, "twitter:title") ||
-    primeiroMatch(/<h1[^>]*>([\s\S]*?)<\/h1>/i) ||
-    primeiroMatch(/"subject"\s*:\s*"([^"]+)"/i) ||
-    primeiroMatch(/"title"\s*:\s*"([^"]+)"/i) ||
-    "Produto AliExpress";
-
-  let preco =
-    precosUrl.precoAtual ||
-    extrairMeta(html, "product:price:amount") ||
-    extrairMeta(html, "og:price:amount") ||
-    primeiroMatch(/"salePrice"\s*:\s*"([^"]+)"/i) ||
-    primeiroMatch(/"formattedPrice"\s*:\s*"([^"]+)"/i) ||
-    "";
-
-  preco = limparPreco(htmlDecode(preco));
-
-  let precoAntigo = precosUrl.precoAntigo || "";
-
-  if (!precoAntigo && preco) {
-    const precoNumero = Number(String(preco).replace(",", "."));
-
-    if (Number.isFinite(precoNumero) && precoNumero > 0) {
-      precoAntigo = (precoNumero * 1.25)
-        .toFixed(2)
-        .replace(".", ",");
-    }
-  }
-
-  let imagem =
-    extrairMeta(html, "og:image") ||
-    extrairMeta(html, "twitter:image") ||
-    primeiroMatch(/"imagePath"\s*:\s*"([^"]+)"/i) ||
-    primeiroMatch(/"imageUrl"\s*:\s*"([^"]+)"/i) ||
-    "";
-
-  imagem = htmlDecode(imagem).replace(/\\u002F/g, "/");
-
-  if (imagem && imagem.startsWith("//")) {
-    imagem = "https:" + imagem;
-  }
-
-  return {
-    marketplace: "aliexpress",
-    titulo: htmlDecode(titulo)
-      .replace(" | AliExpress", "")
-      .replace("- AliExpress", "")
-      .trim(),
-    precoAntigo,
-    precoAtual: preco,
-    cupom: "",
-    linkOriginal: url,
-    linkAfiliado: url,
-    imagem: corrigirImagemUrl(imagem) || imagem,
-    categoria: "AliExpress"
-  };
-}      return res.json(produto);
+      return res.json(produto);
     } catch (e) {
       console.error("ERRO MERCADO LIVRE:", e);
 
@@ -907,57 +838,9 @@ async function importarAliExpress(url, config) {
 
   if (marketplace === "shopee") {
     try {
-      const { appId, secret } = config.credenciais || {};
+      const produto = await importarShopee(url, config);
 
-      if (!appId || !secret) {
-        return res.status(400).json({
-          erro: "Credenciais Shopee inválidas"
-        });
-      }
-
-      const timestamp = Math.floor(Date.now() / 1000);
-
-      const bodyPayload = {
-        query: `
-          query {
-            productOfferV2(url: "${url}") {
-              title
-              price
-              priceBeforeDiscount
-              imageUrl
-              productLink
-            }
-          }
-        `
-      };
-
-      const payload = JSON.stringify(bodyPayload);
-      const baseString = `${appId}${timestamp}${payload}${secret}`;
-
-      const sign = crypto
-        .createHash("sha256")
-        .update(baseString)
-        .digest("hex");
-
-      const response = await fetch(
-        "https://open-api.affiliate.shopee.com.br/graphql",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${sign}`
-          },
-          body: payload
-        }
-      );
-
-      const data = await response.json();
-
-      console.log("SHOPEE RESPONSE:", JSON.stringify(data));
-
-      const produto = data?.data?.productOfferV2;
-
-      if (!response.ok || !produto) {
+      if ((!produto.titulo || produto.titulo === "Produto Shopee") && !produto.precoAtual && !produto.imagem) {
         return res.json({
           marketplace: "shopee",
           titulo: "Produto Shopee importado",
@@ -972,17 +855,7 @@ async function importarAliExpress(url, config) {
         });
       }
 
-      return res.json({
-        marketplace: "shopee",
-        titulo: produto.title || "Produto Shopee",
-        precoAntigo: produto.priceBeforeDiscount || "",
-        precoAtual: produto.price || "",
-        cupom: "",
-        linkOriginal: url,
-        linkAfiliado: produto.productLink || url,
-        imagem: produto.imageUrl || "",
-        categoria: "Shopee"
-      });
+      return res.json(produto);
     } catch (e) {
       console.error("ERRO SHOPEE:", e);
 
@@ -1000,7 +873,6 @@ async function importarAliExpress(url, config) {
       });
     }
   }
-
   return res.json({
     marketplace,
     titulo: `Produto importado de ${config.nome || marketplace}`,
