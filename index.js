@@ -885,25 +885,37 @@ async function importarAmazon(url, config) {
     }
   }
 
-  const precoAtual =
-    normalizarPrecoShopee(produto?.priceMin || produto?.priceMax || "");
+ const precoMin = normalizarPrecoShopee(produto?.priceMin || "");
+const precoMax = normalizarPrecoShopee(produto?.priceMax || "");
 
-  let precoAntigo = "";
+let precoAtual = "";
+let precoAntigo = "";
 
-  if (precoAtual) {
-    const desconto = Number(produto?.priceDiscountRate || 0);
-    const precoNumero = Number(String(precoAtual).replace(",", "."));
+const minNumero = Number(String(precoMin).replace(",", "."));
+const maxNumero = Number(String(precoMax).replace(",", "."));
 
-    if (Number.isFinite(precoNumero) && desconto > 0 && desconto < 95) {
-      precoAntigo = (precoNumero / (1 - desconto / 100))
-        .toFixed(2)
-        .replace(".", ",");
-    } else if (Number.isFinite(precoNumero)) {
-      precoAntigo = (precoNumero * 1.25)
-        .toFixed(2)
-        .replace(".", ",");
-    }
+const temMin = Number.isFinite(minNumero) && minNumero > 0;
+const temMax = Number.isFinite(maxNumero) && maxNumero > 0;
+
+if (temMin && temMax && minNumero !== maxNumero) {
+  precoAtual = `${precoMin} a ${precoMax}`;
+
+  // Produto com variação: não inventa preço antigo automático
+  precoAntigo = "";
+} else {
+  precoAtual = precoMin || precoMax || "";
+
+  const desconto = Number(produto?.priceDiscountRate || 0);
+  const precoNumero = Number(String(precoAtual).replace(",", "."));
+
+  if (Number.isFinite(precoNumero) && desconto > 0 && desconto < 80) {
+    precoAntigo = (precoNumero / (1 - desconto / 100))
+      .toFixed(2)
+      .replace(".", ",");
+  } else {
+    precoAntigo = "";
   }
+}
 
   let imagem = produto?.imageUrl || "";
   imagem = htmlDecode(imagem).replace(/\\u002F/g, "/");
