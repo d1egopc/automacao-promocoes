@@ -483,35 +483,125 @@ async function importarAmazon(url, config) {
   const html = await response.text();
   const jsonLd = extrairJsonLd(html);
 
+  function limparHtml(texto) {
+    if (!texto) return "";
+    return htmlDecode(String(texto).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+  }
+
+  function primeiroMatch(regex) {
+    const match = html.match(regex);
+    return match?.[1] ? limparHtml(match[1]) : "";
+  }
+
+  function todosPrecosDoHtml() {
+    const encontrados = [];
+    const regex = /R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})|R\$\s*\d+(?:,\d{2})?/g;
+    const matches = html.match(regex) || [];
+
+    for (const item of matches) {
+      const precoLimpo = limparPreco(item);
+      const numero = Number(String(precoLimpo).replace(",", "."));
+
+      if (Number.isFinite(numero) && numero > 0) {
+        encontrados.push({ texto: precoLimpo, numero });
+      }
+    }
+
+    return encontrados;
+  }
+
+  function extrairImagemAmazon() {
+    const imagemMeta =
+      (Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image) ||
+      extrairMeta(html, "og:image") ||
+      extrairMeta(html, "twitter:image") ||
+      html.match(/id=["']landingImage["'][^>]+src=["']([^"']+)["']/i)?.[1] ||
+      html.match(/data-old-hires=["']([^"']+)["']/i)?.[1] ||
+      "";
+
+    if (imagemMeta) return htmlDecode(imagemMeta).replace(/\\u002F/g, "/");
+
+    const dynamicImageRaw =
+      html.match(/data-a-dynamic-image=["']([^"']+)["']/i)?.[1] ||
+      "";
+
+    if (dynamicImageRaw) {
+      try {
+        const decoded = htmlDecode(dynamicImageRaw).replace(/\\u002F/g, "/");
+        const parsed = JSON.parse(decoded);
+        const primeira = Object.keys(parsed || {})[0];
+
+        if (primeira) return primeira;
+      } catch {}
+    }
+
+    const hiRes =
+      html.match(/"hiRes"\s*:\s*"([^"]+)"/i)?.[1] ||
+      html.match(/"large"\s*:\s*"([^"]+)"/i)?.[1] ||
+      "";
+
+    return hiRes ? hiRes.replace(/\\u002F/g, "/") : "";
+  }
+
   const titulo =
     jsonLd?.name ||
     extrairMeta(html, "og:title") ||
     extrairMeta(html, "twitter:title") ||
-    html.match(/<span[^>]+id=["']productTitle["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] ||
+    primeiroMatch(/<span[^>]+id=["']productTitle["'][^>]*>([\s\S]*?)<\/span>/i) ||
     "Produto Amazon";
 
+  const precoOffscreenAtual =
+    primeiroMatch(/id=["']corePriceDisplay_desktop_feature_div["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
+    primeiroMatch(/id=["']corePrice_feature_div["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
+    primeiroMatch(/class=["'][^"']*priceToPay[^"']*["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
+    primeiroMatch(/id=["']apex_desktop["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i);
+
+  const precoWholeFractionMatch =
+    html.match(/class=["'][^"']*a-price-whole[^"']*["'][^>]*>([\s\S]*?)<\/span>[\s\S]*?class=["'][^"']*a-price-fraction[^"']*["'][^>]*>([\s\S]*?)<\/span>/i);
+
   let preco =
+    precoOffscreenAtual ||
     jsonLd?.offers?.price ||
     extrairMeta(html, "product:price:amount") ||
     extrairMeta(html, "og:price:amount") ||
-    html.match(/class=["'][^"']*a-price-whole[^"']*["'][^>]*>([\s\S]*?)<\/span>[\s\S]*?class=["'][^"']*a-price-fraction[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.slice(1, 3).join(",") ||
-    html.match(/id=["']priceblock_ourprice["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] ||
-    html.match(/id=["']priceblock_dealprice["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] ||
-    "";
-
-  let precoAntigoRaw =
-    html.match(/class=["'][^"']*a-text-price[^"']*["'][^>]*>[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>/i)?.[1] ||
-    "";
-
-  const imagem =
-    (Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image) ||
-    extrairMeta(html, "og:image") ||
-    extrairMeta(html, "twitter:image") ||
-    html.match(/id=["']landingImage["'][^>]+src=["']([^"']+)["']/i)?.[1] ||
+    (precoWholeFractionMatch ? `${limparHtml(precoWholeFractionMatch[1])},${limparHtml(precoWholeFractionMatch[2])}` : "") ||
+    primeiroMatch(/id=["']priceblock_ourprice["'][^>]*>([\s\S]*?)<\/span>/i) ||
+    primeiroMatch(/id=["']priceblock_dealprice["'][^>]*>([\s\S]*?)<\/span>/i) ||
     "";
 
   preco = limparPreco(htmlDecode(preco));
+
+  const precosEncontrados = todosPrecosDoHtml();
+
+  if (!preco && precosEncontrados.length) {
+    const menorPreco = precosEncontrados
+      .map((p) => p.numero)
+      .filter((n) => n > 1)
+      .sort((a, b) => a - b)[0];
+
+    if (menorPreco) {
+      preco = menorPreco.toFixed(2).replace(".", ",");
+    }
+  }
+
+  let precoAntigoRaw =
+    primeiroMatch(/class=["'][^"']*a-text-price[^"']*["'][^>]*>[\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
+    primeiroMatch(/data-a-strike=["']true["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
+    "";
+
   let precoAntigo = limparPreco(htmlDecode(precoAntigoRaw));
+
+  if (!precoAntigo && precosEncontrados.length && preco) {
+    const precoAtualNumero = Number(String(preco).replace(",", "."));
+    const maiorPreco = precosEncontrados
+      .map((p) => p.numero)
+      .filter((n) => Number.isFinite(n) && n > precoAtualNumero)
+      .sort((a, b) => b - a)[0];
+
+    if (maiorPreco) {
+      precoAntigo = maiorPreco.toFixed(2).replace(".", ",");
+    }
+  }
 
   if (!precoAntigo) {
     const precoNumero = Number(String(preco).replace(",", "."));
@@ -521,6 +611,8 @@ async function importarAmazon(url, config) {
         .replace(".", ",");
     }
   }
+
+  const imagem = extrairImagemAmazon();
 
   let linkAfiliado = url;
   const trackingId =
@@ -554,7 +646,6 @@ async function importarAmazon(url, config) {
     categoria: "Amazon"
   };
 }
-
 // ================= IMPORTAR PRODUTO =================
 
 app.post("/importar-produto", async (req, res) => {
