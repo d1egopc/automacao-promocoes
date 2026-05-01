@@ -35,6 +35,52 @@ let destinosPorSessao = {};
 let reconectando = {};
 let integracoesPorCliente = {};
 
+const INTEGRACOES_FILE = process.env.INTEGRACOES_FILE || "integracoes.json";
+
+function carregarIntegracoesPersistidas() {
+  try {
+    if (!fs.existsSync(INTEGRACOES_FILE)) {
+      console.log("ℹ️ Nenhum arquivo de integrações encontrado ainda");
+      return;
+    }
+
+    const raw = fs.readFileSync(INTEGRACOES_FILE, "utf8");
+
+    if (!raw) {
+      console.log("ℹ️ Arquivo de integrações vazio");
+      return;
+    }
+
+    const data = JSON.parse(raw);
+
+    if (data && typeof data === "object") {
+      integracoesPorCliente = data;
+      console.log("✅ Integrações carregadas do arquivo");
+    }
+  } catch (e) {
+    console.error("ERRO AO CARREGAR INTEGRAÇÕES:", e.message);
+  }
+}
+
+function salvarIntegracoesPersistidas() {
+  try {
+    const tempFile = `${INTEGRACOES_FILE}.tmp`;
+
+    fs.writeFileSync(
+      tempFile,
+      JSON.stringify(integracoesPorCliente, null, 2),
+      "utf8"
+    );
+
+    fs.renameSync(tempFile, INTEGRACOES_FILE);
+
+    console.log("✅ Integrações salvas no arquivo");
+  } catch (e) {
+    console.error("ERRO AO SALVAR INTEGRAÇÕES:", e.message);
+  }
+}
+
+carregarIntegracoesPersistidas();
 const ADMIN_USER = "admin";
 const ADMIN_PASS_HASH = bcrypt.hashSync("123456", 10);
 const JWT_SECRET = process.env.JWT_SECRET || "segredo";
@@ -261,13 +307,17 @@ app.post("/integracoes/:marketplace", (req, res) => {
   }
 
   integracoesPorCliente[clienteId][marketplace] = {
-    marketplace,
-    nome: marketplaceRules[marketplace]?.nome || marketplace,
-    modo: validacao.modo || req.body.modo || null,
-    credenciais: validacao.clean,
-    status: "configurado",
-    atualizadoEm: new Date().toISOString()
-  };
+  marketplace,
+  nome: marketplaceRules[marketplace]?.nome || marketplace,
+  modo: validacao.modo || req.body.modo || null,
+  credenciais: validacao.clean,
+  status: "configurado",
+  atualizadoEm: new Date().toISOString()
+};
+
+salvarIntegracoesPersistidas();
+
+return res.json({
 
   return res.json({
     ok: true,
@@ -294,6 +344,22 @@ app.post("/integracoes/:marketplace/test", (req, res) => {
     marketplace,
     status: "conectado",
     message: `${config.nome || marketplace} configurado.`
+  });
+});
+ app.delete("/integracoes/:marketplace", (req, res) => {
+  const clienteId = getClienteId(req);
+  const marketplace = req.params.marketplace.toLowerCase();
+
+  if (integracoesPorCliente[clienteId]?.[marketplace]) {
+    delete integracoesPorCliente[clienteId][marketplace];
+  }
+
+  salvarIntegracoesPersistidas();
+
+  return res.json({
+    ok: true,
+    message: `${marketplace} removido com sucesso`,
+    marketplace
   });
 });
 // ================= HELPERS DE IMPORTAÇÃO =================
