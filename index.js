@@ -361,13 +361,11 @@ function limparPreco(valor) {
     .replace("R$", "")
     .replace(/\s/g, "");
 
-  // Se vier 50.99, vira 50,99
   if (/^\d+\.\d{2}$/.test(texto)) {
     const numero = Number(texto);
     return numero.toFixed(2).replace(".", ",");
   }
 
-  // Se vier 50,99, mantém correto
   if (texto.includes(",")) {
     texto = texto.replace(/\./g, "").replace(",", ".");
     const numero = Number(texto);
@@ -375,7 +373,6 @@ function limparPreco(valor) {
     return numero.toFixed(2).replace(".", ",");
   }
 
-  // Se vier 5099, vira 50,99
   texto = texto.replace(/\D/g, "");
 
   if (!texto) return "";
@@ -464,6 +461,96 @@ async function importarMercadoLivre(url, config) {
   };
 }
 
+async function importarAmazon(url, config) {
+  const cookies = config?.credenciais?.cookies || "";
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+      "Accept":
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+      "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+      "Cookie": cookies
+    }
+  });
+
+  const html = await response.text();
+  const jsonLd = extrairJsonLd(html);
+
+  const titulo =
+    jsonLd?.name ||
+    extrairMeta(html, "og:title") ||
+    extrairMeta(html, "twitter:title") ||
+    html.match(/<span[^>]+id=["']productTitle["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] ||
+    "Produto Amazon";
+
+  let preco =
+    jsonLd?.offers?.price ||
+    extrairMeta(html, "product:price:amount") ||
+    extrairMeta(html, "og:price:amount") ||
+    html.match(/class=["'][^"']*a-price-whole[^"']*["'][^>]*>([\s\S]*?)<\/span>[\s\S]*?class=["'][^"']*a-price-fraction[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.slice(1, 3).join(",") ||
+    html.match(/id=["']priceblock_ourprice["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] ||
+    html.match(/id=["']priceblock_dealprice["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] ||
+    "";
+
+  let precoAntigoRaw =
+    html.match(/class=["'][^"']*a-text-price[^"']*["'][^>]*>[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>/i)?.[1] ||
+    "";
+
+  const imagem =
+    (Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image) ||
+    extrairMeta(html, "og:image") ||
+    extrairMeta(html, "twitter:image") ||
+    html.match(/id=["']landingImage["'][^>]+src=["']([^"']+)["']/i)?.[1] ||
+    "";
+
+  preco = limparPreco(htmlDecode(preco));
+  let precoAntigo = limparPreco(htmlDecode(precoAntigoRaw));
+
+  if (!precoAntigo) {
+    const precoNumero = Number(String(preco).replace(",", "."));
+    if (Number.isFinite(precoNumero) && precoNumero > 0) {
+      precoAntigo = (precoNumero * 1.2)
+        .toFixed(2)
+        .replace(".", ",");
+    }
+  }
+
+  let linkAfiliado = url;
+  const trackingId =
+    config?.credenciais?.trackingId ||
+    config?.credenciais?.partnerTag ||
+    config?.credenciais?.appId ||
+    "";
+
+  if (trackingId) {
+    try {
+      const u = new URL(url);
+      u.searchParams.set("tag", trackingId);
+      linkAfiliado = u.toString();
+    } catch {
+      linkAfiliado = url;
+    }
+  }
+
+  return {
+    marketplace: "amazon",
+    titulo: htmlDecode(titulo)
+      .replace("Amazon.com.br:", "")
+      .replace("Amazon.com:", "")
+      .trim(),
+    precoAntigo,
+    precoAtual: preco,
+    cupom: "",
+    linkOriginal: url,
+    linkAfiliado,
+    imagem: corrigirImagemUrl(imagem) || imagem,
+    categoria: "Amazon"
+  };
+}
+
 // ================= IMPORTAR PRODUTO =================
 
 app.post("/importar-produto", async (req, res) => {
@@ -483,6 +570,44 @@ app.post("/importar-produto", async (req, res) => {
     return res.status(400).json({
       erro: `Integração ${marketplace} não configurada`
     });
+  }
+
+  if (marketplace === "amazon") {
+    try {
+      const produto = await importarAmazon(url, config);
+
+      if (!produto.titulo || produto.titulo === "Produto Amazon") {
+        return res.json({
+          marketplace: "amazon",
+          titulo: "Produto importado da Amazon",
+          precoAntigo: "",
+          precoAtual: "",
+          cupom: "",
+          linkOriginal: url,
+          linkAfiliado: url,
+          imagem: "",
+          categoria: "Amazon",
+          aviso: "Dados não encontrados automaticamente. Preencha manualmente."
+        });
+      }
+
+      return res.json(produto);
+    } catch (e) {
+      console.error("ERRO AMAZON:", e);
+
+      return res.json({
+        marketplace: "amazon",
+        titulo: "Produto importado da Amazon",
+        precoAntigo: "",
+        precoAtual: "",
+        cupom: "",
+        linkOriginal: url,
+        linkAfiliado: url,
+        imagem: "",
+        categoria: "Amazon",
+        aviso: "Erro ao consultar Amazon. Preencha manualmente."
+      });
+    }
   }
 
   if (marketplace === "mercadolivre") {
