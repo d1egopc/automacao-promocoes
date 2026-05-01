@@ -323,7 +323,9 @@ return res.json({
   marketplace,
   status: "configurado"
 });
+});
 
+app.post("/integracoes/:marketplace/test", (req, res) => {
 app.post("/integracoes/:marketplace/test", (req, res) => {
   const clienteId = getClienteId(req);
   const marketplace = req.params.marketplace.toLowerCase();
