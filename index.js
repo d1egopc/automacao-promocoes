@@ -139,8 +139,8 @@ const marketplaceRules = {
   },
  mercadolivre: {
   nome: "Mercado Livre",
-  required: ["clientId", "cookies", "tag", "csrfToken"],
-  allowed: ["clientId", "cookies", "tag", "csrfToken"]
+  required: ["cookies", "tag"],
+  allowed: ["cookies", "tag"]
 },
   aliexpress: {
     nome: "AliExpress",
@@ -399,16 +399,62 @@ function corrigirImagemUrl(imagem) {
 
   return imagemFinal;
 }
+async function buscarCsrfTokenMercadoLivre(cookies) {
+  try {
+    if (!cookies) return "";
+
+    const response = await fetch(
+      "https://www.mercadolivre.com.br/afiliados/linkbuilder",
+      {
+        method: "GET",
+        headers: {
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+          "Cookie": cookies
+        }
+      }
+    );
+
+    const html = await response.text();
+
+    const patterns = [
+      /x-csrf-token["']?\s*[:=]\s*["']([^"']+)["']/i,
+      /csrfToken["']?\s*[:=]\s*["']([^"']+)["']/i,
+      /csrf-token["']?\s*content=["']([^"']+)["']/i,
+      /_csrf["']?\s*[:=]\s*["']([^"']+)["']/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match?.[1]) return match[1];
+    }
+
+    console.log("ML CSRF: token não encontrado automaticamente");
+    return "";
+  } catch (e) {
+    console.error("ERRO BUSCAR CSRF ML:", e.message);
+    return "";
+  }
+}
+
 async function gerarLinkAfiliadoMercadoLivre(url, config) {
   try {
     const credenciais = config?.credenciais || {};
 
     const cookies = credenciais.cookies || "";
     const tag = credenciais.tag || "";
-    const csrfToken = credenciais.csrfToken || "";
 
-    if (!url || !cookies || !tag || !csrfToken) {
-      console.log("ML AFILIADO: faltando cookies, tag ou csrfToken");
+    if (!url || !cookies || !tag) {
+      console.log("ML AFILIADO: faltando cookies ou tag");
+      return "";
+    }
+
+    const csrfToken = await buscarCsrfTokenMercadoLivre(cookies);
+
+    if (!csrfToken) {
+      console.log("ML AFILIADO: csrfToken automático não encontrado");
       return "";
     }
 
@@ -447,8 +493,7 @@ async function gerarLinkAfiliadoMercadoLivre(url, config) {
     console.error("ERRO ML AFILIADO:", e.message);
     return "";
   }
-}
-async function importarMercadoLivre(url, config) {
+}async function importarMercadoLivre(url, config) {
   const cookies = config?.credenciais?.cookies || "";
 
   const response = await fetch(url, {
