@@ -277,7 +277,7 @@ app.post("/integracoes/:marketplace", (req, res) => {
   });
 });
 
-app.post("/integracoes/:marketplace/test", (req, res) => {
+app.post("/integracoes/:marketplace/test", (req, res) => { 
   const clienteId = getClienteId(req);
   const marketplace = req.params.marketplace.toLowerCase();
   const config = integracoesPorCliente[clienteId]?.[marketplace];
@@ -294,6 +294,20 @@ app.post("/integracoes/:marketplace/test", (req, res) => {
     marketplace,
     status: "conectado",
     message: `${config.nome || marketplace} configurado.`
+  });
+});
+ app.delete("/integracoes/:marketplace", (req, res) => {
+  const clienteId = getClienteId(req);
+  const marketplace = req.params.marketplace.toLowerCase();
+
+  if (integracoesPorCliente[clienteId]?.[marketplace]) {
+    delete integracoesPorCliente[clienteId][marketplace];
+  }
+
+  return res.json({
+    ok: true,
+    message: `${marketplace} removido com sucesso`,
+    marketplace
   });
 });
 // ================= HELPERS DE IMPORTAÇÃO =================
