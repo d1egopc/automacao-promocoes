@@ -34,7 +34,39 @@ let statusSessao = {};
 let destinosPorSessao = {};
 let reconectando = {};
 let integracoesPorCliente = {};
+const INTEGRACOES_FILE = "integracoes.json";
 
+function carregarIntegracoes() {
+  try {
+    if (fs.existsSync(INTEGRACOES_FILE)) {
+      const raw = fs.readFileSync(INTEGRACOES_FILE, "utf8");
+      const data = JSON.parse(raw);
+
+      if (data && typeof data === "object") {
+        integracoesPorCliente = data;
+        console.log("✅ Integrações carregadas do arquivo");
+      }
+    }
+  } catch (e) {
+    console.error("ERRO AO CARREGAR INTEGRAÇÕES:", e.message);
+  }
+}
+
+function salvarIntegracoes() {
+  try {
+    fs.writeFileSync(
+      INTEGRACOES_FILE,
+      JSON.stringify(integracoesPorCliente, null, 2),
+      "utf8"
+    );
+
+    console.log("✅ Integrações salvas no arquivo");
+  } catch (e) {
+    console.error("ERRO AO SALVAR INTEGRAÇÕES:", e.message);
+  }
+}
+
+carregarIntegracoes();
 const ADMIN_USER = "admin";
 const ADMIN_PASS_HASH = bcrypt.hashSync("123456", 10);
 const JWT_SECRET = process.env.JWT_SECRET || "segredo";
@@ -268,6 +300,8 @@ app.post("/integracoes/:marketplace", (req, res) => {
     status: "configurado",
     atualizadoEm: new Date().toISOString()
   };
+  
+  salvarIntegracoes();
 
   return res.json({
     ok: true,
@@ -303,6 +337,8 @@ app.post("/integracoes/:marketplace/test", (req, res) => {
   if (integracoesPorCliente[clienteId]?.[marketplace]) {
     delete integracoesPorCliente[clienteId][marketplace];
   }
+  
+  salvarIntegracoes();
 
   return res.json({
     ok: true,
