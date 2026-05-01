@@ -137,11 +137,11 @@ const marketplaceRules = {
       }
     }
   },
-  mercadolivre: {
-    nome: "Mercado Livre",
-    required: ["clientId", "cookies"],
-    allowed: ["clientId", "cookies"]
-  },
+ mercadolivre: {
+  nome: "Mercado Livre",
+  required: ["clientId", "cookies", "tag", "csrfToken"],
+  allowed: ["clientId", "cookies", "tag", "csrfToken"]
+},
   aliexpress: {
     nome: "AliExpress",
     required: ["appKey", "secret", "trackingId"],
@@ -213,12 +213,13 @@ function mascararIntegracao(config) {
 
   for (const key of Object.keys(masked)) {
     if (
-      key.toLowerCase().includes("secret") ||
-      key.toLowerCase().includes("key") ||
-      key.toLowerCase().includes("cookies")
-    ) {
-      masked[key] = "•••••••• configurado";
-    }
+  key.toLowerCase().includes("secret") ||
+  key.toLowerCase().includes("key") ||
+  key.toLowerCase().includes("token") ||
+  key.toLowerCase().includes("cookies")
+) {
+  masked[key] = "•••••••• configurado";
+}
   }
 
   return masked;
@@ -398,7 +399,55 @@ function corrigirImagemUrl(imagem) {
 
   return imagemFinal;
 }
+async function gerarLinkAfiliadoMercadoLivre(url, config) {
+  try {
+    const credenciais = config?.credenciais || {};
 
+    const cookies = credenciais.cookies || "";
+    const tag = credenciais.tag || "";
+    const csrfToken = credenciais.csrfToken || "";
+
+    if (!url || !cookies || !tag || !csrfToken) {
+      console.log("ML AFILIADO: faltando cookies, tag ou csrfToken");
+      return "";
+    }
+
+    const response = await fetch(
+      "https://www.mercadolivre.com.br/affiliate-program/api/v2/stripe/user/links",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json, text/plain, */*",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+          "Origin": "https://www.mercadolivre.com.br",
+          "Referer": "https://www.mercadolivre.com.br/afiliados/linkbuilder",
+          "Cookie": cookies,
+          "x-csrf-token": csrfToken
+        },
+        body: JSON.stringify({
+          url,
+          tag
+        })
+      }
+    );
+
+    const data = await response.json().catch(() => null);
+
+    console.log("ML AFILIADO RESPONSE:", JSON.stringify(data));
+
+    if (!response.ok) {
+      console.log("ML AFILIADO ERRO STATUS:", response.status);
+      return "";
+    }
+
+    return data?.short_url || data?.shortUrl || data?.url || "";
+  } catch (e) {
+    console.error("ERRO ML AFILIADO:", e.message);
+    return "";
+  }
+}
 async function importarMercadoLivre(url, config) {
   const cookies = config?.credenciais?.cookies || "";
 
@@ -447,6 +496,8 @@ async function importarMercadoLivre(url, config) {
       .replace(".", ",");
   }
 
+    const linkAfiliadoGerado = await gerarLinkAfiliadoMercadoLivre(url, config);
+
   return {
     marketplace: "mercadolivre",
     titulo: htmlDecode(titulo).replace(" | MercadoLivre", "").replace(" | Mercado Livre", ""),
@@ -454,7 +505,7 @@ async function importarMercadoLivre(url, config) {
     precoAtual: preco,
     cupom: "",
     linkOriginal: url,
-    linkAfiliado: url,
+    linkAfiliado: linkAfiliadoGerado || url,
     imagem: corrigirImagemUrl(imagem) || imagem,
     categoria: "Mercado Livre"
   };
