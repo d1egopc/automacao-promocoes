@@ -388,6 +388,7 @@ function limparPreco(valor) {
 
   return numero.toFixed(2).replace(".", ",");
 }
+
 function corrigirImagemUrl(imagem) {
   if (!imagem || typeof imagem !== "string") return null;
 
@@ -442,35 +443,25 @@ async function importarMercadoLivre(url, config) {
   preco = limparPreco(preco);
 
   let precoNumero = Number(String(preco).replace(",", "."));
-let precoAntigo = "";
+  let precoAntigo = "";
 
-if (Number.isFinite(precoNumero) && precoNumero > 0) {
-  precoAntigo = (precoNumero * 1.52)
-    .toFixed(2)
-    .replace(".", ",");
-}
+  if (Number.isFinite(precoNumero) && precoNumero > 0) {
+    precoAntigo = (precoNumero * 1.52)
+      .toFixed(2)
+      .replace(".", ",");
+  }
 
-let precoNumero = Number(String(preco).replace(",", "."));
-let precoAntigo = "";
-
-if (Number.isFinite(precoNumero) && precoNumero > 0) {
-  precoAntigo = (precoNumero * 1.52)
-    .toFixed(2)
-    .replace(".", ",");
-}
-
-return {
-  marketplace: "mercadolivre",
-  titulo: htmlDecode(titulo).replace(" | MercadoLivre", "").replace(" | Mercado Livre", ""),
-  precoAntigo,
-  precoAtual: preco,
-  cupom: "",
-  linkOriginal: url,
-  linkAfiliado: url,
-  imagem: corrigirImagemUrl(imagem) || imagem,
-  categoria: "Mercado Livre"
-};
-
+  return {
+    marketplace: "mercadolivre",
+    titulo: htmlDecode(titulo).replace(" | MercadoLivre", "").replace(" | Mercado Livre", ""),
+    precoAntigo,
+    precoAtual: preco,
+    cupom: "",
+    linkOriginal: url,
+    linkAfiliado: url,
+    imagem: corrigirImagemUrl(imagem) || imagem,
+    categoria: "Mercado Livre"
+  };
 }
 
 // ================= IMPORTAR PRODUTO =================
