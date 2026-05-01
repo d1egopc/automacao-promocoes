@@ -34,63 +34,6 @@ let statusSessao = {};
 let destinosPorSessao = {};
 let reconectando = {};
 let integracoesPorCliente = {};
-let automacoesPorCliente = {};
-let historicoOfertasPorCliente = {};
-
-const DADOS_FILE = process.env.DADOS_FILE || "dados_saas.json";
-
-function carregarDadosPersistidos() {
-  try {
-    if (!fs.existsSync(DADOS_FILE)) return;
-
-    const raw = fs.readFileSync(DADOS_FILE, "utf8");
-    if (!raw) return;
-
-    const data = JSON.parse(raw);
-
-    if (data?.integracoesPorCliente && typeof data.integracoesPorCliente === "object") {
-      integracoesPorCliente = data.integracoesPorCliente;
-    }
-
-    if (data?.destinosPorSessao && typeof data.destinosPorSessao === "object") {
-      destinosPorSessao = data.destinosPorSessao;
-    }
-
-    if (data?.automacoesPorCliente && typeof data.automacoesPorCliente === "object") {
-      automacoesPorCliente = data.automacoesPorCliente;
-    }
-
-    if (data?.historicoOfertasPorCliente && typeof data.historicoOfertasPorCliente === "object") {
-      historicoOfertasPorCliente = data.historicoOfertasPorCliente;
-    }
-
-    console.log("✅ Dados persistidos carregados");
-  } catch (e) {
-    console.error("ERRO AO CARREGAR DADOS PERSISTIDOS:", e.message);
-  }
-}
-
-function salvarDadosPersistidos() {
-  try {
-    const payload = {
-      integracoesPorCliente,
-      destinosPorSessao,
-      automacoesPorCliente,
-      historicoOfertasPorCliente,
-      atualizadoEm: new Date().toISOString()
-    };
-
-    const tempFile = `${DADOS_FILE}.tmp`;
-    fs.writeFileSync(tempFile, JSON.stringify(payload, null, 2), "utf8");
-    fs.renameSync(tempFile, DADOS_FILE);
-
-    console.log("✅ Dados persistidos salvos");
-  } catch (e) {
-    console.error("ERRO AO SALVAR DADOS PERSISTIDOS:", e.message);
-  }
-}
-
-carregarDadosPersistidos();
 
 const ADMIN_USER = "admin";
 const ADMIN_PASS_HASH = bcrypt.hashSync("123456", 10);
@@ -258,6 +201,7 @@ function validarIntegracao(marketplace, body) {
       campos: missing
     };
   }
+
   return {
     ok: true,
     clean: limparCredencial(body, rule.allowed)
@@ -269,13 +213,13 @@ function mascararIntegracao(config) {
 
   for (const key of Object.keys(masked)) {
     if (
-      key.toLowerCase().includes("secret") ||
-      key.toLowerCase().includes("key") ||
-      key.toLowerCase().includes("token") ||
-      key.toLowerCase().includes("cookies")
-    ) {
-      masked[key] = "•••••••• configurado";
-    }
+  key.toLowerCase().includes("secret") ||
+  key.toLowerCase().includes("key") ||
+  key.toLowerCase().includes("token") ||
+  key.toLowerCase().includes("cookies")
+) {
+  masked[key] = "•••••••• configurado";
+}
   }
 
   return masked;
@@ -325,8 +269,6 @@ app.post("/integracoes/:marketplace", (req, res) => {
     atualizadoEm: new Date().toISOString()
   };
 
-  salvarDadosPersistidos();
-
   return res.json({
     ok: true,
     message: `${marketplace} configurado com sucesso`,
@@ -354,8 +296,7 @@ app.post("/integracoes/:marketplace/test", (req, res) => {
     message: `${config.nome || marketplace} configurado.`
   });
 });
-
-app.delete("/integracoes/:marketplace", (req, res) => {
+ app.delete("/integracoes/:marketplace", (req, res) => {
   const clienteId = getClienteId(req);
   const marketplace = req.params.marketplace.toLowerCase();
 
@@ -363,89 +304,12 @@ app.delete("/integracoes/:marketplace", (req, res) => {
     delete integracoesPorCliente[clienteId][marketplace];
   }
 
-  salvarDadosPersistidos();
-
   return res.json({
     ok: true,
     message: `${marketplace} removido com sucesso`,
     marketplace
   });
 });
-
-// ================= DESTINOS / AUTOMAÇÃO BASE =================
-
-app.get("/automacao/config", (req, res) => {
-  const clienteId = getClienteId(req);
-
-  return res.json({
-    ok: true,
-    clienteId,
-    config: automacoesPorCliente[clienteId] || {
-      ativa: false,
-      marketplaces: [],
-      palavrasChave: [],
-      intervaloMinutos: 30,
-      horarioInicio: 8,
-      horarioFim: 22,
-      descontoMinimo: 0,
-      precoMaximo: null,
-      evitarRepetidos: true
-    }
-  });
-});
-
-app.post("/automacao/config", (req, res) => {
-  const clienteId = getClienteId(req);
-
-  const configAtual = automacoesPorCliente[clienteId] || {};
-
-  automacoesPorCliente[clienteId] = {
-    ...configAtual,
-    ativa: Boolean(req.body.ativa),
-    marketplaces: Array.isArray(req.body.marketplaces) ? req.body.marketplaces : [],
-    palavrasChave: Array.isArray(req.body.palavrasChave) ? req.body.palavrasChave : [],
-    intervaloMinutos: Number(req.body.intervaloMinutos || 30),
-    horarioInicio: Number(req.body.horarioInicio || 8),
-    horarioFim: Number(req.body.horarioFim || 22),
-    descontoMinimo: Number(req.body.descontoMinimo || 0),
-    precoMaximo: req.body.precoMaximo === null || req.body.precoMaximo === undefined || req.body.precoMaximo === ""
-      ? null
-      : Number(req.body.precoMaximo),
-    evitarRepetidos: req.body.evitarRepetidos !== false,
-    atualizadoEm: new Date().toISOString()
-  };
-
-  salvarDadosPersistidos();
-
-  return res.json({
-    ok: true,
-    message: "Configuração de automação salva",
-    config: automacoesPorCliente[clienteId]
-  });
-});
-
-app.get("/automacao/historico", (req, res) => {
-  const clienteId = getClienteId(req);
-
-  return res.json({
-    ok: true,
-    clienteId,
-    historico: historicoOfertasPorCliente[clienteId] || []
-  });
-});
-
-app.delete("/automacao/historico", (req, res) => {
-  const clienteId = getClienteId(req);
-  historicoOfertasPorCliente[clienteId] = [];
-
-  salvarDadosPersistidos();
-
-  return res.json({
-    ok: true,
-    message: "Histórico de ofertas limpo"
-  });
-});
-
 // ================= HELPERS DE IMPORTAÇÃO =================
 
 function htmlDecode(str) {
@@ -476,6 +340,7 @@ function extrairMeta(html, property) {
 
   return "";
 }
+
 function extrairJsonLd(html) {
   const matches = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
 
@@ -511,9 +376,9 @@ function limparPreco(valor) {
     .replace(/\s/g, "");
 
   if (/^\d+\.\d{1,2}$/.test(texto)) {
-    const numero = Number(texto);
-    return numero.toFixed(2).replace(".", ",");
-  }
+  const numero = Number(texto);
+  return numero.toFixed(2).replace(".", ",");
+}
 
   if (texto.includes(",")) {
     texto = texto.replace(/\./g, "").replace(",", ".");
@@ -529,8 +394,8 @@ function limparPreco(valor) {
   let numero = Number(texto);
 
   if (numero > 10000) {
-    numero = numero / 100;
-  }
+  numero = numero / 100;
+}
 
   return numero.toFixed(2).replace(".", ",");
 }
@@ -548,7 +413,6 @@ function corrigirImagemUrl(imagem) {
 
   return imagemFinal;
 }
-
 async function buscarCsrfTokenMercadoLivre(cookies) {
   try {
     if (!cookies) return "";
@@ -643,8 +507,7 @@ async function gerarLinkAfiliadoMercadoLivre(url, config) {
     console.error("ERRO ML AFILIADO:", e.message);
     return "";
   }
-}
-async function importarMercadoLivre(url, config) {
+}async function importarMercadoLivre(url, config) {
   const cookies = config?.credenciais?.cookies || "";
 
   const response = await fetch(url, {
@@ -692,7 +555,7 @@ async function importarMercadoLivre(url, config) {
       .replace(".", ",");
   }
 
-  const linkAfiliadoGerado = await gerarLinkAfiliadoMercadoLivre(url, config);
+    const linkAfiliadoGerado = await gerarLinkAfiliadoMercadoLivre(url, config);
 
   return {
     marketplace: "mercadolivre",
@@ -891,8 +754,7 @@ async function importarAmazon(url, config) {
     imagem: corrigirImagemUrl(imagem) || imagem,
     categoria: "Amazon"
   };
-}
-async function importarShopee(url, config) {
+}async function importarShopee(url, config) {
   if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
     url = "https://" + url;
   }
@@ -1133,37 +995,37 @@ async function importarShopee(url, config) {
     }
   }
 
-  const precoMin = normalizarPrecoShopee(produto?.priceMin || "");
-  const precoMax = normalizarPrecoShopee(produto?.priceMax || "");
+ const precoMin = normalizarPrecoShopee(produto?.priceMin || "");
+const precoMax = normalizarPrecoShopee(produto?.priceMax || "");
 
-  let precoAtual = "";
-  let precoAntigo = "";
+let precoAtual = "";
+let precoAntigo = "";
 
-  const minNumero = Number(String(precoMin).replace(",", "."));
-  const maxNumero = Number(String(precoMax).replace(",", "."));
+const minNumero = Number(String(precoMin).replace(",", "."));
+const maxNumero = Number(String(precoMax).replace(",", "."));
 
-  const temMin = Number.isFinite(minNumero) && minNumero > 0;
-  const temMax = Number.isFinite(maxNumero) && maxNumero > 0;
+const temMin = Number.isFinite(minNumero) && minNumero > 0;
+const temMax = Number.isFinite(maxNumero) && maxNumero > 0;
 
-  if (temMin && temMax && minNumero !== maxNumero) {
-    precoAtual = `${precoMin} a ${precoMax}`;
+if (temMin && temMax && minNumero !== maxNumero) {
+  precoAtual = `${precoMin} a ${precoMax}`;
 
-    // Produto com variação: não inventa preço antigo automático
-    precoAntigo = "";
+  // Produto com variação: não inventa preço antigo automático
+  precoAntigo = "";
+} else {
+  precoAtual = precoMin || precoMax || "";
+
+  const desconto = Number(produto?.priceDiscountRate || 0);
+  const precoNumero = Number(String(precoAtual).replace(",", "."));
+
+  if (Number.isFinite(precoNumero) && desconto > 0 && desconto < 80) {
+    precoAntigo = (precoNumero / (1 - desconto / 100))
+      .toFixed(2)
+      .replace(".", ",");
   } else {
-    precoAtual = precoMin || precoMax || "";
-
-    const desconto = Number(produto?.priceDiscountRate || 0);
-    const precoNumero = Number(String(precoAtual).replace(",", "."));
-
-    if (Number.isFinite(precoNumero) && desconto > 0 && desconto < 80) {
-      precoAntigo = (precoNumero / (1 - desconto / 100))
-        .toFixed(2)
-        .replace(".", ",");
-    } else {
-      precoAntigo = "";
-    }
+    precoAntigo = "";
   }
+}
 
   let imagem = produto?.imageUrl || "";
   imagem = htmlDecode(imagem).replace(/\\u002F/g, "/");
@@ -1187,103 +1049,407 @@ async function importarShopee(url, config) {
     categoria: "Shopee"
   };
 }
-function extrairMeta(html, name) {
-  const match = html.match(
-    new RegExp(`<meta[^>]+property=['"]${name}['"][^>]+content=['"]([^'"]+)['"]`, "i")
-  );
 
-  if (match) {
-    return match[1];
+// ================= IMPORTAR PRODUTO =================
+
+app.post("/importar-produto", async (req, res) => {
+  const clienteId = getClienteId(req);
+  const marketplace = String(req.body.marketplace || "").toLowerCase();
+  const { url } = req.body;
+
+  if (!marketplace || !url) {
+    return res.status(400).json({
+      erro: "marketplace e url obrigatórios"
+    });
   }
 
-  return "";
-}
+  const config = integracoesPorCliente[clienteId]?.[marketplace];
 
-function htmlDecode(input) {
-  const doc = new DOMParser().parseFromString(input, "text/html");
-  return doc.documentElement.textContent;
-}
-
-function corrigirImagemUrl(url) {
-  if (!url) return url;
-
-  if (url.startsWith("//")) {
-    return "https:" + url;
+  if (!config) {
+    return res.status(400).json({
+      erro: `Integração ${marketplace} não configurada`
+    });
   }
 
-  return url;
-}
+  if (marketplace === "amazon") {
+    try {
+      const produto = await importarAmazon(url, config);
 
-function normalizarPreco(valor) {
-  if (!valor) return "";
+      if (!produto.titulo || produto.titulo === "Produto Amazon") {
+        return res.json({
+          marketplace: "amazon",
+          titulo: "Produto importado da Amazon",
+          precoAntigo: "",
+          precoAtual: "",
+          cupom: "",
+          linkOriginal: url,
+          linkAfiliado: url,
+          imagem: "",
+          categoria: "Amazon",
+          aviso: "Dados não encontrados automaticamente. Preencha manualmente."
+        });
+      }
 
-  let texto = String(valor).trim();
+      return res.json(produto);
+    } catch (e) {
+      console.error("ERRO AMAZON:", e);
 
-  texto = texto.replace("R$", "").replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
-
-  const numero = Number(texto);
-
-  if (!Number.isFinite(numero)) return String(valor);
-
-  return numero.toFixed(2).replace(".", ",");
-}
-
-function normalizarPrecoShopee(valor) {
-  if (!valor) return "";
-
-  let texto = String(valor).trim();
-
-  texto = texto.replace(/\s/g, "").replace(",", ".");
-
-  const numero = Number(texto);
-
-  if (!Number.isFinite(numero)) return String(valor);
-
-  return numero.toFixed(2).replace(".", ",");
-}
-async function chamarAwinAPI(url, cookies) {
-  const headers = {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-    "Accept": "application/json",
-    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Cookie": cookies
-  };
-
-  const response = await fetch(url, { method: "GET", headers });
-
-  const data = await response.json();
-  return data;
-}
-
-async function buscarProdutoAwin(url, cookies) {
-  const linkProduto = url;
-  const linkConvertido = `https://www.awin1.com/cread.php?awinmid=YOUR_AFFILIATE_ID&clickref=YOUR_REFERRAL&subid=YOUR_SUBID&url=${encodeURIComponent(linkProduto)}`;
-
-  const produto = await chamarAwinAPI(linkConvertido, cookies);
-
-  if (!produto) {
-    return {
-      status: "erro",
-      mensagem: "Produto não encontrado no Awin."
-    };
+      return res.json({
+        marketplace: "amazon",
+        titulo: "Produto importado da Amazon",
+        precoAntigo: "",
+        precoAtual: "",
+        cupom: "",
+        linkOriginal: url,
+        linkAfiliado: url,
+        imagem: "",
+        categoria: "Amazon",
+        aviso: "Erro ao consultar Amazon. Preencha manualmente."
+      });
+    }
   }
 
-  const preco = produto.price;
-  const precoAtual = preco ? `R$ ${normalizarPreco(preco)}` : "Não disponível";
-  const titulo = produto.title;
-  const imagem = produto.image;
-  const linkAfiliado = linkConvertido;
+  if (marketplace === "mercadolivre") {
+    try {
+      const produto = await importarMercadoLivre(url, config);
 
-  return {
-    marketplace: "awin",
-    titulo,
+      if (!produto.titulo || produto.titulo === "Produto Mercado Livre") {
+        return res.json({
+          marketplace: "mercadolivre",
+          titulo: "Produto importado de Mercado Livre",
+          precoAntigo: "",
+          precoAtual: "",
+          cupom: "",
+          linkOriginal: url,
+          linkAfiliado: url,
+          imagem: "",
+          categoria: "Mercado Livre",
+          aviso: "Dados não encontrados automaticamente. Preencha manualmente."
+        });
+      }
+
+      return res.json(produto);
+    } catch (e) {
+      console.error("ERRO MERCADO LIVRE:", e);
+
+      return res.json({
+        marketplace: "mercadolivre",
+        titulo: "Produto importado de Mercado Livre",
+        precoAntigo: "",
+        precoAtual: "",
+        cupom: "",
+        linkOriginal: url,
+        linkAfiliado: url,
+        imagem: "",
+        categoria: "Mercado Livre",
+        aviso: "Erro ao consultar Mercado Livre. Preencha manualmente."
+      });
+    }
+  }
+
+  if (marketplace === "shopee") {
+    try {
+      const produto = await importarShopee(url, config);
+
+      if ((!produto.titulo || produto.titulo === "Produto Shopee") && !produto.precoAtual && !produto.imagem) {
+        return res.json({
+          marketplace: "shopee",
+          titulo: "Produto Shopee importado",
+          precoAntigo: "",
+          precoAtual: "",
+          cupom: "",
+          linkOriginal: url,
+          linkAfiliado: url,
+          imagem: "",
+          categoria: "Shopee",
+          aviso: "Shopee não retornou dados completos. Preencha manualmente."
+        });
+      }
+
+      return res.json(produto);
+    } catch (e) {
+      console.error("ERRO SHOPEE:", e);
+
+      return res.json({
+        marketplace: "shopee",
+        titulo: "Produto Shopee importado",
+        precoAntigo: "",
+        precoAtual: "",
+        cupom: "",
+        linkOriginal: url,
+        linkAfiliado: url,
+        imagem: "",
+        categoria: "Shopee",
+        aviso: "Erro ao consultar Shopee. Preencha manualmente."
+      });
+    }
+  }
+  return res.json({
+    marketplace,
+    titulo: `Produto importado de ${config.nome || marketplace}`,
     precoAntigo: "",
-    precoAtual,
+    precoAtual: "",
     cupom: "",
-    linkOriginal: linkProduto,
-    linkAfiliado,
-    imagem,
-    categoria: produto.category || "Awin"
-  };
+    linkOriginal: url,
+    linkAfiliado: url,
+    imagem: "",
+    categoria: config.nome || marketplace
+  });
+});
+
+// ================= WHATSAPP =================
+
+app.post("/reset/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    reconectando[id] = false;
+
+    if (sessoes[id]) {
+      try { await sessoes[id].logout(); } catch {}
+      try { sessoes[id].end?.(); } catch {}
+      delete sessoes[id];
+    }
+
+    delete qrCodes[id];
+    delete statusSessao[id];
+    delete destinosPorSessao[id];
+
+    fs.rmSync("auth_" + id, { recursive: true, force: true });
+
+    return res.json({
+      ok: true,
+      message: "Sessão resetada",
+      id
+    });
+  } catch (e) {
+    return res.status(500).json({ erro: e.message });
+  }
+});
+
+app.post("/conectar", async (req, res) => {
+  const { id } = req.body;
+
+  if (!id) return res.status(400).json({ erro: "ID obrigatório" });
+
+  if (!sessoes[id]) iniciarWhatsApp(id);
+
+  return res.json({
+    ok: true,
+    message: "Sessão iniciada",
+    id
+  });
+});
+
+app.get("/status/:id", (req, res) => {
+  const { id } = req.params;
+
+  res.json({
+    conectado: statusSessao[id] === "open",
+    status: statusSessao[id] || "offline"
+  });
+});
+
+app.get("/qr/:id", (req, res) => {
+  const { id } = req.params;
+
+  if (!qrCodes[id]) {
+    return res.json({
+      status: "loading",
+      qr: null
+    });
+  }
+
+  return res.json({
+    status: "ready",
+    qr: qrCodes[id]
+  });
+});
+
+app.get("/grupos/:id", async (req, res) => {
+  const sock = sessoes[req.params.id];
+
+  if (!sock) return res.status(400).json({ erro: "Sem sessão" });
+
+  if (statusSessao[req.params.id] !== "open") {
+    return res.status(400).json({ erro: "WhatsApp não conectado" });
+  }
+
+  try {
+    const grupos = await sock.groupFetchAllParticipating();
+
+    const lista = Object.entries(grupos).map(([id, g]) => ({
+      id,
+      nome: g.subject || "Grupo sem nome"
+    }));
+
+    return res.json(lista);
+  } catch (e) {
+    return res.status(500).json({ erro: e.message });
+  }
+});
+
+app.post("/destinos/:id", (req, res) => {
+  const { destinos } = req.body;
+
+  if (!Array.isArray(destinos)) {
+    return res.status(400).json({ erro: "destinos deve ser array" });
+  }
+
+  destinosPorSessao[req.params.id] = destinos;
+
+  return res.json({
+    ok: true,
+    destinos
+  });
+});
+
+app.get("/destinos/:id", (req, res) => {
+  return res.json({
+    ok: true,
+    destinos: destinosPorSessao[req.params.id] || []
+  });
+});
+
+app.post("/test-send/:id", async (req, res) => {
+  const { id } = req.params;
+  const sock = sessoes[id];
+  const destinos = destinosPorSessao[id] || [];
+
+  if (!sock) return res.status(400).json({ erro: "Sem sessão" });
+
+  if (statusSessao[id] !== "open") {
+    return res.status(400).json({ erro: "WhatsApp não conectado" });
+  }
+
+  if (!destinos.length) {
+    return res.status(400).json({ erro: "Nenhum destino selecionado" });
+  }
+
+  const mensagem =
+    req.body?.mensagem ||
+    "🧪 TESTE " + new Date().toLocaleTimeString();
+
+  const imagemOriginal = req.body?.imagem;
+  const imagemFinal = corrigirImagemUrl(imagemOriginal);
+
+  const resultados = [];
+
+  for (const destino of destinos) {
+    try {
+      if (imagemFinal) {
+        await sock.sendMessage(destino, {
+          image: { url: imagemFinal },
+          caption: mensagem
+        });
+
+        resultados.push({
+          destino,
+          ok: true,
+          tipo: "imagem_com_legenda",
+          imagemEnviada: imagemFinal
+        });
+      } else {
+        await sock.sendMessage(destino, {
+          text: mensagem
+        });
+
+        resultados.push({
+          destino,
+          ok: true,
+          tipo: "texto"
+        });
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    } catch (e) {
+      resultados.push({
+        destino,
+        ok: false,
+        erro: e.message
+      });
+    }
+  }
+
+  return res.json({
+    ok: true,
+    resultados
+  });
+});
+
+async function iniciarWhatsApp(id) {
+  console.log("🚀 Iniciando sessão:", id);
+
+  statusSessao[id] = "connecting";
+  qrCodes[id] = null;
+  reconectando[id] = false;
+
+  const { state, saveCreds } = await useMultiFileAuthState("auth_" + id);
+  const { version } = await fetchLatestBaileysVersion();
+
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    printQRInTerminal: false,
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
+    browser: ["Chrome", "Desktop", "1.0.0"]
+  });
+
+  sessoes[id] = sock;
+
+  sock.ev.on("creds.update", saveCreds);
+
+  sock.ev.on("connection.update", async (update) => {
+    const { connection, qr, lastDisconnect } = update;
+
+    if (qr) {
+      console.log("🔥 QR RECEBIDO");
+      qrCodes[id] = await qrcode.toDataURL(qr);
+      statusSessao[id] = "qr";
+    }
+
+    if (connection === "open") {
+      console.log("✅ WHATSAPP CONECTADO:", id);
+      statusSessao[id] = "open";
+      qrCodes[id] = null;
+      reconectando[id] = false;
+    }
+
+    if (connection === "close") {
+      const motivo = lastDisconnect?.error?.output?.statusCode;
+
+      console.log("❌ WHATSAPP DESCONECTADO:", id);
+      console.log("Motivo:", motivo);
+
+      qrCodes[id] = null;
+      delete sessoes[id];
+
+      if (motivo === DisconnectReason.loggedOut) {
+        statusSessao[id] = "loggedOut";
+        reconectando[id] = false;
+        return;
+      }
+
+      statusSessao[id] = "reconnecting";
+
+      if (!reconectando[id]) {
+        reconectando[id] = true;
+
+        setTimeout(() => {
+          iniciarWhatsApp(id).catch((e) => {
+            console.error("ERRO AO RECONECTAR:", e);
+            statusSessao[id] = "offline";
+            reconectando[id] = false;
+          });
+        }, 5000);
+      }
+    }
+  });
 }
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("🔥 API ONLINE NA PORTA " + PORT);
+});
