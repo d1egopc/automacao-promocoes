@@ -1104,8 +1104,26 @@ if (temMin && temMax && minNumero !== maxNumero) {
 
 app.post("/importar-produto", async (req, res) => {
   const clienteId = getClienteId(req);
-  const marketplace = String(req.body.marketplace || "").toLowerCase();
-  const { url } = req.body;
+let marketplace = String(req.body.marketplace || "").toLowerCase();
+let { url } = req.body;
+
+url = String(url || "").trim();
+
+if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
+  url = "https://" + url;
+}
+
+const urlLower = url.toLowerCase();
+
+if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
+  marketplace = "amazon";
+} else if (urlLower.includes("mercadolivre.com") || urlLower.includes("meli.la")) {
+  marketplace = "mercadolivre";
+} else if (urlLower.includes("shopee.com") || urlLower.includes("s.shopee")) {
+  marketplace = "shopee";
+} else if (urlLower.includes("aliexpress.com")) {
+  marketplace = "aliexpress";
+}
 
   if (!marketplace || !url) {
     return res.status(400).json({
