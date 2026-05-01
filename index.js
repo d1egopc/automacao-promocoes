@@ -708,7 +708,7 @@ app.post("/importar-produto", async (req, res) => {
     try {
       const produto = await importarAliExpress(url, config);
 
-      if (!produto.titulo || produto.titulo === "Produto AliExpress") {
+      if ((!produto.titulo || produto.titulo === "Produto AliExpress") && !produto.precoAtual) {
         return res.json({
           marketplace: "aliexpress",
           titulo: "Produto importado do AliExpress",
