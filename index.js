@@ -318,13 +318,10 @@ app.post("/integracoes/:marketplace", (req, res) => {
 salvarIntegracoesPersistidas();
 
 return res.json({
-
-  return res.json({
-    ok: true,
-    message: `${marketplace} configurado com sucesso`,
-    marketplace,
-    status: "configurado"
-  });
+  ok: true,
+  message: `${marketplace} configurado com sucesso`,
+  marketplace,
+  status: "configurado"
 });
 
 app.post("/integracoes/:marketplace/test", (req, res) => {
