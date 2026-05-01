@@ -723,7 +723,159 @@ app.post("/importar-produto", async (req, res) => {
           aviso: "Dados não encontrados automaticamente. Preencha manualmente."
         });
       }
+async function importarAliExpress(url, config) {
+  if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
+    url = "https://" + url;
+  }
 
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+      "Accept":
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+      "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+    }
+  });
+
+  const html = await response.text();
+
+  function limparHtml(texto) {
+    if (!texto) return "";
+    return htmlDecode(String(texto).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+  }
+
+  function primeiroMatch(regex) {
+    const match = html.match(regex);
+    return match?.[1] ? limparHtml(match[1]) : "";
+  }
+
+  function todosPrecosDoHtml() {
+    const encontrados = [];
+
+    const regexes = [
+      /R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})/g,
+      /US\s*\$\s*\d+(?:\.\d{2})?/g,
+      /\$\s*\d+(?:\.\d{2})?/g
+    ];
+
+    for (const regex of regexes) {
+      const matches = html.match(regex) || [];
+
+      for (const item of matches) {
+        let valor = String(item)
+          .replace("US", "")
+          .replace("$", "")
+          .replace("R$", "")
+          .trim();
+
+        const precoLimpo = limparPreco(valor);
+        const numero = Number(String(precoLimpo).replace(",", "."));
+
+        if (Number.isFinite(numero) && numero > 0) {
+          encontrados.push({ texto: precoLimpo, numero });
+        }
+      }
+    }
+
+    return encontrados;
+  }
+
+  const titulo =
+    extrairMeta(html, "og:title") ||
+    extrairMeta(html, "twitter:title") ||
+    primeiroMatch(/<h1[^>]*>([\s\S]*?)<\/h1>/i) ||
+    primeiroMatch(/"subject"\s*:\s*"([^"]+)"/i) ||
+    primeiroMatch(/"title"\s*:\s*"([^"]+)"/i) ||
+    "Produto AliExpress";
+
+  let preco =
+    extrairMeta(html, "product:price:amount") ||
+    extrairMeta(html, "og:price:amount") ||
+    primeiroMatch(/"salePrice"\s*:\s*"([^"]+)"/i) ||
+    primeiroMatch(/"formattedPrice"\s*:\s*"([^"]+)"/i) ||
+    primeiroMatch(/"minActivityAmount"\s*:\s*"([^"]+)"/i) ||
+    "";
+
+  preco = limparPreco(htmlDecode(preco));
+
+  const precosEncontrados = todosPrecosDoHtml();
+
+  if (!preco && precosEncontrados.length) {
+    const menorPreco = precosEncontrados
+      .map((p) => p.numero)
+      .filter((n) => n > 1)
+      .sort((a, b) => a - b)[0];
+
+    if (menorPreco) {
+      preco = menorPreco.toFixed(2).replace(".", ",");
+    }
+  }
+
+  let precoAntigo = "";
+
+  if (precosEncontrados.length && preco) {
+    const precoAtualNumero = Number(String(preco).replace(",", "."));
+
+    const maiorPreco = precosEncontrados
+      .map((p) => p.numero)
+      .filter((n) => Number.isFinite(n) && n > precoAtualNumero)
+      .sort((a, b) => b - a)[0];
+
+    if (maiorPreco) {
+      precoAntigo = maiorPreco.toFixed(2).replace(".", ",");
+    }
+  }
+
+  if (!precoAntigo) {
+    const precoNumero = Number(String(preco).replace(",", "."));
+
+    if (Number.isFinite(precoNumero) && precoNumero > 0) {
+      precoAntigo = (precoNumero * 1.25)
+        .toFixed(2)
+        .replace(".", ",");
+    }
+  }
+
+  let imagem =
+    extrairMeta(html, "og:image") ||
+    extrairMeta(html, "twitter:image") ||
+    primeiroMatch(/"imagePath"\s*:\s*"([^"]+)"/i) ||
+    primeiroMatch(/"imageUrl"\s*:\s*"([^"]+)"/i) ||
+    "";
+
+  imagem = htmlDecode(imagem).replace(/\\u002F/g, "/");
+
+  if (imagem && imagem.startsWith("//")) {
+    imagem = "https:" + imagem;
+  }
+
+  const trackingId = config?.credenciais?.trackingId || "";
+
+  let linkAfiliado = url;
+
+  // Por enquanto mantém o link original.
+  // A conversão afiliada real do AliExpress normalmente precisa da API de geração de link.
+  if (trackingId) {
+    linkAfiliado = url;
+  }
+
+  return {
+    marketplace: "aliexpress",
+    titulo: htmlDecode(titulo)
+      .replace(" | AliExpress", "")
+      .replace("- AliExpress", "")
+      .trim(),
+    precoAntigo,
+    precoAtual: preco,
+    cupom: "",
+    linkOriginal: url,
+    linkAfiliado,
+    imagem: corrigirImagemUrl(imagem) || imagem,
+    categoria: "AliExpress"
+  };
+}
       return res.json(produto);
     } catch (e) {
       console.error("ERRO MERCADO LIVRE:", e);
