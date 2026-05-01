@@ -764,22 +764,60 @@ async function importarAliExpress(url, config) {
     url = "https://" + url;
   }
 
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-      "Accept":
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-      "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
-    }
-  });
-
-  const html = await response.text();
-
   function limparHtml(texto) {
     if (!texto) return "";
     return htmlDecode(String(texto).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+  }
+
+  function extrairPrecosDaUrlAliExpress(urlOriginal) {
+    try {
+      const decoded = decodeURIComponent(urlOriginal);
+
+      // Exemplo comum:
+      // BRL!68.88!28.93
+      const matchBRL = decoded.match(/BRL!([\d.]+)!([\d.]+)/i);
+
+      if (matchBRL) {
+        return {
+          precoAntigo: limparPreco(matchBRL[1]),
+          precoAtual: limparPreco(matchBRL[2])
+        };
+      }
+
+      // Fallback genérico dentro do pdp_npi
+      const matchPdp = decoded.match(/pdp_npi=.*?BRL.*?!([\d.]+)!([\d.]+)/i);
+
+      if (matchPdp) {
+        return {
+          precoAntigo: limparPreco(matchPdp[1]),
+          precoAtual: limparPreco(matchPdp[2])
+        };
+      }
+    } catch {}
+
+    return {
+      precoAntigo: "",
+      precoAtual: ""
+    };
+  }
+
+  let html = "";
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+      }
+    });
+
+    html = await response.text();
+  } catch (e) {
+    console.error("ALIEXPRESS HTML ERRO:", e.message);
   }
 
   function primeiroMatch(regex) {
@@ -787,36 +825,7 @@ async function importarAliExpress(url, config) {
     return match?.[1] ? limparHtml(match[1]) : "";
   }
 
-  function todosPrecosDoHtml() {
-    const encontrados = [];
-
-    const regexes = [
-      /R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})/g,
-      /US\s*\$\s*\d+(?:\.\d{2})?/g,
-      /\$\s*\d+(?:\.\d{2})?/g
-    ];
-
-    for (const regex of regexes) {
-      const matches = html.match(regex) || [];
-
-      for (const item of matches) {
-        let valor = String(item)
-          .replace("US", "")
-          .replace("$", "")
-          .replace("R$", "")
-          .trim();
-
-        const precoLimpo = limparPreco(valor);
-        const numero = Number(String(precoLimpo).replace(",", "."));
-
-        if (Number.isFinite(numero) && numero > 0) {
-          encontrados.push({ texto: precoLimpo, numero });
-        }
-      }
-    }
-
-    return encontrados;
-  }
+  const precosUrl = extrairPrecosDaUrlAliExpress(url);
 
   const titulo =
     extrairMeta(html, "og:title") ||
@@ -824,9 +833,10 @@ async function importarAliExpress(url, config) {
     primeiroMatch(/<h1[^>]*>([\s\S]*?)<\/h1>/i) ||
     primeiroMatch(/"subject"\s*:\s*"([^"]+)"/i) ||
     primeiroMatch(/"title"\s*:\s*"([^"]+)"/i) ||
-    "Produto AliExpress";
+    "Produto AliExpress importado";
 
   let preco =
+    precosUrl.precoAtual ||
     extrairMeta(html, "product:price:amount") ||
     extrairMeta(html, "og:price:amount") ||
     primeiroMatch(/"salePrice"\s*:\s*"([^"]+)"/i) ||
@@ -836,35 +846,11 @@ async function importarAliExpress(url, config) {
 
   preco = limparPreco(htmlDecode(preco));
 
-  const precosEncontrados = todosPrecosDoHtml();
+  let precoAntigo =
+    precosUrl.precoAntigo ||
+    "";
 
-  if (!preco && precosEncontrados.length) {
-    const menorPreco = precosEncontrados
-      .map((p) => p.numero)
-      .filter((n) => n > 1)
-      .sort((a, b) => a - b)[0];
-
-    if (menorPreco) {
-      preco = menorPreco.toFixed(2).replace(".", ",");
-    }
-  }
-
-  let precoAntigo = "";
-
-  if (precosEncontrados.length && preco) {
-    const precoAtualNumero = Number(String(preco).replace(",", "."));
-
-    const maiorPreco = precosEncontrados
-      .map((p) => p.numero)
-      .filter((n) => Number.isFinite(n) && n > precoAtualNumero)
-      .sort((a, b) => b - a)[0];
-
-    if (maiorPreco) {
-      precoAntigo = maiorPreco.toFixed(2).replace(".", ",");
-    }
-  }
-
-  if (!precoAntigo) {
+  if (!precoAntigo && preco) {
     const precoNumero = Number(String(preco).replace(",", "."));
 
     if (Number.isFinite(precoNumero) && precoNumero > 0) {
@@ -892,7 +878,7 @@ async function importarAliExpress(url, config) {
   let linkAfiliado = url;
 
   // Por enquanto mantém o link original.
-  // A conversão afiliada real do AliExpress normalmente precisa da API de geração de link.
+  // Depois ligamos a geração oficial do link afiliado AliExpress via API.
   if (trackingId) {
     linkAfiliado = url;
   }
