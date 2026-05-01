@@ -462,6 +462,10 @@ async function importarMercadoLivre(url, config) {
 }
 
 async function importarAmazon(url, config) {
+  if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
+    url = "https://" + url;
+  }
+
   const cookies = config?.credenciais?.cookies || "";
 
   const response = await fetch(url, {
