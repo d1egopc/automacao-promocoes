@@ -651,17 +651,17 @@ async function importarAmazon(url, config) {
 
   const { appId, secret } = config.credenciais || {};
 
-  function limparHtml(texto) {
-    if (!texto) return "";
-    return htmlDecode(String(texto).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
-  }
-
   function normalizarPrecoShopee(valor) {
     if (!valor) return "";
 
-    const texto = String(valor).trim();
+    let texto = String(valor).trim();
 
-    // Shopee às vezes retorna número grande tipo 5199000
+    if (texto.includes(",")) return limparPreco(texto);
+
+    if (/^\d+\.\d{2}$/.test(texto)) {
+      return Number(texto).toFixed(2).replace(".", ",");
+    }
+
     if (/^\d+$/.test(texto)) {
       let numero = Number(texto);
 
@@ -675,6 +675,48 @@ async function importarAmazon(url, config) {
     }
 
     return limparPreco(texto);
+  }
+
+  function extrairIdsShopee(link) {
+    const texto = String(link || "");
+
+    const match1 = texto.match(/-i\.(\d+)\.(\d+)/i);
+    if (match1) {
+      return {
+        shopId: match1[1],
+        itemId: match1[2]
+      };
+    }
+
+    const match2 = texto.match(/i\.(\d+)\.(\d+)/i);
+    if (match2) {
+      return {
+        shopId: match2[1],
+        itemId: match2[2]
+      };
+    }
+
+    return {
+      shopId: "",
+      itemId: ""
+    };
+  }
+
+  function gerarKeywordShopee(link) {
+    try {
+      const semQuery = String(link).split("?")[0];
+      const parte = decodeURIComponent(semQuery.split("/").pop() || "");
+      const antesDoId = parte.split("-i.")[0] || parte;
+
+      return antesDoId
+        .replace(/-/g, " ")
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 80);
+    } catch {
+      return "";
+    }
   }
 
   async function chamarShopeeGraphQL(bodyPayload) {
@@ -707,48 +749,98 @@ async function importarAmazon(url, config) {
     return data;
   }
 
-  let titulo = "";
-  let precoAtual = "";
-  let precoAntigo = "";
-  let imagem = "";
-  let linkAfiliado = url;
+  const ids = extrairIdsShopee(url);
+  const keyword = gerarKeywordShopee(url);
 
-  // 1) Tenta API Shopee
-  try {
-    const urlGraph = JSON.stringify(url);
+  let produto = null;
 
-    const bodyPayload = {
-      query: `
-        query {
-          productOfferV2(url: ${urlGraph}) {
-            title
-            price
-            priceBeforeDiscount
-            imageUrl
-            productLink
-            offerLink
+  // 1) Tenta buscar pelo itemId do próprio link
+  if (ids.itemId) {
+    try {
+      const bodyPayload = {
+        query: `
+          query {
+            productOfferV2(
+              itemId: ${ids.itemId},
+              page: 1,
+              limit: 10
+            ) {
+              nodes {
+                itemId
+                productName
+                productLink
+                offerLink
+                imageUrl
+                priceMin
+                priceMax
+                priceDiscountRate
+                sales
+                ratingStar
+                commissionRate
+                shopId
+                shopName
+              }
+            }
           }
-        }
-      `
-    };
+        `
+      };
 
-    const data = await chamarShopeeGraphQL(bodyPayload);
+      const data = await chamarShopeeGraphQL(bodyPayload);
+      const nodes = data?.data?.productOfferV2?.nodes || [];
 
-    const produto = data?.data?.productOfferV2;
-
-    if (produto) {
-      titulo = produto.title || "";
-      precoAtual = normalizarPrecoShopee(produto.price || "");
-      precoAntigo = normalizarPrecoShopee(produto.priceBeforeDiscount || "");
-      imagem = produto.imageUrl || "";
-      linkAfiliado = produto.productLink || produto.offerLink || url;
+      produto =
+        nodes.find((p) => String(p.itemId) === String(ids.itemId)) ||
+        nodes[0] ||
+        null;
+    } catch (e) {
+      console.error("SHOPEE ITEMID ERRO:", e.message);
     }
-  } catch (e) {
-    console.error("SHOPEE API ERRO:", e.message);
   }
 
-  // 2) Fallback HTML se a API não devolver completo
-  if (!titulo || !precoAtual || !imagem) {
+  // 2) Se não achou, tenta por keyword do link
+  if (!produto && keyword) {
+    try {
+      const bodyPayload = {
+        query: `
+          query {
+            productOfferV2(
+              keyword: ${JSON.stringify(keyword)},
+              listType: 0,
+              sortType: 2,
+              page: 1,
+              limit: 20
+            ) {
+              nodes {
+                itemId
+                productName
+                productLink
+                offerLink
+                imageUrl
+                priceMin
+                priceMax
+                priceDiscountRate
+                sales
+                ratingStar
+                commissionRate
+                shopId
+                shopName
+              }
+            }
+          }
+        `
+      };
+
+      const data = await chamarShopeeGraphQL(bodyPayload);
+      const nodes = data?.data?.productOfferV2?.nodes || [];
+
+      produto = nodes[0] || null;
+    } catch (e) {
+      console.error("SHOPEE KEYWORD ERRO:", e.message);
+    }
+  }
+
+  // 3) Se a API não encontrou, fallback simples pelo HTML
+  if (!produto) {
     try {
       const response = await fetch(url, {
         method: "GET",
@@ -763,51 +855,57 @@ async function importarAmazon(url, config) {
 
       const html = await response.text();
 
-      titulo =
-        titulo ||
+      const titulo =
         extrairMeta(html, "og:title") ||
         extrairMeta(html, "twitter:title") ||
-        limparHtml(html.match(/"name"\s*:\s*"([^"]+)"/i)?.[1] || "") ||
+        keyword ||
         "Produto Shopee";
 
-      imagem =
-        imagem ||
+      const imagem =
         extrairMeta(html, "og:image") ||
         extrairMeta(html, "twitter:image") ||
-        limparHtml(html.match(/"image"\s*:\s*"([^"]+)"/i)?.[1] || "");
-
-      let precoHtml =
-        limparHtml(html.match(/"price"\s*:\s*"?(\d+)"?/i)?.[1] || "") ||
-        limparHtml(html.match(/"price_min"\s*:\s*"?(\d+)"?/i)?.[1] || "") ||
         "";
 
-      let precoAntigoHtml =
-        limparHtml(html.match(/"price_before_discount"\s*:\s*"?(\d+)"?/i)?.[1] || "") ||
-        "";
-
-      if (!precoAtual && precoHtml) {
-        precoAtual = normalizarPrecoShopee(precoHtml);
-      }
-
-      if (!precoAntigo && precoAntigoHtml) {
-        precoAntigo = normalizarPrecoShopee(precoAntigoHtml);
-      }
+      return {
+        marketplace: "shopee",
+        titulo: htmlDecode(titulo)
+          .replace(" | Shopee Brasil", "")
+          .replace(" | Shopee", "")
+          .trim(),
+        precoAntigo: "",
+        precoAtual: "",
+        cupom: "",
+        linkOriginal: url,
+        linkAfiliado: url,
+        imagem: corrigirImagemUrl(imagem) || imagem,
+        categoria: "Shopee"
+      };
     } catch (e) {
       console.error("SHOPEE HTML ERRO:", e.message);
     }
   }
 
-  // 3) Se não tiver preço antigo, cria automático
-  if (!precoAntigo && precoAtual) {
+  const precoAtual =
+    normalizarPrecoShopee(produto?.priceMin || produto?.priceMax || "");
+
+  let precoAntigo = "";
+
+  if (precoAtual) {
+    const desconto = Number(produto?.priceDiscountRate || 0);
     const precoNumero = Number(String(precoAtual).replace(",", "."));
 
-    if (Number.isFinite(precoNumero) && precoNumero > 0) {
+    if (Number.isFinite(precoNumero) && desconto > 0 && desconto < 95) {
+      precoAntigo = (precoNumero / (1 - desconto / 100))
+        .toFixed(2)
+        .replace(".", ",");
+    } else if (Number.isFinite(precoNumero)) {
       precoAntigo = (precoNumero * 1.25)
         .toFixed(2)
         .replace(".", ",");
     }
   }
 
+  let imagem = produto?.imageUrl || "";
   imagem = htmlDecode(imagem).replace(/\\u002F/g, "/");
 
   if (imagem && imagem.startsWith("//")) {
@@ -816,7 +914,7 @@ async function importarAmazon(url, config) {
 
   return {
     marketplace: "shopee",
-    titulo: htmlDecode(titulo)
+    titulo: htmlDecode(produto?.productName || keyword || "Produto Shopee")
       .replace(" | Shopee Brasil", "")
       .replace(" | Shopee", "")
       .trim(),
@@ -824,7 +922,7 @@ async function importarAmazon(url, config) {
     precoAtual,
     cupom: "",
     linkOriginal: url,
-    linkAfiliado,
+    linkAfiliado: produto?.offerLink || produto?.productLink || url,
     imagem: corrigirImagemUrl(imagem) || imagem,
     categoria: "Shopee"
   };
