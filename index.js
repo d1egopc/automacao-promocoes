@@ -148,10 +148,10 @@ const marketplaceRules = {
     allowed: ["appKey", "secret", "trackingId"]
   },
   awin: {
-    nome: "Awin",
-    required: ["appId", "secret"],
-    allowed: ["appId", "secret"]
-  }
+  nome: "Awin",
+  required: ["publisherId", "apiToken", "loja"],
+  allowed: ["publisherId", "apiToken", "loja"]
+}
 };
 
 function limparCredencial(config, allowed) {
