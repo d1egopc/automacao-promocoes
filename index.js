@@ -704,7 +704,43 @@ app.post("/importar-produto", async (req, res) => {
       });
     }
   }
+  if (marketplace === "aliexpress") {
+    try {
+      const produto = await importarAliExpress(url, config);
 
+      if (!produto.titulo || produto.titulo === "Produto AliExpress") {
+        return res.json({
+          marketplace: "aliexpress",
+          titulo: "Produto importado do AliExpress",
+          precoAntigo: "",
+          precoAtual: "",
+          cupom: "",
+          linkOriginal: url,
+          linkAfiliado: url,
+          imagem: "",
+          categoria: "AliExpress",
+          aviso: "Dados não encontrados automaticamente. Preencha manualmente."
+        });
+      }
+
+      return res.json(produto);
+    } catch (e) {
+      console.error("ERRO ALIEXPRESS:", e);
+
+      return res.json({
+        marketplace: "aliexpress",
+        titulo: "Produto importado do AliExpress",
+        precoAntigo: "",
+        precoAtual: "",
+        cupom: "",
+        linkOriginal: url,
+        linkAfiliado: url,
+        imagem: "",
+        categoria: "AliExpress",
+        aviso: "Erro ao consultar AliExpress. Preencha manualmente."
+      });
+    }
+  }
   if (marketplace === "mercadolivre") {
     try {
       const produto = await importarMercadoLivre(url, config);
