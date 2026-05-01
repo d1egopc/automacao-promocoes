@@ -771,27 +771,29 @@ async function importarAliExpress(url, config) {
 
   function extrairPrecosDaUrlAliExpress(urlOriginal) {
     try {
-      const decoded = decodeURIComponent(urlOriginal);
+      const raw = String(urlOriginal || "");
+      const decoded = decodeURIComponent(raw);
 
-      // Exemplo comum:
-      // BRL!68.88!28.93
-      const matchBRL = decoded.match(/BRL!([\d.]+)!([\d.]+)/i);
+      const textos = [raw, decoded];
 
-      if (matchBRL) {
-        return {
-          precoAntigo: limparPreco(matchBRL[1]),
-          precoAtual: limparPreco(matchBRL[2])
-        };
-      }
+      for (const texto of textos) {
+        const match1 = texto.match(/BRL(?:%21|!)+([\d.]+)(?:%21|!)+([\d.]+)/i);
 
-      // Fallback genérico dentro do pdp_npi
-      const matchPdp = decoded.match(/pdp_npi=.*?BRL.*?!([\d.]+)!([\d.]+)/i);
+        if (match1) {
+          return {
+            precoAntigo: limparPreco(match1[1]),
+            precoAtual: limparPreco(match1[2])
+          };
+        }
 
-      if (matchPdp) {
-        return {
-          precoAntigo: limparPreco(matchPdp[1]),
-          precoAtual: limparPreco(matchPdp[2])
-        };
+        const match2 = texto.match(/dis(?:%21|!)+BRL(?:%21|!)+([\d.]+)(?:%21|!)+([\d.]+)/i);
+
+        if (match2) {
+          return {
+            precoAntigo: limparPreco(match2[1]),
+            precoAtual: limparPreco(match2[2])
+          };
+        }
       }
     } catch {}
 
@@ -833,7 +835,7 @@ async function importarAliExpress(url, config) {
     primeiroMatch(/<h1[^>]*>([\s\S]*?)<\/h1>/i) ||
     primeiroMatch(/"subject"\s*:\s*"([^"]+)"/i) ||
     primeiroMatch(/"title"\s*:\s*"([^"]+)"/i) ||
-    "Produto AliExpress importado";
+    "Produto AliExpress";
 
   let preco =
     precosUrl.precoAtual ||
@@ -841,14 +843,11 @@ async function importarAliExpress(url, config) {
     extrairMeta(html, "og:price:amount") ||
     primeiroMatch(/"salePrice"\s*:\s*"([^"]+)"/i) ||
     primeiroMatch(/"formattedPrice"\s*:\s*"([^"]+)"/i) ||
-    primeiroMatch(/"minActivityAmount"\s*:\s*"([^"]+)"/i) ||
     "";
 
   preco = limparPreco(htmlDecode(preco));
 
-  let precoAntigo =
-    precosUrl.precoAntigo ||
-    "";
+  let precoAntigo = precosUrl.precoAntigo || "";
 
   if (!precoAntigo && preco) {
     const precoNumero = Number(String(preco).replace(",", "."));
@@ -873,16 +872,6 @@ async function importarAliExpress(url, config) {
     imagem = "https:" + imagem;
   }
 
-  const trackingId = config?.credenciais?.trackingId || "";
-
-  let linkAfiliado = url;
-
-  // Por enquanto mantém o link original.
-  // Depois ligamos a geração oficial do link afiliado AliExpress via API.
-  if (trackingId) {
-    linkAfiliado = url;
-  }
-
   return {
     marketplace: "aliexpress",
     titulo: htmlDecode(titulo)
@@ -893,12 +882,11 @@ async function importarAliExpress(url, config) {
     precoAtual: preco,
     cupom: "",
     linkOriginal: url,
-    linkAfiliado,
+    linkAfiliado: url,
     imagem: corrigirImagemUrl(imagem) || imagem,
     categoria: "AliExpress"
   };
-}
-      return res.json(produto);
+}      return res.json(produto);
     } catch (e) {
       console.error("ERRO MERCADO LIVRE:", e);
 
