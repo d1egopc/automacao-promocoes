@@ -42,7 +42,13 @@ async function processarFila() {
       return;
     }
 
-    const destinosBrutos = oferta.destinos || oferta.grupos || [oferta.destino || oferta.grupoDestino];
+    const idSessao = oferta.sessaoId || Object.keys(sessoes)[0];
+
+const destinosBrutos =
+  oferta.destinos ||
+  oferta.grupos ||
+  destinosPorSessao[idSessao] ||
+  [oferta.destino || oferta.grupoDestino];
 
 const destinos = destinosBrutos
   .map((d) => {
