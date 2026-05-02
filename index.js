@@ -94,9 +94,9 @@ async function processarFila() {
     console.log("❌ Erro ao enviar", erro);
     oferta.status = "erro";
   }
-  }
+ 
+ }
 
-}
 const {
   default: makeWASocket,
   useMultiFileAuthState,
