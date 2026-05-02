@@ -45,7 +45,14 @@ const horarioInicio = 8;
 const horarioFim = 22;
 
 function podeRodarAgora() {
-  const hora = new Date().getHours();
+  const horaBrasil = new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit",
+    hour12: false
+  });
+
+  const hora = Number(horaBrasil);
+
   return hora >= horarioInicio && hora <= horarioFim;
 }
 async function processarFila() {
