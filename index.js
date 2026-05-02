@@ -1,3 +1,7 @@
+let config = {
+  intervaloMinutos: 1
+};
+
 require("dotenv").config();
 
 let fila = [];
@@ -155,6 +159,20 @@ app.post("/fila", (req, res) => {
 
 app.get("/fila", (req, res) => {
   res.json(fila);
+});
+
+app.post("/config", (req, res) => {
+  const intervalo = Number(req.body.intervalo);
+
+  if (!intervalo || intervalo <= 0) {
+    return res.status(400).send("Intervalo inválido");
+  }
+
+  config.intervaloMinutos = intervalo;
+
+  console.log("⚙️ Novo intervalo:", intervalo, "minutos");
+
+  res.send("Config atualizada");
 });
 
 let sessoes = {};
@@ -1652,4 +1670,6 @@ app.listen(PORT, () => {
   console.log("🔥 API ONLINE NA PORTA " + PORT);
 });
 
-setInterval(processarFila, 30 * 1000); // 30 segundos
+setInterval(() => {
+  processarFila();
+}, config.intervaloMinutos * 60 * 1000); // intervalo em minutos
