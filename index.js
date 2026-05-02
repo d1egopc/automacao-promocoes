@@ -42,39 +42,21 @@ async function processarFila() {
       return;
     }
 
-const destinosBrutos =
-  oferta.destinos ||
-  oferta.grupos ||
-  destinosPorSessao[idSessao] ||
-  [oferta.destino || oferta.grupoDestino];
+    const destinosBrutos =
+      oferta.destinos ||
+      oferta.grupos ||
+      destinosPorSessao[idSessao] ||
+      [oferta.destino || oferta.grupoDestino];
 
-const destinos = destinosBrutos
-  .map((d) => {
-    if (typeof d === "string") return d;
-    if (d?.id) return d.id;
-    if (d?.value) return d.value;
-    if (d?.jid) return d.jid;
-    return null;
-  })
-  .filter(Boolean);
-console.log("🎯 Destinos finais:", destinos);
-
-for (const destino of destinos) {
-  if (!destino) continue;
-
-  if (oferta.imagem) {
-    await sock.sendMessage(destino, {
-      image: { url: corrigirImagemUrl(oferta.imagem) || oferta.imagem },
-      caption: mensagem
-    });
-  } else {
-    await sock.sendMessage(destino, {
-      text: mensagem
-    });
-  }
-
-  await new Promise((resolve) => setTimeout(resolve, 3000));
-}
+    const destinos = destinosBrutos
+      .map((d) => {
+        if (typeof d === "string") return d;
+        if (d?.id) return d.id;
+        if (d?.value) return d.value;
+        if (d?.jid) return d.jid;
+        return null;
+      })
+      .filter(Boolean);
 
     const mensagem = `🔥 OFERTA
 
@@ -84,6 +66,8 @@ for (const destino of destinos) {
 👉 ${oferta.link || oferta.linkAfiliado}
 
 🚀 Corre antes que acabe!`;
+
+    console.log("🎯 Destinos finais:", destinos);
 
     for (const destino of destinos) {
       if (!destino) continue;
@@ -109,6 +93,7 @@ for (const destino of destinos) {
   } catch (erro) {
     console.log("❌ Erro ao enviar", erro);
     oferta.status = "erro";
+  }
   }
 
 }
