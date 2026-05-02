@@ -126,6 +126,10 @@ app.post("/fila", (req, res) => {
   res.send("OK");
 });
 
+app.get("/fila", (req, res) => {
+  res.json(fila);
+});
+
 let sessoes = {};
 let qrCodes = {};
 let statusSessao = {};
