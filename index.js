@@ -168,6 +168,22 @@ app.get("/fila", (req, res) => {
   res.json(fila);
 });
 
+app.delete("/fila/:index", (req, res) => {
+  const index = Number(req.params.index);
+
+  if (isNaN(index) || index < 0 || index >= fila.length) {
+    return res.status(400).send("Índice inválido");
+  }
+
+  const removido = fila.splice(index, 1);
+
+  salvarFila();
+
+  console.log("🗑️ Removido da fila:", removido[0]?.nome || removido[0]?.titulo);
+
+  res.send("Removido com sucesso");
+});
+
 app.post("/config", (req, res) => {
   const intervalo = Number(req.body.intervalo);
 
