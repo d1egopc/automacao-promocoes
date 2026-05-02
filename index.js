@@ -2,6 +2,30 @@ require("dotenv").config();
 
 let fila = [];
 
+const FILA_FILE = "fila.json";
+
+function salvarFila() {
+  try {
+    fs.writeFileSync(FILA_FILE, JSON.stringify(fila, null, 2));
+  } catch (e) {
+    console.error("❌ ERRO AO SALVAR FILA:", e.message);
+  }
+}
+
+function carregarFila() {
+  try {
+    if (fs.existsSync(FILA_FILE)) {
+      const data = fs.readFileSync(FILA_FILE, "utf8");
+      if (data) {
+        fila = JSON.parse(data);
+        console.log("✅ Fila carregada do arquivo");
+      }
+    }
+  } catch (e) {
+    console.error("❌ ERRO AO CARREGAR FILA:", e.message);
+  }
+}
+
 const fs = require("fs");
 const crypto = require("crypto");
 const express = require("express");
@@ -88,11 +112,13 @@ async function processarFila() {
 
     oferta.status = "enviado";
     oferta.dataEnvio = new Date();
+                     salvarFila();
 
     console.log("✅ Oferta enviada automaticamente");
   } catch (erro) {
     console.log("❌ Erro ao enviar", erro);
     oferta.status = "erro";
+             salvarFila();
   }
  
  }
@@ -120,6 +146,7 @@ app.post("/fila", (req, res) => {
   oferta.status = "pendente";
 
   fila.push(oferta);
+       salvarFila();
 
   console.log("📥 Oferta adicionada na fila:", oferta.nome);
 
@@ -183,6 +210,7 @@ function salvarIntegracoesPersistidas() {
 }
 
 carregarIntegracoesPersistidas();
+carregarFila();
 const ADMIN_USER = "admin";
 const ADMIN_PASS_HASH = bcrypt.hashSync("123456", 10);
 const JWT_SECRET = process.env.JWT_SECRET || "segredo";
