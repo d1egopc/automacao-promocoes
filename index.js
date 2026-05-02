@@ -9,7 +9,41 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const app = express(); // 👈 MUITO IMPORTANTE ter isso
 
+const horarioInicio = 8;
+const horarioFim = 22;
+
+function podeRodarAgora() {
+  const hora = new Date().getHours();
+  return hora >= horarioInicio && hora <= horarioFim;
+}
+
+async function processarFila() {
+  if (!podeRodarAgora()) {
+    console.log("⏸️ Fora do horário");
+    return;
+  }
+
+  const oferta = fila.find(o => o.status === "pendente");
+
+  if (!oferta) {
+    console.log("📭 Nenhuma oferta pendente");
+    return;
+  }
+
+  try {
+    await enviarParaGrupo(oferta);
+
+    oferta.status = "enviado";
+    oferta.dataEnvio = new Date();
+
+    console.log("✅ Oferta enviada automaticamente");
+  } catch (erro) {
+    console.log("❌ Erro ao enviar", erro);
+    oferta.status = "erro";
+  }
+}
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -1521,3 +1555,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("🔥 API ONLINE NA PORTA " + PORT);
 });
+
+setInterval(processarFila, 30 * 1000); // 30 segundos
