@@ -42,8 +42,6 @@ async function processarFila() {
       return;
     }
 
-    const idSessao = oferta.sessaoId || Object.keys(sessoes)[0];
-
 const destinosBrutos =
   oferta.destinos ||
   oferta.grupos ||
