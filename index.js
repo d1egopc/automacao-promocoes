@@ -20,7 +20,6 @@ function podeRodarAgora() {
   const hora = new Date().getHours();
   return hora >= horarioInicio && hora <= horarioFim;
 }
-
 async function processarFila() {
   if (!podeRodarAgora()) {
     console.log("⏸️ Fora do horário");
@@ -35,7 +34,41 @@ async function processarFila() {
   }
 
   try {
-    await enviarParaGrupo(oferta);
+    const idSessao = oferta.sessaoId || oferta.id || Object.keys(sessoes)[0];
+    const sock = sessoes[idSessao];
+
+    if (!sock) {
+      console.log("❌ Nenhuma sessão WhatsApp conectada");
+      return;
+    }
+
+    const destinos = oferta.destinos || oferta.grupos || [oferta.destino || oferta.grupoDestino];
+
+    const mensagem = `🔥 OFERTA
+
+🛍️ ${oferta.nome || oferta.titulo}
+💰 R$ ${oferta.preco || oferta.precoAtual}
+
+👉 ${oferta.link || oferta.linkAfiliado}
+
+🚀 Corre antes que acabe!`;
+
+    for (const destino of destinos) {
+      if (!destino) continue;
+
+      if (oferta.imagem) {
+        await sock.sendMessage(destino, {
+          image: { url: corrigirImagemUrl(oferta.imagem) || oferta.imagem },
+          caption: mensagem
+        });
+      } else {
+        await sock.sendMessage(destino, {
+          text: mensagem
+        });
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
 
     oferta.status = "enviado";
     oferta.dataEnvio = new Date();
@@ -45,6 +78,7 @@ async function processarFila() {
     console.log("❌ Erro ao enviar", erro);
     oferta.status = "erro";
   }
+}
 }
 const {
   default: makeWASocket,
