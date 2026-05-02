@@ -63,6 +63,18 @@ app.use(rateLimit({
   max: 300
 }));
 
+app.post("/fila", (req, res) => {
+  const oferta = req.body;
+
+  oferta.status = "pendente";
+
+  fila.push(oferta);
+
+  console.log("📥 Oferta adicionada na fila:", oferta.nome);
+
+  res.send("OK");
+});
+
 let sessoes = {};
 let qrCodes = {};
 let statusSessao = {};
