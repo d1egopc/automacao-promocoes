@@ -42,7 +42,35 @@ async function processarFila() {
       return;
     }
 
-    const destinos = oferta.destinos || oferta.grupos || [oferta.destino || oferta.grupoDestino];
+    const destinosBrutos = oferta.destinos || oferta.grupos || [oferta.destino || oferta.grupoDestino];
+
+const destinos = destinosBrutos
+  .map((d) => {
+    if (typeof d === "string") return d;
+    if (d?.id) return d.id;
+    if (d?.value) return d.value;
+    if (d?.jid) return d.jid;
+    return null;
+  })
+  .filter(Boolean);
+console.log("🎯 Destinos finais:", destinos);
+
+for (const destino of destinos) {
+  if (!destino) continue;
+
+  if (oferta.imagem) {
+    await sock.sendMessage(destino, {
+      image: { url: corrigirImagemUrl(oferta.imagem) || oferta.imagem },
+      caption: mensagem
+    });
+  } else {
+    await sock.sendMessage(destino, {
+      text: mensagem
+    });
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+}
 
     const mensagem = `🔥 OFERTA
 
