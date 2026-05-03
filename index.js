@@ -1,4 +1,4 @@
-1
+
 let config = {
   intervaloMinutos: 1
 };
