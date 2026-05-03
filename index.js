@@ -1790,45 +1790,27 @@ async function iniciarWhatsApp(id) {
 
 async function farejarMercadoLivre() {
   try {
-    console.log("🐶 Farejando ofertas ML...");
+    console.log("🐶 Farejando ofertas ML (API)...");
 
-    const busca = "oferta"; // depois deixamos dinâmico
+    const busca = "oferta";
 
-    const url = `https://lista.mercadolivre.com.br/${encodeURIComponent(busca)}`;
+    const url = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(busca)}`;
 
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0"
-      }
-    });
+    const response = await fetch(url);
+    const data = await response.json();
 
-    const html = await response.text();
+    const produtos = data.results || [];
 
-  const links = [...html.matchAll(/https:\/\/produto\.mercadolivre\.com\.br\/[^\s"]+/g)]
-  .map(m => m[0])
-  .slice(0, 5);
+    console.log("🔎 Produtos encontrados:", produtos.length);
 
-    console.log("🔎 Produtos encontrados:", links.length);
-
-    for (const link of links) {
+    for (const item of produtos.slice(0, 5)) {
       try {
-        const produto = await importarMercadoLivre(link, {
-          credenciais: integracoesPorCliente["admin"]?.mercadolivre?.credenciais
-        });
-
-        if (!produto.precoAtual) continue;
-
-        const precoNumero = Number(
-          String(produto.precoAtual).replace(",", ".")
-        );
-
-        const precoAntigoNumero = Number(
-          String(produto.precoAntigo || "").replace(",", ".")
-        );
+        const preco = item.price;
+        const precoAntigo = item.original_price || 0;
 
         const desconto =
-          precoAntigoNumero > precoNumero
-            ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
+          precoAntigo > preco
+            ? ((precoAntigo - preco) / precoAntigo) * 100
             : 0;
 
         if (desconto < 10) {
@@ -1837,10 +1819,10 @@ async function farejarMercadoLivre() {
         }
 
         const novaOferta = {
-          nome: produto.titulo,
-          preco: produto.precoAtual,
-          link: produto.linkAfiliado,
-          imagem: produto.imagem,
+          nome: item.title,
+          preco: preco.toFixed(2).replace(".", ","),
+          link: item.permalink,
+          imagem: item.thumbnail,
           status: "pendente"
         };
 
@@ -1861,6 +1843,7 @@ async function farejarMercadoLivre() {
     console.log("❌ erro farejador", e.message);
   }
 }
+
 
 const PORT = process.env.PORT || 3000;
 
