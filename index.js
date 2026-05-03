@@ -1797,9 +1797,9 @@ async function farejarMercadoLivre() {
         id: "eletronicos",
         nome: "Eletrônicos",
         buscas: [
-          "tv smart 50 polegadas promoção",
+          "tv 50 polegadas",
           "fone bluetooth",
-          "smartwatch desconto",
+          "smartwatch",
           "caixa de som bluetooth"
         ]
       },
@@ -1807,10 +1807,10 @@ async function farejarMercadoLivre() {
         id: "eletrodomesticos",
         nome: "Eletrodomésticos",
         buscas: [
-          "air fryer promoção",
-          "micro ondas promoção",
-          "geladeira promoção",
-          "liquidificador desconto"
+          "air fryer",
+          "micro ondas",
+          "geladeira",
+          "liquidificador"
         ]
       },
       {
@@ -1860,7 +1860,17 @@ async function farejarMercadoLivre() {
         try {
           const url = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(termo)}&limit=5`;
 
-          const response = await fetch(url);
+          const response = await fetch(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json",
+            "Accept-Language": "pt-BR,pt;q=0.9"
+           }
+          });
+
+          console.log("URL:", url);
+          console.log("STATUS:", response.status);
+
           const data = await response.json();
 
           const produtos = data.results || [];
