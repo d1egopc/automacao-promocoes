@@ -762,7 +762,24 @@ async function gerarLinkAfiliadoMercadoLivre(url, config) {
   preco = limparPreco(preco);
 
   let precoNumero = Number(String(preco).replace(",", "."));
-let precoAntigo = "";
+  let precoAntigo = "";
+  
+  const descontoMatch = html.match(/(\d{1,2})\s*%\s*OFF/i);
+const descontoReal = descontoMatch ? Number(descontoMatch[1]) : 0;
+
+if (
+  Number.isFinite(precoNumero) &&
+  precoNumero > 0 &&
+  descontoReal > 0 &&
+  descontoReal < 90
+) {
+  precoAntigo = (precoNumero / (1 - descontoReal / 100))
+    .toFixed(2)
+    .replace(".", ",");
+
+  console.log("🏷️ Desconto real ML detectado:", descontoReal + "%");
+}
+
 
     const linkAfiliadoGerado = await gerarLinkAfiliadoMercadoLivre(url, config);
 
