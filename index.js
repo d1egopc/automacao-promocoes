@@ -1813,10 +1813,10 @@ async function farejarMercadoLivre() {
             ? ((precoAntigo - preco) / precoAntigo) * 100
             : 0;
 
-        if (desconto < 10) {
-          console.log("⚠️ Ignorado (desconto baixo)");
+       if (!precoAntigo || desconto < 10) {
+          console.log("⚠️ Ignorado (sem desconto real)");
           continue;
-        }
+         }
 
         const novaOferta = {
           nome: item.title,
