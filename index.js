@@ -7,7 +7,7 @@ if (!fs.existsSync("/data")) {
 }
 
 let config = {
-  intervaloMinutos: 1
+  intervaloMinutos: 2
 };
 
 let fila = [];
@@ -1767,6 +1767,80 @@ async function iniciarWhatsApp(id) {
   });
 }
 
+async function farejarMercadoLivre() {
+  try {
+    console.log("🐶 Farejando ofertas ML...");
+
+    const busca = "oferta"; // depois deixamos dinâmico
+
+    const url = `https://lista.mercadolivre.com.br/${encodeURIComponent(busca)}`;
+
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0"
+      }
+    });
+
+    const html = await response.text();
+
+    const links = [...html.matchAll(/href="(https:\/\/produto\.mercadolivre\.com\.br\/[^"]+)"/g)]
+      .map(m => m[1])
+      .slice(0, 5); // pega 5 produtos
+
+    console.log("🔎 Produtos encontrados:", links.length);
+
+    for (const link of links) {
+      try {
+        const produto = await importarMercadoLivre(link, {
+          credenciais: integracoesPorCliente["admin"]?.mercadolivre?.credenciais
+        });
+
+        if (!produto.precoAtual) continue;
+
+        const precoNumero = Number(
+          String(produto.precoAtual).replace(",", ".")
+        );
+
+        const precoAntigoNumero = Number(
+          String(produto.precoAntigo || "").replace(",", ".")
+        );
+
+        const desconto =
+          precoAntigoNumero > precoNumero
+            ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
+            : 0;
+
+        if (desconto < 10) {
+          console.log("⚠️ Ignorado (desconto baixo)");
+          continue;
+        }
+
+        const novaOferta = {
+          nome: produto.titulo,
+          preco: produto.precoAtual,
+          link: produto.linkAfiliado,
+          imagem: produto.imagem,
+          status: "pendente"
+        };
+
+        const jaExiste = fila.some(o => o.link === novaOferta.link);
+
+        if (!jaExiste) {
+          fila.push(novaOferta);
+          salvarFila();
+          console.log("🤖 Nova oferta adicionada:", novaOferta.nome);
+        }
+
+      } catch (e) {
+        console.log("❌ erro produto", e.message);
+      }
+    }
+
+  } catch (e) {
+    console.log("❌ erro farejador", e.message);
+  }
+}
+
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
@@ -1776,3 +1850,7 @@ app.listen(PORT, () => {
 setInterval(() => {
   processarFila();
 }, config.intervaloMinutos * 60 * 1000); // intervalo em minutos
+
+setInterval(() => {
+  farejarMercadoLivre();
+}, 5 * 60 * 1000); // a cada 5 minutos
