@@ -1814,7 +1814,8 @@ const busca = categoria.nome;
 console.log("🔍 Categoria:", busca);
 
 
-const busca = buscas[Math.floor(Math.random() * buscas.length)];
+const categoria = categorias[Math.floor(Math.random() * categorias.length)];
+const busca = categoria.nome;
 
 console.log("🔍 Buscando por:", busca);
 
