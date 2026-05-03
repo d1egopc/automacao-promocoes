@@ -1,9 +1,16 @@
 
+const fs = require("fs");
+
+// 🔥 GARANTE QUE O /data EXISTE
+if (!fs.existsSync("/data")) {
+  fs.mkdirSync("/data", { recursive: true });
+  console.log("📁 Pasta /data criada");
+}
+
 let config = {
   intervaloMinutos: 1
 };
 
-require("dotenv").config();
 
 let fila = [];
 
