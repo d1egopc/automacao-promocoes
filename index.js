@@ -1384,6 +1384,35 @@ if (!precoNumero || !Number.isFinite(precoNumero)) {
   });
 }
 
+const precoAntigoNumero = Number(
+  String(produto.precoAntigo || "")
+    .replace("R$", "")
+    .replace(/\./g, "")
+    .replace(",", ".")
+    .trim()
+);
+
+const temCupom = Boolean(produto.cupom && String(produto.cupom).trim());
+
+const temDescontoReal =
+  precoAntigoNumero &&
+  Number.isFinite(precoAntigoNumero) &&
+  precoAntigoNumero > precoNumero;
+
+const descontoPercentual = temDescontoReal
+  ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
+  : 0;
+
+if (!temCupom && descontoPercentual < 10) {
+  console.log("⚠️ Oferta ignorada: desconto baixo", novaOferta.nome);
+
+  return res.json({
+    ...produto,
+    aviso: "Produto importado, mas não foi enviado para fila porque o desconto parece baixo."
+  });
+}
+
+
     const jaExiste = fila.some(
   (o) => o.link === novaOferta.link
 );
