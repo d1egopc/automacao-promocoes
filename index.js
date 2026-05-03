@@ -1792,7 +1792,7 @@ async function farejarMercadoLivre() {
   try {
     console.log("🐶 Farejando ofertas ML (API)...");
 
-    const buscas = [
+const buscas = [
   "fone bluetooth",
   "smartwatch",
   "moletom masculino",
@@ -1802,7 +1802,7 @@ async function farejarMercadoLivre() {
   "ar condicionado",
   "tv smart",
   "xiaomi",
-  "cadeira gamer"
+  "cadeira gamer",
   "Micro-ondas",
   "Perfumaria",
   "Calças Jeans",
