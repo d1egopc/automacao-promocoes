@@ -1,5 +1,3 @@
-const horarioInicio = 0;
-const horarioFim = 23;
 
 let config = {
   intervaloMinutos: 1
@@ -48,11 +46,8 @@ const horarioInicio = 9;
 const horarioFim = 23;
 
 function podeRodarAgora() {
-  const horaBrasil = new Date().toLocaleString("pt-BR", {
-    timeZone: "America/Sao_Paulo",
-    hour: "2-digit",
-    hour12: false
-  });
+  return true;
+}
 
   const hora = Number(horaBrasil);
 
