@@ -1379,12 +1379,10 @@ if (jaExiste) {
   salvarFila();
 
   console.log("🤖 Oferta adicionada automaticamente:", novaOferta.nome);
-};
+}
 
-    return res.json(produto);
+return res.json(produto);
 
-
-      return res.json(produto);
     } catch (e) {
       console.error("ERRO MERCADO LIVRE:", e);
 
