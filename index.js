@@ -1792,28 +1792,27 @@ async function farejarMercadoLivre() {
   try {
     console.log("🐶 Farejando ofertas ML (API)...");
 
-const buscas = [
-  "fone bluetooth",
-  "smartwatch",
-  "moletom masculino",
-  "barbeador eletrico",
-  "air fryer",
-  "tenis masculino",
-  "ar condicionado",
-  "tv smart",
-  "xiaomi",
-  "cadeira gamer",
-  "Micro-ondas",
-  "Perfumaria",
-  "Calças Jeans",
-  "Eletrodomésticos",
-  "Roupas",
-  "Bermudas",
-  "Bicicletas",
-  "Motinha Elétrica",
-  "Ferramentas",
-  "Blusas de Moletom"
+const categorias = [
+  { id: "tv", nome: "smart tv" },
+  { id: "microondas", nome: "micro ondas" },
+  { id: "perfumaria", nome: "perfume masculino" },
+  { id: "calca_jeans", nome: "calca jeans masculina" },
+  { id: "eletrodomesticos", nome: "liquidificador" },
+  { id: "roupas", nome: "camiseta masculina" },
+  { id: "bermudas", nome: "bermuda masculina" },
+  { id: "bicicletas", nome: "bicicleta aro 29" },
+  { id: "ferramentas", nome: "parafusadeira" },
+  { id: "moletom", nome: "moletom masculino" }
 ];
+
+// 🔥 pega uma categoria aleatória
+const categoria = categorias[Math.floor(Math.random() * categorias.length)];
+
+// 🔥 usa o nome pra busca
+const busca = categoria.nome;
+
+console.log("🔍 Categoria:", busca);
+
 
 const busca = buscas[Math.floor(Math.random() * buscas.length)];
 
