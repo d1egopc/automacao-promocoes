@@ -1367,6 +1367,22 @@ if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
       imagem: produto.imagem,
       status: "pendente"
     };
+    
+    const precoNumero = Number(
+  String(novaOferta.preco || "")
+    .replace("R$", "")
+    .replace(/\./g, "")
+    .replace(",", ".")
+    .trim()
+);
+
+if (!precoNumero || !Number.isFinite(precoNumero)) {
+  console.log("⚠️ Oferta ignorada: preço inválido", novaOferta.nome);
+  return res.json({
+    ...produto,
+    aviso: "Produto importado, mas não foi enviado para fila porque não tem preço válido."
+  });
+}
 
     const jaExiste = fila.some(
   (o) => o.link === novaOferta.link
