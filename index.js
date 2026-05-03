@@ -1,21 +1,25 @@
-console.log("📂 Salvando dados em:", FILA_FILE);
+
 
 const fs = require("fs");
 
-// 🔥 GARANTE QUE O /data EXISTE
+// 🔥 GARANTE QUE O /data EXISTE PRIMEIRO
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
   console.log("📁 Pasta /data criada");
 }
 
+// 🔥 AGORA SIM TESTA ESCRITA
+fs.writeFileSync("/data/teste.txt", "ok " + new Date().toISOString());
+console.log("🧪 arquivo teste criado em /data");
+
 let config = {
   intervaloMinutos: 1
 };
 
-
 let fila = [];
 
 const FILA_FILE = "/data/fila.json";
+console.log("📂 Salvando dados em:", FILA_FILE);
 
 function salvarFila() {
   try {
