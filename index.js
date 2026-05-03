@@ -38,7 +38,6 @@ function carregarFila() {
   }
 }
 
-const fs = require("fs");
 const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
