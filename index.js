@@ -265,7 +265,17 @@ function gerarToken() {
 }
 
 function getClienteId(req) {
-  return "admin";
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+  if (!token) return "admin";
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    return decoded.clienteId || "admin";
+  } catch {
+    return "admin";
+  }
 }
 
 function auth(req, res, next) {
@@ -1375,7 +1385,10 @@ if (jaExiste) {
   salvarFila();
 
   console.log("🤖 Oferta adicionada automaticamente:", novaOferta.nome);
-}
+};
+
+    return res.json(produto);
+
 
       return res.json(produto);
     } catch (e) {
