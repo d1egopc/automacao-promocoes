@@ -1,3 +1,6 @@
+const horarioInicio = 0;
+const horarioFim = 23;
+
 let config = {
   intervaloMinutos: 1
 };
@@ -41,8 +44,8 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const app = express(); // 👈 MUITO IMPORTANTE ter isso
 
-const horarioInicio = 8;
-const horarioFim = 22;
+const horarioInicio = 9;
+const horarioFim = 23;
 
 function podeRodarAgora() {
   const horaBrasil = new Date().toLocaleString("pt-BR", {
