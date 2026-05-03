@@ -1790,77 +1790,147 @@ async function iniciarWhatsApp(id) {
 
 async function farejarMercadoLivre() {
   try {
-    console.log("🐶 Farejando ofertas ML (API)...");
+    console.log("🐶 Farejando ofertas ML por categorias...");
 
-const categorias = [
-  { id: "tv", nome: "smart tv" },
-  { id: "microondas", nome: "micro ondas" },
-  { id: "perfumaria", nome: "perfume masculino" },
-  { id: "calca_jeans", nome: "calca jeans masculina" },
-  { id: "eletrodomesticos", nome: "liquidificador" },
-  { id: "roupas", nome: "camiseta masculina" },
-  { id: "bermudas", nome: "bermuda masculina" },
-  { id: "bicicletas", nome: "bicicleta aro 29" },
-  { id: "ferramentas", nome: "parafusadeira" },
-  { id: "moletom", nome: "moletom masculino" }
-];
+    const categorias = [
+      {
+        id: "eletronicos",
+        nome: "Eletrônicos",
+        buscas: [
+          "tv smart 50 polegadas promoção",
+          "fone bluetooth",
+          "smartwatch desconto",
+          "caixa de som bluetooth"
+        ]
+      },
+      {
+        id: "eletrodomesticos",
+        nome: "Eletrodomésticos",
+        buscas: [
+          "air fryer promoção",
+          "micro ondas promoção",
+          "geladeira promoção",
+          "liquidificador desconto"
+        ]
+      },
+      {
+        id: "moda",
+        nome: "Moda",
+        buscas: [
+          "calça jeans masculina promoção",
+          "bermuda masculina",
+          "blusa moletom",
+          "tenis masculino promoção"
+        ]
+      },
+      {
+        id: "perfumaria",
+        nome: "Perfumaria",
+        buscas: [
+          "perfume importado promoção",
+          "perfume masculino desconto",
+          "kit perfume feminino"
+        ]
+      },
+      {
+        id: "ferramentas",
+        nome: "Ferramentas",
+        buscas: [
+          "furadeira promoção",
+          "parafusadeira",
+          "kit ferramentas",
+          "compressor de ar"
+        ]
+      },
+      {
+        id: "mobilidade",
+        nome: "Mobilidade",
+        buscas: [
+          "bicicleta promoção",
+          "patinete elétrico",
+          "motinha elétrica"
+        ]
+      }
+    ];
 
-// 🔥 pega uma categoria aleatória
-const categoria = categorias[Math.floor(Math.random() * categorias.length)];
+    for (const categoria of categorias) {
+      console.log("📂 Categoria:", categoria.nome);
 
-// 🔥 usa o nome pra busca
-const busca = categoria.nome;
+      for (const termo of categoria.buscas) {
+        try {
+          const url = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(termo)}&limit=5`;
 
-console.log("🔍 Categoria:", busca);
+          const response = await fetch(url);
+          const data = await response.json();
 
+          const produtos = data.results || [];
 
-const categoria = categorias[Math.floor(Math.random() * categorias.length)];
-const busca = categoria.nome;
+          console.log(`🔎 ${termo}: ${produtos.length} produtos`);
 
-console.log("🔍 Buscando por:", busca);
+          for (const p of produtos) {
+            try {
+              const produtoImportado = await importarMercadoLivre(p.permalink, {
+                credenciais: integracoesPorCliente["admin"]?.mercadolivre?.credenciais
+              });
 
-    const url = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(busca)}`;
+              if (!produtoImportado.precoAtual) continue;
 
-    const response = await fetch(url);
-    const data = await response.json();
+              const precoNumero = Number(
+                String(produtoImportado.precoAtual).replace(",", ".")
+              );
 
-    const produtos = data.results || [];
+              const precoAntigoNumero = Number(
+                String(produtoImportado.precoAntigo || "").replace(",", ".")
+              );
 
-    console.log("🔎 Produtos encontrados:", produtos.length);
+              const desconto =
+                precoAntigoNumero > precoNumero
+                  ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
+                  : 0;
 
-    for (const item of produtos.slice(0, 5)) {
-      try {
-        const preco = item.price;
-        const precoAntigo = item.original_price || 0;
+              // 🔥 FILTROS
+              if (desconto < 15) {
+                console.log("⚠️ Ignorado (desconto baixo)");
+                continue;
+              }
 
-        const desconto =
-          precoAntigo > preco
-            ? ((precoAntigo - preco) / precoAntigo) * 100
-            : 0;
+              if (precoNumero < 30) {
+                console.log("⚠️ Ignorado (preço baixo)");
+                continue;
+              }
 
-       if (!precoAntigo || desconto < 10) {
-          console.log("⚠️ Ignorado (sem desconto real)");
-          continue;
-         }
+              const novaOferta = {
+                nome: produtoImportado.titulo,
+                preco: produtoImportado.precoAtual,
+                link: produtoImportado.linkAfiliado,
+                imagem: produtoImportado.imagem,
+                categoria: categoria.id, // 🔥 importante pro painel depois
+                status: "pendente"
+              };
 
-        const novaOferta = {
-          nome: item.title,
-          preco: preco.toFixed(2).replace(".", ","),
-          link: item.permalink,
-          imagem: item.thumbnail,
-          status: "pendente"
-        };
+              const jaExiste = fila.some(o => o.link === novaOferta.link);
 
-        const jaExiste = fila.some(o => o.link === novaOferta.link);
+              if (!jaExiste) {
+                fila.push(novaOferta);
+                salvarFila();
 
-        if (!jaExiste) {
-          fila.push(novaOferta);
-          salvarFila();
-          console.log("🤖 Nova oferta adicionada:", novaOferta.nome);
+                console.log(`🤖 Nova oferta [${categoria.nome}]:`, novaOferta.nome);
+              }
+
+              // ⏱️ Anti-block
+              await new Promise(r => setTimeout(r, 1500));
+
+            } catch (e) {
+              console.log("❌ erro produto", e.message);
+            }
+          }
+
+        } catch (e) {
+          console.log("❌ erro busca", e.message);
         }
 
-      } catch (e) {
-        console.log("❌ erro produto", e.message);
+        // ⏱️ pausa entre buscas
+        await new Promise(r => setTimeout(r, 3000));
       }
     }
 
@@ -1868,7 +1938,6 @@ console.log("🔍 Buscando por:", busca);
     console.log("❌ erro farejador", e.message);
   }
 }
-
 
 const PORT = process.env.PORT || 3000;
 
