@@ -267,8 +267,8 @@ function gerarToken() {
 function getClienteId(req) {
   return "admin";
 }
+function auth(req, res, next) {
 
-  try {
     const decoded = jwt.verify(token, JWT_SECRET);
     return decoded.clienteId || "admin";
   } catch {
