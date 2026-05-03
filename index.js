@@ -762,13 +762,7 @@ async function gerarLinkAfiliadoMercadoLivre(url, config) {
   preco = limparPreco(preco);
 
   let precoNumero = Number(String(preco).replace(",", "."));
-  let precoAntigo = "";
-
-  if (Number.isFinite(precoNumero) && precoNumero > 0) {
-    precoAntigo = (precoNumero * 1.52)
-      .toFixed(2)
-      .replace(".", ",");
-  }
+let precoAntigo = "";
 
     const linkAfiliadoGerado = await gerarLinkAfiliadoMercadoLivre(url, config);
 
