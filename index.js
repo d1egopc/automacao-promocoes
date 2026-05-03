@@ -1379,6 +1379,8 @@ if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
 
     console.log("🤖 Oferta adicionada automaticamente:", novaOferta.nome);
 
+    return res.json(produto);
+
 
       return res.json(produto);
     } catch (e) {
