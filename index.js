@@ -7,7 +7,7 @@ require("dotenv").config();
 
 let fila = [];
 
-const FILA_FILE = "./data/fila.json";
+const FILA_FILE = "/data/fila.json";
 
 function salvarFila() {
   try {
@@ -199,7 +199,7 @@ let destinosPorSessao = {};
 let reconectando = {};
 let integracoesPorCliente = {};
 
-const INTEGRACOES_FILE = process.env.INTEGRACOES_FILE || "./data/integracoes.json";
+const INTEGRACOES_FILE = process.env.INTEGRACOES_FILE || "/data/integracoes.json";
 
 function carregarIntegracoesPersistidas() {
   try {
@@ -1529,7 +1529,7 @@ app.post("/reset/:id", async (req, res) => {
     delete statusSessao[id];
     delete destinosPorSessao[id];
 
-    fs.rmSync("./data/auth_" + id, { recursive: true, force: true });
+    fs.rmSync("/data/auth_" + id, { recursive: true, force: true });
 
     return res.json({
       ok: true,
@@ -1698,7 +1698,7 @@ async function iniciarWhatsApp(id) {
   qrCodes[id] = null;
   reconectando[id] = false;
 
-  const { state, saveCreds } = await useMultiFileAuthState("./data/auth_" + id);
+  const { state, saveCreds } = await useMultiFileAuthState("/data/auth_" + id);
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
