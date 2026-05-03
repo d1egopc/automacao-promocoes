@@ -1804,10 +1804,9 @@ async function farejarMercadoLivre() {
 
     const html = await response.text();
 
-    const links = [...html.matchAll(/https:\/\/produto\.mercadolivre\.com\.br\/[^\s"]+/g)]
+  const links = [...html.matchAll(/https:\/\/produto\.mercadolivre\.com\.br\/[^\s"]+/g)]
   .map(m => m[0])
-  .filter(link => link.includes("-p-") || link.includes("MLB"))
-  .slice(0, 5);s
+  .slice(0, 5);
 
     console.log("🔎 Produtos encontrados:", links.length);
 
@@ -1879,4 +1878,4 @@ setInterval(() => {
   } else {
     console.log("⏸️ Farejador pausado");
   }
-}, 5 * 60 * 1000);
+}, 2 * 60 * 1000);
