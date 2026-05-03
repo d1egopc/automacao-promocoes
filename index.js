@@ -1374,10 +1374,18 @@ if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
       status: "pendente"
     };
 
-    fila.push(novaOferta);
-    salvarFila();
+    const jaExiste = fila.some(
+  (o) => o.link === novaOferta.link
+);
 
-    console.log("🤖 Oferta adicionada automaticamente:", novaOferta.nome);
+if (jaExiste) {
+  console.log("⚠️ Oferta já existe na fila:", novaOferta.nome);
+} else {
+  fila.push(novaOferta);
+  salvarFila();
+
+  console.log("🤖 Oferta adicionada automaticamente:", novaOferta.nome);
+};
 
     return res.json(produto);
 
