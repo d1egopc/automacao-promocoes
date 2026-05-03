@@ -1,3 +1,4 @@
+console.log("📂 Salvando dados em:", FILA_FILE);
 
 const fs = require("fs");
 
