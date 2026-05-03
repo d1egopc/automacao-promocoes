@@ -1792,7 +1792,26 @@ async function farejarMercadoLivre() {
   try {
     console.log("🐶 Farejando ofertas ML (API)...");
 
-    const busca = "oferta";
+    const buscas = [
+  "fone bluetooth",
+  "smartwatch",
+  "moletom masculino",
+  "barbeador eletrico",
+  "air fryer",
+  "tenis masculino",
+  "ar condicionado",
+  "tv smart",
+  "xiaomi",
+  "cadeira gamer"
+  "perfumes"
+  "eletrodomesticos"
+  "calsa jeans"
+  "bicicleta motinha"
+];
+
+const busca = buscas[Math.floor(Math.random() * buscas.length)];
+
+console.log("🔍 Buscando por:", busca);
 
     const url = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(busca)}`;
 
