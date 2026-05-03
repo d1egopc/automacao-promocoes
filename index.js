@@ -3,16 +3,11 @@ let config = {
   intervaloMinutos: 1
 };
 
-
-if (!fs.existsSync("/data")) {
-  fs.mkdirSync("/data", { recursive: true });
-}
-
 require("dotenv").config();
 
 let fila = [];
 
-const FILA_FILE = "/data/fila.json";
+const FILA_FILE = "./data/fila.json";
 
 function salvarFila() {
   try {
@@ -204,7 +199,7 @@ let destinosPorSessao = {};
 let reconectando = {};
 let integracoesPorCliente = {};
 
-const INTEGRACOES_FILE = process.env.INTEGRACOES_FILE || "/data/integracoes.json";
+const INTEGRACOES_FILE = process.env.INTEGRACOES_FILE || "./data/integracoes.json";
 
 function carregarIntegracoesPersistidas() {
   try {
@@ -769,18 +764,12 @@ async function gerarLinkAfiliadoMercadoLivre(url, config) {
   let precoNumero = Number(String(preco).replace(",", "."));
   let precoAntigo = "";
   
-  let descontoReal = 0;
-
-const matchTexto = html.match(/(\d{1,2})\s*%\s*OFF/i);
-const matchJSON = html.match(/"discount_rate":\s*(\d{1,2})/i);
-
-if (matchJSON) {
-  descontoReal = Number(matchJSON[1]);
-} else if (matchTexto) {
-  descontoReal = Number(matchTexto[1]);
-}
-
-console.log("🔎 Desconto detectado:", descontoReal + "%");
+  const descontoMatch =
+  html.match(/(\d{1,2})\s*%\s*OFF/i) ||
+  html.match(/"discount_rate"\s*:\s*(\d{1,2})/i) ||
+  html.match(/"discountPercentage"\s*:\s*(\d{1,2})/i) ||
+  html.match(/(\d{1,2})\s*%\s*de desconto/i);
+const descontoReal = descontoMatch ? Number(descontoMatch[1]) : 0;
 
 if (
   Number.isFinite(precoNumero) &&
@@ -1540,7 +1529,7 @@ app.post("/reset/:id", async (req, res) => {
     delete statusSessao[id];
     delete destinosPorSessao[id];
 
-    fs.rmSync("/data/auth_" + id, { recursive: true, force: true });
+    fs.rmSync("./data/auth_" + id, { recursive: true, force: true });
 
     return res.json({
       ok: true,
