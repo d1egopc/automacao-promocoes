@@ -1803,9 +1803,16 @@ async function farejarMercadoLivre() {
   "tv smart",
   "xiaomi",
   "cadeira gamer"
- "eletrodomesticos"
-  "calsa jeans"
-  "bicicleta motinha"
+  "Micro-ondas",
+  "Perfumaria",
+  "Calças Jeans",
+  "Eletrodomésticos",
+  "Roupas",
+  "Bermudas",
+  "Bicicletas",
+  "Motinha Elétrica",
+  "Ferramentas",
+  "Blusas de Moletom"
 ];
 
 const busca = buscas[Math.floor(Math.random() * buscas.length)];
