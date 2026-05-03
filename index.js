@@ -49,10 +49,6 @@ function podeRodarAgora() {
   return true;
 }
 
-  const hora = Number(horaBrasil);
-
-  return hora >= horarioInicio && hora <= horarioFim;
-}
 async function processarFila() {
   if (!podeRodarAgora()) {
     console.log("⏸️ Fora do horário");
