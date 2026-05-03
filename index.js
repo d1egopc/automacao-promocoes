@@ -1803,8 +1803,7 @@ async function farejarMercadoLivre() {
   "tv smart",
   "xiaomi",
   "cadeira gamer"
-  "perfumes"
-  "eletrodomesticos"
+ "eletrodomesticos"
   "calsa jeans"
   "bicicleta motinha"
 ];
