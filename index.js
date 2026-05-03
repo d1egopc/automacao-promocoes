@@ -1790,157 +1790,95 @@ async function iniciarWhatsApp(id) {
 
 async function farejarMercadoLivre() {
   try {
-    console.log("🐶 Farejando ofertas ML por categorias...");
+    console.log("🐶 Farejando ofertas ML (modo stealth)...");
 
-    const categorias = [
-      {
-        id: "eletronicos",
-        nome: "Eletrônicos",
-        buscas: [
-          "tv 50 polegadas",
-          "fone bluetooth",
-          "smartwatch",
-          "caixa de som bluetooth"
-        ]
-      },
-      {
-        id: "eletrodomesticos",
-        nome: "Eletrodomésticos",
-        buscas: [
-          "air fryer",
-          "micro ondas",
-          "geladeira",
-          "liquidificador"
-        ]
-      },
-      {
-        id: "moda",
-        nome: "Moda",
-        buscas: [
-          "calça jeans masculina promoção",
-          "bermuda masculina",
-          "blusa moletom",
-          "tenis masculino promoção"
-        ]
-      },
-      {
-        id: "perfumaria",
-        nome: "Perfumaria",
-        buscas: [
-          "perfume importado promoção",
-          "perfume masculino desconto",
-          "kit perfume feminino"
-        ]
-      },
-      {
-        id: "ferramentas",
-        nome: "Ferramentas",
-        buscas: [
-          "furadeira promoção",
-          "parafusadeira",
-          "kit ferramentas",
-          "compressor de ar"
-        ]
-      },
-      {
-        id: "mobilidade",
-        nome: "Mobilidade",
-        buscas: [
-          "bicicleta promoção",
-          "patinete elétrico",
-          "motinha elétrica"
-        ]
-      }
+    const buscas = [
+      "tv 50 polegadas",
+      "fone bluetooth",
+      "smartwatch",
+      "air fryer",
+      "tenis masculino",
+      "perfume importado",
+      "furadeira",
+      "bicicleta"
     ];
 
-    for (const categoria of categorias) {
-      console.log("📂 Categoria:", categoria.nome);
+    for (const termo of buscas) {
+      try {
+        const url = `https://lista.mercadolivre.com.br/${encodeURIComponent(termo)}`;
 
-      for (const termo of categoria.buscas) {
-        try {
-          const url = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(termo)}&limit=5`;
-
-          const response = await fetch(url, {
+        const response = await fetch(url, {
           headers: {
             "User-Agent": "Mozilla/5.0",
-            "Accept": "application/json",
             "Accept-Language": "pt-BR,pt;q=0.9"
-           }
-          });
-
-          console.log("URL:", url);
-          console.log("STATUS:", response.status);
-
-          const data = await response.json();
-
-          const produtos = data.results || [];
-
-          console.log(`🔎 ${termo}: ${produtos.length} produtos`);
-
-          for (const p of produtos) {
-            try {
-              const produtoImportado = await importarMercadoLivre(p.permalink, {
-                credenciais: integracoesPorCliente["admin"]?.mercadolivre?.credenciais
-              });
-
-              if (!produtoImportado.precoAtual) continue;
-
-              const precoNumero = Number(
-                String(produtoImportado.precoAtual).replace(",", ".")
-              );
-
-              const precoAntigoNumero = Number(
-                String(produtoImportado.precoAntigo || "").replace(",", ".")
-              );
-
-              const desconto =
-                precoAntigoNumero > precoNumero
-                  ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
-                  : 0;
-
-              // 🔥 FILTROS
-              if (desconto < 15) {
-                console.log("⚠️ Ignorado (desconto baixo)");
-                continue;
-              }
-
-              if (precoNumero < 30) {
-                console.log("⚠️ Ignorado (preço baixo)");
-                continue;
-              }
-
-              const novaOferta = {
-                nome: produtoImportado.titulo,
-                preco: produtoImportado.precoAtual,
-                link: produtoImportado.linkAfiliado,
-                imagem: produtoImportado.imagem,
-                categoria: categoria.id, // 🔥 importante pro painel depois
-                status: "pendente"
-              };
-
-              const jaExiste = fila.some(o => o.link === novaOferta.link);
-
-              if (!jaExiste) {
-                fila.push(novaOferta);
-                salvarFila();
-
-                console.log(`🤖 Nova oferta [${categoria.nome}]:`, novaOferta.nome);
-              }
-
-              // ⏱️ Anti-block
-              await new Promise(r => setTimeout(r, 1500));
-
-            } catch (e) {
-              console.log("❌ erro produto", e.message);
-            }
           }
+        });
 
-        } catch (e) {
-          console.log("❌ erro busca", e.message);
+        console.log("🌐 URL:", url);
+        console.log("📡 STATUS:", response.status);
+
+        const html = await response.text();
+
+        const links = [
+          ...html.matchAll(/https:\/\/produto\.mercadolivre\.com\.br\/[^\s"]+/g)
+        ]
+          .map(m => m[0])
+          .slice(0, 5);
+
+        console.log(`🔎 ${termo}: ${links.length} produtos`);
+
+        for (const link of links) {
+          try {
+            const produto = await importarMercadoLivre(link, {
+              credenciais: integracoesPorCliente["admin"]?.mercadolivre?.credenciais
+            });
+
+            if (!produto.precoAtual) continue;
+
+            const precoNumero = Number(
+              String(produto.precoAtual).replace(",", ".")
+            );
+
+            const precoAntigoNumero = Number(
+              String(produto.precoAntigo || "").replace(",", ".")
+            );
+
+            const desconto =
+              precoAntigoNumero > precoNumero
+                ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
+                : 0;
+
+            if (desconto < 10) continue;
+            if (precoNumero < 30) continue;
+
+            const novaOferta = {
+              nome: produto.titulo,
+              preco: produto.precoAtual,
+              link: produto.linkAfiliado,
+              imagem: produto.imagem,
+              status: "pendente"
+            };
+
+            const jaExiste = fila.some(o => o.link === novaOferta.link);
+
+            if (!jaExiste) {
+              fila.push(novaOferta);
+              salvarFila();
+
+              console.log("🤖 Nova oferta:", novaOferta.nome);
+            }
+
+            await new Promise(r => setTimeout(r, 2000));
+
+          } catch (e) {
+            console.log("❌ erro produto", e.message);
+          }
         }
 
-        // ⏱️ pausa entre buscas
-        await new Promise(r => setTimeout(r, 3000));
+        await new Promise(r => setTimeout(r, 4000));
+
+      } catch (e) {
+        console.log("❌ erro busca", e.message);
       }
     }
 
