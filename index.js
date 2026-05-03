@@ -1804,9 +1804,10 @@ async function farejarMercadoLivre() {
 
     const html = await response.text();
 
-    const links = [...html.matchAll(/href="(https:\/\/produto\.mercadolivre\.com\.br\/[^"]+)"/g)]
-      .map(m => m[1])
-      .slice(0, 5); // pega 5 produtos
+    const links = [...html.matchAll(/https:\/\/produto\.mercadolivre\.com\.br\/[^\s"]+/g)]
+  .map(m => m[0])
+  .filter(link => link.includes("-p-") || link.includes("MLB"))
+  .slice(0, 5);s
 
     console.log("🔎 Produtos encontrados:", links.length);
 
