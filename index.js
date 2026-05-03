@@ -764,7 +764,11 @@ async function gerarLinkAfiliadoMercadoLivre(url, config) {
   let precoNumero = Number(String(preco).replace(",", "."));
   let precoAntigo = "";
   
-  const descontoMatch = html.match(/(\d{1,2})\s*%\s*OFF/i);
+  const descontoMatch =
+  html.match(/(\d{1,2})\s*%\s*OFF/i) ||
+  html.match(/"discount_rate"\s*:\s*(\d{1,2})/i) ||
+  html.match(/"discountPercentage"\s*:\s*(\d{1,2})/i) ||
+  html.match(/(\d{1,2})\s*%\s*de desconto/i);
 const descontoReal = descontoMatch ? Number(descontoMatch[1]) : 0;
 
 if (
