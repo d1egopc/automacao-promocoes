@@ -2,6 +2,11 @@
 let config = {
   intervaloMinutos: 1
 };
+const fs = require("fs");
+
+if (!fs.existsSync("/data")) {
+  fs.mkdirSync("/data", { recursive: true });
+}
 
 require("dotenv").config();
 
