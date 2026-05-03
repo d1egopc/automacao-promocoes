@@ -1366,6 +1366,19 @@ if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
           aviso: "Dados não encontrados automaticamente. Preencha manualmente."
         });
       }
+       const novaOferta = {
+      nome: produto.nome || produto.titulo,
+      preco: produto.preco || produto.precoAtual,
+      link: produto.linkAfiliado || produto.linkOriginal,
+      imagem: produto.imagem,
+      status: "pendente"
+    };
+
+    fila.push(novaOferta);
+    salvarFila();
+
+    console.log("🤖 Oferta adicionada automaticamente:", novaOferta.nome);
+
 
       return res.json(produto);
     } catch (e) {
