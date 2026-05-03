@@ -167,6 +167,27 @@ app.get("/fila", (req, res) => {
   res.json(fila);
 });
 
+// ================= AUTOMAÇÃO =================
+
+app.get("/automacao", (req, res) => {
+  res.json({
+    ok: true,
+    ativo: config.automacaoAtiva
+  });
+});
+
+app.post("/automacao/toggle", (req, res) => {
+  config.automacaoAtiva = !config.automacaoAtiva;
+
+  console.log("🤖 Automação:", config.automacaoAtiva ? "ON" : "OFF");
+
+  res.json({
+    ok: true,
+    ativo: config.automacaoAtiva
+  });
+});
+
+
 app.delete("/fila/:index", (req, res) => {
   const index = Number(req.params.index);
 
@@ -1852,5 +1873,9 @@ setInterval(() => {
 }, config.intervaloMinutos * 60 * 1000); // intervalo em minutos
 
 setInterval(() => {
-  farejarMercadoLivre();
-}, 5 * 60 * 1000); // a cada 5 minutos
+  if (config.automacaoAtiva) {
+    farejarMercadoLivre();
+  } else {
+    console.log("⏸️ Farejador pausado");
+  }
+}, 5 * 60 * 1000);
