@@ -11,6 +11,7 @@ let config = {
 };
 
 let fila = [];
+let enviandoAgora = false;
 
 const FILA_FILE = "/data/fila.json";
 console.log("📂 Salvando dados em:", FILA_FILE);
@@ -55,12 +56,30 @@ function podeRodarAgora() {
 }
 
 async function processarFila() {
-  if (!podeRodarAgora()) {
-    console.log("⏸️ Fora do horário");
+  if (enviandoAgora) {
+    console.log("⏳ Já está enviando, aguardando...");
     return;
   }
 
-  const oferta = fila.find(o => o.status === "pendente");
+  enviandoAgora = true;
+
+  if (!podeRodarAgora()) {
+    console.log("⏸️ Fora do horário");
+    enviandoAgora = false;
+    return;
+  }
+
+  const agora = Date.now();
+
+const oferta = fila.find(o => {
+  if (o.status !== "pendente") return false;
+
+  if (!o.ultimoEnvio) return true;
+
+  const intervaloMs = (config.intervaloMinutos || 2) * 60 * 1000;
+
+  return (agora - new Date(o.ultimoEnvio).getTime()) >= intervaloMs;
+});
 
   if (!oferta) {
     console.log("📭 Nenhuma oferta pendente");
@@ -122,6 +141,7 @@ async function processarFila() {
 
     oferta.status = "enviado";
     oferta.dataEnvio = new Date();
+  oferta.ultimoEnvio = new Date();
                      salvarFila();
 
     console.log("✅ Oferta enviada automaticamente");
@@ -1894,9 +1914,13 @@ app.listen(PORT, () => {
 });
 
 setInterval(() => {
-  processarFila();
-}, config.intervaloMinutos * 60 * 1000); // intervalo em minutos
+  if (!config.automacaoAtiva) {
+    console.log("⏸️ Automação desligada");
+    return;
+  }
 
+  processarFila();
+}, 10 * 1000); // roda a cada 10 segundos
 setInterval(() => {
   if (config.automacaoAtiva) {
     farejarMercadoLivre();
