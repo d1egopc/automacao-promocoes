@@ -12,6 +12,7 @@ let config = {
 
 let fila = [];
 let enviandoAgora = false;
+let controleEnvio = {}; // por cliente
 
 const FILA_FILE = "/data/fila.json";
 console.log("📂 Salvando dados em:", FILA_FILE);
@@ -56,30 +57,98 @@ function podeRodarAgora() {
 }
 
 async function processarFila() {
-  if (enviandoAgora) {
-    console.log("⏳ Já está enviando, aguardando...");
-    return;
-  }
-
+  if (enviandoAgora) return;
   enviandoAgora = true;
 
   try {
-    if (!podeRodarAgora()) {
-      console.log("⏸️ Fora do horário");
+    if (!config.automacaoAtiva) return;
+
+    const agora = Date.now();
+    const intervaloMs = (config.intervaloMinutos || 2) * 60 * 1000;
+
+    // 🔥 pega primeira oferta pendente
+    const oferta = fila.find(o => o.status === "pendente");
+
+    if (!oferta) {
+      console.log("📭 Nenhuma oferta pendente");
       return;
     }
 
-    const agora = Date.now();
+    const clienteId = oferta.clienteId || "admin";
 
-    const oferta = fila.find(o => {
-      if (o.status !== "pendente") return false;
+    // cria controle por cliente
+    if (!controleEnvio[clienteId]) {
+      controleEnvio[clienteId] = 0;
+    }
 
-      // oferta que nunca foi enviada ainda está pronta
-      if (!o.ultimoEnvio) return true;
+    // ⛔ trava pelo intervalo
+    if (agora - controleEnvio[clienteId] < intervaloMs) {
+      return;
+    }
 
-      const intervaloMs = (config.intervaloMinutos || 2) * 60 * 1000;
-      return (agora - new Date(o.ultimoEnvio).getTime()) >= intervaloMs;
-    });
+    const idSessao = oferta.sessaoId || oferta.id || Object.keys(sessoes)[0];
+    const sock = sessoes[idSessao];
+
+    if (!sock) {
+      console.log("❌ Nenhuma sessão conectada");
+      return;
+    }
+
+    const destinosBrutos =
+      oferta.destinos ||
+      oferta.grupos ||
+      destinosPorSessao[idSessao] ||
+      [oferta.destino || oferta.grupoDestino];
+
+    const destinos = destinosBrutos
+      .map(d => d?.id || d?.value || d?.jid || d)
+      .filter(Boolean);
+
+    if (!destinos.length) {
+      console.log("⚠️ Sem destino");
+      return;
+    }
+
+    const mensagem = `🔥 OFERTA
+
+🛍️ ${oferta.nome || oferta.titulo}
+💰 R$ ${oferta.preco || oferta.precoAtual}
+
+👉 ${oferta.link || oferta.linkAfiliado}
+
+🚀 Corre antes que acabe!`;
+
+    for (const destino of destinos) {
+      if (oferta.imagem) {
+        await sock.sendMessage(destino, {
+          image: { url: corrigirImagemUrl(oferta.imagem) || oferta.imagem },
+          caption: mensagem
+        });
+      } else {
+        await sock.sendMessage(destino, {
+          text: mensagem
+        });
+      }
+
+      await new Promise(r => setTimeout(r, 3000));
+    }
+
+    // ✅ atualiza controle
+    controleEnvio[clienteId] = Date.now();
+
+    oferta.status = "enviado";
+    oferta.dataEnvio = new Date();
+
+    salvarFila();
+
+    console.log("✅ Enviado 1 oferta com controle de tempo");
+
+  } catch (e) {
+    console.log("❌ ERRO:", e.message);
+  } finally {
+    enviandoAgora = false;
+  }
+}
 
     if (!oferta) {
       console.log("📭 Nenhuma oferta pendente");
@@ -180,6 +249,7 @@ app.use(rateLimit({
 app.post("/fila", (req, res) => {
   const oferta = req.body;
 
+  oferta.clienteId = getClienteId(req);
   oferta.status = "pendente";
 
   fila.push(oferta);
