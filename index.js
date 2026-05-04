@@ -1098,7 +1098,7 @@ async function importarAmazon(url, config) {
     itemId: ""
   };
 }
-
+1
     return {
       shopId: "",
       itemId: ""
