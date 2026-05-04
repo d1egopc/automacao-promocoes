@@ -66,7 +66,6 @@ async function processarFila() {
     const agora = Date.now();
     const intervaloMs = (config.intervaloMinutos || 2) * 60 * 1000;
 
-    // 🔥 pega primeira oferta pendente
     const oferta = fila.find(o => o.status === "pendente");
 
     if (!oferta) {
@@ -76,12 +75,10 @@ async function processarFila() {
 
     const clienteId = oferta.clienteId || "admin";
 
-    // cria controle por cliente
     if (!controleEnvio[clienteId]) {
       controleEnvio[clienteId] = 0;
     }
 
-    // ⛔ trava pelo intervalo
     if (agora - controleEnvio[clienteId] < intervaloMs) {
       return;
     }
@@ -133,15 +130,13 @@ async function processarFila() {
       await new Promise(r => setTimeout(r, 3000));
     }
 
-    // ✅ atualiza controle
     controleEnvio[clienteId] = Date.now();
-
     oferta.status = "enviado";
     oferta.dataEnvio = new Date();
 
     salvarFila();
 
-    console.log("✅ Enviado 1 oferta com controle de tempo");
+    console.log("✅ Enviado com controle de tempo");
 
   } catch (e) {
     console.log("❌ ERRO:", e.message);
@@ -149,6 +144,7 @@ async function processarFila() {
     enviandoAgora = false;
   }
 }
+
 
     if (!oferta) {
       console.log("📭 Nenhuma oferta pendente");
