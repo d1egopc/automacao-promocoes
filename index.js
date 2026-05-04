@@ -11,7 +11,6 @@ let config = {
 };
 
 let fila = [];
-let enviandoAgora = false;
 
 const FILA_FILE = "/data/fila.json";
 console.log("📂 Salvando dados em:", FILA_FILE);
@@ -56,30 +55,12 @@ function podeRodarAgora() {
 }
 
 async function processarFila() {
-  if (enviandoAgora) {
-    console.log("⏳ Já está enviando, aguardando...");
-    return;
-  }
-
-  enviandoAgora = true;
-
   if (!podeRodarAgora()) {
     console.log("⏸️ Fora do horário");
-    enviandoAgora = false;
     return;
   }
 
-  const agora = Date.now();
-
-const oferta = fila.find(o => {
-  if (o.status !== "pendente") return false;
-
-  if (!o.ultimoEnvio) return true;
-
-  const intervaloMs = (config.intervaloMinutos || 2) * 60 * 1000;
-
-  return (agora - new Date(o.ultimoEnvio).getTime()) >= intervaloMs;
-});
+  const oferta = fila.find(o => o.status === "pendente");
 
   if (!oferta) {
     console.log("📭 Nenhuma oferta pendente");
@@ -141,7 +122,6 @@ const oferta = fila.find(o => {
 
     oferta.status = "enviado";
     oferta.dataEnvio = new Date();
-  oferta.ultimoEnvio = new Date();
                      salvarFila();
 
     console.log("✅ Oferta enviada automaticamente");
@@ -1064,40 +1044,23 @@ async function importarAmazon(url, config) {
   }
 
   function extrairIdsShopee(link) {
-  const texto = String(link || "").split("?")[0];
+    const texto = String(link || "");
 
-  // Formato novo: /product/shopId/itemId
-  const matchProduct = texto.match(/\/product\/(\d+)\/(\d+)/i);
-  if (matchProduct) {
-    return {
-      shopId: matchProduct[1],
-      itemId: matchProduct[2]
-    };
-  }
+    const match1 = texto.match(/-i\.(\d+)\.(\d+)/i);
+    if (match1) {
+      return {
+        shopId: match1[1],
+        itemId: match1[2]
+      };
+    }
 
-  // Formato antigo: -i.shopId.itemId
-  const match1 = texto.match(/-i\.(\d+)\.(\d+)/i);
-  if (match1) {
-    return {
-      shopId: match1[1],
-      itemId: match1[2]
-    };
-  }
-
-  // Outro formato: i.shopId.itemId
-  const match2 = texto.match(/i\.(\d+)\.(\d+)/i);
-  if (match2) {
-    return {
-      shopId: match2[1],
-      itemId: match2[2]
-    };
-  }
-
-  return {
-    shopId: "",
-    itemId: ""
-  };
-}
+    const match2 = texto.match(/i\.(\d+)\.(\d+)/i);
+    if (match2) {
+      return {
+        shopId: match2[1],
+        itemId: match2[2]
+      };
+    }
 
     return {
       shopId: "",
@@ -1931,13 +1894,9 @@ app.listen(PORT, () => {
 });
 
 setInterval(() => {
-  if (!config.automacaoAtiva) {
-    console.log("⏸️ Automação desligada");
-    return;
-  }
-
   processarFila();
-}, 10 * 1000); // roda a cada 10 segundos
+}, config.intervaloMinutos * 60 * 1000); // intervalo em minutos
+
 setInterval(() => {
   if (config.automacaoAtiva) {
     farejarMercadoLivre();
