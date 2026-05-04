@@ -63,30 +63,29 @@ async function processarFila() {
 
   enviandoAgora = true;
 
-  if (!podeRodarAgora()) {
-    console.log("⏸️ Fora do horário");
-    enviandoAgora = false;
-    return;
-  }
-
-  const agora = Date.now();
-
-const oferta = fila.find(o => {
-  if (o.status !== "pendente") return false;
-
-  if (!o.ultimoEnvio) return true;
-
-  const intervaloMs = (config.intervaloMinutos || 2) * 60 * 1000;
-
-  return (agora - new Date(o.ultimoEnvio).getTime()) >= intervaloMs;
-});
-
-  if (!oferta) {
-    console.log("📭 Nenhuma oferta pendente");
-    return;
-  }
-
   try {
+    if (!podeRodarAgora()) {
+      console.log("⏸️ Fora do horário");
+      return;
+    }
+
+    const agora = Date.now();
+
+    const oferta = fila.find(o => {
+      if (o.status !== "pendente") return false;
+
+      // oferta que nunca foi enviada ainda está pronta
+      if (!o.ultimoEnvio) return true;
+
+      const intervaloMs = (config.intervaloMinutos || 2) * 60 * 1000;
+      return (agora - new Date(o.ultimoEnvio).getTime()) >= intervaloMs;
+    });
+
+    if (!oferta) {
+      console.log("📭 Nenhuma oferta pendente");
+      return;
+    }
+
     const idSessao = oferta.sessaoId || oferta.id || Object.keys(sessoes)[0];
     const sock = sessoes[idSessao];
 
@@ -110,6 +109,11 @@ const oferta = fila.find(o => {
         return null;
       })
       .filter(Boolean);
+
+    if (!destinos.length) {
+      console.log("⚠️ Nenhum destino encontrado para a oferta:", oferta.nome || oferta.titulo);
+      return;
+    }
 
     const mensagem = `🔥 OFERTA
 
@@ -141,17 +145,20 @@ const oferta = fila.find(o => {
 
     oferta.status = "enviado";
     oferta.dataEnvio = new Date();
-  oferta.ultimoEnvio = new Date();
-                     salvarFila();
+    oferta.ultimoEnvio = new Date();
+    salvarFila();
 
     console.log("✅ Oferta enviada automaticamente");
   } catch (erro) {
     console.log("❌ Erro ao enviar", erro);
-    oferta.status = "erro";
-             salvarFila();
+
+    // Só marca erro se já existir uma oferta em processamento no escopo
+    // Mantemos a fila salva para não perder nada.
+    salvarFila();
+  } finally {
+    enviandoAgora = false;
   }
- 
- }
+}
 
 const {
   default: makeWASocket,
@@ -1064,73 +1071,40 @@ async function importarAmazon(url, config) {
   }
 
   function extrairIdsShopee(link) {
-  const texto = String(link || "").split("?")[0];
+    const texto = String(link || "").split("?")[0];
 
-  // Formato novo: /product/shopId/itemId
-  const matchProduct = texto.match(/\/product\/(\d+)\/(\d+)/i);
-  if (matchProduct) {
+    // Formato novo: /product/shopId/itemId
+    const matchProduct = texto.match(/\/product\/(\d+)\/(\d+)/i);
+    if (matchProduct) {
+      return {
+        shopId: matchProduct[1],
+        itemId: matchProduct[2]
+      };
+    }
+
+    // Formato antigo: -i.shopId.itemId
+    const match1 = texto.match(/-i\.(\d+)\.(\d+)/i);
+    if (match1) {
+      return {
+        shopId: match1[1],
+        itemId: match1[2]
+      };
+    }
+
+    // Outro formato: i.shopId.itemId
+    const match2 = texto.match(/i\.(\d+)\.(\d+)/i);
+    if (match2) {
+      return {
+        shopId: match2[1],
+        itemId: match2[2]
+      };
+    }
+
     return {
-      shopId: matchProduct[1],
-      itemId: matchProduct[2]
+      shopId: "",
+      itemId: ""
     };
   }
-
-  // Formato antigo: -i.shopId.itemId
-  const match1 = texto.match(/-i\.(\d+)\.(\d+)/i);
-  if (match1) {
-    return {
-      shopId: match1[1],
-      itemId: match1[2]
-    };
-  }
-
-  // Outro formato: i.shopId.itemId
-  const match2 = texto.match(/i\.(\d+)\.(\d+)/i);
-  if (match2) {
-    return {
-      shopId: match2[1],
-      itemId: match2[2]
-    };
-  }
-
-  return {
-    shopId: "",
-    itemId: ""
-  };
-}
-
-   function extrairIdsShopee(link) {
-  const texto = String(link || "").split("?")[0];
-
-  const matchProduct = texto.match(/\/product\/(\d+)\/(\d+)/i);
-  if (matchProduct) {
-    return {
-      shopId: matchProduct[1],
-      itemId: matchProduct[2]
-    };
-  }
-
-  const match1 = texto.match(/-i\.(\d+)\.(\d+)/i);
-  if (match1) {
-    return {
-      shopId: match1[1],
-      itemId: match1[2]
-    };
-  }
-
-  const match2 = texto.match(/i\.(\d+)\.(\d+)/i);
-  if (match2) {
-    return {
-      shopId: match2[1],
-      itemId: match2[2]
-    };
-  }
-
-  return {
-    shopId: "",
-    itemId: ""
-  };
-}
 
   function gerarKeywordShopee(link) {
     try {
