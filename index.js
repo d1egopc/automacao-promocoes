@@ -1064,23 +1064,40 @@ async function importarAmazon(url, config) {
   }
 
   function extrairIdsShopee(link) {
-    const texto = String(link || "");
+  const texto = String(link || "").split("?")[0];
 
-    const match1 = texto.match(/-i\.(\d+)\.(\d+)/i);
-    if (match1) {
-      return {
-        shopId: match1[1],
-        itemId: match1[2]
-      };
-    }
+  // Formato novo: /product/shopId/itemId
+  const matchProduct = texto.match(/\/product\/(\d+)\/(\d+)/i);
+  if (matchProduct) {
+    return {
+      shopId: matchProduct[1],
+      itemId: matchProduct[2]
+    };
+  }
 
-    const match2 = texto.match(/i\.(\d+)\.(\d+)/i);
-    if (match2) {
-      return {
-        shopId: match2[1],
-        itemId: match2[2]
-      };
-    }
+  // Formato antigo: -i.shopId.itemId
+  const match1 = texto.match(/-i\.(\d+)\.(\d+)/i);
+  if (match1) {
+    return {
+      shopId: match1[1],
+      itemId: match1[2]
+    };
+  }
+
+  // Outro formato: i.shopId.itemId
+  const match2 = texto.match(/i\.(\d+)\.(\d+)/i);
+  if (match2) {
+    return {
+      shopId: match2[1],
+      itemId: match2[2]
+    };
+  }
+
+  return {
+    shopId: "",
+    itemId: ""
+  };
+}
 
     return {
       shopId: "",
