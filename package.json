@@ -1,21 +1,21 @@
 {
-  "name": "automacao-promocoes",
+  "name": "whatsapp-api",
   "version": "1.0.0",
-  "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "@whiskeysockets/baileys": "^7.0.0-rc.9",
-    "axios": "^1.15.2",
-    "express": "^5.2.1",
-    "node-cron": "^4.2.1",
-    "qrcode-terminal": "^0.12.0",
-    "cors": "^2.8.5"
+    "@whiskeysockets/baileys": "^6.7.7",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.2.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "node-cron": "^3.0.3",
+    "pino": "^9.3.2",
+    "qrcode": "^1.5.4"
   }
 }
