@@ -982,14 +982,25 @@ async function importarAliExpress(urlEntrada, config = {}) {
       } catch {}
     }
 
-    return {
+   async function encurtarUrl(url) {
+  try {
+    const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`);
+    return await res.text();
+  } catch {
+    return url;
+  }
+}
+     
+   const linkFinal = await encurtarUrl(linkAfiliado);
+
+   return {
       marketplace: "aliexpress",
       titulo: htmlDecode(titulo || "Produto AliExpress"),
       precoAntigo: limparPreco(precoAntigo || ""),
       precoAtual: limparPreco(precoAtual || ""),
       cupom: "",
       linkOriginal: urlEntrada,
-      linkAfiliado,
+      linkAfiliado: linkFinal,
       imagem: corrigirImagemUrl(imagem) || imagem,
       categoria: "AliExpress",
       aviso: !imagem || titulo === "Produto AliExpress"
