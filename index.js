@@ -1026,7 +1026,28 @@ async function importarAliExpress(urlEntrada, config = {}) {
       if (m?.[1]) dados.precoAtual = m[1];
     }
 
-    if (!dados.precoAntigo) {
+    // Fallback: tenta extrair preços do parâmetro pdp_npi da URL
+if (!dados.precoAtual) {
+  try {
+    const urlDecodificada = decodeURIComponent(urlFinal);
+    const precos = [...urlDecodificada.matchAll(/R\$ ?([\d.,]+)/g)]
+      .map(m => m[1])
+      .filter(Boolean);
+
+    if (precos.length >= 2) {
+      dados.precoAntigo = dados.precoAntigo || precos[0];
+      dados.precoAtual = precos[1];
+      console.log("💰 Preços AliExpress extraídos da URL:", dados.precoAntigo, dados.precoAtual);
+    } else if (precos.length === 1) {
+      dados.precoAtual = precos[0];
+      console.log("💰 Preço AliExpress extraído da URL:", dados.precoAtual);
+    }
+  } catch (e) {
+    console.log("⚠️ Não foi possível extrair preço da URL AliExpress:", e.message);
+  }
+}
+
+      if (!dados.precoAntigo) {
       const m = html.match(/"originalPrice"\s*:\s*"([^"]+)"/i);
       if (m?.[1]) dados.precoAntigo = m[1];
     }
