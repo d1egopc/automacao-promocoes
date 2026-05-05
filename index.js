@@ -990,21 +990,31 @@ try {
     }
 
     // Fallback: se API não trouxer preço, tenta pegar do parâmetro pdp_npi da URL
-    if (!precoAtual || limparPreco(precoAtual) === limparPreco(precoAntigo)) {
-      try {
-        const urlDecodificada = decodeURIComponent(urlEntrada);
-        const precos = [...urlDecodificada.matchAll(/R\$ ?([\d.,]+)/g)]
-          .map((m) => m[1])
-          .filter(Boolean);
+    
+     // 🔥 PRIORIDADE: preço real da URL (AliExpress promo)
+  try {
+  const urlDecodificada = decodeURIComponent(urlEntrada);
 
-        if (precos.length >= 2) {
-          precoAntigo = precoAntigo || precos[0];
-          precoAtual = precos[1];
-        } else if (precos.length === 1) {
-          precoAtual = precos[0];
-        }
-      } catch {}
+  // 1) Tenta padrão exato: BRL!68.88!28.93
+  let m = urlDecodificada.match(/BRL[!|%21]+(\d+(?:\.\d+)?)[!|%21]+(\d+(?:\.\d+)?)/);
+
+  if (m) {
+    precoAntigo = m[1]; // 68.88
+    precoAtual  = m[2]; // 28.93
+  } else {
+    // 2) Fallback: pega R$ 68,88 / R$ 28,93
+    const precos = [...urlDecodificada.matchAll(/R\$ ?([\d.,]+)/g)]
+      .map(x => x[1])
+      .filter(Boolean);
+
+    if (precos.length >= 2) {
+      precoAntigo = precos[0];
+      precoAtual  = precos[1];
+    } else if (precos.length === 1) {
+      precoAtual = precos[0];
     }
+  }
+} catch {}
 
    async function encurtarUrl(url) {
   try {
