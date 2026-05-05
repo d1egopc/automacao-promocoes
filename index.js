@@ -106,7 +106,14 @@ async function processarFila() {
       return;
     }
 
-    const mensagem = `🔥 OFERTA
+    let mensagem = `🔥 OFERTA
+
+🛍️ ${oferta.nome || oferta.titulo}
+💰 R$ ${oferta.preco || oferta.precoAtual}
+
+👉 ${oferta.link || oferta.linkAfiliado}
+
+🚀 Corre antes que acabe!`;
 
 🛍️ ${oferta.nome || oferta.titulo}
 💰 R$ ${oferta.preco || oferta.precoAtual}
