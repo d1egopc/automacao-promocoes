@@ -975,16 +975,6 @@ async function importarAliExpress(urlEntrada, config = {}) {
       redirect: "follow"
     });
 
-    const urlFinal = response.url || urlEntrada;
-    const html = await response.text();
-     headers: {
-    "User-Agent": UA,
-    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-    "Accept": "text/html,application/xhtml+xml"
-  },
-  redirect: "follow"
-});
-
 const urlFinal = response.url || urlEntrada;
 const html = await response.text();
 
