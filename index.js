@@ -132,6 +132,25 @@ if (cupom) {
 
 ⚠️ Preço pode variar por moedas, cupom, variação ou impostos. Confira o valor final.`;
 }
+
+function parsePreco(valor) {
+  if (!valor) return 0;
+  return parseFloat(valor.toString().replace(",", "."));
+}
+
+const antigo = parsePreco(oferta.precoAntigo);
+const atual = parsePreco(oferta.precoAtual);
+
+if (antigo > atual && atual > 0) {
+  const economia = (antigo - atual).toFixed(2);
+  const porcentagem = Math.round(((antigo - atual) / antigo) * 100);
+
+  mensagem += `
+
+💥 Economia: R$ ${economia.replace(".", ",")}
+🔥 ${porcentagem}% OFF`;
+}
+
     
     for (const destino of destinos) {
       if (oferta.imagem) {
