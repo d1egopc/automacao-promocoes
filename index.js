@@ -1056,6 +1056,34 @@ if (!dados.precoAtual) {
       const m = html.match(/"imagePath"\s*:\s*"(https?:[^"]+)"/i);
       if (m?.[1]) dados.imagem = m[1].replace(/\\u002F/g, "/");
     }
+    
+    // Fallback extra: tenta achar imagens do AliExpress no HTML
+if (!dados.imagem) {
+  const m =
+    html.match(/https?:\\?\/\\?\/[^"']+alicdn\.com[^"']+\.(?:jpg|jpeg|png|webp)/i) ||
+    html.match(/\/\/[^"']+alicdn\.com[^"']+\.(?:jpg|jpeg|png|webp)/i);
+
+  if (m?.[0]) {
+    dados.imagem = m[0]
+      .replace(/\\\//g, "/")
+      .replace(/^\/\//, "https://");
+  }
+}
+
+// Fallback extra: tenta achar título no HTML
+if (!dados.titulo || dados.titulo === "Produto AliExpress") {
+  const m =
+    html.match(/<title>(.*?)<\/title>/i) ||
+    html.match(/"subject"\s*:\s*"([^"]+)"/i) ||
+    html.match(/"title"\s*:\s*"([^"]+)"/i);
+
+  if (m?.[1]) {
+    dados.titulo = htmlDecode(m[1])
+      .replace(" | AliExpress", "")
+      .replace(" - AliExpress", "")
+      .trim();
+  }
+}
 
     let imagemFinal = dados.imagem || "";
 
