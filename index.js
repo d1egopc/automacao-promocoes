@@ -839,55 +839,231 @@ if (
   };
 }
 
-async function importarAliExpress(url, config) {
-  try {
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Accept-Language": "pt-BR,pt;q=0.9"
+async function importarAliExpress(urlEntrada, config = {}) {
+  const UA =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+
+  function extrairJsonBalanceado(texto, inicio) {
+    let depth = 0;
+    let dentroString = false;
+    let escape = false;
+
+    for (let i = inicio; i < texto.length; i++) {
+      const c = texto[i];
+
+      if (dentroString) {
+        if (escape) escape = false;
+        else if (c === "\\") escape = true;
+        else if (c === '"') dentroString = false;
+        continue;
       }
-    });
 
-    const html = await response.text();
+      if (c === '"') dentroString = true;
+      else if (c === "{") depth++;
+      else if (c === "}") {
+        depth--;
+        if (depth === 0) return texto.slice(inicio, i + 1);
+      }
+    }
 
-    const jsonLd = extrairJsonLd(html);
+    return null;
+  }
+
+  function tentarJson(html, padroes) {
+    for (const re of padroes) {
+      const m = html.match(re);
+      if (!m) continue;
+
+      const idx = html.indexOf("{", m.index);
+      if (idx < 0) continue;
+
+      const bruto = extrairJsonBalanceado(html, idx);
+      if (!bruto) continue;
+
+      try {
+        return JSON.parse(bruto);
+      } catch {
+        try {
+          return JSON.parse(bruto.replace(/,\s*([}\]])/g, "$1"));
+        } catch {}
+      }
+    }
+
+    return null;
+  }
+
+  function pickPreco(obj, keys) {
+    for (const k of keys) {
+      const v = obj?.[k];
+      if (!v) continue;
+
+      if (typeof v === "string") return v;
+      if (typeof v === "number") return String(v);
+
+      if (typeof v === "object") {
+        const cand =
+          v.formatedAmount ||
+          v.formattedAmount ||
+          v.value ||
+          v.amount ||
+          v.minActivityAmount?.formatedAmount ||
+          v.minAmount?.formatedAmount;
+
+        if (cand) return String(cand);
+      }
+    }
+
+    return "";
+  }
+
+  function extrairDados(json) {
+    const root = json?.data || json || {};
+
+    const titleModule = root.titleModule || root.productInfoComponent || {};
+    const priceModule = root.priceModule || {};
+    const imageModule = root.imageModule || {};
 
     const titulo =
-      jsonLd?.name ||
-      extrairMeta(html, "og:title") ||
-      "Produto AliExpress";
-
-    let preco =
-      jsonLd?.offers?.price ||
-      extrairMeta(html, "product:price:amount") ||
-      extrairMeta(html, "og:price:amount") ||
+      titleModule.subject ||
+      titleModule.title ||
+      root.productTitle ||
+      root.title ||
       "";
 
-    const imagem =
-      (Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image) ||
-      extrairMeta(html, "og:image") ||
-      "";
+    const precoAtual = pickPreco(priceModule, [
+      "formatedActivityPrice",
+      "formatedPrice",
+      "salePrice",
+      "minActivityAmount",
+      "minAmount"
+    ]);
 
-    preco = limparPreco(preco);
+    const precoAntigo = pickPreco(priceModule, [
+      "originalPrice",
+      "formatedPrice",
+      "maxAmount"
+    ]);
 
-    let linkAfiliado = url;
+    const imagens =
+      imageModule.imagePathList ||
+      imageModule.summImagePathList ||
+      root.imagePath ||
+      [];
 
-    const trackingId = config?.credenciais?.trackingId;
+    const imagem = Array.isArray(imagens) ? imagens[0] : imagens || "";
+
+    return {
+      titulo,
+      precoAtual,
+      precoAntigo: precoAntigo === precoAtual ? "" : precoAntigo,
+      imagem
+    };
+  }
+
+  try {
+    if (urlEntrada && !urlEntrada.startsWith("http")) {
+      urlEntrada = "https://" + urlEntrada;
+    }
+
+    const response = await fetch(urlEntrada, {
+      headers: {
+        "User-Agent": UA,
+        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+        "Accept": "text/html,application/xhtml+xml"
+      },
+      redirect: "follow"
+    });
+
+    const urlFinal = response.url || urlEntrada;
+    const html = await response.text();
+
+    let dados = {
+      titulo: "",
+      precoAtual: "",
+      precoAntigo: "",
+      imagem: ""
+    };
+
+    const padroes = [
+      /window\.runParams\s*=\s*/i,
+      /__AER_DATA__\s*=\s*/i,
+      /window\._dida_config_\s*=\s*/i,
+      /"productInfoComponent"\s*:\s*/i,
+      /"priceModule"\s*:\s*/i,
+      /"imageModule"\s*:\s*/i
+    ];
+
+    const json = tentarJson(html, padroes);
+
+    if (json) {
+      dados = {
+        ...dados,
+        ...extrairDados(json)
+      };
+    }
+
+    if (!dados.titulo) {
+      dados.titulo =
+        extrairMeta(html, "og:title") ||
+        extrairMeta(html, "twitter:title") ||
+        "Produto AliExpress";
+    }
+
+    if (!dados.imagem) {
+      dados.imagem =
+        extrairMeta(html, "og:image") ||
+        extrairMeta(html, "twitter:image") ||
+        "";
+    }
+
+    if (!dados.precoAtual) {
+      const m =
+        html.match(/"salePrice"\s*:\s*"([^"]+)"/i) ||
+        html.match(/"formatedActivityPrice"\s*:\s*"([^"]+)"/i) ||
+        html.match(/"formatedPrice"\s*:\s*"([^"]+)"/i);
+
+      if (m?.[1]) dados.precoAtual = m[1];
+    }
+
+    if (!dados.precoAntigo) {
+      const m = html.match(/"originalPrice"\s*:\s*"([^"]+)"/i);
+      if (m?.[1]) dados.precoAntigo = m[1];
+    }
+
+    if (!dados.imagem) {
+      const m = html.match(/"imagePath"\s*:\s*"(https?:[^"]+)"/i);
+      if (m?.[1]) dados.imagem = m[1].replace(/\\u002F/g, "/");
+    }
+
+    let imagemFinal = dados.imagem || "";
+
+    if (imagemFinal.startsWith("//")) {
+      imagemFinal = "https:" + imagemFinal;
+    }
+
+    imagemFinal = imagemFinal.replace(/\\u002F/g, "/");
+
+    const trackingId = config?.credenciais?.trackingId || "";
+
+    let linkAfiliado = urlFinal;
 
     if (trackingId) {
-      linkAfiliado = `https://s.click.aliexpress.com/e/${trackingId}`;
+      linkAfiliado =
+        `https://s.click.aliexpress.com/deep_link.htm?aff_short_key=${trackingId}&dl_target_url=${encodeURIComponent(urlFinal)}`;
     }
 
     return {
       marketplace: "aliexpress",
-      titulo: htmlDecode(titulo),
-      precoAntigo: "",
-      precoAtual: preco,
+      titulo: htmlDecode(dados.titulo || "Produto AliExpress"),
+      precoAntigo: limparPreco(dados.precoAntigo || ""),
+      precoAtual: limparPreco(dados.precoAtual || ""),
       cupom: "",
-      linkOriginal: url,
+      linkOriginal: urlFinal,
       linkAfiliado,
-      imagem: corrigirImagemUrl(imagem) || imagem,
-      categoria: "AliExpress"
+      imagem: corrigirImagemUrl(imagemFinal) || imagemFinal,
+      categoria: "AliExpress",
+      aviso: !dados.precoAtual || !imagemFinal ? "Alguns dados não foram encontrados automaticamente." : ""
     };
 
   } catch (e) {
@@ -899,10 +1075,11 @@ async function importarAliExpress(url, config) {
       precoAntigo: "",
       precoAtual: "",
       cupom: "",
-      linkOriginal: url,
-      linkAfiliado: url,
+      linkOriginal: urlEntrada,
+      linkAfiliado: urlEntrada,
       imagem: "",
-      categoria: "AliExpress"
+      categoria: "AliExpress",
+      aviso: "Erro ao consultar AliExpress. Preencha manualmente."
     };
   }
 }
