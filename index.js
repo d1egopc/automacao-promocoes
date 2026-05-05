@@ -977,6 +977,25 @@ async function importarAliExpress(urlEntrada, config = {}) {
 
     const urlFinal = response.url || urlEntrada;
     const html = await response.text();
+    const response = await fetch(urlEntrada, {
+  headers: {
+    "User-Agent": UA,
+    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+    "Accept": "text/html,application/xhtml+xml"
+  },
+  redirect: "follow"
+});
+
+const urlFinal = response.url || urlEntrada;
+const html = await response.text();
+
+// 🔥 COLE AQUI 👇
+console.log("ALIEXPRESS STATUS:", response.status);
+console.log("ALIEXPRESS HTML TAMANHO:", html.length);
+console.log("ALIEXPRESS TEM OG IMAGE:", html.includes("og:image"));
+console.log("ALIEXPRESS TEM TITLE:", html.includes("<title>"));
+console.log("ALIEXPRESS TRECHO:", html.slice(0, 500));
+
 
     let dados = {
       titulo: "",
