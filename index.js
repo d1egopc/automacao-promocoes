@@ -1552,16 +1552,9 @@ if (temMin && temMax && minNumero !== maxNumero) {
 } else {
   precoAtual = precoMin || precoMax || "";
 
-  const desconto = Number(produto?.priceDiscountRate || 0);
-  const precoNumero = Number(String(precoAtual).replace(",", "."));
-
-  if (Number.isFinite(precoNumero) && desconto > 0 && desconto < 80) {
-    precoAntigo = (precoNumero / (1 - desconto / 100))
-      .toFixed(2)
-      .replace(".", ",");
-  } else {
-    precoAntigo = "";
-  }
+  // Shopee não retorna preço antigo real nesse endpoint.
+  // Não calcular "De" automaticamente para evitar desconto inflado.
+  precoAntigo = "";
 }
 
   let imagem = produto?.imageUrl || "";
