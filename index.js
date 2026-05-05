@@ -105,7 +105,7 @@ async function processarFila() {
       console.log("⚠️ Sem destino");
       return;
     }
-
+    
     let mensagem = `🔥 OFERTA
 
 🛍️ ${oferta.nome || oferta.titulo}
@@ -115,13 +115,19 @@ async function processarFila() {
 
 🚀 Corre antes que acabe!`;
 
-🛍️ ${oferta.nome || oferta.titulo}
-💰 R$ ${oferta.preco || oferta.precoAtual}
+const cupom = oferta.cupom || "";
 
-👉 ${oferta.link || oferta.linkAfiliado}
+if (cupom) {
+  mensagem += `
 
-🚀 Corre antes que acabe!`;
+🎟️ Cupom: ${cupom}
+🎫 Use o cupom ${cupom} para chegar neste valor.`;
+} else {
+  mensagem += `
 
+🎟️ Verifique se há cupons disponíveis na página`;
+}
+    
     for (const destino of destinos) {
       if (oferta.imagem) {
         await sock.sendMessage(destino, {
