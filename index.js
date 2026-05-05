@@ -839,83 +839,162 @@ if (
   };
 }
 
-async function importarAliExpress(url, config = {}) {
+async function importarAliExpress(urlEntrada, config = {}) {
   try {
-    if (url && !url.startsWith("http")) {
-      url = "https://" + url;
+    if (urlEntrada && !urlEntrada.startsWith("http")) {
+      urlEntrada = "https://" + urlEntrada;
     }
 
-    // 🔍 extrair productId do link
-    const match = url.match(/item\/(\d+)\.html/);
-    const productId = match ? match[1] : null;
+    const productId =
+      urlEntrada.match(/\/item\/(\d+)\.html/i)?.[1] ||
+      urlEntrada.match(/[?&]productId=(\d+)/i)?.[1];
 
     if (!productId) {
-      throw new Error("ProductId não encontrado");
+      throw new Error("Product ID não encontrado no link AliExpress");
     }
 
-    const { appKey, trackingId } = config?.credenciais || {};
+    const credenciais = config?.credenciais || {};
+    const appKey = credenciais.appKey || "";
+    const secret = credenciais.secret || "";
+    const trackingId = credenciais.trackingId || "";
 
-    // 🔥 tentativa API oficial (endpoint simplificado público afiliado)
-    let titulo = "";
-    let imagem = "";
-    let precoAtual = "";
-    let precoAntigo = "";
+    if (!appKey || !secret || !trackingId) {
+      throw new Error("Credenciais AliExpress incompletas");
+    }
 
-    try {
-      const apiUrl = `https://api-sg.aliexpress.com/sync?app_key=${appKey}&method=aliexpress.affiliate.productdetail.get&product_ids=${productId}`;
+    function timestampGMT8() {
+      const d = new Date(Date.now() + 8 * 60 * 60 * 1000);
+      const pad = (n) => String(n).padStart(2, "0");
 
-      const response = await fetch(apiUrl);
-      const data = await response.json();
+      return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+    }
 
-      console.log("ALIEXPRESS API RESPONSE:", JSON.stringify(data));
+    function assinar(params, appSecret) {
+      const sortedKeys = Object.keys(params).sort();
+      let base = appSecret;
 
-      const produto =
-        data?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result?.products?.[0];
-
-      if (produto) {
-        titulo = produto.product_title || "";
-        imagem = produto.product_main_image_url || "";
-        precoAtual = produto.target_sale_price || "";
-        precoAntigo = produto.target_original_price || "";
+      for (const key of sortedKeys) {
+        if (key === "sign") continue;
+        base += key + params[key];
       }
-    } catch (e) {
-      console.log("⚠️ API falhou, usando fallback URL");
+
+      base += appSecret;
+
+      return crypto
+        .createHash("md5")
+        .update(base, "utf8")
+        .digest("hex")
+        .toUpperCase();
     }
 
-    // 🔥 fallback preço pela URL (já funciona no seu sistema)
-    if (!precoAtual) {
-      const urlDecodificada = decodeURIComponent(url);
-      const precos = [...urlDecodificada.matchAll(/R\$ ?([\d.,]+)/g)]
-        .map(m => m[1])
-        .filter(Boolean);
+    const params = {
+      method: "aliexpress.affiliate.productdetail.get",
+      app_key: appKey,
+      timestamp: timestampGMT8(),
+      sign_method: "md5",
+      format: "json",
+      v: "2.0",
+      product_ids: productId,
+      target_currency: "BRL",
+      target_language: "PT",
+      ship_to_country: "BR",
+      tracking_id: trackingId
+    };
 
-      if (precos.length >= 2) {
-        precoAntigo = precos[0];
-        precoAtual = precos[1];
-      } else if (precos.length === 1) {
-        precoAtual = precos[0];
-      }
-    }
+    params.sign = assinar(params, secret);
 
-    // 🔗 link afiliado
-    let linkAfiliado = url;
+    const body = new URLSearchParams(params);
 
-    if (trackingId) {
+    const response = await fetch("https://api-sg.aliexpress.com/sync", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=utf-8"
+      },
+      body
+    });
+
+    const data = await response.json();
+
+    console.log("ALIEXPRESS API RESPONSE:", JSON.stringify(data));
+
+    const result =
+      data?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result ||
+      data?.resp_result?.result ||
+      data?.result ||
+      {};
+
+    const produto =
+      result?.products?.product?.[0] ||
+      result?.products?.[0] ||
+      result?.product?.[0] ||
+      result?.product ||
+      {};
+
+    let titulo =
+      produto.product_title ||
+      produto.title ||
+      produto.productTitle ||
+      "Produto AliExpress";
+
+    let imagem =
+      produto.product_main_image_url ||
+      produto.product_small_image_urls?.string?.[0] ||
+      produto.product_small_image_urls?.[0] ||
+      produto.image_url ||
+      "";
+
+    let precoAtual =
+      produto.target_sale_price ||
+      produto.sale_price ||
+      produto.app_sale_price ||
+      produto.original_price ||
+      "";
+
+    let precoAntigo =
+      produto.target_original_price ||
+      produto.original_price ||
+      "";
+
+    let linkAfiliado =
+      produto.promotion_link ||
+      produto.product_detail_url ||
+      urlEntrada;
+
+    if (!linkAfiliado && trackingId) {
       linkAfiliado =
-        `https://s.click.aliexpress.com/deep_link.htm?aff_short_key=${trackingId}&dl_target_url=${encodeURIComponent(url)}`;
+        `https://s.click.aliexpress.com/deep_link.htm?aff_short_key=${trackingId}&dl_target_url=${encodeURIComponent(urlEntrada)}`;
+    }
+
+    // Fallback: se API não trouxer preço, tenta pegar do parâmetro pdp_npi da URL
+    if (!precoAtual) {
+      try {
+        const urlDecodificada = decodeURIComponent(urlEntrada);
+        const precos = [...urlDecodificada.matchAll(/R\$ ?([\d.,]+)/g)]
+          .map((m) => m[1])
+          .filter(Boolean);
+
+        if (precos.length >= 2) {
+          precoAntigo = precoAntigo || precos[0];
+          precoAtual = precos[1];
+        } else if (precos.length === 1) {
+          precoAtual = precos[0];
+        }
+      } catch {}
     }
 
     return {
       marketplace: "aliexpress",
-      titulo: titulo || "Produto AliExpress",
-      precoAntigo: limparPreco(precoAntigo),
-      precoAtual: limparPreco(precoAtual),
+      titulo: htmlDecode(titulo || "Produto AliExpress"),
+      precoAntigo: limparPreco(precoAntigo || ""),
+      precoAtual: limparPreco(precoAtual || ""),
       cupom: "",
-      linkOriginal: url,
+      linkOriginal: urlEntrada,
       linkAfiliado,
       imagem: corrigirImagemUrl(imagem) || imagem,
       categoria: "AliExpress",
-      aviso: !titulo ? "Dados parciais. Preencha imagem/título se necessário." : ""
+      aviso: !imagem || titulo === "Produto AliExpress"
+        ? "Dados parciais retornados pela API AliExpress."
+        : ""
     };
 
   } catch (e) {
@@ -927,11 +1006,11 @@ async function importarAliExpress(url, config = {}) {
       precoAntigo: "",
       precoAtual: "",
       cupom: "",
-      linkOriginal: url,
-      linkAfiliado: url,
+      linkOriginal: urlEntrada,
+      linkAfiliado: urlEntrada,
       imagem: "",
       categoria: "AliExpress",
-      aviso: "Erro ao consultar AliExpress"
+      aviso: "Erro ao consultar API AliExpress"
     };
   }
 }
