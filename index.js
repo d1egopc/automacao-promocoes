@@ -116,16 +116,21 @@ async function processarFila() {
 🚀 Corre antes que acabe!`;
 
 const cupom = oferta.cupom || "";
+const marketplace = oferta.marketplace || "";
 
 if (cupom) {
   mensagem += `
 
 🎟️ Cupom: ${cupom}
 🎫 Use o cupom ${cupom} para chegar neste valor.`;
-} else {
+} else if (marketplace === "shopee") {
   mensagem += `
 
 🎟️ Verifique se há cupons disponíveis na página`;
+} else if (marketplace === "aliexpress") {
+  mensagem += `
+
+⚠️ Preço pode variar por moedas, cupom, variação ou impostos. Confira o valor final.`;
 }
     
     for (const destino of destinos) {
