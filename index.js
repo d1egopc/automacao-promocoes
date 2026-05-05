@@ -943,12 +943,10 @@ async function importarAliExpress(urlEntrada, config = {}) {
       produto.image_url ||
       "";
 
-    let precoAtual =
-      produto.target_sale_price ||
-      produto.sale_price ||
-      produto.app_sale_price ||
-      produto.original_price ||
-      "";
+   let precoAtual =
+       produto.target_sale_price ||
+       produto.sale_price ||
+       produto.app_sale_price || "";
 
     let precoAntigo =
       produto.target_original_price ||
