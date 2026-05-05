@@ -977,8 +977,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
 
     const urlFinal = response.url || urlEntrada;
     const html = await response.text();
-    const response = await fetch(urlEntrada, {
-  headers: {
+     headers: {
     "User-Agent": UA,
     "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
     "Accept": "text/html,application/xhtml+xml"
