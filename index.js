@@ -960,24 +960,23 @@ async function importarAliExpress(urlEntrada, config = {}) {
 try {
   const urlDecodificada = decodeURIComponent(urlEntrada);
 
-  let precos = [...urlDecodificada.matchAll(/R\$ ?([\d.,]+)/g)]
-    .map(m => m[1])
-    .filter(Boolean);
+  // pega exatamente o padrão pdp_npi
+  const match = urlDecodificada.match(/BRL!([\d.]+)!([\d.]+)/);
 
-  if (precos.length < 2) {
-    precos = [...urlDecodificada.matchAll(/BRL[!|%21]+([\d.,]+)[!|%21]+([\d.,]+)/g)]
-      .flatMap(m => [m[1], m[2]])
-      .filter(Boolean);
+  if (match) {
+    const antigo = match[1];
+    const atual = match[2];
+
+    // só usa se fizer sentido (evita bug tipo 8.93)
+    if (parseFloat(atual) < parseFloat(antigo)) {
+      precoAntigo = antigo;
+      precoAtual = atual;
+    }
   }
 
-  if (precos.length >= 2) {
-    precoAntigo = precos[0];
-    precoAtual = precos[1];
-  } else if (precos.length === 1) {
-    precoAtual = precos[0];
-  }
-} catch {}
-
+} catch (e) {
+  console.log("Erro ao extrair preço da URL:", e.message);
+}
 
     let linkAfiliado =
       produto.promotion_link ||
