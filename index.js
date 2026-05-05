@@ -964,7 +964,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
     }
 
     // Fallback: se API não trouxer preço, tenta pegar do parâmetro pdp_npi da URL
-    if (!precoAtual) {
+    if (!precoAtual || limparPreco(precoAtual) === limparPreco(precoAntigo)) {
       try {
         const urlDecodificada = decodeURIComponent(urlEntrada);
         const precos = [...urlDecodificada.matchAll(/R\$ ?([\d.,]+)/g)]
