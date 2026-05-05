@@ -952,6 +952,24 @@ async function importarAliExpress(urlEntrada, config = {}) {
       produto.target_original_price ||
       produto.original_price ||
       "";
+  if (produto.discount === "0%" && limparPreco(precoAtual) === limparPreco(precoAntigo)) {
+  precoAntigo = "";
+}
+
+// 🔥 PRIORIDADE: preço real da URL (AliExpress promo)
+try {
+  const urlDecodificada = decodeURIComponent(urlEntrada);
+  const precos = [...urlDecodificada.matchAll(/R\$ ?([\d.,]+)/g)]
+    .map(m => m[1])
+    .filter(Boolean);
+
+  if (precos.length >= 2) {
+    precoAntigo = precos[0];
+    precoAtual = precos[1];
+  } else if (precos.length === 1) {
+    precoAtual = precos[0];
+  }
+} catch {}
 
     let linkAfiliado =
       produto.promotion_link ||
