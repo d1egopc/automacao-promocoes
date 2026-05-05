@@ -839,6 +839,75 @@ if (
   };
 }
 
+async function importarAliExpress(url, config) {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept-Language": "pt-BR,pt;q=0.9"
+      }
+    });
+
+    const html = await response.text();
+
+    const jsonLd = extrairJsonLd(html);
+
+    const titulo =
+      jsonLd?.name ||
+      extrairMeta(html, "og:title") ||
+      "Produto AliExpress";
+
+    let preco =
+      jsonLd?.offers?.price ||
+      extrairMeta(html, "product:price:amount") ||
+      extrairMeta(html, "og:price:amount") ||
+      "";
+
+    const imagem =
+      (Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image) ||
+      extrairMeta(html, "og:image") ||
+      "";
+
+    preco = limparPreco(preco);
+
+    let linkAfiliado = url;
+
+    const trackingId = config?.credenciais?.trackingId;
+
+    if (trackingId) {
+      linkAfiliado = `https://s.click.aliexpress.com/e/${trackingId}`;
+    }
+
+    return {
+      marketplace: "aliexpress",
+      titulo: htmlDecode(titulo),
+      precoAntigo: "",
+      precoAtual: preco,
+      cupom: "",
+      linkOriginal: url,
+      linkAfiliado,
+      imagem: corrigirImagemUrl(imagem) || imagem,
+      categoria: "AliExpress"
+    };
+
+  } catch (e) {
+    console.error("ERRO ALIEXPRESS:", e.message);
+
+    return {
+      marketplace: "aliexpress",
+      titulo: "Produto AliExpress",
+      precoAntigo: "",
+      precoAtual: "",
+      cupom: "",
+      linkOriginal: url,
+      linkAfiliado: url,
+      imagem: "",
+      categoria: "AliExpress"
+    };
+  }
+}
+
+
 async function importarAmazon(url, config) {
   if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
     url = "https://" + url;
@@ -1406,6 +1475,29 @@ if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
       });
     }
   }
+
+     if (marketplace === "aliexpress") {
+  try {
+    const produto = await importarAliExpress(url, config);
+    return res.json(produto);
+  } catch (e) {
+    console.error("ERRO ALIEXPRESS:", e);
+
+    return res.json({
+      marketplace: "aliexpress",
+      titulo: "Produto importado da AliExpress",
+      precoAntigo: "",
+      precoAtual: "",
+      cupom: "",
+      linkOriginal: url,
+      linkAfiliado: url,
+      imagem: "",
+      categoria: "AliExpress",
+      aviso: "Erro ao consultar AliExpress"
+    });
+  }
+}
+
 
   if (marketplace === "mercadolivre") {
     try {
