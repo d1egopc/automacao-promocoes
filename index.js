@@ -56,6 +56,8 @@ function podeRodarAgora() {
   return true;
 }
 
+let ultimoEnvioFila = 0;
+
 async function processarFila() {
   if (enviandoAgora) return;
   enviandoAgora = true;
@@ -90,6 +92,8 @@ async function processarFila() {
       console.log("❌ Nenhuma sessão conectada");
       return;
     }
+
+    let ultimoEnvioFila = 0;
 
    const destinosBrutos =
   oferta.destinos?.length
@@ -179,9 +183,10 @@ if (antigo > atual && atual > 0) {
     }
 
     controleEnvio[clienteId] = Date.now();
+    ultimoEnvioFila = Date.now();
     oferta.status = "enviado";
     oferta.dataEnvio = new Date();
-
+    
     salvarFila();
 
     console.log("✅ Enviado com controle de tempo");
@@ -226,6 +231,29 @@ app.post("/fila", (req, res) => {
 
 app.get("/fila", (req, res) => {
   res.json(fila);
+});
+
+app.get("/fila/status", (req, res) => {
+  const intervaloMinutos = config.intervaloFila || 5;
+  const intervaloMs = intervaloMinutos * 60 * 1000;
+
+  const agora = Date.now();
+
+  const proximoEnvio = ultimoEnvioFila
+    ? ultimoEnvioFila + intervaloMs
+    : agora + intervaloMs;
+
+  const restanteMs = Math.max(proximoEnvio - agora, 0);
+
+  const restanteSegundos = Math.ceil(restanteMs / 1000);
+
+  res.json({
+    ativa: config.automacaoAtiva,
+    ultimoEnvioFila,
+    proximoEnvio,
+    restanteSegundos,
+    pendentes: fila.filter(f => f.status === "pendente").length
+  });
 });
 
 // ================= AUTOMAÇÃO =================
