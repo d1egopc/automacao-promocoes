@@ -2232,20 +2232,10 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("🔥 API ONLINE NA PORTA " + PORT);
 
-  setTimeout(() => {
-  console.log("🔄 Tentando reconectar WhatsApp automaticamente...");
-
-  if (typeof conectar === "function") {
-    conectar("sessao1");
-  } else if (typeof iniciarSessao === "function") {
-    iniciarSessao("sessao1");
-  } else if (typeof conectarSessao === "function") {
-    conectarSessao("sessao1");
-  } else {
-    console.log("⚠️ Função de conexão automática não encontrada");
-  }
-}, 3000);
-
+ setTimeout(() => {
+    console.log("🔄 Tentando reconectar WhatsApp automaticamente...");
+    iniciarWhatsApp("sessao1");
+  }, 3000);
 });
  
  setInterval(() => {
