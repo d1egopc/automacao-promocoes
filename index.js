@@ -2231,16 +2231,17 @@ const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log("🔥 API ONLINE NA PORTA " + PORT);
+
+  setTimeout(() => {
+    console.log("🔄 Tentando reconectar WhatsApp automaticamente...");
+    conectarWhatsApp("sessao1");
+  }, 3000);
 });
 
 setInterval(() => {
-  if (!config.automacaoAtiva) {
-    console.log("⏸️ Automação desligada");
-    return;
-  }
-
   processarFila();
 }, 10 * 1000); // roda a cada 10 segundos
+
 setInterval(() => {
   if (config.automacaoAtiva) {
     farejarMercadoLivre();
