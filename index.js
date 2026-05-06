@@ -2245,6 +2245,8 @@ app.listen(PORT, () => {
     console.log("⚠️ Função de conexão automática não encontrada");
   }
 }, 3000);
+
+});
  
  setInterval(() => {
   processarFila();
