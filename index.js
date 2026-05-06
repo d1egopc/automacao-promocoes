@@ -1314,7 +1314,9 @@ async function importarAmazon(url, config) {
   }
 
 let cupom =
+  primeiroMatch(/(COMPRANOAPP)/i) ||
   primeiroMatch(/Insira o código\s+([A-Z0-9]+)/i) ||
+  primeiroMatch(/Aplique o cupom\s+([A-Z0-9]{4,20})/i) ||
   primeiroMatch(/cupom\s+([A-Z0-9]{4,20})/i) ||
   primeiroMatch(/código\s+([A-Z0-9]{4,20})/i) ||
   "";
