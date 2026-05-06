@@ -1989,20 +1989,6 @@ app.get("/grupos/:id", async (req, res) => {
   return res.json(lista);
 });
 
-  try {
-    const grupos = await sock.groupFetchAllParticipating();
-
-    const lista = Object.entries(grupos).map(([id, g]) => ({
-      id,
-      nome: g.subject || "Grupo sem nome"
-    }));
-
-    return res.json(lista);
-  } catch (e) {
-    return res.status(500).json({ erro: e.message });
-  }
-});
-
 app.post("/destinos/:id", (req, res) => {
   const { destinos } = req.body;
 
