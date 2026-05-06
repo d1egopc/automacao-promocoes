@@ -1329,6 +1329,11 @@ if (cupom) {
 
 const linkFinal = await encurtarUrl(linkAfiliado); 
  
+console.log("🎟️ AMAZON CUPOM DETECTADO:", cupom);
+console.log("🎫 AMAZON AVISO CUPOM:", avisoCupom);
+console.log("🔎 AMAZON TEM COMPRANOAPP?", html.includes("COMPRANOAPP"));
+console.log("🔎 AMAZON TEM CUPOM?", /cupom/i.test(html));
+
 return {
     marketplace: "amazon",
     titulo: htmlDecode(titulo)
