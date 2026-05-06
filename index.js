@@ -2010,7 +2010,15 @@ app.post("/destinos/:id", (req, res) => {
 
   config.destinosPorSessao[id] = destinos;
 
-  salvarIntegracoes();
+  try {
+  if (typeof salvarIntegracoes === "function") {
+    salvarIntegracoes();
+  } else {
+    console.log("⚠️ salvarIntegracoes não encontrada. Destinos salvos só em memória.");
+  }
+} catch (e) {
+  console.log("⚠️ Erro ao salvar destinos:", e.message);
+}
 
   return res.json({
     ok: true,
