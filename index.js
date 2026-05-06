@@ -2010,7 +2010,7 @@ app.post("/destinos/:id", (req, res) => {
 
   config.destinosPorSessao[id] = destinos;
 
-  salvarConfig();
+  salvarIntegracoes();
 
   return res.json({
     ok: true,
