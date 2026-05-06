@@ -2013,8 +2013,9 @@ app.post("/destinos/:id", (req, res) => {
     ok: true,
     destinos
   });
+});
 
-  app.get("/destinos/:id", (req, res) => {
+app.get("/destinos/:id", (req, res) => {
   const id = req.params.id;
 
   return res.json({
@@ -2025,6 +2026,7 @@ app.post("/destinos/:id", (req, res) => {
       []
   });
 });
+
 
 app.post("/test-send/:id", async (req, res) => {
   const { id } = req.params;
