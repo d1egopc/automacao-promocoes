@@ -1313,6 +1313,20 @@ async function importarAmazon(url, config) {
     }
   }
 
+let cupom =
+  primeiroMatch(/Insira o código\s+([A-Z0-9]+)/i) ||
+  primeiroMatch(/cupom\s+([A-Z0-9]{4,20})/i) ||
+  primeiroMatch(/código\s+([A-Z0-9]{4,20})/i) ||
+  "";
+
+let avisoCupom = "";
+
+if (cupom) {
+  avisoCupom = `Aplique o cupom ${cupom} no carrinho.`;
+} else if (/resgatar|aplique o cupom|cupom disponível|desconto extra/i.test(html)) {
+  avisoCupom = "Há cupom/desconto extra na página. Resgate antes de finalizar.";
+}
+
 const linkFinal = await encurtarUrl(linkAfiliado); 
  
 return {
@@ -1324,7 +1338,8 @@ return {
     precoAntigo,
     precoAtual: preco,
     parcelamento,
-    cupom: "",
+    cupom,
+    avisoCupom,
     linkOriginal: url,
     linkAfiliado: linkFinal,
     imagem: corrigirImagemUrl(imagem) || imagem,
