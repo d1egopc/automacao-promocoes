@@ -1950,6 +1950,9 @@ app.get("/qr/:id", (req, res) => {
 
 async function carregarGruposSessao(id) {
   const sock = sessoes[id];
+if (gruposPorSessao[id]?.length) {
+  return gruposPorSessao[id];
+}
 
   if (!sock) {
     console.log("⚠️ Não carregou grupos: sem sessão");
