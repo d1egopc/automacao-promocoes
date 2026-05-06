@@ -312,6 +312,7 @@ let sessoes = {};
 let qrCodes = {};
 let statusSessao = {};
 let destinosPorSessao = {};
+let gruposPorSessao = {};
 let reconectando = {};
 let integracoesPorCliente = {};
 
