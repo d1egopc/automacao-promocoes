@@ -798,6 +798,16 @@ async function gerarLinkAfiliadoMercadoLivre(url, config) {
     console.error("ERRO ML AFILIADO:", e.message);
     return "";
   }
+  
+async function encurtarUrl(url) {
+  try {
+    const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`);
+    return await res.text();
+  } catch {
+    return url;
+  }
+}
+
 }async function importarMercadoLivre(url, config) {
   const cookies = config?.credenciais?.cookies || "";
 
@@ -1052,16 +1062,7 @@ try {
   }
 } catch {}
 
-   async function encurtarUrl(url) {
-  try {
-    const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`);
-    return await res.text();
-  } catch {
-    return url;
-  }
-}
-     
-   const linkFinal = await encurtarUrl(linkAfiliado);
+     const linkFinal = await encurtarUrl(linkAfiliado);
 
    return {
       marketplace: "aliexpress",
