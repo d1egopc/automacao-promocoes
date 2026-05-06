@@ -1290,6 +1290,10 @@ async function importarAmazon(url, config) {
     }
   }
 
+  let parcelamento =
+  primeiroMatch(/(\d+x\s+de\s+R\$\s*[\d.,]+\s*sem juros)/i) ||
+  primeiroMatch(/(\d+\s*x\s*R\$\s*[\d.,]+)/i) ||
+  "";
   const imagem = extrairImagemAmazon();
 
   let linkAfiliado = url;
@@ -1319,12 +1323,14 @@ return {
       .trim(),
     precoAntigo,
     precoAtual: preco,
+    parcelamento,
     cupom: "",
     linkOriginal: url,
     linkAfiliado: linkFinal,
     imagem: corrigirImagemUrl(imagem) || imagem,
     categoria: "Amazon"
   };
+
 }async function importarShopee(url, config) {
   if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
     url = "https://" + url;
