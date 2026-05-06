@@ -122,23 +122,70 @@ if (!destinos.length) {
   return;
 }
     
-    let mensagem = `🔥 OFERTA
+const titulo = oferta.nome || oferta.titulo || "Oferta";
 
-🛍️ ${oferta.nome || oferta.titulo}
-💰 R$ ${oferta.preco || oferta.precoAtual}
-
-👉 ${oferta.link || oferta.linkAfiliado}
-
-🚀 Corre antes que acabe!`;
-
+const precoAtual = oferta.preco || oferta.precoAtual || "";
+const precoAntigo = oferta.precoAntigo || "";
 const cupom = oferta.cupom || "";
+const avisoCupom = oferta.avisoCupom || "";
 const marketplace = oferta.marketplace || "";
+const link = oferta.link || oferta.linkAfiliado || "";
+const parcelamento = oferta.parcelamento || "";
+
+let mensagem = `🔥 OFERTA ENCONTRADA!
+
+🛍️ ${titulo}`;
+
+if (precoAntigo) {
+  mensagem += `
+
+❌ De: R$ ${precoAntigo}`;
+}
+
+if (precoAtual) {
+  mensagem += `
+✅ Por: R$ ${precoAtual}`;
+}
+
+if (precoAntigo && precoAtual) {
+  const antigo = Number(String(precoAntigo).replace(",", "."));
+  const atual = Number(String(precoAtual).replace(",", "."));
+
+  if (Number.isFinite(antigo) && Number.isFinite(atual) && antigo > atual) {
+    const economia = (antigo - atual).toFixed(2).replace(".", ",");
+    const desconto = Math.round(((antigo - atual) / antigo) * 100);
+
+    mensagem += `
+
+💥 Economia: R$ ${economia}
+🔥 ${desconto}% OFF`;
+
+    if (desconto >= 25) {
+      mensagem += `
+⚠️ PREÇO MUITO BOM`;
+    }
+  }
+}
+
+if (parcelamento) {
+  mensagem += `
+
+💳 ${parcelamento}`;
+}
 
 if (cupom) {
   mensagem += `
 
-🎟️ Cupom: ${cupom}
-🎫 Use o cupom ${cupom} para chegar neste valor.`;
+🎟️ Cupom: ${cupom}`;
+
+  if (avisoCupom) {
+    mensagem += `
+🎫 ${avisoCupom}`;
+  }
+} else if (marketplace === "amazon") {
+  mensagem += `
+
+🎟️ Verifique se há cupons extras na página`;
 } else if (marketplace === "shopee") {
   mensagem += `
 
@@ -148,6 +195,11 @@ if (cupom) {
 
 ⚠️ Preço pode variar por moedas, cupom, variação ou impostos. Confira o valor final.`;
 }
+
+mensagem += `
+
+🛒 Comprar:
+${link}`;  
 
 function parsePreco(valor) {
   if (!valor) return 0;
