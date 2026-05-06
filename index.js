@@ -1997,18 +1997,32 @@ app.post("/destinos/:id", (req, res) => {
     return res.status(400).json({ erro: "destinos deve ser array" });
   }
 
-  destinosPorSessao[req.params.id] = destinos;
+  const id = req.params.id;
+
+  destinosPorSessao[id] = destinos;
+
+  if (!config.destinosPorSessao) {
+    config.destinosPorSessao = {};
+  }
+
+  config.destinosPorSessao[id] = destinos;
+
+  salvarConfig();
 
   return res.json({
     ok: true,
     destinos
   });
-});
 
-app.get("/destinos/:id", (req, res) => {
+  app.get("/destinos/:id", (req, res) => {
+  const id = req.params.id;
+
   return res.json({
     ok: true,
-    destinos: destinosPorSessao[req.params.id] || []
+    destinos:
+      destinosPorSessao[id] ||
+      config?.destinosPorSessao?.[id] ||
+      []
   });
 });
 
