@@ -91,20 +91,31 @@ async function processarFila() {
       return;
     }
 
-    const destinosBrutos =
-      oferta.destinos ||
-      oferta.grupos ||
-      destinosPorSessao[idSessao] ||
-      [oferta.destino || oferta.grupoDestino];
+   const destinosBrutos =
+  oferta.destinos?.length
+    ? oferta.destinos
+    : oferta.grupos?.length
+      ? oferta.grupos
+      : destinosPorSessao[idSessao]?.length
+        ? destinosPorSessao[idSessao]
+        : oferta.destino
+          ? [oferta.destino]
+          : oferta.grupoDestino
+            ? [oferta.grupoDestino]
+            : config?.destinos?.length
+              ? config.destinos
+              : [];
 
-    const destinos = destinosBrutos
-      .map(d => d?.id || d?.value || d?.jid || d)
-      .filter(Boolean);
+const destinos = destinosBrutos
+  .map(d => d?.id || d?.value || d?.jid || d)
+  .filter(Boolean);
 
-    if (!destinos.length) {
-      console.log("⚠️ Sem destino");
-      return;
-    }
+console.log("DESTINOS PARA ENVIO:", destinos);
+
+if (!destinos.length) {
+  console.log("⚠️ Sem destino");
+  return;
+}
     
     let mensagem = `🔥 OFERTA
 
