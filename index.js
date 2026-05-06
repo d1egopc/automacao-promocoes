@@ -117,7 +117,8 @@ const destinos = destinosBrutos
 console.log("DESTINOS PARA ENVIO:", destinos);
 
 if (!destinos.length) {
-  console.log("⚠️ Sem destino");
+  console.log("⚠️ Sem destino carregado ainda. Aguardando...");
+  enviandoAgora = false;
   return;
 }
     
