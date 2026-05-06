@@ -793,22 +793,23 @@ async function gerarLinkAfiliadoMercadoLivre(url, config) {
       return "";
     }
 
-    return data?.short_url || data?.shortUrl || data?.url || "";
+ return data?.short_url || data?.shortUrl || data?.url || "";
   } catch (e) {
     console.error("ERRO ML AFILIADO:", e.message);
     return "";
   }
-  
-async function encurtarUrl(url) {
+}
+
+const encurtarUrl = async (url) => {
   try {
     const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`);
     return await res.text();
   } catch {
     return url;
   }
-}
+};
 
-}async function importarMercadoLivre(url, config) {
+async function importarMercadoLivre(url, config) {
   const cookies = config?.credenciais?.cookies || "";
 
   const response = await fetch(url, {
