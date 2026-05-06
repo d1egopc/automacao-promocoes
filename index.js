@@ -1947,14 +1947,47 @@ app.get("/qr/:id", (req, res) => {
   });
 });
 
-app.get("/grupos/:id", async (req, res) => {
-  const sock = sessoes[req.params.id];
+async function carregarGruposSessao(id) {
+  const sock = sessoes[id];
 
-  if (!sock) return res.status(400).json({ erro: "Sem sessão" });
-
-  if (statusSessao[req.params.id] !== "open") {
-    return res.status(400).json({ erro: "WhatsApp não conectado" });
+  if (!sock) {
+    console.log("⚠️ Não carregou grupos: sem sessão");
+    return [];
   }
+
+  if (statusSessao[id] !== "open") {
+    console.log("⚠️ Não carregou grupos: WhatsApp não está open");
+    return [];
+  }
+
+  try {
+    const grupos = await sock.groupFetchAllParticipating();
+
+    const lista = Object.entries(grupos).map(([gid, g]) => ({
+      id: gid,
+      nome: g.subject || "Grupo sem nome"
+    }));
+
+    gruposPorSessao[id] = lista;
+
+    console.log(`✅ Grupos carregados automaticamente: ${lista.length}`);
+
+    return lista;
+  } catch (e) {
+    console.log("❌ Erro ao carregar grupos:", e.message);
+    return [];
+  }
+}
+
+app.get("/grupos/:id", async (req, res) => {
+  const lista = await carregarGruposSessao(req.params.id);
+
+  if (!lista.length) {
+    return res.status(400).json({ erro: "Sem grupos carregados" });
+  }
+
+  return res.json(lista);
+});
 
   try {
     const grupos = await sock.groupFetchAllParticipating();
@@ -2091,11 +2124,14 @@ async function iniciarWhatsApp(id) {
     }
 
     if (connection === "open") {
-      console.log("✅ WHATSAPP CONECTADO:", id);
-      statusSessao[id] = "open";
-      qrCodes[id] = null;
-      reconectando[id] = false;
-    }
+  console.log("✅ WHATSAPP CONECTADO:", id);
+
+  statusSessao[id] = "open";
+  qrCodes[id] = null;
+  reconectando[id] = false;
+
+  setTimeout(() => carregarGruposSessao(id), 3000);
+}
 
     if (connection === "close") {
       const motivo = lastDisconnect?.error?.output?.statusCode;
