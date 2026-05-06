@@ -1266,7 +1266,9 @@ async function importarAmazon(url, config) {
     }
   }
 
-  return {
+const linkFinal = await encurtarUrl(linkAfiliado); 
+ 
+return {
     marketplace: "amazon",
     titulo: htmlDecode(titulo)
       .replace("Amazon.com.br:", "")
@@ -1276,7 +1278,7 @@ async function importarAmazon(url, config) {
     precoAtual: preco,
     cupom: "",
     linkOriginal: url,
-    linkAfiliado,
+    linkAfiliado: linkFinal,
     imagem: corrigirImagemUrl(imagem) || imagem,
     categoria: "Amazon"
   };
