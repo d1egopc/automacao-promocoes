@@ -2651,6 +2651,29 @@ const links = [...new Set(linksExtraidos)].slice(0, 8);
 console.log("🧪 AMAZON LINKS:", links);
 console.log(`🔎 ${termo}: ${links.length} produtos Amazon`);
 
+for (const link of links) {
+  try {
+    const produto = await importarAmazon(link, {
+      credenciais: integracoesPorCliente["admin"]?.amazon?.credenciais
+    });
+
+    console.log("🧪 PRODUTO AMAZON:", {
+      titulo: produto.titulo,
+      precoAtual: produto.precoAtual,
+      precoAntigo: produto.precoAntigo,
+      cupom: produto.cupom,
+      avisoCupom: produto.avisoCupom
+    });
+
+    await new Promise(r =>
+      setTimeout(r, 3000 + Math.random() * 5000)
+    );
+
+  } catch (e) {
+    console.log("❌ erro produto Amazon:", e.message);
+  }
+}
+
       await new Promise(r =>
         setTimeout(r, 4000 + Math.random() * 5000)
       );
