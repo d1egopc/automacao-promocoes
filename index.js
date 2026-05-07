@@ -2584,12 +2584,10 @@ if (compraNoApp && !cupom) {
 
 const PORT = process.env.PORT || 3000;
 
-  app.listen(PORT, () => {
+app.listen(PORT, () => {
   console.log("🔥 API ONLINE NA PORTA " + PORT);
-   farejarMercadoLivre();
-    
-   farejarMercadoLivre();
- 
+
+  farejarAmazon(); 
 
  setTimeout(() => {
     console.log("🔄 Tentando reconectar WhatsApp automaticamente...");
@@ -2603,7 +2601,7 @@ const PORT = process.env.PORT || 3000;
 
 setInterval(() => {
   if (config.automacaoAtiva) {
-    farejarMercadoLivre();
+    farejarAmazon();
   } else {
     console.log("⏸️ Farejador pausado");
   }
