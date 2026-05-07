@@ -274,6 +274,31 @@ app.post("/fila", (req, res) => {
 
   const oferta = {
     ...body,
+  };
+
+  const html = JSON.stringify(body || "");
+  const htmlLower = html.toLowerCase();
+
+  const temCompraNoApp =
+    html.includes("COMPRANOAPP") ||
+    htmlLower.includes("compra no app") ||
+    htmlLower.includes("pelo app");
+
+  if (temCompraNoApp && !oferta.cupom) {
+    oferta.cupom = "COMPRANOAPP";
+
+    oferta.avisoCupom =
+      "📱 Use no app da Amazon para tentar chegar no menor valor.";
+  }
+
+  fila.push(oferta);
+
+  res.json({
+    ok: true,
+    mensagem: "Oferta adicionada na fila",
+    oferta,
+  });
+});
 
     nome: body.nome || body.titulo || "Oferta",
     titulo: body.titulo || body.nome || "Oferta",
