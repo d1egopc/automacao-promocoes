@@ -980,6 +980,8 @@ const encurtarUrl = async (url) => {
 async function importarMercadoLivre(url, config) {
   const cookies = config?.credenciais?.cookies || "";
   
+  console.log("🌐 AMAZON URL:", url);
+
   const response = await fetch(url, {
   method: "GET",
   redirect: "follow",
