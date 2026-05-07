@@ -308,7 +308,7 @@ app.post("/fila", (req, res) => {
     avisoCupom: oferta.avisoCupom
   });
 
-  res.json({ ok: true, oferta });
+  res.send("OK");
 });
 
 // ================= AUTOMAÇÃO =================
