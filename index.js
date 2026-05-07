@@ -1367,7 +1367,22 @@ async function importarAmazon(url, config) {
     }
   }
 
-  let cupom = "";
+  let cupom =
+  primeiroMatch(/Salve o cupom[^:]{0,80}:\s*([A-Z0-9]{4,20})/i) ||
+  primeiroMatch(/Desconto de R\$\s*[\d.,]+[^<]{0,80}código\s+([A-Z0-9]{4,20})/i) ||
+  primeiroMatch(/com o código\s+([A-Z0-9]{4,20})/i) ||
+  primeiroMatch(/Insira o código\s+([A-Z0-9]{4,20})/i) ||
+  primeiroMatch(/Aplique o cupom\s+([A-Z0-9]{4,20})/i) ||
+  primeiroMatch(/Use o cupom\s+([A-Z0-9]{4,20})/i) ||
+  "";
+
+ let avisoCupom = "";
+
+if (cupom) {
+  avisoCupom = `Resgate/aplique o cupom ${cupom} na página antes de finalizar.`;
+} else if (/resgatar|cupom|código|desconto extra/i.test(html)) {
+  avisoCupom = "Há cupom/desconto extra na página. Resgate antes de finalizar.";
+}
 
 const matchCupom =
   html.match(/COMPRANOAPP/i) ||
