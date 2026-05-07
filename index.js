@@ -282,8 +282,8 @@ app.post("/fila", (req, res) => {
     precoAtual: body.precoAtual || body.preco || "",
 
     precoAntigo: body.precoAntigo || "",
-    cupom: body.cupom || "",
-    avisoCupom: body.avisoCupom || "",
+    cupom: body.cupom ? String(body.cupom).trim() : "",
+    avisoCupom: body.cupom ? (body.avisoCupom || "") : "",
     parcelamento: body.parcelamento || "",
 
     link: body.link || body.linkAfiliado || "",
