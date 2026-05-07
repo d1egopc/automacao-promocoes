@@ -1384,26 +1384,6 @@ if (cupom) {
   avisoCupom = "Há cupom/desconto extra na página. Resgate antes de finalizar.";
 }
 
-const matchCupom =
-  html.match(/COMPRANOAPP/i) ||
-  html.match(/cupom.{0,80}COMPRANOAPP/i) ||
-  html.match(/aplique.{0,80}COMPRANOAPP/i) ||
-  html.match(/use.{0,80}COMPRANOAPP/i);
-
-if (matchCupom) {
-  cupom = "COMPRANOAPP";
-} else {
-  cupom =
-    primeiroMatch(/Insira o código\s+([A-Z0-9]+)/i) ||
-    primeiroMatch(/Aplique o cupom\s+([A-Z0-9]{4,20})/i) ||
-    primeiroMatch(/Use o cupom\s+([A-Z0-9]{4,20})/i) ||
-    primeiroMatch(/cupom[^A-Z0-9]{0,40}([A-Z0-9]{4,20})/i) ||
-    primeiroMatch(/código[^A-Z0-9]{0,40}([A-Z0-9]{4,20})/i) ||
-    "";
-}
-
-let avisoCupom = "";
-
 if (cupom) {
   avisoCupom = `Aplique o cupom ${cupom} no carrinho.`;
 } else if (/resgatar|aplique o cupom|cupom disponível|desconto extra/i.test(html)) {
