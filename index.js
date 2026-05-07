@@ -2582,6 +2582,39 @@ if (compraNoApp && !cupom) {
   }
 }
 
+
+async function farejarAmazon() {
+  try {
+    console.log("🐶 Farejando ofertas Amazon...");
+
+    const buscas = [
+      "air fryer",
+      "fone bluetooth",
+      "mouse gamer",
+      "teclado mecanico",
+      "ssd 1tb",
+      "monitor gamer",
+      "smartwatch",
+      "cafeteira",
+      "furadeira",
+      "cadeira escritorio"
+    ];
+
+    for (const termo of buscas) {
+      const url = `https://www.amazon.com.br/s?k=${encodeURIComponent(termo)}&rh=p_n_deal_type%3A23565492011`;
+
+      console.log("🌐 AMAZON URL:", url);
+
+      await new Promise(r =>
+        setTimeout(r, 4000 + Math.random() * 5000)
+      );
+    }
+
+  } catch (e) {
+    console.log("❌ erro farejador Amazon:", e.message);
+  }
+}
+
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
