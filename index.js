@@ -269,28 +269,29 @@ app.use(rateLimit({
   max: 300
 }));
 
-    nome: body.nome || body.titulo || "Oferta",
-    titulo: body.titulo || body.nome || "Oferta",
+const oferta = {
+  nome: body.nome || body.titulo || "Oferta",
+  titulo: body.titulo || body.nome || "Oferta",
 
-    preco: body.preco || body.precoAtual || "",
-    precoAtual: body.precoAtual || body.preco || "",
+  preco: body.preco || body.precoAtual || "",
+  precoAtual: body.precoAtual || body.preco || "",
 
-    precoAntigo: body.precoAntigo || "",
-    cupom: body.cupom ? String(body.cupom).trim() : "",
-    avisoCupom: body.cupom ? (body.avisoCupom || "") : "",
-    parcelamento: body.parcelamento || "",
+  precoAntigo: body.precoAntigo || "",
+  cupom: body.cupom ? String(body.cupom).trim() : "",
+  avisoCupom: body.cupom ? (body.avisoCupom || "") : "",
+  parcelamento: body.parcelamento || "",
 
-    link: body.link || body.linkAfiliado || "",
-    linkAfiliado: body.linkAfiliado || body.link || "",
+  link: body.link || body.linkAfiliado || "",
+  linkAfiliado: body.linkAfiliado || body.link || "",
 
-    imagem: body.imagem || "",
-    marketplace: body.marketplace || "",
-    categoria: body.categoria || body.marketplace || "",
+  imagem: body.imagem || "",
+  marketplace: body.marketplace || "",
+  categoria: body.categoria || body.marketplace || "",
 
-    clienteId: getClienteId(req),
-    status: "pendente"
-  };
-
+  clienteId: getClienteId(req),
+  status: "pendente"
+};
+  
 const html = JSON.stringify(body || "");
 const htmlLower = html.toLowerCase();
 
