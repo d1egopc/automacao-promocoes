@@ -281,7 +281,7 @@ app.post("/fila", (req, res) => {
 
     precoAntigo: body.precoAntigo || "",
     cupom: body.cupom ? String(body.cupom).trim() : "",
-    avisoCupom: body.cupom ? (body.avisoCupom || "") : "",
+    avisoCupom: body.avisoCupom || "",
     parcelamento: body.parcelamento || "",
 
     link: body.link || body.linkAfiliado || "",
