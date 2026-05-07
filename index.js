@@ -1468,12 +1468,6 @@ const temCompraNoApp =
   /compra\s+no\s+app/i.test(html) ||
   /desconto\s+no\s+app/i.test(html)
 
-if (temCompraNoApp && !cupom) {
-  cupom = "COMPRANOAPP";
-  avisoCupom =
-    "📱 Use no app da Amazon para tentar chegar no menor valor.";
-}
-
 console.log("🎟️ AMAZON CUPOM DETECTADO:", cupom);
 console.log("🎫 AMAZON AVISO CUPOM:", avisoCupom);
 console.log("🔎 AMAZON TEM COMPRANOAPP?", html.includes("COMPRANOAPP"));
