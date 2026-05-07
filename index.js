@@ -136,7 +136,17 @@ let mensagem = `🔥 OFERTA ENCONTRADA!
 
 🛍️ ${titulo}`;
 
-if (precoAntigo) {
+const antigoNum = Number(String(precoAntigo).replace(",", "."));
+const atualNum = Number(String(precoAtual).replace(",", "."));
+
+const temPrecoAntigoValido =
+  precoAntigo &&
+  precoAtual &&
+  Number.isFinite(antigoNum) &&
+  Number.isFinite(atualNum) &&
+  antigoNum > atualNum;
+
+if (temPrecoAntigoValido) {
   mensagem += `
 
 ❌ De: R$ ${precoAntigo}`;
@@ -147,23 +157,18 @@ if (precoAtual) {
 ✅ Por: R$ ${precoAtual}`;
 }
 
-if (precoAntigo && precoAtual) {
-  const antigo = Number(String(precoAntigo).replace(",", "."));
-  const atual = Number(String(precoAtual).replace(",", "."));
+if (temPrecoAntigoValido) {
+  const economia = (antigoNum - atualNum).toFixed(2).replace(".", ",");
+  const desconto = Math.round(((antigoNum - atualNum) / antigoNum) * 100);
 
-  if (Number.isFinite(antigo) && Number.isFinite(atual) && antigo > atual) {
-    const economia = (antigo - atual).toFixed(2).replace(".", ",");
-    const desconto = Math.round(((antigo - atual) / antigo) * 100);
-
-    mensagem += `
+  mensagem += `
 
 💥 Economia: R$ ${economia}
 🔥 ${desconto}% OFF`;
 
-    if (desconto >= 25) {
-      mensagem += `
+  if (desconto >= 25) {
+    mensagem += `
 ⚠️ PREÇO MUITO BOM`;
-    }
   }
 }
 
@@ -182,10 +187,6 @@ if (cupom) {
     mensagem += `
 🎫 ${avisoCupom}`;
   }
-} else if (marketplace === "amazon") {
-  mensagem += `
-
-🎟️ Verifique se há cupons extras na página`;
 } else if (marketplace === "shopee") {
   mensagem += `
 
@@ -269,44 +270,45 @@ app.use(rateLimit({
 }));
 
 app.post("/fila", (req, res) => {
-  const oferta = req.body;
+  const body = req.body || {};
 
-  oferta.clienteId = getClienteId(req);
-  oferta.status = "pendente";
+  const oferta = {
+    ...body,
+
+    nome: body.nome || body.titulo || "Oferta",
+    titulo: body.titulo || body.nome || "Oferta",
+
+    preco: body.preco || body.precoAtual || "",
+    precoAtual: body.precoAtual || body.preco || "",
+
+    precoAntigo: body.precoAntigo || "",
+    cupom: body.cupom || "",
+    avisoCupom: body.avisoCupom || "",
+    parcelamento: body.parcelamento || "",
+
+    link: body.link || body.linkAfiliado || "",
+    linkAfiliado: body.linkAfiliado || body.link || "",
+
+    imagem: body.imagem || "",
+    marketplace: body.marketplace || "",
+    categoria: body.categoria || body.marketplace || "",
+
+    clienteId: getClienteId(req),
+    status: "pendente"
+  };
 
   fila.push(oferta);
-       salvarFila();
+  salvarFila();
 
-  console.log("📥 Oferta adicionada na fila:", oferta.nome);
-
-  res.send("OK");
-});
-
-app.get("/fila", (req, res) => {
-  res.json(fila);
-});
-
-app.get("/fila/status", (req, res) => {
-  const intervaloMinutos = config.intervaloFila || 5;
-  const intervaloMs = intervaloMinutos * 60 * 1000;
-
-  const agora = Date.now();
-
-  const proximoEnvio = ultimoEnvioFila
-    ? ultimoEnvioFila + intervaloMs
-    : agora + intervaloMs;
-
-  const restanteMs = Math.max(proximoEnvio - agora, 0);
-
-  const restanteSegundos = Math.ceil(restanteMs / 1000);
-
-  res.json({
-    ativa: config.automacaoAtiva,
-    ultimoEnvioFila,
-    proximoEnvio,
-    restanteSegundos,
-    pendentes: fila.filter(f => f.status === "pendente").length
+  console.log("📥 Oferta adicionada na fila:", {
+    titulo: oferta.titulo,
+    precoAntigo: oferta.precoAntigo,
+    precoAtual: oferta.precoAtual,
+    cupom: oferta.cupom,
+    avisoCupom: oferta.avisoCupom
   });
+
+  res.json({ ok: true, oferta });
 });
 
 // ================= AUTOMAÇÃO =================
@@ -1366,11 +1368,11 @@ async function importarAmazon(url, config) {
   }
 
 let cupom =
-  primeiroMatch(/(COMPRANOAPP)/i) ||
   primeiroMatch(/Insira o código\s+([A-Z0-9]+)/i) ||
   primeiroMatch(/Aplique o cupom\s+([A-Z0-9]{4,20})/i) ||
-  primeiroMatch(/cupom\s+([A-Z0-9]{4,20})/i) ||
-  primeiroMatch(/código\s+([A-Z0-9]{4,20})/i) ||
+  primeiroMatch(/Use o cupom\s+([A-Z0-9]{4,20})/i) ||
+  primeiroMatch(/cupom[^A-Z0-9]{0,40}([A-Z0-9]{4,20})/i) ||
+  primeiroMatch(/código[^A-Z0-9]{0,40}([A-Z0-9]{4,20})/i) ||
   "";
 
 let avisoCupom = "";
