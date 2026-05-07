@@ -2590,6 +2590,9 @@ async function farejarAmazon() {
   try {
     console.log("🐶 Farejando ofertas Amazon...");
 
+    let adicionadasNestaRodada = 0;
+    const limitePorRodada = 10;
+
     const buscas = [
       "air fryer",
       "fone bluetooth",
@@ -2718,6 +2721,13 @@ const jaExiste = fila.some(o =>
 if (!jaExiste) {
   fila.push(novaOferta);
   salvarFila();
+
+adicionadasNestaRodada++;
+
+if (adicionadasNestaRodada >= limitePorRodada) {
+  console.log("🛑 Limite Amazon por rodada atingido");
+  return;
+}
 
   console.log("🤖 Nova oferta Amazon:", {
     titulo: novaOferta.titulo,
