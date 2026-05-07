@@ -2586,7 +2586,6 @@ if (compraNoApp && !cupom) {
   }
 }
 
-
 async function farejarAmazon() {
   try {
     console.log("🐶 Farejando ofertas Amazon...");
@@ -2607,11 +2606,28 @@ async function farejarAmazon() {
     for (const termo of buscas) {
       const url = `https://www.amazon.com.br/s?k=${encodeURIComponent(termo)}&rh=p_n_deal_type%3A23565492011`;
 
+      console.log("🌐 AMAZON URL:", url);
+
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+          "Accept-Language":
+            "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+        }
+      });
+
+      console.log("📡 AMAZON STATUS:", response.status);
+
+      const html = await response.text();
+
+      console.log("🧪 AMAZON HTML:", html.length);
+      console.log("🧪 TEM ASIN?", html.includes("/dp/"));
+
       await new Promise(r =>
         setTimeout(r, 4000 + Math.random() * 5000)
       );
     }
-
   } catch (e) {
     console.log("❌ erro farejador Amazon:", e.message);
   }
