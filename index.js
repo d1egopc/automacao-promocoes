@@ -2422,11 +2422,6 @@ async function farejarMercadoLivre() {
   
   .filter(link =>
   link.includes("mercadolivre.com.br") &&
-  (
-    link.includes("/MLB-") ||
-    link.includes("/p/MLB") ||
-    link.includes("produto.mercadolivre.com.br")
-  ) &&
   !link.includes("lista.mercadolivre") &&
   !link.includes("login") &&
   !link.includes("cart") &&
@@ -2434,10 +2429,18 @@ async function farejarMercadoLivre() {
   !link.includes("security.js") &&
   !link.includes("privacidade") &&
   !link.includes("account-verification") &&
-  !link.includes("help")
+  !link.includes("help") &&
+  !link.includes("cookies") &&
+  !link.includes("mercadopago") &&
+  (
+    link.includes("MLB") ||
+    link.includes("/p/") ||
+    link.includes("produto.mercadolivre.com.br")
+  )
 );
 
         const links = [...new Set(linksExtraidos)].slice(0, 8);
+        console.log("🧪 LINKS LIMPOS:", links);
 
         console.log(`🔎 ${termo}: ${links.length} produtos`);
 
