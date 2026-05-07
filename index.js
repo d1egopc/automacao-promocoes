@@ -312,7 +312,14 @@ app.post("/fila", (req, res) => {
 
   console.log("🧪 BODY RECEBIDO NA FILA:", body);
   console.log("🧪 OFERTA FINAL PARA FILA:", oferta);
-  
+  console.log("🧪 CUPOM RECEBIDO:", body.cupom);
+  console.log("🧪 AVISO RECEBIDO:", body.avisoCupom);
+  console.log("🧪 OFERTA FINAL:", {
+  titulo: oferta.titulo,
+  cupom: oferta.cupom,
+  avisoCupom: oferta.avisoCupom
+});
+
   fila.push(oferta);
   salvarFila();
 
@@ -375,6 +382,40 @@ app.delete("/fila/:index", (req, res) => {
 
   res.send("Removido com sucesso");
 });
+
+app.post("/fila/:index/enviar-agora", async (req, res) => {
+  const index = Number(req.params.index);
+
+  if (isNaN(index) || index < 0 || index >= fila.length) {
+    return res.status(400).json({ ok: false, erro: "Índice inválido" });
+  }
+
+  const oferta = fila[index];
+
+  oferta.status = "pendente";
+
+  // joga a oferta escolhida para o começo da fila
+  fila.splice(index, 1);
+  fila.unshift(oferta);
+  salvarFila();
+
+  const clienteId = oferta.clienteId || "admin";
+  controleEnvio[clienteId] = 0;
+
+  const automacaoAnterior = config.automacaoAtiva;
+  config.automacaoAtiva = true;
+
+  await processarFila();
+
+  config.automacaoAtiva = automacaoAnterior;
+
+  return res.json({
+    ok: true,
+    mensagem: "Envio manual processado",
+    oferta
+  });
+});
+
 
 app.post("/config", (req, res) => {
   const intervalo = Number(req.body.intervalo);
