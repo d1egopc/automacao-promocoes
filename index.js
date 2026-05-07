@@ -2401,6 +2401,11 @@ async function farejarMercadoLivre() {
 
         const html = await response.text();
         
+        console.log("🧪 HTML TAMANHO:", html.length);
+        console.log("🧪 TEM MLB?", html.includes("MLB"));
+        console.log("🧪 TEM item?", html.includes("item"));
+        console.log("🧪 HTML INICIO:", html.slice(0, 1000));
+        
         const linksExtraidos = [
   ...html.matchAll(/href="([^"]*\/MLB-[^"]*)"/g),
   ...html.matchAll(/href="([^"]*\/p\/MLB[^"]*)"/g),
