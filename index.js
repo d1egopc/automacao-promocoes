@@ -1729,6 +1729,14 @@ return {
 
        console.log("🧪 SHOPEE PRODUTO RAW:", JSON.stringify(produto, null, 2));
 
+      let cupom = "";
+      let avisoCupom = "";
+
+      if (produto?.priceDiscountRate) {
+         avisoCupom =
+         "🎟️ Verifique e resgate os cupons disponíveis na página da Shopee antes de finalizar.";
+      }
+
         return {
         marketplace: "shopee",
         titulo: htmlDecode(titulo)
@@ -1737,7 +1745,8 @@ return {
           .trim(),
         precoAntigo: "",
         precoAtual: "",
-        cupom: "",
+        cupom,
+        avisoCupom, 
         linkOriginal: url,
         linkAfiliado: url,
         imagem: corrigirImagemUrl(imagem) || imagem,
