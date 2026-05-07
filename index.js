@@ -2665,6 +2665,70 @@ for (const link of links) {
       avisoCupom: produto.avisoCupom
     });
 
+ const precoNumero = Number(
+  String(produto.precoAtual || "")
+    .replace("R$", "")
+    .replace(/\./g, "")
+    .replace(",", ".")
+    .trim()
+);
+
+const precoAntigoNumero = Number(
+  String(produto.precoAntigo || "")
+    .replace("R$", "")
+    .replace(/\./g, "")
+    .replace(",", ".")
+    .trim()
+);
+
+const desconto =
+  precoAntigoNumero > precoNumero
+    ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
+    : 0;
+
+if (!precoNumero || !Number.isFinite(precoNumero)) continue;
+if (precoNumero < 30) continue;
+if (desconto < 15 && !produto.avisoCupom) continue;
+
+const novaOferta = {
+  nome: produto.titulo,
+  titulo: produto.titulo,
+  preco: produto.precoAtual,
+  precoAtual: produto.precoAtual,
+  precoAntigo: produto.precoAntigo || "",
+  cupom: produto.cupom || "",
+  avisoCupom: produto.avisoCupom || "",
+  parcelamento: produto.parcelamento || "",
+  link: produto.linkAfiliado || produto.linkOriginal || link,
+  linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
+  imagem: produto.imagem || "",
+  marketplace: "amazon",
+  categoria: "Amazon",
+  sessaoId: "sessao1",
+  status: "pendente",
+  clienteId: "admin"
+};
+
+const jaExiste = fila.some(o =>
+  o.link === novaOferta.link ||
+  o.linkAfiliado === novaOferta.linkAfiliado ||
+  o.titulo === novaOferta.titulo
+);
+
+if (!jaExiste) {
+  fila.push(novaOferta);
+  salvarFila();
+
+  console.log("🤖 Nova oferta Amazon:", {
+    titulo: novaOferta.titulo,
+    preco: novaOferta.precoAtual,
+    precoAntigo: novaOferta.precoAntigo,
+    desconto: Math.round(desconto) + "%",
+    cupom: novaOferta.cupom,
+    avisoCupom: novaOferta.avisoCupom
+  });
+}
+
     await new Promise(r =>
       setTimeout(r, 3000 + Math.random() * 5000)
     );
