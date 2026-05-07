@@ -1722,12 +1722,14 @@ return {
         keyword ||
         "Produto Shopee";
 
-      const imagem =
+        const imagem =
         extrairMeta(html, "og:image") ||
         extrairMeta(html, "twitter:image") ||
         "";
 
-      return {
+       console.log("🧪 SHOPEE PRODUTO RAW:", JSON.stringify(produto, null, 2));
+
+        return {
         marketplace: "shopee",
         titulo: htmlDecode(titulo)
           .replace(" | Shopee Brasil", "")
