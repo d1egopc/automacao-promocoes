@@ -2404,6 +2404,8 @@ async function farejarMercadoLivre() {
       try {
         const url = `https://lista.mercadolivre.com.br/${encodeURIComponent(termo)}`;
 
+        console.log("🌐 AMAZON URL:", url);
+
         const response = await fetch(url, {
           headers: {
             "User-Agent":
@@ -2604,8 +2606,6 @@ async function farejarAmazon() {
 
     for (const termo of buscas) {
       const url = `https://www.amazon.com.br/s?k=${encodeURIComponent(termo)}&rh=p_n_deal_type%3A23565492011`;
-
-      console.log("🌐 AMAZON URL:", url);
 
       await new Promise(r =>
         setTimeout(r, 4000 + Math.random() * 5000)
