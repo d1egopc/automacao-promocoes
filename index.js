@@ -2624,6 +2624,33 @@ async function farejarAmazon() {
       console.log("🧪 AMAZON HTML:", html.length);
       console.log("🧪 TEM ASIN?", html.includes("/dp/"));
 
+      const linksExtraidos = [
+  ...html.matchAll(/href="([^"]*\/dp\/[A-Z0-9]{10}[^"]*)"/g),
+  ...html.matchAll(/href="([^"]*\/gp\/product\/[A-Z0-9]{10}[^"]*)"/g)
+]
+  .map(m => m[1])
+  .map(link => {
+    let limpo = String(link)
+      .replace(/&amp;/g, "&")
+      .split("?")[0];
+
+    if (limpo.startsWith("/")) {
+      limpo = "https://www.amazon.com.br" + limpo;
+    }
+
+    return limpo;
+  })
+  .filter(link =>
+    link.includes("amazon.com.br") &&
+    !link.includes("/sspa/") &&
+    !link.includes("/gp/slredirect")
+  );
+
+const links = [...new Set(linksExtraidos)].slice(0, 8);
+
+console.log("🧪 AMAZON LINKS:", links);
+console.log(`🔎 ${termo}: ${links.length} produtos Amazon`);
+
       await new Promise(r =>
         setTimeout(r, 4000 + Math.random() * 5000)
       );
