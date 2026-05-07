@@ -979,19 +979,39 @@ const encurtarUrl = async (url) => {
 
 async function importarMercadoLivre(url, config) {
   const cookies = config?.credenciais?.cookies || "";
-
+  
   const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-      "Accept":
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-      "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-      "Cookie": cookies
-    }
-  });
+  method: "GET",
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
 
+    "Accept":
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+
+    "Accept-Language":
+      "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+
+    "Cache-Control": "no-cache",
+
+    "Pragma": "no-cache",
+
+    "Upgrade-Insecure-Requests": "1",
+
+    "Sec-Fetch-Dest": "document",
+
+    "Sec-Fetch-Mode": "navigate",
+
+    "Sec-Fetch-Site": "none",
+
+    "Sec-Fetch-User": "?1",
+
+    "Referer": "https://www.google.com/",
+
+    "Cookie": cookies || ""
+  }
+});
+  
   const html = await response.text();
 
   const jsonLd = extrairJsonLd(html);
@@ -2511,14 +2531,18 @@ async function farejarMercadoLivre() {
               });
             }
 
-            await new Promise(r => setTimeout(r, 2500));
+            await new Promise(r =>
+            setTimeout(r, 2000 + Math.random() * 4000)
+            );
 
           } catch (e) {
             console.log("❌ erro produto ML:", e.message);
           }
         }
 
-        await new Promise(r => setTimeout(r, 5000));
+         await new Promise(r =>
+         setTimeout(r, 4000 + Math.random() * 6000)
+        );
 
       } catch (e) {
         console.log("❌ erro busca ML:", e.message);
