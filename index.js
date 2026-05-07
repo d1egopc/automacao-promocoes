@@ -2360,14 +2360,18 @@ async function farejarMercadoLivre() {
     console.log("🐶 Farejando ofertas ML (modo stealth)...");
 
     const buscas = [
-      "tv 50 polegadas",
-      "fone bluetooth",
-      "smartwatch",
-      "air fryer",
-      "tenis masculino",
-      "perfume importado",
-      "furadeira",
-      "bicicleta"
+      "tenis masculino oferta",
+      "air fryer promocao",
+      "fone bluetooth promocao",
+      "smartwatch oferta",
+      "furadeira oferta",
+      "perfume masculino promocao",
+      "cadeira gamer oferta",
+      "monitor gamer promocao",
+      "mouse gamer oferta",
+      "teclado mecanico oferta",
+      "ssd 1tb promocao",
+      "kit ferramentas promocao"
     ];
 
     for (const termo of buscas) {
@@ -2376,21 +2380,49 @@ async function farejarMercadoLivre() {
 
         const response = await fetch(url, {
           headers: {
-            "User-Agent": "Mozilla/5.0",
-            "Accept-Language": "pt-BR,pt;q=0.9"
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            "Accept":
+              "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
           }
         });
 
         console.log("🌐 URL:", url);
         console.log("📡 STATUS:", response.status);
 
+        if (!response.ok) {
+          await new Promise(r => setTimeout(r, 6000));
+          continue;
+        }
+
         const html = await response.text();
 
-        const links = [
-          ...html.matchAll(/https:\/\/produto\.mercadolivre\.com\.br\/[^\s"]+/g)
+        const linksExtraidos = [
+          ...html.matchAll(/https:\/\/produto\.mercadolivre\.com\.br\/[^\s"'<>]+/g),
+          ...html.matchAll(/https:\/\/www\.mercadolivre\.com\.br\/[^\s"'<>]+\/p\/[^\s"'<>]+/g),
+          ...html.matchAll(/href=["'](\/[^"']*MLB[^"']*)["']/g)
         ]
-          .map(m => m[0])
-          .slice(0, 5);
+          .map(m => m[1] || m[0])
+          .map(link => {
+            let limpo = String(link)
+              .replace(/&amp;/g, "&")
+              .split("#")[0];
+
+            if (limpo.startsWith("/")) {
+              limpo = "https://www.mercadolivre.com.br" + limpo;
+            }
+
+            return limpo;
+          })
+          .filter(link =>
+            link.includes("mercadolivre.com.br") &&
+            !link.includes("lista.mercadolivre") &&
+            !link.includes("login") &&
+            !link.includes("cart")
+          );
+
+        const links = [...new Set(linksExtraidos)].slice(0, 8);
 
         console.log(`🔎 ${termo}: ${links.length} produtos`);
 
@@ -2403,11 +2435,19 @@ async function farejarMercadoLivre() {
             if (!produto.precoAtual) continue;
 
             const precoNumero = Number(
-              String(produto.precoAtual).replace(",", ".")
+              String(produto.precoAtual)
+                .replace("R$", "")
+                .replace(/\./g, "")
+                .replace(",", ".")
+                .trim()
             );
 
             const precoAntigoNumero = Number(
-              String(produto.precoAntigo || "").replace(",", ".")
+              String(produto.precoAntigo || "")
+                .replace("R$", "")
+                .replace(/\./g, "")
+                .replace(",", ".")
+                .trim()
             );
 
             const desconto =
@@ -2415,42 +2455,64 @@ async function farejarMercadoLivre() {
                 ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
                 : 0;
 
-            if (desconto < 10) continue;
+            if (!precoNumero || !Number.isFinite(precoNumero)) continue;
             if (precoNumero < 30) continue;
+            if (desconto < 12) continue;
 
             const novaOferta = {
               nome: produto.titulo,
+              titulo: produto.titulo,
               preco: produto.precoAtual,
-              link: produto.linkAfiliado,
-              imagem: produto.imagem,
-              status: "pendente"
+              precoAtual: produto.precoAtual,
+              precoAntigo: produto.precoAntigo || "",
+              cupom: produto.cupom || "",
+              avisoCupom: produto.avisoCupom || "",
+              parcelamento: produto.parcelamento || "",
+              link: produto.linkAfiliado || produto.linkOriginal || link,
+              linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
+              imagem: produto.imagem || "",
+              marketplace: "mercadolivre",
+              categoria: "Mercado Livre",
+              sessaoId: "sessao1",
+              status: "pendente",
+              clienteId: "admin"
             };
 
-            const jaExiste = fila.some(o => o.link === novaOferta.link);
+            const jaExiste = fila.some(o =>
+              o.link === novaOferta.link ||
+              o.linkAfiliado === novaOferta.linkAfiliado ||
+              o.titulo === novaOferta.titulo
+            );
 
             if (!jaExiste) {
               fila.push(novaOferta);
               salvarFila();
 
-              console.log("🤖 Nova oferta:", novaOferta.nome);
+              console.log("🤖 Nova oferta ML:", {
+                titulo: novaOferta.titulo,
+                preco: novaOferta.precoAtual,
+                precoAntigo: novaOferta.precoAntigo,
+                desconto: Math.round(desconto) + "%",
+                link: novaOferta.link
+              });
             }
 
-            await new Promise(r => setTimeout(r, 2000));
+            await new Promise(r => setTimeout(r, 2500));
 
           } catch (e) {
-            console.log("❌ erro produto", e.message);
+            console.log("❌ erro produto ML:", e.message);
           }
         }
 
-        await new Promise(r => setTimeout(r, 4000));
+        await new Promise(r => setTimeout(r, 5000));
 
       } catch (e) {
-        console.log("❌ erro busca", e.message);
+        console.log("❌ erro busca ML:", e.message);
       }
     }
 
   } catch (e) {
-    console.log("❌ erro farejador", e.message);
+    console.log("❌ erro farejador ML:", e.message);
   }
 }
 
