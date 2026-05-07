@@ -982,6 +982,7 @@ async function importarMercadoLivre(url, config) {
   
   const response = await fetch(url, {
   method: "GET",
+  redirect: "follow",
   headers: {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
@@ -999,11 +1000,8 @@ async function importarMercadoLivre(url, config) {
     "Upgrade-Insecure-Requests": "1",
 
     "Sec-Fetch-Dest": "document",
-
     "Sec-Fetch-Mode": "navigate",
-
     "Sec-Fetch-Site": "none",
-
     "Sec-Fetch-User": "?1",
 
     "Referer": "https://www.google.com/",
@@ -1011,6 +1009,8 @@ async function importarMercadoLivre(url, config) {
     "Cookie": cookies || ""
   }
 });
+
+console.log("🌍 URL FINAL:", response.url);
   
   const html = await response.text();
 
@@ -2018,7 +2018,8 @@ return res.json(produto);
         titulo: "Produto importado de Mercado Livre",
         precoAntigo: "",
         precoAtual: "",
-        cupom: "",
+        cupom,
+        avisoCupom,
         linkOriginal: url,
         linkAfiliado: url,
         imagem: "",
@@ -2420,11 +2421,38 @@ async function farejarMercadoLivre() {
         }
 
         const html = await response.text();
+
+        let cupom = "";
+        let avisoCupom = "";
         
         console.log("🧪 HTML TAMANHO:", html.length);
         console.log("🧪 TEM MLB?", html.includes("MLB"));
         console.log("🧪 TEM item?", html.includes("item"));
         console.log("🧪 HTML INICIO:", html.slice(0, 1000));
+        
+        const cupomMatch =
+  html.match(/cupom\s+([A-Z0-9]{4,20})/i) ||
+  html.match(/código\s+([A-Z0-9]{4,20})/i) ||
+  html.match(/use\s+o\s+cupom\s+([A-Z0-9]{4,20})/i) ||
+  html.match(/aplique\s+o\s+cupom\s+([A-Z0-9]{4,20})/i);
+
+if (cupomMatch?.[1]) {
+  cupom = cupomMatch[1].trim().toUpperCase();
+  avisoCupom = `Aplique o cupom ${cupom} antes de finalizar.`;
+} else if (/cupom|código promocional|desconto extra|aplicar desconto/i.test(html)) {
+  avisoCupom = "Há possível cupom/desconto extra na página. Confira antes de finalizar.";
+}
+
+const compraNoApp =
+  /compra\s+no\s+app/i.test(html) ||
+  /menor\s+preço\s+no\s+app/i.test(html) ||
+  /app\s+garante/i.test(html) ||
+  /desconto\s+no\s+app/i.test(html);
+
+if (compraNoApp && !cupom) {
+  cupom = "VER NO APP";
+  avisoCupom = "📱 Confira pelo app do Mercado Livre, pode aparecer menor valor ou desconto exclusivo.";
+}
         
         const linksExtraidos = [
   ...html.matchAll(/href="([^"]*\/MLB-[^"]*)"/g),
@@ -2556,8 +2584,12 @@ async function farejarMercadoLivre() {
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+  app.listen(PORT, () => {
   console.log("🔥 API ONLINE NA PORTA " + PORT);
+   farejarMercadoLivre();
+    
+   farejarMercadoLivre();
+ 
 
  setTimeout(() => {
     console.log("🔄 Tentando reconectar WhatsApp automaticamente...");
