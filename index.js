@@ -269,44 +269,47 @@ app.use(rateLimit({
   max: 300
 }));
 
-const oferta = {
-  nome: body.nome || body.titulo || "Oferta",
-  titulo: body.titulo || body.nome || "Oferta",
+app.post("/fila", (req, res) => {
+  const body = req.body || {};
 
-  preco: body.preco || body.precoAtual || "",
-  precoAtual: body.precoAtual || body.preco || "",
+  const oferta = {
+    nome: body.nome || body.titulo || "Oferta",
+    titulo: body.titulo || body.nome || "Oferta",
 
-  precoAntigo: body.precoAntigo || "",
-  cupom: body.cupom ? String(body.cupom).trim() : "",
-  avisoCupom: body.cupom ? (body.avisoCupom || "") : "",
-  parcelamento: body.parcelamento || "",
+    preco: body.preco || body.precoAtual || "",
+    precoAtual: body.precoAtual || body.preco || "",
 
-  link: body.link || body.linkAfiliado || "",
-  linkAfiliado: body.linkAfiliado || body.link || "",
+    precoAntigo: body.precoAntigo || "",
+    cupom: body.cupom ? String(body.cupom).trim() : "",
+    avisoCupom: body.cupom ? (body.avisoCupom || "") : "",
+    parcelamento: body.parcelamento || "",
 
-  imagem: body.imagem || "",
-  marketplace: body.marketplace || "",
-  categoria: body.categoria || body.marketplace || "",
+    link: body.link || body.linkAfiliado || "",
+    linkAfiliado: body.linkAfiliado || body.link || "",
 
-  clienteId: getClienteId(req),
-  status: "pendente"
-};
-  
-const html = JSON.stringify(body || "");
-const htmlLower = html.toLowerCase();
+    imagem: body.imagem || "",
+    marketplace: body.marketplace || "",
+    categoria: body.categoria || body.marketplace || "",
 
-const temCompraNoApp =
-  html.includes("COMPRANOAPP") ||
-  htmlLower.includes("compra no app") ||
-  htmlLower.includes("pelo app");
+    clienteId: getClienteId(req),
+    status: "pendente"
+  };
 
-if (temCompraNoApp && !oferta.cupom) {
-  oferta.cupom = "COMPRANOAPP";
+  const html = JSON.stringify(body || "");
+  const htmlLower = html.toLowerCase();
 
-  oferta.avisoCupom =
-    "📱 Use no app da Amazon para tentar chegar no menor valor.";
-}
-  
+  const temCompraNoApp =
+    html.includes("COMPRANOAPP") ||
+    htmlLower.includes("compra no app") ||
+    htmlLower.includes("pelo app");
+
+  if (temCompraNoApp && !oferta.cupom) {
+    oferta.cupom = "COMPRANOAPP";
+
+    oferta.avisoCupom =
+      "📱 Use no app da Amazon para tentar chegar no menor valor.";
+  }
+
   fila.push(oferta);
   salvarFila();
 
@@ -320,6 +323,7 @@ if (temCompraNoApp && !oferta.cupom) {
 
   res.send("OK");
 });
+
 
 // ================= AUTOMAÇÃO =================
 
