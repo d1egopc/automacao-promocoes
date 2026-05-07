@@ -2397,21 +2397,19 @@ async function farejarMercadoLivre() {
         }
 
         const html = await response.text();
-
+        
         const linksExtraidos = [
-  ...html.matchAll(/https?:\/\/(?:www\.)?mercadolivre\.com\.br\/[^"' <>\n]+/g),
-  ...html.matchAll(/https?:\/\/produto\.mercadolivre\.com\.br\/[^"' <>\n]+/g),
-  ...html.matchAll(/href=["']([^"']*(?:MLB|\/p\/|produto\.mercadolivre)[^"']*)["']/g),
-  ...html.matchAll(/"permalink":"([^"]+)"/g),
-  ...html.matchAll(/"url":"([^"]*mercadolivre\.com\.br[^"]*)"/g)
+  ...html.matchAll(/href="([^"]*\/MLB-[^"]*)"/g),
+  ...html.matchAll(/href="([^"]*\/p\/MLB[^"]*)"/g),
+  ...html.matchAll(/"permalink":"([^"]*MLB[^"]*)"/g),
+  ...html.matchAll(/"url":"([^"]*MLB[^"]*)"/g)
 ]
   .map(m => m[1] || m[0])
   .map(link => {
     let limpo = String(link)
       .replace(/\\\//g, "/")
       .replace(/&amp;/g, "&")
-      .split("#")[0]
-      .split("?")[0];
+      .split("#")[0];
 
     if (limpo.startsWith("/")) {
       limpo = "https://www.mercadolivre.com.br" + limpo;
@@ -2419,25 +2417,15 @@ async function farejarMercadoLivre() {
 
     return limpo;
   })
-  
   .filter(link =>
-  link.includes("mercadolivre.com.br") &&
-  !link.includes("lista.mercadolivre") &&
-  !link.includes("login") &&
-  !link.includes("cart") &&
-  !link.includes("registration") &&
-  !link.includes("security.js") &&
-  !link.includes("privacidade") &&
-  !link.includes("account-verification") &&
-  !link.includes("help") &&
-  !link.includes("cookies") &&
-  !link.includes("mercadopago") &&
-  (
-    link.includes("MLB") ||
-    link.includes("/p/") ||
-    link.includes("produto.mercadolivre.com.br")
-  )
-);
+    link.includes("mercadolivre.com.br") &&
+    link.includes("MLB") &&
+    !link.includes("lista.mercadolivre") &&
+    !link.includes("registration") &&
+    !link.includes("security.js") &&
+    !link.includes("privacidade") &&
+    !link.includes("account-verification")
+  );
 
         const links = [...new Set(linksExtraidos)].slice(0, 8);
         console.log("🧪 LINKS LIMPOS:", links);
