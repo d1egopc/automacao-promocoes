@@ -2419,14 +2419,23 @@ async function farejarMercadoLivre() {
 
     return limpo;
   })
+  
   .filter(link =>
-    link.includes("mercadolivre.com.br") &&
-    !link.includes("lista.mercadolivre") &&
-    !link.includes("login") &&
-    !link.includes("cart") &&
-    !link.includes("privacy") &&
-    !link.includes("help")
-  );
+  link.includes("mercadolivre.com.br") &&
+  (
+    link.includes("/MLB-") ||
+    link.includes("/p/MLB") ||
+    link.includes("produto.mercadolivre.com.br")
+  ) &&
+  !link.includes("lista.mercadolivre") &&
+  !link.includes("login") &&
+  !link.includes("cart") &&
+  !link.includes("registration") &&
+  !link.includes("security.js") &&
+  !link.includes("privacidade") &&
+  !link.includes("account-verification") &&
+  !link.includes("help")
+);
 
         const links = [...new Set(linksExtraidos)].slice(0, 8);
 
