@@ -1463,9 +1463,10 @@ if (cupom) {
 const linkFinal = await encurtarUrl(linkAfiliado); 
  
 const temCompraNoApp =
-  html.includes("COMPRANOAPP") ||
+  /COMPRANOAPP[\s\S]{0,120}(app|aplicativo|desconto|off|cupom|resgate)/i.test(html) ||
+  /(app|aplicativo|desconto|off|cupom|resgate)[\s\S]{0,120}COMPRANOAPP/i.test(html) ||
   /compra\s+no\s+app/i.test(html) ||
-  /pelo\s+app/i.test(html);
+  /desconto\s+no\s+app/i.test(html)
 
 if (temCompraNoApp && !cupom) {
   cupom = "COMPRANOAPP";
