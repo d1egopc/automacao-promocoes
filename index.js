@@ -324,6 +324,17 @@ app.post("/fila", (req, res) => {
   res.send("OK");
 });
 
+app.get("/fila", (req, res) => {
+  res.json({
+    ok: true,
+    total: fila.length,
+    pendentes: fila.filter((o) => o.status === "pendente").length,
+    enviados: fila.filter((o) => o.status === "enviado").length,
+    itens: fila,
+    fila: fila
+  });
+});
+
 
 // ================= AUTOMAÇÃO =================
 
