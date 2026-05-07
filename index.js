@@ -272,10 +272,6 @@ app.use(rateLimit({
 app.post("/fila", (req, res) => {
   const body = req.body || {};
 
-  const oferta = {
-    ...body,
-  };
-
   const html = JSON.stringify(body || "");
   const htmlLower = html.toLowerCase();
 
@@ -284,9 +280,22 @@ app.post("/fila", (req, res) => {
     htmlLower.includes("compra no app") ||
     htmlLower.includes("pelo app");
 
+  const oferta = {
+    ...body,
+    titulo: body.titulo || body.nome || "Oferta",
+    nome: body.nome || body.titulo || "Oferta",
+    preco: body.preco || body.precoAtual || "",
+    precoAtual: body.precoAtual || body.preco || "",
+    precoAntigo: body.precoAntigo || "",
+    cupom: body.cupom ? String(body.cupom).trim() : "",
+    avisoCupom: body.cupom ? body.avisoCupom || "" : "",
+    parcelamento: body.parcelamento || "",
+    status: body.status || "pendente",
+    criadoEm: body.criadoEm || new Date().toISOString(),
+  };
+
   if (temCompraNoApp && !oferta.cupom) {
     oferta.cupom = "COMPRANOAPP";
-
     oferta.avisoCupom =
       "📱 Use no app da Amazon para tentar chegar no menor valor.";
   }
@@ -299,7 +308,7 @@ app.post("/fila", (req, res) => {
     oferta,
   });
 });
-
+  
     nome: body.nome || body.titulo || "Oferta",
     titulo: body.titulo || body.nome || "Oferta",
 
