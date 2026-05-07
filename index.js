@@ -2399,28 +2399,34 @@ async function farejarMercadoLivre() {
         const html = await response.text();
 
         const linksExtraidos = [
-          ...html.matchAll(/https:\/\/produto\.mercadolivre\.com\.br\/[^\s"'<>]+/g),
-          ...html.matchAll(/https:\/\/www\.mercadolivre\.com\.br\/[^\s"'<>]+\/p\/[^\s"'<>]+/g),
-          ...html.matchAll(/href=["'](\/[^"']*MLB[^"']*)["']/g)
-        ]
-          .map(m => m[1] || m[0])
-          .map(link => {
-            let limpo = String(link)
-              .replace(/&amp;/g, "&")
-              .split("#")[0];
+  ...html.matchAll(/https?:\/\/(?:www\.)?mercadolivre\.com\.br\/[^"' <>\n]+/g),
+  ...html.matchAll(/https?:\/\/produto\.mercadolivre\.com\.br\/[^"' <>\n]+/g),
+  ...html.matchAll(/href=["']([^"']*(?:MLB|\/p\/|produto\.mercadolivre)[^"']*)["']/g),
+  ...html.matchAll(/"permalink":"([^"]+)"/g),
+  ...html.matchAll(/"url":"([^"]*mercadolivre\.com\.br[^"]*)"/g)
+]
+  .map(m => m[1] || m[0])
+  .map(link => {
+    let limpo = String(link)
+      .replace(/\\\//g, "/")
+      .replace(/&amp;/g, "&")
+      .split("#")[0]
+      .split("?")[0];
 
-            if (limpo.startsWith("/")) {
-              limpo = "https://www.mercadolivre.com.br" + limpo;
-            }
+    if (limpo.startsWith("/")) {
+      limpo = "https://www.mercadolivre.com.br" + limpo;
+    }
 
-            return limpo;
-          })
-          .filter(link =>
-            link.includes("mercadolivre.com.br") &&
-            !link.includes("lista.mercadolivre") &&
-            !link.includes("login") &&
-            !link.includes("cart")
-          );
+    return limpo;
+  })
+  .filter(link =>
+    link.includes("mercadolivre.com.br") &&
+    !link.includes("lista.mercadolivre") &&
+    !link.includes("login") &&
+    !link.includes("cart") &&
+    !link.includes("privacy") &&
+    !link.includes("help")
+  );
 
         const links = [...new Set(linksExtraidos)].slice(0, 8);
 
