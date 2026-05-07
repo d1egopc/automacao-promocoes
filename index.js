@@ -266,7 +266,16 @@ app.use(express.json({ limit: "10mb" }));
 
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300
+  max: 3000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) =>
+    req.path.startsWith("/status") ||
+    req.path.startsWith("/qr") ||
+    req.path.startsWith("/fila") ||
+    req.path.startsWith("/automacao") ||
+    req.path.startsWith("/destinos") ||
+    req.path.startsWith("/grupos")
 }));
 
 app.post("/fila", (req, res) => {
