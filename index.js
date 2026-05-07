@@ -299,9 +299,10 @@ app.post("/fila", (req, res) => {
   const htmlLower = html.toLowerCase();
 
   const temCompraNoApp =
-    html.includes("COMPRANOAPP") ||
-    htmlLower.includes("compra no app") ||
-    htmlLower.includes("pelo app");
+     html.includes("COMPRANOAPP") ||
+    /compra\s+no\s+app/i.test(html) ||
+    /use\s+o\s+app/i.test(html) ||
+    /desconto\s+no\s+app/i.test(html);
 
   if (temCompraNoApp && !oferta.cupom) {
     oferta.cupom = "COMPRANOAPP";
