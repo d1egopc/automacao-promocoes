@@ -1406,6 +1406,17 @@ if (cupom) {
 
 const linkFinal = await encurtarUrl(linkAfiliado); 
  
+const temCompraNoApp =
+  html.includes("COMPRANOAPP") ||
+  /compra\s+no\s+app/i.test(html) ||
+  /pelo\s+app/i.test(html);
+
+if (temCompraNoApp && !cupom) {
+  cupom = "COMPRANOAPP";
+  avisoCupom =
+    "📱 Use no app da Amazon para tentar chegar no menor valor.";
+}
+
 console.log("🎟️ AMAZON CUPOM DETECTADO:", cupom);
 console.log("🎫 AMAZON AVISO CUPOM:", avisoCupom);
 console.log("🔎 AMAZON TEM COMPRANOAPP?", html.includes("COMPRANOAPP"));
