@@ -889,6 +889,9 @@ async function buscarCsrfTokenMercadoLivre(cookies) {
 
     const html = await response.text();
 
+    console.log("🧪 HTML INICIO:");
+    console.log(html.slice(0, 3000)); 
+
     const patterns = [
       /x-csrf-token["']?\s*[:=]\s*["']([^"']+)["']/i,
       /csrfToken["']?\s*[:=]\s*["']([^"']+)["']/i,
