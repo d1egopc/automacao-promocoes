@@ -269,46 +269,6 @@ app.use(rateLimit({
   max: 300
 }));
 
-app.post("/fila", (req, res) => {
-  const body = req.body || {};
-
-  const html = JSON.stringify(body || "");
-  const htmlLower = html.toLowerCase();
-
-  const temCompraNoApp =
-    html.includes("COMPRANOAPP") ||
-    htmlLower.includes("compra no app") ||
-    htmlLower.includes("pelo app");
-
-  const oferta = {
-    ...body,
-    titulo: body.titulo || body.nome || "Oferta",
-    nome: body.nome || body.titulo || "Oferta",
-    preco: body.preco || body.precoAtual || "",
-    precoAtual: body.precoAtual || body.preco || "",
-    precoAntigo: body.precoAntigo || "",
-    cupom: body.cupom ? String(body.cupom).trim() : "",
-    avisoCupom: body.cupom ? body.avisoCupom || "" : "",
-    parcelamento: body.parcelamento || "",
-    status: body.status || "pendente",
-    criadoEm: body.criadoEm || new Date().toISOString(),
-  };
-
-  if (temCompraNoApp && !oferta.cupom) {
-    oferta.cupom = "COMPRANOAPP";
-    oferta.avisoCupom =
-      "📱 Use no app da Amazon para tentar chegar no menor valor.";
-  }
-
-  fila.push(oferta);
-
-  res.json({
-    ok: true,
-    mensagem: "Oferta adicionada na fila",
-    oferta,
-  });
-});
-  
     nome: body.nome || body.titulo || "Oferta",
     titulo: body.titulo || body.nome || "Oferta",
 
@@ -331,6 +291,21 @@ app.post("/fila", (req, res) => {
     status: "pendente"
   };
 
+const html = JSON.stringify(body || "");
+const htmlLower = html.toLowerCase();
+
+const temCompraNoApp =
+  html.includes("COMPRANOAPP") ||
+  htmlLower.includes("compra no app") ||
+  htmlLower.includes("pelo app");
+
+if (temCompraNoApp && !oferta.cupom) {
+  oferta.cupom = "COMPRANOAPP";
+
+  oferta.avisoCupom =
+    "📱 Use no app da Amazon para tentar chegar no menor valor.";
+}
+  
   fila.push(oferta);
   salvarFila();
 
