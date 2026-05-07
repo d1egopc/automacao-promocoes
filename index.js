@@ -310,6 +310,9 @@ app.post("/fila", (req, res) => {
       "📱 Use no app da Amazon para tentar chegar no menor valor.";
   }
 
+  console.log("🧪 BODY RECEBIDO NA FILA:", body);
+  console.log("🧪 OFERTA FINAL PARA FILA:", oferta);
+  
   fila.push(oferta);
   salvarFila();
 
