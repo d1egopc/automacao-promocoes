@@ -3010,26 +3010,27 @@ setTimeout(() => {
   }, 3000);
 });
  
-setInterval(() => {
-  if (
-  config.automacaoAtiva &&
-  config.marketplaces?.amazon
-) {
-    console.log("⏱️ Rodando farejador Amazon...");
-    farejarAmazon();
-  } else {
-    console.log("⏸️ Amazon pausada");
-  }
-}, 10 * 60 * 1000);
-
-setInterval(() => {
-  if (
-  config.automacaoAtiva &&
-  config.marketplaces?.shopee
-) {
-    console.log("⏱️ Rodando farejador Shopee...");
-    farejarShopee();
-  } else {
-    console.log("⏸️ Shopee pausada");
-  }
+setTimeout(() => {
+  setInterval(() => {
+    if (
+      config.automacaoAtiva &&
+      config.marketplaces?.shopee
+    ) {
+      console.log("⏱️ Rodando farejador Shopee...");
+      farejarShopee();
+    }
+  }, 10 * 60 * 1000);
 }, 5 * 60 * 1000);
+
+setTimeout(() => {
+  setInterval(() => {
+    if (
+      config.automacaoAtiva &&
+      config.marketplaces?.amazon
+    ) {
+      console.log("⏱️ Rodando farejador Amazon...");
+      farejarAmazon();
+    }
+  }, 15 * 60 * 1000);
+}, 15 * 60 * 1000);
+
