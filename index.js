@@ -7,7 +7,7 @@ if (!fs.existsSync("/data")) {
 }
 
 let config = {
-  automacAtiva: false,
+  automacaoAtiva: false,
 
   intervaloEnvioMinutos: 5,
 
