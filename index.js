@@ -2574,9 +2574,20 @@ if (compraNoApp && !cupom) {
                 ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
                 : 0;
 
-            if (!precoNumero || !Number.isFinite(precoNumero)) continue;
-            if (precoNumero < 30) continue;
-            if (desconto < 12) continue;
+             if (!precoNumero || !Number.isFinite(precoNumero)) continue;
+
+if (precoNumero < 25) continue;
+
+if (desconto < 20 && !produto.avisoCupom) continue;
+
+const tituloLower = String(produto.titulo || "").toLowerCase();
+
+if (
+  tituloLower.includes("refil") ||
+  tituloLower.includes("amostra") ||
+  tituloLower.includes("mini") ||
+  tituloLower.includes("teste")
+) continue;
 
             const novaOferta = {
               nome: produto.titulo,
@@ -2907,13 +2918,17 @@ async function farejarShopee() {
 
     for (const item of produtos) {
       try {
-        const desconto = Number(item.priceDiscountRate || 0);
+        
+       const desconto = Number(item.priceDiscountRate || 0);
+const vendas = Number(item.sales || 0);
+const nota = Number(item.ratingStar || 0);
+const precoAtualNumero = Number(item.priceMin || 0);
 
-        if (desconto < 40) continue;
-
-        const precoAtualNumero = Number(item.priceMin || 0);
-
-        if (!precoAtualNumero) continue;
+if (desconto < 15) continue;
+if (!precoAtualNumero) continue;
+if (precoAtualNumero < 20) continue;
+if (vendas < 20) continue;
+if (nota > 0 && nota < 4.5) continue;
 
         const precoAtual = precoAtualNumero
           .toFixed(2)
