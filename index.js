@@ -2870,13 +2870,7 @@ for (const link of links) {
     });
 
   console.log(`🛒 Amazon produto encontrado: ${titulo}`);
-      titulo: produto.titulo,
-      precoAtual: produto.precoAtual,
-      precoAntigo: produto.precoAntigo,
-      cupom: produto.cupom,
-      avisoCupom: produto.avisoCupom
-    });
-
+ 
  const precoNumero = Number(
   String(produto.precoAtual || "")
     .replace("R$", "")
