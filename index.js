@@ -1323,16 +1323,36 @@ async function importarAliExpress(urlEntrada, config = {}) {
       produto.product_small_image_urls?.[0] ||
       produto.image_url ||
       "";
+     
+    let precoAtual =
+  produto.target_app_sale_price ||
+  produto.target_sale_price ||
+  produto.app_sale_price ||
+  produto.sale_price ||
+  produto.target_min_sale_price ||
+  produto.min_sale_price ||
+  "";
+   
+   
+   let precoAntigo =
+  produto.target_original_price ||
+  produto.original_price ||
+  produto.target_max_sale_price ||
+  produto.max_sale_price ||
+  "";
 
-   let precoAtual =
-       produto.target_sale_price ||
-       produto.sale_price ||
-       produto.app_sale_price || "";
+   console.log("💰 ALI PREÇOS RAW:", {
+  target_sale_price: produto.target_sale_price,
+  sale_price: produto.sale_price,
+  app_sale_price: produto.app_sale_price,
+  target_app_sale_price: produto.target_app_sale_price,
+  target_min_sale_price: produto.target_min_sale_price,
+  min_sale_price: produto.min_sale_price,
+  target_original_price: produto.target_original_price,
+  original_price: produto.original_price
+});
 
-    let precoAntigo =
-      produto.target_original_price ||
-      produto.original_price ||
-      "";
+  
   if (produto.discount === "0%" && limparPreco(precoAtual) === limparPreco(precoAntigo)) {
   precoAntigo = "";
 }
