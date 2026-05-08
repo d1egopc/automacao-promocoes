@@ -1126,7 +1126,7 @@ const encurtarUrl = async (url) => {
 async function importarMercadoLivre(url, config) {
   const cookies = config?.credenciais?.cookies || "";
   
-  // console.log("🌐 ML URL:", url);
+  console.log("🌐 AMAZON URL:", url);
 
   const response = await fetch(url, {
   method: "GET",
@@ -1298,8 +1298,8 @@ async function importarAliExpress(urlEntrada, config = {}) {
     });
 
     const data = await response.json();
-   
-    console.log("🛒 AliExpress consultado");
+
+    console.log("ALIEXPRESS API RESPONSE:", JSON.stringify(data));
 
     const result =
       data?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result ||
@@ -1362,6 +1362,18 @@ async function importarAliExpress(urlEntrada, config = {}) {
   produto.max_sale_price ||
   "";
 
+   console.log("💰 ALI PREÇOS RAW:", {
+  target_sale_price: produto.target_sale_price,
+  sale_price: produto.sale_price,
+  app_sale_price: produto.app_sale_price,
+  target_app_sale_price: produto.target_app_sale_price,
+  target_min_sale_price: produto.target_min_sale_price,
+  min_sale_price: produto.min_sale_price,
+  target_original_price: produto.target_original_price,
+  original_price: produto.original_price
+});
+
+  
   if (produto.discount === "0%" && limparPreco(precoAtual) === limparPreco(precoAntigo)) {
   precoAntigo = "";
 }
@@ -2621,6 +2633,9 @@ async function farejarMercadoLivre() {
           }
         });
 
+        console.log("🌐 URL:", url);
+        console.log("📡 STATUS:", response.status);
+
         if (!response.ok) {
           await new Promise(r => setTimeout(r, 6000));
           continue;
@@ -2630,7 +2645,12 @@ async function farejarMercadoLivre() {
 
         let cupom = "";
         let avisoCupom = "";
-       
+        
+        console.log("🧪 HTML TAMANHO:", html.length);
+        console.log("🧪 TEM MLB?", html.includes("MLB"));
+        console.log("🧪 TEM item?", html.includes("item"));
+        console.log("🧪 HTML INICIO:", html.slice(0, 1000));
+        
         const cupomMatch =
   html.match(/cupom\s+([A-Z0-9]{4,20})/i) ||
   html.match(/código\s+([A-Z0-9]{4,20})/i) ||
@@ -2683,6 +2703,11 @@ if (compraNoApp && !cupom) {
     !link.includes("privacidade") &&
     !link.includes("account-verification")
   );
+
+        const links = [...new Set(linksExtraidos)].slice(0, 8);
+        console.log("🧪 LINKS LIMPOS:", links);
+
+        console.log(`🔎 ${termo}: ${links.length} produtos`);
 
         for (const link of links) {
           try {
@@ -2757,9 +2782,14 @@ if (
               fila.push(novaOferta);
               salvarFila();
 
-             console.log(
-         `🤖 ML: ${novaOferta.titulo} | ${Math.round(desconto)}% OFF`
-           );
+              console.log("🤖 Nova oferta ML:", {
+                titulo: novaOferta.titulo,
+                preco: novaOferta.precoAtual,
+                precoAntigo: novaOferta.precoAntigo,
+                desconto: Math.round(desconto) + "%",
+                link: novaOferta.link
+              });
+            }
 
             await new Promise(r =>
             setTimeout(r, 2000 + Math.random() * 4000)
@@ -2837,6 +2867,9 @@ async function farejarAmazon() {
 
       const html = await response.text();
 
+      console.log("🧪 AMAZON HTML:", html.length);
+      console.log("🧪 TEM ASIN?", html.includes("/dp/"));
+
       const linksExtraidos = [
   ...html.matchAll(/href="([^"]*\/dp\/[A-Z0-9]{10}[^"]*)"/g),
   ...html.matchAll(/href="([^"]*\/gp\/product\/[A-Z0-9]{10}[^"]*)"/g)
@@ -2861,6 +2894,7 @@ async function farejarAmazon() {
 
 const links = [...new Set(linksExtraidos)].slice(0, 3);
 
+console.log("🧪 AMAZON LINKS:", links);
 console.log(`🔎 ${termo}: ${links.length} produtos Amazon`);
 
 for (const link of links) {
@@ -2869,76 +2903,84 @@ for (const link of links) {
       credenciais: integracoesPorCliente["admin"]?.amazon?.credenciais
     });
 
-    console.log(`🛒 Amazon produto encontrado: ${produto.titulo}`);
-
-    const precoNumero = Number(
-      String(produto.precoAtual || "")
-        .replace("R$", "")
-        .replace(/\./g, "")
-        .replace(",", ".")
-        .trim()
-    );
-
-    const precoAntigoNumero = Number(
-      String(produto.precoAntigo || "")
-        .replace("R$", "")
-        .replace(/\./g, "")
-        .replace(",", ".")
-        .trim()
-    );
-
-    const desconto =
-      precoAntigoNumero > precoNumero
-        ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
-        : 0;
-
-    if (!precoNumero || !Number.isFinite(precoNumero)) continue;
-    if (precoNumero < (config.marketplaces?.amazon?.precoMinimo || 25)) continue;
-    if (desconto < (config.marketplaces?.amazon?.descontoMinimo || 20) && !produto.avisoCupom) continue;
-
-    const novaOferta = {
-      nome: produto.titulo,
+    console.log("🧪 PRODUTO AMAZON:", {
       titulo: produto.titulo,
-      preco: produto.precoAtual,
       precoAtual: produto.precoAtual,
-      precoAntigo: produto.precoAntigo || "",
-      cupom: produto.cupom || "",
-      avisoCupom: produto.avisoCupom || "",
-      parcelamento: produto.parcelamento || "",
-      link: produto.linkAfiliado || produto.linkOriginal || link,
-      linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
-      imagem: produto.imagem || "",
-      marketplace: "amazon",
-      categoria: "Amazon",
-      sessaoId: "sessao1",
-      status: "pendente",
-      clienteId: "admin"
-    };
+      precoAntigo: produto.precoAntigo,
+      cupom: produto.cupom,
+      avisoCupom: produto.avisoCupom
+    });
 
-    const jaExiste = fila.some(o =>
-      o.link === novaOferta.link ||
-      o.linkAfiliado === novaOferta.linkAfiliado ||
-      o.titulo === novaOferta.titulo
-    );
+ const precoNumero = Number(
+  String(produto.precoAtual || "")
+    .replace("R$", "")
+    .replace(/\./g, "")
+    .replace(",", ".")
+    .trim()
+);
 
-    if (jaExiste) continue;
+const precoAntigoNumero = Number(
+  String(produto.precoAntigo || "")
+    .replace("R$", "")
+    .replace(/\./g, "")
+    .replace(",", ".")
+    .trim()
+);
 
-    if (produtoRepetidoRecentemente(novaOferta.titulo, 12)) {
-      console.log("🔁 Amazon repetido ignorado:", novaOferta.titulo);
-      continue;
-    }
+const desconto =
+  precoAntigoNumero > precoNumero
+    ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
+    : 0;
 
-    fila.push(novaOferta);
-    salvarFila();
+if (!precoNumero || !Number.isFinite(precoNumero)) continue;
+if (precoNumero < 30) continue;
+if (desconto < 15 && !produto.avisoCupom) continue;
 
-    adicionadasNestaRodada++;
+const novaOferta = {
+  nome: produto.titulo,
+  titulo: produto.titulo,
+  preco: produto.precoAtual,
+  precoAtual: produto.precoAtual,
+  precoAntigo: produto.precoAntigo || "",
+  cupom: produto.cupom || "",
+  avisoCupom: produto.avisoCupom || "",
+  parcelamento: produto.parcelamento || "",
+  link: produto.linkAfiliado || produto.linkOriginal || link,
+  linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
+  imagem: produto.imagem || "",
+  marketplace: "amazon",
+  categoria: "Amazon",
+  sessaoId: "sessao1",
+  status: "pendente",
+  clienteId: "admin"
+};
 
-    console.log(`🤖 Nova oferta Amazon: ${novaOferta.titulo} | ${Math.round(desconto)}% OFF`);
+const jaExiste = fila.some(o =>
+  o.link === novaOferta.link ||
+  o.linkAfiliado === novaOferta.linkAfiliado ||
+  o.titulo === novaOferta.titulo
+);
 
-    if (adicionadasNestaRodada >= limitePorRodada) {
-      console.log("🛑 Limite Amazon por rodada atingido");
-      return;
-    }
+if (!jaExiste) {
+  fila.push(novaOferta);
+  salvarFila();
+
+adicionadasNestaRodada++;
+
+if (adicionadasNestaRodada >= limitePorRodada) {
+  console.log("🛑 Limite Amazon por rodada atingido");
+  return;
+}
+
+  console.log("🤖 Nova oferta Amazon:", {
+    titulo: novaOferta.titulo,
+    preco: novaOferta.precoAtual,
+    precoAntigo: novaOferta.precoAntigo,
+    desconto: Math.round(desconto) + "%",
+    cupom: novaOferta.cupom,
+    avisoCupom: novaOferta.avisoCupom
+  });
+}
 
     await new Promise(r =>
       setTimeout(r, 3000 + Math.random() * 5000)
@@ -2948,7 +2990,6 @@ for (const link of links) {
     console.log("❌ erro produto Amazon:", e.message);
   }
 }
-
 
       await new Promise(r =>
         setTimeout(r, 4000 + Math.random() * 5000)
@@ -3019,6 +3060,8 @@ async function buscarOfertasShopee() {
   });
 
   const data = await response.json();
+
+  console.log("🛍️ SHOPEE BUSCA RESPONSE:", JSON.stringify(data).slice(0, 1000));
 
   return data?.data?.productOfferV2?.nodes || [];
 }
