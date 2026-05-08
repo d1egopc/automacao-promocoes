@@ -2671,7 +2671,7 @@ async function farejarAmazon() {
     !link.includes("/gp/slredirect")
   );
 
-const links = [...new Set(linksExtraidos)].slice(0, 8);
+const links = [...new Set(linksExtraidos)].slice(0, 3);
 
 console.log("🧪 AMAZON LINKS:", links);
 console.log(`🔎 ${termo}: ${links.length} produtos Amazon`);
