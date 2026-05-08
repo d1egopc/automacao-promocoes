@@ -2994,8 +2994,15 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("🔥 API ONLINE NA PORTA " + PORT);
 
+setTimeout(() => {
+  console.log("🚀 Iniciando Shopee após boot...");
+  farejarShopee();
+}, 5 * 60 * 1000);
+
+setTimeout(() => {
+  console.log("🚀 Iniciando Amazon após boot...");
   farejarAmazon();
-  farejarShopee(); 
+}, 15 * 60 * 1000);
 
  setTimeout(() => {
     console.log("🔄 Tentando reconectar WhatsApp automaticamente...");
