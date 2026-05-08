@@ -1126,7 +1126,7 @@ const encurtarUrl = async (url) => {
 async function importarMercadoLivre(url, config) {
   const cookies = config?.credenciais?.cookies || "";
   
-  console.log("🌐 AMAZON URL:", url);
+  // console.log("🌐 ML URL:", url);
 
   const response = await fetch(url, {
   method: "GET",
@@ -2869,7 +2869,7 @@ for (const link of links) {
       credenciais: integracoesPorCliente["admin"]?.amazon?.credenciais
     });
 
-  console.log(`🛒 Amazon produto encontrado: ${titulo}`);
+  console.log(`🛒 Amazon produto encontrado: ${produto.titulo}`);
  
  const precoNumero = Number(
   String(produto.precoAtual || "")
