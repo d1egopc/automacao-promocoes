@@ -2713,9 +2713,11 @@ if (
 async function farejarAmazon() {
   try {
     console.log("🐶 Farejando ofertas Amazon...");
-
+    
     let adicionadasNestaRodada = 0;
-    const limitePorRodada = 10;
+    
+    const limitePorRodada =
+    config.marketplaces?.amazon?.limitePorRodada || 5;
 
     const buscas = [
       "air fryer",
@@ -2974,7 +2976,9 @@ async function farejarShopee() {
     console.log(`🔎 ${produtos.length} produtos Shopee encontrados`);
 
     let adicionadasNestaRodada = 0;
-    const limitePorRodada = 10;
+    
+    const limitePorRodada =
+    config.marketplaces?.shopee?.limitePorRodada || 10;
 
     for (const item of produtos) {
       try {
@@ -2984,7 +2988,7 @@ const vendas = Number(item.sales || 0);
 const nota = Number(item.ratingStar || 0);
 const precoAtualNumero = Number(item.priceMin || 0);
 
-if (desconto < 15) continue;
+if (desconto < (config.marketplaces?.shopee?.descontoMinimo || 15)) continue;
 if (!precoAtualNumero) continue;
 if (precoAtualNumero < 20) continue;
 if (vendas < 20) continue;
