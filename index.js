@@ -54,10 +54,36 @@ let config = {
 let fila = [];
 let enviandoAgora = false;
 let controleEnvio = {}; // por cliente
+let historicoOfertas = {};
 
 const FILA_FILE = "/data/fila.json";
 const CONFIG_FILE = "/data/config.json";
 console.log("📂 Salvando dados em:", FILA_FILE);
+
+function gerarChaveProduto(titulo = "") {
+  return String(titulo)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\b(preto|branco|azul|rosa|verde|vermelho|127v|220v|110v|bivolt)\b/g, "")
+    .replace(/[^a-z0-9 ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+}
+
+function produtoRepetidoRecentemente(titulo, horas = 12) {
+  const chave = gerarChaveProduto(titulo);
+  const agora = Date.now();
+  const limite = horas * 60 * 60 * 1000;
+
+  if (historicoOfertas[chave] && agora - historicoOfertas[chave] < limite) {
+    return true;
+  }
+
+  historicoOfertas[chave] = agora;
+  return false;
+}
 
 
 function salvarFila() {
@@ -2121,6 +2147,12 @@ if (!temCupom && descontoPercentual < 10) {
 if (jaExiste) {
   console.log("⚠️ Oferta já existe na fila:", novaOferta.nome);
 } else {
+  
+  if (produtoRepetidoRecentemente(novaOferta.titulo, 12)) {
+  console.log("🔁 Oferta parecida ignorada:", novaOferta.titulo);
+  return;
+}
+
   fila.push(novaOferta);
   salvarFila();
 
