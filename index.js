@@ -3070,6 +3070,26 @@ if (nota > 0 && nota < 4.5) continue;
 
 const PORT = process.env.PORT || 3000;
 
+function podeRodarAgora() {
+  if (!config.pausarMadrugada) return true;
+
+  const agora = new Date();
+  const horaAtual = agora.getHours() * 60 + agora.getMinutes();
+
+  const [inicioH, inicioM] = (config.horarioInicio || "08:00").split(":").map(Number);
+  const [fimH, fimM] = (config.horarioFim || "23:00").split(":").map(Number);
+
+  const inicio = inicioH * 60 + inicioM;
+  const fim = fimH * 60 + fimM;
+
+  if (inicio <= fim) {
+    return horaAtual >= inicio && horaAtual <= fim;
+  }
+
+  return horaAtual >= inicio || horaAtual <= fim;
+}
+
+
 app.listen(PORT, () => {
   console.log("🔥 API ONLINE NA PORTA " + PORT);
 
@@ -3093,7 +3113,11 @@ setTimeout(() => {
   setInterval(() => {
     const cfg = config.marketplaces?.shopee;
 
-    if (config.automacaoAtiva && cfg?.ativo) {
+    if (
+  config.automacaoAtiva &&
+  cfg?.ativo &&
+  podeRodarAgora()
+) {
       console.log("⏱️ Rodando farejador Shopee...");
       farejarShopee();
     }
@@ -3104,7 +3128,11 @@ setTimeout(() => {
   setInterval(() => {
     const cfg = config.marketplaces?.amazon;
 
-    if (config.automacaoAtiva && cfg?.ativo) {
+    if (
+  config.automacaoAtiva &&
+  cfg?.ativo &&
+  podeRodarAgora()
+) {
       console.log("⏱️ Rodando farejador Amazon...");
       farejarAmazon();
     }
@@ -3112,6 +3140,10 @@ setTimeout(() => {
 }, 15 * 60 * 1000);
 
 setInterval(() => {
+  if (!podeRodarAgora()) {
+    console.log("🌙 Fila pausada fora do horário configurado");
+    return;
+  }
+
   processarFila();
 }, 10 * 1000);
-
