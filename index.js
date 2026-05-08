@@ -2869,78 +2869,76 @@ for (const link of links) {
       credenciais: integracoesPorCliente["admin"]?.amazon?.credenciais
     });
 
-  console.log(`🛒 Amazon produto encontrado: ${produto.titulo}`);
- 
- const precoNumero = Number(
-  String(produto.precoAtual || "")
-    .replace("R$", "")
-    .replace(/\./g, "")
-    .replace(",", ".")
-    .trim()
-);
+    console.log(`🛒 Amazon produto encontrado: ${produto.titulo}`);
 
-const precoAntigoNumero = Number(
-  String(produto.precoAntigo || "")
-    .replace("R$", "")
-    .replace(/\./g, "")
-    .replace(",", ".")
-    .trim()
-);
+    const precoNumero = Number(
+      String(produto.precoAtual || "")
+        .replace("R$", "")
+        .replace(/\./g, "")
+        .replace(",", ".")
+        .trim()
+    );
 
-const desconto =
-  precoAntigoNumero > precoNumero
-    ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
-    : 0;
+    const precoAntigoNumero = Number(
+      String(produto.precoAntigo || "")
+        .replace("R$", "")
+        .replace(/\./g, "")
+        .replace(",", ".")
+        .trim()
+    );
 
-if (!precoNumero || !Number.isFinite(precoNumero)) continue;
-if (precoNumero < 30) continue;
-if (desconto < 15 && !produto.avisoCupom) continue;
+    const desconto =
+      precoAntigoNumero > precoNumero
+        ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
+        : 0;
 
-const novaOferta = {
-  nome: produto.titulo,
-  titulo: produto.titulo,
-  preco: produto.precoAtual,
-  precoAtual: produto.precoAtual,
-  precoAntigo: produto.precoAntigo || "",
-  cupom: produto.cupom || "",
-  avisoCupom: produto.avisoCupom || "",
-  parcelamento: produto.parcelamento || "",
-  link: produto.linkAfiliado || produto.linkOriginal || link,
-  linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
-  imagem: produto.imagem || "",
-  marketplace: "amazon",
-  categoria: "Amazon",
-  sessaoId: "sessao1",
-  status: "pendente",
-  clienteId: "admin"
-};
+    if (!precoNumero || !Number.isFinite(precoNumero)) continue;
+    if (precoNumero < (config.marketplaces?.amazon?.precoMinimo || 25)) continue;
+    if (desconto < (config.marketplaces?.amazon?.descontoMinimo || 20) && !produto.avisoCupom) continue;
 
-const jaExiste = fila.some(o =>
-  o.link === novaOferta.link ||
-  o.linkAfiliado === novaOferta.linkAfiliado ||
-  o.titulo === novaOferta.titulo
-);
+    const novaOferta = {
+      nome: produto.titulo,
+      titulo: produto.titulo,
+      preco: produto.precoAtual,
+      precoAtual: produto.precoAtual,
+      precoAntigo: produto.precoAntigo || "",
+      cupom: produto.cupom || "",
+      avisoCupom: produto.avisoCupom || "",
+      parcelamento: produto.parcelamento || "",
+      link: produto.linkAfiliado || produto.linkOriginal || link,
+      linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
+      imagem: produto.imagem || "",
+      marketplace: "amazon",
+      categoria: "Amazon",
+      sessaoId: "sessao1",
+      status: "pendente",
+      clienteId: "admin"
+    };
 
-if (!jaExiste) {
-  fila.push(novaOferta);
-  salvarFila();
+    const jaExiste = fila.some(o =>
+      o.link === novaOferta.link ||
+      o.linkAfiliado === novaOferta.linkAfiliado ||
+      o.titulo === novaOferta.titulo
+    );
 
-adicionadasNestaRodada++;
+    if (jaExiste) continue;
 
-if (adicionadasNestaRodada >= limitePorRodada) {
-  console.log("🛑 Limite Amazon por rodada atingido");
-  return;
-}
+    if (produtoRepetidoRecentemente(novaOferta.titulo, 12)) {
+      console.log("🔁 Amazon repetido ignorado:", novaOferta.titulo);
+      continue;
+    }
 
-  console.log("🤖 Nova oferta Amazon:", {
-    titulo: novaOferta.titulo,
-    preco: novaOferta.precoAtual,
-    precoAntigo: novaOferta.precoAntigo,
-    desconto: Math.round(desconto) + "%",
-    cupom: novaOferta.cupom,
-    avisoCupom: novaOferta.avisoCupom
-  });
-}
+    fila.push(novaOferta);
+    salvarFila();
+
+    adicionadasNestaRodada++;
+
+    console.log(`🤖 Nova oferta Amazon: ${novaOferta.titulo} | ${Math.round(desconto)}% OFF`);
+
+    if (adicionadasNestaRodada >= limitePorRodada) {
+      console.log("🛑 Limite Amazon por rodada atingido");
+      return;
+    }
 
     await new Promise(r =>
       setTimeout(r, 3000 + Math.random() * 5000)
@@ -2950,6 +2948,7 @@ if (adicionadasNestaRodada >= limitePorRodada) {
     console.log("❌ erro produto Amazon:", e.message);
   }
 }
+
 
       await new Promise(r =>
         setTimeout(r, 4000 + Math.random() * 5000)
