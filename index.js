@@ -2613,6 +2613,19 @@ async function farejarAmazon() {
       "cafeteira",
       "furadeira",
       "cadeira escritorio"
+      "produto de limpeza",
+      "amaciante",
+      "desinfetante",
+      "sabao em po",
+      "papel higienico",
+      "kit limpeza",
+      "perfume masculino",
+      "perfume feminino",
+      "bicicleta eletrica",
+      "chuteira",
+      "camisa brasil",
+      "copa do mundo",
+      "smart tv",
     ];
 
     for (const termo of buscas) {
