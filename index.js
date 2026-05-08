@@ -598,6 +598,12 @@ function salvarIntegracoesPersistidas() {
 carregarIntegracoesPersistidas();
 carregarFila();
 carregarConfig();
+
+if (config.destinosPorSessao) {
+  destinosPorSessao = config.destinosPorSessao;
+  console.log("✅ Destinos carregados da config");
+}
+
 const ADMIN_USER = "admin";
 const ADMIN_PASS_HASH = bcrypt.hashSync("123456", 10);
 const JWT_SECRET = process.env.JWT_SECRET || "segredo";
@@ -2323,15 +2329,8 @@ app.post("/destinos/:id", (req, res) => {
 
   config.destinosPorSessao[id] = destinos;
 
-  try {
-  if (typeof salvarIntegracoes === "function") {
-    salvarIntegracoes();
-  } else {
-    console.log("⚠️ salvarIntegracoes não encontrada. Destinos salvos só em memória.");
-  }
-} catch (e) {
-  console.log("⚠️ Erro ao salvar destinos:", e.message);
-}
+  salvarConfig();
+  console.log("💾 Destinos salvos na config:", id, destinos);
 
   return res.json({
     ok: true,
@@ -2355,7 +2354,10 @@ app.get("/destinos/:id", (req, res) => {
 app.post("/test-send/:id", async (req, res) => {
   const { id } = req.params;
   const sock = sessoes[id];
-  const destinos = destinosPorSessao[id] || [];
+  const destinos =
+  destinosPorSessao[id] ||
+  config?.destinosPorSessao?.[id] ||
+  [];
 
   if (!sock) return res.status(400).json({ erro: "Sem sessão" });
 
