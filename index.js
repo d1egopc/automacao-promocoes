@@ -10,6 +10,13 @@ let config = {
   intervaloMinutos: 2
 };
 
+config.marketplaces = {
+  amazon: true,
+  shopee: true,
+  mercadolivre: false,
+  aliexpress: false
+};
+
 let fila = [];
 let enviandoAgora = false;
 let controleEnvio = {}; // por cliente
@@ -2959,14 +2966,26 @@ app.listen(PORT, () => {
   }, 3000);
 });
  
- setInterval(() => {
-  processarFila();
-}, 10 * 1000); // roda a cada 10 segundos
-
 setInterval(() => {
-  if (config.automacaoAtiva) {
+  if (
+  config.automacaoAtiva &&
+  config.marketplaces?.amazon
+) {
+    console.log("⏱️ Rodando farejador Amazon...");
     farejarAmazon();
   } else {
-    console.log("⏸️ Farejador pausado");
+    console.log("⏸️ Amazon pausada");
   }
-}, 2 * 60 * 1000);
+}, 10 * 60 * 1000);
+
+setInterval(() => {
+  if (
+  config.automacaoAtiva &&
+  config.marketplaces?.shopee
+) {
+    console.log("⏱️ Rodando farejador Shopee...");
+    farejarShopee();
+  } else {
+    console.log("⏸️ Shopee pausada");
+  }
+}, 5 * 60 * 1000);
