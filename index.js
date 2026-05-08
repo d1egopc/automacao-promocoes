@@ -502,20 +502,39 @@ app.post("/fila/:index/enviar-agora", async (req, res) => {
   });
 });
 
+app.get("/config", (req, res) => {
+  return res.json({
+    ok: true,
+    config
+  });
+});
 
 app.post("/config", (req, res) => {
-  const intervalo = Number(req.body.intervalo);
+  const body = req.body || {};
 
-  if (!intervalo || intervalo <= 0) {
-    return res.status(400).send("Intervalo inválido");
+  config = {
+    ...config,
+    ...body,
+    marketplaces: {
+      ...config.marketplaces,
+      ...(body.marketplaces || {})
+    }
+  };
+
+  if (body.intervaloEnvioMinutos) {
+    config.intervaloMinutos = Number(body.intervaloEnvioMinutos);
   }
 
-  config.intervaloMinutos = intervalo;
+  if (body.intervaloMinutos) {
+    config.intervaloEnvioMinutos = Number(body.intervaloMinutos);
+  }
+
   salvarConfig();
 
-  console.log("⚙️ Novo intervalo:", intervalo, "minutos");
-
-  res.send("Config atualizada");
+  return res.json({
+    ok: true,
+    config
+  });
 });
 
 let sessoes = {};
