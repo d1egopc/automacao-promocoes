@@ -1314,6 +1314,24 @@ async function importarAliExpress(urlEntrada, config = {}) {
       result?.product ||
       {};
 
+     if (!produto || Object.keys(produto).length === 0) {
+  console.log("⚠️ AliExpress sem produto retornado pela API:", productId);
+
+  return {
+    marketplace: "aliexpress",
+    titulo: "Produto AliExpress",
+    precoAntigo: "",
+    precoAtual: "",
+    cupom: "",
+    linkOriginal: urlEntrada,
+    linkAfiliado: urlEntrada,
+    imagem: "",
+    categoria: "AliExpress",
+    aviso: "AliExpress não retornou dados desse produto. Preencha manualmente."
+  };
+} 
+
+
     let titulo =
       produto.product_title ||
       produto.title ||
