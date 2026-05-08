@@ -50,7 +50,9 @@ let config = {
   priorizarBrasil: true,
   permitirInternacionalForte: true,
   descontoMinimoInternacional: 40
-}
+    }
+  }
+};
 
 let fila = [];
 let enviandoAgora = false;
