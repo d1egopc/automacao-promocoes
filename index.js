@@ -22,7 +22,9 @@ let enviandoAgora = false;
 let controleEnvio = {}; // por cliente
 
 const FILA_FILE = "/data/fila.json";
+const CONFIG_FILE = "/data/config.json";
 console.log("📂 Salvando dados em:", FILA_FILE);
+
 
 function salvarFila() {
   try {
@@ -43,6 +45,38 @@ function carregarFila() {
     }
   } catch (e) {
     console.error("❌ ERRO AO CARREGAR FILA:", e.message);
+  }
+}
+
+function salvarConfig() {
+  try {
+    fs.writeFileSync(
+      CONFIG_FILE,
+      JSON.stringify(config, null, 2)
+    );
+
+    console.log("💾 Config salva");
+  } catch (e) {
+    console.error("❌ ERRO AO SALVAR CONFIG:", e.message);
+  }
+}
+
+function carregarConfig() {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      const dados = fs.readFileSync(CONFIG_FILE, "utf8");
+
+      const configSalva = JSON.parse(dados);
+
+      config = {
+        ...config,
+        ...configSalva
+      };
+
+      console.log("✅ Config carregada");
+    }
+  } catch (e) {
+    console.error("❌ ERRO AO CARREGAR CONFIG:", e.message);
   }
 }
 
@@ -503,6 +537,7 @@ function salvarIntegracoesPersistidas() {
 
 carregarIntegracoesPersistidas();
 carregarFila();
+carregarConfig();
 const ADMIN_USER = "admin";
 const ADMIN_PASS_HASH = bcrypt.hashSync("123456", 10);
 const JWT_SECRET = process.env.JWT_SECRET || "segredo";
