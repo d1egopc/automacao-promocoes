@@ -408,6 +408,7 @@ app.get("/automacao", (req, res) => {
 
 app.post("/automacao/toggle", (req, res) => {
   config.automacaoAtiva = !config.automacaoAtiva;
+  salvarConfig();
 
   console.log("🤖 Automação:", config.automacaoAtiva ? "ON" : "OFF");
 
@@ -476,6 +477,7 @@ app.post("/config", (req, res) => {
   }
 
   config.intervaloMinutos = intervalo;
+  salvarConfig();
 
   console.log("⚙️ Novo intervalo:", intervalo, "minutos");
 
