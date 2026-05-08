@@ -7,14 +7,48 @@ if (!fs.existsSync("/data")) {
 }
 
 let config = {
-  intervaloMinutos: 2
-};
+  automacaoAtiva: false,
 
-config.marketplaces = {
-  amazon: true,
-  shopee: true,
-  mercadolivre: false,
-  aliexpress: false
+  intervaloEnvioMinutos: 5,
+
+  horarioInicio: "08:00",
+  horarioFim: "23:00",
+
+  pausarMadrugada: true,
+
+  marketplaces: {
+    amazon: {
+      ativo: true,
+      intervaloFarejoMinutos: 30,
+      limitePorRodada: 5,
+      descontoMinimo: 20,
+      precoMinimo: 25
+    },
+
+    shopee: {
+      ativo: true,
+      intervaloFarejoMinutos: 15,
+      limitePorRodada: 10,
+      descontoMinimo: 25,
+      precoMinimo: 20
+    },
+
+    mercadolivre: {
+      ativo: false,
+      intervaloFarejoMinutos: 60,
+      limitePorRodada: 5,
+      descontoMinimo: 20,
+      precoMinimo: 30
+    },
+
+    aliexpress: {
+      ativo: false,
+      intervaloFarejoMinutos: 40,
+      limitePorRodada: 8,
+      descontoMinimo: 20,
+      precoMinimo: 20
+    }
+  }
 };
 
 let fila = [];
@@ -3029,7 +3063,7 @@ setTimeout(() => {
   setInterval(() => {
     if (
       config.automacaoAtiva &&
-      config.marketplaces?.shopee
+      config.marketplaces?.shopee?.ativo
     ) {
       console.log("⏱️ Rodando farejador Shopee...");
       farejarShopee();
@@ -3041,7 +3075,7 @@ setTimeout(() => {
   setInterval(() => {
     if (
       config.automacaoAtiva &&
-      config.marketplaces?.amazon
+      config.marketplaces.amazon.ativo
     ) {
       console.log("⏱️ Rodando farejador Amazon...");
       farejarAmazon();
