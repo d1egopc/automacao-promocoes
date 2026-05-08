@@ -1298,8 +1298,8 @@ async function importarAliExpress(urlEntrada, config = {}) {
     });
 
     const data = await response.json();
-
-    console.log("ALIEXPRESS API RESPONSE:", JSON.stringify(data));
+   
+    console.log("🛒 AliExpress consultado");
 
     const result =
       data?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result ||
@@ -1362,18 +1362,6 @@ async function importarAliExpress(urlEntrada, config = {}) {
   produto.max_sale_price ||
   "";
 
-   console.log("💰 ALI PREÇOS RAW:", {
-  target_sale_price: produto.target_sale_price,
-  sale_price: produto.sale_price,
-  app_sale_price: produto.app_sale_price,
-  target_app_sale_price: produto.target_app_sale_price,
-  target_min_sale_price: produto.target_min_sale_price,
-  min_sale_price: produto.min_sale_price,
-  target_original_price: produto.target_original_price,
-  original_price: produto.original_price
-});
-
-  
   if (produto.discount === "0%" && limparPreco(precoAtual) === limparPreco(precoAntigo)) {
   precoAntigo = "";
 }
@@ -2633,9 +2621,6 @@ async function farejarMercadoLivre() {
           }
         });
 
-        console.log("🌐 URL:", url);
-        console.log("📡 STATUS:", response.status);
-
         if (!response.ok) {
           await new Promise(r => setTimeout(r, 6000));
           continue;
@@ -2645,12 +2630,7 @@ async function farejarMercadoLivre() {
 
         let cupom = "";
         let avisoCupom = "";
-        
-        console.log("🧪 HTML TAMANHO:", html.length);
-        console.log("🧪 TEM MLB?", html.includes("MLB"));
-        console.log("🧪 TEM item?", html.includes("item"));
-        console.log("🧪 HTML INICIO:", html.slice(0, 1000));
-        
+       
         const cupomMatch =
   html.match(/cupom\s+([A-Z0-9]{4,20})/i) ||
   html.match(/código\s+([A-Z0-9]{4,20})/i) ||
@@ -2703,11 +2683,6 @@ if (compraNoApp && !cupom) {
     !link.includes("privacidade") &&
     !link.includes("account-verification")
   );
-
-        const links = [...new Set(linksExtraidos)].slice(0, 8);
-        console.log("🧪 LINKS LIMPOS:", links);
-
-        console.log(`🔎 ${termo}: ${links.length} produtos`);
 
         for (const link of links) {
           try {
@@ -2782,14 +2757,9 @@ if (
               fila.push(novaOferta);
               salvarFila();
 
-              console.log("🤖 Nova oferta ML:", {
-                titulo: novaOferta.titulo,
-                preco: novaOferta.precoAtual,
-                precoAntigo: novaOferta.precoAntigo,
-                desconto: Math.round(desconto) + "%",
-                link: novaOferta.link
-              });
-            }
+             console.log(
+         `🤖 ML: ${novaOferta.titulo} | ${Math.round(desconto)}% OFF`
+           );
 
             await new Promise(r =>
             setTimeout(r, 2000 + Math.random() * 4000)
@@ -2867,9 +2837,6 @@ async function farejarAmazon() {
 
       const html = await response.text();
 
-      console.log("🧪 AMAZON HTML:", html.length);
-      console.log("🧪 TEM ASIN?", html.includes("/dp/"));
-
       const linksExtraidos = [
   ...html.matchAll(/href="([^"]*\/dp\/[A-Z0-9]{10}[^"]*)"/g),
   ...html.matchAll(/href="([^"]*\/gp\/product\/[A-Z0-9]{10}[^"]*)"/g)
@@ -2894,7 +2861,6 @@ async function farejarAmazon() {
 
 const links = [...new Set(linksExtraidos)].slice(0, 3);
 
-console.log("🧪 AMAZON LINKS:", links);
 console.log(`🔎 ${termo}: ${links.length} produtos Amazon`);
 
 for (const link of links) {
@@ -2903,7 +2869,7 @@ for (const link of links) {
       credenciais: integracoesPorCliente["admin"]?.amazon?.credenciais
     });
 
-    console.log("🧪 PRODUTO AMAZON:", {
+  console.log(`🛒 Amazon produto encontrado: ${titulo}`);
       titulo: produto.titulo,
       precoAtual: produto.precoAtual,
       precoAntigo: produto.precoAntigo,
@@ -3060,8 +3026,6 @@ async function buscarOfertasShopee() {
   });
 
   const data = await response.json();
-
-  console.log("🛍️ SHOPEE BUSCA RESPONSE:", JSON.stringify(data).slice(0, 1000));
 
   return data?.data?.productOfferV2?.nodes || [];
 }
