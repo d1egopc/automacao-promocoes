@@ -3109,3 +3109,7 @@ setTimeout(() => {
   }, 15 * 60 * 1000);
 }, 15 * 60 * 1000);
 
+setInterval(() => {
+  processarFila();
+}, 10 * 1000);
+
