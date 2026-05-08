@@ -3087,26 +3087,24 @@ setTimeout(() => {
  
 setTimeout(() => {
   setInterval(() => {
-    if (
-      config.automacaoAtiva &&
-      config.marketplaces?.shopee?.ativo
-    ) {
+    const cfg = config.marketplaces?.shopee;
+
+    if (config.automacaoAtiva && cfg?.ativo) {
       console.log("⏱️ Rodando farejador Shopee...");
       farejarShopee();
     }
-  }, 10 * 60 * 1000);
+  }, (config.marketplaces?.shopee?.intervaloFarejoMinutos || 10) * 60 * 1000);
 }, 5 * 60 * 1000);
 
 setTimeout(() => {
   setInterval(() => {
-    if (
-      config.automacaoAtiva &&
-      config.marketplaces.amazon.ativo
-    ) {
+    const cfg = config.marketplaces?.amazon;
+
+    if (config.automacaoAtiva && cfg?.ativo) {
       console.log("⏱️ Rodando farejador Amazon...");
       farejarAmazon();
     }
-  }, 15 * 60 * 1000);
+  }, (config.marketplaces?.amazon?.intervaloFarejoMinutos || 15) * 60 * 1000);
 }, 15 * 60 * 1000);
 
 setInterval(() => {
