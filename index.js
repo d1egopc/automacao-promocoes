@@ -41,15 +41,16 @@ let config = {
       precoMinimo: 30
     },
 
-    aliexpress: {
-      ativo: false,
-      intervaloFarejoMinutos: 40,
-      limitePorRodada: 8,
-      descontoMinimo: 20,
-      precoMinimo: 20
-    }
-  }
-};
+   aliexpress: {
+  ativo: false,
+  intervaloFarejoMinutos: 40,
+  limitePorRodada: 5,
+  descontoMinimo: 20,
+  precoMinimo: 20,
+  priorizarBrasil: true,
+  permitirInternacionalForte: true,
+  descontoMinimoInternacional: 40
+}
 
 let fila = [];
 let enviandoAgora = false;
@@ -1450,6 +1451,37 @@ try {
     };
   }
 }
+
+async function farejarAliExpress() {
+  try {
+    console.log("🛒 Farejando ofertas AliExpress...");
+
+    const cfg = config.marketplaces?.aliexpress || {};
+    const limitePorRodada = cfg.limitePorRodada || 5;
+
+    let adicionadasNestaRodada = 0;
+
+    const buscas = [
+      "produto no brasil",
+      "estoque no brasil",
+      "xeon x99",
+      "ssd nvme",
+      "fone bluetooth",
+      "smartwatch",
+      "placa mae kit xeon",
+      "mini pc",
+      "controle gamer"
+    ];
+
+    for (const termo of buscas) {
+      console.log("🔎 Busca AliExpress:", termo);
+    }
+
+  } catch (e) {
+    console.log("❌ erro farejador AliExpress:", e.message);
+  }
+}
+
 
 async function importarAmazon(url, config) {
   if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
@@ -3190,6 +3222,21 @@ setTimeout(() => {
     }
   }, (config.marketplaces?.amazon?.intervaloFarejoMinutos || 15) * 60 * 1000);
 }, 15 * 60 * 1000);
+
+setTimeout(() => {
+  setInterval(() => {
+    const cfg = config.marketplaces?.aliexpress;
+
+    if (
+      config.automacaoAtiva &&
+      cfg?.ativo &&
+      podeRodarAgora()
+    ) {
+      console.log("⏱️ Rodando farejador AliExpress...");
+      farejarAliExpress();
+    }
+  }, (config.marketplaces?.aliexpress?.intervaloFarejoMinutos || 40) * 60 * 1000);
+}, 20 * 60 * 1000);
 
 setInterval(() => {
   if (!podeRodarAgora()) {
