@@ -2612,7 +2612,7 @@ async function farejarAmazon() {
       "smartwatch",
       "cafeteira",
       "furadeira",
-      "cadeira escritorio"
+      "cadeira escritorio",
       "produto de limpeza",
       "amaciante",
       "desinfetante",
