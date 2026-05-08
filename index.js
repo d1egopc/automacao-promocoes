@@ -522,12 +522,17 @@ app.post("/config", (req, res) => {
   };
 
   if (body.intervaloEnvioMinutos) {
-    config.intervaloMinutos = Number(body.intervaloEnvioMinutos);
-  }
+  config.intervaloMinutos = Number(body.intervaloEnvioMinutos);
+}
 
-  if (body.intervaloMinutos) {
-    config.intervaloEnvioMinutos = Number(body.intervaloMinutos);
-  }
+if (body.intervaloMinutos) {
+  config.intervaloEnvioMinutos = Number(body.intervaloMinutos);
+}
+
+if (body.intervalo) {
+  config.intervaloMinutos = Number(body.intervalo);
+  config.intervaloEnvioMinutos = Number(body.intervalo);
+}
 
   salvarConfig();
 
