@@ -54,6 +54,14 @@ let config = {
   }
 };
 
+magalu: {
+  ativo: true,
+  intervaloFarejoMinutos: 30,
+  limitePorRodada: 10,
+  descontoMinimo: 15,
+  precoMinimo: 20
+},
+
 let fila = [];
 let enviandoAgora = false;
 let controleEnvio = {}; // por cliente
@@ -1542,6 +1550,17 @@ async function farejarAliExpress() {
   }
 }
 
+async function farejarMagalu() {
+  try {
+    console.log("🟦 Farejando ofertas Magalu...");
+
+    // em breve:
+    // buscarOfertasMagalu()
+
+  } catch (e) {
+    console.log("❌ erro farejador Magalu:", e.message);
+  }
+}
 
 async function importarAmazon(url, config) {
   if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
@@ -3306,6 +3325,21 @@ setTimeout(() => {
     }
   }, (config.marketplaces?.aliexpress?.intervaloFarejoMinutos || 40) * 60 * 1000);
 }, 20 * 60 * 1000);
+
+setTimeout(() => {
+  setInterval(() => {
+    const cfg = config.marketplaces?.magalu;
+
+    if (
+      config.automacaoAtiva &&
+      cfg?.ativo &&
+      podeRodarAgora()
+    ) {
+      console.log("🟦 Rodando farejador Magalu...");
+      farejarMagalu();
+    }
+  }, (config.marketplaces?.magalu?.intervaloFarejoMinutos || 30) * 60 * 1000);
+}, 25 * 60 * 1000);
 
 let ultimoLogPausaFila = 0;
 
