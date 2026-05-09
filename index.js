@@ -3143,6 +3143,10 @@ if (nota > 0 && nota < 4.5) continue;
           sessaoId: "sessao1",
           status: "pendente",
           clienteId: "admin",
+          
+          criadoEm: new Date().toLocaleString("pt-BR", {
+          timeZone: "America/Sao_Paulo"
+          }),
 
           cupom: "",
           avisoCupom:
