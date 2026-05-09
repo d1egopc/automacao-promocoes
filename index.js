@@ -2244,37 +2244,7 @@ if (marketplace === "magalu") {
       precoAtual: "",
       cupom: "",
       linkOriginal: url,
-      linkAfiliado,
-      imagem: "",
-      categoria: "Magalu",
-      aviso: "Dados não encontrados automaticamente. Preencha preço e título manualmente."
-    });
-  } catch (e) {
-    console.error("ERRO MAGALU:", e);
-
-    return res.json({
-      marketplace: "magalu",
-      titulo: "Produto importado de Magalu",
-      precoAntigo: "",
-      precoAtual: "",
-      cupom: "",
-      linkOriginal: url,
-      linkAfiliado: url,
-      imagem: "",
-      categoria: "Magalu",
-      aviso: "Erro ao gerar link Magalu. Preencha manualmente."
-    });
-  }
-}
-
-    return res.json({
-      marketplace: "magalu",
-      titulo: "Produto importado de Magalu",
-      precoAntigo: "",
-      precoAtual: "",
-      cupom: "",
-      linkOriginal: url,
-      linkAfiliado,
+      linkAfiliado: linkAfiliado,
       imagem: "",
       categoria: "Magalu",
       aviso: "Dados não encontrados automaticamente. Preencha preço e título manualmente."
@@ -2376,7 +2346,7 @@ if (jaExiste) {
   console.log("⚠️ Oferta já existe na fila:", novaOferta.nome);
 } else {
   
-  if (produtoRepetidoRecentemente(novaOferta.titulo, 12)) {
+  if (produtoRepetidoRecentemente(novaOferta.nome, 12)) {
   console.log("🔁 Oferta parecida ignorada:", novaOferta.titulo);
   return;
 }
