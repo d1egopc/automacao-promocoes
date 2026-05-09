@@ -3162,8 +3162,19 @@ if (!config.marketplaces?.amazon?.ativo) {
 
       console.log("📡 AMAZON STATUS:", response.status);
 
-      const html = await response.text();
+      if (!response.ok) {
+      console.log("⚠️ Amazon recusou essa busca:", response.status);
+      continue;
+      }
 
+   const html = await response.text();
+
+
+    if (!html || html.length < 5000) {
+    console.log("⚠️ HTML Amazon muito pequeno ou inválido.");
+    continue;
+    }
+   
       console.log("🧪 AMAZON HTML:", html.length);
       console.log("🧪 TEM ASIN?", html.includes("/dp/"));
 
