@@ -1429,6 +1429,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
   "";
 
 precoAtual = String(precoAtual).trim();
+console.log("✅ ALI PREÇO ESCOLHIDO:", precoAtual);
    
    
   let precoAntigo =
@@ -1437,6 +1438,7 @@ precoAtual = String(precoAtual).trim();
   "";
 
 precoAntigo = String(precoAntigo).trim();
+console.log("✅ ALI PREÇO ANTIGO ESCOLHIDO:", precoAntigo);
 
    console.log("💰 ALI PREÇOS RAW:", {
   target_sale_price: produto.target_sale_price,
