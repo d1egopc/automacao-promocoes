@@ -170,8 +170,7 @@ async function processarFila() {
     if (!config.automacaoAtiva) return;
 
     if (!podeRodarAgora()) {
-      console.log("🌙 Fora do horário permitido. Fila pausada.");
-      return;
+           return;
     }
 
     const agora = Date.now();
@@ -3272,9 +3271,17 @@ setTimeout(() => {
   }, (config.marketplaces?.aliexpress?.intervaloFarejoMinutos || 40) * 60 * 1000);
 }, 20 * 60 * 1000);
 
+let ultimoLogPausaFila = 0;
+
 setInterval(() => {
   if (!podeRodarAgora()) {
-    console.log("🌙 Fila pausada fora do horário configurado");
+    const agora = Date.now();
+
+    if (agora - ultimoLogPausaFila > 5 * 60 * 1000) {
+      console.log("🌙 Fila pausada fora do horário configurado");
+      ultimoLogPausaFila = agora;
+    }
+
     return;
   }
 
