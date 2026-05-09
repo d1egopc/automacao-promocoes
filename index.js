@@ -2227,14 +2227,20 @@ if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
 
 if (marketplace === "magalu") {
   try {
+    console.log("🔎 DEBUG MAGALU CONFIG:", config);
+
     const promoterId =
-  config?.promoterId ||
-  config?.promoterID ||
-  config?.promoter_id ||
-  config?.idAfiliado ||
-  config?.publisherId ||
-  config?.promoter ||
-  "";
+      config?.promoterId ||
+      config?.promoterID ||
+      config?.promoter_id ||
+      config?.idAfiliado ||
+      config?.publisherId ||
+      config?.promoter ||
+      config?.PromoterID ||
+      config?.["Promoter ID"] ||
+      "";
+
+    console.log("🔎 DEBUG MAGALU PROMOTER:", promoterId);
     
     if (!promoterId) {
       return res.status(400).json({
