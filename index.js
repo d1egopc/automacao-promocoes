@@ -34,25 +34,12 @@ let config = {
     },
 
     mercadolivre: {
-      ativo: false,
-      intervaloFarejoMinutos: 60,
-      limitePorRodada: 5,
-      descontoMinimo: 20,
-      precoMinimo: 30
-    },
-
-   aliexpress: {
   ativo: false,
-  intervaloFarejoMinutos: 40,
+  intervaloFarejoMinutos: 60,
   limitePorRodada: 5,
   descontoMinimo: 20,
-  precoMinimo: 20,
-  priorizarBrasil: true,
-  permitirInternacionalForte: true,
-  descontoMinimoInternacional: 40
-    }
-  }
-};
+  precoMinimo: 30
+},
 
 magalu: {
   ativo: true,
@@ -61,6 +48,20 @@ magalu: {
   descontoMinimo: 15,
   precoMinimo: 20
 },
+
+aliexpress: {
+  ativo: false,
+  intervaloFarejoMinutos: 40,
+  limitePorRodada: 5,
+  descontoMinimo: 20,
+  precoMinimo: 20,
+  priorizarBrasil: true,
+  permitirInternacionalForte: true,
+  descontoMinimoInternacional: 40
+}
+  }
+};
+
 
 let fila = [];
 let enviandoAgora = false;
