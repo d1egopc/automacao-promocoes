@@ -2227,8 +2227,45 @@ if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
 
 if (marketplace === "magalu") {
   try {
-    const promoterId = config?.promoterId || integracoes?.magalu?.promoterId || "";
+    const promoterId = config?.promoterId || "";
+
+    if (!promoterId) {
+      return res.status(400).json({
+        erro: "Magalu não configurada para este cliente. Informe o Promoter ID."
+      });
+    }
+
     const linkAfiliado = gerarLinkMagalu(url, promoterId);
+
+    return res.json({
+      marketplace: "magalu",
+      titulo: "Produto importado de Magalu",
+      precoAntigo: "",
+      precoAtual: "",
+      cupom: "",
+      linkOriginal: url,
+      linkAfiliado,
+      imagem: "",
+      categoria: "Magalu",
+      aviso: "Dados não encontrados automaticamente. Preencha preço e título manualmente."
+    });
+  } catch (e) {
+    console.error("ERRO MAGALU:", e);
+
+    return res.json({
+      marketplace: "magalu",
+      titulo: "Produto importado de Magalu",
+      precoAntigo: "",
+      precoAtual: "",
+      cupom: "",
+      linkOriginal: url,
+      linkAfiliado: url,
+      imagem: "",
+      categoria: "Magalu",
+      aviso: "Erro ao gerar link Magalu. Preencha manualmente."
+    });
+  }
+}
 
     return res.json({
       marketplace: "magalu",
