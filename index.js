@@ -2227,21 +2227,19 @@ if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
 
 if (marketplace === "magalu") {
   try {
-    console.log("🔎 DEBUG MAGALU CONFIG:", config);
-
-    const promoterId =
-      config?.promoterId ||
-      config?.promoterID ||
-      config?.promoter_id ||
-      config?.idAfiliado ||
-      config?.publisherId ||
-      config?.promoter ||
-      config?.PromoterID ||
-      config?.["Promoter ID"] ||
-      "";
-
-    console.log("🔎 DEBUG MAGALU PROMOTER:", promoterId);
-    
+   
+  const promoterId =
+  config?.credenciais?.promoterId ||
+  config?.promoterId ||
+  config?.promoterID ||
+  config?.promoter_id ||
+  config?.idAfiliado ||
+  config?.publisherId ||
+  config?.promoter ||
+  config?.PromoterID ||
+  config?.["Promoter ID"] ||
+  "";
+      
     if (!promoterId) {
       return res.status(400).json({
         erro: "Magalu não configurada para este cliente. Informe o Promoter ID."
