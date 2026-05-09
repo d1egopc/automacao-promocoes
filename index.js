@@ -1387,25 +1387,48 @@ async function importarAliExpress(urlEntrada, config = {}) {
       result?.product?.[0] ||
       result?.product ||
       {};
-
-     if (!produto || Object.keys(produto).length === 0) {
+      
+      if (!produto || Object.keys(produto).length === 0) {
   console.log("⚠️ AliExpress sem produto retornado pela API:", productId);
+
+  let precoAntigoUrl = "";
+  let precoAtualUrl = "";
+
+  try {
+    const urlDecodificada = decodeURIComponent(urlEntrada);
+    const pdpMatch = urlDecodificada.match(/pdp_npi=([^&]+)/);
+
+    if (pdpMatch?.[1]) {
+      const numeros = pdpMatch[1]
+        .split("!")
+        .filter((p) => /^\d+(\.\d+)?$/.test(p))
+        .map(Number)
+        .filter((n) => n > 0);
+
+      if (numeros.length >= 2) {
+        precoAntigoUrl = numeros[0].toFixed(2);
+        precoAtualUrl = numeros[1].toFixed(2);
+      }
+    }
+  } catch (e) {
+    console.log("Erro fallback pdp_npi AliExpress:", e.message);
+  }
 
   return {
     marketplace: "aliexpress",
     titulo: "Produto AliExpress",
-    precoAntigo: "",
-    precoAtual: "",
+    precoAntigo: precoAntigoUrl,
+    precoAtual: precoAtualUrl,
     cupom: "",
     linkOriginal: urlEntrada,
     linkAfiliado: urlEntrada,
     imagem: "",
     categoria: "AliExpress",
-    aviso: "AliExpress não retornou dados desse produto. Preencha manualmente."
+    avisoCupom: "🪙 Pode haver desconto extra usando moedas no AliExpress. Confira também se há cupom disponível na página.",
+    aviso: "AliExpress não retornou dados pela API. Preços extraídos do link quando disponíveis."
   };
-} 
-
-
+}
+    
     let titulo =
       produto.product_title ||
       produto.title ||
