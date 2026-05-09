@@ -1547,25 +1547,71 @@ try {
 }
 
 async function importarMagalu(urlEntrada, config = {}) {
-  const promoterId =
-    config?.credenciais?.promoterId ||
-    config?.promoterId ||
-    "";
+  try {
+    const promoterId =
+      config?.credenciais?.promoterId ||
+      config?.promoterId ||
+      "";
 
-  const linkAfiliado = gerarLinkMagalu(urlEntrada, promoterId);
+    const linkAfiliado = gerarLinkMagalu(urlEntrada, promoterId);
 
-  return {
-    marketplace: "magalu",
-    titulo: "Produto importado de Magalu",
-    precoAntigo: "",
-    precoAtual: "",
-    cupom: "",
-    linkOriginal: urlEntrada,
-    linkAfiliado,
-    imagem: "",
-    categoria: "Magalu",
-    aviso: "Dados não encontrados automaticamente. Preencha preço e título manualmente."
-  };
+    const response = await fetch(urlEntrada, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+        "Accept-Language": "pt-BR,pt;q=0.9"
+      }
+    });
+
+    const html = await response.text();
+
+    const titulo =
+      html.match(/<title>(.*?)<\/title>/i)?.[1]
+        ?.replace(" | Magazine Luiza", "")
+        ?.trim() ||
+      "Produto Magalu";
+
+    const imagem =
+      html.match(/property="og:image" content="([^"]+)"/i)?.[1] || "";
+
+    let precoAtual = "";
+
+    const precoMatch =
+      html.match(/"price":"([^"]+)"/i) ||
+      html.match(/"finalPrice":"([^"]+)"/i);
+
+    if (precoMatch?.[1]) {
+      precoAtual = `R$ ${String(precoMatch[1]).replace(".", ",")}`;
+    }
+
+    return {
+      marketplace: "magalu",
+      titulo,
+      precoAntigo: "",
+      precoAtual,
+      cupom: "",
+      linkOriginal: urlEntrada,
+      linkAfiliado,
+      imagem,
+      categoria: "Magalu",
+      aviso: "Verifique se há cupons disponíveis na página"
+    };
+  } catch (e) {
+    console.log("❌ erro importarMagalu:", e.message);
+
+    return {
+      marketplace: "magalu",
+      titulo: "Produto Magalu",
+      precoAntigo: "",
+      precoAtual: "",
+      cupom: "",
+      linkOriginal: urlEntrada,
+      linkAfiliado: urlEntrada,
+      imagem: "",
+      categoria: "Magalu",
+      aviso: "Erro ao consultar Magalu"
+    };
+  }
 }
 
 async function farejarAliExpress() {
