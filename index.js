@@ -1636,6 +1636,11 @@ const response = await fetch(urlConsulta, {
 
 async function farejarAliExpress() {
   try {
+
+if (!config.marketplaces?.aliexpress?.ativo) {
+  console.log("⏸ AliExpress desativado. Farejador ignorado.");
+  return;
+}
     console.log("🛒 Farejando ofertas AliExpress...");
 
     const cfg = config.marketplaces?.aliexpress || {};
@@ -2886,6 +2891,11 @@ async function iniciarWhatsApp(id) {
 
 async function farejarMercadoLivre() {
   try {
+
+if (!config.marketplaces?.mercadolivre?.ativo) {
+  console.log("⏸ Mercado Livre desativado. Farejador ignorado.");
+  return;
+}
     console.log("🐶 Farejando ofertas ML (modo stealth)...");
 
     const buscas = [
@@ -3098,6 +3108,11 @@ if (
 
 async function farejarAmazon() {
   try {
+
+if (!config.marketplaces?.amazon?.ativo) {
+  console.log("⏸ Amazon desativada. Farejador ignorado.");
+  return;
+}
     console.log("🐶 Farejando ofertas Amazon...");
     
     let adicionadasNestaRodada = 0;
@@ -3350,6 +3365,11 @@ async function buscarOfertasShopee() {
 
 async function farejarShopee() {
   try {
+
+if (!config.marketplaces?.shopee?.ativo) {
+  console.log("⏸ Shopee desativada. Farejador ignorado.");
+  return;
+}
     console.log("🛍️ Farejando ofertas Shopee...");
 
     const produtos = await buscarOfertasShopee();
