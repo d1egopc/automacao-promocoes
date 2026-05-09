@@ -346,8 +346,14 @@ if (antigo > atual && atual > 0) {
 
     controleEnvio[clienteId] = Date.now();
     ultimoEnvioFila = Date.now();
+    
     oferta.status = "enviado";
-    oferta.dataEnvio = new Date();
+
+    oferta.enviadoEm = new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+    });
+
+    oferta.dataEnvio = oferta.enviadoEm;
     
     salvarFila();
 
@@ -437,6 +443,11 @@ app.post("/fila", (req, res) => {
   cupom: oferta.cupom,
   avisoCupom: oferta.avisoCupom
 });
+
+
+oferta.criadoEm = oferta.criadoEm || new Date().toLocaleString("pt-BR", {
+  timeZone: "America/Sao_Paulo"
+}); 
 
   fila.push(oferta);
   salvarFila();
