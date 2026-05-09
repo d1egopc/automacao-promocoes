@@ -1636,87 +1636,206 @@ const response = await fetch(urlConsulta, {
 
 async function farejarAliExpress() {
   try {
+    if (!config.marketplaces?.aliexpress?.ativo) {
+      console.log("⏸ AliExpress desativado. Farejador ignorado.");
+      return;
+    }
 
-if (!config.marketplaces?.aliexpress?.ativo) {
-  console.log("⏸ AliExpress desativado. Farejador ignorado.");
-  return;
-}
     console.log("🛒 Farejando ofertas AliExpress...");
 
     const cfg = config.marketplaces?.aliexpress || {};
     const limitePorRodada = cfg.limitePorRodada || 5;
-
     let adicionadasNestaRodada = 0;
 
-  const buscasBrasil = [
-  "produto no brasil",
-  "estoque no brasil",
-  "ship from brazil",
-  "entrega do brasil",
+    const buscasBrasil = [
+      "produto no brasil",
+      "estoque no brasil",
+      "ship from brazil",
+      "entrega do brasil",
+      "rx 6600 brasil",
+      "placa de video brasil",
+      "kit xeon brasil",
+      "ssd nvme brasil",
+      "mini pc brasil",
+      "mouse gamer brasil",
+      "teclado mecanico brasil",
+      "fone bluetooth brasil",
+      "smartwatch brasil"
+    ];
 
-  "rx 6600 brasil",
-  "placa de video brasil",
-  "kit xeon brasil",
-  "ssd nvme brasil",
-  "mini pc brasil",
+    const buscasInternacionais = [
+      "rx 6600",
+      "rx 580",
+      "kit xeon",
+      "placa de video",
+      "ssd nvme",
+      "mini pc",
+      "mouse gamer",
+      "teclado mecanico",
+      "fone bluetooth",
+      "smartwatch"
+    ];
 
-  "mouse gamer brasil",
-  "teclado mecanico brasil",
-  "fone bluetooth brasil",
-  "smartwatch brasil",
+    async function buscarTermoAliExpress(termo, tipo) {
+      try {
+        if (adicionadasNestaRodada >= limitePorRodada) return;
 
-  "multimetro digital brasil",
-  "capacimetro brasil",
-  "estacao de solda brasil",
-  "fonte bancada brasil",
+        console.log(`${tipo} Busca AliExpress:`, termo);
 
-  "relogio masculino brasil",
-  "smartwatch ultra brasil",
-  "relogio esportivo brasil"
-];
+        const url = `https://pt.aliexpress.com/wholesale?SearchText=${encodeURIComponent(termo)}`;
 
-const buscasInternacionais = [
-  "rx 6600",
-  "rx 580",
-  "kit xeon",
-  "placa de video",
-  "ssd nvme",
-  "mini pc",
+        console.log("🌐 ALIEXPRESS URL:", url);
 
-  "mouse gamer",
-  "teclado mecanico",
-  "fone bluetooth",
-  "smartwatch",
+        const response = await fetch(url, {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8"
+          }
+        });
 
-  "multimetro digital",
-  "capacimetro",
-  "estacao de solda",
-  "fonte bancada",
+        console.log("📡 ALIEXPRESS STATUS:", response.status);
 
-  "camera wifi",
-  "drone",
-  "tv box",
-  "console retro",
+        if (!response.ok) {
+          console.log("⚠️ AliExpress recusou:", response.status);
+          return;
+        }
 
-  "relogio masculino",
-  "relogio esportivo",
-  "smartwatch ultra"
-];
+        const html = await response.text();
+
+        if (!html || html.length < 5000) {
+          console.log("⚠️ HTML AliExpress muito pequeno.");
+          return;
+        }
+
+        const linksExtraidos = [
+          ...html.matchAll(/https?:\/\/[^"'\s]*aliexpress\.com\/item\/[^"'\s]+/g),
+          ...html.matchAll(/\/\/[^"'\s]*aliexpress\.com\/item\/[^"'\s]+/g)
+        ]
+          .map(m => m[0])
+          .map(link => {
+            let limpo = String(link).replace(/&amp;/g, "&").split("?")[0];
+
+            if (limpo.startsWith("//")) {
+              limpo = "https:" + limpo;
+            }
+
+            return limpo;
+          })
+          .filter(link => link.includes("aliexpress.com/item/"));
+
+        const links = [...new Set(linksExtraidos)].slice(0, 3);
+
+        console.log(`🔎 ${termo}: ${links.length} produtos AliExpress`);
+
+        for (const link of links) {
+          try {
+            if (adicionadasNestaRodada >= limitePorRodada) return;
+
+            const produto = await importarAliExpress(link, {
+              credenciais: integracoesPorCliente["admin"]?.aliexpress?.credenciais
+            });
+
+            if (!produto) continue;
+
+            console.log("🧪 PRODUTO ALIEXPRESS:", {
+              titulo: produto.titulo,
+              precoAtual: produto.precoAtual,
+              precoAntigo: produto.precoAntigo,
+              cupom: produto.cupom,
+              avisoCupom: produto.avisoCupom
+            });
+
+            const precoNumero = Number(
+              String(produto.precoAtual || "")
+                .replace("R$", "")
+                .replace(/\./g, "")
+                .replace(",", ".")
+                .trim()
+            );
+
+            const precoAntigoNumero = Number(
+              String(produto.precoAntigo || "")
+                .replace("R$", "")
+                .replace(/\./g, "")
+                .replace(",", ".")
+                .trim()
+            );
+
+            const desconto =
+              precoAntigoNumero > precoNumero
+                ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
+                : 0;
+
+            if (!precoNumero || !Number.isFinite(precoNumero)) continue;
+            if (precoNumero < 20) continue;
+            if (desconto < 10 && !produto.avisoCupom && !produto.cupom) continue;
+
+            const novaOferta = {
+              nome: produto.titulo,
+              titulo: produto.titulo,
+              preco: produto.precoAtual,
+              precoAtual: produto.precoAtual,
+              precoAntigo: produto.precoAntigo || "",
+              cupom: produto.cupom || "",
+              avisoCupom: produto.avisoCupom || "",
+              parcelamento: produto.parcelamento || "",
+              link: produto.linkAfiliado || produto.linkOriginal || link,
+              linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
+              imagem: produto.imagem || "",
+              marketplace: "aliexpress",
+              categoria: "AliExpress",
+              sessaoId: "sessao1",
+              status: "pendente",
+              clienteId: "admin"
+            };
+
+            const jaExiste = ofertaJaExiste(novaOferta);
+
+            if (!jaExiste) {
+              novaOferta.criadoEm = new Date().toLocaleString("pt-BR", {
+                timeZone: "America/Sao_Paulo"
+              });
+
+              fila.push(novaOferta);
+              salvarFila();
+
+              adicionadasNestaRodada++;
+
+              console.log("🤖 Nova oferta AliExpress:", {
+                titulo: novaOferta.titulo,
+                preco: novaOferta.precoAtual,
+                precoAntigo: novaOferta.precoAntigo,
+                desconto: Math.round(desconto) + "%",
+                cupom: novaOferta.cupom
+              });
+            }
+
+            await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+          } catch (e) {
+            console.log("❌ erro produto AliExpress:", e.message);
+          }
+        }
+
+        await new Promise(r => setTimeout(r, 5000 + Math.random() * 6000));
+      } catch (e) {
+        console.log("❌ erro busca AliExpress:", termo, e.message);
+      }
+    }
 
     for (const termo of buscasBrasil) {
-  console.log("🇧🇷 Busca AliExpress BR:", termo);
+      await buscarTermoAliExpress(termo, "🇧🇷");
+      if (adicionadasNestaRodada >= limitePorRodada) break;
+    }
 
-  // aqui depois vai entrar a busca real
-}
+    if (cfg.permitirInternacionalForte && adicionadasNestaRodada < limitePorRodada) {
+      for (const termo of buscasInternacionais) {
+        await buscarTermoAliExpress(termo, "🌍");
+        if (adicionadasNestaRodada >= limitePorRodada) break;
+      }
+    }
 
-if (cfg.permitirInternacionalForte) {
-  for (const termo of buscasInternacionais) {
-    console.log("🌍 Busca AliExpress INT:", termo);
-
-    // aqui depois vai entrar a busca real
-  }
-}
-
+    console.log(`✅ AliExpress finalizado. Adicionadas: ${adicionadasNestaRodada}`);
   } catch (e) {
     console.log("❌ erro farejador AliExpress:", e.message);
   }
