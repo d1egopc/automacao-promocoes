@@ -3180,16 +3180,20 @@ if (nota > 0 && nota < 4.5) continue;
 const PORT = process.env.PORT || 3000;
 
 function podeRodarAgora() {
-console.log({
-  pausarMadrugada: config.pausarMadrugada,
-  inicio: config.horarioInicio,
-  fim: config.horarioFim
-});
+  const agoraBR = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
+  );
+
+  const horaAtual = agoraBR.getHours() * 60 + agoraBR.getMinutes();
+
+  console.log({
+    pausarMadrugada: config.pausarMadrugada,
+    inicio: config.horarioInicio,
+    fim: config.horarioFim,
+    horaServidorBR: `${String(agoraBR.getHours()).padStart(2, "0")}:${String(agoraBR.getMinutes()).padStart(2, "0")}`
+  });
 
   if (!config.pausarMadrugada) return true;
-
-  const agora = new Date();
-  const horaAtual = agora.getHours() * 60 + agora.getMinutes();
 
   const [inicioH, inicioM] = (config.horarioInicio || "08:00").split(":").map(Number);
   const [fimH, fimM] = (config.horarioFim || "23:00").split(":").map(Number);
@@ -3203,7 +3207,6 @@ console.log({
 
   return horaAtual >= inicio || horaAtual <= fim;
 }
-
 
 app.listen(PORT, () => {
   console.log("🔥 API ONLINE NA PORTA " + PORT);
