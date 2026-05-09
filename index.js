@@ -1307,10 +1307,6 @@ const ehBrasil =
   String(urlEntrada).includes('"ship_from":"BR"') ||
   String(produto?.product_detail_url || "").includes("ship_from");
 
-const avisoCupom = ehBrasil
-  ? "🇧🇷 Produto no Brasil. Confira se há cupom ou desconto com moedas na página."
-  : "🌍 Compra internacional. Pode haver imposto/taxa. Confira cupom ou desconto com moedas na página.";
-
     const productId =
       urlEntrada.match(/\/item\/(\d+)\.html/i)?.[1] ||
       urlEntrada.match(/[?&]productId=(\d+)/i)?.[1];
@@ -1395,6 +1391,11 @@ const avisoCupom = ehBrasil
       result?.product?.[0] ||
       result?.product ||
       {};
+
+  const avisoCupom = ehBrasil
+  ? "🇧🇷 Produto no Brasil. Confira se há cupom ou desconto com moedas na página."
+  : "🌍 Compra internacional. Pode haver imposto/taxa. Confira cupom ou desconto com moedas na página.";
+
       
       if (!produto || Object.keys(produto).length === 0) {
   console.log("⚠️ AliExpress sem produto retornado pela API:", productId);
