@@ -2977,6 +2977,11 @@ const jaExiste = fila.some(o =>
 );
 
 if (!jaExiste) {
+
+novaOferta.criadoEm = novaOferta.criadoEm || new Date().toLocaleString("pt-BR", {
+  timeZone: "America/Sao_Paulo"
+});
+
   fila.push(novaOferta);
   salvarFila();
 
@@ -3014,7 +3019,6 @@ if (adicionadasNestaRodada >= limitePorRodada) {
     console.log("❌ erro farejador Amazon:", e.message);
   }
 }
-
 
 async function buscarOfertasShopee() {
   const configShopee = integracoesPorCliente["admin"]?.shopee;
