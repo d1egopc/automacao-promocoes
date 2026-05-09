@@ -1302,9 +1302,10 @@ async function importarAliExpress(urlEntrada, config = {}) {
       urlEntrada = "https://" + urlEntrada;
     }
 
-const ehBrasil =
+  const ehBrasil =
   String(urlEntrada).includes("ship_from%22%3A%22BR") ||
-  String(urlEntrada).includes('"ship_from":"BR"');
+  String(urlEntrada).includes('"ship_from":"BR"') ||
+  String(urlEntrada).includes("%22ship_from%22%3A%22BR%22");
 
     const productId =
       urlEntrada.match(/\/item\/(\d+)\.html/i)?.[1] ||
@@ -1392,7 +1393,7 @@ const ehBrasil =
       {};
 
   const avisoCupom = ehBrasil
-  ? "🇧🇷 Produto no Brasil. Confira se há cupom ou desconto com moedas na página."
+  ? "🇧🇷 Produto no Brasil. Confira cupom ou desconto com moedas na página."
   : "🌍 Compra internacional. Pode haver imposto/taxa. Confira cupom ou desconto com moedas na página.";
 
       
