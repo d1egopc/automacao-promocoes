@@ -169,6 +169,11 @@ async function processarFila() {
   try {
     if (!config.automacaoAtiva) return;
 
+    if (!podeRodarAgora()) {
+      console.log("🌙 Fora do horário permitido. Fila pausada.");
+      return;
+    }
+
     const agora = Date.now();
     const intervaloMs = (config.intervaloMinutos || 2) * 60 * 1000;
 
@@ -3175,6 +3180,12 @@ if (nota > 0 && nota < 4.5) continue;
 const PORT = process.env.PORT || 3000;
 
 function podeRodarAgora() {
+console.log({
+  pausarMadrugada: config.pausarMadrugada,
+  inicio: config.horarioInicio,
+  fim: config.horarioFim
+});
+
   if (!config.pausarMadrugada) return true;
 
   const agora = new Date();
