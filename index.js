@@ -136,6 +136,31 @@ function carregarConfig() {
         ...configSalva
       };
 
+function normalizarTexto(texto = "") {
+  return String(texto)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function ofertaJaExiste(novaOferta) {
+  const tituloNovo = normalizarTexto(novaOferta.titulo || novaOferta.nome);
+  const linkNovo = String(novaOferta.link || novaOferta.linkAfiliado || "").trim();
+
+  return fila.some((o) => {
+    const tituloExistente = normalizarTexto(o.titulo || o.nome);
+    const linkExistente = String(o.link || o.linkAfiliado || "").trim();
+
+    if (linkNovo && linkExistente && linkNovo === linkExistente) return true;
+    if (tituloNovo && tituloExistente && tituloNovo === tituloExistente) return true;
+
+    return false;
+  });
+}
+
       console.log("✅ Config carregada");
     }
   } catch (e) {
@@ -2787,11 +2812,7 @@ if (
               clienteId: "admin"
             };
 
-            const jaExiste = fila.some(o =>
-              o.link === novaOferta.link ||
-              o.linkAfiliado === novaOferta.linkAfiliado ||
-              o.titulo === novaOferta.titulo
-            );
+           const jaExiste = ofertaJaExiste(novaOferta);
 
             if (!jaExiste) {
               fila.push(novaOferta);
