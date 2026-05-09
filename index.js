@@ -2991,11 +2991,7 @@ const novaOferta = {
   clienteId: "admin"
 };
 
-const jaExiste = fila.some(o =>
-  o.link === novaOferta.link ||
-  o.linkAfiliado === novaOferta.linkAfiliado ||
-  o.titulo === novaOferta.titulo
-);
+const jaExiste = ofertaJaExiste(novaOferta);
 
 if (!jaExiste) {
 
