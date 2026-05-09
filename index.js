@@ -2227,8 +2227,15 @@ if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
 
 if (marketplace === "magalu") {
   try {
-    const promoterId = config?.promoterId || "";
-
+    const promoterId =
+  config?.promoterId ||
+  config?.promoterID ||
+  config?.promoter_id ||
+  config?.idAfiliado ||
+  config?.publisherId ||
+  config?.promoter ||
+  "";
+    
     if (!promoterId) {
       return res.status(400).json({
         erro: "Magalu não configurada para este cliente. Informe o Promoter ID."
