@@ -2739,8 +2739,9 @@ app.post("/reset/:id", async (req, res) => {
     reconectando[id] = false;
 
     if (sessoes[id]) {
-      try { await sessoes[id].logout(); } catch {}
-      try { sessoes[id].end?.(); } catch {}
+      try { await sessoes[id].sock.logout(); } catch {}
+      try { sessoes[id].sock.end?.(); } catch {}
+
       delete sessoes[id];
     }
 
@@ -2748,15 +2749,21 @@ app.post("/reset/:id", async (req, res) => {
     delete statusSessao[id];
     delete destinosPorSessao[id];
 
-    fs.rmSync("/data/auth_" + id, { recursive: true, force: true });
+    fs.rmSync("/data/auth_" + id, {
+      recursive: true,
+      force: true
+    });
 
     return res.json({
       ok: true,
       message: "Sessão resetada",
       id
     });
+
   } catch (e) {
-    return res.status(500).json({ erro: e.message });
+    return res.status(500).json({
+      erro: e.message
+    });
   }
 });
 
