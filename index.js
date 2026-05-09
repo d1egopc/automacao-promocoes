@@ -1440,6 +1440,10 @@ console.log("✅ ALI PREÇO ESCOLHIDO:", precoAtual);
 precoAntigo = String(precoAntigo).trim();
 console.log("✅ ALI PREÇO ANTIGO ESCOLHIDO:", precoAntigo);
 
+if (precoAntigo === precoAtual) {
+  precoAntigo = "";
+}
+
    console.log("💰 ALI PREÇOS RAW:", {
   target_sale_price: produto.target_sale_price,
   sale_price: produto.sale_price,
