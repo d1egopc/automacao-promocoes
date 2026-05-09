@@ -1279,6 +1279,24 @@ if (
   };
 }
 
+function gerarLinkMagalu(linkOriginal, promoterId) {
+  if (!linkOriginal || !promoterId) return linkOriginal;
+
+  const urlLimpa = String(linkOriginal).trim();
+  const loja = String(promoterId).trim();
+
+  // Se já for link da loja do influenciador, mantém
+  if (urlLimpa.includes("magazinevoce.com.br")) {
+    return urlLimpa;
+  }
+
+  // Converte link comum do Magalu para link da loja
+  return urlLimpa.replace(
+    "https://www.magazineluiza.com.br",
+    `https://www.magazinevoce.com.br/${loja}`
+  );
+}
+
 async function importarAliExpress(urlEntrada, config = {}) {
   try {
     if (urlEntrada && !urlEntrada.startsWith("http")) {
@@ -2481,6 +2499,45 @@ app.get("/grupos/:id", async (req, res) => {
   }
 
   return res.json(lista);
+});
+
+app.post("/magalu/gerar-link", (req, res) => {
+  try {
+    const { link } = req.body;
+
+    const promoterId = integracoes?.magalu?.promoterId;
+
+    if (!promoterId) {
+      return res.status(400).json({
+        ok: false,
+        erro: "Magalu não configurada."
+      });
+    }
+
+    if (!link) {
+      return res.status(400).json({
+        ok: false,
+        erro: "Informe o link."
+      });
+    }
+
+    const linkAfiliado = gerarLinkMagalu(link, promoterId);
+
+    res.json({
+      ok: true,
+      marketplace: "magalu",
+      linkOriginal: link,
+      linkAfiliado
+    });
+
+  } catch (err) {
+    console.error("❌ Erro Magalu:", err);
+
+    res.status(500).json({
+      ok: false,
+      erro: "Erro ao gerar link Magalu"
+    });
+  }
 });
 
 app.post("/destinos/:id", (req, res) => {
