@@ -1,5 +1,6 @@
 
 const fs = require("fs");
+const path = require("path");
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -760,6 +761,62 @@ app.get("/", (req, res) => {
     status: "API ONLINE",
     uptime: process.uptime()
   });
+});
+
+app.post("/desconectar/:id", async (req, res) => {
+  try {
+    const id = req.params.id || "sessao1";
+
+    if (sessoes[id]?.sock) {
+      try {
+        await sessoes[id].sock.logout();
+      } catch (e) {
+        console.log("⚠️ erro logout:", e.message);
+      }
+    }
+
+    delete sessoes[id];
+    delete qrcodes[id];
+
+    res.json({
+      ok: true,
+      message: "WhatsApp desconectado."
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, erro: e.message });
+  }
+});
+
+app.post("/limpar-sessao/:id", async (req, res) => {
+  try {
+    const id = req.params.id || "sessao1";
+
+    if (sessoes[id]?.sock) {
+      try {
+        await sessoes[id].sock.logout();
+      } catch (e) {
+        console.log("⚠️ erro logout ao limpar:", e.message);
+      }
+    }
+
+    delete sessoes[id];
+    delete qrcodes[id];
+
+    const pastaAuth = path.join(__dirname, `auth_${id}`);
+
+    if (fs.existsSync(pastaAuth)) {
+      fs.rmSync(pastaAuth, { recursive: true, force: true });
+      console.log("🗑️ Sessão limpa:", pastaAuth);
+    }
+
+    res.json({
+      ok: true,
+      message: "Sessão limpa. Gere um novo QR Code."
+    });
+  } catch (e) {
+    console.log("❌ erro limpar sessão:", e.message);
+    res.status(500).json({ ok: false, erro: e.message });
+  }
 });
 
 // ================= INTEGRAÇÕES =================
