@@ -794,6 +794,13 @@ const marketplaceRules = {
     required: ["appKey", "secret", "trackingId"],
     allowed: ["appKey", "secret", "trackingId"]
   },
+
+  magalu: {
+    nome: "Magalu",
+    required: ["promoterId"],
+    allowed: ["promoterId"]
+  },
+
   awin: {
   nome: "Awin",
   required: ["publisherId", "apiToken", "loja"],
