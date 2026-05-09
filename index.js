@@ -1546,6 +1546,28 @@ try {
   }
 }
 
+async function importarMagalu(urlEntrada, config = {}) {
+  const promoterId =
+    config?.credenciais?.promoterId ||
+    config?.promoterId ||
+    "";
+
+  const linkAfiliado = gerarLinkMagalu(urlEntrada, promoterId);
+
+  return {
+    marketplace: "magalu",
+    titulo: "Produto importado de Magalu",
+    precoAntigo: "",
+    precoAtual: "",
+    cupom: "",
+    linkOriginal: urlEntrada,
+    linkAfiliado,
+    imagem: "",
+    categoria: "Magalu",
+    aviso: "Dados não encontrados automaticamente. Preencha preço e título manualmente."
+  };
+}
+
 async function farejarAliExpress() {
   try {
     console.log("🛒 Farejando ofertas AliExpress...");
@@ -2227,39 +2249,8 @@ if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
 
 if (marketplace === "magalu") {
   try {
-   
-  const promoterId =
-  config?.credenciais?.promoterId ||
-  config?.promoterId ||
-  config?.promoterID ||
-  config?.promoter_id ||
-  config?.idAfiliado ||
-  config?.publisherId ||
-  config?.promoter ||
-  config?.PromoterID ||
-  config?.["Promoter ID"] ||
-  "";
-      
-    if (!promoterId) {
-      return res.status(400).json({
-        erro: "Magalu não configurada para este cliente. Informe o Promoter ID."
-      });
-    }
-
-    const linkAfiliado = gerarLinkMagalu(url, promoterId);
-
-    return res.json({
-      marketplace: "magalu",
-      titulo: "Produto importado de Magalu",
-      precoAntigo: "",
-      precoAtual: "",
-      cupom: "",
-      linkOriginal: url,
-      linkAfiliado: linkAfiliado,
-      imagem: "",
-      categoria: "Magalu",
-      aviso: "Dados não encontrados automaticamente. Preencha preço e título manualmente."
-    });
+    const produto = await importarMagalu(url, config);
+    return res.json(produto);
   } catch (e) {
     console.error("ERRO MAGALU:", e);
 
