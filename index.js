@@ -2736,18 +2736,40 @@ app.post("/reset/:id", async (req, res) => {
   const { id } = req.params;
 
   try {
-    reconectando[id] = false;
+    console.log("🔄 Resetando sessão:", id);
+
+    if (typeof reconectando !== "undefined") {
+      reconectando[id] = false;
+    }
 
     if (sessoes[id]) {
-      try { await sessoes[id].sock.logout(); } catch {}
-      try { sessoes[id].sock.end?.(); } catch {}
+
+      try {
+        await sessoes[id]?.sock?.logout?.();
+      } catch (e) {
+        console.log("⚠️ logout ignorado:", e.message);
+      }
+
+      try {
+        sessoes[id]?.sock?.end?.();
+      } catch (e) {
+        console.log("⚠️ end ignorado:", e.message);
+      }
 
       delete sessoes[id];
     }
 
-    delete qrCodes[id];
-    delete statusSessao[id];
-    delete destinosPorSessao[id];
+    if (typeof qrCodes !== "undefined") {
+      delete qrCodes[id];
+    }
+
+    if (typeof statusSessao !== "undefined") {
+      delete statusSessao[id];
+    }
+
+    if (typeof destinosPorSessao !== "undefined") {
+      delete destinosPorSessao[id];
+    }
 
     fs.rmSync("/data/auth_" + id, {
       recursive: true,
@@ -2756,12 +2778,15 @@ app.post("/reset/:id", async (req, res) => {
 
     return res.json({
       ok: true,
-      message: "Sessão resetada",
+      message: "Sessão resetada. Gere novo QR.",
       id
     });
 
   } catch (e) {
+    console.log("❌ erro reset sessão:", e.message);
+
     return res.status(500).json({
+      ok: false,
       erro: e.message
     });
   }
