@@ -1555,14 +1555,20 @@ async function importarMagalu(urlEntrada, config = {}) {
 
     const linkAfiliado = gerarLinkMagalu(urlEntrada, promoterId);
 
-    const response = await fetch(urlEntrada, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
-        "Accept-Language": "pt-BR,pt;q=0.9"
-      }
-    });
+   const urlConsulta = String(urlEntrada)
+  .replace(
+    /https:\/\/www\.magazinevoce\.com\.br\/[^/]+/i,
+    "https://www.magazineluiza.com.br"
+  );
 
+const response = await fetch(urlConsulta, {
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+    "Accept-Language": "pt-BR,pt;q=0.9"
+  }
+});
+    
     const html = await response.text();
 
     const titulo =
