@@ -58,10 +58,9 @@ aliexpress: {
   priorizarBrasil: true,
   permitirInternacionalForte: true,
   descontoMinimoInternacional: 40
-}
   }
+ }
 };
-
 
 let fila = [];
 let enviandoAgora = false;
@@ -1303,6 +1302,15 @@ async function importarAliExpress(urlEntrada, config = {}) {
       urlEntrada = "https://" + urlEntrada;
     }
 
+const ehBrasil =
+  String(urlEntrada).includes("ship_from%22%3A%22BR") ||
+  String(urlEntrada).includes('"ship_from":"BR"') ||
+  String(produto?.product_detail_url || "").includes("ship_from");
+
+const avisoCupom = ehBrasil
+  ? "🇧🇷 Produto no Brasil. Confira se há cupom ou desconto com moedas na página."
+  : "🌍 Compra internacional. Pode haver imposto/taxa. Confira cupom ou desconto com moedas na página.";
+
     const productId =
       urlEntrada.match(/\/item\/(\d+)\.html/i)?.[1] ||
       urlEntrada.match(/[?&]productId=(\d+)/i)?.[1];
@@ -1424,7 +1432,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
     linkAfiliado: urlEntrada,
     imagem: "",
     categoria: "AliExpress",
-    avisoCupom: "🪙 Pode haver desconto extra usando moedas no AliExpress. Confira também se há cupom disponível na página.",
+    avisoCupom,
     aviso: "AliExpress não retornou dados pela API. Preços extraídos do link quando disponíveis."
   };
 }
