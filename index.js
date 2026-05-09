@@ -1304,8 +1304,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
 
 const ehBrasil =
   String(urlEntrada).includes("ship_from%22%3A%22BR") ||
-  String(urlEntrada).includes('"ship_from":"BR"') ||
-  String(produto?.product_detail_url || "").includes("ship_from");
+  String(urlEntrada).includes('"ship_from":"BR"');
 
     const productId =
       urlEntrada.match(/\/item\/(\d+)\.html/i)?.[1] ||
@@ -1524,33 +1523,6 @@ try {
         `https://s.click.aliexpress.com/deep_link.htm?aff_short_key=${trackingId}&dl_target_url=${encodeURIComponent(urlEntrada)}`;
     }
 
-    // Fallback: se API não trouxer preço, tenta pegar do parâmetro pdp_npi da URL
-    
-     // 🔥 PRIORIDADE: preço real da URL (AliExpress promo)
-  try {
-  const urlDecodificada = decodeURIComponent(urlEntrada);
-
-  // 1) Tenta padrão exato: BRL!68.88!28.93
-  let m = urlDecodificada.match(/BRL[!|%21]+(\d+(?:\.\d+)?)[!|%21]+(\d+(?:\.\d+)?)/);
-
-  if (m) {
-    precoAntigo = m[1]; // 68.88
-    precoAtual  = m[2]; // 28.93
-  } else {
-    // 2) Fallback: pega R$ 68,88 / R$ 28,93
-    const precos = [...urlDecodificada.matchAll(/R\$ ?([\d.,]+)/g)]
-      .map(x => x[1])
-      .filter(Boolean);
-
-    if (precos.length >= 2) {
-      precoAntigo = precos[0];
-      precoAtual  = precos[1];
-    } else if (precos.length === 1) {
-      precoAtual = precos[0];
-    }
-  }
-} catch {}
-
      const linkFinal = await encurtarUrl(linkAfiliado);
 
    return {
@@ -1563,6 +1535,7 @@ try {
       linkAfiliado: linkFinal,
       imagem: corrigirImagemUrl(imagem) || imagem,
       categoria: "AliExpress",
+      avisoCupom,
       aviso: !imagem || titulo === "Produto AliExpress"
         ? "Dados parciais retornados pela API AliExpress."
         : ""
@@ -1669,21 +1642,74 @@ async function farejarAliExpress() {
 
     let adicionadasNestaRodada = 0;
 
-    const buscas = [
-      "produto no brasil",
-      "estoque no brasil",
-      "xeon x99",
-      "ssd nvme",
-      "fone bluetooth",
-      "smartwatch",
-      "placa mae kit xeon",
-      "mini pc",
-      "controle gamer"
-    ];
+  const buscasBrasil = [
+  "produto no brasil",
+  "estoque no brasil",
+  "ship from brazil",
+  "entrega do brasil",
 
-    for (const termo of buscas) {
-      console.log("🔎 Busca AliExpress:", termo);
-    }
+  "rx 6600 brasil",
+  "placa de video brasil",
+  "kit xeon brasil",
+  "ssd nvme brasil",
+  "mini pc brasil",
+
+  "mouse gamer brasil",
+  "teclado mecanico brasil",
+  "fone bluetooth brasil",
+  "smartwatch brasil",
+
+  "multimetro digital brasil",
+  "capacimetro brasil",
+  "estacao de solda brasil",
+  "fonte bancada brasil",
+
+  "relogio masculino brasil",
+  "smartwatch ultra brasil",
+  "relogio esportivo brasil"
+];
+
+const buscasInternacionais = [
+  "rx 6600",
+  "rx 580",
+  "kit xeon",
+  "placa de video",
+  "ssd nvme",
+  "mini pc",
+
+  "mouse gamer",
+  "teclado mecanico",
+  "fone bluetooth",
+  "smartwatch",
+
+  "multimetro digital",
+  "capacimetro",
+  "estacao de solda",
+  "fonte bancada",
+
+  "camera wifi",
+  "drone",
+  "tv box",
+  "console retro",
+
+  "relogio masculino",
+  "relogio esportivo",
+  "smartwatch ultra"
+];
+
+    for (const termo of buscasBrasil) {
+  console.log("🇧🇷 Busca AliExpress BR:", termo);
+
+  // aqui depois vai entrar a busca real
+}
+
+if (cfg.permitirInternacionalForte) {
+  for (const termo of buscasInternacionais) {
+    console.log("🌍 Busca AliExpress INT:", termo);
+
+    // aqui depois vai entrar a busca real
+  }
+}
 
   } catch (e) {
     console.log("❌ erro farejador AliExpress:", e.message);
