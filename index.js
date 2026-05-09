@@ -1419,22 +1419,24 @@ async function importarAliExpress(urlEntrada, config = {}) {
       produto.image_url ||
       "";
      
-    let precoAtual =
-  produto.target_app_sale_price ||
+ let precoAtual =
   produto.target_sale_price ||
-  produto.app_sale_price ||
   produto.sale_price ||
+  produto.target_app_sale_price ||
+  produto.app_sale_price ||
   produto.target_min_sale_price ||
   produto.min_sale_price ||
   "";
+
+precoAtual = String(precoAtual).trim();
    
    
-   let precoAntigo =
+  let precoAntigo =
   produto.target_original_price ||
   produto.original_price ||
-  produto.target_max_sale_price ||
-  produto.max_sale_price ||
   "";
+
+precoAntigo = String(precoAntigo).trim();
 
    console.log("💰 ALI PREÇOS RAW:", {
   target_sale_price: produto.target_sale_price,
