@@ -1981,13 +1981,6 @@ if (palavrasBloqueadas.some(p => tituloLower.includes(p))) {
   continue;
 }
        
-          titulo,
-          precoAtual,
-          precoAntigo,
-          desconto: Math.round(desconto) + "%",
-          link
-        });
-
         if (!link) continue;
         if (!precoNumero || !Number.isFinite(precoNumero)) continue;
         if (precoNumero < 20) continue;
