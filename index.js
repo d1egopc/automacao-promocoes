@@ -252,11 +252,13 @@ function destinoAceitaOferta(destino, oferta) {
   return false;
 }
 
-  if (categoriasDestino.length && categoriaOferta && !categoriasDestino.includes(categoriaOferta)) {
-    return false;
-  }
-
-  return true;
+ if (
+  categoriasDestino.length &&
+  categoriaOferta &&
+  categoriaOferta !== marketplaceOferta &&
+  !categoriasDestino.includes(categoriaOferta)
+) {
+  return false;
 }
 
 function destinoDentroHorario(destino) {
