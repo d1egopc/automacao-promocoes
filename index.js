@@ -235,9 +235,22 @@ function destinoAceitaOferta(destino, oferta) {
   const marketplacesDestino = (destino.marketplaces || []).map(normalizarTexto);
   const categoriasDestino = (destino.categorias || []).map(normalizarTexto);
 
-  if (marketplacesDestino.length && !marketplacesDestino.includes(marketplaceOferta)) {
-    return false;
-  }
+  console.log("🧪 DESTINO DEBUG:", {
+  nome: destino.nome,
+  tipo: destino.tipo,
+  marketplaceOferta,
+  categoriaOferta,
+  marketplacesDestino,
+  categoriasDestino
+  });
+
+  if (
+  marketplacesDestino.length &&
+  marketplaceOferta &&
+  !marketplacesDestino.includes(marketplaceOferta)
+) {
+  return false;
+}
 
   if (categoriasDestino.length && categoriaOferta && !categoriasDestino.includes(categoriaOferta)) {
     return false;
