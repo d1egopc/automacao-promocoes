@@ -1777,61 +1777,99 @@ async function farejarAliExpress() {
     const limitePorRodada = cfg.limitePorRodada || 5;
     let adicionadasNestaRodada = 0;
 
-    const buscasBrasil = [
-     
-      "pen drivr",
-      "hd exos brasil",
-      "hd seagate exos brasil",
-      "hd 16tb brasil",
-      "hd 18tb brasil",
+   const buscasBrasil = [
 
-      "ssd samsung brasil",
-      "ssd kingston brasil",
-      "ssd crucial brasil",
+  "pen drive brasil",
 
-      "ssd 1tb brasil",
-      "ssd 2tb brasil",
-      "ssd nvme 1tb brasil"
+  "hd exos brasil",
+  "hd seagate exos brasil",
+  "hd 16tb brasil",
+  "hd 18tb brasil",
 
-      "produto no brasil",
-      "estoque no brasil",
-      "ship from brazil",
-      "entrega do brasil",
-      "rx 6600 brasil",
-      "placa de video brasil",
-      "kit xeon brasil",
-      "ssd nvme brasil",
-      "mini pc brasil",
-      "mouse gamer brasil",
-      "teclado mecanico brasil",
-      "fone bluetooth brasil",
-      "smartwatch brasil"
-    ];
+  "ssd samsung brasil",
+  "ssd kingston brasil",
+  "ssd crucial brasil",
 
-    const buscasInternacionais = [
-       
-      "data travel",
-      "hd exos",
-      "seagate exos",
-      "hd 16tb",
-      "hd 18tb"
-      "ssd samsung",
-      "ssd kingston",
-      "ssd crucial"
-      "ssd 1tb",
-      "ssd 2tb",
-      "ssd nvme 1tb"
-      "rx 6600",
-      "rx 580",
-      "kit xeon",
-      "placa de video",
-      "ssd nvme",
-      "mini pc",
-      "mouse gamer",
-      "teclado mecanico",
-      "fone bluetooth",
-      "smartwatch"
-    ];
+  "ssd 1tb brasil",
+  "ssd 2tb brasil",
+  "ssd nvme 1tb brasil",
+  "ssd nvme brasil",
+
+  "rx 6600 brasil",
+  "rx 7600 brasil",
+  "rx 7900 brasil",
+
+  "rtx 4060 brasil",
+  "rtx 4070 brasil",
+
+  "placa de video brasil",
+  "kit xeon brasil",
+  "mini pc brasil",
+
+  "mouse gamer brasil",
+  "teclado mecanico brasil",
+  "teclado gamer brasil",
+
+  "fone bluetooth brasil",
+  "caixinha de som brasil",
+  "speaker bluetooth brasil",
+
+  "webcam brasil",
+  "face cam brasil",
+
+  "smartwatch brasil",
+  "camera wifi brasil",
+
+  "multimetro digital brasil",
+  "estacao de solda brasil",
+  "fonte bancada brasil"
+];
+
+const buscasInternacionais = [
+  "data traveler",
+
+  "hd exos",
+  "seagate exos",
+  "hd 16tb",
+  "hd 18tb",
+
+  "ssd samsung",
+  "ssd kingston",
+  "ssd crucial",
+
+  "ssd 1tb",
+  "ssd 2tb",
+  "ssd nvme 1tb",
+  "ssd nvme",
+
+  "rx 6600",
+  "rx 7600",
+  "rx 7900",
+
+  "rtx 4060",
+  "rtx 4070",
+
+  "kit xeon",
+  "placa de video",
+  "mini pc",
+
+  "mouse gamer",
+  "teclado mecanico",
+  "teclado gamer",
+
+  "fone bluetooth",
+  "caixinha de som",
+  "speaker bluetooth",
+
+  "webcam",
+  "face cam",
+
+  "smartwatch",
+  "camera wifi",
+
+  "tv box",
+  "drone"
+];
 
   async function buscarTermoAliExpress(termo, tipo) {
   try {
