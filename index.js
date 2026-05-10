@@ -4280,3 +4280,6 @@ setInterval(() => {
 
   processarFila();
 }, 10 * 1000);
+
+
+}
