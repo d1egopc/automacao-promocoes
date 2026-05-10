@@ -1778,6 +1778,21 @@ async function farejarAliExpress() {
     let adicionadasNestaRodada = 0;
 
     const buscasBrasil = [
+     
+      "pen drivr",
+      "hd exos brasil",
+      "hd seagate exos brasil",
+      "hd 16tb brasil",
+      "hd 18tb brasil",
+
+      "ssd samsung brasil",
+      "ssd kingston brasil",
+      "ssd crucial brasil",
+
+      "ssd 1tb brasil",
+      "ssd 2tb brasil",
+      "ssd nvme 1tb brasil"
+
       "produto no brasil",
       "estoque no brasil",
       "ship from brazil",
@@ -1794,6 +1809,18 @@ async function farejarAliExpress() {
     ];
 
     const buscasInternacionais = [
+       
+      "data travel",
+      "hd exos",
+      "seagate exos",
+      "hd 16tb",
+      "hd 18tb"
+      "ssd samsung",
+      "ssd kingston",
+      "ssd crucial"
+      "ssd 1tb",
+      "ssd 2tb",
+      "ssd nvme 1tb"
       "rx 6600",
       "rx 580",
       "kit xeon",
@@ -1881,7 +1908,41 @@ async function farejarAliExpress() {
             ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
             : Number(String(descontoTexto).replace(/\D/g, "")) || 0;
 
+      
         console.log("🧪 PRODUTO ALI API:", {
+        titulo,
+        precoAtual,
+        precoAntigo,
+        desconto: Math.round(desconto) + "%",
+        link
+        });
+
+const tituloLower = titulo.toLowerCase();
+
+const palavrasBloqueadas = [
+  "cabelo",
+  "peruca",
+  "extensão",
+  "extensões",
+  "sapato",
+  "sandália",
+  "chinelo",
+  "salto",
+  "batom",
+  "cílios",
+  "unha",
+  "bolsa",
+  "sutiã",
+  "calcinha",
+  "wedding",
+  "bridal"
+];
+
+if (palavrasBloqueadas.some(p => tituloLower.includes(p))) {
+  console.log("🚫 Produto bloqueado:", titulo);
+  continue;
+}
+       
           titulo,
           precoAtual,
           precoAntigo,
@@ -1894,6 +1955,8 @@ async function farejarAliExpress() {
         if (precoNumero < 20) continue;
         if (desconto < 10) continue;
 
+        const linkCurto = await encurtarUrl(link);
+
         const novaOferta = {
           nome: titulo,
           titulo,
@@ -1903,8 +1966,8 @@ async function farejarAliExpress() {
           cupom: "",
           avisoCupom: desconto >= 10 ? `${Math.round(desconto)}% OFF no AliExpress.` : "",
           parcelamento: "",
-          link,
-          linkAfiliado: link,
+          link: linkCurto,
+          linkAfiliado: linkCurto,
           imagem,
           marketplace: "aliexpress",
           categoria: "AliExpress",
@@ -1930,7 +1993,7 @@ async function farejarAliExpress() {
             preco: novaOferta.precoAtual,
             precoAntigo: novaOferta.precoAntigo,
             desconto: Math.round(desconto) + "%",
-            link: novaOferta.linkAfiliado
+            link: novaOferta.linkAfiliado?.slice(0, 80)
           });
         }
 
