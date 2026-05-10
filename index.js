@@ -381,14 +381,41 @@ if (antigo > atual && atual > 0) {
 }
 
     
-    for (const destino of destinos) {
+   const sessoesComDestino = Object.keys(config?.destinosPorSessao || {})
+  .filter(id => {
+    const destinosSessao =
+      config?.destinosPorSessao?.[id] ||
+      destinosPorSessao[id] ||
+      [];
+
+    return (
+      destinosSessao.length &&
+      statusSessao[id] === "open" &&
+      sessoes[id]
+    );
+  });
+
+console.log("📡 Sessões com destino:", sessoesComDestino);
+
+for (const idSessaoAtual of sessoesComDestino) {
+  try {
+    const sockAtual = sessoes[idSessaoAtual];
+
+    const destinosSessao =
+      config?.destinosPorSessao?.[idSessaoAtual] ||
+      destinosPorSessao[idSessaoAtual] ||
+      [];
+
+    console.log("🚀 Enviando pela sessão:", idSessaoAtual);
+
+    for (const destino of destinosSessao) {
       if (oferta.imagem) {
-        await sock.sendMessage(destino, {
+        await sockAtual.sendMessage(destino, {
           image: { url: corrigirImagemUrl(oferta.imagem) || oferta.imagem },
           caption: mensagem
         });
       } else {
-        await sock.sendMessage(destino, {
+        await sockAtual.sendMessage(destino, {
           text: mensagem
         });
       }
@@ -396,20 +423,25 @@ if (antigo > atual && atual > 0) {
       await new Promise(r => setTimeout(r, 3000));
     }
 
-    controleEnvio[clienteId] = Date.now();
-    ultimoEnvioFila = Date.now();
-    
-    oferta.status = "enviado";
+  } catch (e) {
+    console.log("❌ erro envio sessão:", idSessaoAtual, e.message);
+  }
+}
 
-    oferta.enviadoEm = new Date().toLocaleString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-    });
+controleEnvio[clienteId] = Date.now();
+ultimoEnvioFila = Date.now();
 
-    oferta.dataEnvio = oferta.enviadoEm;
-    
-    salvarFila();
+oferta.status = "enviado";
 
-    console.log("✅ Enviado com controle de tempo");
+oferta.enviadoEm = new Date().toLocaleString("pt-BR", {
+  timeZone: "America/Sao_Paulo"
+});
+
+oferta.dataEnvio = oferta.enviadoEm;
+
+salvarFila();
+
+console.log("✅ Enviado com controle de tempo");
 
   } catch (e) {
     console.log("❌ ERRO:", e.message);
@@ -3293,67 +3325,47 @@ app.post("/test-send/:id", async (req, res) => {
 
   const resultados = [];
 
-const sessoesComDestino = Object.keys(config?.destinosPorSessao || {})
-  .filter(id => {
-    const destinosSessao =
-      config?.destinosPorSessao?.[id] ||
-      destinosPorSessao[id] ||
-      [];
-
-    return (
-      destinosSessao.length &&
-      statusSessao[id] === "open" &&
-      sessoes[id]
-    );
-  });
-
-console.log("📡 Sessões com destino:", sessoesComDestino);
-
-for (const idSessaoAtual of sessoesComDestino) {
-
-  try {
-
-    const sockAtual = sessoes[idSessaoAtual];
-
-    const destinosSessao =
-      config?.destinosPorSessao?.[idSessaoAtual] ||
-      destinosPorSessao[idSessaoAtual] ||
-      [];
-
-    console.log("🚀 Enviando pela sessão:", idSessaoAtual);
-
-    for (const destino of destinosSessao) {
-
-      if (oferta.imagem) {
-
-        await sockAtual.sendMessage(destino, {
-          image: {
-            url: corrigirImagemUrl(oferta.imagem) || oferta.imagem
-          },
+  for (const destino of destinos) {
+    try {
+      if (imagemFinal) {
+        await sock.sendMessage(destino, {
+          image: { url: imagemFinal },
           caption: mensagem
         });
 
+        resultados.push({
+          destino,
+          ok: true,
+          tipo: "imagem_com_legenda",
+          imagemEnviada: imagemFinal
+        });
       } else {
-
-        await sockAtual.sendMessage(destino, {
+        await sock.sendMessage(destino, {
           text: mensagem
         });
 
+        resultados.push({
+          destino,
+          ok: true,
+          tipo: "texto"
+        });
       }
 
-      await new Promise(r => setTimeout(r, 3000));
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    } catch (e) {
+      resultados.push({
+        destino,
+        ok: false,
+        erro: e.message
+      });
     }
-
-  } catch (e) {
-
-    console.log(
-      "❌ erro envio sessão:",
-      idSessaoAtual,
-      e.message
-    );
-
   }
-}
+
+  return res.json({
+    ok: true,
+    resultados
+  });
+});
 
 async function iniciarWhatsApp(id) {
   console.log("🚀 Iniciando sessão:", id);
