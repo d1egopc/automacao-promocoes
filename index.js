@@ -4206,11 +4206,25 @@ setTimeout(() => {
   farejarAmazon();
 }, 10 * 60 * 1000);
 
- setTimeout(() => {
-    console.log("🔄 Tentando reconectar WhatsApp automaticamente...");
-    iniciarWhatsApp("sessao1");
-  }, 3000);
-});
+setTimeout(() => {
+  console.log("🔄 Reconectando sessões WhatsApp automaticamente...");
+
+  const sessoesParaReconectar = Object.keys(config?.destinosPorSessao || {});
+
+  if (!sessoesParaReconectar.includes("sessao1")) {
+    sessoesParaReconectar.push("sessao1");
+  }
+
+  sessoesParaReconectar.forEach((id, index) => {
+    setTimeout(() => {
+      console.log("🚀 Reconectando sessão:", id);
+      iniciarWhatsApp(id);
+    }, 3000 + index * 4000);
+  });
+
+}, 3000);
+
+}); 
  
 setTimeout(() => {
   setInterval(() => {
