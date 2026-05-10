@@ -1,7 +1,6 @@
 
 const fs = require("fs");
 const path = require("path");
-const axios = require("axios");
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -17,12 +16,6 @@ let config = {
   horarioFim: "23:00",
 
   pausarMadrugada: true,
-
-  telegram: {
-    ativo: false,
-    botToken: "",
-    chatId: ""
-  },
 
   marketplaces: {
     amazon: {
@@ -435,11 +428,6 @@ for (const idSessaoAtual of sessoesComDestino) {
   }
 }
 
-await enviarTelegram(oferta, mensagem);
-
-controleEnvio[clienteId] = Date.now();
-ultimoEnvioFila = Date.now();
-
 controleEnvio[clienteId] = Date.now();
 ultimoEnvioFila = Date.now();
 
@@ -570,38 +558,8 @@ app.get("/fila", (req, res) => {
   });
 });
 
-// ================= TELEGRAM =================
 
-app.get("/telegram", (req, res) => {
-  res.json({
-    ativo: config.telegram?.ativo || false,
-    botTokenConfigurado: !!config.telegram?.botToken,
-    chatId: config.telegram?.chatId || ""
-  });
-});
-
-app.post("/telegram", (req, res) => {
-  const { ativo, botToken, chatId } = req.body;
-
-  config.telegram = {
-    ativo: ativo === true,
-    botToken: botToken || config.telegram?.botToken || "",
-    chatId: chatId || config.telegram?.chatId || ""
-  };
-
-  salvarConfig();
-
-  res.json({
-    ok: true,
-    telegram: {
-      ativo: config.telegram.ativo,
-      botTokenConfigurado: !!config.telegram.botToken,
-      chatId: config.telegram.chatId
-    }
-  });
-});
-
-// ================= WHATSAPP =================
+// ================= AUTOMAÇÃO =================
 
 app.get("/automacao", (req, res) => {
   res.json({
@@ -3483,48 +3441,6 @@ async function iniciarWhatsApp(id) {
   });
 }
 
-// ================= FUNCÇÃO TELEGRAM =================
-
-async function enviarTelegram(oferta, mensagem) {
-  try {
-    const token = config.telegram?.botToken;
-    const chatId = config.telegram?.chatId;
-
-    if (!config.telegram?.ativo) {
-      console.log("⏸ Telegram desativado.");
-      return;
-    }
-
-    if (!token || !chatId) {
-      console.log("⚠️ Telegram sem token ou chatId.");
-      return;
-    }
-
-    if (oferta.imagem) {
-      await axios.post(`https://api.telegram.org/bot${token}/sendPhoto`, {
-        chat_id: chatId,
-        photo: corrigirImagemUrl(oferta.imagem) || oferta.imagem,
-        caption: mensagem
-      });
-    } else {
-      await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
-        chat_id: chatId,
-        text: mensagem,
-        disable_web_page_preview: false
-      });
-    }
-
-    console.log("✅ Telegram enviado com sucesso");
-
-  } catch (e) {
-    console.log("❌ Erro Telegram:", e.response?.data || e.message);
-  }
-}
-
-// ================= FUNÇÃO WHATSAPP =================
-
-async function iniciarWhatsApp(id) {
-
 async function farejarMercadoLivre() {
   try {
 
@@ -4280,6 +4196,3 @@ setInterval(() => {
 
   processarFila();
 }, 10 * 1000);
-
-
-}
