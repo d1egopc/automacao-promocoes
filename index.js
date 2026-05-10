@@ -340,9 +340,10 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
       const telegrams = config.telegram?.destinos || [];
 
       const selecionados =
-        telegrams.filter(t =>
-          (destino.telegramDestinos || []).includes(t.nome)
-        );
+      telegrams.filter(t =>
+      (destino.telegramDestinos || []).includes(t.nome) ||
+      (destino.telegramDestinos || []).includes(String(t.chatId))
+      );
        
        console.log("🧪 TELEGRAM DEBUG:", {
        destinoNome: destino.nome,
