@@ -69,6 +69,15 @@ magalu: {
   precoMinimo: 20
 },
 
+awin: {
+  ativo: false,
+  publisherId: "",
+  apiToken: "",
+  loja: "",
+  intervaloFarejoMinutos: 30,
+  limitePorRodada: 10
+},
+
 aliexpress: {
   ativo: false,
   intervaloFarejoMinutos: 40,
@@ -1382,7 +1391,7 @@ return res.json({
 });
 });
 
-app.post("/integracoes/:marketplace/test", (req, res) => {
+app.post("/integracoes/:marketplace/test", async (req, res) => {
   const clienteId = getClienteId(req);
   const marketplace = req.params.marketplace.toLowerCase();
   const config = integracoesPorCliente[clienteId]?.[marketplace];
@@ -1394,6 +1403,47 @@ app.post("/integracoes/:marketplace/test", (req, res) => {
     });
   }
 
+  if (marketplace === "awin") {
+    try {
+      const { publisherId, apiToken } = config.credenciais || {};
+
+      if (!publisherId || !apiToken) {
+        return res.status(400).json({
+          ok: false,
+          erro: "Awin sem publisherId ou apiToken"
+        });
+      }
+
+      const url = `https://api.awin.com/publishers/${publisherId}/programmes`;
+
+      const response = await axios.get(url, {
+        headers: {
+          Authorization: `Bearer ${apiToken}`
+        },
+        params: {
+          relationship: "joined"
+        },
+        timeout: 15000
+      });
+
+      return res.json({
+        ok: true,
+        marketplace: "awin",
+        status: "conectado",
+        message: "Awin conectada com sucesso",
+        totalProgramas: Array.isArray(response.data) ? response.data.length : 0
+      });
+
+    } catch (e) {
+      return res.status(500).json({
+        ok: false,
+        marketplace: "awin",
+        erro: "Erro ao consultar API da Awin",
+        detalhe: e.response?.data || e.message
+      });
+    }
+  }
+
   return res.json({
     ok: true,
     marketplace,
@@ -1401,22 +1451,7 @@ app.post("/integracoes/:marketplace/test", (req, res) => {
     message: `${config.nome || marketplace} configurado.`
   });
 });
- app.delete("/integracoes/:marketplace", (req, res) => {
-  const clienteId = getClienteId(req);
-  const marketplace = req.params.marketplace.toLowerCase();
 
-  if (integracoesPorCliente[clienteId]?.[marketplace]) {
-    delete integracoesPorCliente[clienteId][marketplace];
-  }
-
-  salvarIntegracoesPersistidas();
-
-  return res.json({
-    ok: true,
-    message: `${marketplace} removido com sucesso`,
-    marketplace
-  });
-});
 // ================= HELPERS DE IMPORTAÇÃO =================
 
 function htmlDecode(str) {
