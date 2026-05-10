@@ -3757,7 +3757,7 @@ setTimeout(() => {
 setTimeout(() => {
   console.log("🚀 Iniciando Amazon após boot...");
   farejarAmazon();
-}, 15 * 60 * 1000);
+}, 1 * 60 * 1000);
 
  setTimeout(() => {
     console.log("🔄 Tentando reconectar WhatsApp automaticamente...");
@@ -3793,7 +3793,7 @@ setTimeout(() => {
       farejarAmazon();
     }
   }, (config.marketplaces?.amazon?.intervaloFarejoMinutos || 15) * 60 * 1000);
-}, 15 * 60 * 1000);
+}, 1 * 60 * 1000);
 
 setTimeout(() => {
   setInterval(() => {
@@ -3814,7 +3814,7 @@ setTimeout(() => {
       farejarAliExpress();
     }
   }, (config.marketplaces?.aliexpress?.intervaloFarejoMinutos || 40) * 60 * 1000);
-}, 20 * 60 * 1000);
+},  1 * 60 * 1000);
 
 setTimeout(() => {
   setInterval(() => {
