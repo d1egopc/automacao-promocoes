@@ -3622,12 +3622,30 @@ app.post("/test-send/:id", async (req, res) => {
     }
   }
 
- await enviarTelegram(
-    {
-      imagem: imagemFinal
-    },
-    mensagem
-  );
+if (typeof enviarTelegram === "function") {
+  try {
+    await enviarTelegram(
+      {
+        ...req.body,
+        imagem: imagemFinal,
+        marketplace: req.body.marketplace || req.body.loja || ""
+      },
+      mensagem
+    );
+
+    resultados.push({
+      destino: "telegram",
+      ok: true,
+      tipo: "telegram"
+    });
+  } catch (e) {
+    resultados.push({
+      destino: "telegram",
+      ok: false,
+      erro: e.message
+    });
+  }
+}
 
   return res.json({
     ok: true,
