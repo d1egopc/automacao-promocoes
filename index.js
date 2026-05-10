@@ -3401,6 +3401,61 @@ app.post("/test-send/:id", async (req, res) => {
   });
 });
 
+// ================= TELEGRAM =================
+
+async function enviarTelegram(oferta, mensagem) {
+  try {
+
+    const token = config.telegram?.botToken;
+    const chatId = config.telegram?.chatId;
+
+    if (!config.telegram?.ativo) {
+      console.log("⏸ Telegram desativado.");
+      return;
+    }
+
+    if (!token || !chatId) {
+      console.log("⚠️ Telegram sem token/chatId.");
+      return;
+    }
+
+    if (oferta.imagem) {
+
+      await axios.post(
+        `https://api.telegram.org/bot${token}/sendPhoto`,
+        {
+          chat_id: chatId,
+          photo: corrigirImagemUrl(oferta.imagem) || oferta.imagem,
+          caption: mensagem
+        }
+      );
+
+    } else {
+
+      await axios.post(
+        `https://api.telegram.org/bot${token}/sendMessage`,
+        {
+          chat_id: chatId,
+          text: mensagem
+        }
+      );
+
+    }
+
+    console.log("✅ Telegram enviado");
+
+  } catch (e) {
+
+    console.log(
+      "❌ Erro Telegram:",
+      e.response?.data || e.message
+    );
+
+  }
+}
+
+// ================= FUNCÃO WHATSAPP =================
+
 async function iniciarWhatsApp(id) {
   console.log("🚀 Iniciando sessão:", id);
 
