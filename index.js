@@ -1758,12 +1758,16 @@ async function farejarAliExpress() {
           return;
         }
 
-        const html = await response.text();
+       const html = await response.text();
 
-        if (!html || html.length < 5000) {
-          console.log("⚠️ HTML AliExpress muito pequeno.");
-          return;
-        }
+       console.log("🧪 ALI HTML tamanho:", html.length);
+       console.log("🧪 ALI TEM ITEM?", html.includes("/item/"));
+       console.log("🧪 ALI TRECHO:", html.slice(0, 300));
+
+       if (!html || html.length < 1000) {
+       console.log("⚠️ HTML AliExpress muito pequeno.");
+       return;
+       }
 
         const linksExtraidos = [
           ...html.matchAll(/https?:\/\/[^"'\s]*aliexpress\.com\/item\/[^"'\s]+/g),
