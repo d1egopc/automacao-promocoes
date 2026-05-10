@@ -3816,6 +3816,11 @@ app.listen(PORT, () => {
   console.log("🔥 API ONLINE NA PORTA " + PORT);
 
 setTimeout(() => {
+  console.log("🧪 TESTE DIRETO ALIEXPRESS");
+  farejarAliExpress();
+}, 15000);
+
+setTimeout(() => {
   console.log("🚀 Iniciando Shopee após boot...");
   farejarShopee();
 }, 5 * 60 * 1000);
