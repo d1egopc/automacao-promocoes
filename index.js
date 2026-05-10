@@ -266,6 +266,115 @@ function destinoDentroHorario(destino) {
   return horaAtual >= inicio || horaAtual <= fim;
 }
 
+
+// ================= ENVIO DESTINO INTELIGENTE =================
+
+async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
+
+  try {
+
+    if (!destinoAceitaOferta(destino, oferta)) {
+      return;
+    }
+
+    if (!destinoDentroHorario(destino)) {
+      console.log("⏰ Destino fora do horário:", destino.nome);
+      return;
+    }
+
+    // ================= WHATSAPP =================
+
+    if (destino.tipo === "whatsapp") {
+
+      const sock = sessoes[destino.conexaoId];
+
+      if (!sock) {
+        console.log("❌ Sessão não encontrada:", destino.conexaoId);
+        return;
+      }
+
+      const grupos = destino.gruposWhatsapp || [];
+
+      for (const grupo of grupos) {
+
+        if (destino.tipoMidia === "texto" || !oferta.imagem) {
+
+          await sock.sendMessage(grupo, {
+            text: mensagem
+          });
+
+        } else {
+
+          await sock.sendMessage(grupo, {
+            image: {
+              url: corrigirImagemUrl(oferta.imagem) || oferta.imagem
+            },
+            caption: mensagem
+          });
+
+        }
+
+        console.log("✅ Enviado destino WhatsApp:", destino.nome);
+
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+
+    // ================= TELEGRAM =================
+
+    if (destino.tipo === "telegram") {
+
+      const telegrams = config.telegram?.destinos || [];
+
+      const selecionados =
+        telegrams.filter(t =>
+          (destino.telegramDestinos || []).includes(t.nome)
+        );
+
+      for (const tel of selecionados) {
+
+        if (!tel.ativo) continue;
+
+        if (destino.tipoMidia === "texto" || !oferta.imagem) {
+
+          await axios.post(
+            `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
+            {
+              chat_id: tel.chatId,
+              text: mensagem
+            }
+          );
+
+        } else {
+
+          await axios.post(
+            `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
+            {
+              chat_id: tel.chatId,
+              photo: corrigirImagemUrl(oferta.imagem) || oferta.imagem,
+              caption: mensagem
+            }
+          );
+
+        }
+
+        console.log("✅ Enviado destino Telegram:", destino.nome);
+
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+
+  } catch (e) {
+
+    console.log(
+      "❌ erro destino inteligente:",
+      destino?.nome,
+      e.message
+    );
+
+  }
+}
+
 // ================= FUNCÃO PRCESSA FILA =================
 
 async function processarFila() {
