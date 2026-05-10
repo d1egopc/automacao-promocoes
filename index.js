@@ -436,6 +436,8 @@ for (const idSessaoAtual of sessoesComDestino) {
   }
 }
 
+await enviarTelegram(oferta, mensagem);
+
 controleEnvio[clienteId] = Date.now();
 ultimoEnvioFila = Date.now();
 
