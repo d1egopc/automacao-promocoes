@@ -3604,7 +3604,7 @@ if (
             }
 
             await new Promise(r =>
-            setTimeout(r, 2000 + Math.random() * 4000)
+            setTimeout(r, 4000 + Math.random() * 4000)
             );
 
           } catch (e) {
@@ -4074,7 +4074,7 @@ setTimeout(() => {
 setTimeout(() => {
   console.log("🚀 Iniciando Amazon após boot...");
   farejarAmazon();
-}, 1 * 60 * 1000);
+}, 10 * 60 * 1000);
 
  setTimeout(() => {
     console.log("🔄 Tentando reconectar WhatsApp automaticamente...");
@@ -4110,7 +4110,7 @@ setTimeout(() => {
       farejarAmazon();
     }
   }, (config.marketplaces?.amazon?.intervaloFarejoMinutos || 15) * 60 * 1000);
-}, 1 * 60 * 1000);
+}, 5 * 60 * 1000);
 
 setTimeout(() => {
   setInterval(() => {
@@ -4131,7 +4131,7 @@ setTimeout(() => {
       farejarAliExpress();
     }
   }, (config.marketplaces?.aliexpress?.intervaloFarejoMinutos || 40) * 60 * 1000);
-},  1 * 60 * 1000);
+},  10 * 60 * 1000);
 
 setTimeout(() => {
   setInterval(() => {
