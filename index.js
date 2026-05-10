@@ -602,6 +602,41 @@ app.post("/telegram", (req, res) => {
   });
 });
 
+app.post("/telegram/testar", async (req, res) => {
+  try {
+
+    const { destino } = req.body;
+
+    if (!destino?.botToken || !destino?.chatId) {
+      return res.status(400).json({
+        ok: false,
+        erro: "Token ou Chat ID ausente"
+      });
+    }
+
+    await axios.post(
+      `https://api.telegram.org/bot${destino.botToken}/sendMessage`,
+      {
+        chat_id: destino.chatId,
+        text: "🧪 Teste Telegram Optimus Promo enviado com sucesso!"
+      }
+    );
+
+    return res.json({
+      ok: true,
+      mensagem: "Teste enviado com sucesso"
+    });
+
+  } catch (e) {
+
+    return res.status(400).json({
+      ok: false,
+      erro: e.response?.data || e.message
+    });
+
+  }
+});
+
 // ================= AUTOMAÇÃO =================
 
 app.get("/automacao", (req, res) => {
