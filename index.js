@@ -580,18 +580,18 @@ app.get("/fila", (req, res) => {
 app.get("/telegram", (req, res) => {
   res.json({
     ativo: config.telegram?.ativo || false,
-    botTokenConfigurado: !!config.telegram?.botToken,
-    chatId: config.telegram?.chatId || ""
+    destinos: config.telegram?.destinos || []
   });
 });
 
 app.post("/telegram", (req, res) => {
-  const { ativo, botToken, chatId } = req.body;
+  const { ativo, destinos } = req.body;
 
   config.telegram = {
     ativo: ativo === true,
-    botToken: botToken || config.telegram?.botToken || "",
-    chatId: chatId || config.telegram?.chatId || ""
+    destinos: Array.isArray(destinos)
+      ? destinos
+      : config.telegram?.destinos || []
   };
 
   salvarConfig();
@@ -3414,52 +3414,49 @@ app.post("/test-send/:id", async (req, res) => {
 
 async function enviarTelegram(oferta, mensagem) {
   try {
-
-    const token = config.telegram?.botToken;
-    const chatId = config.telegram?.chatId;
-
     if (!config.telegram?.ativo) {
       console.log("⏸ Telegram desativado.");
       return;
     }
 
-    if (!token || !chatId) {
-      console.log("⚠️ Telegram sem token/chatId.");
+    const destinos = config.telegram?.destinos || [];
+
+    if (!destinos.length) {
+      console.log("⚠️ Nenhum destino Telegram configurado.");
       return;
     }
 
-    if (oferta.imagem) {
+    for (const destino of destinos) {
+      if (!destino.ativo) continue;
 
-      await axios.post(
-        `https://api.telegram.org/bot${token}/sendPhoto`,
-        {
+      const token = destino.botToken;
+      const chatId = destino.chatId;
+
+      if (!token || !chatId) {
+        console.log("⚠️ Telegram destino incompleto:", destino.nome);
+        continue;
+      }
+
+      if (oferta.imagem) {
+        await axios.post(`https://api.telegram.org/bot${token}/sendPhoto`, {
           chat_id: chatId,
           photo: corrigirImagemUrl(oferta.imagem) || oferta.imagem,
           caption: mensagem
-        }
-      );
-
-    } else {
-
-      await axios.post(
-        `https://api.telegram.org/bot${token}/sendMessage`,
-        {
+        });
+      } else {
+        await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
           chat_id: chatId,
           text: mensagem
-        }
-      );
+        });
+      }
 
+      console.log("✅ Telegram enviado:", destino.nome || chatId);
+
+      await new Promise(r => setTimeout(r, 1500));
     }
 
-    console.log("✅ Telegram enviado");
-
   } catch (e) {
-
-    console.log(
-      "❌ Erro Telegram:",
-      e.response?.data || e.message
-    );
-
+    console.log("❌ Erro Telegram:", e.response?.data || e.message);
   }
 }
 
