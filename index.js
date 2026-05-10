@@ -227,30 +227,48 @@ async function processarFila() {
       return;
     }
 
-    const idSessao = oferta.sessaoId || oferta.id || Object.keys(sessoes)[0];
-    const sock = sessoes[idSessao];
+    let idSessao =
+  oferta.sessaoId ||
+  oferta.id ||
+  Object.keys(destinosPorSessao).find(id => destinosPorSessao[id]?.length) ||
+  Object.keys(sessoes)[0];
 
-    if (!sock) {
-      console.log("❌ Nenhuma sessão conectada");
-      return;
-    }
+if (!destinosPorSessao[idSessao]?.length) {
+  const sessaoComDestino = Object.keys(destinosPorSessao)
+    .find(id => destinosPorSessao[id]?.length && statusSessao[id] === "open");
+
+  if (sessaoComDestino) {
+    idSessao = sessaoComDestino;
+  }
+}
+
+const sock = sessoes[idSessao];
+
+if (!sock) {
+  console.log("❌ Nenhuma sessão conectada para:", idSessao);
+  return;
+}
+
+console.log("📡 Sessão escolhida para envio:", idSessao);
 
     let ultimoEnvioFila = 0;
 
-   const destinosBrutos =
+    const destinosBrutos =
   oferta.destinos?.length
     ? oferta.destinos
     : oferta.grupos?.length
       ? oferta.grupos
       : destinosPorSessao[idSessao]?.length
         ? destinosPorSessao[idSessao]
-        : oferta.destino
-          ? [oferta.destino]
-          : oferta.grupoDestino
-            ? [oferta.grupoDestino]
-            : config?.destinos?.length
-              ? config.destinos
-              : [];
+        : config?.destinosPorSessao?.[idSessao]?.length
+          ? config.destinosPorSessao[idSessao]
+          : oferta.destino
+            ? [oferta.destino]
+            : oferta.grupoDestino
+              ? [oferta.grupoDestino]
+              : config?.destinos?.length
+                ? config.destinos
+                : [];
 
 const destinos = destinosBrutos
   .map(d => d?.id || d?.value || d?.jid || d)
