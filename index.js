@@ -17,6 +17,12 @@ let config = {
 
   pausarMadrugada: true,
 
+  telegram: {
+  ativo: false,
+  botToken: "",
+  chatId: ""
+  },
+
   marketplaces: {
     amazon: {
       ativo: true,
