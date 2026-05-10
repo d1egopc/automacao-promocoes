@@ -380,19 +380,56 @@ if (antigo > atual && atual > 0) {
 🔥 ${porcentagem}% OFF`;
 }
 
-    
-    for (const destino of destinos) {
-      if (oferta.imagem) {
-        await sock.sendMessage(destino, {
-          image: { url: corrigirImagemUrl(oferta.imagem) || oferta.imagem },
-          caption: mensagem
-        });
-      } else {
-        await sock.sendMessage(destino, {
-          text: mensagem
-        });
-      }
+     const sessoesComDestino = Object.keys(config?.destinosPorSessao || {})
+  .filter(id => {
+    const destinosSessao =
+      config?.destinosPorSessao?.[id] ||
+      destinosPorSessao[id] ||
+      [];
 
+    return (
+      destinosSessao.length &&
+      statusSessao[id] === "open" &&
+      sessoes[id]
+    );
+  });
+
+console.log("📡 Sessões com destino:", sessoesComDestino);
+
+for (const idSessaoAtual of sessoesComDestino) {
+
+  const sockAtual = sessoes[idSessaoAtual];
+
+  const destinosSessao =
+    config?.destinosPorSessao?.[idSessaoAtual] ||
+    destinosPorSessao[idSessaoAtual] ||
+    [];
+
+  console.log("🚀 Enviando pela sessão:", idSessaoAtual);
+
+  for (const destino of destinosSessao) {
+
+    if (oferta.imagem) {
+
+      await sockAtual.sendMessage(destino, {
+        image: {
+          url: corrigirImagemUrl(oferta.imagem) || oferta.imagem
+        },
+        caption: mensagem
+      });
+
+    } else {
+
+      await sockAtual.sendMessage(destino, {
+        text: mensagem
+      });
+
+    }
+
+    await new Promise(r => setTimeout(r, 3000));
+  }
+} 
+      
       await new Promise(r => setTimeout(r, 3000));
     }
 
