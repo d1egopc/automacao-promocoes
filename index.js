@@ -380,56 +380,19 @@ if (antigo > atual && atual > 0) {
 🔥 ${porcentagem}% OFF`;
 }
 
-     const sessoesComDestino = Object.keys(config?.destinosPorSessao || {})
-  .filter(id => {
-    const destinosSessao =
-      config?.destinosPorSessao?.[id] ||
-      destinosPorSessao[id] ||
-      [];
+    
+    for (const destino of destinos) {
+      if (oferta.imagem) {
+        await sock.sendMessage(destino, {
+          image: { url: corrigirImagemUrl(oferta.imagem) || oferta.imagem },
+          caption: mensagem
+        });
+      } else {
+        await sock.sendMessage(destino, {
+          text: mensagem
+        });
+      }
 
-    return (
-      destinosSessao.length &&
-      statusSessao[id] === "open" &&
-      sessoes[id]
-    );
-  });
-
-console.log("📡 Sessões com destino:", sessoesComDestino);
-
-for (const idSessaoAtual of sessoesComDestino) {
-
-  const sockAtual = sessoes[idSessaoAtual];
-
-  const destinosSessao =
-    config?.destinosPorSessao?.[idSessaoAtual] ||
-    destinosPorSessao[idSessaoAtual] ||
-    [];
-
-  console.log("🚀 Enviando pela sessão:", idSessaoAtual);
-
-  for (const destino of destinosSessao) {
-
-    if (oferta.imagem) {
-
-      await sockAtual.sendMessage(destino, {
-        image: {
-          url: corrigirImagemUrl(oferta.imagem) || oferta.imagem
-        },
-        caption: mensagem
-      });
-
-    } else {
-
-      await sockAtual.sendMessage(destino, {
-        text: mensagem
-      });
-
-    }
-
-    await new Promise(r => setTimeout(r, 3000));
-  }
-} 
-      
       await new Promise(r => setTimeout(r, 3000));
     }
 
@@ -3330,47 +3293,67 @@ app.post("/test-send/:id", async (req, res) => {
 
   const resultados = [];
 
-  for (const destino of destinos) {
-    try {
-      if (imagemFinal) {
-        await sock.sendMessage(destino, {
-          image: { url: imagemFinal },
+const sessoesComDestino = Object.keys(config?.destinosPorSessao || {})
+  .filter(id => {
+    const destinosSessao =
+      config?.destinosPorSessao?.[id] ||
+      destinosPorSessao[id] ||
+      [];
+
+    return (
+      destinosSessao.length &&
+      statusSessao[id] === "open" &&
+      sessoes[id]
+    );
+  });
+
+console.log("📡 Sessões com destino:", sessoesComDestino);
+
+for (const idSessaoAtual of sessoesComDestino) {
+
+  try {
+
+    const sockAtual = sessoes[idSessaoAtual];
+
+    const destinosSessao =
+      config?.destinosPorSessao?.[idSessaoAtual] ||
+      destinosPorSessao[idSessaoAtual] ||
+      [];
+
+    console.log("🚀 Enviando pela sessão:", idSessaoAtual);
+
+    for (const destino of destinosSessao) {
+
+      if (oferta.imagem) {
+
+        await sockAtual.sendMessage(destino, {
+          image: {
+            url: corrigirImagemUrl(oferta.imagem) || oferta.imagem
+          },
           caption: mensagem
         });
 
-        resultados.push({
-          destino,
-          ok: true,
-          tipo: "imagem_com_legenda",
-          imagemEnviada: imagemFinal
-        });
       } else {
-        await sock.sendMessage(destino, {
+
+        await sockAtual.sendMessage(destino, {
           text: mensagem
         });
 
-        resultados.push({
-          destino,
-          ok: true,
-          tipo: "texto"
-        });
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-    } catch (e) {
-      resultados.push({
-        destino,
-        ok: false,
-        erro: e.message
-      });
+      await new Promise(r => setTimeout(r, 3000));
     }
-  }
 
-  return res.json({
-    ok: true,
-    resultados
-  });
-});
+  } catch (e) {
+
+    console.log(
+      "❌ erro envio sessão:",
+      idSessaoAtual,
+      e.message
+    );
+
+  }
+}
 
 async function iniciarWhatsApp(id) {
   console.log("🚀 Iniciando sessão:", id);
