@@ -470,7 +470,7 @@ console.log(
   destinosInteligentes.map(d => d.nome)
 );
 
-if (!destinos.length) {
+  if (!destinosInteligentes.length) {
   console.log("⚠️ Sem destino carregado ainda. Aguardando...");
   enviandoAgora = false;
   return;
@@ -573,56 +573,6 @@ if (antigo > atual && atual > 0) {
 💥 Economia: R$ ${economia.replace(".", ",")}
 🔥 ${porcentagem}% OFF`;
 }
-
-    
-   const sessoesComDestino = Object.keys(config?.destinosPorSessao || {})
-  .filter(id => {
-    const destinosSessao =
-      config?.destinosPorSessao?.[id] ||
-      destinosPorSessao[id] ||
-      [];
-
-    return (
-      destinosSessao.length &&
-      statusSessao[id] === "open" &&
-      sessoes[id]
-    );
-  });
-
-console.log("📡 Sessões com destino:", sessoesComDestino);
-
-for (const idSessaoAtual of sessoesComDestino) {
-  try {
-    const sockAtual = sessoes[idSessaoAtual];
-
-    const destinosSessao =
-      config?.destinosPorSessao?.[idSessaoAtual] ||
-      destinosPorSessao[idSessaoAtual] ||
-      [];
-
-    console.log("🚀 Enviando pela sessão:", idSessaoAtual);
-
-    for (const destino of destinosSessao) {
-      if (oferta.imagem) {
-        await sockAtual.sendMessage(destino, {
-          image: { url: corrigirImagemUrl(oferta.imagem) || oferta.imagem },
-          caption: mensagem
-        });
-      } else {
-        await sockAtual.sendMessage(destino, {
-          text: mensagem
-        });
-      }
-
-      await new Promise(r => setTimeout(r, 3000));
-    }
-
-  } catch (e) {
-    console.log("❌ erro envio sessão:", idSessaoAtual, e.message);
-  }
-}
-
-await enviarTelegram(oferta, mensagem);
 
 // ================= ENVIO DESTINOS INTELIGENTES =================
 
