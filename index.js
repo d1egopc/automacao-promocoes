@@ -21,9 +21,16 @@ let config = {
 
   telegram: {
   ativo: false,
-  botToken: "",
-  chatId: ""
-  },
+
+  destinos: [
+    {
+      nome: "Canal Principal",
+      botToken: "",
+      chatId: "",
+      ativo: true
+    }
+  ]
+},
 
   marketplaces: {
     amazon: {
