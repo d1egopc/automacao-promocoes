@@ -457,6 +457,19 @@ const destinos = destinosBrutos
 
 console.log("DESTINOS PARA ENVIO:", destinos);
 
+// ================= DESTINOS INTELIGENTES =================
+
+const destinosInteligentes =
+  (config.destinosInteligentes || [])
+    .filter(destino =>
+      destinoAceitaOferta(destino, oferta)
+    );
+
+console.log(
+  "🧠 Destinos inteligentes compatíveis:",
+  destinosInteligentes.map(d => d.nome)
+);
+
 if (!destinos.length) {
   console.log("⚠️ Sem destino carregado ainda. Aguardando...");
   enviandoAgora = false;
@@ -610,6 +623,16 @@ for (const idSessaoAtual of sessoesComDestino) {
 }
 
 await enviarTelegram(oferta, mensagem);
+
+// ================= ENVIO DESTINOS INTELIGENTES =================
+
+for (const destino of destinosInteligentes) {
+  await enviarParaDestinoInteligente(
+    destino,
+    oferta,
+    mensagem
+  );
+}
 
 controleEnvio[clienteId] = Date.now();
 ultimoEnvioFila = Date.now();
