@@ -3404,6 +3404,13 @@ app.post("/test-send/:id", async (req, res) => {
     }
   }
 
+ await enviarTelegram(
+    {
+      imagem: imagemFinal
+    },
+    mensagem
+  );
+
   return res.json({
     ok: true,
     resultados
