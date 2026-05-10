@@ -489,11 +489,25 @@ console.log("DESTINOS PARA ENVIO:", destinos);
 
 // ================= DESTINOS INTELIGENTES =================
 
+const todosDestinos = config.destinosInteligentes || [];
+
+console.log("🧪 TODOS DESTINOS CONFIG:", todosDestinos.map(d => ({
+  nome: d.nome,
+  tipo: d.tipo,
+  ativo: d.ativo,
+  marketplaces: d.marketplaces,
+  telegramDestinos: d.telegramDestinos
+})));
+
 const destinosInteligentes =
-  (config.destinosInteligentes || [])
-    .filter(destino =>
-      destinoAceitaOferta(destino, oferta)
-    );
+  todosDestinos.filter(destino =>
+    destinoAceitaOferta(destino, oferta)
+  );
+
+console.log("🧪 DESTINOS APROVADOS:", destinosInteligentes.map(d => ({
+  nome: d.nome,
+  tipo: d.tipo
+})));
 
 console.log(
   "🧠 Destinos inteligentes compatíveis:",
