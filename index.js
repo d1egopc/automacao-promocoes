@@ -628,6 +628,38 @@ let gruposPorSessao = {};
 let reconectando = {};
 let integracoesPorCliente = {};
 
+let sessoesMeta = {};
+
+const SESSOES_FILE = process.env.SESSOES_FILE || "/data/sessoes.json";
+
+function carregarSessoesMeta() {
+  try {
+    if (!fs.existsSync(SESSOES_FILE)) {
+      console.log("ℹ️ Nenhum arquivo de sessões encontrado ainda");
+      return;
+    }
+
+    const raw = fs.readFileSync(SESSOES_FILE, "utf8");
+    if (!raw) return;
+
+    sessoesMeta = JSON.parse(raw);
+    console.log("✅ Sessões carregadas:", Object.keys(sessoesMeta).length);
+  } catch (e) {
+    console.log("❌ erro carregar sessões:", e.message);
+    sessoesMeta = {};
+  }
+}
+
+function salvarSessoesMeta() {
+  try {
+    fs.writeFileSync(SESSOES_FILE, JSON.stringify(sessoesMeta, null, 2));
+  } catch (e) {
+    console.log("❌ erro salvar sessões:", e.message);
+  }
+}
+
+carregarSessoesMeta();
+
 const INTEGRACOES_FILE = process.env.INTEGRACOES_FILE || "/data/integracoes.json";
 
 function carregarIntegracoesPersistidas() {
@@ -2891,6 +2923,108 @@ return res.json(produto);
 });
 
 // ================= WHATSAPP =================
+
+app.get("/sessoes", (req, res) => {
+  const lista = Object.values(sessoesMeta).map(sessao => {
+    const id = sessao.id;
+
+    return {
+      ...sessao,
+      status: statusSessao[id] || "offline",
+      conectado: statusSessao[id] === "open",
+      qrDisponivel: !!qrCodes[id],
+      grupos: gruposPorSessao[id]?.length || 0,
+      destinos: destinosPorSessao[id]?.length || 0
+    };
+  });
+
+  return res.json({
+    ok: true,
+    sessoes: lista
+  });
+});
+
+app.post("/sessoes", (req, res) => {
+  try {
+    const nome = req.body.nome || "WhatsApp";
+    const tipo = req.body.tipo || "whatsapp";
+
+    const total = Object.keys(sessoesMeta).length + 1;
+    const id = req.body.id || `sessao${total}`;
+
+    if (sessoesMeta[id]) {
+      return res.status(400).json({
+        ok: false,
+        erro: "Sessão já existe"
+      });
+    }
+
+    sessoesMeta[id] = {
+      id,
+      nome,
+      tipo,
+      criadoEm: new Date().toISOString()
+    };
+
+    salvarSessoesMeta();
+
+    return res.json({
+      ok: true,
+      sessao: sessoesMeta[id]
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
+
+app.delete("/sessoes/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    try {
+      if (sessoes[id]?.sock?.logout) {
+        await sessoes[id].sock.logout();
+      }
+    } catch (e) {
+      console.log("⚠️ logout ignorado ao excluir:", e.message);
+    }
+
+    try {
+      sessoes[id]?.sock?.end?.();
+    } catch (e) {
+      console.log("⚠️ end ignorado ao excluir:", e.message);
+    }
+
+    delete sessoes[id];
+    delete qrCodes[id];
+    delete statusSessao[id];
+    delete destinosPorSessao[id];
+    delete gruposPorSessao[id];
+    delete reconectando[id];
+    delete sessoesMeta[id];
+
+    fs.rmSync("/data/auth_" + id, {
+      recursive: true,
+      force: true
+    });
+
+    salvarSessoesMeta();
+
+    return res.json({
+      ok: true,
+      message: "Sessão excluída com sucesso",
+      id
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
 
 app.post("/reset/:id", async (req, res) => {
   const { id } = req.params;
