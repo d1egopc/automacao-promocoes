@@ -3798,6 +3798,12 @@ setTimeout(() => {
 setTimeout(() => {
   setInterval(() => {
     const cfg = config.marketplaces?.aliexpress;
+  console.log("🧪 CHECK ALIEXPRESS:", {
+  ativo: config.marketplaces?.aliexpress?.ativo,
+  automacao: config.automacaoAtiva,
+  podeRodar: podeRodarAgora(),
+  intervalo: config.marketplaces?.aliexpress?.intervaloFarejoMinutos
+  });
 
     if (
       config.automacaoAtiva &&
