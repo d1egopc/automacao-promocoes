@@ -564,6 +564,32 @@ app.get("/fila", (req, res) => {
   });
 });
 
+// ================= TELEGRAM =================
+
+app.get("/telegram", (req, res) => {
+  res.json({
+    ativo: config.telegram?.ativo || false,
+    botTokenConfigurado: !!config.telegram?.botToken,
+    chatId: config.telegram?.chatId || ""
+  });
+});
+
+app.post("/telegram", (req, res) => {
+  const { ativo, botToken, chatId } = req.body;
+
+  config.telegram = {
+    ativo: ativo === true,
+    botToken: botToken || config.telegram?.botToken || "",
+    chatId: chatId || config.telegram?.chatId || ""
+  };
+
+  salvarConfig();
+
+  res.json({
+    ok: true,
+    telegram: config.telegram
+  });
+});
 
 // ================= AUTOMAÇÃO =================
 
