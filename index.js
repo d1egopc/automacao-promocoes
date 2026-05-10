@@ -284,7 +284,7 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
 
     // ================= WHATSAPP =================
 
-    if (destino.tipo === "whatsapp") {
+    if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
       const sock = sessoes[destino.conexaoId];
 
@@ -322,7 +322,7 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
 
     // ================= TELEGRAM =================
 
-    if (destino.tipo === "telegram") {
+      if (String(destino.tipo || "").toLowerCase() === "telegram") {
 
       const telegrams = config.telegram?.destinos || [];
 
@@ -330,6 +330,23 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
         telegrams.filter(t =>
           (destino.telegramDestinos || []).includes(t.nome)
         );
+       
+       console.log("🧪 TELEGRAM DEBUG:", {
+       destinoNome: destino.nome,
+       destinoTipo: destino.tipo,
+       telegramDestinosDoDestino: destino.telegramDestinos,
+       telegramsConfigurados: telegrams.map(t => ({
+       nome: t.nome,
+       ativo: t.ativo,
+       chatId: t.chatId ? "OK" : "SEM CHATID",
+       botToken: t.botToken ? "OK" : "SEM TOKEN"
+       })),
+       selecionados: selecionados.map(t => t.nome)
+     });
+
+   if (!selecionados.length) {
+   console.log("⚠️ Nenhum Telegram selecionado para este destino:", destino.nome);
+   }
 
       for (const tel of selecionados) {
 
