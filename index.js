@@ -32,6 +32,10 @@ let config = {
   ]
 },
 
+// ================= DESTINOS INTELIGENTES =================
+
+destinosInteligentes: [],
+
   marketplaces: {
     amazon: {
       ativo: true,
@@ -635,6 +639,50 @@ app.post("/telegram/testar", async (req, res) => {
     });
 
   }
+});
+
+// ============== DESTINOS INTELIG APPGET ==============
+
+app.get("/destinos", (req, res) => {
+  res.json(config.destinosInteligentes || []);
+});
+
+app.post("/destinos", (req, res) => {
+
+  const destinos = req.body;
+
+  if (!Array.isArray(destinos)) {
+    return res.status(400).json({
+      ok: false,
+      erro: "Formato inválido"
+    });
+  }
+
+  config.destinosInteligentes = destinos;
+
+  salvarConfig();
+
+  return res.json({
+    ok: true,
+    destinos: config.destinosInteligentes
+  });
+
+});
+
+app.delete("/destinos/:id", (req, res) => {
+
+  const { id } = req.params;
+
+  config.destinosInteligentes =
+    (config.destinosInteligentes || [])
+      .filter(d => d.id !== id);
+
+  salvarConfig();
+
+  return res.json({
+    ok: true
+  });
+
 });
 
 // ================= AUTOMAÇÃO =================
