@@ -3314,6 +3314,24 @@ if (
   }
 }
 
+function ofertaJaExiste(oferta) {
+  const linkNovo = String(
+    oferta.link || oferta.linkAfiliado || ""
+  ).trim();
+
+  return fila.some(item => {
+    const linkItem = String(
+      item.link || item.linkAfiliado || ""
+    ).trim();
+
+    return (
+      linkNovo &&
+      linkItem &&
+      linkItem === linkNovo
+    );
+  });
+}
+
 async function farejarAmazon() {
   try {
 
