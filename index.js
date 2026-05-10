@@ -1978,14 +1978,14 @@ const buscasInternacionais = [
             ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
             : Number(String(descontoTexto).replace(/\D/g, "")) || 0;
 
-      
-        console.log("🧪 PRODUTO ALI API:", {
-        titulo,
-        precoAtual,
-        precoAntigo,
-        desconto: Math.round(desconto) + "%",
-        link
-        });
+      console.log("🧪 PRODUTO ALI API:", {
+      titulo,
+      precoAtual,
+      precoAntigo,
+      desconto: Math.round(desconto) + "%",
+      link: link?.slice(0, 80)
+      });
+        
 
 const tituloLower = titulo.toLowerCase();
 
