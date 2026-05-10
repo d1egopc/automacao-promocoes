@@ -215,6 +215,59 @@ function podeRodarAgora() {
 
 let ultimoEnvioFila = 0;
 
+
+// ================= HELPERS DESTINOS INTELIGENTES =================
+
+function normalizarTexto(valor = "") {
+  return String(valor)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function destinoAceitaOferta(destino, oferta) {
+  if (!destino?.ativo) return false;
+
+  const marketplaceOferta = normalizarTexto(oferta.marketplace || oferta.loja || "");
+  const categoriaOferta = normalizarTexto(oferta.categoria || "");
+
+  const marketplacesDestino = (destino.marketplaces || []).map(normalizarTexto);
+  const categoriasDestino = (destino.categorias || []).map(normalizarTexto);
+
+  if (marketplacesDestino.length && !marketplacesDestino.includes(marketplaceOferta)) {
+    return false;
+  }
+
+  if (categoriasDestino.length && categoriaOferta && !categoriasDestino.includes(categoriaOferta)) {
+    return false;
+  }
+
+  return true;
+}
+
+function destinoDentroHorario(destino) {
+  const agoraBR = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
+  );
+
+  const horaAtual = agoraBR.getHours() * 60 + agoraBR.getMinutes();
+
+  const [inicioH, inicioM] = (destino.horarioInicio || "00:00").split(":").map(Number);
+  const [fimH, fimM] = (destino.horarioFim || "23:59").split(":").map(Number);
+
+  const inicio = inicioH * 60 + inicioM;
+  const fim = fimH * 60 + fimM;
+
+  if (inicio <= fim) {
+    return horaAtual >= inicio && horaAtual <= fim;
+  }
+
+  return horaAtual >= inicio || horaAtual <= fim;
+}
+
+// ================= FUNCÃO PRCESSA FILA =================
+
 async function processarFila() {
   if (enviandoAgora) return;
   enviandoAgora = true;
