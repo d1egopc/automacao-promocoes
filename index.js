@@ -2346,11 +2346,25 @@ const buscasInternacionais = [
           item.target_sale_url ||
           "";
 
+const linkLimpo = String(link).split("?")[0];
+
+if (produtoRepetidoRecentemente(linkLimpo, 48)) {
+  console.log("⏭️ Link AliExpress repetido ignorado:", linkLimpo);
+  return;
+}
         const titulo =
           item.product_title ||
           item.title ||
           item.product_subject ||
           "Produto AliExpress";
+
+const chaveRepeticao =
+  gerarChaveProduto(titulo + " aliexpress");
+
+if (produtoRepetidoRecentemente(chaveRepeticao, 48)) {
+  console.log("⏭️ AliExpress repetido ignorado:", titulo);
+  return;
+}
 
         const precoAtual =
           limparPreco(
