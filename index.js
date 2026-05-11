@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 const csv = require("csv-parser");
+const zlib = require("zlib");
 
 
 if (!fs.existsSync("/data")) {
@@ -77,7 +78,7 @@ awin: {
   descontoMinimo: 0,
   precoMinimo: 0,
   loja: "kabum",
-  feedFile: "awin_kabum.csv"
+  feedFile: "awin_kabum.csv.gz"
 },
 
 aliexpress: {
@@ -2546,13 +2547,14 @@ async function farejarAwin() {
     const produtos = [];
 
     await new Promise((resolve, reject) => {
-      fs.createReadStream(caminhoFeed)
-        .pipe(csv())
-        .on("data", (row) => {
-          produtos.push(row);
-        })
-        .on("end", resolve)
-        .on("error", reject);
+    fs.createReadStream(caminhoFeed)
+    .pipe(zlib.createGunzip())
+    .pipe(csv())
+    .on("data", (row) => {
+      produtos.push(row);
+    })
+    .on("end", resolve)
+    .on("error", reject);
     });
 
     console.log("📦 Produtos no feed Awin:", produtos.length);
