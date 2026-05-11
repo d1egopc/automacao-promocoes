@@ -2569,11 +2569,16 @@ async function farejarAwin() {
         promo.advertiser?.name ||
         "Oferta Awin";
 
-      const link =
-        promo.url ||
-        promo.trackingLink ||
-        promo.clickThroughUrl ||
-        "";
+     if (produtoRepetidoRecentemente(titulo, 24)) {
+    console.log("⏭️ Awin repetido ignorado:", titulo);
+    continue;
+  }
+
+  const link =
+    promo.url ||
+    promo.trackingLink ||
+    promo.clickThroughUrl ||
+    "";
 
       if (!link) continue;
 
@@ -4805,8 +4810,8 @@ setTimeout(() => {
       console.log("🟪 Rodando farejador Awin...");
       farejarAwin();
     }
-  }, (config.marketplaces?.awin?.intervaloFarejoMinutos || 2 ) * 60 * 1000);
-}, 1 * 60 * 1000);
+  }, (config.marketplaces?.awin?.intervaloFarejoMinutos ||  ) * 60 * 1000);
+},  * 60 * 1000);
 
 
 let ultimoLogPausaFila = 0;
