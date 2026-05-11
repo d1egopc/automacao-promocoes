@@ -1532,6 +1532,86 @@ function extrairJsonLd(html) {
   return null;
 }
 
+
+// ================= FILTROS UNIVERSAIS DE OFERTAS =================
+
+function normalizarTexto(valor) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function pontuarOferta(oferta = {}, opcoes = {}) {
+  let score = 0;
+
+  const texto = normalizarTexto(`
+    ${oferta.titulo || ""}
+    ${oferta.nome || ""}
+    ${oferta.descricao || ""}
+    ${oferta.categoria || ""}
+    ${oferta.marketplace || ""}
+    ${oferta.origem || ""}
+    ${oferta.link || ""}
+    ${oferta.linkAfiliado || ""}
+  `);
+
+  if (texto.includes("envio do brasil")) score += 100;
+  if (texto.includes("estoque no brasil")) score += 90;
+  if (texto.includes("produto no brasil")) score += 80;
+  if (texto.includes("brasil")) score += 40;
+  if (texto.includes("brazil")) score += 40;
+
+  if (oferta.imagem) score += 10;
+  if (oferta.precoAtual || oferta.preco) score += 10;
+  if (oferta.cupom) score += 15;
+  if (oferta.precoAntigo) score += 8;
+
+  if (opcoes.preferirEnvioBrasil && texto.includes("brasil")) {
+    score += 30;
+  }
+
+  return score;
+}
+
+function ofertaPassaNosFiltros(oferta = {}, opcoes = {}) {
+  const bloquearSemImagem = opcoes.bloquearSemImagem ?? true;
+  const bloquearSemPreco = opcoes.bloquearSemPreco ?? true;
+
+  if (bloquearSemImagem && !oferta.imagem) {
+    return { ok: false, motivo: "sem_imagem" };
+  }
+
+  if (bloquearSemPreco && !(oferta.precoAtual || oferta.preco)) {
+    return { ok: false, motivo: "sem_preco" };
+  }
+
+  return { ok: true, motivo: "ok" };
+}
+
+function aplicarFiltrosUniversais(ofertas = [], opcoes = {}) {
+  return ofertas
+    .map((oferta) => ({
+      ...oferta,
+      score: pontuarOferta(oferta, opcoes),
+    }))
+    .filter((oferta) => {
+      const resultado = ofertaPassaNosFiltros(oferta, opcoes);
+
+      if (!resultado.ok) {
+        console.log(
+          "⏭️ Oferta ignorada pelo filtro universal:",
+          resultado.motivo,
+          oferta.titulo || oferta.nome || "sem título"
+        );
+      }
+
+      return resultado.ok;
+    })
+    .sort((a, b) => (b.score || 0) - (a.score || 0));
+}
+
 function limparPreco(valor) {
   if (!valor) return "";
 
@@ -2494,8 +2574,7 @@ if (desconto < minimoDescontoAplicado) continue;
             timeZone: "America/Sao_Paulo"
           });
 
-          fila.push(novaOferta);
-          salvarFila();
+          ofertasEncontradas.push(novaOferta);
 
           adicionadasNestaRodada++;
 
@@ -2531,6 +2610,26 @@ if (desconto < minimoDescontoAplicado) continue;
         if (adicionadasNestaRodada >= limitePorRodada) break;
       }
     }
+
+const ofertasFiltradas = aplicarFiltrosUniversais(
+  ofertasEncontradas,
+  {
+    preferirEnvioBrasil: true,
+    bloquearSemImagem: true,
+    bloquearSemPreco: true,
+  }
+);
+
+console.log(
+  `🧠 Ofertas AliExpress após filtros universais: ${ofertasFiltradas.length}`
+);
+
+for (const oferta of ofertasFiltradas) {
+  fila.push(oferta);
+}
+
+salvarFila();
+
 
     console.log(`✅ AliExpress finalizado. Adicionadas: ${adicionadasNestaRodada}`);
   } catch (e) {
