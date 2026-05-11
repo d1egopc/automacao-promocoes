@@ -2614,14 +2614,16 @@ const resp = await axios.post(
 
     salvarFila();
 
-  } catch (e) {
-    console.log("❌ erro farejador Awin:", {
-      status: e.response?.status,
-      data: e.response?.data,
-      message: e.message
-    });
+   } catch (e) {
+    console.log(
+      "❌ erro farejador Awin:",
+      JSON.stringify({
+        status: e.response?.status,
+        data: e.response?.data,
+        message: e.message
+      })
+    );
   }
-}
 
 // ================= FAREJADOR AMAZON =================
 
