@@ -4687,7 +4687,6 @@ setInterval(() => {
     return;
   }
 
-testarAwinProdutos();
 
 setInterval(() => {
   processarFila();
