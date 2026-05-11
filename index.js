@@ -1076,6 +1076,23 @@ carregarIntegracoesPersistidas();
 carregarFila();
 carregarConfig();
 
+if (!config.marketplaces.awin) {
+  config.marketplaces.awin = {
+    ativo: true,
+    intervaloFarejoMinutos: 30,
+    limitePorRodada: 10,
+    descontoMinimo: 0,
+    precoMinimo: 0,
+    loja: "kabum"
+  };
+
+  salvarConfig();
+  console.log("✅ Awin recriada no config");
+}
+
+console.log("🧪 CONFIG AWIN ATUAL:", config.marketplaces?.awin);
+
+
 if (config.destinosPorSessao) {
   destinosPorSessao = config.destinosPorSessao;
   console.log("✅ Destinos carregados da config");
