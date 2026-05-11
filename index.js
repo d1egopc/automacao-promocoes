@@ -2614,9 +2614,12 @@ const resp = await axios.post(
 
     salvarFila();
 
-    console.log(`🚀 Awin finalizado. Adicionadas: ${adicionadas}`);
   } catch (e) {
-    console.log("❌ erro farejador Awin:", e.message);
+    console.log("❌ erro farejador Awin:", {
+      status: e.response?.status,
+      data: e.response?.data,
+      message: e.message
+    });
   }
 }
 
