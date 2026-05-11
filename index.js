@@ -4302,6 +4302,62 @@ if (adicionadasNestaRodada >= limitePorRodada) {
   }
 }
 
+// ================= TESTE AWIN =================
+
+async function testarAwinProdutos() {
+
+  try {
+
+    console.log("🧪 TESTE AWIN INICIADO");
+
+    const clienteId = "admin";
+
+    const integracao =
+      integracoesPorCliente?.[clienteId]?.awin;
+
+    if (!integracao) {
+      console.log("❌ Awin não configurada");
+      return;
+    }
+
+    const {
+      publisherId,
+      apiToken
+    } = integracao.credenciais || {};
+
+    if (!publisherId || !apiToken) {
+      console.log("❌ Credenciais Awin inválidas");
+      return;
+    }
+
+    const url =
+      `https://api.awin.com/publishers/${publisherId}/programmes`;
+
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${apiToken}`
+      },
+      params: {
+        relationship: "joined"
+      },
+      timeout: 15000
+    });
+
+    console.log(
+      "🧪 AWIN PROGRAMAS:",
+      JSON.stringify(response.data, null, 2)
+    );
+
+  } catch (e) {
+
+    console.log(
+      "❌ erro teste awin:",
+      e.response?.data || e.message
+    );
+
+  }
+}
+
 async function buscarOfertasShopee() {
   const configShopee = integracoesPorCliente["admin"]?.shopee;
 
@@ -4630,6 +4686,12 @@ setInterval(() => {
 
     return;
   }
+
+testarAwinProdutos();
+
+setInterval(() => {
+  processarFila();
+}, 10 * 1000);
 
   processarFila();
 }, 10 * 1000);
