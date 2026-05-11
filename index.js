@@ -4810,7 +4810,7 @@ setTimeout(() => {
       console.log("🟪 Rodando farejador Awin...");
       farejarAwin();
     }
-  }, (config.marketplaces?.awin?.intervaloFarejoMinutos ||  ) * 60 * 1000);
+  }, (config.marketplaces?.awin?.intervaloFarejoMinutos || 30) * 60 * 1000);
 },  * 60 * 1000);
 
 
