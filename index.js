@@ -2311,6 +2311,8 @@ async function farejarAliExpress() {
     const limitePorRodada = cfg.limitePorRodada || 5;
     let adicionadasNestaRodada = 0;
 
+    let ofertasEncontradas = [];
+
    const buscasBrasil = [
 
   "pen drive brasil",
