@@ -2549,7 +2549,8 @@ const resp = await axios.post(
   {
     filters: {
       membership: "joined",
-      status: "active"
+      status: "active",
+      type: "all"
     },
     pagination: {
       page: 1,
@@ -2560,6 +2561,9 @@ const resp = await axios.post(
     headers: {
       Authorization: `Bearer ${apiToken}`,
       "Content-Type": "application/json"
+    },
+    params: {
+      accessToken: apiToken
     },
     timeout: 15000
   }
