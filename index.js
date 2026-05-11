@@ -4302,38 +4302,30 @@ if (adicionadasNestaRodada >= limitePorRodada) {
   }
 }
 
-// ================= TESTE AWIN =================
+// ================= FAREJADOR AWIN =================
 
-async function testarAwinProdutos() {
-
+async function farejarAwin() {
   try {
-
-    console.log("🧪 TESTE AWIN INICIADO");
+    console.log("🛒 Farejando ofertas Awin...");
 
     const clienteId = "admin";
-
-    const integracao =
-      integracoesPorCliente?.[clienteId]?.awin;
+    const integracao = integracoesPorCliente?.[clienteId]?.awin;
 
     if (!integracao) {
-      console.log("❌ Awin não configurada");
+      console.log("⏸ Awin não configurada.");
       return;
     }
 
-    const {
-      publisherId,
-      apiToken
-    } = integracao.credenciais || {};
+    const { publisherId, apiToken, loja } = integracao.credenciais || {};
 
     if (!publisherId || !apiToken) {
-      console.log("❌ Credenciais Awin inválidas");
+      console.log("❌ Credenciais Awin inválidas.");
       return;
     }
 
-    const url =
-      `https://api.awin.com/publishers/${publisherId}/programmes`;
+    const programasUrl = `https://api.awin.com/publishers/${publisherId}/programmes`;
 
-    const response = await axios.get(url, {
+    const programasResp = await axios.get(programasUrl, {
       headers: {
         Authorization: `Bearer ${apiToken}`
       },
@@ -4343,20 +4335,66 @@ async function testarAwinProdutos() {
       timeout: 15000
     });
 
-    console.log(
-      "🧪 AWIN PROGRAMAS:",
-      JSON.stringify(response.data, null, 2)
-    );
+    const programas = Array.isArray(programasResp.data)
+      ? programasResp.data
+      : [];
+
+    const programa = programas.find(p =>
+      String(p.name || "").toLowerCase().includes(String(loja || "kabum").toLowerCase())
+    ) || programas[0];
+
+    if (!programa) {
+      console.log("❌ Nenhum programa Awin encontrado.");
+      return;
+    }
+
+    console.log("✅ Programa Awin escolhido:", {
+      id: programa.id,
+      nome: programa.name,
+      status: programa.status,
+      linkStatus: programa.linkStatus,
+      clickThroughUrl: programa.clickThroughUrl
+    });
+
+    // Por enquanto, vamos criar uma oferta teste com o link afiliado base.
+    // Depois vamos trocar isso por feed real de produtos.
+    const oferta = {
+      titulo: `Ofertas ${programa.name}`,
+      nome: `Ofertas ${programa.name}`,
+      precoAtual: "",
+      precoAntigo: "",
+      cupom: "",
+      avisoCupom: "Confira as ofertas disponíveis na loja.",
+      parcelamento: "",
+      link: programa.clickThroughUrl,
+      linkAfiliado: programa.clickThroughUrl,
+      imagem: programa.logoUrl || "",
+      marketplace: "awin",
+      loja: programa.name,
+      categoria: "eletronicos",
+      clienteId: "admin",
+      status: "pendente",
+      criadoEm: new Date().toLocaleString("pt-BR", {
+        timeZone: "America/Sao_Paulo"
+      })
+    };
+
+    fila.push(oferta);
+    salvarFila();
+
+    console.log("🤖 Nova oferta Awin adicionada na fila:", {
+      titulo: oferta.titulo,
+      loja: oferta.loja,
+      link: oferta.link
+    });
 
   } catch (e) {
-
-    console.log(
-      "❌ erro teste awin:",
-      e.response?.data || e.message
-    );
-
+    console.log("❌ erro farejador Awin:", e.response?.data || e.message);
   }
 }
+
+
+// ================= FAREJADOR SHOPEE =================
 
 async function buscarOfertasShopee() {
   const configShopee = integracoesPorCliente["admin"]?.shopee;
@@ -4684,13 +4722,11 @@ setInterval(() => {
       ultimoLogPausaFila = agora;
     }
 
-    return;
-  }
+return;
+}
 
+farejarAwin();
 
 setInterval(() => {
-  processarFila();
-}, 10 * 1000);
-
   processarFila();
 }, 10 * 1000);
