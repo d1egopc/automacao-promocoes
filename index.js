@@ -1089,12 +1089,16 @@ if (!config.marketplaces.awin) {
     limitePorRodada: 10,
     descontoMinimo: 0,
     precoMinimo: 0,
-    loja: "kabum"
+    loja: "kabum",
+    feedFile: "awin_kabum.csv.gz"
   };
 
   salvarConfig();
   console.log("✅ Awin recriada no config");
 }
+
+config.marketplaces.awin.feedFile = "awin_kabum.csv.gz";
+
 
 console.log("🧪 CONFIG AWIN ATUAL:", config.marketplaces?.awin);
 
