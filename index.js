@@ -2614,7 +2614,7 @@ const resp = await axios.post(
 
     salvarFila();
 
-   } catch (e) {
+  } catch (e) {
     console.log(
       "❌ erro farejador Awin:",
       JSON.stringify({
@@ -2624,6 +2624,8 @@ const resp = await axios.post(
       })
     );
   }
+}
+
 
 // ================= FAREJADOR AMAZON =================
 
