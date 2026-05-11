@@ -2544,14 +2544,12 @@ async function farejarAwin() {
 
     const url = `https://api.awin.com/publisher/${publisherId}/promotions`;
 
-    const resp = await axios.post(
-   url,
-   {
+const resp = await axios.post(
+  url,
+  {
     filters: {
       membership: "joined",
-      status: "active",
-      type: "all",
-      regionCodes: ["BR"]
+      status: "active"
     },
     pagination: {
       page: 1,
@@ -2563,12 +2561,9 @@ async function farejarAwin() {
       Authorization: `Bearer ${apiToken}`,
       "Content-Type": "application/json"
     },
-    params: {
-      accessToken: apiToken
-    },
     timeout: 15000
-   }
- );
+  }
+);
 
     const promocoes = Array.isArray(resp.data) ? resp.data : [];
 
