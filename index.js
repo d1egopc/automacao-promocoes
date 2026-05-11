@@ -75,7 +75,7 @@ awin: {
   intervaloFarejoMinutos: 30,
   limitePorRodada: 5,
   descontoMinimo: 0,
-  precoMinimo: 20,
+  precoMinimo: 0,
   loja: "kabum",
   feedFile: "awin_kabum.csv"
 },
@@ -2556,6 +2556,8 @@ async function farejarAwin() {
     });
 
     console.log("📦 Produtos no feed Awin:", produtos.length);
+    
+    console.log("🧪 PRIMEIRO PRODUTO AWIN:", produtos[0]);
 
     let adicionadas = 0;
 
