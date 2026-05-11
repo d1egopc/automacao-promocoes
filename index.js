@@ -70,10 +70,7 @@ magalu: {
 },
 
 awin: {
-  ativo: false,
-  publisherId: "",
-  apiToken: "",
-  loja: "",
+  ativo: true,
   intervaloFarejoMinutos: 30,
   limitePorRodada: 10
 },
@@ -2192,6 +2189,8 @@ async function buscarProdutosAliExpressAPI(termo) {
   return Array.isArray(lista) ? lista : [lista];
 }
 
+// ================= FAREJADOR ALIEXPRESS =================
+
 async function farejarAliExpress() {
   try {
     if (!config.marketplaces?.aliexpress?.ativo) {
@@ -2497,6 +2496,103 @@ async function farejarMagalu() {
     console.log("❌ erro farejador Magalu:", e.message);
   }
 }
+
+// ================= FAREJADOR AWIN =================
+async function farejarAwin() {
+  try {
+    console.log("🛒 Farejando ofertas Awin...");
+
+    if (!config.marketplaces?.awin?.ativo) {
+      console.log("⏸ Awin desativada. Farejador ignorado.");
+      return;
+    }
+
+    const clienteId = "admin";
+    const integracao = integracoesPorCliente?.[clienteId]?.awin;
+
+    if (!integracao?.credenciais) {
+      console.log("⏸ Awin não configurada.");
+      return;
+    }
+
+    const { publisherId, apiToken } = integracao.credenciais;
+
+    if (!publisherId || !apiToken) {
+      console.log("❌ Credenciais Awin inválidas.");
+      return;
+    }
+
+    const limitePorRodada =
+      config.marketplaces?.awin?.limitePorRodada || 5;
+
+    const url = `https://api.awin.com/publishers/${publisherId}/promotions`;
+
+    const resp = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${apiToken}`
+      },
+      params: {
+        relationship: "joined"
+      },
+      timeout: 15000
+    });
+
+    const promocoes = Array.isArray(resp.data) ? resp.data : [];
+
+    console.log("📦 Promoções Awin encontradas:", promocoes.length);
+
+    let adicionadas = 0;
+
+    for (const promo of promocoes) {
+      if (adicionadas >= limitePorRodada) break;
+
+      const titulo =
+        promo.title ||
+        promo.description ||
+        promo.advertiser?.name ||
+        "Oferta Awin";
+
+      const link =
+        promo.url ||
+        promo.trackingLink ||
+        promo.clickThroughUrl ||
+        "";
+
+      if (!link) continue;
+
+      const oferta = {
+        id: Date.now() + "-" + Math.random().toString(36).slice(2),
+        titulo,
+        precoAtual: "",
+        precoAntigo: "",
+        cupom: promo.voucherCode || promo.code || "",
+        avisoCupom: promo.voucherCode ? "Use o cupom no carrinho." : "",
+        parcelamento: "",
+        imagem: "",
+        link,
+        linkAfiliado: link,
+        marketplace: "Awin",
+        categoria: "Promoções",
+        status: "pendente",
+        clienteId,
+        criadoEm: new Date().toISOString()
+      };
+
+      fila.push(oferta);
+      adicionadas++;
+
+      console.log("✅ Oferta Awin adicionada na fila:", titulo);
+    }
+
+    salvarFila();
+
+    console.log(`🚀 Awin finalizado. Adicionadas: ${adicionadas}`);
+  } catch (e) {
+    console.log("❌ erro farejador Awin:", e.message);
+  }
+}
+
+// ================= FAREJADOR AMAZON =================
 
 async function importarAmazon(url, config) {
   if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
@@ -4672,6 +4768,22 @@ setTimeout(() => {
     }
   }, (config.marketplaces?.magalu?.intervaloFarejoMinutos || 30) * 60 * 1000);
 }, 25 * 60 * 1000);
+
+setTimeout(() => {
+  setInterval(() => {
+    const cfg = config.marketplaces?.awin;
+
+    if (
+      config.automacaoAtiva &&
+      cfg?.ativo &&
+      podeRodarAgora()
+    ) {
+      console.log("🟪 Rodando farejador Awin...");
+      farejarAwin();
+    }
+  }, (config.marketplaces?.awin?.intervaloFarejoMinutos || 30) * 60 * 1000);
+}, 2 * 60 * 1000);
+
 
 let ultimoLogPausaFila = 0;
 
