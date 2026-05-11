@@ -2693,6 +2693,7 @@ async function farejarAwin() {
     console.log("🧪 PRIMEIRO PRODUTO AWIN:", produtos[0]);
 
     let adicionadas = 0;
+    let ofertasEncontradas = [];
 
     for (const item of produtos) {
       if (adicionadas >= limitePorRodada) break;
@@ -2730,15 +2731,32 @@ async function farejarAwin() {
         criadoEm: new Date().toISOString()
       };
 
-      fila.push(oferta);
+       ofertasEncontradas.push(oferta);
       adicionadas++;
 
-      console.log("✅ Produto Awin adicionado na fila:", titulo);
+      console.log("✅ Produto Awin encontrado:", titulo);
+    }
+
+    const ofertasFiltradas = aplicarFiltrosUniversais(
+      ofertasEncontradas,
+      {
+        preferirEnvioBrasil: false,
+        bloquearSemImagem: true,
+        bloquearSemPreco: true,
+      }
+    );
+
+    console.log(
+      `🧠 Ofertas Awin após filtros universais: ${ofertasFiltradas.length}`
+    );
+
+    for (const oferta of ofertasFiltradas) {
+      fila.push(oferta);
     }
 
     salvarFila();
 
-    console.log(`🚀 Awin finalizado. Produtos adicionados: ${adicionadas}`);
+    console.log(`🚀 Awin finalizado. Produtos adicionados: ${ofertasFiltradas.length}`);
   } catch (e) {
     console.log("❌ erro farejador Awin:", e.message);
   }
