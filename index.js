@@ -2434,12 +2434,24 @@ if (palavrasBloqueadas.some(p => tituloLower.includes(p))) {
   console.log("🚫 Produto bloqueado:", titulo);
   continue;
 }
-       
+        
         if (!link) continue;
-        if (!precoNumero || !Number.isFinite(precoNumero)) continue;
-        if (precoNumero < 20) continue;
-        if (desconto < 10) continue;
+if (!precoNumero || !Number.isFinite(precoNumero)) continue;
 
+const precoMinimo = Number(cfg.precoMinimo) || 0;
+const descontoMinimo = Number(cfg.descontoMinimo) || 0;
+
+const descontoMinimoInternacional =
+  Number(cfg.descontoMinimoInternacional) || descontoMinimo;
+
+const minimoDescontoAplicado =
+  tipo === "🌍"
+    ? descontoMinimoInternacional
+    : descontoMinimo;
+
+if (precoNumero < precoMinimo) continue;
+if (desconto < minimoDescontoAplicado) continue;
+         
         const linkCurto = await encurtarUrl(link);
 
         const novaOferta = {
@@ -2449,7 +2461,7 @@ if (palavrasBloqueadas.some(p => tituloLower.includes(p))) {
           precoAtual,
           precoAntigo: precoAntigo || "",
           cupom: "",
-          avisoCupom: desconto >= 10 ? `${Math.round(desconto)}% OFF no AliExpress.` : "",
+          avisoCupom: desconto >= minimoDescontoAplicado ? `${Math.round(desconto)}% OFF no AliExpress.` : "",
           parcelamento: "",
           link: linkCurto,
           linkAfiliado: linkCurto,
