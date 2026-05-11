@@ -3764,25 +3764,7 @@ app.get("/destinos/:id", (req, res) => {
   });
 });
 
-
-app.post("/test-send/:id", async (req, res) => {
-  const { id } = req.params;
-  const sock = sessoes[id];
-  const destinos =
-  destinosPorSessao[id] ||
-  config?.destinosPorSessao?.[id] ||
-  [];
-
-  if (!sock) return res.status(400).json({ erro: "Sem sessão" });
-
-  if (statusSessao[id] !== "open") {
-    return res.status(400).json({ erro: "WhatsApp não conectado" });
-  }
-
-  if (!destinos.length) {
-    return res.status(400).json({ erro: "Nenhum destino selecionado" });
-  }
-
+app.post("/test-send-todos", async (req, res) => {
   const mensagem =
     req.body?.mensagem ||
     "🧪 TESTE " + new Date().toLocaleTimeString();
@@ -3792,66 +3774,86 @@ app.post("/test-send/:id", async (req, res) => {
 
   const resultados = [];
 
-  for (const destino of destinos) {
-    try {
-      if (imagemFinal) {
-        await sock.sendMessage(destino, {
-          image: { url: imagemFinal },
-          caption: mensagem
-        });
+  for (const id of Object.keys(sessoes)) {
+    const sock = sessoes[id];
 
-        resultados.push({
-          destino,
-          ok: true,
-          tipo: "imagem_com_legenda",
-          imagemEnviada: imagemFinal
-        });
-      } else {
-        await sock.sendMessage(destino, {
-          text: mensagem
-        });
+    if (!sock || statusSessao[id] !== "open") {
+      resultados.push({
+        sessao: id,
+        ok: false,
+        erro: "Sessão offline"
+      });
+      continue;
+    }
 
+    const destinos =
+      destinosPorSessao[id] ||
+      config?.destinosPorSessao?.[id] ||
+      [];
+
+    for (const destino of destinos) {
+      try {
+        if (imagemFinal) {
+          await sock.sendMessage(destino, {
+            image: { url: imagemFinal },
+            caption: mensagem
+          });
+
+          resultados.push({
+            sessao: id,
+            destino,
+            ok: true,
+            tipo: "imagem_com_legenda"
+          });
+        } else {
+          await sock.sendMessage(destino, {
+            text: mensagem
+          });
+
+          resultados.push({
+            sessao: id,
+            destino,
+            ok: true,
+            tipo: "texto"
+          });
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      } catch (e) {
         resultados.push({
+          sessao: id,
           destino,
-          ok: true,
-          tipo: "texto"
+          ok: false,
+          erro: e.message
         });
       }
+    }
+  }
 
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+  if (typeof enviarTelegram === "function") {
+    try {
+      await enviarTelegram(
+        {
+          ...req.body,
+          imagem: imagemFinal,
+          marketplace: req.body.marketplace || req.body.loja || ""
+        },
+        mensagem
+      );
+
+      resultados.push({
+        destino: "telegram",
+        ok: true,
+        tipo: "telegram"
+      });
     } catch (e) {
       resultados.push({
-        destino,
+        destino: "telegram",
         ok: false,
         erro: e.message
       });
     }
   }
-
-if (typeof enviarTelegram === "function") {
-  try {
-    await enviarTelegram(
-      {
-        ...req.body,
-        imagem: imagemFinal,
-        marketplace: req.body.marketplace || req.body.loja || ""
-      },
-      mensagem
-    );
-
-    resultados.push({
-      destino: "telegram",
-      ok: true,
-      tipo: "telegram"
-    });
-  } catch (e) {
-    resultados.push({
-      destino: "telegram",
-      ok: false,
-      erro: e.message
-    });
-  }
-}
 
   return res.json({
     ok: true,
