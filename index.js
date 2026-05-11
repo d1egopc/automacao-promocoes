@@ -2539,35 +2539,20 @@ async function farejarAwin() {
       return;
     }
 
-    const limitePorRodada =
-      config.marketplaces?.awin?.limitePorRodada || 5;
+   const limitePorRodada =
+   config.marketplaces?.awin?.limitePorRodada || 5;
 
-    const url = `https://api.awin.com/publisher/${publisherId}/promotions`;
+  const url = `https://api.awin.com/publishers/${publisherId}/programmes`;
 
-const resp = await axios.post(
-  url,
-  {
-    filters: {
-      membership: "joined",
-      status: "active",
-      type: "all"
-    },
-    pagination: {
-      page: 1,
-      pageSize: limitePorRodada
-    }
+  const resp = await axios.get(url, {
+  headers: {
+    Authorization: `Bearer ${apiToken}`
   },
-  {
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-      "Content-Type": "application/json"
-    },
-    params: {
-      accessToken: apiToken
-    },
-    timeout: 15000
-  }
-);
+  params: {
+    relationship: "joined"
+  },
+  timeout: 15000
+});
 
     const promocoes = Array.isArray(resp.data) ? resp.data : [];
 
@@ -4820,8 +4805,8 @@ setTimeout(() => {
       console.log("🟪 Rodando farejador Awin...");
       farejarAwin();
     }
-  }, (config.marketplaces?.awin?.intervaloFarejoMinutos || 30) * 60 * 1000);
-}, 2 * 60 * 1000);
+  }, (config.marketplaces?.awin?.intervaloFarejoMinutos || 2 ) * 60 * 1000);
+}, 1 * 60 * 1000);
 
 
 let ultimoLogPausaFila = 0;
