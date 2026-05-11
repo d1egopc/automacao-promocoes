@@ -4392,7 +4392,7 @@ async function farejarAwin() {
     console.log("❌ erro farejador Awin:", e.response?.data || e.message);
   }
 }
-
+}
 
 // ================= FAREJADOR SHOPEE =================
 
@@ -4725,8 +4725,7 @@ setInterval(() => {
 return;
 }
 
-farejarAwin();
-
 setInterval(() => {
   processarFila();
 }, 10 * 1000);
+
