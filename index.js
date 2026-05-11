@@ -4811,7 +4811,7 @@ setTimeout(() => {
       farejarAwin();
     }
   }, (config.marketplaces?.awin?.intervaloFarejoMinutos || 30) * 60 * 1000);
-},  * 60 * 1000);
+}, 1 * 60 * 1000);
 
 
 let ultimoLogPausaFila = 0;
