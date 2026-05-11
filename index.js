@@ -4301,7 +4301,7 @@ if (adicionadasNestaRodada >= limitePorRodada) {
     console.log("❌ erro farejador Amazon:", e.message);
   }
 }
-}
+
 // ================= FAREJADOR AWIN =================
 
 async function farejarAwin() {
@@ -4392,7 +4392,7 @@ async function farejarAwin() {
     console.log("❌ erro farejador Awin:", e.response?.data || e.message);
   }
 }
-}
+
 
 // ================= FAREJADOR SHOPEE =================
 
