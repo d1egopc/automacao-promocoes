@@ -4301,7 +4301,7 @@ if (adicionadasNestaRodada >= limitePorRodada) {
     console.log("❌ erro farejador Amazon:", e.message);
   }
 }
-
+}
 // ================= FAREJADOR AWIN =================
 
 async function farejarAwin() {
