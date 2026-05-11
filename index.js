@@ -2,6 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
+const csv = require("csv-parser");
 
 
 if (!fs.existsSync("/data")) {
@@ -72,7 +73,11 @@ magalu: {
 awin: {
   ativo: true,
   intervaloFarejoMinutos: 30,
-  limitePorRodada: 10
+  limitePorRodada: 5,
+  descontoMinimo: 0,
+  precoMinimo: 20,
+  loja: "kabum",
+  feedFile: "awin_kabum.csv"
 },
 
 aliexpress: {
@@ -2515,111 +2520,94 @@ async function farejarMagalu() {
 }
 
 // ================= FAREJADOR AWIN =================
+
 async function farejarAwin() {
   try {
-    console.log("🛒 Farejando ofertas Awin...");
+    console.log("🛒 Farejando produtos reais Awin KaBuM...");
 
-    if (!config.marketplaces?.awin?.ativo) {
+    const cfg = config.marketplaces?.awin || {};
+
+    if (!cfg.ativo) {
       console.log("⏸ Awin desativada. Farejador ignorado.");
       return;
     }
 
-    const clienteId = "admin";
-    const integracao = integracoesPorCliente?.[clienteId]?.awin;
+    const limitePorRodada = cfg.limitePorRodada || 5;
+    const precoMinimo = cfg.precoMinimo || 20;
+    const feedFile = cfg.feedFile || "awin_kabum.csv";
 
-    if (!integracao?.credenciais) {
-      console.log("⏸ Awin não configurada.");
+    const caminhoFeed = path.join(__dirname, feedFile);
+
+    if (!fs.existsSync(caminhoFeed)) {
+      console.log("❌ Feed Awin não encontrado:", caminhoFeed);
       return;
     }
 
-    const { publisherId, apiToken } = integracao.credenciais;
+    const produtos = [];
 
-    if (!publisherId || !apiToken) {
-      console.log("❌ Credenciais Awin inválidas.");
-      return;
-    }
+    await new Promise((resolve, reject) => {
+      fs.createReadStream(caminhoFeed)
+        .pipe(csv())
+        .on("data", (row) => {
+          produtos.push(row);
+        })
+        .on("end", resolve)
+        .on("error", reject);
+    });
 
-   const limitePorRodada =
-   config.marketplaces?.awin?.limitePorRodada || 5;
-
-  const url = `https://api.awin.com/publishers/${publisherId}/programmes`;
-
-  const resp = await axios.get(url, {
-  headers: {
-    Authorization: `Bearer ${apiToken}`
-  },
-  params: {
-    relationship: "joined"
-  },
-  timeout: 15000
-});
-
-    const promocoes = Array.isArray(resp.data) ? resp.data : [];
-
-    console.log("📦 Promoções Awin encontradas:", promocoes.length);
+    console.log("📦 Produtos no feed Awin:", produtos.length);
 
     let adicionadas = 0;
 
-    for (const promo of promocoes) {
+    for (const item of produtos) {
       if (adicionadas >= limitePorRodada) break;
 
-      const titulo =
-        promo.title ||
-        promo.description ||
-        promo.advertiser?.name ||
-        "Oferta Awin";
+      const titulo = item.product_name || item.name || "";
+      const preco = Number(String(item.search_price || "0").replace(",", "."));
+      const imagem = item.merchant_image_url || item.aw_image_url || "";
+      const link = item.aw_deep_link || item.product_url || item.merchant_deep_link || "";
+      const categoria = item.merchant_category || "KaBuM";
 
-     if (produtoRepetidoRecentemente(titulo, 24)) {
-    console.log("⏭️ Awin repetido ignorado:", titulo);
-    continue;
-  }
+      if (!titulo || !link) continue;
+      if (preco < precoMinimo) continue;
 
-  const link =
-    promo.url ||
-    promo.trackingLink ||
-    promo.clickThroughUrl ||
-    "";
-
-      if (!link) continue;
+      if (produtoRepetidoRecentemente(titulo, 24)) {
+        console.log("⏭️ Awin repetido ignorado:", titulo);
+        continue;
+      }
 
       const oferta = {
         id: Date.now() + "-" + Math.random().toString(36).slice(2),
         titulo,
-        precoAtual: "",
+        precoAtual: preco ? `R$ ${preco.toFixed(2).replace(".", ",")}` : "",
         precoAntigo: "",
-        cupom: promo.voucherCode || promo.code || "",
-        avisoCupom: promo.voucherCode ? "Use o cupom no carrinho." : "",
+        cupom: "",
+        avisoCupom: "",
         parcelamento: "",
-        imagem: "",
+        imagem,
         link,
         linkAfiliado: link,
         marketplace: "Awin",
-        categoria: "Promoções",
+        loja: "KaBuM",
+        categoria,
         status: "pendente",
-        clienteId,
+        clienteId: "admin",
         criadoEm: new Date().toISOString()
       };
 
       fila.push(oferta);
       adicionadas++;
 
-      console.log("✅ Oferta Awin adicionada na fila:", titulo);
+      console.log("✅ Produto Awin adicionado na fila:", titulo);
     }
 
     salvarFila();
 
+    console.log(`🚀 Awin finalizado. Produtos adicionados: ${adicionadas}`);
   } catch (e) {
-    console.log(
-      "❌ erro farejador Awin:",
-      JSON.stringify({
-        status: e.response?.status,
-        data: e.response?.data,
-        message: e.message
-      })
-    );
+    console.log("❌ erro farejador Awin:", e.message);
   }
 }
-
 
 // ================= FAREJADOR AMAZON =================
 
