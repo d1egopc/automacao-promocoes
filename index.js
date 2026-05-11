@@ -4359,6 +4359,7 @@ if (!config.marketplaces?.amazon?.ativo) {
     console.log("🐶 Farejando ofertas Amazon...");
     
     let adicionadasNestaRodada = 0;
+    let ofertasEncontradas = [];
     
     const limitePorRodada =
     config.marketplaces?.amazon?.limitePorRodada || 5;
@@ -4514,8 +4515,7 @@ novaOferta.criadoEm = novaOferta.criadoEm || new Date().toLocaleString("pt-BR", 
   timeZone: "America/Sao_Paulo"
 });
 
-  fila.push(novaOferta);
-  salvarFila();
+ofertasEncontradas.push(novaOferta);
 
 adicionadasNestaRodada++;
 
@@ -4547,6 +4547,29 @@ if (adicionadasNestaRodada >= limitePorRodada) {
         setTimeout(r, 4000 + Math.random() * 5000)
       );
     }
+
+const ofertasFiltradas = aplicarFiltrosUniversais(
+  ofertasEncontradas,
+  {
+    preferirEnvioBrasil: false,
+    bloquearSemImagem: true,
+    bloquearSemPreco: true,
+  }
+);
+
+console.log(
+  `🧠 Ofertas Amazon após filtros universais: ${ofertasFiltradas.length}`
+);
+
+for (const oferta of ofertasFiltradas) {
+  fila.push(oferta);
+}
+
+salvarFila();
+
+console.log(`✅ Amazon finalizado. Adicionadas: ${adicionadasNestaRodada}`);
+
+
   } catch (e) {
     console.log("❌ erro farejador Amazon:", e.message);
   }
