@@ -4114,6 +4114,8 @@ async function iniciarWhatsApp(id) {
   });
 }
 
+// ================= FAREJADOR MERCADO LIVRE =================
+
 async function farejarMercadoLivre() {
   try {
 
@@ -4348,6 +4350,8 @@ function ofertaJaExiste(oferta) {
     );
   });
 }
+
+// ================= FAREJADOR AMAZON =================
 
 async function farejarAmazon() {
   try {
@@ -4696,6 +4700,9 @@ async function buscarOfertasShopee() {
   return data?.data?.productOfferV2?.nodes || [];
 }
 
+
+// ================= FAREJADOR SHOPEE =================
+
 async function farejarShopee() {
   try {
 
@@ -4715,6 +4722,7 @@ if (!config.marketplaces?.shopee?.ativo) {
     console.log(`🔎 ${produtos.length} produtos Shopee encontrados`);
 
     let adicionadasNestaRodada = 0;
+    let ofertasEncontradas = [];
     
     const limitePorRodada =
     config.marketplaces?.shopee?.limitePorRodada || 10;
@@ -4780,9 +4788,7 @@ if (nota > 0 && nota < 4.5) continue;
 
         if (jaExiste) continue;
 
-        fila.push(novaOferta);
-
-        salvarFila();
+        ofertasEncontradas.push(novaOferta);
 
         adicionadasNestaRodada++;
 
@@ -4800,6 +4806,28 @@ if (nota > 0 && nota < 4.5) continue;
         await new Promise(r =>
           setTimeout(r, 3000 + Math.random() * 4000)
         );
+
+   const ofertasFiltradas = aplicarFiltrosUniversais(
+  ofertasEncontradas,
+  {
+    preferirEnvioBrasil: false,
+    bloquearSemImagem: true,
+    bloquearSemPreco: true,
+  }
+);
+
+console.log(
+  `🧠 Ofertas Shopee após filtros universais: ${ofertasFiltradas.length}`
+);
+
+for (const oferta of ofertasFiltradas) {
+  fila.push(oferta);
+}
+
+salvarFila();
+
+console.log(`✅ Shopee finalizado. Adicionadas: ${adicionadasNestaRodada}`);   
+
 
       } catch (e) {
         console.log("❌ erro item Shopee:", e.message);
