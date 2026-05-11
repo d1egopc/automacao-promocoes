@@ -1946,44 +1946,21 @@ async function importarAliExpress(urlEntrada, config = {}) {
     aviso: "AliExpress não retornou dados pela API. Preços extraídos do link quando disponíveis."
   };
 }
-  
-let titulo =
-  produto.product_title ||
-  produto.title ||
-  produto.productTitle ||
-  "Produto AliExpress";
+    
+    let titulo =
+      produto.product_title ||
+      produto.title ||
+      produto.productTitle ||
+      "Produto AliExpress";
 
-const chaveRepeticao = gerarChaveProduto(
-  titulo + " aliexpress"
-);
-
-if (produtoRepetidoRecentemente(chaveRepeticao, 48)) {
-  console.log("⏭️ AliExpress repetido ignorado:", titulo);
-  continue;
-}
-
-let link =
-  produto.promotion_link ||
-  produto.product_detail_url ||
-  produto.product_url ||
-  produto.target_sale_url ||
-  "";
-
-const linkLimpo = String(link).split("?")[0];
-
-if (produtoRepetidoRecentemente(linkLimpo, 48)) {
-  console.log("⏭️ Link AliExpress repetido ignorado:", linkLimpo);
-  continue;
-}
-
-let imagem =
-  produto.product_main_image_url ||
-  produto.product_small_image_urls?.string?.[0] ||
-  produto.product_small_image_urls?.[0] ||
-  produto.image_url ||
-  "";
-
-let precoAtual =
+    let imagem =
+      produto.product_main_image_url ||
+      produto.product_small_image_urls?.string?.[0] ||
+      produto.product_small_image_urls?.[0] ||
+      produto.image_url ||
+      "";
+     
+ let precoAtual =
   produto.target_sale_price ||
   produto.sale_price ||
   produto.target_app_sale_price ||
@@ -1993,23 +1970,22 @@ let precoAtual =
   "";
 
 precoAtual = String(precoAtual).trim();
-
 console.log("✅ ALI PREÇO ESCOLHIDO:", precoAtual);
-
-let precoAntigo =
+   
+   
+  let precoAntigo =
   produto.target_original_price ||
   produto.original_price ||
   "";
 
 precoAntigo = String(precoAntigo).trim();
-
 console.log("✅ ALI PREÇO ANTIGO ESCOLHIDO:", precoAntigo);
 
 if (precoAntigo === precoAtual) {
   precoAntigo = "";
 }
 
-     console.log("💰 ALI PREÇOS RAW:", {
+   console.log("💰 ALI PREÇOS RAW:", {
   target_sale_price: produto.target_sale_price,
   sale_price: produto.sale_price,
   app_sale_price: produto.app_sale_price,
