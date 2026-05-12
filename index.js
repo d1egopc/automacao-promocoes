@@ -176,13 +176,13 @@ function carregarConfig() {
         ...configSalva
       };
 
-function normalizarTexto(texto = "") {
-  return String(texto)
+function normalizarDestino(valor = "") {
+  return String(valor || "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\w\s]/g, "")
-    .replace(/\s+/g, " ")
+    .replace(/&/g, "e")
+    .replace(/[^a-z0-9]/g, "")
     .trim();
 }
 
@@ -240,42 +240,59 @@ function normalizarTexto(valor = "") {
     .trim();
 }
 
+// ================= HELPERS DESTINOS INTELIGENTES =================
+
+function normalizarDestino(valor = "") {
+  return String(valor || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, "e")
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+}
+
 function destinoAceitaOferta(destino, oferta) {
   if (!destino?.ativo) return false;
 
-  const marketplaceOferta = normalizarTexto(oferta.marketplace || oferta.loja || "");
-  const categoriaOferta = normalizarTexto(oferta.categoria || "");
+  const marketplaceOferta = normalizarDestino(oferta.marketplace || oferta.loja || "");
+  const categoriaOferta = normalizarDestino(oferta.categoria || "");
 
-  const marketplacesDestino = (destino.marketplaces || []).map(normalizarTexto);
-  const categoriasDestino = (destino.categorias || []).map(normalizarTexto);
+  const marketplacesDestino = (destino.marketplaces || []).map(normalizarDestino);
+  const categoriasDestino = (destino.categorias || []).map(normalizarDestino);
 
   console.log("🧪 DESTINO DEBUG:", {
-  nome: destino.nome,
-  tipo: destino.tipo,
-  marketplaceOferta,
-  categoriaOferta,
-  marketplacesDestino,
-  categoriasDestino
+    nome: destino.nome,
+    tipo: destino.tipo,
+    marketplaceOferta,
+    categoriaOferta,
+    marketplaceOk:
+      !marketplacesDestino.length ||
+      marketplacesDestino.includes(marketplaceOferta),
+    categoriaOk:
+      !categoriasDestino.length ||
+      categoriasDestino.includes(categoriaOferta) ||
+      categoriaOferta === marketplaceOferta
   });
 
   if (
-  marketplacesDestino.length &&
-  marketplaceOferta &&
-  !marketplacesDestino.includes(marketplaceOferta)
-) {
-  return false;
-}
+    marketplacesDestino.length &&
+    marketplaceOferta &&
+    !marketplacesDestino.includes(marketplaceOferta)
+  ) {
+    return false;
+  }
 
-if (
-  categoriasDestino.length &&
-  categoriaOferta &&
-  categoriaOferta !== marketplaceOferta &&
-  !categoriasDestino.includes(categoriaOferta)
-) {
-  return false;
-}
+  if (
+    categoriasDestino.length &&
+    categoriaOferta &&
+    categoriaOferta !== marketplaceOferta &&
+    !categoriasDestino.includes(categoriaOferta)
+  ) {
+    return false;
+  }
 
-return true;
+  return true;
 }
 
 function destinoDentroHorario(destino) {
@@ -526,10 +543,16 @@ const todosDestinos = Array.isArray(config.destinosInteligentes)
   ? config.destinosInteligentes
   : [];
 
-console.log(
-  "🧪 TODOS DESTINOS CONFIG COMPLETO:",
-  JSON.stringify(todosDestinos, null, 2)
-);
+console.log("🧪 DESTINOS RESUMO:", todosDestinos.map(d => ({
+  nome: d.nome,
+  tipo: d.tipo,
+  ativo: d.ativo,
+  conexaoId: d.conexaoId,
+  grupos: d.gruposWhatsapp?.length || 0,
+  telegram: d.telegramDestinos?.length || 0,
+  marketplaces: d.marketplaces,
+  categorias: d.categorias?.length || 0
+})));
 
 const destinosInteligentes =
   todosDestinos.filter(destino =>
