@@ -2571,32 +2571,34 @@ async function farejarAliExpress() {
 
    const buscasBrasil = [
 
-  "pen drive brasil",
-
   "hd exos brasil",
   "hd seagate exos brasil",
   "hd 16tb brasil",
   "hd 18tb brasil",
 
-  "ssd samsung brasil",
-  "ssd kingston brasil",
-  "ssd crucial brasil",
+  "aspirador portatil brasil",
+  "mini aspirador brasil",
+  "promo brasil",
 
   "ssd 1tb brasil",
   "ssd 2tb brasil",
   "ssd nvme 1tb brasil",
   "ssd nvme brasil",
+  "envio brasil",
 
   "rx 6600 brasil",
   "rx 7600 brasil",
   "rx 7900 brasil",
+  "entrega brasil",
 
   "rtx 4060 brasil",
   "rtx 4070 brasil",
+  "fullview brasil",
 
   "placa de video brasil",
   "kit xeon brasil",
   "mini pc brasil",
+  "top venda brasil",
 
   "mouse gamer brasil",
   "teclado mecanico brasil",
@@ -2611,6 +2613,7 @@ async function farejarAliExpress() {
 
   "smartwatch brasil",
   "camera wifi brasil",
+  "mais vendido brasil",
 
   "multimetro digital brasil",
   "estacao de solda brasil",
