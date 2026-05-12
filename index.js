@@ -318,6 +318,19 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
 
     if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
+  console.log("📤 TENTANDO ENVIAR DESTINO:", {
+  destino: destino.nome,
+  tipo: destino.tipo,
+  conexaoId: destino.conexaoId,
+  gruposWhatsapp: destino.gruposWhatsapp,
+  sessaoExiste: !!sessoes[destino.conexaoId],
+  statusSessao: statusSessao[destino.conexaoId],
+  titulo: oferta.titulo || oferta.nome,
+  marketplace: oferta.marketplace,
+  categoria: oferta.categoria
+  });
+
+
       const sock = sessoes[destino.conexaoId];
 
       if (!sock) {
