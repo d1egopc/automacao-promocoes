@@ -3753,7 +3753,7 @@ app.post("/conectar", async (req, res) => {
 
   if (!id) return res.status(400).json({ erro: "ID obrigatório" });
 
-  if (!sessoes[id]) iniciarWhatsApp(id);
+  iniciarWhatsApp(id, false);
 
   return res.json({
     ok: true,
@@ -4058,11 +4058,34 @@ async function enviarTelegram(oferta, mensagem) {
 
 // ================= FUNCÃO WHATSAPP =================
 
-async function iniciarWhatsApp(id) {
-  console.log("🚀 Iniciando sessão:", id);
+async function iniciarWhatsApp(id, force = false) {
+  console.log("🚀 Iniciando sessão:", id, "force:", force);
+
+  const statusAtual = statusSessao[id];
+
+  if (!force && sessoes[id] && ["connecting", "qr", "open", "reconnecting"].includes(statusAtual)) {
+    console.log("⏸ Sessão já em andamento, não vou recriar:", id, statusAtual);
+    return sessoes[id];
+  }
+
+  if (!force && qrCodes[id] && statusAtual === "qr") {
+    console.log("⏸ QR já ativo, não vou recriar:", id);
+    return sessoes[id] || null;
+  }
+
+  if (force && sessoes[id]) {
+    try {
+      console.log("♻️ Forçando reinício da sessão:", id);
+      sessoes[id].end?.();
+    } catch (e) {
+      console.log("⚠️ Erro ao encerrar sessão antiga:", e.message);
+    }
+
+    delete sessoes[id];
+    qrCodes[id] = null;
+  }
 
   statusSessao[id] = "connecting";
-  qrCodes[id] = null;
   reconectando[id] = false;
 
   const { state, saveCreds } = await useMultiFileAuthState("/data/auth_" + id);
@@ -4085,20 +4108,20 @@ async function iniciarWhatsApp(id) {
     const { connection, qr, lastDisconnect } = update;
 
     if (qr) {
-      console.log("🔥 QR RECEBIDO");
+      console.log("🔥 QR RECEBIDO:", id);
       qrCodes[id] = await qrcode.toDataURL(qr);
       statusSessao[id] = "qr";
     }
 
     if (connection === "open") {
-  console.log("✅ WHATSAPP CONECTADO:", id);
+      console.log("✅ WHATSAPP CONECTADO:", id);
 
-  statusSessao[id] = "open";
-  qrCodes[id] = null;
-  reconectando[id] = false;
+      statusSessao[id] = "open";
+      qrCodes[id] = null;
+      reconectando[id] = false;
 
-  setTimeout(() => carregarGruposSessao(id), 3000);
-}
+      setTimeout(() => carregarGruposSessao(id), 3000);
+    }
 
     if (connection === "close") {
       const motivo = lastDisconnect?.error?.output?.statusCode;
@@ -4130,6 +4153,8 @@ async function iniciarWhatsApp(id) {
       }
     }
   });
+
+  return sock;
 }
 
 // ================= FAREJADOR MERCADO LIVRE =================
