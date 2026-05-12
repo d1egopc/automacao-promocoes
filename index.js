@@ -1476,6 +1476,78 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
   });
 });
 
+// ================= AWIN DEEP LINK MANUAL =================
+
+async function gerarDeepLinkAwin(urlOriginal, clienteId = "admin") {
+  const integracao = integracoesPorCliente[clienteId]?.awin;
+  const credenciais = integracao?.credenciais || {};
+
+  const { publisherId, apiToken, advertiserId } = credenciais;
+
+  if (!publisherId || !apiToken || !advertiserId) {
+    throw new Error("Awin sem publisherId, apiToken ou advertiserId configurado.");
+  }
+
+  const response = await axios.post(
+    `https://api.awin.com/publishers/${publisherId}/linkbuilder/generate`,
+    {
+      advertiserId: Number(advertiserId),
+      destinationUrl: urlOriginal
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        "Content-Type": "application/json"
+      },
+      timeout: 15000
+    }
+  );
+
+  return (
+    response.data?.shortUrl ||
+    response.data?.url ||
+    response.data?.link ||
+    response.data?.trackingLink ||
+    response.data?.clickUrl ||
+    ""
+  );
+}
+
+app.post("/awin/gerar-link", async (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    const { url } = req.body;
+
+    if (!url) {
+      return res.status(400).json({
+        ok: false,
+        erro: "URL obrigatória"
+      });
+    }
+
+    const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
+
+    if (!linkAfiliado) {
+      return res.status(500).json({
+        ok: false,
+        erro: "Awin não retornou link afiliado"
+      });
+    }
+
+    return res.json({
+      ok: true,
+      urlOriginal: url,
+      linkAfiliado
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: "Erro ao gerar deep link Awin",
+      detalhe: e.response?.data || e.message
+    });
+  }
+});
+
 // ================= HELPERS DE IMPORTAÇÃO =================
 
 function htmlDecode(str) {
