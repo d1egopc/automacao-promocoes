@@ -1621,6 +1621,10 @@ if (pixMatch?.[1]) {
   avisoPagamento = "À vista no PIX";
 }
 
+const precosValidos = precosNumericos.filter((p) => {
+  return p.numero > 80 && p.numero < 100000;
+});
+
 if (!precoAtual && precosValidos.length) {
   const unicos = [];
 
