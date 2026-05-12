@@ -1578,6 +1578,18 @@ function pontuarOferta(oferta = {}, opcoes = {}) {
 function removerDuplicadas(ofertas = []) {
   const vistas = new Set();
 
+for (const existente of fila || []) {
+  const linkExistente = String(existente.linkAfiliado || existente.link || "")
+    .split("?")[0]
+    .toLowerCase()
+    .trim();
+
+  const tituloExistente = normalizarTexto(existente.titulo || existente.nome || "");
+
+  if (linkExistente) vistas.add(linkExistente);
+  if (tituloExistente) vistas.add(tituloExistente);
+}
+
   return ofertas.filter((oferta) => {
     const link = String(oferta.linkAfiliado || oferta.link || "")
       .split("?")[0]
@@ -2387,8 +2399,7 @@ async function farejarAliExpress() {
 ];
 
 const buscasInternacionais = [
-  "data traveler",
-
+ 
   "hd exos",
   "seagate exos",
   "hd 16tb",
@@ -2406,6 +2417,7 @@ const buscasInternacionais = [
   "rx 6600",
   "rx 7600",
   "rx 7900",
+  "rx 590",
 
   "rtx 4060",
   "rtx 4070",
