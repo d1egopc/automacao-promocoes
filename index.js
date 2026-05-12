@@ -1613,7 +1613,14 @@ const precosNumericos = precosEncontrados
   })
   .filter(p => Number.isFinite(p.numero) && p.numero > 0);
 
-const pixMatch = html.match(/R\$\s?[\d\.]+,\d{2}\s*À vista no PIX/i);
+const pixRegex = /(R\$\s?[\d\.]+,\d{2})[\s\S]{0,80}À vista no PIX/i;
+
+const pixMatch = html.match(pixRegex);
+
+if (pixMatch?.[1]) {
+  precoAtual = pixMatch[1].trim();
+  avisoPagamento = "À vista no PIX";
+}
 
 if (pixMatch) {
   const precoPixTexto = pixMatch[0]
