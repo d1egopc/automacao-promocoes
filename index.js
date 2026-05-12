@@ -631,23 +631,29 @@ if (parcelamento) {
 💳 ${parcelamento}`;
 }
 
-if (cupom) {
+if (avisoCupom) {
+
+  mensagem += `
+
+${avisoCupom}`;
+
+} else if (cupom) {
+
   mensagem += `
 
 🎟️ Cupom: ${cupom}`;
 
-  if (avisoCupom) {
-    mensagem += `
-🎫 ${avisoCupom}`;
-  }
 } else if (marketplace === "shopee") {
+
   mensagem += `
 
 🎟️ Verifique se há cupons disponíveis na página`;
+
 } else if (marketplace === "aliexpress") {
+
   mensagem += `
 
-⚠️ Preço pode variar por moedas, cupom, variação ou impostos. Confira o valor final.`;
+⚠️ Compra internacional pode ter variação de valor, impostos ou acréscimos. Confira o valor final antes de pagar.`;
 }
 
 mensagem += `
