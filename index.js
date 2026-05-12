@@ -4824,7 +4824,7 @@ adicionadasNestaRodada++;
 
 if (adicionadasNestaRodada >= limitePorRodada) {
   console.log("🛑 Limite Amazon por rodada atingido");
-  return;
+  break;
 }
 
   console.log("🤖 Nova oferta Amazon:", {
