@@ -1571,21 +1571,21 @@ const precosNumericos = precosEncontrados
         .trim()
     );
 
-    return {
-      texto,
-      numero
-    };
+    return { texto, numero };
   })
   .filter(p => Number.isFinite(p.numero) && p.numero > 0);
 
-if (precosNumericos.length) {
-  const ordenados = [...precosNumericos].sort((a, b) => a.numero - b.numero);
+const precosValidos = precosNumericos.filter((p) => {
+  return p.numero > 80 && p.numero < 100000;
+});
 
-  precoAtual = ordenados[0].texto;
+if (precosValidos.length) {
+  const menor = [...precosValidos].sort((a, b) => a.numero - b.numero)[0];
+  const maior = [...precosValidos].sort((a, b) => b.numero - a.numero)[0];
 
-  const maior = [...precosNumericos].sort((a, b) => b.numero - a.numero)[0];
+  precoAtual = menor.texto;
 
-  if (maior && maior.numero > ordenados[0].numero) {
+  if (maior && maior.numero > menor.numero) {
     precoAntigo = maior.texto;
   }
 }
