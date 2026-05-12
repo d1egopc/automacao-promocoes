@@ -1283,11 +1283,11 @@ const marketplaceRules = {
     allowed: ["promoterId"]
   },
 
-  awin: {
-  nome: "Awin",
-  required: ["publisherId", "apiToken", "loja"],
-  allowed: ["publisherId", "apiToken", "loja"]
-}
+    awin: {
+    nome: "Awin",
+    required: ["publisherId", "apiToken", "loja"],
+    allowed: ["publisherId", "apiToken", "loja", "advertiserId"]
+  }
 };
 
 function limparCredencial(config, allowed) {
