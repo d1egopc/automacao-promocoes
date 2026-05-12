@@ -1635,6 +1635,7 @@ console.log("🧪 PREÇOS VALIDOS:", precosValidos.slice(0, 20));
   precoAtual,
   precoAntigo,
   avisoPagamento,
+  avisoCupom: "💳 Com desconto à vista no PIX.",
   imagem
   });
 
