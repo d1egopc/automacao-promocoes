@@ -1576,11 +1576,22 @@ const precosNumericos = precosEncontrados
   })
   .filter(p => Number.isFinite(p.numero) && p.numero > 0);
 
+const pixMatch = html.match(/R\$\s?[\d\.]+,\d{2}\s*À vista no PIX/i);
+
+if (pixMatch) {
+  const precoPixTexto = pixMatch[0]
+    .replace(/À vista no PIX/i, "")
+    .trim();
+
+  precoAtual = precoPixTexto;
+  avisoPagamento = "À vista no PIX";
+}
+
 const precosValidos = precosNumericos.filter((p) => {
   return p.numero > 80 && p.numero < 100000;
 });
 
-if (precosValidos.length) {
+if (!precoAtual && precosValidos.length) {
   const menor = [...precosValidos].sort((a, b) => a.numero - b.numero)[0];
   const maior = [...precosValidos].sort((a, b) => b.numero - a.numero)[0];
 
