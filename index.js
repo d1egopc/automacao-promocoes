@@ -631,29 +631,23 @@ if (parcelamento) {
 💳 ${parcelamento}`;
 }
 
-if (avisoCupom) {
-
-  mensagem += `
-
-${avisoCupom}`;
-
-} else if (cupom) {
-
+if (cupom) {
   mensagem += `
 
 🎟️ Cupom: ${cupom}`;
 
+  if (avisoCupom) {
+    mensagem += `
+🎫 ${avisoCupom}`;
+  }
 } else if (marketplace === "shopee") {
-
   mensagem += `
 
 🎟️ Verifique se há cupons disponíveis na página`;
-
 } else if (marketplace === "aliexpress") {
-
   mensagem += `
 
-⚠️ Compra internacional pode ter variação de valor, impostos ou acréscimos. Confira o valor final antes de pagar.`;
+⚠️ Preço pode variar por moedas, cupom, variação ou impostos. Confira o valor final.`;
 }
 
 mensagem += `
@@ -974,7 +968,17 @@ app.post("/fila/:index/enviar-agora", async (req, res) => {
 
   oferta.status = "pendente";
 
+  
   // joga a oferta escolhida para o começo da fila
+  
+  console.log("📦 ENTRANDO NA FILA AMAZON:", {
+  titulo: oferta.titulo || oferta.nome,
+  preco: oferta.precoAtual || oferta.preco,
+  imagem: !!oferta.imagem,
+  marketplace: oferta.marketplace,
+  categoria: oferta.categoria
+  });
+
   fila.splice(index, 1);
   fila.unshift(oferta);
   salvarFila();
@@ -1619,11 +1623,14 @@ const precosNumericos = precosEncontrados
   })
   .filter(p => Number.isFinite(p.numero) && p.numero > 0);
 
-const pixRegex = /(R\$\s?[\d\.]+,\d{2})[\s\S]{0,120}À vista no PIX/i;
-const pixMatch = html.match(pixRegex);
+const pixMatch = html.match(/R\$\s?[\d\.]+,\d{2}\s*À vista no PIX/i);
 
-if (pixMatch?.[1]) {
-  precoAtual = pixMatch[1].trim();
+if (pixMatch) {
+  const precoPixTexto = pixMatch[0]
+    .replace(/À vista no PIX/i, "")
+    .trim();
+
+  precoAtual = precoPixTexto;
   avisoPagamento = "À vista no PIX";
 }
 
