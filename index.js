@@ -231,10 +231,12 @@ let ultimoEnvioFila = 0;
 // ================= HELPERS DESTINOS INTELIGENTES =================
 
 function normalizarTexto(valor = "") {
-  return String(valor)
+  return String(valor || "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, "e")
+    .replace(/[^a-z0-9]/g, "")
     .trim();
 }
 
@@ -507,15 +509,14 @@ console.log("DESTINOS PARA ENVIO:", destinos);
 
 // ================= DESTINOS INTELIGENTES =================
 
-const todosDestinos = config.destinosInteligentes || [];
+const todosDestinos = Array.isArray(config.destinosInteligentes)
+  ? config.destinosInteligentes
+  : [];
 
-console.log("🧪 TODOS DESTINOS CONFIG:", todosDestinos.map(d => ({
-  nome: d.nome,
-  tipo: d.tipo,
-  ativo: d.ativo,
-  marketplaces: d.marketplaces,
-  telegramDestinos: d.telegramDestinos
-})));
+console.log(
+  "🧪 TODOS DESTINOS CONFIG COMPLETO:",
+  JSON.stringify(todosDestinos, null, 2)
+);
 
 const destinosInteligentes =
   todosDestinos.filter(destino =>
