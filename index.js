@@ -1554,6 +1554,7 @@ app.post("/awin/gerar-link", async (req, res) => {
 
 let precoAtual = "";
 let precoAntigo = "";
+let avisoPagamento = "";
 
 const precosEncontrados = [
   ...html.matchAll(/R\$\s?[\d\.]+,\d{2}/g)
@@ -1583,9 +1584,21 @@ if (precosValidos.length) {
   const menor = [...precosValidos].sort((a, b) => a.numero - b.numero)[0];
   const maior = [...precosValidos].sort((a, b) => b.numero - a.numero)[0];
 
-  precoAtual = menor.texto;
+  let precoBase = menor.numero;
 
-  if (maior && maior.numero > menor.numero) {
+  const matchPix = html.match(/PIX\s+com\s+(\d+)%\s+de\s+desconto/i);
+
+  if (matchPix?.[1]) {
+    const descontoPix = Number(matchPix[1]);
+    const precoPix = precoBase * (1 - descontoPix / 100);
+
+    precoAtual = `R$ ${precoPix.toFixed(2).replace(".", ",")}`;
+    avisoPagamento = `À vista no PIX com ${descontoPix}% de desconto`;
+  } else {
+    precoAtual = menor.texto;
+  }
+
+  if (maior && maior.numero > precoBase) {
     precoAntigo = maior.texto;
   }
 }
@@ -1608,6 +1621,7 @@ if (precosValidos.length) {
   titulo,
   precoAtual,
   precoAntigo,
+  avisoPagamento,
   imagem
   });
 
