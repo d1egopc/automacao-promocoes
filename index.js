@@ -1552,15 +1552,43 @@ app.post("/awin/gerar-link", async (req, res) => {
 
     // ================= EXTRAIR PREÇO =================
 
-    let precoAtual = "";
+let precoAtual = "";
+let precoAntigo = "";
 
-    const precoMatch =
-      html.match(/R\$\s?([\d\.,]+)/i) ||
-      html.match(/price["']?\s*:\s*["']?([\d\.,]+)/i);
+const precosEncontrados = [
+  ...html.matchAll(/R\$\s?[\d\.]+,\d{2}/g)
+]
+  .map(m => m[0])
+  .map(p => p.replace(/\s+/g, " ").trim());
 
-    if (precoMatch?.[1]) {
-      precoAtual = `R$ ${precoMatch[1]}`;
-    }
+const precosNumericos = precosEncontrados
+  .map((texto) => {
+    const numero = Number(
+      texto
+        .replace("R$", "")
+        .replace(/\./g, "")
+        .replace(",", ".")
+        .trim()
+    );
+
+    return {
+      texto,
+      numero
+    };
+  })
+  .filter(p => Number.isFinite(p.numero) && p.numero > 0);
+
+if (precosNumericos.length) {
+  const ordenados = [...precosNumericos].sort((a, b) => a.numero - b.numero);
+
+  precoAtual = ordenados[0].texto;
+
+  const maior = [...precosNumericos].sort((a, b) => b.numero - a.numero)[0];
+
+  if (maior && maior.numero > ordenados[0].numero) {
+    precoAntigo = maior.texto;
+  }
+}
 
     // ================= LINK AFILIADO =================
 
@@ -1573,14 +1601,15 @@ app.post("/awin/gerar-link", async (req, res) => {
       });
     }
 
-    return res.json({
-      ok: true,
-      urlOriginal: url,
-      linkAfiliado,
-      titulo,
-      precoAtual,
-      imagem
-    });
+  return res.json({
+  ok: true,
+  urlOriginal: url,
+  linkAfiliado,
+  titulo,
+  precoAtual,
+  precoAntigo,
+  imagem
+  });
 
   } catch (e) {
     return res.status(500).json({
