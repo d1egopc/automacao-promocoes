@@ -1575,6 +1575,31 @@ function pontuarOferta(oferta = {}, opcoes = {}) {
   return score;
 }
 
+function removerDuplicadas(ofertas = []) {
+  const vistas = new Set();
+
+  return ofertas.filter((oferta) => {
+    const link = String(oferta.linkAfiliado || oferta.link || "")
+      .split("?")[0]
+      .toLowerCase()
+      .trim();
+
+    const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
+
+    const chave = link || titulo;
+
+    if (!chave) return true;
+
+    if (vistas.has(chave)) {
+      console.log("⏭️ Duplicada removida pelo filtro universal:", oferta.titulo || oferta.nome);
+      return false;
+    }
+
+    vistas.add(chave);
+    return true;
+  });
+}
+
 function ofertaPassaNosFiltros(oferta = {}, opcoes = {}) {
   const bloquearSemImagem = opcoes.bloquearSemImagem ?? true;
   const bloquearSemPreco = opcoes.bloquearSemPreco ?? true;
@@ -1591,7 +1616,7 @@ function ofertaPassaNosFiltros(oferta = {}, opcoes = {}) {
 }
 
 function aplicarFiltrosUniversais(ofertas = [], opcoes = {}) {
-  return ofertas
+  return removerDuplicadas(ofertas)
     .map((oferta) => ({
       ...oferta,
       score: pontuarOferta(oferta, opcoes),
