@@ -1525,6 +1525,45 @@ app.post("/awin/gerar-link", async (req, res) => {
       });
     }
 
+    const response = await axios.get(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36"
+      },
+      timeout: 15000
+    });
+
+    const html = response.data || "";
+
+    // ================= EXTRAIR TÍTULO =================
+
+    const titulo =
+      html.match(/<title>(.*?)<\/title>/i)?.[1]
+        ?.replace(/\s+/g, " ")
+        ?.trim() ||
+      "Produto importado de Awin";
+
+    // ================= EXTRAIR IMAGEM =================
+
+    const imagem =
+      html.match(/property="og:image"\s*content="([^"]+)"/i)?.[1] ||
+      html.match(/<img[^>]+src="([^"]+)"/i)?.[1] ||
+      "";
+
+    // ================= EXTRAIR PREÇO =================
+
+    let precoAtual = "";
+
+    const precoMatch =
+      html.match(/R\$\s?([\d\.,]+)/i) ||
+      html.match(/price["']?\s*:\s*["']?([\d\.,]+)/i);
+
+    if (precoMatch?.[1]) {
+      precoAtual = `R$ ${precoMatch[1]}`;
+    }
+
+    // ================= LINK AFILIADO =================
+
     const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
 
     if (!linkAfiliado) {
@@ -1537,12 +1576,16 @@ app.post("/awin/gerar-link", async (req, res) => {
     return res.json({
       ok: true,
       urlOriginal: url,
-      linkAfiliado
+      linkAfiliado,
+      titulo,
+      precoAtual,
+      imagem
     });
+
   } catch (e) {
     return res.status(500).json({
       ok: false,
-      erro: "Erro ao gerar deep link Awin",
+      erro: "Erro ao importar produto Awin",
       detalhe: e.response?.data || e.message
     });
   }
