@@ -1592,27 +1592,29 @@ const precosValidos = precosNumericos.filter((p) => {
 });
 
 if (!precoAtual && precosValidos.length) {
-  const menor = [...precosValidos].sort((a, b) => a.numero - b.numero)[0];
-  const maior = [...precosValidos].sort((a, b) => b.numero - a.numero)[0];
+  const unicos = [];
 
-  let precoBase = menor.numero;
-
-  const matchPix = html.match(/PIX\s+com\s+(\d+)%\s+de\s+desconto/i);
-
-  if (matchPix?.[1]) {
-    const descontoPix = Number(matchPix[1]);
-    const precoPix = precoBase * (1 - descontoPix / 100);
-
-    precoAtual = `R$ ${precoPix.toFixed(2).replace(".", ",")}`;
-    avisoPagamento = `À vista no PIX com ${descontoPix}% de desconto`;
-  } else {
-    precoAtual = menor.texto;
+  for (const preco of precosValidos) {
+    if (!unicos.some(p => p.numero === preco.numero)) {
+      unicos.push(preco);
+    }
   }
 
-  if (maior && maior.numero > precoBase) {
-    precoAntigo = maior.texto;
+  const ordenados = [...unicos].sort((a, b) => a.numero - b.numero);
+
+  precoAtual = ordenados[0]?.texto || "";
+
+  const possivelAntigo = [...unicos]
+    .filter(p => p.numero > (ordenados[0]?.numero || 0))
+    .sort((a, b) => b.numero - a.numero)[0];
+
+  if (possivelAntigo) {
+    precoAntigo = possivelAntigo.texto;
   }
 }
+
+console.log("🧪 PREÇOS KABUM EXTRAÍDOS:", precosEncontrados.slice(0, 20));
+console.log("🧪 PREÇOS VALIDOS:", precosValidos.slice(0, 20));
 
     // ================= LINK AFILIADO =================
 
