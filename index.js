@@ -2571,50 +2571,93 @@ async function farejarAliExpress() {
 
    const buscasBrasil = [
 
-  "pen drive brasil",
+"mini projetor brasil",
+"projetor hy300 brasil",
+"projetor magcubic brasil",
 
-  "hd exos brasil",
-  "hd seagate exos brasil",
-  "hd 16tb brasil",
-  "hd 18tb brasil",
+"smartwatch amoled brasil",
+"smartwatch masculino brasil",
+"smartwatch iwo brasil",
 
-  "ssd samsung brasil",
-  "ssd kingston brasil",
-  "ssd crucial brasil",
+"fone bluetooth brasil",
+"fone lenovo brasil",
+"fone qcy brasil",
+"fone gamer brasil",
 
-  "ssd 1tb brasil",
-  "ssd 2tb brasil",
-  "ssd nvme 1tb brasil",
-  "ssd nvme brasil",
+"teclado mecanico brasil",
+"mouse gamer brasil",
+"kit gamer rgb brasil",
 
-  "rx 6600 brasil",
-  "rx 7600 brasil",
-  "rx 7900 brasil",
+"ssd nvme brasil",
+"ssd kingston brasil",
+"ssd 1tb brasil",
 
-  "rtx 4060 brasil",
-  "rtx 4070 brasil",
+"memoria ram gamer brasil",
+"memoria ram ddr4 brasil",
+"memoria ram rgb brasil",
 
-  "placa de video brasil",
-  "kit xeon brasil",
-  "mini pc brasil",
+"mini pc brasil",
+"mini pc ryzen brasil",
 
-  "mouse gamer brasil",
-  "teclado mecanico brasil",
-  "teclado gamer brasil",
+"camera wifi brasil",
+"camera ip brasil",
+"camera seguranca brasil",
 
-  "fone bluetooth brasil",
-  "caixinha de som brasil",
-  "speaker bluetooth brasil",
+"led rgb brasil",
+"fita led brasil",
+"painel led gamer brasil",
 
-  "webcam brasil",
-  "face cam brasil",
+"carregador turbo brasil",
+"carregador 120w brasil",
+"power bank brasil",
 
-  "smartwatch brasil",
-  "camera wifi brasil",
+"caixa de som bluetooth brasil",
+"caixa de som rgb brasil",
 
-  "multimetro digital brasil",
-  "estacao de solda brasil",
-  "fonte bancada brasil"
+"barbeador eletrico brasil",
+"maquina acabamento brasil",
+"maquina cortar cabelo brasil",
+
+"drone brasil",
+"drone 4k brasil",
+
+"controle gamesir brasil",
+"controle bluetooth brasil",
+
+"retro game brasil",
+"videogame retro brasil",
+
+"tablet android brasil",
+"tablet teclast brasil",
+
+"central multimidia brasil",
+"multimidia android brasil",
+
+"aspirador portatil brasil",
+"mini aspirador brasil",
+
+"gadget cozinha brasil",
+"utensilio cozinha brasil",
+
+"organizadores casa brasil",
+"organizacao cozinha brasil",
+
+"iphone acessórios brasil",
+"capinha iphone brasil",
+"pelicula iphone brasil",
+
+"suporte celular carro brasil",
+"suporte magsafe brasil",
+
+"casa inteligente brasil",
+"automacao residencial brasil"
+
+"promo brasil"
+"envio brasil"
+"entrega brasil"
+"fullview brasil"
+"top venda brasil"
+"mais vendido brasil"
 ];
 
 const buscasInternacionais = [
