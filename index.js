@@ -1613,27 +1613,13 @@ const precosNumericos = precosEncontrados
   })
   .filter(p => Number.isFinite(p.numero) && p.numero > 0);
 
-const pixRegex = /(R\$\s?[\d\.]+,\d{2})[\s\S]{0,80}À vista no PIX/i;
-
+const pixRegex = /(R\$\s?[\d\.]+,\d{2})[\s\S]{0,120}À vista no PIX/i;
 const pixMatch = html.match(pixRegex);
 
 if (pixMatch?.[1]) {
   precoAtual = pixMatch[1].trim();
   avisoPagamento = "À vista no PIX";
 }
-
-if (pixMatch) {
-  const precoPixTexto = pixMatch[0]
-    .replace(/À vista no PIX/i, "")
-    .trim();
-
-  precoAtual = precoPixTexto;
-  avisoPagamento = "À vista no PIX";
-}
-
-const precosValidos = precosNumericos.filter((p) => {
-  return p.numero > 80 && p.numero < 100000;
-});
 
 if (!precoAtual && precosValidos.length) {
   const unicos = [];
