@@ -261,19 +261,6 @@ function destinoAceitaOferta(destino, oferta) {
   const marketplacesDestino = (destino.marketplaces || []).map(normalizarDestino);
   const categoriasDestino = (destino.categorias || []).map(normalizarDestino);
 
-  console.log("🧪 DESTINO DEBUG:", {
-    nome: destino.nome,
-    tipo: destino.tipo,
-    marketplaceOferta,
-    categoriaOferta,
-    marketplaceOk:
-      !marketplacesDestino.length ||
-      marketplacesDestino.includes(marketplaceOferta),
-    categoriaOk:
-      !categoriasDestino.length ||
-      categoriasDestino.includes(categoriaOferta) ||
-      categoriaOferta === marketplaceOferta
-  });
 
   if (
     marketplacesDestino.length &&
@@ -335,18 +322,6 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
 
     if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
-  console.log("📤 TENTANDO ENVIAR DESTINO:", {
-  destino: destino.nome,
-  tipo: destino.tipo,
-  conexaoId: destino.conexaoId,
-  gruposWhatsapp: destino.gruposWhatsapp,
-  sessaoExiste: !!sessoes[destino.conexaoId],
-  statusSessao: statusSessao[destino.conexaoId],
-  titulo: oferta.titulo || oferta.nome,
-  marketplace: oferta.marketplace,
-  categoria: oferta.categoria
-  });
-
 
       const sock = sessoes[destino.conexaoId];
 
@@ -394,18 +369,6 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
       (destino.telegramDestinos || []).includes(String(t.chatId))
       );
        
-       console.log("🧪 TELEGRAM DEBUG:", {
-       destinoNome: destino.nome,
-       destinoTipo: destino.tipo,
-       telegramDestinosDoDestino: destino.telegramDestinos,
-       telegramsConfigurados: telegrams.map(t => ({
-       nome: t.nome,
-       ativo: t.ativo,
-       chatId: t.chatId ? "OK" : "SEM CHATID",
-       botToken: t.botToken ? "OK" : "SEM TOKEN"
-       })),
-       selecionados: selecionados.map(t => t.nome)
-     });
 
    if (!selecionados.length) {
    console.log("⚠️ Nenhum Telegram selecionado para este destino:", destino.nome);
@@ -4725,9 +4688,6 @@ if (!config.marketplaces?.amazon?.ativo) {
     continue;
     }
    
-      console.log("🧪 AMAZON HTML:", html.length);
-      console.log("🧪 TEM ASIN?", html.includes("/dp/"));
-
       const linksExtraidos = [
   ...html.matchAll(/href="([^"]*\/dp\/[A-Z0-9]{10}[^"]*)"/g),
   ...html.matchAll(/href="([^"]*\/gp\/product\/[A-Z0-9]{10}[^"]*)"/g)
@@ -4751,9 +4711,6 @@ if (!config.marketplaces?.amazon?.ativo) {
   );
 
 const links = [...new Set(linksExtraidos)].slice(0, 3);
-
-console.log("🧪 AMAZON LINKS:", links);
-console.log(`🔎 ${termo}: ${links.length} produtos Amazon`);
 
 for (const link of links) {
   try {
