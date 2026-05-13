@@ -164,6 +164,8 @@ function salvarConfig() {
   }
 }
 
+// ================= FUNÇÃO CARREGA CONFIG =================
+
 function carregarConfig() {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
@@ -173,20 +175,21 @@ function carregarConfig() {
 
       config = {
         ...config,
-        ...configSalva
+        ...configSalva,
+        marketplaces: {
+          ...config.marketplaces,
+          ...(configSalva.marketplaces || {})
+        }
       };
 
-function normalizarDestino(valor = "") {
-  return String(valor || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/&/g, "e")
-    .replace(/[^a-z0-9]/g, "")
-    .trim();
+      console.log("✅ Config carregada");
+    }
+  } catch (e) {
+    console.error("❌ ERRO AO CARREGAR CONFIG:", e.message);
+  }
 }
 
-// ================= FILTROS NORMALIZA TEXO =================
+// ================= FILTROS OFERTA JA EXISTE =================
 
 function ofertaJaExiste(novaOferta) {
   const tituloNovo = normalizarTexto(novaOferta.titulo || novaOferta.nome);
@@ -268,13 +271,6 @@ function produtoSuspeito(oferta = {}) {
   }
 
   return false;
-}
-
-      console.log("✅ Config carregada");
-    }
-  } catch (e) {
-    console.error("❌ ERRO AO CARREGAR CONFIG:", e.message);
-  }
 }
 
 const crypto = require("crypto");
@@ -1788,14 +1784,6 @@ function extrairJsonLd(html) {
 
 
 // ================= FILTROS UNIVERSAIS DE OFERTAS =================
-
-function normalizarTexto(valor) {
-  return String(valor || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
-}
 
 function pontuarOferta(oferta = {}, opcoes = {}) {
   let score = 0;
@@ -4696,24 +4684,6 @@ if (
   }
 }
 
-function ofertaJaExiste(oferta) {
-  const linkNovo = String(
-    oferta.link || oferta.linkAfiliado || ""
-  ).trim();
-
-  return fila.some(item => {
-    const linkItem = String(
-      item.link || item.linkAfiliado || ""
-    ).trim();
-
-    return (
-      linkNovo &&
-      linkItem &&
-      linkItem === linkNovo
-    );
-  });
-}
-
 // ================= FAREJADOR AMAZON =================
 
 async function farejarAmazon() {
@@ -5215,122 +5185,88 @@ function podeRodarAgora() {
 app.listen(PORT, () => {
   console.log("🔥 API ONLINE NA PORTA " + PORT);
 
-setTimeout(() => {
-  console.log("🧪 TESTE DIRETO ALIEXPRESS");
-  farejarAliExpress();
-}, 15000);
+  setTimeout(() => {
+    console.log("🔄 Reconectando sessões WhatsApp automaticamente...");
 
-setTimeout(() => {
-  console.log("🚀 Iniciando Shopee após boot...");
-  farejarShopee();
-}, 5 * 60 * 1000);
+    const sessoesParaReconectar = Object.keys(config?.destinosPorSessao || {});
 
-setTimeout(() => {
-  console.log("🚀 Iniciando Amazon após boot...");
-  farejarAmazon();
-}, 10 * 60 * 1000);
+    if (!sessoesParaReconectar.includes("sessao1")) {
+      sessoesParaReconectar.push("sessao1");
+    }
 
-setTimeout(() => {
-  console.log("🔄 Reconectando sessões WhatsApp automaticamente...");
+    sessoesParaReconectar.forEach((id, index) => {
+      setTimeout(() => {
+        console.log("🚀 Reconectando sessão:", id);
+        iniciarWhatsApp(id);
+      }, 3000 + index * 4000);
+    });
 
-  const sessoesParaReconectar = Object.keys(config?.destinosPorSessao || {});
+  }, 3000);
+});
 
-  if (!sessoesParaReconectar.includes("sessao1")) {
-    sessoesParaReconectar.push("sessao1");
+// ================= ORQUESTRADOR GLOBAL DE MARKETPLACES =================
+
+const ordemMarketplaces = [
+  "shopee",
+  "amazon",
+  "aliexpress",
+  "awin",
+  "magalu"
+];
+
+const farejadoresMarketplaces = {
+  shopee: farejarShopee,
+  amazon: farejarAmazon,
+  aliexpress: farejarAliExpress,
+  awin: farejarAwin,
+  magalu: farejarMagalu
+};
+
+let indiceMarketplaceAtual = 0;
+let farejadorRodando = false;
+
+async function rodarProximoMarketplace() {
+  if (farejadorRodando) return;
+  if (!config.automacaoAtiva) return;
+  if (!podeRodarAgora()) return;
+
+  const marketplace = ordemMarketplaces[indiceMarketplaceAtual];
+  indiceMarketplaceAtual =
+    (indiceMarketplaceAtual + 1) % ordemMarketplaces.length;
+
+  const cfg = config.marketplaces?.[marketplace];
+
+  if (!cfg?.ativo) {
+    console.log(`⏭️ ${marketplace} desativado. Pulando.`);
+    return;
   }
 
-  sessoesParaReconectar.forEach((id, index) => {
-    setTimeout(() => {
-      console.log("🚀 Reconectando sessão:", id);
-      iniciarWhatsApp(id);
-    }, 3000 + index * 4000);
-  });
+  const farejador = farejadoresMarketplaces[marketplace];
 
-}, 3000);
+  if (typeof farejador !== "function") {
+    console.log(`⚠️ Farejador não encontrado: ${marketplace}`);
+    return;
+  }
 
-}); 
- 
-setTimeout(() => {
-  setInterval(() => {
-    const cfg = config.marketplaces?.shopee;
+  try {
+    farejadorRodando = true;
+    console.log(`🎯 Rodada global: ${marketplace}`);
 
-    if (
-  config.automacaoAtiva &&
-  cfg?.ativo &&
-  podeRodarAgora()
-) {
-      console.log("⏱️ Rodando farejador Shopee...");
-      farejarShopee();
-    }
-  }, (config.marketplaces?.shopee?.intervaloFarejoMinutos || 10) * 60 * 1000);
-}, 5 * 60 * 1000);
+    await farejador();
 
-setTimeout(() => {
-  setInterval(() => {
-    const cfg = config.marketplaces?.amazon;
+    console.log(`✅ Rodada finalizada: ${marketplace}`);
+  } catch (e) {
+    console.log(`❌ Erro na rodada ${marketplace}:`, e.message);
+  } finally {
+    farejadorRodando = false;
+  }
+}
 
-    if (
-  config.automacaoAtiva &&
-  cfg?.ativo &&
-  podeRodarAgora()
-) {
-      console.log("⏱️ Rodando farejador Amazon...");
-      farejarAmazon();
-    }
-  }, (config.marketplaces?.amazon?.intervaloFarejoMinutos || 15) * 60 * 1000);
-}, 5 * 60 * 1000);
+setInterval(() => {
+  rodarProximoMarketplace();
+}, (config.intervaloFarejadorGlobalMinutos || 10) * 60 * 1000);
 
-setTimeout(() => {
-  setInterval(() => {
-    const cfg = config.marketplaces?.aliexpress;
-  console.log("🧪 CHECK ALIEXPRESS:", {
-  ativo: config.marketplaces?.aliexpress?.ativo,
-  automacao: config.automacaoAtiva,
-  podeRodar: podeRodarAgora(),
-  intervalo: config.marketplaces?.aliexpress?.intervaloFarejoMinutos
-  });
-
-    if (
-      config.automacaoAtiva &&
-      cfg?.ativo &&
-      podeRodarAgora()
-    ) {
-      console.log("⏱️ Rodando farejador AliExpress...");
-      farejarAliExpress();
-    }
-  }, (config.marketplaces?.aliexpress?.intervaloFarejoMinutos || 40) * 60 * 1000);
-},  10 * 60 * 1000);
-
-setTimeout(() => {
-  setInterval(() => {
-    const cfg = config.marketplaces?.magalu;
-
-    if (
-      config.automacaoAtiva &&
-      cfg?.ativo &&
-      podeRodarAgora()
-    ) {
-      console.log("🟦 Rodando farejador Magalu...");
-      farejarMagalu();
-    }
-  }, (config.marketplaces?.magalu?.intervaloFarejoMinutos || 30) * 60 * 1000);
-}, 25 * 60 * 1000);
-
-setTimeout(() => {
-  setInterval(() => {
-    const cfg = config.marketplaces?.awin;
-
-    if (
-      config.automacaoAtiva &&
-      cfg?.ativo &&
-      podeRodarAgora()
-    ) {
-      console.log("🟪 Rodando farejador Awin...");
-      farejarAwin();
-    }
-  }, (config.marketplaces?.awin?.intervaloFarejoMinutos || 30) * 60 * 1000);
-}, 1 * 60 * 1000);
-
+// ================= PROCESSADOR DA FILA =================
 
 let ultimoLogPausaFila = 0;
 
@@ -5345,11 +5281,6 @@ setInterval(() => {
 
     return;
   }
-
-
-setInterval(() => {
-  processarFila();
-}, 10 * 1000);
 
   processarFila();
 }, 10 * 1000);
