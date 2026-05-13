@@ -2660,7 +2660,7 @@ const linkLimpo = String(link).split("?")[0];
 
 if (produtoRepetidoRecentemente(linkLimpo, 48)) {
   console.log("⏭️ Link AliExpress repetido ignorado:", linkLimpo);
-  return;
+  continue;
 }
         const titulo =
           item.product_title ||
@@ -2673,7 +2673,7 @@ const chaveRepeticao =
 
 if (produtoRepetidoRecentemente(chaveRepeticao, 48)) {
   console.log("⏭️ AliExpress repetido ignorado:", titulo);
-  return;
+  continue;
 }
 
         const precoAtual =
