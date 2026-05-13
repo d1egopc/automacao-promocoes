@@ -2677,6 +2677,21 @@ if (produtoRepetidoRecentemente(chaveAli, 48)) {
   continue;
 }
 
+const titulo =
+  item.product_title ||
+  item.title ||
+  item.product_subject ||
+  "Produto AliExpress";
+
+const chaveRepeticao =
+  gerarChaveProduto(titulo + " aliexpress");
+
+if (produtoRepetidoRecentemente(chaveRepeticao, 48)) {
+  console.log("⏭️ AliExpress título repetido ignorado:", titulo);
+  continue;
+}
+
+
         const precoAtual =
           limparPreco(
             item.target_sale_price ||
