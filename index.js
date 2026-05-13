@@ -186,6 +186,8 @@ function normalizarDestino(valor = "") {
     .trim();
 }
 
+// ================= FILTROS NORMALIZA TEXO =================
+
 function ofertaJaExiste(novaOferta) {
   const tituloNovo = normalizarTexto(novaOferta.titulo || novaOferta.nome);
   const linkNovo = String(novaOferta.link || novaOferta.linkAfiliado || "").trim();
@@ -199,6 +201,73 @@ function ofertaJaExiste(novaOferta) {
 
     return false;
   });
+}
+
+// ================= FILTROS UNIVERSAIS DE OFERTAS =================
+
+function produtoSuspeito(oferta = {}) {
+  const texto = normalizarTexto(`
+    ${oferta.titulo || ""}
+    ${oferta.nome || ""}
+    ${oferta.descricao || ""}
+    ${oferta.categoria || ""}
+    ${oferta.marketplace || ""}
+  `);
+
+  const preco = Number(
+    String(oferta.precoAtual || oferta.preco || "")
+      .replace("R$", "")
+      .replace(/\./g, "")
+      .replace(",", ".")
+      .trim()
+  );
+
+  const suspeitos = [
+    "ssd externo 2026",
+    "1tb 2tb 4tb",
+    "alta velocidade original",
+    "super capacidade",
+    "expansao memoria",
+    "cartao memoria 2tb",
+    "pendrive 2tb",
+    "disco rigido externo 4tb",
+    "brand+",
+    "sem marca",
+    "generico"
+  ];
+
+  if (suspeitos.some(p => texto.includes(normalizarTexto(p)))) {
+    return true;
+  }
+
+  if (
+    texto.includes("ssd") &&
+    texto.includes("4tb") &&
+    preco > 0 &&
+    preco < 250
+  ) {
+    return true;
+  }
+
+  if (
+    texto.includes("ssd") &&
+    texto.includes("2tb") &&
+    preco > 0 &&
+    preco < 150
+  ) {
+    return true;
+  }
+
+  if (
+    texto.includes("pendrive") &&
+    texto.includes("2tb") &&
+    preco > 0 &&
+    preco < 100
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
       console.log("✅ Config carregada");
@@ -220,6 +289,9 @@ const app = express(); // 👈 MUITO IMPORTANTE ter isso
 
 const horarioInicio = 9;
 const horarioFim = 23;
+
+
+// ================= FUNÇÃO RODAR AGORA =================
 
 function podeRodarAgora() {
   return true;
@@ -1798,7 +1870,11 @@ function ofertaPassaNosFiltros(oferta = {}, opcoes = {}) {
   const bloquearSemImagem = opcoes.bloquearSemImagem ?? true;
   const bloquearSemPreco = opcoes.bloquearSemPreco ?? true;
 
-  if (bloquearSemImagem && !oferta.imagem) {
+  if (produtoSuspeito(oferta)) {
+  return { ok: false, motivo: "produto_suspeito" };
+}
+
+if (bloquearSemImagem && !oferta.imagem) {
     return { ok: false, motivo: "sem_imagem" };
   }
 
