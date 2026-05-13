@@ -1905,6 +1905,21 @@ if (texto.includes("premium")) score -= 8;
 if (texto.includes("generico")) score -= 15;
 if (texto.includes("replica")) score -= 20;
 
+const vendas = Number(oferta.sales || oferta.vendas || 0);
+const nota = Number(oferta.ratingStar || oferta.nota || 0);
+const comissao = Number(oferta.commissionRate || oferta.comissao || 0);
+
+if (vendas >= 5000) score += 35;
+else if (vendas >= 1000) score += 25;
+else if (vendas >= 100) score += 10;
+
+if (nota >= 4.8) score += 25;
+else if (nota >= 4.5) score += 15;
+else if (nota >= 4.0) score += 5;
+
+if (comissao >= 0.2) score += 20;
+else if (comissao >= 0.1) score += 10;
+
   if (opcoes.preferirEnvioBrasil && texto.includes("brasil")) {
     score += 30;
   }
