@@ -1871,6 +1871,40 @@ function pontuarOferta(oferta = {}, opcoes = {}) {
   if (oferta.cupom) score += 15;
   if (oferta.precoAntigo) score += 8;
 
+  const marcasFortes = [
+  "logitech",
+  "jbl",
+  "xiaomi",
+  "huawei",
+  "kingston",
+  "redragon",
+  "hyperx",
+  "aoc",
+  "lg",
+  "samsung",
+  "philips",
+  "cadence",
+  "elgin",
+  "tp-link",
+  "intelbras",
+  "dell"
+];
+
+if (
+  marcasFortes.some(marca =>
+    texto.includes(normalizarTexto(marca))
+  )
+) {
+  score += 25;
+}
+
+if (texto.includes("oficial")) score += 10;
+if (texto.includes("original")) score += 10;
+
+if (texto.includes("premium")) score -= 8;
+if (texto.includes("generico")) score -= 15;
+if (texto.includes("replica")) score -= 20;
+
   if (opcoes.preferirEnvioBrasil && texto.includes("brasil")) {
     score += 30;
   }
