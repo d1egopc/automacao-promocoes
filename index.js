@@ -251,7 +251,7 @@ function produtoSuspeito(oferta = {}) {
    "pendrive usb",
    "flash drive",
    "super armazenamento",
-   "armazenamento movel"                   
+   "armazenamento movel",                   
   ];
 
   if (suspeitos.some(p => texto.includes(normalizarTexto(p)))) {
