@@ -585,6 +585,14 @@ console.log("🧪 DESTINOS RESUMO:", todosDestinos.map(d => ({
   categorias: d.categorias?.length || 0
 })));
 
+console.log("🧪 OFERTA PARA ROTEAR:", {
+  titulo: oferta.titulo || oferta.nome,
+  marketplace: oferta.marketplace,
+  loja: oferta.loja,
+  categoria: oferta.categoria,
+  status: oferta.status
+});
+
 const destinosInteligentes =
   todosDestinos.filter(destino =>
     destinoAceitaOferta(destino, oferta)
