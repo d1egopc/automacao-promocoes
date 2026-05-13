@@ -236,7 +236,7 @@ function produtoSuspeito(oferta = {}) {
     "disco rigido externo 4tb",
     "brand+",
     "sem marca",
-    "generico"
+    "generico",
     "unidade flash",
     "usb 3.0",
     "memoria expandida",
