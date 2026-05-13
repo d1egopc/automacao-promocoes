@@ -285,9 +285,6 @@ function produtoSuspeito(oferta = {}) {
     return true;
   }
 
-  return false;
-}
-
 if (
   texto.includes("ssd") &&
   texto.includes("1tb") &&
@@ -321,6 +318,9 @@ if (
   preco < 250
 ) {
   return true;
+}
+
+return false;
 }
 
 const crypto = require("crypto");
