@@ -338,14 +338,17 @@ function destinoAceitaOferta(destino, oferta) {
     return false;
   }
 
-  if (
-    categoriasDestino.length &&
-    categoriaOferta &&
-    categoriaOferta !== marketplaceOferta &&
-    !categoriasDestino.includes(categoriaOferta)
-  ) {
+if (categoriasDestino.length && categoriaOferta) {
+  const categoriaOk =
+    categoriasDestino.includes(categoriaOferta) ||
+    categoriasDestino.includes("geral") ||
+    categoriaOferta.includes(marketplaceOferta) ||
+    marketplaceOferta === "awin";
+
+  if (!categoriaOk) {
     return false;
   }
+}
 
   return true;
 }
