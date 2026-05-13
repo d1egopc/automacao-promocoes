@@ -237,6 +237,21 @@ function produtoSuspeito(oferta = {}) {
     "brand+",
     "sem marca",
     "generico"
+    "unidade flash",
+    "usb 3.0",
+    "memoria expandida",
+    "disco externo",
+    "hd externo portatil",
+    "armazenamento externo",
+    "ssd externo",
+    "expansao de memoria",
+    "cartao tf",
+    "micro sd 1tb",
+   "micro sd 2tb",
+   "pendrive usb",
+   "flash drive",
+   "super armazenamento",
+   "armazenamento movel"                   
   ];
 
   if (suspeitos.some(p => texto.includes(normalizarTexto(p)))) {
@@ -271,6 +286,41 @@ function produtoSuspeito(oferta = {}) {
   }
 
   return false;
+}
+
+if (
+  texto.includes("ssd") &&
+  texto.includes("1tb") &&
+  preco > 0 &&
+  preco < 80
+) {
+  return true;
+}
+
+if (
+  texto.includes("hd") &&
+  texto.includes("16tb") &&
+  preco > 0 &&
+  preco < 400
+) {
+  return true;
+}
+
+if (
+  texto.includes("hd") &&
+  texto.includes("18tb") &&
+  preco > 0 &&
+  preco < 500
+) {
+  return true;
+}
+
+if (
+  texto.includes("placa de video") &&
+  preco > 0 &&
+  preco < 250
+) {
+  return true;
 }
 
 const crypto = require("crypto");
