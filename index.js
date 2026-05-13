@@ -2534,10 +2534,15 @@ async function farejarAliExpress() {
 
    const buscasBrasil = [
 
+  "Veineda RX5600",
   "hd exos brasil",
   "hd seagate exos brasil",
   "hd 16tb brasil",
   "hd 18tb brasil",
+  "veineda",
+  "mongol",
+  "mongol",
+  "jieshuo",
 
   "aspirador portatil brasil",
   "mini aspirador brasil",
@@ -2610,6 +2615,7 @@ const buscasInternacionais = [
   "kit xeon",
   "placa de video",
   "mini pc",
+  "kit placa mae",
 
   "mouse gamer",
   "teclado mecanico",
