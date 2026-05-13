@@ -1920,6 +1920,48 @@ else if (nota >= 4.0) score += 5;
 if (comissao >= 0.2) score += 20;
 else if (comissao >= 0.1) score += 10;
 
+if (produtoSuspeito(oferta)) {
+  score -= 100;
+}
+
+if (
+  texto.includes("ssd") &&
+  texto.includes("1tb") &&
+  !texto.includes("kingston") &&
+  !texto.includes("sandisk") &&
+  !texto.includes("wd") &&
+  !texto.includes("western digital")
+) {
+  score -= 40;
+}
+
+if (
+  texto.includes("micro sd") &&
+  texto.includes("1tb")
+) {
+  score -= 50;
+}
+
+if (
+  texto.includes("super armazenamento")
+) {
+  score -= 50;
+}
+
+if (
+  texto.includes("alta velocidade")
+) {
+  score -= 20;
+}
+
+if (
+  vendas <= 3 &&
+  nota > 0 &&
+  nota < 4
+) {
+  score -= 25;
+}
+
   if (opcoes.preferirEnvioBrasil && texto.includes("brasil")) {
     score += 30;
   }
