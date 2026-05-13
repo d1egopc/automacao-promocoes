@@ -2656,23 +2656,24 @@ const buscasInternacionais = [
           item.target_sale_url ||
           "";
 
-const linkLimpo = String(link).split("?")[0];
+const linkOriginalAli =
+  item.product_detail_url ||
+  item.product_url ||
+  item.target_sale_url ||
+  link ||
+  "";
 
-if (produtoRepetidoRecentemente(linkLimpo, 48)) {
-  console.log("⏭️ Link AliExpress repetido ignorado:", linkLimpo);
-  continue;
-}
-        const titulo =
-          item.product_title ||
-          item.title ||
-          item.product_subject ||
-          "Produto AliExpress";
+const itemIdAli =
+  String(linkOriginalAli).match(/item\/(\d+)\.html/)?.[1] ||
+  String(linkOriginalAli).match(/\/(\d{10,})/)?.[1] ||
+  "";
 
-const chaveRepeticao =
-  gerarChaveProduto(titulo + " aliexpress");
+const chaveAli = itemIdAli
+  ? `aliexpress_item_${itemIdAli}`
+  : gerarChaveProduto(String(linkOriginalAli).split("?")[0]);
 
-if (produtoRepetidoRecentemente(chaveRepeticao, 48)) {
-  console.log("⏭️ AliExpress repetido ignorado:", titulo);
+if (produtoRepetidoRecentemente(chaveAli, 48)) {
+  console.log("⏭️ AliExpress item repetido ignorado:", chaveAli);
   continue;
 }
 
