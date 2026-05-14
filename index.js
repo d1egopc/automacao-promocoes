@@ -4735,12 +4735,33 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
       "teclado mecanico oferta",
       "ssd 1tb promocao",
       "kit ferramentas promocao"
-    ];
+      "vara de pesca oferta",
+      "molinete pesca promocao",
+      "carretilha pesca oferta",
+      "linha multifilamento pesca",
+      "iscas artificiais pesca",
+      "kit pesca completo",
+      "maleta pesca oferta",
+      "caixa pesca organizadora",
+      "anzol pesca kit",
+      "chumbada pesca kit",
+      "boia pesca",
+      "alicate pesca oferta",
+      "cadeira pesca dobravel",
+      "suporte vara pesca",
+      "camiseta pesca protecao uv",
+      "oculos polarizado pesca",
+      "faca de pesca",
+      "mochila de pesca",
+      "lanterna de caça",
+      "barraca de camping pesca",        
+      ];
 
       const limiteBuscas =
       config.marketplaces?.mercadolivre?.limiteBuscasPorRodada || 1;
 
-      const buscasDaRodada = buscas.slice(0, limiteBuscas);
+      const buscasEmbaralhadas = [...buscas].sort(() => Math.random() - 0.5);
+      const buscasDaRodada = buscasEmbaralhadas.slice(0, limiteBuscas);
 
       for (const termo of buscasDaRodada) {
       try {
@@ -4903,7 +4924,9 @@ if (
               linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
               imagem: produto.imagem || "",
               marketplace: "mercadolivre",
-              categoria: "Mercado Livre",
+              categoria: termo.includes("pesca")
+              ? "Pesca"
+              : "Mercado Livre",
               sessaoId: "sessao1",
               status: "pendente",
               clienteId: "admin"
