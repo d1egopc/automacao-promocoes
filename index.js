@@ -1783,6 +1783,24 @@ if (parcelamentoMatch?.[2] && parcelamentoMatch?.[3]) {
   parcelamento = `💳 Ou ${parcelamentoMatch[2]}x de ${parcelamentoMatch[3]} sem juros`;
 }
 
+if (!parcelamento) {
+  const precoParcela = precosNumericos
+    .filter(p => p.numero > 20 && p.numero < 1000)
+    .sort((a, b) => a.numero - b.numero)[0];
+
+  const precoTotalParcelado = precosNumericos
+    .filter(p => p.numero > precoParcela?.numero * 5)
+    .sort((a, b) => a.numero - b.numero)[0];
+
+  if (precoParcela && precoTotalParcelado) {
+    const vezes = Math.round(precoTotalParcelado.numero / precoParcela.numero);
+
+    if (vezes >= 2 && vezes <= 12) {
+      parcelamento = `💳 Ou ${vezes}x de ${precoParcela.texto} sem juros`;
+    }
+  }
+}
+
 if (pixMatch?.[1]) {
   precoAtual = pixMatch[1].trim();
   avisoPagamento = "À vista no PIX";
