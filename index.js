@@ -4734,7 +4734,7 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
       "mouse gamer oferta",
       "teclado mecanico oferta",
       "ssd 1tb promocao",
-      "kit ferramentas promocao"
+      "kit ferramentas promocao",
       "vara de pesca oferta",
       "molinete pesca promocao",
       "carretilha pesca oferta",
