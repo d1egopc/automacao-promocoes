@@ -4758,7 +4758,7 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
       ];
 
       const limiteBuscas =
-      config.marketplaces?.mercadolivre?.limiteBuscasPorRodada || 1;
+      config.marketplaces?.mercadolivre?.limiteBuscasPorRodada || 2;
 
       const buscasEmbaralhadas = [...buscas].sort(() => Math.random() - 0.5);
       const buscasDaRodada = buscasEmbaralhadas.slice(0, limiteBuscas);
