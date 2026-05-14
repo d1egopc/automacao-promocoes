@@ -2114,6 +2114,11 @@ async function buscarCsrfTokenMercadoLivre(cookies) {
 
     const html = await response.text();
 
+    if (html.includes("suspicious-traffic-frontend")) {
+    console.log("🛡️ Mercado Livre bloqueou por tráfego suspeito. Pulando rodada.");
+    return;
+    }
+
     console.log("🧪 HTML INICIO:");
     console.log(html.slice(0, 3000)); 
 
