@@ -5387,7 +5387,7 @@ app.listen(PORT, () => {
 // ================= ORQUESTRADOR GLOBAL DE MARKETPLACES =================
 
 const ordemMarketplaces = [
-  "MercadoLivre",
+  "mercadolivre",
   "shopee",
   "amazon",
   "aliexpress",
@@ -5396,7 +5396,7 @@ const ordemMarketplaces = [
 ];
 
 const farejadoresMarketplaces = {
-  mercadolivre: farejarMercadoLivre,
+  mercadolivre: farejarmercadolivre,
   shopee: farejarShopee,
   amazon: farejarAmazon,
   aliexpress: farejarAliExpress,
@@ -5418,7 +5418,12 @@ async function rodarProximoMarketplace() {
 
   const cfg = config.marketplaces?.[marketplace];
 
-  if (!cfg?.ativo) {
+  console.log("🧪 ORQUESTRADOR CHECK:", {
+  marketplace,
+  ativo: cfg?.ativo
+  });
+
+ if (!cfg?.ativo) {
     console.log(`⏭️ ${marketplace} desativado. Pulando.`);
     return;
   }
