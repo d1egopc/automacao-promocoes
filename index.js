@@ -4742,7 +4742,7 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
 
       const buscasDaRodada = buscas.slice(0, limiteBuscas);
 
-      for (const termo of buscas) {
+      for (const termo of buscasDaRodada) {
       try {
         const url = `https://lista.mercadolivre.com.br/${encodeURIComponent(termo)}`;
 
