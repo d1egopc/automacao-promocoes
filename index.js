@@ -5396,7 +5396,7 @@ const ordemMarketplaces = [
 ];
 
 const farejadoresMarketplaces = {
-  mercadolivre: farejarmercadolivre,
+  mercadolivre: farejarMercadoLivre,
   shopee: farejarShopee,
   amazon: farejarAmazon,
   aliexpress: farejarAliExpress,
