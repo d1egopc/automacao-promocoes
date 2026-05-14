@@ -1672,7 +1672,7 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
   });
 });
 
-// ================= AWIN DEEP LINK MANUAL =================
+// ================= AWIN IMPORTAR DEEP LINK MANUAL =================
 
 async function gerarDeepLinkAwin(urlOriginal, clienteId = "admin") {
   const integracao = integracoesPorCliente[clienteId]?.awin;
@@ -1751,6 +1751,7 @@ app.post("/awin/gerar-link", async (req, res) => {
 let precoAtual = "";
 let precoAntigo = "";
 let avisoPagamento = "";
+let parcelamento = "";
 
 const precosEncontrados = [
   ...html.matchAll(/R\$\s?[\d\.]+,\d{2}/g)
@@ -1774,11 +1775,13 @@ const precosNumericos = precosEncontrados
 
 const pixMatch = html.match(/(R\$\s?[\d\.]+,\d{2})[\s\S]{0,80}À vista no PIX/i);
 
-if (pixMatch) {
-  const precoPixTexto = pixMatch[0]
-    .replace(/À vista no PIX/i, "")
-    .trim();
+const parcelamentoMatch = html.match(/(R\$\s?[\d\.]+,\d{2})\s+em\s+até\s+(\d+)x\s+de\s+(R\$\s?[\d\.]+,\d{2})/i);
 
+if (parcelamentoMatch?.[2] && parcelamentoMatch?.[3]) {
+  parcelamento = `💳 Ou ${parcelamentoMatch[2]}x de ${parcelamentoMatch[3]} sem juros`;
+}
+
+if (pixMatch?.[1]) {
   precoAtual = pixMatch[1].trim();
   avisoPagamento = "À vista no PIX";
 }
@@ -1830,6 +1833,7 @@ console.log("🧪 PREÇOS VALIDOS:", precosValidos.slice(0, 20));
   titulo,
   precoAtual,
   precoAntigo,
+  parcelamento,
   avisoPagamento,
   avisoCupom: "💳 Com desconto à vista no PIX.",
   imagem
