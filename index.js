@@ -1775,7 +1775,9 @@ const precosNumericos = precosEncontrados
 
 const pixMatch = html.match(/(R\$\s?[\d\.]+,\d{2})[\s\S]{0,80}À vista no PIX/i);
 
-const parcelamentoMatch = html.match(/(R\$\s?[\d\.]+,\d{2})\s+em\s+até\s+(\d+)x\s+de\s+(R\$\s?[\d\.]+,\d{2})/i);
+const parcelamentoMatch = html.match(
+  /(R\$\s?[\d\.]+,\d{2})[\s\S]{0,40}em\s+até\s+(\d+)x[\s\S]{0,30}de\s+(R\$\s?[\d\.]+,\d{2})[\s\S]{0,40}sem\s+juros/i
+);
 
 if (parcelamentoMatch?.[2] && parcelamentoMatch?.[3]) {
   parcelamento = `💳 Ou ${parcelamentoMatch[2]}x de ${parcelamentoMatch[3]} sem juros`;
