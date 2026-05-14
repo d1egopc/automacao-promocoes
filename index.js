@@ -56,7 +56,7 @@ destinosInteligentes: [],
     },
 
     mercadolivre: {
-  ativo: false,
+  ativo: true,
   intervaloFarejoMinutos: 60,
   limitePorRodada: 5,
   descontoMinimo: 20,
@@ -82,7 +82,7 @@ awin: {
 },
 
 aliexpress: {
-  ativo: false,
+  ativo: true,
   intervaloFarejoMinutos: 40,
   limitePorRodada: 5,
   descontoMinimo: 20,
@@ -5387,6 +5387,7 @@ app.listen(PORT, () => {
 // ================= ORQUESTRADOR GLOBAL DE MARKETPLACES =================
 
 const ordemMarketplaces = [
+  "MercadoLivre",
   "shopee",
   "amazon",
   "aliexpress",
@@ -5395,11 +5396,12 @@ const ordemMarketplaces = [
 ];
 
 const farejadoresMarketplaces = {
+  mercadolivre: farejarMercadoLivre,
   shopee: farejarShopee,
   amazon: farejarAmazon,
   aliexpress: farejarAliExpress,
   awin: farejarAwin,
-  magalu: farejarMagalu
+  magalu: farejarMagalu,
 };
 
 let indiceMarketplaceAtual = 0;
