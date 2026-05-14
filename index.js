@@ -4749,8 +4749,16 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
        console.log("🌐 MERCADO LIVRE URL:", url);
 
        const response = await fetch(url, {
-       headers: gerarHeadersStealth()
-       });
+  headers: {
+    ...gerarHeadersStealth(),
+    ...(integracoesPorCliente["admin"]?.mercadolivre?.credenciais?.cookies
+      ? {
+          Cookie:
+            integracoesPorCliente["admin"].mercadolivre.credenciais.cookies
+        }
+      : {})
+  }
+});
 
         console.log("🌐 URL:", url);
         console.log("📡 STATUS:", response.status);
