@@ -1828,6 +1828,8 @@ console.log("🧪 PREÇOS VALIDOS:", precosValidos.slice(0, 20));
       });
     }
 
+console.log("🧪 PARCELAMENTO KABUM:", parcelamento);
+
   return res.json({
   ok: true,
   urlOriginal: url,
