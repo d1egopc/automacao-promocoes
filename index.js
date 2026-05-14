@@ -2663,9 +2663,13 @@ async function importarMagalu(urlEntrada, config = {}) {
 
 const response = await fetch(urlConsulta, {
   headers: {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
-    "Accept-Language": "pt-BR,pt;q=0.9"
+    ...gerarHeadersStealth(),
+    ...(integracoesPorCliente["admin"]?.magalu?.credenciais?.cookies
+      ? {
+          Cookie:
+            integracoesPorCliente["admin"].magalu.credenciais.cookies
+        }
+      : {})
   }
 });
     
@@ -4723,6 +4727,22 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
     console.log("🐶 Farejando ofertas ML (modo stealth)...");
 
     const buscas = [
+      
+      "corta vento",
+      "camiseta",
+      "blusa",
+      "moleton",
+      "liquidificador",
+      "calça jeans",
+      "mochila",
+      "tenis feminino",
+      "miroondas",
+      "tv 60",
+      "meias puma",
+      "cuecas lupo",
+      "meias lupo",
+      "perfume masculino",
+      "perfume feminino",
       "tenis masculino oferta",
       "air fryer promocao",
       "fone bluetooth promocao",
