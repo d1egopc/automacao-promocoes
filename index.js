@@ -894,6 +894,63 @@ oferta.criadoEm = oferta.criadoEm || new Date().toLocaleString("pt-BR", {
   res.send("OK");
 });
 
+// ================= ENVIO MANUAL =================
+
+app.post("/enviar-manual", async (req, res) => {
+ 
+  console.log("🧪 /enviar-manual BODY:", req.body);
+  
+  try {
+  const body = req.body || {};
+
+    const oferta = {
+      nome: body.nome || body.titulo || "Oferta",
+      titulo: body.titulo || body.nome || "Oferta",
+      preco: body.preco || body.precoAtual || "",
+      precoAtual: body.precoAtual || body.preco || "",
+      precoAntigo: body.precoAntigo || "",
+      cupom: body.cupom ? String(body.cupom).trim() : "",
+      avisoCupom: body.avisoCupom || "",
+      parcelamento: body.parcelamento || "",
+      link: body.link || body.linkAfiliado || "",
+      linkAfiliado: body.linkAfiliado || body.link || "",
+      imagem: body.imagem || "",
+      marketplace: body.marketplace || "",
+      categoria: body.categoria || body.marketplace || "",
+      clienteId: getClienteId(req),
+      status: "pendente",
+      criadoEm: new Date().toLocaleString("pt-BR", {
+        timeZone: "America/Sao_Paulo"
+      })
+    };
+
+    fila.unshift(oferta);
+    salvarFila();
+
+    const clienteId = oferta.clienteId || "admin";
+    controleEnvio[clienteId] = 0;
+
+    const automacaoAnterior = config.automacaoAtiva;
+    config.automacaoAtiva = true;
+
+    await processarFila();
+
+    config.automacaoAtiva = automacaoAnterior;
+
+    return res.json({
+      ok: true,
+      mensagem: "Oferta enviada manualmente",
+      oferta
+    });
+
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
+
 app.get("/fila", (req, res) => {
   res.json({
     ok: true,
