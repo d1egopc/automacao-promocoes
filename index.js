@@ -2731,6 +2731,40 @@ async function buscarProdutosAliExpressAPI(termo) {
   return Array.isArray(lista) ? lista : [lista];
 }
 
+// ================= AREA GLOBAL STEALTH  =================
+
+const HEADERS_STEALTH = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0 Safari/537.36",
+
+  "Accept":
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+
+  "Accept-Language":
+    "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+
+  "Cache-Control": "no-cache",
+
+  "Pragma": "no-cache",
+
+  "Upgrade-Insecure-Requests": "1",
+
+  "Sec-Ch-Ua":
+    '"Google Chrome";v="136", "Chromium";v="136", "Not:A-Brand";v="24"',
+
+  "Sec-Ch-Ua-Mobile": "?0",
+
+  "Sec-Ch-Ua-Platform": '"Windows"',
+
+  "Sec-Fetch-Dest": "document",
+
+  "Sec-Fetch-Mode": "navigate",
+
+  "Sec-Fetch-Site": "none",
+
+  "Sec-Fetch-User": "?1"
+};
+
 // ================= FAREJADOR ALIEXPRESS =================
 
 async function farejarAliExpress() {
@@ -4647,17 +4681,11 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
       try {
         const url = `https://lista.mercadolivre.com.br/${encodeURIComponent(termo)}`;
 
-        console.log("🌐 AMAZON URL:", url);
+       console.log("🌐 MERCADO LIVRE URL:", url);
 
-        const response = await fetch(url, {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-            "Accept":
-              "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
-          }
-        });
+       const response = await fetch(url, {
+       headers: HEADERS_STEALTH
+       });
 
         console.log("🌐 URL:", url);
         console.log("📡 STATUS:", response.status);
