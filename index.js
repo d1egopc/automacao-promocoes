@@ -4760,12 +4760,22 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
           continue;
         }
 
-        const html = await response.text();
+       const html = await response.text();
 
-        let cupom = "";
-        let avisoCupom = "";
+console.log("🧪 HTML TAMANHO:", html.length);
+console.log(
+  "🧪 TEM BLOQUEIO ML?",
+  html.includes("suspicious-traffic-frontend")
+);
+
+if (html.includes("suspicious-traffic-frontend")) {
+  console.log("🛡️ Mercado Livre bloqueou por tráfego suspeito.");
+  return;
+}
+
+let cupom = "";
+let avisoCupom = "";
         
-        console.log("🧪 HTML TAMANHO:", html.length);
         console.log("🧪 TEM MLB?", html.includes("MLB"));
         console.log("🧪 TEM item?", html.includes("item"));
         console.log("🧪 HTML INICIO:", html.slice(0, 1000));
