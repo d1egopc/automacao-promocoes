@@ -398,10 +398,12 @@ console.log("🎯 DESTINO CHECK:", {
 if (categoriasDestino.length && categoriaOferta) {
   const categoriaOk =
     categoriasDestino.includes(categoriaOferta) ||
-    categoriasDestino.includes("geral") ||
-    categoriaOferta.includes(marketplaceOferta) ||
-    marketplaceOferta === "awin";
+    categoriasDestino.includes("geral");
 
+  if (!categoriaOk) {
+    return false;
+  }
+}
   if (!categoriaOk) {
     return false;
   }
