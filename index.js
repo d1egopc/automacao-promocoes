@@ -393,7 +393,126 @@ const CATEGORIAS_GLOBAIS = {
     ]
   },
 
-  modaMasculina: {
+alimentos: {
+  nome: "Alimentos e Mercearia",
+  palavras: [
+    "chocolate", "cafe", "café", "capsula de cafe", "cápsula de café",
+    "arroz", "feijao", "feijão", "biscoito", "bolacha",
+    "bombom", "salgadinho", "temperos", "salame", "cereal"
+  ]
+},
+
+audioTv: {
+  nome: "Audio TV",
+  palavras: [
+    "tv", "smart tv", "televisor", "televisao", "televisão",
+    "caixa de som", "soundbar", "jbl", "boombox",
+    "radio", "rádio", "conversor digital", "iptv"
+  ]
+},
+
+eletroportateis: {
+  nome: "Eletroportáteis",
+  palavras: [
+    "air fryer", "fritadeira eletrica", "fritadeira elétrica",
+    "liquidificador", "cafeteira", "batedeira", "mixer",
+    "sanduicheira", "grill", "aspirador", "panela eletrica",
+    "panela elétrica", "processador de alimentos"
+  ]
+},
+  
+automotivo: {
+  nome: "Automotivo",
+  palavras: [
+    "multimidia", "som automotivo", "camera de re", "câmera de ré",
+    "farol", "lampada automotiva", "lâmpada automotiva",
+    "taramps", "pioneer", "aiwa", "hbuster", "retrovisor"
+  ]
+},
+
+bebidas: {
+  nome: "Bebidas",
+  palavras: [
+    "heineken", "cerveja", "whisky", "vodka",
+    "energetico", "energético", "gatorade",
+    "red label", "old par", "chopp"
+  ]
+},
+
+computadores: {
+  nome: "Computadores e Notebook",
+  palavras: [
+    "notebook", "laptop", "pc gamer", "computador",
+    "all in one", "desktop", "macbook",
+    "ipad", "tablet", "monitor"
+  ]
+},
+
+brinquedos: {
+  nome: "Brinquedos e Artigos Infantis",
+  palavras: [
+    "lego", "carrinho", "helicoptero", "helicóptero",
+    "controle remoto", "boneca", "quebra cabeca",
+    "quebra cabeça", "domino", "dominó", "trator brinquedo"
+  ]
+},
+
+casaDecoracao: {
+  nome: "Casa, Móveis e Decoração",
+  palavras: [
+    "sofa", "sofá", "mesa", "cadeira", "guarda roupa",
+    "armario", "armário", "espelho", "torneira",
+    "painel tv", "penteadeira", "cômoda"
+  ]
+},
+
+eletrodomesticos: {
+  nome: "Eletrodomésticos",
+  palavras: [
+    "geladeira", "freezer", "microondas", "micro-ondas",
+    "fogao", "fogão", "lava e seca",
+    "lava loucas", "lava louças", "secadora"
+  ]
+},
+
+infantil: {
+  nome: "Roupas e Calçados Infantil",
+  palavras: [
+    "tenis infantil", "tênis infantil", "camisa infantil",
+    "sandalia infantil", "sandalia infantil",
+    "roupa infantil", "moda infantil", "bebe",
+    "bebê", "body infantil"
+  ]
+},
+
+petshop: {
+  nome: "Pet Shop e Fazendinha",
+  palavras: [
+    "racao", "ração", "coleira", "comedouro",
+    "bebedouro", "aquario", "aquário",
+    "areia gato", "ração cachorro", "ração gato"
+  ]
+},
+
+esporte: {
+  nome: "Esporte e Suplementos",
+  palavras: [
+    "creatina", "whey", "suplemento",
+    "academia", "camisa time", "roupa academia",
+    "beta alanina", "pré treino", "pre treino"
+  ]
+},
+
+games: {
+  nome: "Games e Console",
+  palavras: [
+    "xbox", "playstation", "ps5", "ps4",
+    "nintendo switch", "controle xbox",
+    "joystick", "game stick", "fliperama"
+  ]
+},
+
+ modaMasculina: {
     nome: "Roupas e Moda Masculina",
     palavras: [
       "camiseta masculina", "cueca", "kit cuecas", "bermuda",
