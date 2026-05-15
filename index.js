@@ -5102,16 +5102,7 @@ if (
   tituloLower.includes("teste")
 ) continue;
 
-            {async function importarMercadoLivre
             
-            console.log("🎣 CATEGORIA ML:",
-            termo,
-            categoria:
-            termo.includes("pesca")
-            ? "Pesca"
-            : "Mercado",
-            });
-
             const novaOferta = {
               nome: produto.titulo,
               titulo: produto.titulo,
@@ -5127,7 +5118,7 @@ if (
               marketplace: "mercadolivre",
               categoria: termo.includes("pesca")
               ? "Pesca"
-              : "Mercado Livre",
+              : "Mercado",
               sessaoId: "sessao1",
               status: "pendente",
               clienteId: "admin"
