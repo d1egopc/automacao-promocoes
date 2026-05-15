@@ -470,8 +470,10 @@ eletrodomesticos: {
   nome: "Eletrodomésticos",
   palavras: [
     "geladeira", "freezer", "microondas", "micro-ondas",
-    "fogao", "fogão", "lava e seca",
-    "lava loucas", "lava louças", "secadora"
+    "fogao", "fogão", "lava e seca", "ar condicionado",
+    "micro-ondas", "lava loucas", "lava louças", "secadora",
+    "elgin", "lg", "philco", "hisense", "electrolux",
+    "consul", "brastemp", "hd", "gree", "tcl", "agratto",
   ]
 },
 
