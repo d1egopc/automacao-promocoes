@@ -353,7 +353,10 @@ const CATEGORIAS_GLOBAIS = {
     palavras: [
       "vara de pesca", "molinete", "carretilha", "anzol",
       "isca artificial", "chumbada", "camisa pesca", "lanterna",
-      "fogareiro", "camping"
+      "linha de multifilamento", "camiseta uv", "camisa pesca", "lanterna",
+      "oculos polarisado", "oculos de pesca", "canivete", "daiwa", "nelson nakamura",
+      "jennerlure", "jogá", "nautika", "monster 3x", "lixxada", "camping", "bravinha" 
+       
     ]
   },
 
@@ -362,16 +365,22 @@ const CATEGORIAS_GLOBAIS = {
     palavras: [
       "perfume", "shampoo", "condicionador", "hidratante",
       "desodorante", "sabonete", "protetor solar", "creme dental",
-      "escova de dente", "fralda"
+      "carolona herrera", "ferrari", "sundown", "neutrogena", "clean",
+      "boticário", "azzaro", "armani", "natura", "clean", "malbec", "fralda"
     ]
   },
 
   hardware: {
     nome: "Gamer e Hardware",
     palavras: [
-      "ssd", "nvme", "placa de video", "placa de vídeo",
+      "ssd", "nvme", "placa de video", "placa de vídeo", "fonte",
       "memoria ram", "memória ram", "fonte gamer", "gabinete gamer",
-      "headset gamer", "teclado mecanico", "mouse gamer"
+      "headset gamer", "teclado mecanico", "mouse gamer","jieshuo",
+      "amd", "nvidia", "pny", "jieshuo", "veineda", "kllisre",
+      "kingston", "seagate", "samsung", "western digital", "veineda",
+      "arsrock", "asus", "netac", "kootion", "neologic", "risemod",
+      "tgt", "redragon", "giabyte", "hp", "intel", "hyperx",
+      "jbl", "lenovo"
     ]
   },
 
@@ -379,7 +388,8 @@ const CATEGORIAS_GLOBAIS = {
     nome: "Tênis e Chinelos",
     palavras: [
       "tenis", "tênis", "chinelo", "sandalia", "sandália",
-      "chuteira", "bota", "coturno", "sapato"
+      "havainadas", "papete", "salto alto", "loafer", "puma",
+      "mocasin", "mizuno", "asics", "nike", "olimpikus", "penalty"   
     ]
   },
 
@@ -387,7 +397,8 @@ const CATEGORIAS_GLOBAIS = {
     nome: "Roupas e Moda Masculina",
     palavras: [
       "camiseta masculina", "cueca", "kit cuecas", "bermuda",
-      "calca masculina", "calça masculina", "moletom masculino"
+      "calca masculina", "calça masculina", "moletom masculino",
+      "carteira masculina", "cinto masculino", "jaqueta"
     ]
   },
 
@@ -395,7 +406,9 @@ const CATEGORIAS_GLOBAIS = {
     nome: "Roupas e Moda Feminina",
     palavras: [
       "blusinha", "lingerie", "calcinha", "biquini", "saia",
-      "vestido", "sandalia feminina", "calca feminina"
+      "vestido", "sandalia feminina", "shorts feminino", 
+      "shorts feminino", "kit calca feminina", "shorts, feminino",
+      "calça jeans feminina", "shortes jeans feminino", "colar"
     ]
   }
 };
