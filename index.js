@@ -348,15 +348,18 @@ let ultimoEnvioFila = 0;
 // ================= CATEGORIAS GLOBAIS =================
 
 const CATEGORIAS_GLOBAIS = {
-  pesca: {
+  
+ pesca: {
     nome: "Pesca e Pescaria",
     palavras: [
-      "vara de pesca", "molinete", "carretilha", "anzol",
-      "isca artificial", "chumbada", "camisa pesca", "lanterna",
+      "vara de pesca", "molinete", "carretilha", "anzol", "mochila de molinete",
+      "isca artificial", "chumbada", "camisa pesca", "lanterna", "bolsa de pesca",
       "linha de multifilamento", "camiseta uv", "camisa pesca", "lanterna",
       "oculos polarisado", "oculos de pesca", "canivete", "daiwa", "nelson nakamura",
-      "jennerlure", "jogá", "nautika", "monster 3x", "lixxada", "camping", "bravinha" 
-       
+      "caixa organizadora de isca", "box de anzol", "iscas de pesca", "divisórias pesca",
+      "jennerlure", "jogá", "nautika", "monster 3x", "lixxada", "camping", "bravinha", 
+      "jennerlure", "luri", "caixa de isca", "caixa pesca", "divisórias pesca", "camping",   
+      "divisorias pesca","farolete de pesca", "lampião pesca", "barraca", "rede de dormir"    
     ]
   },
 
@@ -389,7 +392,8 @@ const CATEGORIAS_GLOBAIS = {
     palavras: [
       "tenis", "tênis", "chinelo", "sandalia", "sandália",
       "havainadas", "papete", "salto alto", "loafer", "puma",
-      "mocasin", "mizuno", "asics", "nike", "olimpikus", "penalty"   
+      "rider", "ribock", "under armor", "new balance", "adidas",
+      "mocassin", "mizuno", "asics", "nike", "olympikus", "penalty"   
     ]
   },
 
@@ -405,9 +409,10 @@ alimentos: {
 audioTv: {
   nome: "Audio TV",
   palavras: [
+    "tv 65pl", "tv 55pl", "tv 75ol", "lg", "tcl", "philips",
     "tv", "smart tv", "televisor", "televisao", "televisão",
     "caixa de som", "soundbar", "jbl", "boombox",
-    "radio", "rádio", "conversor digital", "iptv"
+    "radio", "rádio", "conversor digital", "iptv", "jbl" 
   ]
 },
 
