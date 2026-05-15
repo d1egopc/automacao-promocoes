@@ -404,11 +404,7 @@ if (categoriasDestino.length && categoriaOferta) {
     return false;
   }
 }
-  if (!categoriaOk) {
-    return false;
-  }
-}
-
+  
   return true;
 }
 
