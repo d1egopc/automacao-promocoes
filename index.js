@@ -373,6 +373,13 @@ function normalizarDestino(valor = "") {
 function destinoAceitaOferta(destino, oferta) {
   if (!destino?.ativo) return false;
 
+console.log("🎯 DESTINO CHECK:", {
+  destino: destino.nome,
+  categoriasDestino: destino.categorias,
+  categoriaOferta: oferta.categoria,
+  titulo: oferta.titulo || oferta.nome
+   });
+
   const marketplaceOferta = normalizarDestino(oferta.marketplace || oferta.loja || "");
   const categoriaOferta = normalizarDestino(oferta.categoria || "");
 
@@ -2672,6 +2679,8 @@ try {
   }
 }
 
+
+//================== FUNCAO IMPORTAR MAGALU =========================
 async function importarMagalu(urlEntrada, config = {}) {
   try {
     const promoterId =
@@ -3223,13 +3232,150 @@ salvarFila();
   }
 }
 
+// ================= FAREJADOR MAGALU =================
+
 async function farejarMagalu() {
   try {
+    if (!config.marketplaces?.magalu?.ativo) {
+      console.log("⏸ Magalu desativada. Farejador ignorado.");
+      return;
+    }
+
     console.log("🟦 Farejando ofertas Magalu...");
 
-    // em breve:
-    // buscarOfertasMagalu()
+    const integracao = integracoesPorCliente?.admin?.magalu;
+    const promoterId =
+      integracao?.credenciais?.promoterId ||
+      integracao?.promoterId ||
+      "";
 
+    if (!promoterId) {
+      console.log("❌ Magalu sem promoterId configurado.");
+      return;
+    }
+
+    const limitePorRodada =
+      config.marketplaces?.magalu?.limitePorRodada || 3;
+
+    const buscas = [
+      "air fryer",
+      "fone bluetooth",
+      "smartwatch",
+      "cadeira escritorio",
+      "furadeira",
+      "cafeteira",
+      "liquidificador",
+      "ventilador",
+      "microondas",
+      "notebook"
+    ];
+
+    const buscasDaRodada = [...buscas]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 2);
+
+    let adicionadas = 0;
+
+    for (const termo of buscasDaRodada) {
+      if (adicionadas >= limitePorRodada) break;
+
+      const urlBusca = `https://www.magazineluiza.com.br/busca/${encodeURIComponent(termo)}/`;
+
+      console.log("🌐 MAGALU BUSCA:", urlBusca);
+
+      const response = await fetch(urlBusca, {
+        headers: {
+          ...gerarHeadersStealth(),
+          ...(integracao?.credenciais?.cookies
+            ? { Cookie: integracao.credenciais.cookies }
+            : {})
+        }
+      });
+
+      console.log("📡 MAGALU STATUS:", response.status);
+
+      if (!response.ok) {
+        await new Promise(r => setTimeout(r, 5000));
+        continue;
+      }
+
+      const html = await response.text();
+
+      const linksExtraidos = [
+        ...html.matchAll(/href="([^"]*\/p\/[^"]+)"/g),
+        ...html.matchAll(/"url":"([^"]*magazineluiza\.com\.br[^"]*\/p\/[^"]*)"/g)
+      ]
+        .map(m => m[1])
+        .map(link => String(link).replace(/\\\//g, "/").replace(/&amp;/g, "&"))
+        .map(link => {
+          if (link.startsWith("/")) {
+            return "https://www.magazineluiza.com.br" + link;
+          }
+          return link;
+        })
+        .filter(link =>
+          link.includes("magazineluiza.com.br") &&
+          link.includes("/p/") &&
+          !link.includes("login") &&
+          !link.includes("sacola")
+        );
+
+      const links = [...new Set(linksExtraidos)].slice(0, 5);
+
+      console.log(`🔎 ${termo}: ${links.length} links Magalu`);
+
+      for (const link of links) {
+        if (adicionadas >= limitePorRodada) break;
+
+        try {
+          const produto = await importarMagalu(link, {
+            credenciais: { promoterId }
+          });
+
+          if (!produto?.precoAtual) continue;
+
+          const novaOferta = {
+            nome: produto.titulo,
+            titulo: produto.titulo,
+            preco: produto.precoAtual,
+            precoAtual: produto.precoAtual,
+            precoAntigo: produto.precoAntigo || "",
+            cupom: produto.cupom || "",
+            avisoCupom: produto.avisoCupom || produto.aviso || "",
+            parcelamento: produto.parcelamento || "",
+            link: produto.linkAfiliado || produto.linkOriginal || link,
+            linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
+            imagem: produto.imagem || "",
+            marketplace: "magalu",
+            categoria: "Magalu",
+            sessaoId: "sessao1",
+            status: "pendente",
+            clienteId: "admin"
+          };
+
+          if (produtoSuspeito(novaOferta)) continue;
+          if (ofertaJaExiste(novaOferta)) continue;
+
+          fila.push(novaOferta);
+          salvarFila();
+          adicionadas++;
+
+          console.log("🤖 Nova oferta Magalu:", {
+            titulo: novaOferta.titulo,
+            preco: novaOferta.precoAtual,
+            link: novaOferta.link
+          });
+
+          await new Promise(r => setTimeout(r, 3000 + Math.random() * 4000));
+        } catch (e) {
+          console.log("❌ erro produto Magalu:", e.message);
+        }
+      }
+
+      await new Promise(r => setTimeout(r, 5000 + Math.random() * 6000));
+    }
+
+    console.log(`✅ Magalu finalizado. Adicionadas: ${adicionadas}`);
   } catch (e) {
     console.log("❌ erro farejador Magalu:", e.message);
   }
@@ -4025,6 +4171,7 @@ if (marketplace === "magalu") {
           aviso: "Dados não encontrados automaticamente. Preencha manualmente."
         });
       }
+
        const novaOferta = {
       nome: produto.nome || produto.titulo,
       preco: produto.preco || produto.precoAtual,
@@ -4956,6 +5103,14 @@ if (
   tituloLower.includes("mini") ||
   tituloLower.includes("teste")
 ) continue;
+
+            console.log("🎣 CATEGORIA ML:", {
+            termo,
+            categoria:
+            termo.includes("pesca")
+            ? "Pesca"
+            : "Mercado Livre"
+            });
 
             const novaOferta = {
               nome: produto.titulo,
