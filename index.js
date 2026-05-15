@@ -3361,7 +3361,7 @@ async function farejarMagalu() {
 
     const buscasDaRodada = [...buscas]
       .sort(() => Math.random() - 0.5)
-      .slice(0, 2);
+      .slice(0, 1);
 
     let adicionadas = 0;
 
@@ -3420,6 +3420,8 @@ async function farejarMagalu() {
           const produto = await importarMagalu(link, {
             credenciais: { promoterId }
           });
+
+          console.log("🧪 PRODUTO MAGALU IMPORTADO:", produto);     
 
           if (!produto?.precoAtual) continue;
 
@@ -4236,7 +4238,7 @@ if (marketplace === "magalu") {
       linkOriginal: url,
       linkAfiliado: url,
       imagem: "",
-      categoria: "Magalu",
+      categoria: classificarCategoriaOferta(produto, termo),
       aviso: "Erro ao gerar link Magalu. Preencha manualmente."
     });
   }
