@@ -5107,7 +5107,7 @@ if (
             categoria:
             termo.includes("pesca")
             ? "Pesca"
-            : "Mercado"
+            : "Mercado",
             });
 
             const novaOferta = {
