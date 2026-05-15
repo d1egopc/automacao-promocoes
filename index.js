@@ -345,6 +345,82 @@ function podeRodarAgora() {
 
 let ultimoEnvioFila = 0;
 
+// ================= CATEGORIAS GLOBAIS =================
+
+const CATEGORIAS_GLOBAIS = {
+  pesca: {
+    nome: "Pesca e Pescaria",
+    palavras: [
+      "vara de pesca", "molinete", "carretilha", "anzol",
+      "isca artificial", "chumbada", "camisa pesca", "lanterna",
+      "fogareiro", "camping"
+    ]
+  },
+
+  beleza: {
+    nome: "Perfumaria, Farmácia e Beleza",
+    palavras: [
+      "perfume", "shampoo", "condicionador", "hidratante",
+      "desodorante", "sabonete", "protetor solar", "creme dental",
+      "escova de dente", "fralda"
+    ]
+  },
+
+  hardware: {
+    nome: "Gamer e Hardware",
+    palavras: [
+      "ssd", "nvme", "placa de video", "placa de vídeo",
+      "memoria ram", "memória ram", "fonte gamer", "gabinete gamer",
+      "headset gamer", "teclado mecanico", "mouse gamer"
+    ]
+  },
+
+  tenis: {
+    nome: "Tênis e Chinelos",
+    palavras: [
+      "tenis", "tênis", "chinelo", "sandalia", "sandália",
+      "chuteira", "bota", "coturno", "sapato"
+    ]
+  },
+
+  modaMasculina: {
+    nome: "Roupas e Moda Masculina",
+    palavras: [
+      "camiseta masculina", "cueca", "kit cuecas", "bermuda",
+      "calca masculina", "calça masculina", "moletom masculino"
+    ]
+  },
+
+  modaFeminina: {
+    nome: "Roupas e Moda Feminina",
+    palavras: [
+      "blusinha", "lingerie", "calcinha", "biquini", "saia",
+      "vestido", "sandalia feminina", "calca feminina"
+    ]
+  }
+};
+
+function classificarCategoriaOferta(oferta = {}, termo = "") {
+  const texto = normalizarTexto(`
+    ${termo}
+    ${oferta.titulo || ""}
+    ${oferta.nome || ""}
+    ${oferta.descricao || ""}
+    ${oferta.categoria || ""}
+  `);
+
+  for (const categoria of Object.values(CATEGORIAS_GLOBAIS)) {
+    const bateu = categoria.palavras.some(palavra =>
+      texto.includes(normalizarTexto(palavra))
+    );
+
+    if (bateu) {
+      return categoria.nome;
+    }
+  }
+
+  return oferta.categoria || "Mercado";
+}
 
 // ================= HELPERS DESTINOS INTELIGENTES =================
 
@@ -5116,9 +5192,7 @@ if (
               linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
               imagem: produto.imagem || "",
               marketplace: "mercadolivre",
-              categoria: termo.includes("pesca")
-              ? "Pesca"
-              : "Mercado",
+              categoria: classificarCategoriaOferta(produto, termo),
               sessaoId: "sessao1",
               status: "pendente",
               clienteId: "admin"
