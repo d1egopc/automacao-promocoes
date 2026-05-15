@@ -457,7 +457,9 @@ console.log("🎯 DESTINO CHECK:", {
    });
 
   const marketplaceOferta = normalizarDestino(oferta.marketplace || oferta.loja || "");
-  const categoriaOferta = normalizarDestino(oferta.categoria || "");
+
+  const categoriaClassificada = classificarCategoriaOferta(oferta, oferta.termo || "");
+  const categoriaOferta = normalizarDestino(categoriaClassificada);
 
   const marketplacesDestino = (destino.marketplaces || []).map(normalizarDestino);
   const categoriasDestino = (destino.categorias || []).map(normalizarDestino);
