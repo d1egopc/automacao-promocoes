@@ -419,7 +419,7 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     }
   }
 
-  return oferta.categoria || "Alimentos e Mercearia";
+  return "Alimentos e Mercearia";
 }
 
 // ================= HELPERS DESTINOS INTELIGENTES =================
