@@ -3390,10 +3390,13 @@ async function farejarMagalu() {
 
       const html = await response.text();
 
-      const linksExtraidos = [
-        ...html.matchAll(/href="([^"]*\/p\/[^"]+)"/g),
-        ...html.matchAll(/"url":"([^"]*magazineluiza\.com\.br[^"]*\/p\/[^"]*)"/g)
-      ]
+     const linksExtraidos = [
+  ...html.matchAll(/href="([^"]*\/p\/[^"]+)"/g),
+  ...html.matchAll(/href="([^"]*\/produto\/[^"]+)"/g),
+  ...html.matchAll(/"url":"([^"]*magazineluiza\.com\.br[^"]*)"/g),
+  ...html.matchAll(/"productUrl":"([^"]*)"/g),
+  ...html.matchAll(/"canonicalUrl":"([^"]*)"/g)
+  ]
         .map(m => m[1])
         .map(link => String(link).replace(/\\\//g, "/").replace(/&amp;/g, "&"))
         .map(link => {
