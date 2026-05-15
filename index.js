@@ -5102,7 +5102,9 @@ if (
   tituloLower.includes("teste")
 ) continue;
 
-            console.log("🎣 CATEGORIA ML:", {async function importarMercadoLivre
+            {async function importarMercadoLivre
+            
+            console.log("🎣 CATEGORIA ML:",
             termo,
             categoria:
             termo.includes("pesca")
