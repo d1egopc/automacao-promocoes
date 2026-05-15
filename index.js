@@ -5102,12 +5102,12 @@ if (
   tituloLower.includes("teste")
 ) continue;
 
-            console.log("🎣 CATEGORIA ML:", {
+            console.log("🎣 CATEGORIA ML:", {async function importarMercadoLivre
             termo,
             categoria:
             termo.includes("pesca")
             ? "Pesca"
-            : "Mercado Livre"
+            : "Mercado"
             });
 
             const novaOferta = {
