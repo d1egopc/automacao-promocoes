@@ -391,8 +391,8 @@ const CATEGORIAS_GLOBAIS = {
     nome: "Tênis e Chinelos",
     palavras: [
       "tenis", "tênis", "chinelo", "sandalia", "sandália",
-      "havainadas", "papete", "salto alto", "loafer", "puma",
-      "rider", "ribock", "under armor", "new balance", "adidas",
+      "havaianas", "papete", "salto alto", "loafer", "puma",
+      "rider", "reebok", "under armor", "new balance", "adidas",
       "mocassin", "mizuno", "asics", "nike", "olympikus", "penalty"   
     ]
   },
@@ -440,7 +440,9 @@ bebidas: {
   palavras: [
     "heineken", "cerveja", "whisky", "vodka",
     "energetico", "energético", "gatorade",
-    "red label", "old par", "chopp"
+    "red label", "old par", "chopp","cerveja heineken",
+    "amstel", "heineken barril 5 litros", "colorado",
+    "coca cola", "tnt", "monster", "ipa", "burn"
   ]
 },
 
@@ -468,6 +470,60 @@ casaDecoracao: {
     "sofa", "sofá", "mesa", "cadeira", "guarda roupa",
     "armario", "armário", "espelho", "torneira",
     "painel tv", "penteadeira", "cômoda"
+  ]
+},
+
+
+celulares: {
+  nome: "Celulares e Smartphones",
+  palavras: [
+    "iphone", "samsung galaxy", "xiaomi", "motorola",
+    "redmi", "poco x", "realme", "smartphone",
+    "celular", "iphone 13", "iphone 14", "iphone 15",
+    "galaxy s23", "galaxy s24", "moto g", "infinix"
+  ]
+},
+
+ferramentas: {
+  nome: "Ferramentas",
+  palavras: [
+    "furadeira", "parafusadeira", "martelete",
+    "chave de impacto", "serra marmore", "serra mármore",
+    "makita", "dewalt", "bosch", "vonder",
+    "jogo de ferramentas", "maleta de ferramentas",
+    "esmerilhadeira", "compressor de ar"
+  ]
+},
+
+limpeza: {
+  nome: "Limpeza",
+  palavras: [
+    "amaciante", "sabao em po", "sabão em pó",
+    "desinfetante", "detergente", "papel higienico",
+    "papel higiênico", "limpeza pesada",
+    "multiuso", "veja", "omo", "ypê",
+    "candida", "água sanitaria", "agua sanitaria"
+  ]
+},
+
+eletronicos: {
+  nome: "Eletrônicos",
+  palavras: [
+    "smartwatch", "fone bluetooth", "caixa bluetooth",
+    "ring light", "drone", "camera wifi",
+    "camera ip", "webcam", "projetor",
+    "mini projetor", "echo dot", "alexa"
+  ]
+},
+
+perifericos: {
+  nome: "Periféricos",
+  palavras: [
+    "mouse", "teclado", "mousepad",
+    "webcam gamer", "headphone", "fone gamer",
+    "controle pc", "adaptador usb",
+    "hub usb", "microfone gamer",
+    "cadeira gamer", "monitor gamer"
   ]
 },
 
@@ -533,7 +589,7 @@ games: {
     palavras: [
       "blusinha", "lingerie", "calcinha", "biquini", "saia",
       "vestido", "sandalia feminina", "shorts feminino", 
-      "shorts feminino", "kit calca feminina", "shorts, feminino",
+      "shorts feminino", "kit calca feminina", "shorts feminino",
       "calça jeans feminina", "shortes jeans feminino", "colar"
     ]
   }
