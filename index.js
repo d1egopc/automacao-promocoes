@@ -2981,6 +2981,8 @@ const response = await fetch(urlConsulta, {
     
     const html = await response.text();
 
+    console.log("🧪 HTML MAGALU:", html.slice(0, 2000));
+
     const titulo =
       html.match(/<title>(.*?)<\/title>/i)?.[1]
         ?.replace(" | Magazine Luiza", "")
@@ -3769,7 +3771,7 @@ async function farejarAwin() {
     })
     .on("end", resolve)
     .on("error", reject);
-    });
+    });123456
 
     console.log("📦 Produtos no feed Awin:", produtos.length);
     
