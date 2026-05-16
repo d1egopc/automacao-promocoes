@@ -2950,8 +2950,8 @@ try {
   }
 }
 
-
 //================== FUNCAO IMPORTAR MAGALU =========================
+
 async function importarMagalu(urlEntrada, config = {}) {
   try {
     const promoterId =
@@ -3102,6 +3102,75 @@ async function buscarProdutosAliExpressAPI(termo) {
 
   return Array.isArray(lista) ? lista : [lista];
 }
+
+//================ IMPORTE MANUAL MAGALU ===================
+
+app.post("/importar-magalu-manual", async (req, res) => {
+  try {
+
+    const { url } = req.body;
+
+    if (!url) {
+      return res.status(400).json({
+        ok: false,
+        erro: "URL obrigatória"
+      });
+    }
+
+    const integracao = integracoesPorCliente?.admin?.magalu;
+
+    const promoterId =
+      integracao?.credenciais?.promoterId || "";
+
+    const produto = await importarMagalu(url, {
+      credenciais: { promoterId }
+    });
+
+    if (!produto?.precoAtual) {
+      return res.status(400).json({
+        ok: false,
+        erro: "Produto inválido"
+      });
+    }
+
+    const novaOferta = {
+      nome: produto.titulo,
+      titulo: produto.titulo,
+      preco: produto.precoAtual,
+      precoAtual: produto.precoAtual,
+      precoAntigo: produto.precoAntigo || "",
+      cupom: produto.cupom || "",
+      avisoCupom: produto.avisoCupom || "",
+      parcelamento: produto.parcelamento || "",
+      link: produto.linkAfiliado || url,
+      linkAfiliado: produto.linkAfiliado || url,
+      imagem: produto.imagem || "",
+      marketplace: "magalu",
+      categoria: classificarCategoriaOferta(produto, ""),
+      sessaoId: "sessao1",
+      status: "pendente",
+      clienteId: "admin"
+    };
+
+    fila.push(novaOferta);
+
+    salvarFila();
+
+    return res.json({
+      ok: true,
+      produto: novaOferta
+    });
+
+  } catch (e) {
+
+    console.log("❌ erro importar manual Magalu:", e.message);
+
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
 
 // ================= AREA GLOBAL STEALTH  =================
 
@@ -5185,6 +5254,7 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
 
     const buscas = [
       
+      "perfume",
       "corta vento",
       "camiseta",
       "blusa",
@@ -5450,6 +5520,7 @@ if (
     console.log("❌ erro farejador ML:", e.message);
   }
 }
+
 
 // ================= FAREJADOR AMAZON =================
 
