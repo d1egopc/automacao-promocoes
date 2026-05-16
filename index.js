@@ -3510,11 +3510,19 @@ async function farejarMagalu() {
       console.log("📡 MAGALU STATUS:", response.status);
 
       if (!response.ok) {
-        await new Promise(r => setTimeout(r, 5000));
-        continue;
-      }
 
-      const html = await response.text();
+  console.log(
+    "🛡️ Magalu bloqueou status:",
+    response.status,
+    "- parando rodada."
+  );
+
+  await new Promise(r => setTimeout(r, 15000));
+
+  return;
+}
+
+const html = await response.text();
 
      const linksExtraidos = [
   ...html.matchAll(/href="([^"]*\/p\/[^"]+)"/g),
@@ -5171,7 +5179,7 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
       ];
 
       const limiteBuscas =
-      config.marketplaces?.mercadolivre?.limiteBuscasPorRodada || 2;
+      config.marketplaces?.mercadolivre?.limiteBuscasPorRodada || 1;
 
       const buscasEmbaralhadas = [...buscas].sort(() => Math.random() - 0.5);
       const buscasDaRodada = buscasEmbaralhadas.slice(0, limiteBuscas);
@@ -5197,18 +5205,20 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
         console.log("🌐 URL:", url);
         console.log("📡 STATUS:", response.status);
 
-        if (!response.ok) {
-          await new Promise(r => setTimeout(r, 6000));
-          continue;
-        }
+       if (!response.ok) {
 
-       const html = await response.text();
+      console.log(
+    "🛡️ ML bloqueou status:",
+    response.status,
+    "- parando rodada."
+  );
 
-console.log("🧪 HTML TAMANHO:", html.length);
-console.log(
-  "🧪 TEM BLOQUEIO ML?",
-  html.includes("suspicious-traffic-frontend")
-);
+  await new Promise(r => setTimeout(r, 15000));
+
+  return;
+}
+
+const html = await response.text(); 
 
 if (html.includes("suspicious-traffic-frontend")) {
   console.log("🛡️ Mercado Livre bloqueou por tráfego suspeito.");
