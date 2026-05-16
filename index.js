@@ -5321,9 +5321,12 @@ if (compraNoApp && !cupom) {
 
              if (!precoNumero || !Number.isFinite(precoNumero)) continue;
 
-if (precoNumero < (config.marketplaces?.amazon?.precoMinimo || 25)) continue;
+if (precoNumero < (config.marketplaces?.mercadolivre?.precoMinimo || 25)) continue;
 
-if (desconto < (config.marketplaces?.amazon?.descontoMinimo || 20) && !produto.avisoCupom) continue;
+if (
+  desconto < (config.marketplaces?.mercadolivre?.descontoMinimo || 20) &&
+  !produto.avisoCupom
+) continue;
 
 const tituloLower = String(produto.titulo || "").toLowerCase();
 
