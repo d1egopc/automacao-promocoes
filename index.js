@@ -21,18 +21,40 @@ let config = {
 
   pausarMadrugada: true,
 
-  telegram: {
-  ativo: false,
+  // ================= CUPONS GLOBAIS =======================
 
-  destinos: [
+  cuponsAtivos: [
     {
-      nome: "Canal Principal",
-      botToken: "",
-      chatId: "",
-      ativo: true
+      ativo: true,
+      marketplace: "mercadolivre",
+      cupom: "MELILIBERADO",
+      categorias: ["ferramentas", "casa"],
+      termos: ["lavadora", "lava jato", "pressao", "furadeira"],
+      aviso: "Use o cupom MELILIBERADO + Pix para chegar neste valor."
+    },
+    {
+      ativo: true,
+      marketplace: "mercadolivre",
+      cupom: "SUPERFASHION",
+      categorias: ["tenis"],
+      termos: ["tenis", "moda", "roupa", "mizuno", "nike"],
+      aviso: "Use o cupom SUPERFASHION para chegar no melhor valor."
     }
-  ]
-},
+  ],
+
+  telegram: {
+    ativo: false,
+
+    destinos: [
+      {
+        nome: "Canal Principal",
+        botToken: "",
+        chatId: "",
+        ativo: true
+      }
+    ]
+  },
+
 
 // ================= DESTINOS INTELIGENTES =================
 
