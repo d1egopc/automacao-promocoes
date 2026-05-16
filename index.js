@@ -345,6 +345,81 @@ function podeRodarAgora() {
 
 let ultimoEnvioFila = 0;
 
+// =================== BUSCAS GLOBAIS ===================
+
+const BUSCAS_GLOBAIS = {
+  pesca: [
+    "vara de pesca oferta",
+    "molinete pesca promocao",
+    "carretilha pesca oferta",
+    "iscas artificiais pesca",
+    "caixa pesca organizadora",
+    "oculos polarizado pesca"
+  ],
+
+  beleza: [
+    "perfume masculino promocao",
+    "perfume feminino promocao",
+    "shampoo promocao",
+    "desodorante promocao",
+    "hidratante promocao"
+  ],
+
+  hardware: [
+    "ssd 1tb promocao",
+    "mouse gamer oferta",
+    "teclado mecanico oferta",
+    "placa de video promocao",
+    "headset gamer oferta"
+  ],
+
+  tenis: [
+    "tenis masculino oferta",
+    "tenis feminino promocao",
+    "mizuno promocao",
+    "nike promocao",
+    "chinelo promocao"
+  ],
+
+  casa: [
+    "air fryer promocao",
+    "liquidificador promocao",
+    "cafeteira promocao",
+    "ventilador promocao",
+    "cadeira escritorio"
+  ],
+
+  ferramentas: [
+    "furadeira oferta",
+    "parafusadeira promocao",
+    "kit ferramentas promocao",
+    "maleta ferramentas promocao"
+  ],
+
+  celulares: [
+    "smartphone promocao",
+    "iphone oferta",
+    "samsung galaxy promocao",
+    "xiaomi promocao",
+    "motorola promocao"
+  ],
+
+  audioTv: [
+    "smart tv promocao",
+    "tv 55 promocao",
+    "tv 65 oferta",
+    "caixa de som bluetooth",
+    "soundbar promocao"
+  ]
+};
+
+function gerarBuscasGlobais(limite = 30) {
+  return Object.values(BUSCAS_GLOBAIS)
+    .flat()
+    .sort(() => Math.random() - 0.5)
+    .slice(0, limite);
+}
+
 // ================= CATEGORIAS GLOBAIS =================
 
 const CATEGORIAS_GLOBAIS = {
@@ -5254,57 +5329,7 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
 }
     console.log("🐶 Farejando ofertas ML (modo stealth)...");
 
-    const buscas = [
-      
-      "perfume",
-      "corta vento",
-      "camiseta",
-      "blusa",
-      "moleton",
-      "liquidificador",
-      "calça jeans",
-      "mochila",
-      "tenis feminino",
-      "miroondas",
-      "tv 60",
-      "meias puma",
-      "cuecas lupo",
-      "meias lupo",
-      "perfume masculino",
-      "perfume feminino",
-      "tenis masculino oferta",
-      "air fryer promocao",
-      "fone bluetooth promocao",
-      "smartwatch oferta",
-      "furadeira oferta",
-      "perfume masculino promocao",
-      "cadeira gamer oferta",
-      "monitor gamer promocao",
-      "mouse gamer oferta",
-      "teclado mecanico oferta",
-      "ssd 1tb promocao",
-      "kit ferramentas promocao",
-      "vara de pesca oferta",
-      "molinete pesca promocao",
-      "carretilha pesca oferta",
-      "linha multifilamento pesca",
-      "iscas artificiais pesca",
-      "kit pesca completo",
-      "maleta pesca oferta",
-      "caixa pesca organizadora",
-      "anzol pesca kit",
-      "chumbada pesca kit",
-      "boia pesca",
-      "alicate pesca oferta",
-      "cadeira pesca dobravel",
-      "suporte vara pesca",
-      "camiseta pesca protecao uv",
-      "oculos polarizado pesca",
-      "faca de pesca",
-      "mochila de pesca",
-      "lanterna de caça",
-      "barraca de camping pesca",        
-      ];
+    const buscas = gerarBuscasGlobais(40);
 
       const limiteBuscas =
       config.marketplaces?.mercadolivre?.limiteBuscasPorRodada || 1;
