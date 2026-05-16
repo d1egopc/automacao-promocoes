@@ -968,7 +968,17 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
 
         }
 
-        console.log("✅ Enviado destino WhatsApp:", destino.nome);
+       console.log("✅ Enviado destino WhatsApp:", destino.nome);
+
+       oferta.destinosEnviados = oferta.destinosEnviados || [];
+
+       oferta.destinosEnviados.push({
+       nome: destino.nome || "Destino",
+       tipo: destino.tipo || "desconhecido",
+       data: new Date().toLocaleString("pt-BR", {
+       timeZone: "America/Sao_Paulo"
+       })
+       });
 
         await new Promise(r => setTimeout(r, 3000));
       }
@@ -1019,7 +1029,17 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
         }
 
         console.log("✅ Enviado destino Telegram:", destino.nome);
+        
+       oferta.destinosEnviados = oferta.destinosEnviados || [];
 
+       oferta.destinosEnviados.push({
+       nome: destino.nome || "Destino",
+       tipo: destino.tipo || "desconhecido",
+       data: new Date().toLocaleString("pt-BR", {
+       timeZone: "America/Sao_Paulo"
+       })
+       });
+       
         await new Promise(r => setTimeout(r, 2000));
       }
     }
