@@ -3393,108 +3393,14 @@ async function farejarAliExpress() {
 
     let ofertasEncontradas = [];
 
-   const buscasBrasil = [
+const buscasBrasil = gerarBuscasGlobais(
+  config.marketplaces?.aliexpress?.limiteBuscasBrasil || 20
+);
 
-  "Veineda RX5600",
-  "hd exos brasil",
-  "hd seagate exos brasil",
-  "hd 16tb brasil",
-  "hd 18tb brasil",
-  "veineda",
-  "mongol",
-  "mongol",
-  "jieshuo",
+const buscasInternacional = gerarBuscasGlobais(
+  config.marketplaces?.aliexpress?.limiteBuscasInternacional || 10
+);
 
-  "aspirador portatil brasil",
-  "mini aspirador brasil",
-  "promo brasil",
-
-  "ssd 1tb brasil",
-  "ssd 2tb brasil",
-  "ssd nvme 1tb brasil",
-  "ssd nvme brasil",
-  "envio brasil",
-
-  "rx 6600 brasil",
-  "rx 7600 brasil",
-  "rx 7900 brasil",
-  "entrega brasil",
-
-  "rtx 4060 brasil",
-  "rtx 4070 brasil",
-  "fullview brasil",
-
-  "placa de video brasil",
-  "kit xeon brasil",
-  "mini pc brasil",
-  "top venda brasil",
-
-  "mouse gamer brasil",
-  "teclado mecanico brasil",
-  "teclado gamer brasil",
-
-  "fone bluetooth brasil",
-  "caixinha de som brasil",
-  "speaker bluetooth brasil",
-
-  "webcam brasil",
-  "face cam brasil",
-
-  "smartwatch brasil",
-  "camera wifi brasil",
-  "mais vendido brasil",
-
-  "multimetro digital brasil",
-  "estacao de solda brasil",
-  "fonte bancada brasil"
-];
-
-const buscasInternacionais = [
- 
-  "hd exos",
-  "seagate exos",
-  "hd 16tb",
-  "hd 18tb",
-
-  "ssd samsung",
-  "ssd kingston",
-  "ssd crucial",
-
-  "ssd 1tb",
-  "ssd 2tb",
-  "ssd nvme 1tb",
-  "ssd nvme",
-
-  "rx 6600",
-  "rx 7600",
-  "rx 7900",
-  "rx 590",
-
-  "rtx 4060",
-  "rtx 4070",
-
-  "kit xeon",
-  "placa de video",
-  "mini pc",
-  "kit placa mae",
-
-  "mouse gamer",
-  "teclado mecanico",
-  "teclado gamer",
-
-  "fone bluetooth",
-  "caixinha de som",
-  "speaker bluetooth",
-
-  "webcam",
-  "face cam",
-
-  "smartwatch",
-  "camera wifi",
-
-  "tv box",
-  "drone"
-];
 
   async function buscarTermoAliExpress(termo, tipo) {
   try {
@@ -3655,7 +3561,7 @@ if (desconto < minimoDescontoAplicado) continue;
          
         const linkCurto = await encurtarUrl(link);
 
-        const novaOferta = {
+        let novaOferta = {
           nome: titulo,
           titulo,
           preco: precoAtual,
@@ -3673,6 +3579,8 @@ if (desconto < minimoDescontoAplicado) continue;
           status: "pendente",
           clienteId: "admin"
         };
+
+        novaOferta = prepararOfertaGlobal(novaOferta);
 
         const jaExiste = ofertaJaExiste(novaOferta);
 
@@ -3859,7 +3767,7 @@ const html = await response.text();
 
           if (!produto?.precoAtual) continue;
 
-          const novaOferta = {
+          let novaOferta = {
             nome: produto.titulo,
             titulo: produto.titulo,
             preco: produto.precoAtual,
@@ -3877,6 +3785,8 @@ const html = await response.text();
             status: "pendente",
             clienteId: "admin"
           };
+
+          novaOferta = prepararOfertaGlobal(novaOferta);
 
           if (produtoSuspeito(novaOferta)) continue;
           if (ofertaJaExiste(novaOferta)) continue;
@@ -5663,31 +5573,9 @@ if (!config.marketplaces?.amazon?.ativo) {
     const limitePorRodada =
     config.marketplaces?.amazon?.limitePorRodada || 5;
 
-    const buscas = [
-      "air fryer",
-      "fone bluetooth",
-      "mouse gamer",
-      "teclado mecanico",
-      "ssd 1tb",
-      "monitor gamer",
-      "smartwatch",
-      "cafeteira",
-      "furadeira",
-      "cadeira escritorio",
-      "produto de limpeza",
-      "amaciante",
-      "desinfetante",
-      "sabao em po",
-      "papel higienico",
-      "kit limpeza",
-      "perfume masculino",
-      "perfume feminino",
-      "bicicleta eletrica",
-      "chuteira",
-      "camisa brasil",
-      "copa do mundo",
-      "smart tv",
-    ];
+    const buscas = gerarBuscasGlobais(
+    config.marketplaces?.amazon?.limiteBuscas || 30
+    );
 
     for (const termo of buscas) {
       const url = `https://www.amazon.com.br/s?k=${encodeURIComponent(termo)}&rh=p_n_deal_type%3A23565492011`;
@@ -5781,7 +5669,7 @@ if (!precoNumero || !Number.isFinite(precoNumero)) continue;
 if (precoNumero < 30) continue;
 if (desconto < 15 && !produto.avisoCupom) continue;
 
-const novaOferta = {
+let novaOferta = {
   nome: produto.titulo,
   titulo: produto.titulo,
   preco: produto.precoAtual,
@@ -5799,6 +5687,8 @@ const novaOferta = {
   status: "pendente",
   clienteId: "admin"
 };
+
+novaOferta = prepararOfertaGlobal(novaOferta);
 
 const jaExiste = ofertaJaExiste(novaOferta);
 
@@ -5943,7 +5833,7 @@ async function buscarOfertasShopee() {
           listType: 0,
           sortType: 2,
           page: 1,
-          limit: 30
+          limit: ${config.marketplaces?.shopee?.limiteBuscas || 30}
         ) {
           nodes {
             itemId
@@ -6036,7 +5926,7 @@ async function farejarShopee() {
 
         const precoAntigo = precoAntigoNumero.toFixed(2).replace(".", ",");
 
-        const novaOferta = {
+        let novaOferta = {
           nome: item.productName,
           titulo: item.productName,
           preco: precoAtual,
@@ -6056,6 +5946,8 @@ async function farejarShopee() {
           cupom: "",
           avisoCupom: "🎟️ Confira cupons disponíveis na página antes de finalizar."
         };
+
+        novaOferta = prepararOfertaGlobal(novaOferta);
 
         const jaExiste = fila.some(o =>
           o.link === novaOferta.link ||
@@ -6112,6 +6004,7 @@ async function farejarShopee() {
     console.log("❌ erro farejador Shopee:", e.message);
   }
 }
+
 
 const PORT = process.env.PORT || 3000;
 
