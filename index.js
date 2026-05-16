@@ -420,6 +420,101 @@ function gerarBuscasGlobais(limite = 30) {
     .slice(0, limite);
 }
 
+// =================== NÚCLEO GLOBAL DE OFERTAS ===================
+
+function normalizarTexto(valor = "") {
+  return String(valor)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function detectarCategoriaGlobal(oferta = {}) {
+  const texto = normalizarTexto(
+    `${oferta.titulo || oferta.nome || ""} ${oferta.categoria || ""}`
+  );
+
+  for (const [categoria, buscas] of Object.entries(BUSCAS_GLOBAIS || {})) {
+    const bate = buscas.some(termo => {
+      const termoLimpo = normalizarTexto(termo)
+        .replace("promocao", "")
+        .replace("oferta", "")
+        .trim();
+
+      return termoLimpo && texto.includes(termoLimpo.split(" ")[0]);
+    });
+
+    if (bate) return categoria;
+  }
+
+  return oferta.categoria || "geral";
+}
+
+function aplicarCupomAutomatico(oferta = {}) {
+  if (!oferta) return oferta;
+
+  if (oferta.cupom && String(oferta.cupom).trim()) {
+    return oferta;
+  }
+
+  const cupons = config.cuponsAtivos || [];
+  if (!Array.isArray(cupons) || !cupons.length) return oferta;
+
+  const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
+  const marketplace = normalizarTexto(oferta.marketplace || "");
+  const categoria = normalizarTexto(oferta.categoria || "");
+
+  for (const regra of cupons) {
+    if (!regra || regra.ativo === false) continue;
+
+    const regraMarketplace = normalizarTexto(regra.marketplace || "");
+
+    if (regraMarketplace && regraMarketplace !== marketplace) {
+      continue;
+    }
+
+    const termos = regra.termos || regra.palavras || [];
+    const categorias = regra.categorias || [];
+
+    const bateCategoria =
+      !categorias.length ||
+      categorias.some(c => categoria.includes(normalizarTexto(c)));
+
+    const bateTermo =
+      !termos.length ||
+      termos.some(t => titulo.includes(normalizarTexto(t)));
+
+    if (bateCategoria && bateTermo && regra.cupom) {
+      oferta.cupom = String(regra.cupom).trim();
+      oferta.avisoCupom =
+        regra.aviso ||
+        `Use o cupom ${oferta.cupom} para chegar no melhor valor.`;
+
+      oferta.cupomAutomatico = true;
+
+      console.log("🎟️ Cupom automático aplicado:", oferta.cupom, "-", oferta.titulo || oferta.nome);
+      break;
+    }
+  }
+
+  return oferta;
+}
+
+function prepararOfertaGlobal(oferta = {}) {
+  if (!oferta) return oferta;
+
+  oferta.titulo = oferta.titulo || oferta.nome || "Oferta";
+  oferta.nome = oferta.nome || oferta.titulo;
+
+  oferta.marketplace = normalizarTexto(oferta.marketplace || "geral");
+  oferta.categoria = oferta.categoria || detectarCategoriaGlobal(oferta);
+
+  oferta = aplicarCupomAutomatico(oferta);
+
+  return oferta;
+}
+
 // ================= CATEGORIAS GLOBAIS =================
 
 const CATEGORIAS_GLOBAIS = {
@@ -5491,7 +5586,7 @@ if (
 ) continue;
 
             
-            const novaOferta = {
+            let novaOferta = {
               nome: produto.titulo,
               titulo: produto.titulo,
               preco: produto.precoAtual,
@@ -5509,6 +5604,8 @@ if (
               status: "pendente",
               clienteId: "admin"
             };
+
+            novaOferta = prepararOfertaGlobal(novaOferta);
 
            const jaExiste = ofertaJaExiste(novaOferta);
 
