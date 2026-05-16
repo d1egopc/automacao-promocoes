@@ -508,7 +508,14 @@ function prepararOfertaGlobal(oferta = {}) {
   oferta.nome = oferta.nome || oferta.titulo;
 
   oferta.marketplace = normalizarTexto(oferta.marketplace || "geral");
-  oferta.categoria = oferta.categoria || detectarCategoriaGlobal(oferta);
+  if (
+  !oferta.categoria ||
+  ["aliexpress", "amazon", "shopee", "mercadolivre", "magalu", "awin"].includes(
+    normalizarTexto(oferta.categoria)
+  )
+) {
+  oferta.categoria = detectarCategoriaGlobal(oferta);
+}
 
   oferta = aplicarCupomAutomatico(oferta);
 
