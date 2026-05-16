@@ -523,6 +523,9 @@ function aplicarCupomAutomatico(oferta = {}) {
   return oferta;
 }
 
+
+// ====================== FUNCAO PREPARA OFERTA GLOBAL =========================
+
 function prepararOfertaGlobal(oferta = {}) {
   if (!oferta) return oferta;
 
@@ -530,14 +533,30 @@ function prepararOfertaGlobal(oferta = {}) {
   oferta.nome = oferta.nome || oferta.titulo;
 
   oferta.marketplace = normalizarTexto(oferta.marketplace || "geral");
+
   if (
-  !oferta.categoria ||
-  ["aliexpress", "amazon", "shopee", "mercadolivre", "magalu", "awin"].includes(
-    normalizarTexto(oferta.categoria)
-  )
-) {
-  oferta.categoria = detectarCategoriaGlobal(oferta);
-}
+    !oferta.categoria ||
+    ["aliexpress", "amazon", "shopee", "mercadolivre", "magalu", "awin"].includes(
+      normalizarTexto(oferta.categoria)
+    )
+  ) {
+    oferta.categoria = detectarCategoriaGlobal(oferta);
+  }
+
+  const agoraBR = new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  });
+
+  oferta.criadoEm = oferta.criadoEm || agoraBR;
+  oferta.dataEntradaFila = oferta.dataEntradaFila || agoraBR;
+
+  oferta.status = oferta.status || "pendente";
+  oferta.statusDetalhe = oferta.statusDetalhe || "Aguardando envio";
+  oferta.destinosEnviados = oferta.destinosEnviados || [];
+  oferta.logsEnvio = oferta.logsEnvio || [];
+  oferta.erro = oferta.erro || "";
+  oferta.erroEm = oferta.erroEm || "";
+  oferta.dataEntradaFila = oferta.dataEntradaFila || agoraBR;
 
   oferta = aplicarCupomAutomatico(oferta);
 
@@ -1262,16 +1281,43 @@ oferta.enviadoEm = new Date().toLocaleString("pt-BR", {
 });
 
 oferta.dataEnvio = oferta.enviadoEm;
+oferta.statusDetalhe = `Enviada para ${destinosInteligentes.length} destino(s)`;
+
+oferta.logsEnvio = oferta.logsEnvio || [];
+oferta.logsEnvio.push({
+  tipo: "sucesso",
+  mensagem: oferta.statusDetalhe,
+  data: oferta.enviadoEm
+});
 
 salvarFila();
 
 console.log("✅ Enviado com controle de tempo");
 
-  } catch (e) {
-    console.log("❌ ERRO:", e.message);
-  } finally {
-    enviandoAgora = false;
+ } catch (e) {
+  console.log("❌ ERRO:", e.message);
+
+  if (oferta) {
+    oferta.status = "erro";
+    oferta.erro = e.message;
+    oferta.erroEm = new Date().toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo"
+    });
+    oferta.statusDetalhe = `Erro no envio: ${e.message}`;
+
+    oferta.logsEnvio = oferta.logsEnvio || [];
+    oferta.logsEnvio.push({
+      tipo: "erro",
+      mensagem: oferta.statusDetalhe,
+      data: oferta.erroEm
+    });
+
+    salvarFila();
   }
+
+} finally {
+  enviandoAgora = false;
+}
 }
    
 const {
