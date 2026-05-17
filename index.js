@@ -1369,7 +1369,7 @@ app.use(rateLimit({
 app.post("/fila", (req, res) => {
   const body = req.body || {};
 
-  const oferta = {
+let oferta = {
     nome: body.nome || body.titulo || "Oferta",
     titulo: body.titulo || body.nome || "Oferta",
 
@@ -1422,6 +1422,8 @@ app.post("/fila", (req, res) => {
 oferta.criadoEm = oferta.criadoEm || new Date().toLocaleString("pt-BR", {
   timeZone: "America/Sao_Paulo"
 }); 
+
+  oferta = prepararOfertaGlobal(oferta);
 
   fila.push(oferta);
   salvarFila();
