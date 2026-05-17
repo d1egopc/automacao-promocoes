@@ -413,7 +413,7 @@ const BUSCAS_GLOBAIS = {
     "tenis masculino oferta", "tenis masculino adidas", "tenis masculino fila",
     "tenis feminino promocao", "tenis feminino adidas", "tenis feminino fila",
     "mizuno promocao", "fila promocao", "adidas promocao", "mizuno promocao",
-    "nike promocao", "olympicus promocao", puma promocao", "asics promocao", "fila",
+    "nike promocao", "olympicus promocao", "puma promocao", "asics promocao", "fila",
     "new balance promocao", "chinelo promocao" "kappa promocao", reebok promocao",
     "chinelo nike", "chinelo promocao" "chinelo rider", "sandalha", "rasteirinha",
     "chinelo cropped masculino", "chinelo cropped feminino", "chinelo havaianas",
