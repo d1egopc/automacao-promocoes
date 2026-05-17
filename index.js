@@ -490,7 +490,7 @@ mercearia: [
   "arroz promocao", "feijao promocao", "azeite",
   "kit churrasco", "kit cozinha", "temperos",
   "chocolate promocao", "biscoito promocao", "snack fit"
-]
+],
 
 moda: [
   "camiseta masculina", "camiseta feminina",
@@ -528,7 +528,7 @@ brinquedos: [
   "carrinho controle remoto", "hot wheels",
   "piscina infantil", "patinete",
   "skate infantil", "brinquedo educativo"
-]
+],
 
 
  ferramentas: [
