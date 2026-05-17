@@ -1451,6 +1451,15 @@ if (antigo > atual && atual > 0) {
 // ================= ENVIO DESTINOS INTELIGENTES =================
 
 for (const destino of destinosInteligentes) {
+
+if (!categoriaPermitidaNoDestino(oferta, destino)) {
+  console.log("⏭️ Categoria bloqueada para destino:", {
+    destino: destino.nome,
+    categoriaOferta: oferta.categoria
+  });
+
+  continue;
+}
   await enviarParaDestinoInteligente(
     destino,
     oferta,
@@ -3715,6 +3724,44 @@ function escolherMelhorCupom(marketplace, titulo = "", categoria = "") {
   if (!candidatos.length) return null;
 
   return candidatos[0];
+}
+
+// =========== NORMALIZADOR GLOBAL DE CATEGORIAS ===========
+
+function normalizarCategoria(txt = "") {
+  return String(txt || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// =========== VALIDAR CATEGORIA DO DESTINO ===========
+
+function categoriaPermitidaNoDestino(oferta, destino) {
+  const categoriaOferta = normalizarCategoria(
+    oferta.categoria || oferta.categoriaProduto || ""
+  );
+
+  const categoriasDestino = (
+    destino.categorias ||
+    destino.categoriasPermitidas ||
+    []
+  )
+    .map(normalizarCategoria)
+    .filter(Boolean);
+
+  if (!categoriasDestino.length) return true;
+
+  if (!categoriaOferta) return false;
+
+  return categoriasDestino.some(cat =>
+    categoriaOferta === cat ||
+    categoriaOferta.includes(cat) ||
+    cat.includes(categoriaOferta)
+  );
 }
 
 
