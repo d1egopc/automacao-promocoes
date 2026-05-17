@@ -374,66 +374,190 @@ const BUSCAS_GLOBAIS = {
   "vara de pesca oferta", "vara telescópica", "vara de carretilha",
   "molinete pesca promocao", "carretilha de pesca", "anzol",
   "iscas artificiais pesca", "linha de pesca", "caixa pesca organizadora",
-  "mochila de pesca", "fogareiro", "fogao portatil",
-  "tenis nautico", "bota de pescador", "rede de dormir",
-  "barraca", "linha multifilamento", "linha fluorcarbono",
-  "kit de pesca", "marine sports", "abu garcia",
-  "daiwa", "shimano", "nelson nakamura"
+  "mochila de pesca", "fogareiro", "fogao portatil", "chaira",
+  "tenis nautico", "bota de pescador", "rede de dormir", "caixa termica",
+  "barraca", "linha multifilamento", "linha fluorcarbono", "linha de pesca",
+  "kit de pesca", "marine sports", "abu garcia", "lori fishing", "venza",
+  "daiwa", "shimano", "nelson nakamura", "vexter", "brava", "mochila de pesca",
+  "jogá", "joga", "mochila joga", "mochila de pesca com suporte", "faca de pesca"
 ],
 
   beleza: [
-    "perfume masculino promocao",
-    "perfume feminino promocao",
-    "shampoo promocao",
-    "desodorante promocao",
-    "hidratante promocao"
-  ],
-
+    "perfume masculino promocao", "kit malbec","promocao boticario",
+    "perfume feminino promocao",  "kit natura","promocao natura",
+    "shampoo promocao",  "kit perfume","kit locao", "kit shampoo",
+    "desodorante promocao", "kit creme", "promocao de creme",
+    "hidratante promocao", "kit hidratante", "sabonete", "eudora",
+    "maquiagem", "esmalt", "glos labial", "baton", "pulseira" 
+  ], 
+ 
   hardware: [
-    "ssd 1tb promocao",
-    "mouse gamer oferta",
-    "teclado mecanico oferta",
-    "placa de video promocao",
-    "headset gamer oferta"
+    "nvme 1tb m2", "nvme", "ssd 500 gb", "ssd kingston",
+    "ssd 1tb promocao", "ssd 1tb kootion", "hd exos",
+    "mouse gamer oferta", "attack shark", "redragom",
+    "teclado mecanico oferta", "monitor curvo",
+    "placa de video promocao", "monitor gamer",
+    "headset gamer oferta", "monitor gamer oferta",
+    "netac", "m2 movespeed", "movespeed", "sandisk",
+    "fonte gamer", "fonte gamer promocao", "corsair", 
+    "knup", "revengers", "master cool", "deep cool",
+    "air cooler gamer", "water cooler", "water gamer",
+    "teclado magnetico", "mini teclado", "rise mode",
+    "headset promocao", "headset barato", "mouse sem fio",
+    "headset rise", "headset havit", "headset headset binnune",
+    "tgt", "corsair", "montech", "gabinte gamer", "binnune", 
+    "nvidia", "amd", "ryzen", "intel", "redragon", "rise"  
   ],
 
   tenis: [
-    "tenis masculino oferta",
-    "tenis feminino promocao",
-    "mizuno promocao",
-    "nike promocao",
-    "chinelo promocao"
+    "tenis masculino oferta", "tenis masculino adidas", "tenis masculino fila",
+    "tenis feminino promocao", "tenis feminino adidas", "tenis feminino fila",
+    "mizuno promocao", "fila promocao", "adidas promocao", "mizuno promocao",
+    "nike promocao", "olympicus promocao", puma promocao", "asics promocao", "fila",
+    "new balance promocao", "chinelo promocao" "kappa promocao", reebok promocao",
+    "chinelo nike", "chinelo promocao" "chinelo rider", "sandalha", "rasteirinha",
+    "chinelo cropped masculino", "chinelo cropped feminino", "chinelo havaianas",
+    "nike", "olympicus", "mizuno", "kappa", "new balance", "havaianas", "asics"   
   ],
 
   casa: [
-    "air fryer promocao",
-    "liquidificador promocao",
-    "cafeteira promocao",
-    "ventilador promocao",
-    "cadeira escritorio"
+    "air fryer promocao", "condicionador de ar", "ar split",
+    "liquidificador promocao", "ar condicionado", "espelho",
+    "cafeteira promocao", "torneira automatica", "torneira",
+    "ventilador promocao", "torneira de pia gourmet",
+    "cadeira escritorio", "torneira de banheiro", "luminaria",
+    "refletor externo", "refletor", "varal de chão",  "varal",
+    "varal de parede", "varal versatil", "lixeira",  "campainha",
+    "abajur", "fechadura eletrônica", "lustre",  "campainha sem fio"
   ],
 
-  ferramentas: [
-    "furadeira oferta",
-    "parafusadeira promocao",
-    "kit ferramentas promocao",
-    "maleta ferramentas promocao"
-  ],
+  automotivo: [
+  "central multimidia", "som automotivo", "pneu promocao",
+  "oleo motor", "kit xenon", "lampada led automotiva",
+  "camera de re", "multimidia android", "tapete automotivo",
+  "carregador veicular", "compressor automotivo", "macaco hidraulico",
+  "pelicula automotiva", "alarme automotivo", "sensor de estacionamento",
+  "calota", "volante esportivo", "retrovisor automotivo",
+  "caixa trio automotiva", "subwoofer", "corneta automotiva",
+  "modulo taramps", "stetsom", "pioneer", "jbl selenium"
+],
+
+eletrodomesticos: [
+  "geladeira promocao", "maquina de lavar", "microondas",
+  "fogao promocao", "cooktop", "forno eletrico",
+  "lava e seca", "aspirador de po", "robo aspirador",
+  "air fryer", "frigobar", "purificador de agua",
+  "bebedouro", "freezer horizontal", "coifa cozinha",
+  "depurador", "centrifuga roupa", "maquina lava louca"
+],
+
+eletroportateis: [
+  "escova secadora", "secador de cabelo", "chapinha",
+  "barbeador eletrico", "maquina cortar cabelo",
+  "cafeteira", "liquidificador", "batedeira",
+  "espremedor", "panela eletrica", "grill eletrico",
+  "fritadeira eletrica", "vaporizador", "passadeira vapor",
+  "aspirador portatil", "massageador eletrico"
+],
+
+limpeza: [
+  "sabao liquido", "amaciante promocao", "desinfetante",
+  "detergente", "papel higienico", "kit limpeza",
+  "mop giratorio", "rodo magico", "vassoura eletrica",
+  "limpa piso", "alcool limpeza", "esponja limpeza",
+  "lava roupas", "produto limpeza pesada", "kit lavanderia"
+],
+
+notebooksPc: [
+  "notebook gamer", "notebook promocao", "pc gamer",
+  "gabinete gamer", "cadeira gamer", "mesa gamer",
+  "monitor gamer", "notebook lenovo", "notebook dell",
+  "notebook samsung", "macbook", "mini pc",
+  "all in one", "chromebook", "kit upgrade pc"
+],
+
+perifericos: [
+  "mouse gamer", "mouse sem fio", "teclado mecanico",
+  "headset gamer", "webcam", "microfone gamer",
+  "mousepad gamer", "controle gamer", "adaptador usb",
+  "hub usb", "fonte notebook", "cooler notebook",
+  "cadeira gamer", "suporte notebook", "mesa digitalizadora"
+],
+
+mercearia: [
+  "cafe promocao", "capsula dolce gusto", "whey protein",
+  "creatina", "barra proteina", "suplemento",
+  "arroz promocao", "feijao promocao", "azeite",
+  "kit churrasco", "kit cozinha", "temperos",
+  "chocolate promocao", "biscoito promocao", "snack fit"
+]
+
+moda: [
+  "camiseta masculina", "camiseta feminina",
+  "bermuda masculina", "calca jeans", "vestido feminino",
+  "roupa infantil", "jaqueta masculina", "moletom",
+  "lingerie", "cropped", "conjunto feminino",
+  "camisa polo", "roupa fitness", "moda evangelica"
+],
+
+bebes: [
+  "fralda promocao", "kit bebe", "mamadeira", "fralda pampers",
+  "carrinho bebe", "berco", "banheira bebe", "kit fralda pampers",
+  "roupa bebe", "cadeira alimentacao","fra", "fralda",  "chupeta",
+  "brinquedo educativo", "pomada assadura", "tapete de bebe",
+  "brinquedo infantil", "pomada pra assadura", "shampoo de bebe"
+],
+
+petshop: [
+  "racao cachorro", "racao gato", "areia gato",
+  "brinquedo pet", "coleira cachorro",
+  "tapete higienico", "casinha cachorro",
+  "arranhador gato", "petisco cachorro"
+],
+
+esporte: [
+  "bicicleta promocao", "esteira eletrica",
+  "halter", "smartwatch esportivo",
+  "camisa futebol", "bola futebol",
+  "luva academia", "bicicleta ergometrica",
+  "equipamento academia", "kimono"
+],
+
+brinquedos: [
+  "lego promocao", "boneca infantil",
+  "carrinho controle remoto", "hot wheels",
+  "piscina infantil", "patinete",
+  "skate infantil", "brinquedo educativo"
+]
+
+
+ ferramentas: [
+    "furadeira oferta", kit ferramentas", parafusadeira de impacto",
+    "parafusadeira promocao", "chave de impacato", "lixadeira",
+    "kit ferramentas promocao", "moto serra portatil", "bomba de veneno",
+    "macaco jacaré", "macaco hidraulico", "extitor automotivo", "chave philips",
+    "kit parafusadeira", "extintor de incendio veicular", "chave de fenda",
+    "jogo de chave combinada", "kit chave de fenda", "kit chave philips",
+    "combo chave de impacto", "compressor de ar", "chave inglesa"    
+  ], 
 
   celulares: [
-    "smartphone promocao",
-    "iphone oferta",
-    "samsung galaxy promocao",
-    "xiaomi promocao",
-    "motorola promocao"
+    "smartphone promocao", "smartphone promocao relâmpago",
+    "iphone oferta", "smartphone barato", "smartphone cupom",
+    "samsung galaxy promocao", "smartphone xiaomi", "nokia",
+    "xiaomi promocao", "smartphone pocophone", "smartphone galax",
+     "xiaomi", "samsumg", "lg", "xiaomi", "caterpillar", "sony"
   ],
 
   audioTv: [
     "smart tv promocao",
-    "tv 55 promocao",
-    "tv 65 oferta",
-    "caixa de som bluetooth",
-    "soundbar promocao"
+    "tv 43 promocao", "tv monitor", "suporte para tv",
+    "tv 55 promocao", "tv oled 144hz", "home theater",
+    "tv 65 oferta", "conversor digital", "tv stick wi-fi",
+    "tv 75 oferta", "box ip tv", "tv stick adroid", 
+    "caixa de som bluetooth", "caixa de som jbl", "cabo hdmi",
+    "caixa de som aiwa", "soundbar promocao", "samsung",
+    "lg", "philco", "philips", "tcl", "roku","panassonic"
   ]
 };
 
