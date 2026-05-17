@@ -591,7 +591,7 @@ brinquedos: [
   "bola de futebol", "skate infantil", "brinquedo educativo",
   "losa magica", "motoca", "kit de carrinho", "brinquedo educativo",
   "boneca", "boneco", "pistola de agua", "caminhao de terra",
-  "batman" "homem aranha", "hulk", "robo", "homem de ferro" 
+  "batman", "homem aranha", "hulk", "robo", "homem de ferro" 
 ],
 
 
