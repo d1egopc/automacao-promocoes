@@ -3005,7 +3005,7 @@ const encurtarUrl = async (url) => {
 async function importarMercadoLivre(url, config) {
   const cookies = config?.credenciais?.cookies || "";
   
-  console.log("🌐 AMAZON URL:", url);
+  console.log("🌐 ML URL:", url);
 
   const response = await fetch(url, {
   method: "GET",
@@ -3640,19 +3640,64 @@ function gerarHeadersStealth() {
   };
 }
 
+// =========== FILTRO GLOBAL DE CUPONS ===========
+
+function limparCuponsInvalidos(cupons = []) {
+  const blacklist = [
+    "APPLE",
+    "APPLICATION",
+    "APPPROPS",
+    "OFFSET",
+    "OFFICIAL",
+    "APPLY",
+    "APPENDCHILD",
+    "OFFERS",
+    "OFFER",
+    "OFFSETHEIGHT",
+    "APPLEWEBKIT",
+    "MELIDATA",
+    "MELIMAIS",
+    "MELIPLUS",
+    "FUNCTION",
+    "OBJECT",
+    "RETURN",
+    "SCRIPT",
+    "WEBPACK",
+    "WINDOW",
+    "DOCUMENT",
+    "NULL",
+    "UNDEFINED"
+  ];
+
+  return [...new Set(
+    cupons.filter(c =>
+      c &&
+      typeof c === "string" &&
+      c.length >= 4 &&
+      c.length <= 20 &&
+      /^[A-Z0-9_-]+$/i.test(c) &&
+      !blacklist.includes(c.toUpperCase())
+    )
+  )];
+}
+
 //============ FUNCAO FAREJAR CUPOM MERCADO LIVRE ================
 
 async function farejarCuponsMercadoLivre(html = "") {
   try {
     const texto = String(html || "").toUpperCase();
 
-    const encontrados = [
+    let cuponsEncontrados = [
       ...texto.matchAll(
         /\b(MELI[A-Z0-9]{3,}|CASINHA|SUPERFASHION|APP[A-Z0-9]{2,}|OFF[A-Z0-9]{2,})\b/g
       )
     ].map(m => m[1]);
 
-    const cuponsUnicos = [...new Set(encontrados)];
+    // 🔥 limpeza global
+    cuponsEncontrados = limparCuponsInvalidos(cuponsEncontrados);
+
+    // 🔥 remove duplicados
+    const cuponsUnicos = [...new Set(cuponsEncontrados)];
 
     for (const cupom of cuponsUnicos) {
       registrarCupomAtivo({
