@@ -475,6 +475,47 @@ function detectarCategoriaGlobal(oferta = {}) {
   return oferta.categoria || "geral";
 }
 
+//================= FUNCAO REGISTRA CUPOM =======================
+
+function registrarCupomAtivo(regra = {}) {
+  if (!regra.cupom) return false;
+
+  config.cuponsAtivos = config.cuponsAtivos || [];
+
+  const cupom = String(regra.cupom).trim().toUpperCase();
+  const marketplace = normalizarTexto(regra.marketplace || "");
+
+  const jaExiste = config.cuponsAtivos.some(c =>
+    String(c.cupom || "").trim().toUpperCase() === cupom &&
+    normalizarTexto(c.marketplace || "") === marketplace
+  );
+
+  if (jaExiste) return false;
+
+  config.cuponsAtivos.push({
+    ativo: true,
+    marketplace,
+    cupom,
+    categorias: regra.categorias || [],
+    termos: regra.termos || [],
+    aviso:
+      regra.aviso ||
+      `Use o cupom ${cupom} para tentar chegar no melhor valor.`,
+    origem: regra.origem || "farejador",
+    criadoEm: new Date().toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo"
+    })
+  });
+
+  salvarConfig();
+
+  console.log("🎟️ Novo cupom ativo registrado:", cupom, marketplace);
+
+  return true;
+}
+
+//================= FUNCAO APLICA CUPOM AUTO ====================
+
 function aplicarCupomAutomatico(oferta = {}) {
   if (!oferta) return oferta;
 
@@ -3475,7 +3516,39 @@ function gerarHeadersStealth() {
   };
 }
 
-// ================= FAREJADOR ALIEXPRESS =================
+//============ FUNCAO FAREJAR CUPOM MERCADO LIVRE ================
+
+async function farejarCuponsMercadoLivre(html = "") {
+  try {
+    const texto = String(html || "").toUpperCase();
+
+    const encontrados = [
+      ...texto.matchAll(
+        /\b(MELI[A-Z0-9]{3,}|CASINHA|SUPERFASHION|APP[A-Z0-9]{2,}|OFF[A-Z0-9]{2,})\b/g
+      )
+    ].map(m => m[1]);
+
+    const cuponsUnicos = [...new Set(encontrados)];
+
+    for (const cupom of cuponsUnicos) {
+      registrarCupomAtivo({
+        marketplace: "mercadolivre",
+        cupom,
+        origem: "mercadolivre-auto",
+        aviso: `Use o cupom ${cupom} para chegar no melhor valor.`
+      });
+    }
+
+    if (cuponsUnicos.length) {
+      console.log("🎟️ Cupons ML encontrados:", cuponsUnicos);
+    }
+
+  } catch (e) {
+    console.log("❌ erro farejarCuponsMercadoLivre:", e.message);
+  }
+}
+
+// ================= FAREJADOR ALIEXPRESS ========================
 
 async function farejarAliExpress() {
   try {
@@ -5476,6 +5549,8 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
 }
 
 const html = await response.text(); 
+
+await farejarCuponsMercadoLivre(html);
 
 if (html.includes("suspicious-traffic-frontend")) {
   console.log("🛡️ Mercado Livre bloqueou por tráfego suspeito.");
