@@ -550,14 +550,23 @@ perfumariaBeleza: [
   "creatina", "whey protein",
   "termogenico", "multivitaminico",
   "melzinho", "massageador corporal"
-]
+],
 
 bebes: [
-  "fralda promocao", "kit bebe", "mamadeira", "fralda pampers",
-  "carrinho bebe", "berco", "banheira bebe", "kit fralda pampers",
-  "roupa bebe", "cadeira alimentacao","fra", "fralda",  "chupeta",
-  "brinquedo educativo", "pomada assadura", "tapete de bebe",
-  "brinquedo infantil", "pomada pra assadura", "shampoo de bebe"
+  "fralda promocao", "kit bebe",
+  "mamadeira", "fralda pampers",
+  "fralda huggies", "carrinho bebe",
+  "berco", "banheira bebe",
+  "kit fralda pampers", "roupa bebe",
+  "cadeira alimentacao", "fralda",
+  "chupeta", "brinquedo educativo",
+  "pomada assadura", "pomada pra assadura",
+  "tapete de bebe", "brinquedo infantil",
+  "shampoo de bebe", "lenco umedecido",
+  "kit maternidade", "saida maternidade",
+  "babador", "berco portatil",
+  "cadeirinha bebe", "andador bebe",
+  "banho bebe", "nan", "aptamil"
 ],
 
 petshop: [
