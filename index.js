@@ -415,7 +415,7 @@ const BUSCAS_GLOBAIS = {
     "mizuno promocao", "fila promocao", "adidas promocao", "mizuno promocao",
     "nike promocao", "olympicus promocao", "puma promocao", "asics promocao", "fila",
     "new balance promocao", "chinelo promocao", "kappa promocao", "reebok promocao",
-    "chinelo nike", "chinelo promocao" "chinelo rider", "sandalha", "rasteirinha",
+    "chinelo nike", "chinelo promocao", "chinelo rider", "sandalha", "rasteirinha",
     "chinelo cropped masculino", "chinelo cropped feminino", "chinelo havaianas",
     "nike", "olympicus", "mizuno", "kappa", "new balance", "havaianas", "asics"   
   ],
