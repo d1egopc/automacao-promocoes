@@ -489,9 +489,9 @@ perifericos: [
 
 mercearia: [
   "cafe promocao", "capsula dolce gusto", "whey protein",
-  "creatina", "barra proteina", "suplemento",
-  "arroz promocao", "feijao promocao", "azeite",
-  "kit churrasco", "kit cozinha", "temperos",
+  "creatina", "barra proteina", "suplemento", "olho de coco",
+  "arroz promocao", "feijao promocao", "azeite", "sal marinho",
+  "kit churrasco", "kit cozinha", "temperos", "sal integral",
   "chocolate promocao", "biscoito promocao", "snack fit"
 ],
 
@@ -577,12 +577,40 @@ petshop: [
 ],
 
 esporte: [
-  "bicicleta promocao","esteira eletrica",
-  "halter", "smartwatch esportivo",
-  "camisa futebol", "bola futebol",
-  "luva academia", "bicicleta ergometrica",
-  "equipamento academia", "kimono"
+  // ACADEMIA
+  "halter", "kit halter",
+  "barra musculacao", "anilha",
+  "luva academia", "cinto musculacao",
+  "corda pular", "colchonete yoga",
+  "tapete yoga", "faixa elastica",
+  "mini band", "garrafinha academia",
+  "squeeze termica", "bolsa academia",
+  "equipamento academia",
+  "bicicleta ergometrica",
+  "esteira eletrica",
+  "smartwatch esportivo",
+
+  // SUPLEMENTOS
+  "whey protein", "creatina",
+  "pre treino", "bcaa",
+  "albumina", "hipercalorico",
+  "termogenico", "multivitaminico",
+  "colageno", "glutamina",
+  "coqueteleira", "suplemento",
+
+  // ESPORTES
+  "camisa futebol",
+  "bola futebol",
+  "chuteira",
+  "joelheira",
+  "cotoveleira",
+  "kimono",
+  "bicicleta promocao",
+  "patins",
+  "skate",
+  "raquete beach tennis"
 ],
+
 
 brinquedos: [
   "lego promocao", "boneca infantil", "caminhao de controle",
