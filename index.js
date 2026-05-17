@@ -975,10 +975,10 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
        oferta.destinosEnviados.push({
        nome: destino.nome || "Destino",
        tipo: destino.tipo || "desconhecido",
-       data: new Date().toLocaleString("pt-BR", {
+       dataEnvio: new Date().toLocaleString("pt-BR", {
        timeZone: "America/Sao_Paulo"
-       })
-       });
+      })
+      });
 
         await new Promise(r => setTimeout(r, 3000));
       }
@@ -1035,11 +1035,11 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
        oferta.destinosEnviados.push({
        nome: destino.nome || "Destino",
        tipo: destino.tipo || "desconhecido",
-       data: new Date().toLocaleString("pt-BR", {
+       dataEnvio: new Date().toLocaleString("pt-BR", {
        timeZone: "America/Sao_Paulo"
-       })
-       });
-       
+      })
+      });
+    
         await new Promise(r => setTimeout(r, 2000));
       }
     }
