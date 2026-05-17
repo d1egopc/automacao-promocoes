@@ -532,7 +532,7 @@ brinquedos: [
 
 
  ferramentas: [
-    "furadeira oferta", kit ferramentas", parafusadeira de impacto",
+    "furadeira oferta", "kit ferramentas", parafusadeira de impacto",
     "parafusadeira promocao", "chave de impacato", "lixadeira",
     "kit ferramentas promocao", "moto serra portatil", "bomba de veneno",
     "macaco jacaré", "macaco hidraulico", "extitor automotivo", "chave philips",
