@@ -444,7 +444,7 @@ const BUSCAS_GLOBAIS = {
 
 eletrodomesticos: [
   "geladeira promocao", "maquina de lavar", "microondas",
-  "fogao promocao", "cooktop", "forno eletrico",
+  "fogao promocao", "cooktop", "forno eletrico", "ar split",
   "lava e seca", "aspirador de po", "robo aspirador",
   "air fryer", "frigobar", "purificador de agua",
   "bebedouro", "freezer horizontal", "coifa cozinha",
@@ -465,8 +465,11 @@ limpeza: [
   "detergente", "papel higienico", "kit limpeza",
   "mop giratorio", "rodo magico", "vassoura eletrica",
   "limpa piso", "alcool limpeza", "esponja limpeza",
-  "lava roupas", "produto limpeza pesada", "kit lavanderia"
-],
+  "lava roupas", "produto limpeza pesada", "kit lavanderia",
+  "amo 4 kg", "omo", "ype", "tira mancha venesh", "venesh",
+  "limpador multiuso", "veja", "downy", "cif multiuso",
+  "brilhante", "downy amaciante ", "dwayne ", "bom ar"
+],  
 
 notebooksPc: [
   "notebook gamer", "notebook promocao", "pc gamer",
@@ -492,13 +495,62 @@ mercearia: [
   "chocolate promocao", "biscoito promocao", "snack fit"
 ],
 
-moda: [
-  "camiseta masculina", "camiseta feminina",
-  "bermuda masculina", "calca jeans", "vestido feminino",
-  "roupa infantil", "jaqueta masculina", "moletom",
-  "lingerie", "cropped", "conjunto feminino",
-  "camisa polo", "roupa fitness", "moda evangelica"
+modaFeminina: [
+  "vestido feminino", "cropped",
+  "conjunto feminino", "legging feminina",
+  "calca feminina", "short feminino",
+  "blusa feminina", "baby doll",
+  "pijama feminino", "lingerie",
+  "sutia", "calcinha",
+  "moda evangelica feminina",
+  "bolsa feminina", "sandalia feminina",
+  "salto feminino", "tenis feminino",
+  "jaqueta feminina", "moletom feminino",
+  "roupa fitness feminina",
+  "saia feminina", "biquini",
+  "maio feminino", "camiseta feminina",
+  "plus size feminina"
 ],
+
+modaMasculina: [
+  "camiseta masculina", "camisa polo",
+  "bermuda masculina", "calca jeans masculina",
+  "cueca", "carteira masculina",
+  "tenis masculino", "chinelo masculino",
+  "moletom masculino", "jaqueta masculina",
+  "camisa social masculina",
+  "roupa fitness masculina",
+  "regata masculina",
+  "short masculino",
+  "bone masculino",
+  "relogio masculino",
+  "perfume masculino",
+  "roupa evangelica masculina",
+  "camisa time futebol",
+  "roupa termica masculina"
+],
+
+perfumariaBeleza: [
+  "perfume importado", "perfume promocao", "perfume masculino",
+  "perfume feminino", "azzaro", "ferrari black",
+  "eternity", "212", "armani", "hugo boss",
+  "lattafa", "asad", "malbec", "natura",
+  "eudora", "boticario", "kaiak",
+  "essencial", "club 6", "zaad",
+  "coffee woman", "quasar", "perfume arabe",
+  "pomada para dor", "gel para dor muscular",
+  "gelo reutilizavel", "protetor solar",
+  "creme dental", "pasta de dente",
+  "listerine", "enxaguante bucal",
+  "fio dental", "lenco umedecido",
+  "hipoglos", "vick vaporub",
+  "pastilha garganta", "doralgina",
+  "omeprazol", "pantoprazol",
+  "vitamina c", "colageno",
+  "creatina", "whey protein",
+  "termogenico", "multivitaminico",
+  "melzinho", "massageador corporal"
+]
 
 bebes: [
   "fralda promocao", "kit bebe", "mamadeira", "fralda pampers",
@@ -524,10 +576,13 @@ esporte: [
 ],
 
 brinquedos: [
-  "lego promocao", "boneca infantil",
-  "carrinho controle remoto", "hot wheels",
-  "piscina infantil", "patinete",
-  "skate infantil", "brinquedo educativo"
+  "lego promocao", "boneca infantil", "caminhao de controle",
+  "carrinho controle remoto", "hot wheels", "lancha de controle",
+  "piscina infantil", "patinete", "trator de controle remoto", 
+  "bola de futebol" "skate infantil", "brinquedo educativo,
+  "losa magica" "motoca", "kit de carrinho", "brinquedo educativo",
+  "boneca" "boneco", "pistola de agua", "caminhao de terra",
+  "batman" "homem aranha", "hulk", "robo", "homem de ferro" 
 ],
 
 
