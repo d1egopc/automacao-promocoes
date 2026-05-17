@@ -3681,6 +3681,43 @@ function limparCuponsInvalidos(cupons = []) {
   )];
 }
 
+// =========== ESCOLHER MELHOR CUPOM GLOBAL ===========
+
+function escolherMelhorCupom(marketplace, titulo = "", categoria = "") {
+  const lista = cuponsAtivos || [];
+
+  const normalizar = txt =>
+    String(txt || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+  const mp = normalizar(marketplace);
+  const t = normalizar(titulo);
+  const cat = normalizar(categoria);
+
+  const candidatos = lista.filter(c => {
+    if (!c || !c.cupom) return false;
+
+    const cupomMarketplace = normalizar(c.marketplace);
+    const cupomCategoria = normalizar(c.categoria || "");
+    const cupomTitulo = normalizar(c.titulo || "");
+
+    if (cupomMarketplace && cupomMarketplace !== mp) return false;
+
+    if (cupomCategoria && cat && cupomCategoria !== cat) return false;
+
+    if (cupomTitulo && t && !t.includes(cupomTitulo)) return false;
+
+    return true;
+  });
+
+  if (!candidatos.length) return null;
+
+  return candidatos[0];
+}
+
+
 //============ FUNCAO FAREJAR CUPOM MERCADO LIVRE ================
 
 async function farejarCuponsMercadoLivre(html = "") {
@@ -4948,15 +4985,26 @@ if (marketplace === "magalu") {
         });
       }
 
-       const novaOferta = {
-      nome: produto.nome || produto.titulo,
-      preco: produto.preco || produto.precoAtual,
-      link: produto.linkAfiliado || produto.linkOriginal,
-      imagem: produto.imagem,
-      status: "pendente"
-    };
-    
-    const precoNumero = Number(
+       
+  const cupomEscolhido = escolherMelhorCupom(
+  "mercadolivre",
+  produto.nome || produto.titulo,
+  produto.categoria || ""
+);
+
+const novaOferta = {
+  nome: produto.nome || produto.titulo,
+  preco: produto.preco || produto.precoAtual,
+  link: produto.linkAfiliado || produto.linkOriginal,
+  imagem: produto.imagem,
+  status: "pendente",
+
+  // 🔥 cupom automático
+  cupom: cupomEscolhido?.cupom || "",
+  avisoCupom: cupomEscolhido?.aviso || ""
+};
+
+const precoNumero = Number(
   String(novaOferta.preco || "")
     .replace("R$", "")
     .replace(/\./g, "")
