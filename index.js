@@ -370,14 +370,16 @@ let ultimoEnvioFila = 0;
 // =================== BUSCAS GLOBAIS ===================
 
 const BUSCAS_GLOBAIS = {
-  pesca: [
-    "vara de pesca oferta",
-    "molinete pesca promocao",
-    "carretilha pesca oferta",
-    "iscas artificiais pesca",
-    "caixa pesca organizadora",
-    "oculos polarizado pesca"
-  ],
+ pesca: [
+  "vara de pesca oferta", "vara telescópica", "vara de carretilha",
+  "molinete pesca promocao", "carretilha de pesca", "anzol",
+  "iscas artificiais pesca", "linha de pesca", "caixa pesca organizadora",
+  "mochila de pesca", "fogareiro", "fogao portatil",
+  "tenis nautico", "bota de pescador", "rede de dormir",
+  "barraca", "linha multifilamento", "linha fluorcarbono",
+  "kit de pesca", "marine sports", "abu garcia",
+  "daiwa", "shimano", "nelson nakamura"
+]
 
   beleza: [
     "perfume masculino promocao",
