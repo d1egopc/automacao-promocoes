@@ -379,7 +379,7 @@ const BUSCAS_GLOBAIS = {
   "barraca", "linha multifilamento", "linha fluorcarbono",
   "kit de pesca", "marine sports", "abu garcia",
   "daiwa", "shimano", "nelson nakamura"
-]
+],
 
   beleza: [
     "perfume masculino promocao",
