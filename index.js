@@ -588,7 +588,7 @@ brinquedos: [
   "lego promocao", "boneca infantil", "caminhao de controle",
   "carrinho controle remoto", "hot wheels", "lancha de controle",
   "piscina infantil", "patinete", "trator de controle remoto", 
-  "bola de futebol", "skate infantil", "brinquedo educativo,
+  "bola de futebol", "skate infantil", "brinquedo educativo",
   "losa magica", "motoca", "kit de carrinho", "brinquedo educativo",
   "boneca", "boneco", "pistola de agua", "caminhao de terra",
   "batman" "homem aranha", "hulk", "robo", "homem de ferro" 
