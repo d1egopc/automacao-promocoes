@@ -695,7 +695,14 @@ function detectarCategoriaGlobal(oferta = {}) {
 //================= FUNCAO REGISTRA CUPOM =======================
 
 function registrarCupomAtivo(regra = {}) {
-  if (!regra.cupom) return false;
+  
+if (
+    !regra?.cupom ||
+    !limparCuponsInvalidos([regra.cupom]).length
+  ) {
+    console.log("🚫 Cupom bloqueado:", regra?.cupom);
+    return false;
+  }
 
   config.cuponsAtivos = config.cuponsAtivos || [];
 
