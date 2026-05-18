@@ -16,7 +16,7 @@ let config = {
 
 linksOptimus: {
   ativo: true,
-  dominio: "https://optimus-promo.com",
+  dominio: "dominio: "https://automacao-promocoes-production.up.railway.app",
   formato: "/r",
   rastrearCliques: true
 },
