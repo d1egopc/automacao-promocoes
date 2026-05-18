@@ -6658,12 +6658,13 @@ app.listen(PORT, () => {
   setTimeout(() => {
     console.log("🔄 Reconectando sessões WhatsApp automaticamente...");
 
-    const sessoesParaReconectar = Object.keys(config?.destinosPorSessao || {});
-
-    if (!sessoesParaReconectar.includes("sessao1")) {
-      sessoesParaReconectar.push("sessao1");
-    }
-
+    const sessoesParaReconectar = [
+  ...new Set([
+    ...Object.keys(config?.destinosPorSessao || {}),
+    ...(config?.sessoesWhatsapp || []),
+    "sessao1"
+  ])
+];
     sessoesParaReconectar.forEach((id, index) => {
       setTimeout(() => {
         console.log("🚀 Reconectando sessão:", id);
