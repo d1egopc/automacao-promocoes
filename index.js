@@ -3543,16 +3543,21 @@ try {
 }
 
     let linkAfiliado =
-      produto.promotion_link ||
-      produto.product_detail_url ||
-      urlEntrada;
+  produto.promotion_link ||
+  produto.promotion_link_short ||
+  produto.product_detail_url ||
+  produto.product_url ||
+  urlEntrada;
 
-    if (!linkAfiliado && trackingId) {
-      linkAfiliado =
-        `https://s.click.aliexpress.com/deep_link.htm?aff_short_key=${trackingId}&dl_target_url=${encodeURIComponent(urlEntrada)}`;
-    }
+// Se já vier link oficial curto da Ali, mantém ele.
+const linkAliOficial = String(linkAfiliado || "").includes("s.click.aliexpress.com")
+  ? linkAfiliado
+  : linkAfiliado;
 
-     const linkFinal = await encurtarUrl(linkAfiliado);
+// Depois passa pelo motor Optimus.
+// Se linksOptimus.ativo = false, volta o link oficial/original.
+// Se linksOptimus.ativo = true, vira /r/codigo.
+const linkFinal = gerarLinkOptimus(linkAliOficial, "aliexpress");
 
    return {
       marketplace: "aliexpress",
