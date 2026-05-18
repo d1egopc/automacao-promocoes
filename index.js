@@ -3568,7 +3568,14 @@ const linkFinal = gerarLinkOptimus(linkAliOficial, "aliexpress");
       linkOriginal: urlEntrada,
       linkAfiliado: linkFinal,
       imagem: corrigirImagemUrl(imagem) || imagem,
-      categoria: "AliExpress",
+      categoria:
+      produto.first_level_category_name ||
+      produto.second_level_category_name ||
+      "AliExpress",
+      categoriaProduto:
+      produto.first_level_category_name ||
+      produto.second_level_category_name ||
+      "AliExpress",
       avisoCupom,
       aviso: !imagem || titulo === "Produto AliExpress"
         ? "Dados parciais retornados pela API AliExpress."
@@ -4014,30 +4021,38 @@ function normalizarCategoria(txt = "") {
 function categoriaBase(txt = "") {
   const c = normalizarCategoria(txt);
 
-  if (
-    c.includes("pesca") ||
-    c.includes("pescaria") ||
-    c.includes("camping") ||
-    c.includes("acampamento") ||
-    c.includes("barraca") ||
-    c.includes("vara") ||
-    c.includes("anzol") ||
-    c.includes("isca") ||
-    c.includes("lampiao") ||
-    c.includes("lanterna") ||
-    c.includes("fogareiro") ||
-    c.includes("mochila camping") ||
-    c.includes("caixa termica")
-  ) {
-    return "pesca";
+  for (const [chave, categoria] of Object.entries(CATEGORIAS_GLOBAIS || {})) {
+
+    const nomeCategoria = normalizarCategoria(
+      categoria.nome || ""
+    );
+
+    // bate nome da categoria
+    if (
+      c === chave ||
+      c === nomeCategoria ||
+      c.includes(nomeCategoria) ||
+      nomeCategoria.includes(c)
+    ) {
+      return chave;
+    }
+
+    // bate palavras da categoria
+    const bateu = (categoria.palavras || []).some(palavra => {
+      const p = normalizarCategoria(palavra);
+
+      return (
+        c.includes(p) ||
+        p.includes(c)
+      );
+    });
+
+    if (bateu) {
+      return chave;
+    }
   }
 
-  if (c.includes("gamer") || c.includes("hardware")) return "hardware";
-  if (c.includes("audio") || c.includes("tv")) return "audioTv";
-  if (c.includes("ferramenta")) return "ferramentas";
-  if (c.includes("bebe")) return "bebes";
-
-  return c;
+  return c || "geral";
 }
 
 // =========== VALIDAR CATEGORIA DO DESTINO ===========
