@@ -3995,6 +3995,48 @@ const lista = fonteCupons.filter(c =>
   return candidatos[0];
 }
 
+// =========== RESULTADO INTELIGENTE DE CUPOM ===========
+
+function registrarResultadoCupom(marketplace = "", cupom = "", sucesso = false) {
+  const mp = normalizarTexto(marketplace || "");
+  const cp = String(cupom || "").trim().toUpperCase();
+
+  if (!mp || !cp) return;
+
+  config.cuponsStatus = config.cuponsStatus || {};
+  config.cuponsStatus[mp] = config.cuponsStatus[mp] || {};
+
+  const atual = config.cuponsStatus[mp][cp] || {
+    falhas: 0,
+    sucessos: 0,
+    confianca: 50,
+    status: "ativo"
+  };
+
+  if (sucesso) {
+    atual.sucessos = (atual.sucessos || 0) + 1;
+    atual.falhas = 0;
+    atual.confianca = Math.min(100, (atual.confianca || 50) + 15);
+    atual.status = "ativo";
+    atual.ultimoSucesso = new Date().toISOString();
+  } else {
+    atual.falhas = (atual.falhas || 0) + 1;
+    atual.confianca = Math.max(0, (atual.confianca || 50) - 20);
+    atual.ultimaFalha = new Date().toISOString();
+
+    if (atual.falhas >= 3 || atual.confianca <= 20) {
+      atual.status = "expirado";
+      atual.expirouEm = new Date().toISOString();
+      console.log("🚫 Cupom expirado automaticamente:", mp, cp);
+    }
+  }
+
+  atual.ultimaUtilizacao = new Date().toISOString();
+
+  config.cuponsStatus[mp][cp] = atual;
+  salvarConfig();
+}
+
 // =========== INTELIGÊNCIA GLOBAL DE CUPONS ===========
 
 function cupomEstaBloqueado(marketplace = "", cupom = "") {
@@ -5550,11 +5592,11 @@ const descontoPercentual = temDescontoReal
   : 0;
 
 if (cupomEscolhido?.cupom) {
-  if (temDescontoReal && descontoPercentual >= 10) {
-    registrarSucessoCupom("mercadolivre", cupomEscolhido.cupom);
-  } else {
-    registrarFalhaCupom("mercadolivre", cupomEscolhido.cupom);
-  }
+  registrarResultadoCupom(
+    "mercadolivre",
+    cupomEscolhido.cupom,
+    temDescontoReal && descontoPercentual >= 10
+  );
 }
 
 if (!temCupom && descontoPercentual < 10) {
