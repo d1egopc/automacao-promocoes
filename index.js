@@ -969,7 +969,12 @@ ferramentas: {
     "chave de impacto", "serra marmore", "serra mármore",
     "makita", "dewalt", "bosch", "vonder",
     "jogo de ferramentas", "maleta de ferramentas",
-    "esmerilhadeira", "compressor de ar"
+    "manifold suryha", "manifold agetherm", "manifold elitech",
+    "manifold Digital suryha", "manifold agetherm",
+    "balanca nao programavel", "manifold digital",
+    "FINYQBET conjunto de manômetro", "bomba de vacuo",
+    "alicate amperimetro", "capacimetro", "alicate",
+    "jogo mangueira manifold premium", "compressor de ar"
   ]
 },
 
