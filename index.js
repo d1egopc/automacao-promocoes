@@ -453,12 +453,12 @@ eletrodomesticos: [
 ],
 
 eletroportateis: [
-  "escova secadora", "secador de cabelo", "chapinha",
-  "barbeador eletrico", "maquina cortar cabelo",
-  "cafeteira", "liquidificador", "batedeira",
-  "espremedor", "panela eletrica", "grill eletrico",
+  "escova secadora", "secador de cabelo", "chapinha", "multi cook philco",
+  "barbeador eletrico", "maquina cortar cabelo", "massageador eletrico", 
+  "cafeteira", "liquidificador", "batedeira", "multi cook", "grill",
+  "espremedor", "panela eletrica", "grill eletrico", "sanduicheira",
   "fritadeira eletrica", "vaporizador", "passadeira vapor",
-  "aspirador portatil", "massageador eletrico"
+  "aspirador portatil", "multi cook philco antiaderente" 
 ],
 
 limpeza: [
@@ -695,6 +695,11 @@ function detectarCategoriaGlobal(oferta = {}) {
 //================= FUNCAO REGISTRA CUPOM =======================
 
 function registrarCupomAtivo(regra = {}) {
+
+if (cupomEstaBloqueado(regra.marketplace, regra.cupom)) {
+  console.log("🚫 Cupom ignorado por status expirado:", regra.cupom);
+  return false;
+}
   
 if (
     !regra?.cupom ||
@@ -3858,6 +3863,65 @@ const lista = fonteCupons.filter(c =>
   return candidatos[0];
 }
 
+// =========== INTELIGÊNCIA GLOBAL DE CUPONS ===========
+
+function cupomEstaBloqueado(marketplace = "", cupom = "") {
+  const mp = normalizarTexto(marketplace || "");
+  const cp = String(cupom || "").trim().toUpperCase();
+
+  const status = config.cuponsStatus || {};
+  const dados = status?.[mp]?.[cp];
+
+  return dados?.status === "expirado" && (dados?.falhas || 0) >= 3;
+}
+
+function registrarFalhaCupom(marketplace = "", cupom = "") {
+  const mp = normalizarTexto(marketplace || "");
+  const cp = String(cupom || "").trim().toUpperCase();
+
+  if (!mp || !cp) return;
+
+  config.cuponsStatus = config.cuponsStatus || {};
+  config.cuponsStatus[mp] = config.cuponsStatus[mp] || {};
+
+  const atual = config.cuponsStatus[mp][cp] || {
+    falhas: 0,
+    status: "ativo"
+  };
+
+  atual.falhas = (atual.falhas || 0) + 1;
+  atual.ultimoTeste = new Date().toISOString();
+
+  if (atual.falhas >= 3) {
+    atual.status = "expirado";
+    atual.expirouEm = new Date().toISOString();
+    console.log("🚫 Cupom marcado como expirado:", mp, cp);
+  }
+
+  config.cuponsStatus[mp][cp] = atual;
+  salvarConfig();
+}
+
+function registrarSucessoCupom(marketplace = "", cupom = "") {
+  const mp = normalizarTexto(marketplace || "");
+  const cp = String(cupom || "").trim().toUpperCase();
+
+  if (!mp || !cp) return;
+
+  config.cuponsStatus = config.cuponsStatus || {};
+  config.cuponsStatus[mp] = config.cuponsStatus[mp] || {};
+
+  config.cuponsStatus[mp][cp] = {
+    falhas: 0,
+    status: "ativo",
+    ultimoSucesso: new Date().toISOString()
+  };
+
+  salvarConfig();
+
+  console.log("✅ Cupom validado como ativo:", mp, cp);
+}
+
 // =========== NORMALIZADOR GLOBAL DE CATEGORIAS ===========
 
 function normalizarCategoria(txt = "") {
@@ -5211,11 +5275,11 @@ if (marketplace === "magalu") {
       }
 
        
-  const cupomEscolhido = escolherMelhorCupom(
+ const cupomEscolhido = escolherMelhorCupom(
   "mercadolivre",
   produto.nome || produto.titulo,
   produto.categoria || ""
-);
+ );
 
 const novaOferta = {
   nome: produto.nome || produto.titulo,
@@ -5253,7 +5317,10 @@ const precoAntigoNumero = Number(
     .trim()
 );
 
-const temCupom = Boolean(produto.cupom && String(produto.cupom).trim());
+const temCupom = Boolean(
+  novaOferta.cupom &&
+  String(novaOferta.cupom).trim()
+);
 
 const temDescontoReal =
   precoAntigoNumero &&
@@ -5263,6 +5330,14 @@ const temDescontoReal =
 const descontoPercentual = temDescontoReal
   ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
   : 0;
+
+if (cupomEscolhido?.cupom) {
+  if (temDescontoReal && descontoPercentual >= 10) {
+    registrarSucessoCupom("mercadolivre", cupomEscolhido.cupom);
+  } else {
+    registrarFalhaCupom("mercadolivre", cupomEscolhido.cupom);
+  }
+}
 
 if (!temCupom && descontoPercentual < 10) {
   console.log("⚠️ Oferta ignorada: desconto baixo", novaOferta.nome);
