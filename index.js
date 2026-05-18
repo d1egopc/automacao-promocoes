@@ -4252,6 +4252,25 @@ function assinar(params, appSecret) {
     .toUpperCase();
 }
 
+// ======================= FUNCAO LIMPAR LINK AMAZON =======================
+
+function limparLinkAmazon(url = "") {
+  try {
+    const u = new URL(url);
+    const asin =
+      u.pathname.match(/\/dp\/([A-Z0-9]{10})/i)?.[1] ||
+      u.pathname.match(/\/gp\/product\/([A-Z0-9]{10})/i)?.[1];
+
+    if (!asin) return url;
+
+    const tag = u.searchParams.get("tag") || "d1egopcoff-20";
+
+    return `https://www.amazon.com.br/dp/${asin}?tag=${tag}`;
+  } catch (e) {
+    return url;
+  }
+}
+
 // =================== LINK CURTO OFICIAL ALIEXPRESS ===================
 
 async function gerarLinkCurtoAliExpress(urlOriginal, credenciais = {}) {
@@ -5053,8 +5072,6 @@ if (cupom) {
   avisoCupom = "Há cupom/desconto extra na página. Resgate antes de finalizar.";
 }
 
-const linkFinal = gerarLinkOptimus(linkAfiliado, "amazon"); 
- 
 const temCompraNoApp =
   /COMPRANOAPP[\s\S]{0,120}(app|aplicativo|desconto|off|cupom|resgate)/i.test(html) ||
   /(app|aplicativo|desconto|off|cupom|resgate)[\s\S]{0,120}COMPRANOAPP/i.test(html) ||
@@ -5065,6 +5082,10 @@ console.log("🎟️ AMAZON CUPOM DETECTADO:", cupom);
 console.log("🎫 AMAZON AVISO CUPOM:", avisoCupom);
 console.log("🔎 AMAZON TEM COMPRANOAPP?", html.includes("COMPRANOAPP"));
 console.log("🔎 AMAZON TEM CUPOM?", /cupom/i.test(html));
+
+linkAfiliado = limparLinkAmazon(linkAfiliado);
+
+const linkFinal = gerarLinkOptimus(linkAfiliado, "amazon"); 
 
 return {
     marketplace: "amazon",
