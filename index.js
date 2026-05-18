@@ -129,9 +129,12 @@ let enviandoAgora = false;
 let controleEnvio = {}; // por cliente
 let historicoOfertas = {};
 let cuponsAtivos = config.cuponsAtivos || [];
+let usuarios = [];
 
 const FILA_FILE = "/data/fila.json";
 const CONFIG_FILE = "/data/config.json";
+const USUARIOS_FILE = "/data/usuarios.json";
+
 console.log("📂 Salvando dados em:", FILA_FILE);
 
 function gerarChaveProduto(titulo = "") {
@@ -195,6 +198,15 @@ function salvarConfig() {
   }
 }
 
+// ================= FUNÇÃO SALVA USUARIO =================
+
+function salvarUsuarios() {
+  fs.writeFileSync(
+    USUARIOS_FILE,
+    JSON.stringify(usuarios, null, 2)
+  );
+}
+
 // ================= FUNÇÃO CARREGA CONFIG =================
 
 function carregarConfig() {
@@ -215,6 +227,16 @@ function carregarConfig() {
 
       console.log("✅ Config carregada");
     }
+
+if (fs.existsSync(USUARIOS_FILE)) {
+  usuarios = JSON.parse(
+    fs.readFileSync(USUARIOS_FILE, "utf8")
+  );
+
+  console.log("✅ Usuários carregados");
+}
+
+
   } catch (e) {
     console.error("❌ ERRO AO CARREGAR CONFIG:", e.message);
   }
