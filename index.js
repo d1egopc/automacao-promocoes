@@ -1716,11 +1716,19 @@ oferta.criadoEm = oferta.criadoEm || new Date().toLocaleString("pt-BR", {
 // ================= ENVIO MANUAL =================
 
 app.post("/enviar-manual", async (req, res) => {
- 
   console.log("🧪 /enviar-manual BODY:", req.body);
-  
+
   try {
-  const body = req.body || {};
+    const body = req.body || {};
+
+    const categoriaManual =
+      body.categoria &&
+      body.categoria !== body.marketplace
+        ? body.categoria
+        : body.categoriaProduto &&
+          body.categoriaProduto !== body.marketplace
+            ? body.categoriaProduto
+            : "geral";
 
     const oferta = {
       nome: body.nome || body.titulo || "Oferta",
@@ -1735,10 +1743,10 @@ app.post("/enviar-manual", async (req, res) => {
       linkAfiliado: body.linkAfiliado || body.link || "",
       imagem: body.imagem || "",
       marketplace: body.marketplace || "",
-      categoria: body.categoria || body.categoriaProduto || "geral",
-      categoriaProduto: body.categoria || body.categoriaProduto || "geral",
+      categoria: categoriaManual,
+      categoriaProduto: categoriaManual,
       origem: "manual",
-      manual: true, 
+      manual: true,
       clienteId: getClienteId(req),
       status: "pendente",
       criadoEm: new Date().toLocaleString("pt-BR", {
