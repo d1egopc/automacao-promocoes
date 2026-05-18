@@ -3458,7 +3458,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
     precoAtual: precoAtualUrl,
     cupom: "",
     linkOriginal: urlEntrada,
-    linkAfiliado: urlEntrada,
+    linkAfiliado: gerarLinkOptimus(urlEntrada, "aliexpress"),
     imagem: "",
     categoria: "AliExpress",
     avisoCupom,
