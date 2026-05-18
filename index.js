@@ -3574,7 +3574,15 @@ const linkAliOficial = String(linkAfiliado || "").includes("s.click.aliexpress.c
 // Depois passa pelo motor Optimus.
 // Se linksOptimus.ativo = false, volta o link oficial/original.
 // Se linksOptimus.ativo = true, vira /r/codigo.
-const linkFinal = gerarLinkOptimus(linkAliOficial, "aliexpress");
+const linkAliCurto = await gerarLinkCurtoAliExpress(
+  linkAfiliado,
+  credenciais
+);
+
+const linkFinal = gerarLinkOptimus(
+  linkAliCurto,
+  "aliexpress"
+);
 
    return {
       marketplace: "aliexpress",
@@ -4147,6 +4155,27 @@ async function farejarCuponsMercadoLivre(html = "") {
 
   } catch (e) {
     console.log("❌ erro farejarCuponsMercadoLivre:", e.message);
+  }
+}
+
+// =========== LINK CURTO OFICIAL ALIEXPRESS ===========
+
+async function gerarLinkCurtoAliExpress(urlOriginal, credenciais = {}) {
+  try {
+    const appKey = credenciais.appKey || "";
+    const secret = credenciais.secret || "";
+    const trackingId = credenciais.trackingId || "";
+
+    if (!appKey || !secret || !trackingId || !urlOriginal) {
+      return urlOriginal;
+    }
+
+    // fallback seguro por enquanto
+    return urlOriginal;
+
+  } catch (e) {
+    console.log("❌ Erro gerar link curto AliExpress:", e.message);
+    return urlOriginal;
   }
 }
 
