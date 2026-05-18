@@ -243,11 +243,13 @@ function gerarLinkOptimus(linkOriginal = "", marketplace = "") {
     .substring(2, 8);
 
   config.linksGerados[codigo] = {
-    original: linkOriginal,
-    marketplace,
-    cliques: 0,
-    criadoEm: new Date().toISOString()
-  };
+  original: linkOriginal,
+  urlOriginal: linkOriginal,
+  marketplace,
+  cliques: 0,
+  ultimoClique: null,
+  criadoEm: new Date().toISOString()
+};
 
   salvarConfig();
 
