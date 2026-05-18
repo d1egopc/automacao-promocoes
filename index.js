@@ -15,12 +15,13 @@ let config = {
   automacaoAtiva: false,
 
 linksOptimus: {
-  ativo: false,
+  ativo: true,
   dominio: "https://optimus-promo.com",
   formato: "/r",
   rastrearCliques: true
 },
 
+linksGerados: {},
   intervaloEnvioMinutos: 5,
 
   horarioInicio: "08:00",
@@ -223,16 +224,32 @@ function carregarConfig() {
 
 function gerarLinkOptimus(linkOriginal = "", marketplace = "") {
 
+  if (!linkOriginal) return "";
+
   if (!config?.linksOptimus?.ativo) {
     return linkOriginal;
   }
 
-  const dominio = config.linksOptimus.dominio || "";
-  const formato = config.linksOptimus.formato || "/r";
+  config.linksGerados = config.linksGerados || {};
+
+  const dominio =
+    config.linksOptimus.dominio || "https://optimus-promo.com";
+
+  const formato =
+    config.linksOptimus.formato || "/r";
 
   const codigo = Math.random()
     .toString(36)
     .substring(2, 8);
+
+  config.linksGerados[codigo] = {
+    original: linkOriginal,
+    marketplace,
+    cliques: 0,
+    criadoEm: new Date().toISOString()
+  };
+
+  salvarConfig();
 
   return `${dominio}${formato}/${codigo}`;
 }
@@ -1831,6 +1848,34 @@ app.get("/fila", (req, res) => {
     itens: fila,
     fila: fila
   });
+});
+
+// =========== REDIRECIONADOR OPTIMUS ===========
+
+app.get("/r/:codigo", (req, res) => {
+  try {
+    const codigo = req.params.codigo;
+
+    config.linksGerados = config.linksGerados || {};
+
+    const dados = config.linksGerados[codigo];
+
+    if (!dados?.original) {
+      return res.status(404).send("Link não encontrado");
+    }
+
+    dados.cliques = (dados.cliques || 0) + 1;
+    dados.ultimoClique = new Date().toISOString();
+
+    salvarConfig();
+
+    return res.redirect(dados.original);
+
+  } catch (e) {
+    console.log("❌ erro link optimus:", e.message);
+
+    return res.status(500).send("Erro ao abrir link");
+  }
 });
 
 // ================= TELEGRAM =================
