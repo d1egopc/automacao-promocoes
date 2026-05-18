@@ -3756,6 +3756,12 @@ function limparCuponsInvalidos(cupons = []) {
     "OFFER",
     "OFFSETHEIGHT",
     "APPLEWEBKIT",
+    "MELIDATA",   
+    "MELISEARCH",
+    "MELISESSION",
+    "MELISTORE",
+    "MELIPAY",
+    "MELICLIENT",
     "MELIDATA",
     "MELIMAIS",
     "MELIPLUS",
@@ -3785,7 +3791,10 @@ function limparCuponsInvalidos(cupons = []) {
 // =========== ESCOLHER MELHOR CUPOM GLOBAL ===========
 
 function escolherMelhorCupom(marketplace, titulo = "", categoria = "") {
-  const lista = cuponsAtivos || [];
+  const lista = (cuponsAtivos || []).filter(c =>
+    c?.cupom &&
+    limparCuponsInvalidos([c.cupom]).length
+  );
 
   const normalizar = txt =>
     String(txt || "")
@@ -3805,9 +3814,7 @@ function escolherMelhorCupom(marketplace, titulo = "", categoria = "") {
     const cupomTitulo = normalizar(c.titulo || "");
 
     if (cupomMarketplace && cupomMarketplace !== mp) return false;
-
     if (cupomCategoria && cat && cupomCategoria !== cat) return false;
-
     if (cupomTitulo && t && !t.includes(cupomTitulo)) return false;
 
     return true;
@@ -3865,7 +3872,7 @@ async function farejarCuponsMercadoLivre(html = "") {
 
     let cuponsEncontrados = [
       ...texto.matchAll(
-        /\b(MELI[A-Z0-9]{3,}|CASINHA|SUPERFASHION|APP[A-Z0-9]{2,}|OFF[A-Z0-9]{2,})\b/g
+        /\b(CASINHA|SUPERFASHION|APP[A-Z0-9]{2,}|OFF[A-Z0-9]{2,})\b/g
       )
     ].map(m => m[1]);
 
