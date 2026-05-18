@@ -3549,6 +3549,23 @@ try {
   produto.product_url ||
   urlEntrada;
 
+// 🔥 Limpar link gigante AliExpress
+if (
+  linkAfiliado.includes("s.click.aliexpress.com/s/")
+) {
+  try {
+    const match = linkAfiliado.match(
+      /https:\/\/s\.click\.aliexpress\.com\/e\/_[a-zA-Z0-9]+/i
+    );
+
+    if (match?.[0]) {
+      linkAfiliado = match[0];
+    }
+  } catch (e) {
+    console.log("Erro limpando link AliExpress:", e.message);
+  }
+}
+
 // Se já vier link oficial curto da Ali, mantém ele.
 const linkAliOficial = String(linkAfiliado || "").includes("s.click.aliexpress.com")
   ? linkAfiliado
