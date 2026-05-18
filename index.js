@@ -705,6 +705,10 @@ if (
   }
 
   config.cuponsAtivos = config.cuponsAtivos || [];
+  
+  config.cuponsAtivos = config.cuponsAtivos.filter(c =>
+  limparCuponsInvalidos([c?.cupom]).length
+  );
 
   const cupom = String(regra.cupom).trim().toUpperCase();
   const marketplace = normalizarTexto(regra.marketplace || "");
