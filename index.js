@@ -14,6 +14,13 @@ if (!fs.existsSync("/data")) {
 let config = {
   automacaoAtiva: false,
 
+linksOptimus: {
+  ativo: false,
+  dominio: "https://optimus-promo.com",
+  formato: "/r",
+  rastrearCliques: true
+},
+
   intervaloEnvioMinutos: 5,
 
   horarioInicio: "08:00",
@@ -210,6 +217,24 @@ function carregarConfig() {
   } catch (e) {
     console.error("❌ ERRO AO CARREGAR CONFIG:", e.message);
   }
+}
+
+// =========== LINK GLOBAL OPTIMUS ===========
+
+function gerarLinkOptimus(linkOriginal = "", marketplace = "") {
+
+  if (!config?.linksOptimus?.ativo) {
+    return linkOriginal;
+  }
+
+  const dominio = config.linksOptimus.dominio || "";
+  const formato = config.linksOptimus.formato || "/r";
+
+  const codigo = Math.random()
+    .toString(36)
+    .substring(2, 8);
+
+  return `${dominio}${formato}/${codigo}`;
 }
 
 // ================= FILTROS OFERTA JA EXISTE =================
@@ -4226,7 +4251,7 @@ const minimoDescontoAplicado =
 if (precoNumero < precoMinimo) continue;
 if (desconto < minimoDescontoAplicado) continue;
          
-        const linkCurto = await encurtarUrl(link);
+        const linkCurto = gerarLinkOptimus(link, "aliexpress");
 
         let novaOferta = {
           nome: titulo,
@@ -4793,7 +4818,7 @@ if (cupom) {
   avisoCupom = "Há cupom/desconto extra na página. Resgate antes de finalizar.";
 }
 
-const linkFinal = await encurtarUrl(linkAfiliado); 
+const linkFinal = gerarLinkOptimus(linkAfiliado, "amazon"); 
  
 const temCompraNoApp =
   /COMPRANOAPP[\s\S]{0,120}(app|aplicativo|desconto|off|cupom|resgate)/i.test(html) ||
