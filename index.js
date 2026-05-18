@@ -236,6 +236,24 @@ if (fs.existsSync(USUARIOS_FILE)) {
   console.log("✅ Usuários carregados");
 }
 
+if (!usuarios.length) {
+  usuarios = [
+    {
+      id: "admin",
+      nome: "Diego",
+      email: "admin@optimus.local",
+      papel: "admin_master",
+      plano: "master",
+      creditos: 999999,
+      ativo: true,
+      criadoEm: new Date().toISOString()
+    }
+  ];
+
+  salvarUsuarios();
+
+  console.log("👑 Usuário admin inicial criado");
+}
 
   } catch (e) {
     console.error("❌ ERRO AO CARREGAR CONFIG:", e.message);
