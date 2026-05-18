@@ -1009,10 +1009,10 @@ eletronicos: {
 perifericos: {
   nome: "Periféricos",
   palavras: [
-    "mouse", "teclado", "mousepad",
+    "mouse", "teclado", "mousepad", "Headset gamer",
     "webcam gamer", "headphone", "fone gamer",
-    "controle pc", "adaptador usb",
-    "hub usb", "microfone gamer",
+    "controle pc", "adaptador usb", "Headset",
+    "hub usb", "microfone gamer", "teclado magnetico",
     "cadeira gamer", "monitor gamer"
   ]
 },
