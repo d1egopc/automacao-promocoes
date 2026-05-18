@@ -3819,10 +3819,15 @@ function limparCuponsInvalidos(cupons = []) {
 // =========== ESCOLHER MELHOR CUPOM GLOBAL ===========
 
 function escolherMelhorCupom(marketplace, titulo = "", categoria = "") {
-  const lista = (cuponsAtivos || []).filter(c =>
-    c?.cupom &&
-    limparCuponsInvalidos([c.cupom]).length
-  );
+ const fonteCupons = [
+  ...(config?.cuponsAtivos || []),
+  ...(cuponsAtivos || [])
+];
+
+const lista = fonteCupons.filter(c =>
+  c?.cupom &&
+  limparCuponsInvalidos([c.cupom]).length
+);
 
   const normalizar = txt =>
     String(txt || "")
