@@ -3873,13 +3873,23 @@ function categoriaPermitidaNoDestino(oferta, destino) {
 
   if (!categoriaOferta) return false;
 
+  if (categoriaOferta === "geral") {
+    const nomeDestino = normalizarCategoria(destino.nome || "");
+
+    return (
+      nomeDestino.includes("geral") ||
+      categoriasDestino.includes("geral") ||
+      categoriasDestino.includes("todas") ||
+      categoriasDestino.length >= 8
+    );
+  }
+
   return categoriasDestino.some(cat =>
     categoriaOferta === cat ||
     categoriaOferta.includes(cat) ||
     cat.includes(categoriaOferta)
   );
 }
-
 
 //============ FUNCAO FAREJAR CUPOM MERCADO LIVRE ================
 
