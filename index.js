@@ -5481,7 +5481,15 @@ app.post("/conectar", async (req, res) => {
 
   if (!id) return res.status(400).json({ erro: "ID obrigatório" });
 
-  iniciarWhatsApp(id, false);
+  config.sessoesWhatsapp = config.sessoesWhatsapp || [];
+
+  if (!config.sessoesWhatsapp.includes(id)) {
+  config.sessoesWhatsapp.push(id);
+  salvarConfig();
+  console.log("💾 Sessão WhatsApp salva para reconexão:", id);
+ }
+
+ iniciarWhatsApp(id, false);
 
   return res.json({
     ok: true,
