@@ -1735,7 +1735,10 @@ app.post("/enviar-manual", async (req, res) => {
       linkAfiliado: body.linkAfiliado || body.link || "",
       imagem: body.imagem || "",
       marketplace: body.marketplace || "",
-      categoria: body.categoria || body.marketplace || "",
+      categoria: body.categoria || body.categoriaProduto || "geral",
+      categoriaProduto: body.categoria || body.categoriaProduto || "geral",
+      origem: "manual",
+      manual: true, 
       clienteId: getClienteId(req),
       status: "pendente",
       criadoEm: new Date().toLocaleString("pt-BR", {
