@@ -3930,7 +3930,26 @@ function limparCuponsInvalidos(cupons = []) {
   )];
 }
 
-// =========== ESCOLHER MELHOR CUPOM GLOBAL ===========
+// ===================== FUNCAO VALIDAR CUPOM ========================
+
+function validarCupomAutomaticamente(marketplace = "", cupom = "") {
+  const mp = normalizarTexto(marketplace || "");
+  const cp = String(cupom || "").trim().toUpperCase();
+
+  if (!mp || !cp) return false;
+
+  const status = config.cuponsStatus?.[mp]?.[cp];
+
+  if (!status) return true;
+
+  if (status.status === "expirado") return false;
+
+  if ((status.falhas || 0) >= 3) return false;
+
+  return true;
+}
+
+// ============== ESCOLHER MELHOR CUPOM GLOBAL =======================
 
 function escolherMelhorCupom(marketplace, titulo = "", categoria = "") {
  const fonteCupons = [
@@ -3940,7 +3959,11 @@ function escolherMelhorCupom(marketplace, titulo = "", categoria = "") {
 
 const lista = fonteCupons.filter(c =>
   c?.cupom &&
-  limparCuponsInvalidos([c.cupom]).length
+  limparCuponsInvalidos([c.cupom]).length &&
+  validarCupomAutomaticamente(
+    c.marketplace || marketplace,
+    c.cupom
+  )
 );
 
   const normalizar = txt =>
