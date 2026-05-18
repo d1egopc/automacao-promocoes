@@ -120,6 +120,7 @@ let fila = [];
 let enviandoAgora = false;
 let controleEnvio = {}; // por cliente
 let historicoOfertas = {};
+let cuponsAtivos = config.cuponsAtivos || [];
 
 const FILA_FILE = "/data/fila.json";
 const CONFIG_FILE = "/data/config.json";
