@@ -4158,7 +4158,34 @@ async function farejarCuponsMercadoLivre(html = "") {
   }
 }
 
-// =========== LINK CURTO OFICIAL ALIEXPRESS ===========
+// ===================== FUNCAO TIMES TAMP =============================
+
+function timestampGMT8() {
+  const d = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+
+function assinar(params, appSecret) {
+  const sortedKeys = Object.keys(params).sort();
+  let base = appSecret;
+
+  for (const key of sortedKeys) {
+    if (key === "sign") continue;
+    base += key + params[key];
+  }
+
+  base += appSecret;
+
+  return crypto
+    .createHash("md5")
+    .update(base, "utf8")
+    .digest("hex")
+    .toUpperCase();
+}
+
+// =================== LINK CURTO OFICIAL ALIEXPRESS ===================
 
 async function gerarLinkCurtoAliExpress(urlOriginal, credenciais = {}) {
   try {
