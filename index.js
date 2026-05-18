@@ -3861,19 +3861,55 @@ function normalizarCategoria(txt = "") {
     .trim();
 }
 
+// =========== CATEGORIA BASE GLOBAL ===========
+
+function categoriaBase(txt = "") {
+  const c = normalizarCategoria(txt);
+
+  if (
+    c.includes("pesca") ||
+    c.includes("pescaria") ||
+    c.includes("camping") ||
+    c.includes("acampamento") ||
+    c.includes("barraca") ||
+    c.includes("vara") ||
+    c.includes("anzol") ||
+    c.includes("isca") ||
+    c.includes("lampiao") ||
+    c.includes("lanterna") ||
+    c.includes("fogareiro") ||
+    c.includes("mochila camping") ||
+    c.includes("caixa termica")
+  ) {
+    return "pesca";
+  }
+
+  if (c.includes("gamer") || c.includes("hardware")) return "hardware";
+  if (c.includes("audio") || c.includes("tv")) return "audioTv";
+  if (c.includes("ferramenta")) return "ferramentas";
+  if (c.includes("bebe")) return "bebes";
+
+  return c;
+}
+
 // =========== VALIDAR CATEGORIA DO DESTINO ===========
 
 function categoriaPermitidaNoDestino(oferta, destino) {
-  const categoriaOferta = normalizarCategoria(
-    oferta.categoria || oferta.categoriaProduto || ""
-  );
+  
+const categoriaOferta = categoriaBase(
+  oferta.categoria ||
+  oferta.categoriaProduto ||
+  oferta.titulo ||
+  oferta.nome ||
+  ""
+);
 
   const categoriasDestino = (
     destino.categorias ||
     destino.categoriasPermitidas ||
     []
   )
-    .map(normalizarCategoria)
+   .map(categoriaBase)
     .filter(Boolean);
 
   if (!categoriasDestino.length) return true;
