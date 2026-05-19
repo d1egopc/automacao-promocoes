@@ -2140,6 +2140,38 @@ app.get("/config", (req, res) => {
   });
 });
 
+app.get("/minha-config", (req, res) => {
+  const clienteId = getClienteId(req);
+  const configCliente = getConfigCliente(clienteId);
+
+  return res.json({
+    ok: true,
+    clienteId,
+    config: {
+      ...config,
+      ...configCliente
+    }
+  });
+});
+
+app.post("/minha-config", (req, res) => {
+  const clienteId = getClienteId(req);
+  const body = req.body || {};
+
+  configsPorCliente[clienteId] = {
+    ...configsPorCliente[clienteId],
+    ...body
+  };
+
+  salvarConfigsClientes();
+
+  return res.json({
+    ok: true,
+    clienteId,
+    config: configsPorCliente[clienteId]
+  });
+});
+
 app.post("/config", (req, res) => {
   const body = req.body || {};
 
@@ -2299,6 +2331,17 @@ function gerarToken() {
     { expiresIn: "7d" }
   );
 }
+
+// ===================== FUNCAO ADMIN MASTER ==============================
+
+function isAdminMaster(req) {
+  const clienteId = getClienteId(req);
+  const usuario = usuarios.find(u => u.id === clienteId);
+
+  return usuario?.papel === "admin_master";
+}
+
+//======================== FUNCAO CLIENTE ID ==============================
 
 function getClienteId(req) {
   const authHeader = req.headers.authorization || "";
@@ -5867,10 +5910,17 @@ return res.json(produto);
 // ================= WHATSAPP =================
 
 app.get("/sessoes", (req, res) => {
-  const lista = Object.values(sessoesMeta).map(sessao => {
-    const id = sessao.id;
+  const clienteId = getClienteId(req);
 
+  const lista = Object.values(sessoesMeta)
+  .filter(sessao =>
+    isAdminMaster(req) ||
+    String(sessao.id || "").startsWith(clienteId + "_")
+  )
+  .map(sessao => {
+    const id = sessao.id;
     return {
+
       ...sessao,
       status: statusSessao[id] || "offline",
       conectado: statusSessao[id] === "open",
@@ -5887,12 +5937,14 @@ app.get("/sessoes", (req, res) => {
 });
 
 app.post("/sessoes", (req, res) => {
+const clienteId = getClienteId(req);
   try {
     const nome = req.body.nome || "WhatsApp";
     const tipo = req.body.tipo || "whatsapp";
 
     const total = Object.keys(sessoesMeta).length + 1;
-    const id = req.body.id || `sessao${total}`;
+    const nomeSessao = req.body.id || `sessao${total}`;
+    const id = `${clienteId}_${nomeSessao}`;
 
     if (sessoesMeta[id]) {
       return res.status(400).json({
@@ -5924,7 +5976,10 @@ app.post("/sessoes", (req, res) => {
 
 app.delete("/sessoes/:id", async (req, res) => {
   try {
-    const { id } = req.params;
+    const clienteId = getClienteId(req);
+    const id = isAdminMaster(req)
+   ? req.params.id
+   : `${clienteId}_${req.params.id}`;
 
     try {
       if (sessoes[id]?.sock?.logout) {
@@ -5969,7 +6024,10 @@ app.delete("/sessoes/:id", async (req, res) => {
 });
 
 app.post("/reset/:id", async (req, res) => {
-  const { id } = req.params;
+  const clienteId = getClienteId(req);
+  const id = isAdminMaster(req)
+  ? req.params.id
+  : `${clienteId}_${req.params.id}`;
 
   try {
     console.log("🔄 Resetando sessão:", id);
@@ -6029,29 +6087,33 @@ app.post("/reset/:id", async (req, res) => {
 });
 
 app.post("/conectar", async (req, res) => {
+  const clienteId = getClienteId(req);
   const { id } = req.body;
+
+  const sessaoId = `${clienteId}_${id}`;
 
   if (!id) return res.status(400).json({ erro: "ID obrigatório" });
 
   config.sessoesWhatsapp = config.sessoesWhatsapp || [];
 
-  if (!config.sessoesWhatsapp.includes(id)) {
-  config.sessoesWhatsapp.push(id);
+  if (!config.sessoesWhatsapp.includes(sessaoId)) {
+  config.sessoesWhatsapp.push(sessaoId);
   salvarConfig();
   console.log("💾 Sessão WhatsApp salva para reconexão:", id);
  }
 
- iniciarWhatsApp(id, false);
+ iniciarWhatsApp(sessaoId, false);
 
   return res.json({
-    ok: true,
-    message: "Sessão iniciada",
-    id
+  ok: true,
+  message: "Sessão iniciada",
+  id: sessaoId
   });
-});
+  });
 
 app.get("/status/:id", (req, res) => {
-  const { id } = req.params;
+  const clienteId = getClienteId(req);
+  const id = `${clienteId}_${req.params.id}`;
 
   res.json({
     conectado: statusSessao[id] === "open",
@@ -6060,7 +6122,8 @@ app.get("/status/:id", (req, res) => {
 });
 
 app.get("/qr/:id", (req, res) => {
-  const { id } = req.params;
+  const clienteId = getClienteId(req);
+  const id = `${clienteId}_${req.params.id}`;
 
   if (!qrCodes[id]) {
     return res.json({
@@ -6111,7 +6174,10 @@ if (gruposPorSessao[id]?.length) {
 }
 
 app.get("/grupos/:id", async (req, res) => {
-  const lista = await carregarGruposSessao(req.params.id);
+  const clienteId = getClienteId(req);
+  const id = `${clienteId}_${req.params.id}`;
+
+  const lista = await carregarGruposSessao(id);
 
   if (!lista.length) {
     return res.status(400).json({ erro: "Sem grupos carregados" });
@@ -6166,7 +6232,8 @@ app.post("/destinos/:id", (req, res) => {
     return res.status(400).json({ erro: "destinos deve ser array" });
   }
 
-  const id = req.params.id;
+  const clienteId = getClienteId(req);
+  const id = `${clienteId}_${req.params.id}`;
 
   destinosPorSessao[id] = destinos;
 
@@ -6186,7 +6253,8 @@ app.post("/destinos/:id", (req, res) => {
 });
 
 app.get("/destinos/:id", (req, res) => {
-  const id = req.params.id;
+  const clienteId = getClienteId(req);
+  const id = `${clienteId}_${req.params.id}`;
 
   return res.json({
     ok: true,
