@@ -131,6 +131,8 @@ let historicoOfertas = {};
 let cuponsAtivos = config.cuponsAtivos || [];
 let usuarios = [];
 
+let configsPorCliente = {};
+
 const FILA_FILE = "/data/fila.json";
 const CONFIG_FILE = "/data/config.json";
 const USUARIOS_FILE = "/data/usuarios.json";
@@ -1883,13 +1885,20 @@ app.post("/enviar-manual", async (req, res) => {
 });
 
 app.get("/fila", (req, res) => {
+  const clienteId = getClienteId(req);
+
+  const itensCliente = fila.filter((o) =>
+    (o.clienteId || "admin") === clienteId
+  );
+
   res.json({
     ok: true,
-    total: fila.length,
-    pendentes: fila.filter((o) => o.status === "pendente").length,
-    enviados: fila.filter((o) => o.status === "enviado").length,
-    itens: fila,
-    fila: fila
+    clienteId,
+    total: itensCliente.length,
+    pendentes: itensCliente.filter((o) => o.status === "pendente").length,
+    enviados: itensCliente.filter((o) => o.status === "enviado").length,
+    itens: itensCliente,
+    fila: itensCliente
   });
 });
 
@@ -2287,6 +2296,13 @@ function getClienteId(req) {
   } catch {
     return "admin";
   }
+}
+
+function getConfigCliente(clienteId = "admin") {
+  configsPorCliente[clienteId] =
+    configsPorCliente[clienteId] || {};
+
+  return configsPorCliente[clienteId];
 }
 
 function auth(req, res, next) {
