@@ -4319,8 +4319,9 @@ function limparLinkAmazon(url = "") {
   try {
     const u = new URL(url);
     const asin =
-      u.pathname.match(/\/dp\/([A-Z0-9]{10})/i)?.[1] ||
-      u.pathname.match(/\/gp\/product\/([A-Z0-9]{10})/i)?.[1];
+    u.pathname.match(/\/dp\/([A-Z0-9]{10})/i)?.[1] ||
+    u.pathname.match(/\/gp\/product\/([A-Z0-9]{10})/i)?.[1] ||
+    u.pathname.match(/\/([A-Z0-9]{10})(?:\/|$)/i)?.[1];
 
     if (!asin) return url;
 
