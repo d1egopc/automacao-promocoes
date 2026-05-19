@@ -4430,6 +4430,16 @@ const buscasInternacional = gerarBuscasGlobais(
           item.target_sale_url ||
           "";
 
+       const linkAliCurto = await gerarLinkCurtoAliExpress(
+       link,
+       integracao.credenciais || {}
+       );
+
+      const linkFinal = gerarLinkOptimus(
+      linkAliCurto,
+      "aliexpress"
+);
+
 const linkOriginalAli =
   item.product_detail_url ||
   item.product_url ||
@@ -4577,8 +4587,8 @@ if (desconto < minimoDescontoAplicado) continue;
           cupom: "",
           avisoCupom: desconto >= minimoDescontoAplicado ? `${Math.round(desconto)}% OFF no AliExpress.` : "",
           parcelamento: "",
-          link: linkCurto,
-          linkAfiliado: linkCurto,
+          link: linkFinal,
+          linkAfiliado: linkFinal,
           imagem,
           marketplace: "aliexpress",
           categoria: "AliExpress",
