@@ -136,6 +136,7 @@ let configsPorCliente = {};
 const FILA_FILE = "/data/fila.json";
 const CONFIG_FILE = "/data/config.json";
 const USUARIOS_FILE = "/data/usuarios.json";
+const CONFIGS_CLIENTES_FILE = "/data/configs_clientes.json";
 
 console.log("📂 Salvando dados em:", FILA_FILE);
 
@@ -209,6 +210,13 @@ function salvarUsuarios() {
   );
 }
 
+function salvarConfigsClientes() {
+  fs.writeFileSync(
+    CONFIGS_CLIENTES_FILE,
+    JSON.stringify(configsPorCliente, null, 2)
+  );
+}
+
 // ================= FUNÇÃO CARREGA CONFIG =================
 
 function carregarConfig() {
@@ -236,6 +244,14 @@ if (fs.existsSync(USUARIOS_FILE)) {
   );
 
   console.log("✅ Usuários carregados");
+}
+
+if (fs.existsSync(CONFIGS_CLIENTES_FILE)) {
+  configsPorCliente = JSON.parse(
+    fs.readFileSync(CONFIGS_CLIENTES_FILE, "utf8")
+  );
+
+  console.log("✅ Configs dos clientes carregadas");
 }
 
 if (!usuarios.length) {
