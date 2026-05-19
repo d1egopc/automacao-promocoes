@@ -131,12 +131,14 @@ let historicoOfertas = {};
 let cuponsAtivos = config.cuponsAtivos || [];
 let usuarios = [];
 
+let planos = {};
 let configsPorCliente = {};
 
 const FILA_FILE = "/data/fila.json";
 const CONFIG_FILE = "/data/config.json";
 const USUARIOS_FILE = "/data/usuarios.json";
 const CONFIGS_CLIENTES_FILE = "/data/configs_clientes.json";
+const PLANOS_FILE = "/data/planos.json";
 
 console.log("📂 Salvando dados em:", FILA_FILE);
 
@@ -210,6 +212,8 @@ function salvarUsuarios() {
   );
 }
 
+
+
 function salvarConfigsClientes() {
   fs.writeFileSync(
     CONFIGS_CLIENTES_FILE,
@@ -253,6 +257,15 @@ if (fs.existsSync(CONFIGS_CLIENTES_FILE)) {
 
   console.log("✅ Configs dos clientes carregadas");
 }
+
+if (fs.existsSync(PLANOS_FILE)) {
+  planos = JSON.parse(
+    fs.readFileSync(PLANOS_FILE, "utf8")
+  );
+
+  console.log("✅ Planos carregados");
+}
+
 
 if (!usuarios.length) {
   usuarios = [
