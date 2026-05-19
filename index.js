@@ -4157,6 +4157,46 @@ function registrarSucessoCupom(marketplace = "", cupom = "") {
   console.log("✅ Cupom validado como ativo:", mp, cp);
 }
 
+// =========== DECAIMENTO GLOBAL DE CUPONS ===========
+
+function decairConfiancaCupons() {
+  try {
+    config.cuponsStatus = config.cuponsStatus || {};
+    const agora = Date.now();
+
+    for (const [marketplace, cupons] of Object.entries(config.cuponsStatus)) {
+      for (const [cupom, status] of Object.entries(cupons)) {
+        if (!status || status.status === "expirado") continue;
+
+        const ultima =
+          status.ultimoSucesso ||
+          status.ultimaDeteccao ||
+          status.ultimaUtilizacao ||
+          status.criadoEm;
+
+        if (!ultima) continue;
+
+        const horas = (agora - new Date(ultima).getTime()) / (1000 * 60 * 60);
+
+        if (horas >= 24) {
+          status.confianca = Math.max(0, (status.confianca || 50) - 20);
+          status.ultimaDecaida = new Date().toISOString();
+        }
+
+        if (horas >= 48 || status.confianca <= 20) {
+          status.status = "expirado";
+          status.expirouEm = new Date().toISOString();
+          console.log("⏳ Cupom expirado por decaimento:", marketplace, cupom);
+        }
+      }
+    }
+
+    salvarConfig();
+  } catch (e) {
+    console.log("❌ erro decairConfiancaCupons:", e.message);
+  }
+}
+
 // =========== NORMALIZADOR GLOBAL DE CATEGORIAS ===========
 
 function normalizarCategoria(txt = "") {
@@ -7091,6 +7131,12 @@ function podeRodarAgora() {
 
 app.listen(PORT, () => {
   console.log("🔥 API ONLINE NA PORTA " + PORT);
+
+decairConfiancaCupons();
+
+setInterval(() => {
+  decairConfiancaCupons();
+}, 4 * 60 * 60 * 1000);
 
   setTimeout(() => {
     console.log("🔄 Reconectando sessões WhatsApp automaticamente...");
