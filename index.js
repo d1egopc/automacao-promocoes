@@ -2181,6 +2181,53 @@ app.get("/admin/usuarios", (req, res) => {
   });
 });
 
+app.get("/admin/planos", (req, res) => {
+  if (!isAdminMaster(req)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Acesso restrito ao Admin Master"
+    });
+  }
+
+  return res.json({
+    ok: true,
+    planos
+  });
+});
+
+app.post("/admin/planos", (req, res) => {
+  if (!isAdminMaster(req)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Acesso restrito ao Admin Master"
+    });
+  }
+
+  const body = req.body || {};
+
+  if (!body.nome) {
+    return res.status(400).json({
+      ok: false,
+      erro: "Nome do plano obrigatório"
+    });
+  }
+
+  planos[body.nome] = {
+    nome: body.nome,
+    marketplaces: body.marketplaces || [],
+    limites: body.limites || {},
+    recursos: body.recursos || {},
+    atualizadoEm: new Date().toISOString()
+  };
+
+  salvarPlanos();
+
+  return res.json({
+    ok: true,
+    plano: planos[body.nome]
+  });
+});
+
 app.post("/admin/usuarios", (req, res) => {
   if (!isAdminMaster(req)) {
     return res.status(403).json({
@@ -2416,6 +2463,21 @@ function isAdminMaster(req) {
   const usuario = usuarios.find(u => u.id === clienteId);
 
   return usuario?.papel === "admin_master";
+}
+
+// ===================== FUNCAO USUARIO ATUAL ============================
+
+function getUsuarioAtual(req) {
+  const clienteId = getClienteId(req);
+  return usuarios.find(u => u.id === clienteId) || null;
+}
+
+function getPlanoUsuario(req) {
+  const usuario = getUsuarioAtual(req);
+
+  if (!usuario) return null;
+
+  return planos[usuario.plano] || null;
 }
 
 //======================== FUNCAO GERAR ID ================================
@@ -2736,6 +2798,19 @@ app.get("/integracoes", (req, res) => {
 app.post("/integracoes/:marketplace", (req, res) => {
   const clienteId = getClienteId(req);
   const marketplace = req.params.marketplace.toLowerCase();
+
+  const plano = getPlanoUsuario(req);
+
+if (!isAdminMaster(req)) {
+  const liberados = plano?.marketplaces || [];
+
+  if (!liberados.includes(marketplace)) {
+    return res.status(403).json({
+      ok: false,
+      erro: `Marketplace ${marketplace} não liberado no seu plano`
+    });
+  }
+}
 
   const validacao = validarIntegracao(marketplace, req.body);
 
