@@ -2411,8 +2411,6 @@ function gerarId() {
   return "user_" + Math.random().toString(36).substring(2, 10);
 }
 
-function getClienteId(req) {
-
 //======================== FUNCAO CLIENTE ID ==============================
 
 function getClienteId(req) {
