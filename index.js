@@ -6090,7 +6090,9 @@ app.post("/conectar", async (req, res) => {
   const clienteId = getClienteId(req);
   const { id } = req.body;
 
-  const sessaoId = `${clienteId}_${id}`;
+  const sessaoId = clienteId === "admin"
+  ? id
+  : `${clienteId}_${id}`;
 
   if (!id) return res.status(400).json({ erro: "ID obrigatório" });
 
