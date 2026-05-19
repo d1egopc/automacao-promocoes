@@ -815,6 +815,7 @@ if (
     cupom,
     categorias: regra.categorias || [],
     termos: regra.termos || [],
+    ultimaDeteccao: new Date().toISOString(),
     aviso:
       regra.aviso ||
       `Use o cupom ${cupom} para tentar chegar no melhor valor.`,
@@ -3985,6 +3986,26 @@ function validarCupomAutomaticamente(marketplace = "", cupom = "") {
   if (status.status === "expirado") return false;
 
   if ((status.falhas || 0) >= 3) return false;
+
+  const ultima =
+    status.ultimoSucesso ||
+    status.ultimaDeteccao ||
+    status.ultimaUtilizacao ||
+    status.criadoEm;
+
+  if (ultima) {
+    const horasSemValidar =
+      (Date.now() - new Date(ultima).getTime()) / (1000 * 60 * 60);
+
+    if (horasSemValidar >= 24 && (status.confianca || 50) <= 50) {
+      status.status = "expirado";
+      status.expirouEm = new Date().toISOString();
+      salvarConfig();
+
+      console.log("⏳ Cupom expirado por tempo:", mp, cp);
+      return false;
+    }
+  }
 
   return true;
 }
