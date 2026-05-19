@@ -2154,6 +2154,70 @@ app.get("/minha-config", (req, res) => {
   });
 });
 
+app.get("/admin/usuarios", (req, res) => {
+  if (!isAdminMaster(req)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Acesso restrito ao Admin Master"
+    });
+  }
+
+  return res.json({
+    ok: true,
+    usuarios
+  });
+});
+
+app.post("/admin/usuarios", (req, res) => {
+  if (!isAdminMaster(req)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Acesso restrito ao Admin Master"
+    });
+  }
+
+  const body = req.body || {};
+
+  if (!body.nome || !body.email || !body.senha) {
+    return res.status(400).json({
+      ok: false,
+      erro: "Nome, email e senha obrigatórios"
+    });
+  }
+
+  const existe = usuarios.find(
+    u => u.email.toLowerCase() === body.email.toLowerCase()
+  );
+
+  if (existe) {
+    return res.status(400).json({
+      ok: false,
+      erro: "Email já cadastrado"
+    });
+  }
+
+  const novoUsuario = {
+    id: gerarId(),
+    nome: body.nome,
+    email: body.email.toLowerCase(),
+    senha: body.senha,
+    papel: body.papel || "cliente",
+    plano: body.plano || "free",
+    creditos: Number(body.creditos || 0),
+    ativo: true,
+    criadoEm: new Date().toISOString()
+  };
+
+  usuarios.push(novoUsuario);
+
+  salvarUsuarios();
+
+  return res.json({
+    ok: true,
+    usuario: novoUsuario
+  });
+});
+
 app.post("/minha-config", (req, res) => {
   const clienteId = getClienteId(req);
   const body = req.body || {};
@@ -2340,6 +2404,14 @@ function isAdminMaster(req) {
 
   return usuario?.papel === "admin_master";
 }
+
+//======================== FUNCAO GERAR ID ================================
+
+function gerarId() {
+  return "user_" + Math.random().toString(36).substring(2, 10);
+}
+
+function getClienteId(req) {
 
 //======================== FUNCAO CLIENTE ID ==============================
 
