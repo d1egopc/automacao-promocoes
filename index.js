@@ -5901,13 +5901,29 @@ const urlLower = url.toLowerCase();
 
 if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
   marketplace = "amazon";
-} else if (urlLower.includes("mercadolivre.com") || urlLower.includes("meli.la")) {
+
+} else if (
+  urlLower.includes("mercadolivre.com") ||
+  urlLower.includes("meli.la")
+) {
   marketplace = "mercadolivre";
-} else if (urlLower.includes("shopee.com") || urlLower.includes("s.shopee")) {
+
+} else if (
+  urlLower.includes("shopee.com") ||
+  urlLower.includes("s.shopee")
+) {
   marketplace = "shopee";
+
+} else if (
+  urlLower.includes("awin1.com") ||
+  urlLower.includes("awin.com")
+) {
+  marketplace = "awin";
+
 } else if (urlLower.includes("aliexpress.com")) {
   marketplace = "aliexpress";
 }
+
 
   if (!marketplace || !url) {
     return res.status(400).json({
