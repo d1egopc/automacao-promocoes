@@ -2551,13 +2551,25 @@ function getPlanoUsuario(req) {
   return planos[usuario.plano] || null;
 }
 
-//======================== FUNCAO GERAR ID ================================
+// ======================== FUNCAO GET INTEGRACOES ========================
+
+function getIntegracaoCliente(clienteId = "admin", marketplace = "") {
+  const mp = String(marketplace || "").toLowerCase();
+
+  return (
+    integracoesPorCliente?.[clienteId]?.[mp] ||
+    integracoesPorCliente?.admin?.[mp] ||
+    null
+  );
+}
+
+// ======================== FUNCAO GERAR ID ===============================
 
 function gerarId() {
   return "user_" + Math.random().toString(36).substring(2, 10);
 }
 
-//======================== FUNCAO CLIENTE ID ==============================
+// ======================== FUNCAO CLIENTE ID =============================
 
 function getClienteId(req) {
   const authHeader = req.headers.authorization || "";
@@ -2974,7 +2986,8 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
 // ================= AWIN IMPORTAR DEEP LINK MANUAL =================
 
 async function gerarDeepLinkAwin(urlOriginal, clienteId = "admin") {
-  const integracao = integracoesPorCliente[clienteId]?.awin;
+  const integracao =
+  getIntegracaoCliente(clienteId, "awin");
   const credenciais = integracao?.credenciais || {};
 
   const { publisherId, apiToken, advertiserId } = credenciais;
@@ -4177,7 +4190,8 @@ app.post("/importar-magalu-manual", async (req, res) => {
       });
     }
 
-    const integracao = integracoesPorCliente?.admin?.magalu;
+    const integracao =
+    getIntegracaoCliente(clienteId, "magalu");
 
     const promoterId =
       integracao?.credenciais?.promoterId || "";
@@ -5061,7 +5075,8 @@ async function farejarMagalu() {
 
     console.log("🟦 Farejando ofertas Magalu...");
 
-    const integracao = integracoesPorCliente?.admin?.magalu;
+    const integracao =
+    getIntegracaoCliente(clienteId, "magalu");
     const promoterId =
       integracao?.credenciais?.promoterId ||
       integracao?.promoterId ||
@@ -7230,7 +7245,7 @@ async function testarAwinProdutos() {
     const clienteId = "admin";
 
     const integracao =
-      integracoesPorCliente?.[clienteId]?.awin;
+    getIntegracaoCliente(clienteId, "awin");
 
     if (!integracao) {
       console.log("❌ Awin não configurada");
