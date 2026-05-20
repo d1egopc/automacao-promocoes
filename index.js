@@ -1620,7 +1620,25 @@ async function processarFila() {
   enviandoAgora = true;
 
   try {
-    if (!config.automacaoAtiva) return;
+    const oferta = fila.find(o => o.status === "pendente");
+
+if (!oferta) {
+  console.log("📭 Nenhuma oferta pendente");
+  return;
+}
+
+const clienteId = oferta.clienteId || "admin";
+
+const configCliente =
+  configsPorCliente?.[clienteId] || config;
+
+const clienteAtivo =
+  configCliente.automacaoAtiva === true;
+
+if (!clienteAtivo) {
+  console.log("⏸ Automação desligada para cliente:", clienteId);
+  return;
+}
 
     if (!podeRodarAgora()) {
       return;
@@ -1628,19 +1646,7 @@ async function processarFila() {
 
     const agora = Date.now();
 
-    const oferta = fila.find(o => o.status === "pendente");
-
-    if (!oferta) {
-      console.log("📭 Nenhuma oferta pendente");
-      return;
-    }
-
-    const clienteId = oferta.clienteId || "admin";
-
-    const configCliente =
-      configsPorCliente?.[clienteId] || config;
-
-    const intervaloMs =
+       const intervaloMs =
       (configCliente.intervaloMinutos || config.intervaloMinutos || 2) *
       60 *
       1000;
@@ -2198,13 +2204,19 @@ app.post("/telegram/testar", async (req, res) => {
   }
 });
 
-// ============== DESTINOS INTELIG APPGET ==============
+// ============== DESTINOS INTELIGENTES =================
 
 app.get("/destinos", (req, res) => {
-  res.json(config.destinosInteligentes || []);
+  const clienteId = getClienteId(req);
+
+  const destinos =
+    destinosPorCliente?.[clienteId] || [];
+
+  return res.json(destinos);
 });
 
 app.post("/destinos", (req, res) => {
+  const clienteId = getClienteId(req);
 
   const destinos = req.body;
 
@@ -2215,23 +2227,23 @@ app.post("/destinos", (req, res) => {
     });
   }
 
-  config.destinosInteligentes = destinos;
+  destinosPorCliente[clienteId] = destinos;
 
   salvarConfig();
 
   return res.json({
     ok: true,
-    destinos: config.destinosInteligentes
+    destinos: destinosPorCliente[clienteId]
   });
-
 });
 
 app.delete("/destinos/:id", (req, res) => {
+  const clienteId = getClienteId(req);
 
   const { id } = req.params;
 
-  config.destinosInteligentes =
-    (config.destinosInteligentes || [])
+  destinosPorCliente[clienteId] =
+    (destinosPorCliente?.[clienteId] || [])
       .filter(d => d.id !== id);
 
   salvarConfig();
@@ -2239,30 +2251,57 @@ app.delete("/destinos/:id", (req, res) => {
   return res.json({
     ok: true
   });
-
 });
 
-// ================= AUTOMAÇÃO =================
+// ================= AUTOMAÇÃO POR CLIENTE =================
 
 app.get("/automacao", (req, res) => {
-  res.json({
+  const clienteId = getClienteId(req);
+
+  if (!clienteId) {
+    return res.status(401).json({
+      ok: false,
+      erro: "Usuário não identificado"
+    });
+  }
+
+  configsPorCliente[clienteId] = configsPorCliente[clienteId] || {};
+
+  return res.json({
     ok: true,
-    ativo: config.automacaoAtiva
+    clienteId,
+    ativo: configsPorCliente[clienteId].automacaoAtiva === true
   });
 });
 
 app.post("/automacao/toggle", (req, res) => {
-  config.automacaoAtiva = !config.automacaoAtiva;
-  salvarConfig();
+  const clienteId = getClienteId(req);
 
-  console.log("🤖 Automação:", config.automacaoAtiva ? "ON" : "OFF");
+  if (!clienteId) {
+    return res.status(401).json({
+      ok: false,
+      erro: "Usuário não identificado"
+    });
+  }
 
-  res.json({
+  configsPorCliente[clienteId] = configsPorCliente[clienteId] || {};
+
+  configsPorCliente[clienteId].automacaoAtiva =
+    !configsPorCliente[clienteId].automacaoAtiva;
+
+  salvarConfigsClientes();
+
+  console.log("🤖 Automação cliente:", {
+    clienteId,
+    ativo: configsPorCliente[clienteId].automacaoAtiva
+  });
+
+  return res.json({
     ok: true,
-    ativo: config.automacaoAtiva
+    clienteId,
+    ativo: configsPorCliente[clienteId].automacaoAtiva
   });
 });
-
 
 app.delete("/fila/:index", (req, res) => {
   const index = Number(req.params.index);
@@ -2856,57 +2895,110 @@ app.get("/", (req, res) => {
 
 app.post("/desconectar/:id", async (req, res) => {
   try {
-    const id = req.params.id || "sessao1";
+    const clienteId = getClienteId(req);
 
-    if (sessoes[id]?.sock) {
+    const id = isAdminMaster(req)
+      ? req.params.id
+      : `${clienteId}_${req.params.id}`;
+
+    if (sessoes[id]) {
       try {
-        await sessoes[id].sock.logout();
+        await sessoes[id]?.logout?.();
       } catch (e) {
         console.log("⚠️ erro logout:", e.message);
+      }
+
+      try {
+        sessoes[id]?.end?.();
+      } catch (e) {
+        console.log("⚠️ erro end:", e.message);
       }
     }
 
     delete sessoes[id];
-    delete qrcodes[id];
+
+    if (typeof qrCodes !== "undefined") {
+      delete qrCodes[id];
+    }
+
+    if (typeof statusSessao !== "undefined") {
+      delete statusSessao[id];
+    }
 
     res.json({
       ok: true,
-      message: "WhatsApp desconectado."
+      message: "WhatsApp desconectado.",
+      id
     });
+
   } catch (e) {
-    res.status(500).json({ ok: false, erro: e.message });
+    res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
   }
 });
 
 app.post("/limpar-sessao/:id", async (req, res) => {
   try {
-    const id = req.params.id || "sessao1";
+    const clienteId = getClienteId(req);
 
-    if (sessoes[id]?.sock) {
+    const id = isAdminMaster(req)
+      ? req.params.id
+      : `${clienteId}_${req.params.id}`;
+
+    if (sessoes[id]) {
       try {
-        await sessoes[id].sock.logout();
+        await sessoes[id]?.logout?.();
       } catch (e) {
         console.log("⚠️ erro logout ao limpar:", e.message);
+      }
+
+      try {
+        sessoes[id]?.end?.();
+      } catch (e) {
+        console.log("⚠️ erro end ao limpar:", e.message);
       }
     }
 
     delete sessoes[id];
-    delete qrcodes[id];
 
-    const pastaAuth = path.join(__dirname, `auth_${id}`);
+    if (typeof qrCodes !== "undefined") {
+      delete qrCodes[id];
+    }
+
+    if (typeof statusSessao !== "undefined") {
+      delete statusSessao[id];
+    }
+
+    if (typeof destinosPorSessao !== "undefined") {
+      delete destinosPorSessao[id];
+    }
+
+    const pastaAuth = `/data/auth_${id}`;
 
     if (fs.existsSync(pastaAuth)) {
-      fs.rmSync(pastaAuth, { recursive: true, force: true });
+      fs.rmSync(pastaAuth, {
+        recursive: true,
+        force: true
+      });
+
       console.log("🗑️ Sessão limpa:", pastaAuth);
     }
 
-    res.json({
+    return res.json({
       ok: true,
-      message: "Sessão limpa. Gere um novo QR Code."
+      message: "Sessão limpa. Gere um novo QR Code.",
+      id
     });
+
   } catch (e) {
     console.log("❌ erro limpar sessão:", e.message);
-    res.status(500).json({ ok: false, erro: e.message });
+
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
   }
 });
 
@@ -6533,13 +6625,13 @@ app.post("/reset/:id", async (req, res) => {
     if (sessoes[id]) {
 
       try {
-        await sessoes[id]?.sock?.logout?.();
+        await sessoes[id]?.logout?.();
       } catch (e) {
         console.log("⚠️ logout ignorado:", e.message);
       }
 
       try {
-        sessoes[id]?.sock?.end?.();
+        sessoes[id]?.end?.();
       } catch (e) {
         console.log("⚠️ end ignorado:", e.message);
       }
@@ -6584,9 +6676,17 @@ app.post("/conectar", async (req, res) => {
   const clienteId = getClienteId(req);
   const { id } = req.body;
 
+  if (!clienteId) {
+    return res.status(401).json({ erro: "Usuário não identificado" });
+  }
+
+  if (!id) {
+    return res.status(400).json({ erro: "ID obrigatório" });
+  }
+
   const sessaoId = clienteId === "admin"
-  ? id
-  : `${clienteId}_${id}`;
+    ? id
+    : `${clienteId}_${id}`;
 
   if (!id) return res.status(400).json({ erro: "ID obrigatório" });
 
@@ -6794,6 +6894,9 @@ app.get("/destinos/:id", (req, res) => {
   });
 });
 
+
+// DESABILITADO TEMPORARIAMENTE - perigoso em multiusuário
+/*
 app.post("/test-send-todos", async (req, res) => {
   const mensagem =
     req.body?.mensagem ||
@@ -6828,6 +6931,7 @@ app.post("/test-send-todos", async (req, res) => {
             image: { url: imagemFinal },
             caption: mensagem
           });
+         
 
           resultados.push({
             sessao: id,
@@ -6890,6 +6994,7 @@ app.post("/test-send-todos", async (req, res) => {
     resultados
   });
 });
+*/
 
 // ================= TELEGRAM =================
 
