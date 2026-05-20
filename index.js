@@ -6470,7 +6470,9 @@ if (gruposPorSessao[id]?.length) {
 
 app.get("/grupos/:id", async (req, res) => {
   const clienteId = getClienteId(req);
-  const id = `${clienteId}_${req.params.id}`;
+  const id = clienteId === "admin"
+  ? req.params.id
+  : `${clienteId}_${req.params.id}`;
 
   const lista = await carregarGruposSessao(id);
 
@@ -6483,6 +6485,7 @@ return res.json({
   total: lista.length,
   grupos: lista,
   lista
+});
 });
 
 app.post("/magalu/gerar-link", (req, res) => {
