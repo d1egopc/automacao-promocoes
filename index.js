@@ -6478,7 +6478,11 @@ app.get("/grupos/:id", async (req, res) => {
     return res.status(400).json({ erro: "Sem grupos carregados" });
   }
 
-  return res.json(lista);
+return res.json({
+  ok: true,
+  total: lista.length,
+  grupos: lista,
+  lista
 });
 
 app.post("/magalu/gerar-link", (req, res) => {
