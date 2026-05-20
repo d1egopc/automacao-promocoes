@@ -2743,25 +2743,6 @@ const LIMITES_PLANO = {
   }
 };
 
-const LIMITES_PLANO = {
-  free: {
-    sessoes: 1,
-    destinos: 3
-  },
-  starter: {
-    sessoes: 3,
-    destinos: 10
-  },
-  pro: {
-    sessoes: 10,
-    destinos: 50
-  },
-  enterprise: {
-    sessoes: 999,
-    destinos: 999
-  }
-};
-
 // ======================== FUNCAO GET INTEGRACOES ========================
 
 function getIntegracaoCliente(clienteId = "admin", marketplace = "") {
