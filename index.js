@@ -212,13 +212,82 @@ function salvarUsuarios() {
   );
 }
 
+// ================= FUNÇÃO SALVA PLANO ===================
 
+function salvarPlanos() {
+  fs.writeFileSync(
+    PLANOS_FILE,
+    JSON.stringify(planos, null, 2)
+  );
+}
+
+// ============ FUNCAO SALVA CONFIG CLIENTES ==============
 
 function salvarConfigsClientes() {
   fs.writeFileSync(
     CONFIGS_CLIENTES_FILE,
     JSON.stringify(configsPorCliente, null, 2)
   );
+}
+
+// ================ FUNCAO CRIAR PLANO =====================
+
+function criarPlanosPadrao() {
+  if (Object.keys(planos || {}).length) return;
+
+  planos = {
+    free: {
+      nome: "free",
+      marketplaces: ["amazon", "shopee"],
+      limites: {
+        sessoes: 1,
+        destinos: 2,
+        enviosDia: 50
+      },
+      recursos: {
+        linkOptimus: false,
+        analytics: false,
+        cupomInteligente: false
+      },
+      atualizadoEm: new Date().toISOString()
+    },
+
+    pro: {
+      nome: "pro",
+      marketplaces: ["amazon", "shopee", "mercadolivre", "aliexpress"],
+      limites: {
+        sessoes: 3,
+        destinos: 10,
+        enviosDia: 500
+      },
+      recursos: {
+        linkOptimus: true,
+        analytics: true,
+        cupomInteligente: true
+      },
+      atualizadoEm: new Date().toISOString()
+    },
+
+    premium: {
+      nome: "premium",
+      marketplaces: ["amazon", "shopee", "mercadolivre", "aliexpress", "awin", "magalu"],
+      limites: {
+        sessoes: 10,
+        destinos: 50,
+        enviosDia: 5000
+      },
+      recursos: {
+        linkOptimus: true,
+        analytics: true,
+        cupomInteligente: true,
+        adminAvancado: true
+      },
+      atualizadoEm: new Date().toISOString()
+    }
+  };
+
+  salvarPlanos();
+  console.log("✅ Planos padrão criados");
 }
 
 // ================= FUNÇÃO CARREGA CONFIG =================
@@ -265,6 +334,8 @@ if (fs.existsSync(PLANOS_FILE)) {
 
   console.log("✅ Planos carregados");
 }
+
+   criarPlanosPadrao();
 
 
 if (!usuarios.length) {
