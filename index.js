@@ -6423,7 +6423,11 @@ app.get("/qr/:id", (req, res) => {
 });
 
 async function carregarGruposSessao(id) {
-  const sock = sessoes[id];
+console.log("🔎 Tentando carregar grupos da sessão:", id);
+console.log("📌 Sessões abertas:", Object.keys(sessoes));
+console.log("📌 Status sessões:", statusSessao);
+  
+const sock = sessoes[id];
 if (gruposPorSessao[id]?.length) {
   return gruposPorSessao[id];
 }
