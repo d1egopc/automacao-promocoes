@@ -6538,7 +6538,9 @@ app.post("/destinos/:id", (req, res) => {
 
 app.get("/destinos/:id", (req, res) => {
   const clienteId = getClienteId(req);
-  const id = `${clienteId}_${req.params.id}`;
+  const id = clienteId === "admin"
+  ? req.params.id
+  : `${clienteId}_${req.params.id}`;
 
   return res.json({
     ok: true,
