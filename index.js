@@ -6431,7 +6431,8 @@ console.log("🔎 Tentando carregar grupos da sessão:", id);
 console.log("📌 Sessões abertas:", Object.keys(sessoes));
 console.log("📌 Status sessões:", statusSessao);
   
-const sock = sessoes[id];
+const sock = sessoes[id]?.sock || sessoes[id];
+
 if (gruposPorSessao[id]?.length) {
   return gruposPorSessao[id];
 }
