@@ -4041,15 +4041,15 @@ async function importarMagalu(urlEntrada, config = {}) {
 const response = await fetch(urlConsulta, {
   headers: {
     ...gerarHeadersStealth(),
-    ...(integracoesPorCliente["admin"]?.magalu?.credenciais?.cookies
+    ...(getIntegracaoCliente("admin", "magalu")?.credenciais?.cookies
       ? {
           Cookie:
-            integracoesPorCliente["admin"].magalu.credenciais.cookies
+            getIntegracaoCliente("admin", "magalu").credenciais.cookies
         }
       : {})
   }
 });
-    
+
     const html = await response.text();
 
     console.log("🧪 HTML MAGALU:", html.slice(0, 2000));
@@ -4104,7 +4104,8 @@ const response = await fetch(urlConsulta, {
 }
 
 async function buscarProdutosAliExpressAPI(termo) {
-  const credenciais = integracoesPorCliente["admin"]?.aliexpress?.credenciais || {};
+  const credenciais =
+  getIntegracaoCliente("admin", "aliexpress")?.credenciais || {};
 
   const appKey = credenciais.appKey || "";
   const secret = credenciais.secret || "";
@@ -4191,7 +4192,7 @@ app.post("/importar-magalu-manual", async (req, res) => {
     }
 
     const integracao =
-    getIntegracaoCliente(clienteId, "magalu");
+    getIntegracaoCliente("admin", "magalu");
 
     const promoterId =
       integracao?.credenciais?.promoterId || "";
@@ -4790,241 +4791,240 @@ async function farejarAliExpress() {
     console.log("🛒 Farejando ofertas AliExpress...");
 
     const cfg = config.marketplaces?.aliexpress || {};
+    const integracao = getIntegracaoCliente("admin", "aliexpress");
+
     const limitePorRodada = cfg.limitePorRodada || 5;
     let adicionadasNestaRodada = 0;
-
     let ofertasEncontradas = [];
 
-const buscasBrasil = gerarBuscasGlobais(
-  config.marketplaces?.aliexpress?.limiteBuscasBrasil || 20
-);
+    const buscasBrasil = gerarBuscasGlobais(
+      cfg.limiteBuscasBrasil || 20
+    );
 
-const buscasInternacional = gerarBuscasGlobais(
-  config.marketplaces?.aliexpress?.limiteBuscasInternacional || 10
-);
+    const buscasInternacional = gerarBuscasGlobais(
+      cfg.limiteBuscasInternacional || 10
+    );
 
-
-  async function buscarTermoAliExpress(termo, tipo) {
-  try {
-    if (adicionadasNestaRodada >= limitePorRodada) return;
-
-    console.log(`${tipo} Busca AliExpress API:`, termo);
-
-    const produtosAPI = await buscarProdutosAliExpressAPI(termo);
-
-    console.log(`🔎 ${termo}: ${produtosAPI.length} produtos AliExpress via API`);
-
-    for (const item of produtosAPI.slice(0, 5)) {
+    async function buscarTermoAliExpress(termo, tipo) {
       try {
         if (adicionadasNestaRodada >= limitePorRodada) return;
 
-        const link =
-          item.promotion_link ||
-          item.product_detail_url ||
-          item.product_url ||
-          item.target_sale_url ||
-          "";
+        console.log(`${tipo} Busca AliExpress API:`, termo);
 
-       const linkAliCurto = await gerarLinkCurtoAliExpress(
-       link,
-       integracao.credenciais || {}
-       );
+        const produtosAPI = await buscarProdutosAliExpressAPI(termo);
 
-      const linkFinal = gerarLinkOptimus(
-      linkAliCurto,
-      "aliexpress"
-);
+        console.log(`🔎 ${termo}: ${produtosAPI.length} produtos AliExpress via API`);
 
-const linkOriginalAli =
-  item.product_detail_url ||
-  item.product_url ||
-  item.target_sale_url ||
-  link ||
-  "";
+        for (const item of produtosAPI.slice(0, 5)) {
+          try {
+            if (adicionadasNestaRodada >= limitePorRodada) return;
 
-const itemIdAli =
-  String(linkOriginalAli).match(/item\/(\d+)\.html/)?.[1] ||
-  String(linkOriginalAli).match(/\/(\d{10,})/)?.[1] ||
-  "";
+            const link =
+              item.promotion_link ||
+              item.product_detail_url ||
+              item.product_url ||
+              item.target_sale_url ||
+              "";
 
-const chaveAli = itemIdAli
-  ? `aliexpress_item_${itemIdAli}`
-  : gerarChaveProduto(String(linkOriginalAli).split("?")[0]);
+            if (!link) continue;
 
-if (produtoRepetidoRecentemente(chaveAli, 48)) {
-  console.log("⏭️ AliExpress item repetido ignorado:", chaveAli);
-  continue;
-}
+            const linkAliCurto = await gerarLinkCurtoAliExpress(
+              link,
+              integracao?.credenciais || {}
+            );
 
-const titulo =
-  item.product_title ||
-  item.title ||
-  item.product_subject ||
-  "Produto AliExpress";
+            const linkFinal = gerarLinkOptimus(
+              linkAliCurto,
+              "aliexpress"
+            );
 
-const chaveRepeticao =
-  gerarChaveProduto(titulo + " aliexpress");
+            const linkOriginalAli =
+              item.product_detail_url ||
+              item.product_url ||
+              item.target_sale_url ||
+              link ||
+              "";
 
-if (produtoRepetidoRecentemente(chaveRepeticao, 48)) {
-  console.log("⏭️ AliExpress título repetido ignorado:", titulo);
-  continue;
-}
+            const itemIdAli =
+              String(linkOriginalAli).match(/item\/(\d+)\.html/)?.[1] ||
+              String(linkOriginalAli).match(/\/(\d{10,})/)?.[1] ||
+              "";
 
+            const chaveAli = itemIdAli
+              ? `aliexpress_item_${itemIdAli}`
+              : gerarChaveProduto(String(linkOriginalAli).split("?")[0]);
 
-        const precoAtual =
-          limparPreco(
-            item.target_sale_price ||
-            item.sale_price ||
-            item.app_sale_price ||
-            item.original_price
-          );
+            if (produtoRepetidoRecentemente(chaveAli, 48)) {
+              console.log("⏭️ AliExpress item repetido ignorado:", chaveAli);
+              continue;
+            }
 
-        const precoAntigo =
-          limparPreco(
-            item.target_original_price ||
-            item.original_price ||
-            item.product_original_price
-          );
+            const titulo =
+              item.product_title ||
+              item.title ||
+              item.product_subject ||
+              "Produto AliExpress";
 
-        const imagem =
-          item.product_main_image_url ||
-          item.image_url ||
-          item.product_small_image_urls?.string?.[0] ||
-          "";
+            const chaveRepeticao =
+              gerarChaveProduto(titulo + " aliexpress");
 
-        const descontoTexto =
-          item.discount ||
-          item.discount_rate ||
-          item.evaluate_rate ||
-          "";
+            if (produtoRepetidoRecentemente(chaveRepeticao, 48)) {
+              console.log("⏭️ AliExpress título repetido ignorado:", titulo);
+              continue;
+            }
 
-        const precoNumero = Number(
-          String(precoAtual || "")
-            .replace("R$", "")
-            .replace(/\./g, "")
-            .replace(",", ".")
-            .trim()
-        );
+            const precoAtual =
+              limparPreco(
+                item.target_sale_price ||
+                item.sale_price ||
+                item.app_sale_price ||
+                item.original_price
+              );
 
-        const precoAntigoNumero = Number(
-          String(precoAntigo || "")
-            .replace("R$", "")
-            .replace(/\./g, "")
-            .replace(",", ".")
-            .trim()
-        );
+            const precoAntigo =
+              limparPreco(
+                item.target_original_price ||
+                item.original_price ||
+                item.product_original_price
+              );
 
-        const desconto =
-          precoAntigoNumero > precoNumero
-            ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
-            : Number(String(descontoTexto).replace(/\D/g, "")) || 0;
+            const imagem =
+              item.product_main_image_url ||
+              item.image_url ||
+              item.product_small_image_urls?.string?.[0] ||
+              "";
 
-      console.log("🧪 PRODUTO ALI API:", {
-      titulo,
-      precoAtual,
-      precoAntigo,
-      desconto: Math.round(desconto) + "%",
-      link: link?.slice(0, 80)
-      });
-        
+            const descontoTexto =
+              item.discount ||
+              item.discount_rate ||
+              item.evaluate_rate ||
+              "";
 
-const tituloLower = titulo.toLowerCase();
+            const precoNumero = Number(
+              String(precoAtual || "")
+                .replace("R$", "")
+                .replace(/\./g, "")
+                .replace(",", ".")
+                .trim()
+            );
 
-const palavrasBloqueadas = [
-  "cabelo",
-  "peruca",
-  "extensão",
-  "extensões",
-  "sapato",
-  "sandália",
-  "chinelo",
-  "salto",
-  "batom",
-  "cílios",
-  "unha",
-  "bolsa",
-  "sutiã",
-  "calcinha",
-  "wedding",
-  "bridal"
-];
+            const precoAntigoNumero = Number(
+              String(precoAntigo || "")
+                .replace("R$", "")
+                .replace(/\./g, "")
+                .replace(",", ".")
+                .trim()
+            );
 
-if (palavrasBloqueadas.some(p => tituloLower.includes(p))) {
-  console.log("🚫 Produto bloqueado:", titulo);
-  continue;
-}
-        
-        if (!link) continue;
-if (!precoNumero || !Number.isFinite(precoNumero)) continue;
+            const desconto =
+              precoAntigoNumero > precoNumero
+                ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
+                : Number(String(descontoTexto).replace(/\D/g, "")) || 0;
 
-const precoMinimo = Number(cfg.precoMinimo) || 0;
-const descontoMinimo = Number(cfg.descontoMinimo) || 0;
+            console.log("🧪 PRODUTO ALI API:", {
+              titulo,
+              precoAtual,
+              precoAntigo,
+              desconto: Math.round(desconto) + "%",
+              link: link?.slice(0, 80)
+            });
 
-const descontoMinimoInternacional =
-  Number(cfg.descontoMinimoInternacional) || descontoMinimo;
+            const tituloLower = titulo.toLowerCase();
 
-const minimoDescontoAplicado =
-  tipo === "🌍"
-    ? descontoMinimoInternacional
-    : descontoMinimo;
+            const palavrasBloqueadas = [
+              "cabelo",
+              "peruca",
+              "extensão",
+              "extensões",
+              "sapato",
+              "sandália",
+              "chinelo",
+              "salto",
+              "batom",
+              "cílios",
+              "unha",
+              "bolsa",
+              "sutiã",
+              "calcinha",
+              "wedding",
+              "bridal"
+            ];
 
-if (precoNumero < precoMinimo) continue;
-if (desconto < minimoDescontoAplicado) continue;
-         
-        const linkCurto = gerarLinkOptimus(link, "aliexpress");
+            if (palavrasBloqueadas.some(p => tituloLower.includes(p))) {
+              console.log("🚫 Produto bloqueado:", titulo);
+              continue;
+            }
 
-        let novaOferta = {
-          nome: titulo,
-          titulo,
-          preco: precoAtual,
-          precoAtual,
-          precoAntigo: precoAntigo || "",
-          cupom: "",
-          avisoCupom: desconto >= minimoDescontoAplicado ? `${Math.round(desconto)}% OFF no AliExpress.` : "",
-          parcelamento: "",
-          link: linkFinal,
-          linkAfiliado: linkFinal,
-          imagem,
-          marketplace: "aliexpress",
-          categoria: "AliExpress",
-          sessaoId: "sessao1",
-          status: "pendente",
-          clienteId: "admin"
-        };
+            if (!precoNumero || !Number.isFinite(precoNumero)) continue;
 
-        novaOferta = prepararOfertaGlobal(novaOferta);
+            const precoMinimo = Number(cfg.precoMinimo) || 0;
+            const descontoMinimo = Number(cfg.descontoMinimo) || 0;
 
-        const jaExiste = ofertaJaExiste(novaOferta);
+            const descontoMinimoInternacional =
+              Number(cfg.descontoMinimoInternacional) || descontoMinimo;
 
-        if (!jaExiste) {
-          novaOferta.criadoEm = new Date().toLocaleString("pt-BR", {
-            timeZone: "America/Sao_Paulo"
-          });
+            const minimoDescontoAplicado =
+              tipo === "🌍"
+                ? descontoMinimoInternacional
+                : descontoMinimo;
 
-          ofertasEncontradas.push(novaOferta);
+            if (precoNumero < precoMinimo) continue;
+            if (desconto < minimoDescontoAplicado) continue;
 
-          adicionadasNestaRodada++;
+            let novaOferta = {
+              nome: titulo,
+              titulo,
+              preco: precoAtual,
+              precoAtual,
+              precoAntigo: precoAntigo || "",
+              cupom: "",
+              avisoCupom:
+                desconto >= minimoDescontoAplicado
+                  ? `${Math.round(desconto)}% OFF no AliExpress.`
+                  : "",
+              parcelamento: "",
+              link: linkFinal,
+              linkAfiliado: linkFinal,
+              imagem,
+              marketplace: "aliexpress",
+              categoria: "AliExpress",
+              sessaoId: "sessao1",
+              status: "pendente",
+              clienteId: "admin"
+            };
 
-          console.log("🤖 Nova oferta AliExpress:", {
-            titulo: novaOferta.titulo,
-            preco: novaOferta.precoAtual,
-            precoAntigo: novaOferta.precoAntigo,
-            desconto: Math.round(desconto) + "%",
-            link: novaOferta.linkAfiliado?.slice(0, 80)
-          });
+            novaOferta = prepararOfertaGlobal(novaOferta);
+
+            const jaExiste = ofertaJaExiste(novaOferta);
+
+            if (!jaExiste) {
+              novaOferta.criadoEm = new Date().toLocaleString("pt-BR", {
+                timeZone: "America/Sao_Paulo"
+              });
+
+              ofertasEncontradas.push(novaOferta);
+              adicionadasNestaRodada++;
+
+              console.log("🤖 Nova oferta AliExpress:", {
+                titulo: novaOferta.titulo,
+                preco: novaOferta.precoAtual,
+                precoAntigo: novaOferta.precoAntigo,
+                desconto: Math.round(desconto) + "%",
+                link: novaOferta.linkAfiliado?.slice(0, 80)
+              });
+            }
+
+            await new Promise(r => setTimeout(r, 1500));
+          } catch (e) {
+            console.log("❌ erro produto AliExpress API:", e.message);
+          }
         }
 
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, 3000));
       } catch (e) {
-        console.log("❌ erro produto AliExpress API:", e.message);
+        console.log("❌ erro busca AliExpress API:", termo, e.message);
       }
     }
-
-    await new Promise(r => setTimeout(r, 3000));
-  } catch (e) {
-    console.log("❌ erro busca AliExpress API:", termo, e.message);
-  }
-}
 
     for (const termo of buscasBrasil) {
       await buscarTermoAliExpress(termo, "🇧🇷");
@@ -5032,37 +5032,37 @@ if (desconto < minimoDescontoAplicado) continue;
     }
 
     if (cfg.permitirInternacionalForte && adicionadasNestaRodada < limitePorRodada) {
-      for (const termo of buscasInternacionais) {
+      for (const termo of buscasInternacional) {
         await buscarTermoAliExpress(termo, "🌍");
         if (adicionadasNestaRodada >= limitePorRodada) break;
       }
     }
 
-const ofertasFiltradas = aplicarFiltrosUniversais(
-  ofertasEncontradas,
-  {
-    preferirEnvioBrasil: true,
-    bloquearSemImagem: true,
-    bloquearSemPreco: true,
-  }
-);
+    const ofertasFiltradas = aplicarFiltrosUniversais(
+      ofertasEncontradas,
+      {
+        preferirEnvioBrasil: true,
+        bloquearSemImagem: true,
+        bloquearSemPreco: true
+      }
+    );
 
-console.log(
-  `🧠 Ofertas AliExpress após filtros universais: ${ofertasFiltradas.length}`
-);
+    console.log(
+      `🧠 Ofertas AliExpress após filtros universais: ${ofertasFiltradas.length}`
+    );
 
-for (const oferta of ofertasFiltradas) {
-  fila.push(oferta);
-}
+    for (const oferta of ofertasFiltradas) {
+      fila.push(oferta);
+    }
 
-salvarFila();
-
+    salvarFila();
 
     console.log(`✅ AliExpress finalizado. Adicionadas: ${adicionadasNestaRodada}`);
   } catch (e) {
     console.log("❌ erro farejador AliExpress:", e.message);
   }
 }
+
 
 // ================= FAREJADOR MAGALU =================
 
@@ -5076,8 +5076,8 @@ async function farejarMagalu() {
     console.log("🟦 Farejando ofertas Magalu...");
 
     const integracao =
-    getIntegracaoCliente(clienteId, "magalu");
-    const promoterId =
+     getIntegracaoCliente(clienteId, "magalu");
+     const promoterId =
       integracao?.credenciais?.promoterId ||
       integracao?.promoterId ||
       "";
@@ -5264,7 +5264,7 @@ async function farejarAwin() {
     })
     .on("end", resolve)
     .on("error", reject);
-    });123456
+    });
 
     console.log("📦 Produtos no feed Awin:", produtos.length);
     
@@ -5571,7 +5571,9 @@ return {
     categoria: "Amazon"
   };
 
-}async function importarShopee(url, config) {
+}
+
+async function importarShopee(url, config) {
   if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
     url = "https://" + url;
   }
@@ -5882,7 +5884,7 @@ if (temMin && temMax && minNumero !== maxNumero) {
   };
 }
 
-// ================= IMPORTAR PRODUTO =================
+// ================= IMPORTAR PRODUTO AMAZON =================
 
 app.post("/importar-produto", async (req, res) => {
   const clienteId = getClienteId(req);
@@ -5997,7 +5999,7 @@ if (marketplace === "magalu") {
       linkOriginal: url,
       linkAfiliado: url,
       imagem: "",
-      categoria: classificarCategoriaOferta(produto, termo),
+      categoria: "Magalu",
       aviso: "Erro ao gerar link Magalu. Preencha manualmente."
     });
   }
@@ -6224,7 +6226,9 @@ const clienteId = getClienteId(req);
 
     const total = Object.keys(sessoesMeta).length + 1;
     const nomeSessao = req.body.id || `sessao${total}`;
-    const id = `${clienteId}_${nomeSessao}`;
+    const id = clienteId === "admin"
+   ? nomeSessao
+   : `${clienteId}_${nomeSessao}`;
 
     if (sessoesMeta[id]) {
       return res.status(400).json({
@@ -6828,13 +6832,13 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
 
        console.log("🌐 MERCADO LIVRE URL:", url);
 
-       const response = await fetch(url, {
+      const response = await fetch(url, {
   headers: {
     ...gerarHeadersStealth(),
-    ...(integracoesPorCliente["admin"]?.mercadolivre?.credenciais?.cookies
+    ...(getIntegracaoCliente("admin", "mercadolivre")?.credenciais?.cookies
       ? {
           Cookie:
-            integracoesPorCliente["admin"].mercadolivre.credenciais.cookies
+            getIntegracaoCliente("admin", "mercadolivre").credenciais.cookies
         }
       : {})
   }
@@ -6932,9 +6936,12 @@ if (compraNoApp && !cupom) {
 
         for (const link of links) {
           try {
-            const produto = await importarMercadoLivre(link, {
-              credenciais: integracoesPorCliente["admin"]?.mercadolivre?.credenciais
-            });
+            const integracaoML =
+  getIntegracaoCliente("admin", "mercadolivre");
+
+  const produto = await importarMercadoLivre(link, {
+  credenciais: integracaoML?.credenciais
+  });
 
             if (!produto.precoAtual) continue;
 
@@ -7114,9 +7121,12 @@ const links = [...new Set(linksExtraidos)].slice(0, 3);
 
 for (const link of links) {
   try {
-    const produto = await importarAmazon(link, {
-      credenciais: integracoesPorCliente["admin"]?.amazon?.credenciais
-    });
+    const integracaoAmazon =
+  getIntegracaoCliente("admin", "amazon");
+
+  const produto = await importarAmazon(link, {
+  credenciais: integracaoAmazon?.credenciais
+  });
 
     console.log("🧪 PRODUTO AMAZON:", {
       titulo: produto.titulo,
@@ -7297,12 +7307,16 @@ async function testarAwinProdutos() {
 }
 
 async function buscarOfertasShopee() {
-  const configShopee = integracoesPorCliente["admin"]?.shopee;
+  const configShopee =
+  getIntegracaoCliente("admin", "shopee");
 
-  if (!configShopee?.credenciais?.appId || !configShopee?.credenciais?.secret) {
-    console.log("❌ Shopee sem credenciais configuradas");
-    return [];
-  }
+if (
+  !configShopee?.credenciais?.appId ||
+  !configShopee?.credenciais?.secret
+) {
+  console.log("❌ Shopee sem credenciais configuradas");
+  return [];
+}
 
   const { appId, secret } = configShopee.credenciais;
 
