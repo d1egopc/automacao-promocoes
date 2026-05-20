@@ -1882,6 +1882,7 @@ if (!categoriaPermitidaNoDestino(oferta, destino)) {
   clienteId,
   configCliente
 );
+}
 
 controleEnvio[clienteId] = Date.now();
 ultimoEnvioFila = Date.now();
