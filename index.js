@@ -6380,7 +6380,9 @@ app.post("/conectar", async (req, res) => {
 
 app.get("/status/:id", (req, res) => {
   const clienteId = getClienteId(req);
-  const id = `${clienteId}_${req.params.id}`;
+  const id = clienteId === "admin"
+  ? req.params.id
+  : `${clienteId}_${req.params.id}`;
 
   res.json({
     conectado: statusSessao[id] === "open",
