@@ -7172,53 +7172,6 @@ async function enviarTelegram(oferta, mensagem, clienteId, configCliente) {
   }
 }
 
-// ================= ENVIO PARA DESTINO INTELIGENTE TELEGRAM =================
-
-async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId, configCliente) {
-  try {
-    clienteId = clienteId || oferta?.clienteId || "admin";
-
-    if (!destino?.ativo) {
-      console.log("⏸ Destino desativado:", destino?.nome);
-      return;
-    }
-
-    if (destino.tipo === "telegram") {
-      await enviarTelegram(oferta, mensagem, clienteId, configCliente);
-      return;
-    }
-
-    if (destino.tipo === "whatsapp") {
-      const grupos = destino.gruposWhatsapp || destino.grupos || [];
-
-      if (!grupos.length) {
-        console.log("⚠️ Nenhum grupo WhatsApp no destino:", destino.nome);
-        return;
-      }
-
-      const sessaoId = destino.conexaoId || destino.sessaoId || "sessao1";
-      const sock = sessoes?.[sessaoId];
-
-      if (!sock) {
-        console.log("❌ Sessão WhatsApp não conectada:", sessaoId);
-        return;
-      }
-
-      for (const grupoId of grupos) {
-        await sock.sendMessage(grupoId, { text: mensagem });
-        console.log("✅ WhatsApp enviado:", destino.nome, grupoId);
-      }
-
-      return;
-    }
-
-    console.log("⚠️ Tipo de destino desconhecido:", destino.tipo);
-
-  } catch (e) {
-    console.log("❌ Erro enviarParaDestinoInteligente:", e.message);
-  }
-}
-
 // ================= FUNCÃO WHATSAPP =================
 
 async function iniciarWhatsApp(id, clienteId = "admin", force = false) {
