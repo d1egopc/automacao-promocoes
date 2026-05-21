@@ -6502,9 +6502,6 @@ app.post("/sessoes", (req, res) => {
   }
 
   try {
-
-const clienteId = getClienteId(req);
-  try {
     const nome = req.body.nome || "WhatsApp";
     const tipo = req.body.tipo || "whatsapp";
 
