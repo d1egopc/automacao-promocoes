@@ -1554,81 +1554,82 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
       }
     }
 
-    // ================= TELEGRAM =================
+// ================= TELEGRAM =================
 
-    if (String(destino.tipo || "").toLowerCase() === "telegram") {
-      const telegrams = configCliente.telegram?.destinos || [];
+if (String(destino.tipo || "").toLowerCase() === "telegram") {
+  const telegramConfig =
+    configCliente?.telegram ||
+    integracoesPorCliente?.[clienteId]?.telegram ||
+    {};
 
-      const selecionados = telegrams.filter(t =>
-        (destino.telegramDestinos || []).includes(t.nome) ||
-        (destino.telegramDestinos || []).includes(String(t.chatId))
-      );
+  if (!telegramConfig?.ativo) {
+    console.log("⏸ Telegram desativado para cliente:", clienteId);
+    return;
+  }
 
-      if (!selecionados.length) {
-        console.log("⚠️ Nenhum Telegram selecionado para este destino:", destino.nome);
-      }
+  const telegrams = telegramConfig.destinos || [];
 
-      for (const tel of selecionados) {
-       
-      if (!usuarioTemCreditos(clienteId, 1)) {
-      console.log("🚫 Sem créditos:", clienteId);
+  const selecionados = telegrams.filter(t =>
+    t?.ativo !== false &&
+    (
+      (destino.telegramDestinos || []).includes(t.nome) ||
+      (destino.telegramDestinos || []).includes(String(t.chatId))
+    )
+  );
+
+  if (!selecionados.length) {
+    console.log("⚠️ Nenhum Telegram selecionado para este destino:", destino.nome);
+    return;
+  }
+
+  for (const tel of selecionados) {
+    if (!tel.botToken || !tel.chatId) {
+      console.log("⚠️ Telegram incompleto:", tel.nome || tel.chatId);
       continue;
-      }
-
-      debitarCreditos(clienteId, 1); 
-            
-        if (!tel.ativo) continue;
-
-        if (destino.tipoMidia === "texto" || !oferta.imagem) {
-          await axios.post(
-            `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
-            {
-              chat_id: tel.chatId,
-              text: mensagem
-            }
-          );
-        } else {
-          await axios.post(
-            `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
-            {
-              chat_id: tel.chatId,
-              photo: corrigirImagemUrl(oferta.imagem) || oferta.imagem,
-              caption: mensagem
-            }
-          );
-        }
-
-        console.log("✅ Enviado Telegram:", {
-          clienteId,
-          destino: destino.nome,
-          chatId: tel.chatId
-        });
-
-        oferta.destinosEnviados = oferta.destinosEnviados || [];
-        oferta.destinosEnviados.push({
-          clienteId,
-          nome: destino.nome || "Destino",
-          tipo: "telegram",
-          chatId: tel.chatId,
-          creditos: 1,
-          dataEnvio: new Date().toLocaleString("pt-BR", {
-            timeZone: "America/Sao_Paulo"
-          })
-        });
-
-        await new Promise(r => setTimeout(r, 2000));
-      }
     }
 
-  } catch (e) {
-    console.log(
-      "❌ erro destino inteligente:",
-      destino?.nome,
-      e.message
-    );
+    if (!usuarioTemCreditos(clienteId, 1)) {
+      console.log("🚫 Sem créditos:", clienteId);
+      continue;
+    }
+
+    if (destino.tipoMidia === "texto" || !oferta.imagem) {
+      await axios.post(`https://api.telegram.org/bot${tel.botToken}/sendMessage`, {
+        chat_id: tel.chatId,
+        text: mensagem
+      });
+    } else {
+      await axios.post(`https://api.telegram.org/bot${tel.botToken}/sendPhoto`, {
+        chat_id: tel.chatId,
+        photo: corrigirImagemUrl(oferta.imagem) || oferta.imagem,
+        caption: mensagem
+      });
+    }
+
+    debitarCreditos(clienteId, 1);
+
+    console.log("✅ Enviado Telegram:", {
+      clienteId,
+      destino: destino.nome,
+      telegram: tel.nome || tel.chatId
+    });
+
+    oferta.destinosEnviados = oferta.destinosEnviados || [];
+    oferta.destinosEnviados.push({
+      clienteId,
+      nome: destino.nome || "Destino",
+      tipo: "telegram",
+      telegram: tel.nome || "",
+      chatId: tel.chatId,
+      creditos: 1,
+      dataEnvio: new Date().toLocaleString("pt-BR", {
+        timeZone: "America/Sao_Paulo"
+      })
+    });
+
+    await new Promise(r => setTimeout(r, 2000));
   }
 }
-
 
 // ================= FUNCÃO PROCESSA FILA =================
 
@@ -2160,35 +2161,74 @@ app.get("/r/:codigo", (req, res) => {
   }
 });
 
-// ================= TELEGRAM =================
+// ================= TELEGRAM ROTA =================
 
 app.get("/telegram", (req, res) => {
+  const clienteId = getClienteId(req);
+
+  if (!clienteId) {
+    return res.status(401).json({
+      ok: false,
+      erro: "Cliente não identificado"
+    });
+  }
+
+  const configCliente =
+    configsPorCliente?.[clienteId] || {};
+
+  const telegram =
+    configCliente.telegram || {
+      ativo: false,
+      destinos: []
+    };
+
   res.json({
-    ativo: config.telegram?.ativo || false,
-    destinos: config.telegram?.destinos || []
+    ok: true,
+    clienteId,
+    ativo: telegram.ativo === true,
+    destinos: telegram.destinos || []
   });
 });
 
 app.post("/telegram", (req, res) => {
+  const clienteId = getClienteId(req);
+
+  if (!clienteId) {
+    return res.status(401).json({
+      ok: false,
+      erro: "Cliente não identificado"
+    });
+  }
+
   const { ativo, destinos } = req.body;
 
-  config.telegram = {
+  configsPorCliente[clienteId] =
+    configsPorCliente[clienteId] || {};
+
+  configsPorCliente[clienteId].telegram = {
     ativo: ativo === true,
-    destinos: Array.isArray(destinos)
-      ? destinos
-      : config.telegram?.destinos || []
+    destinos: Array.isArray(destinos) ? destinos : []
   };
 
-  salvarConfig();
+  salvarConfigsClientes();
 
   res.json({
     ok: true,
-    telegram: config.telegram
+    clienteId,
+    telegram: configsPorCliente[clienteId].telegram
   });
 });
 
 app.post("/telegram/testar", async (req, res) => {
   try {
+    const clienteId = getClienteId(req);
+
+    if (!clienteId) {
+      return res.status(401).json({
+        ok: false,
+        erro: "Cliente não identificado"
+      });
+    }
 
     const { destino } = req.body;
 
@@ -2203,22 +2243,21 @@ app.post("/telegram/testar", async (req, res) => {
       `https://api.telegram.org/bot${destino.botToken}/sendMessage`,
       {
         chat_id: destino.chatId,
-        text: "🧪 Teste Telegram Optimus Promo enviado com sucesso!"
+        text: `🧪 Teste Telegram Optimus Promo enviado com sucesso!\n👤 Cliente: ${clienteId}`
       }
     );
 
     return res.json({
       ok: true,
+      clienteId,
       mensagem: "Teste enviado com sucesso"
     });
 
   } catch (e) {
-
     return res.status(400).json({
       ok: false,
       erro: e.response?.data || e.message
     });
-
   }
 });
 
@@ -7066,88 +7105,184 @@ app.get("/destinos/:id", (req, res) => {
 
 // ================= TELEGRAM =================
 
-async function enviarTelegram(oferta, mensagem) {
+async function enviarTelegram(oferta, mensagem, clienteId, configCliente) {
   try {
-    if (!config.telegram?.ativo) {
-      console.log("⏸ Telegram desativado.");
+    clienteId = clienteId || oferta?.clienteId || "admin";
+    configCliente = configCliente || configsPorCliente?.[clienteId] || {};
+
+    const telegramConfig =
+      configCliente.telegram ||
+      integracoesPorCliente?.[clienteId]?.telegram ||
+      {};
+
+    if (!telegramConfig?.ativo) {
+      console.log("⏸ Telegram desativado para cliente:", clienteId);
       return;
     }
 
-    const destinos = config.telegram?.destinos || [];
+    const destinos = telegramConfig.destinos || [];
 
     if (!destinos.length) {
-      console.log("⚠️ Nenhum destino Telegram configurado.");
+      console.log("⚠️ Nenhum destino Telegram configurado para cliente:", clienteId);
       return;
     }
 
     for (const destino of destinos) {
-      if (!destino.ativo) continue;
+      try {
+        if (!destino.ativo) continue;
 
-      const token = destino.botToken;
-      const chatId = destino.chatId;
+        const token = destino.botToken;
+        const chatId = destino.chatId;
 
-      if (!token || !chatId) {
-        console.log("⚠️ Telegram destino incompleto:", destino.nome);
-        continue;
+        if (!token || !chatId) {
+          console.log("⚠️ Telegram destino incompleto:", destino.nome || "sem nome");
+          continue;
+        }
+
+        if (oferta.imagem) {
+          await axios.post(`https://api.telegram.org/bot${token}/sendPhoto`, {
+            chat_id: chatId,
+            photo: corrigirImagemUrl(oferta.imagem) || oferta.imagem,
+            caption: mensagem,
+            parse_mode: "HTML"
+          });
+        } else {
+          await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+            chat_id: chatId,
+            text: mensagem,
+            parse_mode: "HTML"
+          });
+        }
+
+        console.log(
+          `✅ Telegram enviado | cliente: ${clienteId} | destino: ${destino.nome || chatId}`
+        );
+
+      } catch (erroDestino) {
+        console.log(
+          "❌ Erro ao enviar Telegram para destino:",
+          destino.nome || destino.chatId,
+          erroDestino.response?.data || erroDestino.message
+        );
       }
-
-      if (oferta.imagem) {
-        await axios.post(`https://api.telegram.org/bot${token}/sendPhoto`, {
-          chat_id: chatId,
-          photo: corrigirImagemUrl(oferta.imagem) || oferta.imagem,
-          caption: mensagem
-        });
-      } else {
-        await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
-          chat_id: chatId,
-          text: mensagem
-        });
-      }
-
-      console.log("✅ Telegram enviado:", destino.nome || chatId);
-
-      await new Promise(r => setTimeout(r, 1500));
     }
 
   } catch (e) {
-    console.log("❌ Erro Telegram:", e.response?.data || e.message);
+    console.log("❌ Erro geral enviarTelegram:", e.message);
+  }
+}
+
+// ================= ENVIO PARA DESTINO INTELIGENTE TELEGRAM =================
+
+async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId, configCliente) {
+  try {
+    clienteId = clienteId || oferta?.clienteId || "admin";
+
+    if (!destino?.ativo) {
+      console.log("⏸ Destino desativado:", destino?.nome);
+      return;
+    }
+
+    if (destino.tipo === "telegram") {
+      await enviarTelegram(oferta, mensagem, clienteId, configCliente);
+      return;
+    }
+
+    if (destino.tipo === "whatsapp") {
+      const grupos = destino.gruposWhatsapp || destino.grupos || [];
+
+      if (!grupos.length) {
+        console.log("⚠️ Nenhum grupo WhatsApp no destino:", destino.nome);
+        return;
+      }
+
+      const sessaoId = destino.conexaoId || destino.sessaoId || "sessao1";
+      const sock = sessoes?.[sessaoId];
+
+      if (!sock) {
+        console.log("❌ Sessão WhatsApp não conectada:", sessaoId);
+        return;
+      }
+
+      for (const grupoId of grupos) {
+        await sock.sendMessage(grupoId, { text: mensagem });
+        console.log("✅ WhatsApp enviado:", destino.nome, grupoId);
+      }
+
+      return;
+    }
+
+    console.log("⚠️ Tipo de destino desconhecido:", destino.tipo);
+
+  } catch (e) {
+    console.log("❌ Erro enviarParaDestinoInteligente:", e.message);
   }
 }
 
 // ================= FUNCÃO WHATSAPP =================
 
-async function iniciarWhatsApp(id, force = false) {
-  console.log("🚀 Iniciando sessão:", id, "force:", force);
+async function iniciarWhatsApp(id, clienteId = "admin", force = false) {
 
-  const statusAtual = statusSessao[id];
+  const clienteIdFinal = clienteId || "admin";
+  const chaveSessao = `${clienteIdFinal}_${id}`;
 
-  if (!force && sessoes[id] && ["connecting", "qr", "open", "reconnecting"].includes(statusAtual)) {
-    console.log("⏸ Sessão já em andamento, não vou recriar:", id, statusAtual);
-    return sessoes[id];
+  console.log("🚀 Iniciando sessão:", chaveSessao, "force:", force);
+
+  const statusAtual = statusSessao[chaveSessao];
+
+  if (
+    !force &&
+    sessoes[chaveSessao] &&
+    ["connecting", "qr", "open", "reconnecting"].includes(statusAtual)
+  ) {
+    console.log(
+      "⏸ Sessão já em andamento, não vou recriar:",
+      chaveSessao,
+      statusAtual
+    );
+
+    return sessoes[chaveSessao];
   }
 
-  if (!force && qrCodes[id] && statusAtual === "qr") {
-    console.log("⏸ QR já ativo, não vou recriar:", id);
-    return sessoes[id] || null;
+  if (!force && qrCodes[chaveSessao] && statusAtual === "qr") {
+    console.log("⏸ QR já ativo, não vou recriar:", chaveSessao);
+
+    return sessoes[chaveSessao] || null;
   }
 
-  if (force && sessoes[id]) {
+  if (force && sessoes[chaveSessao]) {
     try {
-      console.log("♻️ Forçando reinício da sessão:", id);
-      sessoes[id].end?.();
+      console.log("♻️ Forçando reinício da sessão:", chaveSessao);
+
+      sessoes[chaveSessao].end?.();
+
     } catch (e) {
       console.log("⚠️ Erro ao encerrar sessão antiga:", e.message);
     }
 
-    delete sessoes[id];
-    qrCodes[id] = null;
+    delete sessoes[chaveSessao];
+
+    qrCodes[chaveSessao] = null;
   }
 
-  statusSessao[id] = "connecting";
-  reconectando[id] = false;
+  statusSessao[chaveSessao] = "connecting";
+  reconectando[chaveSessao] = false;
 
-  const { state, saveCreds } = await useMultiFileAuthState("/data/auth_" + id);
-  const { version } = await fetchLatestBaileysVersion();
+  const pastaNova = `/data/auth_${chaveSessao}`;
+  const pastaAntiga = `/data/auth_${id}`;
+
+  const pastaAuth =
+    fs.existsSync(pastaNova)
+      ? pastaNova
+      : fs.existsSync(pastaAntiga)
+        ? pastaAntiga
+        : pastaNova;
+
+  const { state, saveCreds } =
+    await useMultiFileAuthState(pastaAuth);
+
+  const { version } =
+    await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
     version,
@@ -7158,55 +7293,77 @@ async function iniciarWhatsApp(id, force = false) {
     browser: ["Chrome", "Desktop", "1.0.0"]
   });
 
-  sessoes[id] = sock;
+  sessoes[chaveSessao] = sock;
 
   sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("connection.update", async (update) => {
+
     const { connection, qr, lastDisconnect } = update;
 
     if (qr) {
-      console.log("🔥 QR RECEBIDO:", id);
-      qrCodes[id] = await qrcode.toDataURL(qr);
-      statusSessao[id] = "qr";
+      console.log("🔥 QR RECEBIDO:", chaveSessao);
+
+      qrCodes[chaveSessao] =
+        await qrcode.toDataURL(qr);
+
+      statusSessao[chaveSessao] = "qr";
     }
 
     if (connection === "open") {
-      console.log("✅ WHATSAPP CONECTADO:", id);
 
-      statusSessao[id] = "open";
-      qrCodes[id] = null;
-      reconectando[id] = false;
+      console.log("✅ WHATSAPP CONECTADO:", chaveSessao);
 
-      setTimeout(() => carregarGruposSessao(id), 3000);
+      statusSessao[chaveSessao] = "open";
+
+      qrCodes[chaveSessao] = null;
+
+      reconectando[chaveSessao] = false;
+
+      setTimeout(() => {
+        carregarGruposSessao(id, clienteIdFinal);
+      }, 3000);
     }
 
     if (connection === "close") {
-      const motivo = lastDisconnect?.error?.output?.statusCode;
 
-      console.log("❌ WHATSAPP DESCONECTADO:", id);
+      const motivo =
+        lastDisconnect?.error?.output?.statusCode;
+
+      console.log("❌ WHATSAPP DESCONECTADO:", chaveSessao);
       console.log("Motivo:", motivo);
 
-      qrCodes[id] = null;
-      delete sessoes[id];
+      qrCodes[chaveSessao] = null;
+
+      delete sessoes[chaveSessao];
 
       if (motivo === DisconnectReason.loggedOut) {
-        statusSessao[id] = "loggedOut";
-        reconectando[id] = false;
+
+        statusSessao[chaveSessao] = "loggedOut";
+
+        reconectando[chaveSessao] = false;
+
         return;
       }
 
-      statusSessao[id] = "reconnecting";
+      statusSessao[chaveSessao] = "reconnecting";
 
-      if (!reconectando[id]) {
-        reconectando[id] = true;
+      if (!reconectando[chaveSessao]) {
+
+        reconectando[chaveSessao] = true;
 
         setTimeout(() => {
-          iniciarWhatsApp(id).catch((e) => {
-            console.error("ERRO AO RECONECTAR:", e);
-            statusSessao[id] = "offline";
-            reconectando[id] = false;
-          });
+
+          iniciarWhatsApp(id, clienteIdFinal)
+            .catch((e) => {
+
+              console.error("ERRO AO RECONECTAR:", e);
+
+              statusSessao[chaveSessao] = "offline";
+
+              reconectando[chaveSessao] = false;
+            });
+
         }, 5000);
       }
     }
