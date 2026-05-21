@@ -133,11 +133,13 @@ let usuarios = [];
 
 let planos = {};
 let configsPorCliente = {};
+let destinosPorCliente = {};
 
 const FILA_FILE = "/data/fila.json";
 const CONFIG_FILE = "/data/config.json";
 const USUARIOS_FILE = "/data/usuarios.json";
 const CONFIGS_CLIENTES_FILE = "/data/configs_clientes.json";
+const DESTINOS_CLIENTES_FILE = "/data/destinos_clientes.json";
 const PLANOS_FILE = "/data/planos.json";
 
 console.log("📂 Salvando dados em:", FILA_FILE);
@@ -212,6 +214,85 @@ function salvarUsuarios() {
   );
 }
 
+// ================= CRÉDITOS =================
+
+const CREDITOS_PLANO = {
+  free: 300,
+  starter: 2500,
+  pro: 7500,
+  enterprise: 9500
+};
+
+function obterUsuario(clienteId) {
+  return usuarios.find(
+    u => String(u.id) === String(clienteId)
+  );
+}
+
+function renovarCreditosSeNecessario(usuario) {
+  if (!usuario) return;
+
+  const hoje = new Date();
+
+  const mesAtual =
+    `${hoje.getFullYear()}-${hoje.getMonth() + 1}`;
+
+  if (usuario.mesCreditos === mesAtual) {
+    return;
+  }
+
+  const plano =
+    String(usuario.plano || "free").toLowerCase();
+
+  usuario.creditos =
+    CREDITOS_PLANO[plano] || 300;
+
+  usuario.mesCreditos = mesAtual;
+
+  salvarUsuarios();
+
+  console.log("🔄 Créditos renovados:", {
+    usuario: usuario.email,
+    plano,
+    creditos: usuario.creditos
+  });
+}
+
+function usuarioTemCreditos(clienteId, quantidade = 1) {
+  const usuario = obterUsuario(clienteId);
+
+  if (!usuario) return false;
+
+  renovarCreditosSeNecessario(usuario);
+
+  return Number(usuario.creditos || 0) >= quantidade;
+}
+
+function debitarCreditos(clienteId, quantidade = 1) {
+  const usuario = obterUsuario(clienteId);
+
+  if (!usuario) return false;
+
+  renovarCreditosSeNecessario(usuario);
+
+  if (Number(usuario.creditos || 0) < quantidade) {
+    return false;
+  }
+
+  usuario.creditos =
+    Number(usuario.creditos || 0) - quantidade;
+
+  salvarUsuarios();
+
+  console.log("💳 Créditos debitados:", {
+    usuario: usuario.email,
+    restante: usuario.creditos,
+    debitado: quantidade
+  });
+
+  return true;
+}
+
 // ================= FUNÇÃO SALVA PLANO ===================
 
 function salvarPlanos() {
@@ -227,6 +308,13 @@ function salvarConfigsClientes() {
   fs.writeFileSync(
     CONFIGS_CLIENTES_FILE,
     JSON.stringify(configsPorCliente, null, 2)
+  );
+}
+
+function salvarDestinosClientes() {
+  fs.writeFileSync(
+    DESTINOS_CLIENTES_FILE,
+    JSON.stringify(destinosPorCliente, null, 2)
   );
 }
 
@@ -325,6 +413,14 @@ if (fs.existsSync(CONFIGS_CLIENTES_FILE)) {
   );
 
   console.log("✅ Configs dos clientes carregadas");
+}
+
+if (fs.existsSync(DESTINOS_CLIENTES_FILE)) {
+  destinosPorCliente = JSON.parse(
+    fs.readFileSync(DESTINOS_CLIENTES_FILE, "utf8")
+  );
+
+  console.log("✅ Destinos dos clientes carregados");
 }
 
 if (fs.existsSync(PLANOS_FILE)) {
@@ -1390,9 +1486,10 @@ function destinoDentroHorario(destino) {
 
 // ================= ENVIO DESTINO INTELIGENTE =================
 
-async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
-
+async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId, configCliente) {
   try {
+    clienteId = clienteId || oferta.clienteId || "admin";
+    configCliente = configCliente || configsPorCliente?.[clienteId] || config;
 
     if (!destinoAceitaOferta(destino, oferta)) {
       return;
@@ -1406,8 +1503,6 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
     // ================= WHATSAPP =================
 
     if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
-
-
       const sock = sessoes[destino.conexaoId];
 
       if (!sock) {
@@ -1418,35 +1513,42 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
       const grupos = destino.gruposWhatsapp || [];
 
       for (const grupo of grupos) {
+        
+      if (!usuarioTemCreditos(clienteId, 1)) {
+      console.log("🚫 Sem créditos:", clienteId);
+      continue;
+      }
+
+      debitarCreditos(clienteId, 1);            
 
         if (destino.tipoMidia === "texto" || !oferta.imagem) {
-
-          await sock.sendMessage(grupo, {
-            text: mensagem
-          });
-
+          await sock.sendMessage(grupo, { text: mensagem });
         } else {
-
           await sock.sendMessage(grupo, {
             image: {
               url: corrigirImagemUrl(oferta.imagem) || oferta.imagem
             },
             caption: mensagem
           });
-
         }
 
-       console.log("✅ Enviado destino WhatsApp:", destino.nome);
+        console.log("✅ Enviado WhatsApp:", {
+          clienteId,
+          destino: destino.nome,
+          grupo
+        });
 
-       oferta.destinosEnviados = oferta.destinosEnviados || [];
-
-       oferta.destinosEnviados.push({
-       nome: destino.nome || "Destino",
-       tipo: destino.tipo || "desconhecido",
-       dataEnvio: new Date().toLocaleString("pt-BR", {
-       timeZone: "America/Sao_Paulo"
-      })
-      });
+        oferta.destinosEnviados = oferta.destinosEnviados || [];
+        oferta.destinosEnviados.push({
+          clienteId,
+          nome: destino.nome || "Destino",
+          tipo: "whatsapp",
+          grupo,
+          creditos: 1,
+          dataEnvio: new Date().toLocaleString("pt-BR", {
+            timeZone: "America/Sao_Paulo"
+          })
+        });
 
         await new Promise(r => setTimeout(r, 3000));
       }
@@ -1454,27 +1556,30 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
 
     // ================= TELEGRAM =================
 
-      if (String(destino.tipo || "").toLowerCase() === "telegram") {
+    if (String(destino.tipo || "").toLowerCase() === "telegram") {
+      const telegrams = configCliente.telegram?.destinos || [];
 
-      const telegrams = config.telegram?.destinos || [];
-
-      const selecionados =
-      telegrams.filter(t =>
-      (destino.telegramDestinos || []).includes(t.nome) ||
-      (destino.telegramDestinos || []).includes(String(t.chatId))
+      const selecionados = telegrams.filter(t =>
+        (destino.telegramDestinos || []).includes(t.nome) ||
+        (destino.telegramDestinos || []).includes(String(t.chatId))
       );
-       
 
-   if (!selecionados.length) {
-   console.log("⚠️ Nenhum Telegram selecionado para este destino:", destino.nome);
-   }
+      if (!selecionados.length) {
+        console.log("⚠️ Nenhum Telegram selecionado para este destino:", destino.nome);
+      }
 
       for (const tel of selecionados) {
+       
+      if (!usuarioTemCreditos(clienteId, 1)) {
+      console.log("🚫 Sem créditos:", clienteId);
+      continue;
+      }
 
+      debitarCreditos(clienteId, 1); 
+            
         if (!tel.ativo) continue;
 
         if (destino.tipoMidia === "texto" || !oferta.imagem) {
-
           await axios.post(
             `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
             {
@@ -1482,9 +1587,7 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
               text: mensagem
             }
           );
-
         } else {
-
           await axios.post(
             `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
             {
@@ -1493,60 +1596,77 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
               caption: mensagem
             }
           );
-
         }
 
-        console.log("✅ Enviado destino Telegram:", destino.nome);
-        
-       oferta.destinosEnviados = oferta.destinosEnviados || [];
+        console.log("✅ Enviado Telegram:", {
+          clienteId,
+          destino: destino.nome,
+          chatId: tel.chatId
+        });
 
-       oferta.destinosEnviados.push({
-       nome: destino.nome || "Destino",
-       tipo: destino.tipo || "desconhecido",
-       dataEnvio: new Date().toLocaleString("pt-BR", {
-       timeZone: "America/Sao_Paulo"
-      })
-      });
-    
+        oferta.destinosEnviados = oferta.destinosEnviados || [];
+        oferta.destinosEnviados.push({
+          clienteId,
+          nome: destino.nome || "Destino",
+          tipo: "telegram",
+          chatId: tel.chatId,
+          creditos: 1,
+          dataEnvio: new Date().toLocaleString("pt-BR", {
+            timeZone: "America/Sao_Paulo"
+          })
+        });
+
         await new Promise(r => setTimeout(r, 2000));
       }
     }
 
   } catch (e) {
-
     console.log(
       "❌ erro destino inteligente:",
       destino?.nome,
       e.message
     );
-
   }
 }
 
-// ================= FUNCÃO PRCESSA FILA =================
+
+// ================= FUNCÃO PROCESSA FILA =================
 
 async function processarFila() {
   if (enviandoAgora) return;
   enviandoAgora = true;
 
   try {
-    if (!config.automacaoAtiva) return;
-
-    if (!podeRodarAgora()) {
-           return;
-    }
-
-    const agora = Date.now();
-    const intervaloMs = (config.intervaloMinutos || 2) * 60 * 1000;
-
     const oferta = fila.find(o => o.status === "pendente");
 
-    if (!oferta) {
-      console.log("📭 Nenhuma oferta pendente");
+if (!oferta) {
+  console.log("📭 Nenhuma oferta pendente");
+  return;
+}
+
+const clienteId = oferta.clienteId || "admin";
+
+const configCliente =
+  configsPorCliente?.[clienteId] || config;
+
+const clienteAtivo =
+  configCliente.automacaoAtiva === true;
+
+if (!clienteAtivo) {
+  console.log("⏸ Automação desligada para cliente:", clienteId);
+  return;
+}
+
+    if (!podeRodarAgora()) {
       return;
     }
 
-    const clienteId = oferta.clienteId || "admin";
+    const agora = Date.now();
+
+       const intervaloMs =
+      (configCliente.intervaloMinutos || config.intervaloMinutos || 2) *
+      60 *
+      1000;
 
     if (!controleEnvio[clienteId]) {
       controleEnvio[clienteId] = 0;
@@ -1557,58 +1677,69 @@ async function processarFila() {
     }
 
     let idSessao =
-  oferta.sessaoId ||
-  oferta.id ||
-  Object.keys(destinosPorSessao).find(id => destinosPorSessao[id]?.length) ||
-  Object.keys(sessoes)[0];
+      oferta.sessaoId ||
+      oferta.idSessao ||
+      oferta.id ||
+      Object.keys(destinosPorSessao || {}).find(id =>
+        destinosPorSessao[id]?.length &&
+        statusSessao[id] === "open"
+      ) ||
+      Object.keys(sessoes || {})[0];
 
-if (!destinosPorSessao[idSessao]?.length) {
-  const sessaoComDestino = Object.keys(destinosPorSessao)
-    .find(id => destinosPorSessao[id]?.length && statusSessao[id] === "open");
+    if (!destinosPorSessao?.[idSessao]?.length) {
+      const sessaoComDestino = Object.keys(destinosPorSessao || {})
+        .find(id =>
+          destinosPorSessao[id]?.length &&
+          statusSessao[id] === "open"
+        );
 
-  if (sessaoComDestino) {
-    idSessao = sessaoComDestino;
-  }
-}
+      if (sessaoComDestino) {
+        idSessao = sessaoComDestino;
+      }
+    }
 
-const sock = sessoes[idSessao];
+    const sock = sessoes[idSessao];
 
-if (!sock) {
-  console.log("❌ Nenhuma sessão conectada para:", idSessao);
-  return;
-}
+    if (!sock) {
+      console.log("❌ Nenhuma sessão conectada para:", idSessao);
+      return;
+    }
 
-console.log("📡 Sessão escolhida para envio:", idSessao);
-
-    let ultimoEnvioFila = 0;
+    console.log("📡 Sessão escolhida para envio:", idSessao);
+    console.log("👤 Cliente dono da oferta:", clienteId);
 
     const destinosBrutos =
-  oferta.destinos?.length
-    ? oferta.destinos
-    : oferta.grupos?.length
-      ? oferta.grupos
-      : destinosPorSessao[idSessao]?.length
-        ? destinosPorSessao[idSessao]
-        : config?.destinosPorSessao?.[idSessao]?.length
-          ? config.destinosPorSessao[idSessao]
-          : oferta.destino
-            ? [oferta.destino]
-            : oferta.grupoDestino
-              ? [oferta.grupoDestino]
-              : config?.destinos?.length
-                ? config.destinos
-                : [];
+      oferta.destinos?.length
+        ? oferta.destinos
+        : oferta.grupos?.length
+          ? oferta.grupos
+          : destinosPorSessao?.[idSessao]?.length
+            ? destinosPorSessao[idSessao]
+            : configCliente?.destinosPorSessao?.[idSessao]?.length
+              ? configCliente.destinosPorSessao[idSessao]
+              : oferta.destino
+                ? [oferta.destino]
+                : oferta.grupoDestino
+                  ? [oferta.grupoDestino]
+                  : configCliente?.destinos?.length
+                    ? configCliente.destinos
+                    : [];
 
-const destinos = destinosBrutos
-  .map(d => d?.id || d?.value || d?.jid || d)
-  .filter(Boolean);
+    const destinos = destinosBrutos
+      .map(d => d?.id || d?.value || d?.jid || d)
+      .filter(Boolean);
 
-console.log("DESTINOS PARA ENVIO:", destinos);
+    console.log("DESTINOS PARA ENVIO:", destinos);
 
 // ================= DESTINOS INTELIGENTES =================
 
-const todosDestinos = Array.isArray(config.destinosInteligentes)
-  ? config.destinosInteligentes
+const destinosCliente =
+  destinosPorCliente?.[clienteId] ||
+  configCliente?.destinosInteligentes ||
+  [];
+
+const todosDestinos = Array.isArray(destinosCliente)
+  ? destinosCliente.filter(d => d?.ativo !== false)
   : [];
 
 console.log("🧪 DESTINOS RESUMO:", todosDestinos.map(d => ({
@@ -1762,10 +1893,12 @@ if (!categoriaPermitidaNoDestino(oferta, destino)) {
   continue;
 }
   await enviarParaDestinoInteligente(
-    destino,
-    oferta,
-    mensagem
-  );
+  destino,
+  oferta,
+  mensagem,
+  clienteId,
+  configCliente
+);
 }
 
 controleEnvio[clienteId] = Date.now();
@@ -1843,10 +1976,17 @@ app.use(rateLimit({
     req.path.startsWith("/grupos")
 }));
 
+// ============== POST FILA ENVIO =================
+
 app.post("/fila", (req, res) => {
   const body = req.body || {};
+  const clienteId = getClienteId(req);
 
-let oferta = {
+  if (!clienteId) {
+    return res.status(401).json({ erro: "Usuário não identificado" });
+  }
+
+  let oferta = {
     nome: body.nome || body.titulo || "Oferta",
     titulo: body.titulo || body.nome || "Oferta",
 
@@ -1865,40 +2005,26 @@ let oferta = {
     marketplace: body.marketplace || "",
     categoria: body.categoria || body.marketplace || "",
 
-    clienteId: getClienteId(req),
-    status: "pendente"
+    clienteId,
+    status: "pendente",
+    criadoEm: new Date().toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo"
+    })
   };
 
   const html = JSON.stringify(body || "");
-  const htmlLower = html.toLowerCase();
 
   const temCompraNoApp =
-     html.includes("COMPRANOAPP") ||
+    html.includes("COMPRANOAPP") ||
     /compra\s+no\s+app/i.test(html) ||
     /use\s+o\s+app/i.test(html) ||
     /desconto\s+no\s+app/i.test(html);
 
   if (temCompraNoApp && !oferta.cupom) {
     oferta.cupom = "COMPRANOAPP";
-
     oferta.avisoCupom =
       "📱 Use no app da Amazon para tentar chegar no menor valor.";
   }
-
-  console.log("🧪 BODY RECEBIDO NA FILA:", body);
-  console.log("🧪 OFERTA FINAL PARA FILA:", oferta);
-  console.log("🧪 CUPOM RECEBIDO:", body.cupom);
-  console.log("🧪 AVISO RECEBIDO:", body.avisoCupom);
-  console.log("🧪 OFERTA FINAL:", {
-  titulo: oferta.titulo,
-  cupom: oferta.cupom,
-  avisoCupom: oferta.avisoCupom
-});
-
-
-oferta.criadoEm = oferta.criadoEm || new Date().toLocaleString("pt-BR", {
-  timeZone: "America/Sao_Paulo"
-}); 
 
   oferta = prepararOfertaGlobal(oferta);
 
@@ -1906,14 +2032,18 @@ oferta.criadoEm = oferta.criadoEm || new Date().toLocaleString("pt-BR", {
   salvarFila();
 
   console.log("📥 Oferta adicionada na fila:", {
+    clienteId,
     titulo: oferta.titulo,
-    precoAntigo: oferta.precoAntigo,
-    precoAtual: oferta.precoAtual,
-    cupom: oferta.cupom,
-    avisoCupom: oferta.avisoCupom
+    marketplace: oferta.marketplace,
+    categoria: oferta.categoria,
+    cupom: oferta.cupom
   });
 
-  res.send("OK");
+  res.json({
+    ok: true,
+    mensagem: "Oferta adicionada na fila",
+    oferta
+  });
 });
 
 // ================= ENVIO MANUAL =================
@@ -2092,13 +2222,19 @@ app.post("/telegram/testar", async (req, res) => {
   }
 });
 
-// ============== DESTINOS INTELIG APPGET ==============
+// ============== DESTINOS INTELIGENTES =================
 
 app.get("/destinos", (req, res) => {
-  res.json(config.destinosInteligentes || []);
+  const clienteId = getClienteId(req);
+
+  const destinos =
+    destinosPorCliente?.[clienteId] || [];
+
+  return res.json(destinos);
 });
 
 app.post("/destinos", (req, res) => {
+  const clienteId = getClienteId(req);
 
   const destinos = req.body;
 
@@ -2109,23 +2245,23 @@ app.post("/destinos", (req, res) => {
     });
   }
 
-  config.destinosInteligentes = destinos;
+  destinosPorCliente[clienteId] = destinos;
 
   salvarConfig();
 
   return res.json({
     ok: true,
-    destinos: config.destinosInteligentes
+    destinos: destinosPorCliente[clienteId]
   });
-
 });
 
 app.delete("/destinos/:id", (req, res) => {
+  const clienteId = getClienteId(req);
 
   const { id } = req.params;
 
-  config.destinosInteligentes =
-    (config.destinosInteligentes || [])
+  destinosPorCliente[clienteId] =
+    (destinosPorCliente?.[clienteId] || [])
       .filter(d => d.id !== id);
 
   salvarConfig();
@@ -2133,82 +2269,140 @@ app.delete("/destinos/:id", (req, res) => {
   return res.json({
     ok: true
   });
-
 });
 
-// ================= AUTOMAÇÃO =================
+// ================= AUTOMAÇÃO POR CLIENTE =================
 
 app.get("/automacao", (req, res) => {
-  res.json({
+  const clienteId = getClienteId(req);
+
+  if (!clienteId) {
+    return res.status(401).json({
+      ok: false,
+      erro: "Usuário não identificado"
+    });
+  }
+
+  configsPorCliente[clienteId] = configsPorCliente[clienteId] || {};
+
+  return res.json({
     ok: true,
-    ativo: config.automacaoAtiva
+    clienteId,
+    ativo: configsPorCliente[clienteId].automacaoAtiva === true
   });
 });
 
 app.post("/automacao/toggle", (req, res) => {
-  config.automacaoAtiva = !config.automacaoAtiva;
-  salvarConfig();
+  const clienteId = getClienteId(req);
 
-  console.log("🤖 Automação:", config.automacaoAtiva ? "ON" : "OFF");
+  if (!clienteId) {
+    return res.status(401).json({
+      ok: false,
+      erro: "Usuário não identificado"
+    });
+  }
 
-  res.json({
+  configsPorCliente[clienteId] = configsPorCliente[clienteId] || {};
+
+  configsPorCliente[clienteId].automacaoAtiva =
+    !configsPorCliente[clienteId].automacaoAtiva;
+
+  salvarConfigsClientes();
+
+  console.log("🤖 Automação cliente:", {
+    clienteId,
+    ativo: configsPorCliente[clienteId].automacaoAtiva
+  });
+
+  return res.json({
     ok: true,
-    ativo: config.automacaoAtiva
+    clienteId,
+    ativo: configsPorCliente[clienteId].automacaoAtiva
   });
 });
 
-
 app.delete("/fila/:index", (req, res) => {
   const index = Number(req.params.index);
+  const clienteId = getClienteId(req);
 
   if (isNaN(index) || index < 0 || index >= fila.length) {
     return res.status(400).send("Índice inválido");
+  }
+
+  const oferta = fila[index];
+
+  if ((oferta.clienteId || "admin") !== clienteId) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Sem permissão para remover esta oferta"
+    });
   }
 
   const removido = fila.splice(index, 1);
 
   salvarFila();
 
-  console.log("🗑️ Removido da fila:", removido[0]?.nome || removido[0]?.titulo);
+  console.log("🗑️ Removido da fila:", {
+    clienteId,
+    titulo: removido[0]?.nome || removido[0]?.titulo
+  });
 
-  res.send("Removido com sucesso");
+  res.json({
+    ok: true,
+    mensagem: "Removido com sucesso"
+  });
 });
 
 app.post("/fila/:index/enviar-agora", async (req, res) => {
   const index = Number(req.params.index);
+  const clienteIdReq = getClienteId(req);
 
   if (isNaN(index) || index < 0 || index >= fila.length) {
-    return res.status(400).json({ ok: false, erro: "Índice inválido" });
+    return res.status(400).json({
+      ok: false,
+      erro: "Índice inválido"
+    });
   }
 
   const oferta = fila[index];
 
+  if ((oferta.clienteId || "admin") !== clienteIdReq) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Sem permissão para enviar esta oferta"
+    });
+  }
+
   oferta.status = "pendente";
 
-  
-  // joga a oferta escolhida para o começo da fila
-  
-  console.log("📦 ENTRANDO NA FILA AMAZON:", {
-  titulo: oferta.titulo || oferta.nome,
-  preco: oferta.precoAtual || oferta.preco,
-  imagem: !!oferta.imagem,
-  marketplace: oferta.marketplace,
-  categoria: oferta.categoria
+  console.log("📦 ENTRANDO NA FILA:", {
+    clienteId: clienteIdReq,
+    titulo: oferta.titulo || oferta.nome,
+    preco: oferta.precoAtual || oferta.preco,
+    imagem: !!oferta.imagem,
+    marketplace: oferta.marketplace,
+    categoria: oferta.categoria
   });
 
   fila.splice(index, 1);
   fila.unshift(oferta);
+
   salvarFila();
 
   const clienteId = oferta.clienteId || "admin";
+
   controleEnvio[clienteId] = 0;
 
-  const automacaoAnterior = config.automacaoAtiva;
-  config.automacaoAtiva = true;
+  const configCliente =
+    configsPorCliente?.[clienteId] || config;
+
+  const automacaoAnterior = configCliente.automacaoAtiva;
+
+  configCliente.automacaoAtiva = true;
 
   await processarFila();
 
-  config.automacaoAtiva = automacaoAnterior;
+  configCliente.automacaoAtiva = automacaoAnterior;
 
   return res.json({
     ok: true,
@@ -2260,11 +2454,12 @@ app.get("/admin/planos", (req, res) => {
     });
   }
 
-  return res.json({
-    ok: true,
-    planos
-  });
-});
+return res.json({
+  ok: true,
+  planos,
+  lista: Object.values(planos || {})
+ });
+}); 
 
 app.post("/admin/planos", (req, res) => {
   if (!isAdminMaster(req)) {
@@ -2283,19 +2478,71 @@ app.post("/admin/planos", (req, res) => {
     });
   }
 
-  planos[body.nome] = {
-    nome: body.nome,
-    marketplaces: body.marketplaces || [],
-    limites: body.limites || {},
-    recursos: body.recursos || {},
-    atualizadoEm: new Date().toISOString()
-  };
+ planos[body.nome] = {
+  nome: body.nome,
+
+  marketplaces: Array.isArray(body.marketplaces)
+    ? body.marketplaces
+    : [],
+
+  limites: {
+    sessoes: Number(body.limites?.sessoes || 0),
+    destinos: Number(body.limites?.destinos || 0),
+    enviosDia: Number(body.limites?.enviosDia || 0)
+  },
+
+  recursos: {
+    linkOptimus: !!body.recursos?.linkOptimus,
+    analytics: !!body.recursos?.analytics,
+    cupomInteligente: !!body.recursos?.cupomInteligente
+  },
+
+  atualizadoEm: new Date().toISOString()
+};
 
   salvarPlanos();
 
   return res.json({
     ok: true,
     plano: planos[body.nome]
+  });
+});
+
+app.delete("/admin/planos/:nome", (req, res) => {
+  if (!isAdminMaster(req)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Acesso restrito ao Admin Master"
+    });
+  }
+
+  const { nome } = req.params;
+
+  if (!planos[nome]) {
+    return res.status(404).json({
+      ok: false,
+      erro: "Plano não encontrado"
+    });
+  }
+
+  const usuariosUsandoPlano = usuarios.filter(
+    u => String(u.plano).toLowerCase() === String(nome).toLowerCase()
+  );
+
+  if (usuariosUsandoPlano.length > 0) {
+    return res.status(400).json({
+      ok: false,
+      erro: "Não é possível excluir plano em uso por usuários"
+    });
+  }
+
+  delete planos[nome];
+
+  salvarPlanos();
+
+  return res.json({
+    ok: true,
+    mensagem: "Plano excluído com sucesso"
   });
 });
 
@@ -2346,6 +2593,61 @@ app.post("/admin/usuarios", (req, res) => {
   return res.json({
     ok: true,
     usuario: novoUsuario
+  });
+});
+
+app.put("/admin/usuarios/:id", (req, res) => {
+  if (!isAdminMaster(req)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Acesso restrito"
+    });
+  }
+
+  const { id } = req.params;
+
+  const usuario = usuarios.find(
+    u => String(u.id) === String(id)
+  );
+
+  if (!usuario) {
+    return res.status(404).json({
+      ok: false,
+      erro: "Usuário não encontrado"
+    });
+  }
+
+  const body = req.body || {};
+
+  usuario.nome = body.nome || usuario.nome;
+
+  usuario.email =
+    (body.email || usuario.email).toLowerCase();
+
+  if (body.senha) {
+    usuario.senha = body.senha;
+  }
+
+  usuario.plano = body.plano || usuario.plano;
+
+  usuario.papel = body.papel || usuario.papel;
+
+  usuario.creditos = Number(
+    body.creditos ?? usuario.creditos ?? 0
+  );
+
+  if (typeof body.ativo === "boolean") {
+    usuario.ativo = body.ativo;
+  }
+
+  usuario.atualizadoEm =
+    new Date().toISOString();
+
+  salvarUsuarios();
+
+  return res.json({
+    ok: true,
+    usuario
   });
 });
 
@@ -2551,6 +2853,21 @@ function getPlanoUsuario(req) {
   return planos[usuario.plano] || null;
 }
 
+const LIMITES_PLANO = {
+  free: {
+    sessoes: 1
+  },
+  starter: {
+    sessoes: 3
+  },
+  pro: {
+    sessoes: 10
+  },
+  enterprise: {
+    sessoes: 999
+  }
+};
+
 // ======================== FUNCAO GET INTEGRACOES ========================
 
 function getIntegracaoCliente(clienteId = "admin", marketplace = "") {
@@ -2685,58 +3002,173 @@ app.get("/", (req, res) => {
 
 app.post("/desconectar/:id", async (req, res) => {
   try {
-    const id = req.params.id || "sessao1";
+    const clienteId = getClienteId(req);
 
-    if (sessoes[id]?.sock) {
+    const id = isAdminMaster(req)
+      ? req.params.id
+      : `${clienteId}_${req.params.id}`;
+
+    if (sessoes[id]) {
       try {
-        await sessoes[id].sock.logout();
+        await sessoes[id]?.logout?.();
       } catch (e) {
         console.log("⚠️ erro logout:", e.message);
+      }
+
+      try {
+        sessoes[id]?.end?.();
+      } catch (e) {
+        console.log("⚠️ erro end:", e.message);
       }
     }
 
     delete sessoes[id];
-    delete qrcodes[id];
+
+    if (typeof qrCodes !== "undefined") {
+      delete qrCodes[id];
+    }
+
+    if (typeof statusSessao !== "undefined") {
+      delete statusSessao[id];
+    }
 
     res.json({
       ok: true,
-      message: "WhatsApp desconectado."
+      message: "WhatsApp desconectado.",
+      id
     });
+
   } catch (e) {
-    res.status(500).json({ ok: false, erro: e.message });
+    res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
   }
 });
 
 app.post("/limpar-sessao/:id", async (req, res) => {
   try {
-    const id = req.params.id || "sessao1";
+    const clienteId = getClienteId(req);
 
-    if (sessoes[id]?.sock) {
+    const id = isAdminMaster(req)
+      ? req.params.id
+      : `${clienteId}_${req.params.id}`;
+
+    if (sessoes[id]) {
       try {
-        await sessoes[id].sock.logout();
+        await sessoes[id]?.logout?.();
       } catch (e) {
         console.log("⚠️ erro logout ao limpar:", e.message);
+      }
+
+      try {
+        sessoes[id]?.end?.();
+      } catch (e) {
+        console.log("⚠️ erro end ao limpar:", e.message);
       }
     }
 
     delete sessoes[id];
-    delete qrcodes[id];
 
-    const pastaAuth = path.join(__dirname, `auth_${id}`);
+    if (typeof qrCodes !== "undefined") {
+      delete qrCodes[id];
+    }
+
+    if (typeof statusSessao !== "undefined") {
+      delete statusSessao[id];
+    }
+
+    if (typeof destinosPorSessao !== "undefined") {
+      delete destinosPorSessao[id];
+    }
+
+    const pastaAuth = `/data/auth_${id}`;
 
     if (fs.existsSync(pastaAuth)) {
-      fs.rmSync(pastaAuth, { recursive: true, force: true });
+      fs.rmSync(pastaAuth, {
+        recursive: true,
+        force: true
+      });
+
       console.log("🗑️ Sessão limpa:", pastaAuth);
     }
 
-    res.json({
+    return res.json({
       ok: true,
-      message: "Sessão limpa. Gere um novo QR Code."
+      message: "Sessão limpa. Gere um novo QR Code.",
+      id
     });
+
   } catch (e) {
     console.log("❌ erro limpar sessão:", e.message);
-    res.status(500).json({ ok: false, erro: e.message });
+
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
   }
+});
+
+// ================= ME ==========================
+
+app.get("/me", (req, res) => {
+  const clienteId = getClienteId(req);
+
+  const usuario = usuarios.find(
+    u => String(u.id) === String(clienteId)
+  );
+
+  if (!usuario) {
+    return res.status(404).json({
+      ok: false,
+      erro: "Usuário não encontrado"
+    });
+  }
+
+  renovarCreditosSeNecessario(usuario);
+
+  const sessoesUsuario = Object.values(sessoesMeta || {}).filter(s =>
+    String(s.id || "").startsWith(clienteId + "_") ||
+    (clienteId === "admin" && !String(s.id || "").includes("_"))
+  );
+
+  const destinosUsuario =
+    destinosPorCliente?.[clienteId] || {};
+
+  const filaUsuario = fila.filter(o =>
+    String(o.clienteId || "admin") === String(clienteId)
+  );
+
+  const hoje = new Date().toLocaleDateString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  });
+
+  const enviosHoje = filaUsuario.filter(o =>
+    String(o.enviadoEm || "").startsWith(hoje)
+  ).length;
+
+  return res.json({
+    ok: true,
+    usuario: {
+      id: usuario.id,
+      nome: usuario.nome,
+      email: usuario.email,
+      plano: usuario.plano,
+      creditos: usuario.creditos,
+      papel: usuario.papel,
+      ativo: usuario.ativo
+    },
+    consumo: {
+      enviosHoje,
+      sessoes: sessoesUsuario.length,
+      destinos: Object.keys(destinosUsuario).length,
+      ofertasNaFila: filaUsuario.filter(o => o.status === "pendente").length,
+      ofertasEnviadas: filaUsuario.filter(o => o.status === "enviado").length
+    },
+    status: {
+      automacaoAtiva: configsPorCliente?.[clienteId]?.automacaoAtiva === true
+    }
+  });
 });
 
 // ================= INTEGRAÇÕES =================
@@ -5901,13 +6333,29 @@ const urlLower = url.toLowerCase();
 
 if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
   marketplace = "amazon";
-} else if (urlLower.includes("mercadolivre.com") || urlLower.includes("meli.la")) {
+
+} else if (
+  urlLower.includes("mercadolivre.com") ||
+  urlLower.includes("meli.la")
+) {
   marketplace = "mercadolivre";
-} else if (urlLower.includes("shopee.com") || urlLower.includes("s.shopee")) {
+
+} else if (
+  urlLower.includes("shopee.com") ||
+  urlLower.includes("s.shopee")
+) {
   marketplace = "shopee";
+
+} else if (
+  urlLower.includes("awin1.com") ||
+  urlLower.includes("awin.com")
+) {
+  marketplace = "awin";
+
 } else if (urlLower.includes("aliexpress.com")) {
   marketplace = "aliexpress";
 }
+
 
   if (!marketplace || !url) {
     return res.status(400).json({
@@ -6219,7 +6667,27 @@ app.get("/sessoes", (req, res) => {
 });
 
 app.post("/sessoes", (req, res) => {
-const clienteId = getClienteId(req);
+
+  const clienteId = getClienteId(req);
+
+  const plano = getUsuarioAtual(req)?.plano || "free";
+
+  const limite =
+    LIMITES_PLANO?.[plano]?.sessoes || 1;
+
+  const sessoesCliente = Object.values(sessoesMeta)
+    .filter(s =>
+      String(s.id || "").startsWith(clienteId + "_") ||
+      (clienteId === "admin" && !String(s.id).includes("_"))
+    );
+
+  if (sessoesCliente.length >= limite) {
+    return res.status(403).json({
+      ok: false,
+      erro: `Seu plano permite apenas ${limite} sessão(ões).`
+    });
+  }
+
   try {
     const nome = req.body.nome || "WhatsApp";
     const tipo = req.body.tipo || "whatsapp";
@@ -6323,13 +6791,13 @@ app.post("/reset/:id", async (req, res) => {
     if (sessoes[id]) {
 
       try {
-        await sessoes[id]?.sock?.logout?.();
+        await sessoes[id]?.logout?.();
       } catch (e) {
         console.log("⚠️ logout ignorado:", e.message);
       }
 
       try {
-        sessoes[id]?.sock?.end?.();
+        sessoes[id]?.end?.();
       } catch (e) {
         console.log("⚠️ end ignorado:", e.message);
       }
@@ -6374,9 +6842,17 @@ app.post("/conectar", async (req, res) => {
   const clienteId = getClienteId(req);
   const { id } = req.body;
 
+  if (!clienteId) {
+    return res.status(401).json({ erro: "Usuário não identificado" });
+  }
+
+  if (!id) {
+    return res.status(400).json({ erro: "ID obrigatório" });
+  }
+
   const sessaoId = clienteId === "admin"
-  ? id
-  : `${clienteId}_${id}`;
+    ? id
+    : `${clienteId}_${id}`;
 
   if (!id) return res.status(400).json({ erro: "ID obrigatório" });
 
@@ -6470,7 +6946,9 @@ if (gruposPorSessao[id]?.length) {
 
 app.get("/grupos/:id", async (req, res) => {
   const clienteId = getClienteId(req);
-  const id = `${clienteId}_${req.params.id}`;
+  const id = clienteId === "admin"
+  ? req.params.id
+  : `${clienteId}_${req.params.id}`;
 
   const lista = await carregarGruposSessao(id);
 
@@ -6483,6 +6961,7 @@ return res.json({
   total: lista.length,
   grupos: lista,
   lista
+});
 });
 
 app.post("/magalu/gerar-link", (req, res) => {
@@ -6531,8 +7010,23 @@ app.post("/destinos/:id", (req, res) => {
     return res.status(400).json({ erro: "destinos deve ser array" });
   }
 
+  const plano = getUsuarioAtual(req)?.plano || "free";
+
+  const limiteDestinos =
+    LIMITES_PLANO?.[plano]?.destinos || 3;
+
+  if (destinos.length > limiteDestinos) {
+    return res.status(403).json({
+      ok: false,
+      erro: `Seu plano permite apenas ${limiteDestinos} destino(s).`
+    });
+  }
+
   const clienteId = getClienteId(req);
-  const id = `${clienteId}_${req.params.id}`;
+
+  const id = clienteId === "admin"
+    ? req.params.id
+    : `${clienteId}_${req.params.id}`;
 
   destinosPorSessao[id] = destinos;
 
@@ -6540,9 +7034,12 @@ app.post("/destinos/:id", (req, res) => {
     config.destinosPorSessao = {};
   }
 
-  config.destinosPorSessao[id] = destinos;
+  destinosPorCliente[clienteId] =
+  destinosPorCliente[clienteId] || {};
 
-  salvarConfig();
+ destinosPorCliente[clienteId][id] = destinos;
+
+ salvarDestinosClientes();
   console.log("💾 Destinos salvos na config:", id, destinos);
 
   return res.json({
@@ -6553,113 +7050,17 @@ app.post("/destinos/:id", (req, res) => {
 
 app.get("/destinos/:id", (req, res) => {
   const clienteId = getClienteId(req);
+
   const id = clienteId === "admin"
-  ? req.params.id
-  : `${clienteId}_${req.params.id}`;
+    ? req.params.id
+    : `${clienteId}_${req.params.id}`;
+
+  const destinos =
+    destinosPorCliente?.[clienteId]?.[id] || [];
 
   return res.json({
     ok: true,
-    destinos:
-      destinosPorSessao[id] ||
-      config?.destinosPorSessao?.[id] ||
-      []
-  });
-});
-
-app.post("/test-send-todos", async (req, res) => {
-  const mensagem =
-    req.body?.mensagem ||
-    "🧪 TESTE " + new Date().toLocaleTimeString();
-
-  const imagemOriginal = req.body?.imagem;
-  const imagemFinal = corrigirImagemUrl(imagemOriginal);
-
-  const resultados = [];
-
-  for (const id of Object.keys(sessoes)) {
-    const sock = sessoes[id];
-
-    if (!sock || statusSessao[id] !== "open") {
-      resultados.push({
-        sessao: id,
-        ok: false,
-        erro: "Sessão offline"
-      });
-      continue;
-    }
-
-    const destinos =
-      destinosPorSessao[id] ||
-      config?.destinosPorSessao?.[id] ||
-      [];
-
-    for (const destino of destinos) {
-      try {
-        if (imagemFinal) {
-          await sock.sendMessage(destino, {
-            image: { url: imagemFinal },
-            caption: mensagem
-          });
-
-          resultados.push({
-            sessao: id,
-            destino,
-            ok: true,
-            tipo: "imagem_com_legenda"
-          });
-        } else {
-          await sock.sendMessage(destino, {
-            text: mensagem
-          });
-
-          resultados.push({
-            sessao: id,
-            destino,
-            ok: true,
-            tipo: "texto"
-          });
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-      } catch (e) {
-        resultados.push({
-          sessao: id,
-          destino,
-          ok: false,
-          erro: e.message
-        });
-      }
-    }
-  }
-
-  if (typeof enviarTelegram === "function") {
-    try {
-      await enviarTelegram(
-        {
-          ...req.body,
-          imagem: imagemFinal,
-          marketplace: req.body.marketplace || req.body.loja || ""
-        },
-        mensagem
-      );
-
-      resultados.push({
-        destino: "telegram",
-        ok: true,
-        tipo: "telegram"
-      });
-    } catch (e) {
-      resultados.push({
-        destino: "telegram",
-        ok: false,
-        erro: e.message
-      });
-    }
-  }
-
-  return res.json({
-    ok: true,
-    resultados
+    destinos
   });
 });
 
