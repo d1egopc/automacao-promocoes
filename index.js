@@ -2477,13 +2477,27 @@ app.post("/admin/planos", (req, res) => {
     });
   }
 
-  planos[body.nome] = {
-    nome: body.nome,
-    marketplaces: body.marketplaces || [],
-    limites: body.limites || {},
-    recursos: body.recursos || {},
-    atualizadoEm: new Date().toISOString()
-  };
+ planos[body.nome] = {
+  nome: body.nome,
+
+  marketplaces: Array.isArray(body.marketplaces)
+    ? body.marketplaces
+    : [],
+
+  limites: {
+    sessoes: Number(body.limites?.sessoes || 0),
+    destinos: Number(body.limites?.destinos || 0),
+    enviosDia: Number(body.limites?.enviosDia || 0)
+  },
+
+  recursos: {
+    linkOptimus: !!body.recursos?.linkOptimus,
+    analytics: !!body.recursos?.analytics,
+    cupomInteligente: !!body.recursos?.cupomInteligente
+  },
+
+  atualizadoEm: new Date().toISOString()
+};
 
   salvarPlanos();
 
@@ -2540,6 +2554,61 @@ app.post("/admin/usuarios", (req, res) => {
   return res.json({
     ok: true,
     usuario: novoUsuario
+  });
+});
+
+app.put("/admin/usuarios/:id", (req, res) => {
+  if (!isAdminMaster(req)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Acesso restrito"
+    });
+  }
+
+  const { id } = req.params;
+
+  const usuario = usuarios.find(
+    u => String(u.id) === String(id)
+  );
+
+  if (!usuario) {
+    return res.status(404).json({
+      ok: false,
+      erro: "Usuário não encontrado"
+    });
+  }
+
+  const body = req.body || {};
+
+  usuario.nome = body.nome || usuario.nome;
+
+  usuario.email =
+    (body.email || usuario.email).toLowerCase();
+
+  if (body.senha) {
+    usuario.senha = body.senha;
+  }
+
+  usuario.plano = body.plano || usuario.plano;
+
+  usuario.papel = body.papel || usuario.papel;
+
+  usuario.creditos = Number(
+    body.creditos ?? usuario.creditos ?? 0
+  );
+
+  if (typeof body.ativo === "boolean") {
+    usuario.ativo = body.ativo;
+  }
+
+  usuario.atualizadoEm =
+    new Date().toISOString();
+
+  salvarUsuarios();
+
+  return res.json({
+    ok: true,
+    usuario
   });
 });
 
