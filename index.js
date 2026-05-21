@@ -3001,6 +3001,68 @@ app.post("/limpar-sessao/:id", async (req, res) => {
   }
 });
 
+// ================= ME ==========================
+
+app.get("/me", (req, res) => {
+  const clienteId = getClienteId(req);
+
+  const usuario = usuarios.find(
+    u => String(u.id) === String(clienteId)
+  );
+
+  if (!usuario) {
+    return res.status(404).json({
+      ok: false,
+      erro: "Usuário não encontrado"
+    });
+  }
+
+  renovarCreditosSeNecessario(usuario);
+
+  const sessoesUsuario = Object.values(sessoesMeta || {}).filter(s =>
+    String(s.id || "").startsWith(clienteId + "_") ||
+    (clienteId === "admin" && !String(s.id || "").includes("_"))
+  );
+
+  const destinosUsuario =
+    destinosPorCliente?.[clienteId] || {};
+
+  const filaUsuario = fila.filter(o =>
+    String(o.clienteId || "admin") === String(clienteId)
+  );
+
+  const hoje = new Date().toLocaleDateString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  });
+
+  const enviosHoje = filaUsuario.filter(o =>
+    String(o.enviadoEm || "").startsWith(hoje)
+  ).length;
+
+  return res.json({
+    ok: true,
+    usuario: {
+      id: usuario.id,
+      nome: usuario.nome,
+      email: usuario.email,
+      plano: usuario.plano,
+      creditos: usuario.creditos,
+      papel: usuario.papel,
+      ativo: usuario.ativo
+    },
+    consumo: {
+      enviosHoje,
+      sessoes: sessoesUsuario.length,
+      destinos: Object.keys(destinosUsuario).length,
+      ofertasNaFila: filaUsuario.filter(o => o.status === "pendente").length,
+      ofertasEnviadas: filaUsuario.filter(o => o.status === "enviado").length
+    },
+    status: {
+      automacaoAtiva: configsPorCliente?.[clienteId]?.automacaoAtiva === true
+    }
+  });
+});
+
 // ================= INTEGRAÇÕES =================
 
 const marketplaceRules = {
