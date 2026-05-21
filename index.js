@@ -2454,11 +2454,12 @@ app.get("/admin/planos", (req, res) => {
     });
   }
 
-  return res.json({
-    ok: true,
-    planos
-  });
-});
+return res.json({
+  ok: true,
+  planos,
+  lista: Object.values(planos || {})
+ });
+}); 
 
 app.post("/admin/planos", (req, res) => {
   if (!isAdminMaster(req)) {
