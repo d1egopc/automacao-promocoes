@@ -133,13 +133,11 @@ let usuarios = [];
 
 let planos = {};
 let configsPorCliente = {};
-let destinosPorCliente = {};
 
 const FILA_FILE = "/data/fila.json";
 const CONFIG_FILE = "/data/config.json";
 const USUARIOS_FILE = "/data/usuarios.json";
 const CONFIGS_CLIENTES_FILE = "/data/configs_clientes.json";
-const DESTINOS_CLIENTES_FILE = "/data/destinos_clientes.json";
 const PLANOS_FILE = "/data/planos.json";
 
 console.log("📂 Salvando dados em:", FILA_FILE);
@@ -214,85 +212,6 @@ function salvarUsuarios() {
   );
 }
 
-// ================= CRÉDITOS =================
-
-const CREDITOS_PLANO = {
-  free: 300,
-  starter: 2500,
-  pro: 7500,
-  enterprise: 9500
-};
-
-function obterUsuario(clienteId) {
-  return usuarios.find(
-    u => String(u.id) === String(clienteId)
-  );
-}
-
-function renovarCreditosSeNecessario(usuario) {
-  if (!usuario) return;
-
-  const hoje = new Date();
-
-  const mesAtual =
-    `${hoje.getFullYear()}-${hoje.getMonth() + 1}`;
-
-  if (usuario.mesCreditos === mesAtual) {
-    return;
-  }
-
-  const plano =
-    String(usuario.plano || "free").toLowerCase();
-
-  usuario.creditos =
-    CREDITOS_PLANO[plano] || 300;
-
-  usuario.mesCreditos = mesAtual;
-
-  salvarUsuarios();
-
-  console.log("🔄 Créditos renovados:", {
-    usuario: usuario.email,
-    plano,
-    creditos: usuario.creditos
-  });
-}
-
-function usuarioTemCreditos(clienteId, quantidade = 1) {
-  const usuario = obterUsuario(clienteId);
-
-  if (!usuario) return false;
-
-  renovarCreditosSeNecessario(usuario);
-
-  return Number(usuario.creditos || 0) >= quantidade;
-}
-
-function debitarCreditos(clienteId, quantidade = 1) {
-  const usuario = obterUsuario(clienteId);
-
-  if (!usuario) return false;
-
-  renovarCreditosSeNecessario(usuario);
-
-  if (Number(usuario.creditos || 0) < quantidade) {
-    return false;
-  }
-
-  usuario.creditos =
-    Number(usuario.creditos || 0) - quantidade;
-
-  salvarUsuarios();
-
-  console.log("💳 Créditos debitados:", {
-    usuario: usuario.email,
-    restante: usuario.creditos,
-    debitado: quantidade
-  });
-
-  return true;
-}
-
 // ================= FUNÇÃO SALVA PLANO ===================
 
 function salvarPlanos() {
@@ -308,13 +227,6 @@ function salvarConfigsClientes() {
   fs.writeFileSync(
     CONFIGS_CLIENTES_FILE,
     JSON.stringify(configsPorCliente, null, 2)
-  );
-}
-
-function salvarDestinosClientes() {
-  fs.writeFileSync(
-    DESTINOS_CLIENTES_FILE,
-    JSON.stringify(destinosPorCliente, null, 2)
   );
 }
 
@@ -413,14 +325,6 @@ if (fs.existsSync(CONFIGS_CLIENTES_FILE)) {
   );
 
   console.log("✅ Configs dos clientes carregadas");
-}
-
-if (fs.existsSync(DESTINOS_CLIENTES_FILE)) {
-  destinosPorCliente = JSON.parse(
-    fs.readFileSync(DESTINOS_CLIENTES_FILE, "utf8")
-  );
-
-  console.log("✅ Destinos dos clientes carregados");
 }
 
 if (fs.existsSync(PLANOS_FILE)) {
@@ -1486,10 +1390,9 @@ function destinoDentroHorario(destino) {
 
 // ================= ENVIO DESTINO INTELIGENTE =================
 
-async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId, configCliente) {
+async function enviarParaDestinoInteligente(destino, oferta, mensagem) {
+
   try {
-    clienteId = clienteId || oferta.clienteId || "admin";
-    configCliente = configCliente || configsPorCliente?.[clienteId] || config;
 
     if (!destinoAceitaOferta(destino, oferta)) {
       return;
@@ -1503,6 +1406,8 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
     // ================= WHATSAPP =================
 
     if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
+
+
       const sock = sessoes[destino.conexaoId];
 
       if (!sock) {
@@ -1513,161 +1418,135 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
       const grupos = destino.gruposWhatsapp || [];
 
       for (const grupo of grupos) {
-        
-      if (!usuarioTemCreditos(clienteId, 1)) {
-      console.log("🚫 Sem créditos:", clienteId);
-      continue;
-      }
-
-      debitarCreditos(clienteId, 1);            
 
         if (destino.tipoMidia === "texto" || !oferta.imagem) {
-          await sock.sendMessage(grupo, { text: mensagem });
+
+          await sock.sendMessage(grupo, {
+            text: mensagem
+          });
+
         } else {
+
           await sock.sendMessage(grupo, {
             image: {
               url: corrigirImagemUrl(oferta.imagem) || oferta.imagem
             },
             caption: mensagem
           });
+
         }
 
-        console.log("✅ Enviado WhatsApp:", {
-          clienteId,
-          destino: destino.nome,
-          grupo
-        });
+       console.log("✅ Enviado destino WhatsApp:", destino.nome);
 
-        oferta.destinosEnviados = oferta.destinosEnviados || [];
-        oferta.destinosEnviados.push({
-          clienteId,
-          nome: destino.nome || "Destino",
-          tipo: "whatsapp",
-          grupo,
-          creditos: 1,
-          dataEnvio: new Date().toLocaleString("pt-BR", {
-            timeZone: "America/Sao_Paulo"
-          })
-        });
+       oferta.destinosEnviados = oferta.destinosEnviados || [];
+
+       oferta.destinosEnviados.push({
+       nome: destino.nome || "Destino",
+       tipo: destino.tipo || "desconhecido",
+       dataEnvio: new Date().toLocaleString("pt-BR", {
+       timeZone: "America/Sao_Paulo"
+      })
+      });
 
         await new Promise(r => setTimeout(r, 3000));
       }
     }
 
-// ================= TELEGRAM =================
+    // ================= TELEGRAM =================
 
-if (String(destino.tipo || "").toLowerCase() === "telegram") {
-  const telegramConfig =
-    configCliente?.telegram ||
-    integracoesPorCliente?.[clienteId]?.telegram ||
-    {};
+      if (String(destino.tipo || "").toLowerCase() === "telegram") {
 
-  if (!telegramConfig?.ativo) {
-    console.log("⏸ Telegram desativado para cliente:", clienteId);
-    return;
-  }
+      const telegrams = config.telegram?.destinos || [];
 
-  const telegrams = telegramConfig.destinos || [];
-
-  const selecionados = telegrams.filter(t =>
-    t?.ativo !== false &&
-    (
+      const selecionados =
+      telegrams.filter(t =>
       (destino.telegramDestinos || []).includes(t.nome) ||
       (destino.telegramDestinos || []).includes(String(t.chatId))
-    )
-  );
+      );
+       
 
-  if (!selecionados.length) {
-    console.log("⚠️ Nenhum Telegram selecionado para este destino:", destino.nome);
-    return;
-  }
+   if (!selecionados.length) {
+   console.log("⚠️ Nenhum Telegram selecionado para este destino:", destino.nome);
+   }
 
-  for (const tel of selecionados) {
-    if (!tel.botToken || !tel.chatId) {
-      console.log("⚠️ Telegram incompleto:", tel.nome || tel.chatId);
-      continue;
-    }
+      for (const tel of selecionados) {
 
-    if (!usuarioTemCreditos(clienteId, 1)) {
-      console.log("🚫 Sem créditos:", clienteId);
-      continue;
-    }
+        if (!tel.ativo) continue;
 
-    if (destino.tipoMidia === "texto" || !oferta.imagem) {
-      await axios.post(`https://api.telegram.org/bot${tel.botToken}/sendMessage`, {
-        chat_id: tel.chatId,
-        text: mensagem
-      });
-    } else {
-      await axios.post(`https://api.telegram.org/bot${tel.botToken}/sendPhoto`, {
-        chat_id: tel.chatId,
-        photo: corrigirImagemUrl(oferta.imagem) || oferta.imagem,
-        caption: mensagem
-      });
-    }
+        if (destino.tipoMidia === "texto" || !oferta.imagem) {
 
-    debitarCreditos(clienteId, 1);
+          await axios.post(
+            `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
+            {
+              chat_id: tel.chatId,
+              text: mensagem
+            }
+          );
 
-    console.log("✅ Enviado Telegram:", {
-      clienteId,
-      destino: destino.nome,
-      telegram: tel.nome || tel.chatId
-    });
+        } else {
 
-    oferta.destinosEnviados = oferta.destinosEnviados || [];
-    oferta.destinosEnviados.push({
-      clienteId,
-      nome: destino.nome || "Destino",
-      tipo: "telegram",
-      telegram: tel.nome || "",
-      chatId: tel.chatId,
-      creditos: 1,
-      dataEnvio: new Date().toLocaleString("pt-BR", {
-        timeZone: "America/Sao_Paulo"
+          await axios.post(
+            `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
+            {
+              chat_id: tel.chatId,
+              photo: corrigirImagemUrl(oferta.imagem) || oferta.imagem,
+              caption: mensagem
+            }
+          );
+
+        }
+
+        console.log("✅ Enviado destino Telegram:", destino.nome);
+        
+       oferta.destinosEnviados = oferta.destinosEnviados || [];
+
+       oferta.destinosEnviados.push({
+       nome: destino.nome || "Destino",
+       tipo: destino.tipo || "desconhecido",
+       dataEnvio: new Date().toLocaleString("pt-BR", {
+       timeZone: "America/Sao_Paulo"
       })
-    });
+      });
+    
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
 
-    await new Promise(r => setTimeout(r, 2000));
+  } catch (e) {
+
+    console.log(
+      "❌ erro destino inteligente:",
+      destino?.nome,
+      e.message
+    );
+
   }
 }
 
-// ================= FUNCÃO PROCESSA FILA =================
+// ================= FUNCÃO PRCESSA FILA =================
 
 async function processarFila() {
   if (enviandoAgora) return;
   enviandoAgora = true;
 
   try {
-    const oferta = fila.find(o => o.status === "pendente");
-
-if (!oferta) {
-  console.log("📭 Nenhuma oferta pendente");
-  return;
-}
-
-const clienteId = oferta.clienteId || "admin";
-
-const configCliente =
-  configsPorCliente?.[clienteId] || config;
-
-const clienteAtivo =
-  configCliente.automacaoAtiva === true;
-
-if (!clienteAtivo) {
-  console.log("⏸ Automação desligada para cliente:", clienteId);
-  return;
-}
+    if (!config.automacaoAtiva) return;
 
     if (!podeRodarAgora()) {
-      return;
+           return;
     }
 
     const agora = Date.now();
+    const intervaloMs = (config.intervaloMinutos || 2) * 60 * 1000;
 
-       const intervaloMs =
-      (configCliente.intervaloMinutos || config.intervaloMinutos || 2) *
-      60 *
-      1000;
+    const oferta = fila.find(o => o.status === "pendente");
+
+    if (!oferta) {
+      console.log("📭 Nenhuma oferta pendente");
+      return;
+    }
+
+    const clienteId = oferta.clienteId || "admin";
 
     if (!controleEnvio[clienteId]) {
       controleEnvio[clienteId] = 0;
@@ -1678,69 +1557,58 @@ if (!clienteAtivo) {
     }
 
     let idSessao =
-      oferta.sessaoId ||
-      oferta.idSessao ||
-      oferta.id ||
-      Object.keys(destinosPorSessao || {}).find(id =>
-        destinosPorSessao[id]?.length &&
-        statusSessao[id] === "open"
-      ) ||
-      Object.keys(sessoes || {})[0];
+  oferta.sessaoId ||
+  oferta.id ||
+  Object.keys(destinosPorSessao).find(id => destinosPorSessao[id]?.length) ||
+  Object.keys(sessoes)[0];
 
-    if (!destinosPorSessao?.[idSessao]?.length) {
-      const sessaoComDestino = Object.keys(destinosPorSessao || {})
-        .find(id =>
-          destinosPorSessao[id]?.length &&
-          statusSessao[id] === "open"
-        );
+if (!destinosPorSessao[idSessao]?.length) {
+  const sessaoComDestino = Object.keys(destinosPorSessao)
+    .find(id => destinosPorSessao[id]?.length && statusSessao[id] === "open");
 
-      if (sessaoComDestino) {
-        idSessao = sessaoComDestino;
-      }
-    }
+  if (sessaoComDestino) {
+    idSessao = sessaoComDestino;
+  }
+}
 
-    const sock = sessoes[idSessao];
+const sock = sessoes[idSessao];
 
-    if (!sock) {
-      console.log("❌ Nenhuma sessão conectada para:", idSessao);
-      return;
-    }
+if (!sock) {
+  console.log("❌ Nenhuma sessão conectada para:", idSessao);
+  return;
+}
 
-    console.log("📡 Sessão escolhida para envio:", idSessao);
-    console.log("👤 Cliente dono da oferta:", clienteId);
+console.log("📡 Sessão escolhida para envio:", idSessao);
+
+    let ultimoEnvioFila = 0;
 
     const destinosBrutos =
-      oferta.destinos?.length
-        ? oferta.destinos
-        : oferta.grupos?.length
-          ? oferta.grupos
-          : destinosPorSessao?.[idSessao]?.length
-            ? destinosPorSessao[idSessao]
-            : configCliente?.destinosPorSessao?.[idSessao]?.length
-              ? configCliente.destinosPorSessao[idSessao]
-              : oferta.destino
-                ? [oferta.destino]
-                : oferta.grupoDestino
-                  ? [oferta.grupoDestino]
-                  : configCliente?.destinos?.length
-                    ? configCliente.destinos
-                    : [];
+  oferta.destinos?.length
+    ? oferta.destinos
+    : oferta.grupos?.length
+      ? oferta.grupos
+      : destinosPorSessao[idSessao]?.length
+        ? destinosPorSessao[idSessao]
+        : config?.destinosPorSessao?.[idSessao]?.length
+          ? config.destinosPorSessao[idSessao]
+          : oferta.destino
+            ? [oferta.destino]
+            : oferta.grupoDestino
+              ? [oferta.grupoDestino]
+              : config?.destinos?.length
+                ? config.destinos
+                : [];
 
-    const destinos = destinosBrutos
-      .map(d => d?.id || d?.value || d?.jid || d)
-      .filter(Boolean);
+const destinos = destinosBrutos
+  .map(d => d?.id || d?.value || d?.jid || d)
+  .filter(Boolean);
 
-    console.log("DESTINOS PARA ENVIO:", destinos);
+console.log("DESTINOS PARA ENVIO:", destinos);
 
 // ================= DESTINOS INTELIGENTES =================
 
-const destinosCliente =
-  destinosPorCliente?.[clienteId] ||
-  configCliente?.destinosInteligentes ||
-  [];
-
-const todosDestinos = Array.isArray(destinosCliente)
-  ? destinosCliente.filter(d => d?.ativo !== false)
+const todosDestinos = Array.isArray(config.destinosInteligentes)
+  ? config.destinosInteligentes
   : [];
 
 console.log("🧪 DESTINOS RESUMO:", todosDestinos.map(d => ({
@@ -1894,12 +1762,10 @@ if (!categoriaPermitidaNoDestino(oferta, destino)) {
   continue;
 }
   await enviarParaDestinoInteligente(
-  destino,
-  oferta,
-  mensagem,
-  clienteId,
-  configCliente
-);
+    destino,
+    oferta,
+    mensagem
+  );
 }
 
 controleEnvio[clienteId] = Date.now();
@@ -1977,17 +1843,10 @@ app.use(rateLimit({
     req.path.startsWith("/grupos")
 }));
 
-// ============== POST FILA ENVIO =================
-
 app.post("/fila", (req, res) => {
   const body = req.body || {};
-  const clienteId = getClienteId(req);
 
-  if (!clienteId) {
-    return res.status(401).json({ erro: "Usuário não identificado" });
-  }
-
-  let oferta = {
+let oferta = {
     nome: body.nome || body.titulo || "Oferta",
     titulo: body.titulo || body.nome || "Oferta",
 
@@ -2006,26 +1865,40 @@ app.post("/fila", (req, res) => {
     marketplace: body.marketplace || "",
     categoria: body.categoria || body.marketplace || "",
 
-    clienteId,
-    status: "pendente",
-    criadoEm: new Date().toLocaleString("pt-BR", {
-      timeZone: "America/Sao_Paulo"
-    })
+    clienteId: getClienteId(req),
+    status: "pendente"
   };
 
   const html = JSON.stringify(body || "");
+  const htmlLower = html.toLowerCase();
 
   const temCompraNoApp =
-    html.includes("COMPRANOAPP") ||
+     html.includes("COMPRANOAPP") ||
     /compra\s+no\s+app/i.test(html) ||
     /use\s+o\s+app/i.test(html) ||
     /desconto\s+no\s+app/i.test(html);
 
   if (temCompraNoApp && !oferta.cupom) {
     oferta.cupom = "COMPRANOAPP";
+
     oferta.avisoCupom =
       "📱 Use no app da Amazon para tentar chegar no menor valor.";
   }
+
+  console.log("🧪 BODY RECEBIDO NA FILA:", body);
+  console.log("🧪 OFERTA FINAL PARA FILA:", oferta);
+  console.log("🧪 CUPOM RECEBIDO:", body.cupom);
+  console.log("🧪 AVISO RECEBIDO:", body.avisoCupom);
+  console.log("🧪 OFERTA FINAL:", {
+  titulo: oferta.titulo,
+  cupom: oferta.cupom,
+  avisoCupom: oferta.avisoCupom
+});
+
+
+oferta.criadoEm = oferta.criadoEm || new Date().toLocaleString("pt-BR", {
+  timeZone: "America/Sao_Paulo"
+}); 
 
   oferta = prepararOfertaGlobal(oferta);
 
@@ -2033,18 +1906,14 @@ app.post("/fila", (req, res) => {
   salvarFila();
 
   console.log("📥 Oferta adicionada na fila:", {
-    clienteId,
     titulo: oferta.titulo,
-    marketplace: oferta.marketplace,
-    categoria: oferta.categoria,
-    cupom: oferta.cupom
+    precoAntigo: oferta.precoAntigo,
+    precoAtual: oferta.precoAtual,
+    cupom: oferta.cupom,
+    avisoCupom: oferta.avisoCupom
   });
 
-  res.json({
-    ok: true,
-    mensagem: "Oferta adicionada na fila",
-    oferta
-  });
+  res.send("OK");
 });
 
 // ================= ENVIO MANUAL =================
@@ -2161,74 +2030,35 @@ app.get("/r/:codigo", (req, res) => {
   }
 });
 
-// ================= TELEGRAM ROTA =================
+// ================= TELEGRAM =================
 
 app.get("/telegram", (req, res) => {
-  const clienteId = getClienteId(req);
-
-  if (!clienteId) {
-    return res.status(401).json({
-      ok: false,
-      erro: "Cliente não identificado"
-    });
-  }
-
-  const configCliente =
-    configsPorCliente?.[clienteId] || {};
-
-  const telegram =
-    configCliente.telegram || {
-      ativo: false,
-      destinos: []
-    };
-
   res.json({
-    ok: true,
-    clienteId,
-    ativo: telegram.ativo === true,
-    destinos: telegram.destinos || []
+    ativo: config.telegram?.ativo || false,
+    destinos: config.telegram?.destinos || []
   });
 });
 
 app.post("/telegram", (req, res) => {
-  const clienteId = getClienteId(req);
-
-  if (!clienteId) {
-    return res.status(401).json({
-      ok: false,
-      erro: "Cliente não identificado"
-    });
-  }
-
   const { ativo, destinos } = req.body;
 
-  configsPorCliente[clienteId] =
-    configsPorCliente[clienteId] || {};
-
-  configsPorCliente[clienteId].telegram = {
+  config.telegram = {
     ativo: ativo === true,
-    destinos: Array.isArray(destinos) ? destinos : []
+    destinos: Array.isArray(destinos)
+      ? destinos
+      : config.telegram?.destinos || []
   };
 
-  salvarConfigsClientes();
+  salvarConfig();
 
   res.json({
     ok: true,
-    clienteId,
-    telegram: configsPorCliente[clienteId].telegram
+    telegram: config.telegram
   });
 });
 
 app.post("/telegram/testar", async (req, res) => {
   try {
-    const clienteId = getClienteId(req);
-
-    if (!clienteId) {
-      return res.status(401).json({
-        ok: false,
-        erro: "Cliente não identificado"
-      });
-    }
 
     const { destino } = req.body;
 
@@ -2243,37 +2073,32 @@ app.post("/telegram/testar", async (req, res) => {
       `https://api.telegram.org/bot${destino.botToken}/sendMessage`,
       {
         chat_id: destino.chatId,
-        text: `🧪 Teste Telegram Optimus Promo enviado com sucesso!\n👤 Cliente: ${clienteId}`
+        text: "🧪 Teste Telegram Optimus Promo enviado com sucesso!"
       }
     );
 
     return res.json({
       ok: true,
-      clienteId,
       mensagem: "Teste enviado com sucesso"
     });
 
   } catch (e) {
+
     return res.status(400).json({
       ok: false,
       erro: e.response?.data || e.message
     });
+
   }
 });
 
-// ============== DESTINOS INTELIGENTES =================
+// ============== DESTINOS INTELIG APPGET ==============
 
 app.get("/destinos", (req, res) => {
-  const clienteId = getClienteId(req);
-
-  const destinos =
-    destinosPorCliente?.[clienteId] || [];
-
-  return res.json(destinos);
+  res.json(config.destinosInteligentes || []);
 });
 
 app.post("/destinos", (req, res) => {
-  const clienteId = getClienteId(req);
 
   const destinos = req.body;
 
@@ -2284,23 +2109,23 @@ app.post("/destinos", (req, res) => {
     });
   }
 
-  destinosPorCliente[clienteId] = destinos;
+  config.destinosInteligentes = destinos;
 
   salvarConfig();
 
   return res.json({
     ok: true,
-    destinos: destinosPorCliente[clienteId]
+    destinos: config.destinosInteligentes
   });
+
 });
 
 app.delete("/destinos/:id", (req, res) => {
-  const clienteId = getClienteId(req);
 
   const { id } = req.params;
 
-  destinosPorCliente[clienteId] =
-    (destinosPorCliente?.[clienteId] || [])
+  config.destinosInteligentes =
+    (config.destinosInteligentes || [])
       .filter(d => d.id !== id);
 
   salvarConfig();
@@ -2308,140 +2133,82 @@ app.delete("/destinos/:id", (req, res) => {
   return res.json({
     ok: true
   });
+
 });
 
-// ================= AUTOMAÇÃO POR CLIENTE =================
+// ================= AUTOMAÇÃO =================
 
 app.get("/automacao", (req, res) => {
-  const clienteId = getClienteId(req);
-
-  if (!clienteId) {
-    return res.status(401).json({
-      ok: false,
-      erro: "Usuário não identificado"
-    });
-  }
-
-  configsPorCliente[clienteId] = configsPorCliente[clienteId] || {};
-
-  return res.json({
+  res.json({
     ok: true,
-    clienteId,
-    ativo: configsPorCliente[clienteId].automacaoAtiva === true
+    ativo: config.automacaoAtiva
   });
 });
 
 app.post("/automacao/toggle", (req, res) => {
-  const clienteId = getClienteId(req);
+  config.automacaoAtiva = !config.automacaoAtiva;
+  salvarConfig();
 
-  if (!clienteId) {
-    return res.status(401).json({
-      ok: false,
-      erro: "Usuário não identificado"
-    });
-  }
+  console.log("🤖 Automação:", config.automacaoAtiva ? "ON" : "OFF");
 
-  configsPorCliente[clienteId] = configsPorCliente[clienteId] || {};
-
-  configsPorCliente[clienteId].automacaoAtiva =
-    !configsPorCliente[clienteId].automacaoAtiva;
-
-  salvarConfigsClientes();
-
-  console.log("🤖 Automação cliente:", {
-    clienteId,
-    ativo: configsPorCliente[clienteId].automacaoAtiva
-  });
-
-  return res.json({
+  res.json({
     ok: true,
-    clienteId,
-    ativo: configsPorCliente[clienteId].automacaoAtiva
+    ativo: config.automacaoAtiva
   });
 });
 
+
 app.delete("/fila/:index", (req, res) => {
   const index = Number(req.params.index);
-  const clienteId = getClienteId(req);
 
   if (isNaN(index) || index < 0 || index >= fila.length) {
     return res.status(400).send("Índice inválido");
-  }
-
-  const oferta = fila[index];
-
-  if ((oferta.clienteId || "admin") !== clienteId) {
-    return res.status(403).json({
-      ok: false,
-      erro: "Sem permissão para remover esta oferta"
-    });
   }
 
   const removido = fila.splice(index, 1);
 
   salvarFila();
 
-  console.log("🗑️ Removido da fila:", {
-    clienteId,
-    titulo: removido[0]?.nome || removido[0]?.titulo
-  });
+  console.log("🗑️ Removido da fila:", removido[0]?.nome || removido[0]?.titulo);
 
-  res.json({
-    ok: true,
-    mensagem: "Removido com sucesso"
-  });
+  res.send("Removido com sucesso");
 });
 
 app.post("/fila/:index/enviar-agora", async (req, res) => {
   const index = Number(req.params.index);
-  const clienteIdReq = getClienteId(req);
 
   if (isNaN(index) || index < 0 || index >= fila.length) {
-    return res.status(400).json({
-      ok: false,
-      erro: "Índice inválido"
-    });
+    return res.status(400).json({ ok: false, erro: "Índice inválido" });
   }
 
   const oferta = fila[index];
 
-  if ((oferta.clienteId || "admin") !== clienteIdReq) {
-    return res.status(403).json({
-      ok: false,
-      erro: "Sem permissão para enviar esta oferta"
-    });
-  }
-
   oferta.status = "pendente";
 
-  console.log("📦 ENTRANDO NA FILA:", {
-    clienteId: clienteIdReq,
-    titulo: oferta.titulo || oferta.nome,
-    preco: oferta.precoAtual || oferta.preco,
-    imagem: !!oferta.imagem,
-    marketplace: oferta.marketplace,
-    categoria: oferta.categoria
+  
+  // joga a oferta escolhida para o começo da fila
+  
+  console.log("📦 ENTRANDO NA FILA AMAZON:", {
+  titulo: oferta.titulo || oferta.nome,
+  preco: oferta.precoAtual || oferta.preco,
+  imagem: !!oferta.imagem,
+  marketplace: oferta.marketplace,
+  categoria: oferta.categoria
   });
 
   fila.splice(index, 1);
   fila.unshift(oferta);
-
   salvarFila();
 
   const clienteId = oferta.clienteId || "admin";
-
   controleEnvio[clienteId] = 0;
 
-  const configCliente =
-    configsPorCliente?.[clienteId] || config;
-
-  const automacaoAnterior = configCliente.automacaoAtiva;
-
-  configCliente.automacaoAtiva = true;
+  const automacaoAnterior = config.automacaoAtiva;
+  config.automacaoAtiva = true;
 
   await processarFila();
 
-  configCliente.automacaoAtiva = automacaoAnterior;
+  config.automacaoAtiva = automacaoAnterior;
 
   return res.json({
     ok: true,
@@ -2493,12 +2260,11 @@ app.get("/admin/planos", (req, res) => {
     });
   }
 
-return res.json({
-  ok: true,
-  planos,
-  lista: Object.values(planos || {})
- });
-}); 
+  return res.json({
+    ok: true,
+    planos
+  });
+});
 
 app.post("/admin/planos", (req, res) => {
   if (!isAdminMaster(req)) {
@@ -2517,71 +2283,19 @@ app.post("/admin/planos", (req, res) => {
     });
   }
 
- planos[body.nome] = {
-  nome: body.nome,
-
-  marketplaces: Array.isArray(body.marketplaces)
-    ? body.marketplaces
-    : [],
-
-  limites: {
-    sessoes: Number(body.limites?.sessoes || 0),
-    destinos: Number(body.limites?.destinos || 0),
-    enviosDia: Number(body.limites?.enviosDia || 0)
-  },
-
-  recursos: {
-    linkOptimus: !!body.recursos?.linkOptimus,
-    analytics: !!body.recursos?.analytics,
-    cupomInteligente: !!body.recursos?.cupomInteligente
-  },
-
-  atualizadoEm: new Date().toISOString()
-};
+  planos[body.nome] = {
+    nome: body.nome,
+    marketplaces: body.marketplaces || [],
+    limites: body.limites || {},
+    recursos: body.recursos || {},
+    atualizadoEm: new Date().toISOString()
+  };
 
   salvarPlanos();
 
   return res.json({
     ok: true,
     plano: planos[body.nome]
-  });
-});
-
-app.delete("/admin/planos/:nome", (req, res) => {
-  if (!isAdminMaster(req)) {
-    return res.status(403).json({
-      ok: false,
-      erro: "Acesso restrito ao Admin Master"
-    });
-  }
-
-  const { nome } = req.params;
-
-  if (!planos[nome]) {
-    return res.status(404).json({
-      ok: false,
-      erro: "Plano não encontrado"
-    });
-  }
-
-  const usuariosUsandoPlano = usuarios.filter(
-    u => String(u.plano).toLowerCase() === String(nome).toLowerCase()
-  );
-
-  if (usuariosUsandoPlano.length > 0) {
-    return res.status(400).json({
-      ok: false,
-      erro: "Não é possível excluir plano em uso por usuários"
-    });
-  }
-
-  delete planos[nome];
-
-  salvarPlanos();
-
-  return res.json({
-    ok: true,
-    mensagem: "Plano excluído com sucesso"
   });
 });
 
@@ -2632,61 +2346,6 @@ app.post("/admin/usuarios", (req, res) => {
   return res.json({
     ok: true,
     usuario: novoUsuario
-  });
-});
-
-app.put("/admin/usuarios/:id", (req, res) => {
-  if (!isAdminMaster(req)) {
-    return res.status(403).json({
-      ok: false,
-      erro: "Acesso restrito"
-    });
-  }
-
-  const { id } = req.params;
-
-  const usuario = usuarios.find(
-    u => String(u.id) === String(id)
-  );
-
-  if (!usuario) {
-    return res.status(404).json({
-      ok: false,
-      erro: "Usuário não encontrado"
-    });
-  }
-
-  const body = req.body || {};
-
-  usuario.nome = body.nome || usuario.nome;
-
-  usuario.email =
-    (body.email || usuario.email).toLowerCase();
-
-  if (body.senha) {
-    usuario.senha = body.senha;
-  }
-
-  usuario.plano = body.plano || usuario.plano;
-
-  usuario.papel = body.papel || usuario.papel;
-
-  usuario.creditos = Number(
-    body.creditos ?? usuario.creditos ?? 0
-  );
-
-  if (typeof body.ativo === "boolean") {
-    usuario.ativo = body.ativo;
-  }
-
-  usuario.atualizadoEm =
-    new Date().toISOString();
-
-  salvarUsuarios();
-
-  return res.json({
-    ok: true,
-    usuario
   });
 });
 
@@ -2892,21 +2551,6 @@ function getPlanoUsuario(req) {
   return planos[usuario.plano] || null;
 }
 
-const LIMITES_PLANO = {
-  free: {
-    sessoes: 1
-  },
-  starter: {
-    sessoes: 3
-  },
-  pro: {
-    sessoes: 10
-  },
-  enterprise: {
-    sessoes: 999
-  }
-};
-
 // ======================== FUNCAO GET INTEGRACOES ========================
 
 function getIntegracaoCliente(clienteId = "admin", marketplace = "") {
@@ -3041,173 +2685,58 @@ app.get("/", (req, res) => {
 
 app.post("/desconectar/:id", async (req, res) => {
   try {
-    const clienteId = getClienteId(req);
+    const id = req.params.id || "sessao1";
 
-    const id = isAdminMaster(req)
-      ? req.params.id
-      : `${clienteId}_${req.params.id}`;
-
-    if (sessoes[id]) {
+    if (sessoes[id]?.sock) {
       try {
-        await sessoes[id]?.logout?.();
+        await sessoes[id].sock.logout();
       } catch (e) {
         console.log("⚠️ erro logout:", e.message);
-      }
-
-      try {
-        sessoes[id]?.end?.();
-      } catch (e) {
-        console.log("⚠️ erro end:", e.message);
       }
     }
 
     delete sessoes[id];
-
-    if (typeof qrCodes !== "undefined") {
-      delete qrCodes[id];
-    }
-
-    if (typeof statusSessao !== "undefined") {
-      delete statusSessao[id];
-    }
+    delete qrcodes[id];
 
     res.json({
       ok: true,
-      message: "WhatsApp desconectado.",
-      id
+      message: "WhatsApp desconectado."
     });
-
   } catch (e) {
-    res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
+    res.status(500).json({ ok: false, erro: e.message });
   }
 });
 
 app.post("/limpar-sessao/:id", async (req, res) => {
   try {
-    const clienteId = getClienteId(req);
+    const id = req.params.id || "sessao1";
 
-    const id = isAdminMaster(req)
-      ? req.params.id
-      : `${clienteId}_${req.params.id}`;
-
-    if (sessoes[id]) {
+    if (sessoes[id]?.sock) {
       try {
-        await sessoes[id]?.logout?.();
+        await sessoes[id].sock.logout();
       } catch (e) {
         console.log("⚠️ erro logout ao limpar:", e.message);
-      }
-
-      try {
-        sessoes[id]?.end?.();
-      } catch (e) {
-        console.log("⚠️ erro end ao limpar:", e.message);
       }
     }
 
     delete sessoes[id];
+    delete qrcodes[id];
 
-    if (typeof qrCodes !== "undefined") {
-      delete qrCodes[id];
-    }
-
-    if (typeof statusSessao !== "undefined") {
-      delete statusSessao[id];
-    }
-
-    if (typeof destinosPorSessao !== "undefined") {
-      delete destinosPorSessao[id];
-    }
-
-    const pastaAuth = `/data/auth_${id}`;
+    const pastaAuth = path.join(__dirname, `auth_${id}`);
 
     if (fs.existsSync(pastaAuth)) {
-      fs.rmSync(pastaAuth, {
-        recursive: true,
-        force: true
-      });
-
+      fs.rmSync(pastaAuth, { recursive: true, force: true });
       console.log("🗑️ Sessão limpa:", pastaAuth);
     }
 
-    return res.json({
+    res.json({
       ok: true,
-      message: "Sessão limpa. Gere um novo QR Code.",
-      id
+      message: "Sessão limpa. Gere um novo QR Code."
     });
-
   } catch (e) {
     console.log("❌ erro limpar sessão:", e.message);
-
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
+    res.status(500).json({ ok: false, erro: e.message });
   }
-});
-
-// ================= ME ==========================
-
-app.get("/me", (req, res) => {
-  const clienteId = getClienteId(req);
-
-  const usuario = usuarios.find(
-    u => String(u.id) === String(clienteId)
-  );
-
-  if (!usuario) {
-    return res.status(404).json({
-      ok: false,
-      erro: "Usuário não encontrado"
-    });
-  }
-
-  renovarCreditosSeNecessario(usuario);
-
-  const sessoesUsuario = Object.values(sessoesMeta || {}).filter(s =>
-    String(s.id || "").startsWith(clienteId + "_") ||
-    (clienteId === "admin" && !String(s.id || "").includes("_"))
-  );
-
-  const destinosUsuario =
-    destinosPorCliente?.[clienteId] || {};
-
-  const filaUsuario = fila.filter(o =>
-    String(o.clienteId || "admin") === String(clienteId)
-  );
-
-  const hoje = new Date().toLocaleDateString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-  });
-
-  const enviosHoje = filaUsuario.filter(o =>
-    String(o.enviadoEm || "").startsWith(hoje)
-  ).length;
-
-  return res.json({
-    ok: true,
-    usuario: {
-      id: usuario.id,
-      nome: usuario.nome,
-      email: usuario.email,
-      plano: usuario.plano,
-      creditos: usuario.creditos,
-      papel: usuario.papel,
-      ativo: usuario.ativo
-    },
-    consumo: {
-      enviosHoje,
-      sessoes: sessoesUsuario.length,
-      destinos: Object.keys(destinosUsuario).length,
-      ofertasNaFila: filaUsuario.filter(o => o.status === "pendente").length,
-      ofertasEnviadas: filaUsuario.filter(o => o.status === "enviado").length
-    },
-    status: {
-      automacaoAtiva: configsPorCliente?.[clienteId]?.automacaoAtiva === true
-    }
-  });
 });
 
 // ================= INTEGRAÇÕES =================
@@ -6372,29 +5901,13 @@ const urlLower = url.toLowerCase();
 
 if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
   marketplace = "amazon";
-
-} else if (
-  urlLower.includes("mercadolivre.com") ||
-  urlLower.includes("meli.la")
-) {
+} else if (urlLower.includes("mercadolivre.com") || urlLower.includes("meli.la")) {
   marketplace = "mercadolivre";
-
-} else if (
-  urlLower.includes("shopee.com") ||
-  urlLower.includes("s.shopee")
-) {
+} else if (urlLower.includes("shopee.com") || urlLower.includes("s.shopee")) {
   marketplace = "shopee";
-
-} else if (
-  urlLower.includes("awin1.com") ||
-  urlLower.includes("awin.com")
-) {
-  marketplace = "awin";
-
 } else if (urlLower.includes("aliexpress.com")) {
   marketplace = "aliexpress";
 }
-
 
   if (!marketplace || !url) {
     return res.status(400).json({
@@ -6706,27 +6219,7 @@ app.get("/sessoes", (req, res) => {
 });
 
 app.post("/sessoes", (req, res) => {
-
-  const clienteId = getClienteId(req);
-
-  const plano = getUsuarioAtual(req)?.plano || "free";
-
-  const limite =
-    LIMITES_PLANO?.[plano]?.sessoes || 1;
-
-  const sessoesCliente = Object.values(sessoesMeta)
-    .filter(s =>
-      String(s.id || "").startsWith(clienteId + "_") ||
-      (clienteId === "admin" && !String(s.id).includes("_"))
-    );
-
-  if (sessoesCliente.length >= limite) {
-    return res.status(403).json({
-      ok: false,
-      erro: `Seu plano permite apenas ${limite} sessão(ões).`
-    });
-  }
-
+const clienteId = getClienteId(req);
   try {
     const nome = req.body.nome || "WhatsApp";
     const tipo = req.body.tipo || "whatsapp";
@@ -6830,13 +6323,13 @@ app.post("/reset/:id", async (req, res) => {
     if (sessoes[id]) {
 
       try {
-        await sessoes[id]?.logout?.();
+        await sessoes[id]?.sock?.logout?.();
       } catch (e) {
         console.log("⚠️ logout ignorado:", e.message);
       }
 
       try {
-        sessoes[id]?.end?.();
+        sessoes[id]?.sock?.end?.();
       } catch (e) {
         console.log("⚠️ end ignorado:", e.message);
       }
@@ -6881,17 +6374,9 @@ app.post("/conectar", async (req, res) => {
   const clienteId = getClienteId(req);
   const { id } = req.body;
 
-  if (!clienteId) {
-    return res.status(401).json({ erro: "Usuário não identificado" });
-  }
-
-  if (!id) {
-    return res.status(400).json({ erro: "ID obrigatório" });
-  }
-
   const sessaoId = clienteId === "admin"
-    ? id
-    : `${clienteId}_${id}`;
+  ? id
+  : `${clienteId}_${id}`;
 
   if (!id) return res.status(400).json({ erro: "ID obrigatório" });
 
@@ -6903,7 +6388,7 @@ app.post("/conectar", async (req, res) => {
   console.log("💾 Sessão WhatsApp salva para reconexão:", id);
  }
 
- iniciarWhatsApp(sessaoId, clienteId, false);
+ iniciarWhatsApp(sessaoId, false);
 
   return res.json({
   ok: true,
@@ -6985,9 +6470,7 @@ if (gruposPorSessao[id]?.length) {
 
 app.get("/grupos/:id", async (req, res) => {
   const clienteId = getClienteId(req);
-  const id = clienteId === "admin"
-  ? req.params.id
-  : `${clienteId}_${req.params.id}`;
+  const id = `${clienteId}_${req.params.id}`;
 
   const lista = await carregarGruposSessao(id);
 
@@ -7000,7 +6483,6 @@ return res.json({
   total: lista.length,
   grupos: lista,
   lista
-});
 });
 
 app.post("/magalu/gerar-link", (req, res) => {
@@ -7049,23 +6531,8 @@ app.post("/destinos/:id", (req, res) => {
     return res.status(400).json({ erro: "destinos deve ser array" });
   }
 
-  const plano = getUsuarioAtual(req)?.plano || "free";
-
-  const limiteDestinos =
-    LIMITES_PLANO?.[plano]?.destinos || 3;
-
-  if (destinos.length > limiteDestinos) {
-    return res.status(403).json({
-      ok: false,
-      erro: `Seu plano permite apenas ${limiteDestinos} destino(s).`
-    });
-  }
-
   const clienteId = getClienteId(req);
-
-  const id = clienteId === "admin"
-    ? req.params.id
-    : `${clienteId}_${req.params.id}`;
+  const id = `${clienteId}_${req.params.id}`;
 
   destinosPorSessao[id] = destinos;
 
@@ -7073,12 +6540,9 @@ app.post("/destinos/:id", (req, res) => {
     config.destinosPorSessao = {};
   }
 
-  destinosPorCliente[clienteId] =
-  destinosPorCliente[clienteId] || {};
+  config.destinosPorSessao[id] = destinos;
 
- destinosPorCliente[clienteId][id] = destinos;
-
- salvarDestinosClientes();
+  salvarConfig();
   console.log("💾 Destinos salvos na config:", id, destinos);
 
   return res.json({
@@ -7089,153 +6553,200 @@ app.post("/destinos/:id", (req, res) => {
 
 app.get("/destinos/:id", (req, res) => {
   const clienteId = getClienteId(req);
-
   const id = clienteId === "admin"
-    ? req.params.id
-    : `${clienteId}_${req.params.id}`;
-
-  const destinos =
-    destinosPorCliente?.[clienteId]?.[id] || [];
+  ? req.params.id
+  : `${clienteId}_${req.params.id}`;
 
   return res.json({
     ok: true,
-    destinos
+    destinos:
+      destinosPorSessao[id] ||
+      config?.destinosPorSessao?.[id] ||
+      []
+  });
+});
+
+app.post("/test-send-todos", async (req, res) => {
+  const mensagem =
+    req.body?.mensagem ||
+    "🧪 TESTE " + new Date().toLocaleTimeString();
+
+  const imagemOriginal = req.body?.imagem;
+  const imagemFinal = corrigirImagemUrl(imagemOriginal);
+
+  const resultados = [];
+
+  for (const id of Object.keys(sessoes)) {
+    const sock = sessoes[id];
+
+    if (!sock || statusSessao[id] !== "open") {
+      resultados.push({
+        sessao: id,
+        ok: false,
+        erro: "Sessão offline"
+      });
+      continue;
+    }
+
+    const destinos =
+      destinosPorSessao[id] ||
+      config?.destinosPorSessao?.[id] ||
+      [];
+
+    for (const destino of destinos) {
+      try {
+        if (imagemFinal) {
+          await sock.sendMessage(destino, {
+            image: { url: imagemFinal },
+            caption: mensagem
+          });
+
+          resultados.push({
+            sessao: id,
+            destino,
+            ok: true,
+            tipo: "imagem_com_legenda"
+          });
+        } else {
+          await sock.sendMessage(destino, {
+            text: mensagem
+          });
+
+          resultados.push({
+            sessao: id,
+            destino,
+            ok: true,
+            tipo: "texto"
+          });
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      } catch (e) {
+        resultados.push({
+          sessao: id,
+          destino,
+          ok: false,
+          erro: e.message
+        });
+      }
+    }
+  }
+
+  if (typeof enviarTelegram === "function") {
+    try {
+      await enviarTelegram(
+        {
+          ...req.body,
+          imagem: imagemFinal,
+          marketplace: req.body.marketplace || req.body.loja || ""
+        },
+        mensagem
+      );
+
+      resultados.push({
+        destino: "telegram",
+        ok: true,
+        tipo: "telegram"
+      });
+    } catch (e) {
+      resultados.push({
+        destino: "telegram",
+        ok: false,
+        erro: e.message
+      });
+    }
+  }
+
+  return res.json({
+    ok: true,
+    resultados
   });
 });
 
 // ================= TELEGRAM =================
 
-async function enviarTelegram(oferta, mensagem, clienteId, configCliente) {
+async function enviarTelegram(oferta, mensagem) {
   try {
-    clienteId = clienteId || oferta?.clienteId || "admin";
-    configCliente = configCliente || configsPorCliente?.[clienteId] || {};
-
-    const telegramConfig =
-      configCliente.telegram ||
-      integracoesPorCliente?.[clienteId]?.telegram ||
-      {};
-
-    if (!telegramConfig?.ativo) {
-      console.log("⏸ Telegram desativado para cliente:", clienteId);
+    if (!config.telegram?.ativo) {
+      console.log("⏸ Telegram desativado.");
       return;
     }
 
-    const destinos = telegramConfig.destinos || [];
+    const destinos = config.telegram?.destinos || [];
 
     if (!destinos.length) {
-      console.log("⚠️ Nenhum destino Telegram configurado para cliente:", clienteId);
+      console.log("⚠️ Nenhum destino Telegram configurado.");
       return;
     }
 
     for (const destino of destinos) {
-      try {
-        if (!destino.ativo) continue;
+      if (!destino.ativo) continue;
 
-        const token = destino.botToken;
-        const chatId = destino.chatId;
+      const token = destino.botToken;
+      const chatId = destino.chatId;
 
-        if (!token || !chatId) {
-          console.log("⚠️ Telegram destino incompleto:", destino.nome || "sem nome");
-          continue;
-        }
-
-        if (oferta.imagem) {
-          await axios.post(`https://api.telegram.org/bot${token}/sendPhoto`, {
-            chat_id: chatId,
-            photo: corrigirImagemUrl(oferta.imagem) || oferta.imagem,
-            caption: mensagem,
-            parse_mode: "HTML"
-          });
-        } else {
-          await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
-            chat_id: chatId,
-            text: mensagem,
-            parse_mode: "HTML"
-          });
-        }
-
-        console.log(
-          `✅ Telegram enviado | cliente: ${clienteId} | destino: ${destino.nome || chatId}`
-        );
-
-      } catch (erroDestino) {
-        console.log(
-          "❌ Erro ao enviar Telegram para destino:",
-          destino.nome || destino.chatId,
-          erroDestino.response?.data || erroDestino.message
-        );
+      if (!token || !chatId) {
+        console.log("⚠️ Telegram destino incompleto:", destino.nome);
+        continue;
       }
+
+      if (oferta.imagem) {
+        await axios.post(`https://api.telegram.org/bot${token}/sendPhoto`, {
+          chat_id: chatId,
+          photo: corrigirImagemUrl(oferta.imagem) || oferta.imagem,
+          caption: mensagem
+        });
+      } else {
+        await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+          chat_id: chatId,
+          text: mensagem
+        });
+      }
+
+      console.log("✅ Telegram enviado:", destino.nome || chatId);
+
+      await new Promise(r => setTimeout(r, 1500));
     }
 
   } catch (e) {
-    console.log("❌ Erro geral enviarTelegram:", e.message);
+    console.log("❌ Erro Telegram:", e.response?.data || e.message);
   }
 }
 
 // ================= FUNCÃO WHATSAPP =================
 
-async function iniciarWhatsApp(id, clienteId = "admin", force = false) {
+async function iniciarWhatsApp(id, force = false) {
+  console.log("🚀 Iniciando sessão:", id, "force:", force);
 
-  const clienteIdFinal = clienteId || "admin";
-  const chaveSessao = `${clienteIdFinal}_${id}`;
+  const statusAtual = statusSessao[id];
 
-  console.log("🚀 Iniciando sessão:", chaveSessao, "force:", force);
-
-  const statusAtual = statusSessao[chaveSessao];
-
-  if (
-    !force &&
-    sessoes[chaveSessao] &&
-    ["connecting", "qr", "open", "reconnecting"].includes(statusAtual)
-  ) {
-    console.log(
-      "⏸ Sessão já em andamento, não vou recriar:",
-      chaveSessao,
-      statusAtual
-    );
-
-    return sessoes[chaveSessao];
+  if (!force && sessoes[id] && ["connecting", "qr", "open", "reconnecting"].includes(statusAtual)) {
+    console.log("⏸ Sessão já em andamento, não vou recriar:", id, statusAtual);
+    return sessoes[id];
   }
 
-  if (!force && qrCodes[chaveSessao] && statusAtual === "qr") {
-    console.log("⏸ QR já ativo, não vou recriar:", chaveSessao);
-
-    return sessoes[chaveSessao] || null;
+  if (!force && qrCodes[id] && statusAtual === "qr") {
+    console.log("⏸ QR já ativo, não vou recriar:", id);
+    return sessoes[id] || null;
   }
 
-  if (force && sessoes[chaveSessao]) {
+  if (force && sessoes[id]) {
     try {
-      console.log("♻️ Forçando reinício da sessão:", chaveSessao);
-
-      sessoes[chaveSessao].end?.();
-
+      console.log("♻️ Forçando reinício da sessão:", id);
+      sessoes[id].end?.();
     } catch (e) {
       console.log("⚠️ Erro ao encerrar sessão antiga:", e.message);
     }
 
-    delete sessoes[chaveSessao];
-
-    qrCodes[chaveSessao] = null;
+    delete sessoes[id];
+    qrCodes[id] = null;
   }
 
-  statusSessao[chaveSessao] = "connecting";
-  reconectando[chaveSessao] = false;
+  statusSessao[id] = "connecting";
+  reconectando[id] = false;
 
-  const pastaNova = `/data/auth_${chaveSessao}`;
-  const pastaAntiga = `/data/auth_${id}`;
-
-  const pastaAuth =
-    fs.existsSync(pastaNova)
-      ? pastaNova
-      : fs.existsSync(pastaAntiga)
-        ? pastaAntiga
-        : pastaNova;
-
-  const { state, saveCreds } =
-    await useMultiFileAuthState(pastaAuth);
-
-  const { version } =
-    await fetchLatestBaileysVersion();
+  const { state, saveCreds } = await useMultiFileAuthState("/data/auth_" + id);
+  const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
     version,
@@ -7246,77 +6757,55 @@ async function iniciarWhatsApp(id, clienteId = "admin", force = false) {
     browser: ["Chrome", "Desktop", "1.0.0"]
   });
 
-  sessoes[chaveSessao] = sock;
+  sessoes[id] = sock;
 
   sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("connection.update", async (update) => {
-
     const { connection, qr, lastDisconnect } = update;
 
     if (qr) {
-      console.log("🔥 QR RECEBIDO:", chaveSessao);
-
-      qrCodes[chaveSessao] =
-        await qrcode.toDataURL(qr);
-
-      statusSessao[chaveSessao] = "qr";
+      console.log("🔥 QR RECEBIDO:", id);
+      qrCodes[id] = await qrcode.toDataURL(qr);
+      statusSessao[id] = "qr";
     }
 
     if (connection === "open") {
+      console.log("✅ WHATSAPP CONECTADO:", id);
 
-      console.log("✅ WHATSAPP CONECTADO:", chaveSessao);
+      statusSessao[id] = "open";
+      qrCodes[id] = null;
+      reconectando[id] = false;
 
-      statusSessao[chaveSessao] = "open";
-
-      qrCodes[chaveSessao] = null;
-
-      reconectando[chaveSessao] = false;
-
-      setTimeout(() => {
-        carregarGruposSessao(id, clienteIdFinal);
-      }, 3000);
+      setTimeout(() => carregarGruposSessao(id), 3000);
     }
 
     if (connection === "close") {
+      const motivo = lastDisconnect?.error?.output?.statusCode;
 
-      const motivo =
-        lastDisconnect?.error?.output?.statusCode;
-
-      console.log("❌ WHATSAPP DESCONECTADO:", chaveSessao);
+      console.log("❌ WHATSAPP DESCONECTADO:", id);
       console.log("Motivo:", motivo);
 
-      qrCodes[chaveSessao] = null;
-
-      delete sessoes[chaveSessao];
+      qrCodes[id] = null;
+      delete sessoes[id];
 
       if (motivo === DisconnectReason.loggedOut) {
-
-        statusSessao[chaveSessao] = "loggedOut";
-
-        reconectando[chaveSessao] = false;
-
+        statusSessao[id] = "loggedOut";
+        reconectando[id] = false;
         return;
       }
 
-      statusSessao[chaveSessao] = "reconnecting";
+      statusSessao[id] = "reconnecting";
 
-      if (!reconectando[chaveSessao]) {
-
-        reconectando[chaveSessao] = true;
+      if (!reconectando[id]) {
+        reconectando[id] = true;
 
         setTimeout(() => {
-
-          iniciarWhatsApp(id, clienteIdFinal)
-            .catch((e) => {
-
-              console.error("ERRO AO RECONECTAR:", e);
-
-              statusSessao[chaveSessao] = "offline";
-
-              reconectando[chaveSessao] = false;
-            });
-
+          iniciarWhatsApp(id).catch((e) => {
+            console.error("ERRO AO RECONECTAR:", e);
+            statusSessao[id] = "offline";
+            reconectando[id] = false;
+          });
         }, 5000);
       }
     }
