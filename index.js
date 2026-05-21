@@ -6903,7 +6903,7 @@ app.post("/conectar", async (req, res) => {
   console.log("💾 Sessão WhatsApp salva para reconexão:", id);
  }
 
- iniciarWhatsApp(sessaoId, false);
+ iniciarWhatsApp(sessaoId, clienteId, false);
 
   return res.json({
   ok: true,
