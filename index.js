@@ -133,11 +133,13 @@ let usuarios = [];
 
 let planos = {};
 let configsPorCliente = {};
+let destinosPorCliente = {};
 
 const FILA_FILE = "/data/fila.json";
 const CONFIG_FILE = "/data/config.json";
 const USUARIOS_FILE = "/data/usuarios.json";
 const CONFIGS_CLIENTES_FILE = "/data/configs_clientes.json";
+const DESTINOS_CLIENTES_FILE = "/data/destinos_clientes.json";
 const PLANOS_FILE = "/data/planos.json";
 
 console.log("📂 Salvando dados em:", FILA_FILE);
@@ -309,6 +311,13 @@ function salvarConfigsClientes() {
   );
 }
 
+function salvarDestinosClientes() {
+  fs.writeFileSync(
+    DESTINOS_CLIENTES_FILE,
+    JSON.stringify(destinosPorCliente, null, 2)
+  );
+}
+
 // ================ FUNCAO CRIAR PLANO =====================
 
 function criarPlanosPadrao() {
@@ -404,6 +413,14 @@ if (fs.existsSync(CONFIGS_CLIENTES_FILE)) {
   );
 
   console.log("✅ Configs dos clientes carregadas");
+}
+
+if (fs.existsSync(DESTINOS_CLIENTES_FILE)) {
+  destinosPorCliente = JSON.parse(
+    fs.readFileSync(DESTINOS_CLIENTES_FILE, "utf8")
+  );
+
+  console.log("✅ Destinos dos clientes carregados");
 }
 
 if (fs.existsSync(PLANOS_FILE)) {
@@ -6847,9 +6864,12 @@ app.post("/destinos/:id", (req, res) => {
     config.destinosPorSessao = {};
   }
 
-  config.destinosPorSessao[id] = destinos;
+  destinosPorCliente[clienteId] =
+  destinosPorCliente[clienteId] || {};
 
-  salvarConfig();
+ destinosPorCliente[clienteId][id] = destinos;
+
+ salvarDestinosClientes();
   console.log("💾 Destinos salvos na config:", id, destinos);
 
   return res.json({
@@ -6860,16 +6880,17 @@ app.post("/destinos/:id", (req, res) => {
 
 app.get("/destinos/:id", (req, res) => {
   const clienteId = getClienteId(req);
+
   const id = clienteId === "admin"
-  ? req.params.id
-  : `${clienteId}_${req.params.id}`;
+    ? req.params.id
+    : `${clienteId}_${req.params.id}`;
+
+  const destinos =
+    destinosPorCliente?.[clienteId]?.[id] || [];
 
   return res.json({
     ok: true,
-    destinos:
-      destinosPorSessao[id] ||
-      config?.destinosPorSessao?.[id] ||
-      []
+    destinos
   });
 });
 
