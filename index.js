@@ -2507,6 +2507,44 @@ app.post("/admin/planos", (req, res) => {
   });
 });
 
+app.delete("/admin/planos/:nome", (req, res) => {
+  if (!isAdminMaster(req)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Acesso restrito ao Admin Master"
+    });
+  }
+
+  const { nome } = req.params;
+
+  if (!planos[nome]) {
+    return res.status(404).json({
+      ok: false,
+      erro: "Plano não encontrado"
+    });
+  }
+
+  const usuariosUsandoPlano = usuarios.filter(
+    u => String(u.plano).toLowerCase() === String(nome).toLowerCase()
+  );
+
+  if (usuariosUsandoPlano.length > 0) {
+    return res.status(400).json({
+      ok: false,
+      erro: "Não é possível excluir plano em uso por usuários"
+    });
+  }
+
+  delete planos[nome];
+
+  salvarPlanos();
+
+  return res.json({
+    ok: true,
+    mensagem: "Plano excluído com sucesso"
+  });
+});
+
 app.post("/admin/usuarios", (req, res) => {
   if (!isAdminMaster(req)) {
     return res.status(403).json({
