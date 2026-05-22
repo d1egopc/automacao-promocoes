@@ -7167,6 +7167,18 @@ async function iniciarWhatsApp(id, clienteId = "admin", force = false) {
       qrCodes[id] = null;
       reconectando[id] = false;
 
+sessoesMeta[id] = sessoesMeta[id] || {
+  id,
+  nome: id,
+  tipo: "whatsapp",
+  criadoEm: new Date().toISOString()
+};
+
+sessoesMeta[id].status = "open";
+sessoesMeta[id].conectadoEm = new Date().toISOString();
+
+salvarSessoesMeta();
+
       setTimeout(() => carregarGruposSessao(id), 3000);
     }
 
