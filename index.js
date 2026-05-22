@@ -432,6 +432,14 @@ if (fs.existsSync(USUARIOS_FILE)) {
   console.log("✅ Usuários carregados");
 }
 
+if (fs.existsSync(INTEGRACOES_FILE)) {
+  integracoesPorCliente = JSON.parse(
+    fs.readFileSync(INTEGRACOES_FILE, "utf8")
+  );
+
+  console.log("✅ Integrações carregadas");
+}
+
 if (fs.existsSync(CONFIGS_CLIENTES_FILE)) {
   configsPorCliente = JSON.parse(
     fs.readFileSync(CONFIGS_CLIENTES_FILE, "utf8")
