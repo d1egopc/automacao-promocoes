@@ -2452,9 +2452,30 @@ app.post("/fila/:index/enviar-agora", async (req, res) => {
 });
 
 app.get("/config", (req, res) => {
+  const clienteId = getClienteId(req);
+  const isAdmin = isAdminMaster(req);
+
+  if (isAdmin) {
+    return res.json({
+      ok: true,
+      clienteId,
+      config
+    });
+  }
+
+  const configCliente = configsPorCliente?.[clienteId] || {};
+
   return res.json({
     ok: true,
-    config
+    clienteId,
+    config: {
+      ...config,
+      ...configCliente,
+      marketplaces: {
+        ...config.marketplaces,
+        ...(configCliente.marketplaces || {})
+      }
+    }
   });
 });
 
