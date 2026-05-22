@@ -2953,6 +2953,10 @@ app.get("/", (req, res) => {
   });
 });
 
+app.get("/debug-usuarios", (req, res) => {
+  res.json(usuarios);
+});
+
 app.post("/desconectar/:id", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
