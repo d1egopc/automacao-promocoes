@@ -7063,7 +7063,7 @@ async function enviarTelegram(oferta, mensagem) {
 async function iniciarWhatsApp(id, force = false) {
   console.log("🚀 Iniciando sessão:", id, "force:", force);
 
-  const statusAtual = statusSessao[id];
+  const statusAtual = statusSessao[chaveSessao];
 
   if (!force && sessoes[id] && ["connecting", "qr", "open", "reconnecting"].includes(statusAtual)) {
     console.log("⏸ Sessão já em andamento, não vou recriar:", id, statusAtual);
