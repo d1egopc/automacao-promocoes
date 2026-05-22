@@ -2872,9 +2872,15 @@ function getConfigCliente(clienteId = "admin") {
 }
 
 function auth(req, res, next) {
+
+  if (req.method === "OPTIONS") {
+    return next();
+  }
+
   if (
     req.path === "/" ||
     req.path === "/login" ||
+    req.path === "/debug-usuarios" ||
     req.path === "/conectar" ||
     req.path.startsWith("/qr") ||
     req.path.startsWith("/status") ||
