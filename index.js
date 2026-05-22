@@ -6863,9 +6863,12 @@ app.post("/conectar", async (req, res) => {
 
 app.get("/status/:id", (req, res) => {
   const clienteId = getClienteId(req);
-  const id = clienteId === "admin"
-  ? req.params.id
-  : `${clienteId}_${req.params.id}`;
+  const idOriginal = req.params.id;
+
+  const id =
+    statusSessao[idOriginal] !== undefined
+      ? idOriginal
+      : `${clienteId}_${idOriginal}`;
 
   res.json({
     conectado: statusSessao[id] === "open",
@@ -6875,9 +6878,12 @@ app.get("/status/:id", (req, res) => {
 
 app.get("/qr/:id", (req, res) => {
   const clienteId = getClienteId(req);
-  const id = clienteId === "admin"
-  ? req.params.id
-  : `${clienteId}_${req.params.id}`;
+  const idOriginal = req.params.id;
+
+  const id =
+    qrCodes[idOriginal] !== undefined
+      ? idOriginal
+      : `${clienteId}_${idOriginal}`;
 
   if (!qrCodes[id]) {
     return res.json({
