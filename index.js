@@ -7068,7 +7068,7 @@ async function enviarTelegram(oferta, mensagem) {
 
 // ================= FUNCÃO WHATSAPP =================
 
-async function iniciarWhatsApp(id, force = false) {
+async function iniciarWhatsApp(id, clienteId = "admin", force = false) {
   console.log("🚀 Iniciando sessão:", id, "force:", force);
 
   const clienteIdFinal = clienteId || "admin";
