@@ -7205,7 +7205,9 @@ salvarSessoesMeta();
       console.log("Motivo:", motivo);
 
       qrCodes[id] = null;
+      if (statusSessao[id] !== "open") {
       delete sessoes[id];
+      }
 
       if (motivo === DisconnectReason.loggedOut) {
         statusSessao[id] = "loggedOut";
