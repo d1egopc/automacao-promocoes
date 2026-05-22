@@ -2751,6 +2751,14 @@ app.post("/config", (req, res) => {
       // admin controla farejo global
       if (isAdmin) {
 
+    config.marketplaces[nome] =
+    config.marketplaces[nome] || {};
+
+    if (dados.ativo != null) {
+    config.marketplaces[nome].ativo =
+    dados.ativo === true;
+    }
+
         if (dados.intervaloFarejoMinutos != null) {
           config.marketplaces[nome].intervaloFarejoMinutos =
             Number(dados.intervaloFarejoMinutos);
