@@ -2295,7 +2295,7 @@ app.post("/destinos", (req, res) => {
 
   destinosPorCliente[clienteId] = destinos;
 
-  salvarConfig();
+  salvarDestinosClientes();
 
   return res.json({
     ok: true,
@@ -2312,7 +2312,7 @@ app.delete("/destinos/:id", (req, res) => {
     (destinosPorCliente?.[clienteId] || [])
       .filter(d => d.id !== id);
 
-  salvarConfig();
+  salvarDestinosClientes();
 
   return res.json({
     ok: true
