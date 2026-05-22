@@ -150,6 +150,7 @@ const USUARIOS_FILE = "/data/usuarios.json";
 const CONFIGS_CLIENTES_FILE = "/data/configs_clientes.json";
 const DESTINOS_CLIENTES_FILE = "/data/destinos_clientes.json";
 const PLANOS_FILE = "/data/planos.json";
+const SESSOES_FILE = "/data/sessoes.json";
 
 console.log("📂 Salvando dados em:", FILA_FILE);
 
@@ -212,6 +213,13 @@ function salvarConfig() {
   } catch (e) {
     console.error("❌ ERRO AO SALVAR CONFIG:", e.message);
   }
+}
+
+function salvarSessoesMeta() {
+  fs.writeFileSync(
+    SESSOES_FILE,
+    JSON.stringify(sessoesMeta, null, 2)
+  );
 }
 
 // ================= FUNÇÃO SALVA USUARIO =================
