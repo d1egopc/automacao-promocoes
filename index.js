@@ -443,6 +443,7 @@ if (fs.existsSync(PLANOS_FILE)) {
 
 
 if (!usuarios.length) {
+console.log("🧪 CRIANDO ADMIN PADRÃO");
   usuarios = [
  {
   id: "admin",
@@ -2892,6 +2893,8 @@ app.get("/debug-usuarios", (req, res) => {
 });
 
 app.use(auth);
+
+carregarConfig();
 
 // ================= LOGIN =================
 
