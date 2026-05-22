@@ -7071,6 +7071,9 @@ async function enviarTelegram(oferta, mensagem) {
 async function iniciarWhatsApp(id, force = false) {
   console.log("🚀 Iniciando sessão:", id, "force:", force);
 
+  const clienteIdFinal = clienteId || "admin";
+  const chaveSessao = `${clienteIdFinal}_${id}`;
+
   const statusAtual = statusSessao[chaveSessao];
 
   if (!force && sessoes[id] && ["connecting", "qr", "open", "reconnecting"].includes(statusAtual)) {
