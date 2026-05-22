@@ -6706,6 +6706,7 @@ app.get("/sessoes", (req, res) => {
 });
 
 app.post("/sessoes", (req, res) => {
+   console.log("🧪 BODY NOVA SESSÃO:", req.body);
 
   const clienteId = getClienteId(req);
 
