@@ -6667,12 +6667,12 @@ app.post("/sessoes", (req, res) => {
       (clienteId === "admin" && !String(s.id).includes("_"))
     );
 
-  if (sessoesCliente.length >= limite) {
-    return res.status(403).json({
-      ok: false,
-      erro: `Seu plano permite apenas ${limite} sessão(ões).`
-    });
-  }
+  if (!isAdminMaster(req) && sessoesCliente.length >= limite) {
+  return res.status(403).json({
+    ok: false,
+    erro: `Seu plano permite apenas ${limite} sessão(ões).`
+  });
+}
 
   try {
     const nome = req.body.nome || "WhatsApp";
