@@ -2615,6 +2615,50 @@ app.delete("/admin/planos/:nome", (req, res) => {
   });
 });
 
+app.delete("/admin/usuarios/:id", (req, res) => {
+  if (!isAdminMaster(req)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Acesso restrito ao Admin Master"
+    });
+  }
+
+  const { id } = req.params;
+
+  if (id === "admin") {
+    return res.status(400).json({
+      ok: false,
+      erro: "Não é possível excluir o Admin Master principal"
+    });
+  }
+
+  const antes = usuarios.length;
+
+  usuarios = usuarios.filter(u => String(u.id) !== String(id));
+
+  if (usuarios.length === antes) {
+    return res.status(404).json({
+      ok: false,
+      erro: "Usuário não encontrado"
+    });
+  }
+
+  delete configsPorCliente[id];
+  delete destinosPorCliente[id];
+  delete integracoesPorCliente[id];
+
+  salvarUsuarios();
+  salvarConfigsClientes();
+  salvarDestinosClientes();
+  salvarIntegracoesPersistidas();
+
+  return res.json({
+    ok: true,
+    mensagem: "Usuário excluído com sucesso",
+    id
+  });
+});
+
 app.post("/admin/usuarios", (req, res) => {
   if (!isAdminMaster(req)) {
     return res.status(403).json({
