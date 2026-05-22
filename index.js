@@ -135,6 +135,14 @@ let planos = {};
 let configsPorCliente = {};
 let destinosPorCliente = {};
 
+let sessoes = {};
+let qrCodes = {};
+let statusSessao = {};
+let destinosPorSessao = {};
+let gruposPorSessao = {};
+let reconectando = {};
+let integracoesPorCliente = {};
+
 const FILA_FILE = "/data/fila.json";
 const CONFIG_FILE = "/data/config.json";
 const USUARIOS_FILE = "/data/usuarios.json";
