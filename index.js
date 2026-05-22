@@ -444,16 +444,17 @@ if (fs.existsSync(PLANOS_FILE)) {
 
 if (!usuarios.length) {
   usuarios = [
-    {
-      id: "admin",
-      nome: "Diego",
-      email: "admin@optimus.local",
-      papel: "admin_master",
-      plano: "master",
-      creditos: 999999,
-      ativo: true,
-      criadoEm: new Date().toISOString()
-    }
+ {
+  id: "admin",
+  nome: "Diego",
+  email: "admin@optimus.local",
+  senha: "123456",
+  papel: "admin_master",
+  plano: "master",
+  creditos: 999999,
+  ativo: true,
+  criadoEm: new Date().toISOString()
+}
   ];
 
   salvarUsuarios();
