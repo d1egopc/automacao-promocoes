@@ -2915,6 +2915,8 @@ app.use(auth);
 
 carregarConfig();
 
+const JWT_SECRET = process.env.JWT_SECRET || "segredo";
+
 // ================= LOGIN =================
 
 app.post("/login", async (req, res) => {
