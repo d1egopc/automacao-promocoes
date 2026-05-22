@@ -142,6 +142,7 @@ let destinosPorSessao = {};
 let gruposPorSessao = {};
 let reconectando = {};
 let integracoesPorCliente = {};
+let sessoesMeta = {};
 
 const FILA_FILE = "/data/fila.json";
 const CONFIG_FILE = "/data/config.json";
