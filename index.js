@@ -6700,6 +6700,8 @@ app.post("/sessoes", (req, res) => {
 
     salvarSessoesMeta();
 
+console.log("✅ Sessão criada e salva:", sessoesMeta[id]);
+
     return res.json({
       ok: true,
       sessao: sessoesMeta[id]
@@ -6850,7 +6852,7 @@ app.post("/conectar", async (req, res) => {
   console.log("💾 Sessão WhatsApp salva para reconexão:", id);
  }
 
- iniciarWhatsApp(sessaoId, false);
+ iniciarWhatsApp(sessaoId, clienteId, false);
 
   return res.json({
   ok: true,
