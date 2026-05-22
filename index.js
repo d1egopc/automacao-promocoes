@@ -2557,7 +2557,8 @@ app.post("/admin/planos", (req, res) => {
   limites: {
     sessoes: Number(body.limites?.sessoes || 0),
     destinos: Number(body.limites?.destinos || 0),
-    enviosDia: Number(body.limites?.enviosDia || 0)
+    enviosDia: Number(body.limites?.enviosDia || 0),
+    creditos: Number(body.limites?.creditos || body.creditos || 0)
   },
 
   recursos: {
