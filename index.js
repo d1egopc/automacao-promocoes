@@ -2670,164 +2670,108 @@ app.post("/minha-config", (req, res) => {
 });
 
 app.post("/config", (req, res) => {
+
+  const clienteId = getClienteId(req);
+
+  if (!clienteId) {
+    return res.status(401).json({
+      ok: false,
+      erro: "Cliente não identificado"
+    });
+  }
+
   const body = req.body || {};
 
-  config = {
-    ...config,
-    ...body,
-    marketplaces: {
-      ...config.marketplaces,
-      ...(body.marketplaces || {})
-    }
+  configsPorCliente[clienteId] =
+    configsPorCliente[clienteId] || {};
+
+  const configCliente =
+    configsPorCliente[clienteId];
+
+  const isAdmin =
+    isAdminMaster(req);
+
+  // ================= MARKETPLACES =================
+
+  configCliente.marketplaces = {
+    ...(configCliente.marketplaces || {})
   };
 
-  if (body.intervaloEnvioMinutos) {
-  config.intervaloMinutos = Number(body.intervaloEnvioMinutos);
-}
+  if (body.marketplaces) {
 
-if (body.intervaloMinutos) {
-  config.intervaloEnvioMinutos = Number(body.intervaloMinutos);
-}
+    for (const [nome, dados] of Object.entries(body.marketplaces)) {
 
-if (body.intervalo) {
-  config.intervaloMinutos = Number(body.intervalo);
-  config.intervaloEnvioMinutos = Number(body.intervalo);
-}
+      configCliente.marketplaces[nome] =
+        configCliente.marketplaces[nome] || {};
 
+      // usuário comum só liga/desliga
+      configCliente.marketplaces[nome].ativo =
+        dados?.ativo === true;
+
+      // admin controla farejo global
+      if (isAdmin) {
+
+        if (dados.intervaloFarejoMinutos != null) {
+          config.marketplaces[nome].intervaloFarejoMinutos =
+            Number(dados.intervaloFarejoMinutos);
+        }
+
+        if (dados.limitePorRodada != null) {
+          config.marketplaces[nome].limitePorRodada =
+            Number(dados.limitePorRodada);
+        }
+
+        if (dados.descontoMinimo != null) {
+          config.marketplaces[nome].descontoMinimo =
+            Number(dados.descontoMinimo);
+        }
+
+        if (dados.precoMinimo != null) {
+          config.marketplaces[nome].precoMinimo =
+            Number(dados.precoMinimo);
+        }
+
+      }
+    }
+  }
+
+  // ================= CONFIG CLIENTE =================
+
+  if (body.automacaoAtiva != null) {
+    configCliente.automacaoAtiva =
+      body.automacaoAtiva === true;
+  }
+
+  if (body.intervaloMinutos != null) {
+    configCliente.intervaloMinutos =
+      Number(body.intervaloMinutos);
+  }
+
+  if (body.intervaloEnvioMinutos != null) {
+    configCliente.intervaloEnvioMinutos =
+      Number(body.intervaloEnvioMinutos);
+  }
+
+  if (body.horarioInicio) {
+    configCliente.horarioInicio =
+      body.horarioInicio;
+  }
+
+  if (body.horarioFim) {
+    configCliente.horarioFim =
+      body.horarioFim;
+  }
+
+  salvarConfigsClientes();
   salvarConfig();
 
   return res.json({
     ok: true,
-    config
+    clienteId,
+    configCliente,
+    configGlobal: isAdmin ? config : undefined
   });
 });
-
-let sessoes = {};
-let qrCodes = {};
-let statusSessao = {};
-let destinosPorSessao = {};
-let gruposPorSessao = {};
-let reconectando = {};
-let integracoesPorCliente = {};
-
-let sessoesMeta = {};
-
-const SESSOES_FILE = process.env.SESSOES_FILE || "/data/sessoes.json";
-
-function carregarSessoesMeta() {
-  try {
-    if (!fs.existsSync(SESSOES_FILE)) {
-      console.log("ℹ️ Nenhum arquivo de sessões encontrado ainda");
-      return;
-    }
-
-    const raw = fs.readFileSync(SESSOES_FILE, "utf8");
-    if (!raw) return;
-
-    sessoesMeta = JSON.parse(raw);
-    console.log("✅ Sessões carregadas:", Object.keys(sessoesMeta).length);
-  } catch (e) {
-    console.log("❌ erro carregar sessões:", e.message);
-    sessoesMeta = {};
-  }
-}
-
-function salvarSessoesMeta() {
-  try {
-    fs.writeFileSync(SESSOES_FILE, JSON.stringify(sessoesMeta, null, 2));
-  } catch (e) {
-    console.log("❌ erro salvar sessões:", e.message);
-  }
-}
-
-carregarSessoesMeta();
-
-const INTEGRACOES_FILE = process.env.INTEGRACOES_FILE || "/data/integracoes.json";
-
-function carregarIntegracoesPersistidas() {
-  try {
-    if (!fs.existsSync(INTEGRACOES_FILE)) {
-      console.log("ℹ️ Nenhum arquivo de integrações encontrado ainda");
-      return;
-    }
-
-    const raw = fs.readFileSync(INTEGRACOES_FILE, "utf8");
-
-    if (!raw) {
-      console.log("ℹ️ Arquivo de integrações vazio");
-      return;
-    }
-
-    const data = JSON.parse(raw);
-
-    if (data && typeof data === "object") {
-      integracoesPorCliente = data;
-      console.log("✅ Integrações carregadas do arquivo");
-    }
-  } catch (e) {
-    console.error("ERRO AO CARREGAR INTEGRAÇÕES:", e.message);
-  }
-}
-
-function salvarIntegracoesPersistidas() {
-  try {
-    const tempFile = `${INTEGRACOES_FILE}.tmp`;
-
-    fs.writeFileSync(
-      tempFile,
-      JSON.stringify(integracoesPorCliente, null, 2),
-      "utf8"
-    );
-
-    fs.renameSync(tempFile, INTEGRACOES_FILE);
-
-    console.log("✅ Integrações salvas no arquivo");
-  } catch (e) {
-    console.error("ERRO AO SALVAR INTEGRAÇÕES:", e.message);
-  }
-}
-
-carregarIntegracoesPersistidas();
-carregarFila();
-carregarConfig();
-
-if (!config.marketplaces.awin) {
-  config.marketplaces.awin = {
-    ativo: true,
-    intervaloFarejoMinutos: 30,
-    limitePorRodada: 10,
-    descontoMinimo: 0,
-    precoMinimo: 0,
-    loja: "kabum",
-    feedFile: "awin_kabum.csv.gz"
-  };
-
-  salvarConfig();
-  console.log("✅ Awin recriada no config");
-}
-
-config.marketplaces.awin.feedFile = "awin_kabum.csv.gz";
-
-
-console.log("🧪 CONFIG AWIN ATUAL:", config.marketplaces?.awin);
-
-
-if (config.destinosPorSessao) {
-  destinosPorSessao = config.destinosPorSessao;
-  console.log("✅ Destinos carregados da config");
-}
-
-const ADMIN_USER = "admin";
-const ADMIN_PASS_HASH = bcrypt.hashSync("123456", 10);
-const JWT_SECRET = process.env.JWT_SECRET || "segredo";
-
-function gerarToken() {
-  return jwt.sign(
-    { admin: true, clienteId: "admin" },
-    JWT_SECRET,
-    { expiresIn: "7d" }
-  );
-}
 
 // ===================== FUNCAO ADMIN MASTER ==============================
 
