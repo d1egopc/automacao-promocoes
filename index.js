@@ -2887,6 +2887,10 @@ function auth(req, res, next) {
   }
 }
 
+app.get("/debug-usuarios", (req, res) => {
+  res.json(usuarios);
+});
+
 app.use(auth);
 
 // ================= LOGIN =================
