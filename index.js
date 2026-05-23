@@ -5371,7 +5371,15 @@ async function distribuirOfertaParaClientes(ofertaBase) {
       })
     };
 
-    if (!ofertaJaExiste(ofertaCliente)) {
+    const jaExisteCliente = fila.some(o =>
+    String(o.clienteId || "admin") === String(clienteId) &&
+   (
+    String(o.link || o.linkAfiliado || "") === String(ofertaCliente.link || ofertaCliente.linkAfiliado || "") ||
+    normalizarTexto(o.titulo || o.nome || "") === normalizarTexto(ofertaCliente.titulo || ofertaCliente.nome || "")
+   )
+  );
+
+   if (!jaExisteCliente) {
 
       fila.push(ofertaCliente);
 
