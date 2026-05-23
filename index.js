@@ -5326,7 +5326,95 @@ function getPlanoPorNome(nome) {
   return planos?.[nome] || null;
 }
 
-// =============== FUNCAO GERAR LINK AFILIADO CLIENTE =================================
+// =============== FUNCAO GERAR LINK AFILIADO SHOPEE ========================================
+
+async function gerarLinkShopeeCliente(clienteId, ofertaBase = {}) {
+  const integracao = getIntegracaoCliente(clienteId, "shopee");
+
+  const appId = integracao?.credenciais?.appId || "";
+  const secret = integracao?.credenciais?.secret || "";
+
+  if (!appId || !secret) {
+    return ofertaBase.linkAfiliado || ofertaBase.link || "";
+  }
+
+try {
+
+  const originalLink =
+    ofertaBase.linkOriginal ||
+    ofertaBase.linkAfiliado ||
+    ofertaBase.link ||
+    "";
+
+  if (!originalLink) {
+    return "";
+  }
+
+  const timestamp = Math.floor(Date.now() / 1000);
+
+  const bodyPayload = {
+    query: `
+      query {
+        productOfferV2(
+          keyword: "${String(originalLink).replace(/"/g, "")}",
+          page: 1,
+          limit: 1
+        ) {
+          nodes {
+            offerLink
+          }
+        }
+      }
+    `
+  };
+
+  const payload = JSON.stringify(bodyPayload);
+
+  const baseString =
+    `${appId}${timestamp}${payload}${secret}`;
+
+  const sign = crypto
+    .createHash("sha256")
+    .update(baseString, "utf8")
+    .digest("hex");
+
+  const response = await fetch(
+    "https://open-api.affiliate.shopee.com.br/graphql",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization":
+          `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${sign}`
+      },
+      body: payload
+    }
+  );
+
+  const data = await response.json().catch(() => null);
+
+  const offerLink =
+    data?.data?.productOfferV2?.nodes?.[0]?.offerLink;
+
+  return (
+    offerLink ||
+    ofertaBase.linkAfiliado ||
+    ofertaBase.link ||
+    ""
+  );
+
+} catch (e) {
+  console.log("❌ erro gerarLinkShopeeCliente:", e.message);
+
+  return ofertaBase.linkAfiliado || ofertaBase.link || "";
+}
+
+  return ofertaBase.linkAfiliado || ofertaBase.link || "";
+}
+
+async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, ofertaBase = {}) {
+
+// =============== FUNCAO GERAR LINK AFILIADO VARIOS MARKTPLACES  ============================
 
 async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, ofertaBase = {}) {
   try {
@@ -5342,6 +5430,13 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
       );
 
       return linkML || linkOriginal || ofertaBase.linkAfiliado || ofertaBase.link || "";
+    }
+
+    if (mp === "shopee") {
+    return await gerarLinkShopeeCliente(
+    clienteId,
+    ofertaBase
+    );
     }
 
     if (mp === "amazon") {
