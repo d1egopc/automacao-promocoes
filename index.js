@@ -7057,7 +7057,9 @@ app.get("/grupos/:id", async (req, res) => {
   const clienteId = getClienteId(req);
   const id = clienteId === "admin"
   ? req.params.id
-  : `${clienteId}_${req.params.id}`;
+  : String(req.params.id).startsWith(clienteId + "_")
+    ? req.params.id
+    : `${clienteId}_${req.params.id}`;
 
   const lista = await carregarGruposSessao(id);
 
