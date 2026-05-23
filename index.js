@@ -6939,6 +6939,8 @@ app.post("/conectar", async (req, res) => {
   }
 
   const sessaoId = clienteId === "admin"
+  ? id
+  : String(id).startsWith(clienteId + "_")
     ? id
     : `${clienteId}_${id}`;
 
