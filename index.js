@@ -6831,11 +6831,10 @@ const id = isAdminMaster(req)
     ? req.params.id
     : `${clienteId}_${req.params.id}`;
 
-const idsPossiveis = [
-  req.params.id,
+const idsPossiveis = [...new Set([
   id,
-  `${clienteId}_${req.params.id}`
-];
+  req.params.id
+])];
 
     try {
       if (sessoes[id]?.sock?.logout) {
