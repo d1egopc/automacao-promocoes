@@ -1594,7 +1594,7 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
       }
     }
 
-    // ================= TELEGRAM =================
+    // ================= ENVIO TELEGRAM =================
 
     if (String(destino.tipo || "").toLowerCase() === "telegram") {
       const telegrams = configCliente.telegram?.destinos || [];
@@ -2211,27 +2211,39 @@ app.get("/r/:codigo", (req, res) => {
 // ================= TELEGRAM =================
 
 app.get("/telegram", (req, res) => {
+
+  const clienteId = getClienteId(req);
+
+  const configCliente =
+    configsPorCliente[clienteId] || {};
+
   res.json({
-    ativo: config.telegram?.ativo || false,
-    destinos: config.telegram?.destinos || []
+    ativo: configCliente.telegram?.ativo || false,
+    destinos: configCliente.telegram?.destinos || []
   });
 });
+
 
 app.post("/telegram", (req, res) => {
   const { ativo, destinos } = req.body;
 
-  config.telegram = {
-    ativo: ativo === true,
-    destinos: Array.isArray(destinos)
-      ? destinos
-      : config.telegram?.destinos || []
-  };
+const clienteId = getClienteId(req);
 
-  salvarConfig();
+configsPorCliente[clienteId] =
+  configsPorCliente[clienteId] || {};
+
+configsPorCliente[clienteId].telegram = {
+  ativo: ativo === true,
+  destinos: Array.isArray(destinos)
+    ? destinos
+    : configsPorCliente[clienteId]?.telegram?.destinos || []
+};
+
+  salvarConfigsClientes();
 
   res.json({
     ok: true,
-    telegram: config.telegram
+    telegram: configsPorCliente[clienteId].telegram
   });
 });
 
@@ -2403,16 +2415,22 @@ app.delete("/fila/:index", (req, res) => {
 
 app.post("/fila/:index/enviar-agora", async (req, res) => {
   const index = Number(req.params.index);
-  const clienteIdReq = getClienteId(req);
+const clienteIdReq = getClienteId(req);
 
-  if (isNaN(index) || index < 0 || index >= fila.length) {
-    return res.status(400).json({
-      ok: false,
-      erro: "Índice inválido"
-    });
-  }
+const filaCliente = fila.filter(o =>
+  String(o.clienteId || "admin") === String(clienteIdReq)
+);
 
-  const oferta = fila[index];
+if (isNaN(index) || index < 0 || index >= filaCliente.length) {
+  return res.status(400).json({
+    ok: false,
+    erro: "Índice inválido"
+  });
+}
+
+const oferta = filaCliente[index];
+
+const indexReal = fila.findIndex(o => o === oferta);
 
   if ((oferta.clienteId || "admin") !== clienteIdReq) {
     return res.status(403).json({
@@ -2432,7 +2450,7 @@ app.post("/fila/:index/enviar-agora", async (req, res) => {
     categoria: oferta.categoria
   });
 
-  fila.splice(index, 1);
+  fila.splice(indexReal, 1);
   fila.unshift(oferta);
 
   salvarFila();
