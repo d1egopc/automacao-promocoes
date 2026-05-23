@@ -8168,6 +8168,10 @@ setInterval(() => {
   rodarProximoMarketplace();
 }, (config.intervaloFarejadorGlobalMinutos || 10) * 60 * 1000);
 
+setTimeout(() => {
+  rodarProximoMarketplace();
+}, 30 * 1000);
+
 // ================= PROCESSADOR DA FILA =================
 
 let ultimoLogPausaFila = 0;
