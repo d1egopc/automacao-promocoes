@@ -5336,17 +5336,25 @@ async function distribuirOfertaParaClientes(ofertaBase) {
 
     const clienteId = usuario.id;
 
+   const adminMaster =
+   usuario.papel === "admin_master";
+
+   if (adminMaster) {
+   console.log("👑 Admin Master recebe oferta:", ofertaBase.titulo);
+   }
+
     const plano =
       getPlanoPorNome(usuario.plano) || {};
 
     const marketplacesLiberados =
       plano.marketplaces || [];
 
-    if (
-      !marketplacesLiberados.includes(ofertaBase.marketplace)
-    ) {
-      continue;
-    }
+   if (
+  !adminMaster &&
+  !marketplacesLiberados.includes(ofertaBase.marketplace)
+  ) {
+  continue;
+  }
 
     console.log("📦 Distribuindo oferta:", {
       clienteId,
