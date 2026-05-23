@@ -6818,10 +6818,19 @@ console.log("✅ Sessão criada e salva:", sessoesMeta[id]);
 
 app.delete("/sessoes/:id", async (req, res) => {
   try {
-    const clienteId = getClienteId(req);
-    const id = isAdminMaster(req)
-   ? req.params.id
-   : `${clienteId}_${req.params.id}`;
+  const clienteId = getClienteId(req);
+
+const id = isAdminMaster(req)
+  ? req.params.id
+  : String(req.params.id).startsWith(clienteId + "_")
+    ? req.params.id
+    : `${clienteId}_${req.params.id}`;
+
+const idsPossiveis = [
+  req.params.id,
+  id,
+  `${clienteId}_${req.params.id}`
+];
 
     try {
       if (sessoes[id]?.sock?.logout) {
@@ -6837,18 +6846,20 @@ app.delete("/sessoes/:id", async (req, res) => {
       console.log("⚠️ end ignorado ao excluir:", e.message);
     }
 
-    delete sessoes[id];
-    delete qrCodes[id];
-    delete statusSessao[id];
-    delete destinosPorSessao[id];
-    delete gruposPorSessao[id];
-    delete reconectando[id];
-    delete sessoesMeta[id];
+   for (const sid of idsPossiveis) {
+  delete sessoes[sid];
+  delete qrCodes[sid];
+  delete statusSessao[sid];
+  delete destinosPorSessao[sid];
+  delete gruposPorSessao[sid];
+  delete reconectando[sid];
+  delete sessoesMeta[sid];
 
-    fs.rmSync("/data/auth_" + id, {
-      recursive: true,
-      force: true
-    });
+  fs.rmSync("/data/auth_" + sid, {
+    recursive: true,
+    force: true
+  });
+}
 
     salvarSessoesMeta();
 
