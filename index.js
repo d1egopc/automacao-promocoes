@@ -3240,7 +3240,8 @@ app.get("/me", (req, res) => {
       plano: usuario.plano,
       creditos: usuario.creditos,
       papel: usuario.papel,
-      ativo: usuario.ativo
+      ativo: usuario.ativo,
+      marketplacesLiberados: getPlanoUsuario(req)?.marketplaces || []
     },
     consumo: {
       enviosHoje,
