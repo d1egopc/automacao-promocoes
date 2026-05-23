@@ -3240,6 +3240,8 @@ app.get("/me", (req, res) => {
       ativo: usuario.ativo,
       marketplacesLiberados: getPlanoUsuario(req)?.marketplaces || []
     },
+    marketplacesLiberados:getPlanoUsuario(req)?.marketplaces || [],
+       
     consumo: {
       enviosHoje,
       sessoes: sessoesUsuario.length,
