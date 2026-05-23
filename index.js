@@ -2916,23 +2916,20 @@ function getPlanoUsuario(req) {
 
   if (!usuario) return null;
 
-  return planos[usuario.plano] || null;
-}
+  const nomePlano =
+    String(usuario.plano || "")
+      .trim()
+      .toLowerCase();
 
-const LIMITES_PLANO = {
-  free: {
-    sessoes: 1
-  },
-  starter: {
-    sessoes: 3
-  },
-  pro: {
-    sessoes: 10
-  },
-  enterprise: {
-    sessoes: 999
-  }
-};
+  const planoEncontrado = Object.values(planos).find(
+    p =>
+      String(p.nome || "")
+        .trim()
+        .toLowerCase() === nomePlano
+  );
+
+  return planoEncontrado || null;
+}
 
 // ======================== FUNCAO GET INTEGRACOES ========================
 
