@@ -5320,6 +5320,64 @@ async function gerarLinkCurtoAliExpress(urlOriginal, credenciais = {}) {
   }
 }
 
+// ======================= FUNCAO PLANO NOME =====================
+
+function getPlanoPorNome(nome) {
+  return planos?.[nome] || null;
+}
+
+// =============== FUNCAO DISTRIBUIDOR OFERTAS ===================
+
+async function distribuirOfertaParaClientes(ofertaBase) {
+
+  for (const usuario of usuarios) {
+
+    if (!usuario?.ativo) continue;
+
+    const clienteId = usuario.id;
+
+    const plano =
+      getPlanoPorNome(usuario.plano) || {};
+
+    const marketplacesLiberados =
+      plano.marketplaces || [];
+
+    if (
+      !marketplacesLiberados.includes(ofertaBase.marketplace)
+    ) {
+      continue;
+    }
+
+    console.log("📦 Distribuindo oferta:", {
+      clienteId,
+      marketplace: ofertaBase.marketplace,
+      titulo: ofertaBase.titulo
+    });
+
+    const ofertaCliente = {
+      ...ofertaBase,
+      clienteId,
+      status: "pendente",
+      criadoEm: new Date().toLocaleString("pt-BR", {
+        timeZone: "America/Sao_Paulo"
+      })
+    };
+
+    if (!ofertaJaExiste(ofertaCliente)) {
+
+      fila.push(ofertaCliente);
+
+      salvarFila();
+
+      console.log("✅ Oferta distribuída para cliente:", {
+        clienteId,
+        titulo: ofertaCliente.titulo,
+        marketplace: ofertaCliente.marketplace
+      });
+    }
+  }
+}
+
 // ================= FAREJADOR ALIEXPRESS ========================
 
 async function farejarAliExpress() {
@@ -5592,11 +5650,9 @@ async function farejarAliExpress() {
       `🧠 Ofertas AliExpress após filtros universais: ${ofertasFiltradas.length}`
     );
 
-    for (const oferta of ofertasFiltradas) {
-      fila.push(oferta);
-    }
-
-    salvarFila();
+  for (const oferta of ofertasFiltradas) {
+  await distribuirOfertaParaClientes(oferta);
+  }
 
     console.log(`✅ AliExpress finalizado. Adicionadas: ${adicionadasNestaRodada}`);
   } catch (e) {
@@ -5745,8 +5801,7 @@ const html = await response.text();
           if (produtoSuspeito(novaOferta)) continue;
           if (ofertaJaExiste(novaOferta)) continue;
 
-          fila.push(novaOferta);
-          salvarFila();
+          await distribuirOfertaParaClientes(novaOferta);
           adicionadas++;
 
           console.log("🤖 Nova oferta Magalu:", {
@@ -5869,11 +5924,9 @@ async function farejarAwin() {
       `🧠 Ofertas Awin após filtros universais: ${ofertasFiltradas.length}`
     );
 
-    for (const oferta of ofertasFiltradas) {
-      fila.push(oferta);
-    }
-
-    salvarFila();
+   for (const oferta of ofertasFiltradas) {
+   await distribuirOfertaParaClientes(oferta);
+  }
 
     console.log(`🚀 Awin finalizado. Produtos adicionados: ${ofertasFiltradas.length}`);
   } catch (e) {
@@ -7563,13 +7616,12 @@ if (
               clienteId: "admin"
             };
 
-            novaOferta = prepararOfertaGlobal(novaOferta);
+          novaOferta = prepararOfertaGlobal(novaOferta);
 
-           const jaExiste = ofertaJaExiste(novaOferta);
+          const jaExiste = ofertaJaExiste(novaOferta);
 
-            if (!jaExiste) {
-              fila.push(novaOferta);
-              salvarFila();
+          if (!jaExiste) {
+          await distribuirOfertaParaClientes(novaOferta);
 
               console.log("🤖 Nova oferta ML:", {
                 titulo: novaOferta.titulo,
@@ -7796,10 +7848,8 @@ console.log(
 );
 
 for (const oferta of ofertasFiltradas) {
-  fila.push(oferta);
+  await distribuirOfertaParaClientes(oferta);
 }
-
-salvarFila();
 
 console.log(`✅ Amazon finalizado. Adicionadas: ${adicionadasNestaRodada}`);
 
@@ -8047,11 +8097,9 @@ async function farejarShopee() {
       `🧠 Ofertas Shopee após filtros universais: ${ofertasFiltradas.length}`
     );
 
-    for (const oferta of ofertasFiltradas) {
-      fila.push(oferta);
-    }
-
-    salvarFila();
+   for (const oferta of ofertasFiltradas) {
+   await distribuirOfertaParaClientes(oferta);
+   }
 
     console.log(`✅ Shopee finalizado. Adicionadas: ${adicionadasNestaRodada}`);
 
