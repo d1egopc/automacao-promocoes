@@ -3086,8 +3086,10 @@ app.post("/desconectar/:id", async (req, res) => {
     const clienteId = getClienteId(req);
 
     const id = isAdminMaster(req)
-      ? req.params.id
-      : `${clienteId}_${req.params.id}`;
+  ? req.params.id
+  : String(req.params.id).startsWith(clienteId + "_")
+    ? req.params.id
+    : `${clienteId}_${req.params.id}`;
 
     if (sessoes[id]) {
       try {
