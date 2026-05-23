@@ -5363,13 +5363,18 @@ async function distribuirOfertaParaClientes(ofertaBase) {
     });
 
     const ofertaCliente = {
-      ...ofertaBase,
-      clienteId,
-      status: "pendente",
-      criadoEm: new Date().toLocaleString("pt-BR", {
-        timeZone: "America/Sao_Paulo"
-      })
-    };
+  ...ofertaBase,
+  clienteId,
+  status: "pendente",
+  destinosEnviados: [],
+  logsEnvio: [],
+  enviadoEm: "",
+  dataEnvio: "",
+  statusDetalhe: "Aguardando envio",
+  criadoEm: new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  })
+};
 
     const jaExisteCliente = fila.some(o =>
     String(o.clienteId || "admin") === String(clienteId) &&
