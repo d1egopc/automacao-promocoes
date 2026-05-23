@@ -8123,22 +8123,34 @@ let indiceMarketplaceAtual = 0;
 let farejadorRodando = false;
 
 async function rodarProximoMarketplace() {
+  console.log("🧪 ORQUESTRADOR TENTOU RODAR", {
+    farejadorRodando,
+    automacaoAtiva: config.automacaoAtiva,
+    horarioOk: podeRodarAgora()
+  });
+
   if (farejadorRodando) return;
-  if (!config.automacaoAtiva) return;
+
+  if (!config.automacaoAtiva) {
+    console.log("⏸ Farejador parado: automação global desligada");
+    return;
+  }
+
   if (!podeRodarAgora()) return;
 
   const marketplace = ordemMarketplaces[indiceMarketplaceAtual];
+
   indiceMarketplaceAtual =
     (indiceMarketplaceAtual + 1) % ordemMarketplaces.length;
 
   const cfg = config.marketplaces?.[marketplace];
 
   console.log("🧪 ORQUESTRADOR CHECK:", {
-  marketplace,
-  ativo: cfg?.ativo
+    marketplace,
+    ativo: cfg?.ativo
   });
 
- if (!cfg?.ativo) {
+  if (!cfg?.ativo) {
     console.log(`⏭️ ${marketplace} desativado. Pulando.`);
     return;
   }
@@ -8152,6 +8164,7 @@ async function rodarProximoMarketplace() {
 
   try {
     farejadorRodando = true;
+
     console.log(`🎯 Rodada global: ${marketplace}`);
 
     await farejador();
