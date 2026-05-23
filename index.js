@@ -5320,13 +5320,120 @@ async function gerarLinkCurtoAliExpress(urlOriginal, credenciais = {}) {
   }
 }
 
-// ======================= FUNCAO PLANO NOME =====================
+// ======================= FUNCAO PLANO NOME =========================================
 
 function getPlanoPorNome(nome) {
   return planos?.[nome] || null;
 }
 
-// =============== FUNCAO DISTRIBUIDOR OFERTAS ===================
+// =============== FUNCAO GERAR LINK AFILIADO CLIENTE =================================
+
+async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, ofertaBase = {}) {
+  try {
+    const mp = String(marketplace || "").toLowerCase();
+
+    const integracao =
+      getIntegracaoCliente(clienteId, mp);
+
+    if (mp === "mercadolivre") {
+      const linkML = await gerarLinkAfiliadoMercadoLivre(
+        linkOriginal || ofertaBase.linkOriginal || ofertaBase.link,
+        integracao
+      );
+
+      return linkML || linkOriginal || ofertaBase.linkAfiliado || ofertaBase.link || "";
+    }
+
+    if (mp === "amazon") {
+      const trackingId =
+      integracao?.credenciais?.trackingId ||
+      integracao?.credenciais?.partnerTag ||
+      integracao?.credenciais?.tag ||
+      integracao?.credenciais?.appId ||
+      "";
+
+      if (!trackingId) {
+        return linkOriginal || ofertaBase.linkAfiliado || ofertaBase.link || "";
+      }
+
+      try {
+        const u = new URL(
+          linkOriginal || ofertaBase.linkOriginal || ofertaBase.link
+        );
+
+        u.searchParams.set("tag", trackingId);
+
+        return u.toString();
+      } catch {
+        return linkOriginal || ofertaBase.linkAfiliado || ofertaBase.link || "";
+      }
+    }
+
+     if (mp === "aliexpress") {
+
+      const linkAli = await gerarLinkCurtoAliExpress(
+        linkOriginal || ofertaBase.linkOriginal || ofertaBase.link,
+        integracao?.credenciais || {}
+      );
+
+      return (
+        linkAli ||
+        linkOriginal ||
+        ofertaBase.linkAfiliado ||
+        ofertaBase.link ||
+        ""
+      );
+    }
+
+   if (mp === "awin") {
+    const linkAwin = await gerarDeepLinkAwin(
+    linkOriginal || ofertaBase.linkOriginal || ofertaBase.link,
+    clienteId
+  );
+
+  return (
+    linkAwin ||
+    linkOriginal ||
+    ofertaBase.linkAfiliado ||
+    ofertaBase.link ||
+    ""
+  );
+}
+
+if (mp === "magalu") {
+
+  const promoterId =
+    integracao?.credenciais?.promoterId || "";
+
+  if (!promoterId) {
+    return linkOriginal || ofertaBase.linkAfiliado || ofertaBase.link || "";
+  }
+
+  try {
+    return gerarLinkMagalu(
+      linkOriginal || ofertaBase.linkOriginal || ofertaBase.link,
+      promoterId
+    );
+
+  } catch {
+    return linkOriginal || ofertaBase.linkAfiliado || ofertaBase.link || "";
+  }
+}
+
+  return linkOriginal || ofertaBase.linkAfiliado || ofertaBase.link || "";
+
+ } catch (e) {
+    console.log("⚠️ Erro ao gerar link afiliado do cliente:", {
+      clienteId,
+      marketplace,
+      erro: e.message
+    });
+
+    return linkOriginal || ofertaBase.linkAfiliado || ofertaBase.link || "";
+  }
+}
+
+// =============== FUNCAO DISTRIBUIDOR OFERTAS ======================================
 
 async function distribuirOfertaParaClientes(ofertaBase) {
 
@@ -5361,10 +5468,22 @@ async function distribuirOfertaParaClientes(ofertaBase) {
       marketplace: ofertaBase.marketplace,
       titulo: ofertaBase.titulo
     });
-
-    const ofertaCliente = {
+    
+    const linkAfiliadoCliente =
+    await gerarLinkAfiliadoCliente(
+    clienteId,
+    ofertaBase.marketplace,
+    ofertaBase.linkOriginal || ofertaBase.link,
+    ofertaBase
+  );
+    
+  const ofertaCliente = {
   ...ofertaBase,
   clienteId,
+
+  linkAfiliado: linkAfiliadoCliente,
+  link: linkAfiliadoCliente,
+
   status: "pendente",
   destinosEnviados: [],
   logsEnvio: [],
@@ -5693,8 +5812,8 @@ async function farejarMagalu() {
 
     console.log("🟦 Farejando ofertas Magalu...");
 
-    const integracao =
-     getIntegracaoCliente(clienteId, "magalu");
+     const integracao =
+     getIntegracaoCliente("admin", "magalu");
      const promoterId =
       integracao?.credenciais?.promoterId ||
       integracao?.promoterId ||
@@ -5918,7 +6037,7 @@ async function farejarAwin() {
         imagem,
         link,
         linkAfiliado: link,
-        marketplace: "Awin",
+        marketplace: "awin",
         loja: "KaBuM",
         categoria,
         status: "pendente",
