@@ -2859,10 +2859,15 @@ app.post("/config", (req, res) => {
 
   // ================= CONFIG CLIENTE =================
 
-  if (body.automacaoAtiva != null) {
-    configCliente.automacaoAtiva =
+ if (body.automacaoAtiva != null) {
+  configCliente.automacaoAtiva =
+    body.automacaoAtiva === true;
+
+  if (isAdmin) {
+    config.automacaoAtiva =
       body.automacaoAtiva === true;
   }
+}
 
   if (body.intervaloMinutos != null) {
     configCliente.intervaloMinutos =
