@@ -6755,10 +6755,11 @@ app.post("/sessoes", (req, res) => {
 
   const clienteId = getClienteId(req);
 
-  const plano = getUsuarioAtual(req)?.plano || "free";
+  const planoUsuario = getPlanoUsuario(req);
 
-  const limite =
-    LIMITES_PLANO?.[plano]?.sessoes || 1;
+  const limite = isAdminMaster(req)
+  ? 999
+  : Number(planoUsuario?.limites?.sessoes || 1);
 
   const sessoesCliente = Object.values(sessoesMeta)
     .filter(s =>
@@ -7103,10 +7104,11 @@ app.post("/destinos/:id", (req, res) => {
     return res.status(400).json({ erro: "destinos deve ser array" });
   }
 
-  const plano = getUsuarioAtual(req)?.plano || "free";
+const planoUsuario = getPlanoUsuario(req);
 
-  const limiteDestinos =
-    LIMITES_PLANO?.[plano]?.destinos || 3;
+const limiteDestinos = isAdminMaster(req)
+  ? 999
+  : Number(planoUsuario?.limites?.destinos || 3);
 
   if (destinos.length > limiteDestinos) {
     return res.status(403).json({
