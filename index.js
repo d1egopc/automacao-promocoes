@@ -7550,33 +7550,34 @@ async function iniciarWhatsApp(id, clienteId = "admin", force = false) {
   console.log("🚀 Iniciando sessão:", id, "force:", force);
 
   const clienteIdFinal = clienteId || "admin";
-  const chaveSessao = String(id).startsWith(clienteIdFinal + "_")
+
+  id = String(id).startsWith(clienteIdFinal + "_")
   ? id
   : `${clienteIdFinal}_${id}`;
 
-  const statusAtual = statusSessao[chaveSessao];
+const statusAtual = statusSessao[id];
 
-  if (!force && sessoes[id] && ["connecting", "qr", "open", "reconnecting"].includes(statusAtual)) {
-    console.log("⏸ Sessão já em andamento, não vou recriar:", id, statusAtual);
-    return sessoes[id];
+if (!force && sessoes[id] && ["connecting", "qr", "open", "reconnecting"].includes(statusAtual)) {
+  console.log("⏸ Sessão já em andamento, não vou recriar:", id, statusAtual);
+  return sessoes[id];
+}
+
+if (!force && qrCodes[id] && statusAtual === "qr") {
+  console.log("⏸ QR já ativo, não vou recriar:", id);
+  return sessoes[id] || null;
+}
+
+if (force && sessoes[id]) {
+  try {
+    console.log("♻️ Forçando reinício da sessão:", id);
+    sessoes[id].end?.();
+  } catch (e) {
+    console.log("⚠️ Erro ao encerrar sessão antiga:", e.message);
   }
 
-  if (!force && qrCodes[id] && statusAtual === "qr") {
-    console.log("⏸ QR já ativo, não vou recriar:", id);
-    return sessoes[id] || null;
-  }
-
-  if (force && sessoes[id]) {
-    try {
-      console.log("♻️ Forçando reinício da sessão:", id);
-      sessoes[id].end?.();
-    } catch (e) {
-      console.log("⚠️ Erro ao encerrar sessão antiga:", e.message);
-    }
-
-    delete sessoes[id];
-    qrCodes[id] = null;
-  }
+  delete sessoes[id];
+  qrCodes[id] = null;
+}
 
   statusSessao[id] = "connecting";
   reconectando[id] = false;
