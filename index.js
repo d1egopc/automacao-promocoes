@@ -7306,10 +7306,13 @@ app.get("/status/:id", (req, res) => {
   const clienteId = getClienteId(req);
   const idOriginal = req.params.id;
 
-  const id =
-    statusSessao[idOriginal] !== undefined
+  const id = clienteId === "admin"
+    ? idOriginal
+    : String(idOriginal).startsWith(clienteId + "_")
       ? idOriginal
-      : `${clienteId}_${idOriginal}`;
+      : statusSessao[idOriginal] !== undefined
+        ? idOriginal
+        : `${clienteId}_${idOriginal}`;
 
   res.json({
     conectado: statusSessao[id] === "open",
