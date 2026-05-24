@@ -3540,13 +3540,28 @@ app.get("/integracoes", (req, res) => {
   const resposta = {};
 
   for (const [marketplace, config] of Object.entries(data)) {
+    const credenciais = config?.credenciais || {};
+
+    const camposConfigurados = Object.keys(credenciais).filter(k => {
+      const valor = credenciais[k];
+
+      return (
+        valor !== undefined &&
+        valor !== null &&
+        String(valor).trim() !== ""
+      );
+    });
+
+    const configurado = camposConfigurados.length > 0;
+
     resposta[marketplace] = {
       marketplace,
-      nome: marketplaceRules[marketplace]?.nome || marketplace,
-      configurado: true,
-      status: config.status || "configurado",
-      credenciais: mascararIntegracao(config.credenciais || {}),
-      atualizadoEm: config.atualizadoEm
+      nome: marketplaceRules?.[marketplace]?.nome || marketplace,
+      configurado,
+      status: configurado ? (config.status || "conectado") : "incompleto",
+      camposConfigurados,
+      credenciais: mascararIntegracao(credenciais),
+      atualizadoEm: config?.atualizadoEm || null
     };
   }
 
