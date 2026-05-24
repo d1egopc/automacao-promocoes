@@ -5432,6 +5432,13 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
     const integracao =
       getIntegracaoCliente(clienteId, mp);
 
+console.log("====================================");
+console.log("👤 CLIENTE:", clienteId);
+console.log("🛒 MARKETPLACE:", mp);
+console.log("🔑 Integração encontrada?", !!integracao);
+console.log("🔑 Tem credenciais?", !!integracao?.credenciais);
+console.log("====================================");
+
     if (mp === "mercadolivre") {
       const linkML = await gerarLinkAfiliadoMercadoLivre(
         linkOriginal || ofertaBase.linkOriginal || ofertaBase.link,
@@ -8240,7 +8247,10 @@ async function farejarShopee() {
 
     console.log("🛍️ Farejando ofertas Shopee...");
 
-    const produtos = await buscarOfertasShopee();
+   const clienteId = "free";
+
+   const produtos =
+   await buscarOfertasShopee(clienteId);
 
     if (!Array.isArray(produtos)) {
       console.log("❌ Shopee não retornou array");
