@@ -8161,17 +8161,22 @@ async function testarAwinProdutos() {
   }
 }
 
-async function buscarOfertasShopee() {
-  const configShopee =
-  getIntegracaoCliente("admin", "shopee");
+async function buscarOfertasShopee(clienteId = "admin") {
 
-if (
-  !configShopee?.credenciais?.appId ||
-  !configShopee?.credenciais?.secret
-) {
-  console.log("❌ Shopee sem credenciais configuradas");
-  return [];
-}
+  const configShopee =
+    getIntegracaoCliente(clienteId, "shopee");
+
+  if (
+    !configShopee?.credenciais?.appId ||
+    !configShopee?.credenciais?.secret
+  ) {
+    console.log(
+      "❌ Shopee sem credenciais configuradas para:",
+      clienteId
+    );
+
+    return [];
+  }
 
   const { appId, secret } = configShopee.credenciais;
 
