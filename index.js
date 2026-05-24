@@ -8623,15 +8623,13 @@ setInterval(() => {
   setTimeout(() => {
     console.log("🔄 Reconectando sessões WhatsApp automaticamente...");
  
-   let sessoesParaReconectar = [
-  ...new Set([
-    ...Object.keys(config?.destinosPorSessao || {}),
-    ...(config?.sessoesWhatsapp || [])
-  ])
+let sessoesParaReconectar = [
+  ...new Set(config?.sessoesWhatsapp || [])
 ];
 
 sessoesParaReconectar = sessoesParaReconectar
-  .filter(id => id && !id.includes("_user_"))
+  .filter(id => id && id.includes("_"))
+  .filter(id => !id.includes("_user_"))
   .filter(id => !/^user_[^_]+_user_/.test(id));
 
 config.sessoesWhatsapp = sessoesParaReconectar;
