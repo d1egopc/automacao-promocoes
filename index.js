@@ -153,6 +153,21 @@ const PLANOS_FILE = "/data/planos.json";
 const SESSOES_FILE = "/data/sessoes.json";
 const INTEGRACOES_FILE = "/data/integracoes.json";
 
+function getClienteDir(clienteId = "admin") {
+  const id = String(clienteId || "admin").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const dir = `/data/clientes/${id}`;
+
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  return dir;
+}
+
+function getFilaFile(clienteId = "admin") {
+  return `${getClienteDir(clienteId)}/fila.json`;
+}
+
 console.log("📂 Salvando dados em:", FILA_FILE);
 
 function gerarChaveProduto(titulo = "") {
@@ -180,24 +195,48 @@ function produtoRepetidoRecentemente(titulo, horas = 12) {
   return false;
 }
 
-
-function salvarFila() {
+function salvarFila(clienteId = "admin") {
   try {
-    fs.writeFileSync(FILA_FILE, JSON.stringify(fila, null, 2));
+
+    const filaCliente = fila.filter(
+      o => String(o.clienteId || "admin") === String(clienteId)
+    );
+
+    fs.writeFileSync(
+      getFilaFile(clienteId),
+      JSON.stringify(filaCliente, null, 2)
+    );
+
   } catch (e) {
     console.error("❌ ERRO AO SALVAR FILA:", e.message);
   }
 }
 
-function carregarFila() {
+function carregarFila(clienteId = "admin") {
   try {
-    if (fs.existsSync(FILA_FILE)) {
-      const data = fs.readFileSync(FILA_FILE, "utf8");
+
+    const file = getFilaFile(clienteId);
+
+    if (fs.existsSync(file)) {
+
+      const data = fs.readFileSync(file, "utf8");
+
       if (data) {
-        fila = JSON.parse(data);
-        console.log("✅ Fila carregada do arquivo");
+
+        const filaCliente = JSON.parse(data);
+
+        fila = fila.filter(
+          o => String(o.clienteId || "admin") !== String(clienteId)
+        );
+
+        fila.push(...filaCliente);
+
+        console.log(
+          `✅ Fila carregada do cliente: ${clienteId}`
+        );
       }
     }
+
   } catch (e) {
     console.error("❌ ERRO AO CARREGAR FILA:", e.message);
   }
@@ -1733,7 +1772,15 @@ async function processarFila() {
   enviandoAgora = true;
 
   try {
-    const oferta = fila.find(o => o.status === "pendente");
+    const oferta = fila.find(o => {
+  if (o.status !== "pendente") return false;
+
+  const clienteIdOferta = o.clienteId || "admin";
+  const configClienteOferta =
+    configsPorCliente?.[clienteIdOferta] || config;
+
+  return configClienteOferta.automacaoAtiva === true;
+});
 
 if (!oferta) {
   console.log("📭 Nenhuma oferta pendente");
@@ -2016,7 +2063,7 @@ oferta.logsEnvio.push({
   data: oferta.enviadoEm
 });
 
-salvarFila();
+salvarFila(clienteId);
 
 console.log("✅ Enviado com controle de tempo");
 
@@ -2038,7 +2085,7 @@ console.log("✅ Enviado com controle de tempo");
       data: oferta.erroEm
     });
 
-    salvarFila();
+    salvarFila(oferta.clienteId || "admin");
   }
 
 } finally {
@@ -2138,10 +2185,11 @@ app.post("/fila", (req, res) => {
       "📱 Use no app da Amazon para tentar chegar no menor valor.";
   }
 
-  oferta = prepararOfertaGlobal(oferta);
+ oferta = prepararOfertaGlobal(oferta);
 
-  fila.push(oferta);
-  salvarFila();
+ fila.push(oferta);
+
+ salvarFila(clienteId);
 
   console.log("📥 Oferta adicionada na fila:", {
     clienteId,
@@ -5756,8 +5804,9 @@ async function distribuirOfertaParaClientes(ofertaBase) {
 
     if (jaExisteCliente) continue;
 
-    fila.push(ofertaCliente);
-    salvarFila();
+  fila.push(ofertaCliente);
+
+  salvarFila(clienteId);
 
     console.log("✅ Oferta distribuída para cliente:", {
       clienteId,
@@ -8533,7 +8582,9 @@ function podeRodarAgora() {
 }
 
 carregarConfig();
-carregarFila();
+for (const usuario of usuarios) {
+  carregarFila(usuario.id);
+}
 
 console.log("🚀 Dados iniciais carregados:", {
   fila: fila.length,
