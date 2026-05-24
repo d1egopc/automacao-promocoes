@@ -2016,6 +2016,12 @@ app.use(rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) =>
+    req.path.startsWith("/conexoes") ||
+    req.path.startsWith("/sessoes") ||
+    req.path.startsWith("/conectar") ||
+    req.path.startsWith("/desconectar") ||
+    req.path.startsWith("/reset") ||
+    req.path.startsWith("/limpar-sessao") ||
     req.path.startsWith("/login") ||
     req.path.startsWith("/config") ||
     req.path.startsWith("/status") ||
