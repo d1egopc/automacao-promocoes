@@ -4232,8 +4232,8 @@ async function gerarLinkAfiliadoMercadoLivre(url, config) {
   try {
 
 if (String(url || "").includes("meli.la")) {
-  console.log("⚠️ Link ML já afiliado. Reutilizando.");
-  return url;
+  console.log("⚠️ Link ML já encurtado detectado. Não vou reutilizar para outro cliente.");
+  return "";
 }
 
     const credenciais = config?.credenciais || {};
@@ -5488,19 +5488,16 @@ async function gerarLinkShopeeCliente(clienteId, ofertaBase = {}) {
   try {
     const integracao = getIntegracaoCliente(clienteId, "shopee");
 
-console.log("👤 CLIENTE:", clienteId);
-console.log("🛒 MARKETPLACE:", "shopee");
-console.log("🔑 Integração encontrada?", !!integracao);
-console.log(
-  "🔑 Tem credenciais?",
-  !!integracao?.credenciais
- );
+    console.log("👤 CLIENTE:", clienteId);
+    console.log("🛒 MARKETPLACE:", "shopee");
+    console.log("🔑 Integração encontrada?", !!integracao);
+    console.log("🔑 Tem credenciais?", !!integracao?.credenciais);
 
     const appId = integracao?.credenciais?.appId || "";
     const secret = integracao?.credenciais?.secret || "";
 
     if (!appId || !secret) {
-      return ofertaBase.linkAfiliado || ofertaBase.link || "";
+      return "";
     }
 
     const keyword = String(
@@ -5512,7 +5509,7 @@ console.log(
       .slice(0, 80);
 
     if (!keyword) {
-      return ofertaBase.linkAfiliado || ofertaBase.link || "";
+      return "";
     }
 
     const timestamp = Math.floor(Date.now() / 1000);
@@ -5538,7 +5535,6 @@ console.log(
     };
 
     const payload = JSON.stringify(bodyPayload);
-
     const baseString = `${appId}${timestamp}${payload}${secret}`;
 
     const sign = crypto
@@ -5559,7 +5555,6 @@ console.log(
     );
 
     const data = await response.json().catch(() => null);
-
     const nodes = data?.data?.productOfferV2?.nodes || [];
 
     const ofertaTitulo = String(ofertaBase.titulo || ofertaBase.nome || "")
@@ -5573,16 +5568,11 @@ console.log(
           .includes(ofertaTitulo.slice(0, 20))
       ) || nodes[0];
 
-    return (
-      produto?.offerLink ||
-      ofertaBase.linkAfiliado ||
-      ofertaBase.link ||
-      ""
-    );
+    return produto?.offerLink || "";
 
   } catch (e) {
     console.log("❌ erro gerarLinkShopeeCliente:", e.message);
-    return ofertaBase.linkAfiliado || ofertaBase.link || "";
+    return "";
   }
 }
 
@@ -5592,118 +5582,102 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
   try {
     const mp = String(marketplace || "").toLowerCase();
 
-    const integracao =
-      getIntegracaoCliente(clienteId, mp);
+    const integracao = getIntegracaoCliente(clienteId, mp);
 
-console.log("====================================");
-console.log("👤 CLIENTE:", clienteId);
-console.log("🛒 MARKETPLACE:", mp);
-console.log("🔑 Integração encontrada?", !!integracao);
-console.log("🔑 Tem credenciais?", !!integracao?.credenciais);
-console.log("====================================");
+    console.log("====================================");
+    console.log("👤 CLIENTE:", clienteId);
+    console.log("🛒 MARKETPLACE:", mp);
+    console.log("🔑 Integração encontrada?", !!integracao);
+    console.log("🔑 Tem credenciais?", !!integracao?.credenciais);
+    console.log("====================================");
+
+    const linkBase =
+      linkOriginal ||
+      ofertaBase.linkOriginal ||
+      ofertaBase.link ||
+      "";
+
+    if (!linkBase) {
+      return "";
+    }
 
     if (mp === "mercadolivre") {
       const linkML = await gerarLinkAfiliadoMercadoLivre(
-        linkOriginal || ofertaBase.linkOriginal || ofertaBase.link,
+        linkBase,
         integracao
       );
 
-      return linkML || linkOriginal || ofertaBase.linkAfiliado || ofertaBase.link || "";
+      return linkML || "";
     }
 
     if (mp === "shopee") {
-    return await gerarLinkShopeeCliente(
-    clienteId,
-    ofertaBase
-    );
+      return await gerarLinkShopeeCliente(clienteId, ofertaBase);
     }
 
     if (mp === "amazon") {
       const trackingId =
-      integracao?.credenciais?.trackingId ||
-      integracao?.credenciais?.partnerTag ||
-      integracao?.credenciais?.tag ||
-      integracao?.credenciais?.appId ||
-      "";
+        integracao?.credenciais?.trackingId ||
+        integracao?.credenciais?.partnerTag ||
+        integracao?.credenciais?.tag ||
+        integracao?.credenciais?.appId ||
+        "";
 
       if (!trackingId) {
-        return linkOriginal || ofertaBase.linkAfiliado || ofertaBase.link || "";
+        return "";
       }
 
       try {
-        const u = new URL(
-          linkOriginal || ofertaBase.linkOriginal || ofertaBase.link
-        );
-
+        const u = new URL(linkBase);
         u.searchParams.set("tag", trackingId);
-
         return u.toString();
       } catch {
-        return linkOriginal || ofertaBase.linkAfiliado || ofertaBase.link || "";
+        return "";
       }
     }
 
-     if (mp === "aliexpress") {
-
+    if (mp === "aliexpress") {
       const linkAli = await gerarLinkCurtoAliExpress(
-        linkOriginal || ofertaBase.linkOriginal || ofertaBase.link,
+        linkBase,
         integracao?.credenciais || {}
       );
 
-      return (
-        linkAli ||
-        linkOriginal ||
-        ofertaBase.linkAfiliado ||
-        ofertaBase.link ||
-        ""
-      );
+      return linkAli || "";
     }
 
-   if (mp === "awin") {
-    const linkAwin = await gerarDeepLinkAwin(
-    linkOriginal || ofertaBase.linkOriginal || ofertaBase.link,
-    clienteId
-  );
+    if (mp === "awin") {
+      const linkAwin = await gerarDeepLinkAwin(
+        linkBase,
+        clienteId
+      );
 
-  return (
-    linkAwin ||
-    linkOriginal ||
-    ofertaBase.linkAfiliado ||
-    ofertaBase.link ||
-    ""
-  );
-}
+      return linkAwin || "";
+    }
 
-if (mp === "magalu") {
+    if (mp === "magalu") {
+      const promoterId =
+        integracao?.credenciais?.promoterId || "";
 
-  const promoterId =
-    integracao?.credenciais?.promoterId || "";
+      if (!promoterId) {
+        return "";
+      }
 
-  if (!promoterId) {
-    return linkOriginal || ofertaBase.linkAfiliado || ofertaBase.link || "";
-  }
+      try {
+        return gerarLinkMagalu(linkBase, promoterId) || "";
+      } catch {
+        return "";
+      }
+    }
 
-  try {
-    return gerarLinkMagalu(
-      linkOriginal || ofertaBase.linkOriginal || ofertaBase.link,
-      promoterId
-    );
+    return "";
 
-  } catch {
-    return linkOriginal || ofertaBase.linkAfiliado || ofertaBase.link || "";
-  }
-}
-
-  return linkOriginal || ofertaBase.linkAfiliado || ofertaBase.link || "";
-
- } catch (e) {
+  } catch (e) {
     console.log("⚠️ Erro ao gerar link afiliado do cliente:", {
       clienteId,
       marketplace,
       erro: e.message
     });
 
-    return linkOriginal || ofertaBase.linkAfiliado || ofertaBase.link || "";
+    return "";
   }
 }
 
@@ -5859,8 +5833,7 @@ async function farejarAliExpress() {
     console.log("🛒 Farejando ofertas AliExpress...");
 
     const cfg = config.marketplaces?.aliexpress || {};
-    const integracao = getIntegracaoCliente("admin", "aliexpress");
-
+    
     const limitePorRodada = cfg.limitePorRodada || 5;
     let adicionadasNestaRodada = 0;
     let ofertasEncontradas = [];
@@ -5895,16 +5868,6 @@ async function farejarAliExpress() {
               "";
 
             if (!link) continue;
-
-            const linkAliCurto = await gerarLinkCurtoAliExpress(
-              link,
-              integracao?.credenciais || {}
-            );
-
-            const linkFinal = gerarLinkOptimus(
-              linkAliCurto,
-              "aliexpress"
-            );
 
             const linkOriginalAli =
               item.product_detail_url ||
@@ -6051,8 +6014,9 @@ async function farejarAliExpress() {
                   ? `${Math.round(desconto)}% OFF no AliExpress.`
                   : "",
               parcelamento: "",
-              link: linkFinal,
-              linkAfiliado: linkFinal,
+              linkOriginal: linkOriginalAli || link,
+              link: linkOriginalAli || link,
+              linkAfiliado: "",
               imagem,
               marketplace: "aliexpress",
               categoria: "AliExpress",
@@ -6141,17 +6105,8 @@ async function farejarMagalu() {
 
     console.log("🟦 Farejando ofertas Magalu...");
 
-     const integracao =
-     getIntegracaoCliente("admin", "magalu");
-     const promoterId =
-      integracao?.credenciais?.promoterId ||
-      integracao?.promoterId ||
-      "";
-
-    if (!promoterId) {
-      console.log("❌ Magalu sem promoterId configurado.");
-      return;
-    }
+   const integracao =
+   getIntegracaoCliente("admin", "magalu");
 
     const limitePorRodada =
       config.marketplaces?.magalu?.limitePorRodada || 3;
@@ -6238,9 +6193,7 @@ const html = await response.text();
         if (adicionadas >= limitePorRodada) break;
 
         try {
-          const produto = await importarMagalu(link, {
-            credenciais: { promoterId }
-          });
+         const produto = await importarMagalu(link);
 
           console.log("🧪 PRODUTO MAGALU IMPORTADO:", produto);     
 
@@ -6255,8 +6208,9 @@ const html = await response.text();
             cupom: produto.cupom || "",
             avisoCupom: produto.avisoCupom || produto.aviso || "",
             parcelamento: produto.parcelamento || "",
-            link: produto.linkAfiliado || produto.linkOriginal || link,
-            linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
+            linkOriginal: produto.linkOriginal || link,
+            link: produto.linkOriginal || link,
+            linkAfiliado: "",
             imagem: produto.imagem || "",
             marketplace: "magalu",
             categoria: "Magalu",
@@ -6364,8 +6318,9 @@ async function farejarAwin() {
         avisoCupom: "",
         parcelamento: "",
         imagem,
-        link,
-        linkAfiliado: link,
+        linkOriginal: item.product_url || item.merchant_deep_link || link,
+        link: item.product_url || item.merchant_deep_link || link,
+        linkAfiliado: "",
         marketplace: "awin",
         loja: "KaBuM",
         categoria,
@@ -8006,12 +7961,8 @@ if (compraNoApp && !cupom) {
 
         for (const link of links) {
           try {
-            const integracaoML =
-  getIntegracaoCliente("admin", "mercadolivre");
-
-  const produto = await importarMercadoLivre(link, {
-  credenciais: integracaoML?.credenciais
-  });
+           
+const produto = await importarMercadoLivre(link);
 
             if (!produto.precoAtual) continue;
 
@@ -8191,12 +8142,8 @@ const links = [...new Set(linksExtraidos)].slice(0, 3);
 
 for (const link of links) {
   try {
-    const integracaoAmazon =
-  getIntegracaoCliente("admin", "amazon");
-
-  const produto = await importarAmazon(link, {
-  credenciais: integracaoAmazon?.credenciais
-  });
+  
+const produto = await importarAmazon(link);
 
     console.log("🧪 PRODUTO AMAZON:", {
       titulo: produto.titulo,
@@ -8240,8 +8187,9 @@ let novaOferta = {
   cupom: produto.cupom || "",
   avisoCupom: produto.avisoCupom || "",
   parcelamento: produto.parcelamento || "",
-  link: produto.linkAfiliado || produto.linkOriginal || link,
-  linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
+  linkOriginal: produto.linkOriginal || link,
+  link: produto.linkOriginal || link,
+  linkAfiliado: "",
   imagem: produto.imagem || "",
   marketplace: "amazon",
   categoria: "Amazon",
@@ -8496,8 +8444,9 @@ async function farejarShopee() {
           preco: precoAtual,
           precoAtual,
           precoAntigo,
-          link: item.offerLink,
-          linkAfiliado: item.offerLink,
+          linkOriginal: item.productLink || item.offerLink,
+          link: item.productLink || item.offerLink,
+          linkAfiliado: "",
           imagem: item.imageUrl,
           marketplace: "shopee",
           categoria: "Shopee",
