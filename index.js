@@ -8622,14 +8622,21 @@ setInterval(() => {
 
   setTimeout(() => {
     console.log("🔄 Reconectando sessões WhatsApp automaticamente...");
-
-    const sessoesParaReconectar = [
+ 
+   let sessoesParaReconectar = [
   ...new Set([
     ...Object.keys(config?.destinosPorSessao || {}),
-    ...(config?.sessoesWhatsapp || []),
-    "sessao1"
+    ...(config?.sessoesWhatsapp || [])
   ])
 ];
+
+sessoesParaReconectar = sessoesParaReconectar
+  .filter(id => id && !id.includes("_user_"))
+  .filter(id => !/^user_[^_]+_user_/.test(id));
+
+config.sessoesWhatsapp = sessoesParaReconectar;
+salvarConfig();
+
     sessoesParaReconectar.forEach((id, index) => {
       setTimeout(() => {
         console.log("🚀 Reconectando sessão:", id);
