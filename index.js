@@ -5360,6 +5360,14 @@ async function gerarLinkShopeeCliente(clienteId, ofertaBase = {}) {
   try {
     const integracao = getIntegracaoCliente(clienteId, "shopee");
 
+console.log("👤 CLIENTE:", clienteId);
+console.log("🛒 MARKETPLACE:", "shopee");
+console.log("🔑 Integração encontrada?", !!integracao);
+console.log(
+  "🔑 Tem credenciais?",
+  !!integracao?.credenciais
+ );
+
     const appId = integracao?.credenciais?.appId || "";
     const secret = integracao?.credenciais?.secret || "";
 
