@@ -4170,6 +4170,12 @@ async function buscarCsrfTokenMercadoLivre(cookies) {
 
 async function gerarLinkAfiliadoMercadoLivre(url, config) {
   try {
+
+if (String(url || "").includes("meli.la")) {
+  console.log("⚠️ Link ML já afiliado. Reutilizando.");
+  return url;
+}
+
     const credenciais = config?.credenciais || {};
 
     const cookies = credenciais.cookies || "";
