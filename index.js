@@ -5647,6 +5647,36 @@ if (mp === "magalu") {
   }
 }
 
+// ============== HELPERS DISTRIBUIDOR OFERTAS =====================================
+
+function usuarioPodeReceberMarketplace(usuario, marketplace) {
+  if (!usuario?.ativo) return false;
+
+  if (usuario.papel === "admin_master") {
+    return true;
+  }
+
+  const plano =
+    getPlanoPorNome(usuario.plano) || {};
+
+  const marketplacesLiberados =
+    plano.marketplaces || [];
+
+  return marketplacesLiberados.includes(
+    normalizarTexto(marketplace || "")
+  );
+}
+
+function usuarioTemIntegracaoMarketplace(clienteId, marketplace) {
+  const integracao =
+    getIntegracaoCliente(
+      clienteId,
+      normalizarTexto(marketplace || "")
+    );
+
+  return !!integracao?.credenciais;
+}
+
 // =============== FUNCAO DISTRIBUIDOR OFERTAS ======================================
 
 async function distribuirOfertaParaClientes(ofertaBase) {
@@ -5656,11 +5686,10 @@ async function distribuirOfertaParaClientes(ofertaBase) {
     const clienteId = usuario.id;
     const adminMaster = usuario.papel === "admin_master";
 
-    const plano = getPlanoPorNome(usuario.plano) || {};
-    const marketplacesLiberados = plano.marketplaces || [];
     const mp = normalizarTexto(ofertaBase.marketplace || "");
 
-    if (!adminMaster && !marketplacesLiberados.includes(mp)) {
+    if (!usuarioPodeReceberMarketplace(usuario, mp)) {
+
       console.log("⏭️ Usuário não recebe marketplace pelo plano:", {
         clienteId,
         plano: usuario.plano,
@@ -5668,6 +5697,15 @@ async function distribuirOfertaParaClientes(ofertaBase) {
       });
       continue;
     }
+
+   if (!usuarioTemIntegracaoMarketplace(clienteId, mp)) {
+     console.log("🚫 Usuário sem integração configurada:", {
+     clienteId,
+     marketplace: mp,
+      titulo: ofertaBase.titulo
+   });
+   continue;
+   }
 
     const linkOriginal =
       ofertaBase.linkOriginal ||
