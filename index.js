@@ -5329,99 +5329,8 @@ function getPlanoPorNome(nome) {
 // =============== FUNCAO GERAR LINK AFILIADO SHOPEE ========================================
 
 async function gerarLinkShopeeCliente(clienteId, ofertaBase = {}) {
-  try {
-    const integracao = getIntegracaoCliente(clienteId, "shopee");
-
-    const appId = integracao?.credenciais?.appId || "";
-    const secret = integracao?.credenciais?.secret || "";
-
-    if (!appId || !secret) {
-      return ofertaBase.linkAfiliado || ofertaBase.link || "";
-    }
-
-    const keyword = String(
-      ofertaBase.titulo ||
-      ofertaBase.nome ||
-      ""
-    )
-      .replace(/"/g, "")
-      .slice(0, 80);
-
-    if (!keyword) {
-      return ofertaBase.linkAfiliado || ofertaBase.link || "";
-    }
-
-    const timestamp = Math.floor(Date.now() / 1000);
-
-    const bodyPayload = {
-      query: `
-        query {
-          productOfferV2(
-            keyword: "${keyword}",
-            page: 1,
-            limit: 5
-          ) {
-            nodes {
-              productName
-              productLink
-              offerLink
-              itemId
-              shopId
-            }
-          }
-        }
-      `
-    };
-
-    const payload = JSON.stringify(bodyPayload);
-
-    const baseString = `${appId}${timestamp}${payload}${secret}`;
-
-    const sign = crypto
-      .createHash("sha256")
-      .update(baseString, "utf8")
-      .digest("hex");
-
-    const response = await fetch(
-      "https://open-api.affiliate.shopee.com.br/graphql",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${sign}`
-        },
-        body: payload
-      }
-    );
-
-    const data = await response.json().catch(() => null);
-
-    const nodes = data?.data?.productOfferV2?.nodes || [];
-
-    const ofertaTitulo = String(ofertaBase.titulo || ofertaBase.nome || "")
-      .toLowerCase()
-      .slice(0, 40);
-
-    const produto =
-      nodes.find(n =>
-        String(n.productName || "")
-          .toLowerCase()
-          .includes(ofertaTitulo.slice(0, 20))
-      ) || nodes[0];
-
-    return (
-      produto?.offerLink ||
-      ofertaBase.linkAfiliado ||
-      ofertaBase.link ||
-      ""
-    );
-
-  } catch (e) {
-    console.log("❌ erro gerarLinkShopeeCliente:", e.message);
-    return ofertaBase.linkAfiliado || ofertaBase.link || "";
-  }
+  return ofertaBase.linkAfiliado || ofertaBase.link || "";
 }
-
 
 // =============== FUNCAO GERAR LINK AFILIADO VARIOS MARKTPLACES  ============================
 
@@ -5431,13 +5340,6 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
 
     const integracao =
       getIntegracaoCliente(clienteId, mp);
-
-console.log("====================================");
-console.log("👤 CLIENTE:", clienteId);
-console.log("🛒 MARKETPLACE:", mp);
-console.log("🔑 Integração encontrada?", !!integracao);
-console.log("🔑 Tem credenciais?", !!integracao?.credenciais);
-console.log("====================================");
 
     if (mp === "mercadolivre") {
       const linkML = await gerarLinkAfiliadoMercadoLivre(
@@ -7293,13 +7195,21 @@ app.post("/conectar", async (req, res) => {
   console.log("💾 Sessão WhatsApp salva para reconexão:", id);
  }
 
- app.get("/status/:id", (req, res) => {
+ iniciarWhatsApp(sessaoId, clienteId, false);
+
+  return res.json({
+  ok: true,
+  message: "Sessão iniciada",
+  id: sessaoId
+  });
+  });
+
+app.get("/status/:id", (req, res) => {
   const clienteId = getClienteId(req);
   const idOriginal = req.params.id;
 
-  const id = String(idOriginal).startsWith(clienteId + "_")
-    ? idOriginal
-    : statusSessao[idOriginal] !== undefined
+  const id =
+    statusSessao[idOriginal] !== undefined
       ? idOriginal
       : `${clienteId}_${idOriginal}`;
 
@@ -7550,34 +7460,31 @@ async function iniciarWhatsApp(id, clienteId = "admin", force = false) {
   console.log("🚀 Iniciando sessão:", id, "force:", force);
 
   const clienteIdFinal = clienteId || "admin";
+  const chaveSessao = `${clienteIdFinal}_${id}`;
 
-  id = String(id).startsWith(clienteIdFinal + "_")
-  ? id
-  : `${clienteIdFinal}_${id}`;
+  const statusAtual = statusSessao[chaveSessao];
 
-const statusAtual = statusSessao[id];
-
-if (!force && sessoes[id] && ["connecting", "qr", "open", "reconnecting"].includes(statusAtual)) {
-  console.log("⏸ Sessão já em andamento, não vou recriar:", id, statusAtual);
-  return sessoes[id];
-}
-
-if (!force && qrCodes[id] && statusAtual === "qr") {
-  console.log("⏸ QR já ativo, não vou recriar:", id);
-  return sessoes[id] || null;
-}
-
-if (force && sessoes[id]) {
-  try {
-    console.log("♻️ Forçando reinício da sessão:", id);
-    sessoes[id].end?.();
-  } catch (e) {
-    console.log("⚠️ Erro ao encerrar sessão antiga:", e.message);
+  if (!force && sessoes[id] && ["connecting", "qr", "open", "reconnecting"].includes(statusAtual)) {
+    console.log("⏸ Sessão já em andamento, não vou recriar:", id, statusAtual);
+    return sessoes[id];
   }
 
-  delete sessoes[id];
-  qrCodes[id] = null;
-}
+  if (!force && qrCodes[id] && statusAtual === "qr") {
+    console.log("⏸ QR já ativo, não vou recriar:", id);
+    return sessoes[id] || null;
+  }
+
+  if (force && sessoes[id]) {
+    try {
+      console.log("♻️ Forçando reinício da sessão:", id);
+      sessoes[id].end?.();
+    } catch (e) {
+      console.log("⚠️ Erro ao encerrar sessão antiga:", e.message);
+    }
+
+    delete sessoes[id];
+    qrCodes[id] = null;
+  }
 
   statusSessao[id] = "connecting";
   reconectando[id] = false;
@@ -8161,22 +8068,17 @@ async function testarAwinProdutos() {
   }
 }
 
-async function buscarOfertasShopee(clienteId = "admin") {
-
+async function buscarOfertasShopee() {
   const configShopee =
-    getIntegracaoCliente(clienteId, "shopee");
+  getIntegracaoCliente("admin", "shopee");
 
-  if (
-    !configShopee?.credenciais?.appId ||
-    !configShopee?.credenciais?.secret
-  ) {
-    console.log(
-      "❌ Shopee sem credenciais configuradas para:",
-      clienteId
-    );
-
-    return [];
-  }
+if (
+  !configShopee?.credenciais?.appId ||
+  !configShopee?.credenciais?.secret
+) {
+  console.log("❌ Shopee sem credenciais configuradas");
+  return [];
+}
 
   const { appId, secret } = configShopee.credenciais;
 
@@ -8247,10 +8149,7 @@ async function farejarShopee() {
 
     console.log("🛍️ Farejando ofertas Shopee...");
 
-   const clienteId = "free";
-
-   const produtos =
-   await buscarOfertasShopee(clienteId);
+    const produtos = await buscarOfertasShopee();
 
     if (!Array.isArray(produtos)) {
       console.log("❌ Shopee não retornou array");
