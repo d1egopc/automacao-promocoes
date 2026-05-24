@@ -7293,21 +7293,13 @@ app.post("/conectar", async (req, res) => {
   console.log("💾 Sessão WhatsApp salva para reconexão:", id);
  }
 
- iniciarWhatsApp(sessaoId, clienteId, false);
-
-  return res.json({
-  ok: true,
-  message: "Sessão iniciada",
-  id: sessaoId
-  });
-  });
-
-app.get("/status/:id", (req, res) => {
+ app.get("/status/:id", (req, res) => {
   const clienteId = getClienteId(req);
   const idOriginal = req.params.id;
 
-  const id =
-    statusSessao[idOriginal] !== undefined
+  const id = String(idOriginal).startsWith(clienteId + "_")
+    ? idOriginal
+    : statusSessao[idOriginal] !== undefined
       ? idOriginal
       : `${clienteId}_${idOriginal}`;
 
@@ -7558,7 +7550,9 @@ async function iniciarWhatsApp(id, clienteId = "admin", force = false) {
   console.log("🚀 Iniciando sessão:", id, "force:", force);
 
   const clienteIdFinal = clienteId || "admin";
-  const chaveSessao = `${clienteIdFinal}_${id}`;
+  const chaveSessao = String(id).startsWith(clienteIdFinal + "_")
+  ? id
+  : `${clienteIdFinal}_${id}`;
 
   const statusAtual = statusSessao[chaveSessao];
 
