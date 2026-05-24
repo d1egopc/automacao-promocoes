@@ -2875,6 +2875,32 @@ app.post("/config", (req, res) => {
     }
   }
 
+if (body.horarioInicio != null) {
+  configCliente.horarioInicio = body.horarioInicio;
+
+  if (isAdmin) {
+    config.horarioInicio = body.horarioInicio;
+  }
+}
+
+if (body.horarioFim != null) {
+  configCliente.horarioFim = body.horarioFim;
+
+  if (isAdmin) {
+    config.horarioFim = body.horarioFim;
+  }
+}
+
+if (body.pausarMadrugada != null) {
+  configCliente.pausarMadrugada =
+    body.pausarMadrugada === true;
+
+  if (isAdmin) {
+    config.pausarMadrugada =
+      body.pausarMadrugada === true;
+  }
+}
+
   // ================= CONFIG CLIENTE =================
 
  if (body.automacaoAtiva != null) {
