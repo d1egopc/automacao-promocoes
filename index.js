@@ -2016,6 +2016,7 @@ app.use(rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) =>
+    req.path.startsWith("/config") ||
     req.path.startsWith("/status") ||
     req.path.startsWith("/qr") ||
     req.path.startsWith("/fila") ||
