@@ -349,57 +349,113 @@ function criarPlanosPadrao() {
   if (Object.keys(planos || {}).length) return;
 
   planos = {
+
     free: {
       nome: "free",
-      marketplaces: ["amazon", "shopee"],
+
+      marketplaces: [
+        "amazon",
+        "shopee"
+      ],
+
       limites: {
         sessoes: 1,
         destinos: 2,
-        enviosDia: 50
+        enviosDia: 50,
+        creditos: 300
       },
+
       recursos: {
+        buscaManual: true,
+        farejadorAutomatico: false,
+
+        whatsapp: true,
+        telegram: false,
+
+        multiSessao: false,
+
         linkOptimus: false,
         analytics: false,
         cupomInteligente: false
       },
+
       atualizadoEm: new Date().toISOString()
     },
 
     pro: {
       nome: "pro",
-      marketplaces: ["amazon", "shopee", "mercadolivre", "aliexpress"],
+
+      marketplaces: [
+        "amazon",
+        "shopee",
+        "mercadolivre",
+        "aliexpress"
+      ],
+
       limites: {
         sessoes: 3,
         destinos: 10,
-        enviosDia: 500
+        enviosDia: 500,
+        creditos: 2500
       },
+
       recursos: {
+        buscaManual: true,
+        farejadorAutomatico: false,
+
+        whatsapp: true,
+        telegram: true,
+
+        multiSessao: true,
+
         linkOptimus: true,
         analytics: true,
         cupomInteligente: true
       },
+
       atualizadoEm: new Date().toISOString()
     },
 
     premium: {
       nome: "premium",
-      marketplaces: ["amazon", "shopee", "mercadolivre", "aliexpress", "awin", "magalu"],
+
+      marketplaces: [
+        "amazon",
+        "shopee",
+        "mercadolivre",
+        "aliexpress",
+        "awin",
+        "magalu"
+      ],
+
       limites: {
         sessoes: 10,
         destinos: 50,
-        enviosDia: 5000
+        enviosDia: 5000,
+        creditos: 9500
       },
+
       recursos: {
+        buscaManual: true,
+        farejadorAutomatico: true,
+
+        whatsapp: true,
+        telegram: true,
+
+        multiSessao: true,
+
         linkOptimus: true,
         analytics: true,
         cupomInteligente: true,
         adminAvancado: true
       },
+
       atualizadoEm: new Date().toISOString()
     }
   };
 
   salvarPlanos();
+
   console.log("✅ Planos padrão criados");
 }
 
@@ -5585,89 +5641,85 @@ if (mp === "magalu") {
   }
 }
 
-
 // =============== FUNCAO DISTRIBUIDOR OFERTAS ======================================
 
 async function distribuirOfertaParaClientes(ofertaBase) {
-
   for (const usuario of usuarios) {
-
     if (!usuario?.ativo) continue;
 
     const clienteId = usuario.id;
+    const adminMaster = usuario.papel === "admin_master";
 
-   const adminMaster =
-   usuario.papel === "admin_master";
+    const plano = getPlanoPorNome(usuario.plano) || {};
+    const marketplacesLiberados = plano.marketplaces || [];
+    const mp = normalizarTexto(ofertaBase.marketplace || "");
 
-   if (adminMaster) {
-   console.log("👑 Admin Master recebe oferta:", ofertaBase.titulo);
-   }
+    if (!adminMaster && !marketplacesLiberados.includes(mp)) {
+      console.log("⏭️ Usuário não recebe marketplace pelo plano:", {
+        clienteId,
+        plano: usuario.plano,
+        marketplace: mp
+      });
+      continue;
+    }
 
-    const plano =
-      getPlanoPorNome(usuario.plano) || {};
+    const linkOriginal =
+      ofertaBase.linkOriginal ||
+      ofertaBase.link ||
+      ofertaBase.linkAfiliado ||
+      "";
 
-    const marketplacesLiberados =
-      plano.marketplaces || [];
-
-   if (
-  !adminMaster &&
-  !marketplacesLiberados.includes(ofertaBase.marketplace)
-  ) {
-  continue;
-  }
-
-    console.log("📦 Distribuindo oferta:", {
+    const linkAfiliadoCliente = await gerarLinkAfiliadoCliente(
       clienteId,
-      marketplace: ofertaBase.marketplace,
-      titulo: ofertaBase.titulo
-    });
-    
-    const linkAfiliadoCliente =
-    await gerarLinkAfiliadoCliente(
-    clienteId,
-    ofertaBase.marketplace,
-    ofertaBase.linkOriginal || ofertaBase.link,
-    ofertaBase
-  );
-    
-  const ofertaCliente = {
-  ...ofertaBase,
-  clienteId,
+      mp,
+      linkOriginal,
+      ofertaBase
+    );
 
-  linkAfiliado: linkAfiliadoCliente,
-  link: linkAfiliadoCliente,
+    if (!linkAfiliadoCliente || linkAfiliadoCliente === linkOriginal) {
+      console.log("🚫 Oferta bloqueada: cliente sem link afiliado próprio:", {
+        clienteId,
+        marketplace: mp,
+        titulo: ofertaBase.titulo
+      });
+      continue;
+    }
 
-  status: "pendente",
-  destinosEnviados: [],
-  logsEnvio: [],
-  enviadoEm: "",
-  dataEnvio: "",
-  statusDetalhe: "Aguardando envio",
-  criadoEm: new Date().toLocaleString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-  })
-};
+    const ofertaCliente = {
+      ...ofertaBase,
+      clienteId,
+      marketplace: mp,
+      linkAfiliado: linkAfiliadoCliente,
+      link: linkAfiliadoCliente,
+      status: "pendente",
+      destinosEnviados: [],
+      logsEnvio: [],
+      enviadoEm: "",
+      dataEnvio: "",
+      statusDetalhe: "Aguardando envio",
+      criadoEm: new Date().toLocaleString("pt-BR", {
+        timeZone: "America/Sao_Paulo"
+      })
+    };
 
     const jaExisteCliente = fila.some(o =>
-    String(o.clienteId || "admin") === String(clienteId) &&
-   (
-    String(o.link || o.linkAfiliado || "") === String(ofertaCliente.link || ofertaCliente.linkAfiliado || "") ||
-    normalizarTexto(o.titulo || o.nome || "") === normalizarTexto(ofertaCliente.titulo || ofertaCliente.nome || "")
-   )
-  );
+      String(o.clienteId || "admin") === String(clienteId) &&
+      (
+        String(o.link || o.linkAfiliado || "") === String(ofertaCliente.link || ofertaCliente.linkAfiliado || "") ||
+        normalizarTexto(o.titulo || o.nome || "") === normalizarTexto(ofertaCliente.titulo || ofertaCliente.nome || "")
+      )
+    );
 
-   if (!jaExisteCliente) {
+    if (jaExisteCliente) continue;
 
-      fila.push(ofertaCliente);
+    fila.push(ofertaCliente);
+    salvarFila();
 
-      salvarFila();
-
-      console.log("✅ Oferta distribuída para cliente:", {
-        clienteId,
-        titulo: ofertaCliente.titulo,
-        marketplace: ofertaCliente.marketplace
-      });
-    }
+    console.log("✅ Oferta distribuída para cliente:", {
+      clienteId,
+      titulo: ofertaCliente.titulo,
+      marketplace: ofertaCliente.marketplace
+    });
   }
 }
 
@@ -8504,6 +8556,14 @@ async function rodarProximoMarketplace() {
     automacaoAtiva: config.automacaoAtiva,
     horarioOk: podeRodarAgora()
   });
+
+// Farejador global roda apenas no ADMIN MASTER
+const admin = usuarios.find(u => u.papel === "admin_master");
+
+if (!admin) {
+  console.log("⛔ Nenhum admin master encontrado. Farejador global bloqueado.");
+  return;
+}
 
   if (farejadorRodando) return;
 
