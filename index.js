@@ -3246,11 +3246,10 @@ app.post("/desconectar/:id", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
 
-    const id = isAdminMaster(req)
-  ? req.params.id
-  : String(req.params.id).startsWith(clienteId + "_")
-    ? req.params.id
-    : `${clienteId}_${req.params.id}`;
+  const id = normalizarSessaoId(
+  clienteId,
+  req.params.id
+  );
 
     if (sessoes[id]) {
       try {
@@ -3294,9 +3293,10 @@ app.post("/limpar-sessao/:id", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
 
-    const id = isAdminMaster(req)
-      ? req.params.id
-      : `${clienteId}_${req.params.id}`;
+    const id = normalizarSessaoId(
+    clienteId,
+    req.params.id
+    );
 
     if (sessoes[id]) {
       try {
@@ -5707,6 +5707,25 @@ if (mp === "magalu") {
   }
 }
 
+// =========================== HEPERS DE WHATSAPP =================================
+
+function normalizarSessaoId(clienteId, id = "sessao1") {
+
+  const cliente = String(clienteId || "admin").trim();
+
+  let sessao = String(id || "sessao1").trim();
+
+  // remove duplicação
+  if (sessao.startsWith(cliente + "_")) {
+    sessao = sessao.slice((cliente + "_").length);
+  }
+
+  // evita admin_admin_sessao1
+  sessao = sessao.replace(/^admin_/g, "");
+
+  return `${cliente}_${sessao}`;
+}
+
 // ============== HELPERS DISTRIBUIDOR OFERTAS =====================================
 
 function usuarioPodeReceberMarketplace(usuario, marketplace) {
@@ -7308,9 +7327,10 @@ app.post("/sessoes", (req, res) => {
 
     const total = Object.keys(sessoesMeta).length + 1;
     const nomeSessao = req.body.id || `sessao${total}`;
-    const id = clienteId === "admin"
-   ? nomeSessao
-   : `${clienteId}_${nomeSessao}`;
+    const id = normalizarSessaoId(
+    clienteId,
+    nomeSessao
+    );
 
     if (sessoesMeta[id]) {
       return res.status(400).json({
@@ -7346,11 +7366,10 @@ app.delete("/sessoes/:id", async (req, res) => {
   try {
   const clienteId = getClienteId(req);
 
-const id = isAdminMaster(req)
-  ? req.params.id
-  : String(req.params.id).startsWith(clienteId + "_")
-    ? req.params.id
-    : `${clienteId}_${req.params.id}`;
+  const id = normalizarSessaoId(
+  clienteId,
+  req.params.id
+  );
 
 const idsPossiveis = [...new Set([
   id,
@@ -7402,10 +7421,8 @@ const idsPossiveis = [...new Set([
 });
 
 app.post("/reset/:id", async (req, res) => {
-  const clienteId = getClienteId(req);
-  const id = isAdminMaster(req)
-  ? req.params.id
-  : `${clienteId}_${req.params.id}`;
+ const clienteId = getClienteId(req);
+ const id = normalizarSessaoId(clienteId, req.params.id);
 
   try {
     console.log("🔄 Resetando sessão:", id);
@@ -7476,46 +7493,35 @@ app.post("/conectar", async (req, res) => {
     return res.status(400).json({ erro: "ID obrigatório" });
   }
 
-  const sessaoId = clienteId === "admin"
-  ? id
-  : String(id).startsWith(clienteId + "_")
-    ? id
-    : `${clienteId}_${id}`;
-
-  if (!id) return res.status(400).json({ erro: "ID obrigatório" });
+  const sessaoId = normalizarSessaoId(clienteId, id);
 
   config.sessoesWhatsapp = config.sessoesWhatsapp || [];
 
   if (!config.sessoesWhatsapp.includes(sessaoId)) {
-  config.sessoesWhatsapp.push(sessaoId);
-  salvarConfig();
-  console.log("💾 Sessão WhatsApp salva para reconexão:", id);
- }
+    config.sessoesWhatsapp.push(sessaoId);
+    salvarConfig();
+    console.log("💾 Sessão WhatsApp salva para reconexão:", sessaoId);
+  }
 
- iniciarWhatsApp(sessaoId, clienteId, false);
+  iniciarWhatsApp(sessaoId, false);
 
   return res.json({
-  ok: true,
-  message: "Sessão iniciada",
-  id: sessaoId
+    ok: true,
+    message: "Sessão iniciada",
+    id: sessaoId
   });
-  });
+});
 
 app.get("/status/:id", (req, res) => {
   const clienteId = getClienteId(req);
   const idOriginal = req.params.id;
 
-  const id = clienteId === "admin"
-    ? idOriginal
-    : String(idOriginal).startsWith(clienteId + "_")
-      ? idOriginal
-      : statusSessao[idOriginal] !== undefined
-        ? idOriginal
-        : `${clienteId}_${idOriginal}`;
+  const id = normalizarSessaoId(clienteId, idOriginal);
 
   res.json({
     conectado: statusSessao[id] === "open",
-    status: statusSessao[id] || "offline"
+    status: statusSessao[id] || "offline",
+    id
   });
 });
 
@@ -7523,21 +7529,20 @@ app.get("/qr/:id", (req, res) => {
   const clienteId = getClienteId(req);
   const idOriginal = req.params.id;
 
-  const id =
-    qrCodes[idOriginal] !== undefined
-      ? idOriginal
-      : `${clienteId}_${idOriginal}`;
+  const id = normalizarSessaoId(clienteId, idOriginal);
 
   if (!qrCodes[id]) {
     return res.json({
       status: "loading",
-      qr: null
+      qr: null,
+      id
     });
   }
 
   return res.json({
     status: "ready",
-    qr: qrCodes[id]
+    qr: qrCodes[id],
+    id
   });
 });
 
@@ -7581,13 +7586,13 @@ if (gruposPorSessao[id]?.length) {
   }
 }
 
-app.get("/grupos/:id", async (req, res) => {
+  app.get("/grupos/:id", async (req, res) => {
   const clienteId = getClienteId(req);
-  const id = clienteId === "admin"
-  ? req.params.id
-  : String(req.params.id).startsWith(clienteId + "_")
-    ? req.params.id
-    : `${clienteId}_${req.params.id}`;
+
+  const id = normalizarSessaoId(
+    clienteId,
+    req.params.id
+  );
 
   const lista = await carregarGruposSessao(id);
 
@@ -7664,9 +7669,10 @@ const limiteDestinos = isAdminMaster(req)
 
   const clienteId = getClienteId(req);
 
-  const id = clienteId === "admin"
-    ? req.params.id
-    : `${clienteId}_${req.params.id}`;
+  const id = normalizarSessaoId(
+  clienteId,
+  req.params.id
+);
 
   destinosPorSessao[id] = destinos;
 
@@ -7691,9 +7697,10 @@ const limiteDestinos = isAdminMaster(req)
 app.get("/destinos/:id", (req, res) => {
   const clienteId = getClienteId(req);
 
-  const id = clienteId === "admin"
-    ? req.params.id
-    : `${clienteId}_${req.params.id}`;
+  const id = normalizarSessaoId(
+  clienteId,
+  req.params.id
+ );
 
   const destinos =
     destinosPorCliente?.[clienteId]?.[id] || [];
@@ -7756,12 +7763,10 @@ async function enviarTelegram(oferta, mensagem) {
 
 // ================= FUNCÃO WHATSAPP =================
 
-async function iniciarWhatsApp(id, clienteId = "admin", force = false) {
+async function iniciarWhatsApp(id, force = false) {
   console.log("🚀 Iniciando sessão:", id, "force:", force);
 
-  const clienteIdFinal = clienteId || "admin";
-  const chaveSessao = `${clienteIdFinal}_${id}`;
-
+  const chaveSessao = id;
   const statusAtual = statusSessao[chaveSessao];
 
   if (!force && sessoes[id] && ["connecting", "qr", "open", "reconnecting"].includes(statusAtual)) {
