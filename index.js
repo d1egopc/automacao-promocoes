@@ -3613,9 +3613,21 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
     });
   }
 
+  const credenciais = config.credenciais || {};
+
+  const temAlgumaCredencial = Object.values(credenciais)
+    .some(v => String(v || "").trim());
+
+  if (!temAlgumaCredencial) {
+    return res.status(400).json({
+      ok: false,
+      erro: "Insira as credenciais antes de testar."
+    });
+  }
+
   if (marketplace === "awin") {
     try {
-      const { publisherId, apiToken } = config.credenciais || {};
+      const { publisherId, apiToken } = credenciais;
 
       if (!publisherId || !apiToken) {
         return res.status(400).json({
@@ -3657,8 +3669,8 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
   return res.json({
     ok: true,
     marketplace,
-    status: "conectado",
-    message: `${config.nome || marketplace} configurado.`
+    status: "credenciais_presentes",
+    message: `${config.nome || marketplace} possui credenciais salvas.`
   });
 });
 
