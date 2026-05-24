@@ -8391,6 +8391,16 @@ function podeRodarAgora() {
   return horaAtual >= inicio || horaAtual <= fim;
 }
 
+carregarConfig();
+carregarFila();
+
+console.log("🚀 Dados iniciais carregados:", {
+  fila: fila.length,
+  usuarios: usuarios.length,
+  integracoesClientes: Object.keys(integracoesPorCliente || {}).length,
+  destinosClientes: Object.keys(destinosPorCliente || {}).length
+});
+
 app.listen(PORT, () => {
   console.log("🔥 API ONLINE NA PORTA " + PORT);
 
