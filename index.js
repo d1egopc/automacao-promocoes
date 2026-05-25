@@ -214,40 +214,29 @@ function salvarFila(clienteId = "admin") {
 
 function carregarFila(clienteId = "admin") {
   try {
+    const file = getFilaFile(clienteId);
 
-   const filaCliente = JSON.parse(data);
+    if (fs.existsSync(file)) {
+      const data = fs.readFileSync(file, "utf8");
 
-const filaLimpa = filaCliente.filter(
-  o => o?.clienteId
-);
+      if (data) {
+        const filaCliente = JSON.parse(data);
 
-fila = fila.filter(
-  o => String(o.clienteId || "admin") !== String(clienteId)
-);
-
-fila.push(...filaLimpa);
-
-        console.log(
-          `✅ Fila carregada do cliente: ${clienteId}`
+        const filaLimpa = filaCliente.filter(
+          o => o?.clienteId
         );
+
+        fila = fila.filter(
+          o => String(o.clienteId || "admin") !== String(clienteId)
+        );
+
+        fila.push(...filaLimpa);
+
+        console.log(`✅ Fila carregada do cliente: ${clienteId}`);
       }
     }
-
   } catch (e) {
     console.error("❌ ERRO AO CARREGAR FILA:", e.message);
-  }
-}
-
-function salvarConfig() {
-  try {
-    fs.writeFileSync(
-      CONFIG_FILE,
-      JSON.stringify(config, null, 2)
-    );
-
-    console.log("💾 Config salva");
-  } catch (e) {
-    console.error("❌ ERRO AO SALVAR CONFIG:", e.message);
   }
 }
 
