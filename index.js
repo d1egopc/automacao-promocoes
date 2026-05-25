@@ -2521,18 +2521,39 @@ app.delete("/fila/item/:id", (req, res) => {
 
 app.delete("/fila/limpar", (req, res) => {
   const clienteId = getClienteId(req);
+  const status = req.query.status;
+
   const antes = fila.length;
 
-  fila = fila.filter(item =>
-    String(item.clienteId || "admin") !== String(clienteId)
-  );
+  fila = fila.filter(item => {
+    const dono = String(item.clienteId || "admin");
+
+    const mesmoCliente =
+      dono === String(clienteId);
+
+    const mesmoStatus =
+      status
+        ? String(item.status) === String(status)
+        : true;
+
+    return !(mesmoCliente && mesmoStatus);
+  });
+
+  const removidos = antes - fila.length;
 
   salvarFila();
 
+  console.log("🧹 LIMPEZA FILA:", {
+    clienteId,
+    status: status || "todos",
+    removidos
+  });
+
   return res.json({
     ok: true,
-    removidos: antes - fila.length,
-    message: "Fila do usuário limpa com sucesso"
+    clienteId,
+    status: status || "todos",
+    removidos
   });
 });
 
@@ -8649,9 +8670,34 @@ function podeRodarAgora() {
 }
 
 carregarConfig();
+
 for (const usuario of usuarios) {
   carregarFila(usuario.id);
 }
+
+function garantirIdsFila() {
+  let alterou = false;
+
+  fila = fila.map((item) => {
+    if (!item.id) {
+      alterou = true;
+
+      return {
+        ...item,
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      };
+    }
+
+    return item;
+  });
+
+  if (alterou) {
+    salvarFila();
+    console.log("🆔 IDs antigos da fila corrigidos");
+  }
+}
+
+garantirIdsFila();
 
 console.log("🚀 Dados iniciais carregados:", {
   fila: fila.length,
