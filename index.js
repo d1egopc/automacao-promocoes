@@ -3616,6 +3616,37 @@ return res.json({
 });
 });
 
+app.delete("/integracoes/:marketplace", (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    const marketplace = req.params.marketplace.toLowerCase();
+
+    if (!integracoesPorCliente[clienteId]) {
+      integracoesPorCliente[clienteId] = {};
+    }
+
+    delete integracoesPorCliente[clienteId][marketplace];
+
+    salvarIntegracoesPersistidas();
+
+    return res.json({
+      ok: true,
+      marketplace,
+      configurado: false,
+      status: "nao_configurado",
+      message: "Integração removida com sucesso"
+    });
+
+  } catch (e) {
+    console.log("❌ Erro ao remover integração:", e.message);
+
+    return res.status(500).json({
+      ok: false,
+      erro: "Erro interno ao remover integração"
+    });
+  }
+});
+
 app.post("/integracoes/:marketplace/test", async (req, res) => {
   const clienteId = getClienteId(req);
   const marketplace = req.params.marketplace.toLowerCase();
