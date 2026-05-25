@@ -2493,6 +2493,49 @@ app.post("/automacao/toggle", (req, res) => {
   });
 });
 
+
+app.delete("/fila/item/:id", (req, res) => {
+  const clienteId = getClienteId(req);
+  const id = req.params.id;
+
+  const index = fila.findIndex(item =>
+    String(item.id) === String(id) &&
+    String(item.clienteId || "admin") === String(clienteId)
+  );
+
+  if (index === -1) {
+    return res.status(404).json({
+      ok: false,
+      erro: "Item não encontrado para este usuário"
+    });
+  }
+
+  fila.splice(index, 1);
+  salvarFila();
+
+  return res.json({
+    ok: true,
+    message: "Item removido da fila"
+  });
+});
+
+app.delete("/fila/limpar", (req, res) => {
+  const clienteId = getClienteId(req);
+  const antes = fila.length;
+
+  fila = fila.filter(item =>
+    String(item.clienteId || "admin") !== String(clienteId)
+  );
+
+  salvarFila();
+
+  return res.json({
+    ok: true,
+    removidos: antes - fila.length,
+    message: "Fila do usuário limpa com sucesso"
+  });
+});
+
 app.delete("/fila/:index", (req, res) => {
   const index = Number(req.params.index);
   const clienteId = getClienteId(req);
