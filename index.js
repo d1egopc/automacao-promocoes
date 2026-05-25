@@ -8001,134 +8001,100 @@ salvarSessoesMeta();
 
 async function farejarMercadoLivre(clienteIdAlvo = "admin") {
   try {
+    const cfgMl = config.marketplaces?.mercadolivre || {};
 
-if (!config.marketplaces?.mercadolivre?.ativo) {
-  console.log("⏸ Mercado Livre desativado. Farejador ignorado.");
-  return;
-}
-    console.log("🐶 Farejando ofertas ML (modo stealth)...");
+    if (!cfgMl.ativo) {
+      console.log("⏸ Mercado Livre desativado. Farejador ignorado.");
+      return;
+    }
+
+    console.log("🐶 Farejando ofertas ML:", clienteIdAlvo);
+
+    const clienteId = clienteIdAlvo || "admin";
+    const integracaoMl = getIntegracaoCliente(clienteId, "mercadolivre");
+
+    if (!integracaoMl?.credenciais?.cookies || !integracaoMl?.credenciais?.tag) {
+      console.log("🚫 ML sem cookies/tag para cliente:", clienteId);
+      return;
+    }
 
     const buscas = gerarBuscasGlobais(40);
+    const limiteBuscas = cfgMl.limiteBuscasPorRodada || 1;
+    const precoMinimo = Number(cfgMl.precoMinimo || 10);
+    const descontoMinimo = Number(cfgMl.descontoMinimo || 0);
 
-      const limiteBuscas =
-      config.marketplaces?.mercadolivre?.limiteBuscasPorRodada || 1;
+    const buscasDaRodada = [...buscas]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, limiteBuscas);
 
-      const buscasEmbaralhadas = [...buscas].sort(() => Math.random() - 0.5);
-      const buscasDaRodada = buscasEmbaralhadas.slice(0, limiteBuscas);
-
-      for (const termo of buscasDaRodada) {
+    for (const termo of buscasDaRodada) {
       try {
         const url = `https://lista.mercadolivre.com.br/${encodeURIComponent(termo)}`;
 
-       console.log("🌐 MERCADO LIVRE URL:", url);
+        console.log("🌐 MERCADO LIVRE URL:", url);
 
-   const response = await fetch(url, {
-  headers: {
-    ...gerarHeadersStealth(),
-    ...(getIntegracaoCliente(clienteIdAlvo, "mercadolivre")?.credenciais?.cookies
-      ? {
-          Cookie:
-            getIntegracaoCliente(clienteIdAlvo, "mercadolivre").credenciais.cookies
+        const response = await fetch(url, {
+          headers: {
+            ...gerarHeadersStealth(),
+            Cookie: integracaoMl.credenciais.cookies
+          }
+        });
+
+        console.log("📡 STATUS ML:", response.status);
+
+        if (!response.ok) {
+          console.log("🛡️ ML bloqueou status:", response.status);
+          await new Promise(r => setTimeout(r, 15000));
+          return;
         }
-      : {})
-  }
-});
-        console.log("🌐 URL:", url);
-        console.log("📡 STATUS:", response.status);
 
-       if (!response.ok) {
+        const html = await response.text();
 
-      console.log(
-    "🛡️ ML bloqueou status:",
-    response.status,
-    "- parando rodada."
-  );
+        if (html.includes("suspicious-traffic-frontend")) {
+          console.log("🛡️ Mercado Livre bloqueou por tráfego suspeito.");
+          return;
+        }
 
-  await new Promise(r => setTimeout(r, 15000));
+        await farejarCuponsMercadoLivre(html);
 
-  return;
-}
-
-const html = await response.text(); 
-
-await farejarCuponsMercadoLivre(html);
-
-if (html.includes("suspicious-traffic-frontend")) {
-  console.log("🛡️ Mercado Livre bloqueou por tráfego suspeito.");
-  return;
-}
-
-let cupom = "";
-let avisoCupom = "";
-        
-        console.log("🧪 TEM MLB?", html.includes("MLB"));
-        console.log("🧪 TEM item?", html.includes("item"));
-        console.log("🧪 HTML INICIO:", html.slice(0, 1000));
-        
-        const cupomMatch =
-  html.match(/cupom\s+([A-Z0-9]{4,20})/i) ||
-  html.match(/código\s+([A-Z0-9]{4,20})/i) ||
-  html.match(/use\s+o\s+cupom\s+([A-Z0-9]{4,20})/i) ||
-  html.match(/aplique\s+o\s+cupom\s+([A-Z0-9]{4,20})/i);
-
-if (cupomMatch?.[1]) {
-  cupom = cupomMatch[1].trim().toUpperCase();
-  avisoCupom = `Aplique o cupom ${cupom} antes de finalizar.`;
-} else if (/cupom|código promocional|desconto extra|aplicar desconto/i.test(html)) {
-  avisoCupom = "Há possível cupom/desconto extra na página. Confira antes de finalizar.";
-}
-
-const compraNoApp =
-  /compra\s+no\s+app/i.test(html) ||
-  /menor\s+preço\s+no\s+app/i.test(html) ||
-  /app\s+garante/i.test(html) ||
-  /desconto\s+no\s+app/i.test(html);
-
-if (compraNoApp && !cupom) {
-  cupom = "VER NO APP";
-  avisoCupom = "📱 Confira pelo app do Mercado Livre, pode aparecer menor valor ou desconto exclusivo.";
-}
-        
         const linksExtraidos = [
-  ...html.matchAll(/href="([^"]*\/MLB-[^"]*)"/g),
-  ...html.matchAll(/href="([^"]*\/p\/MLB[^"]*)"/g),
-  ...html.matchAll(/"permalink":"([^"]*MLB[^"]*)"/g),
-  ...html.matchAll(/"url":"([^"]*MLB[^"]*)"/g)
-]
-  .map(m => m[1] || m[0])
-  .map(link => {
-    let limpo = String(link)
-      .replace(/\\\//g, "/")
-      .replace(/&amp;/g, "&")
-      .split("#")[0];
+          ...html.matchAll(/href="([^"]*\/MLB-[^"]*)"/g),
+          ...html.matchAll(/href="([^"]*\/p\/MLB[^"]*)"/g),
+          ...html.matchAll(/"permalink":"([^"]*MLB[^"]*)"/g),
+          ...html.matchAll(/"url":"([^"]*MLB[^"]*)"/g)
+        ]
+          .map(m => m[1] || m[0])
+          .map(link => {
+            let limpo = String(link)
+              .replace(/\\\//g, "/")
+              .replace(/&amp;/g, "&")
+              .split("#")[0];
 
-    if (limpo.startsWith("/")) {
-      limpo = "https://www.mercadolivre.com.br" + limpo;
-    }
+            if (limpo.startsWith("/")) {
+              limpo = "https://www.mercadolivre.com.br" + limpo;
+            }
 
-    return limpo;
-  })
-  .filter(link =>
-    link.includes("mercadolivre.com.br") &&
-    link.includes("MLB") &&
-    !link.includes("lista.mercadolivre") &&
-    !link.includes("registration") &&
-    !link.includes("security.js") &&
-    !link.includes("privacidade") &&
-    !link.includes("account-verification")
-  );
+            return limpo;
+          })
+          .filter(link =>
+            link.includes("mercadolivre.com.br") &&
+            link.includes("MLB") &&
+            !link.includes("lista.mercadolivre") &&
+            !link.includes("registration") &&
+            !link.includes("security.js") &&
+            !link.includes("privacidade") &&
+            !link.includes("account-verification")
+          );
 
         const links = [...new Set(linksExtraidos)].slice(0, 8);
-        console.log("🧪 LINKS LIMPOS:", links);
 
         console.log(`🔎 ${termo}: ${links.length} produtos`);
 
         for (const link of links) {
           try {
-           
-const produto = await importarMercadoLivre(link, clienteIdAlvo);
+            const produto = await importarMercadoLivre(link, clienteId);
 
-            if (!produto.precoAtual) continue;
+            if (!produto?.precoAtual) continue;
 
             const precoNumero = Number(
               String(produto.precoAtual)
@@ -8151,76 +8117,75 @@ const produto = await importarMercadoLivre(link, clienteIdAlvo);
                 ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
                 : 0;
 
-             if (!precoNumero || !Number.isFinite(precoNumero)) continue;
+            if (!precoNumero || !Number.isFinite(precoNumero)) continue;
+            if (precoNumero < precoMinimo) continue;
 
-if (precoNumero < (config.marketplaces?.mercadolivre?.precoMinimo || 25)) continue;
+            if (
+              desconto < descontoMinimo &&
+              !produto.avisoCupom &&
+              !produto.linkAfiliado
+            ) {
+              console.log("⏭️ ML bloqueado por desconto:", {
+                titulo: produto.titulo,
+                desconto: Math.round(desconto),
+                descontoMinimo
+              });
+              continue;
+            }
 
-if (
-  desconto < (config.marketplaces?.mercadolivre?.descontoMinimo || 20) &&
-  !produto.avisoCupom
-) continue;
+            const tituloLower = String(produto.titulo || "").toLowerCase();
 
-const tituloLower = String(produto.titulo || "").toLowerCase();
+            if (
+              tituloLower.includes("refil") ||
+              tituloLower.includes("amostra") ||
+              tituloLower.includes("teste")
+            ) continue;
 
-if (
-  tituloLower.includes("refil") ||
-  tituloLower.includes("amostra") ||
-  tituloLower.includes("mini") ||
-  tituloLower.includes("teste")
-) continue;
+            let novaOferta = {
+              nome: produto.titulo,
+              titulo: produto.titulo,
+              preco: produto.precoAtual,
+              precoAtual: produto.precoAtual,
+              precoAntigo: produto.precoAntigo || "",
+              cupom: produto.cupom || "",
+              avisoCupom: produto.avisoCupom || "",
+              parcelamento: produto.parcelamento || "",
+              linkOriginal: produto.linkOriginal || link,
+              link: produto.linkAfiliado || produto.linkOriginal || link,
+              linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
+              imagem: produto.imagem || "",
+              marketplace: "mercadolivre",
+              categoria: classificarCategoriaOferta(produto, termo),
+              sessaoId: normalizarSessaoId(clienteId, "sessao1"),
+              status: "pendente",
+              clienteId
+            };
 
-            const clienteId = clienteIdAlvo || "admin";
+            novaOferta = prepararOfertaGlobal(novaOferta);
 
-let novaOferta = {
-  nome: produto.titulo,
-  titulo: produto.titulo,
-  preco: produto.precoAtual,
-  precoAtual: produto.precoAtual,
-  precoAntigo: produto.precoAntigo || "",
-  cupom: produto.cupom || "",
-  avisoCupom: produto.avisoCupom || "",
-  parcelamento: produto.parcelamento || "",
-  linkOriginal: produto.linkOriginal || link,
-  link: produto.linkOriginal || link,
-  linkAfiliado: "",
-  imagem: produto.imagem || "",
-  marketplace: "mercadolivre",
-  categoria: classificarCategoriaOferta(produto, termo),
-  sessaoId: normalizarSessaoId(clienteId, "sessao1"),
-  status: "pendente",
-  clienteId
-};
-            
+            const jaExiste = ofertaJaExiste(novaOferta);
 
-          novaOferta = prepararOfertaGlobal(novaOferta);
-
-          const jaExiste = ofertaJaExiste(novaOferta);
-
-          if (!jaExiste) {
-          fila.unshift(novaOferta);
-          salvarFila(clienteId);
+            if (!jaExiste) {
+              fila.unshift(novaOferta);
+              salvarFila(clienteId);
 
               console.log("🤖 Nova oferta ML:", {
+                clienteId,
                 titulo: novaOferta.titulo,
                 preco: novaOferta.precoAtual,
-                precoAntigo: novaOferta.precoAntigo,
                 desconto: Math.round(desconto) + "%",
                 link: novaOferta.link
               });
             }
 
-            await new Promise(r =>
-            setTimeout(r, 4000 + Math.random() * 4000)
-            );
+            await new Promise(r => setTimeout(r, 4000 + Math.random() * 4000));
 
           } catch (e) {
             console.log("❌ erro produto ML:", e.message);
           }
         }
 
-         await new Promise(r =>
-         setTimeout(r, 4000 + Math.random() * 6000)
-        );
+        await new Promise(r => setTimeout(r, 4000 + Math.random() * 6000));
 
       } catch (e) {
         console.log("❌ erro busca ML:", e.message);
@@ -8231,7 +8196,6 @@ let novaOferta = {
     console.log("❌ erro farejador ML:", e.message);
   }
 }
-
 
 // ================= FAREJADOR AMAZON =================
 
