@@ -2283,13 +2283,19 @@ app.post("/enviar-manual", async (req, res) => {
     const clienteId = oferta.clienteId || "admin";
     controleEnvio[clienteId] = 0;
 
-    const automacaoAnterior = config.automacaoAtiva;
-    config.automacaoAtiva = true;
+const clienteId = oferta.clienteId || "admin";
+controleEnvio[clienteId] = 0;
 
-    await processarFila();
+const configCliente =
+  configsPorCliente?.[clienteId] || config;
 
-    config.automacaoAtiva = automacaoAnterior;
+const automacaoAnterior = configCliente.automacaoAtiva;
+configCliente.automacaoAtiva = true;
 
+await processarFila(clienteId);
+
+configCliente.automacaoAtiva = automacaoAnterior;
+  
     return res.json({
       ok: true,
       mensagem: "Oferta enviada manualmente",
@@ -2672,7 +2678,7 @@ const indexReal = fila.findIndex(o => o === oferta);
 
   configCliente.automacaoAtiva = true;
 
-  await processarFila(clienteIdReq);
+  await processarFila(clienteId);
 
   configCliente.automacaoAtiva = automacaoAnterior;
 
@@ -6466,7 +6472,9 @@ async function farejarAwin() {
         continue;
       }
 
-      const oferta = {
+     const clienteId = clienteIdAlvo || "admin";
+
+     const oferta = {
         id: Date.now() + "-" + Math.random().toString(36).slice(2),
         titulo,
         precoAtual: preco ? `R$ ${preco.toFixed(2).replace(".", ",")}` : "",
@@ -6482,7 +6490,8 @@ async function farejarAwin() {
         loja: "KaBuM",
         categoria,
         status: "pendente",
-        clienteId: "admin",
+        clienteId,
+        sessaoId: normalizarSessaoId(clienteId, "sessao1"),
         criadoEm: new Date().toISOString()
       };
 
