@@ -1837,8 +1837,7 @@ if (!clienteAtivo) {
 
     let idSessao =
       oferta.sessaoId ||
-      oferta.idSessao ||
-      oferta.id ||
+      oferta.idSessao ||  
       Object.keys(destinosPorSessao || {}).find(id =>
       String(id).startsWith(clienteId + "_") &&
       destinosPorSessao[id]?.length &&
