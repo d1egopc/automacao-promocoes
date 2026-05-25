@@ -2056,22 +2056,13 @@ if (antigo > atual && atual > 0) {
 // ================= ENVIO DESTINOS INTELIGENTES =================
 
 for (const destino of destinosInteligentes) {
-
-if (!categoriaPermitidaNoDestino(oferta, destino)) {
-  console.log("⏭️ Categoria bloqueada para destino:", {
-    destino: destino.nome,
-    categoriaOferta: oferta.categoria
-  });
-
-  continue;
-}
   await enviarParaDestinoInteligente(
-  destino,
-  oferta,
-  mensagem,
-  clienteId,
-  configCliente
-);
+    destino,
+    oferta,
+    mensagem,
+    clienteId,
+    configCliente
+  );
 }
 
 controleEnvio[clienteId] = Date.now();
