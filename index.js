@@ -1767,12 +1767,19 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
 
 // ================= FUNCÃO PROCESSA FILA =================
 
-async function processarFila() {
+async function processarFila(clienteIdAlvo = null) {
   if (enviandoAgora) return;
   enviandoAgora = true;
 
   try {
     const oferta = fila.find(o => {
+
+  const mesmoCliente =
+    !clienteIdAlvo ||
+    String(o.clienteId || "admin") === String(clienteIdAlvo);
+
+  if (!mesmoCliente) return false;
+
   if (o.status !== "pendente") return false;
 
   const clienteIdOferta = o.clienteId || "admin";
@@ -2642,7 +2649,7 @@ const indexReal = fila.findIndex(o => o === oferta);
 
   configCliente.automacaoAtiva = true;
 
-  await processarFila();
+  await processarFila(clienteIdReq);
 
   configCliente.automacaoAtiva = automacaoAnterior;
 
