@@ -1647,7 +1647,13 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
     // ================= WHATSAPP =================
 
     if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
-      const sock = sessoes[destino.conexaoId];
+
+      console.log(
+      "🧪 DESTINO COMPLETO PARA ENVIO:",
+      JSON.stringify(destino, null, 2)
+      );   
+     
+    const sock = sessoes[destino.conexaoId];
 
       if (!sock) {
         console.log("❌ Sessão não encontrada:", destino.conexaoId);
