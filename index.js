@@ -1576,6 +1576,15 @@ console.log("🎯 DESTINO CHECK:", {
   const marketplacesDestino = (destino.marketplaces || []).map(normalizarDestino);
   const categoriasDestino = (destino.categorias || []).map(normalizarDestino);
 
+  console.log("🧪 CHECK DESTINO:", {
+  nome: destino.nome,
+  clienteIdDestino: destino.clienteId,
+  marketplaceOferta,
+  marketplacesDestino,
+  categoriaOferta,
+  categoriasDestino
+  });
+
 
   if (
     marketplacesDestino.length &&
