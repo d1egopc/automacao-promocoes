@@ -5976,7 +5976,7 @@ async function distribuirOfertaParaClientes(ofertaBase) {
 
 // ================= FAREJADOR ALIEXPRESS ========================
 
-async function farejarAliExpress() {
+async function farejarAliExpress(clienteIdAlvo = "admin") {
   try {
     if (!config.marketplaces?.aliexpress?.ativo) {
       console.log("⏸ AliExpress desativado. Farejador ignorado.");
