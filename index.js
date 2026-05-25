@@ -2280,9 +2280,6 @@ app.post("/enviar-manual", async (req, res) => {
     fila.unshift(oferta);
     salvarFila();
 
-    const clienteId = oferta.clienteId || "admin";
-    controleEnvio[clienteId] = 0;
-
 const clienteId = oferta.clienteId || "admin";
 controleEnvio[clienteId] = 0;
 
