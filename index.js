@@ -7330,8 +7330,8 @@ app.get("/sessoes", (req, res) => {
 
   const lista = Object.values(sessoesMeta)
   .filter(sessao =>
-    isAdminMaster(req) ||
-    String(sessao.id || "").startsWith(clienteId + "_")
+   String(sessao.id || "").startsWith(clienteId + "_") ||
+   (clienteId === "admin" && !String(sessao.id || "").includes("_"))
   )
   .map(sessao => {
     const id = sessao.id;
