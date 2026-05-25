@@ -3589,7 +3589,9 @@ if (!isAdminMaster(req)) {
   }
 }
 
-  const validacao = validarIntegracao(marketplace, req.body);
+  const payload = req.body?.credenciais || req.body;
+
+  const validacao = validarIntegracao(marketplace, payload);
 
   if (!validacao.ok) return res.status(400).json(validacao);
 
@@ -3601,7 +3603,7 @@ if (!isAdminMaster(req)) {
   marketplace,
   nome: marketplaceRules[marketplace]?.nome || marketplace,
   modo: validacao.modo || req.body.modo || null,
-  credenciais: validacao.clean,
+  credenciais: validacao.clean || payload,
   status: "configurado",
   atualizadoEm: new Date().toISOString()
 };
