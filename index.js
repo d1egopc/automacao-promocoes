@@ -4477,10 +4477,9 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin") {
     "Sec-Fetch-Site": "none",
     "Sec-Fetch-User": "?1",
 
-    "Referer": "https://www.google.com/",
-
-    "Cookie": cookies || ""
-  }
+    "Sec-Fetch-User": "?1",
+    "Referer": "https://www.google.com/"  
+ }
 });
 
 console.log("🌍 URL FINAL:", response.url);
