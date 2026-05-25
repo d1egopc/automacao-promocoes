@@ -3434,9 +3434,9 @@ const marketplaceRules = {
         allowed: ["modo", "appId", "accessKey", "secretKey"]
       },
       cookies: {
-        required: ["cookies"],
-        allowed: ["modo", "appId", "cookies"]
-      }
+      required: ["cookies", "tag"],
+      allowed: ["modo", "cookies", "tag"]
+     }
     }
   },
  mercadolivre: {
