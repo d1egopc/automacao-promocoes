@@ -367,6 +367,19 @@ function salvarDestinosClientes() {
   );
 }
 
+function salvarConfig() {
+  try {
+    fs.writeFileSync(
+      CONFIG_FILE,
+      JSON.stringify(config, null, 2)
+    );
+
+    console.log("💾 Config salva");
+  } catch (e) {
+    console.error("❌ ERRO AO SALVAR CONFIG:", e.message);
+  }
+}
+
 // ================ FUNCAO CRIAR PLANO =====================
 
 function criarPlanosPadrao() {
