@@ -3479,8 +3479,15 @@ function validarIntegracao(marketplace, body) {
   if (!rule) return { ok: false, erro: "Marketplace não suportado" };
 
   if (marketplace === "amazon") {
-    const modo = body.modo || "api";
-    const modeRule = rule.modes[modo];
+  let modo = body.modo;
+
+  if (!modo) {
+  if (body.cookies && body.tag) {
+    modo = "cookies";
+  } else {
+    modo = "api";
+  }
+}
 
     if (!modeRule) return { ok: false, erro: "Modo Amazon inválido" };
 
