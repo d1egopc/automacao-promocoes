@@ -215,21 +215,17 @@ function salvarFila(clienteId = "admin") {
 function carregarFila(clienteId = "admin") {
   try {
 
-    const file = getFilaFile(clienteId);
+   const filaCliente = JSON.parse(data);
 
-    if (fs.existsSync(file)) {
+const filaLimpa = filaCliente.filter(
+  o => o?.clienteId
+);
 
-      const data = fs.readFileSync(file, "utf8");
+fila = fila.filter(
+  o => String(o.clienteId || "admin") !== String(clienteId)
+);
 
-      if (data) {
-
-        const filaCliente = JSON.parse(data);
-
-        fila = fila.filter(
-          o => String(o.clienteId || "admin") !== String(clienteId)
-        );
-
-        fila.push(...filaCliente);
+fila.push(...filaLimpa);
 
         console.log(
           `✅ Fila carregada do cliente: ${clienteId}`
