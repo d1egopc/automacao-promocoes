@@ -7994,7 +7994,7 @@ salvarSessoesMeta();
 
 // ================= FAREJADOR MERCADO LIVRE =================
 
-async function farejarMercadoLivre() {
+async function farejarMercadoLivre(clienteIdAlvo = "admin") {
   try {
 
 if (!config.marketplaces?.mercadolivre?.ativo) {
@@ -8017,18 +8017,17 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
 
        console.log("🌐 MERCADO LIVRE URL:", url);
 
-      const response = await fetch(url, {
+   const response = await fetch(url, {
   headers: {
     ...gerarHeadersStealth(),
-    ...(getIntegracaoCliente("admin", "mercadolivre")?.credenciais?.cookies
+    ...(getIntegracaoCliente(clienteIdAlvo, "mercadolivre")?.credenciais?.cookies
       ? {
           Cookie:
-            getIntegracaoCliente("admin", "mercadolivre").credenciais.cookies
+            getIntegracaoCliente(clienteIdAlvo, "mercadolivre").credenciais.cookies
         }
       : {})
   }
 });
-
         console.log("🌐 URL:", url);
         console.log("📡 STATUS:", response.status);
 
