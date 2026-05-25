@@ -8858,11 +8858,40 @@ if (!admin) {
   try {
     farejadorRodando = true;
 
-    console.log(`🎯 Rodada global: ${marketplace}`);
+console.log(`🎯 Rodada multiusuário: ${marketplace}`);
 
-    await farejador();
+for (const usuario of usuarios) {
+  if (!usuario?.ativo) continue;
 
-    console.log(`✅ Rodada finalizada: ${marketplace}`);
+  const clienteId = usuario.id;
+
+  if (!usuarioPodeReceberMarketplace(usuario, marketplace)) {
+    console.log("⏭️ Usuário não recebe marketplace pelo plano:", {
+      clienteId,
+      marketplace
+    });
+    continue;
+  }
+
+  if (!usuarioTemIntegracaoMarketplace(clienteId, marketplace)) {
+    console.log("🚫 Usuário sem integração configurada:", {
+      clienteId,
+      marketplace
+    });
+    continue;
+  }
+
+  console.log("🐶 Farejando marketplace para cliente:", {
+    clienteId,
+    marketplace
+  });
+
+  await farejador(clienteId);
+}
+
+console.log(`✅ Rodada multiusuário finalizada: ${marketplace}`);
+ 
+
   } catch (e) {
     console.log(`❌ Erro na rodada ${marketplace}:`, e.message);
   } finally {
