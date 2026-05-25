@@ -4450,7 +4450,7 @@ const encurtarUrl = async (url) => {
   }
 };
 
-async function importarMercadoLivre(url, config) {
+async function importarMercadoLivre(url, clienteIdAlvo = "admin") {
   const cookies = config?.credenciais?.cookies || "";
   
   console.log("🌐 ML URL:", url);
@@ -4535,7 +4535,11 @@ if (
 }
 
 
-    const linkAfiliadoGerado = await gerarLinkAfiliadoMercadoLivre(url, config);
+    const linkAfiliadoGerado =
+  await gerarLinkAfiliadoMercadoLivre(
+    url,
+    getIntegracaoCliente(clienteIdAlvo, "mercadolivre")
+  );
 
   return {
     marketplace: "mercadolivre",
@@ -7201,7 +7205,10 @@ if (marketplace === "magalu") {
 
   if (marketplace === "mercadolivre") {
     try {
-      const produto = await importarMercadoLivre(url, config);
+      const produto = await importarMercadoLivre(
+  url,
+  clienteIdAlvo
+);
 
       if (!produto.titulo || produto.titulo === "Produto Mercado Livre") {
         return res.json({
@@ -8121,7 +8128,7 @@ if (compraNoApp && !cupom) {
         for (const link of links) {
           try {
            
-const produto = await importarMercadoLivre(link);
+const produto = await importarMercadoLivre(link, clienteIdAlvo);
 
             if (!produto.precoAtual) continue;
 
@@ -8192,7 +8199,8 @@ let novaOferta = {
           const jaExiste = ofertaJaExiste(novaOferta);
 
           if (!jaExiste) {
-          await distribuirOfertaParaClientes(novaOferta);
+          fila.unshift(novaOferta);
+          salvarFila(clienteId);
 
               console.log("🤖 Nova oferta ML:", {
                 titulo: novaOferta.titulo,
