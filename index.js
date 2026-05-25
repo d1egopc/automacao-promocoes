@@ -8094,7 +8094,15 @@ async function farejarMercadoLivre(clienteIdAlvo = "admin") {
           try {
             const produto = await importarMercadoLivre(link, clienteId);
 
-            if (!produto?.precoAtual) continue;
+            if (!produto?.precoAtual) {
+            console.log("⛔ ML sem preço após importar:", {
+            clienteId,
+            titulo: produto?.titulo,
+            linkOriginal: produto?.linkOriginal,
+            linkAfiliado: produto?.linkAfiliado
+            });
+            continue;
+            }
 
             const precoNumero = Number(
               String(produto.precoAtual)
