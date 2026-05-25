@@ -3489,9 +3489,11 @@ function validarIntegracao(marketplace, body) {
   }
 }
 
-    if (!modeRule) return { ok: false, erro: "Modo Amazon inválido" };
+  const modeRule = rule.modes[modo];
 
-    const missing = modeRule.required.filter((field) => !body[field]);
+if (!modeRule) return { ok: false, erro: "Modo Amazon inválido" };
+
+const missing = modeRule.required.filter((field) => !body[field]);
 
     if (missing.length) {
       return {
