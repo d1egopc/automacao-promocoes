@@ -5045,24 +5045,26 @@ app.post("/importar-magalu-manual", async (req, res) => {
       });
     }
 
-    const novaOferta = {
-      nome: produto.titulo,
-      titulo: produto.titulo,
-      preco: produto.precoAtual,
-      precoAtual: produto.precoAtual,
-      precoAntigo: produto.precoAntigo || "",
-      cupom: produto.cupom || "",
-      avisoCupom: produto.avisoCupom || "",
-      parcelamento: produto.parcelamento || "",
-      link: produto.linkAfiliado || url,
-      linkAfiliado: produto.linkAfiliado || url,
-      imagem: produto.imagem || "",
-      marketplace: "magalu",
-      categoria: classificarCategoriaOferta(produto, ""),
-      sessaoId: "sessao1",
-      status: "pendente",
-      clienteId: "admin"
-    };
+    const clienteId = clienteIdAlvo || "admin";
+
+const novaOferta = {
+  nome: produto.titulo,
+  titulo: produto.titulo,
+  preco: produto.precoAtual,
+  precoAtual: produto.precoAtual,
+  precoAntigo: produto.precoAntigo || "",
+  cupom: produto.cupom || "",
+  avisoCupom: produto.avisoCupom || "",
+  parcelamento: produto.parcelamento || "",
+  link: produto.linkAfiliado || url,
+  linkAfiliado: produto.linkAfiliado || url,
+  imagem: produto.imagem || "",
+  marketplace: "magalu",
+  categoria: classificarCategoriaOferta(produto, ""),
+  sessaoId: normalizarSessaoId(clienteId, "sessao1"),
+  status: "pendente",
+  clienteId
+};
 
     fila.push(novaOferta);
 
@@ -6142,7 +6144,9 @@ async function farejarAliExpress() {
             if (precoNumero < precoMinimo) continue;
             if (desconto < minimoDescontoAplicado) continue;
 
-            let novaOferta = {
+           const clienteId = clienteIdAlvo || "admin";
+
+           let novaOferta = {
               nome: titulo,
               titulo,
               preco: precoAtual,
@@ -6160,9 +6164,9 @@ async function farejarAliExpress() {
               imagem,
               marketplace: "aliexpress",
               categoria: "AliExpress",
-              sessaoId: "sessao1",
+              sessaoId: normalizarSessaoId(clienteId, "sessao1"),
               status: "pendente",
-              clienteId: "admin"
+              clienteId
             };
 
             novaOferta = prepararOfertaGlobal(novaOferta);
@@ -6339,7 +6343,9 @@ const html = await response.text();
 
           if (!produto?.precoAtual) continue;
 
-          let novaOferta = {
+        const clienteId = clienteIdAlvo || "admin";
+          
+        let novaOferta = {
             nome: produto.titulo,
             titulo: produto.titulo,
             preco: produto.precoAtual,
@@ -6354,9 +6360,9 @@ const html = await response.text();
             imagem: produto.imagem || "",
             marketplace: "magalu",
             categoria: "Magalu",
-            sessaoId: "sessao1",
+            sessaoId: normalizarSessaoId(clienteId, "sessao1"),
             status: "pendente",
-            clienteId: "admin"
+            clienteId
           };
 
           novaOferta = prepararOfertaGlobal(novaOferta);
@@ -8145,26 +8151,28 @@ if (
   tituloLower.includes("teste")
 ) continue;
 
+            const clienteId = clienteIdAlvo || "admin";
+
+let novaOferta = {
+  nome: produto.titulo,
+  titulo: produto.titulo,
+  preco: produto.precoAtual,
+  precoAtual: produto.precoAtual,
+  precoAntigo: produto.precoAntigo || "",
+  cupom: produto.cupom || "",
+  avisoCupom: produto.avisoCupom || "",
+  parcelamento: produto.parcelamento || "",
+  linkOriginal: produto.linkOriginal || link,
+  link: produto.linkOriginal || link,
+  linkAfiliado: "",
+  imagem: produto.imagem || "",
+  marketplace: "mercadolivre",
+  categoria: classificarCategoriaOferta(produto, termo),
+  sessaoId: normalizarSessaoId(clienteId, "sessao1"),
+  status: "pendente",
+  clienteId
+};
             
-            let novaOferta = {
-              nome: produto.titulo,
-              titulo: produto.titulo,
-              preco: produto.precoAtual,
-              precoAtual: produto.precoAtual,
-              precoAntigo: produto.precoAntigo || "",
-              cupom: produto.cupom || "",
-              avisoCupom: produto.avisoCupom || "",
-              parcelamento: produto.parcelamento || "",
-              linkOriginal: produto.linkOriginal || link,
-              link: produto.linkOriginal || link,
-              linkAfiliado: "",
-              imagem: produto.imagem || "",
-              marketplace: "mercadolivre",
-              categoria: classificarCategoriaOferta(produto, termo),
-              sessaoId: "sessao1",
-              status: "pendente",
-              clienteId: "admin"
-            };
 
           novaOferta = prepararOfertaGlobal(novaOferta);
 
@@ -8318,6 +8326,8 @@ if (!precoNumero || !Number.isFinite(precoNumero)) continue;
 if (precoNumero < 30) continue;
 if (desconto < 15 && !produto.avisoCupom) continue;
 
+const clienteId = clienteIdAlvo || "admin";
+
 let novaOferta = {
   nome: produto.titulo,
   titulo: produto.titulo,
@@ -8333,10 +8343,10 @@ let novaOferta = {
   imagem: produto.imagem || "",
   marketplace: "amazon",
   categoria: "Amazon",
-  sessaoId: "sessao1",
+  sessaoId: normalizarSessaoId(clienteId, "sessao1"),
   status: "pendente",
-  clienteId: "admin"
-};
+  clienteId
+ };
 
 novaOferta = prepararOfertaGlobal(novaOferta);
 
@@ -8578,27 +8588,29 @@ async function farejarShopee() {
 
         const precoAntigo = precoAntigoNumero.toFixed(2).replace(".", ",");
 
-        let novaOferta = {
-          nome: item.productName,
-          titulo: item.productName,
-          preco: precoAtual,
-          precoAtual,
-          precoAntigo,
-          linkOriginal: item.productLink || item.offerLink,
-          link: item.productLink || item.offerLink,
-          linkAfiliado: "",
-          imagem: item.imageUrl,
-          marketplace: "shopee",
-          categoria: "Shopee",
-          sessaoId: "sessao1",
-          status: "pendente",
-          clienteId: "admin",
-          criadoEm: new Date().toLocaleString("pt-BR", {
-            timeZone: "America/Sao_Paulo"
-          }),
-          cupom: "",
-          avisoCupom: "🎟️ Confira cupons disponíveis na página antes de finalizar."
-        };
+     const clienteId = clienteIdAlvo || "admin";
+
+let novaOferta = {
+  nome: item.productName,
+  titulo: item.productName,
+  preco: precoAtual,
+  precoAtual,
+  precoAntigo,
+  linkOriginal: item.productLink || item.offerLink,
+  link: item.productLink || item.offerLink,
+  linkAfiliado: "",
+  imagem: item.imageUrl,
+  marketplace: "shopee",
+  categoria: "Shopee",
+  sessaoId: normalizarSessaoId(clienteId, "sessao1"),
+  status: "pendente",
+  clienteId,
+  criadoEm: new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  }),
+  cupom: "",
+  avisoCupom: "🎟️ Confira cupons disponíveis na página antes de finalizar."
+};
 
         novaOferta = prepararOfertaGlobal(novaOferta);
 
