@@ -1805,6 +1805,11 @@ if (!oferta) {
 
 const clienteId = oferta.clienteId || "admin";
 
+if (oferta.sessaoId === "sessao1") {
+  oferta.sessaoId = normalizarSessaoId(clienteId, "sessao1");
+  salvarFila();
+}
+
 const configCliente =
   configsPorCliente?.[clienteId] || config;
 
@@ -1836,16 +1841,22 @@ if (!clienteAtivo) {
     }
 
     let idSessao =
-      oferta.sessaoId ||
-      oferta.idSessao ||  
-      Object.keys(destinosPorSessao || {}).find(id =>
+  normalizarSessaoId(
+    clienteId,
+    oferta.sessaoId || oferta.idSessao || "sessao1"
+  );
+
+if (!sessoes[idSessao]) {
+  idSessao =
+    Object.keys(destinosPorSessao || {}).find(id =>
       String(id).startsWith(clienteId + "_") &&
       destinosPorSessao[id]?.length &&
       statusSessao[id] === "open"
-      ) ||
-      Object.keys(sessoes || {}).find(id =>
+    ) ||
+    Object.keys(sessoes || {}).find(id =>
       String(id).startsWith(clienteId + "_")
-      );
+    );
+}
 
     if (!destinosPorSessao?.[idSessao]?.length) {
       const sessaoComDestino = Object.keys(destinosPorSessao || {})
