@@ -1840,16 +1840,20 @@ if (!clienteAtivo) {
       oferta.idSessao ||
       oferta.id ||
       Object.keys(destinosPorSessao || {}).find(id =>
-        destinosPorSessao[id]?.length &&
-        statusSessao[id] === "open"
+      String(id).startsWith(clienteId + "_") &&
+      destinosPorSessao[id]?.length &&
+      statusSessao[id] === "open"
       ) ||
-      Object.keys(sessoes || {})[0];
+      Object.keys(sessoes || {}).find(id =>
+      String(id).startsWith(clienteId + "_")
+      );
 
     if (!destinosPorSessao?.[idSessao]?.length) {
       const sessaoComDestino = Object.keys(destinosPorSessao || {})
         .find(id =>
-          destinosPorSessao[id]?.length &&
-          statusSessao[id] === "open"
+        String(id).startsWith(clienteId + "_") &&
+        destinosPorSessao[id]?.length &&
+        statusSessao[id] === "open"
         );
 
       if (sessaoComDestino) {
