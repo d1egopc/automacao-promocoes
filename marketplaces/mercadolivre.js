@@ -1,6 +1,21 @@
 // ================= FAREJADOR MERCADO LIVRE =================
 
-async function farejarMercadoLivre() {
+async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
+
+  const {
+    config,
+    integracoesPorCliente,
+    fila,
+    salvarFila,
+    prepararOfertaGlobal,
+    ofertaJaExiste,
+    classificarCategoriaOferta,
+    gerarBuscasGlobais,
+    gerarHeadersStealth,
+    farejarCuponsMercadoLivre,
+    importarMercadoLivre
+  } = deps;
+
   try {
 
 if (!config.marketplaces?.mercadolivre?.ativo) {
