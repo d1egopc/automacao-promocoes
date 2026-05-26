@@ -8903,7 +8903,9 @@ await farejador(clienteId, {
   gerarHeadersStealth,
   farejarCuponsMercadoLivre,
   importarMercadoLivre,
-  buscarOfertasShopee
+  buscarOfertasShopee,
+  normalizarSessaoId,
+  aplicarFiltrosUniversais
 });
 }
 
