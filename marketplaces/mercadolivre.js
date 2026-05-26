@@ -58,6 +58,11 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
         console.log("🌐 URL:", url);
         console.log("📡 STATUS:", response.status);
 
+if (response.url.includes("account-verification")) {
+  console.log("🛡️ ML bloqueou produto individual. Pulando:", link);
+  continue;
+}
+
        if (!response.ok) {
 
       console.log(
