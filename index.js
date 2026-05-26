@@ -8908,7 +8908,8 @@ await farejador(clienteId, {
   aplicarFiltrosUniversais,
   distribuirOfertaParaClientes
 });
-console.log(`✅ Rodada multiusuário finalizada: ${marketplace}`);
+}
+  console.log(`✅ Rodada multiusuário finalizada: ${marketplace}`);
  
 
   } catch (e) {
