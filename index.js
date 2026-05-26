@@ -8902,7 +8902,7 @@ await farejador(clienteId, {
   gerarBuscasGlobais,
   gerarHeadersStealth,
   farejarCuponsMercadoLivre,
-  importarMercadoLivre
+  importarMercadoLivre,
   buscarOfertasShopee
 });
 }
