@@ -8877,6 +8877,13 @@ for (const usuario of usuarios) {
   });
 
 await farejador(clienteId, {
+
+console.log("🚀 CHAMANDO FAREJADOR:", {
+  clienteId,
+  marketplace,
+  funcao: typeof farejador
+});
+
   config,
   integracoesPorCliente,
   fila,
