@@ -10,8 +10,8 @@ const {
     prepararOfertaGlobal,
     ofertaJaExiste,
     classificarCategoriaOferta,
-    aplicarFiltrosUniversais
-    buscarOfertasShopee,
+    aplicarFiltrosUniversais,
+    buscarOfertasShopee
   } = deps;
 
 
