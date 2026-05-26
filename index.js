@@ -8876,7 +8876,19 @@ for (const usuario of usuarios) {
     marketplace
   });
 
-  await farejador(clienteId);
+await farejador(clienteId, {
+  config,
+  integracoesPorCliente,
+  fila,
+  salvarFila,
+  prepararOfertaGlobal,
+  ofertaJaExiste,
+  classificarCategoriaOferta,
+  gerarBuscasGlobais,
+  gerarHeadersStealth,
+  farejarCuponsMercadoLivre,
+  importarMercadoLivre
+});
 }
 
 console.log(`✅ Rodada multiusuário finalizada: ${marketplace}`);
