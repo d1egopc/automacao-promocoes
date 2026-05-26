@@ -8905,7 +8905,8 @@ await farejador(clienteId, {
   importarMercadoLivre,
   buscarOfertasShopee,
   normalizarSessaoId,
-  aplicarFiltrosUniversais
+  aplicarFiltrosUniversais,
+  distribuirOfertaParaClientes
 });
 }
 
