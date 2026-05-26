@@ -8911,13 +8911,34 @@ await farejador(clienteId, {
 }
   console.log(`✅ Rodada multiusuário finalizada: ${marketplace}`);
  
-
   } catch (e) {
     console.log(`❌ Erro na rodada ${marketplace}:`, e.message);
   } finally {
     farejadorRodando = false;
   }
 }
+
+setTimeout(async () => {
+  console.log("🧪 TESTE MANUAL SHOPEE AGORA");
+  await farejadoresMarketplaces.shopee("admin", {
+    config,
+    integracoesPorCliente,
+    fila,
+    salvarFila,
+    prepararOfertaGlobal,
+    ofertaJaExiste,
+    classificarCategoriaOferta,
+    gerarBuscasGlobais,
+    gerarHeadersStealth,
+    farejarCuponsMercadoLivre,
+    importarMercadoLivre,
+    buscarOfertasShopee,
+    normalizarSessaoId,
+    aplicarFiltrosUniversais,
+    distribuirOfertaParaClientes
+  });
+}, 60 * 1000);
+
 
 setInterval(() => {
   rodarProximoMarketplace();
