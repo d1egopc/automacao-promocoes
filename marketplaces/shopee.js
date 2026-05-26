@@ -3,18 +3,18 @@
 async function farejarShopee(clienteId = "admin", deps = {}) {
   
 const {
-    config,
-    integracoesPorCliente,
-    fila,
-    salvarFila,
-    prepararOfertaGlobal,
-    ofertaJaExiste,
-    classificarCategoriaOferta,
-    aplicarFiltrosUniversais,
-    buscarOfertasShopee,
-    normalizarSessaoId,
-    distribuirOfertaParaClientes
-  } = deps;
+  config,
+  integracoesPorCliente,
+  fila,
+  salvarFila,
+  prepararOfertaGlobal,
+  ofertaJaExiste,
+  classificarCategoriaOferta,
+  aplicarFiltrosUniversais,
+  buscarOfertasShopee,
+  normalizarSessaoId,
+  distribuirOfertaParaClientes
+} = deps;
 
 
  try {
