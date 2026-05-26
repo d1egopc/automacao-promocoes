@@ -9,6 +9,10 @@ const {
   farejarMercadoLivre: farejarMercadoLivreModulo
 } = require("./marketplaces/mercadolivre");
 
+const {
+  farejarShopee: farejarShopeeModulo
+} = require("./marketplaces/shopee");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -8792,7 +8796,7 @@ const ordemMarketplaces = [
 
 const farejadoresMarketplaces = {
   mercadolivre: farejarMercadoLivreModulo,
-  shopee: farejarShopee,
+  shopee: farejarShopeeModulo,
   amazon: farejarAmazon,
   aliexpress: farejarAliExpress,
   awin: farejarAwin,
