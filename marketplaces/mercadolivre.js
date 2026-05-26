@@ -58,11 +58,6 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
         console.log("🌐 URL:", url);
         console.log("📡 STATUS:", response.status);
 
-if (response.url.includes("account-verification")) {
-  console.log("🛡️ ML bloqueou produto individual. Pulando:", link);
-  continue;
-}
-
        if (!response.ok) {
 
       console.log(
@@ -151,12 +146,15 @@ if (compraNoApp && !cupom) {
         console.log(`🔎 ${termo}: ${links.length} produtos`);
 
         for (const link of links) {
-          try {
-            const produto = await importarMercadoLivre(link, {
-              credenciais: integracoesPorCliente["admin"]?.mercadolivre?.credenciais
-            });
+  try {
+    const produto = await importarMercadoLivre(link, {
+      credenciais: integracoesPorCliente["admin"]?.mercadolivre?.credenciais
+    });
 
-            if (!produto.precoAtual) continue;
+    if (!produto || !produto.precoAtual) {
+      console.log("⛔ ML produto bloqueado/sem preço. Pulando:", link);
+      continue;
+    }
 
             const precoNumero = Number(
               String(produto.precoAtual)
