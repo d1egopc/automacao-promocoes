@@ -8908,8 +8908,6 @@ await farejador(clienteId, {
   aplicarFiltrosUniversais,
   distribuirOfertaParaClientes
 });
-}
-
 console.log(`✅ Rodada multiusuário finalizada: ${marketplace}`);
  
 
