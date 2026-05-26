@@ -5461,21 +5461,21 @@ function categoriaBase(txt = "") {
 // =========== VALIDAR CATEGORIA DO DESTINO ===========
 
 function categoriaPermitidaNoDestino(oferta, destino) {
-  
-const categoriaOferta = categoriaBase(
-  oferta.categoria ||
-  oferta.categoriaProduto ||
-  oferta.titulo ||
-  oferta.nome ||
-  ""
-);
+
+  const categoriaOferta = categoriaBase(
+    oferta.categoria ||
+    oferta.categoriaProduto ||
+    oferta.titulo ||
+    oferta.nome ||
+    ""
+  );
 
   const categoriasDestino = (
     destino.categorias ||
     destino.categoriasPermitidas ||
     []
   )
-   .map(categoriaBase)
+    .map(categoriaBase)
     .filter(Boolean);
 
   if (!categoriasDestino.length) return true;
@@ -5493,10 +5493,19 @@ const categoriaOferta = categoriaBase(
     );
   }
 
-  return categoriasDestino.some(cat =>
-    categoriaOferta === cat ||
-    categoriaOferta.includes(cat) ||
-    cat.includes(categoriaOferta)
+  const categoriaOfertaNorm = normalizarCategoria(categoriaOferta)
+    .replace(/[^a-z0-9]/g, "");
+
+  const categoriasDestinoNorm = categoriasDestino
+    .map(cat =>
+      normalizarCategoria(cat).replace(/[^a-z0-9]/g, "")
+    )
+    .filter(Boolean);
+
+  return categoriasDestinoNorm.some(cat =>
+    categoriaOfertaNorm === cat ||
+    categoriaOfertaNorm.includes(cat) ||
+    cat.includes(categoriaOfertaNorm)
   );
 }
 
