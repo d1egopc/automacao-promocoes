@@ -6,7 +6,7 @@ const csv = require("csv-parser");
 const zlib = require("zlib");
 
 const {
-  farejarMercadoLivre
+  farejarMercadoLivre: farejarMercadoLivreModulo
 } = require("./marketplaces/mercadolivre");
 
 
