@@ -18,6 +18,11 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
 
   try {
 
+console.log("🐶 ML MÓDULO RODANDO PARA CLIENTE:", clienteId);
+console.log("🧪 ML config recebida?", !!config);
+console.log("🧪 ML ativo?", config?.marketplaces?.mercadolivre?.ativo);
+console.log("🧪 ML integração cliente?", !!integracoesPorCliente?.[clienteId]?.mercadolivre);
+
 if (!config.marketplaces?.mercadolivre?.ativo) {
   console.log("⏸ Mercado Livre desativado. Farejador ignorado.");
   return;
