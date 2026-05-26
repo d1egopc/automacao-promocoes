@@ -5,6 +5,10 @@ const axios = require("axios");
 const csv = require("csv-parser");
 const zlib = require("zlib");
 
+const {
+  farejarMercadoLivre
+} = require("./marketplaces/mercadolivre");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
