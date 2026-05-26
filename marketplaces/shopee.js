@@ -11,6 +11,7 @@ const {
     ofertaJaExiste,
     classificarCategoriaOferta,
     aplicarFiltrosUniversais
+    buscarOfertasShopee,
   } = deps;
 
 
