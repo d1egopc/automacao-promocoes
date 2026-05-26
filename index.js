@@ -8914,11 +8914,12 @@ console.log(`✅ Rodada multiusuário finalizada: ${marketplace}`);
 
 setInterval(() => {
   rodarProximoMarketplace();
-}, (config.intervaloFarejadorGlobalMinutos || 10) * 60 * 1000);
+}, (config.intervaloFarejadorGlobalMinutos || 27) * 60 * 1000);
 
 setTimeout(() => {
+  console.log("⏳ Primeira rodada do orquestrador em 5 minutos...");
   rodarProximoMarketplace();
-}, 30 * 1000);
+}, 5 * 60 * 1000);
 
 // ================= PROCESSADOR DA FILA =================
 
