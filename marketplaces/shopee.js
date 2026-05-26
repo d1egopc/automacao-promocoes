@@ -12,7 +12,8 @@ const {
     classificarCategoriaOferta,
     aplicarFiltrosUniversais,
     buscarOfertasShopee,
-    normalizarSessaoId
+    normalizarSessaoId,
+    distribuirOfertaParaClientes
   } = deps;
 
 
