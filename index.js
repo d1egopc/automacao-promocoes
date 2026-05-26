@@ -4487,7 +4487,12 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin") {
 });
 
 console.log("🌍 URL FINAL:", response.url);
-  
+
+if (response.url.includes("account-verification")) {
+  console.log("🛡️ ML ACCOUNT VERIFICATION DETECTADO");
+  return null;
+}
+
   const html = await response.text();
 
   const jsonLd = extrairJsonLd(html);
