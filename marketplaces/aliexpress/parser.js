@@ -1,35 +1,39 @@
 // ================= PARSER ALIEXPRESS =================
 
-function limparTexto(texto = "") {
-  return String(texto)
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function extrairLinksProdutosAliExpress(html = "") {
   const links = [];
 
   const regexes = [
-    /https:\/\/pt\.aliexpress\.com\/item\/\d+\.html[^"'\s<]*/g,
-    /https:\/\/www\.aliexpress\.com\/item\/\d+\.html[^"'\s<]*/g,
-    /\/\/pt\.aliexpress\.com\/item\/\d+\.html[^"'\s<]*/g,
-    /\/\/www\.aliexpress\.com\/item\/\d+\.html[^"'\s<]*/g
+    /https?:\\?\/\\?\/(?:pt|www)\.aliexpress\.com\\?\/item\\?\/\d+\.html[^"'\s<\\]*/gi,
+    /\/\/(?:pt|www)\.aliexpress\.com\/item\/\d+\.html[^"'\s<]*/gi,
+    /\/item\/\d+\.html[^"'\s<]*/gi,
+    /"productDetailUrl"\s*:\s*"([^"]+)"/gi,
+    /"productUrl"\s*:\s*"([^"]+)"/gi,
+    /"itemUrl"\s*:\s*"([^"]+)"/gi
   ];
 
   for (const regex of regexes) {
-    const encontrados = html.match(regex) || [];
+    let match;
 
-    for (let link of encontrados) {
+    while ((match = regex.exec(html)) !== null) {
+      let link = match[1] || match[0];
+
+      link = link
+        .replace(/\\u002F/g, "/")
+        .replace(/\\\//g, "/")
+        .replace(/&amp;/g, "&")
+        .trim();
+
       if (link.startsWith("//")) link = "https:" + link;
-      links.push(link.split("?")[0]);
+      if (link.startsWith("/item/")) link = "https://pt.aliexpress.com" + link;
+
+      const limpo = link.split("?")[0];
+
+      if (limpo.includes("/item/") && limpo.includes(".html")) {
+        links.push(limpo);
+      }
     }
   }
 
   return [...new Set(links)];
 }
-
-module.exports = {
-  limparTexto,
-  extrairLinksProdutosAliExpress
-};
