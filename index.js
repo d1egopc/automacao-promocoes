@@ -13,6 +13,9 @@ const {
   farejarShopee: farejarShopeeModulo
 } = require("./marketplaces/shopee");
 
+const { farejarAmazon } =
+  require("./marketplaces/amazon");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -2067,6 +2070,8 @@ if (antigo > atual && atual > 0) {
 
 // ================= ENVIO DESTINOS INTELIGENTES =================
 
+let enviouParaAlgumDestino = false;
+
 for (const destino of destinosInteligentes) {
   await enviarParaDestinoInteligente(
     destino,
@@ -2075,6 +2080,17 @@ for (const destino of destinosInteligentes) {
     clienteId,
     configCliente
   );
+
+enviouParaAlgumDestino = true;
+}
+
+if (!enviouParaAlgumDestino) {
+  console.log(
+    "⚠️ Oferta sem destino compatível. Mantendo pendente:",
+    oferta.titulo
+  );
+
+  return;
 }
 
 controleEnvio[clienteId] = Date.now();
@@ -6541,7 +6557,7 @@ async function farejarAwin() {
   }
 }
 
-// ================= FAREJADOR AMAZON =================
+// ================= IMPORTAR AMAZON =================
 
 async function importarAmazon(url, config) {
   if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
@@ -8797,7 +8813,7 @@ const ordemMarketplaces = [
 const farejadoresMarketplaces = {
   mercadolivre: farejarMercadoLivreModulo,
   shopee: farejarShopeeModulo,
-  amazon: farejarAmazon,
+  amazon: farejarAmazonModulo,
   aliexpress: farejarAliExpress,
   awin: farejarAwin,
   magalu: farejarMagalu,
@@ -8906,7 +8922,8 @@ await farejador(clienteId, {
   buscarOfertasShopee,
   normalizarSessaoId,
   aplicarFiltrosUniversais,
-  distribuirOfertaParaClientes
+  distribuirOfertaParaClientes,
+  encurtarUrl
 });
 }
   console.log(`✅ Rodada multiusuário finalizada: ${marketplace}`);
