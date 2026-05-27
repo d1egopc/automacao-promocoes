@@ -1,3 +1,8 @@
+const { gerarBuscasAliExpress } = require("./buscas");
+
+const { importarProdutoAliExpress } =
+require("./importarProduto");
+
 // ================= FAREJADOR ALIEXPRESS MODULAR =================
 
 async function farejarAliExpress(clienteId = "admin", deps = {}) {
@@ -36,10 +41,7 @@ async function farejarAliExpress(clienteId = "admin", deps = {}) {
 
     const limitePorRodada = cfg.limitePorRodada || 5;
 
-    const buscas =
-      typeof gerarBuscasGlobais === "function"
-        ? gerarBuscasGlobais(30)
-        : ["produto no brasil", "estoque no brasil", "fone bluetooth", "smartwatch"];
+   const buscas = gerarBuscasAliExpress({ gerarBuscasGlobais });
 
     console.log("🔎 Buscas AliExpress:", buscas.slice(0, 10));
 
