@@ -13,8 +13,9 @@ const {
   farejarShopee: farejarShopeeModulo
 } = require("./marketplaces/shopee");
 
-const { farejarAmazon } =
-  require("./marketplaces/amazon");
+const {
+  farejarAmazon: farejarAmazonModulo
+} = require("./marketplaces/amazon");
 
 
 if (!fs.existsSync("/data")) {
