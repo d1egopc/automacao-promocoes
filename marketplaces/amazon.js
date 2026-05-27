@@ -15,7 +15,7 @@ async function farejarAmazon(clienteId = "admin", deps = {}) {
     gerarHeadersStealth,
     normalizarSessaoId,
     distribuirOfertaParaClientes,
-    encurtarUrl
+    encurtarUrl,
     importarAmazon
   } = deps;
 
