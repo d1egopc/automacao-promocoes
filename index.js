@@ -8740,6 +8740,7 @@ await farejador(clienteId, {
 
 setTimeout(async () => {
   console.log("🧪 TESTE MANUAL AMAZON AGORA");
+
   await farejadoresMarketplaces.amazon("admin", {
     config,
     integracoesPorCliente,
@@ -8752,13 +8753,15 @@ setTimeout(async () => {
     gerarHeadersStealth,
     farejarCuponsMercadoLivre,
     importarMercadoLivre,
+    importarAmazon,
     buscarOfertasShopee,
     normalizarSessaoId,
     aplicarFiltrosUniversais,
-    distribuirOfertaParaClientes
+    distribuirOfertaParaClientes,
+    encurtarUrl
   });
-}, 60 * 1000);
 
+}, 60 * 1000);
 
 setInterval(() => {
   rodarProximoMarketplace();
