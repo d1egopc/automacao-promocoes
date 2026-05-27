@@ -76,6 +76,15 @@ for (const termo of buscas.slice(0, 5)) {
     console.log("🧪 HTML AliExpress tamanho:", html.length);
     console.log("🧪 HTML AliExpress trecho:", html.slice(0, 500));
 
+    if (
+  html.includes("_____tmd_____") ||
+  html.includes("/punish") ||
+  html.includes("x5secdata")
+  ) {
+  console.log("🛡️ AliExpress bloqueou a busca. Pulando termo:", termo);
+  continue;
+  }
+
     const links = extrairLinksProdutosAliExpress(html).slice(0, 3);
 
     console.log("🔗 Links AliExpress encontrados:", links.length);
