@@ -8719,6 +8719,7 @@ await farejador(clienteId, {
   gerarHeadersStealth,
   farejarCuponsMercadoLivre,
   importarMercadoLivre,
+  importarAmazon,
   buscarOfertasShopee,
   normalizarSessaoId,
   aplicarFiltrosUniversais,
