@@ -40,7 +40,14 @@ async function importarProdutoAliExpress(link, deps = {}) {
     const precoAtual = precos?.[0] || "";
     const precoAntigo = precos?.[1] || "";
 
-    return {
+  console.log("🤖 PRODUTO ALIEXPRESS:", {
+  titulo,
+  precoAtual,
+  precoAntigo,
+  imagem
+  });
+
+   return {
       titulo,
       precoAtual,
       precoAntigo,
