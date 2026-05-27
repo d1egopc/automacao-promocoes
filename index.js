@@ -6019,7 +6019,7 @@ async function distribuirOfertaParaClientes(ofertaBase) {
 
 // ================= FAREJADOR ALIEXPRESS - SERA EXCLUIDO ========================
 
-async function farejarAliExpress(clienteIdAlvo = "admin", deps = {}) {
+async function farejarAliExpressOld(clienteIdAlvo = "admin", deps = {}) {
   try {
     if (!config.marketplaces?.aliexpress?.ativo) {
       console.log("⏸ AliExpress desativado. Farejador ignorado.");
