@@ -16,6 +16,7 @@ async function farejarAmazon(clienteId = "admin", deps = {}) {
     normalizarSessaoId,
     distribuirOfertaParaClientes,
     encurtarUrl
+    importarAmazon
   } = deps;
 
  try {
