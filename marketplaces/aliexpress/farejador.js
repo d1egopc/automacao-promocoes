@@ -60,7 +60,7 @@ async function farejarAliExpress(clienteId = "admin", deps = {}) {
 
    const produtosEncontrados = [];
 
-for (const termo of buscas.slice(0, 5)) {
+for (const termo of buscas.slice(0, 2)) {
   try {
     const slug = termo.trim().replace(/\s+/g, "-");
 
