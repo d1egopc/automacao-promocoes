@@ -8741,30 +8741,30 @@ await farejador(clienteId, {
   }
 }
 
-setTimeout(async () => {
-  console.log("🧪 TESTE MANUAL ALIEXPRESS AGORA");
+// setTimeout(async () => {
+ // console.log("🧪 TESTE MANUAL ALIEXPRESS AGORA");
 
-   await farejadoresMarketplaces.aliexpress("admin", {
-    config,
-    integracoesPorCliente,
-    fila,
-    salvarFila,
-    prepararOfertaGlobal,
-    ofertaJaExiste,
-    classificarCategoriaOferta,
-    gerarBuscasGlobais,
-    gerarHeadersStealth,
-    farejarCuponsMercadoLivre,
-    importarMercadoLivre,
-    importarAmazon,
-    buscarOfertasShopee,
-    normalizarSessaoId,
-    aplicarFiltrosUniversais,
-    distribuirOfertaParaClientes,
-    encurtarUrl
-  });
+   // await farejadoresMarketplaces.aliexpress("admin", {
+    // config,
+    // integracoesPorCliente,
+    // fila,
+    // salvarFila,
+    // prepararOfertaGlobal,
+    // ofertaJaExiste,
+    // classificarCategoriaOferta,
+    // gerarBuscasGlobais,
+    // gerarHeadersStealth,
+    // farejarCuponsMercadoLivre,
+    // importarMercadoLivre,
+    // importarAmazon,
+    // buscarOfertasShopee,
+    // normalizarSessaoId,
+    // aplicarFiltrosUniversais,
+    // distribuirOfertaParaClientes,
+    // encurtarUrl
+  // });
 
-}, 60 * 1000);
+// }, 60 * 1000);
 
 setInterval(() => {
   rodarProximoMarketplace();
