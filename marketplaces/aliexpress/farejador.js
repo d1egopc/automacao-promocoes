@@ -73,6 +73,9 @@ for (const termo of buscas.slice(0, 5)) {
 
     const html = await response.text();
 
+    console.log("🧪 HTML AliExpress tamanho:", html.length);
+    console.log("🧪 HTML AliExpress trecho:", html.slice(0, 500));
+
     const links = extrairLinksProdutosAliExpress(html).slice(0, 3);
 
     console.log("🔗 Links AliExpress encontrados:", links.length);
