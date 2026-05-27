@@ -1,5 +1,12 @@
 // ================= PARSER ALIEXPRESS =================
 
+function limparTexto(texto = "") {
+  return String(texto)
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function extrairLinksProdutosAliExpress(html = "") {
   const links = [];
 
@@ -37,3 +44,8 @@ function extrairLinksProdutosAliExpress(html = "") {
 
   return [...new Set(links)];
 }
+
+module.exports = {
+  limparTexto,
+  extrairLinksProdutosAliExpress
+};
