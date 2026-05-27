@@ -3,6 +3,10 @@ const { gerarBuscasAliExpress } = require("./buscas");
 const { importarProdutoAliExpress } =
 require("./importarProduto");
 
+const {
+  extrairLinksProdutosAliExpress
+} = require("./parser");
+
 // ================= FAREJADOR ALIEXPRESS MODULAR =================
 
 async function farejarAliExpress(clienteId = "admin", deps = {}) {
