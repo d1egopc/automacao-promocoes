@@ -45,7 +45,45 @@ function extrairLinksProdutosAliExpress(html = "") {
   return [...new Set(links)];
 }
 
+function extrairProdutosDaBuscaAliExpress(html = "") {
+  const produtos = [];
+
+  const blocos = html.match(/"productId".{0,3000}?"productUrl".{0,1000}?/g) || [];
+
+  for (const bloco of blocos.slice(0, 20)) {
+    const titulo =
+      bloco.match(/"title"\s*:\s*"([^"]+)"/)?.[1] ||
+      bloco.match(/"productTitle"\s*:\s*"([^"]+)"/)?.[1] ||
+      "";
+
+    const precoAtual =
+      bloco.match(/"formattedPrice"\s*:\s*"([^"]+)"/)?.[1] ||
+      bloco.match(/"price"\s*:\s*"([^"]+)"/)?.[1] ||
+      "";
+
+    const imagem =
+      bloco.match(/"imageUrl"\s*:\s*"([^"]+)"/)?.[1] ||
+      "";
+
+    const link =
+      bloco.match(/"productUrl"\s*:\s*"([^"]+)"/)?.[1] ||
+      "";
+
+    if (titulo || link) {
+      produtos.push({
+        titulo,
+        precoAtual,
+        imagem: imagem.replace(/\\u002F/g, "/").replace(/\\\//g, "/"),
+        link: link.replace(/\\u002F/g, "/").replace(/\\\//g, "/")
+      });
+    }
+  }
+
+  return produtos;
+}
+
 module.exports = {
   limparTexto,
-  extrairLinksProdutosAliExpress
+  extrairLinksProdutosAliExpress,
+  extrairProdutosDaBuscaAliExpress
 };
