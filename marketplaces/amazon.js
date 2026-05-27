@@ -200,14 +200,16 @@ if (!jaExiste) {
   });
 }
 
-    await new Promise(r =>
+      await new Promise(r =>
       setTimeout(r, 3000 + Math.random() * 5000)
     );
 
   } catch (e) {
     console.log("❌ erro produto Amazon:", e.message);
   }
-}
+} // fecha for (const link of links)
+
+} // fecha for (const termo of buscas)
 
 const ofertasFiltradas =
   aplicarFiltrosUniversais(ofertasEncontradas);
@@ -217,14 +219,11 @@ console.log(
 );
 
 for (const oferta of ofertasFiltradas) {
-
   await distribuirOfertaParaClientes(oferta);
-
-  adicionadasNestaRodada++;
 }
 
 console.log(
-  `✅ Amazon finalizado. Adicionadas: ${adicionadasNestaRodada}`
+  `✅ Amazon finalizado. Adicionadas: ${ofertasFiltradas.length}`
 );
 
 } catch (e) {
@@ -234,3 +233,4 @@ console.log(
 
 module.exports = {
   farejarAmazon
+};
