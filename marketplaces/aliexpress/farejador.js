@@ -49,6 +49,51 @@ async function farejarAliExpress(clienteId = "admin", deps = {}) {
 
     console.log("🔎 Buscas AliExpress:", buscas.slice(0, 10));
 
+   const produtosEncontrados = [];
+
+for (const termo of buscas.slice(0, 5)) {
+  try {
+    const url = `https://pt.aliexpress.com/w/wholesale-${encodeURIComponent(termo)}.html`;
+
+    console.log("🌐 ALIEXPRESS URL:", url);
+
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+      }
+    });
+
+    console.log("📡 ALIEXPRESS STATUS:", response.status);
+
+    if (!response.ok) continue;
+
+    const html = await response.text();
+
+    const links = extrairLinksProdutosAliExpress(html).slice(0, 3);
+
+    console.log("🔗 Links AliExpress encontrados:", links.length);
+
+    for (const link of links) {
+      const produto = await importarProdutoAliExpress(link, {
+        config,
+        integracao,
+        encurtarUrl
+      });
+
+      if (produto) {
+        produtosEncontrados.push(produto);
+      }
+    }
+
+  } catch (e) {
+    console.log("❌ erro busca AliExpress:", e.message);
+  }
+}
+
+console.log("🧪 Produtos AliExpress encontrados:", produtosEncontrados.length);
+
     // Por enquanto só estrutura inicial
     console.log("✅ AliExpress modular carregado com sucesso.");
 
