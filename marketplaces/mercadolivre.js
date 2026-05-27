@@ -43,13 +43,16 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
 
        console.log("🌐 MERCADO LIVRE URL:", url);
 
-       const response = await fetch(url, {
+    const response = await fetch(url, {
   headers: {
     ...gerarHeadersStealth(),
-    ...(integracoesPorCliente["admin"]?.mercadolivre?.credenciais?.cookies
+
+    ...(integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais?.cookies ||
+    integracoesPorCliente?.admin?.mercadolivre?.credenciais?.cookies
       ? {
           Cookie:
-            integracoesPorCliente["admin"].mercadolivre.credenciais.cookies
+            integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais?.cookies ||
+            integracoesPorCliente?.admin?.mercadolivre?.credenciais?.cookies
         }
       : {})
   }
@@ -146,15 +149,14 @@ if (compraNoApp && !cupom) {
         console.log(`🔎 ${termo}: ${links.length} produtos`);
 
         for (const link of links) {
-  try {
-    const produto = await importarMercadoLivre(link, {
-      credenciais: integracoesPorCliente["admin"]?.mercadolivre?.credenciais
-    });
+          try {
+            const produto = await importarMercadoLivre(link, {
+            credenciais:
+            integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais ||
+            integracoesPorCliente?.admin?.mercadolivre?.credenciais      
+            });
 
-    if (!produto || !produto.precoAtual) {
-      console.log("⛔ ML produto bloqueado/sem preço. Pulando:", link);
-      continue;
-    }
+            if (!produto.precoAtual) continue;
 
             const precoNumero = Number(
               String(produto.precoAtual)
@@ -212,7 +214,7 @@ if (
               categoria: classificarCategoriaOferta(produto, termo),
               sessaoId: "sessao1",
               status: "pendente",
-              clienteId: "admin"
+              clienteId
             };
 
             novaOferta = prepararOfertaGlobal(novaOferta);
