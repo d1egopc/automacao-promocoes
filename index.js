@@ -8707,6 +8707,8 @@ console.log("🚀 CHAMANDO FAREJADOR:", {
   funcao: typeof farejador
 });
 
+console.log("🧪 ORQUESTRADOR importarAmazon:", typeof importarAmazon);
+
 await farejador(clienteId, {
   config,
   integracoesPorCliente,
@@ -8719,7 +8721,7 @@ await farejador(clienteId, {
   gerarHeadersStealth,
   farejarCuponsMercadoLivre,
   importarMercadoLivre,
-  importarAmazon,
+  importarAmazon: importarAmazon,
   buscarOfertasShopee,
   normalizarSessaoId,
   aplicarFiltrosUniversais,
