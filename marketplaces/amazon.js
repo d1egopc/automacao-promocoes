@@ -19,7 +19,6 @@ async function farejarAmazon(clienteId = "admin", deps = {}) {
   } = deps;
 
  try {
-
     if (!config.marketplaces?.amazon?.ativo) {
       console.log("⏸ Amazon desativada. Farejador ignorado.");
       return;
@@ -132,7 +131,6 @@ if (!precoNumero || !Number.isFinite(precoNumero)) continue;
 if (precoNumero < 30) continue;
 if (desconto < 15 && !produto.avisoCupom) continue;
 
-const clienteId = clienteIdAlvo || "admin";
 
 let novaOferta = {
   nome: produto.titulo,
@@ -189,17 +187,6 @@ if (!jaExiste) {
     break;
   }
 }
-
-  console.log("🤖 Nova oferta Amazon:", {
-    titulo: novaOferta.titulo,
-    preco: novaOferta.precoAtual,
-    precoAntigo: novaOferta.precoAntigo,
-    desconto: Math.round(desconto) + "%",
-    cupom: novaOferta.cupom,
-    avisoCupom: novaOferta.avisoCupom
-  });
-}
-
       await new Promise(r =>
       setTimeout(r, 3000 + Math.random() * 5000)
     );
