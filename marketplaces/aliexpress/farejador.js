@@ -53,7 +53,9 @@ async function farejarAliExpress(clienteId = "admin", deps = {}) {
 
 for (const termo of buscas.slice(0, 5)) {
   try {
-    const url = `https://pt.aliexpress.com/w/wholesale-${encodeURIComponent(termo)}.html`;
+    const slug = termo.trim().replace(/\s+/g, "-");
+
+    const url = `https://pt.aliexpress.com/w/wholesale-${encodeURIComponent(slug)}.html`;
 
     console.log("🌐 ALIEXPRESS URL:", url);
 
