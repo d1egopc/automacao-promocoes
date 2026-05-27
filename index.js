@@ -17,6 +17,9 @@ const {
   farejarAmazon: farejarAmazonModulo
 } = require("./marketplaces/amazon");
 
+const farejarAliExpress =
+require("./marketplaces/aliexpress/farejador");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -6014,9 +6017,9 @@ async function distribuirOfertaParaClientes(ofertaBase) {
   }
 }
 
-// ================= FAREJADOR ALIEXPRESS ========================
+// ================= FAREJADOR ALIEXPRESS - SERA EXCLUIDO ========================
 
-async function farejarAliExpress(clienteIdAlvo = "admin") {
+async function farejarAliExpress(clienteIdAlvo = "admin", deps = {}) {
   try {
     if (!config.marketplaces?.aliexpress?.ativo) {
       console.log("⏸ AliExpress desativado. Farejador ignorado.");
