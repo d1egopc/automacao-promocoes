@@ -60,13 +60,24 @@ for (const termo of buscas.slice(0, 5)) {
 
     console.log("🌐 ALIEXPRESS URL:", url);
 
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
-      }
-    });
+  const response = await fetch(url, {
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept":
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language":
+      "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Referer": "https://www.google.com/"
+  }
+});
 
     console.log("📡 ALIEXPRESS STATUS:", response.status);
 
@@ -108,6 +119,13 @@ for (const produto of produtos) {
   });
 
 }
+
+await new Promise(r =>
+  setTimeout(
+    r,
+    2500 + Math.floor(Math.random() * 2500)
+  )
+);
 
   } catch (e) {
     console.log("❌ erro busca AliExpress:", e.message);
