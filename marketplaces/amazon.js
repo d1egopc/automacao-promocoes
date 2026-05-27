@@ -19,6 +19,8 @@ async function farejarAmazon(clienteId = "admin", deps = {}) {
     importarAmazon
   } = deps;
 
+console.log("🧪 DENTRO FAREJADOR:", typeof importarAmazon);
+
  try {
     if (!config.marketplaces?.amazon?.ativo) {
       console.log("⏸ Amazon desativada. Farejador ignorado.");
