@@ -23,6 +23,9 @@ async function importarProdutoAliExpress(link, deps = {}) {
 
     const html = await response.text();
 
+console.log("🧪 HTML PRODUTO tamanho:", html.length);
+console.log("🧪 HTML PRODUTO trecho:", html.slice(0, 800));
+
     const titulo =
       html.match(/<title>(.*?)<\/title>/i)?.[1]
         ?.replace(/\s+-\s+AliExpress.*$/i, "")
