@@ -4,7 +4,8 @@ const { importarProdutoAliExpress } =
 require("./importarProduto");
 
 const {
-  extrairLinksProdutosAliExpress
+  extrairLinksProdutosAliExpress,
+  extrairProdutosDaBuscaAliExpress
 } = require("./parser");
 
 // ================= FAREJADOR ALIEXPRESS MODULAR =================
@@ -85,21 +86,28 @@ for (const termo of buscas.slice(0, 5)) {
   continue;
   }
 
-    const links = extrairLinksProdutosAliExpress(html).slice(0, 3);
+const produtos =
+  extrairProdutosDaBuscaAliExpress(html).slice(0, 10);
 
-    console.log("🔗 Links AliExpress encontrados:", links.length);
+console.log(
+  "🧪 Produtos extraídos da busca:",
+  produtos.length
+);
 
-    for (const link of links) {
-      const produto = await importarProdutoAliExpress(link, {
-        config,
-        integracao,
-        encurtarUrl
-      });
+for (const produto of produtos) {
 
-      if (produto) {
-        produtosEncontrados.push(produto);
-      }
-    }
+  console.log("🔥 PRODUTO BUSCA ALI:", produto);
+
+  produtosEncontrados.push({
+    titulo: produto.titulo || "Produto AliExpress",
+    precoAtual: produto.precoAtual || "",
+    precoAntigo: "",
+    imagem: produto.imagem || "",
+    linkAfiliado: produto.link || "",
+    marketplace: "AliExpress"
+  });
+
+}
 
   } catch (e) {
     console.log("❌ erro busca AliExpress:", e.message);
@@ -111,7 +119,8 @@ console.log("🧪 Produtos AliExpress encontrados:", produtosEncontrados.length)
     // Por enquanto só estrutura inicial
     console.log("✅ AliExpress modular carregado com sucesso.");
 
-    return [];
+   
+return produtosEncontrados;
 
   } catch (e) {
     console.log("❌ erro farejador AliExpress modular:", e.message);
