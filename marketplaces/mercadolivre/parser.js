@@ -48,17 +48,9 @@ const links = [
 
   for (const link of [...new Set(links)].slice(0, 10)) {
   const trechoIndex = html.indexOf(link);
-  const mlbId = link.match(/MLB[-\d]+|MLB\d+/)?.[0] || "";
-  const idIndex = mlbId ? html.indexOf(mlbId) : -1;
-
-const baseIndex = trechoIndex >= 0 ? trechoIndex : idIndex;
-
-if (baseIndex < 0) continue;
-
-const trecho = html.slice(
-  Math.max(0, baseIndex - 3000),
-  baseIndex + 3000
-);
+  const trecho = trechoIndex >= 0
+    ? html.slice(Math.max(0, trechoIndex - 3000), trechoIndex + 3000)
+    : html;
 
 const titulo =
   limparTextoML(
@@ -69,31 +61,22 @@ const titulo =
     ""
   );
 
-const tituloUrl = limparTextoML(
-  link
-    .replace(/^https?:\/\/(www\.|produto\.)?mercadolivre\.com\.br\//, "")
-    .split("#")[0]
-    .split("?")[0]
-    .split("/p/MLB")[0]
-    .split("/MLB")[0]
-    .replace(/_/g, " ")
-    .replace(/-/g, " ")
-);
+const tituloLixo =
+  !titulo ||
+  titulo.toLowerCase().includes("ordenar por") ||
+  titulo.toLowerCase().includes("mais relevantes") ||
+  titulo.toLowerCase().includes("menor preço") ||
+  titulo.toLowerCase().includes("maior preço") ||
+  titulo.toLowerCase().includes("outras pessoas pesquisaram") ||
+  titulo.toLowerCase().includes("pesquisaram também") ||
+  titulo.toLowerCase().includes("produtos relacionados") ||
+  titulo.toLowerCase().includes("formato de venda") ||
+  titulo.toLowerCase().includes("lojas oficiais") ||
+  titulo.toLowerCase() === "p";
 
-const tituloFinal = titulo || tituloUrl;
+const tituloFinal = tituloLixo ? tituloUrl : titulo;
 
-if (
-!tituloFinal ||
-tituloFinal.toLowerCase().includes("ordenar por") ||
-tituloFinal.toLowerCase().includes("mais relevantes") ||
-tituloFinal.toLowerCase().includes("menor preço") ||
-tituloFinal.toLowerCase().includes("maior preço") ||
-tituloFinal.toLowerCase().includes("outras pessoas pesquisaram") ||
-tituloFinal.toLowerCase().includes("pesquisaram também") ||
-tituloFinal.toLowerCase().includes("produtos relacionados") ||
-tituloFinal.toLowerCase() === "p" ||
-tituloFinal.toLowerCase().includes("lojas oficiais")
-) {
+if (!tituloFinal) {
   continue;
 }
 
@@ -111,15 +94,8 @@ const precoMatch =
     trecho.match(/src="([^"]*mlstatic[^"]+)"/)?.[1] ||
     "";
 
-console.log("🧪 ML PARSER ITEM:", {
-  titulo: tituloFinal,
-  precoAtual,
-  imagem: !!imagem,
-  link
-});
-
   produtos.push({
-    titulo: tituloFinal,
+    titulo,
     precoAtual,
     precoAntigo: "",
     imagem: limparTextoML(imagem),
