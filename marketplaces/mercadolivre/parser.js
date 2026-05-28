@@ -66,7 +66,10 @@ if (
   titulo.toLowerCase().includes("ordenar por") ||
   titulo.toLowerCase().includes("mais relevantes") ||
   titulo.toLowerCase().includes("menor preço") ||
-  titulo.toLowerCase().includes("maior preço")
+  titulo.toLowerCase().includes("maior preço") ||
+  titulo.toLowerCase().includes("outras pessoas pesquisaram") ||
+  titulo.toLowerCase().includes("pesquisaram também") ||
+  titulo.toLowerCase().includes("produtos relacionados")
 ) {
   continue;
 }
@@ -93,7 +96,6 @@ const precoMatch =
     link
   });
 }
-
 
   return produtos;
 }
