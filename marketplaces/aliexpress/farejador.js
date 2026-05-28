@@ -100,6 +100,12 @@ const response = await fetch(url, {
     console.log("🧪 HTML AliExpress tamanho:", html.length);
     console.log("🧪 HTML AliExpress trecho:", html.slice(0, 500));
 
+console.log("🧪 ALI TEM productId?", html.includes("productId"));
+console.log("🧪 ALI TEM productTitle?", html.includes("productTitle"));
+console.log("🧪 ALI TEM salePrice?", html.includes("salePrice"));
+console.log("🧪 ALI TEM searchResult?", html.includes("searchResult"));
+console.log("🧪 ALI TEM window?", html.includes("window."));
+
     if (
   html.includes("_____tmd_____") ||
   html.includes("/punish") ||
