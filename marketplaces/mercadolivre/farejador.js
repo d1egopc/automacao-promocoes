@@ -128,7 +128,7 @@ for (const itemBusca of produtosBusca) {
 
     if (!link) continue;
 
-    const produto = await importarMercadoLivre(link, {
+    let produto = await importarMercadoLivre(link, {
       credenciais:
         integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais ||
         integracoesPorCliente?.admin?.mercadolivre?.credenciais
