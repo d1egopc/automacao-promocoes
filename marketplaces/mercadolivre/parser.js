@@ -41,14 +41,41 @@ function extrairProdutosBuscaML(html = "") {
     );
 
   for (const link of [...new Set(links)].slice(0, 10)) {
-    produtos.push({
-      titulo: "",
-      precoAtual: "",
-      precoAntigo: "",
-      imagem: "",
-      link
-    });
-  }
+  const trechoIndex = html.indexOf(link);
+  const trecho = trechoIndex >= 0
+    ? html.slice(Math.max(0, trechoIndex - 3000), trechoIndex + 3000)
+    : html;
+
+  const titulo =
+    limparTextoML(
+      trecho.match(/"name":"([^"]{10,200})"/)?.[1] ||
+      trecho.match(/"title":"([^"]{10,200})"/)?.[1] ||
+      trecho.match(/aria-label="([^"]{10,200})"/)?.[1] ||
+      ""
+    );
+
+  const precoMatch =
+    trecho.match(/"price":\s*"?([0-9]+(?:\.[0-9]+)?(?:,[0-9]+)?)"?/) ||
+    trecho.match(/R\$\s*([0-9.]+,\d{2})/);
+
+  const precoAtual = precoMatch?.[1]
+    ? `R$ ${String(precoMatch[1]).replace(".", ",")}`
+    : "";
+
+  const imagem =
+    trecho.match(/"image":"([^"]+)"/)?.[1] ||
+    trecho.match(/src="([^"]*mlstatic[^"]+)"/)?.[1] ||
+    "";
+
+  produtos.push({
+    titulo,
+    precoAtual,
+    precoAntigo: "",
+    imagem: limparTextoML(imagem),
+    link
+  });
+}
+
 
   return produtos;
 }
