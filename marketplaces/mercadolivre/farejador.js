@@ -177,6 +177,12 @@ console.log("🧪 ML produto via parser:", {
       produto.linkOriginal = link;
     }
 
+console.log("🧪 PRECO ML:", {
+  titulo: produto.titulo,
+  precoAtual: produto.precoAtual,
+  tipo: typeof produto.precoAtual
+});
+
     if (!produto.precoAtual) continue;
 
     const precoNumero = Number(
