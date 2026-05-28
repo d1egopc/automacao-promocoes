@@ -1,8 +1,9 @@
-const {
-  farejarMercadoLivre
-} = require("./farejador");
 
-const { extrairProdutosBuscaML } = require("./parser");
+const { farejarMercadoLivre } = require("./farejador");
+
+module.exports = {
+  farejarMercadoLivre
+};
 
 // ================= FAREJADOR MERCADO LIVRE =================
 
