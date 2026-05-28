@@ -149,6 +149,13 @@ if (!produto) {
   };
 }
 
+console.log("🧪 ML FALLBACK USADO:", {
+  titulo: produto.titulo,
+  precoAtual: produto.precoAtual,
+  imagem: !!produto.imagem,
+  link: produto.linkOriginal
+});
+
 console.log("🧪 ML PRODUTO FINAL:", produto);
 
 console.log("🧪 ML produto via parser:", {
