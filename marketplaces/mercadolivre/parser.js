@@ -61,7 +61,18 @@ const titulo =
     ""
   );
 
-const tituloLixo =
+const tituloUrl = limparTextoML(
+  link
+    .replace(/^https?:\/\/(www\.|produto\.)?mercadolivre\.com\.br\//, "")
+    .split("#")[0]
+    .split("?")[0]
+    .split("/p/MLB")[0]
+    .split("/MLB")[0]
+    .replace(/_/g, " ")
+    .replace(/-/g, " ")
+);
+
+ const tituloLixo =
   !titulo ||
   titulo.toLowerCase().includes("ordenar por") ||
   titulo.toLowerCase().includes("mais relevantes") ||
@@ -72,6 +83,9 @@ const tituloLixo =
   titulo.toLowerCase().includes("produtos relacionados") ||
   titulo.toLowerCase().includes("formato de venda") ||
   titulo.toLowerCase().includes("lojas oficiais") ||
+  titulo.toLowerCase().includes("mercadolíderes") ||
+  titulo.toLowerCase().includes("mercado lideres") ||
+  titulo.toLowerCase().includes("filtro") ||
   titulo.toLowerCase() === "p";
 
 const tituloFinal = tituloLixo ? tituloUrl : titulo;
@@ -95,7 +109,7 @@ const precoMatch =
     "";
 
   produtos.push({
-    titulo,
+    titulo: tituloFinal,
     precoAtual,
     precoAntigo: "",
     imagem: limparTextoML(imagem),
