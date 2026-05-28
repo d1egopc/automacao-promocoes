@@ -135,8 +135,18 @@ for (const itemBusca of produtosBusca) {
     });
 
 if (!produto) {
-  console.log("⚠️ ML importador retornou vazio:", link);
-  continue;
+  console.log("⚠️ ML importador retornou vazio, usando parser:", link);
+
+  produto = {
+    titulo: itemBusca.titulo,
+    precoAtual: itemBusca.precoAtual,
+    precoAntigo: itemBusca.precoAntigo || "",
+    imagem: itemBusca.imagem || "",
+    linkOriginal: link,
+    linkAfiliado: link,
+    cupom,
+    avisoCupom
+  };
 }
 
     if (!produto.precoAtual && itemBusca.precoAtual) {
