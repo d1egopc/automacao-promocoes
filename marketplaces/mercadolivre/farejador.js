@@ -245,15 +245,6 @@ if (!produto) {
   }
 }
 
-            await new Promise(r =>
-            setTimeout(r, 4000 + Math.random() * 4000)
-            );
-
-          } catch (e) {
-            console.log("❌ erro produto ML:", e.message);
-          }
-        }
-
          await new Promise(r =>
          setTimeout(r, 4000 + Math.random() * 6000)
         );
