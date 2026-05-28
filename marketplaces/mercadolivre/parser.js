@@ -71,24 +71,25 @@ const titulo =
 
 const tituloUrl = limparTextoML(
   link
-    .split("/MLB")[0]
+    .replace(/^https?:\/\/(www\.)?mercadolivre\.com\.br\//, "")
     .split("/p/MLB")[0]
-    .split("/")
-    .pop()
+    .split("/MLB")[0]
     .replace(/-/g, " ")
 );
 
 const tituloFinal = titulo || tituloUrl;
 
 if (
-  !tituloFinal ||
-  tituloFinal.toLowerCase().includes("ordenar por") ||
-  tituloFinal.toLowerCase().includes("mais relevantes") ||
-  tituloFinal.toLowerCase().includes("menor preço") ||
-  tituloFinal.toLowerCase().includes("maior preço") ||
-  tituloFinal.toLowerCase().includes("outras pessoas pesquisaram") ||
-  tituloFinal.toLowerCase().includes("pesquisaram também") ||
-  tituloFinal.toLowerCase().includes("produtos relacionados")
+!tituloFinal ||
+tituloFinal.toLowerCase().includes("ordenar por") ||
+tituloFinal.toLowerCase().includes("mais relevantes") ||
+tituloFinal.toLowerCase().includes("menor preço") ||
+tituloFinal.toLowerCase().includes("maior preço") ||
+tituloFinal.toLowerCase().includes("outras pessoas pesquisaram") ||
+tituloFinal.toLowerCase().includes("pesquisaram também") ||
+tituloFinal.toLowerCase().includes("produtos relacionados") ||
+tituloFinal.toLowerCase() === "p" ||
+tituloFinal.toLowerCase().includes("lojas oficiais")
 ) {
   continue;
 }
