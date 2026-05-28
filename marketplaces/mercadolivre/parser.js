@@ -52,19 +52,19 @@ const links = [
     ? html.slice(Math.max(0, trechoIndex - 3000), trechoIndex + 3000)
     : html;
 
- const titulo =
+const titulo =
   limparTextoML(
     trecho.match(/"poly_component_title":"([^"]+)"/)?.[1] ||
-    trecho.match(/"name":"([^"]{5,300})"/)?.[1] ||
-    trecho.match(/"title":"([^"]{5,300})"/)?.[1] ||
-    trecho.match(/aria-label="([^"]{5,300})"/)?.[1] ||
+    trecho.match(/"label":"([^"]{10,300})"/)?.[1] ||
+    trecho.match(/aria-label="([^"]{10,300})"/)?.[1] ||
+    trecho.match(/"name":"([^"]{10,300})"/)?.[1] ||
     ""
   );
 
 const precoMatch =
-  trecho.match(/"price":([0-9.]+)/)?.[1] ||
-  trecho.match(/"price":"([0-9.,]+)"/)?.[1] ||
-  trecho.match(/R\$\s*([0-9.]+,\d{2})/)?.[1];
+  trecho.match(/"current_price":([0-9.]+)/)?.[1] ||
+  trecho.match(/"price":([0-9]{2,6}(?:\.[0-9]{2})?)/)?.[1] ||
+  trecho.match(/R\$\s*([0-9]{2,6}(?:\.[0-9]{3})*,\d{2})/)?.[1];
 
   const precoAtual = precoMatch?.[1]
     ? `R$ ${String(precoMatch[1]).replace(".", ",")}`
