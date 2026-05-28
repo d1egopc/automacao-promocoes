@@ -1733,11 +1733,15 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
     if (String(destino.tipo || "").toLowerCase() === "telegram") {
       const telegrams = configCliente.telegram?.destinos || [];
 
-      const selecionados = telegrams.filter(t =>
-        (destino.telegramDestinos || []).includes(t.nome) ||
-        (destino.telegramDestinos || []).includes(String(t.chatId))
-      );
+const telegramsSelecionados = destino.telegramDestinos || [];
 
+const selecionados = telegramsSelecionados.length
+  ? telegrams.filter(t =>
+      telegramsSelecionados.includes(t.nome) ||
+      telegramsSelecionados.includes(String(t.chatId))
+    )
+  : telegrams.filter(t => t.ativo);
+  
       if (!selecionados.length) {
         console.log("⚠️ Nenhum Telegram selecionado para este destino:", destino.nome);
       }
