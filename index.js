@@ -20,6 +20,9 @@ const {
 const farejarAliExpress =
 require("./marketplaces/aliexpress/farejador");
 
+const farejarKabum =
+require("./marketplaces/kabum/farejador");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -124,6 +127,14 @@ awin: {
   precoMinimo: 0,
   loja: "kabum",
   feedFile: "awin_kabum.csv.gz"
+},
+
+kabum: {
+  ativo: true,
+  intervaloFarejoMinutos: 20,
+  limitePorRodada: 2,
+  descontoMinimo: 10,
+  precoMinimo: 30
 },
 
 aliexpress: {
@@ -8618,7 +8629,7 @@ const farejadoresMarketplaces = {
   shopee: farejarShopeeModulo,
   amazon: farejarAmazonModulo,
   aliexpress: farejarAliExpress,
-  awin: farejarAwin,
+  kabum: farejarKabum,
   magalu: farejarMagalu,
 };
 
