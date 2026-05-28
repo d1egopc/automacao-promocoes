@@ -149,6 +149,8 @@ if (!produto) {
   };
 }
 
+console.log("🧪 ML PRODUTO FINAL:", produto);
+
 console.log("🧪 ML produto via parser:", {
   titulo: produto.titulo,
   precoAtual: produto.precoAtual,
@@ -183,7 +185,21 @@ console.log("🧪 PRECO ML:", {
   tipo: typeof produto.precoAtual
 });
 
-    if (!produto.precoAtual) continue;
+console.log("🧪 PRECO ML:", {
+  titulo: produto.titulo,
+  precoAtual: produto.precoAtual,
+  precoAntigo: produto.precoAntigo
+});
+
+if (!produto.precoAtual) continue;
+
+console.log("🧪 PRECO ML:", {
+  titulo: produto.titulo,
+  precoAtual: produto.precoAtual,
+  precoAntigo: produto.precoAntigo
+});
+
+   if (!produto.precoAtual) continue;
 
     const precoNumero = Number(
       String(produto.precoAtual)
@@ -245,7 +261,16 @@ console.log("🧪 PRECO ML:", {
 
     novaOferta = prepararOfertaGlobal(novaOferta);
 
+console.log("🧪 ML oferta pronta antes do filtro:", {
+  titulo: novaOferta.titulo,
+  preco: novaOferta.precoAtual,
+  categoria: novaOferta.categoria,
+  link: novaOferta.link
+});
+
     const jaExiste = ofertaJaExiste(novaOferta);
+
+console.log("🧪 ML jaExiste?", jaExiste);
 
     if (!jaExiste) {
       fila.push(novaOferta);
