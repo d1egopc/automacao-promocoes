@@ -67,7 +67,8 @@ const tituloUrl = limparTextoML(
     .split("#")[0]
     .split("?")[0]
     .split("/p/MLB")[0]
-    .split("/MLB")[0]
+    .replace(/^MLB-\d+-/, "")
+    .replace(/_JM$/i, "")
     .replace(/_/g, " ")
     .replace(/-/g, " ")
 );
