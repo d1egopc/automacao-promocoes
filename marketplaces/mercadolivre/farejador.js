@@ -149,6 +149,14 @@ if (!produto) {
   };
 }
 
+console.log("🧪 ML produto via parser:", {
+  titulo: produto.titulo,
+  precoAtual: produto.precoAtual,
+  precoAntigo: produto.precoAntigo,
+  imagem: !!produto.imagem,
+  link: produto.linkOriginal
+});
+
     if (!produto.precoAtual && itemBusca.precoAtual) {
       produto.precoAtual = itemBusca.precoAtual;
     }
