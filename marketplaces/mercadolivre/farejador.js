@@ -137,6 +137,11 @@ for (const itemBusca of produtosBusca) {
         integracoesPorCliente?.admin?.mercadolivre?.credenciais
     });
 
+if (!produto) {
+  console.log("⚠️ ML importador retornou vazio:", link);
+  continue;
+}
+
     if (!produto.precoAtual && itemBusca.precoAtual) {
       produto.precoAtual = itemBusca.precoAtual;
     }
