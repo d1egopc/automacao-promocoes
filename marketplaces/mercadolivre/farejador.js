@@ -222,15 +222,16 @@ console.log("🧪 PRECO ML:", {
   precoAntigo: produto.precoAntigo
 });
 
-if (!produto.precoAtual) continue;
+if (!produto.precoAtual) {
+  produto.precoAtual = "R$ 0,00";
+  produto.precoEstimado = true;
+}
 
 console.log("🧪 PRECO ML:", {
   titulo: produto.titulo,
   precoAtual: produto.precoAtual,
   precoAntigo: produto.precoAntigo
 });
-
-   if (!produto.precoAtual) continue;
 
     const precoNumero = Number(
       String(produto.precoAtual)
@@ -299,7 +300,7 @@ console.log("🧪 ML oferta pronta antes do filtro:", {
   link: novaOferta.link
 });
 
-    const jaExiste = ofertaJaExiste(novaOferta);
+ const jaExiste = ofertaJaExiste(novaOferta);
 
 console.log("🧪 ML jaExiste?", jaExiste);
 
