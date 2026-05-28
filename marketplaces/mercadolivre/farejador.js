@@ -273,6 +273,7 @@ console.log("🧪 PRECO ML:", {
     ) continue;
 
     let novaOferta = {
+      id: `ml_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       nome: produto.titulo,
       titulo: produto.titulo,
       preco: produto.precoAtual,
