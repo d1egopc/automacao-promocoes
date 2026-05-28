@@ -2,6 +2,8 @@ const {
   farejarMercadoLivre
 } = require("./farejador");
 
+const { extrairProdutosBuscaML } = require("./parser");
+
 // ================= FAREJADOR MERCADO LIVRE =================
 
 async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
@@ -118,125 +120,128 @@ if (compraNoApp && !cupom) {
   avisoCupom = "📱 Confira pelo app do Mercado Livre, pode aparecer menor valor ou desconto exclusivo.";
 }
         
-        const linksExtraidos = [
-  ...html.matchAll(/href="([^"]*\/MLB-[^"]*)"/g),
-  ...html.matchAll(/href="([^"]*\/p\/MLB[^"]*)"/g),
-  ...html.matchAll(/"permalink":"([^"]*MLB[^"]*)"/g),
-  ...html.matchAll(/"url":"([^"]*MLB[^"]*)"/g)
-]
-  .map(m => m[1] || m[0])
-  .map(link => {
-    let limpo = String(link)
-      .replace(/\\\//g, "/")
-      .replace(/&amp;/g, "&")
-      .split("#")[0];
+const produtosBusca = extrairProdutosBuscaML(html).slice(0, 8);
 
-    if (limpo.startsWith("/")) {
-      limpo = "https://www.mercadolivre.com.br" + limpo;
+console.log("🧪 PRODUTOS ML PARSEADOS:", produtosBusca.length);
+console.log(`🔎 ${termo}: ${produtosBusca.length} produtos`);
+
+for (const itemBusca of produtosBusca) {
+  try {
+    const link = itemBusca.link;
+
+    if (!link) continue;
+
+    const produto = await importarMercadoLivre(link, {
+      credenciais:
+        integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais ||
+        integracoesPorCliente?.admin?.mercadolivre?.credenciais
+    });
+
+    if (!produto.precoAtual && itemBusca.precoAtual) {
+      produto.precoAtual = itemBusca.precoAtual;
     }
 
-    return limpo;
-  })
-  .filter(link =>
-    link.includes("mercadolivre.com.br") &&
-    link.includes("MLB") &&
-    !link.includes("lista.mercadolivre") &&
-    !link.includes("registration") &&
-    !link.includes("security.js") &&
-    !link.includes("privacidade") &&
-    !link.includes("account-verification")
-  );
+    if (!produto.precoAntigo && itemBusca.precoAntigo) {
+      produto.precoAntigo = itemBusca.precoAntigo;
+    }
 
-        const links = [...new Set(linksExtraidos)].slice(0, 8);
-        console.log("🧪 LINKS LIMPOS:", links);
+    if (!produto.titulo && itemBusca.titulo) {
+      produto.titulo = itemBusca.titulo;
+    }
 
-        console.log(`🔎 ${termo}: ${links.length} produtos`);
+    if (!produto.imagem && itemBusca.imagem) {
+      produto.imagem = itemBusca.imagem;
+    }
 
-        for (const link of links) {
-          try {
-            const produto = await importarMercadoLivre(link, {
-            credenciais:
-            integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais ||
-            integracoesPorCliente?.admin?.mercadolivre?.credenciais      
-            });
+    if (!produto.linkOriginal) {
+      produto.linkOriginal = link;
+    }
 
-            if (!produto.precoAtual) continue;
+    if (!produto.precoAtual) continue;
 
-            const precoNumero = Number(
-              String(produto.precoAtual)
-                .replace("R$", "")
-                .replace(/\./g, "")
-                .replace(",", ".")
-                .trim()
-            );
+    const precoNumero = Number(
+      String(produto.precoAtual)
+        .replace("R$", "")
+        .replace(/\./g, "")
+        .replace(",", ".")
+        .trim()
+    );
 
-            const precoAntigoNumero = Number(
-              String(produto.precoAntigo || "")
-                .replace("R$", "")
-                .replace(/\./g, "")
-                .replace(",", ".")
-                .trim()
-            );
+    const precoAntigoNumero = Number(
+      String(produto.precoAntigo || "")
+        .replace("R$", "")
+        .replace(/\./g, "")
+        .replace(",", ".")
+        .trim()
+    );
 
-            const desconto =
-              precoAntigoNumero > precoNumero
-                ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
-                : 0;
+    const desconto =
+      precoAntigoNumero > precoNumero
+        ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
+        : 0;
 
-             if (!precoNumero || !Number.isFinite(precoNumero)) continue;
+    if (!precoNumero || !Number.isFinite(precoNumero)) continue;
 
-if (precoNumero < (config.marketplaces?.mercadolivre?.precoMinimo || 25)) continue;
+    if (precoNumero < (config.marketplaces?.mercadolivre?.precoMinimo || 25)) continue;
 
-if (
-  desconto < (config.marketplaces?.mercadolivre?.descontoMinimo || 20) &&
-  !produto.avisoCupom
-) continue;
+    if (
+      desconto < (config.marketplaces?.mercadolivre?.descontoMinimo || 20) &&
+      !produto.avisoCupom
+    ) continue;
 
-const tituloLower = String(produto.titulo || "").toLowerCase();
+    const tituloLower = String(produto.titulo || "").toLowerCase();
 
-if (
-  tituloLower.includes("refil") ||
-  tituloLower.includes("amostra") ||
-  tituloLower.includes("mini") ||
-  tituloLower.includes("teste")
-) continue;
+    if (
+      tituloLower.includes("refil") ||
+      tituloLower.includes("amostra") ||
+      tituloLower.includes("mini") ||
+      tituloLower.includes("teste")
+    ) continue;
 
-            
-            let novaOferta = {
-              nome: produto.titulo,
-              titulo: produto.titulo,
-              preco: produto.precoAtual,
-              precoAtual: produto.precoAtual,
-              precoAntigo: produto.precoAntigo || "",
-              cupom: produto.cupom || "",
-              avisoCupom: produto.avisoCupom || "",
-              parcelamento: produto.parcelamento || "",
-              link: produto.linkAfiliado || produto.linkOriginal || link,
-              linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
-              imagem: produto.imagem || "",
-              marketplace: "mercadolivre",
-              categoria: classificarCategoriaOferta(produto, termo),
-              sessaoId: "sessao1",
-              status: "pendente",
-              clienteId
-            };
+    let novaOferta = {
+      nome: produto.titulo,
+      titulo: produto.titulo,
+      preco: produto.precoAtual,
+      precoAtual: produto.precoAtual,
+      precoAntigo: produto.precoAntigo || "",
+      cupom: produto.cupom || "",
+      avisoCupom: produto.avisoCupom || "",
+      parcelamento: produto.parcelamento || "",
+      link: produto.linkAfiliado || produto.linkOriginal || link,
+      linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
+      imagem: produto.imagem || "",
+      marketplace: "mercadolivre",
+      categoria: classificarCategoriaOferta(produto, termo),
+      sessaoId: "sessao1",
+      status: "pendente",
+      clienteId
+    };
 
-            novaOferta = prepararOfertaGlobal(novaOferta);
+    novaOferta = prepararOfertaGlobal(novaOferta);
 
-           const jaExiste = ofertaJaExiste(novaOferta);
+    const jaExiste = ofertaJaExiste(novaOferta);
 
-            if (!jaExiste) {
-              fila.push(novaOferta);
-              salvarFila();
+    if (!jaExiste) {
+      fila.push(novaOferta);
+      salvarFila();
 
-              console.log("🤖 Nova oferta ML:", {
-                titulo: novaOferta.titulo,
-                preco: novaOferta.precoAtual,
-                precoAntigo: novaOferta.precoAntigo,
-                desconto: Math.round(desconto) + "%",
-                link: novaOferta.link
-              });
-            }
+      console.log("🤖 Nova oferta ML:", {
+        titulo: novaOferta.titulo,
+        preco: novaOferta.precoAtual,
+        precoAntigo: novaOferta.precoAntigo,
+        desconto: Math.round(desconto) + "%",
+        link: novaOferta.link
+      });
+    }
+
+    await new Promise(r =>
+      setTimeout(r, 4000 + Math.random() * 4000)
+    );
+
+  } catch (e) {
+    console.log("❌ erro produto ML:", e.message);
+  }
+}
 
             await new Promise(r =>
             setTimeout(r, 4000 + Math.random() * 4000)
