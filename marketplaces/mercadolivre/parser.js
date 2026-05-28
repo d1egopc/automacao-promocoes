@@ -71,9 +71,12 @@ const titulo =
 
 const tituloUrl = limparTextoML(
   link
-    .replace(/^https?:\/\/(www\.)?mercadolivre\.com\.br\//, "")
+    .replace(/^https?:\/\/(www\.|produto\.)?mercadolivre\.com\.br\//, "")
+    .split("#")[0]
+    .split("?")[0]
     .split("/p/MLB")[0]
     .split("/MLB")[0]
+    .replace(/_/g, " ")
     .replace(/-/g, " ")
 );
 
