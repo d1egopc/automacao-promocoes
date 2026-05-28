@@ -48,9 +48,17 @@ const links = [
 
   for (const link of [...new Set(links)].slice(0, 10)) {
   const trechoIndex = html.indexOf(link);
-  const trecho = trechoIndex >= 0
-    ? html.slice(Math.max(0, trechoIndex - 3000), trechoIndex + 3000)
-    : html;
+  const mlbId = link.match(/MLB[-\d]+|MLB\d+/)?.[0] || "";
+  const idIndex = mlbId ? html.indexOf(mlbId) : -1;
+
+const baseIndex = trechoIndex >= 0 ? trechoIndex : idIndex;
+
+if (baseIndex < 0) continue;
+
+const trecho = html.slice(
+  Math.max(0, baseIndex - 3000),
+  baseIndex + 3000
+);
 
 const titulo =
   limparTextoML(
@@ -61,15 +69,26 @@ const titulo =
     ""
   );
 
+const tituloUrl = limparTextoML(
+  link
+    .split("/MLB")[0]
+    .split("/p/MLB")[0]
+    .split("/")
+    .pop()
+    .replace(/-/g, " ")
+);
+
+const tituloFinal = titulo || tituloUrl;
+
 if (
-  !titulo ||
-  titulo.toLowerCase().includes("ordenar por") ||
-  titulo.toLowerCase().includes("mais relevantes") ||
-  titulo.toLowerCase().includes("menor preço") ||
-  titulo.toLowerCase().includes("maior preço") ||
-  titulo.toLowerCase().includes("outras pessoas pesquisaram") ||
-  titulo.toLowerCase().includes("pesquisaram também") ||
-  titulo.toLowerCase().includes("produtos relacionados")
+  !tituloFinal ||
+  tituloFinal.toLowerCase().includes("ordenar por") ||
+  tituloFinal.toLowerCase().includes("mais relevantes") ||
+  tituloFinal.toLowerCase().includes("menor preço") ||
+  tituloFinal.toLowerCase().includes("maior preço") ||
+  tituloFinal.toLowerCase().includes("outras pessoas pesquisaram") ||
+  tituloFinal.toLowerCase().includes("pesquisaram também") ||
+  tituloFinal.toLowerCase().includes("produtos relacionados")
 ) {
   continue;
 }
@@ -89,7 +108,7 @@ const precoMatch =
     "";
 
   produtos.push({
-    titulo,
+    titulo: tituloFinal,
     precoAtual,
     precoAntigo: "",
     imagem: limparTextoML(imagem),
