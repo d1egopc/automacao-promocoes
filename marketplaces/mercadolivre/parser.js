@@ -61,14 +61,24 @@ const titulo =
     ""
   );
 
+if (
+  !titulo ||
+  titulo.toLowerCase().includes("ordenar por") ||
+  titulo.toLowerCase().includes("mais relevantes") ||
+  titulo.toLowerCase().includes("menor preço") ||
+  titulo.toLowerCase().includes("maior preço")
+) {
+  continue;
+}
+
 const precoMatch =
   trecho.match(/"current_price":([0-9.]+)/)?.[1] ||
   trecho.match(/"price":([0-9]{2,6}(?:\.[0-9]{2})?)/)?.[1] ||
   trecho.match(/R\$\s*([0-9]{2,6}(?:\.[0-9]{3})*,\d{2})/)?.[1];
 
-  const precoAtual = precoMatch?.[1]
-    ? `R$ ${String(precoMatch[1]).replace(".", ",")}`
-    : "";
+  const precoAtual = precoMatch
+  ? `R$ ${String(precoMatch).replace(".", ",")}`
+  : "";
 
   const imagem =
     trecho.match(/"image":"([^"]+)"/)?.[1] ||
