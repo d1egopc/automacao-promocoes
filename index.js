@@ -5,9 +5,10 @@ const axios = require("axios");
 const csv = require("csv-parser");
 const zlib = require("zlib");
 
-const {
-  farejarMercadoLivre: farejarMercadoLivreModulo
-} = require("./marketplaces/mercadolivre");
+const { farejarMercadoLivre } = require("./farejador");
+module.exports = {
+  farejarMercadoLivre
+};
 
 const {
   farejarShopee: farejarShopeeModulo
