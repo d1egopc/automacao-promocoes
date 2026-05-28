@@ -138,15 +138,39 @@ if (!produto) {
   console.log("⚠️ ML importador retornou vazio, usando parser:", link);
 
   produto = {
-    titulo: itemBusca.titulo,
-    precoAtual: itemBusca.precoAtual,
+    titulo:
+      itemBusca.titulo ||
+      limparTextoML(
+        link
+          .replace(/^https?:\/\/(www\.|produto\.)?mercadolivre\.com\.br\//, "")
+          .split("#")[0]
+          .split("?")[0]
+          .split("/p/MLB")[0]
+          .split("/MLB")[0]
+          .replace(/_/g, " ")
+          .replace(/-/g, " ")
+      ),
+
+    precoAtual: itemBusca.precoAtual || "",
     precoAntigo: itemBusca.precoAntigo || "",
-    imagem: itemBusca.imagem || "",
+
+    imagem:
+      itemBusca.imagem ||
+      "https://http2.mlstatic.com/frontend-assets/ml-web-navigation/ui-navigation/7.30.0/mercadolibre/logo_large_plus.webp",
+
     linkOriginal: link,
     linkAfiliado: link,
+
     cupom,
     avisoCupom
   };
+
+  console.log("🧪 ML FALLBACK USADO:", {
+    titulo: produto.titulo,
+    precoAtual: produto.precoAtual,
+    imagem: !!produto.imagem,
+    link: produto.linkOriginal
+  });
 }
 
 console.log("🧪 ML FALLBACK USADO:", {
