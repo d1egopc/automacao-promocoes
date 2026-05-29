@@ -162,8 +162,11 @@ if (!jaExisteKabum) {
       preco: novaOferta.precoAtual,
       link: novaOferta.link
     });
-  }
+
+} else {
+  console.log("⏭️ KaBuM duplicado ignorado:", novaOferta.titulo);
 }
+  }
 
     await new Promise(r =>
       setTimeout(
