@@ -128,57 +128,16 @@ for (const itemBusca of produtosBusca) {
 
     if (!link) continue;
 
-    let produto = await importarMercadoLivre(link, {
-      credenciais:
-        integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais ||
-        integracoesPorCliente?.admin?.mercadolivre?.credenciais
-    });
-
-if (!produto) {
-  console.log("⚠️ ML importador retornou vazio, usando parser:", link);
-
-  produto = {
-    titulo:
-      itemBusca.titulo ||
-      limparTextoML(
-        link
-          .replace(/^https?:\/\/(www\.|produto\.)?mercadolivre\.com\.br\//, "")
-          .split("#")[0]
-          .split("?")[0]
-          .split("/p/MLB")[0]
-          .split("/MLB")[0]
-          .replace(/_/g, " ")
-          .replace(/-/g, " ")
-      ),
-
-    precoAtual: itemBusca.precoAtual || "",
-    precoAntigo: itemBusca.precoAntigo || "",
-
-    imagem:
-      itemBusca.imagem ||
-      "https://http2.mlstatic.com/frontend-assets/ml-web-navigation/ui-navigation/7.30.0/mercadolibre/logo_large_plus.webp",
-
-    linkOriginal: link,
-    linkAfiliado: link,
-
-    cupom,
-    avisoCupom
-  };
-
-  console.log("🧪 ML FALLBACK USADO:", {
-    titulo: produto.titulo,
-    precoAtual: produto.precoAtual,
-    imagem: !!produto.imagem,
-    link: produto.linkOriginal
-  });
-}
-
-console.log("🧪 ML FALLBACK USADO:", {
-  titulo: produto.titulo,
-  precoAtual: produto.precoAtual,
-  imagem: !!produto.imagem,
-  link: produto.linkOriginal
-});
+  let produto = {
+  titulo: itemBusca.titulo || "",
+  precoAtual: itemBusca.precoAtual || "",
+  precoAntigo: itemBusca.precoAntigo || "",
+  imagem: itemBusca.imagem || "",
+  linkOriginal: link,
+  linkAfiliado: link,
+  cupom,
+  avisoCupom
+};
 
 console.log("🧪 ML PRODUTO FINAL:", produto);
 
@@ -223,8 +182,8 @@ console.log("🧪 PRECO ML:", {
 });
 
 if (!produto.precoAtual) {
-  produto.precoAtual = "R$ 0,00";
-  produto.precoEstimado = true;
+  console.log("⏭️ ML ignorado sem preço vindo da busca:", produto.titulo);
+  continue;
 }
 
 console.log("🧪 PRECO ML:", {
