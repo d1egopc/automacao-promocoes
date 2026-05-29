@@ -48,9 +48,9 @@ function extrairProdutosKabum(html = "") {
       ? html.slice(Math.max(0, trechoIndex - 2500), trechoIndex + 2500)
       : html;
 
-    const precoRaw =
-      trecho.match(/price["']?\s*:\s*([0-9.]+)/i)?.[1] ||
-      html.match(/price["']?\s*:\s*([0-9.]+)/i)?.[1];
+  const precoRaw =
+  trecho.match(/price["']?\s*:\s*([0-9.]+)/i)?.[1] ||
+  "";
 
     const imagem =
       trecho.match(/https:\/\/images\.kabum\.com\.br[^"\\]+/i)?.[0] ||
