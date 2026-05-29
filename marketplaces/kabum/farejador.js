@@ -73,6 +73,50 @@ for (const termo of buscas.slice(0, 3)) {
       links.length
     );
 
+for (const link of links.slice(0, cfg.limitePorRodada || 2)) {
+  const titulo = link
+    .split("/produto/")[1]
+    ?.split("?")[0]
+    ?.replace(/^\d+\//, "")
+    ?.replace(/-/g, " ")
+    ?.trim();
+
+  if (!titulo) continue;
+
+  let novaOferta = {
+    id: `kabum_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    nome: titulo,
+    titulo,
+    preco: "R$ 0,00",
+    precoAtual: "R$ 0,00",
+    precoAntigo: "",
+    cupom: "",
+    avisoCupom: "",
+    parcelamento: "",
+    link,
+    linkAfiliado: link,
+    imagem: "",
+    marketplace: "kabum",
+    categoria: classificarCategoriaOferta({ titulo }, termo),
+    sessaoId: "sessao1",
+    status: "pendente",
+    clienteId
+  };
+
+  novaOferta = prepararOfertaGlobal(novaOferta);
+
+  if (!ofertaJaExiste(novaOferta)) {
+    fila.push(novaOferta);
+    salvarFila();
+
+    console.log("🧡 Nova oferta KaBuM:", {
+      titulo: novaOferta.titulo,
+      preco: novaOferta.precoAtual,
+      link: novaOferta.link
+    });
+  }
+}
+
     await new Promise(r =>
       setTimeout(
         r,
