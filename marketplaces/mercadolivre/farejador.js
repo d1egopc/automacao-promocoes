@@ -272,6 +272,31 @@ console.log("🧪 PRECO ML:", {
       tituloLower.includes("teste")
     ) continue;
 
+if (
+  !produto.precoAtual ||
+  produto.precoAtual === "R$ 0,00" ||
+  produto.precoAtual === "R$ 0,0"
+) {
+  console.log("⏭️ ML ignorado sem preço válido:", produto.titulo);
+  continue;
+}
+
+if (
+  produto.imagem &&
+  (
+    produto.imagem.includes("logo_large") ||
+    produto.imagem.includes("ml-web-navigation") ||
+    produto.imagem.includes("mercadolibre/logo")
+  )
+) {
+  produto.imagem = "";
+}
+
+if (["COPIADO", "APPLIED", "APPEARANCE", "APPLINK"].includes(produto.cupom)) {
+  produto.cupom = "";
+  produto.avisoCupom = "";
+}
+
     let novaOferta = {
       id: `ml_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       nome: produto.titulo,
