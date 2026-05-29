@@ -8415,6 +8415,7 @@ const ordemMarketplaces = [
   "shopee",
   "amazon",
   "aliexpress",
+  "kabum",
   "awin",
   "magalu"
 ];
@@ -8547,30 +8548,30 @@ await farejador(clienteId, {
   }
 }
 
-// setTimeout(async () => {
- // console.log("🧪 TESTE MANUAL ALIEXPRESS AGORA");
+setTimeout(async () => {
+ console.log("🧪 TESTE MANUAL KABUM");
 
-   // await farejadoresMarketplaces.aliexpress("admin", {
-    // config,
-    // integracoesPorCliente,
-    // fila,
-    // salvarFila,
-    // prepararOfertaGlobal,
-    // ofertaJaExiste,
-    // classificarCategoriaOferta,
-    // gerarBuscasGlobais,
-    // gerarHeadersStealth,
-    // farejarCuponsMercadoLivre,
-    // importarMercadoLivre,
-    // importarAmazon,
-    // buscarOfertasShopee,
-    // normalizarSessaoId,
-    // aplicarFiltrosUniversais,
-    // distribuirOfertaParaClientes,
-    // encurtarUrl
-  // });
+   await farejadoresMarketplaces.kabum("admin", {
+    config,
+    integracoesPorCliente,
+    fila,
+    salvarFila,
+    prepararOfertaGlobal,
+    ofertaJaExiste,
+    classificarCategoriaOferta,
+    gerarBuscasGlobais,
+    gerarHeadersStealth,
+    farejarCuponsMercadoLivre,
+    importarMercadoLivre,
+    importarAmazon,
+    buscarOfertasShopee,
+    normalizarSessaoId,
+    aplicarFiltrosUniversais,
+    distribuirOfertaParaClientes,
+    encurtarUrl
+  });
 
-// }, 60 * 1000);
+}, 60 * 1000);
 
 setInterval(() => {
   rodarProximoMarketplace();
