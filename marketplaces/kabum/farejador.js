@@ -100,6 +100,8 @@ for (const produto of produtos.slice(0, cfg.limitePorRodada || 2)) {
 
 let linkAfiliado = produto.link;
 
+console.log("🧪 gerarDeepLinkAwin recebido?", typeof gerarDeepLinkAwin);
+
 if (typeof gerarDeepLinkAwin === "function") {
   try {
     linkAfiliado =
