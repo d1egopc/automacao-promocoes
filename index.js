@@ -8568,7 +8568,8 @@ setTimeout(async () => {
     normalizarSessaoId,
     aplicarFiltrosUniversais,
     distribuirOfertaParaClientes,
-    encurtarUrl
+    encurtarUrl,
+    gerarDeepLinkAwin
   });
 
 }, 60 * 1000);
