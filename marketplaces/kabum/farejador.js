@@ -17,7 +17,8 @@ async function farejarKabum(clienteId = "admin", deps = {}) {
     classificarCategoriaOferta,
     aplicarFiltrosUniversais,
     gerarHeadersStealth,
-    encurtarUrl
+    encurtarUrl,
+    gerarDeepLinkAwin
   } = deps;
 
   try {
@@ -97,6 +98,29 @@ for (const produto of produtos.slice(0, cfg.limitePorRodada || 2)) {
 
   if (!titulo) continue;
 
+let linkAfiliado = produto.link;
+
+if (typeof gerarDeepLinkAwin === "function") {
+  try {
+    linkAfiliado =
+      await gerarDeepLinkAwin(
+        produto.link,
+        clienteId
+      );
+
+    console.log(
+      "🔗 DeepLink Awin KaBuM:",
+      linkAfiliado
+    );
+
+  } catch (e) {
+    console.log(
+      "⚠️ Erro DeepLink Awin:",
+      e.message
+    );
+  }
+}
+
 let novaOferta = {
   id: `kabum_${Date.now()}_${Math.random().toString(36).slice(2)}`,
   nome: produto.titulo,
@@ -108,7 +132,7 @@ let novaOferta = {
   avisoCupom: "",
   parcelamento: "",
   link: produto.link,
-  linkAfiliado: produto.link,
+  linkAfiliado,
   imagem: produto.imagem || "",
   marketplace: "kabum",
   categoria: classificarCategoriaOferta(produto, termo),
