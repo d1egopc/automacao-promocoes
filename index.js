@@ -3875,6 +3875,15 @@ async function gerarDeepLinkAwin(urlOriginal, clienteId = "admin") {
 
   const { publisherId, apiToken, advertiserId } = credenciais;
 
+console.log("🧪 AWIN DEEPLINK CONFIG:", {
+  clienteId,
+  temPublisherId: !!publisherId,
+  temApiToken: !!apiToken,
+  temAdvertiserId: !!advertiserId,
+  advertiserId,
+  destino: urlOriginal
+});
+
   if (!publisherId || !apiToken || !advertiserId) {
     throw new Error("Awin sem publisherId, apiToken ou advertiserId configurado.");
   }
