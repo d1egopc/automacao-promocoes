@@ -72,6 +72,16 @@ for (const termo of buscas.slice(0, 3)) {
       html.slice(0, 500)
     );
 
+console.log(
+  "🧪 PRECO KABUM:",
+  html.match(/price["']?\s*:\s*["']?[0-9.,]+/i)?.[0]
+);
+
+console.log(
+  "🧪 IMAGE KABUM:",
+  html.match(/https:\/\/images\.kabum\.com\.br[^"]+/i)?.[0]
+);
+
     const links =
       extrairLinksKabum(html);
 
