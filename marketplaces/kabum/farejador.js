@@ -23,6 +23,13 @@ async function farejarKabum(clienteId = "admin", deps = {}) {
   try {
     console.log("🧡 Farejando KaBuM stealth...", { clienteId });
 
+const cfg = config.marketplaces?.kabum || {};
+
+    if (!cfg.ativo) {
+      console.log("⏸ KaBuM desativada. Farejador ignorado.");
+      return [];
+    }
+
 const buscas = gerarBuscasKabum();
 
 console.log("🔎 Buscas KaBuM:", buscas.slice(0, 10));
@@ -135,13 +142,7 @@ for (const link of links.slice(0, cfg.limitePorRodada || 2)) {
 
 }
 
-    const cfg = config.marketplaces?.kabum || {};
-
-    if (!cfg.ativo) {
-      console.log("⏸ KaBuM desativada. Farejador ignorado.");
-      return [];
-    }
-
+    
     const integracaoAwin =
       integracoesPorCliente?.[clienteId]?.awin ||
       integracoesPorCliente?.admin?.awin;
