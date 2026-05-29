@@ -73,15 +73,6 @@ for (const termo of buscas.slice(0, 3)) {
       html.slice(0, 500)
     );
 
-console.log(
-  "🧪 PRECO KABUM:",
-  html.match(/price["']?\s*:\s*["']?[0-9.,]+/i)?.[0]
-);
-
-console.log(
-  "🧪 IMAGE KABUM:",
-  html.match(/https:\/\/images\.kabum\.com\.br[^"]+/i)?.[0]
-);
 
     const produtos =
   extrairProdutosKabum(html);
@@ -91,29 +82,26 @@ console.log(
   produtos.length
 );
 
-
 for (const produto of produtos.slice(0, cfg.limitePorRodada || 2)) {
 
   const titulo = produto.titulo;
 
   if (!titulo) continue;
 
-let linkAfiliado = produto.link;
+  if (!produto.precoAtual || produto.precoAtual === "R$ 0,00") {
+    console.log("⏭️ KaBuM ignorado sem preço:", produto.titulo);
+    continue;
+  }
 
-console.log("🧪 gerarDeepLinkAwin recebido?", typeof gerarDeepLinkAwin);
+  console.log("🧪 PRODUTO KABUM EXTRAÍDO:", {
+    titulo: produto.titulo,
+    preco: produto.precoAtual,
+    imagem: produto.imagem,
+    link: produto.link
+  });
 
-if (typeof gerarDeepLinkAwin === "function") {
-  try {
-    linkAfiliado =
-      await gerarDeepLinkAwin(
-        produto.link,
-        clienteId
-      );
+  let linkAfiliado = produto.link;
 
-    console.log(
-      "🔗 DeepLink Awin KaBuM:",
-      linkAfiliado
-    );
 
   } catch (e) {
     console.log(
