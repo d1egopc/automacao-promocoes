@@ -73,6 +73,15 @@ for (const termo of buscas.slice(0, 3)) {
       html.slice(0, 500)
     );
 
+console.log(
+  "🧪 PRECO KABUM:",
+  html.match(/price["']?\s*:\s*["']?[0-9.,]+/i)?.[0]
+);
+
+console.log(
+  "🧪 IMAGE KABUM:",
+  html.match(/https:\/\/images\.kabum\.com\.br[^"]+/i)?.[0]
+);
 
     const produtos =
   extrairProdutosKabum(html);
@@ -82,62 +91,71 @@ for (const termo of buscas.slice(0, 3)) {
   produtos.length
 );
 
+
 for (const produto of produtos.slice(0, cfg.limitePorRodada || 2)) {
+
   const titulo = produto.titulo;
 
   if (!titulo) continue;
 
-  //if (!produto.precoAtual || produto.precoAtual === "R$ 0,00") {
-    //console.log("⏭️ KaBuM ignorado sem preço:", produto.titulo);
-    //continue;
- //}
+let linkAfiliado = produto.link;
 
-  console.log("🧪 PRODUTO KABUM EXTRAÍDO:", {
-    titulo: produto.titulo,
-    preco: produto.precoAtual,
-    imagem: produto.imagem,
-    link: produto.link
-  });
+console.log("🧪 gerarDeepLinkAwin recebido?", typeof gerarDeepLinkAwin);
 
-  let linkAfiliado = produto.link;
+if (typeof gerarDeepLinkAwin === "function") {
+  try {
+    linkAfiliado =
+      await gerarDeepLinkAwin(
+        produto.link,
+        clienteId
+      );
 
-  console.log("🧪 gerarDeepLinkAwin recebido?", typeof gerarDeepLinkAwin);
+    console.log(
+      "🔗 DeepLink Awin KaBuM:",
+      linkAfiliado
+    );
 
-  if (typeof gerarDeepLinkAwin === "function") {
-    try {
-      linkAfiliado = await gerarDeepLinkAwin(produto.link, clienteId);
-
-      console.log("🔗 DeepLink Awin KaBuM:", linkAfiliado);
-    } catch (e) {
-      console.log("⚠️ Erro DeepLink Awin:", e.message);
-    }
+  } catch (e) {
+    console.log(
+      "⚠️ Erro DeepLink Awin:",
+      e.message
+    );
   }
+}
 
-  let novaOferta = {
-    id: `kabum_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-    nome: produto.titulo,
-    titulo: produto.titulo,
-    preco: produto.precoAtual,
-    precoAtual: produto.precoAtual,
-    precoAntigo: produto.precoAntigo || "",
-    cupom: "",
-    avisoCupom: "",
-    parcelamento: "",
-    link: produto.link,
-    linkAfiliado,
-    imagem: produto.imagem || "",
-    marketplace: "kabum",
-    categoria: classificarCategoriaOferta(produto.titulo || produto, termo),
-    sessaoId: "sessao1",
-    status: "pendente",
-    clienteId
-  };
+let novaOferta = {
+  id: `kabum_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+  nome: produto.titulo,
+  titulo: produto.titulo,
+  preco: produto.precoAtual || "R$ 0,00",
+  precoAtual: produto.precoAtual || "R$ 0,00",
+  precoAntigo: produto.precoAntigo || "",
+  cupom: "",
+  avisoCupom: produto.avisoPagamento || "💳 Com desconto à vista no PIX.",
+  parcelamento: produto.parcelamento || "",
+  link: produto.link,
+  linkAfiliado,
+  imagem: produto.imagem || "",
+  marketplace: "kabum",
+  categoria: classificarCategoriaOferta(produto, termo),
+  sessaoId: "sessao1",
+  status: "pendente",
+  clienteId
+};
 
   novaOferta = prepararOfertaGlobal(novaOferta);
 
-  if (!ofertaJaExiste(novaOferta)) {
-    fila.push(novaOferta);
-    salvarFila();
+ const jaExisteKabum = ofertaJaExiste(novaOferta);
+
+console.log("🧪 KABUM jaExiste?", {
+  jaExiste: jaExisteKabum,
+  titulo: novaOferta.titulo,
+  link: novaOferta.link
+});
+
+if (!jaExisteKabum) {
+  fila.push(novaOferta);
+  salvarFila();
 
     console.log("🧡 Nova oferta KaBuM:", {
       titulo: novaOferta.titulo,
@@ -146,6 +164,7 @@ for (const produto of produtos.slice(0, cfg.limitePorRodada || 2)) {
     });
   }
 }
+
     await new Promise(r =>
       setTimeout(
         r,
@@ -164,6 +183,7 @@ for (const produto of produtos.slice(0, cfg.limitePorRodada || 2)) {
 
 }
 
+    
     const integracaoAwin =
       integracoesPorCliente?.[clienteId]?.awin ||
       integracoesPorCliente?.admin?.awin;

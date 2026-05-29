@@ -44,42 +44,36 @@ function extrairProdutosKabum(html = "") {
 
   for (const link of [...new Set(links)]) {
     const trechoIndex = html.indexOf(link);
+    const trecho = trechoIndex >= 0
+      ? html.slice(Math.max(0, trechoIndex - 2500), trechoIndex + 2500)
+      : html;
 
-   const proximoLinkIndex = links
-  .map(l => html.indexOf(l))
-  .filter(i => i > trechoIndex)
-  .sort((a, b) => a - b)[0];
-
-const trecho = trechoIndex >= 0
-  ? html.slice(
-      Math.max(0, trechoIndex - 800),
-      proximoLinkIndex ? proximoLinkIndex : trechoIndex + 6000
-    )
-  : "";
-
-    const precoRaw =
-      trecho.match(/"price"\s*:\s*"?([0-9]+(?:[.,][0-9]+)?)"?/i)?.[1] ||
-      trecho.match(/price["']?\s*:\s*"?([0-9]+(?:[.,][0-9]+)?)"?/i)?.[1] ||
-      trecho.match(/"priceWithDiscount"\s*:\s*"?([0-9]+(?:[.,][0-9]+)?)"?/i)?.[1] ||
-      trecho.match(/"priceValue"\s*:\s*"?([0-9]+(?:[.,][0-9]+)?)"?/i)?.[1] ||
-      "";
+  const precoRaw =
+  trecho.match(/price["']?\s*:\s*([0-9.]+)/i)?.[1] ||
+  "";
 
     const imagem =
       trecho.match(/https:\/\/images\.kabum\.com\.br[^"\\]+/i)?.[0] ||
+      html.match(/https:\/\/images\.kabum\.com\.br[^"\\]+/i)?.[0] ||
       "";
+
+    const parcelamento =
+     trecho.match(/Ou\s+\d+x\s+de\s+R\$\s*[\d.,]+[^"<]*/i)?.[0] ||
+     trecho.match(/\d+x\s+de\s+R\$\s*[\d.,]+[^"<]*/i)?.[0] ||
+     "";
 
     const titulo = tituloPeloLinkKabum(link);
 
-    if (!titulo || !link) continue;
-
     produtos.push({
-      titulo,
-      precoAtual: precoRaw ? formatarPrecoKabum(precoRaw) : "",
-      precoAntigo: "",
-      imagem,
-      link
+     titulo,
+     precoAtual: precoRaw ? formatarPrecoKabum(precoRaw) : "",
+     precoAntigo: "",
+     parcelamento,
+     avisoPagamento: "💳 Com desconto à vista no PIX.",
+     imagem,
+    link
     });
-  }
+   }
 
   return produtos;
 }
