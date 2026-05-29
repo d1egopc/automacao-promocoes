@@ -2,41 +2,63 @@
 
 function gerarBuscasKabum() {
   return [
-
-    "placa de video",
-    "placa mae",
-    "placa mae am5",
-    "kit placa mae processador",
-    "ddr4",
-    "ddr5",
+"placa de video",
     "rtx",
     "rx",
-    "ssd nvme",
-    "ssd",
-    "mouse gamer",
-    "caixa de som",
-    "memoria ram",
+
+    "placa mae",
+    "placa mae am4",
+    "placa mae am5",
+    "kit placa mae processador",
+
+    "processador amd",
+    "processador intel",
+
     "fonte gamer",
-    "soundbar",
-    "headset",
-    "cadeira gamer",
+    "fonte 650w",
+    "fonte 750w",
+    "fonte 850w",
+
+    "memoria ram",
+    "memoria ddr4",
+    "memoria ddr5",
+    "kingston fury",
+    "hyperx",
+
+    "ssd",
+    "ssd nvme",
+    "ssd kingston",
+
+    "monitor",
     "monitor gamer",
+    "monitor 144hz",
+    "monitor 165hz",
+    "monitor 240hz",
+
     "mouse gamer",
     "teclado mecanico",
+    "headset",
+    "headset gamer",
+
+    "fan",
+    "fans",
+    "kit fan",
     "water cooler",
+
+    "gabinete gamer",
+    "cadeira gamer",
+
+    "tablet",
+    "smartwatch",
+    "fone bluetooth",
+    "caixa de som",
+    "soundbar",
 
     "air fryer",
     "smart tv",
-    "iphone",
-    "smartwatch",
-    "fone bluetooth",
-
-    "whey protein",
-    "creatina",
 
     "furadeira",
     "parafusadeira"
-
   ];
 }
 
