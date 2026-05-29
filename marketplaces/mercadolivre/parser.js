@@ -63,6 +63,10 @@ for (const link of linksUnicos) {
       )
     : "";
 
+console.log(
+  "🧪 TRECHO ML PRECO DEBUG:",
+  trecho.slice(0, 1200)
+);
 
 const titulo =
   limparTextoML(
