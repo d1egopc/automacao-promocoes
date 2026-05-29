@@ -46,11 +46,22 @@ const links = [
     !link.includes("account-verification")
   );
 
-  for (const link of [...new Set(links)].slice(0, 10)) {
+const linksUnicos = [...new Set(links)].slice(0, 10);
+
+for (const link of linksUnicos) {
   const trechoIndex = html.indexOf(link);
+
+  const proximoLinkIndex = linksUnicos
+    .map(l => html.indexOf(l))
+    .filter(i => i > trechoIndex)
+    .sort((a, b) => a - b)[0];
+
   const trecho = trechoIndex >= 0
-    ? html.slice(Math.max(0, trechoIndex - 3000), trechoIndex + 3000)
-    : html;
+    ? html.slice(
+        Math.max(0, trechoIndex - 800),
+        proximoLinkIndex || trechoIndex + 5000
+      )
+    : "";
 
 const titulo =
   limparTextoML(
@@ -95,10 +106,11 @@ if (!tituloFinal) {
   continue;
 }
 
-const precoMatch =
-  trecho.match(/"current_price":([0-9.]+)/)?.[1] ||
-  trecho.match(/"price":([0-9]{2,6}(?:\.[0-9]{2})?)/)?.[1] ||
-  trecho.match(/R\$\s*([0-9]{2,6}(?:\.[0-9]{3})*,\d{2})/)?.[1];
+const precoAtual = precoMatch
+  ? `R$ ${String(precoMatch)
+      .replace(/\.(?=\d{3}(,|$))/g, "")
+      .replace(".", ",")}`
+  : "";
 
   const precoAtual = precoMatch
   ? `R$ ${String(precoMatch).replace(".", ",")}`
