@@ -44,20 +44,23 @@ function extrairProdutosKabum(html = "") {
 
   for (const link of [...new Set(links)]) {
     const trechoIndex = html.indexOf(link);
-    const trecho = trechoIndex >= 0
-      ? html.slice(Math.max(0, trechoIndex - 2500), trechoIndex + 2500)
-      : html;
 
-  const precoRaw =
-  trecho.match(/price["']?\s*:\s*([0-9.]+)/i)?.[1] ||
-  "";
+    const trecho = trechoIndex >= 0
+      ? html.slice(trechoIndex, trechoIndex + 1800)
+      : "";
+
+    const precoRaw =
+      trecho.match(/"price"\s*:\s*"?([0-9]+(?:\.[0-9]+)?)"?/i)?.[1] ||
+      trecho.match(/price["']?\s*:\s*"?([0-9]+(?:\.[0-9]+)?)"?/i)?.[1] ||
+      "";
 
     const imagem =
       trecho.match(/https:\/\/images\.kabum\.com\.br[^"\\]+/i)?.[0] ||
-      html.match(/https:\/\/images\.kabum\.com\.br[^"\\]+/i)?.[0] ||
       "";
 
     const titulo = tituloPeloLinkKabum(link);
+
+    if (!titulo || !link) continue;
 
     produtos.push({
       titulo,
