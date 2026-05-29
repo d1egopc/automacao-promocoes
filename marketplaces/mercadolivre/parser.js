@@ -63,10 +63,14 @@ for (const link of linksUnicos) {
       )
     : "";
 
-console.log(
-  "🧪 TRECHO ML PRECO DEBUG:",
-  trecho.slice(0, 1200)
-);
+console.log("🧪 ML TEM CAMPOS PRECO?", {
+  temPrice: trecho.includes("price"),
+  temCurrentPrice: trecho.includes("current_price"),
+  temPriceAmount: trecho.includes("price_amount"),
+  temFormatted: trecho.includes("formatted"),
+  temMoneyAmount: trecho.includes("money_amount"),
+  amostraPrice: trecho.match(/.{0,80}price.{0,120}/i)?.[0] || ""
+});
 
 const titulo =
   limparTextoML(
