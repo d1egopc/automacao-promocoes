@@ -116,15 +116,14 @@ if (compraNoApp && !cupom) {
   cupom = "VER NO APP";
   avisoCupom = "📱 Confira pelo app do Mercado Livre, pode aparecer menor valor ou desconto exclusivo.";
 }
-        
+
+const produtosBusca = extrairProdutosBuscaML(html).slice(0, 8);
 
 console.log("🚨 ML PRODUTOS BUSCA RESUMO:", produtosBusca.map(p => ({
   titulo: p.titulo,
   precoAtual: p.precoAtual,
   link: p.link
 })));
-
-const produtosBusca = extrairProdutosBuscaML(html).slice(0, 8);
 
 console.log("🧪 PRODUTOS ML PARSEADOS:", produtosBusca.length);
 console.log(`🔎 ${termo}: ${produtosBusca.length} produtos`);
