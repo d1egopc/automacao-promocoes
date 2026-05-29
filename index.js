@@ -8560,9 +8560,9 @@ await farejador(clienteId, {
 }
 
 setTimeout(async () => {
- console.log("🧪 TESTE MANUAL KABUM");
+ console.log("🧪 TESTE MANUAL MERCADO LIVRE");
 
-   await farejadoresMarketplaces.kabum("admin", {
+   await farejadoresMarketplaces.MercadoLivre("admin", {
     config,
     integracoesPorCliente,
     fila,
