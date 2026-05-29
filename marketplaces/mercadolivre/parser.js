@@ -46,11 +46,23 @@ const links = [
     !link.includes("account-verification")
   );
 
-  for (const link of [...new Set(links)].slice(0, 10)) {
+ const linksUnicos = [...new Set(links)].slice(0, 10);
+
+for (const link of linksUnicos) {
   const trechoIndex = html.indexOf(link);
+
+  const proximoLinkIndex = linksUnicos
+    .map(l => html.indexOf(l))
+    .filter(i => i > trechoIndex)
+    .sort((a, b) => a - b)[0];
+
   const trecho = trechoIndex >= 0
-    ? html.slice(Math.max(0, trechoIndex - 3000), trechoIndex + 3000)
-    : html;
+    ? html.slice(
+        trechoIndex,
+        proximoLinkIndex || trechoIndex + 3500
+      )
+    : "";
+
 
 const titulo =
   limparTextoML(
