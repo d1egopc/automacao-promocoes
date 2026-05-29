@@ -83,7 +83,6 @@ for (const termo of buscas.slice(0, 3)) {
 );
 
 for (const produto of produtos.slice(0, cfg.limitePorRodada || 2)) {
-
   const titulo = produto.titulo;
 
   if (!titulo) continue;
@@ -102,39 +101,37 @@ for (const produto of produtos.slice(0, cfg.limitePorRodada || 2)) {
 
   let linkAfiliado = produto.link;
 
+  console.log("🧪 gerarDeepLinkAwin recebido?", typeof gerarDeepLinkAwin);
 
-  } catch (e) {
-    console.log(
-      "⚠️ Erro DeepLink Awin:",
-      e.message
-    );
+  if (typeof gerarDeepLinkAwin === "function") {
+    try {
+      linkAfiliado = await gerarDeepLinkAwin(produto.link, clienteId);
+
+      console.log("🔗 DeepLink Awin KaBuM:", linkAfiliado);
+    } catch (e) {
+      console.log("⚠️ Erro DeepLink Awin:", e.message);
+    }
   }
-}
 
-if (!produto.precoAtual || produto.precoAtual === "R$ 0,00") {
-  console.log("⏭️ KaBuM ignorado sem preço:", produto.titulo);
-  continue;
-}
-
-let novaOferta = {
-  id: `kabum_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-  nome: produto.titulo,
-  titulo: produto.titulo,
-  preco: produto.precoAtual || "R$ 0,00",
-  precoAtual: produto.precoAtual || "R$ 0,00",
-  precoAntigo: produto.precoAntigo || "",
-  cupom: "",
-  avisoCupom: "",
-  parcelamento: "",
-  link: produto.link,
-  linkAfiliado,
-  imagem: produto.imagem || "",
-  marketplace: "kabum",
-  categoria: classificarCategoriaOferta(produto, termo),
-  sessaoId: "sessao1",
-  status: "pendente",
-  clienteId
-};
+  let novaOferta = {
+    id: `kabum_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    nome: produto.titulo,
+    titulo: produto.titulo,
+    preco: produto.precoAtual,
+    precoAtual: produto.precoAtual,
+    precoAntigo: produto.precoAntigo || "",
+    cupom: "",
+    avisoCupom: "",
+    parcelamento: "",
+    link: produto.link,
+    linkAfiliado,
+    imagem: produto.imagem || "",
+    marketplace: "kabum",
+    categoria: classificarCategoriaOferta(produto.titulo || produto, termo),
+    sessaoId: "sessao1",
+    status: "pendente",
+    clienteId
+  };
 
   novaOferta = prepararOfertaGlobal(novaOferta);
 
@@ -149,7 +146,6 @@ let novaOferta = {
     });
   }
 }
-
     await new Promise(r =>
       setTimeout(
         r,
@@ -168,7 +164,6 @@ let novaOferta = {
 
 }
 
-    
     const integracaoAwin =
       integracoesPorCliente?.[clienteId]?.awin ||
       integracoesPorCliente?.admin?.awin;
