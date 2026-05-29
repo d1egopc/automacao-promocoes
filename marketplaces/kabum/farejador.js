@@ -123,6 +123,11 @@ if (typeof gerarDeepLinkAwin === "function") {
   }
 }
 
+if (!produto.precoAtual || produto.precoAtual === "R$ 0,00") {
+  console.log("⏭️ KaBuM ignorado sem preço:", produto.titulo);
+  continue;
+}
+
 let novaOferta = {
   id: `kabum_${Date.now()}_${Math.random().toString(36).slice(2)}`,
   nome: produto.titulo,

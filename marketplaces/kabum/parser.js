@@ -45,9 +45,17 @@ function extrairProdutosKabum(html = "") {
   for (const link of [...new Set(links)]) {
     const trechoIndex = html.indexOf(link);
 
-    const trecho = trechoIndex >= 0
-      ? html.slice(trechoIndex, trechoIndex + 1800)
-      : "";
+   const proximoLinkIndex = links
+  .map(l => html.indexOf(l))
+  .filter(i => i > trechoIndex)
+  .sort((a, b) => a - b)[0];
+
+const trecho = trechoIndex >= 0
+  ? html.slice(
+      Math.max(0, trechoIndex - 800),
+      proximoLinkIndex ? proximoLinkIndex : trechoIndex + 6000
+    )
+  : "";
 
     const precoRaw =
       trecho.match(/"price"\s*:\s*"?([0-9]+(?:\.[0-9]+)?)"?/i)?.[1] ||
