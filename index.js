@@ -8562,7 +8562,7 @@ await farejador(clienteId, {
 setTimeout(async () => {
  console.log("🧪 TESTE MANUAL MERCADO LIVRE");
 
-   await farejadoresMarketplaces.MercadoLivre("admin", {
+   await farejadoresMarketplaces.mercadolivre("admin", {
     config,
     integracoesPorCliente,
     fila,
