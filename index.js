@@ -2016,6 +2016,7 @@ const temPrecoAntigoValido =
 if (temPrecoAntigoValido) {
 mensagem += `
 ❌ De: ${precoAntigo}`;
+}
 
 if (precoAtual) {
 mensagem += `
