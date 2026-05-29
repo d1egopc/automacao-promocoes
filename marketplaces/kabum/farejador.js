@@ -87,10 +87,10 @@ for (const produto of produtos.slice(0, cfg.limitePorRodada || 2)) {
 
   if (!titulo) continue;
 
-  if (!produto.precoAtual || produto.precoAtual === "R$ 0,00") {
-    console.log("⏭️ KaBuM ignorado sem preço:", produto.titulo);
-    continue;
-  }
+  //if (!produto.precoAtual || produto.precoAtual === "R$ 0,00") {
+    //console.log("⏭️ KaBuM ignorado sem preço:", produto.titulo);
+    //continue;
+ //}
 
   console.log("🧪 PRODUTO KABUM EXTRAÍDO:", {
     titulo: produto.titulo,
