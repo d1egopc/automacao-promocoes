@@ -1,20 +1,77 @@
 // ================= PARSER KABUM =================
 
-function extrairLinksKabum(html = "") {
+function limparTextoKabum(texto = "") {
+  return String(texto)
+    .replace(/\\u002F/g, "/")
+    .replace(/\\\//g, "/")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
+function formatarPrecoKabum(valor) {
+  const numero = Number(String(valor).replace(",", "."));
+
+  if (!Number.isFinite(numero) || numero <= 0) {
+    return "";
+  }
+
+  return numero.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  });
+}
+
+function tituloPeloLinkKabum(link = "") {
+  return limparTextoKabum(
+    link
+      .split("/produto/")[1]
+      ?.split("?")[0]
+      ?.replace(/^\d+\//, "")
+      ?.replace(/-/g, " ") || ""
+  );
+}
+
+function extrairProdutosKabum(html = "") {
   const links = [
-
     ...html.matchAll(/href="(https:\/\/www\.kabum\.com\.br\/produto\/[^"]+)"/gi),
-
     ...html.matchAll(/"url":"(https:\/\/www\.kabum\.com\.br\/produto\/[^"]+)"/gi)
-
   ]
-    .map(m => m[1])
+    .map(m => limparTextoKabum(m[1] || ""))
     .filter(Boolean);
 
-  return [...new Set(links)];
+  const produtos = [];
+
+  for (const link of [...new Set(links)]) {
+    const trechoIndex = html.indexOf(link);
+    const trecho = trechoIndex >= 0
+      ? html.slice(Math.max(0, trechoIndex - 2500), trechoIndex + 2500)
+      : html;
+
+    const precoRaw =
+      trecho.match(/price["']?\s*:\s*([0-9.]+)/i)?.[1] ||
+      html.match(/price["']?\s*:\s*([0-9.]+)/i)?.[1];
+
+    const imagem =
+      trecho.match(/https:\/\/images\.kabum\.com\.br[^"\\]+/i)?.[0] ||
+      html.match(/https:\/\/images\.kabum\.com\.br[^"\\]+/i)?.[0] ||
+      "";
+
+    const titulo = tituloPeloLinkKabum(link);
+
+    produtos.push({
+      titulo,
+      precoAtual: formatarPrecoKabum(precoRaw),
+      precoAntigo: "",
+      imagem,
+      link
+    });
+  }
+
+  return produtos;
 }
 
 module.exports = {
-  extrairLinksKabum
+  limparTextoKabum,
+  extrairProdutosKabum
 };

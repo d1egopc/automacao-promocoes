@@ -1,7 +1,7 @@
 const { gerarBuscasKabum } =
 require("./buscas");
 
-const { extrairLinksKabum } =
+const { extrairProdutosKabum } =
 require("./parser");
 
 // ================= FAREJADOR KABUM =================
@@ -82,43 +82,40 @@ console.log(
   html.match(/https:\/\/images\.kabum\.com\.br[^"]+/i)?.[0]
 );
 
-    const links =
-      extrairLinksKabum(html);
+    const produtos =
+  extrairProdutosKabum(html);
 
-    console.log(
-      "🔗 Links KaBuM encontrados:",
-      links.length
-    );
+   console.log(
+  "📦 Produtos KaBuM encontrados:",
+  produtos.length
+);
 
-for (const link of links.slice(0, cfg.limitePorRodada || 2)) {
-  const titulo = link
-    .split("/produto/")[1]
-    ?.split("?")[0]
-    ?.replace(/^\d+\//, "")
-    ?.replace(/-/g, " ")
-    ?.trim();
+
+for (const produto of produtos.slice(0, cfg.limitePorRodada || 2)) {
+
+  const titulo = produto.titulo;
 
   if (!titulo) continue;
 
-  let novaOferta = {
-    id: `kabum_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-    nome: titulo,
-    titulo,
-    preco: "R$ 0,00",
-    precoAtual: "R$ 0,00",
-    precoAntigo: "",
-    cupom: "",
-    avisoCupom: "",
-    parcelamento: "",
-    link,
-    linkAfiliado: link,
-    imagem: "",
-    marketplace: "kabum",
-    categoria: classificarCategoriaOferta({ titulo }, termo),
-    sessaoId: "sessao1",
-    status: "pendente",
-    clienteId
-  };
+let novaOferta = {
+  id: `kabum_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+  nome: produto.titulo,
+  titulo: produto.titulo,
+  preco: produto.precoAtual || "R$ 0,00",
+  precoAtual: produto.precoAtual || "R$ 0,00",
+  precoAntigo: produto.precoAntigo || "",
+  cupom: "",
+  avisoCupom: "",
+  parcelamento: "",
+  link: produto.link,
+  linkAfiliado: produto.link,
+  imagem: produto.imagem || "",
+  marketplace: "kabum",
+  categoria: classificarCategoriaOferta(produto, termo),
+  sessaoId: "sessao1",
+  status: "pendente",
+  clienteId
+};
 
   novaOferta = prepararOfertaGlobal(novaOferta);
 
