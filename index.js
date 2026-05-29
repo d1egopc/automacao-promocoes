@@ -3902,6 +3902,8 @@ console.log("🧪 AWIN DEEPLINK CONFIG:", {
     }
   );
 
+console.log("🧪 AWIN LINKBUILDER RESPOSTA:", response.data);
+
   return (
     response.data?.shortUrl ||
     response.data?.url ||
