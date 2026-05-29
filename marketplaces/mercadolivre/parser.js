@@ -112,9 +112,6 @@ const precoAtual = precoMatch
       .replace(".", ",")}`
   : "";
 
-  const precoAtual = precoMatch
-  ? `R$ ${String(precoMatch).replace(".", ",")}`
-  : "";
 
   const imagem =
     trecho.match(/"image":"([^"]+)"/)?.[1] ||
