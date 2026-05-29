@@ -8545,7 +8545,8 @@ await farejador(clienteId, {
   normalizarSessaoId,
   aplicarFiltrosUniversais,
   distribuirOfertaParaClientes,
-  encurtarUrl
+  encurtarUrl,
+  gerarDeepLinkAwin
 });
 }
   console.log(`✅ Rodada multiusuário finalizada: ${marketplace}`);
