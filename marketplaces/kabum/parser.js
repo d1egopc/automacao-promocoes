@@ -58,8 +58,10 @@ const trecho = trechoIndex >= 0
   : "";
 
     const precoRaw =
-      trecho.match(/"price"\s*:\s*"?([0-9]+(?:\.[0-9]+)?)"?/i)?.[1] ||
-      trecho.match(/price["']?\s*:\s*"?([0-9]+(?:\.[0-9]+)?)"?/i)?.[1] ||
+      trecho.match(/"price"\s*:\s*"?([0-9]+(?:[.,][0-9]+)?)"?/i)?.[1] ||
+      trecho.match(/price["']?\s*:\s*"?([0-9]+(?:[.,][0-9]+)?)"?/i)?.[1] ||
+      trecho.match(/"priceWithDiscount"\s*:\s*"?([0-9]+(?:[.,][0-9]+)?)"?/i)?.[1] ||
+      trecho.match(/"priceValue"\s*:\s*"?([0-9]+(?:[.,][0-9]+)?)"?/i)?.[1] ||
       "";
 
     const imagem =
@@ -72,7 +74,7 @@ const trecho = trechoIndex >= 0
 
     produtos.push({
       titulo,
-      precoAtual: formatarPrecoKabum(precoRaw),
+      precoAtual: precoRaw ? formatarPrecoKabum(precoRaw) : "",
       precoAntigo: "",
       imagem,
       link
