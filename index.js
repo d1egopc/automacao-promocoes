@@ -1996,7 +1996,7 @@ const precoAntigo = oferta.precoAntigo || "";
 const cupom = oferta.cupom || "";
 const avisoCupom = oferta.avisoCupom || "";
 const marketplace = oferta.marketplace || "";
-const link = oferta.link || oferta.linkAfiliado || "";
+const link = oferta.linkAfiliado || oferta.link || "";
 const parcelamento = oferta.parcelamento || "";
 
 let mensagem = `🔥 OFERTA ENCONTRADA!
@@ -2014,14 +2014,12 @@ const temPrecoAntigoValido =
   antigoNum > atualNum;
 
 if (temPrecoAntigoValido) {
-  mensagem += `
-
-❌ De: R$ ${precoAntigo}`;
-}
+mensagem += `
+❌ De: ${precoAntigo}`;
 
 if (precoAtual) {
-  mensagem += `
-✅ Por: R$ ${precoAtual}`;
+mensagem += `
+✅ Por: ${precoAtual}`;
 }
 
 if (temPrecoAntigoValido) {
