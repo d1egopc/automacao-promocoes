@@ -124,7 +124,7 @@ const precoMatch =
     trecho.match(/src="([^"]*mlstatic[^"]+)"/)?.[1] ||
     "";
 
-console.log("🧪 PARSER ML ITEM:", {
+console.log("🚨🚨🚨 PARSER ML ITEM PREÇO:", {
   titulo: tituloFinal,
   precoMatch,
   precoAtual,
