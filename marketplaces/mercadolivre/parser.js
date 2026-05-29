@@ -46,22 +46,11 @@ const links = [
     !link.includes("account-verification")
   );
 
-const linksUnicos = [...new Set(links)].slice(0, 10);
-
-for (const link of linksUnicos) {
+  for (const link of [...new Set(links)].slice(0, 10)) {
   const trechoIndex = html.indexOf(link);
-
-  const proximoLinkIndex = linksUnicos
-    .map(l => html.indexOf(l))
-    .filter(i => i > trechoIndex)
-    .sort((a, b) => a - b)[0];
-
   const trecho = trechoIndex >= 0
-    ? html.slice(
-        Math.max(0, trechoIndex - 800),
-        proximoLinkIndex || trechoIndex + 5000
-      )
-    : "";
+    ? html.slice(Math.max(0, trechoIndex - 3000), trechoIndex + 3000)
+    : html;
 
 const titulo =
   limparTextoML(
@@ -112,7 +101,7 @@ const precoMatch =
   trecho.match(/R\$\s*([0-9]{1,3}(?:\.[0-9]{3})*,\d{2})/)?.[1] ||
   "";
 
-const precoAtual = precoMatch
+  const precoAtual = precoMatch
   ? `R$ ${String(precoMatch)
       .replace(/\.(?=\d{3}(,|$))/g, "")
       .replace(".", ",")}`
@@ -122,6 +111,13 @@ const precoAtual = precoMatch
     trecho.match(/"image":"([^"]+)"/)?.[1] ||
     trecho.match(/src="([^"]*mlstatic[^"]+)"/)?.[1] ||
     "";
+
+console.log("🧪 PARSER ML ITEM:", {
+  titulo: tituloFinal,
+  precoMatch,
+  precoAtual,
+  link
+});
 
   produtos.push({
     titulo: tituloFinal,
