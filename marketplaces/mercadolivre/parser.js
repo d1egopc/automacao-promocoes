@@ -115,6 +115,11 @@ if (!tituloFinal) {
   continue;
 }
 
+console.log(
+  "🧪 TRECHO ML:",
+  trecho.slice(0, 2000)
+);
+
 const precoMatch =
   trecho.match(/"current_price"\s*:\s*([0-9]+(?:\.[0-9]+)?)/)?.[1] ||
   trecho.match(/"price"\s*:\s*([0-9]+(?:\.[0-9]+)?)/)?.[1] ||
