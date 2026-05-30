@@ -23,6 +23,12 @@ require("./marketplaces/aliexpress/farejador");
 const farejarKabum =
 require("./marketplaces/kabum/farejador");
 
+const {
+  escolherMelhorCupom,
+  cupomEstaValido,
+  CUPONS_ATIVOS
+} = require("./marketplaces/cupons");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
