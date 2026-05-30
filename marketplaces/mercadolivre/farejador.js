@@ -32,7 +32,65 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
 }
     console.log("🐶 Farejando ofertas ML (modo stealth)...");
 
-    const buscas = gerarBuscasGlobais(40);
+    const buscasPrioritariasML = [
+  // 👟 Tênis e calçados
+  "tenis masculino promocao",
+  "tenis feminino promocao",
+  "tenis nike promocao",
+  "tenis adidas promocao",
+  "tenis olympikus promocao",
+  "tenis mizuno promocao",
+  "tenis fila promocao",
+  "chinelo havaianas promocao",
+
+  // 👕 Moda masculina
+  "kit camisetas masculinas",
+  "camiseta masculina",
+  "camiseta oversized masculina",
+  "camisa polo masculina",
+  "calca jeans masculina",
+  "bermuda masculina",
+  "moletom masculino",
+  "jaqueta masculina",
+
+  // 👗 Moda feminina
+  "blusa feminina",
+  "calca jeans feminina",
+  "kit calca jeans feminina",
+  "legging feminina",
+  "conjunto feminino",
+  "pijama feminino",
+  "moletom feminino",
+  "jaqueta feminina",
+
+  // 🌸 Perfumes e beleza
+  "perfume masculino promocao",
+  "perfume feminino promocao",
+  "perfume importado promocao",
+  "kit perfume masculino",
+  "kit perfume feminino",
+  "malbec promocao",
+  "natura perfume promocao",
+  "boticario perfume promocao",
+  "eudora perfume promocao",
+
+  // ❄️ Frio / tendência
+  "meia termica",
+  "blusa frio masculina",
+  "blusa frio feminina",
+  "jaqueta corta vento",
+  "moletom flanelado",
+  "calca moletom",
+  "pijama inverno",
+  "cobertor casal"
+];
+
+const buscasGlobaisExtras = gerarBuscasGlobais(20);
+
+const buscas = [
+  ...buscasPrioritariasML,
+  ...buscasGlobaisExtras
+];
 
       const limiteBuscas =
       config.marketplaces?.mercadolivre?.limiteBuscasPorRodada || 1;
