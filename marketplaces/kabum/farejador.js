@@ -123,6 +123,20 @@ if (typeof gerarDeepLinkAwin === "function") {
   }
 }
 
+if (typeof importarProdutoKabumViaAwin === "function" && produto.link) {
+  const produtoImportado = await importarProdutoKabumViaAwin(
+    produto.link,
+    clienteId
+  );
+
+  if (produtoImportado?.precoAtual) {
+    produto = {
+      ...produto,
+      ...produtoImportado
+    };
+  }
+}
+
 let novaOferta = {
   id: `kabum_${Date.now()}_${Math.random().toString(36).slice(2)}`,
   nome: produto.titulo,
