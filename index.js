@@ -7673,7 +7673,11 @@ app.post("/reset/:id", async (req, res) => {
 
 app.post("/conectar", async (req, res) => {
   const clienteId = getClienteId(req);
-  const { id } = req.body;
+  const id =
+  req.body?.id ||
+  req.body?.sessaoId ||
+  req.body?.nome ||
+  req.body?.name;
 
   if (!clienteId) {
     return res.status(401).json({ erro: "Usuário não identificado" });
@@ -8037,10 +8041,8 @@ salvarSessoesMeta();
       console.log("❌ WHATSAPP DESCONECTADO:", id);
       console.log("Motivo:", motivo);
 
-      qrCodes[id] = null;
-      if (statusSessao[id] !== "open") {
-      delete sessoes[id];
-      }
+    qrCodes[id] = null;
+    delete sessoes[id];
 
       if (motivo === DisconnectReason.loggedOut) {
         statusSessao[id] = "loggedOut";
