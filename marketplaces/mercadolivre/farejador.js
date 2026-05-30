@@ -314,6 +314,36 @@ if (["COPIADO", "APPLIED", "APPEARANCE", "APPLINK"].includes(produto.cupom)) {
   produto.avisoCupom = "";
 }
 
+const categoriaProduto =
+  classificarCategoriaOferta(
+    produto,
+    termo
+  );
+
+const cupomInteligente =
+  escolherMelhorCupom({
+    marketplace: "mercadolivre",
+    titulo: produto.titulo || "",
+    categoria: categoriaProduto
+  });
+
+if (
+  cupomInteligente &&
+  !produto.cupom
+) {
+  produto.cupom =
+    cupomInteligente.cupom;
+
+  produto.avisoCupom =
+    cupomInteligente.aviso;
+
+  console.log("🎟️ CUPOM INTELIGENTE ML:", {
+    titulo: produto.titulo,
+    cupom: produto.cupom
+  });
+}
+
+
     let novaOferta = {
       id: `ml_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       nome: produto.titulo,
@@ -328,7 +358,7 @@ if (["COPIADO", "APPLIED", "APPEARANCE", "APPLINK"].includes(produto.cupom)) {
       linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
       imagem: produto.imagem || "",
       marketplace: "mercadolivre",
-      categoria: classificarCategoriaOferta(produto, termo),
+      categoria: categoriaProduto,
       sessaoId: "sessao1",
       status: "pendente",
       clienteId
