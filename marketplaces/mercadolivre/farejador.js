@@ -134,11 +134,10 @@ for (const itemBusca of produtosBusca) {
 
     if (!link) continue;
 
- let produto = await importarMercadoLivre(link, {
-  credenciais:
-    integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais ||
-    integracoesPorCliente?.admin?.mercadolivre?.credenciais
-});
+let produto = await importarMercadoLivre(
+  link,
+  clienteId
+);
 
 if (!produto) {
   console.log("⏭️ ML importador vazio, pulando:", link);
