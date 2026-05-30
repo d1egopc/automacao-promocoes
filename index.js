@@ -5316,52 +5316,6 @@ function validarCupomAutomaticamente(marketplace = "", cupom = "") {
   return true;
 }
 
-// ============== ESCOLHER MELHOR CUPOM GLOBAL =======================
-
-function escolherMelhorCupom(marketplace, titulo = "", categoria = "") {
- const fonteCupons = [
-  ...(config?.cuponsAtivos || []),
-  ...(cuponsAtivos || [])
-];
-
-const lista = fonteCupons.filter(c =>
-  c?.cupom &&
-  limparCuponsInvalidos([c.cupom]).length &&
-  validarCupomAutomaticamente(
-    c.marketplace || marketplace,
-    c.cupom
-  )
-);
-
-  const normalizar = txt =>
-    String(txt || "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-
-  const mp = normalizar(marketplace);
-  const t = normalizar(titulo);
-  const cat = normalizar(categoria);
-
-  const candidatos = lista.filter(c => {
-    if (!c || !c.cupom) return false;
-
-    const cupomMarketplace = normalizar(c.marketplace);
-    const cupomCategoria = normalizar(c.categoria || "");
-    const cupomTitulo = normalizar(c.titulo || "");
-
-    if (cupomMarketplace && cupomMarketplace !== mp) return false;
-    if (cupomCategoria && cat && cupomCategoria !== cat) return false;
-    if (cupomTitulo && t && !t.includes(cupomTitulo)) return false;
-
-    return true;
-  });
-
-  if (!candidatos.length) return null;
-
-  return candidatos[0];
-}
-
 // =========== RESULTADO INTELIGENTE DE CUPOM ===========
 
 function registrarResultadoCupom(marketplace = "", cupom = "", sucesso = false) {
