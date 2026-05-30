@@ -7288,11 +7288,18 @@ if (marketplace === "magalu") {
       }
 
        
- const cupomEscolhido = escolherMelhorCupom(
-  "mercadolivre",
-  produto.nome || produto.titulo,
-  produto.categoria || ""
- );
+ let cupomEscolhido = null;
+
+try {
+  if (typeof escolherMelhorCupom === "function") {
+    cupomEscolhido = escolherMelhorCupom(
+      "mercadolivre",
+      produto.nome || produto.titulo,
+      produto.categoria || ""
+    );
+  }
+} catch (e) {
+  console.log("⚠️ Erro ao escolher cupom ML:", e.message);
 
 const novaOferta = {
   nome: produto.nome || produto.titulo,
@@ -7391,8 +7398,8 @@ return res.json(produto);
         titulo: "Produto importado de Mercado Livre",
         precoAntigo: "",
         precoAtual: "",
-        cupom,
-        avisoCupom,
+        cupom: "",
+        avisoCupom: "",
         linkOriginal: url,
         linkAfiliado: url,
         imagem: "",
