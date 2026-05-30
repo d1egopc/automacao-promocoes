@@ -17,8 +17,15 @@ const {
   farejarAmazon: farejarAmazonModulo
 } = require("./marketplaces/amazon");
 
-const farejarAliExpress =
-require("./marketplaces/aliexpress/farejador");
+const {
+  farejarAliExpress
+} = require("./marketplaces/aliexpress/farejador");
+
+console.log(
+  "🧪 DEBUG ALIEXPRESS:",
+  typeof farejarAliExpress,
+  farejarAliExpress
+);
 
 const farejarKabum =
 require("./marketplaces/kabum/farejador");
