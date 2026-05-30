@@ -4531,12 +4531,13 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin") {
     "Sec-Fetch-Site": "none",
     "Sec-Fetch-User": "?1",
 
-    "Sec-Fetch-User": "?1",
-    "Referer": "https://www.google.com/",
+"Sec-Fetch-User": "?1",
+"Referer": "https://www.google.com/",
 ...(cookies ? { Cookie: cookies } : {})
-console.log("🍪 ML cookies importador:", cookies ? "SIM" : "NÃO");
   }
 });
+
+console.log("🍪 ML cookies importador:", cookies ? "SIM" : "NÃO");
 
 console.log("🌍 URL FINAL:", response.url);
 
