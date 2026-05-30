@@ -130,6 +130,8 @@ await new Promise(r =>
   )
 );
 
+}
+
   } catch (e) {
     console.log("❌ erro busca AliExpress:", e.message);
   }
