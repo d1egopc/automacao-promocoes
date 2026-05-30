@@ -23,17 +23,6 @@ require("./marketplaces/aliexpress/farejador");
 const farejarKabum =
 require("./marketplaces/kabum/farejador");
 
-const {
-  escolherMelhorCupom,
-  cupomEstaValido,
-  CUPONS_ATIVOS
-} = require("./marketplaces/cupons");
-
-console.log(
-  "🧪 CUPOM DEBUG:",
-  typeof escolherMelhorCupom
-);
-
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -58,26 +47,6 @@ linksGerados: {},
 
   pausarMadrugada: true,
 
-  // ================= CUPONS GLOBAIS =======================
-
-  cuponsAtivos: [
-    {
-      ativo: true,
-      marketplace: "mercadolivre",
-      cupom: "MELILIBERADO",
-      categorias: ["ferramentas", "casa"],
-      termos: ["lavadora", "lava jato", "pressao", "furadeira"],
-      aviso: "Use o cupom MELILIBERADO + Pix para chegar neste valor."
-    },
-    {
-      ativo: true,
-      marketplace: "mercadolivre",
-      cupom: "SUPERFASHION",
-      categorias: ["tenis"],
-      termos: ["tenis", "moda", "roupa", "mizuno", "nike"],
-      aviso: "Use o cupom SUPERFASHION para chegar no melhor valor."
-    }
-  ],
 
   telegram: {
     ativo: false,
@@ -1147,111 +1116,9 @@ function detectarCategoriaGlobal(oferta = {}) {
 //================= FUNCAO REGISTRA CUPOM =======================
 
 function registrarCupomAtivo(regra = {}) {
-
-if (cupomEstaBloqueado(regra.marketplace, regra.cupom)) {
-  console.log("🚫 Cupom ignorado por status expirado:", regra.cupom);
+  console.log("⏸️ registrarCupomAtivo desativado");
   return false;
 }
-  
-if (
-    !regra?.cupom ||
-    !limparCuponsInvalidos([regra.cupom]).length
-  ) {
-    console.log("🚫 Cupom bloqueado:", regra?.cupom);
-    return false;
-  }
-
-  config.cuponsAtivos = config.cuponsAtivos || [];
-  
-  config.cuponsAtivos = config.cuponsAtivos.filter(c =>
-  limparCuponsInvalidos([c?.cupom]).length
-  );
-
-  const cupom = String(regra.cupom).trim().toUpperCase();
-  const marketplace = normalizarTexto(regra.marketplace || "");
-
-  const jaExiste = config.cuponsAtivos.some(c =>
-    String(c.cupom || "").trim().toUpperCase() === cupom &&
-    normalizarTexto(c.marketplace || "") === marketplace
-  );
-
-  if (jaExiste) return false;
-
-  config.cuponsAtivos.push({
-    ativo: true,
-    marketplace,
-    cupom,
-    categorias: regra.categorias || [],
-    termos: regra.termos || [],
-    ultimaDeteccao: new Date().toISOString(),
-    aviso:
-      regra.aviso ||
-      `Use o cupom ${cupom} para tentar chegar no melhor valor.`,
-    origem: regra.origem || "farejador",
-    criadoEm: new Date().toLocaleString("pt-BR", {
-      timeZone: "America/Sao_Paulo"
-    })
-  });
-
-  salvarConfig();
-
-  console.log("🎟️ Novo cupom ativo registrado:", cupom, marketplace);
-
-  return true;
-}
-
-//================= FUNCAO APLICA CUPOM AUTO ====================
-
-function aplicarCupomAutomatico(oferta = {}) {
-  if (!oferta) return oferta;
-
-  if (oferta.cupom && String(oferta.cupom).trim()) {
-    return oferta;
-  }
-
-  const cupons = config.cuponsAtivos || [];
-  if (!Array.isArray(cupons) || !cupons.length) return oferta;
-
-  const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
-  const marketplace = normalizarTexto(oferta.marketplace || "");
-  const categoria = normalizarTexto(oferta.categoria || "");
-
-  for (const regra of cupons) {
-    if (!regra || regra.ativo === false) continue;
-
-    const regraMarketplace = normalizarTexto(regra.marketplace || "");
-
-    if (regraMarketplace && regraMarketplace !== marketplace) {
-      continue;
-    }
-
-    const termos = regra.termos || regra.palavras || [];
-    const categorias = regra.categorias || [];
-
-    const bateCategoria =
-      !categorias.length ||
-      categorias.some(c => categoria.includes(normalizarTexto(c)));
-
-    const bateTermo =
-      !termos.length ||
-      termos.some(t => titulo.includes(normalizarTexto(t)));
-
-    if (bateCategoria && bateTermo && regra.cupom) {
-      oferta.cupom = String(regra.cupom).trim();
-      oferta.avisoCupom =
-        regra.aviso ||
-        `Use o cupom ${oferta.cupom} para chegar no melhor valor.`;
-
-      oferta.cupomAutomatico = true;
-
-      console.log("🎟️ Cupom automático aplicado:", oferta.cupom, "-", oferta.titulo || oferta.nome);
-      break;
-    }
-  }
-
-  return oferta;
-}
-
 
 // ====================== FUNCAO PREPARA OFERTA GLOBAL =========================
 
@@ -1287,7 +1154,7 @@ function prepararOfertaGlobal(oferta = {}) {
   oferta.erroEm = oferta.erroEm || "";
   oferta.dataEntradaFila = oferta.dataEntradaFila || agoraBR;
 
-  oferta = aplicarCupomAutomatico(oferta);
+  // oferta = aplicarCupomAutomatico(oferta); // cupom antigo desativado
 
   return oferta;
 }
@@ -5567,39 +5434,11 @@ function categoriaPermitidaNoDestino(oferta, destino) {
 }
 
 //============ FUNCAO FAREJAR CUPOM MERCADO LIVRE ================
+// DESATIVADA: não registrar cupons ML automaticamente
 
 async function farejarCuponsMercadoLivre(html = "") {
-  try {
-    const texto = String(html || "").toUpperCase();
-
-    let cuponsEncontrados = [
-      ...texto.matchAll(
-        /\b(CASINHA|SUPERFASHION|APP[A-Z0-9]{2,}|OFF[A-Z0-9]{2,})\b/g
-      )
-    ].map(m => m[1]);
-
-    // 🔥 limpeza global
-    cuponsEncontrados = limparCuponsInvalidos(cuponsEncontrados);
-
-    // 🔥 remove duplicados
-    const cuponsUnicos = [...new Set(cuponsEncontrados)];
-
-    for (const cupom of cuponsUnicos) {
-      registrarCupomAtivo({
-        marketplace: "mercadolivre",
-        cupom,
-        origem: "mercadolivre-auto",
-        aviso: `Use o cupom ${cupom} para chegar no melhor valor.`
-      });
-    }
-
-    if (cuponsUnicos.length) {
-      console.log("🎟️ Cupons ML encontrados:", cuponsUnicos);
-    }
-
-  } catch (e) {
-    console.log("❌ erro farejarCuponsMercadoLivre:", e.message);
-  }
+  console.log("⏸️ farejarCuponsMercadoLivre desativado");
+  return [];
 }
 
 // ===================== FUNCAO TIMES TAMP =============================
@@ -7293,19 +7132,7 @@ if (marketplace === "magalu") {
       }
 
        
- let cupomEscolhido = null;
-
-try {
-  if (typeof escolherMelhorCupom === "function") {
-   cupomEscolhido = escolherMelhorCupom({
-   marketplace: "mercadolivre",
-   titulo: produto.nome || produto.titulo,
-   categoria: produto.categoria || ""
-  });
-  }
-} catch (e) {
-  console.log("⚠️ Erro ao escolher cupom ML:", e.message);
-}
+const cupomEscolhido = null;
 
 const novaOferta = {
   nome: produto.nome || produto.titulo,
@@ -7314,9 +7141,8 @@ const novaOferta = {
   imagem: produto.imagem,
   status: "pendente",
 
-  // 🔥 cupom automático
-  cupom: cupomEscolhido?.cupom || "",
-  avisoCupom: cupomEscolhido?.aviso || ""
+  cupom: "",
+  avisoCupom: ""
 };
 
 const precoNumero = Number(
@@ -7326,6 +7152,7 @@ const precoNumero = Number(
     .replace(",", ".")
     .trim()
 );
+
 
 if (!precoNumero || !Number.isFinite(precoNumero)) {
   console.log("⚠️ Oferta ignorada: preço inválido", novaOferta.nome);
