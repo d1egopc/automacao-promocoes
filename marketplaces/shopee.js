@@ -25,7 +25,7 @@ const {
 
     console.log("🛍️ Farejando ofertas Shopee...");
 
-    const produtos = await buscarOfertasShopee();
+    const produtos = await buscarOfertasShopee(clienteId);
 
     if (!Array.isArray(produtos)) {
       console.log("❌ Shopee não retornou array");
