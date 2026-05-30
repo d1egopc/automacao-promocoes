@@ -214,10 +214,21 @@ console.log("🧪 PRECO ML:", {
 
     if (precoNumero < (config.marketplaces?.mercadolivre?.precoMinimo || 25)) continue;
 
-    if (
-      desconto < (config.marketplaces?.mercadolivre?.descontoMinimo || 20) &&
-      !produto.avisoCupom
-    ) continue;
+   const descontoMinimoML =
+  config.marketplaces?.mercadolivre?.descontoMinimo ?? 10;
+
+if (
+  desconto < descontoMinimoML &&
+  !produto.avisoCupom &&
+  !produto.linkAfiliado
+) {
+  console.log("⏭️ ML ignorado por desconto baixo:", {
+    titulo: produto.titulo,
+    desconto: Math.round(desconto) + "%",
+    descontoMinimoML
+  });
+  continue;
+}
 
     const tituloLower = String(produto.titulo || "").toLowerCase();
 
