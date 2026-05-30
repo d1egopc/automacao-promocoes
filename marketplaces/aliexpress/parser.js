@@ -42,6 +42,12 @@ function extrairLinksProdutosAliExpress(html = "") {
     }
   }
 
+console.log("🔗 LINKS ALIEXPRESS ENCONTRADOS:", links.length);
+
+if (links.length) {
+  console.log("🔗 PRIMEIROS LINKS:", links.slice(0, 5));
+}
+
   return [...new Set(links)];
 }
 
@@ -78,6 +84,9 @@ function extrairProdutosDaBuscaAliExpress(html = "") {
       });
     }
   }
+
+  console.log("📦 BLOCOS ALIEXPRESS:", blocos.length);
+  console.log("📦 PRODUTOS EXTRAÍDOS:", produtos.length);
 
   return produtos;
 }

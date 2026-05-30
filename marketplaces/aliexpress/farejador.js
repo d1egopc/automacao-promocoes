@@ -103,6 +103,15 @@ const response = await fetch(url, {
     console.log("🧪 HTML AliExpress tamanho:", html.length);
     console.log("🧪 HTML AliExpress trecho:", html.slice(0, 500));
 
+console.log("🔎 CHECK ALIEXPRESS HTML:", {
+  temItem: html.includes("/item/"),
+  temProductId: html.includes("productId"),
+  temSearchResult: html.includes("searchResult"),
+  temProductTitle: html.includes("productTitle"),
+  temPrice: html.includes("salePrice"),
+  temImg: html.includes("imageUrl")
+});
+
     if (
   html.includes("_____tmd_____") ||
   html.includes("/punish") ||
