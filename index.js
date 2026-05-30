@@ -7613,6 +7613,11 @@ const idsPossiveis = [...new Set([
   });
 }
 
+config.sessoesWhatsapp = (config.sessoesWhatsapp || [])
+  .filter(sid => !idsPossiveis.includes(sid));
+
+salvarConfig();
+
     salvarSessoesMeta();
 
     return res.json({
