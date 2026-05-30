@@ -7300,6 +7300,7 @@ try {
   }
 } catch (e) {
   console.log("⚠️ Erro ao escolher cupom ML:", e.message);
+}
 
 const novaOferta = {
   nome: produto.nome || produto.titulo,
