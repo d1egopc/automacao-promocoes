@@ -30,6 +30,12 @@ console.log(
 const farejarKabum =
 require("./marketplaces/kabum/farejador");
 
+const {
+  escolherMelhorCupom,
+  cupomEstaValido,
+  CUPONS_ATIVOS
+} = require("./marketplaces/cupons");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -7148,8 +7154,8 @@ const novaOferta = {
   imagem: produto.imagem,
   status: "pendente",
 
-  cupom: "",
-  avisoCupom: ""
+ cupom: "",
+ avisoCupom: "",
 };
 
 const precoNumero = Number(
