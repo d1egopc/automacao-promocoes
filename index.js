@@ -5961,11 +5961,23 @@ function usuarioPodeReceberMarketplace(usuario, marketplace) {
 }
 
 function usuarioTemIntegracaoMarketplace(clienteId, marketplace) {
-  const integracao =
-    getIntegracaoCliente(
-      clienteId,
-      normalizarTexto(marketplace || "")
+  const mp = normalizarTexto(marketplace || "");
+
+  if (mp === "kabum") {
+    const integracaoKabum =
+      getIntegracaoCliente(clienteId, "kabum");
+
+    const integracaoAwin =
+      getIntegracaoCliente(clienteId, "awin");
+
+    return !!(
+      integracaoKabum?.credenciais ||
+      integracaoAwin?.credenciais
     );
+  }
+
+  const integracao =
+    getIntegracaoCliente(clienteId, mp);
 
   return !!integracao?.credenciais;
 }
