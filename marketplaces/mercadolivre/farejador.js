@@ -320,29 +320,6 @@ const categoriaProduto =
     termo
   );
 
-const cupomInteligente =
-  escolherMelhorCupom({
-    marketplace: "mercadolivre",
-    titulo: produto.titulo || "",
-    categoria: categoriaProduto
-  });
-
-if (
-  cupomInteligente &&
-  !produto.cupom
-) {
-  produto.cupom =
-    cupomInteligente.cupom;
-
-  produto.avisoCupom =
-    cupomInteligente.aviso;
-
-  console.log("🎟️ CUPOM INTELIGENTE ML:", {
-    titulo: produto.titulo,
-    cupom: produto.cupom
-  });
-}
-
 
     let novaOferta = {
       id: `ml_${Date.now()}_${Math.random().toString(36).slice(2)}`,
