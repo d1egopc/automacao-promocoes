@@ -3137,6 +3137,21 @@ if (body.horarioFim != null) {
   }
 }
 
+if (req.body.intervaloFarejadorGlobalMinutos !== undefined) {
+  config.intervaloFarejadorGlobalMinutos =
+    Number(req.body.intervaloFarejadorGlobalMinutos);
+}
+
+if (req.body.intervaloFarejador !== undefined) {
+  config.intervaloFarejadorGlobalMinutos =
+    Number(req.body.intervaloFarejador);
+}
+
+if (req.body.intervaloFarejoMinutos !== undefined) {
+  config.intervaloFarejadorGlobalMinutos =
+    Number(req.body.intervaloFarejoMinutos);
+}
+
 if (body.pausarMadrugada != null) {
   configCliente.pausarMadrugada =
     body.pausarMadrugada === true;
@@ -8596,12 +8611,12 @@ await farejador(clienteId, {
 
 setInterval(() => {
   rodarProximoMarketplace();
-}, (config.intervaloFarejadorGlobalMinutos || 27) * 60 * 1000);
+}, (config.intervaloFarejadorGlobalMinutos || 7) * 60 * 1000);
 
 setTimeout(() => {
   console.log("⏳ Primeira rodada do orquestrador em 5 minutos...");
   rodarProximoMarketplace();
-}, 5 * 60 * 1000);
+}, 1 * 60 * 1000);
 
 // ================= PROCESSADOR DA FILA =================
 
