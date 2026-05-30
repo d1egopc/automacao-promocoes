@@ -29,6 +29,11 @@ const {
   CUPONS_ATIVOS
 } = require("./marketplaces/cupons");
 
+console.log(
+  "🧪 CUPOM DEBUG:",
+  typeof escolherMelhorCupom
+);
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -7292,11 +7297,11 @@ if (marketplace === "magalu") {
 
 try {
   if (typeof escolherMelhorCupom === "function") {
-    cupomEscolhido = escolherMelhorCupom(
-      "mercadolivre",
-      produto.nome || produto.titulo,
-      produto.categoria || ""
-    );
+   cupomEscolhido = escolherMelhorCupom({
+   marketplace: "mercadolivre",
+   titulo: produto.nome || produto.titulo,
+   categoria: produto.categoria || ""
+  });
   }
 } catch (e) {
   console.log("⚠️ Erro ao escolher cupom ML:", e.message);
