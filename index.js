@@ -36,6 +36,10 @@ const {
   CUPONS_ATIVOS
 } = require("./marketplaces/cupons");
 
+function escolherMelhorCupom() {
+  return null;
+}
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
