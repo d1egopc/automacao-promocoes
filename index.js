@@ -3920,28 +3920,6 @@ console.log("🧪 AWIN LINKBUILDER RESPOSTA:", response.data);
   );
 }
 
-app.post("/awin/gerar-link", async (req, res) => {
-  try {
-    const clienteId = getClienteId(req);
-    const { url } = req.body;
-
-    if (!url) {
-      return res.status(400).json({
-        ok: false,
-        erro: "URL obrigatória"
-      });
-    }
-
-    const response = await axios.get(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36"
-      },
-      timeout: 15000
-    });
-
-    const html = response.data || "";
-
 // ============================= FUNCAO IMPORTA AWIN/KABUM =====================================
 
 async function importarProdutoKabumViaAwin(url, clienteId = "admin") {
@@ -4077,6 +4055,30 @@ console.log("🧪 PREÇOS VALIDOS:", precosValidos.slice(0, 20));
     categoria: "KaBuM"
   };
 }
+
+
+app.post("/awin/gerar-link", async (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    const { url } = req.body;
+
+    if (!url) {
+      return res.status(400).json({
+        ok: false,
+        erro: "URL obrigatória"
+      });
+    }
+
+    const response = await axios.get(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36"
+      },
+      timeout: 15000
+    });
+
+    const html = response.data || "";
+
 
     // ================= LINK AFILIADO =================
 
@@ -8546,9 +8548,14 @@ await farejador(clienteId, {
   distribuirOfertaParaClientes,
   encurtarUrl,
   gerarDeepLinkAwin,
-  importarProdutoKabumViaAwin
+
+  importarProdutoKabumViaAwin:
+  typeof importarProdutoKabumViaAwin === "function"
+    ? importarProdutoKabumViaAwin
+    : null,
 });
 }
+  
   console.log(`✅ Rodada multiusuário finalizada: ${marketplace}`);
  
   } catch (e) {
