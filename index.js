@@ -8465,6 +8465,7 @@ const farejadoresMarketplaces = {
   amazon: farejarAmazonModulo,
   aliexpress: farejarAliExpress,
   kabum: farejarKabum,
+  awin: farejarAwin,
   magalu: farejarMagalu,
 };
 
