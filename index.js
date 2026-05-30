@@ -3137,21 +3137,6 @@ if (body.horarioFim != null) {
   }
 }
 
-if (req.body.intervaloFarejadorGlobalMinutos !== undefined) {
-  config.intervaloFarejadorGlobalMinutos =
-    Number(req.body.intervaloFarejadorGlobalMinutos);
-}
-
-if (req.body.intervaloFarejador !== undefined) {
-  config.intervaloFarejadorGlobalMinutos =
-    Number(req.body.intervaloFarejador);
-}
-
-if (req.body.intervaloFarejoMinutos !== undefined) {
-  config.intervaloFarejadorGlobalMinutos =
-    Number(req.body.intervaloFarejoMinutos);
-}
-
 if (body.pausarMadrugada != null) {
   configCliente.pausarMadrugada =
     body.pausarMadrugada === true;
@@ -3951,7 +3936,20 @@ app.post("/awin/gerar-link", async (req, res) => {
 
     const html = response.data || "";
 
-    // ================= EXTRAIR TÍTULO =================
+// ============================= FUNCAO IMPORTA AWIN/KABUM =====================================
+
+async function importarProdutoKabumViaAwin(url, clienteId = "admin") {
+  const response = await axios.get(url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36"
+    },
+    timeout: 15000
+  });
+
+  const html = response.data || "";
+
+      // ================= EXTRAIR TÍTULO =================
 
     const titulo =
       html.match(/<title>(.*?)<\/title>/i)?.[1]
@@ -4054,6 +4052,25 @@ if (!precoAtual && precosValidos.length) {
 
 console.log("🧪 PREÇOS KABUM EXTRAÍDOS:", precosEncontrados.slice(0, 20));
 console.log("🧪 PREÇOS VALIDOS:", precosValidos.slice(0, 20));
+
+
+  const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
+
+  return {
+    marketplace: "kabum",
+    titulo,
+    precoAtual,
+    precoAntigo,
+    avisoPagamento,
+    avisoCupom: avisoPagamento ? "💳 Com desconto à vista no PIX." : "",
+    parcelamento,
+    linkOriginal: url,
+    link: url,
+    linkAfiliado,
+    imagem,
+    categoria: "KaBuM"
+  };
+}
 
     // ================= LINK AFILIADO =================
 
@@ -5961,23 +5978,11 @@ function usuarioPodeReceberMarketplace(usuario, marketplace) {
 }
 
 function usuarioTemIntegracaoMarketplace(clienteId, marketplace) {
-  const mp = normalizarTexto(marketplace || "");
-
-  if (mp === "kabum") {
-    const integracaoKabum =
-      getIntegracaoCliente(clienteId, "kabum");
-
-    const integracaoAwin =
-      getIntegracaoCliente(clienteId, "awin");
-
-    return !!(
-      integracaoKabum?.credenciais ||
-      integracaoAwin?.credenciais
-    );
-  }
-
   const integracao =
-    getIntegracaoCliente(clienteId, mp);
+    getIntegracaoCliente(
+      clienteId,
+      normalizarTexto(marketplace || "")
+    );
 
   return !!integracao?.credenciais;
 }
@@ -7543,10 +7548,7 @@ app.post("/sessoes", (req, res) => {
     const tipo = req.body.tipo || "whatsapp";
 
     const total = Object.keys(sessoesMeta).length + 1;
-    const nomeSessao =
-    req.body.nome
-    ? String(req.body.nome).toLowerCase().replace(/\s+/g, "_")
-    : `sessao${total}`;
+    const nomeSessao = req.body.id || `sessao${total}`;
     const id = normalizarSessaoId(
     clienteId,
     nomeSessao
@@ -7624,11 +7626,6 @@ const idsPossiveis = [...new Set([
     force: true
   });
 }
-
-config.sessoesWhatsapp = (config.sessoesWhatsapp || [])
-  .filter(sid => !idsPossiveis.includes(sid));
-
-salvarConfig();
 
     salvarSessoesMeta();
 
@@ -8477,7 +8474,6 @@ const farejadoresMarketplaces = {
   amazon: farejarAmazonModulo,
   aliexpress: farejarAliExpress,
   kabum: farejarKabum,
-  awin: farejarAwin,
   magalu: farejarMagalu,
 };
 
@@ -8589,7 +8585,8 @@ await farejador(clienteId, {
   aplicarFiltrosUniversais,
   distribuirOfertaParaClientes,
   encurtarUrl,
-  gerarDeepLinkAwin
+  gerarDeepLinkAwin,
+  importarProdutoKabumViaAwin
 });
 }
   console.log(`✅ Rodada multiusuário finalizada: ${marketplace}`);
@@ -8629,12 +8626,12 @@ await farejador(clienteId, {
 
 setInterval(() => {
   rodarProximoMarketplace();
-}, (config.intervaloFarejadorGlobalMinutos || 7) * 60 * 1000);
+}, (config.intervaloFarejadorGlobalMinutos || 27) * 60 * 1000);
 
 setTimeout(() => {
   console.log("⏳ Primeira rodada do orquestrador em 5 minutos...");
   rodarProximoMarketplace();
-}, 1 * 60 * 1000);
+}, 5 * 60 * 1000);
 
 // ================= PROCESSADOR DA FILA =================
 
