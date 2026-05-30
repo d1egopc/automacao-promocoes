@@ -121,8 +121,22 @@ console.log("🔎 CHECK ALIEXPRESS HTML:", {
   continue;
   }
 
-const produtos =
+let produtos =
   extrairProdutosDaBuscaAliExpress(html).slice(0, 10);
+
+if (!produtos.length) {
+  const links = extrairLinksProdutosAliExpress(html).slice(0, 10);
+
+  console.log("🔗 Links fallback AliExpress:", links.length);
+  console.log("🔗 Primeiros links fallback:", links.slice(0, 5));
+
+  produtos = links.map(link => ({
+    titulo: "Produto AliExpress",
+    link,
+    precoAtual: "",
+    imagem: ""
+  }));
+}
 
 console.log(
   "🧪 Produtos extraídos da busca:",
