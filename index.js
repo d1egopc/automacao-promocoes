@@ -7516,7 +7516,10 @@ app.post("/sessoes", (req, res) => {
     const tipo = req.body.tipo || "whatsapp";
 
     const total = Object.keys(sessoesMeta).length + 1;
-    const nomeSessao = req.body.id || `sessao${total}`;
+    const nomeSessao =
+    req.body.nome
+    ? String(req.body.nome).toLowerCase().replace(/\s+/g, "_")
+    : `sessao${total}`;
     const id = normalizarSessaoId(
     clienteId,
     nomeSessao
