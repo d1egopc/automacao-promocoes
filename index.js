@@ -4502,7 +4502,8 @@ const encurtarUrl = async (url) => {
 };
 
 async function importarMercadoLivre(url, clienteIdAlvo = "admin") {
-  const cookies = config?.credenciais?.cookies || "";
+  const integracaoML = getIntegracaoCliente(clienteIdAlvo, "mercadolivre");
+  const cookies = integracaoML?.credenciais?.cookies || "";
   
   console.log("🌐 ML URL:", url);
 
@@ -4531,8 +4532,10 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin") {
     "Sec-Fetch-User": "?1",
 
     "Sec-Fetch-User": "?1",
-    "Referer": "https://www.google.com/"  
- }
+    "Referer": "https://www.google.com/",
+...(cookies ? { Cookie: cookies } : {})
+console.log("🍪 ML cookies importador:", cookies ? "SIM" : "NÃO");
+  }
 });
 
 console.log("🌍 URL FINAL:", response.url);
