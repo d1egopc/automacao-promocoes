@@ -1,20 +1,11 @@
 const { gerarBuscasAliExpress } = require("./buscas");
 
-const { importarProdutoAliExpress } =
-require("./importarProduto");
+const { importarAliExpress } = require("./importar");
 
 const {
   extrairLinksProdutosAliExpress,
   extrairProdutosDaBuscaAliExpress
 } = require("./parser");
-
-const USER_AGENTS = [
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
-
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-];
 
 // ================= FAREJADOR ALIEXPRESS MODULAR =================
 
@@ -122,18 +113,15 @@ for (const produto of produtos) {
  console.log("🔥 PRODUTO BUSCA ALI:", produto);
 
   const produtoCompleto =
-    await importarProdutoAliExpress(
-      produto.link
-    );
+  await importarAliExpress(produto.link, {
+    credenciais
+  });
 
-  if (!produtoCompleto) {
-    continue;
-  }
-
-  produtosEncontrados.push(
-    produtoCompleto
-  );
+if (!produtoCompleto) {
+  continue;
 }
+
+produtosEncontrados.push(produtoCompleto);
 
 await new Promise(r =>
   setTimeout(
@@ -161,4 +149,6 @@ return produtosEncontrados;
   }
 }
 
-module.exports = farejarAliExpress;
+module.exports = {
+  farejarAliExpress
+};
