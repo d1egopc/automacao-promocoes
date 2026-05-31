@@ -179,6 +179,11 @@ let linkFinal =
     integracao.credenciais
   );
 
+console.log(
+  "🔗 LINK FINAL ALI:",
+  linkFinal
+);
+
 // Se AliExpress já mandar link curto oficial, usa ele
 if (
   item.promotion_link_short ||
