@@ -216,6 +216,14 @@ for (const termo of buscas.slice(0, 10)) {
     // Por enquanto só estrutura inicial
     console.log("✅ AliExpress modular carregado com sucesso.");
 
+for (const oferta of produtosEncontrados) {
+  fila.push(oferta);
+}
+
+salvarFila();
+
+console.log("✅ AliExpress ofertas enviadas para fila:", produtosEncontrados.length);
+
    
 return produtosEncontrados;
 
