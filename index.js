@@ -645,14 +645,49 @@ function gerarLinkOptimus(linkOriginal = "", marketplace = "") {
 
 function ofertaJaExiste(novaOferta) {
   const tituloNovo = normalizarTexto(novaOferta.titulo || novaOferta.nome);
-  const linkNovo = String(novaOferta.link || novaOferta.linkAfiliado || "").trim();
+  const linkNovo = String(
+    novaOferta.linkOriginal ||
+    novaOferta.link ||
+    novaOferta.linkAfiliado ||
+    ""
+  ).trim();
+
+  const agora = Date.now();
+  const HORAS_BLOQUEIO = 12;
 
   return fila.some((o) => {
     const tituloExistente = normalizarTexto(o.titulo || o.nome);
-    const linkExistente = String(o.link || o.linkAfiliado || "").trim();
+    const linkExistente = String(
+      o.linkOriginal ||
+      o.link ||
+      o.linkAfiliado ||
+      ""
+    ).trim();
 
-    if (linkNovo && linkExistente && linkNovo === linkExistente) return true;
-    if (tituloNovo && tituloExistente && tituloNovo === tituloExistente) return true;
+    const dataItem = new Date(
+      o.criadoEm || o.dataCriacao || o.enviadoEm || o.dataEnvio || 0
+    ).getTime();
+
+    const itemRecente =
+      dataItem && agora - dataItem < HORAS_BLOQUEIO * 60 * 60 * 1000;
+
+    if (!itemRecente) return false;
+
+    if (linkNovo && linkExistente && linkNovo === linkExistente) {
+      console.log("🚫 DUPLICADA POR LINK:", {
+        tituloNovo: novaOferta.titulo || novaOferta.nome,
+        tituloExistente: o.titulo || o.nome
+      });
+      return true;
+    }
+
+    if (tituloNovo && tituloExistente && tituloNovo === tituloExistente) {
+      console.log("🚫 DUPLICADA POR TÍTULO:", {
+        tituloNovo: novaOferta.titulo || novaOferta.nome,
+        tituloExistente: o.titulo || o.nome
+      });
+      return true;
+    }
 
     return false;
   });
