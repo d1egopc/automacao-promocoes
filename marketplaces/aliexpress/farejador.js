@@ -42,13 +42,26 @@ async function farejarAliExpress(clienteId = "admin", deps = {}) {
 
     const limitePorRodada = cfg.limitePorRodada || 5;
 
-   const buscas = gerarBuscasAliExpress({ gerarBuscasGlobais });
+const buscas = gerarBuscasAliExpress({
+  gerarBuscasGlobais
+});
 
-    console.log("🔎 Buscas AliExpress:", buscas.slice(0, 10));
+const buscasBrasil = buscas.brasil || [];
+const buscasInternacionais = buscas.internacional || [];
+
+console.log(
+  "🔎 Buscas AliExpress Brasil:",
+  buscasBrasil.slice(0, 10)
+);
+
+console.log(
+  "🔎 Buscas AliExpress Internacional:",
+  buscasInternacionais.slice(0, 10)
+);
 
    const produtosEncontrados = [];
 
-for (const termo of buscas.slice(0, 10)) {
+for (const termo of buscasBrasil) {
   try {
     if (produtosEncontrados.length >= limitePorRodada) break;
 
@@ -170,6 +183,7 @@ if (
 const tituloLower = String(titulo || "").toLowerCase();
 
 const palavrasBloqueadasAli = [
+  // moda/calçados
   "sapato",
   "sandália",
   "sandalia",
@@ -178,14 +192,26 @@ const palavrasBloqueadasAli = [
   "casamento",
   "wedding",
   "bridal",
-  "bomba",
-  "bombas",
+
+  // beleza
   "unha",
   "cabelo",
   "peruca",
   "bolsa",
   "sutiã",
-  "calcinha"
+  "calcinha",
+
+  // adesivos
+  "adesivo",
+  "adesivos",
+  "decalque",
+  "decalques",
+  "vinil",
+
+  // acessórios femininos
+  "mary jane",
+  "ankle strap",
+  "bodycon"
 ];
 
 if (palavrasBloqueadasAli.some(p => tituloLower.includes(p))) {
