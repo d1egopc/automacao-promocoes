@@ -7055,7 +7055,8 @@ if (marketplace === "magalu") {
     try {
       const produto = await importarMercadoLivre(
   url,
-  clienteIdAlvo
+  clienteIdAlvo,
+  { getIntegracaoCliente }
 );
 
       if (!produto.titulo || produto.titulo === "Produto Mercado Livre") {
