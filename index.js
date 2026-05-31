@@ -8269,7 +8269,7 @@ await farejador(clienteId, {
 
 
  setTimeout(async () => {
- console.log("🛩️ TESTE MANUAL SHOPEE");
+ console.log("🪂 TESTE MANUAL SHOPEE");
 
    await farejadoresMarketplaces.shopee("admin", {
     config,
@@ -8284,7 +8284,11 @@ await farejador(clienteId, {
     farejarCuponsMercadoLivre,
     importarMercadoLivre,
     importarAmazon,
-    buscarOfertasShopee,
+    buscarOfertasShopee: (clienteId) =>
+    buscarOfertasShopee(clienteId, {
+    config,
+    getIntegracaoCliente
+    }),
     normalizarSessaoId,
     aplicarFiltrosUniversais,
     distribuirOfertaParaClientes,
