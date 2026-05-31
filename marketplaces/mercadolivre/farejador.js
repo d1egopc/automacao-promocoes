@@ -8,6 +8,7 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
   const {
     config,
     integracoesPorCliente,
+    getIntegracaoCliente,
     fila,
     salvarFila,
     prepararOfertaGlobal,
@@ -194,7 +195,10 @@ for (const itemBusca of produtosBusca) {
 
 let produto = await importarMercadoLivre(
   link,
-  clienteId
+  clienteId,
+  {
+    getIntegracaoCliente
+  }
 );
 
 if (!produto) {
