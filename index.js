@@ -6661,21 +6661,22 @@ console.log("🔗 AMAZON LINK LIMPO:", linkAfiliado);
 console.log("🔗 AMAZON LINK FINAL:", linkFinal);
 
 return {
-    marketplace: "amazon",
-    titulo: htmlDecode(titulo)
-      .replace("Amazon.com.br:", "")
-      .replace("Amazon.com:", "")
-      .trim(),
-    precoAntigo,
-    precoAtual: preco,
-    parcelamento,
-    cupom,
-    avisoCupom,
-    linkOriginal: url,
-    linkAfiliado: linkFinal,
-    imagem: corrigirImagemUrl(imagem) || imagem,
-    categoria: "Amazon"
-  };
+  marketplace: "amazon",
+  titulo: htmlDecode(titulo)
+    .replace("Amazon.com.br:", "")
+    .replace("Amazon.com:", "")
+    .trim(),
+  precoAntigo,
+  precoAtual: preco,
+  parcelamento,
+  cupom,
+  avisoCupom,
+  linkOriginal: linkAfiliado,
+  link: linkFinal,
+  linkAfiliado: linkFinal,
+  imagem: corrigirImagemUrl(imagem) || imagem,
+  categoria: "Amazon"
+};
 
 }
 
