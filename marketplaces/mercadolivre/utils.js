@@ -51,10 +51,6 @@ function limparPreco(valor = "") {
     .trim();
 }
 
-console.log("🧪 PREÇO ML:", {
-  original: jsonLd?.offers?.price,
-  depoisLimpar: preco
-});
 
 function corrigirImagemUrl(url = "") {
   if (!url) return "";

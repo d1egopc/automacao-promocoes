@@ -85,6 +85,11 @@ if (response.url.includes("account-verification")) {
 
   let precoNumero = Number(String(preco).replace(",", "."));
   let precoAntigo = "";
+
+  console.log("🧪 PREÇO ML:", {
+  original: jsonLd?.offers?.price,
+  depoisLimpar: preco
+  });
   
   const descontoMatch =
   html.match(/(\d{1,2})\s*%\s*OFF/i) ||
