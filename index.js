@@ -8132,7 +8132,8 @@ await farejador(clienteId, {
   farejarCuponsMercadoLivre,
   importarMercadoLivre: (url, clienteIdAlvo = "admin") =>
   importarMercadoLivre(url, clienteIdAlvo, {
-    getIntegracaoCliente
+  getIntegracaoCliente,
+  gerarLinkAfiliadoMercadoLivre
   }),
   importarAmazon: importarAmazon,
   buscarOfertasShopee: (clienteId) =>
