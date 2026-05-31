@@ -8293,30 +8293,46 @@ await farejador(clienteId, {
 }
 
 setTimeout(async () => {
- console.log("🧪 TESTE MANUAL MERCADO LIVRE");
+  console.log("🧪 TESTE API ALIEXPRESS");
 
-   await farejadoresMarketplaces.mercadolivre("admin", {
-    config,
-    integracoesPorCliente,
-    fila,
-    salvarFila,
-    prepararOfertaGlobal,
-    ofertaJaExiste,
-    classificarCategoriaOferta,
-    gerarBuscasGlobais,
-    gerarHeadersStealth,
-    farejarCuponsMercadoLivre,
-    importarMercadoLivre,
-    importarAmazon,
-    buscarOfertasShopee,
-    normalizarSessaoId,
-    aplicarFiltrosUniversais,
-    distribuirOfertaParaClientes,
-    encurtarUrl,
-    gerarDeepLinkAwin
-   });
+  const testeAli = await importarAliExpress(
+    "https://pt.aliexpress.com/item/1005007827593929.html",
+    {
+      credenciais:
+        integracoesPorCliente?.admin?.aliexpress?.credenciais || {}
+    }
+  );
 
- }, 60 * 1000);
+  console.log("🧪 TESTE API ALI:", testeAli);
+
+}, 30000);
+
+
+//setTimeout(async () => {
+ //console.log("🧪 TESTE MANUAL MERCADO LIVRE");
+
+   //await farejadoresMarketplaces.mercadolivre("admin", {
+    //config,
+    //integracoesPorCliente,
+    //fila,
+    //salvarFila,
+    //prepararOfertaGlobal,
+    //ofertaJaExiste,
+    //classificarCategoriaOferta,
+    //gerarBuscasGlobais,
+    //gerarHeadersStealth,
+    //farejarCuponsMercadoLivre,
+    //importarMercadoLivre,
+    //importarAmazon,
+    //buscarOfertasShopee,
+    //normalizarSessaoId,
+   //aplicarFiltrosUniversais,
+    //distribuirOfertaParaClientes,
+    //encurtarUrl,
+    //gerarDeepLinkAwin
+   //});
+
+ //}, 60 * 1000);
 
 setInterval(() => {
   rodarProximoMarketplace();
