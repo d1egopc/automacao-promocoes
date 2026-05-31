@@ -6653,6 +6653,8 @@ console.log("🔎 AMAZON TEM CUPOM?", /cupom/i.test(html));
 
 linkAfiliado = limparLinkAmazon(linkAfiliado);
 
+console.log("🔗 AMAZON ANTES OPTIMUS:", linkAfiliado);
+
 const linkFinal = gerarLinkOptimus(linkAfiliado, "amazon"); 
 
 console.log("🔗 AMAZON LINK LIMPO:", linkAfiliado);
@@ -7061,6 +7063,7 @@ if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
           aviso: "Dados não encontrados automaticamente. Preencha manualmente."
         });
       }
+
 
       return res.json(produto);
     } catch (e) {
