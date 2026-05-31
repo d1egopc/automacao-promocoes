@@ -1994,24 +1994,6 @@ mensagem += `
 🛒 Comprar:
 ${link}`;  
 
-function parsePreco(valor) {
-  if (!valor) return 0;
-  return parseFloat(valor.toString().replace(",", "."));
-}
-
-const antigo = parsePreco(oferta.precoAntigo);
-const atual = parsePreco(oferta.precoAtual);
-
-if (antigo > atual && atual > 0) {
-  const economia = (antigo - atual).toFixed(2);
-  const porcentagem = Math.round(((antigo - atual) / antigo) * 100);
-
-  mensagem += `
-
-💥 Economia: R$ ${economia.replace(".", ",")}
-🔥 ${porcentagem}% OFF`;
-}
-
 // ================= ENVIO DESTINOS INTELIGENTES =================
 
 let enviouParaAlgumDestino = false;
@@ -5726,25 +5708,29 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
     }
 
     if (mp === "amazon") {
-      const trackingId =
-        integracao?.credenciais?.trackingId ||
-        integracao?.credenciais?.partnerTag ||
-        integracao?.credenciais?.tag ||
-        integracao?.credenciais?.appId ||
-        "";
+  const trackingId =
+    integracao?.credenciais?.trackingId ||
+    integracao?.credenciais?.partnerTag ||
+    integracao?.credenciais?.tag ||
+    integracao?.credenciais?.affiliateTag ||
+    "";
 
-      if (!trackingId) {
-        return "";
-      }
+  if (!trackingId) {
+    console.log("🚫 Amazon sem trackingId/tag afiliada:", {
+      clienteId,
+      credenciais: Object.keys(integracao?.credenciais || {})
+    });
+    return "";
+  }
 
-      try {
-        const u = new URL(linkBase);
-        u.searchParams.set("tag", trackingId);
-        return u.toString();
-      } catch {
-        return "";
-      }
-    }
+  try {
+    const u = new URL(linkBase);
+    u.searchParams.set("tag", trackingId);
+    return u.toString();
+  } catch {
+    return "";
+  }
+}
 
     if (mp === "aliexpress") {
       const linkAli = await gerarLinkCurtoAliExpress(
