@@ -198,7 +198,7 @@ let produto = await importarMercadoLivre(
   link,
   clienteId,
   {
-    getIntegracaoCliente
+    getIntegracaoCliente,
     gerarLinkAfiliadoMercadoLivre
   }
 );
