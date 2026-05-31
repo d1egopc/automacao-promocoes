@@ -1,6 +1,10 @@
 const { gerarBuscasAmazon } =
   require("./buscas");
 
+const {
+  extrairLinksAmazon
+} = require("./parser");
+
 // ================= FAREJADOR AMAZON =================
 
 async function farejarAmazon(clienteId = "admin", deps = {}) {
@@ -73,29 +77,9 @@ console.log("🧪 DENTRO FAREJADOR:", typeof importarAmazon);
     continue;
     }
    
-      const linksExtraidos = [
-  ...html.matchAll(/href="([^"]*\/dp\/[A-Z0-9]{10}[^"]*)"/g),
-  ...html.matchAll(/href="([^"]*\/gp\/product\/[A-Z0-9]{10}[^"]*)"/g)
-]
-  .map(m => m[1])
-  .map(link => {
-    let limpo = String(link)
-      .replace(/&amp;/g, "&")
-      .split("?")[0];
-
-    if (limpo.startsWith("/")) {
-      limpo = "https://www.amazon.com.br" + limpo;
-    }
-
-    return limpo;
-  })
-  .filter(link =>
-    link.includes("amazon.com.br") &&
-    !link.includes("/sspa/") &&
-    !link.includes("/gp/slredirect")
-  );
-
-const links = [...new Set(linksExtraidos)].slice(0, 3);
+const links =
+  extrairLinksAmazon(html)
+    .slice(0, 3);
 
 for (const link of links) {
   try {
@@ -149,8 +133,8 @@ let novaOferta = {
   avisoCupom: produto.avisoCupom || "",
   parcelamento: produto.parcelamento || "",
   linkOriginal: produto.linkOriginal || link,
-  link: produto.linkOriginal || link,
-  linkAfiliado: "",
+  link: produto.linkAfiliado || produto.link || produto.linkOriginal || link,
+  linkAfiliado: produto.linkAfiliado || produto.link || produto.linkOriginal || link,
   imagem: produto.imagem || "",
   marketplace: "amazon",
   categoria: "Amazon",
