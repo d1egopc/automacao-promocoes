@@ -8180,6 +8180,7 @@ await farejador(clienteId, {
     gerarHeadersStealth,
     farejarCuponsMercadoLivre,
     importarMercadoLivre,
+    gerarLinkAfiliadoMercadoLivre,
     importarAmazon,
     buscarOfertasShopee: (clienteId) =>
     buscarOfertasShopee(clienteId, {
