@@ -8165,7 +8165,7 @@ await farejador(clienteId, {
 
 
  setTimeout(async () => {
- console.log("🪂 TESTE MANUAL SHOPEE");
+ console.log("🪂 TESTE MANUAL MERCADO LIBRE - CHAT GPT");
 
    await farejadoresMarketplaces.mercadolivre("admin", {
     config,
