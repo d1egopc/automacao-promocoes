@@ -5884,14 +5884,24 @@ async function distribuirOfertaParaClientes(ofertaBase) {
       ofertaBase
     );
 
-    if (!linkAfiliadoCliente || linkAfiliadoCliente === linkOriginal) {
-      console.log("🚫 Oferta bloqueada: cliente sem link afiliado próprio:", {
-        clienteId,
-        marketplace: mp,
-        titulo: ofertaBase.titulo
-      });
-      continue;
-    }
+ if (!linkAfiliadoCliente) {
+  console.log("🚫 Oferta bloqueada: cliente sem link afiliado próprio:", {
+    clienteId,
+    marketplace: mp,
+    titulo: ofertaBase.titulo
+  });
+  continue;
+}
+
+if (linkAfiliadoCliente === linkOriginal) {
+  console.log("⚠️ Link afiliado igual ao original, permitindo por enquanto:", {
+    clienteId,
+    marketplace: mp,
+    titulo: ofertaBase.titulo,
+    linkAfiliadoCliente,
+    linkOriginal
+  });
+}
 
     const ofertaCliente = {
       ...ofertaBase,
