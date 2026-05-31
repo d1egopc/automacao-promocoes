@@ -8305,7 +8305,7 @@ setTimeout(async () => {
 
   console.log("🧪 TESTE API ALI:", testeAli);
 
-}, 30000);
+}, 90000);
 
 
 //setTimeout(async () => {
