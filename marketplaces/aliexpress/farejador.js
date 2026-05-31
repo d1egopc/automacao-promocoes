@@ -154,10 +154,18 @@ for (const termo of buscas.slice(0, 10)) {
           item.second_level_category_name ||
           "AliExpress";
 
-        const linkFinal =
-          typeof encurtarUrl === "function"
-            ? await encurtarUrl(linkAfiliadoOriginal)
-            : linkAfiliadoOriginal;
+let linkFinal = linkAfiliadoOriginal;
+
+// Se AliExpress já mandar link curto oficial, usa ele
+if (
+  item.promotion_link_short ||
+  String(linkAfiliadoOriginal).includes("s.click.aliexpress.com")
+) {
+  linkFinal =
+    item.promotion_link_short ||
+    linkAfiliadoOriginal;
+}
+       
 
 const tituloLower = String(titulo || "").toLowerCase();
 
@@ -193,9 +201,9 @@ if (palavrasBloqueadasAli.some(p => tituloLower.includes(p))) {
           precoAntigo: precoAntigo || "",
           cupom: "",
           avisoCupom:
-            desconto > 0
-              ? `${Math.round(desconto)}% OFF no AliExpress.`
-              : "",
+          desconto > 0
+          ? `${Math.round(desconto)}% OFF no AliExpress.`
+          : "",
           parcelamento: "",
           link: linkFinal,
           linkOriginal,
