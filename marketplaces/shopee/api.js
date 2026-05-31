@@ -1,7 +1,12 @@
 const crypto = require("crypto");
 
-async function buscarOfertasShopee(clienteId = "admin") {
-const configShopee =
+async function buscarOfertasShopee(clienteId = "admin", deps = {}) {
+  const {
+    config,
+    getIntegracaoCliente
+  } = deps;
+
+  const configShopee =
     getIntegracaoCliente(clienteId, "shopee") ||
     getIntegracaoCliente("admin", "shopee");
 
