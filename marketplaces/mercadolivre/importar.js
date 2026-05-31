@@ -81,10 +81,20 @@ if (response.url.includes("account-verification")) {
     extrairMeta(html, "twitter:image") ||
     "";
 
-  preco = limparPreco(preco);
+ preco = limparPreco(preco);
 
-  let precoNumero = Number(String(preco).replace(",", "."));
-  let precoAntigo = "";
+ // Correção ML: jsonLd às vezes vem como 48.9 e limparPreco vira 489
+ if (
+  jsonLd?.offers?.price !== undefined &&
+  String(jsonLd.offers.price).includes(".") &&
+  !String(jsonLd.offers.price).includes(",")
+) {
+  preco = Number(jsonLd.offers.price)
+    .toFixed(2)
+    .replace(".", ",");
+}
+
+let precoNumero = Number(String(preco).replace(",", "."));
 
   console.log("🧪 PREÇO ML:", {
   original: jsonLd?.offers?.price,
