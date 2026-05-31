@@ -171,8 +171,6 @@ let novaOferta = {
 
 novaOferta = prepararOfertaGlobal(novaOferta);
 
-console.log("🔎 CHAVE AMAZON:", gerarChaveProduto(novaOferta.titulo));
-
 const jaExiste = ofertaJaExiste(novaOferta);
 
 console.log("🔎 AMAZON JA EXISTE?", {
