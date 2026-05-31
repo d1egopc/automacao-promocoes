@@ -159,6 +159,32 @@ for (const termo of buscas.slice(0, 10)) {
             ? await encurtarUrl(linkAfiliadoOriginal)
             : linkAfiliadoOriginal;
 
+const tituloLower = String(titulo || "").toLowerCase();
+
+const palavrasBloqueadasAli = [
+  "sapato",
+  "sandália",
+  "sandalia",
+  "salto",
+  "stiletto",
+  "casamento",
+  "wedding",
+  "bridal",
+  "bomba",
+  "bombas",
+  "unha",
+  "cabelo",
+  "peruca",
+  "bolsa",
+  "sutiã",
+  "calcinha"
+];
+
+if (palavrasBloqueadasAli.some(p => tituloLower.includes(p))) {
+  console.log("🚫 AliExpress bloqueado por palavra:", titulo);
+  continue;
+}
+
         let novaOferta = {
           nome: titulo,
           titulo,
