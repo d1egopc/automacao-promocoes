@@ -8292,47 +8292,47 @@ await farejador(clienteId, {
   }
 }
 
-setTimeout(async () => {
-  console.log("🧪 TESTE API ALIEXPRESS");
-
-  const testeAli = await importarAliExpress(
-    "https://pt.aliexpress.com/item/1005007315554113.html?aff_fcid=871ab54964e24c35a08a4b8a551fb490-1780233139984-08527-_c398OPvj&aff_fsk=_c398OPvj&aff_platform=api-new-link-generate&sk=_c398OPvj&aff_trace_key=871ab54964e24c35a08a4b8a551fb490-1780233139984-08527-_c398OPvj&terminal_id=809c8b7a6a344d3cb844971bcc633c4d&afSmartRedirect=y",
-    {
-      credenciais:
-        integracoesPorCliente?.admin?.aliexpress?.credenciais || {}
-    }
-  );
-
-  console.log("🧪 TESTE API ALI:", testeAli);
-
-}, 90000);
-
-
 //setTimeout(async () => {
- //console.log("🧪 TESTE MANUAL MERCADO LIVRE");
+ // console.log("🧪 TESTE API ALIEXPRESS");
 
-   //await farejadoresMarketplaces.mercadolivre("admin", {
-    //config,
-    //integracoesPorCliente,
-    //fila,
-    //salvarFila,
-    //prepararOfertaGlobal,
-    //ofertaJaExiste,
-    //classificarCategoriaOferta,
-    //gerarBuscasGlobais,
-    //gerarHeadersStealth,
-    //farejarCuponsMercadoLivre,
-    //importarMercadoLivre,
-    //importarAmazon,
-    //buscarOfertasShopee,
-    //normalizarSessaoId,
-   //aplicarFiltrosUniversais,
-    //distribuirOfertaParaClientes,
-    //encurtarUrl,
-    //gerarDeepLinkAwin
-   //});
+ // const testeAli = await importarAliExpress(
+  //  "LINK ALIEXPRESS",
+   // {
+     // credenciais:
+      //  integracoesPorCliente?.admin?.aliexpress?.credenciais || {}
+   // }
+ // );
 
- //}, 60 * 1000);
+ // console.log("🧪 TESTE API ALI:", testeAli);
+
+//}, 90000);
+
+
+ setTimeout(async () => {
+ console.log("🧪 TESTE MANUAL ALIEXPRESS");
+
+   await farejadoresMarketplaces.aliexpress("admin", {
+    config,
+    integracoesPorCliente,
+    fila,
+    salvarFila,
+    prepararOfertaGlobal,
+    ofertaJaExiste,
+    classificarCategoriaOferta,
+    gerarBuscasGlobais,
+    gerarHeadersStealth,
+    farejarCuponsMercadoLivre,
+    importarMercadoLivre,
+    importarAmazon,
+    buscarOfertasShopee,
+    normalizarSessaoId,
+    aplicarFiltrosUniversais,
+    distribuirOfertaParaClientes,
+    encurtarUrl,
+    gerarDeepLinkAwin
+    });
+
+  }, 60 * 1000);
 
 setInterval(() => {
   rodarProximoMarketplace();
