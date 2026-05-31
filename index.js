@@ -8160,7 +8160,7 @@ const ordemMarketplaces = [
 const farejadoresMarketplaces = {
   mercadolivre: farejarMercadoLivreModulo,
   shopee: farejarShopeeModulo,
-  amazon: farejarAmazonModulo,
+  amazon: farejarAmazon,
   aliexpress: farejarAliExpress,
   kabum: farejarKabum,
   magalu: farejarMagalu,
