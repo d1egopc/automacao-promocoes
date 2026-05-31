@@ -14,7 +14,7 @@ const {
 } = require("./marketplaces/shopee");
 
 const {
-  farejarAmazon: farejarAmazonModulo
+  farejarAmazon
 } = require("./marketplaces/amazon");
 
 const {
