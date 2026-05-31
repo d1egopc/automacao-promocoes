@@ -6655,6 +6655,9 @@ linkAfiliado = limparLinkAmazon(linkAfiliado);
 
 const linkFinal = gerarLinkOptimus(linkAfiliado, "amazon"); 
 
+console.log("🔗 AMAZON LINK LIMPO:", linkAfiliado);
+console.log("🔗 AMAZON LINK FINAL:", linkFinal);
+
 return {
     marketplace: "amazon",
     titulo: htmlDecode(titulo)
