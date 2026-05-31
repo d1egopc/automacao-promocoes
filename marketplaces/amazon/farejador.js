@@ -118,6 +118,15 @@ const desconto =
     ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
     : 0;
 
+console.log("🔎 AMAZON FILTRO:", {
+  titulo: produto.titulo,
+  precoNumero,
+  precoAntigoNumero,
+  desconto: Math.round(desconto),
+  avisoCupom: produto.avisoCupom,
+  link: produto.linkAfiliado
+});
+
 if (!precoNumero || !Number.isFinite(precoNumero)) continue;
 if (precoNumero < 30) continue;
 if (desconto < 15 && !produto.avisoCupom) continue;
@@ -146,6 +155,13 @@ let novaOferta = {
 novaOferta = prepararOfertaGlobal(novaOferta);
 
 const jaExiste = ofertaJaExiste(novaOferta);
+
+console.log("🔎 AMAZON JA EXISTE?", {
+  titulo: novaOferta.titulo,
+  jaExiste,
+  link: novaOferta.link,
+  linkAfiliado: novaOferta.linkAfiliado
+});
 
 if (!jaExiste) {
 
