@@ -17,7 +17,8 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
     gerarBuscasGlobais,
     gerarHeadersStealth,
     farejarCuponsMercadoLivre,
-    importarMercadoLivre
+    importarMercadoLivre,
+    gerarLinkAfiliadoMercadoLivre
   } = deps;
 
   try {
@@ -198,6 +199,7 @@ let produto = await importarMercadoLivre(
   clienteId,
   {
     getIntegracaoCliente
+    gerarLinkAfiliadoMercadoLivre
   }
 );
 
