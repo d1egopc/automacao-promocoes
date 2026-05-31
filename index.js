@@ -8164,37 +8164,37 @@ await farejador(clienteId, {
 }
 
 
- setTimeout(async () => {
- console.log("🪂 TESTE MANUAL MERCADO LIBRE - CHAT GPT");
+ //setTimeout(async () => {
+ //console.log("🪂 TESTE MANUAL MERCADO LIBRE - CHAT GPT");
 
-   await farejadoresMarketplaces.mercadolivre("admin", {
-    config,
-    integracoesPorCliente,
-    getIntegracaoCliente,
-    fila,
-    salvarFila,
-    prepararOfertaGlobal,
-    ofertaJaExiste,
-    classificarCategoriaOferta,
-    gerarBuscasGlobais,
-    gerarHeadersStealth,
-    farejarCuponsMercadoLivre,
-    importarMercadoLivre,
-    gerarLinkAfiliadoMercadoLivre,
-    importarAmazon,
-    buscarOfertasShopee: (clienteId) =>
-    buscarOfertasShopee(clienteId, {
-    config,
-    getIntegracaoCliente
-    }),
-    normalizarSessaoId,
-    aplicarFiltrosUniversais,
-    distribuirOfertaParaClientes,
-    encurtarUrl,
-    gerarDeepLinkAwin
-    });
+   //await farejadoresMarketplaces.mercadolivre("admin", {
+    //config,
+    //integracoesPorCliente,
+   //getIntegracaoCliente,
+    //fila,
+    //salvarFila,
+    //prepararOfertaGlobal,
+    //ofertaJaExiste,
+    //classificarCategoriaOferta,
+    //gerarBuscasGlobais,
+    //gerarHeadersStealth,
+    //farejarCuponsMercadoLivre,
+    //importarMercadoLivre,
+    //gerarLinkAfiliadoMercadoLivre,
+    //importarAmazon,
+    //buscarOfertasShopee: (clienteId) =>
+    //buscarOfertasShopee(clienteId, {
+    //config,
+    //getIntegracaoCliente
+    //}),
+    //normalizarSessaoId,
+    //aplicarFiltrosUniversais,
+    //distribuirOfertaParaClientes,
+    //encurtarUrl,
+    //gerarDeepLinkAwin
+    //});
 
-  }, 60 * 1000);
+  //}, 60 * 1000);
 
 setInterval(() => {
   rodarProximoMarketplace();
