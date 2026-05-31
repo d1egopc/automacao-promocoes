@@ -120,6 +120,8 @@ const desconto =
 
 console.log("🔎 AMAZON FILTRO:", {
   titulo: produto.titulo,
+  precoAtual: produto.precoAtual,
+  precoAntigo: produto.precoAntigo,
   precoNumero,
   precoAntigoNumero,
   desconto: Math.round(desconto),
@@ -127,9 +129,24 @@ console.log("🔎 AMAZON FILTRO:", {
   link: produto.linkAfiliado
 });
 
-if (!precoNumero || !Number.isFinite(precoNumero)) continue;
-if (precoNumero < 30) continue;
-if (desconto < 15 && !produto.avisoCupom) continue;
+if (!precoNumero || !Number.isFinite(precoNumero)) {
+  console.log("🚫 Amazon sem preço válido:", produto.titulo);
+  continue;
+}
+
+if (precoNumero < 30) {
+  console.log("🚫 Amazon preço baixo:", produto.titulo, precoNumero);
+  continue;
+}
+
+if (desconto < 15 && !produto.avisoCupom) {
+  console.log("🚫 Amazon desconto baixo:", {
+    titulo: produto.titulo,
+    desconto: Math.round(desconto),
+    avisoCupom: produto.avisoCupom
+  });
+  continue;
+}
 
 
 let novaOferta = {
