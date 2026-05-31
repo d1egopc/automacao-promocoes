@@ -1,5 +1,10 @@
-async function importarMercadoLivre(url, clienteIdAlvo = "admin") {
+async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
+  const {
+    getIntegracaoCliente
+  } = deps;
+
   const integracaoML = getIntegracaoCliente(clienteIdAlvo, "mercadolivre");
+  
   const cookies = integracaoML?.credenciais?.cookies || "";
   
   console.log("🌐 ML URL:", url);
