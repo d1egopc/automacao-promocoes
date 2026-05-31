@@ -1,13 +1,24 @@
+const {
+  htmlDecode,
+  extrairMeta,
+  extrairJsonLd,
+  limparPreco,
+  corrigirImagemUrl
+} = require("./utils");
+
 async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
   const {
-    getIntegracaoCliente
+    getIntegracaoCliente,
+    gerarLinkAfiliadoMercadoLivre
   } = deps;
 
-  const integracaoML = getIntegracaoCliente(clienteIdAlvo, "mercadolivre");
+  const integracaoML =
+    getIntegracaoCliente(clienteIdAlvo, "mercadolivre");
+
+  const cookies =
+    integracaoML?.credenciais?.cookies || "";  
   
-  const cookies = integracaoML?.credenciais?.cookies || "";
-  
-  console.log("🌐 ML URL:", url);
+console.log("🌐 ML URL:", url);
 
   const response = await fetch(url, {
   method: "GET",
