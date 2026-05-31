@@ -179,21 +179,7 @@ let linkFinal =
     integracao.credenciais
   );
 
-console.log(
-  "🔗 LINK FINAL ALI:",
-  linkFinal
-);
-
-// Se AliExpress já mandar link curto oficial, usa ele
-if (
-  item.promotion_link_short ||
-  String(linkAfiliadoOriginal).includes("s.click.aliexpress.com")
-) {
-  linkFinal =
-    item.promotion_link_short ||
-    linkAfiliadoOriginal;
-}
-       
+console.log("🔗 LINK FINAL ALI:", linkFinal);       
 
 const tituloLower = String(titulo || "").toLowerCase();
 
@@ -257,14 +243,21 @@ if (palavrasBloqueadasAli.some(p => tituloLower.includes(p))) {
           clienteId
         };
 
-        if (typeof prepararOfertaGlobal === "function") {
-          novaOferta = prepararOfertaGlobal(novaOferta);
-        }
+       if (typeof prepararOfertaGlobal === "function") {
 
-console.log("🔗 LINK DEPOIS PREPARAR:", {
-  link: novaOferta.link,
-  linkAfiliado: novaOferta.linkAfiliado
-});
+  console.log("🔎 ANTES PREPARAR:", {
+    link: novaOferta.link,
+    linkAfiliado: novaOferta.linkAfiliado
+  });
+
+  novaOferta = prepararOfertaGlobal(novaOferta);
+
+  console.log("🔎 DEPOIS PREPARAR:", {
+    link: novaOferta.link,
+    linkAfiliado: novaOferta.linkAfiliado
+  });
+
+}
 
         if (typeof ofertaJaExiste === "function" && ofertaJaExiste(novaOferta)) {
           console.log("⏭️ AliExpress já existe:", titulo);
