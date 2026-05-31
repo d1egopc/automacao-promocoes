@@ -1212,42 +1212,32 @@ function prepararOfertaGlobal(oferta = {}) {
 // ================= CATEGORIAS GLOBAIS =================
 
 const CATEGORIAS_GLOBAIS = {
-  
- pesca: {
-    nome: "Pesca e Pescaria",
+  modaMasculina: {
+    nome: "Roupas e Moda Masculina",
     palavras: [
-      "vara de pesca", "molinete", "carretilha", "anzol", "mochila de molinete",
-      "isca artificial", "chumbada", "camisa pesca", "lanterna", "bolsa de pesca",
-      "linha de multifilamento", "camiseta uv", "camisa pesca", "lanterna",
-      "oculos polarisado", "oculos de pesca", "canivete", "daiwa", "nelson nakamura",
-      "caixa organizadora de isca", "box de anzol", "iscas de pesca", "divisórias pesca",
-      "jennerlure", "jogá", "nautika", "monster 3x", "lixxada", "camping", "bravinha", 
-      "jennerlure", "luri", "caixa de isca", "caixa pesca", "divisórias pesca", "camping",   
-      "divisorias pesca","farolete de pesca", "lampião pesca", "barraca", "rede de dormir"    
+      "camiseta", "camisa", "regata", "oversized", "algodao", "algodão",
+      "malhao", "malhão", "cueca", "kit cuecas", "bermuda", "caterpillar",
+      "calca masculina", "calça masculina", "moletom masculino", "masculina",
+      "carteira masculina", "cinto masculino", "jaqueta masculina", "masculino"
     ]
   },
 
-  beleza: {
-    nome: "Perfumaria, Farmácia e Beleza",
+  modaFeminina: {
+    nome: "Roupas e Moda Feminina",
     palavras: [
-      "perfume", "shampoo", "condicionador", "hidratante",
-      "desodorante", "sabonete", "protetor solar", "creme dental",
-      "carolona herrera", "ferrari", "sundown", "neutrogena", "clean",
-      "boticário", "azzaro", "armani", "natura", "clean", "malbec", "fralda"
+      "blusinha", "lingerie", "calcinha", "biquini", "biquíni", "saia",
+      "vestido", "sandalia feminina", "sandália feminina",
+      "shorts feminino", "calca feminina", "calça feminina",
+      "calça jeans feminina", "colar feminino"
     ]
   },
 
-  hardware: {
-    nome: "Gamer e Hardware",
+  infantil: {
+    nome: "Roupas e Calçados Infantil",
     palavras: [
-      "ssd", "nvme", "placa de video", "placa de vídeo", "fonte",
-      "memoria ram", "memória ram", "fonte gamer", "gabinete gamer",
-      "headset gamer", "teclado mecanico", "mouse gamer","jieshuo",
-      "amd", "nvidia", "pny", "jieshuo", "veineda", "kllisre",
-      "kingston", "seagate", "samsung", "western digital", "veineda",
-      "arsrock", "asus", "netac", "kootion", "neologic", "risemod",
-      "tgt", "redragon", "giabyte", "hp", "intel", "hyperx",
-      "jbl", "lenovo"
+      "tenis infantil", "tênis infantil", "camisa infantil",
+      "sandalia infantil", "sandália infantil", "roupa infantil",
+      "moda infantil", "bebe", "bebê", "body infantil"
     ]
   },
 
@@ -1257,209 +1247,222 @@ const CATEGORIAS_GLOBAIS = {
       "tenis", "tênis", "chinelo", "sandalia", "sandália",
       "havaianas", "papete", "salto alto", "loafer", "puma",
       "rider", "reebok", "under armor", "new balance", "adidas",
-      "mocassin", "mizuno", "asics", "nike", "olympikus", "penalty"   
+      "mocassim", "mizuno", "asics", "nike", "olympikus", "penalty",
+      "bota", "botina", "coturno", "sapato", "sapatenis", "sapatenis", "casual unissex"    
     ]
   },
 
-alimentos: {
-  nome: "Alimentos e Mercearia",
-  palavras: [
-    "chocolate", "cafe", "café", "capsula de cafe", "cápsula de café",
-    "arroz", "feijao", "feijão", "biscoito", "bolacha",
-    "bombom", "salgadinho", "temperos", "salame", "cereal"
-  ]
-},
-
-audioTv: {
-  nome: "Audio TV",
-  palavras: [
-    "tv 65pl", "tv 55pl", "tv 75ol", "lg", "tcl", "philips",
-    "tv", "smart tv", "televisor", "televisao", "televisão",
-    "caixa de som", "soundbar", "jbl", "boombox",
-    "radio", "rádio", "conversor digital", "iptv", "jbl" 
-  ]
-},
-
-eletroportateis: {
-  nome: "Eletroportáteis",
-  palavras: [
-    "air fryer", "fritadeira eletrica", "fritadeira elétrica",
-    "liquidificador", "cafeteira", "batedeira", "mixer",
-    "sanduicheira", "grill", "aspirador", "panela eletrica",
-    "panela elétrica", "processador de alimentos"
-  ]
-},
-  
-automotivo: {
-  nome: "Automotivo",
-  palavras: [
-    "multimidia", "som automotivo", "camera de re", "câmera de ré",
-    "farol", "lampada automotiva", "lâmpada automotiva",
-    "taramps", "pioneer", "aiwa", "hbuster", "retrovisor"
-  ]
-},
-
-bebidas: {
-  nome: "Bebidas",
-  palavras: [
-    "heineken", "cerveja", "whisky", "vodka",
-    "energetico", "energético", "gatorade",
-    "red label", "old par", "chopp","cerveja heineken",
-    "amstel", "heineken barril 5 litros", "colorado",
-    "coca cola", "tnt", "monster", "ipa", "burn"
-  ]
-},
-
-computadores: {
-  nome: "Computadores e Notebook",
-  palavras: [
-    "notebook", "laptop", "pc gamer", "computador",
-    "all in one", "desktop", "macbook",
-    "ipad", "tablet", "monitor"
-  ]
-},
-
-brinquedos: {
-  nome: "Brinquedos e Artigos Infantis",
-  palavras: [
-    "lego", "carrinho", "helicoptero", "helicóptero",
-    "controle remoto", "boneca", "quebra cabeca",
-    "quebra cabeça", "domino", "dominó", "trator brinquedo"
-  ]
-},
-
-casaDecoracao: {
-  nome: "Casa, Móveis e Decoração",
-  palavras: [
-    "sofa", "sofá", "mesa", "cadeira", "guarda roupa",
-    "armario", "armário", "espelho", "torneira",
-    "painel tv", "penteadeira", "cômoda"
-  ]
-},
-
-
-celulares: {
-  nome: "Celulares e Smartphones",
-  palavras: [
-    "iphone", "samsung galaxy", "xiaomi", "motorola",
-    "redmi", "poco x", "realme", "smartphone",
-    "celular", "iphone 13", "iphone 14", "iphone 15",
-    "galaxy s23", "galaxy s24", "moto g", "infinix"
-  ]
-},
-
-ferramentas: {
-  nome: "Ferramentas",
-  palavras: [
-    "furadeira", "parafusadeira", "martelete",
-    "chave de impacto", "serra marmore", "serra mármore",
-    "makita", "dewalt", "bosch", "vonder",
-    "jogo de ferramentas", "maleta de ferramentas",
-    "manifold suryha", "manifold agetherm", "manifold elitech",
-    "manifold Digital suryha", "manifold agetherm",
-    "balanca nao programavel", "manifold digital",
-    "FINYQBET conjunto de manômetro", "bomba de vacuo",
-    "alicate amperimetro", "capacimetro", "alicate",
-    "jogo mangueira manifold premium", "compressor de ar"
-  ]
-},
-
-limpeza: {
-  nome: "Limpeza",
-  palavras: [
-    "amaciante", "sabao em po", "sabão em pó",
-    "desinfetante", "detergente", "papel higienico",
-    "papel higiênico", "limpeza pesada",
-    "multiuso", "veja", "omo", "ypê",
-    "candida", "água sanitaria", "agua sanitaria"
-  ]
-},
-
-eletronicos: {
-  nome: "Eletrônicos",
-  palavras: [
-    "smartwatch", "fone bluetooth", "caixa bluetooth",
-    "ring light", "drone", "camera wifi",
-    "camera ip", "webcam", "projetor",
-    "mini projetor", "echo dot", "alexa"
-  ]
-},
-
-perifericos: {
-  nome: "Periféricos",
-  palavras: [
-    "mouse", "teclado", "mousepad", "Headset gamer",
-    "webcam gamer", "headphone", "fone gamer",
-    "controle pc", "adaptador usb", "Headset",
-    "hub usb", "microfone gamer", "teclado magnetico",
-    "cadeira gamer", "monitor gamer"
-  ]
-},
-
-eletrodomesticos: {
-  nome: "Eletrodomésticos",
-  palavras: [
-    "geladeira", "freezer", "microondas", "micro-ondas",
-    "fogao", "fogão", "lava e seca", "ar condicionado",
-    "micro-ondas", "lava loucas", "lava louças", "secadora",
-    "elgin", "lg", "philco", "hisense", "electrolux",
-    "consul", "brastemp", "hd", "gree", "tcl", "agratto",
-  ]
-},
-
-infantil: {
-  nome: "Roupas e Calçados Infantil",
-  palavras: [
-    "tenis infantil", "tênis infantil", "camisa infantil",
-    "sandalia infantil", "sandalia infantil",
-    "roupa infantil", "moda infantil", "bebe",
-    "bebê", "body infantil"
-  ]
-},
-
-petshop: {
-  nome: "Pet Shop e Fazendinha",
-  palavras: [
-    "racao", "ração", "coleira", "comedouro",
-    "bebedouro", "aquario", "aquário",
-    "areia gato", "ração cachorro", "ração gato"
-  ]
-},
-
-esporte: {
-  nome: "Esporte e Suplementos",
-  palavras: [
-    "creatina", "whey", "suplemento",
-    "academia", "camisa time", "roupa academia",
-    "beta alanina", "pré treino", "pre treino"
-  ]
-},
-
-games: {
-  nome: "Games e Console",
-  palavras: [
-    "xbox", "playstation", "ps5", "ps4",
-    "nintendo switch", "controle xbox",
-    "joystick", "game stick", "fliperama"
-  ]
-},
-
- modaMasculina: {
-    nome: "Roupas e Moda Masculina",
+  hardware: {
+    nome: "Gamer e Hardware",
     palavras: [
-      "camiseta masculina", "cueca", "kit cuecas", "bermuda",
-      "calca masculina", "calça masculina", "moletom masculino",
-      "carteira masculina", "cinto masculino", "jaqueta"
+      "ssd", "nvme", "placa de video", "placa de vídeo", "fonte gamer",
+      "memoria ram", "memória ram", "gabinete gamer",
+      "headset gamer", "teclado mecanico", "teclado mecânico",
+      "mouse gamer", "amd", "nvidia", "pny", "kingston",
+      "seagate", "western digital", "asus", "asrock", "netac",
+      "redragon", "gigabyte", "intel", "hyperx"
     ]
   },
 
-  modaFeminina: {
-    nome: "Roupas e Moda Feminina",
+  computadores: {
+    nome: "Computadores e Notebook",
     palavras: [
-      "blusinha", "lingerie", "calcinha", "biquini", "saia",
-      "vestido", "sandalia feminina", "shorts feminino", 
-      "shorts feminino", "kit calca feminina", "shorts feminino",
-      "calça jeans feminina", "shortes jeans feminino", "colar"
+      "notebook", "laptop", "pc gamer", "computador",
+      "all in one", "desktop", "macbook", "ipad", "tablet", "monitor"
+    ]
+  },
+
+  celulares: {
+    nome: "Celulares e Smartphones",
+    palavras: [
+      "iphone", "samsung galaxy", "xiaomi", "motorola",
+      "redmi", "poco", "realme", "smartphone", "celular",
+      "galaxy s", "moto g", "infinix"
+    ]
+  },
+
+  perifericos: {
+    nome: "Periféricos",
+    palavras: [
+      "mouse", "teclado", "mousepad", "webcam gamer",
+      "headphone", "fone gamer", "controle pc", "adaptador usb",
+      "headset", "hub usb", "microfone gamer", "cadeira gamer",
+      "monitor gamer"
+    ]
+  },
+
+  audioTv: {
+    nome: "Audio TV",
+    palavras: [
+      "smart tv", "televisor", "televisao", "televisão",
+      "tv 32", "tv 40", "tv 43", "tv 50", "tv 55", "tv 65", "tv 75",
+      "caixa de som", "soundbar", "boombox", "radio", "rádio",
+      "conversor digital", "iptv"
+    ]
+  },
+
+  eletronicos: {
+    nome: "Eletrônicos",
+    palavras: [
+      "smartwatch", "fone bluetooth", "caixa bluetooth",
+      "ring light", "drone", "camera wifi", "câmera wifi",
+      "camera ip", "câmera ip", "webcam", "projetor",
+      "mini projetor", "echo dot", "alexa"
+    ]
+  },
+
+  eletroportateis: {
+    nome: "Eletroportáteis",
+    palavras: [
+      "air fryer", "fritadeira eletrica", "fritadeira elétrica",
+      "liquidificador", "cafeteira", "batedeira", "mixer",
+      "sanduicheira", "grill", "aspirador", "panela eletrica",
+      "panela elétrica", "processador de alimentos"
+    ]
+  },
+
+  eletrodomesticos: {
+    nome: "Eletrodomésticos",
+    palavras: [
+      "geladeira", "freezer", "microondas", "micro-ondas",
+      "fogao", "fogão", "lava e seca", "ar condicionado",
+      "lava loucas", "lava louças", "secadora",
+      "electrolux", "consul", "brastemp", "philco", "hisense", "elgin", "gree"
+    ]
+  },
+
+  ferramentas: {
+    nome: "Ferramentas",
+    palavras: [
+      "furadeira", "parafusadeira", "martelete",
+      "chave de impacto", "serra marmore", "serra mármore",
+      "makita", "dewalt", "bosch", "vonder",
+      "jogo de ferramentas", "maleta de ferramentas",
+      "manifold", "bomba de vacuo", "bomba de vácuo",
+      "alicate amperimetro", "alicate amperímetro",
+      "capacimetro", "capacímetro", "compressor de ar"
+    ]
+  },
+
+  automotivo: {
+    nome: "Automotivo",
+    palavras: [
+      "multimidia", "multimídia", "som automotivo",
+      "camera de re", "câmera de ré", "farol",
+      "lampada automotiva", "lâmpada automotiva",
+      "taramps", "pioneer", "retrovisor"
+    ]
+  },
+
+  pesca: {
+    nome: "Pesca e Pescaria",
+    palavras: [
+      "vara de pesca", "molinete", "carretilha", "anzol",
+      "isca artificial", "chumbada", "bolsa de pesca",
+      "linha de multifilamento", "camiseta uv",
+      "camisa pesca", "oculos polarizado", "óculos polarizado",
+      "oculos de pesca", "óculos de pesca", "daiwa",
+      "nelson nakamura", "caixa de isca", "caixa pesca",
+      "farolete de pesca", "lampiao pesca", "lampião pesca"
+    ]
+  },
+
+  casaDecoracao: {
+    nome: "Casa, Móveis e Decoração",
+    palavras: [
+      "sofa", "sofá", "mesa", "cadeira", "guarda roupa",
+      "armario", "armário", "espelho", "torneira",
+      "painel tv", "penteadeira", "comoda", "cômoda",
+      "barraca", "rede de dormir"
+    ]
+  },
+
+  limpeza: {
+    nome: "Limpeza",
+    palavras: [
+      "amaciante", "sabao em po", "sabão em pó",
+      "desinfetante", "detergente", "papel higienico",
+      "papel higiênico", "limpeza pesada",
+      "multiuso", "veja", "omo", "ypê",
+      "candida", "cândida", "agua sanitaria", "água sanitaria", "água sanitária"
+    ]
+  },
+
+  alimentos: {
+    nome: "Alimentos e Mercearia",
+    palavras: [
+      "chocolate", "cafe", "café", "capsula de cafe", "cápsula de café",
+      "arroz", "feijao", "feijão", "biscoito", "bolacha",
+      "bombom", "salgadinho", "temperos", "salame", "cereal"
+    ]
+  },
+
+  bebidas: {
+    nome: "Bebidas",
+    palavras: [
+      "heineken", "cerveja", "whisky", "vodka",
+      "energetico", "energético", "gatorade",
+      "red label", "old par", "chopp", "amstel",
+      "coca cola", "tnt", "monster", "ipa", "burn"
+    ]
+  },
+
+  beleza: {
+    nome: "Perfumaria, Farmácia e Beleza",
+    palavras: [
+      "perfume", "shampoo", "condicionador", "hidratante",
+      "desodorante", "sabonete", "protetor solar", "creme dental",
+      "carolina herrera", "ferrari", "sundown", "neutrogena",
+      "boticario", "boticário", "azzaro", "armani", "natura",
+      "malbec"
+    ]
+  },
+
+  petshop: {
+    nome: "Pet Shop e Fazendinha",
+    palavras: [
+      "racao", "ração", "coleira", "comedouro",
+      "bebedouro", "aquario", "aquário",
+      "areia gato", "ração cachorro", "ração gato"
+    ]
+  },
+
+  esporte: {
+    nome: "Esporte e Suplementos",
+    palavras: [
+      "creatina", "whey", "suplemento",
+      "academia", "camisa time", "roupa academia",
+      "beta alanina", "pre treino", "pré treino",
+      "halter", "anilha", "bike", "bicicleta"
+    ]
+  },
+
+  games: {
+    nome: "Games e Console",
+    palavras: [
+      "xbox", "playstation", "ps5", "ps4",
+      "nintendo switch", "controle xbox",
+      "joystick", "game stick", "fliperama"
+    ]
+  },
+
+bebes: {
+  nome: "Bebês e Acessórios",
+  palavras: [
+    "bebe", "bebê", "bebes", "bebês", "carrinho de bebe", "carrinho de bebê",
+    "cadeirinha", "cadeirinha de bebe", "cadeirinha de bebê",
+    "mamae bebe", "mamãe bebê", "mamadeira", "chupeta",
+    "berco", "berço", "banheira bebe", "banheira bebê",
+    "fralda", "lenço umedecido", "lenco umedecido"
+  ]
+},
+
+  brinquedos: {
+    nome: "Brinquedos e Artigos Infantis",
+    palavras: [
+      "lego", "carrinho", "helicoptero", "helicóptero",
+      "controle remoto", "boneca", "quebra cabeca",
+      "quebra cabeça", "domino", "dominó", "trator brinquedo"
     ]
   }
 };
@@ -1483,7 +1486,7 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     }
   }
 
-  return "Alimentos e Mercearia";
+  return "Outros";
 }
 
 // ================= HELPERS DESTINOS INTELIGENTES =================
@@ -8164,37 +8167,37 @@ await farejador(clienteId, {
 }
 
 
- //setTimeout(async () => {
- //console.log("🪂 TESTE MANUAL MERCADO LIBRE - CHAT GPT");
+ setTimeout(async () => {
+ console.log("🪂 TESTE MANUAL MERCADO LIBRE - CHAT GPT");
 
-   //await farejadoresMarketplaces.mercadolivre("admin", {
-    //config,
-    //integracoesPorCliente,
-   //getIntegracaoCliente,
-    //fila,
-    //salvarFila,
-    //prepararOfertaGlobal,
-    //ofertaJaExiste,
-    //classificarCategoriaOferta,
-    //gerarBuscasGlobais,
-    //gerarHeadersStealth,
-    //farejarCuponsMercadoLivre,
-    //importarMercadoLivre,
-    //gerarLinkAfiliadoMercadoLivre,
-    //importarAmazon,
-    //buscarOfertasShopee: (clienteId) =>
-    //buscarOfertasShopee(clienteId, {
-    //config,
-    //getIntegracaoCliente
-    //}),
-    //normalizarSessaoId,
-    //aplicarFiltrosUniversais,
-    //distribuirOfertaParaClientes,
-    //encurtarUrl,
-    //gerarDeepLinkAwin
-    //});
+   await farejadoresMarketplaces.mercadolivre("admin", {
+    config,
+    integracoesPorCliente,
+    getIntegracaoCliente,
+    fila,
+    salvarFila,
+    prepararOfertaGlobal,
+    ofertaJaExiste,
+    classificarCategoriaOferta,
+    gerarBuscasGlobais,
+    gerarHeadersStealth,
+    farejarCuponsMercadoLivre,
+    importarMercadoLivre,
+    gerarLinkAfiliadoMercadoLivre,
+    importarAmazon,
+    buscarOfertasShopee: (clienteId) =>
+    buscarOfertasShopee(clienteId, {
+    config,
+    getIntegracaoCliente
+    }),
+    normalizarSessaoId,
+    aplicarFiltrosUniversais,
+    distribuirOfertaParaClientes,
+    encurtarUrl,
+    gerarDeepLinkAwin
+    });
 
-  //}, 60 * 1000);
+  }, 60 * 1000);
 
 setInterval(() => {
   rodarProximoMarketplace();
