@@ -8292,21 +8292,6 @@ await farejador(clienteId, {
   }
 }
 
-//setTimeout(async () => {
- // console.log("🧪 TESTE API ALIEXPRESS");
-
- // const testeAli = await importarAliExpress(
-  //  "LINK ALIEXPRESS",
-   // {
-     // credenciais:
-      //  integracoesPorCliente?.admin?.aliexpress?.credenciais || {}
-   // }
- // );
-
- // console.log("🧪 TESTE API ALI:", testeAli);
-
-//}, 90000);
-
 
  setTimeout(async () => {
  console.log("🧪 TESTE MANUAL ALIEXPRESS");
