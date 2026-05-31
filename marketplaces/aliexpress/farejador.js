@@ -261,6 +261,11 @@ if (palavrasBloqueadasAli.some(p => tituloLower.includes(p))) {
           novaOferta = prepararOfertaGlobal(novaOferta);
         }
 
+console.log("🔗 LINK DEPOIS PREPARAR:", {
+  link: novaOferta.link,
+  linkAfiliado: novaOferta.linkAfiliado
+});
+
         if (typeof ofertaJaExiste === "function" && ofertaJaExiste(novaOferta)) {
           console.log("⏭️ AliExpress já existe:", titulo);
           continue;
