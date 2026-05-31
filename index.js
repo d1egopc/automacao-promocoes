@@ -8294,9 +8294,9 @@ await farejador(clienteId, {
 
 
  setTimeout(async () => {
- console.log("🧪 TESTE MANUAL ALIEXPRESS");
+ console.log("🧪 TESTE MANUAL AMAZON");
 
-   await farejadoresMarketplaces.aliexpress("admin", {
+   await farejadoresMarketplaces.amazon("admin", {
     config,
     integracoesPorCliente,
     fila,
