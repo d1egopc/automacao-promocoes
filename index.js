@@ -8121,6 +8121,7 @@ console.log("🧪 ORQUESTRADOR importarAmazon:", typeof importarAmazon);
 await farejador(clienteId, {
   config,
   integracoesPorCliente,
+  getIntegracaoCliente,
   fila,
   salvarFila,
   prepararOfertaGlobal,
@@ -8168,6 +8169,7 @@ await farejador(clienteId, {
    await farejadoresMarketplaces.mercadolivre("admin", {
     config,
     integracoesPorCliente,
+    getIntegracaoCliente,
     fila,
     salvarFila,
     prepararOfertaGlobal,
