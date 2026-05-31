@@ -1,7 +1,8 @@
 const { gerarBuscasAliExpress } = require("./buscas");
 
 const {
-  buscarProdutosAliExpressAPI
+  buscarProdutosAliExpressAPI,
+  gerarLinkCurtoAliExpress
 } = require("./api");
 
 // ================= FAREJADOR ALIEXPRESS MODULAR =================
@@ -95,10 +96,15 @@ for (const termo of buscasBrasil) {
           "";
 
         const linkAfiliadoOriginal =
-          item.promotion_link ||
-          item.promotion_link_short ||
-          linkOriginal;
-
+        item.promotion_link_short ||
+        item.promotion_link ||
+        linkOriginal;
+       
+        console.log("🔗 ALI LINKS:", {
+        short: item.promotion_link_short,
+        normal: item.promotion_link
+        });
+       
         if (!linkAfiliadoOriginal) continue;
 
         const precoAtual =
@@ -167,7 +173,11 @@ for (const termo of buscasBrasil) {
           item.second_level_category_name ||
           "AliExpress";
 
-let linkFinal = linkAfiliadoOriginal;
+let linkFinal =
+  await gerarLinkCurtoAliExpress(
+    linkAfiliadoOriginal,
+    integracao.credenciais
+  );
 
 // Se AliExpress já mandar link curto oficial, usa ele
 if (

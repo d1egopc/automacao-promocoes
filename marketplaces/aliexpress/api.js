@@ -84,6 +84,107 @@ async function buscarProdutosAliExpressAPI(termo, credenciais = {}, opcoes = {})
   return Array.isArray(produtos) ? produtos : [];
 }
 
+async function gerarLinkCurtoAliExpress(
+  linkLongo,
+  credenciais = {}
+) {
+
+  const appKey =
+    credenciais.appKey || "";
+
+  const secret =
+    credenciais.secret || "";
+
+  const trackingId =
+    credenciais.trackingId || "";
+
+  if (
+    !appKey ||
+    !secret ||
+    !trackingId
+  ) {
+    return linkLongo;
+  }
+
+  try {
+
+    const params = {
+      method:
+        "aliexpress.affiliate.link.generate",
+
+      app_key: appKey,
+
+      timestamp: timestampGMT8(),
+
+      sign_method: "md5",
+
+      format: "json",
+
+      v: "2.0",
+
+      promotion_link_type: 0,
+
+      source_values: linkLongo,
+
+      tracking_id: trackingId
+    };
+
+    params.sign =
+      assinar(params, secret);
+
+    const response = await fetch(
+      "https://api-sg.aliexpress.com/sync",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/x-www-form-urlencoded;charset=utf-8"
+        },
+        body:
+          new URLSearchParams(params)
+      }
+    );
+
+    const data =
+      await response.json();
+
+    console.log(
+      "🔗 ALI SHORT RESPONSE:",
+      JSON.stringify(data).slice(0, 1000)
+    );
+
+    const result =
+      data?.
+      aliexpress_affiliate_link_generate_response?.
+      resp_result?.
+      result;
+
+    const linkCurto =
+      result?.
+      promotion_links?.
+      promotion_link?.[0]?.
+      promotion_link ||
+      result?.
+      promotion_link ||
+      "";
+
+    return (
+      linkCurto ||
+      linkLongo
+    );
+
+  } catch (e) {
+
+    console.log(
+      "⚠️ erro gerar link curto Ali:",
+      e.message
+    );
+
+    return linkLongo;
+  }
+}
+
 module.exports = {
-  buscarProdutosAliExpressAPI
+  buscarProdutosAliExpressAPI,
+  gerarLinkCurtoAliExpress
 };
