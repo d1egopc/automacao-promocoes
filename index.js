@@ -8269,9 +8269,9 @@ await farejador(clienteId, {
 
 
  setTimeout(async () => {
- console.log("🧪 TESTE MANUAL AMAZON");
+ console.log("🛩️ TESTE MANUAL SHOPEE");
 
-   await farejadoresMarketplaces.amazon("admin", {
+   await farejadoresMarketplaces.shopee("admin", {
     config,
     integracoesPorCliente,
     fila,
