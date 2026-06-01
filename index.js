@@ -4193,10 +4193,10 @@ console.log("🧪 AWIN LINK GERADO:", {
   }
 });
 
-app.post("/kabum/importar", async (req, res) => {
+app.get("/kabum/importar", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
-    const { url } = req.body;
+    const url = req.query.url;
 
     if (!url) {
       return res.status(400).json({
