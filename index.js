@@ -7135,11 +7135,22 @@ if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
     }
   }
 
-     if (marketplace === "aliexpress") {
+  if (marketplace === "aliexpress") {
   try {
-    const produto = await importarAliExpress(url, config);
+
+    const clienteId = getClienteId(req);
+
+    const integracaoAli =
+      getIntegracaoCliente(clienteId, "aliexpress");
+
+    const produto = await importarAliExpress(url, {
+      credenciais: integracaoAli?.credenciais || {}
+    });
+
     return res.json(produto);
+
   } catch (e) {
+
     console.error("ERRO ALIEXPRESS:", e);
 
     return res.json({
