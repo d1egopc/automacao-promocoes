@@ -4166,41 +4166,6 @@ app.post("/awin/gerar-link", async (req, res) => {
   }
 });
 
-    // ================= LINK AFILIADO =================
-
-    //const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
-
-    if (!linkAfiliado) {
-      return res.status(500).json({
-        ok: false,
-        erro: "Awin não retornou link afiliado"
-      });
-    }
-
-console.log("🧪 PARCELAMENTO KABUM:", parcelamento);
-
-  return res.json({
-  ok: true,
-  urlOriginal: url,
-  linkAfiliado,
-  titulo,
-  precoAtual,
-  precoAntigo,
-  parcelamento,
-  avisoPagamento,
-  avisoCupom: "💳 Com desconto à vista no PIX.",
-  imagem
-  });
-
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: "Erro ao importar produto Awin",
-      detalhe: e.response?.data || e.message
-    });
-  }
-});
-
 // ================= HELPERS DE IMPORTAÇÃO =================
 
 function htmlDecode(str) {
