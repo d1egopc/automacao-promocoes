@@ -7138,8 +7138,10 @@ if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
   if (marketplace === "aliexpress") {
   try {
 
-    const clienteId = getClienteId(req);
+   const clienteId = getClienteId(req);
 
+if (marketplace === "aliexpress") {
+  try {
     const integracaoAli =
       getIntegracaoCliente(clienteId, "aliexpress");
 
@@ -7150,7 +7152,6 @@ if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
     return res.json(produto);
 
   } catch (e) {
-
     console.error("ERRO ALIEXPRESS:", e);
 
     return res.json({
@@ -7190,7 +7191,6 @@ if (marketplace === "magalu") {
   }
 }
 
-  const clienteId = getClienteId(req);
 
 console.log("🧪 IMPORTAÇÃO MANUAL ML:", {
   url,
@@ -7200,16 +7200,15 @@ console.log("🧪 IMPORTAÇÃO MANUAL ML:", {
 });
 
 if (marketplace === "mercadolivre") {
-    try {
-
- const produto = await importarMercadoLivre(
-  url,
-  clienteId,
-  {
-    getIntegracaoCliente,
-    gerarLinkAfiliadoMercadoLivre
-  }
-);
+  try {
+    const produto = await importarMercadoLivre(
+      url,
+      clienteId,
+      {
+        getIntegracaoCliente,
+        gerarLinkAfiliadoMercadoLivre
+      }
+    );
 
       if (!produto.titulo || produto.titulo === "Produto Mercado Livre") {
         return res.json({
