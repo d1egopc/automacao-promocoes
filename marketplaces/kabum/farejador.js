@@ -1,8 +1,10 @@
 const { gerarBuscasKabum } =
 require("./buscas");
 
-const { extrairProdutosKabum } =
-require("./parser");
+const {
+  extrairProdutosKabum,
+  extrairDetalheProdutoKabum
+} = require("./parser");
 
 // ================= FAREJADOR KABUM =================
 
@@ -92,11 +94,42 @@ console.log(
 );
 
 
-for (const produto of produtos.slice(0, cfg.limitePorRodada || 2)) {
-
-  const titulo = produto.titulo;
+for (let produto of produtos.slice(0, cfg.limitePorRodada || 2)) {
+  
+const titulo = produto.titulo;
 
   if (!titulo) continue;
+
+try {
+  const respDetalhe = await fetch(produto.link, {
+    headers: {
+      ...gerarHeadersStealth(),
+      "Referer": "https://www.kabum.com.br/"
+    }
+  });
+
+  if (respDetalhe.ok) {
+    const htmlDetalhe = await respDetalhe.text();
+    const detalhe = extrairDetalheProdutoKabum(htmlDetalhe);
+
+    console.log("🧪 KABUM DETALHE:", {
+      titulo: produto.titulo,
+      precoLista: produto.precoAtual,
+      precoDetalhe: detalhe.precoAtual,
+      link: produto.link
+    });
+
+    if (detalhe.precoAtual) {
+      produto.precoAtual = detalhe.precoAtual;
+    }
+
+    if (detalhe.imagem) {
+      produto.imagem = detalhe.imagem;
+    }
+  }
+} catch (e) {
+  console.log("⚠️ Erro ao validar detalhe KaBuM:", e.message);
+}
 
 let linkAfiliado = produto.link;
 
@@ -199,7 +232,6 @@ if (!jaExisteKabum) {
   }
 
 }
-
     
     const integracaoAwin =
       integracoesPorCliente?.[clienteId]?.awin ||

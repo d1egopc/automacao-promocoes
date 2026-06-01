@@ -64,12 +64,6 @@ function extrairProdutosKabum(html = "") {
 
     const titulo = tituloPeloLinkKabum(link);
 
-console.log("🧪 KABUM PRODUTO:", {
-  titulo,
-  precoRaw,
-  link
-});
-
     produtos.push({
      titulo,
      precoAtual: precoRaw ? formatarPrecoKabum(precoRaw) : "",
@@ -84,7 +78,24 @@ console.log("🧪 KABUM PRODUTO:", {
   return produtos;
 }
 
+function extrairDetalheProdutoKabum(html = "") {
+  const precoRaw =
+    html.match(/"price"\s*:\s*([0-9.]+)/i)?.[1] ||
+    html.match(/"priceWithDiscount"\s*:\s*([0-9.]+)/i)?.[1] ||
+    html.match(/R\$\s*([\d.]+,\d{2})/)?.[1] ||
+    "";
+
+  const imagem =
+    html.match(/https:\/\/images\.kabum\.com\.br[^"\\]+/i)?.[0] || "";
+
+  return {
+    precoAtual: precoRaw ? formatarPrecoKabum(precoRaw) : "",
+    imagem
+  };
+}
+
 module.exports = {
   limparTextoKabum,
-  extrairProdutosKabum
+  extrairProdutosKabum,
+  extrairDetalheProdutoKabum
 };
