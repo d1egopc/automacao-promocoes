@@ -4193,6 +4193,35 @@ console.log("🧪 AWIN LINK GERADO:", {
   }
 });
 
+app.post("/kabum/importar", async (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    const { url } = req.body;
+
+    if (!url) {
+      return res.status(400).json({
+        ok: false,
+        erro: "URL obrigatória"
+      });
+    }
+
+    const produto = await importarProdutoKabumViaAwin(url, clienteId);
+
+    return res.json({
+      ok: true,
+      produto
+    });
+
+  } catch (e) {
+    console.error("❌ ERRO IMPORTAR KABUM AWIN:", e.message);
+
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
+
 // ================= HELPERS DE IMPORTAÇÃO =================
 
 function htmlDecode(str) {
