@@ -4126,6 +4126,7 @@ console.log("🧪 PREÇOS VALIDOS:", precosValidos.slice(0, 20));
   imagem,
   categoria: "Gamer e Hardware"
 };
+}
 
 app.post("/awin/gerar-link", async (req, res) => {
   try {
