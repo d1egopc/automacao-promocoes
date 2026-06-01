@@ -4168,7 +4168,7 @@ app.post("/awin/gerar-link", async (req, res) => {
 
     // ================= LINK AFILIADO =================
 
-    const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
+    //const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
 
     if (!linkAfiliado) {
       return res.status(500).json({
