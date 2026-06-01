@@ -1295,9 +1295,9 @@ const CATEGORIAS_GLOBAIS = {
     palavras: [
       "camiseta", "camisa", "regata", "oversized", "algodao", "algodão",
       "malhao", "malhão", "cueca", "kit cuecas", "bermuda", "caterpillar",
-      "calca masculina", "calça masculina", "moletom masculino", "masculina",
-      "carteira masculina", "cinto masculino", "jaqueta masculina", "masculino",
-      "cueca", "cuecas", "boxer", "cueca boxer", "microfibra"
+      "calca masculina", "calça", "moletom", "bermuda", "kit cuecas",
+      "carteira", "cinto", "jaqueta", "capa de chuva", "bone", "canguru",
+      "cueca", "cuecas", "boxer", "cueca boxer", "microfibra", "blusa de frio"
     ]
   },
 
@@ -1305,10 +1305,10 @@ const CATEGORIAS_GLOBAIS = {
     nome: "Roupas e Moda Feminina",
     palavras: [
       "blusinha", "lingerie", "calcinha", "biquini", "biquíni", "saia",
-      "vestido", "sandalia feminina", "sandália feminina",
-      "shorts feminino", "calca feminina", "calça feminina",
-      "calça jeans feminina", "colar feminino", "top feminino", "top",
-      "sutia", "sutiã", "cropped", "legging", "fitness feminino"
+      "vestido", "sandalia", "sandália", "sueter", "casaco",
+      "shorts feminino", "calca", "calça", "canguru",
+      "calça jeans", "colar", "top", "top", "blusa de frio",
+      "sutia", "sutiã", "cropped", "legging", "fitness"
     ]
   },
 
