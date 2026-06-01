@@ -1556,7 +1556,7 @@ bebes: {
     palavras: [
       "lego", "carrinho", "helicoptero", "helicóptero", "losa mágica",
       "controle remoto", "boneca", "quebra cabeca", "lousa mágica infantil",
-      "quebra cabeça", "domino", "dominó", "trator brinquedo" "lousa mágica infantil"
+      "quebra cabeça", "domino", "dominó", "trator brinquedo", "lousa mágica infantil"
     ]
   }
 };
