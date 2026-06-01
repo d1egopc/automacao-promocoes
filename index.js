@@ -643,10 +643,39 @@ function gerarLinkOptimus(linkOriginal = "", marketplace = "") {
   return `${dominio}${formato}/${codigo}`;
 }
 
+
 // ================= FILTROS OFERTA JA EXISTE =================
+
+function gerarChaveDuplicidadeOferta(oferta = {}) {
+  return normalizarTexto(
+    oferta.titulo ||
+    oferta.nome ||
+    ""
+  )
+    .replace(/\b(preto|preta|branco|branca|azul|vermelho|verde|rosa|cinza)\b/g, "")
+    .replace(/\b(bivolt|110v|220v|110-220v|110\/220v)\b/g, "")
+    .replace(/\b(cor|tamanho|modelo)\b/g, "")
+    .replace(/\b(mlb\d+)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extrairIdMercadoLivreOferta(oferta = {}) {
+  const texto = String(
+    oferta.linkOriginal ||
+    oferta.link ||
+    oferta.linkAfiliado ||
+    ""
+  );
+
+  return texto.match(/MLB-?\d+/i)?.[0]?.replace("-", "").toUpperCase() || "";
+}
 
 function ofertaJaExiste(novaOferta) {
   const tituloNovo = normalizarTexto(novaOferta.titulo || novaOferta.nome);
+  const chaveNova = gerarChaveDuplicidadeOferta(novaOferta);
+  const idMlNovo = extrairIdMercadoLivreOferta(novaOferta);
+
   const linkNovo = String(
     novaOferta.linkOriginal ||
     novaOferta.link ||
@@ -654,17 +683,36 @@ function ofertaJaExiste(novaOferta) {
     ""
   ).trim();
 
+  const precoNovo = String(
+    novaOferta.preco ||
+    novaOferta.precoAtual ||
+    ""
+  ).trim();
+
+  const marketplaceNovo = normalizarTexto(novaOferta.marketplace || novaOferta.mercado || "");
+
   const agora = Date.now();
   const HORAS_BLOQUEIO = 12;
 
   return fila.some((o) => {
     const tituloExistente = normalizarTexto(o.titulo || o.nome);
+    const chaveExistente = gerarChaveDuplicidadeOferta(o);
+    const idMlExistente = extrairIdMercadoLivreOferta(o);
+
     const linkExistente = String(
       o.linkOriginal ||
       o.link ||
       o.linkAfiliado ||
       ""
     ).trim();
+
+    const precoExistente = String(
+      o.preco ||
+      o.precoAtual ||
+      ""
+    ).trim();
+
+    const marketplaceExistente = normalizarTexto(o.marketplace || o.mercado || "");
 
     const dataItem = new Date(
       o.criadoEm || o.dataCriacao || o.enviadoEm || o.dataEnvio || 0
@@ -674,6 +722,15 @@ function ofertaJaExiste(novaOferta) {
       dataItem && agora - dataItem < HORAS_BLOQUEIO * 60 * 60 * 1000;
 
     if (!itemRecente) return false;
+
+    if (idMlNovo && idMlExistente && idMlNovo === idMlExistente) {
+      console.log("🚫 DUPLICADA ML POR ID:", {
+        id: idMlNovo,
+        tituloNovo: novaOferta.titulo || novaOferta.nome,
+        tituloExistente: o.titulo || o.nome
+      });
+      return true;
+    }
 
     if (linkNovo && linkExistente && linkNovo === linkExistente) {
       console.log("🚫 DUPLICADA POR LINK:", {
@@ -685,6 +742,27 @@ function ofertaJaExiste(novaOferta) {
 
     if (tituloNovo && tituloExistente && tituloNovo === tituloExistente) {
       console.log("🚫 DUPLICADA POR TÍTULO:", {
+        tituloNovo: novaOferta.titulo || novaOferta.nome,
+        tituloExistente: o.titulo || o.nome
+      });
+      return true;
+    }
+
+    if (
+      chaveNova &&
+      chaveExistente &&
+      chaveNova === chaveExistente &&
+      precoNovo &&
+      precoExistente &&
+      precoNovo === precoExistente &&
+      marketplaceNovo &&
+      marketplaceExistente &&
+      marketplaceNovo === marketplaceExistente
+    ) {
+      console.log("🚫 DUPLICADA POR CHAVE + PREÇO + MARKETPLACE:", {
+        chave: chaveNova,
+        preco: precoNovo,
+        marketplace: marketplaceNovo,
         tituloNovo: novaOferta.titulo || novaOferta.nome,
         tituloExistente: o.titulo || o.nome
       });
@@ -1307,7 +1385,9 @@ const CATEGORIAS_GLOBAIS = {
       "smartwatch", "fone bluetooth", "caixa bluetooth",
       "ring light", "drone", "camera wifi", "câmera wifi",
       "camera ip", "câmera ip", "webcam", "projetor",
-      "mini projetor", "echo dot", "alexa"
+      "mini projetor", "echo dot", "alexa", "fone sem fio",
+      "fone bluetooth", "fone de ouvido", "fones de ouvido",
+      "ear hook", "headphone", "tws", "bluetooth 5.3", "airpods"
     ]
   },
 
@@ -1373,7 +1453,7 @@ const CATEGORIAS_GLOBAIS = {
       "sofa", "sofá", "mesa", "cadeira", "guarda roupa",
       "armario", "armário", "espelho", "torneira",
       "painel tv", "penteadeira", "comoda", "cômoda",
-      "barraca", "rede de dormir"
+      "barraca", "rede de dormir", "sofá retrátil"
     ]
   },
 
@@ -8019,7 +8099,6 @@ const ordemMarketplaces = [
   "aliexpress",
   "kabum",
   "awin",
-  "magalu"
 ];
 
 const farejadoresMarketplaces = {
@@ -8201,7 +8280,7 @@ await farejador(clienteId, {
 
 setInterval(() => {
   rodarProximoMarketplace();
-}, (config.intervaloFarejadorGlobalMinutos || 27) * 60 * 1000);
+}, (config.intervaloFarejadorGlobalMinutos || 10) * 60 * 1000);
 
 setTimeout(() => {
   console.log("⏳ Primeira rodada do orquestrador em 5 minutos...");
