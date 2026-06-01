@@ -1361,16 +1361,17 @@ const CATEGORIAS_GLOBAIS = {
     ]
   },
 
-  perifericos: {
-    nome: "Periféricos",
-    palavras: [
-      "mouse", "teclado", "mousepad", "webcam gamer", "micro sd", "sdxc",
-      "headphone", "fone gamer", "controle pc", "adaptador usb", "sdhc",
-      "headset", "hub usb", "microfone gamer", "cadeira gamer", "usb flash"
-      "monitor gamer", "microsd", "cartao de memoria", "cartão de memória",
-      "sandisk ultra", "sandisk extreme","pendrive"
-    ]
-  },
+ perifericos: {
+  nome: "Periféricos",
+  palavras: [
+    "mouse", "teclado", "mousepad", "webcam gamer",
+    "headphone", "fone gamer", "controle pc", "adaptador usb",
+    "headset", "hub usb", "microfone gamer", "cadeira gamer",
+    "monitor gamer", "microsd", "micro sd",
+    "cartao de memoria", "cartão de memória",
+    "sdxc", "sdhc", "pendrive", "usb flash"
+  ]
+},
 
   audioTv: {
     nome: "Audio TV",
