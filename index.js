@@ -7135,11 +7135,6 @@ if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
     }
   }
 
-  if (marketplace === "aliexpress") {
-  try {
-
-   const clienteId = getClienteId(req);
-
 if (marketplace === "aliexpress") {
   try {
     const integracaoAli =
@@ -7373,6 +7368,7 @@ return res.json(produto);
       });
     }
   }
+
   return res.json({
     marketplace,
     titulo: `Produto importado de ${config.nome || marketplace}`,
