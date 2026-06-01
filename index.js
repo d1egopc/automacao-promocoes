@@ -7176,12 +7176,22 @@ if (marketplace === "magalu") {
   }
 }
 
-  if (marketplace === "mercadolivre") {
+  console.log("🧪 IMPORTAÇÃO MANUAL ML:", {
+  url,
+  clienteIdAlvo,
+  temGetIntegracao: typeof getIntegracaoCliente,
+  temGeradorML: typeof gerarLinkAfiliadoMercadoLivre
+});
+
+if (marketplace === "mercadolivre") {
     try {
       const produto = await importarMercadoLivre(
   url,
   clienteIdAlvo,
-  { getIntegracaoCliente }
+  {
+    getIntegracaoCliente,
+    gerarLinkAfiliadoMercadoLivre
+  }
 );
 
       if (!produto.titulo || produto.titulo === "Produto Mercado Livre") {
