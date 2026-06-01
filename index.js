@@ -1296,7 +1296,8 @@ const CATEGORIAS_GLOBAIS = {
       "camiseta", "camisa", "regata", "oversized", "algodao", "algodão",
       "malhao", "malhão", "cueca", "kit cuecas", "bermuda", "caterpillar",
       "calca masculina", "calça masculina", "moletom masculino", "masculina",
-      "carteira masculina", "cinto masculino", "jaqueta masculina", "masculino"
+      "carteira masculina", "cinto masculino", "jaqueta masculina", "masculino",
+      "cueca", "cuecas", "boxer", "cueca boxer", "microfibra"
     ]
   },
 
@@ -1306,7 +1307,8 @@ const CATEGORIAS_GLOBAIS = {
       "blusinha", "lingerie", "calcinha", "biquini", "biquíni", "saia",
       "vestido", "sandalia feminina", "sandália feminina",
       "shorts feminino", "calca feminina", "calça feminina",
-      "calça jeans feminina", "colar feminino"
+      "calça jeans feminina", "colar feminino", "top feminino", "top",
+      "sutia", "sutiã", "cropped", "legging", "fitness feminino"
     ]
   },
 
@@ -1362,10 +1364,11 @@ const CATEGORIAS_GLOBAIS = {
   perifericos: {
     nome: "Periféricos",
     palavras: [
-      "mouse", "teclado", "mousepad", "webcam gamer",
-      "headphone", "fone gamer", "controle pc", "adaptador usb",
-      "headset", "hub usb", "microfone gamer", "cadeira gamer",
-      "monitor gamer"
+      "mouse", "teclado", "mousepad", "webcam gamer", "micro sd", "sdxc",
+      "headphone", "fone gamer", "controle pc", "adaptador usb", "sdhc",
+      "headset", "hub usb", "microfone gamer", "cadeira gamer", "usb flash"
+      "monitor gamer", "microsd", "cartao de memoria", "cartão de memória",
+      "sandisk ultra", "sandisk extreme","pendrive"
     ]
   },
 
@@ -1387,7 +1390,9 @@ const CATEGORIAS_GLOBAIS = {
       "camera ip", "câmera ip", "webcam", "projetor",
       "mini projetor", "echo dot", "alexa", "fone sem fio",
       "fone bluetooth", "fone de ouvido", "fones de ouvido",
-      "ear hook", "headphone", "tws", "bluetooth 5.3", "airpods"
+      "ear hook", "headphone", "tws", "bluetooth 5.3", "airpods",
+      "smartwatch", "relogio inteligente", "relógio inteligente",
+      "smart watch", "smart band" 
     ]
   },
 
@@ -1397,7 +1402,8 @@ const CATEGORIAS_GLOBAIS = {
       "air fryer", "fritadeira eletrica", "fritadeira elétrica",
       "liquidificador", "cafeteira", "batedeira", "mixer",
       "sanduicheira", "grill", "aspirador", "panela eletrica",
-      "panela elétrica", "processador de alimentos"
+      "panela elétrica", "processador de alimentos", "aspirador robo",
+      "aspirador robô", "robo aspirador", "robô aspirador"
     ]
   },
 
@@ -1438,22 +1444,24 @@ const CATEGORIAS_GLOBAIS = {
     nome: "Pesca e Pescaria",
     palavras: [
       "vara de pesca", "molinete", "carretilha", "anzol",
-      "isca artificial", "chumbada", "bolsa de pesca",
-      "linha de multifilamento", "camiseta uv",
+      "isca artificial", "chumbada", "bolsa de pesca", "isca silicone",
+      "linha de multifilamento", "camiseta uv", "isca artificial",
       "camisa pesca", "oculos polarizado", "óculos polarizado",
-      "oculos de pesca", "óculos de pesca", "daiwa",
-      "nelson nakamura", "caixa de isca", "caixa pesca",
-      "farolete de pesca", "lampiao pesca", "lampião pesca"
+      "oculos de pesca", "óculos de pesca", "daiwa", "shad",
+      "nelson nakamura", "caixa de isca", "caixa pesca", "anzuol",
+      "farolete de pesca", "lampiao pesca", "lampião pesca", "varal",
+      "secador de roupas", "varal dobravel", "varal dobrável"
     ]
   },
 
   casaDecoracao: {
     nome: "Casa, Móveis e Decoração",
     palavras: [
-      "sofa", "sofá", "mesa", "cadeira", "guarda roupa",
-      "armario", "armário", "espelho", "torneira",
-      "painel tv", "penteadeira", "comoda", "cômoda",
-      "barraca", "rede de dormir", "sofá retrátil"
+      "sofa", "sofá", "mesa", "cadeira", "guarda roupa", "cantinho do cafe",
+      "armario", "armário", "espelho", "torneira", "cantinho do café", "rack banheiro",
+      "painel tv", "penteadeira", "comoda", "cômoda", "decoracao", "xícara decorativa",
+      "barraca", "rede de dormir", "sofá retrátil", "decoração", "xicara decorativa",
+      "organizador banheiro", "porta shampoo", "porta sabonete"
     ]
   },
 
@@ -1510,10 +1518,11 @@ const CATEGORIAS_GLOBAIS = {
   esporte: {
     nome: "Esporte e Suplementos",
     palavras: [
-      "creatina", "whey", "suplemento",
-      "academia", "camisa time", "roupa academia",
-      "beta alanina", "pre treino", "pré treino",
-      "halter", "anilha", "bike", "bicicleta"
+      "creatina", "whey", "suplemento", "massageador", "massageador muscular",
+      "academia", "camisa time", "roupa academia", "pistola de massagem",
+      "beta alanina", "pre treino", "pré treino", "liberacao miofascial",
+      "halter", "anilha", "bike", "bicicleta", "liberação miofascial",
+      "recuperacao muscular", "recuperação muscular"
     ]
   },
 
@@ -1593,75 +1602,66 @@ function normalizarDestino(valor = "") {
     .trim();
 }
 
+const ALIASES_CATEGORIA_DESTINO = {
+  bebes: "bebeseacessorios",
+  bebe: "bebeseacessorios",
+  mercearia: "alimentosemercearia",
+  alimentos: "alimentosemercearia",
+  casa: "casamoveisedecoracao",
+  hardware: "gamerehardware",
+  gamerhardware: "gamerehardware",
+  eletronico: "eletronicos",
+  eletroportados: "eletroportateis",
+  celularesmartphones: "celularesesmartphones",
+  celularsmartphones: "celularesesmartphones",
+  jogosconsole: "gameseconsole",
+  jogos: "gameseconsole",
+  pesca: "pescaepescaria",
+  farmacia: "perfumariafarmaciaebeleza",
+  farmaciabeleza: "perfumariafarmaciaebeleza"
+};
+
+function normalizarCategoriaDestino(valor = "") {
+  const slug = normalizarDestino(valor);
+  return ALIASES_CATEGORIA_DESTINO[slug] || slug;
+}
+
 function destinoAceitaOferta(destino, oferta) {
   if (!destino?.ativo) return false;
 
-console.log("🎯 DESTINO CHECK:", {
-  destino: destino.nome,
-  categoriasDestino: destino.categorias,
-  categoriaOferta: oferta.categoria,
-  titulo: oferta.titulo || oferta.nome
-   });
-
-  const marketplaceOferta = normalizarDestino(oferta.marketplace || oferta.loja || "");
-
-  const categoriaClassificada = classificarCategoriaOferta(oferta, oferta.termo || "");
-  const categoriaOferta = normalizarDestino(categoriaClassificada);
-
-  const marketplacesDestino = (destino.marketplaces || []).map(normalizarDestino);
-  const categoriasDestino = (destino.categorias || []).map(normalizarDestino);
-
-  console.log("🧪 CHECK DESTINO:", {
-  nome: destino.nome,
-  clienteIdDestino: destino.clienteId,
-  marketplaceOferta,
-  marketplacesDestino,
-  categoriaOferta,
-  categoriasDestino
-  });
-
-
-  if (
-    marketplacesDestino.length &&
-    marketplaceOferta &&
-    !marketplacesDestino.includes(marketplaceOferta)
-  ) {
-    return false;
-  }
-
-if (categoriasDestino.length && categoriaOferta) {
-  const categoriaOk =
-    categoriasDestino.includes(categoriaOferta) ||
-    categoriasDestino.includes("geral");
-
-  if (!categoriaOk) {
-    return false;
-  }
-}
-  
-  return true;
-}
-
-function destinoDentroHorario(destino) {
-  const agoraBR = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
+  const marketplaceOferta = normalizarDestino(
+    oferta.marketplace || oferta.mercado || oferta.loja || ""
   );
 
-  const horaAtual = agoraBR.getHours() * 60 + agoraBR.getMinutes();
+  const categoriaClassificada =
+    oferta.categoria ||
+    classificarCategoriaOferta(oferta, oferta.termo || "");
 
-  const [inicioH, inicioM] = (destino.horarioInicio || "00:00").split(":").map(Number);
-  const [fimH, fimM] = (destino.horarioFim || "23:59").split(":").map(Number);
+  const categoriaOferta = normalizarCategoriaDestino(categoriaClassificada);
 
-  const inicio = inicioH * 60 + inicioM;
-  const fim = fimH * 60 + fimM;
+  const marketplacesDestino = (destino.marketplaces || []).map(normalizarDestino);
+  const categoriasDestino = (destino.categorias || []).map(normalizarCategoriaDestino);
 
-  if (inicio <= fim) {
-    return horaAtual >= inicio && horaAtual <= fim;
-  }
+  console.log("🧪 CHECK DESTINO:", {
+    nome: destino.nome,
+    marketplaceOferta,
+    marketplacesDestino,
+    categoriaOferta,
+    categoriasDestino
+  });
 
-  return horaAtual >= inicio || horaAtual <= fim;
+  const aceitaMarketplace =
+    !marketplacesDestino.length ||
+    marketplacesDestino.includes("geral") ||
+    marketplacesDestino.includes(marketplaceOferta);
+
+  const aceitaCategoria =
+    !categoriasDestino.length ||
+    categoriasDestino.includes("geral") ||
+    categoriasDestino.includes(categoriaOferta);
+
+  return aceitaMarketplace && aceitaCategoria;
 }
-
 
 // ================= ENVIO DESTINO INTELIGENTE =================
 
