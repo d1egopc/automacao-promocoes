@@ -261,6 +261,22 @@ function carregarFila(clienteId = "admin") {
   }
 }
 
+function garantirIdsFila() {
+  let alterou = false;
+
+  for (const item of fila) {
+    if (!item.id) {
+      item.id = `oferta_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      alterou = true;
+    }
+  }
+
+  if (alterou) {
+    salvarFila(clienteId)
+    console.log("🆔 IDs corrigidos em itens antigos da fila");
+  }
+}
+
 function salvarSessoesMeta() {
   fs.writeFileSync(
     SESSOES_FILE,
