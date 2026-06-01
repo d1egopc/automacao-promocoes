@@ -4005,6 +4005,17 @@ async function importarProdutoKabumViaAwin(url, clienteId = "admin") {
 
   const html = response.data || "";
 
+console.log("🧪 KABUM HTML DEBUG:", {
+  status: response.status,
+  tamanhoHtml: html.length,
+  temOgImage: html.includes('og:image'),
+  temTitle: html.includes("<title>"),
+  temPreco: html.includes("R$"),
+  temPix: html.toLowerCase().includes("pix"),
+  trechoPreco: html.match(/R\$\s?[\d\.]+,\d{2}/g)?.slice(0, 10) || [],
+  trechoImagem: html.match(/https?:\/\/[^"']+\.(jpg|jpeg|png|webp)/i)?.[0] || ""
+});
+
       // ================= EXTRAIR TÍTULO =================
 
     const titulo =
@@ -4112,6 +4123,16 @@ console.log("🧪 PREÇOS VALIDOS:", precosValidos.slice(0, 20));
 
   const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
 
+console.log("🧪 KABUM IMPORTADO FINAL:", {
+  titulo,
+  precoAtual,
+  precoAntigo,
+  imagem,
+  avisoPagamento,
+  parcelamento,
+  linkAfiliado
+});
+
   return {
   marketplace: "kabum",
   titulo: titulo.replace(/\|.*?KaBuM.*/i, "").trim(),
@@ -4142,12 +4163,9 @@ app.post("/awin/gerar-link", async (req, res) => {
 
     const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
 
-console.log("🧪 KABUM IMPORTADO:", {
-  titulo,
-  precoAtual,
-  precoAntigo,
-  avisoPagamento,
-  parcelamento,
+console.log("🧪 AWIN LINK GERADO:", {
+  clienteId,
+  urlOriginal: url,
   linkAfiliado
 });
 
