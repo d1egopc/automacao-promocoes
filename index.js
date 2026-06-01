@@ -1401,7 +1401,7 @@ const CATEGORIAS_GLOBAIS = {
     nome: "Eletroportáteis",
     palavras: [
       "air fryer", "fritadeira eletrica", "fritadeira elétrica",
-      "liquidificador", "cafeteira", "batedeira", "mixer",
+      "liquidificador", "cafeteira", "batedeira", "mixer", "cozedor de ovos",
       "sanduicheira", "grill", "aspirador", "panela eletrica",
       "panela elétrica", "processador de alimentos", "aspirador robo",
       "aspirador robô", "robo aspirador", "robô aspirador", "bebedor eletrico"
@@ -1447,8 +1447,8 @@ const CATEGORIAS_GLOBAIS = {
       "vara de pesca", "molinete", "carretilha", "anzol",
       "isca artificial", "chumbada", "bolsa de pesca", "isca silicone",
       "linha de multifilamento", "camiseta uv", "isca artificial",
-      "camisa pesca", "oculos polarizado", "óculos polarizado",
-      "oculos de pesca", "óculos de pesca", "daiwa", "shad",
+      "camisa pesca", "oculos polarizado", "óculos polarizado","AOSTSOA",
+      "oculos de pesca", "óculos de pesca", "daiwa", "shad", "Kit 5 Isca",
       "nelson nakamura", "caixa de isca", "caixa pesca", "anzuol",
       "farolete de pesca", "lampiao pesca", "lampião pesca", "varal",
       "secador de roupas", "varal dobravel", "varal dobrável"
@@ -1463,7 +1463,8 @@ const CATEGORIAS_GLOBAIS = {
       "painel tv", "penteadeira", "comoda", "cômoda", "decoracao", "xícara decorativa",
       "barraca", "rede de dormir", "sofá retrátil", "decoração", "xicara decorativa",
       "organizador banheiro", "porta shampoo", "porta sabonete", "cortina", "pote plastico",
-      "potes plásticos", "cobertor casal", "cobertor casal"    
+      "potes plásticos", "cobertor casal", "cobertor casal", "manta", "unidades manta",
+      "jogo de lençol"       
     ]
   },
 
@@ -1490,8 +1491,8 @@ const CATEGORIAS_GLOBAIS = {
   bebidas: {
     nome: "Bebidas",
     palavras: [
-      "heineken", "cerveja", "whisky", "vodka",
-      "energetico", "energético", "gatorade",
+      "heineken", "cerveja", "whisky", "vodka", "vinho rose",
+      "energetico", "energético", "gatorade", "vinho chileno",
       "red label", "old par", "chopp", "amstel",
       "coca cola", "tnt", "monster", "ipa", "burn"
     ]
@@ -1504,7 +1505,8 @@ const CATEGORIAS_GLOBAIS = {
       "desodorante", "sabonete", "protetor solar", "creme dental",
       "carolina herrera", "ferrari", "sundown", "neutrogena",
       "boticario", "boticário", "azzaro", "armani", "natura",
-      "malbec", "Kit Body Splash", "Deo Parfum", 
+      "malbec", "Kit Body Splash", "Deo Parfum", "hydra lipgloss",
+      "gloss"
     ]
   },
 
@@ -1524,7 +1526,7 @@ const CATEGORIAS_GLOBAIS = {
       "academia", "camisa time", "roupa academia", "pistola de massagem",
       "beta alanina", "pre treino", "pré treino", "liberacao miofascial",
       "halter", "anilha", "bike", "bicicleta", "liberação miofascial",
-      "recuperacao muscular", "recuperação muscular"
+      "recuperacao muscular", "recuperação muscular", "Whey"
     ]
   },
 
