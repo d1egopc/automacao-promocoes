@@ -4113,20 +4113,19 @@ console.log("🧪 PREÇOS VALIDOS:", precosValidos.slice(0, 20));
   const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
 
   return {
-    marketplace: "kabum",
-    titulo,
-    precoAtual,
-    precoAntigo,
-    avisoPagamento,
-    avisoCupom: avisoPagamento ? "💳 Com desconto à vista no PIX." : "",
-    parcelamento,
-    linkOriginal: url,
-    link: url,
-    linkAfiliado,
-    imagem,
-    categoria: "KaBuM"
-  };
-}
+  marketplace: "kabum",
+  titulo: titulo.replace(/\|.*?KaBuM.*/i, "").trim(),
+  precoAtual,
+  precoAntigo,
+  avisoPagamento,
+  avisoCupom: avisoPagamento ? "💳 Com desconto à vista no PIX." : "",
+  parcelamento,
+  linkOriginal: url,
+  link: linkAfiliado || url,
+  linkAfiliado: linkAfiliado || url,
+  imagem,
+  categoria: "Gamer e Hardware"
+};
 
 app.post("/awin/gerar-link", async (req, res) => {
   try {
@@ -4141,6 +4140,15 @@ app.post("/awin/gerar-link", async (req, res) => {
     }
 
     const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
+
+console.log("🧪 KABUM IMPORTADO:", {
+  titulo,
+  precoAtual,
+  precoAntigo,
+  avisoPagamento,
+  parcelamento,
+  linkAfiliado
+});
 
     if (!linkAfiliado) {
       return res.status(400).json({
