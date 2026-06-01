@@ -1295,7 +1295,7 @@ const CATEGORIAS_GLOBAIS = {
     palavras: [
       "camiseta", "camisa", "regata", "oversized", "algodao", "algodão",
       "malhao", "malhão", "cueca", "kit cuecas", "bermuda", "caterpillar",
-      "calca masculina", "calça", "moletom", "bermuda", "kit cuecas",
+      "calca masculina", "calça", "moletom", "bermuda", "kit cuecas", "corta vento",
       "carteira", "cinto", "jaqueta", "capa de chuva", "bone", "canguru",
       "cueca", "cuecas", "boxer", "cueca boxer", "microfibra", "blusa de frio"
     ]
@@ -1306,7 +1306,7 @@ const CATEGORIAS_GLOBAIS = {
     palavras: [
       "blusinha", "lingerie", "calcinha", "biquini", "biquíni", "saia",
       "vestido", "sandalia", "sandália", "sueter", "casaco",
-      "shorts feminino", "calca", "calça", "canguru",
+      "shorts feminino", "calca", "calça", "canguru", "corta vento",
       "calça jeans", "colar", "top", "top", "blusa de frio",
       "sutia", "sutiã", "cropped", "legging", "fitness"
     ]
@@ -1404,7 +1404,7 @@ const CATEGORIAS_GLOBAIS = {
       "liquidificador", "cafeteira", "batedeira", "mixer",
       "sanduicheira", "grill", "aspirador", "panela eletrica",
       "panela elétrica", "processador de alimentos", "aspirador robo",
-      "aspirador robô", "robo aspirador", "robô aspirador"
+      "aspirador robô", "robo aspirador", "robô aspirador", "bebedor eletrico"
     ]
   },
 
@@ -1463,7 +1463,7 @@ const CATEGORIAS_GLOBAIS = {
       "painel tv", "penteadeira", "comoda", "cômoda", "decoracao", "xícara decorativa",
       "barraca", "rede de dormir", "sofá retrátil", "decoração", "xicara decorativa",
       "organizador banheiro", "porta shampoo", "porta sabonete", "cortina", "pote plastico",
-      "potes plásticos"    
+      "potes plásticos", "cobertor casal", "cobertor casal"    
     ]
   },
 
@@ -1504,7 +1504,7 @@ const CATEGORIAS_GLOBAIS = {
       "desodorante", "sabonete", "protetor solar", "creme dental",
       "carolina herrera", "ferrari", "sundown", "neutrogena",
       "boticario", "boticário", "azzaro", "armani", "natura",
-      "malbec"
+      "malbec", "Kit Body Splash", "Deo Parfum", 
     ]
   },
 
