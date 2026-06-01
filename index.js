@@ -1298,7 +1298,7 @@ const CATEGORIAS_GLOBAIS = {
       "calca masculina", "calça", "moletom", "bermuda", "kit cuecas", "corta vento",
       "carteira", "cinto", "jaqueta", "capa de chuva", "bone", "canguru", 
       "cueca", "cuecas", "boxer", "cueca boxer", "microfibra", "blusa de frio",
-      "jaqueta de couro feminina" 
+      "jaqueta de couro feminina", "bolsa mulher"
     ]
   },
 
@@ -1309,7 +1309,8 @@ const CATEGORIAS_GLOBAIS = {
       "vestido", "sandalia", "sandália", "sueter", "casaco", "saia",
       "shorts feminino", "calca", "calça", "canguru", "corta vento",
       "calça jeans", "colar", "top", "top", "blusa de frio", "blusa de frio",
-      "sutia", "sutiã", "cropped", "legging", "Kit 2 Moletons", "cacharrel"
+      "sutia", "sutiã", "cropped", "legging", "Kit 2 Moletons", "cacharrel",
+      "vestido longo vermelho"
     ]
   },
 
@@ -1325,7 +1326,7 @@ const CATEGORIAS_GLOBAIS = {
   tenis: {
     nome: "Tênis e Chinelos",
     palavras: [
-      "tenis", "tênis", "chinelo", "sandalia", "sandália",
+      "tenis", "tênis", "chinelo", "sandalia", "sandália", "botina com solado",
       "havaianas", "papete", "salto alto", "loafer", "puma",
       "rider", "reebok", "under armor", "new balance", "adidas",
       "mocassim", "mizuno", "asics", "nike", "olympikus", "penalty",
@@ -1380,7 +1381,7 @@ const CATEGORIAS_GLOBAIS = {
       "smart tv", "televisor", "televisao", "televisão",
       "tv 32", "tv 40", "tv 43", "tv 50", "tv 55", "tv 65", "tv 75",
       "caixa de som", "soundbar", "boombox", "radio", "rádio",
-      "conversor digital", "iptv"
+      "conversor digital", "AIWA", "iptv"
     ]
   },
 
@@ -1394,7 +1395,7 @@ const CATEGORIAS_GLOBAIS = {
       "fone bluetooth", "fone de ouvido", "fones de ouvido",
       "ear hook", "headphone", "tws", "bluetooth 5.3", "airpods",
       "smartwatch", "relogio inteligente", "relógio inteligente",
-      "smart watch", "smart band" 
+      "smart watch", "smart band", "amplificador de áudio", "soundcore" 
     ]
   },
 
@@ -1438,7 +1439,7 @@ const CATEGORIAS_GLOBAIS = {
       "multimidia", "multimídia", "som automotivo",
       "camera de re", "câmera de ré", "farol",
       "lampada automotiva", "lâmpada automotiva",
-      "taramps", "pioneer", "retrovisor"
+      "taramps", "pioneer", "retrovisor", "cadeira de carro"
     ]
   },
 
@@ -1475,7 +1476,7 @@ const CATEGORIAS_GLOBAIS = {
       "amaciante", "sabao em po", "sabão em pó",
       "desinfetante", "detergente", "papel higienico",
       "papel higiênico", "limpeza pesada",
-      "multiuso", "veja", "omo", "ypê",
+      "multiuso", "veja", "omo", "ypê", "vonixx BACTRAN",
       "candida", "cândida", "agua sanitaria", "água sanitaria", "água sanitária"
     ]
   },
@@ -1485,7 +1486,7 @@ const CATEGORIAS_GLOBAIS = {
     palavras: [
       "chocolate", "cafe", "café", "capsula de cafe", "cápsula de café",
       "arroz", "feijao", "feijão", "biscoito", "bolacha",
-      "bombom", "salgadinho", "temperos", "salame", "cereal"
+      "bombom", "salgadinho", "temperos", "salame", "cereal", "barra de proteína"
     ]
   },
 
@@ -1502,11 +1503,11 @@ const CATEGORIAS_GLOBAIS = {
   beleza: {
     nome: "Perfumaria, Farmácia e Beleza",
     palavras: [
-      "perfume", "shampoo", "condicionador", "hidratante",
-      "desodorante", "sabonete", "protetor solar", "creme dental",
-      "carolina herrera", "ferrari", "sundown", "neutrogena",
-      "boticario", "boticário", "azzaro", "armani", "natura",
-      "malbec", "kit body splash", "deo parfum", "hydra lipgloss",
+      "perfume", "shampoo", "condicionador", "hidratante", "eau de toilette",
+      "desodorante", "sabonete", "protetor solar", "creme dental", "montblanc",
+      "carolina herrera", "ferrari", "sundown", "neutrogena", "perfume natura",
+      "boticario", "boticário", "azzaro", "armani", "natura", "deo parfum",
+      "malbec", "kit body splash", "deo parfum", "hydra lipgloss", "perfume",
       "gloss", "eau de toilette", "máquina de Cortar", "máquina de Cortar"
     ]
   },
@@ -1514,8 +1515,8 @@ const CATEGORIAS_GLOBAIS = {
   petshop: {
     nome: "Pet Shop e Fazendinha",
     palavras: [
-      "racao", "ração", "coleira", "comedouro",
-      "bebedouro", "aquario", "aquário",
+      "racao", "ração", "coleira", "comedouro", "cama arranhadora",
+      "bebedouro", "aquario", "aquário", "WHISKAS ração",
       "areia gato", "ração cachorro", "ração gato"
     ]
   },
@@ -1527,7 +1528,8 @@ const CATEGORIAS_GLOBAIS = {
       "academia", "camisa time", "roupa academia", "pistola de massagem",
       "beta alanina", "pre treino", "pré treino", "liberacao miofascial",
       "halter", "anilha", "bike", "bicicleta", "liberação miofascial", "macacão fitness ",
-      "recuperacao muscular", "recuperação muscular", "Whey", "bicicleta spinning"
+      "recuperacao muscular", "recuperação muscular", "Whey", "bicicleta spinning",
+      "garrafa térmica", "ARENA Mochila"
     ]
   },
 
@@ -1546,7 +1548,7 @@ bebes: {
     "bebe", "bebê", "bebes", "bebês", "carrinho de bebe", "carrinho de bebê",
     "cadeirinha", "cadeirinha de bebe", "cadeirinha de bebê",
     "mamae bebe", "mamãe bebê", "mamadeira", "chupeta",
-    "berco", "berço", "banheira bebe", "banheira bebê",
+    "berco", "berço", "banheira bebe", "banheira bebê", "lenços umedecidos",
     "fralda", "lenço umedecido", "lenco umedecido"
   ]
 },
@@ -1556,7 +1558,8 @@ bebes: {
     palavras: [
       "lego", "carrinho", "helicoptero", "helicóptero", "losa mágica",
       "controle remoto", "boneca", "quebra cabeca", "lousa mágica infantil",
-      "quebra cabeça", "domino", "dominó", "trator brinquedo", "lousa mágica infantil"
+      "quebra cabeça", "domino", "dominó", "trator brinquedo", "lousa mágica infantil",
+      "carro transformável", "bulldozer de controle"
     ]
   }
 };
@@ -7176,18 +7179,21 @@ if (marketplace === "magalu") {
   }
 }
 
-  console.log("🧪 IMPORTAÇÃO MANUAL ML:", {
+  const clienteId = getClienteId(req);
+
+console.log("🧪 IMPORTAÇÃO MANUAL ML:", {
   url,
-  clienteIdAlvo,
+  clienteId,
   temGetIntegracao: typeof getIntegracaoCliente,
   temGeradorML: typeof gerarLinkAfiliadoMercadoLivre
 });
 
 if (marketplace === "mercadolivre") {
     try {
-      const produto = await importarMercadoLivre(
+
+ const produto = await importarMercadoLivre(
   url,
-  clienteIdAlvo,
+  clienteId,
   {
     getIntegracaoCliente,
     gerarLinkAfiliadoMercadoLivre
