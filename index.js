@@ -5823,11 +5823,21 @@ function usuarioPodeReceberMarketplace(usuario, marketplace) {
 }
 
 function usuarioTemIntegracaoMarketplace(clienteId, marketplace) {
-  const integracao =
-    getIntegracaoCliente(
-      clienteId,
-      normalizarTexto(marketplace || "")
+  const mp = normalizarTexto(marketplace || "");
+
+  // KaBuM usa credenciais da Awin
+  if (mp === "kabum") {
+    const awin =
+      getIntegracaoCliente(clienteId, "awin");
+
+    return !!(
+      awin?.credenciais?.publisherId &&
+      awin?.credenciais?.apiToken
     );
+  }
+
+  const integracao =
+    getIntegracaoCliente(clienteId, mp);
 
   return !!integracao?.credenciais;
 }
@@ -8138,6 +8148,7 @@ const farejadoresMarketplaces = {
   amazon: farejarAmazon,
   aliexpress: farejarAliExpress,
   kabum: farejarKabum,
+  awin: farejarAwin,
   magalu: farejarMagalu,
 };
 
