@@ -1296,8 +1296,9 @@ const CATEGORIAS_GLOBAIS = {
       "camiseta", "camisa", "regata", "oversized", "algodao", "algodão",
       "malhao", "malhão", "cueca", "kit cuecas", "bermuda", "caterpillar",
       "calca masculina", "calça", "moletom", "bermuda", "kit cuecas", "corta vento",
-      "carteira", "cinto", "jaqueta", "capa de chuva", "bone", "canguru",
-      "cueca", "cuecas", "boxer", "cueca boxer", "microfibra", "blusa de frio"
+      "carteira", "cinto", "jaqueta", "capa de chuva", "bone", "canguru", 
+      "cueca", "cuecas", "boxer", "cueca boxer", "microfibra", "blusa de frio",
+      "jaqueta de couro feminina" 
     ]
   },
 
@@ -1305,10 +1306,10 @@ const CATEGORIAS_GLOBAIS = {
     nome: "Roupas e Moda Feminina",
     palavras: [
       "blusinha", "lingerie", "calcinha", "biquini", "biquíni", "saia",
-      "vestido", "sandalia", "sandália", "sueter", "casaco",
+      "vestido", "sandalia", "sandália", "sueter", "casaco", "saia",
       "shorts feminino", "calca", "calça", "canguru", "corta vento",
-      "calça jeans", "colar", "top", "top", "blusa de frio",
-      "sutia", "sutiã", "cropped", "legging", "fitness"
+      "calça jeans", "colar", "top", "top", "blusa de frio", "blusa de frio",
+      "sutia", "sutiã", "cropped", "legging", "Kit 2 Moletons", "cacharrel"
     ]
   },
 
@@ -1464,7 +1465,7 @@ const CATEGORIAS_GLOBAIS = {
       "barraca", "rede de dormir", "sofá retrátil", "decoração", "xicara decorativa",
       "organizador banheiro", "porta shampoo", "porta sabonete", "cortina", "pote plastico",
       "potes plásticos", "cobertor casal", "cobertor casal", "manta", "unidades manta",
-      "jogo de lençol"       
+      "jogo de lençol", "Xícaras Bebidas Fria", "top e legging"      
     ]
   },
 
@@ -1505,8 +1506,8 @@ const CATEGORIAS_GLOBAIS = {
       "desodorante", "sabonete", "protetor solar", "creme dental",
       "carolina herrera", "ferrari", "sundown", "neutrogena",
       "boticario", "boticário", "azzaro", "armani", "natura",
-      "malbec", "Kit Body Splash", "Deo Parfum", "hydra lipgloss",
-      "gloss"
+      "malbec", "kit body splash", "deo parfum", "hydra lipgloss",
+      "gloss", "eau de toilette", "máquina de Cortar", "máquina de Cortar"
     ]
   },
 
@@ -1525,8 +1526,8 @@ const CATEGORIAS_GLOBAIS = {
       "creatina", "whey", "suplemento", "massageador", "massageador muscular",
       "academia", "camisa time", "roupa academia", "pistola de massagem",
       "beta alanina", "pre treino", "pré treino", "liberacao miofascial",
-      "halter", "anilha", "bike", "bicicleta", "liberação miofascial",
-      "recuperacao muscular", "recuperação muscular", "Whey"
+      "halter", "anilha", "bike", "bicicleta", "liberação miofascial", "macacão fitness ",
+      "recuperacao muscular", "recuperação muscular", "Whey", "bicicleta spinning"
     ]
   },
 
@@ -1553,9 +1554,9 @@ bebes: {
   brinquedos: {
     nome: "Brinquedos e Artigos Infantis",
     palavras: [
-      "lego", "carrinho", "helicoptero", "helicóptero",
-      "controle remoto", "boneca", "quebra cabeca",
-      "quebra cabeça", "domino", "dominó", "trator brinquedo"
+      "lego", "carrinho", "helicoptero", "helicóptero", "losa mágica",
+      "controle remoto", "boneca", "quebra cabeca", "lousa mágica infantil",
+      "quebra cabeça", "domino", "dominó", "trator brinquedo" "lousa mágica infantil"
     ]
   }
 };
