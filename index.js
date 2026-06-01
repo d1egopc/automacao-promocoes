@@ -4128,7 +4128,6 @@ console.log("🧪 PREÇOS VALIDOS:", precosValidos.slice(0, 20));
   };
 }
 
-
 app.post("/awin/gerar-link", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
@@ -4141,16 +4140,31 @@ app.post("/awin/gerar-link", async (req, res) => {
       });
     }
 
-    const response = await axios.get(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36"
-      },
-      timeout: 15000
+    const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
+
+    if (!linkAfiliado) {
+      return res.status(400).json({
+        ok: false,
+        erro: "Não foi possível gerar o link afiliado Awin"
+      });
+    }
+
+    return res.json({
+      ok: true,
+      marketplace: "awin",
+      linkOriginal: url,
+      linkAfiliado
     });
 
-    const html = response.data || "";
+  } catch (e) {
+    console.error("❌ ERRO GERAR LINK AWIN:", e.message);
 
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
 
     // ================= LINK AFILIADO =================
 
