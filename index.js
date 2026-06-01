@@ -8364,7 +8364,7 @@ await farejador(clienteId, {
  setTimeout(async () => {
  console.log("🪂 TESTE MANUAL MERCADO LIBRE - CHAT GPT");
 
-   await farejadoresMarketplaces.mercadolivre("admin", {
+   await farejadoresMarketplaces.kabum("admin", {
     config,
     integracoesPorCliente,
     getIntegracaoCliente,
