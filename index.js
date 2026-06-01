@@ -1462,7 +1462,8 @@ const CATEGORIAS_GLOBAIS = {
       "armario", "armário", "espelho", "torneira", "cantinho do café", "rack banheiro",
       "painel tv", "penteadeira", "comoda", "cômoda", "decoracao", "xícara decorativa",
       "barraca", "rede de dormir", "sofá retrátil", "decoração", "xicara decorativa",
-      "organizador banheiro", "porta shampoo", "porta sabonete"
+      "organizador banheiro", "porta shampoo", "porta sabonete", "cortina", "pote plastico",
+      "potes plásticos"    
     ]
   },
 
@@ -1662,6 +1663,33 @@ function destinoAceitaOferta(destino, oferta) {
     categoriasDestino.includes(categoriaOferta);
 
   return aceitaMarketplace && aceitaCategoria;
+}
+
+function destinoDentroHorario(destino = {}) {
+  const agoraBR = new Date(
+    new Date().toLocaleString("en-US", {
+      timeZone: "America/Sao_Paulo"
+    })
+  );
+
+  const horaAtual = agoraBR.getHours() * 60 + agoraBR.getMinutes();
+
+  const [inicioH, inicioM] = (destino.horarioInicio || "00:00")
+    .split(":")
+    .map(Number);
+
+  const [fimH, fimM] = (destino.horarioFim || "23:59")
+    .split(":")
+    .map(Number);
+
+  const inicio = inicioH * 60 + inicioM;
+  const fim = fimH * 60 + fimM;
+
+  if (inicio <= fim) {
+    return horaAtual >= inicio && horaAtual <= fim;
+  }
+
+  return horaAtual >= inicio || horaAtual <= fim;
 }
 
 // ================= ENVIO DESTINO INTELIGENTE =================
