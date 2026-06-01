@@ -4149,6 +4149,10 @@ console.log("🧪 KABUM IMPORTADO FINAL:", {
 };
 }
 
+app.get("/teste-kabum-rota", (req, res) => {
+  return res.json({ ok: true, rota: "kabum ativa" });
+});
+
 app.post("/awin/gerar-link", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
