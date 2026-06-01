@@ -1267,6 +1267,11 @@ function registrarCupomAtivo(regra = {}) {
 // ====================== FUNCAO PREPARA OFERTA GLOBAL =========================
 
 function prepararOfertaGlobal(oferta = {}) {
+ 
+if (!oferta.id) {
+    oferta.id = `oferta_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  }
+
   if (!oferta) return oferta;
 
   oferta.titulo = oferta.titulo || oferta.nome || "Oferta";
@@ -1599,7 +1604,7 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     }
   }
 
-  return "Outros";
+  return "Diversos";
 }
 
 // ================= HELPERS DESTINOS INTELIGENTES =================
@@ -1629,20 +1634,49 @@ function normalizarDestino(valor = "") {
 const ALIASES_CATEGORIA_DESTINO = {
   bebes: "bebeseacessorios",
   bebe: "bebeseacessorios",
+
   mercearia: "alimentosemercearia",
   alimentos: "alimentosemercearia",
+
   casa: "casamoveisedecoracao",
+
   hardware: "gamerehardware",
   gamerhardware: "gamerehardware",
+
   eletronico: "eletronicos",
   eletroportados: "eletroportateis",
+
   celularesmartphones: "celularesesmartphones",
   celularsmartphones: "celularesesmartphones",
+
   jogosconsole: "gameseconsole",
   jogos: "gameseconsole",
+
   pesca: "pescaepescaria",
+
   farmacia: "perfumariafarmaciaebeleza",
-  farmaciabeleza: "perfumariafarmaciaebeleza"
+  farmaciabeleza: "perfumariafarmaciaebeleza",
+  beleza: "perfumariafarmaciaebeleza",
+  perfumaria: "perfumariafarmaciaebeleza",
+
+  moda: "roupasemodamasculina",
+  roupas: "roupasemodamasculina",
+  roupamasculina: "roupasemodamasculina",
+  roupasmasculinas: "roupasemodamasculina",
+  modamasculina: "roupasemodamasculina",
+
+  roupafeminina: "roupasemodafeminina",
+  roupasfemininas: "roupasemodafeminina",
+  modafeminina: "roupasemodafeminina",
+
+  tenis: "tenisechinelos",
+  calcados: "tenisechinelos",
+  chinelos: "tenisechinelos",
+
+  outros: "diversos",
+  outro: "diversos",
+  diverso: "diversos",
+  diversos: "diversos"
 };
 
 function normalizarCategoriaDestino(valor = "") {
