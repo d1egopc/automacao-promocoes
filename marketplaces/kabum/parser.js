@@ -64,6 +64,12 @@ function extrairProdutosKabum(html = "") {
 
     const titulo = tituloPeloLinkKabum(link);
 
+console.log("🧪 KABUM PRODUTO:", {
+  titulo,
+  precoRaw,
+  link
+});
+
     produtos.push({
      titulo,
      precoAtual: precoRaw ? formatarPrecoKabum(precoRaw) : "",
