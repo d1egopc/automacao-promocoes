@@ -215,6 +215,24 @@ try {
   console.log("⚠️ Falha ao enriquecer KaBuM:", e.message);
 }
 
+const textoCategoriaKabum = `${novaOferta.titulo || ""} ${termo || ""}`.toLowerCase();
+
+if (
+  textoCategoriaKabum.includes("placa mae") ||
+  textoCategoriaKabum.includes("placa mãe") ||
+  textoCategoriaKabum.includes("placa de video") ||
+  textoCategoriaKabum.includes("placa de vídeo") ||
+  textoCategoriaKabum.includes("processador") ||
+  textoCategoriaKabum.includes("memoria ram") ||
+  textoCategoriaKabum.includes("memória ram") ||
+  textoCategoriaKabum.includes("ssd") ||
+  textoCategoriaKabum.includes("gabinete") ||
+  textoCategoriaKabum.includes("water cooler") ||
+  textoCategoriaKabum.includes("fonte")
+) {
+  novaOferta.categoria = "Gamer e Hardware";
+}
+
   novaOferta = prepararOfertaGlobal(novaOferta);
 
  const jaExisteKabum = ofertaJaExiste(novaOferta);
