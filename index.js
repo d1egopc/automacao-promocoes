@@ -4199,7 +4199,7 @@ console.log("🧪 AWIN LINK GERADO:", {
 
 app.get("/kabum/importar", async (req, res) => {
   try {
-    const clienteId = getClienteId(req);
+    const clienteId = req.query.clienteId || "admin";
     const url = req.query.url;
 
     if (!url) {
