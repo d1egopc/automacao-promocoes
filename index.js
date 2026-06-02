@@ -4167,13 +4167,22 @@ app.post("/awin/gerar-link", async (req, res) => {
       });
     }
 
+    if (url.includes("kabum.com.br")) {
+      const produto = await importarProdutoKabumViaAwin(url, clienteId);
+
+      return res.json({
+        ok: true,
+        ...produto
+      });
+    }
+
     const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
 
-console.log("🧪 AWIN LINK GERADO:", {
-  clienteId,
-  urlOriginal: url,
-  linkAfiliado
-});
+    console.log("🧪 AWIN LINK GERADO:", {
+      clienteId,
+      urlOriginal: url,
+      linkAfiliado
+    });
 
     if (!linkAfiliado) {
       return res.status(400).json({
@@ -4186,40 +4195,12 @@ console.log("🧪 AWIN LINK GERADO:", {
       ok: true,
       marketplace: "awin",
       linkOriginal: url,
+      link: linkAfiliado,
       linkAfiliado
     });
 
   } catch (e) {
     console.error("❌ ERRO GERAR LINK AWIN:", e.message);
-
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-app.get("/kabum/importar", async (req, res) => {
-  try {
-    const clienteId = req.query.clienteId || "admin";
-    const url = req.query.url;
-
-    if (!url) {
-      return res.status(400).json({
-        ok: false,
-        erro: "URL obrigatória"
-      });
-    }
-
-    const produto = await importarProdutoKabumViaAwin(url, clienteId);
-
-    return res.json({
-      ok: true,
-      produto
-    });
-
-  } catch (e) {
-    console.error("❌ ERRO IMPORTAR KABUM AWIN:", e.message);
 
     return res.status(500).json({
       ok: false,
