@@ -1310,6 +1310,13 @@ if (!oferta.id) {
 
   // oferta = aplicarCupomAutomatico(oferta); // cupom antigo desativado
 
+oferta.precoAtual = oferta.precoAtual || oferta.preco || "";
+oferta.preco = oferta.preco || oferta.precoAtual || "";
+
+oferta.avisoPagamento = oferta.avisoPagamento || "";
+oferta.parcelamento = oferta.parcelamento || "";
+oferta.avisoCupom = oferta.avisoCupom || "";
+
   return oferta;
 }
 
@@ -1324,7 +1331,7 @@ const CATEGORIAS_GLOBAIS = {
       "calca masculina", "calça", "moletom", "bermuda", "kit cuecas", "corta vento",
       "carteira", "cinto", "jaqueta", "capa de chuva", "bone", "canguru", 
       "cueca", "cuecas", "boxer", "cueca boxer", "microfibra", "blusa de frio",
-      "jaqueta de couro feminina", "bolsa mulher"
+      "jaqueta de couro feminina", "conjunto moletom"
     ]
   },
 
@@ -1336,7 +1343,7 @@ const CATEGORIAS_GLOBAIS = {
       "shorts feminino", "calca", "calça", "canguru", "corta vento",
       "calça jeans", "colar", "top", "top", "blusa de frio", "blusa de frio",
       "sutia", "sutiã", "cropped", "legging", "Kit 2 Moletons", "cacharrel",
-      "vestido longo vermelho"
+      "vestido longo vermelho", "bolsa mulher"
     ]
   },
 
@@ -1353,8 +1360,8 @@ const CATEGORIAS_GLOBAIS = {
     nome: "Tênis e Chinelos",
     palavras: [
       "tenis", "tênis", "chinelo", "sandalia", "sandália", "botina com solado",
-      "havaianas", "papete", "salto alto", "loafer", "puma",
-      "rider", "reebok", "under armor", "new balance", "adidas",
+      "havaianas", "papete", "salto alto", "loafer", "puma", "tenis puma",
+      "rider", "reebok", "under armor", "new balance", "adidas", "rasteira",
       "mocassim", "mizuno", "asics", "nike", "olympikus", "penalty",
       "bota", "botina", "coturno", "sapato", "sapatenis", "sapatenis", "casual unissex"    
     ]
@@ -1364,7 +1371,7 @@ const CATEGORIAS_GLOBAIS = {
     nome: "Gamer e Hardware",
     palavras: [
       "ssd", "nvme", "placa de video", "placa de vídeo", "fonte gamer",
-      "memoria ram", "memória ram", "gabinete gamer",
+      "memoria ram", "memória ram", "gabinete gamer", "fonte de alimentacao",
       "headset gamer", "teclado mecanico", "teclado mecânico",
       "mouse gamer", "amd", "nvidia", "pny", "kingston",
       "seagate", "western digital", "asus", "asrock", "netac",
@@ -1454,15 +1461,15 @@ const CATEGORIAS_GLOBAIS = {
       "makita", "dewalt", "bosch", "vonder",
       "jogo de ferramentas", "maleta de ferramentas",
       "manifold", "bomba de vacuo", "bomba de vácuo",
-      "alicate amperimetro", "alicate amperímetro",
-      "capacimetro", "capacímetro", "compressor de ar"
+      "alicate amperimetro", "alicate amperímetro", "canivete multiuso",
+      "capacimetro", "capacímetro", "bota de pvc", "compressor de ar"
     ]
   },
 
   automotivo: {
     nome: "Automotivo",
     palavras: [
-      "multimidia", "multimídia", "som automotivo",
+      "multimidia", "multimídia", "som automotivo", "compressor de ar automotivo",
       "camera de re", "câmera de ré", "farol",
       "lampada automotiva", "lâmpada automotiva",
       "taramps", "pioneer", "retrovisor", "cadeira de carro"
@@ -1492,7 +1499,7 @@ const CATEGORIAS_GLOBAIS = {
       "barraca", "rede de dormir", "sofá retrátil", "decoração", "xicara decorativa",
       "organizador banheiro", "porta shampoo", "porta sabonete", "cortina", "pote plastico",
       "potes plásticos", "cobertor casal", "cobertor casal", "manta", "unidades manta",
-      "jogo de lençol", "Xícaras Bebidas Fria", "top e legging"      
+      "jogo de lençol", "Xícaras Bebidas Fria", "top e legging", "fechadura digital"        
     ]
   },
 
@@ -1512,7 +1519,8 @@ const CATEGORIAS_GLOBAIS = {
     palavras: [
       "chocolate", "cafe", "café", "capsula de cafe", "cápsula de café",
       "arroz", "feijao", "feijão", "biscoito", "bolacha", "creme crocante",
-      "bombom", "salgadinho", "temperos", "salame", "cereal", "barra de proteína"
+      "bombom", "salgadinho", "temperos", "salame", "cereal", "barra de proteína",
+      "neslac comfor",
     ]
   },
 
@@ -1534,7 +1542,8 @@ const CATEGORIAS_GLOBAIS = {
       "carolina herrera", "ferrari", "sundown", "neutrogena", "perfume natura",
       "boticario", "boticário", "azzaro", "armani", "natura", "deo parfum",
       "malbec", "kit body splash", "deo parfum", "hydra lipgloss", "perfume",
-      "gloss", "eau de toilette", "máquina de Cortar", "máquina de Cortar"
+      "gloss", "eau de toilette", "máquina de Cortar", "máquina de Cortar",
+      "NAUTICA BLUE"
     ]
   },
 
@@ -1542,7 +1551,7 @@ const CATEGORIAS_GLOBAIS = {
     nome: "Pet Shop e Fazendinha",
     palavras: [
       "racao", "ração", "coleira", "comedouro", "cama arranhadora",
-      "bebedouro", "aquario", "aquário", "WHISKAS ração",
+      "bebedouro", "aquario", "aquário", "WHISKAS ração", "pet coleira peitoral",
       "areia gato", "ração cachorro", "ração gato"
     ]
   },
@@ -1562,7 +1571,7 @@ const CATEGORIAS_GLOBAIS = {
   games: {
     nome: "Games e Console",
     palavras: [
-      "xbox", "playstation", "ps5", "ps4",
+      "xbox", "playstation", "ps5", "ps4", "cadeira ergonomica gamer",
       "nintendo switch", "controle xbox",
       "joystick", "game stick", "fliperama"
     ]
