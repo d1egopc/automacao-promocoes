@@ -8207,6 +8207,11 @@ console.log("🚀 CHAMANDO FAREJADOR:", {
 
 console.log("🧪 ORQUESTRADOR importarAmazon:", typeof importarAmazon);
 
+console.log("🧪 DEPS ORQUESTRADOR:", {
+  marketplace,
+  tipoImportadorKabum: typeof importarProdutoKabumViaAwin
+});
+
 await farejador(clienteId, {
   config,
   integracoesPorCliente,
