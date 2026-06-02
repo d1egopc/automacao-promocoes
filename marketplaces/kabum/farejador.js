@@ -36,14 +36,14 @@ const cfg = config.marketplaces?.kabum || {};
 
 const buscas = gerarBuscasKabum();
 
-console.log("🔎 Buscas KaBuM:", buscas.slice(0, 10));
+const buscasRodada = buscas
+  .sort(() => Math.random() - 0.5)
+  .slice(0, 8);
 
-for (const termo of buscas.slice(0, 3)) {
+console.log("🔎 Buscas KaBuM:", buscasRodada);
 
+for (const termo of buscasRodada) {
   try {
-
-    const slug =
-      encodeURIComponent(termo);
 
     const url =
       `https://www.kabum.com.br/busca/${slug}`;
