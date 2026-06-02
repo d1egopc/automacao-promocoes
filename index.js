@@ -8283,6 +8283,7 @@ await farejador(clienteId, {
     distribuirOfertaParaClientes,
     encurtarUrl,
     gerarDeepLinkAwin
+    importarProdutoKabumViaAwin
     });
 
   }, 60 * 1000);
