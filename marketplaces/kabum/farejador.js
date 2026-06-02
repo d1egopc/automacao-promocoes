@@ -157,6 +157,11 @@ if (typeof gerarDeepLinkAwin === "function") {
   }
 }
 
+console.log("🧪 CHECK IMPORTADOR:", {
+  tipo: typeof importarProdutoKabumViaAwin,
+  link: produto.link
+});
+
 if (typeof importarProdutoKabumViaAwin === "function" && produto.link) {
   const produtoImportado = await importarProdutoKabumViaAwin(
     produto.link,
