@@ -2228,7 +2228,11 @@ if (!enviouParaAlgumDestino) {
   return;
 }
 
-controleEnvio[chaveControle] = Date.now();
+for (const destino of destinosInteligentes) {
+  const chaveControle = `${clienteId}_${destino.id || destino.nome}`;
+  controleEnvio[chaveControle] = Date.now();
+}
+
 ultimoEnvioFila = Date.now();
 
 oferta.status = "enviado";
@@ -2820,7 +2824,7 @@ const indexReal = fila.findIndex(o => o === oferta);
 
   const clienteId = oferta.clienteId || "admin";
 
-  controleEnvio[clienteId] = 0;
+  controleEnvio = {};
 
   const configCliente =
     configsPorCliente?.[clienteId] || config;
