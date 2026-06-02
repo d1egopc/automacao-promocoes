@@ -2226,10 +2226,16 @@ for (const destino of destinosInteligentes) {
     configCliente
   );
 
-  if (enviado === true) {
-    enviouParaAlgumDestino = true;
-  }
+if (enviado === true) {
+  enviouParaAlgumDestino = true;
 }
+}
+
+if (!enviouParaAlgumDestino) {
+  console.log(
+    "⚠️ Oferta não foi enviada para nenhum destino. Mantendo pendente:",
+    oferta.titulo
+  );
 
   return;
 }
