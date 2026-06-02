@@ -1992,13 +1992,11 @@ if (!clienteAtivo) {
       60 *
       1000;
 
-const chaveControle = `${clienteId}_${destino.id || destino.nome}`;
-
-if (!controleEnvio[chaveControle]) {
-  controleEnvio[chaveControle] = 0;
+if (!controleEnvio[clienteId]) {
+  controleEnvio[clienteId] = 0;
 }
 
-if (agora - controleEnvio[chaveControle] < intervaloMs) {
+if (agora - controleEnvio[clienteId] < intervaloMs) {
   return;
 }
 
