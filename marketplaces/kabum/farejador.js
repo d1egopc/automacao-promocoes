@@ -191,54 +191,6 @@ let novaOferta = {
   clienteId
 };
 
-if (typeof importarProdutoKabumViaAwin !== "function") {
-  console.log("⚠️ importarProdutoKabumViaAwin não recebido no farejador KaBuM");
-} else {
-
-try {
-  const urlOriginalKabum =
-    produto.linkOriginal || produto.url || produto.link;
-
-  console.log("🧪 ENRIQUECENDO KABUM:", {
-    urlOriginalKabum,
-    clienteId
-  });
-
- const detalhes = await importarProdutoKabumViaAwin(
-  urlOriginalKabum,
-  clienteId,
-  {
-    gerarDeepLinkAwin: deps.gerarDeepLinkAwin
-  }
-);
-
-console.log("🧪 DETALHES KABUM:", detalhes);
-
-
-  novaOferta.nome = detalhes.titulo || novaOferta.nome;
-  novaOferta.titulo = detalhes.titulo || novaOferta.titulo;
-  novaOferta.preco = detalhes.precoAtual || novaOferta.preco;
-  novaOferta.precoAtual = detalhes.precoAtual || novaOferta.precoAtual;
-  novaOferta.precoAntigo = detalhes.precoAntigo || novaOferta.precoAntigo;
-  novaOferta.avisoCupom = detalhes.avisoCupom || novaOferta.avisoCupom;
-  novaOferta.avisoPagamento = detalhes.avisoPagamento || novaOferta.avisoPagamento;
-  novaOferta.parcelamento = detalhes.parcelamento || novaOferta.parcelamento;
-  novaOferta.imagem = detalhes.imagem || novaOferta.imagem;
-  novaOferta.link = detalhes.linkAfiliado || novaOferta.link;
-  novaOferta.linkAfiliado = detalhes.linkAfiliado || novaOferta.linkAfiliado;
-
-  console.log("✅ KABUM ENRIQUECIDA:", {
-    titulo: novaOferta.titulo,
-    precoAtual: novaOferta.precoAtual,
-    parcelamento: novaOferta.parcelamento,
-    avisoCupom: novaOferta.avisoCupom
-  });
-
-} catch (e) {
-  console.log("⚠️ Falha ao enriquecer KaBuM:", e.message);
-}
-
-}
 
 const textoCategoriaKabum = `${novaOferta.titulo || ""} ${termo || ""}`.toLowerCase();
 
