@@ -233,6 +233,8 @@ try {
   console.log("⚠️ Falha ao enriquecer KaBuM:", e.message);
 }
 
+}
+
 const textoCategoriaKabum = `${novaOferta.titulo || ""} ${termo || ""}`.toLowerCase();
 
 if (
