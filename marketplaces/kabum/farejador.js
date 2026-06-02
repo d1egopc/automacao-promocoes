@@ -190,6 +190,10 @@ let novaOferta = {
   clienteId
 };
 
+if (typeof deps?.importarProdutoKabumViaAwin !== "function") {
+  console.log("⚠️ importarProdutoKabumViaAwin não recebido no farejador KaBuM");
+} else {
+
 try {
   const urlOriginalKabum =
     produto.linkOriginal || produto.url || produto.link;
@@ -199,10 +203,10 @@ try {
     clienteId
   });
 
-  const detalhes = await importarProdutoKabumViaAwin(
-    urlOriginalKabum,
-    clienteId
-  );
+ const detalhes = await deps.importarProdutoKabumViaAwin(
+  urlOriginalKabum,
+  clienteId
+);
 
   console.log("🧪 DETALHES KABUM:", detalhes);
 
