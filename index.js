@@ -1594,6 +1594,22 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     ${oferta.categoria || ""}
   `);
 
+if (
+  texto.includes("perfume") ||
+  texto.includes("colonia") ||
+  texto.includes("colônia") ||
+  texto.includes("deo colonia") ||
+  texto.includes("deo colônia") ||
+  texto.includes("body splash") ||
+  texto.includes("attar") ||
+  texto.includes("fragrancia") ||
+  texto.includes("fragrância") ||
+  texto.includes("feromonio") ||
+  texto.includes("feromônio")
+) {
+  return "Perfumaria, Farmácia e Beleza";
+}
+
   for (const categoria of Object.values(CATEGORIAS_GLOBAIS)) {
     const bateu = categoria.palavras.some(palavra =>
       texto.includes(normalizarTexto(palavra))
