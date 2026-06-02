@@ -190,6 +190,31 @@ let novaOferta = {
   clienteId
 };
 
+try {
+  const detalhes = await importarProdutoKabumViaAwin(
+    produto.linkOriginal || produto.link || produto.url,
+    clienteId
+  );
+
+  novaOferta.nome = detalhes.titulo || novaOferta.nome;
+  novaOferta.titulo = detalhes.titulo || novaOferta.titulo;
+  novaOferta.preco = detalhes.precoAtual || novaOferta.preco;
+  novaOferta.precoAtual = detalhes.precoAtual || novaOferta.precoAtual;
+  novaOferta.precoAntigo = detalhes.precoAntigo || novaOferta.precoAntigo;
+  novaOferta.avisoCupom = detalhes.avisoCupom || novaOferta.avisoCupom;
+  novaOferta.parcelamento = detalhes.parcelamento || novaOferta.parcelamento;
+  novaOferta.imagem = detalhes.imagem || novaOferta.imagem;
+
+  console.log("✅ KABUM ENRIQUECIDA:", {
+    titulo: novaOferta.titulo,
+    precoAtual: novaOferta.precoAtual,
+    parcelamento: novaOferta.parcelamento
+  });
+
+} catch (e) {
+  console.log("⚠️ Falha ao enriquecer KaBuM:", e.message);
+}
+
   novaOferta = prepararOfertaGlobal(novaOferta);
 
  const jaExisteKabum = ofertaJaExiste(novaOferta);
