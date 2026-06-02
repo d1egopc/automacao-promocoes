@@ -1510,7 +1510,7 @@ const CATEGORIAS_GLOBAIS = {
     nome: "Alimentos e Mercearia",
     palavras: [
       "chocolate", "cafe", "café", "capsula de cafe", "cápsula de café",
-      "arroz", "feijao", "feijão", "biscoito", "bolacha",
+      "arroz", "feijao", "feijão", "biscoito", "bolacha", "creme crocante",
       "bombom", "salgadinho", "temperos", "salame", "cereal", "barra de proteína"
     ]
   },
