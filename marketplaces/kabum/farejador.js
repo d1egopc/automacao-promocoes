@@ -192,9 +192,14 @@ let novaOferta = {
 
 try {
   const detalhes = await importarProdutoKabumViaAwin(
-    produto.linkOriginal || produto.link || produto.url,
+  
+  console.log("🧪 ENRIQUECENDO KABUM:", {
+    
+  produto.linkOriginal || produto.link || produto.url,
     clienteId
   );
+
+ console.log("🧪 DETALHES KABUM:", detalhes)
 
   novaOferta.nome = detalhes.titulo || novaOferta.nome;
   novaOferta.titulo = detalhes.titulo || novaOferta.titulo;
@@ -210,6 +215,8 @@ try {
     precoAtual: novaOferta.precoAtual,
     parcelamento: novaOferta.parcelamento
   });
+
+console.log("🧪 DETALHES KABUM:", detalhes)
 
 } catch (e) {
   console.log("⚠️ Falha ao enriquecer KaBuM:", e.message);
