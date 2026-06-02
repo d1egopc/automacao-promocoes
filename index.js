@@ -8282,7 +8282,7 @@ await farejador(clienteId, {
     aplicarFiltrosUniversais,
     distribuirOfertaParaClientes,
     encurtarUrl,
-    gerarDeepLinkAwin
+    gerarDeepLinkAwin,
     importarProdutoKabumViaAwin
     });
 
