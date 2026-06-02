@@ -36,6 +36,7 @@ const {
   importarProdutoKabumViaAwin
 } = require("./marketplaces/kabum/importador");
 
+
 const {
   escolherMelhorCupom,
   cupomEstaValido,
@@ -2109,6 +2110,7 @@ const titulo = oferta.nome || oferta.titulo || "Oferta";
 
 const precoAtual = oferta.preco || oferta.precoAtual || "";
 const precoAntigo = oferta.precoAntigo || "";
+const avisoPagamento = oferta.avisoPagamento || "";
 const cupom = oferta.cupom || "";
 const avisoCupom = oferta.avisoCupom || "";
 const marketplace = oferta.marketplace || "";
@@ -2136,7 +2138,7 @@ mensagem += `
 
 if (precoAtual) {
 mensagem += `
-✅ Por: ${precoAtual}`;
+✅ Por: ${precoAtual}${avisoPagamento ? ` ${avisoPagamento}` : ""}`;
 }
 
 if (temPrecoAntigoValido) {
@@ -2157,7 +2159,7 @@ if (temPrecoAntigoValido) {
 if (parcelamento) {
   mensagem += `
 
-💳 ${parcelamento}`;
+💳 ${String(parcelamento).replace(/^💳\s*/i, "")}`;
 }
 
 if (cupom) {
