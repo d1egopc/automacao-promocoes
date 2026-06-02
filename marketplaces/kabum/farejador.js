@@ -191,15 +191,20 @@ let novaOferta = {
 };
 
 try {
-  const detalhes = await importarProdutoKabumViaAwin(
-  
+  const urlOriginalKabum =
+    produto.linkOriginal || produto.url || produto.link;
+
   console.log("🧪 ENRIQUECENDO KABUM:", {
-    
-  produto.linkOriginal || produto.link || produto.url,
+    urlOriginalKabum,
+    clienteId
+  });
+
+  const detalhes = await importarProdutoKabumViaAwin(
+    urlOriginalKabum,
     clienteId
   );
 
- console.log("🧪 DETALHES KABUM:", detalhes)
+  console.log("🧪 DETALHES KABUM:", detalhes);
 
   novaOferta.nome = detalhes.titulo || novaOferta.nome;
   novaOferta.titulo = detalhes.titulo || novaOferta.titulo;
@@ -207,16 +212,18 @@ try {
   novaOferta.precoAtual = detalhes.precoAtual || novaOferta.precoAtual;
   novaOferta.precoAntigo = detalhes.precoAntigo || novaOferta.precoAntigo;
   novaOferta.avisoCupom = detalhes.avisoCupom || novaOferta.avisoCupom;
+  novaOferta.avisoPagamento = detalhes.avisoPagamento || novaOferta.avisoPagamento;
   novaOferta.parcelamento = detalhes.parcelamento || novaOferta.parcelamento;
   novaOferta.imagem = detalhes.imagem || novaOferta.imagem;
+  novaOferta.link = detalhes.linkAfiliado || novaOferta.link;
+  novaOferta.linkAfiliado = detalhes.linkAfiliado || novaOferta.linkAfiliado;
 
   console.log("✅ KABUM ENRIQUECIDA:", {
     titulo: novaOferta.titulo,
     precoAtual: novaOferta.precoAtual,
-    parcelamento: novaOferta.parcelamento
+    parcelamento: novaOferta.parcelamento,
+    avisoCupom: novaOferta.avisoCupom
   });
-
-console.log("🧪 DETALHES KABUM:", detalhes)
 
 } catch (e) {
   console.log("⚠️ Falha ao enriquecer KaBuM:", e.message);
