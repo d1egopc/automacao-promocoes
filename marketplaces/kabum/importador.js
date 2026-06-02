@@ -44,12 +44,14 @@ console.log("🧪 KABUM HTML DEBUG:", {
 
     // ================= EXTRAIR IMAGEM =================
 
-    const imagem =
-      html.match(/property="og:image"\s*content="([^"]+)"/i)?.[1] ||
-      html.match(/<img[^>]+src="([^"]+)"/i)?.[1] ||
-      "";
+   const imagem =
+  html.match(/property="og:image"\s*content="([^"]+)"/i)?.[1] ||
+  html.match(/name="twitter:image"\s*content="([^"]+)"/i)?.[1] ||
+  "";
+  
+  html.match(/<img[^>]+src="([^"]+)"/i)?.[1]
 
-    // ================= EXTRAIR PREÇO =================
+  // ================= EXTRAIR PREÇO =================
 
 let precoAtual = "";
 let precoAntigo = "";
@@ -76,7 +78,11 @@ const precosNumericos = precosEncontrados
   })
   .filter(p => Number.isFinite(p.numero) && p.numero > 0);
 
-const pixMatch = html.match(/(R\$\s?[\d\.]+,\d{2})[\s\S]{0,80}À vista no PIX/i);
+const pixMatch =
+  html.match(/(R\$\s?[\d\.]+,\d{2})[\s\S]{0,200}(?:à|a)\s*vista\s*no\s*pix/i) ||
+  html.match(/(?:à|a)\s*vista\s*no\s*pix[\s\S]{0,200}(R\$\s?[\d\.]+,\d{2})/i) ||
+  html.match(/(R\$\s?[\d\.]+,\d{2})[\s\S]{0,200}pix/i) ||
+  html.match(/pix[\s\S]{0,200}(R\$\s?[\d\.]+,\d{2})/i);
 
 const parcelamentoMatch =
   html.match(/em\s+até\s+(\d+)x[\s\S]{0,80}de\s+(R\$\s?[\d\.]+,\d{2})[\s\S]{0,80}sem\s+juros/i) ||
