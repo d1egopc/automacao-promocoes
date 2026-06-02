@@ -20,7 +20,8 @@ async function farejarKabum(clienteId = "admin", deps = {}) {
     aplicarFiltrosUniversais,
     gerarHeadersStealth,
     encurtarUrl,
-    gerarDeepLinkAwin
+    gerarDeepLinkAwin,
+    importarProdutoKabumViaAwin
   } = deps;
 
   try {
@@ -190,7 +191,7 @@ let novaOferta = {
   clienteId
 };
 
-if (typeof deps?.importarProdutoKabumViaAwin !== "function") {
+if (typeof importarProdutoKabumViaAwin !== "function") {
   console.log("⚠️ importarProdutoKabumViaAwin não recebido no farejador KaBuM");
 } else {
 
@@ -203,7 +204,7 @@ try {
     clienteId
   });
 
- const detalhes = await deps.importarProdutoKabumViaAwin(
+ const detalhes = await importarProdutoKabumViaAwin(
   urlOriginalKabum,
   clienteId,
   {
