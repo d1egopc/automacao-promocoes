@@ -160,16 +160,38 @@ if (typeof gerarDeepLinkAwin === "function") {
 if (typeof importarProdutoKabumViaAwin === "function" && produto.link) {
   const produtoImportado = await importarProdutoKabumViaAwin(
     produto.link,
-    clienteId
+    clienteId,
+    {
+      gerarDeepLinkAwin
+    }
   );
+
+  console.log("🧪 PRODUTO IMPORTADO KABUM:", {
+    titulo: produtoImportado?.titulo,
+    precoAtual: produtoImportado?.precoAtual,
+    avisoPagamento: produtoImportado?.avisoPagamento,
+    avisoCupom: produtoImportado?.avisoCupom,
+    parcelamento: produtoImportado?.parcelamento,
+    linkAfiliado: produtoImportado?.linkAfiliado
+  });
 
   if (produtoImportado?.precoAtual) {
     produto = {
       ...produto,
       ...produtoImportado
     };
+
+    console.log("🧪 PRODUTO FINAL KABUM:", {
+      titulo: produto.titulo,
+      precoAtual: produto.precoAtual,
+      avisoPagamento: produto.avisoPagamento,
+      avisoCupom: produto.avisoCupom,
+      parcelamento: produto.parcelamento,
+      linkAfiliado: produto.linkAfiliado
+    });
   }
 }
+
 
 let novaOferta = {
   id: `kabum_${Date.now()}_${Math.random().toString(36).slice(2)}`,
