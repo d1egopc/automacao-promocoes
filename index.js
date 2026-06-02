@@ -1992,13 +1992,15 @@ if (!clienteAtivo) {
       60 *
       1000;
 
-    if (!controleEnvio[clienteId]) {
-      controleEnvio[clienteId] = 0;
-    }
+const chaveControle = `${clienteId}_${destino.id || destino.nome}`;
 
-    if (agora - controleEnvio[clienteId] < intervaloMs) {
-      return;
-    }
+if (!controleEnvio[chaveControle]) {
+  controleEnvio[chaveControle] = 0;
+}
+
+if (agora - controleEnvio[chaveControle] < intervaloMs) {
+  return;
+}
 
     let idSessao =
   normalizarSessaoId(
@@ -2226,7 +2228,7 @@ if (!enviouParaAlgumDestino) {
   return;
 }
 
-controleEnvio[clienteId] = Date.now();
+controleEnvio[chaveControle] = Date.now();
 ultimoEnvioFila = Date.now();
 
 oferta.status = "enviado";
@@ -2433,7 +2435,7 @@ app.post("/enviar-manual", async (req, res) => {
     salvarFila();
 
 const clienteId = oferta.clienteId || "admin";
-controleEnvio[clienteId] = 0;
+controleEnvio = {};
 
 const configCliente =
   configsPorCliente?.[clienteId] || config;
