@@ -1849,8 +1849,14 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
           })
         });
 
-        await new Promise(r => setTimeout(r, 3000));
+      await new Promise(r => setTimeout(r, 3000));
       }
+
+      if (grupos.length) {
+        return true;
+      }
+
+      return false;
     }
 
     // ================= ENVIO TELEGRAM =================
