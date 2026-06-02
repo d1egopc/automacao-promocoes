@@ -56,6 +56,12 @@ if (imagem) {
     .replace(/_\d+x\d+(?=\.)/gi, "");
 }
 
+if (imagem) {
+  imagem = imagem
+    .replace("_m.jpg", "_g.jpg")
+    .replace("_p.jpg", "_g.jpg");
+}
+
 console.log("🖼️ IMAGEM KABUM:", imagem);
 
   // ================= EXTRAIR PREÇO =================
@@ -86,10 +92,8 @@ const precosNumericos = precosEncontrados
   .filter(p => Number.isFinite(p.numero) && p.numero > 0);
 
 const pixMatch =
-  html.match(/(R\$\s?[\d\.]+,\d{2})[\s\S]{0,200}(?:à|a)\s*vista\s*no\s*pix/i) ||
-  html.match(/(?:à|a)\s*vista\s*no\s*pix[\s\S]{0,200}(R\$\s?[\d\.]+,\d{2})/i) ||
-  html.match(/(R\$\s?[\d\.]+,\d{2})[\s\S]{0,200}pix/i) ||
-  html.match(/pix[\s\S]{0,200}(R\$\s?[\d\.]+,\d{2})/i);
+  html.match(/(R\$\s?[\d\.]+,\d{2})\s*À vista no PIX/i) ||
+  html.match(/(R\$\s?[\d\.]+,\d{2})\s*À vista no PIX com/i);
 
 console.log("🧪 PIX MATCH:", pixMatch?.[1]);
 
