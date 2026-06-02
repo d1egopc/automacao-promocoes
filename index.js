@@ -1564,7 +1564,7 @@ const CATEGORIAS_GLOBAIS = {
       "beta alanina", "pre treino", "pré treino", "liberacao miofascial",
       "halter", "anilha", "bike", "bicicleta", "liberação miofascial", "macacão fitness ",
       "recuperacao muscular", "recuperação muscular", "Whey", "bicicleta spinning",
-      "garrafa térmica", "ARENA Mochila"
+      "garrafa térmica", "ARENA Mochila", "bolsa térmica"
     ]
   },
 
