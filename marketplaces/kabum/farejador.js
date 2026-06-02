@@ -205,10 +205,14 @@ try {
 
  const detalhes = await deps.importarProdutoKabumViaAwin(
   urlOriginalKabum,
-  clienteId
+  clienteId,
+  {
+    gerarDeepLinkAwin: deps.gerarDeepLinkAwin
+  }
 );
 
-  console.log("🧪 DETALHES KABUM:", detalhes);
+console.log("🧪 DETALHES KABUM:", detalhes);
+
 
   novaOferta.nome = detalhes.titulo || novaOferta.nome;
   novaOferta.titulo = detalhes.titulo || novaOferta.titulo;
