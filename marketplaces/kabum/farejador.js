@@ -44,6 +44,7 @@ console.log("🔎 Buscas KaBuM:", buscasRodada);
 
 for (const termo of buscasRodada) {
   try {
+    const slug = encodeURIComponent(termo);
 
     const url =
       `https://www.kabum.com.br/busca/${slug}`;
