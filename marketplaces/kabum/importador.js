@@ -141,11 +141,26 @@ if (!precoAtual && precosValidos.length) {
     }
   }
 
-  const ordenados = [...unicos].sort((a, b) => a.numero - b.numero);
+  const parcelasProvaveis = unicos.filter(p => {
+    return unicos.some(outro => {
+      if (outro.numero <= p.numero) return false;
+
+      const vezes = Math.round(outro.numero / p.numero);
+      const diferenca = Math.abs(outro.numero - p.numero * vezes);
+
+      return vezes >= 2 && vezes <= 12 && diferenca < 2;
+    });
+  });
+
+  const semParcelas = unicos.filter(p =>
+    !parcelasProvaveis.some(pp => pp.numero === p.numero)
+  );
+
+  const ordenados = [...semParcelas].sort((a, b) => a.numero - b.numero);
 
   precoAtual = ordenados[0]?.texto || "";
 
-  const possivelAntigo = [...unicos]
+  const possivelAntigo = [...semParcelas]
     .filter(p => p.numero > (ordenados[0]?.numero || 0))
     .sort((a, b) => b.numero - a.numero)[0];
 
