@@ -2145,9 +2145,15 @@ mensagem += `
 ❌ De: ${precoAntigo}`;
 }
 
+const avisoPix =
+  avisoPagamento ||
+  (avisoCupom && String(avisoCupom).toLowerCase().includes("pix")
+    ? "À vista no PIX"
+    : "");
+
 if (precoAtual) {
 mensagem += `
-✅ Por: ${precoAtual}${avisoPagamento ? ` ${avisoPagamento}` : ""}`;
+✅ Por: ${precoAtual}${avisoPix ? ` ${avisoPix}` : ""}`;
 }
 
 if (temPrecoAntigoValido) {
