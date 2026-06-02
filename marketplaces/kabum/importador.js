@@ -177,7 +177,11 @@ console.log("🧪 PREÇOS KABUM EXTRAÍDOS:", precosEncontrados.slice(0, 20));
 console.log("🧪 PREÇOS VALIDOS:", precosValidos.slice(0, 20));
 
 
-  const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
+const urlLimpa = url.split("?")[0];
+
+console.log("🧹 URL KABUM LIMPA:", urlLimpa);
+  
+const linkAfiliado = await gerarDeepLinkAwin(urlLimpa, clienteId);
 
 console.log("🧪 KABUM IMPORTADO FINAL:", {
   titulo,
