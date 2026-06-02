@@ -1786,12 +1786,12 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
     configCliente = configCliente || configsPorCliente?.[clienteId] || config;
 
     if (!destinoAceitaOferta(destino, oferta)) {
-      return;
+      return false;
     }
 
     if (!destinoDentroHorario(destino)) {
       console.log("⏰ Destino fora do horário:", destino.nome);
-      return;
+      return false;
     }
 
     // ================= WHATSAPP =================
@@ -1805,11 +1805,10 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
      
     const sock = sessoes[destino.conexaoId];
 
-      if (!sock) {
-        console.log("❌ Sessão não encontrada:", destino.conexaoId);
-        return;
-      }
-
+  if (!sock) {
+  console.log("❌ Sessão não encontrada:", destino.conexaoId);
+  return false;
+}
       const grupos = destino.gruposWhatsapp || [];
 
       for (const grupo of grupos) {
@@ -1924,15 +1923,23 @@ const selecionados = telegramsSelecionados.length
       }
     }
 
+  if (selecionados.length) {
+        return true;
+      }
+    }
+
   } catch (e) {
     console.log(
       "❌ erro destino inteligente:",
       destino?.nome,
       e.message
     );
-  }
-}
 
+    return false;
+  }
+
+  return false;
+}
 
 // ================= FUNCÃO PROCESSA FILA =================
 
@@ -2206,7 +2213,7 @@ ${link}`;
 let enviouParaAlgumDestino = false;
 
 for (const destino of destinosInteligentes) {
-  await enviarParaDestinoInteligente(
+  const enviado = await enviarParaDestinoInteligente(
     destino,
     oferta,
     mensagem,
@@ -2214,14 +2221,10 @@ for (const destino of destinosInteligentes) {
     configCliente
   );
 
-enviouParaAlgumDestino = true;
+  if (enviado === true) {
+    enviouParaAlgumDestino = true;
+  }
 }
-
-if (!enviouParaAlgumDestino) {
-  console.log(
-    "⚠️ Oferta sem destino compatível. Mantendo pendente:",
-    oferta.titulo
-  );
 
   return;
 }
@@ -6144,8 +6147,10 @@ async function farejarAliExpressOld(clienteIdAlvo = "admin", deps = {}) {
         }
 
         await new Promise(r => setTimeout(r, 3000));
-      } catch (e) {
-        console.log("❌ erro busca AliExpress API:", termo, e.message);
+      }
+
+      if (grupos.length) {
+        return true;
       }
     }
 
