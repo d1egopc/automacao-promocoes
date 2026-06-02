@@ -128,6 +128,10 @@ if (pixMatch?.[1]) {
   avisoPagamento = "À vista no PIX";
 }
 
+if (!avisoPagamento && precoAtual && html.toLowerCase().includes("vista no pix")) {
+  avisoPagamento = "À vista no PIX";
+}
+
 const precosValidos = precosNumericos.filter((p) => {
   return p.numero > 80 && p.numero < 100000;
 });
@@ -184,6 +188,8 @@ console.log("🧪 KABUM IMPORTADO FINAL:", {
   parcelamento,
   linkAfiliado
 });
+
+avisoPagamento = avisoPagamento || "";
 
   return {
   marketplace: "kabum",
