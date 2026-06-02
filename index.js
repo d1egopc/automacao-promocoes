@@ -3355,6 +3355,8 @@ function auth(req, res, next) {
     req.path === "/" ||
     req.path === "/login" ||
     req.path === "/debug-usuarios" ||
+    req.path === "/kabum/importar" ||
+    req.path === "/kabum/importar-teste" ||
     req.path === "/conectar" ||
     req.path.startsWith("/qr") ||
     req.path.startsWith("/status") ||
