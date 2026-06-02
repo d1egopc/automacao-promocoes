@@ -8235,11 +8235,8 @@ await farejador(clienteId, {
   distribuirOfertaParaClientes,
   encurtarUrl,
   gerarDeepLinkAwin,
+  importarProdutoKabumViaAwin,
 
-  importarProdutoKabumViaAwin:
-  typeof importarProdutoKabumViaAwin === "function"
-    ? importarProdutoKabumViaAwin
-    : null,
 });
 }
   
