@@ -33,6 +33,10 @@ const farejarKabum =
 require("./marketplaces/kabum/farejador");
 
 const {
+  importarProdutoKabumViaAwin
+} = require("./marketplaces/kabum/importador");
+
+const {
   escolherMelhorCupom,
   cupomEstaValido,
   CUPONS_ATIVOS
@@ -4184,7 +4188,13 @@ app.post("/awin/gerar-link", async (req, res) => {
     }
 
     if (url.includes("kabum.com.br")) {
-      const produto = await importarProdutoKabumViaAwin(url, clienteId);
+      const produto = await importarProdutoKabumViaAwin(
+      url,
+      clienteId,
+     {
+     gerarDeepLinkAwin
+    }
+    );
 
       return res.json({
         ok: true,
