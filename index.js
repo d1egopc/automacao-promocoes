@@ -7362,6 +7362,7 @@ const novaOferta = {
   link: produto.linkAfiliado || produto.linkOriginal,
   imagem: produto.imagem,
   status: "pendente",
+  marketplace: "mercadolivre",
 
   cupom: "",
   tipoCupom: "",
