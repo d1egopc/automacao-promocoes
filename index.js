@@ -1355,7 +1355,7 @@ const CATEGORIAS_GLOBAIS = {
     palavras: [
       "tenis infantil", "tênis infantil", "camisa infantil",
       "sandalia infantil", "sandália infantil", "roupa infantil",
-      "moda infantil", "bebe", "bebê", "body infantil"
+      "moda infantil", "bebe", "bebê", "infantil verão menino", "body infantil"
     ]
   },
 
@@ -1376,7 +1376,7 @@ const CATEGORIAS_GLOBAIS = {
       "ssd", "nvme", "placa de video", "placa de vídeo", "fonte gamer",
       "memoria ram", "memória ram", "gabinete gamer", "fonte de alimentacao",
       "headset gamer", "teclado mecanico", "teclado mecânico",
-      "mouse gamer", "amd", "nvidia", "pny", "kingston",
+      "mouse gamer", "amd", "nvidia", "pny", "kingston", "memória ram",
       "seagate", "western digital", "asus", "asrock", "netac",
       "redragon", "gigabyte", "intel", "hyperx"
     ]
@@ -1405,7 +1405,7 @@ const CATEGORIAS_GLOBAIS = {
     "mouse", "teclado", "mousepad", "webcam gamer",
     "headphone", "fone gamer", "controle pc", "adaptador usb",
     "headset", "hub usb", "microfone gamer", "cadeira gamer",
-    "monitor gamer", "microsd", "micro sd",
+    "monitor gamer", "microsd", "micro sd", "webcam full hd 1080p",
     "cartao de memoria", "cartão de memória",
     "sdxc", "sdhc", "pendrive", "usb flash"
   ]
@@ -1440,16 +1440,17 @@ const CATEGORIAS_GLOBAIS = {
     palavras: [
       "air fryer", "fritadeira eletrica", "fritadeira elétrica",
       "liquidificador", "cafeteira", "batedeira", "mixer", "cozedor de ovos",
-      "sanduicheira", "grill", "aspirador", "panela eletrica",
+      "sanduicheira", "grill", "aspirador", "panela eletrica", "escova secadora",
       "panela elétrica", "processador de alimentos", "aspirador robo",
-      "aspirador robô", "robo aspirador", "robô aspirador", "bebedor eletrico"
+      "aspirador robô", "robo aspirador", "robô aspirador", "bebedor eletrico",
+      "robô aspirador"
     ]
   },
 
   eletrodomesticos: {
     nome: "Eletrodomésticos",
     palavras: [
-      "geladeira", "freezer", "microondas", "micro-ondas",
+      "geladeira", "freezer", "microondas", "micro-ondas", "purificador de água",
       "fogao", "fogão", "lava e seca", "ar condicionado",
       "lava loucas", "lava louças", "secadora",
       "electrolux", "consul", "brastemp", "philco", "hisense", "elgin", "gree"
@@ -1459,9 +1460,9 @@ const CATEGORIAS_GLOBAIS = {
   ferramentas: {
     nome: "Ferramentas",
     palavras: [
-      "furadeira", "parafusadeira", "martelete",
-      "chave de impacto", "serra marmore", "serra mármore",
-      "makita", "dewalt", "bosch", "vonder",
+      "furadeira", "parafusadeira", "martelete", "caixa para ferramentas,
+      "chave de impacto", "serra marmore", "serra mármore", "maleta de ferramentas",
+      "makita", "dewalt", "bosch", "vonder", "jogo de chave de fenda",
       "jogo de ferramentas", "maleta de ferramentas",
       "manifold", "bomba de vacuo", "bomba de vácuo",
       "alicate amperimetro", "alicate amperímetro", "canivete multiuso",
@@ -1473,7 +1474,7 @@ const CATEGORIAS_GLOBAIS = {
     nome: "Automotivo",
     palavras: [
       "multimidia", "multimídia", "som automotivo", "compressor de ar automotivo",
-      "camera de re", "câmera de ré", "farol",
+      "camera de re", "câmera de ré", "farol", "rádio automotivo",
       "lampada automotiva", "lâmpada automotiva",
       "taramps", "pioneer", "retrovisor", "cadeira de carro"
     ]
@@ -1492,11 +1493,11 @@ const CATEGORIAS_GLOBAIS = {
     "óculos de pesca", "luva pesca", "buff pesca", "chapéu pesca", "bone pesca", "protetor solar",
 
     "camping", "barraca", "barraca camping", "saco de dormir", "colchonete camping", "isolante termico",
-    "isolante térmico", "lanterna camping", "lanterna led", "lampiao", "lampião", "fogareiro",
+    "isolante térmico", "lanterna camping", "lanterna led", "lampiao", "lampião", "fogareiro", "mochila de caping",
     "fogareiro camping", "cartucho gas", "cartucho gás", "caixa termica", "caixa térmica", "cooler termico",
     "cooler térmico", "mochila trilha", "mochila cargueira", "cadeira camping", "mesa camping", "rede camping",
 
-    "canivete", "bússola", "bussola", "kit sobrevivencia", "kit sobrevivência", "aventura"
+    "canivete", "bússola", "bussola", "kit sobrevivencia", "kit sobrevivência", "aventura", "fogão elétrico portátil"
   ]
 },
 
@@ -1510,15 +1511,16 @@ const CATEGORIAS_GLOBAIS = {
       "organizador banheiro", "porta shampoo", "porta sabonete", "cortina", "pote plastico",
       "potes plásticos", "cobertor casal", "cobertor casal", "manta", "unidades manta",
       "jogo de lençol", "Xícaras Bebidas Fria", "top e legging", "fechadura digital",
-      "formas assadeiras"        
+      "formas assadeiras", "amolador de facas", "torneira gourmet", "faca de chef",
+      "tapete sala"       
     ]
   },
 
   limpeza: {
     nome: "Limpeza",
     palavras: [
-      "amaciante", "sabao em po", "sabão em pó",
-      "desinfetante", "detergente", "papel higienico",
+      "amaciante", "sabao em po", "sabão em pó", "amaciante concentrado",
+      "desinfetante", "detergente", "papel higienico", "DOWNY",
       "papel higiênico", "limpeza pesada",
       "multiuso", "veja", "omo", "ypê", "vonixx BACTRAN",
       "candida", "cândida", "agua sanitaria", "água sanitaria", "água sanitária"
@@ -1605,7 +1607,7 @@ bebes: {
       "lego", "carrinho", "helicoptero", "helicóptero", "losa mágica",
       "controle remoto", "boneca", "quebra cabeca", "lousa mágica infantil",
       "quebra cabeça", "domino", "dominó", "trator brinquedo", "lousa mágica infantil",
-      "carro transformável", "bulldozer de controle"
+      "carro transformável", "bulldozer de controle", "controle remoto 2,4 Ghz"
     ]
   }
 };
@@ -8448,38 +8450,38 @@ await farejador(clienteId, {
 }
 
 
- setTimeout(async () => {
- console.log("🪂 TESTE MANUAL MERCADO LIBRE - CHAT GPT");
+ //setTimeout(async () => {
+ //console.log("🪂 TESTE MANUAL MERCADO LIBRE - CHAT GPT");
 
-   await farejadoresMarketplaces.kabum("admin", {
-    config,
-    integracoesPorCliente,
-    getIntegracaoCliente,
-    fila,
-    salvarFila,
-    prepararOfertaGlobal,
-    ofertaJaExiste,
-    classificarCategoriaOferta,
-    gerarBuscasGlobais,
-    gerarHeadersStealth,
-    farejarCuponsMercadoLivre,
-    importarMercadoLivre,
-    gerarLinkAfiliadoMercadoLivre,
-    importarAmazon,
-    buscarOfertasShopee: (clienteId) =>
-    buscarOfertasShopee(clienteId, {
-    config,
-    getIntegracaoCliente
-    }),
-    normalizarSessaoId,
-    aplicarFiltrosUniversais,
-    distribuirOfertaParaClientes,
-    encurtarUrl,
-    gerarDeepLinkAwin,
-    importarProdutoKabumViaAwin
-    });
+   //await farejadoresMarketplaces.kabum("admin", {
+   // config,
+    //integracoesPorCliente,
+    //getIntegracaoCliente,
+    //fila,
+    //salvarFila,
+    //prepararOfertaGlobal,
+    //ofertaJaExiste,
+    //classificarCategoriaOferta,
+    //gerarBuscasGlobais,
+    //gerarHeadersStealth,
+    //farejarCuponsMercadoLivre,
+    //importarMercadoLivre,
+    //gerarLinkAfiliadoMercadoLivre,
+    //importarAmazon,
+    //buscarOfertasShopee: (clienteId) =>
+    //buscarOfertasShopee(clienteId, {
+    //config,
+    //getIntegracaoCliente
+    //}),
+    //normalizarSessaoId,
+    //aplicarFiltrosUniversais,
+    //distribuirOfertaParaClientes,
+    //encurtarUrl,
+    //gerarDeepLinkAwin,
+    //importarProdutoKabumViaAwin
+    //});
 
-  }, 60 * 1000);
+  //}, 60 * 1000);
 
 setInterval(() => {
   rodarProximoMarketplace();
