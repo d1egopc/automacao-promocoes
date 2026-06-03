@@ -1288,7 +1288,10 @@ const categoriaNormalizada = normalizarTexto(oferta.categoria || "");
 
 if (
   !oferta.categoria ||
-  ["aliexpress", "amazon", "shopee", "mercadolivre", "magalu", "awin", "kabum"].includes(categoriaNormalizada)
+  ["aliexpress", "amazon", "shopee", "mercadolivre", "magalu", "awin", "kabum"].includes(categoriaNormalizada) ||
+  categoriaNormalizada.includes("computador") ||
+  categoriaNormalizada.includes("escritorio") ||
+  categoriaNormalizada.includes("escritório")
 ) {
   oferta.categoria = classificarCategoriaOferta(oferta);
 }
