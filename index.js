@@ -6156,6 +6156,8 @@ async function farejarAliExpressOld(clienteIdAlvo = "admin", deps = {}) {
             console.log("❌ erro produto AliExpress API:", e.message);
           }
         }
+       
+       } 
 
     for (const termo of buscasBrasil) {
       await buscarTermoAliExpress(termo, "🇧🇷");
