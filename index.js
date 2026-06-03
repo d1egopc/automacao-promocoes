@@ -1624,6 +1624,69 @@ if (
   return "Perfumaria, Farmácia e Beleza";
 }
 
+if (
+  texto.includes("smart tv") ||
+  texto.includes("roku tv") ||
+  texto.includes("google tv") ||
+  texto.includes("qled") ||
+  texto.includes("oled")
+) {
+  return "Audio TV";
+}
+
+if (
+  texto.includes("iphone") ||
+  texto.includes("smartphone") ||
+  texto.includes("celular") ||
+  texto.includes("galaxy") ||
+  texto.includes("motorola")
+) {
+  return "Celulares e Smartphones";
+}
+
+if (
+  texto.includes("furadeira") ||
+  texto.includes("parafusadeira") ||
+  texto.includes("kit ferramenta") ||
+  texto.includes("jogo de ferramentas")
+) {
+  return "Ferramentas";
+}
+
+if (
+  texto.includes("ssd") ||
+  texto.includes("nvme") ||
+  texto.includes("m.2") ||
+  texto.includes("headset") ||
+  texto.includes("mouse gamer") ||
+  texto.includes("teclado mecanico") ||
+  texto.includes("teclado mecânico") ||
+  texto.includes("placa mae") ||
+  texto.includes("placa mãe") ||
+  texto.includes("placa de video") ||
+  texto.includes("placa de vídeo") ||
+  texto.includes("rtx") ||
+  texto.includes("radeon")
+) {
+  return "Gamer e Hardware";
+}
+
+if (
+  texto.includes("cafeteira") ||
+  texto.includes("air fryer") ||
+  texto.includes("microondas") ||
+  texto.includes("liquidificador")
+) {
+  return "Eletroportáteis";
+}
+
+if (
+  texto.includes("ventilador") ||
+  texto.includes("climatizador")
+) {
+  return "Eletrodomésticos";
+}
+
   for (const categoria of Object.values(CATEGORIAS_GLOBAIS)) {
     const bateu = categoria.palavras.some(palavra =>
       texto.includes(normalizarTexto(palavra))
