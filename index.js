@@ -38,9 +38,7 @@ const {
 
 
 const {
-  escolherMelhorCupom,
-  cupomEstaValido,
-  CUPONS_ATIVOS
+  aplicarCuponsAutomaticos
 } = require("./marketplaces/cupons");
 
 
@@ -7357,9 +7355,7 @@ if (marketplace === "mercadolivre") {
         });
       }
 
-       
-const cupomEscolhido = null;
-
+    
 const novaOferta = {
   nome: produto.nome || produto.titulo,
   preco: produto.preco || produto.precoAtual,
@@ -7367,8 +7363,12 @@ const novaOferta = {
   imagem: produto.imagem,
   status: "pendente",
 
- cupom: "",
- avisoCupom: "",
+  cupom: "",
+  tipoCupom: "",
+  avisoCupom: "",
+  cupomMarketplace: "mercadolivre",
+  cupomValor: "",
+  cupomPercentual: "",
 };
 
 const precoNumero = Number(
@@ -7410,14 +7410,6 @@ const descontoPercentual = temDescontoReal
   ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
   : 0;
 
-if (cupomEscolhido?.cupom) {
-  registrarResultadoCupom(
-    "mercadolivre",
-    cupomEscolhido.cupom,
-    temDescontoReal && descontoPercentual >= 10
-  );
-}
-
 if (!temCupom && descontoPercentual < 10) {
   console.log("⚠️ Oferta ignorada: desconto baixo", novaOferta.nome);
 
@@ -7428,23 +7420,26 @@ if (!temCupom && descontoPercentual < 10) {
 }
 
 
-    const jaExiste = fila.some(
-  (o) => o.link === novaOferta.link
+const ofertaFinal =
+  await aplicarCuponsAutomaticos(novaOferta);
+
+ const jaExiste = fila.some(
+  (o) => o.link === ofertaFinal.link
 );
 
 if (jaExiste) {
-  console.log("⚠️ Oferta já existe na fila:", novaOferta.nome);
+  console.log("⚠️ Oferta já existe na fila:", ofertaFinal.nome);
 } else {
-  
-  if (produtoRepetidoRecentemente(novaOferta.nome, 12)) {
-  console.log("🔁 Oferta parecida ignorada:", novaOferta.titulo);
-  return;
-}
 
-  fila.push(novaOferta);
+  if (produtoRepetidoRecentemente(ofertaFinal.nome, 12)) {
+    console.log("🔁 Oferta parecida ignorada:", ofertaFinal.nome);
+    return;
+  }
+
+  fila.push(ofertaFinal);
   salvarFila();
 
-  console.log("🤖 Oferta adicionada automaticamente:", novaOferta.nome);
+  console.log("🤖 Oferta adicionada automaticamente:", ofertaFinal.nome);
 }
 
 return res.json(produto);
