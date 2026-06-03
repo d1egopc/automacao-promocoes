@@ -2,7 +2,7 @@ const axios = require("axios");
 
 // ================= MOTOR UNIVERSAL DE CUPONS =================
 
-async function buscarCupomMercadoLivre(oferta = {}) {
+async function buscarCupomMercadoLivre(oferta = {}, contexto = {}) {
   try {
     const url =
       oferta.linkOriginal ||
@@ -31,8 +31,11 @@ console.log("🎟️ URL USADA PELO MOTOR:", url);
         "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
         "Accept":
           "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+
+          Cookie: contexto.cookies || ""
       }
     });
+
 
 console.log(
   "🎟️ URL FINAL CUPOM:",
@@ -84,7 +87,7 @@ console.log(
   }
 }
 
-async function aplicarCuponsAutomaticos(oferta = {}) {
+async function aplicarCuponsAutomaticos(oferta = {}, contexto = {}) {
   try {
 
     console.log("🎟️ MOTOR CUPONS RECEBEU:", {
@@ -104,7 +107,7 @@ async function aplicarCuponsAutomaticos(oferta = {}) {
       marketplace === "mercado_livre" ||
       marketplace === "ml"
     ) {
-      cupomEncontrado = await buscarCupomMercadoLivre(oferta);
+      cupomEncontrado = await buscarCupomMercadoLivre(oferta, contexto);
     }
 
     if (!cupomEncontrado) {
