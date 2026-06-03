@@ -1500,7 +1500,7 @@ const CATEGORIAS_GLOBAIS = {
       "organizador banheiro", "porta shampoo", "porta sabonete", "cortina", "pote plastico",
       "potes plásticos", "cobertor casal", "cobertor casal", "manta", "unidades manta",
       "jogo de lençol", "Xícaras Bebidas Fria", "top e legging", "fechadura digital",
-      "formas, "assadeiras"        
+      "formas assadeiras"        
     ]
   },
 
