@@ -52,6 +52,11 @@ console.log(
 
     const textoLower = texto.toLowerCase();
 
+console.log("🧪 TEM CUPOM:", textoLower.includes("cupom"));
+console.log("🧪 TEM ECONOMIZE:", textoLower.includes("economize"));
+console.log("🧪 TEM APLICAR CUPOM:", textoLower.includes("aplicar cupom"));
+console.log("🧪 TEM DESCONTO ADICIONAL:", textoLower.includes("desconto adicional"));
+
     const temSinalCupom =
       textoLower.includes("cupom") ||
       textoLower.includes("cupon") ||
@@ -69,7 +74,7 @@ console.log(
       texto.match(/.{0,80}(cupom|economize|desconto adicional).{0,120}/i)?.[0] ||
       "";
 
-    console.log("🎟️ ML SINAL DE CUPOM ENCONTRADO:", trechoCupom);
+console.log("🎟️ TRECHO CUPOM:", trechoCupom);
 
     return {
       cupom: "",
