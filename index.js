@@ -5924,32 +5924,8 @@ if (linkAfiliadoCliente === linkOriginal) {
   }
 }
 
-// ================= FAREJADOR ALIEXPRESS - SERA EXCLUIDO ========================
 
-async function farejarAliExpressOld(clienteIdAlvo = "admin", deps = {}) {
-  try {
-    if (!config.marketplaces?.aliexpress?.ativo) {
-      console.log("⏸ AliExpress desativado. Farejador ignorado.");
-      return;
-    }
-
-    console.log("🛒 Farejando ofertas AliExpress...");
-
-    const cfg = config.marketplaces?.aliexpress || {};
-    
-    const limitePorRodada = cfg.limitePorRodada || 5;
-    let adicionadasNestaRodada = 0;
-    let ofertasEncontradas = [];
-
-    const buscasBrasil = gerarBuscasGlobais(
-      cfg.limiteBuscasBrasil || 20
-    );
-
-    const buscasInternacional = gerarBuscasGlobais(
-      cfg.limiteBuscasInternacional || 10
-    );
-
-    async function buscarTermoAliExpress(termo, tipo) {
+      async function buscarTermoAliExpress(termo, tipo) {
       try {
         if (adicionadasNestaRodada >= limitePorRodada) return;
 
