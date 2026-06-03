@@ -34,6 +34,11 @@ console.log("🎟️ URL USADA PELO MOTOR:", url);
       }
     });
 
+console.log(
+  "🎟️ URL FINAL CUPOM:",
+  response.request?.res?.responseUrl
+);
+
     const html = String(response.data || "");
     const texto = html
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
