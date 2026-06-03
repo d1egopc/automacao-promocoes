@@ -2250,8 +2250,23 @@ console.log(
 );
 
   if (!destinosInteligentes.length) {
-  console.log("⚠️ Sem destino carregado ainda. Aguardando...");
-  enviandoAgora = false;
+  console.log("⚠️ Oferta sem destino compatível. Marcando como erro:", oferta.titulo);
+
+  oferta.status = "erro";
+  oferta.statusDetalhe = "Sem destino compatível";
+  oferta.erro = "Nenhum destino aceitou marketplace/categoria";
+  oferta.erroEm = new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  });
+
+  oferta.logsEnvio = oferta.logsEnvio || [];
+  oferta.logsEnvio.push({
+    tipo: "erro",
+    mensagem: oferta.statusDetalhe,
+    data: oferta.erroEm
+  });
+
+  salvarFila(clienteId);
   return;
 }
     
@@ -2360,11 +2375,16 @@ if (enviado === true) {
 }
 
 if (!enviouParaAlgumDestino) {
-  console.log(
-    "⚠️ Oferta não foi enviada para nenhum destino. Mantendo pendente:",
-    oferta.titulo
-  );
+  console.log("⚠️ Oferta não enviada. Marcando como erro:", oferta.titulo);
 
+  oferta.status = "erro";
+  oferta.statusDetalhe = "Falha ao enviar para destinos";
+  oferta.erro = "Nenhum destino confirmou envio";
+  oferta.erroEm = new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  });
+
+  salvarFila(clienteId);
   return;
 }
 
