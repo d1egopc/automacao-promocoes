@@ -7422,8 +7422,16 @@ if (!temCupom && descontoPercentual < 10) {
 }
 
 
+const integracaoML =
+  getIntegracaoCliente(clienteId, "mercadolivre");
+
+const cookiesML =
+  integracaoML?.credenciais?.cookies || "";
+
 const ofertaFinal =
-  await aplicarCuponsAutomaticos(novaOferta);
+  await aplicarCuponsAutomaticos(novaOferta, {
+    cookies: cookiesML
+  });
 
  const jaExiste = fila.some(
   (o) => o.link === ofertaFinal.link
