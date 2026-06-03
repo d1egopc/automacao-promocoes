@@ -1284,14 +1284,14 @@ if (!oferta.id) {
 
   oferta.marketplace = normalizarTexto(oferta.marketplace || "geral");
 
-  if (
-    !oferta.categoria ||
-    ["aliexpress", "amazon", "shopee", "mercadolivre", "magalu", "awin"].includes(
-      normalizarTexto(oferta.categoria)
-    )
-  ) {
-    oferta.categoria = detectarCategoriaGlobal(oferta);
-  }
+const categoriaNormalizada = normalizarTexto(oferta.categoria || "");
+
+if (
+  !oferta.categoria ||
+  ["aliexpress", "amazon", "shopee", "mercadolivre", "magalu", "awin", "kabum"].includes(categoriaNormalizada)
+) {
+  oferta.categoria = classificarCategoriaOferta(oferta);
+}
 
   const agoraBR = new Date().toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo"
