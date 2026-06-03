@@ -7360,6 +7360,7 @@ const novaOferta = {
   nome: produto.nome || produto.titulo,
   preco: produto.preco || produto.precoAtual,
   link: produto.linkAfiliado || produto.linkOriginal,
+  linkOriginal: produto.linkOriginal || produto.url || url,
   imagem: produto.imagem,
   status: "pendente",
   marketplace: "mercadolivre",
