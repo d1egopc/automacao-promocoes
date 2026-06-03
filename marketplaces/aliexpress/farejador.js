@@ -50,6 +50,14 @@ const buscas = gerarBuscasAliExpress({
 const buscasBrasil = buscas.brasil || [];
 const buscasInternacionais = buscas.internacional || [];
 
+const buscasBrasilRodada = [...buscasBrasil]
+  .sort(() => Math.random() - 0.5)
+  .slice(0, 10);
+
+const buscasInternacionaisRodada = [...buscasInternacionais]
+  .sort(() => Math.random() - 0.5)
+  .slice(0, 5);
+
 console.log(
   "🔎 Buscas AliExpress Brasil:",
   buscasBrasil.slice(0, 10)
@@ -62,8 +70,10 @@ console.log(
 
    const produtosEncontrados = [];
 
-for (const termo of buscasBrasil) {
-  try {
+
+for (const termo of buscasBrasilRodada) {
+  
+try {
     if (produtosEncontrados.length >= limitePorRodada) break;
 
     console.log("🇧🇷 Busca AliExpress API:", termo);
@@ -220,6 +230,15 @@ if (palavrasBloqueadasAli.some(p => tituloLower.includes(p))) {
   continue;
 }
 
+const categoriaDetectada =
+  typeof classificarCategoriaOferta === "function"
+    ? classificarCategoriaOferta({
+        titulo,
+        nome: titulo,
+        categoria
+      })
+    : categoria;
+
         let novaOferta = {
           nome: titulo,
           titulo,
@@ -237,7 +256,7 @@ if (palavrasBloqueadasAli.some(p => tituloLower.includes(p))) {
           linkAfiliado: linkFinal,
           imagem: corrigirImagemAli(imagem),
           marketplace: "aliexpress",
-          categoria,
+          categoria: categoriaDetectada,
           categoriaProduto: categoria,
           status: "pendente",
           clienteId
