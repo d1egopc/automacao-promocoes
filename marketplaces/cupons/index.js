@@ -2,6 +2,12 @@
 
 async function buscarCupomMercadoLivre(oferta = {}) {
   try {
+
+ console.log("🎟️ BUSCADOR ML CUPOM ATIVO:", {
+      nome: oferta.nome || oferta.titulo,
+      link: oferta.link || oferta.linkOriginal || ""
+    });
+
     // FASE 1:
     // Aqui ainda NÃO inventa cupom.
     // Depois vamos buscar cupom real do Mercado Livre.
@@ -15,6 +21,13 @@ async function buscarCupomMercadoLivre(oferta = {}) {
 
 async function aplicarCuponsAutomaticos(oferta = {}) {
   try {
+
+    console.log("🎟️ MOTOR CUPONS RECEBEU:", {
+      marketplace: oferta.marketplace || oferta.loja,
+      nome: oferta.nome || oferta.titulo,
+      cupomAtual: oferta.cupom || ""
+    });
+
     const marketplace = String(
       oferta.marketplace || oferta.loja || ""
     ).toLowerCase();
