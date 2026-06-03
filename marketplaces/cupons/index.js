@@ -4,11 +4,12 @@ async function buscarCupomMercadoLivre(oferta = {}) {
   try {
 
  console.log("🎟️ BUSCADOR ML CUPOM ATIVO:", {
-      nome: oferta.nome || oferta.titulo,
-      link: oferta.link || oferta.linkOriginal || ""
-    });
-
-    // FASE 1:
+  nome: oferta.nome || oferta.titulo,
+  link: oferta.link || "",
+  linkOriginal: oferta.linkOriginal || ""
+ });
+    
+     // FASE 1:
     // Aqui ainda NÃO inventa cupom.
     // Depois vamos buscar cupom real do Mercado Livre.
 
