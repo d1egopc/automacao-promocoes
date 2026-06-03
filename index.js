@@ -2410,10 +2410,7 @@ if (!enviouParaAlgumDestino) {
   return;
 }
 
-for (const destino of destinosInteligentes) {
-  const chaveControle = `${clienteId}_${destino.id || destino.nome}`;
-  controleEnvio[chaveControle] = Date.now();
-}
+controleEnvio[clienteId] = Date.now();
 
 ultimoEnvioFila = Date.now();
 
