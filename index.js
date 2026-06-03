@@ -2621,7 +2621,6 @@ app.post("/enviar-manual", async (req, res) => {
     salvarFila();
 
 const clienteId = oferta.clienteId || "admin";
-controleEnvio = {};
 
 const configCliente =
   configsPorCliente?.[clienteId] || config;
