@@ -6157,14 +6157,6 @@ async function farejarAliExpressOld(clienteIdAlvo = "admin", deps = {}) {
           }
         }
 
-        await new Promise(r => setTimeout(r, 3000));
-      }
-
-      if (grupos.length) {
-        return true;
-      }
-    }
-
     for (const termo of buscasBrasil) {
       await buscarTermoAliExpress(termo, "🇧🇷");
       if (adicionadasNestaRodada >= limitePorRodada) break;
