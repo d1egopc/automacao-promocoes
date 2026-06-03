@@ -1612,6 +1612,25 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     ${oferta.categoria || ""}
   `);
 
+
+if (
+  texto.includes("racao") ||
+  texto.includes("ração") ||
+  texto.includes("cachorro") ||
+  texto.includes("caes") ||
+  texto.includes("cães") ||
+  texto.includes("petisco") ||
+  texto.includes("bifinho") ||
+  texto.includes("pedigree") ||
+  texto.includes("quatree") ||
+  texto.includes("formula natural") ||
+  texto.includes("fórmula natural") ||
+  texto.includes("gato") ||
+  texto.includes("pet shop")
+) {
+  return "Pet Shop e Fazendinha";
+}
+
 if (
   texto.includes("perfume") ||
   texto.includes("colonia") ||
