@@ -1744,13 +1744,28 @@ if (
   return "Roupas e Moda Masculina";
 }
 
+
 if (
   texto.includes("molinete") ||
   texto.includes("vara de pesca") ||
-  texto.includes("pescaria")
+  texto.includes("carretilha") ||
+  texto.includes("anzol") ||
+  texto.includes("isca artificial") ||
+  texto.includes("pescaria") ||
+  texto.includes("camping") ||
+  texto.includes("barraca") ||
+  texto.includes("fogareiro") ||
+  texto.includes("saco de dormir") ||
+  texto.includes("lanterna") ||
+  texto.includes("caixa termica") ||
+  texto.includes("caixa térmica") ||
+  texto.includes("mochila trilha") ||
+  texto.includes("kit sobrevivencia") ||
+  texto.includes("kit sobrevivência")
 ) {
   return "Pesca e Camping";
 }
+
 
 if (
   texto.includes("vestido") ||
