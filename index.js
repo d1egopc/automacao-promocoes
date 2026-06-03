@@ -1480,18 +1480,25 @@ const CATEGORIAS_GLOBAIS = {
   },
 
   pesca: {
-    nome: "Pesca e Pescaria",
-    palavras: [
-      "vara de pesca", "molinete", "carretilha", "anzol",
-      "isca artificial", "chumbada", "bolsa de pesca", "isca silicone",
-      "linha de multifilamento", "camiseta uv", "isca artificial",
-      "camisa pesca", "oculos polarizado", "óculos polarizado","AOSTSOA",
-      "oculos de pesca", "óculos de pesca", "daiwa", "shad", "Kit 5 Isca",
-      "nelson nakamura", "caixa de isca", "caixa pesca", "anzuol",
-      "farolete de pesca", "lampiao pesca", "lampião pesca", "varal",
-      "secador de roupas", "varal dobravel", "varal dobrável"
-    ]
-  },
+  nome: "Pesca e Camping",
+  palavras: [
+    "vara de pesca", "molinete", "carretilha", "anzol", "anzuol", "isca artificial",
+    "isca silicone", "shad", "chumbada", "linha multifilamento", "linha monofilamento", "leader fluorcarbono",
+    "caixa de pesca", "caixa de isca", "bolsa de pesca", "alicate pesca", "passagua", "passaguá",
+    "girador", "snap pesca", "boia pesca", "boia cevadeira", "kit pesca", "kit isca",
+    "nelson nakamura", "daiwa", "marine sports", "albatroz fishing", "shimano pesca", "pesca esportiva",
+
+    "camisa pesca", "camiseta uv", "camisa uv", "oculos polarizado", "óculos polarizado", "oculos de pesca",
+    "óculos de pesca", "luva pesca", "buff pesca", "chapéu pesca", "bone pesca", "protetor solar",
+
+    "camping", "barraca", "barraca camping", "saco de dormir", "colchonete camping", "isolante termico",
+    "isolante térmico", "lanterna camping", "lanterna led", "lampiao", "lampião", "fogareiro",
+    "fogareiro camping", "cartucho gas", "cartucho gás", "caixa termica", "caixa térmica", "cooler termico",
+    "cooler térmico", "mochila trilha", "mochila cargueira", "cadeira camping", "mesa camping", "rede camping",
+
+    "canivete", "bússola", "bussola", "kit sobrevivencia", "kit sobrevivência", "aventura"
+  ]
+},
 
   casaDecoracao: {
     nome: "Casa, Móveis e Decoração",
@@ -1742,7 +1749,7 @@ if (
   texto.includes("vara de pesca") ||
   texto.includes("pescaria")
 ) {
-  return "Pesca e Pescaria";
+  return "Pesca e Camping";
 }
 
 if (
