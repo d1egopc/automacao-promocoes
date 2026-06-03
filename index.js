@@ -1499,7 +1499,8 @@ const CATEGORIAS_GLOBAIS = {
       "barraca", "rede de dormir", "sofá retrátil", "decoração", "xicara decorativa",
       "organizador banheiro", "porta shampoo", "porta sabonete", "cortina", "pote plastico",
       "potes plásticos", "cobertor casal", "cobertor casal", "manta", "unidades manta",
-      "jogo de lençol", "Xícaras Bebidas Fria", "top e legging", "fechadura digital"        
+      "jogo de lençol", "Xícaras Bebidas Fria", "top e legging", "fechadura digital",
+      "formas "assadeiras"        
     ]
   },
 
@@ -1685,6 +1686,70 @@ if (
   texto.includes("climatizador")
 ) {
   return "Eletrodomésticos";
+}
+
+if (
+  texto.includes("boneco") ||
+  texto.includes("avengers") ||
+  texto.includes("homem de ferro") ||
+  texto.includes("hasbro") ||
+  texto.includes("marvel") ||
+  texto.includes("vingadores")
+) {
+  return "Brinquedos e Artigos Infantis";
+}
+
+if (
+  texto.includes("fantasia infantil") ||
+  texto.includes("homem aranha") ||
+  texto.includes("tobey")
+) {
+  return "Roupas e Calçados Infantil";
+}
+
+if (
+  texto.includes("calca moletom") ||
+  texto.includes("calça moletom") ||
+  texto.includes("moletom masculino")
+) {
+  return "Roupas e Moda Masculina";
+}
+
+if (
+  texto.includes("molinete") ||
+  texto.includes("vara de pesca") ||
+  texto.includes("pescaria")
+) {
+  return "Pesca e Pescaria";
+}
+
+if (
+  texto.includes("vestido") ||
+  texto.includes("sandalia feminina") ||
+  texto.includes("sandália feminina") ||
+  texto.includes("salto feminino") ||
+  texto.includes("vizzano")
+) {
+  return "Roupas e Moda Feminina";
+}
+
+if (
+  texto.includes("cadeira de carro infantil") ||
+  texto.includes("bebê conforto") ||
+  texto.includes("bebe conforto") ||
+  texto.includes("isofix") ||
+  texto.includes("maxi baby")
+) {
+  return "Bebês e Acessórios";
+}
+
+if (
+  texto.includes("bolsa viagem") ||
+  texto.includes("mochila") ||
+  texto.includes("gym bag") ||
+  texto.includes("academia")
+) {
+  return "Esporte e Suplementos";
 }
 
   for (const categoria of Object.values(CATEGORIAS_GLOBAIS)) {
