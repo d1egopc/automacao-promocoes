@@ -1460,7 +1460,7 @@ const CATEGORIAS_GLOBAIS = {
   ferramentas: {
     nome: "Ferramentas",
     palavras: [
-      "furadeira", "parafusadeira", "martelete", "caixa para ferramentas,
+      "furadeira", "parafusadeira", "martelete", "caixa para ferramentas",
       "chave de impacto", "serra marmore", "serra mármore", "maleta de ferramentas",
       "makita", "dewalt", "bosch", "vonder", "jogo de chave de fenda",
       "jogo de ferramentas", "maleta de ferramentas",
