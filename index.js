@@ -1533,7 +1533,7 @@ const CATEGORIAS_GLOBAIS = {
       "chocolate", "cafe", "café", "capsula de cafe", "cápsula de café",
       "arroz", "feijao", "feijão", "biscoito", "bolacha", "creme crocante",
       "bombom", "salgadinho", "temperos", "salame", "cereal", "barra de proteína",
-      "neslac comfor",
+      "neslac comfor"
     ]
   },
 
