@@ -20,6 +20,8 @@ async function buscarCupomMercadoLivre(oferta = {}) {
       return null;
     }
 
+console.log("🎟️ URL USADA PELO MOTOR:", url);
+
     const response = await axios.get(url, {
       timeout: 15000,
       maxRedirects: 5,
