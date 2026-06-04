@@ -1,0 +1,189 @@
+function normalizarTextoLocal(texto = "") {
+  return String(texto)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function contemAlgum(texto, palavras = []) {
+  return palavras.some(palavra =>
+    texto.includes(normalizarTextoLocal(palavra))
+  );
+}
+
+function classificarCategoriaOferta(oferta = {}, termo = "") {
+  const marketplace = normalizarTextoLocal(oferta.marketplace || "");
+
+  const texto = normalizarTextoLocal(`
+    ${termo}
+    ${oferta.titulo || ""}
+    ${oferta.nome || ""}
+    ${oferta.descricao || ""}
+    ${oferta.categoria || ""}
+    ${marketplace}
+  `);
+
+  if (contemAlgum(texto, [
+    "smartwatch", "smart watch", "relogio inteligente",
+    "smart band", "amazfit", "galaxy watch"
+  ])) {
+    return "Eletrônicos";
+  }
+
+  if (contemAlgum(texto, [
+    "guarda roupa", "guarda-roupa", "roupeiro", "painel tv",
+    "rack", "sofa", "mesa", "cadeira", "penteadeira",
+    "comoda", "armario", "cortina", "tapete sala"
+  ])) {
+    return "Casa, Móveis e Decoração";
+  }
+
+  if (contemAlgum(texto, [
+    "mouse", "teclado", "mousepad", "webcam", "micro sd",
+    "microsd", "cartao de memoria", "pendrive", "hub usb",
+    "headset", "monitor gamer"
+  ])) {
+    return "Periféricos";
+  }
+
+  if (contemAlgum(texto, [
+    "perfume", "colonia", "deo colonia", "malbec", "lattafa", "yara",
+    "eau de parfum", "body splash", "maquiagem", "skincare",
+    "hidratante", "protetor solar", "shampoo", "condicionador"
+  ])) {
+    return "Perfumaria, Farmácia e Beleza";
+  }
+
+  if (contemAlgum(texto, [
+    "memoria ram", "memoria kingston", "ram ddr", "ddr4", "ddr5",
+    "ssd", "nvme", "m.2", "placa de video", "placa mae",
+    "fonte gamer", "rx 580", "rx 6600", "rx 7600", "rx 9070",
+    "gtx", "rtx", "water cooler", "processador ryzen"
+  ])) {
+    return "Gamer e Hardware";
+  }
+
+  if (contemAlgum(texto, [
+    "iphone", "smartphone", "celular", "galaxy", "motorola",
+    "xiaomi", "redmi", "poco", "realme"
+  ])) {
+    return "Celulares e Smartphones";
+  }
+
+  if (contemAlgum(texto, [
+    "smart tv", "roku tv", "google tv", "qled", "oled",
+    "soundbar", "caixa de som", "fone bluetooth",
+    "fone de ouvido", "projetor", "echo dot", "alexa"
+  ])) {
+    return "Audio TV";
+  }
+
+  if (contemAlgum(texto, [
+    "cafeteira", "air fryer", "microondas", "liquidificador",
+    "batedeira", "sanduicheira", "grill", "aspirador robo",
+    "robo aspirador", "escova secadora", "panela eletrica"
+  ])) {
+    return "Eletroportáteis";
+  }
+
+  if (contemAlgum(texto, [
+    "ventilador", "climatizador", "geladeira", "freezer",
+    "maquina de lavar", "lava e seca", "fogao", "ar condicionado"
+  ])) {
+    return "Eletrodomésticos";
+  }
+
+  if (contemAlgum(texto, [
+    "furadeira", "parafusadeira", "kit ferramenta", "jogo de ferramentas",
+    "esmerilhadeira", "serra marmore", "trena", "martelete",
+    "makita", "dewalt", "bosch", "vonder"
+  ])) {
+    return "Ferramentas";
+  }
+
+  if (contemAlgum(texto, [
+    "fralda", "huggies", "pampers", "formula infantil",
+    "aptamil", "mamadeira", "chupeta", "bebe conforto",
+    "cadeira de carro infantil", "isofix", "carrinho de bebe"
+  ])) {
+    return "Bebês e Acessórios";
+  }
+
+  if (contemAlgum(texto, [
+    "racao", "cachorro", "gato", "petisco", "bifinho",
+    "pedigree", "quatree", "formula natural", "pet shop",
+    "coleira", "comedouro", "bebedouro"
+  ])) {
+    return "Pet Shop e Fazendinha";
+  }
+
+  if (contemAlgum(texto, [
+    "whey", "creatina", "pre treino", "albumina",
+    "bicicleta ergometrica", "spinning", "bola de futebol",
+    "camiseta academia", "dry fit treino", "academia",
+    "bike", "bicicleta"
+  ])) {
+    return "Esporte e Suplementos";
+  }
+
+  if (contemAlgum(texto, [
+    "molinete", "vara de pesca", "carretilha", "anzol",
+    "isca artificial", "pescaria", "camping", "barraca",
+    "fogareiro", "saco de dormir", "caixa termica"
+  ])) {
+    return "Pesca e Camping";
+  }
+
+  if (contemAlgum(texto, [
+    "vestido", "sandalia feminina", "salto feminino", "vizzano",
+    "bolsa feminina", "blusa feminina", "cropped", "saia feminina",
+    "calcinha", "sutia", "lingerie"
+  ])) {
+    return "Roupas e Moda Feminina";
+  }
+
+  if (contemAlgum(texto, [
+    "moletom masculino", "calca moletom", "camiseta masculina",
+    "bermuda masculina", "cueca", "carteira masculina"
+  ])) {
+    return "Roupas e Moda Masculina";
+  }
+
+  if (contemAlgum(texto, [
+    "chinelo", "havaianas", "tenis", "sapatilha",
+    "sandalia", "crocs", "mizuno", "asics", "nike",
+    "adidas", "olympikus", "puma"
+  ])) {
+    return "Tênis e Chinelos";
+  }
+
+  if (contemAlgum(texto, [
+    "boneco", "boneca", "lego", "avengers", "homem de ferro",
+    "hasbro", "marvel", "vingadores", "controle remoto",
+    "quebra cabeca", "lousa magica"
+  ])) {
+    return "Brinquedos e Artigos Infantis";
+  }
+
+  if (contemAlgum(texto, [
+    "azeite", "andorinha", "alimento", "mercearia",
+    "flor de sal", "cafe", "arroz", "feijao", "leite",
+    "chocolate", "biscoito", "bolacha"
+  ])) {
+    return "Alimentos e Mercearia";
+  }
+
+  if (contemAlgum(texto, [
+    "moto", "motocicleta", "honda cg", "titan", "fan 160",
+    "filtro de oleo", "carplay moto", "multimidia para moto",
+    "som automotivo", "camera de re"
+  ])) {
+    return "Automotivo";
+  }
+
+  return "Diversos";
+}
+
+module.exports = {
+  classificarCategoriaOferta
+};
