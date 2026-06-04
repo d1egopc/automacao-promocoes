@@ -257,54 +257,54 @@ function escolherCupomMercadoLivreParaOferta(oferta = {}, cupons = []) {
     if (cupom.length < 6 || cupom.length > 30) continue;
     if (/^\d+$/.test(cupom)) continue;
 
-    let pontos = 0;
+   let pontos = 0;
 
+const temLetra = /[A-Z]/.test(cupom);
+const temNumero = /\d/.test(cupom);
+
+if (temLetra && temNumero) pontos += 60;
+
+if (cupom.startsWith("CUPOM")) pontos += 300;
 if (cupom.includes("CUPOM")) pontos += 120;
-if (cupom.includes("OFF")) pontos += 80;
-if (/[A-Z]/.test(cupom) && /\d/.test(cupom)) pontos += 60;
 
-if (
-  cupom.includes("MODA") &&
-  (
-    textoOferta.includes("moda") ||
-    textoOferta.includes("camiseta") ||
-    textoOferta.includes("t-shirt") ||
-    textoOferta.includes("roupa") ||
-    textoOferta.includes("insider") ||
-    textoOferta.includes("feminina") ||
-    textoOferta.includes("masculina")
-  )
-) {
-  pontos += 200;
+if (cupom.includes("MODA")) pontos += 300;
+if (cupom.includes("PRA")) pontos += 100;
+
+if (cupom.includes("OFF")) pontos += 20;
+
+if (cupom.includes("TENIS") || cupom.includes("TÊNIS")) pontos += 80;
+
+const ofertaEhModa =
+  textoOferta.includes("moda") ||
+  textoOferta.includes("camiseta") ||
+  textoOferta.includes("t-shirt") ||
+  textoOferta.includes("roupa") ||
+  textoOferta.includes("insider") ||
+  textoOferta.includes("feminina") ||
+  textoOferta.includes("masculina");
+
+if (ofertaEhModa && cupom.includes("MODA")) {
+  pontos += 500;
 }
 
-    const temLetra = /[A-Z]/.test(cupom);
-    const temNumero = /\d/.test(cupom);
+for (const [grupo, palavras] of Object.entries(palavrasPorCategoria)) {
+  const ofertaCombina = palavras.some(p => textoOferta.includes(p));
+  const cupomCombina =
+    palavras.some(p => cupom.toLowerCase().includes(p)) ||
+    palavras.some(p => trecho.includes(p));
 
-    if (temLetra && temNumero) pontos += 20;
-    if (cupom.includes("CUPOM")) pontos += 30;
-    if (cupom.includes("OFF")) pontos += 20;
-    if (cupom.includes("MODA")) pontos += 25;
-    if (cupom.includes("TENIS") || cupom.includes("TÊNIS")) pontos += 25;
+  if (ofertaCombina && cupomCombina) {
+    pontos += 50;
+  }
 
-    for (const [grupo, palavras] of Object.entries(palavrasPorCategoria)) {
-      const ofertaCombina = palavras.some(p => textoOferta.includes(p));
-      const cupomCombina =
-        palavras.some(p => cupom.toLowerCase().includes(p)) ||
-        palavras.some(p => trecho.includes(p));
+  if (grupo === "moda" && ofertaCombina && trecho.includes("moda")) {
+    pontos += 40;
+  }
 
-      if (ofertaCombina && cupomCombina) {
-        pontos += 50;
-      }
-
-      if (grupo === "moda" && ofertaCombina && trecho.includes("moda")) {
-        pontos += 40;
-      }
-
-      if (grupo === "informatica" && ofertaCombina && trecho.includes("informática")) {
-        pontos += 40;
-      }
-    }
+  if (grupo === "informatica" && ofertaCombina && trecho.includes("informática")) {
+    pontos += 40;
+  }
+}
 
     if (trecho.includes("pix")) pontos += 10;
     if (trecho.includes("válido") || trecho.includes("valido")) pontos += 10;
