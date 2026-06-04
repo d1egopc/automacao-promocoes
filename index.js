@@ -1620,6 +1620,106 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
   `);
 
 
+// ===== CORREÇÕES FORTES DE CATEGORIA =====
+
+if (
+  texto.includes("perfume") ||
+  texto.includes("colonia") ||
+  texto.includes("colônia") ||
+  texto.includes("deo colonia") ||
+  texto.includes("deo colônia") ||
+  texto.includes("malbec") ||
+  texto.includes("lattafa") ||
+  texto.includes("yara") ||
+  texto.includes("eau de parfum") ||
+  texto.includes("body splash") ||
+  texto.includes("maquiagem") ||
+  texto.includes("skincare") ||
+  texto.includes("hidratante") ||
+  texto.includes("protetor solar")
+) {
+  return "Perfumaria, Farmácia e Beleza";
+}
+
+if (
+  texto.includes("memoria ram") ||
+  texto.includes("memória ram") ||
+  texto.includes("memória kingston") ||
+  texto.includes("memoria kingston") ||
+  texto.includes("ram ddr") ||
+  texto.includes("ddr4") ||
+  texto.includes("ddr5") ||
+  texto.includes("ssd") ||
+  texto.includes("nvme") ||
+  texto.includes("m.2") ||
+  texto.includes("placa de video") ||
+  texto.includes("placa de vídeo") ||
+  texto.includes("placa mae") ||
+  texto.includes("placa mãe") ||
+  texto.includes("fonte gamer") ||
+  texto.includes("rx 580") ||
+  texto.includes("rx 7600") ||
+  texto.includes("gtx") ||
+  texto.includes("rtx")
+) {
+  return "Gamer e Hardware";
+}
+
+if (
+  texto.includes("whey") ||
+  texto.includes("creatina") ||
+  texto.includes("pré treino") ||
+  texto.includes("pre treino") ||
+  texto.includes("albumin") ||
+  texto.includes("albumina") ||
+  texto.includes("bicicleta ergometrica") ||
+  texto.includes("bicicleta ergométrica") ||
+  texto.includes("spinning") ||
+  texto.includes("bola de futebol") ||
+  texto.includes("camiseta academia") ||
+  texto.includes("dry fit treino")
+) {
+  return "Esporte e Suplementos";
+}
+
+if (
+  texto.includes("formula infantil") ||
+  texto.includes("fórmula infantil") ||
+  texto.includes("aptamil") ||
+  texto.includes("fralda") ||
+  texto.includes("huggies") ||
+  texto.includes("pampers") ||
+  texto.includes("tapete de atividades") ||
+  texto.includes("brinquedos interativos")
+) {
+  return "Bebês e Acessórios";
+}
+
+if (
+  texto.includes("azeite") ||
+  texto.includes("andorinha") ||
+  texto.includes("mercado") ||
+  texto.includes("alimento") ||
+  texto.includes("mercearia") ||
+  texto.includes("flor de sal")
+) {
+  return "Alimentos e Mercearia";
+}
+
+if (
+  texto.includes("moto") ||
+  texto.includes("motocicleta") ||
+  texto.includes("honda cg") ||
+  texto.includes("titan") ||
+  texto.includes("fan 160") ||
+  texto.includes("filtro de oleo") ||
+  texto.includes("filtro de óleo") ||
+  texto.includes("carplay moto") ||
+  texto.includes("multimidia para moto")
+) {
+  return "Automotivo";
+}
+
 if (
   texto.includes("racao") ||
   texto.includes("ração") ||
@@ -1638,21 +1738,6 @@ if (
   return "Pet Shop e Fazendinha";
 }
 
-if (
-  texto.includes("perfume") ||
-  texto.includes("colonia") ||
-  texto.includes("colônia") ||
-  texto.includes("deo colonia") ||
-  texto.includes("deo colônia") ||
-  texto.includes("body splash") ||
-  texto.includes("attar") ||
-  texto.includes("fragrancia") ||
-  texto.includes("fragrância") ||
-  texto.includes("feromonio") ||
-  texto.includes("feromônio")
-) {
-  return "Perfumaria, Farmácia e Beleza";
-}
 
 if (
   texto.includes("smart tv") ||
@@ -1681,24 +1766,6 @@ if (
   texto.includes("jogo de ferramentas")
 ) {
   return "Ferramentas";
-}
-
-if (
-  texto.includes("ssd") ||
-  texto.includes("nvme") ||
-  texto.includes("m.2") ||
-  texto.includes("headset") ||
-  texto.includes("mouse gamer") ||
-  texto.includes("teclado mecanico") ||
-  texto.includes("teclado mecânico") ||
-  texto.includes("placa mae") ||
-  texto.includes("placa mãe") ||
-  texto.includes("placa de video") ||
-  texto.includes("placa de vídeo") ||
-  texto.includes("rtx") ||
-  texto.includes("radeon")
-) {
-  return "Gamer e Hardware";
 }
 
 if (
@@ -1785,15 +1852,6 @@ if (
   texto.includes("maxi baby")
 ) {
   return "Bebês e Acessórios";
-}
-
-if (
-  texto.includes("bolsa viagem") ||
-  texto.includes("mochila") ||
-  texto.includes("gym bag") ||
-  texto.includes("academia")
-) {
-  return "Esporte e Suplementos";
 }
 
   for (const categoria of Object.values(CATEGORIAS_GLOBAIS)) {
