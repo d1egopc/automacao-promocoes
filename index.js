@@ -2414,6 +2414,8 @@ if (jaExisteNaFila) {
   return res.json({
     ok: true,
     ignorada: true,
+    statusFila: "na_fila",
+    jaEstaNaFila: true,
     motivo: "Essa oferta já está salva ou já está na fila.",
     oferta
   });
@@ -2443,11 +2445,12 @@ salvarFila(clienteId);
     cupom: oferta.cupom
   });
 
-  res.json({
-    ok: true,
-    mensagem: "Oferta adicionada na fila",
-    oferta
-  });
+res.json({
+  ok: true,
+  mensagem: "Oferta adicionada na fila",
+  statusFila: "na_fila",
+  jaEstaNaFila: true,
+  oferta
 });
 
 // ================= ENVIO MANUAL =================
