@@ -63,17 +63,31 @@ console.log("🎟️ URL USADA PELO MOTOR:", url);
       timeout: 15000,
       maxRedirects: 5,
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Accept":
-          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-
-          Cookie: contexto.cookies || ""
-      }
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+  "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+  "Accept":
+    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Cookie": contexto.cookies || ""
+}
     });
 
 const html = response.data;
+
+console.log(
+  "🧪 HTML PRODUTO TEM PDP:",
+  String(html).includes("ui-pdp")
+);
+
+console.log(
+  "🧪 HTML PRODUTO TEM AFFILIATES:",
+  String(html).includes("affiliates-site")
+);
+
+console.log(
+  "🧪 TITULO HTML:",
+  String(html).match(/<title[^>]*>(.*?)<\/title>/i)?.[1]
+);
 
 const cuponsProduto =
   extrairCuponsDoHtmlProdutoML(html);
