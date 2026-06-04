@@ -215,7 +215,13 @@ const bloqueados = new Set([
   "VENDEDORES",
   "ORIGINAIS",
   "INTERNACIONAL",
-  "DOCTYPE"
+  "DOCTYPE",
+  "HTML",
+  "JSON",
+  "HTTP",
+  "PERCENT",
+  "TOTAL",
+  "CORRIGIDO"
 ]);
 
   const categoria = String(oferta.categoria || "").toLowerCase();
@@ -256,11 +262,6 @@ const bloqueados = new Set([
       "caneta", "mochila"
     ]
   };
-
-  const bloqueados = new Set([
-    "INATIVO", "ATIVO", "DOCTYPE", "HTML", "JSON", "HTTP",
-    "CUPOM", "CUPONS", "PERCENT", "TOTAL", "CORRIGIDO"
-  ]);
 
   let melhor = null;
 
