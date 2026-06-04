@@ -270,11 +270,15 @@ for (const item of cupons) {
   const cupom = String(item.cupom || "").toUpperCase().trim();
   const trecho = String(item.trecho || "").toLowerCase();
 
-  if (!pareceCupomRealML(cupom)) {
-    continue;
-  }
+ if (bloqueados.has(cupom)) {
+  continue;
+}
 
-   let pontos = 0;
+if (!pareceCupomRealML(cupom)) {
+  continue;
+}
+
+let pontos = 0;
 
 const temLetra = /[A-Z]/.test(cupom);
 const temNumero = /\d/.test(cupom);
