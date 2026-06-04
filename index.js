@@ -7811,6 +7811,7 @@ app.get("/destinos/:id", (req, res) => {
   });
 });
 
+
 // ================= TELEGRAM =================
 
 async function enviarTelegram(oferta, mensagem) {
@@ -7854,17 +7855,14 @@ async function enviarTelegram(oferta, mensagem) {
       console.log("✅ Telegram enviado:", destino.nome || chatId);
 
       await new Promise(r => setTimeout(r, 1500));
-
-          } catch (e) {
-            console.log("❌ erro produto AliExpress API:", e.message);
-          }
-        }
-
-      } catch (e) {
-        console.log("❌ erro busca termo AliExpress API:", e.message);
-      }
     }
 
+  } catch (e) {
+    console.log("❌ Erro Telegram:", e.message);
+  }
+}
+
+         
 // ================= FUNCÃO WHATSAPP =================
 
 async function iniciarWhatsApp(id, force = false) {
