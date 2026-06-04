@@ -39,7 +39,6 @@ const {
   registrarOfertaVista
 } = require("./marketplaces/inteligencia/memoria-ofertas");
 
-
 const {
   classificarCategoriaOferta
 } = require("./marketplaces/inteligencia/classificador-categorias");
@@ -2383,7 +2382,42 @@ app.post("/fila", (req, res) => {
       "📱 Use no app da Amazon para tentar chegar no menor valor.";
   }
 
- oferta = prepararOfertaGlobal(oferta);
+
+// ================= PROCESSAMENTO DE OFERTA MANUAL =================
+
+oferta = prepararOfertaGlobal(oferta);
+
+if (!oferta.id) {
+  oferta.id = `manual_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+oferta.manual = true;
+oferta.origem = oferta.origem || "manual";
+
+oferta.criadoEm = oferta.criadoEm || new Date().toLocaleString("pt-BR", {
+  timeZone: "America/Sao_Paulo"
+});
+
+oferta.dataEntradaFila = oferta.dataEntradaFila || oferta.criadoEm;
+
+const jaExisteNaFila = fila.some(o =>
+  String(o.clienteId || "admin") === String(clienteId) &&
+  (
+    String(o.linkOriginal || o.link || o.linkAfiliado || "") ===
+    String(oferta.linkOriginal || oferta.link || oferta.linkAfiliado || "") ||
+    normalizarTexto(o.titulo || o.nome || "") ===
+    normalizarTexto(oferta.titulo || oferta.nome || "")
+  )
+);
+
+if (jaExisteNaFila) {
+  return res.json({
+    ok: true,
+    ignorada: true,
+    motivo: "Essa oferta já está salva ou já está na fila.",
+    oferta
+  });
+}
 
 if (deveIgnorarOfertaRepetida(oferta)) {
   return res.json({
@@ -2396,9 +2430,10 @@ if (deveIgnorarOfertaRepetida(oferta)) {
 
 registrarOfertaVista(oferta);
 
- fila.push(oferta);
+fila.push(oferta);
 
- salvarFila(clienteId);
+salvarFila(clienteId);
+
 
   console.log("📥 Oferta adicionada na fila:", {
     clienteId,
