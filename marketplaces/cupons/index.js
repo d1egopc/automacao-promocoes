@@ -9,11 +9,7 @@ const CUPONS_CONFIRMADOS_ML = [
     ativo: true,
     validoAte: "2026-06-10",
     confianca: 100,
-    palavras: [
-      "moda", "camiseta", "t-shirt", "roupa", "moletom",
-      "calça", "blusa", "feminino", "feminina",
-      "masculino", "masculina", "oversized", "insider"
-    ]
+    palavras: ["moda", "camiseta", "t-shirt", "roupa", "moletom", "calça", "blusa", "vestido", "short", "saia", "polo", "oversized", "insider", "jeans", "cropped", "legging", "jaqueta"]
   },
   {
     cupom: "ESQUENTABELEZA",
@@ -21,11 +17,7 @@ const CUPONS_CONFIRMADOS_ML = [
     ativo: true,
     validoAte: "2026-06-10",
     confianca: 100,
-    palavras: [
-      "beleza", "perfume", "perfumaria", "lattafa",
-      "yara", "edp", "eau de parfum", "cosmético",
-      "cosmetico", "maquiagem", "skincare"
-    ]
+    palavras: ["beleza", "perfume", "perfumaria", "lattafa", "yara", "edp", "eau de parfum", "cosmético", "cosmetico", "maquiagem", "skincare", "hidratante", "protetor solar", "serum", "sérum", "shampoo", "condicionador", "batom"]
   }
 ];
 
