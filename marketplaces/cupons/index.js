@@ -203,6 +203,21 @@ console.log(
 
 function escolherCupomMercadoLivreParaOferta(oferta = {}, cupons = []) {
   const titulo = String(oferta.titulo || oferta.nome || "").toLowerCase();
+
+const bloqueados = new Set([
+  "CUPOM",
+  "CUPONS",
+  "INATIVO",
+  "ATIVO",
+  "MODA",
+  "TÊNIS",
+  "PRESENTES",
+  "VENDEDORES",
+  "ORIGINAIS",
+  "INTERNACIONAL",
+  "DOCTYPE"
+]);
+
   const categoria = String(oferta.categoria || "").toLowerCase();
   const preco = Number(
     String(oferta.preco || oferta.precoAtual || "0")
