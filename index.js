@@ -39,9 +39,6 @@ const {
   registrarOfertaVista
 } = require("./marketplaces/inteligencia/memoria-ofertas");
 
-const {
-  adicionarOfertaNaFila
-} = require("./marketplaces/inteligencia/fila-inteligente");
 
 const {
   classificarCategoriaOferta
@@ -5947,6 +5944,8 @@ console.log("✅ Oferta distribuída para cliente:", {
   marketplace: ofertaCliente.marketplace
 });
 
+  }
+}
 
       async function buscarTermoAliExpress(termo, tipo) {
       try {
@@ -6151,10 +6150,11 @@ console.log("✅ Oferta distribuída para cliente:", {
             }
 
             await new Promise(r => setTimeout(r, 1500));
-          } catch (e) {
-            console.log("❌ erro produto AliExpress API:", e.message);
-          }
-        }    
+
+      } catch (e) {
+        console.log("❌ erro busca termo AliExpress API:", e.message);
+      }
+    }
 
     for (const termo of buscasBrasil) {
       await buscarTermoAliExpress(termo, "🇧🇷");
@@ -7855,12 +7855,16 @@ async function enviarTelegram(oferta, mensagem) {
       console.log("✅ Telegram enviado:", destino.nome || chatId);
 
       await new Promise(r => setTimeout(r, 1500));
-    }
 
-  } catch (e) {
-    console.log("❌ Erro Telegram:", e.response?.data || e.message);
-  }
-}
+          } catch (e) {
+            console.log("❌ erro produto AliExpress API:", e.message);
+          }
+        }
+
+      } catch (e) {
+        console.log("❌ erro busca termo AliExpress API:", e.message);
+      }
+    }
 
 // ================= FUNCÃO WHATSAPP =================
 
