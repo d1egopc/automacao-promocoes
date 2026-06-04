@@ -7331,7 +7331,10 @@ if (jaExiste) {
   console.log("🤖 Oferta adicionada automaticamente:", ofertaFinal.nome);
 }
 
-return res.json(ofertaFinal);
+if (produtoRepetidoRecentemente(ofertaFinal.nome, 12)) {
+  console.log("🔁 Oferta parecida ignorada:", ofertaFinal.nome);
+  return res.json(ofertaFinal);
+}
 
     } catch (e) {
       console.error("ERRO MERCADO LIVRE:", e);
