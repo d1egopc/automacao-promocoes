@@ -204,48 +204,132 @@ console.log(
 function escolherCupomMercadoLivreParaOferta(oferta = {}, cupons = []) {
   const titulo = String(oferta.titulo || oferta.nome || "").toLowerCase();
   const categoria = String(oferta.categoria || "").toLowerCase();
+  const preco = Number(
+    String(oferta.preco || oferta.precoAtual || "0")
+      .replace(/[^\d,.-]/g, "")
+      .replace(".", "")
+      .replace(",", ".")
+  );
+
+  const textoOferta = `${titulo} ${categoria}`;
+
+  const palavrasPorCategoria = {
+    moda: [
+      "moda", "roupa", "roupas", "camiseta", "t-shirt", "blusa",
+      "calça", "vestido", "short", "polo", "insider", "feminina",
+      "masculina"
+    ],
+    tenis: [
+      "tênis", "tenis", "sapato", "chinelo", "adidas", "nike",
+      "mizuno", "olympikus"
+    ],
+    informatica: [
+      "informática", "informatica", "computador", "notebook", "pc",
+      "ssd", "fonte", "fonte gamer", "placa de vídeo", "placa de video",
+      "monitor", "teclado", "mouse", "hardware", "gamer"
+    ],
+    ferramentas: [
+      "ferramenta", "ferramentas", "furadeira", "parafusadeira",
+      "serra", "makita", "bosch"
+    ],
+    mercado: [
+      "mercado", "supermercado", "alimento", "limpeza", "heinz",
+      "yopro", "galderma"
+    ],
+    papelaria: [
+      "papelaria", "escritório", "escritorio", "escola", "caderno",
+      "caneta", "mochila"
+    ]
+  };
+
+  const bloqueados = new Set([
+    "INATIVO", "ATIVO", "DOCTYPE", "HTML", "JSON", "HTTP",
+    "CUPOM", "CUPONS", "PERCENT", "TOTAL", "CORRIGIDO"
+  ]);
+
+  let melhor = null;
 
   for (const item of cupons) {
-    const cupom = String(item.cupom || "").toUpperCase();
+    const cupom = String(item.cupom || "").toUpperCase().trim();
     const trecho = String(item.trecho || "").toLowerCase();
 
-    const ehModa =
-      titulo.includes("camiseta") ||
-      titulo.includes("t-shirt") ||
-      titulo.includes("roupa") ||
-      titulo.includes("moda") ||
-      categoria.includes("moda") ||
-      categoria.includes("roupas");
+    if (!cupom || bloqueados.has(cupom)) continue;
+    if (cupom.length < 6 || cupom.length > 30) continue;
+    if (/^\d+$/.test(cupom)) continue;
 
-    if (
-      cupom.includes("MODA") ||
-      trecho.includes("moda") ||
-      trecho.includes("roupas")
-    ) {
-      if (ehModa) {
-        return {
-          cupom,
-          tipoCupom: "campanha",
-          avisoCupom: `Use o cupom ${cupom} no carrinho e pague no Pix.`
-        };
+    let pontos = 0;
+
+    const temLetra = /[A-Z]/.test(cupom);
+    const temNumero = /\d/.test(cupom);
+
+    if (temLetra && temNumero) pontos += 20;
+    if (cupom.includes("CUPOM")) pontos += 30;
+    if (cupom.includes("OFF")) pontos += 20;
+    if (cupom.includes("MODA")) pontos += 25;
+    if (cupom.includes("TENIS") || cupom.includes("TÊNIS")) pontos += 25;
+
+    for (const [grupo, palavras] of Object.entries(palavrasPorCategoria)) {
+      const ofertaCombina = palavras.some(p => textoOferta.includes(p));
+      const cupomCombina =
+        palavras.some(p => cupom.toLowerCase().includes(p)) ||
+        palavras.some(p => trecho.includes(p));
+
+      if (ofertaCombina && cupomCombina) {
+        pontos += 50;
+      }
+
+      if (grupo === "moda" && ofertaCombina && trecho.includes("moda")) {
+        pontos += 40;
+      }
+
+      if (grupo === "informatica" && ofertaCombina && trecho.includes("informática")) {
+        pontos += 40;
       }
     }
 
-    if (
-      trecho.includes("mercado livre") ||
-      trecho.includes("pix") ||
-      trecho.includes("cupom")
-    ) {
-      return {
+    if (trecho.includes("pix")) pontos += 10;
+    if (trecho.includes("válido") || trecho.includes("valido")) pontos += 10;
+    if (trecho.includes("inativo")) pontos -= 100;
+    if (trecho.includes("expirado")) pontos -= 100;
+
+    if (preco > 0) {
+      const minMatch = trecho.match(/(?:acima de|mínimo|minimo|a partir de)\s*r?\$?\s*([\d.,]+)/i);
+      if (minMatch) {
+        const minimo = Number(
+          minMatch[1].replace(".", "").replace(",", ".")
+        );
+
+        if (minimo && preco >= minimo) pontos += 20;
+        if (minimo && preco < minimo) pontos -= 80;
+      }
+    }
+
+    if (!melhor || pontos > melhor.pontos) {
+      melhor = {
         cupom,
-        tipoCupom: "campanha",
-        avisoCupom: `Use o cupom ${cupom} no carrinho e pague no Pix.`
+        pontos,
+        trecho
       };
     }
   }
 
-  return null;
+  if (!melhor || melhor.pontos < 40) {
+    console.log("🎟️ ML: nenhum cupom com pontuação suficiente");
+    return null;
+  }
+
+  console.log("🏆 ML MELHOR CUPOM:", {
+    cupom: melhor.cupom,
+    pontos: melhor.pontos
+  });
+
+  return {
+    cupom: melhor.cupom,
+    tipoCupom: "campanha",
+    avisoCupom: `Use o cupom ${melhor.cupom} no carrinho e confira se aplica nesta oferta.`
+  };
 }
+
 
 async function aplicarCuponsAutomaticos(oferta = {}, contexto = {}) {
   try {
