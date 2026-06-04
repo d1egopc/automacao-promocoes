@@ -1,6 +1,10 @@
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 
 // ================= MOTOR UNIVERSAL DE CUPONS =================
+
+const ARQUIVO_CUPONS_ML = "/data/cupons_ml.json";
 
 const CUPONS_CONFIRMADOS_ML = [
   {
@@ -28,6 +32,58 @@ const CUPONS_CONFIRMADOS_ML = [
   palavras: ["esporte", "fitness", "bicicleta", "spinning", "bike", "academia", "musculação", "musculacao", "treino", "esteira"]
  }
 ];
+
+function garantirArquivoCuponsML() {
+  try {
+    if (!fs.existsSync("/data")) {
+      fs.mkdirSync("/data", { recursive: true });
+    }
+
+    if (!fs.existsSync(ARQUIVO_CUPONS_ML)) {
+      fs.writeFileSync(
+        ARQUIVO_CUPONS_ML,
+        JSON.stringify(CUPONS_CONFIRMADOS_ML, null, 2)
+      );
+    }
+  } catch (e) {
+    console.log("❌ Erro ao garantir arquivo de cupons ML:", e.message);
+  }
+}
+
+function carregarCuponsML() {
+  try {
+    garantirArquivoCuponsML();
+
+    const conteudo = fs.readFileSync(ARQUIVO_CUPONS_ML, "utf8");
+    const cupons = JSON.parse(conteudo);
+
+     console.log(
+      "🎟️ ML CUPONS CARREGADOS DO ARQUIVO:",
+      cupons.length
+    );
+
+   return Array.isArray(cupons) ? cupons : [];
+  } catch (e) {
+    console.log("❌ Erro ao carregar cupons ML:", e.message);
+    return CUPONS_CONFIRMADOS_ML;
+  }
+}
+
+function salvarCuponsML(cupons = []) {
+  try {
+    garantirArquivoCuponsML();
+
+    fs.writeFileSync(
+      ARQUIVO_CUPONS_ML,
+      JSON.stringify(cupons, null, 2)
+    );
+
+    return true;
+  } catch (e) {
+    console.log("❌ Erro ao salvar cupons ML:", e.message);
+    return false;
+  }
+}
 
 function extrairCuponsDoHtmlProdutoML(html = "") {
   const candidatos = [];
@@ -72,7 +128,10 @@ function buscarCupomConfirmadoML(oferta = {}) {
   const textoOferta = `${titulo} ${categoria}`;
   const hoje = new Date().toISOString().slice(0, 10);
 
-  for (const regra of CUPONS_CONFIRMADOS_ML) {
+  const cuponsConfirmados = carregarCuponsML();
+
+  for (const regra of cuponsConfirmados) {
+   
     if (!regra.ativo) continue;
     if (regra.validoAte && regra.validoAte < hoje) continue;
 
