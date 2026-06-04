@@ -259,6 +259,25 @@ function escolherCupomMercadoLivreParaOferta(oferta = {}, cupons = []) {
 
     let pontos = 0;
 
+if (cupom.includes("CUPOM")) pontos += 120;
+if (cupom.includes("OFF")) pontos += 80;
+if (/[A-Z]/.test(cupom) && /\d/.test(cupom)) pontos += 60;
+
+if (
+  cupom.includes("MODA") &&
+  (
+    textoOferta.includes("moda") ||
+    textoOferta.includes("camiseta") ||
+    textoOferta.includes("t-shirt") ||
+    textoOferta.includes("roupa") ||
+    textoOferta.includes("insider") ||
+    textoOferta.includes("feminina") ||
+    textoOferta.includes("masculina")
+  )
+) {
+  pontos += 200;
+}
+
     const temLetra = /[A-Z]/.test(cupom);
     const temNumero = /\d/.test(cupom);
 
