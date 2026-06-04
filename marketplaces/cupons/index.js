@@ -22,15 +22,15 @@ const CUPONS_CONFIRMADOS_ML = [
     validoAte: "2026-06-10",
     confianca: 100,
     palavras: ["beleza", "perfume", "perfumaria", "lattafa", "yara", "edp", "eau de parfum", "cosmético", "cosmetico", "maquiagem", "skincare", "hidratante", "protetor solar", "serum", "sérum", "shampoo", "condicionador", "batom"]
+  },
+  {
+    cupom: "6DO6SPORTS",
+    grupo: "esporte",
+    ativo: true,
+    validoAte: "2026-06-05",
+    confianca: 100,
+    palavras: ["esporte", "fitness", "bicicleta", "spinning", "bike", "academia", "musculação", "musculacao", "treino", "esteira", "squeeze"]
   }
- {
-  cupom: "6DO6SPORTS",
-  grupo: "esporte",
-  ativo: true,
-  validoAte: "2026-06-05",
-  confianca: 100,
-  palavras: ["esporte", "fitness", "bicicleta", "spinning", "bike", "academia", "musculação", "musculacao", "treino", "esteira"]
- }
 ];
 
 function garantirArquivoCuponsML() {
