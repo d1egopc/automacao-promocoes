@@ -36,10 +36,15 @@ const {
   importarProdutoKabumViaAwin
 } = require("./marketplaces/kabum/importador");
 
-
 const {
   aplicarCuponsAutomaticos
 } = require("./marketplaces/cupons");
+
+const {
+  deveIgnorarOfertaRepetida,
+  registrarOfertaVista
+} = require("./marketplaces/inteligencia/memoria-ofertas");
+
 
 
 if (!fs.existsSync("/data")) {
@@ -2637,6 +2642,17 @@ app.post("/fila", (req, res) => {
   }
 
  oferta = prepararOfertaGlobal(oferta);
+
+if (deveIgnorarOfertaRepetida(oferta)) {
+  return res.json({
+    ok: true,
+    ignorada: true,
+    motivo: "Oferta repetida recentemente sem queda relevante de preço ou cupom novo.",
+    oferta
+  });
+}
+
+registrarOfertaVista(oferta);
 
  fila.push(oferta);
 
