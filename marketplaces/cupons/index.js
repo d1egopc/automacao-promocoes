@@ -2,6 +2,43 @@ const axios = require("axios");
 
 // ================= MOTOR UNIVERSAL DE CUPONS =================
 
+function extrairCuponsDoHtmlProdutoML(html = "") {
+  const candidatos = [];
+  const texto = String(html);
+
+  const regexCupomMarketing =
+    /\b(?:CUPOM|MELI|ESQUENTA|COMPRA|GANHA|OFERTA)[A-Z0-9]{3,30}\b/g;
+
+  const encontradosDiretos = texto.match(regexCupomMarketing) || [];
+
+  for (const cupom of encontradosDiretos) {
+    candidatos.push({
+      cupom: cupom.toUpperCase(),
+      tipoCupom: "produto",
+      origem: "html_produto_ml",
+      prioridade: 1000
+    });
+  }
+
+  const regexJson =
+    /"(?:code|coupon_code|couponCode|voucherCode|voucher_code)"\s*:\s*"([A-Z0-9_-]{5,40})"/gi;
+
+  let match;
+
+  while ((match = regexJson.exec(texto)) !== null) {
+    candidatos.push({
+      cupom: String(match[1]).toUpperCase(),
+      tipoCupom: "produto",
+      origem: "json_produto_ml",
+      prioridade: 1200
+    });
+  }
+
+  return Array.from(
+    new Map(candidatos.map(c => [c.cupom, c])).values()
+  );
+}
+
 async function buscarCupomMercadoLivre(oferta = {}, contexto = {}) {
   try {
     const url =
@@ -36,6 +73,30 @@ console.log("🎟️ URL USADA PELO MOTOR:", url);
       }
     });
 
+const html = response.data;
+
+const cuponsProduto =
+  extrairCuponsDoHtmlProdutoML(html);
+
+if (cuponsProduto.length) {
+  console.log(
+    "🎟️ ML CUPONS NO HTML/JSON DO PRODUTO:",
+    cuponsProduto
+  );
+
+  const melhorProduto =
+    escolherCupomMercadoLivreParaOferta(
+      oferta,
+      cuponsProduto
+    );
+
+  if (melhorProduto) {
+    return melhorProduto;
+  }
+}
+
+const urlFinal =
+  response?.request?.res?.responseUrl || url;
 
 console.log(
   "🎟️ URL FINAL CUPOM:",
