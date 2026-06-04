@@ -156,6 +156,11 @@ async function buscarCuponsPaginaMercadoLivre(contexto = {}) {
       .replace(/\s+/g, " ")
       .trim();
 
+console.log(
+  "🧪 TRECHO CUPONS ML:",
+  texto.slice(0, 5000)
+);
+
     const cupons = [];
 
     const regexCupom = /\b[A-Z0-9]{5,25}\b/g;
