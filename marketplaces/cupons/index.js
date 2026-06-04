@@ -103,7 +103,7 @@ console.log(
   response.request?.res?.responseUrl
 );
 
-    const html = String(response.data || "");
+    const htmlProduto = String(response.data || "");
     const texto = html
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
       .replace(/<style[\s\S]*?<\/style>/gi, " ")
