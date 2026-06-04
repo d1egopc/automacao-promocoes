@@ -6149,21 +6149,14 @@ console.log("✅ Oferta distribuída para cliente:", {
               });
             }
 
-    await new Promise(r => setTimeout(r, 1500));
-
-       } catch (e) {
-       console.log("❌ erro produto AliExpress API:", e.message);
-      }
-       }
-
-      } catch (e) {
-        console.log("❌ erro busca termo AliExpress API:", e.message);
-      }
-    }
+            await new Promise(r => setTimeout(r, 1500));
+          } catch (e) {
+            console.log("❌ erro produto AliExpress API:", e.message);
+          }
+        }    
 
     for (const termo of buscasBrasil) {
-     
-   await buscarTermoAliExpress(termo, "🇧🇷");
+      await buscarTermoAliExpress(termo, "🇧🇷");
       if (adicionadasNestaRodada >= limitePorRodada) break;
     }
 
