@@ -2611,6 +2611,10 @@ app.post("/fila", (req, res) => {
     marketplace: body.marketplace || "",
     categoria: body.categoria || body.marketplace || "",
 
+    origem: body.origem || "manual",
+    manual: body.manual !== undefined ? body.manual : true,
+
+
     clienteId,
     status: "pendente",
     criadoEm: new Date().toLocaleString("pt-BR", {
