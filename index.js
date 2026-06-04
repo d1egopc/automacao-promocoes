@@ -23,12 +23,6 @@ const {
   farejarAliExpress
 } = require("./marketplaces/aliexpress/farejador");
 
-console.log(
-  "🧪 DEBUG ALIEXPRESS:",
-  typeof farejarAliExpress,
-  farejarAliExpress
-);
-
 const farejarKabum =
 require("./marketplaces/kabum/farejador");
 
@@ -45,6 +39,13 @@ const {
   registrarOfertaVista
 } = require("./marketplaces/inteligencia/memoria-ofertas");
 
+const {
+  adicionarOfertaNaFila
+} = require("./marketplaces/inteligencia/fila-inteligente");
+
+const {
+  classificarCategoriaOferta
+} = require("./marketplaces/inteligencia/classificador-categorias");
 
 
 if (!fs.existsSync("/data")) {
@@ -1615,262 +1616,6 @@ bebes: {
   }
 };
 
-function classificarCategoriaOferta(oferta = {}, termo = "") {
-  const texto = normalizarTexto(`
-    ${termo}
-    ${oferta.titulo || ""}
-    ${oferta.nome || ""}
-    ${oferta.descricao || ""}
-    ${oferta.categoria || ""}
-  `);
-
-
-// ===== CORREÇÕES FORTES DE CATEGORIA =====
-
-if (
-  texto.includes("perfume") ||
-  texto.includes("colonia") ||
-  texto.includes("colônia") ||
-  texto.includes("deo colonia") ||
-  texto.includes("deo colônia") ||
-  texto.includes("malbec") ||
-  texto.includes("lattafa") ||
-  texto.includes("yara") ||
-  texto.includes("eau de parfum") ||
-  texto.includes("body splash") ||
-  texto.includes("maquiagem") ||
-  texto.includes("skincare") ||
-  texto.includes("hidratante") ||
-  texto.includes("protetor solar")
-) {
-  return "Perfumaria, Farmácia e Beleza";
-}
-
-if (
-  texto.includes("memoria ram") ||
-  texto.includes("memória ram") ||
-  texto.includes("memória kingston") ||
-  texto.includes("memoria kingston") ||
-  texto.includes("ram ddr") ||
-  texto.includes("ddr4") ||
-  texto.includes("ddr5") ||
-  texto.includes("ssd") ||
-  texto.includes("nvme") ||
-  texto.includes("m.2") ||
-  texto.includes("placa de video") ||
-  texto.includes("placa de vídeo") ||
-  texto.includes("placa mae") ||
-  texto.includes("placa mãe") ||
-  texto.includes("fonte gamer") ||
-  texto.includes("rx 580") ||
-  texto.includes("rx 7600") ||
-  texto.includes("gtx") ||
-  texto.includes("rtx")
-) {
-  return "Gamer e Hardware";
-}
-
-if (
-  texto.includes("whey") ||
-  texto.includes("creatina") ||
-  texto.includes("pré treino") ||
-  texto.includes("pre treino") ||
-  texto.includes("albumin") ||
-  texto.includes("albumina") ||
-  texto.includes("bicicleta ergometrica") ||
-  texto.includes("bicicleta ergométrica") ||
-  texto.includes("spinning") ||
-  texto.includes("bola de futebol") ||
-  texto.includes("camiseta academia") ||
-  texto.includes("dry fit treino")
-) {
-  return "Esporte e Suplementos";
-}
-
-if (
-  texto.includes("formula infantil") ||
-  texto.includes("fórmula infantil") ||
-  texto.includes("aptamil") ||
-  texto.includes("fralda") ||
-  texto.includes("huggies") ||
-  texto.includes("pampers") ||
-  texto.includes("tapete de atividades") ||
-  texto.includes("brinquedos interativos")
-) {
-  return "Bebês e Acessórios";
-}
-
-if (
-  texto.includes("azeite") ||
-  texto.includes("andorinha") ||
-  texto.includes("mercado") ||
-  texto.includes("alimento") ||
-  texto.includes("mercearia") ||
-  texto.includes("flor de sal")
-) {
-  return "Alimentos e Mercearia";
-}
-
-if (
-  texto.includes("moto") ||
-  texto.includes("motocicleta") ||
-  texto.includes("honda cg") ||
-  texto.includes("titan") ||
-  texto.includes("fan 160") ||
-  texto.includes("filtro de oleo") ||
-  texto.includes("filtro de óleo") ||
-  texto.includes("carplay moto") ||
-  texto.includes("multimidia para moto")
-) {
-  return "Automotivo";
-}
-
-if (
-  texto.includes("racao") ||
-  texto.includes("ração") ||
-  texto.includes("cachorro") ||
-  texto.includes("caes") ||
-  texto.includes("cães") ||
-  texto.includes("petisco") ||
-  texto.includes("bifinho") ||
-  texto.includes("pedigree") ||
-  texto.includes("quatree") ||
-  texto.includes("formula natural") ||
-  texto.includes("fórmula natural") ||
-  texto.includes("gato") ||
-  texto.includes("pet shop")
-) {
-  return "Pet Shop e Fazendinha";
-}
-
-
-if (
-  texto.includes("smart tv") ||
-  texto.includes("roku tv") ||
-  texto.includes("google tv") ||
-  texto.includes("qled") ||
-  texto.includes("oled")
-) {
-  return "Audio TV";
-}
-
-if (
-  texto.includes("iphone") ||
-  texto.includes("smartphone") ||
-  texto.includes("celular") ||
-  texto.includes("galaxy") ||
-  texto.includes("motorola")
-) {
-  return "Celulares e Smartphones";
-}
-
-if (
-  texto.includes("furadeira") ||
-  texto.includes("parafusadeira") ||
-  texto.includes("kit ferramenta") ||
-  texto.includes("jogo de ferramentas")
-) {
-  return "Ferramentas";
-}
-
-if (
-  texto.includes("cafeteira") ||
-  texto.includes("air fryer") ||
-  texto.includes("microondas") ||
-  texto.includes("liquidificador")
-) {
-  return "Eletroportáteis";
-}
-
-if (
-  texto.includes("ventilador") ||
-  texto.includes("climatizador")
-) {
-  return "Eletrodomésticos";
-}
-
-if (
-  texto.includes("boneco") ||
-  texto.includes("avengers") ||
-  texto.includes("homem de ferro") ||
-  texto.includes("hasbro") ||
-  texto.includes("marvel") ||
-  texto.includes("vingadores")
-) {
-  return "Brinquedos e Artigos Infantis";
-}
-
-if (
-  texto.includes("fantasia infantil") ||
-  texto.includes("homem aranha") ||
-  texto.includes("tobey")
-) {
-  return "Roupas e Calçados Infantil";
-}
-
-if (
-  texto.includes("calca moletom") ||
-  texto.includes("calça moletom") ||
-  texto.includes("moletom masculino")
-) {
-  return "Roupas e Moda Masculina";
-}
-
-
-if (
-  texto.includes("molinete") ||
-  texto.includes("vara de pesca") ||
-  texto.includes("carretilha") ||
-  texto.includes("anzol") ||
-  texto.includes("isca artificial") ||
-  texto.includes("pescaria") ||
-  texto.includes("camping") ||
-  texto.includes("barraca") ||
-  texto.includes("fogareiro") ||
-  texto.includes("saco de dormir") ||
-  texto.includes("lanterna") ||
-  texto.includes("caixa termica") ||
-  texto.includes("caixa térmica") ||
-  texto.includes("mochila trilha") ||
-  texto.includes("kit sobrevivencia") ||
-  texto.includes("kit sobrevivência")
-) {
-  return "Pesca e Camping";
-}
-
-
-if (
-  texto.includes("vestido") ||
-  texto.includes("sandalia feminina") ||
-  texto.includes("sandália feminina") ||
-  texto.includes("salto feminino") ||
-  texto.includes("vizzano")
-) {
-  return "Roupas e Moda Feminina";
-}
-
-if (
-  texto.includes("cadeira de carro infantil") ||
-  texto.includes("bebê conforto") ||
-  texto.includes("bebe conforto") ||
-  texto.includes("isofix") ||
-  texto.includes("maxi baby")
-) {
-  return "Bebês e Acessórios";
-}
-
-  for (const categoria of Object.values(CATEGORIAS_GLOBAIS)) {
-    const bateu = categoria.palavras.some(palavra =>
-      texto.includes(normalizarTexto(palavra))
-    );
-
-    if (bateu) {
-      return categoria.nome;
-    }
-  }
-
-  return "Diversos";
-}
 
 // ================= HELPERS DESTINOS INTELIGENTES =================
 
@@ -6092,6 +5837,9 @@ function usuarioTemIntegracaoMarketplace(clienteId, marketplace) {
 // =============== FUNCAO DISTRIBUIDOR OFERTAS ======================================
 
 async function distribuirOfertaParaClientes(ofertaBase) {
+
+  ofertaBase = prepararOfertaGlobal(ofertaBase);
+
   for (const usuario of usuarios) {
     if (!usuario?.ativo) continue;
 
@@ -6176,19 +5924,28 @@ if (linkAfiliadoCliente === linkOriginal) {
       )
     );
 
-    if (jaExisteCliente) continue;
+ if (jaExisteCliente) continue;
 
-  fila.push(ofertaCliente);
-
-  salvarFila(clienteId);
-
-    console.log("✅ Oferta distribuída para cliente:", {
-      clienteId,
-      titulo: ofertaCliente.titulo,
-      marketplace: ofertaCliente.marketplace
-    });
-  }
+if (deveIgnorarOfertaRepetida(ofertaCliente)) {
+  console.log("🧠 Oferta automática ignorada pela memória:", {
+    clienteId,
+    marketplace: ofertaCliente.marketplace,
+    titulo: ofertaCliente.titulo
+  });
+  continue;
 }
+
+registrarOfertaVista(ofertaCliente);
+
+fila.push(ofertaCliente);
+
+salvarFila(clienteId);
+
+console.log("✅ Oferta distribuída para cliente:", {
+  clienteId,
+  titulo: ofertaCliente.titulo,
+  marketplace: ofertaCliente.marketplace
+});
 
 
       async function buscarTermoAliExpress(termo, tipo) {
