@@ -7412,15 +7412,21 @@ const descontoPercentual = temDescontoReal
   ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
   : 0;
 
-if (!temCupom && descontoPercentual < 10) {
-  console.log("⚠️ Oferta ignorada: desconto baixo", novaOferta.nome);
+const descontoMinimoManual =
+  Number(config?.marketplaces?.mercadolivre?.descontoMinimo || 3);
+
+if (!temCupom && descontoPercentual < descontoMinimoManual) {
+  console.log("⚠️ Oferta ignorada: desconto baixo", {
+    nome: novaOferta.nome,
+    descontoPercentual,
+    descontoMinimoManual
+  });
 
   return res.json({
     ...produto,
     aviso: "Produto importado, mas não foi enviado para fila porque o desconto parece baixo."
   });
 }
-
 
 const integracaoML =
   getIntegracaoCliente(clienteId, "mercadolivre");
