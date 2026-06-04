@@ -249,13 +249,14 @@ function escolherCupomMercadoLivreParaOferta(oferta = {}, cupons = []) {
 
   let melhor = null;
 
-  for (const item of cupons) {
-    const cupom = String(item.cupom || "").toUpperCase().trim();
-    const trecho = String(item.trecho || "").toLowerCase();
+for (const item of cupons) {
 
-    if (!cupom || bloqueados.has(cupom)) continue;
-    if (cupom.length < 6 || cupom.length > 30) continue;
-    if (/^\d+$/.test(cupom)) continue;
+  const cupom = String(item.cupom || "").toUpperCase().trim();
+  const trecho = String(item.trecho || "").toLowerCase();
+
+  if (!pareceCupomRealML(cupom)) {
+    continue;
+  }
 
    let pontos = 0;
 
@@ -349,6 +350,24 @@ for (const [grupo, palavras] of Object.entries(palavrasPorCategoria)) {
   };
 }
 
+function pareceCupomRealML(cupom = "") {
+  cupom = String(cupom).toUpperCase();
+
+  const palavrasFortes = [
+    "MELI",
+    "CUPOM",
+    "MODA",
+    "BELEZA",
+    "OFERTA",
+    "PIX",
+    "APP",
+    "OFF"
+  ];
+
+  return palavrasFortes.some(p =>
+    cupom.includes(p)
+  );
+}
 
 async function aplicarCuponsAutomaticos(oferta = {}, contexto = {}) {
   try {
