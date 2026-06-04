@@ -7311,25 +7311,27 @@ const ofertaFinal =
     cookies: cookiesML
   });
 
-
- const jaExiste = fila.some(
+const jaExiste = fila.some(
   (o) => o.link === ofertaFinal.link
 );
 
 if (jaExiste) {
   console.log("⚠️ Oferta já existe na fila:", ofertaFinal.nome);
-} else {
-
-  if (produtoRepetidoRecentemente(ofertaFinal.nome, 12)) {
-    console.log("🔁 Oferta parecida ignorada:", ofertaFinal.nome);
-    return;
-  }
-
-  fila.push(ofertaFinal);
-  salvarFila();
-
-  console.log("🤖 Oferta adicionada automaticamente:", ofertaFinal.nome);
+  return res.json(ofertaFinal);
 }
+
+if (produtoRepetidoRecentemente(ofertaFinal.nome, 12)) {
+  console.log("🔁 Oferta parecida ignorada:", ofertaFinal.nome);
+  return res.json(ofertaFinal);
+}
+
+fila.push(ofertaFinal);
+salvarFila();
+
+console.log("🤖 Oferta adicionada automaticamente:", ofertaFinal.nome);
+
+return res.json(ofertaFinal);
+
 
 if (produtoRepetidoRecentemente(ofertaFinal.nome, 12)) {
   console.log("🔁 Oferta parecida ignorada:", ofertaFinal.nome);
