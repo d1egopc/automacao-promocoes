@@ -7311,6 +7311,7 @@ const ofertaFinal =
     cookies: cookiesML
   });
 
+
  const jaExiste = fila.some(
   (o) => o.link === ofertaFinal.link
 );
@@ -7330,7 +7331,7 @@ if (jaExiste) {
   console.log("🤖 Oferta adicionada automaticamente:", ofertaFinal.nome);
 }
 
-return res.json(produto);
+return res.json(ofertaFinal);
 
     } catch (e) {
       console.error("ERRO MERCADO LIVRE:", e);
