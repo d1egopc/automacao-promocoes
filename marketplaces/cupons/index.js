@@ -2,6 +2,33 @@ const axios = require("axios");
 
 // ================= MOTOR UNIVERSAL DE CUPONS =================
 
+const CUPONS_CONFIRMADOS_ML = [
+  {
+    cupom: "CUPOMPRAMODA",
+    grupo: "moda",
+    ativo: true,
+    validoAte: "2026-06-10",
+    confianca: 100,
+    palavras: [
+      "moda", "camiseta", "t-shirt", "roupa", "moletom",
+      "calça", "blusa", "feminino", "feminina",
+      "masculino", "masculina", "oversized", "insider"
+    ]
+  },
+  {
+    cupom: "ESQUENTABELEZA",
+    grupo: "beleza",
+    ativo: true,
+    validoAte: "2026-06-10",
+    confianca: 100,
+    palavras: [
+      "beleza", "perfume", "perfumaria", "lattafa",
+      "yara", "edp", "eau de parfum", "cosmético",
+      "cosmetico", "maquiagem", "skincare"
+    ]
+  }
+];
+
 function extrairCuponsDoHtmlProdutoML(html = "") {
   const candidatos = [];
   const texto = String(html);
@@ -39,6 +66,40 @@ function extrairCuponsDoHtmlProdutoML(html = "") {
   );
 }
 
+function buscarCupomConfirmadoML(oferta = {}) {
+  const titulo = String(oferta.titulo || oferta.nome || "").toLowerCase();
+  const categoria = String(oferta.categoria || "").toLowerCase();
+  const textoOferta = `${titulo} ${categoria}`;
+  const hoje = new Date().toISOString().slice(0, 10);
+
+  for (const regra of CUPONS_CONFIRMADOS_ML) {
+    if (!regra.ativo) continue;
+    if (regra.validoAte && regra.validoAte < hoje) continue;
+
+    const combina = regra.palavras.some(p =>
+      textoOferta.includes(String(p).toLowerCase())
+    );
+
+    if (!combina) continue;
+
+    console.log("✅ ML CUPOM CONFIRMADO ENCONTRADO:", {
+      cupom: regra.cupom,
+      grupo: regra.grupo,
+      confianca: regra.confianca
+    });
+
+    return {
+      cupom: regra.cupom,
+      tipoCupom: "confirmado",
+      avisoCupom: `Use o cupom ${regra.cupom} no carrinho e pague no Pix para chegar no menor valor.`,
+      cupomConfianca: regra.confianca,
+      cupomGrupo: regra.grupo
+    };
+  }
+
+  return null;
+}
+
 async function buscarCupomMercadoLivre(oferta = {}, contexto = {}) {
   try {
     const url =
@@ -56,6 +117,12 @@ async function buscarCupomMercadoLivre(oferta = {}, contexto = {}) {
     if (!url || !url.includes("mercadolivre.com")) {
       return null;
     }
+
+const cupomConfirmado = buscarCupomConfirmadoML(oferta);
+
+if (cupomConfirmado) {
+  return cupomConfirmado;
+}
 
 console.log("🎟️ URL USADA PELO MOTOR:", url);
 
@@ -298,8 +365,14 @@ const bloqueados = new Set([
   "HTTP",
   "PERCENT",
   "TOTAL",
-  "CORRIGIDO"
+  "CORRIGIDO",
+  "40OFF",
+  "50OFF",
+  "60OFF",
+  "70OFF",
+  "CUPOM20REAIS1P"
 ]);
+
 
   const categoria = String(oferta.categoria || "").toLowerCase();
   const preco = Number(
