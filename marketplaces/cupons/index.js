@@ -78,6 +78,8 @@ const html = response.data;
 const cuponsProduto =
   extrairCuponsDoHtmlProdutoML(html);
 
+console.log("🧪 ML CUPONS PRODUTO EXTRAÍDOS:", cuponsProduto);
+
 if (cuponsProduto.length) {
   console.log(
     "🎟️ ML CUPONS NO HTML/JSON DO PRODUTO:",
