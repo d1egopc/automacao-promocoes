@@ -52,6 +52,10 @@ const {
   adicionarManualNaFila
 } = require("./marketplaces/manual");
 
+const {
+  importarProdutoManual
+} = require("./marketplaces/manual");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -7045,366 +7049,36 @@ if (temMin && temMax && minNumero !== maxNumero) {
   };
 }
 
-// ================= IMPORTAR PRODUTO AMAZON =================
+// ================= IMPORTAR PRODUTO MANUAL UNIVERSAL =================
 
 app.post("/importar-produto", async (req, res) => {
-  const clienteId = getClienteId(req);
-let marketplace = String(req.body.marketplace || "").toLowerCase();
-let { url } = req.body;
-
-url = String(url || "").trim();
-
-if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
-  url = "https://" + url;
-}
-
-const urlLower = url.toLowerCase();
-
-if (urlLower.includes("amazon.com") || urlLower.includes("amzn.to")) {
-  marketplace = "amazon";
-
-} else if (
-  urlLower.includes("mercadolivre.com") ||
-  urlLower.includes("meli.la")
-) {
-  marketplace = "mercadolivre";
-
-} else if (
-  urlLower.includes("shopee.com") ||
-  urlLower.includes("s.shopee")
-) {
-  marketplace = "shopee";
-
-} else if (
-  urlLower.includes("awin1.com") ||
-  urlLower.includes("awin.com")
-) {
-  marketplace = "awin";
-
-} else if (urlLower.includes("aliexpress.com")) {
-  marketplace = "aliexpress";
-}
-
-
-  if (!marketplace || !url) {
-    return res.status(400).json({
-      erro: "marketplace e url obrigatórios"
-    });
-  }
-
-  const config = integracoesPorCliente[clienteId]?.[marketplace];
-
-  if (!config) {
-    return res.status(400).json({
-      erro: `Integração ${marketplace} não configurada`
-    });
-  }
-
-  if (marketplace === "amazon") {
-    try {
-      const produto = await importarAmazon(url, config);
-
-      if (!produto.titulo || produto.titulo === "Produto Amazon") {
-        return res.json({
-          marketplace: "amazon",
-          titulo: "Produto importado da Amazon",
-          precoAntigo: "",
-          precoAtual: "",
-          cupom: "",
-          linkOriginal: url,
-          linkAfiliado: url,
-          imagem: "",
-          categoria: "Amazon",
-          aviso: "Dados não encontrados automaticamente. Preencha manualmente."
-        });
-      }
-
-
-      return res.json(produto);
-    } catch (e) {
-      console.error("ERRO AMAZON:", e);
-
-      return res.json({
-        marketplace: "amazon",
-        titulo: "Produto importado da Amazon",
-        precoAntigo: "",
-        precoAtual: "",
-        cupom: "",
-        linkOriginal: url,
-        linkAfiliado: url,
-        imagem: "",
-        categoria: "Amazon",
-        aviso: "Erro ao consultar Amazon. Preencha manualmente."
-      });
-    }
-  }
-
-if (marketplace === "aliexpress") {
   try {
-    const integracaoAli =
-      getIntegracaoCliente(clienteId, "aliexpress");
+    const resultado = await importarProdutoManual(req, {
+      getClienteId,
+      integracoesPorCliente,
+      getIntegracaoCliente,
 
-    const produto = await importarAliExpress(url, {
-      credenciais: integracaoAli?.credenciais || {}
+      importarAmazon,
+      importarAliExpress,
+      importarMagalu,
+      importarMercadoLivre,
+      importarShopee,
+
+      gerarLinkAfiliadoMercadoLivre
     });
 
-    return res.json(produto);
+    return res
+      .status(resultado.status || 200)
+      .json(resultado.body);
 
   } catch (e) {
-    console.error("ERRO ALIEXPRESS:", e);
+    console.log("❌ erro rota importar-produto:", e.message);
 
-    return res.json({
-      marketplace: "aliexpress",
-      titulo: "Produto importado da AliExpress",
-      precoAntigo: "",
-      precoAtual: "",
-      cupom: "",
-      linkOriginal: url,
-      linkAfiliado: url,
-      imagem: "",
-      categoria: "AliExpress",
-      aviso: "Erro ao consultar AliExpress"
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
     });
   }
-}
-
-if (marketplace === "magalu") {
-  try {
-    const produto = await importarMagalu(url, config);
-    return res.json(produto);
-  } catch (e) {
-    console.error("ERRO MAGALU:", e);
-
-    return res.json({
-      marketplace: "magalu",
-      titulo: "Produto importado de Magalu",
-      precoAntigo: "",
-      precoAtual: "",
-      cupom: "",
-      linkOriginal: url,
-      linkAfiliado: url,
-      imagem: "",
-      categoria: "Magalu",
-      aviso: "Erro ao gerar link Magalu. Preencha manualmente."
-    });
-  }
-}
-
-
-console.log("🧪 IMPORTAÇÃO MANUAL ML:", {
-  url,
-  clienteId,
-  temGetIntegracao: typeof getIntegracaoCliente,
-  temGeradorML: typeof gerarLinkAfiliadoMercadoLivre
-});
-
-if (marketplace === "mercadolivre") {
-  try {
-    const produto = await importarMercadoLivre(
-      url,
-      clienteId,
-      {
-        getIntegracaoCliente,
-        gerarLinkAfiliadoMercadoLivre
-      }
-    );
-
-      if (!produto.titulo || produto.titulo === "Produto Mercado Livre") {
-        return res.json({
-          marketplace: "mercadolivre",
-          titulo: "Produto importado de Mercado Livre",
-          precoAntigo: "",
-          precoAtual: "",
-          cupom: "",
-          linkOriginal: url,
-          linkAfiliado: url,
-          imagem: "",
-          categoria: "Mercado Livre",
-          aviso: "Dados não encontrados automaticamente. Preencha manualmente."
-        });
-      }
-
-    
-const novaOferta = {
-  nome: produto.nome || produto.titulo,
-  preco: produto.preco || produto.precoAtual,
-  link: produto.linkAfiliado || produto.linkOriginal,
-  linkOriginal: produto.linkOriginal || produto.url || url,
-  imagem: produto.imagem,
-  status: "pendente",
-  marketplace: "mercadolivre",
-
-  cupom: "",
-  tipoCupom: "",
-  avisoCupom: "",
-  cupomMarketplace: "mercadolivre",
-  cupomValor: "",
-  cupomPercentual: "",
-};
-
-const precoNumero = Number(
-  String(novaOferta.preco || "")
-    .replace("R$", "")
-    .replace(/\./g, "")
-    .replace(",", ".")
-    .trim()
-);
-
-
-if (!precoNumero || !Number.isFinite(precoNumero)) {
-  console.log("⚠️ Oferta ignorada: preço inválido", novaOferta.nome);
-  return res.json({
-    ...produto,
-    aviso: "Produto importado, mas não foi enviado para fila porque não tem preço válido."
-  });
-}
-
-const precoAntigoNumero = Number(
-  String(produto.precoAntigo || "")
-    .replace("R$", "")
-    .replace(/\./g, "")
-    .replace(",", ".")
-    .trim()
-);
-
-const temCupom = Boolean(
-  novaOferta.cupom &&
-  String(novaOferta.cupom).trim()
-);
-
-const temDescontoReal =
-  precoAntigoNumero &&
-  Number.isFinite(precoAntigoNumero) &&
-  precoAntigoNumero > precoNumero;
-
-const descontoPercentual = temDescontoReal
-  ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
-  : 0;
-
-const descontoMinimoManual =
-  Number(config?.marketplaces?.mercadolivre?.descontoMinimo || 3);
-
-if (!temCupom && descontoPercentual < descontoMinimoManual) {
-  console.log("⚠️ Oferta ignorada: desconto baixo", {
-    nome: novaOferta.nome,
-    descontoPercentual,
-    descontoMinimoManual
-  });
-
-  return res.json({
-    ...produto,
-    aviso: "Produto importado, mas não foi enviado para fila porque o desconto parece baixo."
-  });
-}
-
-const integracaoML =
-  getIntegracaoCliente(clienteId, "mercadolivre");
-
-const cookiesML =
-  integracaoML?.credenciais?.cookies || "";
-
-const ofertaFinal =
-  await aplicarCuponsAutomaticos(novaOferta, {
-    cookies: cookiesML
-  });
-
- const jaExiste = fila.some(
-  (o) => o.link === ofertaFinal.link
-);
-
-if (jaExiste) {
-  console.log("⚠️ Oferta já existe na fila:", ofertaFinal.nome);
-} else {
-
-  if (deveIgnorarOfertaRepetida(ofertaFinal)) {
-    console.log("🧠 Oferta ignorada pela memória:", ofertaFinal.nome);
-    return;
-  }
-
-  ofertaFinal.status = ofertaFinal.status || "pendente";
-  ofertaFinal.statusDetalhe = ofertaFinal.statusDetalhe || "Na fila";
-
-  registrarOfertaVista(ofertaFinal);
-
-  fila.push(ofertaFinal);
-
-  salvarFila();
-
-  console.log("🤖 Oferta adicionada automaticamente:", ofertaFinal.nome);
-}
-
-return res.json(produto);
-
-    } catch (e) {
-      console.error("ERRO MERCADO LIVRE:", e);
-
-      return res.json({
-        marketplace: "mercadolivre",
-        titulo: "Produto importado de Mercado Livre",
-        precoAntigo: "",
-        precoAtual: "",
-        cupom: "",
-        avisoCupom: "",
-        linkOriginal: url,
-        linkAfiliado: url,
-        imagem: "",
-        categoria: "Mercado Livre",
-        aviso: "Erro ao consultar Mercado Livre. Preencha manualmente."
-      });
-    }
-  }
-
-  if (marketplace === "shopee") {
-    try {
-      const produto = await importarShopee(url, config);
-
-      if ((!produto.titulo || produto.titulo === "Produto Shopee") && !produto.precoAtual && !produto.imagem) {
-        return res.json({
-          marketplace: "shopee",
-          titulo: "Produto Shopee importado",
-          precoAntigo: "",
-          precoAtual: "",
-          cupom: "",
-          linkOriginal: url,
-          linkAfiliado: url,
-          imagem: "",
-          categoria: "Shopee",
-          aviso: "Shopee não retornou dados completos. Preencha manualmente."
-        });
-      }
-
-console.log("🧪 SHOPEE PRODUTO FINAL RES.JSON:", produto);
-
-      return res.json(produto);
-    } catch (e) {
-      console.error("ERRO SHOPEE:", e);
-
-      return res.json({
-        marketplace: "shopee",
-        titulo: "Produto Shopee importado",
-        precoAntigo: "",
-        precoAtual: "",
-        cupom: "",
-        linkOriginal: url,
-        linkAfiliado: url,
-        imagem: "",
-        categoria: "Shopee",
-        aviso: "Erro ao consultar Shopee. Preencha manualmente."
-      });
-    }
-  }
-
-  return res.json({
-    marketplace,
-    titulo: `Produto importado de ${config.nome || marketplace}`,
-    precoAntigo: "",
-    precoAtual: "",
-    cupom: "",
-    linkOriginal: url,
-    linkAfiliado: url,
-    imagem: "",
-    categoria: config.nome || marketplace
-  });
 });
 
 // ================= WHATSAPP =================
