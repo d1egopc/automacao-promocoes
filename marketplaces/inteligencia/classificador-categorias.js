@@ -30,7 +30,75 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     return "Eletrônicos";
   }
 
-// ===== CORREÇÕES FORTES OPTIMUS =====
+
+// ===== CORREÇÕES FORTES OPTIMUS 1 =====
+
+if (contemAlgum(texto, [
+  "kit led", "osram", "h1 osram", "capacete", "pro tork",
+  "pneu pretinho", "v-floc", "vonixx", "carnauba",
+  "envelopamento automotivo", "vinil automotivo", "adesivo vinil"
+])) return "Automotivo";
+
+if (contemAlgum(texto, [
+  "patinete", "bola puma", "puma prestige", "brinquedo infantil"
+])) return "Brinquedos e Artigos Infantis";
+
+if (contemAlgum(texto, [
+  "berco", "berço", "mosquiteiro", "toalhas umedecidas",
+  "lenços baby", "lencos baby", "baby free"
+])) return "Bebês e Acessórios";
+
+if (contemAlgum(texto, [
+  "mop", "esfregao", "esfregão", "rodo magico", "rodo mágico",
+  "limpa seca", "shampoo v-floc"
+])) return "Limpeza";
+
+if (contemAlgum(texto, [
+  "cesto organizadora", "caixa organizadora", "rattan",
+  "jogo de tacas", "jogo de taças", "copos", "taças",
+  "talheres", "inoxidable", "cozinha", "tapete", "felpudo",
+  "garrafa termica", "garrafa térmica", "torneira", "banheiro"
+])) return "Casa, Móveis e Decoração";
+
+if (contemAlgum(texto, [
+  "calca jeans masculina", "calça jeans masculina", "jeans masculina",
+  "calca de inverno", "calça de inverno", "flanelada",
+  "cueca", "cuecas", "boxer", "meias algodao", "meias algodão",
+  "jaqueta puffer", "bobojaco", "corta vento"
+])) return "Roupas e Moda Masculina";
+
+if (contemAlgum(texto, [
+  "pijama feminino", "pijamas feminino", "camisola",
+  "calca jeans feminina", "calça jeans feminina", "blusa feminina",
+  "vestido feminino"
+])) return "Roupas e Moda Feminina";
+
+if (contemAlgum(texto, [
+  "eudora", "siage", "siàge", "gabriela sabatini",
+  "eau de toilette", "eau de parfum", "perfume",
+  "mascara capilar", "máscara capilar", "fio dental",
+  "medidor de pressao", "medidor de pressão",
+  "pressao arterial", "pressão arterial", "gel hidratante",
+  "locao hidratante", "loção hidratante", "termometro", "termômetro"
+])) return "Perfumaria, Farmácia e Beleza";
+
+if (contemAlgum(texto, [
+  "caixa amplificada", "subwoofer", "jbl", "soundcore",
+  "anker", "fone bluetooth", "fone de ouvido", "headphone",
+  "tws", "mixer profissional", "mesa de som", "microfone lapela",
+  "microfone celular", "karaoke"
+])) return "Audio TV";
+
+if (contemAlgum(texto, [
+  "depurador", "coifa", "suggar", "climatizador", "ar condicionado"
+])) return "Eletrodomésticos";
+
+if (contemAlgum(texto, [
+  "pre treino", "pré treino", "creatina", "whey", "albumina",
+  "mochila camping", "trilha", "academia", "bike", "bicicleta"
+])) return "Esporte e Suplementos";
+
+// ===== CORREÇÕES FORTES OPTIMUS 2 =====
 
 if (contemAlgum(texto, [
   "tapete", "felpudo", "sala quarto", "cortina", "almofada",
@@ -219,13 +287,19 @@ if (contemAlgum(texto, [
     return "Roupas e Moda Masculina";
   }
 
-  if (contemAlgum(texto, [
-    "chinelo", "havaianas", "tenis", "sapatilha",
-    "sandalia", "crocs", "mizuno", "asics", "nike",
-    "adidas", "olympikus", "puma"
-  ])) {
-    return "Tênis e Chinelos";
-  }
+if (contemAlgum(texto, [
+  "chinelo", "havaianas", "cartago", "rider",
+  "tenis", "tênis", "sapatenis", "sapatênis",
+  "sapatilha", "sandalia", "sandália",
+  "crocs", "mizuno", "asics", "nike",
+  "adidas", "olympikus", "wayke",
+  "rixxon", "o2x", "runway",
+  "caminhada", "sneaker", "calcado masculino",
+  "calçado masculino", "calcado feminino",
+  "calçado feminino"
+])) {
+  return "Tênis e Chinelos";
+}
 
   if (contemAlgum(texto, [
     "boneco", "boneca", "lego", "avengers", "homem de ferro",
