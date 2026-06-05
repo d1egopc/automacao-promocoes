@@ -15,6 +15,8 @@ async function farejarAliExpress(clienteId = "admin", deps = {}) {
     salvarFila,
     prepararOfertaGlobal,
     ofertaJaExiste,
+    deveIgnorarOfertaRepetida,
+    registrarOfertaVista,
     classificarCategoriaOferta,
     aplicarFiltrosUniversais,
     gerarBuscasGlobais,
@@ -308,11 +310,28 @@ const categoriaDetectada =
     // Por enquanto só estrutura inicial
     console.log("✅ AliExpress modular carregado com sucesso.");
 
+let adicionadasNaFila = 0;
+
 for (const oferta of produtosEncontrados) {
+
+  if (deveIgnorarOfertaRepetida(oferta)) {
+    console.log("🧠 AliExpress ignorado pela memória:", oferta.titulo);
+    continue;
+  }
+
+  oferta.status = oferta.status || "pendente";
+  oferta.statusDetalhe = oferta.statusDetalhe || "Na fila";
+
+  registrarOfertaVista(oferta);
+
   fila.push(oferta);
+
+  adicionadasNaFila++;
 }
 
-salvarFila();
+if (adicionadasNaFila > 0) {
+  salvarFila(clienteId);
+}
 
 console.log("✅ AliExpress ofertas enviadas para fila:", produtosEncontrados.length);
 
