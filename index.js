@@ -2384,41 +2384,6 @@ app.post("/fila", (req, res) => {
   }
 });
 
-// ================= PROCESSAMENTO DE OFERTA MANUAL =================
-
-oferta = prepararOfertaGlobal(oferta);
-
-if (!oferta.id) {
-  oferta.id = `manual_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-}
-
-oferta.manual = true;
-oferta.origem = oferta.origem || "manual";
-
-oferta.criadoEm = oferta.criadoEm || new Date().toLocaleString("pt-BR", {
-  timeZone: "America/Sao_Paulo"
-});
-
-// IMPORTAÇÃO MANUAL NÃO ENTRA DIRETO NA FILA
-// Ela volta para a tela para revisão/edição.
-oferta.status = "rascunho";
-oferta.statusDetalhe = "Importada para revisão";
-
-console.log("📝 Oferta importada para revisão:", {
-  clienteId,
-  titulo: oferta.titulo,
-  marketplace: oferta.marketplace,
-  categoria: oferta.categoria,
-  cupom: oferta.cupom
-});
-
-return res.json({
-  ok: true,
-  mensagem: "Oferta importada para revisão",
-  oferta
-});
-
-
 // ================= ENVIO MANUAL =================
 
 app.post("/enviar-manual", async (req, res) => {
