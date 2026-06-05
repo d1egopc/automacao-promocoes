@@ -2450,7 +2450,7 @@ app.post("/fila", (req, res) => {
       erro: e.message
     });
   }
-});
+
 
 // ================= PROCESSAMENTO DE OFERTA MANUAL =================
 
