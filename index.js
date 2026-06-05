@@ -6952,6 +6952,13 @@ async function importarShopee(url, config) {
 
       const html = await response.text();
 
+console.log("🧪 SHOPEE HTML TAMANHO:", html.length);
+console.log("🧪 SHOPEE HTML TEM R$:", html.includes("R$"));
+console.log("🧪 SHOPEE HTML PREÇOS:", html.match(/R\$\s*[\d.]+,\d{2}/g)?.slice(0, 10));
+console.log("🧪 SHOPEE KEYWORD:", keyword);
+console.log("🧪 SHOPEE IDS:", ids);
+
+
       const titulo =
         extrairMeta(html, "og:title") ||
         extrairMeta(html, "twitter:title") ||
@@ -7006,6 +7013,9 @@ if (precosHtml.length) {
   }
 
  const precoMin = normalizarPrecoShopee(produto?.priceMin || "");
+
+console.log("🧪 SHOPEE PRODUTO API FINAL:", JSON.stringify(produto, null, 2));
+
 const precoMax = normalizarPrecoShopee(produto?.priceMax || "");
 
 let precoAtual = "";
