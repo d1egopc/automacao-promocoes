@@ -9,13 +9,15 @@ const {
 // ================= FAREJADOR KABUM =================
 
 async function farejarKabum(clienteId = "admin", deps = {}) {
-  const {
+    const {
     config,
     integracoesPorCliente,
     fila,
     salvarFila,
     prepararOfertaGlobal,
     ofertaJaExiste,
+    deveIgnorarOfertaRepetida,
+    registrarOfertaVista,
     classificarCategoriaOferta,
     aplicarFiltrosUniversais,
     gerarHeadersStealth,
@@ -36,15 +38,14 @@ const cfg = config.marketplaces?.kabum || {};
 
 const buscas = gerarBuscasKabum();
 
-const buscasRodada = buscas
-  .sort(() => Math.random() - 0.5)
-  .slice(0, 8);
+console.log("🔎 Buscas KaBuM:", buscas.slice(0, 10));
 
-console.log("🔎 Buscas KaBuM:", buscasRodada);
+for (const termo of buscas.slice(0, 3)) {
 
-for (const termo of buscasRodada) {
   try {
-    const slug = encodeURIComponent(termo);
+
+    const slug =
+      encodeURIComponent(termo);
 
     const url =
       `https://www.kabum.com.br/busca/${slug}`;
@@ -249,10 +250,23 @@ console.log("🧪 KABUM jaExiste?", {
 });
 
 if (!jaExisteKabum) {
-  fila.push(novaOferta);
-  salvarFila();
 
-    console.log("🧡 Nova oferta KaBuM:", {
+  if (deveIgnorarOfertaRepetida(novaOferta)) {
+    console.log("🧠 KaBuM ignorado pela memória:", novaOferta.titulo);
+    continue;
+  }
+
+  novaOferta.status = novaOferta.status || "pendente";
+  novaOferta.statusDetalhe = novaOferta.statusDetalhe || "Na fila";
+
+  registrarOfertaVista(novaOferta);
+
+  fila.push(novaOferta);
+
+  salvarFila(clienteId);
+
+  console.log("🧡 Nova oferta KaBuM:", {
+
       titulo: novaOferta.titulo,
       preco: novaOferta.precoAtual,
       link: novaOferta.link
