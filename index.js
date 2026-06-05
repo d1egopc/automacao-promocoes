@@ -2417,7 +2417,7 @@ return res.json({
   mensagem: "Oferta importada para revisão",
   oferta
 });
-});
+
 
 // ================= ENVIO MANUAL =================
 
