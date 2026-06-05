@@ -30,6 +30,76 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     return "Eletrônicos";
   }
 
+// ===== CORREÇÕES FORTES OPTIMUS =====
+
+if (contemAlgum(texto, [
+  "tapete", "felpudo", "sala quarto", "cortina", "almofada",
+  "garrafa termica", "garrafa térmica", "copo termico", "copo térmico",
+  "torneira", "banheiro", "lavatório"
+])) {
+  return "Casa, Móveis e Decoração";
+}
+
+if (contemAlgum(texto, [
+  "calca jeans masculina", "calça jeans masculina", "jeans masculino",
+  "cueca", "boxer masculina", "jaqueta puffer", "bobojaco",
+  "corta vento", "moletom masculino"
+])) {
+  return "Roupas e Moda Masculina";
+}
+
+if (contemAlgum(texto, [
+  "pijama feminino", "pijamas feminino", "calca jeans feminina",
+  "calça jeans feminina", "blusa feminina", "vestido feminino"
+])) {
+  return "Roupas e Moda Feminina";
+}
+
+if (contemAlgum(texto, [
+  "gabriela sabatini", "eau de toilette", "eau de parfum",
+  "perfume", "colonia", "colônia", "eudora", "siage",
+  "máscara capilar", "mascara capilar", "fio dental", "gel hidratante",
+  "loção hidratante", "locao hidratante"
+])) {
+  return "Perfumaria, Farmácia e Beleza";
+}
+
+if (contemAlgum(texto, [
+  "caixa amplificada", "subwoofer", "jbl", "soundcore",
+  "anker", "fone bluetooth", "fone de ouvido", "headphone",
+  "tws", "mixer profissional", "mesa de som"
+])) {
+  return "Audio TV";
+}
+
+if (contemAlgum(texto, [
+  "depurador", "coifa", "suggar", "climatizador", "ar condicionado"
+])) {
+  return "Eletrodomésticos";
+}
+
+if (contemAlgum(texto, [
+  "patinete infantil", "patinete", "berco", "berço", "mosquiteiro",
+  "bebe", "bebê", "carrinho de bebe", "carrinho de bebê"
+])) {
+  return "Bebês e Acessórios";
+}
+
+if (contemAlgum(texto, [
+  "bola", "puma prestige", "mochila camping", "trilha",
+  "academia", "bike", "bicicleta"
+])) {
+  return "Esporte e Suplementos";
+}
+
+if (contemAlgum(texto, [
+  "capacete", "pro tork", "moto", "motocicleta",
+  "kit led", "osram", "h1", "envelopamento automotivo",
+  "vinil automotivo", "adesivo vinil"
+])) {
+  return "Automotivo";
+}
+
   if (contemAlgum(texto, [
     "guarda roupa", "guarda-roupa", "roupeiro", "painel tv",
     "rack", "sofa", "mesa", "cadeira", "penteadeira",
