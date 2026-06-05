@@ -5,20 +5,22 @@ const { extrairProdutosBuscaML } = require("./parser");
 
 async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
 
-  const {
-    config,
-    integracoesPorCliente,
-    getIntegracaoCliente,
-    fila,
-    salvarFila,
-    prepararOfertaGlobal,
-    ofertaJaExiste,
-    classificarCategoriaOferta,
-    gerarBuscasGlobais,
-    gerarHeadersStealth,
-    farejarCuponsMercadoLivre,
-    importarMercadoLivre,
-    gerarLinkAfiliadoMercadoLivre
+ const {
+  config,
+  integracoesPorCliente,
+  getIntegracaoCliente,
+  fila,
+  salvarFila,
+  prepararOfertaGlobal,
+  ofertaJaExiste,
+  classificarCategoriaOferta,
+  gerarBuscasGlobais,
+  gerarHeadersStealth,
+  farejarCuponsMercadoLivre,
+  importarMercadoLivre,
+  gerarLinkAfiliadoMercadoLivre,
+  deveIgnorarOfertaRepetida,
+  registrarOfertaVista
   } = deps;
 
   try {
@@ -360,11 +362,25 @@ console.log("🧪 ML oferta pronta antes do filtro:", {
 
 console.log("🧪 ML jaExiste?", jaExiste);
 
-    if (!jaExiste) {
-      fila.push(novaOferta);
-      salvarFila();
+   if (!jaExiste) {
 
-      console.log("🤖 Nova oferta ML:", {
+  if (deveIgnorarOfertaRepetida(novaOferta)) {
+    console.log("🧠 ML ignorado pela memória:", novaOferta.titulo);
+    continue;
+  }
+
+  novaOferta.status = novaOferta.status || "pendente";
+  novaOferta.statusDetalhe = novaOferta.statusDetalhe || "Na fila";
+
+  registrarOfertaVista(novaOferta);
+
+  fila.push(novaOferta);
+
+  salvarFila(clienteId);
+
+  console.log("🤖 Nova oferta ML:", {
+
+
         titulo: novaOferta.titulo,
         preco: novaOferta.precoAtual,
         precoAntigo: novaOferta.precoAntigo,
