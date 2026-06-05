@@ -47,6 +47,11 @@ const {
   adicionarOfertaNaFila
 } = require("./marketplaces/inteligencia/fila-inteligente");
 
+const {
+  normalizarOfertaManual,
+  adicionarManualNaFila
+} = require("./marketplaces/manual");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -2340,107 +2345,34 @@ app.post("/fila", (req, res) => {
     const clienteId = getClienteId(req);
 
     if (!clienteId) {
-      return res.status(401).json({ erro: "Usuário não identificado" });
-    }
-
-    const agora = new Date().toLocaleString("pt-BR", {
-      timeZone: "America/Sao_Paulo"
-    });
-
-    const categoriaDetectada = classificarCategoriaOferta(
-      {
-        titulo: body.titulo || body.nome || "",
-        nome: body.nome || body.titulo || "",
-        categoria: body.categoria || body.categoriaProduto || "",
-        marketplace: body.marketplace || ""
-      },
-      body.titulo || body.nome || ""
-    );
-
-    let oferta = {
-      id:
-        body.id ||
-        `manual_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-
-      nome: body.nome || body.titulo || "Oferta",
-      titulo: body.titulo || body.nome || "Oferta",
-
-      preco: body.preco || body.precoAtual || "",
-      precoAtual: body.precoAtual || body.preco || "",
-      precoAntigo: body.precoAntigo || "",
-
-      cupom: body.cupom ? String(body.cupom).trim() : "",
-      avisoCupom: body.avisoCupom || "",
-      parcelamento: body.parcelamento || "",
-
-      link: body.link || body.linkAfiliado || "",
-      linkAfiliado: body.linkAfiliado || body.link || "",
-      linkOriginal: body.linkOriginal || body.link || body.linkAfiliado || "",
-
-      imagem: body.imagem || "",
-      marketplace: body.marketplace || "",
-
-      categoria: categoriaDetectada,
-      categoriaProduto: categoriaDetectada,
-
-      origem: body.origem || "manual",
-      manual: body.manual !== undefined ? body.manual : true,
-
-      clienteId,
-      status: "pendente",
-      statusDetalhe: "Na fila",
-      criadoEm: body.criadoEm || agora,
-      dataEntradaFila: agora
-    };
-
-    oferta = prepararOfertaGlobal(oferta);
-
-    const jaExisteNaFila = fila.some(o =>
-      String(o.clienteId || "admin") === String(clienteId) &&
-      (
-        String(o.linkOriginal || o.link || o.linkAfiliado || "") ===
-        String(oferta.linkOriginal || oferta.link || oferta.linkAfiliado || "") ||
-        normalizarTexto(o.titulo || o.nome || "") ===
-        normalizarTexto(oferta.titulo || oferta.nome || "")
-      )
-    );
-
-    if (jaExisteNaFila) {
-      return res.json({
-        ok: true,
-        ignorada: true,
-        motivo: "Essa oferta já está salva ou já está na fila.",
-        oferta
+      return res.status(401).json({
+        ok: false,
+        erro: "Usuário não identificado"
       });
     }
 
-    if (deveIgnorarOfertaRepetida(oferta)) {
-      return res.json({
-        ok: true,
-        ignorada: true,
-        motivo: "Oferta repetida recentemente sem queda relevante de preço ou cupom novo.",
-        oferta
+    const resultado = adicionarManualNaFila(body, {
+      fila,
+      clienteId,
+      salvarFila,
+      classificarCategoriaOferta,
+      normalizarTexto,
+      deveIgnorarOfertaRepetida,
+      registrarOfertaVista,
+      prepararOfertaGlobal
+    });
+
+    if (resultado?.ok && !resultado?.ignorada) {
+      console.log("📥 Oferta manual adicionada à fila:", {
+        clienteId,
+        id: resultado.oferta?.id,
+        titulo: resultado.oferta?.titulo,
+        categoria: resultado.oferta?.categoria,
+        dataEntradaFila: resultado.oferta?.dataEntradaFila
       });
     }
 
-    registrarOfertaVista(oferta);
-
-    fila.unshift(oferta);
-    salvarFila(clienteId);
-
-    console.log("📥 Oferta manual adicionada à fila:", {
-      clienteId,
-      id: oferta.id,
-      titulo: oferta.titulo,
-      categoria: oferta.categoria,
-      dataEntradaFila: oferta.dataEntradaFila
-    });
-
-    return res.json({
-      ok: true,
-      mensagem: "Oferta adicionada à fila",
-      oferta
-    });
+    return res.json(resultado);
 
   } catch (e) {
     console.log("❌ erro ao adicionar oferta na fila:", e.message);
@@ -2450,7 +2382,7 @@ app.post("/fila", (req, res) => {
       erro: e.message
     });
   }
-
+});
 
 // ================= PROCESSAMENTO DE OFERTA MANUAL =================
 
