@@ -2,6 +2,11 @@ const {
   farejarAmazon
 } = require("./farejador");
 
+const {
+  criarImportarAmazon
+} = require("./importar");
+
 module.exports = {
-  farejarAmazon
+  farejarAmazon,
+  criarImportarAmazon
 };
