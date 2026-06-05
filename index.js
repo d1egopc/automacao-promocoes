@@ -2402,58 +2402,24 @@ oferta.criadoEm = oferta.criadoEm || new Date().toLocaleString("pt-BR", {
   timeZone: "America/Sao_Paulo"
 });
 
-oferta.dataEntradaFila = oferta.dataEntradaFila || oferta.criadoEm;
+// IMPORTAÇÃO MANUAL NÃO ENTRA DIRETO NA FILA
+// Ela volta para a tela para revisão/edição.
+oferta.status = "rascunho";
+oferta.statusDetalhe = "Importada para revisão";
 
-const jaExisteNaFila = fila.some(o =>
-  String(o.clienteId || "admin") === String(clienteId) &&
-  (
-    String(o.linkOriginal || o.link || o.linkAfiliado || "") ===
-    String(oferta.linkOriginal || oferta.link || oferta.linkAfiliado || "") ||
-    normalizarTexto(o.titulo || o.nome || "") ===
-    normalizarTexto(oferta.titulo || oferta.nome || "")
-  )
-);
+console.log("📝 Oferta importada para revisão:", {
+  clienteId,
+  titulo: oferta.titulo,
+  marketplace: oferta.marketplace,
+  categoria: oferta.categoria,
+  cupom: oferta.cupom
+});
 
-if (jaExisteNaFila) {
-  return res.json({
-    ok: true,
-    ignorada: true,
-    motivo: "Essa oferta já está salva ou já está na fila.",
-    oferta
-  });
-}
-
-if (deveIgnorarOfertaRepetida(oferta)) {
-  return res.json({
-    ok: true,
-    ignorada: true,
-    motivo: "Oferta repetida recentemente sem queda relevante de preço ou cupom novo.",
-    oferta
-  });
-}
-
-registrarOfertaVista(oferta);
-
-oferta.status = oferta.status || "pendente";
-oferta.statusDetalhe = oferta.statusDetalhe || "Na fila";
-
-fila.push(oferta);
-
-salvarFila(clienteId);
-
-  console.log("📥 Oferta adicionada na fila:", {
-    clienteId,
-    titulo: oferta.titulo,
-    marketplace: oferta.marketplace,
-    categoria: oferta.categoria,
-    cupom: oferta.cupom
-  });
-
-  res.json({
-    ok: true,
-    mensagem: "Oferta adicionada na fila",
-    oferta
-  });
+return res.json({
+  ok: true,
+  mensagem: "Oferta importada para revisão",
+  oferta
+});
 });
 
 // ================= ENVIO MANUAL =================
@@ -2497,10 +2463,24 @@ app.post("/enviar-manual", async (req, res) => {
       })
     };
 
-    fila.unshift(oferta);
-    salvarFila();
+ const clienteId = oferta.clienteId || "admin";
 
-const clienteId = oferta.clienteId || "admin";
+if (deveIgnorarOfertaRepetida(oferta)) {
+  return res.json({
+    ok: true,
+    ignorada: true,
+    motivo: "Oferta repetida recentemente sem queda relevante de preço ou cupom novo.",
+    oferta
+  });
+}
+
+oferta.status = "pendente";
+oferta.statusDetalhe = "Na fila";
+
+registrarOfertaVista(oferta);
+
+fila.unshift(oferta);
+salvarFila(clienteId);
 
 const configCliente =
   configsPorCliente?.[clienteId] || config;
