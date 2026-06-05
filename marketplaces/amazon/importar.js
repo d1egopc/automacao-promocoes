@@ -142,7 +142,12 @@ function criarImportarAmazon(deps = {}) {
 
     linkAfiliado = limparLinkAmazon(linkAfiliado);
 
-    const linkFinal = gerarLinkOptimus(linkAfiliado, "amazon");
+const usarLinksOptimus =
+  config?.linksOptimus?.ativo === true;
+
+const linkFinal = usarLinksOptimus
+  ? gerarLinkOptimus(linkAfiliado, "amazon")
+  : linkAfiliado;
 
     return {
       marketplace: "amazon",
