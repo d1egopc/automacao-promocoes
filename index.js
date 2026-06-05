@@ -6728,6 +6728,8 @@ return {
 
 }
 
+// =================== IMPORTAR MANUAL SHOPEE ============================
+
 async function importarShopee(url, config) {
   if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
     url = "https://" + url;
@@ -6964,30 +6966,42 @@ async function importarShopee(url, config) {
        console.log("🧪 SHOPEE PRODUTO RAW:", JSON.stringify(produto, null, 2));
 
       let cupom = "";
-      let avisoCupom = "";
+      let avisoCupom =
+  "🎟️ Verifique se há cupons disponíveis na página";
 
-      if (produto?.priceDiscountRate) {
-         avisoCupom =
-         "🎟️ Verifique e resgate os cupons disponíveis na página da Shopee antes de finalizar.";
-      }
+const precosHtml = [...html.matchAll(/R\$\s*[\d.]+,\d{2}/g)]
+  .map(m => m[0])
+  .filter(Boolean);
 
-        return {
-        marketplace: "shopee",
-        titulo: htmlDecode(titulo)
-          .replace(" | Shopee Brasil", "")
-          .replace(" | Shopee", "")
-          .trim(),
-        precoAntigo: "",
-        precoAtual: "",
-        cupom,
-        avisoCupom, 
-        linkOriginal: url,
-        linkAfiliado: url,
-        imagem: corrigirImagemUrl(imagem) || imagem,
-        categoria: "Shopee"
-      };
-    } catch (e) {
-      console.error("SHOPEE HTML ERRO:", e.message);
+let precoAtual = "";
+
+if (precosHtml.length) {
+  const unicos = [...new Set(precosHtml)];
+
+  if (unicos.length >= 2) {
+    precoAtual = `${unicos[0].replace("R$", "").trim()} a ${unicos[1].replace("R$", "").trim()}`;
+  } else {
+    precoAtual = unicos[0].replace("R$", "").trim();
+  }
+}
+
+      return {
+  marketplace: "shopee",
+  titulo: htmlDecode(titulo)
+    .replace(" | Shopee Brasil", "")
+    .replace(" | Shopee", "")
+    .trim(),
+  precoAntigo: "",
+  precoAtual,
+  cupom,
+  avisoCupom,
+  linkOriginal: url,
+  linkAfiliado: url,
+  imagem: corrigirImagemUrl(imagem) || imagem,
+  categoria: "Shopee"
+};
+  } catch (e) {
+   console.error("SHOPEE HTML ERRO:", e.message);
     }
   }
 
