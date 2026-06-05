@@ -339,8 +339,9 @@ if (temMin && temMax && minNumero !== maxNumero) {
     imagem: corrigirImagemUrl(imagem) || imagem,
     categoria: "Shopee"
   };
-}
+ };
 
+}
 
 module.exports = {
   criarImportarShopee
