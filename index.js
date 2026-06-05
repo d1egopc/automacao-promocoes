@@ -2335,65 +2335,122 @@ app.use(rateLimit({
 // ============== POST FILA ENVIO =================
 
 app.post("/fila", (req, res) => {
-  const body = req.body || {};
-  const clienteId = getClienteId(req);
+  try {
+    const body = req.body || {};
+    const clienteId = getClienteId(req);
 
-  if (!clienteId) {
-    return res.status(401).json({ erro: "Usuário não identificado" });
+    if (!clienteId) {
+      return res.status(401).json({ erro: "Usuário não identificado" });
+    }
+
+    const agora = new Date().toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo"
+    });
+
+    const categoriaDetectada = classificarCategoriaOferta(
+      {
+        titulo: body.titulo || body.nome || "",
+        nome: body.nome || body.titulo || "",
+        categoria: body.categoria || body.categoriaProduto || "",
+        marketplace: body.marketplace || ""
+      },
+      body.titulo || body.nome || ""
+    );
+
+    let oferta = {
+      id:
+        body.id ||
+        `manual_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+
+      nome: body.nome || body.titulo || "Oferta",
+      titulo: body.titulo || body.nome || "Oferta",
+
+      preco: body.preco || body.precoAtual || "",
+      precoAtual: body.precoAtual || body.preco || "",
+      precoAntigo: body.precoAntigo || "",
+
+      cupom: body.cupom ? String(body.cupom).trim() : "",
+      avisoCupom: body.avisoCupom || "",
+      parcelamento: body.parcelamento || "",
+
+      link: body.link || body.linkAfiliado || "",
+      linkAfiliado: body.linkAfiliado || body.link || "",
+      linkOriginal: body.linkOriginal || body.link || body.linkAfiliado || "",
+
+      imagem: body.imagem || "",
+      marketplace: body.marketplace || "",
+
+      categoria: categoriaDetectada,
+      categoriaProduto: categoriaDetectada,
+
+      origem: body.origem || "manual",
+      manual: body.manual !== undefined ? body.manual : true,
+
+      clienteId,
+      status: "pendente",
+      statusDetalhe: "Na fila",
+      criadoEm: body.criadoEm || agora,
+      dataEntradaFila: agora
+    };
+
+    oferta = prepararOfertaGlobal(oferta);
+
+    const jaExisteNaFila = fila.some(o =>
+      String(o.clienteId || "admin") === String(clienteId) &&
+      (
+        String(o.linkOriginal || o.link || o.linkAfiliado || "") ===
+        String(oferta.linkOriginal || oferta.link || oferta.linkAfiliado || "") ||
+        normalizarTexto(o.titulo || o.nome || "") ===
+        normalizarTexto(oferta.titulo || oferta.nome || "")
+      )
+    );
+
+    if (jaExisteNaFila) {
+      return res.json({
+        ok: true,
+        ignorada: true,
+        motivo: "Essa oferta já está salva ou já está na fila.",
+        oferta
+      });
+    }
+
+    if (deveIgnorarOfertaRepetida(oferta)) {
+      return res.json({
+        ok: true,
+        ignorada: true,
+        motivo: "Oferta repetida recentemente sem queda relevante de preço ou cupom novo.",
+        oferta
+      });
+    }
+
+    registrarOfertaVista(oferta);
+
+    fila.unshift(oferta);
+    salvarFila(clienteId);
+
+    console.log("📥 Oferta manual adicionada à fila:", {
+      clienteId,
+      id: oferta.id,
+      titulo: oferta.titulo,
+      categoria: oferta.categoria,
+      dataEntradaFila: oferta.dataEntradaFila
+    });
+
+    return res.json({
+      ok: true,
+      mensagem: "Oferta adicionada à fila",
+      oferta
+    });
+
+  } catch (e) {
+    console.log("❌ erro ao adicionar oferta na fila:", e.message);
+
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
   }
-
-  let oferta = {
-    nome: body.nome || body.titulo || "Oferta",
-    titulo: body.titulo || body.nome || "Oferta",
-
-    preco: body.preco || body.precoAtual || "",
-    precoAtual: body.precoAtual || body.preco || "",
-
-    precoAntigo: body.precoAntigo || "",
-    cupom: body.cupom ? String(body.cupom).trim() : "",
-    avisoCupom: body.avisoCupom || "",
-    parcelamento: body.parcelamento || "",
-
-    link: body.link || body.linkAfiliado || "",
-    linkAfiliado: body.linkAfiliado || body.link || "",
-
-    imagem: body.imagem || "",
-    marketplace: body.marketplace || "",
-    categoria: body.categoria || body.marketplace || "",
-
-    origem: body.origem || "manual",
-    manual: body.manual !== undefined ? body.manual : true,
-
-
-  id:
-  body.id ||
-  `manual_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-
-clienteId,
-status: "pendente",
-statusDetalhe: "Na fila",
-criadoEm: new Date().toLocaleString("pt-BR", {
-  timeZone: "America/Sao_Paulo"
-}),
-dataEntradaFila: new Date().toLocaleString("pt-BR", {
-  timeZone: "America/Sao_Paulo"
-})
-  };
-
-  const html = JSON.stringify(body || "");
-
-  const temCompraNoApp =
-    html.includes("COMPRANOAPP") ||
-    /compra\s+no\s+app/i.test(html) ||
-    /use\s+o\s+app/i.test(html) ||
-    /desconto\s+no\s+app/i.test(html);
-
-  if (temCompraNoApp && !oferta.cupom) {
-    oferta.cupom = "COMPRANOAPP";
-    oferta.avisoCupom =
-      "📱 Use no app da Amazon para tentar chegar no menor valor.";
-  }
-
+});
 
 // ================= PROCESSAMENTO DE OFERTA MANUAL =================
 
