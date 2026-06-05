@@ -6744,9 +6744,9 @@ async function importarShopee(url, config) {
 
     if (texto.includes(",")) return limparPreco(texto);
 
-    if (/^\d+\.\d{2}$/.test(texto)) {
-      return Number(texto).toFixed(2).replace(".", ",");
-    }
+   if (/^\d+\.\d+$/.test(texto)) {
+   return Number(texto).toFixed(2).replace(".", ",");
+   }
 
     if (/^\d+$/.test(texto)) {
       let numero = Number(texto);
