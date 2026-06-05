@@ -7391,6 +7391,8 @@ return res.json(produto);
         });
       }
 
+console.log("🧪 SHOPEE PRODUTO FINAL RES.JSON:", produto);
+
       return res.json(produto);
     } catch (e) {
       console.error("ERRO SHOPEE:", e);
