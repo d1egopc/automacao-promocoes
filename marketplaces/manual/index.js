@@ -6,7 +6,14 @@ const {
   adicionarManualNaFila
 } = require("./fila-manual");
 
+const {
+  detectarMarketplaceManual,
+  importarProdutoManual
+} = require("./importar-produto");
+
 module.exports = {
   normalizarOfertaManual,
-  adicionarManualNaFila
+  adicionarManualNaFila,
+  detectarMarketplaceManual,
+  importarProdutoManual
 };
