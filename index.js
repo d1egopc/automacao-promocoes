@@ -2447,29 +2447,49 @@ app.post("/enviar-manual", async (req, res) => {
             ? body.categoriaProduto
             : "geral";
 
-    const oferta = {
-      nome: body.nome || body.titulo || "Oferta",
-      titulo: body.titulo || body.nome || "Oferta",
-      preco: body.preco || body.precoAtual || "",
-      precoAtual: body.precoAtual || body.preco || "",
-      precoAntigo: body.precoAntigo || "",
-      cupom: body.cupom ? String(body.cupom).trim() : "",
-      avisoCupom: body.avisoCupom || "",
-      parcelamento: body.parcelamento || "",
-      link: body.link || body.linkAfiliado || "",
-      linkAfiliado: body.linkAfiliado || body.link || "",
-      imagem: body.imagem || "",
-      marketplace: body.marketplace || "",
-      categoria: categoriaManual,
-      categoriaProduto: categoriaManual,
-      origem: "manual",
-      manual: true,
-      clienteId: getClienteId(req),
-      status: "pendente",
-      criadoEm: new Date().toLocaleString("pt-BR", {
-        timeZone: "America/Sao_Paulo"
-      })
-    };
+   const agora = new Date().toLocaleString("pt-BR", {
+  timeZone: "America/Sao_Paulo"
+});
+
+const categoriaDetectada = classificarCategoriaOferta(
+  {
+    titulo: body.titulo || body.nome || "",
+    nome: body.nome || body.titulo || "",
+    categoria: categoriaManual,
+    marketplace: body.marketplace || ""
+  },
+  body.titulo || body.nome || ""
+);
+
+const oferta = {
+  id:
+    body.id ||
+    `manual_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+
+  nome: body.nome || body.titulo || "Oferta",
+  titulo: body.titulo || body.nome || "Oferta",
+  preco: body.preco || body.precoAtual || "",
+  precoAtual: body.precoAtual || body.preco || "",
+  precoAntigo: body.precoAntigo || "",
+  cupom: body.cupom ? String(body.cupom).trim() : "",
+  avisoCupom: body.avisoCupom || "",
+  parcelamento: body.parcelamento || "",
+  link: body.link || body.linkAfiliado || "",
+  linkAfiliado: body.linkAfiliado || body.link || "",
+  imagem: body.imagem || "",
+  marketplace: body.marketplace || "",
+
+  categoria: categoriaDetectada,
+  categoriaProduto: categoriaDetectada,
+
+  origem: "manual",
+  manual: true,
+  clienteId: getClienteId(req),
+  status: "pendente",
+  statusDetalhe: "Na fila",
+  criadoEm: body.criadoEm || agora,
+  dataEntradaFila: agora
+};
 
  const clienteId = oferta.clienteId || "admin";
 
