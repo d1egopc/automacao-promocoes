@@ -97,21 +97,24 @@ async function importarAliExpress(urlEntrada, config = {}) {
       produto.productTitle ||
       "Produto AliExpress";
 
-    let imagem =
-      produto.product_main_image_url ||
-      produto.product_small_image_urls?.string?.[0] ||
-      produto.product_small_image_urls?.[0] ||
-      produto.image_url ||
-      "";
+let imagem =
+  produto.product_main_image_url ||
+  produto.product_small_image_urls?.string?.[0] ||
+  produto.product_small_image_urls?.string ||
+  produto.product_small_image_urls?.[0] ||
+  produto.image_url ||
+  produto.product_image ||
+  "";
 
     let precoAtual =
-      produto.target_sale_price ||
-      produto.sale_price ||
-      produto.target_app_sale_price ||
-      produto.app_sale_price ||
-      produto.target_min_sale_price ||
-      produto.min_sale_price ||
-      "";
+  produto.sale_price ||
+  produto.target_sale_price ||
+  produto.app_sale_price ||
+  produto.target_app_sale_price ||
+  produto.target_min_sale_price ||
+  produto.min_sale_price ||
+  produto.target_sale_price_min ||
+  "";
 
     let precoAntigo =
       produto.target_original_price ||
@@ -141,6 +144,24 @@ async function importarAliExpress(urlEntrada, config = {}) {
         linkAfiliado = match[0];
       }
     }
+
+
+console.log("🧪 ALIEXPRESS PRODUTO FINAL:", {
+  titulo,
+  precoAtual,
+  precoAntigo,
+  imagem,
+  camposPreco: {
+    sale_price: produto.sale_price,
+    target_sale_price: produto.target_sale_price,
+    app_sale_price: produto.app_sale_price,
+    target_app_sale_price: produto.target_app_sale_price,
+    target_min_sale_price: produto.target_min_sale_price,
+    min_sale_price: produto.min_sale_price,
+    target_original_price: produto.target_original_price,
+    original_price: produto.original_price
+  }
+});
 
     return {
       marketplace: "aliexpress",
