@@ -2365,11 +2365,19 @@ app.post("/fila", (req, res) => {
     manual: body.manual !== undefined ? body.manual : true,
 
 
-    clienteId,
-    status: "pendente",
-    criadoEm: new Date().toLocaleString("pt-BR", {
-      timeZone: "America/Sao_Paulo"
-    })
+  id:
+  body.id ||
+  `manual_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+
+clienteId,
+status: "pendente",
+statusDetalhe: "Na fila",
+criadoEm: new Date().toLocaleString("pt-BR", {
+  timeZone: "America/Sao_Paulo"
+}),
+dataEntradaFila: new Date().toLocaleString("pt-BR", {
+  timeZone: "America/Sao_Paulo"
+})
   };
 
   const html = JSON.stringify(body || "");
