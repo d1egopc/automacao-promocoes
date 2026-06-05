@@ -56,6 +56,10 @@ const {
   importarProdutoManual
 } = require("./marketplaces/manual");
 
+const {
+  criarImportarAmazon
+} = require("./marketplaces/amazon");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -676,6 +680,19 @@ function gerarLinkOptimus(linkOriginal = "", marketplace = "") {
 
   return `${dominio}${formato}/${codigo}`;
 }
+
+
+// =================== PARTE IMPORTAR AMAZON ===================
+
+const importarAmazon = criarImportarAmazon({
+  extrairJsonLd,
+  extrairMeta,
+  htmlDecode,
+  limparPreco,
+  corrigirImagemUrl,
+  limparLinkAmazon,
+  gerarLinkOptimus
+});
 
 
 // ================= FILTROS OFERTA JA EXISTE =================
@@ -6475,244 +6492,6 @@ async function farejarAwin() {
   }
 }
 
-// ================= IMPORTAR AMAZON =================
-
-async function importarAmazon(url, config) {
-  if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
-    url = "https://" + url;
-  }
-
-  const cookies = config?.credenciais?.cookies || "";
-
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-      "Accept":
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-      "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-      "Cookie": cookies
-    }
-  });
-
-  const html = await response.text();
-  const jsonLd = extrairJsonLd(html);
-
-  function limparHtml(texto) {
-    if (!texto) return "";
-    return htmlDecode(String(texto).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
-  }
-
-  function primeiroMatch(regex) {
-    const match = html.match(regex);
-    return match?.[1] ? limparHtml(match[1]) : "";
-  }
-
-  function todosPrecosDoHtml() {
-    const encontrados = [];
-    const regex = /R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})|R\$\s*\d+(?:,\d{2})?/g;
-    const matches = html.match(regex) || [];
-
-    for (const item of matches) {
-      const precoLimpo = limparPreco(item);
-      const numero = Number(String(precoLimpo).replace(",", "."));
-
-      if (Number.isFinite(numero) && numero > 0) {
-        encontrados.push({ texto: precoLimpo, numero });
-      }
-    }
-
-    return encontrados;
-  }
-
-  function extrairImagemAmazon() {
-    const imagemMeta =
-      (Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image) ||
-      extrairMeta(html, "og:image") ||
-      extrairMeta(html, "twitter:image") ||
-      html.match(/id=["']landingImage["'][^>]+src=["']([^"']+)["']/i)?.[1] ||
-      html.match(/data-old-hires=["']([^"']+)["']/i)?.[1] ||
-      "";
-
-    if (imagemMeta) return htmlDecode(imagemMeta).replace(/\\u002F/g, "/");
-
-    const dynamicImageRaw =
-      html.match(/data-a-dynamic-image=["']([^"']+)["']/i)?.[1] ||
-      "";
-
-    if (dynamicImageRaw) {
-      try {
-        const decoded = htmlDecode(dynamicImageRaw).replace(/\\u002F/g, "/");
-        const parsed = JSON.parse(decoded);
-        const primeira = Object.keys(parsed || {})[0];
-
-        if (primeira) return primeira;
-      } catch {}
-    }
-
-    const hiRes =
-      html.match(/"hiRes"\s*:\s*"([^"]+)"/i)?.[1] ||
-      html.match(/"large"\s*:\s*"([^"]+)"/i)?.[1] ||
-      "";
-
-    return hiRes ? hiRes.replace(/\\u002F/g, "/") : "";
-  }
-
-  const titulo =
-    jsonLd?.name ||
-    extrairMeta(html, "og:title") ||
-    extrairMeta(html, "twitter:title") ||
-    primeiroMatch(/<span[^>]+id=["']productTitle["'][^>]*>([\s\S]*?)<\/span>/i) ||
-    "Produto Amazon";
-
-  const precoOffscreenAtual =
-    primeiroMatch(/id=["']corePriceDisplay_desktop_feature_div["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
-    primeiroMatch(/id=["']corePrice_feature_div["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
-    primeiroMatch(/class=["'][^"']*priceToPay[^"']*["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
-    primeiroMatch(/id=["']apex_desktop["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i);
-
-  const precoWholeFractionMatch =
-    html.match(/class=["'][^"']*a-price-whole[^"']*["'][^>]*>([\s\S]*?)<\/span>[\s\S]*?class=["'][^"']*a-price-fraction[^"']*["'][^>]*>([\s\S]*?)<\/span>/i);
-
-  let preco =
-    precoOffscreenAtual ||
-    jsonLd?.offers?.price ||
-    extrairMeta(html, "product:price:amount") ||
-    extrairMeta(html, "og:price:amount") ||
-    (precoWholeFractionMatch ? `${limparHtml(precoWholeFractionMatch[1])},${limparHtml(precoWholeFractionMatch[2])}` : "") ||
-    primeiroMatch(/id=["']priceblock_ourprice["'][^>]*>([\s\S]*?)<\/span>/i) ||
-    primeiroMatch(/id=["']priceblock_dealprice["'][^>]*>([\s\S]*?)<\/span>/i) ||
-    "";
-
-  preco = limparPreco(htmlDecode(preco));
-
-  const precosEncontrados = todosPrecosDoHtml();
-
-  if (!preco && precosEncontrados.length) {
-    const menorPreco = precosEncontrados
-      .map((p) => p.numero)
-      .filter((n) => n > 1)
-      .sort((a, b) => a - b)[0];
-
-    if (menorPreco) {
-      preco = menorPreco.toFixed(2).replace(".", ",");
-    }
-  }
-
-  let precoAntigoRaw =
-    primeiroMatch(/class=["'][^"']*a-text-price[^"']*["'][^>]*>[\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
-    primeiroMatch(/data-a-strike=["']true["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
-    "";
-
-  let precoAntigo = limparPreco(htmlDecode(precoAntigoRaw));
-
-  if (!precoAntigo && precosEncontrados.length && preco) {
-    const precoAtualNumero = Number(String(preco).replace(",", "."));
-    const maiorPreco = precosEncontrados
-      .map((p) => p.numero)
-      .filter((n) => Number.isFinite(n) && n > precoAtualNumero)
-      .sort((a, b) => b - a)[0];
-
-    if (maiorPreco) {
-      precoAntigo = maiorPreco.toFixed(2).replace(".", ",");
-    }
-  }
-
-  if (!precoAntigo) {
-    const precoNumero = Number(String(preco).replace(",", "."));
-    if (Number.isFinite(precoNumero) && precoNumero > 0) {
-      precoAntigo = (precoNumero * 1.2)
-        .toFixed(2)
-        .replace(".", ",");
-    }
-  }
-
-  let parcelamento =
-  primeiroMatch(/(\d+x\s+de\s+R\$\s*[\d.,]+\s*sem juros)/i) ||
-  primeiroMatch(/(\d+\s*x\s*R\$\s*[\d.,]+)/i) ||
-  "";
-  const imagem = extrairImagemAmazon();
-
-  let linkAfiliado = url;
-  const trackingId =
-    config?.credenciais?.trackingId ||
-    config?.credenciais?.partnerTag ||
-    config?.credenciais?.appId ||
-    "";
-
-  if (trackingId) {
-    try {
-      const u = new URL(url);
-      u.searchParams.set("tag", trackingId);
-      linkAfiliado = u.toString();
-    } catch {
-      linkAfiliado = url;
-    }
-  }
-
-  let cupom =
-  primeiroMatch(/Salve o cupom[^:]{0,80}:\s*([A-Z0-9]{4,20})/i) ||
-  primeiroMatch(/Desconto de R\$\s*[\d.,]+[^<]{0,80}código\s+([A-Z0-9]{4,20})/i) ||
-  primeiroMatch(/com o código\s+([A-Z0-9]{4,20})/i) ||
-  primeiroMatch(/Insira o código\s+([A-Z0-9]{4,20})/i) ||
-  primeiroMatch(/Aplique o cupom\s+([A-Z0-9]{4,20})/i) ||
-  primeiroMatch(/Use o cupom\s+([A-Z0-9]{4,20})/i) ||
-  "";
-
- let avisoCupom = "";
-
-if (cupom) {
-  avisoCupom = `Resgate/aplique o cupom ${cupom} na página antes de finalizar.`;
-} else if (/resgatar|cupom|código|desconto extra/i.test(html)) {
-  avisoCupom = "Há cupom/desconto extra na página. Resgate antes de finalizar.";
-}
-
-if (cupom) {
-  avisoCupom = `Aplique o cupom ${cupom} no carrinho.`;
-} else if (/resgatar|aplique o cupom|cupom disponível|desconto extra/i.test(html)) {
-  avisoCupom = "Há cupom/desconto extra na página. Resgate antes de finalizar.";
-}
-
-const temCompraNoApp =
-  /COMPRANOAPP[\s\S]{0,120}(app|aplicativo|desconto|off|cupom|resgate)/i.test(html) ||
-  /(app|aplicativo|desconto|off|cupom|resgate)[\s\S]{0,120}COMPRANOAPP/i.test(html) ||
-  /compra\s+no\s+app/i.test(html) ||
-  /desconto\s+no\s+app/i.test(html)
-
-console.log("🎟️ AMAZON CUPOM DETECTADO:", cupom);
-console.log("🎫 AMAZON AVISO CUPOM:", avisoCupom);
-console.log("🔎 AMAZON TEM COMPRANOAPP?", html.includes("COMPRANOAPP"));
-console.log("🔎 AMAZON TEM CUPOM?", /cupom/i.test(html));
-
-linkAfiliado = limparLinkAmazon(linkAfiliado);
-
-console.log("🔗 AMAZON ANTES OPTIMUS:", linkAfiliado);
-
-const linkFinal = gerarLinkOptimus(linkAfiliado, "amazon"); 
-
-console.log("🔗 AMAZON LINK LIMPO:", linkAfiliado);
-console.log("🔗 AMAZON LINK FINAL:", linkFinal);
-
-return {
-  marketplace: "amazon",
-  titulo: htmlDecode(titulo)
-    .replace("Amazon.com.br:", "")
-    .replace("Amazon.com:", "")
-    .trim(),
-  precoAntigo,
-  precoAtual: preco,
-  parcelamento,
-  cupom,
-  avisoCupom,
-  linkOriginal: linkAfiliado,
-  link: linkFinal,
-  linkAfiliado: linkFinal,
-  imagem: corrigirImagemUrl(imagem) || imagem,
-  categoria: "Amazon"
-};
-
-}
 
 // =================== IMPORTAR MANUAL SHOPEE ============================
 
