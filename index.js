@@ -43,6 +43,10 @@ const {
   classificarCategoriaOferta
 } = require("./marketplaces/inteligencia/classificador-categorias");
 
+const {
+  adicionarOfertaNaFila
+} = require("./marketplaces/inteligencia/fila-inteligente");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -2430,10 +2434,12 @@ if (deveIgnorarOfertaRepetida(oferta)) {
 
 registrarOfertaVista(oferta);
 
+oferta.status = oferta.status || "pendente";
+oferta.statusDetalhe = oferta.statusDetalhe || "Na fila";
+
 fila.push(oferta);
 
 salvarFila(clienteId);
-
 
   console.log("📥 Oferta adicionada na fila:", {
     clienteId,
@@ -5090,7 +5096,7 @@ app.post("/importar-magalu-manual", async (req, res) => {
       });
     }
 
-    const clienteId = clienteIdAlvo || "admin";
+    const clienteId = getClienteId(req);
 
 const novaOferta = {
   nome: produto.titulo,
@@ -5111,9 +5117,14 @@ const novaOferta = {
   clienteId
 };
 
-    fila.push(novaOferta);
+novaOferta.status = novaOferta.status || "pendente";
+novaOferta.statusDetalhe = novaOferta.statusDetalhe || "Na fila";
 
-    salvarFila();
+const adicionou = adicionarOfertaNaFila(fila, novaOferta, "manual-magalu");
+
+if (adicionou) {
+  salvarFila(clienteId);
+}
 
     return res.json({
       ok: true,
@@ -5967,6 +5978,9 @@ if (deveIgnorarOfertaRepetida(ofertaCliente)) {
   continue;
 }
 
+ofertaCliente.status = ofertaCliente.status || "pendente";
+ofertaCliente.statusDetalhe = ofertaCliente.statusDetalhe || "Na fila";
+
 registrarOfertaVista(ofertaCliente);
 
 fila.push(ofertaCliente);
@@ -6138,7 +6152,7 @@ console.log("✅ Oferta distribuída para cliente:", {
             if (precoNumero < precoMinimo) continue;
             if (desconto < minimoDescontoAplicado) continue;
 
-           const clienteId = clienteIdAlvo || "admin";
+           const clienteId = "admin";
 
            let novaOferta = {
               nome: titulo,
@@ -6331,7 +6345,7 @@ const html = await response.text();
 
           if (!produto?.precoAtual) continue;
 
-        const clienteId = clienteIdAlvo || "admin";
+        const clienteId = getClienteId(req);
           
         let novaOferta = {
             nome: produto.titulo,
@@ -6443,7 +6457,7 @@ async function farejarAwin() {
         continue;
       }
 
-     const clienteId = clienteIdAlvo || "admin";
+     const clienteId = "admin";
 
      const oferta = {
         id: Date.now() + "-" + Math.random().toString(36).slice(2),
@@ -7316,12 +7330,18 @@ if (jaExiste) {
   console.log("⚠️ Oferta já existe na fila:", ofertaFinal.nome);
 } else {
 
-  if (produtoRepetidoRecentemente(ofertaFinal.nome, 12)) {
-    console.log("🔁 Oferta parecida ignorada:", ofertaFinal.nome);
+  if (deveIgnorarOfertaRepetida(ofertaFinal)) {
+    console.log("🧠 Oferta ignorada pela memória:", ofertaFinal.nome);
     return;
   }
 
+  ofertaFinal.status = ofertaFinal.status || "pendente";
+  ofertaFinal.statusDetalhe = ofertaFinal.statusDetalhe || "Na fila";
+
+  registrarOfertaVista(ofertaFinal);
+
   fila.push(ofertaFinal);
+
   salvarFila();
 
   console.log("🤖 Oferta adicionada automaticamente:", ofertaFinal.nome);
