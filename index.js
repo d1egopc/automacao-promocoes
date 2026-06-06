@@ -2262,6 +2262,8 @@ app.delete("/fila/:index", (req, res) => {
   });
 });
 
+// ============== POST FILA INDEX ===========================
+
 app.post("/fila/:index/enviar-agora", async (req, res) => {
   const index = Number(req.params.index);
 const clienteIdReq = getClienteId(req);
@@ -2299,12 +2301,12 @@ const indexReal = fila.findIndex(o => o === oferta);
     categoria: oferta.categoria
   });
 
-  fila.splice(indexReal, 1);
-  fila.unshift(oferta);
+fila.splice(indexReal, 1);
+fila.unshift(oferta);
 
-  salvarFila(clienteId);
+const clienteId = clienteIdReq;
 
-  const clienteId = oferta.clienteId || "admin";
+salvarFila(clienteId);
 
   controleEnvio = {};
 
