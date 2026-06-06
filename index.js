@@ -5969,29 +5969,36 @@ app.get("/sessoes", (req, res) => {
   const clienteId = getClienteId(req);
 
   const lista = Object.values(sessoesMeta)
-  .filter(sessao =>
-   String(sessao.id || "").startsWith(clienteId + "_") ||
-   (clienteId === "admin" && !String(sessao.id || "").includes("_"))
-  )
-  .map(sessao => {
-    const id = sessao.id;
-    return {
+    .filter(sessao => {
+      const id = String(sessao.id || "");
 
-      ...sessao,
-      status: statusSessao[id] || "offline",
-      conectado: statusSessao[id] === "open",
-      qrDisponivel: !!qrCodes[id],
-      grupos: gruposPorSessao[id]?.length || 0,
-      gruposLista: gruposPorSessao[id] || [],
-      destinos: destinosPorSessao[id]?.length || 0
-    };
-  });
+      return (
+        id.startsWith(clienteId + "_") ||
+        id === clienteId ||
+        (clienteId === "admin" && id.startsWith("admin_"))
+      );
+    })
+    .map(sessao => {
+      const id = sessao.id;
+      const gruposLista = gruposPorSessao[id] || [];
+
+      return {
+        ...sessao,
+        status: statusSessao[id] || "offline",
+        conectado: statusSessao[id] === "open",
+        qrDisponivel: !!qrCodes[id],
+        grupos: gruposLista.length,
+        gruposLista,
+        destinos: destinosPorSessao[id]?.length || 0
+      };
+    });
 
   return res.json({
     ok: true,
     sessoes: lista
   });
 });
+
 
 app.post("/sessoes", (req, res) => {
    console.log("🧪 BODY NOVA SESSÃO:", req.body);
@@ -6004,11 +6011,16 @@ app.post("/sessoes", (req, res) => {
   ? 999
   : Number(planoUsuario?.limites?.sessoes || 1);
 
-  const sessoesCliente = Object.values(sessoesMeta)
-    .filter(s =>
-      String(s.id || "").startsWith(clienteId + "_") ||
-      (clienteId === "admin" && !String(s.id).includes("_"))
+ const sessoesCliente = Object.values(sessoesMeta)
+  .filter(s => {
+    const id = String(s.id || "");
+
+    return (
+      id.startsWith(clienteId + "_") ||
+      id === clienteId ||
+      (clienteId === "admin" && id.startsWith("admin_"))
     );
+  });
 
   if (!isAdminMaster(req) && sessoesCliente.length >= limite) {
   return res.status(403).json({
