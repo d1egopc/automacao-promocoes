@@ -4834,13 +4834,12 @@ function normalizarCategoria(txt = "") {
     .trim();
 }
 
-// =========== CATEGORIA BASE GLOBAL ===========
+// ========================= CATEGORIA BASE GLOBAL ============================
 
 function categoriaBase(txt = "") {
   const c = normalizarCategoria(txt);
 
-  for (const [chave, categoria] of Object.entries(
- || {})) {
+for (const [chave, categoria] of Object.entries(CATEGORIAS_DESTINOS || {})) {
 
     const nomeCategoria = normalizarCategoria(
       categoria.nome || ""
