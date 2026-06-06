@@ -83,7 +83,7 @@ async function importarProdutoManual(req, deps = {}) {
     };
   }
 
-  const config = integracoesPorCliente?.[clienteId]?.[marketplace];
+  const config = getIntegracaoCliente(clienteId, marketplace);
 
   if (!config) {
     return {
