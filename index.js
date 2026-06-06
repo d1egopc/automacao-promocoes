@@ -6599,7 +6599,16 @@ sessoesMeta[id].conectadoEm = new Date().toISOString();
 
 salvarSessoesMeta();
 
-      setTimeout(() => carregarGruposSessao(id), 3000);
+  setTimeout(async () => {
+  try {
+    await carregarGruposSessao(id);
+  } catch (e) {
+    console.log(
+      "⚠️ Erro ao carregar grupos no pós-conexão:",
+      e.message
+    );
+  }
+}, 3000);
     }
 
     if (connection === "close") {
