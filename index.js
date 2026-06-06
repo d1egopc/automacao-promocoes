@@ -5982,6 +5982,7 @@ app.get("/sessoes", (req, res) => {
       conectado: statusSessao[id] === "open",
       qrDisponivel: !!qrCodes[id],
       grupos: gruposPorSessao[id]?.length || 0,
+      gruposLista: gruposPorSessao[id] || [],
       destinos: destinosPorSessao[id]?.length || 0
     };
   });
@@ -6296,26 +6297,27 @@ async function carregarGruposSessao(id) {
   console.log("📌 Sessões abertas:", Object.keys(sessoes));
   console.log("📌 Status sessões:", statusSessao);
 
-  const sock = sessoes[id]?.sock || sessoes[id];
+  const sessao = sessoes[id];
+  const sock = sessao?.sock || sessao;
 
   if (gruposPorSessao[id]?.length) {
     return gruposPorSessao[id];
   }
 
   if (!sock) {
-    console.log("⚠️ Não carregou grupos: sem sessão");
+    console.log("⚠️ Não carregou grupos: sem sessão", id);
     return [];
   }
 
-  if (statusSessao[id] !== "open") {
-    console.log("⚠️ Não carregou grupos: WhatsApp não está open");
+  if (typeof sock.groupFetchAllParticipating !== "function") {
+    console.log("⚠️ Sessão existe, mas não tem groupFetchAllParticipating:", id);
     return [];
   }
 
   try {
     const grupos = await sock.groupFetchAllParticipating();
 
-    const lista = Object.entries(grupos).map(([gid, g]) => ({
+    const lista = Object.entries(grupos || {}).map(([gid, g]) => ({
       id: gid,
       nome: g.subject || "Grupo sem nome"
     }));
@@ -6330,6 +6332,7 @@ async function carregarGruposSessao(id) {
     return [];
   }
 }
+
 
 // ================= ROTA GRUPOS ID ====================================
 
