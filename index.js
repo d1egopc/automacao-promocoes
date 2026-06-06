@@ -6297,8 +6297,19 @@ async function carregarGruposSessao(id) {
   console.log("📌 Sessões abertas:", Object.keys(sessoes));
   console.log("📌 Status sessões:", statusSessao);
 
-  const sessao = sessoes[id];
-  const sock = sessao?.sock || sessao;
+const idNormalizado = normalizarSessaoId("admin", id);
+
+const sessao =
+  sessoes[id] ||
+  sessoes[idNormalizado] ||
+  sessoes[`admin_${id}`];
+
+const sock = sessao?.sock || sessao;
+
+console.log("🧪 Sessão encontrada?", !!sessao);
+console.log("🧪 Sock encontrado?", !!sock);
+console.log("🧪 Existe cache?", !!gruposPorSessao[id]);
+console.log("🧪 Total cache:", gruposPorSessao[id]?.length || 0);
 
   if (gruposPorSessao[id]?.length) {
     return gruposPorSessao[id];
@@ -6315,7 +6326,13 @@ async function carregarGruposSessao(id) {
   }
 
   try {
+    console.log("🧪 Vai buscar grupos do WhatsApp...");
     const grupos = await sock.groupFetchAllParticipating();
+
+console.log(
+    "🧪 groupFetchAllParticipating retornou:",
+    Object.keys(grupos || {}).length
+  );
 
     const lista = Object.entries(grupos || {}).map(([gid, g]) => ({
       id: gid,
