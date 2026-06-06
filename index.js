@@ -6284,6 +6284,48 @@ app.post("/conectar", async (req, res) => {
 });
 
 
+// ================= FUNCAO CARREGAR SESSAO ID ==========================
+
+async function carregarGruposSessao(id) {
+  console.log("🔎 Tentando carregar grupos da sessão:", id);
+  console.log("📌 Sessões abertas:", Object.keys(sessoes));
+  console.log("📌 Status sessões:", statusSessao);
+
+  const sock = sessoes[id]?.sock || sessoes[id];
+
+  if (gruposPorSessao[id]?.length) {
+    return gruposPorSessao[id];
+  }
+
+  if (!sock) {
+    console.log("⚠️ Não carregou grupos: sem sessão");
+    return [];
+  }
+
+  if (statusSessao[id] !== "open") {
+    console.log("⚠️ Não carregou grupos: WhatsApp não está open");
+    return [];
+  }
+
+  try {
+    const grupos = await sock.groupFetchAllParticipating();
+
+    const lista = Object.entries(grupos).map(([gid, g]) => ({
+      id: gid,
+      nome: g.subject || "Grupo sem nome"
+    }));
+
+    gruposPorSessao[id] = lista;
+
+    console.log(`✅ Grupos carregados automaticamente: ${lista.length}`);
+
+    return lista;
+  } catch (e) {
+    console.log("❌ Erro ao carregar grupos:", e.message);
+    return [];
+  }
+}
+
 // ================= ROTA GRUPOS ID ====================================
 
   app.get("/grupos/:id", async (req, res) => {
