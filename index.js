@@ -6366,6 +6366,48 @@ console.log(
   }
 }
 
+//================= POST MAGALU =======================================
+
+app.post("/magalu/gerar-link", (req, res) => {
+  try {
+    const { link } = req.body;
+
+    const promoterId = integracoes?.magalu?.promoterId;
+
+    if (!promoterId) {
+      return res.status(400).json({
+        ok: false,
+        erro: "Magalu não configurada."
+      });
+    }
+
+    if (!link) {
+      return res.status(400).json({
+        ok: false,
+        erro: "Informe o link."
+      });
+    }
+
+    const linkAfiliado = gerarLinkMagalu(link, promoterId);
+
+    res.json({
+      ok: true,
+      marketplace: "magalu",
+      linkOriginal: link,
+      linkAfiliado
+    });
+
+  } catch (err) {
+    console.error("❌ Erro Magalu:", err);
+
+    res.status(500).json({
+      ok: false,
+      erro: "Erro ao gerar link Magalu"
+    });
+  }
+});
+
+
 // ================= GRUPOS ID ==============================
 
 app.get("/grupos/:id", async (req, res) => {
@@ -6446,45 +6488,45 @@ app.get("/qr/:id", (req, res) => {
   });
 });
 
+// ===================== ROTA STATUS ==========================
 
-app.post("/magalu/gerar-link", (req, res) => {
-  try {
-    const { link } = req.body;
+app.get("/status/:id", (req, res) => {
+  const clienteId = getClienteId(req);
 
-    const promoterId = integracoes?.magalu?.promoterId;
+  const id = normalizarSessaoId(
+    clienteId,
+    req.params.id
+  );
 
-    if (!promoterId) {
-      return res.status(400).json({
-        ok: false,
-        erro: "Magalu não configurada."
-      });
-    }
-
-    if (!link) {
-      return res.status(400).json({
-        ok: false,
-        erro: "Informe o link."
-      });
-    }
-
-    const linkAfiliado = gerarLinkMagalu(link, promoterId);
-
-    res.json({
-      ok: true,
-      marketplace: "magalu",
-      linkOriginal: link,
-      linkAfiliado
-    });
-
-  } catch (err) {
-    console.error("❌ Erro Magalu:", err);
-
-    res.status(500).json({
-      ok: false,
-      erro: "Erro ao gerar link Magalu"
-    });
-  }
+  return res.json({
+    ok: true,
+    id,
+    status: statusSessao[id] || "offline",
+    conectado: statusSessao[id] === "open" || statusSessao[id] === "aberto",
+    qrDisponivel: !!qrCodes[id],
+    grupos: gruposPorSessao[id]?.length || 0
+  });
 });
+
+app.get("/fila/status", (req, res) => {
+  const clienteId = getClienteId(req);
+
+  const itensCliente = fila.filter(o =>
+    String(o.clienteId || "admin") === String(clienteId)
+  );
+
+  return res.json({
+    ok: true,
+    clienteId,
+    total: itensCliente.length,
+    pendentes: itensCliente.filter(o => o.status === "pendente").length,
+    enviados: itensCliente.filter(o => o.status === "enviado").length,
+    erros: itensCliente.filter(o => o.status === "erro").length
+  });
+});
+
+
+// =================== POST DESTINOS ================================
 
 app.post("/destinos/:id", (req, res) => {
   const { destinos } = req.body;
@@ -6724,6 +6766,8 @@ salvarSessoesMeta();
 
   return sock;
 }
+
+
 
 // ================= TESTE AWIN =================
 
