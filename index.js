@@ -2833,12 +2833,15 @@ function getPlanoUsuario(req) {
 
 function getIntegracaoCliente(clienteId = "admin", marketplace = "") {
   const mp = String(marketplace || "").toLowerCase();
+  const cid = String(clienteId || "admin");
 
-  return (
-    integracoesPorCliente?.[clienteId]?.[mp] ||
-    integracoesPorCliente?.admin?.[mp] ||
-    null
-  );
+  // Admin pode usar integrações do admin
+  if (cid === "admin") {
+    return integracoesPorCliente?.admin?.[mp] || null;
+  }
+
+  // Usuário comum só pode usar integração própria
+  return integracoesPorCliente?.[cid]?.[mp] || null;
 }
 
 // ======================== FUNCAO GERAR ID ===============================
@@ -5980,16 +5983,16 @@ app.get("/sessoes", (req, res) => {
     })
     .map(sessao => {
       const id = sessao.id;
-      const gruposLista = gruposPorSessao[id] || [];
+      const totalGrupos = gruposPorSessao[id]?.length || 0;
 
-      return {
-        ...sessao,
-        status: statusSessao[id] || "offline",
-        conectado: statusSessao[id] === "open",
-        qrDisponivel: !!qrCodes[id],
-        grupos: gruposLista.length,
-        gruposLista,
-        destinos: destinosPorSessao[id]?.length || 0
+     return {
+     ...sessao,
+     status: statusSessao[id] || "offline",
+     conectado: statusSessao[id] === "open" || statusSessao[id] === "aberto",
+     qrDisponivel: !!qrCodes[id],
+     grupos: totalGrupos,
+     totalGrupos,
+     destinos: destinosPorSessao[id]?.length || 0
       };
     });
 
