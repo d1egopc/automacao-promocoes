@@ -85,6 +85,18 @@ async function importarProdutoManual(req, deps = {}) {
 
   const config = getIntegracaoCliente(clienteId, marketplace);
 
+console.log("🧪 IMPORTAÇÃO MANUAL CONFIG:", {
+  clienteId,
+  marketplace,
+  tagUsada:
+    config?.credenciais?.trackingId ||
+    config?.credenciais?.partnerTag ||
+    config?.credenciais?.appId,
+  credenciais: Object.keys(config?.credenciais || {})
+});
+
+
+
   if (!config) {
     return {
       status: 400,
