@@ -6363,6 +6363,36 @@ console.log(
   }
 }
 
+// ================= GRUPOS ID ==============================
+
+app.get("/grupos/:id", async (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    const id = normalizarSessaoId(clienteId, req.params.id);
+
+    console.log("📋 ROTA /grupos buscando:", id);
+
+    const grupos = await carregarGruposSessao(id);
+
+    return res.json({
+      ok: true,
+      id,
+      total: grupos.length,
+      grupos,
+      gruposLista: grupos
+    });
+  } catch (e) {
+    console.log("❌ Erro rota /grupos/:id:", e.message);
+
+    return res.status(500).json({
+      ok: false,
+      erro: e.message,
+      total: 0,
+      grupos: [],
+      gruposLista: []
+    });
+  }
+});
 
 // ================= ROTA QRCOD ID ==============================
 
