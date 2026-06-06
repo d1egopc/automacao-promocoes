@@ -6020,12 +6020,17 @@ app.post("/sessoes", (req, res) => {
     const nome = req.body.nome || "WhatsApp";
     const tipo = req.body.tipo || "whatsapp";
 
-    const total = Object.keys(sessoesMeta).length + 1;
-    const nomeSessao = req.body.id || `sessao${total}`;
-    const id = normalizarSessaoId(
-    clienteId,
-    nomeSessao
-    );
+    const idRecebido = String(req.body.id || "").trim();
+
+    const nomeSessao =
+    !idRecebido || idRecebido === "sessao1"
+    ? gerarProximaSessaoId(clienteId)
+    : idRecebido;
+
+const id = normalizarSessaoId(
+  clienteId,
+  nomeSessao
+);
 
     if (sessoesMeta[id]) {
       return res.status(400).json({
@@ -6279,7 +6284,7 @@ app.post("/conectar", async (req, res) => {
 });
 
 
-// ================= ROTA GRUPOS ID =======================================
+// ================= ROTA GRUPOS ID ====================================
 
   app.get("/grupos/:id", async (req, res) => {
   const clienteId = getClienteId(req);
