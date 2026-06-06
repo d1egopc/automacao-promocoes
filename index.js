@@ -6320,13 +6320,14 @@ const sock = sessao?.sock || sessao;
 
 console.log("🧪 Sessão encontrada?", !!sessao);
 console.log("🧪 Sock encontrado?", !!sock);
-console.log("🧪 Existe cache?", !!gruposPorSessao[id]);
-console.log("🧪 Total cache:", gruposPorSessao[id]?.length || 0);
+const chaveCache = sessoes[id] ? id : idNormalizado;
 
-  if (gruposPorSessao[id]?.length) {
-    return gruposPorSessao[id];
-  }
+console.log("🧪 Existe cache?", !!gruposPorSessao[chaveCache]);
+console.log("🧪 Total cache:", gruposPorSessao[chaveCache]?.length || 0);
 
+if (gruposPorSessao[chaveCache]?.length) {
+  return gruposPorSessao[chaveCache];
+}
   if (!sock) {
     console.log("⚠️ Não carregou grupos: sem sessão", id);
     return [];
@@ -6351,7 +6352,7 @@ console.log(
       nome: g.subject || "Grupo sem nome"
     }));
 
-    gruposPorSessao[id] = lista;
+    gruposPorSessao[chaveCache] = lista;
 
     console.log(`✅ Grupos carregados automaticamente: ${lista.length}`);
 
@@ -6363,7 +6364,7 @@ console.log(
 }
 
 
-// ================= ROTA GRUPOS ID ====================================
+// ================= ROTA QRCOD ID ==============================
 
 app.get("/qr/:id", (req, res) => {
   const clienteId = getClienteId(req);
