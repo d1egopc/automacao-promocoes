@@ -7146,44 +7146,23 @@ await farejador(clienteId, {
   }
 }
 
+// ============================= TESTE MANUAL =========================
 
- //setTimeout(async () => {
- //console.log("🪂 TESTE MANUAL MERCADO LIBRE - CHAT GPT");
+setTimeout(async () => {
+  console.log("🪂 TESTE MANUAL ORQUESTRADOR AMAZON");
 
-   //await farejadoresMarketplaces.kabum("admin", {
-   // config,
-    //integracoesPorCliente,
-    //getIntegracaoCliente,
-    //fila,
-    //salvarFila,
-    //prepararOfertaGlobal,
-    //ofertaJaExiste,
-    //prepararOfertaGlobal,
-    //ofertaJaExiste,
-    //deveIgnorarOfertaRepetida,
-    //registrarOfertaVista,
-    //classificarCategoriaOferta,
-    //classificarCategoriaOferta,
-    //gerarBuscasGlobais,
-    //gerarHeadersStealth,
-    //farejarCuponsMercadoLivre,
-    //importarMercadoLivre,
-    //gerarLinkAfiliadoMercadoLivre,
-    //importarAmazon,
-    //buscarOfertasShopee: (clienteId) =>
-    //buscarOfertasShopee(clienteId, {
-    //config,
-    //getIntegracaoCliente
-    //}),
-    //normalizarSessaoId,
-    //aplicarFiltrosUniversais,
-    //distribuirOfertaParaClientes,
-    //encurtarUrl,
-    //gerarDeepLinkAwin,
-    //importarProdutoKabumViaAwin
-    //});
+  const indiceAmazon =
+    ordemMarketplaces.indexOf("amazon");
 
-  //}, 60 * 1000);
+  if (indiceAmazon >= 0) {
+    indiceMarketplaceAtual = indiceAmazon;
+  }
+
+  await rodarProximoMarketplace();
+
+}, 60 * 1000);
+
+ 
 
 setInterval(() => {
   rodarProximoMarketplace();
