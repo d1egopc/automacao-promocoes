@@ -6176,31 +6176,98 @@ app.post("/reset/:id", async (req, res) => {
   }
 });
 
+// ===================== FUNÇÃO LIMETE SESSÃO WHATSAPP ========================
+
+function obterLimiteSessoesCliente(clienteId) {
+  const usuario = obterUsuario(clienteId);
+  const nomePlano = String(usuario?.plano || "free").toLowerCase();
+  const plano = getPlanoPorNome(nomePlano);
+
+  return Number(
+    plano?.limites?.sessoes ||
+    usuario?.limites?.sessoes ||
+    1
+  );
+}
+
+function listarSessoesCliente(clienteId) {
+  config.sessoesWhatsapp = config.sessoesWhatsapp || [];
+
+  return config.sessoesWhatsapp.filter(id =>
+    String(id).startsWith(`${clienteId}_`)
+  );
+}
+
+function gerarProximaSessaoId(clienteId) {
+  const sessoesCliente = listarSessoesCliente(clienteId);
+
+  const numeros = sessoesCliente
+    .map(id => {
+      const match = String(id).match(/_sessao(\d+)$/);
+      return match ? Number(match[1]) : 0;
+    })
+    .filter(n => Number.isFinite(n));
+
+  const proximo = numeros.length
+    ? Math.max(...numeros) + 1
+    : 1;
+
+  return `sessao${proximo}`;
+}
+
+// ========================== ROTA CONECTAR ================================
+
 app.post("/conectar", async (req, res) => {
   const clienteId = getClienteId(req);
-  const id =
-  req.body?.id ||
-  req.body?.sessaoId ||
-  req.body?.nome ||
-  req.body?.name;
 
   if (!clienteId) {
     return res.status(401).json({ erro: "Usuário não identificado" });
   }
 
-  if (!id) {
-    return res.status(400).json({ erro: "ID obrigatório" });
-  }
-
-  const sessaoId = normalizarSessaoId(clienteId, id);
-
   config.sessoesWhatsapp = config.sessoesWhatsapp || [];
 
-  if (!config.sessoesWhatsapp.includes(sessaoId)) {
-    config.sessoesWhatsapp.push(sessaoId);
-    salvarConfig();
-    console.log("💾 Sessão WhatsApp salva para reconexão:", sessaoId);
+  const limiteSessoes = obterLimiteSessoesCliente(clienteId);
+  const sessoesCliente = listarSessoesCliente(clienteId);
+
+  if (sessoesCliente.length >= limiteSessoes) {
+    return res.status(403).json({
+      ok: false,
+      erro: `Seu plano permite até ${limiteSessoes} sessão(ões) WhatsApp.`,
+      limite: limiteSessoes,
+      usadas: sessoesCliente.length
+    });
   }
+
+  const idRecebido = String(
+    req.body?.id ||
+    req.body?.sessaoId ||
+    ""
+  ).trim();
+
+  const idBase =
+    !idRecebido || idRecebido === "sessao1"
+      ? gerarProximaSessaoId(clienteId)
+      : idRecebido;
+
+  const sessaoId = normalizarSessaoId(clienteId, idBase);
+
+  if (config.sessoesWhatsapp.includes(sessaoId)) {
+    return res.status(400).json({
+      ok: false,
+      erro: "Já existe uma conexão com esse ID. Tente criar uma nova conexão novamente.",
+      id: sessaoId
+    });
+  }
+
+  config.sessoesWhatsapp.push(sessaoId);
+  salvarConfig();
+
+  console.log("💾 Sessão WhatsApp salva para reconexão:", {
+    clienteId,
+    sessaoId,
+    limiteSessoes,
+    usadas: sessoesCliente.length + 1
+  });
 
   iniciarWhatsApp(sessaoId, false);
 
@@ -6211,79 +6278,8 @@ app.post("/conectar", async (req, res) => {
   });
 });
 
-app.get("/status/:id", (req, res) => {
-  const clienteId = getClienteId(req);
-  const idOriginal = req.params.id;
 
-  const id = normalizarSessaoId(clienteId, idOriginal);
-
-  res.json({
-    conectado: statusSessao[id] === "open",
-    status: statusSessao[id] || "offline",
-    id
-  });
-});
-
-app.get("/qr/:id", (req, res) => {
-  const clienteId = getClienteId(req);
-  const idOriginal = req.params.id;
-
-  const id = normalizarSessaoId(clienteId, idOriginal);
-
-  if (!qrCodes[id]) {
-    return res.json({
-      status: "loading",
-      qr: null,
-      id
-    });
-  }
-
-  return res.json({
-    status: "ready",
-    qr: qrCodes[id],
-    id
-  });
-});
-
-async function carregarGruposSessao(id) {
-console.log("🔎 Tentando carregar grupos da sessão:", id);
-console.log("📌 Sessões abertas:", Object.keys(sessoes));
-console.log("📌 Status sessões:", statusSessao);
-  
-const sock = sessoes[id]?.sock || sessoes[id];
-
-if (gruposPorSessao[id]?.length) {
-  return gruposPorSessao[id];
-}
-
-  if (!sock) {
-    console.log("⚠️ Não carregou grupos: sem sessão");
-    return [];
-  }
-
-  if (statusSessao[id] !== "open") {
-    console.log("⚠️ Não carregou grupos: WhatsApp não está open");
-    return [];
-  }
-
-  try {
-    const grupos = await sock.groupFetchAllParticipating();
-
-    const lista = Object.entries(grupos).map(([gid, g]) => ({
-      id: gid,
-      nome: g.subject || "Grupo sem nome"
-    }));
-
-    gruposPorSessao[id] = lista;
-
-    console.log(`✅ Grupos carregados automaticamente: ${lista.length}`);
-
-    return lista;
-  } catch (e) {
-    console.log("❌ Erro ao carregar grupos:", e.message);
-    return [];
-  }
-}
+// ================= ROTA GRUPOS ID =======================================
 
   app.get("/grupos/:id", async (req, res) => {
   const clienteId = getClienteId(req);
