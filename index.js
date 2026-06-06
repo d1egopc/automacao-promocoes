@@ -5272,6 +5272,13 @@ function usuarioPodeReceberMarketplace(usuario, marketplace) {
     return true;
   }
 
+console.log("🧪 PLANO MARKETPLACE CHECK:", {
+  clienteId: usuario.id,
+  plano: usuario.plano,
+  marketplace: normalizarTexto(marketplace || ""),
+  marketplacesLiberados
+});
+
   const plano =
     getPlanoPorNome(usuario.plano) || {};
 
