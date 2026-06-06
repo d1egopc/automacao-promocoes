@@ -2184,7 +2184,7 @@ app.delete("/fila/item/:id", (req, res) => {
   }
 
   fila.splice(index, 1);
-  salvarFila();
+  salvarFila(clienteId);
 
   return res.json({
     ok: true,
@@ -2214,7 +2214,7 @@ app.delete("/fila/limpar", (req, res) => {
 
   const removidos = antes - fila.length;
 
-  salvarFila();
+  salvarFila(clienteId);
 
   console.log("🧹 LIMPEZA FILA:", {
     clienteId,
@@ -2249,7 +2249,7 @@ app.delete("/fila/:index", (req, res) => {
 
   const removido = fila.splice(index, 1);
 
-  salvarFila();
+  salvarFila(clienteId);
 
   console.log("🗑️ Removido da fila:", {
     clienteId,
@@ -2302,7 +2302,7 @@ const indexReal = fila.findIndex(o => o === oferta);
   fila.splice(indexReal, 1);
   fila.unshift(oferta);
 
-  salvarFila();
+  salvarFila(clienteId);
 
   const clienteId = oferta.clienteId || "admin";
 
