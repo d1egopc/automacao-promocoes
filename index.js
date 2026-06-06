@@ -6231,10 +6231,15 @@ app.post("/conectar", async (req, res) => {
 
   config.sessoesWhatsapp = config.sessoesWhatsapp || [];
 
-  const limiteSessoes = obterLimiteSessoesCliente(clienteId);
-  const sessoesCliente = listarSessoesCliente(clienteId);
+ const limiteSessoes = isAdminMaster(req)
+  ? 999
+  : obterLimiteSessoesCliente(clienteId);
 
-  if (sessoesCliente.length >= limiteSessoes) {
+const sessoesCliente = listarSessoesCliente(clienteId);
+
+if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
+
+
     return res.status(403).json({
       ok: false,
       erro: `Seu plano permite até ${limiteSessoes} sessão(ões) WhatsApp.`,
