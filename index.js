@@ -5266,18 +5266,18 @@ function normalizarSessaoId(clienteId, id = "sessao1") {
 // ============== HELPERS DISTRIBUIDOR OFERTAS =====================================
 
 function usuarioPodeReceberMarketplace(usuario, marketplace) {
+
+  console.log("🔥 ENTROU usuarioPodeReceberMarketplace", {
+    clienteId: usuario?.id,
+    plano: usuario?.plano,
+    marketplace
+  });
+
   if (!usuario?.ativo) return false;
 
   if (usuario.papel === "admin_master") {
     return true;
   }
-
-console.log("🧪 PLANO MARKETPLACE CHECK:", {
-  clienteId: usuario.id,
-  plano: usuario.plano,
-  marketplace: normalizarTexto(marketplace || ""),
-  marketplacesLiberados
-});
 
   const plano =
     getPlanoPorNome(usuario.plano) || {};
@@ -5285,11 +5285,17 @@ console.log("🧪 PLANO MARKETPLACE CHECK:", {
   const marketplacesLiberados =
     plano.marketplaces || [];
 
+  console.log("🧪 PLANO MARKETPLACE CHECK:", {
+    clienteId: usuario.id,
+    plano: usuario.plano,
+    marketplace: normalizarTexto(marketplace || ""),
+    marketplacesLiberados
+  });
+
   return marketplacesLiberados.includes(
     normalizarTexto(marketplace || "")
   );
 }
-
 
 // ============ FUNCAO INTEGRACAO MARKET POR CLIENTE ID ===================
 
