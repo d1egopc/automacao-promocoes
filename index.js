@@ -5283,25 +5283,76 @@ function usuarioPodeReceberMarketplace(usuario, marketplace) {
   );
 }
 
+
+// ============ FUNCAO INTEGRACAO MARKET POR CLIENTE ID ===================
+
 function usuarioTemIntegracaoMarketplace(clienteId, marketplace) {
   const mp = normalizarTexto(marketplace || "");
 
-  // KaBuM usa credenciais da Awin
-  if (mp === "kabum") {
-    const awin =
-      getIntegracaoCliente(clienteId, "awin");
+  const integracao = getIntegracaoCliente(clienteId, mp);
+  const cred = integracao?.credenciais || {};
 
+  console.log("🔎 CHECK INTEGRAÇÃO CLIENTE:", {
+    clienteId,
+    marketplace: mp,
+    temIntegracao: !!integracao,
+    campos: Object.keys(cred)
+  });
+
+  if (!integracao) return false;
+
+  if (mp === "amazon") {
     return !!(
-      awin?.credenciais?.publisherId &&
-      awin?.credenciais?.apiToken
+      cred.tag ||
+      cred.trackingId ||
+      cred.partnerTag ||
+      cred.appId ||
+      cred.cookies
     );
   }
 
-  const integracao =
-    getIntegracaoCliente(clienteId, mp);
+  if (mp === "mercadolivre") {
+    return !!(
+      cred.tag ||
+      cred.cookies
+    );
+  }
 
-  return !!integracao?.credenciais;
+  if (mp === "shopee") {
+    return !!(
+      cred.appId &&
+      cred.secret
+    );
+  }
+
+  if (mp === "aliexpress") {
+    return !!(
+      cred.appKey &&
+      cred.secret &&
+      cred.trackingId
+    );
+  }
+
+  if (mp === "kabum") {
+    const awin = getIntegracaoCliente(clienteId, "awin");
+    const awinCred = awin?.credenciais || {};
+
+    return !!(
+      awinCred.publisherId &&
+      awinCred.apiToken
+    );
+  }
+
+  if (mp === "awin") {
+    return !!(
+      cred.publisherId &&
+      cred.apiToken
+    );
+  }
+
+  return Object.keys(cred).length > 0;
 }
+
 
 // =============== FUNCAO DISTRIBUIDOR OFERTAS ======================================
 
