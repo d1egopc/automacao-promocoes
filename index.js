@@ -6373,6 +6373,20 @@ app.get("/grupos/:id", async (req, res) => {
     const clienteId = getClienteId(req);
     const id = normalizarSessaoId(clienteId, req.params.id);
 
+const status = statusSessao[id];
+
+if (status !== "open" && status !== "aberto") {
+  return res.json({
+    ok: false,
+    id,
+    status: status || "offline",
+    total: gruposPorSessao[id]?.length || 0,
+    grupos: gruposPorSessao[id] || [],
+    gruposLista: gruposPorSessao[id] || [],
+    aviso: "Sessão não está conectada."
+  });
+}
+
     console.log("📋 ROTA /grupos buscando:", id);
 
     const grupos = await carregarGruposSessao(id);
