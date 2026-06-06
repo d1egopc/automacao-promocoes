@@ -110,11 +110,12 @@ function criarImportarAmazon(deps = {}) {
 
     let linkAfiliado = url;
 
-    const trackingId =
-      config?.credenciais?.trackingId ||
-      config?.credenciais?.partnerTag ||
-      config?.credenciais?.appId ||
-      "";
+   const trackingId =
+   config?.credenciais?.trackingId ||
+   config?.credenciais?.partnerTag ||
+   config?.credenciais?.tag ||
+   config?.credenciais?.appId ||
+   "";
 
     if (trackingId) {
       try {
