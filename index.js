@@ -6333,27 +6333,39 @@ async function carregarGruposSessao(id) {
 
 // ================= ROTA GRUPOS ID ====================================
 
-  app.get("/grupos/:id", async (req, res) => {
+app.get("/qr/:id", (req, res) => {
   const clienteId = getClienteId(req);
+  const idOriginal = req.params.id;
 
-  const id = normalizarSessaoId(
+  const id = normalizarSessaoId(clienteId, idOriginal);
+
+  console.log("🧪 BUSCANDO QR:", {
     clienteId,
-    req.params.id
-  );
+    idOriginal,
+    id,
+    temQr: !!qrCodes[id],
+    status: statusSessao[id]
+  });
 
-  const lista = await carregarGruposSessao(id);
-
-  if (!lista.length) {
-    return res.status(400).json({ erro: "Sem grupos carregados" });
+  if (!qrCodes[id]) {
+    return res.json({
+      ok: false,
+      status: statusSessao[id] || "loading",
+      qr: null,
+      qrCode: null,
+      id
+    });
   }
 
-return res.json({
-  ok: true,
-  total: lista.length,
-  grupos: lista,
-  lista
+  return res.json({
+    ok: true,
+    status: "ready",
+    qr: qrCodes[id],
+    qrCode: qrCodes[id],
+    id
+  });
 });
-});
+
 
 app.post("/magalu/gerar-link", (req, res) => {
   try {
