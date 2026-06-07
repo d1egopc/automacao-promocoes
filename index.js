@@ -7173,25 +7173,25 @@ await farejador(clienteId, {
 
 // ============================= TESTE MANUAL =========================
 
-setTimeout(async () => {
-  console.log("🪂 TESTE MANUAL ORQUESTRADOR AMAZON");
+//setTimeout(async () => {
+  //console.log("🪂 TESTE MANUAL ORQUESTRADOR AMAZON");
 
-  const indiceAmazon =
-    ordemMarketplaces.indexOf("amazon");
+  //const indiceAmazon =
+    //ordemMarketplaces.indexOf("amazon");
 
-  if (indiceAmazon >= 0) {
+  //if (indiceAmazon >= 0) {
     indiceMarketplaceAtual = indiceAmazon;
-  }
+  //}
 
-  await rodarProximoMarketplace();
+  //await rodarProximoMarketplace();
 
-}, 60 * 1000);
+//}, 60 * 1000);
 
  
 
 setInterval(() => {
   rodarProximoMarketplace();
-}, (config.intervaloFarejadorGlobalMinutos || 10) * 60 * 1000);
+}, (config.intervaloFarejadorGlobalMinutos || 7) * 60 * 1000);
 
 setTimeout(() => {
   console.log("⏳ Primeira rodada do orquestrador em 5 minutos...");
