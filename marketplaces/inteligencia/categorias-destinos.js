@@ -1,5 +1,5 @@
 
- // ====================== CATEGORIAS GLOBAIS ===========================
+ // ====================== CATEGORIAS DESTINO ===========================
 
 const CATEGORIAS_DESTINOS = {
   modaMasculina: {

@@ -26,6 +26,13 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
   // ===== CORREÇÕES FORTES ANTES DE TUDO =====
 
   if (contemAlgum(texto, [
+    "ventilador", "ventilador de mesa", "ventilador de coluna",
+    "ventilador de teto", "circulador de ar", "ar condicionado",
+    "ar-condicionado", "climatizador", "umidificador",
+    "desumidificador", "aquecedor", "exaustor", "purificador de ar"
+  ])) return "Climatização e Ventilação";
+
+if (contemAlgum(texto, [
     "bebedouro esmaltec", "purificador de agua", "purificador de água",
     "agua gelada", "água gelada", "bebedouro de mesa", "bebedouro coluna"
   ])) return "Eletrodomésticos";
@@ -77,6 +84,16 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     "vitamina", "capsulas", "cápsulas", "fio dental", "termometro",
     "termômetro", "medidor de pressao", "medidor de pressão"
   ])) return "Perfumaria, Farmácia e Beleza";
+
+  if (contemAlgum(texto, [
+    "luminaria", "luminária", "lustre", "pendente", "pendente led",
+    "refletor", "refletor led", "holofote", "lampada", "lâmpada",
+    "painel led", "plafon", "spot", "spot led", "fita led",
+    "led strip", "tomada", "interruptor", "extensao", "extensão",
+    "disjuntor", "sensor de presenca", "sensor de presença",
+    "soquete", "bocal", "fio eletrico", "fio elétrico", "cabo eletrico",
+    "cabo elétrico"
+  ])) return "Iluminação e Elétrica";
 
   if (contemAlgum(texto, [
     "halter", "haltere", "kettlebell", "musculacao", "musculação",
@@ -165,12 +182,12 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
   if (contemAlgum(texto, [
     "tapete", "cortina", "almofada", "sofa", "sofá", "rack",
     "painel tv", "guarda roupa", "guarda-roupa", "roupeiro",
-    "mesa", "cadeira", "penteadeira", "comoda", "cômoda", "armario",
-    "armário", "varal", "colcha", "cobre leito", "luminaria",
-    "luminária", "lustre", "torneira", "banheiro", "cozinha",
+    "mesa", "cadeira", "penteadeira", "comoda", "cômoda", 
+    "armário", "varal", "colcha", "cobre leito", "armario", 
+    "torneira", "banheiro", "cozinha", "caixa térmica",
     "kit churrasco", "utensilios cozinha", "utensílios cozinha",
     "espelho", "adnet", "garrafa termica", "garrafa térmica",
-    "copo termico", "copo térmico", "caixa termica", "caixa térmica",
+    "copo termico", "copo térmico", "caixa termica", 
     "gelo reutilizavel", "gelo reutilizável"
   ])) return "Casa, Móveis e Decoração";
 
