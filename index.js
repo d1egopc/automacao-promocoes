@@ -2437,11 +2437,12 @@ app.post("/admin/planos", (req, res) => {
     creditos: Number(body.limites?.creditos || body.creditos || 0)
   },
 
-  recursos: {
-    linkOptimus: !!body.recursos?.linkOptimus,
-    analytics: !!body.recursos?.analytics,
-    cupomInteligente: !!body.recursos?.cupomInteligente
-  },
+recursos: {
+  linkOptimus: !!body.recursos?.linkOptimus,
+  analytics: !!body.recursos?.analytics,
+  cupomInteligente: !!body.recursos?.cupomInteligente,
+  campanhas: !!body.recursos?.campanhas
+},
 
   atualizadoEm: new Date().toISOString()
 };
