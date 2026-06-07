@@ -81,6 +81,12 @@ if (tipo === "telegram") {
     }
 
     if (imagemUrl) {
+
+console.log("🖼️ DEBUG IMAGEM CAMPANHA TELEGRAM:", {
+  imagemUrl,
+  tipo: typeof imagemUrl,
+  inicio: String(imagemUrl || "").slice(0, 120)
+});
       await axios.post(
         `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
         {
