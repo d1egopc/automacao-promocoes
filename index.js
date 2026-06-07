@@ -6693,6 +6693,7 @@ app.post("/campanhas/enviar", async (req, res) => {
       destinosIds,
       destinosPorCliente,
       sessoes,
+      configsPorCliente,
       usuarioTemCreditos,
       debitarCreditos,
       corrigirImagemUrl
