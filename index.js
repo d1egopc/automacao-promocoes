@@ -490,6 +490,7 @@ function criarPlanosPadrao() {
         linkOptimus: false,
         analytics: false,
         cupomInteligente: false
+        campanhas: false
       },
 
       atualizadoEm: new Date().toISOString()
@@ -524,6 +525,7 @@ function criarPlanosPadrao() {
         linkOptimus: true,
         analytics: true,
         cupomInteligente: true
+        campanhas: true
       },
 
       atualizadoEm: new Date().toISOString()
@@ -561,6 +563,7 @@ function criarPlanosPadrao() {
         analytics: true,
         cupomInteligente: true,
         adminAvancado: true
+        campanhas: true
       },
 
       atualizadoEm: new Date().toISOString()
