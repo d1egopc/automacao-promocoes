@@ -61,7 +61,13 @@ function precoNumero(valor) {
 }
 
 function chaveOferta(oferta = {}) {
-  const marketplace = normalizarTextoLocal(oferta.marketplace || "geral");
+  const clienteId = normalizarTextoLocal(
+    oferta.clienteId || "admin"
+  );
+
+  const marketplace = normalizarTextoLocal(
+    oferta.marketplace || "geral"
+  );
 
   let titulo = normalizarTextoLocal(
     oferta.titulo || oferta.nome || ""
@@ -72,8 +78,9 @@ function chaveOferta(oferta = {}) {
     .replace(/\s+/g, " ")
     .trim();
 
-  return `${marketplace}|${titulo}`;
+  return `${clienteId}|${marketplace}|${titulo}`;
 }
+
 
 function janelaHorasPorCategoria(oferta = {}) {
   const categoria = normalizarTextoLocal(oferta.categoria || "");
