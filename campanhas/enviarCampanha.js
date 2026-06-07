@@ -1,3 +1,5 @@
+const axios = require("axios");
+
 async function enviarCampanhaManual({
   clienteId,
   mensagem,
@@ -5,6 +7,7 @@ async function enviarCampanhaManual({
   destinosIds = [],
   destinosPorCliente,
   sessoes,
+  configsPorCliente,
   usuarioTemCreditos,
   debitarCreditos,
   corrigirImagemUrl
@@ -38,15 +41,90 @@ async function enviarCampanhaManual({
 
   for (const destino of destinosSelecionados) {
     try {
-      if (String(destino.tipo || "").toLowerCase() !== "whatsapp") {
-        resultado.detalhes.push({
-          destino: destino.nome,
-          tipo: destino.tipo,
-          status: "ignorado",
-          motivo: "Tipo ainda não suportado nesta fase"
-        });
-        continue;
-      }
+    const tipo = String(destino.tipo || "").toLowerCase();
+
+if (tipo === "telegram") {
+  const configCliente = configsPorCliente?.[clienteId] || {};
+  const telegrams = configCliente.telegram?.destinos || [];
+  const telegramsSelecionados = destino.telegramDestinos || [];
+
+  const selecionados = telegramsSelecionados.length
+    ? telegrams.filter(t =>
+        telegramsSelecionados.includes(t.nome) ||
+        telegramsSelecionados.includes(String(t.chatId))
+      )
+    : telegrams.filter(t => t.ativo);
+
+  if (!selecionados.length) {
+    resultado.erros++;
+    resultado.detalhes.push({
+      destino: destino.nome,
+      tipo: "telegram",
+      status: "erro",
+      motivo: "Nenhum Telegram selecionado"
+    });
+    continue;
+  }
+
+  for (const tel of selecionados) {
+    if (!tel.ativo) continue;
+
+    if (!usuarioTemCreditos(clienteId, 1)) {
+      resultado.erros++;
+      resultado.detalhes.push({
+        destino: destino.nome,
+        chatId: tel.chatId,
+        status: "erro",
+        motivo: "Sem créditos"
+      });
+      continue;
+    }
+
+    if (imagemUrl) {
+      await axios.post(
+        `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
+        {
+          chat_id: tel.chatId,
+          photo: corrigirImagemUrl(imagemUrl) || imagemUrl,
+          caption: mensagem
+        }
+      );
+    } else {
+      await axios.post(
+        `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
+        {
+          chat_id: tel.chatId,
+          text: mensagem
+        }
+      );
+    }
+
+    debitarCreditos(clienteId, 1);
+    resultado.enviados++;
+
+    resultado.detalhes.push({
+      destino: destino.nome,
+      tipo: "telegram",
+      chatId: tel.chatId,
+      status: "enviado",
+      creditos: 1
+    });
+
+    await new Promise(r => setTimeout(r, 2000));
+  }
+
+  continue;
+}
+
+if (tipo !== "whatsapp") {
+  resultado.detalhes.push({
+    destino: destino.nome,
+    tipo: destino.tipo,
+    status: "ignorado",
+    motivo: "Tipo não suportado"
+  });
+  continue;
+}
 
       const sock = sessoes[destino.conexaoId];
 
