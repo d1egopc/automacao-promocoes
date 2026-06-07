@@ -489,7 +489,7 @@ function criarPlanosPadrao() {
 
         linkOptimus: false,
         analytics: false,
-        cupomInteligente: false
+        cupomInteligente: false,
         campanhas: false
       },
 
@@ -524,7 +524,7 @@ function criarPlanosPadrao() {
 
         linkOptimus: true,
         analytics: true,
-        cupomInteligente: true
+        cupomInteligente: true,
         campanhas: true
       },
 
@@ -562,7 +562,7 @@ function criarPlanosPadrao() {
         linkOptimus: true,
         analytics: true,
         cupomInteligente: true,
-        adminAvancado: true
+        adminAvancado: true,
         campanhas: true
       },
 
