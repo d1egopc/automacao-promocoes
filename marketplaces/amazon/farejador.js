@@ -171,46 +171,42 @@ let novaOferta = {
 
 novaOferta = prepararOfertaGlobal(novaOferta);
 
-const jaExiste = ofertaJaExiste(novaOferta);
-
-console.log("🔎 AMAZON JA EXISTE?", {
+console.log("🔎 AMAZON OFERTA PRONTA PARA DISTRIBUIÇÃO:", {
   titulo: novaOferta.titulo,
-  jaExiste,
   link: novaOferta.link,
   linkAfiliado: novaOferta.linkAfiliado
 });
 
-if (!jaExiste) {
-
-  novaOferta.criadoEm =
-    novaOferta.criadoEm ||
-    new Date().toLocaleString("pt-BR", {
-      timeZone: "America/Sao_Paulo"
-    });
-
-  ofertasEncontradas.push(novaOferta);
-
-  adicionadasNestaRodada++;
-
-  console.log("🛒 Nova oferta Amazon:", {
-    titulo: novaOferta.titulo,
-    preco: novaOferta.precoAtual
+novaOferta.criadoEm =
+  novaOferta.criadoEm ||
+  new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
   });
 
-  console.log("🤖 Nova oferta Amazon:", {
-    titulo: novaOferta.titulo,
-    preco: novaOferta.precoAtual,
-    precoAntigo: novaOferta.precoAntigo,
-    desconto: Math.round(desconto) + "%",
-    cupom: novaOferta.cupom,
-    avisoCupom: novaOferta.avisoCupom
-  });
+ofertasEncontradas.push(novaOferta);
 
-  if (adicionadasNestaRodada >= limitePorRodada) {
-    console.log("🛑 Limite Amazon por rodada atingido");
-    break;
-  }
+adicionadasNestaRodada++;
+
+console.log("🛒 Nova oferta Amazon:", {
+  titulo: novaOferta.titulo,
+  preco: novaOferta.precoAtual
+});
+
+console.log("🤖 Nova oferta Amazon:", {
+  titulo: novaOferta.titulo,
+  preco: novaOferta.precoAtual,
+  precoAntigo: novaOferta.precoAntigo,
+  desconto: Math.round(desconto) + "%",
+  cupom: novaOferta.cupom,
+  avisoCupom: novaOferta.avisoCupom
+});
+
+if (adicionadasNestaRodada >= limitePorRodada) {
+  console.log("🛑 Limite Amazon por rodada atingido");
+  break;
 }
+
+
       await new Promise(r =>
       setTimeout(r, 3000 + Math.random() * 5000)
     );
