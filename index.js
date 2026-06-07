@@ -73,6 +73,10 @@ const {
   CATEGORIAS_DESTINOS
 } = require("./marketplaces/inteligencia/categorias-destinos");
 
+const {
+  enviarCampanhaManual
+} = require("./campanhas/enviarCampanha");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -6670,6 +6674,44 @@ app.get("/destinos/:id", (req, res) => {
   });
 });
 
+// ================ CAMPANHAS =======================
+
+app.post("/campanhas/enviar", async (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+
+    const {
+      mensagem,
+      imagemUrl,
+      destinosIds
+    } = req.body || {};
+
+    const resultado = await enviarCampanhaManual({
+      clienteId,
+      mensagem,
+      imagemUrl,
+      destinosIds,
+      destinosPorCliente,
+      sessoes,
+      usuarioTemCreditos,
+      debitarCreditos,
+      corrigirImagemUrl
+    });
+
+    return res.json({
+      ok: true,
+      ...resultado
+    });
+
+  } catch (e) {
+    console.log("❌ Erro campanha manual:", e.message);
+
+    return res.status(400).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
 
 // ================= TELEGRAM =================
 
