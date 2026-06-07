@@ -1,4 +1,5 @@
 const axios = require("axios");
+const FormData = require("form-data");
 
 async function enviarCampanhaManual({
   clienteId,
@@ -111,9 +112,9 @@ try {
   throw erroTelegram;
 }
 
-
-
     } else {
+
+
       await axios.post(
         `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
         {
