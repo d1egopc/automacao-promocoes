@@ -87,14 +87,32 @@ console.log("🖼️ DEBUG IMAGEM CAMPANHA TELEGRAM:", {
   tipo: typeof imagemUrl,
   inicio: String(imagemUrl || "").slice(0, 120)
 });
-      await axios.post(
-        `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
-        {
-          chat_id: tel.chatId,
-          photo: corrigirImagemUrl(imagemUrl) || imagemUrl,
-          caption: mensagem
-        }
-      );
+     
+try {
+
+  const respostaTelegram = await axios.post(
+    `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
+    {
+      chat_id: tel.chatId,
+      photo: corrigirImagemUrl(imagemUrl) || imagemUrl,
+      caption: mensagem
+    }
+  );
+
+  console.log("✅ TELEGRAM FOTO OK:", respostaTelegram.data);
+
+} catch (erroTelegram) {
+
+  console.log(
+    "❌ TELEGRAM FOTO ERRO:",
+    erroTelegram.response?.data || erroTelegram.message
+  );
+
+  throw erroTelegram;
+}
+
+
+
     } else {
       await axios.post(
         `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
