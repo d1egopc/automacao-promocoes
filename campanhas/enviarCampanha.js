@@ -81,38 +81,103 @@ if (tipo === "telegram") {
       continue;
     }
 
-    if (imagemUrl) {
+   if (imagemUrl) {
+  console.log("🖼️ DEBUG IMAGEM CAMPANHA TELEGRAM:", {
+    tipo: typeof imagemUrl,
+    inicio: String(imagemUrl || "").slice(0, 80)
+  });
 
-console.log("🖼️ DEBUG IMAGEM CAMPANHA TELEGRAM:", {
-  imagemUrl,
-  tipo: typeof imagemUrl,
-  inicio: String(imagemUrl || "").slice(0, 120)
-});
-     
-try {
+  try {
+    const imagemTexto = String(imagemUrl || "");
 
-  const respostaTelegram = await axios.post(
-    `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
-    {
-      chat_id: tel.chatId,
-      photo: corrigirImagemUrl(imagemUrl) || imagemUrl,
-      caption: mensagem
-    }
-  );
+    const ehUrl =
+      imagemTexto.startsWith("http://") ||
+      imagemTexto.startsWith("https://");
 
-  console.log("✅ TELEGRAM FOTO OK:", respostaTelegram.data);
+    const ehDataImage =
+      imagemTexto.startsWith("data:image");
 
-} catch (erroTelegram) {
+    const pareceBase64Puro =
+      !ehUrl &&
+      !imagemTexto.startsWith("data:") &&
+      imagemTexto.length > 500;
 
-  console.log(
-    "❌ TELEGRAM FOTO ERRO:",
-    erroTelegram.response?.data || erroTelegram.message
-  );
+    if (ehDataImage || pareceBase64Puro) {
+      let mimeType = "image/jpeg";
+      let base64Data = imagemTexto;
 
-  throw erroTelegram;
-}
+      if (ehDataImage) {
+        const match = imagemTexto.match(
+          /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/
+        );
+
+        if (!match) {
+          throw new Error("Imagem base64 inválida para Telegram");
+        }
+
+        mimeType = match[1];
+        base64Data = match[2];
+      } else {
+        if (imagemTexto.startsWith("UklGR")) {
+          mimeType = "image/webp";
+        } else if (imagemTexto.startsWith("iVBOR")) {
+          mimeType = "image/png";
+        } else if (imagemTexto.startsWith("/9j/")) {
+          mimeType = "image/jpeg";
+        }
+      }
+
+      const buffer = Buffer.from(base64Data, "base64");
+
+      const ext =
+        mimeType.includes("png") ? "png" :
+        mimeType.includes("webp") ? "webp" :
+        "jpg";
+
+      const form = new FormData();
+
+      form.append("chat_id", String(tel.chatId));
+      form.append("caption", mensagem);
+      form.append("photo", buffer, {
+        filename: `campanha.${ext}`,
+        contentType: mimeType
+      });
+
+      const respostaTelegram = await axios.post(
+        `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
+        form,
+        {
+          headers: form.getHeaders(),
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity
+        }
+      );
+
+      console.log("✅ TELEGRAM FOTO OK:", respostaTelegram.data);
 
     } else {
+      const respostaTelegram = await axios.post(
+        `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
+        {
+          chat_id: tel.chatId,
+          photo: corrigirImagemUrl(imagemUrl) || imagemUrl,
+          caption: mensagem
+        }
+      );
+
+      console.log("✅ TELEGRAM FOTO OK:", respostaTelegram.data);
+    }
+
+  } catch (erroTelegram) {
+    console.log(
+      "❌ TELEGRAM FOTO ERRO:",
+      erroTelegram.response?.data || erroTelegram.message
+    );
+
+    throw erroTelegram;
+  }
+
+} else {
 
 
       await axios.post(
