@@ -254,14 +254,56 @@ if (tipo !== "whatsapp") {
           continue;
         }
 
-        if (imagemUrl) {
-          await sock.sendMessage(grupo, {
-            image: {
-              url: corrigirImagemUrl(imagemUrl) || imagemUrl
-            },
-            caption: mensagem
-          });
-        } else {
+       
+if (imagemUrl) {
+  const imagemTexto = String(imagemUrl || "");
+
+  const ehUrl =
+    imagemTexto.startsWith("http://") ||
+    imagemTexto.startsWith("https://");
+
+  const ehDataImage =
+    imagemTexto.startsWith("data:image");
+
+  const pareceBase64Puro =
+    !ehUrl &&
+    !imagemTexto.startsWith("data:") &&
+    imagemTexto.length > 500;
+
+  if (ehDataImage || pareceBase64Puro) {
+    let base64Data = imagemTexto;
+
+    if (ehDataImage) {
+      const match = imagemTexto.match(
+        /^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/
+      );
+
+      if (!match) {
+        throw new Error("Imagem base64 inválida para WhatsApp");
+      }
+
+      base64Data = match[1];
+    }
+
+    const buffer = Buffer.from(base64Data, "base64");
+
+    await sock.sendMessage(grupo, {
+      image: buffer,
+      caption: mensagem
+    });
+
+  } else {
+    await sock.sendMessage(grupo, {
+      image: {
+        url: corrigirImagemUrl(imagemUrl) || imagemUrl
+      },
+      caption: mensagem
+    });
+  }
+
+} else {
+
+
           await sock.sendMessage(grupo, {
             text: mensagem
           });
