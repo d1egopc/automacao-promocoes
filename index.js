@@ -5263,14 +5263,14 @@ function normalizarSessaoId(clienteId, id = "sessao1") {
   return `${cliente}_${sessao}`;
 }
 
-// ============== HELPERS DISTRIBUIDOR OFERTAS =====================================
+// ============== HELPERS DISTRIBUIDOR OFERTAS ==================================
 
 function usuarioPodeReceberMarketplace(usuario, marketplace) {
-
-  console.log("🔥 ENTROU usuarioPodeReceberMarketplace", {
+  console.log("🔥 PLANO MARKETPLACE:", {
     clienteId: usuario?.id,
     plano: usuario?.plano,
-    marketplace
+    papel: usuario?.papel,
+    marketplace: normalizarTexto(marketplace || "")
   });
 
   if (!usuario?.ativo) return false;
@@ -5279,13 +5279,10 @@ function usuarioPodeReceberMarketplace(usuario, marketplace) {
     return true;
   }
 
-  const plano =
-    getPlanoPorNome(usuario.plano) || {};
+  const plano = getPlanoPorNome(usuario.plano) || {};
+  const marketplacesLiberados = plano.marketplaces || [];
 
-  const marketplacesLiberados =
-    plano.marketplaces || [];
-
-  console.log("🧪 PLANO MARKETPLACE CHECK:", {
+  console.log("🧪 MARKETPLACES LIBERADOS:", {
     clienteId: usuario.id,
     plano: usuario.plano,
     marketplace: normalizarTexto(marketplace || ""),
@@ -5391,6 +5388,14 @@ async function distribuirOfertaParaClientes(ofertaBase) {
       continue;
     }
 
+
+console.log("🔎 CHECK INTEGRAÇÃO:", {
+  clienteId,
+  marketplace: mp,
+  integracao: !!getIntegracaoCliente(clienteId, mp),
+  campos: Object.keys(getIntegracaoCliente(clienteId, mp)?.credenciais || {})
+});
+
    if (!usuarioTemIntegracaoMarketplace(clienteId, mp)) {
      console.log("🚫 Usuário sem integração configurada:", {
      clienteId,
@@ -5412,6 +5417,13 @@ async function distribuirOfertaParaClientes(ofertaBase) {
       linkOriginal,
       ofertaBase
     );
+
+console.log("🔗 LINK CLIENTE GERADO:", {
+  clienteId,
+  marketplace: mp,
+  linkOriginal,
+  linkAfiliadoCliente
+});
 
  if (!linkAfiliadoCliente) {
   console.log("🚫 Oferta bloqueada: cliente sem link afiliado próprio:", {
