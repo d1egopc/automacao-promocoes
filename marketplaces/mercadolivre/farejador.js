@@ -108,21 +108,19 @@ const buscas = [
 
        console.log("🌐 MERCADO LIVRE URL:", url);
 
-    const response = await fetch(url, {
-  headers: {
-    ...gerarHeadersStealth(),
+const headersML = {
+  ...gerarHeadersStealth()
+};
 
- const response = await fetch(url, {
-  headers: {
-    ...gerarHeadersStealth(),
+const cookiesML =
+  integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais?.cookies;
 
-    ...(integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais?.cookies
-      ? {
-          Cookie:
-            integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais?.cookies
-        }
-      : {})
-  }
+if (cookiesML) {
+  headersML.Cookie = cookiesML;
+}
+
+const response = await fetch(url, {
+  headers: headersML
 });
 
         console.log("🌐 URL:", url);
