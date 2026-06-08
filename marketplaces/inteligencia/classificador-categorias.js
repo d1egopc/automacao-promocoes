@@ -23,6 +23,34 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     ${marketplace}
   `);
 
+console.log("🧪 CLASSIFICANDO CATEGORIA:", texto);
+
+// ===== PERFUMARIA / BELEZA TEM PRIORIDADE MÁXIMA =====
+if (
+  texto.includes("perfume") ||
+  texto.includes("edp") ||
+  texto.includes("edt") ||
+  texto.includes("eau de parfum") ||
+  texto.includes("eau de toilette") ||
+  texto.includes("colonia") ||
+  texto.includes("colônia") ||
+  texto.includes("deo colonia") ||
+  texto.includes("malbec") ||
+  texto.includes("lattafa") ||
+  texto.includes("yara") ||
+  texto.includes("body splash") ||
+  texto.includes("maquiagem") ||
+  texto.includes("skincare") ||
+  texto.includes("hidratante") ||
+  texto.includes("protetor solar") ||
+  texto.includes("shampoo") ||
+  texto.includes("condicionador")
+) {
+console.log("✅ CAIU EM PERFUMARIA PRIORIDADE:", oferta.titulo || oferta.nome);
+  return "Perfumaria, Farmácia e Beleza";
+}
+
+
   // ===== CORREÇÕES FORTES ANTES DE TUDO =====
 
   if (contemAlgum(texto, [
