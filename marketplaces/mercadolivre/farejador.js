@@ -112,12 +112,14 @@ const buscas = [
   headers: {
     ...gerarHeadersStealth(),
 
-    ...(integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais?.cookies ||
-    integracoesPorCliente?.admin?.mercadolivre?.credenciais?.cookies
+ const response = await fetch(url, {
+  headers: {
+    ...gerarHeadersStealth(),
+
+    ...(integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais?.cookies
       ? {
           Cookie:
-            integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais?.cookies ||
-            integracoesPorCliente?.admin?.mercadolivre?.credenciais?.cookies
+            integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais?.cookies
         }
       : {})
   }
