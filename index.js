@@ -5086,8 +5086,21 @@ async function gerarLinkCurtoAliExpress(urlOriginal, credenciais = {}) {
 
 // ======================= FUNCAO PLANO NOME =========================================
 
-function getPlanoPorNome(nome) {
-  return planos?.[nome] || null;
+function getPlanoPorNome(nome = "free") {
+  const chave = normalizarTexto(nome || "free");
+
+  if (planos?.[chave]) {
+    return planos[chave];
+  }
+
+  const encontrado = Object.entries(planos || {}).find(([key, plano]) => {
+    return (
+      normalizarTexto(key) === chave ||
+      normalizarTexto(plano?.nome || "") === chave
+    );
+  });
+
+  return encontrado?.[1] || planos?.free || null;
 }
 
 // =============== FUNCAO GERAR LINK AFILIADO SHOPEE ========================================
@@ -5329,6 +5342,14 @@ function usuarioPodeReceberMarketplace(usuario, marketplace) {
   }
 
   const plano = getPlanoPorNome(usuario.plano) || {};
+
+console.log("🧪 PLANO RESOLVIDO:", {
+  clienteId: usuario.id,
+  planoUsuario: usuario.plano,
+  planoEncontrado: plano?.nome,
+  marketplaces: plano?.marketplaces
+});
+
   const marketplacesLiberados = plano.marketplaces || [];
 
   console.log("🧪 MARKETPLACES LIBERADOS:", {
