@@ -5961,7 +5961,21 @@ async function farejarAwin() {
       const preco = Number(String(item.search_price || "0").replace(",", "."));
       const imagem = item.merchant_image_url || item.aw_image_url || "";
       const link = item.aw_deep_link || item.product_url || item.merchant_deep_link || "";
-      const categoria = item.merchant_category || "KaBuM";
+      const categoriaOriginal =
+      item.merchant_category ||
+      item.category_name ||
+      item.aw_category ||
+      "KaBuM";
+
+     const categoria = classificarCategoriaOferta(
+     {
+     titulo,
+     nome: titulo,
+     descricao: item.description || item.product_short_description || "",
+     categoria: categoriaOriginal
+     },
+    `${titulo} ${categoriaOriginal}`
+     );
 
       if (!titulo || !link) continue;
       if (preco < precoMinimo) continue;
@@ -5988,6 +6002,7 @@ async function farejarAwin() {
         marketplace: "awin",
         loja: "KaBuM",
         categoria,
+        categoriaOriginal,
         status: "pendente",
         clienteId,
         sessaoId: normalizarSessaoId(clienteId, "sessao1"),
