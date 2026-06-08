@@ -6071,7 +6071,7 @@ app.post("/importar-produto", async (req, res) => {
   }
 });
 
-// ================= WHATSAPP =================
+// ================= WHATSAPP SESSOES =================
 
 app.get("/sessoes", (req, res) => {
   const clienteId = getClienteId(req);
@@ -6090,14 +6090,26 @@ app.get("/sessoes", (req, res) => {
       const id = sessao.id;
       const totalGrupos = gruposPorSessao[id]?.length || 0;
 
-     return {
-     ...sessao,
-     status: statusSessao[id] || "offline",
-     conectado: statusSessao[id] === "open" || statusSessao[id] === "aberto",
-     qrDisponivel: !!qrCodes[id],
-     grupos: totalGrupos,
-     totalGrupos,
-     destinos: destinosPorSessao[id]?.length || 0
+      const nomeAmigavel =
+        sessao.nome ||
+        sessao.nomeSessao ||
+        sessao.apelido ||
+        sessao.titulo ||
+        sessao.label ||
+        id;
+
+      return {
+        ...sessao,
+        nome: nomeAmigavel,
+        nomeAmigavel,
+        nomeExibicao: nomeAmigavel,
+        idTecnico: id,
+        status: statusSessao[id] || "offline",
+        conectado: statusSessao[id] === "open" || statusSessao[id] === "aberto",
+        qrDisponivel: !!qrCodes[id],
+        grupos: totalGrupos,
+        totalGrupos,
+        destinos: destinosPorSessao[id]?.length || 0
       };
     });
 
@@ -6106,7 +6118,6 @@ app.get("/sessoes", (req, res) => {
     sessoes: lista
   });
 });
-
 
 app.post("/sessoes", (req, res) => {
    console.log("🧪 BODY NOVA SESSÃO:", req.body);
