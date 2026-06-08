@@ -490,7 +490,7 @@ function criarPlanosPadrao() {
         linkOptimus: false,
         analytics: false,
         cupomInteligente: false,
-        campanhas: false
+        campanhas: true
       },
 
       atualizadoEm: new Date().toISOString()
@@ -3143,20 +3143,24 @@ app.get("/me", (req, res) => {
     String(o.enviadoEm || "").startsWith(hoje)
   ).length;
 
-  return res.json({
-    ok: true,
-    usuario: {
-      id: usuario.id,
-      nome: usuario.nome,
-      email: usuario.email,
-      plano: usuario.plano,
-      creditos: usuario.creditos,
-      papel: usuario.papel,
-      ativo: usuario.ativo,
-      marketplacesLiberados: getPlanoUsuario(req)?.marketplaces || []
-    },
-    marketplacesLiberados:getPlanoUsuario(req)?.marketplaces || [],
-       
+ const planoAtual = getPlanoUsuario(req) || {};
+
+return res.json({
+  ok: true,
+  usuario: {
+    id: usuario.id,
+    nome: usuario.nome,
+    email: usuario.email,
+    plano: usuario.plano,
+    creditos: usuario.creditos,
+    papel: usuario.papel,
+    ativo: usuario.ativo,
+    marketplacesLiberados: planoAtual.marketplaces || [],
+    recursos: planoAtual.recursos || {},
+    limites: planoAtual.limites || {}
+  },
+  marketplacesLiberados: planoAtual.marketplaces || [],
+      
     consumo: {
       enviosHoje,
       sessoes: sessoesUsuario.length,
