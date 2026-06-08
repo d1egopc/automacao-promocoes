@@ -75,15 +75,105 @@ if (contemAlgum(texto, [
   ])) return "Eletrônicos";
 
   if (contemAlgum(texto, [
-    "perfume", "parfum", "eau de toilette", "eau de parfum",
-    "calvin klein", "eternity", "hugo boss", "azzaro", "natura kaiak",
-    "gabriela sabatini", "malbec", "lattafa", "yara", "body splash",
-    "eudora", "siage", "siàge", "shampoo", "condicionador",
-    "mascara capilar", "máscara capilar", "hidratante", "protetor solar",
-    "skincare", "maquiagem", "principia", "magnesio", "magnésio",
-    "vitamina", "capsulas", "cápsulas", "fio dental", "termometro",
-    "termômetro", "medidor de pressao", "medidor de pressão"
-  ])) return "Perfumaria, Farmácia e Beleza";
+    "halter", "haltere", "kettlebell", "musculacao", "musculação",
+    "peso livre", "crossfit", "whey", "creatina", "pre treino",
+    "pré treino", "albumina", "barra de proteina", "barra de proteína",
+    "barra proteica", "faixa elastica", "faixa elástica", "bike",
+    "bicicleta", "spinning", "tapete yoga", "tapete para yoga",
+    "short academia", "camiseta academia", "dry fit", "bola de futebol"
+  ])) return "Esporte e Suplementos";
+
+
+if (contemAlgum(texto, [
+  "perfume", "parfum",
+  "eau de toilette", "eau de parfum",
+
+  "calvin klein", "eternity",
+  "hugo boss", "azzaro",
+  "gabriela sabatini",
+  "malbec", "lattafa",
+  "yara", "body splash",
+  "invictus", "montblanc",
+  "paco rabanne",
+  "armani",
+
+  "eudora", "siage", "siàge",
+
+  "shampoo",
+  "condicionador",
+  "máscara capilar",
+  "mascara capilar",
+
+  "secador",
+  "chapinha",
+  "prancha",
+  "escova secadora",
+  "modelador",
+  "babyliss",
+
+  "hidratante",
+  "protetor solar",
+  "skincare",
+  "maquiagem",
+
+  "creme facial",
+  "creme corporal",
+  "sabonete facial",
+  "serum",
+  "sérum",
+
+  "pomada",
+  "massageadora",
+  "arnica",
+  "mentol",
+
+  "principia",
+
+  "magnesio", "magnésio",
+  "vitamina",
+  "multivitaminico",
+  "multivitamínico",
+
+  "capsulas",
+  "cápsulas",
+
+  "fio dental",
+  "enxaguante",
+  "colutorio",
+  "colutório",
+
+  "termometro",
+  "termômetro",
+
+  "medidor de pressao",
+  "medidor de pressão",
+
+  "balanca corporal",
+  "balança corporal"
+])) return "Perfumaria, Farmácia e Beleza";
+
+
+  if (contemAlgum(texto, [
+  "furadeira", "parafusadeira", "esmerilhadeira",
+  "serra marmore", "serra mármore", "serra circular",
+  "serra tico tico", "martelete", "lixadeira",
+  "trena", "nivel laser", "nível laser",
+  "kit ferramenta", "kit ferramentas",
+  "jogo de ferramentas", "maleta de ferramentas",
+  "caixa de ferramentas",
+  "chave inglesa", "chave ajustavel", "chave ajustável",
+  "chave grifo", "chave allen", "chave combinada",
+  "chave soquete", "soquete", "adaptador soquete",
+  "alicate pressão", "alicate pressao",
+  "alicate universal", "alicate corte",
+  "alicate bico", "alicate bomba d agua",
+  "alicate bomba d'agua", "alicate grifo",
+  "vonder", "makita", "bosch", "dewalt",
+  "gedore", "fertak", "tramontina pro",
+  "macaco hidraulico", "macaco hidráulico",
+  "compressor de ar", "pistola pintura",
+  "soprador termico", "soprador térmico"
+])) return "Ferramentas";
 
   if (contemAlgum(texto, [
     "luminaria", "luminária", "lustre", "pendente", "pendente led",
@@ -95,14 +185,6 @@ if (contemAlgum(texto, [
     "cabo elétrico"
   ])) return "Iluminação e Elétrica";
 
-  if (contemAlgum(texto, [
-    "halter", "haltere", "kettlebell", "musculacao", "musculação",
-    "peso livre", "crossfit", "whey", "creatina", "pre treino",
-    "pré treino", "albumina", "barra de proteina", "barra de proteína",
-    "barra proteica", "faixa elastica", "faixa elástica", "bike",
-    "bicicleta", "spinning", "tapete yoga", "tapete para yoga",
-    "short academia", "camiseta academia", "dry fit", "bola de futebol"
-  ])) return "Esporte e Suplementos";
 
   if (contemAlgum(texto, [
     "racao", "ração", "cachorro", "gato", "petisco", "bifinho",
@@ -166,13 +248,7 @@ if (contemAlgum(texto, [
     "ar condicionado", "ventilador", "ventilador de mesa"
   ])) return "Eletrodomésticos";
 
-  if (contemAlgum(texto, [
-    "furadeira", "parafusadeira", "esmerilhadeira", "serra marmore",
-    "serra mármore", "trena", "martelete", "kit ferramenta",
-    "jogo de ferramentas", "vonder", "makita", "bosch", "dewalt",
-    "macaco hidraulico", "macaco hidráulico", "compressor de ar"
-  ])) return "Ferramentas";
-
+ 
   if (contemAlgum(texto, [
     "mop", "esfregao", "esfregão", "rodo", "limpeza geral",
     "desinfetante", "multiuso", "amaciante", "downy", "sabao liquido",
@@ -180,16 +256,61 @@ if (contemAlgum(texto, [
   ])) return "Limpeza";
 
   if (contemAlgum(texto, [
-    "tapete", "cortina", "almofada", "sofa", "sofá", "rack",
-    "painel tv", "guarda roupa", "guarda-roupa", "roupeiro",
-    "mesa", "cadeira", "penteadeira", "comoda", "cômoda", 
-    "armário", "varal", "colcha", "cobre leito", "armario", 
-    "torneira", "banheiro", "cozinha", "caixa térmica",
-    "kit churrasco", "utensilios cozinha", "utensílios cozinha",
-    "espelho", "adnet", "garrafa termica", "garrafa térmica",
-    "copo termico", "copo térmico", "caixa termica", 
-    "gelo reutilizavel", "gelo reutilizável"
-  ])) return "Casa, Móveis e Decoração";
+  "molinete", "vara de pesca", "vara telescopica",
+  "vara telescópica", "carretilha", "anzol",
+  "isca artificial", "isca", "linha de pesca",
+  "pescaria", "pesca", "pesqueiro",
+
+  "alicate de pesca", "pega peixe",
+  "tira anzol", "removedor de anzol",
+
+  "camping", "acampamento",
+  "barraca", "barraca camping",
+  "fogareiro", "saco de dormir",
+  "colchonete", "lanterna camping",
+  "mochila camping",
+
+  "cooler", "caixa termica",
+  "caixa térmica", "ice box",
+  "caixa termolar", "termolar",
+  "coleman", "nautika",
+
+  "caixa termica praia",
+  "caixa termica camping",
+  "caixa termica pesca",
+  "caixa térmica praia",
+  "caixa térmica camping",
+  "caixa térmica pesca"
+])) return "Pesca e Camping";
+
+if (contemAlgum(texto, [
+  "tapete", "cortina", "almofada",
+  "sofa", "sofá", "rack",
+  "painel tv", "painel de tv",
+  "guarda roupa", "guarda-roupa",
+  "roupeiro", "mesa", "cadeira",
+  "penteadeira", "comoda", "cômoda",
+  "armário", "armario",
+  "varal", "colcha", "cobre leito",
+  "torneira", "banheiro", "cozinha",
+  "kit churrasco",
+  "utensilios cozinha",
+  "utensílios cozinha",
+  "espelho", "adnet",
+
+  "escrivaninha",
+  "nicho",
+  "prateleira",
+  "sapateira",
+  "cabideiro",
+  "cabeceira",
+  "poltrona",
+  "estante",
+  "aparador",
+  "buffet",
+  "criado mudo",
+  "criado-mudo"
+])) return "Casa, Móveis e Decoração";
 
   if (contemAlgum(texto, [
     "moto", "motocicleta", "capacete", "pro tork", "kit led",
@@ -199,11 +320,6 @@ if (contemAlgum(texto, [
     "vinil automotivo", "adesivo vinil", "bomba de ar", "inflador de pneus"
   ])) return "Automotivo";
 
-  if (contemAlgum(texto, [
-    "molinete", "vara de pesca", "carretilha", "anzol",
-    "isca artificial", "pescaria", "camping", "barraca",
-    "fogareiro", "saco de dormir", "mochila camping"
-  ])) return "Pesca e Camping";
 
   if (contemAlgum(texto, [
     "lego", "boneco", "boneca", "hot wheels", "hasbro",
