@@ -34,9 +34,8 @@ async function farejarAliExpress(clienteId = "admin", deps = {}) {
       return [];
     }
 
-    const integracao =
-      integracoesPorCliente?.[clienteId]?.aliexpress ||
-      integracoesPorCliente?.admin?.aliexpress;
+  const integracao =
+  integracoesPorCliente?.[clienteId]?.aliexpress;
 
     if (!integracao?.credenciais) {
       console.log("❌ AliExpress sem integração configurada:", clienteId);
