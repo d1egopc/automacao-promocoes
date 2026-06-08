@@ -7373,13 +7373,13 @@ await farejador(clienteId, {
 // ============================= TESTE MANUAL =========================
 
  setTimeout(async () => {
-   console.log("🪂 TESTE MANUAL ORQUESTRADOR AMAZON");
+   console.log("🪂 TESTE MANUAL ORQUESTRADOR SHOPEE");
 
-   const indiceAmazon =
-     ordemMarketplaces.indexOf("amazon");
+   const indiceShopee =
+     ordemMarketplaces.indexOf("shopee");
 
    if (indiceAmazon >= 0) {
-     indiceMarketplaceAtual = indiceAmazon;
+     indiceMarketplaceAtual = indiceShopee;
    }
 
    await rodarProximoMarketplace();
