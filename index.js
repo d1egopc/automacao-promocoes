@@ -6412,48 +6412,57 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
 
 // ================= FUNCAO CARREGAR SESSAO ID ==========================
 
-async function carregarGruposSessao(id) {
+async function carregarGruposSessao(id, opcoes = {}) {
+  const force = opcoes.force === true;
+
   console.log("🔎 Tentando carregar grupos da sessão:", id);
   console.log("📌 Sessões abertas:", Object.keys(sessoes));
   console.log("📌 Status sessões:", statusSessao);
 
-const idNormalizado = normalizarSessaoId("admin", id);
+  const idNormalizado = normalizarSessaoId("admin", id);
 
-const sessao =
-  sessoes[id] ||
-  sessoes[idNormalizado] ||
-  sessoes[`admin_${id}`];
+  const sessao =
+    sessoes[id] ||
+    sessoes[idNormalizado] ||
+    sessoes[`admin_${id}`];
 
-const sock = sessao?.sock || sessao;
+  const sock = sessao?.sock || sessao;
 
-console.log("🧪 Sessão encontrada?", !!sessao);
-console.log("🧪 Sock encontrado?", !!sock);
-const chaveCache = sessoes[id] ? id : idNormalizado;
+  console.log("🧪 Sessão encontrada?", !!sessao);
+  console.log("🧪 Sock encontrado?", !!sock);
 
-console.log("🧪 Existe cache?", !!gruposPorSessao[chaveCache]);
-console.log("🧪 Total cache:", gruposPorSessao[chaveCache]?.length || 0);
+  const chaveCache =
+    sessoes[id] ? id :
+    sessoes[idNormalizado] ? idNormalizado :
+    sessoes[`admin_${id}`] ? `admin_${id}` :
+    idNormalizado;
 
-if (gruposPorSessao[chaveCache]?.length) {
-  return gruposPorSessao[chaveCache];
-}
+  console.log("🧪 Existe cache?", !!gruposPorSessao[chaveCache]);
+  console.log("🧪 Total cache:", gruposPorSessao[chaveCache]?.length || 0);
+  console.log("🔄 Force atualizar grupos?", force);
+
+  if (!force && gruposPorSessao[chaveCache]?.length) {
+    return gruposPorSessao[chaveCache];
+  }
+
   if (!sock) {
     console.log("⚠️ Não carregou grupos: sem sessão", id);
-    return [];
+    return gruposPorSessao[chaveCache] || [];
   }
 
   if (typeof sock.groupFetchAllParticipating !== "function") {
     console.log("⚠️ Sessão existe, mas não tem groupFetchAllParticipating:", id);
-    return [];
+    return gruposPorSessao[chaveCache] || [];
   }
 
   try {
     console.log("🧪 Vai buscar grupos do WhatsApp...");
     const grupos = await sock.groupFetchAllParticipating();
 
-console.log(
-    "🧪 groupFetchAllParticipating retornou:",
-    Object.keys(grupos || {}).length
-  );
+    console.log(
+      "🧪 groupFetchAllParticipating retornou:",
+      Object.keys(grupos || {}).length
+    );
 
     const lista = Object.entries(grupos || {}).map(([gid, g]) => ({
       id: gid,
@@ -6461,13 +6470,18 @@ console.log(
     }));
 
     gruposPorSessao[chaveCache] = lista;
+    gruposPorSessao[id] = lista;
+
+    if (idNormalizado) {
+      gruposPorSessao[idNormalizado] = lista;
+    }
 
     console.log(`✅ Grupos carregados automaticamente: ${lista.length}`);
 
     return lista;
   } catch (e) {
     console.log("❌ Erro ao carregar grupos:", e.message);
-    return [];
+    return gruposPorSessao[chaveCache] || [];
   }
 }
 
@@ -6519,31 +6533,51 @@ app.get("/grupos/:id", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
     const id = normalizarSessaoId(clienteId, req.params.id);
+    const force = req.query.force === "true";
 
-const status = statusSessao[id];
+    const status = statusSessao[id];
 
-if (status !== "open" && status !== "aberto") {
-  return res.json({
-    ok: false,
-    id,
-    status: status || "offline",
-    total: gruposPorSessao[id]?.length || 0,
-    grupos: gruposPorSessao[id] || [],
-    gruposLista: gruposPorSessao[id] || [],
-    aviso: "Sessão não está conectada."
-  });
-}
+    if (status !== "open" && status !== "aberto") {
+      return res.json({
+        ok: false,
+        id,
+        status: status || "offline",
+        total: gruposPorSessao[id]?.length || 0,
+        grupos: gruposPorSessao[id] || [],
+        gruposLista: gruposPorSessao[id] || [],
+        cache: true,
+        aviso: "Sessão não está conectada."
+      });
+    }
 
-    console.log("📋 ROTA /grupos buscando:", id);
+    console.log("📋 ROTA /grupos buscando:", {
+      id,
+      force,
+      temCache: !!gruposPorSessao[id]?.length,
+      totalCache: gruposPorSessao[id]?.length || 0
+    });
 
-    const grupos = await carregarGruposSessao(id);
+    if (!force && gruposPorSessao[id]?.length) {
+      return res.json({
+        ok: true,
+        id,
+        total: gruposPorSessao[id].length,
+        grupos: gruposPorSessao[id],
+        gruposLista: gruposPorSessao[id],
+        cache: true
+      });
+    }
+
+    const grupos = await carregarGruposSessao(id, { force: true });
 
     return res.json({
       ok: true,
       id,
       total: grupos.length,
       grupos,
-      gruposLista: grupos
+      gruposLista: grupos,
+      cache: false,
+      atualizado: true
     });
   } catch (e) {
     console.log("❌ Erro rota /grupos/:id:", e.message);
