@@ -7324,19 +7324,19 @@ await farejador(clienteId, {
 
 // ============================= TESTE MANUAL =========================
 
-// setTimeout(async () => {
-  // console.log("🪂 TESTE MANUAL ORQUESTRADOR AMAZON");
+ setTimeout(async () => {
+   console.log("🪂 TESTE MANUAL ORQUESTRADOR AMAZON");
 
-  // const indiceAmazon =
-    // ordemMarketplaces.indexOf("amazon");
+   const indiceAmazon =
+     ordemMarketplaces.indexOf("amazon");
 
-  // if (indiceAmazon >= 0) {
-    // indiceMarketplaceAtual = indiceAmazon;
-  // }
+   if (indiceAmazon >= 0) {
+     indiceMarketplaceAtual = indiceAmazon;
+   }
 
-  // await rodarProximoMarketplace();
+   await rodarProximoMarketplace();
 
-// }, 60 * 1000);
+ }, 60 * 1000);
 
  
 
