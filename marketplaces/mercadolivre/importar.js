@@ -103,7 +103,7 @@ function logTrechoML(palavra) {
 
   console.log(
     `🧪 TRECHO ${palavra}:`,
-    html.slice(Math.max(0, idx - 300), idx + 700)
+    html.slice(Math.max(0, idx - 1000), idx + 2000)
   );
 }
 
@@ -112,7 +112,13 @@ logTrechoML("coupon");
 logTrechoML("promotion");
 logTrechoML("discount");
 logTrechoML("voucher");
-logTrechoML("pix"); 
+logTrechoML("pix");
+
+logTrechoML("coupon:true");
+logTrechoML("followers");
+logTrechoML("follow");
+logTrechoML("cta_do_follow");
+logTrechoML("coupon-followers"); 
 
 
   const jsonLd = extrairJsonLd(html);
