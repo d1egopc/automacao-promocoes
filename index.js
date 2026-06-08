@@ -5970,14 +5970,37 @@ const html = await response.text();
 
 // ================= FAREJADOR AWIN =================
 
-async function farejarAwin() {
+async function farejarAwin(clienteId = "admin", deps = {}) {
+
+  const {
+    config,
+    integracoesPorCliente,
+    classificarCategoriaOferta,
+    aplicarFiltrosUniversais,
+    distribuirOfertaParaClientes,
+    normalizarSessaoId
+  } = deps;
+
   try {
-    console.log("🛒 Farejando produtos reais Awin KaBuM...");
+    console.log("🛒 Farejando produtos reais Awin KaBuM...", {
+      clienteId
+    });
 
     const cfg = config.marketplaces?.awin || {};
 
     if (!cfg.ativo) {
       console.log("⏸ Awin desativada. Farejador ignorado.");
+      return;
+    }
+
+    const integracaoAwin =
+      integracoesPorCliente?.[clienteId]?.awin;
+
+    if (!integracaoAwin?.credenciais) {
+      console.log(
+        "❌ Awin sem integração configurada:",
+        clienteId
+      );
       return;
     }
 
@@ -5988,9 +6011,13 @@ async function farejarAwin() {
     const caminhoFeed = path.join(__dirname, feedFile);
 
     if (!fs.existsSync(caminhoFeed)) {
-      console.log("❌ Feed Awin não encontrado:", caminhoFeed);
+      console.log(
+        "❌ Feed Awin não encontrado:",
+        caminhoFeed
+      );
       return;
     }
+
 
     const produtos = [];
 
