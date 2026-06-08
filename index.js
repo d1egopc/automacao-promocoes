@@ -316,12 +316,39 @@ function garantirIdsFila() {
   }
 }
 
+// ================= FUNCAO SALVAR SESSOES META =======================
+
 function salvarSessoesMeta() {
   fs.writeFileSync(
     SESSOES_FILE,
     JSON.stringify(sessoesMeta, null, 2)
   );
 }
+
+// ================= FUNCAO CARREGA SESSOES META =======================
+
+function carregarSessoesMeta() {
+  try {
+    if (!fs.existsSync(SESSOES_FILE)) {
+      sessoesMeta = {};
+      salvarSessoesMeta();
+      return;
+    }
+
+    const dados = JSON.parse(
+      fs.readFileSync(SESSOES_FILE, "utf8")
+    );
+
+    sessoesMeta = dados && typeof dados === "object" ? dados : {};
+
+    console.log("✅ Sessões meta carregadas:", Object.keys(sessoesMeta).length);
+  } catch (e) {
+    console.log("❌ Erro ao carregar sessões meta:", e.message);
+    sessoesMeta = {};
+  }
+}
+
+// ================= FUNCAO SALVA INTEGRACOES =======================
 
 function salvarIntegracoesPersistidas() {
   fs.writeFileSync(
@@ -382,6 +409,8 @@ function renovarCreditosSeNecessario(usuario) {
     creditos: usuario.creditos
   });
 }
+
+// ================ FUNCAO USUARIO TEM CRÉDITO ==================
 
 function usuarioTemCreditos(clienteId, quantidade = 1) {
   const usuario = obterUsuario(clienteId);
@@ -634,6 +663,14 @@ if (fs.existsSync(PLANOS_FILE)) {
   );
 
   console.log("✅ Planos carregados");
+}
+
+if (fs.existsSync(SESSOES_FILE)) {
+  sessoesMeta = JSON.parse(
+    fs.readFileSync(SESSOES_FILE, "utf8")
+  );
+
+  console.log("✅ Sessões meta carregadas:", Object.keys(sessoesMeta).length);
 }
 
    criarPlanosPadrao();
