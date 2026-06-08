@@ -1,10 +1,11 @@
 // ================= FAREJADOR SHOPEE =================
 
 async function farejarShopee(clienteId = "admin", deps = {}) {
-  
+
 const {
   config,
   integracoesPorCliente,
+  getIntegracaoCliente,
   fila,
   salvarFila,
   prepararOfertaGlobal,
@@ -16,16 +17,20 @@ const {
   distribuirOfertaParaClientes
 } = deps;
 
+try {
 
- try {
-    if (!config.marketplaces?.shopee?.ativo) {
-      console.log("⏸ Shopee desativada. Farejador ignorado.");
-      return;
-    }
+  if (!config.marketplaces?.shopee?.ativo) {
+    console.log("⏸ Shopee desativada. Farejador ignorado.");
+    return;
+  }
 
-    console.log("🛍️ Farejando ofertas Shopee...");
+  console.log("🛍️ Farejando ofertas Shopee...");
 
-    const produtos = await buscarOfertasShopee(clienteId);
+  const produtos = await buscarOfertasShopee(clienteId, {
+    config,
+    getIntegracaoCliente
+  });
+
 
     if (!Array.isArray(produtos)) {
       console.log("❌ Shopee não retornou array");

@@ -6,9 +6,8 @@ async function buscarOfertasShopee(clienteId = "admin", deps = {}) {
     getIntegracaoCliente
   } = deps;
 
-  const configShopee =
-    getIntegracaoCliente(clienteId, "shopee") ||
-    getIntegracaoCliente("admin", "shopee");
+ const configShopee =
+  getIntegracaoCliente(clienteId, "shopee");
 
 if (
   !configShopee?.credenciais?.appId ||
