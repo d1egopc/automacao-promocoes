@@ -91,6 +91,30 @@ console.log(
   html.toLowerCase().includes("discount")
 );
 
+ const htmlLower = html.toLowerCase();
+
+function logTrechoML(palavra) {
+  const idx = htmlLower.indexOf(palavra.toLowerCase());
+
+  if (idx === -1) {
+    console.log(`🧪 TRECHO ${palavra}: NÃO ACHOU`);
+    return;
+  }
+
+  console.log(
+    `🧪 TRECHO ${palavra}:`,
+    html.slice(Math.max(0, idx - 300), idx + 700)
+  );
+}
+
+logTrechoML("cupom");
+logTrechoML("coupon");
+logTrechoML("promotion");
+logTrechoML("discount");
+logTrechoML("voucher");
+logTrechoML("pix"); 
+
+
   const jsonLd = extrairJsonLd(html);
 
   const titulo =
