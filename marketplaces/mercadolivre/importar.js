@@ -126,6 +126,12 @@ logTrechoML("success_message");
 logTrechoML("entity_id");
 logTrechoML("eshops/follow");
 
+logTrechoML("BELEZADUPLA");
+logTrechoML("beleza");
+logTrechoML("coupon_summary");
+logTrechoML("coupon");
+logTrechoML("cupom");
+
 
   const jsonLd = extrairJsonLd(html);
 
