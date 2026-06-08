@@ -120,6 +120,12 @@ logTrechoML("follow");
 logTrechoML("cta_do_follow");
 logTrechoML("coupon-followers"); 
 
+logTrechoML("300OFF");
+logTrechoML("has_follower_coupon");
+logTrechoML("success_message");
+logTrechoML("entity_id");
+logTrechoML("eshops/follow");
+
 
   const jsonLd = extrairJsonLd(html);
 
