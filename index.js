@@ -7378,7 +7378,7 @@ await farejador(clienteId, {
    const indiceShopee =
      ordemMarketplaces.indexOf("shopee");
 
-   if (indiceAmazon >= 0) {
+   if (indiceShopee >= 0) {
      indiceMarketplaceAtual = indiceShopee;
    }
 
