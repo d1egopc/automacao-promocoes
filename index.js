@@ -7224,6 +7224,13 @@ console.log("🧪 DEPS ORQUESTRADOR:", {
   tipoImportadorKabum: typeof importarProdutoKabumViaAwin
 });
 
+console.log("🧪 ORQUESTRADOR importarAmazon:", typeof importarAmazon);
+
+console.log("🧪 DEPS ORQUESTRADOR:", {
+  marketplace,
+  tipoImportadorKabum: typeof importarProdutoKabumViaAwin
+});
+
 await farejador(clienteId, {
   config,
   integracoesPorCliente,
@@ -7247,11 +7254,7 @@ await farejador(clienteId, {
   gerarLinkAfiliadoMercadoLivre
   }),
   importarAmazon: importarAmazon,
-  buscarOfertasShopee: (clienteId) =>
-  buscarOfertasShopee(clienteId, {
-    config,
-    getIntegracaoCliente
-  }),
+  buscarOfertasShopee,
   normalizarSessaoId,
   aplicarFiltrosUniversais,
   distribuirOfertaParaClientes,
