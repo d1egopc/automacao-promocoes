@@ -61,6 +61,36 @@ if (response.url.includes("account-verification")) {
 
   const html = await response.text();
 
+console.log(
+  "🧪 HTML TEM UI-PDP:",
+  html.includes("ui-pdp")
+);
+
+console.log(
+  "🧪 HTML TEM AFFILIATES-SITE:",
+  html.includes("affiliates-site")
+);
+
+console.log(
+  "🧪 HTML TEM CUPOM:",
+  html.toLowerCase().includes("cupom")
+);
+
+console.log(
+  "🧪 HTML TEM COUPON:",
+  html.toLowerCase().includes("coupon")
+);
+
+console.log(
+  "🧪 HTML TEM PROMOTION:",
+  html.toLowerCase().includes("promotion")
+);
+
+console.log(
+  "🧪 HTML TEM DISCOUNT:",
+  html.toLowerCase().includes("discount")
+);
+
   const jsonLd = extrairJsonLd(html);
 
   const titulo =
