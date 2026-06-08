@@ -295,9 +295,8 @@ if (!jaExisteKabum) {
 
 }
     
-    const integracaoAwin =
-      integracoesPorCliente?.[clienteId]?.awin ||
-      integracoesPorCliente?.admin?.awin;
+  const integracaoAwin =
+  integracoesPorCliente?.[clienteId]?.awin;
 
     if (!integracaoAwin?.credenciais) {
       console.log("⚠️ KaBuM sem Awin configurada para gerar afiliado:", clienteId);
