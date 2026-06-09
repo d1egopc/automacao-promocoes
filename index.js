@@ -3343,18 +3343,16 @@ const missing = modeRule.required.filter((field) => !body[field]);
   };
 }
 
-function mascararIntegracao(config) {
-  const masked = { ...config };
+function mascararIntegracao(config = {}) {
+  const masked = {};
 
-  for (const key of Object.keys(masked)) {
-    if (
-  key.toLowerCase().includes("secret") ||
-  key.toLowerCase().includes("key") ||
-  key.toLowerCase().includes("token") ||
-  key.toLowerCase().includes("cookies")
-) {
-  masked[key] = "•••••••• configurado";
-}
+  for (const [key, valor] of Object.entries(config || {})) {
+    const temValor =
+      valor !== undefined &&
+      valor !== null &&
+      String(valor).trim() !== "";
+
+    masked[key] = temValor ? "••••••••••••••••" : "";
   }
 
   return masked;
@@ -3413,7 +3411,7 @@ app.get("/integracoes", (req, res) => {
 });
 
 
-//============= ROTA POST INTEGRACOES ==================================
+//============= ROTA POST INTEGRACOES MARTPLACES ====================
 
 app.post("/integracoes/:marketplace", (req, res) => {
   const clienteId = getClienteId(req);
