@@ -7451,5 +7451,10 @@ setInterval(() => {
     return;
   }
 
-  processarFila();
+  for (const usuario of usuarios) {
+    if (!usuario?.ativo) continue;
+
+    processarFila(usuario.id);
+  }
+
 }, 10 * 1000);
