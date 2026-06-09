@@ -2966,6 +2966,7 @@ function getClienteId(req) {
 }
 
 // ============ FUNCAO AUTH ===============================================
+
 function auth(req, res, next) {
 
   if (req.method === "OPTIONS") {
@@ -2975,7 +2976,6 @@ function auth(req, res, next) {
   if (
     req.path === "/" ||
     req.path === "/login" ||
-    req.path === "/debug-usuarios" ||
     req.path === "/kabum/importar" ||
     req.path === "/kabum/importar-teste" ||
     req.path === "/conectar" ||
@@ -3016,10 +3016,6 @@ function auth(req, res, next) {
     return res.status(401).json({ erro: "Não autorizado" });
   }
 }
-
-app.get("/debug-usuarios", (req, res) => {
-  res.json(usuarios);
-});
 
 app.use(auth);
 
