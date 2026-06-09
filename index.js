@@ -1202,6 +1202,9 @@ function normalizarCategoriaDestino(valor = "") {
   return ALIASES_CATEGORIA_DESTINO[slug] || slug;
 }
 
+
+// ====================== FUNCAO DESTINO ACEITA OFERTAS =========================
+
 function destinoAceitaOferta(destino, oferta) {
   if (!destino?.ativo) return false;
 
@@ -1266,7 +1269,7 @@ function destinoDentroHorario(destino = {}) {
   return horaAtual >= inicio || horaAtual <= fim;
 }
 
-// ================= ENVIO DESTINO INTELIGENTE =================
+// ========================== ENVIO DESTINO INTELIGENTE ============================
 
 async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId, configCliente) {
   try {
@@ -4927,55 +4930,17 @@ function normalizarCategoria(txt = "") {
     .trim();
 }
 
-// ========================= CATEGORIA BASE GLOBAL ============================
+// ========================= CATEGORIA BASE ============================
 
 function categoriaBase(txt = "") {
-  const c = normalizarCategoria(txt);
-
-for (const [chave, categoria] of Object.entries(CATEGORIAS_DESTINOS || {})) {
-
-    const nomeCategoria = normalizarCategoria(
-      categoria.nome || ""
-    );
-
-    // bate nome da categoria
-    if (
-      c === chave ||
-      c === nomeCategoria ||
-      c.includes(nomeCategoria) ||
-      nomeCategoria.includes(c)
-    ) {
-      return chave;
-    }
-
-    // bate palavras da categoria
-    const bateu = (categoria.palavras || []).some(palavra => {
-      const p = normalizarCategoria(palavra);
-
-      return (
-        c.includes(p) ||
-        p.includes(c)
-      );
-    });
-
-    if (bateu) {
-      return chave;
-    }
-  }
-
-  return c || "geral";
+  return normalizarCategoriaDestino(txt || "geral");
 }
 
 // =========== VALIDAR CATEGORIA DO DESTINO ===========
 
 function categoriaPermitidaNoDestino(oferta, destino) {
-
-  const categoriaOferta = categoriaBase(
-    oferta.categoria ||
-    oferta.categoriaProduto ||
-    oferta.titulo ||
-    oferta.nome ||
-    ""
+  const categoriaOferta = normalizarCategoriaDestino(
+    oferta.categoria || "Diversos"
   );
 
   const categoriasDestino = (
@@ -4983,37 +4948,15 @@ function categoriaPermitidaNoDestino(oferta, destino) {
     destino.categoriasPermitidas ||
     []
   )
-    .map(categoriaBase)
+    .map(normalizarCategoriaDestino)
     .filter(Boolean);
 
   if (!categoriasDestino.length) return true;
 
-  if (!categoriaOferta) return false;
-
-  if (categoriaOferta === "geral") {
-    const nomeDestino = normalizarCategoria(destino.nome || "");
-
-    return (
-      nomeDestino.includes("geral") ||
-      categoriasDestino.includes("geral") ||
-      categoriasDestino.includes("todas") ||
-      categoriasDestino.length >= 8
-    );
-  }
-
-  const categoriaOfertaNorm = normalizarCategoria(categoriaOferta)
-    .replace(/[^a-z0-9]/g, "");
-
-  const categoriasDestinoNorm = categoriasDestino
-    .map(cat =>
-      normalizarCategoria(cat).replace(/[^a-z0-9]/g, "")
-    )
-    .filter(Boolean);
-
-  return categoriasDestinoNorm.some(cat =>
-    categoriaOfertaNorm === cat ||
-    categoriaOfertaNorm.includes(cat) ||
-    cat.includes(categoriaOfertaNorm)
+  return (
+    categoriasDestino.includes("geral") ||
+    categoriasDestino.includes("todas") ||
+    categoriasDestino.includes(categoriaOferta)
   );
 }
 
