@@ -185,7 +185,7 @@ aliexpress: {
 };
 
 let fila = [];
-let enviandoAgora = false;
+let enviandoAgoraPorCliente = {};
 let controleEnvio = {}; // por cliente
 let historicoOfertas = {};
 let cuponsAtivos = config.cuponsAtivos || [];
@@ -1437,8 +1437,11 @@ const selecionados = telegramsSelecionados.length
 // ================= FUNCÃO PROCESSA FILA =================
 
 async function processarFila(clienteIdAlvo = null) {
-  if (enviandoAgora) return;
-  enviandoAgora = true;
+  const clienteFila = clienteIdAlvo || "admin";
+
+  if (enviandoAgoraPorCliente[clienteFila]) return;
+
+  enviandoAgoraPorCliente[clienteFila] = true;
 
   try {
     const oferta = fila.find(o => {
@@ -1815,7 +1818,7 @@ console.log("✅ Enviado com controle de tempo");
   }
 
 } finally {
-  enviandoAgora = false;
+  enviandoAgoraPorCliente[clienteFila] = false;
 }
 }
    
