@@ -72,51 +72,173 @@ if (contemAlgum(texto, [
     "kemei", "kemel", "barbearia", "shaver", "depilador"
   ])) return "Perfumaria, Farmácia e Beleza";
 
-  if (contemAlgum(texto, [
+
+// ===== INFANTIL / ROUPAS E CALÇADOS INFANTIL =====
+
+if (contemAlgum(texto, [
+  "infantil", "juvenil", "menino", "menina", "kids", "kid",
+
+  "bota infantil",
+  "coturno infantil",
+  "botina infantil",
+
+  "camisa infantil",
+  "camisa xadrez infantil",
+
+  "calca moletom infantil",
+  "calça moletom infantil",
+
+  "moletom infantil",
+  "roupa infantil",
+
+  "patins infantil",
+
+  "sandalia infantil",
+  "sandália infantil",
+
+  "chinelo infantil",
+
+  "tenis infantil",
+  "tênis infantil",
+
+  "conjunto infantil",
+
+  "vestido infantil",
+
+  "pijama infantil",
+
+  "body infantil",
+
+  "fantasia infantil",
+
+  "sereia com led",
+
+  "1 a 16 anos",
+
+  "criança",
+  "crianca",
+
+  "bebê infantil",
+  "moda infantil"
+])) return "Roupas e Calçados Infantil";
+
+
+
+if (contemAlgum(texto, [
   "calcinha", "sutia", "sutiã", "lingerie", "cueca feminina",
   "calcinha boxer", "short sem costura", "she by mash",
   "segunda pele", "anagua", "anágua", "camisola",
-  "pijama feminino", "biquini", "bíquini",
-  "maio natacao", "maiô natação",
+  "pijama feminino", "baby doll", "babydoll",
+  "biquini", "bíquini", "maio natacao", "maiô natação",
 
   "camiseta feminina",
   "camiseta oversized",
   "camiseta oversized feminina",
+  "blusa feminina",
+  "regata feminina",
+  "t-shirt feminina",
   "baby look",
   "babylook",
   "cropped",
   "cropped feminino",
-  "blusa feminina",
-  "regata feminina",
+
   "vestido",
   "saia",
+
+  "short feminino",
+  "shorts feminino",
+
+  "calca feminina",
+  "calça feminina",
+
+  "legging",
+  "legging feminina",
+
   "body feminino",
+
   "macaquinho feminino",
   "macacao feminino",
   "macacão feminino",
+
+  "conjunto feminino",
+
+  "moletom feminino",
+  "jaqueta feminina",
+
   "gola alta",
   "strass",
-  "t-shirt feminina",
-  "camiseta gola alta"
+  "camiseta gola alta",
+
+  "moda feminina",
+
+  "plus size feminino",
+  "plus size feminina",
+
+  // ===== NOVOS =====
+
+  "blusa brasil",
+  "blusa do brasil",
+
+  "tricot feminino",
+  "tricô feminino",
+
+  "wide leg",
+  "calca wide leg",
+  "calça wide leg",
+
+  "jeans feminina",
+
+  "bolsa feminina",
+  "bolsas femininas",
+
+  "tiracolo",
+  "tote",
+
+  "carteira feminina",
+
+  "meia calca",
+  "meia-calca",
+  "meia-calça",
+
+  "peluciada",
+
+  "look feminino",
+
+  "camisa xadrez feminina",
+  "xadrez feminina",
+
+  "moda evangelica",
+  "moda evangélica"
 ])) return "Roupas e Moda Feminina";
 
-  if (contemAlgum(texto, [
-    "camisa polo", "polo piquet", "camiseta masculina", "camisetas masculina",
-    "camiseta henley", "henley", "camiseta basica", "camiseta básica",
-    "camiseta premium", "camiseta algodao", "camiseta algodão",
-    "kit camiseta", "kit camisetas", "camisa masculina",
-    "camisa social masculina", "moletom masculino", "calca jeans masculina",
-    "calça jeans masculina", "bermuda masculina", "cueca boxer",
-    "cuecas boxer", "boxer masculina", "boxer masculino"
-  ])) return "Roupas e Moda Masculina";
+if (contemAlgum(texto, [
+  "camisa polo", "polo piquet", "camiseta masculina", "camisetas masculina",
+  "camiseta henley", "henley", "camiseta basica", "camiseta básica",
+  "camiseta premium", "camiseta algodao", "camiseta algodão",
+  "camiseta oversized masculina", "camiseta masculina oversized",
+  "kit camiseta masculina", "kit camisetas masculinas",
+  "kit camiseta", "kit camisetas",
+  "camisa masculina", "camisa social masculina",
+  "moletom masculino", "jaqueta masculina",
+  "calca jeans masculina", "calça jeans masculina",
+  "bermuda masculina", "short masculino", "shorts masculino",
+  "regata masculina", "cueca boxer", "cuecas boxer",
+  "boxer masculina", "boxer masculino",
+  "moda masculina", "plus size masculino"
+])) return "Roupas e Moda Masculina";
 
-  if (contemAlgum(texto, [
-    "tenis", "tênis", "chinelo", "havaianas", "sandalia", "sandália",
-    "rasteira", "rasteirinha", "tamanco", "sapatilha", "sapatenis",
-    "sapatênis", "crocs", "mizuno", "asics", "nike", "adidas",
-    "olympikus", "fila", "vizzano", "piccadilly", "calcado feminino",
-    "calçado feminino", "calcado masculino", "calçado masculino"
-  ])) return "Tênis e Chinelos";
+if (contemAlgum(texto, [
+  "tenis", "tênis", "chinelo", "havaianas", "sandalia", "sandália",
+  "rasteira", "rasteirinha", "tamanco", "sapatilha",
+  "sapatenis", "sapatênis", "crocs", "papete",
+  "mocassim", "loafer", "bota", "botina", "coturno",
+  "sapato", "salto", "salto alto",
+  "mizuno", "asics", "nike", "adidas", "olympikus",
+  "olympicus", "fila", "vizzano", "piccadilly",
+  "puma", "reebok", "new balance", "kappa",
+  "calcado feminino", "calçado feminino",
+  "calcado masculino", "calçado masculino"
+])) return "Tênis e Chinelos";
 
   if (contemAlgum(texto, [
     "smartwatch", "smart watch", "relogio inteligente", "relógio inteligente",
@@ -225,6 +347,22 @@ if (contemAlgum(texto, [
 ])) return "Ferramentas";
 
   
+// ===== COZINHA / UTILIDADES DOMÉSTICAS =====
+
+if (contemAlgum(texto, [
+  "jogo de panelas", "kit panela", "frigideira",
+  "panela", "caçarola", "caçarola", "fervedor",
+  "faqueiro", "tramontina", "talheres",
+  "copos", "taças", "tacas", "jogo de copos",
+  "cortador de legumes", "ralador", "fatiador",
+  "marmitas", "potes", "travas hermeticas", "travas herméticas",
+  "formas assadeiras", "assadeira", "forma antiaderente",
+  "crepeira", "maquina de crepe", "máquina de crepe",
+  "garrafa inox", "garrafa termica", "garrafa térmica",
+  "lixeira", "guarda chuva", "cobertor", "manta",
+  "toalhas de banho", "toalha de banho"
+])) return "Casa, Móveis e Decoração";
+
 if (contemAlgum(texto, [
   "tapete", "cortina", "almofada",
   "sofa", "sofá", "rack",
@@ -256,7 +394,6 @@ if (contemAlgum(texto, [
   "criado mudo",
   "criado-mudo"
 ])) return "Casa, Móveis e Decoração";
-
 
 
 if (contemAlgum(texto, [
