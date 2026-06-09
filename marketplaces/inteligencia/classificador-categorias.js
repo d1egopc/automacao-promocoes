@@ -203,7 +203,42 @@ if (contemAlgum(texto, [
   "soprador termico", "soprador térmico"
 ])) return "Ferramentas";
 
-  if (contemAlgum(texto, [
+  
+if (contemAlgum(texto, [
+  "tapete", "cortina", "almofada",
+  "sofa", "sofá", "rack",
+  "painel tv", "painel de tv",
+  "guarda roupa", "guarda-roupa",
+  "roupeiro", "mesa", "cadeira",
+  "cadeira de escritorio", "cadeira de escritório",
+  "cadeira ergonomica", "cadeira ergonômica",
+  "cadeira executiva", "cadeira presidente",
+  "penteadeira", "comoda", "cômoda",
+  "armário", "armario",
+  "varal", "colcha", "cobre leito",
+  "torneira", "banheiro", "cozinha",
+  "kit churrasco",
+  "utensilios cozinha",
+  "utensílios cozinha",
+  "espelho", "adnet",
+
+  "escrivaninha",
+  "nicho",
+  "prateleira",
+  "sapateira",
+  "cabideiro",
+  "cabeceira",
+  "poltrona",
+  "estante",
+  "aparador",
+  "buffet",
+  "criado mudo",
+  "criado-mudo"
+])) return "Casa, Móveis e Decoração";
+
+
+
+if (contemAlgum(texto, [
     "luminaria", "luminária", "lustre", "pendente", "pendente led",
     "refletor", "refletor led", "holofote", "lampada", "lâmpada",
     "painel led", "plafon", "spot", "spot led", "fita led",
@@ -310,35 +345,6 @@ if (contemAlgum(texto, [
   "caixa térmica camping",
   "caixa térmica pesca"
 ])) return "Pesca e Camping";
-
-if (contemAlgum(texto, [
-  "tapete", "cortina", "almofada",
-  "sofa", "sofá", "rack",
-  "painel tv", "painel de tv",
-  "guarda roupa", "guarda-roupa",
-  "roupeiro", "mesa", "cadeira",
-  "penteadeira", "comoda", "cômoda",
-  "armário", "armario",
-  "varal", "colcha", "cobre leito",
-  "torneira", "banheiro", "cozinha",
-  "kit churrasco",
-  "utensilios cozinha",
-  "utensílios cozinha",
-  "espelho", "adnet",
-
-  "escrivaninha",
-  "nicho",
-  "prateleira",
-  "sapateira",
-  "cabideiro",
-  "cabeceira",
-  "poltrona",
-  "estante",
-  "aparador",
-  "buffet",
-  "criado mudo",
-  "criado-mudo"
-])) return "Casa, Móveis e Decoração";
 
   if (contemAlgum(texto, [
     "moto", "motocicleta", "capacete", "pro tork", "kit led",
