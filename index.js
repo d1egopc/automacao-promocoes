@@ -2944,8 +2944,28 @@ function gerarId() {
   return "user_" + Math.random().toString(36).substring(2, 10);
 }
 
+
+const JWT_SECRET = process.env.JWT_SECRET || "segredo";
+
 // ======================== FUNCAO CLIENTE ID =============================
 
+function getClienteId(req) {
+  if (req.clienteId) return req.clienteId;
+
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+  if (!token) return "admin";
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    return decoded.clienteId || "admin";
+  } catch {
+    return "admin";
+  }
+}
+
+// ============ FUNCAO AUTH ===============================================
 function auth(req, res, next) {
 
   if (req.method === "OPTIONS") {
@@ -3005,7 +3025,6 @@ app.use(auth);
 
 carregarConfig();
 
-const JWT_SECRET = process.env.JWT_SECRET || "segredo";
 
 // ================= LOGIN =================
 
