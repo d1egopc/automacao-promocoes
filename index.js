@@ -1214,33 +1214,53 @@ function destinoAceitaOferta(destino, oferta) {
 
   const categoriaClassificada =
     oferta.categoria ||
+    oferta.categoriaProduto ||
     classificarCategoriaOferta(oferta, oferta.termo || "");
 
   const categoriaOferta = normalizarCategoriaDestino(categoriaClassificada);
 
-  const marketplacesDestino = (destino.marketplaces || []).map(normalizarDestino);
-  const categoriasDestino = (destino.categorias || []).map(normalizarCategoriaDestino);
+  const marketplacesDestino = (destino.marketplaces || [])
+    .map(normalizarDestino)
+    .filter(Boolean);
 
-  console.log("🧪 CHECK DESTINO:", {
-    nome: destino.nome,
-    marketplaceOferta,
-    marketplacesDestino,
-    categoriaOferta,
-    categoriasDestino
-  });
+  const categoriasDestino = (destino.categorias || [])
+    .map(normalizarCategoriaDestino)
+    .filter(Boolean);
 
   const aceitaMarketplace =
     !marketplacesDestino.length ||
     marketplacesDestino.includes("geral") ||
+    marketplacesDestino.includes("todos") ||
+    marketplacesDestino.includes("todas") ||
     marketplacesDestino.includes(marketplaceOferta);
 
   const aceitaCategoria =
     !categoriasDestino.length ||
     categoriasDestino.includes("geral") ||
-    categoriasDestino.includes(categoriaOferta);
+    categoriasDestino.includes("todos") ||
+    categoriasDestino.includes("todas") ||
+    categoriasDestino.some(cat =>
+      cat === categoriaOferta ||
+      cat.includes(categoriaOferta) ||
+      categoriaOferta.includes(cat)
+    );
+
+  console.log("🧪 CHECK DESTINO:", {
+    nome: destino.nome,
+    marketplaceOferta,
+    marketplacesDestino,
+    aceitaMarketplace,
+    categoriaClassificada,
+    categoriaOferta,
+    categoriasDestino,
+    aceitaCategoria
+  });
 
   return aceitaMarketplace && aceitaCategoria;
 }
+
+
+// ========== FUNCAO DESTINO DENTRO HORARIO ==================
 
 function destinoDentroHorario(destino = {}) {
   const agoraBR = new Date(
