@@ -3357,10 +3357,16 @@ function mascararIntegracao(config) {
   return masked;
 }
 
+//============= ROTA INTEGRACOES =======================================
+
 app.get("/integracoes", (req, res) => {
   const clienteId = getClienteId(req);
   const data = integracoesPorCliente[clienteId] || {};
   const resposta = {};
+
+  const reveal =
+    req.query.reveal === "1" ||
+    req.query.reveal === "true";
 
   for (const [marketplace, config] of Object.entries(data)) {
     const credenciais = config?.credenciais || {};
@@ -3377,13 +3383,20 @@ app.get("/integracoes", (req, res) => {
 
     const configurado = camposConfigurados.length > 0;
 
+    const credenciaisResposta =
+      reveal
+        ? credenciais
+        : mascararIntegracao(credenciais);
+
     resposta[marketplace] = {
       marketplace,
       nome: marketplaceRules?.[marketplace]?.nome || marketplace,
       configurado,
-      status: configurado ? (config.status || "conectado") : "incompleto",
+      status: configurado
+        ? (config.status || "conectado")
+        : "incompleto",
       camposConfigurados,
-      credenciais: mascararIntegracao(credenciais),
+      credenciais: credenciaisResposta,
       atualizadoEm: config?.atualizadoEm || null
     };
   }
@@ -3391,9 +3404,13 @@ app.get("/integracoes", (req, res) => {
   return res.json({
     ok: true,
     clienteId,
+    reveal,
     integracoes: resposta
   });
 });
+
+
+//============= ROTA POST INTEGRACOES ==================================
 
 app.post("/integracoes/:marketplace", (req, res) => {
   const clienteId = getClienteId(req);
