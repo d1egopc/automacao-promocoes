@@ -2946,27 +2946,6 @@ function gerarId() {
 
 // ======================== FUNCAO CLIENTE ID =============================
 
-function getClienteId(req) {
-  const authHeader = req.headers.authorization || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-
-  if (!token) return "admin";
-
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    return decoded.clienteId || "admin";
-  } catch {
-    return "admin";
-  }
-}
-
-function getConfigCliente(clienteId = "admin") {
-  configsPorCliente[clienteId] =
-    configsPorCliente[clienteId] || {};
-
-  return configsPorCliente[clienteId];
-}
-
 function auth(req, res, next) {
 
   if (req.method === "OPTIONS") {
@@ -2990,10 +2969,28 @@ function auth(req, res, next) {
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
-  if (!token) return res.status(401).json({ erro: "Token inválido" });
+  if (!token) {
+    return res.status(401).json({ erro: "Token inválido" });
+  }
 
   try {
-    jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const clienteId = decoded.clienteId || "admin";
+
+    const usuarioExiste = usuarios.find(u =>
+      String(u.id) === String(clienteId)
+    );
+
+    if (!usuarioExiste || usuarioExiste.ativo === false) {
+      return res.status(401).json({
+        ok: false,
+        erro: "Usuário não existe ou foi desativado"
+      });
+    }
+
+    req.usuario = usuarioExiste;
+    req.clienteId = clienteId;
+
     next();
   } catch {
     return res.status(401).json({ erro: "Não autorizado" });
