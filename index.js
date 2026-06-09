@@ -1485,20 +1485,7 @@ if (!clienteAtivo) {
       return;
     }
 
-    const agora = Date.now();
-
-       const intervaloMs =
-      (configCliente.intervaloMinutos || config.intervaloMinutos || 2) *
-      60 *
-      1000;
-
-if (!controleEnvio[clienteId]) {
-  controleEnvio[clienteId] = 0;
-}
-
-if (agora - controleEnvio[clienteId] < intervaloMs) {
-  return;
-}
+  const agora = Date.now();
 
     let idSessao =
   normalizarSessaoId(
@@ -1720,7 +1707,35 @@ ${link}`;
 
 let enviouParaAlgumDestino = false;
 
+let pulouPorIntervalo = false;
+
 for (const destino of destinosInteligentes) {
+  const chaveControle = `${clienteId}_${destino.id || destino.nome || destino.conexaoId}`;
+
+  const intervaloDestinoMin = Number(
+    destino.intervaloMinutos ||
+    destino.intervalo ||
+    configCliente.intervaloMinutos ||
+    config.intervaloMinutos ||
+    2
+  );
+
+  const intervaloMs = intervaloDestinoMin * 60 * 1000;
+
+  if (!controleEnvio[chaveControle]) {
+    controleEnvio[chaveControle] = 0;
+  }
+
+  if (agora - controleEnvio[chaveControle] < intervaloMs) {
+    pulouPorIntervalo = true;
+    console.log("⏳ Destino aguardando intervalo:", {
+      clienteId,
+      destino: destino.nome,
+      intervaloMinutos: intervaloDestinoMin
+    });
+    continue;
+  }
+
   const enviado = await enviarParaDestinoInteligente(
     destino,
     oferta,
@@ -1729,9 +1744,16 @@ for (const destino of destinosInteligentes) {
     configCliente
   );
 
-if (enviado === true) {
-  enviouParaAlgumDestino = true;
+  if (enviado === true) {
+    enviouParaAlgumDestino = true;
+    controleEnvio[chaveControle] = Date.now();
+  }
 }
+
+
+if (!enviouParaAlgumDestino && pulouPorIntervalo) {
+  console.log("⏳ Oferta aguardando intervalo dos destinos:", oferta.titulo);
+  return;
 }
 
 if (!enviouParaAlgumDestino) {
@@ -1748,7 +1770,6 @@ if (!enviouParaAlgumDestino) {
   return;
 }
 
-controleEnvio[clienteId] = Date.now();
 
 ultimoEnvioFila = Date.now();
 
