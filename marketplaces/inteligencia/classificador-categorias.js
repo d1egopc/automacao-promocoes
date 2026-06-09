@@ -73,11 +73,32 @@ if (contemAlgum(texto, [
   ])) return "Perfumaria, Farmácia e Beleza";
 
   if (contemAlgum(texto, [
-    "calcinha", "sutia", "sutiã", "lingerie", "cueca feminina",
-    "calcinha boxer", "short sem costura", "she by mash",
-    "segunda pele", "anagua", "anágua", "camisola",
-    "pijama feminino", "biquini", "bíquini", "maio natacao", "maiô natação"
-  ])) return "Roupas e Moda Feminina";
+  "calcinha", "sutia", "sutiã", "lingerie", "cueca feminina",
+  "calcinha boxer", "short sem costura", "she by mash",
+  "segunda pele", "anagua", "anágua", "camisola",
+  "pijama feminino", "biquini", "bíquini",
+  "maio natacao", "maiô natação",
+
+  "camiseta feminina",
+  "camiseta oversized",
+  "camiseta oversized feminina",
+  "baby look",
+  "babylook",
+  "cropped",
+  "cropped feminino",
+  "blusa feminina",
+  "regata feminina",
+  "vestido",
+  "saia",
+  "body feminino",
+  "macaquinho feminino",
+  "macacao feminino",
+  "macacão feminino",
+  "gola alta",
+  "strass",
+  "t-shirt feminina",
+  "camiseta gola alta"
+])) return "Roupas e Moda Feminina";
 
   if (contemAlgum(texto, [
     "camisa polo", "polo piquet", "camiseta masculina", "camisetas masculina",
