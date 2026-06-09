@@ -7374,30 +7374,30 @@ await farejador(clienteId, {
 
 // ============================= TESTE MANUAL =========================
 
- setTimeout(async () => {
-   console.log("🪂 TESTE MANUAL ORQUESTRADOR SHOPEE");
+// setTimeout(async () => {
+ //  console.log("🪂 TESTE MANUAL ORQUESTRADOR SHOPEE");
 
-   const indiceShopee =
-     ordemMarketplaces.indexOf("shopee");
+  // const indiceShopee =
+   //  ordemMarketplaces.indexOf("shopee");
 
-   if (indiceShopee >= 0) {
-     indiceMarketplaceAtual = indiceShopee;
-   }
+  // if (indiceShopee >= 0) {
+   //  indiceMarketplaceAtual = indiceShopee;
+  // }
 
-   await rodarProximoMarketplace();
+  // await rodarProximoMarketplace();
 
- }, 60 * 1000);
+// }, 60 * 1000);
 
  
 
 setInterval(() => {
   rodarProximoMarketplace();
-}, (config.intervaloFarejadorGlobalMinutos || 7) * 60 * 1000);
+}, (config.intervaloFarejadorGlobalMinutos || 10) * 60 * 1000);
 
 setTimeout(() => {
-  console.log("⏳ Primeira rodada do orquestrador em 5 minutos...");
+  console.log("🚀 Primeira rodada do orquestrador em 1 minuto...");
   rodarProximoMarketplace();
-}, 5 * 60 * 1000);
+}, 1 * 60 * 1000);
 
 // ================= PROCESSADOR DA FILA =================
 
