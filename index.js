@@ -683,7 +683,7 @@ console.log("🧪 CRIANDO ADMIN PADRÃO");
   id: "admin",
   nome: "Diego",
   email: "admin@optimus.local",
-  senha: "123456",
+  senha: "fzt976",
   papel: "admin_master",
   plano: "master",
   creditos: 999999,
@@ -3044,11 +3044,7 @@ app.post("/login", async (req, res) => {
 
   let senhaOk = false;
 
-  if (usuario.id === "admin" && pass === "123456") {
-    senhaOk = true;
-  } else {
-    senhaOk = String(usuario.senha || "") === String(pass || "");
-  }
+ senhaOk = String(usuario.senha || "") === String(pass || "");
 
   if (!senhaOk) {
     return res.status(401).json({ erro: "Senha inválida" });
