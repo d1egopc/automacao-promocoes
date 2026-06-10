@@ -3049,9 +3049,11 @@ app.use(auth);
 app.use("/mensageiro", criarRotasMensageiro({
   getClienteId,
   getPlanoUsuario,
+  usuarioTemRecurso,
   getMensageiroCliente: mensageiro.getMensageiroCliente,
   setMensageiroCliente: mensageiro.setMensageiroCliente
 }));
+
 
 // ================= LOGIN ==========================
 
