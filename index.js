@@ -3044,13 +3044,12 @@ app.post("/login", async (req, res) => {
 
   let senhaOk = false;
 
-console.log("🧪 LOGIN:", {
-  usuario: usuario.id,
-  senhaSalva: usuario.senha,
-  senhaRecebida: pass
-});
+if (usuario.id === "admin" && !usuario.senha) {
+  usuario.senha = "fzt976";
+  salvarUsuarios();
+}
 
- senhaOk = String(usuario.senha || "") === String(pass || "");
+senhaOk = String(usuario.senha || "") === String(pass || "");
 
   if (!senhaOk) {
     return res.status(401).json({ erro: "Senha inválida" });
