@@ -407,12 +407,51 @@ if (contemAlgum(texto, [
   ])) return "Iluminação e Elétrica";
 
 
-  if (contemAlgum(texto, [
-    "racao", "ração", "cachorro", "gato", "petisco", "bifinho",
-    "pedigree", "quatree", "tapete higienico", "tapete higiênico",
-    "coleira", "comedouro", "bebedouro pet", "bebedouro para cachorro",
-    "bebedouro para gato", "chalesco"
-  ])) return "Pet Shop e Fazendinha";
+if (contemAlgum(texto, [
+  "racao",
+  "ração",
+  "cachorro",
+  "gato",
+  "petisco",
+  "bifinho",
+  "pedigree",
+  "quatree",
+  "tapete higienico",
+  "tapete higiênico",
+
+  "coleira",
+  "guia para cachorro",
+  "peitoral para cachorro",
+
+  "comedouro",
+  "bebedouro pet",
+  "bebedouro para cachorro",
+  "bebedouro para gato",
+
+  "chalesco",
+  "petlove",
+
+  "avert",
+  "macrogard",
+  "pet sticks",
+  "pet stick",
+
+  "brinquedo para cachorro",
+  "brinquedo para gato",
+
+  "areia para gato",
+
+  "antipulgas",
+  "anti pulgas",
+  "vermifugo",
+  "vermífugo",
+
+  "arranhador",
+  "casinha pet",
+  "cama pet",
+  "caminha pet",
+  "transportadora pet"
+])) return "Pet Shop e Fazendinha";
 
   if (contemAlgum(texto, [
     "fralda", "huggies", "pampers", "lenco umedecido", "lenço umedecido",
@@ -421,21 +460,115 @@ if (contemAlgum(texto, [
     "bebe conforto", "bebê conforto", "tapete infantil", "tatame infantil"
   ])) return "Bebês e Acessórios";
 
-  if (contemAlgum(texto, [
-    "placa de video", "placa de vídeo", "placa grafica", "placa gráfica",
-    "rtx", "gtx", "rx 580", "rx 6600", "rx 7600", "rx 9070",
-    "ssd", "nvme", "m.2", "memoria ram", "memória ram", "ddr4", "ddr5",
-    "placa mae", "placa mãe", "processador ryzen", "intel core",
-    "water cooler", "air cooler", "gabinete gamer", "fonte gamer",
-    "geforce", "radeon"
-  ])) return "Gamer e Hardware";
+if (contemAlgum(texto, [
+  "placa de video",
+  "placa de vídeo",
+  "placa grafica",
+  "placa gráfica",
+  "rtx",
+  "gtx",
+  "rx 580",
+  "rx 6600",
+  "rx 7600",
+  "rx 9070",
+  "geforce",
+  "radeon",
 
-  if (contemAlgum(texto, [
-    "mouse", "teclado", "mousepad", "webcam", "headset", "micro sd",
-    "microsd", "cartao de memoria", "cartão de memória", "pendrive",
-    "hub usb", "monitor gamer", "monitor aoc", "suporte para notebook",
-    "suporte notebook", "base notebook", "cooler notebook"
-  ])) return "Periféricos";
+  "ssd",
+  "ssd nvme",
+  "nvme",
+  "m.2",
+  "ssd sata",
+
+  "memoria ram",
+  "memória ram",
+  "ddr4",
+  "ddr5",
+
+  "placa mae",
+  "placa mãe",
+
+  "processador",
+  "processador amd",
+  "processador intel",
+  "ryzen",
+  "ryzen 3",
+  "ryzen 5",
+  "ryzen 7",
+  "ryzen 9",
+  "intel core",
+  "core i3",
+  "core i5",
+  "core i7",
+  "core i9",
+  "soquete am4",
+  "soquete am5",
+  "soquete lga",
+
+  "water cooler",
+  "air cooler",
+  "cooler para processador",
+  "fan argb",
+  "ventoinha",
+
+  "gabinete gamer",
+  "fonte gamer",
+  "fonte atx",
+
+  "kit xeon",
+  "xeon",
+
+  "monitor gamer"
+])) return "Gamer e Hardware";
+
+ if (contemAlgum(texto, [
+  "mouse",
+  "teclado",
+  "mousepad",
+
+  "webcam",
+
+  "headset",
+
+  "micro sd",
+  "microsd",
+  "cartao de memoria",
+  "cartão de memória",
+
+  "pendrive",
+
+  "hub usb",
+
+  "monitor gamer",
+  "monitor aoc",
+
+  "suporte para notebook",
+  "suporte notebook",
+  "base notebook",
+  "cooler notebook",
+
+  "mesa digitalizadora",
+  "xp-pen",
+  "xppen",
+  "deco 640",
+  "deco",
+  "mesa grafica",
+  "mesa gráfica",
+  "caneta digital",
+
+  "dock station",
+  "adaptador usb",
+  "adaptador usb-c",
+  "adaptador usb c",
+
+  "leitor de cartão",
+  "leitor de cartao",
+
+  "trackball",
+
+  "apoio ergonômico",
+  "apoio ergonomico"
+])) return "Periféricos";
 
   if (contemAlgum(texto, [
     "notebook", "laptop", "chromebook", "macbook", "computador",
@@ -447,13 +580,43 @@ if (contemAlgum(texto, [
     "xiaomi", "redmi", "poco", "realme", "nokia"
   ])) return "Celulares e Smartphones";
 
-  if (contemAlgum(texto, [
-    "smart tv", "tv 43", "tv 50", "tv 55", "tv 65", "roku tv",
-    "google tv", "qled", "oled", "soundbar", "home theater",
-    "caixa de som", "fone bluetooth", "fone de ouvido", "headphone",
-    "tws", "jbl", "anker", "soundcore", "subwoofer", "projetor",
-    "echo dot", "alexa", "mesa de som", "mixer profissional"
-  ])) return "Audio TV";
+if (contemAlgum(texto, [
+  "smart tv",
+  "tv 43",
+  "tv 50",
+  "tv 55",
+  "tv 65",
+  "roku tv",
+  "google tv",
+  "qled",
+  "oled",
+  "soundbar",
+  "home theater",
+  "caixa de som",
+  "party box",
+  "fone bluetooth",
+  "fone de ouvido",
+  "headphone",
+  "headset",
+  "earbuds",
+  "tws",
+  "jbl",
+  "anker",
+  "soundcore",
+  "subwoofer",
+  "projetor",
+  "echo dot",
+  "alexa",
+  "mesa de som",
+  "mixer profissional",
+  "microfone",
+  "microfone sem fio",
+  "karaoke",
+  "speaker",
+  "aiwa",
+  "som portátil",
+  "som portatil"
+])) return "Audio TV";
 
   if (contemAlgum(texto, [
     "cafeteira", "air fryer", "fritadeira sem oleo", "fritadeira sem óleo",
@@ -513,12 +676,59 @@ if (contemAlgum(texto, [
   ])) return "Automotivo";
 
 
-  if (contemAlgum(texto, [
-    "lego", "boneco", "boneca", "hot wheels", "hasbro",
-    "marvel", "vingadores", "homem aranha", "homem de ferro",
-    "brinquedo", "quebra cabeca", "quebra cabeça", "triciclo infantil",
-    "patinete infantil"
-  ])) return "Brinquedos e Artigos Infantis";
+if (contemAlgum(texto, [
+  "lego",
+  "boneco",
+  "boneca",
+  "hot wheels",
+  "hasbro",
+  "marvel",
+  "vingadores",
+  "homem aranha",
+  "homem de ferro",
+
+  "brinquedo",
+  "brinquedo infantil",
+  "pista de brinquedo",
+
+  "carrinho",
+  "carrinho dinossauro",
+  "carrinho bate e volta",
+  "carrinho controle remoto",
+
+  "bebê reborn",
+  "bebe reborn",
+
+  "quebra cabeca",
+  "quebra cabeça",
+
+  "triciclo infantil",
+  "patinete infantil",
+
+  "fisher price",
+  "fisher-price",
+
+  "montessori",
+
+  "play doh",
+  "play-doh",
+
+  "nerf",
+
+  "massinha",
+
+  "casinha infantil",
+
+  "blocos de montar",
+
+  "pista hot wheels",
+
+  "kit brinquedo",
+
+  "brinquedo educativo",
+
+  "jogo educativo"
+])) return "Brinquedos e Artigos Infantis";
 
   if (contemAlgum(texto, [
     "game stick", "playstation", "xbox", "nintendo", "controle ps5",
@@ -530,6 +740,8 @@ if (contemAlgum(texto, [
     "chocolate", "biscoito", "bolacha", "sal grosso", "sal marinho",
     "tempero", "gourmet", "alimento", "mercearia", "gin", "bebida"
   ])) return "Alimentos e Mercearia";
+
+console.log("🧠 CATEGORIA NAO IDENTIFICADA:", texto);
 
   return "Diversos";
 }
