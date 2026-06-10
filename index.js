@@ -7010,6 +7010,26 @@ async function iniciarWhatsApp(id, force = false) {
 
   sock.ev.on("creds.update", saveCreds);
 
+const clienteIdMensageiro =
+  id.startsWith("admin_")
+    ? "admin"
+    : id.split("_sessao")[0];
+
+// =============== EVENTO MENSAGEIRO =================
+
+sock.ev.on("group-participants.update", async (evento) => {
+  try {
+    await mensageiro.tratarEventoGrupoMensageiro({
+      clienteId,
+      sessaoId: id,
+      sock,
+      evento
+    });
+  } catch (e) {
+    console.log("❌ Erro evento Mensageiro:", e.message);
+  }
+});
+
   sock.ev.on("connection.update", async (update) => {
     const { connection, qr, lastDisconnect } = update;
 
