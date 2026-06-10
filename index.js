@@ -3044,6 +3044,12 @@ app.post("/login", async (req, res) => {
 
   let senhaOk = false;
 
+console.log("🧪 LOGIN:", {
+  usuario: usuario.id,
+  senhaSalva: usuario.senha,
+  senhaRecebida: pass
+});
+
  senhaOk = String(usuario.senha || "") === String(pass || "");
 
   if (!senhaOk) {
