@@ -40,6 +40,8 @@ function criarConfigPadraoMensageiro(clienteId) {
     clienteId,
     ativo: false,
 
+    sessaoId: "",
+
     boasVindasAtivo: false,
     despedidaAtivo: false,
 

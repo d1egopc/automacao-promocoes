@@ -53,6 +53,68 @@ function obterMensagemDespedida(clienteId) {
   );
 }
 
+async function tratarEventoGrupoMensageiro({
+  clienteId,
+  sessaoId,
+  sock,
+  evento
+}) {
+  try {
+    const config = getMensageiroCliente(clienteId);
+
+    if (!config?.ativo) return;
+    if (config.sessaoId && config.sessaoId !== sessaoId) return;
+
+    const grupoId = evento.id;
+    const participantes = evento.participants || [];
+    const acao = evento.action;
+
+    if (!grupoPermitido(clienteId, grupoId)) return;
+
+    if (acao === "add" && !config.boasVindasAtivo) return;
+    if ((acao === "remove" || acao === "leave") && !config.despedidaAtivo) return;
+
+    const mensagem =
+      acao === "add"
+        ? obterMensagemBoasVindas(clienteId)
+        : obterMensagemDespedida(clienteId);
+
+    const imagem =
+      acao === "add"
+        ? config.imagemBoasVindas
+        : config.imagemDespedida;
+
+    for (const participante of participantes) {
+      const numero = String(participante).split("@")[0];
+
+      const textoFinal = String(mensagem || "")
+        .replaceAll("{numero}", numero)
+        .replaceAll("{grupo}", grupoId);
+
+      if (imagem) {
+        await sock.sendMessage(grupoId, {
+          image: { url: imagem },
+          caption: textoFinal
+        });
+      } else {
+        await sock.sendMessage(grupoId, {
+          text: textoFinal
+        });
+      }
+
+      console.log("🤖 Mensageiro enviado:", {
+        clienteId,
+        sessaoId,
+        grupoId,
+        participante,
+        acao
+      });
+    }
+  } catch (e) {
+    console.log("❌ Erro no Mensageiro:", e.message);
+  }
+}
+
 module.exports = {
   mensageiroAtivo,
   boasVindasAtivo,
@@ -60,6 +122,9 @@ module.exports = {
   grupoPermitido,
   obterMensagemBoasVindas,
   obterMensagemDespedida,
+
+  tratarEventoGrupoMensageiro,
+
   getMensageiroCliente,
   setMensageiroCliente
 };

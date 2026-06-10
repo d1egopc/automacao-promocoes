@@ -46,9 +46,21 @@ const {
 
     const dados = req.body || {};
 
-    const atualizado = setMensageiroCliente(clienteId, {
-      ativo: Boolean(dados.ativo),
-      boasVindasAtivo: Boolean(dados.boasVindasAtivo),
+const atualizado = setMensageiroCliente(clienteId, {
+  ativo: Boolean(dados.ativo),
+  sessaoId: dados.sessaoId || "",
+
+  boasVindasAtivo: Boolean(dados.boasVindasAtivo),
+  despedidaAtivo: Boolean(dados.despedidaAtivo),
+
+  mensagemBoasVindas: dados.mensagemBoasVindas || "",
+  mensagemDespedida: dados.mensagemDespedida || "",
+
+  imagemBoasVindas: dados.imagemBoasVindas || "",
+  imagemDespedida: dados.imagemDespedida || "",
+
+  grupos: Array.isArray(dados.grupos) ? dados.grupos : []
+});
       despedidaAtivo: Boolean(dados.despedidaAtivo),
 
       mensagemBoasVindas: dados.mensagemBoasVindas || "",
