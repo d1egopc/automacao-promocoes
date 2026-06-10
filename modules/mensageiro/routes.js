@@ -11,36 +11,42 @@ const {
   setMensageiroCliente
 } = deps;
 
-  router.get("/", (req, res) => {
+ router.get("/", (req, res) => {
 
- if (!usuarioTemRecurso(req, "mensageiro")) {
-  return res.status(403).json({
-    ok: false,
-    erro: "Mensageiro não disponível no seu plano"
-  });
-}
+  const clienteId = getClienteId(req);
 
-    const clienteId = getClienteId(req);
-    const config = getMensageiroCliente(clienteId);
-
-    return res.json({
-      ok: true,
-      clienteId,
-      mensageiro: config
-    });
-  });
-
-  router.post("/", (req, res) => {
-
-  const plano = getPlanoUsuario(req);
-
-  if (plano?.recursos?.mensageiro !== true) {
+  if (
+    clienteId !== "admin" &&
+    !usuarioTemRecurso(req, "mensageiro")
+  ) {
     return res.status(403).json({
       ok: false,
       erro: "Mensageiro não disponível no seu plano"
     });
   }
 
+  const config = getMensageiroCliente(clienteId);
+
+  return res.json({
+    ok: true,
+    clienteId,
+    mensageiro: config
+  });
+});
+
+  router.post("/", (req, res) => {
+
+ const clienteId = getClienteId(req);
+
+if (
+  clienteId !== "admin" &&
+  !usuarioTemRecurso(req, "mensageiro")
+) {
+  return res.status(403).json({
+    ok: false,
+    erro: "Mensageiro não disponível no seu plano"
+  });
+}
     const clienteId = getClienteId(req);
 
     const dados = req.body || {};
