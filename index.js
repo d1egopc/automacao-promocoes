@@ -2935,6 +2935,14 @@ function getPlanoUsuario(req) {
 function usuarioTemRecurso(req, recurso) {
   const usuario = getUsuarioAtual(req);
 
+console.log("🧪 RECURSO CHECK:", {
+  clienteId: getClienteId(req),
+  recurso,
+  usuarioId: usuario?.id,
+  papel: usuario?.papel,
+  plano: usuario?.plano
+});
+
   if (!usuario) return false;
 
   if (usuario.papel === "admin_master") {
