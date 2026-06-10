@@ -92,14 +92,14 @@ async function tratarEventoGrupoMensageiro({
         .replaceAll("{grupo}", grupoId);
 
       if (imagem) {
-        await sock.sendMessage(grupoId, {
-          image: { url: imagem },
-          caption: textoFinal
+        await sock.sendMessage(participante, {
+        image: { url: imagem },
+        caption: textoFinal
         });
       } else {
-        await sock.sendMessage(grupoId, {
-          text: textoFinal
-        });
+        await sock.sendMessage(participante, {
+        text: textoFinal
+       });
       }
 
       console.log("🤖 Mensageiro enviado:", {
