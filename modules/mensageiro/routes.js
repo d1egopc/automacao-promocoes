@@ -6,20 +6,19 @@ function criarRotasMensageiro(deps = {}) {
 const {
   getClienteId,
   getPlanoUsuario,
+  usuarioTemRecurso,
   getMensageiroCliente,
   setMensageiroCliente
 } = deps;
 
   router.get("/", (req, res) => {
 
-  const plano = getPlanoUsuario(req);
-
-  if (plano?.recursos?.mensageiro !== true) {
-    return res.status(403).json({
-      ok: false,
-      erro: "Mensageiro não disponível no seu plano"
-    });
-  }
+ if (!usuarioTemRecurso(req, "mensageiro")) {
+  return res.status(403).json({
+    ok: false,
+    erro: "Mensageiro não disponível no seu plano"
+  });
+}
 
     const clienteId = getClienteId(req);
     const config = getMensageiroCliente(clienteId);
