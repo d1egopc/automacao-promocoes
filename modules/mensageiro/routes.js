@@ -3,13 +3,24 @@ const express = require("express");
 function criarRotasMensageiro(deps = {}) {
   const router = express.Router();
 
-  const {
-    getClienteId,
-    getMensageiroCliente,
-    setMensageiroCliente
-  } = deps;
+const {
+  getClienteId,
+  getPlanoUsuario,
+  getMensageiroCliente,
+  setMensageiroCliente
+} = deps;
 
   router.get("/", (req, res) => {
+
+  const plano = getPlanoUsuario(req);
+
+  if (plano?.recursos?.mensageiro !== true) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Mensageiro não disponível no seu plano"
+    });
+  }
+
     const clienteId = getClienteId(req);
     const config = getMensageiroCliente(clienteId);
 
@@ -21,6 +32,16 @@ function criarRotasMensageiro(deps = {}) {
   });
 
   router.post("/", (req, res) => {
+
+  const plano = getPlanoUsuario(req);
+
+  if (plano?.recursos?.mensageiro !== true) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Mensageiro não disponível no seu plano"
+    });
+  }
+
     const clienteId = getClienteId(req);
 
     const dados = req.body || {};
