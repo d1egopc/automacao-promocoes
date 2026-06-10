@@ -77,6 +77,9 @@ const {
   enviarCampanhaManual
 } = require("./campanhas/enviarCampanha");
 
+const mensageiro = require("./modules/mensageiro");
+const criarRotasMensageiro = require("./modules/mensageiro/routes");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -625,6 +628,7 @@ function carregarConfig() {
       console.log("✅ Config carregada");
     }
 
+         
 if (fs.existsSync(USUARIOS_FILE)) {
   usuarios = JSON.parse(
     fs.readFileSync(USUARIOS_FILE, "utf8")
@@ -672,6 +676,8 @@ if (fs.existsSync(SESSOES_FILE)) {
 
   console.log("✅ Sessões meta carregadas:", Object.keys(sessoesMeta).length);
 }
+
+  mensageiro.carregarMensageiro();
 
    criarPlanosPadrao();
 
@@ -3017,12 +3023,19 @@ function auth(req, res, next) {
   }
 }
 
-app.use(auth);
-
 carregarConfig();
 
+app.use(auth);
 
-// ================= LOGIN =================
+// =============== ROTA DO MENSAGEIRO =================
+
+app.use("/mensageiro", criarRotasMensageiro({
+  getClienteId,
+  getMensageiroCliente: mensageiro.getMensageiroCliente,
+  setMensageiroCliente: mensageiro.setMensageiroCliente
+}));
+
+// ================= LOGIN ==========================
 
 app.post("/login", async (req, res) => {
   const { user, pass } = req.body || {};
