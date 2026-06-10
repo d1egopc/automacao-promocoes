@@ -3042,18 +3042,13 @@ app.post("/login", async (req, res) => {
     return res.status(403).json({ erro: "Usuário inativo" });
   }
 
-  let senhaOk = false;
-
-if (usuario.id === "admin" && !usuario.senha) {
-  usuario.senha = "fzt976";
-  salvarUsuarios();
-}
+ let senhaOk = false;
 
 senhaOk = String(usuario.senha || "") === String(pass || "");
 
-  if (!senhaOk) {
-    return res.status(401).json({ erro: "Senha inválida" });
-  }
+if (!senhaOk) {
+  return res.status(401).json({ erro: "Senha inválida" });
+}
 
   const token = jwt.sign(
     {
