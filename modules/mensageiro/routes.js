@@ -59,18 +59,10 @@ const atualizado = setMensageiroCliente(clienteId, {
   imagemBoasVindas: dados.imagemBoasVindas || "",
   imagemDespedida: dados.imagemDespedida || "",
 
-  grupos: Array.isArray(dados.grupos) ? dados.grupos : []
+  grupos: Array.isArray(dados.grupos)
+    ? dados.grupos
+    : []
 });
-      despedidaAtivo: Boolean(dados.despedidaAtivo),
-
-      mensagemBoasVindas: dados.mensagemBoasVindas || "",
-      mensagemDespedida: dados.mensagemDespedida || "",
-
-      imagemBoasVindas: dados.imagemBoasVindas || "",
-      imagemDespedida: dados.imagemDespedida || "",
-
-      grupos: Array.isArray(dados.grupos) ? dados.grupos : []
-    });
 
     return res.json({
       ok: true,
