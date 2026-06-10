@@ -557,7 +557,8 @@ function criarPlanosPadrao() {
         linkOptimus: true,
         analytics: true,
         cupomInteligente: true,
-        campanhas: true
+        campanhas: false,
+        mensageiro: false
       },
 
       atualizadoEm: new Date().toISOString()
@@ -2929,6 +2930,22 @@ function getPlanoUsuario(req) {
   return planoEncontrado || null;
 }
 
+// ===================== FUNCAO RECURSOS ============================
+
+function usuarioTemRecurso(req, recurso) {
+  const usuario = getUsuarioAtual(req);
+
+  if (!usuario) return false;
+
+  if (usuario.papel === "admin_master") {
+    return true;
+  }
+
+  const plano = getPlanoUsuario(req);
+
+  return plano?.recursos?.[recurso] === true;
+}
+
 // ======================== FUNCAO GET INTEGRACOES ========================
 
 function getIntegracaoCliente(clienteId = "admin", marketplace = "") {
@@ -3031,6 +3048,7 @@ app.use(auth);
 
 app.use("/mensageiro", criarRotasMensageiro({
   getClienteId,
+  getPlanoUsuario,
   getMensageiroCliente: mensageiro.getMensageiroCliente,
   setMensageiroCliente: mensageiro.setMensageiroCliente
 }));
