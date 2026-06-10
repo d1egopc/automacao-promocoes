@@ -7028,7 +7028,7 @@ const clienteIdMensageiro =
 sock.ev.on("group-participants.update", async (evento) => {
   try {
     await mensageiro.tratarEventoGrupoMensageiro({
-      clienteId,
+      clienteId: clienteIdMensageiro,
       sessaoId: id,
       sock,
       evento
