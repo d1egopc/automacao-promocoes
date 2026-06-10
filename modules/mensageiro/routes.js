@@ -11,7 +11,7 @@ const {
   setMensageiroCliente
 } = deps;
 
- router.get("/", (req, res) => {
+router.post("/", (req, res) => {
 
   const clienteId = getClienteId(req);
 
@@ -25,49 +25,26 @@ const {
     });
   }
 
-  const config = getMensageiroCliente(clienteId);
+  const dados = req.body || {};
 
-  return res.json({
-    ok: true,
-    clienteId,
-    mensageiro: config
+  const atualizado = setMensageiroCliente(clienteId, {
+    ativo: Boolean(dados.ativo),
+    sessaoId: dados.sessaoId || "",
+
+    boasVindasAtivo: Boolean(dados.boasVindasAtivo),
+    despedidaAtivo: Boolean(dados.despedidaAtivo),
+
+    mensagemBoasVindas: dados.mensagemBoasVindas || "",
+    mensagemDespedida: dados.mensagemDespedida || "",
+
+    imagemBoasVindas: dados.imagemBoasVindas || "",
+    imagemDespedida: dados.imagemDespedida || "",
+
+    grupos: Array.isArray(dados.grupos)
+      ? dados.grupos
+      : []
   });
-});
 
-  router.post("/", (req, res) => {
-
- const clienteId = getClienteId(req);
-
-if (
-  clienteId !== "admin" &&
-  !usuarioTemRecurso(req, "mensageiro")
-) {
-  return res.status(403).json({
-    ok: false,
-    erro: "Mensageiro não disponível no seu plano"
-  });
-}
-    const clienteId = getClienteId(req);
-
-    const dados = req.body || {};
-
-const atualizado = setMensageiroCliente(clienteId, {
-  ativo: Boolean(dados.ativo),
-  sessaoId: dados.sessaoId || "",
-
-  boasVindasAtivo: Boolean(dados.boasVindasAtivo),
-  despedidaAtivo: Boolean(dados.despedidaAtivo),
-
-  mensagemBoasVindas: dados.mensagemBoasVindas || "",
-  mensagemDespedida: dados.mensagemDespedida || "",
-
-  imagemBoasVindas: dados.imagemBoasVindas || "",
-  imagemDespedida: dados.imagemDespedida || "",
-
-  grupos: Array.isArray(dados.grupos)
-    ? dados.grupos
-    : []
-});
 
     return res.json({
       ok: true,
