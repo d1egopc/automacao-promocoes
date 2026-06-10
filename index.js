@@ -2532,10 +2532,12 @@ recursos: {
   linkOptimus: !!body.recursos?.linkOptimus,
   analytics: !!body.recursos?.analytics,
   cupomInteligente: !!body.recursos?.cupomInteligente,
-  campanhas: !!body.recursos?.campanhas
+  campanhas: !!body.recursos?.campanhas,
+  mensageiro: !!body.recursos?.mensageiro
 },
 
   atualizadoEm: new Date().toISOString()
+
 };
 
   salvarPlanos();
