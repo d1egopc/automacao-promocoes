@@ -84,23 +84,37 @@ async function tratarEventoGrupoMensageiro({
         ? config.imagemBoasVindas
         : config.imagemDespedida;
 
-    for (const participante of participantes) {
-      const numero = String(participante).split("@")[0];
+  for (const participante of participantes) {
+  const numero = String(participante).split("@")[0];
+  const destinoPrivado = participante;
 
-      const textoFinal = String(mensagem || "")
-        .replaceAll("{numero}", numero)
-        .replaceAll("{grupo}", grupoId);
+  const textoFinal = String(mensagem || "")
+    .replaceAll("{numero}", numero)
+    .replaceAll("{grupo}", grupoId)
+    .replaceAll("{acao}", acao);
 
-      if (imagem) {
-        await sock.sendMessage(participante, {
-        image: { url: imagem },
-        caption: textoFinal
-        });
-      } else {
-        await sock.sendMessage(participante, {
-        text: textoFinal
-       });
-      }
+     if (imagem) {
+  const imagemStr = String(imagem);
+
+  if (imagemStr.startsWith("data:image")) {
+    const base64 = imagemStr.split(",")[1];
+    const buffer = Buffer.from(base64, "base64");
+
+    await sock.sendMessage(destinoPrivado, {
+      image: buffer,
+      caption: textoFinal
+    });
+  } else {
+    await sock.sendMessage(destinoPrivado, {
+      image: { url: imagemStr },
+      caption: textoFinal
+    });
+  }
+} else {
+  await sock.sendMessage(destinoPrivado, {
+    text: textoFinal
+  });
+}
 
       console.log("🤖 Mensageiro enviado:", {
         clienteId,
