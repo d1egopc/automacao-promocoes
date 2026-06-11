@@ -6564,16 +6564,28 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
 async function carregarGruposSessao(id, opcoes = {}) {
   const force = opcoes.force === true;
 
-  console.log("🔎 Tentando carregar grupos da sessão:", id);
+  const clienteId =
+    opcoes.clienteId ||
+    (
+      id.startsWith("user_") && id.includes("_sessao")
+        ? id.split("_sessao")[0]
+        : "admin"
+    );
+
+  console.log("🔎 Tentando carregar grupos da sessão:", {
+    id,
+    clienteId
+  });
+
   console.log("📌 Sessões abertas:", Object.keys(sessoes));
   console.log("📌 Status sessões:", statusSessao);
 
-  const idNormalizado = normalizarSessaoId("admin", id);
+  const idNormalizado = normalizarSessaoId(clienteId, id);
 
   const sessao =
     sessoes[id] ||
     sessoes[idNormalizado] ||
-    sessoes[`admin_${id}`];
+    sessoes[`${clienteId}_${id}`];
 
   const sock = sessao?.sock || sessao;
 
@@ -6583,7 +6595,7 @@ async function carregarGruposSessao(id, opcoes = {}) {
   const chaveCache =
     sessoes[id] ? id :
     sessoes[idNormalizado] ? idNormalizado :
-    sessoes[`admin_${id}`] ? `admin_${id}` :
+    sessoes[`${clienteId}_${id}`] ? `${clienteId}_${id}` :
     idNormalizado;
 
   console.log("🧪 Existe cache?", !!gruposPorSessao[chaveCache]);
@@ -7085,7 +7097,9 @@ salvarSessoesMeta();
 
   setTimeout(async () => {
   try {
-    await carregarGruposSessao(id);
+    await carregarGruposSessao(id, {
+  clienteId: clienteIdMensageiro
+  });
   } catch (e) {
     console.log(
       "⚠️ Erro ao carregar grupos no pós-conexão:",
