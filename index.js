@@ -7021,9 +7021,14 @@ async function iniciarWhatsApp(id, force = false) {
   sock.ev.on("creds.update", saveCreds);
 
 const clienteIdMensageiro =
-  id.startsWith("admin_")
-    ? "admin"
-    : id.split("_sessao")[0];
+  id.startsWith("user_") && id.includes("_sessao")
+    ? id.split("_sessao")[0]
+    : "admin";
+
+console.log("🧭 Cliente mensageiro da sessão:", {
+  sessao: id,
+  clienteIdMensageiro
+});
 
 // =============== EVENTO MENSAGEIRO =================
 
