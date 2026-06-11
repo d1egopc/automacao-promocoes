@@ -271,9 +271,9 @@ if (contemAlgum(texto, [
   "bermuda masculina", "short masculino", "shorts masculino",
   "regata masculina", "cueca boxer", "cuecas boxer",
   "boxer masculina", "boxer masculino",
-  "moda masculina", "plus size masculino"
+  "moda masculina", "plus size masculino",
 
-     "calca masculina",
+  "calca masculina",
   "calça masculina",
 
   "calca sarja masculina",
