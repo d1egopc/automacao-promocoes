@@ -1,5 +1,9 @@
 const express = require("express");
 
+const {
+  otimizarBase64
+} = require("./imagem");
+
 function criarRotasMensageiro(deps = {}) {
   const router = express.Router();
 
@@ -35,7 +39,7 @@ router.get("/", (req, res) => {
 });
 
 
-router.post("/", (req, res) => {
+router.post("/", async (req, res) => {
 
   const clienteId = getClienteId(req);
 
@@ -49,25 +53,31 @@ router.post("/", (req, res) => {
     });
   }
 
-  const dados = req.body || {};
+ const dados = req.body || {};
 
-  const atualizado = setMensageiroCliente(clienteId, {
-    ativo: Boolean(dados.ativo),
-    sessaoId: dados.sessaoId || "",
+const imagemBoasVindas =
+  await otimizarBase64(dados.imagemBoasVindas);
 
-    boasVindasAtivo: Boolean(dados.boasVindasAtivo),
-    despedidaAtivo: Boolean(dados.despedidaAtivo),
+const imagemDespedida =
+  await otimizarBase64(dados.imagemDespedida);
 
-    mensagemBoasVindas: dados.mensagemBoasVindas || "",
-    mensagemDespedida: dados.mensagemDespedida || "",
+const atualizado = setMensageiroCliente(clienteId, {
+  ativo: Boolean(dados.ativo),
+  sessaoId: dados.sessaoId || "",
 
-    imagemBoasVindas: dados.imagemBoasVindas || "",
-    imagemDespedida: dados.imagemDespedida || "",
+  boasVindasAtivo: Boolean(dados.boasVindasAtivo),
+  despedidaAtivo: Boolean(dados.despedidaAtivo),
 
-    grupos: Array.isArray(dados.grupos)
-      ? dados.grupos
-      : []
-  });
+  mensagemBoasVindas: dados.mensagemBoasVindas || "",
+  mensagemDespedida: dados.mensagemDespedida || "",
+
+  imagemBoasVindas: imagemBoasVindas || "",
+  imagemDespedida: imagemDespedida || "",
+
+  grupos: Array.isArray(dados.grupos)
+    ? dados.grupos
+    : []
+});
 
 
     return res.json({
