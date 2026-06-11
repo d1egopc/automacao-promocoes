@@ -99,6 +99,9 @@ for (const participante of participantes) {
     .replaceAll("{grupo}", grupoId)
     .replaceAll("{acao}", acao);
 
+console.log("🧪 DESTINO PRIVADO:", destinoPrivado);
+console.log("🧪 TEXTO FINAL:", textoFinal);
+
      if (imagem) {
   const imagemStr = String(imagem);
 
