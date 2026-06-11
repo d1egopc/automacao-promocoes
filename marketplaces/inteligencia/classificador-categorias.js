@@ -1302,12 +1302,11 @@ if (contemAlgum(texto, [
   "tv 42",
   "tv 70",
   "tv 75",
-har
   "android tv",
 
   "mini system",
   "receiver",
-  "smart tv",
+  "roku tv",
 
   "caixa bluetooth",
   "caixa bluetooth portátil",
