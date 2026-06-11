@@ -6,19 +6,6 @@ const {
 function mensageiroAtivo(clienteId) {
   const config = getMensageiroCliente(clienteId);
 
-console.log("🤖 CHECK MENSAGEIRO:", {
-  clienteId,
-  sessaoConfig: config?.sessaoId,
-  sessaoEvento: sessaoId,
-  ativo: config?.ativo,
-  boasVindasAtivo: config?.boasVindasAtivo,
-  despedidaAtivo: config?.despedidaAtivo,
-  gruposConfig: config?.grupos,
-  grupoEvento: evento?.id,
-  acao: evento?.action,
-  participantes: evento?.participants
-});
-
   return config?.ativo === true;
 }
 
@@ -97,7 +84,13 @@ async function tratarEventoGrupoMensageiro({
         ? config.imagemBoasVindas
         : config.imagemDespedida;
 
-  for (const participante of participantes) {
+for (const participante of participantes) {
+
+  console.log(
+    "📱 PARTICIPANTE:",
+    participante
+  );
+
   const numero = String(participante).split("@")[0];
   const destinoPrivado = participante;
 
