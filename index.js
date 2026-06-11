@@ -7029,6 +7029,15 @@ const clienteIdMensageiro =
 
 sock.ev.on("group-participants.update", async (evento) => {
   try {
+
+console.log("🔥 EVENTO GRUPO MENSAGEIRO:", {
+      clienteIdMensageiro,
+      sessaoId: id,
+      grupoId: evento?.id,
+      acao: evento?.action,
+      participantes: evento?.participants
+    });
+
     await mensageiro.tratarEventoGrupoMensageiro({
       clienteId: clienteIdMensageiro,
       sessaoId: id,
