@@ -6,6 +6,19 @@ const {
 function mensageiroAtivo(clienteId) {
   const config = getMensageiroCliente(clienteId);
 
+console.log("🤖 CHECK MENSAGEIRO:", {
+  clienteId,
+  sessaoConfig: config?.sessaoId,
+  sessaoEvento: sessaoId,
+  ativo: config?.ativo,
+  boasVindasAtivo: config?.boasVindasAtivo,
+  despedidaAtivo: config?.despedidaAtivo,
+  gruposConfig: config?.grupos,
+  grupoEvento: evento?.id,
+  acao: evento?.action,
+  participantes: evento?.participants
+});
+
   return config?.ativo === true;
 }
 
