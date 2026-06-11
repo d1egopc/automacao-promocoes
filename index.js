@@ -7028,16 +7028,17 @@ const clienteIdMensageiro =
 // =============== EVENTO MENSAGEIRO =================
 
 sock.ev.on("group-participants.update", async (evento) => {
-  try {
+  
+  console.log("🔥 EVENTO GRUPO MENSAGEIRO:", {
+    quando: new Date().toISOString(),
+    clienteIdMensageiro,
+    sessaoId: id,
+    grupoId: evento?.id,
+    acao: evento?.action,
+    participantes: evento?.participants
+  });
 
-console.log("🔥 EVENTO GRUPO MENSAGEIRO:", {
-      clienteIdMensageiro,
-      sessaoId: id,
-      grupoId: evento?.id,
-      acao: evento?.action,
-      participantes: evento?.participants
-    });
-
+   try {
     await mensageiro.tratarEventoGrupoMensageiro({
       clienteId: clienteIdMensageiro,
       sessaoId: id,
