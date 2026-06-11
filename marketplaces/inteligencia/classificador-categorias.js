@@ -1201,7 +1201,7 @@ if (contemAlgum(texto, [
   "nitro 5",
 
   "acer predator",
-  "predator helios"
+  "predator helios",
 
   "latitude",
   "inspiron",
