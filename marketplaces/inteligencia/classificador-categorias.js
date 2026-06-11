@@ -553,7 +553,63 @@ if (contemAlgum(texto, [
   "gedore", "fertak", "tramontina pro",
   "macaco hidraulico", "macaco hidráulico",
   "compressor de ar", "pistola pintura",
-  "soprador termico", "soprador térmico"
+  "soprador termico", "soprador térmico",
+  
+// ===== REFORÇO =====
+
+  "micro retifica",
+  "micro retífica",
+  "retifica",
+  "retífica",
+
+  "serra sabre",
+  "serra meia esquadria",
+  "esmeril",
+
+  "inversora solda",
+  "maquina solda",
+  "máquina solda",
+  "soldadora",
+
+  "lavadora alta pressao",
+  "lavadora alta pressão",
+  "wap",
+
+  "gerador energia",
+  "gerador portátil",
+  "gerador portatil",
+
+  "multimetro",
+  "multímetro",
+
+  "detector metal",
+  "detector de metal",
+
+  "grampeador pneumático",
+  "grampeador pneumatico",
+
+  "pregador pneumático",
+  "pregador pneumatico",
+
+  "torquimetro",
+  "torquímetro",
+
+  "carrinho ferramenta",
+  "carrinho de ferramentas",
+
+  "bateria makita",
+  "bateria dewalt",
+  "bateria bosch",
+
+  "disco corte",
+  "disco diamantado",
+
+  "broca",
+  "jogo brocas",
+  "kit brocas",
+
+  "chave catraca",
+  "catraca"
 ])) return "Ferramentas";
 
   
@@ -748,14 +804,132 @@ if (contemAlgum(texto, [
   "casinha pet",
   "cama pet",
   "caminha pet",
-  "transportadora pet"
+  "transportadora pet",
+    // ===== REFORÇO =====
+
+  "whiskas",
+  "golden",
+  "premier pet",
+  "granplus",
+  "special dog",
+  "special cat",
+
+  "royal canin",
+  "farmina",
+
+  "petisco cachorro",
+  "petisco gato",
+
+  "osso mastigavel",
+  "osso mastigável",
+
+  "mordedor cachorro",
+
+  "roupa pet",
+  "fantasia pet",
+
+  "shampoo pet",
+  "condicionador pet",
+
+  "escova pet",
+
+  "caixa transporte",
+  "caixa de transporte",
+
+  "gaiola",
+  "viveiro",
+
+  "aquario",
+  "aquário",
+
+  "fonte pet",
+  "fonte para gato",
+
+  "comedouro automatico",
+  "comedouro automático",
+
+  "bebedouro automatico",
+  "bebedouro automático",
+
+  "educador sanitario",
+  "educador sanitário",
+
+  "granulado higienico",
+  "granulado higiênico",
+
+  "areia higienica",
+  "areia higiênica"
 ])) return "Pet Shop e Fazendinha";
 
   if (contemAlgum(texto, [
     "fralda", "huggies", "pampers", "lenco umedecido", "lenço umedecido",
     "lencos umedecidos", "lenços umedecidos", "mamadeira", "chupeta",
     "berco", "berço", "mosquiteiro", "carrinho de bebe", "carrinho de bebê",
-    "bebe conforto", "bebê conforto", "tapete infantil", "tatame infantil"
+    "bebe conforto", "bebê conforto", "tapete infantil", "tatame infantil",
+      
+// ===== REFORÇO =====
+
+  "formula infantil",
+  "fórmula infantil",
+
+  "nan",
+  "aptamil",
+  "nestogeno",
+  "nestogênio",
+
+  "kit maternidade",
+
+  "saida maternidade",
+  "saída maternidade",
+
+  "body bebe",
+  "body bebê",
+
+  "macacao bebe",
+  "macacão bebê",
+  "macacao infantil",
+  "macacão infantil",
+
+  "babador",
+
+  "prato infantil",
+  "talher infantil",
+
+  "cadeira alimentacao",
+  "cadeira alimentação",
+
+  "banheira bebe",
+  "banheira bebê",
+
+  "almofada amamentacao",
+  "almofada amamentação",
+
+  "extrator leite",
+  "bomba tira leite",
+
+  "andador bebe",
+  "andador bebê",
+
+  "berco portatil",
+  "berço portátil",
+
+  "ninho bebe",
+  "ninho bebê",
+
+  "kit higiene bebe",
+  "kit higiene bebê",
+
+  "termometro infantil",
+  "termômetro infantil",
+
+  "aspirador nasal",
+
+  "mordedor",
+
+  "brinquedo educativo",
+
+  "tapete atividades",
+  "tapete de atividades"
   ])) return "Bebês e Acessórios";
 
 if (contemAlgum(texto, [
@@ -816,7 +990,73 @@ if (contemAlgum(texto, [
   "kit xeon",
   "xeon",
 
-  "monitor gamer"
+  "monitor gamer",
+    // ===== REFORÇO =====
+
+  "placa-mae",
+  "placa-mãe",
+
+  "b450",
+  "b550",
+  "b650",
+  "a520",
+  "a620",
+  "x570",
+  "x670",
+  "h610",
+  "b760",
+  "z790",
+
+  "rx 570",
+  "rx 6750",
+  "rx 7700",
+  "rx 7800",
+  "rx 7900",
+
+  "rtx 3050",
+  "rtx 3060",
+  "rtx 4060",
+  "rtx 4070",
+  "rtx 4080",
+  "rtx 4090",
+  "rtx 5060",
+  "rtx 5070",
+  "rtx 5080",
+  "rtx 5090",
+
+  "memoria ddr4",
+  "memória ddr4",
+  "memoria ddr5",
+  "memória ddr5",
+
+  "fonte 500w",
+  "fonte 550w",
+  "fonte 600w",
+  "fonte 650w",
+  "fonte 750w",
+  "fonte 850w",
+
+  "80 plus",
+  "pfc ativo",
+
+  "cooler master",
+  "corsair",
+  "kingston fury",
+  "xpg",
+  "crucial",
+  "western digital",
+  "wd black",
+  "seagate",
+
+  "pasta termica",
+  "pasta térmica",
+
+  "controladora argb",
+  "hub fan",
+  "kit fan",
+
+  "cadeira gamer",
+  "mesa gamer"
 ])) return "Gamer e Hardware";
 
  if (contemAlgum(texto, [
@@ -865,18 +1105,135 @@ if (contemAlgum(texto, [
   "trackball",
 
   "apoio ergonômico",
-  "apoio ergonomico"
+  "apoio ergonomico",
+    // ===== REFORÇO =====
+
+  "mouse gamer",
+  "teclado gamer",
+
+  "combo gamer",
+  "kit gamer",
+
+  "teclado mecanico",
+  "teclado mecânico",
+
+  "teclado sem fio",
+  "mouse sem fio",
+
+  "webcam full hd",
+
+  "monitor",
+  "monitor led",
+  "monitor curvo",
+  "monitor ultrawide",
+
+  "braço articulado monitor",
+  "suporte monitor",
+
+  "hd externo",
+  "ssd externo",
+
+  "case hd",
+  "case ssd",
+
+  "placa captura",
+  "placa de captura",
+
+  "stream deck",
+
+  "switch hdmi",
+
+  "cabo hdmi",
+  "displayport",
+
+  "adaptador displayport",
+
+  "repetidor wifi",
+  "repetidor wi-fi",
+
+  "placa rede usb",
+  "adaptador wifi",
+  "adaptador wi-fi",
+
+  "roteador usb",
+
+  "logitech",
+  "redragon",
+  "hyperx",
+  "razer"
 ])) return "Periféricos";
 
-  if (contemAlgum(texto, [
-    "notebook", "laptop", "chromebook", "macbook", "computador",
-    "pc gamer", "all in one"
-  ])) return "Computadores e Notebook";
+ if (contemAlgum(texto, [
+  "notebook",
+  "laptop",
+  "chromebook",
+  "macbook",
 
-  if (contemAlgum(texto, [
-    "iphone", "smartphone", "celular", "galaxy", "motorola",
-    "xiaomi", "redmi", "poco", "realme", "nokia"
-  ])) return "Celulares e Smartphones";
+  "computador",
+
+  "pc gamer",
+
+  "all in one",
+
+  // reforço
+
+  "ultrabook",
+
+  "imac",
+
+  "mini pc",
+  "mini computador",
+
+  "desktop",
+
+  "workstation",
+
+  "notebook gamer",
+
+  "thinkpad",
+  "ideapad",
+
+  "vivobook",
+  "zenbook",
+
+  "aspire",
+  "acer nitro",
+  "nitro 5",
+
+  "acer predator",
+  "predator helios"
+
+  "latitude",
+  "inspiron",
+  "vostro",
+
+  "surface laptop",
+    "book4",
+  "galaxy book",
+
+  "expertbook",
+
+  "legion",
+
+  "omen",
+
+  "alienware",
+
+  "avell",
+
+  "positivo master",
+
+  "celeron",
+  "core i3",
+  "core i5",
+  "core i7",
+  "core ultra",
+
+  "ryzen 3",
+  "ryzen 5",
+  "ryzen 7",
+  "ryzen 9"
+])) return "Computadores e Notebook";
 
 if (contemAlgum(texto, [
   "smart tv",
@@ -913,7 +1270,56 @@ if (contemAlgum(texto, [
   "speaker",
   "aiwa",
   "som portátil",
-  "som portatil"
+  "som portatil",
+    // ===== REFORÇO =====
+
+  "smarttv",
+
+  "tv led",
+  "tv 32",
+  "tv 40",
+  "tv 42",
+  "tv 70",
+  "tv 75",
+
+  "android tv",
+
+  "mini system",
+  "receiver",
+
+  "caixa bluetooth",
+  "caixa bluetooth portátil",
+  "caixa bluetooth portatil",
+
+  "caixa amplificada",
+
+  "monitor audio",
+  "monitor de áudio",
+  "monitor de audio",
+
+  "mixer audio",
+  "mixer áudio",
+
+  "web radio",
+  "web rádio",
+
+  "radio portatil",
+  "rádio portátil",
+
+  "amplificador",
+
+  "kit karaoke",
+  "kit karaokê",
+
+  "podcast",
+  "microfone condensador",
+
+  "ring light com microfone",
+
+  "fire tv stick",
+  "chromecast",
+
+  "tv box"
 ])) return "Audio TV";
 
 if (contemAlgum(texto, [
@@ -1148,11 +1554,88 @@ if (contemAlgum(texto, [
     "controle xbox", "console", "jogo ps5", "jogo xbox"
   ])) return "Games e Console";
 
-  if (contemAlgum(texto, [
-    "azeite", "arroz", "feijao", "feijão", "leite", "cafe", "café",
-    "chocolate", "biscoito", "bolacha", "sal grosso", "sal marinho",
-    "tempero", "gourmet", "alimento", "mercearia", "gin", "bebida"
-  ])) return "Alimentos e Mercearia";
+if (contemAlgum(texto, [
+  "azeite",
+
+  "arroz",
+  "feijao", "feijão",
+
+  "leite",
+
+  "cafe", "café",
+
+  "chocolate",
+
+  "biscoito",
+  "bolacha",
+
+  "sal grosso",
+  "sal marinho",
+
+  "tempero",
+
+  "gourmet",
+
+  "alimento",
+  "mercearia",
+
+  // reforço
+
+  "capsula nespresso",
+  "cápsula nespresso",
+
+  "capsula dolce gusto",
+  "cápsula dolce gusto",
+
+  "nespresso",
+  "dolce gusto",
+
+  "nescafe", "nescafé",
+
+  "achocolatado",
+
+  "barra cereal",
+  "barra de cereal",
+
+  "granola",
+
+  "wafers",
+
+  "amendoim",
+
+  "castanha",
+  "castanhas",
+
+  "pasta amendoim",
+  "pasta de amendoim",
+
+  "geleia", "geléia",
+
+  "mel",
+
+  "macarrao",
+  "macarrão",
+
+  "molho tomate",
+  "molho de tomate",
+
+  "farinha",
+
+  "acucar", "açúcar",
+
+  "adocante",
+
+  "cha", "chá",
+
+  "suco",
+
+  "energetico", "energético",
+
+  "kit churrasco gourmet",
+
+  "cesta basica",
+  "cesta básica"
+])) return "Alimentos e Mercearia";
 
 console.log("🧠 CATEGORIA NAO IDENTIFICADA:", texto);
 
