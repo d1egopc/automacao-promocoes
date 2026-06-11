@@ -69,7 +69,14 @@ if (contemAlgum(texto, [
     "maquina de cortar cabelo", "máquina de cortar cabelo",
     "maquininha de cortar cabelo", "maquina de barbear", "máquina de barbear",
     "barbeador", "aparador de pelos", "aparador de barba",
-    "kemei", "kemel", "barbearia", "shaver", "depilador"
+    "kemei", "kemel", "barbearia", "shaver", "depilador",
+    "la vie est belle",
+    "elixir",
+    "anasol",
+    "fps",
+    "protetor solar",
+    "protecao solar",
+    "proteção solar"
   ])) return "Perfumaria, Farmácia e Beleza";
 
 
@@ -254,8 +261,11 @@ if (contemAlgum(texto, [
 
   "sapatilha feminina",
 
-  "tamanco feminino"
-  
+  "tamanco feminino",
+
+  "regata brasil",
+  "regatas do brasil",
+  "ribana feminina"  
 ])) return "Roupas e Moda Feminina";
 
 if (contemAlgum(texto, [
@@ -311,8 +321,9 @@ if (contemAlgum(texto, [
   "cinto masculino",
 
   "meia masculina",
-  "meias masculinas"
-  
+  "meias masculinas",
+  "blusa de moletom masculina",
+  "blusas de moletom masculina" 
 ])) return "Roupas e Moda Masculina";
 
 if (contemAlgum(texto, [
@@ -438,7 +449,14 @@ if (contemAlgum(texto, [
   "tênis esportivo", "corrida", "caminhada",
 
   "garrafa termica esportiva", "garrafa esportiva",
-  "squeeze", "mochila hidratacao", "mochila hidratação"
+  "squeeze", "mochila hidratacao", "mochila hidratação",
+  
+  "mini band",
+  "mini bands",
+  "elastico exercicio",
+  "elástico exercício",
+  "albumin protein",
+  "albumin"
 ])) return "Esporte e Suplementos";
 
 
@@ -951,6 +969,7 @@ if (contemAlgum(texto, [
   "nvme",
   "m.2",
   "ssd sata",
+  "Dissipador JEYI PS5 SSD",
 
   "memoria ram",
   "memória ram",
@@ -1098,11 +1117,13 @@ if (contemAlgum(texto, [
   "adaptador usb",
   "adaptador usb-c",
   "adaptador usb c",
+  "Caixa de Som USB Notebook",
 
   "leitor de cartão",
   "leitor de cartao",
 
   "trackball",
+  "Ventoinha ASUS TF120",
 
   "apoio ergonômico",
   "apoio ergonomico",
@@ -1281,11 +1302,12 @@ if (contemAlgum(texto, [
   "tv 42",
   "tv 70",
   "tv 75",
-
+har
   "android tv",
 
   "mini system",
   "receiver",
+  "smart tv",
 
   "caixa bluetooth",
   "caixa bluetooth portátil",
@@ -1455,7 +1477,9 @@ if (contemAlgum(texto, [
 
   "limpeza pesada",
   "kit limpeza",
-  "refil mop"
+  "refil mop",
+  "papel higienico",
+  "papel higiênico"
 ])) return "Limpeza";
 
   if (contemAlgum(texto, [
