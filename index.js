@@ -7365,19 +7365,19 @@ await farejador(clienteId, {
 
 // ============================= TESTE MANUAL =========================
 
-// setTimeout(async () => {
- //  console.log("🪂 TESTE MANUAL ORQUESTRADOR SHOPEE");
+ setTimeout(async () => {
+   console.log("🪂 TESTE MANUAL ORQUESTRADOR KABUM");
 
-  // const indiceShopee =
-   //  ordemMarketplaces.indexOf("shopee");
+  const indicekabum =
+    ordemMarketplaces.indexOf("kabum");
 
-  // if (indiceShopee >= 0) {
-   //  indiceMarketplaceAtual = indiceShopee;
-  // }
+   if (indicekabum >= 0) {
+     indiceMarketplaceAtual = indicekabum;
+   }
 
-  // await rodarProximoMarketplace();
+   await rodarProximoMarketplace();
 
-// }, 60 * 1000);
+ }, 60 * 1000);
 
  
 
