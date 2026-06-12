@@ -35,9 +35,10 @@ if (
   texto.includes("colônia") ||
   texto.includes("deo colonia") ||
 
-  "malbec" ||
-  texto.includes("lattafa") ||
-  texto.includes("yara") ||
+ texto.includes("deo colonia") ||
+ texto.includes("malbec") ||
+ texto.includes("lattafa") ||
+ texto.includes("yara") ||
 
   texto.includes("body splash") ||
 
