@@ -1325,9 +1325,20 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
   console.log("❌ Sessão não encontrada:", destino.conexaoId);
   return false;
 }
-      const grupos = destino.gruposWhatsapp || [];
+    
+  if (destino.tipoMidia === "texto" || !oferta.imagem) {
+  await sock.sendMessage(grupo, { text: mensagem });
+} else {
+  await sock.sendMessage(grupo, {
+    image: {
+      url: corrigirImagemUrl(oferta.imagem) || oferta.imagem
+    },
+    caption: mensagem
+  });
+}
 
-      for (const grupo of grupos) {
+debitarCreditos(clienteId, 1);
+
         
       if (!usuarioTemCreditos(clienteId, 1)) {
       console.log("🚫 Sem créditos:", clienteId);
