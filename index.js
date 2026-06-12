@@ -6577,9 +6577,6 @@ async function carregarGruposSessao(id, opcoes = {}) {
     clienteId
   });
 
-  console.log("📌 Sessões abertas:", Object.keys(sessoes));
-  console.log("📌 Status sessões:", statusSessao);
-
   const idNormalizado = normalizarSessaoId(clienteId, id);
 
   const sessao =
@@ -6589,18 +6586,11 @@ async function carregarGruposSessao(id, opcoes = {}) {
 
   const sock = sessao?.sock || sessao;
 
-  console.log("🧪 Sessão encontrada?", !!sessao);
-  console.log("🧪 Sock encontrado?", !!sock);
-
   const chaveCache =
     sessoes[id] ? id :
     sessoes[idNormalizado] ? idNormalizado :
     sessoes[`${clienteId}_${id}`] ? `${clienteId}_${id}` :
     idNormalizado;
-
-  console.log("🧪 Existe cache?", !!gruposPorSessao[chaveCache]);
-  console.log("🧪 Total cache:", gruposPorSessao[chaveCache]?.length || 0);
-  console.log("🔄 Force atualizar grupos?", force);
 
   if (!force && gruposPorSessao[chaveCache]?.length) {
     return gruposPorSessao[chaveCache];
@@ -6617,13 +6607,12 @@ async function carregarGruposSessao(id, opcoes = {}) {
   }
 
   try {
-    console.log("🧪 Vai buscar grupos do WhatsApp...");
-    const grupos = await sock.groupFetchAllParticipating();
+ const grupos = await sock.groupFetchAllParticipating();
 
-    console.log(
-      "🧪 groupFetchAllParticipating retornou:",
-      Object.keys(grupos || {}).length
-    );
+console.log(
+  "📋 Grupos carregados:",
+  Object.keys(grupos || {}).length
+);
 
     const lista = Object.entries(grupos || {}).map(([gid, g]) => ({
       id: gid,
