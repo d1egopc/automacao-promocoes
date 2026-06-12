@@ -940,6 +940,88 @@ if (contemAlgum(texto, [
 
 
 if (contemAlgum(texto, [
+  "smart tv",
+  "smarttv",
+  "tv led",
+  "tv 32",
+  "tv 40",
+  "tv 42",
+  "tv 43",
+  "tv 50",
+  "tv 55",
+  "tv 65",
+  "tv 70",
+  "tv 75",
+  "roku tv",
+  "google tv",
+  "android tv",
+  "qled",
+  "oled",
+
+  "soundbar",
+  "home theater",
+  "caixa de som",
+  "caixa bluetooth",
+  "caixa bluetooth portátil",
+  "caixa bluetooth portatil",
+  "caixa amplificada",
+  "party box",
+  "boombox",
+  "mini speaker",
+  "speaker",
+  "som portátil",
+  "som portatil",
+
+  "fone bluetooth",
+  "fone de ouvido",
+  "headphone",
+  "headset",
+  "earbuds",
+  "tws",
+
+  "jbl",
+  "aiwa",
+  "anker",
+  "soundcore",
+
+  "subwoofer",
+  "alto falante",
+  "alto-falante",
+
+  "projetor",
+  "echo dot",
+  "alexa",
+  "fire tv stick",
+  "chromecast",
+  "tv box",
+
+  "mesa de som",
+  "mixer profissional",
+  "mixer audio",
+  "mixer áudio",
+  "amplificador",
+  "receiver",
+
+  "microfone",
+  "microfone sem fio",
+  "microfone condensador",
+  "podcast",
+  "karaoke",
+  "kit karaoke",
+  "kit karaokê",
+
+  "monitor audio",
+  "monitor de áudio",
+  "monitor de audio",
+
+  "web radio",
+  "web rádio",
+  "radio portatil",
+  "rádio portátil"
+])) return "Audio TV";
+
+
+if (contemAlgum(texto, [
     "luminaria", "luminária", "lustre", "pendente", "pendente led",
     "refletor", "refletor led", "holofote", "lampada", "lâmpada",
     "painel led", "plafon", "spot", "spot led", "fita led",
@@ -1354,7 +1436,26 @@ if (contemAlgum(texto, [
   "kit fan",
 
   "cadeira gamer",
-  "mesa gamer"
+  "mesa gamer",
+// ===== X99 / XEON =====
+
+"x99",
+"x79",
+
+"lga2011",
+"lga2011-3",
+
+"machinist",
+"mllse",
+"huananzhi",
+
+"e5 2670",
+"e5 2680",
+"e5 2690",
+"e5 2696",
+
+"kit x99",
+"kit xeon x99",
 ])) return "Gamer e Hardware";
 
  if (contemAlgum(texto, [
@@ -1535,86 +1636,7 @@ if (contemAlgum(texto, [
   "ryzen 9"
 ])) return "Computadores e Notebook";
 
-if (contemAlgum(texto, [
-  "smart tv",
-  "smarttv",
-  "tv led",
-  "tv 32",
-  "tv 40",
-  "tv 42",
-  "tv 43",
-  "tv 50",
-  "tv 55",
-  "tv 65",
-  "tv 70",
-  "tv 75",
-  "roku tv",
-  "google tv",
-  "android tv",
-  "qled",
-  "oled",
 
-  "soundbar",
-  "home theater",
-  "caixa de som",
-  "caixa bluetooth",
-  "caixa bluetooth portátil",
-  "caixa bluetooth portatil",
-  "caixa amplificada",
-  "party box",
-  "boombox",
-  "mini speaker",
-  "speaker",
-  "som portátil",
-  "som portatil",
-
-  "fone bluetooth",
-  "fone de ouvido",
-  "headphone",
-  "headset",
-  "earbuds",
-  "tws",
-
-  "jbl",
-  "aiwa",
-  "anker",
-  "soundcore",
-
-  "subwoofer",
-  "alto falante",
-  "alto-falante",
-
-  "projetor",
-  "echo dot",
-  "alexa",
-  "fire tv stick",
-  "chromecast",
-  "tv box",
-
-  "mesa de som",
-  "mixer profissional",
-  "mixer audio",
-  "mixer áudio",
-  "amplificador",
-  "receiver",
-
-  "microfone",
-  "microfone sem fio",
-  "microfone condensador",
-  "podcast",
-  "karaoke",
-  "kit karaoke",
-  "kit karaokê",
-
-  "monitor audio",
-  "monitor de áudio",
-  "monitor de audio",
-
-  "web radio",
-  "web rádio",
-  "radio portatil",
-  "rádio portátil"
-])) return "Audio TV";
 
 if (contemAlgum(texto, [
   "cafeteira",
