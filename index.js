@@ -7300,13 +7300,19 @@ for (const usuario of usuarios) {
     continue;
   }
 
-  if (!usuarioTemIntegracaoMarketplace(clienteId, marketplace)) {
-    console.log("🚫 Usuário sem integração configurada:", {
-      clienteId,
-      marketplace
-    });
-    continue;
-  }
+  const marketplaceIntegracao =
+  marketplace === "kabum"
+    ? "awin"
+    : marketplace;
+
+if (!usuarioTemIntegracaoMarketplace(clienteId, marketplaceIntegracao)) {
+  console.log("🚫 Usuário sem integração configurada:", {
+    clienteId,
+    marketplace,
+    marketplaceIntegracao
+  });
+  continue;
+}
 
   console.log("🐶 Farejando marketplace para cliente:", {
     clienteId,
