@@ -145,16 +145,52 @@ if (contemAlgum(texto, [
   ])) return "Climatização e Ventilação";
 
 if (contemAlgum(texto, [
-    "bebedouro esmaltec", "purificador de agua", "purificador de água",
-    "agua gelada", "água gelada", "bebedouro de mesa", "bebedouro coluna"
-  ])) return "Eletrodomésticos";
+  "geladeira",
+  "frigobar",
+  "freezer",
 
+  "microondas",
+  "micro-ondas",
 
-// ===== INFANTIL / ROUPAS E CALÇADOS INFANTIL =====
+  "forno eletrico",
+  "forno elétrico",
+
+  "fogao",
+  "fogão",
+
+  "cooktop",
+
+  "lava loucas",
+  "lava-louças",
+
+  "lava roupas",
+  "lavadora",
+  "máquina de lavar",
+  "maquina de lavar",
+
+  "secadora",
+
+  "bebedouro esmaltec",
+  "purificador de agua",
+  "purificador de água",
+
+  "agua gelada",
+  "água gelada",
+
+  "bebedouro de mesa",
+  "bebedouro coluna",
+
+  "consul",
+  "brastemp",
+  "electrolux",
+  "philco",
+  "midea",
+  "eos",
+  "panasonic"
+])) return "Eletrodomésticos";
+
 
 if (contemAlgum(texto, [
-  "infantil", "juvenil", "menino", "menina", "kids", "kid",
-
   "bota infantil",
   "coturno infantil",
   "botina infantil",
@@ -188,17 +224,18 @@ if (contemAlgum(texto, [
 
   "fantasia infantil",
 
-  "sereia com led",
+  "moda infantil",
 
-  "1 a 16 anos",
+  "roupa para menino",
+  "roupa para menina",
 
-  "criança",
-  "crianca",
+  "calçado infantil",
+  "calcado infantil",
 
-  "bebê infantil",
-  "moda infantil"
+  "kit roupa infantil",
+
+  "1 a 16 anos"
 ])) return "Roupas e Calçados Infantil";
-
 
 if (contemAlgum(texto, [
   "calcinha", "sutia", "sutiã", "lingerie", "cueca feminina",
@@ -466,7 +503,17 @@ if (contemAlgum(texto, [
   "calçado feminino",
 
   "calcado masculino",
-  "calçado masculino"
+  "calçado masculino",
+
+  "mizuno wave",
+  "nike air",
+  "air max",
+  "ultraboost",
+  "gel kayano",
+  "gel nimbus",
+  "corre 3",
+  "corre 4",
+  "corre max"
 ])) return "Tênis e Chinelos";
 
 if (contemAlgum(texto, [
@@ -940,88 +987,6 @@ if (contemAlgum(texto, [
 
 
 if (contemAlgum(texto, [
-  "smart tv",
-  "smarttv",
-  "tv led",
-  "tv 32",
-  "tv 40",
-  "tv 42",
-  "tv 43",
-  "tv 50",
-  "tv 55",
-  "tv 65",
-  "tv 70",
-  "tv 75",
-  "roku tv",
-  "google tv",
-  "android tv",
-  "qled",
-  "oled",
-
-  "soundbar",
-  "home theater",
-  "caixa de som",
-  "caixa bluetooth",
-  "caixa bluetooth portátil",
-  "caixa bluetooth portatil",
-  "caixa amplificada",
-  "party box",
-  "boombox",
-  "mini speaker",
-  "speaker",
-  "som portátil",
-  "som portatil",
-
-  "fone bluetooth",
-  "fone de ouvido",
-  "headphone",
-  "headset",
-  "earbuds",
-  "tws",
-
-  "jbl",
-  "aiwa",
-  "anker",
-  "soundcore",
-
-  "subwoofer",
-  "alto falante",
-  "alto-falante",
-
-  "projetor",
-  "echo dot",
-  "alexa",
-  "fire tv stick",
-  "chromecast",
-  "tv box",
-
-  "mesa de som",
-  "mixer profissional",
-  "mixer audio",
-  "mixer áudio",
-  "amplificador",
-  "receiver",
-
-  "microfone",
-  "microfone sem fio",
-  "microfone condensador",
-  "podcast",
-  "karaoke",
-  "kit karaoke",
-  "kit karaokê",
-
-  "monitor audio",
-  "monitor de áudio",
-  "monitor de audio",
-
-  "web radio",
-  "web rádio",
-  "radio portatil",
-  "rádio portátil"
-])) return "Audio TV";
-
-
-if (contemAlgum(texto, [
     "luminaria", "luminária", "lustre", "pendente", "pendente led",
     "refletor", "refletor led", "holofote", "lampada", "lâmpada",
     "painel led", "plafon", "spot", "spot led", "fita led",
@@ -1099,7 +1064,6 @@ if (contemAlgum(texto, [
   "racao",
   "ração",
   "cachorro",
-  "gato",
   "petisco",
   "bifinho",
   "pedigree",
@@ -1139,7 +1103,6 @@ if (contemAlgum(texto, [
   "cama pet",
   "caminha pet",
   "transportadora pet",
-    // ===== REFORÇO =====
 
   "whiskas",
   "golden",
@@ -1147,7 +1110,6 @@ if (contemAlgum(texto, [
   "granplus",
   "special dog",
   "special cat",
-
   "royal canin",
   "farmina",
 
@@ -1158,13 +1120,16 @@ if (contemAlgum(texto, [
   "osso mastigável",
 
   "mordedor cachorro",
+  "mordedor pet",
 
   "roupa pet",
   "fantasia pet",
+  "roupinha pet",
+  "roupa para cachorro",
+  "roupa para gato",
 
   "shampoo pet",
   "condicionador pet",
-
   "escova pet",
 
   "caixa transporte",
@@ -1193,51 +1158,36 @@ if (contemAlgum(texto, [
 
   "areia higienica",
   "areia higiênica",
-  // REFORÇO
 
-"cao",
-"cão",
-"caes",
-"cães",
+  "gatinho",
+  "gatinha",
 
-"gatinho",
-"gatinha",
+  "snack pet",
+  "snack para cachorro",
+  "snack para gato",
 
-"snack pet",
-"snack para cachorro",
-"snack para gato",
+  "omega 3 pet",
+  "ômega 3 pet",
+  "suplemento pet",
 
-"omega 3 pet",
-"ômega 3 pet",
+  "higienico para caes",
+  "higiênico para cães",
 
-"suplemento pet",
+  "fralda pet",
 
-"higienico para caes",
-"higiênico para cães",
+  "corda mordedor",
+  "brinquedo pet",
 
-"fralda pet",
+  "poste arranhador",
 
-"roupinha pet",
-"roupa para cachorro",
-"roupa para gato",
+  "casa para cachorro",
+  "casa para gato",
 
-"corda mordedor",
-"mordedor pet",
+  "pet trainer",
+  "adestramento",
 
-"brinquedo pet",
-
-"poste arranhador",
-
-"casa para cachorro",
-"casa para gato",
-
-"pet trainer",
-
-"adestramento",
-
-"dog",
-"doguinho",
-"doginho"
+  "doguinho",
+  "doginho"
 ])) return "Pet Shop e Fazendinha";
 
   if (contemAlgum(texto, [
@@ -1436,26 +1386,7 @@ if (contemAlgum(texto, [
   "kit fan",
 
   "cadeira gamer",
-  "mesa gamer",
-// ===== X99 / XEON =====
-
-"x99",
-"x79",
-
-"lga2011",
-"lga2011-3",
-
-"machinist",
-"mllse",
-"huananzhi",
-
-"e5 2670",
-"e5 2680",
-"e5 2690",
-"e5 2696",
-
-"kit x99",
-"kit xeon x99",
+  "mesa gamer"
 ])) return "Gamer e Hardware";
 
  if (contemAlgum(texto, [
@@ -1636,7 +1567,86 @@ if (contemAlgum(texto, [
   "ryzen 9"
 ])) return "Computadores e Notebook";
 
+if (contemAlgum(texto, [
+  "smart tv",
+  "smarttv",
+  "tv led",
+  "tv 32",
+  "tv 40",
+  "tv 42",
+  "tv 43",
+  "tv 50",
+  "tv 55",
+  "tv 65",
+  "tv 70",
+  "tv 75",
+  "roku tv",
+  "google tv",
+  "android tv",
+  "qled",
+  "oled",
 
+  "soundbar",
+  "home theater",
+  "caixa de som",
+  "caixa bluetooth",
+  "caixa bluetooth portátil",
+  "caixa bluetooth portatil",
+  "caixa amplificada",
+  "party box",
+  "boombox",
+  "mini speaker",
+  "speaker",
+  "som portátil",
+  "som portatil",
+
+  "fone bluetooth",
+  "fone de ouvido",
+  "headphone",
+  "headset",
+  "earbuds",
+  "tws",
+
+  "jbl",
+  "aiwa",
+  "anker",
+  "soundcore",
+
+  "subwoofer",
+  "alto falante",
+  "alto-falante",
+
+  "projetor",
+  "echo dot",
+  "alexa",
+  "fire tv stick",
+  "chromecast",
+  "tv box",
+
+  "mesa de som",
+  "mixer profissional",
+  "mixer audio",
+  "mixer áudio",
+  "amplificador",
+  "receiver",
+
+  "microfone",
+  "microfone sem fio",
+  "microfone condensador",
+  "podcast",
+  "karaoke",
+  "kit karaoke",
+  "kit karaokê",
+
+  "monitor audio",
+  "monitor de áudio",
+  "monitor de audio",
+
+  "web radio",
+  "web rádio",
+  "radio portatil",
+  "rádio portátil"
+])) return "Audio TV";
 
 if (contemAlgum(texto, [
   "cafeteira",
@@ -1647,14 +1657,40 @@ if (contemAlgum(texto, [
   "fritadeira sem óleo",
   "fritadeira eletrica", "fritadeira elétrica",
 
-  "microondas",
-
   "liquidificador",
   "mixer",
   "processador alimentos",
   "processador de alimentos",
 
   "batedeira",
+  
+"pipoqueira",
+"popcorn maker",
+
+"espremedor",
+"espremedor de frutas",
+
+"extrator de suco",
+
+"cafeteira expresso",
+"cafeteira espresso",
+
+"chaleira eletrica",
+"chaleira elétrica",
+
+"torradeira",
+
+"maquina waffle",
+"máquina waffle",
+
+"waffle maker",
+
+"crepeira",
+
+"multicooker",
+
+"cooktop eletrico",
+"cooktop elétrico",
 
   "sanduicheira",
   "grill",
@@ -2011,7 +2047,6 @@ if (contemAlgum(texto, [
 
   "tempero",
 
-  "alimento",
   "mercearia",
 
   // reforço
@@ -2101,8 +2136,6 @@ if (contemAlgum(texto, [
 
 "cookies",
 "cookie",
-
-"snack",
 
 "mix de castanhas",
 
