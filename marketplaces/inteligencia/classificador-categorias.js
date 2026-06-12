@@ -799,7 +799,7 @@ if (contemAlgum(texto, [
 "rebitadeira"
 ])) return "Ferramentas";
 
-  
+  if (contemAlgum(texto, [
    // Cozinha
   "jogo de panelas", "kit panela", "frigideira",
   "panela", "caçarola", "caçarola", "fervedor",
