@@ -40,7 +40,7 @@ const buscas = gerarBuscasKabum();
 
 console.log("🔎 Buscas KaBuM:", buscas.slice(0, 10));
 
-for (const termo of buscas.slice(0, 3)) {
+for (const termo of buscas.slice(0, cfg.limiteBuscas || 8)) {
 
   try {
 
