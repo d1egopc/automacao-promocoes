@@ -23,6 +23,7 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     ${marketplace}
   `);
 
+
 // ===== PERFUMARIA / BELEZA TEM PRIORIDADE MÁXIMA =====
 if (
   texto.includes("perfume") ||
@@ -33,24 +34,81 @@ if (
   texto.includes("colonia") ||
   texto.includes("colônia") ||
   texto.includes("deo colonia") ||
-  texto.includes("malbec") ||
+
+  "malbec" ||
   texto.includes("lattafa") ||
   texto.includes("yara") ||
+
   texto.includes("body splash") ||
+
   texto.includes("maquiagem") ||
   texto.includes("skincare") ||
+
   texto.includes("hidratante") ||
   texto.includes("protetor solar") ||
-  texto.includes("shampoo") ||
-  texto.includes("condicionador")
-) {
+  texto.includes("fps 30") ||
+  texto.includes("fps 50") ||
+  texto.includes("fps 60") ||
 
-console.log(
-  "🧠 Perfumaria prioridade:",
-  oferta.titulo || oferta.nome
-);
+  texto.includes("shampoo") ||
+  texto.includes("condicionador") ||
+
+  // ===== REFORÇO =====
+
+  texto.includes("batom") ||
+  texto.includes("gel para sobrancelhas") ||
+  texto.includes("sobrancelha") ||
+  texto.includes("bruma hidratante") ||
+
+  texto.includes("sabonete liquido") ||
+  texto.includes("sabonete líquido") ||
+
+  texto.includes("loção") ||
+  texto.includes("locao") ||
+  texto.includes("lotion") ||
+
+  texto.includes("creme facial") ||
+  texto.includes("creme corporal") ||
+
+  texto.includes("arnica") ||
+  texto.includes("pomada") ||
+
+  texto.includes("óleo de coco") ||
+  texto.includes("oleo de coco") ||
+
+  texto.includes("prancha de cabelo") ||
+  texto.includes("escova secadora") ||
+
+  texto.includes("kit hidratação") ||
+  texto.includes("kit hidratacao") ||
+
+  texto.includes("protetor facial") ||
+  texto.includes("anti oleosidade") ||
+  texto.includes("antioleosidade")
+) {
+  console.log(
+    "🧠 Perfumaria prioridade:",
+    oferta.titulo || oferta.nome
+  );
+
   return "Perfumaria, Farmácia e Beleza";
 }
+
+if (contemAlgum(texto, [
+  "maquina de cortar cabelo",
+  "máquina de cortar cabelo",
+  "maquininha de cortar cabelo",
+  "maquina de barbear",
+  "máquina de barbear",
+  "barbeador",
+  "aparador de pelos",
+  "aparador de barba",
+  "kemei",
+  "kemel",
+  "barbearia",
+  "shaver",
+  "depilador"
+])) return "Perfumaria, Farmácia e Beleza";
 
 
   // ===== CORREÇÕES FORTES ANTES DE TUDO =====
@@ -66,20 +124,6 @@ if (contemAlgum(texto, [
     "bebedouro esmaltec", "purificador de agua", "purificador de água",
     "agua gelada", "água gelada", "bebedouro de mesa", "bebedouro coluna"
   ])) return "Eletrodomésticos";
-
-  if (contemAlgum(texto, [
-    "maquina de cortar cabelo", "máquina de cortar cabelo",
-    "maquininha de cortar cabelo", "maquina de barbear", "máquina de barbear",
-    "barbeador", "aparador de pelos", "aparador de barba",
-    "kemei", "kemel", "barbearia", "shaver", "depilador",
-    "la vie est belle",
-    "elixir",
-    "anasol",
-    "fps",
-    "protetor solar",
-    "protecao solar",
-    "proteção solar"
-  ])) return "Perfumaria, Farmácia e Beleza";
 
 
 // ===== INFANTIL / ROUPAS E CALÇADOS INFANTIL =====
@@ -458,7 +502,78 @@ if (contemAlgum(texto, [
   "elastico exercicio",
   "elástico exercício",
   "albumin protein",
-  "albumin"
+  "albumin",
+
+  // ===== REFORÇO =====
+
+"omega 3",
+"ômega 3",
+
+"termogenico",
+"termogênico",
+
+"multivitaminico",
+"multivitamínico",
+
+"vitamina esportiva",
+
+"isotonico",
+"isotônico",
+
+"carbo gel",
+"gel carboidrato",
+
+"massa muscular",
+
+"ganho de massa",
+
+"protein bar",
+
+"electrolitico",
+"eletrolítico",
+
+"suplemento esportivo",
+
+"kit academia",
+
+"barra fixa",
+
+"roda abdominal",
+
+"ab wheel",
+
+"hand grip",
+"handgrip",
+
+"munhequeira",
+"munhequeira esportiva",
+
+"joelheira esportiva",
+
+"cinta lombar academia",
+
+"camisa ciclismo",
+"bermuda ciclismo",
+
+"oculos ciclismo",
+"óculos ciclismo",
+
+"capacete ciclismo",
+
+"garmin",
+
+"gatorade",
+
+"integralmedica",
+"integralmedica",
+
+"max titanium",
+
+"growth supplements",
+
+"black skull",
+
+"dux nutrition"
 ])) return "Esporte e Suplementos";
 
 
@@ -550,7 +665,6 @@ if (contemAlgum(texto, [
   "bio extratus",
   "wella",
   "eucerin"
-
 ])) return "Perfumaria, Farmácia e Beleza";
 
 
@@ -629,12 +743,64 @@ if (contemAlgum(texto, [
   "kit brocas",
 
   "chave catraca",
-  "catraca"
+  "catraca",
+
+  // ===== REFORÇO FINAL =====
+
+"black decker",
+"black+decker",
+"worker",
+"stanley",
+
+"ferro solda",
+"ferro de solda",
+
+"estacao solda",
+"estação solda",
+
+"rebitador",
+
+"parafuso",
+"kit parafuso",
+
+"bucha parede",
+"bucha nylon",
+
+"escada aluminio",
+"escada alumínio",
+
+"escada dobravel",
+"escada dobrável",
+
+"nivel",
+"nível",
+
+"paquimetro",
+"paquímetro",
+
+"micrometro",
+"micrômetro",
+
+"morsa",
+
+"torno bancada",
+
+"arco serra",
+
+"lamina serra",
+"lâmina serra",
+
+"chave philips",
+"chave phillips",
+"chave de fenda",
+
+"estilete",
+
+"rebitadeira"
 ])) return "Ferramentas";
 
   
-if (contemAlgum(texto, [
-  // Cozinha
+   // Cozinha
   "jogo de panelas", "kit panela", "frigideira",
   "panela", "caçarola", "caçarola", "fervedor",
   "faqueiro", "tramontina", "talheres",
@@ -699,74 +865,53 @@ if (contemAlgum(texto, [
 
   // Utilidades
   "utensilios cozinha",
-  "utensílios cozinha"
-])) return "Casa, Móveis e Decoração";if (contemAlgum(texto, [
-  // Cozinha
-  "jogo de panelas", "kit panela", "frigideira",
-  "panela", "caçarola", "caçarola", "fervedor",
-  "faqueiro", "tramontina", "talheres",
-  "copos", "taças", "tacas", "jogo de copos",
-  "cortador de legumes", "ralador", "fatiador",
-  "marmitas", "potes", "travas hermeticas", "travas herméticas",
-  "formas assadeiras", "assadeira", "forma antiaderente",
-  "crepeira", "maquina de crepe", "máquina de crepe",
-  "garrafa inox", "garrafa termica", "garrafa térmica",
+  "utensílios cozinha",
 
-  // Cama e Banho
-  "cobertor", "manta",
-  "toalhas de banho", "toalha de banho",
-  "colcha", "cobre leito",
+  // Rede e descanso
+"rede",
+"rede de dormir",
+"rede casal",
+"rede solteiro",
 
-  // Decoração
-  "tapete", "cortina", "almofada",
-  "espelho", "adnet",
+// Organização
+"organizador",
+"caixa organizadora",
+"gaveteiro",
 
-  // Móveis
-  "sofa", "sofá",
-  "rack",
-  "painel tv", "painel de tv",
-  "guarda roupa", "guarda-roupa",
-  "roupeiro",
-  "mesa", "cadeira",
+// Lavanderia
+"cesto roupa",
+"cesto de roupa",
+"cesto organizador",
 
-  "cadeira de escritorio",
-  "cadeira de escritório",
-  "cadeira ergonomica",
-  "cadeira ergonômica",
-  "cadeira executiva",
-  "cadeira presidente",
+// Banheiro
+"porta papel higienico",
+"porta papel higiênico",
+"porta toalha",
 
-  "penteadeira",
-  "comoda", "cômoda",
-  "armario", "armário",
+// Cozinha
+"escorredor",
+"escorredor de louça",
+"escorredor de louca",
 
-  "escrivaninha",
-  "nicho",
-  "prateleira",
-  "sapateira",
-  "cabideiro",
-  "cabeceira",
-  "poltrona",
-  "estante",
-  "aparador",
-  "buffet",
-  "criado mudo",
-  "criado-mudo",
+// Torneiras
+"torneira gourmet",
+"misturador monocomando",
+"monocomando",
 
-  // Casa
-  "varal",
-  "lixeira",
-  "guarda chuva",
-  "torneira",
-  "banheiro",
-  "cozinha",
+// Iluminação decorativa
+"abajur",
+"luminaria decorativa",
+"luminária decorativa",
 
-  // Churrasco
-  "kit churrasco",
+ // Organização
+"cesto roupa",
+"cesto de roupa",
+"cesto organizador",
 
-  // Utilidades
-  "utensilios cozinha",
-  "utensílios cozinha"
+// Banheiro
+"porta papel higienico",
+"porta papel higiênico",
+"porta toalha" 
 ])) return "Casa, Móveis e Decoração";
 
 
@@ -777,8 +922,71 @@ if (contemAlgum(texto, [
     "led strip", "tomada", "interruptor", "extensao", "extensão",
     "disjuntor", "sensor de presenca", "sensor de presença",
     "soquete", "bocal", "fio eletrico", "fio elétrico", "cabo eletrico",
-    "cabo elétrico"
-  ])) return "Iluminação e Elétrica";
+    "cabo elétrico",
+    // ===== REFORÇO =====
+
+"arandela",
+
+"trilho eletrificado",
+"trilho de luz",
+
+"perfil led",
+
+"fonte led",
+
+"driver led",
+
+"mangueira led",
+
+"cordao luminoso",
+"cordão luminoso",
+
+"pisca pisca",
+"pisca-pisca",
+
+"abajur",
+
+"luminaria mesa",
+"luminária mesa",
+
+"luminaria escritorio",
+"luminária escritório",
+
+"luminaria solar",
+"luminária solar",
+
+"poste solar",
+
+"energia solar",
+"painel solar",
+
+"fotocelula",
+"fotocélula",
+
+"quadro distribuicao",
+"quadro distribuição",
+
+"contator",
+
+"rele",
+"relé",
+
+"campainha",
+
+"dps eletrico",
+"dps elétrico",
+
+"canaleta eletrica",
+"canaleta elétrica",
+
+"conector eletrico",
+"conector elétrico",
+
+"adaptador tomada",
+
+"regua energia",
+"régua energia"
+])) return "Iluminação e Elétrica";
 
 
 if (contemAlgum(texto, [
@@ -878,7 +1086,52 @@ if (contemAlgum(texto, [
   "granulado higiênico",
 
   "areia higienica",
-  "areia higiênica"
+  "areia higiênica",
+  // REFORÇO
+
+"cao",
+"cão",
+"caes",
+"cães",
+
+"gatinho",
+"gatinha",
+
+"snack pet",
+"snack para cachorro",
+"snack para gato",
+
+"omega 3 pet",
+"ômega 3 pet",
+
+"suplemento pet",
+
+"higienico para caes",
+"higiênico para cães",
+
+"fralda pet",
+
+"roupinha pet",
+"roupa para cachorro",
+"roupa para gato",
+
+"corda mordedor",
+"mordedor pet",
+
+"brinquedo pet",
+
+"poste arranhador",
+
+"casa para cachorro",
+"casa para gato",
+
+"pet trainer",
+
+"adestramento",
+
+"dog",
+"doguinho",
+"doginho"
 ])) return "Pet Shop e Fazendinha";
 
   if (contemAlgum(texto, [
@@ -1260,89 +1513,83 @@ if (contemAlgum(texto, [
 
 if (contemAlgum(texto, [
   "smart tv",
+  "smarttv",
+  "tv led",
+  "tv 32",
+  "tv 40",
+  "tv 42",
   "tv 43",
   "tv 50",
   "tv 55",
   "tv 65",
+  "tv 70",
+  "tv 75",
   "roku tv",
   "google tv",
+  "android tv",
   "qled",
   "oled",
+
   "soundbar",
   "home theater",
   "caixa de som",
+  "caixa bluetooth",
+  "caixa bluetooth portátil",
+  "caixa bluetooth portatil",
+  "caixa amplificada",
   "party box",
+  "boombox",
+  "mini speaker",
+  "speaker",
+  "som portátil",
+  "som portatil",
+
   "fone bluetooth",
   "fone de ouvido",
   "headphone",
   "headset",
   "earbuds",
   "tws",
+
   "jbl",
+  "aiwa",
   "anker",
   "soundcore",
+
   "subwoofer",
+  "alto falante",
+  "alto-falante",
+
   "projetor",
   "echo dot",
   "alexa",
+  "fire tv stick",
+  "chromecast",
+  "tv box",
+
   "mesa de som",
   "mixer profissional",
+  "mixer audio",
+  "mixer áudio",
+  "amplificador",
+  "receiver",
+
   "microfone",
   "microfone sem fio",
+  "microfone condensador",
+  "podcast",
   "karaoke",
-  "speaker",
-  "aiwa",
-  "som portátil",
-  "som portatil",
-    // ===== REFORÇO =====
-
-  "smarttv",
-
-  "tv led",
-  "tv 32",
-  "tv 40",
-  "tv 42",
-  "tv 70",
-  "tv 75",
-  "android tv",
-
-  "mini system",
-  "receiver",
-  "roku tv",
-
-  "caixa bluetooth",
-  "caixa bluetooth portátil",
-  "caixa bluetooth portatil",
-
-  "caixa amplificada",
+  "kit karaoke",
+  "kit karaokê",
 
   "monitor audio",
   "monitor de áudio",
   "monitor de audio",
 
-  "mixer audio",
-  "mixer áudio",
-
   "web radio",
   "web rádio",
-
   "radio portatil",
-  "rádio portátil",
-
-  "amplificador",
-
-  "kit karaoke",
-  "kit karaokê",
-
-  "podcast",
-  "microfone condensador",
-
-  "ring light com microfone",
-
-  "fire tv stick",
-  "chromecast",
-
-  "tv box"
+  "rádio portátil"
 ])) return "Audio TV";
 
 if (contemAlgum(texto, [
@@ -1442,7 +1689,7 @@ if (contemAlgum(texto, [
   "secadora"
 ])) return "Eletrodomésticos";
  
-  if (contemAlgum(texto, [
+if (contemAlgum(texto, [
   "mop", "esfregao", "esfregão",
   "rodo", "vassoura",
   "pá de lixo", "pa de lixo",
@@ -1451,12 +1698,18 @@ if (contemAlgum(texto, [
   "multiuso",
   "desinfetante",
   "detergente",
+  "desengordurante",
 
   "amaciante", "downy",
   "sabao liquido", "sabão líquido",
   "sabao em po", "sabão em pó",
   "lava roupas",
+  "lava-roupas",
   "lava louças", "lava louca",
+
+  "tira manchas",
+  "tira mancha",
+  "removedor de manchas",
 
   "alvejante",
   "agua sanitaria", "água sanitária",
@@ -1464,6 +1717,7 @@ if (contemAlgum(texto, [
 
   "limpa vidro",
   "limpa piso",
+  "limpa pisos",
   "limpa porcelanato",
   "limpa banheiro",
 
@@ -1472,7 +1726,7 @@ if (contemAlgum(texto, [
   "lustra moveis", "lustra móveis",
 
   "pano microfibra",
-  "microfibra",
+  "pano de microfibra",
   "esponja limpeza",
   "esponja multiuso",
 
@@ -1511,13 +1765,97 @@ if (contemAlgum(texto, [
   "caixa térmica pesca"
 ])) return "Pesca e Camping";
 
-  if (contemAlgum(texto, [
-    "moto", "motocicleta", "capacete", "pro tork", "kit led",
-    "osram", "h1 osram", "pneu", "carplay", "multimidia",
-    "multimídia", "som automotivo", "radio automotivo", "rádio automotivo",
-    "camera de re", "câmera de ré", "envelopamento automotivo",
-    "vinil automotivo", "adesivo vinil", "bomba de ar", "inflador de pneus"
-  ])) return "Automotivo";
+if (contemAlgum(texto, [
+  "moto",
+  "motocicleta",
+  "capacete",
+  "pro tork",
+
+  "pneu",
+  "pneu aro",
+  "calota",
+
+  "roda esportiva",
+  "roda automotiva",
+
+  "carplay",
+  "android auto",
+
+  "multimidia",
+  "multimídia",
+
+  "som automotivo",
+  "radio automotivo",
+  "rádio automotivo",
+
+  "camera de re",
+  "câmera de ré",
+
+  "sensor estacionamento",
+  "sensor de estacionamento",
+
+  "retrovisor",
+
+  "farol",
+  "lanterna automotiva",
+
+  "kit led",
+  "lampada automotiva",
+  "lâmpada automotiva",
+
+  "osram",
+  "h1 osram",
+  "h4",
+  "h7",
+
+  "bateria automotiva",
+
+  "carregador veicular",
+
+  "suporte veicular",
+
+  "pelicula automotiva",
+  "película automotiva",
+
+  "envelopamento automotivo",
+  "vinil automotivo",
+  "adesivo vinil",
+
+  "tapete automotivo",
+
+  "capa banco",
+  "capa para banco",
+
+  "volante esportivo",
+
+  "compressor de ar",
+
+  "bomba de ar",
+  "inflador de pneus",
+
+  "macaco hidraulico",
+  "macaco hidráulico",
+
+  "chave de roda",
+
+  "limpador parabrisa",
+  "limpador para-brisa",
+
+  "palheta limpador",
+
+  "oleo motor",
+  "óleo motor",
+
+  "aditivo radiador",
+
+  "escapamento",
+
+  "engate reboque",
+
+  "rack teto",
+
+  "bagageiro teto"
+])) return "Automotivo";
 
 
 if (contemAlgum(texto, [
@@ -1530,6 +1868,9 @@ if (contemAlgum(texto, [
   "vingadores",
   "homem aranha",
   "homem de ferro",
+  "spider man",
+  "spiderman",
+  "miles morales",
 
   "brinquedo",
   "brinquedo infantil",
@@ -1539,6 +1880,7 @@ if (contemAlgum(texto, [
   "carrinho dinossauro",
   "carrinho bate e volta",
   "carrinho controle remoto",
+  "controle remoto infantil",
 
   "bebê reborn",
   "bebe reborn",
@@ -1564,6 +1906,9 @@ if (contemAlgum(texto, [
   "casinha infantil",
 
   "blocos de montar",
+  "bloco de montar",
+  "blocos construção",
+  "blocos construcao",
 
   "pista hot wheels",
 
@@ -1571,7 +1916,28 @@ if (contemAlgum(texto, [
 
   "brinquedo educativo",
 
-  "jogo educativo"
+  "jogo educativo",
+
+  // ===== REFORÇO DA FILA =====
+
+  "dinossauro",
+  "t rex",
+  "t-rex",
+
+  "figura de ação",
+  "figura de acao",
+  "action figure",
+
+  "boneco marvel",
+  "boneco homem aranha",
+
+  "caminhão brinquedo",
+  "caminhao brinquedo",
+
+  "brinquedo stem",
+
+  "kit construção",
+  "kit construcao"
 ])) return "Brinquedos e Artigos Infantis";
 
   if (contemAlgum(texto, [
@@ -1598,8 +1964,6 @@ if (contemAlgum(texto, [
   "sal marinho",
 
   "tempero",
-
-  "gourmet",
 
   "alimento",
   "mercearia",
@@ -1659,7 +2023,50 @@ if (contemAlgum(texto, [
   "kit churrasco gourmet",
 
   "cesta basica",
-  "cesta básica"
+  "cesta básica",
+  // ===== REFORÇO DA FILA =====
+
+"bananinha",
+"banana mania",
+
+"vinho",
+"vinho tinto",
+"vinho branco",
+"vinho rose",
+"vinho rosé",
+"espumante",
+
+"steak seasoning",
+
+"molho barbecue",
+"barbecue",
+
+"azeitona",
+
+"cappuccino",
+
+"bala",
+"bombom",
+
+"doce de leite",
+
+"paçoca",
+"pacoca",
+
+"cookies",
+"cookie",
+
+"snack",
+
+"mix de castanhas",
+
+"suplemento alimentar infantil",
+
+"agua de coco",
+"água de coco",
+
+"isotonico",
+"isotônico",
 ])) return "Alimentos e Mercearia";
 
 console.log("🧠 CATEGORIA NAO IDENTIFICADA:", texto);
