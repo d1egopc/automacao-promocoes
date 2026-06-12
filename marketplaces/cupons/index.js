@@ -200,25 +200,8 @@ console.log("🎟️ URL USADA PELO MOTOR:", url);
 
 const html = response.data;
 
-console.log(
-  "🧪 HTML PRODUTO TEM PDP:",
-  String(html).includes("ui-pdp")
-);
-
-console.log(
-  "🧪 HTML PRODUTO TEM AFFILIATES:",
-  String(html).includes("affiliates-site")
-);
-
-console.log(
-  "🧪 TITULO HTML:",
-  String(html).match(/<title[^>]*>(.*?)<\/title>/i)?.[1]
-);
-
 const cuponsProduto =
   extrairCuponsDoHtmlProdutoML(html);
-
-console.log("🧪 ML CUPONS PRODUTO EXTRAÍDOS:", cuponsProduto);
 
 if (cuponsProduto.length) {
   console.log(
@@ -254,11 +237,6 @@ console.log(
       .trim();
 
     const textoLower = texto.toLowerCase();
-
-console.log("🧪 TEM CUPOM:", textoLower.includes("cupom"));
-console.log("🧪 TEM ECONOMIZE:", textoLower.includes("economize"));
-console.log("🧪 TEM APLICAR CUPOM:", textoLower.includes("aplicar cupom"));
-console.log("🧪 TEM DESCONTO ADICIONAL:", textoLower.includes("desconto adicional"));
 
     const temSinalCupom =
       textoLower.includes("cupom") ||
@@ -358,11 +336,6 @@ async function buscarCuponsPaginaMercadoLivre(contexto = {}) {
     const texto = String(html)
       .replace(/\s+/g, " ")
       .trim();
-
-console.log(
-  "🧪 TRECHO CUPONS ML:",
-  texto.slice(0, 5000)
-);
 
     const cupons = [];
 
