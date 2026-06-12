@@ -101,9 +101,6 @@ for (const participante of participantes) {
     .replaceAll("{grupo}", grupoId)
     .replaceAll("{acao}", acao);
 
-console.log("🧪 DESTINO PRIVADO:", destinoPrivado);
-console.log("🧪 TEXTO FINAL:", textoFinal);
-
     // ANTI DUPLICAÇÃO
 const chaveEvento =
   `${clienteId}:${sessaoId}:${grupoId}:${participante}:${acao}`;
@@ -112,7 +109,7 @@ const agora = Date.now();
 const ultimo =
   eventosMensageiroRecentes.get(chaveEvento) || 0;
 
-if (agora - ultimo < 20 * 1000) {
+if (agora - ultimo < 25 * 1000) {
   console.log("⏭️ Mensageiro ignorado duplicado:", {
     chaveEvento,
     segundosDesdeUltimo: Math.round((agora - ultimo) / 1000)
