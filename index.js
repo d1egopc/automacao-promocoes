@@ -7431,19 +7431,19 @@ await farejador(clienteId, {
 
 // ============================= TESTE MANUAL =========================
 
- setTimeout(async () => {
-   console.log("🪂 TESTE MANUAL ORQUESTRADOR KABUM");
+// setTimeout(async () => {
+  // console.log("🪂 TESTE MANUAL ORQUESTRADOR KABUM");
 
-  const indicekabum =
-    ordemMarketplaces.indexOf("kabum");
+ // const indicekabum =
+   // ordemMarketplaces.indexOf("kabum");
 
-   if (indicekabum >= 0) {
-     indiceMarketplaceAtual = indicekabum;
-   }
+  // if (indicekabum >= 0) {
+    // indiceMarketplaceAtual = indicekabum;
+ //  }
 
-   await rodarProximoMarketplace();
+ //  await rodarProximoMarketplace();
 
- }, 60 * 1000);
+// }, 60 * 1000);
 
  
 
