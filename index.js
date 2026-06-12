@@ -5553,6 +5553,15 @@ try {
   ofertaCliente.nivelScore = resultadoScore.nivel;
   ofertaCliente.descontoScore = resultadoScore.desconto;
   ofertaCliente.motivosScore = resultadoScore.motivos;
+
+    console.log("⭐ SCORE OFERTA:", {
+    titulo: ofertaCliente.titulo || ofertaCliente.nome,
+    score: ofertaCliente.score,
+    nivel: ofertaCliente.nivelScore,
+    motivos: ofertaCliente.motivosScore
+  });
+
+
 } catch (e) {
   console.log("⚠️ Erro ao calcular score:", e.message);
 }
