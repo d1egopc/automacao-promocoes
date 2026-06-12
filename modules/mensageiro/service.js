@@ -1,3 +1,5 @@
+const eventosMensageiroRecentes = new Map();
+
 const {
   getMensageiroCliente,
   setMensageiroCliente
@@ -102,7 +104,28 @@ for (const participante of participantes) {
 console.log("🧪 DESTINO PRIVADO:", destinoPrivado);
 console.log("🧪 TEXTO FINAL:", textoFinal);
 
-     if (imagem) {
+    // ANTI DUPLICAÇÃO
+const chaveEvento =
+  `${clienteId}:${sessaoId}:${grupoId}:${participante}:${acao}`;
+
+const agora = Date.now();
+const ultimo =
+  eventosMensageiroRecentes.get(chaveEvento) || 0;
+
+if (agora - ultimo < 5 * 60 * 1000) {
+  console.log(
+    "⏭️ Mensageiro ignorado duplicado:",
+    chaveEvento
+  );
+  continue;
+}
+
+eventosMensageiroRecentes.set(
+  chaveEvento,
+  agora
+);
+
+      if (imagem) {
   const imagemStr = String(imagem);
 
   if (imagemStr.startsWith("data:image")) {
