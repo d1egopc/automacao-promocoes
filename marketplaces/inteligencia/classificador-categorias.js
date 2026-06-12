@@ -23,8 +23,6 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     ${marketplace}
   `);
 
-console.log("🧠 Categoria definida:", categoriaFinal);
-
 // ===== PERFUMARIA / BELEZA TEM PRIORIDADE MÁXIMA =====
 if (
   texto.includes("perfume") ||
