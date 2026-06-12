@@ -7037,10 +7037,12 @@ const clienteIdMensageiro =
     ? id.split("_sessao")[0]
     : "admin";
 
-console.log("🧭 Cliente mensageiro da sessão:", {
-  sessao: id,
-  clienteIdMensageiro
-});
+if (id.startsWith("user_")) {
+  console.log("🧭 Cliente mensageiro:", {
+    sessao: id,
+    clienteIdMensageiro
+  });
+}
 
 // =============== EVENTO MENSAGEIRO =================
 
