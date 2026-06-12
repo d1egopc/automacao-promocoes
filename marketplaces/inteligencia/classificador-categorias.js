@@ -23,70 +23,92 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     ${marketplace}
   `);
 
-
 // ===== PERFUMARIA / BELEZA TEM PRIORIDADE MÁXIMA =====
-if (
-  texto.includes("perfume") ||
-  texto.includes("edp") ||
-  texto.includes("edt") ||
-  texto.includes("eau de parfum") ||
-  texto.includes("eau de toilette") ||
-  texto.includes("colonia") ||
-  texto.includes("colônia") ||
-  texto.includes("deo colonia") ||
 
- texto.includes("deo colonia") ||
- texto.includes("malbec") ||
- texto.includes("lattafa") ||
- texto.includes("yara") ||
+if (contemAlgum(texto, [
+  "perfume",
+  "edp",
+  "edt",
+  "eau de parfum",
+  "eau de toilette",
 
-  texto.includes("body splash") ||
+  "colonia",
+  "colônia",
+  "deo colonia",
 
-  texto.includes("maquiagem") ||
-  texto.includes("skincare") ||
+  "malbec",
+  "lattafa",
+  "yara",
 
-  texto.includes("hidratante") ||
-  texto.includes("protetor solar") ||
-  texto.includes("fps 30") ||
-  texto.includes("fps 50") ||
-  texto.includes("fps 60") ||
+  "body splash",
 
-  texto.includes("shampoo") ||
-  texto.includes("condicionador") ||
+  "maquiagem",
+  "skincare",
+
+  "hidratante",
+
+  "protetor solar",
+  "protetor facial",
+
+  "fps 30",
+  "fps 50",
+  "fps 60",
+  "fps",
+
+  "shampoo",
+  "condicionador",
 
   // ===== REFORÇO =====
 
-  texto.includes("batom") ||
-  texto.includes("gel para sobrancelhas") ||
-  texto.includes("sobrancelha") ||
-  texto.includes("bruma hidratante") ||
+  "batom",
 
-  texto.includes("sabonete liquido") ||
-  texto.includes("sabonete líquido") ||
+  "gel para sobrancelhas",
+  "sobrancelha",
 
-  texto.includes("loção") ||
-  texto.includes("locao") ||
-  texto.includes("lotion") ||
+  "bruma hidratante",
 
-  texto.includes("creme facial") ||
-  texto.includes("creme corporal") ||
+  "sabonete liquido",
+  "sabonete líquido",
 
-  texto.includes("arnica") ||
-  texto.includes("pomada") ||
+  "loção",
+  "locao",
+  "lotion",
 
-  texto.includes("óleo de coco") ||
-  texto.includes("oleo de coco") ||
+  "creme facial",
+  "creme corporal",
 
-  texto.includes("prancha de cabelo") ||
-  texto.includes("escova secadora") ||
+  "arnica",
+  "pomada",
 
-  texto.includes("kit hidratação") ||
-  texto.includes("kit hidratacao") ||
+  "óleo de coco",
+  "oleo de coco",
 
-  texto.includes("protetor facial") ||
-  texto.includes("anti oleosidade") ||
-  texto.includes("antioleosidade")
-) {
+  "prancha de cabelo",
+  "escova secadora",
+
+  "kit hidratação",
+  "kit hidratacao",
+
+  "anti oleosidade",
+  "antioleosidade",
+
+  // ===== PERFUMES FORTES =====
+
+  "la vie est belle",
+  "elixir",
+
+  // ===== FARMÁCIA =====
+
+  "vitamina c",
+  "colageno",
+  "colágeno",
+
+  "protecao solar",
+  "proteção solar",
+
+  "anti idade",
+  "anti-idade"
+])) {
   console.log(
     "🧠 Perfumaria prioridade:",
     oferta.titulo || oferta.nome
@@ -94,6 +116,7 @@ if (
 
   return "Perfumaria, Farmácia e Beleza";
 }
+
 
 if (contemAlgum(texto, [
   "maquina de cortar cabelo",
