@@ -112,11 +112,11 @@ const agora = Date.now();
 const ultimo =
   eventosMensageiroRecentes.get(chaveEvento) || 0;
 
-if (agora - ultimo < 5 * 60 * 1000) {
-  console.log(
-    "⏭️ Mensageiro ignorado duplicado:",
-    chaveEvento
-  );
+if (agora - ultimo < 20 * 1000) {
+  console.log("⏭️ Mensageiro ignorado duplicado:", {
+    chaveEvento,
+    segundosDesdeUltimo: Math.round((agora - ultimo) / 1000)
+  });
   continue;
 }
 
