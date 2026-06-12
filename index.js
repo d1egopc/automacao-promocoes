@@ -6334,6 +6334,28 @@ const idsPossiveis = [...new Set([
   });
 }
 
+const destinosCliente = destinosPorCliente?.[clienteId] || [];
+
+for (const destino of destinosCliente) {
+  if (destino.conexaoId && idsPossiveis.includes(destino.conexaoId)) {
+    destino.conexaoId = "";
+  }
+
+  if (Array.isArray(destino.sessoes)) {
+    destino.sessoes = destino.sessoes.filter(
+      s => !idsPossiveis.includes(s)
+    );
+  }
+
+  if (Array.isArray(destino.sessoesWhatsapp)) {
+    destino.sessoesWhatsapp = destino.sessoesWhatsapp.filter(
+      s => !idsPossiveis.includes(s)
+    );
+  }
+}
+
+salvarDestinosClientes();
+
     salvarSessoesMeta();
 
     return res.json({
@@ -6389,6 +6411,13 @@ app.post("/reset/:id", async (req, res) => {
       delete destinosPorSessao[id];
     }
 
+    delete gruposPorSessao[id];
+    delete reconectando[id];
+    delete sessoesMeta[id];
+
+    salvarSessoesMeta();
+       
+     
     fs.rmSync("/data/auth_" + id, {
       recursive: true,
       force: true
