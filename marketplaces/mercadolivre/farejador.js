@@ -25,10 +25,6 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
 
   try {
 
-console.log("🐶 ML MÓDULO RODANDO PARA CLIENTE:", clienteId);
-console.log("🧪 ML config recebida?", !!config);
-console.log("🧪 ML ativo?", config?.marketplaces?.mercadolivre?.ativo);
-console.log("🧪 ML integração cliente?", !!integracoesPorCliente?.[clienteId]?.mercadolivre);
 
 if (!config.marketplaces?.mercadolivre?.ativo) {
   console.log("⏸ Mercado Livre desativado. Farejador ignorado.");
@@ -151,8 +147,6 @@ if (html.includes("suspicious-traffic-frontend")) {
 let cupom = "";
 let avisoCupom = "";
         
-        console.log("🧪 TEM MLB?", html.includes("MLB"));
-        console.log("🧪 TEM item?", html.includes("item"));
         console.log("🧪 HTML INICIO:", html.slice(0, 1000));
         
         const cupomMatch =
@@ -187,8 +181,10 @@ console.log("🚨 ML PRODUTOS BUSCA RESUMO:", produtosBusca.map(p => ({
   link: p.link
 })));
 
-console.log("🧪 PRODUTOS ML PARSEADOS:", produtosBusca.length);
-console.log(`🔎 ${termo}: ${produtosBusca.length} produtos`);
+console.log("🔎 Busca ML:", {
+  termo,
+  produtos: produtosBusca.length
+});
 
 for (const itemBusca of produtosBusca) {
   try {
@@ -219,9 +215,6 @@ if (
   continue;
 }
 
-console.log("🧪 ML PRODUTO FINAL:", produto);
-
-console.log("🧪 ML produto via importar:", {
   titulo: produto.titulo,
   precoAtual: produto.precoAtual,
   precoAntigo: produto.precoAntigo,
@@ -351,16 +344,17 @@ const categoriaProduto =
 
     novaOferta = prepararOfertaGlobal(novaOferta);
 
-console.log("🧪 ML oferta pronta antes do filtro:", {
+console.log("📦 Oferta ML pronta:", {
   titulo: novaOferta.titulo,
   preco: novaOferta.precoAtual,
-  categoria: novaOferta.categoria,
-  link: novaOferta.link
+  categoria: novaOferta.categoria
 });
 
  const jaExiste = ofertaJaExiste(novaOferta);
 
-console.log("🧪 ML jaExiste?", jaExiste);
+if (jaExiste) {
+  console.log("♻️ Oferta ML ignorada (duplicada):", novaOferta.titulo);
+}
 
    if (!jaExiste) {
 
@@ -378,15 +372,12 @@ console.log("🧪 ML jaExiste?", jaExiste);
 
   salvarFila(clienteId);
 
-  console.log("🤖 Nova oferta ML:", {
-
-
-        titulo: novaOferta.titulo,
-        preco: novaOferta.precoAtual,
-        precoAntigo: novaOferta.precoAntigo,
-        desconto: Math.round(desconto) + "%",
-        link: novaOferta.link
-      });
+console.log("🤖 Nova oferta ML:", {
+  titulo: novaOferta.titulo,
+  preco: novaOferta.precoAtual,
+  desconto: Math.round(desconto) + "%",
+  categoria: novaOferta.categoria
+});
     }
 
     await new Promise(r =>
