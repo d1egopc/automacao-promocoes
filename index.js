@@ -80,6 +80,10 @@ const {
 const mensageiro = require("./modules/mensageiro");
 const criarRotasMensageiro = require("./modules/mensageiro/routes");
 
+const {
+  calcularScoreOferta
+} = require("./marketplaces/inteligencia/score-oferta");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -5540,6 +5544,18 @@ if (deveIgnorarOfertaRepetida(ofertaCliente)) {
 
 ofertaCliente.status = ofertaCliente.status || "pendente";
 ofertaCliente.statusDetalhe = ofertaCliente.statusDetalhe || "Na fila";
+
+// ⭐ SCORE V1
+try {
+  const resultadoScore = calcularScoreOferta(ofertaCliente);
+
+  ofertaCliente.score = resultadoScore.score;
+  ofertaCliente.nivelScore = resultadoScore.nivel;
+  ofertaCliente.descontoScore = resultadoScore.desconto;
+  ofertaCliente.motivosScore = resultadoScore.motivos;
+} catch (e) {
+  console.log("⚠️ Erro ao calcular score:", e.message);
+}
 
 registrarOfertaVista(ofertaCliente);
 
