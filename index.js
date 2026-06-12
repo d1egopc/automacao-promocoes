@@ -1313,78 +1313,73 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
       return false;
     }
 
-    // ================= WHATSAPP =================
+ 
+// =========================== WHATSAPP ================================
 
-    if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
-
-    
-     
-    const sock = sessoes[destino.conexaoId];
+if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
+  const sock = sessoes[destino.conexaoId];
 
   if (!sock) {
-  console.log("❌ Sessão não encontrada:", destino.conexaoId);
-  return false;
-}
-    
-  if (destino.tipoMidia === "texto" || !oferta.imagem) {
-  await sock.sendMessage(grupo, { text: mensagem });
-} else {
-  await sock.sendMessage(grupo, {
-    image: {
-      url: corrigirImagemUrl(oferta.imagem) || oferta.imagem
-    },
-    caption: mensagem
-  });
-}
+    console.log("❌ Sessão não encontrada:", destino.conexaoId);
+    return false;
+  }
 
-debitarCreditos(clienteId, 1);
+  const grupos = (destino.gruposWhatsapp || [])
+    .map(g => {
+      if (!g) return null;
+      if (typeof g === "string") return g;
+      return g.id || g.value || g.grupoId || null;
+    })
+    .filter(Boolean);
 
-        
-      if (!usuarioTemCreditos(clienteId, 1)) {
+  if (!grupos.length) {
+    console.log("⚠️ Destino WhatsApp sem grupos válidos:", destino.nome);
+    return false;
+  }
+
+  for (const grupo of grupos) {
+    if (!usuarioTemCreditos(clienteId, 1)) {
       console.log("🚫 Sem créditos:", clienteId);
-      continue;
-      }
-
-      debitarCreditos(clienteId, 1);            
-
-        if (destino.tipoMidia === "texto" || !oferta.imagem) {
-          await sock.sendMessage(grupo, { text: mensagem });
-        } else {
-          await sock.sendMessage(grupo, {
-            image: {
-              url: corrigirImagemUrl(oferta.imagem) || oferta.imagem
-            },
-            caption: mensagem
-          });
-        }
-
-        console.log("✅ Enviado WhatsApp:", {
-          clienteId,
-          destino: destino.nome,
-          grupo
-        });
-
-        oferta.destinosEnviados = oferta.destinosEnviados || [];
-        oferta.destinosEnviados.push({
-          clienteId,
-          nome: destino.nome || "Destino",
-          tipo: "whatsapp",
-          grupo,
-          creditos: 1,
-          dataEnvio: new Date().toLocaleString("pt-BR", {
-            timeZone: "America/Sao_Paulo"
-          })
-        });
-
-      await new Promise(r => setTimeout(r, 3000));
-      }
-
-      if (grupos.length) {
-        return true;
-      }
-
       return false;
     }
+
+    if (destino.tipoMidia === "texto" || !oferta.imagem) {
+      await sock.sendMessage(grupo, { text: mensagem });
+    } else {
+      await sock.sendMessage(grupo, {
+        image: {
+          url: corrigirImagemUrl(oferta.imagem) || oferta.imagem
+        },
+        caption: mensagem
+      });
+    }
+
+    debitarCreditos(clienteId, 1);
+
+    console.log("✅ Enviado WhatsApp:", {
+      clienteId,
+      destino: destino.nome,
+      grupo
+    });
+
+    oferta.destinosEnviados = oferta.destinosEnviados || [];
+    oferta.destinosEnviados.push({
+      clienteId,
+      nome: destino.nome || "Destino",
+      tipo: "whatsapp",
+      grupo,
+      creditos: 1,
+      dataEnvio: new Date().toLocaleString("pt-BR", {
+        timeZone: "America/Sao_Paulo"
+      })
+    });
+
+    await new Promise(r => setTimeout(r, 3000));
+  }
+
+  return true;
+}
+
 
     // ================= ENVIO TELEGRAM =================
 
