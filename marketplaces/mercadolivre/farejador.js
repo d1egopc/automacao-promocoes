@@ -214,14 +214,6 @@ if (
   console.log("⏭️ ML ignorado sem preço válido:", produto.titulo || link);
   continue;
 }
-
-  titulo: produto.titulo,
-  precoAtual: produto.precoAtual,
-  precoAntigo: produto.precoAntigo,
-  imagem: !!produto.imagem,
-  link: produto.linkOriginal
-});
-
     if (!produto.precoAtual && itemBusca.precoAtual) {
       produto.precoAtual = itemBusca.precoAtual;
     }
