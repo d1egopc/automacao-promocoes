@@ -684,7 +684,7 @@ if (fs.existsSync(SESSOES_FILE)) {
 
 
 if (!usuarios.length) {
-console.log("🧪 CRIANDO ADMIN PADRÃO");
+console.log("👑 CRIANDO ADMIN PADRÃO");
   usuarios = [
  {
   id: "admin",
@@ -1252,16 +1252,13 @@ function destinoAceitaOferta(destino, oferta) {
       categoriaOferta.includes(cat)
     );
 
-  console.log("🧪 CHECK DESTINO:", {
-    nome: destino.nome,
-    marketplaceOferta,
-    marketplacesDestino,
-    aceitaMarketplace,
-    categoriaClassificada,
-    categoriaOferta,
-    categoriasDestino,
-    aceitaCategoria
-  });
+console.log("🎯 Check destino:", {
+  nome: destino.nome,
+  marketplaceOferta,
+  aceitaMarketplace,
+  categoriaOferta,
+  aceitaCategoria
+});
 
   return aceitaMarketplace && aceitaCategoria;
 }
@@ -1316,10 +1313,7 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
 
     if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
-      console.log(
-      "🧪 DESTINO COMPLETO PARA ENVIO:",
-      JSON.stringify(destino, null, 2)
-      );   
+    
      
     const sock = sessoes[destino.conexaoId];
 
@@ -1595,21 +1589,10 @@ const todosDestinos = Array.isArray(destinosCliente)
   ? destinosCliente.filter(d => d?.ativo !== false)
   : [];
 
-console.log("🧪 DESTINOS RESUMO:", todosDestinos.map(d => ({
-  nome: d.nome,
-  tipo: d.tipo,
-  ativo: d.ativo,
-  conexaoId: d.conexaoId,
-  grupos: d.gruposWhatsapp?.length || 0,
-  telegram: d.telegramDestinos?.length || 0,
-  marketplaces: d.marketplaces,
-  categorias: d.categorias?.length || 0
-})));
 
-console.log("🧪 OFERTA PARA ROTEAR:", {
+console.log("📦 Oferta para rotear:", {
   titulo: oferta.titulo || oferta.nome,
   marketplace: oferta.marketplace,
-  loja: oferta.loja,
   categoria: oferta.categoria,
   status: oferta.status
 });
@@ -1619,10 +1602,6 @@ const destinosInteligentes =
     destinoAceitaOferta(destino, oferta)
   );
 
-console.log("🧪 DESTINOS APROVADOS:", destinosInteligentes.map(d => ({
-  nome: d.nome,
-  tipo: d.tipo
-})));
 
 console.log(
   "🧠 Destinos inteligentes compatíveis:",
@@ -1944,7 +1923,7 @@ app.post("/fila", (req, res) => {
 // ================= ENVIO MANUAL =================
 
 app.post("/enviar-manual", async (req, res) => {
-  console.log("🧪 /enviar-manual BODY:", req.body);
+ console.log("📤 Envio manual recebido:", req.body?.titulo);
 
   try {
     const body = req.body || {};
@@ -2937,14 +2916,6 @@ function getPlanoUsuario(req) {
 function usuarioTemRecurso(req, recurso) {
   const usuario = getUsuarioAtual(req);
 
-console.log("🧪 RECURSO CHECK:", {
-  clienteId: getClienteId(req),
-  recurso,
-  usuarioId: usuario?.id,
-  papel: usuario?.papel,
-  plano: usuario?.plano
-});
-
   if (!usuario) return false;
 
   if (usuario.papel === "admin_master") {
@@ -3646,15 +3617,9 @@ async function gerarDeepLinkAwin(urlOriginal, clienteId = "admin") {
 
   const { publisherId, apiToken, advertiserId } = credenciais;
 
-console.log("🧪 AWIN DEEPLINK CONFIG:", {
-  clienteId,
-  temPublisherId: !!publisherId,
-  temApiToken: !!apiToken,
-  temAdvertiserId: !!advertiserId,
-  advertiserId,
-  destino: urlOriginal
-});
-
+if (!publisherId || !apiToken || !advertiserId) {
+  console.log("⚠️ AWIN sem credenciais:", clienteId);
+}
   if (!publisherId || !apiToken || !advertiserId) {
     throw new Error("Awin sem publisherId, apiToken ou advertiserId configurado.");
   }
@@ -3674,7 +3639,7 @@ console.log("🧪 AWIN DEEPLINK CONFIG:", {
     }
   );
 
-console.log("🧪 AWIN LINKBUILDER RESPOSTA:", response.data);
+console.log("🔗 AWIN Deeplink OK");
 
   return (
     response.data?.shortUrl ||
@@ -3720,11 +3685,7 @@ app.post("/awin/gerar-link", async (req, res) => {
 
     const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
 
-    console.log("🧪 AWIN LINK GERADO:", {
-      clienteId,
-      urlOriginal: url,
-      linkAfiliado
-    });
+  console.log("🔗 AWIN link gerado com sucesso");
 
     if (!linkAfiliado) {
       return res.status(400).json({
@@ -4083,9 +4044,6 @@ async function buscarCsrfTokenMercadoLivre(cookies) {
     return;
     }
 
-    console.log("🧪 HTML INICIO:");
-    console.log(html.slice(0, 3000)); 
-
     const patterns = [
       /x-csrf-token["']?\s*[:=]\s*["']([^"']+)["']/i,
       /csrfToken["']?\s*[:=]\s*["']([^"']+)["']/i,
@@ -4154,7 +4112,7 @@ if (String(url || "").includes("meli.la")) {
 
     const data = await response.json().catch(() => null);
 
-    console.log("ML AFILIADO RESPONSE:", JSON.stringify(data));
+  console.log("🔗 ML afiliado respondeu");
 
     if (!response.ok) {
       console.log("ML AFILIADO ERRO STATUS:", response.status);
@@ -4277,7 +4235,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
 
     const data = await response.json();
 
-    console.log("ALIEXPRESS API RESPONSE:", JSON.stringify(data));
+console.log("🔗 AliExpress produto encontrado");
 
     const result =
       data?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result ||
@@ -4528,8 +4486,7 @@ const response = await fetch(urlConsulta, {
 
     const html = await response.text();
 
-    console.log("🧪 HTML MAGALU:", html.slice(0, 2000));
-
+ 
     const titulo =
       html.match(/<title>(.*?)<\/title>/i)?.[1]
         ?.replace(" | Magazine Luiza", "")
@@ -4642,8 +4599,6 @@ async function buscarProdutosAliExpressAPI(termo) {
   });
 
   const data = await response.json();
-
-  console.log("🧪 ALI API RESPONSE:", JSON.stringify(data).slice(0, 1000));
 
   const lista =
     data?.aliexpress_affiliate_product_query_response?.resp_result?.result?.products?.product ||
@@ -5122,7 +5077,7 @@ async function gerarLinkCurtoAliExpress(urlOriginal, credenciais = {}) {
 
     const data = await response.json();
 
-    console.log("🔗 ALI LINK GENERATE RESPONSE:", JSON.stringify(data));
+   console.log("🔗 Ali link");
 
     const linkGerado =
       data?.aliexpress_affiliate_link_generate_response?.resp_result?.result?.promotion_links?.promotion_link?.[0]?.promotion_link ||
@@ -5381,12 +5336,6 @@ function normalizarSessaoId(clienteId, id = "sessao1") {
 // ============== HELPERS DISTRIBUIDOR OFERTAS ==================================
 
 function usuarioPodeReceberMarketplace(usuario, marketplace) {
-  console.log("🔥 PLANO MARKETPLACE:", {
-    clienteId: usuario?.id,
-    plano: usuario?.plano,
-    papel: usuario?.papel,
-    marketplace: normalizarTexto(marketplace || "")
-  });
 
   if (!usuario?.ativo) return false;
 
@@ -5396,21 +5345,7 @@ function usuarioPodeReceberMarketplace(usuario, marketplace) {
 
   const plano = getPlanoPorNome(usuario.plano) || {};
 
-console.log("🧪 PLANO RESOLVIDO:", {
-  clienteId: usuario.id,
-  planoUsuario: usuario.plano,
-  planoEncontrado: plano?.nome,
-  marketplaces: plano?.marketplaces
-});
-
   const marketplacesLiberados = plano.marketplaces || [];
-
-  console.log("🧪 MARKETPLACES LIBERADOS:", {
-    clienteId: usuario.id,
-    plano: usuario.plano,
-    marketplace: normalizarTexto(marketplace || ""),
-    marketplacesLiberados
-  });
 
   return marketplacesLiberados.includes(
     normalizarTexto(marketplace || "")
@@ -5726,14 +5661,6 @@ console.log("✅ Oferta distribuída para cliente:", {
               precoAntigoNumero > precoNumero
                 ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
                 : Number(String(descontoTexto).replace(/\D/g, "")) || 0;
-
-            console.log("🧪 PRODUTO ALI API:", {
-              titulo,
-              precoAtual,
-              precoAntigo,
-              desconto: Math.round(desconto) + "%",
-              link: link?.slice(0, 80)
-            });
 
             const tituloLower = titulo.toLowerCase();
 
@@ -6087,8 +6014,6 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
 
     console.log("📦 Produtos no feed Awin:", produtos.length);
     
-    console.log("🧪 PRIMEIRO PRODUTO AWIN:", produtos[0]);
-
     let adicionadas = 0;
     let ofertasEncontradas = [];
 
@@ -6258,7 +6183,10 @@ app.get("/sessoes", (req, res) => {
 });
 
 app.post("/sessoes", (req, res) => {
-   console.log("🧪 BODY NOVA SESSÃO:", req.body);
+   console.log("📱 Nova sessão solicitada:", {
+  nome: req.body?.nome,
+  id: req.body?.id
+});
 
   const clienteId = getClienteId(req);
 
@@ -6750,13 +6678,12 @@ app.get("/qr/:id", (req, res) => {
 
   const id = normalizarSessaoId(clienteId, idOriginal);
 
-  console.log("🧪 BUSCANDO QR:", {
-    clienteId,
-    idOriginal,
-    id,
-    temQr: !!qrCodes[id],
-    status: statusSessao[id]
-  });
+console.log("📲 Buscando QR:", {
+  clienteId,
+  id,
+  temQr: !!qrCodes[id],
+  status: statusSessao[id]
+});
 
   if (!qrCodes[id]) {
     return res.json({
@@ -7177,11 +7104,6 @@ async function testarAwinProdutos() {
       timeout: 15000
     });
 
-    console.log(
-      "🧪 AWIN PROGRAMAS:",
-      JSON.stringify(response.data, null, 2)
-    );
-
   } catch (e) {
 
     console.log(
@@ -7322,11 +7244,6 @@ let indiceMarketplaceAtual = 0;
 let farejadorRodando = false;
 
 async function rodarProximoMarketplace() {
-  console.log("🧪 ORQUESTRADOR TENTOU RODAR", {
-    farejadorRodando,
-    automacaoAtiva: config.automacaoAtiva,
-    horarioOk: podeRodarAgora()
-  });
 
 // Farejador global roda apenas no ADMIN MASTER
 const admin = usuarios.find(u => u.papel === "admin_master");
@@ -7352,10 +7269,6 @@ if (!admin) {
 
   const cfg = config.marketplaces?.[marketplace];
 
-  console.log("🧪 ORQUESTRADOR CHECK:", {
-    marketplace,
-    ativo: cfg?.ativo
-  });
 
   if (!cfg?.ativo) {
     console.log(`⏭️ ${marketplace} desativado. Pulando.`);
@@ -7406,19 +7319,6 @@ console.log("🚀 CHAMANDO FAREJADOR:", {
   funcao: typeof farejador
 });
 
-console.log("🧪 ORQUESTRADOR importarAmazon:", typeof importarAmazon);
-
-console.log("🧪 DEPS ORQUESTRADOR:", {
-  marketplace,
-  tipoImportadorKabum: typeof importarProdutoKabumViaAwin
-});
-
-console.log("🧪 ORQUESTRADOR importarAmazon:", typeof importarAmazon);
-
-console.log("🧪 DEPS ORQUESTRADOR:", {
-  marketplace,
-  tipoImportadorKabum: typeof importarProdutoKabumViaAwin
-});
 
 await farejador(clienteId, {
   config,
