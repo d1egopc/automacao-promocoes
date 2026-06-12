@@ -23,7 +23,7 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     ${marketplace}
   `);
 
-console.log("🧪 CLASSIFICANDO CATEGORIA:", texto);
+console.log("🧠 Categoria definida:", categoriaFinal);
 
 // ===== PERFUMARIA / BELEZA TEM PRIORIDADE MÁXIMA =====
 if (
@@ -46,7 +46,11 @@ if (
   texto.includes("shampoo") ||
   texto.includes("condicionador")
 ) {
-console.log("✅ CAIU EM PERFUMARIA PRIORIDADE:", oferta.titulo || oferta.nome);
+
+console.log(
+  "🧠 Perfumaria prioridade:",
+  oferta.titulo || oferta.nome
+);
   return "Perfumaria, Farmácia e Beleza";
 }
 
