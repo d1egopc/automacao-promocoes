@@ -1,4 +1,4 @@
-const {
+﻿const {
   cortarTitulo,
   formatarPreco,
   normalizarPreco,
@@ -26,6 +26,19 @@ function formatarFaixaPreco(valor = "") {
   return formatarPreco(texto);
 }
 
+function montarLinhaAplicarCupom(oferta = {}) {
+  const cupom = String(oferta.cupom || "").trim();
+
+  return cupom ? `\uD83C\uDFAB Aplique o cupom ${cupom} no carrinho.` : "";
+}
+
+function montarBlocoPreco({ precoAtual = "", precoAntigo = "", variacao = false } = {}) {
+  return [
+    precoAntigo ? `\u274C De: ${precoAntigo}` : "",
+    variacao ? `\u2705 Pre\u00E7o com varia\u00E7\u00E3o: ${precoAtual}` : precoAtual ? `\u2705 Por: ${precoAtual}` : ""
+  ].filter(Boolean).join("\n");
+}
+
 function montarLegendaOferta(oferta = {}) {
   const titulo = cortarTitulo(oferta.titulo || oferta.nome || "Oferta", 120);
   const precoAtual = formatarPreco(oferta.precoAtual || oferta.preco);
@@ -33,15 +46,17 @@ function montarLegendaOferta(oferta = {}) {
   const desconto = montarLinhaDesconto(oferta);
   const parcelamento = montarLinhaParcelamento(oferta);
   const cupom = montarLinhaCupom(oferta);
+  const aplicarCupom = montarLinhaAplicarCupom(oferta);
+  const blocoPreco = montarBlocoPreco({ precoAtual, precoAntigo });
 
   return removerLinhasVazias([
-    `🛍️ ${titulo}`,
-    precoAtual ? `✅ Por: ${precoAtual}` : "",
-    precoAntigo ? `💰 De: ${precoAntigo}` : "",
-    desconto ? `🔥 ${desconto}` : "",
+    `\uD83D\uDD25 ${titulo}`,
+    blocoPreco,
+    desconto ? `\uD83D\uDD25 ${desconto}` : "",
     parcelamento,
     cupom,
-    montarLinkCompra(oferta)
+    montarLinkCompra(oferta),
+    aplicarCupom
   ]);
 }
 
@@ -56,20 +71,22 @@ function montarLegendaShopee(oferta = {}) {
   const desconto = temVariacao ? "" : montarLinhaDesconto(oferta);
   const parcelamento = montarLinhaParcelamento(oferta);
   const cupom = montarLinhaCupom(oferta);
+  const aplicarCupom = montarLinhaAplicarCupom(oferta);
+  const blocoPreco = montarBlocoPreco({
+    precoAtual,
+    precoAntigo,
+    variacao: temVariacao
+  });
 
   return removerLinhasVazias([
-    `🛍️ ${titulo}`,
-    precoAntigo ? `💰 De: ${precoAntigo}` : "",
-    temVariacao
-      ? `✅ Preço com variação: ${precoAtual}`
-      : precoAtual
-        ? `✅ Por: ${precoAtual}`
-        : "",
-    temVariacao ? "ℹ️ O valor pode mudar conforme cor, tamanho ou variação escolhida na Shopee." : "",
-    desconto ? `🔥 ${desconto}` : "",
+    `\uD83D\uDD25 ${titulo}`,
+    blocoPreco,
+    temVariacao ? "\u2139\uFE0F O valor pode mudar conforme cor, tamanho ou varia\u00E7\u00E3o escolhida na Shopee." : "",
+    desconto ? `\uD83D\uDD25 ${desconto}` : "",
     parcelamento,
     cupom,
-    montarLinkCompra(oferta)
+    montarLinkCompra(oferta),
+    aplicarCupom
   ]);
 }
 
@@ -97,12 +114,7 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
     return montarLegendaOferta(oferta);
   }
 
-  return oferta.mensagem || oferta.texto || [
-    oferta.titulo || oferta.nome || "Oferta",
-    oferta.precoAtual || oferta.preco ? `Preço: ${oferta.precoAtual || oferta.preco}` : "",
-    oferta.precoAntigo ? `De: ${oferta.precoAntigo}` : "",
-    oferta.linkAfiliado || oferta.link || ""
-  ].filter(Boolean).join("\n");
+  return oferta.mensagem || oferta.texto || montarLegendaOferta(oferta);
 }
 
 module.exports = {

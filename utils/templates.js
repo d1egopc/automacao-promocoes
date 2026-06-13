@@ -1,4 +1,4 @@
-function cortarTitulo(titulo = "", limite = 120) {
+﻿function cortarTitulo(titulo = "", limite = 120) {
   const texto = String(titulo || "Oferta").replace(/\s+/g, " ").trim();
 
   if (texto.length <= limite) return texto;
@@ -54,19 +54,21 @@ function formatarPreco(valor) {
 function montarLinhaCupom(oferta = {}) {
   const cupom = String(oferta.cupom || "").trim();
   const avisoCupom = String(oferta.avisoCupom || "").trim();
+  const iconeCupom = "\uD83C\uDF9F\uFE0F";
 
-  if (cupom) return `🎟️ Cupom: ${cupom}`;
-  if (avisoCupom) return avisoCupom.startsWith("🎟️") ? avisoCupom : `🎟️ ${avisoCupom}`;
+  if (cupom) return `${iconeCupom} Cupom: ${cupom}`;
+  if (avisoCupom) return avisoCupom.startsWith(iconeCupom) ? avisoCupom : `${iconeCupom} ${avisoCupom}`;
 
   return "";
 }
 
 function montarLinhaParcelamento(oferta = {}) {
   const parcelamento = String(oferta.parcelamento || "").trim();
+  const iconeParcelamento = "\uD83D\uDCB3";
 
   if (!parcelamento) return "";
 
-  return parcelamento.startsWith("💳") ? parcelamento : `💳 ${parcelamento}`;
+  return parcelamento.startsWith(iconeParcelamento) ? parcelamento : `${iconeParcelamento} ${parcelamento}`;
 }
 
 function montarLinhaDesconto(oferta = {}) {
@@ -105,7 +107,7 @@ function removerLinhasVazias(linhas = [], separador = "\n\n") {
 function montarLinkCompra(oferta = {}) {
   const link = oferta.linkAfiliado || oferta.link || oferta.linkOriginal || "";
 
-  return link ? `🛒 Comprar:\n${link}` : "";
+  return link ? `\uD83D\uDD17 Confira aqui:\n${link}` : "";
 }
 
 function planoPermiteTemplatePersonalizado(plano = {}) {
