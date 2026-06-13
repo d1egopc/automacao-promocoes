@@ -587,7 +587,8 @@ function criarPlanosPadrao() {
         linkOptimus: false,
         analytics: false,
         cupomInteligente: false,
-        campanhas: true
+        campanhas: true,
+        templatePersonalizado: false
       },
 
       atualizadoEm: new Date().toISOString()
@@ -623,7 +624,8 @@ function criarPlanosPadrao() {
         analytics: true,
         cupomInteligente: true,
         campanhas: false,
-        mensageiro: false
+        mensageiro: false,
+        templatePersonalizado: false
       },
 
       atualizadoEm: new Date().toISOString()
@@ -661,7 +663,8 @@ function criarPlanosPadrao() {
         analytics: true,
         cupomInteligente: true,
         adminAvancado: true,
-        campanhas: true
+        campanhas: true,
+        templatePersonalizado: false
       },
 
       atualizadoEm: new Date().toISOString()
@@ -2353,7 +2356,8 @@ recursos: {
   analytics: !!body.recursos?.analytics,
   cupomInteligente: !!body.recursos?.cupomInteligente,
   campanhas: !!body.recursos?.campanhas,
-  mensageiro: !!body.recursos?.mensageiro
+  mensageiro: !!body.recursos?.mensageiro,
+  templatePersonalizado: !!body.recursos?.templatePersonalizado
 },
 
   atualizadoEm: new Date().toISOString()
