@@ -1,5 +1,11 @@
 // ================= FAREJADOR SHOPEE =================
 
+const {
+  extrairCuponsShopeeDoHtml,
+  detectarAvisoCupomShopee,
+  escolherCupomParaOfertaShopee
+} = require("./cupons");
+
 async function farejarShopee(clienteId = "admin", deps = {}) {
 
 const {
@@ -20,11 +26,11 @@ const {
 try {
 
   if (!config.marketplaces?.shopee?.ativo) {
-    console.log("⏸ Shopee desativada. Farejador ignorado.");
+    console.log("[SHOPEE] Shopee desativada. Farejador ignorado.");
     return;
   }
 
-  console.log("🛍️ Farejando ofertas Shopee...");
+  console.log("[SHOPEE] Farejando ofertas Shopee...");
 
   const produtos = await buscarOfertasShopee(clienteId, {
     config,
@@ -33,11 +39,11 @@ try {
 
 
     if (!Array.isArray(produtos)) {
-      console.log("❌ Shopee não retornou array");
+      console.log("[SHOPEE] Shopee no retornou array");
       return;
     }
 
-    console.log(`🔎 ${produtos.length} produtos Shopee encontrados`);
+    console.log(`[SHOPEE] ${produtos.length} produtos Shopee encontrados`);
 
     let adicionadasNestaRodada = 0;
     let ofertasEncontradas = [];
@@ -89,6 +95,44 @@ let novaOferta = {
 
         novaOferta = prepararOfertaGlobal(novaOferta);
 
+        const htmlShopee =
+          item.html ||
+          item.rawHtml ||
+          item.htmlProduto ||
+          item.pageHtml ||
+          item.productHtml ||
+          "";
+
+        if (htmlShopee) {
+          const cuponsShopee = extrairCuponsShopeeDoHtml(htmlShopee);
+          const avisoShopee = detectarAvisoCupomShopee(htmlShopee, novaOferta);
+          const dadosExtraidos = avisoShopee
+            ? [...cuponsShopee, avisoShopee]
+            : cuponsShopee;
+          const cupomOferta = escolherCupomParaOfertaShopee(
+            novaOferta,
+            dadosExtraidos
+          );
+
+          if (cupomOferta?.cupom) {
+            novaOferta.cupom = cupomOferta.cupom;
+            novaOferta.tipoCupom = cupomOferta.tipoCupom || "";
+            novaOferta.avisoCupom =
+              cupomOferta.avisoCupom || novaOferta.avisoCupom || "";
+
+            if (cupomOferta.cupomUrl) {
+              novaOferta.cupomUrl = cupomOferta.cupomUrl;
+            }
+          } else if (cupomOferta?.avisoCupom) {
+            novaOferta.tipoCupom = cupomOferta.tipoCupom || "";
+            novaOferta.avisoCupom = cupomOferta.avisoCupom;
+
+            if (cupomOferta.cupomUrl) {
+              novaOferta.cupomUrl = cupomOferta.cupomUrl;
+            }
+          }
+        }
+
         const jaExiste = fila.some(o =>
           o.link === novaOferta.link ||
           o.titulo === novaOferta.titulo
@@ -99,14 +143,14 @@ let novaOferta = {
         ofertasEncontradas.push(novaOferta);
         adicionadasNestaRodada++;
 
-        console.log("🛍️ Nova oferta Shopee:", {
+        console.log("[SHOPEE] Nova oferta Shopee:", {
           titulo: novaOferta.titulo,
           preco: novaOferta.precoAtual,
           desconto: desconto + "%"
         });
 
         if (adicionadasNestaRodada >= limitePorRodada) {
-          console.log("🛑 Limite Shopee atingido");
+          console.log("[SHOPEE] Limite Shopee atingido");
           break;
         }
 
@@ -115,7 +159,7 @@ let novaOferta = {
         );
 
       } catch (e) {
-        console.log("❌ erro item Shopee:", e.message);
+        console.log("[ERRO] [SHOPEE] erro item Shopee:", e.message);
       }
     }
 
@@ -136,10 +180,10 @@ let novaOferta = {
    await distribuirOfertaParaClientes(oferta);
    }
 
-    console.log(`✅ Shopee finalizado. Adicionadas: ${adicionadasNestaRodada}`);
+    console.log(`[SHOPEE] Shopee finalizado. Adicionadas: ${adicionadasNestaRodada}`);
 
   } catch (e) {
-    console.log("❌ erro farejador Shopee:", e.message);
+    console.log("[ERRO] [SHOPEE] erro farejador Shopee:", e.message);
   }
 }
 
