@@ -173,6 +173,10 @@ function montarMensagemOferta(oferta = {}) {
     return montarLegendaShopee(oferta);
   }
 
+  if (marketplace === "mercadolivre" || marketplace === "mercado_livre") {
+    return montarLegendaOferta(oferta);
+  }
+
   return oferta.mensagem || oferta.texto || [
     oferta.titulo || oferta.nome || "Oferta",
     oferta.precoAtual || oferta.preco ? `Preço: ${oferta.precoAtual || oferta.preco}` : "",
