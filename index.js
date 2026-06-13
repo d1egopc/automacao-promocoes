@@ -1588,148 +1588,12 @@ if (!sessoes[idSessao]) {
 
     console.log("DESTINOS PARA ENVIO:", destinos);
 
-// ================= DESTINOS INTELIGENTES =================
-
-const destinosCliente =
-  destinosPorCliente?.[clienteId] ||
-  configCliente?.destinosInteligentes ||
-  [];
-
-const todosDestinos = Array.isArray(destinosCliente)
-  ? destinosCliente.filter(d => d?.ativo !== false)
-  : [];
-
-
-console.log("📦 Oferta para rotear:", {
-  titulo: oferta.titulo || oferta.nome,
-  marketplace: oferta.marketplace,
-  categoria: oferta.categoria,
-  status: oferta.status
-});
-
-const destinosInteligentes =
-  todosDestinos.filter(destino =>
-    destinoAceitaOferta(destino, oferta)
-  );
-
-
-console.log(
-  "🧠 Destinos inteligentes compatíveis:",
-  destinosInteligentes.map(d => d.nome)
-);
-
-  if (!destinosInteligentes.length) {
-  console.log("⚠️ Oferta sem destino compatível. Marcando como erro:", oferta.titulo);
-
-  oferta.status = "erro";
-  oferta.statusDetalhe = "Sem destino compatível";
-  oferta.erro = "Nenhum destino aceitou marketplace/categoria";
-  oferta.erroEm = new Date().toLocaleString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-  });
-
-  oferta.logsEnvio = oferta.logsEnvio || [];
-  oferta.logsEnvio.push({
-    tipo: "erro",
-    mensagem: oferta.statusDetalhe,
-    data: oferta.erroEm
-  });
-
-  salvarFila(clienteId);
-  return;
-}
-    
-const titulo = oferta.nome || oferta.titulo || "Oferta";
-
-const precoAtual = oferta.preco || oferta.precoAtual || "";
-const precoAntigo = oferta.precoAntigo || "";
-const avisoPagamento = oferta.avisoPagamento || "";
-const cupom = oferta.cupom || "";
-const avisoCupom = oferta.avisoCupom || "";
-const marketplace = oferta.marketplace || "";
-const link = oferta.linkAfiliado || oferta.link || "";
-const parcelamento = oferta.parcelamento || "";
-
-let mensagem = `🔥 OFERTA ENCONTRADA!
-
-🛍️ ${titulo}`;
-
-const antigoNum = Number(String(precoAntigo).replace(",", "."));
-const atualNum = Number(String(precoAtual).replace(",", "."));
-
-const temPrecoAntigoValido =
-  precoAntigo &&
-  precoAtual &&
-  Number.isFinite(antigoNum) &&
-  Number.isFinite(atualNum) &&
-  antigoNum > atualNum;
-
-if (temPrecoAntigoValido) {
-mensagem += `
-❌ De: ${precoAntigo}`;
-}
-
-const avisoPix =
-  avisoPagamento ||
-  (avisoCupom && String(avisoCupom).toLowerCase().includes("pix")
-    ? "À vista no PIX"
-    : "");
-
-if (precoAtual) {
-mensagem += `
-✅ Por: ${precoAtual}${avisoPix ? ` ${avisoPix}` : ""}`;
-}
-
-if (temPrecoAntigoValido) {
-  const economia = (antigoNum - atualNum).toFixed(2).replace(".", ",");
-  const desconto = Math.round(((antigoNum - atualNum) / antigoNum) * 100);
-
-  mensagem += `
-
-💥 Economia: R$ ${economia}
-🔥 ${desconto}% OFF`;
-
-  if (desconto >= 25) {
-    mensagem += `
-⚠️ PREÇO MUITO BOM`;
-  }
-}
-
-if (parcelamento) {
-  mensagem += `
-
-💳 ${String(parcelamento).replace(/^💳\s*/i, "")}`;
-}
-
-if (cupom) {
-  mensagem += `
-
-🎟️ Cupom: ${cupom}`;
-
-  if (avisoCupom) {
-    mensagem += `
-🎫 ${avisoCupom}`;
-  }
-} else if (marketplace === "shopee") {
-  mensagem += `
-
-🎟️ Verifique se há cupons disponíveis na página`;
-} else if (marketplace === "aliexpress") {
-  mensagem += `
-
-⚠️ Preço pode variar por moedas, cupom, variação ou impostos. Confira o valor final.`;
-}
-
-mensagem += `
-
-🛒 Comprar:
-${link}`;  
-
-// ================= ENVIO DESTINOS INTELIGENTES =================
+// ============================== ENVIO DESTINOS INTELIGENTES =============================
 
 let enviouParaAlgumDestino = false;
-
 let pulouPorIntervalo = false;
+let tentouEnviarParaAlgumDestino = false;
+let errosEnvioDestino = [];
 
 for (const destino of destinosInteligentes) {
   const chaveControle = `${clienteId}_${destino.id || destino.nome || destino.conexaoId}`;
@@ -1750,48 +1614,103 @@ for (const destino of destinosInteligentes) {
 
   if (agora - controleEnvio[chaveControle] < intervaloMs) {
     pulouPorIntervalo = true;
+
     console.log("⏳ Destino aguardando intervalo:", {
       clienteId,
       destino: destino.nome,
       intervaloMinutos: intervaloDestinoMin
     });
+
     continue;
   }
 
-  const enviado = await enviarParaDestinoInteligente(
-    destino,
-    oferta,
-    mensagem,
-    clienteId,
-    configCliente
-  );
+  tentouEnviarParaAlgumDestino = true;
 
-  if (enviado === true) {
-    enviouParaAlgumDestino = true;
-    controleEnvio[chaveControle] = Date.now();
+  try {
+    const enviado = await enviarParaDestinoInteligente(
+      destino,
+      oferta,
+      mensagem,
+      clienteId,
+      configCliente
+    );
+
+    if (enviado === true) {
+      enviouParaAlgumDestino = true;
+      controleEnvio[chaveControle] = Date.now();
+    }
+  } catch (e) {
+    errosEnvioDestino.push({
+      destino: destino.nome || destino.id || "Destino",
+      erro: e.message
+    });
+
+    console.log("❌ Erro ao enviar para destino:", {
+      destino: destino.nome,
+      erro: e.message
+    });
   }
 }
 
+if (!enviouParaAlgumDestino && pulouPorIntervalo && !tentouEnviarParaAlgumDestino) {
+  oferta.status = "pendente";
+  oferta.statusDetalhe = "Aguardando intervalo dos destinos";
+  oferta.erro = "";
+  oferta.erroEm = "";
 
-if (!enviouParaAlgumDestino && pulouPorIntervalo) {
+  salvarFila(clienteId);
+
   console.log("⏳ Oferta aguardando intervalo dos destinos:", oferta.titulo);
   return;
 }
 
-if (!enviouParaAlgumDestino) {
-  console.log("⚠️ Oferta não enviada. Marcando como erro:", oferta.titulo);
+if (!enviouParaAlgumDestino && !tentouEnviarParaAlgumDestino) {
+  oferta.status = "pendente";
+  oferta.statusDetalhe = "Aguardando destino disponível";
+  oferta.erro = "";
+  oferta.erroEm = "";
+
+  salvarFila(clienteId);
+
+  console.log("⏳ Oferta aguardando destino disponível:", oferta.titulo);
+  return;
+}
+
+if (!enviouParaAlgumDestino && errosEnvioDestino.length) {
+  console.log("⚠️ Oferta tentou enviar, mas todos os envios falharam:", oferta.titulo);
 
   oferta.status = "erro";
-  oferta.statusDetalhe = "Falha ao enviar para destinos";
-  oferta.erro = "Nenhum destino confirmou envio";
+  oferta.statusDetalhe = "Falha real ao enviar para destinos";
+  oferta.erro = errosEnvioDestino
+    .map(e => `${e.destino}: ${e.erro}`)
+    .join(" | ");
+
   oferta.erroEm = new Date().toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo"
+  });
+
+  oferta.logsEnvio = oferta.logsEnvio || [];
+  oferta.logsEnvio.push({
+    tipo: "erro",
+    mensagem: oferta.erro,
+    data: oferta.erroEm
   });
 
   salvarFila(clienteId);
   return;
 }
 
+if (!enviouParaAlgumDestino) {
+  oferta.status = "pendente";
+  oferta.statusDetalhe = "Nenhum destino disponível no momento";
+  oferta.erro = "";
+  oferta.erroEm = "";
+
+  salvarFila(clienteId);
+
+  console.log("⏳ Nenhum destino disponível no momento:", oferta.titulo);
+  return;
+}
 
 ultimoEnvioFila = Date.now();
 
