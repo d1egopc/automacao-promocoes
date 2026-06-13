@@ -88,6 +88,8 @@ const {
   montarMensagemOferta
 } = require("./utils/mensagens-ofertas");
 
+const filaOfertas = require("./utils/fila-ofertas");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -267,48 +269,23 @@ function produtoRepetidoRecentemente(titulo, horas = 12) {
 }
 
 function salvarFila(clienteId = "admin") {
-  try {
-
-    const filaCliente = fila.filter(
-      o => String(o.clienteId || "admin") === String(clienteId)
-    );
-
-    fs.writeFileSync(
-      getFilaFile(clienteId),
-      JSON.stringify(filaCliente, null, 2)
-    );
-
-  } catch (e) {
-    console.error("❌ ERRO AO SALVAR FILA:", e.message);
-  }
+  return filaOfertas.salvarFila({
+    fila,
+    clienteId,
+    getFilaFile,
+    logger: console
+  });
 }
 
 function carregarFila(clienteId = "admin") {
-  try {
-    const file = getFilaFile(clienteId);
+  fila = filaOfertas.carregarFila({
+    fila,
+    clienteId,
+    getFilaFile,
+    logger: console
+  });
 
-    if (fs.existsSync(file)) {
-      const data = fs.readFileSync(file, "utf8");
-
-      if (data) {
-        const filaCliente = JSON.parse(data);
-
-        const filaLimpa = filaCliente.filter(
-          o => o?.clienteId
-        );
-
-        fila = fila.filter(
-          o => String(o.clienteId || "admin") !== String(clienteId)
-        );
-
-        fila.push(...filaLimpa);
-
-        console.log(`✅ Fila carregada do cliente: ${clienteId}`);
-      }
-    }
-  } catch (e) {
-    console.error("❌ ERRO AO CARREGAR FILA:", e.message);
-  }
+  return fila;
 }
 
 function garantirIdsFila() {
