@@ -1305,12 +1305,12 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
     configCliente = configCliente || configsPorCliente?.[clienteId] || config;
 
     if (!destinoAceitaOferta(destino, oferta)) {
-      return false;
+      return { enviado: false, motivo: "nao_aceita" };
     }
 
     if (!destinoDentroHorario(destino)) {
       console.log("⏰ Destino fora do horário:", destino.nome);
-      return false;
+      return { enviado: false, motivo: "fora_horario" };
     }
 
  
@@ -1321,7 +1321,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
   if (!sock) {
     console.log("❌ Sessão não encontrada:", destino.conexaoId);
-    return false;
+    return { enviado: false, motivo: "sessao_nao_encontrada" };
   }
 
   const grupos = (destino.gruposWhatsapp || [])
@@ -1334,13 +1334,13 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
   if (!grupos.length) {
     console.log("⚠️ Destino WhatsApp sem grupos válidos:", destino.nome);
-    return false;
+    return { enviado: false, motivo: "sem_grupos" };
   }
 
   for (const grupo of grupos) {
     if (!usuarioTemCreditos(clienteId, 1)) {
       console.log("🚫 Sem créditos:", clienteId);
-      return false;
+      return { enviado: false, motivo: "sem_creditos" };
     }
 
     if (destino.tipoMidia === "texto" || !oferta.imagem) {
@@ -1377,7 +1377,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     await new Promise(r => setTimeout(r, 3000));
   }
 
-  return true;
+  return { enviado: true };
 }
 
 
@@ -1451,7 +1451,7 @@ const selecionados = telegramsSelecionados.length
       }
 
       if (selecionados.length) {
-        return true;
+        return { enviado: true };
       }
     }
 
@@ -1462,10 +1462,10 @@ const selecionados = telegramsSelecionados.length
       e.message
     );
 
-    return false;
+    return { enviado: false, motivo: "erro", erro: e.message };
   }
 
-  return false;
+  return { enviado: false, motivo: "nao_enviado" };
 }
 
 // ================= FUNCÃO PROCESSA FILA =================
@@ -1593,6 +1593,8 @@ if (!sessoes[idSessao]) {
 let enviouParaAlgumDestino = false;
 
 let pulouPorIntervalo = false;
+let pulouPorHorario = false;
+let houveFalhaReal = false;
 
 for (const destino of destinosInteligentes) {
   const chaveControle = `${clienteId}_${destino.id || destino.nome || destino.conexaoId}`;
@@ -1628,16 +1630,31 @@ for (const destino of destinosInteligentes) {
     clienteId,
     configCliente
   );
+  const resultadoEnvio =
+    typeof enviado === "object" && enviado !== null
+      ? enviado
+      : { enviado: enviado === true, motivo: enviado === false ? "nao_enviado" : "" };
 
-  if (enviado === true) {
+  if (resultadoEnvio.enviado === true) {
     enviouParaAlgumDestino = true;
     controleEnvio[chaveControle] = Date.now();
+  } else if (resultadoEnvio.motivo === "fora_horario") {
+    pulouPorHorario = true;
+  } else if (!["nao_aceita"].includes(resultadoEnvio.motivo)) {
+    houveFalhaReal = true;
   }
 }
 
 
-if (!enviouParaAlgumDestino && pulouPorIntervalo) {
-  console.log("⏳ Oferta aguardando intervalo dos destinos:", oferta.titulo);
+if (!enviouParaAlgumDestino && (pulouPorIntervalo || pulouPorHorario) && !houveFalhaReal) {
+  oferta.status = "pendente";
+  oferta.statusDetalhe = pulouPorHorario
+    ? "Aguardando horario do destino"
+    : "Aguardando intervalo dos destinos";
+  oferta.erro = "";
+  oferta.erroEm = "";
+  salvarFila(clienteId);
+  console.log("Oferta aguardando destino liberar envio:", oferta.titulo);
   return;
 }
 
