@@ -10,7 +10,7 @@ try {
     escolherCupomParaOfertaML
   } = require("./cupons"));
 } catch (e) {
-  console.log("âš ï¸ ML CUPONS:", {
+  console.log("[ERRO] [ML-CUPOM]", {
     erro: e.message
   });
 }
@@ -41,10 +41,10 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
 
 
 if (!config.marketplaces?.mercadolivre?.ativo) {
-  console.log("â¸ Mercado Livre desativado. Farejador ignorado.");
+  console.log("[INFO] [ML] Mercado Livre desativado. Farejador ignorado.");
   return;
 }
-    console.log("ðŸ¶ Farejando ofertas ML (modo stealth)...");
+    console.log("[INFO] [ML] Farejando ofertas ML");
 
     const buscasPrioritariasML = [
   // ðŸ‘Ÿ TÃªnis e calÃ§ados
@@ -135,11 +135,7 @@ const response = await fetch(url, {
 
        if (!response.ok) {
 
-      console.log(
-    "ðŸ›¡ï¸ ML bloqueou status:",
-    response.status,
-    "- parando rodada."
-  );
+      console.log("[AVISO] [ML] Bloqueou status:", response.status);
 
   await new Promise(r => setTimeout(r, 15000));
 
@@ -151,7 +147,7 @@ const html = await response.text();
 await farejarCuponsMercadoLivre(html);
 
 if (html.includes("suspicious-traffic-frontend")) {
-  console.log("ðŸ›¡ï¸ Mercado Livre bloqueou por trÃ¡fego suspeito.");
+  console.log("[AVISO] [ML] Trafego suspeito");
   return;
 }
 
@@ -200,7 +196,7 @@ let produto = await importarMercadoLivre(
 );
 
 if (!produto) {
-  console.log("â­ï¸ ML importador vazio, pulando:", link);
+  console.log("[AVISO] [ML] Importador vazio:", link);
   continue;
 }
 
@@ -209,7 +205,7 @@ if (
   produto.precoAtual === "R$ 0,00" ||
   produto.precoAtual === "R$ 0,0"
 ) {
-  console.log("â­ï¸ ML ignorado sem preÃ§o vÃ¡lido:", produto.titulo || link);
+  console.log("[AVISO] [ML] Ignorado sem preco valido:", produto.titulo || link);
   continue;
 }
     if (!produto.precoAtual && itemBusca.precoAtual) {
@@ -266,7 +262,7 @@ if (
   !produto.avisoCupom &&
   !produto.linkAfiliado
 ) {
-  console.log("â­ï¸ ML ignorado por desconto baixo:", {
+  console.log("[AVISO] [ML] Ignorado por desconto baixo:", {
     titulo: produto.titulo,
     desconto: Math.round(desconto) + "%",
     descontoMinimoML
@@ -344,7 +340,7 @@ try {
   }
 
   if (cupomOferta) {
-    console.log("ðŸŽŸï¸ ML CUPOM OFERTA:", {
+    console.log("[ML-CUPOM-OFERTA]", {
       titulo: novaOferta.titulo,
       cupom: cupomOferta.cupom || "",
       score: cupomOferta.cupomConfianca || 0,
@@ -352,12 +348,12 @@ try {
     });
   }
 } catch (e) {
-  console.log("âš ï¸ ML CUPONS:", {
+  console.log("[ERRO] [ML-CUPOM]", {
     erro: e.message
   });
 }
 
-console.log("ðŸ“¦ Oferta ML pronta:", {
+console.log("[ML-OFERTA]", {
   titulo: novaOferta.titulo,
   preco: novaOferta.precoAtual,
   categoria: novaOferta.categoria,
@@ -367,13 +363,13 @@ console.log("ðŸ“¦ Oferta ML pronta:", {
  const jaExiste = ofertaJaExiste(novaOferta);
 
 if (jaExiste) {
-  console.log("â™»ï¸ Oferta ML ignorada (duplicada):", novaOferta.titulo);
+  console.log("[AVISO] [ML] Oferta duplicada:", novaOferta.titulo);
 }
 
    if (!jaExiste) {
 
   if (deveIgnorarOfertaRepetida(novaOferta)) {
-    console.log("ðŸ§  ML ignorado pela memÃ³ria:", novaOferta.titulo);
+    console.log("[AVISO] [ML] Ignorado pela memoria:", novaOferta.titulo);
     continue;
   }
 
@@ -393,7 +389,7 @@ if (jaExiste) {
     );
 
   } catch (e) {
-    console.log("âŒ erro produto ML:", e.message);
+    console.log("[ERRO] [ML] erro produto:", e.message);
   }
 }
 
@@ -402,12 +398,12 @@ if (jaExiste) {
         );
 
       } catch (e) {
-        console.log("âŒ erro busca ML:", e.message);
+        console.log("[ERRO] [ML] erro busca:", e.message);
       }
     }
 
   } catch (e) {
-    console.log("âŒ erro farejador ML:", e.message);
+    console.log("[ERRO] [ML] erro farejador:", e.message);
   }
 }
 
@@ -415,3 +411,6 @@ if (jaExiste) {
 module.exports = {
   farejarMercadoLivre
 };
+
+
+
