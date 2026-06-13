@@ -18,8 +18,6 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
   const cookies =
     integracaoML?.credenciais?.cookies || "";  
   
-console.log("ðŸŒ ML URL:", url);
-
   const response = await fetch(url, {
   method: "GET",
   redirect: "follow",
@@ -50,46 +48,11 @@ console.log("ðŸŒ ML URL:", url);
   }
 });
 
-console.log("ðŸª ML cookies importador:", cookies ? "SIM" : "NÃƒO");
-
-console.log("ðŸŒ URL FINAL:", response.url);
-
 if (response.url.includes("account-verification")) {
-  console.log("ðŸ›¡ï¸ ML ACCOUNT VERIFICATION DETECTADO");
   return null;
 }
 
   const html = await response.text();
-
-console.log(
-  "ðŸ§ª HTML TEM UI-PDP:",
-  html.includes("ui-pdp")
-);
-
-console.log(
-  "ðŸ§ª HTML TEM AFFILIATES-SITE:",
-  html.includes("affiliates-site")
-);
-
-console.log(
-  "ðŸ§ª HTML TEM CUPOM:",
-  html.toLowerCase().includes("cupom")
-);
-
-console.log(
-  "ðŸ§ª HTML TEM COUPON:",
-  html.toLowerCase().includes("coupon")
-);
-
-console.log(
-  "ðŸ§ª HTML TEM PROMOTION:",
-  html.toLowerCase().includes("promotion")
-);
-
-console.log(
-  "ðŸ§ª HTML TEM DISCOUNT:",
-  html.toLowerCase().includes("discount")
-);
 
   const jsonLd = extrairJsonLd(html);
 
@@ -126,11 +89,6 @@ console.log(
 
 let precoNumero = Number(String(preco).replace(",", "."));
 
-  console.log("ðŸ§ª PREÃ‡O ML:", {
-  original: jsonLd?.offers?.price,
-  depoisLimpar: preco
-  });
-  
   const descontoMatch =
   html.match(/(\d{1,2})\s*%\s*OFF/i) ||
   html.match(/"discount_rate"\s*:\s*(\d{1,2})/i) ||
@@ -147,8 +105,6 @@ if (
   precoAntigo = (precoNumero / (1 - descontoReal / 100))
     .toFixed(2)
     .replace(".", ",");
-
-  console.log("ðŸ·ï¸ Desconto real ML detectado:", descontoReal + "%");
 }
 
 

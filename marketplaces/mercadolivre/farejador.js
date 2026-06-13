@@ -1,4 +1,4 @@
-
+﻿
 const { extrairProdutosBuscaML } = require("./parser");
 
 let obterCuponsMLCliente = async () => [];
@@ -10,7 +10,7 @@ try {
     escolherCupomParaOfertaML
   } = require("./cupons"));
 } catch (e) {
-  console.log("⚠️ ML CUPONS:", {
+  console.log("âš ï¸ ML CUPONS:", {
     erro: e.message
   });
 }
@@ -41,13 +41,13 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
 
 
 if (!config.marketplaces?.mercadolivre?.ativo) {
-  console.log("⏸ Mercado Livre desativado. Farejador ignorado.");
+  console.log("â¸ Mercado Livre desativado. Farejador ignorado.");
   return;
 }
-    console.log("🐶 Farejando ofertas ML (modo stealth)...");
+    console.log("ðŸ¶ Farejando ofertas ML (modo stealth)...");
 
     const buscasPrioritariasML = [
-  // 👟 Tênis e calçados
+  // ðŸ‘Ÿ TÃªnis e calÃ§ados
   "tenis masculino promocao",
   "tenis feminino promocao",
   "tenis nike promocao",
@@ -57,7 +57,7 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
   "tenis fila promocao",
   "chinelo havaianas promocao",
 
-  // 👕 Moda masculina
+  // ðŸ‘• Moda masculina
   "kit camisetas masculinas",
   "camiseta masculina",
   "camiseta oversized masculina",
@@ -67,7 +67,7 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
   "moletom masculino",
   "jaqueta masculina",
 
-  // 👗 Moda feminina
+  // ðŸ‘— Moda feminina
   "blusa feminina",
   "calca jeans feminina",
   "kit calca jeans feminina",
@@ -77,7 +77,7 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
   "moletom feminino",
   "jaqueta feminina",
 
-  // 🌸 Perfumes e beleza
+  // ðŸŒ¸ Perfumes e beleza
   "perfume masculino promocao",
   "perfume feminino promocao",
   "perfume importado promocao",
@@ -88,7 +88,7 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
   "boticario perfume promocao",
   "eudora perfume promocao",
 
-  // ❄️ Frio / tendência
+  // â„ï¸ Frio / tendÃªncia
   "meia termica",
   "blusa frio masculina",
   "blusa frio feminina",
@@ -116,7 +116,6 @@ const buscas = [
       try {
         const url = `https://lista.mercadolivre.com.br/${encodeURIComponent(termo)}`;
 
-       console.log("🌐 MERCADO LIVRE URL:", url);
 
 const headersML = {
   ...gerarHeadersStealth()
@@ -133,13 +132,11 @@ const response = await fetch(url, {
   headers: headersML
 });
 
-        console.log("🌐 URL:", url);
-        console.log("📡 STATUS:", response.status);
 
        if (!response.ok) {
 
       console.log(
-    "🛡️ ML bloqueou status:",
+    "ðŸ›¡ï¸ ML bloqueou status:",
     response.status,
     "- parando rodada."
   );
@@ -154,7 +151,7 @@ const html = await response.text();
 await farejarCuponsMercadoLivre(html);
 
 if (html.includes("suspicious-traffic-frontend")) {
-  console.log("🛡️ Mercado Livre bloqueou por tráfego suspeito.");
+  console.log("ðŸ›¡ï¸ Mercado Livre bloqueou por trÃ¡fego suspeito.");
   return;
 }
 
@@ -163,40 +160,29 @@ let avisoCupom = "";
         
         const cupomMatch =
   html.match(/cupom\s+([A-Z0-9]{4,20})/i) ||
-  html.match(/código\s+([A-Z0-9]{4,20})/i) ||
+  html.match(/cÃ³digo\s+([A-Z0-9]{4,20})/i) ||
   html.match(/use\s+o\s+cupom\s+([A-Z0-9]{4,20})/i) ||
   html.match(/aplique\s+o\s+cupom\s+([A-Z0-9]{4,20})/i);
 
 if (cupomMatch?.[1]) {
   cupom = cupomMatch[1].trim().toUpperCase();
   avisoCupom = `Aplique o cupom ${cupom} antes de finalizar.`;
-} else if (/cupom|código promocional|desconto extra|aplicar desconto/i.test(html)) {
-  avisoCupom = "Há possível cupom/desconto extra na página. Confira antes de finalizar.";
+} else if (/cupom|cÃ³digo promocional|desconto extra|aplicar desconto/i.test(html)) {
+  avisoCupom = "HÃ¡ possÃ­vel cupom/desconto extra na pÃ¡gina. Confira antes de finalizar.";
 }
 
 const compraNoApp =
   /compra\s+no\s+app/i.test(html) ||
-  /menor\s+preço\s+no\s+app/i.test(html) ||
+  /menor\s+preÃ§o\s+no\s+app/i.test(html) ||
   /app\s+garante/i.test(html) ||
   /desconto\s+no\s+app/i.test(html);
 
 if (compraNoApp && !cupom) {
   cupom = "VER NO APP";
-  avisoCupom = "📱 Confira pelo app do Mercado Livre, pode aparecer menor valor ou desconto exclusivo.";
+  avisoCupom = "ðŸ“± Confira pelo app do Mercado Livre, pode aparecer menor valor ou desconto exclusivo.";
 }
 
 const produtosBusca = extrairProdutosBuscaML(html).slice(0, 8);
-
-console.log("🚨 ML PRODUTOS BUSCA RESUMO:", produtosBusca.map(p => ({
-  titulo: p.titulo,
-  precoAtual: p.precoAtual,
-  link: p.link
-})));
-
-console.log("🔎 Busca ML:", {
-  termo,
-  produtos: produtosBusca.length
-});
 
 for (const itemBusca of produtosBusca) {
   try {
@@ -214,7 +200,7 @@ let produto = await importarMercadoLivre(
 );
 
 if (!produto) {
-  console.log("⏭️ ML importador vazio, pulando:", link);
+  console.log("â­ï¸ ML importador vazio, pulando:", link);
   continue;
 }
 
@@ -223,7 +209,7 @@ if (
   produto.precoAtual === "R$ 0,00" ||
   produto.precoAtual === "R$ 0,0"
 ) {
-  console.log("⏭️ ML ignorado sem preço válido:", produto.titulo || link);
+  console.log("â­ï¸ ML ignorado sem preÃ§o vÃ¡lido:", produto.titulo || link);
   continue;
 }
     if (!produto.precoAtual && itemBusca.precoAtual) {
@@ -246,11 +232,6 @@ if (
       produto.linkOriginal = link;
     }
 
-console.log("🧪 PRECO ML:", {
-  titulo: produto.titulo,
-  precoAtual: produto.precoAtual,
-  tipo: typeof produto.precoAtual
-});
 
     const precoNumero = Number(
       String(produto.precoAtual)
@@ -285,7 +266,7 @@ if (
   !produto.avisoCupom &&
   !produto.linkAfiliado
 ) {
-  console.log("⏭️ ML ignorado por desconto baixo:", {
+  console.log("â­ï¸ ML ignorado por desconto baixo:", {
     titulo: produto.titulo,
     desconto: Math.round(desconto) + "%",
     descontoMinimoML
@@ -363,7 +344,7 @@ try {
   }
 
   if (cupomOferta) {
-    console.log("🎟️ ML CUPOM OFERTA:", {
+    console.log("ðŸŽŸï¸ ML CUPOM OFERTA:", {
       titulo: novaOferta.titulo,
       cupom: cupomOferta.cupom || "",
       score: cupomOferta.cupomConfianca || 0,
@@ -371,27 +352,28 @@ try {
     });
   }
 } catch (e) {
-  console.log("⚠️ ML CUPONS:", {
+  console.log("âš ï¸ ML CUPONS:", {
     erro: e.message
   });
 }
 
-console.log("📦 Oferta ML pronta:", {
+console.log("ðŸ“¦ Oferta ML pronta:", {
   titulo: novaOferta.titulo,
   preco: novaOferta.precoAtual,
-  categoria: novaOferta.categoria
+  categoria: novaOferta.categoria,
+  desconto: Math.round(desconto) + "%"
 });
 
  const jaExiste = ofertaJaExiste(novaOferta);
 
 if (jaExiste) {
-  console.log("♻️ Oferta ML ignorada (duplicada):", novaOferta.titulo);
+  console.log("â™»ï¸ Oferta ML ignorada (duplicada):", novaOferta.titulo);
 }
 
    if (!jaExiste) {
 
   if (deveIgnorarOfertaRepetida(novaOferta)) {
-    console.log("🧠 ML ignorado pela memória:", novaOferta.titulo);
+    console.log("ðŸ§  ML ignorado pela memÃ³ria:", novaOferta.titulo);
     continue;
   }
 
@@ -404,12 +386,6 @@ if (jaExiste) {
 
   salvarFila(clienteId);
 
-console.log("🤖 Nova oferta ML:", {
-  titulo: novaOferta.titulo,
-  preco: novaOferta.precoAtual,
-  desconto: Math.round(desconto) + "%",
-  categoria: novaOferta.categoria
-});
     }
 
     await new Promise(r =>
@@ -417,7 +393,7 @@ console.log("🤖 Nova oferta ML:", {
     );
 
   } catch (e) {
-    console.log("❌ erro produto ML:", e.message);
+    console.log("âŒ erro produto ML:", e.message);
   }
 }
 
@@ -426,12 +402,12 @@ console.log("🤖 Nova oferta ML:", {
         );
 
       } catch (e) {
-        console.log("❌ erro busca ML:", e.message);
+        console.log("âŒ erro busca ML:", e.message);
       }
     }
 
   } catch (e) {
-    console.log("❌ erro farejador ML:", e.message);
+    console.log("âŒ erro farejador ML:", e.message);
   }
 }
 
