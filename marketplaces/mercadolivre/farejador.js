@@ -10,7 +10,9 @@ try {
     escolherCupomParaOfertaML
   } = require("./cupons"));
 } catch (e) {
-  console.log("ML cupons modulo indisponivel:", e.message);
+  console.log("⚠️ ML CUPONS:", {
+    erro: e.message
+  });
 }
 
 // ================= FAREJADOR MERCADO LIVRE =================
@@ -158,8 +160,6 @@ if (html.includes("suspicious-traffic-frontend")) {
 
 let cupom = "";
 let avisoCupom = "";
-        
-        console.log("🧪 HTML INICIO:", html.slice(0, 1000));
         
         const cupomMatch =
   html.match(/cupom\s+([A-Z0-9]{4,20})/i) ||
@@ -357,21 +357,23 @@ try {
     novaOferta.tipoCupom = cupomOferta.tipoCupom || "";
     novaOferta.avisoCupom = cupomOferta.avisoCupom || novaOferta.avisoCupom || "";
 
-    console.log("ML cupom aplicado:", {
-      clienteId,
-      cupom: novaOferta.cupom
-    });
   } else if (cupomOferta?.avisoCupom) {
     novaOferta.tipoCupom = cupomOferta.tipoCupom || "";
     novaOferta.avisoCupom = cupomOferta.avisoCupom;
+  }
 
-    console.log("ML aviso cupom:", {
-      clienteId,
-      tipoCupom: novaOferta.tipoCupom
+  if (cupomOferta) {
+    console.log("🎟️ ML CUPOM OFERTA:", {
+      titulo: novaOferta.titulo,
+      cupom: cupomOferta.cupom || "",
+      score: cupomOferta.cupomConfianca || 0,
+      tipo: cupomOferta.tipoCupom || ""
     });
   }
 } catch (e) {
-  console.log("ML cupons ignorado:", e.message);
+  console.log("⚠️ ML CUPONS:", {
+    erro: e.message
+  });
 }
 
 console.log("📦 Oferta ML pronta:", {

@@ -1,4 +1,4 @@
-const {
+﻿const {
   htmlDecode,
   extrairMeta,
   extrairJsonLd,
@@ -18,7 +18,7 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
   const cookies =
     integracaoML?.credenciais?.cookies || "";  
   
-console.log("🌐 ML URL:", url);
+console.log("ðŸŒ ML URL:", url);
 
   const response = await fetch(url, {
   method: "GET",
@@ -50,88 +50,46 @@ console.log("🌐 ML URL:", url);
   }
 });
 
-console.log("🍪 ML cookies importador:", cookies ? "SIM" : "NÃO");
+console.log("ðŸª ML cookies importador:", cookies ? "SIM" : "NÃƒO");
 
-console.log("🌍 URL FINAL:", response.url);
+console.log("ðŸŒ URL FINAL:", response.url);
 
 if (response.url.includes("account-verification")) {
-  console.log("🛡️ ML ACCOUNT VERIFICATION DETECTADO");
+  console.log("ðŸ›¡ï¸ ML ACCOUNT VERIFICATION DETECTADO");
   return null;
 }
 
   const html = await response.text();
 
 console.log(
-  "🧪 HTML TEM UI-PDP:",
+  "ðŸ§ª HTML TEM UI-PDP:",
   html.includes("ui-pdp")
 );
 
 console.log(
-  "🧪 HTML TEM AFFILIATES-SITE:",
+  "ðŸ§ª HTML TEM AFFILIATES-SITE:",
   html.includes("affiliates-site")
 );
 
 console.log(
-  "🧪 HTML TEM CUPOM:",
+  "ðŸ§ª HTML TEM CUPOM:",
   html.toLowerCase().includes("cupom")
 );
 
 console.log(
-  "🧪 HTML TEM COUPON:",
+  "ðŸ§ª HTML TEM COUPON:",
   html.toLowerCase().includes("coupon")
 );
 
 console.log(
-  "🧪 HTML TEM PROMOTION:",
+  "ðŸ§ª HTML TEM PROMOTION:",
   html.toLowerCase().includes("promotion")
 );
 
 console.log(
-  "🧪 HTML TEM DISCOUNT:",
+  "ðŸ§ª HTML TEM DISCOUNT:",
   html.toLowerCase().includes("discount")
 );
-
- const htmlLower = html.toLowerCase();
-
-function logTrechoML(palavra) {
-  const idx = htmlLower.indexOf(palavra.toLowerCase());
-
-  if (idx === -1) {
-    console.log(`🧪 TRECHO ${palavra}: NÃO ACHOU`);
-    return;
-  }
-
-  console.log(
-    `🧪 TRECHO ${palavra}:`,
-    html.slice(Math.max(0, idx - 1000), idx + 2000)
-  );
-}
-
-logTrechoML("cupom");
-logTrechoML("coupon");
-logTrechoML("promotion");
-logTrechoML("discount");
-logTrechoML("voucher");
-logTrechoML("pix");
-
-logTrechoML("coupon:true");
-logTrechoML("followers");
-logTrechoML("follow");
-logTrechoML("cta_do_follow");
-logTrechoML("coupon-followers"); 
-
-logTrechoML("300OFF");
-logTrechoML("has_follower_coupon");
-logTrechoML("success_message");
-logTrechoML("entity_id");
-logTrechoML("eshops/follow");
-
-logTrechoML("BELEZADUPLA");
-logTrechoML("beleza");
-logTrechoML("coupon_summary");
-logTrechoML("coupon");
-logTrechoML("cupom");
-
 
   const jsonLd = extrairJsonLd(html);
 
@@ -155,7 +113,7 @@ logTrechoML("cupom");
 
  preco = limparPreco(preco);
 
- // Correção ML: jsonLd às vezes vem como 48.9 e limparPreco vira 489
+ // CorreÃ§Ã£o ML: jsonLd Ã s vezes vem como 48.9 e limparPreco vira 489
  if (
   jsonLd?.offers?.price !== undefined &&
   String(jsonLd.offers.price).includes(".") &&
@@ -168,7 +126,7 @@ logTrechoML("cupom");
 
 let precoNumero = Number(String(preco).replace(",", "."));
 
-  console.log("🧪 PREÇO ML:", {
+  console.log("ðŸ§ª PREÃ‡O ML:", {
   original: jsonLd?.offers?.price,
   depoisLimpar: preco
   });
@@ -190,7 +148,7 @@ if (
     .toFixed(2)
     .replace(".", ",");
 
-  console.log("🏷️ Desconto real ML detectado:", descontoReal + "%");
+  console.log("ðŸ·ï¸ Desconto real ML detectado:", descontoReal + "%");
 }
 
 

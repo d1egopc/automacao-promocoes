@@ -84,11 +84,18 @@ function extrairCuponsDoHtmlCuponsML(html = "") {
   );
 }
 
-async function buscarCuponsMercadoLivreCliente({ cookies } = {}) {
+async function buscarCuponsMercadoLivreCliente({ cookies, clienteId = "desconhecido", cache = "miss" } = {}) {
   const cookiesLimpos = String(cookies || "").trim();
 
   if (!cookiesLimpos) {
-    console.log("ML cupons: sem cookies");
+    console.log("🎟️ ML CUPONS:", {
+      clienteId,
+      encontrouPagina: false,
+      accountVerification: false,
+      cuponsEncontrados: 0,
+      cache
+    });
+
     return [];
   }
 
@@ -118,17 +125,33 @@ async function buscarCuponsMercadoLivreCliente({ cookies } = {}) {
       String(urlFinal).includes("account-verification") ||
       htmlTexto.includes("account-verification")
     ) {
-      console.log("ML cupons: account-verification");
+      console.log("🎟️ ML CUPONS:", {
+        clienteId,
+        encontrouPagina: false,
+        accountVerification: true,
+        cuponsEncontrados: 0,
+        cache
+      });
+
       return [];
     }
 
     const cupons = extrairCuponsDoHtmlCuponsML(htmlTexto);
 
-    console.log("ML cupons encontrados:", cupons.length);
+    console.log("🎟️ ML CUPONS:", {
+      clienteId,
+      encontrouPagina: true,
+      accountVerification: false,
+      cuponsEncontrados: cupons.length,
+      cache
+    });
 
     return cupons;
   } catch (e) {
-    console.log("ML cupons erro:", e.message);
+    console.log("⚠️ ML CUPONS:", {
+      erro: e.message
+    });
+
     return [];
   }
 }
@@ -139,15 +162,22 @@ async function obterCuponsMLCliente(clienteId = "admin", cookies = "") {
   const cache = cacheCuponsPorCliente[id];
 
   if (cache && agora - cache.atualizadoEm < CACHE_TTL_MS) {
-    console.log("ML cupons cache:", {
+    console.log("🎟️ ML CUPONS:", {
       clienteId: id,
-      total: cache.cupons.length
+      encontrouPagina: true,
+      accountVerification: false,
+      cuponsEncontrados: cache.cupons.length,
+      cache: "hit"
     });
 
     return cache.cupons;
   }
 
-  const cupons = await buscarCuponsMercadoLivreCliente({ cookies });
+  const cupons = await buscarCuponsMercadoLivreCliente({
+    cookies,
+    clienteId: id,
+    cache: "miss"
+  });
 
   cacheCuponsPorCliente[id] = {
     atualizadoEm: agora,

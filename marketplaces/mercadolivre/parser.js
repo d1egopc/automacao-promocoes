@@ -1,4 +1,4 @@
-// ================= PARSER MERCADO LIVRE =================
+﻿// ================= PARSER MERCADO LIVRE =================
 
 function limparTextoML(texto = "") {
   return String(texto)
@@ -63,7 +63,7 @@ for (const link of linksUnicos) {
       )
     : "";
 
-console.log("🧪 ML TEM CAMPOS PRECO?", {
+console.log("ðŸ§ª ML TEM CAMPOS PRECO?", {
   temPrice: trecho.includes("price"),
   temCurrentPrice: trecho.includes("current_price"),
   temPriceAmount: trecho.includes("price_amount"),
@@ -97,14 +97,14 @@ const tituloUrl = limparTextoML(
   !titulo ||
   titulo.toLowerCase().includes("ordenar por") ||
   titulo.toLowerCase().includes("mais relevantes") ||
-  titulo.toLowerCase().includes("menor preço") ||
-  titulo.toLowerCase().includes("maior preço") ||
+  titulo.toLowerCase().includes("menor preÃ§o") ||
+  titulo.toLowerCase().includes("maior preÃ§o") ||
   titulo.toLowerCase().includes("outras pessoas pesquisaram") ||
-  titulo.toLowerCase().includes("pesquisaram também") ||
+  titulo.toLowerCase().includes("pesquisaram tambÃ©m") ||
   titulo.toLowerCase().includes("produtos relacionados") ||
   titulo.toLowerCase().includes("formato de venda") ||
   titulo.toLowerCase().includes("lojas oficiais") ||
-  titulo.toLowerCase().includes("mercadolíderes") ||
+  titulo.toLowerCase().includes("mercadolÃ­deres") ||
   titulo.toLowerCase().includes("mercado lideres") ||
   titulo.toLowerCase().includes("filtro") ||
   titulo.toLowerCase() === "p";
@@ -114,11 +114,6 @@ const tituloFinal = tituloLixo ? tituloUrl : titulo;
 if (!tituloFinal) {
   continue;
 }
-
-console.log(
-  "🧪 TRECHO ML:",
-  trecho.slice(0, 2000)
-);
 
 const precoMatch =
   trecho.match(/"current_price"\s*:\s*([0-9]+(?:\.[0-9]+)?)/)?.[1] ||
@@ -137,7 +132,7 @@ const precoMatch =
     trecho.match(/src="([^"]*mlstatic[^"]+)"/)?.[1] ||
     "";
 
-console.log("🚨🚨🚨 PARSER ML ITEM PREÇO:", {
+console.log("ðŸš¨ðŸš¨ðŸš¨ PARSER ML ITEM PREÃ‡O:", {
   titulo: tituloFinal,
   precoMatch,
   precoAtual,
