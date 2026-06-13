@@ -1588,14 +1588,12 @@ if (!sessoes[idSessao]) {
 
     console.log("DESTINOS PARA ENVIO:", destinos);
 
-// ============================== ENVIO DESTINOS INTELIGENTES =============================
+// ================= ENVIO DESTINOS INTELIGENTES =================
 
 let enviouParaAlgumDestino = false;
 let pulouPorIntervalo = false;
-let tentouEnviarParaAlgumDestino = false;
-let errosEnvioDestino = [];
 
-for (const destino of destinosInteligentes) {
+for (const destino of destinosParaEnvio) {
   const chaveControle = `${clienteId}_${destino.id || destino.nome || destino.conexaoId}`;
 
   const intervaloDestinoMin = Number(
@@ -1624,35 +1622,21 @@ for (const destino of destinosInteligentes) {
     continue;
   }
 
-  tentouEnviarParaAlgumDestino = true;
+  const enviado = await enviarParaDestinoInteligente(
+    destino,
+    oferta,
+    mensagem,
+    clienteId,
+    configCliente
+  );
 
-  try {
-    const enviado = await enviarParaDestinoInteligente(
-      destino,
-      oferta,
-      mensagem,
-      clienteId,
-      configCliente
-    );
-
-    if (enviado === true) {
-      enviouParaAlgumDestino = true;
-      controleEnvio[chaveControle] = Date.now();
-    }
-  } catch (e) {
-    errosEnvioDestino.push({
-      destino: destino.nome || destino.id || "Destino",
-      erro: e.message
-    });
-
-    console.log("❌ Erro ao enviar para destino:", {
-      destino: destino.nome,
-      erro: e.message
-    });
+  if (enviado === true) {
+    enviouParaAlgumDestino = true;
+    controleEnvio[chaveControle] = Date.now();
   }
 }
 
-if (!enviouParaAlgumDestino && pulouPorIntervalo && !tentouEnviarParaAlgumDestino) {
+if (!enviouParaAlgumDestino && pulouPorIntervalo) {
   oferta.status = "pendente";
   oferta.statusDetalhe = "Aguardando intervalo dos destinos";
   oferta.erro = "";
@@ -1664,7 +1648,7 @@ if (!enviouParaAlgumDestino && pulouPorIntervalo && !tentouEnviarParaAlgumDestin
   return;
 }
 
-if (!enviouParaAlgumDestino && !tentouEnviarParaAlgumDestino) {
+if (!enviouParaAlgumDestino) {
   oferta.status = "pendente";
   oferta.statusDetalhe = "Aguardando destino disponível";
   oferta.erro = "";
@@ -1673,42 +1657,6 @@ if (!enviouParaAlgumDestino && !tentouEnviarParaAlgumDestino) {
   salvarFila(clienteId);
 
   console.log("⏳ Oferta aguardando destino disponível:", oferta.titulo);
-  return;
-}
-
-if (!enviouParaAlgumDestino && errosEnvioDestino.length) {
-  console.log("⚠️ Oferta tentou enviar, mas todos os envios falharam:", oferta.titulo);
-
-  oferta.status = "erro";
-  oferta.statusDetalhe = "Falha real ao enviar para destinos";
-  oferta.erro = errosEnvioDestino
-    .map(e => `${e.destino}: ${e.erro}`)
-    .join(" | ");
-
-  oferta.erroEm = new Date().toLocaleString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-  });
-
-  oferta.logsEnvio = oferta.logsEnvio || [];
-  oferta.logsEnvio.push({
-    tipo: "erro",
-    mensagem: oferta.erro,
-    data: oferta.erroEm
-  });
-
-  salvarFila(clienteId);
-  return;
-}
-
-if (!enviouParaAlgumDestino) {
-  oferta.status = "pendente";
-  oferta.statusDetalhe = "Nenhum destino disponível no momento";
-  oferta.erro = "";
-  oferta.erroEm = "";
-
-  salvarFila(clienteId);
-
-  console.log("⏳ Nenhum destino disponível no momento:", oferta.titulo);
   return;
 }
 
@@ -1721,7 +1669,7 @@ oferta.enviadoEm = new Date().toLocaleString("pt-BR", {
 });
 
 oferta.dataEnvio = oferta.enviadoEm;
-oferta.statusDetalhe = `Enviada para ${destinosInteligentes.length} destino(s)`;
+oferta.statusDetalhe = `Enviada para ${destinosParaEnvio.length} destino(s)`;
 
 oferta.logsEnvio = oferta.logsEnvio || [];
 oferta.logsEnvio.push({
@@ -1734,10 +1682,10 @@ salvarFila(clienteId);
 
 console.log("✅ Enviado com controle de tempo");
 
- } catch (e) {
+} catch (e) {
   console.log("❌ ERRO:", e.message);
 
-  if (oferta) {
+  if (typeof oferta !== "undefined" && oferta) {
     oferta.status = "erro";
     oferta.erro = e.message;
     oferta.erroEm = new Date().toLocaleString("pt-BR", {
