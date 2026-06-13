@@ -348,10 +348,7 @@ function carregarSessoesMeta() {
 
     sessoesMeta = dados && typeof dados === "object" ? dados : {};
 
-  console.log("✅ Sessões meta carregadas:", {
-  total: Object.keys(sessoesMeta).length,
-  ids: Object.keys(sessoesMeta)
-  });
+    console.log("✅ Sessões meta carregadas:", Object.keys(sessoesMeta).length);
   } catch (e) {
     console.log("❌ Erro ao carregar sessões meta:", e.message);
     sessoesMeta = {};
@@ -1595,8 +1592,36 @@ if (!sessoes[idSessao]) {
 
 let enviouParaAlgumDestino = false;
 
+let pulouPorIntervalo = false;
+
 for (const destino of destinosInteligentes) {
-  await enviarParaDestinoInteligente(
+  const chaveControle = `${clienteId}_${destino.id || destino.nome || destino.conexaoId}`;
+
+  const intervaloDestinoMin = Number(
+    destino.intervaloMinutos ||
+    destino.intervalo ||
+    configCliente.intervaloMinutos ||
+    config.intervaloMinutos ||
+    2
+  );
+
+  const intervaloMs = intervaloDestinoMin * 60 * 1000;
+
+  if (!controleEnvio[chaveControle]) {
+    controleEnvio[chaveControle] = 0;
+  }
+
+  if (agora - controleEnvio[chaveControle] < intervaloMs) {
+    pulouPorIntervalo = true;
+    console.log("⏳ Destino aguardando intervalo:", {
+      clienteId,
+      destino: destino.nome,
+      intervaloMinutos: intervaloDestinoMin
+    });
+    continue;
+  }
+
+  const enviado = await enviarParaDestinoInteligente(
     destino,
     oferta,
     mensagem,
@@ -1604,19 +1629,33 @@ for (const destino of destinosInteligentes) {
     configCliente
   );
 
-enviouParaAlgumDestino = true;
+  if (enviado === true) {
+    enviouParaAlgumDestino = true;
+    controleEnvio[chaveControle] = Date.now();
+  }
 }
 
-if (!enviouParaAlgumDestino) {
-  console.log(
-    "⚠️ Oferta sem destino compatível. Mantendo pendente:",
-    oferta.titulo
-  );
 
+if (!enviouParaAlgumDestino && pulouPorIntervalo) {
+  console.log("⏳ Oferta aguardando intervalo dos destinos:", oferta.titulo);
   return;
 }
 
-controleEnvio[clienteId] = Date.now();
+if (!enviouParaAlgumDestino) {
+  console.log("⚠️ Oferta não enviada. Marcando como erro:", oferta.titulo);
+
+  oferta.status = "erro";
+  oferta.statusDetalhe = "Falha ao enviar para destinos";
+  oferta.erro = "Nenhum destino confirmou envio";
+  oferta.erroEm = new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  });
+
+  salvarFila(clienteId);
+  return;
+}
+
+
 ultimoEnvioFila = Date.now();
 
 oferta.status = "enviado";
@@ -1661,7 +1700,7 @@ console.log("✅ Enviado com controle de tempo");
   }
 
 } finally {
-  enviandoAgora = false;
+  enviandoAgoraPorCliente[clienteFila] = false;
 }
 }
    
