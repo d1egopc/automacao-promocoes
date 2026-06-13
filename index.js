@@ -1323,6 +1323,50 @@ function formatarLegendaOferta(oferta = {}) {
 
 
 
+function precoTemVariacaoLegenda(valor = "") {
+  return /\d[\d.,]*\s+a\s+\d[\d.,]*/i.test(String(valor || ""));
+}
+
+function formatarFaixaPrecoLegenda(valor = "") {
+  const texto = String(valor || "").replace(/\s+/g, " ").trim();
+  const partes = texto.split(/\s+a\s+/i).map(formatarPrecoLegenda).filter(Boolean);
+
+  if (partes.length >= 2) {
+    return `${partes[0]} a ${partes[1]}`;
+  }
+
+  return formatarPrecoLegenda(texto);
+}
+
+function formatarLegendaShopee(oferta = {}) {
+  const titulo = encurtarTituloLegenda(oferta.titulo || oferta.nome || "Oferta", 130);
+  const precoBruto = oferta.precoAtual || oferta.preco;
+  const temVariacao = precoTemVariacaoLegenda(precoBruto);
+  const precoAtual = temVariacao
+    ? formatarFaixaPrecoLegenda(precoBruto)
+    : formatarPrecoLegenda(precoBruto);
+  const precoAntigo = temVariacao ? "" : formatarPrecoLegenda(oferta.precoAntigo);
+  const desconto = temVariacao ? "" : formatarDescontoLegenda(oferta);
+  const parcelamento = String(oferta.parcelamento || "").trim();
+  const cupom = formatarCupomLegenda(oferta);
+  const link = oferta.linkAfiliado || oferta.link || oferta.linkOriginal || "";
+
+  return [
+    `🛍️ ${titulo}`,
+    precoAntigo ? `De: ${precoAntigo}` : "",
+    temVariacao
+      ? `✅ Preço com variação: ${precoAtual}`
+      : precoAtual
+        ? `✅ Por: ${precoAtual}`
+        : "",
+    temVariacao ? "ℹ️ O valor pode mudar conforme cor, tamanho ou variação escolhida na Shopee." : "",
+    desconto ? `🔥 ${desconto}` : "",
+    parcelamento ? (parcelamento.startsWith("💳") ? parcelamento : `💳 ${parcelamento}`) : "",
+    cupom,
+    link ? `🛒 Comprar:\n${link}` : ""
+  ].filter(Boolean).join("\n\n");
+}
+
 // ================= HELPERS DESTINOS INTELIGENTES =================
 
 function normalizarTexto(valor = "") {
@@ -1790,6 +1834,8 @@ const destinosInteligentes =
 const mensagem =
   String(oferta.marketplace || "").toLowerCase() === "amazon"
     ? formatarLegendaOferta(oferta)
+    : String(oferta.marketplace || "").toLowerCase() === "shopee"
+      ? formatarLegendaShopee(oferta)
     : oferta.mensagem || oferta.texto || [
       oferta.titulo || oferta.nome || "Oferta",
       oferta.precoAtual || oferta.preco ? `Preço: ${oferta.precoAtual || oferta.preco}` : "",
