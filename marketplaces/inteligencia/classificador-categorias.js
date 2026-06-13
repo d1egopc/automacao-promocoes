@@ -1,2213 +1,617 @@
+let categoriasDestinos = {};
+
+try {
+  ({ CATEGORIAS_DESTINOS: categoriasDestinos = {} } = require("./categorias-destinos"));
+} catch (e) {
+  categoriasDestinos = {};
+}
+
+const CATEGORIA = {
+  alimentos: "Alimentos e Mercearia",
+  audioTv: "Audio TV",
+  automotivo: "Automotivo",
+  bebes: "Beb\u00eas e Acess\u00f3rios",
+  bebidas: "Bebidas",
+  celulares: "Celulares e Smartphones",
+  computadores: "Computadores e Notebook",
+  brinquedos: "Brinquedos e Artigos Infantis",
+  casa: "Casa, M\u00f3veis e Decora\u00e7\u00e3o",
+  climatizacao: "Climatiza\u00e7\u00e3o e Ventila\u00e7\u00e3o",
+  eletrodomesticos: "Eletrodom\u00e9sticos",
+  eletroportateis: "Eletroport\u00e1teis",
+  eletronicos: "Eletr\u00f4nicos",
+  esporte: "Esporte e Suplementos",
+  ferramentas: "Ferramentas",
+  games: "Games e Console",
+  hardware: "Gamer e Hardware",
+  iluminacao: "Ilumina\u00e7\u00e3o e El\u00e9trica",
+  infantil: "Roupas e Cal\u00e7ados Infantil",
+  limpeza: "Limpeza",
+  modaFeminina: "Roupas e Moda Feminina",
+  modaMasculina: "Roupas e Moda Masculina",
+  perifericos: "Perif\u00e9ricos",
+  pesca: "Pesca e Camping",
+  pet: "Pet Shop e Fazendinha",
+  beleza: "Perfumaria, Farm\u00e1cia e Beleza",
+  tenis: "T\u00eanis e Chinelos",
+  diversos: "Diversos"
+};
+
 function normalizarTextoLocal(texto = "") {
   return String(texto)
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function textoOferta(oferta = {}, termo = "") {
+  return normalizarTextoLocal([
+    termo,
+    oferta.titulo,
+    oferta.nome,
+    oferta.descricao,
+    oferta.categoria,
+    oferta.categoriaProduto,
+    oferta.marca,
+    oferta.marketplace,
+    oferta.loja
+  ].filter(Boolean).join(" "));
+}
+
+function termoExiste(texto, termo) {
+  const termoNormalizado = normalizarTextoLocal(termo);
+  if (!termoNormalizado) return false;
+
+  const alvo = ` ${texto} `;
+  const busca = ` ${termoNormalizado} `;
+  return alvo.includes(busca);
 }
 
 function contemAlgum(texto, palavras = []) {
-  return palavras.some(palavra =>
-    texto.includes(normalizarTextoLocal(palavra))
-  );
+  return palavras.some((palavra) => termoExiste(texto, palavra));
+}
+
+function termosEncontrados(texto, palavras = []) {
+  const encontrados = [];
+
+  for (const palavra of palavras) {
+    if (termoExiste(texto, palavra)) {
+      encontrados.push(normalizarTextoLocal(palavra));
+    }
+  }
+
+  return [...new Set(encontrados)];
+}
+
+function palavrasDosDestinos(nomeCategoria) {
+  return Object.values(categoriasDestinos || {})
+    .filter((item) => item?.nome === nomeCategoria)
+    .flatMap((item) => item.palavras || []);
+}
+
+function regra(categoria, opcoes = {}) {
+  return {
+    categoria,
+    prioridade: opcoes.prioridade || 0,
+    fortes: opcoes.fortes || [],
+    palavras: [
+      ...(opcoes.palavras || []),
+      ...palavrasDosDestinos(categoria)
+    ],
+    negativas: opcoes.negativas || []
+  };
+}
+
+const REGRAS = [
+  regra(CATEGORIA.beleza, {
+    prioridade: 120,
+    fortes: [
+      "perfume", "parfum", "eau de parfum", "eau de toilette", "deo colonia",
+      "colonia", "body splash", "malbec", "lattafa", "yara", "azzaro",
+      "boticario", "natura", "eudora", "hidratante", "skincare",
+      "protetor solar", "fps", "shampoo", "condicionador", "maquiagem",
+      "batom", "gloss", "serum", "sabonete liquido", "creme facial",
+      "vitamina c", "colageno", "maquina de cortar cabelo", "barbeador",
+      "aparador de barba", "depilador", "escova secadora", "prancha de cabelo"
+    ],
+    palavras: [
+      "chapinha", "secador cabelo", "mascara capilar", "pomada", "arnica",
+      "oleo de coco", "lo\u00e7ao", "lotion", "la vie est belle", "elixir",
+      "cerave", "la roche", "vichy", "nivea", "loreal", "elseve",
+      "pantene", "tresemme", "dove", "granado", "wella", "eucerin",
+      "termometro", "medidor de pressao", "balanca corporal", "fio dental"
+    ]
+  }),
+
+  regra(CATEGORIA.bebes, {
+    prioridade: 115,
+    fortes: [
+      "fralda", "pampers", "huggies", "lenco umedecido", "mamadeira",
+      "chupeta", "berco", "carrinho de bebe", "bebe conforto",
+      "formula infantil", "aptamil", "nan", "nestogeno", "banheira bebe"
+    ],
+    palavras: [
+      "body bebe", "macacao bebe", "saida maternidade", "kit maternidade",
+      "babador", "cadeira alimentacao", "almofada amamentacao",
+      "bomba tira leite", "andador bebe", "ninho bebe", "aspirador nasal"
+    ]
+  }),
+
+  regra(CATEGORIA.infantil, {
+    prioridade: 110,
+    fortes: [
+      "roupa infantil", "moda infantil", "tenis infantil",
+      "sandalia infantil", "camisa infantil", "conjunto infantil",
+      "camiseta infantil", "blusa infantil", "short infantil",
+      "calca infantil", "vestido infantil", "pijama infantil", "body infantil"
+    ],
+    palavras: [
+      "bota infantil", "coturno infantil", "moletom infantil", "fantasia infantil",
+      "roupa para menino", "roupa para menina", "calcado infantil", "1 a 16 anos"
+    ],
+    negativas: [
+      "boneca", "boneco", "brinquedo", "carrinho", "lego", "hot wheels",
+      "quebra cabeca", "patinete", "triciclo"
+    ]
+  }),
+
+  regra(CATEGORIA.celulares, {
+    prioridade: 105,
+    fortes: [
+      "iphone", "smartphone", "celular", "samsung galaxy", "galaxy s",
+      "galaxy a", "moto g", "motorola", "xiaomi", "redmi", "poco",
+      "realme", "infinix"
+    ],
+    palavras: [
+      "carregador iphone", "cabo iphone", "capa celular", "pelicula celular",
+      "pelicula iphone", "power bank", "bateria externa"
+    ]
+  }),
+
+  regra(CATEGORIA.hardware, {
+    prioridade: 100,
+    fortes: [
+      "placa de video", "placa grafica", "rtx", "gtx", "radeon", "geforce",
+      "rx 580", "rx 6600", "rx 7600", "rx 7700", "rx 7800", "rx 7900",
+      "ssd nvme", "nvme", "m 2", "memoria ram", "ddr4", "ddr5",
+      "placa mae", "processador", "ryzen", "intel core", "water cooler",
+      "air cooler", "fonte atx", "fonte gamer", "gabinete gamer", "kit xeon"
+    ],
+    palavras: [
+      "b450", "b550", "b650", "a520", "a620", "x570", "x670", "h610",
+      "b760", "z790", "80 plus", "pfc ativo", "cooler master", "corsair",
+      "kingston fury", "xpg", "crucial", "wd black", "pasta termica",
+      "controladora argb", "hub fan", "kit fan"
+    ]
+  }),
+
+  regra(CATEGORIA.computadores, {
+    prioridade: 95,
+    fortes: [
+      "notebook", "laptop", "chromebook", "macbook", "computador",
+      "pc gamer", "all in one", "mini pc", "desktop", "workstation",
+      "notebook gamer"
+    ],
+    palavras: [
+      "thinkpad", "ideapad", "vivobook", "zenbook", "aspire", "acer nitro",
+      "nitro 5", "predator helios", "latitude", "inspiron", "vostro",
+      "galaxy book", "book4", "legion", "omen", "alienware", "avell"
+    ]
+  }),
+
+  regra(CATEGORIA.perifericos, {
+    prioridade: 90,
+    fortes: [
+      "mouse", "teclado", "mousepad", "webcam", "headset", "micro sd",
+      "microsd", "cartao de memoria", "pendrive", "hub usb", "monitor gamer",
+      "monitor led", "monitor curvo", "monitor ultrawide"
+    ],
+    palavras: [
+      "suporte notebook", "base notebook", "cooler notebook", "mesa digitalizadora",
+      "xp pen", "dock station", "adaptador usb", "leitor de cartao",
+      "teclado mecanico", "mouse sem fio", "webcam full hd", "hd externo",
+      "ssd externo", "placa captura", "stream deck", "switch hdmi",
+      "cabo hdmi", "displayport", "repetidor wifi", "adaptador wifi",
+      "logitech", "redragon", "hyperx", "razer"
+    ]
+  }),
+
+  regra(CATEGORIA.audioTv, {
+    prioridade: 85,
+    fortes: [
+      "smart tv", "smarttv", "tv led", "tv 32", "tv 40", "tv 43", "tv 50",
+      "tv 55", "tv 65", "tv 70", "tv 75", "qled", "oled", "soundbar",
+      "home theater", "caixa de som", "caixa bluetooth", "fone bluetooth",
+      "fone de ouvido", "headphone", "earbuds", "tws", "jbl"
+    ],
+    palavras: [
+      "roku tv", "google tv", "android tv", "party box", "boombox",
+      "anker", "soundcore", "subwoofer", "alto falante", "projetor",
+      "echo dot", "alexa", "fire tv stick", "chromecast", "tv box",
+      "microfone", "karaoke", "mesa de som", "amplificador", "receiver"
+    ]
+  }),
+
+  regra(CATEGORIA.games, {
+    prioridade: 82,
+    fortes: [
+      "playstation", "ps5", "ps4", "xbox", "nintendo switch", "console",
+      "game stick", "controle ps5", "controle xbox", "joystick"
+    ],
+    palavras: [
+      "jogo ps5", "jogo xbox", "jogo nintendo", "fliperama", "controle gamer"
+    ]
+  }),
+
+  regra(CATEGORIA.eletronicos, {
+    prioridade: 78,
+    fortes: [
+      "smartwatch", "smart watch", "relogio inteligente", "smart band",
+      "smartband", "pulseira inteligente", "airtag", "smart tag",
+      "tomada inteligente", "lampada inteligente", "interruptor inteligente",
+      "sensor inteligente", "camera inteligente", "drone"
+    ],
+    palavras: [
+      "amazfit", "galaxy watch", "apple watch", "mi band", "haylou",
+      "huawei band", "rastreador bluetooth", "controle remoto universal",
+      "camera wifi", "camera ip", "ring light", "mini projetor", "airpods"
+    ]
+  }),
+
+  regra(CATEGORIA.climatizacao, {
+    prioridade: 76,
+    fortes: [
+      "ventilador", "ventilador de mesa", "ventilador de coluna",
+      "ventilador de teto", "circulador de ar", "ar condicionado",
+      "ar condicionado split", "climatizador", "umidificador",
+      "desumidificador", "aquecedor", "purificador de ar"
+    ],
+    palavras: ["exaustor", "split inverter", "ventilador torre", "elgin", "gree"]
+  }),
+
+  regra(CATEGORIA.eletrodomesticos, {
+    prioridade: 74,
+    fortes: [
+      "geladeira", "refrigerador", "frigobar", "freezer", "microondas",
+      "micro ondas", "fogao", "cooktop", "lava roupas", "maquina de lavar",
+      "lavadora", "lava e seca", "secadora", "lava loucas"
+    ],
+    palavras: [
+      "forno eletrico", "forno embutir", "coifa", "depurador", "bebedouro",
+      "purificador de agua", "adega climatizada", "cervejeira", "consul",
+      "brastemp", "electrolux", "midea", "panasonic", "philco", "eos"
+    ]
+  }),
+
+  regra(CATEGORIA.eletroportateis, {
+    prioridade: 72,
+    fortes: [
+      "cafeteira", "maquina de cafe", "air fryer", "fritadeira sem oleo",
+      "liquidificador", "mixer", "processador de alimentos", "batedeira",
+      "sanduicheira", "grill", "panela eletrica", "aspirador robo",
+      "robo aspirador", "aspirador de po", "ferro de passar"
+    ],
+    palavras: [
+      "pipoqueira", "chaleira eletrica", "torradeira", "maquina waffle",
+      "multicooker", "cooktop eletrico", "aspirador vertical", "vaporizador roupas",
+      "passadeira vapor"
+    ]
+  }),
+
+  regra(CATEGORIA.tenis, {
+    prioridade: 70,
+    fortes: [
+      "tenis", "chinelo", "havaianas", "sandalia", "rasteira", "rasteirinha",
+      "tamanco", "sapatilha", "sapatenis", "crocs", "papete", "mocassim",
+      "bota", "botina", "coturno", "sapato", "salto"
+    ],
+    palavras: [
+      "mizuno", "asics", "nike", "adidas", "olympikus", "fila", "vizzano",
+      "piccadilly", "puma", "reebok", "new balance", "kappa", "pegada",
+      "democrata", "ferracini", "beira rio", "moleca", "molekinha",
+      "via marte", "dakota", "tenis corrida", "tenis casual", "tenis esportivo"
+    ]
+  }),
+
+  regra(CATEGORIA.modaFeminina, {
+    prioridade: 68,
+    fortes: [
+      "calcinha", "sutia", "lingerie", "camisola", "pijama feminino",
+      "biquini", "camiseta feminina", "blusa feminina", "regata feminina",
+      "baby look", "cropped", "vestido", "saia", "short feminino",
+      "calca feminina", "legging", "body feminino", "moda feminina"
+    ],
+    palavras: [
+      "macaquinho feminino", "macacao feminino", "conjunto feminino",
+      "moletom feminino", "jaqueta feminina", "plus size feminina",
+      "tricot feminino", "wide leg", "jeans feminina", "bolsa feminina",
+      "tiracolo", "tote", "carteira feminina", "meia calca", "camisa feminina",
+      "blazer feminino", "kimono feminino", "cardigan", "top feminino",
+      "calca flare", "calca pantalona", "jardineira feminina", "mule feminino"
+    ]
+  }),
+
+  regra(CATEGORIA.modaMasculina, {
+    prioridade: 66,
+    fortes: [
+      "camisa polo", "camiseta masculina", "camisa masculina",
+      "camisa social masculina", "moletom masculino", "jaqueta masculina",
+      "calca jeans masculina", "bermuda masculina", "short masculino",
+      "regata masculina", "cueca boxer", "moda masculina"
+    ],
+    palavras: [
+      "kit camiseta masculina", "calca masculina", "calca sarja masculina",
+      "calca moletom masculina", "camisa xadrez masculina", "blusa masculina",
+      "casaco masculino", "colete masculino", "conjunto masculino",
+      "terno masculino", "blazer masculino", "pijama masculino", "sunga",
+      "carteira masculina", "cinto masculino", "meia masculina"
+    ]
+  }),
+
+  regra(CATEGORIA.esporte, {
+    prioridade: 64,
+    fortes: [
+      "halter", "haltere", "kettlebell", "musculacao", "crossfit", "whey",
+      "creatina", "pre treino", "albumina", "barra de proteina",
+      "suplemento", "hipercalorico", "bcaa", "bike", "bicicleta",
+      "esteira", "eliptico", "yoga", "pilates"
+    ],
+    palavras: [
+      "faixa elastica", "short academia", "camiseta academia", "dry fit",
+      "legging esportiva", "top esportivo", "bola de futebol", "luva academia",
+      "corda de pular", "coqueteleira", "omega 3", "termogenico",
+      "multivitaminico", "barra fixa", "roda abdominal", "hand grip",
+      "garmin", "integralmedica", "max titanium", "growth supplements"
+    ]
+  }),
+
+  regra(CATEGORIA.ferramentas, {
+    prioridade: 62,
+    fortes: [
+      "furadeira", "parafusadeira", "esmerilhadeira", "serra marmore",
+      "serra circular", "serra tico tico", "martelete", "lixadeira",
+      "trena", "nivel laser", "kit ferramenta", "jogo de ferramentas",
+      "maleta de ferramentas", "caixa de ferramentas"
+    ],
+    palavras: [
+      "chave inglesa", "chave allen", "chave soquete", "alicate", "vonder",
+      "makita", "bosch", "dewalt", "gedore", "tramontina pro", "compressor de ar",
+      "pistola pintura", "soprador termico", "micro retifica", "inversora solda",
+      "maquina solda", "lavadora alta pressao", "multimetro", "broca",
+      "parafuso", "escada aluminio", "paquimetro", "estilete", "rebitadeira"
+    ]
+  }),
+
+  regra(CATEGORIA.casa, {
+    prioridade: 58,
+    fortes: [
+      "jogo de panelas", "kit panela", "frigideira", "panela", "faqueiro",
+      "talheres", "copos", "jogo de copos", "marmitas", "potes",
+      "cobertor", "manta", "toalha de banho", "colcha", "tapete",
+      "cortina", "almofada", "espelho", "sofa", "rack", "painel tv",
+      "guarda roupa", "mesa", "cadeira", "penteadeira", "armario"
+    ],
+    palavras: [
+      "cortador de legumes", "ralador", "assadeira", "garrafa termica",
+      "cadeira de escritorio", "escrivaninha", "nicho", "prateleira",
+      "sapateira", "cabeceira", "poltrona", "estante", "aparador",
+      "varal", "lixeira", "torneira", "banheiro", "cozinha", "organizador",
+      "caixa organizadora", "escorredor", "misturador monocomando", "rede de dormir"
+    ]
+  }),
+
+  regra(CATEGORIA.iluminacao, {
+    prioridade: 56,
+    fortes: [
+      "luminaria", "lustre", "pendente led", "refletor", "refletor led",
+      "lampada", "painel led", "plafon", "spot led", "fita led",
+      "tomada", "interruptor", "disjuntor", "sensor de presenca",
+      "fio eletrico", "cabo eletrico"
+    ],
+    palavras: [
+      "arandela", "trilho eletrificado", "perfil led", "fonte led",
+      "driver led", "mangueira led", "pisca pisca", "luminaria solar",
+      "painel solar", "fotocelula", "quadro distribuicao", "contator",
+      "rele", "campainha", "canaleta eletrica", "adaptador tomada",
+      "regua energia"
+    ]
+  }),
+
+  regra(CATEGORIA.pet, {
+    prioridade: 54,
+    fortes: [
+      "racao", "cachorro", "gato", "petisco", "pedigree", "tapete higienico",
+      "coleira", "guia para cachorro", "peitoral", "comedouro pet",
+      "bebedouro pet", "areia para gato", "antipulgas", "vermifugo",
+      "arranhador", "casinha pet", "cama pet", "shampoo pet"
+    ],
+    palavras: [
+      "whiskas", "golden", "premier pet", "granplus", "special dog",
+      "special cat", "royal canin", "farmina", "mordedor pet",
+      "roupa pet", "caixa transporte", "aquario", "fonte pet",
+      "comedouro automatico", "granulado higienico", "fralda pet"
+    ]
+  }),
+
+  regra(CATEGORIA.brinquedos, {
+    prioridade: 52,
+    fortes: [
+      "lego", "boneco", "boneca", "hot wheels", "brinquedo",
+      "pista de brinquedo", "carrinho controle remoto", "bebe reborn",
+      "quebra cabeca", "triciclo infantil", "patinete infantil",
+      "fisher price", "massinha", "blocos de montar", "nerf"
+    ],
+    palavras: [
+      "hasbro", "marvel", "homem aranha", "spider man", "vingadores",
+      "montessori", "play doh", "casinha infantil", "jogo educativo",
+      "dinossauro", "t rex", "action figure", "brinquedo stem"
+    ]
+  }),
+
+  regra(CATEGORIA.pesca, {
+    prioridade: 50,
+    fortes: [
+      "molinete", "vara de pesca", "carretilha", "anzol", "isca artificial",
+      "linha de pesca", "pesca", "camping", "barraca", "saco de dormir",
+      "fogareiro", "lanterna camping", "caixa termica"
+    ],
+    palavras: [
+      "alicate de pesca", "colchonete", "mochila camping", "cooler",
+      "termolar", "nautika", "coleman", "cadeira camping", "mesa camping"
+    ]
+  }),
+
+  regra(CATEGORIA.automotivo, {
+    prioridade: 48,
+    fortes: [
+      "moto", "motocicleta", "capacete", "pneu", "roda automotiva",
+      "carplay", "android auto", "multimidia", "som automotivo",
+      "camera de re", "sensor estacionamento", "farol", "lanterna automotiva",
+      "bateria automotiva", "suporte veicular"
+    ],
+    palavras: [
+      "pro tork", "calota", "radio automotivo", "lampada automotiva",
+      "tapete automotivo", "capa banco", "volante esportivo", "bomba de ar",
+      "inflador de pneus", "chave de roda", "palheta limpador", "oleo motor",
+      "rack teto", "bagageiro teto"
+    ]
+  }),
+
+  regra(CATEGORIA.limpeza, {
+    prioridade: 46,
+    fortes: [
+      "mop", "esfregao", "rodo", "vassoura", "multiuso", "desinfetante",
+      "detergente", "desengordurante", "amaciante", "sabao liquido",
+      "sabao em po", "lava roupas", "tira manchas", "alvejante",
+      "agua sanitaria", "limpa vidro", "limpa piso", "papel higienico"
+    ],
+    palavras: [
+      "downy", "omo", "ype", "veja", "cloro", "removedor", "lustra moveis",
+      "pano microfibra", "esponja limpeza", "kit limpeza", "refil mop"
+    ]
+  }),
+
+  regra(CATEGORIA.bebidas, {
+    prioridade: 44,
+    fortes: [
+      "cerveja", "whisky", "vodka", "vinho", "espumante", "energetico",
+      "coca cola", "refrigerante", "suco", "agua de coco", "chopp"
+    ],
+    palavras: [
+      "heineken", "red label", "old par", "amstel", "monster", "tnt",
+      "burn", "ipa", "vinho tinto", "vinho branco", "vinho rose"
+    ]
+  }),
+
+  regra(CATEGORIA.alimentos, {
+    prioridade: 42,
+    fortes: [
+      "azeite", "arroz", "feijao", "leite", "cafe", "chocolate",
+      "biscoito", "bolacha", "tempero", "mercearia", "nespresso",
+      "dolce gusto", "achocolatado", "granola", "amendoim", "castanha",
+      "macarrao", "molho tomate", "farinha", "acucar", "cesta basica"
+    ],
+    palavras: [
+      "barra cereal", "barra de cereal", "pasta amendoim", "geleia", "mel",
+      "cha", "bananinha", "molho barbecue", "azeitona", "cappuccino",
+      "bala", "bombom", "doce de leite", "pacoca", "cookies"
+    ]
+  })
+];
+
+const ALIASES_CATEGORIA = new Map(
+  Object.values(CATEGORIA).map((categoria) => [normalizarTextoLocal(categoria), categoria])
+);
+
+function categoriaDeclaradaValida(oferta = {}) {
+  const categoria = normalizarTextoLocal(oferta.categoria || oferta.categoriaProduto || "");
+
+  if (!categoria) return "";
+
+  const categoriasInvalidas = [
+    "geral", "todos", "todas", "amazon", "aliexpress", "shopee",
+    "mercadolivre", "mercado livre", "magalu", "awin", "kabum",
+    "computador", "computadores", "escritorio"
+  ];
+
+  if (categoriasInvalidas.some((item) => categoria === item || categoria.includes(item))) {
+    return "";
+  }
+
+  return ALIASES_CATEGORIA.get(categoria) || "";
+}
+
+function pontuarRegra(texto, regraCategoria) {
+  const fortes = termosEncontrados(texto, regraCategoria.fortes);
+  const palavras = termosEncontrados(texto, regraCategoria.palavras);
+  const negativas = termosEncontrados(texto, regraCategoria.negativas);
+
+  if (!fortes.length && !palavras.length) {
+    return null;
+  }
+
+  const pontuacao =
+    regraCategoria.prioridade +
+    fortes.reduce((total, termo) => total + 18 + termo.split(" ").length, 0) +
+    palavras.reduce((total, termo) => total + 6 + Math.min(termo.split(" ").length, 3), 0) -
+    negativas.length * 20;
+
+  return {
+    categoria: regraCategoria.categoria,
+    pontuacao,
+    fortes,
+    palavras
+  };
+}
+
+function desempatar(a, b) {
+  if (b.pontuacao !== a.pontuacao) return b.pontuacao - a.pontuacao;
+
+  const fortes = b.fortes.length - a.fortes.length;
+  if (fortes !== 0) return fortes;
+
+  return b.palavras.length - a.palavras.length;
 }
 
 function classificarCategoriaOferta(oferta = {}, termo = "") {
-  const marketplace = normalizarTextoLocal(oferta.marketplace || "");
-
-  const texto = normalizarTextoLocal(`
-    ${termo}
-    ${oferta.titulo || ""}
-    ${oferta.nome || ""}
-    ${oferta.descricao || ""}
-    ${oferta.categoria || ""}
-    ${marketplace}
-  `);
-
-// ===== PERFUMARIA / BELEZA TEM PRIORIDADE MÁXIMA =====
-
-if (contemAlgum(texto, [
-  "perfume",
-  "edp",
-  "edt",
-  "eau de parfum",
-  "eau de toilette",
-
-  "colonia",
-  "colônia",
-  "deo colonia",
-
-  "malbec",
-  "lattafa",
-  "yara",
-
-  "body splash",
-
-  "maquiagem",
-  "skincare",
-
-  "hidratante",
-
-  "protetor solar",
-  "protetor facial",
-
-  "fps 30",
-  "fps 50",
-  "fps 60",
-  "fps",
-
-  "shampoo",
-  "condicionador",
-
-  // ===== REFORÇO =====
-
-  "batom",
-
-  "gel para sobrancelhas",
-  "sobrancelha",
-
-  "bruma hidratante",
-
-  "sabonete liquido",
-  "sabonete líquido",
-
-  "loção",
-  "locao",
-  "lotion",
-
-  "creme facial",
-  "creme corporal",
-
-  "arnica",
-  "pomada",
-
-  "óleo de coco",
-  "oleo de coco",
-
-  "prancha de cabelo",
-  "escova secadora",
-
-  "kit hidratação",
-  "kit hidratacao",
-
-  "anti oleosidade",
-  "antioleosidade",
-
-  // ===== PERFUMES FORTES =====
-
-  "la vie est belle",
-  "elixir",
-
-  // ===== FARMÁCIA =====
-
-  "vitamina c",
-  "colageno",
-  "colágeno",
-
-  "protecao solar",
-  "proteção solar",
-
-  "anti idade",
-  "anti-idade"
-])) {
-  console.log(
-    "🧠 Perfumaria prioridade:",
-    oferta.titulo || oferta.nome
-  );
-
-  return "Perfumaria, Farmácia e Beleza";
-}
-
-
-if (contemAlgum(texto, [
-  "maquina de cortar cabelo",
-  "máquina de cortar cabelo",
-  "maquininha de cortar cabelo",
-  "maquina de barbear",
-  "máquina de barbear",
-  "barbeador",
-  "aparador de pelos",
-  "aparador de barba",
-  "kemei",
-  "kemel",
-  "barbearia",
-  "shaver",
-  "depilador"
-])) return "Perfumaria, Farmácia e Beleza";
-
-
-  // ===== CORREÇÕES FORTES ANTES DE TUDO =====
-
-  if (contemAlgum(texto, [
-    "ventilador", "ventilador de mesa", "ventilador de coluna",
-    "ventilador de teto", "circulador de ar", "ar condicionado",
-    "ar-condicionado", "climatizador", "umidificador",
-    "desumidificador", "aquecedor", "exaustor", "purificador de ar"
-  ])) return "Climatização e Ventilação";
-
-if (contemAlgum(texto, [
-  "geladeira",
-  "frigobar",
-  "freezer",
-
-  "microondas",
-  "micro-ondas",
-
-  "forno eletrico",
-  "forno elétrico",
-
-  "fogao",
-  "fogão",
-
-  "cooktop",
-
-  "lava loucas",
-  "lava-louças",
-
-  "lava roupas",
-  "lavadora",
-  "máquina de lavar",
-  "maquina de lavar",
-
-  "secadora",
-
-  "bebedouro esmaltec",
-  "purificador de agua",
-  "purificador de água",
-
-  "agua gelada",
-  "água gelada",
-
-  "bebedouro de mesa",
-  "bebedouro coluna",
-
-  "consul",
-  "brastemp",
-  "electrolux",
-  "philco",
-  "midea",
-  "eos",
-  "panasonic"
-])) return "Eletrodomésticos";
-
-
-if (contemAlgum(texto, [
-  "bota infantil",
-  "coturno infantil",
-  "botina infantil",
-
-  "camisa infantil",
-  "camisa xadrez infantil",
-
-  "calca moletom infantil",
-  "calça moletom infantil",
-
-  "moletom infantil",
-  "roupa infantil",
-
-  "patins infantil",
-
-  "sandalia infantil",
-  "sandália infantil",
-
-  "chinelo infantil",
-
-  "tenis infantil",
-  "tênis infantil",
-
-  "conjunto infantil",
-
-  "vestido infantil",
-
-  "pijama infantil",
-
-  "body infantil",
-
-  "fantasia infantil",
-
-  "moda infantil",
-
-  "roupa para menino",
-  "roupa para menina",
-
-  "calçado infantil",
-  "calcado infantil",
-
-  "kit roupa infantil",
-
-  "1 a 16 anos"
-])) return "Roupas e Calçados Infantil";
-
-if (contemAlgum(texto, [
-  "calcinha", "sutia", "sutiã", "lingerie", "cueca feminina",
-  "calcinha boxer", "short sem costura", "she by mash",
-  "anagua", "anágua", "camisola",
-  "pijama feminino", "baby doll", "babydoll",
-  "biquini", "bíquini", "maio natacao", "maiô natação",
-
-  "camiseta feminina",
-  "camiseta oversized feminina",
-  "blusa feminina",
-  "regata feminina",
-  "t-shirt feminina",
-  "baby look",
-  "babylook",
-  "cropped",
-  "cropped feminino",
-
-  "vestido feminino",
-  "saia feminina",
-
-  "short feminino",
-  "shorts feminino",
-
-  "calca feminina",
-  "calça feminina",
-
-  "legging feminina",
-  "calça legging feminina",
-  "calca legging feminina",
-
-  "body feminino",
-
-  "macaquinho feminino",
-  "macacao feminino",
-  "macacão feminino",
-
-  "conjunto feminino",
-
-  "moletom feminino",
-  "jaqueta feminina",
-
-  "camiseta gola alta feminina",
-  "gola alta feminina",
-
-  "moda feminina",
-
-  "plus size feminino",
-  "plus size feminina",
-
-  "blusa brasil feminina",
-  "blusa do brasil feminina",
-
-  "tricot feminino",
-  "tricô feminino",
-
-  "calca wide leg",
-  "calça wide leg",
-  "wide leg feminina",
-
-  "jeans feminina",
-
-  "bolsa feminina",
-  "bolsas femininas",
-  "kit bolsas femininas",
-  "tiracolo feminina",
-  "bolsa tiracolo",
-  "bolsa tote",
-  "carteira feminina",
-
-  "meia calca",
-  "meia-calca",
-  "meia-calça",
-
-  "look feminino",
-
-  "camisa xadrez feminina",
-  "xadrez feminina",
-
-  "moda evangelica",
-  "moda evangélica",
-
-  "camisa feminina",
-  "camisete feminina",
-
-  "blazer feminino",
-
-  "kimono feminino",
-
-  "cardigan feminino",
-  "cardigã feminino",
-
-  "top feminino",
-  "top cropped",
-
-  "conjunto moletom feminino",
-
-  "calca flare",
-  "calça flare",
-
-  "calca pantalona",
-  "calça pantalona",
-
-  "jardineira feminina",
-  "colete feminino",
-  "sobretudo feminino",
-  "casaco feminino",
-  "parka feminina",
-  "anorak feminino",
-
-  "jaqueta jeans feminina",
-  "camisa jeans feminina",
-
-  "bermuda feminina",
-
-  "mule feminino",
-  "sapatilha feminina",
-  "tamanco feminino",
-
-  "regata brasil feminina",
-  "regatas do brasil feminina",
-
-  "ribana feminina"
-])) return "Roupas e Moda Feminina";
-
-
-if (contemAlgum(texto, [
-  "camisa polo", "polo piquet", "camiseta masculina", "camisetas masculina",
-  "camiseta henley", "henley", "camiseta basica", "camiseta básica",
-  "camiseta premium", "camiseta algodao", "camiseta algodão",
-  "camiseta oversized masculina", "camiseta masculina oversized",
-  "kit camiseta masculina", "kit camisetas masculinas",
-  "kit camiseta", "kit camisetas",
-  "camisa masculina", "camisa social masculina",
-  "moletom masculino", "jaqueta masculina",
-  "calca jeans masculina", "calça jeans masculina",
-  "bermuda masculina", "short masculino", "shorts masculino",
-  "regata masculina", "cueca boxer", "cuecas boxer",
-  "boxer masculina", "boxer masculino",
-  "moda masculina", "plus size masculino",
-
-  "calca masculina",
-  "calça masculina",
-
-  "calca sarja masculina",
-  "calça sarja masculina",
-
-  "calca moletom masculina",
-  "calça moletom masculina",
-
-  "camisa xadrez masculina",
-  "camisa jeans masculina",
-
-  "blusa masculina",
-  "blusao masculino",
-  "blusão masculino",
-
-  "casaco masculino",
-  "colete masculino",
-
-  "jaqueta jeans masculina",
-  "jeans masculino",
-  "skinny masculino",
-  "calca skinny masculina",
-  "calça skinny masculina",
-  "lycra masculina",
-  "elastano masculino",
-  "jaqueta couro masculina",
-
-  "conjunto masculino",
-  "conjunto moletom masculino",
-
-  "terno masculino",
-  "blazer masculino",
-
-  "pijama masculino",
-
-  "sunga",
-  "short praia masculino",
-  "bermuda tactel masculina",
-
-  "carteira masculina",
-  "cinto masculino",
-
-  "meia masculina",
-  "meias masculinas",
-  "blusa de moletom masculina",
-  "blusas de moletom masculina",
-
-  // ===== REFORÇO JEANS / SKINNY =====
-
-"jeans masculino",
-"jeans masculina",
-
-"skinny masculino",
-"skinny masculina",
-
-"calca skinny masculina",
-"calça skinny masculina",
-
-"lycra masculina",
-"elastano masculino",
-
-"kit calcas masculina",
-"kit calças masculina",
-
-"kit jeans masculina",
-"kit jeans masculino",
-
-// ===== REFORÇO REGATA =====
-
-"regata oversized",
-"regata oversized masculina",
-
-"machao",
-"machão",
-
-"muscle tee",
-"muscle",
-
-// ===== REFORÇO BERMUDA =====
-
-"bermuda cargo",
-"cargo masculina",
-
-"bermuda moletom",
-
-"bermuda academia",
-
-"bermuda treino",
-
-"bermuda praia",
-
-// ===== REFORÇO CAMISA =====
-
-"camisa casual masculina",
-
-"camisa manga longa masculina",
-
-"camisa manga curta masculina",
-
-// ===== REFORÇO GERAL =====
-
-"roupa masculina",
-
-"look masculino",
-
-"moda homem",
-
-"masculino adulto" 
-])) return "Roupas e Moda Masculina";
-
-if (contemAlgum(texto, [
-  "tenis", "tênis",
-  "chinelo",
-  "havaianas",
-
-  "sandalia", "sandália",
-  "rasteira", "rasteirinha",
-
-  "tamanco",
-  "sapatilha",
-
-  "sapatenis", "sapatênis",
-
-  "crocs",
-  "papete",
-
-  "mocassim",
-  "loafer",
-
-  "bota",
-  "botina",
-  "coturno",
-
-  "sapato",
-  "salto",
-  "salto alto",
-
-  "mizuno",
-  "asics",
-  "nike",
-  "adidas",
-  "olympikus",
-  "olympicus",
-  "fila",
-  "vizzano",
-  "piccadilly",
-  "puma",
-  "reebok",
-  "new balance",
-  "kappa",
-
-  // reforço
-
-  "pegada",
-  "democrata",
-  "ferracini",
-  "beira rio",
-  "moleca",
-  "molekinha",
-  "molekinho",
-
-  "via marte",
-  "dakota",
-
-  "sandalia plataforma",
-  "sandália plataforma",
-
-  "tenis corrida",
-  "tênis corrida",
-
-  "tenis casual",
-  "tênis casual",
-
-  "tenis esportivo",
-  "tênis esportivo",
-
-  "calcado feminino",
-  "calçado feminino",
-
-  "calcado masculino",
-  "calçado masculino",
-
-  "mizuno wave",
-  "nike air",
-  "air max",
-  "ultraboost",
-  "gel kayano",
-  "gel nimbus",
-  "corre 3",
-  "corre 4",
-  "corre max"
-])) return "Tênis e Chinelos";
-
-if (contemAlgum(texto, [
-  "smartwatch", "smart watch",
-  "relogio inteligente", "relógio inteligente",
-  "smart band", "smartband",
-  "pulseira inteligente",
-  "monitor cardiaco", "monitor cardíaco",
-
-  "amazfit", "galaxy watch",
-  "apple watch", "mi band",
-  "haylou", "huawei band",
-
-  "rastreador bluetooth",
-  "airtag", "smart tag", "galaxy smarttag",
-
-  "controle remoto universal",
-  "controle smart",
-  "tomada inteligente",
-  "lampada inteligente", "lâmpada inteligente",
-  "interruptor inteligente",
-  "sensor inteligente",
-  "camera inteligente", "câmera inteligente"
-])) return "Eletrônicos";
-
-if (contemAlgum(texto, [
-  "halter", "haltere", "kettlebell", "musculacao", "musculação",
-  "peso livre", "crossfit", "whey", "creatina", "pre treino",
-  "pré treino", "albumina", "barra de proteina", "barra de proteína",
-  "barra proteica", "faixa elastica", "faixa elástica",
-
-  "bike", "bicicleta", "spinning", "esteira", "eliptico", "elíptico",
-  "ergometrica", "ergométrica",
-
-  "tapete yoga", "tapete para yoga", "yoga", "pilates",
-
-  "short academia", "camiseta academia", "dry fit",
-  "legging esportiva", "top esportivo", "bermuda esportiva",
-
-  "bola de futebol", "bola futebol", "bola futsal",
-  "bola volei", "bola vôlei", "bola basquete",
-
-  "luva academia", "caneleira", "corda de pular",
-  "saco de pancada", "kimono", "tatame",
-
-  "suplemento", "hipercalorico", "hipercalórico",
-  "bcaa", "glutamina", "coqueteleira", "shakeira",
-
-  "tenis corrida", "tênis corrida", "tenis esportivo",
-  "tênis esportivo", "corrida", "caminhada",
-
-  "garrafa termica esportiva", "garrafa esportiva",
-  "squeeze", "mochila hidratacao", "mochila hidratação",
-  
-  "mini band",
-  "mini bands",
-  "elastico exercicio",
-  "elástico exercício",
-  "albumin protein",
-  "albumin",
-
-  // ===== REFORÇO =====
-
-"omega 3",
-"ômega 3",
-
-"termogenico",
-"termogênico",
-
-"multivitaminico",
-"multivitamínico",
-
-"vitamina esportiva",
-
-"isotonico",
-"isotônico",
-
-"carbo gel",
-"gel carboidrato",
-
-"massa muscular",
-
-"ganho de massa",
-
-"protein bar",
-
-"electrolitico",
-"eletrolítico",
-
-"suplemento esportivo",
-
-"kit academia",
-
-"barra fixa",
-
-"roda abdominal",
-
-"ab wheel",
-
-"hand grip",
-"handgrip",
-
-"munhequeira",
-"munhequeira esportiva",
-
-"joelheira esportiva",
-
-"cinta lombar academia",
-
-"camisa ciclismo",
-"bermuda ciclismo",
-
-"oculos ciclismo",
-"óculos ciclismo",
-
-"capacete ciclismo",
-
-"garmin",
-
-"gatorade",
-
-"integralmedica",
-"integralmedica",
-
-"max titanium",
-
-"growth supplements",
-
-"black skull",
-
-"dux nutrition"
-])) return "Esporte e Suplementos";
-
-
-if (contemAlgum(texto, [
-  "perfume", "parfum",
-  "eau de toilette", "eau de parfum",
-
-  "calvin klein", "eternity",
-  "hugo boss", "azzaro",
-  "gabriela sabatini",
-  "malbec", "lattafa",
-  "yara", "body splash",
-  "invictus", "montblanc",
-  "paco rabanne",
-  "armani",
-
-  "eudora", "siage", "siàge",
-
-  "shampoo",
-  "condicionador",
-  "máscara capilar",
-  "mascara capilar",
-
-  
-  "chapinha",
-  
-  "escova secadora",
-  "modelador",
-  "babyliss",
-
-  "hidratante",
-  "protetor solar",
-  "skincare",
-  "maquiagem",
-
-  "creme facial",
-  "creme corporal",
-  "sabonete facial",
-  "serum",
-  "sérum",
-
-  "pomada",
-  "massageadora",
-  "arnica",
-  "mentol",
-
-  "principia",
-
-  "magnesio", "magnésio",
-  
-  "multivitaminico",
-  "multivitamínico",
-
-  
-  "cápsulas",
-
-  "fio dental",
-  "enxaguante",
-  "colutorio",
-  "colutório",
-
-  "termometro",
-  "termômetro",
-
-  "medidor de pressao",
-  "medidor de pressão",
-
-  "balanca corporal",
-  "balança corporal",
-
-  "nivea",
-  "loreal", "l'oréal",
-  "elseve",
-  "pantene",
-  "tresemme", "trésemme",
-  "dove",
-
-  "vichy",
-  "la roche",
-  "la roche-posay",
-  "cerave", "ceravee",
-
-  "avon",
-  "natura",
-  "boticario", "boticário",
-  "o boticario", "o boticário",
-
-  "granado",
-  "bio extratus",
-  "wella",
-  "eucerin"
-])) return "Perfumaria, Farmácia e Beleza";
-
-
-  if (contemAlgum(texto, [
-  "furadeira", "parafusadeira", "esmerilhadeira",
-  "serra marmore", "serra mármore", "serra circular",
-  "serra tico tico", "martelete", "lixadeira",
-  "trena", "nivel laser", "nível laser",
-  "kit ferramenta", "kit ferramentas",
-  "jogo de ferramentas", "maleta de ferramentas",
-  "caixa de ferramentas",
-  "chave inglesa", "chave ajustavel", "chave ajustável",
-  "chave grifo", "chave allen", "chave combinada",
-  "chave soquete", "soquete", "adaptador soquete",
-  "alicate pressão", "alicate pressao",
-  "alicate universal", "alicate corte",
-  "alicate bico", "alicate bomba d agua",
-  "alicate bomba d'agua", "alicate grifo",
-  "vonder", "makita", "bosch", "dewalt",
-  "gedore", "fertak", "tramontina pro",
-  "macaco hidraulico", "macaco hidráulico",
-  "compressor de ar", "pistola pintura",
-  "soprador termico", "soprador térmico",
-  
-// ===== REFORÇO =====
-
-  "micro retifica",
-  "micro retífica",
-  "retifica",
-  "retífica",
-
-  "serra sabre",
-  "serra meia esquadria",
-  "esmeril",
-
-  "inversora solda",
-  "maquina solda",
-  "máquina solda",
-  "soldadora",
-
-  "lavadora alta pressao",
-  "lavadora alta pressão",
-  "wap",
-
-  "gerador energia",
-  "gerador portátil",
-  "gerador portatil",
-
-  "multimetro",
-  "multímetro",
-
-  "detector metal",
-  "detector de metal",
-
-  "grampeador pneumático",
-  "grampeador pneumatico",
-
-  "pregador pneumático",
-  "pregador pneumatico",
-
-  "torquimetro",
-  "torquímetro",
-
-  "carrinho ferramenta",
-  "carrinho de ferramentas",
-
-  "bateria makita",
-  "bateria dewalt",
-  "bateria bosch",
-
-  "disco corte",
-  "disco diamantado",
-
-  "broca",
-  "jogo brocas",
-  "kit brocas",
-
-  "chave catraca",
-  "catraca",
-
-  // ===== REFORÇO FINAL =====
-
-"black decker",
-"black+decker",
-"worker",
-"stanley",
-
-"ferro solda",
-"ferro de solda",
-
-"estacao solda",
-"estação solda",
-
-"rebitador",
-
-"parafuso",
-"kit parafuso",
-
-"bucha parede",
-"bucha nylon",
-
-"escada aluminio",
-"escada alumínio",
-
-"escada dobravel",
-"escada dobrável",
-
-"nivel",
-"nível",
-
-"paquimetro",
-"paquímetro",
-
-"micrometro",
-"micrômetro",
-
-"morsa",
-
-"torno bancada",
-
-"arco serra",
-
-"lamina serra",
-"lâmina serra",
-
-"chave philips",
-"chave phillips",
-"chave de fenda",
-
-"estilete",
-
-"rebitadeira"
-])) return "Ferramentas";
-
-  if (contemAlgum(texto, [
-   // Cozinha
-  "jogo de panelas", "kit panela", "frigideira",
-  "panela", "caçarola", "caçarola", "fervedor",
-  "faqueiro", "tramontina", "talheres",
-  "copos", "taças", "tacas", "jogo de copos",
-  "cortador de legumes", "ralador", "fatiador",
-  "marmitas", "potes", "travas hermeticas", "travas herméticas",
-  "formas assadeiras", "assadeira", "forma antiaderente",
-  "crepeira", "maquina de crepe", "máquina de crepe",
-  "garrafa inox", "garrafa termica", "garrafa térmica",
-
-  // Cama e Banho
-  "cobertor", "manta",
-  "toalhas de banho", "toalha de banho",
-  "colcha", "cobre leito",
-
-  // Decoração
-  "tapete", "cortina", "almofada",
-  "espelho", "adnet",
-
-  // Móveis
-  "sofa", "sofá",
-  "rack",
-  "painel tv", "painel de tv",
-  "guarda roupa", "guarda-roupa",
-  "roupeiro",
-  "mesa", "cadeira",
-
-  "cadeira de escritorio",
-  "cadeira de escritório",
-  "cadeira ergonomica",
-  "cadeira ergonômica",
-  "cadeira executiva",
-  "cadeira presidente",
-
-  "penteadeira",
-  "comoda", "cômoda",
-  "armario", "armário",
-
-  "escrivaninha",
-  "nicho",
-  "prateleira",
-  "sapateira",
-  "cabideiro",
-  "cabeceira",
-  "poltrona",
-  "estante",
-  "aparador",
-  "buffet",
-  "criado mudo",
-  "criado-mudo",
-
-  // Casa
-  "varal",
-  "lixeira",
-  "guarda chuva",
-  "torneira",
-  "banheiro",
-  "cozinha",
-
-  // Churrasco
-  "kit churrasco",
-
-  // Utilidades
-  "utensilios cozinha",
-  "utensílios cozinha",
-
-  // Rede e descanso
-"rede",
-"rede de dormir",
-"rede casal",
-"rede solteiro",
-
-// Organização
-"organizador",
-"caixa organizadora",
-"gaveteiro",
-
-// Lavanderia
-"cesto roupa",
-"cesto de roupa",
-"cesto organizador",
-
-// Banheiro
-"porta papel higienico",
-"porta papel higiênico",
-"porta toalha",
-
-// Cozinha
-"escorredor",
-"escorredor de louça",
-"escorredor de louca",
-
-// Torneiras
-"torneira gourmet",
-"misturador monocomando",
-"monocomando",
-
-// Iluminação decorativa
-"abajur",
-"luminaria decorativa",
-"luminária decorativa",
-
- // Organização
-"cesto roupa",
-"cesto de roupa",
-"cesto organizador",
-
-// Banheiro
-"porta papel higienico",
-"porta papel higiênico",
-"porta toalha" 
-])) return "Casa, Móveis e Decoração";
-
-
-if (contemAlgum(texto, [
-    "luminaria", "luminária", "lustre", "pendente", "pendente led",
-    "refletor", "refletor led", "holofote", "lampada", "lâmpada",
-    "painel led", "plafon", "spot", "spot led", "fita led",
-    "led strip", "tomada", "interruptor", "extensao", "extensão",
-    "disjuntor", "sensor de presenca", "sensor de presença",
-    "soquete", "bocal", "fio eletrico", "fio elétrico", "cabo eletrico",
-    "cabo elétrico",
-    // ===== REFORÇO =====
-
-"arandela",
-
-"trilho eletrificado",
-"trilho de luz",
-
-"perfil led",
-
-"fonte led",
-
-"driver led",
-
-"mangueira led",
-
-"cordao luminoso",
-"cordão luminoso",
-
-"pisca pisca",
-"pisca-pisca",
-
-"abajur",
-
-"luminaria mesa",
-"luminária mesa",
-
-"luminaria escritorio",
-"luminária escritório",
-
-"luminaria solar",
-"luminária solar",
-
-"poste solar",
-
-"energia solar",
-"painel solar",
-
-"fotocelula",
-"fotocélula",
-
-"quadro distribuicao",
-"quadro distribuição",
-
-"contator",
-
-"rele",
-"relé",
-
-"campainha",
-
-"dps eletrico",
-"dps elétrico",
-
-"canaleta eletrica",
-"canaleta elétrica",
-
-"conector eletrico",
-"conector elétrico",
-
-"adaptador tomada",
-
-"regua energia",
-"régua energia"
-])) return "Iluminação e Elétrica";
-
-
-if (contemAlgum(texto, [
-  "racao",
-  "ração",
-  "cachorro",
-  "petisco",
-  "bifinho",
-  "pedigree",
-  "quatree",
-  "tapete higienico",
-  "tapete higiênico",
-
-  "coleira",
-  "guia para cachorro",
-  "peitoral para cachorro",
-
-  "comedouro",
-  "bebedouro pet",
-  "bebedouro para cachorro",
-  "bebedouro para gato",
-
-  "chalesco",
-  "petlove",
-
-  "avert",
-  "macrogard",
-  "pet sticks",
-  "pet stick",
-
-  "brinquedo para cachorro",
-  "brinquedo para gato",
-
-  "areia para gato",
-
-  "antipulgas",
-  "anti pulgas",
-  "vermifugo",
-  "vermífugo",
-
-  "arranhador",
-  "casinha pet",
-  "cama pet",
-  "caminha pet",
-  "transportadora pet",
-
-  "whiskas",
-  "golden",
-  "premier pet",
-  "granplus",
-  "special dog",
-  "special cat",
-  "royal canin",
-  "farmina",
-
-  "petisco cachorro",
-  "petisco gato",
-
-  "osso mastigavel",
-  "osso mastigável",
-
-  "mordedor cachorro",
-  "mordedor pet",
-
-  "roupa pet",
-  "fantasia pet",
-  "roupinha pet",
-  "roupa para cachorro",
-  "roupa para gato",
-
-  "shampoo pet",
-  "condicionador pet",
-  "escova pet",
-
-  "caixa transporte",
-  "caixa de transporte",
-
-  "gaiola",
-  "viveiro",
-
-  "aquario",
-  "aquário",
-
-  "fonte pet",
-  "fonte para gato",
-
-  "comedouro automatico",
-  "comedouro automático",
-
-  "bebedouro automatico",
-  "bebedouro automático",
-
-  "educador sanitario",
-  "educador sanitário",
-
-  "granulado higienico",
-  "granulado higiênico",
-
-  "areia higienica",
-  "areia higiênica",
-
-  "gatinho",
-  "gatinha",
-
-  "snack pet",
-  "snack para cachorro",
-  "snack para gato",
-
-  "omega 3 pet",
-  "ômega 3 pet",
-  "suplemento pet",
-
-  "higienico para caes",
-  "higiênico para cães",
-
-  "fralda pet",
-
-  "corda mordedor",
-  "brinquedo pet",
-
-  "poste arranhador",
-
-  "casa para cachorro",
-  "casa para gato",
-
-  "pet trainer",
-  "adestramento",
-
-  "doguinho",
-  "doginho"
-])) return "Pet Shop e Fazendinha";
-
-  if (contemAlgum(texto, [
-    "fralda", "huggies", "pampers", "lenco umedecido", "lenço umedecido",
-    "lencos umedecidos", "lenços umedecidos", "mamadeira", "chupeta",
-    "berco", "berço", "mosquiteiro", "carrinho de bebe", "carrinho de bebê",
-    "bebe conforto", "bebê conforto", "tapete infantil", "tatame infantil",
-      
-// ===== REFORÇO =====
-
-  "formula infantil",
-  "fórmula infantil",
-
-  "nan",
-  "aptamil",
-  "nestogeno",
-  "nestogênio",
-
-  "kit maternidade",
-
-  "saida maternidade",
-  "saída maternidade",
-
-  "body bebe",
-  "body bebê",
-
-  "macacao bebe",
-  "macacão bebê",
-  "macacao infantil",
-  "macacão infantil",
-
-  "babador",
-
-  "prato infantil",
-  "talher infantil",
-
-  "cadeira alimentacao",
-  "cadeira alimentação",
-
-  "banheira bebe",
-  "banheira bebê",
-
-  "almofada amamentacao",
-  "almofada amamentação",
-
-  "extrator leite",
-  "bomba tira leite",
-
-  "andador bebe",
-  "andador bebê",
-
-  "berco portatil",
-  "berço portátil",
-
-  "ninho bebe",
-  "ninho bebê",
-
-  "kit higiene bebe",
-  "kit higiene bebê",
-
-  "termometro infantil",
-  "termômetro infantil",
-
-  "aspirador nasal",
-
-  "mordedor",
-
-  "brinquedo educativo",
-
-  "tapete atividades",
-  "tapete de atividades"
-  ])) return "Bebês e Acessórios";
-
-if (contemAlgum(texto, [
-  "placa de video",
-  "placa de vídeo",
-  "placa grafica",
-  "placa gráfica",
-  "rtx",
-  "gtx",
-  "rx 580",
-  "rx 6600",
-  "rx 7600",
-  "rx 9070",
-  "geforce",
-  "radeon",
-
-  "ssd",
-  "ssd nvme",
-  "nvme",
-  "m.2",
-  "ssd sata",
-  "Dissipador JEYI PS5 SSD",
-
-  "memoria ram",
-  "memória ram",
-  "ddr4",
-  "ddr5",
-
-  "placa mae",
-  "placa mãe",
-
-  "processador",
-  "processador amd",
-  "processador intel",
-  "ryzen",
-  "ryzen 3",
-  "ryzen 5",
-  "ryzen 7",
-  "ryzen 9",
-  "intel core",
-  "core i3",
-  "core i5",
-  "core i7",
-  "core i9",
-  "soquete am4",
-  "soquete am5",
-  "soquete lga",
-
-  "water cooler",
-  "air cooler",
-  "cooler para processador",
-  "fan argb",
-  "ventoinha",
-
-  "gabinete gamer",
-  "fonte gamer",
-  "fonte atx",
-
-  "kit xeon",
-  "xeon",
-
-  "monitor gamer",
-    // ===== REFORÇO =====
-
-  "placa-mae",
-  "placa-mãe",
-
-  "b450",
-  "b550",
-  "b650",
-  "a520",
-  "a620",
-  "x570",
-  "x670",
-  "h610",
-  "b760",
-  "z790",
-
-  "rx 570",
-  "rx 6750",
-  "rx 7700",
-  "rx 7800",
-  "rx 7900",
-
-  "rtx 3050",
-  "rtx 3060",
-  "rtx 4060",
-  "rtx 4070",
-  "rtx 4080",
-  "rtx 4090",
-  "rtx 5060",
-  "rtx 5070",
-  "rtx 5080",
-  "rtx 5090",
-
-  "memoria ddr4",
-  "memória ddr4",
-  "memoria ddr5",
-  "memória ddr5",
-
-  "fonte 500w",
-  "fonte 550w",
-  "fonte 600w",
-  "fonte 650w",
-  "fonte 750w",
-  "fonte 850w",
-
-  "80 plus",
-  "pfc ativo",
-
-  "cooler master",
-  "corsair",
-  "kingston fury",
-  "xpg",
-  "crucial",
-  "western digital",
-  "wd black",
-  "seagate",
-
-  "pasta termica",
-  "pasta térmica",
-
-  "controladora argb",
-  "hub fan",
-  "kit fan",
-
-  "cadeira gamer",
-  "mesa gamer"
-])) return "Gamer e Hardware";
-
- if (contemAlgum(texto, [
-  "mouse",
-  "teclado",
-  "mousepad",
-
-  "webcam",
-
-  "headset",
-
-  "micro sd",
-  "microsd",
-  "cartao de memoria",
-  "cartão de memória",
-
-  "pendrive",
-
-  "hub usb",
-
-  "monitor gamer",
-  "monitor aoc",
-
-  "suporte para notebook",
-  "suporte notebook",
-  "base notebook",
-  "cooler notebook",
-
-  "mesa digitalizadora",
-  "xp-pen",
-  "xppen",
-  "deco 640",
-  "deco",
-  "mesa grafica",
-  "mesa gráfica",
-  "caneta digital",
-
-  "dock station",
-  "adaptador usb",
-  "adaptador usb-c",
-  "adaptador usb c",
-  "Caixa de Som USB Notebook",
-
-  "leitor de cartão",
-  "leitor de cartao",
-
-  "trackball",
-  "Ventoinha ASUS TF120",
-
-  "apoio ergonômico",
-  "apoio ergonomico",
-    // ===== REFORÇO =====
-
-  "mouse gamer",
-  "teclado gamer",
-
-  "combo gamer",
-  "kit gamer",
-
-  "teclado mecanico",
-  "teclado mecânico",
-
-  "teclado sem fio",
-  "mouse sem fio",
-
-  "webcam full hd",
-
-  "monitor",
-  "monitor led",
-  "monitor curvo",
-  "monitor ultrawide",
-
-  "braço articulado monitor",
-  "suporte monitor",
-
-  "hd externo",
-  "ssd externo",
-
-  "case hd",
-  "case ssd",
-
-  "placa captura",
-  "placa de captura",
-
-  "stream deck",
-
-  "switch hdmi",
-
-  "cabo hdmi",
-  "displayport",
-
-  "adaptador displayport",
-
-  "repetidor wifi",
-  "repetidor wi-fi",
-
-  "placa rede usb",
-  "adaptador wifi",
-  "adaptador wi-fi",
-
-  "roteador usb",
-
-  "logitech",
-  "redragon",
-  "hyperx",
-  "razer"
-])) return "Periféricos";
-
- if (contemAlgum(texto, [
-  "notebook",
-  "laptop",
-  "chromebook",
-  "macbook",
-
-  "computador",
-
-  "pc gamer",
-
-  "all in one",
-
-  // reforço
-
-  "ultrabook",
-
-  "imac",
-
-  "mini pc",
-  "mini computador",
-
-  "desktop",
-
-  "workstation",
-
-  "notebook gamer",
-
-  "thinkpad",
-  "ideapad",
-
-  "vivobook",
-  "zenbook",
-
-  "aspire",
-  "acer nitro",
-  "nitro 5",
-
-  "acer predator",
-  "predator helios",
-
-  "latitude",
-  "inspiron",
-  "vostro",
-
-  "surface laptop",
-    "book4",
-  "galaxy book",
-
-  "expertbook",
-
-  "legion",
-
-  "omen",
-
-  "alienware",
-
-  "avell",
-
-  "positivo master",
-
-  "celeron",
-  "core i3",
-  "core i5",
-  "core i7",
-  "core ultra",
-
-  "ryzen 3",
-  "ryzen 5",
-  "ryzen 7",
-  "ryzen 9"
-])) return "Computadores e Notebook";
-
-if (contemAlgum(texto, [
-  "smart tv",
-  "smarttv",
-  "tv led",
-  "tv 32",
-  "tv 40",
-  "tv 42",
-  "tv 43",
-  "tv 50",
-  "tv 55",
-  "tv 65",
-  "tv 70",
-  "tv 75",
-  "roku tv",
-  "google tv",
-  "android tv",
-  "qled",
-  "oled",
-
-  "soundbar",
-  "home theater",
-  "caixa de som",
-  "caixa bluetooth",
-  "caixa bluetooth portátil",
-  "caixa bluetooth portatil",
-  "caixa amplificada",
-  "party box",
-  "boombox",
-  "mini speaker",
-  "speaker",
-  "som portátil",
-  "som portatil",
-
-  "fone bluetooth",
-  "fone de ouvido",
-  "headphone",
-  "headset",
-  "earbuds",
-  "tws",
-
-  "jbl",
-  "aiwa",
-  "anker",
-  "soundcore",
-
-  "subwoofer",
-  "alto falante",
-  "alto-falante",
-
-  "projetor",
-  "echo dot",
-  "alexa",
-  "fire tv stick",
-  "chromecast",
-  "tv box",
-
-  "mesa de som",
-  "mixer profissional",
-  "mixer audio",
-  "mixer áudio",
-  "amplificador",
-  "receiver",
-
-  "microfone",
-  "microfone sem fio",
-  "microfone condensador",
-  "podcast",
-  "karaoke",
-  "kit karaoke",
-  "kit karaokê",
-
-  "monitor audio",
-  "monitor de áudio",
-  "monitor de audio",
-
-  "web radio",
-  "web rádio",
-  "radio portatil",
-  "rádio portátil"
-])) return "Audio TV";
-
-if (contemAlgum(texto, [
-  "cafeteira",
-  "maquina de cafe", "máquina de café",
-
-  "air fryer",
-  "fritadeira sem oleo",
-  "fritadeira sem óleo",
-  "fritadeira eletrica", "fritadeira elétrica",
-
-  "liquidificador",
-  "mixer",
-  "processador alimentos",
-  "processador de alimentos",
-
-  "batedeira",
-  
-"pipoqueira",
-"popcorn maker",
-
-"espremedor",
-"espremedor de frutas",
-
-"extrator de suco",
-
-"cafeteira expresso",
-"cafeteira espresso",
-
-"chaleira eletrica",
-"chaleira elétrica",
-
-"torradeira",
-
-"maquina waffle",
-"máquina waffle",
-
-"waffle maker",
-
-"crepeira",
-
-"multicooker",
-
-"cooktop eletrico",
-"cooktop elétrico",
-
-  "sanduicheira",
-  "grill",
-
-  "panela eletrica",
-  "panela elétrica",
-  "panela pressao eletrica",
-  "panela pressão elétrica",
-  "cooker",
-
-  "aspirador robo",
-  "robô aspirador",
-  "robo aspirador",
-
-  "aspirador de po",
-  "aspirador de pó",
-  "aspirador vertical",
-  "aspirador sem fio",
-
-  "escova secadora",
-  "escova rotativa",
-
-  "chapinha",
-  "prancha cabelo",
-  "prancha de cabelo",
-
-  "secador cabelo",
-  "secador de cabelo",
-
-  "ferro passar",
-  "ferro de passar",
-
-  "vaporizador roupas",
-  "passadeira vapor"
-])) return "Eletroportáteis";
-
-if (contemAlgum(texto, [
-  "geladeira", "refrigerador",
-  "freezer",
-
-  "maquina de lavar", "máquina de lavar",
-  "lavadora de roupas",
-  "lava e seca",
-  "tanquinho",
-
-  "fogao", "fogão",
-  "cooktop",
-
-  "forno eletrico", "forno elétrico",
-  "forno embutir",
-  "forno de embutir",
-
-  "depurador",
-  "coifa",
-
-  "climatizador",
-
-  "ar condicionado",
-  "ar-condicionado",
-  "split inverter",
-  "split",
-
-  "ventilador",
-  "ventilador de mesa",
-  "ventilador coluna",
-  "ventilador de coluna",
-  "ventilador torre",
-  "ventilador de teto",
-
-  "adega climatizada",
-  "cervejeira",
-
-  "lava loucas",
-  "lava-louças",
-  "lava louça",
-
-  "secadora de roupas",
-  "secadora"
-])) return "Eletrodomésticos";
- 
-if (contemAlgum(texto, [
-  "mop", "esfregao", "esfregão",
-  "rodo", "vassoura",
-  "pá de lixo", "pa de lixo",
-
-  "limpeza geral",
-  "multiuso",
-  "desinfetante",
-  "detergente",
-  "desengordurante",
-
-  "amaciante", "downy",
-  "sabao liquido", "sabão líquido",
-  "sabao em po", "sabão em pó",
-  "lava roupas",
-  "lava-roupas",
-  "lava louças", "lava louca",
-
-  "tira manchas",
-  "tira mancha",
-  "removedor de manchas",
-
-  "alvejante",
-  "agua sanitaria", "água sanitária",
-  "cloro",
-
-  "limpa vidro",
-  "limpa piso",
-  "limpa pisos",
-  "limpa porcelanato",
-  "limpa banheiro",
-
-  "saponaceo", "saponáceo",
-  "removedor",
-  "lustra moveis", "lustra móveis",
-
-  "pano microfibra",
-  "pano de microfibra",
-  "esponja limpeza",
-  "esponja multiuso",
-
-  "limpeza pesada",
-  "kit limpeza",
-  "refil mop",
-  "papel higienico",
-  "papel higiênico"
-])) return "Limpeza";
-
-  if (contemAlgum(texto, [
-  "molinete", "vara de pesca", "vara telescopica",
-  "vara telescópica", "carretilha", "anzol",
-  "isca artificial", "isca", "linha de pesca",
-  "pescaria", "pesca", "pesqueiro",
-
-  "alicate de pesca", "pega peixe",
-  "tira anzol", "removedor de anzol",
-
-  "camping", "acampamento",
-  "barraca", "barraca camping",
-  "fogareiro", "saco de dormir",
-  "colchonete", "lanterna camping",
-  "mochila camping",
-
-  "cooler", "caixa termica",
-  "caixa térmica", "ice box",
-  "caixa termolar", "termolar",
-  "coleman", "nautika",
-
-  "caixa termica praia",
-  "caixa termica camping",
-  "caixa termica pesca",
-  "caixa térmica praia",
-  "caixa térmica camping",
-  "caixa térmica pesca"
-])) return "Pesca e Camping";
-
-if (contemAlgum(texto, [
-  "moto",
-  "motocicleta",
-  "capacete",
-  "pro tork",
-
-  "pneu",
-  "pneu aro",
-  "calota",
-
-  "roda esportiva",
-  "roda automotiva",
-
-  "carplay",
-  "android auto",
-
-  "multimidia",
-  "multimídia",
-
-  "som automotivo",
-  "radio automotivo",
-  "rádio automotivo",
-
-  "camera de re",
-  "câmera de ré",
-
-  "sensor estacionamento",
-  "sensor de estacionamento",
-
-  "retrovisor",
-
-  "farol",
-  "lanterna automotiva",
-
-  "kit led",
-  "lampada automotiva",
-  "lâmpada automotiva",
-
-  "osram",
-  "h1 osram",
-  "h4",
-  "h7",
-
-  "bateria automotiva",
-
-  "carregador veicular",
-
-  "suporte veicular",
-
-  "pelicula automotiva",
-  "película automotiva",
-
-  "envelopamento automotivo",
-  "vinil automotivo",
-  "adesivo vinil",
-
-  "tapete automotivo",
-
-  "capa banco",
-  "capa para banco",
-
-  "volante esportivo",
-
-  "compressor de ar",
-
-  "bomba de ar",
-  "inflador de pneus",
-
-  "macaco hidraulico",
-  "macaco hidráulico",
-
-  "chave de roda",
-
-  "limpador parabrisa",
-  "limpador para-brisa",
-
-  "palheta limpador",
-
-  "oleo motor",
-  "óleo motor",
-
-  "aditivo radiador",
-
-  "escapamento",
-
-  "engate reboque",
-
-  "rack teto",
-
-  "bagageiro teto"
-])) return "Automotivo";
-
-
-if (contemAlgum(texto, [
-  "lego",
-  "boneco",
-  "boneca",
-  "hot wheels",
-  "hasbro",
-  "marvel",
-  "vingadores",
-  "homem aranha",
-  "homem de ferro",
-  "spider man",
-  "spiderman",
-  "miles morales",
-
-  "brinquedo",
-  "brinquedo infantil",
-  "pista de brinquedo",
-
-  "carrinho",
-  "carrinho dinossauro",
-  "carrinho bate e volta",
-  "carrinho controle remoto",
-  "controle remoto infantil",
-
-  "bebê reborn",
-  "bebe reborn",
-
-  "quebra cabeca",
-  "quebra cabeça",
-
-  "triciclo infantil",
-  "patinete infantil",
-
-  "fisher price",
-  "fisher-price",
-
-  "montessori",
-
-  "play doh",
-  "play-doh",
-
-  "nerf",
-
-  "massinha",
-
-  "casinha infantil",
-
-  "blocos de montar",
-  "bloco de montar",
-  "blocos construção",
-  "blocos construcao",
-
-  "pista hot wheels",
-
-  "kit brinquedo",
-
-  "brinquedo educativo",
-
-  "jogo educativo",
-
-  // ===== REFORÇO DA FILA =====
-
-  "dinossauro",
-  "t rex",
-  "t-rex",
-
-  "figura de ação",
-  "figura de acao",
-  "action figure",
-
-  "boneco marvel",
-  "boneco homem aranha",
-
-  "caminhão brinquedo",
-  "caminhao brinquedo",
-
-  "brinquedo stem",
-
-  "kit construção",
-  "kit construcao"
-])) return "Brinquedos e Artigos Infantis";
-
-  if (contemAlgum(texto, [
-    "game stick", "playstation", "xbox", "nintendo", "controle ps5",
-    "controle xbox", "console", "jogo ps5", "jogo xbox"
-  ])) return "Games e Console";
-
-if (contemAlgum(texto, [
-  "azeite",
-
-  "arroz",
-  "feijao", "feijão",
-
-  "leite",
-
-  "cafe", "café",
-
-  "chocolate",
-
-  "biscoito",
-  "bolacha",
-
-  "sal grosso",
-  "sal marinho",
-
-  "tempero",
-
-  "mercearia",
-
-  // reforço
-
-  "capsula nespresso",
-  "cápsula nespresso",
-
-  "capsula dolce gusto",
-  "cápsula dolce gusto",
-
-  "nespresso",
-  "dolce gusto",
-
-  "nescafe", "nescafé",
-
-  "achocolatado",
-
-  "barra cereal",
-  "barra de cereal",
-
-  "granola",
-
-  "wafers",
-
-  "amendoim",
-
-  "castanha",
-  "castanhas",
-
-  "pasta amendoim",
-  "pasta de amendoim",
-
-  "geleia", "geléia",
-
-  "mel",
-
-  "macarrao",
-  "macarrão",
-
-  "molho tomate",
-  "molho de tomate",
-
-  "farinha",
-
-  "acucar", "açúcar",
-
-  "adocante",
-
-  "cha", "chá",
-
-  "suco",
-
-  "energetico", "energético",
-
-  "kit churrasco gourmet",
-
-  "cesta basica",
-  "cesta básica",
-  // ===== REFORÇO DA FILA =====
-
-"bananinha",
-"banana mania",
-
-"vinho",
-"vinho tinto",
-"vinho branco",
-"vinho rose",
-"vinho rosé",
-"espumante",
-
-"steak seasoning",
-
-"molho barbecue",
-"barbecue",
-
-"azeitona",
-
-"cappuccino",
-
-"bala",
-"bombom",
-
-"doce de leite",
-
-"paçoca",
-"pacoca",
-
-"cookies",
-"cookie",
-
-"mix de castanhas",
-
-"suplemento alimentar infantil",
-
-"agua de coco",
-"água de coco",
-
-"isotonico",
-"isotônico",
-])) return "Alimentos e Mercearia";
-
-console.log("🧠 CATEGORIA NAO IDENTIFICADA:", texto);
-
-  return "Diversos";
+  const texto = textoOferta(oferta, termo);
+
+  if (!texto) {
+    return CATEGORIA.diversos;
+  }
+
+  const categoriaManual = categoriaDeclaradaValida(oferta);
+  if (categoriaManual && !termo) {
+    return categoriaManual;
+  }
+
+  const resultados = REGRAS
+    .map((item) => pontuarRegra(texto, item))
+    .filter(Boolean)
+    .sort(desempatar);
+
+  if (!resultados.length) {
+    console.log("CATEGORIA NAO IDENTIFICADA:", texto);
+    return categoriaManual || CATEGORIA.diversos;
+  }
+
+  const melhor = resultados[0];
+
+  console.log("Categoria classificada:", {
+    categoria: melhor.categoria,
+    pontos: melhor.pontuacao,
+    fortes: melhor.fortes.slice(0, 5),
+    palavras: melhor.palavras.slice(0, 5),
+    titulo: oferta.titulo || oferta.nome || termo || ""
+  });
+
+  return melhor.categoria;
 }
 
 module.exports = {
-  classificarCategoriaOferta
+  classificarCategoriaOferta,
+  normalizarTextoLocal
 };
