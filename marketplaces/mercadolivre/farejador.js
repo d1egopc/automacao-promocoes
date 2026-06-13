@@ -1,9 +1,17 @@
 
 const { extrairProdutosBuscaML } = require("./parser");
-const {
-  obterCuponsMLCliente,
-  escolherCupomParaOfertaML
-} = require("./cupons");
+
+let obterCuponsMLCliente = async () => [];
+let escolherCupomParaOfertaML = () => null;
+
+try {
+  ({
+    obterCuponsMLCliente,
+    escolherCupomParaOfertaML
+  } = require("./cupons"));
+} catch (e) {
+  console.log("ML cupons modulo indisponivel:", e.message);
+}
 
 // ================= FAREJADOR MERCADO LIVRE =================
 
