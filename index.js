@@ -492,6 +492,85 @@ function salvarConfig() {
   }
 }
 
+function sessaoPersistidaValida(id) {
+  if (!id) return false;
+
+  return !!sessoesMeta?.[id] || fs.existsSync("/data/auth_" + id);
+}
+
+function removerIdsDeArray(lista, idsRemover) {
+  if (!Array.isArray(lista)) return lista;
+
+  return lista.filter(id => !idsRemover.has(String(id)));
+}
+
+function limparDestinoSessao(destino, idsRemover) {
+  if (!destino || typeof destino !== "object") return;
+
+  if (destino.conexaoId && idsRemover.has(String(destino.conexaoId))) {
+    destino.conexaoId = "";
+  }
+
+  if (destino.sessaoId && idsRemover.has(String(destino.sessaoId))) {
+    destino.sessaoId = "";
+  }
+
+  if (destino.idSessao && idsRemover.has(String(destino.idSessao))) {
+    destino.idSessao = "";
+  }
+
+  destino.sessoes = removerIdsDeArray(destino.sessoes, idsRemover);
+  destino.sessoesWhatsapp = removerIdsDeArray(destino.sessoesWhatsapp, idsRemover);
+}
+
+function limparMapaDestinosPorSessao(mapa, idsRemover) {
+  if (!mapa || typeof mapa !== "object") return;
+
+  for (const id of idsRemover) {
+    delete mapa[id];
+  }
+}
+
+function removerReferenciasSessao(ids = [], clienteId = null) {
+  const idsRemover = new Set(
+    ids
+      .map(id => String(id || "").trim())
+      .filter(Boolean)
+  );
+
+  if (!idsRemover.size) return;
+
+  config.sessoesWhatsapp = removerIdsDeArray(config.sessoesWhatsapp || [], idsRemover);
+  limparMapaDestinosPorSessao(config.destinosPorSessao, idsRemover);
+  limparMapaDestinosPorSessao(destinosPorSessao, idsRemover);
+
+  for (const cfg of Object.values(configsPorCliente || {})) {
+    limparMapaDestinosPorSessao(cfg?.destinosPorSessao, idsRemover);
+  }
+
+  const clientes = clienteId
+    ? [clienteId]
+    : Object.keys(destinosPorCliente || {});
+
+  for (const cid of clientes) {
+    const destinosCliente = destinosPorCliente?.[cid];
+
+    if (Array.isArray(destinosCliente)) {
+      destinosCliente.forEach(destino => limparDestinoSessao(destino, idsRemover));
+    } else if (destinosCliente && typeof destinosCliente === "object") {
+      for (const id of idsRemover) {
+        delete destinosCliente[id];
+      }
+
+      Object.values(destinosCliente).forEach(lista => {
+        if (Array.isArray(lista)) {
+          lista.forEach(destino => limparDestinoSessao(destino, idsRemover));
+        }
+      });
+    }
+  }
+}
+
 // ================ FUNCAO CRIAR PLANO =====================
 
 function criarPlanosPadrao() {
@@ -6216,7 +6295,7 @@ const idsPossiveis = [...new Set([
       console.log("⚠️ end ignorado ao excluir:", e.message);
     }
 
-   for (const sid of idsPossiveis) {
+for (const sid of idsPossiveis) {
   delete sessoes[sid];
   delete qrCodes[sid];
   delete statusSessao[sid];
@@ -6231,27 +6310,37 @@ const idsPossiveis = [...new Set([
   });
 }
 
+removerReferenciasSessao(idsPossiveis, clienteId);
+
 const destinosCliente = destinosPorCliente?.[clienteId] || [];
 
-for (const destino of destinosCliente) {
-  if (destino.conexaoId && idsPossiveis.includes(destino.conexaoId)) {
-    destino.conexaoId = "";
-  }
+const listasDestinosCliente = Array.isArray(destinosCliente)
+  ? [destinosCliente]
+  : Object.values(destinosCliente || {}).filter(Array.isArray);
 
-  if (Array.isArray(destino.sessoes)) {
-    destino.sessoes = destino.sessoes.filter(
-      s => !idsPossiveis.includes(s)
-    );
-  }
+for (const listaDestino of listasDestinosCliente) {
+  for (const destino of listaDestino) {
+    if (destino.conexaoId && idsPossiveis.includes(destino.conexaoId)) {
+      destino.conexaoId = "";
+    }
 
-  if (Array.isArray(destino.sessoesWhatsapp)) {
-    destino.sessoesWhatsapp = destino.sessoesWhatsapp.filter(
-      s => !idsPossiveis.includes(s)
-    );
+    if (Array.isArray(destino.sessoes)) {
+      destino.sessoes = destino.sessoes.filter(
+        s => !idsPossiveis.includes(s)
+      );
+    }
+
+    if (Array.isArray(destino.sessoesWhatsapp)) {
+      destino.sessoesWhatsapp = destino.sessoesWhatsapp.filter(
+        s => !idsPossiveis.includes(s)
+      );
+    }
   }
 }
 
 salvarDestinosClientes();
+salvarConfigsClientes();
+salvarConfig();
 
     salvarSessoesMeta();
 
@@ -6312,6 +6401,10 @@ app.post("/reset/:id", async (req, res) => {
     delete reconectando[id];
     delete sessoesMeta[id];
 
+    removerReferenciasSessao([id], clienteId);
+    salvarDestinosClientes();
+    salvarConfigsClientes();
+    salvarConfig();
     salvarSessoesMeta();
        
      
@@ -7161,6 +7254,14 @@ sessoesParaReconectar = sessoesParaReconectar
   .filter(id => id && id.includes("_"))
   .filter(id => !id.includes("_user_"))
   .filter(id => !/^user_[^_]+_user_/.test(id));
+
+const sessoesFantasma = sessoesParaReconectar.filter(id => !sessaoPersistidaValida(id));
+
+if (sessoesFantasma.length) {
+  console.log("Sessões fantasmas removidas da reconexão:", sessoesFantasma);
+}
+
+sessoesParaReconectar = sessoesParaReconectar.filter(sessaoPersistidaValida);
 
 config.sessoesWhatsapp = sessoesParaReconectar;
 salvarConfig();
