@@ -84,6 +84,10 @@ const {
   calcularScoreOferta
 } = require("./marketplaces/inteligencia/score-oferta");
 
+const {
+  montarMensagemOferta
+} = require("./utils/mensagens-ofertas");
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -1213,160 +1217,6 @@ oferta.avisoCupom = oferta.avisoCupom || "";
   return oferta;
 }
 
-function encurtarTituloLegenda(titulo = "", limite = 130) {
-  const texto = String(titulo || "Oferta").replace(/\s+/g, " ").trim();
-
-  if (texto.length <= limite) return texto;
-
-  return texto.slice(0, limite - 3).trim() + "...";
-}
-
-function parsePrecoLegenda(valor) {
-  if (valor == null || valor === "") return 0;
-
-  const normalizado = String(valor)
-    .replace("R$", "")
-    .replace(/\./g, "")
-    .replace(",", ".")
-    .replace(/[^\d.]/g, "")
-    .trim();
-
-  const numero = Number(normalizado);
-  return Number.isFinite(numero) ? numero : 0;
-}
-
-function formatarPrecoLegenda(valor) {
-  if (typeof valor === "number" && Number.isFinite(valor)) {
-    return `R$ ${valor.toLocaleString("pt-BR", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    })}`;
-  }
-
-  const texto = String(valor || "").trim();
-  if (!texto) return "";
-
-  if (/^R\$\s*/i.test(texto)) {
-    return texto.replace(/^R\$\s*/i, "R$ ");
-  }
-
-  const numero = parsePrecoLegenda(texto);
-
-  if (numero > 0) {
-    return `R$ ${numero.toLocaleString("pt-BR", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    })}`;
-  }
-
-  return `R$ ${texto}`;
-}
-
-function formatarDescontoLegenda(oferta = {}) {
-  const descontoManual =
-    oferta.desconto ||
-    oferta.percentualDesconto ||
-    oferta.descontoPercentual ||
-    "";
-
-  if (descontoManual) {
-    const texto = String(descontoManual).trim();
-    return texto.includes("%") ? `${texto} OFF` : `${texto}% OFF`;
-  }
-
-  const precoAtual = parsePrecoLegenda(oferta.precoAtual || oferta.preco);
-  const precoAntigo = parsePrecoLegenda(oferta.precoAntigo);
-
-  if (precoAtual > 0 && precoAntigo > precoAtual) {
-    const percentual = Math.round(((precoAntigo - precoAtual) / precoAntigo) * 100);
-    const economia = precoAntigo - precoAtual;
-
-    return `${percentual}% OFF | Economia de ${formatarPrecoLegenda(economia)}`;
-  }
-
-  if (oferta.economia) {
-    return `Economia de ${formatarPrecoLegenda(oferta.economia)}`;
-  }
-
-  return "";
-}
-
-function formatarCupomLegenda(oferta = {}) {
-  const cupom = String(oferta.cupom || "").trim();
-  const avisoCupom = String(oferta.avisoCupom || "").trim();
-
-  if (cupom) return `🎟️ Cupom: ${cupom}`;
-  if (avisoCupom) return avisoCupom.startsWith("🎟️") ? avisoCupom : `🎟️ ${avisoCupom}`;
-
-  return "";
-}
-
-function formatarLegendaOferta(oferta = {}) {
-  const titulo = encurtarTituloLegenda(oferta.titulo || oferta.nome || "Oferta", 130);
-  const precoAtual = formatarPrecoLegenda(oferta.precoAtual || oferta.preco);
-  const precoAntigo = formatarPrecoLegenda(oferta.precoAntigo);
-  const desconto = formatarDescontoLegenda(oferta);
-  const parcelamento = String(oferta.parcelamento || "").trim();
-  const cupom = formatarCupomLegenda(oferta);
-  const link = oferta.linkAfiliado || oferta.link || oferta.linkOriginal || "";
-
-  return [
-    `🛍️ ${titulo}`,
-    precoAntigo ? `De: ${precoAntigo}` : "",
-    precoAtual ? `✅ Por: ${precoAtual}` : "",
-    desconto ? `🔥 ${desconto}` : "",
-    parcelamento ? (parcelamento.startsWith("💳") ? parcelamento : `💳 ${parcelamento}`) : "",
-    cupom,
-    link ? `🛒 Comprar:\n${link}` : ""
-  ].filter(Boolean).join("\n\n");
-}
-
-
-
-function precoTemVariacaoLegenda(valor = "") {
-  return /\d[\d.,]*\s+a\s+\d[\d.,]*/i.test(String(valor || ""));
-}
-
-function formatarFaixaPrecoLegenda(valor = "") {
-  const texto = String(valor || "").replace(/\s+/g, " ").trim();
-  const partes = texto.split(/\s+a\s+/i).map(formatarPrecoLegenda).filter(Boolean);
-
-  if (partes.length >= 2) {
-    return `${partes[0]} a ${partes[1]}`;
-  }
-
-  return formatarPrecoLegenda(texto);
-}
-
-function formatarLegendaShopee(oferta = {}) {
-  const titulo = encurtarTituloLegenda(oferta.titulo || oferta.nome || "Oferta", 130);
-  const precoBruto = oferta.precoAtual || oferta.preco;
-  const temVariacao = precoTemVariacaoLegenda(precoBruto);
-  const precoAtual = temVariacao
-    ? formatarFaixaPrecoLegenda(precoBruto)
-    : formatarPrecoLegenda(precoBruto);
-  const precoAntigo = temVariacao ? "" : formatarPrecoLegenda(oferta.precoAntigo);
-  const desconto = temVariacao ? "" : formatarDescontoLegenda(oferta);
-  const parcelamento = String(oferta.parcelamento || "").trim();
-  const cupom = formatarCupomLegenda(oferta);
-  const link = oferta.linkAfiliado || oferta.link || oferta.linkOriginal || "";
-
-  return [
-    `🛍️ ${titulo}`,
-    precoAntigo ? `De: ${precoAntigo}` : "",
-    temVariacao
-      ? `✅ Preço com variação: ${precoAtual}`
-      : precoAtual
-        ? `✅ Por: ${precoAtual}`
-        : "",
-    temVariacao ? "ℹ️ O valor pode mudar conforme cor, tamanho ou variação escolhida na Shopee." : "",
-    desconto ? `🔥 ${desconto}` : "",
-    parcelamento ? (parcelamento.startsWith("💳") ? parcelamento : `💳 ${parcelamento}`) : "",
-    cupom,
-    link ? `🛒 Comprar:\n${link}` : ""
-  ].filter(Boolean).join("\n\n");
-}
-
 // ================= HELPERS DESTINOS INTELIGENTES =================
 
 function normalizarTexto(valor = "") {
@@ -1831,17 +1681,7 @@ const destinosInteligentes =
         ? config.destinosInteligentes
         : [];
 
-const mensagem =
-  String(oferta.marketplace || "").toLowerCase() === "amazon"
-    ? formatarLegendaOferta(oferta)
-    : String(oferta.marketplace || "").toLowerCase() === "shopee"
-      ? formatarLegendaShopee(oferta)
-    : oferta.mensagem || oferta.texto || [
-      oferta.titulo || oferta.nome || "Oferta",
-      oferta.precoAtual || oferta.preco ? `Preço: ${oferta.precoAtual || oferta.preco}` : "",
-      oferta.precoAntigo ? `De: ${oferta.precoAntigo}` : "",
-      oferta.linkAfiliado || oferta.link || ""
-    ].filter(Boolean).join("\n");
+const mensagem = montarMensagemOferta(oferta);
 
 let enviouParaAlgumDestino = false;
 
