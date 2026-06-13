@@ -1,5 +1,9 @@
 
 const { extrairProdutosBuscaML } = require("./parser");
+const {
+  obterCuponsMLCliente,
+  escolherCupomParaOfertaML
+} = require("./cupons");
 
 // ================= FAREJADOR MERCADO LIVRE =================
 
@@ -335,6 +339,32 @@ const categoriaProduto =
     };
 
     novaOferta = prepararOfertaGlobal(novaOferta);
+
+try {
+  const cuponsML = await obterCuponsMLCliente(clienteId, cookiesML || "");
+  const cupomOferta = escolherCupomParaOfertaML(novaOferta, cuponsML);
+
+  if (cupomOferta?.cupom) {
+    novaOferta.cupom = cupomOferta.cupom;
+    novaOferta.tipoCupom = cupomOferta.tipoCupom || "";
+    novaOferta.avisoCupom = cupomOferta.avisoCupom || novaOferta.avisoCupom || "";
+
+    console.log("ML cupom aplicado:", {
+      clienteId,
+      cupom: novaOferta.cupom
+    });
+  } else if (cupomOferta?.avisoCupom) {
+    novaOferta.tipoCupom = cupomOferta.tipoCupom || "";
+    novaOferta.avisoCupom = cupomOferta.avisoCupom;
+
+    console.log("ML aviso cupom:", {
+      clienteId,
+      tipoCupom: novaOferta.tipoCupom
+    });
+  }
+} catch (e) {
+  console.log("ML cupons ignorado:", e.message);
+}
 
 console.log("📦 Oferta ML pronta:", {
   titulo: novaOferta.titulo,
