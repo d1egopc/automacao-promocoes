@@ -348,7 +348,10 @@ function carregarSessoesMeta() {
 
     sessoesMeta = dados && typeof dados === "object" ? dados : {};
 
-    console.log("✅ Sessões meta carregadas:", Object.keys(sessoesMeta).length);
+  console.log("✅ Sessões meta carregadas:", {
+  total: Object.keys(sessoesMeta).length,
+  ids: Object.keys(sessoesMeta)
+  });
   } catch (e) {
     console.log("❌ Erro ao carregar sessões meta:", e.message);
     sessoesMeta = {};
