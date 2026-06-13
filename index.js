@@ -95,7 +95,7 @@ const integracoesUtils = require("./utils/integracoes");
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
-  console.log("ðŸ“ Pasta /data criada");
+  console.log("[OK] Pasta /data criada");
 }
 
 let config = {
@@ -243,7 +243,7 @@ function getFilaFile(clienteId = "admin") {
   return `${getClienteDir(clienteId)}/fila.json`;
 }
 
-console.log("ðŸ“‚ Salvando dados em:", FILA_FILE);
+console.log("[OK] Salvando dados em:", FILA_FILE);
 
 function gerarChaveProduto(titulo = "") {
   return String(titulo)
@@ -302,7 +302,7 @@ function garantirIdsFila() {
 
   if (alterou) {
     salvarFila(clienteId)
-    console.log("ðŸ†” IDs corrigidos em itens antigos da fila");
+    console.log("[FILA] IDs corrigidos em itens antigos da fila");
   }
 }
 
@@ -331,9 +331,9 @@ function carregarSessoesMeta() {
 
     sessoesMeta = dados && typeof dados === "object" ? dados : {};
 
-    console.log("âœ… SessÃµes meta carregadas:", Object.keys(sessoesMeta).length);
+    console.log("[OK] Sesses meta carregadas:", Object.keys(sessoesMeta).length);
   } catch (e) {
-    console.log("âŒ Erro ao carregar sessÃµes meta:", e.message);
+    console.log("[ERRO] Erro ao carregar sesses meta:", e.message);
     sessoesMeta = {};
   }
 }
@@ -393,7 +393,7 @@ function renovarCreditosSeNecessario(usuario) {
 
   salvarUsuarios();
 
-  console.log("ðŸ”„ CrÃ©ditos renovados:", {
+  console.log("[INFO] Crditos renovados:", {
     usuario: usuario.email,
     plano,
     creditos: usuario.creditos
@@ -428,7 +428,7 @@ function debitarCreditos(clienteId, quantidade = 1) {
 
   salvarUsuarios();
 
-  console.log("ðŸ’³ CrÃ©ditos debitados:", {
+  console.log("[INFO] Crditos debitados:", {
     usuario: usuario.email,
     restante: usuario.creditos,
     debitado: quantidade
@@ -469,9 +469,9 @@ function salvarConfig() {
       JSON.stringify(config, null, 2)
     );
 
-    console.log("ðŸ’¾ Config salva");
+    console.log("[OK] Config salva");
   } catch (e) {
-    console.error("âŒ ERRO AO SALVAR CONFIG:", e.message);
+    console.error("[ERRO] ERRO AO SALVAR CONFIG:", e.message);
   }
 }
 
@@ -674,7 +674,7 @@ function criarPlanosPadrao() {
 
   salvarPlanos();
 
-  console.log("âœ… Planos padrÃ£o criados");
+  console.log("[OK] Planos padro criados");
 }
 
 // ================= FUNÃ‡ÃƒO CARREGA CONFIG =================
@@ -695,7 +695,7 @@ function carregarConfig() {
         }
       };
 
-      console.log("âœ… Config carregada");
+      console.log("[OK] Config carregada");
     }
 
          
@@ -704,7 +704,7 @@ if (fs.existsSync(USUARIOS_FILE)) {
     fs.readFileSync(USUARIOS_FILE, "utf8")
   );
 
-  console.log("âœ… UsuÃ¡rios carregados");
+  console.log("[OK] Usurios carregados");
 }
 
 if (fs.existsSync(INTEGRACOES_FILE)) {
@@ -712,7 +712,7 @@ if (fs.existsSync(INTEGRACOES_FILE)) {
     fs.readFileSync(INTEGRACOES_FILE, "utf8")
   );
 
-  console.log("âœ… IntegraÃ§Ãµes carregadas");
+  console.log("[OK] Integraes carregadas");
 }
 
 if (fs.existsSync(CONFIGS_CLIENTES_FILE)) {
@@ -720,7 +720,7 @@ if (fs.existsSync(CONFIGS_CLIENTES_FILE)) {
     fs.readFileSync(CONFIGS_CLIENTES_FILE, "utf8")
   );
 
-  console.log("âœ… Configs dos clientes carregadas");
+  console.log("[OK] Configs dos clientes carregadas");
 }
 
 if (fs.existsSync(DESTINOS_CLIENTES_FILE)) {
@@ -728,7 +728,7 @@ if (fs.existsSync(DESTINOS_CLIENTES_FILE)) {
     fs.readFileSync(DESTINOS_CLIENTES_FILE, "utf8")
   );
 
-  console.log("âœ… Destinos dos clientes carregados");
+  console.log("[DESTINO] Destinos dos clientes carregados");
 }
 
 if (fs.existsSync(PLANOS_FILE)) {
@@ -736,7 +736,7 @@ if (fs.existsSync(PLANOS_FILE)) {
     fs.readFileSync(PLANOS_FILE, "utf8")
   );
 
-  console.log("âœ… Planos carregados");
+  console.log("[OK] Planos carregados");
 }
 
 if (fs.existsSync(SESSOES_FILE)) {
@@ -744,7 +744,7 @@ if (fs.existsSync(SESSOES_FILE)) {
     fs.readFileSync(SESSOES_FILE, "utf8")
   );
 
-  console.log("âœ… SessÃµes meta carregadas:", Object.keys(sessoesMeta).length);
+  console.log("[OK] Sesses meta carregadas:", Object.keys(sessoesMeta).length);
 }
 
   mensageiro.carregarMensageiro();
@@ -753,7 +753,7 @@ if (fs.existsSync(SESSOES_FILE)) {
 
 
 if (!usuarios.length) {
-console.log("ðŸ‘‘ CRIANDO ADMIN PADRÃƒO");
+console.log("[INFO] CRIANDO ADMIN PADRO");
   usuarios = [
  {
   id: "admin",
@@ -770,11 +770,11 @@ console.log("ðŸ‘‘ CRIANDO ADMIN PADRÃƒO");
 
   salvarUsuarios();
 
-  console.log("ðŸ‘‘ UsuÃ¡rio admin inicial criado");
+  console.log("[OK] Usurio admin inicial criado");
 }
 
   } catch (e) {
-    console.error("âŒ ERRO AO CARREGAR CONFIG:", e.message);
+    console.error("[ERRO] ERRO AO CARREGAR CONFIG:", e.message);
   }
 }
 
@@ -914,7 +914,7 @@ function ofertaJaExiste(novaOferta) {
     if (!itemRecente) return false;
 
     if (idMlNovo && idMlExistente && idMlNovo === idMlExistente) {
-      console.log("ðŸš« DUPLICADA ML POR ID:", {
+      console.log("[INFO] DUPLICADA ML POR ID:", {
         id: idMlNovo,
         tituloNovo: novaOferta.titulo || novaOferta.nome,
         tituloExistente: o.titulo || o.nome
@@ -923,7 +923,7 @@ function ofertaJaExiste(novaOferta) {
     }
 
     if (linkNovo && linkExistente && linkNovo === linkExistente) {
-      console.log("ðŸš« DUPLICADA POR LINK:", {
+      console.log("[INFO] DUPLICADA POR LINK:", {
         tituloNovo: novaOferta.titulo || novaOferta.nome,
         tituloExistente: o.titulo || o.nome
       });
@@ -931,7 +931,7 @@ function ofertaJaExiste(novaOferta) {
     }
 
     if (tituloNovo && tituloExistente && tituloNovo === tituloExistente) {
-      console.log("ðŸš« DUPLICADA POR TÃTULO:", {
+      console.log("[INFO] DUPLICADA POR TTULO:", {
         tituloNovo: novaOferta.titulo || novaOferta.nome,
         tituloExistente: o.titulo || o.nome
       });
@@ -949,7 +949,7 @@ function ofertaJaExiste(novaOferta) {
       marketplaceExistente &&
       marketplaceNovo === marketplaceExistente
     ) {
-      console.log("ðŸš« DUPLICADA POR CHAVE + PREÃ‡O + MARKETPLACE:", {
+      console.log("[INFO] DUPLICADA POR CHAVE + PREO + MARKETPLACE:", {
         chave: chaveNova,
         preco: precoNovo,
         marketplace: marketplaceNovo,
@@ -1141,7 +1141,7 @@ function detectarCategoriaGlobal(oferta = {}) {
 //================= FUNCAO REGISTRA CUPOM =======================
 
 function registrarCupomAtivo(regra = {}) {
-  console.log("â¸ï¸ registrarCupomAtivo desativado");
+  console.log("[INFO] registrarCupomAtivo desativado");
   return false;
 }
 
@@ -1252,7 +1252,7 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
     }
 
     if (!destinoDentroHorario(destino)) {
-      console.log("â° Destino fora do horÃ¡rio:", destino.nome);
+      console.log("[DESTINO] Destino fora do horrio:", destino.nome);
       return { enviado: false, motivo: "fora_horario" };
     }
 
@@ -1263,7 +1263,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
   const sock = sessoes[destino.conexaoId];
 
   if (!sock) {
-    console.log("âŒ SessÃ£o nÃ£o encontrada:", destino.conexaoId);
+    console.log("[WHATSAPP] Sesso no encontrada:", destino.conexaoId);
     return { enviado: false, motivo: "sessao_nao_encontrada" };
   }
 
@@ -1276,13 +1276,13 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     .filter(Boolean);
 
   if (!grupos.length) {
-    console.log("âš ï¸ Destino WhatsApp sem grupos vÃ¡lidos:", destino.nome);
+    console.log("[WHATSAPP] Destino WhatsApp sem grupos vlidos:", destino.nome);
     return { enviado: false, motivo: "sem_grupos" };
   }
 
   for (const grupo of grupos) {
     if (!usuarioTemCreditos(clienteId, 1)) {
-      console.log("ðŸš« Sem crÃ©ditos:", clienteId);
+      console.log("[AVISO] Sem crditos:", clienteId);
       return { enviado: false, motivo: "sem_creditos" };
     }
 
@@ -1299,7 +1299,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
     debitarCreditos(clienteId, 1);
 
-    console.log("âœ… Enviado WhatsApp:", {
+    console.log("[WHATSAPP] Enviado WhatsApp:", {
       clienteId,
       destino: destino.nome,
       grupo
@@ -1339,13 +1339,13 @@ const selecionados = telegramsSelecionados.length
   : telegrams.filter(t => t.ativo);
   
       if (!selecionados.length) {
-        console.log("âš ï¸ Nenhum Telegram selecionado para este destino:", destino.nome);
+        console.log("[TELEGRAM] Nenhum Telegram selecionado para este destino:", destino.nome);
       }
 
       for (const tel of selecionados) {
        
       if (!usuarioTemCreditos(clienteId, 1)) {
-      console.log("ðŸš« Sem crÃ©ditos:", clienteId);
+      console.log("[AVISO] Sem crditos:", clienteId);
       continue;
       }
 
@@ -1372,7 +1372,7 @@ const selecionados = telegramsSelecionados.length
           );
         }
 
-        console.log("âœ… Enviado Telegram:", {
+        console.log("[TELEGRAM] Enviado Telegram:", {
           clienteId,
           destino: destino.nome,
           chatId: tel.chatId
@@ -1440,7 +1440,7 @@ async function processarFila(clienteIdAlvo = null) {
 });
 
 if (!oferta) {
-  console.log("ðŸ“­ Nenhuma oferta pendente");
+  console.log("[FILA] Nenhuma oferta pendente");
   return;
 }
 
@@ -1458,7 +1458,7 @@ const clienteAtivo =
   configCliente.automacaoAtiva === true;
 
 if (!clienteAtivo) {
-  console.log("â¸ AutomaÃ§Ã£o desligada para cliente:", clienteId);
+  console.log("[INFO] Automao desligada para cliente:", clienteId);
   return;
 }
 
@@ -1502,12 +1502,12 @@ if (!sessoes[idSessao]) {
     const sock = sessoes[idSessao];
 
     if (!sock) {
-      console.log("âŒ Nenhuma sessÃ£o conectada para:", idSessao);
+      console.log("[WHATSAPP] Nenhuma sesso conectada para:", idSessao);
       return;
     }
 
-    console.log("ðŸ“¡ SessÃ£o escolhida para envio:", idSessao);
-    console.log("ðŸ‘¤ Cliente dono da oferta:", clienteId);
+    console.log("[WHATSAPP] Sesso escolhida para envio:", idSessao);
+    console.log("[INFO] Cliente dono da oferta:", clienteId);
 
     const destinosBrutos =
       oferta.destinos?.length
@@ -1530,7 +1530,7 @@ if (!sessoes[idSessao]) {
       .map(d => d?.id || d?.value || d?.jid || d)
       .filter(Boolean);
 
-    console.log("DESTINOS PARA ENVIO:", destinos);
+    console.log("[DESTINO] DESTINOS PARA ENVIO:", destinos);
 
 // ================= ENVIO DESTINOS INTELIGENTES =================
 
@@ -1574,7 +1574,7 @@ for (const destino of destinosInteligentes) {
 
   if (agora - controleEnvio[chaveControle] < intervaloMs) {
     pulouPorIntervalo = true;
-    console.log("â³ Destino aguardando intervalo:", {
+    console.log("[DESTINO] Destino aguardando intervalo:", {
       clienteId,
       destino: destino.nome,
       intervaloMinutos: intervaloDestinoMin
@@ -1619,12 +1619,12 @@ if (!enviouParaAlgumDestino && (pulouPorIntervalo || pulouPorHorario) && !houveF
   oferta.erro = "";
   oferta.erroEm = "";
   salvarFila(clienteId);
-  console.log("Oferta aguardando destino liberar envio:", oferta.titulo);
+  console.log("[DESTINO] Oferta aguardando destino liberar envio:", oferta.titulo);
   return;
 }
 
 if (!enviouParaAlgumDestino) {
-  console.log("âš ï¸ Oferta nÃ£o enviada. Marcando como erro:", oferta.titulo);
+  console.log("[ERRO] Oferta no enviada. Marcando como erro:", oferta.titulo);
 
   oferta.status = "erro";
   oferta.statusDetalhe = "Falha ao enviar para destinos";
@@ -1658,10 +1658,10 @@ oferta.logsEnvio.push({
 
 salvarFila(clienteId);
 
-console.log("âœ… Enviado com controle de tempo");
+console.log("[ENVIO] Enviado com controle de tempo");
 
  } catch (e) {
-  console.log("âŒ ERRO:", e.message);
+  console.log("[ERRO] ERRO:", e.message);
 
   if (oferta) {
     oferta.status = "erro";
@@ -1754,7 +1754,7 @@ app.post("/fila", (req, res) => {
     });
 
     if (resultado?.ok && !resultado?.ignorada) {
-      console.log("ðŸ“¥ Oferta manual adicionada Ã  fila:", {
+      console.log("[FILA] Oferta manual adicionada  fila:", {
         clienteId,
         id: resultado.oferta?.id,
         titulo: resultado.oferta?.titulo,
@@ -1766,7 +1766,7 @@ app.post("/fila", (req, res) => {
     return res.json(resultado);
 
   } catch (e) {
-    console.log("âŒ erro ao adicionar oferta na fila:", e.message);
+    console.log("[ERRO] [FILA] erro ao adicionar oferta na fila:", e.message);
 
     return res.status(500).json({
       ok: false,
@@ -1778,7 +1778,7 @@ app.post("/fila", (req, res) => {
 // ================= ENVIO MANUAL =================
 
 app.post("/enviar-manual", async (req, res) => {
- console.log("ðŸ“¤ Envio manual recebido:", req.body?.titulo);
+ console.log("[ENVIO] Envio manual recebido:", req.body?.titulo);
 
   try {
     const body = req.body || {};
@@ -1919,7 +1919,7 @@ app.get("/r/:codigo", (req, res) => {
     return res.redirect(dados.original);
 
   } catch (e) {
-    console.log("âŒ erro link optimus:", e.message);
+    console.log("[ERRO] erro link optimus:", e.message);
 
     return res.status(500).send("Erro ao abrir link");
   }
@@ -2086,7 +2086,7 @@ app.post("/automacao/toggle", (req, res) => {
 
   salvarConfigsClientes();
 
-  console.log("ðŸ¤– AutomaÃ§Ã£o cliente:", {
+  console.log("[INFO] Automao cliente:", {
     clienteId,
     ativo: configsPorCliente[clienteId].automacaoAtiva
   });
@@ -2148,7 +2148,7 @@ app.delete("/fila/limpar", (req, res) => {
 
   salvarFila(clienteId);
 
-  console.log("ðŸ§¹ LIMPEZA FILA:", {
+  console.log("[FILA] LIMPEZA FILA:", {
     clienteId,
     status: status || "todos",
     removidos
@@ -2183,7 +2183,7 @@ app.delete("/fila/:index", (req, res) => {
 
   salvarFila(clienteId);
 
-  console.log("ðŸ—‘ï¸ Removido da fila:", {
+  console.log("[FILA] Removido da fila:", {
     clienteId,
     titulo: removido[0]?.nome || removido[0]?.titulo
   });
@@ -2224,7 +2224,7 @@ const indexReal = fila.findIndex(o => o === oferta);
 
   oferta.status = "pendente";
 
-  console.log("ðŸ“¦ ENTRANDO NA FILA:", {
+  console.log("[FILA] ENTRANDO NA FILA:", {
     clienteId: clienteIdReq,
     titulo: oferta.titulo || oferta.nome,
     preco: oferta.precoAtual || oferta.preco,
@@ -2969,13 +2969,13 @@ app.post("/desconectar/:id", async (req, res) => {
       try {
         await sessoes[id]?.logout?.();
       } catch (e) {
-        console.log("âš ï¸ erro logout:", e.message);
+        console.log("[ERRO] erro logout:", e.message);
       }
 
       try {
         sessoes[id]?.end?.();
       } catch (e) {
-        console.log("âš ï¸ erro end:", e.message);
+        console.log("[ERRO] erro end:", e.message);
       }
     }
 
@@ -3016,13 +3016,13 @@ app.post("/limpar-sessao/:id", async (req, res) => {
       try {
         await sessoes[id]?.logout?.();
       } catch (e) {
-        console.log("âš ï¸ erro logout ao limpar:", e.message);
+        console.log("[ERRO] erro logout ao limpar:", e.message);
       }
 
       try {
         sessoes[id]?.end?.();
       } catch (e) {
-        console.log("âš ï¸ erro end ao limpar:", e.message);
+        console.log("[ERRO] erro end ao limpar:", e.message);
       }
     }
 
@@ -3048,7 +3048,7 @@ app.post("/limpar-sessao/:id", async (req, res) => {
         force: true
       });
 
-      console.log("ðŸ—‘ï¸ SessÃ£o limpa:", pastaAuth);
+      console.log("[WHATSAPP] Sesso limpa:", pastaAuth);
     }
 
     return res.json({
@@ -3058,7 +3058,7 @@ app.post("/limpar-sessao/:id", async (req, res) => {
     });
 
   } catch (e) {
-    console.log("âŒ erro limpar sessÃ£o:", e.message);
+    console.log("[ERRO] [WHATSAPP] erro limpar sesso:", e.message);
 
     return res.status(500).json({
       ok: false,
@@ -3275,7 +3275,7 @@ app.delete("/integracoes/:marketplace", (req, res) => {
     });
 
   } catch (e) {
-    console.log("âŒ Erro ao remover integraÃ§Ã£o:", e.message);
+    console.log("[ERRO] Erro ao remover integrao:", e.message);
 
     return res.status(500).json({
       ok: false,
@@ -3367,7 +3367,7 @@ async function gerarDeepLinkAwin(urlOriginal, clienteId = "admin") {
   const { publisherId, apiToken, advertiserId } = credenciais;
 
 if (!publisherId || !apiToken || !advertiserId) {
-  console.log("âš ï¸ AWIN sem credenciais:", clienteId);
+  console.log("[AVISO] AWIN sem credenciais:", clienteId);
 }
   if (!publisherId || !apiToken || !advertiserId) {
     throw new Error("Awin sem publisherId, apiToken ou advertiserId configurado.");
@@ -3388,7 +3388,7 @@ if (!publisherId || !apiToken || !advertiserId) {
     }
   );
 
-console.log("ðŸ”— AWIN Deeplink OK");
+console.log("[INFO] AWIN Deeplink OK");
 
   return (
     response.data?.shortUrl ||
@@ -3434,7 +3434,7 @@ app.post("/awin/gerar-link", async (req, res) => {
 
     const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
 
-  console.log("ðŸ”— AWIN link gerado com sucesso");
+  console.log("[INFO] AWIN link gerado com sucesso");
 
     if (!linkAfiliado) {
       return res.status(400).json({
@@ -3452,7 +3452,7 @@ app.post("/awin/gerar-link", async (req, res) => {
     });
 
   } catch (e) {
-    console.error("âŒ ERRO GERAR LINK AWIN:", e.message);
+    console.error("[ERRO] ERRO GERAR LINK AWIN:", e.message);
 
     return res.status(500).json({
       ok: false,
@@ -3671,7 +3671,7 @@ for (const existente of fila || []) {
     if (!chave) return true;
 
     if (vistas.has(chave)) {
-      console.log("â­ï¸ Duplicada removida pelo filtro universal:", oferta.titulo || oferta.nome);
+      console.log("[INFO] Duplicada removida pelo filtro universal:", oferta.titulo || oferta.nome);
       return false;
     }
 
@@ -3789,7 +3789,7 @@ async function buscarCsrfTokenMercadoLivre(cookies) {
     const html = await response.text();
 
     if (html.includes("suspicious-traffic-frontend")) {
-    console.log("ðŸ›¡ï¸ Mercado Livre bloqueou por trÃ¡fego suspeito. Pulando rodada.");
+    console.log("[AVISO] Mercado Livre bloqueou por trfego suspeito. Pulando rodada.");
     return;
     }
 
@@ -3805,10 +3805,10 @@ async function buscarCsrfTokenMercadoLivre(cookies) {
       if (match?.[1]) return match[1];
     }
 
-    console.log("ML CSRF: token nÃ£o encontrado automaticamente");
+    console.log("[INFO] ML CSRF: token no encontrado automaticamente");
     return "";
   } catch (e) {
-    console.error("ERRO BUSCAR CSRF ML:", e.message);
+    console.error("[ERRO] ERRO BUSCAR CSRF ML:", e.message);
     return "";
   }
 }
@@ -3817,7 +3817,7 @@ async function gerarLinkAfiliadoMercadoLivre(url, config) {
   try {
 
 if (String(url || "").includes("meli.la")) {
-  console.log("âš ï¸ Link ML jÃ¡ encurtado detectado. NÃ£o vou reutilizar para outro cliente.");
+  console.log("[INFO] Link ML j encurtado detectado. No vou reutilizar para outro cliente.");
   return "";
 }
 
@@ -3827,14 +3827,14 @@ if (String(url || "").includes("meli.la")) {
     const tag = credenciais.tag || "";
 
     if (!url || !cookies || !tag) {
-      console.log("ML AFILIADO: faltando cookies ou tag");
+      console.log("[INFO] ML AFILIADO: faltando cookies ou tag");
       return "";
     }
 
     const csrfToken = await buscarCsrfTokenMercadoLivre(cookies);
 
     if (!csrfToken) {
-      console.log("ML AFILIADO: csrfToken automÃ¡tico nÃ£o encontrado");
+      console.log("[INFO] ML AFILIADO: csrfToken automtico no encontrado");
       return "";
     }
 
@@ -3861,16 +3861,16 @@ if (String(url || "").includes("meli.la")) {
 
     const data = await response.json().catch(() => null);
 
-  console.log("ðŸ”— ML afiliado respondeu");
+  console.log("[INFO] ML afiliado respondeu");
 
     if (!response.ok) {
-      console.log("ML AFILIADO ERRO STATUS:", response.status);
+      console.log("[ERRO] ML AFILIADO ERRO STATUS:", response.status);
       return "";
     }
 
  return data?.short_url || data?.shortUrl || data?.url || "";
   } catch (e) {
-    console.error("ERRO ML AFILIADO:", e.message);
+    console.error("[ERRO] ERRO ML AFILIADO:", e.message);
     return "";
   }
 }
@@ -3984,7 +3984,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
 
     const data = await response.json();
 
-console.log("ðŸ”— AliExpress produto encontrado");
+console.log("[INFO] AliExpress produto encontrado");
 
     const result =
       data?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result ||
@@ -4005,7 +4005,7 @@ console.log("ðŸ”— AliExpress produto encontrado");
 
       
       if (!produto || Object.keys(produto).length === 0) {
-  console.log("âš ï¸ AliExpress sem produto retornado pela API:", productId);
+  console.log("[AVISO] AliExpress sem produto retornado pela API:", productId);
 
   let precoAntigoUrl = "";
   let precoAtualUrl = "";
@@ -4027,7 +4027,7 @@ console.log("ðŸ”— AliExpress produto encontrado");
       }
     }
   } catch (e) {
-    console.log("Erro fallback pdp_npi AliExpress:", e.message);
+    console.log("[ERRO] Erro fallback pdp_npi AliExpress:", e.message);
   }
 
   return {
@@ -4068,7 +4068,7 @@ console.log("ðŸ”— AliExpress produto encontrado");
   "";
 
 precoAtual = String(precoAtual).trim();
-console.log("âœ… ALI PREÃ‡O ESCOLHIDO:", precoAtual);
+console.log("[INFO] ALI PREO ESCOLHIDO:", precoAtual);
    
    
   let precoAntigo =
@@ -4077,13 +4077,13 @@ console.log("âœ… ALI PREÃ‡O ESCOLHIDO:", precoAtual);
   "";
 
 precoAntigo = String(precoAntigo).trim();
-console.log("âœ… ALI PREÃ‡O ANTIGO ESCOLHIDO:", precoAntigo);
+console.log("[INFO] ALI PREO ANTIGO ESCOLHIDO:", precoAntigo);
 
 if (precoAntigo === precoAtual) {
   precoAntigo = "";
 }
 
-   console.log("ðŸ’° ALI PREÃ‡OS RAW:", {
+   console.log("[INFO] ALI PREOS RAW:", {
   target_sale_price: produto.target_sale_price,
   sale_price: produto.sale_price,
   app_sale_price: produto.app_sale_price,
@@ -4118,7 +4118,7 @@ try {
   }
 
 } catch (e) {
-  console.log("Erro ao extrair preÃ§o da URL:", e.message);
+  console.log("[ERRO] Erro ao extrair preo da URL:", e.message);
 }
 
     let linkAfiliado =
@@ -4141,7 +4141,7 @@ if (
       linkAfiliado = match[0];
     }
   } catch (e) {
-    console.log("Erro limpando link AliExpress:", e.message);
+    console.log("[ERRO] Erro limpando link AliExpress:", e.message);
   }
 }
 
@@ -4187,7 +4187,7 @@ const linkFinal = gerarLinkOptimus(
     };
 
   } catch (e) {
-    console.error("ERRO ALIEXPRESS:", e.message);
+    console.error("[ERRO] ERRO ALIEXPRESS:", e.message);
 
     return {
       marketplace: "aliexpress",
@@ -4268,7 +4268,7 @@ const response = await fetch(urlConsulta, {
       aviso: "Verifique se hÃ¡ cupons disponÃ­veis na pÃ¡gina"
     };
   } catch (e) {
-    console.log("âŒ erro importarMagalu:", e.message);
+    console.log("[API] erro importarMagalu:", e.message);
 
     return {
       marketplace: "magalu",
@@ -4294,7 +4294,7 @@ async function buscarProdutosAliExpressAPI(termo) {
   const trackingId = credenciais.trackingId || "";
 
   if (!appKey || !secret || !trackingId) {
-    console.log("âš ï¸ AliExpress API sem credenciais.");
+    console.log("[AVISO] AliExpress API sem credenciais.");
     return [];
   }
 
@@ -4425,7 +4425,7 @@ if (adicionou) {
 
   } catch (e) {
 
-    console.log("âŒ erro importar manual Magalu:", e.message);
+    console.log("[API] erro importar manual Magalu:", e.message);
 
     return res.status(500).json({
       ok: false,
@@ -4544,7 +4544,7 @@ function validarCupomAutomaticamente(marketplace = "", cupom = "") {
       status.expirouEm = new Date().toISOString();
       salvarConfig();
 
-      console.log("â³ Cupom expirado por tempo:", mp, cp);
+      console.log("[INFO] Cupom expirado por tempo:", mp, cp);
       return false;
     }
   }
@@ -4584,7 +4584,7 @@ function registrarResultadoCupom(marketplace = "", cupom = "", sucesso = false) 
     if (atual.falhas >= 3 || atual.confianca <= 20) {
       atual.status = "expirado";
       atual.expirouEm = new Date().toISOString();
-      console.log("ðŸš« Cupom expirado automaticamente:", mp, cp);
+      console.log("[INFO] Cupom expirado automaticamente:", mp, cp);
     }
   }
 
@@ -4626,7 +4626,7 @@ function registrarFalhaCupom(marketplace = "", cupom = "") {
   if (atual.falhas >= 3) {
     atual.status = "expirado";
     atual.expirouEm = new Date().toISOString();
-    console.log("ðŸš« Cupom marcado como expirado:", mp, cp);
+    console.log("[INFO] Cupom marcado como expirado:", mp, cp);
   }
 
   config.cuponsStatus[mp][cp] = atual;
@@ -4650,7 +4650,7 @@ function registrarSucessoCupom(marketplace = "", cupom = "") {
 
   salvarConfig();
 
-  console.log("âœ… Cupom validado como ativo:", mp, cp);
+  console.log("[INFO] Cupom validado como ativo:", mp, cp);
 }
 
 // =========== DECAIMENTO GLOBAL DE CUPONS ===========
@@ -4682,14 +4682,14 @@ function decairConfiancaCupons() {
         if (horas >= 48 || status.confianca <= 20) {
           status.status = "expirado";
           status.expirouEm = new Date().toISOString();
-          console.log("â³ Cupom expirado por decaimento:", marketplace, cupom);
+          console.log("[INFO] Cupom expirado por decaimento:", marketplace, cupom);
         }
       }
     }
 
     salvarConfig();
   } catch (e) {
-    console.log("âŒ erro decairConfiancaCupons:", e.message);
+    console.log("[ERRO] erro decairConfiancaCupons:", e.message);
   }
 }
 
@@ -4721,7 +4721,7 @@ function categoriaPermitidaNoDestino(oferta, destino) {
 // DESATIVADA: nÃ£o registrar cupons ML automaticamente
 
 async function farejarCuponsMercadoLivre(html = "") {
-  console.log("â¸ï¸ farejarCuponsMercadoLivre desativado");
+  console.log("[INFO] farejarCuponsMercadoLivre desativado");
   return [];
 }
 
@@ -4808,7 +4808,7 @@ async function gerarLinkCurtoAliExpress(urlOriginal, credenciais = {}) {
 
     const data = await response.json();
 
-   console.log("ðŸ”— Ali link");
+   console.log("[INFO] Ali link");
 
     const linkGerado =
       data?.aliexpress_affiliate_link_generate_response?.resp_result?.result?.promotion_links?.promotion_link?.[0]?.promotion_link ||
@@ -4818,7 +4818,7 @@ async function gerarLinkCurtoAliExpress(urlOriginal, credenciais = {}) {
     return linkGerado || urlOriginal;
 
   } catch (e) {
-    console.log("âŒ Erro gerar link curto AliExpress:", e.message);
+    console.log("[ERRO] Erro gerar link curto AliExpress:", e.message);
     return urlOriginal;
   }
 }
@@ -4848,10 +4848,10 @@ async function gerarLinkShopeeCliente(clienteId, ofertaBase = {}) {
   try {
     const integracao = getIntegracaoCliente(clienteId, "shopee");
 
-    console.log("ðŸ‘¤ CLIENTE:", clienteId);
-    console.log("ðŸ›’ MARKETPLACE:", "shopee");
-    console.log("ðŸ”‘ IntegraÃ§Ã£o encontrada?", !!integracao);
-    console.log("ðŸ”‘ Tem credenciais?", !!integracao?.credenciais);
+    console.log("[INFO] CLIENTE:", clienteId);
+    console.log("[INFO] MARKETPLACE:", "shopee");
+    console.log("[INFO] Integrao encontrada?", !!integracao);
+    console.log("[INFO] Tem credenciais?", !!integracao?.credenciais);
 
     const appId = integracao?.credenciais?.appId || "";
     const secret = integracao?.credenciais?.secret || "";
@@ -4931,7 +4931,7 @@ async function gerarLinkShopeeCliente(clienteId, ofertaBase = {}) {
     return produto?.offerLink || "";
 
   } catch (e) {
-    console.log("âŒ erro gerarLinkShopeeCliente:", e.message);
+    console.log("[ERRO] erro gerarLinkShopeeCliente:", e.message);
     return "";
   }
 }
@@ -4944,12 +4944,12 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
 
     const integracao = getIntegracaoCliente(clienteId, mp);
 
-    console.log("====================================");
-    console.log("ðŸ‘¤ CLIENTE:", clienteId);
-    console.log("ðŸ›’ MARKETPLACE:", mp);
-    console.log("ðŸ”‘ IntegraÃ§Ã£o encontrada?", !!integracao);
-    console.log("ðŸ”‘ Tem credenciais?", !!integracao?.credenciais);
-    console.log("====================================");
+    console.log("[INFO] ====================================");
+    console.log("[INFO] CLIENTE:", clienteId);
+    console.log("[INFO] MARKETPLACE:", mp);
+    console.log("[INFO] Integrao encontrada?", !!integracao);
+    console.log("[INFO] Tem credenciais?", !!integracao?.credenciais);
+    console.log("[INFO] ====================================");
 
     const linkBase =
       linkOriginal ||
@@ -4983,7 +4983,7 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
     "";
 
   if (!trackingId) {
-    console.log("ðŸš« Amazon sem trackingId/tag afiliada:", {
+    console.log("[AVISO] Amazon sem trackingId/tag afiliada:", {
       clienteId,
       credenciais: Object.keys(integracao?.credenciais || {})
     });
@@ -5035,7 +5035,7 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
     return "";
 
   } catch (e) {
-    console.log("âš ï¸ Erro ao gerar link afiliado do cliente:", {
+    console.log("[ERRO] Erro ao gerar link afiliado do cliente:", {
       clienteId,
       marketplace,
       erro: e.message
@@ -5091,7 +5091,7 @@ function usuarioTemIntegracaoMarketplace(clienteId, marketplace) {
   const integracao = getIntegracaoCliente(clienteId, mp);
   const cred = integracao?.credenciais || {};
 
-  console.log("ðŸ”Ž CHECK INTEGRAÃ‡ÃƒO CLIENTE:", {
+  console.log("[DEBUG] CHECK INTEGRAO CLIENTE:", {
     clienteId,
     marketplace: mp,
     temIntegracao: !!integracao,
@@ -5169,7 +5169,7 @@ async function distribuirOfertaParaClientes(ofertaBase) {
 
     if (!usuarioPodeReceberMarketplace(usuario, mp)) {
 
-      console.log("â­ï¸ UsuÃ¡rio nÃ£o recebe marketplace pelo plano:", {
+      console.log("[INFO] Usurio no recebe marketplace pelo plano:", {
         clienteId,
         plano: usuario.plano,
         marketplace: mp
@@ -5178,7 +5178,7 @@ async function distribuirOfertaParaClientes(ofertaBase) {
     }
 
 
-console.log("ðŸ”Ž CHECK INTEGRAÃ‡ÃƒO:", {
+console.log("[DEBUG] CHECK INTEGRAO:", {
   clienteId,
   marketplace: mp,
   integracao: !!getIntegracaoCliente(clienteId, mp),
@@ -5186,7 +5186,7 @@ console.log("ðŸ”Ž CHECK INTEGRAÃ‡ÃƒO:", {
 });
 
    if (!usuarioTemIntegracaoMarketplace(clienteId, mp)) {
-     console.log("ðŸš« UsuÃ¡rio sem integraÃ§Ã£o configurada:", {
+     console.log("[AVISO] Usurio sem integrao configurada:", {
      clienteId,
      marketplace: mp,
       titulo: ofertaBase.titulo
@@ -5207,7 +5207,7 @@ console.log("ðŸ”Ž CHECK INTEGRAÃ‡ÃƒO:", {
       ofertaBase
     );
 
-console.log("ðŸ”— LINK CLIENTE GERADO:", {
+console.log("[INFO] LINK CLIENTE GERADO:", {
   clienteId,
   marketplace: mp,
   linkOriginal,
@@ -5215,7 +5215,7 @@ console.log("ðŸ”— LINK CLIENTE GERADO:", {
 });
 
  if (!linkAfiliadoCliente) {
-  console.log("ðŸš« Oferta bloqueada: cliente sem link afiliado prÃ³prio:", {
+  console.log("[AVISO] Oferta bloqueada: cliente sem link afiliado prprio:", {
     clienteId,
     marketplace: mp,
     titulo: ofertaBase.titulo
@@ -5224,7 +5224,7 @@ console.log("ðŸ”— LINK CLIENTE GERADO:", {
 }
 
 if (linkAfiliadoCliente === linkOriginal) {
-  console.log("âš ï¸ Link afiliado igual ao original, permitindo por enquanto:", {
+  console.log("[INFO] Link afiliado igual ao original, permitindo por enquanto:", {
     clienteId,
     marketplace: mp,
     titulo: ofertaBase.titulo,
@@ -5261,7 +5261,7 @@ if (linkAfiliadoCliente === linkOriginal) {
  if (jaExisteCliente) continue;
 
 if (deveIgnorarOfertaRepetida(ofertaCliente)) {
-  console.log("ðŸ§  Oferta automÃ¡tica ignorada pela memÃ³ria:", {
+  console.log("[INFO] Oferta automtica ignorada pela memria:", {
     clienteId,
     marketplace: ofertaCliente.marketplace,
     titulo: ofertaCliente.titulo
@@ -5281,7 +5281,7 @@ try {
   ofertaCliente.descontoScore = resultadoScore.desconto;
   ofertaCliente.motivosScore = resultadoScore.motivos;
 
-    console.log("â­ SCORE OFERTA:", {
+    console.log("[DEBUG] SCORE OFERTA:", {
     titulo: ofertaCliente.titulo || ofertaCliente.nome,
     score: ofertaCliente.score,
     nivel: ofertaCliente.nivelScore,
@@ -5290,7 +5290,7 @@ try {
 
 
 } catch (e) {
-  console.log("âš ï¸ Erro ao calcular score:", e.message);
+  console.log("[ERRO] Erro ao calcular score:", e.message);
 }
 
 registrarOfertaVista(ofertaCliente);
@@ -5299,7 +5299,7 @@ fila.push(ofertaCliente);
 
 salvarFila(clienteId);
 
-console.log("âœ… Oferta distribuÃ­da para cliente:", {
+console.log("[INFO] Oferta distribuda para cliente:", {
   clienteId,
   titulo: ofertaCliente.titulo,
   marketplace: ofertaCliente.marketplace
@@ -5312,11 +5312,11 @@ console.log("âœ… Oferta distribuÃ­da para cliente:", {
       try {
         if (adicionadasNestaRodada >= limitePorRodada) return;
 
-        console.log(`${tipo} Busca AliExpress API:`, termo);
+        console.log(`[INFO] ${tipo} Busca AliExpress API:`, termo);
 
         const produtosAPI = await buscarProdutosAliExpressAPI(termo);
 
-        console.log(`ðŸ”Ž ${termo}: ${produtosAPI.length} produtos AliExpress via API`);
+        console.log(`[INFO] ${termo}: ${produtosAPI.length} produtos AliExpress via API`);
 
         for (const item of produtosAPI.slice(0, 5)) {
           try {
@@ -5348,7 +5348,7 @@ console.log("âœ… Oferta distribuÃ­da para cliente:", {
               : gerarChaveProduto(String(linkOriginalAli).split("?")[0]);
 
             if (produtoRepetidoRecentemente(chaveAli, 48)) {
-              console.log("â­ï¸ AliExpress item repetido ignorado:", chaveAli);
+              console.log("[AVISO] AliExpress item repetido ignorado:", chaveAli);
               continue;
             }
 
@@ -5362,7 +5362,7 @@ console.log("âœ… Oferta distribuÃ­da para cliente:", {
               gerarChaveProduto(titulo + " aliexpress");
 
             if (produtoRepetidoRecentemente(chaveRepeticao, 48)) {
-              console.log("â­ï¸ AliExpress tÃ­tulo repetido ignorado:", titulo);
+              console.log("[AVISO] AliExpress ttulo repetido ignorado:", titulo);
               continue;
             }
 
@@ -5436,7 +5436,7 @@ console.log("âœ… Oferta distribuÃ­da para cliente:", {
             ];
 
             if (palavrasBloqueadas.some(p => tituloLower.includes(p))) {
-              console.log("ðŸš« Produto bloqueado:", titulo);
+              console.log("[AVISO] Produto bloqueado:", titulo);
               continue;
             }
 
@@ -5493,7 +5493,7 @@ console.log("âœ… Oferta distribuÃ­da para cliente:", {
               ofertasEncontradas.push(novaOferta);
               adicionadasNestaRodada++;
 
-              console.log("ðŸ¤– Nova oferta AliExpress:", {
+              console.log("[INFO] Nova oferta AliExpress:", {
                 titulo: novaOferta.titulo,
                 preco: novaOferta.precoAtual,
                 precoAntigo: novaOferta.precoAntigo,
@@ -5504,7 +5504,7 @@ console.log("âœ… Oferta distribuÃ­da para cliente:", {
 
             await new Promise(r => setTimeout(r, 1500));
           } catch (e) {
-            console.log("âŒ erro produto AliExpress API:", e.message);
+            console.log("[ERRO] erro produto AliExpress API:", e.message);
           }
         }    
 
@@ -5537,9 +5537,9 @@ console.log("âœ… Oferta distribuÃ­da para cliente:", {
   await distribuirOfertaParaClientes(oferta);
   }
 
-    console.log(`âœ… AliExpress finalizado. Adicionadas: ${adicionadasNestaRodada}`);
+    console.log(`[FILA] AliExpress finalizado. Adicionadas: ${adicionadasNestaRodada}`);
   } catch (e) {
-    console.log("âŒ erro farejador AliExpress:", e.message);
+    console.log("[ERRO] erro farejador AliExpress:", e.message);
   }
 }
 
@@ -5549,11 +5549,11 @@ console.log("âœ… Oferta distribuÃ­da para cliente:", {
 async function farejarMagalu() {
   try {
     if (!config.marketplaces?.magalu?.ativo) {
-      console.log("â¸ Magalu desativada. Farejador ignorado.");
+      console.log("[AVISO] Magalu desativada. Farejador ignorado.");
       return;
     }
 
-    console.log("ðŸŸ¦ Farejando ofertas Magalu...");
+    console.log("[INFO] Farejando ofertas Magalu...");
 
    const integracao =
    getIntegracaoCliente("admin", "magalu");
@@ -5585,7 +5585,7 @@ async function farejarMagalu() {
 
       const urlBusca = `https://www.magazineluiza.com.br/busca/${encodeURIComponent(termo)}/`;
 
-      console.log("ðŸŒ MAGALU BUSCA:", urlBusca);
+      console.log("[INFO] MAGALU BUSCA:", urlBusca);
 
       const response = await fetch(urlBusca, {
         headers: {
@@ -5596,7 +5596,7 @@ async function farejarMagalu() {
         }
       });
 
-      console.log("ðŸ“¡ MAGALU STATUS:", response.status);
+      console.log("[INFO] MAGALU STATUS:", response.status);
 
       if (!response.ok) {
 
@@ -5637,7 +5637,7 @@ const html = await response.text();
 
       const links = [...new Set(linksExtraidos)].slice(0, 5);
 
-      console.log(`ðŸ”Ž ${termo}: ${links.length} links Magalu`);
+      console.log(`[INFO] ${termo}: ${links.length} links Magalu`);
 
       for (const link of links) {
         if (adicionadas >= limitePorRodada) break;
@@ -5645,7 +5645,7 @@ const html = await response.text();
         try {
          const produto = await importarMagalu(link);
 
-          console.log("ðŸ§ª PRODUTO MAGALU IMPORTADO:", produto);     
+          console.log("[API] PRODUTO MAGALU IMPORTADO:", produto);     
 
           if (!produto?.precoAtual) continue;
 
@@ -5679,7 +5679,7 @@ const html = await response.text();
           await distribuirOfertaParaClientes(novaOferta);
           adicionadas++;
 
-          console.log("ðŸ¤– Nova oferta Magalu:", {
+          console.log("[INFO] Nova oferta Magalu:", {
             titulo: novaOferta.titulo,
             preco: novaOferta.precoAtual,
             link: novaOferta.link
@@ -5687,16 +5687,16 @@ const html = await response.text();
 
           await new Promise(r => setTimeout(r, 3000 + Math.random() * 4000));
         } catch (e) {
-          console.log("âŒ erro produto Magalu:", e.message);
+          console.log("[ERRO] erro produto Magalu:", e.message);
         }
       }
 
       await new Promise(r => setTimeout(r, 5000 + Math.random() * 6000));
     }
 
-    console.log(`âœ… Magalu finalizado. Adicionadas: ${adicionadas}`);
+    console.log(`[FILA] Magalu finalizado. Adicionadas: ${adicionadas}`);
   } catch (e) {
-    console.log("âŒ erro farejador Magalu:", e.message);
+    console.log("[ERRO] erro farejador Magalu:", e.message);
   }
 }
 
@@ -5714,14 +5714,14 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
   } = deps;
 
   try {
-    console.log("ðŸ›’ Farejando produtos reais Awin KaBuM...", {
+    console.log("[INFO] Farejando produtos reais Awin KaBuM...", {
       clienteId
     });
 
     const cfg = config.marketplaces?.awin || {};
 
     if (!cfg.ativo) {
-      console.log("â¸ Awin desativada. Farejador ignorado.");
+      console.log("[AVISO] Awin desativada. Farejador ignorado.");
       return;
     }
 
@@ -5764,7 +5764,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
     .on("error", reject);
     });
 
-    console.log("ðŸ“¦ Produtos no feed Awin:", produtos.length);
+    console.log("[INFO] Produtos no feed Awin:", produtos.length);
     
     let adicionadas = 0;
     let ofertasEncontradas = [];
@@ -5796,7 +5796,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
       if (preco < precoMinimo) continue;
 
       if (produtoRepetidoRecentemente(titulo, 24)) {
-        console.log("â­ï¸ Awin repetido ignorado:", titulo);
+        console.log("[AVISO] Awin repetido ignorado:", titulo);
         continue;
       }
 
@@ -5827,7 +5827,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
        ofertasEncontradas.push(oferta);
       adicionadas++;
 
-      console.log("âœ… Produto Awin encontrado:", titulo);
+      console.log("[INFO] Produto Awin encontrado:", titulo);
     }
 
     const ofertasFiltradas = aplicarFiltrosUniversais(
@@ -5847,9 +5847,9 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
    await distribuirOfertaParaClientes(oferta);
   }
 
-    console.log(`ðŸš€ Awin finalizado. Produtos adicionados: ${ofertasFiltradas.length}`);
+    console.log(`[INFO] Awin finalizado. Produtos adicionados: ${ofertasFiltradas.length}`);
   } catch (e) {
-    console.log("âŒ erro farejador Awin:", e.message);
+    console.log("[ERRO] erro farejador Awin:", e.message);
   }
 }
 
@@ -5877,7 +5877,7 @@ app.post("/importar-produto", async (req, res) => {
       .json(resultado.body);
 
   } catch (e) {
-    console.log("âŒ erro rota importar-produto:", e.message);
+    console.log("[API] erro rota importar-produto:", e.message);
 
     return res.status(500).json({
       ok: false,
@@ -5935,7 +5935,7 @@ app.get("/sessoes", (req, res) => {
 });
 
 app.post("/sessoes", (req, res) => {
-   console.log("ðŸ“± Nova sessÃ£o solicitada:", {
+   console.log("[WHATSAPP] Nova sesso solicitada:", {
   nome: req.body?.nome,
   id: req.body?.id
 });
@@ -5998,7 +5998,7 @@ const id = normalizarSessaoId(
 
     salvarSessoesMeta();
 
-console.log("âœ… SessÃ£o criada e salva:", sessoesMeta[id]);
+console.log("[WHATSAPP] Sesso criada e salva:", sessoesMeta[id]);
 
     return res.json({
       ok: true,
@@ -6031,13 +6031,13 @@ const idsPossiveis = [...new Set([
         await sessoes[id].sock.logout();
       }
     } catch (e) {
-      console.log("âš ï¸ logout ignorado ao excluir:", e.message);
+      console.log("[AVISO] logout ignorado ao excluir:", e.message);
     }
 
     try {
       sessoes[id]?.sock?.end?.();
     } catch (e) {
-      console.log("âš ï¸ end ignorado ao excluir:", e.message);
+      console.log("[AVISO] end ignorado ao excluir:", e.message);
     }
 
 for (const sid of idsPossiveis) {
@@ -6107,7 +6107,7 @@ app.post("/reset/:id", async (req, res) => {
  const id = normalizarSessaoId(clienteId, req.params.id);
 
   try {
-    console.log("ðŸ”„ Resetando sessÃ£o:", id);
+    console.log("[WHATSAPP] Resetando sesso:", id);
 
     if (typeof reconectando !== "undefined") {
       reconectando[id] = false;
@@ -6118,13 +6118,13 @@ app.post("/reset/:id", async (req, res) => {
       try {
         await sessoes[id]?.logout?.();
       } catch (e) {
-        console.log("âš ï¸ logout ignorado:", e.message);
+        console.log("[AVISO] logout ignorado:", e.message);
       }
 
       try {
         sessoes[id]?.end?.();
       } catch (e) {
-        console.log("âš ï¸ end ignorado:", e.message);
+        console.log("[AVISO] end ignorado:", e.message);
       }
 
       delete sessoes[id];
@@ -6165,7 +6165,7 @@ app.post("/reset/:id", async (req, res) => {
     });
 
   } catch (e) {
-    console.log("âŒ erro reset sessÃ£o:", e.message);
+    console.log("[ERRO] [WHATSAPP] erro reset sesso:", e.message);
 
     return res.status(500).json({
       ok: false,
@@ -6265,7 +6265,7 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
   config.sessoesWhatsapp.push(sessaoId);
   salvarConfig();
 
-  console.log("ðŸ’¾ SessÃ£o WhatsApp salva para reconexÃ£o:", {
+  console.log("[WHATSAPP] Sesso WhatsApp salva para reconexo:", {
     clienteId,
     sessaoId,
     limiteSessoes,
@@ -6295,7 +6295,7 @@ async function carregarGruposSessao(id, opcoes = {}) {
         : "admin"
     );
 
-  console.log("ðŸ”Ž Tentando carregar grupos da sessÃ£o:", {
+  console.log("[WHATSAPP] Tentando carregar grupos da sesso:", {
     id,
     clienteId
   });
@@ -6320,12 +6320,12 @@ async function carregarGruposSessao(id, opcoes = {}) {
   }
 
   if (!sock) {
-    console.log("âš ï¸ NÃ£o carregou grupos: sem sessÃ£o", id);
+    console.log("[WHATSAPP] No carregou grupos: sem sesso", id);
     return gruposPorSessao[chaveCache] || [];
   }
 
   if (typeof sock.groupFetchAllParticipating !== "function") {
-    console.log("âš ï¸ SessÃ£o existe, mas nÃ£o tem groupFetchAllParticipating:", id);
+    console.log("[WHATSAPP] Sesso existe, mas no tem groupFetchAllParticipating:", id);
     return gruposPorSessao[chaveCache] || [];
   }
 
@@ -6349,11 +6349,11 @@ console.log(
       gruposPorSessao[idNormalizado] = lista;
     }
 
-    console.log(`âœ… Grupos carregados automaticamente: ${lista.length}`);
+    console.log(`[OK] Grupos carregados automaticamente: ${lista.length}`);
 
     return lista;
   } catch (e) {
-    console.log("âŒ Erro ao carregar grupos:", e.message);
+    console.log("[ERRO] Erro ao carregar grupos:", e.message);
     return gruposPorSessao[chaveCache] || [];
   }
 }
@@ -6390,7 +6390,7 @@ app.post("/magalu/gerar-link", (req, res) => {
     });
 
   } catch (err) {
-    console.error("âŒ Erro Magalu:", err);
+    console.error("[ERRO] Erro Magalu:", err);
 
     res.status(500).json({
       ok: false,
@@ -6423,7 +6423,7 @@ app.get("/grupos/:id", async (req, res) => {
       });
     }
 
-    console.log("ðŸ“‹ ROTA /grupos buscando:", {
+    console.log("[INFO] ROTA /grupos buscando:", {
       id,
       force,
       temCache: !!gruposPorSessao[id]?.length,
@@ -6453,7 +6453,7 @@ app.get("/grupos/:id", async (req, res) => {
       atualizado: true
     });
   } catch (e) {
-    console.log("âŒ Erro rota /grupos/:id:", e.message);
+    console.log("[ERRO] Erro rota /grupos/:id:", e.message);
 
     return res.status(500).json({
       ok: false,
@@ -6473,7 +6473,7 @@ app.get("/qr/:id", (req, res) => {
 
   const id = normalizarSessaoId(clienteId, idOriginal);
 
-console.log("ðŸ“² Buscando QR:", {
+console.log("[WHATSAPP] Buscando QR:", {
   clienteId,
   id,
   temQr: !!qrCodes[id],
@@ -6578,7 +6578,7 @@ const limiteDestinos = isAdminMaster(req)
  destinosPorCliente[clienteId][id] = destinos;
 
  salvarDestinosClientes();
-  console.log("ðŸ’¾ Destinos salvos na config:", id, destinos);
+  console.log("[DESTINO] Destinos salvos na config:", id, destinos);
 
   return res.json({
     ok: true,
@@ -6634,7 +6634,7 @@ app.post("/campanhas/enviar", async (req, res) => {
     });
 
   } catch (e) {
-    console.log("âŒ Erro campanha manual:", e.message);
+    console.log("[ERRO] Erro campanha manual:", e.message);
 
     return res.status(400).json({
       ok: false,
@@ -6648,14 +6648,14 @@ app.post("/campanhas/enviar", async (req, res) => {
 async function enviarTelegram(oferta, mensagem) {
   try {
     if (!config.telegram?.ativo) {
-      console.log("â¸ Telegram desativado.");
+      console.log("[TELEGRAM] Telegram desativado.");
       return;
     }
 
     const destinos = config.telegram?.destinos || [];
 
     if (!destinos.length) {
-      console.log("âš ï¸ Nenhum destino Telegram configurado.");
+      console.log("[TELEGRAM] Nenhum destino Telegram configurado.");
       return;
     }
 
@@ -6666,7 +6666,7 @@ async function enviarTelegram(oferta, mensagem) {
       const chatId = destino.chatId;
 
       if (!token || !chatId) {
-        console.log("âš ï¸ Telegram destino incompleto:", destino.nome);
+        console.log("[TELEGRAM] Telegram destino incompleto:", destino.nome);
         continue;
       }
 
@@ -6683,13 +6683,13 @@ async function enviarTelegram(oferta, mensagem) {
         });
       }
 
-      console.log("âœ… Telegram enviado:", destino.nome || chatId);
+      console.log("[TELEGRAM] Telegram enviado:", destino.nome || chatId);
 
       await new Promise(r => setTimeout(r, 1500));
     }
 
   } catch (e) {
-    console.log("âŒ Erro Telegram:", e.message);
+    console.log("[ERRO] [TELEGRAM] Erro Telegram:", e.message);
   }
 }
 
@@ -6697,27 +6697,27 @@ async function enviarTelegram(oferta, mensagem) {
 // ================= FUNCÃƒO WHATSAPP =================
 
 async function iniciarWhatsApp(id, force = false) {
-  console.log("ðŸš€ Iniciando sessÃ£o:", id, "force:", force);
+  console.log("[WHATSAPP] Iniciando sesso:", id, "force:", force);
 
   const chaveSessao = id;
   const statusAtual = statusSessao[chaveSessao];
 
   if (!force && sessoes[id] && ["connecting", "qr", "open", "reconnecting"].includes(statusAtual)) {
-    console.log("â¸ SessÃ£o jÃ¡ em andamento, nÃ£o vou recriar:", id, statusAtual);
+    console.log("[WHATSAPP] Sesso j em andamento, no vou recriar:", id, statusAtual);
     return sessoes[id];
   }
 
   if (!force && qrCodes[id] && statusAtual === "qr") {
-    console.log("â¸ QR jÃ¡ ativo, nÃ£o vou recriar:", id);
+    console.log("[WHATSAPP] QR j ativo, no vou recriar:", id);
     return sessoes[id] || null;
   }
 
   if (force && sessoes[id]) {
     try {
-      console.log("â™»ï¸ ForÃ§ando reinÃ­cio da sessÃ£o:", id);
+      console.log("[WHATSAPP] Forando reincio da sesso:", id);
       sessoes[id].end?.();
     } catch (e) {
-      console.log("âš ï¸ Erro ao encerrar sessÃ£o antiga:", e.message);
+      console.log("[ERRO] [WHATSAPP] Erro ao encerrar sesso antiga:", e.message);
     }
 
     delete sessoes[id];
@@ -6749,7 +6749,7 @@ const clienteIdMensageiro =
     : "admin";
 
 if (id.startsWith("user_")) {
-  console.log("ðŸ§­ Cliente mensageiro:", {
+  console.log("[INFO] Cliente mensageiro:", {
     sessao: id,
     clienteIdMensageiro
   });
@@ -6759,7 +6759,7 @@ if (id.startsWith("user_")) {
 
 sock.ev.on("group-participants.update", async (evento) => {
   
-  console.log("ðŸ”¥ EVENTO GRUPO MENSAGEIRO:", {
+  console.log("[INFO] EVENTO GRUPO MENSAGEIRO:", {
     quando: new Date().toISOString(),
     clienteIdMensageiro,
     sessaoId: id,
@@ -6776,7 +6776,7 @@ sock.ev.on("group-participants.update", async (evento) => {
       evento
     });
   } catch (e) {
-    console.log("âŒ Erro evento Mensageiro:", e.message);
+    console.log("[ERRO] Erro evento Mensageiro:", e.message);
   }
 });
 
@@ -6784,13 +6784,13 @@ sock.ev.on("group-participants.update", async (evento) => {
     const { connection, qr, lastDisconnect } = update;
 
     if (qr) {
-      console.log("ðŸ”¥ QR RECEBIDO:", id);
+      console.log("[WHATSAPP] QR RECEBIDO:", id);
       qrCodes[id] = await qrcode.toDataURL(qr);
       statusSessao[id] = "qr";
     }
 
     if (connection === "open") {
-      console.log("âœ… WHATSAPP CONECTADO:", id);
+      console.log("[WHATSAPP] WHATSAPP CONECTADO:", id);
 
       statusSessao[id] = "open";
       qrCodes[id] = null;
@@ -6825,8 +6825,8 @@ salvarSessoesMeta();
     if (connection === "close") {
       const motivo = lastDisconnect?.error?.output?.statusCode;
 
-      console.log("âŒ WHATSAPP DESCONECTADO:", id);
-      console.log("Motivo:", motivo);
+      console.log("[WHATSAPP] WHATSAPP DESCONECTADO:", id);
+      console.log("[INFO] Motivo:", motivo);
 
     qrCodes[id] = null;
     delete sessoes[id];
@@ -6844,7 +6844,7 @@ salvarSessoesMeta();
 
         setTimeout(() => {
           iniciarWhatsApp(id).catch((e) => {
-            console.error("ERRO AO RECONECTAR:", e);
+            console.error("[ERRO] ERRO AO RECONECTAR:", e);
             statusSessao[id] = "offline";
             reconectando[id] = false;
           });
@@ -6864,7 +6864,7 @@ async function testarAwinProdutos() {
 
   try {
 
-    console.log("ðŸ§ª TESTE AWIN INICIADO");
+    console.log("[INFO] TESTE AWIN INICIADO");
 
     const clienteId = "admin";
 
@@ -6872,7 +6872,7 @@ async function testarAwinProdutos() {
     getIntegracaoCliente(clienteId, "awin");
 
     if (!integracao) {
-      console.log("âŒ Awin nÃ£o configurada");
+      console.log("[INFO] Awin no configurada");
       return;
     }
 
@@ -6882,7 +6882,7 @@ async function testarAwinProdutos() {
     } = integracao.credenciais || {};
 
     if (!publisherId || !apiToken) {
-      console.log("âŒ Credenciais Awin invÃ¡lidas");
+      console.log("[INFO] Credenciais Awin invlidas");
       return;
     }
 
@@ -6966,13 +6966,13 @@ function garantirIdsFila() {
 
   if (alterou) {
     salvarFila();
-    console.log("ðŸ†” IDs antigos da fila corrigidos");
+    console.log("[FILA] IDs antigos da fila corrigidos");
   }
 }
 
 garantirIdsFila();
 
-console.log("ðŸš€ Dados iniciais carregados:", {
+console.log("[BOOT] Dados iniciais carregados:", {
   fila: fila.length,
   usuarios: usuarios.length,
   integracoesClientes: Object.keys(integracoesPorCliente || {}).length,
@@ -6980,7 +6980,7 @@ console.log("ðŸš€ Dados iniciais carregados:", {
 });
 
 app.listen(PORT, () => {
-  console.log("ðŸ”¥ API ONLINE NA PORTA " + PORT);
+  console.log("[API] API ONLINE NA PORTA " + PORT);
 
 decairConfiancaCupons();
 
@@ -6989,7 +6989,7 @@ setInterval(() => {
 }, 4 * 60 * 60 * 1000);
 
   setTimeout(() => {
-    console.log("ðŸ”„ Reconectando sessÃµes WhatsApp automaticamente...");
+    console.log("[WHATSAPP] Reconectando sesses WhatsApp automaticamente...");
  
 let sessoesParaReconectar = [
   ...new Set(config?.sessoesWhatsapp || [])
@@ -7003,7 +7003,7 @@ sessoesParaReconectar = sessoesParaReconectar
 const sessoesFantasma = sessoesParaReconectar.filter(id => !sessaoPersistidaValida(id));
 
 if (sessoesFantasma.length) {
-  console.log("SessÃµes fantasmas removidas da reconexÃ£o:", sessoesFantasma);
+  console.log("[INFO] Sesses fantasmas removidas da reconexo:", sessoesFantasma);
 }
 
 sessoesParaReconectar = sessoesParaReconectar.filter(sessaoPersistidaValida);
@@ -7013,7 +7013,7 @@ salvarConfig();
 
     sessoesParaReconectar.forEach((id, index) => {
       setTimeout(() => {
-        console.log("ðŸš€ Reconectando sessÃ£o:", id);
+        console.log("[WHATSAPP] Reconectando sesso:", id);
         iniciarWhatsApp(id);
       }, 3000 + index * 4000);
     });
@@ -7052,14 +7052,14 @@ async function rodarProximoMarketplace() {
 const admin = usuarios.find(u => u.papel === "admin_master");
 
 if (!admin) {
-  console.log("â›” Nenhum admin master encontrado. Farejador global bloqueado.");
+  console.log("[AVISO] Nenhum admin master encontrado. Farejador global bloqueado.");
   return;
 }
 
   if (farejadorRodando) return;
 
   if (!config.automacaoAtiva) {
-    console.log("â¸ Farejador parado: automaÃ§Ã£o global desligada");
+    console.log("[INFO] Farejador parado: automao global desligada");
     return;
   }
 
@@ -7074,21 +7074,21 @@ if (!admin) {
 
 
   if (!cfg?.ativo) {
-    console.log(`â­ï¸ ${marketplace} desativado. Pulando.`);
+    console.log(`[INFO] ${marketplace} desativado. Pulando.`);
     return;
   }
 
   const farejador = farejadoresMarketplaces[marketplace];
 
   if (typeof farejador !== "function") {
-    console.log(`âš ï¸ Farejador nÃ£o encontrado: ${marketplace}`);
+    console.log(`[INFO] Farejador no encontrado: ${marketplace}`);
     return;
   }
 
   try {
     farejadorRodando = true;
 
-console.log(`ðŸŽ¯ Rodada multiusuÃ¡rio: ${marketplace}`);
+console.log(`[INFO] Rodada multiusurio: ${marketplace}`);
 
 for (const usuario of usuarios) {
   if (!usuario?.ativo) continue;
@@ -7096,7 +7096,7 @@ for (const usuario of usuarios) {
   const clienteId = usuario.id;
 
   if (!usuarioPodeReceberMarketplace(usuario, marketplace)) {
-    console.log("â­ï¸ UsuÃ¡rio nÃ£o recebe marketplace pelo plano:", {
+    console.log("[INFO] Usurio no recebe marketplace pelo plano:", {
       clienteId,
       marketplace
     });
@@ -7109,7 +7109,7 @@ for (const usuario of usuarios) {
     : marketplace;
 
 if (!usuarioTemIntegracaoMarketplace(clienteId, marketplaceIntegracao)) {
-  console.log("ðŸš« UsuÃ¡rio sem integraÃ§Ã£o configurada:", {
+  console.log("[AVISO] Usurio sem integrao configurada:", {
     clienteId,
     marketplace,
     marketplaceIntegracao
@@ -7117,12 +7117,12 @@ if (!usuarioTemIntegracaoMarketplace(clienteId, marketplaceIntegracao)) {
   continue;
 }
 
-  console.log("ðŸ¶ Farejando marketplace para cliente:", {
+  console.log("[INFO] Farejando marketplace para cliente:", {
     clienteId,
     marketplace
   });
 
-console.log("ðŸš€ CHAMANDO FAREJADOR:", {
+console.log("[INFO] CHAMANDO FAREJADOR:", {
   clienteId,
   marketplace,
   funcao: typeof farejador
@@ -7163,10 +7163,10 @@ await farejador(clienteId, {
 });
 }
   
-  console.log(`âœ… Rodada multiusuÃ¡rio finalizada: ${marketplace}`);
+  console.log(`[INFO] Rodada multiusurio finalizada: ${marketplace}`);
  
   } catch (e) {
-    console.log(`âŒ Erro na rodada ${marketplace}:`, e.message);
+    console.log(`[ERRO] Erro na rodada ${marketplace}:`, e.message);
   } finally {
     farejadorRodando = false;
   }
@@ -7175,7 +7175,7 @@ await farejador(clienteId, {
 // ============================= TESTE MANUAL =========================
 
  setTimeout(async () => {
-   console.log("ðŸª‚ TESTE MANUAL ORQUESTRADOR ML");
+   console.log("[INFO] TESTE MANUAL ORQUESTRADOR ML");
 
   const indicemercadolivre =
    ordemMarketplaces.indexOf("mercadolivre");
@@ -7195,7 +7195,7 @@ setInterval(() => {
 }, (config.intervaloFarejadorGlobalMinutos || 10) * 60 * 1000);
 
 setTimeout(() => {
-  console.log("ðŸš€ Primeira rodada do orquestrador em 1 minuto...");
+  console.log("[INFO] Primeira rodada do orquestrador em 1 minuto...");
   rodarProximoMarketplace();
 }, 1 * 60 * 1000);
 
@@ -7208,7 +7208,7 @@ setInterval(() => {
     const agora = Date.now();
 
     if (agora - ultimoLogPausaFila > 5 * 60 * 1000) {
-      console.log("ðŸŒ™ Fila pausada fora do horÃ¡rio configurado");
+      console.log("[FILA] Fila pausada fora do horrio configurado");
       ultimoLogPausaFila = agora;
     }
 
