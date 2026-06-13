@@ -122,7 +122,10 @@ const REGRAS = [
       "oleo de coco", "lo\u00e7ao", "lotion", "la vie est belle", "elixir",
       "cerave", "la roche", "vichy", "nivea", "loreal", "elseve",
       "pantene", "tresemme", "dove", "granado", "wella", "eucerin",
-      "termometro", "medidor de pressao", "balanca corporal", "fio dental"
+      "termometro", "medidor de pressao", "balanca corporal", "fio dental",
+      "manicure", "pedicure", "kit manicure", "kit pedicure",
+      "alicate de unha", "alicate cuticula", "esmalte", "removedor esmalte",
+      "unha gel", "unha em gel"
     ]
   }),
 
@@ -292,7 +295,7 @@ const REGRAS = [
       "cafeteira", "maquina de cafe", "air fryer", "fritadeira sem oleo",
       "liquidificador", "mixer", "processador de alimentos", "batedeira",
       "sanduicheira", "grill", "panela eletrica", "aspirador robo",
-      "robo aspirador", "aspirador de po", "ferro de passar"
+      "robo aspirador", "aspirador de po", "ferro de passar", "omeleteira"
     ],
     palavras: [
       "pipoqueira", "chaleira eletrica", "torradeira", "maquina waffle",
@@ -377,11 +380,16 @@ const REGRAS = [
       "maleta de ferramentas", "caixa de ferramentas"
     ],
     palavras: [
-      "chave inglesa", "chave allen", "chave soquete", "alicate", "vonder",
+      "chave inglesa", "chave allen", "chave soquete", "alicate universal",
+      "alicate de pressao", "alicate profissional", "alicate eletricista",
+      "alicate corte", "vonder",
       "makita", "bosch", "dewalt", "gedore", "tramontina pro", "compressor de ar",
       "pistola pintura", "soprador termico", "micro retifica", "inversora solda",
       "maquina solda", "lavadora alta pressao", "multimetro", "broca",
       "parafuso", "escada aluminio", "paquimetro", "estilete", "rebitadeira"
+    ],
+    negativas: [
+      "manicure", "pedicure", "unha", "cuticula", "esmalte"
     ]
   }),
 
