@@ -240,12 +240,11 @@ if (contemAlgum(texto, [
 if (contemAlgum(texto, [
   "calcinha", "sutia", "sutiã", "lingerie", "cueca feminina",
   "calcinha boxer", "short sem costura", "she by mash",
-  "segunda pele", "anagua", "anágua", "camisola",
+  "anagua", "anágua", "camisola",
   "pijama feminino", "baby doll", "babydoll",
   "biquini", "bíquini", "maio natacao", "maiô natação",
 
   "camiseta feminina",
-  "camiseta oversized",
   "camiseta oversized feminina",
   "blusa feminina",
   "regata feminina",
@@ -255,8 +254,8 @@ if (contemAlgum(texto, [
   "cropped",
   "cropped feminino",
 
-  "vestido",
-  "saia",
+  "vestido feminino",
+  "saia feminina",
 
   "short feminino",
   "shorts feminino",
@@ -264,8 +263,9 @@ if (contemAlgum(texto, [
   "calca feminina",
   "calça feminina",
 
-  "legging",
   "legging feminina",
+  "calça legging feminina",
+  "calca legging feminina",
 
   "body feminino",
 
@@ -278,42 +278,37 @@ if (contemAlgum(texto, [
   "moletom feminino",
   "jaqueta feminina",
 
-  "gola alta",
-  "strass",
-  "camiseta gola alta",
+  "camiseta gola alta feminina",
+  "gola alta feminina",
 
   "moda feminina",
 
   "plus size feminino",
   "plus size feminina",
 
-  // ===== NOVOS =====
-
-  "blusa brasil",
-  "blusa do brasil",
+  "blusa brasil feminina",
+  "blusa do brasil feminina",
 
   "tricot feminino",
   "tricô feminino",
 
-  "wide leg",
   "calca wide leg",
   "calça wide leg",
+  "wide leg feminina",
 
   "jeans feminina",
 
   "bolsa feminina",
   "bolsas femininas",
-
-  "tiracolo",
-  "tote",
-
+  "kit bolsas femininas",
+  "tiracolo feminina",
+  "bolsa tiracolo",
+  "bolsa tote",
   "carteira feminina",
 
   "meia calca",
   "meia-calca",
   "meia-calça",
-
-  "peluciada",
 
   "look feminino",
 
@@ -322,8 +317,6 @@ if (contemAlgum(texto, [
 
   "moda evangelica",
   "moda evangélica",
-   
-   // ===== REFORÇO =====
 
   "camisa feminina",
   "camisete feminina",
@@ -332,8 +325,8 @@ if (contemAlgum(texto, [
 
   "kimono feminino",
 
-  "cardigan",
-  "cardigã",
+  "cardigan feminino",
+  "cardigã feminino",
 
   "top feminino",
   "top cropped",
@@ -347,33 +340,27 @@ if (contemAlgum(texto, [
   "calça pantalona",
 
   "jardineira feminina",
-
   "colete feminino",
-
   "sobretudo feminino",
-
   "casaco feminino",
-
   "parka feminina",
-
   "anorak feminino",
 
   "jaqueta jeans feminina",
-
   "camisa jeans feminina",
 
   "bermuda feminina",
 
   "mule feminino",
-
   "sapatilha feminina",
-
   "tamanco feminino",
 
-  "regata brasil",
-  "regatas do brasil",
-  "ribana feminina"  
+  "regata brasil feminina",
+  "regatas do brasil feminina",
+
+  "ribana feminina"
 ])) return "Roupas e Moda Feminina";
+
 
 if (contemAlgum(texto, [
   "camisa polo", "polo piquet", "camiseta masculina", "camisetas masculina",
@@ -410,6 +397,12 @@ if (contemAlgum(texto, [
   "colete masculino",
 
   "jaqueta jeans masculina",
+  "jeans masculino",
+  "skinny masculino",
+  "calca skinny masculina",
+  "calça skinny masculina",
+  "lycra masculina",
+  "elastano masculino",
   "jaqueta couro masculina",
 
   "conjunto masculino",
@@ -430,7 +423,69 @@ if (contemAlgum(texto, [
   "meia masculina",
   "meias masculinas",
   "blusa de moletom masculina",
-  "blusas de moletom masculina" 
+  "blusas de moletom masculina",
+
+  // ===== REFORÇO JEANS / SKINNY =====
+
+"jeans masculino",
+"jeans masculina",
+
+"skinny masculino",
+"skinny masculina",
+
+"calca skinny masculina",
+"calça skinny masculina",
+
+"lycra masculina",
+"elastano masculino",
+
+"kit calcas masculina",
+"kit calças masculina",
+
+"kit jeans masculina",
+"kit jeans masculino",
+
+// ===== REFORÇO REGATA =====
+
+"regata oversized",
+"regata oversized masculina",
+
+"machao",
+"machão",
+
+"muscle tee",
+"muscle",
+
+// ===== REFORÇO BERMUDA =====
+
+"bermuda cargo",
+"cargo masculina",
+
+"bermuda moletom",
+
+"bermuda academia",
+
+"bermuda treino",
+
+"bermuda praia",
+
+// ===== REFORÇO CAMISA =====
+
+"camisa casual masculina",
+
+"camisa manga longa masculina",
+
+"camisa manga curta masculina",
+
+// ===== REFORÇO GERAL =====
+
+"roupa masculina",
+
+"look masculino",
+
+"moda homem",
+
+"masculino adulto" 
 ])) return "Roupas e Moda Masculina";
 
 if (contemAlgum(texto, [
@@ -668,9 +723,9 @@ if (contemAlgum(texto, [
   "máscara capilar",
   "mascara capilar",
 
-  "secador",
+  
   "chapinha",
-  "prancha",
+  
   "escova secadora",
   "modelador",
   "babyliss",
@@ -694,11 +749,11 @@ if (contemAlgum(texto, [
   "principia",
 
   "magnesio", "magnésio",
-  "vitamina",
+  
   "multivitaminico",
   "multivitamínico",
 
-  "capsulas",
+  
   "cápsulas",
 
   "fio dental",
