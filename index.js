@@ -495,7 +495,7 @@ function salvarConfig() {
 function sessaoPersistidaValida(id) {
   if (!id) return false;
 
-  return !!sessoesMeta?.[id] || fs.existsSync("/data/auth_" + id);
+  return !!sessoesMeta?.[id];
 }
 
 function removerIdsDeArray(lista, idsRemover) {
