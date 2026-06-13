@@ -1543,7 +1543,11 @@ const destinosInteligentes =
         ? config.destinosInteligentes
         : [];
 
-const mensagem = montarMensagemOferta(oferta);
+const usuarioOferta =
+  usuarios.find(u => String(u.id) === String(clienteId)) || null;
+
+const plano =
+  getPlanoPorNome(usuarioOferta?.plano || "free") || {};
 
 let enviouParaAlgumDestino = false;
 
@@ -1577,6 +1581,12 @@ for (const destino of destinosInteligentes) {
     });
     continue;
   }
+
+  const mensagem = montarMensagemOferta(oferta, {
+    destino,
+    plano,
+    clienteId
+  });
 
   const enviado = await enviarParaDestinoInteligente(
     destino,
