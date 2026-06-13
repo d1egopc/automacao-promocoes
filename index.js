@@ -1476,9 +1476,10 @@ async function processarFila(clienteIdAlvo = null) {
   if (enviandoAgoraPorCliente[clienteFila]) return;
 
   enviandoAgoraPorCliente[clienteFila] = true;
+  let oferta = null;
 
   try {
-    const oferta = fila.find(o => {
+    oferta = fila.find(o => {
 
   const mesmoCliente =
     !clienteIdAlvo ||
@@ -1589,6 +1590,22 @@ if (!sessoes[idSessao]) {
     console.log("DESTINOS PARA ENVIO:", destinos);
 
 // ================= ENVIO DESTINOS INTELIGENTES =================
+
+const destinosInteligentes =
+  Array.isArray(destinosPorCliente?.[clienteId]) && destinosPorCliente[clienteId].length
+    ? destinosPorCliente[clienteId]
+    : Array.isArray(configCliente?.destinosInteligentes) && configCliente.destinosInteligentes.length
+      ? configCliente.destinosInteligentes
+      : Array.isArray(config?.destinosInteligentes)
+        ? config.destinosInteligentes
+        : [];
+
+const mensagem = oferta.mensagem || oferta.texto || [
+  oferta.titulo || oferta.nome || "Oferta",
+  oferta.precoAtual || oferta.preco ? `Preço: ${oferta.precoAtual || oferta.preco}` : "",
+  oferta.precoAntigo ? `De: ${oferta.precoAntigo}` : "",
+  oferta.linkAfiliado || oferta.link || ""
+].filter(Boolean).join("\n");
 
 let enviouParaAlgumDestino = false;
 
