@@ -1594,38 +1594,9 @@ if (!sessoes[idSessao]) {
 // ================= ENVIO DESTINOS INTELIGENTES =================
 
 let enviouParaAlgumDestino = false;
-let pulouPorIntervalo = false;
 
-for (const destino of destinosParaEnvio) {
-  const chaveControle = `${clienteId}_${destino.id || destino.nome || destino.conexaoId}`;
-
-  const intervaloDestinoMin = Number(
-    destino.intervaloMinutos ||
-    destino.intervalo ||
-    configCliente.intervaloMinutos ||
-    config.intervaloMinutos ||
-    2
-  );
-
-  const intervaloMs = intervaloDestinoMin * 60 * 1000;
-
-  if (!controleEnvio[chaveControle]) {
-    controleEnvio[chaveControle] = 0;
-  }
-
-  if (agora - controleEnvio[chaveControle] < intervaloMs) {
-    pulouPorIntervalo = true;
-
-    console.log("⏳ Destino aguardando intervalo:", {
-      clienteId,
-      destino: destino.nome,
-      intervaloMinutos: intervaloDestinoMin
-    });
-
-    continue;
-  }
-
-  const enviado = await enviarParaDestinoInteligente(
+for (const destino of destinosInteligentes) {
+  await enviarParaDestinoInteligente(
     destino,
     oferta,
     mensagem,
@@ -1633,36 +1604,19 @@ for (const destino of destinosParaEnvio) {
     configCliente
   );
 
-  if (enviado === true) {
-    enviouParaAlgumDestino = true;
-    controleEnvio[chaveControle] = Date.now();
-  }
-}
-
-if (!enviouParaAlgumDestino && pulouPorIntervalo) {
-  oferta.status = "pendente";
-  oferta.statusDetalhe = "Aguardando intervalo dos destinos";
-  oferta.erro = "";
-  oferta.erroEm = "";
-
-  salvarFila(clienteId);
-
-  console.log("⏳ Oferta aguardando intervalo dos destinos:", oferta.titulo);
-  return;
+enviouParaAlgumDestino = true;
 }
 
 if (!enviouParaAlgumDestino) {
-  oferta.status = "pendente";
-  oferta.statusDetalhe = "Aguardando destino disponível";
-  oferta.erro = "";
-  oferta.erroEm = "";
+  console.log(
+    "⚠️ Oferta sem destino compatível. Mantendo pendente:",
+    oferta.titulo
+  );
 
-  salvarFila(clienteId);
-
-  console.log("⏳ Oferta aguardando destino disponível:", oferta.titulo);
   return;
 }
 
+controleEnvio[clienteId] = Date.now();
 ultimoEnvioFila = Date.now();
 
 oferta.status = "enviado";
@@ -1672,7 +1626,7 @@ oferta.enviadoEm = new Date().toLocaleString("pt-BR", {
 });
 
 oferta.dataEnvio = oferta.enviadoEm;
-oferta.statusDetalhe = `Enviada para ${destinosParaEnvio.length} destino(s)`;
+oferta.statusDetalhe = `Enviada para ${destinosInteligentes.length} destino(s)`;
 
 oferta.logsEnvio = oferta.logsEnvio || [];
 oferta.logsEnvio.push({
@@ -1685,10 +1639,10 @@ salvarFila(clienteId);
 
 console.log("✅ Enviado com controle de tempo");
 
-} catch (e) {
+ } catch (e) {
   console.log("❌ ERRO:", e.message);
 
-  if (typeof oferta !== "undefined" && oferta) {
+  if (oferta) {
     oferta.status = "erro";
     oferta.erro = e.message;
     oferta.erroEm = new Date().toLocaleString("pt-BR", {
@@ -1707,7 +1661,7 @@ console.log("✅ Enviado com controle de tempo");
   }
 
 } finally {
-  enviandoAgoraPorCliente[clienteFila] = false;
+  enviandoAgora = false;
 }
 }
    
