@@ -1,4 +1,5 @@
 ﻿const axios = require("axios");
+const { registrarRadarCupons } = require("../cupons/radar");
 
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const cacheCuponsPorCliente = {};
@@ -255,6 +256,8 @@ function escolherCupomParaOfertaML(oferta = {}, cupons = []) {
   if (!melhor || melhor.score < 30) return null;
 
   if (melhor.score >= 70) {
+    registrarRadarCupons("ml", { confirmados: 1 });
+
     return {
       cupom: melhor.cupom,
       tipoCupom: "confirmado_cliente",
@@ -262,6 +265,8 @@ function escolherCupomParaOfertaML(oferta = {}, cupons = []) {
       avisoCupom: `Use o cupom ${melhor.cupom} no carrinho e confira a regra da campanha.`
     };
   }
+
+  registrarRadarCupons("ml", { avisos: 1 });
 
   return {
     cupom: "",
@@ -279,4 +284,5 @@ module.exports = {
   obterCuponsMLCliente,
   escolherCupomParaOfertaML
 };
+
 

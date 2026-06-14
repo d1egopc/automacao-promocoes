@@ -63,7 +63,7 @@ for (const link of linksUnicos) {
       )
     : "";
 
-console.log("ðŸ§ª ML TEM CAMPOS PRECO?", {
+console.log("[DEBUG] [ML] campos preco:", {
   temPrice: trecho.includes("price"),
   temCurrentPrice: trecho.includes("current_price"),
   temPriceAmount: trecho.includes("price_amount"),
@@ -132,7 +132,7 @@ const precoMatch =
     trecho.match(/src="([^"]*mlstatic[^"]+)"/)?.[1] ||
     "";
 
-console.log("ðŸš¨ðŸš¨ðŸš¨ PARSER ML ITEM PREÃ‡O:", {
+console.log("[DEBUG] [ML] parser item preco:", {
   titulo: tituloFinal,
   precoMatch,
   precoAtual,
@@ -155,3 +155,4 @@ module.exports = {
   limparTextoML,
   extrairProdutosBuscaML
 };
+
