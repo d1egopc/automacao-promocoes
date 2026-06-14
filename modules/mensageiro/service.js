@@ -1,4 +1,4 @@
-const eventosMensageiroRecentes = new Map();
+﻿const eventosMensageiroRecentes = new Map();
 
 const {
   getMensageiroCliente,
@@ -43,7 +43,7 @@ function obterMensagemBoasVindas(clienteId) {
   return (
     getMensageiroCliente(clienteId)
       ?.mensagemBoasVindas ||
-    "👋 Seja bem-vindo!"
+    "ðŸ‘‹ Seja bem-vindo!"
   );
 }
 
@@ -51,8 +51,145 @@ function obterMensagemDespedida(clienteId) {
   return (
     getMensageiroCliente(clienteId)
       ?.mensagemDespedida ||
-    "😢 Obrigado por participar."
+    "ðŸ˜¢ Obrigado por participar."
   );
+}
+function normalizarTextoMensagem(texto = "") {
+  return String(texto || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extrairTextoMensagemAtendimento(mensagem = {}) {
+  const conteudo = mensagem.message || {};
+
+  return (
+    conteudo.conversation ||
+    conteudo.extendedTextMessage?.text ||
+    conteudo.imageMessage?.caption ||
+    conteudo.videoMessage?.caption ||
+    conteudo.buttonsResponseMessage?.selectedDisplayText ||
+    conteudo.listResponseMessage?.title ||
+    ""
+  );
+}
+
+function encontrarRespostaRapida(texto = "", respostasRapidas = []) {
+  const textoNormalizado = normalizarTextoMensagem(texto);
+
+  if (!textoNormalizado) return null;
+  if (!Array.isArray(respostasRapidas) || !respostasRapidas.length) return null;
+
+  for (const respostaRapida of respostasRapidas) {
+    if (!respostaRapida?.ativo) continue;
+    if (!Array.isArray(respostaRapida.gatilhos) || !respostaRapida.gatilhos.length) continue;
+
+    const tipoCorrespondencia = String(
+      respostaRapida.tipoCorrespondencia || "contem"
+    ).toLowerCase();
+
+    for (const gatilho of respostaRapida.gatilhos) {
+      const gatilhoNormalizado = normalizarTextoMensagem(gatilho);
+      if (!gatilhoNormalizado) continue;
+
+      const encontrou =
+        tipoCorrespondencia === "exato"
+          ? textoNormalizado === gatilhoNormalizado
+          : tipoCorrespondencia === "inicia"
+            ? textoNormalizado.startsWith(gatilhoNormalizado)
+            : textoNormalizado.includes(gatilhoNormalizado);
+
+      if (encontrou) return respostaRapida;
+    }
+  }
+
+  return null;
+}
+
+function aplicarDelayAtendimento(delaySegundos = 0) {
+  const segundos = Math.max(0, Number(delaySegundos || 0) || 0);
+  const ms = Math.min(segundos, 60) * 1000;
+
+  if (!ms) return Promise.resolve();
+
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function executarRespostaRapida({ sock, jid, resposta, delaySegundos = 0 } = {}) {
+  const conteudo = String(resposta?.conteudo || "").trim();
+  const tipo = String(resposta?.tipo || "texto").toLowerCase();
+
+  if (!sock || !jid || !conteudo) return false;
+  if (tipo !== "texto") return false;
+
+  try {
+    await sock.sendPresenceUpdate?.("composing", jid);
+  } catch (e) {
+    console.log("[MENSAGEIRO-FLUXO] digitando indisponivel:", e.message);
+  }
+
+  await aplicarDelayAtendimento(delaySegundos);
+
+  try {
+    await sock.sendPresenceUpdate?.("paused", jid);
+  } catch {}
+
+  await sock.sendMessage(jid, { text: conteudo });
+  return true;
+}
+
+async function tratarMensagemPrivadaAtendimento({
+  clienteId,
+  sessaoId,
+  sock,
+  mensagem,
+  planoLiberado = false
+} = {}) {
+  try {
+    if (planoLiberado !== true) return;
+
+    const config = getMensageiroCliente(clienteId);
+    const atendimento = config?.atendimento || {};
+
+    if (config?.ativo !== true) return;
+    if (config.sessaoId && config.sessaoId !== sessaoId) return;
+    if (atendimento.ativo !== true) return;
+    if (String(atendimento.escopo || "privado") !== "privado") return;
+
+    const jid = mensagem?.key?.remoteJid || "";
+
+    if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") return;
+    if (mensagem?.key?.fromMe) return;
+
+    const texto = extrairTextoMensagemAtendimento(mensagem);
+    const respostaRapida = encontrarRespostaRapida(
+      texto,
+      atendimento.respostasRapidas
+    );
+
+    if (!respostaRapida) return;
+
+    const enviado = await executarRespostaRapida({
+      sock,
+      jid,
+      resposta: respostaRapida.resposta,
+      delaySegundos: atendimento.delaySegundos
+    });
+
+    if (enviado) {
+      console.log("[MENSAGEIRO-ATENDIMENTO] resposta rapida enviada", {
+        clienteId,
+        sessaoId,
+        jid,
+        respostaId: respostaRapida.id || ""
+      });
+    }
+  } catch (e) {
+    console.log("[MENSAGEIRO-ERRO] atendimento privado:", e.message);
+  }
 }
 
 async function tratarEventoGrupoMensageiro({
@@ -89,7 +226,7 @@ async function tratarEventoGrupoMensageiro({
 for (const participante of participantes) {
 
   console.log(
-    "📱 PARTICIPANTE:",
+    "ðŸ“± PARTICIPANTE:",
     participante
   );
 
@@ -101,7 +238,7 @@ for (const participante of participantes) {
     .replaceAll("{grupo}", grupoId)
     .replaceAll("{acao}", acao);
 
-    // ANTI DUPLICAÇÃO
+    // ANTI DUPLICAÃ‡ÃƒO
 const chaveEvento =
   `${clienteId}:${sessaoId}:${grupoId}:${participante}:${acao}`;
 
@@ -110,7 +247,7 @@ const ultimo =
   eventosMensageiroRecentes.get(chaveEvento) || 0;
 
 if (agora - ultimo < 25 * 1000) {
-  console.log("⏭️ Mensageiro ignorado duplicado:", {
+  console.log("[MENSAGEIRO] Mensageiro ignorado duplicado:", {
     chaveEvento,
     segundosDesdeUltimo: Math.round((agora - ultimo) / 1000)
   });
@@ -145,7 +282,7 @@ eventosMensageiroRecentes.set(
   });
 }
 
-      console.log("🤖 Mensageiro enviado:", {
+      console.log("[MENSAGEIRO] Mensageiro enviado:", {
         clienteId,
         sessaoId,
         grupoId,
@@ -154,7 +291,7 @@ eventosMensageiroRecentes.set(
       });
     }
   } catch (e) {
-    console.log("❌ Erro no Mensageiro:", e.message);
+    console.log("[ERRO] [MENSAGEIRO] Erro no Mensageiro:", e.message);
   }
 }
 
@@ -165,8 +302,13 @@ module.exports = {
   grupoPermitido,
   obterMensagemBoasVindas,
   obterMensagemDespedida,
+  normalizarTextoMensagem,
+  encontrarRespostaRapida,
+  executarRespostaRapida,
+  aplicarDelayAtendimento,
 
   tratarEventoGrupoMensageiro,
+  tratarMensagemPrivadaAtendimento,
 
   getMensageiroCliente,
   setMensageiroCliente

@@ -1,4 +1,4 @@
-const fs = require("fs");
+﻿const fs = require("fs");
 const path = require("path");
 
 const DATA_DIR = process.env.DATA_DIR || "/data";
@@ -15,11 +15,11 @@ function carregarMensageiro() {
     }
 
     console.log(
-      "✅ Mensageiro carregado:",
+      "âœ… Mensageiro carregado:",
       Object.keys(mensageiroPorCliente).length
     );
   } catch (e) {
-    console.log("⚠️ Erro ao carregar mensageiro:", e.message);
+    console.log("[ERRO] [MENSAGEIRO] Erro ao carregar mensageiro:", e.message);
     mensageiroPorCliente = {};
   }
 }
@@ -31,7 +31,7 @@ function salvarMensageiro() {
       JSON.stringify(mensageiroPorCliente, null, 2)
     );
   } catch (e) {
-    console.log("❌ Erro ao salvar mensageiro:", e.message);
+    console.log("[ERRO] [MENSAGEIRO] Erro ao salvar mensageiro:", e.message);
   }
 }
 
@@ -46,14 +46,21 @@ function criarConfigPadraoMensageiro(clienteId) {
     despedidaAtivo: false,
 
     mensagemBoasVindas:
-      "👋 Seja bem-vindo ao grupo!\n\nAproveite as ofertas e promoções.",
+      "ðŸ‘‹ Seja bem-vindo ao grupo!\n\nAproveite as ofertas e promoÃ§Ãµes.",
     mensagemDespedida:
-      "😢 Obrigado por ter participado do grupo.\n\nVolte quando quiser!",
+      "ðŸ˜¢ Obrigado por ter participado do grupo.\n\nVolte quando quiser!",
 
     imagemBoasVindas: "",
     imagemDespedida: "",
 
     grupos: [],
+
+    atendimento: {
+      ativo: false,
+      delaySegundos: 2,
+      escopo: "privado",
+      respostasRapidas: []
+    },
 
     criadoEm: new Date().toISOString(),
     atualizadoEm: new Date().toISOString()
