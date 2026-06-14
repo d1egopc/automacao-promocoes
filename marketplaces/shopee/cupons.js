@@ -1,3 +1,5 @@
+﻿let ultimoTotalCuponsShopee = 0;
+
 function normalizarHtml(html = "") {
   return String(html || "").replace(/\s+/g, " ");
 }
@@ -69,6 +71,59 @@ function extrairCupomUrlShopee(texto = "") {
   return "";
 }
 
+function limparBeneficioShopee(texto = "") {
+  return String(texto || "")
+    .replace(/\\u002F/g, "/")
+    .replace(/\\u00a0/gi, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extrairBeneficioCupomShopee(html = "") {
+  const texto = limparBeneficioShopee(normalizarHtml(html));
+  const textoLower = texto.toLowerCase();
+
+  const valorOff =
+    texto.match(/R\$\s*\d{1,4}(?:[.,]\d{1,2})?\s*OFF/i)?.[0] ||
+    texto.match(/R\$\s*\d{1,4}(?:[.,]\d{1,2})?\s*(?:de\s*)?desconto/i)?.[0] ||
+    "";
+
+  if (valorOff) {
+    const beneficio = limparBeneficioShopee(valorOff).replace(/\s+/g, " ");
+    return {
+      beneficioDetectado: beneficio,
+      avisoCupom: `Cupom disponivel na pagina: ${beneficio}. Resgate antes de finalizar.`
+    };
+  }
+
+  if (/pre[cç]o\s+no\s+pix\s+com\s+cupom/i.test(texto) || textoLower.includes("no pix com cupom")) {
+    return {
+      beneficioDetectado: "preco_no_pix_com_cupom",
+      avisoCupom: "Preco no Pix com cupom disponivel na pagina. Resgate antes de finalizar."
+    };
+  }
+
+  if (/cupons?\s+de\s+loja/i.test(texto)) {
+    return {
+      beneficioDetectado: "cupons_de_loja",
+      avisoCupom: "Cupons de loja disponiveis na pagina. Resgate antes de finalizar."
+    };
+  }
+
+  if (/\bcom\s+cupom\b/i.test(texto)) {
+    return {
+      beneficioDetectado: "com_cupom",
+      avisoCupom: "Cupom disponivel na pagina. Resgate antes de finalizar."
+    };
+  }
+
+  return {
+    beneficioDetectado: "",
+    avisoCupom: ""
+  };
+}
+
 function extrairCuponsShopeeDoHtml(html = "") {
   const texto = normalizarHtml(html);
   const candidatos = [];
@@ -118,16 +173,22 @@ function extrairCuponsShopeeDoHtml(html = "") {
     }
   }
 
-  return Array.from(
+  const unicos = Array.from(
     new Map(candidatos.map(item => [item.cupom, item])).values()
   );
+
+  ultimoTotalCuponsShopee = unicos.length;
+
+  return unicos;
 }
 
 function detectarAvisoCupomShopee(html = "", oferta = {}) {
   const texto = normalizarHtml(html).toLowerCase();
   const cupomUrl = extrairCupomUrlShopee(html);
+  const beneficio = extrairBeneficioCupomShopee(html);
 
   const temAvisoCupom =
+    Boolean(beneficio.avisoCupom) ||
     texto.includes("cupom") ||
     texto.includes("voucher") ||
     texto.includes("resgatar") ||
@@ -141,15 +202,16 @@ function detectarAvisoCupomShopee(html = "", oferta = {}) {
     ? {
         cupom: "",
         tipoCupom: "resgate_pagina_shopee",
-        avisoCupom: "Ha cupom disponivel na pagina. Resgate antes de comprar.",
+        avisoCupom: beneficio.avisoCupom || "Ha cupom disponivel na pagina. Resgate antes de comprar.",
+        beneficioDetectado: beneficio.beneficioDetectado || "",
         cupomUrl
       }
     : null;
 
   console.log("[SHOPEE-CUPOM]", {
-    cuponsEncontrados: 0,
-    temAvisoCupom,
-    cupomUrl
+    cuponsEncontrados: ultimoTotalCuponsShopee,
+    beneficioDetectado: beneficio.beneficioDetectado || "",
+    temAvisoCupom
   });
 
   return aviso;
@@ -216,3 +278,5 @@ module.exports = {
   detectarAvisoCupomShopee,
   escolherCupomParaOfertaShopee
 };
+
+
