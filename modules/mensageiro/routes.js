@@ -80,33 +80,55 @@ router.post("/", async (req, res) => {
 
  const dados = req.body || {};
 const configAtualMensageiro = getMensageiroCliente(clienteId);
+const atendimentoPayload =
+  dados.atendimento !== undefined
+    ? dados.atendimento
+    : dados.mensageiro?.atendimento;
 
 const imagemBoasVindas =
-  await otimizarBase64(dados.imagemBoasVindas);
+  dados.imagemBoasVindas === undefined
+    ? configAtualMensageiro.imagemBoasVindas
+    : await otimizarBase64(dados.imagemBoasVindas);
 
 const imagemDespedida =
-  await otimizarBase64(dados.imagemDespedida);
+  dados.imagemDespedida === undefined
+    ? configAtualMensageiro.imagemDespedida
+    : await otimizarBase64(dados.imagemDespedida);
 
 const atualizado = setMensageiroCliente(clienteId, {
-  ativo: Boolean(dados.ativo),
-  sessaoId: dados.sessaoId || "",
+  ativo: dados.ativo === undefined
+    ? configAtualMensageiro.ativo
+    : Boolean(dados.ativo),
+  sessaoId: dados.sessaoId === undefined
+    ? configAtualMensageiro.sessaoId
+    : dados.sessaoId || "",
 
-  boasVindasAtivo: Boolean(dados.boasVindasAtivo),
-  despedidaAtivo: Boolean(dados.despedidaAtivo),
+  boasVindasAtivo: dados.boasVindasAtivo === undefined
+    ? configAtualMensageiro.boasVindasAtivo
+    : Boolean(dados.boasVindasAtivo),
+  despedidaAtivo: dados.despedidaAtivo === undefined
+    ? configAtualMensageiro.despedidaAtivo
+    : Boolean(dados.despedidaAtivo),
 
-  mensagemBoasVindas: dados.mensagemBoasVindas || "",
-  mensagemDespedida: dados.mensagemDespedida || "",
+  mensagemBoasVindas: dados.mensagemBoasVindas === undefined
+    ? configAtualMensageiro.mensagemBoasVindas
+    : dados.mensagemBoasVindas || "",
+  mensagemDespedida: dados.mensagemDespedida === undefined
+    ? configAtualMensageiro.mensagemDespedida
+    : dados.mensagemDespedida || "",
 
   imagemBoasVindas: imagemBoasVindas || "",
   imagemDespedida: imagemDespedida || "",
 
-  grupos: Array.isArray(dados.grupos)
-    ? dados.grupos
-    : [],
+  grupos: dados.grupos === undefined
+    ? configAtualMensageiro.grupos || []
+    : Array.isArray(dados.grupos)
+      ? dados.grupos
+      : [],
 
-  atendimento: dados.atendimento === undefined
+  atendimento: atendimentoPayload === undefined
     ? configAtualMensageiro.atendimento
-    : normalizarAtendimentoMensageiro(dados.atendimento)
+    : normalizarAtendimentoMensageiro(atendimentoPayload)
 });
 
 
@@ -121,4 +143,5 @@ const atualizado = setMensageiroCliente(clienteId, {
 }
 
 module.exports = criarRotasMensageiro;
+
 

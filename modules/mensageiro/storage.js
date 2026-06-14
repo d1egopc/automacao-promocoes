@@ -6,6 +6,37 @@ const MENSAGEIRO_FILE = path.join(DATA_DIR, "mensageiro.json");
 
 let mensageiroPorCliente = {};
 
+function criarAtendimentoPadraoMensageiro() {
+  return {
+    ativo: false,
+    delaySegundos: 2,
+    escopo: "privado",
+    respostasRapidas: []
+  };
+}
+
+function normalizarConfigMensageiro(clienteId, config = {}) {
+  const padrao = criarConfigPadraoMensageiro(clienteId);
+  const atendimentoAtual =
+    config.atendimento && typeof config.atendimento === "object"
+      ? config.atendimento
+      : {};
+
+  return {
+    ...padrao,
+    ...config,
+    clienteId,
+    atendimento: {
+      ...criarAtendimentoPadraoMensageiro(),
+      ...atendimentoAtual,
+      escopo: "privado",
+      respostasRapidas: Array.isArray(atendimentoAtual.respostasRapidas)
+        ? atendimentoAtual.respostasRapidas
+        : []
+    }
+  };
+}
+
 function carregarMensageiro() {
   try {
     if (fs.existsSync(MENSAGEIRO_FILE)) {
@@ -55,12 +86,7 @@ function criarConfigPadraoMensageiro(clienteId) {
 
     grupos: [],
 
-    atendimento: {
-      ativo: false,
-      delaySegundos: 2,
-      escopo: "privado",
-      respostasRapidas: []
-    },
+    atendimento: criarAtendimentoPadraoMensageiro(),
 
     criadoEm: new Date().toISOString(),
     atualizadoEm: new Date().toISOString()
@@ -74,6 +100,16 @@ function getMensageiroCliente(clienteId) {
 
     salvarMensageiro();
   }
+
+  const normalizado = normalizarConfigMensageiro(
+    clienteId,
+    mensageiroPorCliente[clienteId]
+  );
+
+  const mudou = JSON.stringify(normalizado) !== JSON.stringify(mensageiroPorCliente[clienteId]);
+  mensageiroPorCliente[clienteId] = normalizado;
+
+  if (mudou) salvarMensageiro();
 
   return mensageiroPorCliente[clienteId];
 }
@@ -99,3 +135,4 @@ module.exports = {
   getMensageiroCliente,
   setMensageiroCliente
 };
+
