@@ -1,9 +1,41 @@
-const { gerarBuscasAmazon } =
+﻿const { gerarBuscasAmazon } =
   require("./buscas");
 
 const {
   extrairLinksAmazon
 } = require("./parser");
+
+const {
+  extrairCuponsAmazonDoHtml,
+  detectarAvisoCupomAmazon,
+  escolherCupomParaOfertaAmazon
+} = require("./cupons");
+
+async function buscarHtmlCupomAmazon(url, integracao = {}) {
+  try {
+    const cookies = integracao?.credenciais?.cookies || "";
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Cookie": cookies
+      }
+    });
+
+    if (!response.ok) {
+      console.log("[AMZ-CUPOM] HTML produto indisponivel:", response.status);
+      return "";
+    }
+
+    return await response.text();
+  } catch (e) {
+    console.log("[ERRO] [AMZ-CUPOM] erro HTML produto:", e.message);
+    return "";
+  }
+}
 
 // ================= FAREJADOR AMAZON =================
 
@@ -84,9 +116,10 @@ const links =
 for (const link of links) {
   try {
   
+const integracaoAmazon = integracoesPorCliente[clienteId]?.amazon;
 const produto = await importarAmazon(
   link,
-  integracoesPorCliente[clienteId]?.amazon
+  integracaoAmazon
   );
 
     console.log("[AMZ] PRODUTO AMAZON:", {
@@ -169,6 +202,33 @@ let novaOferta = {
   clienteId
 };
 
+const htmlCupomAmazon = await buscarHtmlCupomAmazon(
+  produto.linkOriginal || link,
+  integracaoAmazon
+);
+
+if (htmlCupomAmazon) {
+  const cuponsAmazon = extrairCuponsAmazonDoHtml(htmlCupomAmazon);
+  const avisoAmazon = detectarAvisoCupomAmazon(htmlCupomAmazon);
+  const dadosCuponsAmazon = avisoAmazon
+    ? [...cuponsAmazon, avisoAmazon]
+    : cuponsAmazon;
+  const cupomOfertaAmazon = escolherCupomParaOfertaAmazon(
+    novaOferta,
+    dadosCuponsAmazon
+  );
+
+  if (cupomOfertaAmazon?.cupom) {
+    novaOferta.cupom = cupomOfertaAmazon.cupom;
+    novaOferta.tipoCupom = cupomOfertaAmazon.tipoCupom || "";
+    novaOferta.avisoCupom =
+      cupomOfertaAmazon.avisoCupom || novaOferta.avisoCupom || "";
+  } else if (cupomOfertaAmazon?.avisoCupom) {
+    novaOferta.tipoCupom = cupomOfertaAmazon.tipoCupom || "";
+    novaOferta.avisoCupom = cupomOfertaAmazon.avisoCupom;
+  }
+}
+
 novaOferta = prepararOfertaGlobal(novaOferta);
 
 console.log("[AMZ] AMAZON OFERTA PRONTA PARA DISTRIBUIO:", {
@@ -222,7 +282,7 @@ const ofertasFiltradas =
   aplicarFiltrosUniversais(ofertasEncontradas);
 
 console.log(
-  `🧠 Ofertas Amazon após filtros universais: ${ofertasFiltradas.length}`
+  `ðŸ§  Ofertas Amazon apÃ³s filtros universais: ${ofertasFiltradas.length}`
 );
 
 for (const oferta of ofertasFiltradas) {
@@ -230,7 +290,7 @@ for (const oferta of ofertasFiltradas) {
 }
 
 console.log(
-  `✅ Amazon finalizado. Adicionadas: ${ofertasFiltradas.length}`
+  `âœ… Amazon finalizado. Adicionadas: ${ofertasFiltradas.length}`
 );
 
 } catch (e) {
@@ -241,3 +301,4 @@ console.log(
 module.exports = {
   farejarAmazon
 };
+
