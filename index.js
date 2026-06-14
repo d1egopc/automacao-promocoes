@@ -33,7 +33,7 @@ const {
 const {
   aplicarCuponsAutomaticos
 } = require("./marketplaces/cupons");
-
+AP
 const {
   deveIgnorarOfertaRepetida,
   registrarOfertaVista
@@ -243,7 +243,7 @@ function getFilaFile(clienteId = "admin") {
   return `${getClienteDir(clienteId)}/fila.json`;
 }
 
-console.log("[OK] Salvando dados em:", FILA_FILE);
+console.log("[OK]📂Salvando dados em:", FILA_FILE);
 
 function gerarChaveProduto(titulo = "") {
   return String(titulo)
@@ -333,7 +333,7 @@ function carregarSessoesMeta() {
 
     console.log("[OK] Sesses meta carregadas:", Object.keys(sessoesMeta).length);
   } catch (e) {
-    console.log("[ERRO] Erro ao carregar sesses meta:", e.message);
+    console.log("[ERRO]❌Erro ao carregar sesses meta:", e.message);
     sessoesMeta = {};
   }
 }
@@ -347,7 +347,7 @@ function salvarIntegracoesPersistidas() {
   );
 }
 
-// ================= FUNÃ‡ÃƒO SALVA USUARIO =================
+// ================= FUNCAO SALVA USUARIO =================
 
 function salvarUsuarios() {
   fs.writeFileSync(
@@ -356,7 +356,7 @@ function salvarUsuarios() {
   );
 }
 
-// ================= CRÃ‰DITOS =================
+// ================= CREDITOS =================
 
 const CREDITOS_PLANO = {
   free: 300,
@@ -437,7 +437,7 @@ function debitarCreditos(clienteId, quantidade = 1) {
   return true;
 }
 
-// ================= FUNÃ‡ÃƒO SALVA PLANO ===================
+// ================= FUNCAO SALVA PLANO ===================
 
 function salvarPlanos() {
   fs.writeFileSync(
@@ -469,9 +469,9 @@ function salvarConfig() {
       JSON.stringify(config, null, 2)
     );
 
-    console.log("[OK] Config salva");
+    console.log("[OK]💾 Config salva");
   } catch (e) {
-    console.error("[ERRO] ERRO AO SALVAR CONFIG:", e.message);
+    console.error("[ERRO]❌ ERRO AO SALVAR CONFIG:", e.message);
   }
 }
 
@@ -674,7 +674,7 @@ function criarPlanosPadrao() {
 
   salvarPlanos();
 
-  console.log("[OK] Planos padro criados");
+  console.log("[OK]✅ Planos padro criados");
 }
 
 // ================= FUNÃ‡ÃƒO CARREGA CONFIG =================
@@ -695,7 +695,7 @@ function carregarConfig() {
         }
       };
 
-      console.log("[OK] Config carregada");
+      console.log("[OK]✅ Config carregada");
     }
 
          
@@ -704,7 +704,7 @@ if (fs.existsSync(USUARIOS_FILE)) {
     fs.readFileSync(USUARIOS_FILE, "utf8")
   );
 
-  console.log("[OK] Usurios carregados");
+  console.log("[OK]✅ Usurios carregados");
 }
 
 if (fs.existsSync(INTEGRACOES_FILE)) {
@@ -712,7 +712,7 @@ if (fs.existsSync(INTEGRACOES_FILE)) {
     fs.readFileSync(INTEGRACOES_FILE, "utf8")
   );
 
-  console.log("[OK] Integraes carregadas");
+  console.log("[OK]✅ Integraes carregadas");
 }
 
 if (fs.existsSync(CONFIGS_CLIENTES_FILE)) {
@@ -720,7 +720,7 @@ if (fs.existsSync(CONFIGS_CLIENTES_FILE)) {
     fs.readFileSync(CONFIGS_CLIENTES_FILE, "utf8")
   );
 
-  console.log("[OK] Configs dos clientes carregadas");
+  console.log("[OK]✅ Configs dos clientes carregadas");
 }
 
 if (fs.existsSync(DESTINOS_CLIENTES_FILE)) {
@@ -736,7 +736,7 @@ if (fs.existsSync(PLANOS_FILE)) {
     fs.readFileSync(PLANOS_FILE, "utf8")
   );
 
-  console.log("[OK] Planos carregados");
+  console.log("[OK]✅ Planos carregados");
 }
 
 if (fs.existsSync(SESSOES_FILE)) {
@@ -744,7 +744,7 @@ if (fs.existsSync(SESSOES_FILE)) {
     fs.readFileSync(SESSOES_FILE, "utf8")
   );
 
-  console.log("[OK] Sesses meta carregadas:", Object.keys(sessoesMeta).length);
+  console.log("[OK]✅ Sesses meta carregadas:", Object.keys(sessoesMeta).length);
 }
 
   mensageiro.carregarMensageiro();
@@ -770,7 +770,7 @@ console.log("[INFO] CRIANDO ADMIN PADRO");
 
   salvarUsuarios();
 
-  console.log("[OK] Usurio admin inicial criado");
+  console.log("[OK]✅ Usurio admin inicial criado");
 }
 
   } catch (e) {
@@ -5049,7 +5049,7 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
     return "";
 
   } catch (e) {
-    console.log("[ERRO] Erro ao gerar link afiliado do cliente:", {
+    console.log("[ERRO]❌ Erro ao gerar link afiliado do cliente:", {
       clienteId,
       marketplace,
       erro: e.message
@@ -5105,7 +5105,7 @@ function usuarioTemIntegracaoMarketplace(clienteId, marketplace) {
   const integracao = getIntegracaoCliente(clienteId, mp);
   const cred = integracao?.credenciais || {};
 
-  console.log("[DEBUG] CHECK INTEGRAO CLIENTE:", {
+  console.log("[DEBUG]✅ CHECK INTEGRAO CLIENTE:", {
     clienteId,
     marketplace: mp,
     temIntegracao: !!integracao,
@@ -5192,7 +5192,7 @@ async function distribuirOfertaParaClientes(ofertaBase) {
     }
 
 
-console.log("[DEBUG] CHECK INTEGRAO:", {
+console.log("[DEBUG]✅ CHECK INTEGRAO:", {
   clienteId,
   marketplace: mp,
   integracao: !!getIntegracaoCliente(clienteId, mp),
@@ -5221,7 +5221,7 @@ console.log("[DEBUG] CHECK INTEGRAO:", {
       ofertaBase
     );
 
-console.log("[INFO] LINK CLIENTE GERADO:", {
+console.log("[INFO]🔗 LINK CLIENTE GERADO:", {
   clienteId,
   marketplace: mp,
   linkOriginal,
@@ -5518,7 +5518,7 @@ console.log("[INFO] Oferta distribuda para cliente:", {
 
             await new Promise(r => setTimeout(r, 1500));
           } catch (e) {
-            console.log("[ERRO] erro produto AliExpress API:", e.message);
+            console.log("[ERRO]❌ erro produto AliExpress API:", e.message);
           }
         }    
 
@@ -5544,7 +5544,7 @@ console.log("[INFO] Oferta distribuda para cliente:", {
     );
 
     console.log(
-      `ðŸ§  Ofertas AliExpress apÃ³s filtros universais: ${ofertasFiltradas.length}`
+      ` 🔍Ofertas AliExpress filtros universais: ${ofertasFiltradas.length}`
     );
 
   for (const oferta of ofertasFiltradas) {
@@ -5863,7 +5863,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
 
     console.log(`[INFO] Awin finalizado. Produtos adicionados: ${ofertasFiltradas.length}`);
   } catch (e) {
-    console.log("[ERRO] erro farejador Awin:", e.message);
+    console.log("[ERRO]❌ erro farejador Awin:", e.message);
   }
 }
 
@@ -6012,7 +6012,7 @@ const id = normalizarSessaoId(
 
     salvarSessoesMeta();
 
-console.log("[WHATSAPP] Sesso criada e salva:", sessoesMeta[id]);
+console.log("[WHATSAPP]💾 Sesso criada e salva:", sessoesMeta[id]);
 
     return res.json({
       ok: true,
@@ -6179,7 +6179,7 @@ app.post("/reset/:id", async (req, res) => {
     });
 
   } catch (e) {
-    console.log("[ERRO] [WHATSAPP] erro reset sesso:", e.message);
+    console.log("[ERRO]❌ [WHATSAPP] erro reset sesso:", e.message);
 
     return res.status(500).json({
       ok: false,
@@ -6279,7 +6279,7 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
   config.sessoesWhatsapp.push(sessaoId);
   salvarConfig();
 
-  console.log("[WHATSAPP] Sesso WhatsApp salva para reconexo:", {
+  console.log("[WHATSAPP]💾 Sesso WhatsApp salva para reconexo:", {
     clienteId,
     sessaoId,
     limiteSessoes,
@@ -6347,7 +6347,7 @@ async function carregarGruposSessao(id, opcoes = {}) {
  const grupos = await sock.groupFetchAllParticipating();
 
 console.log(
-  "ðŸ“‹ Grupos carregados:",
+   "👥 Grupos carregados:",
   Object.keys(grupos || {}).length
 );
 
@@ -6592,7 +6592,7 @@ const limiteDestinos = isAdminMaster(req)
  destinosPorCliente[clienteId][id] = destinos;
 
  salvarDestinosClientes();
-  console.log("[DESTINO] Destinos salvos na config:", id, destinos);
+  console.log("[DESTINO]💾 Destinos salvos na config:", id, destinos);
 
   return res.json({
     ok: true,
@@ -6648,7 +6648,7 @@ app.post("/campanhas/enviar", async (req, res) => {
     });
 
   } catch (e) {
-    console.log("[ERRO] Erro campanha manual:", e.message);
+    console.log("[ERRO]❌ Erro campanha manual:", e.message);
 
     return res.status(400).json({
       ok: false,
@@ -6783,7 +6783,7 @@ sock.ev.on("messages.upsert", async ({ messages = [] } = {}) => {
       });
     }
   } catch (e) {
-    console.log("[MENSAGEIRO-ERRO] messages.upsert:", e.message);
+    console.log("[MENSAGEIRO-ERRO]⚠️ messages.upsert:", e.message);
   }
 });
 
@@ -6806,7 +6806,7 @@ sock.ev.on("group-participants.update", async (evento) => {
       evento
     });
   } catch (e) {
-    console.log("[ERRO] Erro evento Mensageiro:", e.message);
+    console.log("[ERRO]⚠️ Erro evento Mensageiro:", e.message);
   }
 });
 
@@ -6814,7 +6814,7 @@ sock.ev.on("group-participants.update", async (evento) => {
     const { connection, qr, lastDisconnect } = update;
 
     if (qr) {
-      console.log("[WHATSAPP] QR RECEBIDO:", id);
+      console.log("[WHATSAPP]📲 QR RECEBIDO:", id);
       qrCodes[id] = await qrcode.toDataURL(qr);
       statusSessao[id] = "qr";
     }
@@ -6845,7 +6845,7 @@ salvarSessoesMeta();
   });
   } catch (e) {
     console.log(
-      "âš ï¸ Erro ao carregar grupos no pÃ³s-conexÃ£o:",
+      "⚠️ Erro ao carregar grupos no pos conexao:",
       e.message
     );
   }
@@ -7010,7 +7010,7 @@ console.log("[BOOT] Dados iniciais carregados:", {
 });
 
 app.listen(PORT, () => {
-  console.log("[API] API ONLINE NA PORTA " + PORT);
+  console.log("[API]🟢🧠 API ONLINE NA PORTA " + PORT);
 
 decairConfiancaCupons();
 
