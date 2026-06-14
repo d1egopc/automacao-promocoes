@@ -2783,6 +2783,20 @@ function usuarioTemRecurso(req, recurso) {
   return plano?.recursos?.[recurso] === true;
 }
 
+function clienteTemRecursoMensageiro(clienteId = "admin") {
+  const usuario = usuarios.find(u => u.id === clienteId) || null;
+
+  if (!usuario) return clienteId === "admin";
+  if (usuario.papel === "admin_master") return true;
+
+  const nomePlano = String(usuario.plano || "").trim().toLowerCase();
+  const plano = Object.values(planos || {}).find(p =>
+    String(p.nome || "").trim().toLowerCase() === nomePlano
+  );
+
+  return plano?.recursos?.mensageiro === true;
+}
+
 // ======================== FUNCAO GET INTEGRACOES ========================
 
 function getIntegracaoCliente(clienteId = "admin", marketplace = "") {
@@ -6757,6 +6771,22 @@ if (id.startsWith("user_")) {
 
 // =============== EVENTO MENSAGEIRO =================
 
+sock.ev.on("messages.upsert", async ({ messages = [] } = {}) => {
+  try {
+    for (const mensagem of messages) {
+      await mensageiro.tratarMensagemPrivadaAtendimento({
+        clienteId: clienteIdMensageiro,
+        sessaoId: id,
+        sock,
+        mensagem,
+        planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
+      });
+    }
+  } catch (e) {
+    console.log("[MENSAGEIRO-ERRO] messages.upsert:", e.message);
+  }
+});
+
 sock.ev.on("group-participants.update", async (evento) => {
   
   console.log("[INFO] EVENTO GRUPO MENSAGEIRO:", {
@@ -7222,3 +7252,4 @@ setInterval(() => {
   }
 
 }, 10 * 1000);
+
