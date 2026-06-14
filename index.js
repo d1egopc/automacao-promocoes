@@ -33,7 +33,6 @@ const {
 const {
   aplicarCuponsAutomaticos
 } = require("./marketplaces/cupons");
-AP
 const {
   deveIgnorarOfertaRepetida,
   registrarOfertaVista
