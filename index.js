@@ -3165,6 +3165,14 @@ function mascararIntegracao(config = {}) {
   return integracoesUtils.mascararIntegracao(config);
 }
 
+function normalizarCredenciaisAwin(config = {}) {
+  return integracoesUtils.normalizarCredenciaisAwin(config);
+}
+
+function obterProgramaAwin(credenciais = {}, alvo = "kabum") {
+  return integracoesUtils.obterProgramaAwin(credenciais, alvo);
+}
+
 //============= ROTA INTEGRACOES =======================================
 
 app.get("/integracoes", (req, res) => {
@@ -3177,7 +3185,9 @@ app.get("/integracoes", (req, res) => {
     req.query.reveal === "true";
 
   for (const [marketplace, config] of Object.entries(data)) {
-    const credenciais = config?.credenciais || {};
+    const credenciais = marketplace === "awin"
+      ? normalizarCredenciaisAwin(config?.credenciais || {})
+      : config?.credenciais || {};
 
     const camposConfigurados = Object.keys(credenciais).filter(k => {
       const valor = credenciais[k];
@@ -3377,13 +3387,18 @@ async function gerarDeepLinkAwin(urlOriginal, clienteId = "admin") {
   getIntegracaoCliente(clienteId, "awin");
   const credenciais = integracao?.credenciais || {};
 
-  const { publisherId, apiToken, advertiserId } = credenciais;
+  const { publisherId, apiToken } = credenciais;
+  const programaAwin = obterProgramaAwin(credenciais, urlOriginal);
+  const advertiserId = programaAwin?.advertiserId || "";
 
 if (!publisherId || !apiToken || !advertiserId) {
-  console.log("[AVISO] AWIN sem credenciais:", clienteId);
+  console.log("[AVISO] AWIN sem credenciais/programa:", {
+    clienteId,
+    programa: programaAwin?.nome || ""
+  });
 }
   if (!publisherId || !apiToken || !advertiserId) {
-    throw new Error("Awin sem publisherId, apiToken ou advertiserId configurado.");
+    throw new Error("Awin sem publisherId, apiToken ou programa advertiserId configurado.");
   }
 
   const response = await axios.post(
@@ -3834,7 +3849,9 @@ if (String(url || "").includes("meli.la")) {
   return "";
 }
 
-    const credenciais = config?.credenciais || {};
+    const credenciais = marketplace === "awin"
+      ? normalizarCredenciaisAwin(config?.credenciais || {})
+      : config?.credenciais || {};
 
     const cookies = credenciais.cookies || "";
     const tag = credenciais.tag || "";
@@ -3935,7 +3952,9 @@ async function importarAliExpress(urlEntrada, config = {}) {
       throw new Error("Product ID nÃ£o encontrado no link AliExpress");
     }
 
-    const credenciais = config?.credenciais || {};
+    const credenciais = marketplace === "awin"
+      ? normalizarCredenciaisAwin(config?.credenciais || {})
+      : config?.credenciais || {};
     const appKey = credenciais.appKey || "";
     const secret = credenciais.secret || "";
     const trackingId = credenciais.trackingId || "";
@@ -5156,9 +5175,10 @@ function usuarioTemIntegracaoMarketplace(clienteId, marketplace) {
   }
 
   if (mp === "awin") {
+    const awinCred = normalizarCredenciaisAwin(cred);
     return !!(
-      cred.publisherId &&
-      cred.apiToken
+      awinCred.publisherId &&
+      awinCred.apiToken
     );
   }
 
@@ -7251,4 +7271,8 @@ setInterval(() => {
   }
 
 }, 10 * 1000);
+
+
+
+
 
