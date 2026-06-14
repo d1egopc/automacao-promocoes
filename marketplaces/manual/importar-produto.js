@@ -85,7 +85,7 @@ async function importarProdutoManual(req, deps = {}) {
 
   const config = getIntegracaoCliente(clienteId, marketplace);
 
-console.log("🧪 IMPORTAÇÃO MANUAL CONFIG:", {
+console.log("[API] IMPORTAO MANUAL CONFIG:", {
   clienteId,
   marketplace,
   tagUsada:
@@ -163,7 +163,7 @@ console.log("🧪 IMPORTAÇÃO MANUAL CONFIG:", {
     };
 
   } catch (e) {
-    console.error(`❌ ERRO IMPORTAÇÃO MANUAL ${marketplace}:`, e.message);
+    console.error(`[API] ERRO IMPORTAO MANUAL ${marketplace}:`, e.message);
 
     return {
       status: 200,
