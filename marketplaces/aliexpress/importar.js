@@ -56,7 +56,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
 
     const data = await response.json();
 
-    console.log("ALIEXPRESS API RESPONSE:", JSON.stringify(data));
+    console.log("[INFO] ALIEXPRESS API RESPONSE:", JSON.stringify(data));
 
     const result =
       data?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result ||
@@ -146,7 +146,7 @@ let imagem =
     }
 
 
-console.log("🧪 ALIEXPRESS PRODUTO FINAL:", {
+console.log("[INFO] ALIEXPRESS PRODUTO FINAL:", {
   titulo,
   precoAtual,
   precoAntigo,
@@ -187,7 +187,7 @@ console.log("🧪 ALIEXPRESS PRODUTO FINAL:", {
     };
 
   } catch (e) {
-    console.log("❌ ERRO IMPORTAR ALIEXPRESS:", e.message);
+    console.log("[API] ERRO IMPORTAR ALIEXPRESS:", e.message);
 
     return {
       marketplace: "aliexpress",

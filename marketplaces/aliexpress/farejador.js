@@ -25,12 +25,12 @@ async function farejarAliExpress(clienteId = "admin", deps = {}) {
   } = deps;
 
   try {
-    console.log("🛒 Farejando ofertas AliExpress modular...", { clienteId });
+    console.log("[INFO] Farejando ofertas AliExpress modular...", { clienteId });
 
     const cfg = config.marketplaces?.aliexpress || {};
 
     if (!cfg.ativo) {
-      console.log("⏸ AliExpress desativado. Farejador ignorado.");
+      console.log("[AVISO] AliExpress desativado. Farejador ignorado.");
       return [];
     }
 
@@ -38,7 +38,7 @@ async function farejarAliExpress(clienteId = "admin", deps = {}) {
   integracoesPorCliente?.[clienteId]?.aliexpress;
 
     if (!integracao?.credenciais) {
-      console.log("❌ AliExpress sem integração configurada:", clienteId);
+      console.log("[AVISO] AliExpress sem integrao configurada:", clienteId);
       return [];
     }
 
@@ -77,7 +77,7 @@ for (const termo of buscasBrasilRodada) {
 try {
     if (produtosEncontrados.length >= limitePorRodada) break;
 
-    console.log("🇧🇷 Busca AliExpress API:", termo);
+    console.log("[INFO] Busca AliExpress API:", termo);
 
     const produtosAPI = await buscarProdutosAliExpressAPI(
       termo,
@@ -88,7 +88,7 @@ try {
       }
     );
 
-    console.log(`🔎 ${termo}: ${produtosAPI.length} produtos AliExpress via API`);
+    console.log(`[INFO] ${termo}: ${produtosAPI.length} produtos AliExpress via API`);
 
     for (const item of produtosAPI) {
       try {
@@ -111,7 +111,7 @@ try {
         item.promotion_link ||
         linkOriginal;
        
-        console.log("🔗 ALI LINKS:", {
+        console.log("[INFO] ALI LINKS:", {
         short: item.promotion_link_short,
         normal: item.promotion_link
         });
@@ -190,7 +190,7 @@ let linkFinal =
     integracao.credenciais
   );
 
-console.log("🔗 LINK FINAL ALI:", linkFinal);       
+console.log("[INFO] LINK FINAL ALI:", linkFinal);       
 
 const tituloLower = String(titulo || "").toLowerCase();
 
@@ -227,7 +227,7 @@ const palavrasBloqueadasAli = [
 ];
 
 if (palavrasBloqueadasAli.some(p => tituloLower.includes(p))) {
-  console.log("🚫 AliExpress bloqueado por palavra:", titulo);
+  console.log("[AVISO] AliExpress bloqueado por palavra:", titulo);
   continue;
 }
 
@@ -265,14 +265,14 @@ const categoriaDetectada =
 
        if (typeof prepararOfertaGlobal === "function") {
 
-  console.log("🔎 ANTES PREPARAR:", {
+  console.log("[INFO] ANTES PREPARAR:", {
     link: novaOferta.link,
     linkAfiliado: novaOferta.linkAfiliado
   });
 
   novaOferta = prepararOfertaGlobal(novaOferta);
 
-  console.log("🔎 DEPOIS PREPARAR:", {
+  console.log("[INFO] DEPOIS PREPARAR:", {
     link: novaOferta.link,
     linkAfiliado: novaOferta.linkAfiliado
   });
@@ -280,13 +280,13 @@ const categoriaDetectada =
 }
 
         if (typeof ofertaJaExiste === "function" && ofertaJaExiste(novaOferta)) {
-          console.log("⏭️ AliExpress já existe:", titulo);
+          console.log("[INFO] AliExpress j existe:", titulo);
           continue;
         }
 
         produtosEncontrados.push(novaOferta);
 
-        console.log("🤖 Nova oferta AliExpress API:", {
+        console.log("[INFO] Nova oferta AliExpress API:", {
           titulo: novaOferta.titulo,
           preco: novaOferta.precoAtual,
           precoAntigo: novaOferta.precoAntigo,
@@ -296,25 +296,25 @@ const categoriaDetectada =
 
         await new Promise(r => setTimeout(r, 3000));
       } catch (e) {
-        console.log("❌ erro produto AliExpress API:", e.message);
+        console.log("[ERRO] erro produto AliExpress API:", e.message);
       }
     }
 
     await new Promise(r => setTimeout(r, 5000));
   } catch (e) {
-    console.log("❌ erro busca AliExpress API:", termo, e.message);
+    console.log("[ERRO] erro busca AliExpress API:", termo, e.message);
   }
 }
 
     // Por enquanto só estrutura inicial
-    console.log("✅ AliExpress modular carregado com sucesso.");
+    console.log("[OK] AliExpress modular carregado com sucesso.");
 
 let adicionadasNaFila = 0;
 
 for (const oferta of produtosEncontrados) {
 
   if (deveIgnorarOfertaRepetida(oferta)) {
-    console.log("🧠 AliExpress ignorado pela memória:", oferta.titulo);
+    console.log("[AVISO] AliExpress ignorado pela memria:", oferta.titulo);
     continue;
   }
 
@@ -332,13 +332,13 @@ if (adicionadasNaFila > 0) {
   salvarFila(clienteId);
 }
 
-console.log("✅ AliExpress ofertas enviadas para fila:", produtosEncontrados.length);
+console.log("[FILA] AliExpress ofertas enviadas para fila:", produtosEncontrados.length);
 
    
 return produtosEncontrados;
 
   } catch (e) {
-    console.log("❌ erro farejador AliExpress modular:", e.message);
+    console.log("[ERRO] erro farejador AliExpress modular:", e.message);
     return [];
   }
 }

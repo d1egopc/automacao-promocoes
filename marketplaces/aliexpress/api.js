@@ -61,7 +61,7 @@ async function buscarProdutosAliExpressAPI(termo, credenciais = {}, opcoes = {})
 
   const data = await response.json();
 
-  console.log("🧪 ALI API QUERY:", JSON.stringify(data).slice(0, 1000));
+  console.log("[INFO] ALI API QUERY:", JSON.stringify(data).slice(0, 1000));
 
   if (data?.error_response) {
     throw new Error(
