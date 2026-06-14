@@ -23,7 +23,7 @@ async function importarProdutoKabumViaAwin(
 
   const html = response.data || "";
 
-console.log("🧪 KABUM HTML DEBUG:", {
+console.log("[DEBUG] KABUM HTML DEBUG:", {
   status: response.status,
   tamanhoHtml: html.length,
   temOgImage: html.includes('og:image'),
@@ -62,7 +62,7 @@ if (imagem) {
     .replace("_p.jpg", "_g.jpg");
 }
 
-console.log("🖼️ IMAGEM KABUM:", imagem);
+console.log("[INFO] IMAGEM KABUM:", imagem);
 
   // ================= EXTRAIR PREÇO =================
 
@@ -95,7 +95,7 @@ const pixMatch =
   html.match(/(R\$\s?[\d\.]+,\d{2})\s*À vista no PIX/i) ||
   html.match(/(R\$\s?[\d\.]+,\d{2})\s*À vista no PIX com/i);
 
-console.log("🧪 PIX MATCH:", pixMatch?.[1]);
+console.log("[INFO] PIX MATCH:", pixMatch?.[1]);
 
 const parcelamentoMatch =
   html.match(/em\s+até\s+(\d+)x[\s\S]{0,80}de\s+(R\$\s?[\d\.]+,\d{2})[\s\S]{0,80}sem\s+juros/i) ||
@@ -173,17 +173,13 @@ if (!precoAtual && precosValidos.length) {
   }
 }
 
-console.log("🧪 PREÇOS KABUM EXTRAÍDOS:", precosEncontrados.slice(0, 20));
-console.log("🧪 PREÇOS VALIDOS:", precosValidos.slice(0, 20));
+console.log("[INFO] PREOS KABUM EXTRADOS:", precosEncontrados.slice(0, 20));
+console.log("[INFO] PREOS VALIDOS:", precosValidos.slice(0, 20));
 
 
-const urlLimpa = url.split("?")[0];
+  const linkAfiliado = await gerarDeepLinkAwin(url, clienteId);
 
-console.log("🧹 URL KABUM LIMPA:", urlLimpa);
-  
-const linkAfiliado = await gerarDeepLinkAwin(urlLimpa, clienteId);
-
-console.log("🧪 KABUM IMPORTADO FINAL:", {
+console.log("[API] KABUM IMPORTADO FINAL:", {
   titulo,
   precoAtual,
   precoAntigo,

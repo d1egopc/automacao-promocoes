@@ -27,18 +27,18 @@ async function farejarKabum(clienteId = "admin", deps = {}) {
   } = deps;
 
   try {
-    console.log("🧡 Farejando KaBuM stealth...", { clienteId });
+    console.log("[INFO] Farejando KaBuM stealth...", { clienteId });
 
 const cfg = config.marketplaces?.kabum || {};
 
     if (!cfg.ativo) {
-      console.log("⏸ KaBuM desativada. Farejador ignorado.");
+      console.log("[AVISO] KaBuM desativada. Farejador ignorado.");
       return [];
     }
 
 const buscas = gerarBuscasKabum();
 
-console.log("🔎 Buscas KaBuM:", buscas.slice(0, 10));
+console.log("[INFO] Buscas KaBuM:", buscas.slice(0, 10));
 
 for (const termo of buscas.slice(0, cfg.limiteBuscas || 8)) {
 
@@ -50,7 +50,7 @@ for (const termo of buscas.slice(0, cfg.limiteBuscas || 8)) {
     const url =
       `https://www.kabum.com.br/busca/${slug}`;
 
-    console.log("🌐 KABUM URL:", url);
+    console.log("[INFO] KABUM URL:", url);
 
     const response = await fetch(url, {
       headers: {
@@ -59,10 +59,10 @@ for (const termo of buscas.slice(0, cfg.limiteBuscas || 8)) {
       }
     });
 
-    console.log("📡 KABUM STATUS:", response.status);
+    console.log("[INFO] KABUM STATUS:", response.status);
 
     if (!response.ok) {
-      console.log("🛡️ KaBuM bloqueou:", response.status);
+      console.log("[AVISO] KaBuM bloqueou:", response.status);
       continue;
     }
 
@@ -115,7 +115,7 @@ try {
     const htmlDetalhe = await respDetalhe.text();
     const detalhe = extrairDetalheProdutoKabum(htmlDetalhe);
 
-    console.log("🧪 KABUM DETALHE:", {
+    console.log("[INFO] KABUM DETALHE:", {
       titulo: produto.titulo,
       precoLista: produto.precoAtual,
       precoDetalhe: detalhe.precoAtual,
@@ -131,12 +131,12 @@ try {
     }
   }
 } catch (e) {
-  console.log("⚠️ Erro ao validar detalhe KaBuM:", e.message);
+  console.log("[ERRO] Erro ao validar detalhe KaBuM:", e.message);
 }
 
 let linkAfiliado = produto.link;
 
-console.log("🧪 gerarDeepLinkAwin recebido?", typeof gerarDeepLinkAwin);
+console.log("[INFO] gerarDeepLinkAwin recebido?", typeof gerarDeepLinkAwin);
 
 if (typeof gerarDeepLinkAwin === "function") {
   try {
@@ -159,7 +159,7 @@ if (typeof gerarDeepLinkAwin === "function") {
   }
 }
 
-console.log("🧪 CHECK IMPORTADOR:", {
+console.log("[API] CHECK IMPORTADOR:", {
   tipo: typeof importarProdutoKabumViaAwin,
   link: produto.link
 });
@@ -173,7 +173,7 @@ if (typeof importarProdutoKabumViaAwin === "function" && produto.link) {
     }
   );
 
-  console.log("🧪 PRODUTO IMPORTADO KABUM:", {
+  console.log("[API] PRODUTO IMPORTADO KABUM:", {
     titulo: produtoImportado?.titulo,
     precoAtual: produtoImportado?.precoAtual,
     avisoPagamento: produtoImportado?.avisoPagamento,
@@ -188,7 +188,7 @@ if (typeof importarProdutoKabumViaAwin === "function" && produto.link) {
       ...produtoImportado
     };
 
-    console.log("🧪 PRODUTO FINAL KABUM:", {
+    console.log("[INFO] PRODUTO FINAL KABUM:", {
       titulo: produto.titulo,
       precoAtual: produto.precoAtual,
       avisoPagamento: produto.avisoPagamento,
@@ -243,16 +243,15 @@ if (
 
  const jaExisteKabum = ofertaJaExiste(novaOferta);
 
-console.log("🧪 KABUM jaExiste?", {
+console.log("[INFO] KaBuM duplicidade:", {
   jaExiste: jaExisteKabum,
-  titulo: novaOferta.titulo,
-  link: novaOferta.link
+  titulo: novaOferta.titulo
 });
 
 if (!jaExisteKabum) {
 
   if (deveIgnorarOfertaRepetida(novaOferta)) {
-    console.log("🧠 KaBuM ignorado pela memória:", novaOferta.titulo);
+    console.log("[AVISO] KaBuM ignorado pela memria:", novaOferta.titulo);
     continue;
   }
 
@@ -265,7 +264,7 @@ if (!jaExisteKabum) {
 
   salvarFila(clienteId);
 
-  console.log("🧡 Nova oferta KaBuM:", {
+  console.log("[INFO] Nova oferta KaBuM:", {
 
       titulo: novaOferta.titulo,
       preco: novaOferta.precoAtual,
@@ -273,7 +272,7 @@ if (!jaExisteKabum) {
     });
 
 } else {
-  console.log("⏭️ KaBuM duplicado ignorado:", novaOferta.titulo);
+  console.log("[AVISO] KaBuM duplicado ignorado:", novaOferta.titulo);
 }
   }
 
@@ -299,14 +298,14 @@ if (!jaExisteKabum) {
   integracoesPorCliente?.[clienteId]?.awin;
 
     if (!integracaoAwin?.credenciais) {
-      console.log("⚠️ KaBuM sem Awin configurada para gerar afiliado:", clienteId);
+      console.log("[AVISO] KaBuM sem Awin configurada para gerar afiliado:", clienteId);
     }
 
-    console.log("✅ KaBuM modular carregado com sucesso.");
+    console.log("[OK] KaBuM modular carregado com sucesso.");
 
     return [];
   } catch (e) {
-    console.log("❌ erro farejador KaBuM:", e.message);
+    console.log("[ERRO] erro farejador KaBuM:", e.message);
     return [];
   }
 }
