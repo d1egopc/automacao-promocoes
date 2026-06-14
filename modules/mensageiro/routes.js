@@ -25,18 +25,36 @@ function normalizarAtendimentoMensageiro(dados = {}) {
     ativo: atendimento.ativo === true,
     delaySegundos: Math.max(0, Number(atendimento.delaySegundos || 2) || 0),
     escopo: "privado",
-    respostasRapidas: respostasRapidas.map((item, index) => ({
-      id: item.id || `resposta_${Date.now()}_${index}`,
-      ativo: item.ativo !== false,
-      gatilhos: Array.isArray(item.gatilhos)
-        ? item.gatilhos.map(g => String(g || "").trim()).filter(Boolean)
-        : [],
-      tipoCorrespondencia: item.tipoCorrespondencia || "contem",
-      resposta: {
-        tipo: item.resposta?.tipo || "texto",
-        conteudo: String(item.resposta?.conteudo || "")
-      }
-    })).filter(item => item.gatilhos.length && item.resposta.conteudo)
+    respostasRapidas: respostasRapidas.map((item, index) => {
+      const nome = String(
+        item.nome ||
+        item.resposta?.nome ||
+        item.titulo ||
+        ""
+      ).trim();
+      const respostaTipo = item.resposta?.tipo || item.tipo || "texto";
+      const respostaConteudo =
+        item.resposta?.conteudo ??
+        item.resposta?.mensagem ??
+        item.mensagem ??
+        item.conteudo ??
+        "";
+
+      return {
+        id: item.id || `resposta_${Date.now()}_${index}`,
+        nome,
+        ativo: item.ativo !== false,
+        gatilhos: Array.isArray(item.gatilhos)
+          ? item.gatilhos.map(g => String(g || "").trim()).filter(Boolean)
+          : [],
+        tipoCorrespondencia: item.tipoCorrespondencia || "contem",
+        resposta: {
+          tipo: respostaTipo,
+          conteudo: String(respostaConteudo || ""),
+          nome
+        }
+      };
+    }).filter(item => item.gatilhos.length && item.resposta.conteudo)
   };
 }
 
@@ -143,5 +161,6 @@ const atualizado = setMensageiroCliente(clienteId, {
 }
 
 module.exports = criarRotasMensageiro;
+
 
 
