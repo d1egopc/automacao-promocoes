@@ -7,7 +7,7 @@ function adicionarOfertaNaFila(fila, oferta, origem = "automatico") {
   if (!oferta) return false;
 
   if (deveIgnorarOfertaRepetida(oferta)) {
-    console.log("🧠 Oferta ignorada por repetição:", {
+    console.log("[INFO] Oferta ignorada por repetio:", {
       origem,
       titulo: oferta.titulo || oferta.nome,
       marketplace: oferta.marketplace

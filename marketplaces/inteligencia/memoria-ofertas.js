@@ -33,7 +33,7 @@ function carregarOfertasVistas() {
 
     return Array.isArray(dados) ? dados : [];
   } catch (e) {
-    console.log("❌ Erro ao carregar memória de ofertas:", e.message);
+    console.log("[ERRO] Erro ao carregar memria de ofertas:", e.message);
     return [];
   }
 }
@@ -47,7 +47,7 @@ function salvarOfertasVistas(lista = []) {
       JSON.stringify(lista.slice(-5000), null, 2)
     );
   } catch (e) {
-    console.log("❌ Erro ao salvar memória de ofertas:", e.message);
+    console.log("[ERRO] Erro ao salvar memria de ofertas:", e.message);
   }
 }
 
@@ -135,14 +135,14 @@ function deveIgnorarOfertaRepetida(oferta = {}) {
     precoAtual <= precoAnterior * 0.92;
 
   if (horasPassadas < 1 && !temCupomNovo && !quedaPreco) {
-    console.log("🧠 Oferta repetida ignorada <1h:", oferta.titulo || oferta.nome);
+    console.log("[INFO] Oferta repetida ignorada <1h:", oferta.titulo || oferta.nome);
     return true;
   }
 
   const janelaHoras = janelaHorasPorCategoria(oferta);
 
   if (horasPassadas < janelaHoras && !temCupomNovo && !quedaPreco) {
-    console.log("🧠 Oferta repetida ignorada:", {
+    console.log("[INFO] Oferta repetida ignorada:", {
       titulo: oferta.titulo || oferta.nome,
       horasPassadas: Number(horasPassadas.toFixed(2)),
       janelaHoras
