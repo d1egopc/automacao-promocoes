@@ -1,4 +1,4 @@
-let categoriasDestinos = {};
+﻿let categoriasDestinos = {};
 
 try {
   ({ CATEGORIAS_DESTINOS: categoriasDestinos = {} } = require("./categorias-destinos"));
@@ -114,13 +114,13 @@ const REGRAS = [
       "boticario", "natura", "eudora", "hidratante", "skincare",
       "protetor solar", "fps", "shampoo", "condicionador", "maquiagem",
       "batom", "gloss", "serum", "sabonete liquido", "creme facial",
-      "vitamina c", "colageno", "maquina de cortar cabelo", "barbeador",
+      "vitamina c", "maquina de cortar cabelo", "barbeador",
       "aparador de barba", "depilador", "escova secadora", "prancha de cabelo"
     ],
     palavras: [
-      "chapinha", "secador cabelo", "mascara capilar", "pomada", "arnica",
+      "chapinha", "secador cabelo", "secador de cabelo", "mascara capilar", "pomada", "arnica",
       "oleo de coco", "lo\u00e7ao", "lotion", "la vie est belle", "elixir",
-      "cerave", "la roche", "vichy", "nivea", "loreal", "elseve",
+      "fisiogel", "creme maos", "creme para maos", "cerave", "la roche", "vichy", "nivea", "loreal", "elseve",
       "pantene", "tresemme", "dove", "granado", "wella", "eucerin",
       "termometro", "medidor de pressao", "balanca corporal", "fio dental",
       "manicure", "pedicure", "kit manicure", "kit pedicure",
@@ -181,7 +181,7 @@ const REGRAS = [
       "rx 580", "rx 6600", "rx 7600", "rx 7700", "rx 7800", "rx 7900",
       "ssd nvme", "nvme", "m 2", "memoria ram", "ddr4", "ddr5",
       "placa mae", "processador", "ryzen", "intel core", "water cooler",
-      "air cooler", "fonte atx", "fonte gamer", "gabinete gamer", "kit xeon"
+      "air cooler", "fonte atx", "fonte gamer", "gabinete gamer", "cadeira gamer", "kit xeon"
     ],
     palavras: [
       "b450", "b550", "b650", "a520", "a620", "x570", "x670", "h610",
@@ -295,12 +295,12 @@ const REGRAS = [
       "cafeteira", "maquina de cafe", "air fryer", "fritadeira sem oleo",
       "liquidificador", "mixer", "processador de alimentos", "batedeira",
       "sanduicheira", "grill", "panela eletrica", "aspirador robo",
-      "robo aspirador", "aspirador de po", "ferro de passar", "omeleteira"
+      "robo aspirador", "aspirador de po", "ferro de passar", "omeleteira", "fogareiro eletrico", "panela pressao digital", "panela de pressao digital", "multi cook", "multicook"
     ],
     palavras: [
       "pipoqueira", "chaleira eletrica", "torradeira", "maquina waffle",
       "multicooker", "cooktop eletrico", "aspirador vertical", "vaporizador roupas",
-      "passadeira vapor"
+      "passadeira vapor", "panela eletrica pressao"
     ]
   }),
 
@@ -359,7 +359,7 @@ const REGRAS = [
     fortes: [
       "halter", "haltere", "kettlebell", "musculacao", "crossfit", "whey",
       "creatina", "pre treino", "albumina", "barra de proteina",
-      "suplemento", "hipercalorico", "bcaa", "bike", "bicicleta",
+      "suplemento", "hipercalorico", "bcaa", "colageno", "colageno hidrolisado", "colagentek", "vitafor", "bike", "bicicleta",
       "esteira", "eliptico", "yoga", "pilates"
     ],
     palavras: [
@@ -367,7 +367,7 @@ const REGRAS = [
       "legging esportiva", "top esportivo", "bola de futebol", "luva academia",
       "corda de pular", "coqueteleira", "omega 3", "termogenico",
       "multivitaminico", "barra fixa", "roda abdominal", "hand grip",
-      "garmin", "integralmedica", "max titanium", "growth supplements"
+      "garmin", "integralmedica", "max titanium", "growth supplements", "patins"
     ]
   }),
 
@@ -377,10 +377,10 @@ const REGRAS = [
       "furadeira", "parafusadeira", "esmerilhadeira", "serra marmore",
       "serra circular", "serra tico tico", "martelete", "lixadeira",
       "trena", "nivel laser", "kit ferramenta", "jogo de ferramentas",
-      "maleta de ferramentas", "caixa de ferramentas"
+      "maleta de ferramentas", "caixa de ferramentas", "jogo de soquetes", "kit soquetes"
     ],
     palavras: [
-      "chave inglesa", "chave allen", "chave soquete", "alicate universal",
+      "chave inglesa", "chave allen", "chave soquete", "soquete", "soquetes", "alicate universal",
       "alicate de pressao", "alicate profissional", "alicate eletricista",
       "alicate corte", "vonder",
       "makita", "bosch", "dewalt", "gedore", "tramontina pro", "compressor de ar",
@@ -396,7 +396,7 @@ const REGRAS = [
   regra(CATEGORIA.casa, {
     prioridade: 58,
     fortes: [
-      "jogo de panelas", "kit panela", "frigideira", "panela", "faqueiro",
+      "jogo de panelas", "kit panela", "frigideira", "panela", "kit churrasco", "churrasco mestre", "faqueiro",
       "talheres", "copos", "jogo de copos", "marmitas", "potes",
       "cobertor", "manta", "toalha de banho", "colcha", "tapete",
       "cortina", "almofada", "espelho", "sofa", "rack", "painel tv",
@@ -407,7 +407,7 @@ const REGRAS = [
       "cadeira de escritorio", "escrivaninha", "nicho", "prateleira",
       "sapateira", "cabeceira", "poltrona", "estante", "aparador",
       "varal", "lixeira", "torneira", "banheiro", "cozinha", "organizador",
-      "caixa organizadora", "escorredor", "misturador monocomando", "rede de dormir"
+      "caixa organizadora", "escorredor", "misturador monocomando", "rede de dormir", "utensilios churrasco", "conjunto churrasco"
     ]
   }),
 
@@ -450,12 +450,12 @@ const REGRAS = [
       "lego", "boneco", "boneca", "hot wheels", "brinquedo",
       "pista de brinquedo", "carrinho controle remoto", "bebe reborn",
       "quebra cabeca", "triciclo infantil", "patinete infantil",
-      "fisher price", "massinha", "blocos de montar", "nerf"
+      "fisher price", "massinha", "blocos de montar", "nerf", "patins infantil"
     ],
     palavras: [
       "hasbro", "marvel", "homem aranha", "spider man", "vingadores",
       "montessori", "play doh", "casinha infantil", "jogo educativo",
-      "dinossauro", "t rex", "action figure", "brinquedo stem"
+      "dinossauro", "t rex", "action figure", "brinquedo stem", "patins crianca", "patins infantil"
     ]
   }),
 
@@ -464,7 +464,7 @@ const REGRAS = [
     fortes: [
       "molinete", "vara de pesca", "carretilha", "anzol", "isca artificial",
       "linha de pesca", "pesca", "camping", "barraca", "saco de dormir",
-      "fogareiro", "lanterna camping", "caixa termica"
+      "fogareiro camping", "lanterna camping", "caixa termica"
     ],
     palavras: [
       "alicate de pesca", "colchonete", "mochila camping", "cooler",
@@ -602,13 +602,13 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     .sort(desempatar);
 
   if (!resultados.length) {
-    console.log("CATEGORIA NAO IDENTIFICADA:", texto);
+    console.log("[INFO] CATEGORIA NAO IDENTIFICADA:", texto);
     return categoriaManual || CATEGORIA.diversos;
   }
 
   const melhor = resultados[0];
 
-  console.log("Categoria classificada:", {
+  console.log("[INFO] Categoria classificada:", {
     categoria: melhor.categoria,
     pontos: melhor.pontuacao,
     fortes: melhor.fortes.slice(0, 5),
@@ -623,3 +623,4 @@ module.exports = {
   classificarCategoriaOferta,
   normalizarTextoLocal
 };
+
