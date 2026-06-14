@@ -1,4 +1,4 @@
-function criarImportarAmazon(deps = {}) {
+﻿function criarImportarAmazon(deps = {}) {
   const {
     extrairJsonLd,
     extrairMeta,
@@ -46,6 +46,32 @@ function criarImportarAmazon(deps = {}) {
       return match?.[1] ? limparHtml(match[1]) : "";
     }
 
+    function primeiroMatchDetalhado(regex, origem) {
+      const match = html.match(regex);
+      const bruto = match?.[1]
+        ? String(match[1]).replace(/\s+/g, " ").trim()
+        : "";
+
+      return {
+        origem,
+        bruto,
+        valor: bruto ? limparHtml(bruto) : ""
+      };
+    }
+
+    function numeroPrecoAmazon(valor) {
+      const numero = Number(
+        String(valor || "")
+          .replace("R$", "")
+          .replace(/\./g, "")
+          .replace(",", ".")
+          .replace(/[^\d.]/g, "")
+          .trim()
+      );
+
+      return Number.isFinite(numero) ? numero : 0;
+    }
+
     function extrairImagemAmazon() {
       const imagemMeta =
         (Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image) ||
@@ -89,18 +115,51 @@ function criarImportarAmazon(deps = {}) {
 
     preco = limparPreco(htmlDecode(preco));
 
-    let precoAntigo =
-      primeiroMatch(/class=["'][^"']*a-text-price[^"']*["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
-      "";
+    const precoAntigoExtraido = primeiroMatchDetalhado(
+      /class=["'][^"']*a-text-price[^"']*["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i,
+      "a-text-price .a-offscreen"
+    );
+
+    let precoAntigo = precoAntigoExtraido.valor || "";
 
     precoAntigo = limparPreco(htmlDecode(precoAntigo));
 
-    if (precoAntigo === preco) {
+    let origemPrecoAntigo = precoAntigo
+      ? {
+          seletor: precoAntigoExtraido.origem,
+          bruto: precoAntigoExtraido.bruto,
+          valorLimpo: precoAntigo
+        }
+      : "nao_encontrado";
+
+    const precoAtualNumero = numeroPrecoAmazon(preco);
+    const precoAntigoNumero = numeroPrecoAmazon(precoAntigo);
+
+    if (precoAntigoNumero <= 0 || precoAtualNumero <= 0 || precoAntigoNumero <= precoAtualNumero) {
+      if (precoAntigo) {
+        origemPrecoAntigo = {
+          origem: origemPrecoAntigo,
+          motivoDescarte: "preco_antigo_invalido_ou_menor_que_atual",
+          precoAtualNumero,
+          precoAntigoNumero
+        };
+      }
+
       precoAntigo = "";
     }
 
-    // NÃO inventar preço antigo automático na Amazon
-    // Se não veio preço antigo real, fica vazio.
+    console.log("[AMZ-PRECO]", {
+      titulo: htmlDecode(titulo)
+        .replace("Amazon.com.br:", "")
+        .replace("Amazon.com:", "")
+        .trim(),
+      precoAtual: preco,
+      precoAntigo,
+      origemPrecoAntigo
+    });
+
+    // NÃƒO inventar preÃ§o antigo automÃ¡tico na Amazon
+    // Se nÃ£o veio preÃ§o antigo real, fica vazio.
     const parcelamento =
       primeiroMatch(/(\d+x\s+de\s+R\$\s*[\d.,]+\s*sem juros)/i) ||
       primeiroMatch(/(\d+\s*x\s*R\$\s*[\d.,]+)/i) ||
@@ -130,15 +189,15 @@ function criarImportarAmazon(deps = {}) {
     let cupom =
       primeiroMatch(/Use o cupom\s+([A-Z0-9]{4,20})/i) ||
       primeiroMatch(/Aplique o cupom\s+([A-Z0-9]{4,20})/i) ||
-      primeiroMatch(/com o código\s+([A-Z0-9]{4,20})/i) ||
+      primeiroMatch(/com o cÃ³digo\s+([A-Z0-9]{4,20})/i) ||
       "";
 
     let avisoCupom = "";
 
     if (cupom) {
       avisoCupom = `Aplique o cupom ${cupom} no carrinho.`;
-    } else if (/resgatar|aplique o cupom|cupom disponível|desconto extra/i.test(html)) {
-      avisoCupom = "Há cupom/desconto extra na página. Resgate antes de finalizar.";
+    } else if (/resgatar|aplique o cupom|cupom disponÃ­vel|desconto extra/i.test(html)) {
+      avisoCupom = "HÃ¡ cupom/desconto extra na pÃ¡gina. Resgate antes de finalizar.";
     }
 
     linkAfiliado = limparLinkAmazon(linkAfiliado);
@@ -173,3 +232,4 @@ const linkFinal = usarLinksOptimus
 module.exports = {
   criarImportarAmazon
 };
+

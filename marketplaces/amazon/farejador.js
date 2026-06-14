@@ -30,15 +30,15 @@ const buscas = gerarBuscasAmazon({
   gerarBuscasGlobais
 });
 
-console.log("🧪 DENTRO FAREJADOR:", typeof importarAmazon);
+console.log("[AMZ] DENTRO FAREJADOR:", typeof importarAmazon);
 
  try {
     if (!config.marketplaces?.amazon?.ativo) {
-      console.log("⏸ Amazon desativada. Farejador ignorado.");
+      console.log("[AMZ] Amazon desativada. Farejador ignorado.");
       return;
     }
 
-    console.log("🐶 Farejando ofertas Amazon...");
+    console.log("[AMZ] Farejando ofertas Amazon...");
   
   
     let adicionadasNestaRodada = 0;
@@ -51,7 +51,7 @@ console.log("🧪 DENTRO FAREJADOR:", typeof importarAmazon);
     for (const termo of buscas) {
       const url = `https://www.amazon.com.br/s?k=${encodeURIComponent(termo)}&rh=p_n_deal_type%3A23565492011`;
 
-      console.log("🌐 AMAZON URL:", url);
+      console.log("[AMZ] AMAZON URL:", url);
 
       const response = await fetch(url, {
         headers: {
@@ -62,10 +62,10 @@ console.log("🧪 DENTRO FAREJADOR:", typeof importarAmazon);
         }
       });
 
-      console.log("📡 AMAZON STATUS:", response.status);
+      console.log("[AMZ] AMAZON STATUS:", response.status);
 
       if (!response.ok) {
-      console.log("⚠️ Amazon recusou essa busca:", response.status);
+      console.log("[AMZ] Amazon recusou essa busca:", response.status);
       continue;
       }
 
@@ -73,7 +73,7 @@ console.log("🧪 DENTRO FAREJADOR:", typeof importarAmazon);
 
 
     if (!html || html.length < 5000) {
-    console.log("⚠️ HTML Amazon muito pequeno ou inválido.");
+    console.log("[AMZ] HTML Amazon muito pequeno ou invlido.");
     continue;
     }
    
@@ -89,7 +89,7 @@ const produto = await importarAmazon(
   integracoesPorCliente[clienteId]?.amazon
   );
 
-    console.log("🧪 PRODUTO AMAZON:", {
+    console.log("[AMZ] PRODUTO AMAZON:", {
       titulo: produto.titulo,
       precoAtual: produto.precoAtual,
       precoAntigo: produto.precoAntigo,
@@ -118,7 +118,7 @@ const desconto =
     ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
     : 0;
 
-console.log("🔎 AMAZON FILTRO:", {
+console.log("[AMZ] AMAZON FILTRO:", {
   titulo: produto.titulo,
   precoAtual: produto.precoAtual,
   precoAntigo: produto.precoAntigo,
@@ -130,17 +130,17 @@ console.log("🔎 AMAZON FILTRO:", {
 });
 
 if (!precoNumero || !Number.isFinite(precoNumero)) {
-  console.log("🚫 Amazon sem preço válido:", produto.titulo);
+  console.log("[AMZ] Amazon sem preo vlido:", produto.titulo);
   continue;
 }
 
 if (precoNumero < 30) {
-  console.log("🚫 Amazon preço baixo:", produto.titulo, precoNumero);
+  console.log("[AMZ] Amazon preo baixo:", produto.titulo, precoNumero);
   continue;
 }
 
 if (desconto < 15 && !produto.avisoCupom) {
-  console.log("🚫 Amazon desconto baixo:", {
+  console.log("[AMZ] Amazon desconto baixo:", {
     titulo: produto.titulo,
     desconto: Math.round(desconto),
     avisoCupom: produto.avisoCupom
@@ -171,7 +171,7 @@ let novaOferta = {
 
 novaOferta = prepararOfertaGlobal(novaOferta);
 
-console.log("🔎 AMAZON OFERTA PRONTA PARA DISTRIBUIÇÃO:", {
+console.log("[AMZ] AMAZON OFERTA PRONTA PARA DISTRIBUIO:", {
   titulo: novaOferta.titulo,
   link: novaOferta.link,
   linkAfiliado: novaOferta.linkAfiliado
@@ -187,12 +187,12 @@ ofertasEncontradas.push(novaOferta);
 
 adicionadasNestaRodada++;
 
-console.log("🛒 Nova oferta Amazon:", {
+console.log("[AMZ] Nova oferta Amazon:", {
   titulo: novaOferta.titulo,
   preco: novaOferta.precoAtual
 });
 
-console.log("🤖 Nova oferta Amazon:", {
+console.log("[AMZ] Nova oferta Amazon:", {
   titulo: novaOferta.titulo,
   preco: novaOferta.precoAtual,
   precoAntigo: novaOferta.precoAntigo,
@@ -202,7 +202,7 @@ console.log("🤖 Nova oferta Amazon:", {
 });
 
 if (adicionadasNestaRodada >= limitePorRodada) {
-  console.log("🛑 Limite Amazon por rodada atingido");
+  console.log("[AMZ] Limite Amazon por rodada atingido");
   break;
 }
 
@@ -212,7 +212,7 @@ if (adicionadasNestaRodada >= limitePorRodada) {
     );
 
   } catch (e) {
-    console.log("❌ erro produto Amazon:", e.message);
+    console.log("[ERRO] [AMZ] erro produto Amazon:", e.message);
   }
 } // fecha for (const link of links)
 
@@ -234,7 +234,7 @@ console.log(
 );
 
 } catch (e) {
-  console.log("❌ erro farejador Amazon:", e.message);
+  console.log("[ERRO] [AMZ] erro farejador Amazon:", e.message);
 }
 }
 
