@@ -229,6 +229,22 @@ if (
     }
 
 
+    
+    const linkAfiliadoML = String(produto.linkAfiliado || produto.linkFinal || produto.link || "").trim();
+    const linkOriginalML = String(produto.linkOriginal || link || "").trim();
+
+    if (!linkAfiliadoML || linkAfiliadoML === linkOriginalML) {
+      console.log("[AVISO] [ML] Ignorado sem link afiliado do cliente:", {
+        clienteId,
+        titulo: produto.titulo || itemBusca.titulo || "",
+        linkOriginal: linkOriginalML
+      });
+      continue;
+    }
+
+    produto.linkAfiliado = linkAfiliadoML;
+    produto.linkFinal = linkAfiliadoML;
+
     const precoNumero = Number(
       String(produto.precoAtual)
         .replace("R$", "")
@@ -313,8 +329,10 @@ const categoriaProduto =
       cupom: produto.cupom || "",
       avisoCupom: produto.avisoCupom || "",
       parcelamento: produto.parcelamento || "",
-      link: produto.linkAfiliado || produto.linkOriginal || link,
-      linkAfiliado: produto.linkAfiliado || produto.linkOriginal || link,
+      linkOriginal: produto.linkOriginal || link,
+      link: produto.linkAfiliado,
+      linkAfiliado: produto.linkAfiliado,
+      linkFinal: produto.linkAfiliado,
       imagem: produto.imagem || "",
       marketplace: "mercadolivre",
       categoria: categoriaProduto,

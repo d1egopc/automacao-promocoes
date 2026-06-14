@@ -88,6 +88,7 @@ if (response.url.includes("account-verification")) {
 }
 
 let precoNumero = Number(String(preco).replace(",", "."));
+let precoAntigo = "";
 
   const descontoMatch =
   html.match(/(\d{1,2})\s*%\s*OFF/i) ||
@@ -111,7 +112,8 @@ if (
     const linkAfiliadoGerado =
   await gerarLinkAfiliadoMercadoLivre(
     url,
-    getIntegracaoCliente(clienteIdAlvo, "mercadolivre")
+    getIntegracaoCliente(clienteIdAlvo, "mercadolivre"),
+    { clienteId: clienteIdAlvo }
   );
 
   return {
@@ -121,7 +123,9 @@ if (
     precoAtual: preco,
     cupom: "",
     linkOriginal: url,
-    linkAfiliado: linkAfiliadoGerado || url,
+    link: linkAfiliadoGerado || "",
+    linkAfiliado: linkAfiliadoGerado || "",
+    linkFinal: linkAfiliadoGerado || "",
     imagem: corrigirImagemUrl(imagem) || imagem,
     categoria: "Mercado Livre"
   };
