@@ -13,7 +13,7 @@ if (
   !configShopee?.credenciais?.appId ||
   !configShopee?.credenciais?.secret
 ) {
-  console.log("❌ Shopee sem credenciais configuradas");
+  console.log("[SHOPEE] Shopee sem credenciais configuradas");
   return [];
 }
 
@@ -69,7 +69,7 @@ if (
 
   const data = await response.json();
 
-  console.log("🛍️ SHOPEE BUSCA RESPONSE:", JSON.stringify(data).slice(0, 1000));
+  console.log("[SHOPEE] SHOPEE BUSCA RESPONSE:", JSON.stringify(data).slice(0, 1000));
 
   return data?.data?.productOfferV2?.nodes || [];
 }

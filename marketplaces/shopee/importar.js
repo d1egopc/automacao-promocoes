@@ -119,7 +119,7 @@ return async function importarShopee(url, config) {
 
     const data = await response.json();
 
-    console.log("SHOPEE RESPONSE:", JSON.stringify(data));
+    console.log("[SHOPEE] SHOPEE RESPONSE:", JSON.stringify(data));
 
     return data;
   }
@@ -168,7 +168,7 @@ return async function importarShopee(url, config) {
         nodes[0] ||
         null;
     } catch (e) {
-      console.error("SHOPEE ITEMID ERRO:", e.message);
+      console.error("[ERRO] [SHOPEE] SHOPEE ITEMID ERRO:", e.message);
     }
   }
 
@@ -210,7 +210,7 @@ return async function importarShopee(url, config) {
 
       produto = nodes[0] || null;
     } catch (e) {
-      console.error("SHOPEE KEYWORD ERRO:", e.message);
+      console.error("[ERRO] [SHOPEE] SHOPEE KEYWORD ERRO:", e.message);
     }
   }
 
@@ -230,11 +230,11 @@ return async function importarShopee(url, config) {
 
       const html = await response.text();
 
-console.log("🧪 SHOPEE HTML TAMANHO:", html.length);
-console.log("🧪 SHOPEE HTML TEM R$:", html.includes("R$"));
-console.log("🧪 SHOPEE HTML PREÇOS:", html.match(/R\$\s*[\d.]+,\d{2}/g)?.slice(0, 10));
-console.log("🧪 SHOPEE KEYWORD:", keyword);
-console.log("🧪 SHOPEE IDS:", ids);
+console.log("[SHOPEE] SHOPEE HTML TAMANHO:", html.length);
+console.log("[SHOPEE] SHOPEE HTML TEM R$:", html.includes("R$"));
+console.log("[SHOPEE] SHOPEE HTML PREOS:", html.match(/R\$\s*[\d.]+,\d{2}/g)?.slice(0, 10));
+console.log("[SHOPEE] SHOPEE KEYWORD:", keyword);
+console.log("[SHOPEE] SHOPEE IDS:", ids);
 
 
       const titulo =
@@ -248,7 +248,7 @@ console.log("🧪 SHOPEE IDS:", ids);
         extrairMeta(html, "twitter:image") ||
         "";
 
-       console.log("🧪 SHOPEE PRODUTO RAW:", JSON.stringify(produto, null, 2));
+       console.log("[SHOPEE] SHOPEE PRODUTO RAW:", JSON.stringify(produto, null, 2));
 
       let cupom = "";
       let avisoCupom =
@@ -286,13 +286,13 @@ if (precosHtml.length) {
   categoria: "Shopee"
 };
   } catch (e) {
-   console.error("SHOPEE HTML ERRO:", e.message);
+   console.error("[ERRO] [SHOPEE] SHOPEE HTML ERRO:", e.message);
     }
   }
 
  const precoMin = normalizarPrecoShopee(produto?.priceMin || "");
 
-console.log("🧪 SHOPEE PRODUTO API FINAL:", JSON.stringify(produto, null, 2));
+console.log("[SHOPEE] SHOPEE PRODUTO API FINAL:", JSON.stringify(produto, null, 2));
 
 const precoMax = normalizarPrecoShopee(produto?.priceMax || "");
 

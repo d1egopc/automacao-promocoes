@@ -1,4 +1,6 @@
-﻿let ultimoTotalCuponsShopee = 0;
+﻿const { registrarRadarCupons } = require("../cupons/radar");
+
+let ultimoTotalCuponsShopee = 0;
 
 function normalizarHtml(html = "") {
   return String(html || "").replace(/\s+/g, " ");
@@ -243,6 +245,8 @@ function escolherCupomParaOfertaShopee(oferta = {}, cuponsOuAvisos = []) {
       cupom: resultado.cupom
     });
 
+    registrarRadarCupons("shopee", { confirmados: 1 });
+
     return resultado;
   }
 
@@ -266,6 +270,8 @@ function escolherCupomParaOfertaShopee(oferta = {}, cuponsOuAvisos = []) {
       cupom: ""
     });
 
+    registrarRadarCupons("shopee", { avisos: 1 });
+
     return resultado;
   }
 
@@ -278,5 +284,6 @@ module.exports = {
   detectarAvisoCupomShopee,
   escolherCupomParaOfertaShopee
 };
+
 
 
