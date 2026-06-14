@@ -82,7 +82,7 @@ if (tipo === "telegram") {
     }
 
    if (imagemUrl) {
-  console.log("🖼️ DEBUG IMAGEM CAMPANHA TELEGRAM:", {
+  console.log("[TELEGRAM] DEBUG IMAGEM CAMPANHA TELEGRAM:", {
     tipo: typeof imagemUrl,
     inicio: String(imagemUrl || "").slice(0, 80)
   });
@@ -153,7 +153,7 @@ if (tipo === "telegram") {
         }
       );
 
-      console.log("✅ TELEGRAM FOTO OK:", respostaTelegram.data);
+      console.log("[TELEGRAM] TELEGRAM FOTO OK:", respostaTelegram.data);
 
     } else {
       const respostaTelegram = await axios.post(
@@ -165,7 +165,7 @@ if (tipo === "telegram") {
         }
       );
 
-      console.log("✅ TELEGRAM FOTO OK:", respostaTelegram.data);
+      console.log("[TELEGRAM] TELEGRAM FOTO OK:", respostaTelegram.data);
     }
 
   } catch (erroTelegram) {
