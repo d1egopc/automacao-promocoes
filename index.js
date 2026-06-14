@@ -1581,6 +1581,20 @@ for (const destino of destinosInteligentes) {
     continue;
   }
 
+  const marketplaceOfertaLog = String(oferta.marketplace || oferta.mercado || "").toLowerCase();
+
+  if (marketplaceOfertaLog === "mercadolivre" || marketplaceOfertaLog === "mercado_livre") {
+    const linkFinal = oferta.linkFinal || oferta.linkAfiliado || oferta.link || oferta.linkOriginal || "";
+    console.log("🧪 ENVIO ML", {
+      clienteId,
+      marketplace: oferta.marketplace,
+      titulo: oferta.titulo || oferta.nome || "",
+      linkOriginal: oferta.linkOriginal || "",
+      linkAfiliado: oferta.linkAfiliado || "",
+      linkFinal
+    });
+  }
+
   const mensagem = montarMensagemOferta(oferta, {
     destino,
     plano,
@@ -3841,7 +3855,7 @@ async function buscarCsrfTokenMercadoLivre(cookies) {
   }
 }
 
-async function gerarLinkAfiliadoMercadoLivre(url, config) {
+async function gerarLinkAfiliadoMercadoLivre(url, config, contexto = {}) {
   try {
 
 if (String(url || "").includes("meli.la")) {
@@ -3849,9 +3863,7 @@ if (String(url || "").includes("meli.la")) {
   return "";
 }
 
-    const credenciais = marketplace === "awin"
-      ? normalizarCredenciaisAwin(config?.credenciais || {})
-      : config?.credenciais || {};
+    const credenciais = config?.credenciais || {};
 
     const cookies = credenciais.cookies || "";
     const tag = credenciais.tag || "";
@@ -4996,7 +5008,8 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
     if (mp === "mercadolivre") {
       const linkML = await gerarLinkAfiliadoMercadoLivre(
         linkBase,
-        integracao
+        integracao,
+        { clienteId }
       );
 
       return linkML || "";
@@ -5256,7 +5269,20 @@ console.log("[INFO]🔗 LINK CLIENTE GERADO:", {
   continue;
 }
 
-if (linkAfiliadoCliente === linkOriginal) {
+const linkAfiliadoIgualOriginal =
+  String(linkAfiliadoCliente || "").trim() === String(linkOriginal || "").trim();
+
+if (mp === "mercadolivre" && linkAfiliadoIgualOriginal) {
+  console.log("[AVISO] ML bloqueado: link afiliado igual ao original", {
+    clienteId,
+    marketplace: mp,
+    titulo: ofertaBase.titulo,
+    linkOriginal
+  });
+  continue;
+}
+
+if (linkAfiliadoIgualOriginal) {
   console.log("[INFO] Link afiliado igual ao original, permitindo por enquanto:", {
     clienteId,
     marketplace: mp,
@@ -5270,8 +5296,10 @@ if (linkAfiliadoCliente === linkOriginal) {
       ...ofertaBase,
       clienteId,
       marketplace: mp,
+      linkOriginal,
       linkAfiliado: linkAfiliadoCliente,
       link: linkAfiliadoCliente,
+      linkFinal: linkAfiliadoCliente,
       status: "pendente",
       destinosEnviados: [],
       logsEnvio: [],
