@@ -275,8 +275,7 @@ if (
 
 if (
   desconto < descontoMinimoML &&
-  !produto.avisoCupom &&
-  !produto.linkAfiliado
+  !produto.avisoCupom
 ) {
   console.log("[AVISO] [ML] Ignorado por desconto baixo:", {
     titulo: produto.titulo,
@@ -429,6 +428,5 @@ if (jaExiste) {
 module.exports = {
   farejarMercadoLivre
 };
-
 
 
