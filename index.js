@@ -2361,38 +2361,69 @@ app.post("/admin/planos", (req, res) => {
     });
   }
 
- planos[body.nome] = {
-  nome: body.nome,
+  const nomePlano = String(body.nome || "").trim();
+  const planoAnterior =
+    planos[nomePlano] ||
+    planos[nomePlano.toLowerCase()] ||
+    {};
+  const limitesBody = body.limites || {};
+  const recursosBody = body.recursos || {};
+  const limitesAnteriores = planoAnterior.limites || {};
+  const recursosAnteriores = planoAnterior.recursos || {};
 
-  marketplaces: Array.isArray(body.marketplaces)
-    ? body.marketplaces
-    : [],
+  const numeroPlano = (valor, fallback = 0) => {
+    const numero = Number(valor);
+    return Number.isFinite(numero) ? numero : fallback;
+  };
 
-  limites: {
-    sessoes: Number(body.limites?.sessoes || 0),
-    destinos: Number(body.limites?.destinos || 0),
-    enviosDia: Number(body.limites?.enviosDia || 0),
-    creditos: Number(body.limites?.creditos || body.creditos || 0)
-  },
+  const booleanPlano = (chave, fallback = false) => {
+    if (Object.prototype.hasOwnProperty.call(recursosBody, chave)) {
+      return !!recursosBody[chave];
+    }
 
-recursos: {
-  linkOptimus: !!body.recursos?.linkOptimus,
-  analytics: !!body.recursos?.analytics,
-  cupomInteligente: !!body.recursos?.cupomInteligente,
-  campanhas: !!body.recursos?.campanhas,
-  mensageiro: !!body.recursos?.mensageiro,
-  templatePersonalizado: !!body.recursos?.templatePersonalizado
-},
+    return !!fallback;
+  };
 
-  atualizadoEm: new Date().toISOString()
+  planos[nomePlano] = {
+    nome: nomePlano,
+    preco: String(body.preco ?? planoAnterior.preco ?? ""),
 
-};
+    marketplaces: Array.isArray(body.marketplaces)
+      ? body.marketplaces
+      : Array.isArray(planoAnterior.marketplaces)
+        ? planoAnterior.marketplaces
+        : [],
+
+    limites: {
+      sessoes: numeroPlano(limitesBody.sessoes, numeroPlano(limitesAnteriores.sessoes, 0)),
+      destinos: numeroPlano(limitesBody.destinos, numeroPlano(limitesAnteriores.destinos, 0)),
+      enviosDia: numeroPlano(limitesBody.enviosDia, numeroPlano(limitesAnteriores.enviosDia, 0)),
+      creditos: numeroPlano(
+        limitesBody.creditos ?? limitesBody.creditosMes ?? body.creditos,
+        numeroPlano(limitesAnteriores.creditos ?? limitesAnteriores.creditosMes, 0)
+      )
+    },
+
+    recursos: {
+      linkOptimus: booleanPlano("linkOptimus", recursosAnteriores.linkOptimus),
+      analytics: booleanPlano("analytics", recursosAnteriores.analytics),
+      cupomInteligente: booleanPlano("cupomInteligente", recursosAnteriores.cupomInteligente),
+      campanhas: booleanPlano("campanhas", recursosAnteriores.campanhas),
+      mensageiro: booleanPlano("mensageiro", recursosAnteriores.mensageiro),
+      templatePersonalizado: booleanPlano("templatePersonalizado", recursosAnteriores.templatePersonalizado),
+      whatsapp: booleanPlano("whatsapp", recursosAnteriores.whatsapp),
+      telegram: booleanPlano("telegram", recursosAnteriores.telegram),
+      automacao: booleanPlano("automacao", recursosAnteriores.automacao)
+    },
+
+    atualizadoEm: new Date().toISOString()
+  };
 
   salvarPlanos();
 
   return res.json({
     ok: true,
-    plano: planos[body.nome]
+    plano: planos[nomePlano]
   });
 });
 
