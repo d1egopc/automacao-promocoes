@@ -73,7 +73,11 @@ function destinoAceitaOferta(destino, oferta, opcoes = {}) {
     .map(normalizarDestino)
     .filter(Boolean);
 
-  const categoriasDestino = (destino.categorias || [])
+  const categoriasDestino = (
+    destino.categorias ||
+    destino.categoriasPermitidas ||
+    []
+  )
     .map(normalizarCategoriaDestino)
     .filter(Boolean);
 
