@@ -2063,6 +2063,137 @@ app.delete("/destinos/:id", (req, res) => {
 
 // ================= AUTOMAÃ‡ÃƒO POR CLIENTE =================
 
+app.get("/automacao/status", (req, res) => {
+  const clienteId = getClienteId(req);
+
+  if (!clienteId) {
+    return res.status(401).json({
+      ok: false,
+      erro: "UsuÃ¡rio nÃ£o identificado"
+    });
+  }
+
+  const configCliente = configsPorCliente?.[clienteId] || {};
+  const configFinal = {
+    ...config,
+    ...configCliente
+  };
+
+  const usuario = usuarios.find(
+    u => String(u.id) === String(clienteId)
+  );
+
+  const itensCliente = fila.filter(o =>
+    String(o.clienteId || "admin") === String(clienteId)
+  );
+
+  const hojeBR = new Date().toLocaleDateString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  });
+
+  function dataEnvioOferta(oferta = {}) {
+    const valor = oferta.enviadoEm || oferta.dataEnvio || "";
+    if (!valor) return null;
+
+    const dataDireta = new Date(valor);
+    if (!Number.isNaN(dataDireta.getTime())) return dataDireta;
+
+    const partes = String(valor).match(
+      /(\d{2})\/(\d{2})\/(\d{4})(?:,?\s+(\d{2}):(\d{2})(?::(\d{2}))?)?/
+    );
+
+    if (!partes) return null;
+
+    const [, dia, mes, ano, hora = "00", minuto = "00", segundo = "00"] = partes;
+    const data = new Date(
+      Number(ano),
+      Number(mes) - 1,
+      Number(dia),
+      Number(hora),
+      Number(minuto),
+      Number(segundo)
+    );
+
+    return Number.isNaN(data.getTime()) ? null : data;
+  }
+
+  function ofertaEnviadaHoje(oferta = {}) {
+    const data = dataEnvioOferta(oferta);
+
+    if (data) {
+      return data.toLocaleDateString("pt-BR", {
+        timeZone: "America/Sao_Paulo"
+      }) === hojeBR;
+    }
+
+    const valor = String(oferta.enviadoEm || oferta.dataEnvio || "");
+    return valor.startsWith(hojeBR);
+  }
+
+  const enviadas = itensCliente
+    .filter(o => o.status === "enviado" && (o.enviadoEm || o.dataEnvio));
+
+  const ultimaOfertaEnviada = enviadas
+    .map(oferta => ({
+      oferta,
+      data: dataEnvioOferta(oferta)
+    }))
+    .sort((a, b) => {
+      const dataA = a.data ? a.data.getTime() : 0;
+      const dataB = b.data ? b.data.getTime() : 0;
+      return dataB - dataA;
+    })[0]?.oferta || null;
+
+  const destinosCliente = destinosPorCliente?.[clienteId];
+  const listasDestinos = Array.isArray(destinosCliente)
+    ? [destinosCliente]
+    : Object.values(destinosCliente || {}).filter(Array.isArray);
+
+  const destinosAtivos = listasDestinos
+    .flat()
+    .filter(destino => destino?.ativo === true)
+    .length;
+
+  const sessoesAtivas = Object.values(sessoesMeta || {})
+    .filter(sessao => {
+      const id = String(sessao.id || "");
+
+      return (
+        id.startsWith(clienteId + "_") ||
+        id === clienteId ||
+        (clienteId === "admin" && id.startsWith("admin_"))
+      );
+    })
+    .filter(sessao => {
+      const id = sessao.id;
+      return statusSessao[id] === "open" || statusSessao[id] === "aberto";
+    })
+    .length;
+
+  return res.json({
+    ok: true,
+    clienteId,
+    ativa: configCliente.automacaoAtiva === true,
+    pendentes: itensCliente.filter(o => o.status === "pendente").length,
+    enviadasHoje: enviadas.filter(ofertaEnviadaHoje).length,
+    creditos: usuario?.creditos ?? null,
+    sessoesAtivas,
+    destinosAtivos,
+    ultimoEnvio: ultimaOfertaEnviada?.enviadoEm || ultimaOfertaEnviada?.dataEnvio || null,
+    config: {
+      intervaloMinutos: configFinal.intervaloMinutos ?? configFinal.intervaloEnvioMinutos ?? null,
+      horarioInicio: configFinal.horarioInicio ?? null,
+      horarioFim: configFinal.horarioFim ?? null,
+      pausarMadrugada: configFinal.pausarMadrugada ?? null
+    },
+    orquestrador: {
+      marketplaceAtual: ordemMarketplaces?.[indiceMarketplaceAtual] ?? null,
+      intervaloGlobalMinutos: config.intervaloFarejadorGlobalMinutos ?? 10,
+      farejadorRodando
+    }
+  });
+});
+
 app.get("/automacao", (req, res) => {
   const clienteId = getClienteId(req);
 
