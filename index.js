@@ -1440,11 +1440,107 @@ function destinoAceitaOferta(destino, oferta) {
 
 }
 
+function analisarDestinoOferta(destino, oferta) {
+  return destinosUtils.analisarDestinoOferta(destino, oferta, {
+    classificarCategoriaOferta,
+    logger: console
+  });
+}
+
 
 // ========== FUNCAO DESTINO DENTRO HORARIO ==================
 
 function destinoDentroHorario(destino = {}) {
   return destinosUtils.destinoDentroHorario(destino);
+}
+
+function destinoNomeLog(destino = {}) {
+  return String(destino.nome || destino.titulo || destino.label || destino.id || destino.conexaoId || "Destino");
+}
+
+function destinoChaveControle(clienteId = "admin", destino = {}) {
+  return `${clienteId}_${destino.id || destino.nome || destino.conexaoId || destino.chatId || "destino"}`;
+}
+
+function limiteDiarioDestino(destino = {}) {
+  const limite = Number(
+    destino.limiteDiario ??
+    destino.limiteDiarioEnvios ??
+    destino.maximoDiario ??
+    destino.maxPorDia ??
+    destino.maxEnviosDia ??
+    destino.enviosPorDia ??
+    0
+  );
+
+  return Number.isFinite(limite) && limite > 0 ? limite : 0;
+}
+
+function dataBRHoje() {
+  return new Date().toLocaleDateString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  });
+}
+
+function contarEnviosDestinoHoje(clienteId = "admin", destino = {}) {
+  const hoje = dataBRHoje();
+  const nomeDestino = destinoNomeLog(destino);
+  const idDestino = String(destino.id || destino.conexaoId || destino.chatId || "");
+
+  return fila.filter(item => String(item.clienteId || "admin") === String(clienteId))
+    .flatMap(item => Array.isArray(item.destinosEnviados) ? item.destinosEnviados : [])
+    .filter(envio => {
+      const data = String(envio.dataEnvio || envio.data || "");
+      if (!data.includes(hoje)) return false;
+
+      const nomeEnvio = String(envio.nome || envio.destino || "");
+      const idEnvio = String(envio.id || envio.destinoId || envio.conexaoId || envio.chatId || envio.grupo || "");
+
+      return (
+        nomeEnvio === nomeDestino ||
+        (idDestino && idEnvio === idDestino)
+      );
+    }).length;
+}
+
+function destinoLimiteDiarioDisponivel(clienteId = "admin", destino = {}) {
+  const limite = limiteDiarioDestino(destino);
+  if (!limite) return { ok: true, limite: 0, usados: 0 };
+
+  const usados = contarEnviosDestinoHoje(clienteId, destino);
+  return {
+    ok: usados < limite,
+    limite,
+    usados
+  };
+}
+
+function intervaloDestinoInfo(clienteId = "admin", destino = {}, configCliente = {}) {
+  const chaveControle = destinoChaveControle(clienteId, destino);
+  const intervaloDestinoMin = Number(
+    destino.intervaloMinutos ||
+    destino.intervalo ||
+    configCliente.intervaloMinutos ||
+    config.intervaloMinutos ||
+    2
+  );
+  const intervaloMs = Math.max(0, intervaloDestinoMin) * 60 * 1000;
+  const ultimoEnvio = controleEnvio[chaveControle] || 0;
+  const agora = Date.now();
+  const restanteMs = Math.max(0, intervaloMs - (agora - ultimoEnvio));
+
+  return {
+    chaveControle,
+    intervaloDestinoMin,
+    intervaloMs,
+    ultimoEnvio,
+    liberado: restanteMs <= 0,
+    restanteMs
+  };
+}
+
+function proximaTentativaDestino(oferta, ms = 5 * 60 * 1000) {
+  oferta.proximaTentativaEnvioEm = new Date(Date.now() + ms).toISOString();
 }
 
 // ========================== ENVIO DESTINO INTELIGENTE ============================
@@ -1515,6 +1611,9 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     oferta.destinosEnviados = oferta.destinosEnviados || [];
     oferta.destinosEnviados.push({
       clienteId,
+      id: destino.id || "",
+      destinoId: destino.id || "",
+      conexaoId: destino.conexaoId || "",
       nome: destino.nome || "Destino",
       tipo: "whatsapp",
       grupo,
@@ -1588,6 +1687,9 @@ const selecionados = telegramsSelecionados.length
         oferta.destinosEnviados = oferta.destinosEnviados || [];
         oferta.destinosEnviados.push({
           clienteId,
+          id: destino.id || "",
+          destinoId: destino.id || "",
+          conexaoId: destino.conexaoId || "",
           nome: destino.nome || "Destino",
           tipo: "telegram",
           chatId: tel.chatId,
@@ -1638,6 +1740,11 @@ async function processarFila(clienteIdAlvo = null) {
   if (!mesmoCliente) return false;
 
   if (o.status !== "pendente") return false;
+
+  if (o.proximaTentativaEnvioEm) {
+    const proxima = Date.parse(o.proximaTentativaEnvioEm);
+    if (Number.isFinite(proxima) && proxima > Date.now()) return false;
+  }
 
   const clienteIdOferta = o.clienteId || "admin";
   const configClienteOferta =
@@ -1757,34 +1864,108 @@ const plano =
   getPlanoPorNome(usuarioOferta?.plano || "free") || {};
 
 let enviouParaAlgumDestino = false;
+let destinosEnviadosCount = 0;
 
 let pulouPorIntervalo = false;
 let pulouPorHorario = false;
+let pulouPorLimiteDiario = false;
 let houveFalhaReal = false;
+const categoriaOfertaFila = oferta.categoria || oferta.categoriaProduto || classificarCategoriaOferta(oferta, oferta.termo || "");
+const destinosCompativeis = [];
 
 for (const destino of destinosInteligentes) {
-  const chaveControle = `${clienteId}_${destino.id || destino.nome || destino.conexaoId}`;
+  const analise = analisarDestinoOferta(destino, oferta);
+  const nomeDestino = destinoNomeLog(destino);
 
-  const intervaloDestinoMin = Number(
-    destino.intervaloMinutos ||
-    destino.intervalo ||
-    configCliente.intervaloMinutos ||
-    config.intervaloMinutos ||
-    2
-  );
+  if (!analise.aceita) {
+    if (analise.motivo === "marketplace") {
+      console.log("[DESTINO] rejeitado marketplace", {
+        clienteId,
+        destino: nomeDestino,
+        marketplaceOferta: analise.marketplaceOferta
+      });
+    } else if (analise.motivo === "categoria") {
+      console.log("[DESTINO] rejeitado categoria", {
+        clienteId,
+        destino: nomeDestino,
+        categoriaOferta: analise.categoriaOferta
+      });
+    } else {
+      console.log("[DESTINO] rejeitado", {
+        clienteId,
+        destino: nomeDestino,
+        motivo: analise.motivo || "nao_compativel"
+      });
+    }
 
-  const intervaloMs = intervaloDestinoMin * 60 * 1000;
-
-  if (!controleEnvio[chaveControle]) {
-    controleEnvio[chaveControle] = 0;
+    continue;
   }
 
-  if (agora - controleEnvio[chaveControle] < intervaloMs) {
-    pulouPorIntervalo = true;
-    console.log("[DESTINO] Destino aguardando intervalo:", {
+  destinosCompativeis.push({ destino, analise });
+}
+
+console.log("[DESTINO] compatíveis encontrados:", destinosCompativeis.length);
+
+if (!destinosCompativeis.length) {
+  oferta.status = "pendente";
+  oferta.statusDetalhe = `Aguardando destino compatível para categoria ${categoriaOfertaFila || "sem categoria"}`;
+  oferta.erro = "";
+  oferta.erroEm = "";
+  proximaTentativaDestino(oferta, 5 * 60 * 1000);
+  salvarFila(clienteId);
+  console.log("[DESTINO] sem destino compatível:", {
+    clienteId,
+    titulo: oferta.titulo || oferta.nome || "",
+    categoria: categoriaOfertaFila || "",
+    marketplace: oferta.marketplace || oferta.mercado || ""
+  });
+  return;
+}
+
+const destinosOrdenados = destinosCompativeis
+  .map(item => {
+    const intervalo = intervaloDestinoInfo(clienteId, item.destino, configCliente);
+    return {
+      ...item,
+      intervalo,
+      ultimoEnvio: intervalo.ultimoEnvio || 0
+    };
+  })
+  .sort((a, b) => a.ultimoEnvio - b.ultimoEnvio);
+
+for (const item of destinosOrdenados) {
+  const destino = item.destino;
+  const nomeDestino = destinoNomeLog(destino);
+  const intervalo = item.intervalo;
+
+  if (!destinoDentroHorario(destino)) {
+    pulouPorHorario = true;
+    console.log("[DESTINO] rejeitado horário", {
       clienteId,
-      destino: destino.nome,
-      intervaloMinutos: intervaloDestinoMin
+      destino: nomeDestino
+    });
+    continue;
+  }
+
+  const limite = destinoLimiteDiarioDisponivel(clienteId, destino);
+  if (!limite.ok) {
+    pulouPorLimiteDiario = true;
+    console.log("[DESTINO] rejeitado limite diário", {
+      clienteId,
+      destino: nomeDestino,
+      usados: limite.usados,
+      limite: limite.limite
+    });
+    continue;
+  }
+
+  if (!intervalo.liberado) {
+    pulouPorIntervalo = true;
+    console.log("[DESTINO] aguardando intervalo", {
+      clienteId,
+      destino: nomeDestino,
+      intervaloMinutos: intervalo.intervaloDestinoMin,
+      restanteSegundos: Math.ceil(intervalo.restanteMs / 1000)
     });
     continue;
   }
@@ -1823,7 +2004,13 @@ for (const destino of destinosInteligentes) {
 
   if (resultadoEnvio.enviado === true) {
     enviouParaAlgumDestino = true;
-    controleEnvio[chaveControle] = Date.now();
+    destinosEnviadosCount += 1;
+    controleEnvio[intervalo.chaveControle] = Date.now();
+    console.log("[DESTINO] enviado", {
+      clienteId,
+      destino: nomeDestino,
+      titulo: oferta.titulo || oferta.nome || ""
+    });
   } else if (resultadoEnvio.motivo === "fora_horario") {
     pulouPorHorario = true;
   } else if (!["nao_aceita"].includes(resultadoEnvio.motivo)) {
@@ -1832,20 +2019,30 @@ for (const destino of destinosInteligentes) {
 }
 
 
-if (!enviouParaAlgumDestino && (pulouPorIntervalo || pulouPorHorario) && !houveFalhaReal) {
+if (!enviouParaAlgumDestino && (pulouPorIntervalo || pulouPorHorario || pulouPorLimiteDiario) && !houveFalhaReal) {
   oferta.status = "pendente";
-  oferta.statusDetalhe = pulouPorHorario
-    ? "Aguardando horario do destino"
-    : "Aguardando intervalo dos destinos";
+  oferta.statusDetalhe = pulouPorIntervalo
+    ? `Aguardando intervalo do destino ${destinoNomeLog(destinosOrdenados.find(item => !item.intervalo.liberado)?.destino || {})}`
+    : pulouPorHorario
+      ? "Aguardando horario do destino"
+      : "Aguardando limite diario do destino";
   oferta.erro = "";
   oferta.erroEm = "";
+  const menorEsperaIntervalo = destinosOrdenados
+    .filter(item => !item.intervalo.liberado)
+    .map(item => item.intervalo.restanteMs)
+    .sort((a, b) => a - b)[0];
+  proximaTentativaDestino(
+    oferta,
+    Math.max(30 * 1000, Math.min(menorEsperaIntervalo || 5 * 60 * 1000, 15 * 60 * 1000))
+  );
   salvarFila(clienteId);
   console.log("[DESTINO] Oferta aguardando destino liberar envio:", oferta.titulo);
   return;
 }
 
 if (!enviouParaAlgumDestino) {
-  console.log("[ERRO] Oferta no enviada. Marcando como erro:", oferta.titulo);
+  console.log("[ERRO] Oferta no enviada. Marcando como erro técnico:", oferta.titulo);
 
   oferta.status = "erro";
   oferta.statusDetalhe = "Falha ao enviar para destinos";
@@ -1862,13 +2059,14 @@ if (!enviouParaAlgumDestino) {
 ultimoEnvioFila = Date.now();
 
 oferta.status = "enviado";
+oferta.proximaTentativaEnvioEm = "";
 
 oferta.enviadoEm = new Date().toLocaleString("pt-BR", {
   timeZone: "America/Sao_Paulo"
 });
 
 oferta.dataEnvio = oferta.enviadoEm;
-oferta.statusDetalhe = `Enviada para ${destinosInteligentes.length} destino(s)`;
+oferta.statusDetalhe = `Enviada para ${destinosEnviadosCount} destino(s)`;
 
 oferta.logsEnvio = oferta.logsEnvio || [];
 oferta.logsEnvio.push({
