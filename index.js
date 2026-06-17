@@ -3371,6 +3371,198 @@ function getRadarConfigFile(clienteId = "admin") {
   return path.join(getClienteDir(clienteId), "radar-config.json");
 }
 
+function getRadarHistoricoFile(clienteId = "admin") {
+  return path.join(getClienteDir(clienteId), "radar-historico.json");
+}
+
+function lerHistoricoRadar(clienteId = "admin") {
+  const arquivo = getRadarHistoricoFile(clienteId);
+
+  try {
+    if (!fs.existsSync(arquivo)) return [];
+    const dados = JSON.parse(fs.readFileSync(arquivo, "utf8") || "[]");
+    return Array.isArray(dados) ? dados : [];
+  } catch (e) {
+    console.log("[RADAR] Falha ao ler historico:", e.message);
+    return [];
+  }
+}
+
+function salvarHistoricoRadar(clienteId = "admin", eventos = []) {
+  const arquivo = getRadarHistoricoFile(clienteId);
+  const ultimos = Array.isArray(eventos) ? eventos.slice(-200) : [];
+  fs.writeFileSync(arquivo, JSON.stringify(ultimos, null, 2));
+}
+
+function resumirMensagemRadar(texto = "") {
+  return String(texto || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 220);
+}
+
+function beneficioResumoRadar(oferta = {}) {
+  const beneficio = normalizarBeneficiosRadarOferta(oferta);
+  return (
+    beneficio.cupom ||
+    beneficio.beneficioExtra ||
+    beneficio.descontoPix ||
+    beneficio.descontoApp ||
+    beneficio.percentualCupom ||
+    beneficio.valorCupom ||
+    ""
+  );
+}
+
+function registrarHistoricoRadar(clienteId = "admin", evento = {}) {
+  try {
+    const eventos = lerHistoricoRadar(clienteId);
+    eventos.push({
+      id: `radar_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      dataHora: new Date().toLocaleString("pt-BR", {
+        timeZone: "America/Sao_Paulo"
+      }),
+      criadoEm: new Date().toISOString(),
+      origemTipo: evento.origemTipo || "",
+      origemSessaoId: evento.origemSessaoId || "",
+      origemGrupoId: evento.origemGrupoId || "",
+      origemGrupoNome: evento.origemGrupoNome || "",
+      mensagemResumo: resumirMensagemRadar(evento.mensagemResumo || evento.texto || ""),
+      linkCapturado: evento.linkCapturado || "",
+      linkOriginal: evento.linkOriginal || "",
+      marketplace: evento.marketplace || "",
+      titulo: evento.titulo || "",
+      cupom: evento.cupom || "",
+      beneficio: evento.beneficio || "",
+      status: evento.status || "erro",
+      motivo: evento.motivo || "",
+      linksDetectados: Number(evento.linksDetectados || 1) || 1,
+      adicionadas: Number(evento.adicionadas || 0) || 0
+    });
+    salvarHistoricoRadar(clienteId, eventos);
+  } catch (e) {
+    console.log("[RADAR] Falha ao registrar historico:", e.message);
+  }
+}
+
+function fonteMonitoradaResumoRadar(item = {}, origemTipo = "whatsapp") {
+  const id = textoRadarId(
+    item.id ||
+    item.grupoId ||
+    item.chatId ||
+    item.value ||
+    item.jid ||
+    item.remoteJid ||
+    item.nome ||
+    ""
+  );
+  const nome = textoRadarId(
+    item.nome ||
+    item.titulo ||
+    item.label ||
+    item.subject ||
+    item.name ||
+    id
+  );
+
+  return {
+    origemTipo,
+    origemGrupoId: id,
+    origemGrupoNome: nome || id
+  };
+}
+
+function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
+  const configRadar = carregarRadarConfigCliente(clienteId);
+  const eventos = lerHistoricoRadar(clienteId);
+  const hoje = new Date().toLocaleDateString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  });
+  const mapa = new Map();
+
+  const adicionarFonte = fonte => {
+    const chave = `${fonte.origemTipo}:${chaveRadarId(fonte.origemGrupoId || fonte.origemGrupoNome)}`;
+    if (!chave.endsWith(":")) {
+      mapa.set(chave, {
+        ...fonte,
+        ultimaMensagemCapturada: "",
+        ultimaOfertaCapturada: "",
+        linksDetectadosHoje: 0,
+        ofertasAdicionadasFila: 0,
+        comCupomBeneficio: 0,
+        ignoradas: 0,
+        principalMotivoRejeicao: "",
+        totalEventos: 0
+      });
+    }
+  };
+
+  for (const grupo of Array.isArray(configRadar.gruposMonitorados) ? configRadar.gruposMonitorados : []) {
+    adicionarFonte(fonteMonitoradaResumoRadar(grupo, "whatsapp"));
+  }
+
+  for (const grupo of Array.isArray(configRadar.telegramMonitorados) ? configRadar.telegramMonitorados : []) {
+    if (grupo?.ativo === false) continue;
+    adicionarFonte(fonteMonitoradaResumoRadar(grupo, "telegram"));
+  }
+
+  const motivos = {};
+
+  for (const evento of eventos) {
+    const chave = `${evento.origemTipo}:${chaveRadarId(evento.origemGrupoId || evento.origemGrupoNome)}`;
+    if (!mapa.has(chave)) {
+      adicionarFonte({
+        origemTipo: evento.origemTipo,
+        origemGrupoId: evento.origemGrupoId,
+        origemGrupoNome: evento.origemGrupoNome
+      });
+    }
+
+    const resumo = mapa.get(chave);
+    if (!resumo) continue;
+
+    resumo.totalEventos += 1;
+    resumo.ultimaMensagemCapturada = evento.mensagemResumo || resumo.ultimaMensagemCapturada;
+    resumo.ultimaOfertaCapturada = evento.titulo || resumo.ultimaOfertaCapturada;
+
+    if (String(evento.dataHora || "").includes(hoje)) {
+      resumo.linksDetectadosHoje += Number(evento.linksDetectados || 1) || 1;
+    }
+
+    if (evento.status === "fila") {
+      resumo.ofertasAdicionadasFila += Number(evento.adicionadas || 1) || 1;
+    } else {
+      resumo.ignoradas += 1;
+      const motivo = evento.motivo || "nao_informado";
+      motivos[chave] = motivos[chave] || {};
+      motivos[chave][motivo] = (motivos[chave][motivo] || 0) + 1;
+    }
+
+    if (evento.cupom || evento.beneficio) {
+      resumo.comCupomBeneficio += 1;
+    }
+  }
+
+  for (const [chave, resumo] of mapa.entries()) {
+    const motivoMaisComum = Object.entries(motivos[chave] || {})
+      .sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+    resumo.principalMotivoRejeicao = motivoMaisComum;
+  }
+
+  const grupoFiltro = chaveRadarId(opcoes.grupoId || "");
+  const tipoFiltro = normalizarTexto(opcoes.origemTipo || "");
+  const capturas = eventos
+    .filter(evento => !grupoFiltro || chaveRadarId(evento.origemGrupoId || evento.origemGrupoNome) === grupoFiltro)
+    .filter(evento => !tipoFiltro || normalizarTexto(evento.origemTipo) === tipoFiltro)
+    .slice(-Number(opcoes.limit || 20))
+    .reverse();
+
+  return {
+    grupos: [...mapa.values()],
+    capturas
+  };
+}
+
 function listarSessoesWhatsappCliente(clienteId = "admin") {
   return Object.values(sessoesMeta || {})
     .filter(sessao => {
@@ -4744,6 +4936,19 @@ async function processarMensagemRadar({
         urlResolvida: importacao.resolucao?.urlResolvida || "",
         marketplace: importacao.resolucao?.marketplaceReal || ""
       });
+      registrarHistoricoRadar(adminMasterId, {
+        origemTipo: origemTipoFinal,
+        origemSessaoId: sessaoIdTexto,
+        origemGrupoId: grupoIdTexto,
+        origemGrupoNome: grupoNomeTexto,
+        mensagemResumo: texto,
+        linkCapturado: link,
+        linkOriginal: importacao.resolucao?.linkOriginalLimpo || "",
+        marketplace: importacao.resolucao?.marketplaceReal || "",
+        status: "erro",
+        motivo: importacao.motivo || "importacao_falhou",
+        linksDetectados: 1
+      });
       resultados.push({ link, ok: false, motivo: importacao.motivo });
       continue;
     }
@@ -4784,6 +4989,27 @@ async function processarMensagemRadar({
 
     const clientes = await adicionarRadarCapturadoNaFilaClientes(ofertaRadar, {
       radarConfigFontes: radarConfig
+    });
+    const adicionadasLink = clientes.filter(cliente => cliente.adicionada).length;
+    const primeiraRejeicao = clientes.find(cliente => !cliente.adicionada)?.motivo || "";
+    const beneficio = beneficioResumoRadar(ofertaRadar);
+
+    registrarHistoricoRadar(adminMasterId, {
+      origemTipo: origemTipoFinal,
+      origemSessaoId: sessaoIdTexto,
+      origemGrupoId: grupoIdTexto,
+      origemGrupoNome: grupoNomeTexto,
+      mensagemResumo: texto,
+      linkCapturado: importacao.resolucao?.urlCapturada || link,
+      linkOriginal: ofertaRadar.linkOriginal || "",
+      marketplace: ofertaRadar.marketplace || "",
+      titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
+      cupom: ofertaRadar.cupom || "",
+      beneficio,
+      status: adicionadasLink > 0 ? "fila" : "ignorada",
+      motivo: adicionadasLink > 0 ? "" : primeiraRejeicao || "nenhum_cliente_adicionado",
+      linksDetectados: 1,
+      adicionadas: adicionadasLink
     });
 
     resultados.push({
@@ -5330,6 +5556,45 @@ app.post("/radar/config", (req, res) => {
       monitoramento: radarConfig.monitoramento,
       categoriasPermitidas: radarConfig.categoriasPermitidas,
       templateMidia: radarConfig.templateMidia
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
+
+app.get("/radar/historico", (req, res) => {
+  try {
+    if (req.usuario?.papel !== "admin_master") {
+      return res.status(403).json({
+        ok: false,
+        erro: "Acesso restrito ao admin_master"
+      });
+    }
+
+    const clienteId = getClienteId(req);
+
+    if (!clienteId) {
+      return res.status(401).json({
+        ok: false,
+        erro: "Cliente nao autenticado"
+      });
+    }
+
+    const resumo = montarResumoHistoricoRadar(clienteId, {
+      grupoId: req.query?.grupoId || "",
+      origemTipo: req.query?.origemTipo || "",
+      limit: req.query?.limit || 20
+    });
+
+    return res.json({
+      ok: true,
+      clienteId,
+      grupos: resumo.grupos,
+      capturas: resumo.capturas,
+      limite: 200
     });
   } catch (e) {
     return res.status(500).json({
