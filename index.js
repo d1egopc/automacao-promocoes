@@ -84,6 +84,10 @@ const {
 } = require("./marketplaces/inteligencia/score-oferta");
 
 const {
+  avaliarOfertaRadar
+} = require("./marketplaces/inteligencia/radar-ofertas");
+
+const {
   montarMensagemOferta
 } = require("./utils/mensagens-ofertas");
 
@@ -3263,6 +3267,138 @@ function auth(req, res, next) {
 carregarConfig();
 
 app.use(auth);
+
+function lerFilasRadarSomenteLeitura() {
+  const itens = [];
+  const vistos = new Set();
+
+  function adicionar(oferta = {}, clienteIdOrigem = "") {
+    if (!oferta || typeof oferta !== "object") return;
+
+    const origemClienteId = String(
+      oferta.clienteId ||
+      clienteIdOrigem ||
+      "admin"
+    );
+
+    const chave = [
+      origemClienteId,
+      oferta.id || "",
+      oferta.linkAfiliado || oferta.link || "",
+      normalizarTexto(oferta.titulo || oferta.nome || "")
+    ].join("|");
+
+    if (vistos.has(chave)) return;
+
+    vistos.add(chave);
+    itens.push({
+      ...oferta,
+      origemClienteId
+    });
+  }
+
+  for (const oferta of fila || []) {
+    adicionar(oferta, oferta?.clienteId || "admin");
+  }
+
+  const clientesDir = "/data/clientes";
+
+  if (fs.existsSync(clientesDir)) {
+    for (const entrada of fs.readdirSync(clientesDir, { withFileTypes: true })) {
+      if (!entrada.isDirectory()) continue;
+
+      const clienteIdOrigem = entrada.name;
+      const arquivoFila = path.join(clientesDir, clienteIdOrigem, "fila.json");
+
+      if (!fs.existsSync(arquivoFila)) continue;
+
+      try {
+        const dados = JSON.parse(fs.readFileSync(arquivoFila, "utf8") || "[]");
+
+        if (Array.isArray(dados)) {
+          for (const oferta of dados) {
+            adicionar(oferta, clienteIdOrigem);
+          }
+        }
+      } catch (e) {
+        console.log("[RADAR] Falha ao ler fila do cliente:", {
+          clienteId: clienteIdOrigem,
+          erro: e.message
+        });
+      }
+    }
+  }
+
+  if (fs.existsSync(FILA_FILE)) {
+    try {
+      const dadosLegados = JSON.parse(fs.readFileSync(FILA_FILE, "utf8") || "[]");
+
+      if (Array.isArray(dadosLegados)) {
+        for (const oferta of dadosLegados) {
+          adicionar(oferta, oferta?.clienteId || "admin");
+        }
+      }
+    } catch (e) {
+      console.log("[RADAR] Falha ao ler fila legada:", e.message);
+    }
+  }
+
+  return itens;
+}
+
+app.get("/radar", (req, res) => {
+  try {
+    if (req.usuario?.papel !== "admin_master") {
+      return res.status(403).json({
+        ok: false,
+        erro: "Acesso restrito ao admin_master"
+      });
+    }
+
+    const oportunidades = lerFilasRadarSomenteLeitura()
+      .map((oferta) => {
+        const radar = avaliarOfertaRadar(oferta, {
+          possivelRepeticao: oferta.possivelRepeticao
+        });
+
+        return {
+          id: oferta.id || "",
+          titulo: oferta.titulo || oferta.nome || "",
+          imagem: oferta.imagem || "",
+          marketplace: oferta.marketplace || oferta.mercado || "",
+          categoria: radar.categoria,
+          precoAtual: oferta.precoAtual || oferta.preco || "",
+          precoAntigo: oferta.precoAntigo || "",
+          descontoPercentual: radar.descontoPercentual,
+          cupom: oferta.cupom || "",
+          avisoCupom: oferta.avisoCupom || "",
+          link: oferta.link || "",
+          linkAfiliado: oferta.linkAfiliado || "",
+          radar: {
+            radarScore: radar.radarScore,
+            nivel: radar.nivel,
+            motivos: radar.motivos,
+            alertas: radar.alertas,
+            decisao: radar.decisao
+          },
+          origemClienteId: oferta.origemClienteId || oferta.clienteId || "admin",
+          statusFila: oferta.status || ""
+        };
+      })
+      .sort((a, b) => (b.radar.radarScore || 0) - (a.radar.radarScore || 0));
+
+    return res.json({
+      ok: true,
+      total: oportunidades.length,
+      oportunidades: oportunidades.slice(0, 50)
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
 
 // =============== ROTA DO MENSAGEIRO =================
 
