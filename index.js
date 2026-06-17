@@ -3346,6 +3346,94 @@ function lerFilasRadarSomenteLeitura() {
   return itens;
 }
 
+function radarConfigPadrao() {
+  return {
+    sessaoWhatsappId: "",
+    gruposMonitorados: [],
+    telegramMonitorados: []
+  };
+}
+
+function getRadarConfigFile(clienteId = "admin") {
+  return path.join(getClienteDir(clienteId), "radar-config.json");
+}
+
+function carregarRadarConfigCliente(clienteId = "admin") {
+  const arquivo = getRadarConfigFile(clienteId);
+
+  if (!fs.existsSync(arquivo)) {
+    return radarConfigPadrao();
+  }
+
+  try {
+    const dados = JSON.parse(fs.readFileSync(arquivo, "utf8") || "{}");
+
+    return {
+      sessaoWhatsappId: dados.sessaoWhatsappId || "",
+      gruposMonitorados: Array.isArray(dados.gruposMonitorados)
+        ? dados.gruposMonitorados
+        : [],
+      telegramMonitorados: Array.isArray(dados.telegramMonitorados)
+        ? dados.telegramMonitorados
+        : []
+    };
+  } catch (e) {
+    console.log("[RADAR] Falha ao carregar config:", {
+      clienteId,
+      erro: e.message
+    });
+
+    return radarConfigPadrao();
+  }
+}
+
+function salvarRadarConfigCliente(clienteId = "admin", dados = {}) {
+  const arquivo = getRadarConfigFile(clienteId);
+  const payload = {
+    clienteId,
+    sessaoWhatsappId: dados.sessaoWhatsappId || "",
+    gruposMonitorados: Array.isArray(dados.gruposMonitorados)
+      ? dados.gruposMonitorados
+      : [],
+    telegramMonitorados: Array.isArray(dados.telegramMonitorados)
+      ? dados.telegramMonitorados
+      : [],
+    atualizadoEm: new Date().toISOString()
+  };
+
+  fs.writeFileSync(arquivo, JSON.stringify(payload, null, 2));
+
+  return payload;
+}
+
+function validarSessaoRadarCliente(clienteId = "admin", sessaoWhatsappId = "") {
+  const sessaoInformada = String(sessaoWhatsappId || "").trim();
+
+  if (!sessaoInformada) {
+    return { ok: true, sessaoWhatsappId: "" };
+  }
+
+  const sessaoNormalizada = normalizarSessaoId(clienteId, sessaoInformada);
+  const existe =
+    sessoesMeta[sessaoInformada] ||
+    sessoesMeta[sessaoNormalizada] ||
+    statusSessao[sessaoInformada] ||
+    statusSessao[sessaoNormalizada] ||
+    sessoes[sessaoInformada] ||
+    sessoes[sessaoNormalizada];
+
+  if (!existe) {
+    return { ok: false, motivo: "sessao_whatsapp_nao_encontrada" };
+  }
+
+  return {
+    ok: true,
+    sessaoWhatsappId: sessoesMeta[sessaoInformada] || statusSessao[sessaoInformada] || sessoes[sessaoInformada]
+      ? sessaoInformada
+      : sessaoNormalizada
+  };
+}
+
 function normalizarMarketplaceRadar(marketplace = "") {
   const mp = normalizarTexto(marketplace || "");
   return mp === "kabum" ? "awin" : mp;
@@ -3546,6 +3634,93 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin")
     oferta
   };
 }
+
+app.get("/radar/config", (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+
+    if (!clienteId) {
+      return res.status(401).json({
+        ok: false,
+        erro: "Cliente nao autenticado"
+      });
+    }
+
+    const radarConfig = carregarRadarConfigCliente(clienteId);
+
+    return res.json({
+      sessaoWhatsappId: radarConfig.sessaoWhatsappId,
+      gruposMonitorados: radarConfig.gruposMonitorados,
+      telegramMonitorados: radarConfig.telegramMonitorados
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
+
+app.post("/radar/config", (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+
+    if (!clienteId) {
+      return res.status(401).json({
+        ok: false,
+        erro: "Cliente nao autenticado"
+      });
+    }
+
+    const body = req.body || {};
+    const gruposMonitorados = body.gruposMonitorados;
+    const telegramMonitorados = body.telegramMonitorados;
+
+    if (!Array.isArray(gruposMonitorados)) {
+      return res.status(400).json({
+        ok: false,
+        erro: "gruposMonitorados deve ser array"
+      });
+    }
+
+    if (!Array.isArray(telegramMonitorados)) {
+      return res.status(400).json({
+        ok: false,
+        erro: "telegramMonitorados deve ser array"
+      });
+    }
+
+    const sessaoValidada = validarSessaoRadarCliente(
+      clienteId,
+      body.sessaoWhatsappId
+    );
+
+    if (!sessaoValidada.ok) {
+      return res.status(400).json({
+        ok: false,
+        erro: sessaoValidada.motivo
+      });
+    }
+
+    const radarConfig = salvarRadarConfigCliente(clienteId, {
+      sessaoWhatsappId: sessaoValidada.sessaoWhatsappId,
+      gruposMonitorados,
+      telegramMonitorados
+    });
+
+    return res.json({
+      ok: true,
+      sessaoWhatsappId: radarConfig.sessaoWhatsappId,
+      gruposMonitorados: radarConfig.gruposMonitorados,
+      telegramMonitorados: radarConfig.telegramMonitorados
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
 
 app.get("/radar", (req, res) => {
   try {
