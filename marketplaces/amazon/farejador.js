@@ -227,6 +227,14 @@ if (htmlCupomAmazon) {
     novaOferta.tipoCupom = cupomOfertaAmazon.tipoCupom || "";
     novaOferta.avisoCupom = cupomOfertaAmazon.avisoCupom;
   }
+
+  if (cupomOfertaAmazon) {
+    novaOferta.valorCupom = cupomOfertaAmazon.valorCupom || cupomOfertaAmazon.cupomValor || "";
+    novaOferta.percentualCupom = cupomOfertaAmazon.percentualCupom || cupomOfertaAmazon.cupomPercentual || "";
+    novaOferta.descontoPix = cupomOfertaAmazon.descontoPix || "";
+    novaOferta.descontoApp = cupomOfertaAmazon.descontoApp || "";
+    novaOferta.beneficioExtra = cupomOfertaAmazon.beneficioExtra || "";
+  }
 }
 
 novaOferta = prepararOfertaGlobal(novaOferta);
