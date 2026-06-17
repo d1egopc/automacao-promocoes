@@ -50,7 +50,20 @@ function normalizarCategoriaDestino(valor = "") {
 }
 
 function destinoAceitaOferta(destino, oferta, opcoes = {}) {
-  if (!destino?.ativo) return false;
+  return analisarDestinoOferta(destino, oferta, opcoes).aceita;
+}
+
+function analisarDestinoOferta(destino, oferta, opcoes = {}) {
+  if (!destino?.ativo) {
+    return {
+      aceita: false,
+      motivo: "destino_inativo",
+      marketplaceOferta: "",
+      categoriaOferta: "",
+      aceitaMarketplace: false,
+      aceitaCategoria: false
+    };
+  }
 
   const classificarCategoriaOferta =
     opcoes.classificarCategoriaOferta ||
@@ -99,6 +112,12 @@ function destinoAceitaOferta(destino, oferta, opcoes = {}) {
       categoriaOferta.includes(cat)
     );
 
+  const motivo = !aceitaMarketplace
+    ? "marketplace"
+    : !aceitaCategoria
+      ? "categoria"
+      : "";
+
   logger.log("Check destino:", {
     nome: destino.nome,
     marketplaceOferta,
@@ -107,7 +126,14 @@ function destinoAceitaOferta(destino, oferta, opcoes = {}) {
     aceitaCategoria
   });
 
-  return aceitaMarketplace && aceitaCategoria;
+  return {
+    aceita: aceitaMarketplace && aceitaCategoria,
+    motivo,
+    marketplaceOferta,
+    categoriaOferta,
+    aceitaMarketplace,
+    aceitaCategoria
+  };
 }
 
 function destinoDentroHorario(destino = {}) {
@@ -167,6 +193,7 @@ module.exports = {
   normalizarDestino,
   normalizarCategoriaDestino,
   categoriaPermitidaNoDestino,
+  analisarDestinoOferta,
   destinoAceitaOferta,
   destinoDentroHorario,
   categoriaBase,
