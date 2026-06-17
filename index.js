@@ -3465,6 +3465,289 @@ function salvarRadarConfigCliente(clienteId = "admin", dados = {}) {
   return payload;
 }
 
+function textoRadarId(valor = "") {
+  return String(valor || "").trim();
+}
+
+function chaveRadarId(valor = "") {
+  return normalizarTexto(textoRadarId(valor));
+}
+
+function extrairIdsMonitoradosRadar(lista = [], campos = []) {
+  const ids = new Set();
+
+  for (const item of Array.isArray(lista) ? lista : []) {
+    if (typeof item === "string" || typeof item === "number") {
+      const chave = chaveRadarId(item);
+      if (chave) ids.add(chave);
+      continue;
+    }
+
+    if (!item || typeof item !== "object") continue;
+
+    for (const campo of campos) {
+      const chave = chaveRadarId(item[campo]);
+      if (chave) ids.add(chave);
+    }
+  }
+
+  return ids;
+}
+
+function temFontesMonitoradasRadar(configRadar = {}) {
+  return (
+    (Array.isArray(configRadar.gruposMonitorados) && configRadar.gruposMonitorados.length > 0) ||
+    (Array.isArray(configRadar.telegramMonitorados) && configRadar.telegramMonitorados.length > 0)
+  );
+}
+
+function dataHoraRadarOferta(oferta = {}) {
+  return textoRadarId(
+    oferta.dataEntradaRadar ||
+    oferta.capturadaEm ||
+    oferta.dataCaptura ||
+    oferta.dataEntradaFila ||
+    oferta.criadoEm ||
+    oferta.createdAt ||
+    oferta.data ||
+    ""
+  );
+}
+
+function obterOrigemOfertaRadar(oferta = {}) {
+  const origemTipoRaw =
+    oferta.origemTipo ||
+    oferta.tipoOrigem ||
+    oferta.tipoFonte ||
+    oferta.canalOrigem ||
+    oferta.canal ||
+    "";
+
+  const origemGrupoId = textoRadarId(
+    oferta.origemGrupoId ||
+    oferta.grupoId ||
+    oferta.chatId ||
+    oferta.remoteJid ||
+    oferta.jid ||
+    ""
+  );
+
+  const origemGrupoNome = textoRadarId(
+    oferta.origemGrupoNome ||
+    oferta.grupoNome ||
+    oferta.nomeGrupo ||
+    oferta.chatNome ||
+    oferta.nomeCanal ||
+    oferta.canalNome ||
+    ""
+  );
+
+  const origemSessaoId = textoRadarId(
+    oferta.origemSessaoId ||
+    oferta.sessaoId ||
+    oferta.idSessao ||
+    oferta.sessionId ||
+    ""
+  );
+
+  const origemTipoNormalizada = normalizarTexto(origemTipoRaw);
+  const origemLegada = normalizarTexto(oferta.origem || "");
+  let origemTipo = "farejador";
+
+  if (origemTipoNormalizada.includes("telegram")) {
+    origemTipo = "telegram";
+  } else if (origemTipoNormalizada.includes("whatsapp")) {
+    origemTipo = "whatsapp";
+  } else if (origemTipoNormalizada.includes("manual") || origemLegada === "manual") {
+    origemTipo = "manual";
+  } else if (origemTipoNormalizada.includes("farejador") || origemLegada === "farejador") {
+    origemTipo = "farejador";
+  } else if (origemGrupoId || origemGrupoNome || origemSessaoId) {
+    origemTipo = "whatsapp";
+  }
+
+  return {
+    origemGrupoId,
+    origemGrupoNome,
+    origemSessaoId,
+    origemTipo
+  };
+}
+
+function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
+  if (!temFontesMonitoradasRadar(configRadar)) {
+    return { ok: false, motivo: "radar_sem_fontes_monitoradas" };
+  }
+
+  const origem = obterOrigemOfertaRadar(oferta);
+  const grupoId = chaveRadarId(origem.origemGrupoId);
+  const grupoNome = chaveRadarId(origem.origemGrupoNome);
+  const sessaoId = chaveRadarId(origem.origemSessaoId);
+
+  if (!["whatsapp", "telegram"].includes(origem.origemTipo)) {
+    return {
+      ok: false,
+      motivo: "origem_nao_monitoravel",
+      origem
+    };
+  }
+
+  if (!grupoId && !grupoNome) {
+    return {
+      ok: false,
+      motivo: "oferta_sem_origem_monitorada",
+      origem
+    };
+  }
+
+  if (origem.origemTipo === "telegram") {
+    const telegramIds = extrairIdsMonitoradosRadar(configRadar.telegramMonitorados, [
+      "id",
+      "chatId",
+      "nome",
+      "titulo",
+      "label"
+    ]);
+
+    const ok = [grupoId, grupoNome].some(chave => chave && telegramIds.has(chave));
+
+    return {
+      ok,
+      motivo: ok ? "" : "telegram_nao_monitorado",
+      origem
+    };
+  }
+
+  const gruposIds = extrairIdsMonitoradosRadar(configRadar.gruposMonitorados, [
+    "id",
+    "grupoId",
+    "value",
+    "jid",
+    "remoteJid",
+    "nome",
+    "titulo",
+    "label"
+  ]);
+
+  const sessoesIds = extrairIdsMonitoradosRadar(configRadar.gruposMonitorados, [
+    "sessaoId",
+    "origemSessaoId",
+    "sessionId"
+  ]);
+
+  const grupoMonitorado = [grupoId, grupoNome].some(chave => chave && gruposIds.has(chave));
+  const sessaoMonitorada = !sessoesIds.size || (sessaoId && sessoesIds.has(sessaoId));
+  const sessaoConfig = chaveRadarId(configRadar.sessaoWhatsappId);
+  const sessaoConfigOk = !sessaoConfig || (sessaoId && sessaoId === sessaoConfig);
+  const ok = grupoMonitorado && sessaoMonitorada && sessaoConfigOk;
+
+  return {
+    ok,
+    motivo: ok ? "" : "grupo_whatsapp_nao_monitorado",
+    origem
+  };
+}
+
+function normalizarCupomRadar(oferta = {}) {
+  const cupom = textoRadarId(oferta.cupom || oferta.codigoCupom || "").toUpperCase();
+  const bloqueados = new Set([
+    "VER NO APP",
+    "COPIADO",
+    "APPLIED",
+    "APPEARANCE",
+    "APPLINK",
+    "CUPOM",
+    "DESCONTO",
+    "CONFIRA",
+    "RESGATE",
+    "COMPRAR",
+    "COMPRE",
+    "VER OFERTA",
+    "PEGAR OFERTA",
+    "ABRIR OFERTA",
+    "BOTAO",
+    "BUTTON",
+    "TEMA",
+    "APLICAR",
+    "VALIDO"
+  ]);
+  const cupomConfirmado = Boolean(
+    cupom &&
+    !bloqueados.has(cupom) &&
+    !/^(VER|CONFIRA|COMPR|PEGAR|ABRIR|APLICAR|RESGAT)/i.test(cupom) &&
+    /^[A-Z0-9][A-Z0-9_-]{3,39}$/.test(cupom)
+  );
+  const avisoCupom = textoRadarId(oferta.avisoCupom || oferta.aviso_cupom || "");
+  const possivelCupom = !cupomConfirmado && Boolean(cupom || avisoCupom);
+
+  return {
+    cupom: cupomConfirmado ? cupom : "",
+    cupomConfirmado,
+    possivelCupom,
+    avisoCupom: cupomConfirmado
+      ? avisoCupom
+      : (avisoCupom || (cupom ? `Possivel cupom: ${cupom}. Conferir antes de publicar.` : ""))
+  };
+}
+
+function categoriaRadarReclassificada(oferta = {}) {
+  const texto = normalizarTexto([
+    oferta.titulo,
+    oferta.nome,
+    oferta.descricao,
+    oferta.termo
+  ].filter(Boolean).join(" "));
+
+  if (/mop|esfregao|rodo|vassoura|multiuso|desinfetante|detergente|desengordurante|amaciante|sabaoliquido|sabaoempo|lavaroupas|tiramanchas|alvejante|aguasanitaria|limpavidro|limpapiso|papelhigienico|kitlimpeza|refilmop|esponjalimpeza/.test(texto)) {
+    return "Limpeza";
+  }
+
+  if (/processadordealimentos|multiprocessador|liquidificador|mixer|batedeira/.test(texto)) {
+    return "Eletroport\u00e1teis";
+  }
+
+  return classificarCategoriaOferta({
+    ...oferta,
+    categoria: "",
+    categoriaProduto: ""
+  }, oferta.titulo || oferta.nome || oferta.termo || "");
+}
+
+function chaveDuplicidadeRadar(oferta = {}) {
+  const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
+  const links = [
+    oferta.linkOriginal,
+    oferta.linkAfiliado,
+    oferta.link,
+    oferta.linkFinal
+  ]
+    .map(link => textoRadarId(link).toLowerCase())
+    .filter(Boolean);
+
+  return [
+    ...links.map(link => `link:${link}`),
+    titulo ? `titulo:${titulo}` : ""
+  ].filter(Boolean);
+}
+
+function deduplicarOportunidadesRadar(oportunidades = []) {
+  const vistos = new Set();
+  const unicas = [];
+
+  for (const oportunidade of oportunidades) {
+    const chaves = chaveDuplicidadeRadar(oportunidade);
+    if (chaves.some(chave => vistos.has(chave))) continue;
+
+    for (const chave of chaves) {
+      vistos.add(chave);
+    }
+
+    unicas.push(oportunidade);
+  }
+
+  return unicas;
+}
+
 function validarSessaoRadarCliente(clienteId = "admin", sessaoWhatsappId = "") {
   const sessaoInformada = String(sessaoWhatsappId || "").trim();
 
@@ -3532,9 +3815,23 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     return { ok: false, motivo: "cliente_inativo_ou_inexistente" };
   }
 
+  const radarConfig = carregarRadarConfigCliente(clienteId);
+  const origemMonitorada = origemOfertaEstaMonitoradaRadar(ofertaBase, radarConfig);
+
+  if (!origemMonitorada.ok) {
+    return { ok: false, motivo: origemMonitorada.motivo };
+  }
+
   let ofertaPreparada = prepararOfertaGlobal({
-    ...(ofertaBase || {})
+    ...(ofertaBase || {}),
+    ...origemMonitorada.origem
   });
+  const cupomRadar = normalizarCupomRadar(ofertaPreparada);
+  ofertaPreparada.cupom = cupomRadar.cupom;
+  ofertaPreparada.avisoCupom = cupomRadar.avisoCupom;
+  ofertaPreparada.cupomConfirmado = cupomRadar.cupomConfirmado;
+  ofertaPreparada.possivelCupom = cupomRadar.possivelCupom;
+  ofertaPreparada.categoria = categoriaRadarReclassificada(ofertaPreparada);
 
   const marketplaceOriginal = normalizarTexto(
     ofertaPreparada.marketplace ||
@@ -3567,12 +3864,7 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   }
 
   const radar = avaliarOfertaRadar(ofertaPreparada);
-  const temCupomForte = Boolean(
-    ofertaPreparada.cupom ||
-    ofertaPreparada.avisoCupom ||
-    radar.temCupom ||
-    radar.temAvisoCupom
-  );
+  const temCupomForte = cupomRadar.cupomConfirmado;
   const tipoRadar = temCupomForte ? "radarComCupom" : "radarSemCupom";
   const prioridadeFila = temCupomForte ? 80 : 40;
   const linkOriginal =
@@ -3619,7 +3911,16 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     status: "pendente",
     statusDetalhe: temCupomForte
       ? "Radar: cupom detectado"
+      : cupomRadar.possivelCupom
+      ? "Radar: possivel cupom, conferir"
       : "Radar: oportunidade",
+    origemGrupoId: origemMonitorada.origem.origemGrupoId,
+    origemGrupoNome: origemMonitorada.origem.origemGrupoNome,
+    origemSessaoId: origemMonitorada.origem.origemSessaoId,
+    origemTipo: origemMonitorada.origem.origemTipo,
+    coletadoDe: origemMonitorada.origem.origemGrupoNome || origemMonitorada.origem.origemGrupoId,
+    cupomConfirmado: cupomRadar.cupomConfirmado,
+    possivelCupom: cupomRadar.possivelCupom,
     destinosEnviados: [],
     logsEnvio: [],
     enviadoEm: "",
@@ -3630,6 +3931,7 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     radarMotivos: radar.motivos,
     radarAlertas: radar.alertas,
     dataEntradaRadar: agoraBR,
+    capturadaEm: ofertaPreparada.capturadaEm || agoraBR,
     dataEntradaFila: agoraBR,
     criadoEm: ofertaPreparada.criadoEm || agoraBR
   };
@@ -3796,23 +4098,63 @@ app.get("/radar", (req, res) => {
       });
     }
 
-    const oportunidades = lerFilasRadarSomenteLeitura()
+    const clienteId = String(req.query?.clienteId || getClienteId(req) || "admin");
+    const radarConfig = carregarRadarConfigCliente(clienteId);
+
+    if (!temFontesMonitoradasRadar(radarConfig)) {
+      return res.json({
+        ok: true,
+        total: 0,
+        aviso: "Nenhum grupo monitorado configurado para o Radar.",
+        clienteId,
+        oportunidades: []
+      });
+    }
+
+    const oportunidades = deduplicarOportunidadesRadar(lerFilasRadarSomenteLeitura()
+      .filter((oferta) => String(oferta.origemClienteId || oferta.clienteId || "admin") === clienteId)
+      .filter((oferta) => origemOfertaEstaMonitoradaRadar(oferta, radarConfig).ok)
       .map((oferta) => {
-        const radar = avaliarOfertaRadar(oferta, {
+        const origem = obterOrigemOfertaRadar(oferta);
+        const cupomRadar = normalizarCupomRadar(oferta);
+        const categoria = categoriaRadarReclassificada(oferta);
+        const dataEntradaRadar = dataHoraRadarOferta(oferta);
+        const capturadaEm = dataHoraRadarOferta({
+          capturadaEm: oferta.capturadaEm,
+          dataEntradaRadar,
+          dataEntradaFila: oferta.dataEntradaFila,
+          criadoEm: oferta.criadoEm
+        });
+        const ofertaRadar = {
+          ...oferta,
+          categoria,
+          categoriaProduto: "",
+          cupom: cupomRadar.cupom,
+          avisoCupom: cupomRadar.avisoCupom,
+          cupomConfirmado: cupomRadar.cupomConfirmado,
+          possivelCupom: cupomRadar.possivelCupom
+        };
+        const radar = avaliarOfertaRadar(ofertaRadar, {
+          termo: oferta.titulo || oferta.nome || "",
           possivelRepeticao: oferta.possivelRepeticao
         });
 
         return {
           id: oferta.id || "",
           titulo: oferta.titulo || oferta.nome || "",
+          dataEntradaRadar,
+          capturadaEm,
           imagem: oferta.imagem || "",
           marketplace: oferta.marketplace || oferta.mercado || "",
           categoria: radar.categoria,
           precoAtual: oferta.precoAtual || oferta.preco || "",
           precoAntigo: oferta.precoAntigo || "",
           descontoPercentual: radar.descontoPercentual,
-          cupom: oferta.cupom || "",
-          avisoCupom: oferta.avisoCupom || "",
+          cupom: cupomRadar.cupom,
+          avisoCupom: cupomRadar.avisoCupom,
+          cupomConfirmado: cupomRadar.cupomConfirmado,
+          possivelCupom: cupomRadar.possivelCupom,
+          linkOriginal: oferta.linkOriginal || "",
           link: oferta.link || "",
           linkAfiliado: oferta.linkAfiliado || "",
           radar: {
@@ -3823,14 +4165,20 @@ app.get("/radar", (req, res) => {
             decisao: radar.decisao
           },
           origemClienteId: oferta.origemClienteId || oferta.clienteId || "admin",
+          origemGrupoId: origem.origemGrupoId,
+          origemGrupoNome: origem.origemGrupoNome,
+          origemSessaoId: origem.origemSessaoId,
+          origemTipo: origem.origemTipo,
+          coletadoDe: origem.origemGrupoNome || origem.origemGrupoId,
           statusFila: oferta.status || ""
         };
       })
-      .sort((a, b) => (b.radar.radarScore || 0) - (a.radar.radarScore || 0));
+      .sort((a, b) => (b.radar.radarScore || 0) - (a.radar.radarScore || 0)));
 
     return res.json({
       ok: true,
       total: oportunidades.length,
+      clienteId,
       oportunidades: oportunidades.slice(0, 50)
     });
   } catch (e) {
