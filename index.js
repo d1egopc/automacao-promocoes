@@ -52,6 +52,7 @@ const {
 } = require("./marketplaces/manual");
 
 const {
+  detectarMarketplaceManual,
   importarProdutoManual
 } = require("./marketplaces/manual");
 
@@ -3348,9 +3349,21 @@ function lerFilasRadarSomenteLeitura() {
 
 function radarConfigPadrao() {
   return {
+    monitoramentoAtivo: true,
     sessaoWhatsappId: "",
     gruposMonitorados: [],
-    telegramMonitorados: []
+    telegramMonitorados: [],
+    monitoramento: {
+      horaInicial: "07:00",
+      horaFinal: "00:50",
+      intervaloMinutos: 6,
+      maxPorDia: 180
+    },
+    categoriasPermitidas: [],
+    templateMidia: {
+      template: "padrao_optimus",
+      tipoMidia: "imagem"
+    }
   };
 }
 
@@ -3419,22 +3432,35 @@ function listarTelegramRadarCliente(clienteId = "admin") {
 
 function carregarRadarConfigCliente(clienteId = "admin") {
   const arquivo = getRadarConfigFile(clienteId);
+  const padrao = radarConfigPadrao();
 
   if (!fs.existsSync(arquivo)) {
-    return radarConfigPadrao();
+    return padrao;
   }
 
   try {
     const dados = JSON.parse(fs.readFileSync(arquivo, "utf8") || "{}");
 
     return {
+      monitoramentoAtivo: dados.monitoramentoAtivo !== false,
       sessaoWhatsappId: dados.sessaoWhatsappId || "",
       gruposMonitorados: Array.isArray(dados.gruposMonitorados)
         ? dados.gruposMonitorados
         : [],
       telegramMonitorados: Array.isArray(dados.telegramMonitorados)
         ? dados.telegramMonitorados
-        : []
+        : [],
+      monitoramento: {
+        ...padrao.monitoramento,
+        ...(dados.monitoramento && typeof dados.monitoramento === "object" ? dados.monitoramento : {})
+      },
+      categoriasPermitidas: Array.isArray(dados.categoriasPermitidas)
+        ? dados.categoriasPermitidas
+        : [],
+      templateMidia: {
+        ...padrao.templateMidia,
+        ...(dados.templateMidia && typeof dados.templateMidia === "object" ? dados.templateMidia : {})
+      }
     };
   } catch (e) {
     console.log("[RADAR] Falha ao carregar config:", {
@@ -3442,21 +3468,70 @@ function carregarRadarConfigCliente(clienteId = "admin") {
       erro: e.message
     });
 
-    return radarConfigPadrao();
+    return padrao;
   }
+}
+
+function numeroRadarConfig(valor, fallback) {
+  const numero = Number(valor);
+  return Number.isFinite(numero) && numero >= 0 ? numero : fallback;
+}
+
+function normalizarHoraRadar(valor, fallback) {
+  const texto = String(valor || "").trim();
+  return /^\d{2}:\d{2}$/.test(texto) ? texto : fallback;
 }
 
 function salvarRadarConfigCliente(clienteId = "admin", dados = {}) {
   const arquivo = getRadarConfigFile(clienteId);
+  const padrao = radarConfigPadrao();
+  const atual = carregarRadarConfigCliente(clienteId);
+  const possuiCampo = campo => Object.prototype.hasOwnProperty.call(dados, campo);
+  const monitoramentoBase = atual.monitoramento && typeof atual.monitoramento === "object"
+    ? atual.monitoramento
+    : padrao.monitoramento;
+  const monitoramento = dados.monitoramento && typeof dados.monitoramento === "object"
+    ? { ...monitoramentoBase, ...dados.monitoramento }
+    : monitoramentoBase;
+  const templateMidiaBase = atual.templateMidia && typeof atual.templateMidia === "object"
+    ? atual.templateMidia
+    : padrao.templateMidia;
+  const templateMidia = dados.templateMidia && typeof dados.templateMidia === "object"
+    ? { ...templateMidiaBase, ...dados.templateMidia }
+    : templateMidiaBase;
   const payload = {
     clienteId,
-    sessaoWhatsappId: dados.sessaoWhatsappId || "",
+    monitoramentoAtivo: possuiCampo("monitoramentoAtivo")
+      ? dados.monitoramentoAtivo !== false
+      : atual.monitoramentoAtivo !== false,
+    sessaoWhatsappId: possuiCampo("sessaoWhatsappId")
+      ? dados.sessaoWhatsappId || ""
+      : atual.sessaoWhatsappId || "",
     gruposMonitorados: Array.isArray(dados.gruposMonitorados)
       ? dados.gruposMonitorados
-      : [],
+      : Array.isArray(atual.gruposMonitorados)
+        ? atual.gruposMonitorados
+        : [],
     telegramMonitorados: Array.isArray(dados.telegramMonitorados)
       ? dados.telegramMonitorados
-      : [],
+      : Array.isArray(atual.telegramMonitorados)
+        ? atual.telegramMonitorados
+        : [],
+    monitoramento: {
+      horaInicial: normalizarHoraRadar(monitoramento.horaInicial, padrao.monitoramento.horaInicial),
+      horaFinal: normalizarHoraRadar(monitoramento.horaFinal, padrao.monitoramento.horaFinal),
+      intervaloMinutos: numeroRadarConfig(monitoramento.intervaloMinutos, padrao.monitoramento.intervaloMinutos),
+      maxPorDia: numeroRadarConfig(monitoramento.maxPorDia, padrao.monitoramento.maxPorDia)
+    },
+    categoriasPermitidas: Array.isArray(dados.categoriasPermitidas)
+      ? dados.categoriasPermitidas.map(c => String(c || "").trim()).filter(Boolean)
+      : Array.isArray(atual.categoriasPermitidas)
+        ? atual.categoriasPermitidas
+        : [],
+    templateMidia: {
+      template: String(templateMidia.template || padrao.templateMidia.template),
+      tipoMidia: String(templateMidia.tipoMidia || padrao.templateMidia.tipoMidia)
+    },
     atualizadoEm: new Date().toISOString()
   };
 
@@ -3494,11 +3569,87 @@ function extrairIdsMonitoradosRadar(lista = [], campos = []) {
   return ids;
 }
 
+function extrairIdsTelegramMonitoradosRadar(lista = []) {
+  const ids = new Set();
+
+  for (const item of Array.isArray(lista) ? lista : []) {
+    if (!item || typeof item !== "object" || item.ativo !== true) continue;
+
+    for (const campo of ["id", "chatId", "grupoId"]) {
+      const chave = chaveRadarId(item[campo]);
+      if (chave) ids.add(chave);
+    }
+  }
+
+  return ids;
+}
+
 function temFontesMonitoradasRadar(configRadar = {}) {
   return (
     (Array.isArray(configRadar.gruposMonitorados) && configRadar.gruposMonitorados.length > 0) ||
     (Array.isArray(configRadar.telegramMonitorados) && configRadar.telegramMonitorados.length > 0)
   );
+}
+
+function minutosHoraRadar(valor = "") {
+  const partes = String(valor || "").split(":").map(Number);
+  if (partes.length !== 2 || partes.some(n => !Number.isFinite(n))) return null;
+  const [hora, minuto] = partes;
+  if (hora < 0 || hora > 23 || minuto < 0 || minuto > 59) return null;
+  return hora * 60 + minuto;
+}
+
+function radarDentroHorarioMonitoramento(configRadar = {}) {
+  const cfg = configRadar.monitoramento || {};
+  const inicio = minutosHoraRadar(cfg.horaInicial);
+  const fim = minutosHoraRadar(cfg.horaFinal);
+
+  if (inicio === null || fim === null) return true;
+
+  const agora = new Date();
+  const horaBR = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(agora);
+  const atual = minutosHoraRadar(horaBR);
+
+  if (atual === null) return true;
+  if (inicio === fim) return true;
+  if (inicio < fim) return atual >= inicio && atual <= fim;
+
+  return atual >= inicio || atual <= fim;
+}
+
+function totalRadarCapturadoHoje() {
+  const hoje = new Date().toLocaleDateString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  });
+
+  return lerFilasRadarSomenteLeitura().filter(item => {
+    if (item.origem !== "radar" && item.radar !== true) return false;
+
+    const data = String(item.capturadaEm || item.dataEntradaRadar || item.dataEntradaFila || "");
+    return data.includes(hoje);
+  }).length;
+}
+
+function radarPodeCapturarAgora(configRadar = {}) {
+  if (configRadar.monitoramentoAtivo === false) {
+    return { ok: false, motivo: "radar_monitoramento_inativo" };
+  }
+
+  if (!radarDentroHorarioMonitoramento(configRadar)) {
+    return { ok: false, motivo: "fora_do_horario_monitoramento" };
+  }
+
+  const maxPorDia = Number(configRadar.monitoramento?.maxPorDia || 0);
+  if (maxPorDia > 0 && totalRadarCapturadoHoje() >= maxPorDia) {
+    return { ok: false, motivo: "limite_diario_radar_atingido" };
+  }
+
+  return { ok: true };
 }
 
 function dataHoraRadarOferta(oferta = {}) {
@@ -3601,15 +3752,9 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
   }
 
   if (origem.origemTipo === "telegram") {
-    const telegramIds = extrairIdsMonitoradosRadar(configRadar.telegramMonitorados, [
-      "id",
-      "chatId",
-      "nome",
-      "titulo",
-      "label"
-    ]);
+    const telegramIds = extrairIdsTelegramMonitoradosRadar(configRadar.telegramMonitorados);
 
-    const ok = [grupoId, grupoNome].some(chave => chave && telegramIds.has(chave));
+    const ok = grupoId && telegramIds.has(grupoId);
 
     return {
       ok,
@@ -3793,6 +3938,360 @@ function destinosClienteNormalizados(clienteId = "admin") {
     .flat();
 }
 
+function obterClienteIdAdminMaster() {
+  return usuarios.find(u => u?.ativo !== false && u.papel === "admin_master")?.id || "admin";
+}
+
+function carregarRadarConfigAdminMaster() {
+  return carregarRadarConfigCliente(obterClienteIdAdminMaster());
+}
+
+function extrairMensagemInternaRadar(conteudo = {}) {
+  return (
+    conteudo.ephemeralMessage?.message ||
+    conteudo.viewOnceMessage?.message ||
+    conteudo.viewOnceMessageV2?.message ||
+    conteudo.documentWithCaptionMessage?.message ||
+    conteudo
+  );
+}
+
+function extrairTextoMensagemRadar(mensagem = {}) {
+  const conteudo = extrairMensagemInternaRadar(mensagem.message || {});
+
+  return [
+    conteudo.conversation,
+    conteudo.extendedTextMessage?.text,
+    conteudo.imageMessage?.caption,
+    conteudo.videoMessage?.caption,
+    conteudo.documentMessage?.caption,
+    conteudo.buttonsResponseMessage?.selectedDisplayText,
+    conteudo.listResponseMessage?.title,
+    conteudo.templateButtonReplyMessage?.selectedDisplayText
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function limparLinkRadar(link = "") {
+  return String(link || "")
+    .trim()
+    .replace(/[)\].,;!?]+$/g, "");
+}
+
+function extrairLinksRadar(texto = "") {
+  const encontrados = String(texto || "").match(/\b(?:https?:\/\/|www\.)[^\s<>"']+/gi) || [];
+  const unicos = new Set();
+
+  for (const link of encontrados) {
+    const limpo = limparLinkRadar(link);
+    if (!limpo) continue;
+
+    unicos.add(limpo.startsWith("www.") ? `https://${limpo}` : limpo);
+  }
+
+  return [...unicos];
+}
+
+function obterNomeGrupoRadar(sessaoId = "", grupoId = "") {
+  const grupos = gruposPorSessao[sessaoId] || [];
+  const grupo = grupos.find(g =>
+    [g.id, g.grupoId, g.value, g.jid, g.remoteJid]
+      .filter(Boolean)
+      .some(valor => String(valor) === String(grupoId))
+  );
+
+  return grupo?.nome || grupo?.name || grupo?.subject || grupo?.titulo || grupo?.label || "";
+}
+
+function detectarMarketplaceRadarLink(url = "") {
+  const urlLower = String(url || "").toLowerCase();
+
+  if (urlLower.includes("kabum.com.br")) {
+    return "kabum";
+  }
+
+  return detectarMarketplaceManual(url, "");
+}
+
+async function importarOfertaRadarPorLink(url = "", contexto = {}) {
+  const adminMasterId = obterClienteIdAdminMaster();
+  const marketplaceDetectado = detectarMarketplaceRadarLink(url);
+
+  if (!marketplaceDetectado) {
+    return { ok: false, motivo: "marketplace_nao_identificado" };
+  }
+
+  try {
+    if (marketplaceDetectado === "kabum") {
+      const produtoKabum = await importarProdutoKabumViaAwin(url, adminMasterId, {
+        gerarDeepLinkAwin
+      });
+
+      return {
+        ok: true,
+        oferta: {
+          ...produtoKabum,
+          marketplace: produtoKabum.marketplace || "kabum",
+          linkOriginal: produtoKabum.linkOriginal || url,
+          origem: "radar",
+          radar: true,
+          status: "rascunho"
+        }
+      };
+    }
+
+    const resultado = await importarProdutoManual({
+      clienteId: adminMasterId,
+      headers: {},
+      body: {
+        url,
+        marketplace: marketplaceDetectado
+      }
+    }, {
+      getClienteId,
+      integracoesPorCliente,
+      getIntegracaoCliente,
+      importarAmazon,
+      importarAliExpress,
+      importarMagalu,
+      importarMercadoLivre,
+      importarShopee,
+      gerarLinkAfiliadoMercadoLivre
+    });
+
+    if (resultado.status >= 400 || resultado.body?.ok === false) {
+      return {
+        ok: false,
+        motivo: resultado.body?.erro || "importacao_falhou"
+      };
+    }
+
+    return {
+      ok: true,
+      oferta: {
+        ...(resultado.body || {}),
+        marketplace: resultado.body?.marketplace || marketplaceDetectado,
+        linkOriginal: resultado.body?.linkOriginal || url,
+        origem: "radar",
+        radar: true,
+        status: "rascunho"
+      }
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      motivo: e.message || "erro_importacao_radar",
+      contexto
+    };
+  }
+}
+
+async function adicionarRadarCapturadoNaFilaClientes(ofertaBase = {}, opcoes = {}) {
+  const resultados = [];
+  const radarConfigFontes = opcoes.radarConfigFontes || carregarRadarConfigAdminMaster();
+
+  for (const usuario of usuarios) {
+    if (!usuario?.ativo) continue;
+
+    const clienteId = usuario.id;
+    const resultado = await adicionarRadarNaFilaCliente(ofertaBase, clienteId, {
+      radarConfigFontes
+    });
+
+    resultados.push({
+      clienteId,
+      ok: !!resultado.ok,
+      motivo: resultado.motivo || "",
+      adicionada: !!resultado.adicionada
+    });
+  }
+
+  return resultados;
+}
+
+async function processarMensagemRadar({
+  origemTipo,
+  sessaoId,
+  grupoId,
+  grupoNome,
+  texto,
+  capturadaEm,
+  raw
+} = {}) {
+  const tipo = normalizarTexto(origemTipo || "");
+  const origemTipoFinal = tipo.includes("telegram") ? "telegram" : tipo.includes("whatsapp") ? "whatsapp" : "";
+  const grupoIdTexto = textoRadarId(grupoId);
+  const grupoNomeTexto = textoRadarId(grupoNome);
+  const sessaoIdTexto = textoRadarId(sessaoId || (origemTipoFinal === "telegram" ? "telegram" : ""));
+
+  if (!["whatsapp", "telegram"].includes(origemTipoFinal)) {
+    return { ok: false, motivo: "origem_tipo_invalida" };
+  }
+
+  if (!grupoIdTexto) {
+    return { ok: false, motivo: "grupo_ou_chat_ausente" };
+  }
+
+  const links = extrairLinksRadar(texto);
+
+  if (!links.length) {
+    return { ok: false, motivo: "sem_links" };
+  }
+
+  const adminMasterId = obterClienteIdAdminMaster();
+  const radarConfig = carregarRadarConfigCliente(adminMasterId);
+  const capturaPermitida = radarPodeCapturarAgora(radarConfig);
+
+  if (!capturaPermitida.ok) {
+    return capturaPermitida;
+  }
+
+  const origemBase = {
+    origemTipo: origemTipoFinal,
+    origemGrupoId: grupoIdTexto,
+    origemGrupoNome: grupoNomeTexto,
+    origemSessaoId: sessaoIdTexto,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto,
+    chatId: origemTipoFinal === "telegram" ? grupoIdTexto : "",
+    sessaoId: sessaoIdTexto
+  };
+  const origemMonitorada = origemOfertaEstaMonitoradaRadar(origemBase, radarConfig);
+
+  if (!origemMonitorada.ok) {
+    return { ok: false, motivo: origemMonitorada.motivo };
+  }
+
+  const resultados = [];
+  const dataCaptura = capturadaEm || new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  });
+
+  for (const link of links) {
+    const importacao = await importarOfertaRadarPorLink(link, {
+      origemTipo: origemTipoFinal,
+      sessaoId: sessaoIdTexto,
+      grupoId: grupoIdTexto,
+      grupoNome: grupoNomeTexto
+    });
+
+    if (!importacao.ok) {
+      resultados.push({ link, ok: false, motivo: importacao.motivo });
+      continue;
+    }
+
+    const ofertaRadar = prepararOfertaGlobal({
+      ...importacao.oferta,
+      ...origemBase,
+      origemClienteId: adminMasterId,
+      origem: "radar",
+      origemTipo: origemTipoFinal,
+      radar: true,
+      linkOriginal: importacao.oferta.linkOriginal || link,
+      linkCapturado: link,
+      mensagemOriginalRadar: texto.slice(0, 1000),
+      capturadaEm: dataCaptura,
+      dataEntradaRadar: dataCaptura
+    });
+
+    const clientes = await adicionarRadarCapturadoNaFilaClientes(ofertaRadar, {
+      radarConfigFontes: radarConfig
+    });
+
+    resultados.push({
+      link,
+      ok: true,
+      marketplace: ofertaRadar.marketplace,
+      clientes
+    });
+  }
+
+  const adicionadas = resultados.reduce((total, item) =>
+    total + (item.clientes || []).filter(cliente => cliente.adicionada).length,
+    0
+  );
+
+  if (resultados.length) {
+    console.log("[RADAR] Mensagem monitorada processada:", {
+      origemTipo: origemTipoFinal,
+      sessaoId: sessaoIdTexto,
+      grupo: grupoNomeTexto || grupoIdTexto,
+      links: links.length,
+      adicionadas
+    });
+  }
+
+  return {
+    ok: true,
+    links: links.length,
+    adicionadas,
+    resultados
+  };
+}
+
+async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {}) {
+  const remoteJid = mensagem?.key?.remoteJid || "";
+
+  if (!remoteJid || !remoteJid.endsWith("@g.us") || mensagem?.key?.fromMe) {
+    return { ok: false, motivo: "mensagem_nao_monitoravel" };
+  }
+
+  return processarMensagemRadar({
+    origemTipo: "whatsapp",
+    sessaoId,
+    grupoId: remoteJid,
+    grupoNome: obterNomeGrupoRadar(sessaoId, remoteJid),
+    texto: extrairTextoMensagemRadar(mensagem),
+    raw: mensagem
+  });
+}
+
+function normalizarMensagemTelegramRadar(payload = {}) {
+  const mensagem =
+    payload.message ||
+    payload.channel_post ||
+    payload.edited_message ||
+    payload.edited_channel_post ||
+    payload;
+  const chat = mensagem.chat || payload.chat || {};
+  const grupoId = textoRadarId(
+    payload.grupoId ||
+    payload.chatId ||
+    chat.id ||
+    mensagem.chatId ||
+    ""
+  );
+  const grupoNome = textoRadarId(
+    payload.grupoNome ||
+    payload.nome ||
+    chat.title ||
+    chat.username ||
+    chat.first_name ||
+    ""
+  );
+  const texto = textoRadarId(
+    payload.texto ||
+    payload.text ||
+    mensagem.text ||
+    mensagem.caption ||
+    ""
+  );
+
+  return {
+    origemTipo: "telegram",
+    sessaoId: "telegram",
+    grupoId,
+    grupoNome,
+    texto,
+    capturadaEm: payload.capturadaEm || new Date().toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo"
+    }),
+    raw: payload
+  };
+}
+
 function clienteAceitaMarketplaceAtivo(clienteId = "admin", marketplace = "") {
   const configCliente = configsPorCliente?.[clienteId] || {};
   const regraCliente = configCliente.marketplaces?.[marketplace];
@@ -3808,14 +4307,14 @@ function existeDestinoCompativelRadar(clienteId = "admin", oferta = {}) {
   );
 }
 
-async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admin") {
+async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admin", opcoes = {}) {
   const usuario = usuarios.find(u => String(u.id) === String(clienteId));
 
   if (!usuario || usuario.ativo === false) {
     return { ok: false, motivo: "cliente_inativo_ou_inexistente" };
   }
 
-  const radarConfig = carregarRadarConfigCliente(clienteId);
+  const radarConfig = opcoes.radarConfigFontes || carregarRadarConfigAdminMaster();
   const origemMonitorada = origemOfertaEstaMonitoradaRadar(ofertaBase, radarConfig);
 
   if (!origemMonitorada.ok) {
@@ -3832,6 +4331,21 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   ofertaPreparada.cupomConfirmado = cupomRadar.cupomConfirmado;
   ofertaPreparada.possivelCupom = cupomRadar.possivelCupom;
   ofertaPreparada.categoria = categoriaRadarReclassificada(ofertaPreparada);
+
+  const categoriasPermitidas = Array.isArray(radarConfig.categoriasPermitidas)
+    ? radarConfig.categoriasPermitidas
+    : [];
+
+  if (categoriasPermitidas.length) {
+    const categoriaOferta = normalizarTexto(ofertaPreparada.categoria || "");
+    const permitido = categoriasPermitidas.some(categoria =>
+      normalizarTexto(categoria) === categoriaOferta
+    );
+
+    if (!permitido) {
+      return { ok: false, motivo: "categoria_nao_permitida_radar" };
+    }
+  }
 
   const marketplaceOriginal = normalizarTexto(
     ofertaPreparada.marketplace ||
@@ -3951,8 +4465,8 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   return { ok: true, oferta: ofertaCliente };
 }
 
-async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin") {
-  const preparado = await prepararOfertaRadarParaCliente(ofertaBase, clienteId);
+async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin", opcoes = {}) {
+  const preparado = await prepararOfertaRadarParaCliente(ofertaBase, clienteId, opcoes);
 
   if (!preparado.ok) {
     return preparado;
@@ -3998,6 +4512,13 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin")
 
 app.get("/radar/config", (req, res) => {
   try {
+    if (req.usuario?.papel !== "admin_master") {
+      return res.status(403).json({
+        ok: false,
+        erro: "Acesso restrito ao admin_master"
+      });
+    }
+
     const clienteId = getClienteId(req);
 
     if (!clienteId) {
@@ -4012,9 +4533,13 @@ app.get("/radar/config", (req, res) => {
     const telegramDisponiveis = listarTelegramRadarCliente(clienteId);
 
     return res.json({
+      monitoramentoAtivo: radarConfig.monitoramentoAtivo,
       sessaoWhatsappId: radarConfig.sessaoWhatsappId,
       gruposMonitorados: radarConfig.gruposMonitorados,
       telegramMonitorados: radarConfig.telegramMonitorados,
+      monitoramento: radarConfig.monitoramento,
+      categoriasPermitidas: radarConfig.categoriasPermitidas,
+      templateMidia: radarConfig.templateMidia,
       sessoesWhatsapp,
       sessoes: sessoesWhatsapp,
       telegramDisponiveis,
@@ -4030,6 +4555,13 @@ app.get("/radar/config", (req, res) => {
 
 app.post("/radar/config", (req, res) => {
   try {
+    if (req.usuario?.papel !== "admin_master") {
+      return res.status(403).json({
+        ok: false,
+        erro: "Acesso restrito ao admin_master"
+      });
+    }
+
     const clienteId = getClienteId(req);
 
     if (!clienteId) {
@@ -4040,51 +4572,134 @@ app.post("/radar/config", (req, res) => {
     }
 
     const body = req.body || {};
+    const possuiCampo = campo => Object.prototype.hasOwnProperty.call(body, campo);
     const gruposMonitorados = body.gruposMonitorados;
     const telegramMonitorados = body.telegramMonitorados;
 
-    if (!Array.isArray(gruposMonitorados)) {
+    if (possuiCampo("gruposMonitorados") && !Array.isArray(gruposMonitorados)) {
       return res.status(400).json({
         ok: false,
         erro: "gruposMonitorados deve ser array"
       });
     }
 
-    if (!Array.isArray(telegramMonitorados)) {
+    if (possuiCampo("telegramMonitorados") && !Array.isArray(telegramMonitorados)) {
       return res.status(400).json({
         ok: false,
         erro: "telegramMonitorados deve ser array"
       });
     }
 
-    const sessaoValidada = validarSessaoRadarCliente(
-      clienteId,
-      body.sessaoWhatsappId
-    );
-
-    if (!sessaoValidada.ok) {
+    if (possuiCampo("monitoramento") && (!body.monitoramento || typeof body.monitoramento !== "object" || Array.isArray(body.monitoramento))) {
       return res.status(400).json({
         ok: false,
-        erro: sessaoValidada.motivo
+        erro: "monitoramento deve ser objeto"
       });
     }
 
-    const radarConfig = salvarRadarConfigCliente(clienteId, {
-      sessaoWhatsappId: sessaoValidada.sessaoWhatsappId,
-      gruposMonitorados,
-      telegramMonitorados
-    });
+    if (possuiCampo("categoriasPermitidas") && !Array.isArray(body.categoriasPermitidas)) {
+      return res.status(400).json({
+        ok: false,
+        erro: "categoriasPermitidas deve ser array"
+      });
+    }
+
+    if (possuiCampo("templateMidia") && (!body.templateMidia || typeof body.templateMidia !== "object" || Array.isArray(body.templateMidia))) {
+      return res.status(400).json({
+        ok: false,
+        erro: "templateMidia deve ser objeto"
+      });
+    }
+
+    const dadosConfig = {};
+
+    if (possuiCampo("monitoramentoAtivo")) {
+      dadosConfig.monitoramentoAtivo = body.monitoramentoAtivo !== false;
+    }
+
+    if (possuiCampo("sessaoWhatsappId")) {
+      const sessaoValidada = validarSessaoRadarCliente(
+        clienteId,
+        body.sessaoWhatsappId
+      );
+
+      if (!sessaoValidada.ok) {
+        return res.status(400).json({
+          ok: false,
+          erro: sessaoValidada.motivo
+        });
+      }
+
+      dadosConfig.sessaoWhatsappId = sessaoValidada.sessaoWhatsappId;
+    }
+
+    if (possuiCampo("gruposMonitorados")) dadosConfig.gruposMonitorados = gruposMonitorados;
+    if (possuiCampo("telegramMonitorados")) dadosConfig.telegramMonitorados = telegramMonitorados;
+    if (possuiCampo("monitoramento")) dadosConfig.monitoramento = body.monitoramento;
+    if (possuiCampo("categoriasPermitidas")) dadosConfig.categoriasPermitidas = body.categoriasPermitidas;
+    if (possuiCampo("templateMidia")) dadosConfig.templateMidia = body.templateMidia;
+
+    const radarConfig = salvarRadarConfigCliente(clienteId, dadosConfig);
 
     return res.json({
       ok: true,
+      monitoramentoAtivo: radarConfig.monitoramentoAtivo,
       sessaoWhatsappId: radarConfig.sessaoWhatsappId,
       gruposMonitorados: radarConfig.gruposMonitorados,
-      telegramMonitorados: radarConfig.telegramMonitorados
+      telegramMonitorados: radarConfig.telegramMonitorados,
+      monitoramento: radarConfig.monitoramento,
+      categoriasPermitidas: radarConfig.categoriasPermitidas,
+      templateMidia: radarConfig.templateMidia
     });
   } catch (e) {
     return res.status(500).json({
       ok: false,
       erro: e.message
+    });
+  }
+});
+
+// Endpoint interno para plugar webhook/polling Telegram futuramente.
+// Requer Bearer token de admin_master e processa somente chats ativos em telegramMonitorados.
+app.post("/radar/telegram/inbound", async (req, res) => {
+  try {
+    if (req.usuario?.papel !== "admin_master") {
+      return res.status(403).json({
+        ok: false,
+        motivo: "acesso_restrito_admin_master"
+      });
+    }
+
+    const entrada = normalizarMensagemTelegramRadar(req.body || {});
+
+    if (!entrada.grupoId) {
+      return res.status(400).json({
+        ok: false,
+        motivo: "telegram_chat_id_obrigatorio"
+      });
+    }
+
+    if (!entrada.texto) {
+      return res.status(400).json({
+        ok: false,
+        motivo: "telegram_texto_obrigatorio"
+      });
+    }
+
+    const resultado = await processarMensagemRadar(entrada);
+
+    return res.json({
+      ok: !!resultado.ok,
+      origemTipo: "telegram",
+      motivo: resultado.motivo || "",
+      links: resultado.links || 0,
+      adicionadas: resultado.adicionadas || 0,
+      resultados: resultado.resultados || []
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      motivo: e.message
     });
   }
 });
@@ -8100,6 +8715,12 @@ if (id.startsWith("user_")) {
 sock.ev.on("messages.upsert", async ({ messages = [] } = {}) => {
   try {
     for (const mensagem of messages) {
+      await processarMensagemRadarAutomatica({
+        mensagem,
+        sessaoId: id,
+        sock
+      });
+
       await mensageiro.tratarMensagemPrivadaAtendimento({
         clienteId: clienteIdMensageiro,
         sessaoId: id,
