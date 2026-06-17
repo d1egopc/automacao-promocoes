@@ -256,6 +256,10 @@ function gerarChaveProduto(titulo = "") {
     .slice(0, 80);
 }
 
+function normalizarTextoBasico(texto = "") {
+  return gerarChaveProduto(texto);
+}
+
 function produtoRepetidoRecentemente(titulo, horas = 12) {
   const chave = gerarChaveProduto(titulo);
   const agora = Date.now();
@@ -269,7 +273,197 @@ function produtoRepetidoRecentemente(titulo, horas = 12) {
   return false;
 }
 
+function detectarMarcaOferta(texto = "", oferta = {}) {
+  if (oferta.marca) {
+    return normalizarTextoBasico(oferta.marca);
+  }
+
+  const marcas = [
+    "jbl", "kingston", "samsung", "xiaomi", "lg", "philips", "sony",
+    "lenovo", "dell", "acer", "asus", "apple", "motorola", "nike",
+    "adidas", "olympikus", "puma", "fila", "topper", "tramontina",
+    "vonder", "bosch", "makita", "dewalt", "mondial", "britania",
+    "philco", "electrolux", "consul", "brastemp", "redragon", "hyperx",
+    "logitech", "corsair", "intel", "amd", "nvidia", "kabum"
+  ];
+
+  return marcas.find(marca => texto.includes(` ${marca} `)) || "";
+}
+
+function detectarProdutoBaseOferta(texto = "") {
+  const padroes = [
+    ["memoria ram", ["memoria ram", "ddr4", "ddr5"]],
+    ["placa de video", ["placa de video", "placa grafica", "rtx", "gtx", "radeon"]],
+    ["fone", ["fone", "headphone", "headset", "earbuds"]],
+    ["smartphone", ["smartphone", "celular", "iphone", "galaxy", "redmi", "moto g"]],
+    ["notebook", ["notebook", "laptop", "chromebook"]],
+    ["ssd", ["ssd", "nvme", "m 2"]],
+    ["moletom", ["moletom", "blusa de frio", "casaco"]],
+    ["tenis", ["tenis", "sapatenis", "chinelo", "sandalia"]],
+    ["bola", ["bola futebol", "bola futsal", "bola society", "bola volei", "bola"]],
+    ["furadeira", ["furadeira", "parafusadeira", "martelete"]],
+    ["air fryer", ["air fryer", "fritadeira sem oleo"]],
+    ["perfume", ["perfume", "parfum", "colonia", "malbec"]]
+  ];
+
+  for (const [base, termos] of padroes) {
+    if (termos.some(termo => texto.includes(termo))) {
+      return base;
+    }
+  }
+
+  const stopwords = new Set([
+    "kit", "combo", "oferta", "promocao", "original", "novo", "nova",
+    "com", "sem", "para", "por", "de", "do", "da", "das", "dos",
+    "masculino", "feminino", "infantil", "preto", "branco", "azul",
+    "rosa", "verde", "vermelho", "unissex", "premium"
+  ]);
+
+  return texto
+    .split(" ")
+    .filter(token =>
+      token.length > 2 &&
+      !stopwords.has(token) &&
+      !/^\d+$/.test(token)
+    )
+    .slice(0, 3)
+    .join(" ");
+}
+
+function sinaisDiversidadeOferta(oferta = {}) {
+  const texto = ` ${normalizarTextoBasico([
+    oferta.titulo,
+    oferta.nome,
+    oferta.categoria,
+    oferta.categoriaProduto,
+    oferta.marketplace,
+    oferta.marca
+  ].filter(Boolean).join(" "))} `;
+
+  const categoria = normalizarTextoBasico(
+    oferta.categoria || oferta.categoriaProduto || "geral"
+  );
+
+  const marca = detectarMarcaOferta(texto, oferta);
+  const produtoBase = detectarProdutoBaseOferta(texto);
+  const tema = produtoBase || categoria || "geral";
+
+  return {
+    categoria,
+    marca,
+    produtoBase,
+    tema
+  };
+}
+
+function calcularDiversidadeOferta(oferta = {}, recentes = []) {
+  const sinais = sinaisDiversidadeOferta(oferta);
+  let score = 100;
+  const motivos = [];
+
+  recentes.forEach((recente, index) => {
+    const peso = Math.max(1, 4 - index);
+    const sinaisRecentes = recente.__sinaisDiversidade || sinaisDiversidadeOferta(recente);
+
+    if (sinais.produtoBase && sinais.produtoBase === sinaisRecentes.produtoBase) {
+      score -= 18 * peso;
+      motivos.push("produto_base_repetido");
+    }
+
+    if (sinais.marca && sinais.marca === sinaisRecentes.marca) {
+      score -= 10 * peso;
+      motivos.push("marca_repetida");
+    }
+
+    if (sinais.tema && sinais.tema === sinaisRecentes.tema) {
+      score -= 8 * peso;
+      motivos.push("tema_repetido");
+    }
+
+    if (sinais.categoria && sinais.categoria === sinaisRecentes.categoria) {
+      score -= 5 * peso;
+      motivos.push("categoria_repetida");
+    }
+  });
+
+  return {
+    score: Math.max(0, score),
+    sinais,
+    motivos: [...new Set(motivos)]
+  };
+}
+
+function ordenarPendentesPorDiversidade(itens = []) {
+  const pendentes = itens
+    .map((oferta, index) => ({ oferta, index }))
+    .filter(item => item.oferta?.status === "pendente");
+
+  if (pendentes.length < 3) {
+    return itens;
+  }
+
+  const restantes = [...pendentes];
+  const ordenados = [];
+
+  while (restantes.length) {
+    const recentes = ordenados.slice(-4).reverse().map(item => item.oferta);
+
+    const melhor = restantes
+      .map((item, posicao) => {
+        const diversidade = calcularDiversidadeOferta(item.oferta, recentes);
+        return {
+          item,
+          posicao,
+          diversidade,
+          scoreFinal: diversidade.score - item.index * 0.001
+        };
+      })
+      .sort((a, b) => b.scoreFinal - a.scoreFinal)[0];
+
+    melhor.item.oferta.diversidadeScore = melhor.diversidade.score;
+    melhor.item.oferta.diversidadeSinais = melhor.diversidade.sinais;
+    melhor.item.oferta.diversidadeMotivos = melhor.diversidade.motivos;
+    melhor.item.oferta.__sinaisDiversidade = melhor.diversidade.sinais;
+
+    ordenados.push(melhor.item);
+    restantes.splice(melhor.posicao, 1);
+  }
+
+  const filaOrdenada = [...itens];
+  let indicePendente = 0;
+
+  for (let i = 0; i < filaOrdenada.length; i++) {
+    if (filaOrdenada[i]?.status === "pendente") {
+      filaOrdenada[i] = ordenados[indicePendente].oferta;
+      delete filaOrdenada[i].__sinaisDiversidade;
+      indicePendente++;
+    }
+  }
+
+  return filaOrdenada;
+}
+
+function aplicarDiversidadeFila(clienteId = "admin") {
+  const cliente = String(clienteId || "admin");
+  const itensCliente = fila.filter(item =>
+    String(item.clienteId || "admin") === cliente
+  );
+
+  const itensOrdenados = ordenarPendentesPorDiversidade(itensCliente);
+  let indiceCliente = 0;
+
+  fila = fila.map(item => {
+    if (String(item.clienteId || "admin") !== cliente) {
+      return item;
+    }
+
+    return itensOrdenados[indiceCliente++];
+  });
+}
+
 function salvarFila(clienteId = "admin") {
+  aplicarDiversidadeFila(clienteId);
+
   return filaOfertas.salvarFila({
     fila,
     clienteId,
