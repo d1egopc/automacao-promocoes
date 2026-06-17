@@ -3652,6 +3652,36 @@ function radarPodeCapturarAgora(configRadar = {}) {
   return { ok: true };
 }
 
+function motivoRadarDebug(motivo = "") {
+  const chave = String(motivo || "").trim();
+  const mapa = {
+    integracao_marketplace_ausente: "sem integração",
+    sem_destino_compativel: "sem destino compatível",
+    oferta_duplicada: "duplicada",
+    oferta_repetida_na_memoria: "memória",
+    limite_radar_pendente_total: "limite Radar",
+    limite_radar_com_cupom: "limite Radar",
+    limite_radar_sem_cupom: "limite Radar",
+    limite_diario_radar_atingido: "limite Radar",
+    marketplace_nao_permitido_no_plano: "marketplace bloqueado",
+    marketplace_desativado_no_cliente: "marketplace bloqueado",
+    fora_do_horario_monitoramento: "horário fora da janela",
+    categoria_nao_permitida_radar: "categoria bloqueada",
+    link_afiliado_nao_gerado: "link afiliado inválido",
+    link_afiliado_igual_original: "link afiliado inválido",
+    link_original_nao_resolvido: "link original não resolvido"
+  };
+
+  return mapa[chave] || chave || "motivo_nao_informado";
+}
+
+function logRadarRejeitado(motivo = "", contexto = {}) {
+  console.log(`[RADAR] rejeitado: ${motivoRadarDebug(motivo)}`, {
+    motivoTecnico: motivo || "",
+    ...contexto
+  });
+}
+
 function dataHoraRadarOferta(oferta = {}) {
   return textoRadarId(
     oferta.dataEntradaRadar ||
@@ -4008,33 +4038,169 @@ function obterNomeGrupoRadar(sessaoId = "", grupoId = "") {
 function detectarMarketplaceRadarLink(url = "") {
   const urlLower = String(url || "").toLowerCase();
 
+  if (urlLower.includes("mercadolivre.com") || urlLower.includes("mercadolivre.com.br") || urlLower.includes("meli.la")) {
+    return "mercadolivre";
+  }
+
+  if (urlLower.includes("shopee.com")) {
+    return "shopee";
+  }
+
+  if (urlLower.includes("amazon.") || urlLower.includes("amzn.to")) {
+    return "amazon";
+  }
+
+  if (urlLower.includes("aliexpress.")) {
+    return "aliexpress";
+  }
+
   if (urlLower.includes("kabum.com.br")) {
     return "kabum";
+  }
+
+  if (urlLower.includes("awin1.com") || urlLower.includes("awin.com")) {
+    return "awin";
   }
 
   return detectarMarketplaceManual(url, "");
 }
 
-async function importarOfertaRadarPorLink(url = "", contexto = {}) {
-  const adminMasterId = obterClienteIdAdminMaster();
-  const marketplaceDetectado = detectarMarketplaceRadarLink(url);
+function extrairAmazonAsinRadar(pathname = "") {
+  const match = String(pathname || "").match(/\/(?:dp|gp\/product|product)\/([A-Z0-9]{10})(?:[/?]|$)/i);
+  return match?.[1] || "";
+}
 
-  if (!marketplaceDetectado) {
-    return { ok: false, motivo: "marketplace_nao_identificado" };
+function limparUrlProdutoRadar(url = "", marketplace = "") {
+  const mp = normalizarMarketplaceRadar(marketplace || detectarMarketplaceRadarLink(url));
+
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+
+    if (mp === "amazon") {
+      const asin = extrairAmazonAsinRadar(parsed.pathname);
+      if (!asin) return "";
+      parsed.pathname = `/dp/${asin}`;
+      parsed.search = "";
+      return parsed.toString();
+    }
+
+    if (mp === "shopee") {
+      parsed.search = "";
+      return parsed.toString();
+    }
+
+    if (mp === "mercadolivre") {
+      parsed.search = "";
+      return parsed.toString();
+    }
+
+    if (mp === "aliexpress") {
+      const itemMatch = parsed.pathname.match(/\/item\/(\d+)\.html/i);
+      if (itemMatch?.[1]) {
+        parsed.pathname = `/item/${itemMatch[1]}.html`;
+      }
+      parsed.search = "";
+      return parsed.toString();
+    }
+
+    if (mp === "kabum" || mp === "awin") {
+      parsed.search = "";
+      return parsed.toString();
+    }
+
+    parsed.search = "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
+async function resolverLinkOriginalRadar(url = "") {
+  const capturada = limparLinkRadar(url);
+
+  if (!capturada) {
+    return { ok: false, motivo: "link_original_nao_resolvido" };
   }
 
   try {
+    const resposta = await axios.get(capturada, {
+      maxRedirects: 5,
+      timeout: 7000,
+      validateStatus: () => true,
+      responseType: "stream",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; OptimusRadar/1.0)",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      }
+    });
+    if (resposta.data?.destroy) resposta.data.destroy();
+    const resolvida =
+      resposta?.request?.res?.responseUrl ||
+      resposta?.request?._redirectable?._currentUrl ||
+      capturada;
+    const marketplaceReal = detectarMarketplaceRadarLink(resolvida);
+    const linkOriginalLimpo = marketplaceReal
+      ? limparUrlProdutoRadar(resolvida, marketplaceReal)
+      : "";
+
+    if (!resolvida || !marketplaceReal || marketplaceReal === "awin" || !linkOriginalLimpo) {
+      return {
+        ok: false,
+        motivo: "link_original_nao_resolvido",
+        urlCapturada: capturada,
+        urlResolvida: resolvida || "",
+        marketplaceReal: marketplaceReal || ""
+      };
+    }
+
+    return {
+      ok: true,
+      urlCapturada: capturada,
+      urlResolvida: resolvida,
+      marketplaceReal,
+      linkOriginalLimpo
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      motivo: "link_original_nao_resolvido",
+      urlCapturada: capturada,
+      erro: e.message
+    };
+  }
+}
+
+async function importarOfertaRadarPorLink(url = "", contexto = {}) {
+  const adminMasterId = obterClienteIdAdminMaster();
+  const resolucao = await resolverLinkOriginalRadar(url);
+
+  if (!resolucao.ok) {
+    return {
+      ok: false,
+      motivo: resolucao.motivo || "link_original_nao_resolvido",
+      resolucao
+    };
+  }
+
+  const marketplaceDetectado = resolucao.marketplaceReal;
+  const linkOriginalLimpo = resolucao.linkOriginalLimpo;
+
+  try {
     if (marketplaceDetectado === "kabum") {
-      const produtoKabum = await importarProdutoKabumViaAwin(url, adminMasterId, {
+      const produtoKabum = await importarProdutoKabumViaAwin(linkOriginalLimpo, adminMasterId, {
         gerarDeepLinkAwin
       });
 
       return {
         ok: true,
+        resolucao,
         oferta: {
           ...produtoKabum,
           marketplace: produtoKabum.marketplace || "kabum",
-          linkOriginal: produtoKabum.linkOriginal || url,
+          linkOriginal: linkOriginalLimpo,
+          linkCapturado: resolucao.urlCapturada,
+          linkResolvidoRadar: resolucao.urlResolvida,
           origem: "radar",
           radar: true,
           status: "rascunho"
@@ -4046,7 +4212,7 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
       clienteId: adminMasterId,
       headers: {},
       body: {
-        url,
+        url: linkOriginalLimpo,
         marketplace: marketplaceDetectado
       }
     }, {
@@ -4064,16 +4230,20 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
     if (resultado.status >= 400 || resultado.body?.ok === false) {
       return {
         ok: false,
-        motivo: resultado.body?.erro || "importacao_falhou"
+        motivo: resultado.body?.erro || "importacao_falhou",
+        resolucao
       };
     }
 
     return {
       ok: true,
+      resolucao,
       oferta: {
         ...(resultado.body || {}),
         marketplace: resultado.body?.marketplace || marketplaceDetectado,
-        linkOriginal: resultado.body?.linkOriginal || url,
+        linkOriginal: linkOriginalLimpo,
+        linkCapturado: resolucao.urlCapturada,
+        linkResolvidoRadar: resolucao.urlResolvida,
         origem: "radar",
         radar: true,
         status: "rascunho"
@@ -4083,6 +4253,7 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
     return {
       ok: false,
       motivo: e.message || "erro_importacao_radar",
+      resolucao,
       contexto
     };
   }
@@ -4091,14 +4262,26 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
 async function adicionarRadarCapturadoNaFilaClientes(ofertaBase = {}, opcoes = {}) {
   const resultados = [];
   const radarConfigFontes = opcoes.radarConfigFontes || carregarRadarConfigAdminMaster();
+  const clientesAtivos = usuarios.filter(usuario => usuario?.ativo);
 
-  for (const usuario of usuarios) {
-    if (!usuario?.ativo) continue;
+  console.log("[RADAR] clientes elegíveis encontrados:", clientesAtivos.length);
 
+  for (const usuario of clientesAtivos) {
     const clienteId = usuario.id;
+
+    console.log("[RADAR] cliente analisado:", clienteId);
+
     const resultado = await adicionarRadarNaFilaCliente(ofertaBase, clienteId, {
       radarConfigFontes
     });
+
+    if (!resultado.ok || !resultado.adicionada) {
+      logRadarRejeitado(resultado.motivo || "nao_adicionada", {
+        clienteId
+      });
+    } else {
+      console.log(`[RADAR] ADICIONADA FILA clienteId=${clienteId}`);
+    }
 
     resultados.push({
       clienteId,
@@ -4126,17 +4309,39 @@ async function processarMensagemRadar({
   const grupoNomeTexto = textoRadarId(grupoNome);
   const sessaoIdTexto = textoRadarId(sessaoId || (origemTipoFinal === "telegram" ? "telegram" : ""));
 
+  console.log("[RADAR] mensagem recebida", {
+    origemTipo: origemTipoFinal || origemTipo,
+    sessaoId: sessaoIdTexto,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto,
+    tamanhoTexto: String(texto || "").length
+  });
+
   if (!["whatsapp", "telegram"].includes(origemTipoFinal)) {
+    logRadarRejeitado("origem_tipo_invalida", {
+      origemTipo
+    });
     return { ok: false, motivo: "origem_tipo_invalida" };
   }
 
   if (!grupoIdTexto) {
+    logRadarRejeitado("grupo_ou_chat_ausente", {
+      origemTipo: origemTipoFinal
+    });
     return { ok: false, motivo: "grupo_ou_chat_ausente" };
   }
 
   const links = extrairLinksRadar(texto);
+  console.log(`[RADAR] links detectados: ${links.length}`, {
+    origemTipo: origemTipoFinal,
+    grupo: grupoNomeTexto || grupoIdTexto
+  });
 
   if (!links.length) {
+    logRadarRejeitado("sem_links", {
+      origemTipo: origemTipoFinal,
+      grupo: grupoNomeTexto || grupoIdTexto
+    });
     return { ok: false, motivo: "sem_links" };
   }
 
@@ -4145,6 +4350,10 @@ async function processarMensagemRadar({
   const capturaPermitida = radarPodeCapturarAgora(radarConfig);
 
   if (!capturaPermitida.ok) {
+    logRadarRejeitado(capturaPermitida.motivo, {
+      origemTipo: origemTipoFinal,
+      grupo: grupoNomeTexto || grupoIdTexto
+    });
     return capturaPermitida;
   }
 
@@ -4161,8 +4370,19 @@ async function processarMensagemRadar({
   const origemMonitorada = origemOfertaEstaMonitoradaRadar(origemBase, radarConfig);
 
   if (!origemMonitorada.ok) {
+    logRadarRejeitado(origemMonitorada.motivo, {
+      origemTipo: origemTipoFinal,
+      grupo: grupoNomeTexto || grupoIdTexto
+    });
     return { ok: false, motivo: origemMonitorada.motivo };
   }
+
+  console.log("[RADAR] grupo monitorado confirmado", {
+    origemTipo: origemTipoFinal,
+    sessaoId: sessaoIdTexto,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto
+  });
 
   const resultados = [];
   const dataCaptura = capturadaEm || new Date().toLocaleString("pt-BR", {
@@ -4170,6 +4390,8 @@ async function processarMensagemRadar({
   });
 
   for (const link of links) {
+    console.log("[RADAR] link capturado", { url: link });
+
     const importacao = await importarOfertaRadarPorLink(link, {
       origemTipo: origemTipoFinal,
       sessaoId: sessaoIdTexto,
@@ -4178,9 +4400,36 @@ async function processarMensagemRadar({
     });
 
     if (!importacao.ok) {
+      console.log("[RADAR] importação falhou:", {
+        motivo: importacao.motivo || "importacao_falhou",
+        link,
+        urlResolvida: importacao.resolucao?.urlResolvida || "",
+        marketplace: importacao.resolucao?.marketplaceReal || ""
+      });
+      logRadarRejeitado(importacao.motivo || "importacao_falhou", {
+        link,
+        urlResolvida: importacao.resolucao?.urlResolvida || "",
+        marketplace: importacao.resolucao?.marketplaceReal || ""
+      });
       resultados.push({ link, ok: false, motivo: importacao.motivo });
       continue;
     }
+
+    console.log("[RADAR] URL resolvida", {
+      capturada: importacao.resolucao?.urlCapturada || link,
+      resolvida: importacao.resolucao?.urlResolvida || ""
+    });
+    console.log("[RADAR] marketplace real", {
+      marketplace: importacao.resolucao?.marketplaceReal || importacao.oferta?.marketplace || ""
+    });
+    console.log("[RADAR] link original limpo", {
+      linkOriginal: importacao.resolucao?.linkOriginalLimpo || importacao.oferta?.linkOriginal || ""
+    });
+    console.log("[RADAR] importação sucesso", {
+      link,
+      marketplace: importacao.oferta?.marketplace || importacao.resolucao?.marketplaceReal || "",
+      titulo: importacao.oferta?.titulo || importacao.oferta?.nome || ""
+    });
 
     const ofertaRadar = prepararOfertaGlobal({
       ...importacao.oferta,
@@ -4189,8 +4438,9 @@ async function processarMensagemRadar({
       origem: "radar",
       origemTipo: origemTipoFinal,
       radar: true,
-      linkOriginal: importacao.oferta.linkOriginal || link,
-      linkCapturado: link,
+      linkOriginal: importacao.resolucao?.linkOriginalLimpo || importacao.oferta.linkOriginal,
+      linkCapturado: importacao.resolucao?.urlCapturada || link,
+      linkResolvidoRadar: importacao.resolucao?.urlResolvida || importacao.oferta.linkResolvidoRadar || "",
       mensagemOriginalRadar: texto.slice(0, 1000),
       capturadaEm: dataCaptura,
       dataEntradaRadar: dataCaptura
@@ -4387,7 +4637,23 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     ofertaPreparada.linkAfiliado ||
     "";
 
+  console.log("[RADAR] score", {
+    clienteId,
+    score: radar.radarScore,
+    nivel: radar.nivel,
+    decisao: radar.decisao
+  });
+  console.log("[RADAR] tipoRadar", {
+    clienteId,
+    tipoRadar
+  });
+
   if (!linkOriginal) {
+    console.log("[RADAR] aprovado/reprovado", {
+      clienteId,
+      aprovado: false,
+      motivo: "link_original_ausente"
+    });
     return { ok: false, motivo: "link_original_ausente" };
   }
 
@@ -4399,12 +4665,29 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   );
 
   if (!linkAfiliadoCliente) {
+    console.log("[RADAR] aprovado/reprovado", {
+      clienteId,
+      aprovado: false,
+      motivo: "link_afiliado_nao_gerado"
+    });
     return { ok: false, motivo: "link_afiliado_nao_gerado" };
   }
 
   if (String(linkAfiliadoCliente).trim() === String(linkOriginal).trim()) {
+    console.log("[RADAR] aprovado/reprovado", {
+      clienteId,
+      aprovado: false,
+      motivo: "link_afiliado_igual_original"
+    });
     return { ok: false, motivo: "link_afiliado_igual_original" };
   }
+
+  console.log("[RADAR] link afiliado cliente gerado", {
+    clienteId,
+    marketplace,
+    linkOriginal,
+    linkAfiliado: linkAfiliadoCliente
+  });
 
   const agoraBR = new Date().toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo"
@@ -4451,16 +4734,37 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   };
 
   if (!existeDestinoCompativelRadar(clienteId, ofertaCliente)) {
+    console.log("[RADAR] aprovado/reprovado", {
+      clienteId,
+      aprovado: false,
+      motivo: "sem_destino_compativel"
+    });
     return { ok: false, motivo: "sem_destino_compativel" };
   }
 
   if (ofertaJaExiste(ofertaCliente)) {
+    console.log("[RADAR] aprovado/reprovado", {
+      clienteId,
+      aprovado: false,
+      motivo: "oferta_duplicada"
+    });
     return { ok: false, motivo: "oferta_duplicada" };
   }
 
   if (deveIgnorarOfertaRepetida(ofertaCliente)) {
+    console.log("[RADAR] aprovado/reprovado", {
+      clienteId,
+      aprovado: false,
+      motivo: "oferta_repetida_na_memoria"
+    });
     return { ok: false, motivo: "oferta_repetida_na_memoria" };
   }
+
+  console.log("[RADAR] aprovado/reprovado", {
+    clienteId,
+    aprovado: true,
+    decisao: radar.decisao
+  });
 
   return { ok: true, oferta: ofertaCliente };
 }
@@ -4488,14 +4792,29 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
   ).length;
 
   if (totalRadar >= 10) {
+    console.log("[RADAR] aprovado/reprovado", {
+      clienteId,
+      aprovado: false,
+      motivo: "limite_radar_pendente_total"
+    });
     return { ok: false, motivo: "limite_radar_pendente_total" };
   }
 
   if (oferta.tipoRadar === "radarComCupom" && totalComCupom >= 4) {
+    console.log("[RADAR] aprovado/reprovado", {
+      clienteId,
+      aprovado: false,
+      motivo: "limite_radar_com_cupom"
+    });
     return { ok: false, motivo: "limite_radar_com_cupom" };
   }
 
   if (oferta.tipoRadar === "radarSemCupom" && totalSemCupom >= 6) {
+    console.log("[RADAR] aprovado/reprovado", {
+      clienteId,
+      aprovado: false,
+      motivo: "limite_radar_sem_cupom"
+    });
     return { ok: false, motivo: "limite_radar_sem_cupom" };
   }
 
