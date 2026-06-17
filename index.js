@@ -3358,6 +3358,65 @@ function getRadarConfigFile(clienteId = "admin") {
   return path.join(getClienteDir(clienteId), "radar-config.json");
 }
 
+function listarSessoesWhatsappCliente(clienteId = "admin") {
+  return Object.values(sessoesMeta || {})
+    .filter(sessao => {
+      const id = String(sessao.id || "");
+
+      return (
+        id.startsWith(clienteId + "_") ||
+        id === clienteId ||
+        (clienteId === "admin" && id.startsWith("admin_"))
+      );
+    })
+    .map(sessao => {
+      const id = sessao.id;
+      const totalGrupos = gruposPorSessao[id]?.length || 0;
+
+      const nomeAmigavel =
+        sessao.nome ||
+        sessao.nomeSessao ||
+        sessao.apelido ||
+        sessao.titulo ||
+        sessao.label ||
+        id;
+
+      return {
+        ...sessao,
+        id,
+        sessaoId: id,
+        nome: nomeAmigavel,
+        nomeAmigavel,
+        nomeExibicao: nomeAmigavel,
+        idTecnico: id,
+        status: statusSessao[id] || "offline",
+        conectado: statusSessao[id] === "open" || statusSessao[id] === "aberto",
+        qrDisponivel: !!qrCodes[id],
+        grupos: totalGrupos,
+        totalGrupos,
+        destinos: destinosPorSessao[id]?.length || 0
+      };
+    });
+}
+
+function listarTelegramRadarCliente(clienteId = "admin") {
+  const configCliente = configsPorCliente?.[clienteId] || {};
+  const destinos = configCliente.telegram?.destinos || [];
+
+  if (!Array.isArray(destinos)) {
+    return [];
+  }
+
+  return destinos.map((destino, index) => ({
+    ...destino,
+    id: String(destino.id || destino.chatId || destino.nome || `telegram_${index}`),
+    nome: destino.nome || destino.titulo || destino.label || String(destino.chatId || `Telegram ${index + 1}`),
+    chatId: destino.chatId || "",
+    ativo: destino.ativo === true,
+    status: destino.ativo === true ? "conectado" : "desconectado"
+  }));
+}
+
 function carregarRadarConfigCliente(clienteId = "admin") {
   const arquivo = getRadarConfigFile(clienteId);
 
@@ -3647,11 +3706,17 @@ app.get("/radar/config", (req, res) => {
     }
 
     const radarConfig = carregarRadarConfigCliente(clienteId);
+    const sessoesWhatsapp = listarSessoesWhatsappCliente(clienteId);
+    const telegramDisponiveis = listarTelegramRadarCliente(clienteId);
 
     return res.json({
       sessaoWhatsappId: radarConfig.sessaoWhatsappId,
       gruposMonitorados: radarConfig.gruposMonitorados,
-      telegramMonitorados: radarConfig.telegramMonitorados
+      telegramMonitorados: radarConfig.telegramMonitorados,
+      sessoesWhatsapp,
+      sessoes: sessoesWhatsapp,
+      telegramDisponiveis,
+      telegram: telegramDisponiveis
     });
   } catch (e) {
     return res.status(500).json({
@@ -6853,43 +6918,7 @@ app.post("/importar-produto", async (req, res) => {
 
 app.get("/sessoes", (req, res) => {
   const clienteId = getClienteId(req);
-
-  const lista = Object.values(sessoesMeta)
-    .filter(sessao => {
-      const id = String(sessao.id || "");
-
-      return (
-        id.startsWith(clienteId + "_") ||
-        id === clienteId ||
-        (clienteId === "admin" && id.startsWith("admin_"))
-      );
-    })
-    .map(sessao => {
-      const id = sessao.id;
-      const totalGrupos = gruposPorSessao[id]?.length || 0;
-
-      const nomeAmigavel =
-        sessao.nome ||
-        sessao.nomeSessao ||
-        sessao.apelido ||
-        sessao.titulo ||
-        sessao.label ||
-        id;
-
-      return {
-        ...sessao,
-        nome: nomeAmigavel,
-        nomeAmigavel,
-        nomeExibicao: nomeAmigavel,
-        idTecnico: id,
-        status: statusSessao[id] || "offline",
-        conectado: statusSessao[id] === "open" || statusSessao[id] === "aberto",
-        qrDisponivel: !!qrCodes[id],
-        grupos: totalGrupos,
-        totalGrupos,
-        destinos: destinosPorSessao[id]?.length || 0
-      };
-    });
+  const lista = listarSessoesWhatsappCliente(clienteId);
 
   return res.json({
     ok: true,
