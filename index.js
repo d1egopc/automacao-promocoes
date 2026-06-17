@@ -3857,15 +3857,98 @@ function normalizarCupomRadar(oferta = {}) {
   );
   const avisoCupom = textoRadarId(oferta.avisoCupom || oferta.aviso_cupom || "");
   const possivelCupom = !cupomConfirmado && Boolean(cupom || avisoCupom);
+  const tipoCupom = textoRadarId(oferta.tipoCupom || oferta.cupomTipo || "");
+  const valorCupom = textoRadarId(oferta.valorCupom || oferta.cupomValor || "");
+  const percentualCupom = textoRadarId(oferta.percentualCupom || oferta.cupomPercentual || "");
+  const descontoPix = textoRadarId(oferta.descontoPix || "");
+  const descontoApp = textoRadarId(oferta.descontoApp || "");
+  const beneficioExtra = textoRadarId(oferta.beneficioExtra || "");
 
   return {
     cupom: cupomConfirmado ? cupom : "",
     cupomConfirmado,
     possivelCupom,
+    tipoCupom,
+    valorCupom,
+    percentualCupom,
+    descontoPix,
+    descontoApp,
+    beneficioExtra,
     avisoCupom: cupomConfirmado
       ? avisoCupom
       : (avisoCupom || (cupom ? `Possivel cupom: ${cupom}. Conferir antes de publicar.` : ""))
   };
+}
+
+function avisoCupomGenericoRadar(texto = "") {
+  const normalizado = normalizarTexto(texto);
+
+  return (
+    !normalizado ||
+    normalizado.includes("ha cupom desconto extra na pagina") ||
+    normalizado.includes("cupom disponivel na pagina") ||
+    normalizado.includes("confira cupom ou desconto") ||
+    normalizado.includes("verifique na pagina") ||
+    normalizado.includes("confira antes de finalizar") ||
+    normalizado.includes("resgate antes de finalizar")
+  );
+}
+
+function normalizarBeneficiosRadarOferta(oferta = {}) {
+  const cupomRadar = normalizarCupomRadar(oferta);
+  const avisoOriginal = textoRadarId(oferta.avisoCupom || "");
+  const avisoUtil = avisoCupomGenericoRadar(avisoOriginal) ? "" : avisoOriginal;
+  const textoBeneficio = normalizarTexto([
+    avisoOriginal,
+    cupomRadar.tipoCupom,
+    oferta.beneficioExtra,
+    oferta.descricaoBeneficio
+  ].filter(Boolean).join(" "));
+  const descontoPix =
+    cupomRadar.descontoPix ||
+    (/\bpix\b/.test(textoBeneficio) ? "Desconto PIX" : "");
+  const descontoApp =
+    cupomRadar.descontoApp ||
+    (/\b(app|aplicativo)\b/.test(textoBeneficio) ? "Oferta exclusiva App" : "");
+  const freteGratis = /frete gratis|frete free|frete 0/.test(textoBeneficio)
+    ? "Frete gratis"
+    : "";
+  const acumulavel = /acumulavel|acumula/.test(textoBeneficio)
+    ? "Cupom acumulavel"
+    : "";
+  const beneficioExtra =
+    cupomRadar.beneficioExtra ||
+    descontoPix ||
+    descontoApp ||
+    freteGratis ||
+    acumulavel ||
+    avisoUtil;
+
+  return {
+    cupom: cupomRadar.cupom,
+    avisoCupom: avisoUtil,
+    tipoCupom: cupomRadar.tipoCupom,
+    valorCupom: cupomRadar.valorCupom,
+    percentualCupom: cupomRadar.percentualCupom,
+    descontoPix,
+    descontoApp,
+    beneficioExtra,
+    cupomConfirmado: cupomRadar.cupomConfirmado,
+    possivelCupom: cupomRadar.possivelCupom && Boolean(avisoUtil || beneficioExtra)
+  };
+}
+
+async function enriquecerBeneficioRadarOferta(oferta = {}, contexto = {}) {
+  try {
+    const enriquecida = await aplicarCuponsAutomaticos(oferta, contexto);
+    return {
+      ...oferta,
+      ...(enriquecida || {})
+    };
+  } catch (e) {
+    console.log("[RADAR] beneficio nao enriquecido:", e.message);
+    return oferta;
+  }
 }
 
 function categoriaRadarReclassificada(oferta = {}) {
@@ -4411,13 +4494,24 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
           resolucao
         };
       }
+      const produtoEnriquecido = await enriquecerBeneficioRadarOferta({
+        ...produtoKabum,
+        marketplace: produtoKabum.marketplace || "kabum",
+        linkOriginal: linkOriginalLimpo
+      }, {
+        origem: "radar",
+        marketplace: "kabum",
+        linkOriginal: linkOriginalLimpo
+      });
+      const beneficioRadar = normalizarBeneficiosRadarOferta(produtoEnriquecido);
 
       return {
         ok: true,
         resolucao,
         oferta: {
-          ...produtoKabum,
-          marketplace: produtoKabum.marketplace || "kabum",
+          ...produtoEnriquecido,
+          ...beneficioRadar,
+          marketplace: produtoEnriquecido.marketplace || "kabum",
           linkOriginal: linkOriginalLimpo,
           linkCapturado: resolucao.urlCapturada,
           linkResolvidoRadar: resolucao.urlResolvida,
@@ -4462,13 +4556,24 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
         resolucao
       };
     }
+    const produtoEnriquecido = await enriquecerBeneficioRadarOferta({
+      ...(resultado.body || {}),
+      marketplace: resultado.body?.marketplace || marketplaceDetectado,
+      linkOriginal: linkOriginalLimpo
+    }, {
+      origem: "radar",
+      marketplace: marketplaceDetectado,
+      linkOriginal: linkOriginalLimpo
+    });
+    const beneficioRadar = normalizarBeneficiosRadarOferta(produtoEnriquecido);
 
     return {
       ok: true,
       resolucao,
       oferta: {
-        ...(resultado.body || {}),
-        marketplace: resultado.body?.marketplace || marketplaceDetectado,
+        ...produtoEnriquecido,
+        ...beneficioRadar,
+        marketplace: produtoEnriquecido.marketplace || marketplaceDetectado,
         linkOriginal: linkOriginalLimpo,
         linkCapturado: resolucao.urlCapturada,
         linkResolvidoRadar: resolucao.urlResolvida,
@@ -4806,9 +4911,15 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     ...(ofertaBase || {}),
     ...origemMonitorada.origem
   });
-  const cupomRadar = normalizarCupomRadar(ofertaPreparada);
+  const cupomRadar = normalizarBeneficiosRadarOferta(ofertaPreparada);
   ofertaPreparada.cupom = cupomRadar.cupom;
   ofertaPreparada.avisoCupom = cupomRadar.avisoCupom;
+  ofertaPreparada.tipoCupom = cupomRadar.tipoCupom;
+  ofertaPreparada.valorCupom = cupomRadar.valorCupom;
+  ofertaPreparada.percentualCupom = cupomRadar.percentualCupom;
+  ofertaPreparada.descontoPix = cupomRadar.descontoPix;
+  ofertaPreparada.descontoApp = cupomRadar.descontoApp;
+  ofertaPreparada.beneficioExtra = cupomRadar.beneficioExtra;
   ofertaPreparada.cupomConfirmado = cupomRadar.cupomConfirmado;
   ofertaPreparada.possivelCupom = cupomRadar.possivelCupom;
   ofertaPreparada.categoria = categoriaRadarReclassificada(ofertaPreparada);
@@ -4959,6 +5070,13 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     origemSessaoId: origemMonitorada.origem.origemSessaoId,
     origemTipo: origemMonitorada.origem.origemTipo,
     coletadoDe: origemMonitorada.origem.origemGrupoNome || origemMonitorada.origem.origemGrupoId,
+    avisoCupom: cupomRadar.avisoCupom,
+    tipoCupom: cupomRadar.tipoCupom,
+    valorCupom: cupomRadar.valorCupom,
+    percentualCupom: cupomRadar.percentualCupom,
+    descontoPix: cupomRadar.descontoPix,
+    descontoApp: cupomRadar.descontoApp,
+    beneficioExtra: cupomRadar.beneficioExtra,
     cupomConfirmado: cupomRadar.cupomConfirmado,
     possivelCupom: cupomRadar.possivelCupom,
     destinosEnviados: [],
@@ -5293,7 +5411,7 @@ app.get("/radar", (req, res) => {
       .filter((oferta) => origemOfertaEstaMonitoradaRadar(oferta, radarConfig).ok)
       .map((oferta) => {
         const origem = obterOrigemOfertaRadar(oferta);
-        const cupomRadar = normalizarCupomRadar(oferta);
+        const cupomRadar = normalizarBeneficiosRadarOferta(oferta);
         const categoria = categoriaRadarReclassificada(oferta);
         const dataEntradaRadar = dataHoraRadarOferta(oferta);
         const capturadaEm = dataHoraRadarOferta({
@@ -5329,11 +5447,20 @@ app.get("/radar", (req, res) => {
           descontoPercentual: radar.descontoPercentual,
           cupom: cupomRadar.cupom,
           avisoCupom: cupomRadar.avisoCupom,
+          tipoCupom: cupomRadar.tipoCupom,
+          valorCupom: cupomRadar.valorCupom,
+          percentualCupom: cupomRadar.percentualCupom,
+          descontoPix: cupomRadar.descontoPix,
+          descontoApp: cupomRadar.descontoApp,
+          beneficioExtra: cupomRadar.beneficioExtra,
           cupomConfirmado: cupomRadar.cupomConfirmado,
           possivelCupom: cupomRadar.possivelCupom,
           linkOriginal: oferta.linkOriginal || "",
           link: oferta.link || "",
           linkAfiliado: oferta.linkAfiliado || "",
+          radarScore: radar.radarScore,
+          radarNivel: radar.nivel,
+          radarDecisao: radar.decisao,
           radar: {
             radarScore: radar.radarScore,
             nivel: radar.nivel,
