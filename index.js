@@ -3346,6 +3346,207 @@ function lerFilasRadarSomenteLeitura() {
   return itens;
 }
 
+function normalizarMarketplaceRadar(marketplace = "") {
+  const mp = normalizarTexto(marketplace || "");
+  return mp === "kabum" ? "awin" : mp;
+}
+
+function destinosClienteNormalizados(clienteId = "admin") {
+  const destinosCliente = destinosPorCliente?.[clienteId];
+
+  if (Array.isArray(destinosCliente)) {
+    return destinosCliente;
+  }
+
+  return Object.values(destinosCliente || {})
+    .filter(Array.isArray)
+    .flat();
+}
+
+function clienteAceitaMarketplaceAtivo(clienteId = "admin", marketplace = "") {
+  const configCliente = configsPorCliente?.[clienteId] || {};
+  const regraCliente = configCliente.marketplaces?.[marketplace];
+
+  return regraCliente?.ativo !== false;
+}
+
+function existeDestinoCompativelRadar(clienteId = "admin", oferta = {}) {
+  const destinosCliente = destinosClienteNormalizados(clienteId);
+
+  return destinosCliente.some(destino =>
+    destinoAceitaOferta(destino, oferta)
+  );
+}
+
+async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admin") {
+  const usuario = usuarios.find(u => String(u.id) === String(clienteId));
+
+  if (!usuario || usuario.ativo === false) {
+    return { ok: false, motivo: "cliente_inativo_ou_inexistente" };
+  }
+
+  let ofertaPreparada = prepararOfertaGlobal({
+    ...(ofertaBase || {})
+  });
+
+  const marketplaceOriginal = normalizarTexto(
+    ofertaPreparada.marketplace ||
+    ofertaPreparada.mercado ||
+    ofertaBase.marketplace ||
+    ""
+  );
+  const marketplace = normalizarMarketplaceRadar(marketplaceOriginal);
+
+  if (!marketplace) {
+    return { ok: false, motivo: "marketplace_ausente" };
+  }
+
+  ofertaPreparada.marketplace = marketplace;
+
+  if (marketplaceOriginal && marketplaceOriginal !== marketplace) {
+    ofertaPreparada.marketplaceOriginalRadar = marketplaceOriginal;
+  }
+
+  if (!usuarioPodeReceberMarketplace(usuario, marketplace)) {
+    return { ok: false, motivo: "marketplace_nao_permitido_no_plano" };
+  }
+
+  if (!clienteAceitaMarketplaceAtivo(clienteId, marketplace)) {
+    return { ok: false, motivo: "marketplace_desativado_no_cliente" };
+  }
+
+  if (!usuarioTemIntegracaoMarketplace(clienteId, marketplace)) {
+    return { ok: false, motivo: "integracao_marketplace_ausente" };
+  }
+
+  const radar = avaliarOfertaRadar(ofertaPreparada);
+  const temCupomForte = Boolean(
+    ofertaPreparada.cupom ||
+    ofertaPreparada.avisoCupom ||
+    radar.temCupom ||
+    radar.temAvisoCupom
+  );
+  const tipoRadar = temCupomForte ? "radarComCupom" : "radarSemCupom";
+  const prioridadeFila = temCupomForte ? 80 : 40;
+  const linkOriginal =
+    ofertaPreparada.linkOriginal ||
+    ofertaPreparada.link ||
+    ofertaPreparada.linkAfiliado ||
+    "";
+
+  if (!linkOriginal) {
+    return { ok: false, motivo: "link_original_ausente" };
+  }
+
+  const linkAfiliadoCliente = await gerarLinkAfiliadoCliente(
+    clienteId,
+    marketplace,
+    linkOriginal,
+    ofertaPreparada
+  );
+
+  if (!linkAfiliadoCliente) {
+    return { ok: false, motivo: "link_afiliado_nao_gerado" };
+  }
+
+  if (String(linkAfiliadoCliente).trim() === String(linkOriginal).trim()) {
+    return { ok: false, motivo: "link_afiliado_igual_original" };
+  }
+
+  const agoraBR = new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  });
+
+  const ofertaCliente = {
+    ...ofertaPreparada,
+    clienteId,
+    origem: "radar",
+    radar: true,
+    tipoRadar,
+    prioridadeFila,
+    marketplace,
+    linkOriginal,
+    linkAfiliado: linkAfiliadoCliente,
+    link: linkAfiliadoCliente,
+    linkFinal: linkAfiliadoCliente,
+    status: "pendente",
+    statusDetalhe: temCupomForte
+      ? "Radar: cupom detectado"
+      : "Radar: oportunidade",
+    destinosEnviados: [],
+    logsEnvio: [],
+    enviadoEm: "",
+    dataEnvio: "",
+    radarScore: radar.radarScore,
+    radarNivel: radar.nivel,
+    radarDecisao: radar.decisao,
+    radarMotivos: radar.motivos,
+    radarAlertas: radar.alertas,
+    dataEntradaRadar: agoraBR,
+    dataEntradaFila: agoraBR,
+    criadoEm: ofertaPreparada.criadoEm || agoraBR
+  };
+
+  if (!existeDestinoCompativelRadar(clienteId, ofertaCliente)) {
+    return { ok: false, motivo: "sem_destino_compativel" };
+  }
+
+  if (ofertaJaExiste(ofertaCliente)) {
+    return { ok: false, motivo: "oferta_duplicada" };
+  }
+
+  if (deveIgnorarOfertaRepetida(ofertaCliente)) {
+    return { ok: false, motivo: "oferta_repetida_na_memoria" };
+  }
+
+  return { ok: true, oferta: ofertaCliente };
+}
+
+async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin") {
+  const preparado = await prepararOfertaRadarParaCliente(ofertaBase, clienteId);
+
+  if (!preparado.ok) {
+    return preparado;
+  }
+
+  const oferta = preparado.oferta;
+  const pendentesRadar = fila.filter(item =>
+    String(item.clienteId || "admin") === String(clienteId) &&
+    item.status === "pendente" &&
+    item.origem === "radar"
+  );
+
+  const totalRadar = pendentesRadar.length;
+  const totalComCupom = pendentesRadar.filter(item =>
+    item.tipoRadar === "radarComCupom"
+  ).length;
+  const totalSemCupom = pendentesRadar.filter(item =>
+    item.tipoRadar === "radarSemCupom"
+  ).length;
+
+  if (totalRadar >= 10) {
+    return { ok: false, motivo: "limite_radar_pendente_total" };
+  }
+
+  if (oferta.tipoRadar === "radarComCupom" && totalComCupom >= 4) {
+    return { ok: false, motivo: "limite_radar_com_cupom" };
+  }
+
+  if (oferta.tipoRadar === "radarSemCupom" && totalSemCupom >= 6) {
+    return { ok: false, motivo: "limite_radar_sem_cupom" };
+  }
+
+  fila.push(oferta);
+  registrarOfertaVista(oferta);
+  salvarFila(clienteId);
+
+  return {
+    ok: true,
+    adicionada: true,
+    oferta
+  };
+}
+
 app.get("/radar", (req, res) => {
   try {
     if (req.usuario?.papel !== "admin_master") {
@@ -3396,6 +3597,40 @@ app.get("/radar", (req, res) => {
     return res.status(500).json({
       ok: false,
       erro: e.message
+    });
+  }
+});
+
+app.post("/radar/adicionar-fila", async (req, res) => {
+  try {
+    if (req.usuario?.papel !== "admin_master") {
+      return res.status(403).json({
+        ok: false,
+        motivo: "acesso_restrito_admin_master"
+      });
+    }
+
+    const clienteId = String(req.body?.clienteId || "admin");
+    const oferta = req.body?.oferta || {};
+
+    const resultado = await adicionarRadarNaFilaCliente(oferta, clienteId);
+
+    if (!resultado.ok) {
+      return res.json({
+        ok: false,
+        motivo: resultado.motivo
+      });
+    }
+
+    return res.json({
+      ok: true,
+      adicionada: true,
+      oferta: resultado.oferta
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      motivo: e.message
     });
   }
 });
