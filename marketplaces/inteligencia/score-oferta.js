@@ -68,7 +68,7 @@ function calcularScoreOferta(oferta = {}) {
     motivos.push("cupom confirmado");
   }
 
-  if (oferta.cupomDetectadoTexto || oferta.cupomOrigem === "mensagem") {
+  if (oferta.cupomDetectadoTexto || oferta.cupomOrigem === "mensagem" || oferta.cupomOrigem === "texto_grupo") {
     score += 30;
     motivos.push("cupom detectado no texto");
   }
