@@ -3803,10 +3803,24 @@ function montarEventoPreviewRadar(evento = {}) {
 function registrarPreviewRadar(clienteId = "admin", evento = {}) {
   try {
     const eventos = lerPreviewRadar(clienteId);
-    eventos.push(montarEventoPreviewRadar(evento));
+    const eventoPreview = montarEventoPreviewRadar(evento);
+    eventos.push(eventoPreview);
     salvarPreviewRadar(clienteId, eventos);
+    console.log("[RADAR-DECISAO] preview registrado", {
+      clienteId,
+      status: eventoPreview.status,
+      motivo: eventoPreview.motivo || "",
+      grupo: eventoPreview.origemGrupoNome || eventoPreview.origemGrupoId || "",
+      titulo: eventoPreview.titulo || "",
+      cupom: eventoPreview.cupom || "",
+      linkCapturado: eventoPreview.linkCapturado || ""
+    });
   } catch (e) {
     console.log("[RADAR] Falha ao registrar preview:", e.message);
+    console.log("[RADAR-DECISAO] preview falhou", {
+      clienteId,
+      erro: e.message
+    });
   }
 }
 
@@ -3851,8 +3865,21 @@ function registrarHistoricoRadar(clienteId = "admin", evento = {}) {
     });
     salvarHistoricoRadar(clienteId, eventos);
     registrarPreviewRadar(clienteId, eventoPreview);
+    console.log("[RADAR-DECISAO] historico registrado", {
+      clienteId,
+      status: eventoPreview.status,
+      motivo: eventoPreview.motivo || "",
+      grupo: eventoPreview.origemGrupoNome || eventoPreview.origemGrupoId || "",
+      titulo: eventoPreview.titulo || "",
+      cupom: eventoPreview.cupom || "",
+      linkCapturado: eventoPreview.linkCapturado || ""
+    });
   } catch (e) {
     console.log("[RADAR] Falha ao registrar historico:", e.message);
+    console.log("[RADAR-DECISAO] historico falhou", {
+      clienteId,
+      erro: e.message
+    });
   }
 }
 
@@ -5312,7 +5339,15 @@ function oportunidadeRadarBoa(oferta = {}, radar = {}, cupomRadar = {}) {
 async function resolverLinkOriginalRadar(url = "") {
   const capturada = limparLinkRadar(url);
 
+  console.log("[RADAR-LINK] resolver inicio", {
+    capturada
+  });
+
   if (!capturada) {
+    console.log("[RADAR-LINK] resolver falhou", {
+      motivo: "link_original_nao_resolvido",
+      capturada
+    });
     return { ok: false, motivo: "link_original_nao_resolvido" };
   }
 
@@ -5337,10 +5372,23 @@ async function resolverLinkOriginalRadar(url = "") {
       ? limparUrlProdutoRadar(resolvida, marketplaceReal)
       : "";
 
+    console.log("[RADAR-LINK] redirecionamento resolvido", {
+      capturada,
+      resolvida,
+      marketplaceReal,
+      linkOriginalLimpo
+    });
+
     if (marketplaceReal === "mercadolivre" && isUrlIntermediariaMercadoLivreRadar(linkOriginalLimpo || resolvida)) {
       const produtoMl = await extrairProdutoMercadoLivreIntermediarioRadar(resolvida);
 
       if (!produtoMl) {
+        console.log("[RADAR-LINK] resolver falhou", {
+          motivo: "link_produto_ml_nao_encontrado",
+          capturada,
+          resolvida,
+          marketplaceReal
+        });
         return {
           ok: false,
           motivo: "link_produto_ml_nao_encontrado",
@@ -5351,9 +5399,22 @@ async function resolverLinkOriginalRadar(url = "") {
       }
 
       linkOriginalLimpo = limparUrlProdutoRadar(produtoMl, "mercadolivre");
+      console.log("[RADAR-LINK] produto ML extraido", {
+        capturada,
+        resolvida,
+        produtoMl,
+        linkOriginalLimpo
+      });
     }
 
     if (!resolvida || !marketplaceReal || marketplaceReal === "awin" || !linkOriginalLimpo) {
+      console.log("[RADAR-LINK] resolver falhou", {
+        motivo: "link_original_nao_resolvido",
+        capturada,
+        resolvida: resolvida || "",
+        marketplaceReal: marketplaceReal || "",
+        linkOriginalLimpo
+      });
       return {
         ok: false,
         motivo: "link_original_nao_resolvido",
@@ -5363,6 +5424,13 @@ async function resolverLinkOriginalRadar(url = "") {
       };
     }
 
+    console.log("[RADAR-LINK] resolver sucesso", {
+      capturada,
+      resolvida,
+      marketplaceReal,
+      linkOriginalLimpo
+    });
+
     return {
       ok: true,
       urlCapturada: capturada,
@@ -5371,6 +5439,10 @@ async function resolverLinkOriginalRadar(url = "") {
       linkOriginalLimpo
     };
   } catch (e) {
+    console.log("[RADAR-LINK] resolver erro", {
+      capturada,
+      erro: e.message
+    });
     return {
       ok: false,
       motivo: "link_original_nao_resolvido",
@@ -5556,7 +5628,7 @@ async function processarMensagemRadar({
   const grupoNomeTexto = textoRadarId(grupoNome);
   const sessaoIdTexto = textoRadarId(sessaoId || (origemTipoFinal === "telegram" ? "telegram" : ""));
 
-  console.log("[RADAR] mensagem recebida", {
+  console.log("[RADAR-CAPTURA] mensagem recebida", {
     origemTipo: origemTipoFinal || origemTipo,
     sessaoId: sessaoIdTexto,
     grupoId: grupoIdTexto,
@@ -5565,6 +5637,10 @@ async function processarMensagemRadar({
   });
 
   if (!["whatsapp", "telegram"].includes(origemTipoFinal)) {
+    console.log("[RADAR-CAPTURA] rejeitada", {
+      motivo: "origem_tipo_invalida",
+      origemTipo
+    });
     logRadarRejeitado("origem_tipo_invalida", {
       origemTipo
     });
@@ -5572,6 +5648,10 @@ async function processarMensagemRadar({
   }
 
   if (!grupoIdTexto) {
+    console.log("[RADAR-CAPTURA] rejeitada", {
+      motivo: "grupo_ou_chat_ausente",
+      origemTipo: origemTipoFinal
+    });
     logRadarRejeitado("grupo_ou_chat_ausente", {
       origemTipo: origemTipoFinal
     });
@@ -5579,12 +5659,23 @@ async function processarMensagemRadar({
   }
 
   const links = extrairLinksRadar(texto);
+  console.log("[RADAR-LINK] links detectados", {
+    total: links.length,
+    links,
+    origemTipo: origemTipoFinal,
+    grupo: grupoNomeTexto || grupoIdTexto
+  });
   console.log(`[RADAR] links detectados: ${links.length}`, {
     origemTipo: origemTipoFinal,
     grupo: grupoNomeTexto || grupoIdTexto
   });
 
   if (!links.length) {
+    console.log("[RADAR-LINK] rejeitada", {
+      motivo: "sem_links",
+      origemTipo: origemTipoFinal,
+      grupo: grupoNomeTexto || grupoIdTexto
+    });
     logRadarRejeitado("sem_links", {
       origemTipo: origemTipoFinal,
       grupo: grupoNomeTexto || grupoIdTexto
@@ -5593,6 +5684,14 @@ async function processarMensagemRadar({
   }
 
   const beneficiosMensagem = analisarBeneficiosMensagemRadar(texto, links);
+  console.log("[RADAR-CUPOM] resultado extracao mensagem", {
+    cupom: beneficiosMensagem.cupom || "",
+    cupomOrigem: beneficiosMensagem.cupomOrigem || "",
+    tipoCupom: beneficiosMensagem.tipoCupom || "",
+    beneficioExtra: beneficiosMensagem.beneficioExtra || "",
+    linkResgateCupom: beneficiosMensagem.linkResgateCupom || "",
+    linksResgate: beneficiosMensagem.linksResgate || []
+  });
   if (beneficiosMensagem.cupom || beneficiosMensagem.linkResgateCupom || beneficiosMensagem.beneficioExtra) {
     console.log("[RADAR] cupom detectado", {
       cupom: beneficiosMensagem.cupom || "",
@@ -5607,6 +5706,11 @@ async function processarMensagemRadar({
   const capturaPermitida = radarPodeCapturarAgora(radarConfig);
 
   if (!capturaPermitida.ok) {
+    console.log("[RADAR-CAPTURA] rejeitada", {
+      motivo: capturaPermitida.motivo,
+      origemTipo: origemTipoFinal,
+      grupo: grupoNomeTexto || grupoIdTexto
+    });
     logRadarRejeitado(capturaPermitida.motivo, {
       origemTipo: origemTipoFinal,
       grupo: grupoNomeTexto || grupoIdTexto
@@ -5627,6 +5731,13 @@ async function processarMensagemRadar({
   const origemMonitorada = origemOfertaEstaMonitoradaRadar(origemBase, radarConfig);
 
   if (!origemMonitorada.ok) {
+    console.log("[RADAR-CAPTURA] grupo nao monitorado", {
+      motivo: origemMonitorada.motivo,
+      origemTipo: origemTipoFinal,
+      sessaoId: sessaoIdTexto,
+      grupoId: grupoIdTexto,
+      grupoNome: grupoNomeTexto
+    });
     logRadarRejeitado(origemMonitorada.motivo, {
       origemTipo: origemTipoFinal,
       grupo: grupoNomeTexto || grupoIdTexto
@@ -5634,7 +5745,7 @@ async function processarMensagemRadar({
     return { ok: false, motivo: origemMonitorada.motivo };
   }
 
-  console.log("[RADAR] grupo monitorado confirmado", {
+  console.log("[RADAR-CAPTURA] grupo monitorado confirmado", {
     origemTipo: origemTipoFinal,
     sessaoId: sessaoIdTexto,
     grupoId: grupoIdTexto,
@@ -5647,7 +5758,10 @@ async function processarMensagemRadar({
   });
 
   for (const link of links) {
-    console.log("[RADAR] link capturado", { url: link });
+    console.log("[RADAR-LINK] link capturado", {
+      url: link,
+      grupo: grupoNomeTexto || grupoIdTexto
+    });
     const linkEhResgate = beneficiosMensagem.linksResgate.includes(link);
 
     if (linkEhResgate && links.length > beneficiosMensagem.linksResgate.length) {
@@ -5672,7 +5786,7 @@ async function processarMensagemRadar({
         motivo: "link_resgate_cupom_detectado",
         linksDetectados: 1
       });
-      console.log("[RADAR] link de resgate detectado", {
+      console.log("[RADAR-CUPOM] link de resgate detectado", {
         link,
         tipoCupom: "resgate"
       });
@@ -5687,6 +5801,13 @@ async function processarMensagemRadar({
     });
 
     if (!importacao.ok) {
+      console.log("[RADAR-IMPORTACAO] falhou", {
+        motivo: importacao.motivo || "importacao_falhou",
+        link,
+        urlResolvida: importacao.resolucao?.urlResolvida || "",
+        linkOriginal: importacao.resolucao?.linkOriginalLimpo || "",
+        marketplace: importacao.resolucao?.marketplaceReal || ""
+      });
       console.log("[RADAR] importação falhou:", {
         motivo: importacao.motivo || "importacao_falhou",
         link,
@@ -5723,6 +5844,17 @@ async function processarMensagemRadar({
       continue;
     }
 
+    console.log("[RADAR-IMPORTACAO] sucesso", {
+      linkCapturado: link,
+      urlResolvida: importacao.resolucao?.urlResolvida || "",
+      linkOriginal: importacao.resolucao?.linkOriginalLimpo || importacao.oferta?.linkOriginal || "",
+      marketplace: importacao.oferta?.marketplace || importacao.resolucao?.marketplaceReal || "",
+      titulo: importacao.oferta?.titulo || importacao.oferta?.nome || "",
+      preco: importacao.oferta?.precoAtual || importacao.oferta?.preco || "",
+      categoria: importacao.oferta?.categoria || "",
+      cupomImportado: importacao.oferta?.cupom || "",
+      cupomMensagem: beneficiosMensagem.cupom || ""
+    });
     console.log("[RADAR] URL resolvida", {
       capturada: importacao.resolucao?.urlCapturada || link,
       resolvida: importacao.resolucao?.urlResolvida || ""
@@ -5764,6 +5896,16 @@ async function processarMensagemRadar({
       dataEntradaRadar: dataCaptura
     });
 
+    console.log("[RADAR-CUPOM] oferta preparada", {
+      titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
+      cupom: ofertaRadar.cupom || "",
+      avisoCupom: ofertaRadar.avisoCupom || "",
+      tipoCupom: ofertaRadar.tipoCupom || "",
+      cupomOrigem: ofertaRadar.cupomOrigem || "",
+      beneficioExtra: ofertaRadar.beneficioExtra || "",
+      linkResgateCupom: ofertaRadar.linkResgateCupom || ""
+    });
+
     const clientes = await adicionarRadarCapturadoNaFilaClientes(ofertaRadar, {
       radarConfigFontes: radarConfig
     });
@@ -5775,6 +5917,16 @@ async function processarMensagemRadar({
       .filter(cliente => cliente.adicionada)
       .map(cliente => cliente.clienteId)
       .filter(Boolean);
+
+    console.log("[RADAR-DECISAO] distribuicao concluida", {
+      linkCapturado: importacao.resolucao?.urlCapturada || link,
+      titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
+      marketplace: ofertaRadar.marketplace || "",
+      cupom: ofertaRadar.cupom || "",
+      clientesAnalisados: clientes.length,
+      adicionadas: adicionadasLink,
+      primeiraRejeicao: primeiraRejeicao || ""
+    });
 
     registrarHistoricoRadar(adminMasterId, {
       origemTipo: origemTipoFinal,
@@ -5841,8 +5993,26 @@ async function processarMensagemRadar({
 
 async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {}) {
   const remoteJid = mensagem?.key?.remoteJid || "";
+  const textoExtraido = extrairTextoMensagemRadar(mensagem);
+  const conteudo = extrairMensagemInternaRadar(mensagem?.message || {});
+  const tiposMensagem = Object.keys(conteudo || {});
+
+  console.log("[RADAR-CAPTURA] upsert whatsapp", {
+    sessaoId,
+    remoteJid,
+    fromMe: Boolean(mensagem?.key?.fromMe),
+    isGrupo: String(remoteJid || "").endsWith("@g.us"),
+    tiposMensagem,
+    tamanhoTexto: textoExtraido.length
+  });
 
   if (!remoteJid || !remoteJid.endsWith("@g.us") || mensagem?.key?.fromMe) {
+    console.log("[RADAR-CAPTURA] mensagem nao monitoravel", {
+      sessaoId,
+      remoteJid,
+      fromMe: Boolean(mensagem?.key?.fromMe),
+      motivo: "mensagem_nao_monitoravel"
+    });
     return { ok: false, motivo: "mensagem_nao_monitoravel" };
   }
 
@@ -5851,7 +6021,7 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
     sessaoId,
     grupoId: remoteJid,
     grupoNome: obterNomeGrupoRadar(sessaoId, remoteJid),
-    texto: extrairTextoMensagemRadar(mensagem),
+    texto: textoExtraido,
     raw: mensagem
   });
 }
@@ -5913,6 +6083,15 @@ function existeDestinoCompativelRadar(clienteId = "admin", oferta = {}) {
   return destinosCliente.some(destino =>
     destinoAceitaOferta(destino, oferta)
   );
+}
+
+function itemContaComoPendenteRadar(item = {}) {
+  if (!item || typeof item !== "object") return false;
+  if (item.removidaRadar || item.ocultadaRadar) return false;
+  if (item.radarPendenteAnalise === true) return true;
+  if (String(item.statusRadar || "") === "pendente_analise") return true;
+
+  return false;
 }
 
 async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admin", opcoes = {}) {
@@ -6007,12 +6186,38 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     nivel: radar.nivel,
     decisao: radar.decisao
   });
+  console.log("[RADAR-SCORE]", {
+    clienteId,
+    titulo: ofertaPreparada.titulo || ofertaPreparada.nome || "",
+    marketplace,
+    categoria: ofertaPreparada.categoria || "",
+    cupom: ofertaPreparada.cupom || "",
+    cupomOrigem: ofertaPreparada.cupomOrigem || "",
+    tipoCupom: ofertaPreparada.tipoCupom || "",
+    cupomConfirmado: Boolean(cupomRadar.cupomConfirmado),
+    possivelCupom: Boolean(cupomRadar.possivelCupom),
+    score: radar.radarScore,
+    nivel: radar.nivel,
+    decisao: radar.decisao,
+    motivos: radar.motivos || [],
+    alertas: radar.alertas || []
+  });
   console.log("[RADAR] tipoRadar", {
     clienteId,
     tipoRadar
   });
+  console.log("[RADAR-SCORE] tipoRadar", {
+    clienteId,
+    tipoRadar,
+    origemTipoRadar: temCupomForte ? "cupomConfirmado" : "semCupomConfirmado"
+  });
 
   if (!linkOriginal) {
+    console.log("[RADAR-DECISAO]", {
+      clienteId,
+      aprovado: false,
+      motivo: "link_original_ausente"
+    });
     console.log("[RADAR] aprovado/reprovado", {
       clienteId,
       aprovado: false,
@@ -6022,6 +6227,16 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   }
 
   if (!oportunidadeRadarBoa(ofertaPreparada, radar, cupomRadar)) {
+    console.log("[RADAR-DECISAO]", {
+      clienteId,
+      aprovado: false,
+      motivo: "oferta_sem_cupom_ou_desconto_relevante",
+      score: radar.radarScore,
+      decisao: radar.decisao,
+      desconto: percentualDescontoRadar(ofertaPreparada, radar),
+      cupom: ofertaPreparada.cupom || "",
+      cupomConfirmado: Boolean(cupomRadar.cupomConfirmado)
+    });
     console.log("[RADAR] aprovado/reprovado", {
       clienteId,
       aprovado: false,
@@ -6041,6 +6256,11 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   );
 
   if (!linkAfiliadoCliente) {
+    console.log("[RADAR-DECISAO]", {
+      clienteId,
+      aprovado: false,
+      motivo: "link_afiliado_nao_gerado"
+    });
     console.log("[RADAR] aprovado/reprovado", {
       clienteId,
       aprovado: false,
@@ -6050,6 +6270,11 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   }
 
   if (String(linkAfiliadoCliente).trim() === String(linkOriginal).trim()) {
+    console.log("[RADAR-DECISAO]", {
+      clienteId,
+      aprovado: false,
+      motivo: "link_afiliado_igual_original"
+    });
     console.log("[RADAR] aprovado/reprovado", {
       clienteId,
       aprovado: false,
@@ -6074,6 +6299,9 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     clienteId,
     origem: "radar",
     radar: true,
+    radarNaFila: true,
+    statusRadar: "fila",
+    radarPendenteAnalise: false,
     tipoRadar,
     prioridadeFila,
     marketplace,
@@ -6117,6 +6345,13 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   };
 
   if (!existeDestinoCompativelRadar(clienteId, ofertaCliente)) {
+    console.log("[RADAR-DECISAO]", {
+      clienteId,
+      aprovado: false,
+      motivo: "sem_destino_compativel",
+      categoria: ofertaCliente.categoria || "",
+      marketplace: ofertaCliente.marketplace || ""
+    });
     console.log("[RADAR] aprovado/reprovado", {
       clienteId,
       aprovado: false,
@@ -6126,6 +6361,11 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   }
 
   if (ofertaJaExiste(ofertaCliente)) {
+    console.log("[RADAR-DECISAO]", {
+      clienteId,
+      aprovado: false,
+      motivo: "oferta_duplicada"
+    });
     console.log("[RADAR] aprovado/reprovado", {
       clienteId,
       aprovado: false,
@@ -6135,6 +6375,11 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   }
 
   if (deveIgnorarOfertaRepetida(ofertaCliente)) {
+    console.log("[RADAR-DECISAO]", {
+      clienteId,
+      aprovado: false,
+      motivo: "oferta_repetida_na_memoria"
+    });
     console.log("[RADAR] aprovado/reprovado", {
       clienteId,
       aprovado: false,
@@ -6148,6 +6393,15 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     aprovado: true,
     decisao: radar.decisao
   });
+  console.log("[RADAR-DECISAO]", {
+    clienteId,
+    aprovado: true,
+    decisao: radar.decisao,
+    tipoRadar,
+    cupom: ofertaCliente.cupom || "",
+    linkOriginal,
+    linkAfiliado: linkAfiliadoCliente
+  });
 
   return { ok: true, oferta: ofertaCliente };
 }
@@ -6160,11 +6414,11 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
   }
 
   const oferta = preparado.oferta;
-  const pendentesRadar = fila.filter(item =>
+  const itensFilaRadarCliente = fila.filter(item =>
     String(item.clienteId || "admin") === String(clienteId) &&
-    item.status === "pendente" &&
     item.origem === "radar"
   );
+  const pendentesRadar = itensFilaRadarCliente.filter(itemContaComoPendenteRadar);
 
   const totalRadar = pendentesRadar.length;
   const totalComCupom = pendentesRadar.filter(item =>
@@ -6173,8 +6427,29 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
   const totalSemCupom = pendentesRadar.filter(item =>
     item.tipoRadar === "radarSemCupom"
   ).length;
+  const totalRadarNaFilaNormal = itensFilaRadarCliente.filter(item =>
+    item.status === "pendente" &&
+    (item.radarNaFila === true || String(item.statusRadar || "") === "fila" || !item.statusRadar)
+  ).length;
+
+  console.log("[RADAR-LIMITE] pendentes analisados", {
+    clienteId,
+    totalRadar,
+    totalComCupom,
+    totalSemCupom,
+    totalRadarNaFilaNormal,
+    regra: "conta_apenas_statusRadar_pendente_analise"
+  });
 
   if (totalRadar >= 10) {
+    console.log("[RADAR-DECISAO]", {
+      clienteId,
+      aprovado: false,
+      motivo: "limite_radar_pendente_total",
+      totalRadar,
+      totalComCupom,
+      totalSemCupom
+    });
     console.log("[RADAR] aprovado/reprovado", {
       clienteId,
       aprovado: false,
@@ -6184,6 +6459,14 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
   }
 
   if (oferta.tipoRadar === "radarComCupom" && totalComCupom >= 4) {
+    console.log("[RADAR-DECISAO]", {
+      clienteId,
+      aprovado: false,
+      motivo: "limite_radar_com_cupom",
+      totalRadar,
+      totalComCupom,
+      totalSemCupom
+    });
     console.log("[RADAR] aprovado/reprovado", {
       clienteId,
       aprovado: false,
@@ -6193,6 +6476,14 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
   }
 
   if (oferta.tipoRadar === "radarSemCupom" && totalSemCupom >= 6) {
+    console.log("[RADAR-DECISAO]", {
+      clienteId,
+      aprovado: false,
+      motivo: "limite_radar_sem_cupom",
+      totalRadar,
+      totalComCupom,
+      totalSemCupom
+    });
     console.log("[RADAR] aprovado/reprovado", {
       clienteId,
       aprovado: false,
