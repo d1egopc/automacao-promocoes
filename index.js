@@ -3754,6 +3754,15 @@ function normalizarStatusPreviewRadar(status = "") {
   return "erro";
 }
 
+function normalizarStatusOperacionalRadar(status = "") {
+  const statusPreview = normalizarStatusPreviewRadar(status);
+  if (statusPreview === "adicionado_fila") return "fila";
+  if (statusPreview === "ignorado") return "ignorada";
+  if (statusPreview === "erro") return "erro";
+  if (statusPreview === "detectado" || statusPreview === "importado") return "detectada";
+  return "erro";
+}
+
 function montarEventoPreviewRadar(evento = {}) {
   const criadoEm = evento.criadoEm || new Date().toISOString();
   const dataHora = evento.dataHora || dataHoraRadarAgora();
@@ -3774,8 +3783,12 @@ function montarEventoPreviewRadar(evento = {}) {
     origemGrupoNome: evento.origemGrupoNome || "",
     textoResumo: resumirMensagemRadar(evento.textoResumo || evento.mensagemResumo || evento.texto || ""),
     mensagemResumo: resumirMensagemRadar(evento.mensagemResumo || evento.textoResumo || evento.texto || ""),
+    imagem: evento.imagem || evento.image || evento.foto || evento.thumbnail || "",
+    image: evento.imagem || evento.image || evento.foto || evento.thumbnail || "",
     linkCapturado: evento.linkCapturado || "",
     linkOriginal: evento.linkOriginal || "",
+    linkAfiliado: evento.linkAfiliado || "",
+    idOfertaFila: evento.idOfertaFila || evento.ofertaFilaId || "",
     linksDetectados: Number(evento.linksDetectados || 1) || 1,
     marketplace: evento.marketplace || "",
     titulo: evento.titulo || "",
@@ -3794,8 +3807,12 @@ function montarEventoPreviewRadar(evento = {}) {
     beneficioExtra,
     beneficio: beneficioExtra,
     status: normalizarStatusPreviewRadar(evento.status),
+    statusRadar: evento.statusRadar || normalizarStatusOperacionalRadar(evento.status),
     motivo: evento.motivo || "",
     clienteIdsAdicionados,
+    clientesAdicionados: Array.isArray(evento.clientesAdicionados)
+      ? evento.clientesAdicionados
+      : clienteIdsAdicionados.map(clienteId => ({ clienteId })),
     adicionadas: Number(evento.adicionadas || clienteIdsAdicionados.length || 0) || 0
   };
 }
@@ -3839,8 +3856,11 @@ function registrarHistoricoRadar(clienteId = "admin", evento = {}) {
       origemGrupoNome: evento.origemGrupoNome || "",
       textoResumo: eventoPreview.textoResumo,
       mensagemResumo: eventoPreview.mensagemResumo,
+      imagem: eventoPreview.imagem,
       linkCapturado: evento.linkCapturado || "",
       linkOriginal: evento.linkOriginal || "",
+      linkAfiliado: evento.linkAfiliado || "",
+      idOfertaFila: evento.idOfertaFila || "",
       marketplace: evento.marketplace || "",
       titulo: evento.titulo || "",
       preco: evento.preco || evento.precoAtual || "",
@@ -3858,10 +3878,12 @@ function registrarHistoricoRadar(clienteId = "admin", evento = {}) {
       beneficioExtra: eventoPreview.beneficioExtra,
       beneficio: eventoPreview.beneficio,
       status: evento.status || "erro",
+      statusRadar: evento.statusRadar || eventoPreview.statusRadar,
       motivo: evento.motivo || "",
       linksDetectados: Number(evento.linksDetectados || 1) || 1,
       adicionadas: Number(evento.adicionadas || 0) || 0,
-      clienteIdsAdicionados: eventoPreview.clienteIdsAdicionados
+      clienteIdsAdicionados: eventoPreview.clienteIdsAdicionados,
+      clientesAdicionados: eventoPreview.clientesAdicionados
     });
     salvarHistoricoRadar(clienteId, eventos);
     registrarPreviewRadar(clienteId, eventoPreview);
@@ -5606,7 +5628,11 @@ async function adicionarRadarCapturadoNaFilaClientes(ofertaBase = {}, opcoes = {
       clienteId,
       ok: !!resultado.ok,
       motivo: resultado.motivo || "",
-      adicionada: !!resultado.adicionada
+      adicionada: !!resultado.adicionada,
+      idOfertaFila: resultado.oferta?.id || "",
+      linkAfiliado: resultado.oferta?.linkAfiliado || resultado.oferta?.linkFinal || resultado.oferta?.link || "",
+      statusRadar: resultado.oferta?.statusRadar || "",
+      statusFila: resultado.oferta?.status || ""
     });
   }
 
@@ -5783,6 +5809,7 @@ async function processarMensagemRadar({
         beneficioExtra: beneficiosMensagem.beneficioExtra || link,
         linkResgateCupom: beneficiosMensagem.linkResgateCupom || link,
         status: "detectado",
+        statusRadar: "detectada",
         motivo: "link_resgate_cupom_detectado",
         linksDetectados: 1
       });
@@ -5837,6 +5864,7 @@ async function processarMensagemRadar({
         beneficioExtra: beneficiosMensagem.beneficioExtra || "",
         linkResgateCupom: beneficiosMensagem.linkResgateCupom || "",
         status: "erro",
+        statusRadar: "erro",
         motivo: importacao.motivo || "importacao_falhou",
         linksDetectados: 1
       });
@@ -5917,6 +5945,16 @@ async function processarMensagemRadar({
       .filter(cliente => cliente.adicionada)
       .map(cliente => cliente.clienteId)
       .filter(Boolean);
+    const clientesAdicionados = clientes
+      .filter(cliente => cliente.adicionada)
+      .map(cliente => ({
+        clienteId: cliente.clienteId,
+        idOfertaFila: cliente.idOfertaFila || "",
+        linkAfiliado: cliente.linkAfiliado || "",
+        statusRadar: cliente.statusRadar || "fila",
+        statusFila: cliente.statusFila || "pendente"
+      }));
+    const primeiraFila = clientesAdicionados[0] || {};
 
     console.log("[RADAR-DECISAO] distribuicao concluida", {
       linkCapturado: importacao.resolucao?.urlCapturada || link,
@@ -5935,8 +5973,11 @@ async function processarMensagemRadar({
       origemGrupoNome: grupoNomeTexto,
       capturadaEm: dataCaptura,
       mensagemResumo: texto,
+      imagem: ofertaRadar.imagem || ofertaRadar.image || ofertaRadar.foto || "",
       linkCapturado: importacao.resolucao?.urlCapturada || link,
       linkOriginal: ofertaRadar.linkOriginal || "",
+      linkAfiliado: primeiraFila.linkAfiliado || "",
+      idOfertaFila: primeiraFila.idOfertaFila || "",
       marketplace: ofertaRadar.marketplace || "",
       titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
       preco: ofertaRadar.precoAtual || ofertaRadar.preco || "",
@@ -5954,10 +5995,12 @@ async function processarMensagemRadar({
       beneficioExtra: ofertaRadar.beneficioExtra || beneficio,
       beneficio,
       status: adicionadasLink > 0 ? "fila" : "ignorada",
+      statusRadar: adicionadasLink > 0 ? "fila" : "ignorada",
       motivo: adicionadasLink > 0 ? "" : primeiraRejeicao || "nenhum_cliente_adicionado",
       linksDetectados: 1,
       adicionadas: adicionadasLink,
-      clienteIdsAdicionados
+      clienteIdsAdicionados,
+      clientesAdicionados
     });
 
     resultados.push({
@@ -6873,6 +6916,9 @@ app.get("/radar", (req, res) => {
     const clienteId = String(req.query?.clienteId || getClienteId(req) || "admin");
     const radarConfig = carregarRadarConfigCliente(clienteId);
     const descartesRadar = lerDescartesRadar(clienteId);
+    const historicoOperacional = montarResumoHistoricoRadar(clienteId, {
+      limit: req.query?.limit || 50
+    }).eventos;
 
     if (!temFontesMonitoradasRadar(radarConfig)) {
       return res.json({
@@ -6880,7 +6926,9 @@ app.get("/radar", (req, res) => {
         total: 0,
         aviso: "Nenhum grupo monitorado configurado para o Radar.",
         clienteId,
-        oportunidades: []
+        oportunidades: [],
+        historicoOperacional,
+        ultimasOfertasProcessadas: historicoOperacional
       });
     }
 
@@ -6916,10 +6964,11 @@ app.get("/radar", (req, res) => {
 
         return {
           id: oferta.id || "",
+          idOfertaFila: oferta.id || oferta.idOfertaFila || "",
           titulo: oferta.titulo || oferta.nome || "",
           dataEntradaRadar,
           capturadaEm,
-          imagem: oferta.imagem || "",
+          imagem: oferta.imagem || oferta.image || oferta.foto || "",
           marketplace: oferta.marketplace || oferta.mercado || "",
           categoria: radar.categoria,
           precoAtual: oferta.precoAtual || oferta.preco || "",
@@ -6940,6 +6989,8 @@ app.get("/radar", (req, res) => {
           linkOriginal: oferta.linkOriginal || "",
           link: oferta.link || "",
           linkAfiliado: oferta.linkAfiliado || "",
+          statusRadar: oferta.statusRadar || (oferta.radarNaFila || oferta.status === "pendente" ? "fila" : normalizarStatusOperacionalRadar(oferta.status || "")),
+          motivo: oferta.motivo || oferta.statusDetalhe || "",
           radarScore: radar.radarScore,
           radarNivel: radar.nivel,
           radarDecisao: radar.decisao,
@@ -6965,7 +7016,9 @@ app.get("/radar", (req, res) => {
       ok: true,
       total: oportunidades.length,
       clienteId,
-      oportunidades: oportunidades.slice(0, 50)
+      oportunidades: oportunidades.slice(0, 50),
+      historicoOperacional,
+      ultimasOfertasProcessadas: historicoOperacional
     });
   } catch (e) {
     return res.status(500).json({
