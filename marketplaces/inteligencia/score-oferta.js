@@ -62,10 +62,28 @@ function calcularScoreOferta(oferta = {}) {
     motivos.push("desconto acima de 10%");
   }
 
-  // cupom
-  if (oferta.cupom || oferta.avisoCupom) {
+  // cupom e beneficios reais do Radar
+  if (oferta.cupom) {
+    score += 40;
+    motivos.push("cupom confirmado");
+  }
+
+  if (oferta.cupomDetectadoTexto || oferta.cupomOrigem === "mensagem") {
+    score += 30;
+    motivos.push("cupom detectado no texto");
+  }
+
+  if (oferta.tipoCupom === "resgate" || oferta.linkResgateCupom) {
+    score += 25;
+    motivos.push("link de resgate de cupom");
+  }
+
+  if (oferta.beneficioExtra || oferta.descontoPix || oferta.descontoApp) {
     score += 15;
-    motivos.push("tem cupom/aviso");
+    motivos.push("beneficio real");
+  } else if (oferta.avisoCupom) {
+    score += 15;
+    motivos.push("tem aviso de cupom");
   }
 
   // categoria quente
