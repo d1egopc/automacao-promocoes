@@ -6791,6 +6791,57 @@ app.get("/teste-kabum-rota", (req, res) => {
   return res.json({ ok: true, rota: "kabum ativa" });
 });
 
+async function importarKabumManualRequest(req, res, opcoes = {}) {
+  try {
+    const clienteId = getClienteId(req);
+    const body = req.body || {};
+    const url = String(body.url || body.link || body.linkOriginal || "").trim();
+
+    if (!url) {
+      return res.status(400).json({
+        ok: false,
+        erro: "URL obrigatória"
+      });
+    }
+
+    if (!/kabum\.com\.br/i.test(url)) {
+      return res.status(400).json({
+        ok: false,
+        erro: "Informe uma URL da KaBuM"
+      });
+    }
+
+    const produto = await importarProdutoKabumViaAwin(
+      url,
+      clienteId,
+      {
+        gerarDeepLinkAwin
+      }
+    );
+
+    return res.json({
+      ok: true,
+      teste: opcoes.teste === true,
+      ...produto
+    });
+  } catch (e) {
+    console.error("[ERRO] KABUM IMPORTAR:", e.message);
+
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+}
+
+app.post("/kabum/importar", (req, res) => {
+  return importarKabumManualRequest(req, res);
+});
+
+app.post("/kabum/importar-teste", (req, res) => {
+  return importarKabumManualRequest(req, res, { teste: true });
+});
+
 app.post("/awin/gerar-link", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
