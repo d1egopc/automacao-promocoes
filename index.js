@@ -3583,6 +3583,10 @@ function getRadarHistoricoFile(clienteId = "admin") {
   return path.join(getClienteDir(clienteId), "radar-historico.json");
 }
 
+function getRadarPreviewFile(clienteId = "admin") {
+  return path.join(getClienteDir(clienteId), "radar-preview.json");
+}
+
 function lerHistoricoRadar(clienteId = "admin") {
   const arquivo = getRadarHistoricoFile(clienteId);
 
@@ -3596,8 +3600,27 @@ function lerHistoricoRadar(clienteId = "admin") {
   }
 }
 
+function lerPreviewRadar(clienteId = "admin") {
+  const arquivo = getRadarPreviewFile(clienteId);
+
+  try {
+    if (!fs.existsSync(arquivo)) return [];
+    const dados = JSON.parse(fs.readFileSync(arquivo, "utf8") || "[]");
+    return Array.isArray(dados) ? dados : [];
+  } catch (e) {
+    console.log("[RADAR] Falha ao ler preview:", e.message);
+    return [];
+  }
+}
+
 function salvarHistoricoRadar(clienteId = "admin", eventos = []) {
   const arquivo = getRadarHistoricoFile(clienteId);
+  const ultimos = Array.isArray(eventos) ? eventos.slice(-200) : [];
+  fs.writeFileSync(arquivo, JSON.stringify(ultimos, null, 2));
+}
+
+function salvarPreviewRadar(clienteId = "admin", eventos = []) {
+  const arquivo = getRadarPreviewFile(clienteId);
   const ultimos = Array.isArray(eventos) ? eventos.slice(-200) : [];
   fs.writeFileSync(arquivo, JSON.stringify(ultimos, null, 2));
 }
@@ -3622,32 +3645,109 @@ function beneficioResumoRadar(oferta = {}) {
   );
 }
 
+function dataHoraRadarAgora() {
+  return new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  });
+}
+
+function normalizarStatusPreviewRadar(status = "") {
+  const texto = normalizarTexto(status);
+  if (texto === "fila" || texto === "adicionado_fila" || texto === "adicionada_fila") return "adicionado_fila";
+  if (texto === "ignorada" || texto === "ignorado") return "ignorado";
+  if (texto === "importado") return "importado";
+  if (texto === "detectado") return "detectado";
+  return "erro";
+}
+
+function montarEventoPreviewRadar(evento = {}) {
+  const criadoEm = evento.criadoEm || new Date().toISOString();
+  const dataHora = evento.dataHora || dataHoraRadarAgora();
+  const beneficioExtra = evento.beneficioExtra || evento.beneficio || "";
+  const clienteIdsAdicionados = Array.isArray(evento.clienteIdsAdicionados)
+    ? evento.clienteIdsAdicionados.filter(Boolean).map(String)
+    : [];
+
+  return {
+    id: evento.id || `radar_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    dataHora,
+    criadoEm,
+    capturadaEm: evento.capturadaEm || dataHora,
+    origemTipo: evento.origemTipo || "",
+    origemSessaoId: evento.origemSessaoId || "",
+    origemGrupoId: evento.origemGrupoId || "",
+    origemGrupoNome: evento.origemGrupoNome || "",
+    textoResumo: resumirMensagemRadar(evento.textoResumo || evento.mensagemResumo || evento.texto || ""),
+    mensagemResumo: resumirMensagemRadar(evento.mensagemResumo || evento.textoResumo || evento.texto || ""),
+    linkCapturado: evento.linkCapturado || "",
+    linkOriginal: evento.linkOriginal || "",
+    linksDetectados: Number(evento.linksDetectados || 1) || 1,
+    marketplace: evento.marketplace || "",
+    titulo: evento.titulo || "",
+    preco: evento.preco || evento.precoAtual || "",
+    categoria: evento.categoria || "",
+    cupom: evento.cupom || "",
+    avisoCupom: evento.avisoCupom || "",
+    tipoCupom: evento.tipoCupom || "",
+    cupomOrigem: evento.cupomOrigem || "",
+    cupomDetectadoTexto: Boolean(evento.cupomDetectadoTexto),
+    linkResgateCupom: evento.linkResgateCupom || "",
+    beneficioExtra,
+    beneficio: beneficioExtra,
+    status: normalizarStatusPreviewRadar(evento.status),
+    motivo: evento.motivo || "",
+    clienteIdsAdicionados,
+    adicionadas: Number(evento.adicionadas || clienteIdsAdicionados.length || 0) || 0
+  };
+}
+
+function registrarPreviewRadar(clienteId = "admin", evento = {}) {
+  try {
+    const eventos = lerPreviewRadar(clienteId);
+    eventos.push(montarEventoPreviewRadar(evento));
+    salvarPreviewRadar(clienteId, eventos);
+  } catch (e) {
+    console.log("[RADAR] Falha ao registrar preview:", e.message);
+  }
+}
+
 function registrarHistoricoRadar(clienteId = "admin", evento = {}) {
   try {
     const eventos = lerHistoricoRadar(clienteId);
+    const eventoPreview = montarEventoPreviewRadar(evento);
     eventos.push({
-      id: `radar_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      dataHora: new Date().toLocaleString("pt-BR", {
-        timeZone: "America/Sao_Paulo"
-      }),
-      criadoEm: new Date().toISOString(),
+      id: eventoPreview.id,
+      dataHora: eventoPreview.dataHora,
+      criadoEm: eventoPreview.criadoEm,
+      capturadaEm: eventoPreview.capturadaEm,
       origemTipo: evento.origemTipo || "",
       origemSessaoId: evento.origemSessaoId || "",
       origemGrupoId: evento.origemGrupoId || "",
       origemGrupoNome: evento.origemGrupoNome || "",
-      mensagemResumo: resumirMensagemRadar(evento.mensagemResumo || evento.texto || ""),
+      textoResumo: eventoPreview.textoResumo,
+      mensagemResumo: eventoPreview.mensagemResumo,
       linkCapturado: evento.linkCapturado || "",
       linkOriginal: evento.linkOriginal || "",
       marketplace: evento.marketplace || "",
       titulo: evento.titulo || "",
+      preco: evento.preco || evento.precoAtual || "",
+      categoria: evento.categoria || "",
       cupom: evento.cupom || "",
-      beneficio: evento.beneficio || "",
+      avisoCupom: eventoPreview.avisoCupom,
+      tipoCupom: eventoPreview.tipoCupom,
+      cupomOrigem: eventoPreview.cupomOrigem,
+      cupomDetectadoTexto: eventoPreview.cupomDetectadoTexto,
+      linkResgateCupom: eventoPreview.linkResgateCupom,
+      beneficioExtra: eventoPreview.beneficioExtra,
+      beneficio: eventoPreview.beneficio,
       status: evento.status || "erro",
       motivo: evento.motivo || "",
       linksDetectados: Number(evento.linksDetectados || 1) || 1,
-      adicionadas: Number(evento.adicionadas || 0) || 0
+      adicionadas: Number(evento.adicionadas || 0) || 0,
+      clienteIdsAdicionados: eventoPreview.clienteIdsAdicionados
     });
     salvarHistoricoRadar(clienteId, eventos);
+    registrarPreviewRadar(clienteId, eventoPreview);
   } catch (e) {
     console.log("[RADAR] Falha ao registrar historico:", e.message);
   }
@@ -3689,9 +3789,29 @@ function chaveFonteHistoricoRadar(fonte = {}) {
   ].join(":");
 }
 
+function dataRadarEhHoje(valor = "", hoje = "") {
+  if (!valor) return false;
+  const texto = String(valor);
+  if (hoje && texto.includes(hoje)) return true;
+
+  const data = new Date(texto);
+  if (Number.isNaN(data.getTime())) return false;
+
+  return data.toLocaleDateString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  }) === hoje;
+}
+
 function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
   const configRadar = carregarRadarConfigCliente(clienteId);
-  const eventos = lerHistoricoRadar(clienteId);
+  const eventosPreview = lerPreviewRadar(clienteId);
+  const eventosHistorico = lerHistoricoRadar(clienteId);
+  const eventosPorId = new Map();
+  for (const evento of [...eventosHistorico, ...eventosPreview]) {
+    const chaveEvento = evento.id || `${evento.criadoEm || evento.dataHora || ""}:${evento.origemTipo || ""}:${evento.origemSessaoId || ""}:${evento.origemGrupoId || ""}:${evento.linkCapturado || evento.linkOriginal || evento.titulo || ""}`;
+    eventosPorId.set(chaveEvento, evento);
+  }
+  const eventos = [...eventosPorId.values()];
   const hoje = new Date().toLocaleDateString("pt-BR", {
     timeZone: "America/Sao_Paulo"
   });
@@ -3702,12 +3822,20 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
     if (!chave.endsWith(":")) {
       mapa.set(chave, {
         ...fonte,
+        tipo: fonte.origemTipo || "",
+        grupoId: fonte.origemGrupoId || "",
+        grupoNome: fonte.origemGrupoNome || "",
+        ultimaCaptura: "",
         ultimaMensagemCapturada: "",
         ultimaOfertaCapturada: "",
+        linksHoje: 0,
         linksDetectadosHoje: 0,
+        adicionadasFila: 0,
         ofertasAdicionadasFila: 0,
+        comCupom: 0,
         comCupomBeneficio: 0,
         ignoradas: 0,
+        erros: 0,
         principalMotivoRejeicao: "",
         totalEventos: 0
       });
@@ -3741,25 +3869,40 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
     const resumo = mapa.get(chave);
     if (!resumo) continue;
 
+    const status = normalizarStatusPreviewRadar(evento.status);
+    const dataEvento = evento.capturadaEm || evento.dataHora || evento.criadoEm || "";
+    const textoResumo = evento.textoResumo || evento.mensagemResumo || "";
+    const beneficio = evento.cupom || evento.beneficioExtra || evento.beneficio || evento.descontoPix || evento.descontoApp || "";
+    const adicionadas = Number(evento.adicionadas || (Array.isArray(evento.clienteIdsAdicionados) ? evento.clienteIdsAdicionados.length : 0) || 0) || 0;
+
     resumo.totalEventos += 1;
-    resumo.ultimaMensagemCapturada = evento.mensagemResumo || resumo.ultimaMensagemCapturada;
+    resumo.ultimaCaptura = dataEvento || resumo.ultimaCaptura;
+    resumo.ultimaMensagemCapturada = textoResumo || resumo.ultimaMensagemCapturada;
     resumo.ultimaOfertaCapturada = evento.titulo || resumo.ultimaOfertaCapturada;
 
-    if (String(evento.dataHora || "").includes(hoje)) {
+    if (dataRadarEhHoje(dataEvento, hoje)) {
       resumo.linksDetectadosHoje += Number(evento.linksDetectados || 1) || 1;
+      resumo.linksHoje = resumo.linksDetectadosHoje;
     }
 
-    if (evento.status === "fila") {
-      resumo.ofertasAdicionadasFila += Number(evento.adicionadas || 1) || 1;
-    } else {
+    if (status === "adicionado_fila") {
+      resumo.ofertasAdicionadasFila += adicionadas || 1;
+      resumo.adicionadasFila = resumo.ofertasAdicionadasFila;
+    } else if (status === "ignorado") {
       resumo.ignoradas += 1;
       const motivo = evento.motivo || "nao_informado";
       motivos[chave] = motivos[chave] || {};
       motivos[chave][motivo] = (motivos[chave][motivo] || 0) + 1;
+    } else if (status === "erro") {
+      resumo.erros += 1;
+      const motivo = evento.motivo || "erro";
+      motivos[chave] = motivos[chave] || {};
+      motivos[chave][motivo] = (motivos[chave][motivo] || 0) + 1;
     }
 
-    if (evento.cupom || evento.beneficio) {
+    if (beneficio) {
       resumo.comCupomBeneficio += 1;
+      resumo.comCupom = resumo.comCupomBeneficio;
     }
   }
 
@@ -3771,15 +3914,19 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
 
   const grupoFiltro = chaveRadarId(opcoes.grupoId || "");
   const tipoFiltro = normalizarTexto(opcoes.origemTipo || "");
+  const sessaoFiltro = chaveRadarId(opcoes.sessaoId || "");
   const capturas = eventos
     .filter(evento => !grupoFiltro || chaveRadarId(evento.origemGrupoId || evento.origemGrupoNome) === grupoFiltro)
     .filter(evento => !tipoFiltro || normalizarTexto(evento.origemTipo) === tipoFiltro)
+    .filter(evento => !sessaoFiltro || chaveRadarId(evento.origemSessaoId || "") === sessaoFiltro)
     .slice(-Number(opcoes.limit || 20))
-    .reverse();
+    .reverse()
+    .map(evento => montarEventoPreviewRadar(evento));
 
   return {
     grupos: [...mapa.values()],
-    capturas
+    capturas,
+    eventos: capturas
   };
 }
 
@@ -4767,6 +4914,128 @@ function extrairLinksRadar(texto = "") {
   return [...unicos];
 }
 
+function normalizarCupomMensagemRadar(cupom = "") {
+  const codigo = String(cupom || "")
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9_-]/g, "")
+    .trim();
+
+  const bloqueados = new Set([
+    "CUPOM",
+    "CODIGO",
+    "PROMOCAO",
+    "PROMO",
+    "DESCONTO",
+    "PRODUTO",
+    "RESGATE",
+    "RESGATAR",
+    "SHOPEE",
+    "AMAZON",
+    "MERCADOLIVRE",
+    "MERCADOLIVRECOMBR"
+  ]);
+
+  if (!codigo || codigo.length < 4 || codigo.length > 40) return "";
+  if (bloqueados.has(codigo)) return "";
+  if (!/[A-Z]/.test(codigo) || !/[0-9]/.test(codigo)) {
+    if (!/(MELI|ML|SHOPEE|AMAZON|APP|OFF|GANHE|BLACK|OFERTA|DESCONTO)/.test(codigo)) return "";
+  }
+
+  return codigo;
+}
+
+function extrairCupomTextoRadar(texto = "") {
+  const fonte = String(texto || "");
+  const padroes = [
+    /(?:cupom|codigo|c[oó]digo|coupon)\s*[:\-]?\s*([A-Z0-9][A-Z0-9_-]{3,39})/gi,
+    /(?:use|usar|aplique|aplicar|utilize|resgate|resgatar)\s+(?:o\s+)?(?:cupom|codigo|c[oó]digo)?\s*([A-Z0-9][A-Z0-9_-]{3,39})/gi,
+    /\b([A-Z0-9]{4,30}(?:OFF|APP|ML|MELI|SHOPEE|AMAZON|GANHE|BLACK|OFERTA)[A-Z0-9_-]*)\b/gi
+  ];
+
+  for (const regex of padroes) {
+    let match;
+    while ((match = regex.exec(fonte))) {
+      const cupom = normalizarCupomMensagemRadar(match[1]);
+      if (cupom) return cupom;
+    }
+  }
+
+  return "";
+}
+
+function trechoProximoLinkRadar(texto = "", link = "") {
+  const fonte = String(texto || "");
+  const alvo = String(link || "");
+  const linhas = fonte.split(/\r?\n/);
+
+  for (let i = 0; i < linhas.length; i++) {
+    if (linhas[i].includes(alvo)) {
+      return [
+        linhas[Math.max(0, i - 1)] || "",
+        linhas[i] || "",
+        linhas[Math.min(linhas.length - 1, i + 1)] || ""
+      ].join(" ");
+    }
+  }
+
+  const indice = fonte.indexOf(alvo);
+  if (indice < 0) return fonte.slice(0, 500);
+
+  return fonte.slice(Math.max(0, indice - 180), Math.min(fonte.length, indice + alvo.length + 180));
+}
+
+function textoIndicaResgateCupomRadar(texto = "") {
+  const normalizado = normalizarTexto(texto);
+  return (
+    normalizado.includes("resgate") ||
+    normalizado.includes("resgatar") ||
+    normalizado.includes("pegarcupom") ||
+    normalizado.includes("coletarcupom") ||
+    normalizado.includes("cupomdapagina") ||
+    normalizado.includes("cuponsdestapagina") ||
+    normalizado.includes("todososcupons") ||
+    normalizado.includes("pagina decupons")
+  );
+}
+
+function analisarBeneficiosMensagemRadar(texto = "", links = []) {
+  const cupom = extrairCupomTextoRadar(texto);
+  const linksResgate = [];
+  const beneficiosPorLink = {};
+
+  for (const link of links) {
+    const trecho = trechoProximoLinkRadar(texto, link);
+    const resgate = textoIndicaResgateCupomRadar(trecho);
+
+    if (resgate) {
+      linksResgate.push(link);
+      beneficiosPorLink[link] = {
+        tipoCupom: "resgate",
+        beneficioExtra: link,
+        avisoCupom: "Link de resgate de cupom detectado na mensagem",
+        linkResgateCupom: link
+      };
+    }
+  }
+
+  const beneficioResgate = linksResgate[0] || "";
+  const beneficioExtra = beneficioResgate || (normalizarTexto(texto).includes("fretegratis") ? "Frete gratis" : "");
+
+  return {
+    cupom,
+    cupomOrigem: cupom ? "mensagem" : "",
+    cupomDetectadoTexto: Boolean(cupom),
+    tipoCupom: cupom ? "texto" : (beneficioResgate ? "resgate" : ""),
+    beneficioExtra,
+    avisoCupom: cupom ? `Cupom detectado na mensagem: ${cupom}` : (beneficioResgate ? "Link de resgate de cupom detectado na mensagem" : ""),
+    linkResgateCupom: beneficioResgate,
+    linksResgate,
+    beneficiosPorLink
+  };
+}
+
 function obterNomeGrupoRadar(sessaoId = "", grupoId = "") {
   const grupos = gruposPorSessao[sessaoId] || [];
   const grupo = grupos.find(g =>
@@ -5289,6 +5558,16 @@ async function processarMensagemRadar({
     return { ok: false, motivo: "sem_links" };
   }
 
+  const beneficiosMensagem = analisarBeneficiosMensagemRadar(texto, links);
+  if (beneficiosMensagem.cupom || beneficiosMensagem.linkResgateCupom || beneficiosMensagem.beneficioExtra) {
+    console.log("[RADAR] cupom detectado", {
+      cupom: beneficiosMensagem.cupom || "",
+      tipoCupom: beneficiosMensagem.tipoCupom || "",
+      beneficioExtra: beneficiosMensagem.beneficioExtra || "",
+      linksResgate: beneficiosMensagem.linksResgate.length
+    });
+  }
+
   const adminMasterId = obterClienteIdAdminMaster();
   const radarConfig = carregarRadarConfigCliente(adminMasterId);
   const capturaPermitida = radarPodeCapturarAgora(radarConfig);
@@ -5335,6 +5614,36 @@ async function processarMensagemRadar({
 
   for (const link of links) {
     console.log("[RADAR] link capturado", { url: link });
+    const linkEhResgate = beneficiosMensagem.linksResgate.includes(link);
+
+    if (linkEhResgate && links.length > beneficiosMensagem.linksResgate.length) {
+      registrarHistoricoRadar(adminMasterId, {
+        origemTipo: origemTipoFinal,
+        origemSessaoId: sessaoIdTexto,
+        origemGrupoId: grupoIdTexto,
+        origemGrupoNome: grupoNomeTexto,
+        capturadaEm: dataCaptura,
+        mensagemResumo: texto,
+        linkCapturado: link,
+        linkOriginal: "",
+        marketplace: detectarMarketplaceRadarLink(link) || "",
+        cupom: beneficiosMensagem.cupom || "",
+        avisoCupom: beneficiosMensagem.avisoCupom || "",
+        tipoCupom: "resgate",
+        cupomOrigem: beneficiosMensagem.cupomOrigem || "",
+        cupomDetectadoTexto: Boolean(beneficiosMensagem.cupomDetectadoTexto),
+        beneficioExtra: beneficiosMensagem.beneficioExtra || link,
+        linkResgateCupom: beneficiosMensagem.linkResgateCupom || link,
+        status: "detectado",
+        motivo: "link_resgate_cupom_detectado",
+        linksDetectados: 1
+      });
+      console.log("[RADAR] link de resgate detectado", {
+        link,
+        tipoCupom: "resgate"
+      });
+      continue;
+    }
 
     const importacao = await importarOfertaRadarPorLink(link, {
       origemTipo: origemTipoFinal,
@@ -5360,10 +5669,18 @@ async function processarMensagemRadar({
         origemSessaoId: sessaoIdTexto,
         origemGrupoId: grupoIdTexto,
         origemGrupoNome: grupoNomeTexto,
+        capturadaEm: dataCaptura,
         mensagemResumo: texto,
         linkCapturado: link,
         linkOriginal: importacao.resolucao?.linkOriginalLimpo || "",
         marketplace: importacao.resolucao?.marketplaceReal || "",
+        cupom: beneficiosMensagem.cupom || "",
+        avisoCupom: beneficiosMensagem.avisoCupom || "",
+        tipoCupom: beneficiosMensagem.tipoCupom || "",
+        cupomOrigem: beneficiosMensagem.cupomOrigem || "",
+        cupomDetectadoTexto: Boolean(beneficiosMensagem.cupomDetectadoTexto),
+        beneficioExtra: beneficiosMensagem.beneficioExtra || "",
+        linkResgateCupom: beneficiosMensagem.linkResgateCupom || "",
         status: "erro",
         motivo: importacao.motivo || "importacao_falhou",
         linksDetectados: 1
@@ -5390,6 +5707,13 @@ async function processarMensagemRadar({
 
     const ofertaRadar = prepararOfertaGlobal({
       ...importacao.oferta,
+      cupom: importacao.oferta?.cupom || beneficiosMensagem.cupom || "",
+      avisoCupom: importacao.oferta?.avisoCupom || beneficiosMensagem.avisoCupom || "",
+      tipoCupom: importacao.oferta?.tipoCupom || beneficiosMensagem.tipoCupom || "",
+      beneficioExtra: importacao.oferta?.beneficioExtra || beneficiosMensagem.beneficioExtra || "",
+      linkResgateCupom: importacao.oferta?.linkResgateCupom || beneficiosMensagem.linkResgateCupom || "",
+      cupomOrigem: importacao.oferta?.cupomOrigem || beneficiosMensagem.cupomOrigem || "",
+      cupomDetectadoTexto: Boolean(importacao.oferta?.cupomDetectadoTexto || beneficiosMensagem.cupomDetectadoTexto),
       ...origemBase,
       origemClienteId: adminMasterId,
       origem: "radar",
@@ -5412,23 +5736,37 @@ async function processarMensagemRadar({
     const adicionadasLink = clientes.filter(cliente => cliente.adicionada).length;
     const primeiraRejeicao = clientes.find(cliente => !cliente.adicionada)?.motivo || "";
     const beneficio = beneficioResumoRadar(ofertaRadar);
+    const clienteIdsAdicionados = clientes
+      .filter(cliente => cliente.adicionada)
+      .map(cliente => cliente.clienteId)
+      .filter(Boolean);
 
     registrarHistoricoRadar(adminMasterId, {
       origemTipo: origemTipoFinal,
       origemSessaoId: sessaoIdTexto,
       origemGrupoId: grupoIdTexto,
       origemGrupoNome: grupoNomeTexto,
+      capturadaEm: dataCaptura,
       mensagemResumo: texto,
       linkCapturado: importacao.resolucao?.urlCapturada || link,
       linkOriginal: ofertaRadar.linkOriginal || "",
       marketplace: ofertaRadar.marketplace || "",
       titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
+      preco: ofertaRadar.precoAtual || ofertaRadar.preco || "",
+      categoria: ofertaRadar.categoria || "",
       cupom: ofertaRadar.cupom || "",
+      avisoCupom: ofertaRadar.avisoCupom || "",
+      tipoCupom: ofertaRadar.tipoCupom || "",
+      cupomOrigem: ofertaRadar.cupomOrigem || "",
+      cupomDetectadoTexto: Boolean(ofertaRadar.cupomDetectadoTexto),
+      linkResgateCupom: ofertaRadar.linkResgateCupom || "",
+      beneficioExtra: ofertaRadar.beneficioExtra || beneficio,
       beneficio,
       status: adicionadasLink > 0 ? "fila" : "ignorada",
       motivo: adicionadasLink > 0 ? "" : primeiraRejeicao || "nenhum_cliente_adicionado",
       linksDetectados: 1,
-      adicionadas: adicionadasLink
+      adicionadas: adicionadasLink,
+      clienteIdsAdicionados
     });
 
     resultados.push({
@@ -6046,6 +6384,7 @@ app.get("/radar/historico", (req, res) => {
     const resumo = montarResumoHistoricoRadar(clienteId, {
       grupoId: req.query?.grupoId || "",
       origemTipo: req.query?.origemTipo || "",
+      sessaoId: req.query?.sessaoId || "",
       limit: req.query?.limit || 20
     });
 
@@ -6053,6 +6392,89 @@ app.get("/radar/historico", (req, res) => {
       ok: true,
       clienteId,
       grupos: resumo.grupos,
+      capturas: resumo.capturas,
+      eventos: resumo.eventos,
+      limite: 200
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
+
+app.get("/radar/preview", (req, res) => {
+  try {
+    if (req.usuario?.papel !== "admin_master") {
+      return res.status(403).json({
+        ok: false,
+        erro: "Acesso restrito ao admin_master"
+      });
+    }
+
+    const clienteId = getClienteId(req);
+
+    if (!clienteId) {
+      return res.status(401).json({
+        ok: false,
+        erro: "Cliente nao autenticado"
+      });
+    }
+
+    const resumo = montarResumoHistoricoRadar(clienteId, {
+      grupoId: req.query?.grupoId || "",
+      origemTipo: req.query?.origemTipo || "",
+      sessaoId: req.query?.sessaoId || "",
+      limit: req.query?.limit || 20
+    });
+
+    return res.json({
+      ok: true,
+      clienteId,
+      grupos: resumo.grupos,
+      eventos: resumo.eventos,
+      capturas: resumo.capturas,
+      limite: 200
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
+
+app.get("/radar/preview/:grupoId", (req, res) => {
+  try {
+    if (req.usuario?.papel !== "admin_master") {
+      return res.status(403).json({
+        ok: false,
+        erro: "Acesso restrito ao admin_master"
+      });
+    }
+
+    const clienteId = getClienteId(req);
+
+    if (!clienteId) {
+      return res.status(401).json({
+        ok: false,
+        erro: "Cliente nao autenticado"
+      });
+    }
+
+    const resumo = montarResumoHistoricoRadar(clienteId, {
+      grupoId: req.params.grupoId || "",
+      origemTipo: req.query?.origemTipo || "",
+      sessaoId: req.query?.sessaoId || "",
+      limit: req.query?.limit || 20
+    });
+
+    return res.json({
+      ok: true,
+      clienteId,
+      grupos: resumo.grupos,
+      eventos: resumo.eventos,
       capturas: resumo.capturas,
       limite: 200
     });
