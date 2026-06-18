@@ -3588,6 +3588,10 @@ function getRadarPreviewFile(clienteId = "admin") {
   return path.join(getClienteDir(clienteId), "radar-preview.json");
 }
 
+function getRadarDescartesFile(clienteId = "admin") {
+  return path.join(getClienteDir(clienteId), "radar-descartes.json");
+}
+
 function lerHistoricoRadar(clienteId = "admin") {
   const arquivo = getRadarHistoricoFile(clienteId);
 
@@ -3614,6 +3618,22 @@ function lerPreviewRadar(clienteId = "admin") {
   }
 }
 
+function lerDescartesRadar(clienteId = "admin") {
+  const arquivo = getRadarDescartesFile(clienteId);
+
+  try {
+    if (!fs.existsSync(arquivo)) return { ids: [], chaves: [] };
+    const dados = JSON.parse(fs.readFileSync(arquivo, "utf8") || "{}");
+    return {
+      ids: Array.isArray(dados.ids) ? dados.ids.map(String) : [],
+      chaves: Array.isArray(dados.chaves) ? dados.chaves.map(String) : []
+    };
+  } catch (e) {
+    console.log("[RADAR] Falha ao ler descartes:", e.message);
+    return { ids: [], chaves: [] };
+  }
+}
+
 function salvarHistoricoRadar(clienteId = "admin", eventos = []) {
   const arquivo = getRadarHistoricoFile(clienteId);
   const ultimos = Array.isArray(eventos) ? eventos.slice(-200) : [];
@@ -3626,11 +3646,84 @@ function salvarPreviewRadar(clienteId = "admin", eventos = []) {
   fs.writeFileSync(arquivo, JSON.stringify(ultimos, null, 2));
 }
 
+function salvarDescartesRadar(clienteId = "admin", descartes = {}) {
+  const arquivo = getRadarDescartesFile(clienteId);
+  const ids = [...new Set(Array.isArray(descartes.ids) ? descartes.ids.map(String).filter(Boolean) : [])];
+  const chaves = [...new Set(Array.isArray(descartes.chaves) ? descartes.chaves.map(String).filter(Boolean) : [])];
+  fs.writeFileSync(arquivo, JSON.stringify({
+    ids,
+    chaves,
+    atualizadoEm: new Date().toISOString()
+  }, null, 2));
+}
+
 function resumirMensagemRadar(texto = "") {
   return String(texto || "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 220);
+}
+
+function numeroRadar(valor = "") {
+  if (typeof valor === "number") return Number.isFinite(valor) ? valor : 0;
+  const limpo = String(valor || "")
+    .replace(/[^\d,.-]/g, "")
+    .replace(/\.(?=\d{3}(?:\D|$))/g, "")
+    .replace(",", ".");
+  const numero = Number(limpo);
+  return Number.isFinite(numero) ? numero : 0;
+}
+
+function calcularEconomiaRadar(oferta = {}) {
+  const atual = numeroRadar(oferta.precoAtual || oferta.preco || oferta.precoFinal || "");
+  const antigo = numeroRadar(oferta.precoAntigo || oferta.precoDe || "");
+  const economiaValor = antigo > atual && atual > 0 ? Number((antigo - atual).toFixed(2)) : 0;
+  const economiaPercentual = economiaValor > 0 && antigo > 0 ? Math.round((economiaValor / antigo) * 100) : 0;
+
+  return {
+    economiaValor,
+    economiaPercentual
+  };
+}
+
+function chavesRemocaoRadar(oferta = {}) {
+  const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
+  return [
+    oferta.id ? `id:${oferta.id}` : "",
+    oferta.linkOriginal ? `link:${String(oferta.linkOriginal).toLowerCase()}` : "",
+    oferta.linkAfiliado ? `link:${String(oferta.linkAfiliado).toLowerCase()}` : "",
+    oferta.link ? `link:${String(oferta.link).toLowerCase()}` : "",
+    titulo ? `titulo:${titulo}` : ""
+  ].filter(Boolean);
+}
+
+function ofertaOcultadaRadar(oferta = {}, descartes = {}) {
+  if (oferta.removidaRadar || oferta.ocultadaRadar) return true;
+  const ids = new Set(Array.isArray(descartes.ids) ? descartes.ids.map(String) : []);
+  const chaves = new Set(Array.isArray(descartes.chaves) ? descartes.chaves.map(String) : []);
+  if (oferta.id && ids.has(String(oferta.id))) return true;
+  return chavesRemocaoRadar(oferta).some(chave => chaves.has(chave));
+}
+
+function registrarDescartesOportunidadesRadar(clienteId = "admin", oportunidades = []) {
+  const descartes = lerDescartesRadar(clienteId);
+  const ids = new Set(descartes.ids || []);
+  const chaves = new Set(descartes.chaves || []);
+
+  for (const oferta of oportunidades) {
+    if (!oferta || typeof oferta !== "object") continue;
+    if (oferta.id) ids.add(String(oferta.id));
+    for (const chave of chavesRemocaoRadar(oferta)) {
+      chaves.add(chave);
+    }
+  }
+
+  salvarDescartesRadar(clienteId, {
+    ids: [...ids],
+    chaves: [...chaves]
+  });
+
+  return oportunidades.length;
 }
 
 function beneficioResumoRadar(oferta = {}) {
@@ -3665,6 +3758,7 @@ function montarEventoPreviewRadar(evento = {}) {
   const criadoEm = evento.criadoEm || new Date().toISOString();
   const dataHora = evento.dataHora || dataHoraRadarAgora();
   const beneficioExtra = evento.beneficioExtra || evento.beneficio || "";
+  const economia = calcularEconomiaRadar(evento);
   const clienteIdsAdicionados = Array.isArray(evento.clienteIdsAdicionados)
     ? evento.clienteIdsAdicionados.filter(Boolean).map(String)
     : [];
@@ -3686,7 +3780,11 @@ function montarEventoPreviewRadar(evento = {}) {
     marketplace: evento.marketplace || "",
     titulo: evento.titulo || "",
     preco: evento.preco || evento.precoAtual || "",
+    precoAtual: evento.precoAtual || evento.preco || "",
+    precoAntigo: evento.precoAntigo || "",
     categoria: evento.categoria || "",
+    economiaValor: Number(evento.economiaValor ?? economia.economiaValor) || 0,
+    economiaPercentual: Number(evento.economiaPercentual ?? economia.economiaPercentual) || 0,
     cupom: evento.cupom || "",
     avisoCupom: evento.avisoCupom || "",
     tipoCupom: evento.tipoCupom || "",
@@ -3732,7 +3830,11 @@ function registrarHistoricoRadar(clienteId = "admin", evento = {}) {
       marketplace: evento.marketplace || "",
       titulo: evento.titulo || "",
       preco: evento.preco || evento.precoAtual || "",
+      precoAtual: eventoPreview.precoAtual,
+      precoAntigo: eventoPreview.precoAntigo,
       categoria: evento.categoria || "",
+      economiaValor: eventoPreview.economiaValor,
+      economiaPercentual: eventoPreview.economiaPercentual,
       cupom: evento.cupom || "",
       avisoCupom: eventoPreview.avisoCupom,
       tipoCupom: eventoPreview.tipoCupom,
@@ -3835,8 +3937,18 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
         ofertasAdicionadasFila: 0,
         comCupom: 0,
         comCupomBeneficio: 0,
+        cuponsDetectados: 0,
+        beneficiosDetectados: 0,
         ignoradas: 0,
         erros: 0,
+        totalCapturas: 0,
+        totalFila: 0,
+        totalIgnoradas: 0,
+        totalErros: 0,
+        economiaTotalGerada: 0,
+        economiaMedia: 0,
+        descontoMedioPercentual: 0,
+        scoreGrupo: 0,
         principalMotivoRejeicao: "",
         totalEventos: 0
       });
@@ -3875,8 +3987,11 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
     const textoResumo = evento.textoResumo || evento.mensagemResumo || "";
     const beneficio = evento.cupom || evento.beneficioExtra || evento.beneficio || evento.descontoPix || evento.descontoApp || "";
     const adicionadas = Number(evento.adicionadas || (Array.isArray(evento.clienteIdsAdicionados) ? evento.clienteIdsAdicionados.length : 0) || 0) || 0;
+    const economiaValor = Number(evento.economiaValor || 0) || 0;
+    const economiaPercentual = Number(evento.economiaPercentual || 0) || 0;
 
     resumo.totalEventos += 1;
+    resumo.totalCapturas = resumo.totalEventos;
     resumo.ultimaCaptura = dataEvento || resumo.ultimaCaptura;
     resumo.ultimaMensagemCapturada = textoResumo || resumo.ultimaMensagemCapturada;
     resumo.ultimaOfertaCapturada = evento.titulo || resumo.ultimaOfertaCapturada;
@@ -3889,13 +4004,16 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
     if (status === "adicionado_fila") {
       resumo.ofertasAdicionadasFila += adicionadas || 1;
       resumo.adicionadasFila = resumo.ofertasAdicionadasFila;
+      resumo.totalFila = resumo.ofertasAdicionadasFila;
     } else if (status === "ignorado") {
       resumo.ignoradas += 1;
+      resumo.totalIgnoradas = resumo.ignoradas;
       const motivo = evento.motivo || "nao_informado";
       motivos[chave] = motivos[chave] || {};
       motivos[chave][motivo] = (motivos[chave][motivo] || 0) + 1;
     } else if (status === "erro") {
       resumo.erros += 1;
+      resumo.totalErros = resumo.erros;
       const motivo = evento.motivo || "erro";
       motivos[chave] = motivos[chave] || {};
       motivos[chave][motivo] = (motivos[chave][motivo] || 0) + 1;
@@ -3905,12 +4023,41 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
       resumo.comCupomBeneficio += 1;
       resumo.comCupom = resumo.comCupomBeneficio;
     }
+
+    if (evento.cupom) resumo.cuponsDetectados += 1;
+    if (evento.beneficioExtra || evento.beneficio || evento.descontoPix || evento.descontoApp || evento.linkResgateCupom) {
+      resumo.beneficiosDetectados += 1;
+    }
+    resumo.economiaTotalGerada += economiaValor;
+    if (economiaPercentual > 0) {
+      resumo.__somaDescontoPercentual = (resumo.__somaDescontoPercentual || 0) + economiaPercentual;
+      resumo.__qtdDescontoPercentual = (resumo.__qtdDescontoPercentual || 0) + 1;
+    }
   }
 
   for (const [chave, resumo] of mapa.entries()) {
     const motivoMaisComum = Object.entries(motivos[chave] || {})
       .sort((a, b) => b[1] - a[1])[0]?.[0] || "";
     resumo.principalMotivoRejeicao = motivoMaisComum;
+    resumo.economiaTotalGerada = Number((resumo.economiaTotalGerada || 0).toFixed(2));
+    resumo.economiaMedia = resumo.totalFila > 0
+      ? Number((resumo.economiaTotalGerada / resumo.totalFila).toFixed(2))
+      : 0;
+    resumo.descontoMedioPercentual = resumo.__qtdDescontoPercentual > 0
+      ? Math.round(resumo.__somaDescontoPercentual / resumo.__qtdDescontoPercentual)
+      : 0;
+    resumo.scoreGrupo = Math.max(0, Math.min(100,
+      Math.round(
+        (resumo.totalFila || 0) * 12 +
+        (resumo.cuponsDetectados || 0) * 10 +
+        (resumo.beneficiosDetectados || 0) * 6 +
+        Math.min(25, (resumo.descontoMedioPercentual || 0) / 2) -
+        (resumo.totalIgnoradas || 0) * 3 -
+        (resumo.totalErros || 0) * 5
+      )
+    ));
+    delete resumo.__somaDescontoPercentual;
+    delete resumo.__qtdDescontoPercentual;
   }
 
   const grupoFiltro = chaveRadarId(opcoes.grupoId || "");
@@ -5623,6 +5770,7 @@ async function processarMensagemRadar({
     const adicionadasLink = clientes.filter(cliente => cliente.adicionada).length;
     const primeiraRejeicao = clientes.find(cliente => !cliente.adicionada)?.motivo || "";
     const beneficio = beneficioResumoRadar(ofertaRadar);
+    const economiaRadar = calcularEconomiaRadar(ofertaRadar);
     const clienteIdsAdicionados = clientes
       .filter(cliente => cliente.adicionada)
       .map(cliente => cliente.clienteId)
@@ -5640,7 +5788,11 @@ async function processarMensagemRadar({
       marketplace: ofertaRadar.marketplace || "",
       titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
       preco: ofertaRadar.precoAtual || ofertaRadar.preco || "",
+      precoAtual: ofertaRadar.precoAtual || ofertaRadar.preco || "",
+      precoAntigo: ofertaRadar.precoAntigo || "",
       categoria: ofertaRadar.categoria || "",
+      economiaValor: economiaRadar.economiaValor,
+      economiaPercentual: economiaRadar.economiaPercentual,
       cupom: ofertaRadar.cupom || "",
       avisoCupom: ofertaRadar.avisoCupom || "",
       tipoCupom: ofertaRadar.tipoCupom || "",
@@ -6429,6 +6581,7 @@ app.get("/radar", (req, res) => {
 
     const clienteId = String(req.query?.clienteId || getClienteId(req) || "admin");
     const radarConfig = carregarRadarConfigCliente(clienteId);
+    const descartesRadar = lerDescartesRadar(clienteId);
 
     if (!temFontesMonitoradasRadar(radarConfig)) {
       return res.json({
@@ -6442,6 +6595,7 @@ app.get("/radar", (req, res) => {
 
     const oportunidades = deduplicarOportunidadesRadar(lerFilasRadarSomenteLeitura()
       .filter((oferta) => String(oferta.origemClienteId || oferta.clienteId || "admin") === clienteId)
+      .filter((oferta) => !ofertaOcultadaRadar(oferta, descartesRadar))
       .filter((oferta) => origemOfertaEstaMonitoradaRadar(oferta, radarConfig).ok)
       .map((oferta) => {
         const origem = obterOrigemOfertaRadar(oferta);
@@ -6454,6 +6608,7 @@ app.get("/radar", (req, res) => {
           dataEntradaFila: oferta.dataEntradaFila,
           criadoEm: oferta.criadoEm
         });
+        const economia = calcularEconomiaRadar(oferta);
         const ofertaRadar = {
           ...oferta,
           categoria,
@@ -6479,6 +6634,8 @@ app.get("/radar", (req, res) => {
           precoAtual: oferta.precoAtual || oferta.preco || "",
           precoAntigo: oferta.precoAntigo || "",
           descontoPercentual: radar.descontoPercentual,
+          economiaValor: economia.economiaValor,
+          economiaPercentual: economia.economiaPercentual,
           cupom: cupomRadar.cupom,
           avisoCupom: cupomRadar.avisoCupom,
           tipoCupom: cupomRadar.tipoCupom,
@@ -6518,6 +6675,116 @@ app.get("/radar", (req, res) => {
       total: oportunidades.length,
       clienteId,
       oportunidades: oportunidades.slice(0, 50)
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
+
+app.delete("/radar/oportunidades", (req, res) => {
+  try {
+    if (req.usuario?.papel !== "admin_master") {
+      return res.status(403).json({
+        ok: false,
+        erro: "Acesso restrito ao admin_master"
+      });
+    }
+
+    const clienteId = String(req.query?.clienteId || getClienteId(req) || "admin");
+    const radarConfig = carregarRadarConfigCliente(clienteId);
+    const descartesRadar = lerDescartesRadar(clienteId);
+    const idsSolicitados = Array.isArray(req.body?.ids)
+      ? req.body.ids.map(String).filter(Boolean)
+      : [];
+    const limparTodas = req.body?.todas !== false;
+    const idsSet = new Set(idsSolicitados);
+
+    const oportunidades = lerFilasRadarSomenteLeitura()
+      .filter((oferta) => String(oferta.origemClienteId || oferta.clienteId || "admin") === clienteId)
+      .filter((oferta) => !ofertaOcultadaRadar(oferta, descartesRadar))
+      .filter((oferta) => origemOfertaEstaMonitoradaRadar(oferta, radarConfig).ok)
+      .filter((oferta) => limparTodas || idsSet.has(String(oferta.id || "")));
+
+    const removidas = registrarDescartesOportunidadesRadar(clienteId, oportunidades);
+
+    return res.json({
+      ok: true,
+      clienteId,
+      removidas
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
+
+app.delete("/radar/oportunidades/:id", (req, res) => {
+  try {
+    if (req.usuario?.papel !== "admin_master") {
+      return res.status(403).json({
+        ok: false,
+        erro: "Acesso restrito ao admin_master"
+      });
+    }
+
+    const clienteId = String(req.query?.clienteId || getClienteId(req) || "admin");
+    const radarConfig = carregarRadarConfigCliente(clienteId);
+    const descartesRadar = lerDescartesRadar(clienteId);
+    const id = String(req.params.id || "");
+    const oportunidades = lerFilasRadarSomenteLeitura()
+      .filter((oferta) => String(oferta.origemClienteId || oferta.clienteId || "admin") === clienteId)
+      .filter((oferta) => !ofertaOcultadaRadar(oferta, descartesRadar))
+      .filter((oferta) => origemOfertaEstaMonitoradaRadar(oferta, radarConfig).ok)
+      .filter((oferta) => String(oferta.id || "") === id);
+
+    const removidas = registrarDescartesOportunidadesRadar(clienteId, oportunidades.length ? oportunidades : [{ id }]);
+
+    return res.json({
+      ok: true,
+      clienteId,
+      removidas
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
+
+app.delete("/radar/preview", (req, res) => {
+  try {
+    if (req.usuario?.papel !== "admin_master") {
+      return res.status(403).json({
+        ok: false,
+        erro: "Acesso restrito ao admin_master"
+      });
+    }
+
+    const clienteId = getClienteId(req);
+
+    if (!clienteId) {
+      return res.status(401).json({
+        ok: false,
+        erro: "Cliente nao autenticado"
+      });
+    }
+
+    const removidosPreview = lerPreviewRadar(clienteId).length;
+    const removidosHistorico = lerHistoricoRadar(clienteId).length;
+    salvarPreviewRadar(clienteId, []);
+    salvarHistoricoRadar(clienteId, []);
+
+    return res.json({
+      ok: true,
+      clienteId,
+      removidosPreview,
+      removidosHistorico
     });
   } catch (e) {
     return res.status(500).json({
@@ -10135,7 +10402,7 @@ app.get("/grupos/:id", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
     const id = normalizarSessaoId(clienteId, req.params.id);
-    const force = req.query.force === "true";
+    const force = ["true", "1", "sim", "yes"].includes(String(req.query.force || req.query.refresh || "").toLowerCase());
 
     const status = statusSessao[id];
 
@@ -10190,6 +10457,45 @@ app.get("/grupos/:id", async (req, res) => {
       total: 0,
       grupos: [],
       gruposLista: []
+    });
+  }
+});
+
+app.post("/grupos/:id/refresh", async (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    const id = normalizarSessaoId(clienteId, req.params.id);
+    const status = statusSessao[id];
+
+    if (status !== "open" && status !== "aberto") {
+      return res.json({
+        ok: false,
+        id,
+        status: status || "offline",
+        total: gruposPorSessao[id]?.length || 0,
+        grupos: gruposPorSessao[id] || [],
+        gruposLista: gruposPorSessao[id] || [],
+        cache: true,
+        aviso: "Sessao nao esta conectada."
+      });
+    }
+
+    const grupos = await carregarGruposSessao(id, { force: true });
+
+    return res.json({
+      ok: true,
+      id,
+      total: grupos.length,
+      grupos,
+      gruposLista: grupos,
+      cache: false,
+      atualizado: true
+    });
+  } catch (e) {
+    console.log("[ERRO] Erro rota /grupos/:id/refresh:", e.message);
+    return res.status(500).json({
+      ok: false,
+      erro: "Erro ao atualizar grupos"
     });
   }
 });
