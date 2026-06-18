@@ -145,11 +145,24 @@ function destinoDentroHorario(destino = {}) {
 
   const horaAtual = agoraBR.getHours() * 60 + agoraBR.getMinutes();
 
-  const [inicioH, inicioM] = (destino.horarioInicio || "00:00")
+  const horaInicio =
+    destino.horarioInicio ||
+    destino.horaInicio ||
+    destino.inicio ||
+    destino.horarioInicial ||
+    "00:00";
+  const horaFim =
+    destino.horarioFim ||
+    destino.horaFim ||
+    destino.fim ||
+    destino.horarioFinal ||
+    "23:59";
+
+  const [inicioH, inicioM] = String(horaInicio)
     .split(":")
     .map(Number);
 
-  const [fimH, fimM] = (destino.horarioFim || "23:59")
+  const [fimH, fimM] = String(horaFim)
     .split(":")
     .map(Number);
 
