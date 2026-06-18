@@ -6835,7 +6835,9 @@ app.use("/mensageiro", criarRotasMensageiro({
   getPlanoUsuario,
   usuarioTemRecurso,
   getMensageiroCliente: mensageiro.getMensageiroCliente,
-  setMensageiroCliente: mensageiro.setMensageiroCliente
+  setMensageiroCliente: mensageiro.setMensageiroCliente,
+  getAtendimentoConfigCliente: mensageiro.getAtendimentoConfigCliente,
+  setAtendimentoConfigCliente: mensageiro.setAtendimentoConfigCliente
 }));
 
 
