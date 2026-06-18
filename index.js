@@ -254,6 +254,135 @@ function getFilaFile(clienteId = "admin") {
   return `${getClienteDir(clienteId)}/fila.json`;
 }
 
+const BRANDING_FILE = "/data/branding.json";
+
+const BRANDING_MAX_BYTES = 5 * 1024 * 1024;
+
+function brandingPadrao() {
+  return {
+    escopo: "oficial",
+    logoUrl: "",
+    logoDataUrl: "",
+    iconUrl: "",
+    iconDataUrl: "",
+    nomeMarca: "",
+    slogan: "",
+    frase: "",
+    theme: "dark",
+    corPrimaria: "",
+    corDestaque: "",
+    atualizadoEm: ""
+  };
+}
+
+function tamanhoDataUrlBytes(valor = "") {
+  const texto = String(valor || "");
+  const base64 = texto.includes(",") ? texto.split(",").pop() || "" : texto;
+  return Math.ceil((base64.length * 3) / 4);
+}
+
+function validarImagemBranding(valor = "", campo = "imagem") {
+  const texto = String(valor || "").trim();
+  if (!texto) return { ok: true, valor: "" };
+
+  if (/^https?:\/\//i.test(texto)) {
+    return { ok: true, valor: texto };
+  }
+
+  const match = texto.match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,/i);
+  if (!match) {
+    return {
+      ok: false,
+      erro: `${campo} deve ser URL http(s) ou data URL PNG/JPEG/WEBP`
+    };
+  }
+
+  if (tamanhoDataUrlBytes(texto) > BRANDING_MAX_BYTES) {
+    return {
+      ok: false,
+      erro: `${campo} excede o limite de 5 MB`
+    };
+  }
+
+  return { ok: true, valor: texto };
+}
+
+function normalizarBranding(dados = {}) {
+  const atual = dados && typeof dados === "object" ? dados : {};
+  const padrao = brandingPadrao();
+
+  return {
+    ...padrao,
+    ...atual,
+    escopo: "oficial",
+    logoUrl: String(atual.logoUrl || "").trim(),
+    logoDataUrl: String(atual.logoDataUrl || atual.logo || "").trim(),
+    iconUrl: String(atual.iconUrl || "").trim(),
+    iconDataUrl: String(atual.iconDataUrl || atual.icon || "").trim(),
+    nomeMarca: String(atual.nomeMarca || atual.nome || "").trim().slice(0, 80),
+    slogan: String(atual.slogan || atual.frase || "").trim().slice(0, 160),
+    frase: String(atual.frase || atual.slogan || "").trim().slice(0, 160),
+    theme: ["dark", "light", "system"].includes(atual.theme) ? atual.theme : "dark",
+    corPrimaria: String(atual.corPrimaria || "").trim(),
+    corDestaque: String(atual.corDestaque || "").trim(),
+    atualizadoEm: atual.atualizadoEm || ""
+  };
+}
+
+function lerBrandingOficial() {
+  try {
+    if (!fs.existsSync(BRANDING_FILE)) {
+      const brandingAdminAntigo = "/data/clientes/admin/branding.json";
+
+      if (fs.existsSync(brandingAdminAntigo)) {
+        const dadosAntigos = JSON.parse(fs.readFileSync(brandingAdminAntigo, "utf8") || "{}");
+        const migrado = normalizarBranding(dadosAntigos);
+        fs.writeFileSync(BRANDING_FILE, JSON.stringify(migrado, null, 2));
+        console.log("[BRANDING] Logo oficial migrada de /data/clientes/admin/branding.json");
+        return migrado;
+      }
+
+      return brandingPadrao();
+    }
+
+    const dados = JSON.parse(fs.readFileSync(BRANDING_FILE, "utf8") || "{}");
+    return normalizarBranding(dados);
+  } catch (e) {
+    console.log("[BRANDING] Falha ao ler branding:", e.message);
+    return brandingPadrao();
+  }
+}
+
+function salvarBrandingOficial(dados = {}) {
+  const atual = lerBrandingOficial();
+  const payload = dados && typeof dados === "object" ? dados : {};
+
+  const logo = validarImagemBranding(payload.logoDataUrl ?? payload.logo ?? atual.logoDataUrl, "logoDataUrl");
+  if (!logo.ok) return { ok: false, erro: logo.erro };
+
+  const icon = validarImagemBranding(payload.iconDataUrl ?? payload.icon ?? atual.iconDataUrl, "iconDataUrl");
+  if (!icon.ok) return { ok: false, erro: icon.erro };
+
+  const logoUrl = validarImagemBranding(payload.logoUrl ?? atual.logoUrl, "logoUrl");
+  if (!logoUrl.ok) return { ok: false, erro: logoUrl.erro };
+
+  const iconUrl = validarImagemBranding(payload.iconUrl ?? atual.iconUrl, "iconUrl");
+  if (!iconUrl.ok) return { ok: false, erro: iconUrl.erro };
+
+  const atualizado = normalizarBranding({
+    ...atual,
+    ...payload,
+    logoDataUrl: logo.valor,
+    iconDataUrl: icon.valor,
+    logoUrl: logoUrl.valor,
+    iconUrl: iconUrl.valor,
+    atualizadoEm: new Date().toISOString()
+  });
+
+  fs.writeFileSync(BRANDING_FILE, JSON.stringify(atualizado, null, 2));
+  return { ok: true, branding: atualizado };
+}
+
 console.log("[OK]📂Salvando dados em:", FILA_FILE);
 
 function gerarChaveProduto(titulo = "") {
@@ -6545,6 +6674,74 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
     oferta
   };
 }
+
+app.get("/branding", (req, res) => {
+  try {
+    const branding = lerBrandingOficial();
+
+    return res.json({
+      ok: true,
+      escopo: "oficial",
+      branding
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
+
+app.post("/branding", (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+    if (!token) {
+      return res.status(401).json({
+        ok: false,
+        erro: "Cliente nao autenticado"
+      });
+    }
+
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      req.clienteId = decoded.clienteId || "";
+    } catch {
+      return res.status(401).json({
+        ok: false,
+        erro: "Token invalido"
+      });
+    }
+
+    if (!isAdminMaster(req)) {
+      return res.status(403).json({
+        ok: false,
+        erro: "Acesso restrito ao admin_master"
+      });
+    }
+
+    const resultado = salvarBrandingOficial(req.body || {});
+
+    if (!resultado.ok) {
+      return res.status(400).json({
+        ok: false,
+        erro: resultado.erro || "Branding invalido"
+      });
+    }
+
+    return res.json({
+      ok: true,
+      escopo: "oficial",
+      branding: resultado.branding
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
 
 app.get("/radar/config", (req, res) => {
   try {
