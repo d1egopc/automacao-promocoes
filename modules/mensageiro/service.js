@@ -2,8 +2,12 @@
 
 const {
   getMensageiroCliente,
-  setMensageiroCliente
+  setMensageiroCliente,
+  getAtendimentoConfigCliente,
+  registrarHistoricoAtendimento
 } = require("./storage");
+
+const COOLDOWN_ATENDIMENTO_MS = 10 * 60 * 1000;
 
 function mensageiroAtivo(clienteId) {
   const config = getMensageiroCliente(clienteId);
@@ -109,6 +113,32 @@ function encontrarRespostaRapida(texto = "", respostasRapidas = []) {
   return null;
 }
 
+function encontrarGatilhoAtendimento(texto = "", gatilhos = []) {
+  const textoNormalizado = normalizarTextoMensagem(texto);
+
+  if (!textoNormalizado) return null;
+  if (!Array.isArray(gatilhos) || !gatilhos.length) return null;
+
+  for (const gatilho of gatilhos) {
+    if (!gatilho?.ativo) continue;
+
+    const obrigatorias = Array.isArray(gatilho.palavrasObrigatorias)
+      ? gatilho.palavrasObrigatorias
+      : [];
+
+    if (!obrigatorias.length) continue;
+
+    const encontrouTodas = obrigatorias.every(palavra => {
+      const palavraNormalizada = normalizarTextoMensagem(palavra);
+      return palavraNormalizada && textoNormalizado.includes(palavraNormalizada);
+    });
+
+    if (encontrouTodas) return gatilho;
+  }
+
+  return null;
+}
+
 function aplicarDelayAtendimento(delaySegundos = 0) {
   const segundos = Math.max(0, Number(delaySegundos || 0) || 0);
   const ms = Math.min(segundos, 60) * 1000;
@@ -141,6 +171,145 @@ async function executarRespostaRapida({ sock, jid, resposta, delaySegundos = 0 }
   return true;
 }
 
+async function executarRespostaAtendimento({ sock, jid, resposta } = {}) {
+  const conteudo = String(resposta?.conteudo || "").trim();
+  const tipo = String(resposta?.tipo || "texto");
+
+  if (!sock || !jid || !conteudo) return false;
+
+  try {
+    await sock.sendPresenceUpdate?.("composing", jid);
+  } catch (e) {
+    console.log("[MENSAGEIRO-FLUXO] digitando indisponivel:", e.message);
+  }
+
+  await aplicarDelayAtendimento(resposta?.delaySegundos || 0);
+
+  try {
+    await sock.sendPresenceUpdate?.("paused", jid);
+  } catch {}
+
+  if (tipo === "imagemUrl") {
+    await sock.sendMessage(jid, {
+      image: { url: conteudo }
+    });
+    return true;
+  }
+
+  if (tipo === "arquivoUrl") {
+    const nomeArquivo = conteudo.split("/").pop()?.split("?")[0] || "arquivo";
+    await sock.sendMessage(jid, {
+      document: { url: conteudo },
+      fileName: nomeArquivo
+    });
+    return true;
+  }
+
+  await sock.sendMessage(jid, { text: conteudo });
+  return true;
+}
+
+function atendimentoEscopoPermitido({ clienteId, jid, escopo }) {
+  const isGrupo = String(jid || "").endsWith("@g.us");
+  const escopoFinal = String(escopo || "privado");
+
+  if (jid === "status@broadcast") return false;
+  if (escopoFinal === "privado" && isGrupo) return false;
+  if (escopoFinal === "grupo" && !isGrupo) return false;
+  if (isGrupo && !grupoPermitido(clienteId, jid)) return false;
+
+  return true;
+}
+
+function registrarHistoricoSeguro(clienteId, evento) {
+  try {
+    registrarHistoricoAtendimento(clienteId, evento);
+  } catch (e) {
+    console.log("[MENSAGEIRO-ERRO] historico atendimento:", e.message);
+  }
+}
+
+async function tratarMensagemAtendimentoV1({
+  clienteId,
+  sessaoId,
+  sock,
+  mensagem,
+  texto,
+  jid
+} = {}) {
+  const configAtendimento = getAtendimentoConfigCliente(clienteId);
+
+  if (configAtendimento?.atendimentoAtivo !== true) return false;
+  if (configAtendimento.sessaoId && configAtendimento.sessaoId !== sessaoId) return false;
+  if (!atendimentoEscopoPermitido({ clienteId, jid, escopo: configAtendimento.escopo })) return false;
+
+  const gatilho = encontrarGatilhoAtendimento(texto, configAtendimento.gatilhos);
+  if (!gatilho) return false;
+
+  const chaveCooldown = `${clienteId}:${sessaoId}:${jid}:${gatilho.id}`;
+  const agora = Date.now();
+  const ultimo = eventosMensageiroRecentes.get(chaveCooldown) || 0;
+
+  if (agora - ultimo < COOLDOWN_ATENDIMENTO_MS) {
+    registrarHistoricoSeguro(clienteId, {
+      origem: jid.endsWith("@g.us") ? "grupo" : "privado",
+      contato: jid,
+      grupo: jid.endsWith("@g.us") ? jid : "",
+      mensagemRecebida: texto,
+      gatilhoId: gatilho.id,
+      gatilhoNome: gatilho.nome,
+      respostaEnviada: [],
+      status: "cooldown"
+    });
+    return true;
+  }
+
+  eventosMensageiroRecentes.set(chaveCooldown, agora);
+
+  const respostasEnviadas = [];
+
+  try {
+    for (const resposta of gatilho.respostas || []) {
+      const enviada = await executarRespostaAtendimento({ sock, jid, resposta });
+      if (enviada) respostasEnviadas.push(`${resposta.tipo}:${String(resposta.conteudo || "").slice(0, 80)}`);
+    }
+
+    registrarHistoricoSeguro(clienteId, {
+      origem: jid.endsWith("@g.us") ? "grupo" : "privado",
+      contato: jid,
+      grupo: jid.endsWith("@g.us") ? jid : "",
+      mensagemRecebida: texto,
+      gatilhoId: gatilho.id,
+      gatilhoNome: gatilho.nome,
+      respostaEnviada: respostasEnviadas,
+      status: respostasEnviadas.length ? "enviado" : "sem_resposta"
+    });
+
+    console.log("[MENSAGEIRO-ATENDIMENTO] gatilho enviado", {
+      clienteId,
+      sessaoId,
+      jid,
+      gatilhoId: gatilho.id,
+      respostas: respostasEnviadas.length
+    });
+
+    return true;
+  } catch (e) {
+    registrarHistoricoSeguro(clienteId, {
+      origem: jid.endsWith("@g.us") ? "grupo" : "privado",
+      contato: jid,
+      grupo: jid.endsWith("@g.us") ? jid : "",
+      mensagemRecebida: texto,
+      gatilhoId: gatilho.id,
+      gatilhoNome: gatilho.nome,
+      respostaEnviada: respostasEnviadas,
+      status: "erro",
+      erro: e.message
+    });
+    throw e;
+  }
+}
+
 async function tratarMensagemPrivadaAtendimento({
   clienteId,
   sessaoId,
@@ -151,6 +320,24 @@ async function tratarMensagemPrivadaAtendimento({
   try {
     if (planoLiberado !== true) return;
 
+    const jid = mensagem?.key?.remoteJid || "";
+
+    if (!jid || jid === "status@broadcast") return;
+    if (mensagem?.key?.fromMe) return;
+
+    const texto = extrairTextoMensagemAtendimento(mensagem);
+
+    const processouV1 = await tratarMensagemAtendimentoV1({
+      clienteId,
+      sessaoId,
+      sock,
+      mensagem,
+      texto,
+      jid
+    });
+
+    if (processouV1) return;
+
     const config = getMensageiroCliente(clienteId);
     const atendimento = config?.atendimento || {};
 
@@ -159,12 +346,7 @@ async function tratarMensagemPrivadaAtendimento({
     if (atendimento.ativo !== true) return;
     if (String(atendimento.escopo || "privado") !== "privado") return;
 
-    const jid = mensagem?.key?.remoteJid || "";
-
     if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") return;
-    if (mensagem?.key?.fromMe) return;
-
-    const texto = extrairTextoMensagemAtendimento(mensagem);
     const respostaRapida = encontrarRespostaRapida(
       texto,
       atendimento.respostasRapidas
@@ -304,7 +486,9 @@ module.exports = {
   obterMensagemDespedida,
   normalizarTextoMensagem,
   encontrarRespostaRapida,
+  encontrarGatilhoAtendimento,
   executarRespostaRapida,
+  executarRespostaAtendimento,
   aplicarDelayAtendimento,
 
   tratarEventoGrupoMensageiro,

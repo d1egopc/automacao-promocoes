@@ -12,7 +12,9 @@ const {
   getPlanoUsuario,
   usuarioTemRecurso,
   getMensageiroCliente,
-  setMensageiroCliente
+  setMensageiroCliente,
+  getAtendimentoConfigCliente,
+  setAtendimentoConfigCliente
 } = deps;
 
 function normalizarAtendimentoMensageiro(dados = {}) {
@@ -58,14 +60,60 @@ function normalizarAtendimentoMensageiro(dados = {}) {
   };
 }
 
+function mensageiroPermitido(req, clienteId) {
+  return (
+    clienteId === "admin" ||
+    usuarioTemRecurso(req, "mensageiro")
+  );
+}
+
+router.get("/config", (req, res) => {
+  const clienteId = getClienteId(req);
+
+  if (!mensageiroPermitido(req, clienteId)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Mensageiro nÃ£o disponÃ­vel no seu plano"
+    });
+  }
+
+  const config = getAtendimentoConfigCliente(clienteId);
+
+  return res.json({
+    ok: true,
+    clienteId,
+    config
+  });
+});
+
+router.post("/config", (req, res) => {
+  const clienteId = getClienteId(req);
+
+  if (!mensageiroPermitido(req, clienteId)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Mensageiro nÃ£o disponÃ­vel no seu plano"
+    });
+  }
+
+  const dados = req.body?.config && typeof req.body.config === "object"
+    ? req.body.config
+    : req.body || {};
+
+  const config = setAtendimentoConfigCliente(clienteId, dados);
+
+  return res.json({
+    ok: true,
+    clienteId,
+    config
+  });
+});
+
 
 router.get("/", (req, res) => {
   const clienteId = getClienteId(req);
 
-  if (
-    clienteId !== "admin" &&
-    !usuarioTemRecurso(req, "mensageiro")
-  ) {
+  if (!mensageiroPermitido(req, clienteId)) {
     return res.status(403).json({
       ok: false,
       erro: "Mensageiro nÃ£o disponÃ­vel no seu plano"
@@ -86,10 +134,7 @@ router.post("/", async (req, res) => {
 
   const clienteId = getClienteId(req);
 
-  if (
-    clienteId !== "admin" &&
-    !usuarioTemRecurso(req, "mensageiro")
-  ) {
+  if (!mensageiroPermitido(req, clienteId)) {
     return res.status(403).json({
       ok: false,
       erro: "Mensageiro nÃ£o disponÃ­vel no seu plano"
