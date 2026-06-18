@@ -101,6 +101,7 @@ const {
 const filaOfertas = require("./utils/fila-ofertas");
 const destinosUtils = require("./utils/destinos");
 const integracoesUtils = require("./utils/integracoes");
+const radarCupomMensagem = require("./utils/radar-cupom-mensagem");
 
 
 if (!fs.existsSync("/data")) {
@@ -4895,145 +4896,31 @@ function extrairTextoMensagemRadar(mensagem = {}) {
 }
 
 function limparLinkRadar(link = "") {
-  return String(link || "")
-    .trim()
-    .replace(/[)\].,;!?]+$/g, "");
+  return radarCupomMensagem.limparLinkRadar(link);
 }
 
 function extrairLinksRadar(texto = "") {
-  const encontrados = String(texto || "").match(/\b(?:https?:\/\/|www\.)[^\s<>"']+/gi) || [];
-  const unicos = new Set();
-
-  for (const link of encontrados) {
-    const limpo = limparLinkRadar(link);
-    if (!limpo) continue;
-
-    unicos.add(limpo.startsWith("www.") ? `https://${limpo}` : limpo);
-  }
-
-  return [...unicos];
+  return radarCupomMensagem.extrairLinksRadar(texto);
 }
 
 function normalizarCupomMensagemRadar(cupom = "") {
-  const codigo = String(cupom || "")
-    .toUpperCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^A-Z0-9_-]/g, "")
-    .trim();
-
-  const bloqueados = new Set([
-    "CUPOM",
-    "CODIGO",
-    "PROMOCAO",
-    "PROMO",
-    "DESCONTO",
-    "PRODUTO",
-    "RESGATE",
-    "RESGATAR",
-    "SHOPEE",
-    "AMAZON",
-    "MERCADOLIVRE",
-    "MERCADOLIVRECOMBR"
-  ]);
-
-  if (!codigo || codigo.length < 4 || codigo.length > 40) return "";
-  if (bloqueados.has(codigo)) return "";
-  if (!/[A-Z]/.test(codigo) || !/[0-9]/.test(codigo)) {
-    if (!/(MELI|ML|SHOPEE|AMAZON|APP|OFF|GANHE|BLACK|OFERTA|DESCONTO)/.test(codigo)) return "";
-  }
-
-  return codigo;
+  return radarCupomMensagem.normalizarCupomMensagemRadar(cupom);
 }
 
 function extrairCupomTextoRadar(texto = "") {
-  const fonte = String(texto || "");
-  const padroes = [
-    /(?:cupom|codigo|c[oó]digo|coupon)\s*[:\-]?\s*([A-Z0-9][A-Z0-9_-]{3,39})/gi,
-    /(?:use|usar|aplique|aplicar|utilize|resgate|resgatar)\s+(?:o\s+)?(?:cupom|codigo|c[oó]digo)?\s*([A-Z0-9][A-Z0-9_-]{3,39})/gi,
-    /\b([A-Z0-9]{4,30}(?:OFF|APP|ML|MELI|SHOPEE|AMAZON|GANHE|BLACK|OFERTA)[A-Z0-9_-]*)\b/gi
-  ];
-
-  for (const regex of padroes) {
-    let match;
-    while ((match = regex.exec(fonte))) {
-      const cupom = normalizarCupomMensagemRadar(match[1]);
-      if (cupom) return cupom;
-    }
-  }
-
-  return "";
+  return radarCupomMensagem.extrairCupomTextoRadar(texto);
 }
 
 function trechoProximoLinkRadar(texto = "", link = "") {
-  const fonte = String(texto || "");
-  const alvo = String(link || "");
-  const linhas = fonte.split(/\r?\n/);
-
-  for (let i = 0; i < linhas.length; i++) {
-    if (linhas[i].includes(alvo)) {
-      return [
-        linhas[Math.max(0, i - 1)] || "",
-        linhas[i] || "",
-        linhas[Math.min(linhas.length - 1, i + 1)] || ""
-      ].join(" ");
-    }
-  }
-
-  const indice = fonte.indexOf(alvo);
-  if (indice < 0) return fonte.slice(0, 500);
-
-  return fonte.slice(Math.max(0, indice - 180), Math.min(fonte.length, indice + alvo.length + 180));
+  return radarCupomMensagem.trechoProximoLinkRadar(texto, link);
 }
 
 function textoIndicaResgateCupomRadar(texto = "") {
-  const normalizado = normalizarTexto(texto);
-  return (
-    normalizado.includes("resgate") ||
-    normalizado.includes("resgatar") ||
-    normalizado.includes("pegarcupom") ||
-    normalizado.includes("coletarcupom") ||
-    normalizado.includes("cupomdapagina") ||
-    normalizado.includes("cuponsdestapagina") ||
-    normalizado.includes("todososcupons") ||
-    normalizado.includes("pagina decupons")
-  );
+  return radarCupomMensagem.textoIndicaResgateCupomRadar(texto);
 }
 
 function analisarBeneficiosMensagemRadar(texto = "", links = []) {
-  const cupom = extrairCupomTextoRadar(texto);
-  const linksResgate = [];
-  const beneficiosPorLink = {};
-
-  for (const link of links) {
-    const trecho = trechoProximoLinkRadar(texto, link);
-    const resgate = textoIndicaResgateCupomRadar(trecho);
-
-    if (resgate) {
-      linksResgate.push(link);
-      beneficiosPorLink[link] = {
-        tipoCupom: "resgate",
-        beneficioExtra: link,
-        avisoCupom: "Link de resgate de cupom detectado na mensagem",
-        linkResgateCupom: link
-      };
-    }
-  }
-
-  const beneficioResgate = linksResgate[0] || "";
-  const beneficioExtra = beneficioResgate || (normalizarTexto(texto).includes("fretegratis") ? "Frete gratis" : "");
-
-  return {
-    cupom,
-    cupomOrigem: cupom ? "mensagem" : "",
-    cupomDetectadoTexto: Boolean(cupom),
-    tipoCupom: cupom ? "texto" : (beneficioResgate ? "resgate" : ""),
-    beneficioExtra,
-    avisoCupom: cupom ? `Cupom detectado na mensagem: ${cupom}` : (beneficioResgate ? "Link de resgate de cupom detectado na mensagem" : ""),
-    linkResgateCupom: beneficioResgate,
-    linksResgate,
-    beneficiosPorLink
-  };
+  return radarCupomMensagem.analisarBeneficiosMensagemRadar(texto, links);
 }
 
 function obterNomeGrupoRadar(sessaoId = "", grupoId = "") {
