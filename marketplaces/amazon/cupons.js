@@ -65,6 +65,61 @@ function formatarPercentualCupomAmazon(texto = "") {
   return match ? match[0].replace(/\s+/g, "").trim() : "";
 }
 
+function numeroMoedaAmazon(valor = "") {
+  if (typeof valor === "number" && Number.isFinite(valor)) return valor;
+
+  const texto = String(valor || "");
+  const match = texto.match(/R\$\s*\d{1,6}(?:\.\d{3})*(?:[,.]\d{1,2})?|\d{1,6}(?:\.\d{3})*(?:[,.]\d{1,2})?/i);
+  if (!match) return 0;
+
+  const normalizado = match[0]
+    .replace(/R\$/gi, "")
+    .replace(/\s+/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+
+  const numero = Number(normalizado);
+  return Number.isFinite(numero) ? numero : 0;
+}
+
+function validarCupomMonetarioAmazon(oferta = {}, item = {}) {
+  const preco = numeroMoedaAmazon(oferta.precoAtual || oferta.preco || oferta.valor || "");
+  const valorCupom = numeroMoedaAmazon(
+    item.cupomValor ||
+    item.valorCupom ||
+    item.avisoCupom ||
+    item.beneficioExtra ||
+    item.beneficioDetectado ||
+    ""
+  );
+
+  if (!preco || !valorCupom) {
+    return { ok: true, suspeito: false, preco, valorCupom };
+  }
+
+  if (valorCupom > preco) {
+    return {
+      ok: false,
+      suspeito: true,
+      motivo: "cupom_monetario_incompativel_com_preco",
+      preco,
+      valorCupom
+    };
+  }
+
+  if (valorCupom >= preco * 0.7) {
+    return {
+      ok: true,
+      suspeito: true,
+      motivo: "cupom_monetario_suspeito_70_pct_preco",
+      preco,
+      valorCupom
+    };
+  }
+
+  return { ok: true, suspeito: false, preco, valorCupom };
+}
+
 function montarBeneficioAmazon({ tipoCupom, valorCupom = "", percentualCupom = "" } = {}) {
   if (valorCupom) {
     return {
@@ -309,6 +364,19 @@ function escolherCupomParaOfertaAmazon(oferta = {}, dados = []) {
   );
 
   if (aviso) {
+    const validacaoMonetaria = validarCupomMonetarioAmazon(oferta, aviso);
+
+    if (!validacaoMonetaria.ok) {
+      console.log("[AMZ-CUPOM-OFERTA] monetario incompativel", {
+        titulo: oferta.titulo || oferta.nome || "",
+        preco: validacaoMonetaria.preco,
+        valorCupom: validacaoMonetaria.valorCupom,
+        motivo: validacaoMonetaria.motivo
+      });
+
+      return null;
+    }
+
     const resultado = {
       cupom: "",
       tipoCupom: aviso.tipoCupom || "resgate_pagina_amazon",
@@ -317,13 +385,16 @@ function escolherCupomParaOfertaAmazon(oferta = {}, dados = []) {
       descontoPix: aviso.descontoPix || "",
       descontoApp: aviso.descontoApp || "",
       cupomValor: aviso.cupomValor || "",
-      cupomPercentual: aviso.cupomPercentual || ""
+      cupomPercentual: aviso.cupomPercentual || "",
+      cupomSuspeito: validacaoMonetaria.suspeito === true,
+      avisosInternos: validacaoMonetaria.motivo ? [validacaoMonetaria.motivo] : []
     };
 
     console.log("[AMZ-CUPOM-OFERTA]", {
       titulo: oferta.titulo || oferta.nome || "",
       tipoCupom: resultado.tipoCupom,
-      cupom: ""
+      cupom: "",
+      cupomSuspeito: resultado.cupomSuspeito === true
     });
 
     registrarRadarCupons("amazon", { avisos: 1 });
