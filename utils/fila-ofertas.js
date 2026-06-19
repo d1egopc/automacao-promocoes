@@ -1,13 +1,37 @@
 const fs = require("fs");
+const path = require("path");
 
-function salvarFila({ fila = [], clienteId = "admin", getFilaFile, logger = console } = {}) {
+function getFallbackFileSeguro(getFilaFile, clienteId = "admin") {
+  if (typeof getFilaFile !== "function") {
+    throw new Error("storage_fila_nao_injetado");
+  }
+
+  const file = getFilaFile(clienteId);
+  const base = path.resolve(process.env.DATA_DIR || "/data");
+  const resolvido = path.resolve(file);
+
+  if (!resolvido.startsWith(`${base}${path.sep}`)) {
+    throw new Error("caminho_fila_inseguro");
+  }
+
+  return resolvido;
+}
+
+function salvarFila({ fila = [], clienteId = "admin", getFilaFile, writeClienteJson, logger = console } = {}) {
   try {
     const filaCliente = fila.filter(
       o => String(o.clienteId || "admin") === String(clienteId)
     );
 
+    if (typeof writeClienteJson === "function") {
+      writeClienteJson(clienteId, "fila.json", filaCliente);
+      return true;
+    }
+
+    const file = getFallbackFileSeguro(getFilaFile, clienteId);
+
     fs.writeFileSync(
-      getFilaFile(clienteId),
+      file,
       JSON.stringify(filaCliente, null, 2)
     );
 
@@ -18,21 +42,27 @@ function salvarFila({ fila = [], clienteId = "admin", getFilaFile, logger = cons
   }
 }
 
-function carregarFila({ fila = [], clienteId = "admin", getFilaFile, logger = console } = {}) {
+function carregarFila({ fila = [], clienteId = "admin", getFilaFile, readClienteJson, logger = console } = {}) {
   try {
-    const file = getFilaFile(clienteId);
+    let filaCliente;
 
-    if (!fs.existsSync(file)) {
-      return fila;
+    if (typeof readClienteJson === "function") {
+      filaCliente = readClienteJson(clienteId, "fila.json", []);
+    } else {
+      const file = getFallbackFileSeguro(getFilaFile, clienteId);
+
+      if (!fs.existsSync(file)) {
+        return fila;
+      }
+
+      const data = fs.readFileSync(file, "utf8");
+
+      if (!data) {
+        return fila;
+      }
+
+      filaCliente = JSON.parse(data);
     }
-
-    const data = fs.readFileSync(file, "utf8");
-
-    if (!data) {
-      return fila;
-    }
-
-    const filaCliente = JSON.parse(data);
 
     const filaLimpa = filaCliente.filter(
       o => o?.clienteId
