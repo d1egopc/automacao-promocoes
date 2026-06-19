@@ -1,6 +1,9 @@
-const fs = require("fs");
+const {
+  readGlobalJson,
+  writeGlobalJson
+} = require("../../utils/storage");
 
-const ARQUIVO_OFERTAS_VISTAS = "/data/ofertas_vistas.json";
+const ARQUIVO_OFERTAS_VISTAS = "ofertas_vistas.json";
 
 function normalizarTextoLocal(texto = "") {
   return String(texto)
@@ -14,12 +17,10 @@ function normalizarTextoLocal(texto = "") {
 }
 
 function garantirArquivoOfertasVistas() {
-  if (!fs.existsSync("/data")) {
-    fs.mkdirSync("/data", { recursive: true });
-  }
+  const atual = readGlobalJson(ARQUIVO_OFERTAS_VISTAS, null);
 
-  if (!fs.existsSync(ARQUIVO_OFERTAS_VISTAS)) {
-    fs.writeFileSync(ARQUIVO_OFERTAS_VISTAS, "[]");
+  if (!Array.isArray(atual)) {
+    writeGlobalJson(ARQUIVO_OFERTAS_VISTAS, []);
   }
 }
 
@@ -27,9 +28,7 @@ function carregarOfertasVistas() {
   try {
     garantirArquivoOfertasVistas();
 
-    const dados = JSON.parse(
-      fs.readFileSync(ARQUIVO_OFERTAS_VISTAS, "utf8")
-    );
+    const dados = readGlobalJson(ARQUIVO_OFERTAS_VISTAS, []);
 
     return Array.isArray(dados) ? dados : [];
   } catch (e) {
@@ -42,10 +41,7 @@ function salvarOfertasVistas(lista = []) {
   try {
     garantirArquivoOfertasVistas();
 
-    fs.writeFileSync(
-      ARQUIVO_OFERTAS_VISTAS,
-      JSON.stringify(lista.slice(-5000), null, 2)
-    );
+    writeGlobalJson(ARQUIVO_OFERTAS_VISTAS, lista.slice(-5000));
   } catch (e) {
     console.log("[ERRO] Erro ao salvar memria de ofertas:", e.message);
   }
