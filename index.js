@@ -102,6 +102,18 @@ const filaOfertas = require("./utils/fila-ofertas");
 const destinosUtils = require("./utils/destinos");
 const integracoesUtils = require("./utils/integracoes");
 const radarCupomMensagem = require("./utils/radar-cupom-mensagem");
+const storageUtils = require("./utils/storage");
+
+const {
+  storage,
+  getClientePath,
+  readClienteJson,
+  writeClienteJson,
+  listClientes,
+  readGlobalJson,
+  writeGlobalJson,
+  mascararSecrets
+} = storageUtils;
 
 
 if (!fs.existsSync("/data")) {
@@ -240,14 +252,7 @@ const SESSOES_FILE = "/data/sessoes.json";
 const INTEGRACOES_FILE = "/data/integracoes.json";
 
 function getClienteDir(clienteId = "admin") {
-  const id = String(clienteId || "admin").replace(/[^a-zA-Z0-9_-]/g, "_");
-  const dir = `/data/clientes/${id}`;
-
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
-  return dir;
+  return getClientePath(clienteId);
 }
 
 function getFilaFile(clienteId = "admin") {
@@ -331,13 +336,14 @@ function normalizarBranding(dados = {}) {
 
 function lerBrandingOficial() {
   try {
-    if (!fs.existsSync(BRANDING_FILE)) {
-      const brandingAdminAntigo = "/data/clientes/admin/branding.json";
+    const dados = readGlobalJson("branding.json", null);
 
+    if (!dados) {
+      const brandingAdminAntigo = path.join(getClienteDir("admin"), "branding.json");
       if (fs.existsSync(brandingAdminAntigo)) {
         const dadosAntigos = JSON.parse(fs.readFileSync(brandingAdminAntigo, "utf8") || "{}");
         const migrado = normalizarBranding(dadosAntigos);
-        fs.writeFileSync(BRANDING_FILE, JSON.stringify(migrado, null, 2));
+        writeGlobalJson("branding.json", migrado);
         console.log("[BRANDING] Logo oficial migrada de /data/clientes/admin/branding.json");
         return migrado;
       }
@@ -345,7 +351,6 @@ function lerBrandingOficial() {
       return brandingPadrao();
     }
 
-    const dados = JSON.parse(fs.readFileSync(BRANDING_FILE, "utf8") || "{}");
     return normalizarBranding(dados);
   } catch (e) {
     console.log("[BRANDING] Falha ao ler branding:", e.message);
@@ -379,7 +384,7 @@ function salvarBrandingOficial(dados = {}) {
     atualizadoEm: new Date().toISOString()
   });
 
-  fs.writeFileSync(BRANDING_FILE, JSON.stringify(atualizado, null, 2));
+  writeGlobalJson("branding.json", atualizado);
   return { ok: true, branding: atualizado };
 }
 
@@ -694,6 +699,7 @@ function salvarFila(clienteId = "admin") {
     fila,
     clienteId,
     getFilaFile,
+    writeClienteJson,
     logger: console
   });
 }
@@ -703,6 +709,7 @@ function carregarFila(clienteId = "admin") {
     fila,
     clienteId,
     getFilaFile,
+    readClienteJson,
     logger: console
   });
 
@@ -728,25 +735,43 @@ function garantirIdsFila() {
 // ================= FUNCAO SALVAR SESSOES META =======================
 
 function salvarSessoesMeta() {
-  fs.writeFileSync(
-    SESSOES_FILE,
-    JSON.stringify(sessoesMeta, null, 2)
-  );
+  writeGlobalJson("sessoes.json", sessoesMeta);
+}
+
+function removerClienteIdRaiz(dados = {}) {
+  if (!dados || typeof dados !== "object" || Array.isArray(dados)) return dados;
+  const { clienteId, ...restante } = dados;
+  return restante;
+}
+
+function carregarMapaClientesJson(arquivo = "", legado = {}) {
+  const mapa = legado && typeof legado === "object" && !Array.isArray(legado)
+    ? { ...legado }
+    : {};
+
+  for (const clienteId of listClientes()) {
+    const dados = readClienteJson(clienteId, arquivo, null);
+    if (!dados || typeof dados !== "object" || Array.isArray(dados)) continue;
+    mapa[clienteId] = removerClienteIdRaiz(dados);
+  }
+
+  return mapa;
+}
+
+function salvarMapaClientesJson(arquivo = "", mapa = {}) {
+  const origem = mapa && typeof mapa === "object" ? mapa : {};
+
+  for (const [clienteId, dados] of Object.entries(origem)) {
+    if (!clienteId || !dados || typeof dados !== "object") continue;
+    writeClienteJson(clienteId, arquivo, dados);
+  }
 }
 
 // ================= FUNCAO CARREGA SESSOES META =======================
 
 function carregarSessoesMeta() {
   try {
-    if (!fs.existsSync(SESSOES_FILE)) {
-      sessoesMeta = {};
-      salvarSessoesMeta();
-      return;
-    }
-
-    const dados = JSON.parse(
-      fs.readFileSync(SESSOES_FILE, "utf8")
-    );
+    const dados = readGlobalJson("sessoes.json", {});
 
     sessoesMeta = dados && typeof dados === "object" ? dados : {};
 
@@ -760,19 +785,14 @@ function carregarSessoesMeta() {
 // ================= FUNCAO SALVA INTEGRACOES =======================
 
 function salvarIntegracoesPersistidas() {
-  fs.writeFileSync(
-    INTEGRACOES_FILE,
-    JSON.stringify(integracoesPorCliente, null, 2)
-  );
+  writeGlobalJson("integracoes.json", integracoesPorCliente);
+  salvarMapaClientesJson("integracoes.json", integracoesPorCliente);
 }
 
 // ================= FUNCAO SALVA USUARIO =================
 
 function salvarUsuarios() {
-  fs.writeFileSync(
-    USUARIOS_FILE,
-    JSON.stringify(usuarios, null, 2)
-  );
+  writeGlobalJson("usuarios.json", usuarios);
 }
 
 // ================= CREDITOS =================
@@ -859,34 +879,24 @@ function debitarCreditos(clienteId, quantidade = 1) {
 // ================= FUNCAO SALVA PLANO ===================
 
 function salvarPlanos() {
-  fs.writeFileSync(
-    PLANOS_FILE,
-    JSON.stringify(planos, null, 2)
-  );
+  writeGlobalJson("planos.json", planos);
 }
 
 // ============ FUNCAO SALVA CONFIG CLIENTES ==============
 
 function salvarConfigsClientes() {
-  fs.writeFileSync(
-    CONFIGS_CLIENTES_FILE,
-    JSON.stringify(configsPorCliente, null, 2)
-  );
+  writeGlobalJson("configs_clientes.json", configsPorCliente);
+  salvarMapaClientesJson("config.json", configsPorCliente);
 }
 
 function salvarDestinosClientes() {
-  fs.writeFileSync(
-    DESTINOS_CLIENTES_FILE,
-    JSON.stringify(destinosPorCliente, null, 2)
-  );
+  writeGlobalJson("destinos_clientes.json", destinosPorCliente);
+  salvarMapaClientesJson("destinos.json", destinosPorCliente);
 }
 
 function salvarConfig() {
   try {
-    fs.writeFileSync(
-      CONFIG_FILE,
-      JSON.stringify(config, null, 2)
-    );
+    writeGlobalJson("config.json", config);
 
     console.log("[OK]💾 Config salva");
   } catch (e) {
@@ -1100,11 +1110,9 @@ function criarPlanosPadrao() {
 
 function carregarConfig() {
   try {
-    if (fs.existsSync(CONFIG_FILE)) {
-      const dados = fs.readFileSync(CONFIG_FILE, "utf8");
+    const configSalva = readGlobalJson("config.json", null);
 
-      const configSalva = JSON.parse(dados);
-
+    if (configSalva && typeof configSalva === "object") {
       config = {
         ...config,
         ...configSalva,
@@ -1118,51 +1126,48 @@ function carregarConfig() {
     }
 
          
-if (fs.existsSync(USUARIOS_FILE)) {
-  usuarios = JSON.parse(
-    fs.readFileSync(USUARIOS_FILE, "utf8")
-  );
+usuarios = readGlobalJson("usuarios.json", []);
 
+if (Array.isArray(usuarios) && usuarios.length) {
   console.log("[OK]✅ Usurios carregados");
 }
 
-if (fs.existsSync(INTEGRACOES_FILE)) {
-  integracoesPorCliente = JSON.parse(
-    fs.readFileSync(INTEGRACOES_FILE, "utf8")
-  );
+integracoesPorCliente = carregarMapaClientesJson(
+  "integracoes.json",
+  readGlobalJson("integracoes.json", {})
+);
 
+if (integracoesPorCliente && Object.keys(integracoesPorCliente).length) {
   console.log("[OK]✅ Integraes carregadas");
 }
 
-if (fs.existsSync(CONFIGS_CLIENTES_FILE)) {
-  configsPorCliente = JSON.parse(
-    fs.readFileSync(CONFIGS_CLIENTES_FILE, "utf8")
-  );
+configsPorCliente = carregarMapaClientesJson(
+  "config.json",
+  readGlobalJson("configs_clientes.json", {})
+);
 
+if (configsPorCliente && Object.keys(configsPorCliente).length) {
   console.log("[OK]✅ Configs dos clientes carregadas");
 }
 
-if (fs.existsSync(DESTINOS_CLIENTES_FILE)) {
-  destinosPorCliente = JSON.parse(
-    fs.readFileSync(DESTINOS_CLIENTES_FILE, "utf8")
-  );
+destinosPorCliente = carregarMapaClientesJson(
+  "destinos.json",
+  readGlobalJson("destinos_clientes.json", {})
+);
 
+if (destinosPorCliente && Object.keys(destinosPorCliente).length) {
   console.log("[DESTINO] Destinos dos clientes carregados");
 }
 
-if (fs.existsSync(PLANOS_FILE)) {
-  planos = JSON.parse(
-    fs.readFileSync(PLANOS_FILE, "utf8")
-  );
+planos = readGlobalJson("planos.json", {});
 
+if (planos && Object.keys(planos).length) {
   console.log("[OK]✅ Planos carregados");
 }
 
-if (fs.existsSync(SESSOES_FILE)) {
-  sessoesMeta = JSON.parse(
-    fs.readFileSync(SESSOES_FILE, "utf8")
-  );
+sessoesMeta = readGlobalJson("sessoes.json", {});
 
+if (sessoesMeta && Object.keys(sessoesMeta).length) {
   console.log("[OK]✅ Sesses meta carregadas:", Object.keys(sessoesMeta).length);
 }
 
@@ -1574,6 +1579,137 @@ function dataExpiracaoPrioridade(horas = 0) {
   return new Date(Date.now() + horas * 60 * 60 * 1000).toISOString();
 }
 
+function numeroMoedaOferta(valor = "") {
+  if (typeof valor === "number" && Number.isFinite(valor)) return valor;
+
+  const texto = String(valor || "");
+  const match = texto.match(/R\$\s*\d{1,6}(?:\.\d{3})*(?:[,.]\d{1,2})?|\d{1,6}(?:\.\d{3})*(?:[,.]\d{1,2})?/i);
+  if (!match) return 0;
+
+  const normalizado = match[0]
+    .replace(/R\$/gi, "")
+    .replace(/\s+/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+
+  const numero = Number(normalizado);
+  return Number.isFinite(numero) ? numero : 0;
+}
+
+function extrairValorMonetarioCupomOferta(oferta = {}) {
+  const campos = [
+    oferta.valorCupom,
+    oferta.cupomValor,
+    oferta.cupom,
+    oferta.avisoCupom,
+    oferta.beneficioExtra,
+    oferta.beneficioDetectado
+  ];
+
+  for (const campo of campos) {
+    const texto = String(campo || "");
+    const match = texto.match(/R\$\s*\d{1,6}(?:\.\d{3})*(?:[,.]\d{1,2})?/i);
+    if (match) return numeroMoedaOferta(match[0]);
+  }
+
+  return 0;
+}
+
+function adicionarAvisoInternoOferta(oferta = {}, aviso = "") {
+  if (!aviso) return oferta;
+
+  const atuais = Array.isArray(oferta.avisosInternos)
+    ? oferta.avisosInternos
+    : oferta.avisosInternos
+      ? [oferta.avisosInternos]
+      : [];
+
+  if (!atuais.includes(aviso)) atuais.push(aviso);
+  oferta.avisosInternos = atuais;
+  return oferta;
+}
+
+function campoTemCupomMonetario(valor = "") {
+  return /R\$\s*\d{1,6}(?:\.\d{3})*(?:[,.]\d{1,2})?/i.test(String(valor || ""));
+}
+
+function limparCupomMonetarioOferta(oferta = {}) {
+  if (campoTemCupomMonetario(oferta.cupom)) oferta.cupom = "";
+  if (campoTemCupomMonetario(oferta.avisoCupom)) oferta.avisoCupom = "";
+  if (campoTemCupomMonetario(oferta.beneficioExtra)) oferta.beneficioExtra = "";
+  if (campoTemCupomMonetario(oferta.beneficioDetectado)) oferta.beneficioDetectado = "";
+
+  oferta.valorCupom = "";
+  oferta.cupomValor = "";
+  oferta.cupomConfirmado = false;
+  oferta.cupomValidado = false;
+  oferta.cupomDetectado = false;
+  oferta.cupomDetectadoTexto = false;
+  oferta.possivelCupom = false;
+  oferta.cupomTipo = "nenhum";
+
+  return oferta;
+}
+
+function validarCupomMonetarioOferta(oferta = {}) {
+  if (!oferta || typeof oferta !== "object") return oferta;
+
+  const preco = numeroMoedaOferta(oferta.precoAtual || oferta.preco || oferta.valor || "");
+  const valorCupom = extrairValorMonetarioCupomOferta(oferta);
+  const ehRadar =
+    String(oferta.origem || "").toLowerCase() === "radar" ||
+    oferta.radar === true ||
+    oferta.radarNaFila === true;
+
+  if (!preco || !valorCupom) return oferta;
+
+  if (valorCupom > preco) {
+    limparCupomMonetarioOferta(oferta);
+    oferta.cupomSuspeito = true;
+    oferta.cupomMonetarioIncompativel = true;
+    adicionarAvisoInternoOferta(oferta, "cupom_monetario_incompativel_com_preco");
+
+    if (ehRadar) {
+      delete oferta.prioridadeEnvio;
+      delete oferta.motivoPrioridade;
+      delete oferta.prioridadeFila;
+    }
+
+    console.log("[CUPOM] monetario incompativel removido", {
+      titulo: oferta.titulo || oferta.nome || "",
+      preco,
+      valorCupom
+    });
+
+    return oferta;
+  }
+
+  if (valorCupom >= preco * 0.7) {
+    oferta.cupomSuspeito = true;
+    oferta.cupomConfirmado = false;
+    oferta.cupomValidado = false;
+    adicionarAvisoInternoOferta(oferta, "cupom_monetario_suspeito_70_pct_preco");
+
+    if (ehRadar) {
+      oferta.cupomDetectado = false;
+      if (oferta.cupomTipo === "real" || oferta.cupomTipo === "detectado" || oferta.cupomTipo === "provavel") {
+        oferta.cupomTipo = "suspeito";
+      }
+      delete oferta.prioridadeEnvio;
+      delete oferta.motivoPrioridade;
+      delete oferta.prioridadeFila;
+    }
+
+    console.log("[CUPOM] monetario suspeito", {
+      titulo: oferta.titulo || oferta.nome || "",
+      preco,
+      valorCupom
+    });
+  }
+
+  return oferta;
+}
+
 function aplicarPrioridadeEnvioOferta(oferta = {}) {
   if (!oferta || typeof oferta !== "object") return oferta;
 
@@ -1593,9 +1729,10 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
     );
 
   if (ehRadar) {
-    const cupomReal = oferta.cupomConfirmado === true || oferta.cupomValidado === true || oferta.cupomTipo === "real";
-    const cupomDetectado = Boolean(oferta.cupom || oferta.cupomDetectado === true || oferta.cupomDetectadoTexto === true);
-    const cupomProvavel = Boolean(oferta.possivelCupom || oferta.avisoCupom || oferta.beneficioExtra || oferta.linkResgateCupom);
+    const cupomSuspeito = oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true;
+    const cupomReal = !cupomSuspeito && (oferta.cupomConfirmado === true || oferta.cupomValidado === true || oferta.cupomTipo === "real");
+    const cupomDetectado = !cupomSuspeito && Boolean(oferta.cupom || oferta.cupomDetectado === true || oferta.cupomDetectadoTexto === true);
+    const cupomProvavel = !cupomSuspeito && Boolean(oferta.possivelCupom || oferta.avisoCupom || oferta.beneficioExtra || oferta.linkResgateCupom);
     const scoreAlto = Number(oferta.radarScore || oferta.score || 0) >= 60;
 
     oferta.origem = "radar";
@@ -1713,6 +1850,7 @@ oferta.avisoPagamento = oferta.avisoPagamento || "";
 oferta.parcelamento = oferta.parcelamento || "";
 oferta.avisoCupom = oferta.avisoCupom || "";
 
+  validarCupomMonetarioOferta(oferta);
   aplicarPrioridadeEnvioOferta(oferta);
 
   return oferta;
@@ -2560,6 +2698,7 @@ if (deveIgnorarOfertaRepetida(oferta)) {
 
 oferta.status = "pendente";
 oferta.statusDetalhe = "Na fila";
+validarCupomMonetarioOferta(oferta);
 aplicarPrioridadeEnvioOferta(oferta);
 
 registrarOfertaVista(oferta);
@@ -3803,31 +3942,20 @@ function lerFilasRadarSomenteLeitura() {
     adicionar(oferta, oferta?.clienteId || "admin");
   }
 
-  const clientesDir = "/data/clientes";
+  for (const clienteIdOrigem of listClientes()) {
+    try {
+      const dados = readClienteJson(clienteIdOrigem, "fila.json", []);
 
-  if (fs.existsSync(clientesDir)) {
-    for (const entrada of fs.readdirSync(clientesDir, { withFileTypes: true })) {
-      if (!entrada.isDirectory()) continue;
-
-      const clienteIdOrigem = entrada.name;
-      const arquivoFila = path.join(clientesDir, clienteIdOrigem, "fila.json");
-
-      if (!fs.existsSync(arquivoFila)) continue;
-
-      try {
-        const dados = JSON.parse(fs.readFileSync(arquivoFila, "utf8") || "[]");
-
-        if (Array.isArray(dados)) {
-          for (const oferta of dados) {
-            adicionar(oferta, clienteIdOrigem);
-          }
+      if (Array.isArray(dados)) {
+        for (const oferta of dados) {
+          adicionar(oferta, clienteIdOrigem);
         }
-      } catch (e) {
-        console.log("[RADAR] Falha ao ler fila do cliente:", {
-          clienteId: clienteIdOrigem,
-          erro: e.message
-        });
       }
+    } catch (e) {
+      console.log("[RADAR] Falha ao ler fila do cliente:", {
+        clienteId: clienteIdOrigem,
+        erro: e.message
+      });
     }
   }
 
@@ -3886,11 +4014,8 @@ function getRadarDescartesFile(clienteId = "admin") {
 }
 
 function lerHistoricoRadar(clienteId = "admin") {
-  const arquivo = getRadarHistoricoFile(clienteId);
-
   try {
-    if (!fs.existsSync(arquivo)) return [];
-    const dados = JSON.parse(fs.readFileSync(arquivo, "utf8") || "[]");
+    const dados = readClienteJson(clienteId, "radar-historico.json", []);
     return Array.isArray(dados) ? dados : [];
   } catch (e) {
     console.log("[RADAR] Falha ao ler historico:", e.message);
@@ -3899,11 +4024,8 @@ function lerHistoricoRadar(clienteId = "admin") {
 }
 
 function lerPreviewRadar(clienteId = "admin") {
-  const arquivo = getRadarPreviewFile(clienteId);
-
   try {
-    if (!fs.existsSync(arquivo)) return [];
-    const dados = JSON.parse(fs.readFileSync(arquivo, "utf8") || "[]");
+    const dados = readClienteJson(clienteId, "radar-preview.json", []);
     return Array.isArray(dados) ? dados : [];
   } catch (e) {
     console.log("[RADAR] Falha ao ler preview:", e.message);
@@ -3912,11 +4034,8 @@ function lerPreviewRadar(clienteId = "admin") {
 }
 
 function lerDescartesRadar(clienteId = "admin") {
-  const arquivo = getRadarDescartesFile(clienteId);
-
   try {
-    if (!fs.existsSync(arquivo)) return { ids: [], chaves: [] };
-    const dados = JSON.parse(fs.readFileSync(arquivo, "utf8") || "{}");
+    const dados = readClienteJson(clienteId, "radar-descartes.json", { ids: [], chaves: [] });
     return {
       ids: Array.isArray(dados.ids) ? dados.ids.map(String) : [],
       chaves: Array.isArray(dados.chaves) ? dados.chaves.map(String) : []
@@ -3928,26 +4047,23 @@ function lerDescartesRadar(clienteId = "admin") {
 }
 
 function salvarHistoricoRadar(clienteId = "admin", eventos = []) {
-  const arquivo = getRadarHistoricoFile(clienteId);
   const ultimos = Array.isArray(eventos) ? eventos.slice(-200) : [];
-  fs.writeFileSync(arquivo, JSON.stringify(ultimos, null, 2));
+  writeClienteJson(clienteId, "radar-historico.json", ultimos);
 }
 
 function salvarPreviewRadar(clienteId = "admin", eventos = []) {
-  const arquivo = getRadarPreviewFile(clienteId);
   const ultimos = Array.isArray(eventos) ? eventos.slice(-200) : [];
-  fs.writeFileSync(arquivo, JSON.stringify(ultimos, null, 2));
+  writeClienteJson(clienteId, "radar-preview.json", ultimos);
 }
 
 function salvarDescartesRadar(clienteId = "admin", descartes = {}) {
-  const arquivo = getRadarDescartesFile(clienteId);
   const ids = [...new Set(Array.isArray(descartes.ids) ? descartes.ids.map(String).filter(Boolean) : [])];
   const chaves = [...new Set(Array.isArray(descartes.chaves) ? descartes.chaves.map(String).filter(Boolean) : [])];
-  fs.writeFileSync(arquivo, JSON.stringify({
+  writeClienteJson(clienteId, "radar-descartes.json", {
     ids,
     chaves,
     atualizadoEm: new Date().toISOString()
-  }, null, 2));
+  });
 }
 
 function resumirMensagemRadar(texto = "") {
@@ -4480,15 +4596,10 @@ function listarTelegramRadarCliente(clienteId = "admin") {
 }
 
 function carregarRadarConfigCliente(clienteId = "admin") {
-  const arquivo = getRadarConfigFile(clienteId);
   const padrao = radarConfigPadrao();
 
-  if (!fs.existsSync(arquivo)) {
-    return padrao;
-  }
-
   try {
-    const dados = JSON.parse(fs.readFileSync(arquivo, "utf8") || "{}");
+    const dados = readClienteJson(clienteId, "radar-config.json", padrao);
 
     const sessoesWhatsappMonitoradas = normalizarSessoesWhatsappMonitoradasRadar(dados);
     const gruposMonitoradosLegado = achatarGruposWhatsappMonitoradosRadar(sessoesWhatsappMonitoradas);
@@ -4682,7 +4793,6 @@ function normalizarHoraRadar(valor, fallback) {
 }
 
 function salvarRadarConfigCliente(clienteId = "admin", dados = {}) {
-  const arquivo = getRadarConfigFile(clienteId);
   const padrao = radarConfigPadrao();
   const atual = carregarRadarConfigCliente(clienteId);
   const possuiCampo = campo => Object.prototype.hasOwnProperty.call(dados, campo);
@@ -4779,7 +4889,7 @@ function salvarRadarConfigCliente(clienteId = "admin", dados = {}) {
     atualizadoEm: new Date().toISOString()
   };
 
-  fs.writeFileSync(arquivo, JSON.stringify(payload, null, 2));
+  writeClienteJson(clienteId, "radar-config.json", payload);
 
   return payload;
 }
@@ -6680,6 +6790,7 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     criadoEm: ofertaPreparada.criadoEm || agoraBR
   };
 
+  validarCupomMonetarioOferta(ofertaCliente);
   aplicarPrioridadeEnvioOferta(ofertaCliente);
   ofertaCliente.prioridadeFila = ofertaCliente.prioridadeEnvio;
 
@@ -9137,6 +9248,7 @@ const novaOferta = {
 
 novaOferta.status = novaOferta.status || "pendente";
 novaOferta.statusDetalhe = novaOferta.statusDetalhe || "Na fila";
+validarCupomMonetarioOferta(novaOferta);
 aplicarPrioridadeEnvioOferta(novaOferta);
 
 const adicionou = adicionarOfertaNaFila(fila, novaOferta, "manual-magalu");
@@ -10016,6 +10128,7 @@ if (deveIgnorarOfertaRepetida(ofertaCliente)) {
 
 ofertaCliente.status = ofertaCliente.status || "pendente";
 ofertaCliente.statusDetalhe = ofertaCliente.statusDetalhe || "Na fila";
+validarCupomMonetarioOferta(ofertaCliente);
 aplicarPrioridadeEnvioOferta(ofertaCliente);
 
 // â­ SCORE V1
