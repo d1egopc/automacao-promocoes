@@ -388,6 +388,16 @@ function salvarBrandingOficial(dados = {}) {
   return { ok: true, branding: atualizado };
 }
 
+function restaurarBrandingOficial() {
+  const padrao = {
+    ...brandingPadrao(),
+    atualizadoEm: new Date().toISOString()
+  };
+
+  writeGlobalJson("branding.json", padrao);
+  return padrao;
+}
+
 console.log("[OK]📂Salvando dados em:", FILA_FILE);
 
 function gerarChaveProduto(titulo = "") {
@@ -3888,6 +3898,7 @@ function auth(req, res, next) {
   if (
     req.path === "/" ||
     req.path === "/login" ||
+    (req.method === "GET" && req.path === "/branding") ||
     req.path === "/kabum/importar" ||
     req.path === "/kabum/importar-teste" ||
     req.path === "/conectar" ||
@@ -7195,6 +7206,31 @@ app.post("/branding", (req, res) => {
       ok: true,
       escopo: "oficial",
       branding: resultado.branding
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
+
+app.delete("/branding", (req, res) => {
+  try {
+    if (!isAdminMaster(req)) {
+      return res.status(403).json({
+        ok: false,
+        erro: "Acesso restrito ao admin_master"
+      });
+    }
+
+    const branding = restaurarBrandingOficial();
+
+    return res.json({
+      ok: true,
+      escopo: "oficial",
+      restaurado: true,
+      branding
     });
   } catch (e) {
     return res.status(500).json({
