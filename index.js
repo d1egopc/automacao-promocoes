@@ -584,6 +584,91 @@ function ordenarPendentesPorDiversidade(itens = []) {
   return filaOrdenada;
 }
 
+function dataFilaMs(oferta = {}) {
+  const data = oferta.criadoEm || oferta.dataEntradaFila || 0;
+  const ms = new Date(data).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function prioridadeEnvioOferta(oferta = {}) {
+  const prioridade = Number(oferta.prioridadeEnvio ?? 40);
+  return Number.isFinite(prioridade) ? prioridade : 40;
+}
+
+function ordenarPendentesPorPrioridade(pendentes = []) {
+  return [...pendentes].sort((a, b) => {
+    const prioridadeA = prioridadeEnvioOferta(a);
+    const prioridadeB = prioridadeEnvioOferta(b);
+
+    if (prioridadeB !== prioridadeA) {
+      return prioridadeB - prioridadeA;
+    }
+
+    return dataFilaMs(a) - dataFilaMs(b);
+  });
+}
+
+function ofertaExpiradaParaEnvio(oferta = {}, agora = Date.now()) {
+  if (!oferta.expiraEm) return false;
+  const expiraEmMs = new Date(oferta.expiraEm).getTime();
+  return Number.isFinite(expiraEmMs) && expiraEmMs < agora;
+}
+
+function marcarOfertaExpirada(oferta = {}) {
+  oferta.status = "expirado";
+  oferta.statusDetalhe = "Oferta/cupom expirado antes do envio";
+  oferta.expiradaEm = new Date().toISOString();
+
+  console.log("⏰ OFERTA EXPIRADA:", {
+    titulo: oferta.titulo || oferta.nome || "",
+    expiraEm: oferta.expiraEm || ""
+  });
+}
+
+function selecionarProximaOfertaFila(clienteIdAlvo = null) {
+  const pendentes = fila.filter(o => {
+    const mesmoCliente =
+      !clienteIdAlvo ||
+      String(o.clienteId || "admin") === String(clienteIdAlvo);
+
+    if (!mesmoCliente) return false;
+    if (o.status !== "pendente") return false;
+
+    if (o.proximaTentativaEnvioEm) {
+      const proxima = Date.parse(o.proximaTentativaEnvioEm);
+      if (Number.isFinite(proxima) && proxima > Date.now()) return false;
+    }
+
+    const clienteIdOferta = o.clienteId || "admin";
+    const configClienteOferta =
+      configsPorCliente?.[clienteIdOferta] || config;
+
+    return configClienteOferta.automacaoAtiva === true;
+  });
+
+  let expirouAlguma = false;
+
+  for (const oferta of ordenarPendentesPorPrioridade(pendentes)) {
+    if (ofertaExpiradaParaEnvio(oferta)) {
+      marcarOfertaExpirada(oferta);
+      expirouAlguma = true;
+      continue;
+    }
+
+    if (expirouAlguma) {
+      salvarFila(oferta.clienteId || clienteIdAlvo || "admin");
+    }
+
+    return oferta;
+  }
+
+  if (expirouAlguma) {
+    salvarFila(clienteIdAlvo || "admin");
+  }
+
+  return null;
+}
+
 function aplicarDiversidadeFila(clienteId = "admin") {
   const cliente = String(clienteId || "admin");
   const itensCliente = fila.filter(item =>
@@ -1484,6 +1569,101 @@ function registrarCupomAtivo(regra = {}) {
 
 // ====================== FUNCAO PREPARA OFERTA GLOBAL =========================
 
+function dataExpiracaoPrioridade(horas = 0) {
+  if (!horas) return "";
+  return new Date(Date.now() + horas * 60 * 60 * 1000).toISOString();
+}
+
+function aplicarPrioridadeEnvioOferta(oferta = {}) {
+  if (!oferta || typeof oferta !== "object") return oferta;
+
+  if (oferta.prioridadeEnvio !== undefined && oferta.motivoPrioridade) {
+    return oferta;
+  }
+
+  const origem = String(oferta.origem || "").toLowerCase();
+  const ehRadar = origem === "radar" || oferta.radar === true || oferta.radarNaFila === true;
+  const ehManualEscolhida =
+    !ehRadar &&
+    (
+      oferta.manual === true ||
+      origem === "manual" ||
+      origem.startsWith("manual-") ||
+      oferta.origemManual === true
+    );
+
+  if (ehRadar) {
+    const cupomReal = oferta.cupomConfirmado === true || oferta.cupomValidado === true || oferta.cupomTipo === "real";
+    const cupomDetectado = Boolean(oferta.cupom || oferta.cupomDetectado === true || oferta.cupomDetectadoTexto === true);
+    const cupomProvavel = Boolean(oferta.possivelCupom || oferta.avisoCupom || oferta.beneficioExtra || oferta.linkResgateCupom);
+    const scoreAlto = Number(oferta.radarScore || oferta.score || 0) >= 60;
+
+    oferta.origem = "radar";
+
+    if (cupomReal) {
+      oferta.prioridadeEnvio = 110;
+      oferta.cupomTipo = "real";
+      oferta.cupomDetectado = true;
+      oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(4);
+      oferta.motivoPrioridade = "Cupom real detectado pelo Radar";
+      return oferta;
+    }
+
+    if (cupomDetectado) {
+      oferta.prioridadeEnvio = 95;
+      oferta.cupomTipo = "detectado";
+      oferta.cupomDetectado = true;
+      oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(4);
+      oferta.motivoPrioridade = "Cupom detectado pelo Radar";
+      return oferta;
+    }
+
+    if (cupomProvavel) {
+      oferta.prioridadeEnvio = 80;
+      oferta.cupomTipo = "provavel";
+      oferta.cupomDetectado = true;
+      oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(3);
+      oferta.motivoPrioridade = "Cupom provável detectado pelo Radar";
+      return oferta;
+    }
+
+    oferta.prioridadeEnvio = scoreAlto ? 60 : 40;
+    oferta.cupomTipo = "nenhum";
+    oferta.cupomDetectado = false;
+    oferta.expiraEm = oferta.expiraEm || (scoreAlto ? dataExpiracaoPrioridade(8) : "");
+    oferta.motivoPrioridade = scoreAlto
+      ? "Oferta Radar com score alto"
+      : "Oferta comum";
+    return oferta;
+  }
+
+  if (ehManualEscolhida) {
+    oferta.origem = "manual";
+    oferta.prioridadeEnvio = 100;
+    oferta.cupomTipo = oferta.cupom ? "detectado" : "nenhum";
+    oferta.cupomDetectado = Boolean(oferta.cupom);
+    oferta.motivoPrioridade = "Oferta escolhida manualmente pelo usuário";
+    return oferta;
+  }
+
+  oferta.origem = oferta.origem || "manual";
+  oferta.prioridadeEnvio = 40;
+  oferta.cupomTipo = "nenhum";
+  oferta.cupomDetectado = false;
+  oferta.motivoPrioridade = "Oferta comum";
+  return oferta;
+}
+
+function logPrioridadeFila(oferta = {}) {
+  console.log("🧠 PRIORIDADE FILA:", {
+    titulo: oferta.titulo || oferta.nome || "",
+    origem: oferta.origem || "",
+    cupomTipo: oferta.cupomTipo || "",
+    prioridadeEnvio: prioridadeEnvioOferta(oferta),
+    motivoPrioridade: oferta.motivoPrioridade || ""
+  });
+}
+
 function prepararOfertaGlobal(oferta = {}) {
  
 if (!oferta.id) {
@@ -1532,6 +1712,8 @@ oferta.preco = oferta.preco || oferta.precoAtual || "";
 oferta.avisoPagamento = oferta.avisoPagamento || "";
 oferta.parcelamento = oferta.parcelamento || "";
 oferta.avisoCupom = oferta.avisoCupom || "";
+
+  aplicarPrioridadeEnvioOferta(oferta);
 
   return oferta;
 }
@@ -1861,27 +2043,7 @@ async function processarFila(clienteIdAlvo = null) {
   let oferta = null;
 
   try {
-    oferta = fila.find(o => {
-
-  const mesmoCliente =
-    !clienteIdAlvo ||
-    String(o.clienteId || "admin") === String(clienteIdAlvo);
-
-  if (!mesmoCliente) return false;
-
-  if (o.status !== "pendente") return false;
-
-  if (o.proximaTentativaEnvioEm) {
-    const proxima = Date.parse(o.proximaTentativaEnvioEm);
-    if (Number.isFinite(proxima) && proxima > Date.now()) return false;
-  }
-
-  const clienteIdOferta = o.clienteId || "admin";
-  const configClienteOferta =
-    configsPorCliente?.[clienteIdOferta] || config;
-
-  return configClienteOferta.automacaoAtiva === true;
-});
+    oferta = selecionarProximaOfertaFila(clienteIdAlvo);
 
 if (!oferta) {
   console.log("[FILA] Nenhuma oferta pendente");
@@ -2398,9 +2560,11 @@ if (deveIgnorarOfertaRepetida(oferta)) {
 
 oferta.status = "pendente";
 oferta.statusDetalhe = "Na fila";
+aplicarPrioridadeEnvioOferta(oferta);
 
 registrarOfertaVista(oferta);
 
+logPrioridadeFila(oferta);
 fila.unshift(oferta);
 salvarFila(clienteId);
 
@@ -6516,6 +6680,9 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     criadoEm: ofertaPreparada.criadoEm || agoraBR
   };
 
+  aplicarPrioridadeEnvioOferta(ofertaCliente);
+  ofertaCliente.prioridadeFila = ofertaCliente.prioridadeEnvio;
+
   if (!existeDestinoCompativelRadar(clienteId, ofertaCliente)) {
     console.log("[RADAR-DECISAO]", {
       clienteId,
@@ -6664,6 +6831,7 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
     return { ok: false, motivo: "limite_radar_sem_cupom" };
   }
 
+  logPrioridadeFila(oferta);
   fila.push(oferta);
   registrarOfertaVista(oferta);
   salvarFila(clienteId);
@@ -8969,10 +9137,12 @@ const novaOferta = {
 
 novaOferta.status = novaOferta.status || "pendente";
 novaOferta.statusDetalhe = novaOferta.statusDetalhe || "Na fila";
+aplicarPrioridadeEnvioOferta(novaOferta);
 
 const adicionou = adicionarOfertaNaFila(fila, novaOferta, "manual-magalu");
 
 if (adicionou) {
+  logPrioridadeFila(novaOferta);
   salvarFila(clienteId);
 }
 
@@ -9846,6 +10016,7 @@ if (deveIgnorarOfertaRepetida(ofertaCliente)) {
 
 ofertaCliente.status = ofertaCliente.status || "pendente";
 ofertaCliente.statusDetalhe = ofertaCliente.statusDetalhe || "Na fila";
+aplicarPrioridadeEnvioOferta(ofertaCliente);
 
 // â­ SCORE V1
 try {
@@ -9870,6 +10041,7 @@ try {
 
 registrarOfertaVista(ofertaCliente);
 
+logPrioridadeFila(ofertaCliente);
 fila.push(ofertaCliente);
 
 salvarFila(clienteId);
