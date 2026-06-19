@@ -61,6 +61,10 @@ function normalizarCupomMensagemRadar(cupom = "") {
     "PAGINA",
     "LOJA",
     "OFICIAL",
+    "LINK",
+    "LINKS",
+    "APP",
+    "SITE",
     "RESGATE",
     "RESGATAR",
     "SHOPEE",
@@ -82,9 +86,28 @@ function normalizarCupomMensagemRadar(cupom = "") {
 function extrairCupomTextoRadar(texto = "") {
   const fonte = String(texto || "");
   const padroes = [
-    /(?:use\s+o\s+cupom|use\s+cupom|cupom|resgate\s+o\s+cupom|resgate\s+cupom|aplique\s+o\s+cupom|com\s+cupom|usando\s+o\s+cupom|utilize\s+o\s+cupom)\s*[:\-]?\s*([A-Z0-9][A-Z0-9_-]{3,29})/gi,
+    /(?:use\s+o\s+cupom|use\s+cupom|use|cupom|resgate\s+o\s+cupom|resgate\s+cupom|resgate|aplique\s+o\s+cupom|aplique\s+cupom|aplique|com\s+o\s+cupom|com\s+cupom|usando\s+o\s+cupom|utilize\s+o\s+cupom)\s*[:\-]?\s*([A-Z0-9][A-Z0-9_-]{3,29})/gi,
     /(?:resgate\s+os\s+cupons|cupons)\s*[:\-]\s*([A-Z0-9][A-Z0-9_-]{3,29})/gi,
     /(?:codigo|c[oó]digo|coupon)\s*[:\-]?\s*([A-Z0-9][A-Z0-9_-]{3,29})/gi
+  ];
+
+  for (const regex of padroes) {
+    let match;
+    while ((match = regex.exec(fonte))) {
+      const cupom = normalizarCupomMensagemRadar(match[1]);
+      if (cupom) return cupom;
+    }
+  }
+
+  return "";
+}
+
+function extrairCupomTextoRadarGenerico(texto = "") {
+  const fonte = String(texto || "");
+  const padroes = [
+    /(?:use\s+o\s+cupom|use\s+cupom|use|cupom|resgate\s+o\s+cupom|resgate\s+cupom|resgate|aplique\s+o\s+cupom|aplique\s+cupom|aplique|com\s+o\s+cupom|com\s+cupom|usando\s+o\s+cupom|utilize\s+o\s+cupom)\s*[:\-]?\s*([A-Z0-9][A-Z0-9_-]{3,29})/gi,
+    /(?:resgate\s+os\s+cupons|cupons)\s*[:\-]\s*([A-Z0-9][A-Z0-9_-]{3,29})/gi,
+    /(?:codigo|c[oó]digo|promocode|promo\s*code|coupon)\s*[:\-]?\s*([A-Z0-9][A-Z0-9_-]{3,29})/gi
   ];
 
   for (const regex of padroes) {
@@ -135,7 +158,7 @@ function textoIndicaResgateCupomRadar(texto = "") {
 }
 
 function analisarBeneficiosMensagemRadar(texto = "", links = []) {
-  const cupom = extrairCupomTextoRadar(texto);
+  const cupom = extrairCupomTextoRadarGenerico(texto);
   const linksResgate = [];
   const beneficiosPorLink = {};
 
@@ -174,7 +197,7 @@ module.exports = {
   limparLinkRadar,
   extrairLinksRadar,
   normalizarCupomMensagemRadar,
-  extrairCupomTextoRadar,
+  extrairCupomTextoRadar: extrairCupomTextoRadarGenerico,
   trechoProximoLinkRadar,
   textoIndicaResgateCupomRadar,
   analisarBeneficiosMensagemRadar
