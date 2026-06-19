@@ -1,10 +1,12 @@
 ﻿const axios = require("axios");
-const fs = require("fs");
-const path = require("path");
+const {
+  readGlobalJson,
+  writeGlobalJson
+} = require("../../utils/storage");
 
 // ================= MOTOR UNIVERSAL DE CUPONS =================
 
-const ARQUIVO_CUPONS_ML = "/data/cupons_ml.json";
+const ARQUIVO_CUPONS_ML = "cupons_ml.json";
 
 const CUPONS_CONFIRMADOS_ML = [
   {
@@ -35,15 +37,10 @@ const CUPONS_CONFIRMADOS_ML = [
 
 function garantirArquivoCuponsML() {
   try {
-    if (!fs.existsSync("/data")) {
-      fs.mkdirSync("/data", { recursive: true });
-    }
+    const atual = readGlobalJson(ARQUIVO_CUPONS_ML, null);
 
-    if (!fs.existsSync(ARQUIVO_CUPONS_ML)) {
-      fs.writeFileSync(
-        ARQUIVO_CUPONS_ML,
-        JSON.stringify(CUPONS_CONFIRMADOS_ML, null, 2)
-      );
+    if (!Array.isArray(atual)) {
+      writeGlobalJson(ARQUIVO_CUPONS_ML, CUPONS_CONFIRMADOS_ML);
     }
   } catch (e) {
     console.log("[ERRO] [ML-CUPOM]", {
@@ -56,8 +53,7 @@ function carregarCuponsML() {
   try {
     garantirArquivoCuponsML();
 
-    const conteudo = fs.readFileSync(ARQUIVO_CUPONS_ML, "utf8");
-    const cupons = JSON.parse(conteudo);
+    const cupons = readGlobalJson(ARQUIVO_CUPONS_ML, CUPONS_CONFIRMADOS_ML);
 
    return Array.isArray(cupons) ? cupons : [];
   } catch (e) {
@@ -72,10 +68,7 @@ function salvarCuponsML(cupons = []) {
   try {
     garantirArquivoCuponsML();
 
-    fs.writeFileSync(
-      ARQUIVO_CUPONS_ML,
-      JSON.stringify(cupons, null, 2)
-    );
+    writeGlobalJson(ARQUIVO_CUPONS_ML, cupons);
 
     return true;
   } catch (e) {
@@ -576,4 +569,3 @@ module.exports = {
   buscarCuponsPaginaMercadoLivre,
   escolherCupomMercadoLivreParaOferta
 };
-
