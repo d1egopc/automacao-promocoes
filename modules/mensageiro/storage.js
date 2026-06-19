@@ -1,5 +1,12 @@
 ﻿const fs = require("fs");
 const path = require("path");
+const {
+  getClienteJsonPath,
+  readClienteJson,
+  writeClienteJson,
+  readGlobalJson,
+  writeGlobalJson
+} = require("../../utils/storage");
 
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const MENSAGEIRO_FILE = path.join(DATA_DIR, "mensageiro.json");
@@ -24,7 +31,7 @@ function getDiretorioCliente(clienteId) {
 }
 
 function getMensageiroConfigFile(clienteId) {
-  return path.join(getDiretorioCliente(clienteId), "mensageiro-config.json");
+  return getClienteJsonPath(clienteId, "mensageiro-config.json");
 }
 
 function criarAtendimentoPadraoMensageiro() {
@@ -60,11 +67,7 @@ function normalizarConfigMensageiro(clienteId, config = {}) {
 
 function carregarMensageiro() {
   try {
-    if (fs.existsSync(MENSAGEIRO_FILE)) {
-      mensageiroPorCliente = JSON.parse(
-        fs.readFileSync(MENSAGEIRO_FILE, "utf8")
-      );
-    }
+    mensageiroPorCliente = readGlobalJson("mensageiro.json", {});
 
     console.log(
       "âœ… Mensageiro carregado:",
@@ -78,10 +81,7 @@ function carregarMensageiro() {
 
 function salvarMensageiro() {
   try {
-    fs.writeFileSync(
-      MENSAGEIRO_FILE,
-      JSON.stringify(mensageiroPorCliente, null, 2)
-    );
+    writeGlobalJson("mensageiro.json", mensageiroPorCliente);
   } catch (e) {
     console.log("[ERRO] [MENSAGEIRO] Erro ao salvar mensageiro:", e.message);
   }
@@ -221,13 +221,10 @@ function normalizarConfigAtendimentoCliente(clienteId, config = {}) {
 }
 
 function getAtendimentoConfigCliente(clienteId) {
-  const arquivo = getMensageiroConfigFile(clienteId);
   let config = criarConfigAtendimentoPadrao(clienteId);
 
   try {
-    if (fs.existsSync(arquivo)) {
-      config = JSON.parse(fs.readFileSync(arquivo, "utf8"));
-    }
+    config = readClienteJson(clienteId, "mensageiro-config.json", config);
   } catch (e) {
     console.log("[ERRO] [MENSAGEIRO] Erro ao ler atendimento:", e.message);
   }
@@ -235,8 +232,7 @@ function getAtendimentoConfigCliente(clienteId) {
   const normalizado = normalizarConfigAtendimentoCliente(clienteId, config);
 
   try {
-    garantirDiretorio(path.dirname(arquivo));
-    fs.writeFileSync(arquivo, JSON.stringify(normalizado, null, 2));
+    writeClienteJson(clienteId, "mensageiro-config.json", normalizado);
   } catch (e) {
     console.log("[ERRO] [MENSAGEIRO] Erro ao salvar atendimento:", e.message);
   }
@@ -255,9 +251,7 @@ function setAtendimentoConfigCliente(clienteId, dados = {}) {
   });
 
   try {
-    const arquivo = getMensageiroConfigFile(clienteId);
-    garantirDiretorio(path.dirname(arquivo));
-    fs.writeFileSync(arquivo, JSON.stringify(atualizado, null, 2));
+    writeClienteJson(clienteId, "mensageiro-config.json", atualizado);
   } catch (e) {
     console.log("[ERRO] [MENSAGEIRO] Erro ao persistir atendimento:", e.message);
   }
