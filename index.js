@@ -660,6 +660,200 @@ function sanearExpiradosFila(clienteId = "admin") {
   return alterou;
 }
 
+const filaInteligenteUltimoAbastecimento = new Map();
+const FILA_INTELIGENTE_COOLDOWN_MS = 5 * 60 * 1000;
+
+function avaliarSaudeFilaCliente(clienteId = "admin") {
+  const cliente = String(clienteId || "admin");
+  const filaCliente = readClienteJson(cliente, "fila.json", []);
+  const itens = Array.isArray(filaCliente) ? filaCliente : [];
+  const pendentes = itens.filter(item => item?.status === "pendente").length;
+
+  let status = "normal";
+  let deveAbastecer = false;
+  let motivo = "Fila com volume operacional normal.";
+
+  if (pendentes <= 3) {
+    status = "critica";
+    deveAbastecer = true;
+    motivo = "Fila com 3 ou menos ofertas pendentes.";
+  } else if (pendentes <= 8) {
+    status = "baixa";
+    deveAbastecer = true;
+    motivo = "Fila com 8 ou menos ofertas pendentes.";
+  } else if (pendentes >= 15) {
+    status = "cheia";
+    motivo = "Fila com 15 ou mais ofertas pendentes.";
+  }
+
+  console.log(
+    `🧠 FILA IA: cliente ${cliente} pendentes ${pendentes} status ${status} deveAbastecer ${deveAbastecer}`
+  );
+
+  return {
+    clienteId: cliente,
+    pendentes,
+    status,
+    deveAbastecer,
+    motivo
+  };
+}
+
+async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
+  const cliente = String(clienteId || "admin");
+  const maximo = Math.max(0, Math.min(Number(limite) || 3, 3));
+  const resultado = {
+    marketplace: "mercadolivre",
+    adicionadas: 0,
+    ignoradas: 0,
+    erros: []
+  };
+
+  try {
+    if (maximo <= 0) return resultado;
+
+    if (!config.marketplaces?.mercadolivre?.ativo) {
+      resultado.erros.push("mercadolivre_desativado");
+      return resultado;
+    }
+
+    if (!usuarioTemIntegracaoMarketplace(cliente, "mercadolivre")) {
+      resultado.erros.push("integracao_mercadolivre_ausente");
+      return resultado;
+    }
+
+    const filaControlada = [];
+
+    filaControlada.push = (oferta) => {
+      if (resultado.adicionadas >= maximo) {
+        resultado.ignoradas += 1;
+        return fila.length;
+      }
+
+      fila.push(oferta);
+      resultado.adicionadas += 1;
+      return fila.length;
+    };
+
+    const ofertaJaExisteControlada = (novaOferta) => {
+      if (resultado.adicionadas >= maximo) {
+        resultado.ignoradas += 1;
+        return true;
+      }
+
+      const existe = ofertaJaExiste(novaOferta);
+      if (existe) resultado.ignoradas += 1;
+      return existe;
+    };
+
+    const configControlada = {
+      ...config,
+      marketplaces: {
+        ...(config.marketplaces || {}),
+        mercadolivre: {
+          ...(config.marketplaces?.mercadolivre || {}),
+          limiteBuscasPorRodada: 1
+        }
+      }
+    };
+
+    await farejarMercadoLivreModulo(cliente, {
+      config: configControlada,
+      integracoesPorCliente,
+      getIntegracaoCliente,
+      fila: filaControlada,
+      salvarFila: () => salvarFila(cliente),
+      prepararOfertaGlobal,
+      ofertaJaExiste: ofertaJaExisteControlada,
+      deveIgnorarOfertaRepetida,
+      registrarOfertaVista,
+      classificarCategoriaOferta,
+      gerarBuscasGlobais,
+      gerarHeadersStealth,
+      farejarCuponsMercadoLivre,
+      importarMercadoLivre: (url, clienteIdAlvo = cliente) =>
+        importarMercadoLivre(url, clienteIdAlvo, {
+          getIntegracaoCliente,
+          gerarLinkAfiliadoMercadoLivre
+        })
+    });
+
+    if (resultado.adicionadas > 0) {
+      salvarFila(cliente);
+    }
+  } catch (e) {
+    resultado.erros.push(e.message || "erro_abastecimento_mercadolivre");
+  }
+
+  return resultado;
+}
+
+async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
+  const cliente = String(clienteId || "admin");
+  const saude = avaliarSaudeFilaCliente(cliente);
+  const simulado = opcoes.simulado !== false;
+
+  if (!saude.deveAbastecer) {
+    return {
+      ok: true,
+      clienteId: cliente,
+      abasteceu: false,
+      modo: simulado ? "simulado" : "real",
+      motivo: saude.motivo,
+      saude
+    };
+  }
+
+  const agora = Date.now();
+  const ultimo = filaInteligenteUltimoAbastecimento.get(cliente) || 0;
+  const restanteMs = FILA_INTELIGENTE_COOLDOWN_MS - (agora - ultimo);
+
+  if (!opcoes.ignorarCooldown && restanteMs > 0) {
+    return {
+      ok: true,
+      clienteId: cliente,
+      abasteceu: false,
+      modo: "cooldown",
+      motivo: "Abastecimento ja executado ha menos de 5 minutos.",
+      cooldownRestanteSegundos: Math.ceil(restanteMs / 1000),
+      saude
+    };
+  }
+
+  filaInteligenteUltimoAbastecimento.set(cliente, agora);
+
+  if (!simulado) {
+    const abastecimento = await abastecerFilaComMercadoLivre(cliente, 3);
+
+    console.log(
+      `🧠 FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo real`
+    );
+
+    return {
+      ok: true,
+      clienteId: cliente,
+      abasteceu: abastecimento.adicionadas > 0,
+      modo: "real",
+      motivo: saude.motivo,
+      saude,
+      abastecimento
+    };
+  }
+
+  console.log(
+    `🧠 FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo simulado`
+  );
+
+  return {
+    ok: true,
+    clienteId: cliente,
+    abasteceu: true,
+    modo: "simulado",
+    motivo: saude.motivo,
+    saude
+  };
+}
+
 function selecionarProximaOfertaFila(clienteIdAlvo = null) {
   const pendentes = fila.filter(o => {
     const mesmoCliente =
@@ -3943,6 +4137,59 @@ function auth(req, res, next) {
 carregarConfig();
 
 app.use(auth);
+
+app.get("/fila/inteligencia/status", (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+
+    if (req.usuario?.papel === "admin_master") {
+      const clientes = Array.from(new Set([
+        clienteId,
+        ...usuarios.map(usuario => usuario?.id).filter(Boolean),
+        ...listClientes()
+      ]));
+
+      const resultados = clientes.map(id => avaliarSaudeFilaCliente(id));
+
+      return res.json({
+        ok: true,
+        modo: "admin_master",
+        totalClientes: resultados.length,
+        resultados
+      });
+    }
+
+    return res.json({
+      ok: true,
+      modo: "cliente",
+      resultado: avaliarSaudeFilaCliente(clienteId)
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
+
+app.post("/fila/inteligencia/abastecer", async (req, res) => {
+  try {
+    const clienteToken = getClienteId(req);
+    const clienteSolicitado = String(req.body?.clienteId || clienteToken || "admin");
+    const clienteId =
+      req.usuario?.papel === "admin_master"
+        ? clienteSolicitado
+        : clienteToken;
+    const simulado = req.body?.simulado !== false;
+
+    return res.json(await abastecerFilaSeNecessario(clienteId, { simulado }));
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
 
 function lerFilasRadarSomenteLeitura() {
   const itens = [];
