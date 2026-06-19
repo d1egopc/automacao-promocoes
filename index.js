@@ -630,6 +630,26 @@ function marcarOfertaExpirada(oferta = {}) {
   });
 }
 
+function sanearExpiradosFila(clienteId = "admin") {
+  const cliente = String(clienteId || "admin");
+  let alterou = false;
+
+  for (const oferta of fila) {
+    if (String(oferta?.clienteId || "admin") !== cliente) continue;
+    if (oferta.status !== "pendente") continue;
+    if (!ofertaExpiradaParaEnvio(oferta)) continue;
+
+    marcarOfertaExpirada(oferta);
+    alterou = true;
+  }
+
+  if (alterou) {
+    salvarFila(cliente);
+  }
+
+  return alterou;
+}
+
 function selecionarProximaOfertaFila(clienteIdAlvo = null) {
   const pendentes = fila.filter(o => {
     const mesmoCliente =
@@ -2181,6 +2201,8 @@ async function processarFila(clienteIdAlvo = null) {
   let oferta = null;
 
   try {
+    sanearExpiradosFila(clienteFila);
+
     oferta = selecionarProximaOfertaFila(clienteIdAlvo);
 
 if (!oferta) {
@@ -2733,6 +2755,8 @@ configCliente.automacaoAtiva = automacaoAnterior;
 
 app.get("/fila", (req, res) => {
   const clienteId = getClienteId(req);
+
+  sanearExpiradosFila(clienteId);
 
   const itensCliente = fila.filter((o) =>
     (o.clienteId || "admin") === clienteId
@@ -4013,6 +4037,10 @@ function getRadarDescartesFile(clienteId = "admin") {
   return path.join(getClienteDir(clienteId), "radar-descartes.json");
 }
 
+function getRadarTratadasFile(clienteId = "admin") {
+  return path.join(getClienteDir(clienteId), "radar-tratadas.json");
+}
+
 function lerHistoricoRadar(clienteId = "admin") {
   try {
     const dados = readClienteJson(clienteId, "radar-historico.json", []);
@@ -4046,6 +4074,20 @@ function lerDescartesRadar(clienteId = "admin") {
   }
 }
 
+function lerTratadasRadar(clienteId = "admin") {
+  try {
+    const dados = readClienteJson(clienteId, "radar-tratadas.json", { ids: [], chaves: [], itens: [] });
+    return {
+      ids: Array.isArray(dados.ids) ? dados.ids.map(String) : [],
+      chaves: Array.isArray(dados.chaves) ? dados.chaves.map(String) : [],
+      itens: Array.isArray(dados.itens) ? dados.itens : []
+    };
+  } catch (e) {
+    console.log("[RADAR] Falha ao ler tratadas:", e.message);
+    return { ids: [], chaves: [], itens: [] };
+  }
+}
+
 function salvarHistoricoRadar(clienteId = "admin", eventos = []) {
   const ultimos = Array.isArray(eventos) ? eventos.slice(-200) : [];
   writeClienteJson(clienteId, "radar-historico.json", ultimos);
@@ -4062,6 +4104,19 @@ function salvarDescartesRadar(clienteId = "admin", descartes = {}) {
   writeClienteJson(clienteId, "radar-descartes.json", {
     ids,
     chaves,
+    atualizadoEm: new Date().toISOString()
+  });
+}
+
+function salvarTratadasRadar(clienteId = "admin", tratadas = {}) {
+  const ids = [...new Set(Array.isArray(tratadas.ids) ? tratadas.ids.map(String).filter(Boolean) : [])].slice(-5000);
+  const chaves = [...new Set(Array.isArray(tratadas.chaves) ? tratadas.chaves.map(String).filter(Boolean) : [])].slice(-5000);
+  const itens = Array.isArray(tratadas.itens) ? tratadas.itens.slice(-1000) : [];
+
+  writeClienteJson(clienteId, "radar-tratadas.json", {
+    ids,
+    chaves,
+    itens,
     atualizadoEm: new Date().toISOString()
   });
 }
@@ -4104,6 +4159,130 @@ function chavesRemocaoRadar(oferta = {}) {
     oferta.link ? `link:${String(oferta.link).toLowerCase()}` : "",
     titulo ? `titulo:${titulo}` : ""
   ].filter(Boolean);
+}
+
+function chavesTratamentoRadar(oferta = {}) {
+  const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
+  const marketplace = normalizarMarketplaceRadar(
+    oferta.marketplace ||
+    oferta.mercado ||
+    oferta.marketplaceOriginalRadar ||
+    ""
+  );
+  const grupo = normalizarTexto(
+    oferta.origemGrupoId ||
+    oferta.remoteJid ||
+    oferta.grupoId ||
+    oferta.origemGrupoNome ||
+    ""
+  );
+  const cupom = normalizarTexto(oferta.cupom || "");
+  const links = [
+    oferta.linkOriginal,
+    oferta.linkResolvidoRadar,
+    oferta.linkCapturado,
+    oferta.linkAfiliado,
+    oferta.linkFinal,
+    oferta.link
+  ]
+    .map(link => String(link || "").trim().toLowerCase())
+    .filter(Boolean);
+
+  return [
+    oferta.id ? `id:${oferta.id}` : "",
+    ...links.map(link => `link:${link}`),
+    marketplace && titulo ? `produto:${marketplace}|${titulo}` : "",
+    marketplace && titulo && grupo ? `produto_grupo:${marketplace}|${titulo}|${grupo}` : "",
+    marketplace && titulo && grupo && cupom ? `produto_grupo_cupom:${marketplace}|${titulo}|${grupo}|${cupom}` : ""
+  ].filter(Boolean);
+}
+
+function ofertaTratadaRadar(oferta = {}, tratadas = {}) {
+  if (!oferta || typeof oferta !== "object") return false;
+  if (oferta.radarTratada === true || oferta.jaTratadaRadar === true) return true;
+
+  const statusRadar = normalizarTexto(oferta.statusRadar || "");
+  if (["fila", "ignorada", "ignorado", "erro", "descartado", "enviado", "ja_tratada", "repetida"].includes(statusRadar)) {
+    return true;
+  }
+
+  if (oferta.radarNaFila === true) return true;
+  if (
+    (oferta.origem === "radar" || oferta.radar === true) &&
+    oferta.status === "pendente" &&
+    oferta.radarPendenteAnalise !== true &&
+    !["novo", "pendente_analise"].includes(statusRadar)
+  ) {
+    return true;
+  }
+
+  const ids = new Set(Array.isArray(tratadas.ids) ? tratadas.ids.map(String) : []);
+  const chaves = new Set(Array.isArray(tratadas.chaves) ? tratadas.chaves.map(String) : []);
+  if (oferta.id && ids.has(String(oferta.id))) return true;
+
+  return chavesTratamentoRadar(oferta).some(chave => chaves.has(chave));
+}
+
+function registrarTratamentoRadar(clienteId = "admin", oferta = {}, statusRadar = "fila") {
+  if (!oferta || typeof oferta !== "object") return false;
+
+  const tratadas = lerTratadasRadar(clienteId);
+  const ids = new Set(tratadas.ids || []);
+  const chaves = new Set(tratadas.chaves || []);
+  const agora = new Date().toISOString();
+
+  if (oferta.id) ids.add(String(oferta.id));
+
+  for (const chave of chavesTratamentoRadar(oferta)) {
+    chaves.add(chave);
+  }
+
+  const itens = Array.isArray(tratadas.itens) ? tratadas.itens : [];
+  itens.push({
+    id: oferta.id || "",
+    idOfertaFila: oferta.idOfertaFila || oferta.id || "",
+    statusRadar,
+    titulo: oferta.titulo || oferta.nome || "",
+    marketplace: oferta.marketplace || oferta.mercado || "",
+    origemGrupoId: oferta.origemGrupoId || oferta.remoteJid || oferta.grupoId || "",
+    origemGrupoNome: oferta.origemGrupoNome || "",
+    origemSessaoId: oferta.origemSessaoId || "",
+    cupom: oferta.cupom || "",
+    linkOriginal: oferta.linkOriginal || oferta.linkResolvidoRadar || "",
+    linkAfiliado: oferta.linkAfiliado || oferta.linkFinal || oferta.link || "",
+    dataTratamento: oferta.dataTratamento || agora,
+    emFilaEm: oferta.emFilaEm || (statusRadar === "fila" ? agora : "")
+  });
+
+  salvarTratadasRadar(clienteId, {
+    ids: [...ids],
+    chaves: [...chaves],
+    itens
+  });
+
+  return true;
+}
+
+function sincronizarTratadasRadarDeOfertas(clienteId = "admin", ofertas = []) {
+  let total = 0;
+
+  for (const oferta of ofertas) {
+    if (!oferta || typeof oferta !== "object") continue;
+    if (oferta.origem !== "radar" && oferta.radar !== true && oferta.radarNaFila !== true) continue;
+
+    const statusRadar = oferta.statusRadar ||
+      (oferta.radarNaFila || oferta.status === "pendente" ? "fila" : normalizarStatusOperacionalRadar(oferta.status || ""));
+
+    if (!["fila", "ignorada", "ignorado", "erro", "descartado", "enviado"].includes(normalizarTexto(statusRadar))) {
+      continue;
+    }
+
+    if (registrarTratamentoRadar(clienteId, oferta, normalizarTexto(statusRadar) || "fila")) {
+      total++;
+    }
+  }
+
+  return total;
 }
 
 function ofertaOcultadaRadar(oferta = {}, descartes = {}) {
@@ -6786,6 +6965,8 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     radarAlertas: radar.alertas,
     dataEntradaRadar: agoraBR,
     capturadaEm: ofertaPreparada.capturadaEm || agoraBR,
+    dataTratamento: new Date().toISOString(),
+    emFilaEm: new Date().toISOString(),
     dataEntradaFila: agoraBR,
     criadoEm: ofertaPreparada.criadoEm || agoraBR
   };
@@ -6945,6 +7126,7 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
   logPrioridadeFila(oferta);
   fila.push(oferta);
   registrarOfertaVista(oferta);
+  registrarTratamentoRadar(clienteId, oferta, "fila");
   salvarFila(clienteId);
 
   return {
@@ -7392,6 +7574,12 @@ app.get("/radar", (req, res) => {
     const clienteId = String(req.query?.clienteId || getClienteId(req) || "admin");
     const radarConfig = carregarRadarConfigCliente(clienteId);
     const descartesRadar = lerDescartesRadar(clienteId);
+    const ofertasRadarCliente = lerFilasRadarSomenteLeitura()
+      .filter((oferta) => String(oferta.origemClienteId || oferta.clienteId || "admin") === clienteId);
+
+    sincronizarTratadasRadarDeOfertas(clienteId, ofertasRadarCliente);
+
+    const tratadasRadar = lerTratadasRadar(clienteId);
     const historicoOperacional = montarResumoHistoricoRadar(clienteId, {
       limit: req.query?.limit || 50
     }).eventos;
@@ -7408,8 +7596,8 @@ app.get("/radar", (req, res) => {
       });
     }
 
-    const oportunidades = deduplicarOportunidadesRadar(lerFilasRadarSomenteLeitura()
-      .filter((oferta) => String(oferta.origemClienteId || oferta.clienteId || "admin") === clienteId)
+    const oportunidades = deduplicarOportunidadesRadar(ofertasRadarCliente
+      .filter((oferta) => !ofertaTratadaRadar(oferta, tratadasRadar))
       .filter((oferta) => !ofertaOcultadaRadar(oferta, descartesRadar))
       .filter((oferta) => origemOfertaEstaMonitoradaRadar(oferta, radarConfig).ok)
       .map((oferta) => {
@@ -7529,6 +7717,10 @@ app.delete("/radar/oportunidades", (req, res) => {
       .filter((oferta) => limparTodas || idsSet.has(String(oferta.id || "")));
 
     const removidas = registrarDescartesOportunidadesRadar(clienteId, oportunidades);
+    sincronizarTratadasRadarDeOfertas(clienteId, oportunidades.map(oferta => ({
+      ...oferta,
+      statusRadar: oferta.statusRadar || "descartado"
+    })));
 
     return res.json({
       ok: true,
@@ -7563,6 +7755,10 @@ app.delete("/radar/oportunidades/:id", (req, res) => {
       .filter((oferta) => String(oferta.id || "") === id);
 
     const removidas = registrarDescartesOportunidadesRadar(clienteId, oportunidades.length ? oportunidades : [{ id }]);
+    sincronizarTratadasRadarDeOfertas(clienteId, oportunidades.map(oferta => ({
+      ...oferta,
+      statusRadar: oferta.statusRadar || "descartado"
+    })));
 
     return res.json({
       ok: true,
@@ -7595,8 +7791,18 @@ app.delete("/radar/preview", (req, res) => {
       });
     }
 
-    const removidosPreview = lerPreviewRadar(clienteId).length;
-    const removidosHistorico = lerHistoricoRadar(clienteId).length;
+    const previewAtual = lerPreviewRadar(clienteId);
+    const historicoAtual = lerHistoricoRadar(clienteId);
+    const removidosPreview = previewAtual.length;
+    const removidosHistorico = historicoAtual.length;
+
+    for (const evento of [...previewAtual, ...historicoAtual]) {
+      const status = normalizarTexto(evento.statusRadar || evento.status || "");
+      if (["fila", "adicionado_fila", "adicionada_fila", "enviado", "ignorado", "ignorada", "erro", "descartado"].includes(status)) {
+        registrarTratamentoRadar(clienteId, evento, status === "adicionado_fila" || status === "adicionada_fila" ? "fila" : status);
+      }
+    }
+
     salvarPreviewRadar(clienteId, []);
     salvarHistoricoRadar(clienteId, []);
 
