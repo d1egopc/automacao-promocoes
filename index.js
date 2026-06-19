@@ -975,7 +975,7 @@ function carregarMapaClientesJson(arquivo = "", legado = {}) {
 
   for (const clienteId of listClientes()) {
     const dados = readClienteJson(clienteId, arquivo, null);
-    if (!dados || typeof dados !== "object" || Array.isArray(dados)) continue;
+    if (!dados || typeof dados !== "object") continue;
     mapa[clienteId] = removerClienteIdRaiz(dados);
   }
 
@@ -2121,6 +2121,67 @@ function analisarDestinoOferta(destino, oferta) {
   });
 }
 
+function obterDestinosInteligentesCliente(clienteId = "admin", configCliente = {}) {
+  return Array.isArray(destinosPorCliente?.[clienteId]) && destinosPorCliente[clienteId].length
+    ? destinosPorCliente[clienteId]
+    : Array.isArray(configCliente?.destinosInteligentes) && configCliente.destinosInteligentes.length
+      ? configCliente.destinosInteligentes
+      : Array.isArray(config?.destinosInteligentes)
+        ? config.destinosInteligentes
+        : [];
+}
+
+function motivoRetencaoSemDestino(analises = []) {
+  if (!analises.length) return "retida_sem_destino_compativel";
+
+  const motivos = analises.map(item => item?.analise?.motivo || "").filter(Boolean);
+
+  if (motivos.length && motivos.every(motivo => motivo === "categoria")) {
+    return "retida_categoria_nao_marcada";
+  }
+
+  if (motivos.length && motivos.every(motivo => motivo === "marketplace")) {
+    return "retida_marketplace_nao_marcado";
+  }
+
+  return "retida_sem_destino_compativel";
+}
+
+function marcarOfertaRetida(oferta = {}, motivoRetencao = "retida_sem_destino_compativel") {
+  oferta.status = "retida";
+  oferta.statusDetalhe = "Retida por falta de destino compatível";
+  oferta.motivoRetencao = motivoRetencao;
+  oferta.retidaEm = new Date().toISOString();
+  oferta.erro = "";
+  oferta.erroEm = "";
+  delete oferta.proximaTentativaEnvioEm;
+
+  return oferta;
+}
+
+function analisarDestinosCompativeisFila(clienteId = "admin", oferta = {}, configCliente = {}) {
+  const destinosInteligentes = obterDestinosInteligentesCliente(clienteId, configCliente);
+  const compativeis = [];
+  const rejeitados = [];
+
+  for (const destino of destinosInteligentes) {
+    const analise = analisarDestinoOferta(destino, oferta);
+
+    if (analise.aceita) {
+      compativeis.push({ destino, analise });
+    } else {
+      rejeitados.push({ destino, analise });
+    }
+  }
+
+  return {
+    destinosInteligentes,
+    compativeis,
+    rejeitados,
+    motivoRetencao: motivoRetencaoSemDestino(rejeitados)
+  };
+}
+
 
 // ========== FUNCAO DESTINO DENTRO HORARIO ==================
 
@@ -2504,15 +2565,6 @@ if (!sessoes[idSessao]) {
 
 // ================= ENVIO DESTINOS INTELIGENTES =================
 
-const destinosInteligentes =
-  Array.isArray(destinosPorCliente?.[clienteId]) && destinosPorCliente[clienteId].length
-    ? destinosPorCliente[clienteId]
-    : Array.isArray(configCliente?.destinosInteligentes) && configCliente.destinosInteligentes.length
-      ? configCliente.destinosInteligentes
-      : Array.isArray(config?.destinosInteligentes)
-        ? config.destinosInteligentes
-        : [];
-
 const usuarioOferta =
   usuarios.find(u => String(u.id) === String(clienteId)) || null;
 
@@ -2527,53 +2579,46 @@ let pulouPorHorario = false;
 let pulouPorLimiteDiario = false;
 let houveFalhaReal = false;
 const categoriaOfertaFila = oferta.categoria || oferta.categoriaProduto || classificarCategoriaOferta(oferta, oferta.termo || "");
-const destinosCompativeis = [];
+const analiseDestinosFila = analisarDestinosCompativeisFila(clienteId, oferta, configCliente);
+const destinosCompativeis = analiseDestinosFila.compativeis;
 
-for (const destino of destinosInteligentes) {
-  const analise = analisarDestinoOferta(destino, oferta);
+for (const itemRejeitado of analiseDestinosFila.rejeitados) {
+  const destino = itemRejeitado.destino;
+  const analise = itemRejeitado.analise;
   const nomeDestino = destinoNomeLog(destino);
 
-  if (!analise.aceita) {
-    if (analise.motivo === "marketplace") {
-      console.log("[DESTINO] rejeitado marketplace", {
-        clienteId,
-        destino: nomeDestino,
-        marketplaceOferta: analise.marketplaceOferta
-      });
-    } else if (analise.motivo === "categoria") {
-      console.log("[DESTINO] rejeitado categoria", {
-        clienteId,
-        destino: nomeDestino,
-        categoriaOferta: analise.categoriaOferta
-      });
-    } else {
-      console.log("[DESTINO] rejeitado", {
-        clienteId,
-        destino: nomeDestino,
-        motivo: analise.motivo || "nao_compativel"
-      });
-    }
-
-    continue;
+  if (analise.motivo === "marketplace") {
+    console.log("[DESTINO] rejeitado marketplace", {
+      clienteId,
+      destino: nomeDestino,
+      marketplaceOferta: analise.marketplaceOferta
+    });
+  } else if (analise.motivo === "categoria") {
+    console.log("[DESTINO] rejeitado categoria", {
+      clienteId,
+      destino: nomeDestino,
+      categoriaOferta: analise.categoriaOferta
+    });
+  } else {
+    console.log("[DESTINO] rejeitado", {
+      clienteId,
+      destino: nomeDestino,
+      motivo: analise.motivo || "nao_compativel"
+    });
   }
-
-  destinosCompativeis.push({ destino, analise });
 }
 
 console.log("[DESTINO] compatíveis encontrados:", destinosCompativeis.length);
 
 if (!destinosCompativeis.length) {
-  oferta.status = "pendente";
-  oferta.statusDetalhe = `Aguardando destino compatível para categoria ${categoriaOfertaFila || "sem categoria"}`;
-  oferta.erro = "";
-  oferta.erroEm = "";
-  proximaTentativaDestino(oferta, 5 * 60 * 1000);
+  marcarOfertaRetida(oferta, analiseDestinosFila.motivoRetencao);
   salvarFila(clienteId);
   console.log("[DESTINO] sem destino compatível:", {
     clienteId,
     titulo: oferta.titulo || oferta.nome || "",
     categoria: categoriaOfertaFila || "",
-    marketplace: oferta.marketplace || oferta.mercado || ""
+    marketplace: oferta.marketplace || oferta.mercado || "",
+    motivoRetencao: oferta.motivoRetencao
   });
   return;
 }
@@ -2972,6 +3017,8 @@ app.get("/fila", (req, res) => {
     total: itensCliente.length,
     pendentes: itensCliente.filter((o) => o.status === "pendente").length,
     enviados: itensCliente.filter((o) => o.status === "enviado").length,
+    retidas: itensCliente.filter((o) => o.status === "retida").length,
+    erros: itensCliente.filter((o) => o.status === "erro").length,
     itens: itensCliente,
     fila: itensCliente
   });
@@ -3242,6 +3289,8 @@ app.get("/automacao/status", (req, res) => {
     clienteId,
     ativa: configCliente.automacaoAtiva === true,
     pendentes: itensCliente.filter(o => o.status === "pendente").length,
+    retidas: itensCliente.filter(o => o.status === "retida").length,
+    erros: itensCliente.filter(o => o.status === "erro").length,
     enviadasHoje: enviadas.filter(ofertaEnviadaHoje).length,
     creditos: usuario?.creditos ?? null,
     sessoesAtivas,
@@ -3405,6 +3454,38 @@ app.delete("/fila/:index", (req, res) => {
   });
 });
 
+app.post("/fila/:id/reprocessar", (req, res) => {
+  const id = String(req.params.id || "").trim();
+  const clienteId = getClienteId(req);
+
+  const oferta = fila.find(item =>
+    String(item.id || "") === id &&
+    String(item.clienteId || "admin") === String(clienteId)
+  );
+
+  if (!oferta) {
+    return res.status(404).json({
+      ok: false,
+      erro: "Oferta nÃ£o encontrada"
+    });
+  }
+
+  oferta.status = "pendente";
+  oferta.statusDetalhe = "Reprocessada manualmente";
+  delete oferta.motivoRetencao;
+  delete oferta.retidaEm;
+  delete oferta.proximaTentativaEnvioEm;
+  oferta.reprocessadaEm = new Date().toISOString();
+
+  salvarFila(clienteId);
+
+  return res.json({
+    ok: true,
+    mensagem: "Oferta reprocessada manualmente",
+    oferta
+  });
+});
+
 // ============== POST FILA INDEX ===========================
 
 app.post("/fila/:index/enviar-agora", async (req, res) => {
@@ -3433,7 +3514,28 @@ const indexReal = fila.findIndex(o => o === oferta);
     });
   }
 
+  const configClienteEnviarAgora =
+    configsPorCliente?.[clienteIdReq] || config;
+  const analiseDestinosEnviarAgora =
+    analisarDestinosCompativeisFila(clienteIdReq, oferta, configClienteEnviarAgora);
+
+  if (!analiseDestinosEnviarAgora.compativeis.length) {
+    marcarOfertaRetida(oferta, analiseDestinosEnviarAgora.motivoRetencao);
+    salvarFila(clienteIdReq);
+
+    return res.status(409).json({
+      ok: false,
+      retida: true,
+      motivo: oferta.motivoRetencao,
+      mensagem: oferta.statusDetalhe,
+      oferta
+    });
+  }
+
   oferta.status = "pendente";
+  oferta.statusDetalhe = "Envio manual solicitado";
+  delete oferta.motivoRetencao;
+  delete oferta.retidaEm;
 
   console.log("[FILA] ENTRANDO NA FILA:", {
     clienteId: clienteIdReq,
