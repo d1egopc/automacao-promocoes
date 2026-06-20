@@ -644,13 +644,67 @@ function prioridadeEnvioOferta(oferta = {}) {
   return Number.isFinite(prioridade) ? prioridade : 40;
 }
 
+function cupomFastLaneTipo(oferta = {}, agora = Date.now()) {
+  if (!oferta || typeof oferta !== "object") return "";
+  if (oferta.status === "retida") return "";
+  if (oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true) return "";
+  if (ofertaExpiradaParaEnvio(oferta, agora)) return "";
+
+  const tipo = String(oferta.cupomTipo || oferta.tipoCupom || "").toLowerCase();
+  const temCupom =
+    Boolean(oferta.cupom) ||
+    oferta.cupomDetectado === true ||
+    oferta.cupomDetectadoTexto === true;
+
+  if (
+    tipo === "real" ||
+    tipo === "detectado" ||
+    oferta.cupomConfirmado === true ||
+    oferta.cupomValidado === true ||
+    (temCupom && prioridadeEnvioOferta(oferta) >= 95)
+  ) {
+    return "real_detectado";
+  }
+
+  if (
+    tipo === "provavel" ||
+    oferta.possivelCupom === true ||
+    Boolean(oferta.avisoCupom || oferta.beneficioExtra || oferta.linkResgateCupom)
+  ) {
+    return "provavel";
+  }
+
+  return "";
+}
+
+function rankFastLaneCupom(oferta = {}) {
+  const tipo = cupomFastLaneTipo(oferta);
+  if (tipo === "real_detectado") return 2;
+  if (tipo === "provavel") return 1;
+  return 0;
+}
+
 function ordenarPendentesPorPrioridade(pendentes = []) {
   return [...pendentes].sort((a, b) => {
+    const fastLaneA = rankFastLaneCupom(a);
+    const fastLaneB = rankFastLaneCupom(b);
+
+    if (fastLaneB !== fastLaneA) {
+      return fastLaneB - fastLaneA;
+    }
+
     const prioridadeA = prioridadeEnvioOferta(a);
     const prioridadeB = prioridadeEnvioOferta(b);
 
     if (prioridadeB !== prioridadeA) {
       return prioridadeB - prioridadeA;
+    }
+
+    const scoreA = Number(a.radarScore || a.score || 0);
+    const scoreB = Number(b.radarScore || b.score || 0);
+
+    if (scoreB !== scoreA) {
+      return scoreB - scoreA;
     }
 
     return dataFilaMs(a) - dataFilaMs(b);
@@ -2284,7 +2338,14 @@ function destinoLimiteDiarioDisponivel(clienteId = "admin", destino = {}) {
   };
 }
 
-function intervaloDestinoInfo(clienteId = "admin", destino = {}, configCliente = {}) {
+function intervaloTurboCupomMinutos(oferta = {}) {
+  const tipoFastLane = cupomFastLaneTipo(oferta);
+  if (tipoFastLane === "real_detectado") return 2.5;
+  if (tipoFastLane === "provavel") return 4;
+  return null;
+}
+
+function intervaloDestinoInfo(clienteId = "admin", destino = {}, configCliente = {}, oferta = {}) {
   const chaveControle = destinoChaveControle(clienteId, destino);
   const intervaloDestinoMin = Number(
     destino.intervaloMinutos ||
@@ -2293,7 +2354,11 @@ function intervaloDestinoInfo(clienteId = "admin", destino = {}, configCliente =
     config.intervaloMinutos ||
     2
   );
-  const intervaloMs = Math.max(0, intervaloDestinoMin) * 60 * 1000;
+  const turboCupomMin = intervaloTurboCupomMinutos(oferta);
+  const intervaloAplicadoMin = Number.isFinite(turboCupomMin)
+    ? turboCupomMin
+    : intervaloDestinoMin;
+  const intervaloMs = Math.max(0, intervaloAplicadoMin) * 60 * 1000;
   const ultimoEnvio = controleEnvio[chaveControle] || 0;
   const agora = Date.now();
   const restanteMs = Math.max(0, intervaloMs - (agora - ultimoEnvio));
@@ -2301,6 +2366,9 @@ function intervaloDestinoInfo(clienteId = "admin", destino = {}, configCliente =
   return {
     chaveControle,
     intervaloDestinoMin,
+    intervaloAplicadoMin,
+    turboCupomMin,
+    fastLaneCupomTipo: cupomFastLaneTipo(oferta, agora),
     intervaloMs,
     ultimoEnvio,
     liberado: restanteMs <= 0,
@@ -2630,6 +2698,27 @@ let houveFalhaReal = false;
 const categoriaOfertaFila = oferta.categoria || oferta.categoriaProduto || classificarCategoriaOferta(oferta, oferta.termo || "");
 const analiseDestinosFila = analisarDestinosCompativeisFila(clienteId, oferta, configCliente);
 const destinosCompativeis = analiseDestinosFila.compativeis;
+const fastLaneCupomTipo = cupomFastLaneTipo(oferta);
+
+if (fastLaneCupomTipo === "real_detectado") {
+  logOptimus("CUPOM", "Fast Lane aplicada", {
+    clienteId,
+    titulo: oferta.titulo || oferta.nome || "",
+    cupom: oferta.cupom || "",
+    tipo: fastLaneCupomTipo
+  });
+} else if (fastLaneCupomTipo === "provavel") {
+  logOptimus("CUPOM", "Fast Lane provavel aplicada", {
+    clienteId,
+    titulo: oferta.titulo || oferta.nome || "",
+    tipo: fastLaneCupomTipo
+  });
+} else {
+  logOptimus("FILA", "Oferta comum usando intervalo normal", {
+    clienteId,
+    titulo: oferta.titulo || oferta.nome || ""
+  });
+}
 
 for (const itemRejeitado of analiseDestinosFila.rejeitados) {
   const destino = itemRejeitado.destino;
@@ -2676,7 +2765,7 @@ if (!destinosCompativeis.length) {
 
 const destinosOrdenados = destinosCompativeis
   .map(item => {
-    const intervalo = intervaloDestinoInfo(clienteId, item.destino, configCliente);
+    const intervalo = intervaloDestinoInfo(clienteId, item.destino, configCliente, oferta);
     return {
       ...item,
       intervalo,
@@ -2716,10 +2805,27 @@ for (const item of destinosOrdenados) {
     logOptimus("DESTINO", "Aguardando intervalo", {
       clienteId,
       destino: nomeDestino,
-      intervaloMinutos: intervalo.intervaloDestinoMin,
+      intervaloMinutos: intervalo.intervaloAplicadoMin,
+      intervaloOriginalMinutos: intervalo.intervaloDestinoMin,
+      turboCupomMinutos: intervalo.turboCupomMin,
       restanteSegundos: Math.ceil(intervalo.restanteMs / 1000)
     });
     continue;
+  }
+
+  if (intervalo.fastLaneCupomTipo === "real_detectado") {
+    logOptimus("CUPOM", "Turbo aplicado 2.5min", {
+      clienteId,
+      destino: nomeDestino,
+      cupom: oferta.cupom || "",
+      intervaloOriginalMinutos: intervalo.intervaloDestinoMin
+    });
+  } else if (intervalo.fastLaneCupomTipo === "provavel") {
+    logOptimus("CUPOM", "Turbo aplicado 4min", {
+      clienteId,
+      destino: nomeDestino,
+      intervaloOriginalMinutos: intervalo.intervaloDestinoMin
+    });
   }
 
   const marketplaceOfertaLog = String(oferta.marketplace || oferta.mercado || "").toLowerCase();
@@ -4778,6 +4884,47 @@ function normalizarStatusOperacionalRadar(status = "") {
   return "erro";
 }
 
+function normalizarTipoLinkRadarOperacional(evento = {}) {
+  const tipo = normalizarTexto(evento.tipoLink || evento.tipoLinkRadar || "");
+  if (tipo === "produto") return "produto";
+  if (tipo === "cupom_resgate" || tipo === "resgate_cupom" || tipo === "resgate") return "cupom_resgate";
+  if (tipo === "intermediario") return "intermediario";
+
+  if (evento.linkResgateCupom && evento.linkCapturado && String(evento.linkResgateCupom) === String(evento.linkCapturado)) {
+    return "cupom_resgate";
+  }
+
+  if (evento.urlResolvida || evento.linkOriginal || evento.marketplaceDetectado || evento.marketplace) {
+    return "produto";
+  }
+
+  return "desconhecido";
+}
+
+function statusCapturaRadarOperacional(evento = {}) {
+  const statusRadar = normalizarTexto(evento.statusRadar || "");
+  const status = normalizarStatusPreviewRadar(evento.status);
+
+  if (statusRadar === "retida" || status === "retida") return "retida";
+  if (statusRadar === "fila" || status === "adicionado_fila") return "fila";
+  if (status === "erro") return "erro";
+  if (status === "ignorado") return "erro";
+  return "sucesso";
+}
+
+function motivoFinalRadarOperacional(evento = {}) {
+  const motivo = textoRadarId(evento.motivoFinal || evento.motivoTecnico || evento.motivo || "");
+  if (motivo === "sem_destino_compativel") return "retida_sem_destino";
+  if (motivo === "retida_categoria_nao_marcada") return "retida_categoria_nao_marcada";
+  if (motivo) return motivo;
+
+  const status = statusCapturaRadarOperacional(evento);
+  if (status === "fila") return "enviado_para_fila";
+  if (status === "retida") return evento.motivoRetencao || "retida_sem_destino";
+  if (status === "erro") return "erro";
+  return "sucesso";
+}
+
 function montarEventoPreviewRadar(evento = {}) {
   const criadoEm = evento.criadoEm || new Date().toISOString();
   const dataHora = evento.dataHora || dataHoraRadarAgora();
@@ -4801,8 +4948,17 @@ function montarEventoPreviewRadar(evento = {}) {
     imagem: evento.imagem || evento.image || evento.foto || evento.thumbnail || "",
     image: evento.imagem || evento.image || evento.foto || evento.thumbnail || "",
     linkCapturado: evento.linkCapturado || "",
+    urlResolvida: evento.urlResolvida || evento.linkResolvidoRadar || "",
     linkOriginal: evento.linkOriginal || "",
     linkAfiliado: evento.linkAfiliado || "",
+    marketplaceDetectado: evento.marketplaceDetectado || evento.marketplaceReal || evento.marketplace || "",
+    tipoLink: normalizarTipoLinkRadarOperacional(evento),
+    tipoLinkRadar: evento.tipoLinkRadar || "",
+    statusCaptura: statusCapturaRadarOperacional(evento),
+    motivoFinal: motivoFinalRadarOperacional(evento),
+    motivoTecnico: evento.motivoTecnico || evento.motivo || "",
+    statusHttp: evento.statusHttp || "",
+    erroTecnico: evento.erroTecnico || "",
     idOfertaFila: evento.idOfertaFila || evento.ofertaFilaId || "",
     linksDetectados: Number(evento.linksDetectados || 1) || 1,
     marketplace: evento.marketplace || "",
@@ -4814,6 +4970,7 @@ function montarEventoPreviewRadar(evento = {}) {
     economiaValor: Number(evento.economiaValor ?? economia.economiaValor) || 0,
     economiaPercentual: Number(evento.economiaPercentual ?? economia.economiaPercentual) || 0,
     cupom: evento.cupom || "",
+    cupomDetectado: Boolean(evento.cupom || evento.cupomDetectado || evento.cupomDetectadoTexto),
     avisoCupom: evento.avisoCupom || "",
     tipoCupom: evento.tipoCupom || "",
     cupomOrigem: evento.cupomOrigem || "",
@@ -4873,8 +5030,17 @@ function registrarHistoricoRadar(clienteId = "admin", evento = {}) {
       mensagemResumo: eventoPreview.mensagemResumo,
       imagem: eventoPreview.imagem,
       linkCapturado: evento.linkCapturado || "",
+      urlResolvida: eventoPreview.urlResolvida,
       linkOriginal: evento.linkOriginal || "",
       linkAfiliado: evento.linkAfiliado || "",
+      marketplaceDetectado: eventoPreview.marketplaceDetectado,
+      tipoLink: eventoPreview.tipoLink,
+      tipoLinkRadar: eventoPreview.tipoLinkRadar,
+      statusCaptura: eventoPreview.statusCaptura,
+      motivoFinal: eventoPreview.motivoFinal,
+      motivoTecnico: eventoPreview.motivoTecnico,
+      statusHttp: eventoPreview.statusHttp,
+      erroTecnico: eventoPreview.erroTecnico,
       idOfertaFila: evento.idOfertaFila || "",
       marketplace: evento.marketplace || "",
       titulo: evento.titulo || "",
@@ -4885,6 +5051,7 @@ function registrarHistoricoRadar(clienteId = "admin", evento = {}) {
       economiaValor: eventoPreview.economiaValor,
       economiaPercentual: eventoPreview.economiaPercentual,
       cupom: evento.cupom || "",
+      cupomDetectado: eventoPreview.cupomDetectado,
       avisoCupom: eventoPreview.avisoCupom,
       tipoCupom: eventoPreview.tipoCupom,
       cupomOrigem: eventoPreview.cupomOrigem,
@@ -4983,6 +5150,17 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
     timeZone: "America/Sao_Paulo"
   });
   const mapa = new Map();
+  const motivosDiagnosticoRadar = [
+    "link_original_nao_resolvido",
+    "importacao_incompleta",
+    "importacao_sem_preco",
+    "importacao_sem_titulo",
+    "marketplace_nao_identificado",
+    "redirect_bloqueado"
+  ];
+  const contadoresDiagnostico = Object.fromEntries(
+    motivosDiagnosticoRadar.map(motivo => [motivo, 0])
+  );
 
   const adicionarFonte = fonte => {
     const chave = chaveFonteHistoricoRadar(fonte);
@@ -5014,7 +5192,10 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
         descontoMedioPercentual: 0,
         scoreGrupo: 0,
         principalMotivoRejeicao: "",
-        totalEventos: 0
+        totalEventos: 0,
+        diagnostico: Object.fromEntries(
+          motivosDiagnosticoRadar.map(motivo => [motivo, 0])
+        )
       });
     }
   };
@@ -5047,6 +5228,8 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
     if (!resumo) continue;
 
     const status = normalizarStatusPreviewRadar(evento.status);
+    const eventoOperacional = montarEventoPreviewRadar(evento);
+    const motivoDiagnostico = eventoOperacional.motivoFinal || eventoOperacional.motivoTecnico || evento.motivo || "";
     const dataEvento = evento.capturadaEm || evento.dataHora || evento.criadoEm || "";
     const textoResumo = evento.textoResumo || evento.mensagemResumo || "";
     const beneficio = evento.cupom || evento.beneficioExtra || evento.beneficio || evento.descontoPix || evento.descontoApp || "";
@@ -5081,6 +5264,11 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
       const motivo = evento.motivo || "erro";
       motivos[chave] = motivos[chave] || {};
       motivos[chave][motivo] = (motivos[chave][motivo] || 0) + 1;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(contadoresDiagnostico, motivoDiagnostico)) {
+      contadoresDiagnostico[motivoDiagnostico] += 1;
+      resumo.diagnostico[motivoDiagnostico] = (resumo.diagnostico[motivoDiagnostico] || 0) + 1;
     }
 
     if (beneficio) {
@@ -5138,7 +5326,9 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
   return {
     grupos: [...mapa.values()],
     capturas,
-    eventos: capturas
+    eventos: capturas,
+    diagnostico: contadoresDiagnostico,
+    contadoresDiagnostico
   };
 }
 
@@ -6142,11 +6332,23 @@ function obterNomeGrupoRadar(sessaoId = "", grupoId = "") {
 function detectarMarketplaceRadarLink(url = "") {
   const urlLower = String(url || "").toLowerCase();
 
+  if (urlLower.includes("go.promozone.ai/mercadolivre") || urlLower.includes("promozone") && urlLower.includes("mercadolivre")) {
+    return "mercadolivre";
+  }
+
+  if (urlLower.includes("go.promozone.ai/shopee") || urlLower.includes("promozone") && urlLower.includes("shopee")) {
+    return "shopee";
+  }
+
+  if (urlLower.includes("go.promozone.ai/amazon") || urlLower.includes("promozone") && urlLower.includes("amazon")) {
+    return "amazon";
+  }
+
   if (urlLower.includes("mercadolivre.com") || urlLower.includes("mercadolivre.com.br") || urlLower.includes("meli.la")) {
     return "mercadolivre";
   }
 
-  if (urlLower.includes("shopee.com")) {
+  if (urlLower.includes("shopee.com") || urlLower.includes("s.shopee.")) {
     return "shopee";
   }
 
@@ -6291,6 +6493,169 @@ function extrairProdutoMercadoLivreDeHtmlRadar(html = "") {
   return "";
 }
 
+function normalizarUrlExtraidaRadar(link = "", base = "") {
+  const texto = String(link || "")
+    .replace(/\\u002F/g, "/")
+    .replace(/\\\//g, "/")
+    .replace(/&amp;/g, "&")
+    .trim();
+
+  if (!texto) return "";
+
+  try {
+    if (texto.startsWith("//")) return `https:${texto}`;
+    if (texto.startsWith("http://") || texto.startsWith("https://")) return texto;
+    if (texto.startsWith("/") && base) return new URL(texto, base).toString();
+    if (texto.startsWith("www.")) return `https://${texto}`;
+  } catch {}
+
+  return texto;
+}
+
+function candidatosUrlHtmlRadar(html = "", base = "") {
+  const texto = String(html || "");
+  return [
+    ...texto.matchAll(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/gi),
+    ...texto.matchAll(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/gi),
+    ...texto.matchAll(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:url["']/gi),
+    ...texto.matchAll(/"canonicalUrl"\s*:\s*"([^"]+)"/gi),
+    ...texto.matchAll(/"permalink"\s*:\s*"([^"]+)"/gi),
+    ...texto.matchAll(/"url"\s*:\s*"([^"]+)"/gi),
+    ...texto.matchAll(/href=["']([^"']+)["']/gi)
+  ]
+    .map(match => normalizarUrlExtraidaRadar(match[1], base))
+    .filter(Boolean);
+}
+
+function isUrlProdutoShopeeRadar(url = "") {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const pathUrl = parsed.pathname.toLowerCase();
+    if (!host.includes("shopee.")) return false;
+    if (host.startsWith("s.")) return false;
+    if (pathUrl.includes("/voucher") || pathUrl.includes("/m/coupon") || pathUrl.includes("/buyer/login")) return false;
+    return /\/product\/\d+\/\d+/.test(pathUrl) || /-i\.\d+\.\d+/.test(pathUrl) || /i\.\d+\.\d+/.test(pathUrl);
+  } catch {
+    return false;
+  }
+}
+
+function isUrlProdutoAmazonRadar(url = "") {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (!host.includes("amazon.")) return false;
+    return Boolean(extrairAmazonAsinRadar(parsed.pathname));
+  } catch {
+    return false;
+  }
+}
+
+function extrairProdutoMarketplaceDeHtmlRadar(html = "", marketplace = "", base = "") {
+  const mp = normalizarMarketplaceRadar(marketplace);
+  const candidatos = candidatosUrlHtmlRadar(html, base);
+  const texto = String(html || "");
+
+  if (mp === "mercadolivre") {
+    return extrairProdutoMercadoLivreDeHtmlRadar(html);
+  }
+
+  if (mp === "amazon") {
+    const asin =
+      candidatos.map(candidato => {
+        try {
+          return extrairAmazonAsinRadar(new URL(candidato).pathname);
+        } catch {
+          return "";
+        }
+      }).find(Boolean) ||
+      texto.match(/\b([A-Z0-9]{10})\b/)?.[1] ||
+      "";
+
+    if (asin) {
+      return `https://www.amazon.com.br/dp/${asin}`;
+    }
+  }
+
+  if (mp === "shopee") {
+    for (const candidato of candidatos) {
+      const limpo = limparUrlProdutoRadar(candidato, "shopee");
+      if (limpo && isUrlProdutoShopeeRadar(limpo)) {
+        return limpo;
+      }
+    }
+  }
+
+  return "";
+}
+
+function isUrlIntermediariaRadar(url = "", marketplace = "") {
+  const mp = normalizarMarketplaceRadar(marketplace || detectarMarketplaceRadarLink(url));
+
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const pathUrl = parsed.pathname.toLowerCase();
+
+    if (host.includes("promozone") || host.includes("awin1.com") || host.includes("awin.com")) return true;
+
+    if (mp === "mercadolivre") {
+      if (!host.includes("mercadolivre.com") && !host.includes("meli.la")) return true;
+      return isUrlIntermediariaMercadoLivreRadar(url);
+    }
+
+    if (mp === "amazon") {
+      if (host.includes("amzn.to")) return true;
+      if (!host.includes("amazon.")) return true;
+      return !isUrlProdutoAmazonRadar(url);
+    }
+
+    if (mp === "shopee") {
+      if (host.startsWith("s.")) return true;
+      if (!host.includes("shopee.")) return true;
+      return !isUrlProdutoShopeeRadar(url);
+    }
+  } catch {
+    return true;
+  }
+
+  return false;
+}
+
+async function baixarHtmlRadar(url = "") {
+  try {
+    const resposta = await axios.get(url, {
+      maxRedirects: 3,
+      timeout: 7000,
+      responseType: "text",
+      maxContentLength: 1024 * 768,
+      validateStatus: () => true,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; OptimusRadar/1.0)",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      }
+    });
+
+    return {
+      ok: resposta.status >= 200 && resposta.status < 400,
+      status: resposta.status,
+      html: resposta.data || "",
+      urlFinal:
+        resposta?.request?.res?.responseUrl ||
+        resposta?.request?._redirectable?._currentUrl ||
+        url
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      erro: e.message,
+      html: "",
+      urlFinal: url
+    };
+  }
+}
+
 async function extrairProdutoMercadoLivreIntermediarioRadar(url = "") {
   console.log("[RADAR] ML social detectado", { url });
 
@@ -6330,16 +6695,21 @@ async function extrairProdutoMercadoLivreIntermediarioRadar(url = "") {
 }
 
 function importacaoRadarIncompleta(oferta = {}, marketplace = "") {
+  return Boolean(motivoImportacaoRadarIncompleta(oferta, marketplace));
+}
+
+function motivoImportacaoRadarIncompleta(oferta = {}, marketplace = "") {
   const mp = normalizarMarketplaceRadar(marketplace || oferta.marketplace || "");
   const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
   const preco = textoRadarId(oferta.precoAtual || oferta.preco || "");
   const categoria = normalizarTexto(oferta.categoria || oferta.categoriaProduto || "");
 
-  if (mp === "mercadolivre" && titulo === "produto mercado livre") return true;
-  if (!preco) return true;
-  if (!categoria || categoria === "mercado livre" || categoria === "nao identificada" || categoria === "nao identificado") return true;
+  if (!titulo) return "importacao_sem_titulo";
+  if (mp === "mercadolivre" && titulo === "produto mercado livre") return "importacao_incompleta";
+  if (!preco) return "importacao_sem_preco";
+  if (!categoria || categoria === "mercado livre" || categoria === "nao identificada" || categoria === "nao identificado") return "importacao_sem_categoria";
 
-  return false;
+  return "";
 }
 
 function percentualDescontoRadar(oferta = {}, radar = {}) {
@@ -6379,7 +6749,13 @@ async function resolverLinkOriginalRadar(url = "") {
       motivo: "link_original_nao_resolvido",
       capturada
     });
-    return { ok: false, motivo: "link_original_nao_resolvido" };
+    return {
+      ok: false,
+      motivo: "link_original_nao_resolvido",
+      motivoTecnico: "link_original_nao_resolvido",
+      urlCapturada: capturada,
+      tipoLinkRadar: "produto"
+    };
   }
 
   try {
@@ -6398,7 +6774,7 @@ async function resolverLinkOriginalRadar(url = "") {
       resposta?.request?.res?.responseUrl ||
       resposta?.request?._redirectable?._currentUrl ||
       capturada;
-    const marketplaceReal = detectarMarketplaceRadarLink(resolvida);
+    let marketplaceReal = detectarMarketplaceRadarLink(resolvida) || detectarMarketplaceRadarLink(capturada);
     let linkOriginalLimpo = marketplaceReal
       ? limparUrlProdutoRadar(resolvida, marketplaceReal)
       : "";
@@ -6410,37 +6786,67 @@ async function resolverLinkOriginalRadar(url = "") {
       linkOriginalLimpo
     });
 
-    if (marketplaceReal === "mercadolivre" && isUrlIntermediariaMercadoLivreRadar(linkOriginalLimpo || resolvida)) {
-      const produtoMl = await extrairProdutoMercadoLivreIntermediarioRadar(resolvida);
+    if (marketplaceReal && isUrlIntermediariaRadar(linkOriginalLimpo || resolvida, marketplaceReal)) {
+      const pagina = await baixarHtmlRadar(resolvida);
+      const urlBaseExtracao = pagina.urlFinal || resolvida;
+      const produtoExtraido = pagina.ok
+        ? extrairProdutoMarketplaceDeHtmlRadar(pagina.html, marketplaceReal, urlBaseExtracao)
+        : "";
 
-      if (!produtoMl) {
-        console.log("[RADAR-LINK] resolver falhou", {
-          motivo: "link_produto_ml_nao_encontrado",
+      if (!produtoExtraido && marketplaceReal === "mercadolivre") {
+        const produtoMlLegado = await extrairProdutoMercadoLivreIntermediarioRadar(resolvida);
+        if (produtoMlLegado) {
+          linkOriginalLimpo = limparUrlProdutoRadar(produtoMlLegado, "mercadolivre");
+        }
+      } else if (produtoExtraido) {
+        linkOriginalLimpo = limparUrlProdutoRadar(produtoExtraido, marketplaceReal);
+      }
+
+      if (pagina.urlFinal && pagina.urlFinal !== resolvida) {
+        const mpFinal = detectarMarketplaceRadarLink(pagina.urlFinal);
+        if (mpFinal) marketplaceReal = mpFinal;
+      }
+
+      if (linkOriginalLimpo && !isUrlIntermediariaRadar(linkOriginalLimpo, marketplaceReal)) {
+        console.log("[RADAR-LINK] produto extraido de intermediario", {
           capturada,
           resolvida,
+          urlFinal: pagina.urlFinal || "",
+          produto: linkOriginalLimpo,
+          marketplaceReal
+        });
+      } else {
+        const motivoIntermediario = pagina.ok
+          ? "link_intermediario_sem_produto"
+          : "redirect_bloqueado";
+        console.log("[RADAR-LINK] resolver falhou", {
+          motivo: motivoIntermediario,
+          capturada,
+          resolvida,
+          status: pagina.status || "",
+          erro: pagina.erro || "",
           marketplaceReal
         });
         return {
           ok: false,
-          motivo: "link_produto_ml_nao_encontrado",
+          motivo: motivoIntermediario,
+          motivoTecnico: motivoIntermediario,
           urlCapturada: capturada,
-          urlResolvida: resolvida || "",
-          marketplaceReal
+          urlResolvida: pagina.urlFinal || resolvida || "",
+          marketplaceReal,
+          tipoLinkRadar: "intermediario",
+          statusHttp: pagina.status || "",
+          erroTecnico: pagina.erro || ""
         };
       }
-
-      linkOriginalLimpo = limparUrlProdutoRadar(produtoMl, "mercadolivre");
-      console.log("[RADAR-LINK] produto ML extraido", {
-        capturada,
-        resolvida,
-        produtoMl,
-        linkOriginalLimpo
-      });
     }
 
-    if (!resolvida || !marketplaceReal || marketplaceReal === "awin" || !linkOriginalLimpo) {
+    if (!resolvida || !marketplaceReal || marketplaceReal === "awin" || !linkOriginalLimpo || isUrlIntermediariaRadar(linkOriginalLimpo, marketplaceReal)) {
+      const motivoFalha = !marketplaceReal
+        ? "marketplace_nao_identificado"
+        : "link_original_nao_resolvido";
       console.log("[RADAR-LINK] resolver falhou", {
-        motivo: "link_original_nao_resolvido",
+        motivo: motivoFalha,
         capturada,
         resolvida: resolvida || "",
         marketplaceReal: marketplaceReal || "",
@@ -6448,7 +6854,8 @@ async function resolverLinkOriginalRadar(url = "") {
       });
       return {
         ok: false,
-        motivo: "link_original_nao_resolvido",
+        motivo: motivoFalha,
+        motivoTecnico: motivoFalha,
         urlCapturada: capturada,
         urlResolvida: resolvida || "",
         marketplaceReal: marketplaceReal || ""
@@ -6467,7 +6874,8 @@ async function resolverLinkOriginalRadar(url = "") {
       urlCapturada: capturada,
       urlResolvida: resolvida,
       marketplaceReal,
-      linkOriginalLimpo
+      linkOriginalLimpo,
+      tipoLinkRadar: "produto"
     };
   } catch (e) {
     console.log("[RADAR-LINK] resolver erro", {
@@ -6476,7 +6884,8 @@ async function resolverLinkOriginalRadar(url = "") {
     });
     return {
       ok: false,
-      motivo: "link_original_nao_resolvido",
+      motivo: "redirect_bloqueado",
+      motivoTecnico: "redirect_bloqueado",
       urlCapturada: capturada,
       erro: e.message
     };
@@ -6504,10 +6913,12 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
         gerarDeepLinkAwin
       });
 
-      if (importacaoRadarIncompleta(produtoKabum || {}, "kabum")) {
+      const motivoIncompletaKabum = motivoImportacaoRadarIncompleta(produtoKabum || {}, "kabum");
+      if (motivoIncompletaKabum) {
         return {
           ok: false,
-          motivo: "importacao_incompleta",
+          motivo: motivoIncompletaKabum,
+          motivoTecnico: motivoIncompletaKabum,
           resolucao
         };
       }
@@ -6559,17 +6970,21 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
     });
 
     if (resultado.status >= 400 || resultado.body?.ok === false) {
+      const motivoFalhaImportador = resultado.body?.erro || "importacao_falhou";
       return {
         ok: false,
-        motivo: resultado.body?.erro || "importacao_falhou",
+        motivo: motivoFalhaImportador,
+        motivoTecnico: motivoFalhaImportador,
         resolucao
       };
     }
 
-    if (importacaoRadarIncompleta(resultado.body || {}, marketplaceDetectado)) {
+    const motivoIncompleta = motivoImportacaoRadarIncompleta(resultado.body || {}, marketplaceDetectado);
+    if (motivoIncompleta) {
       return {
         ok: false,
-        motivo: "importacao_incompleta",
+        motivo: motivoIncompleta,
+        motivoTecnico: motivoIncompleta,
         resolucao
       };
     }
@@ -6603,6 +7018,8 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
     return {
       ok: false,
       motivo: e.message || "erro_importacao_radar",
+      motivoTecnico: e.message || "erro_importacao_radar",
+      erro: e.message || "",
       resolucao,
       contexto
     };
@@ -6794,7 +7211,8 @@ async function processarMensagemRadar({
     });
     const linkEhResgate = beneficiosMensagem.linksResgate.includes(link);
 
-    if (linkEhResgate && links.length > beneficiosMensagem.linksResgate.length) {
+    if (linkEhResgate) {
+      const temOutroLinkProduto = links.some(linkMensagem => !beneficiosMensagem.linksResgate.includes(linkMensagem));
       registrarHistoricoRadar(adminMasterId, {
         origemTipo: origemTipoFinal,
         origemSessaoId: sessaoIdTexto,
@@ -6812,14 +7230,22 @@ async function processarMensagemRadar({
         cupomDetectadoTexto: Boolean(beneficiosMensagem.cupomDetectadoTexto),
         beneficioExtra: beneficiosMensagem.beneficioExtra || link,
         linkResgateCupom: beneficiosMensagem.linkResgateCupom || link,
-        status: "detectado",
-        statusRadar: "detectada",
-        motivo: "link_resgate_cupom_detectado",
+        status: temOutroLinkProduto ? "detectado" : "erro",
+        statusRadar: temOutroLinkProduto ? "detectada" : "erro",
+        statusCaptura: temOutroLinkProduto ? "sucesso" : "erro",
+        motivo: temOutroLinkProduto ? "link_resgate_cupom_detectado" : "link_resgate_cupom_sem_produto",
+        motivoTecnico: temOutroLinkProduto ? "link_resgate_cupom_detectado" : "link_resgate_cupom_sem_produto",
+        motivoFinal: temOutroLinkProduto ? "link_resgate_cupom_detectado" : "link_resgate_cupom_sem_produto",
+        tipoLink: "cupom_resgate",
+        tipoLinkRadar: "resgate_cupom",
+        marketplaceDetectado: detectarMarketplaceRadarLink(link) || "",
+        urlResolvida: "",
         linksDetectados: 1
       });
       logOptimus("CUPOM", "Link de resgate detectado", {
         link,
-        tipoCupom: "resgate"
+        tipoCupom: "resgate",
+        temOutroLinkProduto
       });
       continue;
     }
@@ -6834,10 +7260,12 @@ async function processarMensagemRadar({
     if (!importacao.ok) {
       logOptimus("RADAR", "Importacao falhou", {
         motivo: importacao.motivo || "importacao_falhou",
+        motivoTecnico: importacao.motivoTecnico || importacao.motivo || "importacao_falhou",
         link,
         urlResolvida: importacao.resolucao?.urlResolvida || "",
         linkOriginal: importacao.resolucao?.linkOriginalLimpo || "",
-        marketplace: importacao.resolucao?.marketplaceReal || ""
+        marketplace: importacao.resolucao?.marketplaceReal || "",
+        tipoLinkRadar: importacao.resolucao?.tipoLinkRadar || "produto"
       });
       logRadarRejeitado(importacao.motivo || "importacao_falhou", {
         link,
@@ -6853,7 +7281,17 @@ async function processarMensagemRadar({
         mensagemResumo: texto,
         linkCapturado: link,
         linkOriginal: importacao.resolucao?.linkOriginalLimpo || "",
+        urlResolvida: importacao.resolucao?.urlResolvida || "",
+        linkResolvidoRadar: importacao.resolucao?.urlResolvida || "",
         marketplace: importacao.resolucao?.marketplaceReal || "",
+        marketplaceDetectado: importacao.resolucao?.marketplaceReal || detectarMarketplaceRadarLink(link) || "",
+        tipoLink: importacao.resolucao?.tipoLinkRadar === "intermediario" ? "intermediario" : "produto",
+        tipoLinkRadar: importacao.resolucao?.tipoLinkRadar || "produto",
+        statusCaptura: "erro",
+        motivoTecnico: importacao.motivoTecnico || importacao.motivo || "importacao_falhou",
+        motivoFinal: importacao.motivoTecnico || importacao.motivo || "importacao_falhou",
+        statusHttp: importacao.resolucao?.statusHttp || "",
+        erroTecnico: importacao.resolucao?.erroTecnico || importacao.erro || "",
         cupom: beneficiosMensagem.cupom || "",
         avisoCupom: beneficiosMensagem.avisoCupom || "",
         tipoCupom: beneficiosMensagem.tipoCupom || "",
@@ -6897,7 +7335,12 @@ async function processarMensagemRadar({
       radar: true,
       linkOriginal: importacao.resolucao?.linkOriginalLimpo || importacao.oferta.linkOriginal,
       linkCapturado: importacao.resolucao?.urlCapturada || link,
+      urlResolvida: importacao.resolucao?.urlResolvida || importacao.oferta.linkResolvidoRadar || "",
       linkResolvidoRadar: importacao.resolucao?.urlResolvida || importacao.oferta.linkResolvidoRadar || "",
+      marketplaceDetectado: importacao.resolucao?.marketplaceReal || importacao.oferta.marketplace || "",
+      tipoLink: importacao.resolucao?.tipoLinkRadar === "intermediario" ? "intermediario" : "produto",
+      tipoLinkRadar: importacao.resolucao?.tipoLinkRadar || "produto",
+      motivoTecnico: "",
       link: importacao.resolucao?.linkOriginalLimpo || importacao.oferta.linkOriginal,
       linkAfiliado: "",
       linkFinal: "",
@@ -6957,10 +7400,18 @@ async function processarMensagemRadar({
       mensagemResumo: texto,
       imagem: ofertaRadar.imagem || ofertaRadar.image || ofertaRadar.foto || "",
       linkCapturado: importacao.resolucao?.urlCapturada || link,
+      urlResolvida: importacao.resolucao?.urlResolvida || "",
+      linkResolvidoRadar: importacao.resolucao?.urlResolvida || "",
       linkOriginal: ofertaRadar.linkOriginal || "",
       linkAfiliado: primeiraFila.linkAfiliado || "",
       idOfertaFila: primeiraFila.idOfertaFila || "",
       marketplace: ofertaRadar.marketplace || "",
+      marketplaceDetectado: importacao.resolucao?.marketplaceReal || ofertaRadar.marketplace || "",
+      tipoLink: importacao.resolucao?.tipoLinkRadar === "intermediario" ? "intermediario" : "produto",
+      tipoLinkRadar: importacao.resolucao?.tipoLinkRadar || "produto",
+      statusCaptura: adicionadasLink > 0 ? "fila" : (primeiraRejeicao?.startsWith("retida") ? "retida" : "erro"),
+      motivoFinal: adicionadasLink > 0 ? "enviado_para_fila" : primeiraRejeicao || "nenhum_cliente_adicionado",
+      motivoTecnico: adicionadasLink > 0 ? "" : primeiraRejeicao || "nenhum_cliente_adicionado",
       titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
       preco: ofertaRadar.precoAtual || ofertaRadar.preco || "",
       precoAtual: ofertaRadar.precoAtual || ofertaRadar.preco || "",
