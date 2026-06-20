@@ -3655,6 +3655,25 @@ app.post("/fila/:id/reprocessar", (req, res) => {
 
 // ============== POST FILA INDEX ===========================
 
+app.post("/fila/item/:id/enviar-agora", async (req, res) => {
+  const id = String(req.params.id || "").trim();
+  const clienteId = getClienteId(req);
+  const oferta = fila.find(item =>
+    String(item.id || "") === id &&
+    String(item.clienteId || "admin") === String(clienteId)
+  );
+
+  if (!oferta) {
+    return res.status(404).json({
+      ok: false,
+      erro: "Oferta nao encontrada"
+    });
+  }
+
+  const resultado = await enviarOfertaAgoraDireto(oferta, clienteId);
+  return res.status(resultado.statusHttp || 200).json(resultado);
+});
+
 app.post("/fila/:index/enviar-agora", async (req, res) => {
   const index = Number(req.params.index);
 const clienteIdReq = getClienteId(req);
@@ -3662,6 +3681,7 @@ const clienteIdReq = getClienteId(req);
 const filaCliente = fila.filter(o =>
   String(o.clienteId || "admin") === String(clienteIdReq)
 );
+const idBody = String(req.body?.id || req.body?.ofertaId || "").trim();
 
 if (isNaN(index) || index < 0 || index >= filaCliente.length) {
   return res.status(400).json({
@@ -3670,7 +3690,14 @@ if (isNaN(index) || index < 0 || index >= filaCliente.length) {
   });
 }
 
-const oferta = filaCliente[index];
+let oferta = idBody
+  ? filaCliente.find(item => String(item.id || "") === idBody)
+  : filaCliente[index];
+
+if (!oferta || oferta.status !== "pendente") {
+  const pendentesCliente = filaCliente.filter(item => item.status === "pendente");
+  oferta = pendentesCliente[index] || oferta;
+}
 
 const indexReal = fila.findIndex(o => o === oferta);
 
@@ -3681,35 +3708,6 @@ const indexReal = fila.findIndex(o => o === oferta);
     });
   }
 
-  const configClienteEnviarAgora =
-    configsPorCliente?.[clienteIdReq] || config;
-  const analiseDestinosEnviarAgora =
-    analisarDestinosCompativeisFila(clienteIdReq, oferta, configClienteEnviarAgora);
-
-  if (!analiseDestinosEnviarAgora.compativeis.length) {
-    marcarOfertaRetida(oferta, analiseDestinosEnviarAgora.motivoRetencao);
-    salvarFila(clienteIdReq);
-
-    logOptimus("FILA", "Enviar Agora reteve oferta", {
-      clienteId: clienteIdReq,
-      titulo: oferta.titulo || oferta.nome || "",
-      motivoRetencao: oferta.motivoRetencao
-    });
-
-    return res.status(409).json({
-      ok: false,
-      retida: true,
-      motivo: oferta.motivoRetencao,
-      mensagem: oferta.statusDetalhe,
-      oferta
-    });
-  }
-
-  oferta.status = "pendente";
-  oferta.statusDetalhe = "Envio manual solicitado";
-  delete oferta.motivoRetencao;
-  delete oferta.retidaEm;
-
   logOptimus("FILA", "Enviar Agora solicitado", {
     clienteId: clienteIdReq,
     titulo: oferta.titulo || oferta.nome,
@@ -3719,31 +3717,13 @@ const indexReal = fila.findIndex(o => o === oferta);
     categoria: oferta.categoria
   });
 
-fila.splice(indexReal, 1);
-fila.unshift(oferta);
+if (indexReal >= 0) {
+  fila.splice(indexReal, 1);
+  fila.unshift(oferta);
+}
 
-const clienteId = clienteIdReq;
-
-salvarFila(clienteId);
-
-  controleEnvio = {};
-
-  const configCliente =
-    configsPorCliente?.[clienteId] || config;
-
-  const automacaoAnterior = configCliente.automacaoAtiva;
-
-  configCliente.automacaoAtiva = true;
-
-  await processarFila(clienteId);
-
-  configCliente.automacaoAtiva = automacaoAnterior;
-
-  return res.json({
-    ok: true,
-    mensagem: "Envio manual processado",
-    oferta
-  });
+  const resultado = await enviarOfertaAgoraDireto(oferta, clienteIdReq);
+  return res.status(resultado.statusHttp || 200).json(resultado);
 });
 
 app.get("/config", (req, res) => {
@@ -4582,6 +4562,173 @@ function lerHistoricoRadar(clienteId = "admin") {
     console.log("[RADAR] Falha ao ler historico:", e.message);
     return [];
   }
+}
+
+async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
+  const configCliente = configsPorCliente?.[clienteId] || config;
+
+  if (!oferta || typeof oferta !== "object") {
+    return {
+      ok: false,
+      statusHttp: 404,
+      erro: "Oferta não encontrada"
+    };
+  }
+
+  if (ofertaExpiradaParaEnvio(oferta)) {
+    marcarOfertaExpirada(oferta);
+    salvarFila(clienteId);
+
+    return {
+      ok: false,
+      statusHttp: 409,
+      expirada: true,
+      motivo: "oferta_expirada",
+      mensagem: oferta.statusDetalhe,
+      oferta
+    };
+  }
+
+  const analiseDestinos = analisarDestinosCompativeisFila(clienteId, oferta, configCliente);
+
+  if (!analiseDestinos.compativeis.length) {
+    marcarOfertaRetida(oferta, analiseDestinos.motivoRetencao);
+    salvarFila(clienteId);
+
+    logOptimus("FILA", "Enviar Agora reteve oferta", {
+      clienteId,
+      titulo: oferta.titulo || oferta.nome || "",
+      motivoRetencao: oferta.motivoRetencao
+    });
+
+    return {
+      ok: false,
+      statusHttp: 409,
+      retida: true,
+      motivo: oferta.motivoRetencao,
+      mensagem: oferta.statusDetalhe,
+      oferta
+    };
+  }
+
+  const usuarioOferta =
+    usuarios.find(u => String(u.id) === String(clienteId)) || null;
+  const plano = getPlanoPorNome(usuarioOferta?.plano || "free") || {};
+
+  let enviouParaAlgumDestino = false;
+  let destinosEnviadosCount = 0;
+  let pulouPorHorario = false;
+  let pulouPorLimiteDiario = false;
+  let ultimoMotivo = "";
+
+  oferta.status = "pendente";
+  oferta.statusDetalhe = "Envio manual solicitado";
+  oferta.erro = "";
+  oferta.erroEm = "";
+  oferta.proximaTentativaEnvioEm = "";
+  delete oferta.motivoRetencao;
+  delete oferta.retidaEm;
+
+  for (const item of analiseDestinos.compativeis) {
+    const destino = item.destino;
+    const nomeDestino = destinoNomeLog(destino);
+
+    if (!destinoDentroHorario(destino)) {
+      pulouPorHorario = true;
+      ultimoMotivo = "fora_horario";
+      logOptimus("DESTINO", "Enviar Agora fora do horario", {
+        clienteId,
+        destino: nomeDestino
+      });
+      continue;
+    }
+
+    const limite = destinoLimiteDiarioDisponivel(clienteId, destino);
+    if (!limite.ok) {
+      pulouPorLimiteDiario = true;
+      ultimoMotivo = "limite_diario";
+      logOptimus("DESTINO", "Enviar Agora limite diario", {
+        clienteId,
+        destino: nomeDestino,
+        usados: limite.usados,
+        limite: limite.limite
+      });
+      continue;
+    }
+
+    const mensagem = montarMensagemOferta(oferta, {
+      destino,
+      plano,
+      clienteId
+    });
+
+    const resultadoEnvio = await enviarParaDestinoInteligente(
+      destino,
+      oferta,
+      mensagem,
+      clienteId,
+      configCliente
+    );
+    const resultado =
+      typeof resultadoEnvio === "object" && resultadoEnvio !== null
+        ? resultadoEnvio
+        : { enviado: resultadoEnvio === true, motivo: resultadoEnvio === false ? "nao_enviado" : "" };
+
+    if (resultado.enviado === true) {
+      enviouParaAlgumDestino = true;
+      destinosEnviadosCount += 1;
+      controleEnvio[destinoChaveControle(clienteId, destino)] = Date.now();
+      logOptimus("ENVIO", "Enviar Agora enviado", {
+        clienteId,
+        destino: nomeDestino,
+        titulo: oferta.titulo || oferta.nome || ""
+      });
+    } else {
+      ultimoMotivo = resultado.motivo || "nao_enviado";
+      if (resultado.motivo === "fora_horario") pulouPorHorario = true;
+    }
+  }
+
+  if (!enviouParaAlgumDestino) {
+    oferta.status = "pendente";
+    oferta.statusDetalhe = pulouPorHorario
+      ? "Aguardando horario do destino"
+      : pulouPorLimiteDiario
+        ? "Aguardando limite diario do destino"
+        : "Nenhum destino confirmou envio manual";
+    salvarFila(clienteId);
+
+    return {
+      ok: false,
+      statusHttp: 409,
+      motivo: ultimoMotivo || "nao_enviado",
+      mensagem: oferta.statusDetalhe,
+      oferta
+    };
+  }
+
+  ultimoEnvioFila = Date.now();
+  oferta.status = "enviado";
+  oferta.enviadoEm = new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  });
+  oferta.dataEnvio = oferta.enviadoEm;
+  oferta.statusDetalhe = `Enviada manualmente para ${destinosEnviadosCount} destino(s)`;
+  oferta.logsEnvio = oferta.logsEnvio || [];
+  oferta.logsEnvio.push({
+    tipo: "sucesso",
+    mensagem: oferta.statusDetalhe,
+    data: oferta.enviadoEm
+  });
+
+  salvarFila(clienteId);
+
+  return {
+    ok: true,
+    mensagem: "Envio manual processado",
+    destinosEnviados: destinosEnviadosCount,
+    oferta
+  };
 }
 
 function lerPreviewRadar(clienteId = "admin") {
