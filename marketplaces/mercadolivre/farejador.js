@@ -117,8 +117,14 @@ const buscas = [
   ...buscasGlobaisExtras
 ];
 
-      const limiteBuscas =
-      config.marketplaces?.mercadolivre?.limiteBuscasPorRodada || 1;
+      const limiteBuscasBase = Number(
+        config.marketplaces?.mercadolivre?.limiteBuscasPorRodada || 1
+      ) || 1;
+      const limiteBuscas = estrategiaFarejador.filaCritica
+        ? Math.max(limiteBuscasBase, 4)
+        : estrategiaFarejador.filaBaixa
+          ? Math.max(limiteBuscasBase, 2)
+          : limiteBuscasBase;
 
       const buscasEmbaralhadas = [...buscas].sort(() => Math.random() - 0.5);
       const buscasDaRodada = buscasEmbaralhadas.slice(0, limiteBuscas);
