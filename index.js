@@ -3585,8 +3585,11 @@ app.get("/automacao/status", (req, res) => {
     },
     orquestrador: {
       marketplaceAtual: ordemMarketplaces?.[indiceMarketplaceAtual] ?? null,
+      sequenciaPonderada: ordemMarketplaces,
+      sequenciaCritica: ordemMarketplacesCritica,
       intervaloGlobalMinutos: config.intervaloFarejadorGlobalMinutos ?? 10,
-      farejadorRodando
+      farejadorRodando,
+      statusMarketplaces: statusOrquestradorMarketplaces
     }
   });
 });
@@ -13318,10 +13321,23 @@ salvarConfig();
 const ordemMarketplaces = [
   "mercadolivre",
   "shopee",
+  "mercadolivre",
   "amazon",
+  "mercadolivre",
+  "shopee",
+  "amazon",
+  "mercadolivre",
   "aliexpress",
-  "kabum",
-  "awin",
+  "kabum"
+];
+
+const ordemMarketplacesCritica = [
+  "mercadolivre",
+  "amazon",
+  "shopee",
+  "mercadolivre",
+  "amazon",
+  "shopee"
 ];
 
 const farejadoresMarketplaces = {
@@ -13336,6 +13352,71 @@ const farejadoresMarketplaces = {
 
 let indiceMarketplaceAtual = 0;
 let farejadorRodando = false;
+const statusOrquestradorMarketplaces = {};
+
+function obterStatusOrquestradorMarketplace(marketplace = "") {
+  const mp = normalizarTexto(marketplace || "");
+  if (!statusOrquestradorMarketplaces[mp]) {
+    statusOrquestradorMarketplaces[mp] = {
+      marketplace: mp,
+      rodadas: 0,
+      ultimoInicio: "",
+      ultimaFinalizacao: "",
+      ultimoErro: "",
+      cooldownAte: 0
+    };
+  }
+
+  return statusOrquestradorMarketplaces[mp];
+}
+
+function algumClienteComFilaCritica() {
+  return usuarios.some(usuario => {
+    if (!usuario?.ativo) return false;
+    try {
+      return avaliarSaudeFilaCliente(usuario.id).status === "critica";
+    } catch {
+      return false;
+    }
+  });
+}
+
+function selecionarProximoMarketplaceOrquestrador() {
+  const sequencia = algumClienteComFilaCritica()
+    ? ordemMarketplacesCritica
+    : ordemMarketplaces;
+  const agora = Date.now();
+
+  for (let tentativas = 0; tentativas < sequencia.length; tentativas += 1) {
+    const indice = indiceMarketplaceAtual % sequencia.length;
+    const marketplace = sequencia[indice];
+    indiceMarketplaceAtual = (indiceMarketplaceAtual + 1) % sequencia.length;
+    const status = obterStatusOrquestradorMarketplace(marketplace);
+    const cfg = config.marketplaces?.[marketplace];
+    const farejador = farejadoresMarketplaces[marketplace];
+
+    if (!cfg?.ativo || typeof farejador !== "function") {
+      logOptimus("INTELIGENCIA", "Marketplace indisponivel pulado", {
+        marketplace,
+        ativo: Boolean(cfg?.ativo),
+        temFarejador: typeof farejador === "function"
+      });
+      continue;
+    }
+
+    if (status.cooldownAte && status.cooldownAte > agora) {
+      logOptimus("INTELIGENCIA", "Marketplace em cooldown", {
+        marketplace,
+        cooldownRestanteSegundos: Math.ceil((status.cooldownAte - agora) / 1000)
+      });
+      continue;
+    }
+
+    return marketplace;
+  }
+
+  return "";
+}
 
 async function rodarProximoMarketplace() {
 
@@ -13356,10 +13437,12 @@ if (!admin) {
 
   if (!podeRodarAgora()) return;
 
-  const marketplace = ordemMarketplaces[indiceMarketplaceAtual];
+  const marketplace = selecionarProximoMarketplaceOrquestrador();
 
-  indiceMarketplaceAtual =
-    (indiceMarketplaceAtual + 1) % ordemMarketplaces.length;
+  if (!marketplace) {
+    logOptimus("INTELIGENCIA", "Nenhum marketplace disponivel para rodada");
+    return;
+  }
 
   const cfg = config.marketplaces?.[marketplace];
 
@@ -13378,8 +13461,15 @@ if (!admin) {
 
   try {
     farejadorRodando = true;
+    const statusMarketplace = obterStatusOrquestradorMarketplace(marketplace);
+    statusMarketplace.rodadas += 1;
+    statusMarketplace.ultimoInicio = new Date().toISOString();
+    statusMarketplace.ultimoErro = "";
 
-console.log(`[INFO] Rodada multiusurio: ${marketplace}`);
+logOptimus("INTELIGENCIA", "Rodada marketplace iniciada", {
+  marketplace,
+  rodada: statusMarketplace.rodadas
+});
 
 for (const usuario of usuarios) {
   if (!usuario?.ativo) continue;
@@ -13456,10 +13546,21 @@ await farejador(clienteId, {
 });
 }
   
-  console.log(`[INFO] Rodada multiusurio finalizada: ${marketplace}`);
+  statusMarketplace.ultimaFinalizacao = new Date().toISOString();
+  logOptimus("INTELIGENCIA", "Rodada marketplace finalizada", {
+    marketplace,
+    rodada: statusMarketplace.rodadas
+  });
  
   } catch (e) {
-    console.log(`[ERRO] Erro na rodada ${marketplace}:`, e.message);
+    const statusMarketplace = obterStatusOrquestradorMarketplace(marketplace);
+    statusMarketplace.ultimoErro = e.message || "erro_rodada_marketplace";
+    statusMarketplace.cooldownAte = Date.now() + 15 * 60 * 1000;
+    logOptimus("ERRO", "Erro na rodada marketplace", {
+      marketplace,
+      erro: e.message,
+      cooldownMinutos: 15
+    });
   } finally {
     farejadorRodando = false;
   }
@@ -13468,17 +13569,8 @@ await farejador(clienteId, {
 // ============================= TESTE MANUAL =========================
 
  setTimeout(async () => {
-   console.log("[INFO] TESTE MANUAL ORQUESTRADOR ML");
-
-  const indicemercadolivre =
-   ordemMarketplaces.indexOf("mercadolivre");
-
-   if (indicemercadolivre >= 0) {
-     indiceMarketplaceAtual = indicemercadolivre;
-  }
-
-  await rodarProximoMarketplace();
-
+   console.log("[INFO] TESTE MANUAL ORQUESTRADOR PONDERADO");
+   await rodarProximoMarketplace();
  }, 60 * 1000);
 
  
