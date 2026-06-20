@@ -805,6 +805,90 @@ function avaliarSaudeFilaCliente(clienteId = "admin") {
   };
 }
 
+function ofertaTemBeneficioFarejador(oferta = {}) {
+  if (!oferta || typeof oferta !== "object") return false;
+  if (oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true) return false;
+
+  const campos = [
+    oferta.cupom,
+    oferta.avisoCupom,
+    oferta.tipoCupom,
+    oferta.valorCupom,
+    oferta.percentualCupom,
+    oferta.cupomUrl,
+    oferta.linkResgateCupom,
+    oferta.descontoPix,
+    oferta.descontoApp,
+    oferta.beneficioExtra,
+    oferta.beneficioDetectado,
+    oferta.avisoPagamento
+  ].filter(Boolean);
+
+  const texto = normalizarTexto(campos.join(" "));
+  if (!texto) return false;
+
+  const avisoGenerico =
+    texto.includes("confira cupons disponiveis na pagina") ||
+    texto.includes("verifique na pagina") ||
+    texto.includes("confira antes de finalizar");
+
+  return Boolean(
+    oferta.cupom ||
+    oferta.valorCupom ||
+    oferta.percentualCupom ||
+    oferta.cupomUrl ||
+    oferta.linkResgateCupom ||
+    oferta.descontoPix ||
+    oferta.descontoApp ||
+    oferta.beneficioExtra ||
+    oferta.beneficioDetectado ||
+    /(?:r\$\s*)?\d+(?:[,.]\d{1,2})?\s*(?:off|%|por cento|reais)/i.test(campos.join(" ")) ||
+    (!avisoGenerico && /\b(cupom|coupon|promocode|voucher|pix|app|aplicativo|cashback|frete gratis|desconto)\b/.test(texto))
+  );
+}
+
+function obterEstrategiaFarejador(clienteId = "admin", marketplace = "", opcoes = {}) {
+  const mp = normalizarTexto(marketplace || "");
+  const cfg = config.marketplaces?.[mp] || {};
+  const saude = avaliarSaudeFilaCliente(clienteId);
+  const descontoBase = Number(opcoes.descontoMinimo ?? cfg.descontoMinimo ?? 15);
+  const precoBase = Number(opcoes.precoMinimo ?? cfg.precoMinimo ?? 0);
+
+  let descontoMinimo = Number.isFinite(descontoBase) ? descontoBase : 15;
+
+  if (saude.status === "critica") {
+    descontoMinimo = Math.min(descontoMinimo, 7);
+  } else if (saude.status === "baixa") {
+    descontoMinimo = Math.min(descontoMinimo, 10);
+  }
+
+  const estrategia = {
+    clienteId,
+    marketplace: mp,
+    saude,
+    statusFila: saude.status,
+    filaCritica: saude.status === "critica",
+    filaBaixa: saude.status === "baixa" || saude.status === "critica",
+    filaCheia: saude.status === "cheia",
+    descontoMinimo,
+    descontoMinimoBase: descontoBase,
+    precoMinimo: Number.isFinite(precoBase) ? precoBase : 0,
+    aceitarCupomSemDesconto: true,
+    aceitarBeneficioSemDesconto: true
+  };
+
+  logOptimus("INTELIGENCIA", "Estrategia farejador", {
+    clienteId,
+    marketplace: mp,
+    pendentes: saude.pendentes,
+    statusFila: saude.status,
+    descontoMinimoBase: estrategia.descontoMinimoBase,
+    descontoMinimo: estrategia.descontoMinimo
+  });
+
+  return estrategia;
+}
+
 async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
   const cliente = String(clienteId || "admin");
   const maximo = Math.max(0, Math.min(Number(limite) || 3, 3));
@@ -876,6 +960,8 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
       classificarCategoriaOferta,
       gerarBuscasGlobais,
       gerarHeadersStealth,
+      obterEstrategiaFarejador,
+      ofertaTemBeneficioFarejador,
       farejarCuponsMercadoLivre,
       importarMercadoLivre: (url, clienteIdAlvo = cliente) =>
         importarMercadoLivre(url, clienteIdAlvo, {
@@ -13350,6 +13436,8 @@ await farejador(clienteId, {
   classificarCategoriaOferta,
   gerarBuscasGlobais,
   gerarHeadersStealth,
+  obterEstrategiaFarejador,
+  ofertaTemBeneficioFarejador,
   farejarCuponsMercadoLivre,
   importarMercadoLivre: (url, clienteIdAlvo = "admin") =>
   importarMercadoLivre(url, clienteIdAlvo, {
