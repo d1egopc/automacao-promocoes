@@ -9066,7 +9066,8 @@ app.use("/mensageiro", criarRotasMensageiro({
   getMensageiroCliente: mensageiro.getMensageiroCliente,
   setMensageiroCliente: mensageiro.setMensageiroCliente,
   getAtendimentoConfigCliente: mensageiro.getAtendimentoConfigCliente,
-  setAtendimentoConfigCliente: mensageiro.setAtendimentoConfigCliente
+  setAtendimentoConfigCliente: mensageiro.setAtendimentoConfigCliente,
+  encontrarGatilhoAtendimento: mensageiro.encontrarGatilhoAtendimento
 }));
 
 
