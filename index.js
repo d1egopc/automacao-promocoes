@@ -6106,11 +6106,33 @@ function totalRadarCapturadoHoje() {
     timeZone: "America/Sao_Paulo"
   });
 
-  return lerFilasRadarSomenteLeitura().filter(item => {
-    if (item.origem !== "radar" && item.radar !== true) return false;
+  const adminMasterId = obterClienteIdAdminMaster();
+  const eventos = [
+    ...lerHistoricoRadar(adminMasterId),
+    ...lerPreviewRadar(adminMasterId)
+  ];
+  const vistos = new Set();
 
-    const data = String(item.capturadaEm || item.dataEntradaRadar || item.dataEntradaFila || "");
-    return data.includes(hoje);
+  return eventos.filter(evento => {
+    const data = String(evento.capturadaEm || evento.dataEntradaRadar || evento.dataEntradaFila || "");
+    if (!data.includes(hoje)) return false;
+
+    const status = normalizarTexto(evento.statusCaptura || evento.statusRadar || evento.status || "");
+    const enviadaFila = status === "fila" || status === "adicionado_fila" || status === "adicionada_fila";
+    if (!enviadaFila) return false;
+
+    const chave = [
+      evento.idOfertaFila,
+      evento.linkOriginal,
+      evento.linkCapturado,
+      evento.titulo,
+      evento.origemGrupoId
+    ].filter(Boolean).join("|").toLowerCase();
+
+    if (chave && vistos.has(chave)) return false;
+    if (chave) vistos.add(chave);
+
+    return true;
   }).length;
 }
 
@@ -6839,7 +6861,11 @@ function normalizarUrlExtraidaRadar(link = "", base = "") {
 
 function candidatosUrlHtmlRadar(html = "", base = "") {
   const texto = String(html || "");
-  return [
+  const candidatos = [
+    ...texto.matchAll(/https?%3A%2F%2F[^"'<>\\\s]+/gi),
+    ...texto.matchAll(/(?:url|u|target|redirect|destination|dest|link|to)=((?:https?%3A%2F%2F|https?:\/\/)[^"'<>\\\s&]+)/gi),
+    ...texto.matchAll(/(?:window\.location(?:\.href)?|location\.href)\s*=\s*["']([^"']+)["']/gi),
+    ...texto.matchAll(/content=["'][^"']*url=([^"']+)["']/gi),
     ...texto.matchAll(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/gi),
     ...texto.matchAll(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/gi),
     ...texto.matchAll(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:url["']/gi),
@@ -6847,8 +6873,24 @@ function candidatosUrlHtmlRadar(html = "", base = "") {
     ...texto.matchAll(/"permalink"\s*:\s*"([^"]+)"/gi),
     ...texto.matchAll(/"url"\s*:\s*"([^"]+)"/gi),
     ...texto.matchAll(/href=["']([^"']+)["']/gi)
+  ];
+
+  return [
+    ...candidatos
   ]
-    .map(match => normalizarUrlExtraidaRadar(match[1], base))
+    .map(match => {
+      let valor = match[1] || match[0] || "";
+      for (let i = 0; i < 3; i += 1) {
+        try {
+          const decodificado = decodeURIComponent(valor);
+          if (decodificado === valor) break;
+          valor = decodificado;
+        } catch {
+          break;
+        }
+      }
+      return normalizarUrlExtraidaRadar(valor, base);
+    })
     .filter(Boolean);
 }
 
@@ -7007,8 +7049,9 @@ async function baixarHtmlRadar(url = "") {
       maxContentLength: 1024 * 768,
       validateStatus: () => true,
       headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; OptimusRadar/1.0)",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
       }
     });
 
@@ -7042,8 +7085,9 @@ async function extrairProdutoMercadoLivreIntermediarioRadar(url = "") {
       maxContentLength: 1024 * 512,
       validateStatus: () => true,
       headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; OptimusRadar/1.0)",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
       }
     });
     const produto = extrairProdutoMercadoLivreDeHtmlRadar(resposta.data || "");
@@ -7171,8 +7215,9 @@ async function resolverLinkOriginalRadar(url = "") {
       validateStatus: () => true,
       responseType: "stream",
       headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; OptimusRadar/1.0)",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
       }
     });
     if (resposta.data?.destroy) resposta.data.destroy();
@@ -7632,6 +7677,10 @@ async function processarMensagemRadar({
       url: link,
       grupo: grupoNomeTexto || grupoIdTexto
     });
+    const beneficiosLink = {
+      ...beneficiosMensagem,
+      ...(beneficiosMensagem.beneficiosPorLink?.[link] || {})
+    };
     const linkEhResgate = beneficiosMensagem.linksResgate.includes(link);
 
     if (linkEhResgate) {
@@ -7740,17 +7789,17 @@ async function processarMensagemRadar({
       preco: importacao.oferta?.precoAtual || importacao.oferta?.preco || "",
       categoria: importacao.oferta?.categoria || "",
       cupomImportado: importacao.oferta?.cupom || "",
-      cupomMensagem: beneficiosMensagem.cupom || ""
+      cupomMensagem: beneficiosLink.cupom || ""
     });
     const ofertaRadar = prepararOfertaGlobal({
       ...importacao.oferta,
-      cupom: importacao.oferta?.cupom || beneficiosMensagem.cupom || "",
-      avisoCupom: importacao.oferta?.avisoCupom || beneficiosMensagem.avisoCupom || "",
-      tipoCupom: importacao.oferta?.tipoCupom || beneficiosMensagem.tipoCupom || "",
-      beneficioExtra: importacao.oferta?.beneficioExtra || beneficiosMensagem.beneficioExtra || "",
-      linkResgateCupom: importacao.oferta?.linkResgateCupom || beneficiosMensagem.linkResgateCupom || "",
-      cupomOrigem: importacao.oferta?.cupomOrigem || beneficiosMensagem.cupomOrigem || "",
-      cupomDetectadoTexto: Boolean(importacao.oferta?.cupomDetectadoTexto || beneficiosMensagem.cupomDetectadoTexto),
+      cupom: importacao.oferta?.cupom || beneficiosLink.cupom || "",
+      avisoCupom: importacao.oferta?.avisoCupom || beneficiosLink.avisoCupom || "",
+      tipoCupom: importacao.oferta?.tipoCupom || beneficiosLink.tipoCupom || "",
+      beneficioExtra: importacao.oferta?.beneficioExtra || beneficiosLink.beneficioExtra || "",
+      linkResgateCupom: importacao.oferta?.linkResgateCupom || beneficiosLink.linkResgateCupom || "",
+      cupomOrigem: importacao.oferta?.cupomOrigem || beneficiosLink.cupomOrigem || "",
+      cupomDetectadoTexto: Boolean(importacao.oferta?.cupomDetectadoTexto || beneficiosLink.cupomDetectadoTexto),
       ...origemBase,
       origemClienteId: adminMasterId,
       origem: "radar",
