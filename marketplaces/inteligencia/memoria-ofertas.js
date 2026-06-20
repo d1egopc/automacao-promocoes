@@ -80,13 +80,14 @@ function chaveOferta(oferta = {}) {
 
 function janelaHorasPorCategoria(oferta = {}) {
   const categoria = normalizarTextoLocal(oferta.categoria || "");
+  const marketplace = normalizarTextoLocal(oferta.marketplace || "");
 
   if (
     categoria.includes("gamer") ||
     categoria.includes("hardware") ||
     categoria.includes("computadores")
   ) {
-    return 8;
+    return 10;
   }
 
   if (
@@ -95,10 +96,26 @@ function janelaHorasPorCategoria(oferta = {}) {
     categoria.includes("tenis") ||
     categoria.includes("chinelos")
   ) {
-    return 4;
+    return 7;
+  }
+
+  if (marketplace.includes("amazon") || marketplace.includes("shopee")) {
+    return 5;
   }
 
   return 6;
+}
+
+function ofertaTemBeneficioMemoria(oferta = {}) {
+  return Boolean(
+    String(oferta.cupom || "").trim() ||
+    String(oferta.tipoCupom || "").trim() ||
+    String(oferta.avisoCupom || "").trim() ||
+    String(oferta.beneficioExtra || "").trim() ||
+    String(oferta.linkResgateCupom || "").trim() ||
+    String(oferta.descontoPix || "").trim() ||
+    String(oferta.descontoApp || "").trim()
+  );
 }
 
 function deveIgnorarOfertaRepetida(oferta = {}) {
@@ -124,6 +141,7 @@ function deveIgnorarOfertaRepetida(oferta = {}) {
     oferta.cupom &&
     String(oferta.cupom).trim() &&
     String(oferta.cupom).trim() !== String(anterior.cupom || "").trim();
+  const temBeneficio = ofertaTemBeneficioMemoria(oferta);
 
   const quedaPreco =
     precoAnterior > 0 &&
@@ -133,6 +151,10 @@ function deveIgnorarOfertaRepetida(oferta = {}) {
   if (horasPassadas < 1 && !temCupomNovo && !quedaPreco) {
     console.log("[INFO] Oferta repetida ignorada <1h:", oferta.titulo || oferta.nome);
     return true;
+  }
+
+  if (temBeneficio && horasPassadas >= 3) {
+    return false;
   }
 
   const janelaHoras = janelaHorasPorCategoria(oferta);
