@@ -6705,6 +6705,56 @@ function candidatosUrlHtmlRadar(html = "", base = "") {
     .filter(Boolean);
 }
 
+function extrairProdutoDeParametrosIntermediarioRadar(url = "", marketplace = "") {
+  const mp = normalizarMarketplaceRadar(marketplace || detectarMarketplaceRadarLink(url));
+  const chaves = [
+    "url",
+    "u",
+    "target",
+    "redirect",
+    "redirect_url",
+    "destination",
+    "dest",
+    "link",
+    "to",
+    "r"
+  ];
+
+  try {
+    const parsed = new URL(url);
+    const candidatos = [];
+
+    for (const chave of chaves) {
+      const valor = parsed.searchParams.get(chave);
+      if (!valor) continue;
+
+      let atual = valor;
+      for (let tentativas = 0; tentativas < 3; tentativas += 1) {
+        try {
+          atual = decodeURIComponent(atual);
+        } catch {
+          break;
+        }
+      }
+
+      candidatos.push(normalizarUrlExtraidaRadar(atual));
+    }
+
+    for (const candidato of candidatos.filter(Boolean)) {
+      const marketplaceCandidato = normalizarMarketplaceRadar(detectarMarketplaceRadarLink(candidato) || mp);
+      const limpo = limparUrlProdutoRadar(candidato, marketplaceCandidato);
+      if (limpo && !isUrlIntermediariaRadar(limpo, marketplaceCandidato)) {
+        return {
+          url: limpo,
+          marketplace: marketplaceCandidato
+        };
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
 function isUrlProdutoShopeeRadar(url = "") {
   try {
     const parsed = new URL(url);
@@ -6906,8 +6956,39 @@ function percentualDescontoRadar(oferta = {}, radar = {}) {
   return 0;
 }
 
+function beneficioRadarUtil(oferta = {}, cupomRadar = {}) {
+  if (oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true) return false;
+
+  const campos = [
+    cupomRadar.avisoCupom,
+    cupomRadar.beneficioExtra,
+    cupomRadar.valorCupom,
+    cupomRadar.percentualCupom,
+    cupomRadar.descontoPix,
+    cupomRadar.descontoApp,
+    oferta.avisoCupom,
+    oferta.beneficioExtra,
+    oferta.linkResgateCupom
+  ];
+
+  const texto = normalizarTexto(campos.filter(Boolean).join(" "));
+  if (!texto || avisoCupomGenericoRadar(texto)) return false;
+
+  return Boolean(
+    cupomRadar.possivelCupom ||
+    cupomRadar.valorCupom ||
+    cupomRadar.percentualCupom ||
+    cupomRadar.descontoPix ||
+    cupomRadar.descontoApp ||
+    oferta.linkResgateCupom ||
+    /(?:r\$\s*)?\d+(?:[,.]\d{1,2})?\s*(?:off|%|por cento|reais)/i.test(campos.filter(Boolean).join(" ")) ||
+    /\b(frete gratis|pix|app|aplicativo|cashback|cupom|coupon|promocode|desconto)\b/.test(texto)
+  );
+}
+
 function oportunidadeRadarBoa(oferta = {}, radar = {}, cupomRadar = {}) {
   if (cupomRadar.cupomConfirmado) return true;
+  if (beneficioRadarUtil(oferta, cupomRadar)) return true;
   if (radar.decisao === "aprovado") return true;
   if (Number(radar.radarScore || 0) >= 60) return true;
   if (percentualDescontoRadar(oferta, radar) >= 15) return true;
@@ -6963,6 +7044,22 @@ async function resolverLinkOriginalRadar(url = "") {
       marketplaceReal,
       linkOriginalLimpo
     });
+
+    if (marketplaceReal && isUrlIntermediariaRadar(linkOriginalLimpo || resolvida, marketplaceReal)) {
+      const produtoParametro = extrairProdutoDeParametrosIntermediarioRadar(resolvida, marketplaceReal) ||
+        extrairProdutoDeParametrosIntermediarioRadar(capturada, marketplaceReal);
+
+      if (produtoParametro?.url) {
+        marketplaceReal = produtoParametro.marketplace || marketplaceReal;
+        linkOriginalLimpo = produtoParametro.url;
+        console.log("[RADAR-LINK] produto extraido de parametro intermediario", {
+          capturada,
+          resolvida,
+          produto: linkOriginalLimpo,
+          marketplaceReal
+        });
+      }
+    }
 
     if (marketplaceReal && isUrlIntermediariaRadar(linkOriginalLimpo || resolvida, marketplaceReal)) {
       const pagina = await baixarHtmlRadar(resolvida);
@@ -7825,7 +7922,8 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   }
 
   const radar = avaliarOfertaRadar(ofertaPreparada);
-  const temCupomForte = cupomRadar.cupomConfirmado;
+  const temBeneficioUtil = beneficioRadarUtil(ofertaPreparada, cupomRadar);
+  const temCupomForte = cupomRadar.cupomConfirmado || temBeneficioUtil;
   const tipoRadar = temCupomForte ? "radarComCupom" : "radarSemCupom";
   const prioridadeFila = temCupomForte ? 80 : 40;
   const linkOriginal =
@@ -7853,7 +7951,11 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   logOptimus("RADAR", "Tipo Radar", {
     clienteId,
     tipoRadar,
-    origemTipoRadar: temCupomForte ? "cupomConfirmado" : "semCupomConfirmado"
+    origemTipoRadar: cupomRadar.cupomConfirmado
+      ? "cupomConfirmado"
+      : temBeneficioUtil
+        ? "beneficioUtil"
+        : "semCupomConfirmado"
   });
 
   if (!linkOriginal) {
@@ -7874,7 +7976,8 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
       decisao: radar.decisao,
       desconto: percentualDescontoRadar(ofertaPreparada, radar),
       cupom: ofertaPreparada.cupom || "",
-      cupomConfirmado: Boolean(cupomRadar.cupomConfirmado)
+      cupomConfirmado: Boolean(cupomRadar.cupomConfirmado),
+      beneficioUtil: Boolean(temBeneficioUtil)
     });
     return { ok: false, motivo: "oferta_sem_cupom_ou_desconto_relevante" };
   }
