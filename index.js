@@ -115,6 +115,40 @@ const {
   mascararSecrets
 } = storageUtils;
 
+const LOG_OPTIMUS_ICONS = {
+  FILA: "\u{1F4E6}",
+  RADAR: "\u{1F4E1}",
+  CAPTURA: "\u{1F4E5}",
+  CUPOM: "\u{1F39F}",
+  DESTINO: "\u{1F50D}",
+  ENVIO: "\u{1F4E4}",
+  INTELIGENCIA: "\u{1F9E0}",
+  INTEGRACAO: "\u{1F50C}",
+  WHATSAPP: "\u{1F4F1}",
+  TELEGRAM: "\u2708\uFE0F",
+  MERCADOLIVRE: "\u{1F6D2}",
+  SHOPEE: "\u{1F7E0}",
+  AMAZON: "\u{1F535}",
+  ALIEXPRESS: "\u{1F7E3}",
+  KABUM: "\u{1F9F0}",
+  SUCESSO: "\u2705",
+  AVISO: "\u26A0\uFE0F",
+  ERRO: "\u274C"
+};
+
+function logOptimus(categoria = "INFO", mensagem = "", dados = {}) {
+  const chave = String(categoria || "INFO").toUpperCase();
+  const icone = LOG_OPTIMUS_ICONS[chave] || "\u2139\uFE0F";
+  const prefixo = `${icone} ${chave} | ${mensagem}`;
+
+  if (dados && typeof dados === "object" && Object.keys(dados).length) {
+    console.log(prefixo, dados);
+    return;
+  }
+
+  console.log(prefixo);
+}
+
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -2290,7 +2324,9 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
     }
 
     if (!destinoDentroHorario(destino)) {
-      console.log("[DESTINO] Destino fora do horrio:", destino.nome);
+      logOptimus("DESTINO", "Fora do horario", {
+        destino: destino.nome
+      });
       return { enviado: false, motivo: "fora_horario" };
     }
 
@@ -2301,7 +2337,9 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
   const sock = sessoes[destino.conexaoId];
 
   if (!sock) {
-    console.log("[WHATSAPP] Sesso no encontrada:", destino.conexaoId);
+    logOptimus("WHATSAPP", "Sessao nao encontrada", {
+      conexaoId: destino.conexaoId
+    });
     return { enviado: false, motivo: "sessao_nao_encontrada" };
   }
 
@@ -2314,13 +2352,15 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     .filter(Boolean);
 
   if (!grupos.length) {
-    console.log("[WHATSAPP] Destino WhatsApp sem grupos vlidos:", destino.nome);
+    logOptimus("WHATSAPP", "Destino sem grupos validos", {
+      destino: destino.nome
+    });
     return { enviado: false, motivo: "sem_grupos" };
   }
 
   for (const grupo of grupos) {
     if (!usuarioTemCreditos(clienteId, 1)) {
-      console.log("[AVISO] Sem crditos:", clienteId);
+      logOptimus("AVISO", "Sem creditos", { clienteId });
       return { enviado: false, motivo: "sem_creditos" };
     }
 
@@ -2337,7 +2377,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
     debitarCreditos(clienteId, 1);
 
-    console.log("[WHATSAPP] Enviado WhatsApp:", {
+    logOptimus("WHATSAPP", "Mensagem enviada", {
       clienteId,
       destino: destino.nome,
       grupo
@@ -2377,16 +2417,18 @@ const selecionados = telegramsSelecionados.length
       telegramsSelecionados.includes(t.nome) ||
       telegramsSelecionados.includes(String(t.chatId))
     )
-  : telegrams.filter(t => t.ativo);
+      : telegrams.filter(t => t.ativo);
   
       if (!selecionados.length) {
-        console.log("[TELEGRAM] Nenhum Telegram selecionado para este destino:", destino.nome);
+        logOptimus("TELEGRAM", "Nenhum destino selecionado", {
+          destino: destino.nome
+        });
       }
 
       for (const tel of selecionados) {
        
       if (!usuarioTemCreditos(clienteId, 1)) {
-      console.log("[AVISO] Sem crditos:", clienteId);
+      logOptimus("AVISO", "Sem creditos", { clienteId });
       continue;
       }
 
@@ -2413,7 +2455,7 @@ const selecionados = telegramsSelecionados.length
           );
         }
 
-        console.log("[TELEGRAM] Enviado Telegram:", {
+        logOptimus("TELEGRAM", "Mensagem enviada", {
           clienteId,
           destino: destino.nome,
           chatId: tel.chatId
@@ -2471,7 +2513,7 @@ async function processarFila(clienteIdAlvo = null) {
     oferta = selecionarProximaOfertaFila(clienteIdAlvo);
 
 if (!oferta) {
-  console.log("[FILA] Nenhuma oferta pendente");
+  logOptimus("FILA", "Nenhuma oferta pendente");
   return;
 }
 
@@ -2489,7 +2531,7 @@ const clienteAtivo =
   configCliente.automacaoAtiva === true;
 
 if (!clienteAtivo) {
-  console.log("[INFO] Automao desligada para cliente:", clienteId);
+  logOptimus("FILA", "Automacao desligada para cliente", { clienteId });
   return;
 }
 
@@ -2533,12 +2575,16 @@ if (!sessoes[idSessao]) {
     const sock = sessoes[idSessao];
 
     if (!sock) {
-      console.log("[WHATSAPP] Nenhuma sesso conectada para:", idSessao);
+      logOptimus("WHATSAPP", "Nenhuma sessao conectada", {
+        sessaoId: idSessao
+      });
       return;
     }
 
-    console.log("[WHATSAPP] Sesso escolhida para envio:", idSessao);
-    console.log("[INFO] Cliente dono da oferta:", clienteId);
+    logOptimus("WHATSAPP", "Sessao escolhida", {
+      sessaoId: idSessao,
+      clienteId
+    });
 
     const destinosBrutos =
       oferta.destinos?.length
@@ -2561,7 +2607,10 @@ if (!sessoes[idSessao]) {
       .map(d => d?.id || d?.value || d?.jid || d)
       .filter(Boolean);
 
-    console.log("[DESTINO] DESTINOS PARA ENVIO:", destinos);
+    logOptimus("DESTINO", "Destinos previstos", {
+      total: destinos.length,
+      destinos
+    });
 
 // ================= ENVIO DESTINOS INTELIGENTES =================
 
@@ -2588,19 +2637,19 @@ for (const itemRejeitado of analiseDestinosFila.rejeitados) {
   const nomeDestino = destinoNomeLog(destino);
 
   if (analise.motivo === "marketplace") {
-    console.log("[DESTINO] rejeitado marketplace", {
+    logOptimus("DESTINO", "Rejeitada marketplace", {
       clienteId,
       destino: nomeDestino,
       marketplaceOferta: analise.marketplaceOferta
     });
   } else if (analise.motivo === "categoria") {
-    console.log("[DESTINO] rejeitado categoria", {
+    logOptimus("DESTINO", "Rejeitada categoria", {
       clienteId,
       destino: nomeDestino,
       categoriaOferta: analise.categoriaOferta
     });
   } else {
-    console.log("[DESTINO] rejeitado", {
+    logOptimus("DESTINO", "Rejeitada", {
       clienteId,
       destino: nomeDestino,
       motivo: analise.motivo || "nao_compativel"
@@ -2608,12 +2657,14 @@ for (const itemRejeitado of analiseDestinosFila.rejeitados) {
   }
 }
 
-console.log("[DESTINO] compatíveis encontrados:", destinosCompativeis.length);
+  logOptimus("DESTINO", "Compativeis encontrados", {
+    total: destinosCompativeis.length
+  });
 
 if (!destinosCompativeis.length) {
   marcarOfertaRetida(oferta, analiseDestinosFila.motivoRetencao);
   salvarFila(clienteId);
-  console.log("[DESTINO] sem destino compatível:", {
+  logOptimus("FILA", "Oferta retida", {
     clienteId,
     titulo: oferta.titulo || oferta.nome || "",
     categoria: categoriaOfertaFila || "",
@@ -2641,7 +2692,7 @@ for (const item of destinosOrdenados) {
 
   if (!destinoDentroHorario(destino)) {
     pulouPorHorario = true;
-    console.log("[DESTINO] rejeitado horário", {
+    logOptimus("DESTINO", "Rejeitada horario", {
       clienteId,
       destino: nomeDestino
     });
@@ -2651,7 +2702,7 @@ for (const item of destinosOrdenados) {
   const limite = destinoLimiteDiarioDisponivel(clienteId, destino);
   if (!limite.ok) {
     pulouPorLimiteDiario = true;
-    console.log("[DESTINO] rejeitado limite diário", {
+    logOptimus("DESTINO", "Rejeitada limite diario", {
       clienteId,
       destino: nomeDestino,
       usados: limite.usados,
@@ -2662,7 +2713,7 @@ for (const item of destinosOrdenados) {
 
   if (!intervalo.liberado) {
     pulouPorIntervalo = true;
-    console.log("[DESTINO] aguardando intervalo", {
+    logOptimus("DESTINO", "Aguardando intervalo", {
       clienteId,
       destino: nomeDestino,
       intervaloMinutos: intervalo.intervaloDestinoMin,
@@ -2675,7 +2726,7 @@ for (const item of destinosOrdenados) {
 
   if (marketplaceOfertaLog === "mercadolivre" || marketplaceOfertaLog === "mercado_livre") {
     const linkFinal = oferta.linkFinal || oferta.linkAfiliado || oferta.link || oferta.linkOriginal || "";
-    console.log("🧪 ENVIO ML", {
+    logOptimus("MERCADOLIVRE", "Envio preparado", {
       clienteId,
       marketplace: oferta.marketplace,
       titulo: oferta.titulo || oferta.nome || "",
@@ -2707,7 +2758,7 @@ for (const item of destinosOrdenados) {
     enviouParaAlgumDestino = true;
     destinosEnviadosCount += 1;
     controleEnvio[intervalo.chaveControle] = Date.now();
-    console.log("[DESTINO] enviado", {
+    logOptimus("DESTINO", "Enviado", {
       clienteId,
       destino: nomeDestino,
       titulo: oferta.titulo || oferta.nome || ""
@@ -2738,12 +2789,16 @@ if (!enviouParaAlgumDestino && (pulouPorIntervalo || pulouPorHorario || pulouPor
     Math.max(30 * 1000, Math.min(menorEsperaIntervalo || 5 * 60 * 1000, 15 * 60 * 1000))
   );
   salvarFila(clienteId);
-  console.log("[DESTINO] Oferta aguardando destino liberar envio:", oferta.titulo);
+  logOptimus("DESTINO", "Oferta aguardando destino liberar envio", {
+    titulo: oferta.titulo || oferta.nome || ""
+  });
   return;
 }
 
 if (!enviouParaAlgumDestino) {
-  console.log("[ERRO] Oferta no enviada. Marcando como erro técnico:", oferta.titulo);
+  logOptimus("ERRO", "Oferta nao enviada; marcando erro tecnico", {
+    titulo: oferta.titulo || oferta.nome || ""
+  });
 
   oferta.status = "erro";
   oferta.statusDetalhe = "Falha ao enviar para destinos";
@@ -2874,7 +2929,7 @@ app.post("/fila", (req, res) => {
     });
 
     if (resultado?.ok && !resultado?.ignorada) {
-      console.log("[FILA] Oferta manual adicionada  fila:", {
+      logOptimus("FILA", "Oferta manual adicionada", {
         clienteId,
         id: resultado.oferta?.id,
         titulo: resultado.oferta?.titulo,
@@ -2886,7 +2941,7 @@ app.post("/fila", (req, res) => {
     return res.json(resultado);
 
   } catch (e) {
-    console.log("[ERRO] [FILA] erro ao adicionar oferta na fila:", e.message);
+    logOptimus("ERRO", "Erro ao adicionar oferta na fila", { erro: e.message });
 
     return res.status(500).json({
       ok: false,
@@ -3408,7 +3463,7 @@ app.delete("/fila/limpar", (req, res) => {
 
   salvarFila(clienteId);
 
-  console.log("[FILA] LIMPEZA FILA:", {
+  logOptimus("FILA", "Limpeza da fila", {
     clienteId,
     status: status || "todos",
     removidos
@@ -3443,7 +3498,7 @@ app.delete("/fila/:index", (req, res) => {
 
   salvarFila(clienteId);
 
-  console.log("[FILA] Removido da fila:", {
+  logOptimus("FILA", "Oferta removida", {
     clienteId,
     titulo: removido[0]?.nome || removido[0]?.titulo
   });
@@ -3478,6 +3533,12 @@ app.post("/fila/:id/reprocessar", (req, res) => {
   oferta.reprocessadaEm = new Date().toISOString();
 
   salvarFila(clienteId);
+
+  logOptimus("FILA", "Reprocessada manualmente", {
+    clienteId,
+    id,
+    titulo: oferta.titulo || oferta.nome || ""
+  });
 
   return res.json({
     ok: true,
@@ -3523,6 +3584,12 @@ const indexReal = fila.findIndex(o => o === oferta);
     marcarOfertaRetida(oferta, analiseDestinosEnviarAgora.motivoRetencao);
     salvarFila(clienteIdReq);
 
+    logOptimus("FILA", "Enviar Agora reteve oferta", {
+      clienteId: clienteIdReq,
+      titulo: oferta.titulo || oferta.nome || "",
+      motivoRetencao: oferta.motivoRetencao
+    });
+
     return res.status(409).json({
       ok: false,
       retida: true,
@@ -3537,7 +3604,7 @@ const indexReal = fila.findIndex(o => o === oferta);
   delete oferta.motivoRetencao;
   delete oferta.retidaEm;
 
-  console.log("[FILA] ENTRANDO NA FILA:", {
+  logOptimus("FILA", "Enviar Agora solicitado", {
     clienteId: clienteIdReq,
     titulo: oferta.titulo || oferta.nome,
     preco: oferta.precoAtual || oferta.preco,
@@ -6547,12 +6614,12 @@ async function adicionarRadarCapturadoNaFilaClientes(ofertaBase = {}, opcoes = {
   const radarConfigFontes = opcoes.radarConfigFontes || carregarRadarConfigAdminMaster();
   const clientesAtivos = listarClientesElegiveisRadar();
 
-  console.log("[RADAR] clientes elegíveis encontrados:", clientesAtivos.length);
+  logOptimus("RADAR", "Clientes elegiveis encontrados", { total: clientesAtivos.length });
 
   for (const usuario of clientesAtivos) {
     const clienteId = usuario.id;
 
-    console.log("[RADAR] cliente analisado:", clienteId);
+    logOptimus("RADAR", "Cliente analisado", { clienteId });
 
     const resultado = await adicionarRadarNaFilaCliente(ofertaBase, clienteId, {
       radarConfigFontes
@@ -6563,7 +6630,7 @@ async function adicionarRadarCapturadoNaFilaClientes(ofertaBase = {}, opcoes = {
         clienteId
       });
     } else {
-      console.log(`[RADAR] ADICIONADA FILA clienteId=${clienteId}`);
+      logOptimus("SUCESSO", "Radar adicionou na fila", { clienteId });
     }
 
     resultados.push({
@@ -6596,7 +6663,7 @@ async function processarMensagemRadar({
   const grupoNomeTexto = textoRadarId(grupoNome);
   const sessaoIdTexto = textoRadarId(sessaoId || (origemTipoFinal === "telegram" ? "telegram" : ""));
 
-  console.log("[RADAR-CAPTURA] mensagem recebida", {
+  logOptimus("CAPTURA", "Mensagem recebida", {
     origemTipo: origemTipoFinal || origemTipo,
     sessaoId: sessaoIdTexto,
     grupoId: grupoIdTexto,
@@ -6605,7 +6672,7 @@ async function processarMensagemRadar({
   });
 
   if (!["whatsapp", "telegram"].includes(origemTipoFinal)) {
-    console.log("[RADAR-CAPTURA] rejeitada", {
+    logOptimus("CAPTURA", "Rejeitada", {
       motivo: "origem_tipo_invalida",
       origemTipo
     });
@@ -6616,7 +6683,7 @@ async function processarMensagemRadar({
   }
 
   if (!grupoIdTexto) {
-    console.log("[RADAR-CAPTURA] rejeitada", {
+    logOptimus("CAPTURA", "Rejeitada", {
       motivo: "grupo_ou_chat_ausente",
       origemTipo: origemTipoFinal
     });
@@ -6627,19 +6694,14 @@ async function processarMensagemRadar({
   }
 
   const links = extrairLinksRadar(texto);
-  console.log("[RADAR-LINK] links detectados", {
+  logOptimus("RADAR", "Links detectados", {
     total: links.length,
     links,
     origemTipo: origemTipoFinal,
     grupo: grupoNomeTexto || grupoIdTexto
   });
-  console.log(`[RADAR] links detectados: ${links.length}`, {
-    origemTipo: origemTipoFinal,
-    grupo: grupoNomeTexto || grupoIdTexto
-  });
-
   if (!links.length) {
-    console.log("[RADAR-LINK] rejeitada", {
+    logOptimus("RADAR", "Sem links", {
       motivo: "sem_links",
       origemTipo: origemTipoFinal,
       grupo: grupoNomeTexto || grupoIdTexto
@@ -6652,7 +6714,7 @@ async function processarMensagemRadar({
   }
 
   const beneficiosMensagem = analisarBeneficiosMensagemRadar(texto, links);
-  console.log("[RADAR-CUPOM] resultado extracao mensagem", {
+  logOptimus("CUPOM", "Extracao da mensagem", {
     cupom: beneficiosMensagem.cupom || "",
     cupomOrigem: beneficiosMensagem.cupomOrigem || "",
     tipoCupom: beneficiosMensagem.tipoCupom || "",
@@ -6661,7 +6723,7 @@ async function processarMensagemRadar({
     linksResgate: beneficiosMensagem.linksResgate || []
   });
   if (beneficiosMensagem.cupom || beneficiosMensagem.linkResgateCupom || beneficiosMensagem.beneficioExtra) {
-    console.log("[RADAR] cupom detectado", {
+    logOptimus("CUPOM", "Detectado", {
       cupom: beneficiosMensagem.cupom || "",
       tipoCupom: beneficiosMensagem.tipoCupom || "",
       beneficioExtra: beneficiosMensagem.beneficioExtra || "",
@@ -6674,7 +6736,7 @@ async function processarMensagemRadar({
   const capturaPermitida = radarPodeCapturarAgora(radarConfig);
 
   if (!capturaPermitida.ok) {
-    console.log("[RADAR-CAPTURA] rejeitada", {
+    logOptimus("CAPTURA", "Rejeitada", {
       motivo: capturaPermitida.motivo,
       origemTipo: origemTipoFinal,
       grupo: grupoNomeTexto || grupoIdTexto
@@ -6699,7 +6761,7 @@ async function processarMensagemRadar({
   const origemMonitorada = origemOfertaEstaMonitoradaRadar(origemBase, radarConfig);
 
   if (!origemMonitorada.ok) {
-    console.log("[RADAR-CAPTURA] grupo nao monitorado", {
+    logOptimus("CAPTURA", "Grupo nao monitorado", {
       motivo: origemMonitorada.motivo,
       origemTipo: origemTipoFinal,
       sessaoId: sessaoIdTexto,
@@ -6713,7 +6775,7 @@ async function processarMensagemRadar({
     return { ok: false, motivo: origemMonitorada.motivo };
   }
 
-  console.log("[RADAR-CAPTURA] grupo monitorado confirmado", {
+  logOptimus("CAPTURA", "Grupo monitorado confirmado", {
     origemTipo: origemTipoFinal,
     sessaoId: sessaoIdTexto,
     grupoId: grupoIdTexto,
@@ -6726,7 +6788,7 @@ async function processarMensagemRadar({
   });
 
   for (const link of links) {
-    console.log("[RADAR-LINK] link capturado", {
+    logOptimus("RADAR", "Link capturado", {
       url: link,
       grupo: grupoNomeTexto || grupoIdTexto
     });
@@ -6755,7 +6817,7 @@ async function processarMensagemRadar({
         motivo: "link_resgate_cupom_detectado",
         linksDetectados: 1
       });
-      console.log("[RADAR-CUPOM] link de resgate detectado", {
+      logOptimus("CUPOM", "Link de resgate detectado", {
         link,
         tipoCupom: "resgate"
       });
@@ -6770,17 +6832,11 @@ async function processarMensagemRadar({
     });
 
     if (!importacao.ok) {
-      console.log("[RADAR-IMPORTACAO] falhou", {
+      logOptimus("RADAR", "Importacao falhou", {
         motivo: importacao.motivo || "importacao_falhou",
         link,
         urlResolvida: importacao.resolucao?.urlResolvida || "",
         linkOriginal: importacao.resolucao?.linkOriginalLimpo || "",
-        marketplace: importacao.resolucao?.marketplaceReal || ""
-      });
-      console.log("[RADAR] importação falhou:", {
-        motivo: importacao.motivo || "importacao_falhou",
-        link,
-        urlResolvida: importacao.resolucao?.urlResolvida || "",
         marketplace: importacao.resolucao?.marketplaceReal || ""
       });
       logRadarRejeitado(importacao.motivo || "importacao_falhou", {
@@ -6814,7 +6870,7 @@ async function processarMensagemRadar({
       continue;
     }
 
-    console.log("[RADAR-IMPORTACAO] sucesso", {
+    logOptimus("RADAR", "Importacao concluida", {
       linkCapturado: link,
       urlResolvida: importacao.resolucao?.urlResolvida || "",
       linkOriginal: importacao.resolucao?.linkOriginalLimpo || importacao.oferta?.linkOriginal || "",
@@ -6825,22 +6881,6 @@ async function processarMensagemRadar({
       cupomImportado: importacao.oferta?.cupom || "",
       cupomMensagem: beneficiosMensagem.cupom || ""
     });
-    console.log("[RADAR] URL resolvida", {
-      capturada: importacao.resolucao?.urlCapturada || link,
-      resolvida: importacao.resolucao?.urlResolvida || ""
-    });
-    console.log("[RADAR] marketplace real", {
-      marketplace: importacao.resolucao?.marketplaceReal || importacao.oferta?.marketplace || ""
-    });
-    console.log("[RADAR] link original limpo", {
-      linkOriginal: importacao.resolucao?.linkOriginalLimpo || importacao.oferta?.linkOriginal || ""
-    });
-    console.log("[RADAR] importação sucesso", {
-      link,
-      marketplace: importacao.oferta?.marketplace || importacao.resolucao?.marketplaceReal || "",
-      titulo: importacao.oferta?.titulo || importacao.oferta?.nome || ""
-    });
-
     const ofertaRadar = prepararOfertaGlobal({
       ...importacao.oferta,
       cupom: importacao.oferta?.cupom || beneficiosMensagem.cupom || "",
@@ -6866,7 +6906,7 @@ async function processarMensagemRadar({
       dataEntradaRadar: dataCaptura
     });
 
-    console.log("[RADAR-CUPOM] oferta preparada", {
+    logOptimus("CUPOM", "Oferta preparada", {
       titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
       cupom: ofertaRadar.cupom || "",
       avisoCupom: ofertaRadar.avisoCupom || "",
@@ -6982,7 +7022,7 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
   const conteudo = extrairMensagemInternaRadar(mensagem?.message || {});
   const tiposMensagem = Object.keys(conteudo || {});
 
-  console.log("[RADAR-CAPTURA] upsert whatsapp", {
+  logOptimus("CAPTURA", "Upsert WhatsApp", {
     sessaoId,
     remoteJid,
     fromMe: Boolean(mensagem?.key?.fromMe),
@@ -6992,7 +7032,7 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
   });
 
   if (!remoteJid || !remoteJid.endsWith("@g.us") || mensagem?.key?.fromMe) {
-    console.log("[RADAR-CAPTURA] mensagem nao monitoravel", {
+    logOptimus("CAPTURA", "Mensagem nao monitoravel", {
       sessaoId,
       remoteJid,
       fromMe: Boolean(mensagem?.key?.fromMe),
@@ -7165,13 +7205,7 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     ofertaPreparada.linkCapturado ||
     "";
 
-  console.log("[RADAR] score", {
-    clienteId,
-    score: radar.radarScore,
-    nivel: radar.nivel,
-    decisao: radar.decisao
-  });
-  console.log("[RADAR-SCORE]", {
+  logOptimus("INTELIGENCIA", "Radar score", {
     clienteId,
     titulo: ofertaPreparada.titulo || ofertaPreparada.nome || "",
     marketplace,
@@ -7187,23 +7221,14 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     motivos: radar.motivos || [],
     alertas: radar.alertas || []
   });
-  console.log("[RADAR] tipoRadar", {
-    clienteId,
-    tipoRadar
-  });
-  console.log("[RADAR-SCORE] tipoRadar", {
+  logOptimus("RADAR", "Tipo Radar", {
     clienteId,
     tipoRadar,
     origemTipoRadar: temCupomForte ? "cupomConfirmado" : "semCupomConfirmado"
   });
 
   if (!linkOriginal) {
-    console.log("[RADAR-DECISAO]", {
-      clienteId,
-      aprovado: false,
-      motivo: "link_original_ausente"
-    });
-    console.log("[RADAR] aprovado/reprovado", {
+    logOptimus("RADAR", "Reprovado", {
       clienteId,
       aprovado: false,
       motivo: "link_original_ausente"
@@ -7212,7 +7237,7 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   }
 
   if (!oportunidadeRadarBoa(ofertaPreparada, radar, cupomRadar)) {
-    console.log("[RADAR-DECISAO]", {
+    logOptimus("RADAR", "Reprovado", {
       clienteId,
       aprovado: false,
       motivo: "oferta_sem_cupom_ou_desconto_relevante",
@@ -7221,14 +7246,6 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
       desconto: percentualDescontoRadar(ofertaPreparada, radar),
       cupom: ofertaPreparada.cupom || "",
       cupomConfirmado: Boolean(cupomRadar.cupomConfirmado)
-    });
-    console.log("[RADAR] aprovado/reprovado", {
-      clienteId,
-      aprovado: false,
-      motivo: "oferta_sem_cupom_ou_desconto_relevante",
-      score: radar.radarScore,
-      decisao: radar.decisao,
-      desconto: percentualDescontoRadar(ofertaPreparada, radar)
     });
     return { ok: false, motivo: "oferta_sem_cupom_ou_desconto_relevante" };
   }
@@ -7241,12 +7258,7 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   );
 
   if (!linkAfiliadoCliente) {
-    console.log("[RADAR-DECISAO]", {
-      clienteId,
-      aprovado: false,
-      motivo: "link_afiliado_nao_gerado"
-    });
-    console.log("[RADAR] aprovado/reprovado", {
+    logOptimus("INTEGRACAO", "Link afiliado nao gerado", {
       clienteId,
       aprovado: false,
       motivo: "link_afiliado_nao_gerado"
@@ -7255,12 +7267,7 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   }
 
   if (String(linkAfiliadoCliente).trim() === String(linkOriginal).trim()) {
-    console.log("[RADAR-DECISAO]", {
-      clienteId,
-      aprovado: false,
-      motivo: "link_afiliado_igual_original"
-    });
-    console.log("[RADAR] aprovado/reprovado", {
+    logOptimus("INTEGRACAO", "Link afiliado invalido", {
       clienteId,
       aprovado: false,
       motivo: "link_afiliado_igual_original"
@@ -7268,7 +7275,7 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     return { ok: false, motivo: "link_afiliado_igual_original" };
   }
 
-  console.log("[RADAR] link afiliado cliente gerado", {
+  logOptimus("INTEGRACAO", "Link afiliado cliente gerado", {
     clienteId,
     marketplace,
     linkOriginal,
@@ -7336,28 +7343,18 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   ofertaCliente.prioridadeFila = ofertaCliente.prioridadeEnvio;
 
   if (!existeDestinoCompativelRadar(clienteId, ofertaCliente)) {
-    console.log("[RADAR-DECISAO]", {
+    logOptimus("DESTINO", "Radar sem destino compativel", {
       clienteId,
       aprovado: false,
       motivo: "sem_destino_compativel",
       categoria: ofertaCliente.categoria || "",
       marketplace: ofertaCliente.marketplace || ""
     });
-    console.log("[RADAR] aprovado/reprovado", {
-      clienteId,
-      aprovado: false,
-      motivo: "sem_destino_compativel"
-    });
     return { ok: false, motivo: "sem_destino_compativel" };
   }
 
   if (ofertaJaExiste(ofertaCliente)) {
-    console.log("[RADAR-DECISAO]", {
-      clienteId,
-      aprovado: false,
-      motivo: "oferta_duplicada"
-    });
-    console.log("[RADAR] aprovado/reprovado", {
+    logOptimus("RADAR", "Reprovado", {
       clienteId,
       aprovado: false,
       motivo: "oferta_duplicada"
@@ -7366,12 +7363,7 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   }
 
   if (deveIgnorarOfertaRepetida(ofertaCliente)) {
-    console.log("[RADAR-DECISAO]", {
-      clienteId,
-      aprovado: false,
-      motivo: "oferta_repetida_na_memoria"
-    });
-    console.log("[RADAR] aprovado/reprovado", {
+    logOptimus("RADAR", "Reprovado", {
       clienteId,
       aprovado: false,
       motivo: "oferta_repetida_na_memoria"
@@ -7379,12 +7371,7 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     return { ok: false, motivo: "oferta_repetida_na_memoria" };
   }
 
-  console.log("[RADAR] aprovado/reprovado", {
-    clienteId,
-    aprovado: true,
-    decisao: radar.decisao
-  });
-  console.log("[RADAR-DECISAO]", {
+  logOptimus("SUCESSO", "Radar aprovado", {
     clienteId,
     aprovado: true,
     decisao: radar.decisao,
@@ -7423,7 +7410,7 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
     (item.radarNaFila === true || String(item.statusRadar || "") === "fila" || !item.statusRadar)
   ).length;
 
-  console.log("[RADAR-LIMITE] pendentes analisados", {
+  logOptimus("RADAR", "Pendentes analisados", {
     clienteId,
     totalRadar,
     totalComCupom,
@@ -7433,7 +7420,7 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
   });
 
   if (totalRadar >= 10) {
-    console.log("[RADAR-DECISAO]", {
+    logOptimus("RADAR", "Reprovado", {
       clienteId,
       aprovado: false,
       motivo: "limite_radar_pendente_total",
@@ -7441,16 +7428,11 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
       totalComCupom,
       totalSemCupom
     });
-    console.log("[RADAR] aprovado/reprovado", {
-      clienteId,
-      aprovado: false,
-      motivo: "limite_radar_pendente_total"
-    });
     return { ok: false, motivo: "limite_radar_pendente_total" };
   }
 
   if (oferta.tipoRadar === "radarComCupom" && totalComCupom >= 4) {
-    console.log("[RADAR-DECISAO]", {
+    logOptimus("RADAR", "Reprovado", {
       clienteId,
       aprovado: false,
       motivo: "limite_radar_com_cupom",
@@ -7458,27 +7440,17 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
       totalComCupom,
       totalSemCupom
     });
-    console.log("[RADAR] aprovado/reprovado", {
-      clienteId,
-      aprovado: false,
-      motivo: "limite_radar_com_cupom"
-    });
     return { ok: false, motivo: "limite_radar_com_cupom" };
   }
 
   if (oferta.tipoRadar === "radarSemCupom" && totalSemCupom >= 6) {
-    console.log("[RADAR-DECISAO]", {
+    logOptimus("RADAR", "Reprovado", {
       clienteId,
       aprovado: false,
       motivo: "limite_radar_sem_cupom",
       totalRadar,
       totalComCupom,
       totalSemCupom
-    });
-    console.log("[RADAR] aprovado/reprovado", {
-      clienteId,
-      aprovado: false,
-      motivo: "limite_radar_sem_cupom"
     });
     return { ok: false, motivo: "limite_radar_sem_cupom" };
   }
@@ -10523,7 +10495,7 @@ function usuarioTemIntegracaoMarketplace(clienteId, marketplace) {
   const integracao = getIntegracaoCliente(clienteId, mp);
   const cred = integracao?.credenciais || {};
 
-  console.log("[DEBUG]✅ CHECK INTEGRAO CLIENTE:", {
+  logOptimus("INTEGRACAO", "Check cliente marketplace", {
     clienteId,
     marketplace: mp,
     temIntegracao: !!integracao,
@@ -10619,7 +10591,7 @@ console.log("[DEBUG]✅ CHECK INTEGRAO:", {
 });
 
    if (!usuarioTemIntegracaoMarketplace(clienteId, mp)) {
-     console.log("[AVISO] Usurio sem integrao configurada:", {
+     logOptimus("INTEGRACAO", "Usuario sem integracao configurada", {
      clienteId,
      marketplace: mp,
       titulo: ofertaBase.titulo
@@ -10640,15 +10612,15 @@ console.log("[DEBUG]✅ CHECK INTEGRAO:", {
       ofertaBase
     );
 
-console.log("[INFO]🔗 LINK CLIENTE GERADO:", {
-  clienteId,
-  marketplace: mp,
-  linkOriginal,
-  linkAfiliadoCliente
-});
+    logOptimus("INTEGRACAO", "Link cliente gerado", {
+      clienteId,
+      marketplace: mp,
+      linkOriginal,
+      linkAfiliadoCliente
+    });
 
  if (!linkAfiliadoCliente) {
-  console.log("[AVISO] Oferta bloqueada: cliente sem link afiliado prprio:", {
+  logOptimus("INTEGRACAO", "Oferta bloqueada sem link afiliado proprio", {
     clienteId,
     marketplace: mp,
     titulo: ofertaBase.titulo
@@ -10660,7 +10632,7 @@ const linkAfiliadoIgualOriginal =
   String(linkAfiliadoCliente || "").trim() === String(linkOriginal || "").trim();
 
 if (mp === "mercadolivre" && linkAfiliadoIgualOriginal) {
-  console.log("[AVISO] ML bloqueado: link afiliado igual ao original", {
+  logOptimus("MERCADOLIVRE", "Bloqueado link afiliado igual ao original", {
     clienteId,
     marketplace: mp,
     titulo: ofertaBase.titulo,
@@ -12585,7 +12557,7 @@ for (const usuario of usuarios) {
     : marketplace;
 
 if (!usuarioTemIntegracaoMarketplace(clienteId, marketplaceIntegracao)) {
-  console.log("[AVISO] Usurio sem integrao configurada:", {
+  logOptimus("INTEGRACAO", "Usuario sem integracao configurada", {
     clienteId,
     marketplace,
     marketplaceIntegracao
@@ -12684,7 +12656,7 @@ setInterval(() => {
     const agora = Date.now();
 
     if (agora - ultimoLogPausaFila > 5 * 60 * 1000) {
-      console.log("[FILA] Fila pausada fora do horrio configurado");
+      logOptimus("FILA", "Fila pausada fora do horario configurado");
       ultimoLogPausaFila = agora;
     }
 
