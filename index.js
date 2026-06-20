@@ -1704,6 +1704,37 @@ function extrairIdMercadoLivreOferta(oferta = {}) {
   return texto.match(/MLB-?\d+/i)?.[0]?.replace("-", "").toUpperCase() || "";
 }
 
+function precoNumeroDuplicidade(valor = "") {
+  return Number(
+    String(valor || "0")
+      .replace(/[^\d,.-]/g, "")
+      .replace(/\./g, "")
+      .replace(",", ".")
+  ) || 0;
+}
+
+function horasBloqueioDuplicidadeFila(ofertaExistente = {}) {
+  const status = normalizarTexto(ofertaExistente.status || "");
+
+  if (status === "pendente" || status === "retida") return 12;
+  if (status === "enviado" || status === "fila") return 6;
+  if (status === "expirado" || status === "erro") return 2;
+
+  return 6;
+}
+
+function ofertaTemMelhoriaParaRepetir(novaOferta = {}, ofertaExistente = {}) {
+  const cupomNovo = String(novaOferta.cupom || "").trim();
+  const cupomExistente = String(ofertaExistente.cupom || "").trim();
+
+  if (cupomNovo && cupomNovo !== cupomExistente) return true;
+
+  const precoNovo = precoNumeroDuplicidade(novaOferta.precoAtual || novaOferta.preco);
+  const precoExistente = precoNumeroDuplicidade(ofertaExistente.precoAtual || ofertaExistente.preco);
+
+  return precoExistente > 0 && precoNovo > 0 && precoNovo <= precoExistente * 0.92;
+}
+
 function ofertaJaExiste(novaOferta) {
   const tituloNovo = normalizarTexto(novaOferta.titulo || novaOferta.nome);
   const chaveNova = gerarChaveDuplicidadeOferta(novaOferta);
@@ -1725,8 +1756,6 @@ function ofertaJaExiste(novaOferta) {
   const marketplaceNovo = normalizarTexto(novaOferta.marketplace || novaOferta.mercado || "");
 
   const agora = Date.now();
-  const HORAS_BLOQUEIO = 12;
-
   return fila.some((o) => {
     const tituloExistente = normalizarTexto(o.titulo || o.nome);
     const chaveExistente = gerarChaveDuplicidadeOferta(o);
@@ -1751,10 +1780,14 @@ function ofertaJaExiste(novaOferta) {
       o.criadoEm || o.dataCriacao || o.enviadoEm || o.dataEnvio || 0
     ).getTime();
 
+    const horasBloqueio = horasBloqueioDuplicidadeFila(o);
     const itemRecente =
-      dataItem && agora - dataItem < HORAS_BLOQUEIO * 60 * 60 * 1000;
+      dataItem && agora - dataItem < horasBloqueio * 60 * 60 * 1000;
 
     if (!itemRecente) return false;
+    if (!["pendente", "retida"].includes(normalizarTexto(o.status || "")) && ofertaTemMelhoriaParaRepetir(novaOferta, o)) {
+      return false;
+    }
 
     if (idMlNovo && idMlExistente && idMlNovo === idMlExistente) {
       console.log("[INFO] DUPLICADA ML POR ID:", {
@@ -3588,6 +3621,7 @@ app.get("/automacao/status", (req, res) => {
       sequenciaPonderada: ordemMarketplaces,
       sequenciaCritica: ordemMarketplacesCritica,
       intervaloGlobalMinutos: config.intervaloFarejadorGlobalMinutos ?? 10,
+      intervaloAtualMinutos: Math.round(intervaloOrquestradorAtualMs() / 60000),
       farejadorRodando,
       statusMarketplaces: statusOrquestradorMarketplaces
     }
@@ -13354,6 +13388,7 @@ const farejadoresMarketplaces = {
 let indiceMarketplaceAtual = 0;
 let farejadorRodando = false;
 const statusOrquestradorMarketplaces = {};
+let ultimaRodadaOrquestradorMs = 0;
 
 function obterStatusOrquestradorMarketplace(marketplace = "") {
   const mp = normalizarTexto(marketplace || "");
@@ -13371,15 +13406,32 @@ function obterStatusOrquestradorMarketplace(marketplace = "") {
   return statusOrquestradorMarketplaces[mp];
 }
 
-function algumClienteComFilaCritica() {
+function algumClienteComFilaNosStatus(statuses = []) {
+  const permitidos = new Set(statuses);
+
   return usuarios.some(usuario => {
     if (!usuario?.ativo) return false;
     try {
-      return avaliarSaudeFilaCliente(usuario.id).status === "critica";
+      return permitidos.has(avaliarSaudeFilaCliente(usuario.id).status);
     } catch {
       return false;
     }
   });
+}
+
+function algumClienteComFilaCritica() {
+  return algumClienteComFilaNosStatus(["critica"]);
+}
+
+function algumClienteComFilaBaixaOuCritica() {
+  return algumClienteComFilaNosStatus(["critica", "baixa"]);
+}
+
+function intervaloOrquestradorAtualMs() {
+  if (algumClienteComFilaCritica()) return 3 * 60 * 1000;
+  if (algumClienteComFilaBaixaOuCritica()) return 5 * 60 * 1000;
+
+  return Math.max(5, Number(config.intervaloFarejadorGlobalMinutos || 10) || 10) * 60 * 1000;
 }
 
 function selecionarProximoMarketplaceOrquestrador() {
@@ -13462,6 +13514,7 @@ if (!admin) {
 
   try {
     farejadorRodando = true;
+    ultimaRodadaOrquestradorMs = Date.now();
     const statusMarketplace = obterStatusOrquestradorMarketplace(marketplace);
     statusMarketplace.rodadas += 1;
     statusMarketplace.ultimoInicio = new Date().toISOString();
@@ -13577,8 +13630,13 @@ await farejador(clienteId, {
  
 
 setInterval(() => {
-  rodarProximoMarketplace();
-}, (config.intervaloFarejadorGlobalMinutos || 10) * 60 * 1000);
+  const agora = Date.now();
+  const intervaloMs = intervaloOrquestradorAtualMs();
+
+  if (agora - ultimaRodadaOrquestradorMs >= intervaloMs) {
+    rodarProximoMarketplace();
+  }
+}, 60 * 1000);
 
 setTimeout(() => {
   console.log("[INFO] Primeira rodada do orquestrador em 1 minuto...");
