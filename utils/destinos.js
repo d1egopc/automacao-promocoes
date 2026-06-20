@@ -148,12 +148,14 @@ function destinoDentroHorario(destino = {}) {
   const horaInicio =
     destino.horarioInicio ||
     destino.horaInicio ||
+    destino.horaInicial ||
     destino.inicio ||
     destino.horarioInicial ||
     "00:00";
   const horaFim =
     destino.horarioFim ||
     destino.horaFim ||
+    destino.horaFinal ||
     destino.fim ||
     destino.horarioFinal ||
     "23:59";
