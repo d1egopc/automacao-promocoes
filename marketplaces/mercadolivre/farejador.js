@@ -34,8 +34,8 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
   importarMercadoLivre,
   gerarLinkAfiliadoMercadoLivre,
   deveIgnorarOfertaRepetida,
-  registrarOfertaVista
-  } = deps;
+   registrarOfertaVista
+   } = deps;
 
   try {
 
@@ -45,6 +45,17 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
   return;
 }
     console.log("[INFO] [ML] Farejando ofertas ML");
+    const estrategiaFarejador =
+      typeof deps.obterEstrategiaFarejador === "function"
+        ? deps.obterEstrategiaFarejador(clienteId, "mercadolivre")
+        : {
+            descontoMinimo: config.marketplaces?.mercadolivre?.descontoMinimo ?? 10,
+            aceitarBeneficioSemDesconto: true
+          };
+    const temBeneficioFarejador =
+      typeof deps.ofertaTemBeneficioFarejador === "function"
+        ? deps.ofertaTemBeneficioFarejador
+        : (oferta) => Boolean(oferta?.cupom || oferta?.avisoCupom || oferta?.beneficioExtra);
 
     const buscasPrioritariasML = [
   // ðŸ‘Ÿ TÃªnis e calÃ§ados
@@ -271,11 +282,13 @@ if (
     if (precoNumero < (config.marketplaces?.mercadolivre?.precoMinimo || 25)) continue;
 
    const descontoMinimoML =
-  config.marketplaces?.mercadolivre?.descontoMinimo ?? 10;
+  estrategiaFarejador.descontoMinimo ?? config.marketplaces?.mercadolivre?.descontoMinimo ?? 10;
 
 if (
   desconto < descontoMinimoML &&
-  !produto.avisoCupom
+  !temBeneficioFarejador(produto) &&
+  !cupom &&
+  !avisoCupom
 ) {
   console.log("[AVISO] [ML] Ignorado por desconto baixo:", {
     titulo: produto.titulo,
@@ -325,8 +338,8 @@ const categoriaProduto =
       preco: produto.precoAtual,
       precoAtual: produto.precoAtual,
       precoAntigo: produto.precoAntigo || "",
-      cupom: produto.cupom || "",
-      avisoCupom: produto.avisoCupom || "",
+      cupom: produto.cupom || cupom || "",
+      avisoCupom: produto.avisoCupom || avisoCupom || "",
       parcelamento: produto.parcelamento || "",
       linkOriginal: produto.linkOriginal || link,
       link: produto.linkAfiliado,
@@ -428,5 +441,3 @@ if (jaExiste) {
 module.exports = {
   farejarMercadoLivre
 };
-
-
