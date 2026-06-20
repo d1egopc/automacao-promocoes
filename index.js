@@ -4575,18 +4575,14 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
     };
   }
 
-  if (ofertaExpiradaParaEnvio(oferta)) {
-    marcarOfertaExpirada(oferta);
-    salvarFila(clienteId);
+  const estavaExpirada = ofertaExpiradaParaEnvio(oferta);
 
-    return {
-      ok: false,
-      statusHttp: 409,
-      expirada: true,
-      motivo: "oferta_expirada",
-      mensagem: oferta.statusDetalhe,
-      oferta
-    };
+  if (estavaExpirada) {
+    logOptimus("FILA", "Enviar Agora ignorou expiracao por acao manual", {
+      clienteId,
+      titulo: oferta.titulo || oferta.nome || "",
+      expiraEm: oferta.expiraEm || ""
+    });
   }
 
   const analiseDestinos = analisarDestinosCompativeisFila(clienteId, oferta, configCliente);
@@ -4622,10 +4618,13 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
   let ultimoMotivo = "";
 
   oferta.status = "pendente";
-  oferta.statusDetalhe = "Envio manual solicitado";
+  oferta.statusDetalhe = estavaExpirada
+    ? "Envio manual solicitado após expiração"
+    : "Envio manual solicitado";
   oferta.erro = "";
   oferta.erroEm = "";
   oferta.proximaTentativaEnvioEm = "";
+  oferta.envioManualIgnorouExpiracao = Boolean(estavaExpirada);
   delete oferta.motivoRetencao;
   delete oferta.retidaEm;
 
