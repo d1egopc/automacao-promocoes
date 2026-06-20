@@ -14,7 +14,8 @@ const {
   getMensageiroCliente,
   setMensageiroCliente,
   getAtendimentoConfigCliente,
-  setAtendimentoConfigCliente
+  setAtendimentoConfigCliente,
+  encontrarGatilhoAtendimento
 } = deps;
 
 function normalizarAtendimentoMensageiro(dados = {}) {
@@ -106,6 +107,61 @@ router.post("/config", (req, res) => {
     ok: true,
     clienteId,
     config
+  });
+});
+
+router.get("/historico", (req, res) => {
+  const clienteId = getClienteId(req);
+
+  if (!mensageiroPermitido(req, clienteId)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Mensageiro nÃ£o disponÃ­vel no seu plano"
+    });
+  }
+
+  const config = getAtendimentoConfigCliente(clienteId);
+  const limite = Math.max(1, Math.min(200, Number(req.query?.limit || 50) || 50));
+
+  return res.json({
+    ok: true,
+    clienteId,
+    historico: Array.isArray(config.historico)
+      ? config.historico.slice(-limite).reverse()
+      : []
+  });
+});
+
+router.post("/testar-gatilho", (req, res) => {
+  const clienteId = getClienteId(req);
+
+  if (!mensageiroPermitido(req, clienteId)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Mensageiro nÃ£o disponÃ­vel no seu plano"
+    });
+  }
+
+  const texto = String(req.body?.texto || req.body?.mensagem || "").trim();
+  const configBase = getAtendimentoConfigCliente(clienteId);
+
+  const gatilho = typeof encontrarGatilhoAtendimento === "function"
+    ? encontrarGatilhoAtendimento(texto, configBase.gatilhos)
+    : null;
+
+  return res.json({
+    ok: true,
+    clienteId,
+    texto,
+    encontrou: Boolean(gatilho),
+    gatilho: gatilho
+      ? {
+        id: gatilho.id,
+        nome: gatilho.nome,
+        modo: gatilho.modo,
+        respostas: gatilho.respostas
+      }
+      : null
   });
 });
 

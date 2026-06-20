@@ -11,8 +11,9 @@ const {
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const MENSAGEIRO_FILE = path.join(DATA_DIR, "mensageiro.json");
 const HISTORICO_ATENDIMENTO_MAX = 200;
-const TIPOS_RESPOSTA_ATENDIMENTO = new Set(["texto", "imagemUrl", "arquivoUrl"]);
+const TIPOS_RESPOSTA_ATENDIMENTO = new Set(["texto", "imagemUrl", "videoUrl", "arquivoUrl", "link"]);
 const ESCOPOS_ATENDIMENTO = new Set(["privado", "grupo", "ambos"]);
+const MODOS_GATILHO_ATENDIMENTO = new Set(["todas", "qualquer"]);
 
 let mensageiroPorCliente = {};
 
@@ -119,7 +120,9 @@ function criarConfigAtendimentoPadrao(clienteId) {
     clienteId,
     atendimentoAtivo: false,
     sessaoId: "",
+    sessaoAtendimentoId: "",
     escopo: "privado",
+    cooldownMinutos: 10,
     gatilhos: [],
     historico: [],
     criadoEm: new Date().toISOString(),
@@ -166,6 +169,7 @@ function normalizarGatilhoAtendimento(gatilho = {}, index = 0) {
     id: String(gatilho?.id || `gatilho_${Date.now()}_${index}`),
     ativo: gatilho?.ativo !== false,
     nome: String(gatilho?.nome || `Gatilho ${index + 1}`).trim(),
+    modo: MODOS_GATILHO_ATENDIMENTO.has(gatilho?.modo) ? gatilho.modo : "todas",
     palavrasObrigatorias: normalizarListaPalavras(gatilho?.palavrasObrigatorias),
     palavrasOpcionais: normalizarListaPalavras(gatilho?.palavrasOpcionais),
     respostas: respostas
@@ -202,14 +206,17 @@ function normalizarConfigAtendimentoCliente(clienteId, config = {}) {
   const padrao = criarConfigAtendimentoPadrao(clienteId);
   const raw = config && typeof config === "object" ? config : {};
   const escopo = ESCOPOS_ATENDIMENTO.has(raw.escopo) ? raw.escopo : "privado";
+  const sessaoId = String(raw.sessaoId || raw.sessaoAtendimentoId || "");
 
   return {
     ...padrao,
     ...raw,
     clienteId,
-    atendimentoAtivo: raw.atendimentoAtivo === true,
-    sessaoId: String(raw.sessaoId || ""),
+    atendimentoAtivo: raw.atendimentoAtivo === true || raw.ativo === true,
+    sessaoId,
+    sessaoAtendimentoId: sessaoId,
     escopo,
+    cooldownMinutos: Math.max(1, Math.min(120, Number(raw.cooldownMinutos || 10) || 10)),
     gatilhos: Array.isArray(raw.gatilhos)
       ? raw.gatilhos
         .map(normalizarGatilhoAtendimento)

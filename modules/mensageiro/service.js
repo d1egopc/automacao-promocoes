@@ -125,15 +125,24 @@ function encontrarGatilhoAtendimento(texto = "", gatilhos = []) {
     const obrigatorias = Array.isArray(gatilho.palavrasObrigatorias)
       ? gatilho.palavrasObrigatorias
       : [];
+    const opcionais = Array.isArray(gatilho.palavrasOpcionais)
+      ? gatilho.palavrasOpcionais
+      : [];
 
     if (!obrigatorias.length) continue;
 
-    const encontrouTodas = obrigatorias.every(palavra => {
+    const modo = String(gatilho.modo || "todas").toLowerCase();
+    const contemPalavra = palavra => {
       const palavraNormalizada = normalizarTextoMensagem(palavra);
       return palavraNormalizada && textoNormalizado.includes(palavraNormalizada);
-    });
+    };
 
-    if (encontrouTodas) return gatilho;
+    const encontrou =
+      modo === "qualquer"
+        ? [...obrigatorias, ...opcionais].some(contemPalavra)
+        : obrigatorias.every(contemPalavra);
+
+    if (encontrou) return gatilho;
   }
 
   return null;
@@ -196,12 +205,24 @@ async function executarRespostaAtendimento({ sock, jid, resposta } = {}) {
     return true;
   }
 
+  if (tipo === "videoUrl") {
+    await sock.sendMessage(jid, {
+      video: { url: conteudo }
+    });
+    return true;
+  }
+
   if (tipo === "arquivoUrl") {
     const nomeArquivo = conteudo.split("/").pop()?.split("?")[0] || "arquivo";
     await sock.sendMessage(jid, {
       document: { url: conteudo },
       fileName: nomeArquivo
     });
+    return true;
+  }
+
+  if (tipo === "link") {
+    await sock.sendMessage(jid, { text: conteudo });
     return true;
   }
 
@@ -249,8 +270,9 @@ async function tratarMensagemAtendimentoV1({
   const chaveCooldown = `${clienteId}:${sessaoId}:${jid}:${gatilho.id}`;
   const agora = Date.now();
   const ultimo = eventosMensageiroRecentes.get(chaveCooldown) || 0;
+  const cooldownMs = Math.max(1, Number(configAtendimento.cooldownMinutos || 10) || 10) * 60 * 1000;
 
-  if (agora - ultimo < COOLDOWN_ATENDIMENTO_MS) {
+  if (agora - ultimo < cooldownMs) {
     registrarHistoricoSeguro(clienteId, {
       origem: jid.endsWith("@g.us") ? "grupo" : "privado",
       contato: jid,
