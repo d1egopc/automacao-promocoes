@@ -684,6 +684,24 @@ function rankFastLaneCupom(oferta = {}) {
   return 0;
 }
 
+function cupomQuenteParaTurboOferta(oferta = {}) {
+  if (cupomFastLaneTipo(oferta) !== "real_detectado") return false;
+
+  const score = Number(oferta.radarScore || oferta.score || 0);
+  const desconto = percentualDescontoRadar(oferta, {
+    descontoPercentual: oferta.descontoPercentual || oferta.percentualDesconto || oferta.desconto
+  });
+  const temBeneficioExtra = Boolean(
+    oferta.beneficioExtra ||
+    oferta.linkResgateCupom ||
+    oferta.descontoPix ||
+    oferta.descontoApp
+  );
+  const cupomConfirmado = oferta.cupomConfirmado === true || oferta.cupomValidado === true || oferta.cupomTipo === "real";
+
+  return score >= 90 || desconto >= 40 || (cupomConfirmado && temBeneficioExtra);
+}
+
 function ordenarPendentesPorPrioridade(pendentes = []) {
   return [...pendentes].sort((a, b) => {
     const fastLaneA = rankFastLaneCupom(a);
@@ -2340,6 +2358,7 @@ function destinoLimiteDiarioDisponivel(clienteId = "admin", destino = {}) {
 
 function intervaloTurboCupomMinutos(oferta = {}) {
   const tipoFastLane = cupomFastLaneTipo(oferta);
+  if (tipoFastLane === "real_detectado" && cupomQuenteParaTurboOferta(oferta)) return 2;
   if (tipoFastLane === "real_detectado") return 2.5;
   if (tipoFastLane === "provavel") return 4;
   return null;
@@ -2382,7 +2401,7 @@ function proximaTentativaDestino(oferta, ms = 5 * 60 * 1000) {
 
 // ========================== ENVIO DESTINO INTELIGENTE ============================
 
-async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId, configCliente) {
+async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId, configCliente, opcoes = {}) {
   try {
     clienteId = clienteId || oferta.clienteId || "admin";
     configCliente = configCliente || configsPorCliente?.[clienteId] || config;
@@ -2391,7 +2410,7 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
       return { enviado: false, motivo: "nao_aceita" };
     }
 
-    if (!destinoDentroHorario(destino)) {
+    if (!opcoes.ignorarHorario && !destinoDentroHorario(destino)) {
       logOptimus("DESTINO", "Fora do horario", {
         destino: destino.nome
       });
@@ -2814,10 +2833,11 @@ for (const item of destinosOrdenados) {
   }
 
   if (intervalo.fastLaneCupomTipo === "real_detectado") {
-    logOptimus("CUPOM", "Turbo aplicado 2.5min", {
+    logOptimus("CUPOM", intervalo.turboCupomMin === 2 ? "Turbo quente aplicado 2min" : "Turbo aplicado 2.5min", {
       clienteId,
       destino: nomeDestino,
       cupom: oferta.cupom || "",
+      score: oferta.radarScore || oferta.score || "",
       intervaloOriginalMinutos: intervalo.intervaloDestinoMin
     });
   } else if (intervalo.fastLaneCupomTipo === "provavel") {
@@ -2896,8 +2916,22 @@ if (!enviouParaAlgumDestino && (pulouPorIntervalo || pulouPorHorario || pulouPor
   );
   salvarFila(clienteId);
   logOptimus("DESTINO", "Oferta aguardando destino liberar envio", {
-    titulo: oferta.titulo || oferta.nome || ""
+    titulo: oferta.titulo || oferta.nome || "",
+    clienteId,
+    motivo: pulouPorIntervalo ? "intervalo" : pulouPorHorario ? "horario" : "limite_diario"
   });
+
+  if (pulouPorIntervalo && !pulouPorHorario && !pulouPorLimiteDiario) {
+    setTimeout(() => {
+      processarFila(clienteId).catch(e => {
+        logOptimus("ERRO", "Falha ao continuar fila apos intervalo", {
+          clienteId,
+          erro: e.message
+        });
+      });
+    }, 250);
+  }
+
   return;
 }
 
@@ -4633,13 +4667,10 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
     const nomeDestino = destinoNomeLog(destino);
 
     if (!destinoDentroHorario(destino)) {
-      pulouPorHorario = true;
-      ultimoMotivo = "fora_horario";
-      logOptimus("DESTINO", "Enviar Agora fora do horario", {
+      logOptimus("DESTINO", "Enviar Agora ignorou horario por acao manual", {
         clienteId,
         destino: nomeDestino
       });
-      continue;
     }
 
     const limite = destinoLimiteDiarioDisponivel(clienteId, destino);
@@ -4666,7 +4697,8 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
       oferta,
       mensagem,
       clienteId,
-      configCliente
+      configCliente,
+      { ignorarHorario: true, envioManual: true }
     );
     const resultado =
       typeof resultadoEnvio === "object" && resultadoEnvio !== null
