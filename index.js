@@ -781,17 +781,17 @@ function avaliarSaudeFilaCliente(clienteId = "admin") {
   let deveAbastecer = false;
   let motivo = "Fila com volume operacional normal.";
 
-  if (pendentes <= 3) {
+  if (pendentes <= 8) {
     status = "critica";
     deveAbastecer = true;
-    motivo = "Fila com 3 ou menos ofertas pendentes.";
-  } else if (pendentes <= 8) {
+    motivo = "Fila com 8 ou menos ofertas pendentes.";
+  } else if (pendentes <= 30) {
     status = "baixa";
     deveAbastecer = true;
-    motivo = "Fila com 8 ou menos ofertas pendentes.";
-  } else if (pendentes >= 15) {
+    motivo = "Fila com 30 ou menos ofertas pendentes.";
+  } else if (pendentes >= 100) {
     status = "cheia";
-    motivo = "Fila com 15 ou mais ofertas pendentes.";
+    motivo = "Fila com 100 ou mais ofertas pendentes.";
   }
 
   console.log(
@@ -5215,8 +5215,11 @@ function dataHoraRadarAgora() {
 
 function normalizarStatusPreviewRadar(status = "") {
   const texto = normalizarTexto(status);
+  if (texto === "retida" || texto === "retido") return "retida";
   if (texto === "fila" || texto === "adicionado_fila" || texto === "adicionada_fila") return "adicionado_fila";
   if (texto === "ignorada" || texto === "ignorado") return "ignorado";
+  if (texto === "sucesso") return "importado";
+  if (texto === "erro") return "erro";
   if (texto === "importado") return "importado";
   if (texto === "detectado") return "detectado";
   return "erro";
@@ -5249,6 +5252,12 @@ function normalizarTipoLinkRadarOperacional(evento = {}) {
 }
 
 function statusCapturaRadarOperacional(evento = {}) {
+  const captura = normalizarTexto(evento.statusCaptura || "");
+  if (captura === "retida" || captura === "retido") return "retida";
+  if (captura === "fila" || captura === "adicionado_fila" || captura === "adicionada_fila") return "fila";
+  if (captura === "erro") return "erro";
+  if (captura === "sucesso") return "sucesso";
+
   const statusRadar = normalizarTexto(evento.statusRadar || "");
   const status = normalizarStatusPreviewRadar(evento.status);
 
@@ -5574,7 +5583,7 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
     const resumo = mapa.get(chave);
     if (!resumo) continue;
 
-    const status = normalizarStatusPreviewRadar(evento.status);
+    const status = normalizarStatusPreviewRadar(evento.statusCaptura || evento.statusRadar || evento.status);
     const eventoOperacional = montarEventoPreviewRadar(evento);
     const motivoDiagnostico = eventoOperacional.motivoFinal || eventoOperacional.motivoTecnico || evento.motivo || "";
     const dataEvento = evento.capturadaEm || evento.dataHora || evento.criadoEm || "";
@@ -5663,7 +5672,18 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
   const tipoFiltro = normalizarTexto(opcoes.origemTipo || "");
   const sessaoFiltro = chaveRadarId(opcoes.sessaoId || "");
   const capturas = eventos
-    .filter(evento => !grupoFiltro || chaveRadarId(evento.origemGrupoId || evento.origemGrupoNome) === grupoFiltro)
+    .filter(evento => {
+      if (!grupoFiltro) return true;
+
+      return [
+        evento.origemGrupoId,
+        evento.grupoId,
+        evento.remoteJid,
+        evento.chatId,
+        evento.origemGrupoNome,
+        evento.grupoNome
+      ].some(valor => chaveRadarId(valor || "") === grupoFiltro);
+    })
     .filter(evento => !tipoFiltro || normalizarTexto(evento.origemTipo) === tipoFiltro)
     .filter(evento => !sessaoFiltro || chaveRadarId(evento.origemSessaoId || "") === sessaoFiltro)
     .slice(-Number(opcoes.limit || 20))
@@ -6182,7 +6202,7 @@ function totalRadarCapturadoHoje() {
   }).length;
 }
 
-function radarPodeCapturarAgora(configRadar = {}) {
+function radarPodeCapturarAgora(configRadar = {}, opcoes = {}) {
   if (configRadar.monitoramentoAtivo === false) {
     return { ok: false, motivo: "radar_monitoramento_inativo" };
   }
@@ -6192,7 +6212,7 @@ function radarPodeCapturarAgora(configRadar = {}) {
   }
 
   const maxPorDia = Number(configRadar.monitoramento?.maxPorDia || 0);
-  if (maxPorDia > 0 && totalRadarCapturadoHoje() >= maxPorDia) {
+  if (maxPorDia > 0 && !opcoes.temBeneficioPrioritario && totalRadarCapturadoHoje() >= maxPorDia) {
     return { ok: false, motivo: "limite_diario_radar_atingido" };
   }
 
@@ -7663,7 +7683,13 @@ async function processarMensagemRadar({
 
   const adminMasterId = obterClienteIdAdminMaster();
   const radarConfig = carregarRadarConfigCliente(adminMasterId);
-  const capturaPermitida = radarPodeCapturarAgora(radarConfig);
+  const capturaPermitida = radarPodeCapturarAgora(radarConfig, {
+    temBeneficioPrioritario: Boolean(
+      beneficiosMensagem.cupom ||
+      beneficiosMensagem.linkResgateCupom ||
+      beneficiosMensagem.beneficioExtra
+    )
+  });
 
   if (!capturaPermitida.ok) {
     logOptimus("CAPTURA", "Rejeitada", {
@@ -8912,9 +8938,10 @@ app.get("/radar", (req, res) => {
     sincronizarTratadasRadarDeOfertas(clienteId, ofertasRadarCliente);
 
     const tratadasRadar = lerTratadasRadar(clienteId);
-    const historicoOperacional = montarResumoHistoricoRadar(clienteId, {
+    const resumoHistoricoRadar = montarResumoHistoricoRadar(clienteId, {
       limit: req.query?.limit || 50
-    }).eventos;
+    });
+    const historicoOperacional = resumoHistoricoRadar.eventos;
 
     if (!temFontesMonitoradasRadar(radarConfig)) {
       return res.json({
@@ -8924,7 +8951,10 @@ app.get("/radar", (req, res) => {
         clienteId,
         oportunidades: [],
         historicoOperacional,
-        ultimasOfertasProcessadas: historicoOperacional
+        ultimasOfertasProcessadas: historicoOperacional,
+        capturas: historicoOperacional,
+        gruposPreview: resumoHistoricoRadar.grupos,
+        diagnosticoRadar: resumoHistoricoRadar.diagnostico || resumoHistoricoRadar.contadoresDiagnostico || {}
       });
     }
 
@@ -9014,7 +9044,10 @@ app.get("/radar", (req, res) => {
       clienteId,
       oportunidades: oportunidades.slice(0, 50),
       historicoOperacional,
-      ultimasOfertasProcessadas: historicoOperacional
+      ultimasOfertasProcessadas: historicoOperacional,
+      capturas: historicoOperacional,
+      gruposPreview: resumoHistoricoRadar.grupos,
+      diagnosticoRadar: resumoHistoricoRadar.diagnostico || resumoHistoricoRadar.contadoresDiagnostico || {}
     });
   } catch (e) {
     return res.status(500).json({
@@ -13666,6 +13699,16 @@ for (const usuario of usuarios) {
   if (!usuario?.ativo) continue;
 
   const clienteId = usuario.id;
+  const saudeFilaCliente = avaliarSaudeFilaCliente(clienteId);
+
+  if (saudeFilaCliente.status === "cheia") {
+    logOptimus("INTELIGENCIA", "Cliente com fila cheia pulado", {
+      clienteId,
+      marketplace,
+      pendentes: saudeFilaCliente.pendentes
+    });
+    continue;
+  }
 
   if (!usuarioPodeReceberMarketplace(usuario, marketplace)) {
     console.log("[INFO] Usurio no recebe marketplace pelo plano:", {
