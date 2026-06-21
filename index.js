@@ -3362,6 +3362,34 @@ configCliente.automacaoAtiva = automacaoAnterior;
   }
 });
 
+function decorarItemFilaParaResposta(item = {}) {
+  const ehRadar = item?.origem === "radar" || item?.radar === true || item?.radarNaFila === true;
+
+  if (!ehRadar) return item;
+
+  const badgeOrigemAtual = item.badgeOrigem && typeof item.badgeOrigem === "object"
+    ? item.badgeOrigem
+    : {};
+
+  return {
+    ...item,
+    origem: "radar",
+    radar: true,
+    fonte: item.fonte || "radar",
+    origemLabel: item.origemLabel || "Radar",
+    origemBadge: item.origemBadge || "Radar",
+    origemIcone: item.origemIcone || "radar",
+    exibirBadgeRadar: true,
+    badgeOrigem: {
+      id: "radar",
+      label: "Radar",
+      icone: "radar",
+      cor: "cyan",
+      ...badgeOrigemAtual
+    }
+  };
+}
+
 app.get("/fila", (req, res) => {
   const clienteId = getClienteId(req);
 
@@ -3370,6 +3398,7 @@ app.get("/fila", (req, res) => {
   const itensCliente = fila.filter((o) =>
     (o.clienteId || "admin") === clienteId
   );
+  const itensResposta = itensCliente.map(decorarItemFilaParaResposta);
 
   res.json({
     ok: true,
@@ -3379,8 +3408,8 @@ app.get("/fila", (req, res) => {
     enviados: itensCliente.filter((o) => o.status === "enviado").length,
     retidas: itensCliente.filter((o) => o.status === "retida").length,
     erros: itensCliente.filter((o) => o.status === "erro").length,
-    itens: itensCliente,
-    fila: itensCliente
+    itens: itensResposta,
+    fila: itensResposta
   });
 });
 
@@ -8388,6 +8417,17 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
     clienteId,
     origem: "radar",
     radar: true,
+    fonte: "radar",
+    origemLabel: "Radar",
+    origemBadge: "Radar",
+    origemIcone: "radar",
+    exibirBadgeRadar: true,
+    badgeOrigem: {
+      id: "radar",
+      label: "Radar",
+      icone: "radar",
+      cor: "cyan"
+    },
     radarNaFila: true,
     statusRadar: "fila",
     radarPendenteAnalise: false,
@@ -8658,6 +8698,196 @@ app.delete("/branding", (req, res) => {
   }
 });
 
+function radarDebugAdminMaster(req, res) {
+  if (req.usuario?.papel !== "admin_master") {
+    res.status(403).json({
+      ok: false,
+      erro: "Acesso restrito ao admin_master"
+    });
+    return false;
+  }
+
+  const clienteId = getClienteId(req);
+
+  if (!clienteId) {
+    res.status(401).json({
+      ok: false,
+      erro: "Cliente nao autenticado"
+    });
+    return false;
+  }
+
+  return clienteId;
+}
+
+function montarGrupoRadarDebug(grupo = {}, sessaoId = "") {
+  const remoteJid = textoRadarId(
+    grupo.remoteJid ||
+    grupo.grupoId ||
+    grupo.id ||
+    grupo.jid ||
+    grupo.value ||
+    ""
+  );
+
+  if (!chaveGrupoWhatsappTecnicaRadar(remoteJid)) return null;
+
+  return {
+    id: remoteJid,
+    grupoId: remoteJid,
+    remoteJid,
+    nome: textoRadarId(grupo.nome || grupo.titulo || grupo.label || grupo.subject || remoteJid),
+    sessaoId,
+    ativo: grupo.ativo !== false,
+    tipo: "whatsapp"
+  };
+}
+
+app.post("/radar/debug/salvar-whatsapp", (req, res) => {
+  try {
+    const clienteId = radarDebugAdminMaster(req, res);
+    if (!clienteId) return;
+
+    const body = req.body || {};
+    const sessaoIdEntrada = textoRadarId(body.sessaoId || body.sessaoWhatsappId || body.sessionId || "");
+    const sessaoValidada = validarSessaoRadarCliente(clienteId, sessaoIdEntrada);
+
+    if (!sessaoValidada.ok) {
+      return res.status(400).json({
+        ok: false,
+        erro: sessaoValidada.motivo || "sessao_whatsapp_invalida",
+        sessaoId: sessaoIdEntrada
+      });
+    }
+
+    const sessaoId = sessaoValidada.sessaoWhatsappId || sessaoIdEntrada;
+    const gruposEntrada = Array.isArray(body.grupos)
+      ? body.grupos
+      : Array.isArray(body.gruposMonitorados)
+        ? body.gruposMonitorados
+        : [];
+    const gruposMonitorados = gruposEntrada
+      .map(grupo => montarGrupoRadarDebug(grupo, sessaoId))
+      .filter(Boolean);
+
+    if (!sessaoId) {
+      return res.status(400).json({
+        ok: false,
+        erro: "sessaoId obrigatorio"
+      });
+    }
+
+    if (!gruposMonitorados.length) {
+      return res.status(400).json({
+        ok: false,
+        erro: "Nenhum grupo WhatsApp valido informado. Use remoteJid/grupoId terminando em @g.us.",
+        recebidos: gruposEntrada.length
+      });
+    }
+
+    const salvo = salvarRadarConfigCliente(clienteId, {
+      monitoramentoAtivo: body.monitoramentoAtivo !== false,
+      sessaoWhatsappId: sessaoId,
+      sessoesWhatsappMonitoradas: [
+        {
+          sessaoId,
+          gruposMonitorados
+        }
+      ]
+    });
+    const validacoes = gruposMonitorados.map(grupo => origemOfertaEstaMonitoradaRadar({
+      origemTipo: "whatsapp",
+      origemSessaoId: sessaoId,
+      origemGrupoId: grupo.remoteJid,
+      origemGrupoNome: grupo.nome
+    }, salvo));
+
+    return res.json({
+      ok: true,
+      clienteId,
+      sessaoId,
+      gruposRecebidos: gruposEntrada.length,
+      gruposValidos: gruposMonitorados.length,
+      salvo,
+      validacoes
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
+
+app.get("/radar/debug/config", (req, res) => {
+  try {
+    const clienteId = radarDebugAdminMaster(req, res);
+    if (!clienteId) return;
+
+    const config = carregarRadarConfigCliente(clienteId);
+    const sessoesWhatsappMonitoradas = Array.isArray(config.sessoesWhatsappMonitoradas)
+      ? config.sessoesWhatsappMonitoradas
+      : [];
+    const resumo = sessoesWhatsappMonitoradas.map(sessao => ({
+      sessaoId: sessao.sessaoId,
+      totalGrupos: Array.isArray(sessao.gruposMonitorados) ? sessao.gruposMonitorados.length : 0,
+      grupos: (Array.isArray(sessao.gruposMonitorados) ? sessao.gruposMonitorados : []).map(grupo => ({
+        nome: grupo.nome,
+        id: grupo.id,
+        grupoId: grupo.grupoId,
+        remoteJid: grupo.remoteJid,
+        chaveValida: Boolean(chaveGrupoWhatsappTecnicaRadar(grupo.remoteJid || grupo.grupoId || grupo.id))
+      }))
+    }));
+
+    return res.json({
+      ok: true,
+      clienteId,
+      config,
+      resumo
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
+
+app.get("/radar/debug/validar", (req, res) => {
+  try {
+    const clienteId = radarDebugAdminMaster(req, res);
+    if (!clienteId) return;
+
+    const sessaoId = textoRadarId(req.query.sessaoId || req.query.sessaoWhatsappId || req.query.sessionId || "");
+    const grupoId = textoRadarId(req.query.grupoId || req.query.remoteJid || req.query.id || "");
+    const grupoNome = textoRadarId(req.query.grupoNome || req.query.nome || "");
+    const config = carregarRadarConfigCliente(clienteId);
+    const resultado = origemOfertaEstaMonitoradaRadar({
+      origemTipo: "whatsapp",
+      origemSessaoId: sessaoId,
+      origemGrupoId: grupoId,
+      origemGrupoNome: grupoNome
+    }, config);
+
+    return res.json({
+      ok: resultado.ok,
+      clienteId,
+      entrada: {
+        sessaoId,
+        grupoId,
+        grupoNome
+      },
+      resultado,
+      sessoesWhatsappMonitoradas: config.sessoesWhatsappMonitoradas
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
+});
 app.get("/radar/config", (req, res) => {
   try {
     if (req.usuario?.papel !== "admin_master") {
@@ -13975,6 +14205,9 @@ setInterval(() => {
   }
 
 }, 10 * 1000);
+
+
+
 
 
 
