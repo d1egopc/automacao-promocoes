@@ -6426,6 +6426,8 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
   );
   let grupoMonitorado = false;
   let totalGruposMonitoradosSessao = 0;
+  let sessaoMonitoradaPorGrupo = null;
+  let totalGruposMonitoradosGlobal = 0;
 
   if (sessaoMonitorada) {
     const gruposIds = extrairIdsWhatsappMonitoradosRadar(sessaoMonitorada.gruposMonitorados);
@@ -6433,7 +6435,23 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
     grupoMonitorado = Boolean(grupoId && gruposIds.has(grupoId));
   }
 
-  const ok = Boolean(sessaoMonitorada && grupoMonitorado);
+  if (!grupoMonitorado && grupoId) {
+    for (const sessao of sessoesWhatsappMonitoradas) {
+      const gruposIds = extrairIdsWhatsappMonitoradosRadar(sessao?.gruposMonitorados);
+      totalGruposMonitoradosGlobal += gruposIds.size;
+
+      if (gruposIds.has(grupoId)) {
+        sessaoMonitoradaPorGrupo = sessao;
+        grupoMonitorado = true;
+        break;
+      }
+    }
+  }
+
+  const ok = Boolean(grupoMonitorado && (sessaoMonitorada || sessaoMonitoradaPorGrupo));
+  const validacao = ok && !sessaoMonitorada && sessaoMonitoradaPorGrupo
+    ? "remoteJid_monitorado_em_outra_sessao"
+    : "sessaoId+remoteJid";
 
   return {
     ok,
@@ -6441,8 +6459,12 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
     origem,
     diagnostico: {
       sessaoEncontrada: Boolean(sessaoMonitorada),
+      sessaoEncontradaPorGrupo: Boolean(sessaoMonitoradaPorGrupo),
+      sessaoOrigemId: origem.origemSessaoId,
+      sessaoMonitoradaId: sessaoMonitorada?.sessaoId || sessaoMonitoradaPorGrupo?.sessaoId || "",
       totalGruposMonitoradosSessao,
-      validacao: "sessaoId+remoteJid"
+      totalGruposMonitoradosGlobal,
+      validacao
     }
   };
 }
@@ -14205,6 +14227,8 @@ setInterval(() => {
   }
 
 }, 10 * 1000);
+
+
 
 
 
