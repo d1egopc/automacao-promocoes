@@ -13605,6 +13605,7 @@ let indiceMarketplaceAtual = 0;
 let farejadorRodando = false;
 const statusOrquestradorMarketplaces = {};
 let ultimaRodadaOrquestradorMs = 0;
+const inicioOrquestradorMarketplacesMs = Date.now();
 
 function categoriaLogMarketplace(marketplace = "") {
   const mp = normalizarTexto(marketplace || "");
@@ -13702,7 +13703,7 @@ function selecionarProximoMarketplaceOrquestrador() {
   return "";
 }
 
-async function rodarProximoMarketplace() {
+async function rodarMarketplaceEspecifico(marketplace = "", opcoes = {}) {
 
 // Farejador global roda apenas no ADMIN MASTER
 const admin = usuarios.find(u => u.papel === "admin_master");
@@ -13712,7 +13713,13 @@ if (!admin) {
   return;
 }
 
-  if (farejadorRodando) return;
+  if (farejadorRodando) {
+    logOptimus("INTELIGENCIA", "Farejador ja em execucao", {
+      marketplace,
+      origem: opcoes.origem || "orquestrador"
+    });
+    return;
+  }
 
   if (!config.automacaoAtiva) {
     console.log("[INFO] Farejador parado: automao global desligada");
@@ -13720,8 +13727,6 @@ if (!admin) {
   }
 
   if (!podeRodarAgora()) return;
-
-  const marketplace = selecionarProximoMarketplaceOrquestrador();
 
   if (!marketplace) {
     logOptimus("INTELIGENCIA", "Nenhum marketplace disponivel para rodada");
@@ -13755,15 +13760,17 @@ if (!admin) {
     statusMarketplace.ultimoInicio = new Date().toISOString();
     statusMarketplace.ultimoErro = "";
 
-logOptimus("ORQUESTRADOR", "Rodada iniciada", {
+logOptimus("ORQUESTRADOR", opcoes.origem === "boot_mercadolivre" ? "🚀 ML BOOT | Rodada inicial direta" : "Rodada iniciada", {
   marketplace,
   rodada: statusMarketplace.rodadas,
-  intervaloAtualMinutos: Math.round(intervaloOrquestradorAtualMs() / 60000)
+  intervaloAtualMinutos: Math.round(intervaloOrquestradorAtualMs() / 60000),
+  origem: opcoes.origem || "orquestrador"
 });
 
 logOptimus(categoriaMarketplaceLog, "Início da rodada", {
   marketplace,
-  rodada: statusMarketplace.rodadas
+  rodada: statusMarketplace.rodadas,
+  origem: opcoes.origem || "orquestrador"
 });
 
 for (const usuario of usuarios) {
@@ -13864,7 +13871,8 @@ clientesProcessadosRodada += 1;
     encontradas: "nao_informado",
     adicionadas: adicionadasRodada,
     erros: 0,
-    duracaoSegundos
+    duracaoSegundos,
+    origem: opcoes.origem || "orquestrador"
   });
 
   logOptimus("RESUMO", "Farejador rodada", {
@@ -13873,7 +13881,8 @@ clientesProcessadosRodada += 1;
     clientesProcessados: clientesProcessadosRodada,
     encontradas: "nao_informado",
     adicionadas: adicionadasRodada,
-    erros: 0
+    erros: 0,
+    origem: opcoes.origem || "orquestrador"
   });
  
   } catch (e) {
@@ -13883,11 +13892,39 @@ clientesProcessadosRodada += 1;
     logOptimus("ERRO", "Erro na rodada marketplace", {
       marketplace,
       erro: e.message,
-      cooldownMinutos: 15
+      cooldownMinutos: 15,
+      origem: opcoes.origem || "orquestrador"
     });
   } finally {
     farejadorRodando = false;
   }
+}
+
+async function rodarProximoMarketplace() {
+  const marketplace = selecionarProximoMarketplaceOrquestrador();
+  return rodarMarketplaceEspecifico(marketplace, { origem: "orquestrador" });
+}
+
+if (!global.__optimusMlBootTimeoutRegistrado) {
+  global.__optimusMlBootTimeoutRegistrado = true;
+  setTimeout(() => {
+    logOptimus("MERCADOLIVRE", "🚀 ML BOOT | Disparo inicial apos deploy", {
+      delaySegundos: 60
+    });
+    rodarMarketplaceEspecifico("mercadolivre", { origem: "boot_mercadolivre" });
+  }, 60 * 1000);
+}
+
+if (!global.__optimusOrquestradorMarketplacesIntervalRegistrado) {
+  global.__optimusOrquestradorMarketplacesIntervalRegistrado = true;
+  setInterval(() => {
+    const intervaloAtual = intervaloOrquestradorAtualMs();
+    const ultimaRodada = ultimaRodadaOrquestradorMs || inicioOrquestradorMarketplacesMs;
+
+    if (Date.now() - ultimaRodada < intervaloAtual) return;
+
+    rodarProximoMarketplace();
+  }, 30 * 1000);
 }
 
 // ================= PROCESSADOR DA FILA =================
@@ -13913,6 +13950,9 @@ setInterval(() => {
   }
 
 }, 10 * 1000);
+
+
+
 
 
 
