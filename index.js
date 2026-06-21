@@ -131,6 +131,8 @@ const LOG_OPTIMUS_ICONS = {
   AMAZON: "\u{1F535}",
   ALIEXPRESS: "\u{1F7E3}",
   KABUM: "\u{1F9F0}",
+  ORQUESTRADOR: "\u{1F504}",
+  RESUMO: "\u{1F4CA}",
   SUCESSO: "\u2705",
   AVISO: "\u26A0\uFE0F",
   ERRO: "\u274C"
@@ -2168,6 +2170,24 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
 
   const origem = String(oferta.origem || "").toLowerCase();
   const ehRadar = origem === "radar" || oferta.radar === true || oferta.radarNaFila === true;
+  const cupomSuspeito = oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true;
+  const cupomReal = !cupomSuspeito && (
+    oferta.cupomConfirmado === true ||
+    oferta.cupomValidado === true ||
+    oferta.cupomTipo === "real" ||
+    oferta.tipoCupom === "real"
+  );
+  const cupomDetectado = !cupomSuspeito && Boolean(
+    oferta.cupom ||
+    oferta.cupomDetectado === true ||
+    oferta.cupomDetectadoTexto === true
+  );
+  const cupomProvavel = !cupomSuspeito && Boolean(
+    oferta.possivelCupom ||
+    oferta.avisoCupom ||
+    oferta.beneficioExtra ||
+    oferta.linkResgateCupom
+  );
   const ehManualEscolhida =
     !ehRadar &&
     (
@@ -2178,10 +2198,6 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
     );
 
   if (ehRadar) {
-    const cupomSuspeito = oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true;
-    const cupomReal = !cupomSuspeito && (oferta.cupomConfirmado === true || oferta.cupomValidado === true || oferta.cupomTipo === "real");
-    const cupomDetectado = !cupomSuspeito && Boolean(oferta.cupom || oferta.cupomDetectado === true || oferta.cupomDetectadoTexto === true);
-    const cupomProvavel = !cupomSuspeito && Boolean(oferta.possivelCupom || oferta.avisoCupom || oferta.beneficioExtra || oferta.linkResgateCupom);
     const scoreAlto = Number(oferta.radarScore || oferta.score || 0) >= 60;
 
     oferta.origem = "radar";
@@ -2232,7 +2248,37 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
     return oferta;
   }
 
-  oferta.origem = oferta.origem || "manual";
+  if (cupomReal) {
+    oferta.origem = oferta.origem || "farejador";
+    oferta.prioridadeEnvio = 110;
+    oferta.cupomTipo = "real";
+    oferta.cupomDetectado = true;
+    oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(4);
+    oferta.motivoPrioridade = "Cupom real detectado";
+    return oferta;
+  }
+
+  if (cupomDetectado) {
+    oferta.origem = oferta.origem || "farejador";
+    oferta.prioridadeEnvio = 95;
+    oferta.cupomTipo = "detectado";
+    oferta.cupomDetectado = true;
+    oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(4);
+    oferta.motivoPrioridade = "Cupom detectado";
+    return oferta;
+  }
+
+  if (cupomProvavel) {
+    oferta.origem = oferta.origem || "farejador";
+    oferta.prioridadeEnvio = 80;
+    oferta.cupomTipo = "provavel";
+    oferta.cupomDetectado = true;
+    oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(3);
+    oferta.motivoPrioridade = "Cupom provável detectado";
+    return oferta;
+  }
+
+  oferta.origem = oferta.origem || "farejador";
   oferta.prioridadeEnvio = 40;
   oferta.cupomTipo = "nenhum";
   oferta.cupomDetectado = false;
@@ -13405,20 +13451,37 @@ salvarConfig();
 const ordemMarketplaces = [
   "mercadolivre",
   "shopee",
+  "amazon",
+  "mercadolivre",
+  "shopee",
+  "kabum",
   "mercadolivre",
   "amazon",
+  "shopee",
+  "aliexpress",
   "mercadolivre",
   "shopee",
   "amazon",
   "mercadolivre",
-  "aliexpress",
-  "kabum"
+  "kabum",
+  "shopee",
+  "mercadolivre",
+  "amazon",
+  "aliexpress"
 ];
 
 const ordemMarketplacesCritica = [
   "mercadolivre",
+  "shopee",
+  "amazon",
+  "mercadolivre",
+  "shopee",
+  "mercadolivre",
   "amazon",
   "shopee",
+  "kabum",
+  "mercadolivre",
+  "aliexpress",
   "mercadolivre",
   "amazon",
   "shopee"
@@ -13438,6 +13501,21 @@ let indiceMarketplaceAtual = 0;
 let farejadorRodando = false;
 const statusOrquestradorMarketplaces = {};
 let ultimaRodadaOrquestradorMs = 0;
+
+function categoriaLogMarketplace(marketplace = "") {
+  const mp = normalizarTexto(marketplace || "");
+  const mapa = {
+    mercadolivre: "MERCADOLIVRE",
+    mercado_livre: "MERCADOLIVRE",
+    shopee: "SHOPEE",
+    amazon: "AMAZON",
+    aliexpress: "ALIEXPRESS",
+    kabum: "KABUM",
+    awin: "KABUM"
+  };
+
+  return mapa[mp] || "ORQUESTRADOR";
+}
 
 function obterStatusOrquestradorMarketplace(marketplace = "") {
   const mp = normalizarTexto(marketplace || "");
@@ -13477,10 +13555,10 @@ function algumClienteComFilaBaixaOuCritica() {
 }
 
 function intervaloOrquestradorAtualMs() {
-  if (algumClienteComFilaCritica()) return 3 * 60 * 1000;
-  if (algumClienteComFilaBaixaOuCritica()) return 5 * 60 * 1000;
+  if (algumClienteComFilaCritica()) return 2 * 60 * 1000;
+  if (algumClienteComFilaBaixaOuCritica()) return 3 * 60 * 1000;
 
-  return Math.max(5, Number(config.intervaloFarejadorGlobalMinutos || 10) || 10) * 60 * 1000;
+  return Math.max(4, Number(config.intervaloFarejadorGlobalMinutos || 5) || 5) * 60 * 1000;
 }
 
 function selecionarProximoMarketplaceOrquestrador() {
@@ -13565,11 +13643,21 @@ if (!admin) {
     farejadorRodando = true;
     ultimaRodadaOrquestradorMs = Date.now();
     const statusMarketplace = obterStatusOrquestradorMarketplace(marketplace);
+    const categoriaMarketplaceLog = categoriaLogMarketplace(marketplace);
+    const inicioRodadaMs = Date.now();
+    const totalFilaAntesRodada = Array.isArray(fila) ? fila.length : 0;
+    let clientesProcessadosRodada = 0;
     statusMarketplace.rodadas += 1;
     statusMarketplace.ultimoInicio = new Date().toISOString();
     statusMarketplace.ultimoErro = "";
 
-logOptimus("INTELIGENCIA", "Rodada marketplace iniciada", {
+logOptimus("ORQUESTRADOR", "Rodada iniciada", {
+  marketplace,
+  rodada: statusMarketplace.rodadas,
+  intervaloAtualMinutos: Math.round(intervaloOrquestradorAtualMs() / 60000)
+});
+
+logOptimus(categoriaMarketplaceLog, "Início da rodada", {
   marketplace,
   rodada: statusMarketplace.rodadas
 });
@@ -13647,12 +13735,31 @@ await farejador(clienteId, {
   importarProdutoKabumViaAwin,
 
 });
+clientesProcessadosRodada += 1;
 }
   
   statusMarketplace.ultimaFinalizacao = new Date().toISOString();
-  logOptimus("INTELIGENCIA", "Rodada marketplace finalizada", {
+  const totalFilaDepoisRodada = Array.isArray(fila) ? fila.length : totalFilaAntesRodada;
+  const adicionadasRodada = Math.max(0, totalFilaDepoisRodada - totalFilaAntesRodada);
+  const duracaoSegundos = Math.round((Date.now() - inicioRodadaMs) / 1000);
+
+  logOptimus(categoriaMarketplaceLog, "Fim da rodada", {
     marketplace,
-    rodada: statusMarketplace.rodadas
+    rodada: statusMarketplace.rodadas,
+    clientesProcessados: clientesProcessadosRodada,
+    encontradas: "nao_informado",
+    adicionadas: adicionadasRodada,
+    erros: 0,
+    duracaoSegundos
+  });
+
+  logOptimus("RESUMO", "Farejador rodada", {
+    marketplace,
+    rodada: statusMarketplace.rodadas,
+    clientesProcessados: clientesProcessadosRodada,
+    encontradas: "nao_informado",
+    adicionadas: adicionadasRodada,
+    erros: 0
   });
  
   } catch (e) {
