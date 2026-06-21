@@ -5801,27 +5801,49 @@ function carregarRadarConfigCliente(clienteId = "admin") {
   }
 }
 
-function normalizarGrupoWhatsappRadar(grupo = {}, sessaoIdPadrao = "") {
+function obterGrupoWhatsappIdTecnicoRadar(grupo = {}) {
   if (typeof grupo === "string" || typeof grupo === "number") {
     const id = textoRadarId(grupo);
-    return id ? { id, grupoId: id, nome: id, sessaoId: sessaoIdPadrao } : null;
+    return chaveGrupoWhatsappTecnicaRadar(id) ? id : "";
+  }
+
+  if (!grupo || typeof grupo !== "object") return "";
+
+  const candidatos = [
+    grupo.remoteJid,
+    grupo.grupoId,
+    grupo.jid,
+    grupo.chatId,
+    grupo.value,
+    grupo.id
+  ];
+
+  for (const candidato of candidatos) {
+    const id = textoRadarId(candidato);
+    if (chaveGrupoWhatsappTecnicaRadar(id)) return id;
+  }
+
+  return "";
+}
+
+function normalizarGrupoWhatsappRadar(grupo = {}, sessaoIdPadrao = "") {
+  const idTecnico = obterGrupoWhatsappIdTecnicoRadar(grupo);
+
+  if (!idTecnico) return null;
+
+  if (typeof grupo === "string" || typeof grupo === "number") {
+    return {
+      id: idTecnico,
+      grupoId: idTecnico,
+      remoteJid: idTecnico,
+      nome: idTecnico,
+      sessaoId: sessaoIdPadrao,
+      ativo: true,
+      tipo: "whatsapp"
+    };
   }
 
   if (!grupo || typeof grupo !== "object") return null;
-
-  const id = textoRadarId(
-    grupo.id ||
-    grupo.grupoId ||
-    grupo.value ||
-    grupo.jid ||
-    grupo.remoteJid ||
-    grupo.nome ||
-    grupo.titulo ||
-    grupo.label ||
-    ""
-  );
-
-  if (!id) return null;
 
   const nome = textoRadarId(
     grupo.nome ||
@@ -5829,16 +5851,19 @@ function normalizarGrupoWhatsappRadar(grupo = {}, sessaoIdPadrao = "") {
     grupo.label ||
     grupo.subject ||
     grupo.name ||
-    id
+    idTecnico
   );
   const sessaoId = textoRadarId(grupo.sessaoId || grupo.origemSessaoId || grupo.sessionId || sessaoIdPadrao);
 
   return {
     ...grupo,
-    id: grupo.id || id,
-    grupoId: grupo.grupoId || id,
-    nome: nome || id,
-    sessaoId
+    id: idTecnico,
+    grupoId: idTecnico,
+    remoteJid: idTecnico,
+    nome: nome || idTecnico,
+    sessaoId,
+    ativo: grupo.ativo !== false,
+    tipo: "whatsapp"
   };
 }
 
@@ -13950,6 +13975,7 @@ setInterval(() => {
   }
 
 }, 10 * 1000);
+
 
 
 
