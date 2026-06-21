@@ -37,6 +37,21 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
    registrarOfertaVista
    } = deps;
 
+  const resumoML = {
+    clienteId,
+    buscasExecutadas: 0,
+    produtosEncontrados: 0,
+    importados: 0,
+    ignoradosImportadorVazio: 0,
+    ignoradosSemPreco: 0,
+    ignoradosSemAfiliado: 0,
+    ignoradosPrecoMinimo: 0,
+    ignoradosDescontoBaixo: 0,
+    ignoradosDuplicado: 0,
+    ignoradosMemoria: 0,
+    adicionadosFila: 0
+  };
+
   try {
 
 
@@ -145,6 +160,7 @@ if (cookiesML) {
   headersML.Cookie = cookiesML;
 }
 
+resumoML.buscasExecutadas += 1;
 const response = await fetch(url, {
   headers: headersML
 });
@@ -196,6 +212,7 @@ if (compraNoApp && !cupom) {
 }
 
 const produtosBusca = extrairProdutosBuscaML(html).slice(0, 12);
+resumoML.produtosEncontrados += produtosBusca.length;
 
 for (const itemBusca of produtosBusca) {
   try {
@@ -213,9 +230,12 @@ let produto = await importarMercadoLivre(
 );
 
 if (!produto) {
+  resumoML.ignoradosImportadorVazio += 1;
   console.log("[AVISO] [ML] Importador vazio:", link);
   continue;
 }
+
+resumoML.importados += 1;
 
 // Fallback com dados já extraídos da busca
 if (
@@ -247,6 +267,7 @@ if (
   produto.precoAtual === "R$ 0,00" ||
   produto.precoAtual === "R$ 0,0"
 ) {
+  resumoML.ignoradosSemPreco += 1;
   console.log("[AVISO] [ML] Ignorado sem preco valido:", produto.titulo || link);
   continue;
 }
@@ -255,6 +276,7 @@ const linkAfiliadoML = String(produto.linkAfiliado || produto.linkFinal || produ
 const linkOriginalML = String(produto.linkOriginal || link || "").trim();
 
 if (!linkAfiliadoML || linkAfiliadoML === linkOriginalML) {
+  resumoML.ignoradosSemAfiliado += 1;
   console.log("[AVISO] [ML] Ignorado sem link afiliado do cliente:", {
     clienteId,
     titulo: produto.titulo || itemBusca.titulo || "",
@@ -287,19 +309,28 @@ const precoNumero = Number(
         ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
         : 0;
 
-    if (!precoNumero || !Number.isFinite(precoNumero)) continue;
+    if (!precoNumero || !Number.isFinite(precoNumero)) {
+      resumoML.ignoradosSemPreco += 1;
+      continue;
+    }
 
-    if (precoNumero < (config.marketplaces?.mercadolivre?.precoMinimo || 25)) continue;
+    if (precoNumero < (config.marketplaces?.mercadolivre?.precoMinimo || 25)) {
+      resumoML.ignoradosPrecoMinimo += 1;
+      continue;
+    }
 
    const descontoMinimoML =
   estrategiaFarejador.descontoMinimo ?? config.marketplaces?.mercadolivre?.descontoMinimo ?? 10;
 
+const temDescontoSuficienteML = desconto >= descontoMinimoML;
+
 if (
-  desconto < descontoMinimoML &&
+  !temDescontoSuficienteML &&
   !temBeneficioFarejador(produto) &&
   !cupom &&
   !avisoCupom
 ) {
+  resumoML.ignoradosDescontoBaixo += 1;
   console.log("[AVISO] [ML] Ignorado por desconto baixo:", {
     titulo: produto.titulo,
     desconto: Math.round(desconto) + "%",
@@ -403,12 +434,14 @@ console.log("[ML-OFERTA]", {
  const jaExiste = ofertaJaExiste(novaOferta);
 
 if (jaExiste) {
+  resumoML.ignoradosDuplicado += 1;
   console.log("[AVISO] [ML] Oferta duplicada:", novaOferta.titulo);
 }
 
    if (!jaExiste) {
 
   if (deveIgnorarOfertaRepetida(novaOferta)) {
+    resumoML.ignoradosMemoria += 1;
     console.log("[AVISO] [ML] Ignorado pela memoria:", novaOferta.titulo);
     continue;
   }
@@ -419,6 +452,7 @@ if (jaExiste) {
   registrarOfertaVista(novaOferta);
 
   fila.push(novaOferta);
+  resumoML.adicionadosFila += 1;
 
   salvarFila(clienteId);
 
@@ -444,6 +478,8 @@ if (jaExiste) {
 
   } catch (e) {
     console.log("[ERRO] [ML] erro farejador:", e.message);
+  } finally {
+    console.log("[ML-RESUMO-RODADA]", resumoML);
   }
 }
 
