@@ -364,9 +364,11 @@ async function tratarMensagemPrivadaAtendimento({
     const atendimento = config?.atendimento || {};
 
     if (config?.ativo !== true) return;
-    if (config.sessaoId && config.sessaoId !== sessaoId) return;
     if (atendimento.ativo !== true) return;
     if (String(atendimento.escopo || "privado") !== "privado") return;
+    const sessaoAtendimentoLegado = String(atendimento.sessaoAtendimentoId || atendimento.sessaoId || "");
+    if (sessaoAtendimentoLegado && sessaoAtendimentoLegado !== sessaoId) return;
+    if (!sessaoAtendimentoLegado && config.sessaoId && config.sessaoId !== sessaoId) return;
 
     if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") return;
     const respostaRapida = encontrarRespostaRapida(

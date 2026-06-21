@@ -26,6 +26,8 @@ function normalizarAtendimentoMensageiro(dados = {}) {
 
   return {
     ativo: atendimento.ativo === true,
+    sessaoId: String(atendimento.sessaoAtendimentoId || atendimento.sessaoId || ""),
+    sessaoAtendimentoId: String(atendimento.sessaoAtendimentoId || atendimento.sessaoId || ""),
     delaySegundos: Math.max(0, Number(atendimento.delaySegundos || 2) || 0),
     escopo: "privado",
     respostasRapidas: respostasRapidas.map((item, index) => {
@@ -214,13 +216,17 @@ const imagemDespedida =
     ? configAtualMensageiro.imagemDespedida
     : await otimizarBase64(dados.imagemDespedida);
 
+const sessaoGruposId = dados.sessaoGruposId === undefined && dados.sessaoWhatsappId === undefined && dados.sessaoId === undefined
+  ? (configAtualMensageiro.sessaoGruposId || configAtualMensageiro.sessaoWhatsappId || configAtualMensageiro.sessaoId || "")
+  : (dados.sessaoGruposId || dados.sessaoWhatsappId || dados.sessaoId || "");
+
 const atualizado = setMensageiroCliente(clienteId, {
   ativo: dados.ativo === undefined
     ? configAtualMensageiro.ativo
     : Boolean(dados.ativo),
-  sessaoId: dados.sessaoId === undefined
-    ? configAtualMensageiro.sessaoId
-    : dados.sessaoId || "",
+  sessaoId: sessaoGruposId,
+  sessaoWhatsappId: sessaoGruposId,
+  sessaoGruposId,
 
   boasVindasAtivo: dados.boasVindasAtivo === undefined
     ? configAtualMensageiro.boasVindasAtivo

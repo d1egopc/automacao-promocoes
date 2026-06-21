@@ -50,11 +50,20 @@ function normalizarConfigMensageiro(clienteId, config = {}) {
     config.atendimento && typeof config.atendimento === "object"
       ? config.atendimento
       : {};
+  const sessaoGruposId = String(
+    config.sessaoGruposId ||
+    config.sessaoWhatsappId ||
+    config.sessaoId ||
+    ""
+  );
 
   return {
     ...padrao,
     ...config,
     clienteId,
+    sessaoId: sessaoGruposId,
+    sessaoWhatsappId: sessaoGruposId,
+    sessaoGruposId,
     atendimento: {
       ...criarAtendimentoPadraoMensageiro(),
       ...atendimentoAtual,
@@ -94,6 +103,8 @@ function criarConfigPadraoMensageiro(clienteId) {
     ativo: false,
 
     sessaoId: "",
+    sessaoWhatsappId: "",
+    sessaoGruposId: "",
 
     boasVindasAtivo: false,
     despedidaAtivo: false,
@@ -205,25 +216,36 @@ function normalizarHistoricoAtendimento(historico = []) {
 function normalizarConfigAtendimentoCliente(clienteId, config = {}) {
   const padrao = criarConfigAtendimentoPadrao(clienteId);
   const raw = config && typeof config === "object" ? config : {};
-  const escopo = ESCOPOS_ATENDIMENTO.has(raw.escopo) ? raw.escopo : "privado";
-  const sessaoId = String(raw.sessaoId || raw.sessaoAtendimentoId || "");
+  const nested = raw.atendimento && typeof raw.atendimento === "object" ? raw.atendimento : {};
+  const fonte = Object.keys(nested).length ? nested : raw;
+  const escopo = ESCOPOS_ATENDIMENTO.has(fonte.escopo) ? fonte.escopo : "privado";
+  const podeUsarSessaoIdLegado = !raw.sessaoWhatsappId && !raw.sessaoGruposId && !raw.grupos && !raw.gruposIds;
+  const sessaoId = String(
+    fonte.sessaoAtendimentoId ||
+    raw.sessaoAtendimentoId ||
+    fonte.atendimentoSessaoId ||
+    raw.atendimentoSessaoId ||
+    fonte.sessionId ||
+    fonte.whatsappSessionId ||
+    (podeUsarSessaoIdLegado ? (fonte.sessaoId || raw.sessaoId || "") : "")
+  );
 
   return {
     ...padrao,
-    ...raw,
+    ...fonte,
     clienteId,
-    atendimentoAtivo: raw.atendimentoAtivo === true || raw.ativo === true,
+    atendimentoAtivo: fonte.atendimentoAtivo === true || fonte.ativo === true || raw.atendimentoAtivo === true,
     sessaoId,
     sessaoAtendimentoId: sessaoId,
     escopo,
-    cooldownMinutos: Math.max(1, Math.min(120, Number(raw.cooldownMinutos || 10) || 10)),
-    gatilhos: Array.isArray(raw.gatilhos)
-      ? raw.gatilhos
+    cooldownMinutos: Math.max(1, Math.min(120, Number(fonte.cooldownMinutos || raw.cooldownMinutos || 10) || 10)),
+    gatilhos: Array.isArray(fonte.gatilhos)
+      ? fonte.gatilhos
         .map(normalizarGatilhoAtendimento)
         .filter(gatilho => gatilho.palavrasObrigatorias.length && gatilho.respostas.length)
       : [],
-    historico: normalizarHistoricoAtendimento(raw.historico),
-    atualizadoEm: raw.atualizadoEm || new Date().toISOString()
+    historico: normalizarHistoricoAtendimento(fonte.historico || raw.historico),
+    atualizadoEm: fonte.atualizadoEm || raw.atualizadoEm || new Date().toISOString()
   };
 }
 
@@ -236,19 +258,12 @@ function getAtendimentoConfigCliente(clienteId) {
     console.log("[ERRO] [MENSAGEIRO] Erro ao ler atendimento:", e.message);
   }
 
-  const normalizado = normalizarConfigAtendimentoCliente(clienteId, config);
-
-  try {
-    writeClienteJson(clienteId, "mensageiro-config.json", normalizado);
-  } catch (e) {
-    console.log("[ERRO] [MENSAGEIRO] Erro ao salvar atendimento:", e.message);
-  }
-
-  return normalizado;
+  return normalizarConfigAtendimentoCliente(clienteId, config);
 }
 
 function setAtendimentoConfigCliente(clienteId, dados = {}) {
-  const atual = getAtendimentoConfigCliente(clienteId);
+  const arquivoAtual = readClienteJson(clienteId, "mensageiro-config.json", criarConfigPadraoMensageiro(clienteId));
+  const atual = normalizarConfigAtendimentoCliente(clienteId, arquivoAtual);
   const payload = dados && typeof dados === "object" ? dados : {};
   const atualizado = normalizarConfigAtendimentoCliente(clienteId, {
     ...atual,
@@ -258,7 +273,18 @@ function setAtendimentoConfigCliente(clienteId, dados = {}) {
   });
 
   try {
-    writeClienteJson(clienteId, "mensageiro-config.json", atualizado);
+    writeClienteJson(clienteId, "mensageiro-config.json", {
+      ...arquivoAtual,
+      atendimento: {
+        ...(arquivoAtual.atendimento && typeof arquivoAtual.atendimento === "object" ? arquivoAtual.atendimento : {}),
+        ...atualizado,
+        sessaoId: atualizado.sessaoAtendimentoId,
+        sessaoAtendimentoId: atualizado.sessaoAtendimentoId
+      },
+      atendimentoAtivo: atualizado.atendimentoAtivo,
+      sessaoAtendimentoId: atualizado.sessaoAtendimentoId,
+      atualizadoEm: new Date().toISOString()
+    });
   } catch (e) {
     console.log("[ERRO] [MENSAGEIRO] Erro ao persistir atendimento:", e.message);
   }
@@ -304,12 +330,12 @@ function getMensageiroCliente(clienteId) {
 function setMensageiroCliente(clienteId, dados = {}) {
   const atual = getMensageiroCliente(clienteId);
 
-  mensageiroPorCliente[clienteId] = {
+  mensageiroPorCliente[clienteId] = normalizarConfigMensageiro(clienteId, {
     ...atual,
     ...dados,
     clienteId,
     atualizadoEm: new Date().toISOString()
-  };
+  });
 
   salvarMensageiro();
 
