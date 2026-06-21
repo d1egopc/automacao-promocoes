@@ -1,4 +1,4 @@
-﻿
+
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
@@ -6700,11 +6700,27 @@ function destinosClienteNormalizados(clienteId = "admin") {
 }
 
 function obterClienteIdAdminMaster() {
-  return usuarios.find(u => u?.ativo !== false && u.papel === "admin_master")?.id || "admin";
+  // Radar e uma ferramenta interna do admin_master, mas a configuracao operacional
+  // deve ser unica e canonica no cliente "admin". Isso evita salvar em admin e
+  // o listener ler outro id admin_master encontrado em usuarios.json.
+  return "admin";
+}
+
+function obterClienteIdAdminMasterLegado() {
+  return usuarios.find(u => u?.ativo !== false && u.papel === "admin_master" && String(u.id) !== "admin")?.id || "";
 }
 
 function carregarRadarConfigAdminMaster() {
-  return carregarRadarConfigCliente(obterClienteIdAdminMaster());
+  const configAdmin = carregarRadarConfigCliente(obterClienteIdAdminMaster());
+  if (temFontesMonitoradasRadar(configAdmin)) return configAdmin;
+
+  const legadoId = obterClienteIdAdminMasterLegado();
+  if (legadoId) {
+    const configLegado = carregarRadarConfigCliente(legadoId);
+    if (temFontesMonitoradasRadar(configLegado)) return configLegado;
+  }
+
+  return configAdmin;
 }
 
 function getUsuarioClienteRadar(clienteId = "admin") {
@@ -7824,7 +7840,7 @@ async function processarMensagemRadar({
   }
 
   const adminMasterId = obterClienteIdAdminMaster();
-  const radarConfig = carregarRadarConfigCliente(adminMasterId);
+  const radarConfig = carregarRadarConfigAdminMaster();
   const capturaPermitida = radarPodeCapturarAgora(radarConfig, {
     temBeneficioPrioritario: Boolean(
       beneficiosMensagem.cupom ||
@@ -8729,17 +8745,7 @@ function radarDebugAdminMaster(req, res) {
     return false;
   }
 
-  const clienteId = getClienteId(req);
-
-  if (!clienteId) {
-    res.status(401).json({
-      ok: false,
-      erro: "Cliente nao autenticado"
-    });
-    return false;
-  }
-
-  return clienteId;
+  return obterClienteIdAdminMaster();
 }
 
 function montarGrupoRadarDebug(grupo = {}, sessaoId = "") {
@@ -8919,16 +8925,9 @@ app.get("/radar/config", (req, res) => {
       });
     }
 
-    const clienteId = getClienteId(req);
+    const clienteId = obterClienteIdAdminMaster();
 
-    if (!clienteId) {
-      return res.status(401).json({
-        ok: false,
-        erro: "Cliente nao autenticado"
-      });
-    }
-
-    const radarConfig = carregarRadarConfigCliente(clienteId);
+    const radarConfig = carregarRadarConfigAdminMaster();
     const sessoesWhatsapp = listarSessoesWhatsappCliente(clienteId);
     const telegramDisponiveis = listarTelegramRadarCliente(clienteId);
 
@@ -8963,14 +8962,7 @@ app.post("/radar/config", (req, res) => {
       });
     }
 
-    const clienteId = getClienteId(req);
-
-    if (!clienteId) {
-      return res.status(401).json({
-        ok: false,
-        erro: "Cliente nao autenticado"
-      });
-    }
+    const clienteId = obterClienteIdAdminMaster();
 
     const body = req.body || {};
     const possuiCampo = campo => Object.prototype.hasOwnProperty.call(body, campo);
@@ -14227,6 +14219,9 @@ setInterval(() => {
   }
 
 }, 10 * 1000);
+
+
+
 
 
 
