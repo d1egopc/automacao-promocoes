@@ -118,7 +118,7 @@ const buscas = [
 ];
 
       const limiteBuscasBase = Number(
-        config.marketplaces?.mercadolivre?.limiteBuscasPorRodada || 1
+        const produtosBusca = extrairProdutosBuscaML(html).slice(0, 12);
       ) || 1;
       const limiteBuscas = estrategiaFarejador.filaCritica
         ? Math.max(limiteBuscasBase, 4)
