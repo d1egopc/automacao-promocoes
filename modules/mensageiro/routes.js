@@ -25,11 +25,13 @@ function normalizarAtendimentoMensageiro(dados = {}) {
     : [];
 
   return {
-    ativo: atendimento.ativo === true,
+    ativo: atendimento.ativo === true || atendimento.atendimentoAtivo === true,
+    atendimentoAtivo: atendimento.ativo === true || atendimento.atendimentoAtivo === true,
     sessaoId: String(atendimento.sessaoAtendimentoId || atendimento.sessaoId || ""),
     sessaoAtendimentoId: String(atendimento.sessaoAtendimentoId || atendimento.sessaoId || ""),
     delaySegundos: Math.max(0, Number(atendimento.delaySegundos || 2) || 0),
     escopo: "privado",
+    gatilhos: Array.isArray(atendimento.gatilhos) ? atendimento.gatilhos : [],
     respostasRapidas: respostasRapidas.map((item, index) => {
       const nome = String(
         item.nome ||
@@ -220,6 +222,10 @@ const sessaoGruposId = dados.sessaoGruposId === undefined && dados.sessaoWhatsap
   ? (configAtualMensageiro.sessaoGruposId || configAtualMensageiro.sessaoWhatsappId || configAtualMensageiro.sessaoId || "")
   : (dados.sessaoGruposId || dados.sessaoWhatsappId || dados.sessaoId || "");
 
+const atendimentoNormalizado = atendimentoPayload === undefined
+  ? configAtualMensageiro.atendimento
+  : normalizarAtendimentoMensageiro(atendimentoPayload);
+
 const atualizado = setMensageiroCliente(clienteId, {
   ativo: dados.ativo === undefined
     ? configAtualMensageiro.ativo
@@ -251,10 +257,12 @@ const atualizado = setMensageiroCliente(clienteId, {
       ? dados.grupos
       : [],
 
-  atendimento: atendimentoPayload === undefined
-    ? configAtualMensageiro.atendimento
-    : normalizarAtendimentoMensageiro(atendimentoPayload)
+  atendimento: atendimentoNormalizado
 });
+
+if (atendimentoPayload !== undefined) {
+  setAtendimentoConfigCliente(clienteId, atendimentoNormalizado);
+}
 
 
     return res.json({
@@ -268,6 +276,8 @@ const atualizado = setMensageiroCliente(clienteId, {
 }
 
 module.exports = criarRotasMensageiro;
+
+
 
 
 
