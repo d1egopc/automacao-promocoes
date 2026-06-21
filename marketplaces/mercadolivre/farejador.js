@@ -110,7 +110,7 @@ if (!config.marketplaces?.mercadolivre?.ativo) {
   "cobertor casal"
 ];
 
-const buscasGlobaisExtras = gerarBuscasGlobais(20);
+const buscasGlobaisExtras = gerarBuscasGlobais(30);
 
 const buscas = [
   ...buscasPrioritariasML,
@@ -118,8 +118,8 @@ const buscas = [
 ];
 
       const limiteBuscasBase = Number(
-        const produtosBusca = extrairProdutosBuscaML(html).slice(0, 12);
-      ) || 1;
+      config.marketplaces?.mercadolivre?.limiteBuscasPorRodada || 3
+      ) || 3;
       const limiteBuscas = estrategiaFarejador.filaCritica
         ? Math.max(limiteBuscasBase, 4)
         : estrategiaFarejador.filaBaixa
@@ -192,10 +192,10 @@ const compraNoApp =
 
 if (compraNoApp && !cupom) {
   cupom = "VER NO APP";
-  avisoCupom = "ðŸ“± Confira pelo app do Mercado Livre, pode aparecer menor valor ou desconto exclusivo.";
+  avisoCupom = "📱 Confira pelo app do Mercado Livre, pode aparecer menor valor ou desconto exclusivo.";
 }
 
-const produtosBusca = extrairProdutosBuscaML(html).slice(0, 8);
+const produtosBusca = extrairProdutosBuscaML(html).slice(0, 12);
 
 for (const itemBusca of produtosBusca) {
   try {
