@@ -6,6 +6,35 @@
   corrigirImagemUrl
 } = require("./utils");
 
+function extrairValorMlHtml(html = "", campos = []) {
+  for (const campo of campos) {
+    const re = new RegExp(`"${campo}"\\s*:\\s*"([^"]{1,500})"`, "i");
+    const valor = html.match(re)?.[1];
+    if (valor) return htmlDecode(valor).trim();
+  }
+
+  return "";
+}
+
+function extrairPrecoMlHtml(html = "") {
+  const candidatos = [
+    html.match(/"price"\s*:\s*([0-9]+(?:\.[0-9]+)?)/)?.[1],
+    html.match(/"current_price"\s*:\s*([0-9]+(?:\.[0-9]+)?)/)?.[1],
+    html.match(/"price_amount"\s*:\s*([0-9]+(?:\.[0-9]+)?)/)?.[1],
+    html.match(/"fraction"\s*:\s*"?(\d{1,6})"?[^}]{0,180}"cents"\s*:"?(\d{1,2})"?/)?.slice(1, 3).join("."),
+    html.match(/R\$\s*([0-9]{1,3}(?:\.[0-9]{3})*,\d{2})/)?.[1]
+  ].filter(Boolean);
+
+  const bruto = candidatos.find(Boolean) || "";
+  if (!bruto) return "";
+
+  if (/^\d+\.\d{1,2}$/.test(String(bruto))) {
+    return Number(bruto).toFixed(2).replace(".", ",");
+  }
+
+  return limparPreco(bruto);
+}
+
 async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
   const {
     getIntegracaoCliente,
@@ -56,16 +85,18 @@ if (response.url.includes("account-verification")) {
 
   const jsonLd = extrairJsonLd(html);
 
-  const titulo =
+  let titulo =
     jsonLd?.name ||
     extrairMeta(html, "og:title") ||
     extrairMeta(html, "twitter:title") ||
+    extrairValorMlHtml(html, ["poly_component_title", "name", "title"]) ||
     "Produto Mercado Livre";
 
   let preco =
     jsonLd?.offers?.price ||
     extrairMeta(html, "product:price:amount") ||
     extrairMeta(html, "og:price:amount") ||
+    extrairPrecoMlHtml(html) ||
     "";
 
   const imagem =
@@ -116,9 +147,14 @@ if (
     { clienteId: clienteIdAlvo }
   );
 
+  const tituloLimpo = htmlDecode(titulo)
+    .replace(" | MercadoLivre", "")
+    .replace(" | Mercado Livre", "")
+    .trim();
+
   return {
     marketplace: "mercadolivre",
-    titulo: htmlDecode(titulo).replace(" | MercadoLivre", "").replace(" | Mercado Livre", ""),
+    titulo: tituloLimpo,
     precoAntigo,
     precoAtual: preco,
     cupom: "",
