@@ -217,6 +217,31 @@ if (!produto) {
   continue;
 }
 
+// Fallback com dados já extraídos da busca
+if (
+  (!produto.titulo || produto.titulo === "Produto Mercado Livre") &&
+  itemBusca.titulo
+) {
+  produto.titulo = itemBusca.titulo;
+}
+
+if (!produto.precoAtual && itemBusca.precoAtual) {
+  produto.precoAtual = itemBusca.precoAtual;
+}
+
+if (!produto.precoAntigo && itemBusca.precoAntigo) {
+  produto.precoAntigo = itemBusca.precoAntigo;
+}
+
+if (!produto.imagem && itemBusca.imagem) {
+  produto.imagem = itemBusca.imagem;
+}
+
+if (!produto.linkOriginal) {
+  produto.linkOriginal = link;
+}
+
+// Só valida preço depois do fallback
 if (
   !produto.precoAtual ||
   produto.precoAtual === "R$ 0,00" ||
@@ -225,50 +250,29 @@ if (
   console.log("[AVISO] [ML] Ignorado sem preco valido:", produto.titulo || link);
   continue;
 }
-    if (!produto.precoAtual && itemBusca.precoAtual) {
-      produto.precoAtual = itemBusca.precoAtual;
-    }
 
-    if (!produto.precoAntigo && itemBusca.precoAntigo) {
-      produto.precoAntigo = itemBusca.precoAntigo;
-    }
+const linkAfiliadoML = String(produto.linkAfiliado || produto.linkFinal || produto.link || "").trim();
+const linkOriginalML = String(produto.linkOriginal || link || "").trim();
 
-    if (!produto.titulo && itemBusca.titulo) {
-      produto.titulo = itemBusca.titulo;
-    }
+if (!linkAfiliadoML || linkAfiliadoML === linkOriginalML) {
+  console.log("[AVISO] [ML] Ignorado sem link afiliado do cliente:", {
+    clienteId,
+    titulo: produto.titulo || itemBusca.titulo || "",
+    linkOriginal: linkOriginalML
+  });
+  continue;
+}
 
-    if (!produto.imagem && itemBusca.imagem) {
-      produto.imagem = itemBusca.imagem;
-    }
+produto.linkAfiliado = linkAfiliadoML;
+produto.linkFinal = linkAfiliadoML;
 
-    if (!produto.linkOriginal) {
-      produto.linkOriginal = link;
-    }
-
-
-    
-    const linkAfiliadoML = String(produto.linkAfiliado || produto.linkFinal || produto.link || "").trim();
-    const linkOriginalML = String(produto.linkOriginal || link || "").trim();
-
-    if (!linkAfiliadoML || linkAfiliadoML === linkOriginalML) {
-      console.log("[AVISO] [ML] Ignorado sem link afiliado do cliente:", {
-        clienteId,
-        titulo: produto.titulo || itemBusca.titulo || "",
-        linkOriginal: linkOriginalML
-      });
-      continue;
-    }
-
-    produto.linkAfiliado = linkAfiliadoML;
-    produto.linkFinal = linkAfiliadoML;
-
-    const precoNumero = Number(
-      String(produto.precoAtual)
-        .replace("R$", "")
-        .replace(/\./g, "")
-        .replace(",", ".")
-        .trim()
-    );
+const precoNumero = Number(
+  String(produto.precoAtual)
+    .replace("R$", "")
+    .replace(/\./g, "")
+    .replace(",", ".")
+    .trim()
+);
 
     const precoAntigoNumero = Number(
       String(produto.precoAntigo || "")
