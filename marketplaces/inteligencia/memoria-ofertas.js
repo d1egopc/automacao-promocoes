@@ -82,6 +82,10 @@ function janelaHorasPorCategoria(oferta = {}) {
   const categoria = normalizarTextoLocal(oferta.categoria || "");
   const marketplace = normalizarTextoLocal(oferta.marketplace || "");
 
+  if (marketplace.includes("mercadolivre") || marketplace.includes("mercado livre")) {
+    return 4;
+  }
+
   if (
     categoria.includes("gamer") ||
     categoria.includes("hardware") ||
