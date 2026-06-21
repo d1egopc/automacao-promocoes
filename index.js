@@ -6416,12 +6416,14 @@ function normalizarCupomRadar(oferta = {}) {
     "APLICAR",
     "VALIDO"
   ]);
-  const cupomConfirmado = Boolean(
+  const cupomOrigem = normalizarTexto(oferta.cupomOrigem || "");
+  const cupomValido = Boolean(
     cupom &&
     !bloqueados.has(cupom) &&
     !/^(VER|CONFIRA|COMPR|PEGAR|ABRIR|APLICAR|RESGAT)/i.test(cupom) &&
     /^[A-Z0-9][A-Z0-9_-]{3,39}$/.test(cupom)
   );
+  const cupomConfirmado = cupomValido && !["texto_grupo", "mensagem"].includes(cupomOrigem);
   const avisoCupom = textoRadarId(oferta.avisoCupom || oferta.aviso_cupom || "");
   const possivelCupom = !cupomConfirmado && Boolean(cupom || avisoCupom);
   const tipoCupom = textoRadarId(oferta.tipoCupom || oferta.cupomTipo || "");
@@ -6432,7 +6434,7 @@ function normalizarCupomRadar(oferta = {}) {
   const beneficioExtra = textoRadarId(oferta.beneficioExtra || "");
 
   return {
-    cupom: cupomConfirmado ? cupom : "",
+    cupom: cupomValido ? cupom : "",
     cupomConfirmado,
     possivelCupom,
     tipoCupom,
@@ -7598,6 +7600,70 @@ async function adicionarRadarCapturadoNaFilaClientes(ofertaBase = {}, opcoes = {
   return resultados;
 }
 
+function classificarMotivoResumoRadar(motivo = "") {
+  const texto = normalizarTexto(motivo);
+
+  if (!texto) return "outros";
+  if (texto.includes("memoria") || texto.includes("repetida_na_memoria")) return "memoria";
+  if (texto.includes("duplicada") || texto.includes("repetida")) return "repetida";
+  if (texto.includes("limite_radar") || texto.includes("fila_cheia") || texto.includes("pendente_total")) return "fila";
+  if (texto.includes("categoria") || texto.includes("destino_compativel") || texto.includes("sem_destino")) return "categoria";
+  if (texto.includes("link_original") || texto.includes("intermediario") || texto.includes("marketplace_nao_identificado")) return "link";
+  if (texto.includes("importacao")) return "importacao";
+
+  return "outros";
+}
+
+function resumirResultadosRadarMensagem(resultados = []) {
+  const resumo = {
+    encontradas: 0,
+    rejeitadasMemoria: 0,
+    rejeitadasRepetida: 0,
+    rejeitadasCategoria: 0,
+    rejeitadasFila: 0,
+    rejeitadasImportacao: 0,
+    rejeitadasLink: 0,
+    rejeitadasOutros: 0,
+    adicionadas: 0
+  };
+
+  for (const item of Array.isArray(resultados) ? resultados : []) {
+    if (item?.ok) resumo.encontradas += 1;
+    const clientes = Array.isArray(item?.clientes) ? item.clientes : [];
+
+    if (clientes.length) {
+      for (const cliente of clientes) {
+        if (cliente?.adicionada) {
+          resumo.adicionadas += 1;
+          continue;
+        }
+
+        const bucket = classificarMotivoResumoRadar(cliente?.motivo || "");
+        if (bucket === "memoria") resumo.rejeitadasMemoria += 1;
+        else if (bucket === "repetida") resumo.rejeitadasRepetida += 1;
+        else if (bucket === "categoria") resumo.rejeitadasCategoria += 1;
+        else if (bucket === "fila") resumo.rejeitadasFila += 1;
+        else if (bucket === "importacao") resumo.rejeitadasImportacao += 1;
+        else if (bucket === "link") resumo.rejeitadasLink += 1;
+        else resumo.rejeitadasOutros += 1;
+      }
+      continue;
+    }
+
+    if (!item?.ok) {
+      const bucket = classificarMotivoResumoRadar(item?.motivo || "");
+      if (bucket === "memoria") resumo.rejeitadasMemoria += 1;
+      else if (bucket === "repetida") resumo.rejeitadasRepetida += 1;
+      else if (bucket === "categoria") resumo.rejeitadasCategoria += 1;
+      else if (bucket === "fila") resumo.rejeitadasFila += 1;
+      else if (bucket === "importacao") resumo.rejeitadasImportacao += 1;
+      else if (bucket === "link") resumo.rejeitadasLink += 1;
+      else resumo.rejeitadasOutros += 1;
+    }
+  }
+
+  return resumo;
+}
 async function processarMensagemRadar({
   origemTipo,
   sessaoId,
@@ -7988,12 +8054,17 @@ async function processarMensagemRadar({
     });
   }
 
-  const adicionadas = resultados.reduce((total, item) =>
-    total + (item.clientes || []).filter(cliente => cliente.adicionada).length,
-    0
-  );
+  const resumoRodada = resumirResultadosRadarMensagem(resultados);
+  const adicionadas = resumoRodada.adicionadas;
 
   if (resultados.length) {
+    logOptimus("RADAR", "Resumo rodada", {
+      origemTipo: origemTipoFinal,
+      sessaoId: sessaoIdTexto,
+      grupo: grupoNomeTexto || grupoIdTexto,
+      links: links.length,
+      ...resumoRodada
+    });
     console.log("[RADAR] Mensagem monitorada processada:", {
       origemTipo: origemTipoFinal,
       sessaoId: sessaoIdTexto,
@@ -13865,6 +13936,8 @@ setInterval(() => {
   }
 
 }, 10 * 1000);
+
+
 
 
 
