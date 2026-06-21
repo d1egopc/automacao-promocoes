@@ -1,4 +1,4 @@
-// ================= SCORE DE OFERTA V1 =================
+﻿// ================= SCORE DE OFERTA V1 =================
 
 function precoParaNumero(valor = "") {
   return Number(
@@ -35,16 +35,16 @@ function calcularScoreOferta(oferta = {}) {
     oferta.precoAtual || oferta.preco
   );
 
-  // preço baixo
+  // preÃ§o baixo
   if (precoAtual > 0 && precoAtual <= 30) {
     score += 10;
-    motivos.push("preço até R$30");
+    motivos.push("preÃ§o atÃ© R$30");
   } else if (precoAtual <= 50) {
     score += 8;
-    motivos.push("preço até R$50");
+    motivos.push("preÃ§o atÃ© R$50");
   } else if (precoAtual <= 100) {
     score += 5;
-    motivos.push("preço até R$100");
+    motivos.push("preÃ§o atÃ© R$100");
   }
 
   // desconto
@@ -63,13 +63,23 @@ function calcularScoreOferta(oferta = {}) {
   }
 
   // cupom e beneficios reais do Radar
-  if (oferta.cupom) {
+  const cupomOrigem = String(oferta.cupomOrigem || "").toLowerCase();
+  const cupomConfirmado = Boolean(
+    oferta.cupom &&
+    cupomOrigem !== "texto_grupo" &&
+    cupomOrigem !== "mensagem"
+  );
+
+  if (cupomConfirmado) {
     score += 40;
     motivos.push("cupom confirmado");
+  } else if (oferta.cupom) {
+    score += 20;
+    motivos.push("cupom informado no texto");
   }
 
-  if (oferta.cupomDetectadoTexto || oferta.cupomOrigem === "mensagem" || oferta.cupomOrigem === "texto_grupo") {
-    score += 30;
+  if (oferta.cupomDetectadoTexto || cupomOrigem === "mensagem" || cupomOrigem === "texto_grupo") {
+    score += 15;
     motivos.push("cupom detectado no texto");
   }
 
@@ -98,7 +108,7 @@ function calcularScoreOferta(oferta = {}) {
     motivos.push("categoria quente");
   } else if (
     categoria.includes("perfumaria") ||
-    categoria.includes("tênis") ||
+    categoria.includes("tÃªnis") ||
     categoria.includes("tenis")
   ) {
     score += 10;
@@ -134,3 +144,5 @@ module.exports = {
   precoParaNumero,
   calcularDescontoPercentual
 };
+
+

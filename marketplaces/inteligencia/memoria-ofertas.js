@@ -118,6 +118,12 @@ function ofertaTemBeneficioMemoria(oferta = {}) {
   );
 }
 
+function ofertaOrigemRadar(oferta = {}) {
+  return String(oferta.origem || "").toLowerCase() === "radar" ||
+    oferta.radar === true ||
+    oferta.radarNaFila === true;
+}
+
 function deveIgnorarOfertaRepetida(oferta = {}) {
   const agora = Date.now();
   const vistas = carregarOfertasVistas();
@@ -142,6 +148,7 @@ function deveIgnorarOfertaRepetida(oferta = {}) {
     String(oferta.cupom).trim() &&
     String(oferta.cupom).trim() !== String(anterior.cupom || "").trim();
   const temBeneficio = ofertaTemBeneficioMemoria(oferta);
+  const ehRadar = ofertaOrigemRadar(oferta);
 
   const quedaPreco =
     precoAnterior > 0 &&
@@ -153,17 +160,21 @@ function deveIgnorarOfertaRepetida(oferta = {}) {
     return true;
   }
 
-  if (temBeneficio && horasPassadas >= 3) {
+  const janelaBeneficioHoras = ehRadar ? 1.5 : 3;
+
+  if (temBeneficio && horasPassadas >= janelaBeneficioHoras) {
     return false;
   }
 
-  const janelaHoras = janelaHorasPorCategoria(oferta);
+  const janelaHorasBase = janelaHorasPorCategoria(oferta);
+  const janelaHoras = ehRadar ? Math.min(janelaHorasBase, 3) : janelaHorasBase;
 
   if (horasPassadas < janelaHoras && !temCupomNovo && !quedaPreco) {
     console.log("[INFO] Oferta repetida ignorada:", {
       titulo: oferta.titulo || oferta.nome,
       horasPassadas: Number(horasPassadas.toFixed(2)),
-      janelaHoras
+      janelaHoras,
+      origem: ehRadar ? "radar" : (oferta.origem || "farejador")
     });
     return true;
   }
