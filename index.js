@@ -13890,29 +13890,6 @@ clientesProcessadosRodada += 1;
   }
 }
 
-// ============================= TESTE MANUAL =========================
-
- setTimeout(async () => {
-   console.log("[INFO] TESTE MANUAL ORQUESTRADOR PONDERADO");
-   await rodarProximoMarketplace();
- }, 60 * 1000);
-
- 
-
-setInterval(() => {
-  const agora = Date.now();
-  const intervaloMs = intervaloOrquestradorAtualMs();
-
-  if (agora - ultimaRodadaOrquestradorMs >= intervaloMs) {
-    rodarProximoMarketplace();
-  }
-}, 60 * 1000);
-
-setTimeout(() => {
-  console.log("[INFO] Primeira rodada do orquestrador em 1 minuto...");
-  rodarProximoMarketplace();
-}, 1 * 60 * 1000);
-
 // ================= PROCESSADOR DA FILA =================
 
 let ultimoLogPausaFila = 0;
