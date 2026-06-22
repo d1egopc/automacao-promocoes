@@ -77,6 +77,14 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
   }
 });
 
+console.log("🧪 ML IMPORTADOR MANUAL", {
+  clienteIdAlvo,
+  temCookies: !!cookies,
+  status: response.status,
+  urlOriginal: url,
+  urlFinal: response.url
+});
+
 if (response.url.includes("account-verification")) {
   return null;
 }
