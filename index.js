@@ -6701,26 +6701,13 @@ function destinosClienteNormalizados(clienteId = "admin") {
 
 function obterClienteIdAdminMaster() {
   // Radar e uma ferramenta interna do admin_master, mas a configuracao operacional
-  // deve ser unica e canonica no cliente "admin". Isso evita salvar em admin e
-  // o listener ler outro id admin_master encontrado em usuarios.json.
+  // deve ser unica e canonica no cliente "admin". Nao usar configs legadas de
+  // outros ids, para nao monitorar grupos antigos ou nao selecionados.
   return "admin";
 }
 
-function obterClienteIdAdminMasterLegado() {
-  return usuarios.find(u => u?.ativo !== false && u.papel === "admin_master" && String(u.id) !== "admin")?.id || "";
-}
-
 function carregarRadarConfigAdminMaster() {
-  const configAdmin = carregarRadarConfigCliente(obterClienteIdAdminMaster());
-  if (temFontesMonitoradasRadar(configAdmin)) return configAdmin;
-
-  const legadoId = obterClienteIdAdminMasterLegado();
-  if (legadoId) {
-    const configLegado = carregarRadarConfigCliente(legadoId);
-    if (temFontesMonitoradasRadar(configLegado)) return configLegado;
-  }
-
-  return configAdmin;
+  return carregarRadarConfigCliente(obterClienteIdAdminMaster());
 }
 
 function getUsuarioClienteRadar(clienteId = "admin") {
@@ -7771,14 +7758,6 @@ async function processarMensagemRadar({
   const grupoNomeTexto = textoRadarId(grupoNome);
   const sessaoIdTexto = textoRadarId(sessaoId || (origemTipoFinal === "telegram" ? "telegram" : ""));
 
-  logOptimus("CAPTURA", "Mensagem recebida", {
-    origemTipo: origemTipoFinal || origemTipo,
-    sessaoId: sessaoIdTexto,
-    grupoId: grupoIdTexto,
-    grupoNome: grupoNomeTexto,
-    tamanhoTexto: String(texto || "").length
-  });
-
   if (!["whatsapp", "telegram"].includes(origemTipoFinal)) {
     logOptimus("CAPTURA", "Rejeitada", {
       motivo: "origem_tipo_invalida",
@@ -7800,6 +7779,39 @@ async function processarMensagemRadar({
     });
     return { ok: false, motivo: "grupo_ou_chat_ausente" };
   }
+
+  const adminMasterId = obterClienteIdAdminMaster();
+  const radarConfig = carregarRadarConfigAdminMaster();
+  const origemBase = {
+    origemTipo: origemTipoFinal,
+    origemGrupoId: grupoIdTexto,
+    origemGrupoNome: grupoNomeTexto,
+    origemSessaoId: sessaoIdTexto,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto,
+    chatId: origemTipoFinal === "telegram" ? grupoIdTexto : "",
+    sessaoId: sessaoIdTexto
+  };
+  const origemMonitorada = origemOfertaEstaMonitoradaRadar(origemBase, radarConfig);
+
+  if (!origemMonitorada.ok) {
+    return { ok: false, motivo: origemMonitorada.motivo, ignorada: true };
+  }
+
+  logOptimus("CAPTURA", "Mensagem recebida", {
+    origemTipo: origemTipoFinal || origemTipo,
+    sessaoId: sessaoIdTexto,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto,
+    tamanhoTexto: String(texto || "").length
+  });
+
+  logOptimus("CAPTURA", "Grupo monitorado confirmado", {
+    origemTipo: origemTipoFinal,
+    sessaoId: sessaoIdTexto,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto
+  });
 
   const links = extrairLinksRadar(texto);
   logOptimus("RADAR", "Links detectados", {
@@ -7839,8 +7851,6 @@ async function processarMensagemRadar({
     });
   }
 
-  const adminMasterId = obterClienteIdAdminMaster();
-  const radarConfig = carregarRadarConfigAdminMaster();
   const capturaPermitida = radarPodeCapturarAgora(radarConfig, {
     temBeneficioPrioritario: Boolean(
       beneficiosMensagem.cupom ||
@@ -7861,42 +7871,6 @@ async function processarMensagemRadar({
     });
     return capturaPermitida;
   }
-
-  const origemBase = {
-    origemTipo: origemTipoFinal,
-    origemGrupoId: grupoIdTexto,
-    origemGrupoNome: grupoNomeTexto,
-    origemSessaoId: sessaoIdTexto,
-    grupoId: grupoIdTexto,
-    grupoNome: grupoNomeTexto,
-    chatId: origemTipoFinal === "telegram" ? grupoIdTexto : "",
-    sessaoId: sessaoIdTexto
-  };
-  const origemMonitorada = origemOfertaEstaMonitoradaRadar(origemBase, radarConfig);
-
-  if (!origemMonitorada.ok) {
-    logOptimus("CAPTURA", "Grupo nao monitorado", {
-      motivo: origemMonitorada.motivo,
-      origemTipo: origemTipoFinal,
-      sessaoId: sessaoIdTexto,
-      grupoId: grupoIdTexto,
-      grupoNome: grupoNomeTexto,
-      diagnostico: origemMonitorada.diagnostico || {}
-    });
-    logRadarRejeitado(origemMonitorada.motivo, {
-      origemTipo: origemTipoFinal,
-      grupo: grupoNomeTexto || grupoIdTexto
-    });
-    return { ok: false, motivo: origemMonitorada.motivo };
-  }
-
-  logOptimus("CAPTURA", "Grupo monitorado confirmado", {
-    origemTipo: origemTipoFinal,
-    sessaoId: sessaoIdTexto,
-    grupoId: grupoIdTexto,
-    grupoNome: grupoNomeTexto
-  });
-
   const resultados = [];
   const dataCaptura = capturadaEm || new Date().toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo"
