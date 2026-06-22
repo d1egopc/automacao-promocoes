@@ -90,7 +90,22 @@ console.log("🧪 ML IMPORTADOR MANUAL", {
   urlFinal: response.url
 });
 
-if (response.url.includes("account-verification")) {
+if (
+  response.status === 403 ||
+  response.status === 429 ||
+  response.url.includes("account-verification") ||
+  response.url.includes("login")
+) {
+  registrarAlertaIntegracao(clienteIdAlvo, "mercadolivre", {
+    tipo: "cookie_invalido",
+    status: "atencao",
+    mensagem: "Cookies Mercado Livre precisam ser atualizados.",
+    detalhes: {
+      httpStatus: response.status,
+      urlFinal: response.url
+    }
+  });
+
   return null;
 }
 
@@ -164,6 +179,8 @@ if (
     .replace(" | MercadoLivre", "")
     .replace(" | Mercado Livre", "")
     .trim();
+
+  limparAlertaIntegracao(clienteIdAlvo, "mercadolivre");
 
   return {
     marketplace: "mercadolivre",
