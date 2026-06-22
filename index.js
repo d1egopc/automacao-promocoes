@@ -8232,7 +8232,14 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
     return { ok: false, motivo: "mensagem_nao_monitoravel" };
   }
 
-  return processarMensagemRadar({
+ console.log("🧪 RADAR CHAMANDO PROCESSAR", {
+  sessaoId,
+  remoteJid,
+  tamanhoTexto: textoExtraido.length,
+  preview: textoExtraido.slice(0, 300)
+});
+
+ return processarMensagemRadar({
     origemTipo: "whatsapp",
     sessaoId,
     grupoId: remoteJid,
