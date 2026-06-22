@@ -1,4 +1,9 @@
 ﻿const {
+  registrarAlertaIntegracao,
+  limparAlertaIntegracao
+} = require("../../utils/alertas-integracoes");
+
+const {
   htmlDecode,
   extrairMeta,
   extrairJsonLd,
