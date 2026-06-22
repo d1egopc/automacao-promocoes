@@ -6036,6 +6036,12 @@ function salvarRadarConfigCliente(clienteId = "admin", dados = {}) {
     const entrada = normalizarSessoesWhatsappMonitoradasRadar({
       sessoesWhatsappMonitoradas: dados.sessoesWhatsappMonitoradas
     });
+
+console.log("🧪 RADAR NORMALIZACAO", {
+  recebido: dados.sessoesWhatsappMonitoradas,
+  entradaNormalizada: entrada
+});
+
     const sessoesEntrada = new Set((dados.sessoesWhatsappMonitoradas || [])
       .map(sessao => textoRadarId(sessao?.sessaoId || sessao?.id || sessao?.sessionId || ""))
       .filter(Boolean));
@@ -6106,7 +6112,14 @@ function salvarRadarConfigCliente(clienteId = "admin", dados = {}) {
     atualizadoEm: new Date().toISOString()
   };
 
-  writeClienteJson(clienteId, "radar-config.json", payload);
+  
+console.log("🧪 RADAR PAYLOAD FINAL", {
+  sessoesWhatsappMonitoradas: payload.sessoesWhatsappMonitoradas,
+  gruposMonitorados: payload.gruposMonitorados
+});
+
+
+writeClienteJson(clienteId, "radar-config.json", payload);
 
   return payload;
 }
