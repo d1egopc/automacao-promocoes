@@ -6133,8 +6133,8 @@ function chaveRadarId(valor = "") {
 }
 
 function chaveGrupoWhatsappTecnicaRadar(valor = "") {
-  const chave = chaveRadarId(valor);
-  return chave.includes("@g.us") ? chave : "";
+  const id = textoRadarId(valor);
+  return id.includes("@g.us") ? id : "";
 }
 
 function extrairIdsMonitoradosRadar(lista = [], campos = []) {
