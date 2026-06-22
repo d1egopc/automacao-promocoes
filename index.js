@@ -7900,6 +7900,17 @@ async function processarMensagemRadar({
   });
 
   const links = extrairLinksRadar(texto);
+
+const links = extrairLinksRadar(texto);
+
+console.log("🧪 RADAR LINKS EXTRAIDOS", {
+  sessaoId: dados.sessaoId,
+  grupoId: dados.grupoId,
+  links,
+  total: links.length,
+  texto: texto.slice(0, 250)
+});
+
   logOptimus("RADAR", "Links detectados", {
     total: links.length,
     links,
