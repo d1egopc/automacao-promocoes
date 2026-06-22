@@ -8364,8 +8364,21 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   const origemMonitorada = origemOfertaEstaMonitoradaRadar(ofertaBase, radarConfig);
 
   if (!origemMonitorada.ok) {
+
+console.log("🚨 RADAR BLOQUEADO MONITORAMENTO", {
+    clienteId,
+    motivo: origemMonitorada.motivo,
+    origemMonitorada
+  });
+
     return { ok: false, motivo: origemMonitorada.motivo };
   }
+
+console.log("✅ RADAR ORIGEM VALIDADA", {
+  clienteId,
+  grupoId: ofertaBase.grupoId,
+  sessaoId: ofertaBase.sessaoId
+});
 
   let ofertaPreparada = prepararOfertaGlobal({
     ...(ofertaBase || {}),
