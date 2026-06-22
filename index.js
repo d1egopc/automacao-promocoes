@@ -1791,10 +1791,27 @@ function ofertaJaExiste(novaOferta) {
     const itemRecente =
       dataItem && agora - dataItem < horasBloqueio * 60 * 60 * 1000;
 
-    if (!itemRecente) return false;
-    if (!["pendente", "retida"].includes(normalizarTexto(o.status || "")) && ofertaTemMelhoriaParaRepetir(novaOferta, o)) {
-      return false;
-    }
+  if (!itemRecente) return false;
+
+const ehRadar =
+  normalizarTexto(novaOferta.origem || "") === "radar" ||
+  novaOferta.radar === true ||
+  novaOferta.radarNaFila === true;
+
+const temMelhoria = ofertaTemMelhoriaParaRepetir(novaOferta, o);
+
+const descontoNovo =
+  Number(String(novaOferta.desconto || "0").replace(/[^\d]/g, "")) || 0;
+
+const cupomNovoValido =
+  String(novaOferta.cupom || "").trim() &&
+  !["copiado", "cupom copiado", "sem cupom"].includes(
+    normalizarTexto(novaOferta.cupom || "")
+  );
+
+if (ehRadar || temMelhoria || descontoNovo >= 25 || cupomNovoValido) {
+  return false;
+}
 
     if (idMlNovo && idMlExistente && idMlNovo === idMlExistente) {
       console.log("[INFO] DUPLICADA ML POR ID:", {
@@ -1813,13 +1830,23 @@ function ofertaJaExiste(novaOferta) {
       return true;
     }
 
-    if (tituloNovo && tituloExistente && tituloNovo === tituloExistente) {
-      console.log("[INFO] DUPLICADA POR TTULO:", {
-        tituloNovo: novaOferta.titulo || novaOferta.nome,
-        tituloExistente: o.titulo || o.nome
-      });
-      return true;
-    }
+ if (
+  tituloNovo &&
+  tituloExistente &&
+  tituloNovo === tituloExistente &&
+  precoNovo &&
+  precoExistente &&
+  precoNovo === precoExistente &&
+  marketplaceNovo &&
+  marketplaceExistente &&
+  marketplaceNovo === marketplaceExistente
+) {
+  console.log("[INFO] DUPLICADA POR TITULO + PRECO + MARKETPLACE:", {
+    tituloNovo: novaOferta.titulo || novaOferta.nome,
+    tituloExistente: o.titulo || o.nome
+  });
+  return true;
+}
 
     if (
       chaveNova &&
