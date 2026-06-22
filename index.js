@@ -7899,8 +7899,6 @@ async function processarMensagemRadar({
     grupoNome: grupoNomeTexto
   });
 
-  const links = extrairLinksRadar(texto);
-
 const links = extrairLinksRadar(texto);
 
 console.log("🧪 RADAR LINKS EXTRAIDOS", {
