@@ -8930,6 +8930,11 @@ app.get("/radar/config", (req, res) => {
     const radarConfig = carregarRadarConfigAdminMaster();
     const sessoesWhatsapp = listarSessoesWhatsappCliente(clienteId);
     const telegramDisponiveis = listarTelegramRadarCliente(clienteId);
+    logOptimus("RADAR", "Config carregada", {
+      clienteId,
+      sessoesWhatsappMonitoradas: Array.isArray(radarConfig.sessoesWhatsappMonitoradas) ? radarConfig.sessoesWhatsappMonitoradas.length : 0,
+      gruposMonitorados: Array.isArray(radarConfig.gruposMonitorados) ? radarConfig.gruposMonitorados.length : 0
+    });
 
     return res.json({
       monitoramentoAtivo: radarConfig.monitoramentoAtivo,
@@ -9072,6 +9077,11 @@ app.post("/radar/config", (req, res) => {
     if (possuiCampo("templateMidia")) dadosConfig.templateMidia = body.templateMidia;
 
     const radarConfig = salvarRadarConfigCliente(clienteId, dadosConfig);
+    logOptimus("RADAR", "Config salva", {
+      clienteId,
+      sessoesWhatsappMonitoradas: Array.isArray(radarConfig.sessoesWhatsappMonitoradas) ? radarConfig.sessoesWhatsappMonitoradas.length : 0,
+      gruposMonitorados: Array.isArray(radarConfig.gruposMonitorados) ? radarConfig.gruposMonitorados.length : 0
+    });
 
     return res.json({
       ok: true,
