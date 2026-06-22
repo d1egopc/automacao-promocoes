@@ -83,7 +83,7 @@ function janelaHorasPorCategoria(oferta = {}) {
   const marketplace = normalizarTextoLocal(oferta.marketplace || "");
 
   if (marketplace.includes("mercadolivre") || marketplace.includes("mercado livre")) {
-    return 4;
+    return 1;
   }
 
   if (
@@ -111,16 +111,30 @@ function janelaHorasPorCategoria(oferta = {}) {
 }
 
 function ofertaTemBeneficioMemoria(oferta = {}) {
+  const cupom = String(oferta.cupom || "")
+    .trim()
+    .toLowerCase();
+
+  const cupomValido =
+    cupom &&
+    cupom !== "copiado" &&
+    cupom !== "cupom copiado";
+
   return Boolean(
-    String(oferta.cupom || "").trim() ||
+    cupomValido ||
     String(oferta.tipoCupom || "").trim() ||
     String(oferta.avisoCupom || "").trim() ||
     String(oferta.beneficioExtra || "").trim() ||
     String(oferta.linkResgateCupom || "").trim() ||
     String(oferta.descontoPix || "").trim() ||
-    String(oferta.descontoApp || "").trim()
+    String(oferta.descontoApp || "").trim() ||
+
+    Number(String(oferta.desconto || "0").replace(/[^\d]/g, "")) >= 20 ||
+
+    Number(oferta.score || 0) >= 70
   );
 }
+
 
 function ofertaOrigemRadar(oferta = {}) {
   return String(oferta.origem || "").toLowerCase() === "radar" ||
@@ -153,6 +167,10 @@ function deveIgnorarOfertaRepetida(oferta = {}) {
     String(oferta.cupom).trim() !== String(anterior.cupom || "").trim();
   const temBeneficio = ofertaTemBeneficioMemoria(oferta);
   const ehRadar = ofertaOrigemRadar(oferta);
+
+ if (temBeneficio) {
+  return false;
+}
 
   const quedaPreco =
     precoAnterior > 0 &&
