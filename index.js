@@ -777,22 +777,27 @@ function avaliarSaudeFilaCliente(clienteId = "admin") {
   const itens = Array.isArray(filaCliente) ? filaCliente : [];
   const pendentes = itens.filter(item => item?.status === "pendente").length;
 
-  let status = "normal";
-  let deveAbastecer = false;
-  let motivo = "Fila com volume operacional normal.";
+let status = "normal";
+let deveAbastecer = true;
+let motivo = "Fila em volume operacional normal.";
 
-  if (pendentes <= 8) {
-    status = "critica";
-    deveAbastecer = true;
-    motivo = "Fila com 8 ou menos ofertas pendentes.";
-  } else if (pendentes <= 30) {
-    status = "baixa";
-    deveAbastecer = true;
-    motivo = "Fila com 30 ou menos ofertas pendentes.";
-  } else if (pendentes >= 100) {
-    status = "cheia";
-    motivo = "Fila com 100 ou mais ofertas pendentes.";
-  }
+if (pendentes <= 20) {
+  status = "critica";
+  deveAbastecer = true;
+  motivo = "Fila com 20 ou menos ofertas pendentes.";
+} else if (pendentes <= 80) {
+  status = "baixa";
+  deveAbastecer = true;
+  motivo = "Fila com 80 ou menos ofertas pendentes.";
+} else if (pendentes <= 200) {
+  status = "normal";
+  deveAbastecer = true;
+  motivo = "Fila em volume operacional.";
+} else {
+  status = "cheia";
+  deveAbastecer = false;
+  motivo = "Fila com mais de 200 ofertas pendentes.";
+}
 
   console.log(
     `🧠 FILA IA: cliente ${cliente} pendentes ${pendentes} status ${status} deveAbastecer ${deveAbastecer}`
