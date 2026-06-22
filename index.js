@@ -6775,13 +6775,43 @@ function listarClientesElegiveisRadar() {
 }
 
 function extrairMensagemInternaRadar(conteudo = {}) {
-  return (
-    conteudo.ephemeralMessage?.message ||
-    conteudo.viewOnceMessage?.message ||
-    conteudo.viewOnceMessageV2?.message ||
-    conteudo.documentWithCaptionMessage?.message ||
-    conteudo
-  );
+  let atual = conteudo || {};
+
+  for (let i = 0; i < 8; i++) {
+    if (atual?.ephemeralMessage?.message) {
+      atual = atual.ephemeralMessage.message;
+      continue;
+    }
+
+    if (atual?.viewOnceMessage?.message) {
+      atual = atual.viewOnceMessage.message;
+      continue;
+    }
+
+    if (atual?.viewOnceMessageV2?.message) {
+      atual = atual.viewOnceMessageV2.message;
+      continue;
+    }
+
+    if (atual?.documentWithCaptionMessage?.message) {
+      atual = atual.documentWithCaptionMessage.message;
+      continue;
+    }
+
+    if (atual?.editedMessage?.message) {
+      atual = atual.editedMessage.message;
+      continue;
+    }
+
+    if (atual?.protocolMessage?.editedMessage) {
+      atual = atual.protocolMessage.editedMessage;
+      continue;
+    }
+
+    break;
+  }
+
+  return atual || {};
 }
 
 function extrairTextoMensagemRadar(mensagem = {}) {
@@ -6795,12 +6825,23 @@ function extrairTextoMensagemRadar(mensagem = {}) {
     conteudo.documentMessage?.caption,
     conteudo.buttonsResponseMessage?.selectedDisplayText,
     conteudo.listResponseMessage?.title,
-    conteudo.templateButtonReplyMessage?.selectedDisplayText
+    conteudo.templateButtonReplyMessage?.selectedDisplayText,
+    conteudo.buttonsMessage?.contentText,
+    conteudo.templateMessage?.hydratedTemplate?.hydratedContentText,
+    conteudo.templateMessage?.hydratedFourRowTemplate?.hydratedContentText,
+    conteudo.interactiveResponseMessage?.body?.text,
+    conteudo.protocolMessage?.editedMessage?.conversation,
+    conteudo.protocolMessage?.editedMessage?.extendedTextMessage?.text,
+    conteudo.messageContextInfo?.quotedMessage?.conversation,
+    conteudo.messageContextInfo?.quotedMessage?.extendedTextMessage?.text,
+    conteudo.contextInfo?.quotedMessage?.conversation,
+    conteudo.contextInfo?.quotedMessage?.extendedTextMessage?.text
   ]
     .filter(Boolean)
     .join("\n")
     .trim();
 }
+
 
 function limparLinkRadar(link = "") {
   return radarCupomMensagem.limparLinkRadar(link);
