@@ -10,6 +10,28 @@ function limparTextoML(texto = "") {
     .trim();
 }
 
+function precoBuscaML(trecho = "") {
+  const candidatos = [
+    trecho.match(/"current_price"\s*:\s*([0-9]+(?:\.[0-9]+)?)/)?.[1],
+    trecho.match(/"price"\s*:\s*([0-9]+(?:\.[0-9]+)?)/)?.[1],
+    trecho.match(/"amount"\s*:\s*([0-9]+(?:\.[0-9]+)?)/)?.[1],
+    trecho.match(/"price_amount"\s*:\s*([0-9]+(?:\.[0-9]+)?)/)?.[1],
+    trecho.match(/"fraction"\s*:\s*"?(\d{1,6})"?[^}]{0,180}"cents"\s*:"?(\d{1,2})"?/)?.slice(1, 3).join("."),
+    trecho.match(/R\$\s*([0-9]{1,3}(?:\.[0-9]{3})*,\d{2})/)?.[1]
+  ].filter(Boolean);
+
+  const bruto = candidatos.find(Boolean) || "";
+  if (!bruto) return "";
+
+  if (/^\d+\.\d{1,2}$/.test(String(bruto))) {
+    return `R$ ${Number(bruto).toFixed(2).replace(".", ",")}`;
+  }
+
+  return `R$ ${String(bruto)
+    .replace(/\.(?=\d{3}(,|$))/g, "")
+    .replace(".", ",")}`;
+}
+
 function extrairProdutosBuscaML(html = "") {
   const produtos = [];
 
@@ -63,15 +85,6 @@ for (const link of linksUnicos) {
       )
     : "";
 
-console.log("[DEBUG] [ML] campos preco:", {
-  temPrice: trecho.includes("price"),
-  temCurrentPrice: trecho.includes("current_price"),
-  temPriceAmount: trecho.includes("price_amount"),
-  temFormatted: trecho.includes("formatted"),
-  temMoneyAmount: trecho.includes("money_amount"),
-  amostraPrice: trecho.match(/.{0,80}price.{0,120}/i)?.[0] || ""
-});
-
 const titulo =
   limparTextoML(
     trecho.match(/"poly_component_title":"([^"]+)"/)?.[1] ||
@@ -115,29 +128,12 @@ if (!tituloFinal) {
   continue;
 }
 
-const precoMatch =
-  trecho.match(/"current_price"\s*:\s*([0-9]+(?:\.[0-9]+)?)/)?.[1] ||
-  trecho.match(/"price"\s*:\s*([0-9]+(?:\.[0-9]+)?)/)?.[1] ||
-  trecho.match(/R\$\s*([0-9]{1,3}(?:\.[0-9]{3})*,\d{2})/)?.[1] ||
-  "";
-
-  const precoAtual = precoMatch
-  ? `R$ ${String(precoMatch)
-      .replace(/\.(?=\d{3}(,|$))/g, "")
-      .replace(".", ",")}`
-  : "";
+  const precoAtual = precoBuscaML(trecho);
 
   const imagem =
     trecho.match(/"image":"([^"]+)"/)?.[1] ||
     trecho.match(/src="([^"]*mlstatic[^"]+)"/)?.[1] ||
     "";
-
-console.log("[DEBUG] [ML] parser item preco:", {
-  titulo: tituloFinal,
-  precoMatch,
-  precoAtual,
-  link
-});
 
   produtos.push({
     titulo: tituloFinal,
@@ -155,4 +151,3 @@ module.exports = {
   limparTextoML,
   extrairProdutosBuscaML
 };
-
