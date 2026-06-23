@@ -37,10 +37,16 @@ const cfg = config.marketplaces?.kabum || {};
     }
 
 const buscas = gerarBuscasKabum();
+const estrategiaFarejador =
+  typeof deps.obterEstrategiaFarejador === "function"
+    ? deps.obterEstrategiaFarejador(clienteId, "kabum")
+    : {
+        filaCritica: false
+      };
 
 console.log("[INFO] Buscas KaBuM:", buscas.slice(0, 10));
 
-for (const termo of buscas.slice(0, cfg.limiteBuscas || 8)) {
+for (const termo of buscas.slice(0, estrategiaFarejador.filaCritica ? Math.max(cfg.limiteBuscas || 8, 10) : cfg.limiteBuscas || 8)) {
 
   try {
 
@@ -97,7 +103,7 @@ console.log(
 );
 
 
-for (let produto of produtos.slice(0, cfg.limitePorRodada || 2)) {
+for (let produto of produtos.slice(0, estrategiaFarejador.filaCritica ? Math.max(cfg.limitePorRodada || 2, 3) : cfg.limitePorRodada || 2)) {
   
 const titulo = produto.titulo;
 
@@ -209,6 +215,8 @@ let novaOferta = {
   precoAntigo: produto.precoAntigo || "",
   cupom: "",
   avisoCupom: produto.avisoPagamento || "💳 Com desconto à vista no PIX.",
+  beneficioExtra: produto.avisoPagamento || "Desconto à vista no PIX",
+  tipoCupom: "provavel",
   parcelamento: produto.parcelamento || "",
   link: produto.link,
   linkAfiliado,
