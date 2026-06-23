@@ -12010,6 +12010,12 @@ async function distribuirOfertaParaClientes(ofertaBase) {
 
   ofertaBase = prepararOfertaGlobal(ofertaBase);
 
+console.log("🚨 DISTRIBUIDOR RECEBEU", {
+  clienteId,
+  titulo: ofertaBase.titulo,
+  marketplace: mp
+});
+
   for (const usuario of usuarios) {
     if (!usuario?.ativo) continue;
 
