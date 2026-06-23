@@ -479,13 +479,36 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
               avisoCupom: Boolean(novaOferta.avisoCupom)
             });
 
-            const jaExiste = ofertaJaExiste(novaOferta);
+const jaExiste = ofertaJaExiste(novaOferta);
 
-            if (jaExiste) {
-              resumoML.ignoradosDuplicado += 1;
-              console.log("[AVISO] [ML] Oferta duplicada:", novaOferta.titulo);
-              continue;
-            }
+console.log("🧪 ML CHECK DUPLICIDADE", {
+  titulo: novaOferta.titulo,
+  clienteId,
+  jaExiste,
+  desconto: Math.round(desconto) + "%",
+  cupom: novaOferta.cupom || "",
+  avisoCupom: Boolean(novaOferta.avisoCupom)
+});
+
+if (jaExiste) {
+  resumoML.ignoradosDuplicado += 1;
+  console.log("[AVISO] [ML] Oferta duplicada:", novaOferta.titulo);
+  continue;
+}
+
+const ignoradaMemoria = deveIgnorarOfertaRepetida(novaOferta);
+
+console.log("🧪 ML CHECK MEMORIA", {
+  titulo: novaOferta.titulo,
+  clienteId,
+  ignoradaMemoria
+});
+
+if (ignoradaMemoria) {
+  resumoML.ignoradosMemoria += 1;
+  console.log("[AVISO] [ML] Ignorado pela memoria:", novaOferta.titulo);
+  continue;
+}
 
             if (deveIgnorarOfertaRepetida(novaOferta)) {
               resumoML.ignoradosMemoria += 1;
@@ -497,6 +520,14 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
             novaOferta.statusDetalhe = novaOferta.statusDetalhe || "Na fila";
 
             registrarOfertaVista(novaOferta);
+
+            
+console.log("✅ ML VAI PRA FILA", {
+  titulo: novaOferta.titulo,
+  clienteId,
+  marketplace: novaOferta.marketplace,
+  preco: novaOferta.precoAtual || novaOferta.preco
+});
 
             fila.push(novaOferta);
             resumoML.adicionadosFila += 1;
