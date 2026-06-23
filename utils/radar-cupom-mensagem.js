@@ -157,37 +157,6 @@ function textoIndicaResgateCupomRadar(texto = "") {
   );
 }
 
-function linkPareceResgateCupomRadar(link = "") {
-  const url = String(link || "").toLowerCase();
-
-  if (!url) return false;
-
-  return (
-    url.includes("/voucher") ||
-    url.includes("/coupon") ||
-    url.includes("/cupom") ||
-    url.includes("coupon") ||
-    url.includes("voucher") ||
-    url.includes("cupon") ||
-    url.includes("cupons")
-  );
-}
-
-function textoIndicaPaginaResgateCupomRadar(texto = "") {
-  const normalizado = normalizarTextoCupomRadar(texto);
-
-  return (
-    normalizado.includes("resgatetodososcupons") ||
-    normalizado.includes("resgatartodososcupons") ||
-    normalizado.includes("resgateoscuponsdestapagina") ||
-    normalizado.includes("resgatetodososcuponsdestapagina") ||
-    normalizado.includes("todososcuponsdestapagina") ||
-    normalizado.includes("paginadecupons") ||
-    normalizado.includes("linkderesgatedecupom") ||
-    normalizado.includes("resgatedecupom")
-  );
-}
-
 function analisarBeneficiosMensagemRadar(texto = "", links = []) {
   const cupom = extrairCupomTextoRadarGenerico(texto);
   const linksResgate = [];
@@ -195,26 +164,11 @@ function analisarBeneficiosMensagemRadar(texto = "", links = []) {
 
   for (const link of links) {
     const trecho = trechoProximoLinkRadar(texto, link);
-    const cupomTrecho = extrairCupomTextoRadarGenerico(trecho);
-    const resgate =
-      linkPareceResgateCupomRadar(link) &&
-      textoIndicaPaginaResgateCupomRadar(trecho);
-
-    if (cupomTrecho) {
-      beneficiosPorLink[link] = {
-        ...(beneficiosPorLink[link] || {}),
-        cupom: cupomTrecho,
-        cupomOrigem: "texto_grupo",
-        cupomDetectadoTexto: true,
-        tipoCupom: "texto",
-        avisoCupom: `Cupom detectado na mensagem: ${cupomTrecho}`
-      };
-    }
+    const resgate = textoIndicaResgateCupomRadar(trecho);
 
     if (resgate) {
       linksResgate.push(link);
       beneficiosPorLink[link] = {
-        ...(beneficiosPorLink[link] || {}),
         tipoCupom: "resgate",
         beneficioExtra: link,
         avisoCupom: "Link de resgate de cupom detectado na mensagem",
@@ -246,7 +200,5 @@ module.exports = {
   extrairCupomTextoRadar: extrairCupomTextoRadarGenerico,
   trechoProximoLinkRadar,
   textoIndicaResgateCupomRadar,
-  linkPareceResgateCupomRadar,
-  textoIndicaPaginaResgateCupomRadar,
   analisarBeneficiosMensagemRadar
 };
