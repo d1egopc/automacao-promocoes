@@ -60,7 +60,7 @@ const {
 
 const buscas = gerarBuscasAmazon({
   gerarBuscasGlobais
-});
+}).slice(0, 5);
 
 console.log("[AMZ] DENTRO FAREJADOR:", typeof importarAmazon);
 
@@ -122,7 +122,7 @@ console.log("[AMZ] DENTRO FAREJADOR:", typeof importarAmazon);
    
 const links =
   extrairLinksAmazon(html)
-    .slice(0, 3);
+    .slice(0, 2);
 
 for (const link of links) {
   try {
@@ -214,10 +214,14 @@ let novaOferta = {
   clienteId
 };
 
-const htmlCupomAmazon = await buscarHtmlCupomAmazon(
-  produto.linkOriginal || link,
-  integracaoAmazon
-);
+let htmlCupomAmazon = "";
+
+if (desconto >= 15 || produto.avisoCupom || produto.cupom) {
+  htmlCupomAmazon = await buscarHtmlCupomAmazon(
+    produto.linkOriginal || link,
+    integracaoAmazon
+  );
+}
 
 if (htmlCupomAmazon) {
   const cuponsAmazon = extrairCuponsAmazonDoHtml(htmlCupomAmazon);
