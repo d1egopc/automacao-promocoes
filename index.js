@@ -1055,11 +1055,19 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
 
 function selecionarProximaOfertaFila(clienteIdAlvo = null) {
 
+const clienteLog = String(clienteIdAlvo || "admin");
+
+const filaClienteLog = fila.filter(o =>
+  String(o.clienteId || "admin") === clienteLog
+);
+
 console.log("🧪 FILA SELECAO", {
-    clienteIdAlvo,
-    totalFila: fila.length,
-    pendentes: fila.filter(o => o.status === "pendente").length
-  });
+  clienteIdAlvo: clienteLog,
+  totalGlobal: fila.length,
+  pendentesGlobal: fila.filter(o => o.status === "pendente").length,
+  totalCliente: filaClienteLog.length,
+  pendentesCliente: filaClienteLog.filter(o => o.status === "pendente").length
+});
 
   const pendentes = fila.filter(o => {
     const mesmoCliente =
@@ -2818,7 +2826,9 @@ async function processarFila(clienteIdAlvo = null) {
     oferta = selecionarProximaOfertaFila(clienteFila);
 
 if (!oferta) {
-  logOptimus("FILA", "Nenhuma oferta pendente");
+  logOptimus("FILA", "Nenhuma oferta pendente", {
+    clienteId: clienteFila
+  });
   return;
 }
 
