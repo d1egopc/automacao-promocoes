@@ -151,6 +151,40 @@ function logOptimus(categoria = "INFO", mensagem = "", dados = {}) {
   console.log(prefixo);
 }
 
+const DEBUG_LOGS = String(process.env.DEBUG_LOGS || "").toLowerCase() === "true";
+const LOG_THROTTLE_MS = 60 * 1000;
+const logsThrottle = new Map();
+
+function deveLogarThrottle(chave = "geral", intervaloMs = LOG_THROTTLE_MS) {
+  const agora = Date.now();
+  const id = String(chave || "geral");
+  const ultimo = logsThrottle.get(id) || 0;
+
+  if (agora - ultimo < intervaloMs) return false;
+
+  logsThrottle.set(id, agora);
+  return true;
+}
+
+function logDebug(...args) {
+  if (DEBUG_LOGS) console.log(...args);
+}
+
+function logRadarBloqueadoMonitoramento(dados = {}) {
+  const sessaoId = dados.sessaoId || dados.origemMonitorada?.sessaoId || "sem_sessao";
+  const grupoId = dados.grupoId || dados.origemMonitorada?.grupoId || dados.origemMonitorada?.origemGrupoId || "sem_grupo";
+  const chave = `radar-bloqueado:${sessaoId}:${grupoId}`;
+
+  if (!deveLogarThrottle(chave)) return;
+
+  console.log("🚫 Radar bloqueado por configuração", {
+    clienteId: dados.clienteId || "",
+    motivo: dados.motivo || dados.origemMonitorada?.motivo || "origem_nao_monitorada",
+    sessaoId,
+    grupoId,
+    grupoNome: dados.grupoNome || dados.origemMonitorada?.grupoNome || dados.origemMonitorada?.origemGrupoNome || ""
+  });
+}
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -1252,7 +1286,9 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
 
   diagnosticosFilaPorCliente.set(clienteLog, diagnostico);
 
-  console.log("🧠 Diagnóstico da fila", diagnostico);
+  if (deveLogarThrottle(`fila-diagnostico:${clienteLog}`)) {
+    console.log("🧠 Diagnóstico da fila", diagnostico);
+  }
 
   const pendentes = fila.filter(o => {
     const mesmoCliente =
@@ -1297,7 +1333,9 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
   const diagnosticoSemElegivel = diagnosticarFilaCliente(clienteLog);
   diagnosticosFilaPorCliente.set(clienteLog, diagnosticoSemElegivel);
 
-  console.log("🚨 Fila sem oferta elegível", diagnosticoSemElegivel);
+  if (deveLogarThrottle(`fila-sem-elegivel:${clienteLog}`)) {
+    console.log("🚨 Fila sem oferta elegível", diagnosticoSemElegivel);
+  }
 
   return null;
 }
@@ -3011,11 +3049,13 @@ if (!oferta) {
   const diagnosticoFila = diagnosticosFilaPorCliente.get(String(clienteFila)) ||
     diagnosticarFilaCliente(clienteFila);
 
-  logOptimus("FILA", "Nenhuma oferta pendente elegível", {
-    clienteId: clienteFila,
-    motivoPrincipal: diagnosticoFila.motivoPrincipal,
-    diagnostico: diagnosticoFila
-  });
+  if (deveLogarThrottle(`fila-processar-sem-elegivel:${clienteFila}`)) {
+    logOptimus("FILA", "Nenhuma oferta pendente elegível", {
+      clienteId: clienteFila,
+      motivoPrincipal: diagnosticoFila.motivoPrincipal,
+      diagnostico: diagnosticoFila
+    });
+  }
   return;
 }
 
@@ -8089,7 +8129,7 @@ async function processarMensagemRadar({
   const origemMonitorada = origemOfertaEstaMonitoradaRadar(origemBase, radarConfig);
 
   if (!origemMonitorada.ok) {
-  console.log("🚨 RADAR BLOQUEADO MONITORAMENTO", {
+  logRadarBloqueadoMonitoramento({
     motivo: origemMonitorada.motivo,
     origemMonitorada,
     sessaoId: sessaoIdTexto,
@@ -8484,11 +8524,10 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
     return { ok: false, motivo: "mensagem_nao_monitoravel" };
   }
 
- console.log("🧪 RADAR CHAMANDO PROCESSAR", {
+ logDebug("🧪 RADAR CHAMANDO PROCESSAR", {
   sessaoId,
   remoteJid,
-  tamanhoTexto: textoExtraido.length,
-  preview: textoExtraido.slice(0, 300)
+  tamanhoTexto: textoExtraido.length
 });
 
  return processarMensagemRadar({
@@ -8581,10 +8620,13 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
 
   if (!origemMonitorada.ok) {
 
-console.log("🚨 RADAR BLOQUEADO MONITORAMENTO", {
+logRadarBloqueadoMonitoramento({
     clienteId,
     motivo: origemMonitorada.motivo,
-    origemMonitorada
+    origemMonitorada,
+    sessaoId: ofertaBase.sessaoId,
+    grupoId: ofertaBase.grupoId,
+    grupoNome: ofertaBase.grupoNome
   });
 
     return { ok: false, motivo: origemMonitorada.motivo };
