@@ -213,6 +213,17 @@ function deveIgnorarOfertaRepetida(oferta = {}) {
   const desconto = descontoNumero(oferta);
   const quedaPreco = quedaPrecoRelevante(precoAtual, precoAnterior);
 
+  const marketplace = normalizarTextoLocal(oferta.marketplace || oferta.mercado || "");
+
+if (
+  marketplace.includes("mercadolivre") ||
+  marketplace.includes("mercado livre")
+) {
+  if (ehRadar || temBeneficio || desconto >= 5 || quedaPreco) {
+    return false;
+  }
+}
+
   if (ehRadar) return false;
   if (temCupomNovo) return false;
   if (temBeneficio && horasPassadas >= 0.25) return false;
