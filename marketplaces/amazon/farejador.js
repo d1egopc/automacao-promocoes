@@ -71,17 +71,6 @@ console.log("[AMZ] DENTRO FAREJADOR:", typeof importarAmazon);
     }
 
     console.log("[AMZ] Farejando ofertas Amazon...");
-    const estrategiaFarejador =
-      typeof deps.obterEstrategiaFarejador === "function"
-        ? deps.obterEstrategiaFarejador(clienteId, "amazon")
-        : {
-            descontoMinimo: 15,
-            aceitarBeneficioSemDesconto: true
-          };
-    const temBeneficioFarejador =
-      typeof deps.ofertaTemBeneficioFarejador === "function"
-        ? deps.ofertaTemBeneficioFarejador
-        : (oferta) => Boolean(oferta?.cupom || oferta?.avisoCupom || oferta?.beneficioExtra);
   
   
     let adicionadasNestaRodada = 0;
@@ -183,11 +172,10 @@ if (precoNumero < 30) {
   continue;
 }
 
-if (desconto < estrategiaFarejador.descontoMinimo && !temBeneficioFarejador(produto)) {
+if (desconto < 15 && !produto.avisoCupom) {
   console.log("[AMZ] Amazon desconto baixo:", {
     titulo: produto.titulo,
     desconto: Math.round(desconto),
-    descontoMinimo: estrategiaFarejador.descontoMinimo,
     avisoCupom: produto.avisoCupom
   });
   continue;
