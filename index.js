@@ -6064,28 +6064,17 @@ function salvarRadarConfigCliente(clienteId = "admin", dados = {}) {
     ? atual.sessoesWhatsappMonitoradas
     : normalizarSessoesWhatsappMonitoradasRadar(atual);
 
-  if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
-    const entrada = normalizarSessoesWhatsappMonitoradasRadar({
-      sessoesWhatsappMonitoradas: dados.sessoesWhatsappMonitoradas
-    });
+if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
+  sessoesWhatsappMonitoradas = normalizarSessoesWhatsappMonitoradasRadar({
+    sessoesWhatsappMonitoradas: dados.sessoesWhatsappMonitoradas
+  });
 
-console.log("🧪 RADAR NORMALIZACAO", {
-  recebido: dados.sessoesWhatsappMonitoradas,
-  entradaNormalizada: entrada
-});
+  console.log("🧪 RADAR NORMALIZACAO REPLACE", {
+    recebido: dados.sessoesWhatsappMonitoradas,
+    salvo: sessoesWhatsappMonitoradas
+  });
+}
 
-    const sessoesEntrada = new Set((dados.sessoesWhatsappMonitoradas || [])
-      .map(sessao => textoRadarId(sessao?.sessaoId || sessao?.id || sessao?.sessionId || ""))
-      .filter(Boolean));
-    const vazias = [...sessoesEntrada]
-      .filter(sessaoId => !entrada.some(sessao => sessao.sessaoId === sessaoId))
-      .map(sessaoId => ({ sessaoId, gruposMonitorados: [] }));
-
-    sessoesWhatsappMonitoradas = mesclarSessoesWhatsappMonitoradasRadar(
-      sessoesWhatsappMonitoradas,
-      [...entrada, ...vazias]
-    );
-  }
 
   if (Array.isArray(dados.gruposMonitorados)) {
     const sessaoDestino =
