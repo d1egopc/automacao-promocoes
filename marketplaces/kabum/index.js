@@ -4,14 +4,6 @@ const path = require("path");
 const axios = require("axios");
 const csv = require("csv-parser");
 const zlib = require("zlib");
-const {
-  getClientePath,
-  readClienteJson,
-  writeClienteJson,
-  readGlobalJson,
-  writeGlobalJson,
-  listClientes
-} = require("../../utils/storage");
 
 const {
   farejarMercadoLivre: farejarMercadoLivreModulo
@@ -178,17 +170,24 @@ let reconectando = {};
 let integracoesPorCliente = {};
 let sessoesMeta = {};
 
-const FILA_FILE = "fila.json";
-const CONFIG_FILE = "config.json";
-const USUARIOS_FILE = "usuarios.json";
-const CONFIGS_CLIENTES_FILE = "configs_clientes.json";
-const DESTINOS_CLIENTES_FILE = "destinos_clientes.json";
-const PLANOS_FILE = "planos.json";
-const SESSOES_FILE = "sessoes.json";
-const INTEGRACOES_FILE = "integracoes.json";
+const FILA_FILE = "/data/fila.json";
+const CONFIG_FILE = "/data/config.json";
+const USUARIOS_FILE = "/data/usuarios.json";
+const CONFIGS_CLIENTES_FILE = "/data/configs_clientes.json";
+const DESTINOS_CLIENTES_FILE = "/data/destinos_clientes.json";
+const PLANOS_FILE = "/data/planos.json";
+const SESSOES_FILE = "/data/sessoes.json";
+const INTEGRACOES_FILE = "/data/integracoes.json";
 
 function getClienteDir(clienteId = "admin") {
-  return getClientePath(clienteId);
+  const id = String(clienteId || "admin").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const dir = `/data/clientes/${id}`;
+
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  return dir;
 }
 
 function getFilaFile(clienteId = "admin") {
@@ -196,33 +195,6 @@ function getFilaFile(clienteId = "admin") {
 }
 
 console.log("📂 Salvando dados em:", FILA_FILE);
-
-function carregarMapaClientesJson(arquivo = "", fallbackGlobal = {}) {
-  const mapa = {};
-
-  if (fallbackGlobal && typeof fallbackGlobal === "object" && !Array.isArray(fallbackGlobal)) {
-    Object.assign(mapa, fallbackGlobal);
-  }
-
-  for (const clienteId of listClientes()) {
-    const dadosCliente = readClienteJson(clienteId, arquivo, null);
-
-    if (dadosCliente && typeof dadosCliente === "object" && !Array.isArray(dadosCliente)) {
-      mapa[clienteId] = dadosCliente;
-    }
-  }
-
-  return mapa;
-}
-
-function salvarMapaClientesJson(arquivo = "", mapa = {}) {
-  const origem = mapa && typeof mapa === "object" ? mapa : {};
-
-  for (const [clienteId, dados] of Object.entries(origem)) {
-    if (!clienteId || !dados || typeof dados !== "object") continue;
-    writeClienteJson(clienteId, arquivo, dados);
-  }
-}
 
 function gerarChaveProduto(titulo = "") {
   return String(titulo)
@@ -256,7 +228,10 @@ function salvarFila(clienteId = "admin") {
       o => String(o.clienteId || "admin") === String(clienteId)
     );
 
-    writeClienteJson(clienteId, FILA_FILE, filaCliente);
+    fs.writeFileSync(
+      getFilaFile(clienteId),
+      JSON.stringify(filaCliente, null, 2)
+    );
 
   } catch (e) {
     console.error("❌ ERRO AO SALVAR FILA:", e.message);
@@ -265,9 +240,13 @@ function salvarFila(clienteId = "admin") {
 
 function carregarFila(clienteId = "admin") {
   try {
-    const filaCliente = readClienteJson(clienteId, FILA_FILE, []);
+    const file = getFilaFile(clienteId);
 
-    if (Array.isArray(filaCliente) && filaCliente.length) {
+    if (fs.existsSync(file)) {
+      const data = fs.readFileSync(file, "utf8");
+
+      if (data) {
+        const filaCliente = JSON.parse(data);
 
         const filaLimpa = filaCliente.filter(
           o => o?.clienteId
@@ -280,6 +259,7 @@ function carregarFila(clienteId = "admin") {
         fila.push(...filaLimpa);
 
         console.log(`✅ Fila carregada do cliente: ${clienteId}`);
+      }
     }
   } catch (e) {
     console.error("❌ ERRO AO CARREGAR FILA:", e.message);
@@ -287,18 +267,26 @@ function carregarFila(clienteId = "admin") {
 }
 
 function salvarSessoesMeta() {
-  writeGlobalJson(SESSOES_FILE, sessoesMeta);
+  fs.writeFileSync(
+    SESSOES_FILE,
+    JSON.stringify(sessoesMeta, null, 2)
+  );
 }
 
 function salvarIntegracoesPersistidas() {
-  writeGlobalJson(INTEGRACOES_FILE, integracoesPorCliente);
-  salvarMapaClientesJson(INTEGRACOES_FILE, integracoesPorCliente);
+  fs.writeFileSync(
+    INTEGRACOES_FILE,
+    JSON.stringify(integracoesPorCliente, null, 2)
+  );
 }
 
 // ================= FUNÇÃO SALVA USUARIO =================
 
 function salvarUsuarios() {
-  writeGlobalJson(USUARIOS_FILE, usuarios);
+  fs.writeFileSync(
+    USUARIOS_FILE,
+    JSON.stringify(usuarios, null, 2)
+  );
 }
 
 // ================= CRÉDITOS =================
@@ -383,24 +371,34 @@ function debitarCreditos(clienteId, quantidade = 1) {
 // ================= FUNÇÃO SALVA PLANO ===================
 
 function salvarPlanos() {
-  writeGlobalJson(PLANOS_FILE, planos);
+  fs.writeFileSync(
+    PLANOS_FILE,
+    JSON.stringify(planos, null, 2)
+  );
 }
 
 // ============ FUNCAO SALVA CONFIG CLIENTES ==============
 
 function salvarConfigsClientes() {
-  writeGlobalJson(CONFIGS_CLIENTES_FILE, configsPorCliente);
-  salvarMapaClientesJson(CONFIG_FILE, configsPorCliente);
+  fs.writeFileSync(
+    CONFIGS_CLIENTES_FILE,
+    JSON.stringify(configsPorCliente, null, 2)
+  );
 }
 
 function salvarDestinosClientes() {
-  writeGlobalJson(DESTINOS_CLIENTES_FILE, destinosPorCliente);
-  salvarMapaClientesJson("destinos.json", destinosPorCliente);
+  fs.writeFileSync(
+    DESTINOS_CLIENTES_FILE,
+    JSON.stringify(destinosPorCliente, null, 2)
+  );
 }
 
 function salvarConfig() {
   try {
-    writeGlobalJson(CONFIG_FILE, config);
+    fs.writeFileSync(
+      CONFIG_FILE,
+      JSON.stringify(config, null, 2)
+    );
 
     console.log("💾 Config salva");
   } catch (e) {
@@ -528,9 +526,11 @@ function criarPlanosPadrao() {
 
 function carregarConfig() {
   try {
-    const configSalva = readGlobalJson(CONFIG_FILE, null);
+    if (fs.existsSync(CONFIG_FILE)) {
+      const dados = fs.readFileSync(CONFIG_FILE, "utf8");
 
-    if (configSalva && typeof configSalva === "object") {
+      const configSalva = JSON.parse(dados);
+
       config = {
         ...config,
         ...configSalva,
@@ -543,42 +543,43 @@ function carregarConfig() {
       console.log("✅ Config carregada");
     }
 
-usuarios = readGlobalJson(USUARIOS_FILE, []);
+if (fs.existsSync(USUARIOS_FILE)) {
+  usuarios = JSON.parse(
+    fs.readFileSync(USUARIOS_FILE, "utf8")
+  );
 
-if (Array.isArray(usuarios) && usuarios.length) {
   console.log("✅ Usuários carregados");
 }
 
-integracoesPorCliente = carregarMapaClientesJson(
-  INTEGRACOES_FILE,
-  readGlobalJson(INTEGRACOES_FILE, {})
-);
+if (fs.existsSync(INTEGRACOES_FILE)) {
+  integracoesPorCliente = JSON.parse(
+    fs.readFileSync(INTEGRACOES_FILE, "utf8")
+  );
 
-if (integracoesPorCliente && Object.keys(integracoesPorCliente).length) {
   console.log("✅ Integrações carregadas");
 }
 
-configsPorCliente = carregarMapaClientesJson(
-  CONFIG_FILE,
-  readGlobalJson(CONFIGS_CLIENTES_FILE, {})
-);
+if (fs.existsSync(CONFIGS_CLIENTES_FILE)) {
+  configsPorCliente = JSON.parse(
+    fs.readFileSync(CONFIGS_CLIENTES_FILE, "utf8")
+  );
 
-if (configsPorCliente && Object.keys(configsPorCliente).length) {
   console.log("✅ Configs dos clientes carregadas");
 }
 
-destinosPorCliente = carregarMapaClientesJson(
-  "destinos.json",
-  readGlobalJson(DESTINOS_CLIENTES_FILE, {})
-);
+if (fs.existsSync(DESTINOS_CLIENTES_FILE)) {
+  destinosPorCliente = JSON.parse(
+    fs.readFileSync(DESTINOS_CLIENTES_FILE, "utf8")
+  );
 
-if (destinosPorCliente && Object.keys(destinosPorCliente).length) {
   console.log("✅ Destinos dos clientes carregados");
 }
 
-planos = readGlobalJson(PLANOS_FILE, {});
+if (fs.existsSync(PLANOS_FILE)) {
+  planos = JSON.parse(
+    fs.readFileSync(PLANOS_FILE, "utf8")
+  );
 
-if (planos && Object.keys(planos).length) {
   console.log("✅ Planos carregados");
 }
 
