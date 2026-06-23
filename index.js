@@ -52,19 +52,12 @@ const {
 } = require("./marketplaces/manual");
 
 const {
-  detectarMarketplaceManual,
   importarProdutoManual
 } = require("./marketplaces/manual");
 
 const {
   criarImportarAmazon
 } = require("./marketplaces/amazon");
-
-const {
-  extrairCuponsAmazonDoHtml,
-  detectarAvisoCupomAmazon,
-  escolherCupomParaOfertaAmazon
-} = require("./marketplaces/amazon/cupons");
 
 const {
   criarImportarShopee
@@ -91,63 +84,12 @@ const {
 } = require("./marketplaces/inteligencia/score-oferta");
 
 const {
-  avaliarOfertaRadar
-} = require("./marketplaces/inteligencia/radar-ofertas");
-
-const {
   montarMensagemOferta
 } = require("./utils/mensagens-ofertas");
 
 const filaOfertas = require("./utils/fila-ofertas");
 const destinosUtils = require("./utils/destinos");
 const integracoesUtils = require("./utils/integracoes");
-const radarCupomMensagem = require("./utils/radar-cupom-mensagem");
-const storageUtils = require("./utils/storage");
-
-const {
-  storage,
-  getClientePath,
-  readClienteJson,
-  writeClienteJson,
-  listClientes,
-  readGlobalJson,
-  writeGlobalJson,
-  mascararSecrets
-} = storageUtils;
-
-const LOG_OPTIMUS_ICONS = {
-  FILA: "\u{1F4E6}",
-  RADAR: "\u{1F4E1}",
-  CAPTURA: "\u{1F4E5}",
-  CUPOM: "\u{1F39F}",
-  DESTINO: "\u{1F50D}",
-  ENVIO: "\u{1F4E4}",
-  INTELIGENCIA: "\u{1F9E0}",
-  INTEGRACAO: "\u{1F50C}",
-  WHATSAPP: "\u{1F4F1}",
-  TELEGRAM: "\u2708\uFE0F",
-  MERCADOLIVRE: "\u{1F6D2}",
-  SHOPEE: "\u{1F7E0}",
-  AMAZON: "\u{1F535}",
-  ALIEXPRESS: "\u{1F7E3}",
-  KABUM: "\u{1F9F0}",
-  SUCESSO: "\u2705",
-  AVISO: "\u26A0\uFE0F",
-  ERRO: "\u274C"
-};
-
-function logOptimus(categoria = "INFO", mensagem = "", dados = {}) {
-  const chave = String(categoria || "INFO").toUpperCase();
-  const icone = LOG_OPTIMUS_ICONS[chave] || "\u2139\uFE0F";
-  const prefixo = `${icone} ${chave} | ${mensagem}`;
-
-  if (dados && typeof dados === "object" && Object.keys(dados).length) {
-    console.log(prefixo, dados);
-    return;
-  }
-
-  console.log(prefixo);
-}
 
 
 if (!fs.existsSync("/data")) {
@@ -286,150 +228,18 @@ const SESSOES_FILE = "/data/sessoes.json";
 const INTEGRACOES_FILE = "/data/integracoes.json";
 
 function getClienteDir(clienteId = "admin") {
-  return getClientePath(clienteId);
+  const id = String(clienteId || "admin").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const dir = `/data/clientes/${id}`;
+
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  return dir;
 }
 
 function getFilaFile(clienteId = "admin") {
   return `${getClienteDir(clienteId)}/fila.json`;
-}
-
-const BRANDING_FILE = "/data/branding.json";
-
-const BRANDING_MAX_BYTES = 5 * 1024 * 1024;
-
-function brandingPadrao() {
-  return {
-    escopo: "oficial",
-    logoUrl: "",
-    logoDataUrl: "",
-    iconUrl: "",
-    iconDataUrl: "",
-    nomeMarca: "",
-    slogan: "",
-    frase: "",
-    theme: "dark",
-    corPrimaria: "",
-    corDestaque: "",
-    atualizadoEm: ""
-  };
-}
-
-function tamanhoDataUrlBytes(valor = "") {
-  const texto = String(valor || "");
-  const base64 = texto.includes(",") ? texto.split(",").pop() || "" : texto;
-  return Math.ceil((base64.length * 3) / 4);
-}
-
-function validarImagemBranding(valor = "", campo = "imagem") {
-  const texto = String(valor || "").trim();
-  if (!texto) return { ok: true, valor: "" };
-
-  if (/^https?:\/\//i.test(texto)) {
-    return { ok: true, valor: texto };
-  }
-
-  const match = texto.match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,/i);
-  if (!match) {
-    return {
-      ok: false,
-      erro: `${campo} deve ser URL http(s) ou data URL PNG/JPEG/WEBP`
-    };
-  }
-
-  if (tamanhoDataUrlBytes(texto) > BRANDING_MAX_BYTES) {
-    return {
-      ok: false,
-      erro: `${campo} excede o limite de 5 MB`
-    };
-  }
-
-  return { ok: true, valor: texto };
-}
-
-function normalizarBranding(dados = {}) {
-  const atual = dados && typeof dados === "object" ? dados : {};
-  const padrao = brandingPadrao();
-
-  return {
-    ...padrao,
-    ...atual,
-    escopo: "oficial",
-    logoUrl: String(atual.logoUrl || "").trim(),
-    logoDataUrl: String(atual.logoDataUrl || atual.logo || "").trim(),
-    iconUrl: String(atual.iconUrl || "").trim(),
-    iconDataUrl: String(atual.iconDataUrl || atual.icon || "").trim(),
-    nomeMarca: String(atual.nomeMarca || atual.nome || "").trim().slice(0, 80),
-    slogan: String(atual.slogan || atual.frase || "").trim().slice(0, 160),
-    frase: String(atual.frase || atual.slogan || "").trim().slice(0, 160),
-    theme: ["dark", "light", "system"].includes(atual.theme) ? atual.theme : "dark",
-    corPrimaria: String(atual.corPrimaria || "").trim(),
-    corDestaque: String(atual.corDestaque || "").trim(),
-    atualizadoEm: atual.atualizadoEm || ""
-  };
-}
-
-function lerBrandingOficial() {
-  try {
-    const dados = readGlobalJson("branding.json", null);
-
-    if (!dados) {
-      const brandingAdminAntigo = path.join(getClienteDir("admin"), "branding.json");
-      if (fs.existsSync(brandingAdminAntigo)) {
-        const dadosAntigos = JSON.parse(fs.readFileSync(brandingAdminAntigo, "utf8") || "{}");
-        const migrado = normalizarBranding(dadosAntigos);
-        writeGlobalJson("branding.json", migrado);
-        console.log("[BRANDING] Logo oficial migrada de /data/clientes/admin/branding.json");
-        return migrado;
-      }
-
-      return brandingPadrao();
-    }
-
-    return normalizarBranding(dados);
-  } catch (e) {
-    console.log("[BRANDING] Falha ao ler branding:", e.message);
-    return brandingPadrao();
-  }
-}
-
-function salvarBrandingOficial(dados = {}) {
-  const atual = lerBrandingOficial();
-  const payload = dados && typeof dados === "object" ? dados : {};
-
-  const logo = validarImagemBranding(payload.logoDataUrl ?? payload.logo ?? atual.logoDataUrl, "logoDataUrl");
-  if (!logo.ok) return { ok: false, erro: logo.erro };
-
-  const icon = validarImagemBranding(payload.iconDataUrl ?? payload.icon ?? atual.iconDataUrl, "iconDataUrl");
-  if (!icon.ok) return { ok: false, erro: icon.erro };
-
-  const logoUrl = validarImagemBranding(payload.logoUrl ?? atual.logoUrl, "logoUrl");
-  if (!logoUrl.ok) return { ok: false, erro: logoUrl.erro };
-
-  const iconUrl = validarImagemBranding(payload.iconUrl ?? atual.iconUrl, "iconUrl");
-  if (!iconUrl.ok) return { ok: false, erro: iconUrl.erro };
-
-  const atualizado = normalizarBranding({
-    ...atual,
-    ...payload,
-    logoDataUrl: logo.valor,
-    iconDataUrl: icon.valor,
-    logoUrl: logoUrl.valor,
-    iconUrl: iconUrl.valor,
-    atualizadoEm: new Date().toISOString()
-  });
-
-  writeGlobalJson("branding.json", atualizado);
-  return { ok: true, branding: atualizado };
-}
-
-function restaurarBrandingOficial() {
-  const padrao = {
-    ...brandingPadrao(),
-    atualizadoEm: new Date().toISOString()
-  };
-
-  writeGlobalJson("branding.json", padrao);
-  return padrao;
 }
 
 console.log("[OK]📂Salvando dados em:", FILA_FILE);
@@ -633,377 +443,6 @@ function ordenarPendentesPorDiversidade(itens = []) {
   return filaOrdenada;
 }
 
-function dataFilaMs(oferta = {}) {
-  const data = oferta.criadoEm || oferta.dataEntradaFila || 0;
-  const ms = new Date(data).getTime();
-  return Number.isFinite(ms) ? ms : 0;
-}
-
-function prioridadeEnvioOferta(oferta = {}) {
-  const prioridade = Number(oferta.prioridadeEnvio ?? 40);
-  return Number.isFinite(prioridade) ? prioridade : 40;
-}
-
-function cupomFastLaneTipo(oferta = {}, agora = Date.now()) {
-  if (!oferta || typeof oferta !== "object") return "";
-  if (oferta.status === "retida") return "";
-  if (oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true) return "";
-  if (ofertaExpiradaParaEnvio(oferta, agora)) return "";
-
-  const tipo = String(oferta.cupomTipo || oferta.tipoCupom || "").toLowerCase();
-  const temCupom =
-    Boolean(oferta.cupom) ||
-    oferta.cupomDetectado === true ||
-    oferta.cupomDetectadoTexto === true;
-
-  if (
-    tipo === "real" ||
-    tipo === "detectado" ||
-    oferta.cupomConfirmado === true ||
-    oferta.cupomValidado === true ||
-    (temCupom && prioridadeEnvioOferta(oferta) >= 95)
-  ) {
-    return "real_detectado";
-  }
-
-  if (
-    tipo === "provavel" ||
-    oferta.possivelCupom === true ||
-    Boolean(oferta.avisoCupom || oferta.beneficioExtra || oferta.linkResgateCupom)
-  ) {
-    return "provavel";
-  }
-
-  return "";
-}
-
-function rankFastLaneCupom(oferta = {}) {
-  const tipo = cupomFastLaneTipo(oferta);
-  if (tipo === "real_detectado") return 2;
-  if (tipo === "provavel") return 1;
-  return 0;
-}
-
-function cupomQuenteParaTurboOferta(oferta = {}) {
-  if (cupomFastLaneTipo(oferta) !== "real_detectado") return false;
-
-  const score = Number(oferta.radarScore || oferta.score || 0);
-  const desconto = percentualDescontoRadar(oferta, {
-    descontoPercentual: oferta.descontoPercentual || oferta.percentualDesconto || oferta.desconto
-  });
-  const temBeneficioExtra = Boolean(
-    oferta.beneficioExtra ||
-    oferta.linkResgateCupom ||
-    oferta.descontoPix ||
-    oferta.descontoApp
-  );
-  const cupomConfirmado = oferta.cupomConfirmado === true || oferta.cupomValidado === true || oferta.cupomTipo === "real";
-
-  return score >= 90 || desconto >= 40 || (cupomConfirmado && temBeneficioExtra);
-}
-
-function ordenarPendentesPorPrioridade(pendentes = []) {
-  return [...pendentes].sort((a, b) => {
-    const fastLaneA = rankFastLaneCupom(a);
-    const fastLaneB = rankFastLaneCupom(b);
-
-    if (fastLaneB !== fastLaneA) {
-      return fastLaneB - fastLaneA;
-    }
-
-    const prioridadeA = prioridadeEnvioOferta(a);
-    const prioridadeB = prioridadeEnvioOferta(b);
-
-    if (prioridadeB !== prioridadeA) {
-      return prioridadeB - prioridadeA;
-    }
-
-    const scoreA = Number(a.radarScore || a.score || 0);
-    const scoreB = Number(b.radarScore || b.score || 0);
-
-    if (scoreB !== scoreA) {
-      return scoreB - scoreA;
-    }
-
-    return dataFilaMs(a) - dataFilaMs(b);
-  });
-}
-
-function ofertaExpiradaParaEnvio(oferta = {}, agora = Date.now()) {
-  if (!oferta.expiraEm) return false;
-  const expiraEmMs = new Date(oferta.expiraEm).getTime();
-  return Number.isFinite(expiraEmMs) && expiraEmMs < agora;
-}
-
-function marcarOfertaExpirada(oferta = {}) {
-  oferta.status = "expirado";
-  oferta.statusDetalhe = "Oferta/cupom expirado antes do envio";
-  oferta.expiradaEm = new Date().toISOString();
-
-  console.log("⏰ OFERTA EXPIRADA:", {
-    titulo: oferta.titulo || oferta.nome || "",
-    expiraEm: oferta.expiraEm || ""
-  });
-}
-
-function sanearExpiradosFila(clienteId = "admin") {
-  const cliente = String(clienteId || "admin");
-  let alterou = false;
-
-  for (const oferta of fila) {
-    if (String(oferta?.clienteId || "admin") !== cliente) continue;
-    if (oferta.status !== "pendente") continue;
-    if (!ofertaExpiradaParaEnvio(oferta)) continue;
-
-    marcarOfertaExpirada(oferta);
-    alterou = true;
-  }
-
-  if (alterou) {
-    salvarFila(cliente);
-  }
-
-  return alterou;
-}
-
-const filaInteligenteUltimoAbastecimento = new Map();
-const FILA_INTELIGENTE_COOLDOWN_MS = 5 * 60 * 1000;
-
-function avaliarSaudeFilaCliente(clienteId = "admin") {
-  const cliente = String(clienteId || "admin");
-  const filaCliente = readClienteJson(cliente, "fila.json", []);
-  const itens = Array.isArray(filaCliente) ? filaCliente : [];
-  const pendentes = itens.filter(item => item?.status === "pendente").length;
-
-  let status = "normal";
-  let deveAbastecer = false;
-  let motivo = "Fila com volume operacional normal.";
-
-  if (pendentes <= 3) {
-    status = "critica";
-    deveAbastecer = true;
-    motivo = "Fila com 3 ou menos ofertas pendentes.";
-  } else if (pendentes <= 8) {
-    status = "baixa";
-    deveAbastecer = true;
-    motivo = "Fila com 8 ou menos ofertas pendentes.";
-  } else if (pendentes >= 15) {
-    status = "cheia";
-    motivo = "Fila com 15 ou mais ofertas pendentes.";
-  }
-
-  console.log(
-    `🧠 FILA IA: cliente ${cliente} pendentes ${pendentes} status ${status} deveAbastecer ${deveAbastecer}`
-  );
-
-  return {
-    clienteId: cliente,
-    pendentes,
-    status,
-    deveAbastecer,
-    motivo
-  };
-}
-
-async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
-  const cliente = String(clienteId || "admin");
-  const maximo = Math.max(0, Math.min(Number(limite) || 3, 3));
-  const resultado = {
-    marketplace: "mercadolivre",
-    adicionadas: 0,
-    ignoradas: 0,
-    erros: []
-  };
-
-  try {
-    if (maximo <= 0) return resultado;
-
-    if (!config.marketplaces?.mercadolivre?.ativo) {
-      resultado.erros.push("mercadolivre_desativado");
-      return resultado;
-    }
-
-    if (!usuarioTemIntegracaoMarketplace(cliente, "mercadolivre")) {
-      resultado.erros.push("integracao_mercadolivre_ausente");
-      return resultado;
-    }
-
-    const filaControlada = [];
-
-    filaControlada.push = (oferta) => {
-      if (resultado.adicionadas >= maximo) {
-        resultado.ignoradas += 1;
-        return fila.length;
-      }
-
-      fila.push(oferta);
-      resultado.adicionadas += 1;
-      return fila.length;
-    };
-
-    const ofertaJaExisteControlada = (novaOferta) => {
-      if (resultado.adicionadas >= maximo) {
-        resultado.ignoradas += 1;
-        return true;
-      }
-
-      const existe = ofertaJaExiste(novaOferta);
-      if (existe) resultado.ignoradas += 1;
-      return existe;
-    };
-
-    const configControlada = {
-      ...config,
-      marketplaces: {
-        ...(config.marketplaces || {}),
-        mercadolivre: {
-          ...(config.marketplaces?.mercadolivre || {}),
-          limiteBuscasPorRodada: 1
-        }
-      }
-    };
-
-    await farejarMercadoLivreModulo(cliente, {
-      config: configControlada,
-      integracoesPorCliente,
-      getIntegracaoCliente,
-      fila: filaControlada,
-      salvarFila: () => salvarFila(cliente),
-      prepararOfertaGlobal,
-      ofertaJaExiste: ofertaJaExisteControlada,
-      deveIgnorarOfertaRepetida,
-      registrarOfertaVista,
-      classificarCategoriaOferta,
-      gerarBuscasGlobais,
-      gerarHeadersStealth,
-      farejarCuponsMercadoLivre,
-      importarMercadoLivre: (url, clienteIdAlvo = cliente) =>
-        importarMercadoLivre(url, clienteIdAlvo, {
-          getIntegracaoCliente,
-          gerarLinkAfiliadoMercadoLivre
-        })
-    });
-
-    if (resultado.adicionadas > 0) {
-      salvarFila(cliente);
-    }
-  } catch (e) {
-    resultado.erros.push(e.message || "erro_abastecimento_mercadolivre");
-  }
-
-  return resultado;
-}
-
-async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
-  const cliente = String(clienteId || "admin");
-  const saude = avaliarSaudeFilaCliente(cliente);
-  const simulado = opcoes.simulado !== false;
-
-  if (!saude.deveAbastecer) {
-    return {
-      ok: true,
-      clienteId: cliente,
-      abasteceu: false,
-      modo: simulado ? "simulado" : "real",
-      motivo: saude.motivo,
-      saude
-    };
-  }
-
-  const agora = Date.now();
-  const ultimo = filaInteligenteUltimoAbastecimento.get(cliente) || 0;
-  const restanteMs = FILA_INTELIGENTE_COOLDOWN_MS - (agora - ultimo);
-
-  if (!opcoes.ignorarCooldown && restanteMs > 0) {
-    return {
-      ok: true,
-      clienteId: cliente,
-      abasteceu: false,
-      modo: "cooldown",
-      motivo: "Abastecimento ja executado ha menos de 5 minutos.",
-      cooldownRestanteSegundos: Math.ceil(restanteMs / 1000),
-      saude
-    };
-  }
-
-  filaInteligenteUltimoAbastecimento.set(cliente, agora);
-
-  if (!simulado) {
-    const abastecimento = await abastecerFilaComMercadoLivre(cliente, 3);
-
-    console.log(
-      `🧠 FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo real`
-    );
-
-    return {
-      ok: true,
-      clienteId: cliente,
-      abasteceu: abastecimento.adicionadas > 0,
-      modo: "real",
-      motivo: saude.motivo,
-      saude,
-      abastecimento
-    };
-  }
-
-  console.log(
-    `🧠 FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo simulado`
-  );
-
-  return {
-    ok: true,
-    clienteId: cliente,
-    abasteceu: true,
-    modo: "simulado",
-    motivo: saude.motivo,
-    saude
-  };
-}
-
-function selecionarProximaOfertaFila(clienteIdAlvo = null) {
-  const pendentes = fila.filter(o => {
-    const mesmoCliente =
-      !clienteIdAlvo ||
-      String(o.clienteId || "admin") === String(clienteIdAlvo);
-
-    if (!mesmoCliente) return false;
-    if (o.status !== "pendente") return false;
-
-    if (o.proximaTentativaEnvioEm) {
-      const proxima = Date.parse(o.proximaTentativaEnvioEm);
-      if (Number.isFinite(proxima) && proxima > Date.now()) return false;
-    }
-
-    const clienteIdOferta = o.clienteId || "admin";
-    const configClienteOferta =
-      configsPorCliente?.[clienteIdOferta] || config;
-
-    return configClienteOferta.automacaoAtiva === true;
-  });
-
-  let expirouAlguma = false;
-
-  for (const oferta of ordenarPendentesPorPrioridade(pendentes)) {
-    if (ofertaExpiradaParaEnvio(oferta)) {
-      marcarOfertaExpirada(oferta);
-      expirouAlguma = true;
-      continue;
-    }
-
-    if (expirouAlguma) {
-      salvarFila(oferta.clienteId || clienteIdAlvo || "admin");
-    }
-
-    return oferta;
-  }
-
-  if (expirouAlguma) {
-    salvarFila(clienteIdAlvo || "admin");
-  }
-
-  return null;
-}
-
 function aplicarDiversidadeFila(clienteId = "admin") {
   const cliente = String(clienteId || "admin");
   const itensCliente = fila.filter(item =>
@@ -1029,7 +468,6 @@ function salvarFila(clienteId = "admin") {
     fila,
     clienteId,
     getFilaFile,
-    writeClienteJson,
     logger: console
   });
 }
@@ -1039,7 +477,6 @@ function carregarFila(clienteId = "admin") {
     fila,
     clienteId,
     getFilaFile,
-    readClienteJson,
     logger: console
   });
 
@@ -1065,43 +502,25 @@ function garantirIdsFila() {
 // ================= FUNCAO SALVAR SESSOES META =======================
 
 function salvarSessoesMeta() {
-  writeGlobalJson("sessoes.json", sessoesMeta);
-}
-
-function removerClienteIdRaiz(dados = {}) {
-  if (!dados || typeof dados !== "object" || Array.isArray(dados)) return dados;
-  const { clienteId, ...restante } = dados;
-  return restante;
-}
-
-function carregarMapaClientesJson(arquivo = "", legado = {}) {
-  const mapa = legado && typeof legado === "object" && !Array.isArray(legado)
-    ? { ...legado }
-    : {};
-
-  for (const clienteId of listClientes()) {
-    const dados = readClienteJson(clienteId, arquivo, null);
-    if (!dados || typeof dados !== "object") continue;
-    mapa[clienteId] = removerClienteIdRaiz(dados);
-  }
-
-  return mapa;
-}
-
-function salvarMapaClientesJson(arquivo = "", mapa = {}) {
-  const origem = mapa && typeof mapa === "object" ? mapa : {};
-
-  for (const [clienteId, dados] of Object.entries(origem)) {
-    if (!clienteId || !dados || typeof dados !== "object") continue;
-    writeClienteJson(clienteId, arquivo, dados);
-  }
+  fs.writeFileSync(
+    SESSOES_FILE,
+    JSON.stringify(sessoesMeta, null, 2)
+  );
 }
 
 // ================= FUNCAO CARREGA SESSOES META =======================
 
 function carregarSessoesMeta() {
   try {
-    const dados = readGlobalJson("sessoes.json", {});
+    if (!fs.existsSync(SESSOES_FILE)) {
+      sessoesMeta = {};
+      salvarSessoesMeta();
+      return;
+    }
+
+    const dados = JSON.parse(
+      fs.readFileSync(SESSOES_FILE, "utf8")
+    );
 
     sessoesMeta = dados && typeof dados === "object" ? dados : {};
 
@@ -1115,14 +534,19 @@ function carregarSessoesMeta() {
 // ================= FUNCAO SALVA INTEGRACOES =======================
 
 function salvarIntegracoesPersistidas() {
-  writeGlobalJson("integracoes.json", integracoesPorCliente);
-  salvarMapaClientesJson("integracoes.json", integracoesPorCliente);
+  fs.writeFileSync(
+    INTEGRACOES_FILE,
+    JSON.stringify(integracoesPorCliente, null, 2)
+  );
 }
 
 // ================= FUNCAO SALVA USUARIO =================
 
 function salvarUsuarios() {
-  writeGlobalJson("usuarios.json", usuarios);
+  fs.writeFileSync(
+    USUARIOS_FILE,
+    JSON.stringify(usuarios, null, 2)
+  );
 }
 
 // ================= CREDITOS =================
@@ -1209,24 +633,34 @@ function debitarCreditos(clienteId, quantidade = 1) {
 // ================= FUNCAO SALVA PLANO ===================
 
 function salvarPlanos() {
-  writeGlobalJson("planos.json", planos);
+  fs.writeFileSync(
+    PLANOS_FILE,
+    JSON.stringify(planos, null, 2)
+  );
 }
 
 // ============ FUNCAO SALVA CONFIG CLIENTES ==============
 
 function salvarConfigsClientes() {
-  writeGlobalJson("configs_clientes.json", configsPorCliente);
-  salvarMapaClientesJson("config.json", configsPorCliente);
+  fs.writeFileSync(
+    CONFIGS_CLIENTES_FILE,
+    JSON.stringify(configsPorCliente, null, 2)
+  );
 }
 
 function salvarDestinosClientes() {
-  writeGlobalJson("destinos_clientes.json", destinosPorCliente);
-  salvarMapaClientesJson("destinos.json", destinosPorCliente);
+  fs.writeFileSync(
+    DESTINOS_CLIENTES_FILE,
+    JSON.stringify(destinosPorCliente, null, 2)
+  );
 }
 
 function salvarConfig() {
   try {
-    writeGlobalJson("config.json", config);
+    fs.writeFileSync(
+      CONFIG_FILE,
+      JSON.stringify(config, null, 2)
+    );
 
     console.log("[OK]💾 Config salva");
   } catch (e) {
@@ -1440,9 +874,11 @@ function criarPlanosPadrao() {
 
 function carregarConfig() {
   try {
-    const configSalva = readGlobalJson("config.json", null);
+    if (fs.existsSync(CONFIG_FILE)) {
+      const dados = fs.readFileSync(CONFIG_FILE, "utf8");
 
-    if (configSalva && typeof configSalva === "object") {
+      const configSalva = JSON.parse(dados);
+
       config = {
         ...config,
         ...configSalva,
@@ -1456,48 +892,51 @@ function carregarConfig() {
     }
 
          
-usuarios = readGlobalJson("usuarios.json", []);
+if (fs.existsSync(USUARIOS_FILE)) {
+  usuarios = JSON.parse(
+    fs.readFileSync(USUARIOS_FILE, "utf8")
+  );
 
-if (Array.isArray(usuarios) && usuarios.length) {
   console.log("[OK]✅ Usurios carregados");
 }
 
-integracoesPorCliente = carregarMapaClientesJson(
-  "integracoes.json",
-  readGlobalJson("integracoes.json", {})
-);
+if (fs.existsSync(INTEGRACOES_FILE)) {
+  integracoesPorCliente = JSON.parse(
+    fs.readFileSync(INTEGRACOES_FILE, "utf8")
+  );
 
-if (integracoesPorCliente && Object.keys(integracoesPorCliente).length) {
   console.log("[OK]✅ Integraes carregadas");
 }
 
-configsPorCliente = carregarMapaClientesJson(
-  "config.json",
-  readGlobalJson("configs_clientes.json", {})
-);
+if (fs.existsSync(CONFIGS_CLIENTES_FILE)) {
+  configsPorCliente = JSON.parse(
+    fs.readFileSync(CONFIGS_CLIENTES_FILE, "utf8")
+  );
 
-if (configsPorCliente && Object.keys(configsPorCliente).length) {
   console.log("[OK]✅ Configs dos clientes carregadas");
 }
 
-destinosPorCliente = carregarMapaClientesJson(
-  "destinos.json",
-  readGlobalJson("destinos_clientes.json", {})
-);
+if (fs.existsSync(DESTINOS_CLIENTES_FILE)) {
+  destinosPorCliente = JSON.parse(
+    fs.readFileSync(DESTINOS_CLIENTES_FILE, "utf8")
+  );
 
-if (destinosPorCliente && Object.keys(destinosPorCliente).length) {
   console.log("[DESTINO] Destinos dos clientes carregados");
 }
 
-planos = readGlobalJson("planos.json", {});
+if (fs.existsSync(PLANOS_FILE)) {
+  planos = JSON.parse(
+    fs.readFileSync(PLANOS_FILE, "utf8")
+  );
 
-if (planos && Object.keys(planos).length) {
   console.log("[OK]✅ Planos carregados");
 }
 
-sessoesMeta = readGlobalJson("sessoes.json", {});
+if (fs.existsSync(SESSOES_FILE)) {
+  sessoesMeta = JSON.parse(
+    fs.readFileSync(SESSOES_FILE, "utf8")
+  );
 
-if (sessoesMeta && Object.keys(sessoesMeta).length) {
   console.log("[OK]✅ Sesses meta carregadas:", Object.keys(sessoesMeta).length);
 }
 
@@ -1578,10 +1017,7 @@ const importarAmazon = criarImportarAmazon({
   limparPreco,
   corrigirImagemUrl,
   limparLinkAmazon,
-  gerarLinkOptimus,
-  extrairCuponsAmazonDoHtml,
-  detectarAvisoCupomAmazon,
-  escolherCupomParaOfertaAmazon
+  gerarLinkOptimus
 });
 
 const importarShopee = criarImportarShopee({
@@ -1904,233 +1340,6 @@ function registrarCupomAtivo(regra = {}) {
 
 // ====================== FUNCAO PREPARA OFERTA GLOBAL =========================
 
-function dataExpiracaoPrioridade(horas = 0) {
-  if (!horas) return "";
-  return new Date(Date.now() + horas * 60 * 60 * 1000).toISOString();
-}
-
-function numeroMoedaOferta(valor = "") {
-  if (typeof valor === "number" && Number.isFinite(valor)) return valor;
-
-  const texto = String(valor || "");
-  const match = texto.match(/R\$\s*\d{1,6}(?:\.\d{3})*(?:[,.]\d{1,2})?|\d{1,6}(?:\.\d{3})*(?:[,.]\d{1,2})?/i);
-  if (!match) return 0;
-
-  const normalizado = match[0]
-    .replace(/R\$/gi, "")
-    .replace(/\s+/g, "")
-    .replace(/\./g, "")
-    .replace(",", ".");
-
-  const numero = Number(normalizado);
-  return Number.isFinite(numero) ? numero : 0;
-}
-
-function extrairValorMonetarioCupomOferta(oferta = {}) {
-  const campos = [
-    oferta.valorCupom,
-    oferta.cupomValor,
-    oferta.cupom,
-    oferta.avisoCupom,
-    oferta.beneficioExtra,
-    oferta.beneficioDetectado
-  ];
-
-  for (const campo of campos) {
-    const texto = String(campo || "");
-    const match = texto.match(/R\$\s*\d{1,6}(?:\.\d{3})*(?:[,.]\d{1,2})?/i);
-    if (match) return numeroMoedaOferta(match[0]);
-  }
-
-  return 0;
-}
-
-function adicionarAvisoInternoOferta(oferta = {}, aviso = "") {
-  if (!aviso) return oferta;
-
-  const atuais = Array.isArray(oferta.avisosInternos)
-    ? oferta.avisosInternos
-    : oferta.avisosInternos
-      ? [oferta.avisosInternos]
-      : [];
-
-  if (!atuais.includes(aviso)) atuais.push(aviso);
-  oferta.avisosInternos = atuais;
-  return oferta;
-}
-
-function campoTemCupomMonetario(valor = "") {
-  return /R\$\s*\d{1,6}(?:\.\d{3})*(?:[,.]\d{1,2})?/i.test(String(valor || ""));
-}
-
-function limparCupomMonetarioOferta(oferta = {}) {
-  if (campoTemCupomMonetario(oferta.cupom)) oferta.cupom = "";
-  if (campoTemCupomMonetario(oferta.avisoCupom)) oferta.avisoCupom = "";
-  if (campoTemCupomMonetario(oferta.beneficioExtra)) oferta.beneficioExtra = "";
-  if (campoTemCupomMonetario(oferta.beneficioDetectado)) oferta.beneficioDetectado = "";
-
-  oferta.valorCupom = "";
-  oferta.cupomValor = "";
-  oferta.cupomConfirmado = false;
-  oferta.cupomValidado = false;
-  oferta.cupomDetectado = false;
-  oferta.cupomDetectadoTexto = false;
-  oferta.possivelCupom = false;
-  oferta.cupomTipo = "nenhum";
-
-  return oferta;
-}
-
-function validarCupomMonetarioOferta(oferta = {}) {
-  if (!oferta || typeof oferta !== "object") return oferta;
-
-  const preco = numeroMoedaOferta(oferta.precoAtual || oferta.preco || oferta.valor || "");
-  const valorCupom = extrairValorMonetarioCupomOferta(oferta);
-  const ehRadar =
-    String(oferta.origem || "").toLowerCase() === "radar" ||
-    oferta.radar === true ||
-    oferta.radarNaFila === true;
-
-  if (!preco || !valorCupom) return oferta;
-
-  if (valorCupom > preco) {
-    limparCupomMonetarioOferta(oferta);
-    oferta.cupomSuspeito = true;
-    oferta.cupomMonetarioIncompativel = true;
-    adicionarAvisoInternoOferta(oferta, "cupom_monetario_incompativel_com_preco");
-
-    if (ehRadar) {
-      delete oferta.prioridadeEnvio;
-      delete oferta.motivoPrioridade;
-      delete oferta.prioridadeFila;
-    }
-
-    console.log("[CUPOM] monetario incompativel removido", {
-      titulo: oferta.titulo || oferta.nome || "",
-      preco,
-      valorCupom
-    });
-
-    return oferta;
-  }
-
-  if (valorCupom >= preco * 0.7) {
-    oferta.cupomSuspeito = true;
-    oferta.cupomConfirmado = false;
-    oferta.cupomValidado = false;
-    adicionarAvisoInternoOferta(oferta, "cupom_monetario_suspeito_70_pct_preco");
-
-    if (ehRadar) {
-      oferta.cupomDetectado = false;
-      if (oferta.cupomTipo === "real" || oferta.cupomTipo === "detectado" || oferta.cupomTipo === "provavel") {
-        oferta.cupomTipo = "suspeito";
-      }
-      delete oferta.prioridadeEnvio;
-      delete oferta.motivoPrioridade;
-      delete oferta.prioridadeFila;
-    }
-
-    console.log("[CUPOM] monetario suspeito", {
-      titulo: oferta.titulo || oferta.nome || "",
-      preco,
-      valorCupom
-    });
-  }
-
-  return oferta;
-}
-
-function aplicarPrioridadeEnvioOferta(oferta = {}) {
-  if (!oferta || typeof oferta !== "object") return oferta;
-
-  if (oferta.prioridadeEnvio !== undefined && oferta.motivoPrioridade) {
-    return oferta;
-  }
-
-  const origem = String(oferta.origem || "").toLowerCase();
-  const ehRadar = origem === "radar" || oferta.radar === true || oferta.radarNaFila === true;
-  const ehManualEscolhida =
-    !ehRadar &&
-    (
-      oferta.manual === true ||
-      origem === "manual" ||
-      origem.startsWith("manual-") ||
-      oferta.origemManual === true
-    );
-
-  if (ehRadar) {
-    const cupomSuspeito = oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true;
-    const cupomReal = !cupomSuspeito && (oferta.cupomConfirmado === true || oferta.cupomValidado === true || oferta.cupomTipo === "real");
-    const cupomDetectado = !cupomSuspeito && Boolean(oferta.cupom || oferta.cupomDetectado === true || oferta.cupomDetectadoTexto === true);
-    const cupomProvavel = !cupomSuspeito && Boolean(oferta.possivelCupom || oferta.avisoCupom || oferta.beneficioExtra || oferta.linkResgateCupom);
-    const scoreAlto = Number(oferta.radarScore || oferta.score || 0) >= 60;
-
-    oferta.origem = "radar";
-
-    if (cupomReal) {
-      oferta.prioridadeEnvio = 110;
-      oferta.cupomTipo = "real";
-      oferta.cupomDetectado = true;
-      oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(4);
-      oferta.motivoPrioridade = "Cupom real detectado pelo Radar";
-      return oferta;
-    }
-
-    if (cupomDetectado) {
-      oferta.prioridadeEnvio = 95;
-      oferta.cupomTipo = "detectado";
-      oferta.cupomDetectado = true;
-      oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(4);
-      oferta.motivoPrioridade = "Cupom detectado pelo Radar";
-      return oferta;
-    }
-
-    if (cupomProvavel) {
-      oferta.prioridadeEnvio = 80;
-      oferta.cupomTipo = "provavel";
-      oferta.cupomDetectado = true;
-      oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(3);
-      oferta.motivoPrioridade = "Cupom provável detectado pelo Radar";
-      return oferta;
-    }
-
-    oferta.prioridadeEnvio = scoreAlto ? 60 : 40;
-    oferta.cupomTipo = "nenhum";
-    oferta.cupomDetectado = false;
-    oferta.expiraEm = oferta.expiraEm || (scoreAlto ? dataExpiracaoPrioridade(8) : "");
-    oferta.motivoPrioridade = scoreAlto
-      ? "Oferta Radar com score alto"
-      : "Oferta comum";
-    return oferta;
-  }
-
-  if (ehManualEscolhida) {
-    oferta.origem = "manual";
-    oferta.prioridadeEnvio = 100;
-    oferta.cupomTipo = oferta.cupom ? "detectado" : "nenhum";
-    oferta.cupomDetectado = Boolean(oferta.cupom);
-    oferta.motivoPrioridade = "Oferta escolhida manualmente pelo usuário";
-    return oferta;
-  }
-
-  oferta.origem = oferta.origem || "manual";
-  oferta.prioridadeEnvio = 40;
-  oferta.cupomTipo = "nenhum";
-  oferta.cupomDetectado = false;
-  oferta.motivoPrioridade = "Oferta comum";
-  return oferta;
-}
-
-function logPrioridadeFila(oferta = {}) {
-  console.log("🧠 PRIORIDADE FILA:", {
-    titulo: oferta.titulo || oferta.nome || "",
-    origem: oferta.origem || "",
-    cupomTipo: oferta.cupomTipo || "",
-    prioridadeEnvio: prioridadeEnvioOferta(oferta),
-    motivoPrioridade: oferta.motivoPrioridade || ""
-  });
-}
-
 function prepararOfertaGlobal(oferta = {}) {
  
 if (!oferta.id) {
@@ -2180,9 +1389,6 @@ oferta.avisoPagamento = oferta.avisoPagamento || "";
 oferta.parcelamento = oferta.parcelamento || "";
 oferta.avisoCupom = oferta.avisoCupom || "";
 
-  validarCupomMonetarioOferta(oferta);
-  aplicarPrioridadeEnvioOferta(oferta);
-
   return oferta;
 }
 
@@ -2220,74 +1426,6 @@ function destinoAceitaOferta(destino, oferta) {
 
 }
 
-function analisarDestinoOferta(destino, oferta) {
-  return destinosUtils.analisarDestinoOferta(destino, oferta, {
-    classificarCategoriaOferta,
-    logger: console
-  });
-}
-
-function obterDestinosInteligentesCliente(clienteId = "admin", configCliente = {}) {
-  return Array.isArray(destinosPorCliente?.[clienteId]) && destinosPorCliente[clienteId].length
-    ? destinosPorCliente[clienteId]
-    : Array.isArray(configCliente?.destinosInteligentes) && configCliente.destinosInteligentes.length
-      ? configCliente.destinosInteligentes
-      : Array.isArray(config?.destinosInteligentes)
-        ? config.destinosInteligentes
-        : [];
-}
-
-function motivoRetencaoSemDestino(analises = []) {
-  if (!analises.length) return "retida_sem_destino_compativel";
-
-  const motivos = analises.map(item => item?.analise?.motivo || "").filter(Boolean);
-
-  if (motivos.length && motivos.every(motivo => motivo === "categoria")) {
-    return "retida_categoria_nao_marcada";
-  }
-
-  if (motivos.length && motivos.every(motivo => motivo === "marketplace")) {
-    return "retida_marketplace_nao_marcado";
-  }
-
-  return "retida_sem_destino_compativel";
-}
-
-function marcarOfertaRetida(oferta = {}, motivoRetencao = "retida_sem_destino_compativel") {
-  oferta.status = "retida";
-  oferta.statusDetalhe = "Retida por falta de destino compatível";
-  oferta.motivoRetencao = motivoRetencao;
-  oferta.retidaEm = new Date().toISOString();
-  oferta.erro = "";
-  oferta.erroEm = "";
-  delete oferta.proximaTentativaEnvioEm;
-
-  return oferta;
-}
-
-function analisarDestinosCompativeisFila(clienteId = "admin", oferta = {}, configCliente = {}) {
-  const destinosInteligentes = obterDestinosInteligentesCliente(clienteId, configCliente);
-  const compativeis = [];
-  const rejeitados = [];
-
-  for (const destino of destinosInteligentes) {
-    const analise = analisarDestinoOferta(destino, oferta);
-
-    if (analise.aceita) {
-      compativeis.push({ destino, analise });
-    } else {
-      rejeitados.push({ destino, analise });
-    }
-  }
-
-  return {
-    destinosInteligentes,
-    compativeis,
-    rejeitados,
-    motivoRetencao: motivoRetencaoSemDestino(rejeitados)
-  };
-}
-
 
 // ========== FUNCAO DESTINO DENTRO HORARIO ==================
 
@@ -2295,113 +1433,9 @@ function destinoDentroHorario(destino = {}) {
   return destinosUtils.destinoDentroHorario(destino);
 }
 
-function destinoNomeLog(destino = {}) {
-  return String(destino.nome || destino.titulo || destino.label || destino.id || destino.conexaoId || "Destino");
-}
-
-function destinoChaveControle(clienteId = "admin", destino = {}) {
-  return `${clienteId}_${destino.id || destino.nome || destino.conexaoId || destino.chatId || "destino"}`;
-}
-
-function limiteDiarioDestino(destino = {}) {
-  const limite = Number(
-    destino.limiteDiario ??
-    destino.limiteDiarioEnvios ??
-    destino.maximoDiario ??
-    destino.maxPorDia ??
-    destino.maxEnviosDia ??
-    destino.enviosPorDia ??
-    0
-  );
-
-  return Number.isFinite(limite) && limite > 0 ? limite : 0;
-}
-
-function dataBRHoje() {
-  return new Date().toLocaleDateString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-  });
-}
-
-function contarEnviosDestinoHoje(clienteId = "admin", destino = {}) {
-  const hoje = dataBRHoje();
-  const nomeDestino = destinoNomeLog(destino);
-  const idDestino = String(destino.id || destino.conexaoId || destino.chatId || "");
-
-  return fila.filter(item => String(item.clienteId || "admin") === String(clienteId))
-    .flatMap(item => Array.isArray(item.destinosEnviados) ? item.destinosEnviados : [])
-    .filter(envio => {
-      const data = String(envio.dataEnvio || envio.data || "");
-      if (!data.includes(hoje)) return false;
-
-      const nomeEnvio = String(envio.nome || envio.destino || "");
-      const idEnvio = String(envio.id || envio.destinoId || envio.conexaoId || envio.chatId || envio.grupo || "");
-
-      return (
-        nomeEnvio === nomeDestino ||
-        (idDestino && idEnvio === idDestino)
-      );
-    }).length;
-}
-
-function destinoLimiteDiarioDisponivel(clienteId = "admin", destino = {}) {
-  const limite = limiteDiarioDestino(destino);
-  if (!limite) return { ok: true, limite: 0, usados: 0 };
-
-  const usados = contarEnviosDestinoHoje(clienteId, destino);
-  return {
-    ok: usados < limite,
-    limite,
-    usados
-  };
-}
-
-function intervaloTurboCupomMinutos(oferta = {}) {
-  const tipoFastLane = cupomFastLaneTipo(oferta);
-  if (tipoFastLane === "real_detectado" && cupomQuenteParaTurboOferta(oferta)) return 2;
-  if (tipoFastLane === "real_detectado") return 2.5;
-  if (tipoFastLane === "provavel") return 4;
-  return null;
-}
-
-function intervaloDestinoInfo(clienteId = "admin", destino = {}, configCliente = {}, oferta = {}) {
-  const chaveControle = destinoChaveControle(clienteId, destino);
-  const intervaloDestinoMin = Number(
-    destino.intervaloMinutos ||
-    destino.intervalo ||
-    configCliente.intervaloMinutos ||
-    config.intervaloMinutos ||
-    2
-  );
-  const turboCupomMin = intervaloTurboCupomMinutos(oferta);
-  const intervaloAplicadoMin = Number.isFinite(turboCupomMin)
-    ? turboCupomMin
-    : intervaloDestinoMin;
-  const intervaloMs = Math.max(0, intervaloAplicadoMin) * 60 * 1000;
-  const ultimoEnvio = controleEnvio[chaveControle] || 0;
-  const agora = Date.now();
-  const restanteMs = Math.max(0, intervaloMs - (agora - ultimoEnvio));
-
-  return {
-    chaveControle,
-    intervaloDestinoMin,
-    intervaloAplicadoMin,
-    turboCupomMin,
-    fastLaneCupomTipo: cupomFastLaneTipo(oferta, agora),
-    intervaloMs,
-    ultimoEnvio,
-    liberado: restanteMs <= 0,
-    restanteMs
-  };
-}
-
-function proximaTentativaDestino(oferta, ms = 5 * 60 * 1000) {
-  oferta.proximaTentativaEnvioEm = new Date(Date.now() + ms).toISOString();
-}
-
 // ========================== ENVIO DESTINO INTELIGENTE ============================
 
-async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId, configCliente, opcoes = {}) {
+async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId, configCliente) {
   try {
     clienteId = clienteId || oferta.clienteId || "admin";
     configCliente = configCliente || configsPorCliente?.[clienteId] || config;
@@ -2410,10 +1444,8 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
       return { enviado: false, motivo: "nao_aceita" };
     }
 
-    if (!opcoes.ignorarHorario && !destinoDentroHorario(destino)) {
-      logOptimus("DESTINO", "Fora do horario", {
-        destino: destino.nome
-      });
+    if (!destinoDentroHorario(destino)) {
+      console.log("[DESTINO] Destino fora do horrio:", destino.nome);
       return { enviado: false, motivo: "fora_horario" };
     }
 
@@ -2424,9 +1456,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
   const sock = sessoes[destino.conexaoId];
 
   if (!sock) {
-    logOptimus("WHATSAPP", "Sessao nao encontrada", {
-      conexaoId: destino.conexaoId
-    });
+    console.log("[WHATSAPP] Sesso no encontrada:", destino.conexaoId);
     return { enviado: false, motivo: "sessao_nao_encontrada" };
   }
 
@@ -2439,15 +1469,13 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     .filter(Boolean);
 
   if (!grupos.length) {
-    logOptimus("WHATSAPP", "Destino sem grupos validos", {
-      destino: destino.nome
-    });
+    console.log("[WHATSAPP] Destino WhatsApp sem grupos vlidos:", destino.nome);
     return { enviado: false, motivo: "sem_grupos" };
   }
 
   for (const grupo of grupos) {
     if (!usuarioTemCreditos(clienteId, 1)) {
-      logOptimus("AVISO", "Sem creditos", { clienteId });
+      console.log("[AVISO] Sem crditos:", clienteId);
       return { enviado: false, motivo: "sem_creditos" };
     }
 
@@ -2464,7 +1492,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
     debitarCreditos(clienteId, 1);
 
-    logOptimus("WHATSAPP", "Mensagem enviada", {
+    console.log("[WHATSAPP] Enviado WhatsApp:", {
       clienteId,
       destino: destino.nome,
       grupo
@@ -2473,9 +1501,6 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     oferta.destinosEnviados = oferta.destinosEnviados || [];
     oferta.destinosEnviados.push({
       clienteId,
-      id: destino.id || "",
-      destinoId: destino.id || "",
-      conexaoId: destino.conexaoId || "",
       nome: destino.nome || "Destino",
       tipo: "whatsapp",
       grupo,
@@ -2504,18 +1529,16 @@ const selecionados = telegramsSelecionados.length
       telegramsSelecionados.includes(t.nome) ||
       telegramsSelecionados.includes(String(t.chatId))
     )
-      : telegrams.filter(t => t.ativo);
+  : telegrams.filter(t => t.ativo);
   
       if (!selecionados.length) {
-        logOptimus("TELEGRAM", "Nenhum destino selecionado", {
-          destino: destino.nome
-        });
+        console.log("[TELEGRAM] Nenhum Telegram selecionado para este destino:", destino.nome);
       }
 
       for (const tel of selecionados) {
        
       if (!usuarioTemCreditos(clienteId, 1)) {
-      logOptimus("AVISO", "Sem creditos", { clienteId });
+      console.log("[AVISO] Sem crditos:", clienteId);
       continue;
       }
 
@@ -2542,7 +1565,7 @@ const selecionados = telegramsSelecionados.length
           );
         }
 
-        logOptimus("TELEGRAM", "Mensagem enviada", {
+        console.log("[TELEGRAM] Enviado Telegram:", {
           clienteId,
           destino: destino.nome,
           chatId: tel.chatId
@@ -2551,9 +1574,6 @@ const selecionados = telegramsSelecionados.length
         oferta.destinosEnviados = oferta.destinosEnviados || [];
         oferta.destinosEnviados.push({
           clienteId,
-          id: destino.id || "",
-          destinoId: destino.id || "",
-          conexaoId: destino.conexaoId || "",
           nome: destino.nome || "Destino",
           tipo: "telegram",
           chatId: tel.chatId,
@@ -2595,12 +1615,25 @@ async function processarFila(clienteIdAlvo = null) {
   let oferta = null;
 
   try {
-    sanearExpiradosFila(clienteFila);
+    oferta = fila.find(o => {
 
-    oferta = selecionarProximaOfertaFila(clienteIdAlvo);
+  const mesmoCliente =
+    !clienteIdAlvo ||
+    String(o.clienteId || "admin") === String(clienteIdAlvo);
+
+  if (!mesmoCliente) return false;
+
+  if (o.status !== "pendente") return false;
+
+  const clienteIdOferta = o.clienteId || "admin";
+  const configClienteOferta =
+    configsPorCliente?.[clienteIdOferta] || config;
+
+  return configClienteOferta.automacaoAtiva === true;
+});
 
 if (!oferta) {
-  logOptimus("FILA", "Nenhuma oferta pendente");
+  console.log("[FILA] Nenhuma oferta pendente");
   return;
 }
 
@@ -2618,7 +1651,7 @@ const clienteAtivo =
   configCliente.automacaoAtiva === true;
 
 if (!clienteAtivo) {
-  logOptimus("FILA", "Automacao desligada para cliente", { clienteId });
+  console.log("[INFO] Automao desligada para cliente:", clienteId);
   return;
 }
 
@@ -2662,16 +1695,12 @@ if (!sessoes[idSessao]) {
     const sock = sessoes[idSessao];
 
     if (!sock) {
-      logOptimus("WHATSAPP", "Nenhuma sessao conectada", {
-        sessaoId: idSessao
-      });
+      console.log("[WHATSAPP] Nenhuma sesso conectada para:", idSessao);
       return;
     }
 
-    logOptimus("WHATSAPP", "Sessao escolhida", {
-      sessaoId: idSessao,
-      clienteId
-    });
+    console.log("[WHATSAPP] Sesso escolhida para envio:", idSessao);
+    console.log("[INFO] Cliente dono da oferta:", clienteId);
 
     const destinosBrutos =
       oferta.destinos?.length
@@ -2694,12 +1723,18 @@ if (!sessoes[idSessao]) {
       .map(d => d?.id || d?.value || d?.jid || d)
       .filter(Boolean);
 
-    logOptimus("DESTINO", "Destinos previstos", {
-      total: destinos.length,
-      destinos
-    });
+    console.log("[DESTINO] DESTINOS PARA ENVIO:", destinos);
 
 // ================= ENVIO DESTINOS INTELIGENTES =================
+
+const destinosInteligentes =
+  Array.isArray(destinosPorCliente?.[clienteId]) && destinosPorCliente[clienteId].length
+    ? destinosPorCliente[clienteId]
+    : Array.isArray(configCliente?.destinosInteligentes) && configCliente.destinosInteligentes.length
+      ? configCliente.destinosInteligentes
+      : Array.isArray(config?.destinosInteligentes)
+        ? config.destinosInteligentes
+        : [];
 
 const usuarioOferta =
   usuarios.find(u => String(u.id) === String(clienteId)) || null;
@@ -2708,151 +1743,43 @@ const plano =
   getPlanoPorNome(usuarioOferta?.plano || "free") || {};
 
 let enviouParaAlgumDestino = false;
-let destinosEnviadosCount = 0;
 
 let pulouPorIntervalo = false;
 let pulouPorHorario = false;
-let pulouPorLimiteDiario = false;
 let houveFalhaReal = false;
-const categoriaOfertaFila = oferta.categoria || oferta.categoriaProduto || classificarCategoriaOferta(oferta, oferta.termo || "");
-const analiseDestinosFila = analisarDestinosCompativeisFila(clienteId, oferta, configCliente);
-const destinosCompativeis = analiseDestinosFila.compativeis;
-const fastLaneCupomTipo = cupomFastLaneTipo(oferta);
 
-if (fastLaneCupomTipo === "real_detectado") {
-  logOptimus("CUPOM", "Fast Lane aplicada", {
-    clienteId,
-    titulo: oferta.titulo || oferta.nome || "",
-    cupom: oferta.cupom || "",
-    tipo: fastLaneCupomTipo
-  });
-} else if (fastLaneCupomTipo === "provavel") {
-  logOptimus("CUPOM", "Fast Lane provavel aplicada", {
-    clienteId,
-    titulo: oferta.titulo || oferta.nome || "",
-    tipo: fastLaneCupomTipo
-  });
-} else {
-  logOptimus("FILA", "Oferta comum usando intervalo normal", {
-    clienteId,
-    titulo: oferta.titulo || oferta.nome || ""
-  });
-}
+for (const destino of destinosInteligentes) {
+  const chaveControle = `${clienteId}_${destino.id || destino.nome || destino.conexaoId}`;
 
-for (const itemRejeitado of analiseDestinosFila.rejeitados) {
-  const destino = itemRejeitado.destino;
-  const analise = itemRejeitado.analise;
-  const nomeDestino = destinoNomeLog(destino);
+  const intervaloDestinoMin = Number(
+    destino.intervaloMinutos ||
+    destino.intervalo ||
+    configCliente.intervaloMinutos ||
+    config.intervaloMinutos ||
+    2
+  );
 
-  if (analise.motivo === "marketplace") {
-    logOptimus("DESTINO", "Rejeitada marketplace", {
-      clienteId,
-      destino: nomeDestino,
-      marketplaceOferta: analise.marketplaceOferta
-    });
-  } else if (analise.motivo === "categoria") {
-    logOptimus("DESTINO", "Rejeitada categoria", {
-      clienteId,
-      destino: nomeDestino,
-      categoriaOferta: analise.categoriaOferta
-    });
-  } else {
-    logOptimus("DESTINO", "Rejeitada", {
-      clienteId,
-      destino: nomeDestino,
-      motivo: analise.motivo || "nao_compativel"
-    });
-  }
-}
+  const intervaloMs = intervaloDestinoMin * 60 * 1000;
 
-  logOptimus("DESTINO", "Compativeis encontrados", {
-    total: destinosCompativeis.length
-  });
-
-if (!destinosCompativeis.length) {
-  marcarOfertaRetida(oferta, analiseDestinosFila.motivoRetencao);
-  salvarFila(clienteId);
-  logOptimus("FILA", "Oferta retida", {
-    clienteId,
-    titulo: oferta.titulo || oferta.nome || "",
-    categoria: categoriaOfertaFila || "",
-    marketplace: oferta.marketplace || oferta.mercado || "",
-    motivoRetencao: oferta.motivoRetencao
-  });
-  return;
-}
-
-const destinosOrdenados = destinosCompativeis
-  .map(item => {
-    const intervalo = intervaloDestinoInfo(clienteId, item.destino, configCliente, oferta);
-    return {
-      ...item,
-      intervalo,
-      ultimoEnvio: intervalo.ultimoEnvio || 0
-    };
-  })
-  .sort((a, b) => a.ultimoEnvio - b.ultimoEnvio);
-
-for (const item of destinosOrdenados) {
-  const destino = item.destino;
-  const nomeDestino = destinoNomeLog(destino);
-  const intervalo = item.intervalo;
-
-  if (!destinoDentroHorario(destino)) {
-    pulouPorHorario = true;
-    logOptimus("DESTINO", "Rejeitada horario", {
-      clienteId,
-      destino: nomeDestino
-    });
-    continue;
+  if (!controleEnvio[chaveControle]) {
+    controleEnvio[chaveControle] = 0;
   }
 
-  const limite = destinoLimiteDiarioDisponivel(clienteId, destino);
-  if (!limite.ok) {
-    pulouPorLimiteDiario = true;
-    logOptimus("DESTINO", "Rejeitada limite diario", {
-      clienteId,
-      destino: nomeDestino,
-      usados: limite.usados,
-      limite: limite.limite
-    });
-    continue;
-  }
-
-  if (!intervalo.liberado) {
+  if (agora - controleEnvio[chaveControle] < intervaloMs) {
     pulouPorIntervalo = true;
-    logOptimus("DESTINO", "Aguardando intervalo", {
+    console.log("[DESTINO] Destino aguardando intervalo:", {
       clienteId,
-      destino: nomeDestino,
-      intervaloMinutos: intervalo.intervaloAplicadoMin,
-      intervaloOriginalMinutos: intervalo.intervaloDestinoMin,
-      turboCupomMinutos: intervalo.turboCupomMin,
-      restanteSegundos: Math.ceil(intervalo.restanteMs / 1000)
+      destino: destino.nome,
+      intervaloMinutos: intervaloDestinoMin
     });
     continue;
-  }
-
-  if (intervalo.fastLaneCupomTipo === "real_detectado") {
-    logOptimus("CUPOM", intervalo.turboCupomMin === 2 ? "Turbo quente aplicado 2min" : "Turbo aplicado 2.5min", {
-      clienteId,
-      destino: nomeDestino,
-      cupom: oferta.cupom || "",
-      score: oferta.radarScore || oferta.score || "",
-      intervaloOriginalMinutos: intervalo.intervaloDestinoMin
-    });
-  } else if (intervalo.fastLaneCupomTipo === "provavel") {
-    logOptimus("CUPOM", "Turbo aplicado 4min", {
-      clienteId,
-      destino: nomeDestino,
-      intervaloOriginalMinutos: intervalo.intervaloDestinoMin
-    });
   }
 
   const marketplaceOfertaLog = String(oferta.marketplace || oferta.mercado || "").toLowerCase();
 
   if (marketplaceOfertaLog === "mercadolivre" || marketplaceOfertaLog === "mercado_livre") {
     const linkFinal = oferta.linkFinal || oferta.linkAfiliado || oferta.link || oferta.linkOriginal || "";
-    logOptimus("MERCADOLIVRE", "Envio preparado", {
+    console.log("🧪 ENVIO ML", {
       clienteId,
       marketplace: oferta.marketplace,
       titulo: oferta.titulo || oferta.nome || "",
@@ -2882,13 +1809,7 @@ for (const item of destinosOrdenados) {
 
   if (resultadoEnvio.enviado === true) {
     enviouParaAlgumDestino = true;
-    destinosEnviadosCount += 1;
-    controleEnvio[intervalo.chaveControle] = Date.now();
-    logOptimus("DESTINO", "Enviado", {
-      clienteId,
-      destino: nomeDestino,
-      titulo: oferta.titulo || oferta.nome || ""
-    });
+    controleEnvio[chaveControle] = Date.now();
   } else if (resultadoEnvio.motivo === "fora_horario") {
     pulouPorHorario = true;
   } else if (!["nao_aceita"].includes(resultadoEnvio.motivo)) {
@@ -2897,48 +1818,20 @@ for (const item of destinosOrdenados) {
 }
 
 
-if (!enviouParaAlgumDestino && (pulouPorIntervalo || pulouPorHorario || pulouPorLimiteDiario) && !houveFalhaReal) {
+if (!enviouParaAlgumDestino && (pulouPorIntervalo || pulouPorHorario) && !houveFalhaReal) {
   oferta.status = "pendente";
-  oferta.statusDetalhe = pulouPorIntervalo
-    ? `Aguardando intervalo do destino ${destinoNomeLog(destinosOrdenados.find(item => !item.intervalo.liberado)?.destino || {})}`
-    : pulouPorHorario
-      ? "Aguardando horario do destino"
-      : "Aguardando limite diario do destino";
+  oferta.statusDetalhe = pulouPorHorario
+    ? "Aguardando horario do destino"
+    : "Aguardando intervalo dos destinos";
   oferta.erro = "";
   oferta.erroEm = "";
-  const menorEsperaIntervalo = destinosOrdenados
-    .filter(item => !item.intervalo.liberado)
-    .map(item => item.intervalo.restanteMs)
-    .sort((a, b) => a - b)[0];
-  proximaTentativaDestino(
-    oferta,
-    Math.max(30 * 1000, Math.min(menorEsperaIntervalo || 5 * 60 * 1000, 15 * 60 * 1000))
-  );
   salvarFila(clienteId);
-  logOptimus("DESTINO", "Oferta aguardando destino liberar envio", {
-    titulo: oferta.titulo || oferta.nome || "",
-    clienteId,
-    motivo: pulouPorIntervalo ? "intervalo" : pulouPorHorario ? "horario" : "limite_diario"
-  });
-
-  if (pulouPorIntervalo && !pulouPorHorario && !pulouPorLimiteDiario) {
-    setTimeout(() => {
-      processarFila(clienteId).catch(e => {
-        logOptimus("ERRO", "Falha ao continuar fila apos intervalo", {
-          clienteId,
-          erro: e.message
-        });
-      });
-    }, 250);
-  }
-
+  console.log("[DESTINO] Oferta aguardando destino liberar envio:", oferta.titulo);
   return;
 }
 
 if (!enviouParaAlgumDestino) {
-  logOptimus("ERRO", "Oferta nao enviada; marcando erro tecnico", {
-    titulo: oferta.titulo || oferta.nome || ""
-  });
+  console.log("[ERRO] Oferta no enviada. Marcando como erro:", oferta.titulo);
 
   oferta.status = "erro";
   oferta.statusDetalhe = "Falha ao enviar para destinos";
@@ -2955,14 +1848,13 @@ if (!enviouParaAlgumDestino) {
 ultimoEnvioFila = Date.now();
 
 oferta.status = "enviado";
-oferta.proximaTentativaEnvioEm = "";
 
 oferta.enviadoEm = new Date().toLocaleString("pt-BR", {
   timeZone: "America/Sao_Paulo"
 });
 
 oferta.dataEnvio = oferta.enviadoEm;
-oferta.statusDetalhe = `Enviada para ${destinosEnviadosCount} destino(s)`;
+oferta.statusDetalhe = `Enviada para ${destinosInteligentes.length} destino(s)`;
 
 oferta.logsEnvio = oferta.logsEnvio || [];
 oferta.logsEnvio.push({
@@ -3069,7 +1961,7 @@ app.post("/fila", (req, res) => {
     });
 
     if (resultado?.ok && !resultado?.ignorada) {
-      logOptimus("FILA", "Oferta manual adicionada", {
+      console.log("[FILA] Oferta manual adicionada  fila:", {
         clienteId,
         id: resultado.oferta?.id,
         titulo: resultado.oferta?.titulo,
@@ -3081,7 +1973,7 @@ app.post("/fila", (req, res) => {
     return res.json(resultado);
 
   } catch (e) {
-    logOptimus("ERRO", "Erro ao adicionar oferta na fila", { erro: e.message });
+    console.log("[ERRO] [FILA] erro ao adicionar oferta na fila:", e.message);
 
     return res.status(500).json({
       ok: false,
@@ -3164,12 +2056,9 @@ if (deveIgnorarOfertaRepetida(oferta)) {
 
 oferta.status = "pendente";
 oferta.statusDetalhe = "Na fila";
-validarCupomMonetarioOferta(oferta);
-aplicarPrioridadeEnvioOferta(oferta);
 
 registrarOfertaVista(oferta);
 
-logPrioridadeFila(oferta);
 fila.unshift(oferta);
 salvarFila(clienteId);
 
@@ -3200,8 +2089,6 @@ configCliente.automacaoAtiva = automacaoAnterior;
 app.get("/fila", (req, res) => {
   const clienteId = getClienteId(req);
 
-  sanearExpiradosFila(clienteId);
-
   const itensCliente = fila.filter((o) =>
     (o.clienteId || "admin") === clienteId
   );
@@ -3212,8 +2099,6 @@ app.get("/fila", (req, res) => {
     total: itensCliente.length,
     pendentes: itensCliente.filter((o) => o.status === "pendente").length,
     enviados: itensCliente.filter((o) => o.status === "enviado").length,
-    retidas: itensCliente.filter((o) => o.status === "retida").length,
-    erros: itensCliente.filter((o) => o.status === "erro").length,
     itens: itensCliente,
     fila: itensCliente
   });
@@ -3484,8 +2369,6 @@ app.get("/automacao/status", (req, res) => {
     clienteId,
     ativa: configCliente.automacaoAtiva === true,
     pendentes: itensCliente.filter(o => o.status === "pendente").length,
-    retidas: itensCliente.filter(o => o.status === "retida").length,
-    erros: itensCliente.filter(o => o.status === "erro").length,
     enviadasHoje: enviadas.filter(ofertaEnviadaHoje).length,
     creditos: usuario?.creditos ?? null,
     sessoesAtivas,
@@ -3603,7 +2486,7 @@ app.delete("/fila/limpar", (req, res) => {
 
   salvarFila(clienteId);
 
-  logOptimus("FILA", "Limpeza da fila", {
+  console.log("[FILA] LIMPEZA FILA:", {
     clienteId,
     status: status || "todos",
     removidos
@@ -3638,7 +2521,7 @@ app.delete("/fila/:index", (req, res) => {
 
   salvarFila(clienteId);
 
-  logOptimus("FILA", "Oferta removida", {
+  console.log("[FILA] Removido da fila:", {
     clienteId,
     titulo: removido[0]?.nome || removido[0]?.titulo
   });
@@ -3649,64 +2532,7 @@ app.delete("/fila/:index", (req, res) => {
   });
 });
 
-app.post("/fila/:id/reprocessar", (req, res) => {
-  const id = String(req.params.id || "").trim();
-  const clienteId = getClienteId(req);
-
-  const oferta = fila.find(item =>
-    String(item.id || "") === id &&
-    String(item.clienteId || "admin") === String(clienteId)
-  );
-
-  if (!oferta) {
-    return res.status(404).json({
-      ok: false,
-      erro: "Oferta nÃ£o encontrada"
-    });
-  }
-
-  oferta.status = "pendente";
-  oferta.statusDetalhe = "Reprocessada manualmente";
-  delete oferta.motivoRetencao;
-  delete oferta.retidaEm;
-  delete oferta.proximaTentativaEnvioEm;
-  oferta.reprocessadaEm = new Date().toISOString();
-
-  salvarFila(clienteId);
-
-  logOptimus("FILA", "Reprocessada manualmente", {
-    clienteId,
-    id,
-    titulo: oferta.titulo || oferta.nome || ""
-  });
-
-  return res.json({
-    ok: true,
-    mensagem: "Oferta reprocessada manualmente",
-    oferta
-  });
-});
-
 // ============== POST FILA INDEX ===========================
-
-app.post("/fila/item/:id/enviar-agora", async (req, res) => {
-  const id = String(req.params.id || "").trim();
-  const clienteId = getClienteId(req);
-  const oferta = fila.find(item =>
-    String(item.id || "") === id &&
-    String(item.clienteId || "admin") === String(clienteId)
-  );
-
-  if (!oferta) {
-    return res.status(404).json({
-      ok: false,
-      erro: "Oferta nao encontrada"
-    });
-  }
-
-  const resultado = await enviarOfertaAgoraDireto(oferta, clienteId);
-  return res.status(resultado.statusHttp || 200).json(resultado);
-});
 
 app.post("/fila/:index/enviar-agora", async (req, res) => {
   const index = Number(req.params.index);
@@ -3715,7 +2541,6 @@ const clienteIdReq = getClienteId(req);
 const filaCliente = fila.filter(o =>
   String(o.clienteId || "admin") === String(clienteIdReq)
 );
-const idBody = String(req.body?.id || req.body?.ofertaId || "").trim();
 
 if (isNaN(index) || index < 0 || index >= filaCliente.length) {
   return res.status(400).json({
@@ -3724,14 +2549,7 @@ if (isNaN(index) || index < 0 || index >= filaCliente.length) {
   });
 }
 
-let oferta = idBody
-  ? filaCliente.find(item => String(item.id || "") === idBody)
-  : filaCliente[index];
-
-if (!oferta || oferta.status !== "pendente") {
-  const pendentesCliente = filaCliente.filter(item => item.status === "pendente");
-  oferta = pendentesCliente[index] || oferta;
-}
+const oferta = filaCliente[index];
 
 const indexReal = fila.findIndex(o => o === oferta);
 
@@ -3742,7 +2560,9 @@ const indexReal = fila.findIndex(o => o === oferta);
     });
   }
 
-  logOptimus("FILA", "Enviar Agora solicitado", {
+  oferta.status = "pendente";
+
+  console.log("[FILA] ENTRANDO NA FILA:", {
     clienteId: clienteIdReq,
     titulo: oferta.titulo || oferta.nome,
     preco: oferta.precoAtual || oferta.preco,
@@ -3751,13 +2571,31 @@ const indexReal = fila.findIndex(o => o === oferta);
     categoria: oferta.categoria
   });
 
-if (indexReal >= 0) {
-  fila.splice(indexReal, 1);
-  fila.unshift(oferta);
-}
+fila.splice(indexReal, 1);
+fila.unshift(oferta);
 
-  const resultado = await enviarOfertaAgoraDireto(oferta, clienteIdReq);
-  return res.status(resultado.statusHttp || 200).json(resultado);
+const clienteId = clienteIdReq;
+
+salvarFila(clienteId);
+
+  controleEnvio = {};
+
+  const configCliente =
+    configsPorCliente?.[clienteId] || config;
+
+  const automacaoAnterior = configCliente.automacaoAtiva;
+
+  configCliente.automacaoAtiva = true;
+
+  await processarFila(clienteId);
+
+  configCliente.automacaoAtiva = automacaoAnterior;
+
+  return res.json({
+    ok: true,
+    mensagem: "Envio manual processado",
+    oferta
+  });
 });
 
 app.get("/config", (req, res) => {
@@ -4381,7 +3219,6 @@ function auth(req, res, next) {
   if (
     req.path === "/" ||
     req.path === "/login" ||
-    (req.method === "GET" && req.path === "/branding") ||
     req.path === "/kabum/importar" ||
     req.path === "/kabum/importar-teste" ||
     req.path === "/conectar" ||
@@ -4427,4547 +3264,6 @@ carregarConfig();
 
 app.use(auth);
 
-app.get("/fila/inteligencia/status", (req, res) => {
-  try {
-    const clienteId = getClienteId(req);
-
-    if (req.usuario?.papel === "admin_master") {
-      const clientes = Array.from(new Set([
-        clienteId,
-        ...usuarios.map(usuario => usuario?.id).filter(Boolean),
-        ...listClientes()
-      ]));
-
-      const resultados = clientes.map(id => avaliarSaudeFilaCliente(id));
-
-      return res.json({
-        ok: true,
-        modo: "admin_master",
-        totalClientes: resultados.length,
-        resultados
-      });
-    }
-
-    return res.json({
-      ok: true,
-      modo: "cliente",
-      resultado: avaliarSaudeFilaCliente(clienteId)
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-app.post("/fila/inteligencia/abastecer", async (req, res) => {
-  try {
-    const clienteToken = getClienteId(req);
-    const clienteSolicitado = String(req.body?.clienteId || clienteToken || "admin");
-    const clienteId =
-      req.usuario?.papel === "admin_master"
-        ? clienteSolicitado
-        : clienteToken;
-    const simulado = req.body?.simulado !== false;
-
-    return res.json(await abastecerFilaSeNecessario(clienteId, { simulado }));
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-function lerFilasRadarSomenteLeitura() {
-  const itens = [];
-  const vistos = new Set();
-
-  function adicionar(oferta = {}, clienteIdOrigem = "") {
-    if (!oferta || typeof oferta !== "object") return;
-
-    const origemClienteId = String(
-      oferta.clienteId ||
-      clienteIdOrigem ||
-      "admin"
-    );
-
-    const chave = [
-      origemClienteId,
-      oferta.id || "",
-      oferta.linkAfiliado || oferta.link || "",
-      normalizarTexto(oferta.titulo || oferta.nome || "")
-    ].join("|");
-
-    if (vistos.has(chave)) return;
-
-    vistos.add(chave);
-    itens.push({
-      ...oferta,
-      origemClienteId
-    });
-  }
-
-  for (const oferta of fila || []) {
-    adicionar(oferta, oferta?.clienteId || "admin");
-  }
-
-  for (const clienteIdOrigem of listClientes()) {
-    try {
-      const dados = readClienteJson(clienteIdOrigem, "fila.json", []);
-
-      if (Array.isArray(dados)) {
-        for (const oferta of dados) {
-          adicionar(oferta, clienteIdOrigem);
-        }
-      }
-    } catch (e) {
-      console.log("[RADAR] Falha ao ler fila do cliente:", {
-        clienteId: clienteIdOrigem,
-        erro: e.message
-      });
-    }
-  }
-
-  if (fs.existsSync(FILA_FILE)) {
-    try {
-      const dadosLegados = JSON.parse(fs.readFileSync(FILA_FILE, "utf8") || "[]");
-
-      if (Array.isArray(dadosLegados)) {
-        for (const oferta of dadosLegados) {
-          adicionar(oferta, oferta?.clienteId || "admin");
-        }
-      }
-    } catch (e) {
-      console.log("[RADAR] Falha ao ler fila legada:", e.message);
-    }
-  }
-
-  return itens;
-}
-
-function radarConfigPadrao() {
-  return {
-    monitoramentoAtivo: true,
-    sessaoWhatsappId: "",
-    gruposMonitorados: [],
-    sessoesWhatsappMonitoradas: [],
-    telegramMonitorados: [],
-    monitoramento: {
-      horaInicial: "07:00",
-      horaFinal: "00:50",
-      intervaloMinutos: 6,
-      maxPorDia: 180
-    },
-    categoriasPermitidas: [],
-    templateMidia: {
-      template: "padrao_optimus",
-      tipoMidia: "imagem"
-    }
-  };
-}
-
-function getRadarConfigFile(clienteId = "admin") {
-  return path.join(getClienteDir(clienteId), "radar-config.json");
-}
-
-function getRadarHistoricoFile(clienteId = "admin") {
-  return path.join(getClienteDir(clienteId), "radar-historico.json");
-}
-
-function getRadarPreviewFile(clienteId = "admin") {
-  return path.join(getClienteDir(clienteId), "radar-preview.json");
-}
-
-function getRadarDescartesFile(clienteId = "admin") {
-  return path.join(getClienteDir(clienteId), "radar-descartes.json");
-}
-
-function getRadarTratadasFile(clienteId = "admin") {
-  return path.join(getClienteDir(clienteId), "radar-tratadas.json");
-}
-
-function lerHistoricoRadar(clienteId = "admin") {
-  try {
-    const dados = readClienteJson(clienteId, "radar-historico.json", []);
-    return Array.isArray(dados) ? dados : [];
-  } catch (e) {
-    console.log("[RADAR] Falha ao ler historico:", e.message);
-    return [];
-  }
-}
-
-async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
-  const configCliente = configsPorCliente?.[clienteId] || config;
-
-  if (!oferta || typeof oferta !== "object") {
-    return {
-      ok: false,
-      statusHttp: 404,
-      erro: "Oferta não encontrada"
-    };
-  }
-
-  const estavaExpirada = ofertaExpiradaParaEnvio(oferta);
-
-  if (estavaExpirada) {
-    logOptimus("FILA", "Enviar Agora ignorou expiracao por acao manual", {
-      clienteId,
-      titulo: oferta.titulo || oferta.nome || "",
-      expiraEm: oferta.expiraEm || ""
-    });
-  }
-
-  const analiseDestinos = analisarDestinosCompativeisFila(clienteId, oferta, configCliente);
-
-  if (!analiseDestinos.compativeis.length) {
-    marcarOfertaRetida(oferta, analiseDestinos.motivoRetencao);
-    salvarFila(clienteId);
-
-    logOptimus("FILA", "Enviar Agora reteve oferta", {
-      clienteId,
-      titulo: oferta.titulo || oferta.nome || "",
-      motivoRetencao: oferta.motivoRetencao
-    });
-
-    return {
-      ok: false,
-      statusHttp: 409,
-      retida: true,
-      motivo: oferta.motivoRetencao,
-      mensagem: oferta.statusDetalhe,
-      oferta
-    };
-  }
-
-  const usuarioOferta =
-    usuarios.find(u => String(u.id) === String(clienteId)) || null;
-  const plano = getPlanoPorNome(usuarioOferta?.plano || "free") || {};
-
-  let enviouParaAlgumDestino = false;
-  let destinosEnviadosCount = 0;
-  let pulouPorHorario = false;
-  let pulouPorLimiteDiario = false;
-  let ultimoMotivo = "";
-
-  oferta.status = "pendente";
-  oferta.statusDetalhe = estavaExpirada
-    ? "Envio manual solicitado após expiração"
-    : "Envio manual solicitado";
-  oferta.erro = "";
-  oferta.erroEm = "";
-  oferta.proximaTentativaEnvioEm = "";
-  oferta.envioManualIgnorouExpiracao = Boolean(estavaExpirada);
-  delete oferta.motivoRetencao;
-  delete oferta.retidaEm;
-
-  for (const item of analiseDestinos.compativeis) {
-    const destino = item.destino;
-    const nomeDestino = destinoNomeLog(destino);
-
-    if (!destinoDentroHorario(destino)) {
-      logOptimus("DESTINO", "Enviar Agora ignorou horario por acao manual", {
-        clienteId,
-        destino: nomeDestino
-      });
-    }
-
-    const limite = destinoLimiteDiarioDisponivel(clienteId, destino);
-    if (!limite.ok) {
-      pulouPorLimiteDiario = true;
-      ultimoMotivo = "limite_diario";
-      logOptimus("DESTINO", "Enviar Agora limite diario", {
-        clienteId,
-        destino: nomeDestino,
-        usados: limite.usados,
-        limite: limite.limite
-      });
-      continue;
-    }
-
-    const mensagem = montarMensagemOferta(oferta, {
-      destino,
-      plano,
-      clienteId
-    });
-
-    const resultadoEnvio = await enviarParaDestinoInteligente(
-      destino,
-      oferta,
-      mensagem,
-      clienteId,
-      configCliente,
-      { ignorarHorario: true, envioManual: true }
-    );
-    const resultado =
-      typeof resultadoEnvio === "object" && resultadoEnvio !== null
-        ? resultadoEnvio
-        : { enviado: resultadoEnvio === true, motivo: resultadoEnvio === false ? "nao_enviado" : "" };
-
-    if (resultado.enviado === true) {
-      enviouParaAlgumDestino = true;
-      destinosEnviadosCount += 1;
-      controleEnvio[destinoChaveControle(clienteId, destino)] = Date.now();
-      logOptimus("ENVIO", "Enviar Agora enviado", {
-        clienteId,
-        destino: nomeDestino,
-        titulo: oferta.titulo || oferta.nome || ""
-      });
-    } else {
-      ultimoMotivo = resultado.motivo || "nao_enviado";
-      if (resultado.motivo === "fora_horario") pulouPorHorario = true;
-    }
-  }
-
-  if (!enviouParaAlgumDestino) {
-    oferta.status = "pendente";
-    oferta.statusDetalhe = pulouPorHorario
-      ? "Aguardando horario do destino"
-      : pulouPorLimiteDiario
-        ? "Aguardando limite diario do destino"
-        : "Nenhum destino confirmou envio manual";
-    salvarFila(clienteId);
-
-    return {
-      ok: false,
-      statusHttp: 409,
-      motivo: ultimoMotivo || "nao_enviado",
-      mensagem: oferta.statusDetalhe,
-      oferta
-    };
-  }
-
-  ultimoEnvioFila = Date.now();
-  oferta.status = "enviado";
-  oferta.enviadoEm = new Date().toLocaleString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-  });
-  oferta.dataEnvio = oferta.enviadoEm;
-  oferta.statusDetalhe = `Enviada manualmente para ${destinosEnviadosCount} destino(s)`;
-  oferta.logsEnvio = oferta.logsEnvio || [];
-  oferta.logsEnvio.push({
-    tipo: "sucesso",
-    mensagem: oferta.statusDetalhe,
-    data: oferta.enviadoEm
-  });
-
-  salvarFila(clienteId);
-
-  return {
-    ok: true,
-    mensagem: "Envio manual processado",
-    destinosEnviados: destinosEnviadosCount,
-    oferta
-  };
-}
-
-function lerPreviewRadar(clienteId = "admin") {
-  try {
-    const dados = readClienteJson(clienteId, "radar-preview.json", []);
-    return Array.isArray(dados) ? dados : [];
-  } catch (e) {
-    console.log("[RADAR] Falha ao ler preview:", e.message);
-    return [];
-  }
-}
-
-function lerDescartesRadar(clienteId = "admin") {
-  try {
-    const dados = readClienteJson(clienteId, "radar-descartes.json", { ids: [], chaves: [] });
-    return {
-      ids: Array.isArray(dados.ids) ? dados.ids.map(String) : [],
-      chaves: Array.isArray(dados.chaves) ? dados.chaves.map(String) : []
-    };
-  } catch (e) {
-    console.log("[RADAR] Falha ao ler descartes:", e.message);
-    return { ids: [], chaves: [] };
-  }
-}
-
-function lerTratadasRadar(clienteId = "admin") {
-  try {
-    const dados = readClienteJson(clienteId, "radar-tratadas.json", { ids: [], chaves: [], itens: [] });
-    return {
-      ids: Array.isArray(dados.ids) ? dados.ids.map(String) : [],
-      chaves: Array.isArray(dados.chaves) ? dados.chaves.map(String) : [],
-      itens: Array.isArray(dados.itens) ? dados.itens : []
-    };
-  } catch (e) {
-    console.log("[RADAR] Falha ao ler tratadas:", e.message);
-    return { ids: [], chaves: [], itens: [] };
-  }
-}
-
-function salvarHistoricoRadar(clienteId = "admin", eventos = []) {
-  const ultimos = Array.isArray(eventos) ? eventos.slice(-200) : [];
-  writeClienteJson(clienteId, "radar-historico.json", ultimos);
-}
-
-function salvarPreviewRadar(clienteId = "admin", eventos = []) {
-  const ultimos = Array.isArray(eventos) ? eventos.slice(-200) : [];
-  writeClienteJson(clienteId, "radar-preview.json", ultimos);
-}
-
-function salvarDescartesRadar(clienteId = "admin", descartes = {}) {
-  const ids = [...new Set(Array.isArray(descartes.ids) ? descartes.ids.map(String).filter(Boolean) : [])];
-  const chaves = [...new Set(Array.isArray(descartes.chaves) ? descartes.chaves.map(String).filter(Boolean) : [])];
-  writeClienteJson(clienteId, "radar-descartes.json", {
-    ids,
-    chaves,
-    atualizadoEm: new Date().toISOString()
-  });
-}
-
-function salvarTratadasRadar(clienteId = "admin", tratadas = {}) {
-  const ids = [...new Set(Array.isArray(tratadas.ids) ? tratadas.ids.map(String).filter(Boolean) : [])].slice(-5000);
-  const chaves = [...new Set(Array.isArray(tratadas.chaves) ? tratadas.chaves.map(String).filter(Boolean) : [])].slice(-5000);
-  const itens = Array.isArray(tratadas.itens) ? tratadas.itens.slice(-1000) : [];
-
-  writeClienteJson(clienteId, "radar-tratadas.json", {
-    ids,
-    chaves,
-    itens,
-    atualizadoEm: new Date().toISOString()
-  });
-}
-
-function resumirMensagemRadar(texto = "") {
-  return String(texto || "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 220);
-}
-
-function numeroRadar(valor = "") {
-  if (typeof valor === "number") return Number.isFinite(valor) ? valor : 0;
-  const limpo = String(valor || "")
-    .replace(/[^\d,.-]/g, "")
-    .replace(/\.(?=\d{3}(?:\D|$))/g, "")
-    .replace(",", ".");
-  const numero = Number(limpo);
-  return Number.isFinite(numero) ? numero : 0;
-}
-
-function calcularEconomiaRadar(oferta = {}) {
-  const atual = numeroRadar(oferta.precoAtual || oferta.preco || oferta.precoFinal || "");
-  const antigo = numeroRadar(oferta.precoAntigo || oferta.precoDe || "");
-  const economiaValor = antigo > atual && atual > 0 ? Number((antigo - atual).toFixed(2)) : 0;
-  const economiaPercentual = economiaValor > 0 && antigo > 0 ? Math.round((economiaValor / antigo) * 100) : 0;
-
-  return {
-    economiaValor,
-    economiaPercentual
-  };
-}
-
-function chavesRemocaoRadar(oferta = {}) {
-  const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
-  return [
-    oferta.id ? `id:${oferta.id}` : "",
-    oferta.linkOriginal ? `link:${String(oferta.linkOriginal).toLowerCase()}` : "",
-    oferta.linkAfiliado ? `link:${String(oferta.linkAfiliado).toLowerCase()}` : "",
-    oferta.link ? `link:${String(oferta.link).toLowerCase()}` : "",
-    titulo ? `titulo:${titulo}` : ""
-  ].filter(Boolean);
-}
-
-function chavesTratamentoRadar(oferta = {}) {
-  const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
-  const marketplace = normalizarMarketplaceRadar(
-    oferta.marketplace ||
-    oferta.mercado ||
-    oferta.marketplaceOriginalRadar ||
-    ""
-  );
-  const grupo = normalizarTexto(
-    oferta.origemGrupoId ||
-    oferta.remoteJid ||
-    oferta.grupoId ||
-    oferta.origemGrupoNome ||
-    ""
-  );
-  const cupom = normalizarTexto(oferta.cupom || "");
-  const links = [
-    oferta.linkOriginal,
-    oferta.linkResolvidoRadar,
-    oferta.linkCapturado,
-    oferta.linkAfiliado,
-    oferta.linkFinal,
-    oferta.link
-  ]
-    .map(link => String(link || "").trim().toLowerCase())
-    .filter(Boolean);
-
-  return [
-    oferta.id ? `id:${oferta.id}` : "",
-    ...links.map(link => `link:${link}`),
-    marketplace && titulo ? `produto:${marketplace}|${titulo}` : "",
-    marketplace && titulo && grupo ? `produto_grupo:${marketplace}|${titulo}|${grupo}` : "",
-    marketplace && titulo && grupo && cupom ? `produto_grupo_cupom:${marketplace}|${titulo}|${grupo}|${cupom}` : ""
-  ].filter(Boolean);
-}
-
-function ofertaTratadaRadar(oferta = {}, tratadas = {}) {
-  if (!oferta || typeof oferta !== "object") return false;
-  if (oferta.radarTratada === true || oferta.jaTratadaRadar === true) return true;
-
-  const statusRadar = normalizarTexto(oferta.statusRadar || "");
-  if (["fila", "ignorada", "ignorado", "erro", "descartado", "enviado", "ja_tratada", "repetida"].includes(statusRadar)) {
-    return true;
-  }
-
-  if (oferta.radarNaFila === true) return true;
-  if (
-    (oferta.origem === "radar" || oferta.radar === true) &&
-    oferta.status === "pendente" &&
-    oferta.radarPendenteAnalise !== true &&
-    !["novo", "pendente_analise"].includes(statusRadar)
-  ) {
-    return true;
-  }
-
-  const ids = new Set(Array.isArray(tratadas.ids) ? tratadas.ids.map(String) : []);
-  const chaves = new Set(Array.isArray(tratadas.chaves) ? tratadas.chaves.map(String) : []);
-  if (oferta.id && ids.has(String(oferta.id))) return true;
-
-  return chavesTratamentoRadar(oferta).some(chave => chaves.has(chave));
-}
-
-function registrarTratamentoRadar(clienteId = "admin", oferta = {}, statusRadar = "fila") {
-  if (!oferta || typeof oferta !== "object") return false;
-
-  const tratadas = lerTratadasRadar(clienteId);
-  const ids = new Set(tratadas.ids || []);
-  const chaves = new Set(tratadas.chaves || []);
-  const agora = new Date().toISOString();
-
-  if (oferta.id) ids.add(String(oferta.id));
-
-  for (const chave of chavesTratamentoRadar(oferta)) {
-    chaves.add(chave);
-  }
-
-  const itens = Array.isArray(tratadas.itens) ? tratadas.itens : [];
-  itens.push({
-    id: oferta.id || "",
-    idOfertaFila: oferta.idOfertaFila || oferta.id || "",
-    statusRadar,
-    titulo: oferta.titulo || oferta.nome || "",
-    marketplace: oferta.marketplace || oferta.mercado || "",
-    origemGrupoId: oferta.origemGrupoId || oferta.remoteJid || oferta.grupoId || "",
-    origemGrupoNome: oferta.origemGrupoNome || "",
-    origemSessaoId: oferta.origemSessaoId || "",
-    cupom: oferta.cupom || "",
-    linkOriginal: oferta.linkOriginal || oferta.linkResolvidoRadar || "",
-    linkAfiliado: oferta.linkAfiliado || oferta.linkFinal || oferta.link || "",
-    dataTratamento: oferta.dataTratamento || agora,
-    emFilaEm: oferta.emFilaEm || (statusRadar === "fila" ? agora : "")
-  });
-
-  salvarTratadasRadar(clienteId, {
-    ids: [...ids],
-    chaves: [...chaves],
-    itens
-  });
-
-  return true;
-}
-
-function sincronizarTratadasRadarDeOfertas(clienteId = "admin", ofertas = []) {
-  let total = 0;
-
-  for (const oferta of ofertas) {
-    if (!oferta || typeof oferta !== "object") continue;
-    if (oferta.origem !== "radar" && oferta.radar !== true && oferta.radarNaFila !== true) continue;
-
-    const statusRadar = oferta.statusRadar ||
-      (oferta.radarNaFila || oferta.status === "pendente" ? "fila" : normalizarStatusOperacionalRadar(oferta.status || ""));
-
-    if (!["fila", "ignorada", "ignorado", "erro", "descartado", "enviado"].includes(normalizarTexto(statusRadar))) {
-      continue;
-    }
-
-    if (registrarTratamentoRadar(clienteId, oferta, normalizarTexto(statusRadar) || "fila")) {
-      total++;
-    }
-  }
-
-  return total;
-}
-
-function ofertaOcultadaRadar(oferta = {}, descartes = {}) {
-  if (oferta.removidaRadar || oferta.ocultadaRadar) return true;
-  const ids = new Set(Array.isArray(descartes.ids) ? descartes.ids.map(String) : []);
-  const chaves = new Set(Array.isArray(descartes.chaves) ? descartes.chaves.map(String) : []);
-  if (oferta.id && ids.has(String(oferta.id))) return true;
-  return chavesRemocaoRadar(oferta).some(chave => chaves.has(chave));
-}
-
-function registrarDescartesOportunidadesRadar(clienteId = "admin", oportunidades = []) {
-  const descartes = lerDescartesRadar(clienteId);
-  const ids = new Set(descartes.ids || []);
-  const chaves = new Set(descartes.chaves || []);
-
-  for (const oferta of oportunidades) {
-    if (!oferta || typeof oferta !== "object") continue;
-    if (oferta.id) ids.add(String(oferta.id));
-    for (const chave of chavesRemocaoRadar(oferta)) {
-      chaves.add(chave);
-    }
-  }
-
-  salvarDescartesRadar(clienteId, {
-    ids: [...ids],
-    chaves: [...chaves]
-  });
-
-  return oportunidades.length;
-}
-
-function beneficioResumoRadar(oferta = {}) {
-  const beneficio = normalizarBeneficiosRadarOferta(oferta);
-  return (
-    beneficio.cupom ||
-    beneficio.beneficioExtra ||
-    beneficio.descontoPix ||
-    beneficio.descontoApp ||
-    beneficio.percentualCupom ||
-    beneficio.valorCupom ||
-    ""
-  );
-}
-
-function dataHoraRadarAgora() {
-  return new Date().toLocaleString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-  });
-}
-
-function normalizarStatusPreviewRadar(status = "") {
-  const texto = normalizarTexto(status);
-  if (texto === "fila" || texto === "adicionado_fila" || texto === "adicionada_fila") return "adicionado_fila";
-  if (texto === "ignorada" || texto === "ignorado") return "ignorado";
-  if (texto === "importado") return "importado";
-  if (texto === "detectado") return "detectado";
-  return "erro";
-}
-
-function normalizarStatusOperacionalRadar(status = "") {
-  const statusPreview = normalizarStatusPreviewRadar(status);
-  if (statusPreview === "adicionado_fila") return "fila";
-  if (statusPreview === "ignorado") return "ignorada";
-  if (statusPreview === "erro") return "erro";
-  if (statusPreview === "detectado" || statusPreview === "importado") return "detectada";
-  return "erro";
-}
-
-function normalizarTipoLinkRadarOperacional(evento = {}) {
-  const tipo = normalizarTexto(evento.tipoLink || evento.tipoLinkRadar || "");
-  if (tipo === "produto") return "produto";
-  if (tipo === "cupom_resgate" || tipo === "resgate_cupom" || tipo === "resgate") return "cupom_resgate";
-  if (tipo === "intermediario") return "intermediario";
-
-  if (evento.linkResgateCupom && evento.linkCapturado && String(evento.linkResgateCupom) === String(evento.linkCapturado)) {
-    return "cupom_resgate";
-  }
-
-  if (evento.urlResolvida || evento.linkOriginal || evento.marketplaceDetectado || evento.marketplace) {
-    return "produto";
-  }
-
-  return "desconhecido";
-}
-
-function statusCapturaRadarOperacional(evento = {}) {
-  const statusRadar = normalizarTexto(evento.statusRadar || "");
-  const status = normalizarStatusPreviewRadar(evento.status);
-
-  if (statusRadar === "retida" || status === "retida") return "retida";
-  if (statusRadar === "fila" || status === "adicionado_fila") return "fila";
-  if (status === "erro") return "erro";
-  if (status === "ignorado") return "erro";
-  return "sucesso";
-}
-
-function motivoFinalRadarOperacional(evento = {}) {
-  const motivo = textoRadarId(evento.motivoFinal || evento.motivoTecnico || evento.motivo || "");
-  if (motivo === "sem_destino_compativel") return "retida_sem_destino";
-  if (motivo === "retida_categoria_nao_marcada") return "retida_categoria_nao_marcada";
-  if (motivo) return motivo;
-
-  const status = statusCapturaRadarOperacional(evento);
-  if (status === "fila") return "enviado_para_fila";
-  if (status === "retida") return evento.motivoRetencao || "retida_sem_destino";
-  if (status === "erro") return "erro";
-  return "sucesso";
-}
-
-function montarEventoPreviewRadar(evento = {}) {
-  const criadoEm = evento.criadoEm || new Date().toISOString();
-  const dataHora = evento.dataHora || dataHoraRadarAgora();
-  const beneficioExtra = evento.beneficioExtra || evento.beneficio || "";
-  const economia = calcularEconomiaRadar(evento);
-  const clienteIdsAdicionados = Array.isArray(evento.clienteIdsAdicionados)
-    ? evento.clienteIdsAdicionados.filter(Boolean).map(String)
-    : [];
-
-  return {
-    id: evento.id || `radar_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    dataHora,
-    criadoEm,
-    capturadaEm: evento.capturadaEm || dataHora,
-    origemTipo: evento.origemTipo || "",
-    origemSessaoId: evento.origemSessaoId || "",
-    origemGrupoId: evento.origemGrupoId || "",
-    origemGrupoNome: evento.origemGrupoNome || "",
-    textoResumo: resumirMensagemRadar(evento.textoResumo || evento.mensagemResumo || evento.texto || ""),
-    mensagemResumo: resumirMensagemRadar(evento.mensagemResumo || evento.textoResumo || evento.texto || ""),
-    imagem: evento.imagem || evento.image || evento.foto || evento.thumbnail || "",
-    image: evento.imagem || evento.image || evento.foto || evento.thumbnail || "",
-    linkCapturado: evento.linkCapturado || "",
-    urlResolvida: evento.urlResolvida || evento.linkResolvidoRadar || "",
-    linkOriginal: evento.linkOriginal || "",
-    linkAfiliado: evento.linkAfiliado || "",
-    marketplaceDetectado: evento.marketplaceDetectado || evento.marketplaceReal || evento.marketplace || "",
-    tipoLink: normalizarTipoLinkRadarOperacional(evento),
-    tipoLinkRadar: evento.tipoLinkRadar || "",
-    statusCaptura: statusCapturaRadarOperacional(evento),
-    motivoFinal: motivoFinalRadarOperacional(evento),
-    motivoTecnico: evento.motivoTecnico || evento.motivo || "",
-    statusHttp: evento.statusHttp || "",
-    erroTecnico: evento.erroTecnico || "",
-    idOfertaFila: evento.idOfertaFila || evento.ofertaFilaId || "",
-    linksDetectados: Number(evento.linksDetectados || 1) || 1,
-    marketplace: evento.marketplace || "",
-    titulo: evento.titulo || "",
-    preco: evento.preco || evento.precoAtual || "",
-    precoAtual: evento.precoAtual || evento.preco || "",
-    precoAntigo: evento.precoAntigo || "",
-    categoria: evento.categoria || "",
-    economiaValor: Number(evento.economiaValor ?? economia.economiaValor) || 0,
-    economiaPercentual: Number(evento.economiaPercentual ?? economia.economiaPercentual) || 0,
-    cupom: evento.cupom || "",
-    cupomDetectado: Boolean(evento.cupom || evento.cupomDetectado || evento.cupomDetectadoTexto),
-    avisoCupom: evento.avisoCupom || "",
-    tipoCupom: evento.tipoCupom || "",
-    cupomOrigem: evento.cupomOrigem || "",
-    cupomDetectadoTexto: Boolean(evento.cupomDetectadoTexto),
-    linkResgateCupom: evento.linkResgateCupom || "",
-    beneficioExtra,
-    beneficio: beneficioExtra,
-    status: normalizarStatusPreviewRadar(evento.status),
-    statusRadar: evento.statusRadar || normalizarStatusOperacionalRadar(evento.status),
-    motivo: evento.motivo || "",
-    clienteIdsAdicionados,
-    clientesAdicionados: Array.isArray(evento.clientesAdicionados)
-      ? evento.clientesAdicionados
-      : clienteIdsAdicionados.map(clienteId => ({ clienteId })),
-    adicionadas: Number(evento.adicionadas || clienteIdsAdicionados.length || 0) || 0
-  };
-}
-
-function registrarPreviewRadar(clienteId = "admin", evento = {}) {
-  try {
-    const eventos = lerPreviewRadar(clienteId);
-    const eventoPreview = montarEventoPreviewRadar(evento);
-    eventos.push(eventoPreview);
-    salvarPreviewRadar(clienteId, eventos);
-    console.log("[RADAR-DECISAO] preview registrado", {
-      clienteId,
-      status: eventoPreview.status,
-      motivo: eventoPreview.motivo || "",
-      grupo: eventoPreview.origemGrupoNome || eventoPreview.origemGrupoId || "",
-      titulo: eventoPreview.titulo || "",
-      cupom: eventoPreview.cupom || "",
-      linkCapturado: eventoPreview.linkCapturado || ""
-    });
-  } catch (e) {
-    console.log("[RADAR] Falha ao registrar preview:", e.message);
-    console.log("[RADAR-DECISAO] preview falhou", {
-      clienteId,
-      erro: e.message
-    });
-  }
-}
-
-function registrarHistoricoRadar(clienteId = "admin", evento = {}) {
-  try {
-    const eventos = lerHistoricoRadar(clienteId);
-    const eventoPreview = montarEventoPreviewRadar(evento);
-    eventos.push({
-      id: eventoPreview.id,
-      dataHora: eventoPreview.dataHora,
-      criadoEm: eventoPreview.criadoEm,
-      capturadaEm: eventoPreview.capturadaEm,
-      origemTipo: evento.origemTipo || "",
-      origemSessaoId: evento.origemSessaoId || "",
-      origemGrupoId: evento.origemGrupoId || "",
-      origemGrupoNome: evento.origemGrupoNome || "",
-      textoResumo: eventoPreview.textoResumo,
-      mensagemResumo: eventoPreview.mensagemResumo,
-      imagem: eventoPreview.imagem,
-      linkCapturado: evento.linkCapturado || "",
-      urlResolvida: eventoPreview.urlResolvida,
-      linkOriginal: evento.linkOriginal || "",
-      linkAfiliado: evento.linkAfiliado || "",
-      marketplaceDetectado: eventoPreview.marketplaceDetectado,
-      tipoLink: eventoPreview.tipoLink,
-      tipoLinkRadar: eventoPreview.tipoLinkRadar,
-      statusCaptura: eventoPreview.statusCaptura,
-      motivoFinal: eventoPreview.motivoFinal,
-      motivoTecnico: eventoPreview.motivoTecnico,
-      statusHttp: eventoPreview.statusHttp,
-      erroTecnico: eventoPreview.erroTecnico,
-      idOfertaFila: evento.idOfertaFila || "",
-      marketplace: evento.marketplace || "",
-      titulo: evento.titulo || "",
-      preco: evento.preco || evento.precoAtual || "",
-      precoAtual: eventoPreview.precoAtual,
-      precoAntigo: eventoPreview.precoAntigo,
-      categoria: evento.categoria || "",
-      economiaValor: eventoPreview.economiaValor,
-      economiaPercentual: eventoPreview.economiaPercentual,
-      cupom: evento.cupom || "",
-      cupomDetectado: eventoPreview.cupomDetectado,
-      avisoCupom: eventoPreview.avisoCupom,
-      tipoCupom: eventoPreview.tipoCupom,
-      cupomOrigem: eventoPreview.cupomOrigem,
-      cupomDetectadoTexto: eventoPreview.cupomDetectadoTexto,
-      linkResgateCupom: eventoPreview.linkResgateCupom,
-      beneficioExtra: eventoPreview.beneficioExtra,
-      beneficio: eventoPreview.beneficio,
-      status: evento.status || "erro",
-      statusRadar: evento.statusRadar || eventoPreview.statusRadar,
-      motivo: evento.motivo || "",
-      linksDetectados: Number(evento.linksDetectados || 1) || 1,
-      adicionadas: Number(evento.adicionadas || 0) || 0,
-      clienteIdsAdicionados: eventoPreview.clienteIdsAdicionados,
-      clientesAdicionados: eventoPreview.clientesAdicionados
-    });
-    salvarHistoricoRadar(clienteId, eventos);
-    registrarPreviewRadar(clienteId, eventoPreview);
-    console.log("[RADAR-DECISAO] historico registrado", {
-      clienteId,
-      status: eventoPreview.status,
-      motivo: eventoPreview.motivo || "",
-      grupo: eventoPreview.origemGrupoNome || eventoPreview.origemGrupoId || "",
-      titulo: eventoPreview.titulo || "",
-      cupom: eventoPreview.cupom || "",
-      linkCapturado: eventoPreview.linkCapturado || ""
-    });
-  } catch (e) {
-    console.log("[RADAR] Falha ao registrar historico:", e.message);
-    console.log("[RADAR-DECISAO] historico falhou", {
-      clienteId,
-      erro: e.message
-    });
-  }
-}
-
-function fonteMonitoradaResumoRadar(item = {}, origemTipo = "whatsapp") {
-  const id = textoRadarId(
-    item.id ||
-    item.grupoId ||
-    item.chatId ||
-    item.value ||
-    item.jid ||
-    item.remoteJid ||
-    item.nome ||
-    ""
-  );
-  const nome = textoRadarId(
-    item.nome ||
-    item.titulo ||
-    item.label ||
-    item.subject ||
-    item.name ||
-    id
-  );
-
-  return {
-    origemTipo,
-    origemSessaoId: textoRadarId(item.sessaoId || item.origemSessaoId || item.sessionId || ""),
-    origemGrupoId: id,
-    origemGrupoNome: nome || id
-  };
-}
-
-function chaveFonteHistoricoRadar(fonte = {}) {
-  return [
-    fonte.origemTipo || "",
-    fonte.origemTipo === "whatsapp" ? chaveRadarId(fonte.origemSessaoId || "") : "",
-    chaveRadarId(fonte.origemGrupoId || fonte.origemGrupoNome || "")
-  ].join(":");
-}
-
-function dataRadarEhHoje(valor = "", hoje = "") {
-  if (!valor) return false;
-  const texto = String(valor);
-  if (hoje && texto.includes(hoje)) return true;
-
-  const data = new Date(texto);
-  if (Number.isNaN(data.getTime())) return false;
-
-  return data.toLocaleDateString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-  }) === hoje;
-}
-
-function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
-  const configRadar = carregarRadarConfigCliente(clienteId);
-  const eventosPreview = lerPreviewRadar(clienteId);
-  const eventosHistorico = lerHistoricoRadar(clienteId);
-  const eventosPorId = new Map();
-  for (const evento of [...eventosHistorico, ...eventosPreview]) {
-    const chaveEvento = evento.id || `${evento.criadoEm || evento.dataHora || ""}:${evento.origemTipo || ""}:${evento.origemSessaoId || ""}:${evento.origemGrupoId || ""}:${evento.linkCapturado || evento.linkOriginal || evento.titulo || ""}`;
-    eventosPorId.set(chaveEvento, evento);
-  }
-  const eventos = [...eventosPorId.values()];
-  const hoje = new Date().toLocaleDateString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-  });
-  const mapa = new Map();
-  const motivosDiagnosticoRadar = [
-    "link_original_nao_resolvido",
-    "importacao_incompleta",
-    "importacao_sem_preco",
-    "importacao_sem_titulo",
-    "marketplace_nao_identificado",
-    "redirect_bloqueado"
-  ];
-  const contadoresDiagnostico = Object.fromEntries(
-    motivosDiagnosticoRadar.map(motivo => [motivo, 0])
-  );
-
-  const adicionarFonte = fonte => {
-    const chave = chaveFonteHistoricoRadar(fonte);
-    if (!chave.endsWith(":")) {
-      mapa.set(chave, {
-        ...fonte,
-        tipo: fonte.origemTipo || "",
-        grupoId: fonte.origemGrupoId || "",
-        grupoNome: fonte.origemGrupoNome || "",
-        ultimaCaptura: "",
-        ultimaMensagemCapturada: "",
-        ultimaOfertaCapturada: "",
-        linksHoje: 0,
-        linksDetectadosHoje: 0,
-        adicionadasFila: 0,
-        ofertasAdicionadasFila: 0,
-        comCupom: 0,
-        comCupomBeneficio: 0,
-        cuponsDetectados: 0,
-        beneficiosDetectados: 0,
-        ignoradas: 0,
-        erros: 0,
-        totalCapturas: 0,
-        totalFila: 0,
-        totalIgnoradas: 0,
-        totalErros: 0,
-        economiaTotalGerada: 0,
-        economiaMedia: 0,
-        descontoMedioPercentual: 0,
-        scoreGrupo: 0,
-        principalMotivoRejeicao: "",
-        totalEventos: 0,
-        diagnostico: Object.fromEntries(
-          motivosDiagnosticoRadar.map(motivo => [motivo, 0])
-        )
-      });
-    }
-  };
-
-  for (const sessao of Array.isArray(configRadar.sessoesWhatsappMonitoradas) ? configRadar.sessoesWhatsappMonitoradas : []) {
-    for (const grupo of Array.isArray(sessao.gruposMonitorados) ? sessao.gruposMonitorados : []) {
-      adicionarFonte(fonteMonitoradaResumoRadar({ ...grupo, sessaoId: sessao.sessaoId }, "whatsapp"));
-    }
-  }
-
-  for (const grupo of Array.isArray(configRadar.telegramMonitorados) ? configRadar.telegramMonitorados : []) {
-    if (grupo?.ativo === false) continue;
-    adicionarFonte(fonteMonitoradaResumoRadar(grupo, "telegram"));
-  }
-
-  const motivos = {};
-
-  for (const evento of eventos) {
-    const chave = chaveFonteHistoricoRadar(evento);
-    if (!mapa.has(chave)) {
-      adicionarFonte({
-        origemTipo: evento.origemTipo,
-        origemSessaoId: evento.origemSessaoId,
-        origemGrupoId: evento.origemGrupoId,
-        origemGrupoNome: evento.origemGrupoNome
-      });
-    }
-
-    const resumo = mapa.get(chave);
-    if (!resumo) continue;
-
-    const status = normalizarStatusPreviewRadar(evento.status);
-    const eventoOperacional = montarEventoPreviewRadar(evento);
-    const motivoDiagnostico = eventoOperacional.motivoFinal || eventoOperacional.motivoTecnico || evento.motivo || "";
-    const dataEvento = evento.capturadaEm || evento.dataHora || evento.criadoEm || "";
-    const textoResumo = evento.textoResumo || evento.mensagemResumo || "";
-    const beneficio = evento.cupom || evento.beneficioExtra || evento.beneficio || evento.descontoPix || evento.descontoApp || "";
-    const adicionadas = Number(evento.adicionadas || (Array.isArray(evento.clienteIdsAdicionados) ? evento.clienteIdsAdicionados.length : 0) || 0) || 0;
-    const economiaValor = Number(evento.economiaValor || 0) || 0;
-    const economiaPercentual = Number(evento.economiaPercentual || 0) || 0;
-
-    resumo.totalEventos += 1;
-    resumo.totalCapturas = resumo.totalEventos;
-    resumo.ultimaCaptura = dataEvento || resumo.ultimaCaptura;
-    resumo.ultimaMensagemCapturada = textoResumo || resumo.ultimaMensagemCapturada;
-    resumo.ultimaOfertaCapturada = evento.titulo || resumo.ultimaOfertaCapturada;
-
-    if (dataRadarEhHoje(dataEvento, hoje)) {
-      resumo.linksDetectadosHoje += Number(evento.linksDetectados || 1) || 1;
-      resumo.linksHoje = resumo.linksDetectadosHoje;
-    }
-
-    if (status === "adicionado_fila") {
-      resumo.ofertasAdicionadasFila += adicionadas || 1;
-      resumo.adicionadasFila = resumo.ofertasAdicionadasFila;
-      resumo.totalFila = resumo.ofertasAdicionadasFila;
-    } else if (status === "ignorado") {
-      resumo.ignoradas += 1;
-      resumo.totalIgnoradas = resumo.ignoradas;
-      const motivo = evento.motivo || "nao_informado";
-      motivos[chave] = motivos[chave] || {};
-      motivos[chave][motivo] = (motivos[chave][motivo] || 0) + 1;
-    } else if (status === "erro") {
-      resumo.erros += 1;
-      resumo.totalErros = resumo.erros;
-      const motivo = evento.motivo || "erro";
-      motivos[chave] = motivos[chave] || {};
-      motivos[chave][motivo] = (motivos[chave][motivo] || 0) + 1;
-    }
-
-    if (Object.prototype.hasOwnProperty.call(contadoresDiagnostico, motivoDiagnostico)) {
-      contadoresDiagnostico[motivoDiagnostico] += 1;
-      resumo.diagnostico[motivoDiagnostico] = (resumo.diagnostico[motivoDiagnostico] || 0) + 1;
-    }
-
-    if (beneficio) {
-      resumo.comCupomBeneficio += 1;
-      resumo.comCupom = resumo.comCupomBeneficio;
-    }
-
-    if (evento.cupom) resumo.cuponsDetectados += 1;
-    if (evento.beneficioExtra || evento.beneficio || evento.descontoPix || evento.descontoApp || evento.linkResgateCupom) {
-      resumo.beneficiosDetectados += 1;
-    }
-    resumo.economiaTotalGerada += economiaValor;
-    if (economiaPercentual > 0) {
-      resumo.__somaDescontoPercentual = (resumo.__somaDescontoPercentual || 0) + economiaPercentual;
-      resumo.__qtdDescontoPercentual = (resumo.__qtdDescontoPercentual || 0) + 1;
-    }
-  }
-
-  for (const [chave, resumo] of mapa.entries()) {
-    const motivoMaisComum = Object.entries(motivos[chave] || {})
-      .sort((a, b) => b[1] - a[1])[0]?.[0] || "";
-    resumo.principalMotivoRejeicao = motivoMaisComum;
-    resumo.economiaTotalGerada = Number((resumo.economiaTotalGerada || 0).toFixed(2));
-    resumo.economiaMedia = resumo.totalFila > 0
-      ? Number((resumo.economiaTotalGerada / resumo.totalFila).toFixed(2))
-      : 0;
-    resumo.descontoMedioPercentual = resumo.__qtdDescontoPercentual > 0
-      ? Math.round(resumo.__somaDescontoPercentual / resumo.__qtdDescontoPercentual)
-      : 0;
-    resumo.scoreGrupo = Math.max(0, Math.min(100,
-      Math.round(
-        (resumo.totalFila || 0) * 12 +
-        (resumo.cuponsDetectados || 0) * 10 +
-        (resumo.beneficiosDetectados || 0) * 6 +
-        Math.min(25, (resumo.descontoMedioPercentual || 0) / 2) -
-        (resumo.totalIgnoradas || 0) * 3 -
-        (resumo.totalErros || 0) * 5
-      )
-    ));
-    delete resumo.__somaDescontoPercentual;
-    delete resumo.__qtdDescontoPercentual;
-  }
-
-  const grupoFiltro = chaveRadarId(opcoes.grupoId || "");
-  const tipoFiltro = normalizarTexto(opcoes.origemTipo || "");
-  const sessaoFiltro = chaveRadarId(opcoes.sessaoId || "");
-  const capturas = eventos
-    .filter(evento => !grupoFiltro || chaveRadarId(evento.origemGrupoId || evento.origemGrupoNome) === grupoFiltro)
-    .filter(evento => !tipoFiltro || normalizarTexto(evento.origemTipo) === tipoFiltro)
-    .filter(evento => !sessaoFiltro || chaveRadarId(evento.origemSessaoId || "") === sessaoFiltro)
-    .slice(-Number(opcoes.limit || 20))
-    .reverse()
-    .map(evento => montarEventoPreviewRadar(evento));
-
-  return {
-    grupos: [...mapa.values()],
-    capturas,
-    eventos: capturas,
-    diagnostico: contadoresDiagnostico,
-    contadoresDiagnostico
-  };
-}
-
-function listarSessoesWhatsappCliente(clienteId = "admin") {
-  return Object.values(sessoesMeta || {})
-    .filter(sessao => {
-      const id = String(sessao.id || "");
-
-      return (
-        id.startsWith(clienteId + "_") ||
-        id === clienteId ||
-        (clienteId === "admin" && id.startsWith("admin_"))
-      );
-    })
-    .map(sessao => {
-      const id = sessao.id;
-      const totalGrupos = gruposPorSessao[id]?.length || 0;
-
-      const nomeAmigavel =
-        sessao.nome ||
-        sessao.nomeSessao ||
-        sessao.apelido ||
-        sessao.titulo ||
-        sessao.label ||
-        id;
-
-      return {
-        ...sessao,
-        id,
-        sessaoId: id,
-        nome: nomeAmigavel,
-        nomeAmigavel,
-        nomeExibicao: nomeAmigavel,
-        idTecnico: id,
-        status: statusSessao[id] || "offline",
-        conectado: statusSessao[id] === "open" || statusSessao[id] === "aberto",
-        qrDisponivel: !!qrCodes[id],
-        grupos: totalGrupos,
-        totalGrupos,
-        destinos: destinosPorSessao[id]?.length || 0
-      };
-    });
-}
-
-function listarTelegramRadarCliente(clienteId = "admin") {
-  const configCliente = configsPorCliente?.[clienteId] || {};
-  const destinos = configCliente.telegram?.destinos || [];
-
-  if (!Array.isArray(destinos)) {
-    return [];
-  }
-
-  return destinos.map((destino, index) => ({
-    ...destino,
-    id: String(destino.id || destino.chatId || destino.nome || `telegram_${index}`),
-    nome: destino.nome || destino.titulo || destino.label || String(destino.chatId || `Telegram ${index + 1}`),
-    chatId: destino.chatId || "",
-    ativo: destino.ativo === true,
-    status: destino.ativo === true ? "conectado" : "desconectado"
-  }));
-}
-
-function carregarRadarConfigCliente(clienteId = "admin") {
-  const padrao = radarConfigPadrao();
-
-  try {
-    const dados = readClienteJson(clienteId, "radar-config.json", padrao);
-
-    const sessoesWhatsappMonitoradas = normalizarSessoesWhatsappMonitoradasRadar(dados);
-    const gruposMonitoradosLegado = achatarGruposWhatsappMonitoradosRadar(sessoesWhatsappMonitoradas);
-    const sessaoWhatsappIdLegado =
-      dados.sessaoWhatsappId ||
-      sessoesWhatsappMonitoradas[0]?.sessaoId ||
-      "";
-
-    return {
-      monitoramentoAtivo: dados.monitoramentoAtivo !== false,
-      sessaoWhatsappId: sessaoWhatsappIdLegado,
-      gruposMonitorados: gruposMonitoradosLegado,
-      sessoesWhatsappMonitoradas,
-      telegramMonitorados: Array.isArray(dados.telegramMonitorados)
-        ? dados.telegramMonitorados
-        : [],
-      monitoramento: {
-        ...padrao.monitoramento,
-        ...(dados.monitoramento && typeof dados.monitoramento === "object" ? dados.monitoramento : {})
-      },
-      categoriasPermitidas: Array.isArray(dados.categoriasPermitidas)
-        ? dados.categoriasPermitidas
-        : [],
-      templateMidia: {
-        ...padrao.templateMidia,
-        ...(dados.templateMidia && typeof dados.templateMidia === "object" ? dados.templateMidia : {})
-      }
-    };
-  } catch (e) {
-    console.log("[RADAR] Falha ao carregar config:", {
-      clienteId,
-      erro: e.message
-    });
-
-    return padrao;
-  }
-}
-
-function normalizarGrupoWhatsappRadar(grupo = {}, sessaoIdPadrao = "") {
-  if (typeof grupo === "string" || typeof grupo === "number") {
-    const id = textoRadarId(grupo);
-    return id ? { id, grupoId: id, nome: id, sessaoId: sessaoIdPadrao } : null;
-  }
-
-  if (!grupo || typeof grupo !== "object") return null;
-
-  const id = textoRadarId(
-    grupo.id ||
-    grupo.grupoId ||
-    grupo.value ||
-    grupo.jid ||
-    grupo.remoteJid ||
-    grupo.nome ||
-    grupo.titulo ||
-    grupo.label ||
-    ""
-  );
-
-  if (!id) return null;
-
-  const nome = textoRadarId(
-    grupo.nome ||
-    grupo.titulo ||
-    grupo.label ||
-    grupo.subject ||
-    grupo.name ||
-    id
-  );
-  const sessaoId = textoRadarId(grupo.sessaoId || grupo.origemSessaoId || grupo.sessionId || sessaoIdPadrao);
-
-  return {
-    ...grupo,
-    id: grupo.id || id,
-    grupoId: grupo.grupoId || id,
-    nome: nome || id,
-    sessaoId
-  };
-}
-
-function normalizarSessoesWhatsappMonitoradasRadar(dados = {}) {
-  const mapa = new Map();
-
-  const adicionarSessao = (sessaoIdEntrada = "", grupos = []) => {
-    const sessaoId = textoRadarId(sessaoIdEntrada);
-    if (!sessaoId) return;
-
-    const existentes = mapa.get(sessaoId) || [];
-    const gruposMapa = new Map(existentes.map(grupo => [chaveRadarId(grupo.grupoId || grupo.id || grupo.nome), grupo]));
-
-    for (const grupo of Array.isArray(grupos) ? grupos : []) {
-      const normalizado = normalizarGrupoWhatsappRadar(grupo, sessaoId);
-      const chave = chaveRadarId(normalizado?.grupoId || normalizado?.id || normalizado?.nome || "");
-      if (normalizado && chave) gruposMapa.set(chave, normalizado);
-    }
-
-    mapa.set(sessaoId, [...gruposMapa.values()]);
-  };
-
-  if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
-    for (const sessao of dados.sessoesWhatsappMonitoradas) {
-      if (!sessao || typeof sessao !== "object") continue;
-      adicionarSessao(sessao.sessaoId || sessao.id || sessao.sessionId, sessao.gruposMonitorados);
-    }
-  }
-
-  const gruposLegados = Array.isArray(dados.gruposMonitorados) ? dados.gruposMonitorados : [];
-  if (gruposLegados.length) {
-    const gruposPorSessao = new Map();
-    for (const grupo of gruposLegados) {
-      const sessaoId = textoRadarId(
-        (grupo && typeof grupo === "object" && (grupo.sessaoId || grupo.origemSessaoId || grupo.sessionId)) ||
-        dados.sessaoWhatsappId ||
-        ""
-      );
-      if (!sessaoId) continue;
-      const lista = gruposPorSessao.get(sessaoId) || [];
-      lista.push(grupo);
-      gruposPorSessao.set(sessaoId, lista);
-    }
-
-    if (!gruposPorSessao.size && dados.sessaoWhatsappId) {
-      gruposPorSessao.set(textoRadarId(dados.sessaoWhatsappId), gruposLegados);
-    }
-
-    for (const [sessaoId, grupos] of gruposPorSessao.entries()) {
-      adicionarSessao(sessaoId, grupos);
-    }
-  }
-
-  return [...mapa.entries()]
-    .map(([sessaoId, gruposMonitorados]) => ({
-      sessaoId,
-      gruposMonitorados: gruposMonitorados.map(grupo => ({ ...grupo, sessaoId }))
-    }))
-    .filter(sessao => sessao.sessaoId && sessao.gruposMonitorados.length > 0);
-}
-
-function achatarGruposWhatsappMonitoradosRadar(sessoesWhatsappMonitoradas = []) {
-  const grupos = [];
-
-  for (const sessao of Array.isArray(sessoesWhatsappMonitoradas) ? sessoesWhatsappMonitoradas : []) {
-    const sessaoId = textoRadarId(sessao?.sessaoId || "");
-    for (const grupo of Array.isArray(sessao?.gruposMonitorados) ? sessao.gruposMonitorados : []) {
-      const normalizado = normalizarGrupoWhatsappRadar(grupo, sessaoId);
-      if (normalizado) grupos.push(normalizado);
-    }
-  }
-
-  return grupos;
-}
-
-function mesclarSessoesWhatsappMonitoradasRadar(atual = [], entrada = []) {
-  const mapa = new Map();
-
-  for (const sessao of Array.isArray(atual) ? atual : []) {
-    const sessaoId = textoRadarId(sessao?.sessaoId || "");
-    if (!sessaoId) continue;
-    mapa.set(sessaoId, {
-      sessaoId,
-      gruposMonitorados: Array.isArray(sessao.gruposMonitorados)
-        ? sessao.gruposMonitorados.map(grupo => normalizarGrupoWhatsappRadar(grupo, sessaoId)).filter(Boolean)
-        : []
-    });
-  }
-
-  for (const sessao of Array.isArray(entrada) ? entrada : []) {
-    const sessaoId = textoRadarId(sessao?.sessaoId || sessao?.id || sessao?.sessionId || "");
-    if (!sessaoId) continue;
-    const grupos = Array.isArray(sessao.gruposMonitorados)
-      ? sessao.gruposMonitorados.map(grupo => normalizarGrupoWhatsappRadar(grupo, sessaoId)).filter(Boolean)
-      : [];
-
-    if (grupos.length) {
-      mapa.set(sessaoId, { sessaoId, gruposMonitorados: grupos });
-    } else {
-      mapa.delete(sessaoId);
-    }
-  }
-
-  return [...mapa.values()];
-}
-
-function numeroRadarConfig(valor, fallback) {
-  const numero = Number(valor);
-  return Number.isFinite(numero) && numero >= 0 ? numero : fallback;
-}
-
-function normalizarHoraRadar(valor, fallback) {
-  const texto = String(valor || "").trim();
-  return /^\d{2}:\d{2}$/.test(texto) ? texto : fallback;
-}
-
-function salvarRadarConfigCliente(clienteId = "admin", dados = {}) {
-  const padrao = radarConfigPadrao();
-  const atual = carregarRadarConfigCliente(clienteId);
-  const possuiCampo = campo => Object.prototype.hasOwnProperty.call(dados, campo);
-  const monitoramentoBase = atual.monitoramento && typeof atual.monitoramento === "object"
-    ? atual.monitoramento
-    : padrao.monitoramento;
-  const monitoramento = dados.monitoramento && typeof dados.monitoramento === "object"
-    ? { ...monitoramentoBase, ...dados.monitoramento }
-    : monitoramentoBase;
-  const templateMidiaBase = atual.templateMidia && typeof atual.templateMidia === "object"
-    ? atual.templateMidia
-    : padrao.templateMidia;
-  const templateMidia = dados.templateMidia && typeof dados.templateMidia === "object"
-    ? { ...templateMidiaBase, ...dados.templateMidia }
-    : templateMidiaBase;
-  const sessaoWhatsappId = possuiCampo("sessaoWhatsappId")
-    ? textoRadarId(dados.sessaoWhatsappId || "")
-    : textoRadarId(atual.sessaoWhatsappId || "");
-  let sessoesWhatsappMonitoradas = Array.isArray(atual.sessoesWhatsappMonitoradas)
-    ? atual.sessoesWhatsappMonitoradas
-    : normalizarSessoesWhatsappMonitoradasRadar(atual);
-
-  if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
-    const entrada = normalizarSessoesWhatsappMonitoradasRadar({
-      sessoesWhatsappMonitoradas: dados.sessoesWhatsappMonitoradas
-    });
-    const sessoesEntrada = new Set((dados.sessoesWhatsappMonitoradas || [])
-      .map(sessao => textoRadarId(sessao?.sessaoId || sessao?.id || sessao?.sessionId || ""))
-      .filter(Boolean));
-    const vazias = [...sessoesEntrada]
-      .filter(sessaoId => !entrada.some(sessao => sessao.sessaoId === sessaoId))
-      .map(sessaoId => ({ sessaoId, gruposMonitorados: [] }));
-
-    sessoesWhatsappMonitoradas = mesclarSessoesWhatsappMonitoradasRadar(
-      sessoesWhatsappMonitoradas,
-      [...entrada, ...vazias]
-    );
-  }
-
-  if (Array.isArray(dados.gruposMonitorados)) {
-    const sessaoDestino =
-      sessaoWhatsappId ||
-      dados.gruposMonitorados
-        .map(grupo => textoRadarId(grupo?.sessaoId || grupo?.origemSessaoId || grupo?.sessionId || ""))
-        .find(Boolean) ||
-      atual.sessaoWhatsappId ||
-      "";
-    const entradaLegada = normalizarSessoesWhatsappMonitoradasRadar({
-      sessaoWhatsappId: sessaoDestino,
-      gruposMonitorados: dados.gruposMonitorados
-    });
-    const possuiGrupoSessaoDestino = entradaLegada.some(sessao => sessao.sessaoId === sessaoDestino);
-
-    sessoesWhatsappMonitoradas = mesclarSessoesWhatsappMonitoradasRadar(
-      sessoesWhatsappMonitoradas,
-      entradaLegada.length
-        ? [
-            ...entradaLegada,
-            ...(sessaoDestino && !possuiGrupoSessaoDestino ? [{ sessaoId: sessaoDestino, gruposMonitorados: [] }] : [])
-          ]
-        : [{ sessaoId: sessaoDestino, gruposMonitorados: [] }]
-    );
-  }
-
-  const gruposMonitorados = achatarGruposWhatsappMonitoradosRadar(sessoesWhatsappMonitoradas);
-  const payload = {
-    clienteId,
-    monitoramentoAtivo: possuiCampo("monitoramentoAtivo")
-      ? dados.monitoramentoAtivo !== false
-      : atual.monitoramentoAtivo !== false,
-    sessaoWhatsappId: sessaoWhatsappId || sessoesWhatsappMonitoradas[0]?.sessaoId || "",
-    gruposMonitorados,
-    sessoesWhatsappMonitoradas,
-    telegramMonitorados: Array.isArray(dados.telegramMonitorados)
-      ? dados.telegramMonitorados
-      : Array.isArray(atual.telegramMonitorados)
-        ? atual.telegramMonitorados
-        : [],
-    monitoramento: {
-      horaInicial: normalizarHoraRadar(monitoramento.horaInicial, padrao.monitoramento.horaInicial),
-      horaFinal: normalizarHoraRadar(monitoramento.horaFinal, padrao.monitoramento.horaFinal),
-      intervaloMinutos: numeroRadarConfig(monitoramento.intervaloMinutos, padrao.monitoramento.intervaloMinutos),
-      maxPorDia: numeroRadarConfig(monitoramento.maxPorDia, padrao.monitoramento.maxPorDia)
-    },
-    categoriasPermitidas: Array.isArray(dados.categoriasPermitidas)
-      ? dados.categoriasPermitidas.map(c => String(c || "").trim()).filter(Boolean)
-      : Array.isArray(atual.categoriasPermitidas)
-        ? atual.categoriasPermitidas
-        : [],
-    templateMidia: {
-      template: String(templateMidia.template || padrao.templateMidia.template),
-      tipoMidia: String(templateMidia.tipoMidia || padrao.templateMidia.tipoMidia)
-    },
-    atualizadoEm: new Date().toISOString()
-  };
-
-  writeClienteJson(clienteId, "radar-config.json", payload);
-
-  return payload;
-}
-
-function textoRadarId(valor = "") {
-  return String(valor || "").trim();
-}
-
-function chaveRadarId(valor = "") {
-  return normalizarTexto(textoRadarId(valor));
-}
-
-function chaveGrupoWhatsappTecnicaRadar(valor = "") {
-  const chave = chaveRadarId(valor);
-  return chave.includes("@g.us") ? chave : "";
-}
-
-function extrairIdsMonitoradosRadar(lista = [], campos = []) {
-  const ids = new Set();
-
-  for (const item of Array.isArray(lista) ? lista : []) {
-    if (typeof item === "string" || typeof item === "number") {
-      const chave = chaveRadarId(item);
-      if (chave) ids.add(chave);
-      continue;
-    }
-
-    if (!item || typeof item !== "object") continue;
-
-    for (const campo of campos) {
-      const chave = chaveRadarId(item[campo]);
-      if (chave) ids.add(chave);
-    }
-  }
-
-  return ids;
-}
-
-function extrairIdsWhatsappMonitoradosRadar(lista = []) {
-  const ids = new Set();
-  const camposTecnicos = ["id", "grupoId", "value", "jid", "remoteJid"];
-
-  for (const item of Array.isArray(lista) ? lista : []) {
-    if (typeof item === "string" || typeof item === "number") {
-      const chave = chaveGrupoWhatsappTecnicaRadar(item);
-      if (chave) ids.add(chave);
-      continue;
-    }
-
-    if (!item || typeof item !== "object") continue;
-
-    for (const campo of camposTecnicos) {
-      const chave = chaveGrupoWhatsappTecnicaRadar(item[campo]);
-      if (chave) ids.add(chave);
-    }
-  }
-
-  return ids;
-}
-
-function extrairIdsTelegramMonitoradosRadar(lista = []) {
-  const ids = new Set();
-
-  for (const item of Array.isArray(lista) ? lista : []) {
-    if (!item || typeof item !== "object" || item.ativo !== true) continue;
-
-    for (const campo of ["id", "chatId", "grupoId"]) {
-      const chave = chaveRadarId(item[campo]);
-      if (chave) ids.add(chave);
-    }
-  }
-
-  return ids;
-}
-
-function temFontesMonitoradasRadar(configRadar = {}) {
-  return (
-    (Array.isArray(configRadar.sessoesWhatsappMonitoradas) && configRadar.sessoesWhatsappMonitoradas.some(sessao => Array.isArray(sessao?.gruposMonitorados) && sessao.gruposMonitorados.length > 0)) ||
-    (Array.isArray(configRadar.gruposMonitorados) && configRadar.gruposMonitorados.length > 0) ||
-    (Array.isArray(configRadar.telegramMonitorados) && configRadar.telegramMonitorados.length > 0)
-  );
-}
-
-function minutosHoraRadar(valor = "") {
-  const partes = String(valor || "").split(":").map(Number);
-  if (partes.length !== 2 || partes.some(n => !Number.isFinite(n))) return null;
-  const [hora, minuto] = partes;
-  if (hora < 0 || hora > 23 || minuto < 0 || minuto > 59) return null;
-  return hora * 60 + minuto;
-}
-
-function radarDentroHorarioMonitoramento(configRadar = {}) {
-  const cfg = configRadar.monitoramento || {};
-  const inicio = minutosHoraRadar(cfg.horaInicial);
-  const fim = minutosHoraRadar(cfg.horaFinal);
-
-  if (inicio === null || fim === null) return true;
-
-  const agora = new Date();
-  const horaBR = new Intl.DateTimeFormat("pt-BR", {
-    timeZone: "America/Sao_Paulo",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  }).format(agora);
-  const atual = minutosHoraRadar(horaBR);
-
-  if (atual === null) return true;
-  if (inicio === fim) return true;
-  if (inicio < fim) return atual >= inicio && atual <= fim;
-
-  return atual >= inicio || atual <= fim;
-}
-
-function totalRadarCapturadoHoje() {
-  const hoje = new Date().toLocaleDateString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-  });
-
-  return lerFilasRadarSomenteLeitura().filter(item => {
-    if (item.origem !== "radar" && item.radar !== true) return false;
-
-    const data = String(item.capturadaEm || item.dataEntradaRadar || item.dataEntradaFila || "");
-    return data.includes(hoje);
-  }).length;
-}
-
-function radarPodeCapturarAgora(configRadar = {}) {
-  if (configRadar.monitoramentoAtivo === false) {
-    return { ok: false, motivo: "radar_monitoramento_inativo" };
-  }
-
-  if (!radarDentroHorarioMonitoramento(configRadar)) {
-    return { ok: false, motivo: "fora_do_horario_monitoramento" };
-  }
-
-  const maxPorDia = Number(configRadar.monitoramento?.maxPorDia || 0);
-  if (maxPorDia > 0 && totalRadarCapturadoHoje() >= maxPorDia) {
-    return { ok: false, motivo: "limite_diario_radar_atingido" };
-  }
-
-  return { ok: true };
-}
-
-function motivoRadarDebug(motivo = "") {
-  const chave = String(motivo || "").trim();
-  const mapa = {
-    integracao_marketplace_ausente: "sem integração",
-    sem_destino_compativel: "sem destino compatível",
-    oferta_duplicada: "duplicada",
-    oferta_repetida_na_memoria: "memória",
-    limite_radar_pendente_total: "limite Radar",
-    limite_radar_com_cupom: "limite Radar",
-    limite_radar_sem_cupom: "limite Radar",
-    limite_diario_radar_atingido: "limite Radar",
-    marketplace_nao_permitido_no_plano: "marketplace bloqueado",
-    marketplace_desativado_no_cliente: "marketplace bloqueado",
-    fora_do_horario_monitoramento: "horário fora da janela",
-    categoria_nao_permitida_radar: "categoria bloqueada",
-    link_afiliado_nao_gerado: "link afiliado inválido",
-    link_afiliado_igual_original: "link afiliado inválido",
-    link_original_nao_resolvido: "link original não resolvido",
-    link_produto_ml_nao_encontrado: "link_produto_ml_nao_encontrado",
-    importacao_incompleta: "importacao_incompleta",
-    oferta_sem_cupom_ou_desconto_relevante: "oferta sem cupom ou desconto relevante"
-  };
-
-  return mapa[chave] || chave || "motivo_nao_informado";
-}
-
-function logRadarRejeitado(motivo = "", contexto = {}) {
-  console.log(`[RADAR] rejeitado: ${motivoRadarDebug(motivo)}`, {
-    motivoTecnico: motivo || "",
-    ...contexto
-  });
-}
-
-function dataHoraRadarOferta(oferta = {}) {
-  return textoRadarId(
-    oferta.dataEntradaRadar ||
-    oferta.capturadaEm ||
-    oferta.dataCaptura ||
-    oferta.dataEntradaFila ||
-    oferta.criadoEm ||
-    oferta.createdAt ||
-    oferta.data ||
-    ""
-  );
-}
-
-function obterOrigemOfertaRadar(oferta = {}) {
-  const origemTipoRaw =
-    oferta.origemTipo ||
-    oferta.tipoOrigem ||
-    oferta.tipoFonte ||
-    oferta.canalOrigem ||
-    oferta.canal ||
-    "";
-
-  const origemGrupoId = textoRadarId(
-    oferta.origemGrupoId ||
-    oferta.grupoId ||
-    oferta.chatId ||
-    oferta.remoteJid ||
-    oferta.jid ||
-    ""
-  );
-
-  const origemGrupoNome = textoRadarId(
-    oferta.origemGrupoNome ||
-    oferta.grupoNome ||
-    oferta.nomeGrupo ||
-    oferta.chatNome ||
-    oferta.nomeCanal ||
-    oferta.canalNome ||
-    ""
-  );
-
-  const origemSessaoId = textoRadarId(
-    oferta.origemSessaoId ||
-    oferta.sessaoId ||
-    oferta.idSessao ||
-    oferta.sessionId ||
-    ""
-  );
-
-  const origemTipoNormalizada = normalizarTexto(origemTipoRaw);
-  const origemLegada = normalizarTexto(oferta.origem || "");
-  let origemTipo = "farejador";
-
-  if (origemTipoNormalizada.includes("telegram")) {
-    origemTipo = "telegram";
-  } else if (origemTipoNormalizada.includes("whatsapp")) {
-    origemTipo = "whatsapp";
-  } else if (origemTipoNormalizada.includes("manual") || origemLegada === "manual") {
-    origemTipo = "manual";
-  } else if (origemTipoNormalizada.includes("farejador") || origemLegada === "farejador") {
-    origemTipo = "farejador";
-  } else if (origemGrupoId || origemGrupoNome || origemSessaoId) {
-    origemTipo = "whatsapp";
-  }
-
-  return {
-    origemGrupoId,
-    origemGrupoNome,
-    origemSessaoId,
-    origemTipo
-  };
-}
-
-function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
-  if (!temFontesMonitoradasRadar(configRadar)) {
-    return { ok: false, motivo: "radar_sem_fontes_monitoradas" };
-  }
-
-  const origem = obterOrigemOfertaRadar(oferta);
-  const grupoId = chaveRadarId(origem.origemGrupoId);
-  const grupoNome = chaveRadarId(origem.origemGrupoNome);
-  const sessaoId = chaveRadarId(origem.origemSessaoId);
-
-  if (!["whatsapp", "telegram"].includes(origem.origemTipo)) {
-    return {
-      ok: false,
-      motivo: "origem_nao_monitoravel",
-      origem
-    };
-  }
-
-  if (!grupoId && !grupoNome) {
-    return {
-      ok: false,
-      motivo: "oferta_sem_origem_monitorada",
-      origem
-    };
-  }
-
-  if (origem.origemTipo === "telegram") {
-    const telegramIds = extrairIdsTelegramMonitoradosRadar(configRadar.telegramMonitorados);
-
-    const ok = grupoId && telegramIds.has(grupoId);
-
-    return {
-      ok,
-      motivo: ok ? "" : "telegram_nao_monitorado",
-      origem
-    };
-  }
-
-  const sessoesWhatsappMonitoradas = Array.isArray(configRadar.sessoesWhatsappMonitoradas) && configRadar.sessoesWhatsappMonitoradas.length
-    ? configRadar.sessoesWhatsappMonitoradas
-    : normalizarSessoesWhatsappMonitoradasRadar(configRadar);
-
-  const sessaoMonitorada = sessoesWhatsappMonitoradas.find(sessao =>
-    chaveRadarId(sessao?.sessaoId || "") === sessaoId
-  );
-  let grupoMonitorado = false;
-  let totalGruposMonitoradosSessao = 0;
-
-  if (sessaoMonitorada) {
-    const gruposIds = extrairIdsWhatsappMonitoradosRadar(sessaoMonitorada.gruposMonitorados);
-    totalGruposMonitoradosSessao = gruposIds.size;
-    grupoMonitorado = Boolean(grupoId && gruposIds.has(grupoId));
-  }
-
-  const ok = Boolean(sessaoMonitorada && grupoMonitorado);
-
-  return {
-    ok,
-    motivo: ok ? "" : "grupo_whatsapp_nao_monitorado",
-    origem,
-    diagnostico: {
-      sessaoEncontrada: Boolean(sessaoMonitorada),
-      totalGruposMonitoradosSessao,
-      validacao: "sessaoId+remoteJid"
-    }
-  };
-}
-
-function normalizarCupomRadar(oferta = {}) {
-  const cupom = textoRadarId(oferta.cupom || oferta.codigoCupom || "").toUpperCase();
-  const bloqueados = new Set([
-    "VER NO APP",
-    "COPIADO",
-    "APPLIED",
-    "APPEARANCE",
-    "APPLINK",
-    "CUPOM",
-    "DESCONTO",
-    "CONFIRA",
-    "RESGATE",
-    "COMPRAR",
-    "COMPRE",
-    "VER OFERTA",
-    "PEGAR OFERTA",
-    "ABRIR OFERTA",
-    "BOTAO",
-    "BUTTON",
-    "TEMA",
-    "APLICAR",
-    "VALIDO"
-  ]);
-  const cupomConfirmado = Boolean(
-    cupom &&
-    !bloqueados.has(cupom) &&
-    !/^(VER|CONFIRA|COMPR|PEGAR|ABRIR|APLICAR|RESGAT)/i.test(cupom) &&
-    /^[A-Z0-9][A-Z0-9_-]{3,39}$/.test(cupom)
-  );
-  const avisoCupom = textoRadarId(oferta.avisoCupom || oferta.aviso_cupom || "");
-  const possivelCupom = !cupomConfirmado && Boolean(cupom || avisoCupom);
-  const tipoCupom = textoRadarId(oferta.tipoCupom || oferta.cupomTipo || "");
-  const valorCupom = textoRadarId(oferta.valorCupom || oferta.cupomValor || "");
-  const percentualCupom = textoRadarId(oferta.percentualCupom || oferta.cupomPercentual || "");
-  const descontoPix = textoRadarId(oferta.descontoPix || "");
-  const descontoApp = textoRadarId(oferta.descontoApp || "");
-  const beneficioExtra = textoRadarId(oferta.beneficioExtra || "");
-
-  return {
-    cupom: cupomConfirmado ? cupom : "",
-    cupomConfirmado,
-    possivelCupom,
-    tipoCupom,
-    valorCupom,
-    percentualCupom,
-    descontoPix,
-    descontoApp,
-    beneficioExtra,
-    avisoCupom: cupomConfirmado
-      ? avisoCupom
-      : (avisoCupom || (cupom ? `Possivel cupom: ${cupom}. Conferir antes de publicar.` : ""))
-  };
-}
-
-function avisoCupomGenericoRadar(texto = "") {
-  const normalizado = normalizarTexto(texto);
-
-  return (
-    !normalizado ||
-    normalizado.includes("ha cupom desconto extra na pagina") ||
-    normalizado.includes("cupom disponivel na pagina") ||
-    normalizado.includes("confira cupom ou desconto") ||
-    normalizado.includes("verifique na pagina") ||
-    normalizado.includes("confira antes de finalizar") ||
-    normalizado.includes("resgate antes de finalizar")
-  );
-}
-
-function normalizarBeneficiosRadarOferta(oferta = {}) {
-  const cupomRadar = normalizarCupomRadar(oferta);
-  const avisoOriginal = textoRadarId(oferta.avisoCupom || "");
-  const avisoUtil = avisoCupomGenericoRadar(avisoOriginal) ? "" : avisoOriginal;
-  const textoBeneficio = normalizarTexto([
-    avisoOriginal,
-    cupomRadar.tipoCupom,
-    oferta.beneficioExtra,
-    oferta.descricaoBeneficio
-  ].filter(Boolean).join(" "));
-  const descontoPix =
-    cupomRadar.descontoPix ||
-    (/\bpix\b/.test(textoBeneficio) ? "Desconto PIX" : "");
-  const descontoApp =
-    cupomRadar.descontoApp ||
-    (/\b(app|aplicativo)\b/.test(textoBeneficio) ? "Oferta exclusiva App" : "");
-  const freteGratis = /frete gratis|frete free|frete 0/.test(textoBeneficio)
-    ? "Frete gratis"
-    : "";
-  const acumulavel = /acumulavel|acumula/.test(textoBeneficio)
-    ? "Cupom acumulavel"
-    : "";
-  const beneficioExtra =
-    cupomRadar.beneficioExtra ||
-    descontoPix ||
-    descontoApp ||
-    freteGratis ||
-    acumulavel ||
-    avisoUtil;
-
-  return {
-    cupom: cupomRadar.cupom,
-    avisoCupom: avisoUtil,
-    tipoCupom: cupomRadar.tipoCupom,
-    valorCupom: cupomRadar.valorCupom,
-    percentualCupom: cupomRadar.percentualCupom,
-    descontoPix,
-    descontoApp,
-    beneficioExtra,
-    cupomConfirmado: cupomRadar.cupomConfirmado,
-    possivelCupom: cupomRadar.possivelCupom && Boolean(avisoUtil || beneficioExtra)
-  };
-}
-
-async function enriquecerBeneficioRadarOferta(oferta = {}, contexto = {}) {
-  try {
-    const enriquecida = await aplicarCuponsAutomaticos(oferta, contexto);
-    return {
-      ...oferta,
-      ...(enriquecida || {})
-    };
-  } catch (e) {
-    console.log("[RADAR] beneficio nao enriquecido:", e.message);
-    return oferta;
-  }
-}
-
-function categoriaRadarReclassificada(oferta = {}) {
-  const texto = normalizarTexto([
-    oferta.titulo,
-    oferta.nome,
-    oferta.descricao,
-    oferta.termo
-  ].filter(Boolean).join(" "));
-
-  if (/mop|esfregao|rodo|vassoura|multiuso|desinfetante|detergente|desengordurante|amaciante|sabaoliquido|sabaoempo|lavaroupas|tiramanchas|alvejante|aguasanitaria|limpavidro|limpapiso|papelhigienico|kitlimpeza|refilmop|esponjalimpeza/.test(texto)) {
-    return "Limpeza";
-  }
-
-  if (/processadordealimentos|multiprocessador|liquidificador|mixer|batedeira/.test(texto)) {
-    return "Eletroport\u00e1teis";
-  }
-
-  return classificarCategoriaOferta({
-    ...oferta,
-    categoria: "",
-    categoriaProduto: ""
-  }, oferta.titulo || oferta.nome || oferta.termo || "");
-}
-
-function chaveDuplicidadeRadar(oferta = {}) {
-  const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
-  const links = [
-    oferta.linkOriginal,
-    oferta.linkAfiliado,
-    oferta.link,
-    oferta.linkFinal
-  ]
-    .map(link => textoRadarId(link).toLowerCase())
-    .filter(Boolean);
-
-  return [
-    ...links.map(link => `link:${link}`),
-    titulo ? `titulo:${titulo}` : ""
-  ].filter(Boolean);
-}
-
-function deduplicarOportunidadesRadar(oportunidades = []) {
-  const vistos = new Set();
-  const unicas = [];
-
-  for (const oportunidade of oportunidades) {
-    const chaves = chaveDuplicidadeRadar(oportunidade);
-    if (chaves.some(chave => vistos.has(chave))) continue;
-
-    for (const chave of chaves) {
-      vistos.add(chave);
-    }
-
-    unicas.push(oportunidade);
-  }
-
-  return unicas;
-}
-
-function validarSessaoRadarCliente(clienteId = "admin", sessaoWhatsappId = "") {
-  const sessaoInformada = String(sessaoWhatsappId || "").trim();
-
-  if (!sessaoInformada) {
-    return { ok: true, sessaoWhatsappId: "" };
-  }
-
-  const sessaoNormalizada = normalizarSessaoId(clienteId, sessaoInformada);
-  const existe =
-    sessoesMeta[sessaoInformada] ||
-    sessoesMeta[sessaoNormalizada] ||
-    statusSessao[sessaoInformada] ||
-    statusSessao[sessaoNormalizada] ||
-    sessoes[sessaoInformada] ||
-    sessoes[sessaoNormalizada];
-
-  if (!existe) {
-    return { ok: false, motivo: "sessao_whatsapp_nao_encontrada" };
-  }
-
-  return {
-    ok: true,
-    sessaoWhatsappId: sessoesMeta[sessaoInformada] || statusSessao[sessaoInformada] || sessoes[sessaoInformada]
-      ? sessaoInformada
-      : sessaoNormalizada
-  };
-}
-
-function normalizarMarketplaceRadar(marketplace = "") {
-  const mp = normalizarTexto(marketplace || "");
-  return mp === "kabum" ? "awin" : mp;
-}
-
-function destinosClienteNormalizados(clienteId = "admin") {
-  const destinosCliente = destinosPorCliente?.[clienteId];
-
-  if (Array.isArray(destinosCliente)) {
-    return destinosCliente;
-  }
-
-  return Object.values(destinosCliente || {})
-    .filter(Array.isArray)
-    .flat();
-}
-
-function obterClienteIdAdminMaster() {
-  return usuarios.find(u => u?.ativo !== false && u.papel === "admin_master")?.id || "admin";
-}
-
-function carregarRadarConfigAdminMaster() {
-  return carregarRadarConfigCliente(obterClienteIdAdminMaster());
-}
-
-function getUsuarioClienteRadar(clienteId = "admin") {
-  const cid = String(clienteId || "admin");
-  const usuario = usuarios.find(u => String(u.id) === cid);
-
-  if (usuario) return usuario;
-
-  if (cid === "admin") {
-    return {
-      id: "admin",
-      nome: "Admin",
-      papel: "admin_master",
-      plano: "master",
-      ativo: true
-    };
-  }
-
-  return null;
-}
-
-function listarClientesElegiveisRadar() {
-  const mapa = new Map();
-  const adminCliente = getUsuarioClienteRadar("admin");
-
-  if (adminCliente?.ativo !== false) {
-    mapa.set("admin", {
-      ...adminCliente,
-      id: "admin"
-    });
-  }
-
-  for (const usuario of usuarios) {
-    if (!usuario?.ativo) continue;
-
-    const clienteId = String(usuario.id || "");
-    if (!clienteId) continue;
-
-    if (usuario.papel === "admin_master" && clienteId !== "admin") {
-      continue;
-    }
-
-    mapa.set(clienteId, usuario);
-  }
-
-  return [...mapa.values()];
-}
-
-function extrairMensagemInternaRadar(conteudo = {}) {
-  return (
-    conteudo.ephemeralMessage?.message ||
-    conteudo.viewOnceMessage?.message ||
-    conteudo.viewOnceMessageV2?.message ||
-    conteudo.documentWithCaptionMessage?.message ||
-    conteudo
-  );
-}
-
-function extrairTextoMensagemRadar(mensagem = {}) {
-  const conteudo = extrairMensagemInternaRadar(mensagem.message || {});
-
-  return [
-    conteudo.conversation,
-    conteudo.extendedTextMessage?.text,
-    conteudo.imageMessage?.caption,
-    conteudo.videoMessage?.caption,
-    conteudo.documentMessage?.caption,
-    conteudo.buttonsResponseMessage?.selectedDisplayText,
-    conteudo.listResponseMessage?.title,
-    conteudo.templateButtonReplyMessage?.selectedDisplayText
-  ]
-    .filter(Boolean)
-    .join("\n")
-    .trim();
-}
-
-function limparLinkRadar(link = "") {
-  return radarCupomMensagem.limparLinkRadar(link);
-}
-
-function extrairLinksRadar(texto = "") {
-  return radarCupomMensagem.extrairLinksRadar(texto);
-}
-
-function normalizarCupomMensagemRadar(cupom = "") {
-  return radarCupomMensagem.normalizarCupomMensagemRadar(cupom);
-}
-
-function extrairCupomTextoRadar(texto = "") {
-  return radarCupomMensagem.extrairCupomTextoRadar(texto);
-}
-
-function trechoProximoLinkRadar(texto = "", link = "") {
-  return radarCupomMensagem.trechoProximoLinkRadar(texto, link);
-}
-
-function textoIndicaResgateCupomRadar(texto = "") {
-  return radarCupomMensagem.textoIndicaResgateCupomRadar(texto);
-}
-
-function analisarBeneficiosMensagemRadar(texto = "", links = []) {
-  return radarCupomMensagem.analisarBeneficiosMensagemRadar(texto, links);
-}
-
-function obterNomeGrupoRadar(sessaoId = "", grupoId = "") {
-  const grupos = gruposPorSessao[sessaoId] || [];
-  const grupo = grupos.find(g =>
-    [g.id, g.grupoId, g.value, g.jid, g.remoteJid]
-      .filter(Boolean)
-      .some(valor => String(valor) === String(grupoId))
-  );
-
-  return grupo?.nome || grupo?.name || grupo?.subject || grupo?.titulo || grupo?.label || "";
-}
-
-function detectarMarketplaceRadarLink(url = "") {
-  const urlLower = String(url || "").toLowerCase();
-
-  if (urlLower.includes("go.promozone.ai/mercadolivre") || urlLower.includes("promozone") && urlLower.includes("mercadolivre")) {
-    return "mercadolivre";
-  }
-
-  if (urlLower.includes("go.promozone.ai/shopee") || urlLower.includes("promozone") && urlLower.includes("shopee")) {
-    return "shopee";
-  }
-
-  if (urlLower.includes("go.promozone.ai/amazon") || urlLower.includes("promozone") && urlLower.includes("amazon")) {
-    return "amazon";
-  }
-
-  if (urlLower.includes("mercadolivre.com") || urlLower.includes("mercadolivre.com.br") || urlLower.includes("meli.la")) {
-    return "mercadolivre";
-  }
-
-  if (urlLower.includes("shopee.com") || urlLower.includes("s.shopee.")) {
-    return "shopee";
-  }
-
-  if (urlLower.includes("amazon.") || urlLower.includes("amzn.to")) {
-    return "amazon";
-  }
-
-  if (urlLower.includes("aliexpress.")) {
-    return "aliexpress";
-  }
-
-  if (urlLower.includes("kabum.com.br")) {
-    return "kabum";
-  }
-
-  if (urlLower.includes("awin1.com") || urlLower.includes("awin.com")) {
-    return "awin";
-  }
-
-  return detectarMarketplaceManual(url, "");
-}
-
-function extrairAmazonAsinRadar(pathname = "") {
-  const match = String(pathname || "").match(/\/(?:dp|gp\/product|product)\/([A-Z0-9]{10})(?:[/?]|$)/i);
-  return match?.[1] || "";
-}
-
-function limparUrlProdutoRadar(url = "", marketplace = "") {
-  const mp = normalizarMarketplaceRadar(marketplace || detectarMarketplaceRadarLink(url));
-
-  try {
-    const parsed = new URL(url);
-    parsed.hash = "";
-
-    if (mp === "amazon") {
-      const asin = extrairAmazonAsinRadar(parsed.pathname);
-      if (!asin) return "";
-      parsed.pathname = `/dp/${asin}`;
-      parsed.search = "";
-      return parsed.toString();
-    }
-
-    if (mp === "shopee") {
-      parsed.search = "";
-      return parsed.toString();
-    }
-
-    if (mp === "mercadolivre") {
-      parsed.search = "";
-      return parsed.toString();
-    }
-
-    if (mp === "aliexpress") {
-      const itemMatch = parsed.pathname.match(/\/item\/(\d+)\.html/i);
-      if (itemMatch?.[1]) {
-        parsed.pathname = `/item/${itemMatch[1]}.html`;
-      }
-      parsed.search = "";
-      return parsed.toString();
-    }
-
-    if (mp === "kabum" || mp === "awin") {
-      parsed.search = "";
-      return parsed.toString();
-    }
-
-    parsed.search = "";
-    return parsed.toString();
-  } catch {
-    return "";
-  }
-}
-
-function isUrlIntermediariaMercadoLivreRadar(url = "") {
-  try {
-    const parsed = new URL(url);
-    const host = parsed.hostname.toLowerCase();
-    const pathUrl = parsed.pathname.toLowerCase();
-
-    if (!host.includes("mercadolivre.com")) return false;
-    if (host.includes("produto.mercadolivre.com.br") && /\/mlb-?\d+/i.test(parsed.pathname)) return false;
-    if (/\/p\/mlb/i.test(pathUrl)) return false;
-
-    return (
-      pathUrl.startsWith("/social/") ||
-      pathUrl.startsWith("/ofertas/") ||
-      pathUrl === "/p" ||
-      pathUrl.startsWith("/p/") ||
-      pathUrl.includes("/campanha") ||
-      pathUrl.includes("/promocoes") ||
-      !/mlb-?\d+/i.test(parsed.pathname + parsed.search)
-    );
-  } catch {
-    return false;
-  }
-}
-
-function normalizarUrlExtraidaMercadoLivreRadar(link = "") {
-  const texto = String(link || "")
-    .replace(/\\u002F/g, "/")
-    .replace(/\\\//g, "/")
-    .replace(/&amp;/g, "&")
-    .trim();
-
-  if (!texto) return "";
-  if (texto.startsWith("//")) return `https:${texto}`;
-  if (texto.startsWith("/")) return `https://www.mercadolivre.com.br${texto}`;
-  if (texto.startsWith("www.")) return `https://${texto}`;
-  return texto;
-}
-
-function extrairProdutoMercadoLivreDeHtmlRadar(html = "") {
-  const texto = String(html || "");
-  const candidatos = [
-    ...texto.matchAll(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/gi),
-    ...texto.matchAll(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/gi),
-    ...texto.matchAll(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:url["']/gi),
-    ...texto.matchAll(/"permalink"\s*:\s*"([^"]*MLB[^"]*)"/gi),
-    ...texto.matchAll(/"url"\s*:\s*"([^"]*MLB[^"]*)"/gi),
-    ...texto.matchAll(/"canonicalUrl"\s*:\s*"([^"]*MLB[^"]*)"/gi),
-    ...texto.matchAll(/href=["']([^"']*(?:produto\.mercadolivre\.com\.br\/MLB|mercadolivre\.com\.br\/p\/MLB)[^"']*)["']/gi)
-  ]
-    .map(match => normalizarUrlExtraidaMercadoLivreRadar(match[1]))
-    .filter(Boolean);
-
-  const itemId =
-    texto.match(/\b(MLB-?\d{6,})\b/i)?.[1]?.replace("-", "").toUpperCase() ||
-    "";
-
-  if (itemId) {
-    candidatos.push(`https://produto.mercadolivre.com.br/${itemId}`);
-  }
-
-  for (const candidato of candidatos) {
-    const limpo = limparUrlProdutoRadar(candidato, "mercadolivre");
-    if (!limpo || isUrlIntermediariaMercadoLivreRadar(limpo)) continue;
-    if (/produto\.mercadolivre\.com\.br\/MLB-?\d+/i.test(limpo) || /mercadolivre\.com\.br\/p\/MLB/i.test(limpo)) {
-      return limpo;
-    }
-  }
-
-  return "";
-}
-
-function normalizarUrlExtraidaRadar(link = "", base = "") {
-  const texto = String(link || "")
-    .replace(/\\u002F/g, "/")
-    .replace(/\\\//g, "/")
-    .replace(/&amp;/g, "&")
-    .trim();
-
-  if (!texto) return "";
-
-  try {
-    if (texto.startsWith("//")) return `https:${texto}`;
-    if (texto.startsWith("http://") || texto.startsWith("https://")) return texto;
-    if (texto.startsWith("/") && base) return new URL(texto, base).toString();
-    if (texto.startsWith("www.")) return `https://${texto}`;
-  } catch {}
-
-  return texto;
-}
-
-function candidatosUrlHtmlRadar(html = "", base = "") {
-  const texto = String(html || "");
-  return [
-    ...texto.matchAll(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/gi),
-    ...texto.matchAll(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/gi),
-    ...texto.matchAll(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:url["']/gi),
-    ...texto.matchAll(/"canonicalUrl"\s*:\s*"([^"]+)"/gi),
-    ...texto.matchAll(/"permalink"\s*:\s*"([^"]+)"/gi),
-    ...texto.matchAll(/"url"\s*:\s*"([^"]+)"/gi),
-    ...texto.matchAll(/href=["']([^"']+)["']/gi)
-  ]
-    .map(match => normalizarUrlExtraidaRadar(match[1], base))
-    .filter(Boolean);
-}
-
-function extrairProdutoDeParametrosIntermediarioRadar(url = "", marketplace = "") {
-  const mp = normalizarMarketplaceRadar(marketplace || detectarMarketplaceRadarLink(url));
-  const chaves = [
-    "url",
-    "u",
-    "target",
-    "redirect",
-    "redirect_url",
-    "destination",
-    "dest",
-    "link",
-    "to",
-    "r"
-  ];
-
-  try {
-    const parsed = new URL(url);
-    const candidatos = [];
-
-    for (const chave of chaves) {
-      const valor = parsed.searchParams.get(chave);
-      if (!valor) continue;
-
-      let atual = valor;
-      for (let tentativas = 0; tentativas < 3; tentativas += 1) {
-        try {
-          atual = decodeURIComponent(atual);
-        } catch {
-          break;
-        }
-      }
-
-      candidatos.push(normalizarUrlExtraidaRadar(atual));
-    }
-
-    for (const candidato of candidatos.filter(Boolean)) {
-      const marketplaceCandidato = normalizarMarketplaceRadar(detectarMarketplaceRadarLink(candidato) || mp);
-      const limpo = limparUrlProdutoRadar(candidato, marketplaceCandidato);
-      if (limpo && !isUrlIntermediariaRadar(limpo, marketplaceCandidato)) {
-        return {
-          url: limpo,
-          marketplace: marketplaceCandidato
-        };
-      }
-    }
-  } catch {}
-
-  return null;
-}
-
-function isUrlProdutoShopeeRadar(url = "") {
-  try {
-    const parsed = new URL(url);
-    const host = parsed.hostname.toLowerCase();
-    const pathUrl = parsed.pathname.toLowerCase();
-    if (!host.includes("shopee.")) return false;
-    if (host.startsWith("s.")) return false;
-    if (pathUrl.includes("/voucher") || pathUrl.includes("/m/coupon") || pathUrl.includes("/buyer/login")) return false;
-    return /\/product\/\d+\/\d+/.test(pathUrl) || /-i\.\d+\.\d+/.test(pathUrl) || /i\.\d+\.\d+/.test(pathUrl);
-  } catch {
-    return false;
-  }
-}
-
-function isUrlProdutoAmazonRadar(url = "") {
-  try {
-    const parsed = new URL(url);
-    const host = parsed.hostname.toLowerCase();
-    if (!host.includes("amazon.")) return false;
-    return Boolean(extrairAmazonAsinRadar(parsed.pathname));
-  } catch {
-    return false;
-  }
-}
-
-function extrairProdutoMarketplaceDeHtmlRadar(html = "", marketplace = "", base = "") {
-  const mp = normalizarMarketplaceRadar(marketplace);
-  const candidatos = candidatosUrlHtmlRadar(html, base);
-  const texto = String(html || "");
-
-  if (mp === "mercadolivre") {
-    return extrairProdutoMercadoLivreDeHtmlRadar(html);
-  }
-
-  if (mp === "amazon") {
-    const asin =
-      candidatos.map(candidato => {
-        try {
-          return extrairAmazonAsinRadar(new URL(candidato).pathname);
-        } catch {
-          return "";
-        }
-      }).find(Boolean) ||
-      texto.match(/\b([A-Z0-9]{10})\b/)?.[1] ||
-      "";
-
-    if (asin) {
-      return `https://www.amazon.com.br/dp/${asin}`;
-    }
-  }
-
-  if (mp === "shopee") {
-    for (const candidato of candidatos) {
-      const limpo = limparUrlProdutoRadar(candidato, "shopee");
-      if (limpo && isUrlProdutoShopeeRadar(limpo)) {
-        return limpo;
-      }
-    }
-  }
-
-  return "";
-}
-
-function isUrlIntermediariaRadar(url = "", marketplace = "") {
-  const mp = normalizarMarketplaceRadar(marketplace || detectarMarketplaceRadarLink(url));
-
-  try {
-    const parsed = new URL(url);
-    const host = parsed.hostname.toLowerCase();
-    const pathUrl = parsed.pathname.toLowerCase();
-
-    if (host.includes("promozone") || host.includes("awin1.com") || host.includes("awin.com")) return true;
-
-    if (mp === "mercadolivre") {
-      if (!host.includes("mercadolivre.com") && !host.includes("meli.la")) return true;
-      return isUrlIntermediariaMercadoLivreRadar(url);
-    }
-
-    if (mp === "amazon") {
-      if (host.includes("amzn.to")) return true;
-      if (!host.includes("amazon.")) return true;
-      return !isUrlProdutoAmazonRadar(url);
-    }
-
-    if (mp === "shopee") {
-      if (host.startsWith("s.")) return true;
-      if (!host.includes("shopee.")) return true;
-      return !isUrlProdutoShopeeRadar(url);
-    }
-  } catch {
-    return true;
-  }
-
-  return false;
-}
-
-async function baixarHtmlRadar(url = "") {
-  try {
-    const resposta = await axios.get(url, {
-      maxRedirects: 3,
-      timeout: 7000,
-      responseType: "text",
-      maxContentLength: 1024 * 768,
-      validateStatus: () => true,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; OptimusRadar/1.0)",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-      }
-    });
-
-    return {
-      ok: resposta.status >= 200 && resposta.status < 400,
-      status: resposta.status,
-      html: resposta.data || "",
-      urlFinal:
-        resposta?.request?.res?.responseUrl ||
-        resposta?.request?._redirectable?._currentUrl ||
-        url
-    };
-  } catch (e) {
-    return {
-      ok: false,
-      erro: e.message,
-      html: "",
-      urlFinal: url
-    };
-  }
-}
-
-async function extrairProdutoMercadoLivreIntermediarioRadar(url = "") {
-  console.log("[RADAR] ML social detectado", { url });
-
-  try {
-    const resposta = await axios.get(url, {
-      maxRedirects: 3,
-      timeout: 7000,
-      responseType: "text",
-      maxContentLength: 1024 * 512,
-      validateStatus: () => true,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; OptimusRadar/1.0)",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-      }
-    });
-    const produto = extrairProdutoMercadoLivreDeHtmlRadar(resposta.data || "");
-
-    if (produto) {
-      console.log("[RADAR] ML produto extraído", {
-        intermediaria: url,
-        produto
-      });
-      return produto;
-    }
-  } catch (e) {
-    console.log("[RADAR] ML produto não encontrado", {
-      intermediaria: url,
-      erro: e.message
-    });
-    return "";
-  }
-
-  console.log("[RADAR] ML produto não encontrado", {
-    intermediaria: url
-  });
-  return "";
-}
-
-function importacaoRadarIncompleta(oferta = {}, marketplace = "") {
-  return Boolean(motivoImportacaoRadarIncompleta(oferta, marketplace));
-}
-
-function motivoImportacaoRadarIncompleta(oferta = {}, marketplace = "") {
-  const mp = normalizarMarketplaceRadar(marketplace || oferta.marketplace || "");
-  const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
-  const preco = textoRadarId(oferta.precoAtual || oferta.preco || "");
-  const categoria = normalizarTexto(oferta.categoria || oferta.categoriaProduto || "");
-
-  if (!titulo) return "importacao_sem_titulo";
-  if (mp === "mercadolivre" && titulo === "produto mercado livre") return "importacao_incompleta";
-  if (!preco) return "importacao_sem_preco";
-  if (!categoria || categoria === "mercado livre" || categoria === "nao identificada" || categoria === "nao identificado") return "importacao_sem_categoria";
-
-  return "";
-}
-
-function percentualDescontoRadar(oferta = {}, radar = {}) {
-  const valores = [
-    radar.descontoPercentual,
-    oferta.descontoPercentual,
-    oferta.desconto,
-    oferta.percentualDesconto
-  ];
-
-  for (const valor of valores) {
-    const numero = Number(String(valor || "").replace(",", ".").replace(/[^\d.]/g, ""));
-    if (Number.isFinite(numero) && numero > 0) return numero;
-  }
-
-  return 0;
-}
-
-function beneficioRadarUtil(oferta = {}, cupomRadar = {}) {
-  if (oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true) return false;
-
-  const campos = [
-    cupomRadar.avisoCupom,
-    cupomRadar.beneficioExtra,
-    cupomRadar.valorCupom,
-    cupomRadar.percentualCupom,
-    cupomRadar.descontoPix,
-    cupomRadar.descontoApp,
-    oferta.avisoCupom,
-    oferta.beneficioExtra,
-    oferta.linkResgateCupom
-  ];
-
-  const texto = normalizarTexto(campos.filter(Boolean).join(" "));
-  if (!texto || avisoCupomGenericoRadar(texto)) return false;
-
-  return Boolean(
-    cupomRadar.possivelCupom ||
-    cupomRadar.valorCupom ||
-    cupomRadar.percentualCupom ||
-    cupomRadar.descontoPix ||
-    cupomRadar.descontoApp ||
-    oferta.linkResgateCupom ||
-    /(?:r\$\s*)?\d+(?:[,.]\d{1,2})?\s*(?:off|%|por cento|reais)/i.test(campos.filter(Boolean).join(" ")) ||
-    /\b(frete gratis|pix|app|aplicativo|cashback|cupom|coupon|promocode|desconto)\b/.test(texto)
-  );
-}
-
-function oportunidadeRadarBoa(oferta = {}, radar = {}, cupomRadar = {}) {
-  if (cupomRadar.cupomConfirmado) return true;
-  if (beneficioRadarUtil(oferta, cupomRadar)) return true;
-  if (radar.decisao === "aprovado") return true;
-  if (Number(radar.radarScore || 0) >= 60) return true;
-  if (percentualDescontoRadar(oferta, radar) >= 15) return true;
-
-  return false;
-}
-
-async function resolverLinkOriginalRadar(url = "") {
-  const capturada = limparLinkRadar(url);
-
-  console.log("[RADAR-LINK] resolver inicio", {
-    capturada
-  });
-
-  if (!capturada) {
-    console.log("[RADAR-LINK] resolver falhou", {
-      motivo: "link_original_nao_resolvido",
-      capturada
-    });
-    return {
-      ok: false,
-      motivo: "link_original_nao_resolvido",
-      motivoTecnico: "link_original_nao_resolvido",
-      urlCapturada: capturada,
-      tipoLinkRadar: "produto"
-    };
-  }
-
-  try {
-    const resposta = await axios.get(capturada, {
-      maxRedirects: 5,
-      timeout: 7000,
-      validateStatus: () => true,
-      responseType: "stream",
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; OptimusRadar/1.0)",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-      }
-    });
-    if (resposta.data?.destroy) resposta.data.destroy();
-    const resolvida =
-      resposta?.request?.res?.responseUrl ||
-      resposta?.request?._redirectable?._currentUrl ||
-      capturada;
-    let marketplaceReal = detectarMarketplaceRadarLink(resolvida) || detectarMarketplaceRadarLink(capturada);
-    let linkOriginalLimpo = marketplaceReal
-      ? limparUrlProdutoRadar(resolvida, marketplaceReal)
-      : "";
-
-    console.log("[RADAR-LINK] redirecionamento resolvido", {
-      capturada,
-      resolvida,
-      marketplaceReal,
-      linkOriginalLimpo
-    });
-
-    if (marketplaceReal && isUrlIntermediariaRadar(linkOriginalLimpo || resolvida, marketplaceReal)) {
-      const produtoParametro = extrairProdutoDeParametrosIntermediarioRadar(resolvida, marketplaceReal) ||
-        extrairProdutoDeParametrosIntermediarioRadar(capturada, marketplaceReal);
-
-      if (produtoParametro?.url) {
-        marketplaceReal = produtoParametro.marketplace || marketplaceReal;
-        linkOriginalLimpo = produtoParametro.url;
-        console.log("[RADAR-LINK] produto extraido de parametro intermediario", {
-          capturada,
-          resolvida,
-          produto: linkOriginalLimpo,
-          marketplaceReal
-        });
-      }
-    }
-
-    if (marketplaceReal && isUrlIntermediariaRadar(linkOriginalLimpo || resolvida, marketplaceReal)) {
-      const pagina = await baixarHtmlRadar(resolvida);
-      const urlBaseExtracao = pagina.urlFinal || resolvida;
-      const produtoExtraido = pagina.ok
-        ? extrairProdutoMarketplaceDeHtmlRadar(pagina.html, marketplaceReal, urlBaseExtracao)
-        : "";
-
-      if (!produtoExtraido && marketplaceReal === "mercadolivre") {
-        const produtoMlLegado = await extrairProdutoMercadoLivreIntermediarioRadar(resolvida);
-        if (produtoMlLegado) {
-          linkOriginalLimpo = limparUrlProdutoRadar(produtoMlLegado, "mercadolivre");
-        }
-      } else if (produtoExtraido) {
-        linkOriginalLimpo = limparUrlProdutoRadar(produtoExtraido, marketplaceReal);
-      }
-
-      if (pagina.urlFinal && pagina.urlFinal !== resolvida) {
-        const mpFinal = detectarMarketplaceRadarLink(pagina.urlFinal);
-        if (mpFinal) marketplaceReal = mpFinal;
-      }
-
-      if (linkOriginalLimpo && !isUrlIntermediariaRadar(linkOriginalLimpo, marketplaceReal)) {
-        console.log("[RADAR-LINK] produto extraido de intermediario", {
-          capturada,
-          resolvida,
-          urlFinal: pagina.urlFinal || "",
-          produto: linkOriginalLimpo,
-          marketplaceReal
-        });
-      } else {
-        const motivoIntermediario = pagina.ok
-          ? "link_intermediario_sem_produto"
-          : "redirect_bloqueado";
-        console.log("[RADAR-LINK] resolver falhou", {
-          motivo: motivoIntermediario,
-          capturada,
-          resolvida,
-          status: pagina.status || "",
-          erro: pagina.erro || "",
-          marketplaceReal
-        });
-        return {
-          ok: false,
-          motivo: motivoIntermediario,
-          motivoTecnico: motivoIntermediario,
-          urlCapturada: capturada,
-          urlResolvida: pagina.urlFinal || resolvida || "",
-          marketplaceReal,
-          tipoLinkRadar: "intermediario",
-          statusHttp: pagina.status || "",
-          erroTecnico: pagina.erro || ""
-        };
-      }
-    }
-
-    if (!resolvida || !marketplaceReal || marketplaceReal === "awin" || !linkOriginalLimpo || isUrlIntermediariaRadar(linkOriginalLimpo, marketplaceReal)) {
-      const motivoFalha = !marketplaceReal
-        ? "marketplace_nao_identificado"
-        : "link_original_nao_resolvido";
-      console.log("[RADAR-LINK] resolver falhou", {
-        motivo: motivoFalha,
-        capturada,
-        resolvida: resolvida || "",
-        marketplaceReal: marketplaceReal || "",
-        linkOriginalLimpo
-      });
-      return {
-        ok: false,
-        motivo: motivoFalha,
-        motivoTecnico: motivoFalha,
-        urlCapturada: capturada,
-        urlResolvida: resolvida || "",
-        marketplaceReal: marketplaceReal || ""
-      };
-    }
-
-    console.log("[RADAR-LINK] resolver sucesso", {
-      capturada,
-      resolvida,
-      marketplaceReal,
-      linkOriginalLimpo
-    });
-
-    return {
-      ok: true,
-      urlCapturada: capturada,
-      urlResolvida: resolvida,
-      marketplaceReal,
-      linkOriginalLimpo,
-      tipoLinkRadar: "produto"
-    };
-  } catch (e) {
-    console.log("[RADAR-LINK] resolver erro", {
-      capturada,
-      erro: e.message
-    });
-    return {
-      ok: false,
-      motivo: "redirect_bloqueado",
-      motivoTecnico: "redirect_bloqueado",
-      urlCapturada: capturada,
-      erro: e.message
-    };
-  }
-}
-
-async function importarOfertaRadarPorLink(url = "", contexto = {}) {
-  const adminMasterId = obterClienteIdAdminMaster();
-  const resolucao = await resolverLinkOriginalRadar(url);
-
-  if (!resolucao.ok) {
-    return {
-      ok: false,
-      motivo: resolucao.motivo || "link_original_nao_resolvido",
-      resolucao
-    };
-  }
-
-  const marketplaceDetectado = resolucao.marketplaceReal;
-  const linkOriginalLimpo = resolucao.linkOriginalLimpo;
-
-  try {
-    if (marketplaceDetectado === "kabum") {
-      const produtoKabum = await importarProdutoKabumViaAwin(linkOriginalLimpo, adminMasterId, {
-        gerarDeepLinkAwin
-      });
-
-      const motivoIncompletaKabum = motivoImportacaoRadarIncompleta(produtoKabum || {}, "kabum");
-      if (motivoIncompletaKabum) {
-        return {
-          ok: false,
-          motivo: motivoIncompletaKabum,
-          motivoTecnico: motivoIncompletaKabum,
-          resolucao
-        };
-      }
-      const produtoEnriquecido = await enriquecerBeneficioRadarOferta({
-        ...produtoKabum,
-        marketplace: produtoKabum.marketplace || "kabum",
-        linkOriginal: linkOriginalLimpo
-      }, {
-        origem: "radar",
-        marketplace: "kabum",
-        linkOriginal: linkOriginalLimpo
-      });
-      const beneficioRadar = normalizarBeneficiosRadarOferta(produtoEnriquecido);
-
-      return {
-        ok: true,
-        resolucao,
-        oferta: {
-          ...produtoEnriquecido,
-          ...beneficioRadar,
-          marketplace: produtoEnriquecido.marketplace || "kabum",
-          linkOriginal: linkOriginalLimpo,
-          linkCapturado: resolucao.urlCapturada,
-          linkResolvidoRadar: resolucao.urlResolvida,
-          origem: "radar",
-          radar: true,
-          status: "rascunho"
-        }
-      };
-    }
-
-    const resultado = await importarProdutoManual({
-      clienteId: adminMasterId,
-      headers: {},
-      body: {
-        url: linkOriginalLimpo,
-        marketplace: marketplaceDetectado
-      }
-    }, {
-      getClienteId,
-      integracoesPorCliente,
-      getIntegracaoCliente,
-      importarAmazon,
-      importarAliExpress,
-      importarMagalu,
-      importarMercadoLivre,
-      importarShopee,
-      gerarLinkAfiliadoMercadoLivre
-    });
-
-    if (resultado.status >= 400 || resultado.body?.ok === false) {
-      const motivoFalhaImportador = resultado.body?.erro || "importacao_falhou";
-      return {
-        ok: false,
-        motivo: motivoFalhaImportador,
-        motivoTecnico: motivoFalhaImportador,
-        resolucao
-      };
-    }
-
-    const motivoIncompleta = motivoImportacaoRadarIncompleta(resultado.body || {}, marketplaceDetectado);
-    if (motivoIncompleta) {
-      return {
-        ok: false,
-        motivo: motivoIncompleta,
-        motivoTecnico: motivoIncompleta,
-        resolucao
-      };
-    }
-    const produtoEnriquecido = await enriquecerBeneficioRadarOferta({
-      ...(resultado.body || {}),
-      marketplace: resultado.body?.marketplace || marketplaceDetectado,
-      linkOriginal: linkOriginalLimpo
-    }, {
-      origem: "radar",
-      marketplace: marketplaceDetectado,
-      linkOriginal: linkOriginalLimpo
-    });
-    const beneficioRadar = normalizarBeneficiosRadarOferta(produtoEnriquecido);
-
-    return {
-      ok: true,
-      resolucao,
-      oferta: {
-        ...produtoEnriquecido,
-        ...beneficioRadar,
-        marketplace: produtoEnriquecido.marketplace || marketplaceDetectado,
-        linkOriginal: linkOriginalLimpo,
-        linkCapturado: resolucao.urlCapturada,
-        linkResolvidoRadar: resolucao.urlResolvida,
-        origem: "radar",
-        radar: true,
-        status: "rascunho"
-      }
-    };
-  } catch (e) {
-    return {
-      ok: false,
-      motivo: e.message || "erro_importacao_radar",
-      motivoTecnico: e.message || "erro_importacao_radar",
-      erro: e.message || "",
-      resolucao,
-      contexto
-    };
-  }
-}
-
-async function adicionarRadarCapturadoNaFilaClientes(ofertaBase = {}, opcoes = {}) {
-  const resultados = [];
-  const radarConfigFontes = opcoes.radarConfigFontes || carregarRadarConfigAdminMaster();
-  const clientesAtivos = listarClientesElegiveisRadar();
-
-  logOptimus("RADAR", "Clientes elegiveis encontrados", { total: clientesAtivos.length });
-
-  for (const usuario of clientesAtivos) {
-    const clienteId = usuario.id;
-
-    logOptimus("RADAR", "Cliente analisado", { clienteId });
-
-    const resultado = await adicionarRadarNaFilaCliente(ofertaBase, clienteId, {
-      radarConfigFontes
-    });
-
-    if (!resultado.ok || !resultado.adicionada) {
-      logRadarRejeitado(resultado.motivo || "nao_adicionada", {
-        clienteId
-      });
-    } else {
-      logOptimus("SUCESSO", "Radar adicionou na fila", { clienteId });
-    }
-
-    resultados.push({
-      clienteId,
-      ok: !!resultado.ok,
-      motivo: resultado.motivo || "",
-      adicionada: !!resultado.adicionada,
-      idOfertaFila: resultado.oferta?.id || "",
-      linkAfiliado: resultado.oferta?.linkAfiliado || resultado.oferta?.linkFinal || resultado.oferta?.link || "",
-      statusRadar: resultado.oferta?.statusRadar || "",
-      statusFila: resultado.oferta?.status || ""
-    });
-  }
-
-  return resultados;
-}
-
-async function processarMensagemRadar({
-  origemTipo,
-  sessaoId,
-  grupoId,
-  grupoNome,
-  texto,
-  capturadaEm,
-  raw
-} = {}) {
-  const tipo = normalizarTexto(origemTipo || "");
-  const origemTipoFinal = tipo.includes("telegram") ? "telegram" : tipo.includes("whatsapp") ? "whatsapp" : "";
-  const grupoIdTexto = textoRadarId(grupoId);
-  const grupoNomeTexto = textoRadarId(grupoNome);
-  const sessaoIdTexto = textoRadarId(sessaoId || (origemTipoFinal === "telegram" ? "telegram" : ""));
-
-  logOptimus("CAPTURA", "Mensagem recebida", {
-    origemTipo: origemTipoFinal || origemTipo,
-    sessaoId: sessaoIdTexto,
-    grupoId: grupoIdTexto,
-    grupoNome: grupoNomeTexto,
-    tamanhoTexto: String(texto || "").length
-  });
-
-  if (!["whatsapp", "telegram"].includes(origemTipoFinal)) {
-    logOptimus("CAPTURA", "Rejeitada", {
-      motivo: "origem_tipo_invalida",
-      origemTipo
-    });
-    logRadarRejeitado("origem_tipo_invalida", {
-      origemTipo
-    });
-    return { ok: false, motivo: "origem_tipo_invalida" };
-  }
-
-  if (!grupoIdTexto) {
-    logOptimus("CAPTURA", "Rejeitada", {
-      motivo: "grupo_ou_chat_ausente",
-      origemTipo: origemTipoFinal
-    });
-    logRadarRejeitado("grupo_ou_chat_ausente", {
-      origemTipo: origemTipoFinal
-    });
-    return { ok: false, motivo: "grupo_ou_chat_ausente" };
-  }
-
-  const links = extrairLinksRadar(texto);
-  logOptimus("RADAR", "Links detectados", {
-    total: links.length,
-    links,
-    origemTipo: origemTipoFinal,
-    grupo: grupoNomeTexto || grupoIdTexto
-  });
-  if (!links.length) {
-    logOptimus("RADAR", "Sem links", {
-      motivo: "sem_links",
-      origemTipo: origemTipoFinal,
-      grupo: grupoNomeTexto || grupoIdTexto
-    });
-    logRadarRejeitado("sem_links", {
-      origemTipo: origemTipoFinal,
-      grupo: grupoNomeTexto || grupoIdTexto
-    });
-    return { ok: false, motivo: "sem_links" };
-  }
-
-  const beneficiosMensagem = analisarBeneficiosMensagemRadar(texto, links);
-  logOptimus("CUPOM", "Extracao da mensagem", {
-    cupom: beneficiosMensagem.cupom || "",
-    cupomOrigem: beneficiosMensagem.cupomOrigem || "",
-    tipoCupom: beneficiosMensagem.tipoCupom || "",
-    beneficioExtra: beneficiosMensagem.beneficioExtra || "",
-    linkResgateCupom: beneficiosMensagem.linkResgateCupom || "",
-    linksResgate: beneficiosMensagem.linksResgate || []
-  });
-  if (beneficiosMensagem.cupom || beneficiosMensagem.linkResgateCupom || beneficiosMensagem.beneficioExtra) {
-    logOptimus("CUPOM", "Detectado", {
-      cupom: beneficiosMensagem.cupom || "",
-      tipoCupom: beneficiosMensagem.tipoCupom || "",
-      beneficioExtra: beneficiosMensagem.beneficioExtra || "",
-      linksResgate: beneficiosMensagem.linksResgate.length
-    });
-  }
-
-  const adminMasterId = obterClienteIdAdminMaster();
-  const radarConfig = carregarRadarConfigCliente(adminMasterId);
-  const capturaPermitida = radarPodeCapturarAgora(radarConfig);
-
-  if (!capturaPermitida.ok) {
-    logOptimus("CAPTURA", "Rejeitada", {
-      motivo: capturaPermitida.motivo,
-      origemTipo: origemTipoFinal,
-      grupo: grupoNomeTexto || grupoIdTexto
-    });
-    logRadarRejeitado(capturaPermitida.motivo, {
-      origemTipo: origemTipoFinal,
-      grupo: grupoNomeTexto || grupoIdTexto
-    });
-    return capturaPermitida;
-  }
-
-  const origemBase = {
-    origemTipo: origemTipoFinal,
-    origemGrupoId: grupoIdTexto,
-    origemGrupoNome: grupoNomeTexto,
-    origemSessaoId: sessaoIdTexto,
-    grupoId: grupoIdTexto,
-    grupoNome: grupoNomeTexto,
-    chatId: origemTipoFinal === "telegram" ? grupoIdTexto : "",
-    sessaoId: sessaoIdTexto
-  };
-  const origemMonitorada = origemOfertaEstaMonitoradaRadar(origemBase, radarConfig);
-
-  if (!origemMonitorada.ok) {
-    logOptimus("CAPTURA", "Grupo nao monitorado", {
-      motivo: origemMonitorada.motivo,
-      origemTipo: origemTipoFinal,
-      sessaoId: sessaoIdTexto,
-      grupoId: grupoIdTexto,
-      grupoNome: grupoNomeTexto,
-      diagnostico: origemMonitorada.diagnostico || {}
-    });
-    logRadarRejeitado(origemMonitorada.motivo, {
-      origemTipo: origemTipoFinal,
-      grupo: grupoNomeTexto || grupoIdTexto
-    });
-    return { ok: false, motivo: origemMonitorada.motivo };
-  }
-
-  logOptimus("CAPTURA", "Grupo monitorado confirmado", {
-    origemTipo: origemTipoFinal,
-    sessaoId: sessaoIdTexto,
-    grupoId: grupoIdTexto,
-    grupoNome: grupoNomeTexto
-  });
-
-  const resultados = [];
-  const dataCaptura = capturadaEm || new Date().toLocaleString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-  });
-
-  for (const link of links) {
-    logOptimus("RADAR", "Link capturado", {
-      url: link,
-      grupo: grupoNomeTexto || grupoIdTexto
-    });
-    const linkEhResgate = beneficiosMensagem.linksResgate.includes(link);
-
-    if (linkEhResgate) {
-      const temOutroLinkProduto = links.some(linkMensagem => !beneficiosMensagem.linksResgate.includes(linkMensagem));
-      registrarHistoricoRadar(adminMasterId, {
-        origemTipo: origemTipoFinal,
-        origemSessaoId: sessaoIdTexto,
-        origemGrupoId: grupoIdTexto,
-        origemGrupoNome: grupoNomeTexto,
-        capturadaEm: dataCaptura,
-        mensagemResumo: texto,
-        linkCapturado: link,
-        linkOriginal: "",
-        marketplace: detectarMarketplaceRadarLink(link) || "",
-        cupom: beneficiosMensagem.cupom || "",
-        avisoCupom: beneficiosMensagem.avisoCupom || "",
-        tipoCupom: "resgate",
-        cupomOrigem: beneficiosMensagem.cupomOrigem || "",
-        cupomDetectadoTexto: Boolean(beneficiosMensagem.cupomDetectadoTexto),
-        beneficioExtra: beneficiosMensagem.beneficioExtra || link,
-        linkResgateCupom: beneficiosMensagem.linkResgateCupom || link,
-        status: temOutroLinkProduto ? "detectado" : "erro",
-        statusRadar: temOutroLinkProduto ? "detectada" : "erro",
-        statusCaptura: temOutroLinkProduto ? "sucesso" : "erro",
-        motivo: temOutroLinkProduto ? "link_resgate_cupom_detectado" : "link_resgate_cupom_sem_produto",
-        motivoTecnico: temOutroLinkProduto ? "link_resgate_cupom_detectado" : "link_resgate_cupom_sem_produto",
-        motivoFinal: temOutroLinkProduto ? "link_resgate_cupom_detectado" : "link_resgate_cupom_sem_produto",
-        tipoLink: "cupom_resgate",
-        tipoLinkRadar: "resgate_cupom",
-        marketplaceDetectado: detectarMarketplaceRadarLink(link) || "",
-        urlResolvida: "",
-        linksDetectados: 1
-      });
-      logOptimus("CUPOM", "Link de resgate detectado", {
-        link,
-        tipoCupom: "resgate",
-        temOutroLinkProduto
-      });
-      continue;
-    }
-
-    const importacao = await importarOfertaRadarPorLink(link, {
-      origemTipo: origemTipoFinal,
-      sessaoId: sessaoIdTexto,
-      grupoId: grupoIdTexto,
-      grupoNome: grupoNomeTexto
-    });
-
-    if (!importacao.ok) {
-      logOptimus("RADAR", "Importacao falhou", {
-        motivo: importacao.motivo || "importacao_falhou",
-        motivoTecnico: importacao.motivoTecnico || importacao.motivo || "importacao_falhou",
-        link,
-        urlResolvida: importacao.resolucao?.urlResolvida || "",
-        linkOriginal: importacao.resolucao?.linkOriginalLimpo || "",
-        marketplace: importacao.resolucao?.marketplaceReal || "",
-        tipoLinkRadar: importacao.resolucao?.tipoLinkRadar || "produto"
-      });
-      logRadarRejeitado(importacao.motivo || "importacao_falhou", {
-        link,
-        urlResolvida: importacao.resolucao?.urlResolvida || "",
-        marketplace: importacao.resolucao?.marketplaceReal || ""
-      });
-      registrarHistoricoRadar(adminMasterId, {
-        origemTipo: origemTipoFinal,
-        origemSessaoId: sessaoIdTexto,
-        origemGrupoId: grupoIdTexto,
-        origemGrupoNome: grupoNomeTexto,
-        capturadaEm: dataCaptura,
-        mensagemResumo: texto,
-        linkCapturado: link,
-        linkOriginal: importacao.resolucao?.linkOriginalLimpo || "",
-        urlResolvida: importacao.resolucao?.urlResolvida || "",
-        linkResolvidoRadar: importacao.resolucao?.urlResolvida || "",
-        marketplace: importacao.resolucao?.marketplaceReal || "",
-        marketplaceDetectado: importacao.resolucao?.marketplaceReal || detectarMarketplaceRadarLink(link) || "",
-        tipoLink: importacao.resolucao?.tipoLinkRadar === "intermediario" ? "intermediario" : "produto",
-        tipoLinkRadar: importacao.resolucao?.tipoLinkRadar || "produto",
-        statusCaptura: "erro",
-        motivoTecnico: importacao.motivoTecnico || importacao.motivo || "importacao_falhou",
-        motivoFinal: importacao.motivoTecnico || importacao.motivo || "importacao_falhou",
-        statusHttp: importacao.resolucao?.statusHttp || "",
-        erroTecnico: importacao.resolucao?.erroTecnico || importacao.erro || "",
-        cupom: beneficiosMensagem.cupom || "",
-        avisoCupom: beneficiosMensagem.avisoCupom || "",
-        tipoCupom: beneficiosMensagem.tipoCupom || "",
-        cupomOrigem: beneficiosMensagem.cupomOrigem || "",
-        cupomDetectadoTexto: Boolean(beneficiosMensagem.cupomDetectadoTexto),
-        beneficioExtra: beneficiosMensagem.beneficioExtra || "",
-        linkResgateCupom: beneficiosMensagem.linkResgateCupom || "",
-        status: "erro",
-        statusRadar: "erro",
-        motivo: importacao.motivo || "importacao_falhou",
-        linksDetectados: 1
-      });
-      resultados.push({ link, ok: false, motivo: importacao.motivo });
-      continue;
-    }
-
-    logOptimus("RADAR", "Importacao concluida", {
-      linkCapturado: link,
-      urlResolvida: importacao.resolucao?.urlResolvida || "",
-      linkOriginal: importacao.resolucao?.linkOriginalLimpo || importacao.oferta?.linkOriginal || "",
-      marketplace: importacao.oferta?.marketplace || importacao.resolucao?.marketplaceReal || "",
-      titulo: importacao.oferta?.titulo || importacao.oferta?.nome || "",
-      preco: importacao.oferta?.precoAtual || importacao.oferta?.preco || "",
-      categoria: importacao.oferta?.categoria || "",
-      cupomImportado: importacao.oferta?.cupom || "",
-      cupomMensagem: beneficiosMensagem.cupom || ""
-    });
-    const ofertaRadar = prepararOfertaGlobal({
-      ...importacao.oferta,
-      cupom: importacao.oferta?.cupom || beneficiosMensagem.cupom || "",
-      avisoCupom: importacao.oferta?.avisoCupom || beneficiosMensagem.avisoCupom || "",
-      tipoCupom: importacao.oferta?.tipoCupom || beneficiosMensagem.tipoCupom || "",
-      beneficioExtra: importacao.oferta?.beneficioExtra || beneficiosMensagem.beneficioExtra || "",
-      linkResgateCupom: importacao.oferta?.linkResgateCupom || beneficiosMensagem.linkResgateCupom || "",
-      cupomOrigem: importacao.oferta?.cupomOrigem || beneficiosMensagem.cupomOrigem || "",
-      cupomDetectadoTexto: Boolean(importacao.oferta?.cupomDetectadoTexto || beneficiosMensagem.cupomDetectadoTexto),
-      ...origemBase,
-      origemClienteId: adminMasterId,
-      origem: "radar",
-      origemTipo: origemTipoFinal,
-      radar: true,
-      linkOriginal: importacao.resolucao?.linkOriginalLimpo || importacao.oferta.linkOriginal,
-      linkCapturado: importacao.resolucao?.urlCapturada || link,
-      urlResolvida: importacao.resolucao?.urlResolvida || importacao.oferta.linkResolvidoRadar || "",
-      linkResolvidoRadar: importacao.resolucao?.urlResolvida || importacao.oferta.linkResolvidoRadar || "",
-      marketplaceDetectado: importacao.resolucao?.marketplaceReal || importacao.oferta.marketplace || "",
-      tipoLink: importacao.resolucao?.tipoLinkRadar === "intermediario" ? "intermediario" : "produto",
-      tipoLinkRadar: importacao.resolucao?.tipoLinkRadar || "produto",
-      motivoTecnico: "",
-      link: importacao.resolucao?.linkOriginalLimpo || importacao.oferta.linkOriginal,
-      linkAfiliado: "",
-      linkFinal: "",
-      mensagemOriginalRadar: texto.slice(0, 1000),
-      capturadaEm: dataCaptura,
-      dataEntradaRadar: dataCaptura
-    });
-
-    logOptimus("CUPOM", "Oferta preparada", {
-      titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
-      cupom: ofertaRadar.cupom || "",
-      avisoCupom: ofertaRadar.avisoCupom || "",
-      tipoCupom: ofertaRadar.tipoCupom || "",
-      cupomOrigem: ofertaRadar.cupomOrigem || "",
-      beneficioExtra: ofertaRadar.beneficioExtra || "",
-      linkResgateCupom: ofertaRadar.linkResgateCupom || ""
-    });
-
-    const clientes = await adicionarRadarCapturadoNaFilaClientes(ofertaRadar, {
-      radarConfigFontes: radarConfig
-    });
-    const adicionadasLink = clientes.filter(cliente => cliente.adicionada).length;
-    const primeiraRejeicao = clientes.find(cliente => !cliente.adicionada)?.motivo || "";
-    const beneficio = beneficioResumoRadar(ofertaRadar);
-    const economiaRadar = calcularEconomiaRadar(ofertaRadar);
-    const clienteIdsAdicionados = clientes
-      .filter(cliente => cliente.adicionada)
-      .map(cliente => cliente.clienteId)
-      .filter(Boolean);
-    const clientesAdicionados = clientes
-      .filter(cliente => cliente.adicionada)
-      .map(cliente => ({
-        clienteId: cliente.clienteId,
-        idOfertaFila: cliente.idOfertaFila || "",
-        linkAfiliado: cliente.linkAfiliado || "",
-        statusRadar: cliente.statusRadar || "fila",
-        statusFila: cliente.statusFila || "pendente"
-      }));
-    const primeiraFila = clientesAdicionados[0] || {};
-
-    console.log("[RADAR-DECISAO] distribuicao concluida", {
-      linkCapturado: importacao.resolucao?.urlCapturada || link,
-      titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
-      marketplace: ofertaRadar.marketplace || "",
-      cupom: ofertaRadar.cupom || "",
-      clientesAnalisados: clientes.length,
-      adicionadas: adicionadasLink,
-      primeiraRejeicao: primeiraRejeicao || ""
-    });
-
-    registrarHistoricoRadar(adminMasterId, {
-      origemTipo: origemTipoFinal,
-      origemSessaoId: sessaoIdTexto,
-      origemGrupoId: grupoIdTexto,
-      origemGrupoNome: grupoNomeTexto,
-      capturadaEm: dataCaptura,
-      mensagemResumo: texto,
-      imagem: ofertaRadar.imagem || ofertaRadar.image || ofertaRadar.foto || "",
-      linkCapturado: importacao.resolucao?.urlCapturada || link,
-      urlResolvida: importacao.resolucao?.urlResolvida || "",
-      linkResolvidoRadar: importacao.resolucao?.urlResolvida || "",
-      linkOriginal: ofertaRadar.linkOriginal || "",
-      linkAfiliado: primeiraFila.linkAfiliado || "",
-      idOfertaFila: primeiraFila.idOfertaFila || "",
-      marketplace: ofertaRadar.marketplace || "",
-      marketplaceDetectado: importacao.resolucao?.marketplaceReal || ofertaRadar.marketplace || "",
-      tipoLink: importacao.resolucao?.tipoLinkRadar === "intermediario" ? "intermediario" : "produto",
-      tipoLinkRadar: importacao.resolucao?.tipoLinkRadar || "produto",
-      statusCaptura: adicionadasLink > 0 ? "fila" : (primeiraRejeicao?.startsWith("retida") ? "retida" : "erro"),
-      motivoFinal: adicionadasLink > 0 ? "enviado_para_fila" : primeiraRejeicao || "nenhum_cliente_adicionado",
-      motivoTecnico: adicionadasLink > 0 ? "" : primeiraRejeicao || "nenhum_cliente_adicionado",
-      titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
-      preco: ofertaRadar.precoAtual || ofertaRadar.preco || "",
-      precoAtual: ofertaRadar.precoAtual || ofertaRadar.preco || "",
-      precoAntigo: ofertaRadar.precoAntigo || "",
-      categoria: ofertaRadar.categoria || "",
-      economiaValor: economiaRadar.economiaValor,
-      economiaPercentual: economiaRadar.economiaPercentual,
-      cupom: ofertaRadar.cupom || "",
-      avisoCupom: ofertaRadar.avisoCupom || "",
-      tipoCupom: ofertaRadar.tipoCupom || "",
-      cupomOrigem: ofertaRadar.cupomOrigem || "",
-      cupomDetectadoTexto: Boolean(ofertaRadar.cupomDetectadoTexto),
-      linkResgateCupom: ofertaRadar.linkResgateCupom || "",
-      beneficioExtra: ofertaRadar.beneficioExtra || beneficio,
-      beneficio,
-      status: adicionadasLink > 0 ? "fila" : "ignorada",
-      statusRadar: adicionadasLink > 0 ? "fila" : "ignorada",
-      motivo: adicionadasLink > 0 ? "" : primeiraRejeicao || "nenhum_cliente_adicionado",
-      linksDetectados: 1,
-      adicionadas: adicionadasLink,
-      clienteIdsAdicionados,
-      clientesAdicionados
-    });
-
-    resultados.push({
-      link,
-      ok: true,
-      marketplace: ofertaRadar.marketplace,
-      clientes
-    });
-  }
-
-  const adicionadas = resultados.reduce((total, item) =>
-    total + (item.clientes || []).filter(cliente => cliente.adicionada).length,
-    0
-  );
-
-  if (resultados.length) {
-    console.log("[RADAR] Mensagem monitorada processada:", {
-      origemTipo: origemTipoFinal,
-      sessaoId: sessaoIdTexto,
-      grupo: grupoNomeTexto || grupoIdTexto,
-      links: links.length,
-      adicionadas
-    });
-  }
-
-  return {
-    ok: true,
-    links: links.length,
-    adicionadas,
-    resultados
-  };
-}
-
-async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {}) {
-  const remoteJid = mensagem?.key?.remoteJid || "";
-  const textoExtraido = extrairTextoMensagemRadar(mensagem);
-  const conteudo = extrairMensagemInternaRadar(mensagem?.message || {});
-  const tiposMensagem = Object.keys(conteudo || {});
-
-  logOptimus("CAPTURA", "Upsert WhatsApp", {
-    sessaoId,
-    remoteJid,
-    fromMe: Boolean(mensagem?.key?.fromMe),
-    isGrupo: String(remoteJid || "").endsWith("@g.us"),
-    tiposMensagem,
-    tamanhoTexto: textoExtraido.length
-  });
-
-  if (!remoteJid || !remoteJid.endsWith("@g.us") || mensagem?.key?.fromMe) {
-    logOptimus("CAPTURA", "Mensagem nao monitoravel", {
-      sessaoId,
-      remoteJid,
-      fromMe: Boolean(mensagem?.key?.fromMe),
-      motivo: "mensagem_nao_monitoravel"
-    });
-    return { ok: false, motivo: "mensagem_nao_monitoravel" };
-  }
-
-  return processarMensagemRadar({
-    origemTipo: "whatsapp",
-    sessaoId,
-    grupoId: remoteJid,
-    grupoNome: obterNomeGrupoRadar(sessaoId, remoteJid),
-    texto: textoExtraido,
-    raw: mensagem
-  });
-}
-
-function normalizarMensagemTelegramRadar(payload = {}) {
-  const mensagem =
-    payload.message ||
-    payload.channel_post ||
-    payload.edited_message ||
-    payload.edited_channel_post ||
-    payload;
-  const chat = mensagem.chat || payload.chat || {};
-  const grupoId = textoRadarId(
-    payload.grupoId ||
-    payload.chatId ||
-    chat.id ||
-    mensagem.chatId ||
-    ""
-  );
-  const grupoNome = textoRadarId(
-    payload.grupoNome ||
-    payload.nome ||
-    chat.title ||
-    chat.username ||
-    chat.first_name ||
-    ""
-  );
-  const texto = textoRadarId(
-    payload.texto ||
-    payload.text ||
-    mensagem.text ||
-    mensagem.caption ||
-    ""
-  );
-
-  return {
-    origemTipo: "telegram",
-    sessaoId: "telegram",
-    grupoId,
-    grupoNome,
-    texto,
-    capturadaEm: payload.capturadaEm || new Date().toLocaleString("pt-BR", {
-      timeZone: "America/Sao_Paulo"
-    }),
-    raw: payload
-  };
-}
-
-function clienteAceitaMarketplaceAtivo(clienteId = "admin", marketplace = "") {
-  const configCliente = configsPorCliente?.[clienteId] || {};
-  const regraCliente = configCliente.marketplaces?.[marketplace];
-
-  return regraCliente?.ativo !== false;
-}
-
-function existeDestinoCompativelRadar(clienteId = "admin", oferta = {}) {
-  const destinosCliente = destinosClienteNormalizados(clienteId);
-
-  return destinosCliente.some(destino =>
-    destinoAceitaOferta(destino, oferta)
-  );
-}
-
-function itemContaComoPendenteRadar(item = {}) {
-  if (!item || typeof item !== "object") return false;
-  if (item.removidaRadar || item.ocultadaRadar) return false;
-  if (item.radarPendenteAnalise === true) return true;
-  if (String(item.statusRadar || "") === "pendente_analise") return true;
-
-  return false;
-}
-
-async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admin", opcoes = {}) {
-  const usuario = getUsuarioClienteRadar(clienteId);
-
-  if (!usuario || usuario.ativo === false) {
-    return { ok: false, motivo: "cliente_inativo_ou_inexistente" };
-  }
-
-  const radarConfig = opcoes.radarConfigFontes || carregarRadarConfigAdminMaster();
-  const origemMonitorada = origemOfertaEstaMonitoradaRadar(ofertaBase, radarConfig);
-
-  if (!origemMonitorada.ok) {
-    return { ok: false, motivo: origemMonitorada.motivo };
-  }
-
-  let ofertaPreparada = prepararOfertaGlobal({
-    ...(ofertaBase || {}),
-    ...origemMonitorada.origem
-  });
-  const cupomRadar = normalizarBeneficiosRadarOferta(ofertaPreparada);
-  ofertaPreparada.cupom = cupomRadar.cupom;
-  ofertaPreparada.avisoCupom = cupomRadar.avisoCupom;
-  ofertaPreparada.tipoCupom = cupomRadar.tipoCupom;
-  ofertaPreparada.valorCupom = cupomRadar.valorCupom;
-  ofertaPreparada.percentualCupom = cupomRadar.percentualCupom;
-  ofertaPreparada.descontoPix = cupomRadar.descontoPix;
-  ofertaPreparada.descontoApp = cupomRadar.descontoApp;
-  ofertaPreparada.beneficioExtra = cupomRadar.beneficioExtra;
-  ofertaPreparada.cupomConfirmado = cupomRadar.cupomConfirmado;
-  ofertaPreparada.possivelCupom = cupomRadar.possivelCupom;
-  ofertaPreparada.categoria = categoriaRadarReclassificada(ofertaPreparada);
-
-  const categoriasPermitidas = Array.isArray(radarConfig.categoriasPermitidas)
-    ? radarConfig.categoriasPermitidas
-    : [];
-
-  if (categoriasPermitidas.length) {
-    const categoriaOferta = normalizarTexto(ofertaPreparada.categoria || "");
-    const permitido = categoriasPermitidas.some(categoria =>
-      normalizarTexto(categoria) === categoriaOferta
-    );
-
-    if (!permitido) {
-      return { ok: false, motivo: "categoria_nao_permitida_radar" };
-    }
-  }
-
-  const marketplaceOriginal = normalizarTexto(
-    ofertaPreparada.marketplace ||
-    ofertaPreparada.mercado ||
-    ofertaBase.marketplace ||
-    ""
-  );
-  const marketplace = normalizarMarketplaceRadar(marketplaceOriginal);
-
-  if (!marketplace) {
-    return { ok: false, motivo: "marketplace_ausente" };
-  }
-
-  ofertaPreparada.marketplace = marketplace;
-
-  if (marketplaceOriginal && marketplaceOriginal !== marketplace) {
-    ofertaPreparada.marketplaceOriginalRadar = marketplaceOriginal;
-  }
-
-  if (!usuarioPodeReceberMarketplace(usuario, marketplace)) {
-    return { ok: false, motivo: "marketplace_nao_permitido_no_plano" };
-  }
-
-  if (!clienteAceitaMarketplaceAtivo(clienteId, marketplace)) {
-    return { ok: false, motivo: "marketplace_desativado_no_cliente" };
-  }
-
-  if (!usuarioTemIntegracaoMarketplace(clienteId, marketplace)) {
-    return { ok: false, motivo: "integracao_marketplace_ausente" };
-  }
-
-  const radar = avaliarOfertaRadar(ofertaPreparada);
-  const temBeneficioUtil = beneficioRadarUtil(ofertaPreparada, cupomRadar);
-  const temCupomForte = cupomRadar.cupomConfirmado || temBeneficioUtil;
-  const tipoRadar = temCupomForte ? "radarComCupom" : "radarSemCupom";
-  const prioridadeFila = temCupomForte ? 80 : 40;
-  const linkOriginal =
-    ofertaPreparada.linkOriginal ||
-    ofertaPreparada.linkResolvidoRadar ||
-    ofertaPreparada.linkCapturado ||
-    "";
-
-  logOptimus("INTELIGENCIA", "Radar score", {
-    clienteId,
-    titulo: ofertaPreparada.titulo || ofertaPreparada.nome || "",
-    marketplace,
-    categoria: ofertaPreparada.categoria || "",
-    cupom: ofertaPreparada.cupom || "",
-    cupomOrigem: ofertaPreparada.cupomOrigem || "",
-    tipoCupom: ofertaPreparada.tipoCupom || "",
-    cupomConfirmado: Boolean(cupomRadar.cupomConfirmado),
-    possivelCupom: Boolean(cupomRadar.possivelCupom),
-    score: radar.radarScore,
-    nivel: radar.nivel,
-    decisao: radar.decisao,
-    motivos: radar.motivos || [],
-    alertas: radar.alertas || []
-  });
-  logOptimus("RADAR", "Tipo Radar", {
-    clienteId,
-    tipoRadar,
-    origemTipoRadar: cupomRadar.cupomConfirmado
-      ? "cupomConfirmado"
-      : temBeneficioUtil
-        ? "beneficioUtil"
-        : "semCupomConfirmado"
-  });
-
-  if (!linkOriginal) {
-    logOptimus("RADAR", "Reprovado", {
-      clienteId,
-      aprovado: false,
-      motivo: "link_original_ausente"
-    });
-    return { ok: false, motivo: "link_original_ausente" };
-  }
-
-  if (!oportunidadeRadarBoa(ofertaPreparada, radar, cupomRadar)) {
-    logOptimus("RADAR", "Reprovado", {
-      clienteId,
-      aprovado: false,
-      motivo: "oferta_sem_cupom_ou_desconto_relevante",
-      score: radar.radarScore,
-      decisao: radar.decisao,
-      desconto: percentualDescontoRadar(ofertaPreparada, radar),
-      cupom: ofertaPreparada.cupom || "",
-      cupomConfirmado: Boolean(cupomRadar.cupomConfirmado),
-      beneficioUtil: Boolean(temBeneficioUtil)
-    });
-    return { ok: false, motivo: "oferta_sem_cupom_ou_desconto_relevante" };
-  }
-
-  const linkAfiliadoCliente = await gerarLinkAfiliadoCliente(
-    clienteId,
-    marketplace,
-    linkOriginal,
-    ofertaPreparada
-  );
-
-  if (!linkAfiliadoCliente) {
-    logOptimus("INTEGRACAO", "Link afiliado nao gerado", {
-      clienteId,
-      aprovado: false,
-      motivo: "link_afiliado_nao_gerado"
-    });
-    return { ok: false, motivo: "link_afiliado_nao_gerado" };
-  }
-
-  if (String(linkAfiliadoCliente).trim() === String(linkOriginal).trim()) {
-    logOptimus("INTEGRACAO", "Link afiliado invalido", {
-      clienteId,
-      aprovado: false,
-      motivo: "link_afiliado_igual_original"
-    });
-    return { ok: false, motivo: "link_afiliado_igual_original" };
-  }
-
-  logOptimus("INTEGRACAO", "Link afiliado cliente gerado", {
-    clienteId,
-    marketplace,
-    linkOriginal,
-    linkAfiliado: linkAfiliadoCliente
-  });
-
-  const agoraBR = new Date().toLocaleString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-  });
-
-  const ofertaCliente = {
-    ...ofertaPreparada,
-    clienteId,
-    origem: "radar",
-    radar: true,
-    radarNaFila: true,
-    statusRadar: "fila",
-    radarPendenteAnalise: false,
-    tipoRadar,
-    prioridadeFila,
-    marketplace,
-    linkOriginal,
-    linkAfiliado: linkAfiliadoCliente,
-    link: linkAfiliadoCliente,
-    linkFinal: linkAfiliadoCliente,
-    status: "pendente",
-    statusDetalhe: temCupomForte
-      ? "Radar: cupom detectado"
-      : cupomRadar.possivelCupom
-      ? "Radar: possivel cupom, conferir"
-      : "Radar: oportunidade",
-    origemGrupoId: origemMonitorada.origem.origemGrupoId,
-    origemGrupoNome: origemMonitorada.origem.origemGrupoNome,
-    origemSessaoId: origemMonitorada.origem.origemSessaoId,
-    origemTipo: origemMonitorada.origem.origemTipo,
-    coletadoDe: origemMonitorada.origem.origemGrupoNome || origemMonitorada.origem.origemGrupoId,
-    avisoCupom: cupomRadar.avisoCupom,
-    tipoCupom: cupomRadar.tipoCupom,
-    valorCupom: cupomRadar.valorCupom,
-    percentualCupom: cupomRadar.percentualCupom,
-    descontoPix: cupomRadar.descontoPix,
-    descontoApp: cupomRadar.descontoApp,
-    beneficioExtra: cupomRadar.beneficioExtra,
-    cupomConfirmado: cupomRadar.cupomConfirmado,
-    possivelCupom: cupomRadar.possivelCupom,
-    destinosEnviados: [],
-    logsEnvio: [],
-    enviadoEm: "",
-    dataEnvio: "",
-    radarScore: radar.radarScore,
-    radarNivel: radar.nivel,
-    radarDecisao: radar.decisao,
-    radarMotivos: radar.motivos,
-    radarAlertas: radar.alertas,
-    dataEntradaRadar: agoraBR,
-    capturadaEm: ofertaPreparada.capturadaEm || agoraBR,
-    dataTratamento: new Date().toISOString(),
-    emFilaEm: new Date().toISOString(),
-    dataEntradaFila: agoraBR,
-    criadoEm: ofertaPreparada.criadoEm || agoraBR
-  };
-
-  validarCupomMonetarioOferta(ofertaCliente);
-  aplicarPrioridadeEnvioOferta(ofertaCliente);
-  ofertaCliente.prioridadeFila = ofertaCliente.prioridadeEnvio;
-
-  if (!existeDestinoCompativelRadar(clienteId, ofertaCliente)) {
-    logOptimus("DESTINO", "Radar sem destino compativel", {
-      clienteId,
-      aprovado: false,
-      motivo: "sem_destino_compativel",
-      categoria: ofertaCliente.categoria || "",
-      marketplace: ofertaCliente.marketplace || ""
-    });
-    return { ok: false, motivo: "sem_destino_compativel" };
-  }
-
-  if (ofertaJaExiste(ofertaCliente)) {
-    logOptimus("RADAR", "Reprovado", {
-      clienteId,
-      aprovado: false,
-      motivo: "oferta_duplicada"
-    });
-    return { ok: false, motivo: "oferta_duplicada" };
-  }
-
-  if (deveIgnorarOfertaRepetida(ofertaCliente)) {
-    logOptimus("RADAR", "Reprovado", {
-      clienteId,
-      aprovado: false,
-      motivo: "oferta_repetida_na_memoria"
-    });
-    return { ok: false, motivo: "oferta_repetida_na_memoria" };
-  }
-
-  logOptimus("SUCESSO", "Radar aprovado", {
-    clienteId,
-    aprovado: true,
-    decisao: radar.decisao,
-    tipoRadar,
-    cupom: ofertaCliente.cupom || "",
-    linkOriginal,
-    linkAfiliado: linkAfiliadoCliente
-  });
-
-  return { ok: true, oferta: ofertaCliente };
-}
-
-async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin", opcoes = {}) {
-  const preparado = await prepararOfertaRadarParaCliente(ofertaBase, clienteId, opcoes);
-
-  if (!preparado.ok) {
-    return preparado;
-  }
-
-  const oferta = preparado.oferta;
-  const itensFilaRadarCliente = fila.filter(item =>
-    String(item.clienteId || "admin") === String(clienteId) &&
-    item.origem === "radar"
-  );
-  const pendentesRadar = itensFilaRadarCliente.filter(itemContaComoPendenteRadar);
-
-  const totalRadar = pendentesRadar.length;
-  const totalComCupom = pendentesRadar.filter(item =>
-    item.tipoRadar === "radarComCupom"
-  ).length;
-  const totalSemCupom = pendentesRadar.filter(item =>
-    item.tipoRadar === "radarSemCupom"
-  ).length;
-  const totalRadarNaFilaNormal = itensFilaRadarCliente.filter(item =>
-    item.status === "pendente" &&
-    (item.radarNaFila === true || String(item.statusRadar || "") === "fila" || !item.statusRadar)
-  ).length;
-
-  logOptimus("RADAR", "Pendentes analisados", {
-    clienteId,
-    totalRadar,
-    totalComCupom,
-    totalSemCupom,
-    totalRadarNaFilaNormal,
-    regra: "conta_apenas_statusRadar_pendente_analise"
-  });
-
-  if (totalRadar >= 10) {
-    logOptimus("RADAR", "Reprovado", {
-      clienteId,
-      aprovado: false,
-      motivo: "limite_radar_pendente_total",
-      totalRadar,
-      totalComCupom,
-      totalSemCupom
-    });
-    return { ok: false, motivo: "limite_radar_pendente_total" };
-  }
-
-  if (oferta.tipoRadar === "radarComCupom" && totalComCupom >= 4) {
-    logOptimus("RADAR", "Reprovado", {
-      clienteId,
-      aprovado: false,
-      motivo: "limite_radar_com_cupom",
-      totalRadar,
-      totalComCupom,
-      totalSemCupom
-    });
-    return { ok: false, motivo: "limite_radar_com_cupom" };
-  }
-
-  if (oferta.tipoRadar === "radarSemCupom" && totalSemCupom >= 6) {
-    logOptimus("RADAR", "Reprovado", {
-      clienteId,
-      aprovado: false,
-      motivo: "limite_radar_sem_cupom",
-      totalRadar,
-      totalComCupom,
-      totalSemCupom
-    });
-    return { ok: false, motivo: "limite_radar_sem_cupom" };
-  }
-
-  logPrioridadeFila(oferta);
-  fila.push(oferta);
-  registrarOfertaVista(oferta);
-  registrarTratamentoRadar(clienteId, oferta, "fila");
-  salvarFila(clienteId);
-
-  return {
-    ok: true,
-    adicionada: true,
-    oferta
-  };
-}
-
-app.get("/branding", (req, res) => {
-  try {
-    const branding = lerBrandingOficial();
-
-    return res.json({
-      ok: true,
-      escopo: "oficial",
-      branding
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-app.post("/branding", (req, res) => {
-  try {
-    const authHeader = req.headers.authorization || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-
-    if (!token) {
-      return res.status(401).json({
-        ok: false,
-        erro: "Cliente nao autenticado"
-      });
-    }
-
-    try {
-      const decoded = jwt.verify(token, JWT_SECRET);
-      req.clienteId = decoded.clienteId || "";
-    } catch {
-      return res.status(401).json({
-        ok: false,
-        erro: "Token invalido"
-      });
-    }
-
-    if (!isAdminMaster(req)) {
-      return res.status(403).json({
-        ok: false,
-        erro: "Acesso restrito ao admin_master"
-      });
-    }
-
-    const resultado = salvarBrandingOficial(req.body || {});
-
-    if (!resultado.ok) {
-      return res.status(400).json({
-        ok: false,
-        erro: resultado.erro || "Branding invalido"
-      });
-    }
-
-    return res.json({
-      ok: true,
-      escopo: "oficial",
-      branding: resultado.branding
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-app.delete("/branding", (req, res) => {
-  try {
-    if (!isAdminMaster(req)) {
-      return res.status(403).json({
-        ok: false,
-        erro: "Acesso restrito ao admin_master"
-      });
-    }
-
-    const branding = restaurarBrandingOficial();
-
-    return res.json({
-      ok: true,
-      escopo: "oficial",
-      restaurado: true,
-      branding
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-app.get("/radar/config", (req, res) => {
-  try {
-    if (req.usuario?.papel !== "admin_master") {
-      return res.status(403).json({
-        ok: false,
-        erro: "Acesso restrito ao admin_master"
-      });
-    }
-
-    const clienteId = getClienteId(req);
-
-    if (!clienteId) {
-      return res.status(401).json({
-        ok: false,
-        erro: "Cliente nao autenticado"
-      });
-    }
-
-    const radarConfig = carregarRadarConfigCliente(clienteId);
-    const sessoesWhatsapp = listarSessoesWhatsappCliente(clienteId);
-    const telegramDisponiveis = listarTelegramRadarCliente(clienteId);
-
-    return res.json({
-      monitoramentoAtivo: radarConfig.monitoramentoAtivo,
-      sessaoWhatsappId: radarConfig.sessaoWhatsappId,
-      gruposMonitorados: radarConfig.gruposMonitorados,
-      sessoesWhatsappMonitoradas: radarConfig.sessoesWhatsappMonitoradas,
-      telegramMonitorados: radarConfig.telegramMonitorados,
-      monitoramento: radarConfig.monitoramento,
-      categoriasPermitidas: radarConfig.categoriasPermitidas,
-      templateMidia: radarConfig.templateMidia,
-      sessoesWhatsapp,
-      sessoes: sessoesWhatsapp,
-      telegramDisponiveis,
-      telegram: telegramDisponiveis
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-app.post("/radar/config", (req, res) => {
-  try {
-    if (req.usuario?.papel !== "admin_master") {
-      return res.status(403).json({
-        ok: false,
-        erro: "Acesso restrito ao admin_master"
-      });
-    }
-
-    const clienteId = getClienteId(req);
-
-    if (!clienteId) {
-      return res.status(401).json({
-        ok: false,
-        erro: "Cliente nao autenticado"
-      });
-    }
-
-    const body = req.body || {};
-    const possuiCampo = campo => Object.prototype.hasOwnProperty.call(body, campo);
-    const gruposMonitorados = body.gruposMonitorados;
-    const sessoesWhatsappMonitoradas = body.sessoesWhatsappMonitoradas;
-    const telegramMonitorados = body.telegramMonitorados;
-
-    if (possuiCampo("gruposMonitorados") && !Array.isArray(gruposMonitorados)) {
-      return res.status(400).json({
-        ok: false,
-        erro: "gruposMonitorados deve ser array"
-      });
-    }
-
-    if (possuiCampo("sessoesWhatsappMonitoradas") && !Array.isArray(sessoesWhatsappMonitoradas)) {
-      return res.status(400).json({
-        ok: false,
-        erro: "sessoesWhatsappMonitoradas deve ser array"
-      });
-    }
-
-    if (possuiCampo("sessoesWhatsappMonitoradas")) {
-      for (const sessao of sessoesWhatsappMonitoradas) {
-        if (!sessao || typeof sessao !== "object" || Array.isArray(sessao)) {
-          return res.status(400).json({
-            ok: false,
-            erro: "sessoesWhatsappMonitoradas deve conter objetos"
-          });
-        }
-
-        if (!Array.isArray(sessao.gruposMonitorados)) {
-          return res.status(400).json({
-            ok: false,
-            erro: "gruposMonitorados da sessao deve ser array"
-          });
-        }
-
-        const sessaoValidada = validarSessaoRadarCliente(
-          clienteId,
-          sessao.sessaoId || sessao.id || sessao.sessionId
-        );
-
-        if (!sessaoValidada.ok) {
-          return res.status(400).json({
-            ok: false,
-            erro: sessaoValidada.motivo
-          });
-        }
-      }
-    }
-
-    if (possuiCampo("telegramMonitorados") && !Array.isArray(telegramMonitorados)) {
-      return res.status(400).json({
-        ok: false,
-        erro: "telegramMonitorados deve ser array"
-      });
-    }
-
-    if (possuiCampo("monitoramento") && (!body.monitoramento || typeof body.monitoramento !== "object" || Array.isArray(body.monitoramento))) {
-      return res.status(400).json({
-        ok: false,
-        erro: "monitoramento deve ser objeto"
-      });
-    }
-
-    if (possuiCampo("categoriasPermitidas") && !Array.isArray(body.categoriasPermitidas)) {
-      return res.status(400).json({
-        ok: false,
-        erro: "categoriasPermitidas deve ser array"
-      });
-    }
-
-    if (possuiCampo("templateMidia") && (!body.templateMidia || typeof body.templateMidia !== "object" || Array.isArray(body.templateMidia))) {
-      return res.status(400).json({
-        ok: false,
-        erro: "templateMidia deve ser objeto"
-      });
-    }
-
-    const dadosConfig = {};
-
-    if (possuiCampo("monitoramentoAtivo")) {
-      dadosConfig.monitoramentoAtivo = body.monitoramentoAtivo !== false;
-    }
-
-    if (possuiCampo("sessaoWhatsappId")) {
-      const sessaoValidada = validarSessaoRadarCliente(
-        clienteId,
-        body.sessaoWhatsappId
-      );
-
-      if (!sessaoValidada.ok) {
-        return res.status(400).json({
-          ok: false,
-          erro: sessaoValidada.motivo
-        });
-      }
-
-      dadosConfig.sessaoWhatsappId = sessaoValidada.sessaoWhatsappId;
-    }
-
-    if (possuiCampo("sessoesWhatsappMonitoradas")) dadosConfig.sessoesWhatsappMonitoradas = sessoesWhatsappMonitoradas;
-    if (possuiCampo("gruposMonitorados")) dadosConfig.gruposMonitorados = gruposMonitorados;
-    if (possuiCampo("telegramMonitorados")) dadosConfig.telegramMonitorados = telegramMonitorados;
-    if (possuiCampo("monitoramento")) dadosConfig.monitoramento = body.monitoramento;
-    if (possuiCampo("categoriasPermitidas")) dadosConfig.categoriasPermitidas = body.categoriasPermitidas;
-    if (possuiCampo("templateMidia")) dadosConfig.templateMidia = body.templateMidia;
-
-    const radarConfig = salvarRadarConfigCliente(clienteId, dadosConfig);
-
-    return res.json({
-      ok: true,
-      monitoramentoAtivo: radarConfig.monitoramentoAtivo,
-      sessaoWhatsappId: radarConfig.sessaoWhatsappId,
-      gruposMonitorados: radarConfig.gruposMonitorados,
-      sessoesWhatsappMonitoradas: radarConfig.sessoesWhatsappMonitoradas,
-      telegramMonitorados: radarConfig.telegramMonitorados,
-      monitoramento: radarConfig.monitoramento,
-      categoriasPermitidas: radarConfig.categoriasPermitidas,
-      templateMidia: radarConfig.templateMidia
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-app.get("/radar/historico", (req, res) => {
-  try {
-    if (req.usuario?.papel !== "admin_master") {
-      return res.status(403).json({
-        ok: false,
-        erro: "Acesso restrito ao admin_master"
-      });
-    }
-
-    const clienteId = getClienteId(req);
-
-    if (!clienteId) {
-      return res.status(401).json({
-        ok: false,
-        erro: "Cliente nao autenticado"
-      });
-    }
-
-    const resumo = montarResumoHistoricoRadar(clienteId, {
-      grupoId: req.query?.grupoId || "",
-      origemTipo: req.query?.origemTipo || "",
-      sessaoId: req.query?.sessaoId || "",
-      limit: req.query?.limit || 20
-    });
-
-    return res.json({
-      ok: true,
-      clienteId,
-      grupos: resumo.grupos,
-      capturas: resumo.capturas,
-      eventos: resumo.eventos,
-      limite: 200
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-app.get("/radar/preview", (req, res) => {
-  try {
-    if (req.usuario?.papel !== "admin_master") {
-      return res.status(403).json({
-        ok: false,
-        erro: "Acesso restrito ao admin_master"
-      });
-    }
-
-    const clienteId = getClienteId(req);
-
-    if (!clienteId) {
-      return res.status(401).json({
-        ok: false,
-        erro: "Cliente nao autenticado"
-      });
-    }
-
-    const resumo = montarResumoHistoricoRadar(clienteId, {
-      grupoId: req.query?.grupoId || "",
-      origemTipo: req.query?.origemTipo || "",
-      sessaoId: req.query?.sessaoId || "",
-      limit: req.query?.limit || 20
-    });
-
-    return res.json({
-      ok: true,
-      clienteId,
-      grupos: resumo.grupos,
-      eventos: resumo.eventos,
-      capturas: resumo.capturas,
-      limite: 200
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-app.get("/radar/preview/:grupoId", (req, res) => {
-  try {
-    if (req.usuario?.papel !== "admin_master") {
-      return res.status(403).json({
-        ok: false,
-        erro: "Acesso restrito ao admin_master"
-      });
-    }
-
-    const clienteId = getClienteId(req);
-
-    if (!clienteId) {
-      return res.status(401).json({
-        ok: false,
-        erro: "Cliente nao autenticado"
-      });
-    }
-
-    const resumo = montarResumoHistoricoRadar(clienteId, {
-      grupoId: req.params.grupoId || "",
-      origemTipo: req.query?.origemTipo || "",
-      sessaoId: req.query?.sessaoId || "",
-      limit: req.query?.limit || 20
-    });
-
-    return res.json({
-      ok: true,
-      clienteId,
-      grupos: resumo.grupos,
-      eventos: resumo.eventos,
-      capturas: resumo.capturas,
-      limite: 200
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-// Endpoint interno para plugar webhook/polling Telegram futuramente.
-// Requer Bearer token de admin_master e processa somente chats ativos em telegramMonitorados.
-app.post("/radar/telegram/inbound", async (req, res) => {
-  try {
-    if (req.usuario?.papel !== "admin_master") {
-      return res.status(403).json({
-        ok: false,
-        motivo: "acesso_restrito_admin_master"
-      });
-    }
-
-    const entrada = normalizarMensagemTelegramRadar(req.body || {});
-
-    if (!entrada.grupoId) {
-      return res.status(400).json({
-        ok: false,
-        motivo: "telegram_chat_id_obrigatorio"
-      });
-    }
-
-    if (!entrada.texto) {
-      return res.status(400).json({
-        ok: false,
-        motivo: "telegram_texto_obrigatorio"
-      });
-    }
-
-    const resultado = await processarMensagemRadar(entrada);
-
-    return res.json({
-      ok: !!resultado.ok,
-      origemTipo: "telegram",
-      motivo: resultado.motivo || "",
-      links: resultado.links || 0,
-      adicionadas: resultado.adicionadas || 0,
-      resultados: resultado.resultados || []
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      motivo: e.message
-    });
-  }
-});
-
-app.get("/radar", (req, res) => {
-  try {
-    if (req.usuario?.papel !== "admin_master") {
-      return res.status(403).json({
-        ok: false,
-        erro: "Acesso restrito ao admin_master"
-      });
-    }
-
-    const clienteId = String(req.query?.clienteId || getClienteId(req) || "admin");
-    const radarConfig = carregarRadarConfigCliente(clienteId);
-    const descartesRadar = lerDescartesRadar(clienteId);
-    const ofertasRadarCliente = lerFilasRadarSomenteLeitura()
-      .filter((oferta) => String(oferta.origemClienteId || oferta.clienteId || "admin") === clienteId);
-
-    sincronizarTratadasRadarDeOfertas(clienteId, ofertasRadarCliente);
-
-    const tratadasRadar = lerTratadasRadar(clienteId);
-    const historicoOperacional = montarResumoHistoricoRadar(clienteId, {
-      limit: req.query?.limit || 50
-    }).eventos;
-
-    if (!temFontesMonitoradasRadar(radarConfig)) {
-      return res.json({
-        ok: true,
-        total: 0,
-        aviso: "Nenhum grupo monitorado configurado para o Radar.",
-        clienteId,
-        oportunidades: [],
-        historicoOperacional,
-        ultimasOfertasProcessadas: historicoOperacional
-      });
-    }
-
-    const oportunidades = deduplicarOportunidadesRadar(ofertasRadarCliente
-      .filter((oferta) => !ofertaTratadaRadar(oferta, tratadasRadar))
-      .filter((oferta) => !ofertaOcultadaRadar(oferta, descartesRadar))
-      .filter((oferta) => origemOfertaEstaMonitoradaRadar(oferta, radarConfig).ok)
-      .map((oferta) => {
-        const origem = obterOrigemOfertaRadar(oferta);
-        const cupomRadar = normalizarBeneficiosRadarOferta(oferta);
-        const categoria = categoriaRadarReclassificada(oferta);
-        const dataEntradaRadar = dataHoraRadarOferta(oferta);
-        const capturadaEm = dataHoraRadarOferta({
-          capturadaEm: oferta.capturadaEm,
-          dataEntradaRadar,
-          dataEntradaFila: oferta.dataEntradaFila,
-          criadoEm: oferta.criadoEm
-        });
-        const economia = calcularEconomiaRadar(oferta);
-        const ofertaRadar = {
-          ...oferta,
-          categoria,
-          categoriaProduto: "",
-          cupom: cupomRadar.cupom,
-          avisoCupom: cupomRadar.avisoCupom,
-          cupomConfirmado: cupomRadar.cupomConfirmado,
-          possivelCupom: cupomRadar.possivelCupom
-        };
-        const radar = avaliarOfertaRadar(ofertaRadar, {
-          termo: oferta.titulo || oferta.nome || "",
-          possivelRepeticao: oferta.possivelRepeticao
-        });
-
-        return {
-          id: oferta.id || "",
-          idOfertaFila: oferta.id || oferta.idOfertaFila || "",
-          titulo: oferta.titulo || oferta.nome || "",
-          dataEntradaRadar,
-          capturadaEm,
-          imagem: oferta.imagem || oferta.image || oferta.foto || "",
-          marketplace: oferta.marketplace || oferta.mercado || "",
-          categoria: radar.categoria,
-          precoAtual: oferta.precoAtual || oferta.preco || "",
-          precoAntigo: oferta.precoAntigo || "",
-          descontoPercentual: radar.descontoPercentual,
-          economiaValor: economia.economiaValor,
-          economiaPercentual: economia.economiaPercentual,
-          cupom: cupomRadar.cupom,
-          avisoCupom: cupomRadar.avisoCupom,
-          tipoCupom: cupomRadar.tipoCupom,
-          valorCupom: cupomRadar.valorCupom,
-          percentualCupom: cupomRadar.percentualCupom,
-          descontoPix: cupomRadar.descontoPix,
-          descontoApp: cupomRadar.descontoApp,
-          beneficioExtra: cupomRadar.beneficioExtra,
-          cupomConfirmado: cupomRadar.cupomConfirmado,
-          possivelCupom: cupomRadar.possivelCupom,
-          linkOriginal: oferta.linkOriginal || "",
-          link: oferta.link || "",
-          linkAfiliado: oferta.linkAfiliado || "",
-          statusRadar: oferta.statusRadar || (oferta.radarNaFila || oferta.status === "pendente" ? "fila" : normalizarStatusOperacionalRadar(oferta.status || "")),
-          motivo: oferta.motivo || oferta.statusDetalhe || "",
-          radarScore: radar.radarScore,
-          radarNivel: radar.nivel,
-          radarDecisao: radar.decisao,
-          radar: {
-            radarScore: radar.radarScore,
-            nivel: radar.nivel,
-            motivos: radar.motivos,
-            alertas: radar.alertas,
-            decisao: radar.decisao
-          },
-          origemClienteId: oferta.origemClienteId || oferta.clienteId || "admin",
-          origemGrupoId: origem.origemGrupoId,
-          origemGrupoNome: origem.origemGrupoNome,
-          origemSessaoId: origem.origemSessaoId,
-          origemTipo: origem.origemTipo,
-          coletadoDe: origem.origemGrupoNome || origem.origemGrupoId,
-          statusFila: oferta.status || ""
-        };
-      })
-      .sort((a, b) => (b.radar.radarScore || 0) - (a.radar.radarScore || 0)));
-
-    return res.json({
-      ok: true,
-      total: oportunidades.length,
-      clienteId,
-      oportunidades: oportunidades.slice(0, 50),
-      historicoOperacional,
-      ultimasOfertasProcessadas: historicoOperacional
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-app.delete("/radar/oportunidades", (req, res) => {
-  try {
-    if (req.usuario?.papel !== "admin_master") {
-      return res.status(403).json({
-        ok: false,
-        erro: "Acesso restrito ao admin_master"
-      });
-    }
-
-    const clienteId = String(req.query?.clienteId || getClienteId(req) || "admin");
-    const radarConfig = carregarRadarConfigCliente(clienteId);
-    const descartesRadar = lerDescartesRadar(clienteId);
-    const idsSolicitados = Array.isArray(req.body?.ids)
-      ? req.body.ids.map(String).filter(Boolean)
-      : [];
-    const limparTodas = req.body?.todas !== false;
-    const idsSet = new Set(idsSolicitados);
-
-    const oportunidades = lerFilasRadarSomenteLeitura()
-      .filter((oferta) => String(oferta.origemClienteId || oferta.clienteId || "admin") === clienteId)
-      .filter((oferta) => !ofertaOcultadaRadar(oferta, descartesRadar))
-      .filter((oferta) => origemOfertaEstaMonitoradaRadar(oferta, radarConfig).ok)
-      .filter((oferta) => limparTodas || idsSet.has(String(oferta.id || "")));
-
-    const removidas = registrarDescartesOportunidadesRadar(clienteId, oportunidades);
-    sincronizarTratadasRadarDeOfertas(clienteId, oportunidades.map(oferta => ({
-      ...oferta,
-      statusRadar: oferta.statusRadar || "descartado"
-    })));
-
-    return res.json({
-      ok: true,
-      clienteId,
-      removidas
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-app.delete("/radar/oportunidades/:id", (req, res) => {
-  try {
-    if (req.usuario?.papel !== "admin_master") {
-      return res.status(403).json({
-        ok: false,
-        erro: "Acesso restrito ao admin_master"
-      });
-    }
-
-    const clienteId = String(req.query?.clienteId || getClienteId(req) || "admin");
-    const radarConfig = carregarRadarConfigCliente(clienteId);
-    const descartesRadar = lerDescartesRadar(clienteId);
-    const id = String(req.params.id || "");
-    const oportunidades = lerFilasRadarSomenteLeitura()
-      .filter((oferta) => String(oferta.origemClienteId || oferta.clienteId || "admin") === clienteId)
-      .filter((oferta) => !ofertaOcultadaRadar(oferta, descartesRadar))
-      .filter((oferta) => origemOfertaEstaMonitoradaRadar(oferta, radarConfig).ok)
-      .filter((oferta) => String(oferta.id || "") === id);
-
-    const removidas = registrarDescartesOportunidadesRadar(clienteId, oportunidades.length ? oportunidades : [{ id }]);
-    sincronizarTratadasRadarDeOfertas(clienteId, oportunidades.map(oferta => ({
-      ...oferta,
-      statusRadar: oferta.statusRadar || "descartado"
-    })));
-
-    return res.json({
-      ok: true,
-      clienteId,
-      removidas
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-app.delete("/radar/preview", (req, res) => {
-  try {
-    if (req.usuario?.papel !== "admin_master") {
-      return res.status(403).json({
-        ok: false,
-        erro: "Acesso restrito ao admin_master"
-      });
-    }
-
-    const clienteId = getClienteId(req);
-
-    if (!clienteId) {
-      return res.status(401).json({
-        ok: false,
-        erro: "Cliente nao autenticado"
-      });
-    }
-
-    const previewAtual = lerPreviewRadar(clienteId);
-    const historicoAtual = lerHistoricoRadar(clienteId);
-    const removidosPreview = previewAtual.length;
-    const removidosHistorico = historicoAtual.length;
-
-    for (const evento of [...previewAtual, ...historicoAtual]) {
-      const status = normalizarTexto(evento.statusRadar || evento.status || "");
-      if (["fila", "adicionado_fila", "adicionada_fila", "enviado", "ignorado", "ignorada", "erro", "descartado"].includes(status)) {
-        registrarTratamentoRadar(clienteId, evento, status === "adicionado_fila" || status === "adicionada_fila" ? "fila" : status);
-      }
-    }
-
-    salvarPreviewRadar(clienteId, []);
-    salvarHistoricoRadar(clienteId, []);
-
-    return res.json({
-      ok: true,
-      clienteId,
-      removidosPreview,
-      removidosHistorico
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-app.post("/radar/adicionar-fila", async (req, res) => {
-  try {
-    if (req.usuario?.papel !== "admin_master") {
-      return res.status(403).json({
-        ok: false,
-        motivo: "acesso_restrito_admin_master"
-      });
-    }
-
-    const clienteId = String(req.body?.clienteId || "admin");
-    const oferta = req.body?.oferta || {};
-
-    const resultado = await adicionarRadarNaFilaCliente(oferta, clienteId);
-
-    if (!resultado.ok) {
-      return res.json({
-        ok: false,
-        motivo: resultado.motivo
-      });
-    }
-
-    return res.json({
-      ok: true,
-      adicionada: true,
-      oferta: resultado.oferta
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      motivo: e.message
-    });
-  }
-});
-
 // =============== ROTA DO MENSAGEIRO =================
 
 app.use("/mensageiro", criarRotasMensageiro({
@@ -8975,9 +3271,7 @@ app.use("/mensageiro", criarRotasMensageiro({
   getPlanoUsuario,
   usuarioTemRecurso,
   getMensageiroCliente: mensageiro.getMensageiroCliente,
-  setMensageiroCliente: mensageiro.setMensageiroCliente,
-  getAtendimentoConfigCliente: mensageiro.getAtendimentoConfigCliente,
-  setAtendimentoConfigCliente: mensageiro.setAtendimentoConfigCliente
+  setMensageiroCliente: mensageiro.setMensageiroCliente
 }));
 
 
@@ -9507,57 +3801,6 @@ console.log("[INFO] AWIN Deeplink OK");
 
 app.get("/teste-kabum-rota", (req, res) => {
   return res.json({ ok: true, rota: "kabum ativa" });
-});
-
-async function importarKabumManualRequest(req, res, opcoes = {}) {
-  try {
-    const clienteId = getClienteId(req);
-    const body = req.body || {};
-    const url = String(body.url || body.link || body.linkOriginal || "").trim();
-
-    if (!url) {
-      return res.status(400).json({
-        ok: false,
-        erro: "URL obrigatória"
-      });
-    }
-
-    if (!/kabum\.com\.br/i.test(url)) {
-      return res.status(400).json({
-        ok: false,
-        erro: "Informe uma URL da KaBuM"
-      });
-    }
-
-    const produto = await importarProdutoKabumViaAwin(
-      url,
-      clienteId,
-      {
-        gerarDeepLinkAwin
-      }
-    );
-
-    return res.json({
-      ok: true,
-      teste: opcoes.teste === true,
-      ...produto
-    });
-  } catch (e) {
-    console.error("[ERRO] KABUM IMPORTAR:", e.message);
-
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-}
-
-app.post("/kabum/importar", (req, res) => {
-  return importarKabumManualRequest(req, res);
-});
-
-app.post("/kabum/importar-teste", (req, res) => {
-  return importarKabumManualRequest(req, res, { teste: true });
 });
 
 app.post("/awin/gerar-link", async (req, res) => {
@@ -10568,13 +4811,10 @@ const novaOferta = {
 
 novaOferta.status = novaOferta.status || "pendente";
 novaOferta.statusDetalhe = novaOferta.statusDetalhe || "Na fila";
-validarCupomMonetarioOferta(novaOferta);
-aplicarPrioridadeEnvioOferta(novaOferta);
 
 const adicionou = adicionarOfertaNaFila(fila, novaOferta, "manual-magalu");
 
 if (adicionou) {
-  logPrioridadeFila(novaOferta);
   salvarFila(clienteId);
 }
 
@@ -11252,7 +5492,7 @@ function usuarioTemIntegracaoMarketplace(clienteId, marketplace) {
   const integracao = getIntegracaoCliente(clienteId, mp);
   const cred = integracao?.credenciais || {};
 
-  logOptimus("INTEGRACAO", "Check cliente marketplace", {
+  console.log("[DEBUG]✅ CHECK INTEGRAO CLIENTE:", {
     clienteId,
     marketplace: mp,
     temIntegracao: !!integracao,
@@ -11348,7 +5588,7 @@ console.log("[DEBUG]✅ CHECK INTEGRAO:", {
 });
 
    if (!usuarioTemIntegracaoMarketplace(clienteId, mp)) {
-     logOptimus("INTEGRACAO", "Usuario sem integracao configurada", {
+     console.log("[AVISO] Usurio sem integrao configurada:", {
      clienteId,
      marketplace: mp,
       titulo: ofertaBase.titulo
@@ -11369,15 +5609,15 @@ console.log("[DEBUG]✅ CHECK INTEGRAO:", {
       ofertaBase
     );
 
-    logOptimus("INTEGRACAO", "Link cliente gerado", {
-      clienteId,
-      marketplace: mp,
-      linkOriginal,
-      linkAfiliadoCliente
-    });
+console.log("[INFO]🔗 LINK CLIENTE GERADO:", {
+  clienteId,
+  marketplace: mp,
+  linkOriginal,
+  linkAfiliadoCliente
+});
 
  if (!linkAfiliadoCliente) {
-  logOptimus("INTEGRACAO", "Oferta bloqueada sem link afiliado proprio", {
+  console.log("[AVISO] Oferta bloqueada: cliente sem link afiliado prprio:", {
     clienteId,
     marketplace: mp,
     titulo: ofertaBase.titulo
@@ -11389,7 +5629,7 @@ const linkAfiliadoIgualOriginal =
   String(linkAfiliadoCliente || "").trim() === String(linkOriginal || "").trim();
 
 if (mp === "mercadolivre" && linkAfiliadoIgualOriginal) {
-  logOptimus("MERCADOLIVRE", "Bloqueado link afiliado igual ao original", {
+  console.log("[AVISO] ML bloqueado: link afiliado igual ao original", {
     clienteId,
     marketplace: mp,
     titulo: ofertaBase.titulo,
@@ -11448,8 +5688,6 @@ if (deveIgnorarOfertaRepetida(ofertaCliente)) {
 
 ofertaCliente.status = ofertaCliente.status || "pendente";
 ofertaCliente.statusDetalhe = ofertaCliente.statusDetalhe || "Na fila";
-validarCupomMonetarioOferta(ofertaCliente);
-aplicarPrioridadeEnvioOferta(ofertaCliente);
 
 // â­ SCORE V1
 try {
@@ -11474,7 +5712,6 @@ try {
 
 registrarOfertaVista(ofertaCliente);
 
-logPrioridadeFila(ofertaCliente);
 fila.push(ofertaCliente);
 
 salvarFila(clienteId);
@@ -12070,7 +6307,43 @@ app.post("/importar-produto", async (req, res) => {
 
 app.get("/sessoes", (req, res) => {
   const clienteId = getClienteId(req);
-  const lista = listarSessoesWhatsappCliente(clienteId);
+
+  const lista = Object.values(sessoesMeta)
+    .filter(sessao => {
+      const id = String(sessao.id || "");
+
+      return (
+        id.startsWith(clienteId + "_") ||
+        id === clienteId ||
+        (clienteId === "admin" && id.startsWith("admin_"))
+      );
+    })
+    .map(sessao => {
+      const id = sessao.id;
+      const totalGrupos = gruposPorSessao[id]?.length || 0;
+
+      const nomeAmigavel =
+        sessao.nome ||
+        sessao.nomeSessao ||
+        sessao.apelido ||
+        sessao.titulo ||
+        sessao.label ||
+        id;
+
+      return {
+        ...sessao,
+        nome: nomeAmigavel,
+        nomeAmigavel,
+        nomeExibicao: nomeAmigavel,
+        idTecnico: id,
+        status: statusSessao[id] || "offline",
+        conectado: statusSessao[id] === "open" || statusSessao[id] === "aberto",
+        qrDisponivel: !!qrCodes[id],
+        grupos: totalGrupos,
+        totalGrupos,
+        destinos: destinosPorSessao[id]?.length || 0
+      };
+    });
 
   return res.json({
     ok: true,
@@ -12550,7 +6823,7 @@ app.get("/grupos/:id", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
     const id = normalizarSessaoId(clienteId, req.params.id);
-    const force = ["true", "1", "sim", "yes"].includes(String(req.query.force || req.query.refresh || "").toLowerCase());
+    const force = req.query.force === "true";
 
     const status = statusSessao[id];
 
@@ -12605,45 +6878,6 @@ app.get("/grupos/:id", async (req, res) => {
       total: 0,
       grupos: [],
       gruposLista: []
-    });
-  }
-});
-
-app.post("/grupos/:id/refresh", async (req, res) => {
-  try {
-    const clienteId = getClienteId(req);
-    const id = normalizarSessaoId(clienteId, req.params.id);
-    const status = statusSessao[id];
-
-    if (status !== "open" && status !== "aberto") {
-      return res.json({
-        ok: false,
-        id,
-        status: status || "offline",
-        total: gruposPorSessao[id]?.length || 0,
-        grupos: gruposPorSessao[id] || [],
-        gruposLista: gruposPorSessao[id] || [],
-        cache: true,
-        aviso: "Sessao nao esta conectada."
-      });
-    }
-
-    const grupos = await carregarGruposSessao(id, { force: true });
-
-    return res.json({
-      ok: true,
-      id,
-      total: grupos.length,
-      grupos,
-      gruposLista: grupos,
-      cache: false,
-      atualizado: true
-    });
-  } catch (e) {
-    console.log("[ERRO] Erro rota /grupos/:id/refresh:", e.message);
-    return res.status(500).json({
-      ok: false,
-      erro: "Erro ao atualizar grupos"
     });
   }
 });
@@ -12943,12 +7177,6 @@ if (id.startsWith("user_")) {
 sock.ev.on("messages.upsert", async ({ messages = [] } = {}) => {
   try {
     for (const mensagem of messages) {
-      await processarMensagemRadarAutomatica({
-        mensagem,
-        sessaoId: id,
-        sock
-      });
-
       await mensageiro.tratarMensagemPrivadaAtendimento({
         clienteId: clienteIdMensageiro,
         sessaoId: id,
@@ -13314,7 +7542,7 @@ for (const usuario of usuarios) {
     : marketplace;
 
 if (!usuarioTemIntegracaoMarketplace(clienteId, marketplaceIntegracao)) {
-  logOptimus("INTEGRACAO", "Usuario sem integracao configurada", {
+  console.log("[AVISO] Usurio sem integrao configurada:", {
     clienteId,
     marketplace,
     marketplaceIntegracao
@@ -13413,7 +7641,7 @@ setInterval(() => {
     const agora = Date.now();
 
     if (agora - ultimoLogPausaFila > 5 * 60 * 1000) {
-      logOptimus("FILA", "Fila pausada fora do horario configurado");
+      console.log("[FILA] Fila pausada fora do horrio configurado");
       ultimoLogPausaFila = agora;
     }
 
