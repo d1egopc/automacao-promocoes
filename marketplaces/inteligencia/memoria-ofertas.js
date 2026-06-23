@@ -219,7 +219,7 @@ function deveIgnorarOfertaRepetida(oferta = {}) {
   if (desconto >= 25 && horasPassadas >= 0.25) return false;
   if (quedaPreco && horasPassadas >= 0.25) return false;
 
-  if (horasPassadas < 0.25 && !temCupomNovo && !quedaPreco) {
+  if (horasPassadas < 0.25 && !temCupomNovo && !quedaPreco && !temBeneficio) {
     console.log("[INFO] Oferta repetida ignorada <15min:", oferta.titulo || oferta.nome);
     return true;
   }
