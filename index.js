@@ -2217,6 +2217,14 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
   const origem = String(oferta.origem || "").toLowerCase();
   const ehRadar = origem === "radar" || oferta.radar === true || oferta.radarNaFila === true;
   const cupomSuspeito = oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true;
+  
+  const cupomTexto = String(oferta.cupom || "").trim().toUpperCase();
+  const cupomFake = ["COPIADO", "APPLIED", "APPEARANCE", "APPLINK", "SEM CUPOM"].includes(cupomTexto);
+
+  if (cupomFake) {
+  oferta.cupom = "";
+  } 
+      
   const cupomReal = !cupomSuspeito && (
     oferta.cupomConfirmado === true ||
     oferta.cupomValidado === true ||
@@ -2246,13 +2254,6 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
     const scoreAlto = Number(oferta.radarScore || oferta.score || 0) >= 60;
 
     oferta.origem = "radar";
-
-const cupomTexto = String(oferta.cupom || "").trim().toUpperCase();
-const cupomFake = ["COPIADO", "APPLIED", "APPEARANCE", "APPLINK", "SEM CUPOM"].includes(cupomTexto);
-
-if (cupomFake) {
-  oferta.cupom = "";
-}
 
     if (cupomReal) {
       oferta.prioridadeEnvio = 110;
