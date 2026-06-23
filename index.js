@@ -154,6 +154,8 @@ function logOptimus(categoria = "INFO", mensagem = "", dados = {}) {
 const DEBUG_LOGS = String(process.env.DEBUG_LOGS || "").toLowerCase() === "true";
 const LOG_THROTTLE_MS = 60 * 1000;
 const logsThrottle = new Map();
+const radarListenerRecentes = [];
+const radarBloqueiosRecentes = [];
 
 function deveLogarThrottle(chave = "geral", intervaloMs = LOG_THROTTLE_MS) {
   const agora = Date.now();
@@ -171,19 +173,27 @@ function logDebug(...args) {
 }
 
 function logRadarBloqueadoMonitoramento(dados = {}) {
-  const sessaoId = dados.sessaoId || dados.origemMonitorada?.sessaoId || "sem_sessao";
+  const sessaoId = dados.sessaoId || dados.origemMonitorada?.sessaoId || dados.origemMonitorada?.origemSessaoId || "sem_sessao";
   const grupoId = dados.grupoId || dados.origemMonitorada?.grupoId || dados.origemMonitorada?.origemGrupoId || "sem_grupo";
-  const chave = `radar-bloqueado:${sessaoId}:${grupoId}`;
-
-  if (!deveLogarThrottle(chave)) return;
-
-  console.log("🚫 Radar bloqueado por configuração", {
+  const grupoNome = dados.grupoNome || dados.origemMonitorada?.grupoNome || dados.origemMonitorada?.origemGrupoNome || "";
+  const motivo = dados.motivo || dados.origemMonitorada?.motivo || "origem_nao_monitorada";
+  const evento = {
+    capturadoEm: new Date().toISOString(),
     clienteId: dados.clienteId || "",
-    motivo: dados.motivo || dados.origemMonitorada?.motivo || "origem_nao_monitorada",
+    motivo,
     sessaoId,
     grupoId,
-    grupoNome: dados.grupoNome || dados.origemMonitorada?.grupoNome || dados.origemMonitorada?.origemGrupoNome || ""
-  });
+    grupoNome,
+    diagnostico: dados.origemMonitorada?.diagnostico || {}
+  };
+
+  radarBloqueiosRecentes.push(evento);
+  if (radarBloqueiosRecentes.length > 30) radarBloqueiosRecentes.shift();
+
+  const chave = `radar-bloqueado:${sessaoId}:${grupoId}`;
+  if (!deveLogarThrottle(chave)) return;
+
+  console.log("🚫 Radar bloqueado por configuração", evento);
 }
 
 if (!fs.existsSync("/data")) {
@@ -6146,7 +6156,8 @@ function obterGrupoWhatsappIdTecnicoRadar(grupo = {}) {
 }
 
 function normalizarGrupoWhatsappRadar(grupo = {}, sessaoIdPadrao = "") {
-  const idTecnico = obterGrupoWhatsappIdTecnicoRadar(grupo);
+  const sessaoIdResolvida = resolverSessaoWhatsappRadarCliente("admin", sessaoIdPadrao) || textoRadarId(sessaoIdPadrao);
+  const idTecnico = obterGrupoWhatsappIdTecnicoRadar(grupo) || resolverGrupoWhatsappRadarPorSessao(sessaoIdResolvida, grupo);
 
   if (!idTecnico) return null;
 
@@ -6156,7 +6167,7 @@ function normalizarGrupoWhatsappRadar(grupo = {}, sessaoIdPadrao = "") {
       grupoId: idTecnico,
       remoteJid: idTecnico,
       nome: idTecnico,
-      sessaoId: sessaoIdPadrao,
+      sessaoId: sessaoIdResolvida || sessaoIdPadrao,
       ativo: true,
       tipo: "whatsapp"
     };
@@ -6172,7 +6183,7 @@ function normalizarGrupoWhatsappRadar(grupo = {}, sessaoIdPadrao = "") {
     grupo.name ||
     idTecnico
   );
-  const sessaoId = textoRadarId(grupo.sessaoId || grupo.origemSessaoId || grupo.sessionId || sessaoIdPadrao);
+  const sessaoId = resolverSessaoWhatsappRadarCliente("admin", grupo.sessaoId || grupo.origemSessaoId || grupo.sessionId || sessaoIdResolvida || sessaoIdPadrao) || textoRadarId(grupo.sessaoId || grupo.origemSessaoId || grupo.sessionId || sessaoIdResolvida || sessaoIdPadrao);
 
   return {
     ...grupo,
@@ -6407,6 +6418,85 @@ function textoRadarId(valor = "") {
   return String(valor || "").trim();
 }
 
+function resolverSessaoWhatsappRadarCliente(clienteId = "admin", sessaoEntrada = "") {
+  const entrada = textoRadarId(sessaoEntrada);
+  if (!entrada) return "";
+
+  const normalizada = normalizarSessaoId(clienteId, entrada);
+  const candidatosDiretos = [entrada, normalizada, `${clienteId}_${entrada}`]
+    .map(textoRadarId)
+    .filter(Boolean);
+
+  for (const candidato of candidatosDiretos) {
+    if (sessoesMeta[candidato] || statusSessao[candidato] || sessoes[candidato] || gruposPorSessao[candidato]?.length) {
+      return candidato;
+    }
+  }
+
+  const chaveEntrada = chaveRadarId(entrada);
+  const encontrada = Object.values(sessoesMeta || {}).find(sessao => {
+    const valores = [
+      sessao?.id,
+      sessao?.sessaoId,
+      sessao?.nome,
+      sessao?.nomeSessao,
+      sessao?.apelido,
+      sessao?.titulo,
+      sessao?.label,
+      sessao?.nomeExibicao,
+      sessao?.nomeAmigavel
+    ];
+
+    return valores.some(valor => chaveRadarId(valor || "") === chaveEntrada);
+  });
+
+  return textoRadarId(encontrada?.id || encontrada?.sessaoId || "") || "";
+}
+
+function obterGruposReaisSessaoRadar(sessaoId = "") {
+  const id = textoRadarId(sessaoId);
+  const grupos = gruposPorSessao[id] || [];
+
+  return grupos.map(grupo => ({
+    id: textoRadarId(grupo.id || grupo.grupoId || grupo.value || grupo.jid || grupo.remoteJid || ""),
+    grupoId: textoRadarId(grupo.grupoId || grupo.id || grupo.value || grupo.jid || grupo.remoteJid || ""),
+    remoteJid: textoRadarId(grupo.remoteJid || grupo.grupoId || grupo.id || grupo.value || grupo.jid || ""),
+    nome: textoRadarId(grupo.nome || grupo.name || grupo.subject || grupo.titulo || grupo.label || "")
+  }));
+}
+
+function resolverGrupoWhatsappRadarPorSessao(sessaoId = "", grupo = {}) {
+  const idTecnico = obterGrupoWhatsappIdTecnicoRadar(grupo);
+  if (idTecnico) return idTecnico;
+
+  const nomeGrupo = textoRadarId(
+    typeof grupo === "string" || typeof grupo === "number"
+      ? grupo
+      : grupo?.nome || grupo?.titulo || grupo?.label || grupo?.subject || grupo?.name || grupo?.id || grupo?.grupoId || ""
+  );
+  const chaveGrupo = chaveRadarId(nomeGrupo);
+  if (!chaveGrupo) return "";
+
+  const gruposReais = obterGruposReaisSessaoRadar(sessaoId);
+  const encontrado = gruposReais.find(item =>
+    [item.nome, item.id, item.grupoId, item.remoteJid]
+      .some(valor => chaveRadarId(valor || "") === chaveGrupo)
+  );
+
+  return textoRadarId(encontrado?.remoteJid || encontrado?.grupoId || encontrado?.id || "");
+}
+
+function registrarRadarListenerRecebido(evento = {}) {
+  radarListenerRecentes.push({
+    capturadoEm: new Date().toISOString(),
+    sessaoId: textoRadarId(evento.sessaoId || ""),
+    remoteJid: textoRadarId(evento.remoteJid || evento.grupoId || ""),
+    grupoNome: textoRadarId(evento.grupoNome || ""),
+    tamanhoTexto: Number(evento.tamanhoTexto || 0) || 0
+  });
+
+  if (radarListenerRecentes.length > 30) radarListenerRecentes.shift();
+}
 function chaveRadarId(valor = "") {
   return normalizarTexto(textoRadarId(valor));
 }
@@ -6459,6 +6549,31 @@ function extrairIdsWhatsappMonitoradosRadar(lista = []) {
   return ids;
 }
 
+function grupoWhatsappMonitoradoNaSessaoRadar(sessao = {}, grupoId = "", grupoNome = "") {
+  const grupos = Array.isArray(sessao?.gruposMonitorados) ? sessao.gruposMonitorados : [];
+  const ids = extrairIdsWhatsappMonitoradosRadar(grupos);
+  const id = chaveGrupoWhatsappTecnicaRadar(grupoId);
+
+  if (id && ids.has(id)) {
+    return { ok: true, tipo: "id" };
+  }
+
+  const nome = chaveRadarId(grupoNome || "");
+  if (!nome) return { ok: false, tipo: "" };
+
+  const nomes = new Set();
+  for (const grupo of grupos) {
+    if (!grupo || typeof grupo !== "object") continue;
+    for (const campo of ["nome", "titulo", "label", "subject", "name", "grupoNome"]) {
+      const chave = chaveRadarId(grupo[campo] || "");
+      if (chave) nomes.add(chave);
+    }
+  }
+
+  return nomes.has(nome)
+    ? { ok: true, tipo: "nome" }
+    : { ok: false, tipo: "" };
+}
 function extrairIdsTelegramMonitoradosRadar(lista = []) {
   const ids = new Set();
 
@@ -6721,20 +6836,26 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
   let sessaoMonitoradaPorGrupo = null;
   let totalGruposMonitoradosGlobal = 0;
 
+  let tipoMatchGrupo = "";
+
   if (sessaoMonitorada) {
     const gruposIds = extrairIdsWhatsappMonitoradosRadar(sessaoMonitorada.gruposMonitorados);
     totalGruposMonitoradosSessao = gruposIds.size;
-    grupoMonitorado = Boolean(grupoId && gruposIds.has(grupoId));
+    const match = grupoWhatsappMonitoradoNaSessaoRadar(sessaoMonitorada, origem.origemGrupoId, origem.origemGrupoNome);
+    grupoMonitorado = match.ok;
+    tipoMatchGrupo = match.tipo;
   }
 
-  if (!grupoMonitorado && grupoId) {
+  if (!grupoMonitorado && (grupoId || grupoNome)) {
     for (const sessao of sessoesWhatsappMonitoradas) {
       const gruposIds = extrairIdsWhatsappMonitoradosRadar(sessao?.gruposMonitorados);
       totalGruposMonitoradosGlobal += gruposIds.size;
+      const match = grupoWhatsappMonitoradoNaSessaoRadar(sessao, origem.origemGrupoId, origem.origemGrupoNome);
 
-      if (gruposIds.has(grupoId)) {
+      if (match.ok) {
         sessaoMonitoradaPorGrupo = sessao;
         grupoMonitorado = true;
+        tipoMatchGrupo = match.tipo;
         break;
       }
     }
@@ -6742,8 +6863,8 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
 
   const ok = Boolean(grupoMonitorado && (sessaoMonitorada || sessaoMonitoradaPorGrupo));
   const validacao = ok && !sessaoMonitorada && sessaoMonitoradaPorGrupo
-    ? "remoteJid_monitorado_em_outra_sessao"
-    : "sessaoId+remoteJid";
+    ? `grupo_monitorado_em_outra_sessao_por_${tipoMatchGrupo || "id"}`
+    : `sessao+grupo_por_${tipoMatchGrupo || "id"}`;
 
   return {
     ok,
@@ -6756,6 +6877,7 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
       sessaoMonitoradaId: sessaoMonitorada?.sessaoId || sessaoMonitoradaPorGrupo?.sessaoId || "",
       totalGruposMonitoradosSessao,
       totalGruposMonitoradosGlobal,
+      tipoMatchGrupo,
       validacao
     }
   };
@@ -6954,13 +7076,15 @@ function validarSessaoRadarCliente(clienteId = "admin", sessaoWhatsappId = "") {
   }
 
   const sessaoNormalizada = normalizarSessaoId(clienteId, sessaoInformada);
+  const sessaoResolvida = resolverSessaoWhatsappRadarCliente(clienteId, sessaoInformada);
   const existe =
     sessoesMeta[sessaoInformada] ||
     sessoesMeta[sessaoNormalizada] ||
     statusSessao[sessaoInformada] ||
     statusSessao[sessaoNormalizada] ||
     sessoes[sessaoInformada] ||
-    sessoes[sessaoNormalizada];
+    sessoes[sessaoNormalizada] ||
+    (sessaoResolvida && (sessoesMeta[sessaoResolvida] || statusSessao[sessaoResolvida] || sessoes[sessaoResolvida] || gruposPorSessao[sessaoResolvida]?.length));
 
   if (!existe) {
     return { ok: false, motivo: "sessao_whatsapp_nao_encontrada" };
@@ -6968,9 +7092,9 @@ function validarSessaoRadarCliente(clienteId = "admin", sessaoWhatsappId = "") {
 
   return {
     ok: true,
-    sessaoWhatsappId: sessoesMeta[sessaoInformada] || statusSessao[sessaoInformada] || sessoes[sessaoInformada]
+    sessaoWhatsappId: sessaoResolvida || (sessoesMeta[sessaoInformada] || statusSessao[sessaoInformada] || sessoes[sessaoInformada]
       ? sessaoInformada
-      : sessaoNormalizada
+      : sessaoNormalizada)
   };
 }
 
@@ -8505,6 +8629,12 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
   const conteudo = extrairMensagemInternaRadar(mensagem?.message || {});
   const tiposMensagem = Object.keys(conteudo || {});
 
+  registrarRadarListenerRecebido({
+    sessaoId,
+    remoteJid,
+    grupoNome: obterNomeGrupoRadar(sessaoId, remoteJid),
+    tamanhoTexto: textoExtraido.length
+  });
   logOptimus("CAPTURA", "Upsert WhatsApp", {
     sessaoId,
     remoteJid,
@@ -9263,6 +9393,61 @@ app.get("/radar/debug/validar", (req, res) => {
     });
   }
 });
+function montarDiagnosticoRadarConfig(radarConfig = {}, sessoesWhatsapp = []) {
+  const sessoesMonitoradas = Array.isArray(radarConfig.sessoesWhatsappMonitoradas)
+    ? radarConfig.sessoesWhatsappMonitoradas
+    : [];
+
+  const gruposMonitorados = Array.isArray(radarConfig.gruposMonitorados)
+    ? radarConfig.gruposMonitorados
+    : [];
+
+  const sessoes = sessoesWhatsapp.map(sessao => {
+    const sessaoId = textoRadarId(sessao.sessaoId || sessao.id || "");
+    const gruposReais = obterGruposReaisSessaoRadar(sessaoId);
+    const monitorada = sessoesMonitoradas.find(item => chaveRadarId(item.sessaoId || "") === chaveRadarId(sessaoId));
+
+    return {
+      sessaoId,
+      nome: sessao.nome || sessao.nomeExibicao || sessao.nomeAmigavel || "",
+      status: sessao.status || "",
+      conectado: Boolean(sessao.conectado),
+      totalGruposReais: gruposReais.length,
+      gruposReais,
+      monitorada: Boolean(monitorada),
+      gruposMonitorados: Array.isArray(monitorada?.gruposMonitorados) ? monitorada.gruposMonitorados : []
+    };
+  });
+
+  const validacoesGruposMonitorados = gruposMonitorados.map(grupo => {
+    const resultado = origemOfertaEstaMonitoradaRadar({
+      origemTipo: "whatsapp",
+      origemSessaoId: grupo.sessaoId || radarConfig.sessaoWhatsappId || "",
+      origemGrupoId: grupo.remoteJid || grupo.grupoId || grupo.id || "",
+      origemGrupoNome: grupo.nome || ""
+    }, radarConfig);
+
+    return {
+      nome: grupo.nome || "",
+      sessaoId: grupo.sessaoId || "",
+      id: grupo.id || "",
+      grupoId: grupo.grupoId || "",
+      remoteJid: grupo.remoteJid || "",
+      idTecnicoValido: Boolean(chaveGrupoWhatsappTecnicaRadar(grupo.remoteJid || grupo.grupoId || grupo.id || "")),
+      validacao: resultado
+    };
+  });
+
+  return {
+    sessaoWhatsappId: radarConfig.sessaoWhatsappId || "",
+    gruposMonitorados,
+    sessoesWhatsappMonitoradas: sessoesMonitoradas,
+    sessoesWhatsapp: sessoes,
+    idsReaisRecebidosNoListener: [...radarListenerRecentes].slice(-20).reverse(),
+    gruposCapturadosRecentementeBloqueados: [...radarBloqueiosRecentes].slice(-20).reverse(),
+    validacoesGruposMonitorados
+  };
+}
 app.get("/radar/config", (req, res) => {
   try {
     if (req.usuario?.papel !== "admin_master") {
@@ -9277,6 +9462,7 @@ app.get("/radar/config", (req, res) => {
     const radarConfig = carregarRadarConfigAdminMaster();
     const sessoesWhatsapp = listarSessoesWhatsappCliente(clienteId);
     const telegramDisponiveis = listarTelegramRadarCliente(clienteId);
+    const diagnosticoVinculo = montarDiagnosticoRadarConfig(radarConfig, sessoesWhatsapp);
     logOptimus("RADAR", "Config carregada", {
       clienteId,
       sessoesWhatsappMonitoradas: Array.isArray(radarConfig.sessoesWhatsappMonitoradas) ? radarConfig.sessoesWhatsappMonitoradas.length : 0,
@@ -9295,7 +9481,8 @@ app.get("/radar/config", (req, res) => {
       sessoesWhatsapp,
       sessoes: sessoesWhatsapp,
       telegramDisponiveis,
-      telegram: telegramDisponiveis
+      telegram: telegramDisponiveis,
+      diagnosticoVinculo
     });
   } catch (e) {
     return res.status(500).json({
