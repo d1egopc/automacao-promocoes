@@ -7829,6 +7829,7 @@ function resumirResultadosRadarMensagem(resultados = []) {
 
   return resumo;
 }
+
 async function processarMensagemRadar({
   origemTipo,
   sessaoId,
@@ -7881,8 +7882,16 @@ async function processarMensagemRadar({
   const origemMonitorada = origemOfertaEstaMonitoradaRadar(origemBase, radarConfig);
 
   if (!origemMonitorada.ok) {
-    return { ok: false, motivo: origemMonitorada.motivo, ignorada: true };
-  }
+  console.log("🚨 RADAR BLOQUEADO MONITORAMENTO", {
+    motivo: origemMonitorada.motivo,
+    origemMonitorada,
+    sessaoId: sessaoIdTexto,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto
+  });
+
+  return { ok: false, motivo: origemMonitorada.motivo, ignorada: true };
+}
 
   logOptimus("CAPTURA", "Mensagem recebida", {
     origemTipo: origemTipoFinal || origemTipo,
@@ -7902,11 +7911,11 @@ async function processarMensagemRadar({
 const links = extrairLinksRadar(texto);
 
 console.log("🧪 RADAR LINKS EXTRAIDOS", {
-  sessaoId: dados.sessaoId,
-  grupoId: dados.grupoId,
+  sessaoId: sessaoIdTexto,
+  grupoId: grupoIdTexto,
   links,
   total: links.length,
-  texto: texto.slice(0, 250)
+  texto: String(texto || "").slice(0, 250)
 });
 
   logOptimus("RADAR", "Links detectados", {
