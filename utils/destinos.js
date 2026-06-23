@@ -50,20 +50,7 @@ function normalizarCategoriaDestino(valor = "") {
 }
 
 function destinoAceitaOferta(destino, oferta, opcoes = {}) {
-  return analisarDestinoOferta(destino, oferta, opcoes).aceita;
-}
-
-function analisarDestinoOferta(destino, oferta, opcoes = {}) {
-  if (!destino?.ativo) {
-    return {
-      aceita: false,
-      motivo: "destino_inativo",
-      marketplaceOferta: "",
-      categoriaOferta: "",
-      aceitaMarketplace: false,
-      aceitaCategoria: false
-    };
-  }
+  if (!destino?.ativo) return false;
 
   const classificarCategoriaOferta =
     opcoes.classificarCategoriaOferta ||
@@ -112,12 +99,6 @@ function analisarDestinoOferta(destino, oferta, opcoes = {}) {
       categoriaOferta.includes(cat)
     );
 
-  const motivo = !aceitaMarketplace
-    ? "marketplace"
-    : !aceitaCategoria
-      ? "categoria"
-      : "";
-
   logger.log("Check destino:", {
     nome: destino.nome,
     marketplaceOferta,
@@ -126,14 +107,7 @@ function analisarDestinoOferta(destino, oferta, opcoes = {}) {
     aceitaCategoria
   });
 
-  return {
-    aceita: aceitaMarketplace && aceitaCategoria,
-    motivo,
-    marketplaceOferta,
-    categoriaOferta,
-    aceitaMarketplace,
-    aceitaCategoria
-  };
+  return aceitaMarketplace && aceitaCategoria;
 }
 
 function destinoDentroHorario(destino = {}) {
@@ -145,26 +119,11 @@ function destinoDentroHorario(destino = {}) {
 
   const horaAtual = agoraBR.getHours() * 60 + agoraBR.getMinutes();
 
-  const horaInicio =
-    destino.horarioInicio ||
-    destino.horaInicio ||
-    destino.horaInicial ||
-    destino.inicio ||
-    destino.horarioInicial ||
-    "00:00";
-  const horaFim =
-    destino.horarioFim ||
-    destino.horaFim ||
-    destino.horaFinal ||
-    destino.fim ||
-    destino.horarioFinal ||
-    "23:59";
-
-  const [inicioH, inicioM] = String(horaInicio)
+  const [inicioH, inicioM] = (destino.horarioInicio || "00:00")
     .split(":")
     .map(Number);
 
-  const [fimH, fimM] = String(horaFim)
+  const [fimH, fimM] = (destino.horarioFim || "23:59")
     .split(":")
     .map(Number);
 
@@ -208,7 +167,6 @@ module.exports = {
   normalizarDestino,
   normalizarCategoriaDestino,
   categoriaPermitidaNoDestino,
-  analisarDestinoOferta,
   destinoAceitaOferta,
   destinoDentroHorario,
   categoriaBase,
