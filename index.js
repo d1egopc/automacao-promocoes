@@ -901,9 +901,23 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
   const maximo = Math.max(0, Math.min(Number(limite) || 3, 3));
   const resultado = {
     marketplace: "mercadolivre",
+    limite: maximo,
+    tentadas: 0,
     adicionadas: 0,
+    recusadas: 0,
     ignoradas: 0,
+    motivosRecusa: {},
+    bloqueios: [],
+    statusEntradaFila: "nao_tentada",
     erros: []
+  };
+
+  const registrarRecusaAbastecimento = (motivo, quantidade = 1) => {
+    const total = Math.max(0, Number(quantidade) || 0);
+    if (!total) return;
+    resultado.recusadas += total;
+    resultado.ignoradas += total;
+    resultado.motivosRecusa[motivo] = (resultado.motivosRecusa[motivo] || 0) + total;
   };
 
   try {
@@ -911,11 +925,13 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
 
     if (!config.marketplaces?.mercadolivre?.ativo) {
       resultado.erros.push("mercadolivre_desativado");
+      resultado.statusEntradaFila = "bloqueada_antes_fila";
       return resultado;
     }
 
     if (!usuarioTemIntegracaoMarketplace(cliente, "mercadolivre")) {
       resultado.erros.push("integracao_mercadolivre_ausente");
+      resultado.statusEntradaFila = "bloqueada_antes_fila";
       return resultado;
     }
 
@@ -923,24 +939,13 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
 
     filaControlada.push = (oferta) => {
       if (resultado.adicionadas >= maximo) {
-        resultado.ignoradas += 1;
+        registrarRecusaAbastecimento("limite_rodada_atingido");
         return fila.length;
       }
 
       fila.push(oferta);
       resultado.adicionadas += 1;
       return fila.length;
-    };
-
-    const ofertaJaExisteControlada = (novaOferta) => {
-      if (resultado.adicionadas >= maximo) {
-        resultado.ignoradas += 1;
-        return true;
-      }
-
-      const existe = ofertaJaExiste(novaOferta);
-      if (existe) resultado.ignoradas += 1;
-      return existe;
     };
 
     const configControlada = {
@@ -954,14 +959,14 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
       }
     };
 
-    await farejarMercadoLivreModulo(cliente, {
+    const resumoML = await farejarMercadoLivreModulo(cliente, {
       config: configControlada,
       integracoesPorCliente,
       getIntegracaoCliente,
       fila: filaControlada,
       salvarFila: () => salvarFila(cliente),
       prepararOfertaGlobal,
-      ofertaJaExiste: ofertaJaExisteControlada,
+      ofertaJaExiste,
       deveIgnorarOfertaRepetida,
       registrarOfertaVista,
       classificarCategoriaOferta,
@@ -977,6 +982,23 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
         })
     });
 
+    if (resumoML && typeof resumoML === "object") {
+      resultado.tentadas = Number(resumoML.tentadas || 0);
+      resultado.bloqueios = Array.isArray(resumoML.bloqueios) ? resumoML.bloqueios : [];
+
+      for (const [motivo, quantidade] of Object.entries(resumoML.motivosRecusa || {})) {
+        registrarRecusaAbastecimento(motivo, quantidade);
+      }
+    }
+
+    resultado.statusEntradaFila = resultado.adicionadas > 0
+      ? "fila"
+      : resultado.bloqueios.length > 0
+        ? "bloqueada_antes_fila"
+        : resultado.recusadas > 0
+          ? "recusada_antes_fila"
+          : "sem_ofertas_tentadas";
+
     if (resultado.adicionadas > 0) {
       salvarFila(cliente);
     }
@@ -990,7 +1012,7 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
 async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
   const cliente = String(clienteId || "admin");
   const saude = avaliarSaudeFilaCliente(cliente);
-  const simulado = opcoes.simulado !== false;
+  const simulado = opcoes.simulado === true;
 
   if (!saude.deveAbastecer) {
     return {
@@ -999,7 +1021,16 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
       abasteceu: false,
       modo: simulado ? "simulado" : "real",
       motivo: saude.motivo,
-      saude
+      saude,
+      abastecimento: {
+        marketplace: "mercadolivre",
+        tentadas: 0,
+        adicionadas: 0,
+        recusadas: 0,
+        motivosRecusa: {},
+        bloqueios: [],
+        erros: ["fila_nao_precisa_abastecer"]
+      }
     };
   }
 
@@ -1012,17 +1043,33 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
       ok: true,
       clienteId: cliente,
       abasteceu: false,
-      modo: "cooldown",
+      modo: simulado ? "simulado" : "real",
       motivo: "Abastecimento ja executado ha menos de 5 minutos.",
       cooldownRestanteSegundos: Math.ceil(restanteMs / 1000),
-      saude
+      saude,
+      abastecimento: {
+        marketplace: "mercadolivre",
+        tentadas: 0,
+        adicionadas: 0,
+        recusadas: 0,
+        motivosRecusa: {},
+        bloqueios: [],
+        erros: ["cooldown_ativo"]
+      }
     };
   }
 
-  filaInteligenteUltimoAbastecimento.set(cliente, agora);
-
   if (!simulado) {
     const abastecimento = await abastecerFilaComMercadoLivre(cliente, 3);
+    const tentativaValida =
+      abastecimento.tentadas > 0 ||
+      abastecimento.adicionadas > 0 ||
+      abastecimento.recusadas > 0 ||
+      abastecimento.bloqueios?.length > 0;
+
+    if (tentativaValida) {
+      filaInteligenteUltimoAbastecimento.set(cliente, Date.now());
+    }
 
     console.log(
       `🧠 FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo real`
@@ -1033,7 +1080,9 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
       clienteId: cliente,
       abasteceu: abastecimento.adicionadas > 0,
       modo: "real",
-      motivo: saude.motivo,
+      motivo: abastecimento.adicionadas > 0
+        ? saude.motivo
+        : abastecimento.erros?.[0] || "Nenhuma oferta adicionada na tentativa real.",
       saude,
       abastecimento
     };
@@ -1049,7 +1098,16 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
     abasteceu: true,
     modo: "simulado",
     motivo: saude.motivo,
-    saude
+    saude,
+    abastecimento: {
+      marketplace: "mercadolivre",
+      tentadas: 0,
+      adicionadas: 0,
+      recusadas: 0,
+      motivosRecusa: {},
+      bloqueios: [],
+      erros: []
+    }
   };
 }
 
@@ -4730,7 +4788,7 @@ app.post("/fila/inteligencia/abastecer", async (req, res) => {
       req.usuario?.papel === "admin_master"
         ? clienteSolicitado
         : clienteToken;
-    const simulado = req.body?.simulado !== false;
+    const simulado = req.body?.simulado === true;
 
     return res.json(await abastecerFilaSeNecessario(clienteId, { simulado }));
   } catch (e) {
@@ -12041,12 +12099,6 @@ async function distribuirOfertaParaClientes(ofertaBase) {
 
   ofertaBase = prepararOfertaGlobal(ofertaBase);
 
-console.log("🚨 DISTRIBUIDOR RECEBEU", {
-  clienteId,
-  titulo: ofertaBase.titulo,
-  marketplace: mp
-});
-
   for (const usuario of usuarios) {
     if (!usuario?.ativo) continue;
 
@@ -12054,6 +12106,12 @@ console.log("🚨 DISTRIBUIDOR RECEBEU", {
     const adminMaster = usuario.papel === "admin_master";
 
     const mp = normalizarTexto(ofertaBase.marketplace || "");
+
+    console.log("🚨 DISTRIBUIDOR RECEBEU", {
+      clienteId,
+      titulo: ofertaBase.titulo,
+      marketplace: mp
+    });
 
     if (!usuarioPodeReceberMarketplace(usuario, mp)) {
 
