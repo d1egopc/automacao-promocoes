@@ -1,4 +1,4 @@
-
+﻿
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
@@ -131,8 +131,6 @@ const LOG_OPTIMUS_ICONS = {
   AMAZON: "\u{1F535}",
   ALIEXPRESS: "\u{1F7E3}",
   KABUM: "\u{1F9F0}",
-  ORQUESTRADOR: "\u{1F504}",
-  RESUMO: "\u{1F4CA}",
   SUCESSO: "\u2705",
   AVISO: "\u26A0\uFE0F",
   ERRO: "\u274C"
@@ -777,27 +775,22 @@ function avaliarSaudeFilaCliente(clienteId = "admin") {
   const itens = Array.isArray(filaCliente) ? filaCliente : [];
   const pendentes = itens.filter(item => item?.status === "pendente").length;
 
-let status = "normal";
-let deveAbastecer = true;
-let motivo = "Fila em volume operacional normal.";
+  let status = "normal";
+  let deveAbastecer = false;
+  let motivo = "Fila com volume operacional normal.";
 
-if (pendentes <= 20) {
-  status = "critica";
-  deveAbastecer = true;
-  motivo = "Fila com 20 ou menos ofertas pendentes.";
-} else if (pendentes <= 80) {
-  status = "baixa";
-  deveAbastecer = true;
-  motivo = "Fila com 80 ou menos ofertas pendentes.";
-} else if (pendentes <= 200) {
-  status = "normal";
-  deveAbastecer = true;
-  motivo = "Fila em volume operacional.";
-} else {
-  status = "cheia";
-  deveAbastecer = false;
-  motivo = "Fila com mais de 200 ofertas pendentes.";
-}
+  if (pendentes <= 3) {
+    status = "critica";
+    deveAbastecer = true;
+    motivo = "Fila com 3 ou menos ofertas pendentes.";
+  } else if (pendentes <= 8) {
+    status = "baixa";
+    deveAbastecer = true;
+    motivo = "Fila com 8 ou menos ofertas pendentes.";
+  } else if (pendentes >= 15) {
+    status = "cheia";
+    motivo = "Fila com 15 ou mais ofertas pendentes.";
+  }
 
   console.log(
     `🧠 FILA IA: cliente ${cliente} pendentes ${pendentes} status ${status} deveAbastecer ${deveAbastecer}`
@@ -810,90 +803,6 @@ if (pendentes <= 20) {
     deveAbastecer,
     motivo
   };
-}
-
-function ofertaTemBeneficioFarejador(oferta = {}) {
-  if (!oferta || typeof oferta !== "object") return false;
-  if (oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true) return false;
-
-  const campos = [
-    oferta.cupom,
-    oferta.avisoCupom,
-    oferta.tipoCupom,
-    oferta.valorCupom,
-    oferta.percentualCupom,
-    oferta.cupomUrl,
-    oferta.linkResgateCupom,
-    oferta.descontoPix,
-    oferta.descontoApp,
-    oferta.beneficioExtra,
-    oferta.beneficioDetectado,
-    oferta.avisoPagamento
-  ].filter(Boolean);
-
-  const texto = normalizarTexto(campos.join(" "));
-  if (!texto) return false;
-
-  const avisoGenerico =
-    texto.includes("confira cupons disponiveis na pagina") ||
-    texto.includes("verifique na pagina") ||
-    texto.includes("confira antes de finalizar");
-
-  return Boolean(
-    oferta.cupom ||
-    oferta.valorCupom ||
-    oferta.percentualCupom ||
-    oferta.cupomUrl ||
-    oferta.linkResgateCupom ||
-    oferta.descontoPix ||
-    oferta.descontoApp ||
-    oferta.beneficioExtra ||
-    oferta.beneficioDetectado ||
-    /(?:r\$\s*)?\d+(?:[,.]\d{1,2})?\s*(?:off|%|por cento|reais)/i.test(campos.join(" ")) ||
-    (!avisoGenerico && /\b(cupom|coupon|promocode|voucher|pix|app|aplicativo|cashback|frete gratis|desconto)\b/.test(texto))
-  );
-}
-
-function obterEstrategiaFarejador(clienteId = "admin", marketplace = "", opcoes = {}) {
-  const mp = normalizarTexto(marketplace || "");
-  const cfg = config.marketplaces?.[mp] || {};
-  const saude = avaliarSaudeFilaCliente(clienteId);
-  const descontoBase = Number(opcoes.descontoMinimo ?? cfg.descontoMinimo ?? 15);
-  const precoBase = Number(opcoes.precoMinimo ?? cfg.precoMinimo ?? 0);
-
-  let descontoMinimo = Number.isFinite(descontoBase) ? descontoBase : 15;
-
-  if (saude.status === "critica") {
-    descontoMinimo = Math.min(descontoMinimo, 7);
-  } else if (saude.status === "baixa") {
-    descontoMinimo = Math.min(descontoMinimo, 10);
-  }
-
-  const estrategia = {
-    clienteId,
-    marketplace: mp,
-    saude,
-    statusFila: saude.status,
-    filaCritica: saude.status === "critica",
-    filaBaixa: saude.status === "baixa" || saude.status === "critica",
-    filaCheia: saude.status === "cheia",
-    descontoMinimo,
-    descontoMinimoBase: descontoBase,
-    precoMinimo: Number.isFinite(precoBase) ? precoBase : 0,
-    aceitarCupomSemDesconto: true,
-    aceitarBeneficioSemDesconto: true
-  };
-
-  logOptimus("INTELIGENCIA", "Estrategia farejador", {
-    clienteId,
-    marketplace: mp,
-    pendentes: saude.pendentes,
-    statusFila: saude.status,
-    descontoMinimoBase: estrategia.descontoMinimoBase,
-    descontoMinimo: estrategia.descontoMinimo
-  });
-
-  return estrategia;
 }
 
 async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
@@ -967,8 +876,6 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
       classificarCategoriaOferta,
       gerarBuscasGlobais,
       gerarHeadersStealth,
-      obterEstrategiaFarejador,
-      ofertaTemBeneficioFarejador,
       farejarCuponsMercadoLivre,
       importarMercadoLivre: (url, clienteIdAlvo = cliente) =>
         importarMercadoLivre(url, clienteIdAlvo, {
@@ -1054,13 +961,6 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
 }
 
 function selecionarProximaOfertaFila(clienteIdAlvo = null) {
-
-console.log("🧪 FILA SELECAO", {
-    clienteIdAlvo,
-    totalFila: fila.length,
-    pendentes: fila.filter(o => o.status === "pendente").length
-  });
-
   const pendentes = fila.filter(o => {
     const mesmoCliente =
       !clienteIdAlvo ||
@@ -1100,13 +1000,6 @@ console.log("🧪 FILA SELECAO", {
   if (expirouAlguma) {
     salvarFila(clienteIdAlvo || "admin");
   }
-
-
-console.log("🚨 FILA SEM OFERTA", {
-  clienteIdAlvo,
-  totalFila: fila.length,
-  pendentes: pendentes.length
-});
 
   return null;
 }
@@ -1725,37 +1618,6 @@ function extrairIdMercadoLivreOferta(oferta = {}) {
   return texto.match(/MLB-?\d+/i)?.[0]?.replace("-", "").toUpperCase() || "";
 }
 
-function precoNumeroDuplicidade(valor = "") {
-  return Number(
-    String(valor || "0")
-      .replace(/[^\d,.-]/g, "")
-      .replace(/\./g, "")
-      .replace(",", ".")
-  ) || 0;
-}
-
-function horasBloqueioDuplicidadeFila(ofertaExistente = {}) {
-  const status = normalizarTexto(ofertaExistente.status || "");
-
-  if (status === "pendente" || status === "retida") return 12;
-  if (status === "enviado" || status === "fila") return 6;
-  if (status === "expirado" || status === "erro") return 2;
-
-  return 6;
-}
-
-function ofertaTemMelhoriaParaRepetir(novaOferta = {}, ofertaExistente = {}) {
-  const cupomNovo = String(novaOferta.cupom || "").trim();
-  const cupomExistente = String(ofertaExistente.cupom || "").trim();
-
-  if (cupomNovo && cupomNovo !== cupomExistente) return true;
-
-  const precoNovo = precoNumeroDuplicidade(novaOferta.precoAtual || novaOferta.preco);
-  const precoExistente = precoNumeroDuplicidade(ofertaExistente.precoAtual || ofertaExistente.preco);
-
-  return precoExistente > 0 && precoNovo > 0 && precoNovo <= precoExistente * 0.92;
-}
-
 function ofertaJaExiste(novaOferta) {
   const tituloNovo = normalizarTexto(novaOferta.titulo || novaOferta.nome);
   const chaveNova = gerarChaveDuplicidadeOferta(novaOferta);
@@ -1777,6 +1639,8 @@ function ofertaJaExiste(novaOferta) {
   const marketplaceNovo = normalizarTexto(novaOferta.marketplace || novaOferta.mercado || "");
 
   const agora = Date.now();
+  const HORAS_BLOQUEIO = 12;
+
   return fila.some((o) => {
     const tituloExistente = normalizarTexto(o.titulo || o.nome);
     const chaveExistente = gerarChaveDuplicidadeOferta(o);
@@ -1801,31 +1665,10 @@ function ofertaJaExiste(novaOferta) {
       o.criadoEm || o.dataCriacao || o.enviadoEm || o.dataEnvio || 0
     ).getTime();
 
-    const horasBloqueio = horasBloqueioDuplicidadeFila(o);
     const itemRecente =
-      dataItem && agora - dataItem < horasBloqueio * 60 * 60 * 1000;
+      dataItem && agora - dataItem < HORAS_BLOQUEIO * 60 * 60 * 1000;
 
-  if (!itemRecente) return false;
-
-const ehRadar =
-  normalizarTexto(novaOferta.origem || "") === "radar" ||
-  novaOferta.radar === true ||
-  novaOferta.radarNaFila === true;
-
-const temMelhoria = ofertaTemMelhoriaParaRepetir(novaOferta, o);
-
-const descontoNovo =
-  Number(String(novaOferta.desconto || "0").replace(/[^\d]/g, "")) || 0;
-
-const cupomNovoValido =
-  String(novaOferta.cupom || "").trim() &&
-  !["copiado", "cupom copiado", "sem cupom"].includes(
-    normalizarTexto(novaOferta.cupom || "")
-  );
-
-if (ehRadar || temMelhoria || descontoNovo >= 25 || cupomNovoValido) {
-  return false;
-}
+    if (!itemRecente) return false;
 
     if (idMlNovo && idMlExistente && idMlNovo === idMlExistente) {
       console.log("[INFO] DUPLICADA ML POR ID:", {
@@ -1844,23 +1687,13 @@ if (ehRadar || temMelhoria || descontoNovo >= 25 || cupomNovoValido) {
       return true;
     }
 
- if (
-  tituloNovo &&
-  tituloExistente &&
-  tituloNovo === tituloExistente &&
-  precoNovo &&
-  precoExistente &&
-  precoNovo === precoExistente &&
-  marketplaceNovo &&
-  marketplaceExistente &&
-  marketplaceNovo === marketplaceExistente
-) {
-  console.log("[INFO] DUPLICADA POR TITULO + PRECO + MARKETPLACE:", {
-    tituloNovo: novaOferta.titulo || novaOferta.nome,
-    tituloExistente: o.titulo || o.nome
-  });
-  return true;
-}
+    if (tituloNovo && tituloExistente && tituloNovo === tituloExistente) {
+      console.log("[INFO] DUPLICADA POR TTULO:", {
+        tituloNovo: novaOferta.titulo || novaOferta.nome,
+        tituloExistente: o.titulo || o.nome
+      });
+      return true;
+    }
 
     if (
       chaveNova &&
@@ -2216,23 +2049,6 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
 
   const origem = String(oferta.origem || "").toLowerCase();
   const ehRadar = origem === "radar" || oferta.radar === true || oferta.radarNaFila === true;
-  const cupomSuspeito = oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true;
-  const cupomReal = !cupomSuspeito && (
-    oferta.cupomConfirmado === true ||
-    oferta.cupomValidado === true ||
-    oferta.cupomTipo === "real" ||
-    oferta.tipoCupom === "real"
-  );
-  const cupomDetectado = !cupomSuspeito && Boolean(
-    (!cupomFake && oferta.cupom) ||
-    oferta.cupomDetectado === true ||
-    oferta.cupomDetectadoTexto === true
-  );
-  const cupomProvavel = !cupomSuspeito && Boolean(
-    oferta.possivelCupom ||
-    oferta.beneficioExtra ||
-    oferta.linkResgateCupom
-  );
   const ehManualEscolhida =
     !ehRadar &&
     (
@@ -2243,16 +2059,13 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
     );
 
   if (ehRadar) {
+    const cupomSuspeito = oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true;
+    const cupomReal = !cupomSuspeito && (oferta.cupomConfirmado === true || oferta.cupomValidado === true || oferta.cupomTipo === "real");
+    const cupomDetectado = !cupomSuspeito && Boolean(oferta.cupom || oferta.cupomDetectado === true || oferta.cupomDetectadoTexto === true);
+    const cupomProvavel = !cupomSuspeito && Boolean(oferta.possivelCupom || oferta.avisoCupom || oferta.beneficioExtra || oferta.linkResgateCupom);
     const scoreAlto = Number(oferta.radarScore || oferta.score || 0) >= 60;
 
     oferta.origem = "radar";
-
-const cupomTexto = String(oferta.cupom || "").trim().toUpperCase();
-const cupomFake = ["COPIADO", "APPLIED", "APPEARANCE", "APPLINK", "SEM CUPOM"].includes(cupomTexto);
-
-if (cupomFake) {
-  oferta.cupom = "";
-}
 
     if (cupomReal) {
       oferta.prioridadeEnvio = 110;
@@ -2300,37 +2113,7 @@ if (cupomFake) {
     return oferta;
   }
 
-  if (cupomReal) {
-    oferta.origem = oferta.origem || "farejador";
-    oferta.prioridadeEnvio = 110;
-    oferta.cupomTipo = "real";
-    oferta.cupomDetectado = true;
-    oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(4);
-    oferta.motivoPrioridade = "Cupom real detectado";
-    return oferta;
-  }
-
-  if (cupomDetectado) {
-    oferta.origem = oferta.origem || "farejador";
-    oferta.prioridadeEnvio = 95;
-    oferta.cupomTipo = "detectado";
-    oferta.cupomDetectado = true;
-    oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(4);
-    oferta.motivoPrioridade = "Cupom detectado";
-    return oferta;
-  }
-
-  if (cupomProvavel) {
-    oferta.origem = oferta.origem || "farejador";
-    oferta.prioridadeEnvio = 80;
-    oferta.cupomTipo = "provavel";
-    oferta.cupomDetectado = true;
-    oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(3);
-    oferta.motivoPrioridade = "Cupom provável detectado";
-    return oferta;
-  }
-
-  oferta.origem = oferta.origem || "farejador";
+  oferta.origem = oferta.origem || "manual";
   oferta.prioridadeEnvio = 40;
   oferta.cupomTipo = "nenhum";
   oferta.cupomDetectado = false;
@@ -2801,7 +2584,7 @@ const selecionados = telegramsSelecionados.length
   return { enviado: false, motivo: "nao_enviado" };
 }
 
-// ================= FUNCAO PROCESSA FILA =================
+// ================= FUNCÃƒO PROCESSA FILA =================
 
 async function processarFila(clienteIdAlvo = null) {
   const clienteFila = clienteIdAlvo || "admin";
@@ -2814,7 +2597,7 @@ async function processarFila(clienteIdAlvo = null) {
   try {
     sanearExpiradosFila(clienteFila);
 
-    oferta = selecionarProximaOfertaFila(clienteFila);
+    oferta = selecionarProximaOfertaFila(clienteIdAlvo);
 
 if (!oferta) {
   logOptimus("FILA", "Nenhuma oferta pendente");
@@ -2825,7 +2608,7 @@ const clienteId = oferta.clienteId || "admin";
 
 if (oferta.sessaoId === "sessao1") {
   oferta.sessaoId = normalizarSessaoId(clienteId, "sessao1");
-  salvarFila(clienteId);
+  salvarFila();
 }
 
 const configCliente =
@@ -3414,34 +3197,6 @@ configCliente.automacaoAtiva = automacaoAnterior;
   }
 });
 
-function decorarItemFilaParaResposta(item = {}) {
-  const ehRadar = item?.origem === "radar" || item?.radar === true || item?.radarNaFila === true;
-
-  if (!ehRadar) return item;
-
-  const badgeOrigemAtual = item.badgeOrigem && typeof item.badgeOrigem === "object"
-    ? item.badgeOrigem
-    : {};
-
-  return {
-    ...item,
-    origem: "radar",
-    radar: true,
-    fonte: item.fonte || "radar",
-    origemLabel: item.origemLabel || "Radar",
-    origemBadge: item.origemBadge || "Radar",
-    origemIcone: item.origemIcone || "radar",
-    exibirBadgeRadar: true,
-    badgeOrigem: {
-      id: "radar",
-      label: "Radar",
-      icone: "radar",
-      cor: "cyan",
-      ...badgeOrigemAtual
-    }
-  };
-}
-
 app.get("/fila", (req, res) => {
   const clienteId = getClienteId(req);
 
@@ -3450,7 +3205,6 @@ app.get("/fila", (req, res) => {
   const itensCliente = fila.filter((o) =>
     (o.clienteId || "admin") === clienteId
   );
-  const itensResposta = itensCliente.map(decorarItemFilaParaResposta);
 
   res.json({
     ok: true,
@@ -3460,8 +3214,8 @@ app.get("/fila", (req, res) => {
     enviados: itensCliente.filter((o) => o.status === "enviado").length,
     retidas: itensCliente.filter((o) => o.status === "retida").length,
     erros: itensCliente.filter((o) => o.status === "erro").length,
-    itens: itensResposta,
-    fila: itensResposta
+    itens: itensCliente,
+    fila: itensCliente
   });
 });
 
@@ -3745,12 +3499,8 @@ app.get("/automacao/status", (req, res) => {
     },
     orquestrador: {
       marketplaceAtual: ordemMarketplaces?.[indiceMarketplaceAtual] ?? null,
-      sequenciaPonderada: ordemMarketplaces,
-      sequenciaCritica: ordemMarketplacesCritica,
       intervaloGlobalMinutos: config.intervaloFarejadorGlobalMinutos ?? 10,
-      intervaloAtualMinutos: Math.round(intervaloOrquestradorAtualMs() / 60000),
-      farejadorRodando,
-      statusMarketplaces: statusOrquestradorMarketplaces
+      farejadorRodando
     }
   });
 });
@@ -5296,11 +5046,8 @@ function dataHoraRadarAgora() {
 
 function normalizarStatusPreviewRadar(status = "") {
   const texto = normalizarTexto(status);
-  if (texto === "retida" || texto === "retido") return "retida";
   if (texto === "fila" || texto === "adicionado_fila" || texto === "adicionada_fila") return "adicionado_fila";
   if (texto === "ignorada" || texto === "ignorado") return "ignorado";
-  if (texto === "sucesso") return "importado";
-  if (texto === "erro") return "erro";
   if (texto === "importado") return "importado";
   if (texto === "detectado") return "detectado";
   return "erro";
@@ -5333,12 +5080,6 @@ function normalizarTipoLinkRadarOperacional(evento = {}) {
 }
 
 function statusCapturaRadarOperacional(evento = {}) {
-  const captura = normalizarTexto(evento.statusCaptura || "");
-  if (captura === "retida" || captura === "retido") return "retida";
-  if (captura === "fila" || captura === "adicionado_fila" || captura === "adicionada_fila") return "fila";
-  if (captura === "erro") return "erro";
-  if (captura === "sucesso") return "sucesso";
-
   const statusRadar = normalizarTexto(evento.statusRadar || "");
   const status = normalizarStatusPreviewRadar(evento.status);
 
@@ -5664,7 +5405,7 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
     const resumo = mapa.get(chave);
     if (!resumo) continue;
 
-    const status = normalizarStatusPreviewRadar(evento.statusCaptura || evento.statusRadar || evento.status);
+    const status = normalizarStatusPreviewRadar(evento.status);
     const eventoOperacional = montarEventoPreviewRadar(evento);
     const motivoDiagnostico = eventoOperacional.motivoFinal || eventoOperacional.motivoTecnico || evento.motivo || "";
     const dataEvento = evento.capturadaEm || evento.dataHora || evento.criadoEm || "";
@@ -5753,18 +5494,7 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
   const tipoFiltro = normalizarTexto(opcoes.origemTipo || "");
   const sessaoFiltro = chaveRadarId(opcoes.sessaoId || "");
   const capturas = eventos
-    .filter(evento => {
-      if (!grupoFiltro) return true;
-
-      return [
-        evento.origemGrupoId,
-        evento.grupoId,
-        evento.remoteJid,
-        evento.chatId,
-        evento.origemGrupoNome,
-        evento.grupoNome
-      ].some(valor => chaveRadarId(valor || "") === grupoFiltro);
-    })
+    .filter(evento => !grupoFiltro || chaveRadarId(evento.origemGrupoId || evento.origemGrupoNome) === grupoFiltro)
     .filter(evento => !tipoFiltro || normalizarTexto(evento.origemTipo) === tipoFiltro)
     .filter(evento => !sessaoFiltro || chaveRadarId(evento.origemSessaoId || "") === sessaoFiltro)
     .slice(-Number(opcoes.limit || 20))
@@ -5882,49 +5612,27 @@ function carregarRadarConfigCliente(clienteId = "admin") {
   }
 }
 
-function obterGrupoWhatsappIdTecnicoRadar(grupo = {}) {
+function normalizarGrupoWhatsappRadar(grupo = {}, sessaoIdPadrao = "") {
   if (typeof grupo === "string" || typeof grupo === "number") {
     const id = textoRadarId(grupo);
-    return chaveGrupoWhatsappTecnicaRadar(id) ? id : "";
-  }
-
-  if (!grupo || typeof grupo !== "object") return "";
-
-  const candidatos = [
-    grupo.remoteJid,
-    grupo.grupoId,
-    grupo.jid,
-    grupo.chatId,
-    grupo.value,
-    grupo.id
-  ];
-
-  for (const candidato of candidatos) {
-    const id = textoRadarId(candidato);
-    if (chaveGrupoWhatsappTecnicaRadar(id)) return id;
-  }
-
-  return "";
-}
-
-function normalizarGrupoWhatsappRadar(grupo = {}, sessaoIdPadrao = "") {
-  const idTecnico = obterGrupoWhatsappIdTecnicoRadar(grupo);
-
-  if (!idTecnico) return null;
-
-  if (typeof grupo === "string" || typeof grupo === "number") {
-    return {
-      id: idTecnico,
-      grupoId: idTecnico,
-      remoteJid: idTecnico,
-      nome: idTecnico,
-      sessaoId: sessaoIdPadrao,
-      ativo: true,
-      tipo: "whatsapp"
-    };
+    return id ? { id, grupoId: id, nome: id, sessaoId: sessaoIdPadrao } : null;
   }
 
   if (!grupo || typeof grupo !== "object") return null;
+
+  const id = textoRadarId(
+    grupo.id ||
+    grupo.grupoId ||
+    grupo.value ||
+    grupo.jid ||
+    grupo.remoteJid ||
+    grupo.nome ||
+    grupo.titulo ||
+    grupo.label ||
+    ""
+  );
+
+  if (!id) return null;
 
   const nome = textoRadarId(
     grupo.nome ||
@@ -5932,19 +5640,16 @@ function normalizarGrupoWhatsappRadar(grupo = {}, sessaoIdPadrao = "") {
     grupo.label ||
     grupo.subject ||
     grupo.name ||
-    idTecnico
+    id
   );
   const sessaoId = textoRadarId(grupo.sessaoId || grupo.origemSessaoId || grupo.sessionId || sessaoIdPadrao);
 
   return {
     ...grupo,
-    id: idTecnico,
-    grupoId: idTecnico,
-    remoteJid: idTecnico,
-    nome: nome || idTecnico,
-    sessaoId,
-    ativo: grupo.ativo !== false,
-    tipo: "whatsapp"
+    id: grupo.id || id,
+    grupoId: grupo.grupoId || id,
+    nome: nome || id,
+    sessaoId
   };
 }
 
@@ -6084,17 +5789,22 @@ function salvarRadarConfigCliente(clienteId = "admin", dados = {}) {
     ? atual.sessoesWhatsappMonitoradas
     : normalizarSessoesWhatsappMonitoradasRadar(atual);
 
-if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
-  sessoesWhatsappMonitoradas = normalizarSessoesWhatsappMonitoradasRadar({
-    sessoesWhatsappMonitoradas: dados.sessoesWhatsappMonitoradas
-  });
+  if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
+    const entrada = normalizarSessoesWhatsappMonitoradasRadar({
+      sessoesWhatsappMonitoradas: dados.sessoesWhatsappMonitoradas
+    });
+    const sessoesEntrada = new Set((dados.sessoesWhatsappMonitoradas || [])
+      .map(sessao => textoRadarId(sessao?.sessaoId || sessao?.id || sessao?.sessionId || ""))
+      .filter(Boolean));
+    const vazias = [...sessoesEntrada]
+      .filter(sessaoId => !entrada.some(sessao => sessao.sessaoId === sessaoId))
+      .map(sessaoId => ({ sessaoId, gruposMonitorados: [] }));
 
-  console.log("🧪 RADAR NORMALIZACAO REPLACE", {
-    recebido: dados.sessoesWhatsappMonitoradas,
-    salvo: sessoesWhatsappMonitoradas
-  });
-}
-
+    sessoesWhatsappMonitoradas = mesclarSessoesWhatsappMonitoradasRadar(
+      sessoesWhatsappMonitoradas,
+      [...entrada, ...vazias]
+    );
+  }
 
   if (Array.isArray(dados.gruposMonitorados)) {
     const sessaoDestino =
@@ -6153,14 +5863,7 @@ if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
     atualizadoEm: new Date().toISOString()
   };
 
-  
-console.log("🧪 RADAR PAYLOAD FINAL", {
-  sessoesWhatsappMonitoradas: payload.sessoesWhatsappMonitoradas,
-  gruposMonitorados: payload.gruposMonitorados
-});
-
-
-writeClienteJson(clienteId, "radar-config.json", payload);
+  writeClienteJson(clienteId, "radar-config.json", payload);
 
   return payload;
 }
@@ -6174,8 +5877,8 @@ function chaveRadarId(valor = "") {
 }
 
 function chaveGrupoWhatsappTecnicaRadar(valor = "") {
-  const id = textoRadarId(valor);
-  return id.includes("@g.us") ? id : "";
+  const chave = chaveRadarId(valor);
+  return chave.includes("@g.us") ? chave : "";
 }
 
 function extrairIdsMonitoradosRadar(lista = [], campos = []) {
@@ -6280,37 +5983,15 @@ function totalRadarCapturadoHoje() {
     timeZone: "America/Sao_Paulo"
   });
 
-  const adminMasterId = obterClienteIdAdminMaster();
-  const eventos = [
-    ...lerHistoricoRadar(adminMasterId),
-    ...lerPreviewRadar(adminMasterId)
-  ];
-  const vistos = new Set();
+  return lerFilasRadarSomenteLeitura().filter(item => {
+    if (item.origem !== "radar" && item.radar !== true) return false;
 
-  return eventos.filter(evento => {
-    const data = String(evento.capturadaEm || evento.dataEntradaRadar || evento.dataEntradaFila || "");
-    if (!data.includes(hoje)) return false;
-
-    const status = normalizarTexto(evento.statusCaptura || evento.statusRadar || evento.status || "");
-    const enviadaFila = status === "fila" || status === "adicionado_fila" || status === "adicionada_fila";
-    if (!enviadaFila) return false;
-
-    const chave = [
-      evento.idOfertaFila,
-      evento.linkOriginal,
-      evento.linkCapturado,
-      evento.titulo,
-      evento.origemGrupoId
-    ].filter(Boolean).join("|").toLowerCase();
-
-    if (chave && vistos.has(chave)) return false;
-    if (chave) vistos.add(chave);
-
-    return true;
+    const data = String(item.capturadaEm || item.dataEntradaRadar || item.dataEntradaFila || "");
+    return data.includes(hoje);
   }).length;
 }
 
-function radarPodeCapturarAgora(configRadar = {}, opcoes = {}) {
+function radarPodeCapturarAgora(configRadar = {}) {
   if (configRadar.monitoramentoAtivo === false) {
     return { ok: false, motivo: "radar_monitoramento_inativo" };
   }
@@ -6320,7 +6001,7 @@ function radarPodeCapturarAgora(configRadar = {}, opcoes = {}) {
   }
 
   const maxPorDia = Number(configRadar.monitoramento?.maxPorDia || 0);
-  if (maxPorDia > 0 && !opcoes.temBeneficioPrioritario && totalRadarCapturadoHoje() >= maxPorDia) {
+  if (maxPorDia > 0 && totalRadarCapturadoHoje() >= maxPorDia) {
     return { ok: false, motivo: "limite_diario_radar_atingido" };
   }
 
@@ -6480,8 +6161,6 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
   );
   let grupoMonitorado = false;
   let totalGruposMonitoradosSessao = 0;
-  let sessaoMonitoradaPorGrupo = null;
-  let totalGruposMonitoradosGlobal = 0;
 
   if (sessaoMonitorada) {
     const gruposIds = extrairIdsWhatsappMonitoradosRadar(sessaoMonitorada.gruposMonitorados);
@@ -6489,23 +6168,7 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
     grupoMonitorado = Boolean(grupoId && gruposIds.has(grupoId));
   }
 
-  if (!grupoMonitorado && grupoId) {
-    for (const sessao of sessoesWhatsappMonitoradas) {
-      const gruposIds = extrairIdsWhatsappMonitoradosRadar(sessao?.gruposMonitorados);
-      totalGruposMonitoradosGlobal += gruposIds.size;
-
-      if (gruposIds.has(grupoId)) {
-        sessaoMonitoradaPorGrupo = sessao;
-        grupoMonitorado = true;
-        break;
-      }
-    }
-  }
-
-  const ok = Boolean(grupoMonitorado && (sessaoMonitorada || sessaoMonitoradaPorGrupo));
-  const validacao = ok && !sessaoMonitorada && sessaoMonitoradaPorGrupo
-    ? "remoteJid_monitorado_em_outra_sessao"
-    : "sessaoId+remoteJid";
+  const ok = Boolean(sessaoMonitorada && grupoMonitorado);
 
   return {
     ok,
@@ -6513,12 +6176,8 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
     origem,
     diagnostico: {
       sessaoEncontrada: Boolean(sessaoMonitorada),
-      sessaoEncontradaPorGrupo: Boolean(sessaoMonitoradaPorGrupo),
-      sessaoOrigemId: origem.origemSessaoId,
-      sessaoMonitoradaId: sessaoMonitorada?.sessaoId || sessaoMonitoradaPorGrupo?.sessaoId || "",
       totalGruposMonitoradosSessao,
-      totalGruposMonitoradosGlobal,
-      validacao
+      validacao: "sessaoId+remoteJid"
     }
   };
 }
@@ -6546,14 +6205,12 @@ function normalizarCupomRadar(oferta = {}) {
     "APLICAR",
     "VALIDO"
   ]);
-  const cupomOrigem = normalizarTexto(oferta.cupomOrigem || "");
-  const cupomValido = Boolean(
+  const cupomConfirmado = Boolean(
     cupom &&
     !bloqueados.has(cupom) &&
     !/^(VER|CONFIRA|COMPR|PEGAR|ABRIR|APLICAR|RESGAT)/i.test(cupom) &&
     /^[A-Z0-9][A-Z0-9_-]{3,39}$/.test(cupom)
   );
-  const cupomConfirmado = cupomValido && !["texto_grupo", "mensagem"].includes(cupomOrigem);
   const avisoCupom = textoRadarId(oferta.avisoCupom || oferta.aviso_cupom || "");
   const possivelCupom = !cupomConfirmado && Boolean(cupom || avisoCupom);
   const tipoCupom = textoRadarId(oferta.tipoCupom || oferta.cupomTipo || "");
@@ -6564,7 +6221,7 @@ function normalizarCupomRadar(oferta = {}) {
   const beneficioExtra = textoRadarId(oferta.beneficioExtra || "");
 
   return {
-    cupom: cupomValido ? cupom : "",
+    cupom: cupomConfirmado ? cupom : "",
     cupomConfirmado,
     possivelCupom,
     tipoCupom,
@@ -6754,10 +6411,7 @@ function destinosClienteNormalizados(clienteId = "admin") {
 }
 
 function obterClienteIdAdminMaster() {
-  // Radar e uma ferramenta interna do admin_master, mas a configuracao operacional
-  // deve ser unica e canonica no cliente "admin". Nao usar configs legadas de
-  // outros ids, para nao monitorar grupos antigos ou nao selecionados.
-  return "admin";
+  return usuarios.find(u => u?.ativo !== false && u.papel === "admin_master")?.id || "admin";
 }
 
 function carregarRadarConfigAdminMaster() {
@@ -6811,43 +6465,13 @@ function listarClientesElegiveisRadar() {
 }
 
 function extrairMensagemInternaRadar(conteudo = {}) {
-  let atual = conteudo || {};
-
-  for (let i = 0; i < 8; i++) {
-    if (atual?.ephemeralMessage?.message) {
-      atual = atual.ephemeralMessage.message;
-      continue;
-    }
-
-    if (atual?.viewOnceMessage?.message) {
-      atual = atual.viewOnceMessage.message;
-      continue;
-    }
-
-    if (atual?.viewOnceMessageV2?.message) {
-      atual = atual.viewOnceMessageV2.message;
-      continue;
-    }
-
-    if (atual?.documentWithCaptionMessage?.message) {
-      atual = atual.documentWithCaptionMessage.message;
-      continue;
-    }
-
-    if (atual?.editedMessage?.message) {
-      atual = atual.editedMessage.message;
-      continue;
-    }
-
-    if (atual?.protocolMessage?.editedMessage) {
-      atual = atual.protocolMessage.editedMessage;
-      continue;
-    }
-
-    break;
-  }
-
-  return atual || {};
+  return (
+    conteudo.ephemeralMessage?.message ||
+    conteudo.viewOnceMessage?.message ||
+    conteudo.viewOnceMessageV2?.message ||
+    conteudo.documentWithCaptionMessage?.message ||
+    conteudo
+  );
 }
 
 function extrairTextoMensagemRadar(mensagem = {}) {
@@ -6861,23 +6485,12 @@ function extrairTextoMensagemRadar(mensagem = {}) {
     conteudo.documentMessage?.caption,
     conteudo.buttonsResponseMessage?.selectedDisplayText,
     conteudo.listResponseMessage?.title,
-    conteudo.templateButtonReplyMessage?.selectedDisplayText,
-    conteudo.buttonsMessage?.contentText,
-    conteudo.templateMessage?.hydratedTemplate?.hydratedContentText,
-    conteudo.templateMessage?.hydratedFourRowTemplate?.hydratedContentText,
-    conteudo.interactiveResponseMessage?.body?.text,
-    conteudo.protocolMessage?.editedMessage?.conversation,
-    conteudo.protocolMessage?.editedMessage?.extendedTextMessage?.text,
-    conteudo.messageContextInfo?.quotedMessage?.conversation,
-    conteudo.messageContextInfo?.quotedMessage?.extendedTextMessage?.text,
-    conteudo.contextInfo?.quotedMessage?.conversation,
-    conteudo.contextInfo?.quotedMessage?.extendedTextMessage?.text
+    conteudo.templateButtonReplyMessage?.selectedDisplayText
   ]
     .filter(Boolean)
     .join("\n")
     .trim();
 }
-
 
 function limparLinkRadar(link = "") {
   return radarCupomMensagem.limparLinkRadar(link);
@@ -7103,11 +6716,7 @@ function normalizarUrlExtraidaRadar(link = "", base = "") {
 
 function candidatosUrlHtmlRadar(html = "", base = "") {
   const texto = String(html || "");
-  const candidatos = [
-    ...texto.matchAll(/https?%3A%2F%2F[^"'<>\\\s]+/gi),
-    ...texto.matchAll(/(?:url|u|target|redirect|destination|dest|link|to)=((?:https?%3A%2F%2F|https?:\/\/)[^"'<>\\\s&]+)/gi),
-    ...texto.matchAll(/(?:window\.location(?:\.href)?|location\.href)\s*=\s*["']([^"']+)["']/gi),
-    ...texto.matchAll(/content=["'][^"']*url=([^"']+)["']/gi),
+  return [
     ...texto.matchAll(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/gi),
     ...texto.matchAll(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/gi),
     ...texto.matchAll(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:url["']/gi),
@@ -7115,24 +6724,8 @@ function candidatosUrlHtmlRadar(html = "", base = "") {
     ...texto.matchAll(/"permalink"\s*:\s*"([^"]+)"/gi),
     ...texto.matchAll(/"url"\s*:\s*"([^"]+)"/gi),
     ...texto.matchAll(/href=["']([^"']+)["']/gi)
-  ];
-
-  return [
-    ...candidatos
   ]
-    .map(match => {
-      let valor = match[1] || match[0] || "";
-      for (let i = 0; i < 3; i += 1) {
-        try {
-          const decodificado = decodeURIComponent(valor);
-          if (decodificado === valor) break;
-          valor = decodificado;
-        } catch {
-          break;
-        }
-      }
-      return normalizarUrlExtraidaRadar(valor, base);
-    })
+    .map(match => normalizarUrlExtraidaRadar(match[1], base))
     .filter(Boolean);
 }
 
@@ -7291,9 +6884,8 @@ async function baixarHtmlRadar(url = "") {
       maxContentLength: 1024 * 768,
       validateStatus: () => true,
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+        "User-Agent": "Mozilla/5.0 (compatible; OptimusRadar/1.0)",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
       }
     });
 
@@ -7327,9 +6919,8 @@ async function extrairProdutoMercadoLivreIntermediarioRadar(url = "") {
       maxContentLength: 1024 * 512,
       validateStatus: () => true,
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+        "User-Agent": "Mozilla/5.0 (compatible; OptimusRadar/1.0)",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
       }
     });
     const produto = extrairProdutoMercadoLivreDeHtmlRadar(resposta.data || "");
@@ -7457,9 +7048,8 @@ async function resolverLinkOriginalRadar(url = "") {
       validateStatus: () => true,
       responseType: "stream",
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+        "User-Agent": "Mozilla/5.0 (compatible; OptimusRadar/1.0)",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
       }
     });
     if (resposta.data?.destroy) resposta.data.destroy();
@@ -7774,71 +7364,6 @@ async function adicionarRadarCapturadoNaFilaClientes(ofertaBase = {}, opcoes = {
   return resultados;
 }
 
-function classificarMotivoResumoRadar(motivo = "") {
-  const texto = normalizarTexto(motivo);
-
-  if (!texto) return "outros";
-  if (texto.includes("memoria") || texto.includes("repetida_na_memoria")) return "memoria";
-  if (texto.includes("duplicada") || texto.includes("repetida")) return "repetida";
-  if (texto.includes("limite_radar") || texto.includes("fila_cheia") || texto.includes("pendente_total")) return "fila";
-  if (texto.includes("categoria") || texto.includes("destino_compativel") || texto.includes("sem_destino")) return "categoria";
-  if (texto.includes("link_original") || texto.includes("intermediario") || texto.includes("marketplace_nao_identificado")) return "link";
-  if (texto.includes("importacao")) return "importacao";
-
-  return "outros";
-}
-
-function resumirResultadosRadarMensagem(resultados = []) {
-  const resumo = {
-    encontradas: 0,
-    rejeitadasMemoria: 0,
-    rejeitadasRepetida: 0,
-    rejeitadasCategoria: 0,
-    rejeitadasFila: 0,
-    rejeitadasImportacao: 0,
-    rejeitadasLink: 0,
-    rejeitadasOutros: 0,
-    adicionadas: 0
-  };
-
-  for (const item of Array.isArray(resultados) ? resultados : []) {
-    if (item?.ok) resumo.encontradas += 1;
-    const clientes = Array.isArray(item?.clientes) ? item.clientes : [];
-
-    if (clientes.length) {
-      for (const cliente of clientes) {
-        if (cliente?.adicionada) {
-          resumo.adicionadas += 1;
-          continue;
-        }
-
-        const bucket = classificarMotivoResumoRadar(cliente?.motivo || "");
-        if (bucket === "memoria") resumo.rejeitadasMemoria += 1;
-        else if (bucket === "repetida") resumo.rejeitadasRepetida += 1;
-        else if (bucket === "categoria") resumo.rejeitadasCategoria += 1;
-        else if (bucket === "fila") resumo.rejeitadasFila += 1;
-        else if (bucket === "importacao") resumo.rejeitadasImportacao += 1;
-        else if (bucket === "link") resumo.rejeitadasLink += 1;
-        else resumo.rejeitadasOutros += 1;
-      }
-      continue;
-    }
-
-    if (!item?.ok) {
-      const bucket = classificarMotivoResumoRadar(item?.motivo || "");
-      if (bucket === "memoria") resumo.rejeitadasMemoria += 1;
-      else if (bucket === "repetida") resumo.rejeitadasRepetida += 1;
-      else if (bucket === "categoria") resumo.rejeitadasCategoria += 1;
-      else if (bucket === "fila") resumo.rejeitadasFila += 1;
-      else if (bucket === "importacao") resumo.rejeitadasImportacao += 1;
-      else if (bucket === "link") resumo.rejeitadasLink += 1;
-      else resumo.rejeitadasOutros += 1;
-    }
-  }
-
-  return resumo;
-}
-
 async function processarMensagemRadar({
   origemTipo,
   sessaoId,
@@ -7853,6 +7378,14 @@ async function processarMensagemRadar({
   const grupoIdTexto = textoRadarId(grupoId);
   const grupoNomeTexto = textoRadarId(grupoNome);
   const sessaoIdTexto = textoRadarId(sessaoId || (origemTipoFinal === "telegram" ? "telegram" : ""));
+
+  logOptimus("CAPTURA", "Mensagem recebida", {
+    origemTipo: origemTipoFinal || origemTipo,
+    sessaoId: sessaoIdTexto,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto,
+    tamanhoTexto: String(texto || "").length
+  });
 
   if (!["whatsapp", "telegram"].includes(origemTipoFinal)) {
     logOptimus("CAPTURA", "Rejeitada", {
@@ -7876,57 +7409,7 @@ async function processarMensagemRadar({
     return { ok: false, motivo: "grupo_ou_chat_ausente" };
   }
 
-  const adminMasterId = obterClienteIdAdminMaster();
-  const radarConfig = carregarRadarConfigAdminMaster();
-  const origemBase = {
-    origemTipo: origemTipoFinal,
-    origemGrupoId: grupoIdTexto,
-    origemGrupoNome: grupoNomeTexto,
-    origemSessaoId: sessaoIdTexto,
-    grupoId: grupoIdTexto,
-    grupoNome: grupoNomeTexto,
-    chatId: origemTipoFinal === "telegram" ? grupoIdTexto : "",
-    sessaoId: sessaoIdTexto
-  };
-  const origemMonitorada = origemOfertaEstaMonitoradaRadar(origemBase, radarConfig);
-
-  if (!origemMonitorada.ok) {
-  console.log("🚨 RADAR BLOQUEADO MONITORAMENTO", {
-    motivo: origemMonitorada.motivo,
-    origemMonitorada,
-    sessaoId: sessaoIdTexto,
-    grupoId: grupoIdTexto,
-    grupoNome: grupoNomeTexto
-  });
-
-  return { ok: false, motivo: origemMonitorada.motivo, ignorada: true };
-}
-
-  logOptimus("CAPTURA", "Mensagem recebida", {
-    origemTipo: origemTipoFinal || origemTipo,
-    sessaoId: sessaoIdTexto,
-    grupoId: grupoIdTexto,
-    grupoNome: grupoNomeTexto,
-    tamanhoTexto: String(texto || "").length
-  });
-
-  logOptimus("CAPTURA", "Grupo monitorado confirmado", {
-    origemTipo: origemTipoFinal,
-    sessaoId: sessaoIdTexto,
-    grupoId: grupoIdTexto,
-    grupoNome: grupoNomeTexto
-  });
-
-const links = extrairLinksRadar(texto);
-
-console.log("🧪 RADAR LINKS EXTRAIDOS", {
-  sessaoId: sessaoIdTexto,
-  grupoId: grupoIdTexto,
-  links,
-  total: links.length,
-  texto: String(texto || "").slice(0, 250)
-});
-
+  const links = extrairLinksRadar(texto);
   logOptimus("RADAR", "Links detectados", {
     total: links.length,
     links,
@@ -7964,13 +7447,9 @@ console.log("🧪 RADAR LINKS EXTRAIDOS", {
     });
   }
 
-  const capturaPermitida = radarPodeCapturarAgora(radarConfig, {
-    temBeneficioPrioritario: Boolean(
-      beneficiosMensagem.cupom ||
-      beneficiosMensagem.linkResgateCupom ||
-      beneficiosMensagem.beneficioExtra
-    )
-  });
+  const adminMasterId = obterClienteIdAdminMaster();
+  const radarConfig = carregarRadarConfigCliente(adminMasterId);
+  const capturaPermitida = radarPodeCapturarAgora(radarConfig);
 
   if (!capturaPermitida.ok) {
     logOptimus("CAPTURA", "Rejeitada", {
@@ -7984,6 +7463,42 @@ console.log("🧪 RADAR LINKS EXTRAIDOS", {
     });
     return capturaPermitida;
   }
+
+  const origemBase = {
+    origemTipo: origemTipoFinal,
+    origemGrupoId: grupoIdTexto,
+    origemGrupoNome: grupoNomeTexto,
+    origemSessaoId: sessaoIdTexto,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto,
+    chatId: origemTipoFinal === "telegram" ? grupoIdTexto : "",
+    sessaoId: sessaoIdTexto
+  };
+  const origemMonitorada = origemOfertaEstaMonitoradaRadar(origemBase, radarConfig);
+
+  if (!origemMonitorada.ok) {
+    logOptimus("CAPTURA", "Grupo nao monitorado", {
+      motivo: origemMonitorada.motivo,
+      origemTipo: origemTipoFinal,
+      sessaoId: sessaoIdTexto,
+      grupoId: grupoIdTexto,
+      grupoNome: grupoNomeTexto,
+      diagnostico: origemMonitorada.diagnostico || {}
+    });
+    logRadarRejeitado(origemMonitorada.motivo, {
+      origemTipo: origemTipoFinal,
+      grupo: grupoNomeTexto || grupoIdTexto
+    });
+    return { ok: false, motivo: origemMonitorada.motivo };
+  }
+
+  logOptimus("CAPTURA", "Grupo monitorado confirmado", {
+    origemTipo: origemTipoFinal,
+    sessaoId: sessaoIdTexto,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto
+  });
+
   const resultados = [];
   const dataCaptura = capturadaEm || new Date().toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo"
@@ -7994,10 +7509,6 @@ console.log("🧪 RADAR LINKS EXTRAIDOS", {
       url: link,
       grupo: grupoNomeTexto || grupoIdTexto
     });
-    const beneficiosLink = {
-      ...beneficiosMensagem,
-      ...(beneficiosMensagem.beneficiosPorLink?.[link] || {})
-    };
     const linkEhResgate = beneficiosMensagem.linksResgate.includes(link);
 
     if (linkEhResgate) {
@@ -8106,17 +7617,17 @@ console.log("🧪 RADAR LINKS EXTRAIDOS", {
       preco: importacao.oferta?.precoAtual || importacao.oferta?.preco || "",
       categoria: importacao.oferta?.categoria || "",
       cupomImportado: importacao.oferta?.cupom || "",
-      cupomMensagem: beneficiosLink.cupom || ""
+      cupomMensagem: beneficiosMensagem.cupom || ""
     });
     const ofertaRadar = prepararOfertaGlobal({
       ...importacao.oferta,
-      cupom: importacao.oferta?.cupom || beneficiosLink.cupom || "",
-      avisoCupom: importacao.oferta?.avisoCupom || beneficiosLink.avisoCupom || "",
-      tipoCupom: importacao.oferta?.tipoCupom || beneficiosLink.tipoCupom || "",
-      beneficioExtra: importacao.oferta?.beneficioExtra || beneficiosLink.beneficioExtra || "",
-      linkResgateCupom: importacao.oferta?.linkResgateCupom || beneficiosLink.linkResgateCupom || "",
-      cupomOrigem: importacao.oferta?.cupomOrigem || beneficiosLink.cupomOrigem || "",
-      cupomDetectadoTexto: Boolean(importacao.oferta?.cupomDetectadoTexto || beneficiosLink.cupomDetectadoTexto),
+      cupom: importacao.oferta?.cupom || beneficiosMensagem.cupom || "",
+      avisoCupom: importacao.oferta?.avisoCupom || beneficiosMensagem.avisoCupom || "",
+      tipoCupom: importacao.oferta?.tipoCupom || beneficiosMensagem.tipoCupom || "",
+      beneficioExtra: importacao.oferta?.beneficioExtra || beneficiosMensagem.beneficioExtra || "",
+      linkResgateCupom: importacao.oferta?.linkResgateCupom || beneficiosMensagem.linkResgateCupom || "",
+      cupomOrigem: importacao.oferta?.cupomOrigem || beneficiosMensagem.cupomOrigem || "",
+      cupomDetectadoTexto: Boolean(importacao.oferta?.cupomDetectadoTexto || beneficiosMensagem.cupomDetectadoTexto),
       ...origemBase,
       origemClienteId: adminMasterId,
       origem: "radar",
@@ -8233,17 +7744,12 @@ console.log("🧪 RADAR LINKS EXTRAIDOS", {
     });
   }
 
-  const resumoRodada = resumirResultadosRadarMensagem(resultados);
-  const adicionadas = resumoRodada.adicionadas;
+  const adicionadas = resultados.reduce((total, item) =>
+    total + (item.clientes || []).filter(cliente => cliente.adicionada).length,
+    0
+  );
 
   if (resultados.length) {
-    logOptimus("RADAR", "Resumo rodada", {
-      origemTipo: origemTipoFinal,
-      sessaoId: sessaoIdTexto,
-      grupo: grupoNomeTexto || grupoIdTexto,
-      links: links.length,
-      ...resumoRodada
-    });
     console.log("[RADAR] Mensagem monitorada processada:", {
       origemTipo: origemTipoFinal,
       sessaoId: sessaoIdTexto,
@@ -8286,14 +7792,7 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
     return { ok: false, motivo: "mensagem_nao_monitoravel" };
   }
 
- console.log("🧪 RADAR CHAMANDO PROCESSAR", {
-  sessaoId,
-  remoteJid,
-  tamanhoTexto: textoExtraido.length,
-  preview: textoExtraido.slice(0, 300)
-});
-
- return processarMensagemRadar({
+  return processarMensagemRadar({
     origemTipo: "whatsapp",
     sessaoId,
     grupoId: remoteJid,
@@ -8382,21 +7881,8 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   const origemMonitorada = origemOfertaEstaMonitoradaRadar(ofertaBase, radarConfig);
 
   if (!origemMonitorada.ok) {
-
-console.log("🚨 RADAR BLOQUEADO MONITORAMENTO", {
-    clienteId,
-    motivo: origemMonitorada.motivo,
-    origemMonitorada
-  });
-
     return { ok: false, motivo: origemMonitorada.motivo };
   }
-
-console.log("✅ RADAR ORIGEM VALIDADA", {
-  clienteId,
-  grupoId: ofertaBase.grupoId,
-  sessaoId: ofertaBase.sessaoId
-});
 
   let ofertaPreparada = prepararOfertaGlobal({
     ...(ofertaBase || {}),
@@ -8562,17 +8048,6 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
     clienteId,
     origem: "radar",
     radar: true,
-    fonte: "radar",
-    origemLabel: "Radar",
-    origemBadge: "Radar",
-    origemIcone: "radar",
-    exibirBadgeRadar: true,
-    badgeOrigem: {
-      id: "radar",
-      label: "Radar",
-      icone: "radar",
-      cor: "cyan"
-    },
     radarNaFila: true,
     statusRadar: "fila",
     radarPendenteAnalise: false,
@@ -8843,186 +8318,6 @@ app.delete("/branding", (req, res) => {
   }
 });
 
-function radarDebugAdminMaster(req, res) {
-  if (req.usuario?.papel !== "admin_master") {
-    res.status(403).json({
-      ok: false,
-      erro: "Acesso restrito ao admin_master"
-    });
-    return false;
-  }
-
-  return obterClienteIdAdminMaster();
-}
-
-function montarGrupoRadarDebug(grupo = {}, sessaoId = "") {
-  const remoteJid = textoRadarId(
-    grupo.remoteJid ||
-    grupo.grupoId ||
-    grupo.id ||
-    grupo.jid ||
-    grupo.value ||
-    ""
-  );
-
-  if (!chaveGrupoWhatsappTecnicaRadar(remoteJid)) return null;
-
-  return {
-    id: remoteJid,
-    grupoId: remoteJid,
-    remoteJid,
-    nome: textoRadarId(grupo.nome || grupo.titulo || grupo.label || grupo.subject || remoteJid),
-    sessaoId,
-    ativo: grupo.ativo !== false,
-    tipo: "whatsapp"
-  };
-}
-
-app.post("/radar/debug/salvar-whatsapp", (req, res) => {
-  try {
-    const clienteId = radarDebugAdminMaster(req, res);
-    if (!clienteId) return;
-
-    const body = req.body || {};
-    const sessaoIdEntrada = textoRadarId(body.sessaoId || body.sessaoWhatsappId || body.sessionId || "");
-    const sessaoValidada = validarSessaoRadarCliente(clienteId, sessaoIdEntrada);
-
-    if (!sessaoValidada.ok) {
-      return res.status(400).json({
-        ok: false,
-        erro: sessaoValidada.motivo || "sessao_whatsapp_invalida",
-        sessaoId: sessaoIdEntrada
-      });
-    }
-
-    const sessaoId = sessaoValidada.sessaoWhatsappId || sessaoIdEntrada;
-    const gruposEntrada = Array.isArray(body.grupos)
-      ? body.grupos
-      : Array.isArray(body.gruposMonitorados)
-        ? body.gruposMonitorados
-        : [];
-    const gruposMonitorados = gruposEntrada
-      .map(grupo => montarGrupoRadarDebug(grupo, sessaoId))
-      .filter(Boolean);
-
-    if (!sessaoId) {
-      return res.status(400).json({
-        ok: false,
-        erro: "sessaoId obrigatorio"
-      });
-    }
-
-    if (!gruposMonitorados.length) {
-      return res.status(400).json({
-        ok: false,
-        erro: "Nenhum grupo WhatsApp valido informado. Use remoteJid/grupoId terminando em @g.us.",
-        recebidos: gruposEntrada.length
-      });
-    }
-
-    const salvo = salvarRadarConfigCliente(clienteId, {
-      monitoramentoAtivo: body.monitoramentoAtivo !== false,
-      sessaoWhatsappId: sessaoId,
-      sessoesWhatsappMonitoradas: [
-        {
-          sessaoId,
-          gruposMonitorados
-        }
-      ]
-    });
-    const validacoes = gruposMonitorados.map(grupo => origemOfertaEstaMonitoradaRadar({
-      origemTipo: "whatsapp",
-      origemSessaoId: sessaoId,
-      origemGrupoId: grupo.remoteJid,
-      origemGrupoNome: grupo.nome
-    }, salvo));
-
-    return res.json({
-      ok: true,
-      clienteId,
-      sessaoId,
-      gruposRecebidos: gruposEntrada.length,
-      gruposValidos: gruposMonitorados.length,
-      salvo,
-      validacoes
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-app.get("/radar/debug/config", (req, res) => {
-  try {
-    const clienteId = radarDebugAdminMaster(req, res);
-    if (!clienteId) return;
-
-    const config = carregarRadarConfigCliente(clienteId);
-    const sessoesWhatsappMonitoradas = Array.isArray(config.sessoesWhatsappMonitoradas)
-      ? config.sessoesWhatsappMonitoradas
-      : [];
-    const resumo = sessoesWhatsappMonitoradas.map(sessao => ({
-      sessaoId: sessao.sessaoId,
-      totalGrupos: Array.isArray(sessao.gruposMonitorados) ? sessao.gruposMonitorados.length : 0,
-      grupos: (Array.isArray(sessao.gruposMonitorados) ? sessao.gruposMonitorados : []).map(grupo => ({
-        nome: grupo.nome,
-        id: grupo.id,
-        grupoId: grupo.grupoId,
-        remoteJid: grupo.remoteJid,
-        chaveValida: Boolean(chaveGrupoWhatsappTecnicaRadar(grupo.remoteJid || grupo.grupoId || grupo.id))
-      }))
-    }));
-
-    return res.json({
-      ok: true,
-      clienteId,
-      config,
-      resumo
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
-
-app.get("/radar/debug/validar", (req, res) => {
-  try {
-    const clienteId = radarDebugAdminMaster(req, res);
-    if (!clienteId) return;
-
-    const sessaoId = textoRadarId(req.query.sessaoId || req.query.sessaoWhatsappId || req.query.sessionId || "");
-    const grupoId = textoRadarId(req.query.grupoId || req.query.remoteJid || req.query.id || "");
-    const grupoNome = textoRadarId(req.query.grupoNome || req.query.nome || "");
-    const config = carregarRadarConfigCliente(clienteId);
-    const resultado = origemOfertaEstaMonitoradaRadar({
-      origemTipo: "whatsapp",
-      origemSessaoId: sessaoId,
-      origemGrupoId: grupoId,
-      origemGrupoNome: grupoNome
-    }, config);
-
-    return res.json({
-      ok: resultado.ok,
-      clienteId,
-      entrada: {
-        sessaoId,
-        grupoId,
-        grupoNome
-      },
-      resultado,
-      sessoesWhatsappMonitoradas: config.sessoesWhatsappMonitoradas
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
 app.get("/radar/config", (req, res) => {
   try {
     if (req.usuario?.papel !== "admin_master") {
@@ -9032,16 +8327,18 @@ app.get("/radar/config", (req, res) => {
       });
     }
 
-    const clienteId = obterClienteIdAdminMaster();
+    const clienteId = getClienteId(req);
 
-    const radarConfig = carregarRadarConfigAdminMaster();
+    if (!clienteId) {
+      return res.status(401).json({
+        ok: false,
+        erro: "Cliente nao autenticado"
+      });
+    }
+
+    const radarConfig = carregarRadarConfigCliente(clienteId);
     const sessoesWhatsapp = listarSessoesWhatsappCliente(clienteId);
     const telegramDisponiveis = listarTelegramRadarCliente(clienteId);
-    logOptimus("RADAR", "Config carregada", {
-      clienteId,
-      sessoesWhatsappMonitoradas: Array.isArray(radarConfig.sessoesWhatsappMonitoradas) ? radarConfig.sessoesWhatsappMonitoradas.length : 0,
-      gruposMonitorados: Array.isArray(radarConfig.gruposMonitorados) ? radarConfig.gruposMonitorados.length : 0
-    });
 
     return res.json({
       monitoramentoAtivo: radarConfig.monitoramentoAtivo,
@@ -9074,7 +8371,14 @@ app.post("/radar/config", (req, res) => {
       });
     }
 
-    const clienteId = obterClienteIdAdminMaster();
+    const clienteId = getClienteId(req);
+
+    if (!clienteId) {
+      return res.status(401).json({
+        ok: false,
+        erro: "Cliente nao autenticado"
+      });
+    }
 
     const body = req.body || {};
     const possuiCampo = campo => Object.prototype.hasOwnProperty.call(body, campo);
@@ -9184,11 +8488,6 @@ app.post("/radar/config", (req, res) => {
     if (possuiCampo("templateMidia")) dadosConfig.templateMidia = body.templateMidia;
 
     const radarConfig = salvarRadarConfigCliente(clienteId, dadosConfig);
-    logOptimus("RADAR", "Config salva", {
-      clienteId,
-      sessoesWhatsappMonitoradas: Array.isArray(radarConfig.sessoesWhatsappMonitoradas) ? radarConfig.sessoesWhatsappMonitoradas.length : 0,
-      gruposMonitorados: Array.isArray(radarConfig.gruposMonitorados) ? radarConfig.gruposMonitorados.length : 0
-    });
 
     return res.json({
       ok: true,
@@ -9395,10 +8694,9 @@ app.get("/radar", (req, res) => {
     sincronizarTratadasRadarDeOfertas(clienteId, ofertasRadarCliente);
 
     const tratadasRadar = lerTratadasRadar(clienteId);
-    const resumoHistoricoRadar = montarResumoHistoricoRadar(clienteId, {
+    const historicoOperacional = montarResumoHistoricoRadar(clienteId, {
       limit: req.query?.limit || 50
-    });
-    const historicoOperacional = resumoHistoricoRadar.eventos;
+    }).eventos;
 
     if (!temFontesMonitoradasRadar(radarConfig)) {
       return res.json({
@@ -9408,10 +8706,7 @@ app.get("/radar", (req, res) => {
         clienteId,
         oportunidades: [],
         historicoOperacional,
-        ultimasOfertasProcessadas: historicoOperacional,
-        capturas: historicoOperacional,
-        gruposPreview: resumoHistoricoRadar.grupos,
-        diagnosticoRadar: resumoHistoricoRadar.diagnostico || resumoHistoricoRadar.contadoresDiagnostico || {}
+        ultimasOfertasProcessadas: historicoOperacional
       });
     }
 
@@ -9501,10 +8796,7 @@ app.get("/radar", (req, res) => {
       clienteId,
       oportunidades: oportunidades.slice(0, 50),
       historicoOperacional,
-      ultimasOfertasProcessadas: historicoOperacional,
-      capturas: historicoOperacional,
-      gruposPreview: resumoHistoricoRadar.grupos,
-      diagnosticoRadar: resumoHistoricoRadar.diagnostico || resumoHistoricoRadar.contadoresDiagnostico || {}
+      ultimasOfertasProcessadas: historicoOperacional
     });
   } catch (e) {
     return res.status(500).json({
@@ -9685,8 +8977,7 @@ app.use("/mensageiro", criarRotasMensageiro({
   getMensageiroCliente: mensageiro.getMensageiroCliente,
   setMensageiroCliente: mensageiro.setMensageiroCliente,
   getAtendimentoConfigCliente: mensageiro.getAtendimentoConfigCliente,
-  setAtendimentoConfigCliente: mensageiro.setAtendimentoConfigCliente,
-  encontrarGatilhoAtendimento: mensageiro.encontrarGatilhoAtendimento
+  setAtendimentoConfigCliente: mensageiro.setAtendimentoConfigCliente
 }));
 
 
@@ -12030,12 +11321,6 @@ async function distribuirOfertaParaClientes(ofertaBase) {
 
   ofertaBase = prepararOfertaGlobal(ofertaBase);
 
-console.log("🚨 DISTRIBUIDOR RECEBEU", {
-  clienteId,
-  titulo: ofertaBase.titulo,
-  marketplace: mp
-});
-
   for (const usuario of usuarios) {
     if (!usuario?.ativo) continue;
 
@@ -13948,39 +13233,9 @@ const ordemMarketplaces = [
   "mercadolivre",
   "shopee",
   "amazon",
-  "mercadolivre",
-  "shopee",
-  "kabum",
-  "mercadolivre",
-  "amazon",
-  "shopee",
   "aliexpress",
-  "mercadolivre",
-  "shopee",
-  "amazon",
-  "mercadolivre",
   "kabum",
-  "shopee",
-  "mercadolivre",
-  "amazon",
-  "aliexpress"
-];
-
-const ordemMarketplacesCritica = [
-  "mercadolivre",
-  "shopee",
-  "amazon",
-  "mercadolivre",
-  "shopee",
-  "mercadolivre",
-  "amazon",
-  "shopee",
-  "kabum",
-  "mercadolivre",
-  "aliexpress",
-  "mercadolivre",
-  "amazon",
-  "shopee"
+  "awin",
 ];
 
 const farejadoresMarketplaces = {
@@ -13995,107 +13250,8 @@ const farejadoresMarketplaces = {
 
 let indiceMarketplaceAtual = 0;
 let farejadorRodando = false;
-const statusOrquestradorMarketplaces = {};
-let ultimaRodadaOrquestradorMs = 0;
-const inicioOrquestradorMarketplacesMs = Date.now();
 
-function categoriaLogMarketplace(marketplace = "") {
-  const mp = normalizarTexto(marketplace || "");
-  const mapa = {
-    mercadolivre: "MERCADOLIVRE",
-    mercado_livre: "MERCADOLIVRE",
-    shopee: "SHOPEE",
-    amazon: "AMAZON",
-    aliexpress: "ALIEXPRESS",
-    kabum: "KABUM",
-    awin: "KABUM"
-  };
-
-  return mapa[mp] || "ORQUESTRADOR";
-}
-
-function obterStatusOrquestradorMarketplace(marketplace = "") {
-  const mp = normalizarTexto(marketplace || "");
-  if (!statusOrquestradorMarketplaces[mp]) {
-    statusOrquestradorMarketplaces[mp] = {
-      marketplace: mp,
-      rodadas: 0,
-      ultimoInicio: "",
-      ultimaFinalizacao: "",
-      ultimoErro: "",
-      cooldownAte: 0
-    };
-  }
-
-  return statusOrquestradorMarketplaces[mp];
-}
-
-function algumClienteComFilaNosStatus(statuses = []) {
-  const permitidos = new Set(statuses);
-
-  return usuarios.some(usuario => {
-    if (!usuario?.ativo) return false;
-    try {
-      return permitidos.has(avaliarSaudeFilaCliente(usuario.id).status);
-    } catch {
-      return false;
-    }
-  });
-}
-
-function algumClienteComFilaCritica() {
-  return algumClienteComFilaNosStatus(["critica"]);
-}
-
-function algumClienteComFilaBaixaOuCritica() {
-  return algumClienteComFilaNosStatus(["critica", "baixa"]);
-}
-
-function intervaloOrquestradorAtualMs() {
-  if (algumClienteComFilaCritica()) return 2 * 60 * 1000;
-  if (algumClienteComFilaBaixaOuCritica()) return 3 * 60 * 1000;
-
-  return Math.max(4, Number(config.intervaloFarejadorGlobalMinutos || 5) || 5) * 60 * 1000;
-}
-
-function selecionarProximoMarketplaceOrquestrador() {
-  const sequencia = algumClienteComFilaCritica()
-    ? ordemMarketplacesCritica
-    : ordemMarketplaces;
-  const agora = Date.now();
-
-  for (let tentativas = 0; tentativas < sequencia.length; tentativas += 1) {
-    const indice = indiceMarketplaceAtual % sequencia.length;
-    const marketplace = sequencia[indice];
-    indiceMarketplaceAtual = (indiceMarketplaceAtual + 1) % sequencia.length;
-    const status = obterStatusOrquestradorMarketplace(marketplace);
-    const cfg = config.marketplaces?.[marketplace];
-    const farejador = farejadoresMarketplaces[marketplace];
-
-    if (!cfg?.ativo || typeof farejador !== "function") {
-      logOptimus("INTELIGENCIA", "Marketplace indisponivel pulado", {
-        marketplace,
-        ativo: Boolean(cfg?.ativo),
-        temFarejador: typeof farejador === "function"
-      });
-      continue;
-    }
-
-    if (status.cooldownAte && status.cooldownAte > agora) {
-      logOptimus("INTELIGENCIA", "Marketplace em cooldown", {
-        marketplace,
-        cooldownRestanteSegundos: Math.ceil((status.cooldownAte - agora) / 1000)
-      });
-      continue;
-    }
-
-    return marketplace;
-  }
-
-  return "";
-}
-
-async function rodarMarketplaceEspecifico(marketplace = "", opcoes = {}) {
+async function rodarProximoMarketplace() {
 
 // Farejador global roda apenas no ADMIN MASTER
 const admin = usuarios.find(u => u.papel === "admin_master");
@@ -14105,13 +13261,7 @@ if (!admin) {
   return;
 }
 
-  if (farejadorRodando) {
-    logOptimus("INTELIGENCIA", "Farejador ja em execucao", {
-      marketplace,
-      origem: opcoes.origem || "orquestrador"
-    });
-    return;
-  }
+  if (farejadorRodando) return;
 
   if (!config.automacaoAtiva) {
     console.log("[INFO] Farejador parado: automao global desligada");
@@ -14120,10 +13270,10 @@ if (!admin) {
 
   if (!podeRodarAgora()) return;
 
-  if (!marketplace) {
-    logOptimus("INTELIGENCIA", "Nenhum marketplace disponivel para rodada");
-    return;
-  }
+  const marketplace = ordemMarketplaces[indiceMarketplaceAtual];
+
+  indiceMarketplaceAtual =
+    (indiceMarketplaceAtual + 1) % ordemMarketplaces.length;
 
   const cfg = config.marketplaces?.[marketplace];
 
@@ -14142,43 +13292,13 @@ if (!admin) {
 
   try {
     farejadorRodando = true;
-    ultimaRodadaOrquestradorMs = Date.now();
-    const statusMarketplace = obterStatusOrquestradorMarketplace(marketplace);
-    const categoriaMarketplaceLog = categoriaLogMarketplace(marketplace);
-    const inicioRodadaMs = Date.now();
-    const totalFilaAntesRodada = Array.isArray(fila) ? fila.length : 0;
-    let clientesProcessadosRodada = 0;
-    statusMarketplace.rodadas += 1;
-    statusMarketplace.ultimoInicio = new Date().toISOString();
-    statusMarketplace.ultimoErro = "";
 
-logOptimus("ORQUESTRADOR", opcoes.origem === "boot_mercadolivre" ? "🚀 ML BOOT | Rodada inicial direta" : "Rodada iniciada", {
-  marketplace,
-  rodada: statusMarketplace.rodadas,
-  intervaloAtualMinutos: Math.round(intervaloOrquestradorAtualMs() / 60000),
-  origem: opcoes.origem || "orquestrador"
-});
-
-logOptimus(categoriaMarketplaceLog, "Início da rodada", {
-  marketplace,
-  rodada: statusMarketplace.rodadas,
-  origem: opcoes.origem || "orquestrador"
-});
+console.log(`[INFO] Rodada multiusurio: ${marketplace}`);
 
 for (const usuario of usuarios) {
   if (!usuario?.ativo) continue;
 
   const clienteId = usuario.id;
-  const saudeFilaCliente = avaliarSaudeFilaCliente(clienteId);
-
-  if (saudeFilaCliente.status === "cheia") {
-    logOptimus("INTELIGENCIA", "Cliente com fila cheia pulado", {
-      clienteId,
-      marketplace,
-      pendentes: saudeFilaCliente.pendentes
-    });
-    continue;
-  }
 
   if (!usuarioPodeReceberMarketplace(usuario, marketplace)) {
     console.log("[INFO] Usurio no recebe marketplace pelo plano:", {
@@ -14230,8 +13350,6 @@ await farejador(clienteId, {
   classificarCategoriaOferta,
   gerarBuscasGlobais,
   gerarHeadersStealth,
-  obterEstrategiaFarejador,
-  ofertaTemBeneficioFarejador,
   farejarCuponsMercadoLivre,
   importarMercadoLivre: (url, clienteIdAlvo = "admin") =>
   importarMercadoLivre(url, clienteIdAlvo, {
@@ -14248,76 +13366,43 @@ await farejador(clienteId, {
   importarProdutoKabumViaAwin,
 
 });
-clientesProcessadosRodada += 1;
 }
   
-  statusMarketplace.ultimaFinalizacao = new Date().toISOString();
-  const totalFilaDepoisRodada = Array.isArray(fila) ? fila.length : totalFilaAntesRodada;
-  const adicionadasRodada = Math.max(0, totalFilaDepoisRodada - totalFilaAntesRodada);
-  const duracaoSegundos = Math.round((Date.now() - inicioRodadaMs) / 1000);
-
-  logOptimus(categoriaMarketplaceLog, "Fim da rodada", {
-    marketplace,
-    rodada: statusMarketplace.rodadas,
-    clientesProcessados: clientesProcessadosRodada,
-    encontradas: "nao_informado",
-    adicionadas: adicionadasRodada,
-    erros: 0,
-    duracaoSegundos,
-    origem: opcoes.origem || "orquestrador"
-  });
-
-  logOptimus("RESUMO", "Farejador rodada", {
-    marketplace,
-    rodada: statusMarketplace.rodadas,
-    clientesProcessados: clientesProcessadosRodada,
-    encontradas: "nao_informado",
-    adicionadas: adicionadasRodada,
-    erros: 0,
-    origem: opcoes.origem || "orquestrador"
-  });
+  console.log(`[INFO] Rodada multiusurio finalizada: ${marketplace}`);
  
   } catch (e) {
-    const statusMarketplace = obterStatusOrquestradorMarketplace(marketplace);
-    statusMarketplace.ultimoErro = e.message || "erro_rodada_marketplace";
-    statusMarketplace.cooldownAte = Date.now() + 15 * 60 * 1000;
-    logOptimus("ERRO", "Erro na rodada marketplace", {
-      marketplace,
-      erro: e.message,
-      cooldownMinutos: 15,
-      origem: opcoes.origem || "orquestrador"
-    });
+    console.log(`[ERRO] Erro na rodada ${marketplace}:`, e.message);
   } finally {
     farejadorRodando = false;
   }
 }
 
-async function rodarProximoMarketplace() {
-  const marketplace = selecionarProximoMarketplaceOrquestrador();
-  return rodarMarketplaceEspecifico(marketplace, { origem: "orquestrador" });
-}
+// ============================= TESTE MANUAL =========================
 
-if (!global.__optimusMlBootTimeoutRegistrado) {
-  global.__optimusMlBootTimeoutRegistrado = true;
-  setTimeout(() => {
-    logOptimus("MERCADOLIVRE", "🚀 ML BOOT | Disparo inicial apos deploy", {
-      delaySegundos: 60
-    });
-    rodarMarketplaceEspecifico("mercadolivre", { origem: "boot_mercadolivre" });
-  }, 60 * 1000);
-}
+ setTimeout(async () => {
+   console.log("[INFO] TESTE MANUAL ORQUESTRADOR ML");
 
-if (!global.__optimusOrquestradorMarketplacesIntervalRegistrado) {
-  global.__optimusOrquestradorMarketplacesIntervalRegistrado = true;
-  setInterval(() => {
-    const intervaloAtual = intervaloOrquestradorAtualMs();
-    const ultimaRodada = ultimaRodadaOrquestradorMs || inicioOrquestradorMarketplacesMs;
+  const indicemercadolivre =
+   ordemMarketplaces.indexOf("mercadolivre");
 
-    if (Date.now() - ultimaRodada < intervaloAtual) return;
+   if (indicemercadolivre >= 0) {
+     indiceMarketplaceAtual = indicemercadolivre;
+  }
 
-    rodarProximoMarketplace();
-  }, 30 * 1000);
-}
+  await rodarProximoMarketplace();
+
+ }, 60 * 1000);
+
+ 
+
+setInterval(() => {
+  rodarProximoMarketplace();
+}, (config.intervaloFarejadorGlobalMinutos || 10) * 60 * 1000);
+
+setTimeout(() => {
+  console.log("[INFO] Primeira rodada do orquestrador em 1 minuto...");
+  rodarProximoMarketplace();
+}, 1 * 60 * 1000);
 
 // ================= PROCESSADOR DA FILA =================
 
@@ -14342,20 +13427,6 @@ setInterval(() => {
   }
 
 }, 10 * 1000);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
