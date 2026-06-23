@@ -1054,6 +1054,13 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
 }
 
 function selecionarProximaOfertaFila(clienteIdAlvo = null) {
+
+console.log("🧪 FILA SELECAO", {
+    clienteIdAlvo,
+    totalFila: fila.length,
+    pendentes: fila.filter(o => o.status === "pendente").length
+  });
+
   const pendentes = fila.filter(o => {
     const mesmoCliente =
       !clienteIdAlvo ||
@@ -1093,6 +1100,13 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
   if (expirouAlguma) {
     salvarFila(clienteIdAlvo || "admin");
   }
+
+
+console.log("🚨 FILA SEM OFERTA", {
+  clienteIdAlvo,
+  totalFila: fila.length,
+  pendentes: pendentes.length
+});
 
   return null;
 }
