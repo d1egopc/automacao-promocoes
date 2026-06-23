@@ -71,6 +71,17 @@ console.log("[AMZ] DENTRO FAREJADOR:", typeof importarAmazon);
     }
 
     console.log("[AMZ] Farejando ofertas Amazon...");
+    const estrategiaFarejador =
+      typeof deps.obterEstrategiaFarejador === "function"
+        ? deps.obterEstrategiaFarejador(clienteId, "amazon")
+        : {
+            descontoMinimo: 15,
+            aceitarBeneficioSemDesconto: true
+          };
+    const temBeneficioFarejador =
+      typeof deps.ofertaTemBeneficioFarejador === "function"
+        ? deps.ofertaTemBeneficioFarejador
+        : (oferta) => Boolean(oferta?.cupom || oferta?.avisoCupom || oferta?.beneficioExtra);
   
   
     let adicionadasNestaRodada = 0;
@@ -172,10 +183,11 @@ if (precoNumero < 30) {
   continue;
 }
 
-if (desconto < 15 && !produto.avisoCupom) {
+if (desconto < estrategiaFarejador.descontoMinimo && !temBeneficioFarejador(produto)) {
   console.log("[AMZ] Amazon desconto baixo:", {
     titulo: produto.titulo,
     desconto: Math.round(desconto),
+    descontoMinimo: estrategiaFarejador.descontoMinimo,
     avisoCupom: produto.avisoCupom
   });
   continue;
@@ -226,6 +238,14 @@ if (htmlCupomAmazon) {
   } else if (cupomOfertaAmazon?.avisoCupom) {
     novaOferta.tipoCupom = cupomOfertaAmazon.tipoCupom || "";
     novaOferta.avisoCupom = cupomOfertaAmazon.avisoCupom;
+  }
+
+  if (cupomOfertaAmazon) {
+    novaOferta.valorCupom = cupomOfertaAmazon.valorCupom || cupomOfertaAmazon.cupomValor || "";
+    novaOferta.percentualCupom = cupomOfertaAmazon.percentualCupom || cupomOfertaAmazon.cupomPercentual || "";
+    novaOferta.descontoPix = cupomOfertaAmazon.descontoPix || "";
+    novaOferta.descontoApp = cupomOfertaAmazon.descontoApp || "";
+    novaOferta.beneficioExtra = cupomOfertaAmazon.beneficioExtra || "";
   }
 }
 

@@ -6,7 +6,10 @@
     limparPreco,
     corrigirImagemUrl,
     limparLinkAmazon,
-    gerarLinkOptimus
+    gerarLinkOptimus,
+    extrairCuponsAmazonDoHtml,
+    detectarAvisoCupomAmazon,
+    escolherCupomParaOfertaAmazon
   } = deps;
 
   return async function importarAmazon(url, config = {}) {
@@ -158,8 +161,8 @@
       origemPrecoAntigo
     });
 
-    // NÃƒO inventar preÃ§o antigo automÃ¡tico na Amazon
-    // Se nÃ£o veio preÃ§o antigo real, fica vazio.
+    // Nao inventar preco antigo automatico na Amazon.
+    // Se nao veio preco antigo real, fica vazio.
     const parcelamento =
       primeiroMatch(/(\d+x\s+de\s+R\$\s*[\d.,]+\s*sem juros)/i) ||
       primeiroMatch(/(\d+\s*x\s*R\$\s*[\d.,]+)/i) ||
@@ -186,18 +189,57 @@
       }
     }
 
-    let cupom =
-      primeiroMatch(/Use o cupom\s+([A-Z0-9]{4,20})/i) ||
-      primeiroMatch(/Aplique o cupom\s+([A-Z0-9]{4,20})/i) ||
-      primeiroMatch(/com o cÃ³digo\s+([A-Z0-9]{4,20})/i) ||
-      "";
+    const tituloLimpo = htmlDecode(titulo)
+      .replace("Amazon.com.br:", "")
+      .replace("Amazon.com:", "")
+      .trim();
 
+    let cupom = "";
     let avisoCupom = "";
+    let tipoCupom = "";
+    let valorCupom = "";
+    let percentualCupom = "";
+    let descontoPix = "";
+    let descontoApp = "";
+    let beneficioExtra = "";
 
-    if (cupom) {
-      avisoCupom = `Aplique o cupom ${cupom} no carrinho.`;
-    } else if (/resgatar|aplique o cupom|cupom disponÃ­vel|desconto extra/i.test(html)) {
-      avisoCupom = "HÃ¡ cupom/desconto extra na pÃ¡gina. Resgate antes de finalizar.";
+    if (
+      typeof extrairCuponsAmazonDoHtml === "function" &&
+      typeof detectarAvisoCupomAmazon === "function" &&
+      typeof escolherCupomParaOfertaAmazon === "function"
+    ) {
+      const cuponsAmazon = extrairCuponsAmazonDoHtml(html);
+      const avisoAmazon = detectarAvisoCupomAmazon(html);
+      const dadosCuponsAmazon = avisoAmazon
+        ? [...cuponsAmazon, avisoAmazon]
+        : cuponsAmazon;
+      const cupomOfertaAmazon = escolherCupomParaOfertaAmazon(
+        { titulo: tituloLimpo, marketplace: "amazon" },
+        dadosCuponsAmazon
+      );
+
+      if (cupomOfertaAmazon) {
+        cupom = cupomOfertaAmazon.cupom || "";
+        avisoCupom = cupomOfertaAmazon.avisoCupom || "";
+        tipoCupom = cupomOfertaAmazon.tipoCupom || "";
+        valorCupom = cupomOfertaAmazon.valorCupom || cupomOfertaAmazon.cupomValor || "";
+        percentualCupom = cupomOfertaAmazon.percentualCupom || cupomOfertaAmazon.cupomPercentual || "";
+        descontoPix = cupomOfertaAmazon.descontoPix || "";
+        descontoApp = cupomOfertaAmazon.descontoApp || "";
+        beneficioExtra = cupomOfertaAmazon.beneficioExtra || "";
+      }
+    } else {
+      cupom =
+        primeiroMatch(/Use o cupom\s+([A-Z0-9]{4,20})/i) ||
+        primeiroMatch(/Aplique o cupom\s+([A-Z0-9]{4,20})/i) ||
+        primeiroMatch(/com o c[oó]digo\s+([A-Z0-9]{4,20})/i) ||
+        "";
+
+      if (cupom) {
+        avisoCupom = `Cupom: ${cupom}`;
+        beneficioExtra = `Cupom: ${cupom}`;
+        tipoCupom = "confirmado_amazon";
+      }
     }
 
     linkAfiliado = limparLinkAmazon(linkAfiliado);
@@ -211,15 +253,18 @@ const linkFinal = usarLinksOptimus
 
     return {
       marketplace: "amazon",
-      titulo: htmlDecode(titulo)
-        .replace("Amazon.com.br:", "")
-        .replace("Amazon.com:", "")
-        .trim(),
+      titulo: tituloLimpo,
       precoAntigo,
       precoAtual: preco,
       parcelamento,
       cupom,
       avisoCupom,
+      tipoCupom,
+      valorCupom,
+      percentualCupom,
+      descontoPix,
+      descontoApp,
+      beneficioExtra,
       linkOriginal: linkAfiliado,
       link: linkFinal,
       linkAfiliado: linkFinal,
