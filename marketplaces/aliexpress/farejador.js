@@ -43,6 +43,17 @@ async function farejarAliExpress(clienteId = "admin", deps = {}) {
     }
 
     const limitePorRodada = cfg.limitePorRodada || 5;
+    const estrategiaFarejador =
+      typeof deps.obterEstrategiaFarejador === "function"
+        ? deps.obterEstrategiaFarejador(clienteId, "aliexpress")
+        : {
+            descontoMinimo: Number(cfg.descontoMinimo) || 0,
+            aceitarBeneficioSemDesconto: true
+          };
+    const temBeneficioFarejador =
+      typeof deps.ofertaTemBeneficioFarejador === "function"
+        ? deps.ofertaTemBeneficioFarejador
+        : (oferta) => Boolean(oferta?.cupom || oferta?.avisoCupom || oferta?.beneficioExtra);
 
 const buscas = gerarBuscasAliExpress({
   gerarBuscasGlobais
@@ -167,10 +178,18 @@ try {
         if (!precoNumero || !Number.isFinite(precoNumero)) continue;
 
         const precoMinimo = Number(cfg.precoMinimo) || 0;
-        const descontoMinimo = Number(cfg.descontoMinimo) || 0;
+        const descontoMinimo = Number(estrategiaFarejador.descontoMinimo) || 0;
+        const beneficioAli = Boolean(
+          item.coupon_info ||
+          item.coupon ||
+          item.shop_coupon ||
+          item.seller_coupon ||
+          item.promotion_link ||
+          item.promotion_link_short
+        );
 
         if (precoNumero < precoMinimo) continue;
-        if (desconto < descontoMinimo) continue;
+        if (desconto < descontoMinimo && !beneficioAli) continue;
 
         const imagem =
           item.product_main_image_url ||
@@ -248,7 +267,9 @@ const categoriaDetectada =
           precoAntigo: precoAntigo || "",
           cupom: "",
           avisoCupom:
-          desconto > 0
+          beneficioAli
+          ? "Confira cupom/moedas/desconto do vendedor no AliExpress."
+          : desconto > 0
           ? `${Math.round(desconto)}% OFF no AliExpress.`
           : "",
           parcelamento: "",
@@ -262,6 +283,10 @@ const categoriaDetectada =
           status: "pendente",
           clienteId
         };
+
+        if (temBeneficioFarejador(novaOferta)) {
+          novaOferta.tipoCupom = novaOferta.tipoCupom || "provavel";
+        }
 
        if (typeof prepararOfertaGlobal === "function") {
 
