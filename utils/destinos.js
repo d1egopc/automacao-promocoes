@@ -118,13 +118,15 @@ function analisarDestinoOferta(destino, oferta, opcoes = {}) {
       ? "categoria"
       : "";
 
-  logger.log("Check destino:", {
-    nome: destino.nome,
-    marketplaceOferta,
-    aceitaMarketplace,
-    categoriaOferta,
-    aceitaCategoria
-  });
+  if (String(process.env.DEBUG_LOGS || "").toLowerCase() === "true") {
+    logger.log("Check destino:", {
+      nome: destino.nome,
+      marketplaceOferta,
+      aceitaMarketplace,
+      categoriaOferta,
+      aceitaCategoria
+    });
+  }
 
   return {
     aceita: aceitaMarketplace && aceitaCategoria,
