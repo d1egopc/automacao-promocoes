@@ -2224,13 +2224,12 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
     oferta.tipoCupom === "real"
   );
   const cupomDetectado = !cupomSuspeito && Boolean(
-    oferta.cupom ||
+    (!cupomFake && oferta.cupom) ||
     oferta.cupomDetectado === true ||
     oferta.cupomDetectadoTexto === true
   );
   const cupomProvavel = !cupomSuspeito && Boolean(
     oferta.possivelCupom ||
-    oferta.avisoCupom ||
     oferta.beneficioExtra ||
     oferta.linkResgateCupom
   );
@@ -2247,6 +2246,13 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
     const scoreAlto = Number(oferta.radarScore || oferta.score || 0) >= 60;
 
     oferta.origem = "radar";
+
+const cupomTexto = String(oferta.cupom || "").trim().toUpperCase();
+const cupomFake = ["COPIADO", "APPLIED", "APPEARANCE", "APPLINK", "SEM CUPOM"].includes(cupomTexto);
+
+if (cupomFake) {
+  oferta.cupom = "";
+}
 
     if (cupomReal) {
       oferta.prioridadeEnvio = 110;
