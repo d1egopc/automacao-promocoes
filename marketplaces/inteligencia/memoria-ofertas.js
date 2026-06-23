@@ -5,6 +5,10 @@ const {
 
 const ARQUIVO_OFERTAS_VISTAS = "ofertas_vistas.json";
 
+// --- OTIMIZAÇÃO: Cache em RAM para evitar leitura constante de disco ---
+let CACHE_OFERTAS_VISTAS = null;
+let ESTA_SALVANDO = false;
+
 function normalizarTextoLocal(texto = "") {
   return String(texto || "")
     .toLowerCase()
@@ -18,30 +22,44 @@ function normalizarTextoLocal(texto = "") {
 
 function garantirArquivoOfertasVistas() {
   const atual = readGlobalJson(ARQUIVO_OFERTAS_VISTAS, null);
-
   if (!Array.isArray(atual)) {
     writeGlobalJson(ARQUIVO_OFERTAS_VISTAS, []);
   }
 }
 
+// OTIMIZADO: Só lê do disco uma única vez quando o servidor inicia
 function carregarOfertasVistas() {
+  if (CACHE_OFERTAS_VISTAS !== null) {
+    return CACHE_OFERTAS_VISTAS;
+  }
   try {
     garantirArquivoOfertasVistas();
     const dados = readGlobalJson(ARQUIVO_OFERTAS_VISTAS, []);
-    return Array.isArray(dados) ? dados : [];
+    CACHE_OFERTAS_VISTAS = Array.isArray(dados) ? dados : [];
+    return CACHE_OFERTAS_VISTAS;
   } catch (e) {
     console.log("[ERRO] Erro ao carregar memoria de ofertas:", e.message);
-    return [];
+    CACHE_OFERTAS_VISTAS = [];
+    return CACHE_OFERTAS_VISTAS;
   }
 }
 
+// OTIMIZADO: Salva no disco sem bloquear o Event Loop (Desacoplado)
 function salvarOfertasVistas(lista = []) {
-  try {
-    garantirArquivoOfertasVistas();
-    writeGlobalJson(ARQUIVO_OFERTAS_VISTAS, lista.slice(-7000));
-  } catch (e) {
-    console.log("[ERRO] Erro ao salvar memoria de ofertas:", e.message);
-  }
+  if (ESTA_SALVANDO) return; // Evita gravações simultâneas concorrentes
+  
+  ESTA_SALVANDO = true;
+  // setTimeout joga a escrita pesada para a próxima iteração do loop, aliviando a requisição atual
+  setTimeout(() => {
+    try {
+      garantirArquivoOfertasVistas();
+      writeGlobalJson(ARQUIVO_OFERTAS_VISTAS, lista.slice(-5000)); // Reduzido ligeiramente para 5k para melhor performance
+    } catch (e) {
+      console.log("[ERRO] Erro ao salvar memoria de ofertas:", e.message);
+    } finally {
+      ESTA_SALVANDO = false;
+    }
+  }, 50); 
 }
 
 function precoNumero(valor) {
@@ -105,7 +123,6 @@ function ofertaOrigemRadar(oferta = {}) {
 
 function cupomValidoMemoria(oferta = {}) {
   const cupom = String(oferta.cupom || "").trim().toLowerCase();
-
   return Boolean(
     cupom &&
     cupom !== "copiado" &&
@@ -134,33 +151,20 @@ function janelaHorasPorOferta(oferta = {}) {
   const ehRadar = ofertaOrigemRadar(oferta);
 
   if (ehRadar) return 0.5;
-
-  if (marketplace.includes("mercadolivre") || marketplace.includes("mercado livre")) {
-    return 0.5;
-  }
-
-  if (marketplace.includes("shopee")) {
-    return 2;
-  }
-
-  if (marketplace.includes("amazon")) {
-    return 3;
-  }
+  if (marketplace.includes("mercadolivre") || marketplace.includes("mercado livre")) return 0.5;
+  if (marketplace.includes("shopee")) return 2;
+  if (marketplace.includes("amazon")) return 3;
 
   if (
-    categoria.includes("roupas") ||
-    categoria.includes("moda") ||
-    categoria.includes("tenis") ||
-    categoria.includes("chinelos")
+    categoria.includes("roupas") || categoria.includes("moda") ||
+    categoria.includes("tenis") || categoria.includes("chinelos")
   ) {
     return 2;
   }
 
   if (
-    categoria.includes("gamer") ||
-    categoria.includes("hardware") ||
-    categoria.includes("computadores") ||
-    categoria.includes("notebook")
+    categoria.includes("gamer") || categoria.includes("hardware") ||
+    categoria.includes("computadores") || categoria.includes("notebook")
   ) {
     return 5;
   }
@@ -175,7 +179,6 @@ function quedaPrecoRelevante(precoAtual = 0, precoAnterior = 0) {
   const percentual = diferenca / precoAnterior;
 
   if (percentual >= 0.12) return true;
-
   if (precoAnterior <= 30 && diferenca >= 5) return true;
   if (precoAnterior <= 80 && diferenca >= 10) return true;
   if (precoAnterior > 80 && diferenca >= 20) return true;
@@ -185,29 +188,28 @@ function quedaPrecoRelevante(precoAtual = 0, precoAnterior = 0) {
 
 function deveIgnorarOfertaRepetida(oferta = {}) {
   const agora = Date.now();
-  const vistas = carregarOfertasVistas();
+  const vistas = carregarOfertasVistas(); // Puxa instantaneamente do Cache RAM
   const chave = chaveOferta(oferta);
 
-  const anterior = vistas
-    .filter(item => item.chave === chave)
-    .sort((a, b) => new Date(b.vistoEm) - new Date(a.vistoEm))[0];
+  // OTIMIZAÇÃO: Busca reversa simples e rápida para evitar ordenar 7000 itens a cada request
+  let anterior = null;
+  for (let i = vistas.length - 1; i >= 0; i--) {
+    if (vistas[i].chave === chave) {
+      anterior = vistas[i];
+      break;
+    }
+  }
 
   if (!anterior) return false;
 
-  const horasPassadas =
-    (agora - new Date(anterior.vistoEm).getTime()) / 36e5;
-
+  const horasPassadas = (agora - new Date(anterior.vistoEm).getTime()) / 36e5;
   const precoAtual = precoNumero(oferta.precoAtual || oferta.preco);
   const precoAnterior = precoNumero(anterior.precoAtual || anterior.preco);
 
   const cupomAtual = String(oferta.cupom || "").trim();
   const cupomAnterior = String(anterior.cupom || "").trim();
 
-  const temCupomNovo =
-    cupomAtual &&
-    cupomAtual.toLowerCase() !== "copiado" &&
-    cupomAtual !== cupomAnterior;
-
+  const temCupomNovo = cupomAtual && cupomAtual.toLowerCase() !== "copiado" && cupomAtual !== cupomAnterior;
   const ehRadar = ofertaOrigemRadar(oferta);
   const temBeneficio = ofertaTemBeneficioMemoria(oferta);
   const desconto = descontoNumero(oferta);
@@ -215,14 +217,11 @@ function deveIgnorarOfertaRepetida(oferta = {}) {
 
   const marketplace = normalizarTextoLocal(oferta.marketplace || oferta.mercado || "");
 
-if (
-  marketplace.includes("mercadolivre") ||
-  marketplace.includes("mercado livre")
-) {
-  if (ehRadar || temBeneficio || desconto >= 5 || quedaPreco) {
-    return false;
+  if (marketplace.includes("mercadolivre") || marketplace.includes("mercado livre")) {
+    if (ehRadar || temBeneficio || desconto >= 5 || quedaPreco) {
+      return false;
+    }
   }
-}
 
   if (ehRadar) return false;
   if (temCupomNovo) return false;
@@ -231,21 +230,12 @@ if (
   if (quedaPreco && horasPassadas >= 0.25) return false;
 
   if (horasPassadas < 0.25 && !temCupomNovo && !quedaPreco && !temBeneficio) {
-    console.log("[INFO] Oferta repetida ignorada <15min:", oferta.titulo || oferta.nome);
     return true;
   }
 
   const janelaHoras = janelaHorasPorOferta(oferta);
 
   if (horasPassadas < janelaHoras && !temCupomNovo && !quedaPreco && !temBeneficio) {
-    console.log("[INFO] Oferta repetida ignorada:", {
-      titulo: oferta.titulo || oferta.nome,
-      horasPassadas: Number(horasPassadas.toFixed(2)),
-      janelaHoras,
-      precoAtual,
-      precoAnterior,
-      origem: ehRadar ? "radar" : (oferta.origem || "farejador")
-    });
     return true;
   }
 
@@ -253,7 +243,7 @@ if (
 }
 
 function registrarOfertaVista(oferta = {}) {
-  const vistas = carregarOfertasVistas();
+  const vistas = carregarOfertasVistas(); // Puxa do Cache RAM em 0ms
 
   vistas.push({
     chave: chaveOferta(oferta),
@@ -271,7 +261,9 @@ function registrarOfertaVista(oferta = {}) {
     vistoEm: new Date().toISOString()
   });
 
-  salvarOfertasVistas(vistas);
+  // Atualiza o cache RAM e despacha o salvamento assíncrono em segundo plano
+  CACHE_OFERTAS_VISTAS = vistas.slice(-5000);
+  salvarOfertasVistas(CACHE_OFERTAS_VISTAS);
 }
 
 module.exports = {
