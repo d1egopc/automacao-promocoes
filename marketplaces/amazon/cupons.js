@@ -3,49 +3,16 @@
 let ultimoTotalCuponsAmazon = 0;
 
 function normalizarTextoAmazon(html = "") {
-  return corrigirMojibakeAmazon(String(html || ""))
+  return String(html || "")
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
-    .replace(/&quot;/gi, "\"")
-    .replace(/&#39;/gi, "'")
-    .replace(/&apos;/gi, "'")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => {
-      const code = parseInt(hex, 16);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : " ";
-    })
-    .replace(/&#([0-9]+);/gi, (_, dec) => {
-      const code = parseInt(dec, 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : " ";
-    })
+    .replace(/&#x?([0-9a-f]+);/gi, " ")
     .replace(/\\u00a0/gi, " ")
-    .replace(/\\u([0-9a-f]{4})/gi, (_, hex) => {
-      const code = parseInt(hex, 16);
-      return Number.isFinite(code) ? String.fromCharCode(code) : " ";
-    })
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function corrigirMojibakeAmazon(texto = "") {
-  return String(texto || "")
-    .replace(/HÃ¡/g, "Há")
-    .replace(/hÃ¡/g, "há")
-    .replace(/pÃ¡gina/g, "página")
-    .replace(/disponÃ­vel/g, "disponível")
-    .replace(/cÃ³digo/g, "código")
-    .replace(/nÃ£o/g, "não")
-    .replace(/Ã£/g, "ã")
-    .replace(/Ã¡/g, "á")
-    .replace(/Ã©/g, "é")
-    .replace(/Ã­/g, "í")
-    .replace(/Ã³/g, "ó")
-    .replace(/Ãº/g, "ú")
-    .replace(/Ã§/g, "ç");
 }
 
 function limparBeneficioAmazon(texto = "") {
@@ -53,95 +20,6 @@ function limparBeneficioAmazon(texto = "") {
     .replace(/\s+/g, " ")
     .replace(/[.,;:]+$/g, "")
     .trim();
-}
-
-function formatarValorCupomAmazon(texto = "") {
-  const match = String(texto || "").match(/R\$\s*\d{1,5}(?:[.,]\d{1,2})?/i);
-  return match ? match[0].replace(/\s+/g, " ").trim().toUpperCase() : "";
-}
-
-function formatarPercentualCupomAmazon(texto = "") {
-  const match = String(texto || "").match(/\d{1,3}\s*%/);
-  return match ? match[0].replace(/\s+/g, "").trim() : "";
-}
-
-function numeroMoedaAmazon(valor = "") {
-  if (typeof valor === "number" && Number.isFinite(valor)) return valor;
-
-  const texto = String(valor || "");
-  const match = texto.match(/R\$\s*\d{1,6}(?:\.\d{3})*(?:[,.]\d{1,2})?|\d{1,6}(?:\.\d{3})*(?:[,.]\d{1,2})?/i);
-  if (!match) return 0;
-
-  const normalizado = match[0]
-    .replace(/R\$/gi, "")
-    .replace(/\s+/g, "")
-    .replace(/\./g, "")
-    .replace(",", ".");
-
-  const numero = Number(normalizado);
-  return Number.isFinite(numero) ? numero : 0;
-}
-
-function validarCupomMonetarioAmazon(oferta = {}, item = {}) {
-  const preco = numeroMoedaAmazon(oferta.precoAtual || oferta.preco || oferta.valor || "");
-  const valorCupom = numeroMoedaAmazon(
-    item.cupomValor ||
-    item.valorCupom ||
-    item.avisoCupom ||
-    item.beneficioExtra ||
-    item.beneficioDetectado ||
-    ""
-  );
-
-  if (!preco || !valorCupom) {
-    return { ok: true, suspeito: false, preco, valorCupom };
-  }
-
-  if (valorCupom > preco) {
-    return {
-      ok: false,
-      suspeito: true,
-      motivo: "cupom_monetario_incompativel_com_preco",
-      preco,
-      valorCupom
-    };
-  }
-
-  if (valorCupom >= preco * 0.7) {
-    return {
-      ok: true,
-      suspeito: true,
-      motivo: "cupom_monetario_suspeito_70_pct_preco",
-      preco,
-      valorCupom
-    };
-  }
-
-  return { ok: true, suspeito: false, preco, valorCupom };
-}
-
-function montarBeneficioAmazon({ tipoCupom, valorCupom = "", percentualCupom = "" } = {}) {
-  if (valorCupom) {
-    return {
-      tipoCupom: tipoCupom || "valor_amazon",
-      cupomValor: valorCupom,
-      avisoCupom: `Cupom: ${valorCupom} OFF`,
-      beneficioExtra: `Cupom: ${valorCupom} OFF`,
-      beneficioDetectado: valorCupom
-    };
-  }
-
-  if (percentualCupom) {
-    return {
-      tipoCupom: tipoCupom || "percentual_amazon",
-      cupomPercentual: percentualCupom,
-      avisoCupom: `Cupom: ${percentualCupom} OFF adicional`,
-      beneficioExtra: `Cupom: ${percentualCupom} OFF adicional`,
-      beneficioDetectado: percentualCupom
-    };
-  }
-
-  return null;
 }
 
 function pareceCupomRealAmazon(texto = "") {
@@ -223,77 +101,57 @@ function detectarBeneficioAmazon(html = "") {
   const texto = normalizarTextoAmazon(html);
   const textoLower = texto.toLowerCase();
 
-  const cupomValor = formatarValorCupomAmazon(
-    texto.match(/cupom\s+(?:de\s+)?R\$\s*\d{1,5}(?:[.,]\d{1,2})?/i)?.[0] ||
-    texto.match(/R\$\s*\d{1,5}(?:[.,]\d{1,2})?\s*(?:de\s*)?(?:cupom|off|desconto)/i)?.[0] ||
-    texto.match(/(?:economize|ganhe|desconto)\s+R\$\s*\d{1,5}(?:[.,]\d{1,2})?/i)?.[0] ||
-    ""
-  );
+  const cupomValor =
+    texto.match(/cupom\s+de\s+R\$\s*\d{1,4}(?:[.,]\d{1,2})?/i)?.[0] ||
+    texto.match(/R\$\s*\d{1,4}(?:[.,]\d{1,2})?\s*(?:de\s*)?cupom/i)?.[0] ||
+    "";
 
   if (cupomValor) {
-    return montarBeneficioAmazon({
-      tipoCupom: "valor_amazon",
-      valorCupom: cupomValor
-    });
-  }
-
-  const cupomPercentual = formatarPercentualCupomAmazon(
-    texto.match(/cupom\s+(?:de\s+)?\d{1,3}\s*%/i)?.[0] ||
-    texto.match(/\d{1,3}\s*%\s*(?:off|de desconto|adicional|no cupom|com cupom)/i)?.[0] ||
-    ""
-  );
-
-  if (cupomPercentual) {
-    return montarBeneficioAmazon({
-      tipoCupom: "percentual_amazon",
-      percentualCupom: cupomPercentual
-    });
-  }
-
-  if (/\b(app|aplicativo)\b/i.test(texto) && /(exclusiv|oferta|desconto)/i.test(texto)) {
+    const beneficio = limparBeneficioAmazon(cupomValor);
     return {
-      beneficioDetectado: "app",
-      tipoCupom: "desconto_app_amazon",
-      descontoApp: "Oferta exclusiva App",
-      beneficioExtra: "Oferta exclusiva App",
-      avisoCupom: "Oferta exclusiva App"
+      beneficioDetectado: beneficio,
+      avisoCupom: `Cupom disponivel na pagina: ${beneficio}. Aplique antes de finalizar.`
     };
   }
 
-  if (/\bpix\b/i.test(texto) && /(desconto|economize|off|pagando)/i.test(texto)) {
+  const economia =
+    texto.match(/economize\s+R\$\s*\d{1,4}(?:[.,]\d{1,2})?/i)?.[0] ||
+    texto.match(/ganhe\s+R\$\s*\d{1,4}(?:[.,]\d{1,2})?/i)?.[0] ||
+    "";
+
+  if (economia) {
+    const beneficio = limparBeneficioAmazon(economia);
     return {
-      beneficioDetectado: "pix",
-      tipoCupom: "desconto_pix_amazon",
-      descontoPix: "Desconto PIX disponível",
-      beneficioExtra: "Desconto PIX disponível",
-      avisoCupom: "Desconto PIX disponível"
+      beneficioDetectado: beneficio,
+      avisoCupom: `Beneficio disponivel na pagina: ${beneficio}. Confira antes de finalizar.`
     };
   }
 
   if (/aplicar\s+cupom/i.test(texto) || textoLower.includes("aplicar cupom")) {
     return {
-      beneficioDetectado: "cupom_disponivel",
-      tipoCupom: "resgate_pagina_amazon",
-      beneficioExtra: "Cupom disponível na página",
-      avisoCupom: "Cupom disponível na página"
+      beneficioDetectado: "aplicar_cupom",
+      avisoCupom: "Cupom disponivel na pagina. Aplique antes de finalizar."
     };
   }
 
   if (/desconto\s+ao\s+finalizar/i.test(texto) || textoLower.includes("desconto ao finalizar")) {
     return {
       beneficioDetectado: "desconto_ao_finalizar",
-      tipoCupom: "desconto_finalizacao_amazon",
-      beneficioExtra: "Desconto ao finalizar",
-      avisoCupom: "Desconto ao finalizar"
+      avisoCupom: "Desconto disponivel ao finalizar a compra. Confira antes de pagar."
     };
   }
 
   if (/\bcupom\b/i.test(texto)) {
     return {
-      beneficioDetectado: "cupom_disponivel",
-      tipoCupom: "resgate_pagina_amazon",
-      beneficioExtra: "Cupom disponível na página",
-      avisoCupom: "Cupom disponível na página"
+      beneficioDetectado: "cupom",
+      avisoCupom: "Cupom disponivel na pagina. Confira antes de finalizar."
+    };
+  }
+
+  if (/\bprime\b/i.test(texto)) {
+    return {
+      beneficioDetectado: "prime",
+      avisoCupom: "Beneficio Prime pode estar disponivel na pagina. Confira antes de finalizar."
     };
   }
 
@@ -308,14 +166,9 @@ function detectarAvisoCupomAmazon(html = "") {
   const aviso = beneficio.avisoCupom
     ? {
         cupom: "",
-        tipoCupom: beneficio.tipoCupom || "resgate_pagina_amazon",
+        tipoCupom: "resgate_pagina_amazon",
         avisoCupom: beneficio.avisoCupom,
-        beneficioDetectado: beneficio.beneficioDetectado || "",
-        beneficioExtra: beneficio.beneficioExtra || "",
-        descontoPix: beneficio.descontoPix || "",
-        descontoApp: beneficio.descontoApp || "",
-        cupomValor: beneficio.cupomValor || "",
-        cupomPercentual: beneficio.cupomPercentual || ""
+        beneficioDetectado: beneficio.beneficioDetectado || ""
       }
     : null;
 
@@ -344,8 +197,7 @@ function escolherCupomParaOfertaAmazon(oferta = {}, dados = []) {
     const resultado = {
       cupom,
       tipoCupom: "confirmado_amazon",
-      avisoCupom: `Cupom: ${cupom}`,
-      beneficioExtra: `Cupom: ${cupom}`
+      avisoCupom: `Use o cupom ${cupom} antes de finalizar a compra.`
     };
 
     console.log("[AMZ-CUPOM-OFERTA]", {
@@ -364,37 +216,16 @@ function escolherCupomParaOfertaAmazon(oferta = {}, dados = []) {
   );
 
   if (aviso) {
-    const validacaoMonetaria = validarCupomMonetarioAmazon(oferta, aviso);
-
-    if (!validacaoMonetaria.ok) {
-      console.log("[AMZ-CUPOM-OFERTA] monetario incompativel", {
-        titulo: oferta.titulo || oferta.nome || "",
-        preco: validacaoMonetaria.preco,
-        valorCupom: validacaoMonetaria.valorCupom,
-        motivo: validacaoMonetaria.motivo
-      });
-
-      return null;
-    }
-
     const resultado = {
       cupom: "",
-      tipoCupom: aviso.tipoCupom || "resgate_pagina_amazon",
-      avisoCupom: aviso.avisoCupom || "Cupom disponível na página",
-      beneficioExtra: aviso.beneficioExtra || aviso.avisoCupom || "Cupom disponível na página",
-      descontoPix: aviso.descontoPix || "",
-      descontoApp: aviso.descontoApp || "",
-      cupomValor: aviso.cupomValor || "",
-      cupomPercentual: aviso.cupomPercentual || "",
-      cupomSuspeito: validacaoMonetaria.suspeito === true,
-      avisosInternos: validacaoMonetaria.motivo ? [validacaoMonetaria.motivo] : []
+      tipoCupom: "resgate_pagina_amazon",
+      avisoCupom: aviso.avisoCupom || "Cupom disponivel na pagina. Confira antes de finalizar."
     };
 
     console.log("[AMZ-CUPOM-OFERTA]", {
       titulo: oferta.titulo || oferta.nome || "",
       tipoCupom: resultado.tipoCupom,
-      cupom: "",
-      cupomSuspeito: resultado.cupomSuspeito === true
+      cupom: ""
     });
 
     registrarRadarCupons("amazon", { avisos: 1 });
