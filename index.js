@@ -2781,7 +2781,7 @@ const selecionados = telegramsSelecionados.length
   return { enviado: false, motivo: "nao_enviado" };
 }
 
-// ================= FUNCÃƒO PROCESSA FILA =================
+// ================= FUNCAO PROCESSA FILA =================
 
 async function processarFila(clienteIdAlvo = null) {
   const clienteFila = clienteIdAlvo || "admin";
@@ -2794,7 +2794,7 @@ async function processarFila(clienteIdAlvo = null) {
   try {
     sanearExpiradosFila(clienteFila);
 
-    oferta = selecionarProximaOfertaFila(clienteIdAlvo);
+    oferta = selecionarProximaOfertaFila(clienteFila);
 
 if (!oferta) {
   logOptimus("FILA", "Nenhuma oferta pendente");
@@ -2805,7 +2805,7 @@ const clienteId = oferta.clienteId || "admin";
 
 if (oferta.sessaoId === "sessao1") {
   oferta.sessaoId = normalizarSessaoId(clienteId, "sessao1");
-  salvarFila();
+  salvarFila(clienteId);
 }
 
 const configCliente =
