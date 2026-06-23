@@ -16,6 +16,7 @@ const CATEGORIA = {
   computadores: "Computadores e Notebook",
   brinquedos: "Brinquedos e Artigos Infantis",
   casa: "Casa, M\u00f3veis e Decora\u00e7\u00e3o",
+  climatizacao: "Climatiza\u00e7\u00e3o e Ventila\u00e7\u00e3o",
   eletrodomesticos: "Eletrodom\u00e9sticos",
   eletroportateis: "Eletroport\u00e1teis",
   eletronicos: "Eletr\u00f4nicos",
@@ -114,11 +115,7 @@ const REGRAS = [
       "protetor solar", "fps", "shampoo", "condicionador", "maquiagem",
       "batom", "gloss", "serum", "sabonete liquido", "creme facial",
       "vitamina c", "maquina de cortar cabelo", "barbeador",
-      "aparador de barba", "depilador", "escova secadora", "prancha de cabelo",
-      "pressao arterial", "monitor de pressao", "monitor pressao arterial",
-      "aparelho de pressao", "soro fisiologico", "pasta de dente",
-      "creme dental", "alicate de cuticula", "cortador de unha",
-      "luva nitrilica"
+      "aparador de barba", "depilador", "escova secadora", "prancha de cabelo"
     ],
     palavras: [
       "chapinha", "secador cabelo", "secador de cabelo", "mascara capilar", "pomada", "arnica",
@@ -128,8 +125,7 @@ const REGRAS = [
       "termometro", "medidor de pressao", "balanca corporal", "fio dental",
       "manicure", "pedicure", "kit manicure", "kit pedicure",
       "alicate de unha", "alicate cuticula", "esmalte", "removedor esmalte",
-      "unha gel", "unha em gel", "solucao fisiologica", "marroquina liss",
-      "marroquina", "liss", "luva descartavel"
+      "unha gel", "unha em gel"
     ]
   }),
 
@@ -175,9 +171,6 @@ const REGRAS = [
     palavras: [
       "carregador iphone", "cabo iphone", "capa celular", "pelicula celular",
       "pelicula iphone", "power bank", "bateria externa"
-    ],
-    negativas: [
-      "porta celular", "bolso porta celular"
     ]
   }),
 
@@ -217,11 +210,10 @@ const REGRAS = [
     fortes: [
       "mouse", "teclado", "mousepad", "webcam", "headset", "micro sd",
       "microsd", "cartao de memoria", "pendrive", "hub usb", "monitor gamer",
-      "monitor led", "monitor curvo", "monitor ultrawide",
-      "suporte para notebook", "base refrigerada"
+      "monitor led", "monitor curvo", "monitor ultrawide"
     ],
     palavras: [
-      "suporte notebook", "base notebook", "cooler notebook", "base para notebook", "mesa digitalizadora",
+      "suporte notebook", "base notebook", "cooler notebook", "mesa digitalizadora",
       "xp pen", "dock station", "adaptador usb", "leitor de cartao",
       "teclado mecanico", "mouse sem fio", "webcam full hd", "hd externo",
       "ssd externo", "placa captura", "stream deck", "switch hdmi",
@@ -236,11 +228,10 @@ const REGRAS = [
       "smart tv", "smarttv", "tv led", "tv 32", "tv 40", "tv 43", "tv 50",
       "tv 55", "tv 65", "tv 70", "tv 75", "qled", "oled", "soundbar",
       "home theater", "caixa de som", "caixa bluetooth", "fone bluetooth",
-      "fone de ouvido", "headphone", "headphone bluetooth", "earbuds", "tws", "jbl",
-      "party box"
+      "fone de ouvido", "headphone", "earbuds", "tws", "jbl"
     ],
     palavras: [
-      "roku tv", "google tv", "android tv", "aiwa", "edifier", "boombox",
+      "roku tv", "google tv", "android tv", "party box", "boombox",
       "anker", "soundcore", "subwoofer", "alto falante", "projetor",
       "echo dot", "alexa", "fire tv stick", "chromecast", "tv box",
       "microfone", "karaoke", "mesa de som", "amplificador", "receiver"
@@ -264,15 +255,24 @@ const REGRAS = [
       "smartwatch", "smart watch", "relogio inteligente", "smart band",
       "smartband", "pulseira inteligente", "airtag", "smart tag",
       "tomada inteligente", "lampada inteligente", "interruptor inteligente",
-      "sensor inteligente", "camera inteligente", "camera de vigilancia",
-      "camera seguranca", "camera de seguranca", "drone"
+      "sensor inteligente", "camera inteligente", "drone"
     ],
     palavras: [
       "amazfit", "galaxy watch", "apple watch", "mi band", "haylou",
       "huawei band", "rastreador bluetooth", "controle remoto universal",
-      "camera wifi", "camera ip", "camera externa", "camera interna",
-      "ring light", "mini projetor", "airpods", "hoverboard"
+      "camera wifi", "camera ip", "ring light", "mini projetor", "airpods"
     ]
+  }),
+
+  regra(CATEGORIA.climatizacao, {
+    prioridade: 76,
+    fortes: [
+      "ventilador", "ventilador de mesa", "ventilador de coluna",
+      "ventilador de teto", "circulador de ar", "ar condicionado",
+      "ar condicionado split", "climatizador", "umidificador",
+      "desumidificador", "aquecedor", "purificador de ar"
+    ],
+    palavras: ["exaustor", "split inverter", "ventilador torre", "elgin", "gree"]
   }),
 
   regra(CATEGORIA.eletrodomesticos, {
@@ -280,17 +280,12 @@ const REGRAS = [
     fortes: [
       "geladeira", "refrigerador", "frigobar", "freezer", "microondas",
       "micro ondas", "fogao", "cooktop", "lava roupas", "maquina de lavar",
-      "lavadora", "lava e seca", "secadora", "lava loucas",
-      "ventilador", "ventilador de mesa", "ventilador de coluna",
-      "ventilador de teto", "circulador de ar", "ar condicionado",
-      "ar condicionado split", "climatizador", "umidificador",
-      "desumidificador", "aquecedor", "purificador de ar"
+      "lavadora", "lava e seca", "secadora", "lava loucas"
     ],
     palavras: [
       "forno eletrico", "forno embutir", "coifa", "depurador", "bebedouro",
       "purificador de agua", "adega climatizada", "cervejeira", "consul",
-      "brastemp", "electrolux", "midea", "panasonic", "philco", "eos",
-      "exaustor", "split inverter", "ventilador torre", "elgin", "gree"
+      "brastemp", "electrolux", "midea", "panasonic", "philco", "eos"
     ]
   }),
 
@@ -300,9 +295,7 @@ const REGRAS = [
       "cafeteira", "maquina de cafe", "air fryer", "fritadeira sem oleo",
       "liquidificador", "mixer", "processador de alimentos", "batedeira",
       "sanduicheira", "grill", "panela eletrica", "aspirador robo",
-      "robo aspirador", "aspirador de po", "ferro de passar", "omeleteira",
-      "panificadora", "maquina de pao", "fogareiro eletrico", "panela pressao digital",
-      "panela de pressao digital", "multi cook", "multicook"
+      "robo aspirador", "aspirador de po", "ferro de passar", "omeleteira", "fogareiro eletrico", "panela pressao digital", "panela de pressao digital", "multi cook", "multicook"
     ],
     palavras: [
       "pipoqueira", "chaleira eletrica", "torradeira", "maquina waffle",
@@ -332,8 +325,7 @@ const REGRAS = [
       "calcinha", "sutia", "lingerie", "camisola", "pijama feminino",
       "biquini", "camiseta feminina", "blusa feminina", "regata feminina",
       "baby look", "cropped", "vestido", "saia", "short feminino",
-      "shorts feminino", "calca feminina", "legging", "body feminino", "moda feminina",
-      "oculos de sol", "bolsa de viagem", "bolsa academia"
+      "calca feminina", "legging", "body feminino", "moda feminina"
     ],
     palavras: [
       "macaquinho feminino", "macacao feminino", "conjunto feminino",
@@ -351,16 +343,14 @@ const REGRAS = [
       "camisa polo", "camiseta masculina", "camisa masculina",
       "camisa social masculina", "moletom masculino", "jaqueta masculina",
       "calca jeans masculina", "bermuda masculina", "short masculino",
-      "regata masculina", "cueca boxer", "moda masculina", "meia termica",
-      "meia flanelada"
+      "regata masculina", "cueca boxer", "moda masculina"
     ],
     palavras: [
       "kit camiseta masculina", "calca masculina", "calca sarja masculina",
       "calca moletom masculina", "camisa xadrez masculina", "blusa masculina",
       "casaco masculino", "colete masculino", "conjunto masculino",
       "terno masculino", "blazer masculino", "pijama masculino", "sunga",
-      "carteira masculina", "cinto masculino", "meia masculina",
-      "pares de meia", "pares de meias", "kit pares de meias", "kit meias"
+      "carteira masculina", "cinto masculino", "meia masculina"
     ]
   }),
 
@@ -369,9 +359,8 @@ const REGRAS = [
     fortes: [
       "halter", "haltere", "kettlebell", "musculacao", "crossfit", "whey",
       "creatina", "pre treino", "albumina", "barra de proteina",
-      "suplemento", "hipercalorico", "bcaa", "glutamina", "protein crush",
-      "colageno", "colageno hidrolisado", "colagentek", "vitafor", "bike", "bicicleta",
-      "esteira", "eliptico", "yoga", "pilates", "balanca bioimpedancia"
+      "suplemento", "hipercalorico", "bcaa", "colageno", "colageno hidrolisado", "colagentek", "vitafor", "bike", "bicicleta",
+      "esteira", "eliptico", "yoga", "pilates"
     ],
     palavras: [
       "faixa elastica", "short academia", "camiseta academia", "dry fit",
@@ -388,10 +377,7 @@ const REGRAS = [
       "furadeira", "parafusadeira", "esmerilhadeira", "serra marmore",
       "serra circular", "serra tico tico", "martelete", "lixadeira",
       "trena", "nivel laser", "kit ferramenta", "jogo de ferramentas",
-      "maleta de ferramentas", "caixa de ferramentas", "jogo de soquetes", "kit soquetes",
-      "ferramentas profissional", "profissional eletricista", "eletricista",
-      "motosserra", "eletrosserra", "serra de corte", "serra marmore",
-      "serra ceramica", "serra granito", "ferramenta serralheiro"
+      "maleta de ferramentas", "caixa de ferramentas", "jogo de soquetes", "kit soquetes"
     ],
     palavras: [
       "chave inglesa", "chave allen", "chave soquete", "soquete", "soquetes", "alicate universal",
@@ -400,9 +386,7 @@ const REGRAS = [
       "makita", "bosch", "dewalt", "gedore", "tramontina pro", "compressor de ar",
       "pistola pintura", "soprador termico", "micro retifica", "inversora solda",
       "maquina solda", "lavadora alta pressao", "multimetro", "broca",
-      "parafuso", "escada aluminio", "paquimetro", "estilete", "rebitadeira",
-      "caixa multiuso ferramentas", "serra para marmore", "serra para ceramica",
-      "serra para granito", "lishi", "chave lishi"
+      "parafuso", "escada aluminio", "paquimetro", "estilete", "rebitadeira"
     ],
     negativas: [
       "manicure", "pedicure", "unha", "cuticula", "esmalte"
@@ -416,13 +400,10 @@ const REGRAS = [
       "talheres", "copos", "jogo de copos", "marmitas", "potes",
       "cobertor", "manta", "toalha de banho", "colcha", "tapete",
       "cortina", "almofada", "espelho", "sofa", "rack", "painel tv",
-      "guarda roupa", "mesa", "cadeira", "penteadeira", "armario",
-      "kit toalete", "toalete casamento", "jogo americano", "copo termico",
-      "garrafa termica", "panos de copa", "pano de copa"
+      "guarda roupa", "mesa", "cadeira", "penteadeira", "armario"
     ],
     palavras: [
       "cortador de legumes", "ralador", "assadeira", "garrafa termica",
-      "garrafa termica inox", "garrafa termica cafe", "copo termico inox",
       "cadeira de escritorio", "escrivaninha", "nicho", "prateleira",
       "sapateira", "cabeceira", "poltrona", "estante", "aparador",
       "varal", "lixeira", "torneira", "banheiro", "cozinha", "organizador",
@@ -474,10 +455,7 @@ const REGRAS = [
     palavras: [
       "hasbro", "marvel", "homem aranha", "spider man", "vingadores",
       "montessori", "play doh", "casinha infantil", "jogo educativo",
-      "dinossauro", "t rex", "action figure", "brinquedo stem",
-      "patins crianca", "patins infantil", "batman sunny",
-      "jogo de xadrez", "xadrez", "mandala jogos", "figurinhas copa do mundo",
-      "kit figurinhas", "album copa do mundo"
+      "dinossauro", "t rex", "action figure", "brinquedo stem", "patins crianca", "patins infantil"
     ]
   }),
 
@@ -500,15 +478,13 @@ const REGRAS = [
       "moto", "motocicleta", "capacete", "pneu", "roda automotiva",
       "carplay", "android auto", "multimidia", "som automotivo",
       "camera de re", "sensor estacionamento", "farol", "lanterna automotiva",
-      "bateria automotiva", "suporte veicular", "snow foam",
-      "pulverizador lavagem carro", "calibrador de pneu"
+      "bateria automotiva", "suporte veicular"
     ],
     palavras: [
       "pro tork", "calota", "radio automotivo", "lampada automotiva",
       "tapete automotivo", "capa banco", "volante esportivo", "bomba de ar",
-      "inflador de pneus", "bomba calibrador", "bomba para pneu",
-      "pulverizador automotivo", "chave de roda", "palheta limpador",
-      "oleo motor", "rack teto", "bagageiro teto"
+      "inflador de pneus", "chave de roda", "palheta limpador", "oleo motor",
+      "rack teto", "bagageiro teto"
     ]
   }),
 
@@ -518,15 +494,11 @@ const REGRAS = [
       "mop", "esfregao", "rodo", "vassoura", "multiuso", "desinfetante",
       "detergente", "desengordurante", "amaciante", "sabao liquido",
       "sabao em po", "lava roupas", "tira manchas", "alvejante",
-      "agua sanitaria", "limpa vidro", "limpa piso", "papel higienico",
-      "odorizante ambiente", "aromatizador ambiente", "coala odorizante"
+      "agua sanitaria", "limpa vidro", "limpa piso", "papel higienico"
     ],
     palavras: [
       "downy", "omo", "ype", "veja", "cloro", "removedor", "lustra moveis",
       "pano microfibra", "esponja limpeza", "kit limpeza", "refil mop"
-    ],
-    negativas: [
-      "ferramentas", "eletricista", "caixa de ferramentas"
     ]
   }),
 
