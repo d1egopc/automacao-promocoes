@@ -31,18 +31,6 @@ try {
   }
 
   console.log("[SHOPEE] Farejando ofertas Shopee...");
-  const estrategiaFarejador =
-    typeof deps.obterEstrategiaFarejador === "function"
-      ? deps.obterEstrategiaFarejador(clienteId, "shopee")
-      : {
-          descontoMinimo: config.marketplaces?.shopee?.descontoMinimo || 15,
-          filaCritica: false,
-          aceitarBeneficioSemDesconto: true
-        };
-  const temBeneficioFarejador =
-    typeof deps.ofertaTemBeneficioFarejador === "function"
-      ? deps.ofertaTemBeneficioFarejador
-      : (oferta) => Boolean(oferta?.cupom || oferta?.avisoCupom || oferta?.beneficioExtra || oferta?.cupomUrl);
 
   const produtos = await buscarOfertasShopee(clienteId, {
     config,
@@ -70,20 +58,11 @@ try {
         const nota = Number(item.ratingStar || 0);
         const precoAtualNumero = Number(item.priceMin || 0);
 
-        const temBeneficioItem = Boolean(
-          item.coupon ||
-          item.cupom ||
-          item.voucher ||
-          item.couponInfo ||
-          item.promotionInfo ||
-          item.offerInfo
-        );
-
-        if (desconto < estrategiaFarejador.descontoMinimo && !temBeneficioItem) continue;
+        if (desconto < (config.marketplaces?.shopee?.descontoMinimo || 15)) continue;
         if (!precoAtualNumero) continue;
         if (precoAtualNumero < (config.marketplaces?.shopee?.precoMinimo || 20)) continue;
-        if (vendas < (estrategiaFarejador.filaCritica ? 5 : 20) && !temBeneficioItem) continue;
-        if (nota > 0 && nota < (estrategiaFarejador.filaCritica ? 4.2 : 4.5) && !temBeneficioItem) continue;
+        if (vendas < 20) continue;
+        if (nota > 0 && nota < 4.5) continue;
 
         const precoAtual = precoAtualNumero.toFixed(2).replace(".", ",");
 
@@ -111,9 +90,7 @@ let novaOferta = {
     timeZone: "America/Sao_Paulo"
   }),
   cupom: "",
-  avisoCupom: temBeneficioItem
-    ? "Confira voucher/cupom disponível na Shopee antes de finalizar."
-    : ""
+  avisoCupom: "🎟️ Confira cupons disponíveis na página antes de finalizar."
 };
 
         novaOferta = prepararOfertaGlobal(novaOferta);
