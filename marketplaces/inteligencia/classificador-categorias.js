@@ -1,4 +1,4 @@
-﻿let categoriasDestinos = {};
+let categoriasDestinos = {};
 
 try {
   ({ CATEGORIAS_DESTINOS: categoriasDestinos = {} } = require("./categorias-destinos"));
@@ -112,6 +112,7 @@ const REGRAS = [
       "colonia", "body splash", "malbec", "lattafa", "yara", "azzaro",
       "boticario", "natura", "eudora", "hidratante", "skincare",
       "protetor solar", "fps", "shampoo", "condicionador", "maquiagem",
+      "mascara capilar", "hidratante labial", "skincare",
       "batom", "gloss", "serum", "sabonete liquido", "creme facial",
       "vitamina c", "maquina de cortar cabelo", "barbeador",
       "aparador de barba", "depilador", "escova secadora", "prancha de cabelo",
@@ -330,6 +331,7 @@ const REGRAS = [
     prioridade: 68,
     fortes: [
       "calcinha", "sutia", "lingerie", "camisola", "pijama feminino",
+      "jaqueta feminina", "puffer feminina", "jaqueta puffer feminina",
       "biquini", "camiseta feminina", "blusa feminina", "regata feminina",
       "baby look", "cropped", "vestido", "saia", "short feminino",
       "shorts feminino", "calca feminina", "legging", "body feminino", "moda feminina",
@@ -337,11 +339,13 @@ const REGRAS = [
     ],
     palavras: [
       "macaquinho feminino", "macacao feminino", "conjunto feminino",
+      "calca pantalona feminina", "wide leg feminina", "legging feminina", "cinta modeladora feminina",
       "moletom feminino", "jaqueta feminina", "plus size feminina",
       "tricot feminino", "wide leg", "jeans feminina", "bolsa feminina",
       "tiracolo", "tote", "carteira feminina", "meia calca", "camisa feminina",
       "blazer feminino", "kimono feminino", "cardigan", "top feminino",
-      "calca flare", "calca pantalona", "jardineira feminina", "mule feminino"
+      "calca flare", "calca pantalona", "pantalona feminina", "wide leg",
+      "jardineira feminina", "mule feminino"
     ]
   }),
 
@@ -351,11 +355,13 @@ const REGRAS = [
       "camisa polo", "camiseta masculina", "camisa masculina",
       "camisa social masculina", "moletom masculino", "jaqueta masculina",
       "calca jeans masculina", "bermuda masculina", "short masculino",
+      "calca jogger masculina", "calca moletom masculina",
       "regata masculina", "cueca boxer", "moda masculina", "meia termica",
       "meia flanelada"
     ],
     palavras: [
       "kit camiseta masculina", "calca masculina", "calca sarja masculina",
+      "bermuda masculina", "shorts masculino", "camisa polo masculina",
       "calca moletom masculina", "camisa xadrez masculina", "blusa masculina",
       "casaco masculino", "colete masculino", "conjunto masculino",
       "terno masculino", "blazer masculino", "pijama masculino", "sunga",
@@ -389,12 +395,14 @@ const REGRAS = [
       "serra circular", "serra tico tico", "martelete", "lixadeira",
       "trena", "nivel laser", "kit ferramenta", "jogo de ferramentas",
       "maleta de ferramentas", "caixa de ferramentas", "jogo de soquetes", "kit soquetes",
+      "kit ferramentas", "maleta ferramentas", "chave de fenda",
       "ferramentas profissional", "profissional eletricista", "eletricista",
       "motosserra", "eletrosserra", "serra de corte", "serra marmore",
       "serra ceramica", "serra granito", "ferramenta serralheiro"
     ],
     palavras: [
       "chave inglesa", "chave allen", "chave soquete", "soquete", "soquetes", "alicate universal",
+      "kit de ferramentas",
       "alicate de pressao", "alicate profissional", "alicate eletricista",
       "alicate corte", "vonder",
       "makita", "bosch", "dewalt", "gedore", "tramontina pro", "compressor de ar",
@@ -405,7 +413,8 @@ const REGRAS = [
       "serra para granito", "lishi", "chave lishi"
     ],
     negativas: [
-      "manicure", "pedicure", "unha", "cuticula", "esmalte"
+      "manicure", "pedicure", "unha", "cuticula", "esmalte",
+      "alicate de unha", "alicate aplicador", "botao de pressao", "botoes de pressao", "costura", "artesanato",
     ]
   }),
 
@@ -415,9 +424,11 @@ const REGRAS = [
       "jogo de panelas", "kit panela", "frigideira", "panela", "kit churrasco", "churrasco mestre", "faqueiro",
       "talheres", "copos", "jogo de copos", "marmitas", "potes",
       "cobertor", "manta", "toalha de banho", "colcha", "tapete",
+      "bacia retratil", "tabua de corte", "pote vidro", "copo",
       "cortina", "almofada", "espelho", "sofa", "rack", "painel tv",
       "guarda roupa", "mesa", "cadeira", "penteadeira", "armario",
       "kit toalete", "toalete casamento", "jogo americano", "copo termico",
+      "cabide", "marmita", "tapete banheiro", "porta escova",
       "garrafa termica", "panos de copa", "pano de copa"
     ],
     palavras: [
@@ -425,8 +436,10 @@ const REGRAS = [
       "garrafa termica inox", "garrafa termica cafe", "copo termico inox",
       "cadeira de escritorio", "escrivaninha", "nicho", "prateleira",
       "sapateira", "cabeceira", "poltrona", "estante", "aparador",
+      "revestimento ripado", "autocolante", "alicate aplicador", "botao de pressao",
       "varal", "lixeira", "torneira", "banheiro", "cozinha", "organizador",
-      "caixa organizadora", "escorredor", "misturador monocomando", "rede de dormir", "utensilios churrasco", "conjunto churrasco"
+      "caixa organizadora", "escorredor", "misturador monocomando", "rede de dormir", "utensilios churrasco", "conjunto churrasco",
+      "pote de vidro", "potes de vidro", "porta escova banheiro", "organizador cozinha", "organizador banheiro",
     ]
   }),
 
@@ -498,15 +511,18 @@ const REGRAS = [
     prioridade: 48,
     fortes: [
       "moto", "motocicleta", "capacete", "pneu", "roda automotiva",
+      "macaco hidraulico", "auxiliar partida", "partida automotivo", "partida automotiva",
       "carplay", "android auto", "multimidia", "som automotivo",
       "camera de re", "sensor estacionamento", "farol", "lanterna automotiva",
       "bateria automotiva", "suporte veicular", "snow foam",
-      "pulverizador lavagem carro", "calibrador de pneu"
+      "pulverizador lavagem carro", "calibrador de pneu", "compressor 12v", "calibrador"
     ],
     palavras: [
       "pro tork", "calota", "radio automotivo", "lampada automotiva",
+      "carro", "veicular", "pneu", "partida automotiva",
       "tapete automotivo", "capa banco", "volante esportivo", "bomba de ar",
       "inflador de pneus", "bomba calibrador", "bomba para pneu",
+      "compressor veicular", "compressor de ar 12v", "auxiliar de partida",
       "pulverizador automotivo", "chave de roda", "palheta limpador",
       "oleo motor", "rack teto", "bagageiro teto"
     ]
