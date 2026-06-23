@@ -1111,21 +1111,148 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
   };
 }
 
+const diagnosticosFilaPorCliente = new Map();
+
+function filaForaHorarioConfigurado() {
+  if (!config.pausarMadrugada) return false;
+
+  const agoraBR = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
+  );
+
+  const horaAtual = agoraBR.getHours() * 60 + agoraBR.getMinutes();
+  const [inicioH, inicioM] = (config.horarioInicio || "08:00").split(":").map(Number);
+  const [fimH, fimM] = (config.horarioFim || "23:00").split(":").map(Number);
+
+  const inicio = inicioH * 60 + inicioM;
+  const fim = fimH * 60 + fimM;
+
+  if (inicio <= fim) {
+    return horaAtual < inicio || horaAtual > fim;
+  }
+
+  return horaAtual < inicio && horaAtual > fim;
+}
+
+function motivoPrincipalDiagnosticoFila(diagnostico = {}) {
+  if (!diagnostico.pendentesTotal) return "sem_pendentes";
+  if (diagnostico.elegiveisAgora > 0) return "elegivel";
+
+  const motivos = [
+    ["automacao_desligada", diagnostico.bloqueadasPorAutomacaoDesligada],
+    ["aguardando_proxima_tentativa", diagnostico.bloqueadasPorProximaTentativa],
+    ["fora_horario", diagnostico.bloqueadasPorHorario],
+    ["sem_destino_compativel", diagnostico.bloqueadasPorDestino],
+    ["outros_motivos", diagnostico.bloqueadasPorOutrosMotivos]
+  ];
+
+  const principal = motivos
+    .filter(([, total]) => Number(total) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))[0];
+
+  return principal?.[0] || "outros_motivos";
+}
+
+function diagnosticarFilaCliente(clienteIdAlvo = null) {
+  const cliente = String(clienteIdAlvo || "admin");
+  const agora = Date.now();
+  const foraHorario = filaForaHorarioConfigurado();
+  const itensCliente = fila.filter(o =>
+    String(o?.clienteId || "admin") === cliente
+  );
+  const pendentesCliente = itensCliente.filter(o => o?.status === "pendente");
+
+  const diagnostico = {
+    clienteIdAlvo: cliente,
+    totalGlobal: fila.length,
+    totalCliente: itensCliente.length,
+    pendentesGlobal: fila.filter(o => o?.status === "pendente").length,
+    pendentesTotal: pendentesCliente.length,
+    elegiveisAgora: 0,
+    bloqueadasPorAutomacaoDesligada: 0,
+    bloqueadasPorProximaTentativa: 0,
+    bloqueadasPorHorario: 0,
+    bloqueadasPorDestino: 0,
+    bloqueadasPorOutrosMotivos: 0,
+    motivoPrincipal: "sem_pendentes"
+  };
+
+  for (const oferta of pendentesCliente) {
+    const motivos = [];
+    const clienteIdOferta = oferta.clienteId || "admin";
+    const configClienteOferta = configsPorCliente?.[clienteIdOferta] || config;
+
+    if (configClienteOferta.automacaoAtiva !== true) {
+      diagnostico.bloqueadasPorAutomacaoDesligada += 1;
+      motivos.push("automacao_desligada");
+    }
+
+    if (oferta.proximaTentativaEnvioEm) {
+      const proxima = Date.parse(oferta.proximaTentativaEnvioEm);
+      if (Number.isFinite(proxima) && proxima > agora) {
+        diagnostico.bloqueadasPorProximaTentativa += 1;
+        motivos.push("aguardando_proxima_tentativa");
+      }
+    }
+
+    if (foraHorario) {
+      diagnostico.bloqueadasPorHorario += 1;
+      motivos.push("fora_horario");
+    }
+
+    try {
+      const analiseDestinos = analisarDestinosCompativeisFila(clienteIdOferta, oferta, configClienteOferta);
+      if (!analiseDestinos.compativeis.length) {
+        diagnostico.bloqueadasPorDestino += 1;
+        motivos.push("sem_destino_compativel");
+      }
+    } catch (e) {
+      diagnostico.bloqueadasPorOutrosMotivos += 1;
+      motivos.push("outros_motivos");
+    }
+
+    if (!motivos.length) {
+      diagnostico.elegiveisAgora += 1;
+    }
+  }
+
+  const bloqueadasConhecidas = new Set();
+
+  pendentesCliente.forEach((oferta, indice) => {
+    const clienteIdOferta = oferta.clienteId || "admin";
+    const configClienteOferta = configsPorCliente?.[clienteIdOferta] || config;
+    const proxima = oferta.proximaTentativaEnvioEm
+      ? Date.parse(oferta.proximaTentativaEnvioEm)
+      : NaN;
+
+    if (configClienteOferta.automacaoAtiva !== true) bloqueadasConhecidas.add(indice);
+    if (Number.isFinite(proxima) && proxima > agora) bloqueadasConhecidas.add(indice);
+    if (foraHorario) bloqueadasConhecidas.add(indice);
+
+    try {
+      const analiseDestinos = analisarDestinosCompativeisFila(clienteIdOferta, oferta, configClienteOferta);
+      if (!analiseDestinos.compativeis.length) bloqueadasConhecidas.add(indice);
+    } catch {
+      bloqueadasConhecidas.add(indice);
+    }
+  });
+
+  diagnostico.bloqueadasPorOutrosMotivos += Math.max(
+    0,
+    diagnostico.pendentesTotal - diagnostico.elegiveisAgora - bloqueadasConhecidas.size
+  );
+  diagnostico.motivoPrincipal = motivoPrincipalDiagnosticoFila(diagnostico);
+
+  return diagnostico;
+}
+
 function selecionarProximaOfertaFila(clienteIdAlvo = null) {
+  const clienteLog = String(clienteIdAlvo || "admin");
+  const diagnostico = diagnosticarFilaCliente(clienteLog);
 
-const clienteLog = String(clienteIdAlvo || "admin");
+  diagnosticosFilaPorCliente.set(clienteLog, diagnostico);
 
-const filaClienteLog = fila.filter(o =>
-  String(o.clienteId || "admin") === clienteLog
-);
-
-console.log("🧪 FILA SELECAO", {
-  clienteIdAlvo: clienteLog,
-  totalGlobal: fila.length,
-  pendentesGlobal: fila.filter(o => o.status === "pendente").length,
-  totalCliente: filaClienteLog.length,
-  pendentesCliente: filaClienteLog.filter(o => o.status === "pendente").length
-});
+  console.log("🧠 Diagnóstico da fila", diagnostico);
 
   const pendentes = fila.filter(o => {
     const mesmoCliente =
@@ -1167,16 +1294,13 @@ console.log("🧪 FILA SELECAO", {
     salvarFila(clienteIdAlvo || "admin");
   }
 
+  const diagnosticoSemElegivel = diagnosticarFilaCliente(clienteLog);
+  diagnosticosFilaPorCliente.set(clienteLog, diagnosticoSemElegivel);
 
-console.log("🚨 FILA SEM OFERTA", {
-  clienteIdAlvo,
-  totalFila: fila.length,
-  pendentes: pendentes.length
-});
+  console.log("🚨 Fila sem oferta elegível", diagnosticoSemElegivel);
 
   return null;
 }
-
 function aplicarDiversidadeFila(clienteId = "admin") {
   const cliente = String(clienteId || "admin");
   const itensCliente = fila.filter(item =>
@@ -2884,8 +3008,13 @@ async function processarFila(clienteIdAlvo = null) {
     oferta = selecionarProximaOfertaFila(clienteFila);
 
 if (!oferta) {
-  logOptimus("FILA", "Nenhuma oferta pendente", {
-    clienteId: clienteFila
+  const diagnosticoFila = diagnosticosFilaPorCliente.get(String(clienteFila)) ||
+    diagnosticarFilaCliente(clienteFila);
+
+  logOptimus("FILA", "Nenhuma oferta pendente elegível", {
+    clienteId: clienteFila,
+    motivoPrincipal: diagnosticoFila.motivoPrincipal,
+    diagnostico: diagnosticoFila
   });
   return;
 }
