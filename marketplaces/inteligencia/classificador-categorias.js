@@ -119,7 +119,7 @@ const REGRAS = [
       "pressao arterial", "monitor de pressao", "monitor pressao arterial",
       "aparelho de pressao", "soro fisiologico", "pasta de dente",
       "creme dental", "alicate de cuticula", "cortador de unha",
-      "luva nitrilica"
+      "irrigador oral", "nebulizador", "inalador", "seringa insulina", "escova progressiva", "renovador facial", "corretivo", "base maquiagem", "base corretivo", "base liquida", "base facial", "maquiagem", "luva nitrilica"
     ],
     palavras: [
       "chapinha", "secador cabelo", "secador de cabelo", "mascara capilar", "pomada", "arnica",
@@ -130,7 +130,7 @@ const REGRAS = [
       "manicure", "pedicure", "kit manicure", "kit pedicure",
       "alicate de unha", "alicate cuticula", "esmalte", "removedor esmalte",
       "unha gel", "unha em gel", "solucao fisiologica", "marroquina liss",
-      "marroquina", "liss", "luva descartavel"
+      "marroquina", "liss", "luva descartavel", "aparelho inalador", "mascara nebulizacao", "seringa para insulina", "seringa de insulina"
     ]
   }),
 
@@ -154,11 +154,11 @@ const REGRAS = [
       "roupa infantil", "moda infantil", "tenis infantil",
       "sandalia infantil", "camisa infantil", "conjunto infantil",
       "camiseta infantil", "blusa infantil", "short infantil",
-      "calca infantil", "vestido infantil", "pijama infantil", "body infantil"
+      "calca infantil", "vestido infantil", "pijama infantil", "body infantil", "camiseta menino", "juvenil", "macacao plush infantil", "pantufa infantil"
     ],
     palavras: [
       "bota infantil", "coturno infantil", "moletom infantil", "fantasia infantil",
-      "roupa para menino", "roupa para menina", "calcado infantil", "1 a 16 anos"
+      "roupa para menino", "roupa para menina", "calcado infantil", "1 a 16 anos", "camiseta menino", "camiseta juvenil", "blusa juvenil", "macacao infantil", "macacao plush", "pantufa infantil", "conjunto juvenil"
     ],
     negativas: [
       "boneca", "boneco", "brinquedo", "carrinho", "lego", "hot wheels",
@@ -219,7 +219,7 @@ const REGRAS = [
       "mouse", "teclado", "mousepad", "webcam", "headset", "micro sd",
       "microsd", "cartao de memoria", "pendrive", "hub usb", "monitor gamer",
       "monitor led", "monitor curvo", "monitor ultrawide",
-      "suporte para notebook", "base refrigerada"
+      "suporte para notebook", "base refrigerada", "pen drive", "sandisk", "usb", "armazenamento"
     ],
     palavras: [
       "suporte notebook", "base notebook", "cooler notebook", "base para notebook", "mesa digitalizadora",
@@ -227,7 +227,7 @@ const REGRAS = [
       "teclado mecanico", "mouse sem fio", "webcam full hd", "hd externo",
       "ssd externo", "placa captura", "stream deck", "switch hdmi",
       "cabo hdmi", "displayport", "repetidor wifi", "adaptador wifi",
-      "logitech", "redragon", "hyperx", "razer"
+      "logitech", "redragon", "hyperx", "razer", "pendrive usb", "pen drive usb", "memoria usb", "armazenamento usb", "sandisk ultra"
     ]
   }),
 
@@ -266,13 +266,13 @@ const REGRAS = [
       "smartband", "pulseira inteligente", "airtag", "smart tag",
       "tomada inteligente", "lampada inteligente", "interruptor inteligente",
       "sensor inteligente", "camera inteligente", "camera de vigilancia",
-      "camera seguranca", "camera de seguranca", "drone"
+      "camera seguranca", "camera de seguranca", "drone", "baba eletronica"
     ],
     palavras: [
       "amazfit", "galaxy watch", "apple watch", "mi band", "haylou",
       "huawei band", "rastreador bluetooth", "controle remoto universal",
       "camera wifi", "camera ip", "camera externa", "camera interna",
-      "ring light", "mini projetor", "airpods", "hoverboard"
+      "ring light", "mini projetor", "airpods", "hoverboard", "monitor bebe"
     ]
   }),
 
@@ -303,12 +303,12 @@ const REGRAS = [
       "sanduicheira", "grill", "panela eletrica", "aspirador robo",
       "robo aspirador", "aspirador de po", "ferro de passar", "omeleteira",
       "panificadora", "maquina de pao", "fogareiro eletrico", "panela pressao digital",
-      "panela de pressao digital", "multi cook", "multicook"
+      "panela de pressao digital", "multi cook", "multicook", "vaporizador", "escova eletrica giratoria"
     ],
     palavras: [
       "pipoqueira", "chaleira eletrica", "torradeira", "maquina waffle",
       "multicooker", "cooktop eletrico", "aspirador vertical", "vaporizador roupas",
-      "passadeira vapor", "panela eletrica pressao"
+      "passadeira vapor", "panela eletrica pressao", "vaporizador roupas", "vaporizador portatil", "chaleira eletrica", "escova giratoria", "escova rotativa", "escova eletrica"
     ]
   }),
 
@@ -333,13 +333,13 @@ const REGRAS = [
       "calcinha", "sutia", "lingerie", "camisola", "pijama feminino",
       "jaqueta feminina", "puffer feminina", "jaqueta puffer feminina",
       "biquini", "camiseta feminina", "blusa feminina", "regata feminina",
-      "baby look", "cropped", "vestido", "saia", "short feminino",
+      "baby look", "cropped", "tomara que caia", "vestido", "saia", "short feminino",
       "shorts feminino", "calca feminina", "legging", "body feminino", "moda feminina",
       "oculos de sol", "bolsa de viagem", "bolsa academia"
     ],
     palavras: [
       "macaquinho feminino", "macacao feminino", "conjunto feminino",
-      "calca pantalona feminina", "wide leg feminina", "legging feminina", "cinta modeladora feminina",
+      "calca pantalona feminina", "wide leg feminina", "legging feminina", "cinta modeladora feminina", "cinta modeladora", "body modelador", "top tomara que caia",
       "moletom feminino", "jaqueta feminina", "plus size feminina",
       "tricot feminino", "wide leg", "jeans feminina", "bolsa feminina",
       "tiracolo", "tote", "carteira feminina", "meia calca", "camisa feminina",
@@ -356,11 +356,11 @@ const REGRAS = [
       "camisa social masculina", "moletom masculino", "jaqueta masculina",
       "calca jeans masculina", "bermuda masculina", "short masculino",
       "calca jogger masculina", "calca moletom masculina",
-      "regata masculina", "cueca boxer", "moda masculina", "meia termica",
+      "regata masculina", "cueca boxer", "cueca", "polo masculina", "moda masculina", "meia termica",
       "meia flanelada"
     ],
     palavras: [
-      "kit camiseta masculina", "calca masculina", "calca sarja masculina",
+      "kit camiseta masculina", "calca masculina", "calca sarja masculina", "kit bermudas masculinas", "bermudas masculinas", "polo masculina",
       "bermuda masculina", "shorts masculino", "camisa polo masculina",
       "calca moletom masculina", "camisa xadrez masculina", "blusa masculina",
       "casaco masculino", "colete masculino", "conjunto masculino",
@@ -414,7 +414,7 @@ const REGRAS = [
     ],
     negativas: [
       "manicure", "pedicure", "unha", "cuticula", "esmalte",
-      "alicate de unha", "alicate aplicador", "botao de pressao", "botoes de pressao", "costura", "artesanato",
+      "alicate de unha", "alicate aplicador", "botao de pressao", "botoes de pressao", "costura", "artesanato", "manicure", "pedicure",
     ]
   }),
 
@@ -427,9 +427,9 @@ const REGRAS = [
       "bacia retratil", "tabua de corte", "pote vidro", "copo",
       "cortina", "almofada", "espelho", "sofa", "rack", "painel tv",
       "guarda roupa", "mesa", "cadeira", "penteadeira", "armario",
-      "kit toalete", "toalete casamento", "jogo americano", "copo termico",
+      "kit toalete", "toalete casamento", "jogo americano", "copo termico", "travesseiro", "lencol", "edredom", "fronha", "cuba", "louca", "pote", "fechadura inteligente",
       "cabide", "marmita", "tapete banheiro", "porta escova",
-      "garrafa termica", "panos de copa", "pano de copa"
+      "garrafa termica", "panos de copa", "pano de copa", "gabinete banheiro"
     ],
     palavras: [
       "cortador de legumes", "ralador", "assadeira", "garrafa termica",
@@ -439,7 +439,10 @@ const REGRAS = [
       "revestimento ripado", "autocolante", "alicate aplicador", "botao de pressao",
       "varal", "lixeira", "torneira", "banheiro", "cozinha", "organizador",
       "caixa organizadora", "escorredor", "misturador monocomando", "rede de dormir", "utensilios churrasco", "conjunto churrasco",
-      "pote de vidro", "potes de vidro", "porta escova banheiro", "organizador cozinha", "organizador banheiro",
+      "pote de vidro", "potes de vidro", "pote plastico", "pote hermetico", "porta escova banheiro", "organizador cozinha", "organizador banheiro", "jogo de cama", "roupa de cama", "cuba banheiro", "louca banheiro", "fechadura digital", "fechadura eletronica",
+    ],
+    negativas: [
+      "tapete higienico", "tapete higienico pet", "pet", "gato", "cachorro"
     ]
   }),
 
@@ -465,14 +468,14 @@ const REGRAS = [
     fortes: [
       "racao", "cachorro", "gato", "petisco", "pedigree", "tapete higienico",
       "coleira", "guia para cachorro", "peitoral", "comedouro pet",
-      "bebedouro pet", "areia para gato", "antipulgas", "vermifugo",
+      "bebedouro pet", "areia para gato", "areia sanitaria", "tapete higienico pet", "tapete higienico", "antipulgas", "vermifugo",
       "arranhador", "casinha pet", "cama pet", "shampoo pet"
     ],
     palavras: [
       "whiskas", "golden", "premier pet", "granplus", "special dog",
       "special cat", "royal canin", "farmina", "mordedor pet",
       "roupa pet", "caixa transporte", "aquario", "fonte pet",
-      "comedouro automatico", "granulado higienico", "fralda pet"
+      "comedouro automatico", "granulado higienico", "fralda pet", "sanitario gato", "areia sanitaria gato"
     ]
   }),
 
@@ -490,7 +493,7 @@ const REGRAS = [
       "dinossauro", "t rex", "action figure", "brinquedo stem",
       "patins crianca", "patins infantil", "batman sunny",
       "jogo de xadrez", "xadrez", "mandala jogos", "figurinhas copa do mundo",
-      "kit figurinhas", "album copa do mundo"
+      "figurinha copa", "figurinhas copa", "album copa", "album figurinha", "album de figurinha", "kit figurinhas", "album copa do mundo"
     ]
   }),
 
@@ -511,7 +514,7 @@ const REGRAS = [
     prioridade: 48,
     fortes: [
       "moto", "motocicleta", "capacete", "pneu", "roda automotiva",
-      "macaco hidraulico", "auxiliar partida", "partida automotivo", "partida automotiva",
+      "macaco hidraulico", "macaco jacare", "auxiliar partida", "partida automotivo", "partida automotiva",
       "carplay", "android auto", "multimidia", "som automotivo",
       "camera de re", "sensor estacionamento", "farol", "lanterna automotiva",
       "bateria automotiva", "suporte veicular", "snow foam",
@@ -564,11 +567,11 @@ const REGRAS = [
       "azeite", "arroz", "feijao", "leite", "cafe", "chocolate",
       "biscoito", "bolacha", "tempero", "mercearia", "nespresso",
       "dolce gusto", "achocolatado", "granola", "amendoim", "castanha",
-      "macarrao", "molho tomate", "farinha", "acucar", "cesta basica"
+      "macarrao", "molho tomate", "farinha", "acucar", "cesta basica", "drip coffee", "sache cafe", "sache de cafe"
     ],
     palavras: [
       "barra cereal", "barra de cereal", "pasta amendoim", "geleia", "mel",
-      "cha", "bananinha", "molho barbecue", "azeitona", "cappuccino",
+      "cha", "bananinha", "molho barbecue", "azeitona", "cappuccino", "cafe drip", "cafe em sache", "cafe soluvel",
       "bala", "bombom", "doce de leite", "pacoca", "cookies"
     ]
   })
