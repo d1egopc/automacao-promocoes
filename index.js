@@ -12970,6 +12970,59 @@ function normalizarSessaoId(clienteId, id = "sessao1") {
   return `${cliente}_${sessao}`;
 }
 
+function resolverClienteMensageiroPorSessao(sessao = "") {
+  const idSessao = String(sessao || "").trim();
+
+  if (/^admin(?:_|$)/.test(idSessao)) {
+    return {
+      clienteIdMensageiro: "admin",
+      origemResolucao: "prefixo_sessao"
+    };
+  }
+
+  const usuarioPrefixo = (usuarios || [])
+    .map(usuario => String(usuario?.id || "").trim())
+    .filter(clienteId =>
+      clienteId.startsWith("user_") &&
+      (idSessao === clienteId || idSessao.startsWith(`${clienteId}_`))
+    )
+    .sort((a, b) => b.length - a.length)[0];
+
+  if (usuarioPrefixo) {
+    return {
+      clienteIdMensageiro: usuarioPrefixo,
+      origemResolucao: "prefixo_sessao"
+    };
+  }
+
+  const matchUser = idSessao.match(/^(user_[^_]+)(?:_|$)/);
+  if (matchUser?.[1]) {
+    return {
+      clienteIdMensageiro: matchUser[1],
+      origemResolucao: "prefixo_sessao"
+    };
+  }
+
+  const meta = sessoesMeta?.[idSessao] || {};
+  const clienteMapa = String(
+    meta.clienteId ||
+    meta.clienteIdMensageiro ||
+    meta.donoClienteId ||
+    ""
+  ).trim();
+
+  if (clienteMapa) {
+    return {
+      clienteIdMensageiro: clienteMapa,
+      origemResolucao: "mapa_sessao"
+    };
+  }
+
+  return {
+    clienteIdMensageiro: "admin",
+    origemResolucao: "fallback"
+  };
+}
 // ============== HELPERS DISTRIBUIDOR OFERTAS ==================================
 
 function usuarioPodeReceberMarketplace(usuario, marketplace) {
@@ -14204,17 +14257,15 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
 async function carregarGruposSessao(id, opcoes = {}) {
   const force = opcoes.force === true;
 
-  const clienteId =
-    opcoes.clienteId ||
-    (
-      id.startsWith("user_") && id.includes("_sessao")
-        ? id.split("_sessao")[0]
-        : "admin"
-    );
+  const resolucaoClienteMensageiro = opcoes.clienteId
+    ? { clienteIdMensageiro: opcoes.clienteId, origemResolucao: "mapa_sessao" }
+    : resolverClienteMensageiroPorSessao(id);
+  const clienteId = resolucaoClienteMensageiro.clienteIdMensageiro;
 
   console.log("[WHATSAPP] Tentando carregar grupos da sesso:", {
     id,
-    clienteId
+    clienteId,
+    origemResolucao: resolucaoClienteMensageiro.origemResolucao
   });
 
   const idNormalizado = normalizarSessaoId(clienteId, id);
@@ -14699,17 +14750,14 @@ async function iniciarWhatsApp(id, force = false) {
 
   sock.ev.on("creds.update", saveCreds);
 
-const clienteIdMensageiro =
-  id.startsWith("user_") && id.includes("_sessao")
-    ? id.split("_sessao")[0]
-    : "admin";
+const resolucaoClienteMensageiro = resolverClienteMensageiroPorSessao(id);
+const clienteIdMensageiro = resolucaoClienteMensageiro.clienteIdMensageiro;
 
-if (id.startsWith("user_")) {
-  console.log("[INFO] Cliente mensageiro:", {
-    sessao: id,
-    clienteIdMensageiro
-  });
-}
+console.log("[INFO] Cliente mensageiro resolvido:", {
+  sessao: id,
+  clienteIdMensageiro,
+  origemResolucao: resolucaoClienteMensageiro.origemResolucao
+});
 
 // =============== EVENTO MENSAGEIRO =================
 
