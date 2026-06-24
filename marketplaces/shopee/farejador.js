@@ -104,6 +104,7 @@ try {
     }
 
     console.log(`[SHOPEE] ${produtos.length} produtos Shopee encontrados`);
+    if (typeof registrarAbastecimento === "function") registrarAbastecimento("encontradas", { quantidade: produtos.length });
 
     let adicionadasNestaRodada = 0;
     let ofertasEncontradas = [];
@@ -130,11 +131,26 @@ try {
           item.offerInfo
         );
 
-        if (desconto < estrategiaFarejador.descontoMinimo && !temBeneficioItem) continue;
-        if (!precoAtualNumero) continue;
-        if (precoAtualNumero < (config.marketplaces?.shopee?.precoMinimo || 20)) continue;
-        if (vendas < (estrategiaFarejador.filaCritica ? 5 : 20) && !temBeneficioItem) continue;
-        if (nota > 0 && nota < (estrategiaFarejador.filaCritica ? 4.2 : 4.5) && !temBeneficioItem) continue;
+        if (desconto < estrategiaFarejador.descontoMinimo && !temBeneficioItem) {
+          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "desconto_baixo" });
+          continue;
+        }
+        if (!precoAtualNumero) {
+          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "sem_preco" });
+          continue;
+        }
+        if (precoAtualNumero < (config.marketplaces?.shopee?.precoMinimo || 20)) {
+          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "desconto_baixo" });
+          continue;
+        }
+        if (vendas < (estrategiaFarejador.filaCritica ? 5 : 20) && !temBeneficioItem) {
+          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "outros" });
+          continue;
+        }
+        if (nota > 0 && nota < (estrategiaFarejador.filaCritica ? 4.2 : 4.5) && !temBeneficioItem) {
+          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "outros" });
+          continue;
+        }
 
         const precoAtual = precoAtualNumero.toFixed(2).replace(".", ",");
 
@@ -216,8 +232,12 @@ let novaOferta = {
           o.titulo === novaOferta.titulo
         );
 
-        if (jaExiste) continue;
+        if (jaExiste) {
+          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "duplicada" });
+          continue;
+        }
 
+        if (typeof registrarAbastecimento === "function") registrarAbastecimento("importada");
         ofertasEncontradas.push(novaOferta);
         adicionadasNestaRodada++;
 
