@@ -204,6 +204,17 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
         .replace(".", ",");
     }
 
+    if (!preco) {
+      console.log("ml_importacao_sem_preco_html", {
+        clienteId: clienteIdAlvo,
+        urlOriginal: url,
+        urlFinal: response.url,
+        httpStatus: response.status,
+        tamanhoHtml: html.length,
+        temTitulo: !!titulo
+      });
+    }
+
     perf.etapa("extracao_preco_titulo_imagem", {
       temTitulo: !!titulo,
       temPreco: !!preco,
