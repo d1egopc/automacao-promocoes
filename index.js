@@ -213,7 +213,7 @@ linksOptimus: {
 },
 
 linksGerados: {},
-  intervaloEnvioMinutos: 3,
+  intervaloEnvioMinutos: 5,
 
   horarioInicio: "08:00",
   horarioFim: "23:00",
@@ -242,26 +242,26 @@ destinosInteligentes: [],
   marketplaces: {
     amazon: {
       ativo: true,
-      intervaloFarejoMinutos: 25,
+      intervaloFarejoMinutos: 30,
       limitePorRodada: 5,
-      descontoMinimo: 10,
-      precoMinimo: 20
+      descontoMinimo: 20,
+      precoMinimo: 25
     },
 
     shopee: {
       ativo: true,
-      intervaloFarejoMinutos: 20,
-      limitePorRodada: 6,
-      descontoMinimo: 15,
-      precoMinimo: 15
+      intervaloFarejoMinutos: 15,
+      limitePorRodada: 10,
+      descontoMinimo: 25,
+      precoMinimo: 20
     },
 
     mercadolivre: {
   ativo: true,
-  intervaloFarejoMinutos: 15,
-  limitePorRodada: 7,
-  descontoMinimo: 10,
-  precoMinimo: 15
+  intervaloFarejoMinutos: 60,
+  limitePorRodada: 5,
+  descontoMinimo: 20,
+  precoMinimo: 30
 },
 
 magalu: {
@@ -276,8 +276,8 @@ awin: {
   ativo: true,
   intervaloFarejoMinutos: 30,
   limitePorRodada: 5,
-  descontoMinimo: 10,
-  precoMinimo: 20,
+  descontoMinimo: 0,
+  precoMinimo: 0,
   loja: "kabum",
   feedFile: "awin_kabum.csv.gz"
 },
@@ -285,20 +285,20 @@ awin: {
 kabum: {
   ativo: true,
   intervaloFarejoMinutos: 20,
-  limitePorRodada: 3,
+  limitePorRodada: 2,
   descontoMinimo: 10,
-  precoMinimo: 25
+  precoMinimo: 30
 },
 
 aliexpress: {
   ativo: true,
-  intervaloFarejoMinutos: 28,
+  intervaloFarejoMinutos: 40,
   limitePorRodada: 5,
-  descontoMinimo: 10,
-  precoMinimo: 15,
+  descontoMinimo: 20,
+  precoMinimo: 20,
   priorizarBrasil: true,
   permitirInternacionalForte: true,
-  descontoMinimoInternacional: 30
+  descontoMinimoInternacional: 40
   }
  }
 };
@@ -834,14 +834,14 @@ if (pendentes <= 20) {
   status = "baixa";
   deveAbastecer = true;
   motivo = "Fila com 80 ou menos ofertas pendentes.";
-} else if (pendentes <= 125) {
+} else if (pendentes <= 200) {
   status = "normal";
   deveAbastecer = true;
   motivo = "Fila em volume operacional.";
 } else {
   status = "cheia";
   deveAbastecer = false;
-  motivo = "Fila com mais de 150 ofertas pendentes.";
+  motivo = "Fila com mais de 200 ofertas pendentes.";
 }
 
   console.log(
