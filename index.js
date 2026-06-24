@@ -6598,6 +6598,37 @@ function resolverSessaoWhatsappRadarCliente(clienteId = "admin", sessaoEntrada =
   return textoRadarId(encontrada?.id || encontrada?.sessaoId || "") || "";
 }
 
+function idsSessaoWhatsappRadar(clienteId = "admin", sessaoEntrada = "") {
+  const entrada = textoRadarId(sessaoEntrada);
+  const ids = new Set();
+  const adicionar = valor => {
+    const chave = chaveRadarId(valor || "");
+    if (chave) ids.add(chave);
+  };
+
+  adicionar(entrada);
+  adicionar(normalizarSessaoId(clienteId, entrada));
+  adicionar(resolverSessaoWhatsappRadarCliente(clienteId, entrada));
+
+  if (entrada.startsWith(`${clienteId}_`)) {
+    const semCliente = entrada.slice(`${clienteId}_`.length);
+    adicionar(semCliente);
+    adicionar(normalizarSessaoId(clienteId, semCliente));
+  }
+
+  return ids;
+}
+
+function nomesWhatsappCompativeisRadar(a = "", b = "") {
+  const nomeA = chaveRadarId(a || "");
+  const nomeB = chaveRadarId(b || "");
+
+  if (!nomeA || !nomeB) return false;
+  if (nomeA === nomeB) return true;
+  if (nomeA.length < 8 || nomeB.length < 8) return false;
+
+  return nomeA.includes(nomeB) || nomeB.includes(nomeA);
+}
 function obterGruposReaisSessaoRadar(sessaoId = "") {
   const id = textoRadarId(sessaoId);
   const grupos = gruposPorSessao[id] || [];
@@ -6715,9 +6746,15 @@ function grupoWhatsappMonitoradoNaSessaoRadar(sessao = {}, grupoId = "", grupoNo
     }
   }
 
-  return nomes.has(nome)
-    ? { ok: true, tipo: "nome" }
-    : { ok: false, tipo: "" };
+  if (nomes.has(nome)) return { ok: true, tipo: "nome" };
+
+  for (const nomeMonitorado of nomes) {
+    if (nomesWhatsappCompativeisRadar(nomeMonitorado, grupoNome)) {
+      return { ok: true, tipo: "nome_normalizado" };
+    }
+  }
+
+  return { ok: false, tipo: "" };
 }
 function extrairIdsTelegramMonitoradosRadar(lista = []) {
   const ids = new Set();
@@ -6940,6 +6977,7 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
   const grupoId = chaveRadarId(origem.origemGrupoId);
   const grupoNome = chaveRadarId(origem.origemGrupoNome);
   const sessaoId = chaveRadarId(origem.origemSessaoId);
+  const sessoesEntradaIds = idsSessaoWhatsappRadar("admin", origem.origemSessaoId);
 
   if (!["whatsapp", "telegram"].includes(origem.origemTipo)) {
     return {
@@ -6973,9 +7011,10 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
     ? configRadar.sessoesWhatsappMonitoradas
     : normalizarSessoesWhatsappMonitoradasRadar(configRadar);
 
-  const sessaoMonitorada = sessoesWhatsappMonitoradas.find(sessao =>
-    chaveRadarId(sessao?.sessaoId || "") === sessaoId
-  );
+  const sessaoMonitorada = sessoesWhatsappMonitoradas.find(sessao => {
+    const idsMonitorados = idsSessaoWhatsappRadar("admin", sessao?.sessaoId || "");
+    return [...idsMonitorados].some(id => sessoesEntradaIds.has(id)) || idsMonitorados.has(sessaoId);
+  });
   let grupoMonitorado = false;
   let totalGruposMonitoradosSessao = 0;
   let sessaoMonitoradaPorGrupo = null;
@@ -7017,6 +7056,7 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
     origem,
     diagnostico: {
       sessaoEncontrada: Boolean(sessaoMonitorada),
+      sessoesEntradaIds: [...sessoesEntradaIds],
       sessaoEncontradaPorGrupo: Boolean(sessaoMonitoradaPorGrupo),
       sessaoOrigemId: origem.origemSessaoId,
       sessaoMonitoradaId: sessaoMonitorada?.sessaoId || sessaoMonitoradaPorGrupo?.sessaoId || "",
@@ -8516,6 +8556,7 @@ async function processarMensagemRadar({
 
   if (!origemMonitorada.ok) {
   logRadarBloqueadoMonitoramento({
+    clienteId: adminMasterId,
     motivo: origemMonitorada.motivo,
     origemMonitorada,
     sessaoId: sessaoIdTexto,
