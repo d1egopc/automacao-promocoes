@@ -5360,6 +5360,18 @@ function calcularEconomiaRadar(oferta = {}) {
   };
 }
 
+function precoChaveRadar(oferta = {}) {
+  const numero = numeroRadar(
+    oferta.precoAtual ||
+    oferta.preco ||
+    oferta.precoFinal ||
+    oferta.valor ||
+    ""
+  );
+
+  return numero > 0 ? numero.toFixed(2) : "";
+}
+
 function chavesRemocaoRadar(oferta = {}) {
   const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
   return [
@@ -5386,7 +5398,7 @@ function chavesTratamentoRadar(oferta = {}) {
     oferta.origemGrupoNome ||
     ""
   );
-  const cupom = normalizarTexto(oferta.cupom || "");
+  const preco = precoChaveRadar(oferta);
   const links = [
     oferta.linkOriginal,
     oferta.linkResolvidoRadar,
@@ -5401,9 +5413,8 @@ function chavesTratamentoRadar(oferta = {}) {
   return [
     oferta.id ? `id:${oferta.id}` : "",
     ...links.map(link => `link:${link}`),
-    marketplace && titulo ? `produto:${marketplace}|${titulo}` : "",
-    marketplace && titulo && grupo ? `produto_grupo:${marketplace}|${titulo}|${grupo}` : "",
-    marketplace && titulo && grupo && cupom ? `produto_grupo_cupom:${marketplace}|${titulo}|${grupo}|${cupom}` : ""
+    marketplace && titulo && preco ? `produto:${marketplace}|${titulo}|${preco}` : "",
+    marketplace && titulo && grupo && preco ? `produto_grupo:${marketplace}|${titulo}|${grupo}|${preco}` : ""
   ].filter(Boolean);
 }
 
@@ -7036,6 +7047,13 @@ function categoriaRadarReclassificada(oferta = {}) {
 
 function chaveDuplicidadeRadar(oferta = {}) {
   const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
+  const marketplace = normalizarMarketplaceRadar(
+    oferta.marketplace ||
+    oferta.mercado ||
+    oferta.marketplaceOriginalRadar ||
+    ""
+  );
+  const preco = precoChaveRadar(oferta);
   const links = [
     oferta.linkOriginal,
     oferta.linkAfiliado,
@@ -7047,7 +7065,8 @@ function chaveDuplicidadeRadar(oferta = {}) {
 
   return [
     ...links.map(link => `link:${link}`),
-    titulo ? `titulo:${titulo}` : ""
+    marketplace && titulo && preco ? `produto:${marketplace}|${titulo}|${preco}` : "",
+    !preco && marketplace && titulo ? `produto:${marketplace}|${titulo}` : ""
   ].filter(Boolean);
 }
 
@@ -8739,6 +8758,48 @@ function itemContaComoPendenteRadar(item = {}) {
   return false;
 }
 
+function radarCupomRepetidoProdutoDiferente(clienteId = "admin", oferta = {}) {
+  const cupom = normalizarTexto(oferta.cupom || "");
+  if (!cupom) return false;
+
+  const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
+  const marketplace = normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || "");
+  const preco = precoChaveRadar(oferta);
+  const linksOferta = new Set([
+    oferta.linkOriginal,
+    oferta.linkResolvidoRadar,
+    oferta.linkCapturado,
+    oferta.linkAfiliado,
+    oferta.linkFinal,
+    oferta.link
+  ].map(link => String(link || "").trim().toLowerCase()).filter(Boolean));
+
+  return fila.some(item => {
+    if (String(item.clienteId || "admin") !== String(clienteId || "admin")) return false;
+    if (normalizarTexto(item.cupom || "") !== cupom) return false;
+
+    const linksItem = [
+      item.linkOriginal,
+      item.linkResolvidoRadar,
+      item.linkCapturado,
+      item.linkAfiliado,
+      item.linkFinal,
+      item.link
+    ].map(link => String(link || "").trim().toLowerCase()).filter(Boolean);
+
+    const mesmoLink = linksItem.some(link => linksOferta.has(link));
+    const mesmoProduto = Boolean(
+      titulo &&
+      titulo === normalizarTexto(item.titulo || item.nome || "") &&
+      marketplace &&
+      marketplace === normalizarMarketplaceRadar(item.marketplace || item.mercado || "") &&
+      preco &&
+      preco === precoChaveRadar(item)
+    );
+
+    return !mesmoLink && !mesmoProduto;
+  });
+}
 async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admin", opcoes = {}) {
   const usuario = getUsuarioClienteRadar(clienteId);
 
@@ -9006,11 +9067,19 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
     return { ok: false, motivo: "sem_destino_compativel" };
   }
 
+  if (radarCupomRepetidoProdutoDiferente(clienteId, ofertaCliente)) {
+    logOptimus("RADAR", "radar_cupom_repetido_produto_diferente_permitido", {
+      clienteId,
+      cupom: ofertaCliente.cupom || "",
+      titulo: ofertaCliente.titulo || ofertaCliente.nome || ""
+    });
+  }
+
   if (ofertaJaExiste(ofertaCliente)) {
-    logOptimus("RADAR", "Reprovado", {
+    logOptimus("RADAR", "radar_duplicada_mesma_oferta", {
       clienteId,
       aprovado: false,
-      motivo: "oferta_duplicada"
+      motivo: "radar_duplicada_mesma_oferta"
     });
     return { ok: false, motivo: "oferta_duplicada" };
   }
