@@ -152,6 +152,90 @@ function logOptimus(categoria = "INFO", mensagem = "", dados = {}) {
   console.log(prefixo);
 }
 
+const ABASTECIMENTO_MOTIVOS = [
+  "memoria_repetida",
+  "duplicada",
+  "desconto_baixo",
+  "sem_link_afiliado",
+  "sem_preco",
+  "integracao_ausente",
+  "bloqueio_http",
+  "categoria",
+  "outros"
+];
+
+let abastecimentoRodadaAtual = null;
+
+function criarResumoAbastecimento(marketplace = "") {
+  return {
+    marketplace: normalizarTexto(marketplace || ""),
+    encontradas: 0,
+    importadas: 0,
+    adicionadasFila: 0,
+    recusadas: 0,
+    motivosRecusa: ABASTECIMENTO_MOTIVOS.reduce((acc, motivo) => {
+      acc[motivo] = 0;
+      return acc;
+    }, {})
+  };
+}
+
+function motivoAbastecimentoPadrao(motivo = "") {
+  const texto = normalizarTexto(motivo || "");
+
+  if (/memoria|repetida/.test(texto)) return "memoria_repetida";
+  if (/duplicad|ja_existe|existe/.test(texto)) return "duplicada";
+  if (/desconto|preco_minimo|preco_baixo|baixo/.test(texto)) return "desconto_baixo";
+  if (/sem_link|link_afiliado|afiliado/.test(texto)) return "sem_link_afiliado";
+  if (/sem_preco|preco_ausente|preco_invalido/.test(texto)) return "sem_preco";
+  if (/integracao|credencial/.test(texto)) return "integracao_ausente";
+  if (/http|bloqueio|bloqueado|status|traffic|verification|cookie/.test(texto)) return "bloqueio_http";
+  if (/categoria|destino/.test(texto)) return "categoria";
+
+  return "outros";
+}
+
+function registrarAbastecimento(tipo = "", dados = {}) {
+  if (!abastecimentoRodadaAtual) return;
+
+  const quantidade = Math.max(1, Number(dados.quantidade || 1) || 1);
+
+  if (tipo === "encontrada" || tipo === "encontradas") {
+    abastecimentoRodadaAtual.encontradas += quantidade;
+    return;
+  }
+
+  if (tipo === "importada" || tipo === "importadas") {
+    abastecimentoRodadaAtual.importadas += quantidade;
+    return;
+  }
+
+  if (tipo === "adicionada" || tipo === "adicionadasFila") {
+    abastecimentoRodadaAtual.adicionadasFila += quantidade;
+    return;
+  }
+
+  if (tipo === "recusada" || tipo === "recusa") {
+    const motivo = motivoAbastecimentoPadrao(dados.motivo || "outros");
+    abastecimentoRodadaAtual.recusadas += quantidade;
+    abastecimentoRodadaAtual.motivosRecusa[motivo] =
+      (abastecimentoRodadaAtual.motivosRecusa[motivo] || 0) + quantidade;
+  }
+}
+
+function logResumoAbastecimento(resumo = {}, extras = {}) {
+  if (!resumo) return;
+
+  console.log("[ABASTECIMENTO]", {
+    marketplace: resumo.marketplace,
+    encontradas: resumo.encontradas,
+    importadas: resumo.importadas,
+    adicionadasFila: resumo.adicionadasFila,
+    recusadas: resumo.recusadas,
+    motivosRecusa: resumo.motivosRecusa,
+    ...extras
+  });
+}
 const DEBUG_LOGS = String(process.env.DEBUG_LOGS || "").toLowerCase() === "true";
 const LOG_THROTTLE_MS = 60 * 1000;
 const logsThrottle = new Map();
@@ -15493,6 +15577,8 @@ if (!admin) {
     const categoriaMarketplaceLog = categoriaLogMarketplace(marketplace);
     const inicioRodadaMs = Date.now();
     const totalFilaAntesRodada = Array.isArray(fila) ? fila.length : 0;
+    const resumoAbastecimento = criarResumoAbastecimento(marketplace);
+    abastecimentoRodadaAtual = resumoAbastecimento;
     let clientesProcessadosRodada = 0;
     statusMarketplace.rodadas += 1;
     statusMarketplace.ultimoInicio = new Date().toISOString();
