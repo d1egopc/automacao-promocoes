@@ -1,4 +1,4 @@
-﻿
+
 const { extrairProdutosBuscaML } = require("./parser");
 
 let obterCuponsMLCliente = async () => [];
@@ -250,6 +250,7 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
 
         const produtosBusca = extrairProdutosBuscaML(html).slice(0, limiteProdutosPorBusca);
         resumoML.produtosEncontrados += produtosBusca.length;
+        if (typeof registrarAbastecimento === "function") registrarAbastecimento("encontradas", { quantidade: produtosBusca.length });
 
         console.log("[ML-BUSCA-RESUMO]", {
           termo,
@@ -262,7 +263,10 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
           try {
             const link = itemBusca.link;
 
-            if (!link) continue;
+            if (!link) {
+              if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "sem_link_afiliado" });
+              continue;
+            }
 
             let produto = await importarMercadoLivre(
               link,
@@ -280,6 +284,7 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
             }
 
             resumoML.importados += 1;
+            if (typeof registrarAbastecimento === "function") registrarAbastecimento("importada");
 
             if (
               (!produto.titulo || produto.titulo === "Produto Mercado Livre") &&
