@@ -5,6 +5,10 @@ const {
 
 const ARQUIVO = "alertas-integracoes.json";
 
+function normalizarMarketplace(marketplace = "") {
+  return String(marketplace || "").trim().toLowerCase();
+}
+
 function listarAlertasIntegracoes(clienteId = "admin") {
   return readClienteJson(clienteId, ARQUIVO, []);
 }
@@ -15,13 +19,14 @@ function registrarAlertaIntegracao(
   alerta = {}
 ) {
   const alertas = listarAlertasIntegracoes(clienteId);
+  const mp = normalizarMarketplace(marketplace);
 
   const novaLista = alertas.filter(
-    item => item.marketplace !== marketplace
+    item => normalizarMarketplace(item.marketplace) !== mp
   );
 
   novaLista.push({
-    marketplace,
+    marketplace: mp,
     tipo: alerta.tipo || "desconhecido",
     status: alerta.status || "atencao",
     mensagem: alerta.mensagem || "",
@@ -39,9 +44,10 @@ function limparAlertaIntegracao(
   marketplace = ""
 ) {
   const alertas = listarAlertasIntegracoes(clienteId);
+  const mp = normalizarMarketplace(marketplace);
 
   const novaLista = alertas.filter(
-    item => item.marketplace !== marketplace
+    item => normalizarMarketplace(item.marketplace) !== mp
   );
 
   writeClienteJson(clienteId, ARQUIVO, novaLista);
