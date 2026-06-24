@@ -10770,16 +10770,21 @@ app.get("/integracoes/alertas", (req, res) => {
 
   avaliarAlertasConfiguracaoIntegracoes(clienteId);
 
+  const status = {
+    mercadolivre: statusResumoIntegracao(clienteId, "mercadolivre"),
+    amazon: statusResumoIntegracao(clienteId, "amazon")
+  };
+
+  if (status.mercadolivre.status === "ok") {
+    limparAlertaIntegracao(clienteId, "mercadolivre");
+  }
+
   return res.json({
     ok: true,
-    status: {
-      mercadolivre: statusResumoIntegracao(clienteId, "mercadolivre"),
-      amazon: statusResumoIntegracao(clienteId, "amazon")
-    },
+    status,
     alertas: listarAlertasIntegracoes(clienteId)
   });
 });
-
 app.get("/integracoes", (req, res) => {
   const clienteId = getClienteId(req);
   const data = integracoesPorCliente[clienteId] || {};
