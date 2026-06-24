@@ -7804,6 +7804,105 @@ function motivoImportacaoRadarIncompleta(oferta = {}, marketplace = "") {
   return "";
 }
 
+function formatarPrecoRadarTexto(numero = 0) {
+  return Number(numero).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
+function numeroPrecoRadarTexto(valor = "") {
+  const texto = String(valor || "")
+    .replace(/\./g, "")
+    .replace(",", ".")
+    .replace(/[^\d.]/g, "");
+  const numero = Number(texto);
+  return Number.isFinite(numero) && numero > 0 ? numero : 0;
+}
+
+function extrairPrecoFallbackTextoRadar(texto = "") {
+  const original = String(texto || "");
+  if (!original.trim()) return { ok: false, motivo: "texto_vazio" };
+
+  if (/r\$\s*[\d.,]+\s*(?:a|ate|até|-)\s*r?\$?\s*[\d.,]+/i.test(original)) {
+    return { ok: false, motivo: "faixa_preco" };
+  }
+
+  const padraoPor = /(?:\bpor\b|\bsai\s+por\b|\bsaindo\s+por\b|\bvalor\s+final\b|\bpreco\s+final\b)\s*:?\s*r\$\s*([0-9]{1,5}(?:\.[0-9]{3})*(?:,[0-9]{2})?)/gi;
+  const candidatosPor = [...original.matchAll(padraoPor)]
+    .map((match) => numeroPrecoRadarTexto(match[1]))
+    .filter((numero) => numero > 0);
+  const unicosPor = [...new Set(candidatosPor.map((numero) => numero.toFixed(2)))];
+
+  if (unicosPor.length === 1) {
+    return {
+      ok: true,
+      preco: formatarPrecoRadarTexto(Number(unicosPor[0])),
+      origem: "por"
+    };
+  }
+  if (unicosPor.length > 1) return { ok: false, motivo: "multiplos_precos_por" };
+
+  const matches = [...original.matchAll(/r\$\s*([0-9]{1,5}(?:\.[0-9]{3})*(?:,[0-9]{2})?)/gi)];
+  const candidatos = [];
+
+  for (const match of matches) {
+    const inicio = Math.max(0, match.index - 35);
+    const fim = Math.min(original.length, match.index + match[0].length + 35);
+    const contextoPreco = normalizarTexto(original.slice(inicio, fim));
+
+    if (/\b(cupom|off|desconto|cashback|frete)\b/.test(contextoPreco)) continue;
+
+    const numero = numeroPrecoRadarTexto(match[1]);
+    if (numero > 0) candidatos.push(numero.toFixed(2));
+  }
+
+  const unicos = [...new Set(candidatos)];
+  if (unicos.length === 1 && !/\b(de|era|antes)\s+r\$/i.test(original)) {
+    return {
+      ok: true,
+      preco: formatarPrecoRadarTexto(Number(unicos[0])),
+      origem: "preco_unico"
+    };
+  }
+
+  if (matches.length > 0) {
+    return {
+      ok: false,
+      motivo: unicos.length > 1 || candidatos.length !== matches.length ? "ambiguidade" : "preco_nao_confirmado"
+    };
+  }
+
+  return { ok: false, motivo: "sem_preco_texto" };
+}
+
+function aplicarPrecoFallbackTextoRadarMl(oferta = {}, contexto = {}) {
+  const texto = contexto.textoOriginal || contexto.texto || contexto.mensagemOriginalRadar || "";
+  const link = contexto.linkOriginal || contexto.link || "";
+  const resultado = extrairPrecoFallbackTextoRadar(texto);
+
+  if (!resultado.ok) {
+    console.log("ml_preco_fallback_texto_radar_ambiguidade", {
+      motivo: resultado.motivo,
+      link
+    });
+    return oferta;
+  }
+
+  console.log("ml_preco_fallback_texto_radar_usado", {
+    preco: resultado.preco,
+    origem: resultado.origem,
+    link
+  });
+
+  return {
+    ...oferta,
+    preco: oferta.preco || resultado.preco,
+    precoAtual: oferta.precoAtual || resultado.preco,
+    precoOrigem: "texto_radar",
+    avisoPreco: "Preço extraído da mensagem do Radar"
+  };
+}
 function percentualDescontoRadar(oferta = {}, radar = {}) {
   const valores = [
     radar.descontoPercentual,
@@ -8119,7 +8218,17 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
       };
     }
 
-    const motivoIncompleta = motivoImportacaoRadarIncompleta(resultado.body || {}, marketplaceDetectado);
+    let produtoImportadoRadar = resultado.body || {};
+    let motivoIncompleta = motivoImportacaoRadarIncompleta(produtoImportadoRadar, marketplaceDetectado);
+
+    if (marketplaceDetectado === "mercadolivre" && motivoIncompleta === "importacao_sem_preco") {
+      produtoImportadoRadar = aplicarPrecoFallbackTextoRadarMl(produtoImportadoRadar, {
+        textoOriginal: contexto.textoOriginal || contexto.texto || "",
+        linkOriginal: linkOriginalLimpo
+      });
+      motivoIncompleta = motivoImportacaoRadarIncompleta(produtoImportadoRadar, marketplaceDetectado);
+    }
+
     if (motivoIncompleta) {
       return {
         ok: false,
@@ -8129,8 +8238,8 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
       };
     }
     const produtoEnriquecido = await enriquecerBeneficioRadarOferta({
-      ...(resultado.body || {}),
-      marketplace: resultado.body?.marketplace || marketplaceDetectado,
+      ...produtoImportadoRadar,
+      marketplace: produtoImportadoRadar?.marketplace || marketplaceDetectado,
       linkOriginal: linkOriginalLimpo
     }, {
       origem: "radar",
@@ -8474,7 +8583,8 @@ logDebug("🧪 RADAR LINKS EXTRAIDOS", {
       origemTipo: origemTipoFinal,
       sessaoId: sessaoIdTexto,
       grupoId: grupoIdTexto,
-      grupoNome: grupoNomeTexto
+      grupoNome: grupoNomeTexto,
+      textoOriginal: texto
     });
 
     if (!importacao.ok) {
