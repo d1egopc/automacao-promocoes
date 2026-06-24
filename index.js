@@ -242,26 +242,26 @@ destinosInteligentes: [],
   marketplaces: {
     amazon: {
       ativo: true,
-      intervaloFarejoMinutos: 30,
+      intervaloFarejoMinutos: 25,
       limitePorRodada: 5,
-      descontoMinimo: 20,
-      precoMinimo: 25
+      descontoMinimo: 10,
+      precoMinimo: 20
     },
 
     shopee: {
       ativo: true,
-      intervaloFarejoMinutos: 15,
+      intervaloFarejoMinutos: 20,
       limitePorRodada: 10,
-      descontoMinimo: 25,
-      precoMinimo: 20
+      descontoMinimo: 15,
+      precoMinimo: 15
     },
 
     mercadolivre: {
   ativo: true,
-  intervaloFarejoMinutos: 60,
-  limitePorRodada: 5,
-  descontoMinimo: 20,
-  precoMinimo: 30
+  intervaloFarejoMinutos: 15,
+  limitePorRodada: 7,
+  descontoMinimo: 10,
+  precoMinimo: 15
 },
 
 magalu: {
@@ -276,8 +276,8 @@ awin: {
   ativo: true,
   intervaloFarejoMinutos: 30,
   limitePorRodada: 5,
-  descontoMinimo: 0,
-  precoMinimo: 0,
+  descontoMinimo: 10,
+  precoMinimo: 15,
   loja: "kabum",
   feedFile: "awin_kabum.csv.gz"
 },
@@ -285,20 +285,20 @@ awin: {
 kabum: {
   ativo: true,
   intervaloFarejoMinutos: 20,
-  limitePorRodada: 2,
+  limitePorRodada: 3,
   descontoMinimo: 10,
-  precoMinimo: 30
+  precoMinimo: 20
 },
 
 aliexpress: {
   ativo: true,
-  intervaloFarejoMinutos: 40,
+  intervaloFarejoMinutos: 28,
   limitePorRodada: 5,
   descontoMinimo: 20,
   precoMinimo: 20,
   priorizarBrasil: true,
   permitirInternacionalForte: true,
-  descontoMinimoInternacional: 40
+  descontoMinimoInternacional: 30
   }
  }
 };
@@ -834,14 +834,14 @@ if (pendentes <= 20) {
   status = "baixa";
   deveAbastecer = true;
   motivo = "Fila com 80 ou menos ofertas pendentes.";
-} else if (pendentes <= 200) {
+} else if (pendentes <= 150) {
   status = "normal";
   deveAbastecer = true;
   motivo = "Fila em volume operacional.";
 } else {
   status = "cheia";
   deveAbastecer = false;
-  motivo = "Fila com mais de 200 ofertas pendentes.";
+  motivo = "Fila com mais de 180 ofertas pendentes.";
 }
 
   console.log(
