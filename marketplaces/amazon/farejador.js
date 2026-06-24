@@ -1,4 +1,4 @@
-﻿const { gerarBuscasAmazon } =
+const { gerarBuscasAmazon } =
   require("./buscas");
 
 const {
@@ -109,6 +109,7 @@ console.log("[AMZ] DENTRO FAREJADOR:", typeof importarAmazon);
 
       if (!response.ok) {
       console.log("[AMZ] Amazon recusou essa busca:", response.status);
+      if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "bloqueio_http" });
       continue;
       }
 
@@ -123,6 +124,7 @@ console.log("[AMZ] DENTRO FAREJADOR:", typeof importarAmazon);
 const links =
   extrairLinksAmazon(html)
     .slice(0, 2);
+if (typeof registrarAbastecimento === "function") registrarAbastecimento("encontradas", { quantidade: links.length });
 
 for (const link of links) {
   try {
@@ -175,11 +177,13 @@ console.log("[AMZ] AMAZON FILTRO:", {
 
 if (!precoNumero || !Number.isFinite(precoNumero)) {
   console.log("[AMZ] Amazon sem preo vlido:", produto.titulo);
+  if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "sem_preco" });
   continue;
 }
 
 if (precoNumero < 30) {
   console.log("[AMZ] Amazon preo baixo:", produto.titulo, precoNumero);
+  if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "desconto_baixo" });
   continue;
 }
 
@@ -190,6 +194,7 @@ if (desconto < estrategiaFarejador.descontoMinimo && !temBeneficioFarejador(prod
     descontoMinimo: estrategiaFarejador.descontoMinimo,
     avisoCupom: produto.avisoCupom
   });
+  if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "desconto_baixo" });
   continue;
 }
 
@@ -260,6 +265,8 @@ console.log("[AMZ] AMAZON OFERTA PRONTA PARA DISTRIBUIO:", {
   link: novaOferta.link,
   linkAfiliado: novaOferta.linkAfiliado
 });
+
+if (typeof registrarAbastecimento === "function") registrarAbastecimento("importada");
 
 novaOferta.criadoEm =
   novaOferta.criadoEm ||
