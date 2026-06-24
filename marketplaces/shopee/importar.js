@@ -27,15 +27,8 @@ return async function importarShopee(url, config) {
    }
 
     if (/^\d+$/.test(texto)) {
-      let numero = Number(texto);
-
-      if (numero > 100000) {
-        numero = numero / 100000;
-      } else if (numero > 1000) {
-        numero = numero / 100;
-      }
-
-      return numero.toFixed(2).replace(".", ",");
+      const centavos = Number(texto);
+      return (centavos / 100).toFixed(2).replace(".", ",");
     }
 
     return limparPreco(texto);

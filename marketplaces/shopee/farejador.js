@@ -7,7 +7,24 @@ const {
 } = require("./cupons");
 
 function numeroPrecoShopee(valor) {
-  const numero = Number(String(valor || "").replace("R$", "").replace(/\./g, "").replace(",", ".").replace(/[^\d.]/g, ""));
+  if (valor === null || valor === undefined || valor === "") return 0;
+
+  const bruto = String(valor).trim();
+  if (!bruto) return 0;
+
+  if (/^\d+$/.test(bruto)) {
+    const centavos = Number(bruto);
+    return Number.isFinite(centavos) && centavos > 0 ? centavos / 100 : 0;
+  }
+
+  const numero = Number(
+    bruto
+      .replace("R$", "")
+      .replace(/\./g, "")
+      .replace(",", ".")
+      .replace(/[^\d.]/g, "")
+  );
+
   return Number.isFinite(numero) && numero > 0 ? numero : 0;
 }
 
