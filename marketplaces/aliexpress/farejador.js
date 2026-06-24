@@ -21,7 +21,8 @@ async function farejarAliExpress(clienteId = "admin", deps = {}) {
     aplicarFiltrosUniversais,
     gerarBuscasGlobais,
     distribuirOfertaParaClientes,
-    encurtarUrl
+    encurtarUrl,
+    registrarAbastecimento
   } = deps;
 
   try {
@@ -100,6 +101,7 @@ try {
     );
 
     console.log(`[INFO] ${termo}: ${produtosAPI.length} produtos AliExpress via API`);
+    if (typeof registrarAbastecimento === "function") registrarAbastecimento("encontradas", { quantidade: produtosAPI.length });
 
     for (const item of produtosAPI) {
       try {
@@ -127,7 +129,10 @@ try {
         normal: item.promotion_link
         });
        
-        if (!linkAfiliadoOriginal) continue;
+        if (!linkAfiliadoOriginal) {
+          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "sem_link_afiliado" });
+          continue;
+        }
 
         const precoAtual =
           limparPrecoAli(
@@ -175,7 +180,10 @@ try {
             ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
             : Number(String(descontoTexto).replace(/\D/g, "")) || 0;
 
-        if (!precoNumero || !Number.isFinite(precoNumero)) continue;
+        if (!precoNumero || !Number.isFinite(precoNumero)) {
+          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "sem_preco" });
+          continue;
+        }
 
         const precoMinimo = Number(cfg.precoMinimo) || 0;
         const descontoMinimo = Number(estrategiaFarejador.descontoMinimo) || 0;
@@ -188,8 +196,14 @@ try {
           item.promotion_link_short
         );
 
-        if (precoNumero < precoMinimo) continue;
-        if (desconto < descontoMinimo && !beneficioAli) continue;
+        if (precoNumero < precoMinimo) {
+          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "desconto_baixo" });
+          continue;
+        }
+        if (desconto < descontoMinimo && !beneficioAli) {
+          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "desconto_baixo" });
+          continue;
+        }
 
         const imagem =
           item.product_main_image_url ||
@@ -247,6 +261,7 @@ const palavrasBloqueadasAli = [
 
 if (palavrasBloqueadasAli.some(p => tituloLower.includes(p))) {
   console.log("[AVISO] AliExpress bloqueado por palavra:", titulo);
+  if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "categoria" });
   continue;
 }
 
@@ -306,9 +321,11 @@ const categoriaDetectada =
 
         if (typeof ofertaJaExiste === "function" && ofertaJaExiste(novaOferta)) {
           console.log("[INFO] AliExpress j existe:", titulo);
+          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "duplicada" });
           continue;
         }
 
+        if (typeof registrarAbastecimento === "function") registrarAbastecimento("importada");
         produtosEncontrados.push(novaOferta);
 
         console.log("[INFO] Nova oferta AliExpress API:", {
@@ -340,6 +357,7 @@ for (const oferta of produtosEncontrados) {
 
   if (deveIgnorarOfertaRepetida(oferta)) {
     console.log("[AVISO] AliExpress ignorado pela memria:", oferta.titulo);
+    if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "memoria_repetida" });
     continue;
   }
 
@@ -349,6 +367,7 @@ for (const oferta of produtosEncontrados) {
   registrarOfertaVista(oferta);
 
   fila.push(oferta);
+  if (typeof registrarAbastecimento === "function") registrarAbastecimento("adicionada");
 
   adicionadasNaFila++;
 }
