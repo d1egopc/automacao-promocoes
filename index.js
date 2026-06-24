@@ -10436,6 +10436,7 @@ return res.json({
 const marketplaceRules = integracoesUtils.marketplaceRules;
 
 const MENSAGEM_ALERTA_ML = "Atualize os cookies do Mercado Livre.";
+const MENSAGEM_FALHA_CONVERSAO_ML = "Falha na conversão. Atualize os cookies ou revise a Tag ID.";
 const MENSAGEM_ALERTA_AMAZON = "Atualize a tag/cookies da Amazon para manter a captura de ofertas funcionando.";
 
 const {
@@ -10486,10 +10487,13 @@ function credenciaisAmazonValidas(config = {}) {
 }
 
 function registrarAlertaMercadoLivre(clienteId = "admin", tipo = "configuracao_incompleta", detalhes = {}) {
+  const tipoNormalizado = String(tipo || "").toLowerCase();
   return registrarAlertaIntegracao(clienteId, "mercadolivre", {
-    tipo,
+    tipo: tipoNormalizado === "tag_invalida" ? "falha_conversao" : tipo,
     status: "atencao",
-    mensagem: MENSAGEM_ALERTA_ML,
+    mensagem: ["falha_conversao", "tag_invalida"].includes(tipoNormalizado)
+      ? MENSAGEM_FALHA_CONVERSAO_ML
+      : MENSAGEM_ALERTA_ML,
     detalhes
   });
 }
@@ -10568,11 +10572,18 @@ function statusResumoIntegracao(clienteId = "admin", marketplace = "") {
   }
 
   if (ultimoStatus) {
+    const statusNormalizado = mp === "mercadolivre" && ultimoStatus === "tag_invalida"
+      ? "falha_conversao"
+      : ultimoStatus;
+    const mensagemNormalizada = mp === "mercadolivre" && ultimoStatus === "tag_invalida"
+      ? MENSAGEM_FALHA_CONVERSAO_ML
+      : (config.ultimaMensagem || "");
+
     return {
       marketplace: mp,
-      status: ultimoStatus,
+      status: statusNormalizado,
       ultimoTesteEm: config.ultimoTesteEm,
-      ultimaMensagem: config.ultimaMensagem || "",
+      ultimaMensagem: mensagemNormalizada,
       testado: true
     };
   }
@@ -10713,9 +10724,9 @@ async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
 
     if (!conversao.ok || !/^https?:\/\/meli\.la\//i.test(linkAfiliado)) {
       return respostaTesteMercadoLivre(
-        "tag_invalida",
-        "Não foi possível gerar link afiliado válido com a Tag ID configurada.",
-        "tag_invalida",
+        "falha_conversao",
+        MENSAGEM_FALHA_CONVERSAO_ML,
+        "falha_conversao",
         { httpStatus: conversao.status, linkAfiliado }
       );
     }
@@ -10837,21 +10848,35 @@ function obterProgramaAwin(credenciais = {}, alvo = "kabum") {
 app.get("/integracoes/alertas", (req, res) => {
   const clienteId = getClienteId(req);
 
-  avaliarAlertasConfiguracaoIntegracoes(clienteId);
-
   const status = {
     mercadolivre: statusResumoIntegracao(clienteId, "mercadolivre"),
     amazon: statusResumoIntegracao(clienteId, "amazon")
   };
 
-  if (status.mercadolivre.status === "ok") {
-    limparAlertaIntegracao(clienteId, "mercadolivre");
-  }
+  const alertas = listarAlertasIntegracoes(clienteId)
+    .filter(alerta =>
+      !(String(alerta.marketplace || "").toLowerCase() === "mercadolivre" && status.mercadolivre.status === "ok")
+    )
+    .map(alerta => {
+      const marketplace = String(alerta.marketplace || "").toLowerCase();
+      const tipo = String(alerta.tipo || alerta.status || "").toLowerCase();
+
+      if (marketplace === "mercadolivre" && tipo === "tag_invalida") {
+        return {
+          ...alerta,
+          tipo: "falha_conversao",
+          status: alerta.status || "atencao",
+          mensagem: MENSAGEM_FALHA_CONVERSAO_ML
+        };
+      }
+
+      return alerta;
+    });
 
   return res.json({
     ok: true,
     status,
-    alertas: listarAlertasIntegracoes(clienteId)
+    alertas
   });
 });
 app.get("/integracoes", (req, res) => {
