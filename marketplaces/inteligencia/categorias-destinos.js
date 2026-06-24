@@ -133,6 +133,17 @@ const CATEGORIAS_DESTINOS = {
     ]
   },
 
+
+  climatizacao: {
+    nome: "Climatização e Ventilação",
+    palavras: [
+      "ventilador", "ventilador de mesa", "ventilador de coluna",
+      "ventilador de teto", "circulador de ar", "ar condicionado",
+      "ar condicionado split", "climatizador", "umidificador",
+      "desumidificador", "aquecedor", "purificador de ar",
+      "adega climatizada", "exaustor", "split inverter", "ventilador torre"
+    ]
+  },
   ferramentas: {
     nome: "Ferramentas",
     palavras: [
