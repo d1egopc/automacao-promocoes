@@ -41,6 +41,67 @@ return async function importarShopee(url, config) {
     return limparPreco(texto);
   }
 
+
+  function numeroPrecoShopee(valor) {
+    const preco = normalizarPrecoShopee(valor);
+    const numero = Number(String(preco || "").replace(",", "."));
+    return Number.isFinite(numero) && numero > 0 ? numero : 0;
+  }
+
+  function diagnosticarVariacaoPrecoShopee(precoMin = "", precoMax = "") {
+    const minNumero = Number(String(precoMin || "").replace(",", "."));
+    const maxNumero = Number(String(precoMax || "").replace(",", "."));
+    const temMin = Number.isFinite(minNumero) && minNumero > 0;
+    const temMax = Number.isFinite(maxNumero) && maxNumero > 0;
+
+    if (!temMin || !temMax || maxNumero <= minNumero) {
+      return {
+        precoMin,
+        precoMax: precoMax || precoMin,
+        temVariacaoPreco: false,
+        avisoVariacaoPreco: ""
+      };
+    }
+
+    const diferenca = maxNumero - minNumero;
+    const percentual = minNumero > 0 ? diferenca / minNumero : 0;
+    const variacaoIrrelevante = diferenca < 1 || percentual <= 0.03;
+
+    if (variacaoIrrelevante) {
+      return {
+        precoMin,
+        precoMax,
+        temVariacaoPreco: false,
+        avisoVariacaoPreco: ""
+      };
+    }
+
+    const variacaoGrande = percentual > 0.2 || diferenca >= 20;
+
+    return {
+      precoMin,
+      precoMax,
+      temVariacaoPreco: true,
+      avisoVariacaoPreco: variacaoGrande
+        ? `Variações de R$ ${precoMin} a R$ ${precoMax}`
+        : `A partir de R$ ${precoMin}`
+    };
+  }
+
+  function extrairFaixaPrecosHtmlShopee(precosHtml = []) {
+    const numeros = precosHtml
+      .map(numeroPrecoShopee)
+      .filter(numero => Number.isFinite(numero) && numero > 0)
+      .sort((a, b) => a - b);
+
+    if (!numeros.length) {
+      return diagnosticarVariacaoPrecoShopee("", "");
+    }
+
+    const precoMin = numeros[0].toFixed(2).replace(".", ",");
+    const precoMax = numeros[numeros.length - 1].toFixed(2).replace(".", ",");
+    return diagnosticarVariacaoPrecoShopee(precoMin, precoMax);
+  }
   function extrairIdsShopee(link) {
     const texto = String(link || "").split("?")[0];
 
@@ -258,6 +319,7 @@ const precosHtml = [...html.matchAll(/R\$\s*[\d.]+,\d{2}/g)]
   .map(m => m[0])
   .filter(Boolean);
 
+const variacaoPrecoHtml = extrairFaixaPrecosHtmlShopee(precosHtml);
 let precoAtual = "";
 
 if (precosHtml.length) {
@@ -278,6 +340,10 @@ if (precosHtml.length) {
     .trim(),
   precoAntigo: "",
   precoAtual,
+  precoMin: variacaoPrecoHtml.precoMin,
+  precoMax: variacaoPrecoHtml.precoMax,
+  temVariacaoPreco: variacaoPrecoHtml.temVariacaoPreco,
+  avisoVariacaoPreco: variacaoPrecoHtml.avisoVariacaoPreco,
   cupom,
   avisoCupom,
   linkOriginal: url,
@@ -304,6 +370,8 @@ const maxNumero = Number(String(precoMax).replace(",", "."));
 
 const temMin = Number.isFinite(minNumero) && minNumero > 0;
 const temMax = Number.isFinite(maxNumero) && maxNumero > 0;
+
+const variacaoPreco = diagnosticarVariacaoPrecoShopee(precoMin, precoMax);
 
 if (temMin && temMax && minNumero !== maxNumero) {
   precoAtual = `${precoMin} a ${precoMax}`;
@@ -333,6 +401,10 @@ if (temMin && temMax && minNumero !== maxNumero) {
       .trim(),
     precoAntigo,
     precoAtual,
+    precoMin: variacaoPreco.precoMin,
+    precoMax: variacaoPreco.precoMax,
+    temVariacaoPreco: variacaoPreco.temVariacaoPreco,
+    avisoVariacaoPreco: variacaoPreco.avisoVariacaoPreco,
     cupom: "",
     linkOriginal: url,
     linkAfiliado: produto?.offerLink || produto?.productLink || url,

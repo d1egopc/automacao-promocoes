@@ -6,6 +6,54 @@ const {
   escolherCupomParaOfertaShopee
 } = require("./cupons");
 
+function numeroPrecoShopee(valor) {
+  const numero = Number(String(valor || "").replace("R$", "").replace(/\./g, "").replace(",", ".").replace(/[^\d.]/g, ""));
+  return Number.isFinite(numero) && numero > 0 ? numero : 0;
+}
+
+function formatarPrecoShopee(numero) {
+  return Number(numero).toFixed(2).replace(".", ",");
+}
+
+function diagnosticarVariacaoPrecoShopee(precoMinNumero = 0, precoMaxNumero = 0) {
+  const temMin = Number.isFinite(precoMinNumero) && precoMinNumero > 0;
+  const temMax = Number.isFinite(precoMaxNumero) && precoMaxNumero > 0;
+  const precoMin = temMin ? formatarPrecoShopee(precoMinNumero) : "";
+  const precoMax = temMax ? formatarPrecoShopee(precoMaxNumero) : "";
+
+  if (!temMin || !temMax || precoMaxNumero <= precoMinNumero) {
+    return {
+      precoMin,
+      precoMax: precoMax || precoMin,
+      temVariacaoPreco: false,
+      avisoVariacaoPreco: ""
+    };
+  }
+
+  const diferenca = precoMaxNumero - precoMinNumero;
+  const percentual = precoMinNumero > 0 ? diferenca / precoMinNumero : 0;
+  const variacaoIrrelevante = diferenca < 1 || percentual <= 0.03;
+
+  if (variacaoIrrelevante) {
+    return {
+      precoMin,
+      precoMax,
+      temVariacaoPreco: false,
+      avisoVariacaoPreco: ""
+    };
+  }
+
+  const variacaoGrande = percentual > 0.2 || diferenca >= 20;
+
+  return {
+    precoMin,
+    precoMax,
+    temVariacaoPreco: true,
+    avisoVariacaoPreco: variacaoGrande
+      ? `Variações de R$ ${precoMin} a R$ ${precoMax}`
+      : `A partir de R$ ${precoMin}`
+  };
+}
 async function farejarShopee(clienteId = "admin", deps = {}) {
 
 const {
@@ -68,7 +116,10 @@ try {
         const desconto = Number(item.priceDiscountRate || 0);
         const vendas = Number(item.sales || 0);
         const nota = Number(item.ratingStar || 0);
-        const precoAtualNumero = Number(item.priceMin || 0);
+        const precoMinNumero = numeroPrecoShopee(item.priceMin);
+        const precoMaxNumero = numeroPrecoShopee(item.priceMax);
+        const precoAtualNumero = precoMinNumero || precoMaxNumero;
+        const variacaoPreco = diagnosticarVariacaoPrecoShopee(precoMinNumero, precoMaxNumero);
 
         const temBeneficioItem = Boolean(
           item.coupon ||
@@ -98,6 +149,10 @@ let novaOferta = {
   preco: precoAtual,
   precoAtual,
   precoAntigo,
+  precoMin: variacaoPreco.precoMin,
+  precoMax: variacaoPreco.precoMax,
+  temVariacaoPreco: variacaoPreco.temVariacaoPreco,
+  avisoVariacaoPreco: variacaoPreco.avisoVariacaoPreco,
   linkOriginal: item.productLink || item.offerLink,
   link: item.productLink || item.offerLink,
   linkAfiliado: "",
