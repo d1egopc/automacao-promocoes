@@ -3508,6 +3508,55 @@ app.use(rateLimit({
     req.path.startsWith("/destinos") ||
     req.path.startsWith("/grupos")
 }));
+const ROTAS_PERF_DIAGNOSTICO = [
+  "/login",
+  "/me",
+  "/fila",
+  "/sessoes",
+  "/destinos",
+  "/integracoes",
+  "/grupos",
+  "/status",
+  "/radar/config",
+  "/automacao"
+];
+
+function rotaPerfDiagnostico(path = "") {
+  const alvo = String(path || "");
+  return ROTAS_PERF_DIAGNOSTICO.some(rota =>
+    alvo === rota ||
+    alvo.startsWith(`${rota}/`) ||
+    (rota === "/integracoes" && alvo === "/integracoes/alertas") ||
+    (rota === "/automacao" && alvo === "/automacao/status")
+  );
+}
+
+app.use((req, res, next) => {
+  if (!rotaPerfDiagnostico(req.path)) return next();
+
+  const inicio = process.hrtime.bigint();
+
+  res.on("finish", () => {
+    const duracaoMs = Number(process.hrtime.bigint() - inicio) / 1e6;
+    const clienteId = (() => {
+      try {
+        return getClienteId(req) || "admin";
+      } catch {
+        return "admin";
+      }
+    })();
+
+    console.log("[PERF]", {
+      metodo: req.method,
+      path: req.originalUrl || req.path,
+      clienteId,
+      duracaoMs: Math.round(duracaoMs),
+      statusCode: res.statusCode
+    });
+  });
+
+  return next();
+});
 
 // ============== POST FILA ENVIO =================
 
