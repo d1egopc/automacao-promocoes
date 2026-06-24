@@ -10494,10 +10494,25 @@ const {
   limparAlertaIntegracao
 } = alertasIntegracoes;
 
+function extrairTagMercadoLivreIntegracao(config = {}) {
+  const credenciais = config?.credenciais || config || {};
+  return String(
+    credenciais.tag ||
+    credenciais.codigoAfiliado ||
+    credenciais.tagId ||
+    credenciais.tagID ||
+    credenciais.tag_id ||
+    credenciais.trackingId ||
+    credenciais.partnerTag ||
+    credenciais.affiliateTag ||
+    ""
+  ).trim();
+}
+
 function credenciaisMercadoLivreValidas(credenciais = {}) {
   return !!(
     String(credenciais.cookies || "").trim() &&
-    String(credenciais.tag || credenciais.codigoAfiliado || "").trim()
+    extrairTagMercadoLivreIntegracao(credenciais)
   );
 }
 
@@ -10621,19 +10636,30 @@ function statusResumoIntegracao(clienteId = "admin", marketplace = "") {
   }
 
   if (ultimoStatus) {
-    const statusNormalizado = mp === "mercadolivre" && ultimoStatus === "tag_invalida"
-      ? "falha_conversao"
-      : ultimoStatus;
-    const mensagemNormalizada = mp === "mercadolivre" && ultimoStatus === "tag_invalida"
-      ? MENSAGEM_FALHA_CONVERSAO_ML
-      : (config.ultimaMensagem || "");
+    let statusNormalizado = ultimoStatus;
+    let mensagemNormalizada = config.ultimaMensagem || "";
+
+    if (mp === "mercadolivre" && ultimoStatus === "tag_invalida") {
+      statusNormalizado = "falha_conversao";
+      mensagemNormalizada = MENSAGEM_FALHA_CONVERSAO_ML;
+    }
+
+    if (mp === "mercadolivre" && temCredenciais && ultimoStatus === "nao_configurado") {
+      const mensagemAnterior = String(config.ultimaMensagem || "").toLowerCase();
+      statusNormalizado = mensagemAnterior.includes("convers")
+        ? "falha_conversao"
+        : "teste_pendente";
+      mensagemNormalizada = statusNormalizado === "falha_conversao"
+        ? MENSAGEM_FALHA_CONVERSAO_ML
+        : "Credenciais salvas, teste real pendente.";
+    }
 
     return {
       marketplace: mp,
       status: statusNormalizado,
       ultimoTesteEm: config.ultimoTesteEm,
       ultimaMensagem: mensagemNormalizada,
-      testado: true
+      testado: statusNormalizado !== "teste_pendente"
     };
   }
 
@@ -10675,7 +10701,7 @@ function respostaTesteMercadoLivre(status, mensagem, tipo = status, detalhes = {
 async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
   const credenciais = config?.credenciais || {};
   const cookies = String(credenciais.cookies || "").trim();
-  const tag = String(credenciais.tag || credenciais.codigoAfiliado || "").trim();
+  const tag = extrairTagMercadoLivreIntegracao(credenciais);
   const urlTeste = "https://www.mercadolivre.com.br/ofertas";
 
   if (!cookies || !tag) {
@@ -13916,6 +13942,11 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
 
 app.post("/importar-produto", async (req, res) => {
   try {
+    const inicioRotaImportacaoMl = Date.now();
+    const marketplaceEntradaImportacao = detectarMarketplaceManual(req.body?.url, req.body?.marketplace);
+    const medirImportacaoManualMl = marketplaceEntradaImportacao === "mercadolivre";
+    const clienteId = getClienteId(req);
+
     const resultado = await importarProdutoManual(req, {
       getClienteId,
       integracoesPorCliente,
@@ -13930,12 +13961,27 @@ app.post("/importar-produto", async (req, res) => {
       gerarLinkAfiliadoMercadoLivre
     });
 
-    const clienteId = getClienteId(req);
     const marketplaceResultado = String(resultado.body?.marketplace || "").toLowerCase();
     const avisoResultado = String(resultado.body?.aviso || "").toLowerCase();
 
     if (["mercadolivre", "amazon"].includes(marketplaceResultado)) {
       if (resultado.body?.manual === true && !resultado.body?.aviso) {
+        if (marketplaceResultado === "mercadolivre") {
+          const linkMlImportado = String(
+            resultado.body?.linkAfiliado ||
+            resultado.body?.linkFinal ||
+            resultado.body?.link ||
+            ""
+          ).trim();
+
+          if (/^https?:\/\/meli\.la\//i.test(linkMlImportado)) {
+            salvarResultadoTesteIntegracao(clienteId, "mercadolivre", {
+              status: "ok",
+              mensagem: "Importação manual Mercado Livre concluída com link afiliado."
+            });
+          }
+        }
+
         limparAlertaIntegracao(clienteId, marketplaceResultado);
       } else if (avisoResultado.includes("erro ao consultar")) {
         if (marketplaceResultado === "mercadolivre") {
@@ -13950,6 +13996,16 @@ app.post("/importar-produto", async (req, res) => {
           });
         }
       }
+    }
+
+    if (medirImportacaoManualMl) {
+      console.log("[PERF][ML_IMPORTACAO_MANUAL_ROTA]", {
+        clienteId,
+        marketplaceResultado,
+        duracaoMs: Date.now() - inicioRotaImportacaoMl,
+        statusCode: resultado.status || 200,
+        temAviso: !!resultado.body?.aviso
+      });
     }
 
     return res
