@@ -1,4 +1,4 @@
-﻿const {
+const {
   cortarTitulo,
   formatarPreco,
   normalizarPreco,
@@ -60,23 +60,42 @@ function montarLegendaOferta(oferta = {}) {
   ]);
 }
 
+
+function montarPrecoVariacaoShopee(oferta = {}) {
+  const aviso = String(oferta.avisoVariacaoPreco || "").trim();
+  if (aviso) return aviso;
+
+  const precoMin = formatarPreco(oferta.precoMin || oferta.precoAtual || oferta.preco);
+  const precoMax = formatarPreco(oferta.precoMax);
+
+  if (precoMin && precoMax && precoMin !== precoMax) {
+    return `${precoMin} a ${precoMax}`;
+  }
+
+  return precoMin || formatarPreco(oferta.precoAtual || oferta.preco);
+}
 function montarLegendaShopee(oferta = {}) {
   const titulo = cortarTitulo(oferta.titulo || oferta.nome || "Oferta", 120);
   const precoBruto = oferta.precoAtual || oferta.preco;
-  const temVariacao = precoTemVariacao(precoBruto);
-  const precoAtual = temVariacao
-    ? formatarFaixaPreco(precoBruto)
-    : formatarPreco(precoBruto);
+  const temVariacaoAuxiliar = oferta.temVariacaoPreco === true;
+  const temVariacao = temVariacaoAuxiliar || precoTemVariacao(precoBruto);
+  const precoAtual = temVariacaoAuxiliar
+    ? montarPrecoVariacaoShopee(oferta)
+    : temVariacao
+      ? formatarFaixaPreco(precoBruto)
+      : formatarPreco(precoBruto);
   const precoAntigo = temVariacao ? "" : formatarPreco(oferta.precoAntigo);
   const desconto = temVariacao ? "" : montarLinhaDesconto(oferta);
   const parcelamento = montarLinhaParcelamento(oferta);
   const cupom = montarLinhaCupom(oferta);
   const aplicarCupom = montarLinhaAplicarCupom(oferta);
-  const blocoPreco = montarBlocoPreco({
-    precoAtual,
-    precoAntigo,
-    variacao: temVariacao
-  });
+  const blocoPreco = temVariacaoAuxiliar
+    ? (precoAtual ? `✅ ${precoAtual}` : "")
+    : montarBlocoPreco({
+        precoAtual,
+        precoAntigo,
+        variacao: temVariacao
+      });
 
   return removerLinhasVazias([
     `\uD83D\uDD25 ${titulo}`,
