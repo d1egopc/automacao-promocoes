@@ -17,6 +17,12 @@ function numeroPrecoShopee(valor) {
     return Number.isFinite(centavos) && centavos > 0 ? centavos / 100 : 0;
   }
 
+  const decimalInteiro = bruto.match(/^(\d+)[.,]0+$/);
+  if (decimalInteiro) {
+    const centavos = Number(decimalInteiro[1]);
+    return Number.isFinite(centavos) && centavos > 0 ? centavos / 100 : 0;
+  }
+
   const numero = Number(
     bruto
       .replace("R$", "")

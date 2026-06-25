@@ -18,17 +18,25 @@ return async function importarShopee(url, config) {
   function normalizarPrecoShopee(valor) {
     if (!valor) return "";
 
-    let texto = String(valor).trim();
-
-    if (texto.includes(",")) return limparPreco(texto);
-
-   if (/^\d+\.\d+$/.test(texto)) {
-   return Number(texto).toFixed(2).replace(".", ",");
-   }
+    const texto = String(valor).trim();
 
     if (/^\d+$/.test(texto)) {
       const centavos = Number(texto);
-      return (centavos / 100).toFixed(2).replace(".", ",");
+      return Number.isFinite(centavos) && centavos > 0
+        ? (centavos / 100).toFixed(2).replace(".", ",")
+        : "";
+    }
+
+    const decimalInteiro = texto.match(/^(\d+)[.,]0+$/);
+    if (decimalInteiro) {
+      const centavos = Number(decimalInteiro[1]);
+      return Number.isFinite(centavos) && centavos > 0
+        ? (centavos / 100).toFixed(2).replace(".", ",")
+        : "";
+    }
+
+    if (/^\d+\.\d+$/.test(texto)) {
+      return Number(texto).toFixed(2).replace(".", ",");
     }
 
     return limparPreco(texto);
