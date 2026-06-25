@@ -1,334 +1,570 @@
-// ================= FAREJADOR SHOPEE =================
 
-const {
-  extrairCuponsShopeeDoHtml,
-  detectarAvisoCupomShopee,
-  escolherCupomParaOfertaShopee
-} = require("./cupons");
+const { extrairProdutosBuscaML } = require("./parser");
 
-function numeroPrecoShopee(valor) {
-  if (valor === null || valor === undefined || valor === "") return 0;
-
-  const bruto = String(valor).trim();
-  if (!bruto) return 0;
-
-  if (/^\d+$/.test(bruto)) {
-    const centavos = Number(bruto);
-    return Number.isFinite(centavos) && centavos > 0 ? centavos / 100 : 0;
-  }
-
-  const decimalInteiro = bruto.match(/^(\d+)[.,]0+$/);
-  if (decimalInteiro) {
-    const centavos = Number(decimalInteiro[1]);
-    return Number.isFinite(centavos) && centavos > 0 ? centavos / 100 : 0;
-  }
-
-  const numero = Number(
-    bruto
-      .replace("R$", "")
-      .replace(/\./g, "")
-      .replace(",", ".")
-      .replace(/[^\d.]/g, "")
-  );
-
-  return Number.isFinite(numero) && numero > 0 ? numero : 0;
-}
-
-function formatarPrecoShopee(numero) {
-  return Number(numero).toFixed(2).replace(".", ",");
-}
-
-function diagnosticarVariacaoPrecoShopee(precoMinNumero = 0, precoMaxNumero = 0) {
-  const temMin = Number.isFinite(precoMinNumero) && precoMinNumero > 0;
-  const temMax = Number.isFinite(precoMaxNumero) && precoMaxNumero > 0;
-  const precoMin = temMin ? formatarPrecoShopee(precoMinNumero) : "";
-  const precoMax = temMax ? formatarPrecoShopee(precoMaxNumero) : "";
-
-  if (!temMin || !temMax || precoMaxNumero <= precoMinNumero) {
-    return {
-      precoMin,
-      precoMax: precoMax || precoMin,
-      temVariacaoPreco: false,
-      avisoVariacaoPreco: ""
-    };
-  }
-
-  const diferenca = precoMaxNumero - precoMinNumero;
-  const percentual = precoMinNumero > 0 ? diferenca / precoMinNumero : 0;
-  const variacaoIrrelevante = diferenca < 1 || percentual <= 0.03;
-
-  if (variacaoIrrelevante) {
-    return {
-      precoMin,
-      precoMax,
-      temVariacaoPreco: false,
-      avisoVariacaoPreco: ""
-    };
-  }
-
-  const variacaoGrande = percentual > 0.2 || diferenca >= 20;
-
-  return {
-    precoMin,
-    precoMax,
-    temVariacaoPreco: true,
-    avisoVariacaoPreco: variacaoGrande
-      ? `Variações de R$ ${precoMin} a R$ ${precoMax}`
-      : `A partir de R$ ${precoMin}`
-  };
-}
-async function farejarShopee(clienteId = "admin", deps = {}) {
-
-const {
-  config,
-  integracoesPorCliente,
-  getIntegracaoCliente,
-  fila,
-  salvarFila,
-  prepararOfertaGlobal,
-  ofertaJaExiste,
-  classificarCategoriaOferta,
-  aplicarFiltrosUniversais,
-  buscarOfertasShopee,
-  normalizarSessaoId,
-  distribuirOfertaParaClientes
-} = deps;
+let obterCuponsMLCliente = async () => [];
+let escolherCupomParaOfertaML = () => null;
 
 try {
-
-  if (!config.marketplaces?.shopee?.ativo) {
-    console.log("[SHOPEE] Shopee desativada. Farejador ignorado.");
-    return;
-  }
-
-  console.log("[SHOPEE] Farejando ofertas Shopee...");
-  const estrategiaFarejador =
-    typeof deps.obterEstrategiaFarejador === "function"
-      ? deps.obterEstrategiaFarejador(clienteId, "shopee")
-      : {
-          descontoMinimo: config.marketplaces?.shopee?.descontoMinimo || 15,
-          filaCritica: false,
-          aceitarBeneficioSemDesconto: true
-        };
-  const temBeneficioFarejador =
-    typeof deps.ofertaTemBeneficioFarejador === "function"
-      ? deps.ofertaTemBeneficioFarejador
-      : (oferta) => Boolean(oferta?.cupom || oferta?.avisoCupom || oferta?.beneficioExtra || oferta?.cupomUrl);
-
-  const produtos = await buscarOfertasShopee(clienteId, {
-    config,
-    getIntegracaoCliente
+  ({
+    obterCuponsMLCliente,
+    escolherCupomParaOfertaML
+  } = require("./cupons"));
+} catch (e) {
+  console.log("[ERRO] [ML-CUPOM]", {
+    erro: e.message
   });
+}
 
+// ================= FAREJADOR MERCADO LIVRE =================
 
-    if (!Array.isArray(produtos)) {
-      console.log("[SHOPEE] Shopee no retornou array");
+async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
+  const {
+    config,
+    integracoesPorCliente,
+    getIntegracaoCliente,
+    fila,
+    salvarFila,
+    prepararOfertaGlobal,
+    ofertaJaExiste,
+    classificarCategoriaOferta,
+    gerarBuscasGlobais,
+    gerarHeadersStealth,
+    farejarCuponsMercadoLivre,
+    importarMercadoLivre,
+    gerarLinkAfiliadoMercadoLivre,
+    deveIgnorarOfertaRepetida,
+    registrarOfertaVista
+  } = deps;
+
+  const resumoML = {
+    clienteId,
+    buscasExecutadas: 0,
+    termosExecutados: [],
+    produtosEncontrados: 0,
+    importados: 0,
+    ignoradosImportadorVazio: 0,
+    ignoradosSemPreco: 0,
+    ignoradosSemAfiliado: 0,
+    ignoradosPrecoMinimo: 0,
+    ignoradosDescontoBaixo: 0,
+    ignoradosTituloRuim: 0,
+    ignoradosDuplicado: 0,
+    ignoradosMemoria: 0,
+    adicionadosFila: 0
+  };
+
+  try {
+    if (!config.marketplaces?.mercadolivre?.ativo) {
+      console.log("[INFO] [ML] Mercado Livre desativado. Farejador ignorado.");
       return;
     }
 
-    console.log(`[SHOPEE] ${produtos.length} produtos Shopee encontrados`);
-    if (typeof registrarAbastecimento === "function") registrarAbastecimento("encontradas", { quantidade: produtos.length });
+    console.log("[INFO] [ML] Farejando ofertas ML");
 
-    let adicionadasNestaRodada = 0;
-    let ofertasEncontradas = [];
+    const estrategiaFarejador =
+      typeof deps.obterEstrategiaFarejador === "function"
+        ? deps.obterEstrategiaFarejador(clienteId, "mercadolivre")
+        : {
+            descontoMinimo: config.marketplaces?.mercadolivre?.descontoMinimo ?? 8,
+            aceitarBeneficioSemDesconto: true
+          };
 
-    const limitePorRodada =
-      config.marketplaces?.shopee?.limitePorRodada || 10;
+    const temBeneficioFarejador =
+      typeof deps.ofertaTemBeneficioFarejador === "function"
+        ? deps.ofertaTemBeneficioFarejador
+        : (oferta) => Boolean(oferta?.cupom || oferta?.avisoCupom || oferta?.beneficioExtra);
 
-    for (const item of produtos) {
+    const buscasPrioritariasML = [
+      "tenis masculino promocao",
+      "tenis feminino promocao",
+      "tenis nike promocao",
+      "tenis adidas promocao",
+      "tenis olympikus promocao",
+      "tenis mizuno promocao",
+      "tenis fila promocao",
+      "chinelo havaianas promocao",
+
+      "kit camisetas masculinas",
+      "camiseta masculina",
+      "camiseta oversized masculina",
+      "camisa polo masculina",
+      "calca jeans masculina",
+      "bermuda masculina",
+      "moletom masculino",
+      "jaqueta masculina",
+
+      "blusa feminina",
+      "calca jeans feminina",
+      "kit calca jeans feminina",
+      "legging feminina",
+      "conjunto feminino",
+      "pijama feminino",
+      "moletom feminino",
+      "jaqueta feminina",
+
+      "perfume masculino promocao",
+      "perfume feminino promocao",
+      "perfume importado promocao",
+      "kit perfume masculino",
+      "kit perfume feminino",
+      "malbec promocao",
+      "natura perfume promocao",
+      "boticario perfume promocao",
+      "eudora perfume promocao",
+
+      "meia termica",
+      "blusa frio masculina",
+      "blusa frio feminina",
+      "jaqueta corta vento",
+      "moletom flanelado",
+      "calca moletom",
+      "pijama inverno",
+      "cobertor casal",
+
+      "smartphone promocao",
+      "celular samsung promocao",
+      "xiaomi promocao",
+      "fone bluetooth promocao",
+      "caixa som bluetooth promocao",
+      "monitor gamer promocao",
+      "teclado mecanico promocao",
+      "mouse gamer promocao",
+      "cadeira gamer promocao",
+
+      "air fryer promocao",
+      "panela eletrica promocao",
+      "omeleteira promocao",
+      "cafeteira promocao",
+      "ventilador promocao",
+      "climatizador promocao",
+
+      "kit ferramentas promocao",
+      "furadeira promocao",
+      "parafusadeira promocao",
+
+      "ração cachorro promocao",
+      "ração gato promocao",
+      "tapete higienico promocao"
+    ];
+
+    const buscasGlobaisExtras = gerarBuscasGlobais(40);
+
+    const buscas = [
+      ...buscasPrioritariasML,
+      ...buscasGlobaisExtras
+    ];
+
+    const limiteBuscasBase = Number(
+      config.marketplaces?.mercadolivre?.limiteBuscasPorRodada || 6
+    ) || 6;
+
+    const limiteBuscas = estrategiaFarejador.filaCritica
+      ? Math.max(limiteBuscasBase, 10)
+      : estrategiaFarejador.filaBaixa
+        ? Math.max(limiteBuscasBase, 8)
+        : limiteBuscasBase;
+
+    const limiteProdutosPorBusca = Number(
+      config.marketplaces?.mercadolivre?.limiteProdutosPorBusca || 20
+    ) || 20;
+
+    const buscasEmbaralhadas = [...buscas].sort(() => Math.random() - 0.5);
+    const buscasDaRodada = buscasEmbaralhadas.slice(0, limiteBuscas);
+
+    console.log("[ML-RODADA-INICIO]", {
+      clienteId,
+      limiteBuscas,
+      limiteProdutosPorBusca,
+      descontoMinimo: estrategiaFarejador.descontoMinimo ?? config.marketplaces?.mercadolivre?.descontoMinimo ?? 8,
+      precoMinimo: config.marketplaces?.mercadolivre?.precoMinimo || 25,
+      termos: buscasDaRodada
+    });
+
+    for (const termo of buscasDaRodada) {
       try {
-        const desconto = Number(item.priceDiscountRate || 0);
-        const vendas = Number(item.sales || 0);
-        const nota = Number(item.ratingStar || 0);
-        const precoMinNumero = numeroPrecoShopee(item.priceMin);
-        const precoMaxNumero = numeroPrecoShopee(item.priceMax);
-        const precoAtualNumero = precoMinNumero || precoMaxNumero;
-        const variacaoPreco = diagnosticarVariacaoPrecoShopee(precoMinNumero, precoMaxNumero);
+        const url = `https://lista.mercadolivre.com.br/${encodeURIComponent(termo)}`;
 
-        const temBeneficioItem = Boolean(
-          item.coupon ||
-          item.cupom ||
-          item.voucher ||
-          item.couponInfo ||
-          item.promotionInfo ||
-          item.offerInfo
-        );
+        const headersML = {
+          ...gerarHeadersStealth()
+        };
 
-        if (desconto < estrategiaFarejador.descontoMinimo && !temBeneficioItem) {
-          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "desconto_baixo" });
-          continue;
-        }
-        if (!precoAtualNumero) {
-          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "sem_preco" });
-          continue;
-        }
-        if (precoAtualNumero < (config.marketplaces?.shopee?.precoMinimo || 20)) {
-          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "desconto_baixo" });
-          continue;
-        }
-        if (vendas < (estrategiaFarejador.filaCritica ? 5 : 20) && !temBeneficioItem) {
-          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "outros" });
-          continue;
-        }
-        if (nota > 0 && nota < (estrategiaFarejador.filaCritica ? 4.2 : 4.5) && !temBeneficioItem) {
-          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "outros" });
-          continue;
+        const cookiesML =
+          integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais?.cookies;
+
+        if (cookiesML) {
+          headersML.Cookie = cookiesML;
         }
 
-        const precoAtual = precoAtualNumero.toFixed(2).replace(".", ",");
+        resumoML.buscasExecutadas += 1;
+        resumoML.termosExecutados.push(termo);
 
-        const precoAntigoNumero =
-          precoAtualNumero / (1 - desconto / 100);
+        const response = await fetch(url, {
+          headers: headersML
+        });
 
-        const precoAntigo = precoAntigoNumero.toFixed(2).replace(".", ",");
+        if (!response.ok) {
+          console.log("[AVISO] [ML] Bloqueou status:", {
+            status: response.status,
+            termo
+          });
 
-let novaOferta = {
-  nome: item.productName,
-  titulo: item.productName,
-  preco: precoAtual,
-  precoAtual,
-  precoAntigo,
-  precoMin: variacaoPreco.precoMin,
-  precoMax: variacaoPreco.precoMax,
-  temVariacaoPreco: variacaoPreco.temVariacaoPreco,
-  avisoVariacaoPreco: variacaoPreco.avisoVariacaoPreco,
-  linkOriginal: item.productLink || item.offerLink,
-  link: item.productLink || item.offerLink,
-  linkAfiliado: "",
-  imagem: item.imageUrl,
-  marketplace: "shopee",
-  categoria: "Shopee",
-  sessaoId: normalizarSessaoId(clienteId, "sessao1"),
-  status: "pendente",
+          await new Promise(r => setTimeout(r, 15000));
+          return;
+        }
+
+        const html = await response.text();
+
+        await farejarCuponsMercadoLivre(html);
+
+        if (html.includes("suspicious-traffic-frontend")) {
+          console.log("[AVISO] [ML] Trafego suspeito", { termo });
+          return;
+        }
+
+        let cupom = "";
+        let avisoCupom = "";
+
+        const cupomMatch =
+          html.match(/cupom\s+([A-Z0-9]{4,20})/i) ||
+          html.match(/código\s+([A-Z0-9]{4,20})/i) ||
+          html.match(/use\s+o\s+cupom\s+([A-Z0-9]{4,20})/i) ||
+          html.match(/aplique\s+o\s+cupom\s+([A-Z0-9]{4,20})/i);
+
+        if (cupomMatch?.[1]) {
+          cupom = cupomMatch[1].trim().toUpperCase();
+          avisoCupom = `Aplique o cupom ${cupom} antes de finalizar.`;
+        } else if (/cupom|código promocional|desconto extra|aplicar desconto/i.test(html)) {
+          avisoCupom = "Há possível cupom/desconto extra na página. Confira antes de finalizar.";
+        }
+
+        const compraNoApp =
+          /compra\s+no\s+app/i.test(html) ||
+          /menor\s+preço\s+no\s+app/i.test(html) ||
+          /app\s+garante/i.test(html) ||
+          /desconto\s+no\s+app/i.test(html);
+
+        if (compraNoApp && !cupom) {
+          cupom = "VER NO APP";
+          avisoCupom = "📱 Confira pelo app do Mercado Livre, pode aparecer menor valor ou desconto exclusivo.";
+        }
+
+        const produtosBusca = extrairProdutosBuscaML(html).slice(0, limiteProdutosPorBusca);
+        resumoML.produtosEncontrados += produtosBusca.length;
+        if (typeof registrarAbastecimento === "function") registrarAbastecimento("encontradas", { quantidade: produtosBusca.length });
+
+        console.log("[ML-BUSCA-RESUMO]", {
+          termo,
+          encontrados: produtosBusca.length,
+          cupomPagina: cupom || "",
+          avisoCupom: Boolean(avisoCupom)
+        });
+
+        for (const itemBusca of produtosBusca) {
+          try {
+            const link = itemBusca.link;
+
+            if (!link) {
+              if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "sem_link_afiliado" });
+              continue;
+            }
+
+            let produto = await importarMercadoLivre(
+              link,
+              clienteId,
+              {
+                getIntegracaoCliente,
+                gerarLinkAfiliadoMercadoLivre
+              }
+            );
+
+            if (!produto) {
+              resumoML.ignoradosImportadorVazio += 1;
+              console.log("[AVISO] [ML] Importador vazio:", link);
+              continue;
+            }
+
+            resumoML.importados += 1;
+            if (typeof registrarAbastecimento === "function") registrarAbastecimento("importada");
+
+            if (
+              (!produto.titulo || produto.titulo === "Produto Mercado Livre") &&
+              itemBusca.titulo
+            ) {
+              produto.titulo = itemBusca.titulo;
+            }
+
+            if (!produto.precoAtual && itemBusca.precoAtual) {
+              produto.precoAtual = itemBusca.precoAtual;
+            }
+
+            if (!produto.precoAntigo && itemBusca.precoAntigo) {
+              produto.precoAntigo = itemBusca.precoAntigo;
+            }
+
+            if (!produto.imagem && itemBusca.imagem) {
+              produto.imagem = itemBusca.imagem;
+            }
+
+            if (!produto.linkOriginal) {
+              produto.linkOriginal = link;
+            }
+
+            if (
+              !produto.precoAtual ||
+              produto.precoAtual === "R$ 0,00" ||
+              produto.precoAtual === "R$ 0,0"
+            ) {
+              resumoML.ignoradosSemPreco += 1;
+              console.log("[AVISO] [ML] Ignorado sem preco valido:", produto.titulo || link);
+              continue;
+            }
+
+            const linkAfiliadoML = String(produto.linkAfiliado || produto.linkFinal || produto.link || "").trim();
+            const linkOriginalML = String(produto.linkOriginal || link || "").trim();
+
+            if (!linkAfiliadoML || linkAfiliadoML === linkOriginalML) {
+              resumoML.ignoradosSemAfiliado += 1;
+              console.log("[AVISO] [ML] Ignorado sem link afiliado do cliente:", {
+                clienteId,
+                titulo: produto.titulo || itemBusca.titulo || "",
+                linkOriginal: linkOriginalML
+              });
+              continue;
+            }
+
+            produto.linkAfiliado = linkAfiliadoML;
+            produto.linkFinal = linkAfiliadoML;
+
+            const precoNumero = Number(
+              String(produto.precoAtual)
+                .replace("R$", "")
+                .replace(/\./g, "")
+                .replace(",", ".")
+                .trim()
+            );
+
+            const precoAntigoNumero = Number(
+              String(produto.precoAntigo || "")
+                .replace("R$", "")
+                .replace(/\./g, "")
+                .replace(",", ".")
+                .trim()
+            );
+
+            const desconto =
+              precoAntigoNumero > precoNumero
+                ? ((precoAntigoNumero - precoNumero) / precoAntigoNumero) * 100
+                : 0;
+
+            if (!precoNumero || !Number.isFinite(precoNumero)) {
+              resumoML.ignoradosSemPreco += 1;
+              continue;
+            }
+
+            const precoMinimoML = config.marketplaces?.mercadolivre?.precoMinimo || 25;
+
+            if (precoNumero < precoMinimoML) {
+              resumoML.ignoradosPrecoMinimo += 1;
+              continue;
+            }
+
+            const descontoMinimoML =
+              estrategiaFarejador.descontoMinimo ??
+              config.marketplaces?.mercadolivre?.descontoMinimo ??
+              8;
+
+            const temDescontoSuficienteML = desconto >= descontoMinimoML;
+
+            if (
+              !temDescontoSuficienteML &&
+              !temBeneficioFarejador(produto) &&
+              !cupom &&
+              !avisoCupom
+            ) {
+              resumoML.ignoradosDescontoBaixo += 1;
+              console.log("[AVISO] [ML] Ignorado por desconto baixo:", {
+                titulo: produto.titulo,
+                desconto: Math.round(desconto) + "%",
+                descontoMinimoML
+              });
+              continue;
+            }
+
+            const tituloLower = String(produto.titulo || "").toLowerCase();
+
+            if (
+              tituloLower.includes("refil") ||
+              tituloLower.includes("amostra") ||
+              tituloLower.includes("mini") ||
+              tituloLower.includes("teste")
+            ) {
+              resumoML.ignoradosTituloRuim += 1;
+              continue;
+            }
+
+            if (
+              produto.imagem &&
+              (
+                produto.imagem.includes("logo_large") ||
+                produto.imagem.includes("ml-web-navigation") ||
+                produto.imagem.includes("mercadolibre/logo")
+              )
+            ) {
+              produto.imagem = "";
+            }
+
+            if (["COPIADO", "APPLIED", "APPEARANCE", "APPLINK"].includes(produto.cupom)) {
+              produto.cupom = "";
+              produto.avisoCupom = "";
+            }
+
+            const categoriaProduto =
+              classificarCategoriaOferta(
+                produto,
+                termo
+              );
+
+            let novaOferta = {
+              id: `ml_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+              nome: produto.titulo,
+              titulo: produto.titulo,
+              preco: produto.precoAtual,
+              precoAtual: produto.precoAtual,
+              precoAntigo: produto.precoAntigo || "",
+              cupom: produto.cupom || cupom || "",
+              avisoCupom: produto.avisoCupom || avisoCupom || "",
+              parcelamento: produto.parcelamento || "",
+              linkOriginal: produto.linkOriginal || link,
+              link: produto.linkAfiliado,
+              linkAfiliado: produto.linkAfiliado,
+              linkFinal: produto.linkAfiliado,
+              imagem: produto.imagem || "",
+              marketplace: "mercadolivre",
+              categoria: categoriaProduto,
+              sessaoId: "sessao1",
+              status: "pendente",
+              clienteId
+            };
+
+            novaOferta = prepararOfertaGlobal(novaOferta);
+
+            try {
+              const cuponsML = await obterCuponsMLCliente(clienteId, cookiesML || "");
+              const cupomOferta = escolherCupomParaOfertaML(novaOferta, cuponsML);
+
+              if (cupomOferta?.cupom) {
+                novaOferta.cupom = cupomOferta.cupom;
+                novaOferta.tipoCupom = cupomOferta.tipoCupom || "";
+                novaOferta.avisoCupom = cupomOferta.avisoCupom || novaOferta.avisoCupom || "";
+              } else if (cupomOferta?.avisoCupom) {
+                novaOferta.tipoCupom = cupomOferta.tipoCupom || "";
+                novaOferta.avisoCupom = cupomOferta.avisoCupom;
+              }
+
+              if (cupomOferta) {
+                console.log("[ML-CUPOM-OFERTA]", {
+                  titulo: novaOferta.titulo,
+                  cupom: cupomOferta.cupom || "",
+                  score: cupomOferta.cupomConfianca || 0,
+                  tipo: cupomOferta.tipoCupom || ""
+                });
+              }
+            } catch (e) {
+              console.log("[ERRO] [ML-CUPOM]", {
+                erro: e.message
+              });
+            }
+
+            console.log("[ML-OFERTA]", {
+              titulo: novaOferta.titulo,
+              preco: novaOferta.precoAtual,
+              categoria: novaOferta.categoria,
+              desconto: Math.round(desconto) + "%",
+              cupom: novaOferta.cupom || "",
+              avisoCupom: Boolean(novaOferta.avisoCupom)
+            });
+
+const jaExiste = ofertaJaExiste(novaOferta);
+
+console.log("🧪 ML CHECK DUPLICIDADE", {
+  titulo: novaOferta.titulo,
   clienteId,
-  criadoEm: new Date().toLocaleString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-  }),
-  cupom: "",
-  avisoCupom: temBeneficioItem
-    ? "Confira voucher/cupom disponível na Shopee antes de finalizar."
-    : ""
-};
+  jaExiste,
+  desconto: Math.round(desconto) + "%",
+  cupom: novaOferta.cupom || "",
+  avisoCupom: Boolean(novaOferta.avisoCupom)
+});
 
-        console.log("[SHOPEE-PRECO-ANTES-GLOBAL]", {
-          titulo: item.productName,
-          "item.priceMin": item.priceMin,
-          "item.priceMax": item.priceMax,
-          precoAtualNumero,
-          precoAtual,
-          precoMin: variacaoPreco.precoMin,
-          precoMax: variacaoPreco.precoMax,
-          "novaOferta.preco": novaOferta.preco,
-          "novaOferta.precoAtual": novaOferta.precoAtual
-        });
+if (jaExiste) {
+  resumoML.ignoradosDuplicado += 1;
+  console.log("[AVISO] [ML] Oferta duplicada:", novaOferta.titulo);
+  continue;
+}
 
-        novaOferta = prepararOfertaGlobal(novaOferta);
+const ignoradaMemoria = deveIgnorarOfertaRepetida(novaOferta);
 
-        console.log("[SHOPEE-PRECO-DEPOIS-GLOBAL]", {
-          titulo: novaOferta.titulo || novaOferta.nome || item.productName,
-          "novaOferta.preco": novaOferta.preco,
-          "novaOferta.precoAtual": novaOferta.precoAtual,
-          "novaOferta.precoMin": novaOferta.precoMin,
-          "novaOferta.precoMax": novaOferta.precoMax,
-          "novaOferta.avisoVariacaoPreco": novaOferta.avisoVariacaoPreco
-        });
+console.log("🧪 ML CHECK MEMORIA", {
+  titulo: novaOferta.titulo,
+  clienteId,
+  ignoradaMemoria
+});
 
-        const htmlShopee =
-          item.html ||
-          item.rawHtml ||
-          item.htmlProduto ||
-          item.pageHtml ||
-          item.productHtml ||
-          "";
+if (ignoradaMemoria) {
+  resumoML.ignoradosMemoria += 1;
+  console.log("[AVISO] [ML] Ignorado pela memoria:", novaOferta.titulo);
+  continue;
+}
 
-        if (htmlShopee) {
-          const cuponsShopee = extrairCuponsShopeeDoHtml(htmlShopee);
-          const avisoShopee = detectarAvisoCupomShopee(htmlShopee, novaOferta);
-          const dadosExtraidos = avisoShopee
-            ? [...cuponsShopee, avisoShopee]
-            : cuponsShopee;
-          const cupomOferta = escolherCupomParaOfertaShopee(
-            novaOferta,
-            dadosExtraidos
-          );
-
-          if (cupomOferta?.cupom) {
-            novaOferta.cupom = cupomOferta.cupom;
-            novaOferta.tipoCupom = cupomOferta.tipoCupom || "";
-            novaOferta.avisoCupom =
-              cupomOferta.avisoCupom || novaOferta.avisoCupom || "";
-
-            if (cupomOferta.cupomUrl) {
-              novaOferta.cupomUrl = cupomOferta.cupomUrl;
+            if (deveIgnorarOfertaRepetida(novaOferta)) {
+              resumoML.ignoradosMemoria += 1;
+              console.log("[AVISO] [ML] Ignorado pela memoria:", novaOferta.titulo);
+              continue;
             }
-          } else if (cupomOferta?.avisoCupom) {
-            novaOferta.tipoCupom = cupomOferta.tipoCupom || "";
-            novaOferta.avisoCupom = cupomOferta.avisoCupom;
 
-            if (cupomOferta.cupomUrl) {
-              novaOferta.cupomUrl = cupomOferta.cupomUrl;
-            }
+            novaOferta.status = novaOferta.status || "pendente";
+            novaOferta.statusDetalhe = novaOferta.statusDetalhe || "Na fila";
+
+            registrarOfertaVista(novaOferta);
+
+            
+console.log("✅ ML VAI PRA FILA", {
+  titulo: novaOferta.titulo,
+  clienteId,
+  marketplace: novaOferta.marketplace,
+  preco: novaOferta.precoAtual || novaOferta.preco
+});
+
+            fila.push(novaOferta);
+            resumoML.adicionadosFila += 1;
+
+            salvarFila(clienteId);
+
+            await new Promise(r =>
+              setTimeout(r, 3000 + Math.random() * 3000)
+            );
+
+          } catch (e) {
+            console.log("[ERRO] [ML] erro produto:", e.message);
           }
         }
 
-        const jaExiste = fila.some(o =>
-          o.link === novaOferta.link ||
-          o.titulo === novaOferta.titulo
-        );
-
-        if (jaExiste) {
-          if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "duplicada" });
-          continue;
-        }
-
-        if (typeof registrarAbastecimento === "function") registrarAbastecimento("importada");
-        ofertasEncontradas.push(novaOferta);
-        adicionadasNestaRodada++;
-
-        console.log("[SHOPEE] Nova oferta Shopee:", {
-          titulo: novaOferta.titulo,
-          preco: novaOferta.precoAtual,
-          desconto: desconto + "%"
-        });
-
-        if (adicionadasNestaRodada >= limitePorRodada) {
-          console.log("[SHOPEE] Limite Shopee atingido");
-          break;
-        }
-
         await new Promise(r =>
-          setTimeout(r, 3000 + Math.random() * 4000)
+          setTimeout(r, 3000 + Math.random() * 5000)
         );
 
       } catch (e) {
-        console.log("[ERRO] [SHOPEE] erro item Shopee:", e.message);
+        console.log("[ERRO] [ML] erro busca:", e.message);
       }
     }
 
-    const ofertasFiltradas = aplicarFiltrosUniversais(
-      ofertasEncontradas,
-      {
-        preferirEnvioBrasil: false,
-        bloquearSemImagem: true,
-        bloquearSemPreco: true,
-      }
-    );
-
-    console.log(
-      `🧠 Ofertas Shopee após filtros universais: ${ofertasFiltradas.length}`
-    );
-
-   for (const oferta of ofertasFiltradas) {
-   await distribuirOfertaParaClientes(oferta);
-   }
-
-    console.log(`[SHOPEE] Shopee finalizado. Adicionadas: ${adicionadasNestaRodada}`);
-
   } catch (e) {
-    console.log("[ERRO] [SHOPEE] erro farejador Shopee:", e.message);
+    console.log("[ERRO] [ML] erro farejador:", e.message);
+  } finally {
+    console.log("[ML-RESUMO-RODADA]", resumoML);
   }
 }
 
 module.exports = {
-  farejarShopee
+  farejarMercadoLivre
 };
+
