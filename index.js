@@ -10948,6 +10948,7 @@ const MENSAGEM_NAO_CONFIGURADO_AMAZON = "Preencha tag e cookies da Amazon para t
 const MENSAGEM_COOKIES_INVALIDOS = "Não conseguimos converter um link de teste. Atualize os cookies e teste novamente.";
 const MENSAGEM_FALHA_CONVERSAO_ML = "Não conseguimos validar a integração agora. Atualize os cookies e teste novamente.";
 const MENSAGEM_FALHA_CONVERSAO_AMAZON = "Não conseguimos validar a integração da Amazon agora. Atualize os cookies e teste novamente.";
+const MENSAGEM_TESTE_INCONCLUSIVO_ML = "Não conseguimos validar o link de teste agora, mas sua integração tem conversões recentes funcionando.";
 const MENSAGEM_TESTE_PENDENTE = "Credenciais salvas, teste real pendente.";
 const MENSAGEM_ALERTA_ML = MENSAGEM_COOKIES_INVALIDOS;
 const MENSAGEM_ALERTA_AMAZON = MENSAGEM_FALHA_CONVERSAO_AMAZON;
@@ -11042,11 +11043,15 @@ function salvarResultadoTesteIntegracao(clienteId = "admin", marketplace = "", r
 
   integracoesPorCliente[clienteId] = integracoesPorCliente[clienteId] || {};
   const atual = integracoesPorCliente[clienteId][mp] || { marketplace: mp, credenciais: {} };
+  const preservarOkRecente =
+    mp === "mercadolivre" &&
+    resultado.status === "teste_inconclusivo" &&
+    normalizarStatusSalvoIntegracao(mp, atual.ultimoStatus || "") === "ok";
 
   integracoesPorCliente[clienteId][mp] = {
     ...atual,
     ultimoTesteEm: new Date().toISOString(),
-    ultimoStatus: resultado.status || "erro",
+    ultimoStatus: preservarOkRecente ? atual.ultimoStatus : (resultado.status || "erro"),
     ultimaMensagem: resultado.mensagem || ""
   };
 
@@ -11089,7 +11094,7 @@ function normalizarStatusSalvoIntegracao(marketplace = "", status = "") {
   if (mp === "mercadolivre" && valor === "tag_invalida") return "falha_conversao";
   if (mp === "amazon" && ["configuracao_invalida", "tag_invalida", "falha_geracao_link"].includes(valor)) return "falha_conversao";
 
-  if (["ok", "teste_pendente", "nao_configurado", "cookies_invalidos", "falha_conversao"].includes(valor)) return valor;
+  if (["ok", "teste_pendente", "teste_inconclusivo", "nao_configurado", "cookies_invalidos", "falha_conversao"].includes(valor)) return valor;
 
   return valor || "teste_pendente";
 }
@@ -11100,6 +11105,9 @@ function normalizarMensagemStatusIntegracao(marketplace = "", status = "", mensa
 
   if (statusNormalizado === "ok") return MENSAGEM_TESTE_OK;
   if (statusNormalizado === "teste_pendente") return MENSAGEM_TESTE_PENDENTE;
+  if (statusNormalizado === "teste_inconclusivo") return mp === "mercadolivre"
+    ? MENSAGEM_TESTE_INCONCLUSIVO_ML
+    : mensagem || MENSAGEM_TESTE_PENDENTE;
   if (statusNormalizado === "cookies_invalidos") return MENSAGEM_COOKIES_INVALIDOS;
   if (statusNormalizado === "nao_configurado") return mp === "mercadolivre"
     ? MENSAGEM_NAO_CONFIGURADO_ML
@@ -11199,11 +11207,99 @@ function respostaTesteMercadoLivre(status, mensagem, tipo = status, detalhes = {
   };
 }
 
+const URL_TESTE_MERCADOLIVRE_PRODUTO = "https://www.mercadolivre.com.br/p/MLB19135666";
+const JANELA_CONVERSAO_RECENTE_ML_MS = 7 * 24 * 60 * 60 * 1000;
+
+function dataMsIntegracao(valor = "") {
+  if (!valor) return 0;
+
+  const direto = Date.parse(valor);
+  if (Number.isFinite(direto)) return direto;
+
+  const match = String(valor).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return 0;
+
+  const [, dia, mes, ano, hora, minuto, segundo = "0"] = match;
+  const data = new Date(Number(ano), Number(mes) - 1, Number(dia), Number(hora), Number(minuto), Number(segundo));
+  const ms = data.getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function eventoRecenteIntegracao(valor = "") {
+  const ms = dataMsIntegracao(valor);
+  return ms > 0 && (Date.now() - ms) <= JANELA_CONVERSAO_RECENTE_ML_MS;
+}
+
+function ofertaMercadoLivreComMeliLaRecente(clienteId = "admin") {
+  if (!Array.isArray(fila)) return null;
+
+  return fila.find(item => {
+    const marketplace = normalizarTexto(item?.marketplace || item?.mercado || "");
+    if (marketplace !== "mercadolivre" && marketplace !== "mercadolivrebrasil") return false;
+    if (String(item?.clienteId || "admin") !== String(clienteId || "admin")) return false;
+
+    const linkAfiliado = String(item?.linkAfiliado || item?.linkFinal || item?.link || "").trim();
+    if (!/^https?:\/\/meli\.la\//i.test(linkAfiliado)) return false;
+
+    return [
+      item?.ultimoEnvioEm,
+      item?.enviadoEm,
+      item?.dataEnvio,
+      item?.dataEntradaFila,
+      item?.criadoEm
+    ].some(eventoRecenteIntegracao);
+  }) || null;
+}
+
+function obterUrlProdutoMercadoLivreParaTeste(clienteId = "admin") {
+  if (Array.isArray(fila)) {
+    const item = fila.find(oferta => {
+      const marketplace = normalizarTexto(oferta?.marketplace || oferta?.mercado || "");
+      if (marketplace !== "mercadolivre" && marketplace !== "mercadolivrebrasil") return false;
+      if (String(oferta?.clienteId || "admin") !== String(clienteId || "admin")) return false;
+
+      const linkOriginal = String(oferta?.linkOriginal || oferta?.linkProduto || oferta?.urlOriginal || "").trim();
+      return /^https?:\/\/(?:www\.|produto\.)?mercadolivre\.com\.br\/(?:p\/MLB|MLB-?\d+)/i.test(linkOriginal);
+    });
+
+    if (item) {
+      return String(item.linkOriginal || item.linkProduto || item.urlOriginal || "").trim();
+    }
+  }
+
+  return URL_TESTE_MERCADOLIVRE_PRODUTO;
+}
+
+function evidenciaConversaoMercadoLivreRecente(clienteId = "admin", config = {}) {
+  if (
+    normalizarStatusSalvoIntegracao("mercadolivre", config?.ultimoStatus || "") === "ok" &&
+    eventoRecenteIntegracao(config?.ultimoTesteEm || "")
+  ) {
+    return {
+      ok: true,
+      origem: "ultimo_status_ok",
+      ultimoTesteEm: config.ultimoTesteEm
+    };
+  }
+
+  const oferta = ofertaMercadoLivreComMeliLaRecente(clienteId);
+  if (oferta) {
+    return {
+      ok: true,
+      origem: oferta?.radar || oferta?.radarNaFila ? "radar_meli_la_recente" : "oferta_meli_la_recente",
+      ofertaId: oferta.id || "",
+      linkAfiliado: oferta.linkAfiliado || oferta.linkFinal || oferta.link || ""
+    };
+  }
+
+  return { ok: false };
+}
+
 async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
   const credenciais = config?.credenciais || {};
   const cookies = String(credenciais.cookies || "").trim();
   const tag = extrairTagMercadoLivreIntegracao(credenciais);
-  const urlTeste = "https://www.mercadolivre.com.br/ofertas";
+  const urlTeste = obterUrlProdutoMercadoLivreParaTeste(clienteId);
 
   if (!cookies || !tag) {
     return respostaTesteMercadoLivre(
@@ -11299,11 +11395,28 @@ async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
     }
 
     if (!conversao.ok || !/^https?:\/\/meli\.la\//i.test(linkAfiliado)) {
+      const evidenciaRecente = evidenciaConversaoMercadoLivreRecente(clienteId, config);
+
+      if (Number(conversao.status) === 400 && evidenciaRecente.ok) {
+        return respostaTesteMercadoLivre(
+          "teste_inconclusivo",
+          MENSAGEM_TESTE_INCONCLUSIVO_ML,
+          "teste_inconclusivo",
+          {
+            httpStatus: conversao.status,
+            linkAfiliado,
+            urlTeste,
+            motivo: "url_teste_rejeitada",
+            evidenciaRecente
+          }
+        );
+      }
+
       return respostaTesteMercadoLivre(
         "falha_conversao",
         MENSAGEM_FALHA_CONVERSAO_ML,
         "falha_conversao",
-        { httpStatus: conversao.status, linkAfiliado }
+        { httpStatus: conversao.status, linkAfiliado, urlTeste }
       );
     }
 
@@ -11314,6 +11427,22 @@ async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
       { linkAfiliado }
     );
   } catch (e) {
+    const evidenciaRecente = evidenciaConversaoMercadoLivreRecente(clienteId, config);
+
+    if (evidenciaRecente.ok) {
+      return respostaTesteMercadoLivre(
+        "teste_inconclusivo",
+        MENSAGEM_TESTE_INCONCLUSIVO_ML,
+        "teste_inconclusivo",
+        {
+          erro: e.message,
+          urlTeste,
+          motivo: "erro_teste_com_conversao_recente",
+          evidenciaRecente
+        }
+      );
+    }
+
     return respostaTesteMercadoLivre(
       "falha_conversao",
       MENSAGEM_FALHA_CONVERSAO_ML,
@@ -11724,7 +11853,9 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
       mensagem: resultadoTeste.mensagem
     });
 
-    if (!resultadoTeste.ok) {
+    if (resultadoTeste.status === "teste_inconclusivo") {
+      limparAlertaIntegracao(clienteId, "mercadolivre");
+    } else if (!resultadoTeste.ok) {
       registrarAlertaMercadoLivre(clienteId, resultadoTeste.tipo || resultadoTeste.status, resultadoTeste.detalhes || {});
     } else {
       limparAlertaIntegracao(clienteId, "mercadolivre");
@@ -11735,7 +11866,7 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
       marketplace: "mercadolivre",
       status: resultadoTeste.status,
       ultimoTesteEm: configAtualizada?.ultimoTesteEm || null,
-      ultimoStatus: resultadoTeste.status,
+      ultimoStatus: configAtualizada?.ultimoStatus || resultadoTeste.status,
       ultimaMensagem: resultadoTeste.mensagem,
       detalhes: resultadoTeste.detalhes || {}
     });
