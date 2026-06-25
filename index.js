@@ -9153,6 +9153,42 @@ function radarImportanteParaRetencaoSemDestino(oferta = {}, radar = {}, cupomRad
   );
 }
 
+function linkChaveRetidaOferta(oferta = {}) {
+  return String(
+    oferta.linkOriginal ||
+    oferta.linkAfiliado ||
+    oferta.linkFinal ||
+    oferta.link ||
+    ""
+  ).trim().toLowerCase();
+}
+
+function precoChaveRetidaOferta(oferta = {}) {
+  return String(oferta.precoAtual || oferta.preco || oferta.valor || "")
+    .trim()
+    .replace(/\s+/g, "");
+}
+
+function chaveRetidaOferta(clienteId = "admin", oferta = {}) {
+  return [
+    String(clienteId || oferta.clienteId || "admin"),
+    normalizarTexto(oferta.marketplace || oferta.mercado || ""),
+    normalizarTexto(oferta.titulo || oferta.nome || ""),
+    precoChaveRetidaOferta(oferta),
+    linkChaveRetidaOferta(oferta),
+    "retida"
+  ].join("|");
+}
+
+function retidaEquivalenteJaExiste(clienteId = "admin", oferta = {}) {
+  const chaveNova = chaveRetidaOferta(clienteId, oferta);
+
+  return fila.some(item => {
+    if (normalizarTexto(item.status || "") !== "retida") return false;
+    return chaveRetidaOferta(item.clienteId || clienteId, item) === chaveNova;
+  });
+}
+
 function reterRadarSemDestinoCliente(clienteId = "admin", oferta = {}) {
   marcarOfertaRetida(oferta, "retida_sem_destino_compativel");
   oferta.statusRadar = "retida";
@@ -9161,6 +9197,25 @@ function reterRadarSemDestinoCliente(clienteId = "admin", oferta = {}) {
   oferta.motivo = "sem_destino_compativel";
   oferta.motivoTecnico = "sem_destino_compativel";
   oferta.motivoFinal = "retida_sem_destino_compativel";
+
+  if (retidaEquivalenteJaExiste(clienteId, oferta)) {
+    logOptimus("FILA", "Radar retido duplicado ignorado", {
+      clienteId,
+      titulo: oferta.titulo || oferta.nome || "",
+      marketplace: oferta.marketplace || "",
+      preco: oferta.precoAtual || oferta.preco || "",
+      motivoRetencao: oferta.motivoRetencao
+    });
+
+    return {
+      ok: true,
+      adicionada: false,
+      retida: true,
+      duplicada: true,
+      motivo: "retida_sem_destino_compativel",
+      oferta
+    };
+  }
 
   fila.push(oferta);
   registrarTratamentoRadar(clienteId, oferta, "retida");
