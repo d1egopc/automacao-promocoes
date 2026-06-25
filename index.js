@@ -10800,9 +10800,15 @@ return res.json({
 
 const marketplaceRules = integracoesUtils.marketplaceRules;
 
-const MENSAGEM_ALERTA_ML = "Atualize os cookies do Mercado Livre.";
-const MENSAGEM_FALHA_CONVERSAO_ML = "Falha na conversão. Atualize os cookies ou revise a Tag ID.";
-const MENSAGEM_ALERTA_AMAZON = "Atualize a tag/cookies da Amazon para manter a captura de ofertas funcionando.";
+const MENSAGEM_TESTE_OK = "Teste real OK. Link de teste convertido com sucesso.";
+const MENSAGEM_NAO_CONFIGURADO_ML = "Preencha Tag ID e Cookies para testar.";
+const MENSAGEM_NAO_CONFIGURADO_AMAZON = "Preencha tag e cookies da Amazon para testar.";
+const MENSAGEM_COOKIES_INVALIDOS = "Não conseguimos converter um link de teste. Atualize os cookies e teste novamente.";
+const MENSAGEM_FALHA_CONVERSAO_ML = "Não conseguimos validar a integração agora. Atualize os cookies e teste novamente.";
+const MENSAGEM_FALHA_CONVERSAO_AMAZON = "Não conseguimos validar a integração da Amazon agora. Atualize os cookies e teste novamente.";
+const MENSAGEM_TESTE_PENDENTE = "Credenciais salvas, teste real pendente.";
+const MENSAGEM_ALERTA_ML = MENSAGEM_COOKIES_INVALIDOS;
+const MENSAGEM_ALERTA_AMAZON = MENSAGEM_FALHA_CONVERSAO_AMAZON;
 
 const {
   listarAlertasIntegracoes,
@@ -10871,22 +10877,23 @@ function registrarAlertaMercadoLivre(clienteId = "admin", tipo = "configuracao_i
   return registrarAlertaIntegracao(clienteId, "mercadolivre", {
     tipo: tipoNormalizado === "tag_invalida" ? "falha_conversao" : tipo,
     status: "atencao",
-    mensagem: ["falha_conversao", "tag_invalida"].includes(tipoNormalizado)
+    mensagem: tipoNormalizado === "falha_conversao" || tipoNormalizado === "tag_invalida"
       ? MENSAGEM_FALHA_CONVERSAO_ML
-      : MENSAGEM_ALERTA_ML,
+      : MENSAGEM_COOKIES_INVALIDOS,
     detalhes
   });
 }
-
 function registrarAlertaAmazon(clienteId = "admin", tipo = "configuracao_incompleta", detalhes = {}) {
+  const tipoNormalizado = String(tipo || "").toLowerCase();
   return registrarAlertaIntegracao(clienteId, "amazon", {
     tipo,
     status: "atencao",
-    mensagem: MENSAGEM_ALERTA_AMAZON,
+    mensagem: tipoNormalizado === "cookie_invalido" || tipoNormalizado === "cookies_invalidos"
+      ? MENSAGEM_COOKIES_INVALIDOS
+      : MENSAGEM_FALHA_CONVERSAO_AMAZON,
     detalhes
   });
 }
-
 function salvarResultadoTesteIntegracao(clienteId = "admin", marketplace = "", resultado = {}) {
   const mp = String(marketplace || "").toLowerCase();
   if (!mp) return null;
@@ -10917,6 +10924,50 @@ function extrairTagAmazonIntegracao(config = {}) {
   ).trim();
 }
 
+function credenciaisAmazonTesteValidas(config = {}) {
+  const credenciais = config?.credenciais || {};
+  const modo = String(config?.modo || credenciais.modo || "").toLowerCase();
+  const tag = extrairTagAmazonIntegracao(config);
+  const cookies = String(credenciais.cookies || "").trim();
+  const temApi = !!(
+    String(credenciais.appId || "").trim() &&
+    String(credenciais.accessKey || "").trim() &&
+    String(credenciais.secretKey || "").trim()
+  );
+
+  if (modo === "api") return temApi;
+  if (modo === "cookies" || cookies) return !!(tag && cookies);
+
+  return !!(tag && cookies) || temApi;
+}
+function normalizarStatusSalvoIntegracao(marketplace = "", status = "") {
+  const mp = String(marketplace || "").toLowerCase();
+  const valor = String(status || "").toLowerCase();
+
+  if (mp === "mercadolivre" && valor === "tag_invalida") return "falha_conversao";
+  if (mp === "amazon" && ["configuracao_invalida", "tag_invalida", "falha_geracao_link"].includes(valor)) return "falha_conversao";
+
+  if (["ok", "teste_pendente", "nao_configurado", "cookies_invalidos", "falha_conversao"].includes(valor)) return valor;
+
+  return valor || "teste_pendente";
+}
+
+function normalizarMensagemStatusIntegracao(marketplace = "", status = "", mensagem = "") {
+  const mp = String(marketplace || "").toLowerCase();
+  const statusNormalizado = normalizarStatusSalvoIntegracao(mp, status);
+
+  if (statusNormalizado === "ok") return MENSAGEM_TESTE_OK;
+  if (statusNormalizado === "teste_pendente") return MENSAGEM_TESTE_PENDENTE;
+  if (statusNormalizado === "cookies_invalidos") return MENSAGEM_COOKIES_INVALIDOS;
+  if (statusNormalizado === "nao_configurado") return mp === "mercadolivre"
+    ? MENSAGEM_NAO_CONFIGURADO_ML
+    : MENSAGEM_NAO_CONFIGURADO_AMAZON;
+  if (statusNormalizado === "falha_conversao") return mp === "amazon"
+    ? MENSAGEM_FALHA_CONVERSAO_AMAZON
+    : MENSAGEM_FALHA_CONVERSAO_ML;
+
+  return mensagem || MENSAGEM_TESTE_PENDENTE;
+}
 function statusResumoIntegracao(clienteId = "admin", marketplace = "") {
   const mp = String(marketplace || "").toLowerCase();
   const config = integracoesPorCliente?.[clienteId]?.[mp] || null;
@@ -10926,7 +10977,7 @@ function statusResumoIntegracao(clienteId = "admin", marketplace = "") {
   const temCredenciais = mp === "mercadolivre"
     ? credenciaisMercadoLivreValidas(credenciais)
     : mp === "amazon"
-      ? credenciaisAmazonValidas(config || {})
+      ? credenciaisAmazonTesteValidas(config || {})
       : Object.values(credenciais).some(v => String(v || "").trim());
 
   if (!config || !temCredenciais) {
@@ -10935,8 +10986,8 @@ function statusResumoIntegracao(clienteId = "admin", marketplace = "") {
       status: "nao_configurado",
       ultimoTesteEm: config?.ultimoTesteEm || null,
       ultimaMensagem: mp === "mercadolivre"
-        ? "Sem cookies ou sem Tag ID."
-        : "Sem tag ou configuração mínima.",
+        ? MENSAGEM_NAO_CONFIGURADO_ML
+        : MENSAGEM_NAO_CONFIGURADO_AMAZON,
       testado: Boolean(config?.ultimoTesteEm)
     };
   }
@@ -10946,29 +10997,22 @@ function statusResumoIntegracao(clienteId = "admin", marketplace = "") {
       marketplace: mp,
       status: "teste_pendente",
       ultimoTesteEm: null,
-      ultimaMensagem: "Credenciais salvas, teste real pendente.",
+      ultimaMensagem: MENSAGEM_TESTE_PENDENTE,
       testado: false
     };
   }
 
   if (ultimoStatus) {
-    let statusNormalizado = ultimoStatus;
-    let mensagemNormalizada = config.ultimaMensagem || "";
+    let statusNormalizado = normalizarStatusSalvoIntegracao(mp, ultimoStatus);
 
-    if (mp === "mercadolivre" && ultimoStatus === "tag_invalida") {
-      statusNormalizado = "falha_conversao";
-      mensagemNormalizada = MENSAGEM_FALHA_CONVERSAO_ML;
-    }
-
-    if (mp === "mercadolivre" && temCredenciais && ultimoStatus === "nao_configurado") {
+    if (temCredenciais && statusNormalizado === "nao_configurado") {
       const mensagemAnterior = String(config.ultimaMensagem || "").toLowerCase();
-      statusNormalizado = mensagemAnterior.includes("convers")
+      statusNormalizado = mensagemAnterior.includes("convers") || mensagemAnterior.includes("validar")
         ? "falha_conversao"
         : "teste_pendente";
-      mensagemNormalizada = statusNormalizado === "falha_conversao"
-        ? MENSAGEM_FALHA_CONVERSAO_ML
-        : "Credenciais salvas, teste real pendente.";
     }
+
+    const mensagemNormalizada = normalizarMensagemStatusIntegracao(mp, statusNormalizado, config.ultimaMensagem || "");
 
     return {
       marketplace: mp,
@@ -10983,11 +11027,10 @@ function statusResumoIntegracao(clienteId = "admin", marketplace = "") {
     marketplace: mp,
     status: "teste_pendente",
     ultimoTesteEm: config.ultimoTesteEm,
-    ultimaMensagem: config.ultimaMensagem || "Credenciais salvas, teste real pendente.",
+    ultimaMensagem: MENSAGEM_TESTE_PENDENTE,
     testado: false
   };
 }
-
 function extrairCsrfMercadoLivreHtml(html = "") {
   const patterns = [
     /x-csrf-token["']?\s*[:=]\s*["']([^"']+)["']/i,
@@ -11023,7 +11066,7 @@ async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
   if (!cookies || !tag) {
     return respostaTesteMercadoLivre(
       "nao_configurado",
-      "Sem cookies ou sem Tag ID.",
+      MENSAGEM_NAO_CONFIGURADO_ML,
       "configuracao_incompleta",
       { faltandoCookies: !cookies, faltandoTag: !tag }
     );
@@ -11051,7 +11094,7 @@ async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
     ) {
       return respostaTesteMercadoLivre(
         "cookies_invalidos",
-        "Cookie expirado ou sessão inválida. Atualize seus cookies.",
+        MENSAGEM_COOKIES_INVALIDOS,
         textoFalha.includes("account-verification")
           ? "account_verification"
           : textoFalha.includes("suspicious-traffic")
@@ -11064,7 +11107,7 @@ async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
     if (!response.ok) {
       return respostaTesteMercadoLivre(
         "cookies_invalidos",
-        "Cookie expirado ou sessão inválida. Atualize seus cookies.",
+        MENSAGEM_COOKIES_INVALIDOS,
         "cookie_invalido",
         { httpStatus: response.status, urlFinal }
       );
@@ -11075,7 +11118,7 @@ async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
     if (!csrfToken) {
       return respostaTesteMercadoLivre(
         "cookies_invalidos",
-        "Cookie expirado ou sessão inválida. Atualize seus cookies.",
+        MENSAGEM_COOKIES_INVALIDOS,
         "cookie_invalido",
         { motivo: "csrf_nao_encontrado", httpStatus: response.status, urlFinal }
       );
@@ -11107,7 +11150,7 @@ async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
     if ([401, 403, 419].includes(Number(conversao.status))) {
       return respostaTesteMercadoLivre(
         "cookies_invalidos",
-        "Cookie expirado ou sessão inválida. Atualize seus cookies.",
+        MENSAGEM_COOKIES_INVALIDOS,
         "cookie_invalido",
         { httpStatus: conversao.status }
       );
@@ -11124,63 +11167,126 @@ async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
 
     return respostaTesteMercadoLivre(
       "ok",
-      "Link afiliado convertido com sucesso.",
+      MENSAGEM_TESTE_OK,
       "teste_ok",
       { linkAfiliado }
     );
   } catch (e) {
     return respostaTesteMercadoLivre(
-      "cookies_invalidos",
-      "Cookie expirado ou sessão inválida. Atualize seus cookies.",
+      "falha_conversao",
+      MENSAGEM_FALHA_CONVERSAO_ML,
       "erro_teste",
       { erro: e.message }
     );
   }
 }
 
-function testarAmazonConfiguracao(config = {}) {
-  const tag = extrairTagAmazonIntegracao(config);
+function respostaTesteAmazon(status, mensagem, tipo = status, detalhes = {}) {
+  return {
+    ok: status === "ok",
+    status,
+    tipo,
+    mensagem,
+    detalhes
+  };
+}
 
-  if (!credenciaisAmazonValidas(config || {}) || !tag) {
-    return {
-      ok: false,
-      status: "nao_configurado",
-      tipo: "configuracao_invalida",
-      mensagem: "Sem tag ou configuração mínima.",
-      detalhes: { camposPresentes: Object.keys(config?.credenciais || {}) }
-    };
+async function testarAmazonConfiguracao(config = {}) {
+  const credenciais = config?.credenciais || {};
+  const modo = String(config?.modo || credenciais.modo || "cookies").toLowerCase();
+  const tag = extrairTagAmazonIntegracao(config);
+  const cookies = String(credenciais.cookies || "").trim();
+
+  if (modo === "api") {
+    if (!credenciaisAmazonValidas(config || {})) {
+      return respostaTesteAmazon(
+        "nao_configurado",
+        "Preencha as credenciais da API Amazon para testar.",
+        "configuracao_invalida",
+        { modo, camposPresentes: Object.keys(credenciais) }
+      );
+    }
+
+    return respostaTesteAmazon(
+      "teste_pendente",
+      MENSAGEM_TESTE_PENDENTE,
+      "teste_pendente",
+      { modo, observacao: "Teste real automático preservado apenas para modo cookies." }
+    );
+  }
+
+  if (!tag || !cookies) {
+    return respostaTesteAmazon(
+      "nao_configurado",
+      MENSAGEM_NAO_CONFIGURADO_AMAZON,
+      "configuracao_invalida",
+      { modo, faltandoTag: !tag, faltandoCookies: !cookies, camposPresentes: Object.keys(credenciais) }
+    );
   }
 
   try {
-    const url = new URL("https://www.amazon.com.br/dp/B0TESTEOPTIMUS");
+    const url = new URL("https://www.amazon.com.br/s?k=ofertas");
     url.searchParams.set("tag", tag);
     const linkAfiliado = url.toString();
 
-    if (!linkAfiliado.includes(`tag=${encodeURIComponent(tag)}`) && !linkAfiliado.includes(`tag=${tag}`)) {
-      return {
-        ok: false,
-        status: "configuracao_invalida",
-        tipo: "tag_invalida",
-        mensagem: "Tag inválida ou ausente no link afiliado gerado.",
-        detalhes: { linkAfiliado }
-      };
+    const response = await fetch(linkAfiliado, {
+      method: "GET",
+      headers: {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Cookie": cookies
+      }
+    });
+
+    const urlFinal = response.url || "";
+    const html = await response.text().catch(() => "");
+    const textoFalha = `${urlFinal}\n${html}`.toLowerCase();
+
+    if ([401, 403, 419, 429, 503].includes(Number(response.status)) ||
+      textoFalha.includes("captcha") ||
+      textoFalha.includes("robot check") ||
+      textoFalha.includes("automated access") ||
+      textoFalha.includes("digite os caracteres")) {
+      return respostaTesteAmazon(
+        "cookies_invalidos",
+        MENSAGEM_COOKIES_INVALIDOS,
+        "cookie_invalido",
+        { modo, httpStatus: response.status, urlFinal }
+      );
     }
 
-    return {
-      ok: true,
-      status: "ok",
-      tipo: "teste_ok",
-      mensagem: "Link afiliado gerado corretamente contendo a tag configurada.",
-      detalhes: { linkAfiliado }
-    };
+    if (!response.ok) {
+      return respostaTesteAmazon(
+        "falha_conversao",
+        MENSAGEM_FALHA_CONVERSAO_AMAZON,
+        "falha_conversao",
+        { modo, httpStatus: response.status, urlFinal }
+      );
+    }
+
+    if (!linkAfiliado.includes(`tag=${encodeURIComponent(tag)}`) && !linkAfiliado.includes(`tag=${tag}`)) {
+      return respostaTesteAmazon(
+        "falha_conversao",
+        MENSAGEM_FALHA_CONVERSAO_AMAZON,
+        "falha_conversao",
+        { modo, linkAfiliado }
+      );
+    }
+
+    return respostaTesteAmazon(
+      "ok",
+      MENSAGEM_TESTE_OK,
+      "teste_ok",
+      { modo, linkAfiliado, httpStatus: response.status }
+    );
   } catch (e) {
-    return {
-      ok: false,
-      status: "configuracao_invalida",
-      tipo: "falha_geracao_link",
-      mensagem: "Falha na geração do link afiliado da Amazon.",
-      detalhes: { erro: e.message }
-    };
+    return respostaTesteAmazon(
+      "falha_conversao",
+      MENSAGEM_FALHA_CONVERSAO_AMAZON,
+      "erro_teste",
+      { modo, erro: e.message }
+    );
   }
 }
 function avaliarAlertasConfiguracaoIntegracoes(clienteId = "admin") {
@@ -11246,7 +11352,7 @@ app.get("/integracoes/alertas", (req, res) => {
 
   const alertas = listarAlertasIntegracoes(clienteId)
     .filter(alerta =>
-      !(String(alerta.marketplace || "").toLowerCase() === "mercadolivre" && status.mercadolivre.status === "ok")
+      status[String(alerta.marketplace || "").toLowerCase()]?.status !== "ok"
     )
     .map(alerta => {
       const marketplace = String(alerta.marketplace || "").toLowerCase();
@@ -11440,7 +11546,7 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
         marketplace: "mercadolivre",
         status: "nao_configurado",
         ultimoStatus: "nao_configurado",
-        ultimaMensagem: "Sem cookies ou sem Tag ID."
+        ultimaMensagem: MENSAGEM_NAO_CONFIGURADO_ML
       });
     }
 
@@ -11454,7 +11560,7 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
         marketplace: "amazon",
         status: "nao_configurado",
         ultimoStatus: "nao_configurado",
-        ultimaMensagem: "Sem tag ou configuração mínima."
+        ultimaMensagem: MENSAGEM_NAO_CONFIGURADO_AMAZON
       });
     }
 
@@ -11493,7 +11599,7 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
     });
   }
   if (marketplace === "amazon") {
-    const resultadoTeste = testarAmazonConfiguracao(config);
+    const resultadoTeste = await testarAmazonConfiguracao(config);
     const configAtualizada = salvarResultadoTesteIntegracao(clienteId, "amazon", {
       status: resultadoTeste.status,
       mensagem: resultadoTeste.mensagem
@@ -14293,7 +14399,25 @@ app.post("/importar-produto", async (req, res) => {
           if (/^https?:\/\/meli\.la\//i.test(linkMlImportado)) {
             salvarResultadoTesteIntegracao(clienteId, "mercadolivre", {
               status: "ok",
-              mensagem: "Importação manual Mercado Livre concluída com link afiliado."
+              mensagem: MENSAGEM_TESTE_OK
+            });
+          }
+        }
+
+        if (marketplaceResultado === "amazon") {
+          const linkAmazonImportado = String(
+            resultado.body?.linkAfiliado ||
+            resultado.body?.linkFinal ||
+            resultado.body?.link ||
+            resultado.body?.linkOriginal ||
+            ""
+          ).trim();
+          const tagAmazon = extrairTagAmazonIntegracao(integracoesPorCliente?.[clienteId]?.amazon || {});
+
+          if (linkAmazonImportado && (!tagAmazon || linkAmazonImportado.includes(`tag=${encodeURIComponent(tagAmazon)}`) || linkAmazonImportado.includes(`tag=${tagAmazon}`))) {
+            salvarResultadoTesteIntegracao(clienteId, "amazon", {
+              status: "ok",
+              mensagem: MENSAGEM_TESTE_OK
             });
           }
         }
