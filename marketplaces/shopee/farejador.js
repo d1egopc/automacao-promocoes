@@ -210,7 +210,28 @@ let novaOferta = {
     : ""
 };
 
+        console.log("[SHOPEE-PRECO-ANTES-GLOBAL]", {
+          titulo: item.productName,
+          "item.priceMin": item.priceMin,
+          "item.priceMax": item.priceMax,
+          precoAtualNumero,
+          precoAtual,
+          precoMin: variacaoPreco.precoMin,
+          precoMax: variacaoPreco.precoMax,
+          "novaOferta.preco": novaOferta.preco,
+          "novaOferta.precoAtual": novaOferta.precoAtual
+        });
+
         novaOferta = prepararOfertaGlobal(novaOferta);
+
+        console.log("[SHOPEE-PRECO-DEPOIS-GLOBAL]", {
+          titulo: novaOferta.titulo || novaOferta.nome || item.productName,
+          "novaOferta.preco": novaOferta.preco,
+          "novaOferta.precoAtual": novaOferta.precoAtual,
+          "novaOferta.precoMin": novaOferta.precoMin,
+          "novaOferta.precoMax": novaOferta.precoMax,
+          "novaOferta.avisoVariacaoPreco": novaOferta.avisoVariacaoPreco
+        });
 
         const htmlShopee =
           item.html ||
