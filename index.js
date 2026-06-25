@@ -2335,6 +2335,36 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const BCRYPT_ROUNDS = 10;
+
+function normalizarEmailUsuario(email = "") {
+  return String(email || "").trim().toLowerCase();
+}
+
+function senhaPareceHashBcrypt(senha = "") {
+  return /^\$2[aby]\$\d{2}\$/.test(String(senha || ""));
+}
+
+function hashSenhaUsuario(senha = "") {
+  return bcrypt.hashSync(String(senha || ""), BCRYPT_ROUNDS);
+}
+
+function senhaUsuarioConfere(usuario = {}, senha = "") {
+  const senhaSalva = String(usuario.senha || "");
+  const senhaEntrada = String(senha || "");
+
+  if (!senhaSalva || !senhaEntrada) return false;
+
+  if (senhaPareceHashBcrypt(senhaSalva)) {
+    return bcrypt.compareSync(senhaEntrada, senhaSalva);
+  }
+
+  return senhaSalva === senhaEntrada;
+}
+
+function normalizarPlanoChave(nome = "free") {
+  return normalizarTexto(nome || "free") || "free";
+}
 const app = express(); // ðŸ‘ˆ MUITO IMPORTANTE ter isso
 
 app.set("trust proxy", 1);
@@ -4479,6 +4509,30 @@ if (indexReal >= 0) {
   return res.status(resultado.statusHttp || 200).json(resultado);
 });
 
+function filtrarConfigPorPlanoCliente(clienteId = "admin", configBase = {}) {
+  const usuario = usuarios.find(u => String(u.id) === String(clienteId)) || null;
+
+  if (!usuario || usuario.papel === "admin_master") {
+    return configBase;
+  }
+
+  const plano = getPlanoPorNome(usuario.plano || "free") || {};
+  const permitidos = new Set((plano.marketplaces || []).map(item => normalizarTexto(item)));
+  const marketplacesFiltrados = {};
+
+  for (const [nome, dados] of Object.entries(configBase.marketplaces || {})) {
+    if (permitidos.has(normalizarTexto(nome))) {
+      marketplacesFiltrados[nome] = dados;
+    }
+  }
+
+  return {
+    ...configBase,
+    marketplaces: marketplacesFiltrados,
+    marketplacesLiberados: [...permitidos]
+  };
+}
+
 app.get("/config", (req, res) => {
   const clienteId = getClienteId(req);
   const isAdmin = isAdminMaster(req);
@@ -4493,10 +4547,9 @@ app.get("/config", (req, res) => {
 
   const configCliente = configsPorCliente?.[clienteId] || {};
 
-  return res.json({
-    ok: true,
+  const configResposta = filtrarConfigPorPlanoCliente(
     clienteId,
-    config: {
+    {
       ...config,
       ...configCliente,
       marketplaces: {
@@ -4504,6 +4557,12 @@ app.get("/config", (req, res) => {
         ...(configCliente.marketplaces || {})
       }
     }
+  );
+
+  return res.json({
+    ok: true,
+    clienteId,
+    config: configResposta
   });
 });
 
@@ -4511,13 +4570,18 @@ app.get("/minha-config", (req, res) => {
   const clienteId = getClienteId(req);
   const configCliente = getConfigCliente(clienteId);
 
-  return res.json({
-    ok: true,
+  const configResposta = filtrarConfigPorPlanoCliente(
     clienteId,
-    config: {
+    {
       ...config,
       ...configCliente
     }
+  );
+
+  return res.json({
+    ok: true,
+    clienteId,
+    config: configResposta
   });
 });
 
@@ -4567,10 +4631,10 @@ app.post("/admin/planos", (req, res) => {
     });
   }
 
-  const nomePlano = String(body.nome || "").trim();
+  const nomePlano = normalizarPlanoChave(body.nome || "");
   const planoAnterior =
     planos[nomePlano] ||
-    planos[nomePlano.toLowerCase()] ||
+    planos[String(body.nome || "").trim()] ||
     {};
   const limitesBody = body.limites || {};
   const recursosBody = body.recursos || {};
@@ -4595,7 +4659,7 @@ app.post("/admin/planos", (req, res) => {
     preco: String(body.preco ?? planoAnterior.preco ?? ""),
 
     marketplaces: Array.isArray(body.marketplaces)
-      ? body.marketplaces
+      ? body.marketplaces.map(item => normalizarTexto(item)).filter(Boolean)
       : Array.isArray(planoAnterior.marketplaces)
         ? planoAnterior.marketplaces
         : [],
@@ -4732,8 +4796,10 @@ app.post("/admin/usuarios", (req, res) => {
     });
   }
 
+  const emailNormalizado = normalizarEmailUsuario(body.email);
+
   const existe = usuarios.find(
-    u => u.email.toLowerCase() === body.email.toLowerCase()
+    u => normalizarEmailUsuario(u.email) === emailNormalizado
   );
 
   if (existe) {
@@ -4745,11 +4811,11 @@ app.post("/admin/usuarios", (req, res) => {
 
   const novoUsuario = {
     id: gerarId(),
-    nome: body.nome,
-    email: body.email.toLowerCase(),
-    senha: body.senha,
+    nome: String(body.nome || "").trim(),
+    email: emailNormalizado,
+    senha: hashSenhaUsuario(body.senha),
     papel: body.papel || "cliente",
-    plano: body.plano || "free",
+    plano: normalizarPlanoChave(body.plano || "free"),
     creditos: Number(body.creditos || 0),
     ativo: true,
     criadoEm: new Date().toISOString()
@@ -4788,16 +4854,39 @@ app.put("/admin/usuarios/:id", (req, res) => {
 
   const body = req.body || {};
 
-  usuario.nome = body.nome || usuario.nome;
+  usuario.nome = body.nome ? String(body.nome).trim() : usuario.nome;
 
-  usuario.email =
-    (body.email || usuario.email).toLowerCase();
+  if (body.email) {
+    const emailNormalizado = normalizarEmailUsuario(body.email);
+    const emailEmUso = usuarios.find(u =>
+      String(u.id) !== String(usuario.id) &&
+      normalizarEmailUsuario(u.email) === emailNormalizado
+    );
 
-  if (body.senha) {
-    usuario.senha = body.senha;
+    if (emailEmUso) {
+      return res.status(400).json({
+        ok: false,
+        erro: "Email já cadastrado"
+      });
+    }
+
+    usuario.email = emailNormalizado;
+  } else {
+    usuario.email = normalizarEmailUsuario(usuario.email);
   }
 
-  usuario.plano = body.plano || usuario.plano;
+  if (body.senha) {
+    const senhaEntrada = String(body.senha || "");
+    const senhaAtual = String(usuario.senha || "");
+
+    if (senhaEntrada !== senhaAtual) {
+      usuario.senha = senhaPareceHashBcrypt(senhaEntrada)
+        ? senhaEntrada
+        : hashSenhaUsuario(senhaEntrada);
+    }
+  }
+
+  usuario.plano = body.plano ? normalizarPlanoChave(body.plano) : normalizarPlanoChave(usuario.plano || "free");
 
   usuario.papel = body.papel || usuario.papel;
 
@@ -5002,19 +5091,7 @@ function getPlanoUsuario(req) {
 
   if (!usuario) return null;
 
-  const nomePlano =
-    String(usuario.plano || "")
-      .trim()
-      .toLowerCase();
-
-  const planoEncontrado = Object.values(planos).find(
-    p =>
-      String(p.nome || "")
-        .trim()
-        .toLowerCase() === nomePlano
-  );
-
-  return planoEncontrado || null;
+  return getPlanoPorNome(usuario.plano || "free");
 }
 
 // ===================== FUNCAO RECURSOS ============================
@@ -5039,10 +5116,7 @@ function clienteTemRecursoMensageiro(clienteId = "admin") {
   if (!usuario) return clienteId === "admin";
   if (usuario.papel === "admin_master") return true;
 
-  const nomePlano = String(usuario.plano || "").trim().toLowerCase();
-  const plano = Object.values(planos || {}).find(p =>
-    String(p.nome || "").trim().toLowerCase() === nomePlano
-  );
+  const plano = getPlanoPorNome(usuario.plano || "free");
 
   return plano?.recursos?.mensageiro === true;
 }
@@ -6692,6 +6766,12 @@ function idsSessaoWhatsappRadar(clienteId = "admin", sessaoEntrada = "") {
     const chave = chaveRadarId(valor || "");
     if (chave) ids.add(chave);
   };
+
+  for (const chave of Object.keys(planos || {})) {
+    if (chave !== nomePlano && normalizarPlanoChave(chave) === nomePlano) {
+      delete planos[chave];
+    }
+  }
 
   adicionar(entrada);
   adicionar(normalizarSessaoId(clienteId, entrada));
@@ -10702,8 +10782,8 @@ app.post("/login", async (req, res) => {
   const login = String(user || "").trim().toLowerCase();
 
   const usuario = usuarios.find(u =>
-    String(u.email || "").toLowerCase() === login ||
-    String(u.id || "").toLowerCase() === login
+    normalizarEmailUsuario(u.email) === login ||
+    String(u.id || "").trim().toLowerCase() === login
   );
 
   if (!usuario) {
@@ -10716,10 +10796,17 @@ app.post("/login", async (req, res) => {
 
  let senhaOk = false;
 
-senhaOk = String(usuario.senha || "") === String(pass || "");
+senhaOk = senhaUsuarioConfere(usuario, pass);
 
 if (!senhaOk) {
   return res.status(401).json({ erro: "Senha invÃ¡lida" });
+}
+
+if (!senhaPareceHashBcrypt(usuario.senha)) {
+  usuario.senha = hashSenhaUsuario(pass);
+  usuario.email = normalizarEmailUsuario(usuario.email);
+  usuario.atualizadoEm = new Date().toISOString();
+  salvarUsuarios();
 }
 
   const token = jwt.sign(
@@ -11709,9 +11796,9 @@ app.post("/integracoes/:marketplace", (req, res) => {
   const plano = getPlanoUsuario(req);
 
 if (!isAdminMaster(req)) {
-  const liberados = plano?.marketplaces || [];
+  const liberados = (plano?.marketplaces || []).map(item => normalizarTexto(item));
 
-  if (!liberados.includes(marketplace)) {
+  if (!liberados.includes(normalizarTexto(marketplace))) {
     return res.status(403).json({
       ok: false,
       erro: `Marketplace ${marketplace} nÃ£o liberado no seu plano`
@@ -13522,20 +13609,20 @@ async function gerarLinkCurtoAliExpress(urlOriginal, credenciais = {}) {
 // ======================= FUNCAO PLANO NOME =========================================
 
 function getPlanoPorNome(nome = "free") {
-  const chave = normalizarTexto(nome || "free");
+  const chave = normalizarPlanoChave(nome || "free");
 
-  if (planos?.[chave]) {
-    return planos[chave];
-  }
+  const candidatos = Object.entries(planos || {}).filter(([key, plano]) =>
+    normalizarPlanoChave(key) === chave ||
+    normalizarPlanoChave(plano?.nome || "") === chave
+  );
 
-  const encontrado = Object.entries(planos || {}).find(([key, plano]) => {
-    return (
-      normalizarTexto(key) === chave ||
-      normalizarTexto(plano?.nome || "") === chave
-    );
+  candidatos.sort((a, b) => {
+    const dataA = Date.parse(a[1]?.atualizadoEm || "") || 0;
+    const dataB = Date.parse(b[1]?.atualizadoEm || "") || 0;
+    return dataB - dataA;
   });
 
-  return encontrado?.[1] || planos?.free || null;
+  return candidatos[0]?.[1] || planos?.[chave] || planos?.free || null;
 }
 
 // =============== FUNCAO GERAR LINK AFILIADO SHOPEE ========================================
@@ -13830,7 +13917,7 @@ function usuarioPodeReceberMarketplace(usuario, marketplace) {
 
   const plano = getPlanoPorNome(usuario.plano) || {};
 
-  const marketplacesLiberados = plano.marketplaces || [];
+  const marketplacesLiberados = (plano.marketplaces || []).map(item => normalizarTexto(item));
 
   return marketplacesLiberados.includes(
     normalizarTexto(marketplace || "")
