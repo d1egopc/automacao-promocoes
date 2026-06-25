@@ -4509,25 +4509,71 @@ if (indexReal >= 0) {
   return res.status(resultado.statusHttp || 200).json(resultado);
 });
 
-function filtrarConfigPorPlanoCliente(clienteId = "admin", configBase = {}) {
-  const usuario = usuarios.find(u => String(u.id) === String(clienteId)) || null;
+function getConfigCliente(clienteId = "admin") {
+  return configsPorCliente?.[String(clienteId || "admin")] || {};
+}
 
-  if (!usuario || usuario.papel === "admin_master") {
+function normalizarTelegramCliente(configCliente = {}) {
+  const telegram = configCliente?.telegram || {};
+
+  return {
+    ativo: telegram.ativo === true,
+    destinos: Array.isArray(telegram.destinos) ? telegram.destinos : []
+  };
+}
+
+function aplicarEscopoSensivelCliente(clienteId = "admin", configBase = {}) {
+  const cid = String(clienteId || "admin");
+  const configCliente = getConfigCliente(cid);
+  const destinosCliente = destinosPorCliente?.[cid];
+  const destinosPorSessaoCliente =
+    destinosCliente && !Array.isArray(destinosCliente) && typeof destinosCliente === "object"
+      ? destinosCliente
+      : (
+        configCliente.destinosPorSessao &&
+        !Array.isArray(configCliente.destinosPorSessao) &&
+        typeof configCliente.destinosPorSessao === "object"
+          ? configCliente.destinosPorSessao
+          : {}
+      );
+
+  return {
+    ...configBase,
+    telegram: normalizarTelegramCliente(configCliente),
+    destinos: Array.isArray(configCliente.destinos) ? configCliente.destinos : [],
+    destinosInteligentes: Array.isArray(destinosCliente)
+      ? destinosCliente
+      : Array.isArray(configCliente.destinosInteligentes)
+        ? configCliente.destinosInteligentes
+        : [],
+    destinosPorSessao: destinosPorSessaoCliente
+  };
+}
+
+function filtrarConfigPorPlanoCliente(clienteId = "admin", configBase = {}, opcoes = {}) {
+  const usuario = usuarios.find(u => String(u.id) === String(clienteId)) || null;
+  const configEscopada = aplicarEscopoSensivelCliente(clienteId, configBase);
+
+  if (!usuario || (usuario.papel === "admin_master" && opcoes.permitirGlobalAdmin === true)) {
     return configBase;
+  }
+
+  if (usuario.papel === "admin_master") {
+    return configEscopada;
   }
 
   const plano = getPlanoPorNome(usuario.plano || "free") || {};
   const permitidos = new Set((plano.marketplaces || []).map(item => normalizarTexto(item)));
   const marketplacesFiltrados = {};
 
-  for (const [nome, dados] of Object.entries(configBase.marketplaces || {})) {
+  for (const [nome, dados] of Object.entries(configEscopada.marketplaces || {})) {
     if (permitidos.has(normalizarTexto(nome))) {
       marketplacesFiltrados[nome] = dados;
     }
   }
 
   return {
-    ...configBase,
+    ...configEscopada,
     marketplaces: marketplacesFiltrados,
     marketplacesLiberados: [...permitidos]
   };
@@ -4535,17 +4581,7 @@ function filtrarConfigPorPlanoCliente(clienteId = "admin", configBase = {}) {
 
 app.get("/config", (req, res) => {
   const clienteId = getClienteId(req);
-  const isAdmin = isAdminMaster(req);
-
-  if (isAdmin) {
-    return res.json({
-      ok: true,
-      clienteId,
-      config
-    });
-  }
-
-  const configCliente = configsPorCliente?.[clienteId] || {};
+  const configCliente = getConfigCliente(clienteId);
 
   const configResposta = filtrarConfigPorPlanoCliente(
     clienteId,
@@ -15589,14 +15625,22 @@ app.post("/campanhas/enviar", async (req, res) => {
 
 // ================= TELEGRAM =================
 
-async function enviarTelegram(oferta, mensagem) {
+async function enviarTelegram(oferta, mensagem, clienteIdAlvo = "") {
   try {
-    if (!config.telegram?.ativo) {
+    const clienteId = String(
+      clienteIdAlvo ||
+      oferta?.clienteId ||
+      oferta?.origemClienteId ||
+      "admin"
+    );
+    const telegram = normalizarTelegramCliente(getConfigCliente(clienteId));
+
+    if (!telegram.ativo) {
       console.log("[TELEGRAM] Telegram desativado.");
       return;
     }
 
-    const destinos = config.telegram?.destinos || [];
+    const destinos = telegram.destinos || [];
 
     if (!destinos.length) {
       console.log("[TELEGRAM] Nenhum destino Telegram configurado.");
