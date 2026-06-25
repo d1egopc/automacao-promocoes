@@ -8431,7 +8431,8 @@ async function adicionarRadarCapturadoNaFilaClientes(ofertaBase = {}, opcoes = {
       idOfertaFila: resultado.oferta?.id || "",
       linkAfiliado: resultado.oferta?.linkAfiliado || resultado.oferta?.linkFinal || resultado.oferta?.link || "",
       statusRadar: resultado.oferta?.statusRadar || "",
-      statusFila: resultado.oferta?.status || ""
+      statusFila: resultado.oferta?.status || "",
+      retida: !!resultado.retida
     });
   }
 
@@ -8442,9 +8443,10 @@ function classificarMotivoResumoRadar(motivo = "") {
   const texto = normalizarTexto(motivo);
 
   if (!texto) return "outros";
+  if (texto.includes("semdestinocompativel") || texto.includes("semdestino") || texto.includes("destinocompativel")) return "categoria";
   if (texto.includes("memoria") || texto.includes("repetida_na_memoria")) return "memoria";
   if (texto.includes("duplicada") || texto.includes("repetida")) return "repetida";
-  if (texto.includes("limite_radar") || texto.includes("fila_cheia") || texto.includes("pendente_total")) return "fila";
+  if (texto.includes("limiteradar") || texto.includes("filacheia") || texto.includes("pendentetotal") || texto.includes("limite_radar") || texto.includes("fila_cheia") || texto.includes("pendente_total")) return "fila";
   if (texto.includes("categoria") || texto.includes("destino_compativel") || texto.includes("sem_destino")) return "categoria";
   if (texto.includes("link_original") || texto.includes("intermediario") || texto.includes("marketplace_nao_identificado")) return "link";
   if (texto.includes("importacao")) return "importacao";
@@ -8458,6 +8460,7 @@ function resumirResultadosRadarMensagem(resultados = []) {
     rejeitadasMemoria: 0,
     rejeitadasRepetida: 0,
     rejeitadasCategoria: 0,
+    retidasDestino: 0,
     rejeitadasFila: 0,
     rejeitadasImportacao: 0,
     rejeitadasLink: 0,
@@ -8476,7 +8479,14 @@ function resumirResultadosRadarMensagem(resultados = []) {
           continue;
         }
 
-        const bucket = classificarMotivoResumoRadar(cliente?.motivo || "");
+        const motivoCliente = cliente?.motivo || "";
+        const statusCliente = normalizarTexto(cliente?.statusRadar || cliente?.statusFila || "");
+        if (cliente?.retida || statusCliente === "retida") {
+          resumo.retidasDestino += 1;
+          continue;
+        }
+
+        const bucket = classificarMotivoResumoRadar(motivoCliente);
         if (bucket === "memoria") resumo.rejeitadasMemoria += 1;
         else if (bucket === "repetida") resumo.rejeitadasRepetida += 1;
         else if (bucket === "categoria") resumo.rejeitadasCategoria += 1;
@@ -8818,6 +8828,7 @@ logDebug("🧪 RADAR LINKS EXTRAIDOS", {
       radarConfigFontes: radarConfig
     });
     const adicionadasLink = clientes.filter(cliente => cliente.adicionada).length;
+    const houveRetidaDestino = clientes.some(cliente => cliente.retida);
     const primeiraRejeicao = clientes.find(cliente => !cliente.adicionada)?.motivo || "";
     const beneficio = beneficioResumoRadar(ofertaRadar);
     const economiaRadar = calcularEconomiaRadar(ofertaRadar);
@@ -8864,7 +8875,7 @@ logDebug("🧪 RADAR LINKS EXTRAIDOS", {
       marketplaceDetectado: importacao.resolucao?.marketplaceReal || ofertaRadar.marketplace || "",
       tipoLink: importacao.resolucao?.tipoLinkRadar === "intermediario" ? "intermediario" : "produto",
       tipoLinkRadar: importacao.resolucao?.tipoLinkRadar || "produto",
-      statusCaptura: adicionadasLink > 0 ? "fila" : (primeiraRejeicao?.startsWith("retida") ? "retida" : "erro"),
+      statusCaptura: adicionadasLink > 0 ? "fila" : (houveRetidaDestino || primeiraRejeicao?.startsWith("retida") ? "retida" : "erro"),
       motivoFinal: adicionadasLink > 0 ? "enviado_para_fila" : primeiraRejeicao || "nenhum_cliente_adicionado",
       motivoTecnico: adicionadasLink > 0 ? "" : primeiraRejeicao || "nenhum_cliente_adicionado",
       titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
@@ -8882,8 +8893,8 @@ logDebug("🧪 RADAR LINKS EXTRAIDOS", {
       linkResgateCupom: ofertaRadar.linkResgateCupom || "",
       beneficioExtra: ofertaRadar.beneficioExtra || beneficio,
       beneficio,
-      status: adicionadasLink > 0 ? "fila" : "ignorada",
-      statusRadar: adicionadasLink > 0 ? "fila" : "ignorada",
+      status: adicionadasLink > 0 ? "fila" : (houveRetidaDestino ? "retida" : "ignorada"),
+      statusRadar: adicionadasLink > 0 ? "fila" : (houveRetidaDestino ? "retida" : "ignorada"),
       motivo: adicionadasLink > 0 ? "" : primeiraRejeicao || "nenhum_cliente_adicionado",
       linksDetectados: 1,
       adicionadas: adicionadasLink,
@@ -9031,6 +9042,62 @@ function existeDestinoCompativelRadar(clienteId = "admin", oferta = {}) {
   return destinosCliente.some(destino =>
     destinoAceitaOferta(destino, oferta)
   );
+}
+
+function radarImportanteParaRetencaoSemDestino(oferta = {}, radar = {}, cupomRadar = {}, tipoRadar = "") {
+  const score = Number(radar.radarScore || oferta.radarScore || oferta.score || 0);
+  const tipoRadarNormalizado = normalizarTexto(tipoRadar || oferta.tipoRadar || "");
+  const tipoCupom = normalizarTexto(cupomRadar.tipoCupom || oferta.tipoCupom || "");
+
+  return Boolean(
+    cupomRadar.cupomConfirmado === true ||
+    oferta.cupomConfirmado === true ||
+    cupomRadar.cupom ||
+    oferta.cupom ||
+    cupomRadar.avisoCupom ||
+    oferta.avisoCupom ||
+    cupomRadar.cupomDetectado ||
+    oferta.cupomDetectado ||
+    cupomRadar.cupomDetectadoTexto ||
+    oferta.cupomDetectadoTexto ||
+    (tipoCupom && tipoCupom !== "nenhum") ||
+    tipoRadarNormalizado === "radarcomcupom" ||
+    score >= 60
+  );
+}
+
+function reterRadarSemDestinoCliente(clienteId = "admin", oferta = {}) {
+  marcarOfertaRetida(oferta, "retida_sem_destino_compativel");
+  oferta.statusRadar = "retida";
+  oferta.radarNaFila = false;
+  oferta.radarPendenteAnalise = false;
+  oferta.motivo = "sem_destino_compativel";
+  oferta.motivoTecnico = "sem_destino_compativel";
+  oferta.motivoFinal = "retida_sem_destino_compativel";
+
+  fila.push(oferta);
+  registrarTratamentoRadar(clienteId, oferta, "retida");
+  salvarFila(clienteId);
+
+  logOptimus("FILA", "Radar retido sem destino compativel", {
+    clienteId,
+    titulo: oferta.titulo || oferta.nome || "",
+    categoria: oferta.categoria || "",
+    marketplace: oferta.marketplace || "",
+    tipoRadar: oferta.tipoRadar || "",
+    cupom: oferta.cupom || "",
+    cupomConfirmado: Boolean(oferta.cupomConfirmado),
+    score: oferta.radarScore || oferta.score || "",
+    motivoRetencao: oferta.motivoRetencao
+  });
+
+  return {
+    ok: true,
+    adicionada: false,
+    retida: true,
+    motivo: "retida_sem_destino_compativel",
+    oferta
+  };
 }
 
 function itemContaComoPendenteRadar(item = {}) {
@@ -9348,6 +9415,20 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
       categoria: ofertaCliente.categoria || "",
       marketplace: ofertaCliente.marketplace || ""
     });
+    if (radarImportanteParaRetencaoSemDestino(ofertaCliente, radar, cupomRadar, tipoRadar)) {
+      if (ofertaJaExiste(ofertaCliente)) {
+        logOptimus("RADAR", "Retencao sem destino ignorada por duplicidade", {
+          clienteId,
+          motivo: "oferta_duplicada",
+          categoria: ofertaCliente.categoria || "",
+          marketplace: ofertaCliente.marketplace || ""
+        });
+        return { ok: false, motivo: "oferta_duplicada" };
+      }
+
+      return reterRadarSemDestinoCliente(clienteId, ofertaCliente);
+    }
+
     return { ok: false, motivo: "sem_destino_compativel" };
   }
 
