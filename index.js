@@ -2806,6 +2806,93 @@ function marcarOfertaRetida(oferta = {}, motivoRetencao = "retida_sem_destino_co
   return oferta;
 }
 
+function ofertaEhShopee(oferta = {}) {
+  return normalizarTexto(oferta.marketplace || oferta.mercado || "") === "shopee";
+}
+
+function ofertaEhRadar(oferta = {}) {
+  return (
+    normalizarTexto(oferta.origem || "") === "radar" ||
+    oferta.radar === true ||
+    oferta.radarNaFila === true
+  );
+}
+
+function ofertaTemCupomRealOuDetectado(oferta = {}) {
+  const cupomTexto = String(oferta.cupom || "").trim();
+  const cupomTipo = normalizarTexto(oferta.cupomTipo || oferta.tipoCupom || "");
+  const cupomFake = ["copiado", "cupomcopiado", "semcupom", "applied", "appearance", "applink"].includes(normalizarTexto(cupomTexto));
+
+  return Boolean(
+    !cupomFake &&
+    (
+      cupomTexto ||
+      oferta.cupomConfirmado === true ||
+      oferta.cupomValidado === true ||
+      oferta.cupomDetectado === true ||
+      oferta.cupomDetectadoTexto === true ||
+      cupomTipo === "real" ||
+      cupomTipo === "detectado"
+    )
+  );
+}
+
+function precoShopeeAparentaCentavosBruto(oferta = {}) {
+  const preco = numeroMoedaOferta(oferta.precoAtual || oferta.preco || oferta.valor || "");
+  if (!Number.isFinite(preco) || preco < 1000) return false;
+
+  const textoPreco = String(oferta.precoAtual || oferta.preco || "").trim();
+  const terminaComCentavosZero = /(?:,|\.)00$/.test(textoPreco);
+  const inteiro = Math.abs(preco - Math.round(preco)) < 0.001;
+  const priceMinOriginal = Number(oferta.priceMinOriginal ?? oferta.priceMin ?? oferta.precoMinOriginal ?? 0);
+  const priceMaxOriginal = Number(oferta.priceMaxOriginal ?? oferta.priceMax ?? oferta.precoMaxOriginal ?? 0);
+  const originalInteiroAlto = [priceMinOriginal, priceMaxOriginal].some(valor =>
+    Number.isFinite(valor) && valor >= 1000 && Math.abs(valor - Math.round(valor)) < 0.001
+  );
+
+  return inteiro && (terminaComCentavosZero || originalInteiroAlto);
+}
+
+function diagnosticoPrecoShopee(oferta = {}) {
+  return {
+    titulo: oferta.titulo || oferta.nome || "",
+    precoAntesGlobal: oferta.precoAntesGlobal || "",
+    precoDepoisGlobal: oferta.precoDepoisGlobal || oferta.precoAtual || oferta.preco || "",
+    precoFinalFila: oferta.precoAtual || oferta.preco || "",
+    priceMinOriginal: oferta.priceMinOriginal ?? oferta.priceMin ?? oferta.precoMinOriginal ?? "",
+    priceMaxOriginal: oferta.priceMaxOriginal ?? oferta.priceMax ?? oferta.precoMaxOriginal ?? ""
+  };
+}
+
+function reterShopeePrecoSuspeitoSeNecessario(oferta = {}) {
+  if (!ofertaEhShopee(oferta)) return false;
+
+  const diagnostico = diagnosticoPrecoShopee(oferta);
+  console.log("[SHOPEE-PRECO-DEBUG]", diagnostico);
+
+  if (
+    ofertaEhRadar(oferta) ||
+    ofertaTemCupomRealOuDetectado(oferta) ||
+    !precoShopeeAparentaCentavosBruto(oferta)
+  ) {
+    return false;
+  }
+
+  marcarOfertaRetida(oferta, "retida_preco_shopee_suspeito");
+  oferta.statusDetalhe = "Retida por preco Shopee suspeito";
+  adicionarAvisoInternoOferta(oferta, "retida_preco_shopee_suspeito");
+
+  console.log("[SHOPEE-PRECO-SUSPEITO]", {
+    ...diagnostico,
+    marketplace: oferta.marketplace || "",
+    categoria: oferta.categoria || "",
+    origem: oferta.origem || "",
+    motivoRetencao: oferta.motivoRetencao
+  });
+
+  return true;
+}
+
 function analisarDestinosCompativeisFila(clienteId = "admin", oferta = {}, configCliente = {}) {
   const destinosInteligentes = obterDestinosInteligentesCliente(clienteId, configCliente);
   const compativeis = [];
@@ -13796,6 +13883,13 @@ try {
 
 } catch (e) {
   console.log("[ERRO] Erro ao calcular score:", e.message);
+}
+
+if (reterShopeePrecoSuspeitoSeNecessario(ofertaCliente)) {
+  registrarOfertaVista(ofertaCliente);
+  fila.push(ofertaCliente);
+  salvarFila(clienteId);
+  continue;
 }
 
 registrarOfertaVista(ofertaCliente);
