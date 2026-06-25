@@ -204,12 +204,13 @@ const REGRAS = [
     fortes: [
       "notebook", "laptop", "chromebook", "macbook", "computador",
       "pc gamer", "all in one", "mini pc", "desktop", "workstation",
-      "notebook gamer"
+      "notebook gamer", "mochila notebook"
     ],
     palavras: [
       "thinkpad", "ideapad", "vivobook", "zenbook", "aspire", "acer nitro",
       "nitro 5", "predator helios", "latitude", "inspiron", "vostro",
-      "galaxy book", "book4", "legion", "omen", "alienware", "avell"
+      "galaxy book", "book4", "legion", "omen", "alienware", "avell",
+      "mochila escolar", "bolsa escolar", "mochila impermeavel"
     ]
   }),
 
@@ -266,13 +267,15 @@ const REGRAS = [
       "smartband", "pulseira inteligente", "airtag", "smart tag",
       "tomada inteligente", "lampada inteligente", "interruptor inteligente",
       "sensor inteligente", "camera inteligente", "camera de vigilancia",
-      "camera seguranca", "camera de seguranca", "drone", "baba eletronica"
+      "camera seguranca", "camera de seguranca", "drone", "baba eletronica",
+      "camera instax", "instax mini"
     ],
     palavras: [
       "amazfit", "galaxy watch", "apple watch", "mi band", "haylou",
       "huawei band", "rastreador bluetooth", "controle remoto universal",
       "camera wifi", "camera ip", "camera externa", "camera interna",
-      "ring light", "mini projetor", "airpods", "hoverboard", "monitor bebe"
+      "ring light", "mini projetor", "airpods", "hoverboard", "monitor bebe",
+      "fujifilm instax"
     ]
   }),
 
@@ -335,7 +338,7 @@ const REGRAS = [
       "biquini", "camiseta feminina", "blusa feminina", "regata feminina",
       "baby look", "cropped", "tomara que caia", "vestido", "saia", "short feminino",
       "shorts feminino", "calca feminina", "legging", "body feminino", "moda feminina",
-      "oculos de sol", "bolsa de viagem", "bolsa academia"
+      "oculos de sol", "bolsa de viagem", "bolsa academia", "sobretudo feminino"
     ],
     palavras: [
       "macaquinho feminino", "macacao feminino", "conjunto feminino",
@@ -345,7 +348,7 @@ const REGRAS = [
       "tiracolo", "tote", "carteira feminina", "meia calca", "camisa feminina",
       "blazer feminino", "kimono feminino", "cardigan", "top feminino",
       "calca flare", "calca pantalona", "pantalona feminina", "wide leg",
-      "jardineira feminina", "mule feminino"
+      "jardineira feminina", "mule feminino", "la batida feminina"
     ]
   }),
 
@@ -357,7 +360,7 @@ const REGRAS = [
       "calca jeans masculina", "bermuda masculina", "short masculino",
       "calca jogger masculina", "calca moletom masculina",
       "regata masculina", "cueca boxer", "cueca", "polo masculina", "moda masculina", "meia termica",
-      "meia flanelada"
+      "meia flanelada", "t shirt insider"
     ],
     palavras: [
       "kit camiseta masculina", "calca masculina", "calca sarja masculina", "kit bermudas masculinas", "bermudas masculinas", "polo masculina",
@@ -366,7 +369,8 @@ const REGRAS = [
       "casaco masculino", "colete masculino", "conjunto masculino",
       "terno masculino", "blazer masculino", "pijama masculino", "sunga",
       "carteira masculina", "cinto masculino", "meia masculina",
-      "pares de meia", "pares de meias", "kit pares de meias", "kit meias"
+      "pares de meia", "pares de meias", "kit pares de meias", "kit meias",
+      "sportee insider", "camiseta insider"
     ]
   }),
 
@@ -398,7 +402,8 @@ const REGRAS = [
       "kit ferramentas", "maleta ferramentas", "chave de fenda",
       "ferramentas profissional", "profissional eletricista", "eletricista",
       "motosserra", "eletrosserra", "serra de corte", "serra marmore",
-      "serra ceramica", "serra granito", "ferramenta serralheiro"
+      "serra ceramica", "serra granito", "ferramenta serralheiro",
+      "conjunto de chave", "jogo de chaves"
     ],
     palavras: [
       "chave inglesa", "chave allen", "chave soquete", "soquete", "soquetes", "alicate universal",
@@ -410,7 +415,8 @@ const REGRAS = [
       "maquina solda", "lavadora alta pressao", "multimetro", "broca",
       "parafuso", "escada aluminio", "paquimetro", "estilete", "rebitadeira",
       "caixa multiuso ferramentas", "serra para marmore", "serra para ceramica",
-      "serra para granito", "lishi", "chave lishi"
+      "serra para granito", "lishi", "chave lishi", "chave de deslocamento",
+      "alcance estreito"
     ],
     negativas: [
       "manicure", "pedicure", "unha", "cuticula", "esmalte",
@@ -429,7 +435,9 @@ const REGRAS = [
       "guarda roupa", "mesa", "cadeira", "penteadeira", "armario",
       "kit toalete", "toalete casamento", "jogo americano", "copo termico", "travesseiro", "lencol", "edredom", "fronha", "cuba", "louca", "pote", "fechadura inteligente",
       "cabide", "marmita", "tapete banheiro", "porta escova",
-      "garrafa termica", "panos de copa", "pano de copa", "gabinete banheiro"
+      "garrafa termica", "panos de copa", "pano de copa", "gabinete banheiro",
+      "jogo de toalhas", "espremedor de alho", "molde para bolo",
+      "mala de viagem"
     ],
     palavras: [
       "cortador de legumes", "ralador", "assadeira", "garrafa termica",
@@ -440,6 +448,8 @@ const REGRAS = [
       "varal", "lixeira", "torneira", "banheiro", "cozinha", "organizador",
       "caixa organizadora", "escorredor", "misturador monocomando", "rede de dormir", "utensilios churrasco", "conjunto churrasco",
       "pote de vidro", "potes de vidro", "pote plastico", "pote hermetico", "porta escova banheiro", "organizador cozinha", "organizador banheiro", "jogo de cama", "roupa de cama", "cuba banheiro", "louca banheiro", "fechadura digital", "fechadura eletronica",
+      "jogo de toalha", "toalhas banho", "molde ajustavel", "molde ajustavel para bolo",
+      "mala polipropileno", "utensilio cozinha",
     ],
     negativas: [
       "tapete higienico", "tapete higienico pet", "pet", "gato", "cachorro"
@@ -538,11 +548,13 @@ const REGRAS = [
       "detergente", "desengordurante", "amaciante", "sabao liquido",
       "sabao em po", "lava roupas", "tira manchas", "alvejante",
       "agua sanitaria", "limpa vidro", "limpa piso", "papel higienico",
-      "odorizante ambiente", "aromatizador ambiente", "coala odorizante"
+      "odorizante ambiente", "aromatizador ambiente", "coala odorizante",
+      "coala home"
     ],
     palavras: [
       "downy", "omo", "ype", "veja", "cloro", "removedor", "lustra moveis",
-      "pano microfibra", "esponja limpeza", "kit limpeza", "refil mop"
+      "pano microfibra", "esponja limpeza", "kit limpeza", "refil mop",
+      "kit coala home"
     ],
     negativas: [
       "ferramentas", "eletricista", "caixa de ferramentas"
