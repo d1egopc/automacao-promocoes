@@ -15954,6 +15954,14 @@ clientesProcessadosRodada += 1;
     erros: 0,
     origem: opcoes.origem || "orquestrador"
   });
+
+  logResumoAbastecimento(resumoAbastecimento, {
+    rodada: statusMarketplace.rodadas,
+    clientesProcessados: clientesProcessadosRodada,
+    adicionadasCalculadasFila: adicionadasRodada,
+    duracaoSegundos,
+    origem: opcoes.origem || "orquestrador"
+  });
  
   } catch (e) {
     const statusMarketplace = obterStatusOrquestradorMarketplace(marketplace);
@@ -15966,6 +15974,7 @@ clientesProcessadosRodada += 1;
       origem: opcoes.origem || "orquestrador"
     });
   } finally {
+    abastecimentoRodadaAtual = null;
     farejadorRodando = false;
   }
 }
