@@ -326,24 +326,24 @@ destinosInteligentes: [],
   marketplaces: {
     amazon: {
       ativo: true,
-      intervaloFarejoMinutos: 25,
-      limitePorRodada: 5,
+      intervaloFarejoMinutos: 20,
+      limitePorRodada: 6,
       descontoMinimo: 10,
       precoMinimo: 20
     },
 
     shopee: {
       ativo: true,
-      intervaloFarejoMinutos: 20,
-      limitePorRodada: 10,
-      descontoMinimo: 15,
+      intervaloFarejoMinutos: 25,
+      limitePorRodada: 5,
+      descontoMinimo: 20,
       precoMinimo: 15
     },
 
     mercadolivre: {
   ativo: true,
   intervaloFarejoMinutos: 15,
-  limitePorRodada: 7,
+  limitePorRodada: 8,
   descontoMinimo: 10,
   precoMinimo: 15
 },
