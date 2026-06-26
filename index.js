@@ -4013,6 +4013,10 @@ app.post("/telegram", (req, res) => {
 
 const clienteId = getClienteId(req);
 
+if (bloquearRecursoNaoLiberado(req, res, "telegram", "Telegram nao disponivel no seu plano")) {
+  return;
+}
+
 configsPorCliente[clienteId] =
   configsPorCliente[clienteId] || {};
 
@@ -4087,6 +4091,10 @@ app.post("/destinos", (req, res) => {
       ok: false,
       erro: "Formato invÃ¡lido"
     });
+  }
+
+  if (!validarDestinosPlano(req, res, destinos)) {
+    return;
   }
 
   destinosPorCliente[clienteId] = destinos;
@@ -4994,6 +5002,14 @@ app.post("/config", (req, res) => {
   if (body.marketplaces) {
 
     for (const [nome, dados] of Object.entries(body.marketplaces)) {
+      if (!isAdmin && !marketplaceLiberadoParaReq(req, nome)) {
+        configCliente.marketplaces[nome] = {
+          ...(configCliente.marketplaces[nome] || {}),
+          ativo: false,
+          bloqueadoPlano: true
+        };
+        continue;
+      }
 
       configCliente.marketplaces[nome] =
         configCliente.marketplaces[nome] || {};
@@ -5144,6 +5160,94 @@ function usuarioTemRecurso(req, recurso) {
   const plano = getPlanoUsuario(req);
 
   return plano?.recursos?.[recurso] === true;
+}
+
+function normalizarMarketplacePlano(marketplace = "") {
+  const mp = normalizarTexto(marketplace || "");
+  if (["ml", "meli", "mercadolivrebrasil"].includes(mp)) return "mercadolivre";
+  if (["awin_kabum", "awinkabum"].includes(mp)) return "awin";
+  return mp;
+}
+
+function marketplaceLiberadoParaReq(req, marketplace = "") {
+  if (isAdminMaster(req)) return true;
+
+  const plano = getPlanoUsuario(req) || {};
+  const mp = normalizarMarketplacePlano(marketplace);
+  const liberados = (plano.marketplaces || []).map(item => normalizarMarketplacePlano(item));
+
+  if (mp === "kabum") {
+    return liberados.includes("kabum") || liberados.includes("awin");
+  }
+
+  if (mp === "awin") {
+    return liberados.includes("awin") || liberados.includes("kabum");
+  }
+
+  return liberados.includes(mp);
+}
+
+function bloquearMarketplaceNaoLiberado(req, res, marketplace = "") {
+  const mp = normalizarMarketplacePlano(marketplace);
+
+  if (marketplaceLiberadoParaReq(req, mp)) return false;
+
+  res.status(403).json({
+    ok: false,
+    erro: `Marketplace ${marketplace || mp} nao liberado no seu plano`,
+    motivo: "marketplace_nao_liberado",
+    marketplace: mp
+  });
+
+  return true;
+}
+
+function bloquearRecursoNaoLiberado(req, res, recurso = "", mensagem = "") {
+  if (isAdminMaster(req) || usuarioTemRecurso(req, recurso)) return false;
+
+  res.status(403).json({
+    ok: false,
+    erro: mensagem || `Recurso ${recurso} nao disponivel no seu plano`,
+    motivo: "recurso_nao_liberado",
+    recurso
+  });
+
+  return true;
+}
+
+function validarDestinosPlano(req, res, destinos = []) {
+  const lista = Array.isArray(destinos) ? destinos : [];
+  const planoUsuario = getPlanoUsuario(req);
+  const limiteDestinos = isAdminMaster(req)
+    ? 999
+    : Number(planoUsuario?.limites?.destinos || 3);
+
+  if (!isAdminMaster(req) && lista.length > limiteDestinos) {
+    res.status(403).json({
+      ok: false,
+      erro: `Seu plano permite apenas ${limiteDestinos} destino(s).`,
+      motivo: "limite_destinos",
+      limite: limiteDestinos,
+      usados: lista.length
+    });
+    return false;
+  }
+
+  const temTelegram = lista.some(destino => normalizarTexto(destino?.tipo || destino?.canal || "") === "telegram");
+  const temWhatsapp = lista.some(destino => {
+    const tipo = normalizarTexto(destino?.tipo || destino?.canal || "whatsapp");
+    return tipo === "whatsapp" || tipo === "grupo" || tipo === "grupos";
+  });
+
+  if (temTelegram && bloquearRecursoNaoLiberado(req, res, "telegram", "Telegram nao disponivel no seu plano")) {
+    return false;
+  }
+
+  if (temWhatsapp && bloquearRecursoNaoLiberado(req, res, "whatsapp", "WhatsApp nao disponivel no seu plano")) {
+    return false;
+  }
+
+  return true;
 }
 
 function clienteTemRecursoMensageiro(clienteId = "admin") {
@@ -11780,6 +11884,10 @@ app.get("/integracoes", (req, res) => {
     req.query.reveal === "true";
 
   for (const [marketplace, config] of Object.entries(data)) {
+    if (!marketplaceLiberadoParaReq(req, marketplace)) {
+      continue;
+    }
+
     const credenciais = marketplace === "awin"
       ? normalizarCredenciaisAwin(config?.credenciais || {})
       : config?.credenciais || {};
@@ -11832,9 +11940,9 @@ app.post("/integracoes/:marketplace", (req, res) => {
   const plano = getPlanoUsuario(req);
 
 if (!isAdminMaster(req)) {
-  const liberados = (plano?.marketplaces || []).map(item => normalizarTexto(item));
+  const liberados = (plano?.marketplaces || []).map(item => normalizarMarketplacePlano(item));
 
-  if (!liberados.includes(normalizarTexto(marketplace))) {
+  if (!marketplaceLiberadoParaReq(req, marketplace)) {
     return res.status(403).json({
       ok: false,
       erro: `Marketplace ${marketplace} nÃ£o liberado no seu plano`
@@ -11927,6 +12035,11 @@ app.delete("/integracoes/:marketplace", (req, res) => {
 app.post("/integracoes/:marketplace/test", async (req, res) => {
   const clienteId = getClienteId(req);
   const marketplace = req.params.marketplace.toLowerCase();
+
+  if (bloquearMarketplaceNaoLiberado(req, res, marketplace)) {
+    return;
+  }
+
   const config = integracoesPorCliente[clienteId]?.[marketplace];
 
   if (!config) {
@@ -14772,6 +14885,10 @@ app.post("/importar-produto", async (req, res) => {
     const medirImportacaoManualMl = marketplaceEntradaImportacao === "mercadolivre";
     const clienteId = getClienteId(req);
 
+    if (marketplaceEntradaImportacao && bloquearMarketplaceNaoLiberado(req, res, marketplaceEntradaImportacao)) {
+      return;
+    }
+
     const resultado = await importarProdutoManual(req, {
       getClienteId,
       integracoesPorCliente,
@@ -14884,6 +15001,10 @@ app.post("/sessoes", (req, res) => {
 });
 
   const clienteId = getClienteId(req);
+
+  if (bloquearRecursoNaoLiberado(req, res, "whatsapp", "WhatsApp nao disponivel no seu plano")) {
+    return;
+  }
 
   const planoUsuario = getPlanoUsuario(req);
 
@@ -15132,6 +15253,14 @@ function obterLimiteSessoesCliente(clienteId) {
 }
 
 function listarSessoesCliente(clienteId) {
+  if (bloquearRecursoNaoLiberado(req, res, "whatsapp", "WhatsApp nao disponivel no seu plano")) {
+    return;
+  }
+
+  if (bloquearRecursoNaoLiberado(req, res, "whatsapp", "WhatsApp nao disponivel no seu plano")) {
+    return;
+  }
+
   config.sessoesWhatsapp = config.sessoesWhatsapp || [];
 
   return config.sessoesWhatsapp.filter(id =>
@@ -15303,6 +15432,14 @@ console.log(
 
 app.post("/magalu/gerar-link", (req, res) => {
   try {
+    if (bloquearMarketplaceNaoLiberado(req, res, "magalu")) {
+      return;
+    }
+
+    if (bloquearRecursoNaoLiberado(req, res, "linkOptimus", "Link Optimus nao disponivel no seu plano")) {
+      return;
+    }
+
     const { link } = req.body;
 
     const promoterId = integracoes?.magalu?.promoterId;
@@ -15526,6 +15663,10 @@ app.post("/destinos/:id", (req, res) => {
     return res.status(400).json({ erro: "destinos deve ser array" });
   }
 
+  if (!validarDestinosPlano(req, res, destinos)) {
+    return;
+  }
+
 const planoUsuario = getPlanoUsuario(req);
 
 const limiteDestinos = isAdminMaster(req)
@@ -15588,6 +15729,10 @@ app.get("/destinos/:id", (req, res) => {
 app.post("/campanhas/enviar", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
+
+    if (bloquearRecursoNaoLiberado(req, res, "campanhas", "Campanhas nao disponivel no seu plano")) {
+      return;
+    }
 
     const {
       mensagem,
@@ -15756,7 +15901,9 @@ sock.ev.on("messages.upsert", async ({ messages = [] } = {}) => {
         sessaoId: id,
         sock,
         mensagem,
-        planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
+        planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro),
+        usuarioTemCreditos,
+        debitarCreditos
       });
     }
   } catch (e) {
@@ -15780,7 +15927,9 @@ sock.ev.on("group-participants.update", async (evento) => {
       clienteId: clienteIdMensageiro,
       sessaoId: id,
       sock,
-      evento
+      evento,
+      usuarioTemCreditos,
+      debitarCreditos
     });
   } catch (e) {
     console.log("[ERRO]⚠️ Erro evento Mensageiro:", e.message);
