@@ -2923,6 +2923,86 @@ function reterShopeePrecoSuspeitoSeNecessario(oferta = {}) {
   return true;
 }
 
+function descontoOfertaPercentual(oferta = {}) {
+  const campos = [
+    oferta.descontoScore,
+    oferta.descontoPercentual,
+    oferta.percentualDesconto,
+    oferta.desconto,
+    oferta.priceDiscountRate
+  ];
+
+  for (const campo of campos) {
+    const numero = Number(String(campo ?? "").replace("%", "").replace(",", "."));
+    if (Number.isFinite(numero) && numero > 0) return numero;
+  }
+
+  const precoAtual = numeroMoedaOferta(oferta.precoAtual || oferta.preco || "");
+  const precoAntigo = numeroMoedaOferta(oferta.precoAntigo || oferta.precoOriginal || "");
+
+  if (precoAtual > 0 && precoAntigo > precoAtual) {
+    return Math.round(((precoAntigo - precoAtual) / precoAntigo) * 100);
+  }
+
+  return 0;
+}
+
+function ofertaShopeeForteParaBalanceamento(oferta = {}) {
+  if (!ofertaEhShopee(oferta)) return false;
+  if (ofertaEhRadar(oferta)) return true;
+  if (ofertaTemCupomRealOuDetectado(oferta)) return true;
+
+  const temBeneficio = Boolean(
+    oferta.avisoCupom ||
+    oferta.beneficioExtra ||
+    oferta.beneficioDetectado ||
+    oferta.linkResgateCupom ||
+    oferta.cupomUrl ||
+    oferta.descontoPix ||
+    oferta.descontoApp
+  );
+  if (temBeneficio) return true;
+
+  const score = Number(oferta.radarScore || oferta.score || 0);
+  const nivelScore = normalizarTexto(oferta.nivelScore || oferta.nivel || "");
+  if (score >= 80 || ["alto", "excelente", "premium"].includes(nivelScore)) return true;
+
+  return descontoOfertaPercentual(oferta) >= 40;
+}
+
+function deveBloquearShopeeComumPorExcessoFila(clienteId = "admin", oferta = {}) {
+  if (!ofertaEhShopee(oferta)) return false;
+  if (ofertaShopeeForteParaBalanceamento(oferta)) return false;
+
+  const pendentesCliente = fila.filter(item =>
+    String(item?.clienteId || "admin") === String(clienteId) &&
+    item?.status === "pendente"
+  );
+
+  const pendentesTotal = pendentesCliente.length;
+  if (pendentesTotal < 30) return false;
+
+  const pendentesShopee = pendentesCliente.filter(ofertaEhShopee).length;
+  const percentualShopee = pendentesTotal > 0 ? pendentesShopee / pendentesTotal : 0;
+
+  if (percentualShopee < 0.4) return false;
+
+  console.log("[BALANCEAMENTO] Shopee comum bloqueada por excesso na fila", {
+    clienteId,
+    titulo: oferta.titulo || oferta.nome || "",
+    pendentesTotal,
+    pendentesShopee,
+    percentualShopee: Number((percentualShopee * 100).toFixed(1)),
+    motivo: "shopee_comum_excesso_fila"
+  });
+
+  oferta.motivoRetencao = "shopee_comum_excesso_fila";
+  oferta.statusDetalhe = "Shopee comum bloqueada por excesso na fila";
+  adicionarAvisoInternoOferta(oferta, "shopee_comum_excesso_fila");
+
+  return true;
+}
+
 function analisarDestinosCompativeisFila(clienteId = "admin", oferta = {}, configCliente = {}) {
   const destinosInteligentes = obterDestinosInteligentesCliente(clienteId, configCliente);
   const compativeis = [];
@@ -6906,12 +6986,6 @@ function idsSessaoWhatsappRadar(clienteId = "admin", sessaoEntrada = "") {
     const chave = chaveRadarId(valor || "");
     if (chave) ids.add(chave);
   };
-
-  for (const chave of Object.keys(planos || {})) {
-    if (chave !== nomePlano && normalizarPlanoChave(chave) === nomePlano) {
-      delete planos[chave];
-    }
-  }
 
   adicionar(entrada);
   adicionar(normalizarSessaoId(clienteId, entrada));
@@ -14311,6 +14385,10 @@ if (reterShopeePrecoSuspeitoSeNecessario(ofertaCliente)) {
   registrarOfertaVista(ofertaCliente);
   fila.push(ofertaCliente);
   salvarFila(clienteId);
+  continue;
+}
+
+if (deveBloquearShopeeComumPorExcessoFila(clienteId, ofertaCliente)) {
   continue;
 }
 
