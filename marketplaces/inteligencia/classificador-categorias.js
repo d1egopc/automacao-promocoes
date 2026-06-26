@@ -1,10 +1,4 @@
-let categoriasDestinos = {};
-
-try {
-  ({ CATEGORIAS_DESTINOS: categoriasDestinos = {} } = require("./categorias-destinos"));
-} catch (e) {
-  categoriasDestinos = {};
-}
+const { categoriaSegura } = require("./categorias-globais");
 
 const CATEGORIA = {
   alimentos: "Alimentos e Mercearia",
@@ -85,21 +79,12 @@ function termosEncontrados(texto, palavras = []) {
   return [...new Set(encontrados)];
 }
 
-function palavrasDosDestinos(nomeCategoria) {
-  return Object.values(categoriasDestinos || {})
-    .filter((item) => item?.nome === nomeCategoria)
-    .flatMap((item) => item.palavras || []);
-}
-
 function regra(categoria, opcoes = {}) {
   return {
-    categoria,
+    categoria: categoriaSegura(categoria),
     prioridade: opcoes.prioridade || 0,
     fortes: opcoes.fortes || [],
-    palavras: [
-      ...(opcoes.palavras || []),
-      ...palavrasDosDestinos(categoria)
-    ],
+    palavras: opcoes.palavras || [],
     negativas: opcoes.negativas || []
   };
 }
@@ -119,12 +104,14 @@ const REGRAS = [
       "pressao arterial", "monitor de pressao", "monitor pressao arterial",
       "aparelho de pressao", "soro fisiologico", "pasta de dente",
       "creme dental", "alicate de cuticula", "cortador de unha",
-      "irrigador oral", "nebulizador", "inalador", "seringa insulina", "escova progressiva", "renovador facial", "corretivo", "base maquiagem", "base corretivo", "base liquida", "base facial", "maquiagem", "luva nitrilica"
+      "irrigador oral", "nebulizador", "inalador", "seringa insulina", "escova progressiva", "renovador facial", "corretivo", "base maquiagem", "base corretivo", "base liquida", "base facial", "maquiagem", "luva nitrilica",
+      "desodorante", "desodorantes", "sombra de olhos", "sombra olhos",
+      "creme gel facial", "medicube", "pore pad", "zero pore", "collagen jelly"
     ],
     palavras: [
       "chapinha", "secador cabelo", "secador de cabelo", "mascara capilar", "pomada", "arnica",
       "oleo de coco", "lo\u00e7ao", "lotion", "la vie est belle", "elixir",
-      "fisiogel", "creme maos", "creme para maos", "cerave", "la roche", "vichy", "nivea", "loreal", "elseve",
+      "fisiogel", "creme maos", "creme para maos", "cerave", "la roche", "vichy", "nivea", "loreal", "l oreal", "loreal professionnel", "elseve",
       "pantene", "tresemme", "dove", "granado", "wella", "eucerin",
       "termometro", "medidor de pressao", "balanca corporal", "fio dental",
       "manicure", "pedicure", "kit manicure", "kit pedicure",
@@ -154,7 +141,7 @@ const REGRAS = [
       "roupa infantil", "moda infantil", "tenis infantil",
       "sandalia infantil", "camisa infantil", "conjunto infantil",
       "camiseta infantil", "blusa infantil", "short infantil",
-      "calca infantil", "vestido infantil", "pijama infantil", "body infantil", "camiseta menino", "juvenil", "macacao plush infantil", "pantufa infantil"
+      "calca infantil", "vestido infantil", "pijama infantil", "body infantil", "camiseta menino", "juvenil", "macacao plush infantil", "pantufa infantil", "mochila infantil"
     ],
     palavras: [
       "bota infantil", "coturno infantil", "moletom infantil", "fantasia infantil",
@@ -273,7 +260,7 @@ const REGRAS = [
     palavras: [
       "amazfit", "galaxy watch", "apple watch", "mi band", "haylou",
       "huawei band", "rastreador bluetooth", "controle remoto universal",
-      "camera wifi", "camera ip", "camera externa", "camera interna",
+      "camera wifi", "camera ip", "camera ip wifi", "cameras ip", "cameras ip wifi", "camera externa", "camera interna",
       "ring light", "mini projetor", "airpods", "hoverboard", "monitor bebe",
       "fujifilm instax"
     ]
@@ -346,7 +333,7 @@ const REGRAS = [
       "moletom feminino", "jaqueta feminina", "plus size feminina",
       "tricot feminino", "wide leg", "jeans feminina", "bolsa feminina",
       "tiracolo", "tote", "carteira feminina", "meia calca", "camisa feminina",
-      "blazer feminino", "kimono feminino", "cardigan", "top feminino",
+      "blazer feminino", "blazer casaquinho", "alfaiataria feminina", "casaquinho feminino", "kimono feminino", "cardigan", "top feminino",
       "calca flare", "calca pantalona", "pantalona feminina", "wide leg",
       "jardineira feminina", "mule feminino", "la batida feminina"
     ]
@@ -364,7 +351,7 @@ const REGRAS = [
     ],
     palavras: [
       "kit camiseta masculina", "calca masculina", "calca sarja masculina", "kit bermudas masculinas", "bermudas masculinas", "polo masculina",
-      "bermuda masculina", "shorts masculino", "camisa polo masculina",
+      "bermuda masculina", "shorts masculino", "shorts dryfit masculino", "short dryfit masculino", "camisa polo masculina",
       "calca moletom masculina", "camisa xadrez masculina", "blusa masculina",
       "casaco masculino", "colete masculino", "conjunto masculino",
       "terno masculino", "blazer masculino", "pijama masculino", "sunga",
@@ -427,7 +414,7 @@ const REGRAS = [
   regra(CATEGORIA.casa, {
     prioridade: 58,
     fortes: [
-      "jogo de panelas", "kit panela", "frigideira", "panela", "kit churrasco", "churrasco mestre", "faqueiro",
+      "jogo de panelas", "conjunto de panelas", "kit panela", "frigideira", "panela", "panelas", "kit churrasco", "churrasco mestre", "faqueiro",
       "talheres", "copos", "jogo de copos", "marmitas", "potes",
       "cobertor", "manta", "toalha de banho", "colcha", "tapete",
       "bacia retratil", "tabua de corte", "pote vidro", "copo",
@@ -437,7 +424,7 @@ const REGRAS = [
       "cabide", "marmita", "tapete banheiro", "porta escova",
       "garrafa termica", "panos de copa", "pano de copa", "gabinete banheiro",
       "jogo de toalhas", "espremedor de alho", "molde para bolo",
-      "mala de viagem"
+      "mala de viagem", "mala viagem", "mala bordo", "mala de bordo"
     ],
     palavras: [
       "cortador de legumes", "ralador", "assadeira", "garrafa termica",
@@ -647,7 +634,7 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
   const texto = textoOferta(oferta, termo);
 
   if (!texto) {
-    return CATEGORIA.diversos;
+    return categoriaSegura(CATEGORIA.diversos);
   }
 
   const categoriaManual = categoriaDeclaradaValida(oferta);
@@ -662,7 +649,7 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
 
   if (!resultados.length) {
     console.log("[INFO] CATEGORIA NAO IDENTIFICADA:", texto);
-    return categoriaManual || CATEGORIA.diversos;
+    return categoriaSegura(categoriaManual || CATEGORIA.diversos);
   }
 
   const melhor = resultados[0];
@@ -675,7 +662,7 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     titulo: oferta.titulo || oferta.nome || termo || ""
   });
 
-  return melhor.categoria;
+  return categoriaSegura(melhor.categoria);
 }
 
 module.exports = {
