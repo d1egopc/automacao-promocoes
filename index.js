@@ -898,7 +898,11 @@ function sanearExpiradosFila(clienteId = "admin") {
 }
 
 const filaInteligenteUltimoAbastecimento = new Map();
-const FILA_INTELIGENTE_COOLDOWN_MS = 5 * 60 * 1000;
+const filaInteligenteBaixaDesde = new Map();
+const filaInteligenteResgateRodando = new Set();
+const FILA_INTELIGENTE_COOLDOWN_MS = 10 * 60 * 1000;
+const FILA_INTELIGENTE_BAIXA_MINUTOS_MS = 3 * 60 * 1000;
+const FILA_INTELIGENTE_TETO_RESGATE = 25;
 
 function avaliarSaudeFilaCliente(clienteId = "admin") {
   const cliente = String(clienteId || "admin");
@@ -1027,7 +1031,7 @@ function obterEstrategiaFarejador(clienteId = "admin", marketplace = "", opcoes 
 
 async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
   const cliente = String(clienteId || "admin");
-  const maximo = Math.max(0, Math.min(Number(limite) || 3, 3));
+  const maximo = Math.max(0, Math.min(Number(limite) || 3, 6));
   const resultado = {
     marketplace: "mercadolivre",
     limite: maximo,
@@ -1138,10 +1142,445 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
   return resultado;
 }
 
+function criarResumoResgateFila(clienteId = "admin", saude = {}) {
+  return {
+    clienteId,
+    statusEntrada: saude.status || "",
+    pendentesEntrada: Number(saude.pendentes || 0),
+    teto: FILA_INTELIGENTE_TETO_RESGATE,
+    adicionadas: 0,
+    recusadas: 0,
+    motivosRecusa: {},
+    marketplaces: {},
+    erros: []
+  };
+}
+
+function garantirResumoMarketplaceResgate(resumo, marketplace = "") {
+  const mp = normalizarTexto(marketplace || "");
+
+  if (!resumo.marketplaces[mp]) {
+    resumo.marketplaces[mp] = {
+      marketplace: mp,
+      limite: 0,
+      encontradas: 0,
+      importadas: 0,
+      adicionadas: 0,
+      recusadas: 0,
+      motivosRecusa: {},
+      erros: []
+    };
+  }
+
+  return resumo.marketplaces[mp];
+}
+
+function registrarRecusaResgateFila(resumo, marketplace = "", motivo = "outros", dados = {}) {
+  const mpResumo = garantirResumoMarketplaceResgate(resumo, marketplace);
+  const motivoFinal = motivoAbastecimentoPadrao(motivo || "outros");
+
+  resumo.recusadas += 1;
+  resumo.motivosRecusa[motivoFinal] = (resumo.motivosRecusa[motivoFinal] || 0) + 1;
+  mpResumo.recusadas += 1;
+  mpResumo.motivosRecusa[motivoFinal] = (mpResumo.motivosRecusa[motivoFinal] || 0) + 1;
+
+  console.log("[RESGATE-FILA] oferta recusada", {
+    clienteId: resumo.clienteId,
+    marketplace: normalizarTexto(marketplace || ""),
+    motivo: motivo || motivoFinal,
+    titulo: dados.titulo || "",
+    ...dados
+  });
+}
+
+function registrarAdicaoResgateFila(resumo, marketplace = "", oferta = {}) {
+  const mpResumo = garantirResumoMarketplaceResgate(resumo, marketplace);
+
+  resumo.adicionadas += 1;
+  mpResumo.adicionadas += 1;
+
+  console.log("[RESGATE-FILA] oferta adicionada", {
+    clienteId: resumo.clienteId,
+    marketplace: normalizarTexto(marketplace || ""),
+    adicionadasTotal: resumo.adicionadas,
+    titulo: oferta.titulo || oferta.nome || ""
+  });
+}
+
+function contarPendentesClienteMemoria(clienteId = "admin") {
+  const cliente = String(clienteId || "admin");
+  return fila.filter(item =>
+    String(item?.clienteId || "admin") === cliente &&
+    item?.status === "pendente"
+  ).length;
+}
+
+function clienteTemAutomacaoAtiva(clienteId = "admin") {
+  const cliente = String(clienteId || "admin");
+  const configCliente = configsPorCliente?.[cliente] || config;
+  return configCliente?.automacaoAtiva === true;
+}
+
+function criarConfigResgateFila(marketplace = "", limite = 0) {
+  const mp = normalizarTexto(marketplace || "");
+  const cfgAtual = config.marketplaces?.[mp] || {};
+  const cfgResgate = {
+    ...cfgAtual,
+    limitePorRodada: Math.max(1, Number(limite) || 1)
+  };
+
+  if (mp === "mercadolivre") {
+    cfgResgate.limiteBuscasPorRodada = Math.max(1, Math.min(3, Number(limite) || 1));
+    cfgResgate.limiteProdutosPorBusca = Math.max(10, Number(cfgAtual.limiteProdutosPorBusca || 20));
+  }
+
+  return {
+    ...config,
+    marketplaces: {
+      ...(config.marketplaces || {}),
+      [mp]: cfgResgate
+    }
+  };
+}
+
+function criarFilaControladaResgate(resumo, marketplace = "", limiteMarketplace = 0) {
+  const mp = normalizarTexto(marketplace || "");
+  const filaControlada = [];
+
+  filaControlada.push = (oferta) => {
+    const mpResumo = garantirResumoMarketplaceResgate(resumo, mp);
+
+    if (!ofertaBoaParaResgateFila(oferta)) {
+      registrarRecusaResgateFila(resumo, mp, "comum_fraca", {
+        titulo: oferta?.titulo || oferta?.nome || "",
+        score: oferta?.score || "",
+        desconto: oferta?.descontoScore || oferta?.desconto || ""
+      });
+      return fila.length;
+    }
+
+    if (resumo.adicionadas >= FILA_INTELIGENTE_TETO_RESGATE) {
+      registrarRecusaResgateFila(resumo, mp, "limite_resgate_atingido", {
+        titulo: oferta?.titulo || oferta?.nome || ""
+      });
+      return fila.length;
+    }
+
+    if (mpResumo.adicionadas >= limiteMarketplace) {
+      registrarRecusaResgateFila(resumo, mp, "limite_marketplace_atingido", {
+        titulo: oferta?.titulo || oferta?.nome || ""
+      });
+      return fila.length;
+    }
+
+    fila.push(oferta);
+    registrarAdicaoResgateFila(resumo, mp, oferta);
+    return fila.length;
+  };
+
+  return filaControlada;
+}
+
+async function tentarMarketplaceResgateFila(clienteId = "admin", marketplace = "", limite = 0, resumo) {
+  const cliente = String(clienteId || "admin");
+  const mp = normalizarTexto(marketplace || "");
+  const limiteMarketplace = Math.max(0, Number(limite) || 0);
+  const mpResumo = garantirResumoMarketplaceResgate(resumo, mp);
+  mpResumo.limite = limiteMarketplace;
+
+  console.log("[RESGATE-FILA] marketplace tentado", {
+    clienteId: cliente,
+    marketplace: mp,
+    limite: limiteMarketplace,
+    adicionadasTotal: resumo.adicionadas
+  });
+
+  if (!limiteMarketplace || resumo.adicionadas >= FILA_INTELIGENTE_TETO_RESGATE) return;
+
+  const cfg = config.marketplaces?.[mp];
+  const farejador = farejadoresMarketplaces?.[mp];
+
+  if (!cfg?.ativo || typeof farejador !== "function") {
+    registrarRecusaResgateFila(resumo, mp, "marketplace_indisponivel", {
+      ativo: Boolean(cfg?.ativo),
+      temFarejador: typeof farejador === "function"
+    });
+    return;
+  }
+
+  const usuario = usuarios.find(item => String(item?.id || "") === cliente);
+  if (!usuario || !usuario.ativo) {
+    registrarRecusaResgateFila(resumo, mp, "usuario_inativo");
+    return;
+  }
+
+  if (!usuarioPodeReceberMarketplace(usuario, mp)) {
+    registrarRecusaResgateFila(resumo, mp, "plano_sem_marketplace", {
+      plano: usuario.plano || ""
+    });
+    return;
+  }
+
+  const marketplaceIntegracao = mp === "kabum" ? "awin" : mp;
+  if (!usuarioTemIntegracaoMarketplace(cliente, marketplaceIntegracao)) {
+    registrarRecusaResgateFila(resumo, mp, "integracao_ausente", {
+      marketplaceIntegracao
+    });
+    return;
+  }
+
+  const configResgate = criarConfigResgateFila(mp, limiteMarketplace);
+  const filaControlada = criarFilaControladaResgate(resumo, mp, limiteMarketplace);
+  const podeAdicionar = () => {
+    const atual = garantirResumoMarketplaceResgate(resumo, mp);
+    return (
+      resumo.adicionadas < FILA_INTELIGENTE_TETO_RESGATE &&
+      atual.adicionadas < limiteMarketplace
+    );
+  };
+
+  const registrarAbastecimentoResgate = (tipo = "", dados = {}) => {
+    const quantidade = Math.max(1, Number(dados.quantidade || 1) || 1);
+    const tipoNormalizado = normalizarTexto(tipo || "");
+
+    if (tipoNormalizado === "encontrada" || tipoNormalizado === "encontradas") {
+      mpResumo.encontradas += quantidade;
+      return;
+    }
+
+    if (tipoNormalizado === "importada" || tipoNormalizado === "importadas") {
+      mpResumo.importadas += quantidade;
+      return;
+    }
+
+    if (tipoNormalizado === "recusada" || tipoNormalizado === "recusa") {
+      for (let i = 0; i < quantidade; i += 1) {
+        registrarRecusaResgateFila(resumo, mp, dados.motivo || "outros", dados);
+      }
+    }
+  };
+
+  try {
+    await farejador(cliente, {
+      config: configResgate,
+      integracoesPorCliente,
+      getIntegracaoCliente,
+      fila: filaControlada,
+      salvarFila: () => salvarFila(cliente),
+      prepararOfertaGlobal,
+      ofertaJaExiste,
+      deveIgnorarOfertaRepetida,
+      registrarOfertaVista,
+      classificarCategoriaOferta,
+      gerarBuscasGlobais,
+      gerarHeadersStealth,
+      obterEstrategiaFarejador,
+      ofertaTemBeneficioFarejador,
+      farejarCuponsMercadoLivre,
+      importarMercadoLivre: (url, clienteIdAlvo = cliente) =>
+        importarMercadoLivre(url, clienteIdAlvo, {
+          getIntegracaoCliente,
+          gerarLinkAfiliadoMercadoLivre
+        }),
+      importarAmazon: importarAmazon,
+      buscarOfertasShopee,
+      normalizarSessaoId,
+      aplicarFiltrosUniversais,
+      distribuirOfertaParaClientes: (oferta) =>
+        distribuirOfertaParaClientes(oferta, {
+          clienteId: cliente,
+          contexto: "resgate_fila",
+          podeAdicionar,
+          onAdicionada: (ofertaAdicionada) => registrarAdicaoResgateFila(resumo, mp, ofertaAdicionada),
+          onRecusada: (dados) => registrarRecusaResgateFila(resumo, mp, dados.motivo || "outros", dados)
+        }),
+      encurtarUrl,
+      gerarDeepLinkAwin,
+      importarProdutoKabumViaAwin,
+      registrarAbastecimento: registrarAbastecimentoResgate
+    });
+  } catch (e) {
+    mpResumo.erros.push(e.message || "erro_resgate_marketplace");
+    resumo.erros.push(`${mp}:${e.message || "erro_resgate_marketplace"}`);
+    console.log("[RESGATE-FILA] oferta recusada", {
+      clienteId: cliente,
+      marketplace: mp,
+      motivo: "erro_marketplace",
+      erro: e.message
+    });
+  }
+}
+
+async function executarResgateFilaControlado(clienteId = "admin", saude = avaliarSaudeFilaCliente(clienteId)) {
+  const cliente = String(clienteId || "admin");
+  const pendentes = Number(saude.pendentes || contarPendentesClienteMemoria(cliente));
+  const resumo = criarResumoResgateFila(cliente, saude);
+  const limites = {
+    mercadolivre: 6,
+    amazon: 5,
+    shopee: 5,
+    aliexpress: 4,
+    kabum: 4
+  };
+
+  console.log("[RESGATE-FILA] iniciado", {
+    clienteId: cliente,
+    pendentes,
+    status: saude.status,
+    modo: pendentes <= 10 ? "forte" : "moderado",
+    teto: FILA_INTELIGENTE_TETO_RESGATE,
+    limites
+  });
+
+  for (const [marketplace, limite] of Object.entries(limites)) {
+    if (resumo.adicionadas >= FILA_INTELIGENTE_TETO_RESGATE) break;
+    await tentarMarketplaceResgateFila(cliente, marketplace, limite, resumo);
+  }
+
+  console.log("[RESGATE-FILA] finalizado", {
+    clienteId: cliente,
+    pendentesEntrada: resumo.pendentesEntrada,
+    adicionadas: resumo.adicionadas,
+    recusadas: resumo.recusadas,
+    motivosRecusa: resumo.motivosRecusa,
+    marketplaces: resumo.marketplaces,
+    erros: resumo.erros
+  });
+
+  return resumo;
+}
+
 async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
   const cliente = String(clienteId || "admin");
   const saude = avaliarSaudeFilaCliente(cliente);
   const simulado = opcoes.simulado === true;
+
+  if (!clienteTemAutomacaoAtiva(cliente)) {
+    return {
+      ok: true,
+      clienteId: cliente,
+      abasteceu: false,
+      modo: simulado ? "simulado" : "real",
+      motivo: "Automacao do cliente desligada.",
+      saude,
+      abastecimento: {
+        marketplace: "multi",
+        tentadas: 0,
+        adicionadas: 0,
+        recusadas: 0,
+        motivosRecusa: {},
+        bloqueios: [],
+        erros: ["automacao_desligada"]
+      }
+    };
+  }
+
+  if (!podeRodarAgora()) {
+    return {
+      ok: true,
+      clienteId: cliente,
+      abasteceu: false,
+      modo: simulado ? "simulado" : "real",
+      motivo: "Fora do horario permitido.",
+      saude,
+      abastecimento: {
+        marketplace: "multi",
+        tentadas: 0,
+        adicionadas: 0,
+        recusadas: 0,
+        motivosRecusa: {},
+        bloqueios: [],
+        erros: ["fora_horario"]
+      }
+    };
+  }
+
+  if (!saude.deveAbastecer || saude.pendentes > 20) {
+    return {
+      ok: true,
+      clienteId: cliente,
+      abasteceu: false,
+      modo: simulado ? "simulado" : "real",
+      motivo: saude.motivo,
+      saude,
+      abastecimento: {
+        marketplace: "multi",
+        tentadas: 0,
+        adicionadas: 0,
+        recusadas: 0,
+        motivosRecusa: {},
+        bloqueios: [],
+        erros: ["fila_nao_precisa_abastecer"]
+      }
+    };
+  }
+
+  const agoraResgate = Date.now();
+  const ultimoResgate = filaInteligenteUltimoAbastecimento.get(cliente) || 0;
+  const restanteResgateMs = FILA_INTELIGENTE_COOLDOWN_MS - (agoraResgate - ultimoResgate);
+
+  if (!opcoes.ignorarCooldown && restanteResgateMs > 0) {
+    return {
+      ok: true,
+      clienteId: cliente,
+      abasteceu: false,
+      modo: simulado ? "simulado" : "real",
+      motivo: "Resgate ja executado ha menos de 10 minutos.",
+      cooldownRestanteSegundos: Math.ceil(restanteResgateMs / 1000),
+      saude,
+      abastecimento: {
+        marketplace: "multi",
+        tentadas: 0,
+        adicionadas: 0,
+        recusadas: 0,
+        motivosRecusa: {},
+        bloqueios: [],
+        erros: ["cooldown_ativo"]
+      }
+    };
+  }
+
+  if (simulado) {
+    console.log("[RESGATE-FILA] iniciado", {
+      clienteId: cliente,
+      status: saude.status,
+      pendentes: saude.pendentes,
+      modo: "simulado"
+    });
+
+    return {
+      ok: true,
+      clienteId: cliente,
+      abasteceu: true,
+      modo: "simulado",
+      motivo: saude.motivo,
+      saude,
+      abastecimento: {
+        marketplace: "multi",
+        tentadas: 0,
+        adicionadas: 0,
+        recusadas: 0,
+        motivosRecusa: {},
+        bloqueios: [],
+        erros: []
+      }
+    };
+  }
+
+  filaInteligenteUltimoAbastecimento.set(cliente, Date.now());
+  const abastecimentoResgate = await executarResgateFilaControlado(cliente, saude);
+
+  return {
+    ok: true,
+    clienteId: cliente,
+    abasteceu: abastecimentoResgate.adicionadas > 0,
+    modo: "real",
+    motivo: abastecimentoResgate.adicionadas > 0
+      ? saude.motivo
+      : abastecimentoResgate.erros?.[0] || "Nenhuma oferta boa adicionada no resgate.",
+    saude,
+    abastecimento: abastecimentoResgate
+  };
 
   if (!saude.deveAbastecer) {
     return {
@@ -1238,6 +1677,52 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
       erros: []
     }
   };
+}
+
+async function acionarResgateFilaBaixaSeNecessario(clienteId = "admin") {
+  const cliente = String(clienteId || "admin");
+
+  if (!clienteTemAutomacaoAtiva(cliente)) {
+    filaInteligenteBaixaDesde.delete(cliente);
+    return;
+  }
+
+  if (!podeRodarAgora()) return;
+
+  const saude = avaliarSaudeFilaCliente(cliente);
+
+  if (!saude.deveAbastecer || saude.pendentes > 20) {
+    filaInteligenteBaixaDesde.delete(cliente);
+    return;
+  }
+
+  const agora = Date.now();
+  const baixaDesde = filaInteligenteBaixaDesde.get(cliente) || agora;
+  filaInteligenteBaixaDesde.set(cliente, baixaDesde);
+
+  if (agora - baixaDesde < FILA_INTELIGENTE_BAIXA_MINUTOS_MS) return;
+
+  const ultimo = filaInteligenteUltimoAbastecimento.get(cliente) || 0;
+  if (agora - ultimo < FILA_INTELIGENTE_COOLDOWN_MS) return;
+
+  if (filaInteligenteResgateRodando.has(cliente)) return;
+
+  filaInteligenteResgateRodando.add(cliente);
+
+  try {
+    const resultado = await abastecerFilaSeNecessario(cliente);
+
+    if (resultado?.abasteceu || resultado?.abastecimento?.adicionadas > 0) {
+      filaInteligenteBaixaDesde.delete(cliente);
+    }
+  } catch (e) {
+    console.log("[RESGATE-FILA] finalizado", {
+      clienteId: cliente,
+      erro: e.message || "erro_resgate_automatico"
+    });
+  } finally {
+    filaInteligenteResgateRodando.delete(cliente);
+  }
 }
 
 const diagnosticosFilaPorCliente = new Map();
@@ -3001,6 +3486,30 @@ function deveBloquearShopeeComumPorExcessoFila(clienteId = "admin", oferta = {})
   adicionarAvisoInternoOferta(oferta, "shopee_comum_excesso_fila");
 
   return true;
+}
+
+function ofertaBoaParaResgateFila(oferta = {}) {
+  if (ofertaEhRadar(oferta)) return true;
+  if (ofertaTemCupomRealOuDetectado(oferta)) return true;
+
+  const temBeneficio = Boolean(
+    oferta.avisoCupom ||
+    oferta.beneficioExtra ||
+    oferta.beneficioDetectado ||
+    oferta.linkResgateCupom ||
+    oferta.cupomUrl ||
+    oferta.descontoPix ||
+    oferta.descontoApp ||
+    oferta.valorCupom ||
+    oferta.percentualCupom
+  );
+
+  if (temBeneficio) return true;
+
+  const score = Number(oferta.radarScore || oferta.score || 0);
+  if (score >= 60) return true;
+
+  return descontoOfertaPercentual(oferta) >= 12;
 }
 
 function analisarDestinosCompativeisFila(clienteId = "admin", oferta = {}, configCliente = {}) {
@@ -14220,14 +14729,33 @@ function usuarioTemIntegracaoMarketplace(clienteId, marketplace) {
 
 // =============== FUNCAO DISTRIBUIDOR OFERTAS ======================================
 
-async function distribuirOfertaParaClientes(ofertaBase) {
+async function distribuirOfertaParaClientes(ofertaBase, opcoes = {}) {
 
   ofertaBase = prepararOfertaGlobal(ofertaBase);
+  const clienteAlvo = opcoes.clienteId ? String(opcoes.clienteId) : "";
+  const contextoDistribuicao = String(opcoes.contexto || "");
+  const onAdicionada = typeof opcoes.onAdicionada === "function" ? opcoes.onAdicionada : null;
+  const onRecusada = typeof opcoes.onRecusada === "function" ? opcoes.onRecusada : null;
+  const podeAdicionar = typeof opcoes.podeAdicionar === "function" ? opcoes.podeAdicionar : null;
+  const registrarRecusaDistribuicao = (clienteId, motivo, dados = {}) => {
+    if (onRecusada) {
+      onRecusada({
+        clienteId,
+        motivo,
+        marketplace: normalizarTexto(ofertaBase.marketplace || ""),
+        titulo: ofertaBase.titulo || ofertaBase.nome || "",
+        contexto: contextoDistribuicao,
+        ...dados
+      });
+    }
+  };
 
   for (const usuario of usuarios) {
     if (!usuario?.ativo) continue;
 
     const clienteId = usuario.id;
+    if (clienteAlvo && String(clienteId) !== clienteAlvo) continue;
+
     const adminMaster = usuario.papel === "admin_master";
 
     const mp = normalizarTexto(ofertaBase.marketplace || "");
@@ -14245,6 +14773,9 @@ async function distribuirOfertaParaClientes(ofertaBase) {
         plano: usuario.plano,
         marketplace: mp
       });
+      registrarRecusaDistribuicao(clienteId, "plano_sem_marketplace", {
+        plano: usuario.plano
+      });
       continue;
     }
 
@@ -14259,11 +14790,12 @@ logDebug("[DEBUG]✅ CHECK INTEGRAO:", {
    if (!usuarioTemIntegracaoMarketplace(clienteId, mp)) {
      logOptimus("INTEGRACAO", "Usuario sem integracao configurada", {
      clienteId,
-     marketplace: mp,
-      titulo: ofertaBase.titulo
-   });
-   continue;
-   }
+      marketplace: mp,
+       titulo: ofertaBase.titulo
+    });
+    registrarRecusaDistribuicao(clienteId, "integracao_ausente");
+    continue;
+    }
 
     const linkOriginal =
       ofertaBase.linkOriginal ||
@@ -14291,6 +14823,7 @@ logDebug("[DEBUG]✅ CHECK INTEGRAO:", {
     marketplace: mp,
     titulo: ofertaBase.titulo
   });
+  registrarRecusaDistribuicao(clienteId, "sem_link_afiliado");
   continue;
 }
 
@@ -14304,6 +14837,7 @@ if (mp === "mercadolivre" && linkAfiliadoIgualOriginal) {
     titulo: ofertaBase.titulo,
     linkOriginal
   });
+  registrarRecusaDistribuicao(clienteId, "link_afiliado_igual_original");
   continue;
 }
 
@@ -14344,7 +14878,10 @@ if (linkAfiliadoIgualOriginal) {
       )
     );
 
- if (jaExisteCliente) continue;
+ if (jaExisteCliente) {
+  registrarRecusaDistribuicao(clienteId, "duplicada_cliente");
+  continue;
+}
 
 if (deveIgnorarOfertaRepetida(ofertaCliente)) {
   console.log("[INFO] Oferta automtica ignorada pela memria:", {
@@ -14352,6 +14889,7 @@ if (deveIgnorarOfertaRepetida(ofertaCliente)) {
     marketplace: ofertaCliente.marketplace,
     titulo: ofertaCliente.titulo
   });
+  registrarRecusaDistribuicao(clienteId, "memoria_repetida");
   continue;
 }
 
@@ -14381,23 +14919,50 @@ try {
   console.log("[ERRO] Erro ao calcular score:", e.message);
 }
 
+if (contextoDistribuicao === "resgate_fila" && !ofertaBoaParaResgateFila(ofertaCliente)) {
+  console.log("[RESGATE-FILA] oferta recusada", {
+    clienteId,
+    marketplace: ofertaCliente.marketplace,
+    titulo: ofertaCliente.titulo,
+    motivo: "comum_fraca",
+    score: ofertaCliente.score,
+    desconto: ofertaCliente.descontoScore
+  });
+  registrarRecusaDistribuicao(clienteId, "comum_fraca", {
+    score: ofertaCliente.score,
+    desconto: ofertaCliente.descontoScore
+  });
+  continue;
+}
+
 if (reterShopeePrecoSuspeitoSeNecessario(ofertaCliente)) {
+  if (podeAdicionar && !podeAdicionar(ofertaCliente)) {
+    registrarRecusaDistribuicao(clienteId, "limite_resgate_atingido");
+    continue;
+  }
   registrarOfertaVista(ofertaCliente);
   fila.push(ofertaCliente);
   salvarFila(clienteId);
+  if (onAdicionada) onAdicionada(ofertaCliente);
   continue;
 }
 
 if (deveBloquearShopeeComumPorExcessoFila(clienteId, ofertaCliente)) {
+  registrarRecusaDistribuicao(clienteId, "shopee_comum_excesso_fila");
   continue;
 }
 
+if (podeAdicionar && !podeAdicionar(ofertaCliente)) {
+  registrarRecusaDistribuicao(clienteId, "limite_resgate_atingido");
+  continue;
+}
 registrarOfertaVista(ofertaCliente);
 
 logPrioridadeFila(ofertaCliente);
 fila.push(ofertaCliente);
 
 salvarFila(clienteId);
+if (onAdicionada) onAdicionada(ofertaCliente);
 
 console.log("[INFO] Oferta distribuda para cliente:", {
   clienteId,
@@ -16664,6 +17229,12 @@ setInterval(() => {
     if (!usuario?.ativo) continue;
 
     processarFila(usuario.id);
+    acionarResgateFilaBaixaSeNecessario(usuario.id).catch(e => {
+      console.log("[RESGATE-FILA] finalizado", {
+        clienteId: usuario.id,
+        erro: e.message || "erro_resgate_automatico"
+      });
+    });
   }
 
 }, 10 * 1000);
