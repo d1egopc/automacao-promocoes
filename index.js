@@ -2,6 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
+const FormData = require("form-data");
 const csv = require("csv-parser");
 const zlib = require("zlib");
 
@@ -3007,12 +3008,354 @@ function proximaTentativaDestino(oferta, ms = 5 * 60 * 1000) {
   oferta.proximaTentativaEnvioEm = new Date(Date.now() + ms).toISOString();
 }
 
+function normalizarDestinoEnvio(destino = {}) {
+  const tipo = String(destino.tipo || "").toLowerCase() === "telegram" ? "telegram" : "whatsapp";
+  const conexaoId = String(
+    destino.conexaoId ||
+    destino.sessao ||
+    destino.sessaoId ||
+    destino.idSessao ||
+    destino.botId ||
+    destino.telegramId ||
+    ""
+  ).trim();
+  const grupoUnico = String(destino.grupo || destino.chatId || destino.chat_id || destino.canal || "").trim();
+  const gruposWhatsapp = Array.isArray(destino.gruposWhatsapp)
+    ? destino.gruposWhatsapp
+    : grupoUnico
+      ? [grupoUnico]
+      : [];
+  const telegramDestinos = Array.isArray(destino.telegramDestinos)
+    ? destino.telegramDestinos
+    : Array.isArray(destino.telegramIds)
+      ? destino.telegramIds
+      : grupoUnico
+        ? [grupoUnico]
+        : [];
+
+  return {
+    ...destino,
+    tipo,
+    conexaoId,
+    sessao: destino.sessao || conexaoId,
+    sessaoId: destino.sessaoId || conexaoId,
+    idSessao: destino.idSessao || conexaoId,
+    grupo: grupoUnico || destino.grupo,
+    gruposWhatsapp,
+    telegramDestinos
+  };
+}
+
+function resolverSessaoWhatsappDestino(clienteId = "admin", destino = {}) {
+  const destinoNormalizado = normalizarDestinoEnvio(destino);
+  const candidatos = [
+    destinoNormalizado.conexaoId,
+    destinoNormalizado.sessao,
+    destinoNormalizado.sessaoId,
+    destinoNormalizado.idSessao
+  ].map(id => String(id || "").trim()).filter(Boolean);
+
+  const ids = [];
+  for (const id of candidatos) {
+    ids.push(id);
+    ids.push(normalizarSessaoId(clienteId, id));
+  }
+
+  const idSessao = ids.find(id => sessoes[id]) || "";
+  const sock = idSessao ? sessoes[idSessao] : null;
+  const grupos = (destinoNormalizado.gruposWhatsapp || [])
+    .map(g => {
+      if (!g) return "";
+      if (typeof g === "string") return g;
+      return g.id || g.value || g.grupoId || g.jid || "";
+    })
+    .map(g => String(g || "").trim())
+    .filter(Boolean);
+
+  return {
+    destino: destinoNormalizado,
+    idSessao,
+    sock,
+    grupos
+  };
+}
+
+async function enviarImagemOuTextoWhatsapp(sock, grupo, mensagem, imagemUrl = "", tipoMidia = "imagem") {
+  if (tipoMidia === "texto" || !imagemUrl) {
+    await sock.sendMessage(grupo, { text: mensagem });
+    return;
+  }
+
+  const imagemTexto = String(imagemUrl || "");
+  const ehUrl = imagemTexto.startsWith("http://") || imagemTexto.startsWith("https://");
+  const ehDataImage = imagemTexto.startsWith("data:image");
+  const pareceBase64Puro = !ehUrl && !imagemTexto.startsWith("data:") && imagemTexto.length > 500;
+
+  if (ehDataImage || pareceBase64Puro) {
+    let base64Data = imagemTexto;
+
+    if (ehDataImage) {
+      const match = imagemTexto.match(/^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/);
+      if (!match) throw new Error("Imagem base64 invalida para WhatsApp");
+      base64Data = match[1];
+    }
+
+    await sock.sendMessage(grupo, {
+      image: Buffer.from(base64Data, "base64"),
+      caption: mensagem
+    });
+    return;
+  }
+
+  await sock.sendMessage(grupo, {
+    image: {
+      url: corrigirImagemUrl(imagemUrl) || imagemUrl
+    },
+    caption: mensagem
+  });
+}
+
+async function enviarImagemOuTextoTelegram(destinoTelegram = {}, mensagem, imagemUrl = "", tipoMidia = "imagem") {
+  if (tipoMidia === "texto" || !imagemUrl) {
+    await axios.post(
+      `https://api.telegram.org/bot${destinoTelegram.botToken}/sendMessage`,
+      {
+        chat_id: destinoTelegram.chatId,
+        text: mensagem
+      }
+    );
+    return;
+  }
+
+  const imagemTexto = String(imagemUrl || "");
+  const ehUrl = imagemTexto.startsWith("http://") || imagemTexto.startsWith("https://");
+  const ehDataImage = imagemTexto.startsWith("data:image");
+  const pareceBase64Puro = !ehUrl && !imagemTexto.startsWith("data:") && imagemTexto.length > 500;
+
+  if (ehDataImage || pareceBase64Puro) {
+    let mimeType = "image/jpeg";
+    let base64Data = imagemTexto;
+
+    if (ehDataImage) {
+      const match = imagemTexto.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+      if (!match) throw new Error("Imagem base64 invalida para Telegram");
+      mimeType = match[1];
+      base64Data = match[2];
+    } else if (imagemTexto.startsWith("UklGR")) {
+      mimeType = "image/webp";
+    } else if (imagemTexto.startsWith("iVBOR")) {
+      mimeType = "image/png";
+    }
+
+    const ext =
+      mimeType.includes("png") ? "png" :
+      mimeType.includes("webp") ? "webp" :
+      "jpg";
+    const form = new FormData();
+
+    form.append("chat_id", String(destinoTelegram.chatId));
+    form.append("caption", mensagem);
+    form.append("photo", Buffer.from(base64Data, "base64"), {
+      filename: `campanha.${ext}`,
+      contentType: mimeType
+    });
+
+    await axios.post(
+      `https://api.telegram.org/bot${destinoTelegram.botToken}/sendPhoto`,
+      form,
+      {
+        headers: form.getHeaders(),
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity
+      }
+    );
+    return;
+  }
+
+  await axios.post(
+    `https://api.telegram.org/bot${destinoTelegram.botToken}/sendPhoto`,
+    {
+      chat_id: destinoTelegram.chatId,
+      photo: corrigirImagemUrl(imagemUrl) || imagemUrl,
+      caption: mensagem
+    }
+  );
+}
+
+function registrarEnvioDestinoOferta(oferta, clienteId, destino, dados = {}) {
+  if (!oferta || typeof oferta !== "object") return;
+
+  oferta.destinosEnviados = oferta.destinosEnviados || [];
+  oferta.destinosEnviados.push({
+    clienteId,
+    id: destino.id || "",
+    destinoId: destino.id || "",
+    conexaoId: destino.conexaoId || destino.sessao || "",
+    nome: destino.nome || "Destino",
+    tipo: destino.tipo || "",
+    ...dados,
+    creditos: 1,
+    dataEnvio: new Date().toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo"
+    })
+  });
+}
+
+async function enviarDestinoCentral({
+  clienteId = "admin",
+  destino = {},
+  oferta = null,
+  mensagem = "",
+  imagemUrl = "",
+  configCliente = null,
+  fluxo = "envio",
+  ignorarHorario = false
+} = {}) {
+  const cliente = String(clienteId || oferta?.clienteId || "admin");
+  const destinoNormalizado = normalizarDestinoEnvio(destino);
+  const configEnvio = configCliente || configsPorCliente?.[cliente] || config;
+
+  if (oferta && !destinoAceitaOferta(destinoNormalizado, oferta)) {
+    return { enviado: false, motivo: "nao_aceita" };
+  }
+
+  if (!ignorarHorario && !destinoDentroHorario(destinoNormalizado)) {
+    return { enviado: false, motivo: "fora_horario" };
+  }
+
+  if (destinoNormalizado.tipo === "whatsapp") {
+    const resolucao = resolverSessaoWhatsappDestino(cliente, destinoNormalizado);
+
+    if (!resolucao.sock) {
+      logOptimus("WHATSAPP", "Sessao nao encontrada", {
+        clienteId: cliente,
+        fluxo,
+        conexaoId: destinoNormalizado.conexaoId
+      });
+      return { enviado: false, motivo: "sessao_nao_encontrada" };
+    }
+
+    if (!resolucao.grupos.length) {
+      return { enviado: false, motivo: "sem_grupos" };
+    }
+
+    let enviados = 0;
+    for (const grupo of resolucao.grupos) {
+      if (!usuarioTemCreditos(cliente, 1)) {
+        return { enviado: enviados > 0, motivo: enviados > 0 ? "" : "sem_creditos", enviados };
+      }
+
+      await enviarImagemOuTextoWhatsapp(
+        resolucao.sock,
+        grupo,
+        mensagem,
+        imagemUrl,
+        destinoNormalizado.tipoMidia
+      );
+      debitarCreditos(cliente, 1);
+      enviados += 1;
+
+      registrarEnvioDestinoOferta(oferta, cliente, destinoNormalizado, {
+        tipo: "whatsapp",
+        grupo
+      });
+
+      await new Promise(r => setTimeout(r, 3000));
+    }
+
+    return { enviado: enviados > 0, motivo: enviados > 0 ? "" : "nao_enviado", enviados };
+  }
+
+  if (destinoNormalizado.tipo === "telegram") {
+    const resolucaoTelegram = telegramEnvioUtils.resolverTelegramsDestino({
+      clienteId: cliente,
+      destino: destinoNormalizado,
+      configsPorCliente,
+      integracoesPorCliente,
+      configGlobal: configEnvio
+    });
+    const selecionados = resolucaoTelegram.selecionados;
+
+    if (!selecionados.length) {
+      telegramEnvioUtils.logTelegramEnvio({
+        clienteId: cliente,
+        fluxo,
+        destinoId: destinoNormalizado.id || destinoNormalizado.conexaoId || destinoNormalizado.chatId || destinoNormalizado.grupo || "",
+        destinoEncontrado: !!destino,
+        tipoDestino: destinoNormalizado.tipo || "",
+        telegramsEncontrados: resolucaoTelegram.telegrams.length,
+        telegramConfiguradoEncontrado: resolucaoTelegram.telegrams.length > 0,
+        canalIdEncontrado: resolucaoTelegram.telegrams.some(t => !!t.chatId),
+        grupoIdEncontrado: !!(destinoNormalizado.grupo || destinoNormalizado.chatId || destinoNormalizado.chat_id || destinoNormalizado.canal),
+        tokenEncontrado: resolucaoTelegram.telegrams.some(t => !!t.botToken),
+        fallbackAtivos: resolucaoTelegram.usouFallbackAtivos,
+        motivoRecusa: resolucaoTelegram.telegrams.length ? "telegram_nao_casou_com_destino" : "telegram_nao_configurado"
+      });
+      return { enviado: false, motivo: "Nenhum Telegram selecionado" };
+    }
+
+    let enviados = 0;
+    for (const tel of selecionados) {
+      if (tel.ativo === false) continue;
+      const chatIdDestino = String(
+        destinoNormalizado.chatId ||
+        destinoNormalizado.chat_id ||
+        destinoNormalizado.grupo ||
+        destinoNormalizado.canal ||
+        ""
+      ).trim();
+      const telegramEnvio = {
+        ...tel,
+        chatId: chatIdDestino || tel.chatId
+      };
+
+      if (!telegramEnvio.botToken || !telegramEnvio.chatId) {
+        return { enviado: enviados > 0, motivo: enviados > 0 ? "" : "telegram_incompleto", enviados };
+      }
+      if (!usuarioTemCreditos(cliente, 1)) {
+        return { enviado: enviados > 0, motivo: enviados > 0 ? "" : "sem_creditos", enviados };
+      }
+
+      await enviarImagemOuTextoTelegram(
+        telegramEnvio,
+        mensagem,
+        imagemUrl,
+        destinoNormalizado.tipoMidia
+      );
+      debitarCreditos(cliente, 1);
+      enviados += 1;
+
+      registrarEnvioDestinoOferta(oferta, cliente, destinoNormalizado, {
+        tipo: "telegram",
+        chatId: telegramEnvio.chatId
+      });
+
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    return { enviado: enviados > 0, motivo: enviados > 0 ? "" : "nao_enviado", enviados };
+  }
+
+  return { enviado: false, motivo: "tipo_nao_suportado" };
+}
+
 // ========================== ENVIO DESTINO INTELIGENTE ============================
 
 async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId, configCliente, opcoes = {}) {
   try {
     clienteId = clienteId || oferta.clienteId || "admin";
     configCliente = configCliente || configsPorCliente?.[clienteId] || config;
+
+    return await enviarDestinoCentral({
+      clienteId,
+      destino,
+      oferta,
+      mensagem,
+      imagemUrl: oferta?.imagem || oferta?.imagemUrl || "",
+      configCliente,
+      fluxo: opcoes.envioManual ? "fila/manual" : "fila/automatico",
+      ignorarHorario: opcoes.ignorarHorario === true
+    });
 
     if (!destinoAceitaOferta(destino, oferta)) {
       return { enviado: false, motivo: "nao_aceita" };
@@ -14092,7 +14435,8 @@ app.post("/campanhas/enviar", async (req, res) => {
       telegramStatusPorCliente,
       usuarioTemCreditos,
       debitarCreditos,
-      corrigirImagemUrl
+      corrigirImagemUrl,
+      enviarDestinoCentral
     });
 
     return res.json({
