@@ -588,7 +588,7 @@ function categoriaDeclaradaValida(oferta = {}) {
   const categoriasInvalidas = [
     "geral", "todos", "todas", "amazon", "aliexpress", "shopee",
     "mercadolivre", "mercado livre", "magalu", "awin", "kabum",
-    "computador", "computadores", "escritorio"
+    "computador", "computadores", "escritorio", "diversos"
   ];
 
   if (categoriasInvalidas.some((item) => categoria === item || categoria.includes(item))) {
