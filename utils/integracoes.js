@@ -36,11 +36,6 @@
     nome: "Awin",
     required: ["publisherId", "apiToken"],
     allowed: ["publisherId", "apiToken", "programas", "loja", "advertiserId"]
-  },
-  telegram: {
-    nome: "Telegram",
-    required: ["botToken", "chatId"],
-    allowed: ["botToken", "chatId", "nome", "ativo"]
   }
 };
 
