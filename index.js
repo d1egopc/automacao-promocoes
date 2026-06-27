@@ -3065,14 +3065,16 @@ function normalizarDestinoEnvio(destino = {}) {
 function resolverSessaoWhatsappDestino(clienteId = "admin", destino = {}) {
   const cliente = String(clienteId || "admin").trim();
   const destinoNormalizado = normalizarDestinoEnvio(destino);
-  const candidatos = [
+  const camposDestino = [
     destinoNormalizado.conexaoId,
     destinoNormalizado.sessao,
     destinoNormalizado.sessaoId,
     destinoNormalizado.idSessao,
     destinoNormalizado.telefoneId,
     destinoNormalizado.idTecnico,
+    destinoNormalizado.conexao,
     destinoNormalizado.nome,
+    destinoNormalizado.nomeSessao,
     destinoNormalizado.nomeSessao,
     destinoNormalizado.nomeExibicao,
     destinoNormalizado.nomeAmigavel
@@ -3080,17 +3082,18 @@ function resolverSessaoWhatsappDestino(clienteId = "admin", destino = {}) {
 
   const mapaCliente = lerSessoesClienteMap(cliente);
   const alvos = new Set();
-  for (const id of candidatos) {
+  for (const id of camposDestino) {
     for (const candidato of canonizarSessaoParaBusca(cliente, id)) {
       alvos.add(candidato);
     }
   }
 
   const ids = new Set();
-  for (const id of candidatos) {
+  for (const id of camposDestino) {
     ids.add(id);
     ids.add(normalizarSessaoId(cliente, id));
   }
+  const auditoriaSessoes = [];
 
   for (const [chave, sessao] of Object.entries(mapaCliente)) {
     const chaveTexto = String(chave || "").trim();
@@ -3099,12 +3102,47 @@ function resolverSessaoWhatsappDestino(clienteId = "admin", destino = {}) {
       sessaoPertenceCliente(chaveTexto, cliente) ||
       sessaoPertenceCliente(idSessaoMeta, cliente);
 
-    if (!pertence) continue;
+    const camposSessao = camposIdentificacaoSessao(chaveTexto, sessao);
+    const matches = camposSessao
+      .map(campo => {
+        const candidatosCampo = canonizarSessaoParaBusca(cliente, campo);
+        const bateuCom = [...candidatosCampo].filter(candidato => alvos.has(candidato));
+        return {
+          campo,
+          bateu: bateuCom.length > 0,
+          bateuCom
+        };
+      })
+      .filter(item => item.bateu);
+    const encontrou = matches.length > 0;
+    const idsSessaoPossiveis = [
+      chaveTexto,
+      idSessaoMeta,
+      sessao?.idTecnico,
+      sessao?.conexaoId,
+      normalizarSessaoId(cliente, chaveTexto),
+      normalizarSessaoId(cliente, idSessaoMeta)
+    ].map(id => String(id || "").trim()).filter(Boolean);
+    const idSocket = idsSessaoPossiveis.find(id => !!sessoes[id]) || "";
 
-    const encontrou = camposIdentificacaoSessao(chaveTexto, sessao).some(campo => {
-      const candidatosCampo = canonizarSessaoParaBusca(cliente, campo);
-      return [...candidatosCampo].some(candidato => alvos.has(candidato));
+    auditoriaSessoes.push({
+      id: chaveTexto,
+      sessaoId: idSessaoMeta,
+      idTecnico: String(sessao?.idTecnico || "").trim(),
+      nome: String(sessao?.nome || sessao?.nomeSessao || "").trim(),
+      nomeAmigavel: String(sessao?.nomeAmigavel || sessao?.apelido || "").trim(),
+      nomeExibicao: String(sessao?.nomeExibicao || sessao?.label || "").trim(),
+      clienteId: String(sessao?.clienteId || "").trim() || cliente,
+      status: statusSessao[chaveTexto] || statusSessao[idSessaoMeta] || sessao?.status || "",
+      pertence,
+      camposComparados: camposSessao,
+      matches: matches.map(item => ({ campo: item.campo, bateuCom: item.bateuCom })),
+      encontrou,
+      temSocket: !!idSocket,
+      idSocket
     });
+
+    if (!pertence) continue;
 
     if (encontrou) {
       ids.add(chaveTexto);
@@ -3129,6 +3167,13 @@ function resolverSessaoWhatsappDestino(clienteId = "admin", destino = {}) {
     idsValidos[0] ||
     "";
   const sock = idSessao ? sessoes[idSessao] : null;
+  const encontrouComparacao = auditoriaSessoes.some(sessao => sessao.pertence && sessao.encontrou);
+  const encontrouSocket = auditoriaSessoes.some(sessao => sessao.pertence && sessao.encontrou && sessao.temSocket);
+  const motivoComparacao = encontrouSocket
+    ? ""
+    : encontrouComparacao
+      ? "comparacao_casou_mas_socket_nao_ativo"
+      : "nenhuma_sessao_do_cliente_casou_com_destino";
   const grupos = (destinoNormalizado.gruposWhatsapp || [])
     .map(g => {
       if (!g) return "";
@@ -3143,7 +3188,21 @@ function resolverSessaoWhatsappDestino(clienteId = "admin", destino = {}) {
     idSessao,
     sock,
     grupos,
-    candidatos: idsValidos
+    candidatos: idsValidos,
+    auditoria: {
+      clienteId: cliente,
+      destino: {
+        id: destinoNormalizado.id || "",
+        conexaoId: destinoNormalizado.conexaoId || "",
+        sessaoId: destinoNormalizado.sessaoId || "",
+        idSessao: destinoNormalizado.idSessao || "",
+        nomeSessao: destinoNormalizado.nomeSessao || destinoNormalizado.nome || ""
+      },
+      camposDestino,
+      alvos: [...alvos],
+      motivoComparacao,
+      sessoesCandidatas: auditoriaSessoes
+    }
   };
 }
 
@@ -3301,7 +3360,12 @@ async function enviarDestinoCentral({
         conexaoId: destinoNormalizado.conexaoId,
         sessao: destinoNormalizado.sessao || "",
         sessaoId: destinoNormalizado.sessaoId || "",
-        candidatos: resolucao.candidatos || []
+        idSessao: destinoNormalizado.idSessao || "",
+        nomeSessao: destinoNormalizado.nomeSessao || destinoNormalizado.nome || "",
+        candidatos: resolucao.candidatos || [],
+        motivoComparacao: resolucao.auditoria?.motivoComparacao || "",
+        camposDestino: resolucao.auditoria?.camposDestino || [],
+        sessoesCandidatas: resolucao.auditoria?.sessoesCandidatas || []
       });
       return { enviado: false, motivo: "sessao_nao_encontrada" };
     }
