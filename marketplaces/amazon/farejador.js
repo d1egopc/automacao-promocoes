@@ -55,8 +55,7 @@ const {
   normalizarSessaoId,
   distribuirOfertaParaClientes,
   encurtarUrl,
-  importarAmazon,
-  registrarAbastecimento
+  importarAmazon
 } = deps;
 
 const buscas = gerarBuscasAmazon({
