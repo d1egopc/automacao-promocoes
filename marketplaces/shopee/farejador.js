@@ -313,24 +313,13 @@ async function farejarShopee(clienteId = "admin", deps = {}) {
       `[SHOPEE] Ofertas Shopee apos filtros universais: ${ofertasFiltradas.length}`
     );
 
-    let adicionadasDistribuidas = 0;
-
     for (const oferta of ofertasFiltradas) {
       if (typeof distribuirOfertaParaClientes === "function") {
-        const distribuicao = await distribuirOfertaParaClientes(oferta);
-        adicionadasDistribuidas += Number(distribuicao?.adicionadas || 0) || 0;
+        await distribuirOfertaParaClientes(oferta);
       }
     }
 
-    console.log(`[SHOPEE] Shopee finalizado. Candidatas: ${adicionadasNestaRodada}. Distribuidas: ${adicionadasDistribuidas}`);
-
-    return {
-      marketplace: "shopee",
-      encontradas: produtos.length,
-      candidatas: adicionadasNestaRodada,
-      filtradas: ofertasFiltradas.length,
-      adicionadas: adicionadasDistribuidas
-    };
+    console.log(`[SHOPEE] Shopee finalizado. Adicionadas: ${adicionadasNestaRodada}`);
   } catch (e) {
     console.log("[ERRO] [SHOPEE] erro farejador Shopee:", e.message);
   }
@@ -339,4 +328,3 @@ async function farejarShopee(clienteId = "admin", deps = {}) {
 module.exports = {
   farejarShopee
 };
-
