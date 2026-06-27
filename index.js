@@ -14247,6 +14247,17 @@ async function carregarGruposSessao(id, opcoes = {}) {
   });
 
   const idNormalizado = normalizarSessaoId(clienteId, id);
+  const filtroChaveSessao = chave => {
+    const texto = String(chave || "");
+    return texto === id ||
+      texto === idNormalizado ||
+      texto.includes(id) ||
+      texto.includes(idNormalizado) ||
+      texto.startsWith(`${clienteId}_`);
+  };
+  const chavesSessoesCliente = Object.keys(sessoes || {}).filter(filtroChaveSessao);
+  const chavesStatusCliente = Object.keys(statusSessao || {}).filter(filtroChaveSessao);
+  const chavesGruposCliente = Object.keys(gruposPorSessao || {}).filter(filtroChaveSessao);
 
   const sessao =
     sessoes[id] ||
@@ -14260,6 +14271,23 @@ async function carregarGruposSessao(id, opcoes = {}) {
     sessoes[idNormalizado] ? idNormalizado :
     sessoes[`${clienteId}_${id}`] ? `${clienteId}_${id}` :
     idNormalizado;
+
+  console.log("[WHATSAPP-GRUPOS] Diagnostico carregarGruposSessao", {
+    clienteId,
+    idRecebidoCarregar: id,
+    idNormalizado,
+    chaveCache,
+    chavesSessoesCliente,
+    chavesStatusCliente,
+    chavesGruposCliente,
+    statusPorChave: chavesStatusCliente.map(chave => ({ chave, status: statusSessao[chave] || "" })),
+    temSessaoId: !!sessoes[id],
+    temSessaoNormalizada: !!sessoes[idNormalizado],
+    temSessaoClienteId: !!sessoes[`${clienteId}_${id}`],
+    temSock: !!sock,
+    temGroupFetchAllParticipating: typeof sock?.groupFetchAllParticipating === "function",
+    totalCacheChave: gruposPorSessao[chaveCache]?.length || 0
+  });
 
   if (!force && gruposPorSessao[chaveCache]?.length) {
     return gruposPorSessao[chaveCache];
@@ -14282,6 +14310,21 @@ console.log(
    "👥 Grupos carregados:",
   Object.keys(grupos || {}).length
 );
+
+    const chavesGruposRetornados = Object.keys(grupos || {});
+    console.log("[WHATSAPP-GRUPOS] Resultado groupFetchAllParticipating", {
+      clienteId,
+      idRecebidoCarregar: id,
+      idNormalizado,
+      chaveCache,
+      totalRetornado: chavesGruposRetornados.length,
+      amostraIds: chavesGruposRetornados.slice(0, 10),
+      sockUserId: sock?.user?.id || "",
+      sockUserName: sock?.user?.name || "",
+      statusChaveCache: statusSessao[chaveCache] || "",
+      statusId: statusSessao[id] || "",
+      statusNormalizado: statusSessao[idNormalizado] || ""
+    });
 
     const lista = Object.entries(grupos || {}).map(([gid, g]) => ({
       id: gid,
@@ -14410,6 +14453,20 @@ app.get("/grupos/:id", async (req, res) => {
     }
 
     const grupos = await carregarGruposSessao(resolucaoSessao.idSocket || id, { force: true, clienteId });
+    if (!grupos.length) {
+      console.log("[WHATSAPP-GRUPOS] Rota retornando zero grupos", {
+        clienteId,
+        idRecebido: req.params.id,
+        idResolvido: id,
+        idSocket: resolucaoSessao.idSocket,
+        idStatus: resolucaoSessao.idStatus,
+        idCache: resolucaoSessao.idCache,
+        idsBusca: resolucaoSessao.idsBusca,
+        status,
+        conectado,
+        force
+      });
+    }
 
     return res.json({
       ok: true,
@@ -14469,6 +14526,19 @@ app.post("/grupos/:id/refresh", async (req, res) => {
     }
 
     const grupos = await carregarGruposSessao(resolucaoSessao.idSocket || id, { force: true, clienteId });
+    if (!grupos.length) {
+      console.log("[WHATSAPP-GRUPOS] Refresh retornando zero grupos", {
+        clienteId,
+        idRecebido: req.params.id,
+        idResolvido: id,
+        idSocket: resolucaoSessao.idSocket,
+        idStatus: resolucaoSessao.idStatus,
+        idCache: resolucaoSessao.idCache,
+        idsBusca: resolucaoSessao.idsBusca,
+        status,
+        conectado
+      });
+    }
 
     return res.json({
       ok: true,
