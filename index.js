@@ -10696,6 +10696,90 @@ app.use("/mensageiro", criarRotasMensageiro({
 
 // ================= LOGIN ==========================
 
+const AUTH_DEBUG_VERSION = "auth-multiusuario-2026-06-27-v2";
+
+function pareceHashBcrypt(valor = "") {
+  return /^\$2[aby]\$\d{2}\$/.test(String(valor || ""));
+}
+
+async function diagnosticarSenhaUsuario(usuario = {}, senhaInformada = "") {
+  const senha = String(senhaInformada || "");
+  const camposTexto = [
+    ["senha", usuario.senha],
+    ["password", usuario.password],
+    ["pass", usuario.pass]
+  ].map(([campo, valor]) => [campo, String(valor || "")]);
+  const camposHash = [
+    ["senhaHash", usuario.senhaHash],
+    ["passwordHash", usuario.passwordHash],
+    ["hash", usuario.hash],
+    ["senha", usuario.senha],
+    ["password", usuario.password]
+  ].map(([campo, valor]) => [campo, String(valor || "")]);
+  const diagnostico = {
+    ok: false,
+    camposPresentes: {
+      senha: !!usuario.senha,
+      password: !!usuario.password,
+      pass: !!usuario.pass,
+      senhaHash: !!usuario.senhaHash,
+      passwordHash: !!usuario.passwordHash,
+      hash: !!usuario.hash
+    },
+    tiposCampos: {
+      senha: usuario.senha ? (pareceHashBcrypt(usuario.senha) ? "bcrypt" : "texto") : "ausente",
+      password: usuario.password ? (pareceHashBcrypt(usuario.password) ? "bcrypt" : "texto") : "ausente",
+      pass: usuario.pass ? "texto" : "ausente",
+      senhaHash: usuario.senhaHash ? (pareceHashBcrypt(usuario.senhaHash) ? "bcrypt" : "nao_bcrypt") : "ausente",
+      passwordHash: usuario.passwordHash ? (pareceHashBcrypt(usuario.passwordHash) ? "bcrypt" : "nao_bcrypt") : "ausente",
+      hash: usuario.hash ? (pareceHashBcrypt(usuario.hash) ? "bcrypt" : "nao_bcrypt") : "ausente"
+    },
+    textoPuroPassou: false,
+    campoTextoUsado: "",
+    bcryptTentou: false,
+    bcryptPassou: false,
+    camposBcryptTentados: [],
+    motivoFalha: ""
+  };
+
+  for (const [campo, valor] of camposTexto) {
+    if (!valor) continue;
+    if (valor === senha) {
+      diagnostico.ok = true;
+      diagnostico.textoPuroPassou = true;
+      diagnostico.campoTextoUsado = campo;
+      return diagnostico;
+    }
+  }
+
+  for (const [campo, hash] of camposHash) {
+    if (!pareceHashBcrypt(hash)) continue;
+    diagnostico.bcryptTentou = true;
+    diagnostico.camposBcryptTentados.push(campo);
+
+    try {
+      if (await bcrypt.compare(senha, hash)) {
+        diagnostico.ok = true;
+        diagnostico.bcryptPassou = true;
+        return diagnostico;
+      }
+    } catch (e) {
+      console.log("[AUTH] Falha ao comparar bcrypt:", e.message);
+    }
+  }
+
+  diagnostico.motivoFalha = diagnostico.bcryptTentou
+    ? "texto_puro_nao_bateu_e_bcrypt_nao_bateu"
+    : "texto_puro_nao_bateu_e_nenhum_hash_bcrypt_valido";
+
+  return diagnostico;
+}
+
+async function verificarSenhaUsuario(usuario = {}, senhaInformada = "") {
+  const diagnostico = await diagnosticarSenhaUsuario(usuario, senhaInformada);
+  return diagnostico.ok === true;
+}
+
 app.post("/login", async (req, res) => {
   const { user, pass } = req.body || {};
 
@@ -10707,16 +10791,48 @@ app.post("/login", async (req, res) => {
   );
 
   if (!usuario) {
+    console.log("[AUTH-LOGIN]", {
+      versao: AUTH_DEBUG_VERSION,
+      usuarioInformado: login,
+      usuarioEncontrado: false,
+      totalUsuariosCarregados: Array.isArray(usuarios) ? usuarios.length : 0,
+      idsCarregados: Array.isArray(usuarios) ? usuarios.map(u => u?.id).filter(Boolean).slice(0, 20) : []
+    });
     return res.status(401).json({ erro: "UsuÃ¡rio invÃ¡lido" });
   }
 
   if (usuario.ativo === false) {
+    console.log("[AUTH-LOGIN]", {
+      versao: AUTH_DEBUG_VERSION,
+      usuarioInformado: login,
+      usuarioEncontrado: true,
+      usuarioId: usuario.id || "",
+      ativo: false,
+      motivoFalha: "usuario_inativo"
+    });
     return res.status(403).json({ erro: "UsuÃ¡rio inativo" });
   }
 
- let senhaOk = false;
+ const diagnosticoSenha = await diagnosticarSenhaUsuario(usuario, pass);
+ const senhaOk = diagnosticoSenha.ok === true;
 
-senhaOk = String(usuario.senha || "") === String(pass || "");
+ console.log("[AUTH-LOGIN]", {
+   versao: AUTH_DEBUG_VERSION,
+   usuarioInformado: login,
+   usuarioEncontrado: true,
+   usuarioId: usuario.id || "",
+   email: usuario.email || "",
+   papel: usuario.papel || "",
+   ativo: usuario.ativo !== false,
+   camposPresentes: diagnosticoSenha.camposPresentes,
+   tiposCampos: diagnosticoSenha.tiposCampos,
+   textoPuroPassou: diagnosticoSenha.textoPuroPassou,
+   campoTextoUsado: diagnosticoSenha.campoTextoUsado,
+   bcryptTentou: diagnosticoSenha.bcryptTentou,
+   bcryptPassou: diagnosticoSenha.bcryptPassou,
+   camposBcryptTentados: diagnosticoSenha.camposBcryptTentados,
+   motivoFalha: diagnosticoSenha.motivoFalha || ""
+ });
 
 if (!senhaOk) {
   return res.status(401).json({ erro: "Senha invÃ¡lida" });
