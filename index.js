@@ -3572,10 +3572,25 @@ function limparTelegramCliente(clienteId = "admin") {
     for (const [chave, valor] of Object.entries(destinosCliente)) {
       if (Array.isArray(valor)) {
         destinosCliente[chave] = valor.filter(destino => !destinoEhTelegram(destino));
+        if (!destinosCliente[chave].length) delete destinosCliente[chave];
       } else if (destinoEhTelegram(valor)) {
         delete destinosCliente[chave];
       }
     }
+  }
+
+  if (cliente === "admin") {
+    config.telegram = { ativo: false, destinos: [] };
+
+    if (Array.isArray(config.destinosInteligentes)) {
+      config.destinosInteligentes = config.destinosInteligentes.filter(destino => !destinoEhTelegram(destino));
+    }
+
+    if (Array.isArray(config.destinos)) {
+      config.destinos = config.destinos.filter(destino => !destinoEhTelegram(destino));
+    }
+
+    salvarConfig();
   }
 
   salvarConfigsClientes();
@@ -9878,67 +9893,11 @@ app.post("/desconectar/:id", async (req, res) => {
 });
 
 app.post("/limpar-sessao/:id", async (req, res) => {
-  try {
-    const clienteId = getClienteId(req);
+  return responderExclusaoWhatsapp(req, res, "Sessao limpa. Gere um novo QR Code.");
+});
 
-    const id = normalizarSessaoId(
-    clienteId,
-    req.params.id
-    );
-
-    if (sessoes[id]) {
-      try {
-        await sessoes[id]?.logout?.();
-      } catch (e) {
-        console.log("[ERRO] erro logout ao limpar:", e.message);
-      }
-
-      try {
-        sessoes[id]?.end?.();
-      } catch (e) {
-        console.log("[ERRO] erro end ao limpar:", e.message);
-      }
-    }
-
-    delete sessoes[id];
-
-    if (typeof qrCodes !== "undefined") {
-      delete qrCodes[id];
-    }
-
-    if (typeof statusSessao !== "undefined") {
-      delete statusSessao[id];
-    }
-
-    if (typeof destinosPorSessao !== "undefined") {
-      delete destinosPorSessao[id];
-    }
-
-    const pastaAuth = `/data/auth_${id}`;
-
-    if (fs.existsSync(pastaAuth)) {
-      fs.rmSync(pastaAuth, {
-        recursive: true,
-        force: true
-      });
-
-      console.log("[WHATSAPP] Sesso limpa:", pastaAuth);
-    }
-
-    return res.json({
-      ok: true,
-      message: "SessÃ£o limpa. Gere um novo QR Code.",
-      id
-    });
-
-  } catch (e) {
-    console.log("[ERRO] [WHATSAPP] erro limpar sesso:", e.message);
-
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
+app.delete("/limpar-sessao/:id", async (req, res) => {
+  return responderExclusaoWhatsapp(req, res, "Sessao excluida com sucesso");
 });
 
 // ================= ME ==========================
@@ -12987,23 +12946,31 @@ app.delete("/sessoes/:id", async (req, res) => {
   }
 });
 
-app.post("/reset/:id", async (req, res) => {
+async function responderExclusaoWhatsapp(req, res, mensagem = "Sessao excluida com sucesso") {
   try {
     const clienteId = getClienteId(req);
     const { id } = await excluirSessaoWhatsappCliente(clienteId, req.params.id, { removerAuth: true });
 
     return res.json({
       ok: true,
-      message: "Sessao resetada. Gere novo QR.",
+      message: mensagem,
       id
     });
   } catch (e) {
-    console.log("[ERRO] [WHATSAPP] erro reset sessao:", e.message);
+    console.log("[ERRO] [WHATSAPP] erro ao excluir sessao:", e.message);
     return res.status(500).json({
       ok: false,
       erro: e.message
     });
   }
+}
+
+app.post("/reset/:id", async (req, res) => {
+  return responderExclusaoWhatsapp(req, res, "Sessao resetada. Gere novo QR.");
+});
+
+app.delete("/reset/:id", async (req, res) => {
+  return responderExclusaoWhatsapp(req, res, "Sessao excluida com sucesso");
 });
 
 // ===================== FUNÃ‡ÃƒO LIMETE SESSÃƒO WHATSAPP ========================
