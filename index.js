@@ -9219,6 +9219,16 @@ app.get("/radar/config", (req, res) => {
     const radarConfig = carregarRadarConfigAdminMaster();
     const sessoesWhatsapp = listarSessoesWhatsappCliente(clienteId);
     const telegramDisponiveis = listarTelegramRadarCliente(clienteId);
+    logConexoesOrigem(req, "/radar/config", {
+      origemRetorno: "listarTelegramRadarCliente(clienteId)",
+      telegramDisponiveis: telegramDisponiveis.length,
+      configsPorClienteTelegram: resumoTelegramSeguro(configsPorCliente?.[clienteId]?.telegram),
+      configGlobalTelegram: resumoTelegramSeguro(config?.telegram),
+      integracaoTelegram: !!integracoesPorCliente?.[clienteId]?.telegram,
+      destinosTelegramCliente: contarDestinosTelegramSeguro(destinosPorCliente?.[clienteId]),
+      configDestinosTelegram: contarDestinosTelegramSeguro(config?.destinos),
+      configDestinosInteligentesTelegram: contarDestinosTelegramSeguro(config?.destinosInteligentes)
+    });
     logOptimus("RADAR", "Config carregada", {
       clienteId,
       sessoesWhatsappMonitoradas: Array.isArray(radarConfig.sessoesWhatsappMonitoradas) ? radarConfig.sessoesWhatsappMonitoradas.length : 0,
