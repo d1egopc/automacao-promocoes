@@ -105,7 +105,6 @@ const radarCupomMensagem = require("./utils/radar-cupom-mensagem");
 const storageUtils = require("./utils/storage");
 
 const {
-  storage,
   getClientePath,
   readClienteJson,
   writeClienteJson,
@@ -12092,7 +12091,18 @@ function normalizarSessaoId(clienteId, id = "sessao1") {
 
   const cliente = String(clienteId || "admin").trim() || "admin";
 
-  let sessao = String(id || "sessao1").trim();
+  let idBase = id;
+
+  if (idBase && typeof idBase === "object") {
+    idBase =
+      idBase.id ||
+      idBase.sessaoId ||
+      idBase.nome ||
+      idBase.sessionId ||
+      "";
+  }
+
+  let sessao = String(idBase || "sessao1").trim();
 
   if (sessao.startsWith(cliente + "_")) {
     sessao = sessao.slice((cliente + "_").length);
@@ -12107,8 +12117,33 @@ function normalizarSessaoId(clienteId, id = "sessao1") {
   return `${cliente}_${sessao}`;
 }
 
+function decodificarSessaoId(valor = "") {
+  const texto = String(valor || "").trim();
+  if (!texto) return "";
+
+  try {
+    return decodeURIComponent(texto);
+  } catch {
+    return texto;
+  }
+}
+
+function dataDirStorage() {
+  return String(process.env.DATA_DIR || "/data").trim() || "/data";
+}
+
 function authPathSessao(id = "") {
-  return path.join(storage, `auth_${String(id || "").trim()}`);
+  const idSeguro = String(id || "").trim();
+  if (!idSeguro) {
+    throw new Error("sessao_id_invalido_para_auth");
+  }
+
+  if (!path || typeof path.join !== "function") {
+    throw new Error("modulo_path_indisponivel");
+  }
+
+  const base = dataDirStorage();
+  return path.join(base, `auth_${idSeguro}`);
 }
 
 async function encerrarSocketSessao(id = "") {
@@ -12123,7 +12158,12 @@ async function encerrarSocketSessao(id = "") {
 
 async function excluirSessaoWhatsappCliente(clienteId, idRecebido, opcoes = {}) {
   const cliente = String(clienteId || "admin").trim();
-  const id = normalizarSessaoId(cliente, idRecebido);
+  const idOriginal = decodificarSessaoId(
+    idRecebido && typeof idRecebido === "object"
+      ? (idRecebido.id || idRecebido.sessaoId || idRecebido.nome || idRecebido.sessionId || "")
+      : idRecebido
+  );
+  const id = normalizarSessaoId(cliente, idOriginal);
   if (!sessaoPertenceCliente(id, cliente)) throw new Error("Sessao nao pertence ao cliente informado");
 
   await encerrarSocketSessao(id);
@@ -12141,7 +12181,11 @@ async function excluirSessaoWhatsappCliente(clienteId, idRecebido, opcoes = {}) 
   salvarConfig();
 
   if (opcoes.removerAuth !== false) {
-    fs.rmSync(authPathSessao(id), { recursive: true, force: true });
+    const caminhoAuth = authPathSessao(id);
+    if (typeof caminhoAuth !== "string") {
+      throw new Error("auth_path_invalido");
+    }
+    fs.rmSync(caminhoAuth, { recursive: true, force: true });
   }
 
   return { id };
