@@ -4530,24 +4530,120 @@ function decorarItemFilaParaResposta(item = {}) {
   };
 }
 
+function statusDetalheIndicaPendente(valor = "") {
+  const texto = normalizarTexto(valor);
+  return texto === "aguardandoenvio" || texto === "nafila";
+}
+
+function destinosResolvidosPayload(item = {}) {
+  if (Array.isArray(item.destinosResolvidos)) return item.destinosResolvidos;
+  if (Array.isArray(item.destinosEnviados)) return item.destinosEnviados;
+  if (Array.isArray(item.destinos)) return item.destinos;
+  return [];
+}
+
+function normalizarItemFilaParaResposta(item = {}) {
+  const resposta = { ...item };
+  const statusNormalizado = normalizarTexto(resposta.status || "");
+  const deveSerRetida = statusNormalizado === "retida" || Boolean(resposta.motivoRetencao || resposta.retidaEm);
+
+  if (deveSerRetida) {
+    resposta.status = "retida";
+    resposta.statusDetalhe = statusDetalheIndicaPendente(resposta.statusDetalhe)
+      ? "Retida por falta de destino compativel"
+      : (resposta.statusDetalhe || "Retida por falta de destino compativel");
+    resposta.motivoRetencao = resposta.motivoRetencao || "retida_sem_destino_compativel";
+    resposta.retidaEm = resposta.retidaEm || resposta.atualizadoEm || resposta.criadoEm || resposta.dataEntradaFila || "";
+    resposta.destinosResolvidos = destinosResolvidosPayload(resposta);
+    delete resposta.proximaTentativaEnvioEm;
+  } else if (statusNormalizado === "enviado") {
+    resposta.status = "enviado";
+    resposta.enviadoEm = resposta.enviadoEm || resposta.dataEnvio || "";
+    resposta.destinosEnviados = Array.isArray(resposta.destinosEnviados) ? resposta.destinosEnviados : [];
+    resposta.destinosResolvidos = destinosResolvidosPayload(resposta);
+    resposta.statusDetalhe = resposta.statusDetalhe || `Enviada para ${resposta.destinosEnviados.length} destino(s)`;
+  } else if (statusNormalizado === "erro") {
+    resposta.status = "erro";
+    resposta.destinosResolvidos = destinosResolvidosPayload(resposta);
+    resposta.statusDetalhe = resposta.statusDetalhe || "Erro no envio";
+  } else {
+    resposta.status = "pendente";
+    resposta.statusDetalhe = resposta.statusDetalhe || "Aguardando envio";
+    resposta.destinosResolvidos = destinosResolvidosPayload(resposta);
+  }
+
+  return decorarItemFilaParaResposta(resposta);
+}
+
+function sanearEstadosFilaCliente(clienteId = "admin") {
+  let alterou = false;
+
+  for (const item of fila) {
+    if (String(item?.clienteId || "admin") !== String(clienteId)) continue;
+
+    const statusNormalizado = normalizarTexto(item.status || "");
+    const deveSerRetida = statusNormalizado === "retida" || Boolean(item.motivoRetencao || item.retidaEm);
+
+    if (deveSerRetida) {
+      if (item.status !== "retida") {
+        item.status = "retida";
+        alterou = true;
+      }
+
+      if (!item.statusDetalhe || statusDetalheIndicaPendente(item.statusDetalhe)) {
+        item.statusDetalhe = "Retida por falta de destino compativel";
+        alterou = true;
+      }
+
+      if (!item.motivoRetencao) {
+        item.motivoRetencao = "retida_sem_destino_compativel";
+        alterou = true;
+      }
+
+      if (!item.retidaEm) {
+        item.retidaEm = item.atualizadoEm || item.criadoEm || item.dataEntradaFila || new Date().toISOString();
+        alterou = true;
+      }
+
+      if (item.proximaTentativaEnvioEm) {
+        delete item.proximaTentativaEnvioEm;
+        alterou = true;
+      }
+    }
+  }
+
+  if (alterou) {
+    salvarFila(clienteId);
+    console.log("[FILA] Estados inconsistentes saneados antes do payload", { clienteId });
+  }
+}
+
+function resumirStatusFila(itens = []) {
+  return {
+    total: itens.length,
+    pendentes: itens.filter((o) => o.status === "pendente").length,
+    enviados: itens.filter((o) => o.status === "enviado").length,
+    retidas: itens.filter((o) => o.status === "retida").length,
+    erros: itens.filter((o) => o.status === "erro").length
+  };
+}
+
 app.get("/fila", (req, res) => {
   const clienteId = getClienteId(req);
 
   sanearExpiradosFila(clienteId);
+  sanearEstadosFilaCliente(clienteId);
 
   const itensCliente = fila.filter((o) =>
     (o.clienteId || "admin") === clienteId
   );
-  const itensResposta = itensCliente.map(decorarItemFilaParaResposta);
+  const itensResposta = itensCliente.map(normalizarItemFilaParaResposta);
+  const resumo = resumirStatusFila(itensResposta);
 
   res.json({
     ok: true,
     clienteId,
-    total: itensCliente.length,
-    pendentes: itensCliente.filter((o) => o.status === "pendente").length,
-    enviados: itensCliente.filter((o) => o.status === "enviado").length,
-    retidas: itensCliente.filter((o) => o.status === "retida").length,
-    erros: itensCliente.filter((o) => o.status === "erro").length,
+    ...resumo,
     itens: itensResposta,
     fila: itensResposta
   });
@@ -16282,17 +16378,17 @@ app.get("/status/:id", (req, res) => {
 app.get("/fila/status", (req, res) => {
   const clienteId = getClienteId(req);
 
+  sanearEstadosFilaCliente(clienteId);
+
   const itensCliente = fila.filter(o =>
     String(o.clienteId || "admin") === String(clienteId)
-  );
+  ).map(normalizarItemFilaParaResposta);
+  const resumo = resumirStatusFila(itensCliente);
 
   return res.json({
     ok: true,
     clienteId,
-    total: itensCliente.length,
-    pendentes: itensCliente.filter(o => o.status === "pendente").length,
-    enviados: itensCliente.filter(o => o.status === "enviado").length,
-    erros: itensCliente.filter(o => o.status === "erro").length
+    ...resumo
   });
 });
 
