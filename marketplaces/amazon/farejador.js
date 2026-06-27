@@ -1,4 +1,4 @@
-﻿const { gerarBuscasAmazon } =
+const { gerarBuscasAmazon } =
   require("./buscas");
 
 const {
@@ -312,27 +312,17 @@ if (adicionadasNestaRodada >= limitePorRodada) {
 const ofertasFiltradas =
   aplicarFiltrosUniversais(ofertasEncontradas);
 
-
-let adicionadasDistribuidas = 0;
 console.log(
-  `Ã°Å¸Â§Â  Ofertas Amazon apÃƒÂ³s filtros universais: ${ofertasFiltradas.length}`
+  `ðŸ§  Ofertas Amazon apÃ³s filtros universais: ${ofertasFiltradas.length}`
 );
 
 for (const oferta of ofertasFiltradas) {
-  const distribuicao = await distribuirOfertaParaClientes(oferta);
-  adicionadasDistribuidas += Number(distribuicao?.adicionadas || 0) || 0;
+  await distribuirOfertaParaClientes(oferta);
 }
 
 console.log(
-  `Ã¢Å“â€¦ Amazon finalizado. Filtradas: ${ofertasFiltradas.length}. Distribuidas: ${adicionadasDistribuidas}`
+  `âœ… Amazon finalizado. Adicionadas: ${ofertasFiltradas.length}`
 );
-
-return {
-  marketplace: "amazon",
-  encontradas: ofertasEncontradas.length,
-  filtradas: ofertasFiltradas.length,
-  adicionadas: adicionadasDistribuidas
-};
 
 } catch (e) {
   console.log("[ERRO] [AMZ] erro farejador Amazon:", e.message);
@@ -342,5 +332,4 @@ return {
 module.exports = {
   farejarAmazon
 };
-
 
