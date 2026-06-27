@@ -33,7 +33,8 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
     importarMercadoLivre,
     gerarLinkAfiliadoMercadoLivre,
     deveIgnorarOfertaRepetida,
-    registrarOfertaVista
+    registrarOfertaVista,
+    registrarAbastecimento
   } = deps;
 
   const resumoML = {
