@@ -3555,8 +3555,55 @@ function destinoEhTelegram(destino = {}) {
   return tipo === "telegram" || !!destino?.botToken || !!destino?.chatId;
 }
 
+function resumoTelegramSeguro(valor = {}) {
+  const destinos = Array.isArray(valor?.destinos) ? valor.destinos : [];
+  return {
+    existe: !!valor,
+    ativo: valor?.ativo === true,
+    destinos: destinos.length,
+    destinosAtivos: destinos.filter(destino => destino?.ativo !== false).length,
+    destinosComToken: destinos.filter(destino => !!destino?.botToken).length,
+    destinosComChatId: destinos.filter(destino => !!destino?.chatId).length
+  };
+}
+
+function contarDestinosTelegramSeguro(valor) {
+  if (Array.isArray(valor)) return valor.filter(destinoEhTelegram).length;
+  if (valor && typeof valor === "object") {
+    return Object.values(valor).reduce((total, item) => {
+      if (Array.isArray(item)) return total + item.filter(destinoEhTelegram).length;
+      return total + (destinoEhTelegram(item) ? 1 : 0);
+    }, 0);
+  }
+  return 0;
+}
+
+function logConexoesOrigem(req, rota, detalhes = {}) {
+  const clienteId = (() => {
+    try { return getClienteId(req); } catch { return "indefinido"; }
+  })();
+
+  console.log("[CONEXOES-DEBUG]", {
+    rota,
+    metodo: req.method,
+    clienteId,
+    ...detalhes
+  });
+}
+
 function limparTelegramCliente(clienteId = "admin") {
   const cliente = String(clienteId || "admin").trim();
+
+  console.log("[CONEXOES-DEBUG] limparTelegramCliente antes", {
+    clienteId: cliente,
+    configsPorClienteTelegram: resumoTelegramSeguro(configsPorCliente?.[cliente]?.telegram),
+    configGlobalTelegram: resumoTelegramSeguro(config?.telegram),
+    integracaoTelegram: !!integracoesPorCliente?.[cliente]?.telegram,
+    destinosTelegramCliente: contarDestinosTelegramSeguro(destinosPorCliente?.[cliente]),
+    configDestinosTelegram: contarDestinosTelegramSeguro(config?.destinos),
+    configDestinosInteligentesTelegram: contarDestinosTelegramSeguro(config?.destinosInteligentes),
+    statusCache: telegramStatusPorCliente?.[cliente] || ""
+  });
 
   configsPorCliente[cliente] = configsPorCliente[cliente] || {};
   integracoesPorCliente[cliente] = integracoesPorCliente[cliente] || {};
@@ -3596,6 +3643,17 @@ function limparTelegramCliente(clienteId = "admin") {
   salvarConfigsClientes();
   salvarIntegracoesPersistidas();
   salvarDestinosClientes();
+
+  console.log("[CONEXOES-DEBUG] limparTelegramCliente depois", {
+    clienteId: cliente,
+    configsPorClienteTelegram: resumoTelegramSeguro(configsPorCliente?.[cliente]?.telegram),
+    configGlobalTelegram: resumoTelegramSeguro(config?.telegram),
+    integracaoTelegram: !!integracoesPorCliente?.[cliente]?.telegram,
+    destinosTelegramCliente: contarDestinosTelegramSeguro(destinosPorCliente?.[cliente]),
+    configDestinosTelegram: contarDestinosTelegramSeguro(config?.destinos),
+    configDestinosInteligentesTelegram: contarDestinosTelegramSeguro(config?.destinosInteligentes),
+    statusCache: telegramStatusPorCliente?.[cliente] || ""
+  });
 }
 
 app.get("/telegram", (req, res) => {
@@ -3604,6 +3662,17 @@ app.get("/telegram", (req, res) => {
   const destinos = Array.isArray(telegram.destinos) ? telegram.destinos : [];
   const ativo = telegram.ativo === true;
   const conectado = ativo && destinos.some(destino => destino?.ativo !== false && destino?.botToken && destino?.chatId);
+
+  logConexoesOrigem(req, "/telegram", {
+    origemRetorno: "configsPorCliente[clienteId].telegram",
+    configsPorClienteTelegram: resumoTelegramSeguro(configsPorCliente?.[clienteId]?.telegram),
+    configGlobalTelegram: resumoTelegramSeguro(config?.telegram),
+    integracaoTelegram: !!integracoesPorCliente?.[clienteId]?.telegram,
+    destinosTelegramCliente: contarDestinosTelegramSeguro(destinosPorCliente?.[clienteId]),
+    configDestinosTelegram: contarDestinosTelegramSeguro(config?.destinos),
+    configDestinosInteligentesTelegram: contarDestinosTelegramSeguro(config?.destinosInteligentes),
+    statusCache: telegramStatusPorCliente?.[clienteId] || ""
+  });
 
   return res.json({
     ok: true,
@@ -3645,6 +3714,10 @@ app.post("/telegram", (req, res) => {
 app.delete("/telegram", (req, res) => {
   try {
     const clienteId = getClienteId(req);
+    logConexoesOrigem(req, "/telegram DELETE", {
+      acao: "excluir telegram",
+      origemRemocao: "limparTelegramCliente(clienteId)"
+    });
     limparTelegramCliente(clienteId);
 
     return res.json({
@@ -3705,6 +3778,14 @@ app.get("/destinos", (req, res) => {
 
   const destinos =
     destinosPorCliente?.[clienteId] || [];
+
+  logConexoesOrigem(req, "/destinos", {
+    origemRetorno: "destinosPorCliente[clienteId]",
+    totalDestinos: Array.isArray(destinos) ? destinos.length : Object.keys(destinos || {}).length,
+    destinosTelegram: contarDestinosTelegramSeguro(destinos),
+    configDestinosTelegram: contarDestinosTelegramSeguro(config?.destinos),
+    configDestinosInteligentesTelegram: contarDestinosTelegramSeguro(config?.destinosInteligentes)
+  });
 
   return res.json(destinos);
 });
@@ -4146,6 +4227,16 @@ app.get("/config", (req, res) => {
   const isAdmin = isAdminMaster(req);
 
   if (isAdmin) {
+    logConexoesOrigem(req, "/config", {
+      origemRetorno: "config global",
+      configGlobalTelegram: resumoTelegramSeguro(config?.telegram),
+      configDestinosTelegram: contarDestinosTelegramSeguro(config?.destinos),
+      configDestinosInteligentesTelegram: contarDestinosTelegramSeguro(config?.destinosInteligentes),
+      configsPorClienteTelegram: resumoTelegramSeguro(configsPorCliente?.[clienteId]?.telegram),
+      integracaoTelegram: !!integracoesPorCliente?.[clienteId]?.telegram,
+      destinosTelegramCliente: contarDestinosTelegramSeguro(destinosPorCliente?.[clienteId])
+    });
+
     return res.json({
       ok: true,
       clienteId,
@@ -4154,6 +4245,14 @@ app.get("/config", (req, res) => {
   }
 
   const configCliente = configsPorCliente?.[clienteId] || {};
+
+  logConexoesOrigem(req, "/config", {
+    origemRetorno: "configsPorCliente[clienteId]",
+    configsPorClienteTelegram: resumoTelegramSeguro(configCliente?.telegram),
+    configGlobalTelegram: resumoTelegramSeguro(config?.telegram),
+    integracaoTelegram: !!integracoesPorCliente?.[clienteId]?.telegram,
+    destinosTelegramCliente: contarDestinosTelegramSeguro(destinosPorCliente?.[clienteId])
+  });
 
   return res.json({
     ok: true,
@@ -4172,6 +4271,16 @@ app.get("/config", (req, res) => {
 app.get("/minha-config", (req, res) => {
   const clienteId = getClienteId(req);
   const configCliente = getConfigCliente(clienteId);
+
+  logConexoesOrigem(req, "/minha-config", {
+    origemRetorno: "getConfigCliente(clienteId) mesclado com config global",
+    configClienteTelegram: resumoTelegramSeguro(configCliente?.telegram),
+    configGlobalTelegram: resumoTelegramSeguro(config?.telegram),
+    integracaoTelegram: !!integracoesPorCliente?.[clienteId]?.telegram,
+    destinosTelegramCliente: contarDestinosTelegramSeguro(destinosPorCliente?.[clienteId]),
+    configDestinosTelegram: contarDestinosTelegramSeguro(config?.destinos),
+    configDestinosInteligentesTelegram: contarDestinosTelegramSeguro(config?.destinosInteligentes)
+  });
 
   return res.json({
     ok: true,
@@ -10039,6 +10148,15 @@ app.get("/integracoes", (req, res) => {
     };
   }
 
+  logConexoesOrigem(req, "/integracoes", {
+    origemRetorno: "integracoesPorCliente[clienteId]",
+    marketplaces: Object.keys(data || {}),
+    telegramConfigurado: !!resposta.telegram?.configurado,
+    telegramStatus: resposta.telegram?.status || "ausente",
+    configsPorClienteTelegram: resumoTelegramSeguro(configsPorCliente?.[clienteId]?.telegram),
+    configGlobalTelegram: resumoTelegramSeguro(config?.telegram)
+  });
+
   return res.json({
     ok: true,
     clienteId,
@@ -10106,6 +10224,11 @@ app.delete("/integracoes/:marketplace", (req, res) => {
     }
 
     if (marketplace === "telegram") {
+      logConexoesOrigem(req, "/integracoes/:marketplace DELETE", {
+        marketplace,
+        acao: "excluir telegram via integracoes",
+        origemRemocao: "limparTelegramCliente(clienteId)"
+      });
       limparTelegramCliente(clienteId);
     } else {
       delete integracoesPorCliente[clienteId][marketplace];
@@ -12861,6 +12984,13 @@ app.get("/sessoes", (req, res) => {
   const clienteId = getClienteId(req);
   const lista = listarSessoesWhatsappCliente(clienteId);
 
+  logConexoesOrigem(req, "/sessoes", {
+    origemRetorno: "lerSessoesClienteMap(clienteId)",
+    totalSessoes: lista.length,
+    ids: lista.map(sessao => sessao.id),
+    statuses: lista.map(sessao => ({ id: sessao.id, status: sessao.status, conectado: sessao.conectado, qrDisponivel: sessao.qrDisponivel }))
+  });
+
   return res.json({
     ok: true,
     sessoes: lista
@@ -12932,6 +13062,14 @@ app.delete("/sessoes/:id", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
     const { id } = await excluirSessaoWhatsappCliente(clienteId, req.params.id, { removerAuth: true });
+    console.log("[WHATSAPP-DEBUG] DELETE /sessoes/:id", {
+      clienteId,
+      idRecebido: req.params.id,
+      idNormalizado: id,
+      temSocketDepois: !!sessoes[id],
+      temQrDepois: !!qrCodes[id],
+      statusDepois: statusSessao[id] || ""
+    });
 
     return res.json({
       ok: true,
@@ -13042,11 +13180,31 @@ app.post("/conectar", async (req, res) => {
     : idRecebido;
   const sessaoId = normalizarSessaoId(clienteId, idBase);
 
-  if (listarSessoesCliente(clienteId).includes(sessaoId) || sessoesMeta[sessaoId]) {
-    return res.status(400).json({
-      ok: false,
-      erro: "Ja existe uma conexao com esse ID. Tente criar uma nova conexao novamente.",
-      id: sessaoId
+  const sessaoExistente = listarSessoesCliente(clienteId).includes(sessaoId) || !!sessoesMeta[sessaoId];
+
+  if (sessaoExistente) {
+    console.log("[WHATSAPP-DEBUG] /conectar sessao existente, iniciando QR", {
+      clienteId,
+      idRecebido,
+      idBase,
+      sessaoId,
+      statusAtual: statusSessao[sessaoId] || "",
+      temQr: !!qrCodes[sessaoId],
+      temSocket: !!sessoes[sessaoId],
+      temMeta: !!sessoesMeta[sessaoId]
+    });
+
+    iniciarWhatsApp(sessaoId, req.body?.force === true).catch(e => {
+      console.log("[WHATSAPP-DEBUG] erro iniciar sessao existente:", e.message);
+    });
+
+    return res.json({
+      ok: true,
+      message: "Sessao iniciada",
+      id: sessaoId,
+      existente: true,
+      status: statusSessao[sessaoId] || "connecting",
+      qrDisponivel: !!qrCodes[sessaoId]
     });
   }
 
@@ -13069,6 +13227,16 @@ app.post("/conectar", async (req, res) => {
     sessaoId,
     limiteSessoes,
     usadas: sessoesCliente.length + 1
+  });
+
+  console.log("[WHATSAPP-DEBUG] /conectar nova sessao", {
+    clienteId,
+    idRecebido,
+    idBase,
+    sessaoId,
+    statusAtual: statusSessao[sessaoId] || "",
+    temQr: !!qrCodes[sessaoId],
+    temSocket: !!sessoes[sessaoId]
   });
 
   iniciarWhatsApp(sessaoId, false);
@@ -13310,11 +13478,15 @@ app.get("/qr/:id", (req, res) => {
 
   const id = normalizarSessaoId(clienteId, idOriginal);
 
-console.log("[WHATSAPP] Buscando QR:", {
+console.log("[WHATSAPP-DEBUG] GET /qr", {
   clienteId,
-  id,
+  idOriginal,
+  idNormalizado: id,
   temQr: !!qrCodes[id],
-  status: statusSessao[id]
+  status: statusSessao[id] || "",
+  temSocket: !!sessoes[id],
+  chavesQrMesmoCliente: Object.keys(qrCodes || {}).filter(chave => String(chave).startsWith(clienteId + "_")),
+  chavesStatusMesmoCliente: Object.keys(statusSessao || {}).filter(chave => String(chave).startsWith(clienteId + "_"))
 });
 
   if (!qrCodes[id]) {
@@ -13345,6 +13517,15 @@ app.get("/status/:id", (req, res) => {
     clienteId,
     req.params.id
   );
+
+  console.log("[WHATSAPP-DEBUG] GET /status", {
+    clienteId,
+    idOriginal: req.params.id,
+    idNormalizado: id,
+    status: statusSessao[id] || "offline",
+    temQr: !!qrCodes[id],
+    temSocket: !!sessoes[id]
+  });
 
   return res.json({
     ok: true,
@@ -13638,9 +13819,10 @@ sock.ev.on("group-participants.update", async (evento) => {
     const { connection, qr, lastDisconnect } = update;
 
     if (qr) {
-      console.log("[WHATSAPP]📲 QR RECEBIDO:", id);
+      console.log("[WHATSAPP-DEBUG] Baileys QR recebido", { id, clienteIdMensageiro });
       qrCodes[id] = await qrcode.toDataURL(qr);
       statusSessao[id] = "qr";
+      console.log("[WHATSAPP-DEBUG] QR salvo", { id, temQr: !!qrCodes[id], status: statusSessao[id] });
     }
 
     if (connection === "open") {
