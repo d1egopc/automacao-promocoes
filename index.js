@@ -103,6 +103,7 @@ const destinosUtils = require("./utils/destinos");
 const integracoesUtils = require("./utils/integracoes");
 const radarCupomMensagem = require("./utils/radar-cupom-mensagem");
 const storageUtils = require("./utils/storage");
+const telegramEnvioUtils = require("./utils/telegram-envio");
 
 const {
   getClientePath,
@@ -2845,21 +2846,35 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     // ================= ENVIO TELEGRAM =================
 
     if (String(destino.tipo || "").toLowerCase() === "telegram") {
-      const telegrams = configCliente.telegram?.destinos || [];
-
-const telegramsSelecionados = destino.telegramDestinos || [];
-
-const selecionados = telegramsSelecionados.length
-  ? telegrams.filter(t =>
-      telegramsSelecionados.includes(t.nome) ||
-      telegramsSelecionados.includes(String(t.chatId))
-    )
-      : telegrams.filter(t => t.ativo);
+      const fluxoTelegram = opcoes.envioManual ? "fila/manual" : "fila/automatico";
+      const resolucaoTelegram = telegramEnvioUtils.resolverTelegramsDestino({
+        clienteId,
+        destino,
+        configsPorCliente,
+        integracoesPorCliente,
+        configGlobal: config
+      });
+      const selecionados = resolucaoTelegram.selecionados;
   
       if (!selecionados.length) {
+        telegramEnvioUtils.logTelegramEnvio({
+          clienteId,
+          fluxo: fluxoTelegram,
+          destinoId: destino.id || destino.conexaoId || destino.chatId || destino.grupo || "",
+          destinoEncontrado: !!destino,
+          tipoDestino: destino.tipo || "",
+          telegramsEncontrados: resolucaoTelegram.telegrams.length,
+          telegramConfiguradoEncontrado: resolucaoTelegram.telegrams.length > 0,
+          canalIdEncontrado: resolucaoTelegram.telegrams.some(t => !!t.chatId),
+          grupoIdEncontrado: !!(destino.grupo || destino.chatId || destino.chat_id || destino.canal),
+          tokenEncontrado: resolucaoTelegram.telegrams.some(t => !!t.botToken),
+          fallbackAtivos: resolucaoTelegram.usouFallbackAtivos,
+          motivoRecusa: resolucaoTelegram.telegrams.length ? "telegram_nao_casou_com_destino" : "telegram_nao_configurado"
+        });
         logOptimus("TELEGRAM", "Nenhum destino selecionado", {
           destino: destino.nome
         });
+        return { enviado: false, motivo: "Nenhum Telegram selecionado" };
       }
 
       for (const tel of selecionados) {
@@ -2868,10 +2883,27 @@ const selecionados = telegramsSelecionados.length
       logOptimus("AVISO", "Sem creditos", { clienteId });
       continue;
       }
-
-      debitarCreditos(clienteId, 1); 
             
-        if (!tel.ativo) continue;
+        if (tel.ativo === false) continue;
+
+        telegramEnvioUtils.logTelegramEnvio({
+          clienteId,
+          fluxo: fluxoTelegram,
+          destinoId: destino.id || destino.conexaoId || destino.chatId || destino.grupo || "",
+          destinoEncontrado: !!destino,
+          tipoDestino: destino.tipo || "",
+          telegramsEncontrados: resolucaoTelegram.telegrams.length,
+          telegramConfiguradoEncontrado: true,
+          canalIdEncontrado: !!tel.chatId,
+          grupoIdEncontrado: !!(destino.grupo || tel.chatId),
+          tokenEncontrado: !!tel.botToken,
+          fallbackAtivos: resolucaoTelegram.usouFallbackAtivos,
+          motivoRecusa: !tel.botToken || !tel.chatId ? "telegram_incompleto" : ""
+        });
+
+        if (!tel.botToken || !tel.chatId) {
+          return { enviado: false, motivo: "telegram_incompleto" };
+        }
 
         if (destino.tipoMidia === "texto" || !oferta.imagem) {
           await axios.post(
@@ -2891,6 +2923,8 @@ const selecionados = telegramsSelecionados.length
             }
           );
         }
+
+        debitarCreditos(clienteId, 1);
 
         logOptimus("TELEGRAM", "Mensagem enviada", {
           clienteId,
@@ -13784,6 +13818,9 @@ app.post("/campanhas/enviar", async (req, res) => {
       destinosPorCliente,
       sessoes,
       configsPorCliente,
+      integracoesPorCliente,
+      configGlobal: config,
+      telegramStatusPorCliente,
       usuarioTemCreditos,
       debitarCreditos,
       corrigirImagemUrl
@@ -13808,28 +13845,81 @@ app.post("/campanhas/enviar", async (req, res) => {
 
 async function enviarTelegram(oferta, mensagem) {
   try {
-    if (!config.telegram?.ativo) {
-      console.log("[TELEGRAM] Telegram desativado.");
-      return;
-    }
-
-    const destinos = config.telegram?.destinos || [];
+    const clienteId = String(oferta?.clienteId || "admin").trim() || "admin";
+    const destinoTelegram = {
+      tipo: "telegram",
+      id: oferta?.destinoId || oferta?.telegramId || oferta?.chatId || "telegram",
+      telegramId: oferta?.telegramId,
+      chatId: oferta?.chatId,
+      chat_id: oferta?.chat_id,
+      grupo: oferta?.grupo,
+      canal: oferta?.canal
+    };
+    const resolucaoTelegram = telegramEnvioUtils.resolverTelegramsDestino({
+      clienteId,
+      destino: destinoTelegram,
+      configsPorCliente,
+      integracoesPorCliente,
+      configGlobal: config
+    });
+    const destinos = resolucaoTelegram.selecionados;
 
     if (!destinos.length) {
-      console.log("[TELEGRAM] Nenhum destino Telegram configurado.");
+      telegramEnvioUtils.logTelegramEnvio({
+        clienteId,
+        fluxo: "oferta",
+        destinoId: destinoTelegram.id || "",
+        destinoEncontrado: true,
+        tipoDestino: "telegram",
+        telegramsEncontrados: resolucaoTelegram.telegrams.length,
+        telegramConfiguradoEncontrado: resolucaoTelegram.telegrams.length > 0,
+        canalIdEncontrado: resolucaoTelegram.telegrams.some(t => !!t.chatId),
+        grupoIdEncontrado: !!(destinoTelegram.grupo || destinoTelegram.chatId || destinoTelegram.canal),
+        tokenEncontrado: resolucaoTelegram.telegrams.some(t => !!t.botToken),
+        fallbackAtivos: resolucaoTelegram.usouFallbackAtivos,
+        motivoRecusa: resolucaoTelegram.telegrams.length ? "telegram_nao_casou_com_destino" : "telegram_nao_configurado"
+      });
       return;
     }
 
     for (const destino of destinos) {
-      if (!destino.ativo) continue;
+      if (destino.ativo === false) continue;
 
       const token = destino.botToken;
       const chatId = destino.chatId;
 
       if (!token || !chatId) {
-        console.log("[TELEGRAM] Telegram destino incompleto:", destino.nome);
+        telegramEnvioUtils.logTelegramEnvio({
+          clienteId,
+          fluxo: "oferta",
+          destinoId: destinoTelegram.id || "",
+          destinoEncontrado: true,
+          tipoDestino: "telegram",
+          telegramsEncontrados: resolucaoTelegram.telegrams.length,
+          telegramConfiguradoEncontrado: true,
+          canalIdEncontrado: !!chatId,
+          grupoIdEncontrado: !!(destinoTelegram.grupo || chatId),
+          tokenEncontrado: !!token,
+          fallbackAtivos: resolucaoTelegram.usouFallbackAtivos,
+          motivoRecusa: "telegram_incompleto"
+        });
         continue;
       }
+
+      telegramEnvioUtils.logTelegramEnvio({
+        clienteId,
+        fluxo: "oferta",
+        destinoId: destinoTelegram.id || "",
+        destinoEncontrado: true,
+        tipoDestino: "telegram",
+        telegramsEncontrados: resolucaoTelegram.telegrams.length,
+        telegramConfiguradoEncontrado: true,
+        canalIdEncontrado: !!chatId,
+        grupoIdEncontrado: !!(destinoTelegram.grupo || chatId),
+        tokenEncontrado: !!token,
+        fallbackAtivos: resolucaoTelegram.usouFallbackAtivos,
+        motivoRecusa: ""
+      });
 
       if (oferta.imagem) {
         await axios.post(`https://api.telegram.org/bot${token}/sendPhoto`, {
