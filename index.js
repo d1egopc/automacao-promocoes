@@ -1,4 +1,4 @@
-﻿
+
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
@@ -102,7 +102,6 @@ const filaOfertas = require("./utils/fila-ofertas");
 const destinosUtils = require("./utils/destinos");
 const integracoesUtils = require("./utils/integracoes");
 const radarCupomMensagem = require("./utils/radar-cupom-mensagem");
-const alertasIntegracoes = require("./utils/alertas-integracoes");
 const storageUtils = require("./utils/storage");
 
 const {
@@ -152,134 +151,6 @@ function logOptimus(categoria = "INFO", mensagem = "", dados = {}) {
   console.log(prefixo);
 }
 
-const ABASTECIMENTO_MOTIVOS = [
-  "memoria_repetida",
-  "duplicada",
-  "desconto_baixo",
-  "sem_link_afiliado",
-  "sem_preco",
-  "integracao_ausente",
-  "bloqueio_http",
-  "categoria",
-  "outros"
-];
-
-let abastecimentoRodadaAtual = null;
-
-function criarResumoAbastecimento(marketplace = "") {
-  return {
-    marketplace: normalizarTexto(marketplace || ""),
-    encontradas: 0,
-    importadas: 0,
-    adicionadasFila: 0,
-    recusadas: 0,
-    motivosRecusa: ABASTECIMENTO_MOTIVOS.reduce((acc, motivo) => {
-      acc[motivo] = 0;
-      return acc;
-    }, {})
-  };
-}
-
-function motivoAbastecimentoPadrao(motivo = "") {
-  const texto = normalizarTexto(motivo || "");
-
-  if (/memoria|repetida/.test(texto)) return "memoria_repetida";
-  if (/duplicad|ja_existe|existe/.test(texto)) return "duplicada";
-  if (/desconto|preco_minimo|preco_baixo|baixo/.test(texto)) return "desconto_baixo";
-  if (/sem_link|link_afiliado|afiliado/.test(texto)) return "sem_link_afiliado";
-  if (/sem_preco|preco_ausente|preco_invalido/.test(texto)) return "sem_preco";
-  if (/integracao|credencial/.test(texto)) return "integracao_ausente";
-  if (/http|bloqueio|bloqueado|status|traffic|verification|cookie/.test(texto)) return "bloqueio_http";
-  if (/categoria|destino/.test(texto)) return "categoria";
-
-  return "outros";
-}
-
-function registrarAbastecimento(tipo = "", dados = {}) {
-  if (!abastecimentoRodadaAtual) return;
-
-  const quantidade = Math.max(1, Number(dados.quantidade || 1) || 1);
-
-  if (tipo === "encontrada" || tipo === "encontradas") {
-    abastecimentoRodadaAtual.encontradas += quantidade;
-    return;
-  }
-
-  if (tipo === "importada" || tipo === "importadas") {
-    abastecimentoRodadaAtual.importadas += quantidade;
-    return;
-  }
-
-  if (tipo === "adicionada" || tipo === "adicionadasFila") {
-    abastecimentoRodadaAtual.adicionadasFila += quantidade;
-    return;
-  }
-
-  if (tipo === "recusada" || tipo === "recusa") {
-    const motivo = motivoAbastecimentoPadrao(dados.motivo || "outros");
-    abastecimentoRodadaAtual.recusadas += quantidade;
-    abastecimentoRodadaAtual.motivosRecusa[motivo] =
-      (abastecimentoRodadaAtual.motivosRecusa[motivo] || 0) + quantidade;
-  }
-}
-
-function logResumoAbastecimento(resumo = {}, extras = {}) {
-  if (!resumo) return;
-
-  console.log("[ABASTECIMENTO]", {
-    marketplace: resumo.marketplace,
-    encontradas: resumo.encontradas,
-    importadas: resumo.importadas,
-    adicionadasFila: resumo.adicionadasFila,
-    recusadas: resumo.recusadas,
-    motivosRecusa: resumo.motivosRecusa,
-    ...extras
-  });
-}
-const DEBUG_LOGS = String(process.env.DEBUG_LOGS || "").toLowerCase() === "true";
-const LOG_THROTTLE_MS = 60 * 1000;
-const logsThrottle = new Map();
-const radarListenerRecentes = [];
-const radarBloqueiosRecentes = [];
-
-function deveLogarThrottle(chave = "geral", intervaloMs = LOG_THROTTLE_MS) {
-  const agora = Date.now();
-  const id = String(chave || "geral");
-  const ultimo = logsThrottle.get(id) || 0;
-
-  if (agora - ultimo < intervaloMs) return false;
-
-  logsThrottle.set(id, agora);
-  return true;
-}
-
-function logDebug(...args) {
-  if (DEBUG_LOGS) console.log(...args);
-}
-
-function logRadarBloqueadoMonitoramento(dados = {}) {
-  const sessaoId = dados.sessaoId || dados.origemMonitorada?.sessaoId || dados.origemMonitorada?.origemSessaoId || "sem_sessao";
-  const grupoId = dados.grupoId || dados.origemMonitorada?.grupoId || dados.origemMonitorada?.origemGrupoId || "sem_grupo";
-  const grupoNome = dados.grupoNome || dados.origemMonitorada?.grupoNome || dados.origemMonitorada?.origemGrupoNome || "";
-  const motivo = dados.motivo || dados.origemMonitorada?.motivo || "origem_nao_monitorada";
-  const evento = {
-    capturadoEm: new Date().toISOString(),
-    clienteId: dados.clienteId || "",
-    motivo,
-    sessaoId,
-    grupoId,
-    grupoNome,
-    diagnostico: dados.origemMonitorada?.diagnostico || {}
-  };
-
-  radarBloqueiosRecentes.push(evento);
-  if (radarBloqueiosRecentes.length > 30) radarBloqueiosRecentes.shift();
-
-  const chave = `radar-bloqueado:${sessaoId}:${grupoId}`;
-  if (!deveLogarThrottle(chave)) return;
-
-  console.log("ðŸš« Radar bloqueado por configuraÃ§Ã£o", evento);
-}
 
 if (!fs.existsSync("/data")) {
   fs.mkdirSync("/data", { recursive: true });
@@ -326,26 +197,26 @@ destinosInteligentes: [],
   marketplaces: {
     amazon: {
       ativo: true,
-      intervaloFarejoMinutos: 20,
-      limitePorRodada: 6,
-      descontoMinimo: 10,
-      precoMinimo: 20
+      intervaloFarejoMinutos: 30,
+      limitePorRodada: 5,
+      descontoMinimo: 20,
+      precoMinimo: 25
     },
 
     shopee: {
       ativo: true,
-      intervaloFarejoMinutos: 25,
-      limitePorRodada: 5,
-      descontoMinimo: 20,
-      precoMinimo: 15
+      intervaloFarejoMinutos: 15,
+      limitePorRodada: 10,
+      descontoMinimo: 25,
+      precoMinimo: 20
     },
 
     mercadolivre: {
   ativo: true,
-  intervaloFarejoMinutos: 15,
-  limitePorRodada: 8,
-  descontoMinimo: 10,
-  precoMinimo: 15
+  intervaloFarejoMinutos: 60,
+  limitePorRodada: 5,
+  descontoMinimo: 20,
+  precoMinimo: 30
 },
 
 magalu: {
@@ -360,8 +231,8 @@ awin: {
   ativo: true,
   intervaloFarejoMinutos: 30,
   limitePorRodada: 5,
-  descontoMinimo: 10,
-  precoMinimo: 15,
+  descontoMinimo: 0,
+  precoMinimo: 0,
   loja: "kabum",
   feedFile: "awin_kabum.csv.gz"
 },
@@ -369,20 +240,20 @@ awin: {
 kabum: {
   ativo: true,
   intervaloFarejoMinutos: 20,
-  limitePorRodada: 3,
+  limitePorRodada: 2,
   descontoMinimo: 10,
-  precoMinimo: 20
+  precoMinimo: 30
 },
 
 aliexpress: {
   ativo: true,
-  intervaloFarejoMinutos: 28,
+  intervaloFarejoMinutos: 40,
   limitePorRodada: 5,
   descontoMinimo: 20,
   precoMinimo: 20,
   priorizarBrasil: true,
   permitirInternacionalForte: true,
-  descontoMinimoInternacional: 30
+  descontoMinimoInternacional: 40
   }
  }
 };
@@ -406,6 +277,7 @@ let gruposPorSessao = {};
 let reconectando = {};
 let integracoesPorCliente = {};
 let sessoesMeta = {};
+let telegramStatusPorCliente = {};
 
 const FILA_FILE = "/data/fila.json";
 const CONFIG_FILE = "/data/config.json";
@@ -563,7 +435,7 @@ function restaurarBrandingOficial() {
   return padrao;
 }
 
-console.log("[OK]ðŸ“‚Salvando dados em:", FILA_FILE);
+console.log("[OK]📂Salvando dados em:", FILA_FILE);
 
 function gerarChaveProduto(titulo = "") {
   return String(titulo)
@@ -871,7 +743,7 @@ function marcarOfertaExpirada(oferta = {}) {
   oferta.statusDetalhe = "Oferta/cupom expirado antes do envio";
   oferta.expiradaEm = new Date().toISOString();
 
-  console.log("â° OFERTA EXPIRADA:", {
+  console.log("⏰ OFERTA EXPIRADA:", {
     titulo: oferta.titulo || oferta.nome || "",
     expiraEm: oferta.expiraEm || ""
   });
@@ -898,11 +770,7 @@ function sanearExpiradosFila(clienteId = "admin") {
 }
 
 const filaInteligenteUltimoAbastecimento = new Map();
-const filaInteligenteBaixaDesde = new Map();
-const filaInteligenteResgateRodando = new Set();
-const FILA_INTELIGENTE_COOLDOWN_MS = 10 * 60 * 1000;
-const FILA_INTELIGENTE_BAIXA_MINUTOS_MS = 3 * 60 * 1000;
-const FILA_INTELIGENTE_TETO_RESGATE = 25;
+const FILA_INTELIGENTE_COOLDOWN_MS = 5 * 60 * 1000;
 
 function avaliarSaudeFilaCliente(clienteId = "admin") {
   const cliente = String(clienteId || "admin");
@@ -910,30 +778,25 @@ function avaliarSaudeFilaCliente(clienteId = "admin") {
   const itens = Array.isArray(filaCliente) ? filaCliente : [];
   const pendentes = itens.filter(item => item?.status === "pendente").length;
 
-let status = "normal";
-let deveAbastecer = true;
-let motivo = "Fila em volume operacional normal.";
+  let status = "normal";
+  let deveAbastecer = false;
+  let motivo = "Fila com volume operacional normal.";
 
-if (pendentes <= 20) {
-  status = "critica";
-  deveAbastecer = true;
-  motivo = "Fila com 20 ou menos ofertas pendentes.";
-} else if (pendentes <= 80) {
-  status = "baixa";
-  deveAbastecer = true;
-  motivo = "Fila com 80 ou menos ofertas pendentes.";
-} else if (pendentes <= 150) {
-  status = "normal";
-  deveAbastecer = true;
-  motivo = "Fila em volume operacional.";
-} else {
-  status = "cheia";
-  deveAbastecer = false;
-  motivo = "Fila com mais de 180 ofertas pendentes.";
-}
+  if (pendentes <= 8) {
+    status = "critica";
+    deveAbastecer = true;
+    motivo = "Fila com 8 ou menos ofertas pendentes.";
+  } else if (pendentes <= 30) {
+    status = "baixa";
+    deveAbastecer = true;
+    motivo = "Fila com 30 ou menos ofertas pendentes.";
+  } else if (pendentes >= 100) {
+    status = "cheia";
+    motivo = "Fila com 100 ou mais ofertas pendentes.";
+  }
 
   console.log(
-    `ðŸ§  FILA IA: cliente ${cliente} pendentes ${pendentes} status ${status} deveAbastecer ${deveAbastecer}`
+    `🧠 FILA IA: cliente ${cliente} pendentes ${pendentes} status ${status} deveAbastecer ${deveAbastecer}`
   );
 
   return {
@@ -1031,26 +894,12 @@ function obterEstrategiaFarejador(clienteId = "admin", marketplace = "", opcoes 
 
 async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
   const cliente = String(clienteId || "admin");
-  const maximo = Math.max(0, Math.min(Number(limite) || 3, 6));
+  const maximo = Math.max(0, Math.min(Number(limite) || 3, 3));
   const resultado = {
     marketplace: "mercadolivre",
-    limite: maximo,
-    tentadas: 0,
     adicionadas: 0,
-    recusadas: 0,
     ignoradas: 0,
-    motivosRecusa: {},
-    bloqueios: [],
-    statusEntradaFila: "nao_tentada",
     erros: []
-  };
-
-  const registrarRecusaAbastecimento = (motivo, quantidade = 1) => {
-    const total = Math.max(0, Number(quantidade) || 0);
-    if (!total) return;
-    resultado.recusadas += total;
-    resultado.ignoradas += total;
-    resultado.motivosRecusa[motivo] = (resultado.motivosRecusa[motivo] || 0) + total;
   };
 
   try {
@@ -1058,13 +907,11 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
 
     if (!config.marketplaces?.mercadolivre?.ativo) {
       resultado.erros.push("mercadolivre_desativado");
-      resultado.statusEntradaFila = "bloqueada_antes_fila";
       return resultado;
     }
 
     if (!usuarioTemIntegracaoMarketplace(cliente, "mercadolivre")) {
       resultado.erros.push("integracao_mercadolivre_ausente");
-      resultado.statusEntradaFila = "bloqueada_antes_fila";
       return resultado;
     }
 
@@ -1072,13 +919,24 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
 
     filaControlada.push = (oferta) => {
       if (resultado.adicionadas >= maximo) {
-        registrarRecusaAbastecimento("limite_rodada_atingido");
+        resultado.ignoradas += 1;
         return fila.length;
       }
 
       fila.push(oferta);
       resultado.adicionadas += 1;
       return fila.length;
+    };
+
+    const ofertaJaExisteControlada = (novaOferta) => {
+      if (resultado.adicionadas >= maximo) {
+        resultado.ignoradas += 1;
+        return true;
+      }
+
+      const existe = ofertaJaExiste(novaOferta);
+      if (existe) resultado.ignoradas += 1;
+      return existe;
     };
 
     const configControlada = {
@@ -1092,14 +950,14 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
       }
     };
 
-    const resumoML = await farejarMercadoLivreModulo(cliente, {
+    await farejarMercadoLivreModulo(cliente, {
       config: configControlada,
       integracoesPorCliente,
       getIntegracaoCliente,
       fila: filaControlada,
       salvarFila: () => salvarFila(cliente),
       prepararOfertaGlobal,
-      ofertaJaExiste,
+      ofertaJaExiste: ofertaJaExisteControlada,
       deveIgnorarOfertaRepetida,
       registrarOfertaVista,
       classificarCategoriaOferta,
@@ -1115,23 +973,6 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
         })
     });
 
-    if (resumoML && typeof resumoML === "object") {
-      resultado.tentadas = Number(resumoML.tentadas || 0);
-      resultado.bloqueios = Array.isArray(resumoML.bloqueios) ? resumoML.bloqueios : [];
-
-      for (const [motivo, quantidade] of Object.entries(resumoML.motivosRecusa || {})) {
-        registrarRecusaAbastecimento(motivo, quantidade);
-      }
-    }
-
-    resultado.statusEntradaFila = resultado.adicionadas > 0
-      ? "fila"
-      : resultado.bloqueios.length > 0
-        ? "bloqueada_antes_fila"
-        : resultado.recusadas > 0
-          ? "recusada_antes_fila"
-          : "sem_ofertas_tentadas";
-
     if (resultado.adicionadas > 0) {
       salvarFila(cliente);
     }
@@ -1142,456 +983,10 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
   return resultado;
 }
 
-function criarResumoResgateFila(clienteId = "admin", saude = {}) {
-  return {
-    clienteId,
-    statusEntrada: saude.status || "",
-    pendentesEntrada: Number(saude.pendentes || 0),
-    teto: FILA_INTELIGENTE_TETO_RESGATE,
-    adicionadas: 0,
-    recusadas: 0,
-    motivosRecusa: {},
-    marketplaces: {},
-    erros: []
-  };
-}
-
-function garantirResumoMarketplaceResgate(resumo, marketplace = "") {
-  const mp = normalizarTexto(marketplace || "");
-
-  if (!resumo.marketplaces[mp]) {
-    resumo.marketplaces[mp] = {
-      marketplace: mp,
-      limite: 0,
-      encontradas: 0,
-      importadas: 0,
-      adicionadas: 0,
-      recusadas: 0,
-      motivosRecusa: {},
-      erros: []
-    };
-  }
-
-  return resumo.marketplaces[mp];
-}
-
-function registrarRecusaResgateFila(resumo, marketplace = "", motivo = "outros", dados = {}) {
-  const mpResumo = garantirResumoMarketplaceResgate(resumo, marketplace);
-  const motivoFinal = motivoAbastecimentoPadrao(motivo || "outros");
-
-  resumo.recusadas += 1;
-  resumo.motivosRecusa[motivoFinal] = (resumo.motivosRecusa[motivoFinal] || 0) + 1;
-  mpResumo.recusadas += 1;
-  mpResumo.motivosRecusa[motivoFinal] = (mpResumo.motivosRecusa[motivoFinal] || 0) + 1;
-
-  console.log("[RESGATE-FILA] oferta recusada", {
-    clienteId: resumo.clienteId,
-    marketplace: normalizarTexto(marketplace || ""),
-    motivo: motivo || motivoFinal,
-    titulo: dados.titulo || "",
-    ...dados
-  });
-}
-
-function registrarAdicaoResgateFila(resumo, marketplace = "", oferta = {}) {
-  const mpResumo = garantirResumoMarketplaceResgate(resumo, marketplace);
-
-  resumo.adicionadas += 1;
-  mpResumo.adicionadas += 1;
-
-  console.log("[RESGATE-FILA] oferta adicionada", {
-    clienteId: resumo.clienteId,
-    marketplace: normalizarTexto(marketplace || ""),
-    adicionadasTotal: resumo.adicionadas,
-    titulo: oferta.titulo || oferta.nome || ""
-  });
-}
-
-function contarPendentesClienteMemoria(clienteId = "admin") {
-  const cliente = String(clienteId || "admin");
-  return fila.filter(item =>
-    String(item?.clienteId || "admin") === cliente &&
-    item?.status === "pendente"
-  ).length;
-}
-
-function clienteTemAutomacaoAtiva(clienteId = "admin") {
-  const cliente = String(clienteId || "admin");
-  const configCliente = configsPorCliente?.[cliente] || config;
-  return configCliente?.automacaoAtiva === true;
-}
-
-function criarConfigResgateFila(marketplace = "", limite = 0) {
-  const mp = normalizarTexto(marketplace || "");
-  const cfgAtual = config.marketplaces?.[mp] || {};
-  const cfgResgate = {
-    ...cfgAtual,
-    limitePorRodada: Math.max(1, Number(limite) || 1)
-  };
-
-  if (mp === "mercadolivre") {
-    cfgResgate.limiteBuscasPorRodada = Math.max(1, Math.min(3, Number(limite) || 1));
-    cfgResgate.limiteProdutosPorBusca = Math.max(10, Number(cfgAtual.limiteProdutosPorBusca || 20));
-  }
-
-  return {
-    ...config,
-    marketplaces: {
-      ...(config.marketplaces || {}),
-      [mp]: cfgResgate
-    }
-  };
-}
-
-function criarFilaControladaResgate(resumo, marketplace = "", limiteMarketplace = 0) {
-  const mp = normalizarTexto(marketplace || "");
-  const filaControlada = [];
-
-  filaControlada.push = (oferta) => {
-    const mpResumo = garantirResumoMarketplaceResgate(resumo, mp);
-
-    if (!ofertaBoaParaResgateFila(oferta)) {
-      registrarRecusaResgateFila(resumo, mp, "comum_fraca", {
-        titulo: oferta?.titulo || oferta?.nome || "",
-        score: oferta?.score || "",
-        desconto: oferta?.descontoScore || oferta?.desconto || ""
-      });
-      return fila.length;
-    }
-
-    if (resumo.adicionadas >= FILA_INTELIGENTE_TETO_RESGATE) {
-      registrarRecusaResgateFila(resumo, mp, "limite_resgate_atingido", {
-        titulo: oferta?.titulo || oferta?.nome || ""
-      });
-      return fila.length;
-    }
-
-    if (mpResumo.adicionadas >= limiteMarketplace) {
-      registrarRecusaResgateFila(resumo, mp, "limite_marketplace_atingido", {
-        titulo: oferta?.titulo || oferta?.nome || ""
-      });
-      return fila.length;
-    }
-
-    registrarOfertaVista(oferta);
-    fila.push(oferta);
-    registrarAdicaoResgateFila(resumo, mp, oferta);
-    return fila.length;
-  };
-
-  return filaControlada;
-}
-
-async function tentarMarketplaceResgateFila(clienteId = "admin", marketplace = "", limite = 0, resumo) {
-  const cliente = String(clienteId || "admin");
-  const mp = normalizarTexto(marketplace || "");
-  const limiteMarketplace = Math.max(0, Number(limite) || 0);
-  const mpResumo = garantirResumoMarketplaceResgate(resumo, mp);
-  mpResumo.limite = limiteMarketplace;
-
-  console.log("[RESGATE-FILA] marketplace tentado", {
-    clienteId: cliente,
-    marketplace: mp,
-    limite: limiteMarketplace,
-    adicionadasTotal: resumo.adicionadas
-  });
-
-  if (!limiteMarketplace || resumo.adicionadas >= FILA_INTELIGENTE_TETO_RESGATE) return;
-
-  const cfg = config.marketplaces?.[mp];
-  const farejador = farejadoresMarketplaces?.[mp];
-
-  if (!cfg?.ativo || typeof farejador !== "function") {
-    registrarRecusaResgateFila(resumo, mp, "marketplace_indisponivel", {
-      ativo: Boolean(cfg?.ativo),
-      temFarejador: typeof farejador === "function"
-    });
-    return;
-  }
-
-  const usuario = usuarios.find(item => String(item?.id || "") === cliente);
-  if (!usuario || !usuario.ativo) {
-    registrarRecusaResgateFila(resumo, mp, "usuario_inativo");
-    return;
-  }
-
-  if (!usuarioPodeReceberMarketplace(usuario, mp)) {
-    registrarRecusaResgateFila(resumo, mp, "plano_sem_marketplace", {
-      plano: usuario.plano || ""
-    });
-    return;
-  }
-
-  const marketplaceIntegracao = mp === "kabum" ? "awin" : mp;
-  if (!usuarioTemIntegracaoMarketplace(cliente, marketplaceIntegracao)) {
-    registrarRecusaResgateFila(resumo, mp, "integracao_ausente", {
-      marketplaceIntegracao
-    });
-    return;
-  }
-
-  const configResgate = criarConfigResgateFila(mp, limiteMarketplace);
-  const filaControlada = criarFilaControladaResgate(resumo, mp, limiteMarketplace);
-  const podeAdicionar = () => {
-    const atual = garantirResumoMarketplaceResgate(resumo, mp);
-    return (
-      resumo.adicionadas < FILA_INTELIGENTE_TETO_RESGATE &&
-      atual.adicionadas < limiteMarketplace
-    );
-  };
-
-  const registrarAbastecimentoResgate = (tipo = "", dados = {}) => {
-    const quantidade = Math.max(1, Number(dados.quantidade || 1) || 1);
-    const tipoNormalizado = normalizarTexto(tipo || "");
-
-    if (tipoNormalizado === "encontrada" || tipoNormalizado === "encontradas") {
-      mpResumo.encontradas += quantidade;
-      return;
-    }
-
-    if (tipoNormalizado === "importada" || tipoNormalizado === "importadas") {
-      mpResumo.importadas += quantidade;
-      return;
-    }
-
-    if (tipoNormalizado === "recusada" || tipoNormalizado === "recusa") {
-      for (let i = 0; i < quantidade; i += 1) {
-        registrarRecusaResgateFila(resumo, mp, dados.motivo || "outros", dados);
-      }
-    }
-  };
-
-  try {
-    await farejador(cliente, {
-      config: configResgate,
-      integracoesPorCliente,
-      getIntegracaoCliente,
-      fila: filaControlada,
-      salvarFila: () => salvarFila(cliente),
-      prepararOfertaGlobal,
-      ofertaJaExiste: (oferta) => ofertaJaExiste({
-        ...oferta,
-        clienteId: oferta?.clienteId || cliente
-      }, { clienteId: cliente }),
-      deveIgnorarOfertaRepetida: (oferta) => deveIgnorarOfertaRepetida({
-        ...oferta,
-        clienteId: oferta?.clienteId || cliente
-      }),
-      registrarOfertaVista: () => {},
-      classificarCategoriaOferta,
-      gerarBuscasGlobais,
-      gerarHeadersStealth,
-      obterEstrategiaFarejador,
-      ofertaTemBeneficioFarejador,
-      farejarCuponsMercadoLivre,
-      importarMercadoLivre: (url, clienteIdAlvo = cliente) =>
-        importarMercadoLivre(url, clienteIdAlvo, {
-          getIntegracaoCliente,
-          gerarLinkAfiliadoMercadoLivre
-        }),
-      importarAmazon: importarAmazon,
-      buscarOfertasShopee,
-      normalizarSessaoId,
-      aplicarFiltrosUniversais: (ofertas = [], opcoesFiltro = {}) =>
-        aplicarFiltrosUniversais(ofertas, {
-          ...opcoesFiltro,
-          clienteId: cliente
-        }),
-      distribuirOfertaParaClientes: (oferta) =>
-        distribuirOfertaParaClientes(oferta, {
-          clienteId: cliente,
-          contexto: "resgate_fila",
-          podeAdicionar,
-          onAdicionada: (ofertaAdicionada) => registrarAdicaoResgateFila(resumo, mp, ofertaAdicionada),
-          onRecusada: (dados) => registrarRecusaResgateFila(resumo, mp, dados.motivo || "outros", dados)
-        }),
-      encurtarUrl,
-      gerarDeepLinkAwin,
-      importarProdutoKabumViaAwin,
-      registrarAbastecimento: registrarAbastecimentoResgate
-    });
-  } catch (e) {
-    mpResumo.erros.push(e.message || "erro_resgate_marketplace");
-    resumo.erros.push(`${mp}:${e.message || "erro_resgate_marketplace"}`);
-    console.log("[RESGATE-FILA] oferta recusada", {
-      clienteId: cliente,
-      marketplace: mp,
-      motivo: "erro_marketplace",
-      erro: e.message
-    });
-  }
-}
-
-async function executarResgateFilaControlado(clienteId = "admin", saude = avaliarSaudeFilaCliente(clienteId)) {
-  const cliente = String(clienteId || "admin");
-  const pendentes = Number(saude.pendentes || contarPendentesClienteMemoria(cliente));
-  const resumo = criarResumoResgateFila(cliente, saude);
-  const limites = {
-    mercadolivre: 6,
-    amazon: 5,
-    shopee: 5,
-    aliexpress: 4,
-    kabum: 4
-  };
-
-  console.log("[RESGATE-FILA] iniciado", {
-    clienteId: cliente,
-    pendentes,
-    status: saude.status,
-    modo: pendentes <= 10 ? "forte" : "moderado",
-    teto: FILA_INTELIGENTE_TETO_RESGATE,
-    limites
-  });
-
-  for (const [marketplace, limite] of Object.entries(limites)) {
-    if (resumo.adicionadas >= FILA_INTELIGENTE_TETO_RESGATE) break;
-    await tentarMarketplaceResgateFila(cliente, marketplace, limite, resumo);
-  }
-
-  console.log("[RESGATE-FILA] finalizado", {
-    clienteId: cliente,
-    pendentesEntrada: resumo.pendentesEntrada,
-    adicionadas: resumo.adicionadas,
-    recusadas: resumo.recusadas,
-    motivosRecusa: resumo.motivosRecusa,
-    marketplaces: resumo.marketplaces,
-    erros: resumo.erros
-  });
-
-  return resumo;
-}
-
 async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
   const cliente = String(clienteId || "admin");
   const saude = avaliarSaudeFilaCliente(cliente);
-  const simulado = opcoes.simulado === true;
-
-  if (!clienteTemAutomacaoAtiva(cliente)) {
-    return {
-      ok: true,
-      clienteId: cliente,
-      abasteceu: false,
-      modo: simulado ? "simulado" : "real",
-      motivo: "Automacao do cliente desligada.",
-      saude,
-      abastecimento: {
-        marketplace: "multi",
-        tentadas: 0,
-        adicionadas: 0,
-        recusadas: 0,
-        motivosRecusa: {},
-        bloqueios: [],
-        erros: ["automacao_desligada"]
-      }
-    };
-  }
-
-  if (!podeRodarAgora()) {
-    return {
-      ok: true,
-      clienteId: cliente,
-      abasteceu: false,
-      modo: simulado ? "simulado" : "real",
-      motivo: "Fora do horario permitido.",
-      saude,
-      abastecimento: {
-        marketplace: "multi",
-        tentadas: 0,
-        adicionadas: 0,
-        recusadas: 0,
-        motivosRecusa: {},
-        bloqueios: [],
-        erros: ["fora_horario"]
-      }
-    };
-  }
-
-  if (!saude.deveAbastecer || saude.pendentes > 20) {
-    return {
-      ok: true,
-      clienteId: cliente,
-      abasteceu: false,
-      modo: simulado ? "simulado" : "real",
-      motivo: saude.motivo,
-      saude,
-      abastecimento: {
-        marketplace: "multi",
-        tentadas: 0,
-        adicionadas: 0,
-        recusadas: 0,
-        motivosRecusa: {},
-        bloqueios: [],
-        erros: ["fila_nao_precisa_abastecer"]
-      }
-    };
-  }
-
-  const agoraResgate = Date.now();
-  const ultimoResgate = filaInteligenteUltimoAbastecimento.get(cliente) || 0;
-  const restanteResgateMs = FILA_INTELIGENTE_COOLDOWN_MS - (agoraResgate - ultimoResgate);
-
-  if (!opcoes.ignorarCooldown && restanteResgateMs > 0) {
-    return {
-      ok: true,
-      clienteId: cliente,
-      abasteceu: false,
-      modo: simulado ? "simulado" : "real",
-      motivo: "Resgate ja executado ha menos de 10 minutos.",
-      cooldownRestanteSegundos: Math.ceil(restanteResgateMs / 1000),
-      saude,
-      abastecimento: {
-        marketplace: "multi",
-        tentadas: 0,
-        adicionadas: 0,
-        recusadas: 0,
-        motivosRecusa: {},
-        bloqueios: [],
-        erros: ["cooldown_ativo"]
-      }
-    };
-  }
-
-  if (simulado) {
-    console.log("[RESGATE-FILA] iniciado", {
-      clienteId: cliente,
-      status: saude.status,
-      pendentes: saude.pendentes,
-      modo: "simulado"
-    });
-
-    return {
-      ok: true,
-      clienteId: cliente,
-      abasteceu: true,
-      modo: "simulado",
-      motivo: saude.motivo,
-      saude,
-      abastecimento: {
-        marketplace: "multi",
-        tentadas: 0,
-        adicionadas: 0,
-        recusadas: 0,
-        motivosRecusa: {},
-        bloqueios: [],
-        erros: []
-      }
-    };
-  }
-
-  filaInteligenteUltimoAbastecimento.set(cliente, Date.now());
-  const abastecimentoResgate = await executarResgateFilaControlado(cliente, saude);
-
-  return {
-    ok: true,
-    clienteId: cliente,
-    abasteceu: abastecimentoResgate.adicionadas > 0,
-    modo: "real",
-    motivo: abastecimentoResgate.adicionadas > 0
-      ? saude.motivo
-      : abastecimentoResgate.erros?.[0] || "Nenhuma oferta boa adicionada no resgate.",
-    saude,
-    abastecimento: abastecimentoResgate
-  };
+  const simulado = opcoes.simulado !== false;
 
   if (!saude.deveAbastecer) {
     return {
@@ -1600,16 +995,7 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
       abasteceu: false,
       modo: simulado ? "simulado" : "real",
       motivo: saude.motivo,
-      saude,
-      abastecimento: {
-        marketplace: "mercadolivre",
-        tentadas: 0,
-        adicionadas: 0,
-        recusadas: 0,
-        motivosRecusa: {},
-        bloqueios: [],
-        erros: ["fila_nao_precisa_abastecer"]
-      }
+      saude
     };
   }
 
@@ -1622,36 +1008,20 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
       ok: true,
       clienteId: cliente,
       abasteceu: false,
-      modo: simulado ? "simulado" : "real",
+      modo: "cooldown",
       motivo: "Abastecimento ja executado ha menos de 5 minutos.",
       cooldownRestanteSegundos: Math.ceil(restanteMs / 1000),
-      saude,
-      abastecimento: {
-        marketplace: "mercadolivre",
-        tentadas: 0,
-        adicionadas: 0,
-        recusadas: 0,
-        motivosRecusa: {},
-        bloqueios: [],
-        erros: ["cooldown_ativo"]
-      }
+      saude
     };
   }
 
+  filaInteligenteUltimoAbastecimento.set(cliente, agora);
+
   if (!simulado) {
     const abastecimento = await abastecerFilaComMercadoLivre(cliente, 3);
-    const tentativaValida =
-      abastecimento.tentadas > 0 ||
-      abastecimento.adicionadas > 0 ||
-      abastecimento.recusadas > 0 ||
-      abastecimento.bloqueios?.length > 0;
-
-    if (tentativaValida) {
-      filaInteligenteUltimoAbastecimento.set(cliente, Date.now());
-    }
 
     console.log(
-      `ðŸ§  FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo real`
+      `🧠 FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo real`
     );
 
     return {
@@ -1659,16 +1029,14 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
       clienteId: cliente,
       abasteceu: abastecimento.adicionadas > 0,
       modo: "real",
-      motivo: abastecimento.adicionadas > 0
-        ? saude.motivo
-        : abastecimento.erros?.[0] || "Nenhuma oferta adicionada na tentativa real.",
+      motivo: saude.motivo,
       saude,
       abastecimento
     };
   }
 
   console.log(
-    `ðŸ§  FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo simulado`
+    `🧠 FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo simulado`
   );
 
   return {
@@ -1677,210 +1045,11 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
     abasteceu: true,
     modo: "simulado",
     motivo: saude.motivo,
-    saude,
-    abastecimento: {
-      marketplace: "mercadolivre",
-      tentadas: 0,
-      adicionadas: 0,
-      recusadas: 0,
-      motivosRecusa: {},
-      bloqueios: [],
-      erros: []
-    }
+    saude
   };
-}
-
-async function acionarResgateFilaBaixaSeNecessario(clienteId = "admin") {
-  const cliente = String(clienteId || "admin");
-
-  if (!clienteTemAutomacaoAtiva(cliente)) {
-    filaInteligenteBaixaDesde.delete(cliente);
-    return;
-  }
-
-  if (!podeRodarAgora()) return;
-
-  const saude = avaliarSaudeFilaCliente(cliente);
-
-  if (!saude.deveAbastecer || saude.pendentes > 20) {
-    filaInteligenteBaixaDesde.delete(cliente);
-    return;
-  }
-
-  const agora = Date.now();
-  const baixaDesde = filaInteligenteBaixaDesde.get(cliente) || agora;
-  filaInteligenteBaixaDesde.set(cliente, baixaDesde);
-
-  if (agora - baixaDesde < FILA_INTELIGENTE_BAIXA_MINUTOS_MS) return;
-
-  const ultimo = filaInteligenteUltimoAbastecimento.get(cliente) || 0;
-  if (agora - ultimo < FILA_INTELIGENTE_COOLDOWN_MS) return;
-
-  if (filaInteligenteResgateRodando.has(cliente)) return;
-
-  filaInteligenteResgateRodando.add(cliente);
-
-  try {
-    const resultado = await abastecerFilaSeNecessario(cliente);
-
-    if (resultado?.abasteceu || resultado?.abastecimento?.adicionadas > 0) {
-      filaInteligenteBaixaDesde.delete(cliente);
-    }
-  } catch (e) {
-    console.log("[RESGATE-FILA] finalizado", {
-      clienteId: cliente,
-      erro: e.message || "erro_resgate_automatico"
-    });
-  } finally {
-    filaInteligenteResgateRodando.delete(cliente);
-  }
-}
-
-const diagnosticosFilaPorCliente = new Map();
-
-function filaForaHorarioConfigurado() {
-  if (!config.pausarMadrugada) return false;
-
-  const agoraBR = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
-  );
-
-  const horaAtual = agoraBR.getHours() * 60 + agoraBR.getMinutes();
-  const [inicioH, inicioM] = (config.horarioInicio || "08:00").split(":").map(Number);
-  const [fimH, fimM] = (config.horarioFim || "23:00").split(":").map(Number);
-
-  const inicio = inicioH * 60 + inicioM;
-  const fim = fimH * 60 + fimM;
-
-  if (inicio <= fim) {
-    return horaAtual < inicio || horaAtual > fim;
-  }
-
-  return horaAtual < inicio && horaAtual > fim;
-}
-
-function motivoPrincipalDiagnosticoFila(diagnostico = {}) {
-  if (!diagnostico.pendentesTotal) return "sem_pendentes";
-  if (diagnostico.elegiveisAgora > 0) return "elegivel";
-
-  const motivos = [
-    ["automacao_desligada", diagnostico.bloqueadasPorAutomacaoDesligada],
-    ["aguardando_proxima_tentativa", diagnostico.bloqueadasPorProximaTentativa],
-    ["fora_horario", diagnostico.bloqueadasPorHorario],
-    ["sem_destino_compativel", diagnostico.bloqueadasPorDestino],
-    ["outros_motivos", diagnostico.bloqueadasPorOutrosMotivos]
-  ];
-
-  const principal = motivos
-    .filter(([, total]) => Number(total) > 0)
-    .sort((a, b) => Number(b[1]) - Number(a[1]))[0];
-
-  return principal?.[0] || "outros_motivos";
-}
-
-function diagnosticarFilaCliente(clienteIdAlvo = null) {
-  const cliente = String(clienteIdAlvo || "admin");
-  const agora = Date.now();
-  const foraHorario = filaForaHorarioConfigurado();
-  const itensCliente = fila.filter(o =>
-    String(o?.clienteId || "admin") === cliente
-  );
-  const pendentesCliente = itensCliente.filter(o => o?.status === "pendente");
-
-  const diagnostico = {
-    clienteIdAlvo: cliente,
-    totalGlobal: fila.length,
-    totalCliente: itensCliente.length,
-    pendentesGlobal: fila.filter(o => o?.status === "pendente").length,
-    pendentesTotal: pendentesCliente.length,
-    elegiveisAgora: 0,
-    bloqueadasPorAutomacaoDesligada: 0,
-    bloqueadasPorProximaTentativa: 0,
-    bloqueadasPorHorario: 0,
-    bloqueadasPorDestino: 0,
-    bloqueadasPorOutrosMotivos: 0,
-    motivoPrincipal: "sem_pendentes"
-  };
-
-  for (const oferta of pendentesCliente) {
-    const motivos = [];
-    const clienteIdOferta = oferta.clienteId || "admin";
-    const configClienteOferta = configsPorCliente?.[clienteIdOferta] || config;
-
-    if (configClienteOferta.automacaoAtiva !== true) {
-      diagnostico.bloqueadasPorAutomacaoDesligada += 1;
-      motivos.push("automacao_desligada");
-    }
-
-    if (oferta.proximaTentativaEnvioEm) {
-      const proxima = Date.parse(oferta.proximaTentativaEnvioEm);
-      if (Number.isFinite(proxima) && proxima > agora) {
-        diagnostico.bloqueadasPorProximaTentativa += 1;
-        motivos.push("aguardando_proxima_tentativa");
-      }
-    }
-
-    if (foraHorario) {
-      diagnostico.bloqueadasPorHorario += 1;
-      motivos.push("fora_horario");
-    }
-
-    try {
-      const analiseDestinos = analisarDestinosCompativeisFila(clienteIdOferta, oferta, configClienteOferta);
-      if (!analiseDestinos.compativeis.length) {
-        diagnostico.bloqueadasPorDestino += 1;
-        motivos.push("sem_destino_compativel");
-      }
-    } catch (e) {
-      diagnostico.bloqueadasPorOutrosMotivos += 1;
-      motivos.push("outros_motivos");
-    }
-
-    if (!motivos.length) {
-      diagnostico.elegiveisAgora += 1;
-    }
-  }
-
-  const bloqueadasConhecidas = new Set();
-
-  pendentesCliente.forEach((oferta, indice) => {
-    const clienteIdOferta = oferta.clienteId || "admin";
-    const configClienteOferta = configsPorCliente?.[clienteIdOferta] || config;
-    const proxima = oferta.proximaTentativaEnvioEm
-      ? Date.parse(oferta.proximaTentativaEnvioEm)
-      : NaN;
-
-    if (configClienteOferta.automacaoAtiva !== true) bloqueadasConhecidas.add(indice);
-    if (Number.isFinite(proxima) && proxima > agora) bloqueadasConhecidas.add(indice);
-    if (foraHorario) bloqueadasConhecidas.add(indice);
-
-    try {
-      const analiseDestinos = analisarDestinosCompativeisFila(clienteIdOferta, oferta, configClienteOferta);
-      if (!analiseDestinos.compativeis.length) bloqueadasConhecidas.add(indice);
-    } catch {
-      bloqueadasConhecidas.add(indice);
-    }
-  });
-
-  diagnostico.bloqueadasPorOutrosMotivos += Math.max(
-    0,
-    diagnostico.pendentesTotal - diagnostico.elegiveisAgora - bloqueadasConhecidas.size
-  );
-  diagnostico.motivoPrincipal = motivoPrincipalDiagnosticoFila(diagnostico);
-
-  return diagnostico;
 }
 
 function selecionarProximaOfertaFila(clienteIdAlvo = null) {
-  const clienteLog = String(clienteIdAlvo || "admin");
-  const diagnostico = diagnosticarFilaCliente(clienteLog);
-
-  diagnosticosFilaPorCliente.set(clienteLog, diagnostico);
-
-  if (deveLogarThrottle(`fila-diagnostico:${clienteLog}`)) {
-    console.log("ðŸ§  DiagnÃ³stico da fila", diagnostico);
-  }
-
   const pendentes = fila.filter(o => {
     const mesmoCliente =
       !clienteIdAlvo ||
@@ -1921,15 +1090,9 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
     salvarFila(clienteIdAlvo || "admin");
   }
 
-  const diagnosticoSemElegivel = diagnosticarFilaCliente(clienteLog);
-  diagnosticosFilaPorCliente.set(clienteLog, diagnosticoSemElegivel);
-
-  if (deveLogarThrottle(`fila-sem-elegivel:${clienteLog}`)) {
-    console.log("ðŸš¨ Fila sem oferta elegÃ­vel", diagnosticoSemElegivel);
-  }
-
   return null;
 }
+
 function aplicarDiversidadeFila(clienteId = "admin") {
   const cliente = String(clienteId || "admin");
   const itensCliente = fila.filter(item =>
@@ -1994,6 +1157,91 @@ function salvarSessoesMeta() {
   writeGlobalJson("sessoes.json", sessoesMeta);
 }
 
+function normalizarMapaSessoesCliente(dados = {}) {
+  if (Array.isArray(dados)) {
+    return dados.reduce((acc, item) => {
+      const id = String(item?.id || item?.sessaoId || item || "").trim();
+      if (!id) return acc;
+      acc[id] = typeof item === "object" ? { ...item, id } : { id, tipo: "whatsapp" };
+      return acc;
+    }, {});
+  }
+
+  if (!dados || typeof dados !== "object") return {};
+  const origem = dados.sessoes && typeof dados.sessoes === "object" ? dados.sessoes : dados;
+
+  return Object.entries(origem).reduce((acc, [chave, item]) => {
+    const id = String(item?.id || item?.sessaoId || chave || "").trim();
+    if (!id) return acc;
+    acc[id] = item && typeof item === "object" ? { ...item, id } : { id, tipo: "whatsapp" };
+    return acc;
+  }, {});
+}
+
+function sessaoPertenceCliente(id = "", clienteId = "admin") {
+  const sessaoId = String(id || "").trim();
+  const cliente = String(clienteId || "admin").trim();
+  return !!sessaoId && !!cliente && (sessaoId === cliente || sessaoId.startsWith(`${cliente}_`));
+}
+
+function resolverClientePorSessaoWhatsapp(id = "") {
+  const sessaoId = String(id || "").trim();
+  if (!sessaoId) return "admin";
+
+  const metaCliente = String(sessoesMeta?.[sessaoId]?.clienteId || "").trim();
+  if (metaCliente) return metaCliente;
+
+  const clientePrefixo = ["admin", ...listClientes(), ...(usuarios || []).map(u => u?.id)]
+    .map(v => String(v || "").trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+    .find(clienteId => sessaoPertenceCliente(sessaoId, clienteId));
+
+  return clientePrefixo || "admin";
+}
+
+function lerSessoesClienteMap(clienteId = "admin") {
+  const cliente = String(clienteId || "admin").trim();
+  const locais = normalizarMapaSessoesCliente(readClienteJson(cliente, "sessoes.json", {}));
+  const legado = Object.values(sessoesMeta || {})
+    .filter(sessao => sessaoPertenceCliente(sessao?.id, cliente))
+    .reduce((acc, sessao) => {
+      acc[sessao.id] = { ...sessao, clienteId: sessao.clienteId || cliente };
+      return acc;
+    }, {});
+
+  return { ...legado, ...locais };
+}
+
+function salvarSessoesClienteMap(clienteId = "admin", mapa = {}) {
+  writeClienteJson(clienteId || "admin", "sessoes.json", normalizarMapaSessoesCliente(mapa));
+}
+
+function salvarSessaoCliente(clienteId = "admin", sessao = {}) {
+  const cliente = String(clienteId || "admin").trim();
+  const id = String(sessao?.id || sessao?.sessaoId || "").trim();
+  if (!id || !sessaoPertenceCliente(id, cliente)) return null;
+
+  const mapa = lerSessoesClienteMap(cliente);
+  const meta = { ...mapa[id], ...sessao, id, sessaoId: id, clienteId: cliente, tipo: sessao.tipo || mapa[id]?.tipo || "whatsapp" };
+  mapa[id] = meta;
+  sessoesMeta[id] = meta;
+  salvarSessoesClienteMap(cliente, mapa);
+  salvarSessoesMeta();
+  return meta;
+}
+
+function removerSessoesCliente(clienteId = "admin", ids = []) {
+  const cliente = String(clienteId || "admin").trim();
+  const mapa = lerSessoesClienteMap(cliente);
+  for (const id of ids.map(v => String(v || "").trim()).filter(v => sessaoPertenceCliente(v, cliente))) {
+    delete mapa[id];
+    delete sessoesMeta[id];
+  }
+  salvarSessoesClienteMap(cliente, mapa);
+  salvarSessoesMeta();
+}
+
 function removerClienteIdRaiz(dados = {}) {
   if (!dados || typeof dados !== "object" || Array.isArray(dados)) return dados;
   const { clienteId, ...restante } = dados;
@@ -2033,7 +1281,7 @@ function carregarSessoesMeta() {
 
     console.log("[OK] Sesses meta carregadas:", Object.keys(sessoesMeta).length);
   } catch (e) {
-    console.log("[ERRO]âŒErro ao carregar sesses meta:", e.message);
+    console.log("[ERRO]❌Erro ao carregar sesses meta:", e.message);
     sessoesMeta = {};
   }
 }
@@ -2095,7 +1343,7 @@ function renovarCreditosSeNecessario(usuario) {
   });
 }
 
-// ================ FUNCAO USUARIO TEM CRÃƒâ€°DITO ==================
+// ================ FUNCAO USUARIO TEM CRÃ‰DITO ==================
 
 function usuarioTemCreditos(clienteId, quantidade = 1) {
   const usuario = obterUsuario(clienteId);
@@ -2154,9 +1402,9 @@ function salvarConfig() {
   try {
     writeGlobalJson("config.json", config);
 
-    console.log("[OK]ðŸ’¾ Config salva");
+    console.log("[OK]💾 Config salva");
   } catch (e) {
-    console.error("[ERRO]âŒ ERRO AO SALVAR CONFIG:", e.message);
+    console.error("[ERRO]❌ ERRO AO SALVAR CONFIG:", e.message);
   }
 }
 
@@ -2359,10 +1607,10 @@ function criarPlanosPadrao() {
 
   salvarPlanos();
 
-  console.log("[OK]âœ… Planos padro criados");
+  console.log("[OK]✅ Planos padro criados");
 }
 
-// ================= FUNÃƒâ€¡ÃƒÆ’O CARREGA CONFIG =================
+// ================= FUNÃ‡ÃƒO CARREGA CONFIG =================
 
 function carregarConfig() {
   try {
@@ -2378,14 +1626,14 @@ function carregarConfig() {
         }
       };
 
-      console.log("[OK]âœ… Config carregada");
+      console.log("[OK]✅ Config carregada");
     }
 
          
 usuarios = readGlobalJson("usuarios.json", []);
 
 if (Array.isArray(usuarios) && usuarios.length) {
-  console.log("[OK]âœ… Usurios carregados");
+  console.log("[OK]✅ Usurios carregados");
 }
 
 integracoesPorCliente = carregarMapaClientesJson(
@@ -2394,7 +1642,7 @@ integracoesPorCliente = carregarMapaClientesJson(
 );
 
 if (integracoesPorCliente && Object.keys(integracoesPorCliente).length) {
-  console.log("[OK]âœ… Integraes carregadas");
+  console.log("[OK]✅ Integraes carregadas");
 }
 
 configsPorCliente = carregarMapaClientesJson(
@@ -2403,7 +1651,7 @@ configsPorCliente = carregarMapaClientesJson(
 );
 
 if (configsPorCliente && Object.keys(configsPorCliente).length) {
-  console.log("[OK]âœ… Configs dos clientes carregadas");
+  console.log("[OK]✅ Configs dos clientes carregadas");
 }
 
 destinosPorCliente = carregarMapaClientesJson(
@@ -2418,13 +1666,13 @@ if (destinosPorCliente && Object.keys(destinosPorCliente).length) {
 planos = readGlobalJson("planos.json", {});
 
 if (planos && Object.keys(planos).length) {
-  console.log("[OK]âœ… Planos carregados");
+  console.log("[OK]✅ Planos carregados");
 }
 
 sessoesMeta = readGlobalJson("sessoes.json", {});
 
 if (sessoesMeta && Object.keys(sessoesMeta).length) {
-  console.log("[OK]âœ… Sesses meta carregadas:", Object.keys(sessoesMeta).length);
+  console.log("[OK]✅ Sesses meta carregadas:", Object.keys(sessoesMeta).length);
 }
 
   mensageiro.carregarMensageiro();
@@ -2450,7 +1698,7 @@ console.log("[INFO] CRIANDO ADMIN PADRO");
 
   salvarUsuarios();
 
-  console.log("[OK]âœ… Usurio admin inicial criado");
+  console.log("[OK]✅ Usurio admin inicial criado");
 }
 
   } catch (e) {
@@ -2495,7 +1743,7 @@ function gerarLinkOptimus(linkOriginal = "", marketplace = "") {
 }
 
 
-// ========== LIGAÃƒâ€¡ÃƒÆ’O IMPORTAR AMAZON E SHOPEE ===================
+// ========== LIGAÃ‡ÃƒO IMPORTAR AMAZON E SHOPEE ===================
 
 const importarAmazon = criarImportarAmazon({
   extrairJsonLd,
@@ -2575,7 +1823,7 @@ function ofertaTemMelhoriaParaRepetir(novaOferta = {}, ofertaExistente = {}) {
   return precoExistente > 0 && precoNovo > 0 && precoNovo <= precoExistente * 0.92;
 }
 
-function ofertaJaExiste(novaOferta, opcoes = {}) {
+function ofertaJaExiste(novaOferta) {
   const tituloNovo = normalizarTexto(novaOferta.titulo || novaOferta.nome);
   const chaveNova = gerarChaveDuplicidadeOferta(novaOferta);
   const idMlNovo = extrairIdMercadoLivreOferta(novaOferta);
@@ -2594,12 +1842,9 @@ function ofertaJaExiste(novaOferta, opcoes = {}) {
   ).trim();
 
   const marketplaceNovo = normalizarTexto(novaOferta.marketplace || novaOferta.mercado || "");
-  const clienteDuplicidade = opcoes.clienteId ? String(opcoes.clienteId) : "";
 
   const agora = Date.now();
   return fila.some((o) => {
-    if (clienteDuplicidade && String(o?.clienteId || "admin") !== clienteDuplicidade) return false;
-
     const tituloExistente = normalizarTexto(o.titulo || o.nome);
     const chaveExistente = gerarChaveDuplicidadeOferta(o);
     const idMlExistente = extrairIdMercadoLivreOferta(o);
@@ -2627,27 +1872,10 @@ function ofertaJaExiste(novaOferta, opcoes = {}) {
     const itemRecente =
       dataItem && agora - dataItem < horasBloqueio * 60 * 60 * 1000;
 
-  if (!itemRecente) return false;
-
-const ehRadar =
-  normalizarTexto(novaOferta.origem || "") === "radar" ||
-  novaOferta.radar === true ||
-  novaOferta.radarNaFila === true;
-
-const temMelhoria = ofertaTemMelhoriaParaRepetir(novaOferta, o);
-
-const descontoNovo =
-  Number(String(novaOferta.desconto || "0").replace(/[^\d]/g, "")) || 0;
-
-const cupomNovoValido =
-  String(novaOferta.cupom || "").trim() &&
-  !["copiado", "cupom copiado", "sem cupom"].includes(
-    normalizarTexto(novaOferta.cupom || "")
-  );
-
-if (ehRadar || temMelhoria || descontoNovo >= 25 || cupomNovoValido) {
-  return false;
-}
+    if (!itemRecente) return false;
+    if (!["pendente", "retida"].includes(normalizarTexto(o.status || "")) && ofertaTemMelhoriaParaRepetir(novaOferta, o)) {
+      return false;
+    }
 
     if (idMlNovo && idMlExistente && idMlNovo === idMlExistente) {
       console.log("[INFO] DUPLICADA ML POR ID:", {
@@ -2666,23 +1894,13 @@ if (ehRadar || temMelhoria || descontoNovo >= 25 || cupomNovoValido) {
       return true;
     }
 
- if (
-  tituloNovo &&
-  tituloExistente &&
-  tituloNovo === tituloExistente &&
-  precoNovo &&
-  precoExistente &&
-  precoNovo === precoExistente &&
-  marketplaceNovo &&
-  marketplaceExistente &&
-  marketplaceNovo === marketplaceExistente
-) {
-  console.log("[INFO] DUPLICADA POR TITULO + PRECO + MARKETPLACE:", {
-    tituloNovo: novaOferta.titulo || novaOferta.nome,
-    tituloExistente: o.titulo || o.nome
-  });
-  return true;
-}
+    if (tituloNovo && tituloExistente && tituloNovo === tituloExistente) {
+      console.log("[INFO] DUPLICADA POR TTULO:", {
+        tituloNovo: novaOferta.titulo || novaOferta.nome,
+        tituloExistente: o.titulo || o.nome
+      });
+      return true;
+    }
 
     if (
       chaveNova &&
@@ -2834,37 +2052,7 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-const BCRYPT_ROUNDS = 10;
-
-function normalizarEmailUsuario(email = "") {
-  return String(email || "").trim().toLowerCase();
-}
-
-function senhaPareceHashBcrypt(senha = "") {
-  return /^\$2[aby]\$\d{2}\$/.test(String(senha || ""));
-}
-
-function hashSenhaUsuario(senha = "") {
-  return bcrypt.hashSync(String(senha || ""), BCRYPT_ROUNDS);
-}
-
-function senhaUsuarioConfere(usuario = {}, senha = "") {
-  const senhaSalva = String(usuario.senha || "");
-  const senhaEntrada = String(senha || "");
-
-  if (!senhaSalva || !senhaEntrada) return false;
-
-  if (senhaPareceHashBcrypt(senhaSalva)) {
-    return bcrypt.compareSync(senhaEntrada, senhaSalva);
-  }
-
-  return senhaSalva === senhaEntrada;
-}
-
-function normalizarPlanoChave(nome = "free") {
-  return normalizarTexto(nome || "free") || "free";
-}
-const app = express(); // Ã°Å¸â€˜Ë† MUITO IMPORTANTE ter isso
+const app = express(); // ðŸ‘ˆ MUITO IMPORTANTE ter isso
 
 app.set("trust proxy", 1);
 app.use(helmet());
@@ -2875,7 +2063,7 @@ const horarioInicio = 9;
 const horarioFim = 23;
 
 
-// ================= FUNÃƒâ€¡ÃƒÆ’O RODAR AGORA =================
+// ================= FUNÃ‡ÃƒO RODAR AGORA =================
 
 function podeRodarAgora() {
   return true;
@@ -2883,7 +2071,7 @@ function podeRodarAgora() {
 
 let ultimoEnvioFila = 0;
 
-// =================== NÃƒÅ¡CLEO GLOBAL DE OFERTAS ===================
+// =================== NÃšCLEO GLOBAL DE OFERTAS ===================
 
 function normalizarTexto(valor = "") {
   return String(valor)
@@ -3069,14 +2257,6 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
   const origem = String(oferta.origem || "").toLowerCase();
   const ehRadar = origem === "radar" || oferta.radar === true || oferta.radarNaFila === true;
   const cupomSuspeito = oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true;
-  
-  const cupomTexto = String(oferta.cupom || "").trim().toUpperCase();
-  const cupomFake = ["COPIADO", "APPLIED", "APPEARANCE", "APPLINK", "SEM CUPOM"].includes(cupomTexto);
-
-  if (cupomFake) {
-  oferta.cupom = "";
-  } 
-      
   const cupomReal = !cupomSuspeito && (
     oferta.cupomConfirmado === true ||
     oferta.cupomValidado === true ||
@@ -3084,12 +2264,13 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
     oferta.tipoCupom === "real"
   );
   const cupomDetectado = !cupomSuspeito && Boolean(
-    (!cupomFake && oferta.cupom) ||
+    oferta.cupom ||
     oferta.cupomDetectado === true ||
     oferta.cupomDetectadoTexto === true
   );
   const cupomProvavel = !cupomSuspeito && Boolean(
     oferta.possivelCupom ||
+    oferta.avisoCupom ||
     oferta.beneficioExtra ||
     oferta.linkResgateCupom
   );
@@ -3130,7 +2311,7 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
       oferta.cupomTipo = "provavel";
       oferta.cupomDetectado = true;
       oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(3);
-      oferta.motivoPrioridade = "Cupom provÃ¡vel detectado pelo Radar";
+      oferta.motivoPrioridade = "Cupom provável detectado pelo Radar";
       return oferta;
     }
 
@@ -3149,7 +2330,7 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
     oferta.prioridadeEnvio = 100;
     oferta.cupomTipo = oferta.cupom ? "detectado" : "nenhum";
     oferta.cupomDetectado = Boolean(oferta.cupom);
-    oferta.motivoPrioridade = "Oferta escolhida manualmente pelo usuÃ¡rio";
+    oferta.motivoPrioridade = "Oferta escolhida manualmente pelo usuário";
     return oferta;
   }
 
@@ -3179,7 +2360,7 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
     oferta.cupomTipo = "provavel";
     oferta.cupomDetectado = true;
     oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(3);
-    oferta.motivoPrioridade = "Cupom provÃ¡vel detectado";
+    oferta.motivoPrioridade = "Cupom provável detectado";
     return oferta;
   }
 
@@ -3192,7 +2373,7 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
 }
 
 function logPrioridadeFila(oferta = {}) {
-  console.log("ðŸ§  PRIORIDADE FILA:", {
+  console.log("🧠 PRIORIDADE FILA:", {
     titulo: oferta.titulo || oferta.nome || "",
     origem: oferta.origem || "",
     cupomTipo: oferta.cupomTipo || "",
@@ -3221,7 +2402,7 @@ if (
   ["aliexpress", "amazon", "shopee", "mercadolivre", "magalu", "awin", "kabum"].includes(categoriaNormalizada) ||
   categoriaNormalizada.includes("computador") ||
   categoriaNormalizada.includes("escritorio") ||
-  categoriaNormalizada.includes("escritÃƒÂ³rio")
+  categoriaNormalizada.includes("escritÃ³rio")
 ) {
   oferta.categoria = classificarCategoriaOferta(oferta);
 }
@@ -3325,7 +2506,7 @@ function motivoRetencaoSemDestino(analises = []) {
 
 function marcarOfertaRetida(oferta = {}, motivoRetencao = "retida_sem_destino_compativel") {
   oferta.status = "retida";
-  oferta.statusDetalhe = "Retida por falta de destino compatÃ­vel";
+  oferta.statusDetalhe = "Retida por falta de destino compatível";
   oferta.motivoRetencao = motivoRetencao;
   oferta.retidaEm = new Date().toISOString();
   oferta.erro = "";
@@ -3333,197 +2514,6 @@ function marcarOfertaRetida(oferta = {}, motivoRetencao = "retida_sem_destino_co
   delete oferta.proximaTentativaEnvioEm;
 
   return oferta;
-}
-
-function ofertaEhShopee(oferta = {}) {
-  return normalizarTexto(oferta.marketplace || oferta.mercado || "") === "shopee";
-}
-
-function ofertaEhRadar(oferta = {}) {
-  return (
-    normalizarTexto(oferta.origem || "") === "radar" ||
-    oferta.radar === true ||
-    oferta.radarNaFila === true
-  );
-}
-
-function ofertaTemCupomRealOuDetectado(oferta = {}) {
-  const cupomTexto = String(oferta.cupom || "").trim();
-  const cupomTipo = normalizarTexto(oferta.cupomTipo || oferta.tipoCupom || "");
-  const cupomFake = ["copiado", "cupomcopiado", "semcupom", "applied", "appearance", "applink"].includes(normalizarTexto(cupomTexto));
-
-  return Boolean(
-    !cupomFake &&
-    (
-      cupomTexto ||
-      oferta.cupomConfirmado === true ||
-      oferta.cupomValidado === true ||
-      oferta.cupomDetectado === true ||
-      oferta.cupomDetectadoTexto === true ||
-      cupomTipo === "real" ||
-      cupomTipo === "detectado"
-    )
-  );
-}
-
-function precoShopeeAparentaCentavosBruto(oferta = {}) {
-  const preco = numeroMoedaOferta(oferta.precoAtual || oferta.preco || oferta.valor || "");
-  if (!Number.isFinite(preco) || preco < 1000) return false;
-
-  const textoPreco = String(oferta.precoAtual || oferta.preco || "").trim();
-  const terminaComCentavosZero = /(?:,|\.)00$/.test(textoPreco);
-  const inteiro = Math.abs(preco - Math.round(preco)) < 0.001;
-  const priceMinOriginal = Number(oferta.priceMinOriginal ?? oferta.priceMin ?? oferta.precoMinOriginal ?? 0);
-  const priceMaxOriginal = Number(oferta.priceMaxOriginal ?? oferta.priceMax ?? oferta.precoMaxOriginal ?? 0);
-  const originalInteiroAlto = [priceMinOriginal, priceMaxOriginal].some(valor =>
-    Number.isFinite(valor) && valor >= 1000 && Math.abs(valor - Math.round(valor)) < 0.001
-  );
-
-  return inteiro && (terminaComCentavosZero || originalInteiroAlto);
-}
-
-function diagnosticoPrecoShopee(oferta = {}) {
-  return {
-    titulo: oferta.titulo || oferta.nome || "",
-    precoAntesGlobal: oferta.precoAntesGlobal || "",
-    precoDepoisGlobal: oferta.precoDepoisGlobal || oferta.precoAtual || oferta.preco || "",
-    precoFinalFila: oferta.precoAtual || oferta.preco || "",
-    priceMinOriginal: oferta.priceMinOriginal ?? oferta.priceMin ?? oferta.precoMinOriginal ?? "",
-    priceMaxOriginal: oferta.priceMaxOriginal ?? oferta.priceMax ?? oferta.precoMaxOriginal ?? ""
-  };
-}
-
-function reterShopeePrecoSuspeitoSeNecessario(oferta = {}) {
-  if (!ofertaEhShopee(oferta)) return false;
-
-  const diagnostico = diagnosticoPrecoShopee(oferta);
-  console.log("[SHOPEE-PRECO-DEBUG]", diagnostico);
-
-  if (
-    ofertaEhRadar(oferta) ||
-    ofertaTemCupomRealOuDetectado(oferta) ||
-    !precoShopeeAparentaCentavosBruto(oferta)
-  ) {
-    return false;
-  }
-
-  marcarOfertaRetida(oferta, "retida_preco_shopee_suspeito");
-  oferta.statusDetalhe = "Retida por preco Shopee suspeito";
-  adicionarAvisoInternoOferta(oferta, "retida_preco_shopee_suspeito");
-
-  console.log("[SHOPEE-PRECO-SUSPEITO]", {
-    ...diagnostico,
-    marketplace: oferta.marketplace || "",
-    categoria: oferta.categoria || "",
-    origem: oferta.origem || "",
-    motivoRetencao: oferta.motivoRetencao
-  });
-
-  return true;
-}
-
-function descontoOfertaPercentual(oferta = {}) {
-  const campos = [
-    oferta.descontoScore,
-    oferta.descontoPercentual,
-    oferta.percentualDesconto,
-    oferta.desconto,
-    oferta.priceDiscountRate
-  ];
-
-  for (const campo of campos) {
-    const numero = Number(String(campo ?? "").replace("%", "").replace(",", "."));
-    if (Number.isFinite(numero) && numero > 0) return numero;
-  }
-
-  const precoAtual = numeroMoedaOferta(oferta.precoAtual || oferta.preco || "");
-  const precoAntigo = numeroMoedaOferta(oferta.precoAntigo || oferta.precoOriginal || "");
-
-  if (precoAtual > 0 && precoAntigo > precoAtual) {
-    return Math.round(((precoAntigo - precoAtual) / precoAntigo) * 100);
-  }
-
-  return 0;
-}
-
-function ofertaShopeeForteParaBalanceamento(oferta = {}) {
-  if (!ofertaEhShopee(oferta)) return false;
-  if (ofertaEhRadar(oferta)) return true;
-  if (ofertaTemCupomRealOuDetectado(oferta)) return true;
-
-  const temBeneficio = Boolean(
-    oferta.avisoCupom ||
-    oferta.beneficioExtra ||
-    oferta.beneficioDetectado ||
-    oferta.linkResgateCupom ||
-    oferta.cupomUrl ||
-    oferta.descontoPix ||
-    oferta.descontoApp
-  );
-  if (temBeneficio) return true;
-
-  const score = Number(oferta.radarScore || oferta.score || 0);
-  const nivelScore = normalizarTexto(oferta.nivelScore || oferta.nivel || "");
-  if (score >= 80 || ["alto", "excelente", "premium"].includes(nivelScore)) return true;
-
-  return descontoOfertaPercentual(oferta) >= 40;
-}
-
-function deveBloquearShopeeComumPorExcessoFila(clienteId = "admin", oferta = {}) {
-  if (!ofertaEhShopee(oferta)) return false;
-  if (ofertaShopeeForteParaBalanceamento(oferta)) return false;
-
-  const pendentesCliente = fila.filter(item =>
-    String(item?.clienteId || "admin") === String(clienteId) &&
-    item?.status === "pendente"
-  );
-
-  const pendentesTotal = pendentesCliente.length;
-  if (pendentesTotal < 30) return false;
-
-  const pendentesShopee = pendentesCliente.filter(ofertaEhShopee).length;
-  const percentualShopee = pendentesTotal > 0 ? pendentesShopee / pendentesTotal : 0;
-
-  if (percentualShopee < 0.4) return false;
-
-  console.log("[BALANCEAMENTO] Shopee comum bloqueada por excesso na fila", {
-    clienteId,
-    titulo: oferta.titulo || oferta.nome || "",
-    pendentesTotal,
-    pendentesShopee,
-    percentualShopee: Number((percentualShopee * 100).toFixed(1)),
-    motivo: "shopee_comum_excesso_fila"
-  });
-
-  oferta.motivoRetencao = "shopee_comum_excesso_fila";
-  oferta.statusDetalhe = "Shopee comum bloqueada por excesso na fila";
-  adicionarAvisoInternoOferta(oferta, "shopee_comum_excesso_fila");
-
-  return true;
-}
-
-function ofertaBoaParaResgateFila(oferta = {}) {
-  if (ofertaEhRadar(oferta)) return true;
-  if (ofertaTemCupomRealOuDetectado(oferta)) return true;
-
-  const temBeneficio = Boolean(
-    oferta.avisoCupom ||
-    oferta.beneficioExtra ||
-    oferta.beneficioDetectado ||
-    oferta.linkResgateCupom ||
-    oferta.cupomUrl ||
-    oferta.descontoPix ||
-    oferta.descontoApp ||
-    oferta.valorCupom ||
-    oferta.percentualCupom
-  );
-
-  if (temBeneficio) return true;
-
-  const score = Number(oferta.radarScore || oferta.score || 0);
-  if (score >= 60) return true;
-
-  return descontoOfertaPercentual(oferta) >= 12;
 }
 
 function analisarDestinosCompativeisFila(clienteId = "admin", oferta = {}, configCliente = {}) {
@@ -3834,7 +2824,7 @@ const selecionados = telegramsSelecionados.length
 
   } catch (e) {
     console.log(
-      "Ã¢ÂÅ’ erro destino inteligente:",
+      "âŒ erro destino inteligente:",
       destino?.nome,
       e.message
     );
@@ -3845,7 +2835,7 @@ const selecionados = telegramsSelecionados.length
   return { enviado: false, motivo: "nao_enviado" };
 }
 
-// ================= FUNCAO PROCESSA FILA =================
+// ================= FUNCÃƒO PROCESSA FILA =================
 
 async function processarFila(clienteIdAlvo = null) {
   const clienteFila = clienteIdAlvo || "admin";
@@ -3858,19 +2848,10 @@ async function processarFila(clienteIdAlvo = null) {
   try {
     sanearExpiradosFila(clienteFila);
 
-    oferta = selecionarProximaOfertaFila(clienteFila);
+    oferta = selecionarProximaOfertaFila(clienteIdAlvo);
 
 if (!oferta) {
-  const diagnosticoFila = diagnosticosFilaPorCliente.get(String(clienteFila)) ||
-    diagnosticarFilaCliente(clienteFila);
-
-  if (deveLogarThrottle(`fila-processar-sem-elegivel:${clienteFila}`)) {
-    logOptimus("FILA", "Nenhuma oferta pendente elegÃ­vel", {
-      clienteId: clienteFila,
-      motivoPrincipal: diagnosticoFila.motivoPrincipal,
-      diagnostico: diagnosticoFila
-    });
-  }
+  logOptimus("FILA", "Nenhuma oferta pendente");
   return;
 }
 
@@ -3878,7 +2859,7 @@ const clienteId = oferta.clienteId || "admin";
 
 if (oferta.sessaoId === "sessao1") {
   oferta.sessaoId = normalizarSessaoId(clienteId, "sessao1");
-  salvarFila(clienteId);
+  salvarFila();
 }
 
 const configCliente =
@@ -4312,55 +3293,6 @@ app.use(rateLimit({
     req.path.startsWith("/destinos") ||
     req.path.startsWith("/grupos")
 }));
-const ROTAS_PERF_DIAGNOSTICO = [
-  "/login",
-  "/me",
-  "/fila",
-  "/sessoes",
-  "/destinos",
-  "/integracoes",
-  "/grupos",
-  "/status",
-  "/radar/config",
-  "/automacao"
-];
-
-function rotaPerfDiagnostico(path = "") {
-  const alvo = String(path || "");
-  return ROTAS_PERF_DIAGNOSTICO.some(rota =>
-    alvo === rota ||
-    alvo.startsWith(`${rota}/`) ||
-    (rota === "/integracoes" && alvo === "/integracoes/alertas") ||
-    (rota === "/automacao" && alvo === "/automacao/status")
-  );
-}
-
-app.use((req, res, next) => {
-  if (!rotaPerfDiagnostico(req.path)) return next();
-
-  const inicio = process.hrtime.bigint();
-
-  res.on("finish", () => {
-    const duracaoMs = Number(process.hrtime.bigint() - inicio) / 1e6;
-    const clienteId = (() => {
-      try {
-        return getClienteId(req) || "admin";
-      } catch {
-        return "admin";
-      }
-    })();
-
-    console.log("[PERF]", {
-      metodo: req.method,
-      path: req.originalUrl || req.path,
-      clienteId,
-      duracaoMs: Math.round(duracaoMs),
-      statusCode: res.statusCode
-    });
-  });
-
-  return next();
-});
 
 // ============== POST FILA ENVIO =================
 
@@ -4372,7 +3304,7 @@ app.post("/fila", (req, res) => {
     if (!clienteId) {
       return res.status(401).json({
         ok: false,
-        erro: "UsuÃƒÂ¡rio nÃƒÂ£o identificado"
+        erro: "UsuÃ¡rio nÃ£o identificado"
       });
     }
 
@@ -4476,7 +3408,7 @@ if (deveIgnorarOfertaRepetida(oferta)) {
   return res.json({
     ok: true,
     ignorada: true,
-    motivo: "Oferta repetida recentemente sem queda relevante de preÃƒÂ§o ou cupom novo.",
+    motivo: "Oferta repetida recentemente sem queda relevante de preÃ§o ou cupom novo.",
     oferta
   });
 }
@@ -4544,226 +3476,24 @@ function decorarItemFilaParaResposta(item = {}) {
   };
 }
 
-function statusDetalheIndicaPendente(valor = "") {
-  const texto = normalizarTexto(valor);
-  return texto === "aguardandoenvio" || texto === "nafila";
-}
-
-function destinosResolvidosPayload(item = {}) {
-  if (Array.isArray(item.destinosResolvidos)) return item.destinosResolvidos;
-  if (Array.isArray(item.destinosEnviados)) return item.destinosEnviados;
-  if (Array.isArray(item.destinos)) return item.destinos;
-  return [];
-}
-
-function normalizarItemFilaParaResposta(item = {}) {
-  const resposta = { ...item };
-  const statusNormalizado = normalizarTexto(resposta.status || "");
-  const deveSerRetida = statusNormalizado === "retida" || Boolean(resposta.motivoRetencao || resposta.retidaEm);
-
-  if (deveSerRetida) {
-    resposta.status = "retida";
-    resposta.statusDetalhe = statusDetalheIndicaPendente(resposta.statusDetalhe)
-      ? "Retida por falta de destino compativel"
-      : (resposta.statusDetalhe || "Retida por falta de destino compativel");
-    resposta.motivoRetencao = resposta.motivoRetencao || "retida_sem_destino_compativel";
-    resposta.retidaEm = resposta.retidaEm || resposta.atualizadoEm || resposta.criadoEm || resposta.dataEntradaFila || "";
-    resposta.destinosResolvidos = destinosResolvidosPayload(resposta);
-    delete resposta.proximaTentativaEnvioEm;
-  } else if (statusNormalizado === "enviado") {
-    resposta.status = "enviado";
-    resposta.enviadoEm = resposta.enviadoEm || resposta.dataEnvio || "";
-    resposta.destinosEnviados = Array.isArray(resposta.destinosEnviados) ? resposta.destinosEnviados : [];
-    resposta.destinosResolvidos = destinosResolvidosPayload(resposta);
-    resposta.statusDetalhe = resposta.statusDetalhe || `Enviada para ${resposta.destinosEnviados.length} destino(s)`;
-  } else if (statusNormalizado === "erro") {
-    resposta.status = "erro";
-    resposta.destinosResolvidos = destinosResolvidosPayload(resposta);
-    resposta.statusDetalhe = resposta.statusDetalhe || "Erro no envio";
-  } else {
-    resposta.status = "pendente";
-    resposta.statusDetalhe = resposta.statusDetalhe || "Aguardando envio";
-    resposta.destinosResolvidos = destinosResolvidosPayload(resposta);
-  }
-
-  return decorarItemFilaParaResposta(resposta);
-}
-
-function sanearEstadosFilaCliente(clienteId = "admin") {
-  let alterou = false;
-
-  for (const item of fila) {
-    if (String(item?.clienteId || "admin") !== String(clienteId)) continue;
-
-    const statusNormalizado = normalizarTexto(item.status || "");
-    const deveSerRetida = statusNormalizado === "retida" || Boolean(item.motivoRetencao || item.retidaEm);
-
-    if (deveSerRetida) {
-      if (item.status !== "retida") {
-        item.status = "retida";
-        alterou = true;
-      }
-
-      if (!item.statusDetalhe || statusDetalheIndicaPendente(item.statusDetalhe)) {
-        item.statusDetalhe = "Retida por falta de destino compativel";
-        alterou = true;
-      }
-
-      if (!item.motivoRetencao) {
-        item.motivoRetencao = "retida_sem_destino_compativel";
-        alterou = true;
-      }
-
-      if (!item.retidaEm) {
-        item.retidaEm = item.atualizadoEm || item.criadoEm || item.dataEntradaFila || new Date().toISOString();
-        alterou = true;
-      }
-
-      if (item.proximaTentativaEnvioEm) {
-        delete item.proximaTentativaEnvioEm;
-        alterou = true;
-      }
-    }
-  }
-
-  if (alterou) {
-    salvarFila(clienteId);
-    console.log("[FILA] Estados inconsistentes saneados antes do payload", { clienteId });
-  }
-}
-
-function resumirStatusFila(itens = []) {
-  return {
-    total: itens.length,
-    pendentes: itens.filter((o) => o.status === "pendente").length,
-    enviados: itens.filter((o) => o.status === "enviado").length,
-    retidas: itens.filter((o) => o.status === "retida").length,
-    erros: itens.filter((o) => o.status === "erro").length
-  };
-}
-
-function categoriaReclassificadaFila(oferta = {}) {
-  const base = {
-    ...oferta,
-    categoria: "",
-    categoriaProduto: ""
-  };
-
-  if (ofertaEhRadar(oferta)) {
-    return categoriaRadarReclassificada(base);
-  }
-
-  return classificarCategoriaOferta(base, oferta.titulo || oferta.nome || oferta.termo || "");
-}
-
-function reprocessarRetidasFilaCliente(clienteId = "admin", opcoes = {}) {
-  const aplicar = opcoes.aplicar === true;
-  const agora = new Date().toISOString();
-  const resumo = {
-    clienteId,
-    aplicar,
-    avaliadas: 0,
-    reclassificadas: 0,
-    mantidasRetidas: 0,
-    voltariamPendentes: 0,
-    alteradas: 0,
-    ignoradasEnviadas: 0,
-    itens: []
-  };
-
-  const itensCliente = fila.filter(item =>
-    String(item?.clienteId || "admin") === String(clienteId)
-  );
-
-  for (const item of itensCliente) {
-    if (item?.status === "enviado") {
-      resumo.ignoradasEnviadas += 1;
-      continue;
-    }
-
-    if (item?.status !== "retida") continue;
-
-    resumo.avaliadas += 1;
-
-    const trabalho = aplicar ? item : { ...item };
-    const categoriaAnterior = trabalho.categoria || trabalho.categoriaProduto || "";
-    const categoriaNova = categoriaReclassificadaFila(trabalho);
-
-    if (categoriaNova && categoriaNova !== categoriaAnterior) {
-      trabalho.categoria = categoriaNova;
-      trabalho.categoriaProduto = categoriaNova;
-      resumo.reclassificadas += 1;
-    }
-
-    const configCliente = configsPorCliente?.[clienteId] || config;
-    const analise = analisarDestinosCompativeisFila(clienteId, trabalho, configCliente);
-    const destinosResolvidos = analise.compativeis.map(({ destino }) => ({
-      id: destino.id || destino.conexaoId || destino.chatId || destino.nome || "",
-      nome: destinoNomeLog(destino),
-      tipo: destino.tipo || destino.categoria || "",
-      marketplace: destino.marketplace || destino.marketplaces || ""
-    }));
-
-    if (analise.compativeis.length > 0) {
-      trabalho.status = "pendente";
-      trabalho.statusDetalhe = "Reprocessada: destino compativel encontrado";
-      trabalho.destinosResolvidos = destinosResolvidos;
-      trabalho.reprocessadaEm = agora;
-      trabalho.reprocessadaOrigem = "retidas_legadas";
-      delete trabalho.motivoRetencao;
-      delete trabalho.retidaEm;
-      delete trabalho.proximaTentativaEnvioEm;
-      resumo.voltariamPendentes += 1;
-    } else {
-      trabalho.status = "retida";
-      trabalho.statusDetalhe = "Retida por falta de destino compativel";
-      trabalho.motivoRetencao = analise.motivoRetencao || trabalho.motivoRetencao || "retida_sem_destino_compativel";
-      trabalho.retidaEm = trabalho.retidaEm || agora;
-      trabalho.destinosResolvidos = [];
-      trabalho.reprocessadaEm = agora;
-      trabalho.reprocessadaOrigem = "retidas_legadas";
-      delete trabalho.proximaTentativaEnvioEm;
-      resumo.mantidasRetidas += 1;
-    }
-
-    resumo.itens.push({
-      id: trabalho.id || "",
-      titulo: trabalho.titulo || trabalho.nome || "",
-      marketplace: trabalho.marketplace || trabalho.mercado || "",
-      origem: trabalho.origem || "",
-      categoriaAnterior,
-      categoriaNova: trabalho.categoria || "",
-      statusAnterior: "retida",
-      statusNovo: trabalho.status,
-      motivoRetencao: trabalho.motivoRetencao || "",
-      destinosCompativeis: analise.compativeis.length,
-      destinosResolvidos
-    });
-  }
-
-  if (aplicar && (resumo.reclassificadas > 0 || resumo.voltariamPendentes > 0 || resumo.mantidasRetidas > 0)) {
-    salvarFila(clienteId);
-    resumo.alteradas = resumo.reclassificadas + resumo.voltariamPendentes + resumo.mantidasRetidas;
-  }
-
-  return resumo;
-}
 app.get("/fila", (req, res) => {
   const clienteId = getClienteId(req);
 
   sanearExpiradosFila(clienteId);
-  sanearEstadosFilaCliente(clienteId);
 
   const itensCliente = fila.filter((o) =>
     (o.clienteId || "admin") === clienteId
   );
-  const itensResposta = itensCliente.map(normalizarItemFilaParaResposta);
-  const resumo = resumirStatusFila(itensResposta);
+  const itensResposta = itensCliente.map(decorarItemFilaParaResposta);
 
   res.json({
     ok: true,
     clienteId,
-    ...resumo,
+    total: itensCliente.length,
+    pendentes: itensCliente.filter((o) => o.status === "pendente").length,
+    enviados: itensCliente.filter((o) => o.status === "enviado").length,
+    retidas: itensCliente.filter((o) => o.status === "retida").length,
+    erros: itensCliente.filter((o) => o.status === "erro").length,
     itens: itensResposta,
     fila: itensResposta
   });
@@ -4780,7 +3510,7 @@ app.get("/r/:codigo", (req, res) => {
     const dados = config.linksGerados[codigo];
 
     if (!dados?.original) {
-      return res.status(404).send("Link nÃƒÂ£o encontrado");
+      return res.status(404).send("Link nÃ£o encontrado");
     }
 
     dados.cliques = (dados.cliques || 0) + 1;
@@ -4799,45 +3529,102 @@ app.get("/r/:codigo", (req, res) => {
 
 // ================= TELEGRAM =================
 
+function destinoEhTelegram(destino = {}) {
+  const tipo = String(destino?.tipo || destino?.canal || destino?.plataforma || "").toLowerCase();
+  return tipo === "telegram" || !!destino?.botToken || !!destino?.chatId;
+}
+
+function limparTelegramCliente(clienteId = "admin") {
+  const cliente = String(clienteId || "admin").trim();
+
+  configsPorCliente[cliente] = configsPorCliente[cliente] || {};
+  integracoesPorCliente[cliente] = integracoesPorCliente[cliente] || {};
+
+  delete configsPorCliente[cliente].telegram;
+  delete integracoesPorCliente[cliente].telegram;
+  delete telegramStatusPorCliente[cliente];
+
+  const destinosCliente = destinosPorCliente?.[cliente];
+  if (Array.isArray(destinosCliente)) {
+    destinosPorCliente[cliente] = destinosCliente.filter(destino => !destinoEhTelegram(destino));
+  } else if (destinosCliente && typeof destinosCliente === "object") {
+    for (const [chave, valor] of Object.entries(destinosCliente)) {
+      if (Array.isArray(valor)) {
+        destinosCliente[chave] = valor.filter(destino => !destinoEhTelegram(destino));
+      } else if (destinoEhTelegram(valor)) {
+        delete destinosCliente[chave];
+      }
+    }
+  }
+
+  salvarConfigsClientes();
+  salvarIntegracoesPersistidas();
+  salvarDestinosClientes();
+}
+
 app.get("/telegram", (req, res) => {
-
   const clienteId = getClienteId(req);
+  const telegram = configsPorCliente[clienteId]?.telegram || {};
+  const destinos = Array.isArray(telegram.destinos) ? telegram.destinos : [];
+  const ativo = telegram.ativo === true;
+  const conectado = ativo && destinos.some(destino => destino?.ativo !== false && destino?.botToken && destino?.chatId);
 
-  const configCliente =
-    configsPorCliente[clienteId] || {};
-
-  res.json({
-    ativo: configCliente.telegram?.ativo || false,
-    destinos: configCliente.telegram?.destinos || []
+  return res.json({
+    ok: true,
+    clienteId,
+    ativo,
+    conectado,
+    status: conectado ? "conectado" : "desconectado",
+    destinos
   });
 });
 
-
 app.post("/telegram", (req, res) => {
-  const { ativo, destinos } = req.body;
+  const clienteId = getClienteId(req);
+  const { ativo, destinos } = req.body || {};
 
-const clienteId = getClienteId(req);
+  if (bloquearRecursoNaoLiberado(req, res, "telegram", "Telegram nao disponivel no seu plano")) {
+    return;
+  }
 
-if (bloquearRecursoNaoLiberado(req, res, "telegram", "Telegram nao disponivel no seu plano")) {
-  return;
-}
+  configsPorCliente[clienteId] = configsPorCliente[clienteId] || {};
+  configsPorCliente[clienteId].telegram = {
+    ativo: ativo === true,
+    destinos: Array.isArray(destinos)
+      ? destinos
+      : configsPorCliente[clienteId]?.telegram?.destinos || []
+  };
 
-configsPorCliente[clienteId] =
-  configsPorCliente[clienteId] || {};
-
-configsPorCliente[clienteId].telegram = {
-  ativo: ativo === true,
-  destinos: Array.isArray(destinos)
-    ? destinos
-    : configsPorCliente[clienteId]?.telegram?.destinos || []
-};
-
+  telegramStatusPorCliente[clienteId] = configsPorCliente[clienteId].telegram.ativo ? "conectado" : "desconectado";
   salvarConfigsClientes();
 
-  res.json({
+  return res.json({
     ok: true,
-    telegram: configsPorCliente[clienteId].telegram
+    clienteId,
+    telegram: configsPorCliente[clienteId].telegram,
+    status: telegramStatusPorCliente[clienteId]
   });
+});
+
+app.delete("/telegram", (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    limparTelegramCliente(clienteId);
+
+    return res.json({
+      ok: true,
+      clienteId,
+      ativo: false,
+      conectado: false,
+      status: "desconectado",
+      destinos: []
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      erro: e.message
+    });
+  }
 });
 
 app.post("/telegram/testar", async (req, res) => {
@@ -4856,7 +3643,7 @@ app.post("/telegram/testar", async (req, res) => {
       `https://api.telegram.org/bot${destino.botToken}/sendMessage`,
       {
         chat_id: destino.chatId,
-        text: "Ã°Å¸Â§Âª Teste Telegram Optimus Promo enviado com sucesso!"
+        text: "ðŸ§ª Teste Telegram Optimus Promo enviado com sucesso!"
       }
     );
 
@@ -4894,12 +3681,8 @@ app.post("/destinos", (req, res) => {
   if (!Array.isArray(destinos)) {
     return res.status(400).json({
       ok: false,
-      erro: "Formato invÃƒÂ¡lido"
+      erro: "Formato invÃ¡lido"
     });
-  }
-
-  if (!validarDestinosPlano(req, res, destinos)) {
-    return;
   }
 
   destinosPorCliente[clienteId] = destinos;
@@ -4928,7 +3711,7 @@ app.delete("/destinos/:id", (req, res) => {
   });
 });
 
-// ================= AUTOMAÃƒâ€¡ÃƒÆ’O POR CLIENTE =================
+// ================= AUTOMAÃ‡ÃƒO POR CLIENTE =================
 
 app.get("/automacao/status", (req, res) => {
   const clienteId = getClienteId(req);
@@ -4936,7 +3719,7 @@ app.get("/automacao/status", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "UsuÃƒÂ¡rio nÃƒÂ£o identificado"
+      erro: "UsuÃ¡rio nÃ£o identificado"
     });
   }
 
@@ -5073,7 +3856,7 @@ app.get("/automacao", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "UsuÃƒÂ¡rio nÃƒÂ£o identificado"
+      erro: "UsuÃ¡rio nÃ£o identificado"
     });
   }
 
@@ -5092,7 +3875,7 @@ app.post("/automacao/toggle", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "UsuÃƒÂ¡rio nÃƒÂ£o identificado"
+      erro: "UsuÃ¡rio nÃ£o identificado"
     });
   }
 
@@ -5116,33 +3899,6 @@ app.post("/automacao/toggle", (req, res) => {
 });
 
 
-app.post("/fila/retidas/reprocessar", (req, res) => {
-  try {
-    const clienteId = getClienteId(req);
-    const aplicar = req.body?.aplicar === true || req.query?.aplicar === "true";
-    const resultado = reprocessarRetidasFilaCliente(clienteId, { aplicar });
-
-    logOptimus("FILA", aplicar ? "Retidas reprocessadas" : "Retidas auditadas", {
-      clienteId,
-      aplicar,
-      avaliadas: resultado.avaliadas,
-      reclassificadas: resultado.reclassificadas,
-      voltariamPendentes: resultado.voltariamPendentes,
-      mantidasRetidas: resultado.mantidasRetidas
-    });
-
-    return res.json({
-      ok: true,
-      dryRun: !aplicar,
-      ...resultado
-    });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      erro: e.message
-    });
-  }
-});
 app.delete("/fila/item/:id", (req, res) => {
   const clienteId = getClienteId(req);
   const id = req.params.id;
@@ -5155,7 +3911,7 @@ app.delete("/fila/item/:id", (req, res) => {
   if (index === -1) {
     return res.status(404).json({
       ok: false,
-      erro: "Item nÃƒÂ£o encontrado para este usuÃƒÂ¡rio"
+      erro: "Item nÃ£o encontrado para este usuÃ¡rio"
     });
   }
 
@@ -5211,7 +3967,7 @@ app.delete("/fila/:index", (req, res) => {
   const clienteId = getClienteId(req);
 
   if (isNaN(index) || index < 0 || index >= fila.length) {
-    return res.status(400).send("ÃƒÂndice invÃƒÂ¡lido");
+    return res.status(400).send("Ãndice invÃ¡lido");
   }
 
   const oferta = fila[index];
@@ -5219,7 +3975,7 @@ app.delete("/fila/:index", (req, res) => {
   if ((oferta.clienteId || "admin") !== clienteId) {
     return res.status(403).json({
       ok: false,
-      erro: "Sem permissÃƒÂ£o para remover esta oferta"
+      erro: "Sem permissÃ£o para remover esta oferta"
     });
   }
 
@@ -5250,7 +4006,7 @@ app.post("/fila/:id/reprocessar", (req, res) => {
   if (!oferta) {
     return res.status(404).json({
       ok: false,
-      erro: "Oferta nÃƒÂ£o encontrada"
+      erro: "Oferta nÃ£o encontrada"
     });
   }
 
@@ -5309,7 +4065,7 @@ const idBody = String(req.body?.id || req.body?.ofertaId || "").trim();
 if (isNaN(index) || index < 0 || index >= filaCliente.length) {
   return res.status(400).json({
     ok: false,
-    erro: "ÃƒÂndice invÃƒÂ¡lido"
+    erro: "Ãndice invÃ¡lido"
   });
 }
 
@@ -5327,7 +4083,7 @@ const indexReal = fila.findIndex(o => o === oferta);
   if ((oferta.clienteId || "admin") !== clienteIdReq) {
     return res.status(403).json({
       ok: false,
-      erro: "Sem permissÃƒÂ£o para enviar esta oferta"
+      erro: "Sem permissÃ£o para enviar esta oferta"
     });
   }
 
@@ -5349,83 +4105,24 @@ if (indexReal >= 0) {
   return res.status(resultado.statusHttp || 200).json(resultado);
 });
 
-function getConfigCliente(clienteId = "admin") {
-  return configsPorCliente?.[String(clienteId || "admin")] || {};
-}
-
-function normalizarTelegramCliente(configCliente = {}) {
-  const telegram = configCliente?.telegram || {};
-
-  return {
-    ativo: telegram.ativo === true,
-    destinos: Array.isArray(telegram.destinos) ? telegram.destinos : []
-  };
-}
-
-function aplicarEscopoSensivelCliente(clienteId = "admin", configBase = {}) {
-  const cid = String(clienteId || "admin");
-  const configCliente = getConfigCliente(cid);
-  const destinosCliente = destinosPorCliente?.[cid];
-  const destinosPorSessaoCliente =
-    destinosCliente && !Array.isArray(destinosCliente) && typeof destinosCliente === "object"
-      ? destinosCliente
-      : (
-        configCliente.destinosPorSessao &&
-        !Array.isArray(configCliente.destinosPorSessao) &&
-        typeof configCliente.destinosPorSessao === "object"
-          ? configCliente.destinosPorSessao
-          : {}
-      );
-
-  return {
-    ...configBase,
-    telegram: normalizarTelegramCliente(configCliente),
-    destinos: Array.isArray(configCliente.destinos) ? configCliente.destinos : [],
-    destinosInteligentes: Array.isArray(destinosCliente)
-      ? destinosCliente
-      : Array.isArray(configCliente.destinosInteligentes)
-        ? configCliente.destinosInteligentes
-        : [],
-    destinosPorSessao: destinosPorSessaoCliente
-  };
-}
-
-function filtrarConfigPorPlanoCliente(clienteId = "admin", configBase = {}, opcoes = {}) {
-  const usuario = usuarios.find(u => String(u.id) === String(clienteId)) || null;
-  const configEscopada = aplicarEscopoSensivelCliente(clienteId, configBase);
-
-  if (!usuario || (usuario.papel === "admin_master" && opcoes.permitirGlobalAdmin === true)) {
-    return configBase;
-  }
-
-  if (usuario.papel === "admin_master") {
-    return configEscopada;
-  }
-
-  const plano = getPlanoPorNome(usuario.plano || "free") || {};
-  const permitidos = new Set((plano.marketplaces || []).map(item => normalizarTexto(item)));
-  const marketplacesFiltrados = {};
-
-  for (const [nome, dados] of Object.entries(configEscopada.marketplaces || {})) {
-    if (permitidos.has(normalizarTexto(nome))) {
-      marketplacesFiltrados[nome] = dados;
-    }
-  }
-
-  return {
-    ...configEscopada,
-    marketplaces: marketplacesFiltrados,
-    marketplacesLiberados: [...permitidos]
-  };
-}
-
 app.get("/config", (req, res) => {
   const clienteId = getClienteId(req);
-  const configCliente = getConfigCliente(clienteId);
+  const isAdmin = isAdminMaster(req);
 
-  const configResposta = filtrarConfigPorPlanoCliente(
+  if (isAdmin) {
+    return res.json({
+      ok: true,
+      clienteId,
+      config
+    });
+  }
+
+  const configCliente = configsPorCliente?.[clienteId] || {};
+
+  return res.json({
+    ok: true,
     clienteId,
-    {
+    config: {
       ...config,
       ...configCliente,
       marketplaces: {
@@ -5433,12 +4130,6 @@ app.get("/config", (req, res) => {
         ...(configCliente.marketplaces || {})
       }
     }
-  );
-
-  return res.json({
-    ok: true,
-    clienteId,
-    config: configResposta
   });
 });
 
@@ -5446,18 +4137,13 @@ app.get("/minha-config", (req, res) => {
   const clienteId = getClienteId(req);
   const configCliente = getConfigCliente(clienteId);
 
-  const configResposta = filtrarConfigPorPlanoCliente(
-    clienteId,
-    {
-      ...config,
-      ...configCliente
-    }
-  );
-
   return res.json({
     ok: true,
     clienteId,
-    config: configResposta
+    config: {
+      ...config,
+      ...configCliente
+    }
   });
 });
 
@@ -5503,14 +4189,14 @@ app.post("/admin/planos", (req, res) => {
   if (!body.nome) {
     return res.status(400).json({
       ok: false,
-      erro: "Nome do plano obrigatÃƒÂ³rio"
+      erro: "Nome do plano obrigatÃ³rio"
     });
   }
 
-  const nomePlano = normalizarPlanoChave(body.nome || "");
+  const nomePlano = String(body.nome || "").trim();
   const planoAnterior =
     planos[nomePlano] ||
-    planos[String(body.nome || "").trim()] ||
+    planos[nomePlano.toLowerCase()] ||
     {};
   const limitesBody = body.limites || {};
   const recursosBody = body.recursos || {};
@@ -5535,7 +4221,7 @@ app.post("/admin/planos", (req, res) => {
     preco: String(body.preco ?? planoAnterior.preco ?? ""),
 
     marketplaces: Array.isArray(body.marketplaces)
-      ? body.marketplaces.map(item => normalizarTexto(item)).filter(Boolean)
+      ? body.marketplaces
       : Array.isArray(planoAnterior.marketplaces)
         ? planoAnterior.marketplaces
         : [],
@@ -5586,7 +4272,7 @@ app.delete("/admin/planos/:nome", (req, res) => {
   if (!planos[nome]) {
     return res.status(404).json({
       ok: false,
-      erro: "Plano nÃƒÂ£o encontrado"
+      erro: "Plano nÃ£o encontrado"
     });
   }
 
@@ -5597,7 +4283,7 @@ app.delete("/admin/planos/:nome", (req, res) => {
   if (usuariosUsandoPlano.length > 0) {
     return res.status(400).json({
       ok: false,
-      erro: "NÃƒÂ£o ÃƒÂ© possÃƒÂ­vel excluir plano em uso por usuÃƒÂ¡rios"
+      erro: "NÃ£o Ã© possÃ­vel excluir plano em uso por usuÃ¡rios"
     });
   }
 
@@ -5607,7 +4293,7 @@ app.delete("/admin/planos/:nome", (req, res) => {
 
   return res.json({
     ok: true,
-    mensagem: "Plano excluÃƒÂ­do com sucesso"
+    mensagem: "Plano excluÃ­do com sucesso"
   });
 });
 
@@ -5624,7 +4310,7 @@ app.delete("/admin/usuarios/:id", (req, res) => {
   if (id === "admin") {
     return res.status(400).json({
       ok: false,
-      erro: "NÃƒÂ£o ÃƒÂ© possÃƒÂ­vel excluir o Admin Master principal"
+      erro: "NÃ£o Ã© possÃ­vel excluir o Admin Master principal"
     });
   }
 
@@ -5635,7 +4321,7 @@ app.delete("/admin/usuarios/:id", (req, res) => {
   if (usuarios.length === antes) {
     return res.status(404).json({
       ok: false,
-      erro: "UsuÃƒÂ¡rio nÃƒÂ£o encontrado"
+      erro: "UsuÃ¡rio nÃ£o encontrado"
     });
   }
 
@@ -5650,7 +4336,7 @@ app.delete("/admin/usuarios/:id", (req, res) => {
 
   return res.json({
     ok: true,
-    mensagem: "UsuÃƒÂ¡rio excluÃƒÂ­do com sucesso",
+    mensagem: "UsuÃ¡rio excluÃ­do com sucesso",
     id
   });
 });
@@ -5668,30 +4354,28 @@ app.post("/admin/usuarios", (req, res) => {
   if (!body.nome || !body.email || !body.senha) {
     return res.status(400).json({
       ok: false,
-      erro: "Nome, email e senha obrigatÃƒÂ³rios"
+      erro: "Nome, email e senha obrigatÃ³rios"
     });
   }
 
-  const emailNormalizado = normalizarEmailUsuario(body.email);
-
   const existe = usuarios.find(
-    u => normalizarEmailUsuario(u.email) === emailNormalizado
+    u => u.email.toLowerCase() === body.email.toLowerCase()
   );
 
   if (existe) {
     return res.status(400).json({
       ok: false,
-      erro: "Email jÃƒÂ¡ cadastrado"
+      erro: "Email jÃ¡ cadastrado"
     });
   }
 
   const novoUsuario = {
     id: gerarId(),
-    nome: String(body.nome || "").trim(),
-    email: emailNormalizado,
-    senha: hashSenhaUsuario(body.senha),
+    nome: body.nome,
+    email: body.email.toLowerCase(),
+    senha: body.senha,
     papel: body.papel || "cliente",
-    plano: normalizarPlanoChave(body.plano || "free"),
+    plano: body.plano || "free",
     creditos: Number(body.creditos || 0),
     ativo: true,
     criadoEm: new Date().toISOString()
@@ -5724,45 +4408,22 @@ app.put("/admin/usuarios/:id", (req, res) => {
   if (!usuario) {
     return res.status(404).json({
       ok: false,
-      erro: "UsuÃƒÂ¡rio nÃƒÂ£o encontrado"
+      erro: "UsuÃ¡rio nÃ£o encontrado"
     });
   }
 
   const body = req.body || {};
 
-  usuario.nome = body.nome ? String(body.nome).trim() : usuario.nome;
+  usuario.nome = body.nome || usuario.nome;
 
-  if (body.email) {
-    const emailNormalizado = normalizarEmailUsuario(body.email);
-    const emailEmUso = usuarios.find(u =>
-      String(u.id) !== String(usuario.id) &&
-      normalizarEmailUsuario(u.email) === emailNormalizado
-    );
-
-    if (emailEmUso) {
-      return res.status(400).json({
-        ok: false,
-        erro: "Email jÃ¡ cadastrado"
-      });
-    }
-
-    usuario.email = emailNormalizado;
-  } else {
-    usuario.email = normalizarEmailUsuario(usuario.email);
-  }
+  usuario.email =
+    (body.email || usuario.email).toLowerCase();
 
   if (body.senha) {
-    const senhaEntrada = String(body.senha || "");
-    const senhaAtual = String(usuario.senha || "");
-
-    if (senhaEntrada !== senhaAtual) {
-      usuario.senha = senhaPareceHashBcrypt(senhaEntrada)
-        ? senhaEntrada
-        : hashSenhaUsuario(senhaEntrada);
-    }
+    usuario.senha = body.senha;
   }
 
-  usuario.plano = body.plano ? normalizarPlanoChave(body.plano) : normalizarPlanoChave(usuario.plano || "free");
+  usuario.plano = body.plano || usuario.plano;
 
   usuario.papel = body.papel || usuario.papel;
 
@@ -5810,7 +4471,7 @@ app.post("/config", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "Cliente nÃƒÂ£o identificado"
+      erro: "Cliente nÃ£o identificado"
     });
   }
 
@@ -5834,19 +4495,11 @@ app.post("/config", (req, res) => {
   if (body.marketplaces) {
 
     for (const [nome, dados] of Object.entries(body.marketplaces)) {
-      if (!isAdmin && !marketplaceLiberadoParaReq(req, nome)) {
-        configCliente.marketplaces[nome] = {
-          ...(configCliente.marketplaces[nome] || {}),
-          ativo: false,
-          bloqueadoPlano: true
-        };
-        continue;
-      }
 
       configCliente.marketplaces[nome] =
         configCliente.marketplaces[nome] || {};
 
-      // usuÃƒÂ¡rio comum sÃƒÂ³ liga/desliga
+      // usuÃ¡rio comum sÃ³ liga/desliga
       configCliente.marketplaces[nome].ativo =
         dados?.ativo === true;
 
@@ -5975,7 +4628,19 @@ function getPlanoUsuario(req) {
 
   if (!usuario) return null;
 
-  return getPlanoPorNome(usuario.plano || "free");
+  const nomePlano =
+    String(usuario.plano || "")
+      .trim()
+      .toLowerCase();
+
+  const planoEncontrado = Object.values(planos).find(
+    p =>
+      String(p.nome || "")
+        .trim()
+        .toLowerCase() === nomePlano
+  );
+
+  return planoEncontrado || null;
 }
 
 // ===================== FUNCAO RECURSOS ============================
@@ -5994,90 +4659,14 @@ function usuarioTemRecurso(req, recurso) {
   return plano?.recursos?.[recurso] === true;
 }
 
-function normalizarMarketplacePlano(marketplace = "") {
-  const mp = normalizarTexto(marketplace || "");
-  if (["ml", "meli", "mercadolivrebrasil"].includes(mp)) return "mercadolivre";
-  if (["awin_kabum", "awinkabum"].includes(mp)) return "awin";
-  return mp;
-}
-
-function marketplaceLiberadoParaReq(req, marketplace = "") {
-  if (isAdminMaster(req)) return true;
-
-  const plano = getPlanoUsuario(req) || {};
-  const mp = normalizarMarketplacePlano(marketplace);
-  const liberados = (plano.marketplaces || []).map(item => normalizarMarketplacePlano(item));
-
-  if (mp === "kabum") {
-    return liberados.includes("kabum") || liberados.includes("awin");
-  }
-
-  if (mp === "awin") {
-    return liberados.includes("awin") || liberados.includes("kabum");
-  }
-
-  return liberados.includes(mp);
-}
-
-function bloquearMarketplaceNaoLiberado(req, res, marketplace = "") {
-  const mp = normalizarMarketplacePlano(marketplace);
-
-  if (marketplaceLiberadoParaReq(req, mp)) return false;
+function bloquearRecursoNaoLiberado(req, res, recurso, mensagem = "Recurso nao disponivel no seu plano") {
+  if (usuarioTemRecurso(req, recurso)) return false;
 
   res.status(403).json({
     ok: false,
-    erro: `Marketplace ${marketplace || mp} nao liberado no seu plano`,
-    motivo: "marketplace_nao_liberado",
-    marketplace: mp
-  });
-
-  return true;
-}
-
-function bloquearRecursoNaoLiberado(req, res, recurso = "", mensagem = "") {
-  if (isAdminMaster(req) || usuarioTemRecurso(req, recurso)) return false;
-
-  res.status(403).json({
-    ok: false,
-    erro: mensagem || `Recurso ${recurso} nao disponivel no seu plano`,
-    motivo: "recurso_nao_liberado",
+    erro: mensagem,
     recurso
   });
-
-  return true;
-}
-
-function validarDestinosPlano(req, res, destinos = []) {
-  const lista = Array.isArray(destinos) ? destinos : [];
-  const planoUsuario = getPlanoUsuario(req);
-  const limiteDestinos = isAdminMaster(req)
-    ? 999
-    : Number(planoUsuario?.limites?.destinos || 3);
-
-  if (!isAdminMaster(req) && lista.length > limiteDestinos) {
-    res.status(403).json({
-      ok: false,
-      erro: `Seu plano permite apenas ${limiteDestinos} destino(s).`,
-      motivo: "limite_destinos",
-      limite: limiteDestinos,
-      usados: lista.length
-    });
-    return false;
-  }
-
-  const temTelegram = lista.some(destino => normalizarTexto(destino?.tipo || destino?.canal || "") === "telegram");
-  const temWhatsapp = lista.some(destino => {
-    const tipo = normalizarTexto(destino?.tipo || destino?.canal || "whatsapp");
-    return tipo === "whatsapp" || tipo === "grupo" || tipo === "grupos";
-  });
-
-  if (temTelegram && bloquearRecursoNaoLiberado(req, res, "telegram", "Telegram nao disponivel no seu plano")) {
-    return false;
-  }
-
-  if (temWhatsapp && bloquearRecursoNaoLiberado(req, res, "whatsapp", "WhatsApp nao disponivel no seu plano")) {
-    return false;
-  }
 
   return true;
 }
@@ -6088,7 +4677,10 @@ function clienteTemRecursoMensageiro(clienteId = "admin") {
   if (!usuario) return clienteId === "admin";
   if (usuario.papel === "admin_master") return true;
 
-  const plano = getPlanoPorNome(usuario.plano || "free");
+  const nomePlano = String(usuario.plano || "").trim().toLowerCase();
+  const plano = Object.values(planos || {}).find(p =>
+    String(p.nome || "").trim().toLowerCase() === nomePlano
+  );
 
   return plano?.recursos?.mensageiro === true;
 }
@@ -6099,12 +4691,12 @@ function getIntegracaoCliente(clienteId = "admin", marketplace = "") {
   const mp = String(marketplace || "").toLowerCase();
   const cid = String(clienteId || "admin");
 
-  // Admin pode usar integraÃƒÂ§ÃƒÂµes do admin
+  // Admin pode usar integraÃ§Ãµes do admin
   if (cid === "admin") {
     return integracoesPorCliente?.admin?.[mp] || null;
   }
 
-  // UsuÃƒÂ¡rio comum sÃƒÂ³ pode usar integraÃƒÂ§ÃƒÂ£o prÃƒÂ³pria
+  // UsuÃ¡rio comum sÃ³ pode usar integraÃ§Ã£o prÃ³pria
   return integracoesPorCliente?.[cid]?.[mp] || null;
 }
 
@@ -6161,7 +4753,7 @@ function auth(req, res, next) {
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
   if (!token) {
-    return res.status(401).json({ erro: "Token invÃƒÂ¡lido" });
+    return res.status(401).json({ erro: "Token invÃ¡lido" });
   }
 
   try {
@@ -6175,7 +4767,7 @@ function auth(req, res, next) {
     if (!usuarioExiste || usuarioExiste.ativo === false) {
       return res.status(401).json({
         ok: false,
-        erro: "UsuÃƒÂ¡rio nÃƒÂ£o existe ou foi desativado"
+        erro: "UsuÃ¡rio nÃ£o existe ou foi desativado"
       });
     }
 
@@ -6184,7 +4776,7 @@ function auth(req, res, next) {
 
     next();
   } catch {
-    return res.status(401).json({ erro: "NÃƒÂ£o autorizado" });
+    return res.status(401).json({ erro: "NÃ£o autorizado" });
   }
 }
 
@@ -6234,7 +4826,7 @@ app.post("/fila/inteligencia/abastecer", async (req, res) => {
       req.usuario?.papel === "admin_master"
         ? clienteSolicitado
         : clienteToken;
-    const simulado = req.body?.simulado === true;
+    const simulado = req.body?.simulado !== false;
 
     return res.json(await abastecerFilaSeNecessario(clienteId, { simulado }));
   } catch (e) {
@@ -6370,7 +4962,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
     return {
       ok: false,
       statusHttp: 404,
-      erro: "Oferta nÃ£o encontrada"
+      erro: "Oferta não encontrada"
     };
   }
 
@@ -6418,7 +5010,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
 
   oferta.status = "pendente";
   oferta.statusDetalhe = estavaExpirada
-    ? "Envio manual solicitado apÃ³s expiraÃ§Ã£o"
+    ? "Envio manual solicitado após expiração"
     : "Envio manual solicitado";
   oferta.erro = "";
   oferta.erroEm = "";
@@ -6626,18 +5218,6 @@ function calcularEconomiaRadar(oferta = {}) {
   };
 }
 
-function precoChaveRadar(oferta = {}) {
-  const numero = numeroRadar(
-    oferta.precoAtual ||
-    oferta.preco ||
-    oferta.precoFinal ||
-    oferta.valor ||
-    ""
-  );
-
-  return numero > 0 ? numero.toFixed(2) : "";
-}
-
 function chavesRemocaoRadar(oferta = {}) {
   const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
   return [
@@ -6664,7 +5244,7 @@ function chavesTratamentoRadar(oferta = {}) {
     oferta.origemGrupoNome ||
     ""
   );
-  const preco = precoChaveRadar(oferta);
+  const cupom = normalizarTexto(oferta.cupom || "");
   const links = [
     oferta.linkOriginal,
     oferta.linkResolvidoRadar,
@@ -6679,8 +5259,9 @@ function chavesTratamentoRadar(oferta = {}) {
   return [
     oferta.id ? `id:${oferta.id}` : "",
     ...links.map(link => `link:${link}`),
-    marketplace && titulo && preco ? `produto:${marketplace}|${titulo}|${preco}` : "",
-    marketplace && titulo && grupo && preco ? `produto_grupo:${marketplace}|${titulo}|${grupo}|${preco}` : ""
+    marketplace && titulo ? `produto:${marketplace}|${titulo}` : "",
+    marketplace && titulo && grupo ? `produto_grupo:${marketplace}|${titulo}|${grupo}` : "",
+    marketplace && titulo && grupo && cupom ? `produto_grupo_cupom:${marketplace}|${titulo}|${grupo}|${cupom}` : ""
   ].filter(Boolean);
 }
 
@@ -6958,7 +5539,7 @@ function registrarPreviewRadar(clienteId = "admin", evento = {}) {
     const eventoPreview = montarEventoPreviewRadar(evento);
     eventos.push(eventoPreview);
     salvarPreviewRadar(clienteId, eventos);
-    logDebug("[RADAR-DECISAO] preview registrado", {
+    console.log("[RADAR-DECISAO] preview registrado", {
       clienteId,
       status: eventoPreview.status,
       motivo: eventoPreview.motivo || "",
@@ -6969,7 +5550,7 @@ function registrarPreviewRadar(clienteId = "admin", evento = {}) {
     });
   } catch (e) {
     console.log("[RADAR] Falha ao registrar preview:", e.message);
-    logDebug("[RADAR-DECISAO] preview falhou", {
+    console.log("[RADAR-DECISAO] preview falhou", {
       clienteId,
       erro: e.message
     });
@@ -7032,7 +5613,7 @@ function registrarHistoricoRadar(clienteId = "admin", evento = {}) {
     });
     salvarHistoricoRadar(clienteId, eventos);
     registrarPreviewRadar(clienteId, eventoPreview);
-    logDebug("[RADAR-DECISAO] historico registrado", {
+    console.log("[RADAR-DECISAO] historico registrado", {
       clienteId,
       status: eventoPreview.status,
       motivo: eventoPreview.motivo || "",
@@ -7043,7 +5624,7 @@ function registrarHistoricoRadar(clienteId = "admin", evento = {}) {
     });
   } catch (e) {
     console.log("[RADAR] Falha ao registrar historico:", e.message);
-    logDebug("[RADAR-DECISAO] historico falhou", {
+    console.log("[RADAR-DECISAO] historico falhou", {
       clienteId,
       erro: e.message
     });
@@ -7307,27 +5888,12 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
 }
 
 function listarSessoesWhatsappCliente(clienteId = "admin") {
-  return Object.values(sessoesMeta || {})
-    .filter(sessao => {
-      const id = String(sessao.id || "");
-
-      return (
-        id.startsWith(clienteId + "_") ||
-        id === clienteId ||
-        (clienteId === "admin" && id.startsWith("admin_"))
-      );
-    })
+  return Object.values(lerSessoesClienteMap(clienteId))
+    .filter(sessao => sessaoPertenceCliente(sessao?.id, clienteId))
     .map(sessao => {
       const id = sessao.id;
       const totalGrupos = gruposPorSessao[id]?.length || 0;
-
-      const nomeAmigavel =
-        sessao.nome ||
-        sessao.nomeSessao ||
-        sessao.apelido ||
-        sessao.titulo ||
-        sessao.label ||
-        id;
+      const nomeAmigavel = sessao.nome || sessao.nomeSessao || sessao.apelido || sessao.titulo || sessao.label || id;
 
       return {
         ...sessao,
@@ -7337,8 +5903,8 @@ function listarSessoesWhatsappCliente(clienteId = "admin") {
         nomeAmigavel,
         nomeExibicao: nomeAmigavel,
         idTecnico: id,
-        status: statusSessao[id] || "offline",
-        conectado: statusSessao[id] === "open" || statusSessao[id] === "aberto",
+        status: statusSessao[id] || sessao.status || "offline",
+        conectado: statusSessao[id] === "open" || statusSessao[id] === "aberto" || sessao.status === "open",
         qrDisponivel: !!qrCodes[id],
         grupos: totalGrupos,
         totalGrupos,
@@ -7434,8 +6000,7 @@ function obterGrupoWhatsappIdTecnicoRadar(grupo = {}) {
 }
 
 function normalizarGrupoWhatsappRadar(grupo = {}, sessaoIdPadrao = "") {
-  const sessaoIdResolvida = resolverSessaoWhatsappRadarCliente("admin", sessaoIdPadrao) || textoRadarId(sessaoIdPadrao);
-  const idTecnico = obterGrupoWhatsappIdTecnicoRadar(grupo) || resolverGrupoWhatsappRadarPorSessao(sessaoIdResolvida, grupo);
+  const idTecnico = obterGrupoWhatsappIdTecnicoRadar(grupo);
 
   if (!idTecnico) return null;
 
@@ -7445,7 +6010,7 @@ function normalizarGrupoWhatsappRadar(grupo = {}, sessaoIdPadrao = "") {
       grupoId: idTecnico,
       remoteJid: idTecnico,
       nome: idTecnico,
-      sessaoId: sessaoIdResolvida || sessaoIdPadrao,
+      sessaoId: sessaoIdPadrao,
       ativo: true,
       tipo: "whatsapp"
     };
@@ -7461,7 +6026,7 @@ function normalizarGrupoWhatsappRadar(grupo = {}, sessaoIdPadrao = "") {
     grupo.name ||
     idTecnico
   );
-  const sessaoId = resolverSessaoWhatsappRadarCliente("admin", grupo.sessaoId || grupo.origemSessaoId || grupo.sessionId || sessaoIdResolvida || sessaoIdPadrao) || textoRadarId(grupo.sessaoId || grupo.origemSessaoId || grupo.sessionId || sessaoIdResolvida || sessaoIdPadrao);
+  const sessaoId = textoRadarId(grupo.sessaoId || grupo.origemSessaoId || grupo.sessionId || sessaoIdPadrao);
 
   return {
     ...grupo,
@@ -7611,17 +6176,22 @@ function salvarRadarConfigCliente(clienteId = "admin", dados = {}) {
     ? atual.sessoesWhatsappMonitoradas
     : normalizarSessoesWhatsappMonitoradasRadar(atual);
 
-if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
-  sessoesWhatsappMonitoradas = normalizarSessoesWhatsappMonitoradasRadar({
-    sessoesWhatsappMonitoradas: dados.sessoesWhatsappMonitoradas
-  });
+  if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
+    const entrada = normalizarSessoesWhatsappMonitoradasRadar({
+      sessoesWhatsappMonitoradas: dados.sessoesWhatsappMonitoradas
+    });
+    const sessoesEntrada = new Set((dados.sessoesWhatsappMonitoradas || [])
+      .map(sessao => textoRadarId(sessao?.sessaoId || sessao?.id || sessao?.sessionId || ""))
+      .filter(Boolean));
+    const vazias = [...sessoesEntrada]
+      .filter(sessaoId => !entrada.some(sessao => sessao.sessaoId === sessaoId))
+      .map(sessaoId => ({ sessaoId, gruposMonitorados: [] }));
 
-  logDebug("ðŸ§ª RADAR NORMALIZACAO REPLACE", {
-    recebido: dados.sessoesWhatsappMonitoradas,
-    salvo: sessoesWhatsappMonitoradas
-  });
-}
-
+    sessoesWhatsappMonitoradas = mesclarSessoesWhatsappMonitoradasRadar(
+      sessoesWhatsappMonitoradas,
+      [...entrada, ...vazias]
+    );
+  }
 
   if (Array.isArray(dados.gruposMonitorados)) {
     const sessaoDestino =
@@ -7680,14 +6250,7 @@ if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
     atualizadoEm: new Date().toISOString()
   };
 
-  
-logDebug("ðŸ§ª RADAR PAYLOAD FINAL", {
-  sessoesWhatsappMonitoradas: payload.sessoesWhatsappMonitoradas,
-  gruposMonitorados: payload.gruposMonitorados
-});
-
-
-writeClienteJson(clienteId, "radar-config.json", payload);
+  writeClienteJson(clienteId, "radar-config.json", payload);
 
   return payload;
 }
@@ -7696,123 +6259,13 @@ function textoRadarId(valor = "") {
   return String(valor || "").trim();
 }
 
-function resolverSessaoWhatsappRadarCliente(clienteId = "admin", sessaoEntrada = "") {
-  const entrada = textoRadarId(sessaoEntrada);
-  if (!entrada) return "";
-
-  const normalizada = normalizarSessaoId(clienteId, entrada);
-  const candidatosDiretos = [entrada, normalizada, `${clienteId}_${entrada}`]
-    .map(textoRadarId)
-    .filter(Boolean);
-
-  for (const candidato of candidatosDiretos) {
-    if (sessoesMeta[candidato] || statusSessao[candidato] || sessoes[candidato] || gruposPorSessao[candidato]?.length) {
-      return candidato;
-    }
-  }
-
-  const chaveEntrada = chaveRadarId(entrada);
-  const encontrada = Object.values(sessoesMeta || {}).find(sessao => {
-    const valores = [
-      sessao?.id,
-      sessao?.sessaoId,
-      sessao?.nome,
-      sessao?.nomeSessao,
-      sessao?.apelido,
-      sessao?.titulo,
-      sessao?.label,
-      sessao?.nomeExibicao,
-      sessao?.nomeAmigavel
-    ];
-
-    return valores.some(valor => chaveRadarId(valor || "") === chaveEntrada);
-  });
-
-  return textoRadarId(encontrada?.id || encontrada?.sessaoId || "") || "";
-}
-
-function idsSessaoWhatsappRadar(clienteId = "admin", sessaoEntrada = "") {
-  const entrada = textoRadarId(sessaoEntrada);
-  const ids = new Set();
-  const adicionar = valor => {
-    const chave = chaveRadarId(valor || "");
-    if (chave) ids.add(chave);
-  };
-
-  adicionar(entrada);
-  adicionar(normalizarSessaoId(clienteId, entrada));
-  adicionar(resolverSessaoWhatsappRadarCliente(clienteId, entrada));
-
-  if (entrada.startsWith(`${clienteId}_`)) {
-    const semCliente = entrada.slice(`${clienteId}_`.length);
-    adicionar(semCliente);
-    adicionar(normalizarSessaoId(clienteId, semCliente));
-  }
-
-  return ids;
-}
-
-function nomesWhatsappCompativeisRadar(a = "", b = "") {
-  const nomeA = chaveRadarId(a || "");
-  const nomeB = chaveRadarId(b || "");
-
-  if (!nomeA || !nomeB) return false;
-  if (nomeA === nomeB) return true;
-  if (nomeA.length < 8 || nomeB.length < 8) return false;
-
-  return nomeA.includes(nomeB) || nomeB.includes(nomeA);
-}
-function obterGruposReaisSessaoRadar(sessaoId = "") {
-  const id = textoRadarId(sessaoId);
-  const grupos = gruposPorSessao[id] || [];
-
-  return grupos.map(grupo => ({
-    id: textoRadarId(grupo.id || grupo.grupoId || grupo.value || grupo.jid || grupo.remoteJid || ""),
-    grupoId: textoRadarId(grupo.grupoId || grupo.id || grupo.value || grupo.jid || grupo.remoteJid || ""),
-    remoteJid: textoRadarId(grupo.remoteJid || grupo.grupoId || grupo.id || grupo.value || grupo.jid || ""),
-    nome: textoRadarId(grupo.nome || grupo.name || grupo.subject || grupo.titulo || grupo.label || "")
-  }));
-}
-
-function resolverGrupoWhatsappRadarPorSessao(sessaoId = "", grupo = {}) {
-  const idTecnico = obterGrupoWhatsappIdTecnicoRadar(grupo);
-  if (idTecnico) return idTecnico;
-
-  const nomeGrupo = textoRadarId(
-    typeof grupo === "string" || typeof grupo === "number"
-      ? grupo
-      : grupo?.nome || grupo?.titulo || grupo?.label || grupo?.subject || grupo?.name || grupo?.id || grupo?.grupoId || ""
-  );
-  const chaveGrupo = chaveRadarId(nomeGrupo);
-  if (!chaveGrupo) return "";
-
-  const gruposReais = obterGruposReaisSessaoRadar(sessaoId);
-  const encontrado = gruposReais.find(item =>
-    [item.nome, item.id, item.grupoId, item.remoteJid]
-      .some(valor => chaveRadarId(valor || "") === chaveGrupo)
-  );
-
-  return textoRadarId(encontrado?.remoteJid || encontrado?.grupoId || encontrado?.id || "");
-}
-
-function registrarRadarListenerRecebido(evento = {}) {
-  radarListenerRecentes.push({
-    capturadoEm: new Date().toISOString(),
-    sessaoId: textoRadarId(evento.sessaoId || ""),
-    remoteJid: textoRadarId(evento.remoteJid || evento.grupoId || ""),
-    grupoNome: textoRadarId(evento.grupoNome || ""),
-    tamanhoTexto: Number(evento.tamanhoTexto || 0) || 0
-  });
-
-  if (radarListenerRecentes.length > 30) radarListenerRecentes.shift();
-}
 function chaveRadarId(valor = "") {
   return normalizarTexto(textoRadarId(valor));
 }
 
 function chaveGrupoWhatsappTecnicaRadar(valor = "") {
-  const id = textoRadarId(valor);
-  return id.includes("@g.us") ? id : "";
+  const chave = chaveRadarId(valor);
+  return chave.includes("@g.us") ? chave : "";
 }
 
 function extrairIdsMonitoradosRadar(lista = [], campos = []) {
@@ -7858,37 +6311,6 @@ function extrairIdsWhatsappMonitoradosRadar(lista = []) {
   return ids;
 }
 
-function grupoWhatsappMonitoradoNaSessaoRadar(sessao = {}, grupoId = "", grupoNome = "") {
-  const grupos = Array.isArray(sessao?.gruposMonitorados) ? sessao.gruposMonitorados : [];
-  const ids = extrairIdsWhatsappMonitoradosRadar(grupos);
-  const id = chaveGrupoWhatsappTecnicaRadar(grupoId);
-
-  if (id && ids.has(id)) {
-    return { ok: true, tipo: "id" };
-  }
-
-  const nome = chaveRadarId(grupoNome || "");
-  if (!nome) return { ok: false, tipo: "" };
-
-  const nomes = new Set();
-  for (const grupo of grupos) {
-    if (!grupo || typeof grupo !== "object") continue;
-    for (const campo of ["nome", "titulo", "label", "subject", "name", "grupoNome"]) {
-      const chave = chaveRadarId(grupo[campo] || "");
-      if (chave) nomes.add(chave);
-    }
-  }
-
-  if (nomes.has(nome)) return { ok: true, tipo: "nome" };
-
-  for (const nomeMonitorado of nomes) {
-    if (nomesWhatsappCompativeisRadar(nomeMonitorado, grupoNome)) {
-      return { ok: true, tipo: "nome_normalizado" };
-    }
-  }
-
-  return { ok: false, tipo: "" };
-}
 function extrairIdsTelegramMonitoradosRadar(lista = []) {
   const ids = new Set();
 
@@ -7998,21 +6420,21 @@ function radarPodeCapturarAgora(configRadar = {}, opcoes = {}) {
 function motivoRadarDebug(motivo = "") {
   const chave = String(motivo || "").trim();
   const mapa = {
-    integracao_marketplace_ausente: "sem integraÃ§Ã£o",
-    sem_destino_compativel: "sem destino compatÃ­vel",
+    integracao_marketplace_ausente: "sem integração",
+    sem_destino_compativel: "sem destino compatível",
     oferta_duplicada: "duplicada",
-    oferta_repetida_na_memoria: "memÃ³ria",
+    oferta_repetida_na_memoria: "memória",
     limite_radar_pendente_total: "limite Radar",
     limite_radar_com_cupom: "limite Radar",
     limite_radar_sem_cupom: "limite Radar",
     limite_diario_radar_atingido: "limite Radar",
     marketplace_nao_permitido_no_plano: "marketplace bloqueado",
     marketplace_desativado_no_cliente: "marketplace bloqueado",
-    fora_do_horario_monitoramento: "horÃ¡rio fora da janela",
+    fora_do_horario_monitoramento: "horário fora da janela",
     categoria_nao_permitida_radar: "categoria bloqueada",
-    link_afiliado_nao_gerado: "link afiliado invÃ¡lido",
-    link_afiliado_igual_original: "link afiliado invÃ¡lido",
-    link_original_nao_resolvido: "link original nÃ£o resolvido",
+    link_afiliado_nao_gerado: "link afiliado inválido",
+    link_afiliado_igual_original: "link afiliado inválido",
+    link_original_nao_resolvido: "link original não resolvido",
     link_produto_ml_nao_encontrado: "link_produto_ml_nao_encontrado",
     importacao_incompleta: "importacao_incompleta",
     oferta_sem_cupom_ou_desconto_relevante: "oferta sem cupom ou desconto relevante"
@@ -8110,7 +6532,6 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
   const grupoId = chaveRadarId(origem.origemGrupoId);
   const grupoNome = chaveRadarId(origem.origemGrupoNome);
   const sessaoId = chaveRadarId(origem.origemSessaoId);
-  const sessoesEntradaIds = idsSessaoWhatsappRadar("admin", origem.origemSessaoId);
 
   if (!["whatsapp", "telegram"].includes(origem.origemTipo)) {
     return {
@@ -8144,35 +6565,28 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
     ? configRadar.sessoesWhatsappMonitoradas
     : normalizarSessoesWhatsappMonitoradasRadar(configRadar);
 
-  const sessaoMonitorada = sessoesWhatsappMonitoradas.find(sessao => {
-    const idsMonitorados = idsSessaoWhatsappRadar("admin", sessao?.sessaoId || "");
-    return [...idsMonitorados].some(id => sessoesEntradaIds.has(id)) || idsMonitorados.has(sessaoId);
-  });
+  const sessaoMonitorada = sessoesWhatsappMonitoradas.find(sessao =>
+    chaveRadarId(sessao?.sessaoId || "") === sessaoId
+  );
   let grupoMonitorado = false;
   let totalGruposMonitoradosSessao = 0;
   let sessaoMonitoradaPorGrupo = null;
   let totalGruposMonitoradosGlobal = 0;
 
-  let tipoMatchGrupo = "";
-
   if (sessaoMonitorada) {
     const gruposIds = extrairIdsWhatsappMonitoradosRadar(sessaoMonitorada.gruposMonitorados);
     totalGruposMonitoradosSessao = gruposIds.size;
-    const match = grupoWhatsappMonitoradoNaSessaoRadar(sessaoMonitorada, origem.origemGrupoId, origem.origemGrupoNome);
-    grupoMonitorado = match.ok;
-    tipoMatchGrupo = match.tipo;
+    grupoMonitorado = Boolean(grupoId && gruposIds.has(grupoId));
   }
 
-  if (!grupoMonitorado && (grupoId || grupoNome)) {
+  if (!grupoMonitorado && grupoId) {
     for (const sessao of sessoesWhatsappMonitoradas) {
       const gruposIds = extrairIdsWhatsappMonitoradosRadar(sessao?.gruposMonitorados);
       totalGruposMonitoradosGlobal += gruposIds.size;
-      const match = grupoWhatsappMonitoradoNaSessaoRadar(sessao, origem.origemGrupoId, origem.origemGrupoNome);
 
-      if (match.ok) {
+      if (gruposIds.has(grupoId)) {
         sessaoMonitoradaPorGrupo = sessao;
         grupoMonitorado = true;
-        tipoMatchGrupo = match.tipo;
         break;
       }
     }
@@ -8180,8 +6594,8 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
 
   const ok = Boolean(grupoMonitorado && (sessaoMonitorada || sessaoMonitoradaPorGrupo));
   const validacao = ok && !sessaoMonitorada && sessaoMonitoradaPorGrupo
-    ? `grupo_monitorado_em_outra_sessao_por_${tipoMatchGrupo || "id"}`
-    : `sessao+grupo_por_${tipoMatchGrupo || "id"}`;
+    ? "remoteJid_monitorado_em_outra_sessao"
+    : "sessaoId+remoteJid";
 
   return {
     ok,
@@ -8189,13 +6603,11 @@ function origemOfertaEstaMonitoradaRadar(oferta = {}, configRadar = {}) {
     origem,
     diagnostico: {
       sessaoEncontrada: Boolean(sessaoMonitorada),
-      sessoesEntradaIds: [...sessoesEntradaIds],
       sessaoEncontradaPorGrupo: Boolean(sessaoMonitoradaPorGrupo),
       sessaoOrigemId: origem.origemSessaoId,
       sessaoMonitoradaId: sessaoMonitorada?.sessaoId || sessaoMonitoradaPorGrupo?.sessaoId || "",
       totalGruposMonitoradosSessao,
       totalGruposMonitoradosGlobal,
-      tipoMatchGrupo,
       validacao
     }
   };
@@ -8353,13 +6765,6 @@ function categoriaRadarReclassificada(oferta = {}) {
 
 function chaveDuplicidadeRadar(oferta = {}) {
   const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
-  const marketplace = normalizarMarketplaceRadar(
-    oferta.marketplace ||
-    oferta.mercado ||
-    oferta.marketplaceOriginalRadar ||
-    ""
-  );
-  const preco = precoChaveRadar(oferta);
   const links = [
     oferta.linkOriginal,
     oferta.linkAfiliado,
@@ -8371,8 +6776,7 @@ function chaveDuplicidadeRadar(oferta = {}) {
 
   return [
     ...links.map(link => `link:${link}`),
-    marketplace && titulo && preco ? `produto:${marketplace}|${titulo}|${preco}` : "",
-    !preco && marketplace && titulo ? `produto:${marketplace}|${titulo}` : ""
+    titulo ? `titulo:${titulo}` : ""
   ].filter(Boolean);
 }
 
@@ -8402,15 +6806,13 @@ function validarSessaoRadarCliente(clienteId = "admin", sessaoWhatsappId = "") {
   }
 
   const sessaoNormalizada = normalizarSessaoId(clienteId, sessaoInformada);
-  const sessaoResolvida = resolverSessaoWhatsappRadarCliente(clienteId, sessaoInformada);
   const existe =
     sessoesMeta[sessaoInformada] ||
     sessoesMeta[sessaoNormalizada] ||
     statusSessao[sessaoInformada] ||
     statusSessao[sessaoNormalizada] ||
     sessoes[sessaoInformada] ||
-    sessoes[sessaoNormalizada] ||
-    (sessaoResolvida && (sessoesMeta[sessaoResolvida] || statusSessao[sessaoResolvida] || sessoes[sessaoResolvida] || gruposPorSessao[sessaoResolvida]?.length));
+    sessoes[sessaoNormalizada];
 
   if (!existe) {
     return { ok: false, motivo: "sessao_whatsapp_nao_encontrada" };
@@ -8418,9 +6820,9 @@ function validarSessaoRadarCliente(clienteId = "admin", sessaoWhatsappId = "") {
 
   return {
     ok: true,
-    sessaoWhatsappId: sessaoResolvida || (sessoesMeta[sessaoInformada] || statusSessao[sessaoInformada] || sessoes[sessaoInformada]
+    sessaoWhatsappId: sessoesMeta[sessaoInformada] || statusSessao[sessaoInformada] || sessoes[sessaoInformada]
       ? sessaoInformada
-      : sessaoNormalizada)
+      : sessaoNormalizada
   };
 }
 
@@ -8443,13 +6845,26 @@ function destinosClienteNormalizados(clienteId = "admin") {
 
 function obterClienteIdAdminMaster() {
   // Radar e uma ferramenta interna do admin_master, mas a configuracao operacional
-  // deve ser unica e canonica no cliente "admin". Nao usar configs legadas de
-  // outros ids, para nao monitorar grupos antigos ou nao selecionados.
+  // deve ser unica e canonica no cliente "admin". Isso evita salvar em admin e
+  // o listener ler outro id admin_master encontrado em usuarios.json.
   return "admin";
 }
 
+function obterClienteIdAdminMasterLegado() {
+  return usuarios.find(u => u?.ativo !== false && u.papel === "admin_master" && String(u.id) !== "admin")?.id || "";
+}
+
 function carregarRadarConfigAdminMaster() {
-  return carregarRadarConfigCliente(obterClienteIdAdminMaster());
+  const configAdmin = carregarRadarConfigCliente(obterClienteIdAdminMaster());
+  if (temFontesMonitoradasRadar(configAdmin)) return configAdmin;
+
+  const legadoId = obterClienteIdAdminMasterLegado();
+  if (legadoId) {
+    const configLegado = carregarRadarConfigCliente(legadoId);
+    if (temFontesMonitoradasRadar(configLegado)) return configLegado;
+  }
+
+  return configAdmin;
 }
 
 function getUsuarioClienteRadar(clienteId = "admin") {
@@ -8499,43 +6914,13 @@ function listarClientesElegiveisRadar() {
 }
 
 function extrairMensagemInternaRadar(conteudo = {}) {
-  let atual = conteudo || {};
-
-  for (let i = 0; i < 8; i++) {
-    if (atual?.ephemeralMessage?.message) {
-      atual = atual.ephemeralMessage.message;
-      continue;
-    }
-
-    if (atual?.viewOnceMessage?.message) {
-      atual = atual.viewOnceMessage.message;
-      continue;
-    }
-
-    if (atual?.viewOnceMessageV2?.message) {
-      atual = atual.viewOnceMessageV2.message;
-      continue;
-    }
-
-    if (atual?.documentWithCaptionMessage?.message) {
-      atual = atual.documentWithCaptionMessage.message;
-      continue;
-    }
-
-    if (atual?.editedMessage?.message) {
-      atual = atual.editedMessage.message;
-      continue;
-    }
-
-    if (atual?.protocolMessage?.editedMessage) {
-      atual = atual.protocolMessage.editedMessage;
-      continue;
-    }
-
-    break;
-  }
-
-  return atual || {};
+  return (
+    conteudo.ephemeralMessage?.message ||
+    conteudo.viewOnceMessage?.message ||
+    conteudo.viewOnceMessageV2?.message ||
+    conteudo.documentWithCaptionMessage?.message ||
+    conteudo
+  );
 }
 
 function extrairTextoMensagemRadar(mensagem = {}) {
@@ -8549,23 +6934,12 @@ function extrairTextoMensagemRadar(mensagem = {}) {
     conteudo.documentMessage?.caption,
     conteudo.buttonsResponseMessage?.selectedDisplayText,
     conteudo.listResponseMessage?.title,
-    conteudo.templateButtonReplyMessage?.selectedDisplayText,
-    conteudo.buttonsMessage?.contentText,
-    conteudo.templateMessage?.hydratedTemplate?.hydratedContentText,
-    conteudo.templateMessage?.hydratedFourRowTemplate?.hydratedContentText,
-    conteudo.interactiveResponseMessage?.body?.text,
-    conteudo.protocolMessage?.editedMessage?.conversation,
-    conteudo.protocolMessage?.editedMessage?.extendedTextMessage?.text,
-    conteudo.messageContextInfo?.quotedMessage?.conversation,
-    conteudo.messageContextInfo?.quotedMessage?.extendedTextMessage?.text,
-    conteudo.contextInfo?.quotedMessage?.conversation,
-    conteudo.contextInfo?.quotedMessage?.extendedTextMessage?.text
+    conteudo.templateButtonReplyMessage?.selectedDisplayText
   ]
     .filter(Boolean)
     .join("\n")
     .trim();
 }
-
 
 function limparLinkRadar(link = "") {
   return radarCupomMensagem.limparLinkRadar(link);
@@ -9023,21 +7397,21 @@ async function extrairProdutoMercadoLivreIntermediarioRadar(url = "") {
     const produto = extrairProdutoMercadoLivreDeHtmlRadar(resposta.data || "");
 
     if (produto) {
-      console.log("[RADAR] ML produto extraÃ­do", {
+      console.log("[RADAR] ML produto extraído", {
         intermediaria: url,
         produto
       });
       return produto;
     }
   } catch (e) {
-    console.log("[RADAR] ML produto nÃ£o encontrado", {
+    console.log("[RADAR] ML produto não encontrado", {
       intermediaria: url,
       erro: e.message
     });
     return "";
   }
 
-  console.log("[RADAR] ML produto nÃ£o encontrado", {
+  console.log("[RADAR] ML produto não encontrado", {
     intermediaria: url
   });
   return "";
@@ -9061,105 +7435,6 @@ function motivoImportacaoRadarIncompleta(oferta = {}, marketplace = "") {
   return "";
 }
 
-function formatarPrecoRadarTexto(numero = 0) {
-  return Number(numero).toLocaleString("pt-BR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
-}
-
-function numeroPrecoRadarTexto(valor = "") {
-  const texto = String(valor || "")
-    .replace(/\./g, "")
-    .replace(",", ".")
-    .replace(/[^\d.]/g, "");
-  const numero = Number(texto);
-  return Number.isFinite(numero) && numero > 0 ? numero : 0;
-}
-
-function extrairPrecoFallbackTextoRadar(texto = "") {
-  const original = String(texto || "");
-  if (!original.trim()) return { ok: false, motivo: "texto_vazio" };
-
-  if (/r\$\s*[\d.,]+\s*(?:a|ate|atÃ©|-)\s*r?\$?\s*[\d.,]+/i.test(original)) {
-    return { ok: false, motivo: "faixa_preco" };
-  }
-
-  const padraoPor = /(?:\bpor\b|\bsai\s+por\b|\bsaindo\s+por\b|\bvalor\s+final\b|\bpreco\s+final\b)\s*:?\s*r\$\s*([0-9]{1,5}(?:\.[0-9]{3})*(?:,[0-9]{2})?)/gi;
-  const candidatosPor = [...original.matchAll(padraoPor)]
-    .map((match) => numeroPrecoRadarTexto(match[1]))
-    .filter((numero) => numero > 0);
-  const unicosPor = [...new Set(candidatosPor.map((numero) => numero.toFixed(2)))];
-
-  if (unicosPor.length === 1) {
-    return {
-      ok: true,
-      preco: formatarPrecoRadarTexto(Number(unicosPor[0])),
-      origem: "por"
-    };
-  }
-  if (unicosPor.length > 1) return { ok: false, motivo: "multiplos_precos_por" };
-
-  const matches = [...original.matchAll(/r\$\s*([0-9]{1,5}(?:\.[0-9]{3})*(?:,[0-9]{2})?)/gi)];
-  const candidatos = [];
-
-  for (const match of matches) {
-    const inicio = Math.max(0, match.index - 35);
-    const fim = Math.min(original.length, match.index + match[0].length + 35);
-    const contextoPreco = normalizarTexto(original.slice(inicio, fim));
-
-    if (/\b(cupom|off|desconto|cashback|frete)\b/.test(contextoPreco)) continue;
-
-    const numero = numeroPrecoRadarTexto(match[1]);
-    if (numero > 0) candidatos.push(numero.toFixed(2));
-  }
-
-  const unicos = [...new Set(candidatos)];
-  if (unicos.length === 1 && !/\b(de|era|antes)\s+r\$/i.test(original)) {
-    return {
-      ok: true,
-      preco: formatarPrecoRadarTexto(Number(unicos[0])),
-      origem: "preco_unico"
-    };
-  }
-
-  if (matches.length > 0) {
-    return {
-      ok: false,
-      motivo: unicos.length > 1 || candidatos.length !== matches.length ? "ambiguidade" : "preco_nao_confirmado"
-    };
-  }
-
-  return { ok: false, motivo: "sem_preco_texto" };
-}
-
-function aplicarPrecoFallbackTextoRadarMl(oferta = {}, contexto = {}) {
-  const texto = contexto.textoOriginal || contexto.texto || contexto.mensagemOriginalRadar || "";
-  const link = contexto.linkOriginal || contexto.link || "";
-  const resultado = extrairPrecoFallbackTextoRadar(texto);
-
-  if (!resultado.ok) {
-    console.log("ml_preco_fallback_texto_radar_ambiguidade", {
-      motivo: resultado.motivo,
-      link
-    });
-    return oferta;
-  }
-
-  console.log("ml_preco_fallback_texto_radar_usado", {
-    preco: resultado.preco,
-    origem: resultado.origem,
-    link
-  });
-
-  return {
-    ...oferta,
-    preco: oferta.preco || resultado.preco,
-    precoAtual: oferta.precoAtual || resultado.preco,
-    precoOrigem: "texto_radar",
-    avisoPreco: "PreÃ§o extraÃ­do da mensagem do Radar"
-  };
-}
 function percentualDescontoRadar(oferta = {}, radar = {}) {
   const valores = [
     radar.descontoPercentual,
@@ -9219,12 +7494,12 @@ function oportunidadeRadarBoa(oferta = {}, radar = {}, cupomRadar = {}) {
 async function resolverLinkOriginalRadar(url = "") {
   const capturada = limparLinkRadar(url);
 
-  logDebug("[RADAR-LINK] resolver inicio", {
+  console.log("[RADAR-LINK] resolver inicio", {
     capturada
   });
 
   if (!capturada) {
-    logDebug("[RADAR-LINK] resolver falhou", {
+    console.log("[RADAR-LINK] resolver falhou", {
       motivo: "link_original_nao_resolvido",
       capturada
     });
@@ -9259,7 +7534,7 @@ async function resolverLinkOriginalRadar(url = "") {
       ? limparUrlProdutoRadar(resolvida, marketplaceReal)
       : "";
 
-    logDebug("[RADAR-LINK] redirecionamento resolvido", {
+    console.log("[RADAR-LINK] redirecionamento resolvido", {
       capturada,
       resolvida,
       marketplaceReal,
@@ -9273,7 +7548,7 @@ async function resolverLinkOriginalRadar(url = "") {
       if (produtoParametro?.url) {
         marketplaceReal = produtoParametro.marketplace || marketplaceReal;
         linkOriginalLimpo = produtoParametro.url;
-        logDebug("[RADAR-LINK] produto extraido de parametro intermediario", {
+        console.log("[RADAR-LINK] produto extraido de parametro intermediario", {
           capturada,
           resolvida,
           produto: linkOriginalLimpo,
@@ -9304,7 +7579,7 @@ async function resolverLinkOriginalRadar(url = "") {
       }
 
       if (linkOriginalLimpo && !isUrlIntermediariaRadar(linkOriginalLimpo, marketplaceReal)) {
-        logDebug("[RADAR-LINK] produto extraido de intermediario", {
+        console.log("[RADAR-LINK] produto extraido de intermediario", {
           capturada,
           resolvida,
           urlFinal: pagina.urlFinal || "",
@@ -9315,7 +7590,7 @@ async function resolverLinkOriginalRadar(url = "") {
         const motivoIntermediario = pagina.ok
           ? "link_intermediario_sem_produto"
           : "redirect_bloqueado";
-        logDebug("[RADAR-LINK] resolver falhou", {
+        console.log("[RADAR-LINK] resolver falhou", {
           motivo: motivoIntermediario,
           capturada,
           resolvida,
@@ -9341,7 +7616,7 @@ async function resolverLinkOriginalRadar(url = "") {
       const motivoFalha = !marketplaceReal
         ? "marketplace_nao_identificado"
         : "link_original_nao_resolvido";
-      logDebug("[RADAR-LINK] resolver falhou", {
+      console.log("[RADAR-LINK] resolver falhou", {
         motivo: motivoFalha,
         capturada,
         resolvida: resolvida || "",
@@ -9358,7 +7633,7 @@ async function resolverLinkOriginalRadar(url = "") {
       };
     }
 
-    logDebug("[RADAR-LINK] resolver sucesso", {
+    console.log("[RADAR-LINK] resolver sucesso", {
       capturada,
       resolvida,
       marketplaceReal,
@@ -9374,7 +7649,7 @@ async function resolverLinkOriginalRadar(url = "") {
       tipoLinkRadar: "produto"
     };
   } catch (e) {
-    logDebug("[RADAR-LINK] resolver erro", {
+    console.log("[RADAR-LINK] resolver erro", {
       capturada,
       erro: e.message
     });
@@ -9475,17 +7750,7 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
       };
     }
 
-    let produtoImportadoRadar = resultado.body || {};
-    let motivoIncompleta = motivoImportacaoRadarIncompleta(produtoImportadoRadar, marketplaceDetectado);
-
-    if (marketplaceDetectado === "mercadolivre" && motivoIncompleta === "importacao_sem_preco") {
-      produtoImportadoRadar = aplicarPrecoFallbackTextoRadarMl(produtoImportadoRadar, {
-        textoOriginal: contexto.textoOriginal || contexto.texto || "",
-        linkOriginal: linkOriginalLimpo
-      });
-      motivoIncompleta = motivoImportacaoRadarIncompleta(produtoImportadoRadar, marketplaceDetectado);
-    }
-
+    const motivoIncompleta = motivoImportacaoRadarIncompleta(resultado.body || {}, marketplaceDetectado);
     if (motivoIncompleta) {
       return {
         ok: false,
@@ -9495,8 +7760,8 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
       };
     }
     const produtoEnriquecido = await enriquecerBeneficioRadarOferta({
-      ...produtoImportadoRadar,
-      marketplace: produtoImportadoRadar?.marketplace || marketplaceDetectado,
+      ...(resultado.body || {}),
+      marketplace: resultado.body?.marketplace || marketplaceDetectado,
       linkOriginal: linkOriginalLimpo
     }, {
       origem: "radar",
@@ -9564,8 +7829,7 @@ async function adicionarRadarCapturadoNaFilaClientes(ofertaBase = {}, opcoes = {
       idOfertaFila: resultado.oferta?.id || "",
       linkAfiliado: resultado.oferta?.linkAfiliado || resultado.oferta?.linkFinal || resultado.oferta?.link || "",
       statusRadar: resultado.oferta?.statusRadar || "",
-      statusFila: resultado.oferta?.status || "",
-      retida: !!resultado.retida
+      statusFila: resultado.oferta?.status || ""
     });
   }
 
@@ -9576,10 +7840,9 @@ function classificarMotivoResumoRadar(motivo = "") {
   const texto = normalizarTexto(motivo);
 
   if (!texto) return "outros";
-  if (texto.includes("semdestinocompativel") || texto.includes("semdestino") || texto.includes("destinocompativel")) return "categoria";
   if (texto.includes("memoria") || texto.includes("repetida_na_memoria")) return "memoria";
   if (texto.includes("duplicada") || texto.includes("repetida")) return "repetida";
-  if (texto.includes("limiteradar") || texto.includes("filacheia") || texto.includes("pendentetotal") || texto.includes("limite_radar") || texto.includes("fila_cheia") || texto.includes("pendente_total")) return "fila";
+  if (texto.includes("limite_radar") || texto.includes("fila_cheia") || texto.includes("pendente_total")) return "fila";
   if (texto.includes("categoria") || texto.includes("destino_compativel") || texto.includes("sem_destino")) return "categoria";
   if (texto.includes("link_original") || texto.includes("intermediario") || texto.includes("marketplace_nao_identificado")) return "link";
   if (texto.includes("importacao")) return "importacao";
@@ -9593,7 +7856,6 @@ function resumirResultadosRadarMensagem(resultados = []) {
     rejeitadasMemoria: 0,
     rejeitadasRepetida: 0,
     rejeitadasCategoria: 0,
-    retidasDestino: 0,
     rejeitadasFila: 0,
     rejeitadasImportacao: 0,
     rejeitadasLink: 0,
@@ -9612,14 +7874,7 @@ function resumirResultadosRadarMensagem(resultados = []) {
           continue;
         }
 
-        const motivoCliente = cliente?.motivo || "";
-        const statusCliente = normalizarTexto(cliente?.statusRadar || cliente?.statusFila || "");
-        if (cliente?.retida || statusCliente === "retida") {
-          resumo.retidasDestino += 1;
-          continue;
-        }
-
-        const bucket = classificarMotivoResumoRadar(motivoCliente);
+        const bucket = classificarMotivoResumoRadar(cliente?.motivo || "");
         if (bucket === "memoria") resumo.rejeitadasMemoria += 1;
         else if (bucket === "repetida") resumo.rejeitadasRepetida += 1;
         else if (bucket === "categoria") resumo.rejeitadasCategoria += 1;
@@ -9645,7 +7900,6 @@ function resumirResultadosRadarMensagem(resultados = []) {
 
   return resumo;
 }
-
 async function processarMensagemRadar({
   origemTipo,
   sessaoId,
@@ -9660,6 +7914,14 @@ async function processarMensagemRadar({
   const grupoIdTexto = textoRadarId(grupoId);
   const grupoNomeTexto = textoRadarId(grupoNome);
   const sessaoIdTexto = textoRadarId(sessaoId || (origemTipoFinal === "telegram" ? "telegram" : ""));
+
+  logOptimus("CAPTURA", "Mensagem recebida", {
+    origemTipo: origemTipoFinal || origemTipo,
+    sessaoId: sessaoIdTexto,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto,
+    tamanhoTexto: String(texto || "").length
+  });
 
   if (!["whatsapp", "telegram"].includes(origemTipoFinal)) {
     logOptimus("CAPTURA", "Rejeitada", {
@@ -9683,58 +7945,7 @@ async function processarMensagemRadar({
     return { ok: false, motivo: "grupo_ou_chat_ausente" };
   }
 
-  const adminMasterId = obterClienteIdAdminMaster();
-  const radarConfig = carregarRadarConfigAdminMaster();
-  const origemBase = {
-    origemTipo: origemTipoFinal,
-    origemGrupoId: grupoIdTexto,
-    origemGrupoNome: grupoNomeTexto,
-    origemSessaoId: sessaoIdTexto,
-    grupoId: grupoIdTexto,
-    grupoNome: grupoNomeTexto,
-    chatId: origemTipoFinal === "telegram" ? grupoIdTexto : "",
-    sessaoId: sessaoIdTexto
-  };
-  const origemMonitorada = origemOfertaEstaMonitoradaRadar(origemBase, radarConfig);
-
-  if (!origemMonitorada.ok) {
-  logRadarBloqueadoMonitoramento({
-    clienteId: adminMasterId,
-    motivo: origemMonitorada.motivo,
-    origemMonitorada,
-    sessaoId: sessaoIdTexto,
-    grupoId: grupoIdTexto,
-    grupoNome: grupoNomeTexto
-  });
-
-  return { ok: false, motivo: origemMonitorada.motivo, ignorada: true };
-}
-
-  logOptimus("CAPTURA", "Mensagem recebida", {
-    origemTipo: origemTipoFinal || origemTipo,
-    sessaoId: sessaoIdTexto,
-    grupoId: grupoIdTexto,
-    grupoNome: grupoNomeTexto,
-    tamanhoTexto: String(texto || "").length
-  });
-
-  logOptimus("CAPTURA", "Grupo monitorado confirmado", {
-    origemTipo: origemTipoFinal,
-    sessaoId: sessaoIdTexto,
-    grupoId: grupoIdTexto,
-    grupoNome: grupoNomeTexto
-  });
-
-const links = extrairLinksRadar(texto);
-
-logDebug("ðŸ§ª RADAR LINKS EXTRAIDOS", {
-  sessaoId: sessaoIdTexto,
-  grupoId: grupoIdTexto,
-  links,
-  total: links.length,
-  texto: String(texto || "").slice(0, 250)
-});
-
+  const links = extrairLinksRadar(texto);
   logOptimus("RADAR", "Links detectados", {
     total: links.length,
     links,
@@ -9772,6 +7983,8 @@ logDebug("ðŸ§ª RADAR LINKS EXTRAIDOS", {
     });
   }
 
+  const adminMasterId = obterClienteIdAdminMaster();
+  const radarConfig = carregarRadarConfigAdminMaster();
   const capturaPermitida = radarPodeCapturarAgora(radarConfig, {
     temBeneficioPrioritario: Boolean(
       beneficiosMensagem.cupom ||
@@ -9792,6 +8005,42 @@ logDebug("ðŸ§ª RADAR LINKS EXTRAIDOS", {
     });
     return capturaPermitida;
   }
+
+  const origemBase = {
+    origemTipo: origemTipoFinal,
+    origemGrupoId: grupoIdTexto,
+    origemGrupoNome: grupoNomeTexto,
+    origemSessaoId: sessaoIdTexto,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto,
+    chatId: origemTipoFinal === "telegram" ? grupoIdTexto : "",
+    sessaoId: sessaoIdTexto
+  };
+  const origemMonitorada = origemOfertaEstaMonitoradaRadar(origemBase, radarConfig);
+
+  if (!origemMonitorada.ok) {
+    logOptimus("CAPTURA", "Grupo nao monitorado", {
+      motivo: origemMonitorada.motivo,
+      origemTipo: origemTipoFinal,
+      sessaoId: sessaoIdTexto,
+      grupoId: grupoIdTexto,
+      grupoNome: grupoNomeTexto,
+      diagnostico: origemMonitorada.diagnostico || {}
+    });
+    logRadarRejeitado(origemMonitorada.motivo, {
+      origemTipo: origemTipoFinal,
+      grupo: grupoNomeTexto || grupoIdTexto
+    });
+    return { ok: false, motivo: origemMonitorada.motivo };
+  }
+
+  logOptimus("CAPTURA", "Grupo monitorado confirmado", {
+    origemTipo: origemTipoFinal,
+    sessaoId: sessaoIdTexto,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto
+  });
+
   const resultados = [];
   const dataCaptura = capturadaEm || new Date().toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo"
@@ -9851,8 +8100,7 @@ logDebug("ðŸ§ª RADAR LINKS EXTRAIDOS", {
       origemTipo: origemTipoFinal,
       sessaoId: sessaoIdTexto,
       grupoId: grupoIdTexto,
-      grupoNome: grupoNomeTexto,
-      textoOriginal: texto
+      grupoNome: grupoNomeTexto
     });
 
     if (!importacao.ok) {
@@ -9961,7 +8209,6 @@ logDebug("ðŸ§ª RADAR LINKS EXTRAIDOS", {
       radarConfigFontes: radarConfig
     });
     const adicionadasLink = clientes.filter(cliente => cliente.adicionada).length;
-    const houveRetidaDestino = clientes.some(cliente => cliente.retida);
     const primeiraRejeicao = clientes.find(cliente => !cliente.adicionada)?.motivo || "";
     const beneficio = beneficioResumoRadar(ofertaRadar);
     const economiaRadar = calcularEconomiaRadar(ofertaRadar);
@@ -9980,7 +8227,7 @@ logDebug("ðŸ§ª RADAR LINKS EXTRAIDOS", {
       }));
     const primeiraFila = clientesAdicionados[0] || {};
 
-    logDebug("[RADAR-DECISAO] distribuicao concluida", {
+    console.log("[RADAR-DECISAO] distribuicao concluida", {
       linkCapturado: importacao.resolucao?.urlCapturada || link,
       titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
       marketplace: ofertaRadar.marketplace || "",
@@ -10008,7 +8255,7 @@ logDebug("ðŸ§ª RADAR LINKS EXTRAIDOS", {
       marketplaceDetectado: importacao.resolucao?.marketplaceReal || ofertaRadar.marketplace || "",
       tipoLink: importacao.resolucao?.tipoLinkRadar === "intermediario" ? "intermediario" : "produto",
       tipoLinkRadar: importacao.resolucao?.tipoLinkRadar || "produto",
-      statusCaptura: adicionadasLink > 0 ? "fila" : (houveRetidaDestino || primeiraRejeicao?.startsWith("retida") ? "retida" : "erro"),
+      statusCaptura: adicionadasLink > 0 ? "fila" : (primeiraRejeicao?.startsWith("retida") ? "retida" : "erro"),
       motivoFinal: adicionadasLink > 0 ? "enviado_para_fila" : primeiraRejeicao || "nenhum_cliente_adicionado",
       motivoTecnico: adicionadasLink > 0 ? "" : primeiraRejeicao || "nenhum_cliente_adicionado",
       titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
@@ -10026,8 +8273,8 @@ logDebug("ðŸ§ª RADAR LINKS EXTRAIDOS", {
       linkResgateCupom: ofertaRadar.linkResgateCupom || "",
       beneficioExtra: ofertaRadar.beneficioExtra || beneficio,
       beneficio,
-      status: adicionadasLink > 0 ? "fila" : (houveRetidaDestino ? "retida" : "ignorada"),
-      statusRadar: adicionadasLink > 0 ? "fila" : (houveRetidaDestino ? "retida" : "ignorada"),
+      status: adicionadasLink > 0 ? "fila" : "ignorada",
+      statusRadar: adicionadasLink > 0 ? "fila" : "ignorada",
       motivo: adicionadasLink > 0 ? "" : primeiraRejeicao || "nenhum_cliente_adicionado",
       linksDetectados: 1,
       adicionadas: adicionadasLink,
@@ -10077,12 +8324,6 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
   const conteudo = extrairMensagemInternaRadar(mensagem?.message || {});
   const tiposMensagem = Object.keys(conteudo || {});
 
-  registrarRadarListenerRecebido({
-    sessaoId,
-    remoteJid,
-    grupoNome: obterNomeGrupoRadar(sessaoId, remoteJid),
-    tamanhoTexto: textoExtraido.length
-  });
   logOptimus("CAPTURA", "Upsert WhatsApp", {
     sessaoId,
     remoteJid,
@@ -10102,13 +8343,7 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
     return { ok: false, motivo: "mensagem_nao_monitoravel" };
   }
 
- logDebug("ðŸ§ª RADAR CHAMANDO PROCESSAR", {
-  sessaoId,
-  remoteJid,
-  tamanhoTexto: textoExtraido.length
-});
-
- return processarMensagemRadar({
+  return processarMensagemRadar({
     origemTipo: "whatsapp",
     sessaoId,
     grupoId: remoteJid,
@@ -10177,117 +8412,6 @@ function existeDestinoCompativelRadar(clienteId = "admin", oferta = {}) {
   );
 }
 
-function radarImportanteParaRetencaoSemDestino(oferta = {}, radar = {}, cupomRadar = {}, tipoRadar = "") {
-  const score = Number(radar.radarScore || oferta.radarScore || oferta.score || 0);
-  const tipoRadarNormalizado = normalizarTexto(tipoRadar || oferta.tipoRadar || "");
-  const tipoCupom = normalizarTexto(cupomRadar.tipoCupom || oferta.tipoCupom || "");
-
-  return Boolean(
-    cupomRadar.cupomConfirmado === true ||
-    oferta.cupomConfirmado === true ||
-    cupomRadar.cupom ||
-    oferta.cupom ||
-    cupomRadar.avisoCupom ||
-    oferta.avisoCupom ||
-    cupomRadar.cupomDetectado ||
-    oferta.cupomDetectado ||
-    cupomRadar.cupomDetectadoTexto ||
-    oferta.cupomDetectadoTexto ||
-    (tipoCupom && tipoCupom !== "nenhum") ||
-    tipoRadarNormalizado === "radarcomcupom" ||
-    score >= 60
-  );
-}
-
-function linkChaveRetidaOferta(oferta = {}) {
-  return String(
-    oferta.linkOriginal ||
-    oferta.linkAfiliado ||
-    oferta.linkFinal ||
-    oferta.link ||
-    ""
-  ).trim().toLowerCase();
-}
-
-function precoChaveRetidaOferta(oferta = {}) {
-  return String(oferta.precoAtual || oferta.preco || oferta.valor || "")
-    .trim()
-    .replace(/\s+/g, "");
-}
-
-function chaveRetidaOferta(clienteId = "admin", oferta = {}) {
-  return [
-    String(clienteId || oferta.clienteId || "admin"),
-    normalizarTexto(oferta.marketplace || oferta.mercado || ""),
-    normalizarTexto(oferta.titulo || oferta.nome || ""),
-    precoChaveRetidaOferta(oferta),
-    linkChaveRetidaOferta(oferta),
-    "retida"
-  ].join("|");
-}
-
-function retidaEquivalenteJaExiste(clienteId = "admin", oferta = {}) {
-  const chaveNova = chaveRetidaOferta(clienteId, oferta);
-
-  return fila.some(item => {
-    if (normalizarTexto(item.status || "") !== "retida") return false;
-    return chaveRetidaOferta(item.clienteId || clienteId, item) === chaveNova;
-  });
-}
-
-function reterRadarSemDestinoCliente(clienteId = "admin", oferta = {}) {
-  marcarOfertaRetida(oferta, "retida_sem_destino_compativel");
-  oferta.statusRadar = "retida";
-  oferta.radarNaFila = false;
-  oferta.radarPendenteAnalise = false;
-  oferta.motivo = "sem_destino_compativel";
-  oferta.motivoTecnico = "sem_destino_compativel";
-  oferta.motivoFinal = "retida_sem_destino_compativel";
-
-  if (retidaEquivalenteJaExiste(clienteId, oferta)) {
-    logOptimus("FILA", "Radar retido duplicado ignorado", {
-      clienteId,
-      titulo: oferta.titulo || oferta.nome || "",
-      marketplace: oferta.marketplace || "",
-      preco: oferta.precoAtual || oferta.preco || "",
-      motivoRetencao: oferta.motivoRetencao
-    });
-
-    return {
-      ok: true,
-      adicionada: false,
-      retida: true,
-      duplicada: true,
-      motivo: "retida_sem_destino_compativel",
-      oferta
-    };
-  }
-
-  fila.push(oferta);
-  registrarTratamentoRadar(clienteId, oferta, "retida");
-  salvarFila(clienteId);
-
-  logOptimus("FILA", "Radar retido sem destino compativel", {
-    clienteId,
-    titulo: oferta.titulo || oferta.nome || "",
-    categoria: oferta.categoria || "",
-    marketplace: oferta.marketplace || "",
-    tipoRadar: oferta.tipoRadar || "",
-    cupom: oferta.cupom || "",
-    cupomConfirmado: Boolean(oferta.cupomConfirmado),
-    score: oferta.radarScore || oferta.score || "",
-    motivoRetencao: oferta.motivoRetencao
-  });
-
-  return {
-    ok: true,
-    adicionada: false,
-    retida: true,
-    motivo: "retida_sem_destino_compativel",
-    oferta
-  };
-}
-
 function itemContaComoPendenteRadar(item = {}) {
   if (!item || typeof item !== "object") return false;
   if (item.removidaRadar || item.ocultadaRadar) return false;
@@ -10297,48 +8421,6 @@ function itemContaComoPendenteRadar(item = {}) {
   return false;
 }
 
-function radarCupomRepetidoProdutoDiferente(clienteId = "admin", oferta = {}) {
-  const cupom = normalizarTexto(oferta.cupom || "");
-  if (!cupom) return false;
-
-  const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
-  const marketplace = normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || "");
-  const preco = precoChaveRadar(oferta);
-  const linksOferta = new Set([
-    oferta.linkOriginal,
-    oferta.linkResolvidoRadar,
-    oferta.linkCapturado,
-    oferta.linkAfiliado,
-    oferta.linkFinal,
-    oferta.link
-  ].map(link => String(link || "").trim().toLowerCase()).filter(Boolean));
-
-  return fila.some(item => {
-    if (String(item.clienteId || "admin") !== String(clienteId || "admin")) return false;
-    if (normalizarTexto(item.cupom || "") !== cupom) return false;
-
-    const linksItem = [
-      item.linkOriginal,
-      item.linkResolvidoRadar,
-      item.linkCapturado,
-      item.linkAfiliado,
-      item.linkFinal,
-      item.link
-    ].map(link => String(link || "").trim().toLowerCase()).filter(Boolean);
-
-    const mesmoLink = linksItem.some(link => linksOferta.has(link));
-    const mesmoProduto = Boolean(
-      titulo &&
-      titulo === normalizarTexto(item.titulo || item.nome || "") &&
-      marketplace &&
-      marketplace === normalizarMarketplaceRadar(item.marketplace || item.mercado || "") &&
-      preco &&
-      preco === precoChaveRadar(item)
-    );
-
-    return !mesmoLink && !mesmoProduto;
-  });
-}
 async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admin", opcoes = {}) {
   const usuario = getUsuarioClienteRadar(clienteId);
 
@@ -10350,24 +8432,8 @@ async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admi
   const origemMonitorada = origemOfertaEstaMonitoradaRadar(ofertaBase, radarConfig);
 
   if (!origemMonitorada.ok) {
-
-logRadarBloqueadoMonitoramento({
-    clienteId,
-    motivo: origemMonitorada.motivo,
-    origemMonitorada,
-    sessaoId: ofertaBase.sessaoId,
-    grupoId: ofertaBase.grupoId,
-    grupoNome: ofertaBase.grupoNome
-  });
-
     return { ok: false, motivo: origemMonitorada.motivo };
   }
-
-console.log("âœ… RADAR ORIGEM VALIDADA", {
-  clienteId,
-  grupoId: ofertaBase.grupoId,
-  sessaoId: ofertaBase.sessaoId
-});
 
   let ofertaPreparada = prepararOfertaGlobal({
     ...(ofertaBase || {}),
@@ -10603,36 +8669,14 @@ console.log("âœ… RADAR ORIGEM VALIDADA", {
       categoria: ofertaCliente.categoria || "",
       marketplace: ofertaCliente.marketplace || ""
     });
-    if (radarImportanteParaRetencaoSemDestino(ofertaCliente, radar, cupomRadar, tipoRadar)) {
-      if (ofertaJaExiste(ofertaCliente)) {
-        logOptimus("RADAR", "Retencao sem destino ignorada por duplicidade", {
-          clienteId,
-          motivo: "oferta_duplicada",
-          categoria: ofertaCliente.categoria || "",
-          marketplace: ofertaCliente.marketplace || ""
-        });
-        return { ok: false, motivo: "oferta_duplicada" };
-      }
-
-      return reterRadarSemDestinoCliente(clienteId, ofertaCliente);
-    }
-
     return { ok: false, motivo: "sem_destino_compativel" };
   }
 
-  if (radarCupomRepetidoProdutoDiferente(clienteId, ofertaCliente)) {
-    logOptimus("RADAR", "radar_cupom_repetido_produto_diferente_permitido", {
-      clienteId,
-      cupom: ofertaCliente.cupom || "",
-      titulo: ofertaCliente.titulo || ofertaCliente.nome || ""
-    });
-  }
-
   if (ofertaJaExiste(ofertaCliente)) {
-    logOptimus("RADAR", "radar_duplicada_mesma_oferta", {
+    logOptimus("RADAR", "Reprovado", {
       clienteId,
       aprovado: false,
-      motivo: "radar_duplicada_mesma_oferta"
+      motivo: "oferta_duplicada"
     });
     return { ok: false, motivo: "oferta_duplicada" };
   }
@@ -11016,61 +9060,6 @@ app.get("/radar/debug/validar", (req, res) => {
     });
   }
 });
-function montarDiagnosticoRadarConfig(radarConfig = {}, sessoesWhatsapp = []) {
-  const sessoesMonitoradas = Array.isArray(radarConfig.sessoesWhatsappMonitoradas)
-    ? radarConfig.sessoesWhatsappMonitoradas
-    : [];
-
-  const gruposMonitorados = Array.isArray(radarConfig.gruposMonitorados)
-    ? radarConfig.gruposMonitorados
-    : [];
-
-  const sessoes = sessoesWhatsapp.map(sessao => {
-    const sessaoId = textoRadarId(sessao.sessaoId || sessao.id || "");
-    const gruposReais = obterGruposReaisSessaoRadar(sessaoId);
-    const monitorada = sessoesMonitoradas.find(item => chaveRadarId(item.sessaoId || "") === chaveRadarId(sessaoId));
-
-    return {
-      sessaoId,
-      nome: sessao.nome || sessao.nomeExibicao || sessao.nomeAmigavel || "",
-      status: sessao.status || "",
-      conectado: Boolean(sessao.conectado),
-      totalGruposReais: gruposReais.length,
-      gruposReais,
-      monitorada: Boolean(monitorada),
-      gruposMonitorados: Array.isArray(monitorada?.gruposMonitorados) ? monitorada.gruposMonitorados : []
-    };
-  });
-
-  const validacoesGruposMonitorados = gruposMonitorados.map(grupo => {
-    const resultado = origemOfertaEstaMonitoradaRadar({
-      origemTipo: "whatsapp",
-      origemSessaoId: grupo.sessaoId || radarConfig.sessaoWhatsappId || "",
-      origemGrupoId: grupo.remoteJid || grupo.grupoId || grupo.id || "",
-      origemGrupoNome: grupo.nome || ""
-    }, radarConfig);
-
-    return {
-      nome: grupo.nome || "",
-      sessaoId: grupo.sessaoId || "",
-      id: grupo.id || "",
-      grupoId: grupo.grupoId || "",
-      remoteJid: grupo.remoteJid || "",
-      idTecnicoValido: Boolean(chaveGrupoWhatsappTecnicaRadar(grupo.remoteJid || grupo.grupoId || grupo.id || "")),
-      validacao: resultado
-    };
-  });
-
-  return {
-    sessaoWhatsappId: radarConfig.sessaoWhatsappId || "",
-    gruposMonitorados,
-    sessoesWhatsappMonitoradas: sessoesMonitoradas,
-    sessoesWhatsapp: sessoes,
-    idsReaisRecebidosNoListener: [...radarListenerRecentes].slice(-20).reverse(),
-    gruposCapturadosRecentementeBloqueados: [...radarBloqueiosRecentes].slice(-20).reverse(),
-    validacoesGruposMonitorados
-  };
-}
 app.get("/radar/config", (req, res) => {
   try {
     if (req.usuario?.papel !== "admin_master") {
@@ -11085,7 +9074,6 @@ app.get("/radar/config", (req, res) => {
     const radarConfig = carregarRadarConfigAdminMaster();
     const sessoesWhatsapp = listarSessoesWhatsappCliente(clienteId);
     const telegramDisponiveis = listarTelegramRadarCliente(clienteId);
-    const diagnosticoVinculo = montarDiagnosticoRadarConfig(radarConfig, sessoesWhatsapp);
     logOptimus("RADAR", "Config carregada", {
       clienteId,
       sessoesWhatsappMonitoradas: Array.isArray(radarConfig.sessoesWhatsappMonitoradas) ? radarConfig.sessoesWhatsappMonitoradas.length : 0,
@@ -11104,8 +9092,7 @@ app.get("/radar/config", (req, res) => {
       sessoesWhatsapp,
       sessoes: sessoesWhatsapp,
       telegramDisponiveis,
-      telegram: telegramDisponiveis,
-      diagnosticoVinculo
+      telegram: telegramDisponiveis
     });
   } catch (e) {
     return res.status(500).json({
@@ -11748,31 +9735,24 @@ app.post("/login", async (req, res) => {
   const login = String(user || "").trim().toLowerCase();
 
   const usuario = usuarios.find(u =>
-    normalizarEmailUsuario(u.email) === login ||
-    String(u.id || "").trim().toLowerCase() === login
+    String(u.email || "").toLowerCase() === login ||
+    String(u.id || "").toLowerCase() === login
   );
 
   if (!usuario) {
-    return res.status(401).json({ erro: "UsuÃƒÂ¡rio invÃƒÂ¡lido" });
+    return res.status(401).json({ erro: "UsuÃ¡rio invÃ¡lido" });
   }
 
   if (usuario.ativo === false) {
-    return res.status(403).json({ erro: "UsuÃƒÂ¡rio inativo" });
+    return res.status(403).json({ erro: "UsuÃ¡rio inativo" });
   }
 
  let senhaOk = false;
 
-senhaOk = senhaUsuarioConfere(usuario, pass);
+senhaOk = String(usuario.senha || "") === String(pass || "");
 
 if (!senhaOk) {
-  return res.status(401).json({ erro: "Senha invÃƒÂ¡lida" });
-}
-
-if (!senhaPareceHashBcrypt(usuario.senha)) {
-  usuario.senha = hashSenhaUsuario(pass);
-  usuario.email = normalizarEmailUsuario(usuario.email);
-  usuario.atualizadoEm = new Date().toISOString();
-  salvarUsuarios();
+  return res.status(401).json({ erro: "Senha invÃ¡lida" });
 }
 
   const token = jwt.sign(
@@ -11908,7 +9888,7 @@ app.post("/limpar-sessao/:id", async (req, res) => {
 
     return res.json({
       ok: true,
-      message: "SessÃƒÂ£o limpa. Gere um novo QR Code.",
+      message: "SessÃ£o limpa. Gere um novo QR Code.",
       id
     });
 
@@ -11934,7 +9914,7 @@ app.get("/me", (req, res) => {
   if (!usuario) {
     return res.status(404).json({
       ok: false,
-      erro: "UsuÃƒÂ¡rio nÃƒÂ£o encontrado"
+      erro: "UsuÃ¡rio nÃ£o encontrado"
     });
   }
 
@@ -11991,658 +9971,9 @@ return res.json({
   });
 });
 
-// ================= INTEGRAÃƒâ€¡Ãƒâ€¢ES =================
+// ================= INTEGRAÃ‡Ã•ES =================
 
 const marketplaceRules = integracoesUtils.marketplaceRules;
-
-const MENSAGEM_TESTE_OK = "Teste real OK. Link de teste convertido com sucesso.";
-const MENSAGEM_NAO_CONFIGURADO_ML = "Preencha Tag ID e Cookies para testar.";
-const MENSAGEM_NAO_CONFIGURADO_AMAZON = "Preencha tag e cookies da Amazon para testar.";
-const MENSAGEM_COOKIES_INVALIDOS = "NÃ£o conseguimos converter um link de teste. Atualize os cookies e teste novamente.";
-const MENSAGEM_FALHA_CONVERSAO_ML = "NÃ£o conseguimos validar a integraÃ§Ã£o agora. Atualize os cookies e teste novamente.";
-const MENSAGEM_FALHA_CONVERSAO_AMAZON = "NÃ£o conseguimos validar a integraÃ§Ã£o da Amazon agora. Atualize os cookies e teste novamente.";
-const MENSAGEM_TESTE_INCONCLUSIVO_ML = "NÃ£o conseguimos validar o link de teste agora, mas sua integraÃ§Ã£o tem conversÃµes recentes funcionando.";
-const MENSAGEM_TESTE_PENDENTE = "Credenciais salvas, teste real pendente.";
-const MENSAGEM_ALERTA_ML = MENSAGEM_COOKIES_INVALIDOS;
-const MENSAGEM_ALERTA_AMAZON = MENSAGEM_FALHA_CONVERSAO_AMAZON;
-
-const {
-  listarAlertasIntegracoes,
-  registrarAlertaIntegracao,
-  limparAlertaIntegracao
-} = alertasIntegracoes;
-
-function extrairTagMercadoLivreIntegracao(config = {}) {
-  const credenciais = config?.credenciais || config || {};
-  return String(
-    credenciais.tag ||
-    credenciais.codigoAfiliado ||
-    credenciais.tagId ||
-    credenciais.tagID ||
-    credenciais.tag_id ||
-    credenciais.trackingId ||
-    credenciais.partnerTag ||
-    credenciais.affiliateTag ||
-    ""
-  ).trim();
-}
-
-function credenciaisMercadoLivreValidas(credenciais = {}) {
-  return !!(
-    String(credenciais.cookies || "").trim() &&
-    extrairTagMercadoLivreIntegracao(credenciais)
-  );
-}
-
-function credenciaisAmazonValidas(config = {}) {
-  const credenciais = config?.credenciais || {};
-  const modo = String(config?.modo || credenciais.modo || "").toLowerCase();
-  const tag = String(
-    credenciais.trackingId ||
-    credenciais.partnerTag ||
-    credenciais.tag ||
-    credenciais.affiliateTag ||
-    credenciais.appId ||
-    ""
-  ).trim();
-
-  if (modo === "api") {
-    return !!(
-      String(credenciais.appId || "").trim() &&
-      String(credenciais.accessKey || "").trim() &&
-      String(credenciais.secretKey || "").trim()
-    );
-  }
-
-  if (modo === "cookies") {
-    return !!(String(credenciais.cookies || "").trim() && tag);
-  }
-
-  return !!(
-    tag ||
-    (
-      String(credenciais.appId || "").trim() &&
-      String(credenciais.accessKey || "").trim() &&
-      String(credenciais.secretKey || "").trim()
-    )
-  );
-}
-
-function registrarAlertaMercadoLivre(clienteId = "admin", tipo = "configuracao_incompleta", detalhes = {}) {
-  const tipoNormalizado = String(tipo || "").toLowerCase();
-  return registrarAlertaIntegracao(clienteId, "mercadolivre", {
-    tipo: tipoNormalizado === "tag_invalida" ? "falha_conversao" : tipo,
-    status: "atencao",
-    mensagem: tipoNormalizado === "falha_conversao" || tipoNormalizado === "tag_invalida"
-      ? MENSAGEM_FALHA_CONVERSAO_ML
-      : MENSAGEM_COOKIES_INVALIDOS,
-    detalhes
-  });
-}
-function registrarAlertaAmazon(clienteId = "admin", tipo = "configuracao_incompleta", detalhes = {}) {
-  const tipoNormalizado = String(tipo || "").toLowerCase();
-  return registrarAlertaIntegracao(clienteId, "amazon", {
-    tipo,
-    status: "atencao",
-    mensagem: tipoNormalizado === "cookie_invalido" || tipoNormalizado === "cookies_invalidos"
-      ? MENSAGEM_COOKIES_INVALIDOS
-      : MENSAGEM_FALHA_CONVERSAO_AMAZON,
-    detalhes
-  });
-}
-function salvarResultadoTesteIntegracao(clienteId = "admin", marketplace = "", resultado = {}) {
-  const mp = String(marketplace || "").toLowerCase();
-  if (!mp) return null;
-
-  integracoesPorCliente[clienteId] = integracoesPorCliente[clienteId] || {};
-  const atual = integracoesPorCliente[clienteId][mp] || { marketplace: mp, credenciais: {} };
-  const preservarOkRecente =
-    mp === "mercadolivre" &&
-    resultado.status === "teste_inconclusivo" &&
-    normalizarStatusSalvoIntegracao(mp, atual.ultimoStatus || "") === "ok";
-
-  integracoesPorCliente[clienteId][mp] = {
-    ...atual,
-    ultimoTesteEm: new Date().toISOString(),
-    ultimoStatus: preservarOkRecente ? atual.ultimoStatus : (resultado.status || "erro"),
-    ultimaMensagem: resultado.mensagem || ""
-  };
-
-  salvarIntegracoesPersistidas();
-  return integracoesPorCliente[clienteId][mp];
-}
-
-function extrairTagAmazonIntegracao(config = {}) {
-  const credenciais = config?.credenciais || {};
-  return String(
-    credenciais.trackingId ||
-    credenciais.partnerTag ||
-    credenciais.tag ||
-    credenciais.affiliateTag ||
-    credenciais.appId ||
-    ""
-  ).trim();
-}
-
-function credenciaisAmazonTesteValidas(config = {}) {
-  const credenciais = config?.credenciais || {};
-  const modo = String(config?.modo || credenciais.modo || "").toLowerCase();
-  const tag = extrairTagAmazonIntegracao(config);
-  const cookies = String(credenciais.cookies || "").trim();
-  const temApi = !!(
-    String(credenciais.appId || "").trim() &&
-    String(credenciais.accessKey || "").trim() &&
-    String(credenciais.secretKey || "").trim()
-  );
-
-  if (modo === "api") return temApi;
-  if (modo === "cookies" || cookies) return !!(tag && cookies);
-
-  return !!(tag && cookies) || temApi;
-}
-function normalizarStatusSalvoIntegracao(marketplace = "", status = "") {
-  const mp = String(marketplace || "").toLowerCase();
-  const valor = String(status || "").toLowerCase();
-
-  if (mp === "mercadolivre" && valor === "tag_invalida") return "falha_conversao";
-  if (mp === "amazon" && ["configuracao_invalida", "tag_invalida", "falha_geracao_link"].includes(valor)) return "falha_conversao";
-
-  if (["ok", "teste_pendente", "teste_inconclusivo", "nao_configurado", "cookies_invalidos", "falha_conversao"].includes(valor)) return valor;
-
-  return valor || "teste_pendente";
-}
-
-function normalizarMensagemStatusIntegracao(marketplace = "", status = "", mensagem = "") {
-  const mp = String(marketplace || "").toLowerCase();
-  const statusNormalizado = normalizarStatusSalvoIntegracao(mp, status);
-
-  if (statusNormalizado === "ok") return MENSAGEM_TESTE_OK;
-  if (statusNormalizado === "teste_pendente") return MENSAGEM_TESTE_PENDENTE;
-  if (statusNormalizado === "teste_inconclusivo") return mp === "mercadolivre"
-    ? MENSAGEM_TESTE_INCONCLUSIVO_ML
-    : mensagem || MENSAGEM_TESTE_PENDENTE;
-  if (statusNormalizado === "cookies_invalidos") return MENSAGEM_COOKIES_INVALIDOS;
-  if (statusNormalizado === "nao_configurado") return mp === "mercadolivre"
-    ? MENSAGEM_NAO_CONFIGURADO_ML
-    : MENSAGEM_NAO_CONFIGURADO_AMAZON;
-  if (statusNormalizado === "falha_conversao") return mp === "amazon"
-    ? MENSAGEM_FALHA_CONVERSAO_AMAZON
-    : MENSAGEM_FALHA_CONVERSAO_ML;
-
-  return mensagem || MENSAGEM_TESTE_PENDENTE;
-}
-function statusResumoIntegracao(clienteId = "admin", marketplace = "") {
-  const mp = String(marketplace || "").toLowerCase();
-  const config = integracoesPorCliente?.[clienteId]?.[mp] || null;
-  const credenciais = config?.credenciais || {};
-  const ultimoStatus = String(config?.ultimoStatus || "").toLowerCase();
-
-  const temCredenciais = mp === "mercadolivre"
-    ? credenciaisMercadoLivreValidas(credenciais)
-    : mp === "amazon"
-      ? credenciaisAmazonTesteValidas(config || {})
-      : Object.values(credenciais).some(v => String(v || "").trim());
-
-  if (!config || !temCredenciais) {
-    return {
-      marketplace: mp,
-      status: "nao_configurado",
-      ultimoTesteEm: config?.ultimoTesteEm || null,
-      ultimaMensagem: mp === "mercadolivre"
-        ? MENSAGEM_NAO_CONFIGURADO_ML
-        : MENSAGEM_NAO_CONFIGURADO_AMAZON,
-      testado: Boolean(config?.ultimoTesteEm)
-    };
-  }
-
-  if (!config.ultimoTesteEm) {
-    return {
-      marketplace: mp,
-      status: "teste_pendente",
-      ultimoTesteEm: null,
-      ultimaMensagem: MENSAGEM_TESTE_PENDENTE,
-      testado: false
-    };
-  }
-
-  if (ultimoStatus) {
-    let statusNormalizado = normalizarStatusSalvoIntegracao(mp, ultimoStatus);
-
-    if (temCredenciais && statusNormalizado === "nao_configurado") {
-      const mensagemAnterior = String(config.ultimaMensagem || "").toLowerCase();
-      statusNormalizado = mensagemAnterior.includes("convers") || mensagemAnterior.includes("validar")
-        ? "falha_conversao"
-        : "teste_pendente";
-    }
-
-    const mensagemNormalizada = normalizarMensagemStatusIntegracao(mp, statusNormalizado, config.ultimaMensagem || "");
-
-    return {
-      marketplace: mp,
-      status: statusNormalizado,
-      ultimoTesteEm: config.ultimoTesteEm,
-      ultimaMensagem: mensagemNormalizada,
-      testado: statusNormalizado !== "teste_pendente"
-    };
-  }
-
-  return {
-    marketplace: mp,
-    status: "teste_pendente",
-    ultimoTesteEm: config.ultimoTesteEm,
-    ultimaMensagem: MENSAGEM_TESTE_PENDENTE,
-    testado: false
-  };
-}
-function extrairCsrfMercadoLivreHtml(html = "") {
-  const patterns = [
-    /x-csrf-token["']?\s*[:=]\s*["']([^"']+)["']/i,
-    /csrfToken["']?\s*[:=]\s*["']([^"']+)["']/i,
-    /csrf-token["']?\s*content=["']([^"']+)["']/i,
-    /_csrf["']?\s*[:=]\s*["']([^"']+)["']/i
-  ];
-
-  for (const pattern of patterns) {
-    const match = html.match(pattern);
-    if (match?.[1]) return match[1];
-  }
-
-  return "";
-}
-
-function respostaTesteMercadoLivre(status, mensagem, tipo = status, detalhes = {}) {
-  return {
-    ok: status === "ok",
-    status,
-    tipo,
-    mensagem,
-    detalhes
-  };
-}
-
-const URL_TESTE_MERCADOLIVRE_PRODUTO = "https://www.mercadolivre.com.br/p/MLB19135666";
-const JANELA_CONVERSAO_RECENTE_ML_MS = 7 * 24 * 60 * 60 * 1000;
-
-function dataMsIntegracao(valor = "") {
-  if (!valor) return 0;
-
-  const direto = Date.parse(valor);
-  if (Number.isFinite(direto)) return direto;
-
-  const match = String(valor).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
-  if (!match) return 0;
-
-  const [, dia, mes, ano, hora, minuto, segundo = "0"] = match;
-  const data = new Date(Number(ano), Number(mes) - 1, Number(dia), Number(hora), Number(minuto), Number(segundo));
-  const ms = data.getTime();
-  return Number.isFinite(ms) ? ms : 0;
-}
-
-function eventoRecenteIntegracao(valor = "") {
-  const ms = dataMsIntegracao(valor);
-  return ms > 0 && (Date.now() - ms) <= JANELA_CONVERSAO_RECENTE_ML_MS;
-}
-
-function ofertaMercadoLivreComMeliLaRecente(clienteId = "admin") {
-  if (!Array.isArray(fila)) return null;
-
-  return fila.find(item => {
-    const marketplace = normalizarTexto(item?.marketplace || item?.mercado || "");
-    if (marketplace !== "mercadolivre" && marketplace !== "mercadolivrebrasil") return false;
-    if (String(item?.clienteId || "admin") !== String(clienteId || "admin")) return false;
-
-    const linkAfiliado = String(item?.linkAfiliado || item?.linkFinal || item?.link || "").trim();
-    if (!/^https?:\/\/meli\.la\//i.test(linkAfiliado)) return false;
-
-    return [
-      item?.ultimoEnvioEm,
-      item?.enviadoEm,
-      item?.dataEnvio,
-      item?.dataEntradaFila,
-      item?.criadoEm
-    ].some(eventoRecenteIntegracao);
-  }) || null;
-}
-
-function obterUrlProdutoMercadoLivreParaTeste(clienteId = "admin") {
-  if (Array.isArray(fila)) {
-    const item = fila.find(oferta => {
-      const marketplace = normalizarTexto(oferta?.marketplace || oferta?.mercado || "");
-      if (marketplace !== "mercadolivre" && marketplace !== "mercadolivrebrasil") return false;
-      if (String(oferta?.clienteId || "admin") !== String(clienteId || "admin")) return false;
-
-      const linkOriginal = String(oferta?.linkOriginal || oferta?.linkProduto || oferta?.urlOriginal || "").trim();
-      return /^https?:\/\/(?:www\.|produto\.)?mercadolivre\.com\.br\/(?:p\/MLB|MLB-?\d+)/i.test(linkOriginal);
-    });
-
-    if (item) {
-      return String(item.linkOriginal || item.linkProduto || item.urlOriginal || "").trim();
-    }
-  }
-
-  return URL_TESTE_MERCADOLIVRE_PRODUTO;
-}
-
-function evidenciaConversaoMercadoLivreRecente(clienteId = "admin", config = {}) {
-  if (
-    normalizarStatusSalvoIntegracao("mercadolivre", config?.ultimoStatus || "") === "ok" &&
-    eventoRecenteIntegracao(config?.ultimoTesteEm || "")
-  ) {
-    return {
-      ok: true,
-      origem: "ultimo_status_ok",
-      ultimoTesteEm: config.ultimoTesteEm
-    };
-  }
-
-  const oferta = ofertaMercadoLivreComMeliLaRecente(clienteId);
-  if (oferta) {
-    return {
-      ok: true,
-      origem: oferta?.radar || oferta?.radarNaFila ? "radar_meli_la_recente" : "oferta_meli_la_recente",
-      ofertaId: oferta.id || "",
-      linkAfiliado: oferta.linkAfiliado || oferta.linkFinal || oferta.link || ""
-    };
-  }
-
-  return { ok: false };
-}
-
-async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
-  const credenciais = config?.credenciais || {};
-  const cookies = String(credenciais.cookies || "").trim();
-  const tag = extrairTagMercadoLivreIntegracao(credenciais);
-  const urlTeste = obterUrlProdutoMercadoLivreParaTeste(clienteId);
-
-  if (!cookies || !tag) {
-    return respostaTesteMercadoLivre(
-      "nao_configurado",
-      MENSAGEM_NAO_CONFIGURADO_ML,
-      "configuracao_incompleta",
-      { faltandoCookies: !cookies, faltandoTag: !tag }
-    );
-  }
-
-  try {
-    const response = await fetch("https://www.mercadolivre.com.br/afiliados/linkbuilder", {
-      method: "GET",
-      headers: {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        "Cookie": cookies
-      }
-    });
-
-    const urlFinal = response.url || "";
-    const html = await response.text().catch(() => "");
-    const textoFalha = `${urlFinal}\n${html}`.toLowerCase();
-
-    if (
-      [401, 403, 419].includes(Number(response.status)) ||
-      textoFalha.includes("account-verification") ||
-      textoFalha.includes("suspicious-traffic")
-    ) {
-      return respostaTesteMercadoLivre(
-        "cookies_invalidos",
-        MENSAGEM_COOKIES_INVALIDOS,
-        textoFalha.includes("account-verification")
-          ? "account_verification"
-          : textoFalha.includes("suspicious-traffic")
-            ? "suspicious_traffic"
-            : "cookie_invalido",
-        { httpStatus: response.status, urlFinal }
-      );
-    }
-
-    if (!response.ok) {
-      return respostaTesteMercadoLivre(
-        "cookies_invalidos",
-        MENSAGEM_COOKIES_INVALIDOS,
-        "cookie_invalido",
-        { httpStatus: response.status, urlFinal }
-      );
-    }
-
-    const csrfToken = extrairCsrfMercadoLivreHtml(html);
-
-    if (!csrfToken) {
-      return respostaTesteMercadoLivre(
-        "cookies_invalidos",
-        MENSAGEM_COOKIES_INVALIDOS,
-        "cookie_invalido",
-        { motivo: "csrf_nao_encontrado", httpStatus: response.status, urlFinal }
-      );
-    }
-
-    const conversao = await fetch(
-      "https://www.mercadolivre.com.br/affiliate-program/api/v2/stripe/user/links",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json, text/plain, */*",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-          "Origin": "https://www.mercadolivre.com.br",
-          "Referer": "https://www.mercadolivre.com.br/afiliados/linkbuilder",
-          "Cookie": cookies,
-          "x-csrf-token": csrfToken
-        },
-        body: JSON.stringify({
-          url: urlTeste,
-          tag
-        })
-      }
-    );
-
-    const data = await conversao.json().catch(() => null);
-    const linkAfiliado = String(data?.short_url || data?.shortUrl || data?.url || "").trim();
-
-    if ([401, 403, 419].includes(Number(conversao.status))) {
-      return respostaTesteMercadoLivre(
-        "cookies_invalidos",
-        MENSAGEM_COOKIES_INVALIDOS,
-        "cookie_invalido",
-        { httpStatus: conversao.status }
-      );
-    }
-
-    if (!conversao.ok || !/^https?:\/\/meli\.la\//i.test(linkAfiliado)) {
-      const evidenciaRecente = evidenciaConversaoMercadoLivreRecente(clienteId, config);
-
-      if (Number(conversao.status) === 400 && evidenciaRecente.ok) {
-        return respostaTesteMercadoLivre(
-          "teste_inconclusivo",
-          MENSAGEM_TESTE_INCONCLUSIVO_ML,
-          "teste_inconclusivo",
-          {
-            httpStatus: conversao.status,
-            linkAfiliado,
-            urlTeste,
-            motivo: "url_teste_rejeitada",
-            evidenciaRecente
-          }
-        );
-      }
-
-      return respostaTesteMercadoLivre(
-        "falha_conversao",
-        MENSAGEM_FALHA_CONVERSAO_ML,
-        "falha_conversao",
-        { httpStatus: conversao.status, linkAfiliado, urlTeste }
-      );
-    }
-
-    return respostaTesteMercadoLivre(
-      "ok",
-      MENSAGEM_TESTE_OK,
-      "teste_ok",
-      { linkAfiliado }
-    );
-  } catch (e) {
-    const evidenciaRecente = evidenciaConversaoMercadoLivreRecente(clienteId, config);
-
-    if (evidenciaRecente.ok) {
-      return respostaTesteMercadoLivre(
-        "teste_inconclusivo",
-        MENSAGEM_TESTE_INCONCLUSIVO_ML,
-        "teste_inconclusivo",
-        {
-          erro: e.message,
-          urlTeste,
-          motivo: "erro_teste_com_conversao_recente",
-          evidenciaRecente
-        }
-      );
-    }
-
-    return respostaTesteMercadoLivre(
-      "falha_conversao",
-      MENSAGEM_FALHA_CONVERSAO_ML,
-      "erro_teste",
-      { erro: e.message }
-    );
-  }
-}
-
-function respostaTesteAmazon(status, mensagem, tipo = status, detalhes = {}) {
-  return {
-    ok: status === "ok",
-    status,
-    tipo,
-    mensagem,
-    detalhes
-  };
-}
-
-async function testarAmazonConfiguracao(config = {}) {
-  const credenciais = config?.credenciais || {};
-  const modo = String(config?.modo || credenciais.modo || "cookies").toLowerCase();
-  const tag = extrairTagAmazonIntegracao(config);
-  const cookies = String(credenciais.cookies || "").trim();
-
-  if (modo === "api") {
-    if (!credenciaisAmazonValidas(config || {})) {
-      return respostaTesteAmazon(
-        "nao_configurado",
-        "Preencha as credenciais da API Amazon para testar.",
-        "configuracao_invalida",
-        { modo, camposPresentes: Object.keys(credenciais) }
-      );
-    }
-
-    return respostaTesteAmazon(
-      "teste_pendente",
-      MENSAGEM_TESTE_PENDENTE,
-      "teste_pendente",
-      { modo, observacao: "Teste real automÃ¡tico preservado apenas para modo cookies." }
-    );
-  }
-
-  if (!tag || !cookies) {
-    return respostaTesteAmazon(
-      "nao_configurado",
-      MENSAGEM_NAO_CONFIGURADO_AMAZON,
-      "configuracao_invalida",
-      { modo, faltandoTag: !tag, faltandoCookies: !cookies, camposPresentes: Object.keys(credenciais) }
-    );
-  }
-
-  try {
-    const url = new URL("https://www.amazon.com.br/s?k=ofertas");
-    url.searchParams.set("tag", tag);
-    const linkAfiliado = url.toString();
-
-    const response = await fetch(linkAfiliado, {
-      method: "GET",
-      headers: {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        "Cookie": cookies
-      }
-    });
-
-    const urlFinal = response.url || "";
-    const html = await response.text().catch(() => "");
-    const textoFalha = `${urlFinal}\n${html}`.toLowerCase();
-
-    if ([401, 403, 419, 429, 503].includes(Number(response.status)) ||
-      textoFalha.includes("captcha") ||
-      textoFalha.includes("robot check") ||
-      textoFalha.includes("automated access") ||
-      textoFalha.includes("digite os caracteres")) {
-      return respostaTesteAmazon(
-        "cookies_invalidos",
-        MENSAGEM_COOKIES_INVALIDOS,
-        "cookie_invalido",
-        { modo, httpStatus: response.status, urlFinal }
-      );
-    }
-
-    if (!response.ok) {
-      return respostaTesteAmazon(
-        "falha_conversao",
-        MENSAGEM_FALHA_CONVERSAO_AMAZON,
-        "falha_conversao",
-        { modo, httpStatus: response.status, urlFinal }
-      );
-    }
-
-    if (!linkAfiliado.includes(`tag=${encodeURIComponent(tag)}`) && !linkAfiliado.includes(`tag=${tag}`)) {
-      return respostaTesteAmazon(
-        "falha_conversao",
-        MENSAGEM_FALHA_CONVERSAO_AMAZON,
-        "falha_conversao",
-        { modo, linkAfiliado }
-      );
-    }
-
-    return respostaTesteAmazon(
-      "ok",
-      MENSAGEM_TESTE_OK,
-      "teste_ok",
-      { modo, linkAfiliado, httpStatus: response.status }
-    );
-  } catch (e) {
-    return respostaTesteAmazon(
-      "falha_conversao",
-      MENSAGEM_FALHA_CONVERSAO_AMAZON,
-      "erro_teste",
-      { modo, erro: e.message }
-    );
-  }
-}
-function avaliarAlertasConfiguracaoIntegracoes(clienteId = "admin") {
-  const integracoes = integracoesPorCliente?.[clienteId] || {};
-  const ml = integracoes.mercadolivre;
-  const amazon = integracoes.amazon;
-
-  if (ml && ml.ativo !== false && !credenciaisMercadoLivreValidas(ml.credenciais || {})) {
-    registrarAlertaMercadoLivre(clienteId, "configuracao_incompleta", {
-      camposPresentes: Object.keys(ml.credenciais || {})
-    });
-  }
-
-  if (amazon && amazon.ativo !== false && !credenciaisAmazonValidas(amazon)) {
-    registrarAlertaAmazon(clienteId, "configuracao_incompleta", {
-      modo: amazon.modo || amazon.credenciais?.modo || "",
-      camposPresentes: Object.keys(amazon.credenciais || {})
-    });
-  }
-}
-
-function limparAlertaIntegracaoSeValida(clienteId = "admin", marketplace = "", config = {}) {
-  const mp = String(marketplace || "").toLowerCase();
-
-  if (mp === "mercadolivre" && credenciaisMercadoLivreValidas(config?.credenciais || config || {})) {
-    limparAlertaIntegracao(clienteId, "mercadolivre");
-  }
-
-  if (mp === "amazon" && credenciaisAmazonValidas(config?.credenciais ? config : { credenciais: config, modo: config?.modo })) {
-    limparAlertaIntegracao(clienteId, "amazon");
-  }
-}
 
 function limparCredencial(config, allowed) {
   return integracoesUtils.limparCredencial(config, allowed);
@@ -12666,40 +9997,6 @@ function obterProgramaAwin(credenciais = {}, alvo = "kabum") {
 
 //============= ROTA INTEGRACOES =======================================
 
-app.get("/integracoes/alertas", (req, res) => {
-  const clienteId = getClienteId(req);
-
-  const status = {
-    mercadolivre: statusResumoIntegracao(clienteId, "mercadolivre"),
-    amazon: statusResumoIntegracao(clienteId, "amazon")
-  };
-
-  const alertas = listarAlertasIntegracoes(clienteId)
-    .filter(alerta =>
-      status[String(alerta.marketplace || "").toLowerCase()]?.status !== "ok"
-    )
-    .map(alerta => {
-      const marketplace = String(alerta.marketplace || "").toLowerCase();
-      const tipo = String(alerta.tipo || alerta.status || "").toLowerCase();
-
-      if (marketplace === "mercadolivre" && tipo === "tag_invalida") {
-        return {
-          ...alerta,
-          tipo: "falha_conversao",
-          status: alerta.status || "atencao",
-          mensagem: MENSAGEM_FALHA_CONVERSAO_ML
-        };
-      }
-
-      return alerta;
-    });
-
-  return res.json({
-    ok: true,
-    status,
-    alertas
-  });
-});
 app.get("/integracoes", (req, res) => {
   const clienteId = getClienteId(req);
   const data = integracoesPorCliente[clienteId] || {};
@@ -12710,10 +10007,6 @@ app.get("/integracoes", (req, res) => {
     req.query.reveal === "true";
 
   for (const [marketplace, config] of Object.entries(data)) {
-    if (!marketplaceLiberadoParaReq(req, marketplace)) {
-      continue;
-    }
-
     const credenciais = marketplace === "awin"
       ? normalizarCredenciaisAwin(config?.credenciais || {})
       : config?.credenciais || {};
@@ -12766,12 +10059,12 @@ app.post("/integracoes/:marketplace", (req, res) => {
   const plano = getPlanoUsuario(req);
 
 if (!isAdminMaster(req)) {
-  const liberados = (plano?.marketplaces || []).map(item => normalizarMarketplacePlano(item));
+  const liberados = plano?.marketplaces || [];
 
-  if (!marketplaceLiberadoParaReq(req, marketplace)) {
+  if (!liberados.includes(marketplace)) {
     return res.status(403).json({
       ok: false,
-      erro: `Marketplace ${marketplace} nÃƒÂ£o liberado no seu plano`
+      erro: `Marketplace ${marketplace} nÃ£o liberado no seu plano`
     });
   }
 }
@@ -12780,22 +10073,7 @@ if (!isAdminMaster(req)) {
 
   const validacao = validarIntegracao(marketplace, payload);
 
-  if (!validacao.ok) {
-    if (marketplace === "mercadolivre") {
-      registrarAlertaMercadoLivre(clienteId, "configuracao_incompleta", {
-        campos: validacao.campos || []
-      });
-    }
-
-    if (marketplace === "amazon") {
-      registrarAlertaAmazon(clienteId, "configuracao_incompleta", {
-        campos: validacao.campos || [],
-        modo: payload?.modo || ""
-      });
-    }
-
-    return res.status(400).json(validacao);
-  }
+  if (!validacao.ok) return res.status(400).json(validacao);
 
   if (!integracoesPorCliente[clienteId]) {
     integracoesPorCliente[clienteId] = {};
@@ -12811,12 +10089,6 @@ if (!isAdminMaster(req)) {
 };
 
 salvarIntegracoesPersistidas();
-
-limparAlertaIntegracaoSeValida(
-  clienteId,
-  marketplace,
-  integracoesPorCliente[clienteId][marketplace]
-);
 
 return res.json({
   ok: true,
@@ -12835,17 +10107,19 @@ app.delete("/integracoes/:marketplace", (req, res) => {
       integracoesPorCliente[clienteId] = {};
     }
 
-    delete integracoesPorCliente[clienteId][marketplace];
-
-    salvarIntegracoesPersistidas();
-    limparAlertaIntegracao(clienteId, marketplace);
+    if (marketplace === "telegram") {
+      limparTelegramCliente(clienteId);
+    } else {
+      delete integracoesPorCliente[clienteId][marketplace];
+      salvarIntegracoesPersistidas();
+    }
 
     return res.json({
       ok: true,
       marketplace,
       configurado: false,
       status: "nao_configurado",
-      message: "IntegraÃƒÂ§ÃƒÂ£o removida com sucesso"
+      message: "IntegraÃ§Ã£o removida com sucesso"
     });
 
   } catch (e) {
@@ -12853,7 +10127,7 @@ app.delete("/integracoes/:marketplace", (req, res) => {
 
     return res.status(500).json({
       ok: false,
-      erro: "Erro interno ao remover integraÃƒÂ§ÃƒÂ£o"
+      erro: "Erro interno ao remover integraÃ§Ã£o"
     });
   }
 });
@@ -12861,45 +10135,12 @@ app.delete("/integracoes/:marketplace", (req, res) => {
 app.post("/integracoes/:marketplace/test", async (req, res) => {
   const clienteId = getClienteId(req);
   const marketplace = req.params.marketplace.toLowerCase();
-
-  if (bloquearMarketplaceNaoLiberado(req, res, marketplace)) {
-    return;
-  }
-
   const config = integracoesPorCliente[clienteId]?.[marketplace];
 
   if (!config) {
-    if (marketplace === "mercadolivre") {
-      registrarAlertaMercadoLivre(clienteId, "configuracao_incompleta", {
-        motivo: "nao_configurado"
-      });
-
-      return res.status(400).json({
-        ok: false,
-        marketplace: "mercadolivre",
-        status: "nao_configurado",
-        ultimoStatus: "nao_configurado",
-        ultimaMensagem: MENSAGEM_NAO_CONFIGURADO_ML
-      });
-    }
-
-    if (marketplace === "amazon") {
-      registrarAlertaAmazon(clienteId, "configuracao_invalida", {
-        motivo: "nao_configurado"
-      });
-
-      return res.status(400).json({
-        ok: false,
-        marketplace: "amazon",
-        status: "nao_configurado",
-        ultimoStatus: "nao_configurado",
-        ultimaMensagem: MENSAGEM_NAO_CONFIGURADO_AMAZON
-      });
-    }
-
     return res.status(400).json({
       ok: false,
-      erro: "IntegraÃƒÂ§ÃƒÂ£o nÃƒÂ£o configurada"
+      erro: "IntegraÃ§Ã£o nÃ£o configurada"
     });
   }
 
@@ -12908,68 +10149,7 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
   const temAlgumaCredencial = Object.values(credenciais)
     .some(v => String(v || "").trim());
 
-  if (marketplace === "mercadolivre") {
-    const resultadoTeste = await testarMercadoLivreCookies(clienteId, config);
-    const configAtualizada = salvarResultadoTesteIntegracao(clienteId, "mercadolivre", {
-      status: resultadoTeste.status,
-      mensagem: resultadoTeste.mensagem
-    });
-
-    if (resultadoTeste.status === "teste_inconclusivo") {
-      limparAlertaIntegracao(clienteId, "mercadolivre");
-    } else if (!resultadoTeste.ok) {
-      registrarAlertaMercadoLivre(clienteId, resultadoTeste.tipo || resultadoTeste.status, resultadoTeste.detalhes || {});
-    } else {
-      limparAlertaIntegracao(clienteId, "mercadolivre");
-    }
-
-    return res.json({
-      ok: resultadoTeste.ok,
-      marketplace: "mercadolivre",
-      status: resultadoTeste.status,
-      ultimoTesteEm: configAtualizada?.ultimoTesteEm || null,
-      ultimoStatus: configAtualizada?.ultimoStatus || resultadoTeste.status,
-      ultimaMensagem: resultadoTeste.mensagem,
-      detalhes: resultadoTeste.detalhes || {}
-    });
-  }
-  if (marketplace === "amazon") {
-    const resultadoTeste = await testarAmazonConfiguracao(config);
-    const configAtualizada = salvarResultadoTesteIntegracao(clienteId, "amazon", {
-      status: resultadoTeste.status,
-      mensagem: resultadoTeste.mensagem
-    });
-
-    if (!resultadoTeste.ok) {
-      registrarAlertaAmazon(clienteId, resultadoTeste.tipo || resultadoTeste.status, resultadoTeste.detalhes || {});
-    } else {
-      limparAlertaIntegracao(clienteId, "amazon");
-    }
-
-    return res.json({
-      ok: resultadoTeste.ok,
-      marketplace: "amazon",
-      status: resultadoTeste.status,
-      ultimoTesteEm: configAtualizada?.ultimoTesteEm || null,
-      ultimoStatus: resultadoTeste.status,
-      ultimaMensagem: resultadoTeste.mensagem,
-      detalhes: resultadoTeste.detalhes || {}
-    });
-  }
-
   if (!temAlgumaCredencial) {
-    if (marketplace === "mercadolivre") {
-      registrarAlertaMercadoLivre(clienteId, "configuracao_incompleta", {
-        motivo: "sem_credenciais"
-      });
-    }
-
-    if (marketplace === "amazon") {
-      registrarAlertaAmazon(clienteId, "configuracao_incompleta", {
-        motivo: "sem_credenciais"
-      });
-    }
-
     return res.status(400).json({
       ok: false,
       erro: "Insira as credenciais antes de testar."
@@ -13016,9 +10196,6 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
       });
     }
   }
-
-
-  limparAlertaIntegracaoSeValida(clienteId, marketplace, config);
 
   return res.json({
     ok: true,
@@ -13090,7 +10267,7 @@ async function importarKabumManualRequest(req, res, opcoes = {}) {
     if (!url) {
       return res.status(400).json({
         ok: false,
-        erro: "URL obrigatÃ³ria"
+        erro: "URL obrigatória"
       });
     }
 
@@ -13140,7 +10317,7 @@ app.post("/awin/gerar-link", async (req, res) => {
     if (!url) {
       return res.status(400).json({
         ok: false,
-        erro: "URL obrigatÃƒÂ³ria"
+        erro: "URL obrigatÃ³ria"
       });
     }
 
@@ -13166,7 +10343,7 @@ app.post("/awin/gerar-link", async (req, res) => {
     if (!linkAfiliado) {
       return res.status(400).json({
         ok: false,
-        erro: "NÃƒÂ£o foi possÃƒÂ­vel gerar o link afiliado Awin"
+        erro: "NÃ£o foi possÃ­vel gerar o link afiliado Awin"
       });
     }
 
@@ -13188,7 +10365,7 @@ app.post("/awin/gerar-link", async (req, res) => {
   }
 });
 
-// ================= HELPERS DE IMPORTAÃƒâ€¡ÃƒÆ’O =================
+// ================= HELPERS DE IMPORTAÃ‡ÃƒO =================
 
 function htmlDecode(str) {
   if (!str) return "";
@@ -13370,13 +10547,10 @@ if (
   return score;
 }
 
-function removerDuplicadas(ofertas = [], opcoes = {}) {
+function removerDuplicadas(ofertas = []) {
   const vistas = new Set();
-  const clienteFiltro = opcoes.clienteId ? String(opcoes.clienteId) : "";
 
 for (const existente of fila || []) {
-  if (clienteFiltro && String(existente?.clienteId || "admin") !== clienteFiltro) continue;
-
   const linkExistente = String(existente.linkAfiliado || existente.link || "")
     .split("?")[0]
     .toLowerCase()
@@ -13430,7 +10604,7 @@ if (bloquearSemImagem && !oferta.imagem) {
 }
 
 function aplicarFiltrosUniversais(ofertas = [], opcoes = {}) {
-  return removerDuplicadas(ofertas, opcoes)
+  return removerDuplicadas(ofertas)
     .map((oferta) => ({
       ...oferta,
       score: pontuarOferta(oferta, opcoes),
@@ -13440,9 +10614,9 @@ function aplicarFiltrosUniversais(ofertas = [], opcoes = {}) {
 
       if (!resultado.ok) {
         console.log(
-          "Ã¢ÂÂ­Ã¯Â¸Â Oferta ignorada pelo filtro universal:",
+          "â­ï¸ Oferta ignorada pelo filtro universal:",
           resultado.motivo,
-          oferta.titulo || oferta.nome || "sem tÃƒÂ­tulo"
+          oferta.titulo || oferta.nome || "sem tÃ­tulo"
         );
       }
 
@@ -13498,7 +10672,7 @@ function corrigirImagemUrl(imagem) {
 
   return imagemFinal;
 }
-async function buscarCsrfTokenMercadoLivre(cookies, contexto = {}) {
+async function buscarCsrfTokenMercadoLivre(cookies) {
   try {
     if (!cookies) return "";
 
@@ -13520,11 +10694,6 @@ async function buscarCsrfTokenMercadoLivre(cookies, contexto = {}) {
 
     if (html.includes("suspicious-traffic-frontend")) {
     console.log("[AVISO] Mercado Livre bloqueou por trfego suspeito. Pulando rodada.");
-    if (contexto.clienteId) {
-      registrarAlertaMercadoLivre(contexto.clienteId, "suspicious_traffic", {
-        origem: "csrf_linkbuilder"
-      });
-    }
     return;
     }
 
@@ -13563,24 +10732,13 @@ if (String(url || "").includes("meli.la")) {
 
     if (!url || !cookies || !tag) {
       console.log("[INFO] ML AFILIADO: faltando cookies ou tag");
-      if (contexto.clienteId) {
-        registrarAlertaMercadoLivre(contexto.clienteId, "configuracao_incompleta", {
-          faltandoCookies: !cookies,
-          faltandoTag: !tag
-        });
-      }
       return "";
     }
 
-    const csrfToken = await buscarCsrfTokenMercadoLivre(cookies, contexto);
+    const csrfToken = await buscarCsrfTokenMercadoLivre(cookies);
 
     if (!csrfToken) {
       console.log("[INFO] ML AFILIADO: csrfToken automtico no encontrado");
-      if (contexto.clienteId) {
-        registrarAlertaMercadoLivre(contexto.clienteId, "cookie_invalido", {
-          motivo: "csrf_nao_encontrado"
-        });
-      }
       return "";
     }
 
@@ -13611,18 +10769,8 @@ if (String(url || "").includes("meli.la")) {
 
     if (!response.ok) {
       console.log("[ERRO] ML AFILIADO ERRO STATUS:", response.status);
-      if (contexto.clienteId && [401, 403, 407, 419, 429].includes(Number(response.status))) {
-        registrarAlertaMercadoLivre(contexto.clienteId, "cookie_invalido", {
-          httpStatus: response.status,
-          origem: "link_afiliado"
-        });
-      }
       return "";
     }
-
- if (contexto.clienteId) {
-   limparAlertaIntegracao(contexto.clienteId, "mercadolivre");
- }
 
  return data?.short_url || data?.shortUrl || data?.url || "";
   } catch (e) {
@@ -13647,7 +10795,7 @@ function gerarLinkMagalu(linkOriginal, promoterId) {
   const urlLimpa = String(linkOriginal).trim();
   const loja = String(promoterId).trim();
 
-  // Se jÃƒÂ¡ for link da loja do influenciador, mantÃƒÂ©m
+  // Se jÃ¡ for link da loja do influenciador, mantÃ©m
   if (urlLimpa.includes("magazinevoce.com.br")) {
     return urlLimpa;
   }
@@ -13675,7 +10823,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
       urlEntrada.match(/[?&]productId=(\d+)/i)?.[1];
 
     if (!productId) {
-      throw new Error("Product ID nÃƒÂ£o encontrado no link AliExpress");
+      throw new Error("Product ID nÃ£o encontrado no link AliExpress");
     }
 
     const credenciais = marketplace === "awin"
@@ -13758,8 +10906,8 @@ console.log("[INFO] AliExpress produto encontrado");
       {};
 
   const avisoCupom = ehBrasil
-  ? "Ã°Å¸â€¡Â§Ã°Å¸â€¡Â· Produto no Brasil. Confira cupom ou desconto com moedas na pÃƒÂ¡gina."
-  : "Ã°Å¸Å’Â Compra internacional. Pode haver imposto/taxa. Confira cupom ou desconto com moedas na pÃƒÂ¡gina.";
+  ? "ðŸ‡§ðŸ‡· Produto no Brasil. Confira cupom ou desconto com moedas na pÃ¡gina."
+  : "ðŸŒ Compra internacional. Pode haver imposto/taxa. Confira cupom ou desconto com moedas na pÃ¡gina.";
 
       
       if (!produto || Object.keys(produto).length === 0) {
@@ -13799,7 +10947,7 @@ console.log("[INFO] AliExpress produto encontrado");
     imagem: "",
     categoria: "AliExpress",
     avisoCupom,
-    aviso: "AliExpress nÃƒÂ£o retornou dados pela API. PreÃƒÂ§os extraÃƒÂ­dos do link quando disponÃƒÂ­veis."
+    aviso: "AliExpress nÃ£o retornou dados pela API. PreÃ§os extraÃ­dos do link quando disponÃ­veis."
   };
 }
     
@@ -13857,18 +11005,18 @@ if (precoAntigo === precoAtual) {
   precoAntigo = "";
 }
  
-// Ã°Å¸â€Â¥ PRIORIDADE: preÃƒÂ§o real da URL (AliExpress promo)
+// ðŸ”¥ PRIORIDADE: preÃ§o real da URL (AliExpress promo)
 try {
   const urlDecodificada = decodeURIComponent(urlEntrada);
 
-  // pega exatamente o padrÃƒÂ£o pdp_npi
+  // pega exatamente o padrÃ£o pdp_npi
   const match = urlDecodificada.match(/BRL!([\d.]+)!([\d.]+)/);
 
   if (match) {
     const antigo = match[1];
     const atual = match[2];
 
-    // sÃƒÂ³ usa se fizer sentido (evita bug tipo 8.93)
+    // sÃ³ usa se fizer sentido (evita bug tipo 8.93)
     if (parseFloat(atual) < parseFloat(antigo)) {
       precoAntigo = antigo;
       precoAtual = atual;
@@ -13886,7 +11034,7 @@ try {
   produto.product_url ||
   urlEntrada;
 
-// Ã°Å¸â€Â¥ Limpar link gigante AliExpress
+// ðŸ”¥ Limpar link gigante AliExpress
 if (
   linkAfiliado.includes("s.click.aliexpress.com/s/")
 ) {
@@ -13903,7 +11051,7 @@ if (
   }
 }
 
-// Se jÃƒÂ¡ vier link oficial curto da Ali, mantÃƒÂ©m ele.
+// Se jÃ¡ vier link oficial curto da Ali, mantÃ©m ele.
 const linkAliOficial = String(linkAfiliado || "").includes("s.click.aliexpress.com")
   ? linkAfiliado
   : linkAfiliado;
@@ -14023,7 +11171,7 @@ const response = await fetch(urlConsulta, {
       linkAfiliado,
       imagem,
       categoria: "Magalu",
-      aviso: "Verifique se hÃƒÂ¡ cupons disponÃƒÂ­veis na pÃƒÂ¡gina"
+      aviso: "Verifique se hÃ¡ cupons disponÃ­veis na pÃ¡gina"
     };
   } catch (e) {
     console.log("[API] erro importarMagalu:", e.message);
@@ -14125,7 +11273,7 @@ app.post("/importar-magalu-manual", async (req, res) => {
     if (!url) {
       return res.status(400).json({
         ok: false,
-        erro: "URL obrigatÃƒÂ³ria"
+        erro: "URL obrigatÃ³ria"
       });
     }
 
@@ -14142,7 +11290,7 @@ app.post("/importar-magalu-manual", async (req, res) => {
     if (!produto?.precoAtual) {
       return res.status(400).json({
         ok: false,
-        erro: "Produto invÃƒÂ¡lido"
+        erro: "Produto invÃ¡lido"
       });
     }
 
@@ -14355,7 +11503,7 @@ function registrarResultadoCupom(marketplace = "", cupom = "", sucesso = false) 
   salvarConfig();
 }
 
-// =========== INTELIGÃƒÅ NCIA GLOBAL DE CUPONS ===========
+// =========== INTELIGÃŠNCIA GLOBAL DE CUPONS ===========
 
 function cupomEstaBloqueado(marketplace = "", cupom = "") {
   const mp = normalizarTexto(marketplace || "");
@@ -14479,7 +11627,7 @@ function categoriaPermitidaNoDestino(oferta, destino) {
 }
 
 //============ FUNCAO FAREJAR CUPOM MERCADO LIVRE ================
-// DESATIVADA: nÃƒÂ£o registrar cupons ML automaticamente
+// DESATIVADA: nÃ£o registrar cupons ML automaticamente
 
 async function farejarCuponsMercadoLivre(html = "") {
   console.log("[INFO] farejarCuponsMercadoLivre desativado");
@@ -14587,20 +11735,20 @@ async function gerarLinkCurtoAliExpress(urlOriginal, credenciais = {}) {
 // ======================= FUNCAO PLANO NOME =========================================
 
 function getPlanoPorNome(nome = "free") {
-  const chave = normalizarPlanoChave(nome || "free");
+  const chave = normalizarTexto(nome || "free");
 
-  const candidatos = Object.entries(planos || {}).filter(([key, plano]) =>
-    normalizarPlanoChave(key) === chave ||
-    normalizarPlanoChave(plano?.nome || "") === chave
-  );
+  if (planos?.[chave]) {
+    return planos[chave];
+  }
 
-  candidatos.sort((a, b) => {
-    const dataA = Date.parse(a[1]?.atualizadoEm || "") || 0;
-    const dataB = Date.parse(b[1]?.atualizadoEm || "") || 0;
-    return dataB - dataA;
+  const encontrado = Object.entries(planos || {}).find(([key, plano]) => {
+    return (
+      normalizarTexto(key) === chave ||
+      normalizarTexto(plano?.nome || "") === chave
+    );
   });
 
-  return candidatos[0]?.[1] || planos?.[chave] || planos?.free || null;
+  return encontrado?.[1] || planos?.free || null;
 }
 
 // =============== FUNCAO GERAR LINK AFILIADO SHOPEE ========================================
@@ -14609,10 +11757,10 @@ async function gerarLinkShopeeCliente(clienteId, ofertaBase = {}) {
   try {
     const integracao = getIntegracaoCliente(clienteId, "shopee");
 
-    logDebug("[INFO] CLIENTE:", clienteId);
-    logDebug("[INFO] MARKETPLACE:", "shopee");
-    logDebug("[INFO] Integrao encontrada?", !!integracao);
-    logDebug("[INFO] Tem credenciais?", !!integracao?.credenciais);
+    console.log("[INFO] CLIENTE:", clienteId);
+    console.log("[INFO] MARKETPLACE:", "shopee");
+    console.log("[INFO] Integrao encontrada?", !!integracao);
+    console.log("[INFO] Tem credenciais?", !!integracao?.credenciais);
 
     const appId = integracao?.credenciais?.appId || "";
     const secret = integracao?.credenciais?.secret || "";
@@ -14705,12 +11853,12 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
 
     const integracao = getIntegracaoCliente(clienteId, mp);
 
-    logDebug("[INFO] ====================================");
-    logDebug("[INFO] CLIENTE:", clienteId);
-    logDebug("[INFO] MARKETPLACE:", mp);
-    logDebug("[INFO] Integrao encontrada?", !!integracao);
-    logDebug("[INFO] Tem credenciais?", !!integracao?.credenciais);
-    logDebug("[INFO] ====================================");
+    console.log("[INFO] ====================================");
+    console.log("[INFO] CLIENTE:", clienteId);
+    console.log("[INFO] MARKETPLACE:", mp);
+    console.log("[INFO] Integrao encontrada?", !!integracao);
+    console.log("[INFO] Tem credenciais?", !!integracao?.credenciais);
+    console.log("[INFO] ====================================");
 
     const linkBase =
       linkOriginal ||
@@ -14749,16 +11897,12 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
       clienteId,
       credenciais: Object.keys(integracao?.credenciais || {})
     });
-    registrarAlertaAmazon(clienteId, "tag_ausente", {
-      credenciais: Object.keys(integracao?.credenciais || {})
-    });
     return "";
   }
 
   try {
     const u = new URL(linkBase);
     u.searchParams.set("tag", trackingId);
-    limparAlertaIntegracao(clienteId, "amazon");
     return u.toString();
   } catch {
     return "";
@@ -14801,7 +11945,7 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
     return "";
 
   } catch (e) {
-    console.log("[ERRO]âŒ Erro ao gerar link afiliado do cliente:", {
+    console.log("[ERRO]❌ Erro ao gerar link afiliado do cliente:", {
       clienteId,
       marketplace,
       erro: e.message
@@ -14815,74 +11959,63 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
 
 function normalizarSessaoId(clienteId, id = "sessao1") {
 
-  const cliente = String(clienteId || "admin").trim();
+  const cliente = String(clienteId || "admin").trim() || "admin";
 
   let sessao = String(id || "sessao1").trim();
 
-  // remove duplicaÃƒÂ§ÃƒÂ£o
   if (sessao.startsWith(cliente + "_")) {
     sessao = sessao.slice((cliente + "_").length);
   }
 
-  // evita admin_admin_sessao1
-  sessao = sessao.replace(/^admin_/g, "");
+  sessao = sessao
+    .replace(/[^a-zA-Z0-9_.-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  if (!sessao) sessao = "sessao1";
 
   return `${cliente}_${sessao}`;
 }
 
-function resolverClienteMensageiroPorSessao(sessao = "") {
-  const idSessao = String(sessao || "").trim();
-
-  if (/^admin(?:_|$)/.test(idSessao)) {
-    return {
-      clienteIdMensageiro: "admin",
-      origemResolucao: "prefixo_sessao"
-    };
-  }
-
-  const usuarioPrefixo = (usuarios || [])
-    .map(usuario => String(usuario?.id || "").trim())
-    .filter(clienteId =>
-      clienteId.startsWith("user_") &&
-      (idSessao === clienteId || idSessao.startsWith(`${clienteId}_`))
-    )
-    .sort((a, b) => b.length - a.length)[0];
-
-  if (usuarioPrefixo) {
-    return {
-      clienteIdMensageiro: usuarioPrefixo,
-      origemResolucao: "prefixo_sessao"
-    };
-  }
-
-  const matchUser = idSessao.match(/^(user_[^_]+)(?:_|$)/);
-  if (matchUser?.[1]) {
-    return {
-      clienteIdMensageiro: matchUser[1],
-      origemResolucao: "prefixo_sessao"
-    };
-  }
-
-  const meta = sessoesMeta?.[idSessao] || {};
-  const clienteMapa = String(
-    meta.clienteId ||
-    meta.clienteIdMensageiro ||
-    meta.donoClienteId ||
-    ""
-  ).trim();
-
-  if (clienteMapa) {
-    return {
-      clienteIdMensageiro: clienteMapa,
-      origemResolucao: "mapa_sessao"
-    };
-  }
-
-  return {
-    clienteIdMensageiro: "admin",
-    origemResolucao: "fallback"
-  };
+function authPathSessao(id = "") {
+  return path.join(storage, `auth_${String(id || "").trim()}`);
 }
+
+async function encerrarSocketSessao(id = "") {
+  const sessao = sessoes[id];
+  const sock = sessao?.sock || sessao;
+  if (!sock) return;
+
+  try { if (typeof sock.logout === "function") await sock.logout(); } catch (e) { console.log("[AVISO] logout ignorado ao excluir:", e.message); }
+  try { if (typeof sock.end === "function") sock.end(); } catch (e) { console.log("[AVISO] end ignorado ao excluir:", e.message); }
+  try { if (typeof sock.ws?.close === "function") sock.ws.close(); } catch (e) { console.log("[AVISO] ws.close ignorado ao excluir:", e.message); }
+}
+
+async function excluirSessaoWhatsappCliente(clienteId, idRecebido, opcoes = {}) {
+  const cliente = String(clienteId || "admin").trim();
+  const id = normalizarSessaoId(cliente, idRecebido);
+  if (!sessaoPertenceCliente(id, cliente)) throw new Error("Sessao nao pertence ao cliente informado");
+
+  await encerrarSocketSessao(id);
+  delete sessoes[id];
+  delete qrCodes[id];
+  delete statusSessao[id];
+  delete destinosPorSessao[id];
+  delete gruposPorSessao[id];
+  delete reconectando[id];
+
+  removerReferenciasSessao([id], cliente);
+  removerSessoesCliente(cliente, [id]);
+  salvarDestinosClientes();
+  salvarConfigsClientes();
+  salvarConfig();
+
+  if (opcoes.removerAuth !== false) {
+    fs.rmSync(authPathSessao(id), { recursive: true, force: true });
+  }
+
+  return { id };
+}
+
 // ============== HELPERS DISTRIBUIDOR OFERTAS ==================================
 
 function usuarioPodeReceberMarketplace(usuario, marketplace) {
@@ -14895,7 +12028,7 @@ function usuarioPodeReceberMarketplace(usuario, marketplace) {
 
   const plano = getPlanoPorNome(usuario.plano) || {};
 
-  const marketplacesLiberados = (plano.marketplaces || []).map(item => normalizarTexto(item));
+  const marketplacesLiberados = plano.marketplaces || [];
 
   return marketplacesLiberados.includes(
     normalizarTexto(marketplace || "")
@@ -14975,44 +12108,17 @@ function usuarioTemIntegracaoMarketplace(clienteId, marketplace) {
 
 // =============== FUNCAO DISTRIBUIDOR OFERTAS ======================================
 
-async function distribuirOfertaParaClientes(ofertaBase, opcoes = {}) {
+async function distribuirOfertaParaClientes(ofertaBase) {
 
   ofertaBase = prepararOfertaGlobal(ofertaBase);
-  const clienteAlvo = opcoes.clienteId ? String(opcoes.clienteId) : "";
-  const contextoDistribuicao = String(opcoes.contexto || "");
-  const onAdicionada = typeof opcoes.onAdicionada === "function" ? opcoes.onAdicionada : null;
-  const onRecusada = typeof opcoes.onRecusada === "function" ? opcoes.onRecusada : null;
-  const podeAdicionar = typeof opcoes.podeAdicionar === "function" ? opcoes.podeAdicionar : null;
-  const resumoDistribuicao = { adicionadas: 0, recusadas: 0, clientes: [] };
-  const registrarRecusaDistribuicao = (clienteId, motivo, dados = {}) => {
-    resumoDistribuicao.recusadas += 1;
-    if (onRecusada) {
-      onRecusada({
-        clienteId,
-        motivo,
-        marketplace: normalizarTexto(ofertaBase.marketplace || ""),
-        titulo: ofertaBase.titulo || ofertaBase.nome || "",
-        contexto: contextoDistribuicao,
-        ...dados
-      });
-    }
-  };
 
   for (const usuario of usuarios) {
     if (!usuario?.ativo) continue;
 
     const clienteId = usuario.id;
-    if (clienteAlvo && String(clienteId) !== clienteAlvo) continue;
-
     const adminMaster = usuario.papel === "admin_master";
 
     const mp = normalizarTexto(ofertaBase.marketplace || "");
-
-    console.log("ðŸš¨ DISTRIBUIDOR RECEBEU", {
-      clienteId,
-      titulo: ofertaBase.titulo,
-      marketplace: mp
-    });
 
     if (!usuarioPodeReceberMarketplace(usuario, mp)) {
 
@@ -15021,14 +12127,11 @@ async function distribuirOfertaParaClientes(ofertaBase, opcoes = {}) {
         plano: usuario.plano,
         marketplace: mp
       });
-      registrarRecusaDistribuicao(clienteId, "plano_sem_marketplace", {
-        plano: usuario.plano
-      });
       continue;
     }
 
 
-logDebug("[DEBUG]âœ… CHECK INTEGRAO:", {
+console.log("[DEBUG]✅ CHECK INTEGRAO:", {
   clienteId,
   marketplace: mp,
   integracao: !!getIntegracaoCliente(clienteId, mp),
@@ -15038,12 +12141,11 @@ logDebug("[DEBUG]âœ… CHECK INTEGRAO:", {
    if (!usuarioTemIntegracaoMarketplace(clienteId, mp)) {
      logOptimus("INTEGRACAO", "Usuario sem integracao configurada", {
      clienteId,
-      marketplace: mp,
-       titulo: ofertaBase.titulo
-    });
-    registrarRecusaDistribuicao(clienteId, "integracao_ausente");
-    continue;
-    }
+     marketplace: mp,
+      titulo: ofertaBase.titulo
+   });
+   continue;
+   }
 
     const linkOriginal =
       ofertaBase.linkOriginal ||
@@ -15071,7 +12173,6 @@ logDebug("[DEBUG]âœ… CHECK INTEGRAO:", {
     marketplace: mp,
     titulo: ofertaBase.titulo
   });
-  registrarRecusaDistribuicao(clienteId, "sem_link_afiliado");
   continue;
 }
 
@@ -15085,7 +12186,6 @@ if (mp === "mercadolivre" && linkAfiliadoIgualOriginal) {
     titulo: ofertaBase.titulo,
     linkOriginal
   });
-  registrarRecusaDistribuicao(clienteId, "link_afiliado_igual_original");
   continue;
 }
 
@@ -15126,10 +12226,7 @@ if (linkAfiliadoIgualOriginal) {
       )
     );
 
- if (jaExisteCliente) {
-  registrarRecusaDistribuicao(clienteId, "duplicada_cliente");
-  continue;
-}
+ if (jaExisteCliente) continue;
 
 if (deveIgnorarOfertaRepetida(ofertaCliente)) {
   console.log("[INFO] Oferta automtica ignorada pela memria:", {
@@ -15137,7 +12234,6 @@ if (deveIgnorarOfertaRepetida(ofertaCliente)) {
     marketplace: ofertaCliente.marketplace,
     titulo: ofertaCliente.titulo
   });
-  registrarRecusaDistribuicao(clienteId, "memoria_repetida");
   continue;
 }
 
@@ -15146,7 +12242,7 @@ ofertaCliente.statusDetalhe = ofertaCliente.statusDetalhe || "Na fila";
 validarCupomMonetarioOferta(ofertaCliente);
 aplicarPrioridadeEnvioOferta(ofertaCliente);
 
-// Ã¢Â­Â SCORE V1
+// â­ SCORE V1
 try {
   const resultadoScore = calcularScoreOferta(ofertaCliente);
 
@@ -15155,7 +12251,7 @@ try {
   ofertaCliente.descontoScore = resultadoScore.desconto;
   ofertaCliente.motivosScore = resultadoScore.motivos;
 
-    logDebug("[DEBUG] SCORE OFERTA:", {
+    console.log("[DEBUG] SCORE OFERTA:", {
     titulo: ofertaCliente.titulo || ofertaCliente.nome,
     score: ofertaCliente.score,
     nivel: ofertaCliente.nivelScore,
@@ -15167,54 +12263,12 @@ try {
   console.log("[ERRO] Erro ao calcular score:", e.message);
 }
 
-if (contextoDistribuicao === "resgate_fila" && !ofertaBoaParaResgateFila(ofertaCliente)) {
-  console.log("[RESGATE-FILA] oferta recusada", {
-    clienteId,
-    marketplace: ofertaCliente.marketplace,
-    titulo: ofertaCliente.titulo,
-    motivo: "comum_fraca",
-    score: ofertaCliente.score,
-    desconto: ofertaCliente.descontoScore
-  });
-  registrarRecusaDistribuicao(clienteId, "comum_fraca", {
-    score: ofertaCliente.score,
-    desconto: ofertaCliente.descontoScore
-  });
-  continue;
-}
-
-if (reterShopeePrecoSuspeitoSeNecessario(ofertaCliente)) {
-  if (podeAdicionar && !podeAdicionar(ofertaCliente)) {
-    registrarRecusaDistribuicao(clienteId, "limite_resgate_atingido");
-    continue;
-  }
-  registrarOfertaVista(ofertaCliente);
-  fila.push(ofertaCliente);
-  salvarFila(clienteId);
-  resumoDistribuicao.adicionadas += 1;
-  resumoDistribuicao.clientes.push(clienteId);
-  if (onAdicionada) onAdicionada(ofertaCliente);
-  continue;
-}
-
-if (deveBloquearShopeeComumPorExcessoFila(clienteId, ofertaCliente)) {
-  registrarRecusaDistribuicao(clienteId, "shopee_comum_excesso_fila");
-  continue;
-}
-
-if (podeAdicionar && !podeAdicionar(ofertaCliente)) {
-  registrarRecusaDistribuicao(clienteId, "limite_resgate_atingido");
-  continue;
-}
 registrarOfertaVista(ofertaCliente);
 
 logPrioridadeFila(ofertaCliente);
 fila.push(ofertaCliente);
 
 salvarFila(clienteId);
-resumoDistribuicao.adicionadas += 1;
-resumoDistribuicao.clientes.push(clienteId);
-if (onAdicionada) onAdicionada(ofertaCliente);
 
 console.log("[INFO] Oferta distribuda para cliente:", {
   clienteId,
@@ -15223,8 +12277,6 @@ console.log("[INFO] Oferta distribuda para cliente:", {
 });
 
   }
-
-  return resumoDistribuicao;
 }
 
       async function buscarTermoAliExpress(termo, tipo) {
@@ -15338,17 +12390,17 @@ console.log("[INFO] Oferta distribuda para cliente:", {
             const palavrasBloqueadas = [
               "cabelo",
               "peruca",
-              "extensÃƒÂ£o",
-              "extensÃƒÂµes",
+              "extensÃ£o",
+              "extensÃµes",
               "sapato",
-              "sandÃƒÂ¡lia",
+              "sandÃ¡lia",
               "chinelo",
               "salto",
               "batom",
-              "cÃƒÂ­lios",
+              "cÃ­lios",
               "unha",
               "bolsa",
-              "sutiÃƒÂ£",
+              "sutiÃ£",
               "calcinha",
               "wedding",
               "bridal"
@@ -15368,7 +12420,7 @@ console.log("[INFO] Oferta distribuda para cliente:", {
               Number(cfg.descontoMinimoInternacional) || descontoMinimo;
 
             const minimoDescontoAplicado =
-              tipo === "Ã°Å¸Å’Â"
+              tipo === "ðŸŒ"
                 ? descontoMinimoInternacional
                 : descontoMinimo;
 
@@ -15423,18 +12475,18 @@ console.log("[INFO] Oferta distribuda para cliente:", {
 
             await new Promise(r => setTimeout(r, 1500));
           } catch (e) {
-            console.log("[ERRO]âŒ erro produto AliExpress API:", e.message);
+            console.log("[ERRO]❌ erro produto AliExpress API:", e.message);
           }
         }    
 
     for (const termo of buscasBrasil) {
-      await buscarTermoAliExpress(termo, "Ã°Å¸â€¡Â§Ã°Å¸â€¡Â·");
+      await buscarTermoAliExpress(termo, "ðŸ‡§ðŸ‡·");
       if (adicionadasNestaRodada >= limitePorRodada) break;
     }
 
     if (cfg.permitirInternacionalForte && adicionadasNestaRodada < limitePorRodada) {
       for (const termo of buscasInternacional) {
-        await buscarTermoAliExpress(termo, "Ã°Å¸Å’Â");
+        await buscarTermoAliExpress(termo, "ðŸŒ");
         if (adicionadasNestaRodada >= limitePorRodada) break;
       }
     }
@@ -15449,7 +12501,7 @@ console.log("[INFO] Oferta distribuda para cliente:", {
     );
 
     console.log(
-      `Â ðŸ”Ofertas AliExpress filtros universais: ${ofertasFiltradas.length}`
+      ` 🔍Ofertas AliExpress filtros universais: ${ofertasFiltradas.length}`
     );
 
   for (const oferta of ofertasFiltradas) {
@@ -15520,7 +12572,7 @@ async function farejarMagalu() {
       if (!response.ok) {
 
   console.log(
-    "Ã°Å¸â€ºÂ¡Ã¯Â¸Â Magalu bloqueou status:",
+    "ðŸ›¡ï¸ Magalu bloqueou status:",
     response.status,
     "- parando rodada."
   );
@@ -15649,7 +12701,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
 
     if (!integracaoAwin?.credenciais) {
       console.log(
-        "Ã¢ÂÅ’ Awin sem integraÃƒÂ§ÃƒÂ£o configurada:",
+        "âŒ Awin sem integraÃ§Ã£o configurada:",
         clienteId
       );
       return;
@@ -15663,7 +12715,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
 
     if (!fs.existsSync(caminhoFeed)) {
       console.log(
-        "Ã¢ÂÅ’ Feed Awin nÃƒÂ£o encontrado:",
+        "âŒ Feed Awin nÃ£o encontrado:",
         caminhoFeed
       );
       return;
@@ -15759,7 +12811,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
     );
 
     console.log(
-      `Ã°Å¸Â§Â  Ofertas Awin apÃƒÂ³s filtros universais: ${ofertasFiltradas.length}`
+      `ðŸ§  Ofertas Awin apÃ³s filtros universais: ${ofertasFiltradas.length}`
     );
 
    for (const oferta of ofertasFiltradas) {
@@ -15768,7 +12820,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
 
     console.log(`[INFO] Awin finalizado. Produtos adicionados: ${ofertasFiltradas.length}`);
   } catch (e) {
-    console.log("[ERRO]âŒ erro farejador Awin:", e.message);
+    console.log("[ERRO]❌ erro farejador Awin:", e.message);
   }
 }
 
@@ -15777,15 +12829,6 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
 
 app.post("/importar-produto", async (req, res) => {
   try {
-    const inicioRotaImportacaoMl = Date.now();
-    const marketplaceEntradaImportacao = detectarMarketplaceManual(req.body?.url, req.body?.marketplace);
-    const medirImportacaoManualMl = marketplaceEntradaImportacao === "mercadolivre";
-    const clienteId = getClienteId(req);
-
-    if (marketplaceEntradaImportacao && bloquearMarketplaceNaoLiberado(req, res, marketplaceEntradaImportacao)) {
-      return;
-    }
-
     const resultado = await importarProdutoManual(req, {
       getClienteId,
       integracoesPorCliente,
@@ -15799,71 +12842,6 @@ app.post("/importar-produto", async (req, res) => {
 
       gerarLinkAfiliadoMercadoLivre
     });
-
-    const marketplaceResultado = String(resultado.body?.marketplace || "").toLowerCase();
-    const avisoResultado = String(resultado.body?.aviso || "").toLowerCase();
-
-    if (["mercadolivre", "amazon"].includes(marketplaceResultado)) {
-      if (resultado.body?.manual === true && !resultado.body?.aviso) {
-        if (marketplaceResultado === "mercadolivre") {
-          const linkMlImportado = String(
-            resultado.body?.linkAfiliado ||
-            resultado.body?.linkFinal ||
-            resultado.body?.link ||
-            ""
-          ).trim();
-
-          if (/^https?:\/\/meli\.la\//i.test(linkMlImportado)) {
-            salvarResultadoTesteIntegracao(clienteId, "mercadolivre", {
-              status: "ok",
-              mensagem: MENSAGEM_TESTE_OK
-            });
-          }
-        }
-
-        if (marketplaceResultado === "amazon") {
-          const linkAmazonImportado = String(
-            resultado.body?.linkAfiliado ||
-            resultado.body?.linkFinal ||
-            resultado.body?.link ||
-            resultado.body?.linkOriginal ||
-            ""
-          ).trim();
-          const tagAmazon = extrairTagAmazonIntegracao(integracoesPorCliente?.[clienteId]?.amazon || {});
-
-          if (linkAmazonImportado && (!tagAmazon || linkAmazonImportado.includes(`tag=${encodeURIComponent(tagAmazon)}`) || linkAmazonImportado.includes(`tag=${tagAmazon}`))) {
-            salvarResultadoTesteIntegracao(clienteId, "amazon", {
-              status: "ok",
-              mensagem: MENSAGEM_TESTE_OK
-            });
-          }
-        }
-
-        limparAlertaIntegracao(clienteId, marketplaceResultado);
-      } else if (avisoResultado.includes("erro ao consultar")) {
-        if (marketplaceResultado === "mercadolivre") {
-          registrarAlertaMercadoLivre(clienteId, "importacao_falhou", {
-            aviso: resultado.body?.aviso || ""
-          });
-        }
-
-        if (marketplaceResultado === "amazon") {
-          registrarAlertaAmazon(clienteId, "importacao_falhou", {
-            aviso: resultado.body?.aviso || ""
-          });
-        }
-      }
-    }
-
-    if (medirImportacaoManualMl) {
-      console.log("[PERF][ML_IMPORTACAO_MANUAL_ROTA]", {
-        clienteId,
-        marketplaceResultado,
-        duracaoMs: Date.now() - inicioRotaImportacaoMl,
-        statusCode: resultado.status || 200,
-        temAviso: !!resultado.body?.aviso
-      });
-    }
 
     return res
       .status(resultado.status || 200)
@@ -15892,10 +12870,10 @@ app.get("/sessoes", (req, res) => {
 });
 
 app.post("/sessoes", (req, res) => {
-   console.log("[WHATSAPP] Nova sesso solicitada:", {
-  nome: req.body?.nome,
-  id: req.body?.id
-});
+  console.log("[WHATSAPP] Nova sessao solicitada:", {
+    nome: req.body?.nome,
+    id: req.body?.id
+  });
 
   const clienteId = getClienteId(req);
 
@@ -15904,66 +12882,45 @@ app.post("/sessoes", (req, res) => {
   }
 
   const planoUsuario = getPlanoUsuario(req);
-
-  const limite = isAdminMaster(req)
-  ? 999
-  : Number(planoUsuario?.limites?.sessoes || 1);
-
- const sessoesCliente = Object.values(sessoesMeta)
-  .filter(s => {
-    const id = String(s.id || "");
-
-    return (
-      id.startsWith(clienteId + "_") ||
-      id === clienteId ||
-      (clienteId === "admin" && id.startsWith("admin_"))
-    );
-  });
+  const limite = isAdminMaster(req) ? 999 : Number(planoUsuario?.limites?.sessoes || 1);
+  const sessoesCliente = listarSessoesWhatsappCliente(clienteId);
 
   if (!isAdminMaster(req) && sessoesCliente.length >= limite) {
-  return res.status(403).json({
-    ok: false,
-    erro: `Seu plano permite apenas ${limite} sessÃƒÂ£o(ÃƒÂµes).`
-  });
-}
+    return res.status(403).json({
+      ok: false,
+      erro: `Seu plano permite apenas ${limite} sessao(oes).`
+    });
+  }
 
   try {
     const nome = req.body.nome || "WhatsApp";
     const tipo = req.body.tipo || "whatsapp";
-
     const idRecebido = String(req.body.id || "").trim();
+    const nomeSessao = !idRecebido || idRecebido === "sessao1"
+      ? gerarProximaSessaoId(clienteId)
+      : idRecebido;
+    const id = normalizarSessaoId(clienteId, nomeSessao);
 
-    const nomeSessao =
-    !idRecebido || idRecebido === "sessao1"
-    ? gerarProximaSessaoId(clienteId)
-    : idRecebido;
-
-const id = normalizarSessaoId(
-  clienteId,
-  nomeSessao
-);
-
-    if (sessoesMeta[id]) {
+    if (lerSessoesClienteMap(clienteId)[id] || sessoesMeta[id]) {
       return res.status(400).json({
         ok: false,
-        erro: "SessÃƒÂ£o jÃƒÂ¡ existe"
+        erro: "Sessao ja existe"
       });
     }
 
-    sessoesMeta[id] = {
+    const sessao = salvarSessaoCliente(clienteId, {
       id,
       nome,
       tipo,
+      status: statusSessao[id] || "offline",
       criadoEm: new Date().toISOString()
-    };
+    });
 
-    salvarSessoesMeta();
-
-console.log("[WHATSAPP]ðŸ’¾ Sesso criada e salva:", sessoesMeta[id]);
+    console.log("[WHATSAPP] Sessao criada e salva:", sessao);
 
     return res.json({
       ok: true,
-      sessao: sessoesMeta[id]
+      sessao
     });
   } catch (e) {
     return res.status(500).json({
@@ -15975,84 +12932,12 @@ console.log("[WHATSAPP]ðŸ’¾ Sesso criada e salva:", sessoesMeta[id]);
 
 app.delete("/sessoes/:id", async (req, res) => {
   try {
-  const clienteId = getClienteId(req);
-
-  const id = normalizarSessaoId(
-  clienteId,
-  req.params.id
-  );
-
-const idsPossiveis = [...new Set([
-  id,
-  req.params.id
-])];
-
-    try {
-      if (sessoes[id]?.sock?.logout) {
-        await sessoes[id].sock.logout();
-      }
-    } catch (e) {
-      console.log("[AVISO] logout ignorado ao excluir:", e.message);
-    }
-
-    try {
-      sessoes[id]?.sock?.end?.();
-    } catch (e) {
-      console.log("[AVISO] end ignorado ao excluir:", e.message);
-    }
-
-for (const sid of idsPossiveis) {
-  delete sessoes[sid];
-  delete qrCodes[sid];
-  delete statusSessao[sid];
-  delete destinosPorSessao[sid];
-  delete gruposPorSessao[sid];
-  delete reconectando[sid];
-  delete sessoesMeta[sid];
-
-  fs.rmSync("/data/auth_" + sid, {
-    recursive: true,
-    force: true
-  });
-}
-
-removerReferenciasSessao(idsPossiveis, clienteId);
-
-const destinosCliente = destinosPorCliente?.[clienteId] || [];
-
-const listasDestinosCliente = Array.isArray(destinosCliente)
-  ? [destinosCliente]
-  : Object.values(destinosCliente || {}).filter(Array.isArray);
-
-for (const listaDestino of listasDestinosCliente) {
-  for (const destino of listaDestino) {
-    if (destino.conexaoId && idsPossiveis.includes(destino.conexaoId)) {
-      destino.conexaoId = "";
-    }
-
-    if (Array.isArray(destino.sessoes)) {
-      destino.sessoes = destino.sessoes.filter(
-        s => !idsPossiveis.includes(s)
-      );
-    }
-
-    if (Array.isArray(destino.sessoesWhatsapp)) {
-      destino.sessoesWhatsapp = destino.sessoesWhatsapp.filter(
-        s => !idsPossiveis.includes(s)
-      );
-    }
-  }
-}
-
-salvarDestinosClientes();
-salvarConfigsClientes();
-salvarConfig();
-
-    salvarSessoesMeta();
+    const clienteId = getClienteId(req);
+    const { id } = await excluirSessaoWhatsappCliente(clienteId, req.params.id, { removerAuth: true });
 
     return res.json({
       ok: true,
-      message: "SessÃƒÂ£o excluÃƒÂ­da com sucesso",
+      message: "Sessao excluida com sucesso",
       id
     });
   } catch (e) {
@@ -16064,70 +12949,17 @@ salvarConfig();
 });
 
 app.post("/reset/:id", async (req, res) => {
- const clienteId = getClienteId(req);
- const id = normalizarSessaoId(clienteId, req.params.id);
-
   try {
-    console.log("[WHATSAPP] Resetando sesso:", id);
-
-    if (typeof reconectando !== "undefined") {
-      reconectando[id] = false;
-    }
-
-    if (sessoes[id]) {
-
-      try {
-        await sessoes[id]?.logout?.();
-      } catch (e) {
-        console.log("[AVISO] logout ignorado:", e.message);
-      }
-
-      try {
-        sessoes[id]?.end?.();
-      } catch (e) {
-        console.log("[AVISO] end ignorado:", e.message);
-      }
-
-      delete sessoes[id];
-    }
-
-    if (typeof qrCodes !== "undefined") {
-      delete qrCodes[id];
-    }
-
-    if (typeof statusSessao !== "undefined") {
-      delete statusSessao[id];
-    }
-
-    if (typeof destinosPorSessao !== "undefined") {
-      delete destinosPorSessao[id];
-    }
-
-    delete gruposPorSessao[id];
-    delete reconectando[id];
-    delete sessoesMeta[id];
-
-    removerReferenciasSessao([id], clienteId);
-    salvarDestinosClientes();
-    salvarConfigsClientes();
-    salvarConfig();
-    salvarSessoesMeta();
-       
-     
-    fs.rmSync("/data/auth_" + id, {
-      recursive: true,
-      force: true
-    });
+    const clienteId = getClienteId(req);
+    const { id } = await excluirSessaoWhatsappCliente(clienteId, req.params.id, { removerAuth: true });
 
     return res.json({
       ok: true,
-      message: "SessÃƒÂ£o resetada. Gere novo QR.",
+      message: "Sessao resetada. Gere novo QR.",
       id
     });
-
   } catch (e) {
-    console.log("[ERRO]âŒ [WHATSAPP] erro reset sesso:", e.message);
-
+    console.log("[ERRO] [WHATSAPP] erro reset sessao:", e.message);
     return res.status(500).json({
       ok: false,
       erro: e.message
@@ -16135,7 +12967,7 @@ app.post("/reset/:id", async (req, res) => {
   }
 });
 
-// ===================== FUNÃƒâ€¡ÃƒÆ’O LIMETE SESSÃƒÆ’O WHATSAPP ========================
+// ===================== FUNÃ‡ÃƒO LIMETE SESSÃƒO WHATSAPP ========================
 
 function obterLimiteSessoesCliente(clienteId) {
   const usuario = obterUsuario(clienteId);
@@ -16150,19 +12982,8 @@ function obterLimiteSessoesCliente(clienteId) {
 }
 
 function listarSessoesCliente(clienteId) {
-  if (bloquearRecursoNaoLiberado(req, res, "whatsapp", "WhatsApp nao disponivel no seu plano")) {
-    return;
-  }
-
-  if (bloquearRecursoNaoLiberado(req, res, "whatsapp", "WhatsApp nao disponivel no seu plano")) {
-    return;
-  }
-
-  config.sessoesWhatsapp = config.sessoesWhatsapp || [];
-
-  return config.sessoesWhatsapp.filter(id =>
-    String(id).startsWith(`${clienteId}_`)
-  );
+  return Object.keys(lerSessoesClienteMap(clienteId))
+    .filter(id => sessaoPertenceCliente(id, clienteId));
 }
 
 function gerarProximaSessaoId(clienteId) {
@@ -16188,53 +13009,56 @@ app.post("/conectar", async (req, res) => {
   const clienteId = getClienteId(req);
 
   if (!clienteId) {
-    return res.status(401).json({ erro: "UsuÃƒÂ¡rio nÃƒÂ£o identificado" });
+    return res.status(401).json({ erro: "Usuario nao identificado" });
+  }
+
+  if (bloquearRecursoNaoLiberado(req, res, "whatsapp", "WhatsApp nao disponivel no seu plano")) {
+    return;
   }
 
   config.sessoesWhatsapp = config.sessoesWhatsapp || [];
 
- const limiteSessoes = isAdminMaster(req)
-  ? 999
-  : obterLimiteSessoesCliente(clienteId);
+  const limiteSessoes = isAdminMaster(req) ? 999 : obterLimiteSessoesCliente(clienteId);
+  const sessoesCliente = listarSessoesCliente(clienteId);
 
-const sessoesCliente = listarSessoesCliente(clienteId);
-
-if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
-
-
+  if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
     return res.status(403).json({
       ok: false,
-      erro: `Seu plano permite atÃƒÂ© ${limiteSessoes} sessÃƒÂ£o(ÃƒÂµes) WhatsApp.`,
+      erro: `Seu plano permite ate ${limiteSessoes} sessao(oes) WhatsApp.`,
       limite: limiteSessoes,
       usadas: sessoesCliente.length
     });
   }
 
-  const idRecebido = String(
-    req.body?.id ||
-    req.body?.sessaoId ||
-    ""
-  ).trim();
-
-  const idBase =
-    !idRecebido || idRecebido === "sessao1"
-      ? gerarProximaSessaoId(clienteId)
-      : idRecebido;
-
+  const idRecebido = String(req.body?.id || req.body?.sessaoId || "").trim();
+  const idBase = !idRecebido || idRecebido === "sessao1"
+    ? gerarProximaSessaoId(clienteId)
+    : idRecebido;
   const sessaoId = normalizarSessaoId(clienteId, idBase);
 
-  if (config.sessoesWhatsapp.includes(sessaoId)) {
+  if (listarSessoesCliente(clienteId).includes(sessaoId) || sessoesMeta[sessaoId]) {
     return res.status(400).json({
       ok: false,
-      erro: "JÃƒÂ¡ existe uma conexÃƒÂ£o com esse ID. Tente criar uma nova conexÃƒÂ£o novamente.",
+      erro: "Ja existe uma conexao com esse ID. Tente criar uma nova conexao novamente.",
       id: sessaoId
     });
   }
 
-  config.sessoesWhatsapp.push(sessaoId);
+  if (!config.sessoesWhatsapp.includes(sessaoId)) {
+    config.sessoesWhatsapp.push(sessaoId);
+  }
+
+  salvarSessaoCliente(clienteId, {
+    id: sessaoId,
+    nome: req.body?.nome || sessaoId,
+    tipo: "whatsapp",
+    status: statusSessao[sessaoId] || "loading",
+    criadoEm: new Date().toISOString()
+  });
+
   salvarConfig();
 
-  console.log("[WHATSAPP]ðŸ’¾ Sesso WhatsApp salva para reconexo:", {
+  console.log("[WHATSAPP] Sessao WhatsApp salva para reconexao:", {
     clienteId,
     sessaoId,
     limiteSessoes,
@@ -16245,26 +13069,27 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
 
   return res.json({
     ok: true,
-    message: "SessÃƒÂ£o iniciada",
+    message: "Sessao iniciada",
     id: sessaoId
   });
 });
-
 
 // ================= FUNCAO CARREGAR SESSAO ID ==========================
 
 async function carregarGruposSessao(id, opcoes = {}) {
   const force = opcoes.force === true;
 
-  const resolucaoClienteMensageiro = opcoes.clienteId
-    ? { clienteIdMensageiro: opcoes.clienteId, origemResolucao: "mapa_sessao" }
-    : resolverClienteMensageiroPorSessao(id);
-  const clienteId = resolucaoClienteMensageiro.clienteIdMensageiro;
+  const clienteId =
+    opcoes.clienteId ||
+    (
+      id.startsWith("user_") && id.includes("_sessao")
+        ? id.split("_sessao")[0]
+        : "admin"
+    );
 
   console.log("[WHATSAPP] Tentando carregar grupos da sesso:", {
     id,
-    clienteId,
-    origemResolucao: resolucaoClienteMensageiro.origemResolucao
+    clienteId
   });
 
   const idNormalizado = normalizarSessaoId(clienteId, id);
@@ -16300,7 +13125,7 @@ async function carregarGruposSessao(id, opcoes = {}) {
  const grupos = await sock.groupFetchAllParticipating();
 
 console.log(
-   "ðŸ‘¥ Grupos carregados:",
+   "👥 Grupos carregados:",
   Object.keys(grupos || {}).length
 );
 
@@ -16329,14 +13154,6 @@ console.log(
 
 app.post("/magalu/gerar-link", (req, res) => {
   try {
-    if (bloquearMarketplaceNaoLiberado(req, res, "magalu")) {
-      return;
-    }
-
-    if (bloquearRecursoNaoLiberado(req, res, "linkOptimus", "Link Optimus nao disponivel no seu plano")) {
-      return;
-    }
-
     const { link } = req.body;
 
     const promoterId = integracoes?.magalu?.promoterId;
@@ -16344,7 +13161,7 @@ app.post("/magalu/gerar-link", (req, res) => {
     if (!promoterId) {
       return res.status(400).json({
         ok: false,
-        erro: "Magalu nÃƒÂ£o configurada."
+        erro: "Magalu nÃ£o configurada."
       });
     }
 
@@ -16394,7 +13211,7 @@ app.get("/grupos/:id", async (req, res) => {
         grupos: gruposPorSessao[id] || [],
         gruposLista: gruposPorSessao[id] || [],
         cache: true,
-        aviso: "SessÃƒÂ£o nÃƒÂ£o estÃƒÂ¡ conectada."
+        aviso: "SessÃ£o nÃ£o estÃ¡ conectada."
       });
     }
 
@@ -16536,17 +13353,17 @@ app.get("/status/:id", (req, res) => {
 app.get("/fila/status", (req, res) => {
   const clienteId = getClienteId(req);
 
-  sanearEstadosFilaCliente(clienteId);
-
   const itensCliente = fila.filter(o =>
     String(o.clienteId || "admin") === String(clienteId)
-  ).map(normalizarItemFilaParaResposta);
-  const resumo = resumirStatusFila(itensCliente);
+  );
 
   return res.json({
     ok: true,
     clienteId,
-    ...resumo
+    total: itensCliente.length,
+    pendentes: itensCliente.filter(o => o.status === "pendente").length,
+    enviados: itensCliente.filter(o => o.status === "enviado").length,
+    erros: itensCliente.filter(o => o.status === "erro").length
   });
 });
 
@@ -16558,10 +13375,6 @@ app.post("/destinos/:id", (req, res) => {
 
   if (!Array.isArray(destinos)) {
     return res.status(400).json({ erro: "destinos deve ser array" });
-  }
-
-  if (!validarDestinosPlano(req, res, destinos)) {
-    return;
   }
 
 const planoUsuario = getPlanoUsuario(req);
@@ -16596,7 +13409,7 @@ const limiteDestinos = isAdminMaster(req)
  destinosPorCliente[clienteId][id] = destinos;
 
  salvarDestinosClientes();
-  console.log("[DESTINO]ðŸ’¾ Destinos salvos na config:", id, destinos);
+  console.log("[DESTINO]💾 Destinos salvos na config:", id, destinos);
 
   return res.json({
     ok: true,
@@ -16627,10 +13440,6 @@ app.post("/campanhas/enviar", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
 
-    if (bloquearRecursoNaoLiberado(req, res, "campanhas", "Campanhas nao disponivel no seu plano")) {
-      return;
-    }
-
     const {
       mensagem,
       imagemUrl,
@@ -16656,7 +13465,7 @@ app.post("/campanhas/enviar", async (req, res) => {
     });
 
   } catch (e) {
-    console.log("[ERRO]âŒ Erro campanha manual:", e.message);
+    console.log("[ERRO]❌ Erro campanha manual:", e.message);
 
     return res.status(400).json({
       ok: false,
@@ -16667,22 +13476,14 @@ app.post("/campanhas/enviar", async (req, res) => {
 
 // ================= TELEGRAM =================
 
-async function enviarTelegram(oferta, mensagem, clienteIdAlvo = "") {
+async function enviarTelegram(oferta, mensagem) {
   try {
-    const clienteId = String(
-      clienteIdAlvo ||
-      oferta?.clienteId ||
-      oferta?.origemClienteId ||
-      "admin"
-    );
-    const telegram = normalizarTelegramCliente(getConfigCliente(clienteId));
-
-    if (!telegram.ativo) {
+    if (!config.telegram?.ativo) {
       console.log("[TELEGRAM] Telegram desativado.");
       return;
     }
 
-    const destinos = telegram.destinos || [];
+    const destinos = config.telegram?.destinos || [];
 
     if (!destinos.length) {
       console.log("[TELEGRAM] Nenhum destino Telegram configurado.");
@@ -16724,7 +13525,7 @@ async function enviarTelegram(oferta, mensagem, clienteIdAlvo = "") {
 }
 
          
-// ================= FUNCÃƒÆ’O WHATSAPP =================
+// ================= FUNCÃƒO WHATSAPP =================
 
 async function iniciarWhatsApp(id, force = false) {
   console.log("[WHATSAPP] Iniciando sesso:", id, "force:", force);
@@ -16773,13 +13574,11 @@ async function iniciarWhatsApp(id, force = false) {
 
   sock.ev.on("creds.update", saveCreds);
 
-const resolucaoClienteMensageiro = resolverClienteMensageiroPorSessao(id);
-const clienteIdMensageiro = resolucaoClienteMensageiro.clienteIdMensageiro;
+const clienteIdMensageiro = resolverClientePorSessaoWhatsapp(id);
 
-console.log("[INFO] Cliente mensageiro resolvido:", {
+console.log("[INFO] Cliente mensageiro:", {
   sessao: id,
-  clienteIdMensageiro,
-  origemResolucao: resolucaoClienteMensageiro.origemResolucao
+  clienteIdMensageiro
 });
 
 // =============== EVENTO MENSAGEIRO =================
@@ -16798,13 +13597,11 @@ sock.ev.on("messages.upsert", async ({ messages = [] } = {}) => {
         sessaoId: id,
         sock,
         mensagem,
-        planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro),
-        usuarioTemCreditos,
-        debitarCreditos
+        planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
       });
     }
   } catch (e) {
-    console.log("[MENSAGEIRO-ERRO]âš ï¸ messages.upsert:", e.message);
+    console.log("[MENSAGEIRO-ERRO]⚠️ messages.upsert:", e.message);
   }
 });
 
@@ -16824,12 +13621,10 @@ sock.ev.on("group-participants.update", async (evento) => {
       clienteId: clienteIdMensageiro,
       sessaoId: id,
       sock,
-      evento,
-      usuarioTemCreditos,
-      debitarCreditos
+      evento
     });
   } catch (e) {
-    console.log("[ERRO]âš ï¸ Erro evento Mensageiro:", e.message);
+    console.log("[ERRO]⚠️ Erro evento Mensageiro:", e.message);
   }
 });
 
@@ -16837,7 +13632,7 @@ sock.ev.on("group-participants.update", async (evento) => {
     const { connection, qr, lastDisconnect } = update;
 
     if (qr) {
-      console.log("[WHATSAPP]ðŸ“² QR RECEBIDO:", id);
+      console.log("[WHATSAPP]📲 QR RECEBIDO:", id);
       qrCodes[id] = await qrcode.toDataURL(qr);
       statusSessao[id] = "qr";
     }
@@ -16849,17 +13644,15 @@ sock.ev.on("group-participants.update", async (evento) => {
       qrCodes[id] = null;
       reconectando[id] = false;
 
-sessoesMeta[id] = sessoesMeta[id] || {
+salvarSessaoCliente(clienteIdMensageiro, {
+  ...(sessoesMeta[id] || {}),
   id,
-  nome: id,
+  nome: sessoesMeta[id]?.nome || id,
   tipo: "whatsapp",
-  criadoEm: new Date().toISOString()
-};
-
-sessoesMeta[id].status = "open";
-sessoesMeta[id].conectadoEm = new Date().toISOString();
-
-salvarSessoesMeta();
+  status: "open",
+  conectadoEm: new Date().toISOString(),
+  criadoEm: sessoesMeta[id]?.criadoEm || new Date().toISOString()
+});
 
   setTimeout(async () => {
   try {
@@ -16868,7 +13661,7 @@ salvarSessoesMeta();
   });
   } catch (e) {
     console.log(
-      "âš ï¸ Erro ao carregar grupos no pos conexao:",
+      "⚠️ Erro ao carregar grupos no pos conexao:",
       e.message
     );
   }
@@ -16955,7 +13748,7 @@ async function testarAwinProdutos() {
   } catch (e) {
 
     console.log(
-      "Ã¢ÂÅ’ erro teste awin:",
+      "âŒ erro teste awin:",
       e.response?.data || e.message
     );
 
@@ -17033,7 +13826,7 @@ console.log("[BOOT] Dados iniciais carregados:", {
 });
 
 app.listen(PORT, () => {
-  console.log("[API]ðŸŸ¢ðŸ§  API ONLINE NA PORTA " + PORT);
+  console.log("[API]🟢🧠 API ONLINE NA PORTA " + PORT);
 
 decairConfiancaCupons();
 
@@ -17280,22 +14073,19 @@ if (!admin) {
     const categoriaMarketplaceLog = categoriaLogMarketplace(marketplace);
     const inicioRodadaMs = Date.now();
     const totalFilaAntesRodada = Array.isArray(fila) ? fila.length : 0;
-    const resumoAbastecimento = criarResumoAbastecimento(marketplace);
-    abastecimentoRodadaAtual = resumoAbastecimento;
     let clientesProcessadosRodada = 0;
-    let adicionadasRetornadasRodada = 0;
     statusMarketplace.rodadas += 1;
     statusMarketplace.ultimoInicio = new Date().toISOString();
     statusMarketplace.ultimoErro = "";
 
-logOptimus("ORQUESTRADOR", opcoes.origem === "boot_mercadolivre" ? "ðŸš€ ML BOOT | Rodada inicial direta" : "Rodada iniciada", {
+logOptimus("ORQUESTRADOR", opcoes.origem === "boot_mercadolivre" ? "🚀 ML BOOT | Rodada inicial direta" : "Rodada iniciada", {
   marketplace,
   rodada: statusMarketplace.rodadas,
   intervaloAtualMinutos: Math.round(intervaloOrquestradorAtualMs() / 60000),
   origem: opcoes.origem || "orquestrador"
 });
 
-logOptimus(categoriaMarketplaceLog, "InÃ­cio da rodada", {
+logOptimus(categoriaMarketplaceLog, "Início da rodada", {
   marketplace,
   rodada: statusMarketplace.rodadas,
   origem: opcoes.origem || "orquestrador"
@@ -17350,7 +14140,7 @@ console.log("[INFO] CHAMANDO FAREJADOR:", {
 });
 
 
-const resultadoFarejador = await farejador(clienteId, {
+await farejador(clienteId, {
   config,
   integracoesPorCliente,
   getIntegracaoCliente,
@@ -17384,13 +14174,12 @@ const resultadoFarejador = await farejador(clienteId, {
   importarProdutoKabumViaAwin,
 
 });
-adicionadasRetornadasRodada += Number(resultadoFarejador?.adicionadas || resultadoFarejador?.adicionadasFila || resultadoFarejador?.adicionadosFila || 0) || 0;
 clientesProcessadosRodada += 1;
 }
   
   statusMarketplace.ultimaFinalizacao = new Date().toISOString();
   const totalFilaDepoisRodada = Array.isArray(fila) ? fila.length : totalFilaAntesRodada;
-  const adicionadasRodada = Math.max(0, totalFilaDepoisRodada - totalFilaAntesRodada, adicionadasRetornadasRodada);
+  const adicionadasRodada = Math.max(0, totalFilaDepoisRodada - totalFilaAntesRodada);
   const duracaoSegundos = Math.round((Date.now() - inicioRodadaMs) / 1000);
 
   logOptimus(categoriaMarketplaceLog, "Fim da rodada", {
@@ -17413,14 +14202,6 @@ clientesProcessadosRodada += 1;
     erros: 0,
     origem: opcoes.origem || "orquestrador"
   });
-
-  logResumoAbastecimento(resumoAbastecimento, {
-    rodada: statusMarketplace.rodadas,
-    clientesProcessados: clientesProcessadosRodada,
-    adicionadasCalculadasFila: adicionadasRodada,
-    duracaoSegundos,
-    origem: opcoes.origem || "orquestrador"
-  });
  
   } catch (e) {
     const statusMarketplace = obterStatusOrquestradorMarketplace(marketplace);
@@ -17433,7 +14214,6 @@ clientesProcessadosRodada += 1;
       origem: opcoes.origem || "orquestrador"
     });
   } finally {
-    abastecimentoRodadaAtual = null;
     farejadorRodando = false;
   }
 }
@@ -17446,7 +14226,7 @@ async function rodarProximoMarketplace() {
 if (!global.__optimusMlBootTimeoutRegistrado) {
   global.__optimusMlBootTimeoutRegistrado = true;
   setTimeout(() => {
-    logOptimus("MERCADOLIVRE", "ðŸš€ ML BOOT | Disparo inicial apos deploy", {
+    logOptimus("MERCADOLIVRE", "🚀 ML BOOT | Disparo inicial apos deploy", {
       delaySegundos: 60
     });
     rodarMarketplaceEspecifico("mercadolivre", { origem: "boot_mercadolivre" });
@@ -17485,21 +14265,9 @@ setInterval(() => {
     if (!usuario?.ativo) continue;
 
     processarFila(usuario.id);
-    acionarResgateFilaBaixaSeNecessario(usuario.id).catch(e => {
-      console.log("[RESGATE-FILA] finalizado", {
-        clienteId: usuario.id,
-        erro: e.message || "erro_resgate_automatico"
-      });
-    });
   }
 
 }, 10 * 1000);
-
-
-
-
-
-
 
 
 
