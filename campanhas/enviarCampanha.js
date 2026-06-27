@@ -1,6 +1,5 @@
 const axios = require("axios");
 const FormData = require("form-data");
-const telegramEnvioUtils = require("../utils/telegram-envio");
 
 async function enviarCampanhaManual({
   clienteId,
@@ -10,13 +9,9 @@ async function enviarCampanhaManual({
   destinosPorCliente,
   sessoes,
   configsPorCliente,
-  integracoesPorCliente,
-  configGlobal,
-  telegramStatusPorCliente,
   usuarioTemCreditos,
   debitarCreditos,
-  corrigirImagemUrl,
-  enviarDestinoCentral
+  corrigirImagemUrl
 }) {
   if (!clienteId) {
     throw new Error("clienteId obrigatório");
@@ -47,65 +42,21 @@ async function enviarCampanhaManual({
 
   for (const destino of destinosSelecionados) {
     try {
-    if (typeof enviarDestinoCentral === "function") {
-      const envioCentral = await enviarDestinoCentral({
-        clienteId,
-        destino,
-        mensagem,
-        imagemUrl,
-        fluxo: "campanha/manual",
-        ignorarHorario: true
-      });
-
-      if (envioCentral?.enviado) {
-        const enviadosDestino = Number(envioCentral.enviados || 1) || 1;
-        resultado.enviados += enviadosDestino;
-        resultado.detalhes.push({
-          destino: destino.nome,
-          tipo: destino.tipo,
-          status: "enviado",
-          creditos: enviadosDestino
-        });
-      } else {
-        resultado.erros++;
-        resultado.detalhes.push({
-          destino: destino.nome,
-          tipo: destino.tipo,
-          status: "erro",
-          motivo: envioCentral?.motivo || "nao_enviado"
-        });
-      }
-
-      continue;
-    }
-
     const tipo = String(destino.tipo || "").toLowerCase();
 
 if (tipo === "telegram") {
-  const resolucao = telegramEnvioUtils.resolverTelegramsDestino({
-    clienteId,
-    destino,
-    configsPorCliente,
-    integracoesPorCliente,
-    configGlobal
-  });
-  const selecionados = resolucao.selecionados;
+  const configCliente = configsPorCliente?.[clienteId] || {};
+  const telegrams = configCliente.telegram?.destinos || [];
+  const telegramsSelecionados = destino.telegramDestinos || [];
+
+  const selecionados = telegramsSelecionados.length
+    ? telegrams.filter(t =>
+        telegramsSelecionados.includes(t.nome) ||
+        telegramsSelecionados.includes(String(t.chatId))
+      )
+    : telegrams.filter(t => t.ativo);
 
   if (!selecionados.length) {
-    telegramEnvioUtils.logTelegramEnvio({
-      clienteId,
-      fluxo: "campanha/manual",
-      destinoId: destino.id || destino.conexaoId || destino.chatId || destino.grupo || "",
-      destinoEncontrado: !!destino,
-      tipoDestino: destino.tipo || "",
-      telegramsEncontrados: resolucao.telegrams.length,
-      telegramConfiguradoEncontrado: resolucao.telegrams.length > 0,
-      canalIdEncontrado: resolucao.telegrams.some(t => !!t.chatId),
-      grupoIdEncontrado: !!(destino.grupo || destino.chatId || destino.chat_id || destino.canal),
-      tokenEncontrado: resolucao.telegrams.some(t => !!t.botToken),
-      fallbackAtivos: resolucao.usouFallbackAtivos,
-      motivoRecusa: resolucao.telegrams.length ? "telegram_nao_casou_com_destino" : "telegram_nao_configurado"
-    });
     resultado.erros++;
     resultado.detalhes.push({
       destino: destino.nome,
@@ -117,33 +68,7 @@ if (tipo === "telegram") {
   }
 
   for (const tel of selecionados) {
-    if (tel.ativo === false) continue;
-
-    telegramEnvioUtils.logTelegramEnvio({
-      clienteId,
-      fluxo: "campanha/manual",
-      destinoId: destino.id || destino.conexaoId || destino.chatId || destino.grupo || "",
-      destinoEncontrado: !!destino,
-      tipoDestino: destino.tipo || "",
-      telegramsEncontrados: resolucao.telegrams.length,
-      telegramConfiguradoEncontrado: true,
-      canalIdEncontrado: !!tel.chatId,
-      grupoIdEncontrado: !!(destino.grupo || tel.chatId),
-      tokenEncontrado: !!tel.botToken,
-      fallbackAtivos: resolucao.usouFallbackAtivos,
-      motivoRecusa: !tel.botToken || !tel.chatId ? "telegram_incompleto" : ""
-    });
-
-    if (!tel.botToken || !tel.chatId) {
-      resultado.erros++;
-      resultado.detalhes.push({
-        destino: destino.nome,
-        tipo: "telegram",
-        status: "erro",
-        motivo: "Telegram incompleto"
-      });
-      continue;
-    }
+    if (!tel.ativo) continue;
 
     if (!usuarioTemCreditos(clienteId, 1)) {
       resultado.erros++;
