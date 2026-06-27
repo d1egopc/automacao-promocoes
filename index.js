@@ -983,10 +983,267 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
   return resultado;
 }
 
+const MARKETPLACES_ABASTECIMENTO_CLIENTE = [
+  "mercadolivre",
+  "amazon",
+  "shopee",
+  "aliexpress",
+  "kabum"
+];
+
+function marketplaceIntegracaoObrigatoria(marketplace = "") {
+  const mp = normalizarTexto(marketplace || "");
+  return mp === "kabum" ? "awin" : mp;
+}
+
+function obterUsuarioCliente(clienteId = "admin") {
+  const cliente = String(clienteId || "admin");
+  return usuarios.find(u => String(u?.id || "") === cliente) ||
+    (cliente === "admin" ? usuarios.find(u => u?.papel === "admin_master") : null);
+}
+
+function resumirFilaCliente(clienteId = "admin") {
+  const cliente = String(clienteId || "admin");
+  const itens = readClienteJson(cliente, "fila.json", []);
+  const lista = Array.isArray(itens) ? itens : [];
+
+  return {
+    total: lista.length,
+    pendentes: lista.filter(item => item?.status === "pendente").length,
+    enviadas: lista.filter(item => item?.status === "enviado").length,
+    retidas: lista.filter(item => item?.status === "retida").length,
+    erros: lista.filter(item => item?.status === "erro").length
+  };
+}
+
+function criarDiagnosticoAbastecimento(clienteId, marketplace) {
+  const resumo = {
+    clienteId,
+    marketplace,
+    encontradas: 0,
+    importadas: 0,
+    adicionadasEventos: 0,
+    recusas: {}
+  };
+
+  return {
+    resumo,
+    registrar(evento = "", dados = {}) {
+      const tipo = String(evento || "");
+
+      if (tipo === "encontradas") {
+        resumo.encontradas += Number(dados?.quantidade || 0) || 0;
+        return;
+      }
+
+      if (tipo === "importada") {
+        resumo.importadas += 1;
+        return;
+      }
+
+      if (tipo === "adicionada") {
+        resumo.adicionadasEventos += 1;
+        return;
+      }
+
+      if (tipo === "recusada") {
+        const motivo = String(dados?.motivo || "sem_motivo");
+        resumo.recusas[motivo] = (resumo.recusas[motivo] || 0) + 1;
+      }
+    }
+  };
+}
+
+async function executarFarejadorMarketplaceCliente(marketplace = "", clienteId = "admin") {
+  const mp = normalizarTexto(marketplace || "");
+  const cliente = String(clienteId || "admin");
+  const integracaoMarketplace = marketplaceIntegracaoObrigatoria(mp);
+  const usuario = obterUsuarioCliente(cliente);
+  const farejador = farejadoresMarketplaces?.[mp];
+  const cfg = config.marketplaces?.[mp];
+  const antes = resumirFilaCliente(cliente);
+  const diagnostico = criarDiagnosticoAbastecimento(cliente, mp);
+
+  const resultado = {
+    marketplace: mp,
+    clienteId: cliente,
+    habilitadoPlano: false,
+    integracaoConfigurada: false,
+    chamado: false,
+    encontrouProdutos: 0,
+    aprovouOfertas: 0,
+    tentouAdicionar: false,
+    adicionouNaFila: 0,
+    recusas: {},
+    pendentesAntes: antes.pendentes,
+    pendentesDepois: antes.pendentes,
+    totalAntes: antes.total,
+    totalDepois: antes.total,
+    motivo: ""
+  };
+
+  try {
+    if (!mp || typeof farejador !== "function") {
+      resultado.motivo = "farejador_indisponivel";
+      return resultado;
+    }
+
+    if (!cfg?.ativo) {
+      resultado.motivo = "marketplace_desativado";
+      return resultado;
+    }
+
+    if (!usuario?.ativo) {
+      resultado.motivo = "usuario_inativo_ou_nao_encontrado";
+      return resultado;
+    }
+
+    resultado.habilitadoPlano = usuarioPodeReceberMarketplace(usuario, mp);
+    if (!resultado.habilitadoPlano) {
+      resultado.motivo = "bloqueado_plano";
+      return resultado;
+    }
+
+    resultado.integracaoConfigurada = usuarioTemIntegracaoMarketplace(cliente, integracaoMarketplace);
+    if (!resultado.integracaoConfigurada) {
+      resultado.motivo = `integracao_${integracaoMarketplace}_ausente`;
+      return resultado;
+    }
+
+    const saude = avaliarSaudeFilaCliente(cliente);
+    if (saude.status === "cheia") {
+      resultado.motivo = "fila_cheia";
+      return resultado;
+    }
+
+    carregarFila(cliente);
+    resultado.chamado = true;
+
+    const ofertaJaExisteCliente = (novaOferta = {}) => {
+      const ofertaCliente = {
+        ...novaOferta,
+        clienteId: novaOferta.clienteId || cliente
+      };
+
+      return fila.some(item => {
+        if (String(item?.clienteId || "admin") !== cliente) return false;
+
+        const linkItem = String(item.link || item.linkAfiliado || item.linkOriginal || "").trim();
+        const linkNovo = String(ofertaCliente.link || ofertaCliente.linkAfiliado || ofertaCliente.linkOriginal || "").trim();
+        const tituloItem = normalizarTexto(item.titulo || item.nome || "");
+        const tituloNovo = normalizarTexto(ofertaCliente.titulo || ofertaCliente.nome || "");
+
+        return Boolean(
+          (linkItem && linkNovo && linkItem === linkNovo) ||
+          (tituloItem && tituloNovo && tituloItem === tituloNovo)
+        );
+      });
+    };
+
+    const retornoFarejador = await farejador(cliente, {
+      config,
+      integracoesPorCliente,
+      getIntegracaoCliente,
+      fila,
+      salvarFila: (clienteAlvo = cliente) => salvarFila(clienteAlvo || cliente),
+      prepararOfertaGlobal,
+      ofertaJaExiste: ofertaJaExisteCliente,
+      deveIgnorarOfertaRepetida,
+      registrarOfertaVista,
+      classificarCategoriaOferta,
+      gerarBuscasGlobais,
+      gerarHeadersStealth,
+      obterEstrategiaFarejador,
+      ofertaTemBeneficioFarejador,
+      farejarCuponsMercadoLivre,
+      importarMercadoLivre: (url, clienteIdAlvo = cliente) =>
+        importarMercadoLivre(url, clienteIdAlvo, {
+          getIntegracaoCliente,
+          gerarLinkAfiliadoMercadoLivre
+        }),
+      importarAmazon,
+      buscarOfertasShopee,
+      normalizarSessaoId,
+      aplicarFiltrosUniversais,
+      distribuirOfertaParaClientes: (oferta) =>
+        distribuirOfertaParaClientes(oferta, { clienteIdAlvo: cliente }),
+      encurtarUrl,
+      gerarDeepLinkAwin,
+      importarProdutoKabumViaAwin,
+      registrarAbastecimento: diagnostico.registrar
+    });
+
+    const depois = resumirFilaCliente(cliente);
+    const deltaTotal = Math.max(0, depois.total - antes.total);
+
+    resultado.encontrouProdutos =
+      Number(retornoFarejador?.encontradas || diagnostico.resumo.encontradas || 0) || 0;
+    resultado.aprovouOfertas =
+      Number(retornoFarejador?.filtradas || retornoFarejador?.candidatas || diagnostico.resumo.importadas || 0) || 0;
+    resultado.tentouAdicionar =
+      resultado.aprovouOfertas > 0 ||
+      diagnostico.resumo.adicionadasEventos > 0 ||
+      Number(retornoFarejador?.adicionadas || 0) > 0;
+    resultado.adicionouNaFila = Math.max(
+      deltaTotal,
+      Number(retornoFarejador?.adicionadas || 0) || 0,
+      diagnostico.resumo.adicionadasEventos || 0
+    );
+    resultado.recusas = diagnostico.resumo.recusas;
+    resultado.pendentesDepois = depois.pendentes;
+    resultado.totalDepois = depois.total;
+    resultado.motivo = resultado.adicionouNaFila > 0
+      ? "adicionou"
+      : (resultado.tentouAdicionar ? "tentou_sem_delta_fila_cliente" : "sem_oferta_aprovada");
+
+    return resultado;
+  } catch (e) {
+    resultado.motivo = e.message || "erro_farejador_cliente";
+    return resultado;
+  } finally {
+    logOptimus("FAREJADOR-CLIENTE", "Diagnostico abastecimento", resultado);
+  }
+}
+
+async function abastecerFilaComMarketplacesCliente(clienteId = "admin", marketplaces = MARKETPLACES_ABASTECIMENTO_CLIENTE) {
+  const cliente = String(clienteId || "admin");
+  const resultados = [];
+
+  for (const marketplace of marketplaces) {
+    const saudeAtual = avaliarSaudeFilaCliente(cliente);
+    if (saudeAtual.status === "cheia") {
+      resultados.push({
+        marketplace,
+        clienteId: cliente,
+        chamado: false,
+        motivo: "fila_cheia",
+        pendentesAntes: saudeAtual.pendentes,
+        pendentesDepois: saudeAtual.pendentes,
+        adicionouNaFila: 0
+      });
+      break;
+    }
+
+    resultados.push(await executarFarejadorMarketplaceCliente(marketplace, cliente));
+  }
+
+  return {
+    marketplaces: resultados,
+    adicionadas: resultados.reduce((total, item) => total + (Number(item.adicionouNaFila || 0) || 0), 0),
+    chamados: resultados.filter(item => item.chamado).length,
+    recusas: resultados.reduce((acc, item) => {
+      if (item.motivo && item.motivo !== "adicionou") {
+        acc[item.marketplace] = item.motivo;
+      }
+      return acc;
+    }, {})
+  };
+}
+
 async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
   const cliente = String(clienteId || "admin");
   const saude = avaliarSaudeFilaCliente(cliente);
-  const simulado = opcoes.simulado !== false;
+  const simulado = opcoes.simulado === true;
 
   if (!saude.deveAbastecer) {
     return {
@@ -1018,7 +1275,7 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
   filaInteligenteUltimoAbastecimento.set(cliente, agora);
 
   if (!simulado) {
-    const abastecimento = await abastecerFilaComMercadoLivre(cliente, 3);
+    const abastecimento = await abastecerFilaComMarketplacesCliente(cliente);
 
     console.log(
       `🧠 FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo real`
@@ -5083,7 +5340,7 @@ app.post("/fila/inteligencia/abastecer", async (req, res) => {
       req.usuario?.papel === "admin_master"
         ? clienteSolicitado
         : clienteToken;
-    const simulado = req.body?.simulado !== false;
+    const simulado = req.body?.simulado === true;
 
     return res.json(await abastecerFilaSeNecessario(clienteId, { simulado }));
   } catch (e) {
@@ -12403,15 +12660,24 @@ function usuarioTemIntegracaoMarketplace(clienteId, marketplace) {
 
 // =============== FUNCAO DISTRIBUIDOR OFERTAS ======================================
 
-async function distribuirOfertaParaClientes(ofertaBase) {
+async function distribuirOfertaParaClientes(ofertaBase, opcoes = {}) {
 
   ofertaBase = prepararOfertaGlobal(ofertaBase);
+  const clienteAlvo = opcoes?.clienteIdAlvo ? String(opcoes.clienteIdAlvo) : "";
+  const resultado = {
+    adicionadas: 0,
+    clienteAlvo: clienteAlvo || "todos"
+  };
 
   for (const usuario of usuarios) {
     if (!usuario?.ativo) continue;
 
     const clienteId = usuario.id;
     const adminMaster = usuario.papel === "admin_master";
+
+    if (clienteAlvo && String(clienteId) !== clienteAlvo) {
+      continue;
+    }
 
     const mp = normalizarTexto(ofertaBase.marketplace || "");
 
@@ -12562,6 +12828,7 @@ registrarOfertaVista(ofertaCliente);
 
 logPrioridadeFila(ofertaCliente);
 fila.push(ofertaCliente);
+resultado.adicionadas += 1;
 
 salvarFila(clienteId);
 
@@ -12572,6 +12839,8 @@ console.log("[INFO] Oferta distribuda para cliente:", {
 });
 
   }
+
+  return resultado;
 }
 
       async function buscarTermoAliExpress(termo, tipo) {
@@ -14493,8 +14762,9 @@ if (!admin) {
     const statusMarketplace = obterStatusOrquestradorMarketplace(marketplace);
     const categoriaMarketplaceLog = categoriaLogMarketplace(marketplace);
     const inicioRodadaMs = Date.now();
-    const totalFilaAntesRodada = Array.isArray(fila) ? fila.length : 0;
     let clientesProcessadosRodada = 0;
+    let adicionadasRodada = 0;
+    const detalhesClientesRodada = [];
     statusMarketplace.rodadas += 1;
     statusMarketplace.ultimoInicio = new Date().toISOString();
     statusMarketplace.ultimoErro = "";
@@ -14516,91 +14786,25 @@ for (const usuario of usuarios) {
   if (!usuario?.ativo) continue;
 
   const clienteId = usuario.id;
-  const saudeFilaCliente = avaliarSaudeFilaCliente(clienteId);
+  const resultadoCliente = await executarFarejadorMarketplaceCliente(marketplace, clienteId);
 
-  if (saudeFilaCliente.status === "cheia") {
-    logOptimus("INTELIGENCIA", "Cliente com fila cheia pulado", {
-      clienteId,
-      marketplace,
-      pendentes: saudeFilaCliente.pendentes
-    });
-    continue;
-  }
-
-  if (!usuarioPodeReceberMarketplace(usuario, marketplace)) {
-    console.log("[INFO] Usurio no recebe marketplace pelo plano:", {
-      clienteId,
-      marketplace
-    });
-    continue;
-  }
-
-  const marketplaceIntegracao =
-  marketplace === "kabum"
-    ? "awin"
-    : marketplace;
-
-if (!usuarioTemIntegracaoMarketplace(clienteId, marketplaceIntegracao)) {
-  logOptimus("INTEGRACAO", "Usuario sem integracao configurada", {
+  detalhesClientesRodada.push({
     clienteId,
-    marketplace,
-    marketplaceIntegracao
-  });
-  continue;
-}
-
-  console.log("[INFO] Farejando marketplace para cliente:", {
-    clienteId,
-    marketplace
+    chamado: resultadoCliente.chamado,
+    motivo: resultadoCliente.motivo,
+    adicionouNaFila: resultadoCliente.adicionouNaFila,
+    pendentesAntes: resultadoCliente.pendentesAntes,
+    pendentesDepois: resultadoCliente.pendentesDepois
   });
 
-console.log("[INFO] CHAMANDO FAREJADOR:", {
-  clienteId,
-  marketplace,
-  funcao: typeof farejador
-});
+  if (resultadoCliente.chamado) {
+    clientesProcessadosRodada += 1;
+  }
 
-
-await farejador(clienteId, {
-  config,
-  integracoesPorCliente,
-  getIntegracaoCliente,
-  fila,
-  salvarFila,
-  prepararOfertaGlobal,
-  ofertaJaExiste,
-  prepararOfertaGlobal,
-  ofertaJaExiste,
-  deveIgnorarOfertaRepetida,
-  registrarOfertaVista,
-  classificarCategoriaOferta,
-  classificarCategoriaOferta,
-  gerarBuscasGlobais,
-  gerarHeadersStealth,
-  obterEstrategiaFarejador,
-  ofertaTemBeneficioFarejador,
-  farejarCuponsMercadoLivre,
-  importarMercadoLivre: (url, clienteIdAlvo = "admin") =>
-  importarMercadoLivre(url, clienteIdAlvo, {
-  getIntegracaoCliente,
-  gerarLinkAfiliadoMercadoLivre
-  }),
-  importarAmazon: importarAmazon,
-  buscarOfertasShopee,
-  normalizarSessaoId,
-  aplicarFiltrosUniversais,
-  distribuirOfertaParaClientes,
-  encurtarUrl,
-  gerarDeepLinkAwin,
-  importarProdutoKabumViaAwin,
-
-});
-clientesProcessadosRodada += 1;
+  adicionadasRodada += Number(resultadoCliente.adicionouNaFila || 0) || 0;
 }
   
   statusMarketplace.ultimaFinalizacao = new Date().toISOString();
-  const totalFilaDepoisRodada = Array.isArray(fila) ? fila.length : totalFilaAntesRodada;
-  const adicionadasRodada = Math.max(0, totalFilaDepoisRodada - totalFilaAntesRodada);
   const duracaoSegundos = Math.round((Date.now() - inicioRodadaMs) / 1000);
 
   logOptimus(categoriaMarketplaceLog, "Fim da rodada", {
@@ -14609,6 +14813,7 @@ clientesProcessadosRodada += 1;
     clientesProcessados: clientesProcessadosRodada,
     encontradas: "nao_informado",
     adicionadas: adicionadasRodada,
+    detalhesClientes: detalhesClientesRodada,
     erros: 0,
     duracaoSegundos,
     origem: opcoes.origem || "orquestrador"
