@@ -1439,7 +1439,16 @@ function normalizarMapaSessoesCliente(dados = {}) {
 function sessaoPertenceCliente(id = "", clienteId = "admin") {
   const sessaoId = String(id || "").trim();
   const cliente = String(clienteId || "admin").trim();
-  return !!sessaoId && !!cliente && (sessaoId === cliente || sessaoId.startsWith(`${cliente}_`));
+  if (!sessaoId || !cliente) return false;
+  if (sessaoId === cliente || sessaoId.startsWith(`${cliente}_`)) return true;
+
+  const metaDireta = sessoesMeta?.[sessaoId];
+  if (String(metaDireta?.clienteId || "").trim() === cliente) return true;
+
+  return Object.values(sessoesMeta || {}).some(sessao => {
+    if (String(sessao?.clienteId || "").trim() !== cliente) return false;
+    return camposIdentificacaoSessao("", sessao).includes(sessaoId);
+  });
 }
 
 function resolverClientePorSessaoWhatsapp(id = "") {
@@ -1460,9 +1469,13 @@ function resolverClientePorSessaoWhatsapp(id = "") {
 
 function lerSessoesClienteMap(clienteId = "admin") {
   const cliente = String(clienteId || "admin").trim();
-  const locais = normalizarMapaSessoesCliente(readClienteJson(cliente, "sessoes.json", {}));
+  const locais = Object.entries(normalizarMapaSessoesCliente(readClienteJson(cliente, "sessoes.json", {})))
+    .reduce((acc, [id, sessao]) => {
+      acc[id] = { ...sessao, clienteId: sessao?.clienteId || cliente };
+      return acc;
+    }, {});
   const legado = Object.values(sessoesMeta || {})
-    .filter(sessao => sessaoPertenceCliente(sessao?.id, cliente))
+    .filter(sessao => String(sessao?.clienteId || "").trim() === cliente || sessaoPertenceCliente(sessao?.id, cliente))
     .reduce((acc, sessao) => {
       acc[sessao.id] = { ...sessao, clienteId: sessao.clienteId || cliente };
       return acc;
@@ -1495,6 +1508,7 @@ function camposIdentificacaoSessao(chave = "", sessao = {}) {
     sessao?.id,
     sessao?.sessaoId,
     sessao?.idTecnico,
+    sessao?.conexaoId,
     sessao?.nome,
     sessao?.nomeSessao,
     sessao?.nomeExibicao,
@@ -3015,6 +3029,8 @@ function normalizarDestinoEnvio(destino = {}) {
     destino.sessao ||
     destino.sessaoId ||
     destino.idSessao ||
+    destino.telefoneId ||
+    destino.idTecnico ||
     destino.botId ||
     destino.telegramId ||
     ""
@@ -3047,21 +3063,71 @@ function normalizarDestinoEnvio(destino = {}) {
 }
 
 function resolverSessaoWhatsappDestino(clienteId = "admin", destino = {}) {
+  const cliente = String(clienteId || "admin").trim();
   const destinoNormalizado = normalizarDestinoEnvio(destino);
   const candidatos = [
     destinoNormalizado.conexaoId,
     destinoNormalizado.sessao,
     destinoNormalizado.sessaoId,
-    destinoNormalizado.idSessao
+    destinoNormalizado.idSessao,
+    destinoNormalizado.telefoneId,
+    destinoNormalizado.idTecnico,
+    destinoNormalizado.nome,
+    destinoNormalizado.nomeSessao,
+    destinoNormalizado.nomeExibicao,
+    destinoNormalizado.nomeAmigavel
   ].map(id => String(id || "").trim()).filter(Boolean);
 
-  const ids = [];
+  const mapaCliente = lerSessoesClienteMap(cliente);
+  const alvos = new Set();
   for (const id of candidatos) {
-    ids.push(id);
-    ids.push(normalizarSessaoId(clienteId, id));
+    for (const candidato of canonizarSessaoParaBusca(cliente, id)) {
+      alvos.add(candidato);
+    }
   }
 
-  const idSessao = ids.find(id => sessoes[id]) || "";
+  const ids = new Set();
+  for (const id of candidatos) {
+    ids.add(id);
+    ids.add(normalizarSessaoId(cliente, id));
+  }
+
+  for (const [chave, sessao] of Object.entries(mapaCliente)) {
+    const chaveTexto = String(chave || "").trim();
+    const idSessaoMeta = String(sessao?.id || sessao?.sessaoId || chaveTexto || "").trim();
+    const pertence = String(sessao?.clienteId || "").trim() === cliente ||
+      sessaoPertenceCliente(chaveTexto, cliente) ||
+      sessaoPertenceCliente(idSessaoMeta, cliente);
+
+    if (!pertence) continue;
+
+    const encontrou = camposIdentificacaoSessao(chaveTexto, sessao).some(campo => {
+      const candidatosCampo = canonizarSessaoParaBusca(cliente, campo);
+      return [...candidatosCampo].some(candidato => alvos.has(candidato));
+    });
+
+    if (encontrou) {
+      ids.add(chaveTexto);
+      ids.add(idSessaoMeta);
+      if (sessao?.idTecnico) ids.add(String(sessao.idTecnico).trim());
+      if (sessao?.conexaoId) ids.add(String(sessao.conexaoId).trim());
+      ids.add(normalizarSessaoId(cliente, chaveTexto));
+      ids.add(normalizarSessaoId(cliente, idSessaoMeta));
+    }
+  }
+
+  const idsValidos = [...ids]
+    .map(id => String(id || "").trim())
+    .filter(Boolean)
+    .filter(id => {
+      const meta = mapaCliente[id] || sessoesMeta[id];
+      return String(meta?.clienteId || "").trim() === cliente || sessaoPertenceCliente(id, cliente);
+    });
+
+  const idSessao = idsValidos.find(id => sessoes[id]) ||
+    idsValidos.find(id => statusSessao[id] === "open" || statusSessao[id] === "aberto") ||
+    idsValidos[0] ||
+    "";
   const sock = idSessao ? sessoes[idSessao] : null;
   const grupos = (destinoNormalizado.gruposWhatsapp || [])
     .map(g => {
@@ -3076,7 +3142,8 @@ function resolverSessaoWhatsappDestino(clienteId = "admin", destino = {}) {
     destino: destinoNormalizado,
     idSessao,
     sock,
-    grupos
+    grupos,
+    candidatos: idsValidos
   };
 }
 
@@ -3230,7 +3297,11 @@ async function enviarDestinoCentral({
       logOptimus("WHATSAPP", "Sessao nao encontrada", {
         clienteId: cliente,
         fluxo,
-        conexaoId: destinoNormalizado.conexaoId
+        destinoId: destinoNormalizado.id || "",
+        conexaoId: destinoNormalizado.conexaoId,
+        sessao: destinoNormalizado.sessao || "",
+        sessaoId: destinoNormalizado.sessaoId || "",
+        candidatos: resolucao.candidatos || []
       });
       return { enviado: false, motivo: "sessao_nao_encontrada" };
     }
@@ -3289,7 +3360,9 @@ async function enviarDestinoCentral({
         grupoIdEncontrado: !!(destinoNormalizado.grupo || destinoNormalizado.chatId || destinoNormalizado.chat_id || destinoNormalizado.canal),
         tokenEncontrado: resolucaoTelegram.telegrams.some(t => !!t.botToken),
         fallbackAtivos: resolucaoTelegram.usouFallbackAtivos,
-        motivoRecusa: resolucaoTelegram.telegrams.length ? "telegram_nao_casou_com_destino" : "telegram_nao_configurado"
+        motivoRecusa: resolucaoTelegram.telegrams.length
+          ? "telegram_nao_casou_com_destino"
+          : "telegram_sem_token_persistido_no_backend_recrie_ou_salvar_bot_em_conexoes"
       });
       return { enviado: false, motivo: "Nenhum Telegram selecionado" };
     }
