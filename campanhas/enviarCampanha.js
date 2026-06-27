@@ -15,7 +15,8 @@ async function enviarCampanhaManual({
   telegramStatusPorCliente,
   usuarioTemCreditos,
   debitarCreditos,
-  corrigirImagemUrl
+  corrigirImagemUrl,
+  enviarDestinoCentral
 }) {
   if (!clienteId) {
     throw new Error("clienteId obrigatório");
@@ -46,6 +47,38 @@ async function enviarCampanhaManual({
 
   for (const destino of destinosSelecionados) {
     try {
+    if (typeof enviarDestinoCentral === "function") {
+      const envioCentral = await enviarDestinoCentral({
+        clienteId,
+        destino,
+        mensagem,
+        imagemUrl,
+        fluxo: "campanha/manual",
+        ignorarHorario: true
+      });
+
+      if (envioCentral?.enviado) {
+        const enviadosDestino = Number(envioCentral.enviados || 1) || 1;
+        resultado.enviados += enviadosDestino;
+        resultado.detalhes.push({
+          destino: destino.nome,
+          tipo: destino.tipo,
+          status: "enviado",
+          creditos: enviadosDestino
+        });
+      } else {
+        resultado.erros++;
+        resultado.detalhes.push({
+          destino: destino.nome,
+          tipo: destino.tipo,
+          status: "erro",
+          motivo: envioCentral?.motivo || "nao_enviado"
+        });
+      }
+
+      continue;
+    }
+
     const tipo = String(destino.tipo || "").toLowerCase();
 
 if (tipo === "telegram") {
