@@ -1230,6 +1230,85 @@ function salvarSessaoCliente(clienteId = "admin", sessao = {}) {
   return meta;
 }
 
+function camposIdentificacaoSessao(chave = "", sessao = {}) {
+  return [
+    chave,
+    sessao?.id,
+    sessao?.sessaoId,
+    sessao?.idTecnico,
+    sessao?.nome,
+    sessao?.nomeSessao,
+    sessao?.nomeExibicao,
+    sessao?.nomeAmigavel,
+    sessao?.apelido,
+    sessao?.titulo,
+    sessao?.label,
+    sessao?.sessionId
+  ]
+    .map(valor => String(valor || "").trim())
+    .filter(Boolean);
+}
+
+function canonizarSessaoParaBusca(clienteId = "admin", valor = "") {
+  const cliente = String(clienteId || "admin").trim();
+  const texto = decodificarSessaoId(valor);
+  const candidatos = new Set();
+
+  if (texto) {
+    candidatos.add(texto);
+    candidatos.add(texto.toLowerCase());
+    candidatos.add(normalizarSessaoId(cliente, texto));
+    candidatos.add(normalizarSessaoId(cliente, texto).toLowerCase());
+
+    if (texto.startsWith(`${cliente}_`)) {
+      const semCliente = texto.slice((`${cliente}_`).length);
+      candidatos.add(semCliente);
+      candidatos.add(semCliente.toLowerCase());
+      candidatos.add(normalizarSessaoId(cliente, semCliente));
+      candidatos.add(normalizarSessaoId(cliente, semCliente).toLowerCase());
+    }
+  }
+
+  return candidatos;
+}
+
+function resolverIdsSessoesParaRemover(clienteId = "admin", idRecebido = "") {
+  const cliente = String(clienteId || "admin").trim();
+  const mapa = lerSessoesClienteMap(cliente);
+  const idOriginal = decodificarSessaoId(
+    idRecebido && typeof idRecebido === "object"
+      ? (idRecebido.id || idRecebido.sessaoId || idRecebido.nome || idRecebido.sessionId || "")
+      : idRecebido
+  );
+  const alvos = canonizarSessaoParaBusca(cliente, idOriginal);
+  const ids = new Set();
+
+  if (idOriginal && sessaoPertenceCliente(idOriginal, cliente)) ids.add(idOriginal);
+
+  const idNormalizado = normalizarSessaoId(cliente, idOriginal);
+  if (sessaoPertenceCliente(idNormalizado, cliente)) ids.add(idNormalizado);
+
+  for (const [chave, sessao] of Object.entries(mapa)) {
+    const chaveTexto = String(chave || "").trim();
+    const idSessao = String(sessao?.id || sessao?.sessaoId || chaveTexto || "").trim();
+    const pertence = sessaoPertenceCliente(chaveTexto, cliente) || sessaoPertenceCliente(idSessao, cliente);
+    if (!pertence) continue;
+
+    const campos = camposIdentificacaoSessao(chaveTexto, sessao);
+    const encontrou = campos.some(campo => {
+      const candidatosCampo = canonizarSessaoParaBusca(cliente, campo);
+      return [...candidatosCampo].some(candidato => alvos.has(candidato));
+    });
+
+    if (encontrou) {
+      if (sessaoPertenceCliente(chaveTexto, cliente)) ids.add(chaveTexto);
+      if (sessaoPertenceCliente(idSessao, cliente)) ids.add(idSessao);
+    }
+  }
+
+  return [...ids].filter(id => sessaoPertenceCliente(id, cliente));
+}
+
 function removerSessoesCliente(clienteId = "admin", ids = []) {
   const cliente = String(clienteId || "admin").trim();
   const mapa = lerSessoesClienteMap(cliente);
@@ -12166,29 +12245,36 @@ async function excluirSessaoWhatsappCliente(clienteId, idRecebido, opcoes = {}) 
   const id = normalizarSessaoId(cliente, idOriginal);
   if (!sessaoPertenceCliente(id, cliente)) throw new Error("Sessao nao pertence ao cliente informado");
 
-  await encerrarSocketSessao(id);
-  delete sessoes[id];
-  delete qrCodes[id];
-  delete statusSessao[id];
-  delete destinosPorSessao[id];
-  delete gruposPorSessao[id];
-  delete reconectando[id];
+  const idsParaRemover = resolverIdsSessoesParaRemover(cliente, idOriginal);
+  if (!idsParaRemover.length) idsParaRemover.push(id);
 
-  removerReferenciasSessao([id], cliente);
-  removerSessoesCliente(cliente, [id]);
+  for (const idSessao of idsParaRemover) {
+    await encerrarSocketSessao(idSessao);
+    delete sessoes[idSessao];
+    delete qrCodes[idSessao];
+    delete statusSessao[idSessao];
+    delete destinosPorSessao[idSessao];
+    delete gruposPorSessao[idSessao];
+    delete reconectando[idSessao];
+  }
+
+  removerReferenciasSessao(idsParaRemover, cliente);
+  removerSessoesCliente(cliente, idsParaRemover);
   salvarDestinosClientes();
   salvarConfigsClientes();
   salvarConfig();
 
   if (opcoes.removerAuth !== false) {
-    const caminhoAuth = authPathSessao(id);
-    if (typeof caminhoAuth !== "string") {
-      throw new Error("auth_path_invalido");
+    for (const idSessao of idsParaRemover) {
+      const caminhoAuth = authPathSessao(idSessao);
+      if (typeof caminhoAuth !== "string") {
+        throw new Error("auth_path_invalido");
+      }
+      fs.rmSync(caminhoAuth, { recursive: true, force: true });
     }
-    fs.rmSync(caminhoAuth, { recursive: true, force: true });
   }
 
-  return { id };
+  return { id, idsRemovidos: idsParaRemover };
 }
 
 // ============== HELPERS DISTRIBUIDOR OFERTAS ==================================
@@ -13115,11 +13201,12 @@ app.post("/sessoes", (req, res) => {
 app.delete("/sessoes/:id", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
-    const { id } = await excluirSessaoWhatsappCliente(clienteId, req.params.id, { removerAuth: true });
+    const { id, idsRemovidos = [] } = await excluirSessaoWhatsappCliente(clienteId, req.params.id, { removerAuth: true });
     console.log("[WHATSAPP-DEBUG] DELETE /sessoes/:id", {
       clienteId,
       idRecebido: req.params.id,
       idNormalizado: id,
+      idsRemovidos,
       temSocketDepois: !!sessoes[id],
       temQrDepois: !!qrCodes[id],
       statusDepois: statusSessao[id] || ""
@@ -13128,7 +13215,8 @@ app.delete("/sessoes/:id", async (req, res) => {
     return res.json({
       ok: true,
       message: "Sessao excluida com sucesso",
-      id
+      id,
+      idsRemovidos
     });
   } catch (e) {
     return res.status(500).json({
@@ -13141,12 +13229,13 @@ app.delete("/sessoes/:id", async (req, res) => {
 async function responderExclusaoWhatsapp(req, res, mensagem = "Sessao excluida com sucesso") {
   try {
     const clienteId = getClienteId(req);
-    const { id } = await excluirSessaoWhatsappCliente(clienteId, req.params.id, { removerAuth: true });
+    const { id, idsRemovidos = [] } = await excluirSessaoWhatsappCliente(clienteId, req.params.id, { removerAuth: true });
 
     return res.json({
       ok: true,
       message: mensagem,
-      id
+      id,
+      idsRemovidos
     });
   } catch (e) {
     console.log("[ERRO] [WHATSAPP] erro ao excluir sessao:", e.message);
