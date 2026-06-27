@@ -1299,6 +1299,24 @@ function salvarUsuarios() {
   writeGlobalJson("usuarios.json", usuarios);
 }
 
+function getUsuariosFilePath() {
+  return path.join(process.env.DATA_DIR || "/data", "usuarios.json");
+}
+
+function usuariosArquivoExiste() {
+  try {
+    return fs.existsSync(getUsuariosFilePath());
+  } catch {
+    return false;
+  }
+}
+
+function normalizarUsuariosCarregados(dados) {
+  if (Array.isArray(dados)) return dados;
+  if (Array.isArray(dados?.usuarios)) return dados.usuarios;
+  return [];
+}
+
 // ================= CREDITOS =================
 
 const CREDITOS_PLANO = {
@@ -1630,7 +1648,8 @@ function carregarConfig() {
     }
 
          
-usuarios = readGlobalJson("usuarios.json", []);
+const usuariosArquivoJaExistia = usuariosArquivoExiste();
+usuarios = normalizarUsuariosCarregados(readGlobalJson("usuarios.json", []));
 
 if (Array.isArray(usuarios) && usuarios.length) {
   console.log("[OK]✅ Usurios carregados");
@@ -1680,8 +1699,8 @@ if (sessoesMeta && Object.keys(sessoesMeta).length) {
    criarPlanosPadrao();
 
 
-if (!usuarios.length) {
-console.log("[INFO] CRIANDO ADMIN PADRO");
+if (!usuarios.length && !usuariosArquivoJaExistia) {
+console.log("[INFO] CRIANDO ADMIN PADRAO");
   usuarios = [
  {
   id: "admin",
@@ -1698,7 +1717,9 @@ console.log("[INFO] CRIANDO ADMIN PADRO");
 
   salvarUsuarios();
 
-  console.log("[OK]✅ Usurio admin inicial criado");
+  console.log("[OK] Usuario admin inicial criado");
+} else if (!usuarios.length && usuariosArquivoJaExistia) {
+  console.error("[ERRO] usuarios.json existe, mas nenhum usuario foi carregado. Fallback de admin bloqueado para nao sobrescrever usuarios existentes.");
 }
 
   } catch (e) {
@@ -9727,6 +9748,26 @@ app.use("/mensageiro", criarRotasMensageiro({
 }));
 
 
+async function verificarSenhaUsuario(usuario = {}, senhaInformada = "") {
+  const senhaSalva = String(usuario.senha || usuario.password || usuario.senhaHash || "");
+  const senhaEntrada = String(senhaInformada || "");
+
+  if (!senhaSalva || !senhaEntrada) return false;
+
+  if (senhaSalva === senhaEntrada) return true;
+
+  if (/^\$2[aby]\$/.test(senhaSalva)) {
+    try {
+      return await bcrypt.compare(senhaEntrada, senhaSalva);
+    } catch (e) {
+      console.log("[LOGIN] Falha ao validar hash bcrypt:", e.message);
+      return false;
+    }
+  }
+
+  return false;
+}
+
 // ================= LOGIN ==========================
 
 app.post("/login", async (req, res) => {
@@ -9747,9 +9788,7 @@ app.post("/login", async (req, res) => {
     return res.status(403).json({ erro: "UsuÃ¡rio inativo" });
   }
 
- let senhaOk = false;
-
-senhaOk = String(usuario.senha || "") === String(pass || "");
+ const senhaOk = await verificarSenhaUsuario(usuario, pass);
 
 if (!senhaOk) {
   return res.status(401).json({ erro: "Senha invÃ¡lida" });
