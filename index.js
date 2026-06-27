@@ -3206,6 +3206,57 @@ function resolverSessaoWhatsappDestino(clienteId = "admin", destino = {}) {
   };
 }
 
+function resolverSessaoWhatsappParaGrupos(clienteId = "admin", idRecebido = "") {
+  const cliente = String(clienteId || "admin").trim();
+  const idOriginal = decodificarSessaoId(idRecebido);
+  const idNormalizado = normalizarSessaoId(cliente, idOriginal);
+  const mapaCliente = lerSessoesClienteMap(cliente);
+  const resolucao = resolverSessaoWhatsappDestino(cliente, {
+    id: idOriginal,
+    conexaoId: idOriginal,
+    sessao: idOriginal,
+    sessaoId: idOriginal,
+    idSessao: idOriginal,
+    idTecnico: idOriginal
+  });
+  const idsBusca = [
+    resolucao.idSessao,
+    idOriginal,
+    idNormalizado,
+    ...(resolucao.candidatos || [])
+  ]
+    .map(id => String(id || "").trim())
+    .filter(Boolean)
+    .filter((id, index, lista) => lista.indexOf(id) === index)
+    .filter(id => {
+      const meta = mapaCliente[id] || sessoesMeta[id];
+      return String(meta?.clienteId || "").trim() === cliente || sessaoPertenceCliente(id, cliente);
+    });
+
+  const idSocket = idsBusca.find(id => !!sessoes[id]) || "";
+  const idStatus = idsBusca.find(id => !!statusSessao[id]) || "";
+  const idCache = idsBusca.find(id => Array.isArray(gruposPorSessao[id]) && gruposPorSessao[id].length > 0) || "";
+  const id = idSocket || idStatus || idCache || idsBusca[0] || idNormalizado;
+  const metaStatus = mapaCliente[id]?.status || sessoesMeta[id]?.status || "";
+  const status = statusSessao[idSocket] || statusSessao[idStatus] || statusSessao[id] || metaStatus || "";
+  const sock = idSocket ? (sessoes[idSocket]?.sock || sessoes[idSocket]) : null;
+  const gruposCache = gruposPorSessao[idCache] || gruposPorSessao[id] || [];
+
+  return {
+    id,
+    idOriginal,
+    idNormalizado,
+    idsBusca,
+    idSocket,
+    idStatus,
+    idCache,
+    status,
+    sock,
+    gruposCache,
+    auditoria: resolucao.auditoria
+  };
+}
+
 async function enviarImagemOuTextoWhatsapp(sock, grupo, mensagem, imagemUrl = "", tipoMidia = "imagem") {
   if (tipoMidia === "texto" || !imagemUrl) {
     await sock.sendMessage(grupo, { text: mensagem });
@@ -12958,6 +13009,9 @@ function normalizarSessaoId(clienteId, id = "sessao1") {
     sessao = sessao.slice((cliente + "_").length);
   }
 
+  // Mantem compatibilidade com sessoes legadas criadas com prefixo admin_.
+  sessao = sessao.replace(/^admin_/g, "");
+
   sessao = sessao
     .replace(/[^a-zA-Z0-9_.-]+/g, "_")
     .replace(/^_+|_+$/g, "");
@@ -14297,43 +14351,65 @@ app.post("/magalu/gerar-link", (req, res) => {
 app.get("/grupos/:id", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
-    const id = normalizarSessaoId(clienteId, req.params.id);
+    const resolucaoSessao = resolverSessaoWhatsappParaGrupos(clienteId, req.params.id);
+    const id = resolucaoSessao.id;
     const force = ["true", "1", "sim", "yes"].includes(String(req.query.force || req.query.refresh || "").toLowerCase());
 
-    const status = statusSessao[id];
+    const status = resolucaoSessao.status;
+    const conectado = status === "open" || status === "aberto" || !!resolucaoSessao.sock;
+    const gruposCache = resolucaoSessao.gruposCache || [];
 
-    if (status !== "open" && status !== "aberto") {
+    if (!conectado) {
+      console.log("[WHATSAPP-GRUPOS] Sessao nao conectada para listar grupos", {
+        clienteId,
+        idRecebido: req.params.id,
+        idResolvido: id,
+        idNormalizado: resolucaoSessao.idNormalizado,
+        idsBusca: resolucaoSessao.idsBusca,
+        idSocket: resolucaoSessao.idSocket,
+        idStatus: resolucaoSessao.idStatus,
+        idCache: resolucaoSessao.idCache,
+        status: status || "offline",
+        totalCache: gruposCache.length,
+        auditoria: resolucaoSessao.auditoria
+      });
       return res.json({
         ok: false,
         id,
         status: status || "offline",
-        total: gruposPorSessao[id]?.length || 0,
-        grupos: gruposPorSessao[id] || [],
-        gruposLista: gruposPorSessao[id] || [],
+        total: gruposCache.length,
+        grupos: gruposCache,
+        gruposLista: gruposCache,
         cache: true,
         aviso: "SessÃ£o nÃ£o estÃ¡ conectada."
       });
     }
 
     console.log("[INFO] ROTA /grupos buscando:", {
+      clienteId,
+      idRecebido: req.params.id,
       id,
       force,
-      temCache: !!gruposPorSessao[id]?.length,
-      totalCache: gruposPorSessao[id]?.length || 0
+      idSocket: resolucaoSessao.idSocket,
+      idStatus: resolucaoSessao.idStatus,
+      idCache: resolucaoSessao.idCache,
+      idsBusca: resolucaoSessao.idsBusca,
+      temCache: gruposCache.length > 0,
+      totalCache: gruposCache.length
     });
 
-    if (!force && gruposPorSessao[id]?.length) {
+    if (!force && gruposCache.length) {
       return res.json({
         ok: true,
         id,
-        total: gruposPorSessao[id].length,
-        grupos: gruposPorSessao[id],
-        gruposLista: gruposPorSessao[id],
+        total: gruposCache.length,
+        grupos: gruposCache,
+        gruposLista: gruposCache,
         cache: true
       });
     }
 
-    const grupos = await carregarGruposSessao(id, { force: true });
+    const grupos = await carregarGruposSessao(resolucaoSessao.idSocket || id, { force: true, clienteId });
 
     return res.json({
       ok: true,
@@ -14360,23 +14436,39 @@ app.get("/grupos/:id", async (req, res) => {
 app.post("/grupos/:id/refresh", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
-    const id = normalizarSessaoId(clienteId, req.params.id);
-    const status = statusSessao[id];
+    const resolucaoSessao = resolverSessaoWhatsappParaGrupos(clienteId, req.params.id);
+    const id = resolucaoSessao.id;
+    const status = resolucaoSessao.status;
+    const conectado = status === "open" || status === "aberto" || !!resolucaoSessao.sock;
+    const gruposCache = resolucaoSessao.gruposCache || [];
 
-    if (status !== "open" && status !== "aberto") {
+    if (!conectado) {
+      console.log("[WHATSAPP-GRUPOS] Refresh sem sessao conectada", {
+        clienteId,
+        idRecebido: req.params.id,
+        idResolvido: id,
+        idNormalizado: resolucaoSessao.idNormalizado,
+        idsBusca: resolucaoSessao.idsBusca,
+        idSocket: resolucaoSessao.idSocket,
+        idStatus: resolucaoSessao.idStatus,
+        idCache: resolucaoSessao.idCache,
+        status: status || "offline",
+        totalCache: gruposCache.length,
+        auditoria: resolucaoSessao.auditoria
+      });
       return res.json({
         ok: false,
         id,
         status: status || "offline",
-        total: gruposPorSessao[id]?.length || 0,
-        grupos: gruposPorSessao[id] || [],
-        gruposLista: gruposPorSessao[id] || [],
+        total: gruposCache.length,
+        grupos: gruposCache,
+        gruposLista: gruposCache,
         cache: true,
         aviso: "Sessao nao esta conectada."
       });
     }
 
-    const grupos = await carregarGruposSessao(id, { force: true });
+    const grupos = await carregarGruposSessao(resolucaoSessao.idSocket || id, { force: true, clienteId });
 
     return res.json({
       ok: true,
