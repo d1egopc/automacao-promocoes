@@ -11758,6 +11758,25 @@ function obterProgramaAwin(credenciais = {}, alvo = "kabum") {
   return integracoesUtils.obterProgramaAwin(credenciais, alvo);
 }
 
+function validarAwinKabumManual(clienteId = "admin", urlOriginal = "") {
+  const integracao = getIntegracaoCliente(clienteId, "awin");
+  const credenciais = normalizarCredenciaisAwin(integracao?.credenciais || {});
+  const programaAwin = obterProgramaAwin(credenciais, urlOriginal || "kabum");
+  const faltando = [];
+
+  if (!credenciais.publisherId) faltando.push("publisherId");
+  if (!credenciais.apiToken) faltando.push("apiToken");
+  if (!programaAwin?.advertiserId) faltando.push("advertiserId");
+
+  return {
+    ok: faltando.length === 0,
+    integracao,
+    credenciais,
+    programaAwin,
+    faltando
+  };
+}
+
 //============= ROTA INTEGRACOES =======================================
 
 app.get("/integracoes/alertas", (req, res) => {
@@ -12184,6 +12203,18 @@ async function importarKabumManualRequest(req, res, opcoes = {}) {
       });
     }
 
+    const validacaoAwin = validarAwinKabumManual(clienteId, url);
+
+    if (!validacaoAwin.ok) {
+      return res.status(400).json({
+        ok: false,
+        marketplace: "kabum",
+        erro: `Awin/KaBuM sem ${validacaoAwin.faltando.join(", ")} configurado.`,
+        camposFaltando: validacaoAwin.faltando,
+        clienteId
+      });
+    }
+
     const produto = await importarProdutoKabumViaAwin(
       url,
       clienteId,
@@ -12192,10 +12223,58 @@ async function importarKabumManualRequest(req, res, opcoes = {}) {
       }
     );
 
+    const camposProdutoFaltando = [];
+    if (!produto?.titulo) camposProdutoFaltando.push("titulo");
+    if (!produto?.precoAtual && !produto?.preco) camposProdutoFaltando.push("preco");
+    if (!produto?.linkAfiliado && !produto?.link) camposProdutoFaltando.push("linkAfiliado");
+
+    if (camposProdutoFaltando.length) {
+      return res.status(400).json({
+        ok: false,
+        marketplace: "kabum",
+        erro: `Produto KaBuM incompleto: ${camposProdutoFaltando.join(", ")}.`,
+        camposFaltando: camposProdutoFaltando
+      });
+    }
+
+    const novaOferta = {
+      nome: produto.titulo,
+      titulo: produto.titulo,
+      preco: produto.preco || produto.precoAtual || "",
+      precoAtual: produto.precoAtual || produto.preco || "",
+      precoAntigo: produto.precoAntigo || "",
+      cupom: produto.cupom || "",
+      avisoCupom: produto.avisoCupom || "",
+      avisoPagamento: produto.avisoPagamento || "",
+      parcelamento: produto.parcelamento || "",
+      linkOriginal: produto.linkOriginal || url,
+      link: produto.linkAfiliado || produto.link || url,
+      linkAfiliado: produto.linkAfiliado || produto.link || url,
+      imagem: produto.imagem || "",
+      marketplace: "kabum",
+      categoria: produto.categoria || classificarCategoriaOferta(produto, ""),
+      sessaoId: normalizarSessaoId(clienteId, "sessao1"),
+      status: "pendente",
+      statusDetalhe: "Na fila",
+      clienteId
+    };
+
+    validarCupomMonetarioOferta(novaOferta);
+    aplicarPrioridadeEnvioOferta(novaOferta);
+
+    if (opcoes.teste !== true) {
+      const adicionou = adicionarOfertaNaFila(fila, novaOferta, "manual-kabum-awin");
+
+      if (adicionou) {
+        logPrioridadeFila(novaOferta);
+        salvarFila(clienteId);
+      }
+    }
+
     return res.json({
       ok: true,
       teste: opcoes.teste === true,
-      ...produto
+      produto: novaOferta
     });
   } catch (e) {
     console.error("[ERRO] KABUM IMPORTAR:", e.message);
