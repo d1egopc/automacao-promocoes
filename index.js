@@ -4154,14 +4154,71 @@ configsPorCliente[clienteId].telegram = {
   });
 });
 
+function textoTelegram(valor) {
+  return valor == null ? "" : String(valor).trim();
+}
+
+function listarTelegramsCliente(clienteId) {
+  const destinos = configsPorCliente?.[clienteId]?.telegram?.destinos;
+  return Array.isArray(destinos) ? destinos : [];
+}
+
+function chavesTelegramDestino(destino = {}) {
+  return [
+    destino.id,
+    destino.botId,
+    destino.telegramId,
+    destino.destinoId,
+    destino.nome,
+    destino.chatId,
+    destino.grupoId,
+    destino.canalId,
+    destino.channelId
+  ].map(textoTelegram).filter(Boolean);
+}
+
+function resolverTelegramTeste(body = {}, clienteId) {
+  const entrada = body.destino && typeof body.destino === "object"
+    ? body.destino
+    : body;
+
+  const id = textoTelegram(
+    entrada.id || entrada.botId || entrada.telegramId || entrada.destinoId
+  );
+
+  let botToken = textoTelegram(
+    entrada.botToken || entrada.token || entrada.telegramToken
+  );
+  let chatId = textoTelegram(
+    entrada.chatId || entrada.grupoId || entrada.canalId || entrada.channelId
+  );
+
+  if ((!botToken || !chatId) && id) {
+    const salvo = listarTelegramsCliente(clienteId).find(t =>
+      chavesTelegramDestino(t).includes(id)
+    );
+
+    if (salvo) {
+      botToken = botToken || textoTelegram(
+        salvo.botToken || salvo.token || salvo.telegramToken
+      );
+      chatId = chatId || textoTelegram(
+        salvo.chatId || salvo.grupoId || salvo.canalId || salvo.channelId
+      );
+    }
+  }
+
+  return { botToken, chatId };
+}
+
 app.post("/telegram/testar", async (req, res) => {
   try {
     const clienteId = exigirClienteAutenticado(req, res);
     if (!clienteId) return;
 
-    const { destino } = req.body;
+    const telegram = resolverTelegramTeste(req.body || {}, clienteId);
 
-    if (!destino?.botToken || !destino?.chatId) {
+    if (!telegram.botToken || !telegram.chatId) {
       return res.status(400).json({
         ok: false,
         erro: "Token ou Chat ID ausente"
@@ -4169,9 +4226,9 @@ app.post("/telegram/testar", async (req, res) => {
     }
 
     await axios.post(
-      `https://api.telegram.org/bot${destino.botToken}/sendMessage`,
+      `https://api.telegram.org/bot${telegram.botToken}/sendMessage`,
       {
-        chat_id: destino.chatId,
+        chat_id: telegram.chatId,
         text: "ðŸ§ª Teste Telegram Optimus Promo enviado com sucesso!"
       }
     );
