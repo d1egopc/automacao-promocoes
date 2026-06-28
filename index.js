@@ -4117,7 +4117,8 @@ app.get("/r/:codigo", (req, res) => {
 
 app.get("/telegram", (req, res) => {
 
-  const clienteId = getClienteId(req);
+  const clienteId = exigirClienteAutenticado(req, res);
+  if (!clienteId) return;
 
   const configCliente =
     configsPorCliente[clienteId] || {};
@@ -4132,7 +4133,8 @@ app.get("/telegram", (req, res) => {
 app.post("/telegram", (req, res) => {
   const { ativo, destinos } = req.body;
 
-const clienteId = getClienteId(req);
+const clienteId = exigirClienteAutenticado(req, res);
+if (!clienteId) return;
 
 configsPorCliente[clienteId] =
   configsPorCliente[clienteId] || {};
@@ -4154,6 +4156,8 @@ configsPorCliente[clienteId].telegram = {
 
 app.post("/telegram/testar", async (req, res) => {
   try {
+    const clienteId = exigirClienteAutenticado(req, res);
+    if (!clienteId) return;
 
     const { destino } = req.body;
 
@@ -4190,7 +4194,8 @@ app.post("/telegram/testar", async (req, res) => {
 // ============== DESTINOS INTELIGENTES =================
 
 app.get("/destinos", (req, res) => {
-  const clienteId = getClienteId(req);
+  const clienteId = exigirClienteAutenticado(req, res);
+  if (!clienteId) return;
 
   const destinos =
     destinosPorCliente?.[clienteId] || [];
@@ -4199,7 +4204,8 @@ app.get("/destinos", (req, res) => {
 });
 
 app.post("/destinos", (req, res) => {
-  const clienteId = getClienteId(req);
+  const clienteId = exigirClienteAutenticado(req, res);
+  if (!clienteId) return;
 
   const destinos = req.body;
 
@@ -5237,6 +5243,43 @@ function getClienteId(req) {
     return decoded.clienteId || "admin";
   } catch {
     return "admin";
+  }
+}
+
+function exigirClienteAutenticado(req, res) {
+  if (req.clienteId) return req.clienteId;
+
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+  if (!token) {
+    res.status(401).json({
+      ok: false,
+      erro: "Cliente não autenticado"
+    });
+    return null;
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const clienteId = decoded.clienteId || "";
+
+    if (!clienteId) {
+      res.status(401).json({
+        ok: false,
+        erro: "Cliente não autenticado"
+      });
+      return null;
+    }
+
+    req.clienteId = clienteId;
+    return clienteId;
+  } catch {
+    res.status(401).json({
+      ok: false,
+      erro: "Cliente não autenticado"
+    });
+    return null;
   }
 }
 
