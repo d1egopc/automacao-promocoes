@@ -2211,6 +2211,156 @@ if (ehRadar || temMelhoria || descontoNovo >= 25 || cupomNovoValido) {
   });
 }
 
+function normalizarLinkDuplicidadeRadar(link = "", marketplace = "") {
+  const texto = String(link || "").trim();
+  if (!texto) return "";
+
+  const semEspacos = texto.replace(/\s+/g, "");
+
+  try {
+    const parsed = new URL(semEspacos);
+    parsed.hash = "";
+    parsed.search = "";
+    parsed.hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    return parsed.toString().replace(/\/$/, "").toLowerCase();
+  } catch {
+    const mp = normalizarMarketplaceRadar(marketplace);
+    return limparUrlProdutoRadar(semEspacos, mp).replace(/\/$/, "").toLowerCase() ||
+      semEspacos.split("?")[0].replace(/\/$/, "").toLowerCase();
+  }
+}
+
+function linksDuplicidadeRadar(oferta = {}) {
+  const marketplace = oferta.marketplace || oferta.mercado || "";
+  const links = [
+    oferta.linkOriginal,
+    oferta.linkResolvidoRadar,
+    oferta.linkCapturado,
+    oferta.link,
+    oferta.linkAfiliado,
+    oferta.linkFinal
+  ]
+    .map(link => normalizarLinkDuplicidadeRadar(link, marketplace))
+    .filter(Boolean);
+
+  return [...new Set(links)];
+}
+
+function precoNumericoDuplicidadeRadar(oferta = {}) {
+  return numeroMoedaOferta(
+    oferta.precoAtual ||
+    oferta.preco ||
+    oferta.precoFinal ||
+    oferta.valor ||
+    oferta.precoPor ||
+    ""
+  );
+}
+
+function faixaPrecoDuplicidadeRadar(oferta = {}) {
+  const preco = precoNumericoDuplicidadeRadar(oferta);
+  if (!preco) return "";
+
+  const tamanhoFaixa =
+    preco <= 50 ? 5 :
+    preco <= 200 ? 10 :
+    preco <= 1000 ? 50 :
+    100;
+
+  return String(Math.floor(preco / tamanhoFaixa));
+}
+
+function dataMsDuplicidadeRadar(valor = "") {
+  if (!valor) return 0;
+
+  const direto = new Date(valor).getTime();
+  if (Number.isFinite(direto)) return direto;
+
+  const match = String(valor).match(
+    /(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*(\d{1,2})?:?(\d{1,2})?:?(\d{1,2})?/
+  );
+
+  if (!match) return 0;
+
+  const [, dia, mes, ano, hora = "0", minuto = "0", segundo = "0"] = match;
+  return new Date(
+    Number(ano),
+    Number(mes) - 1,
+    Number(dia),
+    Number(hora),
+    Number(minuto),
+    Number(segundo)
+  ).getTime();
+}
+
+function itemFilaBloqueiaDuplicidadeRadar(item = {}) {
+  const status = normalizarTexto(item.status || item.statusRadar || "");
+  if (status === "pendente" || status === "retida") return true;
+
+  if (status !== "enviado" && status !== "enviada") return false;
+
+  const data = dataMsDuplicidadeRadar(
+    item.enviadoEm ||
+    item.dataEnvio ||
+    item.dataEntradaFila ||
+    item.criadoEm ||
+    ""
+  );
+
+  return data > 0 && Date.now() - data <= 24 * 60 * 60 * 1000;
+}
+
+function duplicidadeRadarNaFilaCliente(oferta = {}, clienteId = "admin") {
+  const cliente = String(clienteId || "admin");
+  const linksNovos = linksDuplicidadeRadar(oferta);
+  const tituloNovo = normalizarTexto(oferta.titulo || oferta.nome || "");
+  const marketplaceNovo = normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || "");
+  const faixaPrecoNova = faixaPrecoDuplicidadeRadar(oferta);
+
+  const itensCliente = fila.filter(item =>
+    String(item.clienteId || "admin") === cliente &&
+    itemFilaBloqueiaDuplicidadeRadar(item)
+  );
+
+  for (const item of itensCliente) {
+    const linksExistentes = linksDuplicidadeRadar(item);
+
+    if (linksNovos.some(link => linksExistentes.includes(link))) {
+      return { duplicada: true, motivo: "mesmo_link" };
+    }
+
+    const tituloExistente = normalizarTexto(item.titulo || item.nome || "");
+    const marketplaceExistente = normalizarMarketplaceRadar(item.marketplace || item.mercado || "");
+    const faixaPrecoExistente = faixaPrecoDuplicidadeRadar(item);
+
+    if (
+      tituloNovo &&
+      tituloExistente &&
+      tituloNovo === tituloExistente &&
+      marketplaceNovo &&
+      marketplaceExistente &&
+      marketplaceNovo === marketplaceExistente &&
+      faixaPrecoNova &&
+      faixaPrecoExistente &&
+      faixaPrecoNova === faixaPrecoExistente
+    ) {
+      return { duplicada: true, motivo: "mesmo_titulo_marketplace_faixa_preco" };
+    }
+  }
+
+  return { duplicada: false, motivo: "" };
+}
+
+function logRadarDuplicadaBloqueada(clienteId = "admin", oferta = {}, motivo = "") {
+  console.log("[RADAR-DUPLICADA-BLOQUEADA]", {
+    clienteId,
+    titulo: oferta.titulo || oferta.nome || "",
+    marketplace: oferta.marketplace || oferta.mercado || "",
+    link: oferta.linkOriginal || oferta.link || oferta.linkAfiliado || "",
+    motivo
+  });
+}
+
 // ================= FILTROS UNIVERSAIS DE OFERTAS =================
 
 function produtoSuspeito(oferta = {}) {
@@ -9622,6 +9772,15 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
   }
 
   const oferta = preparado.oferta;
+  carregarFila(clienteId);
+
+  const duplicidadeRadar = duplicidadeRadarNaFilaCliente(oferta, clienteId);
+
+  if (duplicidadeRadar.duplicada) {
+    logRadarDuplicadaBloqueada(clienteId, oferta, duplicidadeRadar.motivo);
+    return { ok: false, motivo: "radar_duplicada_bloqueada" };
+  }
+
   const itensFilaRadarCliente = fila.filter(item =>
     String(item.clienteId || "admin") === String(clienteId) &&
     item.origem === "radar"
