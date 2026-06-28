@@ -14572,7 +14572,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
         continue;
       }
 
-     const clienteId = "admin";
+     const clienteOfertaId = String(clienteId || "admin");
 
      const oferta = {
         id: Date.now() + "-" + Math.random().toString(36).slice(2),
@@ -14591,8 +14591,8 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
         categoria,
         categoriaOriginal,
         status: "pendente",
-        clienteId,
-        sessaoId: normalizarSessaoId(clienteId, "sessao1"),
+        clienteId: clienteOfertaId,
+        sessaoId: normalizarSessaoId(clienteOfertaId, "sessao1"),
         criadoEm: new Date().toISOString()
       };
 
