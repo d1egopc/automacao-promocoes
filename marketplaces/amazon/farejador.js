@@ -91,6 +91,7 @@ console.log("[AMZ] DENTRO FAREJADOR:", typeof importarAmazon);
     config.marketplaces?.amazon?.limitePorRodada || 5;
 
     
+    buscaAmazon:
     for (const termo of buscas) {
       const url = `https://www.amazon.com.br/s?k=${encodeURIComponent(termo)}&rh=p_n_deal_type%3A23565492011`;
 
@@ -294,7 +295,7 @@ console.log("[AMZ] Nova oferta Amazon:", {
 
 if (adicionadasNestaRodada >= limitePorRodada) {
   console.log("[AMZ] Limite Amazon por rodada atingido");
-  break;
+  break buscaAmazon;
 }
 
 
@@ -332,4 +333,3 @@ console.log(
 module.exports = {
   farejarAmazon
 };
-
