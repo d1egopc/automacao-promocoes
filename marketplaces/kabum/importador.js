@@ -1,5 +1,46 @@
 const axios = require("axios");
 
+const KABUM_HTML_TIMEOUT_MS = 20000;
+
+function criarHeadersHtmlKabum(url) {
+  return {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Referer": "https://www.kabum.com.br/",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-CH-UA": "\"Not/A)Brand\";v=\"8\", \"Chromium\";v=\"126\", \"Google Chrome\";v=\"126\"",
+    "Sec-CH-UA-Mobile": "?0",
+    "Sec-CH-UA-Platform": "\"Windows\"",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1"
+  };
+}
+
+async function baixarHtmlKabum(url) {
+  try {
+    return await axios.get(url, {
+      headers: criarHeadersHtmlKabum(url),
+      timeout: KABUM_HTML_TIMEOUT_MS,
+      responseType: "text",
+      maxRedirects: 5,
+      decompress: true
+    });
+  } catch (e) {
+    if (e.response?.status === 403) {
+      const erro = new Error("KaBuM bloqueou scraping HTTP 403");
+      erro.status = 403;
+      throw erro;
+    }
+
+    throw e;
+  }
+}
+
 // ============================= FUNCAO IMPORTA AWIN/KABUM =====================================
 
 async function importarProdutoKabumViaAwin(
@@ -10,16 +51,9 @@ async function importarProdutoKabumViaAwin(
   const { gerarDeepLinkAwin } = deps;
 
   if (typeof gerarDeepLinkAwin !== "function") {
-    throw new Error("gerarDeepLinkAwin não recebido no importador KaBuM");
-  }  
-
-   const response = await axios.get(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36"
-    },
-    timeout: 15000
-  });
+    throw new Error("gerarDeepLinkAwin nÃ£o recebido no importador KaBuM");
+  }
+  const response = await baixarHtmlKabum(url);
 
   const html = response.data || "";
 
@@ -34,7 +68,7 @@ console.log("[DEBUG] KABUM HTML DEBUG:", {
   trechoImagem: html.match(/https?:\/\/[^"']+\.(jpg|jpeg|png|webp)/i)?.[0] || ""
 });
 
-      // ================= EXTRAIR TÍTULO =================
+      // ================= EXTRAIR TÃTULO =================
 
     const titulo =
       html.match(/<title>(.*?)<\/title>/i)?.[1]
@@ -64,7 +98,7 @@ if (imagem) {
 
 console.log("[INFO] IMAGEM KABUM:", imagem);
 
-  // ================= EXTRAIR PREÇO =================
+  // ================= EXTRAIR PREÃ‡O =================
 
 let precoAtual = "";
 let precoAntigo = "";
@@ -92,17 +126,17 @@ const precosNumericos = precosEncontrados
   .filter(p => Number.isFinite(p.numero) && p.numero > 0);
 
 const pixMatch =
-  html.match(/(R\$\s?[\d\.]+,\d{2})\s*À vista no PIX/i) ||
-  html.match(/(R\$\s?[\d\.]+,\d{2})\s*À vista no PIX com/i);
+  html.match(/(R\$\s?[\d\.]+,\d{2})\s*Ã€ vista no PIX/i) ||
+  html.match(/(R\$\s?[\d\.]+,\d{2})\s*Ã€ vista no PIX com/i);
 
 console.log("[INFO] PIX MATCH:", pixMatch?.[1]);
 
 const parcelamentoMatch =
-  html.match(/em\s+até\s+(\d+)x[\s\S]{0,80}de\s+(R\$\s?[\d\.]+,\d{2})[\s\S]{0,80}sem\s+juros/i) ||
+  html.match(/em\s+atÃ©\s+(\d+)x[\s\S]{0,80}de\s+(R\$\s?[\d\.]+,\d{2})[\s\S]{0,80}sem\s+juros/i) ||
   html.match(/(\d+)x[\s\S]{0,40}de\s+(R\$\s?[\d\.]+,\d{2})[\s\S]{0,80}sem\s+juros/i);
 
 if (parcelamentoMatch?.[1] && parcelamentoMatch?.[2]) {
-  parcelamento = `💳 Ou ${parcelamentoMatch[1]}x de ${parcelamentoMatch[2]} sem juros`;
+  parcelamento = `ðŸ’³ Ou ${parcelamentoMatch[1]}x de ${parcelamentoMatch[2]} sem juros`;
 }
 
 if (!parcelamento) {
@@ -118,18 +152,18 @@ if (!parcelamento) {
     const vezes = Math.round(precoTotalParcelado.numero / precoParcela.numero);
 
     if (vezes >= 2 && vezes <= 12) {
-      parcelamento = `💳 Ou ${vezes}x de ${precoParcela.texto} sem juros`;
+      parcelamento = `ðŸ’³ Ou ${vezes}x de ${precoParcela.texto} sem juros`;
     }
   }
 }
 
 if (pixMatch?.[1]) {
   precoAtual = pixMatch[1].trim();
-  avisoPagamento = "À vista no PIX";
+  avisoPagamento = "Ã€ vista no PIX";
 }
 
 if (!avisoPagamento && precoAtual && html.toLowerCase().includes("vista no pix")) {
-  avisoPagamento = "À vista no PIX";
+  avisoPagamento = "Ã€ vista no PIX";
 }
 
 const precosValidos = precosNumericos.filter((p) => {
