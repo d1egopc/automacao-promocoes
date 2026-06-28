@@ -12,6 +12,7 @@ async function farejarKabum(clienteId = "admin", deps = {}) {
     const {
     config,
     integracoesPorCliente,
+    getIntegracaoCliente,
     fila,
     salvarFila,
     prepararOfertaGlobal,
@@ -303,10 +304,18 @@ if (!jaExisteKabum) {
 }
     
   const integracaoAwin =
-  integracoesPorCliente?.[clienteId]?.awin;
+    typeof getIntegracaoCliente === "function"
+      ? getIntegracaoCliente(clienteId, "awin")
+      : integracoesPorCliente?.[clienteId]?.awin;
 
     if (!integracaoAwin?.credenciais) {
-      console.log("[AVISO] KaBuM sem Awin configurada para gerar afiliado:", clienteId);
+      console.log("[AVISO] KaBuM sem Awin configurada para gerar afiliado:", {
+        clienteId,
+        origemIntegracao:
+          typeof getIntegracaoCliente === "function"
+            ? "getIntegracaoCliente"
+            : "integracoesPorCliente"
+      });
     }
 
     console.log("[OK] KaBuM modular carregado com sucesso.");
