@@ -13,6 +13,62 @@ function listarDestinosCliente(destinosCliente) {
     .filter(Boolean);
 }
 
+function textoTelegram(valor) {
+  return valor == null ? "" : String(valor).trim();
+}
+
+function normalizarTelegramSalvo(telegram = {}) {
+  const botToken = textoTelegram(
+    telegram.botToken || telegram.token || telegram.telegramToken
+  );
+  const chatId = textoTelegram(
+    telegram.chatId || telegram.grupoId || telegram.canalId || telegram.channelId
+  );
+
+  const chaves = [
+    telegram.id,
+    telegram.botId,
+    telegram.telegramId,
+    telegram.destinoId,
+    telegram.nome,
+    telegram.chatId,
+    telegram.grupoId,
+    telegram.canalId,
+    telegram.channelId
+  ].map(textoTelegram).filter(Boolean);
+
+  return {
+    ...telegram,
+    botToken,
+    chatId,
+    ativo: telegram.ativo !== false,
+    chaves
+  };
+}
+
+function idsTelegramDestino(destino = {}) {
+  const ids = [];
+
+  if (Array.isArray(destino.telegramDestinos)) {
+    ids.push(...destino.telegramDestinos);
+  }
+
+  ids.push(
+    destino.telegramId,
+    destino.botId,
+    destino.destinoId,
+    destino.idTelegram,
+    destino.conexaoId,
+    destino.sessao,
+    destino.chatId,
+    destino.grupoId,
+    destino.canalId,
+    destino.channelId
+  );
+
+  return ids.map(textoTelegram).filter(Boolean);
+}
+
 async function enviarCampanhaManual({
   clienteId,
   mensagem,
@@ -59,13 +115,14 @@ async function enviarCampanhaManual({
 
 if (tipo === "telegram") {
   const configCliente = configsPorCliente?.[clienteId] || {};
-  const telegrams = configCliente.telegram?.destinos || [];
-  const telegramsSelecionados = destino.telegramDestinos || [];
+  const telegrams = Array.isArray(configCliente.telegram?.destinos)
+    ? configCliente.telegram.destinos.map(normalizarTelegramSalvo)
+    : [];
+  const telegramsSelecionados = idsTelegramDestino(destino);
 
   const selecionados = telegramsSelecionados.length
     ? telegrams.filter(t =>
-        telegramsSelecionados.includes(t.nome) ||
-        telegramsSelecionados.includes(String(t.chatId))
+        telegramsSelecionados.some(id => t.chaves.includes(id))
       )
     : telegrams.filter(t => t.ativo);
 
@@ -82,6 +139,17 @@ if (tipo === "telegram") {
 
   for (const tel of selecionados) {
     if (!tel.ativo) continue;
+
+    if (!tel.botToken || !tel.chatId) {
+      resultado.erros++;
+      resultado.detalhes.push({
+        destino: destino.nome,
+        tipo: "telegram",
+        status: "erro",
+        motivo: "Token ou Chat ID ausente"
+      });
+      continue;
+    }
 
     if (!usuarioTemCreditos(clienteId, 1)) {
       resultado.erros++;
