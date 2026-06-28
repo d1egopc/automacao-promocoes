@@ -31,6 +31,8 @@ function normalizarTelegramSalvo(telegram = {}) {
     telegram.telegramId,
     telegram.destinoId,
     telegram.nome,
+    telegram.apelido,
+    telegram.username,
     telegram.chatId,
     telegram.grupoId,
     telegram.canalId,
@@ -44,6 +46,11 @@ function normalizarTelegramSalvo(telegram = {}) {
     ativo: telegram.ativo !== false,
     chaves
   };
+}
+
+function telegramTemCredenciais(telegram = {}) {
+  const normalizado = normalizarTelegramSalvo(telegram);
+  return normalizado.botToken && normalizado.chatId ? normalizado : null;
 }
 
 function idsTelegramDestino(destino = {}) {
@@ -67,6 +74,29 @@ function idsTelegramDestino(destino = {}) {
   );
 
   return ids.map(textoTelegram).filter(Boolean);
+}
+
+function telegramsDiretosDestino(destino = {}) {
+  const diretos = [];
+
+  const direto = telegramTemCredenciais(destino);
+  if (direto) diretos.push(direto);
+
+  if (Array.isArray(destino.telegramDestinos)) {
+    destino.telegramDestinos.forEach(item => {
+      if (item && typeof item === "object") {
+        const normalizado = telegramTemCredenciais(item);
+        if (normalizado) diretos.push(normalizado);
+      }
+    });
+  }
+
+  if (destino.telegram && typeof destino.telegram === "object") {
+    const normalizado = telegramTemCredenciais(destino.telegram);
+    if (normalizado) diretos.push(normalizado);
+  }
+
+  return diretos;
 }
 
 async function enviarCampanhaManual({
@@ -119,12 +149,21 @@ if (tipo === "telegram") {
     ? configCliente.telegram.destinos.map(normalizarTelegramSalvo)
     : [];
   const telegramsSelecionados = idsTelegramDestino(destino);
+  const telegramsDiretos = telegramsDiretosDestino(destino);
 
-  const selecionados = telegramsSelecionados.length
+  let selecionados = telegramsSelecionados.length
     ? telegrams.filter(t =>
         telegramsSelecionados.some(id => t.chaves.includes(id))
       )
     : telegrams.filter(t => t.ativo);
+
+  if (telegramsDiretos.length) {
+    selecionados = [...telegramsDiretos, ...selecionados];
+  }
+
+  if (!selecionados.length && telegrams.length === 1) {
+    selecionados = telegrams.filter(t => t.ativo);
+  }
 
   if (!selecionados.length) {
     resultado.erros++;
