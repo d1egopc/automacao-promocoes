@@ -8811,6 +8811,54 @@ function extrairTituloKabumFallbackRadar(texto = "") {
     .trim();
 }
 
+function montarOfertaMercadoLivreRadarFallbackTexto(linkOriginal = "", contexto = {}) {
+  const texto = contexto.textoOriginal || contexto.texto || contexto.mensagemOriginalRadar || "";
+  const titulo = extrairTituloKabumFallbackRadar(texto);
+  const precoExtraido = extrairPrecoFallbackTextoRadar(texto);
+  const imagem = extrairImagemMensagemRadarRaw(contexto.raw || {});
+
+  if (!titulo || !precoExtraido.ok) {
+    return {
+      ok: false,
+      motivo: "mercadolivre_radar_dados_insuficientes",
+      motivoTecnico: "mercadolivre_radar_dados_insuficientes",
+      detalhes: {
+        tituloOk: Boolean(titulo),
+        precoOk: Boolean(precoExtraido.ok),
+        motivoPreco: precoExtraido.motivo || ""
+      }
+    };
+  }
+
+  return {
+    ok: true,
+    oferta: {
+      marketplace: "mercadolivre",
+      titulo,
+      nome: titulo,
+      precoAtual: precoExtraido.preco,
+      preco: precoExtraido.preco,
+      precoOrigem: "texto_radar",
+      avisoPreco: "Preco extraido da mensagem do Radar",
+      imagem,
+      image: imagem,
+      linkOriginal,
+      linkOriginalRadar: contexto.linkOriginalRadar || linkOriginal,
+      linkResolvido: contexto.linkResolvido || linkOriginal,
+      link: linkOriginal,
+      linkAfiliado: "",
+      linkFinal: "",
+      categoria: "Mercado Livre",
+      origem: "radar",
+      radar: true,
+      status: "rascunho",
+      tipoLinkRadar: "shortlink_meli_social",
+      fallbackMercadoLivreRadarTexto: true,
+      motivoFallback: "meli_social_importador_falhou_texto_radar"
+    }
+  };
+}
+
 function extrairImagemMensagemRadarRaw(raw = {}) {
   const vistos = new Set();
 
@@ -9096,13 +9144,14 @@ async function resolverLinkOriginalRadar(url = "") {
         "";
       const dominioFinal = dominioRadar(resolvida);
 
-      if (!urlMercadoLivreProdutoRadar(resolvida)) {
+      const marketplaceFinalMeli = dominioMarketplaceConhecidoRadar(resolvida);
+      if (marketplaceFinalMeli !== "mercadolivre") {
         logRedirectRadar({
           urlOriginal: capturada,
           urlFinal: resolvida || capturada,
           dominioOriginal,
           dominioFinal,
-          marketplaceDetectado: dominioMarketplaceConhecidoRadar(resolvida) || "",
+          marketplaceDetectado: marketplaceFinalMeli || "",
           resolveu: false,
           motivo: "meli_la_redirect_nao_resolvido"
         });
@@ -9121,7 +9170,43 @@ async function resolverLinkOriginalRadar(url = "") {
         };
       }
 
-      const linkOriginalLimpo = limparUrlProdutoRadar(resolvida, "mercadolivre") || resolvida;
+      let tipoLinkRadarMeli = urlMercadoLivreProdutoRadar(resolvida) ? "shortlink_meli" : "shortlink_meli_social";
+      let linkOriginalLimpo = limparUrlProdutoRadar(resolvida, "mercadolivre") || resolvida;
+
+      if (tipoLinkRadarMeli === "shortlink_meli_social") {
+        const produtoParametro =
+          extrairProdutoDeParametrosIntermediarioRadar(resolvida, "mercadolivre") ||
+          extrairProdutoDeParametrosIntermediarioRadar(capturada, "mercadolivre");
+
+        if (produtoParametro) {
+          linkOriginalLimpo = produtoParametro;
+          tipoLinkRadarMeli = "shortlink_meli";
+        } else if (isUrlIntermediariaMercadoLivreRadar(resolvida)) {
+          try {
+            const paginaIntermediaria = await baixarHtmlRadar(resolvida);
+            const produtoHtml = extrairProdutoMarketplaceDeHtmlRadar(
+              paginaIntermediaria.html || "",
+              "mercadolivre",
+              paginaIntermediaria.urlFinal || resolvida
+            );
+            const produtoResolvido = produtoHtml || await extrairProdutoMercadoLivreIntermediarioRadar(resolvida);
+            if (produtoResolvido) {
+              linkOriginalLimpo = produtoResolvido;
+              tipoLinkRadarMeli = "shortlink_meli";
+            }
+          } catch (e) {
+            logDebug("[RADAR-LINK] meli.la intermediario mantido para importador", {
+              capturada,
+              resolvida,
+              erro: e.message
+            });
+          }
+        }
+      }
+
+      if (tipoLinkRadarMeli === "shortlink_meli_social") {
+        linkOriginalLimpo = resolvida;
+      }
 
       logRedirectRadar({
         urlOriginal: capturada,
@@ -9141,7 +9226,7 @@ async function resolverLinkOriginalRadar(url = "") {
         linkResolvido: linkOriginalLimpo,
         marketplaceReal: "mercadolivre",
         linkOriginalLimpo,
-        tipoLinkRadar: "shortlink_meli",
+        tipoLinkRadar: tipoLinkRadarMeli,
         statusHttp: resposta.status || ""
       };
     } catch (e) {
@@ -9435,6 +9520,52 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
 
     if (resultado.status >= 400 || resultado.body?.ok === false) {
       const motivoFalhaImportador = resultado.body?.erro || "importacao_falhou";
+
+      if (marketplaceDetectado === "mercadolivre" && resolucao.tipoLinkRadar === "shortlink_meli_social") {
+        const fallbackMl = montarOfertaMercadoLivreRadarFallbackTexto(linkOriginalLimpo, {
+          ...contexto,
+          linkOriginalRadar: resolucao.linkOriginalRadar || resolucao.urlCapturada,
+          linkResolvido: resolucao.linkResolvido || resolucao.linkOriginalLimpo || resolucao.urlResolvida
+        });
+
+        if (fallbackMl.ok) {
+          const produtoEnriquecido = await enriquecerBeneficioRadarOferta({
+            ...fallbackMl.oferta,
+            marketplace: "mercadolivre",
+            linkOriginal: linkOriginalLimpo
+          }, {
+            origem: "radar",
+            marketplace: "mercadolivre",
+            linkOriginal: linkOriginalLimpo
+          });
+          const beneficioRadar = normalizarBeneficiosRadarOferta(produtoEnriquecido);
+
+          return {
+            ok: true,
+            resolucao: {
+              ...resolucao,
+              erroTecnico: motivoFalhaImportador
+            },
+            oferta: {
+              ...produtoEnriquecido,
+              ...beneficioRadar,
+              marketplace: "mercadolivre",
+              linkOriginal: linkOriginalLimpo,
+              linkCapturado: resolucao.urlCapturada,
+              linkOriginalRadar: resolucao.linkOriginalRadar || resolucao.urlCapturada,
+              linkResolvido: resolucao.linkResolvido || resolucao.linkOriginalLimpo || resolucao.urlResolvida,
+              linkResolvidoRadar: resolucao.urlResolvida,
+              origem: "radar",
+              radar: true,
+              status: "rascunho",
+              tipoLinkRadar: resolucao.tipoLinkRadar || "shortlink_meli_social",
+              fallbackMercadoLivreRadarTexto: true,
+              motivoFallback: "meli_social_importador_falhou_texto_radar"
+            }
+          };
+        }
+      }
+
       return {
         ok: false,
         motivo: motivoFalhaImportador,
@@ -9455,6 +9586,52 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
     }
 
     if (motivoIncompleta) {
+      if (marketplaceDetectado === "mercadolivre" && resolucao.tipoLinkRadar === "shortlink_meli_social") {
+        const fallbackMl = montarOfertaMercadoLivreRadarFallbackTexto(linkOriginalLimpo, {
+          ...contexto,
+          linkOriginalRadar: resolucao.linkOriginalRadar || resolucao.urlCapturada,
+          linkResolvido: resolucao.linkResolvido || resolucao.linkOriginalLimpo || resolucao.urlResolvida
+        });
+
+        if (fallbackMl.ok) {
+          const produtoEnriquecido = await enriquecerBeneficioRadarOferta({
+            ...produtoImportadoRadar,
+            ...fallbackMl.oferta,
+            marketplace: "mercadolivre",
+            linkOriginal: linkOriginalLimpo
+          }, {
+            origem: "radar",
+            marketplace: "mercadolivre",
+            linkOriginal: linkOriginalLimpo
+          });
+          const beneficioRadar = normalizarBeneficiosRadarOferta(produtoEnriquecido);
+
+          return {
+            ok: true,
+            resolucao: {
+              ...resolucao,
+              erroTecnico: motivoIncompleta
+            },
+            oferta: {
+              ...produtoEnriquecido,
+              ...beneficioRadar,
+              marketplace: "mercadolivre",
+              linkOriginal: linkOriginalLimpo,
+              linkCapturado: resolucao.urlCapturada,
+              linkOriginalRadar: resolucao.linkOriginalRadar || resolucao.urlCapturada,
+              linkResolvido: resolucao.linkResolvido || resolucao.linkOriginalLimpo || resolucao.urlResolvida,
+              linkResolvidoRadar: resolucao.urlResolvida,
+              origem: "radar",
+              radar: true,
+              status: "rascunho",
+              tipoLinkRadar: resolucao.tipoLinkRadar || "shortlink_meli_social",
+              fallbackMercadoLivreRadarTexto: true,
+              motivoFallback: "meli_social_importador_incompleto_texto_radar"
+            }
+          };
+        }
+      }
+
       return {
         ok: false,
         motivo: motivoIncompleta,
@@ -9487,7 +9664,8 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
             linkResolvidoRadar: resolucao.urlResolvida,
         origem: "radar",
         radar: true,
-        status: "rascunho"
+        status: "rascunho",
+        tipoLinkRadar: resolucao.tipoLinkRadar || "produto"
       }
     };
   } catch (e) {
@@ -10527,12 +10705,17 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
   );
 
   if (!linkAfiliadoCliente) {
+    const motivoLinkAfiliadoNaoGerado = ofertaPreparada.tipoLinkRadar === "shortlink_meli_social" ||
+      ofertaPreparada.fallbackMercadoLivreRadarTexto === true
+        ? "link_afiliado_nao_gerado_meli_social"
+        : "link_afiliado_nao_gerado";
+
     logOptimus("INTEGRACAO", "Link afiliado nao gerado", {
       clienteId,
       aprovado: false,
-      motivo: "link_afiliado_nao_gerado"
+      motivo: motivoLinkAfiliadoNaoGerado
     });
-    return { ok: false, motivo: "link_afiliado_nao_gerado" };
+    return { ok: false, motivo: motivoLinkAfiliadoNaoGerado };
   }
 
   if (String(linkAfiliadoCliente).trim() === String(linkOriginal).trim()) {
