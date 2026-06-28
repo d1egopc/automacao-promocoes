@@ -44,6 +44,7 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
     termosExecutados: [],
     produtosEncontrados: 0,
     importados: 0,
+    linkAfiliadoOk: 0,
     ignoradosImportadorVazio: 0,
     ignoradosSemPreco: 0,
     ignoradosSemAfiliado: 0,
@@ -366,6 +367,7 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
               continue;
             }
 
+            resumoML.linkAfiliadoOk += 1;
             produto.linkAfiliado = linkAfiliadoML;
             produto.linkFinal = linkAfiliadoML;
 
@@ -602,6 +604,15 @@ console.log("✅ ML VAI PRA FILA", {
   } catch (e) {
     console.log("[ERRO] [ML] erro farejador:", e.message);
   } finally {
+    console.log("[ML-DIAGNOSTICO-CLIENTE]", {
+      clienteId,
+      encontradas: resumoML.produtosEncontrados,
+      importadas: resumoML.importados,
+      linkAfiliadoOk: resumoML.linkAfiliadoOk,
+      adicionadas: resumoML.adicionadosFila,
+      recusas: resumoML.motivosRecusa,
+      bloqueios: resumoML.bloqueios
+    });
     console.log("[ML-RESUMO-RODADA]", resumoML);
   }
 
