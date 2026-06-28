@@ -40,233 +40,161 @@ function extrairPrecoMlHtml(html = "") {
   return limparPreco(bruto);
 }
 
-function criarPerfImportacaoManualMl(clienteIdAlvo = "admin", url = "") {
-  const inicio = Date.now();
-  let ultimaEtapa = inicio;
-  const etapas = [];
-
-  return {
-    etapa(nome, detalhes = {}) {
-      const agora = Date.now();
-      etapas.push({
-        etapa: nome,
-        duracaoMs: agora - ultimaEtapa,
-        desdeInicioMs: agora - inicio,
-        ...detalhes
-      });
-      ultimaEtapa = agora;
-    },
-    fim(status = "ok", detalhes = {}) {
-      console.log("[PERF][ML_IMPORTACAO_MANUAL]", {
-        clienteId: clienteIdAlvo,
-        status,
-        duracaoTotalMs: Date.now() - inicio,
-        url,
-        etapas,
-        ...detalhes
-      });
-    }
-  };
-}
-
 async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
-  const perf = criarPerfImportacaoManualMl(clienteIdAlvo, url);
   const {
     getIntegracaoCliente,
     gerarLinkAfiliadoMercadoLivre
   } = deps;
 
-  try {
-    const integracaoML = getIntegracaoCliente(clienteIdAlvo, "mercadolivre");
-    const cookies = integracaoML?.credenciais?.cookies || "";
+  const integracaoML =
+    getIntegracaoCliente(clienteIdAlvo, "mercadolivre");
 
-    perf.etapa("inicio_importador", {
-      temIntegracao: !!integracaoML,
-      temCookies: !!cookies
-    });
+  const cookies =
+    integracaoML?.credenciais?.cookies || "";  
+  
+  const response = await fetch(url, {
+  method: "GET",
+  redirect: "follow",
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
 
-    const response = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        "Accept":
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language":
-          "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-        "Upgrade-Insecure-Requests": "1",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1",
-        "Referer": "https://www.google.com/",
-        ...(cookies ? { Cookie: cookies } : {})
-      }
-    });
+    "Accept":
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
 
-    perf.etapa("busca_abre_link", {
+    "Accept-Language":
+      "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+
+    "Cache-Control": "no-cache",
+
+    "Pragma": "no-cache",
+
+    "Upgrade-Insecure-Requests": "1",
+
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+
+"Sec-Fetch-User": "?1",
+"Referer": "https://www.google.com/",
+...(cookies ? { Cookie: cookies } : {})
+  }
+});
+
+console.log("🧪 ML IMPORTADOR MANUAL", {
+  clienteIdAlvo,
+  temCookies: !!cookies,
+  status: response.status,
+  urlOriginal: url,
+  urlFinal: response.url
+});
+
+if (
+  response.status === 403 ||
+  response.status === 429 ||
+  response.url.includes("account-verification") ||
+  response.url.includes("login")
+) {
+  registrarAlertaIntegracao(clienteIdAlvo, "mercadolivre", {
+    tipo: "cookie_invalido",
+    status: "atencao",
+    mensagem: "Atualize os cookies do Mercado Livre para manter a captura de ofertas funcionando.",
+    detalhes: {
       httpStatus: response.status,
       urlFinal: response.url
-    });
-
-    console.log("🧪 ML IMPORTADOR MANUAL", {
-      clienteIdAlvo,
-      temCookies: !!cookies,
-      status: response.status,
-      urlOriginal: url,
-      urlFinal: response.url
-    });
-
-    if (
-      response.status === 403 ||
-      response.status === 429 ||
-      response.url.includes("account-verification") ||
-      response.url.includes("login")
-    ) {
-      registrarAlertaIntegracao(clienteIdAlvo, "mercadolivre", {
-        tipo: "cookie_invalido",
-        status: "atencao",
-        mensagem: "Atualize os cookies do Mercado Livre para manter a captura de ofertas funcionando.",
-        detalhes: {
-          httpStatus: response.status,
-          urlFinal: response.url
-        }
-      });
-
-      perf.fim("bloqueado_cookie", {
-        httpStatus: response.status,
-        urlFinal: response.url
-      });
-      return null;
     }
+  });
 
-    const html = await response.text();
-    perf.etapa("download_html", {
-      tamanhoHtml: html.length
-    });
+  return null;
+}
 
-    const jsonLd = extrairJsonLd(html);
+  const html = await response.text();
 
-    let titulo =
-      jsonLd?.name ||
-      extrairMeta(html, "og:title") ||
-      extrairMeta(html, "twitter:title") ||
-      extrairValorMlHtml(html, ["poly_component_title", "name", "title"]) ||
-      "Produto Mercado Livre";
+  const jsonLd = extrairJsonLd(html);
 
-    let preco =
-      jsonLd?.offers?.price ||
-      extrairMeta(html, "product:price:amount") ||
-      extrairMeta(html, "og:price:amount") ||
-      extrairPrecoMlHtml(html) ||
-      "";
+  let titulo =
+    jsonLd?.name ||
+    extrairMeta(html, "og:title") ||
+    extrairMeta(html, "twitter:title") ||
+    extrairValorMlHtml(html, ["poly_component_title", "name", "title"]) ||
+    "Produto Mercado Livre";
 
-    const imagem =
-      (Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image) ||
-      extrairMeta(html, "og:image") ||
-      extrairMeta(html, "twitter:image") ||
-      "";
+  let preco =
+    jsonLd?.offers?.price ||
+    extrairMeta(html, "product:price:amount") ||
+    extrairMeta(html, "og:price:amount") ||
+    extrairPrecoMlHtml(html) ||
+    "";
 
-    preco = limparPreco(preco);
+  const imagem =
+    (Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image) ||
+    extrairMeta(html, "og:image") ||
+    extrairMeta(html, "twitter:image") ||
+    "";
 
-    // Correção ML: jsonLd às vezes vem como 48.9 e limparPreco vira 489.
-    if (
-      jsonLd?.offers?.price !== undefined &&
-      String(jsonLd.offers.price).includes(".") &&
-      !String(jsonLd.offers.price).includes(",")
-    ) {
-      preco = Number(jsonLd.offers.price)
-        .toFixed(2)
-        .replace(".", ",");
-    }
+ preco = limparPreco(preco);
 
-    let precoNumero = Number(String(preco).replace(",", "."));
-    let precoAntigo = "";
+ // CorreÃ§Ã£o ML: jsonLd Ã s vezes vem como 48.9 e limparPreco vira 489
+ if (
+  jsonLd?.offers?.price !== undefined &&
+  String(jsonLd.offers.price).includes(".") &&
+  !String(jsonLd.offers.price).includes(",")
+) {
+  preco = Number(jsonLd.offers.price)
+    .toFixed(2)
+    .replace(".", ",");
+}
 
-    const descontoMatch =
-      html.match(/(\d{1,2})\s*%\s*OFF/i) ||
-      html.match(/"discount_rate"\s*:\s*(\d{1,2})/i) ||
-      html.match(/"discountPercentage"\s*:\s*(\d{1,2})/i) ||
-      html.match(/(\d{1,2})\s*%\s*de desconto/i);
-    const descontoReal = descontoMatch ? Number(descontoMatch[1]) : 0;
+let precoNumero = Number(String(preco).replace(",", "."));
+let precoAntigo = "";
 
-    if (
-      Number.isFinite(precoNumero) &&
-      precoNumero > 0 &&
-      descontoReal > 0 &&
-      descontoReal < 90
-    ) {
-      precoAntigo = (precoNumero / (1 - descontoReal / 100))
-        .toFixed(2)
-        .replace(".", ",");
-    }
+  const descontoMatch =
+  html.match(/(\d{1,2})\s*%\s*OFF/i) ||
+  html.match(/"discount_rate"\s*:\s*(\d{1,2})/i) ||
+  html.match(/"discountPercentage"\s*:\s*(\d{1,2})/i) ||
+  html.match(/(\d{1,2})\s*%\s*de desconto/i);
+const descontoReal = descontoMatch ? Number(descontoMatch[1]) : 0;
 
-    if (!preco) {
-      console.log("ml_importacao_sem_preco_html", {
-        clienteId: clienteIdAlvo,
-        urlOriginal: url,
-        urlFinal: response.url,
-        httpStatus: response.status,
-        tamanhoHtml: html.length,
-        temTitulo: !!titulo
-      });
-    }
+if (
+  Number.isFinite(precoNumero) &&
+  precoNumero > 0 &&
+  descontoReal > 0 &&
+  descontoReal < 90
+) {
+  precoAntigo = (precoNumero / (1 - descontoReal / 100))
+    .toFixed(2)
+    .replace(".", ",");
+}
 
-    perf.etapa("extracao_preco_titulo_imagem", {
-      temTitulo: !!titulo,
-      temPreco: !!preco,
-      temImagem: !!imagem
-    });
 
-    const linkAfiliadoGerado = await gerarLinkAfiliadoMercadoLivre(
-      url,
-      getIntegracaoCliente(clienteIdAlvo, "mercadolivre"),
-      { clienteId: clienteIdAlvo }
-    );
+    const linkAfiliadoGerado =
+  await gerarLinkAfiliadoMercadoLivre(
+    url,
+    getIntegracaoCliente(clienteIdAlvo, "mercadolivre"),
+    { clienteId: clienteIdAlvo }
+  );
 
-    perf.etapa("geracao_link_afiliado", {
-      gerouLinkAfiliado: !!linkAfiliadoGerado,
-      linkCurtoMeli: /^https?:\/\/meli\.la\//i.test(String(linkAfiliadoGerado || ""))
-    });
+  const tituloLimpo = htmlDecode(titulo)
+    .replace(" | MercadoLivre", "")
+    .replace(" | Mercado Livre", "")
+    .trim();
 
-    const tituloLimpo = htmlDecode(titulo)
-      .replace(" | MercadoLivre", "")
-      .replace(" | Mercado Livre", "")
-      .trim();
+  limparAlertaIntegracao(clienteIdAlvo, "mercadolivre");
 
-    limparAlertaIntegracao(clienteIdAlvo, "mercadolivre");
-    perf.etapa("salvamento_retorno", {
-      limpouAlerta: true
-    });
-
-    perf.fim("ok", {
-      temPreco: !!preco,
-      temTitulo: !!tituloLimpo,
-      gerouLinkAfiliado: !!linkAfiliadoGerado
-    });
-
-    return {
-      marketplace: "mercadolivre",
-      titulo: tituloLimpo,
-      precoAntigo,
-      precoAtual: preco,
-      cupom: "",
-      linkOriginal: url,
-      link: linkAfiliadoGerado || "",
-      linkAfiliado: linkAfiliadoGerado || "",
-      linkFinal: linkAfiliadoGerado || "",
-      imagem: corrigirImagemUrl(imagem) || imagem,
-      categoria: "Mercado Livre"
-    };
-  } catch (e) {
-    perf.fim("erro", {
-      erro: e.message
-    });
-    throw e;
-  }
+  return {
+    marketplace: "mercadolivre",
+    titulo: tituloLimpo,
+    precoAntigo,
+    precoAtual: preco,
+    cupom: "",
+    linkOriginal: url,
+    link: linkAfiliadoGerado || "",
+    linkAfiliado: linkAfiliadoGerado || "",
+    linkFinal: linkAfiliadoGerado || "",
+    imagem: corrigirImagemUrl(imagem) || imagem,
+    categoria: "Mercado Livre"
+  };
 }
 
 module.exports = {

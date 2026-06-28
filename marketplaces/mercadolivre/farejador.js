@@ -1,4 +1,4 @@
-
+﻿
 const { extrairProdutosBuscaML } = require("./parser");
 
 let obterCuponsMLCliente = async () => [];
@@ -33,18 +33,15 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
     importarMercadoLivre,
     gerarLinkAfiliadoMercadoLivre,
     deveIgnorarOfertaRepetida,
-    registrarOfertaVista,
-    registrarAbastecimento
+    registrarOfertaVista
   } = deps;
 
   const resumoML = {
     clienteId,
-    tentadas: 0,
     buscasExecutadas: 0,
     termosExecutados: [],
     produtosEncontrados: 0,
     importados: 0,
-    linkAfiliadoOk: 0,
     ignoradosImportadorVazio: 0,
     ignoradosSemPreco: 0,
     ignoradosSemAfiliado: 0,
@@ -53,45 +50,16 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
     ignoradosTituloRuim: 0,
     ignoradosDuplicado: 0,
     ignoradosMemoria: 0,
-    adicionadosFila: 0,
-    bloqueios: [],
-    motivosRecusa: {}
-  };
-
-  const registrarRecusa = (motivo = "outros", quantidade = 1) => {
-    const total = Math.max(0, Number(quantidade) || 0);
-    if (!total) return;
-
-    resumoML.motivosRecusa[motivo] = (resumoML.motivosRecusa[motivo] || 0) + total;
-
-    if (typeof registrarAbastecimento === "function") {
-      registrarAbastecimento("recusada", { motivo, quantidade: total });
-    }
+    adicionadosFila: 0
   };
 
   try {
     if (!config.marketplaces?.mercadolivre?.ativo) {
       console.log("[INFO] [ML] Mercado Livre desativado. Farejador ignorado.");
-      resumoML.bloqueios.push("mercadolivre_desativado");
-      return resumoML;
+      return;
     }
 
     console.log("[INFO] [ML] Farejando ofertas ML");
-
-    const integracaoMLCliente =
-      typeof getIntegracaoCliente === "function"
-        ? getIntegracaoCliente(clienteId, "mercadolivre")
-        : integracoesPorCliente?.[clienteId]?.mercadolivre;
-
-    const cookiesML = integracaoMLCliente?.credenciais?.cookies || "";
-
-    console.log("[ML-DIAGNOSTICO-INTEGRACAO]", {
-      clienteId,
-      temIntegracao: !!integracaoMLCliente,
-      camposCredenciais: Object.keys(integracaoMLCliente?.credenciais || {}),
-      temCookies: !!cookiesML,
-      temTag: !!integracaoMLCliente?.credenciais?.tag
-    });
 
     const estrategiaFarejador =
       typeof deps.obterEstrategiaFarejador === "function"
@@ -220,6 +188,9 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
           ...gerarHeadersStealth()
         };
 
+        const cookiesML =
+          integracoesPorCliente?.[clienteId]?.mercadolivre?.credenciais?.cookies;
+
         if (cookiesML) {
           headersML.Cookie = cookiesML;
         }
@@ -237,9 +208,8 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
             termo
           });
 
-          resumoML.bloqueios.push(`http_${response.status}`);
           await new Promise(r => setTimeout(r, 15000));
-          return resumoML;
+          return;
         }
 
         const html = await response.text();
@@ -248,8 +218,7 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
 
         if (html.includes("suspicious-traffic-frontend")) {
           console.log("[AVISO] [ML] Trafego suspeito", { termo });
-          resumoML.bloqueios.push("trafego_suspeito");
-          return resumoML;
+          return;
         }
 
         let cupom = "";
@@ -281,7 +250,6 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
 
         const produtosBusca = extrairProdutosBuscaML(html).slice(0, limiteProdutosPorBusca);
         resumoML.produtosEncontrados += produtosBusca.length;
-        if (typeof registrarAbastecimento === "function") registrarAbastecimento("encontradas", { quantidade: produtosBusca.length });
 
         console.log("[ML-BUSCA-RESUMO]", {
           termo,
@@ -293,12 +261,8 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
         for (const itemBusca of produtosBusca) {
           try {
             const link = itemBusca.link;
-            resumoML.tentadas += 1;
 
-            if (!link) {
-              registrarRecusa("sem_link_produto");
-              continue;
-            }
+            if (!link) continue;
 
             let produto = await importarMercadoLivre(
               link,
@@ -311,13 +275,11 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
 
             if (!produto) {
               resumoML.ignoradosImportadorVazio += 1;
-              registrarRecusa("importador_vazio");
               console.log("[AVISO] [ML] Importador vazio:", link);
               continue;
             }
 
             resumoML.importados += 1;
-            if (typeof registrarAbastecimento === "function") registrarAbastecimento("importada");
 
             if (
               (!produto.titulo || produto.titulo === "Produto Mercado Livre") &&
@@ -348,7 +310,6 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
               produto.precoAtual === "R$ 0,0"
             ) {
               resumoML.ignoradosSemPreco += 1;
-              registrarRecusa("sem_preco");
               console.log("[AVISO] [ML] Ignorado sem preco valido:", produto.titulo || link);
               continue;
             }
@@ -358,7 +319,6 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
 
             if (!linkAfiliadoML || linkAfiliadoML === linkOriginalML) {
               resumoML.ignoradosSemAfiliado += 1;
-              registrarRecusa("sem_link_afiliado");
               console.log("[AVISO] [ML] Ignorado sem link afiliado do cliente:", {
                 clienteId,
                 titulo: produto.titulo || itemBusca.titulo || "",
@@ -367,7 +327,6 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
               continue;
             }
 
-            resumoML.linkAfiliadoOk += 1;
             produto.linkAfiliado = linkAfiliadoML;
             produto.linkFinal = linkAfiliadoML;
 
@@ -394,7 +353,6 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
 
             if (!precoNumero || !Number.isFinite(precoNumero)) {
               resumoML.ignoradosSemPreco += 1;
-              registrarRecusa("sem_preco");
               continue;
             }
 
@@ -402,7 +360,6 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
 
             if (precoNumero < precoMinimoML) {
               resumoML.ignoradosPrecoMinimo += 1;
-              registrarRecusa("preco_minimo");
               continue;
             }
 
@@ -420,7 +377,6 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
               !avisoCupom
             ) {
               resumoML.ignoradosDescontoBaixo += 1;
-              registrarRecusa("desconto_baixo");
               console.log("[AVISO] [ML] Ignorado por desconto baixo:", {
                 titulo: produto.titulo,
                 desconto: Math.round(desconto) + "%",
@@ -438,7 +394,6 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
               tituloLower.includes("teste")
             ) {
               resumoML.ignoradosTituloRuim += 1;
-              registrarRecusa("titulo_ruim");
               continue;
             }
 
@@ -537,7 +492,6 @@ console.log("🧪 ML CHECK DUPLICIDADE", {
 
 if (jaExiste) {
   resumoML.ignoradosDuplicado += 1;
-  registrarRecusa("duplicado");
   console.log("[AVISO] [ML] Oferta duplicada:", novaOferta.titulo);
   continue;
 }
@@ -552,14 +506,12 @@ console.log("🧪 ML CHECK MEMORIA", {
 
 if (ignoradaMemoria) {
   resumoML.ignoradosMemoria += 1;
-  registrarRecusa("memoria");
   console.log("[AVISO] [ML] Ignorado pela memoria:", novaOferta.titulo);
   continue;
 }
 
             if (deveIgnorarOfertaRepetida(novaOferta)) {
               resumoML.ignoradosMemoria += 1;
-              registrarRecusa("memoria");
               console.log("[AVISO] [ML] Ignorado pela memoria:", novaOferta.titulo);
               continue;
             }
@@ -579,7 +531,6 @@ console.log("✅ ML VAI PRA FILA", {
 
             fila.push(novaOferta);
             resumoML.adicionadosFila += 1;
-            if (typeof registrarAbastecimento === "function") registrarAbastecimento("adicionada");
 
             salvarFila(clienteId);
 
@@ -604,19 +555,8 @@ console.log("✅ ML VAI PRA FILA", {
   } catch (e) {
     console.log("[ERRO] [ML] erro farejador:", e.message);
   } finally {
-    console.log("[ML-DIAGNOSTICO-CLIENTE]", {
-      clienteId,
-      encontradas: resumoML.produtosEncontrados,
-      importadas: resumoML.importados,
-      linkAfiliadoOk: resumoML.linkAfiliadoOk,
-      adicionadas: resumoML.adicionadosFila,
-      recusas: resumoML.motivosRecusa,
-      bloqueios: resumoML.bloqueios
-    });
     console.log("[ML-RESUMO-RODADA]", resumoML);
   }
-
-  return resumoML;
 }
 
 module.exports = {
