@@ -8564,6 +8564,8 @@ function montarOfertaKabumRadarFallback403(linkOriginal = "", contexto = {}) {
       imagem,
       image: imagem,
       linkOriginal,
+      linkOriginalRadar: linkOriginal,
+      linkResolvido: linkOriginal,
       link: linkOriginal,
       linkAfiliado: "",
       linkFinal: "",
@@ -8632,23 +8634,95 @@ function oportunidadeRadarBoa(oferta = {}, radar = {}, cupomRadar = {}) {
   return false;
 }
 
+function dominioMarketplaceConhecidoRadar(url = "") {
+  try {
+    const parsed = new URL(String(url || "").trim());
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+
+    if (host === "meli.la" || host.endsWith(".meli.la")) return "mercadolivre";
+    if (host === "mercadolivre.com.br" || host.endsWith(".mercadolivre.com.br")) return "mercadolivre";
+    if (host === "kabum.com.br" || host.endsWith(".kabum.com.br")) return "kabum";
+    if (host === "amazon.com.br" || host.endsWith(".amazon.com.br")) return "amazon";
+    if (host === "aliexpress.com" || host.endsWith(".aliexpress.com")) return "aliexpress";
+    if (host === "shopee.com.br" || host.endsWith(".shopee.com.br")) return "shopee";
+  } catch {}
+
+  return "";
+}
+
+function dominioRadar(url = "") {
+  try {
+    return new URL(String(url || "").trim()).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function logRedirectRadar(dados = {}) {
+  console.log("[RADAR-REDIRECT]", {
+    urlOriginal: dados.urlOriginal || "",
+    urlFinal: dados.urlFinal || "",
+    dominioOriginal: dados.dominioOriginal || dominioRadar(dados.urlOriginal || ""),
+    dominioFinal: dados.dominioFinal || dominioRadar(dados.urlFinal || ""),
+    marketplaceDetectado: dados.marketplaceDetectado || "",
+    resolveu: dados.resolveu === true,
+    motivo: dados.motivo || ""
+  });
+}
+
 async function resolverLinkOriginalRadar(url = "") {
   const capturada = limparLinkRadar(url);
+  const dominioOriginal = dominioRadar(capturada);
 
   logDebug("[RADAR-LINK] resolver inicio", {
     capturada
   });
 
   if (!capturada) {
-    logDebug("[RADAR-LINK] resolver falhou", {
-      motivo: "link_original_nao_resolvido",
-      capturada
+    logRedirectRadar({
+      urlOriginal: capturada,
+      urlFinal: "",
+      dominioOriginal,
+      dominioFinal: "",
+      marketplaceDetectado: "",
+      resolveu: false,
+      motivo: "link_original_nao_resolvido"
     });
+
     return {
       ok: false,
       motivo: "link_original_nao_resolvido",
       motivoTecnico: "link_original_nao_resolvido",
       urlCapturada: capturada,
+      linkOriginalRadar: capturada,
+      linkResolvido: "",
+      tipoLinkRadar: "produto"
+    };
+  }
+
+  const marketplaceDireto = dominioMarketplaceConhecidoRadar(capturada);
+
+  if (marketplaceDireto) {
+    const linkOriginalLimpo = limparUrlProdutoRadar(capturada, marketplaceDireto) || capturada;
+
+    logRedirectRadar({
+      urlOriginal: capturada,
+      urlFinal: capturada,
+      dominioOriginal,
+      dominioFinal: dominioOriginal,
+      marketplaceDetectado: marketplaceDireto,
+      resolveu: true,
+      motivo: "link_direto_marketplace"
+    });
+
+    return {
+      ok: true,
+      urlCapturada: capturada,
+      urlResolvida: capturada,
+      linkOriginalRadar: capturada,
+      linkResolvido: linkOriginalLimpo,
+      marketplaceReal: marketplaceDireto,
+      linkOriginalLimpo,
       tipoLinkRadar: "produto"
     };
   }
@@ -8656,7 +8730,7 @@ async function resolverLinkOriginalRadar(url = "") {
   try {
     const resposta = await axios.get(capturada, {
       maxRedirects: 5,
-      timeout: 7000,
+      timeout: 4500,
       validateStatus: () => true,
       responseType: "stream",
       headers: {
@@ -8665,140 +8739,91 @@ async function resolverLinkOriginalRadar(url = "") {
         "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
       }
     });
+
     if (resposta.data?.destroy) resposta.data.destroy();
+
     const resolvida =
       resposta?.request?.res?.responseUrl ||
       resposta?.request?._redirectable?._currentUrl ||
       capturada;
-    let marketplaceReal = detectarMarketplaceRadarLink(resolvida) || detectarMarketplaceRadarLink(capturada);
-    let linkOriginalLimpo = marketplaceReal
-      ? limparUrlProdutoRadar(resolvida, marketplaceReal)
-      : "";
+    const dominioFinal = dominioRadar(resolvida);
+    const marketplaceFinal = dominioMarketplaceConhecidoRadar(resolvida);
 
-    logDebug("[RADAR-LINK] redirecionamento resolvido", {
-      capturada,
-      resolvida,
-      marketplaceReal,
-      linkOriginalLimpo
-    });
+    if (!marketplaceFinal) {
+      const motivo = resolvida && resolvida !== capturada
+        ? "redirect_final_nao_marketplace"
+        : "redirect_nao_resolvido";
 
-    if (marketplaceReal && isUrlIntermediariaRadar(linkOriginalLimpo || resolvida, marketplaceReal)) {
-      const produtoParametro = extrairProdutoDeParametrosIntermediarioRadar(resolvida, marketplaceReal) ||
-        extrairProdutoDeParametrosIntermediarioRadar(capturada, marketplaceReal);
-
-      if (produtoParametro?.url) {
-        marketplaceReal = produtoParametro.marketplace || marketplaceReal;
-        linkOriginalLimpo = produtoParametro.url;
-        logDebug("[RADAR-LINK] produto extraido de parametro intermediario", {
-          capturada,
-          resolvida,
-          produto: linkOriginalLimpo,
-          marketplaceReal
-        });
-      }
-    }
-
-    if (marketplaceReal && isUrlIntermediariaRadar(linkOriginalLimpo || resolvida, marketplaceReal)) {
-      const pagina = await baixarHtmlRadar(resolvida);
-      const urlBaseExtracao = pagina.urlFinal || resolvida;
-      const produtoExtraido = pagina.ok
-        ? extrairProdutoMarketplaceDeHtmlRadar(pagina.html, marketplaceReal, urlBaseExtracao)
-        : "";
-
-      if (!produtoExtraido && marketplaceReal === "mercadolivre") {
-        const produtoMlLegado = await extrairProdutoMercadoLivreIntermediarioRadar(resolvida);
-        if (produtoMlLegado) {
-          linkOriginalLimpo = limparUrlProdutoRadar(produtoMlLegado, "mercadolivre");
-        }
-      } else if (produtoExtraido) {
-        linkOriginalLimpo = limparUrlProdutoRadar(produtoExtraido, marketplaceReal);
-      }
-
-      if (pagina.urlFinal && pagina.urlFinal !== resolvida) {
-        const mpFinal = detectarMarketplaceRadarLink(pagina.urlFinal);
-        if (mpFinal) marketplaceReal = mpFinal;
-      }
-
-      if (linkOriginalLimpo && !isUrlIntermediariaRadar(linkOriginalLimpo, marketplaceReal)) {
-        logDebug("[RADAR-LINK] produto extraido de intermediario", {
-          capturada,
-          resolvida,
-          urlFinal: pagina.urlFinal || "",
-          produto: linkOriginalLimpo,
-          marketplaceReal
-        });
-      } else {
-        const motivoIntermediario = pagina.ok
-          ? "link_intermediario_sem_produto"
-          : "redirect_bloqueado";
-        logDebug("[RADAR-LINK] resolver falhou", {
-          motivo: motivoIntermediario,
-          capturada,
-          resolvida,
-          status: pagina.status || "",
-          erro: pagina.erro || "",
-          marketplaceReal
-        });
-        return {
-          ok: false,
-          motivo: motivoIntermediario,
-          motivoTecnico: motivoIntermediario,
-          urlCapturada: capturada,
-          urlResolvida: pagina.urlFinal || resolvida || "",
-          marketplaceReal,
-          tipoLinkRadar: "intermediario",
-          statusHttp: pagina.status || "",
-          erroTecnico: pagina.erro || ""
-        };
-      }
-    }
-
-    if (!resolvida || !marketplaceReal || marketplaceReal === "awin" || !linkOriginalLimpo || isUrlIntermediariaRadar(linkOriginalLimpo, marketplaceReal)) {
-      const motivoFalha = !marketplaceReal
-        ? "marketplace_nao_identificado"
-        : "link_original_nao_resolvido";
-      logDebug("[RADAR-LINK] resolver falhou", {
-        motivo: motivoFalha,
-        capturada,
-        resolvida: resolvida || "",
-        marketplaceReal: marketplaceReal || "",
-        linkOriginalLimpo
+      logRedirectRadar({
+        urlOriginal: capturada,
+        urlFinal: resolvida || "",
+        dominioOriginal,
+        dominioFinal,
+        marketplaceDetectado: "",
+        resolveu: false,
+        motivo
       });
+
       return {
         ok: false,
-        motivo: motivoFalha,
-        motivoTecnico: motivoFalha,
+        motivo,
+        motivoTecnico: motivo,
         urlCapturada: capturada,
         urlResolvida: resolvida || "",
-        marketplaceReal: marketplaceReal || ""
+        linkOriginalRadar: capturada,
+        linkResolvido: resolvida || "",
+        marketplaceReal: "",
+        tipoLinkRadar: "intermediario",
+        statusHttp: resposta.status || ""
       };
     }
 
-    logDebug("[RADAR-LINK] resolver sucesso", {
-      capturada,
-      resolvida,
-      marketplaceReal,
-      linkOriginalLimpo
+    const linkOriginalLimpo = limparUrlProdutoRadar(resolvida, marketplaceFinal) || resolvida;
+
+    logRedirectRadar({
+      urlOriginal: capturada,
+      urlFinal: resolvida,
+      dominioOriginal,
+      dominioFinal,
+      marketplaceDetectado: marketplaceFinal,
+      resolveu: true,
+      motivo: "redirect_resolvido_marketplace"
     });
 
     return {
       ok: true,
       urlCapturada: capturada,
       urlResolvida: resolvida,
-      marketplaceReal,
+      linkOriginalRadar: capturada,
+      linkResolvido: linkOriginalLimpo,
+      marketplaceReal: marketplaceFinal,
       linkOriginalLimpo,
-      tipoLinkRadar: "produto"
+      tipoLinkRadar: "intermediario",
+      statusHttp: resposta.status || ""
     };
   } catch (e) {
+    logRedirectRadar({
+      urlOriginal: capturada,
+      urlFinal: "",
+      dominioOriginal,
+      dominioFinal: "",
+      marketplaceDetectado: "",
+      resolveu: false,
+      motivo: e.message || "redirect_bloqueado"
+    });
+
     logDebug("[RADAR-LINK] resolver erro", {
       capturada,
       erro: e.message
     });
+
     return {
       ok: false,
       motivo: "redirect_bloqueado",
       motivoTecnico: "redirect_bloqueado",
       urlCapturada: capturada,
+      linkOriginalRadar: capturada,
+      linkResolvido: "",
       erro: e.message
     };
   }
@@ -8855,6 +8880,8 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
             marketplace: produtoEnriquecido.marketplace || "kabum",
             linkOriginal: linkOriginalLimpo,
             linkCapturado: resolucao.urlCapturada,
+            linkOriginalRadar: resolucao.linkOriginalRadar || resolucao.urlCapturada,
+            linkResolvido: resolucao.linkResolvido || resolucao.linkOriginalLimpo || resolucao.urlResolvida,
             linkResolvidoRadar: resolucao.urlResolvida,
             origem: "radar",
             radar: true,
@@ -8907,6 +8934,8 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
             marketplaceOriginalRadar: "kabum",
             linkOriginal: linkOriginalLimpo,
             linkCapturado: resolucao.urlCapturada,
+            linkOriginalRadar: resolucao.linkOriginalRadar || resolucao.urlCapturada,
+            linkResolvido: resolucao.linkResolvido || resolucao.linkOriginalLimpo || resolucao.urlResolvida,
             linkResolvidoRadar: resolucao.urlResolvida,
             origem: "radar",
             radar: true,
@@ -8986,7 +9015,9 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
         marketplace: produtoEnriquecido.marketplace || marketplaceDetectado,
         linkOriginal: linkOriginalLimpo,
         linkCapturado: resolucao.urlCapturada,
-        linkResolvidoRadar: resolucao.urlResolvida,
+        linkOriginalRadar: resolucao.linkOriginalRadar || resolucao.urlCapturada,
+            linkResolvido: resolucao.linkResolvido || resolucao.linkOriginalLimpo || resolucao.urlResolvida,
+            linkResolvidoRadar: resolucao.urlResolvida,
         origem: "radar",
         radar: true,
         status: "rascunho"
@@ -10050,6 +10081,8 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
     prioridadeFila,
     marketplace,
     linkOriginal,
+    linkOriginalRadar: ofertaPreparada.linkOriginalRadar || ofertaPreparada.linkCapturado || linkOriginal,
+    linkResolvido: ofertaPreparada.linkResolvido || ofertaPreparada.linkResolvidoRadar || linkOriginal,
     linkAfiliado: linkAfiliadoCliente,
     link: linkAfiliadoCliente,
     linkFinal: linkAfiliadoCliente,
