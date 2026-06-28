@@ -8752,6 +8752,54 @@ function extrairPrecoFallbackTextoRadar(texto = "") {
   return { ok: false, motivo: "sem_preco_texto" };
 }
 
+function tituloGenericoMercadoLivreRadar(titulo = "") {
+  const normalizado = normalizarTexto(titulo || "");
+  return !normalizado || normalizado === "produto mercado livre";
+}
+
+function aplicarTituloFallbackTextoRadarMl(oferta = {}, contexto = {}) {
+  const texto = contexto.textoOriginal || contexto.texto || contexto.mensagemOriginalRadar || "";
+  const link = contexto.linkOriginal || contexto.link || "";
+  const tituloAtual = oferta.titulo || oferta.nome || "";
+
+  if (!tituloGenericoMercadoLivreRadar(tituloAtual)) return oferta;
+
+  const tituloTexto = extrairTituloKabumFallbackRadar(
+    String(texto || "").replace(/https?:\/\/\S*(?:meli\.la|mercadolivre\.com\.br)\S*/gi, "")
+  );
+  if (!tituloTexto || tituloGenericoMercadoLivreRadar(tituloTexto)) {
+    console.log("ml_titulo_fallback_texto_radar_indisponivel", {
+      link,
+      tituloAtual: tituloAtual || ""
+    });
+    return oferta;
+  }
+
+  const categoria = classificarCategoriaOferta({
+    ...oferta,
+    titulo: tituloTexto,
+    nome: tituloTexto,
+    categoria: "",
+    categoriaProduto: ""
+  }, tituloTexto);
+
+  console.log("ml_titulo_fallback_texto_radar_usado", {
+    titulo: tituloTexto,
+    categoria,
+    link
+  });
+
+  return {
+    ...oferta,
+    titulo: tituloTexto,
+    nome: tituloTexto,
+    categoria,
+    categoriaProduto: categoria,
+    tituloOrigem: "texto_radar",
+    fallbackTituloMercadoLivreRadar: true
+  };
+}
+
 function aplicarPrecoFallbackTextoRadarMl(oferta = {}, contexto = {}) {
   const texto = contexto.textoOriginal || contexto.texto || contexto.mensagemOriginalRadar || "";
   const link = contexto.linkOriginal || contexto.link || "";
@@ -8848,7 +8896,13 @@ function montarOfertaMercadoLivreRadarFallbackTexto(linkOriginal = "", contexto 
       link: linkOriginal,
       linkAfiliado: "",
       linkFinal: "",
-      categoria: "Mercado Livre",
+      categoria: classificarCategoriaOferta({
+        marketplace: "mercadolivre",
+        titulo,
+        nome: titulo,
+        categoria: "",
+        categoriaProduto: ""
+      }, titulo),
       origem: "radar",
       radar: true,
       status: "rascunho",
@@ -9575,6 +9629,14 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
     }
 
     let produtoImportadoRadar = resultado.body || {};
+
+    if (marketplaceDetectado === "mercadolivre") {
+      produtoImportadoRadar = aplicarTituloFallbackTextoRadarMl(produtoImportadoRadar, {
+        textoOriginal: contexto.textoOriginal || contexto.texto || "",
+        linkOriginal: linkOriginalLimpo
+      });
+    }
+
     let motivoIncompleta = motivoImportacaoRadarIncompleta(produtoImportadoRadar, marketplaceDetectado);
 
     if (marketplaceDetectado === "mercadolivre" && motivoIncompleta === "importacao_sem_preco") {
