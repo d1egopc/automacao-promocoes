@@ -15238,9 +15238,14 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
   const {
     config,
     integracoesPorCliente,
+    getIntegracaoCliente,
+    fila,
+    salvarFila,
+    prepararOfertaGlobal,
+    ofertaJaExiste,
     classificarCategoriaOferta,
     aplicarFiltrosUniversais,
-    distribuirOfertaParaClientes,
+    gerarDeepLinkAwin,
     normalizarSessaoId
   } = deps;
 
@@ -15256,8 +15261,9 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
       return;
     }
 
-    const integracaoAwin =
-      integracoesPorCliente?.[clienteId]?.awin;
+    const integracaoAwin = typeof getIntegracaoCliente === "function"
+      ? getIntegracaoCliente(clienteId, "awin")
+      : integracoesPorCliente?.[clienteId]?.awin;
 
     if (!integracaoAwin?.credenciais) {
       console.log(
@@ -15374,11 +15380,45 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
       `ðŸ§  Ofertas Awin apÃ³s filtros universais: ${ofertasFiltradas.length}`
     );
 
-   for (const oferta of ofertasFiltradas) {
-   await distribuirOfertaParaClientes(oferta);
-  }
+   let adicionadasFila = 0;
 
-    console.log(`[INFO] Awin finalizado. Produtos adicionados: ${ofertasFiltradas.length}`);
+   for (const oferta of ofertasFiltradas) {
+     const linkBaseAwin = oferta.linkOriginal || oferta.link || "";
+     const linkAfiliadoCliente = typeof gerarDeepLinkAwin === "function"
+       ? await gerarDeepLinkAwin(linkBaseAwin, clienteId)
+       : "";
+
+     if (!linkAfiliadoCliente) {
+       logOptimus("INTEGRACAO", "Feed AWIN ignorado sem deeplink do cliente", {
+         clienteId,
+         marketplace: "awin",
+         titulo: oferta.titulo
+       });
+       continue;
+     }
+
+     oferta.linkAfiliado = linkAfiliadoCliente;
+     oferta.link = linkAfiliadoCliente;
+     oferta.clienteId = clienteId;
+     oferta.sessaoId = normalizarSessaoId(clienteId, "sessao1");
+
+     const ofertaFinal = typeof prepararOfertaGlobal === "function"
+       ? prepararOfertaGlobal(oferta)
+       : oferta;
+
+     if (typeof ofertaJaExiste === "function" && ofertaJaExiste(ofertaFinal)) {
+       continue;
+     }
+
+     fila.push(ofertaFinal);
+     adicionadasFila += 1;
+
+     if (typeof salvarFila === "function") {
+       salvarFila(clienteId);
+     }
+   }
+
+    console.log(`[INFO] Awin finalizado. Produtos adicionados: ${adicionadasFila}`);
   } catch (e) {
     console.log("[ERRO]❌ erro farejador Awin:", e.message);
   }
@@ -15850,8 +15890,6 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
 // ================= FUNCAO CARREGAR SESSAO ID ==========================
 
 async function carregarGruposSessao(id, opcoes = {}) {
-  const force = opcoes.force === true;
-
   const resolucaoClienteMensageiro = opcoes.clienteId
     ? { clienteIdMensageiro: opcoes.clienteId, origemResolucao: "mapa_sessao" }
     : resolverClienteMensageiroPorSessao(id);
@@ -15878,51 +15916,130 @@ async function carregarGruposSessao(id, opcoes = {}) {
     sessoes[`${clienteId}_${id}`] ? `${clienteId}_${id}` :
     idNormalizado;
 
-  if (!force && gruposPorSessao[chaveCache]?.length) {
-    return gruposPorSessao[chaveCache];
-  }
+  const chavesCache = [...new Set([chaveCache, id, idNormalizado].filter(Boolean))];
+  const cacheAntes = chavesCache
+    .map(chave => gruposPorSessao[chave])
+    .find(lista => Array.isArray(lista) && lista.length) || [];
+  const totalAntesCache = cacheAntes.length;
+  const meta = opcoes.meta && typeof opcoes.meta === "object" ? opcoes.meta : null;
+
+  const registrarRefresh = ({ lista, gruposNovos = 0, usouCache = false, erro = "" }) => {
+    const gruposResultado = Array.isArray(lista) ? lista : [];
+
+    console.log("[WHATSAPP-GRUPOS-REFRESH]", {
+      clienteId,
+      sessaoId: id,
+      totalAntesCache,
+      totalDepoisRefresh: gruposResultado.length,
+      gruposNovos,
+      usouCache,
+      erro
+    });
+
+    if (meta) {
+      meta.clienteId = clienteId;
+      meta.sessaoId = id;
+      meta.totalAntesCache = totalAntesCache;
+      meta.totalDepoisRefresh = gruposResultado.length;
+      meta.gruposNovos = gruposNovos;
+      meta.usouCache = usouCache;
+      meta.erro = erro;
+    }
+
+    return gruposResultado;
+  };
+
+  const mesclarGrupos = (antigos = [], novos = []) => {
+    const mapa = new Map();
+    const normalizarGrupo = grupo => {
+      const grupoId = String(grupo?.id || grupo?.grupoId || grupo?.jid || grupo?.remoteJid || "").trim();
+      if (!grupoId) return null;
+
+      return {
+        ...grupo,
+        id: grupoId,
+        nome: String(grupo?.nome || grupo?.name || grupo?.subject || "Grupo sem nome").trim() || "Grupo sem nome"
+      };
+    };
+
+    for (const grupo of antigos) {
+      const normalizado = normalizarGrupo(grupo);
+      if (normalizado) mapa.set(normalizado.id, normalizado);
+    }
+
+    let gruposNovos = 0;
+    for (const grupo of novos) {
+      const normalizado = normalizarGrupo(grupo);
+      if (!normalizado) continue;
+      if (!mapa.has(normalizado.id)) gruposNovos += 1;
+      mapa.set(normalizado.id, {
+        ...mapa.get(normalizado.id),
+        ...normalizado
+      });
+    }
+
+    return { lista: [...mapa.values()], gruposNovos };
+  };
+
+  const salvarCacheGrupos = lista => {
+    for (const chave of chavesCache) {
+      gruposPorSessao[chave] = lista;
+    }
+  };
 
   if (!sock) {
     console.log("[WHATSAPP] No carregou grupos: sem sesso", id);
-    return gruposPorSessao[chaveCache] || [];
+    return registrarRefresh({
+      lista: cacheAntes,
+      usouCache: true,
+      erro: "sessao_sem_socket"
+    });
   }
 
   if (typeof sock.groupFetchAllParticipating !== "function") {
     console.log("[WHATSAPP] Sesso existe, mas no tem groupFetchAllParticipating:", id);
-    return gruposPorSessao[chaveCache] || [];
+    return registrarRefresh({
+      lista: cacheAntes,
+      usouCache: true,
+      erro: "groupFetchAllParticipating_indisponivel"
+    });
   }
 
   try {
- const grupos = await sock.groupFetchAllParticipating();
+    const grupos = await sock.groupFetchAllParticipating();
 
-console.log(
-   "👥 Grupos carregados:",
-  Object.keys(grupos || {}).length
-);
+    console.log(
+      "👥 Grupos carregados:",
+      Object.keys(grupos || {}).length
+    );
 
-    const lista = Object.entries(grupos || {}).map(([gid, g]) => ({
+    const listaRefresh = Object.entries(grupos || {}).map(([gid, g]) => ({
       id: gid,
       nome: g.subject || "Grupo sem nome"
     }));
 
-    gruposPorSessao[chaveCache] = lista;
-    gruposPorSessao[id] = lista;
-
-    if (idNormalizado) {
-      gruposPorSessao[idNormalizado] = lista;
-    }
+    const { lista, gruposNovos } = mesclarGrupos(cacheAntes, listaRefresh);
+    salvarCacheGrupos(lista);
 
     console.log(`[OK] Grupos carregados automaticamente: ${lista.length}`);
 
-    return lista;
+    return registrarRefresh({
+      lista,
+      gruposNovos,
+      usouCache: false,
+      erro: ""
+    });
   } catch (e) {
     console.log("[ERRO] Erro ao carregar grupos:", e.message);
-    return gruposPorSessao[chaveCache] || [];
+    return registrarRefresh({
+      lista: cacheAntes,
+      usouCache: true,
+      erro: e.message || "erro_refresh_grupos"
+    });
   }
 }
 
 //================= POST MAGALU =======================================
-
 app.post("/magalu/gerar-link", (req, res) => {
   try {
     const { link } = req.body;
@@ -15971,40 +16088,15 @@ app.get("/grupos/:id", async (req, res) => {
     const id = normalizarSessaoId(clienteId, req.params.id);
     const force = ["true", "1", "sim", "yes"].includes(String(req.query.force || req.query.refresh || "").toLowerCase());
 
-    const status = statusSessao[id];
-
-    if (status !== "open" && status !== "aberto") {
-      return res.json({
-        ok: false,
-        id,
-        status: status || "offline",
-        total: gruposPorSessao[id]?.length || 0,
-        grupos: gruposPorSessao[id] || [],
-        gruposLista: gruposPorSessao[id] || [],
-        cache: true,
-        aviso: "SessÃ£o nÃ£o estÃ¡ conectada."
-      });
-    }
-
-    console.log("[INFO] ROTA /grupos buscando:", {
+    const status = statusSessao[id];
+console.log("[INFO] ROTA /grupos buscando:", {
       id,
       force,
       temCache: !!gruposPorSessao[id]?.length,
       totalCache: gruposPorSessao[id]?.length || 0
-    });
-
-    if (!force && gruposPorSessao[id]?.length) {
-      return res.json({
-        ok: true,
-        id,
-        total: gruposPorSessao[id].length,
-        grupos: gruposPorSessao[id],
-        gruposLista: gruposPorSessao[id],
-        cache: true
-      });
-    }
-
-    const grupos = await carregarGruposSessao(id, { force: true });
+    });
+    const metaRefreshGrupos = {};
+    const grupos = await carregarGruposSessao(id, { force: true, clienteId, meta: metaRefreshGrupos });
 
     return res.json({
       ok: true,
@@ -16012,8 +16104,9 @@ app.get("/grupos/:id", async (req, res) => {
       total: grupos.length,
       grupos,
       gruposLista: grupos,
-      cache: false,
-      atualizado: true
+      cache: Boolean(metaRefreshGrupos.usouCache),
+      atualizado: !metaRefreshGrupos.usouCache,
+      refresh: metaRefreshGrupos
     });
   } catch (e) {
     console.log("[ERRO] Erro rota /grupos/:id:", e.message);
@@ -16032,22 +16125,9 @@ app.post("/grupos/:id/refresh", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
     const id = normalizarSessaoId(clienteId, req.params.id);
-    const status = statusSessao[id];
-
-    if (status !== "open" && status !== "aberto") {
-      return res.json({
-        ok: false,
-        id,
-        status: status || "offline",
-        total: gruposPorSessao[id]?.length || 0,
-        grupos: gruposPorSessao[id] || [],
-        gruposLista: gruposPorSessao[id] || [],
-        cache: true,
-        aviso: "Sessao nao esta conectada."
-      });
-    }
-
-    const grupos = await carregarGruposSessao(id, { force: true });
+    const status = statusSessao[id];
+const metaRefreshGrupos = {};
+    const grupos = await carregarGruposSessao(id, { force: true, clienteId, meta: metaRefreshGrupos });
 
     return res.json({
       ok: true,
@@ -16055,8 +16135,9 @@ app.post("/grupos/:id/refresh", async (req, res) => {
       total: grupos.length,
       grupos,
       gruposLista: grupos,
-      cache: false,
-      atualizado: true
+      cache: Boolean(metaRefreshGrupos.usouCache),
+      atualizado: !metaRefreshGrupos.usouCache,
+      refresh: metaRefreshGrupos
     });
   } catch (e) {
     console.log("[ERRO] Erro rota /grupos/:id/refresh:", e.message);
@@ -16647,41 +16728,18 @@ salvarConfig();
 
 const ordemMarketplaces = [
   "mercadolivre",
-  "shopee",
-  "amazon",
-  "mercadolivre",
-  "shopee",
-  "kabum",
-  "mercadolivre",
   "amazon",
   "shopee",
   "aliexpress",
-  "mercadolivre",
-  "shopee",
-  "amazon",
-  "mercadolivre",
-  "kabum",
-  "shopee",
-  "mercadolivre",
-  "amazon",
-  "aliexpress"
+  "awin"
 ];
 
 const ordemMarketplacesCritica = [
   "mercadolivre",
-  "shopee",
-  "amazon",
-  "mercadolivre",
-  "shopee",
-  "mercadolivre",
   "amazon",
   "shopee",
-  "kabum",
-  "mercadolivre",
   "aliexpress",
-  "mercadolivre",
-  "amazon",
-  "shopee"
+  "awin"
 ];
 
 const farejadoresMarketplaces = {
@@ -16874,19 +16932,26 @@ for (const usuario of usuarios) {
   const clienteId = usuario.id;
   const saudeFilaCliente = avaliarSaudeFilaCliente(clienteId);
 
-  if (saudeFilaCliente.status === "cheia") {
-    logOptimus("INTELIGENCIA", "Cliente com fila cheia pulado", {
+  if (!saudeFilaCliente.deveAbastecer) {
+    logOptimus("INTELIGENCIA", "Cliente sem necessidade de abastecimento pulado", {
       clienteId,
       marketplace,
-      pendentes: saudeFilaCliente.pendentes
+      statusFila: saudeFilaCliente.status,
+      pendentes: saudeFilaCliente.pendentes,
+      minimo: saudeFilaCliente.minimo
     });
     continue;
   }
 
-  if (!usuarioPodeReceberMarketplace(usuario, marketplace)) {
+  const marketplacePlano = marketplace === "awin" ? "kabum" : marketplace;
+  const planoPermiteMarketplace = usuarioPodeReceberMarketplace(usuario, marketplace) ||
+    usuarioPodeReceberMarketplace(usuario, marketplacePlano);
+
+  if (!planoPermiteMarketplace) {
     console.log("[INFO] Usurio no recebe marketplace pelo plano:", {
       clienteId,
-      marketplace
+      marketplace,
+      marketplacePlano
     });
     continue;
   }
@@ -16937,18 +17002,21 @@ await farejador(clienteId, {
   ofertaTemBeneficioFarejador,
   farejarCuponsMercadoLivre,
   registrarAbastecimento,
-  importarMercadoLivre: (url, clienteIdAlvo = "admin") =>
-  importarMercadoLivre(url, clienteIdAlvo, {
-  getIntegracaoCliente,
-  gerarLinkAfiliadoMercadoLivre
-  }),
+  importarMercadoLivre: (url, clienteIdAlvo = clienteId) => {
+    const clienteImportacao = clienteIdAlvo || clienteId;
+    return importarMercadoLivre(url, clienteImportacao, {
+      getIntegracaoCliente,
+      gerarLinkAfiliadoMercadoLivre
+    });
+  },
   importarAmazon: importarAmazon,
   buscarOfertasShopee,
   normalizarSessaoId,
   aplicarFiltrosUniversais,
   distribuirOfertaParaClientes,
   encurtarUrl,
-  gerarDeepLinkAwin,
+  gerarDeepLinkAwin: (url, clienteIdAlvo = clienteId) =>
+    gerarDeepLinkAwin(url, clienteIdAlvo || clienteId),
   importarProdutoKabumViaAwin,
 
 });
