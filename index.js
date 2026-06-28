@@ -4131,20 +4131,32 @@ app.get("/telegram", (req, res) => {
 
 
 app.post("/telegram", (req, res) => {
-  const { ativo, destinos } = req.body;
+  const body = req.body || {};
 
-const clienteId = exigirClienteAutenticado(req, res);
-if (!clienteId) return;
+  const clienteId = exigirClienteAutenticado(req, res);
+  if (!clienteId) return;
 
-configsPorCliente[clienteId] =
-  configsPorCliente[clienteId] || {};
+  configsPorCliente[clienteId] =
+    configsPorCliente[clienteId] || {};
 
-configsPorCliente[clienteId].telegram = {
-  ativo: ativo === true,
-  destinos: Array.isArray(destinos)
-    ? destinos
-    : configsPorCliente[clienteId]?.telegram?.destinos || []
-};
+  const telegramAtual = configsPorCliente[clienteId].telegram || {};
+  const destinosAtuais = Array.isArray(telegramAtual.destinos)
+    ? telegramAtual.destinos
+    : [];
+
+  const destinosRecebidos = Array.isArray(body.destinos)
+    ? body.destinos.map(normalizarTelegramDestinoRecebido).filter(Boolean)
+    : [normalizarTelegramDestinoRecebido(body)].filter(Boolean);
+
+  const destinos = destinosRecebidos.length
+    ? mesclarDestinosTelegram(destinosAtuais, destinosRecebidos)
+    : destinosAtuais;
+
+  configsPorCliente[clienteId].telegram = {
+    ...telegramAtual,
+    ativo: true,
+    destinos
+  };
 
   salvarConfigsClientes();
 
@@ -4156,6 +4168,58 @@ configsPorCliente[clienteId].telegram = {
 
 function textoTelegram(valor) {
   return valor == null ? "" : String(valor).trim();
+}
+
+function normalizarTelegramDestinoRecebido(body = {}) {
+  const entrada =
+    body.destino && typeof body.destino === "object" ? body.destino :
+    body.telegram && typeof body.telegram === "object" ? body.telegram :
+    body;
+
+  const id = textoTelegram(
+    entrada.id || entrada.botId || entrada.telegramId || entrada.destinoId ||
+    body.id || body.botId || body.telegramId || body.destinoId
+  );
+  const botToken = textoTelegram(
+    entrada.botToken || entrada.token || entrada.telegramToken ||
+    body.botToken || body.token || body.telegramToken
+  );
+  const chatId = textoTelegram(
+    entrada.chatId || entrada.grupoId || entrada.canalId || entrada.channelId ||
+    body.chatId || body.grupoId || body.canalId || body.channelId
+  );
+
+  if (!id && !botToken && !chatId) return null;
+
+  return {
+    ...entrada,
+    id: id || textoTelegram(entrada.id) || `telegram_${Date.now()}`,
+    botToken,
+    chatId,
+    nome: entrada.nome || entrada.apelido || entrada.label || chatId || id || "Telegram"
+  };
+}
+
+function mesclarDestinosTelegram(atuais = [], recebidos = []) {
+  const destinos = Array.isArray(atuais) ? [...atuais] : [];
+
+  for (const destino of recebidos) {
+    const chavesRecebidas = chavesTelegramDestino(destino);
+    const indiceExistente = destinos.findIndex(item =>
+      chavesTelegramDestino(item).some(chave => chavesRecebidas.includes(chave))
+    );
+
+    if (indiceExistente >= 0) {
+      destinos[indiceExistente] = {
+        ...destinos[indiceExistente],
+        ...destino
+      };
+    } else {
+      destinos.push(destino);
+    }
+  }
+
+  return destinos;
 }
 
 function listarTelegramsCliente(clienteId) {
@@ -4217,12 +4281,20 @@ function resolverTelegramTeste(body = {}, clienteId) {
   return { botToken, chatId };
 }
 
-app.post("/telegram/testar", async (req, res) => {
+async function testarTelegram(req, res) {
   try {
     const clienteId = exigirClienteAutenticado(req, res);
     if (!clienteId) return;
 
-    const telegram = resolverTelegramTeste(req.body || {}, clienteId);
+    const body = {
+      ...(req.body || {})
+    };
+
+    if (req.params?.id && !body.id) {
+      body.id = req.params.id;
+    }
+
+    const telegram = resolverTelegramTeste(body, clienteId);
 
     if (!telegram.botToken || !telegram.chatId) {
       return res.status(400).json({
@@ -4235,7 +4307,7 @@ app.post("/telegram/testar", async (req, res) => {
       `https://api.telegram.org/bot${telegram.botToken}/sendMessage`,
       {
         chat_id: telegram.chatId,
-        text: "ðŸ§ª Teste Telegram Optimus Promo enviado com sucesso!"
+        text: "Teste Telegram Optimus Promo enviado com sucesso!"
       }
     );
 
@@ -4252,7 +4324,10 @@ app.post("/telegram/testar", async (req, res) => {
     });
 
   }
-});
+}
+
+app.post("/telegram/testar", testarTelegram);
+app.post("/telegram/:id/testar", testarTelegram);
 
 // ============== DESTINOS INTELIGENTES =================
 
