@@ -129,7 +129,10 @@ async function farejarShopee(clienteId = "admin", deps = {}) {
 
     let adicionadasNestaRodada = 0;
     const ofertasEncontradas = [];
-    const limitePorRodada = config.marketplaces?.shopee?.limitePorRodada || 10;
+    const limiteConfigurado = config.marketplaces?.shopee?.limitePorRodada || 10;
+    const limitePorRodada = estrategiaFarejador.filaCritica
+      ? limiteConfigurado
+      : Math.min(limiteConfigurado, 3);
     const precoMinimo = config.marketplaces?.shopee?.precoMinimo || 20;
 
     for (const item of produtos) {
