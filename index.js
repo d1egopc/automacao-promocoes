@@ -5637,17 +5637,57 @@ function clienteTemRecursoMensageiro(clienteId = "admin") {
 
 // ======================== FUNCAO GET INTEGRACOES ========================
 
-function getIntegracaoCliente(clienteId = "admin", marketplace = "") {
-  const mp = String(marketplace || "").toLowerCase();
-  const cid = String(clienteId || "admin");
+function normalizarMarketplaceIntegracao(marketplace = "") {
+  const mp = normalizarTexto(marketplace || "");
+  const aliases = {
+    ml: "mercadolivre",
+    meli: "mercadolivre",
+    mercadolivrebr: "mercadolivre",
+    mercadolivre: "mercadolivre",
+    ali: "aliexpress",
+    aliexpress: "aliexpress",
+    aliexpressbr: "aliexpress",
+    feedawin: "awin",
+    feedkabum: "awin"
+  };
 
-  // Admin pode usar integraÃ§Ãµes do admin
-  if (cid === "admin") {
-    return integracoesPorCliente?.admin?.[mp] || null;
+  return aliases[mp] || mp;
+}
+
+function chavesPossiveisIntegracao(marketplace = "") {
+  const bruto = String(marketplace || "").trim();
+  const lower = bruto.toLowerCase();
+  const mp = normalizarMarketplaceIntegracao(bruto);
+  const chaves = new Set([mp, lower, bruto]);
+
+  if (mp === "mercadolivre") {
+    ["mercadolivre", "mercado_livre", "mercadoLivre", "ml", "meli"].forEach(k => chaves.add(k));
   }
 
-  // UsuÃ¡rio comum sÃ³ pode usar integraÃ§Ã£o prÃ³pria
-  return integracoesPorCliente?.[cid]?.[mp] || null;
+  if (mp === "aliexpress") {
+    ["aliexpress", "ali_express", "aliExpress"].forEach(k => chaves.add(k));
+  }
+
+  if (mp === "awin") {
+    ["awin", "feed_awin", "feedAwin", "feedkabum", "feed_kabum"].forEach(k => chaves.add(k));
+  }
+
+  return [...chaves].filter(Boolean);
+}
+
+function getIntegracaoCliente(clienteId = "admin", marketplace = "") {
+  const cid = String(clienteId || "admin").trim() || "admin";
+  const integracoesCliente = integracoesPorCliente?.[cid] || null;
+
+  if (!integracoesCliente) return null;
+
+  for (const chave of chavesPossiveisIntegracao(marketplace)) {
+    if (integracoesCliente[chave]) {
+      return integracoesCliente[chave];
+    }
+  }
+
+  return null;
 }
 
 // ======================== FUNCAO GERAR ID ===============================
@@ -14952,7 +14992,7 @@ function usuarioTemIntegracaoMarketplace(clienteId, marketplace) {
   if (mp === "aliexpress") {
     return !!(
       cred.appKey &&
-      cred.secret &&
+      (cred.secret || cred.appSecret) &&
       cred.trackingId
     );
   }
