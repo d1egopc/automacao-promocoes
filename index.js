@@ -8991,6 +8991,45 @@ function dominioRadar(url = "") {
   }
 }
 
+function linkMeliLaRadar(url = "") {
+  const host = dominioRadar(url).replace(/^www\./, "");
+  return host === "meli.la" || host.endsWith(".meli.la");
+}
+
+function urlMercadoLivreProdutoRadar(url = "") {
+  try {
+    const parsed = new URL(String(url || "").trim());
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname || "";
+
+    if (!host.endsWith("mercadolivre.com.br")) return false;
+    if (host.includes("produto.mercadolivre.com.br") && /\/MLB-?\d+/i.test(path)) return true;
+    if (/\/p\/MLB/i.test(path)) return true;
+    if (/MLB-?\d+/i.test(path)) return true;
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function logRadarPipelineDebug(dados = {}) {
+  console.log("[RADAR-PIPELINE-DEBUG]", {
+    clienteId: dados.clienteId || "",
+    grupoNome: dados.grupoNome || "",
+    linkOriginal: dados.linkOriginal || "",
+    linkResolvido: dados.linkResolvido || "",
+    marketplace: dados.marketplace || "",
+    cupom: dados.cupom || "",
+    precoTexto: dados.precoTexto || "",
+    tituloTexto: dados.tituloTexto || "",
+    importadorChamado: dados.importadorChamado === true,
+    linkAfiliadoOk: dados.linkAfiliadoOk === true,
+    adicionouFila: dados.adicionouFila === true,
+    motivoRecusa: dados.motivoRecusa || ""
+  });
+}
+
 function logRedirectRadar(dados = {}) {
   console.log("[RADAR-REDIRECT]", {
     urlOriginal: dados.urlOriginal || "",
@@ -9034,6 +9073,101 @@ async function resolverLinkOriginalRadar(url = "") {
   }
 
   const marketplaceDireto = dominioMarketplaceConhecidoRadar(capturada);
+
+  if (linkMeliLaRadar(capturada)) {
+    try {
+      const resposta = await axios.get(capturada, {
+        maxRedirects: 5,
+        timeout: 4500,
+        validateStatus: () => true,
+        responseType: "stream",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+        }
+      });
+
+      if (resposta.data?.destroy) resposta.data.destroy();
+
+      const resolvida =
+        resposta?.request?.res?.responseUrl ||
+        resposta?.request?._redirectable?._currentUrl ||
+        "";
+      const dominioFinal = dominioRadar(resolvida);
+
+      if (!urlMercadoLivreProdutoRadar(resolvida)) {
+        logRedirectRadar({
+          urlOriginal: capturada,
+          urlFinal: resolvida || capturada,
+          dominioOriginal,
+          dominioFinal,
+          marketplaceDetectado: dominioMarketplaceConhecidoRadar(resolvida) || "",
+          resolveu: false,
+          motivo: "meli_la_redirect_nao_resolvido"
+        });
+
+        return {
+          ok: false,
+          motivo: "meli_la_redirect_nao_resolvido",
+          motivoTecnico: "meli_la_redirect_nao_resolvido",
+          urlCapturada: capturada,
+          urlResolvida: resolvida || "",
+          linkOriginalRadar: capturada,
+          linkResolvido: resolvida || "",
+          marketplaceReal: "mercadolivre",
+          tipoLinkRadar: "shortlink_meli",
+          statusHttp: resposta.status || ""
+        };
+      }
+
+      const linkOriginalLimpo = limparUrlProdutoRadar(resolvida, "mercadolivre") || resolvida;
+
+      logRedirectRadar({
+        urlOriginal: capturada,
+        urlFinal: resolvida,
+        dominioOriginal,
+        dominioFinal,
+        marketplaceDetectado: "mercadolivre",
+        resolveu: true,
+        motivo: "meli_la_resolvido_marketplace"
+      });
+
+      return {
+        ok: true,
+        urlCapturada: capturada,
+        urlResolvida: resolvida,
+        linkOriginalRadar: capturada,
+        linkResolvido: linkOriginalLimpo,
+        marketplaceReal: "mercadolivre",
+        linkOriginalLimpo,
+        tipoLinkRadar: "shortlink_meli",
+        statusHttp: resposta.status || ""
+      };
+    } catch (e) {
+      logRedirectRadar({
+        urlOriginal: capturada,
+        urlFinal: "",
+        dominioOriginal,
+        dominioFinal: "",
+        marketplaceDetectado: "mercadolivre",
+        resolveu: false,
+        motivo: "meli_la_redirect_nao_resolvido"
+      });
+
+      return {
+        ok: false,
+        motivo: "meli_la_redirect_nao_resolvido",
+        motivoTecnico: "meli_la_redirect_nao_resolvido",
+        urlCapturada: capturada,
+        linkOriginalRadar: capturada,
+        linkResolvido: "",
+        marketplaceReal: "mercadolivre",
+        tipoLinkRadar: "shortlink_meli",
+        erro: e.message
+      };
+    }
+  }
 
   if (marketplaceDireto) {
     const linkOriginalLimpo = limparUrlProdutoRadar(capturada, marketplaceDireto) || capturada;
@@ -9392,6 +9526,21 @@ async function adicionarRadarCapturadoNaFilaClientes(ofertaBase = {}, opcoes = {
       logOptimus("SUCESSO", "Radar adicionou na fila", { clienteId });
     }
 
+    logRadarPipelineDebug({
+      clienteId,
+      grupoNome: ofertaBase.origemGrupoNome || ofertaBase.grupoNome || "",
+      linkOriginal: ofertaBase.linkOriginalRadar || ofertaBase.linkCapturado || ofertaBase.linkOriginal || "",
+      linkResolvido: ofertaBase.linkResolvido || ofertaBase.linkResolvidoRadar || ofertaBase.urlResolvida || "",
+      marketplace: ofertaBase.marketplace || ofertaBase.marketplaceDetectado || "",
+      cupom: ofertaBase.cupom || "",
+      precoTexto: ofertaBase.precoAtual || ofertaBase.preco || "",
+      tituloTexto: ofertaBase.titulo || ofertaBase.nome || "",
+      importadorChamado: true,
+      linkAfiliadoOk: Boolean(resultado.oferta?.linkAfiliado || resultado.linkAfiliado),
+      adicionouFila: Boolean(resultado.adicionada),
+      motivoRecusa: resultado.adicionada ? "" : (resultado.motivo || "nao_adicionada")
+    });
+
     resultados.push({
       clienteId,
       ok: !!resultado.ok,
@@ -9707,6 +9856,21 @@ logDebug("🧪 RADAR LINKS EXTRAIDOS", {
         urlResolvida: importacao.resolucao?.urlResolvida || "",
         marketplace: importacao.resolucao?.marketplaceReal || ""
       });
+      logRadarPipelineDebug({
+        clienteId: adminMasterId,
+        grupoNome: grupoNomeTexto || grupoIdTexto,
+        linkOriginal: importacao.resolucao?.linkOriginalRadar || link,
+        linkResolvido: importacao.resolucao?.linkResolvido || importacao.resolucao?.urlResolvida || "",
+        marketplace: importacao.resolucao?.marketplaceReal || detectarMarketplaceRadarLink(link) || "",
+        cupom: beneficiosMensagem.cupom || "",
+        precoTexto: "",
+        tituloTexto: "",
+        importadorChamado: Boolean(importacao.resolucao?.ok),
+        linkAfiliadoOk: false,
+        adicionouFila: false,
+        motivoRecusa: importacao.motivoTecnico || importacao.motivo || "importacao_falhou"
+      });
+
       registrarHistoricoRadar(adminMasterId, {
         origemTipo: origemTipoFinal,
         origemSessaoId: sessaoIdTexto,
