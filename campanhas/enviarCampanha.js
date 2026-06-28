@@ -1,6 +1,18 @@
 const axios = require("axios");
 const FormData = require("form-data");
 
+function listarDestinosCliente(destinosCliente) {
+  if (Array.isArray(destinosCliente)) return destinosCliente;
+
+  if (!destinosCliente || typeof destinosCliente !== "object") {
+    return [];
+  }
+
+  return Object.values(destinosCliente)
+    .flatMap(item => Array.isArray(item) ? item : [])
+    .filter(Boolean);
+}
+
 async function enviarCampanhaManual({
   clienteId,
   mensagem,
@@ -21,8 +33,9 @@ async function enviarCampanhaManual({
     throw new Error("Mensagem obrigatória");
   }
 
-  const destinosCliente =
-    destinosPorCliente?.[clienteId] || [];
+  const destinosCliente = listarDestinosCliente(
+    destinosPorCliente?.[clienteId]
+  );
 
   const destinosSelecionados = destinosIds.length
     ? destinosCliente.filter(d => destinosIds.includes(d.id))
