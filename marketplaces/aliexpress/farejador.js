@@ -11,6 +11,7 @@ async function farejarAliExpress(clienteId = "admin", deps = {}) {
   const {
     config,
     integracoesPorCliente,
+    getIntegracaoCliente,
     fila,
     salvarFila,
     prepararOfertaGlobal,
@@ -35,11 +36,15 @@ async function farejarAliExpress(clienteId = "admin", deps = {}) {
       return [];
     }
 
-  const integracao =
-  integracoesPorCliente?.[clienteId]?.aliexpress;
+  const integracao = typeof getIntegracaoCliente === "function"
+    ? getIntegracaoCliente(clienteId, "aliexpress")
+    : integracoesPorCliente?.[clienteId]?.aliexpress;
 
     if (!integracao?.credenciais) {
-      console.log("[AVISO] AliExpress sem integrao configurada:", clienteId);
+      console.log("[AVISO] AliExpress sem integracao configurada:", {
+        clienteId,
+        origemIntegracao: typeof getIntegracaoCliente === "function" ? "getIntegracaoCliente" : "integracoesPorCliente"
+      });
       return [];
     }
 
