@@ -44,6 +44,7 @@ async function farejarAmazon(clienteId = "admin", deps = {}) {
 const {
   config,
   integracoesPorCliente,
+  getIntegracaoCliente,
   fila,
   salvarFila,
   prepararOfertaGlobal,
@@ -130,7 +131,11 @@ if (typeof registrarAbastecimento === "function") registrarAbastecimento("encont
 for (const link of links) {
   try {
   
-const integracaoAmazon = integracoesPorCliente[clienteId]?.amazon;
+const integracaoAmazon =
+  typeof getIntegracaoCliente === "function"
+    ? getIntegracaoCliente(clienteId, "amazon")
+    : integracoesPorCliente?.[clienteId]?.amazon;
+
 const produto = await importarAmazon(
   link,
   integracaoAmazon
