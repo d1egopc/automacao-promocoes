@@ -11777,6 +11777,46 @@ function validarAwinKabumManual(clienteId = "admin", urlOriginal = "") {
   };
 }
 
+function obterClienteIdAutenticadoKabumManual(req) {
+  if (req.clienteId) {
+    return { ok: true, clienteId: req.clienteId, temTokenAuth: true };
+  }
+
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+  if (!token) {
+    return { ok: false, clienteId: "", temTokenAuth: false };
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const clienteId = decoded.clienteId || "";
+
+    if (!clienteId) {
+      return { ok: false, clienteId: "", temTokenAuth: true };
+    }
+
+    return { ok: true, clienteId, temTokenAuth: true };
+  } catch {
+    return { ok: false, clienteId: "", temTokenAuth: true };
+  }
+}
+
+function logKabumManual(dados = {}) {
+  console.log("[KABUM-MANUAL]", {
+    clienteId: dados.clienteId || "",
+    temTokenAuth: Boolean(dados.temTokenAuth),
+    integracaoAwinEncontrada: Boolean(dados.integracaoAwinEncontrada),
+    camposFaltando: Array.isArray(dados.camposFaltando) ? dados.camposFaltando : [],
+    chamouImportador: Boolean(dados.chamouImportador),
+    tituloOk: Boolean(dados.tituloOk),
+    precoOk: Boolean(dados.precoOk),
+    imagemOk: Boolean(dados.imagemOk),
+    deeplinkOk: Boolean(dados.deeplinkOk)
+  });
+}
+
 //============= ROTA INTEGRACOES =======================================
 
 app.get("/integracoes/alertas", (req, res) => {
@@ -12184,10 +12224,29 @@ app.get("/teste-kabum-rota", (req, res) => {
 });
 
 async function importarKabumManualRequest(req, res, opcoes = {}) {
+  let logContextKabum = {};
+
   try {
-    const clienteId = getClienteId(req);
+    const authKabum = obterClienteIdAutenticadoKabumManual(req);
+    const clienteId = authKabum.clienteId;
     const body = req.body || {};
     const url = String(body.url || body.link || body.linkOriginal || "").trim();
+    logContextKabum = {
+      clienteId,
+      temTokenAuth: authKabum.temTokenAuth
+    };
+
+    if (!authKabum.ok) {
+      logKabumManual({
+        clienteId,
+        temTokenAuth: authKabum.temTokenAuth
+      });
+
+      return res.status(401).json({
+        ok: false,
+        erro: "Cliente não autenticado para importar KaBuM/AWIN"
+      });
+    }
 
     if (!url) {
       return res.status(400).json({
@@ -12206,6 +12265,13 @@ async function importarKabumManualRequest(req, res, opcoes = {}) {
     const validacaoAwin = validarAwinKabumManual(clienteId, url);
 
     if (!validacaoAwin.ok) {
+      logKabumManual({
+        clienteId,
+        temTokenAuth: authKabum.temTokenAuth,
+        integracaoAwinEncontrada: !!validacaoAwin.integracao,
+        camposFaltando: validacaoAwin.faltando
+      });
+
       return res.status(400).json({
         ok: false,
         marketplace: "kabum",
@@ -12214,6 +12280,14 @@ async function importarKabumManualRequest(req, res, opcoes = {}) {
         clienteId
       });
     }
+
+    logContextKabum = {
+      clienteId,
+      temTokenAuth: authKabum.temTokenAuth,
+      integracaoAwinEncontrada: !!validacaoAwin.integracao,
+      camposFaltando: [],
+      chamouImportador: true
+    };
 
     const produto = await importarProdutoKabumViaAwin(
       url,
@@ -12229,6 +12303,18 @@ async function importarKabumManualRequest(req, res, opcoes = {}) {
     if (!produto?.linkAfiliado && !produto?.link) camposProdutoFaltando.push("linkAfiliado");
 
     if (camposProdutoFaltando.length) {
+      logKabumManual({
+        clienteId,
+        temTokenAuth: authKabum.temTokenAuth,
+        integracaoAwinEncontrada: !!validacaoAwin.integracao,
+        camposFaltando: camposProdutoFaltando,
+        chamouImportador: true,
+        tituloOk: !!produto?.titulo,
+        precoOk: !!(produto?.precoAtual || produto?.preco),
+        imagemOk: !!produto?.imagem,
+        deeplinkOk: !!(produto?.linkAfiliado && produto.linkAfiliado !== url)
+      });
+
       return res.status(400).json({
         ok: false,
         marketplace: "kabum",
@@ -12271,13 +12357,33 @@ async function importarKabumManualRequest(req, res, opcoes = {}) {
       }
     }
 
+    logKabumManual({
+      clienteId,
+      temTokenAuth: authKabum.temTokenAuth,
+      integracaoAwinEncontrada: !!validacaoAwin.integracao,
+      camposFaltando: [],
+      chamouImportador: true,
+      tituloOk: !!novaOferta.titulo,
+      precoOk: !!(novaOferta.precoAtual || novaOferta.preco),
+      imagemOk: !!novaOferta.imagem,
+      deeplinkOk: !!(novaOferta.linkAfiliado && novaOferta.linkAfiliado !== url)
+    });
+
     return res.json({
       ok: true,
       teste: opcoes.teste === true,
-      produto: novaOferta
+      produto: novaOferta,
+      titulo: novaOferta.titulo,
+      preco: novaOferta.preco,
+      precoAtual: novaOferta.precoAtual,
+      imagem: novaOferta.imagem,
+      linkOriginal: novaOferta.linkOriginal,
+      linkAfiliado: novaOferta.linkAfiliado,
+      marketplace: novaOferta.marketplace
     });
   } catch (e) {
     console.error("[ERRO] KABUM IMPORTAR:", e.message);
+    logKabumManual(logContextKabum);
 
     return res.status(500).json({
       ok: false,
