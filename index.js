@@ -8446,6 +8446,136 @@ function aplicarPrecoFallbackTextoRadarMl(oferta = {}, contexto = {}) {
     avisoPreco: "Preço extraído da mensagem do Radar"
   };
 }
+function limparLinhaTituloKabumRadar(linha = "") {
+  return String(linha || "")
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/www\.\S+/gi, "")
+    .replace(/[\u{1F300}-\u{1FAFF}]/gu, "")
+    .replace(/^[\s\-_*•:|]+/g, "")
+    .replace(/[\s\-_*•:|]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extrairTituloKabumFallbackRadar(texto = "") {
+  const linhas = String(texto || "")
+    .split(/\r?\n+/)
+    .map(limparLinhaTituloKabumRadar)
+    .filter(Boolean);
+
+  const rejeitar = /^(?:r\$|por\b|de\b|cupom\b|use\b|frete\b|link\b|compre\b|aproveite\b|promo\b|oferta\b)/i;
+  const candidatos = linhas.filter(linha => {
+    if (linha.length < 8) return false;
+    if (/https?:|kabum\.com\.br/i.test(linha)) return false;
+    if (/^r\$\s*[\d.,]+$/i.test(linha)) return false;
+    if (rejeitar.test(linha)) return false;
+    if (/\b(cupom|frete|cashback|desconto|off)\b/i.test(linha) && linha.length < 35) return false;
+    return /[a-zA-ZÀ-ÿ]{3,}/.test(linha);
+  });
+
+  return (candidatos[0] || linhas.find(linha => /[a-zA-ZÀ-ÿ]{3,}/.test(linha)) || "")
+    .slice(0, 180)
+    .trim();
+}
+
+function extrairImagemMensagemRadarRaw(raw = {}) {
+  const vistos = new Set();
+
+  function visitar(valor, profundidade = 0) {
+    if (!valor || profundidade > 8) return "";
+    if (typeof valor !== "object") return "";
+    if (vistos.has(valor)) return "";
+    vistos.add(valor);
+
+    const candidatosUrl = [
+      valor.imagem,
+      valor.image,
+      valor.foto,
+      valor.thumbnail,
+      valor.imageUrl,
+      valor.photoUrl,
+      valor.url,
+      valor.directPath
+    ].filter(v => typeof v === "string" && /^https?:\/\//i.test(v));
+
+    if (candidatosUrl.length) return candidatosUrl[0];
+
+    const miniatura = valor.jpegThumbnail || valor.thumbnail;
+    if (Buffer.isBuffer(miniatura) && miniatura.length) {
+      return `data:image/jpeg;base64,${miniatura.toString("base64")}`;
+    }
+
+    if (miniatura instanceof Uint8Array && miniatura.length) {
+      return `data:image/jpeg;base64,${Buffer.from(miniatura).toString("base64")}`;
+    }
+
+    for (const chave of ["imageMessage", "extendedTextMessage", "message", "raw", "payload", "quotedMessage"]) {
+      const encontrada = visitar(valor[chave], profundidade + 1);
+      if (encontrada) return encontrada;
+    }
+
+    for (const item of Object.values(valor)) {
+      const encontrada = visitar(item, profundidade + 1);
+      if (encontrada) return encontrada;
+    }
+
+    return "";
+  }
+
+  return visitar(raw);
+}
+
+function erroKabumHtml403(e = {}) {
+  return e?.status === 403 ||
+    e?.response?.status === 403 ||
+    /http\s*403|\b403\b|bloqueou scraping/i.test(String(e?.message || ""));
+}
+
+function montarOfertaKabumRadarFallback403(linkOriginal = "", contexto = {}) {
+  const texto = contexto.textoOriginal || contexto.texto || contexto.mensagemOriginalRadar || "";
+  const titulo = extrairTituloKabumFallbackRadar(texto);
+  const precoExtraido = extrairPrecoFallbackTextoRadar(texto);
+  const imagem = extrairImagemMensagemRadarRaw(contexto.raw || {});
+
+  if (!titulo || !precoExtraido.ok) {
+    return {
+      ok: false,
+      motivo: "kabum_radar_dados_insuficientes",
+      motivoTecnico: "kabum_radar_dados_insuficientes",
+      detalhes: {
+        tituloOk: Boolean(titulo),
+        precoOk: Boolean(precoExtraido.ok),
+        motivoPreco: precoExtraido.motivo || ""
+      }
+    };
+  }
+
+  return {
+    ok: true,
+    oferta: {
+      marketplace: "kabum",
+      marketplaceOriginalRadar: "kabum",
+      titulo,
+      nome: titulo,
+      precoAtual: precoExtraido.preco,
+      preco: precoExtraido.preco,
+      precoOrigem: "texto_radar",
+      avisoPreco: "Preco extraido da mensagem do Radar",
+      imagem,
+      image: imagem,
+      linkOriginal,
+      link: linkOriginal,
+      linkAfiliado: "",
+      linkFinal: "",
+      categoria: "Gamer e Hardware",
+      origem: "radar",
+      radar: true,
+      status: "rascunho",
+      fallbackKabumRadar403: true,
+      motivoFallback: "kabum_http_403_awin_radar"
+    }
+  };
+}
 function percentualDescontoRadar(oferta = {}, radar = {}) {
   const valores = [
     radar.descontoPercentual,
@@ -8691,45 +8821,101 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
 
   try {
     if (marketplaceDetectado === "kabum") {
-      const produtoKabum = await importarProdutoKabumViaAwin(linkOriginalLimpo, adminMasterId, {
-        gerarDeepLinkAwin
-      });
+      try {
+        const produtoKabum = await importarProdutoKabumViaAwin(linkOriginalLimpo, adminMasterId, {
+          gerarDeepLinkAwin: async () => linkOriginalLimpo
+        });
 
-      const motivoIncompletaKabum = motivoImportacaoRadarIncompleta(produtoKabum || {}, "kabum");
-      if (motivoIncompletaKabum) {
+        const motivoIncompletaKabum = motivoImportacaoRadarIncompleta(produtoKabum || {}, "kabum");
+        if (motivoIncompletaKabum) {
+          return {
+            ok: false,
+            motivo: motivoIncompletaKabum,
+            motivoTecnico: motivoIncompletaKabum,
+            resolucao
+          };
+        }
+        const produtoEnriquecido = await enriquecerBeneficioRadarOferta({
+          ...produtoKabum,
+          marketplace: produtoKabum.marketplace || "kabum",
+          linkOriginal: linkOriginalLimpo
+        }, {
+          origem: "radar",
+          marketplace: "kabum",
+          linkOriginal: linkOriginalLimpo
+        });
+        const beneficioRadar = normalizarBeneficiosRadarOferta(produtoEnriquecido);
+
         return {
-          ok: false,
-          motivo: motivoIncompletaKabum,
-          motivoTecnico: motivoIncompletaKabum,
-          resolucao
+          ok: true,
+          resolucao,
+          oferta: {
+            ...produtoEnriquecido,
+            ...beneficioRadar,
+            marketplace: produtoEnriquecido.marketplace || "kabum",
+            linkOriginal: linkOriginalLimpo,
+            linkCapturado: resolucao.urlCapturada,
+            linkResolvidoRadar: resolucao.urlResolvida,
+            origem: "radar",
+            radar: true,
+            status: "rascunho"
+          }
+        };
+      } catch (e) {
+        if (!erroKabumHtml403(e)) {
+          throw e;
+        }
+
+        const fallbackKabum = montarOfertaKabumRadarFallback403(linkOriginalLimpo, contexto);
+        if (!fallbackKabum.ok) {
+          return {
+            ok: false,
+            motivo: fallbackKabum.motivo,
+            motivoTecnico: fallbackKabum.motivoTecnico,
+            resolucao,
+            detalhes: fallbackKabum.detalhes || {}
+          };
+        }
+
+        const produtoEnriquecido = await enriquecerBeneficioRadarOferta({
+          ...fallbackKabum.oferta,
+          linkOriginal: linkOriginalLimpo
+        }, {
+          origem: "radar",
+          marketplace: "kabum",
+          linkOriginal: linkOriginalLimpo
+        });
+        const beneficioRadar = normalizarBeneficiosRadarOferta(produtoEnriquecido);
+
+        logOptimus("RADAR", "Fallback KaBuM/AWIN por HTTP 403", {
+          linkOriginal: linkOriginalLimpo,
+          titulo: produtoEnriquecido.titulo || "",
+          preco: produtoEnriquecido.precoAtual || produtoEnriquecido.preco || ""
+        });
+
+        return {
+          ok: true,
+          resolucao: {
+            ...resolucao,
+            statusHttp: 403,
+            erroTecnico: "KaBuM bloqueou scraping HTTP 403"
+          },
+          oferta: {
+            ...produtoEnriquecido,
+            ...beneficioRadar,
+            marketplace: "kabum",
+            marketplaceOriginalRadar: "kabum",
+            linkOriginal: linkOriginalLimpo,
+            linkCapturado: resolucao.urlCapturada,
+            linkResolvidoRadar: resolucao.urlResolvida,
+            origem: "radar",
+            radar: true,
+            status: "rascunho",
+            fallbackKabumRadar403: true,
+            motivoFallback: "kabum_http_403_awin_radar"
+          }
         };
       }
-      const produtoEnriquecido = await enriquecerBeneficioRadarOferta({
-        ...produtoKabum,
-        marketplace: produtoKabum.marketplace || "kabum",
-        linkOriginal: linkOriginalLimpo
-      }, {
-        origem: "radar",
-        marketplace: "kabum",
-        linkOriginal: linkOriginalLimpo
-      });
-      const beneficioRadar = normalizarBeneficiosRadarOferta(produtoEnriquecido);
-
-      return {
-        ok: true,
-        resolucao,
-        oferta: {
-          ...produtoEnriquecido,
-          ...beneficioRadar,
-          marketplace: produtoEnriquecido.marketplace || "kabum",
-          linkOriginal: linkOriginalLimpo,
-          linkCapturado: resolucao.urlCapturada,
-          linkResolvidoRadar: resolucao.urlResolvida,
-          origem: "radar",
-          radar: true,
-          status: "rascunho"
-        }
-      };
     }
 
     const resultado = await importarProdutoManual({
@@ -9138,7 +9324,8 @@ logDebug("🧪 RADAR LINKS EXTRAIDOS", {
       sessaoId: sessaoIdTexto,
       grupoId: grupoIdTexto,
       grupoNome: grupoNomeTexto,
-      textoOriginal: texto
+      textoOriginal: texto,
+      raw
     });
 
     if (!importacao.ok) {
@@ -9713,7 +9900,20 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
     return { ok: false, motivo: "marketplace_desativado_no_cliente" };
   }
 
+  const kabumRadarAwin = marketplace === "awin" && (
+    ofertaPreparada.fallbackKabumRadar403 === true ||
+    normalizarTexto(ofertaPreparada.marketplaceOriginalRadar || ofertaBase.marketplaceOriginalRadar || "") === "kabum"
+  );
+
   if (!usuarioTemIntegracaoMarketplace(clienteId, marketplace)) {
+    if (kabumRadarAwin) {
+      logOptimus("INTEGRACAO", "KaBuM/AWIN Radar sem integracao do cliente", {
+        clienteId,
+        motivo: "awin_kabum_integracao_ausente_cliente"
+      });
+      return { ok: false, motivo: "awin_kabum_integracao_ausente_cliente" };
+    }
+
     return { ok: false, motivo: "integracao_marketplace_ausente" };
   }
 
@@ -9727,6 +9927,19 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
     ofertaPreparada.linkResolvidoRadar ||
     ofertaPreparada.linkCapturado ||
     "";
+
+
+  if (kabumRadarAwin) {
+    const validacaoAwinKabum = validarAwinKabumManual(clienteId, linkOriginal);
+    if (!validacaoAwinKabum.ok) {
+      logOptimus("INTEGRACAO", "KaBuM/AWIN Radar sem integracao do cliente", {
+        clienteId,
+        motivo: "awin_kabum_integracao_ausente_cliente",
+        faltando: validacaoAwinKabum.faltando || []
+      });
+      return { ok: false, motivo: "awin_kabum_integracao_ausente_cliente" };
+    }
+  }
 
   logOptimus("INTELIGENCIA", "Radar score", {
     clienteId,
