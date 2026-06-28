@@ -236,6 +236,178 @@ function logResumoAbastecimento(resumo = {}, extras = {}) {
     ...extras
   });
 }
+
+const MARKETPLACES_RESUMO_ORQUESTRADOR = [
+  "mercadolivre",
+  "amazon",
+  "shopee",
+  "aliexpress",
+  "awin"
+];
+
+function contarItensFilaClienteOrquestrador(clienteId = "admin") {
+  return Array.isArray(fila)
+    ? fila.filter(item => String(item?.clienteId || "admin") === String(clienteId || "admin")).length
+    : 0;
+}
+
+function clonarResumoAbastecimento(resumo = {}) {
+  return {
+    encontradas: Number(resumo.encontradas || 0),
+    importadas: Number(resumo.importadas || 0),
+    adicionadasFila: Number(resumo.adicionadasFila || 0),
+    recusadas: Number(resumo.recusadas || 0),
+    motivosRecusa: { ...(resumo.motivosRecusa || {}) }
+  };
+}
+
+function diffResumoAbastecimento(antes = {}, depois = {}) {
+  const motivos = {};
+  const chaves = new Set([
+    ...Object.keys(antes.motivosRecusa || {}),
+    ...Object.keys(depois.motivosRecusa || {})
+  ]);
+
+  for (const chave of chaves) {
+    motivos[chave] = Math.max(0, Number(depois.motivosRecusa?.[chave] || 0) - Number(antes.motivosRecusa?.[chave] || 0));
+  }
+
+  return {
+    encontradas: Math.max(0, Number(depois.encontradas || 0) - Number(antes.encontradas || 0)),
+    importadas: Math.max(0, Number(depois.importadas || 0) - Number(antes.importadas || 0)),
+    adicionadasFila: Math.max(0, Number(depois.adicionadasFila || 0) - Number(antes.adicionadasFila || 0)),
+    recusadas: Math.max(0, Number(depois.recusadas || 0) - Number(antes.recusadas || 0)),
+    motivosRecusa: motivos
+  };
+}
+
+function numeroResumoOrquestrador(...valores) {
+  for (const valor of valores) {
+    if (Array.isArray(valor)) return valor.length;
+    if (valor === null || valor === undefined || valor === "") continue;
+    const numero = Number(valor);
+    if (Number.isFinite(numero)) return numero;
+  }
+
+  return "nao_informado";
+}
+
+function motivoMaisComumOrquestrador(motivos = {}) {
+  let motivoFinal = "";
+  let maior = 0;
+
+  for (const [motivo, total] of Object.entries(motivos || {})) {
+    const numero = Number(total || 0);
+    if (numero > maior) {
+      maior = numero;
+      motivoFinal = motivo;
+    }
+  }
+
+  return motivoFinal;
+}
+
+function criarMarketplacesResumoOrquestrador(marketplaceAtual = "") {
+  return MARKETPLACES_RESUMO_ORQUESTRADOR.reduce((acc, marketplace) => {
+    acc[marketplace] = {
+      chamado: false,
+      statusHttpBusca: "nao_informado",
+      produtosEncontrados: "nao_informado",
+      importados: "nao_informado",
+      ofertasMontadas: "nao_informado",
+      aprovados: "nao_informado",
+      adicionados: 0,
+      principalMotivoZero: marketplace === marketplaceAtual ? "nao_chamado" : "nao_rodado_nesta_rodada"
+    };
+    return acc;
+  }, {});
+}
+
+function normalizarRetornoFarejadorOrquestrador(retorno, marketplace = "", delta = {}, adicionadasCalculadas = 0) {
+  const objeto = Array.isArray(retorno)
+    ? { ofertasMontadas: retorno.length, aprovados: retorno.length, produtosEncontrados: retorno.length }
+    : (retorno && typeof retorno === "object" ? retorno : {});
+  const temRetorno = retorno !== undefined && retorno !== null;
+  const motivosRetorno = objeto.motivosRecusa || objeto.recusas || {};
+  const bloqueio = Array.isArray(objeto.bloqueios) && objeto.bloqueios.length ? objeto.bloqueios[0] : "";
+  const erros = Array.isArray(objeto.erros) && objeto.erros.length ? objeto.erros[0] : "";
+  const produtosEncontrados = numeroResumoOrquestrador(
+    objeto.produtosEncontrados,
+    objeto.encontrados,
+    objeto.encontradas,
+    objeto.totalProdutos,
+    delta.encontradas
+  );
+  const importados = numeroResumoOrquestrador(
+    objeto.importados,
+    objeto.importadas,
+    objeto.importadosTotal,
+    delta.importadas
+  );
+  const ofertasMontadas = numeroResumoOrquestrador(
+    objeto.ofertasMontadas,
+    objeto.ofertasEncontradas,
+    objeto.ofertasFiltradas,
+    objeto.produtosEncontrados,
+    delta.importadas
+  );
+  const aprovados = numeroResumoOrquestrador(
+    objeto.aprovados,
+    objeto.aprovadas,
+    objeto.linkAfiliadoOk,
+    objeto.ofertasAprovadas
+  );
+  const adicionados = numeroResumoOrquestrador(
+    objeto.adicionadosFila,
+    objeto.adicionadasFila,
+    objeto.adicionados,
+    objeto.adicionadas,
+    delta.adicionadasFila,
+    adicionadasCalculadas
+  );
+  const adicionadosNumero = Number(adicionados);
+  const motivoRecusa = motivoMaisComumOrquestrador(motivosRetorno) || motivoMaisComumOrquestrador(delta.motivosRecusa);
+  let principalMotivoZero = "";
+
+  if (Number.isFinite(adicionadosNumero) && adicionadosNumero > 0) {
+    principalMotivoZero = "";
+  } else if (objeto.principalMotivoZero || objeto.motivoPrincipal || objeto.motivo) {
+    principalMotivoZero = objeto.principalMotivoZero || objeto.motivoPrincipal || objeto.motivo;
+  } else if (bloqueio) {
+    principalMotivoZero = bloqueio;
+  } else if (erros) {
+    principalMotivoZero = erros;
+  } else if (motivoRecusa) {
+    principalMotivoZero = motivoRecusa;
+  } else if (!temRetorno) {
+    principalMotivoZero = "retorno_nao_informado";
+  } else if (produtosEncontrados === 0) {
+    principalMotivoZero = "busca_sem_produtos";
+  } else {
+    principalMotivoZero = "nao_identificado";
+  }
+
+  return {
+    chamado: true,
+    statusHttpBusca: objeto.statusHttpBusca || objeto.statusHttp || objeto.status || "nao_informado",
+    produtosEncontrados,
+    importados,
+    ofertasMontadas,
+    aprovados,
+    adicionados: Number.isFinite(adicionadosNumero) ? adicionadosNumero : adicionados,
+    principalMotivoZero
+  };
+}
+
+function criarItemResumoClienteOrquestrador(clienteId = "admin", marketplace = "", saudeFila = {}) {
+  return {
+    clienteId,
+    pendentesAntes: Number(saudeFila.pendentes || 0),
+    pendentesDepois: Number(saudeFila.pendentes || 0),
+    deveAbastecer: saudeFila.deveAbastecer === true,
+    marketplaces: criarMarketplacesResumoOrquestrador(marketplace)
+  };
+}
 const DEBUG_LOGS = String(process.env.DEBUG_LOGS || "").toLowerCase() === "true";
 const LOG_THROTTLE_MS = 60 * 1000;
 const logsThrottle = new Map();
@@ -17682,9 +17854,16 @@ if (!admin) {
     const inicioRodadaMs = Date.now();
     const totalFilaAntesRodada = Array.isArray(fila) ? fila.length : 0;
     const resumoAbastecimento = criarResumoAbastecimento(marketplace);
+    const resumoGeralOrquestrador = {
+      marketplace,
+      rodada: 0,
+      origem: opcoes.origem || "orquestrador",
+      clientes: []
+    };
     abastecimentoRodadaAtual = resumoAbastecimento;
     let clientesProcessadosRodada = 0;
     statusMarketplace.rodadas += 1;
+    resumoGeralOrquestrador.rodada = statusMarketplace.rodadas;
     statusMarketplace.ultimoInicio = new Date().toISOString();
     statusMarketplace.ultimoErro = "";
 
@@ -17706,8 +17885,11 @@ for (const usuario of usuarios) {
 
   const clienteId = usuario.id;
   const saudeFilaCliente = avaliarSaudeFilaCliente(clienteId);
+  const resumoClienteOrquestrador = criarItemResumoClienteOrquestrador(clienteId, marketplace, saudeFilaCliente);
+  resumoGeralOrquestrador.clientes.push(resumoClienteOrquestrador);
 
   if (!saudeFilaCliente.deveAbastecer) {
+    resumoClienteOrquestrador.marketplaces[marketplace].principalMotivoZero = "fila_nao_precisa_abastecer";
     logOptimus("INTELIGENCIA", "Cliente sem necessidade de abastecimento pulado", {
       clienteId,
       marketplace,
@@ -17723,6 +17905,7 @@ for (const usuario of usuarios) {
     usuarioPodeReceberMarketplace(usuario, marketplacePlano);
 
   if (!planoPermiteMarketplace) {
+    resumoClienteOrquestrador.marketplaces[marketplace].principalMotivoZero = "plano_nao_permite_marketplace";
     console.log("[INFO] Usurio no recebe marketplace pelo plano:", {
       clienteId,
       marketplace,
@@ -17737,6 +17920,7 @@ for (const usuario of usuarios) {
     : marketplace;
 
 if (!usuarioTemIntegracaoMarketplace(clienteId, marketplaceIntegracao)) {
+  resumoClienteOrquestrador.marketplaces[marketplace].principalMotivoZero = "integracao_ausente";
   logOptimus("INTEGRACAO", "Usuario sem integracao configurada", {
     clienteId,
     marketplace,
@@ -17757,7 +17941,10 @@ console.log("[INFO] CHAMANDO FAREJADOR:", {
 });
 
 
-await farejador(clienteId, {
+const resumoAbastecimentoAntesCliente = clonarResumoAbastecimento(resumoAbastecimento);
+const totalFilaClienteAntes = contarItensFilaClienteOrquestrador(clienteId);
+
+const retornoFarejador = await farejador(clienteId, {
   config,
   integracoesPorCliente,
   getIntegracaoCliente,
@@ -17795,6 +17982,18 @@ await farejador(clienteId, {
   importarProdutoKabumViaAwin,
 
 });
+
+const resumoAbastecimentoDepoisCliente = clonarResumoAbastecimento(resumoAbastecimento);
+const deltaAbastecimentoCliente = diffResumoAbastecimento(resumoAbastecimentoAntesCliente, resumoAbastecimentoDepoisCliente);
+const totalFilaClienteDepois = contarItensFilaClienteOrquestrador(clienteId);
+const saudeFilaDepoisCliente = avaliarSaudeFilaCliente(clienteId);
+resumoClienteOrquestrador.pendentesDepois = Number(saudeFilaDepoisCliente.pendentes || 0);
+resumoClienteOrquestrador.marketplaces[marketplace] = normalizarRetornoFarejadorOrquestrador(
+  retornoFarejador,
+  marketplace,
+  deltaAbastecimentoCliente,
+  Math.max(0, totalFilaClienteDepois - totalFilaClienteAntes)
+);
 clientesProcessadosRodada += 1;
 }
   
@@ -17822,6 +18021,15 @@ clientesProcessadosRodada += 1;
     adicionadas: adicionadasRodada,
     erros: 0,
     origem: opcoes.origem || "orquestrador"
+  });
+
+  console.log("[ORQUESTRADOR-RESUMO-GERAL]", {
+    ...resumoGeralOrquestrador,
+    clientesProcessados: clientesProcessadosRodada,
+    pendentesAntes: resumoGeralOrquestrador.clientes.reduce((total, item) => total + Number(item.pendentesAntes || 0), 0),
+    pendentesDepois: resumoGeralOrquestrador.clientes.reduce((total, item) => total + Number(item.pendentesDepois || 0), 0),
+    adicionadasCalculadasFila: adicionadasRodada,
+    duracaoSegundos
   });
 
   logResumoAbastecimento(resumoAbastecimento, {
