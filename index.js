@@ -1104,6 +1104,7 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
       obterEstrategiaFarejador,
       ofertaTemBeneficioFarejador,
       farejarCuponsMercadoLivre,
+      registrarAbastecimento,
       importarMercadoLivre: (url, clienteIdAlvo = cliente) =>
         importarMercadoLivre(url, clienteIdAlvo, {
           getIntegracaoCliente,
@@ -16176,6 +16177,7 @@ await farejador(clienteId, {
   obterEstrategiaFarejador,
   ofertaTemBeneficioFarejador,
   farejarCuponsMercadoLivre,
+  registrarAbastecimento,
   importarMercadoLivre: (url, clienteIdAlvo = "admin") =>
   importarMercadoLivre(url, clienteIdAlvo, {
   getIntegracaoCliente,
