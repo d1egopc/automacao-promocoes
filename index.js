@@ -3182,8 +3182,9 @@ function proximaTentativaDestino(oferta, ms = 5 * 60 * 1000) {
 
 async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId, configCliente, opcoes = {}) {
   try {
-    clienteId = clienteId || oferta.clienteId || "admin";
-    configCliente = configCliente || configsPorCliente?.[clienteId] || config;
+    clienteId = String(clienteId || oferta.clienteId || "").trim();
+    if (!clienteId) return { enviado: false, motivo: "clienteId_ausente" };
+    configCliente = configCliente || configsPorCliente?.[clienteId] || {};
 
     if (!destinoAceitaOferta(destino, oferta)) {
       return { enviado: false, motivo: "nao_aceita" };
@@ -3274,33 +3275,124 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     // ================= ENVIO TELEGRAM =================
 
     if (String(destino.tipo || "").toLowerCase() === "telegram") {
-      const telegrams = configCliente.telegram?.destinos || [];
+      const telegrams = listarTelegramsCliente(clienteId).map(normalizarTelegramFila);
+      const idsSelecionados = idsTelegramDestinoFila(destino);
+      const telegramsDiretos = telegramsDiretosDestinoFila(destino);
 
-const telegramsSelecionados = destino.telegramDestinos || [];
+      let selecionados = idsSelecionados.length
+        ? telegrams.filter(t => idsSelecionados.some(id => t.chaves.includes(id)))
+        : telegrams.filter(t => t.ativo);
 
-const selecionados = telegramsSelecionados.length
-  ? telegrams.filter(t =>
-      telegramsSelecionados.includes(t.nome) ||
-      telegramsSelecionados.includes(String(t.chatId))
-    )
-      : telegrams.filter(t => t.ativo);
-  
+      if (telegramsDiretos.length) {
+        selecionados = [...telegramsDiretos, ...selecionados];
+      }
+
+      if (!selecionados.length && telegrams.length === 1) {
+        selecionados = telegrams.filter(t => t.ativo);
+      }
+
+      const vistosTelegram = new Set();
+      selecionados = selecionados.filter(t => {
+        const chave = `${t.botToken || ""}:${t.chatId || ""}`;
+        if (vistosTelegram.has(chave)) return false;
+        vistosTelegram.add(chave);
+        return true;
+      });
+
       if (!selecionados.length) {
         logOptimus("TELEGRAM", "Nenhum destino selecionado", {
+          clienteId,
           destino: destino.nome
         });
+
+        logFilaTelegramDebug({
+          clienteId,
+          ofertaId: oferta.id || "",
+          destinoId: destino.id || destino.destinoId || destino.chatId || "",
+          destinoNome: destino.nome || "Destino",
+          tipo: destino.tipo || "telegram",
+          compativel: true,
+          motivoFiltro: "nenhum_telegram_selecionado",
+          temBotToken: false,
+          temChatId: false,
+          vaiEnviar: false,
+          resultado: "ignorado"
+        });
+
+        return { enviado: false, motivo: "nenhum_telegram_selecionado" };
       }
+
+      let telegramEnviado = false;
 
       for (const tel of selecionados) {
-       
-      if (!usuarioTemCreditos(clienteId, 1)) {
-      logOptimus("AVISO", "Sem creditos", { clienteId });
-      continue;
-      }
+        const temBotToken = Boolean(tel.botToken);
+        const temChatId = Boolean(tel.chatId);
 
-      debitarCreditos(clienteId, 1); 
-            
-        if (!tel.ativo) continue;
+        if (!tel.ativo) {
+          logFilaTelegramDebug({
+            clienteId,
+            ofertaId: oferta.id || "",
+            destinoId: destino.id || destino.destinoId || tel.chatId || "",
+            destinoNome: destino.nome || tel.nome || "Telegram",
+            tipo: "telegram",
+            compativel: true,
+            motivoFiltro: "telegram_inativo",
+            temBotToken,
+            temChatId,
+            vaiEnviar: false,
+            resultado: "ignorado"
+          });
+          continue;
+        }
+
+        if (!temBotToken || !temChatId) {
+          logFilaTelegramDebug({
+            clienteId,
+            ofertaId: oferta.id || "",
+            destinoId: destino.id || destino.destinoId || tel.chatId || "",
+            destinoNome: destino.nome || tel.nome || "Telegram",
+            tipo: "telegram",
+            compativel: true,
+            motivoFiltro: "credenciais_ausentes",
+            temBotToken,
+            temChatId,
+            vaiEnviar: false,
+            resultado: "erro"
+          });
+          continue;
+        }
+
+        if (!usuarioTemCreditos(clienteId, 1)) {
+          logOptimus("AVISO", "Sem creditos", { clienteId });
+          logFilaTelegramDebug({
+            clienteId,
+            ofertaId: oferta.id || "",
+            destinoId: destino.id || destino.destinoId || tel.chatId || "",
+            destinoNome: destino.nome || tel.nome || "Telegram",
+            tipo: "telegram",
+            compativel: true,
+            motivoFiltro: "sem_creditos",
+            temBotToken,
+            temChatId,
+            vaiEnviar: false,
+            resultado: "erro"
+          });
+          continue;
+        }
+
+        logFilaTelegramDebug({
+          clienteId,
+          ofertaId: oferta.id || "",
+          destinoId: destino.id || destino.destinoId || tel.chatId || "",
+          destinoNome: destino.nome || tel.nome || "Telegram",
+          tipo: "telegram",
+          compativel: true,
+          motivoFiltro: "",
+          temBotToken,
+          temChatId,
+          vaiEnviar: true,
+          resultado: "tentando"
+        });
 
         if (destino.tipoMidia === "texto" || !oferta.imagem) {
           await axios.post(
@@ -3321,10 +3413,27 @@ const selecionados = telegramsSelecionados.length
           );
         }
 
+        debitarCreditos(clienteId, 1);
+        telegramEnviado = true;
+
         logOptimus("TELEGRAM", "Mensagem enviada", {
           clienteId,
           destino: destino.nome,
           chatId: tel.chatId
+        });
+
+        logFilaTelegramDebug({
+          clienteId,
+          ofertaId: oferta.id || "",
+          destinoId: destino.id || destino.destinoId || tel.chatId || "",
+          destinoNome: destino.nome || tel.nome || "Telegram",
+          tipo: "telegram",
+          compativel: true,
+          motivoFiltro: "",
+          temBotToken,
+          temChatId,
+          vaiEnviar: true,
+          resultado: "enviado"
         });
 
         oferta.destinosEnviados = oferta.destinosEnviados || [];
@@ -3342,12 +3451,14 @@ const selecionados = telegramsSelecionados.length
           })
         });
 
-      await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 2000));
       }
 
-      if (selecionados.length) {
+      if (telegramEnviado) {
         return { enviado: true };
       }
+
+      return { enviado: false, motivo: "telegram_nao_enviado" };
     }
 
   } catch (e) {
@@ -3356,6 +3467,22 @@ const selecionados = telegramsSelecionados.length
       destino?.nome,
       e.message
     );
+
+    if (String(destino?.tipo || "").toLowerCase() === "telegram") {
+      logFilaTelegramDebug({
+        clienteId,
+        ofertaId: oferta.id || "",
+        destinoId: destino.id || destino.destinoId || destino.chatId || "",
+        destinoNome: destino.nome || "Telegram",
+        tipo: destino.tipo || "telegram",
+        compativel: true,
+        motivoFiltro: "erro_envio",
+        temBotToken: false,
+        temChatId: false,
+        vaiEnviar: false,
+        resultado: e.message || "erro"
+      });
+    }
 
     return { enviado: false, motivo: "erro", erro: e.message };
   }
@@ -3532,6 +3659,22 @@ for (const itemRejeitado of analiseDestinosFila.rejeitados) {
   const analise = itemRejeitado.analise;
   const nomeDestino = destinoNomeLog(destino);
 
+  if (String(destino.tipo || "").toLowerCase() === "telegram") {
+    logFilaTelegramDebug({
+      clienteId,
+      ofertaId: oferta.id || "",
+      destinoId: destino.id || destino.destinoId || destino.chatId || "",
+      destinoNome: nomeDestino,
+      tipo: destino.tipo || "telegram",
+      compativel: false,
+      motivoFiltro: analise.motivo || "nao_compativel",
+      temBotToken: false,
+      temChatId: false,
+      vaiEnviar: false,
+      resultado: "filtrado"
+    });
+  }
+
   if (analise.motivo === "marketplace") {
     logOptimus("DESTINO", "Rejeitada marketplace", {
       clienteId,
@@ -3586,12 +3729,43 @@ for (const item of destinosOrdenados) {
   const nomeDestino = destinoNomeLog(destino);
   const intervalo = item.intervalo;
 
+  if (String(destino.tipo || "").toLowerCase() === "telegram") {
+    logFilaTelegramDebug({
+      clienteId,
+      ofertaId: oferta.id || "",
+      destinoId: destino.id || destino.destinoId || destino.chatId || "",
+      destinoNome: nomeDestino,
+      tipo: destino.tipo || "telegram",
+      compativel: true,
+      motivoFiltro: "",
+      temBotToken: false,
+      temChatId: false,
+      vaiEnviar: true,
+      resultado: "compativel"
+    });
+  }
+
   if (!destinoDentroHorario(destino)) {
     pulouPorHorario = true;
     logOptimus("DESTINO", "Rejeitada horario", {
       clienteId,
       destino: nomeDestino
     });
+    if (String(destino.tipo || "").toLowerCase() === "telegram") {
+      logFilaTelegramDebug({
+        clienteId,
+        ofertaId: oferta.id || "",
+        destinoId: destino.id || destino.destinoId || destino.chatId || "",
+        destinoNome: nomeDestino,
+        tipo: destino.tipo || "telegram",
+        compativel: true,
+        motivoFiltro: "fora_horario",
+        temBotToken: false,
+        temChatId: false,
+        vaiEnviar: false,
+        resultado: "filtrado"
+      });
+    }
     continue;
   }
 
@@ -3604,6 +3778,21 @@ for (const item of destinosOrdenados) {
       usados: limite.usados,
       limite: limite.limite
     });
+    if (String(destino.tipo || "").toLowerCase() === "telegram") {
+      logFilaTelegramDebug({
+        clienteId,
+        ofertaId: oferta.id || "",
+        destinoId: destino.id || destino.destinoId || destino.chatId || "",
+        destinoNome: nomeDestino,
+        tipo: destino.tipo || "telegram",
+        compativel: true,
+        motivoFiltro: "limite_diario",
+        temBotToken: false,
+        temChatId: false,
+        vaiEnviar: false,
+        resultado: "filtrado"
+      });
+    }
     continue;
   }
 
@@ -3617,6 +3806,21 @@ for (const item of destinosOrdenados) {
       turboCupomMinutos: intervalo.turboCupomMin,
       restanteSegundos: Math.ceil(intervalo.restanteMs / 1000)
     });
+    if (String(destino.tipo || "").toLowerCase() === "telegram") {
+      logFilaTelegramDebug({
+        clienteId,
+        ofertaId: oferta.id || "",
+        destinoId: destino.id || destino.destinoId || destino.chatId || "",
+        destinoNome: nomeDestino,
+        tipo: destino.tipo || "telegram",
+        compativel: true,
+        motivoFiltro: "intervalo",
+        temBotToken: false,
+        temChatId: false,
+        vaiEnviar: false,
+        resultado: "filtrado"
+      });
+    }
     continue;
   }
 
@@ -4220,6 +4424,95 @@ function mesclarDestinosTelegram(atuais = [], recebidos = []) {
   }
 
   return destinos;
+}
+
+function normalizarTelegramFila(telegram = {}) {
+  const botToken = textoTelegram(
+    telegram.botToken || telegram.token || telegram.telegramToken
+  );
+  const chatId = textoTelegram(
+    telegram.chatId || telegram.grupoId || telegram.canalId || telegram.channelId
+  );
+
+  return {
+    ...telegram,
+    botToken,
+    chatId,
+    ativo: telegram.ativo !== false,
+    chaves: chavesTelegramDestino(telegram)
+  };
+}
+
+function telegramTemCredenciaisFila(telegram = {}) {
+  const normalizado = normalizarTelegramFila(telegram);
+  return normalizado.botToken && normalizado.chatId ? normalizado : null;
+}
+
+function idsTelegramDestinoFila(destino = {}) {
+  const ids = [];
+
+  if (Array.isArray(destino.telegramDestinos)) {
+    for (const item of destino.telegramDestinos) {
+      if (item && typeof item === "object") {
+        ids.push(...chavesTelegramDestino(item));
+      } else {
+        ids.push(item);
+      }
+    }
+  }
+
+  ids.push(
+    destino.telegramId,
+    destino.botId,
+    destino.destinoId,
+    destino.idTelegram,
+    destino.conexaoId,
+    destino.sessao,
+    destino.chatId,
+    destino.grupoId,
+    destino.canalId,
+    destino.channelId
+  );
+
+  return ids.map(textoTelegram).filter(Boolean);
+}
+
+function telegramsDiretosDestinoFila(destino = {}) {
+  const diretos = [];
+  const direto = telegramTemCredenciaisFila(destino);
+  if (direto) diretos.push(direto);
+
+  if (Array.isArray(destino.telegramDestinos)) {
+    for (const item of destino.telegramDestinos) {
+      if (item && typeof item === "object") {
+        const normalizado = telegramTemCredenciaisFila(item);
+        if (normalizado) diretos.push(normalizado);
+      }
+    }
+  }
+
+  if (destino.telegram && typeof destino.telegram === "object") {
+    const normalizado = telegramTemCredenciaisFila(destino.telegram);
+    if (normalizado) diretos.push(normalizado);
+  }
+
+  return diretos;
+}
+
+function logFilaTelegramDebug(dados = {}) {
+  console.log("[FILA-TELEGRAM-DEBUG]", {
+    clienteId: dados.clienteId || "",
+    ofertaId: dados.ofertaId || "",
+    destinoId: dados.destinoId || "",
+    destinoNome: dados.destinoNome || "",
+    tipo: dados.tipo || "",
+    compativel: dados.compativel === true,
+    motivoFiltro: dados.motivoFiltro || "",
+    temBotToken: dados.temBotToken === true,
+    temChatId: dados.temChatId === true,
+    vaiEnviar: dados.vaiEnviar === true,
+    resultado: dados.resultado || ""
+  });
 }
 
 function listarTelegramsCliente(clienteId) {
