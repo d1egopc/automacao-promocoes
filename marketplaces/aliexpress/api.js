@@ -26,7 +26,7 @@ function assinar(params, secret) {
 
 async function buscarProdutosAliExpressAPI(termo, credenciais = {}, opcoes = {}) {
   const appKey = credenciais.appKey || "";
-  const secret = credenciais.secret || "";
+  const secret = credenciais.secret || credenciais.appSecret || "";
   const trackingId = credenciais.trackingId || "";
 
   if (!appKey || !secret || !trackingId) {
