@@ -13318,59 +13318,137 @@ function gerarLinkMagalu(linkOriginal, promoterId) {
   );
 }
 
+function extrairProductIdAliExpressManual(urlEntrada = "") {
+  const urlTexto = String(urlEntrada || "");
+  const candidatos = [
+    urlTexto.match(/\/item\/(\d+)\.html/i)?.[1],
+    urlTexto.match(/[?&](?:productId|product_id|itemId|item_id)=(\d+)/i)?.[1],
+    urlTexto.match(/\b(1005\d{8,})\b/)?.[1]
+  ].filter(Boolean);
+
+  if (candidatos.length) return candidatos[0];
+
+  try {
+    const decodificada = decodeURIComponent(urlTexto);
+    return decodificada.match(/\/item\/(\d+)\.html/i)?.[1] ||
+      decodificada.match(/[?&](?:productId|product_id|itemId|item_id)=(\d+)/i)?.[1] ||
+      decodificada.match(/\b(1005\d{8,})\b/)?.[1] ||
+      "";
+  } catch {
+    return "";
+  }
+}
+
+function listaAliExpress(valor) {
+  if (Array.isArray(valor)) return valor;
+  if (!valor) return [];
+  return [valor];
+}
+
+function primeiroCampoAliExpress(objeto = {}, campos = []) {
+  for (const campo of campos) {
+    const valor = campo.split(".").reduce((atual, chave) => atual?.[chave], objeto);
+    if (Array.isArray(valor) && valor.length) return valor[0];
+    if (valor && typeof valor === "object" && Array.isArray(valor.string) && valor.string.length) return valor.string[0];
+    if (valor && typeof valor === "object" && typeof valor.string === "string") return valor.string;
+    if (valor !== undefined && valor !== null && String(valor).trim() !== "") return valor;
+  }
+
+  return "";
+}
+
+function extrairProdutoAliExpressResposta(data = {}) {
+  const resposta = data?.aliexpress_affiliate_productdetail_get_response || data || {};
+  const respResult = resposta?.resp_result || data?.resp_result || {};
+  const result = respResult?.result || resposta?.result || data?.result || {};
+  const produtos = result?.products || result?.product || data?.products || data?.product || {};
+  const listaProdutos = [
+    ...listaAliExpress(produtos?.product),
+    ...listaAliExpress(produtos),
+    ...listaAliExpress(result?.products?.product),
+    ...listaAliExpress(result?.products),
+    ...listaAliExpress(result?.product)
+  ].filter(item => item && typeof item === "object" && !Array.isArray(item));
+
+  return listaProdutos[0] || {};
+}
+
+function logAliExpressApiProdutoFalhou(dados = {}) {
+  console.log("aliexpress_api_produto_falhou", {
+    clienteId: dados.clienteId || "",
+    productId: dados.productId || "",
+    status: dados.status || "",
+    codigo: dados.codigo || "",
+    motivo: dados.motivo || "",
+    temAppKey: Boolean(dados.temAppKey),
+    temSecret: Boolean(dados.temSecret),
+    temTrackingId: Boolean(dados.temTrackingId)
+  });
+}
+
 async function importarAliExpress(urlEntrada, config = {}) {
+  let productId = "";
+  let linkAfiliadoFallback = urlEntrada;
+  const clienteIdLog = config?.clienteId || config?.cliente || "";
+
   try {
     if (urlEntrada && !urlEntrada.startsWith("http")) {
       urlEntrada = "https://" + urlEntrada;
     }
 
-  const ehBrasil =
-  String(urlEntrada).includes("ship_from%22%3A%22BR") ||
-  String(urlEntrada).includes('"ship_from":"BR"') ||
-  String(urlEntrada).includes("%22ship_from%22%3A%22BR%22");
+    const ehBrasil =
+      String(urlEntrada).includes("ship_from%22%3A%22BR") ||
+      String(urlEntrada).includes('"ship_from":"BR"') ||
+      String(urlEntrada).includes("%22ship_from%22%3A%22BR%22");
 
-    const productId =
-      urlEntrada.match(/\/item\/(\d+)\.html/i)?.[1] ||
-      urlEntrada.match(/[?&]productId=(\d+)/i)?.[1];
+    productId = extrairProductIdAliExpressManual(urlEntrada);
 
     if (!productId) {
-      throw new Error("Product ID nÃ£o encontrado no link AliExpress");
+      const erro = new Error("Product ID nao encontrado no link AliExpress");
+      erro.codigo = "product_id_ausente";
+      throw erro;
     }
 
-    const credenciais = marketplace === "awin"
-      ? normalizarCredenciaisAwin(config?.credenciais || {})
-      : config?.credenciais || {};
+    const credenciais = config?.credenciais || {};
     const appKey = credenciais.appKey || "";
-    const secret = credenciais.secret || "";
+    const secret = credenciais.secret || credenciais.appSecret || "";
     const trackingId = credenciais.trackingId || "";
 
+    console.log("[ALIEXPRESS-MANUAL] auditoria", {
+      clienteId: clienteIdLog,
+      productId,
+      integracaoEncontrada: Boolean(config),
+      temAppKey: Boolean(appKey),
+      temSecret: Boolean(secret),
+      temTrackingId: Boolean(trackingId)
+    });
+
     if (!appKey || !secret || !trackingId) {
-      throw new Error("Credenciais AliExpress incompletas");
+      const erro = new Error("Credenciais AliExpress incompletas");
+      erro.codigo = "credenciais_incompletas";
+      throw erro;
     }
 
     function timestampGMT8() {
       const d = new Date(Date.now() + 8 * 60 * 60 * 1000);
       const pad = (n) => String(n).padStart(2, "0");
-
-      return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+      return d.getUTCFullYear() + "-" +
+        pad(d.getUTCMonth() + 1) + "-" +
+        pad(d.getUTCDate()) + " " +
+        pad(d.getUTCHours()) + ":" +
+        pad(d.getUTCMinutes()) + ":" +
+        pad(d.getUTCSeconds());
     }
 
     function assinar(params, appSecret) {
       const sortedKeys = Object.keys(params).sort();
       let base = appSecret;
-
       for (const key of sortedKeys) {
         if (key === "sign") continue;
         base += key + params[key];
       }
-
       base += appSecret;
-
-      return crypto
-        .createHash("md5")
-        .update(base, "utf8")
-        .digest("hex")
-        .toUpperCase();
+      return crypto.createHash("md5").update(base, "utf8").digest("hex").toUpperCase();
     }
 
     const params = {
@@ -13381,6 +13459,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
       format: "json",
       v: "2.0",
       product_ids: productId,
+      fields: "product_title,product_main_image_url,product_small_image_urls,target_sale_price,sale_price,target_app_sale_price,app_sale_price,target_min_sale_price,min_sale_price,target_original_price,original_price,discount,promotion_link,promotion_link_short,product_detail_url,product_url,first_level_category_name,second_level_category_name",
       target_currency: "BRL",
       target_language: "PT",
       ship_to_country: "BR",
@@ -13388,8 +13467,13 @@ async function importarAliExpress(urlEntrada, config = {}) {
     };
 
     params.sign = assinar(params, secret);
-
     const body = new URLSearchParams(params);
+
+    console.log("[ALIEXPRESS-MANUAL] chamada API", {
+      clienteId: clienteIdLog,
+      productId,
+      method: params.method
+    });
 
     const response = await fetch("https://api-sg.aliexpress.com/sync", {
       method: "POST",
@@ -13399,188 +13483,106 @@ async function importarAliExpress(urlEntrada, config = {}) {
       body
     });
 
-    const data = await response.json();
+    let data = null;
+    try {
+      data = await response.json();
+    } catch (e) {
+      const erro = new Error("Resposta AliExpress invalida");
+      erro.status = response.status;
+      erro.codigo = "json_invalido";
+      erro.causa = e.message;
+      throw erro;
+    }
 
-console.log("[INFO] AliExpress produto encontrado");
+    const respostaApi = data?.aliexpress_affiliate_productdetail_get_response || data || {};
+    const erroApi = data?.error_response || respostaApi?.error_response || null;
+    const respResult = respostaApi?.resp_result || data?.resp_result || {};
+    const codigoApi = erroApi?.code || respResult?.resp_code || respostaApi?.code || "";
+    const mensagemApi = erroApi?.msg || erroApi?.sub_msg || respResult?.resp_msg || respostaApi?.msg || "";
 
-    const result =
-      data?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result ||
-      data?.resp_result?.result ||
-      data?.result ||
-      {};
+    if (!response.ok || erroApi || (codigoApi && !["200", "20010000"].includes(String(codigoApi)))) {
+      const erro = new Error(mensagemApi || "AliExpress API retornou erro");
+      erro.status = response.status;
+      erro.codigo = codigoApi || "api_erro";
+      erro.raw = data;
+      throw erro;
+    }
 
-    const produto =
-      result?.products?.product?.[0] ||
-      result?.products?.[0] ||
-      result?.product?.[0] ||
-      result?.product ||
-      {};
+    const produto = extrairProdutoAliExpressResposta(data);
+    const tituloApi = primeiroCampoAliExpress(produto, ["product_title", "title", "productTitle"]);
+    const precoApi = primeiroCampoAliExpress(produto, ["target_sale_price", "sale_price", "target_app_sale_price", "app_sale_price", "target_min_sale_price", "min_sale_price"]);
+    const imagemApi = primeiroCampoAliExpress(produto, ["product_main_image_url", "product_small_image_urls", "product_small_image_urls.string", "image_url"]);
 
-  const avisoCupom = ehBrasil
-  ? "ðŸ‡§ðŸ‡· Produto no Brasil. Confira cupom ou desconto com moedas na pÃ¡gina."
-  : "ðŸŒ Compra internacional. Pode haver imposto/taxa. Confira cupom ou desconto com moedas na pÃ¡gina.";
+    console.log("[ALIEXPRESS-MANUAL] resposta API", {
+      status: response.status,
+      codigo: codigoApi || "ok",
+      temTitulo: Boolean(tituloApi),
+      temPreco: Boolean(precoApi),
+      temImagem: Boolean(imagemApi),
+      camposProduto: Object.keys(produto || {}).slice(0, 30)
+    });
 
-      
-      if (!produto || Object.keys(produto).length === 0) {
-  console.log("[AVISO] AliExpress sem produto retornado pela API:", productId);
+    const avisoCupom = ehBrasil
+      ? "Produto no Brasil. Confira cupom ou desconto com moedas na pagina."
+      : "Compra internacional. Pode haver imposto/taxa. Confira cupom ou desconto com moedas na pagina.";
 
-  let precoAntigoUrl = "";
-  let precoAtualUrl = "";
+    if (!produto || Object.keys(produto).length === 0) {
+      const erro = new Error("AliExpress sem produto retornado pela API");
+      erro.status = response.status;
+      erro.codigo = codigoApi || "produto_ausente";
+      erro.raw = data;
+      throw erro;
+    }
 
-  try {
-    const urlDecodificada = decodeURIComponent(urlEntrada);
-    const pdpMatch = urlDecodificada.match(/pdp_npi=([^&]+)/);
+    let titulo = tituloApi || "Produto AliExpress";
+    let imagem = imagemApi || "";
+    let precoAtual = String(precoApi || "").trim();
+    let precoAntigo = String(primeiroCampoAliExpress(produto, ["target_original_price", "original_price"]) || "").trim();
 
-    if (pdpMatch?.[1]) {
-      const numeros = pdpMatch[1]
-        .split("!")
-        .filter((p) => /^\d+(\.\d+)?$/.test(p))
-        .map(Number)
-        .filter((n) => n > 0);
+    if (precoAntigo === precoAtual) precoAntigo = "";
 
-      if (numeros.length >= 2) {
-        precoAntigoUrl = numeros[0].toFixed(2);
-        precoAtualUrl = numeros[1].toFixed(2);
+    console.log("[ALIEXPRESS-MANUAL] precos raw", {
+      target_sale_price: produto.target_sale_price,
+      sale_price: produto.sale_price,
+      app_sale_price: produto.app_sale_price,
+      target_app_sale_price: produto.target_app_sale_price,
+      target_min_sale_price: produto.target_min_sale_price,
+      min_sale_price: produto.min_sale_price,
+      target_original_price: produto.target_original_price,
+      original_price: produto.original_price
+    });
+
+    if (produto.discount === "0%" && limparPreco(precoAtual) === limparPreco(precoAntigo)) precoAntigo = "";
+
+    try {
+      const urlDecodificada = decodeURIComponent(urlEntrada);
+      const match = urlDecodificada.match(/BRL!([\d.]+)!([\d.]+)/);
+      if (match) {
+        const antigo = match[1];
+        const atual = match[2];
+        if (parseFloat(atual) < parseFloat(antigo)) {
+          precoAntigo = antigo;
+          precoAtual = atual;
+        }
+      }
+    } catch (e) {
+      console.log("[ERRO] Erro ao extrair preco da URL:", e.message);
+    }
+
+    let linkAfiliado = primeiroCampoAliExpress(produto, ["promotion_link", "promotion_link_short", "product_detail_url", "product_url"]) || urlEntrada;
+    if (linkAfiliado.includes("s.click.aliexpress.com/s/")) {
+      try {
+        const match = linkAfiliado.match(/https:\/\/s\.click\.aliexpress\.com\/e\/_[a-zA-Z0-9]+/i);
+        if (match?.[0]) linkAfiliado = match[0];
+      } catch (e) {
+        console.log("[ERRO] Erro limpando link AliExpress:", e.message);
       }
     }
-  } catch (e) {
-    console.log("[ERRO] Erro fallback pdp_npi AliExpress:", e.message);
-  }
 
-  return {
-    marketplace: "aliexpress",
-    titulo: "Produto AliExpress",
-    precoAntigo: precoAntigoUrl,
-    precoAtual: precoAtualUrl,
-    cupom: "",
-    linkOriginal: urlEntrada,
-    linkAfiliado: gerarLinkOptimus(urlEntrada, "aliexpress"),
-    imagem: "",
-    categoria: "AliExpress",
-    avisoCupom,
-    aviso: "AliExpress nÃ£o retornou dados pela API. PreÃ§os extraÃ­dos do link quando disponÃ­veis."
-  };
-}
-    
-    let titulo =
-      produto.product_title ||
-      produto.title ||
-      produto.productTitle ||
-      "Produto AliExpress";
+    const linkAliCurto = await gerarLinkCurtoAliExpress(linkAfiliado, credenciais);
+    const linkFinal = gerarLinkOptimus(linkAliCurto || linkAfiliado, "aliexpress");
 
-    let imagem =
-      produto.product_main_image_url ||
-      produto.product_small_image_urls?.string?.[0] ||
-      produto.product_small_image_urls?.[0] ||
-      produto.image_url ||
-      "";
-     
- let precoAtual =
-  produto.target_sale_price ||
-  produto.sale_price ||
-  produto.target_app_sale_price ||
-  produto.app_sale_price ||
-  produto.target_min_sale_price ||
-  produto.min_sale_price ||
-  "";
-
-precoAtual = String(precoAtual).trim();
-console.log("[INFO] ALI PREO ESCOLHIDO:", precoAtual);
-   
-   
-  let precoAntigo =
-  produto.target_original_price ||
-  produto.original_price ||
-  "";
-
-precoAntigo = String(precoAntigo).trim();
-console.log("[INFO] ALI PREO ANTIGO ESCOLHIDO:", precoAntigo);
-
-if (precoAntigo === precoAtual) {
-  precoAntigo = "";
-}
-
-   console.log("[INFO] ALI PREOS RAW:", {
-  target_sale_price: produto.target_sale_price,
-  sale_price: produto.sale_price,
-  app_sale_price: produto.app_sale_price,
-  target_app_sale_price: produto.target_app_sale_price,
-  target_min_sale_price: produto.target_min_sale_price,
-  min_sale_price: produto.min_sale_price,
-  target_original_price: produto.target_original_price,
-  original_price: produto.original_price
-});
-
-  
-  if (produto.discount === "0%" && limparPreco(precoAtual) === limparPreco(precoAntigo)) {
-  precoAntigo = "";
-}
- 
-// ðŸ”¥ PRIORIDADE: preÃ§o real da URL (AliExpress promo)
-try {
-  const urlDecodificada = decodeURIComponent(urlEntrada);
-
-  // pega exatamente o padrÃ£o pdp_npi
-  const match = urlDecodificada.match(/BRL!([\d.]+)!([\d.]+)/);
-
-  if (match) {
-    const antigo = match[1];
-    const atual = match[2];
-
-    // sÃ³ usa se fizer sentido (evita bug tipo 8.93)
-    if (parseFloat(atual) < parseFloat(antigo)) {
-      precoAntigo = antigo;
-      precoAtual = atual;
-    }
-  }
-
-} catch (e) {
-  console.log("[ERRO] Erro ao extrair preo da URL:", e.message);
-}
-
-    let linkAfiliado =
-  produto.promotion_link ||
-  produto.promotion_link_short ||
-  produto.product_detail_url ||
-  produto.product_url ||
-  urlEntrada;
-
-// ðŸ”¥ Limpar link gigante AliExpress
-if (
-  linkAfiliado.includes("s.click.aliexpress.com/s/")
-) {
-  try {
-    const match = linkAfiliado.match(
-      /https:\/\/s\.click\.aliexpress\.com\/e\/_[a-zA-Z0-9]+/i
-    );
-
-    if (match?.[0]) {
-      linkAfiliado = match[0];
-    }
-  } catch (e) {
-    console.log("[ERRO] Erro limpando link AliExpress:", e.message);
-  }
-}
-
-// Se jÃ¡ vier link oficial curto da Ali, mantÃ©m ele.
-const linkAliOficial = String(linkAfiliado || "").includes("s.click.aliexpress.com")
-  ? linkAfiliado
-  : linkAfiliado;
-
-// Depois passa pelo motor Optimus.
-// Se linksOptimus.ativo = false, volta o link oficial/original.
-// Se linksOptimus.ativo = true, vira /r/codigo.
-const linkAliCurto = await gerarLinkCurtoAliExpress(
-  linkAfiliado,
-  credenciais
-);
-
-const linkFinal = gerarLinkOptimus(
-  linkAliCurto,
-  "aliexpress"
-);
-
-   return {
+    return {
       marketplace: "aliexpress",
       titulo: htmlDecode(titulo || "Produto AliExpress"),
       precoAntigo: limparPreco(precoAntigo || ""),
@@ -13589,14 +13591,8 @@ const linkFinal = gerarLinkOptimus(
       linkOriginal: urlEntrada,
       linkAfiliado: linkFinal,
       imagem: corrigirImagemUrl(imagem) || imagem,
-      categoria:
-      produto.first_level_category_name ||
-      produto.second_level_category_name ||
-      "AliExpress",
-      categoriaProduto:
-      produto.first_level_category_name ||
-      produto.second_level_category_name ||
-      "AliExpress",
+      categoria: primeiroCampoAliExpress(produto, ["first_level_category_name", "second_level_category_name"]) || "AliExpress",
+      categoriaProduto: primeiroCampoAliExpress(produto, ["first_level_category_name", "second_level_category_name"]) || "AliExpress",
       avisoCupom,
       aviso: !imagem || titulo === "Produto AliExpress"
         ? "Dados parciais retornados pela API AliExpress."
@@ -13604,6 +13600,27 @@ const linkFinal = gerarLinkOptimus(
     };
 
   } catch (e) {
+    const credenciais = config?.credenciais || {};
+    logAliExpressApiProdutoFalhou({
+      clienteId: clienteIdLog,
+      productId,
+      status: e.status || e.response?.status || "",
+      codigo: e.codigo || e.code || "",
+      motivo: e.causa || e.message || "erro_api",
+      temAppKey: Boolean(credenciais.appKey),
+      temSecret: Boolean(credenciais.secret || credenciais.appSecret),
+      temTrackingId: Boolean(credenciais.trackingId)
+    });
+
+    try {
+      const linkAliCurto = await gerarLinkCurtoAliExpress(urlEntrada, credenciais);
+      linkAfiliadoFallback = gerarLinkOptimus(linkAliCurto || urlEntrada, "aliexpress");
+    } catch (erroLink) {
+      console.log("[ALIEXPRESS-MANUAL] afiliado fallback falhou", {
+        motivo: erroLink.message || "erro_link_afiliado"
+      });
+    }
+
     console.error("[ERRO] ERRO ALIEXPRESS:", e.message);
 
     return {
@@ -13613,10 +13630,14 @@ const linkFinal = gerarLinkOptimus(
       precoAtual: "",
       cupom: "",
       linkOriginal: urlEntrada,
-      linkAfiliado: urlEntrada,
+      linkAfiliado: linkAfiliadoFallback || urlEntrada,
       imagem: "",
       categoria: "AliExpress",
-      aviso: "Erro ao consultar API AliExpress"
+      aviso: "Erro ao consultar API AliExpress",
+      erroTecnico: "aliexpress_api_produto_falhou",
+      motivoErroAliExpress: e.message || "erro_api",
+      statusApiAliExpress: e.status || e.response?.status || "",
+      codigoApiAliExpress: e.codigo || e.code || ""
     };
   }
 }
