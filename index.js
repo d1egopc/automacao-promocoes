@@ -4170,6 +4170,8 @@ function chavesTelegramDestino(destino = {}) {
     destino.telegramId,
     destino.destinoId,
     destino.nome,
+    destino.apelido,
+    destino.username,
     destino.chatId,
     destino.grupoId,
     destino.canalId,
@@ -4178,19 +4180,23 @@ function chavesTelegramDestino(destino = {}) {
 }
 
 function resolverTelegramTeste(body = {}, clienteId) {
-  const entrada = body.destino && typeof body.destino === "object"
-    ? body.destino
-    : body;
+  const entrada =
+    body.destino && typeof body.destino === "object" ? body.destino :
+    body.telegram && typeof body.telegram === "object" ? body.telegram :
+    body;
 
   const id = textoTelegram(
-    entrada.id || entrada.botId || entrada.telegramId || entrada.destinoId
+    entrada.id || entrada.botId || entrada.telegramId || entrada.destinoId ||
+    body.id || body.botId || body.telegramId || body.destinoId
   );
 
   let botToken = textoTelegram(
-    entrada.botToken || entrada.token || entrada.telegramToken
+    entrada.botToken || entrada.token || entrada.telegramToken ||
+    body.botToken || body.token || body.telegramToken
   );
   let chatId = textoTelegram(
-    entrada.chatId || entrada.grupoId || entrada.canalId || entrada.channelId
+    entrada.chatId || entrada.grupoId || entrada.canalId || entrada.channelId ||
+    body.chatId || body.grupoId || body.canalId || body.channelId
   );
 
   if ((!botToken || !chatId) && id) {
