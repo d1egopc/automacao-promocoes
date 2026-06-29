@@ -2467,7 +2467,7 @@ function dataMsDuplicidadeRadar(valor = "") {
 
 function itemFilaBloqueiaDuplicidadeRadar(item = {}) {
   const status = normalizarTexto(item.status || item.statusRadar || "");
-  if (status === "pendente" || status === "retida") return true;
+  if (status === "pendente") return true;
 
   if (status !== "enviado" && status !== "enviada") return false;
 
@@ -2488,6 +2488,24 @@ function duplicidadeRadarNaFilaCliente(oferta = {}, clienteId = "admin") {
   const tituloNovo = normalizarTexto(oferta.titulo || oferta.nome || "");
   const marketplaceNovo = normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || "");
   const faixaPrecoNova = faixaPrecoDuplicidadeRadar(oferta);
+
+  for (const item of fila) {
+    if (String(item.clienteId || "admin") !== cliente) continue;
+
+    const status = normalizarTexto(item.status || item.statusRadar || "");
+    if (status !== "retida") continue;
+
+    const linksExistentes = linksDuplicidadeRadar(item);
+    if (!linksNovos.some(link => linksExistentes.includes(link))) continue;
+
+    console.log("[RADAR-DUPLICIDADE-RETIDA-IGNORADA]", {
+      clienteId: cliente,
+      titulo: item.titulo || item.nome || oferta.titulo || oferta.nome || "",
+      link: item.linkOriginal || item.link || item.linkAfiliado || oferta.linkOriginal || oferta.link || "",
+      statusAnterior: status,
+      motivo: "retida_nao_bloqueia_duplicidade"
+    });
+  }
 
   const itensCliente = fila.filter(item =>
     String(item.clienteId || "admin") === cliente &&
