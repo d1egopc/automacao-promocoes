@@ -8142,6 +8142,126 @@ function categoriaRadarReclassificada(oferta = {}) {
   }, oferta.titulo || oferta.nome || oferta.termo || "");
 }
 
+function categoriaGenericaRadar(valor = "") {
+  const texto = normalizarTexto(valor || "");
+  return !texto ||
+    texto === "diversos" ||
+    texto === "mercado livre" ||
+    texto === "nao identificada" ||
+    texto === "nao identificado";
+}
+
+function textoCompletoRadarOferta(oferta = {}) {
+  return [
+    oferta.mensagemOriginalRadar,
+    oferta.textoOriginal,
+    oferta.textoResumo,
+    oferta.mensagemResumo,
+    oferta.descricao,
+    oferta.titulo,
+    oferta.nome
+  ].filter(Boolean).join("\n");
+}
+
+function tituloTextoRadarMl(oferta = {}) {
+  const texto = textoCompletoRadarOferta(oferta);
+  const titulo = extrairTituloKabumFallbackRadar(
+    String(texto || "").replace(/https?:\/\/\S*(?:meli\.la|mercadolivre\.com\.br)\S*/gi, "")
+  );
+
+  return tituloGenericoMercadoLivreRadar(titulo) ? "" : titulo;
+}
+
+function categoriaManualTextoRadarMl(texto = "") {
+  const normalizado = normalizarTexto(texto || "");
+
+  if (/perfume|perfum|fragrancia|fragrancias|colonia|bodysplash|bodysplash|malbec|natura|boticario|eudora|rubyrose|ruby rose|protetorlabial|batom|lipbalm|lip balm|gloss|shampoo|condicionador|mascaracapilar|mascara capilar|kitcabelo|kit cabelo|cabelo|isima|skincare|hidratante|maquiagem/.test(normalizado)) {
+    return "Perfumaria, Farm\u00e1cia e Beleza";
+  }
+
+  if (/mangueira|mangueiramagica|mangueira magica|expansivel|retratil|jardim|irrigacao|esguicho|lavadora|lavarcarro|lavar carro/.test(normalizado)) {
+    return "Ferramentas";
+  }
+
+  if (/tech tshirt|tech t shirt|tshirt|t shirt|t-shirt|longsleeve|long sleeve|manga longa|camiseta|camisa|blusa|cropped|legging|calca|short|shorts|moda feminina|feminina|mulher/.test(normalizado)) {
+    if (/feminina|mulher|cropped|legging|vestido|body/.test(normalizado)) return "Roupas e Moda Feminina";
+    return "Roupas e Moda Masculina";
+  }
+
+  return "";
+}
+
+function aplicarFallbackCategoriaRadarMl(oferta = {}, clienteId = "admin") {
+  const marketplace = normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || oferta.marketplaceOriginalRadar || "");
+  if (marketplace !== "mercadolivre") return oferta;
+
+  const tituloAntes = oferta.titulo || oferta.nome || "";
+  const categoriaAntes = oferta.categoria || oferta.categoriaProduto || "";
+  const textoRadar = textoCompletoRadarOferta(oferta);
+  const tituloTexto = tituloTextoRadarMl(oferta);
+  const precisaTitulo = tituloGenericoMercadoLivreRadar(tituloAntes);
+  const precisaCategoria = categoriaGenericaRadar(categoriaAntes);
+  let tituloDepois = tituloAntes;
+  let categoriaDepois = categoriaAntes;
+  let motivo = "";
+
+  if (precisaTitulo && tituloTexto) {
+    tituloDepois = tituloTexto;
+    motivo = "titulo_generico_substituido";
+  }
+
+  if (precisaCategoria && (tituloDepois || tituloTexto || textoRadar)) {
+    const textoClassificacao = [
+      tituloDepois,
+      tituloTexto,
+      textoRadar
+    ].filter(Boolean).join(" ");
+    const categoriaManual = categoriaManualTextoRadarMl(textoClassificacao);
+    const categoriaClassificada = categoriaManual || classificarCategoriaOferta({
+      ...oferta,
+      titulo: tituloDepois || tituloTexto || oferta.titulo || oferta.nome || "",
+      nome: tituloDepois || tituloTexto || oferta.nome || oferta.titulo || "",
+      descricao: textoRadar,
+      categoria: "",
+      categoriaProduto: ""
+    }, textoClassificacao);
+
+    if (!categoriaGenericaRadar(categoriaClassificada)) {
+      categoriaDepois = categoriaClassificada;
+      motivo = motivo || "categoria_diversos_reclassificada";
+    }
+  }
+
+  const usouTextoRadar = Boolean(
+    textoRadar &&
+    (
+      tituloDepois !== tituloAntes ||
+      categoriaDepois !== categoriaAntes
+    )
+  );
+
+  if (usouTextoRadar || precisaTitulo || precisaCategoria) {
+    console.log("[RADAR-CATEGORIA-FALLBACK]", {
+      clienteId,
+      tituloAntes,
+      tituloDepois,
+      categoriaAntes,
+      categoriaDepois,
+      usouTextoRadar,
+      motivo: motivo || "sem_alteracao"
+    });
+  }
+
+  return {
+    ...oferta,
+    titulo: tituloDepois || tituloAntes,
+    nome: tituloDepois || oferta.nome || oferta.titulo || "",
+    categoria: categoriaDepois || categoriaAntes,
+    categoriaProduto: categoriaDepois || oferta.categoriaProduto || categoriaAntes,
+    fallbackCategoriaRadarMl: usouTextoRadar || oferta.fallbackCategoriaRadarMl === true
+  };
+}
+
 function chaveDuplicidadeRadar(oferta = {}) {
   const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
   const marketplace = normalizarMarketplaceRadar(
@@ -10798,6 +10918,7 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
   ofertaPreparada.cupomConfirmado = cupomRadar.cupomConfirmado;
   ofertaPreparada.possivelCupom = cupomRadar.possivelCupom;
   ofertaPreparada.categoria = categoriaRadarReclassificada(ofertaPreparada);
+  ofertaPreparada = aplicarFallbackCategoriaRadarMl(ofertaPreparada, clienteId);
 
   const categoriasPermitidas = Array.isArray(radarConfig.categoriasPermitidas)
     ? radarConfig.categoriasPermitidas
@@ -16180,6 +16301,66 @@ const html = await response.text();
 
 // ================= FAREJADOR AWIN =================
 
+function precoNumeroAwinOferta(oferta = {}) {
+  const valor = oferta.precoAtual || oferta.preco || oferta.search_price || "";
+  const numero = Number(String(valor || "")
+    .replace("R$", "")
+    .replace(/\./g, "")
+    .replace(",", ".")
+    .replace(/[^\d.]/g, "")
+    .trim());
+
+  return Number.isFinite(numero) && numero > 0 ? numero : 0;
+}
+
+function tituloBomAwinOferta(titulo = "") {
+  const texto = normalizarTexto(titulo || "");
+  if (texto.length < 12) return false;
+  if (/^(produto|item|oferta|kit)$/.test(texto)) return false;
+  return /[a-z]{4,}/.test(texto);
+}
+
+function imagemValidaAwinOferta(imagem = "") {
+  return /^https?:\/\//i.test(String(imagem || "")) && !/logo|placeholder|no-image|sem-imagem/i.test(String(imagem || ""));
+}
+
+function destinoCompativelAwinOferta(clienteId = "admin", oferta = {}) {
+  try {
+    return destinosClienteNormalizados(clienteId).some(destino => destinoAceitaOferta(destino, oferta));
+  } catch {
+    return false;
+  }
+}
+
+function chaveSimilarAwinOferta(oferta = {}) {
+  const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
+  const palavras = titulo.split(" ")
+    .filter(p => p.length >= 4)
+    .filter(p => !["para", "com", "sem", "preto", "branco", "branca", "azul", "vermelho", "kit"].includes(p))
+    .slice(0, 4);
+
+  return [
+    normalizarTexto(oferta.categoria || ""),
+    ...palavras
+  ].filter(Boolean).join("|");
+}
+
+function pontuarCandidatoAwin(clienteId = "admin", oferta = {}, repeticoesCategoria = {}) {
+  const preco = precoNumeroAwinOferta(oferta);
+  const categoria = normalizarTexto(oferta.categoria || "");
+  let score = 0;
+
+  if (destinoCompativelAwinOferta(clienteId, oferta)) score += 1000;
+  if (imagemValidaAwinOferta(oferta.imagem)) score += 120;
+  if (tituloBomAwinOferta(oferta.titulo || oferta.nome || "")) score += 80;
+  if (preco > 0) score += Math.max(0, 500 - Math.min(preco, 500));
+  score -= Number(repeticoesCategoria[categoria] || 0) * 80;
+  if (preco >= 1000) score -= 250;
+  if (preco >= 2000) score -= 500;
+
+  return score;
+}
+
 async function farejarAwin(clienteId = "admin", deps = {}) {
 
   const {
@@ -16220,7 +16401,8 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
       return;
     }
 
-    const limitePorRodada = cfg.limitePorRodada || 5;
+    const limitePorRodada = Math.min(3, Number(cfg.limitePorRodada || 3) || 3);
+    const limiteCandidatosAwin = Math.max(30, limitePorRodada * 12);
     const precoMinimo = cfg.precoMinimo || 20;
     const feedFile = cfg.feedFile || "awin_kabum.csv";
 
@@ -16250,11 +16432,11 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
 
     console.log("[INFO] Produtos no feed Awin:", produtos.length);
     
-    let adicionadas = 0;
+    let candidatosAwin = 0;
     let ofertasEncontradas = [];
 
     for (const item of produtos) {
-      if (adicionadas >= limitePorRodada) break;
+      if (ofertasEncontradas.length >= limiteCandidatosAwin) break;
 
       const titulo = item.product_name || item.name || "";
       const preco = Number(String(item.search_price || "0").replace(",", "."));
@@ -16309,7 +16491,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
       };
 
        ofertasEncontradas.push(oferta);
-      adicionadas++;
+      candidatosAwin++;
 
       console.log("[INFO] Produto Awin encontrado:", titulo);
     }
@@ -16324,12 +16506,51 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
     );
 
     console.log(
-      `ðŸ§  Ofertas Awin apÃ³s filtros universais: ${ofertasFiltradas.length}`
+      `Ã°Å¸Â§Â  Ofertas Awin apÃƒÂ³s filtros universais: ${ofertasFiltradas.length}`
     );
 
-   let adicionadasFila = 0;
+   const repeticoesCategoriaAwin = {};
+   for (const itemFila of Array.isArray(fila) ? fila : []) {
+     if (String(itemFila?.clienteId || "admin") !== String(clienteId || "admin")) continue;
+     const categoriaFila = normalizarTexto(itemFila?.categoria || "");
+     if (categoriaFila) repeticoesCategoriaAwin[categoriaFila] = (repeticoesCategoriaAwin[categoriaFila] || 0) + 1;
+   }
 
-   for (const oferta of ofertasFiltradas) {
+   const ofertasOrdenadas = [...ofertasFiltradas]
+     .map(oferta => ({
+       ...oferta,
+       __awinScore: pontuarCandidatoAwin(clienteId, oferta, repeticoesCategoriaAwin)
+     }))
+     .sort((a, b) => {
+       const score = Number(b.__awinScore || 0) - Number(a.__awinScore || 0);
+       if (score !== 0) return score;
+       return precoNumeroAwinOferta(a) - precoNumeroAwinOferta(b);
+     });
+
+   let adicionadasFila = 0;
+   let ignoradosPorLimite = 0;
+   let ignoradosParecidos = 0;
+   let ignoradosSemDeeplink = 0;
+   let ignoradosDuplicados = 0;
+   const similaresRodada = new Set();
+   const categoriasRodada = {};
+
+   for (const oferta of ofertasOrdenadas) {
+     if (adicionadasFila >= limitePorRodada) {
+       ignoradosPorLimite += 1;
+       continue;
+     }
+
+     const chaveSimilar = chaveSimilarAwinOferta(oferta);
+     const categoriaOferta = normalizarTexto(oferta.categoria || "");
+     if (chaveSimilar && similaresRodada.has(chaveSimilar)) {
+       ignoradosParecidos += 1;
+       continue;
+     }
+     if (categoriaOferta && Number(categoriasRodada[categoriaOferta] || 0) >= 1 && ofertasOrdenadas.length > limitePorRodada) {
+       ignoradosParecidos += 1;
+       continue;
+     }
      const linkBaseAwin = oferta.linkOriginal || oferta.link || "";
      const linkAfiliadoCliente = typeof gerarDeepLinkAwin === "function"
        ? await gerarDeepLinkAwin(linkBaseAwin, clienteId)
@@ -16341,6 +16562,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
          marketplace: "awin",
          titulo: oferta.titulo
        });
+       ignoradosSemDeeplink += 1;
        continue;
      }
 
@@ -16354,18 +16576,49 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
        : oferta;
 
      if (typeof ofertaJaExiste === "function" && ofertaJaExiste(ofertaFinal)) {
+       ignoradosDuplicados += 1;
        continue;
      }
 
      fila.push(ofertaFinal);
      adicionadasFila += 1;
+     if (chaveSimilar) similaresRodada.add(chaveSimilar);
+     if (categoriaOferta) categoriasRodada[categoriaOferta] = (categoriasRodada[categoriaOferta] || 0) + 1;
 
      if (typeof salvarFila === "function") {
        salvarFila(clienteId);
      }
    }
 
+    const motivosAwin = {
+      limite: ignoradosPorLimite,
+      parecidos: ignoradosParecidos,
+      sem_deeplink: ignoradosSemDeeplink,
+      duplicados: ignoradosDuplicados
+    };
+    const motivoPrincipalAwin = Object.entries(motivosAwin)
+      .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+      .find(([, total]) => Number(total || 0) > 0)?.[0] || "";
+
+    console.log("[AWIN-LIMITE-RODADA]", {
+      clienteId,
+      candidatos: ofertasEncontradas.length,
+      aprovados: ofertasOrdenadas.length,
+      adicionados: adicionadasFila,
+      limite: limitePorRodada,
+      ignoradosPorLimite,
+      motivoPrincipal: motivoPrincipalAwin || (adicionadasFila > 0 ? "" : "sem_candidato_aprovado")
+    });
+
     console.log(`[INFO] Awin finalizado. Produtos adicionados: ${adicionadasFila}`);
+
+    return {
+      produtosEncontrados: produtos.length,
+      ofertasMontadas: ofertasEncontradas.length,
+      aprovados: ofertasOrdenadas.length,
+      adicionados: adicionadasFila,
+      principalMotivoZero: motivoPrincipalAwin || (adicionadasFila > 0 ? "" : "sem_candidato_aprovado")
+    };
   } catch (e) {
     console.log("[ERRO]❌ erro farejador Awin:", e.message);
   }
