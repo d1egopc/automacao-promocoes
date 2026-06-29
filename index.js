@@ -8142,6 +8142,10 @@ function categoriaRadarReclassificada(oferta = {}) {
   }, oferta.titulo || oferta.nome || oferta.termo || "");
 }
 
+function categoriaDiversosRadar(valor = "") {
+  return normalizarTexto(valor || "") === "diversos";
+}
+
 function categoriaGenericaRadar(valor = "") {
   const texto = normalizarTexto(valor || "");
   return !texto ||
@@ -8172,23 +8176,79 @@ function tituloTextoRadarMl(oferta = {}) {
   return tituloGenericoMercadoLivreRadar(titulo) ? "" : titulo;
 }
 
-function categoriaManualTextoRadarMl(texto = "") {
+function categoriaManualTextoRadarMlDetalhada(texto = "") {
   const normalizado = normalizarTexto(texto || "");
 
-  if (/perfume|perfum|fragrancia|fragrancias|colonia|bodysplash|bodysplash|malbec|natura|boticario|eudora|rubyrose|ruby rose|protetorlabial|batom|lipbalm|lip balm|gloss|shampoo|condicionador|mascaracapilar|mascara capilar|kitcabelo|kit cabelo|cabelo|isima|skincare|hidratante|maquiagem/.test(normalizado)) {
-    return "Perfumaria, Farm\u00e1cia e Beleza";
+  const regras = [
+    {
+      regra: "games_console",
+      categoria: "Games e Console",
+      padrao: /gamepass|gpupass|xbox|playstation|dualsense|ps5|nintendo|ultimate/
+    },
+    {
+      regra: "esporte_suplementos",
+      categoria: "Esporte e Suplementos",
+      padrao: /whey|creatina|glutamine|pretreino|blackskull|fullcombat|fullshape|bcaa/
+    },
+    {
+      regra: "perfumaria_farmacia_beleza",
+      categoria: "Perfumaria, Farm\u00e1cia e Beleza",
+      padrao: /oralb|colgate|gillette|oneblade|philipsoneblade|lolacosmetics|shampoo|condicionador|leavein|argan|perfume|perfum|fragrancia|fragrancias|edt|eaudeparfum|colonia|nautica|bodysplash|malbec|natura|boticario|eudora|rubyrose|protetorlabial|batom|lipbalm|gloss|mascaracapilar|kitcabelo|cabelo|isima|skincare|hidratante|maquiagem/
+    },
+    {
+      regra: "alimentos_mercearia",
+      categoria: "Alimentos e Mercearia",
+      padrao: /heinz|ketchup|maionese|mostarda|ovomaltine|alpino|nestle|chocolate|achocolatado/
+    },
+    {
+      regra: "casa_moveis_decoracao",
+      categoria: "Casa, M\u00f3veis e Decora\u00e7\u00e3o",
+      padrao: /painel|madeira|mdf|ripado|cozinha|tigela|panela|cacarola|cadeira|mesa/
+    },
+    {
+      regra: "brinquedos_infantis",
+      categoria: "Brinquedos e Artigos Infantis",
+      padrao: /maquinadegarra|pelucia|brinquedo/
+    },
+    {
+      regra: "limpeza",
+      categoria: "Limpeza",
+      padrao: /zipclean|limpagordura|espumamagica|tiramanchas|alvejante/
+    },
+    {
+      regra: "ferramentas_jardim",
+      categoria: "Ferramentas",
+      padrao: /mangueira|mangueiramagica|expansivel|retratil|jardim|irrigacao|esguicho|lavadora|lavarcarro/
+    },
+    {
+      regra: "moda",
+      categoria: "Roupas e Moda Masculina",
+      padrao: /techtshirt|tshirt|longsleeve|mangalonga|camiseta|camisa|blusa|cropped|legging|calca|short|shorts|modafeminina|feminina|mulher/
+    }
+  ];
+
+  for (const regra of regras) {
+    if (!regra.padrao.test(normalizado)) continue;
+    if (regra.regra === "moda" && /feminina|mulher|cropped|legging|vestido|body/.test(normalizado)) {
+      return {
+        categoria: "Roupas e Moda Feminina",
+        regra: "moda_feminina"
+      };
+    }
+    return {
+      categoria: regra.categoria,
+      regra: regra.regra
+    };
   }
 
-  if (/mangueira|mangueiramagica|mangueira magica|expansivel|retratil|jardim|irrigacao|esguicho|lavadora|lavarcarro|lavar carro/.test(normalizado)) {
-    return "Ferramentas";
-  }
+  return {
+    categoria: "",
+    regra: ""
+  };
+}
 
-  if (/tech tshirt|tech t shirt|tshirt|t shirt|t-shirt|longsleeve|long sleeve|manga longa|camiseta|camisa|blusa|cropped|legging|calca|short|shorts|moda feminina|feminina|mulher/.test(normalizado)) {
-    if (/feminina|mulher|cropped|legging|vestido|body/.test(normalizado)) return "Roupas e Moda Feminina";
-    return "Roupas e Moda Masculina";
-  }
-
-  return "";
+function categoriaManualTextoRadarMl(texto = "") {
+  return categoriaManualTextoRadarMlDetalhada(texto).categoria;
 }
 
 function aplicarFallbackCategoriaRadarMl(oferta = {}, clienteId = "admin") {
@@ -8197,10 +8257,12 @@ function aplicarFallbackCategoriaRadarMl(oferta = {}, clienteId = "admin") {
 
   const tituloAntes = oferta.titulo || oferta.nome || "";
   const categoriaAntes = oferta.categoria || oferta.categoriaProduto || "";
+  if (!categoriaDiversosRadar(categoriaAntes)) return oferta;
+
   const textoRadar = textoCompletoRadarOferta(oferta);
   const tituloTexto = tituloTextoRadarMl(oferta);
   const precisaTitulo = tituloGenericoMercadoLivreRadar(tituloAntes);
-  const precisaCategoria = categoriaGenericaRadar(categoriaAntes);
+  const precisaCategoria = true;
   let tituloDepois = tituloAntes;
   let categoriaDepois = categoriaAntes;
   let motivo = "";
@@ -8216,7 +8278,8 @@ function aplicarFallbackCategoriaRadarMl(oferta = {}, clienteId = "admin") {
       tituloTexto,
       textoRadar
     ].filter(Boolean).join(" ");
-    const categoriaManual = categoriaManualTextoRadarMl(textoClassificacao);
+    const categoriaManualDetalhada = categoriaManualTextoRadarMlDetalhada(textoClassificacao);
+    const categoriaManual = categoriaManualDetalhada.categoria;
     const categoriaClassificada = categoriaManual || classificarCategoriaOferta({
       ...oferta,
       titulo: tituloDepois || tituloTexto || oferta.titulo || oferta.nome || "",
@@ -8228,7 +8291,7 @@ function aplicarFallbackCategoriaRadarMl(oferta = {}, clienteId = "admin") {
 
     if (!categoriaGenericaRadar(categoriaClassificada)) {
       categoriaDepois = categoriaClassificada;
-      motivo = motivo || "categoria_diversos_reclassificada";
+      motivo = categoriaManualDetalhada.regra || motivo || "categoria_diversos_reclassificada";
     }
   }
 
@@ -8243,11 +8306,14 @@ function aplicarFallbackCategoriaRadarMl(oferta = {}, clienteId = "admin") {
   if (usouTextoRadar || precisaTitulo || precisaCategoria) {
     console.log("[RADAR-CATEGORIA-FALLBACK]", {
       clienteId,
+      tituloImportador: tituloAntes,
+      tituloRadar: tituloTexto,
       tituloAntes,
       tituloDepois,
       categoriaAntes,
       categoriaDepois,
       usouTextoRadar,
+      regraAplicada: motivo || "sem_alteracao",
       motivo: motivo || "sem_alteracao"
     });
   }
