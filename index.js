@@ -9911,6 +9911,17 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
       }
     }
 
+    const textoRadarImportadorMl = String(contexto.textoOriginal || contexto.texto || contexto.mensagemOriginalRadar || "");
+
+    if (marketplaceDetectado === "mercadolivre") {
+      console.log("[RADAR-ML-CONTEXTO-IMPORTADOR]", {
+        temTextoRadar: Boolean(textoRadarImportadorMl.trim()),
+        tamanhoTextoRadar: textoRadarImportadorMl.length,
+        link: linkOriginalLimpo,
+        marketplace: marketplaceDetectado
+      });
+    }
+
     const resultado = await importarProdutoManual({
       clienteId: adminMasterId,
       headers: {},
@@ -9925,7 +9936,16 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
       importarAmazon,
       importarAliExpress,
       importarMagalu,
-      importarMercadoLivre,
+      importarMercadoLivre: (url, clienteIdAlvo, depsMl = {}) => importarMercadoLivre(url, clienteIdAlvo, {
+        ...depsMl,
+        contextoRadar: {
+          ...(depsMl.contextoRadar || {}),
+          textoOriginal: textoRadarImportadorMl,
+          mensagemOriginalRadar: textoRadarImportadorMl
+        },
+        textoOriginal: textoRadarImportadorMl,
+        mensagemOriginalRadar: textoRadarImportadorMl
+      }),
       importarShopee,
       gerarLinkAfiliadoMercadoLivre
     });
