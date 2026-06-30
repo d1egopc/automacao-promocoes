@@ -1197,6 +1197,19 @@ function obterEstrategiaFarejador(clienteId = "admin", marketplace = "", opcoes 
   return estrategia;
 }
 
+function farejadoresAutoDesativados() {
+  return String(process.env.DESATIVAR_FAREJADORES_AUTO || "").toLowerCase() === "true";
+}
+
+function logFarejadorAutoDesativado(marketplace = "", origem = "automatico", clienteId = "admin") {
+  console.log("[FAREJADORES-AUTO-DESATIVADOS]", {
+    marketplace: normalizarTexto(marketplace || "") || "todos",
+    origem,
+    clienteId: String(clienteId || "admin"),
+    motivo: "modo_radar_diagnostico"
+  });
+}
+
 async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
   const cliente = String(clienteId || "admin");
   const maximo = Math.max(0, Math.min(Number(limite) || 3, 3));
@@ -1223,6 +1236,13 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
 
   try {
     if (maximo <= 0) return resultado;
+
+    if (farejadoresAutoDesativados()) {
+      logFarejadorAutoDesativado("mercadolivre", "fila_inteligente", cliente);
+      resultado.erros.push("farejadores_auto_desativados");
+      resultado.statusEntradaFila = "bloqueada_antes_fila";
+      return resultado;
+    }
 
     if (!config.marketplaces?.mercadolivre?.ativo) {
       resultado.erros.push("mercadolivre_desativado");
@@ -16810,6 +16830,17 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
   } = deps;
 
   try {
+    if (farejadoresAutoDesativados()) {
+      logFarejadorAutoDesativado("awin", "farejador_awin", clienteId);
+      return {
+        produtosEncontrados: 0,
+        ofertasMontadas: 0,
+        aprovados: 0,
+        adicionados: 0,
+        principalMotivoZero: "farejadores_auto_desativados"
+      };
+    }
+
     console.log("[INFO] Farejando produtos reais Awin KaBuM...", {
       clienteId
     });
@@ -18524,6 +18555,11 @@ if (!admin) {
   console.log("[AVISO] Nenhum admin master encontrado. Farejador global bloqueado.");
   return;
 }
+
+  if (farejadoresAutoDesativados()) {
+    logFarejadorAutoDesativado(marketplace || "todos", opcoes.origem || "orquestrador", admin.id || "admin");
+    return;
+  }
 
   if (farejadorRodando) {
     logOptimus("INTELIGENCIA", "Farejador ja em execucao", {
