@@ -8679,7 +8679,11 @@ function detectarMarketplaceRadarLink(url = "") {
     return "shopee";
   }
 
-  if (urlLower.includes("go.promozone.ai/amazon") || urlLower.includes("promozone") && urlLower.includes("amazon")) {
+  if (
+    urlLower.includes("go.promozone.ai/amazon") ||
+    urlLower.includes("go.promozone.ai/amz/") ||
+    urlLower.includes("promozone") && (urlLower.includes("amazon") || urlLower.includes("/amz/"))
+  ) {
     return "amazon";
   }
 
@@ -9536,6 +9540,11 @@ function dominioRadar(url = "") {
   }
 }
 
+function linkPromozoneRadar(url = "") {
+  const host = dominioRadar(url).replace(/^www\./, "");
+  return host === "go.promozone.ai" || host.endsWith(".go.promozone.ai");
+}
+
 function linkMeliLaRadar(url = "") {
   const host = dominioRadar(url).replace(/^www\./, "");
   return host === "meli.la" || host.endsWith(".meli.la");
@@ -9587,6 +9596,15 @@ function logRedirectRadar(dados = {}) {
   });
 }
 
+function logPromozoneRadar(dados = {}) {
+  console.log("[RADAR-PROMOZONE]", {
+    urlOriginal: dados.urlOriginal || "",
+    urlResolvida: dados.urlResolvida || "",
+    marketplaceDetectado: dados.marketplaceDetectado || "",
+    redirectOk: dados.redirectOk === true
+  });
+}
+
 async function resolverLinkOriginalRadar(url = "") {
   const capturada = limparLinkRadar(url);
   const dominioOriginal = dominioRadar(capturada);
@@ -9618,6 +9636,127 @@ async function resolverLinkOriginalRadar(url = "") {
   }
 
   const marketplaceDireto = dominioMarketplaceConhecidoRadar(capturada);
+
+  if (linkPromozoneRadar(capturada)) {
+    const marketplacePromozoneSugerido = normalizarMarketplaceRadar(detectarMarketplaceRadarLink(capturada));
+
+    try {
+      const resposta = await axios.get(capturada, {
+        maxRedirects: 5,
+        timeout: 4500,
+        validateStatus: () => true,
+        responseType: "stream",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+        }
+      });
+
+      if (resposta.data?.destroy) resposta.data.destroy();
+
+      const resolvida =
+        resposta?.request?.res?.responseUrl ||
+        resposta?.request?._redirectable?._currentUrl ||
+        capturada;
+      const dominioFinal = dominioRadar(resolvida);
+      const marketplaceFinal =
+        dominioMarketplaceConhecidoRadar(resolvida) ||
+        normalizarMarketplaceRadar(detectarMarketplaceRadarLink(resolvida));
+
+      if (!marketplaceFinal || resolvida === capturada) {
+        logPromozoneRadar({
+          urlOriginal: capturada,
+          urlResolvida: resolvida || "",
+          marketplaceDetectado: marketplaceFinal || marketplacePromozoneSugerido || "",
+          redirectOk: false
+        });
+
+        logRedirectRadar({
+          urlOriginal: capturada,
+          urlFinal: resolvida || "",
+          dominioOriginal,
+          dominioFinal,
+          marketplaceDetectado: marketplaceFinal || marketplacePromozoneSugerido || "",
+          resolveu: false,
+          motivo: "promozone_redirect_nao_resolvido"
+        });
+
+        return {
+          ok: false,
+          motivo: "promozone_redirect_nao_resolvido",
+          motivoTecnico: "promozone_redirect_nao_resolvido",
+          urlCapturada: capturada,
+          urlResolvida: resolvida || "",
+          linkOriginalRadar: capturada,
+          linkResolvido: resolvida || "",
+          marketplaceReal: marketplaceFinal || marketplacePromozoneSugerido || "",
+          tipoLinkRadar: "promozone",
+          statusHttp: resposta.status || ""
+        };
+      }
+
+      const linkOriginalLimpo = limparUrlProdutoRadar(resolvida, marketplaceFinal) || resolvida;
+
+      logPromozoneRadar({
+        urlOriginal: capturada,
+        urlResolvida: resolvida,
+        marketplaceDetectado: marketplaceFinal,
+        redirectOk: true
+      });
+
+      logRedirectRadar({
+        urlOriginal: capturada,
+        urlFinal: resolvida,
+        dominioOriginal,
+        dominioFinal,
+        marketplaceDetectado: marketplaceFinal,
+        resolveu: true,
+        motivo: "promozone_resolvido_marketplace"
+      });
+
+      return {
+        ok: true,
+        urlCapturada: capturada,
+        urlResolvida: resolvida,
+        linkOriginalRadar: capturada,
+        linkResolvido: linkOriginalLimpo,
+        marketplaceReal: marketplaceFinal,
+        linkOriginalLimpo,
+        tipoLinkRadar: "promozone",
+        statusHttp: resposta.status || ""
+      };
+    } catch (e) {
+      logPromozoneRadar({
+        urlOriginal: capturada,
+        urlResolvida: "",
+        marketplaceDetectado: marketplacePromozoneSugerido || "",
+        redirectOk: false
+      });
+
+      logRedirectRadar({
+        urlOriginal: capturada,
+        urlFinal: "",
+        dominioOriginal,
+        dominioFinal: "",
+        marketplaceDetectado: marketplacePromozoneSugerido || "",
+        resolveu: false,
+        motivo: e.message || "promozone_redirect_bloqueado"
+      });
+
+      return {
+        ok: false,
+        motivo: "promozone_redirect_bloqueado",
+        motivoTecnico: "promozone_redirect_bloqueado",
+        urlCapturada: capturada,
+        linkOriginalRadar: capturada,
+        linkResolvido: "",
+        marketplaceReal: marketplacePromozoneSugerido || "",
+        tipoLinkRadar: "promozone",
+        erro: e.message
+      };
+    }
+  }
 
   if (linkMeliLaRadar(capturada)) {
     try {
