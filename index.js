@@ -1202,13 +1202,80 @@ function farejadoresAutoDesativados() {
   return !["false", "0", "off", "nao", "no"].includes(valor);
 }
 
-function logFarejadorAutoDesativado(marketplace = "", origem = "automatico", clienteId = "admin") {
+function logFarejadorAutoDesativado(marketplace = "", origem = "automatico", clienteId = "admin", detalhes = {}) {
+  const marketplaceLog = String(marketplace || "").trim();
+
   console.log("[FAREJADORES-AUTO-DESATIVADOS]", {
-    marketplace: normalizarTexto(marketplace || "") || "todos",
+    marketplace: marketplaceLog || normalizarTexto(marketplace || "") || "todos",
     origem,
     clienteId: String(clienteId || "admin"),
+    titulo: detalhes.titulo || detalhes.nome || "",
     motivo: "modo_radar_diagnostico"
   });
+}
+
+function ofertaAwinKabum(oferta = {}) {
+  const marketplace = normalizarTexto(oferta.marketplace || oferta.mercado || "");
+  const loja = normalizarTexto(oferta.loja || oferta.seller || "");
+  return marketplace === "awin" ||
+    marketplace === "kabum" ||
+    loja === "kabum";
+}
+
+function origemAutomaticaAwinKabum(oferta = {}, origem = "") {
+  const origemTexto = normalizarTexto(origem || oferta.origem || oferta.fonte || oferta.origemLabel || "");
+  if (origemTexto.includes("manual")) return false;
+  if (origemTexto.includes("radar")) return false;
+  return true;
+}
+
+function logAwinEntradaFilaDebug({
+  clienteId = "admin",
+  oferta = {},
+  origem = "",
+  permitido = false,
+  motivo = ""
+} = {}) {
+  if (!ofertaAwinKabum(oferta)) return;
+
+  console.log("[AWIN-ENTRADA-FILA-DEBUG]", {
+    clienteId: String(clienteId || oferta.clienteId || "admin"),
+    titulo: oferta.titulo || oferta.nome || "",
+    marketplace: oferta.marketplace || oferta.mercado || "",
+    origem: origem || oferta.origem || oferta.fonte || "",
+    origemAutomatica: origemAutomaticaAwinKabum(oferta, origem),
+    permitido,
+    motivo
+  });
+}
+
+function bloquearAwinKabumAutoNaFila(oferta = {}, origem = "automatico", clienteId = "admin") {
+  if (!ofertaAwinKabum(oferta)) return false;
+
+  const automatica = origemAutomaticaAwinKabum(oferta, origem);
+  const bloqueada = automatica && farejadoresAutoDesativados();
+  const motivo = bloqueada
+    ? "modo_radar_diagnostico"
+    : automatica
+      ? "automatico_permitido"
+      : "origem_manual_ou_radar";
+
+  logAwinEntradaFilaDebug({
+    clienteId,
+    oferta,
+    origem,
+    permitido: !bloqueada,
+    motivo
+  });
+
+  if (bloqueada) {
+    logFarejadorAutoDesativado("awin/kabum", origem, clienteId, {
+      titulo: oferta.titulo || oferta.nome || ""
+    });
+    return true;
+  }
+
+  return false;
 }
 
 async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
@@ -14554,6 +14621,13 @@ async function importarKabumManualRequest(req, res, opcoes = {}) {
       const adicionou = adicionarOfertaNaFila(fila, novaOferta, "manual-kabum-awin");
 
       if (adicionou) {
+        logAwinEntradaFilaDebug({
+          clienteId,
+          oferta: novaOferta,
+          origem: "manual-kabum-awin",
+          permitido: true,
+          motivo: "origem_manual_ou_radar"
+        });
         logPrioridadeFila(novaOferta);
         salvarFila(clienteId);
       }
@@ -16631,6 +16705,11 @@ if (reterShopeePrecoSuspeitoSeNecessario(ofertaCliente)) {
   continue;
 }
 
+const origemEntradaFila = ofertaCliente.origem || ofertaBase.origem || ofertaCliente.fonte || ofertaBase.fonte || "distribuidor";
+if (bloquearAwinKabumAutoNaFila(ofertaCliente, origemEntradaFila, clienteId)) {
+  continue;
+}
+
 registrarOfertaVista(ofertaCliente);
 
 logPrioridadeFila(ofertaCliente);
@@ -17357,6 +17436,10 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
 
      if (typeof ofertaJaExiste === "function" && ofertaJaExiste(ofertaFinal)) {
        ignoradosDuplicados += 1;
+       continue;
+     }
+
+     if (bloquearAwinKabumAutoNaFila(ofertaFinal, "feed_awin", clienteId)) {
        continue;
      }
 
@@ -19018,6 +19101,8 @@ const retornoFarejador = await farejador(clienteId, {
   gerarDeepLinkAwin: (url, clienteIdAlvo = clienteId) =>
     gerarDeepLinkAwin(url, clienteIdAlvo || clienteId),
   importarProdutoKabumViaAwin,
+  bloquearAwinKabumAutoNaFila,
+  logAwinEntradaFilaDebug,
 
 });
 
