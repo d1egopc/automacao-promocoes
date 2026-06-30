@@ -10473,6 +10473,94 @@ function resumirResultadosRadarMensagem(resultados = []) {
   return resumo;
 }
 
+const RADAR_MARKETPLACE_JANELA_PADRAO_MIN = 120;
+const radarMarketplaceEventos = [];
+
+function normalizarMarketplaceResumoRadar(marketplace = "") {
+  const mp = normalizarTexto(marketplace || "");
+  if (mp === "ml" || mp === "mercadolivre" || mp === "mercadolivrebr" || mp === "mercadolivrecombr") return "mercadolivre";
+  if (mp === "meli" || mp === "melila") return "mercadolivre";
+  return mp || "desconhecido";
+}
+
+function marketplaceResumoRadarDoLink(link = "") {
+  const direto = detectarMarketplaceRadarLink(link);
+  if (direto) return normalizarMarketplaceResumoRadar(direto);
+  if (/meli\.la/i.test(String(link || ""))) return "mercadolivre";
+  if (/mercadolivre\.com\.br/i.test(String(link || ""))) return "mercadolivre";
+  return "desconhecido";
+}
+
+function classificarMotivoResumoMarketplaceRadar(motivo = "") {
+  const texto = normalizarTexto(motivo || "");
+  if (!texto) return "outros";
+  if (/duplicad|repetid|jaexiste|existe/.test(texto)) return "duplicidade";
+  if (/memoria/.test(texto)) return "memoria";
+  if (/categoria/.test(texto)) return "categoria";
+  if (/destino/.test(texto)) return "destino";
+  if (/integracao|credencial|cookie|semcredencial/.test(texto)) return "integracao";
+  if (/sempreco|precoausente|importacaosempreco/.test(texto)) return "importacao_sem_preco";
+  if (/afiliado|deeplink|linkcliente|linkigualoriginal|semlinkafiliado/.test(texto)) return "erro_de_afiliado";
+  if (/importacao|importador/.test(texto)) return "importacao";
+  return "outros";
+}
+
+function registrarRadarMarketplaceEvento(evento = {}) {
+  const agora = Date.now();
+  const item = {
+    em: agora,
+    marketplace: normalizarMarketplaceResumoRadar(evento.marketplace || ""),
+    capturado: evento.capturado === true,
+    redirectOk: evento.redirectOk === true,
+    importadorChamado: evento.importadorChamado === true,
+    importado: evento.importado === true,
+    aprovado: evento.aprovado === true,
+    adicionadoFila: evento.adicionadoFila === true,
+    motivo: evento.motivo || ""
+  };
+
+  radarMarketplaceEventos.push(item);
+
+  const limite = agora - RADAR_MARKETPLACE_JANELA_PADRAO_MIN * 60 * 1000;
+  while (radarMarketplaceEventos.length && radarMarketplaceEventos[0].em < limite) {
+    radarMarketplaceEventos.shift();
+  }
+
+  return item;
+}
+
+function logarResumoRadarMarketplace(marketplaces = [], janelaMinutos = RADAR_MARKETPLACE_JANELA_PADRAO_MIN) {
+  const agora = Date.now();
+  const limite = agora - Math.max(1, Number(janelaMinutos) || RADAR_MARKETPLACE_JANELA_PADRAO_MIN) * 60 * 1000;
+  const lista = [...new Set(marketplaces.map(normalizarMarketplaceResumoRadar).filter(Boolean))];
+
+  for (const marketplace of lista) {
+    const eventos = radarMarketplaceEventos.filter(evento =>
+      evento.em >= limite &&
+      evento.marketplace === marketplace
+    );
+    const recusasPorMotivo = {};
+
+    for (const evento of eventos) {
+      if (evento.adicionadoFila) continue;
+      const motivo = classificarMotivoResumoMarketplaceRadar(evento.motivo || "");
+      recusasPorMotivo[motivo] = (recusasPorMotivo[motivo] || 0) + 1;
+    }
+
+    console.log("[RADAR-MARKETPLACE-RESUMO]", {
+      janelaMinutos,
+      marketplace,
+      capturados: eventos.filter(evento => evento.capturado).length,
+      redirectOk: eventos.filter(evento => evento.redirectOk).length,
+      importadorChamado: eventos.filter(evento => evento.importadorChamado).length,
+      importados: eventos.filter(evento => evento.importado).length,
+      aprovados: eventos.filter(evento => evento.aprovado).length,
+      adicionadosFila: eventos.filter(evento => evento.adicionadoFila).length,
+      recusasPorMotivo
+    });
+  }
+}
+
 async function processarMensagemRadar({
   origemTipo,
   sessaoId,
@@ -10620,11 +10708,15 @@ logDebug("🧪 RADAR LINKS EXTRAIDOS", {
     return capturaPermitida;
   }
   const resultados = [];
+  const marketplacesResumoRadar = new Set();
   const dataCaptura = capturadaEm || new Date().toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo"
   });
 
   for (const link of links) {
+    const marketplaceInicialResumo = marketplaceResumoRadarDoLink(link);
+    marketplacesResumoRadar.add(marketplaceInicialResumo);
+
     logOptimus("RADAR", "Link capturado", {
       url: link,
       grupo: grupoNomeTexto || grupoIdTexto
@@ -10666,6 +10758,11 @@ logDebug("🧪 RADAR LINKS EXTRAIDOS", {
         urlResolvida: "",
         linksDetectados: 1
       });
+      registrarRadarMarketplaceEvento({
+        marketplace: detectarMarketplaceRadarLink(link) || marketplaceInicialResumo,
+        capturado: true,
+        motivo: temOutroLinkProduto ? "link_resgate_cupom_detectado" : "link_resgate_cupom_sem_produto"
+      });
       logOptimus("CUPOM", "Link de resgate detectado", {
         link,
         tipoCupom: "resgate",
@@ -10682,6 +10779,12 @@ logDebug("🧪 RADAR LINKS EXTRAIDOS", {
       textoOriginal: texto,
       raw
     });
+    const marketplaceImportacaoResumo = normalizarMarketplaceResumoRadar(
+      importacao.resolucao?.marketplaceReal ||
+      importacao.oferta?.marketplace ||
+      marketplaceInicialResumo
+    );
+    marketplacesResumoRadar.add(marketplaceImportacaoResumo);
 
     if (!importacao.ok) {
       logOptimus("RADAR", "Importacao falhou", {
@@ -10745,6 +10848,13 @@ logDebug("🧪 RADAR LINKS EXTRAIDOS", {
         motivo: importacao.motivo || "importacao_falhou",
         linksDetectados: 1
       });
+      registrarRadarMarketplaceEvento({
+        marketplace: marketplaceImportacaoResumo,
+        capturado: true,
+        redirectOk: importacao.resolucao?.ok === true || Boolean(importacao.resolucao?.urlResolvida),
+        importadorChamado: importacao.resolucao?.ok === true,
+        motivo: importacao.motivoTecnico || importacao.motivo || "importacao_falhou"
+      });
       resultados.push({ link, ok: false, motivo: importacao.motivo });
       continue;
     }
@@ -10806,6 +10916,7 @@ logDebug("🧪 RADAR LINKS EXTRAIDOS", {
     const adicionadasLink = clientes.filter(cliente => cliente.adicionada).length;
     const houveRetidaDestino = clientes.some(cliente => cliente.retida);
     const primeiraRejeicao = clientes.find(cliente => !cliente.adicionada)?.motivo || "";
+    const aprovadoLink = clientes.some(cliente => cliente.ok === true || cliente.adicionada === true);
     const beneficio = beneficioResumoRadar(ofertaRadar);
     const economiaRadar = calcularEconomiaRadar(ofertaRadar);
     const clienteIdsAdicionados = clientes
@@ -10877,6 +10988,16 @@ logDebug("🧪 RADAR LINKS EXTRAIDOS", {
       clienteIdsAdicionados,
       clientesAdicionados
     });
+    registrarRadarMarketplaceEvento({
+      marketplace: ofertaRadar.marketplace || marketplaceImportacaoResumo,
+      capturado: true,
+      redirectOk: importacao.resolucao?.ok === true || Boolean(importacao.resolucao?.urlResolvida),
+      importadorChamado: importacao.resolucao?.ok === true,
+      importado: Boolean(ofertaRadar.titulo || ofertaRadar.nome) && Boolean(ofertaRadar.precoAtual || ofertaRadar.preco),
+      aprovado: aprovadoLink,
+      adicionadoFila: adicionadasLink > 0,
+      motivo: adicionadasLink > 0 ? "" : primeiraRejeicao || "nenhum_cliente_adicionado"
+    });
 
     resultados.push({
       link,
@@ -10897,6 +11018,7 @@ logDebug("🧪 RADAR LINKS EXTRAIDOS", {
       links: links.length,
       ...resumoRodada
     });
+    logarResumoRadarMarketplace([...marketplacesResumoRadar]);
     console.log("[RADAR] Mensagem monitorada processada:", {
       origemTipo: origemTipoFinal,
       sessaoId: sessaoIdTexto,
@@ -16711,7 +16833,36 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
       return;
     }
 
-    const limitePorRodada = Math.min(3, Number(cfg.limitePorRodada || 3) || 3);
+    const itensClienteAwin = Array.isArray(fila)
+      ? fila.filter(item => String(item?.clienteId || "admin") === String(clienteId || "admin"))
+      : [];
+    const pendentesClienteAwin = itensClienteAwin.filter(item => String(item?.status || "") === "pendente").length;
+    const pendentesAwin = itensClienteAwin.filter(item =>
+      String(item?.status || "") === "pendente" &&
+      normalizarTexto(item?.marketplace || item?.mercado || "") === "awin"
+    ).length;
+    const limiteAwinPendente = pendentesClienteAwin < 10
+      ? Math.max(0, 2 - pendentesAwin)
+      : 0;
+
+    if (limiteAwinPendente <= 0) {
+      console.log("[AWIN-FALLBACK-LIMITE]", {
+        clienteId,
+        pendentesCliente: pendentesClienteAwin,
+        pendentesAwin,
+        limiteAwinPendente: 2,
+        motivo: pendentesAwin >= 2 ? "limite_awin_pendente" : "fila_nao_precisa_fallback_awin"
+      });
+      return {
+        produtosEncontrados: 0,
+        ofertasMontadas: 0,
+        aprovados: 0,
+        adicionados: 0,
+        principalMotivoZero: pendentesAwin >= 2 ? "limite_awin_pendente" : "fila_nao_precisa_fallback_awin"
+      };
+    }
+
+    const limitePorRodada = Math.min(3, Number(cfg.limitePorRodada || 3) || 3, limiteAwinPendente);
     const limiteCandidatosAwin = Math.max(30, limitePorRodada * 12);
     const precoMinimo = cfg.precoMinimo || 20;
     const feedFile = cfg.feedFile || "awin_kabum.csv";
