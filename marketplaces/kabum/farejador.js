@@ -23,7 +23,9 @@ async function farejarKabum(clienteId = "admin", deps = {}) {
     gerarHeadersStealth,
     encurtarUrl,
     gerarDeepLinkAwin,
-    importarProdutoKabumViaAwin
+    importarProdutoKabumViaAwin,
+    bloquearAwinKabumAutoNaFila,
+    logAwinEntradaFilaDebug
   } = deps;
 
   try {
@@ -267,6 +269,23 @@ if (!jaExisteKabum) {
   novaOferta.statusDetalhe = novaOferta.statusDetalhe || "Na fila";
 
   registrarOfertaVista(novaOferta);
+
+  if (
+    typeof bloquearAwinKabumAutoNaFila === "function" &&
+    bloquearAwinKabumAutoNaFila(novaOferta, "farejador_kabum", clienteId)
+  ) {
+    continue;
+  }
+
+  if (typeof logAwinEntradaFilaDebug === "function") {
+    logAwinEntradaFilaDebug({
+      clienteId,
+      oferta: novaOferta,
+      origem: "farejador_kabum",
+      permitido: true,
+      motivo: "automatico_permitido"
+    });
+  }
 
   fila.push(novaOferta);
 
