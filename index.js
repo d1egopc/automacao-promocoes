@@ -2467,19 +2467,74 @@ function dataMsDuplicidadeRadar(valor = "") {
 
 function itemFilaBloqueiaDuplicidadeRadar(item = {}) {
   const status = normalizarTexto(item.status || item.statusRadar || "");
-  if (status === "pendente") return true;
+  return [
+    "pendente",
+    "enviado",
+    "enviada",
+    "erro",
+    "processando",
+    "agendado",
+    "agendada"
+  ].includes(status);
+}
 
-  if (status !== "enviado" && status !== "enviada") return false;
+function mesmoRegistroRadarDuplicidade(item = {}, oferta = {}) {
+  const idsItem = [item.id, item._id, item.codigo, item.uuid].filter(Boolean).map(String);
+  const idsOferta = [oferta.id, oferta._id, oferta.codigo, oferta.uuid].filter(Boolean).map(String);
 
-  const data = dataMsDuplicidadeRadar(
-    item.enviadoEm ||
-    item.dataEnvio ||
-    item.dataEntradaFila ||
-    item.criadoEm ||
-    ""
-  );
+  return idsItem.length > 0 && idsOferta.length > 0 && idsItem.some(id => idsOferta.includes(id));
+}
 
-  return data > 0 && Date.now() - data <= 24 * 60 * 60 * 1000;
+function motivoDuplicidadeRadarItem(item = {}, oferta = {}, contexto = {}) {
+  const linksNovos = contexto.linksNovos || linksDuplicidadeRadar(oferta);
+  const tituloNovo = contexto.tituloNovo || normalizarTexto(oferta.titulo || oferta.nome || "");
+  const marketplaceNovo = contexto.marketplaceNovo || normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || "");
+  const faixaPrecoNova = contexto.faixaPrecoNova || faixaPrecoDuplicidadeRadar(oferta);
+
+  const linksExistentes = linksDuplicidadeRadar(item);
+  if (linksNovos.some(link => linksExistentes.includes(link))) {
+    return "mesmo_link";
+  }
+
+  const tituloExistente = normalizarTexto(item.titulo || item.nome || "");
+  const marketplaceExistente = normalizarMarketplaceRadar(item.marketplace || item.mercado || "");
+  const faixaPrecoExistente = faixaPrecoDuplicidadeRadar(item);
+
+  if (
+    tituloNovo &&
+    tituloExistente &&
+    tituloNovo === tituloExistente &&
+    marketplaceNovo &&
+    marketplaceExistente &&
+    marketplaceNovo === marketplaceExistente &&
+    faixaPrecoNova &&
+    faixaPrecoExistente &&
+    faixaPrecoNova === faixaPrecoExistente
+  ) {
+    return "mesmo_titulo_marketplace_faixa_preco";
+  }
+
+  return "";
+}
+
+function logDecisaoDuplicidadeRadar({
+  clienteId = "admin",
+  oferta = {},
+  linkNormalizado = "",
+  encontrouDuplicada = false,
+  statusDuplicada = "",
+  motivoDuplicidade = "",
+  bloqueou = false
+} = {}) {
+  console.log("[RADAR-DUPLICIDADE-DECISAO]", {
+    clienteId,
+    titulo: oferta.titulo || oferta.nome || "",
+    linkNormalizado,
+    encontrouDuplicada,
+    statusDuplicada,
+    motivoDuplicidade,
+    bloqueou
+  });
 }
 
 function duplicidadeRadarNaFilaCliente(oferta = {}, clienteId = "admin") {
@@ -2489,14 +2544,23 @@ function duplicidadeRadarNaFilaCliente(oferta = {}, clienteId = "admin") {
   const marketplaceNovo = normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || "");
   const faixaPrecoNova = faixaPrecoDuplicidadeRadar(oferta);
 
+  const contextoDuplicidade = {
+    linksNovos,
+    tituloNovo,
+    marketplaceNovo,
+    faixaPrecoNova
+  };
+  const linkNormalizado = linksNovos[0] || "";
+
   for (const item of fila) {
     if (String(item.clienteId || "admin") !== cliente) continue;
+    if (mesmoRegistroRadarDuplicidade(item, oferta)) continue;
 
     const status = normalizarTexto(item.status || item.statusRadar || "");
     if (status !== "retida") continue;
 
-    const linksExistentes = linksDuplicidadeRadar(item);
-    if (!linksNovos.some(link => linksExistentes.includes(link))) continue;
+    const motivoRetida = motivoDuplicidadeRadarItem(item, oferta, contextoDuplicidade);
+    if (!motivoRetida) continue;
 
     console.log("[RADAR-DUPLICIDADE-RETIDA-IGNORADA]", {
       clienteId: cliente,
@@ -2509,34 +2573,37 @@ function duplicidadeRadarNaFilaCliente(oferta = {}, clienteId = "admin") {
 
   const itensCliente = fila.filter(item =>
     String(item.clienteId || "admin") === cliente &&
+    !mesmoRegistroRadarDuplicidade(item, oferta) &&
     itemFilaBloqueiaDuplicidadeRadar(item)
   );
 
   for (const item of itensCliente) {
-    const linksExistentes = linksDuplicidadeRadar(item);
+    const motivoDuplicidade = motivoDuplicidadeRadarItem(item, oferta, contextoDuplicidade);
 
-    if (linksNovos.some(link => linksExistentes.includes(link))) {
-      return { duplicada: true, motivo: "mesmo_link" };
-    }
-
-    const tituloExistente = normalizarTexto(item.titulo || item.nome || "");
-    const marketplaceExistente = normalizarMarketplaceRadar(item.marketplace || item.mercado || "");
-    const faixaPrecoExistente = faixaPrecoDuplicidadeRadar(item);
-
-    if (
-      tituloNovo &&
-      tituloExistente &&
-      tituloNovo === tituloExistente &&
-      marketplaceNovo &&
-      marketplaceExistente &&
-      marketplaceNovo === marketplaceExistente &&
-      faixaPrecoNova &&
-      faixaPrecoExistente &&
-      faixaPrecoNova === faixaPrecoExistente
-    ) {
-      return { duplicada: true, motivo: "mesmo_titulo_marketplace_faixa_preco" };
+    if (motivoDuplicidade) {
+      const statusDuplicada = normalizarTexto(item.status || item.statusRadar || "");
+      logDecisaoDuplicidadeRadar({
+        clienteId: cliente,
+        oferta,
+        linkNormalizado,
+        encontrouDuplicada: true,
+        statusDuplicada,
+        motivoDuplicidade,
+        bloqueou: true
+      });
+      return { duplicada: true, motivo: motivoDuplicidade, statusDuplicada };
     }
   }
+
+  logDecisaoDuplicidadeRadar({
+    clienteId: cliente,
+    oferta,
+    linkNormalizado,
+    encontrouDuplicada: false,
+    statusDuplicada: "",
+    motivoDuplicidade: "",
+    bloqueou: false
+  });
 
   return { duplicada: false, motivo: "" };
 }
