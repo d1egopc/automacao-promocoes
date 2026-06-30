@@ -1,24 +1,25 @@
 {
-  "name": "whatsapp-api",
-  "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js",
-    "test:radar-cupom": "node tests/radar-cupom-mensagem.test.js"
-  },
-  "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.7",
-    "bcryptjs": "^2.4.3",
-    "cors": "^2.8.5",
-    "csv-parser": "^3.2.1",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "express-rate-limit": "^7.2.0",
-    "helmet": "^7.1.0",
-    "jsonwebtoken": "^9.0.2",
-    "node-cron": "^3.0.3",
-    "pino": "^9.3.2",
-    "qrcode": "^1.5.4",
-    "sharp": "^0.35.1"
-  }
+    "name":  "whatsapp-api",
+    "version":  "1.0.0",
+    "main":  "index.js",
+    "scripts":  {
+                    "start":  "node index.js",
+                    "test:radar-cupom":  "node tests/radar-cupom-mensagem.test.js"
+                },
+    "dependencies":  {
+                         "@whiskeysockets/baileys":  "^6.7.7",
+                         "bcryptjs":  "^2.4.3",
+                         "cors":  "^2.8.5",
+                         "csv-parser":  "^3.2.1",
+                         "dotenv":  "^16.4.5",
+                         "express":  "^4.19.2",
+                         "express-rate-limit":  "^7.2.0",
+                         "helmet":  "^7.1.0",
+                         "jsonwebtoken":  "^9.0.2",
+                         "node-cron":  "^3.0.3",
+                         "pino":  "^9.3.2",
+                         "qrcode":  "^1.5.4",
+                         "sharp":  "^0.35.1",
+                         "pg":  "^8.12.0"
+                     }
 }
