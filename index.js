@@ -1,9 +1,14 @@
-
+﻿
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 const csv = require("csv-parser");
 const zlib = require("zlib");
+
+const {
+  initEngineDatabase,
+  registrarEventoBruto
+} = require("./modules/engine");
 
 const {
   farejarMercadoLivre: farejarMercadoLivreModulo,
@@ -450,7 +455,7 @@ function logRadarBloqueadoMonitoramento(dados = {}) {
   const chave = `radar-bloqueado:${sessaoId}:${grupoId}`;
   if (!deveLogarThrottle(chave)) return;
 
-  console.log("🚫 Radar bloqueado por configuração", evento);
+  console.log("ðŸš« Radar bloqueado por configuraÃ§Ã£o", evento);
 }
 
 if (!fs.existsSync("/data")) {
@@ -735,7 +740,7 @@ function restaurarBrandingOficial() {
   return padrao;
 }
 
-console.log("[OK]📂Salvando dados em:", FILA_FILE);
+console.log("[OK]ðŸ“‚Salvando dados em:", FILA_FILE);
 
 function gerarChaveProduto(titulo = "") {
   return String(titulo)
@@ -1043,7 +1048,7 @@ function marcarOfertaExpirada(oferta = {}) {
   oferta.statusDetalhe = "Oferta/cupom expirado antes do envio";
   oferta.expiradaEm = new Date().toISOString();
 
-  console.log("⏰ OFERTA EXPIRADA:", {
+  console.log("â° OFERTA EXPIRADA:", {
     titulo: oferta.titulo || oferta.nome || "",
     expiraEm: oferta.expiraEm || ""
   });
@@ -1101,7 +1106,7 @@ if (pendentes <= 20) {
 }
 
   console.log(
-    `🧠 FILA IA: cliente ${cliente} pendentes ${pendentes} status ${status} deveAbastecer ${deveAbastecer}`
+    `ðŸ§  FILA IA: cliente ${cliente} pendentes ${pendentes} status ${status} deveAbastecer ${deveAbastecer}`
   );
 
   return {
@@ -1483,7 +1488,7 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
     }
 
     console.log(
-      `🧠 FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo real`
+      `ðŸ§  FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo real`
     );
 
     return {
@@ -1500,7 +1505,7 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
   }
 
   console.log(
-    `🧠 FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo simulado`
+    `ðŸ§  FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo simulado`
   );
 
   return {
@@ -1664,7 +1669,7 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
   diagnosticosFilaPorCliente.set(clienteLog, diagnostico);
 
   if (deveLogarThrottle(`fila-diagnostico:${clienteLog}`)) {
-    console.log("🧠 Diagnóstico da fila", diagnostico);
+    console.log("ðŸ§  DiagnÃ³stico da fila", diagnostico);
   }
 
   const pendentes = fila.filter(o => {
@@ -1711,7 +1716,7 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
   diagnosticosFilaPorCliente.set(clienteLog, diagnosticoSemElegivel);
 
   if (deveLogarThrottle(`fila-sem-elegivel:${clienteLog}`)) {
-    console.log("🚨 Fila sem oferta elegível", diagnosticoSemElegivel);
+    console.log("ðŸš¨ Fila sem oferta elegÃ­vel", diagnosticoSemElegivel);
   }
 
   return null;
@@ -1819,7 +1824,7 @@ function carregarSessoesMeta() {
 
     console.log("[OK] Sesses meta carregadas:", Object.keys(sessoesMeta).length);
   } catch (e) {
-    console.log("[ERRO]❌Erro ao carregar sesses meta:", e.message);
+    console.log("[ERRO]âŒErro ao carregar sesses meta:", e.message);
     sessoesMeta = {};
   }
 }
@@ -1881,7 +1886,7 @@ function renovarCreditosSeNecessario(usuario) {
   });
 }
 
-// ================ FUNCAO USUARIO TEM CRÃ‰DITO ==================
+// ================ FUNCAO USUARIO TEM CRÃƒâ€°DITO ==================
 
 function usuarioTemCreditos(clienteId, quantidade = 1) {
   const usuario = obterUsuario(clienteId);
@@ -1940,9 +1945,9 @@ function salvarConfig() {
   try {
     writeGlobalJson("config.json", config);
 
-    console.log("[OK]💾 Config salva");
+    console.log("[OK]ðŸ’¾ Config salva");
   } catch (e) {
-    console.error("[ERRO]❌ ERRO AO SALVAR CONFIG:", e.message);
+    console.error("[ERRO]âŒ ERRO AO SALVAR CONFIG:", e.message);
   }
 }
 
@@ -2145,10 +2150,10 @@ function criarPlanosPadrao() {
 
   salvarPlanos();
 
-  console.log("[OK]✅ Planos padro criados");
+  console.log("[OK]âœ… Planos padro criados");
 }
 
-// ================= FUNÃ‡ÃƒO CARREGA CONFIG =================
+// ================= FUNÃƒâ€¡ÃƒÆ’O CARREGA CONFIG =================
 
 function carregarConfig() {
   try {
@@ -2164,14 +2169,14 @@ function carregarConfig() {
         }
       };
 
-      console.log("[OK]✅ Config carregada");
+      console.log("[OK]âœ… Config carregada");
     }
 
          
 usuarios = readGlobalJson("usuarios.json", []);
 
 if (Array.isArray(usuarios) && usuarios.length) {
-  console.log("[OK]✅ Usurios carregados");
+  console.log("[OK]âœ… Usurios carregados");
 }
 
 integracoesPorCliente = carregarMapaClientesJson(
@@ -2180,7 +2185,7 @@ integracoesPorCliente = carregarMapaClientesJson(
 );
 
 if (integracoesPorCliente && Object.keys(integracoesPorCliente).length) {
-  console.log("[OK]✅ Integraes carregadas");
+  console.log("[OK]âœ… Integraes carregadas");
 }
 
 configsPorCliente = carregarMapaClientesJson(
@@ -2189,7 +2194,7 @@ configsPorCliente = carregarMapaClientesJson(
 );
 
 if (configsPorCliente && Object.keys(configsPorCliente).length) {
-  console.log("[OK]✅ Configs dos clientes carregadas");
+  console.log("[OK]âœ… Configs dos clientes carregadas");
 }
 
 destinosPorCliente = carregarMapaClientesJson(
@@ -2204,13 +2209,13 @@ if (destinosPorCliente && Object.keys(destinosPorCliente).length) {
 planos = readGlobalJson("planos.json", {});
 
 if (planos && Object.keys(planos).length) {
-  console.log("[OK]✅ Planos carregados");
+  console.log("[OK]âœ… Planos carregados");
 }
 
 sessoesMeta = readGlobalJson("sessoes.json", {});
 
 if (sessoesMeta && Object.keys(sessoesMeta).length) {
-  console.log("[OK]✅ Sesses meta carregadas:", Object.keys(sessoesMeta).length);
+  console.log("[OK]âœ… Sesses meta carregadas:", Object.keys(sessoesMeta).length);
 }
 
   mensageiro.carregarMensageiro();
@@ -2236,7 +2241,7 @@ console.log("[INFO] CRIANDO ADMIN PADRO");
 
   salvarUsuarios();
 
-  console.log("[OK]✅ Usurio admin inicial criado");
+  console.log("[OK]âœ… Usurio admin inicial criado");
 }
 
   } catch (e) {
@@ -2281,7 +2286,7 @@ function gerarLinkOptimus(linkOriginal = "", marketplace = "") {
 }
 
 
-// ========== LIGAÃ‡ÃƒO IMPORTAR AMAZON E SHOPEE ===================
+// ========== LIGAÃƒâ€¡ÃƒÆ’O IMPORTAR AMAZON E SHOPEE ===================
 
 const importarAmazon = criarImportarAmazon({
   extrairJsonLd,
@@ -2852,7 +2857,7 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-const app = express(); // ðŸ‘ˆ MUITO IMPORTANTE ter isso
+const app = express(); // Ã°Å¸â€˜Ë† MUITO IMPORTANTE ter isso
 
 app.set("trust proxy", 1);
 app.use(helmet());
@@ -2863,7 +2868,7 @@ const horarioInicio = 9;
 const horarioFim = 23;
 
 
-// ================= FUNÃ‡ÃƒO RODAR AGORA =================
+// ================= FUNÃƒâ€¡ÃƒÆ’O RODAR AGORA =================
 
 function podeRodarAgora() {
   return true;
@@ -2871,7 +2876,7 @@ function podeRodarAgora() {
 
 let ultimoEnvioFila = 0;
 
-// =================== NÃšCLEO GLOBAL DE OFERTAS ===================
+// =================== NÃƒÅ¡CLEO GLOBAL DE OFERTAS ===================
 
 function normalizarTexto(valor = "") {
   return String(valor)
@@ -3118,7 +3123,7 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
       oferta.cupomTipo = "provavel";
       oferta.cupomDetectado = true;
       oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(3);
-      oferta.motivoPrioridade = "Cupom provável detectado pelo Radar";
+      oferta.motivoPrioridade = "Cupom provÃ¡vel detectado pelo Radar";
       return oferta;
     }
 
@@ -3137,7 +3142,7 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
     oferta.prioridadeEnvio = 100;
     oferta.cupomTipo = oferta.cupom ? "detectado" : "nenhum";
     oferta.cupomDetectado = Boolean(oferta.cupom);
-    oferta.motivoPrioridade = "Oferta escolhida manualmente pelo usuário";
+    oferta.motivoPrioridade = "Oferta escolhida manualmente pelo usuÃ¡rio";
     return oferta;
   }
 
@@ -3167,7 +3172,7 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
     oferta.cupomTipo = "provavel";
     oferta.cupomDetectado = true;
     oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(3);
-    oferta.motivoPrioridade = "Cupom provável detectado";
+    oferta.motivoPrioridade = "Cupom provÃ¡vel detectado";
     return oferta;
   }
 
@@ -3180,7 +3185,7 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
 }
 
 function logPrioridadeFila(oferta = {}) {
-  console.log("🧠 PRIORIDADE FILA:", {
+  console.log("ðŸ§  PRIORIDADE FILA:", {
     titulo: oferta.titulo || oferta.nome || "",
     origem: oferta.origem || "",
     cupomTipo: oferta.cupomTipo || "",
@@ -3209,7 +3214,7 @@ if (
   ["aliexpress", "amazon", "shopee", "mercadolivre", "magalu", "awin", "kabum"].includes(categoriaNormalizada) ||
   categoriaNormalizada.includes("computador") ||
   categoriaNormalizada.includes("escritorio") ||
-  categoriaNormalizada.includes("escritÃ³rio")
+  categoriaNormalizada.includes("escritÃƒÂ³rio")
 ) {
   oferta.categoria = classificarCategoriaOferta(oferta);
 }
@@ -3313,7 +3318,7 @@ function motivoRetencaoSemDestino(analises = []) {
 
 function marcarOfertaRetida(oferta = {}, motivoRetencao = "retida_sem_destino_compativel") {
   oferta.status = "retida";
-  oferta.statusDetalhe = "Retida por falta de destino compatível";
+  oferta.statusDetalhe = "Retida por falta de destino compatÃ­vel";
   oferta.motivoRetencao = motivoRetencao;
   oferta.retidaEm = new Date().toISOString();
   oferta.erro = "";
@@ -3898,7 +3903,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
   } catch (e) {
     console.log(
-      "âŒ erro destino inteligente:",
+      "Ã¢ÂÅ’ erro destino inteligente:",
       destino?.nome,
       e.message
     );
@@ -3945,7 +3950,7 @@ if (!oferta) {
     diagnosticarFilaCliente(clienteFila);
 
   if (deveLogarThrottle(`fila-processar-sem-elegivel:${clienteFila}`)) {
-    logOptimus("FILA", "Nenhuma oferta pendente elegível", {
+    logOptimus("FILA", "Nenhuma oferta pendente elegÃ­vel", {
       clienteId: clienteFila,
       motivoPrincipal: diagnosticoFila.motivoPrincipal,
       diagnostico: diagnosticoFila
@@ -4591,7 +4596,7 @@ app.post("/fila", (req, res) => {
     if (!clienteId) {
       return res.status(401).json({
         ok: false,
-        erro: "UsuÃ¡rio nÃ£o identificado"
+        erro: "UsuÃƒÂ¡rio nÃƒÂ£o identificado"
       });
     }
 
@@ -4695,7 +4700,7 @@ if (deveIgnorarOfertaRepetida(oferta)) {
   return res.json({
     ok: true,
     ignorada: true,
-    motivo: "Oferta repetida recentemente sem queda relevante de preÃ§o ou cupom novo.",
+    motivo: "Oferta repetida recentemente sem queda relevante de preÃƒÂ§o ou cupom novo.",
     oferta
   });
 }
@@ -4797,7 +4802,7 @@ app.get("/r/:codigo", (req, res) => {
     const dados = config.linksGerados[codigo];
 
     if (!dados?.original) {
-      return res.status(404).send("Link nÃ£o encontrado");
+      return res.status(404).send("Link nÃƒÂ£o encontrado");
     }
 
     dados.cliques = (dados.cliques || 0) + 1;
@@ -5140,7 +5145,7 @@ app.post("/destinos", (req, res) => {
   if (!Array.isArray(destinos)) {
     return res.status(400).json({
       ok: false,
-      erro: "Formato invÃ¡lido"
+      erro: "Formato invÃƒÂ¡lido"
     });
   }
 
@@ -5170,7 +5175,7 @@ app.delete("/destinos/:id", (req, res) => {
   });
 });
 
-// ================= AUTOMAÃ‡ÃƒO POR CLIENTE =================
+// ================= AUTOMAÃƒâ€¡ÃƒÆ’O POR CLIENTE =================
 
 app.get("/automacao/status", (req, res) => {
   const clienteId = getClienteId(req);
@@ -5178,7 +5183,7 @@ app.get("/automacao/status", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "UsuÃ¡rio nÃ£o identificado"
+      erro: "UsuÃƒÂ¡rio nÃƒÂ£o identificado"
     });
   }
 
@@ -5315,7 +5320,7 @@ app.get("/automacao", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "UsuÃ¡rio nÃ£o identificado"
+      erro: "UsuÃƒÂ¡rio nÃƒÂ£o identificado"
     });
   }
 
@@ -5334,7 +5339,7 @@ app.post("/automacao/toggle", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "UsuÃ¡rio nÃ£o identificado"
+      erro: "UsuÃƒÂ¡rio nÃƒÂ£o identificado"
     });
   }
 
@@ -5370,7 +5375,7 @@ app.delete("/fila/item/:id", (req, res) => {
   if (index === -1) {
     return res.status(404).json({
       ok: false,
-      erro: "Item nÃ£o encontrado para este usuÃ¡rio"
+      erro: "Item nÃƒÂ£o encontrado para este usuÃƒÂ¡rio"
     });
   }
 
@@ -5426,7 +5431,7 @@ app.delete("/fila/:index", (req, res) => {
   const clienteId = getClienteId(req);
 
   if (isNaN(index) || index < 0 || index >= fila.length) {
-    return res.status(400).send("Ãndice invÃ¡lido");
+    return res.status(400).send("ÃƒÂndice invÃƒÂ¡lido");
   }
 
   const oferta = fila[index];
@@ -5434,7 +5439,7 @@ app.delete("/fila/:index", (req, res) => {
   if ((oferta.clienteId || "admin") !== clienteId) {
     return res.status(403).json({
       ok: false,
-      erro: "Sem permissÃ£o para remover esta oferta"
+      erro: "Sem permissÃƒÂ£o para remover esta oferta"
     });
   }
 
@@ -5465,7 +5470,7 @@ app.post("/fila/:id/reprocessar", (req, res) => {
   if (!oferta) {
     return res.status(404).json({
       ok: false,
-      erro: "Oferta nÃ£o encontrada"
+      erro: "Oferta nÃƒÂ£o encontrada"
     });
   }
 
@@ -5524,7 +5529,7 @@ const idBody = String(req.body?.id || req.body?.ofertaId || "").trim();
 if (isNaN(index) || index < 0 || index >= filaCliente.length) {
   return res.status(400).json({
     ok: false,
-    erro: "Ãndice invÃ¡lido"
+    erro: "ÃƒÂndice invÃƒÂ¡lido"
   });
 }
 
@@ -5542,7 +5547,7 @@ const indexReal = fila.findIndex(o => o === oferta);
   if ((oferta.clienteId || "admin") !== clienteIdReq) {
     return res.status(403).json({
       ok: false,
-      erro: "Sem permissÃ£o para enviar esta oferta"
+      erro: "Sem permissÃƒÂ£o para enviar esta oferta"
     });
   }
 
@@ -5648,7 +5653,7 @@ app.post("/admin/planos", (req, res) => {
   if (!body.nome) {
     return res.status(400).json({
       ok: false,
-      erro: "Nome do plano obrigatÃ³rio"
+      erro: "Nome do plano obrigatÃƒÂ³rio"
     });
   }
 
@@ -5731,7 +5736,7 @@ app.delete("/admin/planos/:nome", (req, res) => {
   if (!planos[nome]) {
     return res.status(404).json({
       ok: false,
-      erro: "Plano nÃ£o encontrado"
+      erro: "Plano nÃƒÂ£o encontrado"
     });
   }
 
@@ -5742,7 +5747,7 @@ app.delete("/admin/planos/:nome", (req, res) => {
   if (usuariosUsandoPlano.length > 0) {
     return res.status(400).json({
       ok: false,
-      erro: "NÃ£o Ã© possÃ­vel excluir plano em uso por usuÃ¡rios"
+      erro: "NÃƒÂ£o ÃƒÂ© possÃƒÂ­vel excluir plano em uso por usuÃƒÂ¡rios"
     });
   }
 
@@ -5752,7 +5757,7 @@ app.delete("/admin/planos/:nome", (req, res) => {
 
   return res.json({
     ok: true,
-    mensagem: "Plano excluÃ­do com sucesso"
+    mensagem: "Plano excluÃƒÂ­do com sucesso"
   });
 });
 
@@ -5769,7 +5774,7 @@ app.delete("/admin/usuarios/:id", (req, res) => {
   if (id === "admin") {
     return res.status(400).json({
       ok: false,
-      erro: "NÃ£o Ã© possÃ­vel excluir o Admin Master principal"
+      erro: "NÃƒÂ£o ÃƒÂ© possÃƒÂ­vel excluir o Admin Master principal"
     });
   }
 
@@ -5780,7 +5785,7 @@ app.delete("/admin/usuarios/:id", (req, res) => {
   if (usuarios.length === antes) {
     return res.status(404).json({
       ok: false,
-      erro: "UsuÃ¡rio nÃ£o encontrado"
+      erro: "UsuÃƒÂ¡rio nÃƒÂ£o encontrado"
     });
   }
 
@@ -5795,7 +5800,7 @@ app.delete("/admin/usuarios/:id", (req, res) => {
 
   return res.json({
     ok: true,
-    mensagem: "UsuÃ¡rio excluÃ­do com sucesso",
+    mensagem: "UsuÃƒÂ¡rio excluÃƒÂ­do com sucesso",
     id
   });
 });
@@ -5813,7 +5818,7 @@ app.post("/admin/usuarios", (req, res) => {
   if (!body.nome || !body.email || !body.senha) {
     return res.status(400).json({
       ok: false,
-      erro: "Nome, email e senha obrigatÃ³rios"
+      erro: "Nome, email e senha obrigatÃƒÂ³rios"
     });
   }
 
@@ -5824,7 +5829,7 @@ app.post("/admin/usuarios", (req, res) => {
   if (existe) {
     return res.status(400).json({
       ok: false,
-      erro: "Email jÃ¡ cadastrado"
+      erro: "Email jÃƒÂ¡ cadastrado"
     });
   }
 
@@ -5867,7 +5872,7 @@ app.put("/admin/usuarios/:id", (req, res) => {
   if (!usuario) {
     return res.status(404).json({
       ok: false,
-      erro: "UsuÃ¡rio nÃ£o encontrado"
+      erro: "UsuÃƒÂ¡rio nÃƒÂ£o encontrado"
     });
   }
 
@@ -5930,7 +5935,7 @@ app.post("/config", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "Cliente nÃ£o identificado"
+      erro: "Cliente nÃƒÂ£o identificado"
     });
   }
 
@@ -5958,7 +5963,7 @@ app.post("/config", (req, res) => {
       configCliente.marketplaces[nome] =
         configCliente.marketplaces[nome] || {};
 
-      // usuÃ¡rio comum sÃ³ liga/desliga
+      // usuÃƒÂ¡rio comum sÃƒÂ³ liga/desliga
       configCliente.marketplaces[nome].ativo =
         dados?.ativo === true;
 
@@ -6223,7 +6228,7 @@ function exigirClienteAutenticado(req, res) {
   if (!token) {
     res.status(401).json({
       ok: false,
-      erro: "Cliente não autenticado"
+      erro: "Cliente nÃ£o autenticado"
     });
     return null;
   }
@@ -6235,7 +6240,7 @@ function exigirClienteAutenticado(req, res) {
     if (!clienteId) {
       res.status(401).json({
         ok: false,
-        erro: "Cliente não autenticado"
+        erro: "Cliente nÃ£o autenticado"
       });
       return null;
     }
@@ -6245,7 +6250,7 @@ function exigirClienteAutenticado(req, res) {
   } catch {
     res.status(401).json({
       ok: false,
-      erro: "Cliente não autenticado"
+      erro: "Cliente nÃ£o autenticado"
     });
     return null;
   }
@@ -6277,7 +6282,7 @@ function auth(req, res, next) {
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
   if (!token) {
-    return res.status(401).json({ erro: "Token invÃ¡lido" });
+    return res.status(401).json({ erro: "Token invÃƒÂ¡lido" });
   }
 
   try {
@@ -6291,7 +6296,7 @@ function auth(req, res, next) {
     if (!usuarioExiste || usuarioExiste.ativo === false) {
       return res.status(401).json({
         ok: false,
-        erro: "UsuÃ¡rio nÃ£o existe ou foi desativado"
+        erro: "UsuÃƒÂ¡rio nÃƒÂ£o existe ou foi desativado"
       });
     }
 
@@ -6300,11 +6305,12 @@ function auth(req, res, next) {
 
     next();
   } catch {
-    return res.status(401).json({ erro: "NÃ£o autorizado" });
+    return res.status(401).json({ erro: "NÃƒÂ£o autorizado" });
   }
 }
 
 carregarConfig();
+
 
 app.use(auth);
 
@@ -6486,7 +6492,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
     return {
       ok: false,
       statusHttp: 404,
-      erro: "Oferta não encontrada"
+      erro: "Oferta nÃ£o encontrada"
     };
   }
 
@@ -6534,7 +6540,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
 
   oferta.status = "pendente";
   oferta.statusDetalhe = estavaExpirada
-    ? "Envio manual solicitado após expiração"
+    ? "Envio manual solicitado apÃ³s expiraÃ§Ã£o"
     : "Envio manual solicitado";
   oferta.erro = "";
   oferta.erroEm = "";
@@ -7732,7 +7738,7 @@ if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
     sessoesWhatsappMonitoradas: dados.sessoesWhatsappMonitoradas
   });
 
-  logDebug("🧪 RADAR NORMALIZACAO REPLACE", {
+  logDebug("ðŸ§ª RADAR NORMALIZACAO REPLACE", {
     recebido: dados.sessoesWhatsappMonitoradas,
     salvo: sessoesWhatsappMonitoradas
   });
@@ -7797,7 +7803,7 @@ if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
   };
 
   
-logDebug("🧪 RADAR PAYLOAD FINAL", {
+logDebug("ðŸ§ª RADAR PAYLOAD FINAL", {
   sessoesWhatsappMonitoradas: payload.sessoesWhatsappMonitoradas,
   gruposMonitorados: payload.gruposMonitorados
 });
@@ -8114,21 +8120,21 @@ function radarPodeCapturarAgora(configRadar = {}, opcoes = {}) {
 function motivoRadarDebug(motivo = "") {
   const chave = String(motivo || "").trim();
   const mapa = {
-    integracao_marketplace_ausente: "sem integração",
-    sem_destino_compativel: "sem destino compatível",
+    integracao_marketplace_ausente: "sem integraÃ§Ã£o",
+    sem_destino_compativel: "sem destino compatÃ­vel",
     oferta_duplicada: "duplicada",
-    oferta_repetida_na_memoria: "memória",
+    oferta_repetida_na_memoria: "memÃ³ria",
     limite_radar_pendente_total: "limite Radar",
     limite_radar_com_cupom: "limite Radar",
     limite_radar_sem_cupom: "limite Radar",
     limite_diario_radar_atingido: "limite Radar",
     marketplace_nao_permitido_no_plano: "marketplace bloqueado",
     marketplace_desativado_no_cliente: "marketplace bloqueado",
-    fora_do_horario_monitoramento: "horário fora da janela",
+    fora_do_horario_monitoramento: "horÃ¡rio fora da janela",
     categoria_nao_permitida_radar: "categoria bloqueada",
-    link_afiliado_nao_gerado: "link afiliado inválido",
-    link_afiliado_igual_original: "link afiliado inválido",
-    link_original_nao_resolvido: "link original não resolvido",
+    link_afiliado_nao_gerado: "link afiliado invÃ¡lido",
+    link_afiliado_igual_original: "link afiliado invÃ¡lido",
+    link_original_nao_resolvido: "link original nÃ£o resolvido",
     link_produto_ml_nao_encontrado: "link_produto_ml_nao_encontrado",
     importacao_incompleta: "importacao_incompleta",
     oferta_sem_cupom_ou_desconto_relevante: "oferta sem cupom ou desconto relevante"
@@ -9382,21 +9388,21 @@ async function extrairProdutoMercadoLivreIntermediarioRadar(url = "") {
     const produto = extrairProdutoMercadoLivreDeHtmlRadar(resposta.data || "");
 
     if (produto) {
-      console.log("[RADAR] ML produto extraído", {
+      console.log("[RADAR] ML produto extraÃ­do", {
         intermediaria: url,
         produto
       });
       return produto;
     }
   } catch (e) {
-    console.log("[RADAR] ML produto não encontrado", {
+    console.log("[RADAR] ML produto nÃ£o encontrado", {
       intermediaria: url,
       erro: e.message
     });
     return "";
   }
 
-  console.log("[RADAR] ML produto não encontrado", {
+  console.log("[RADAR] ML produto nÃ£o encontrado", {
     intermediaria: url
   });
   return "";
@@ -9440,7 +9446,7 @@ function extrairPrecoFallbackTextoRadar(texto = "") {
   const original = String(texto || "");
   if (!original.trim()) return { ok: false, motivo: "texto_vazio" };
 
-  if (/r\$\s*[\d.,]+\s*(?:a|ate|até|-)\s*r?\$?\s*[\d.,]+/i.test(original)) {
+  if (/r\$\s*[\d.,]+\s*(?:a|ate|atÃ©|-)\s*r?\$?\s*[\d.,]+/i.test(original)) {
     return { ok: false, motivo: "faixa_preco" };
   }
 
@@ -9564,7 +9570,7 @@ function aplicarPrecoFallbackTextoRadarMl(oferta = {}, contexto = {}) {
     preco: oferta.preco || resultado.preco,
     precoAtual: oferta.precoAtual || resultado.preco,
     precoOrigem: "texto_radar",
-    avisoPreco: "Preço extraído da mensagem do Radar"
+    avisoPreco: "PreÃ§o extraÃ­do da mensagem do Radar"
   };
 }
 function limparLinhaTituloKabumRadar(linha = "") {
@@ -9572,8 +9578,8 @@ function limparLinhaTituloKabumRadar(linha = "") {
     .replace(/https?:\/\/\S+/gi, "")
     .replace(/www\.\S+/gi, "")
     .replace(/[\u{1F300}-\u{1FAFF}]/gu, "")
-    .replace(/^[\s\-_*•:|]+/g, "")
-    .replace(/[\s\-_*•:|]+$/g, "")
+    .replace(/^[\s\-_*â€¢:|]+/g, "")
+    .replace(/[\s\-_*â€¢:|]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -9591,10 +9597,10 @@ function extrairTituloKabumFallbackRadar(texto = "") {
     if (/^r\$\s*[\d.,]+$/i.test(linha)) return false;
     if (rejeitar.test(linha)) return false;
     if (/\b(cupom|frete|cashback|desconto|off)\b/i.test(linha) && linha.length < 35) return false;
-    return /[a-zA-ZÀ-ÿ]{3,}/.test(linha);
+    return /[a-zA-Z\u00C0-\u00FF]{3,}/.test(linha);
   });
 
-  return (candidatos[0] || linhas.find(linha => /[a-zA-ZÀ-ÿ]{3,}/.test(linha)) || "")
+  return (candidatos[0] || linhas.find(linha => /[a-zA-Z\u00C0-\u00FF]{3,}/.test(linha)) || "")
     .slice(0, 180)
     .trim();
 }
@@ -10913,6 +10919,30 @@ function logarResumoRadarMarketplace(marketplaces = [], janelaMinutos = RADAR_MA
   }
 }
 
+function listarClientesEngineRadar() {
+  try {
+    const ids = Array.isArray(usuarios)
+      ? usuarios.map(usuario => usuario?.id).filter(Boolean)
+      : [];
+    return [...new Set(ids.length ? ids : ["admin"] )];
+  } catch {
+    return ["admin"];
+  }
+}
+
+async function registrarEventoBrutoEngineRadar(dados = {}) {
+  try {
+    await registrarEventoBruto(dados, {
+      clientes: listarClientesEngineRadar()
+    });
+  } catch (e) {
+    console.log("[ENGINE-EVENTO-BRUTO-ERRO]", {
+      motivo: "radar_chamada_falhou",
+      erro: e.message
+    });
+  }
+}
+
 async function processarMensagemRadar({
   origemTipo,
   sessaoId,
@@ -10994,12 +11024,23 @@ async function processarMensagemRadar({
 
 const links = extrairLinksRadar(texto);
 
-logDebug("🧪 RADAR LINKS EXTRAIDOS", {
+logDebug("ðŸ§ª RADAR LINKS EXTRAIDOS", {
   sessaoId: sessaoIdTexto,
   grupoId: grupoIdTexto,
   links,
   total: links.length,
   texto: String(texto || "").slice(0, 250)
+});
+
+registrarEventoBrutoEngineRadar({
+  origem: "radar",
+  origemTipo: origemTipoFinal,
+  sessaoId: sessaoIdTexto,
+  grupoId: grupoIdTexto,
+  grupoNome: grupoNomeTexto,
+  textoOriginal: texto,
+  linksExtraidos: links,
+  capturadoEm: capturadaEm || new Date()
 });
 
   logOptimus("RADAR", "Links detectados", {
@@ -11431,7 +11472,7 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
     return { ok: false, motivo: "mensagem_nao_monitoravel" };
   }
 
- logDebug("🧪 RADAR CHAMANDO PROCESSAR", {
+ logDebug("ðŸ§ª RADAR CHAMANDO PROCESSAR", {
   sessaoId,
   remoteJid,
   tamanhoTexto: textoExtraido.length
@@ -11737,7 +11778,7 @@ logRadarBloqueadoMonitoramento({
     return { ok: false, motivo: origemMonitorada.motivo };
   }
 
-console.log("✅ RADAR ORIGEM VALIDADA", {
+console.log("âœ… RADAR ORIGEM VALIDADA", {
   clienteId,
   grupoId: ofertaBase.grupoId,
   sessaoId: ofertaBase.sessaoId
@@ -13287,7 +13328,7 @@ app.post("/login", async (req, res) => {
       totalUsuariosCarregados: Array.isArray(usuarios) ? usuarios.length : 0,
       idsCarregados: Array.isArray(usuarios) ? usuarios.map(u => u?.id).filter(Boolean).slice(0, 20) : []
     });
-    return res.status(401).json({ erro: "UsuÃ¡rio invÃ¡lido" });
+    return res.status(401).json({ erro: "UsuÃƒÂ¡rio invÃƒÂ¡lido" });
   }
 
   if (usuario.ativo === false) {
@@ -13299,7 +13340,7 @@ app.post("/login", async (req, res) => {
       ativo: false,
       motivoFalha: "usuario_inativo"
     });
-    return res.status(403).json({ erro: "UsuÃ¡rio inativo" });
+    return res.status(403).json({ erro: "UsuÃƒÂ¡rio inativo" });
   }
 
  const diagnosticoSenha = await diagnosticarSenhaUsuario(usuario, pass);
@@ -13324,7 +13365,7 @@ app.post("/login", async (req, res) => {
  });
 
 if (!senhaOk) {
-  return res.status(401).json({ erro: "Senha invÃ¡lida" });
+  return res.status(401).json({ erro: "Senha invÃƒÂ¡lida" });
 }
 
   const token = jwt.sign(
@@ -13460,7 +13501,7 @@ app.post("/limpar-sessao/:id", async (req, res) => {
 
     return res.json({
       ok: true,
-      message: "SessÃ£o limpa. Gere um novo QR Code.",
+      message: "SessÃƒÂ£o limpa. Gere um novo QR Code.",
       id
     });
 
@@ -13486,7 +13527,7 @@ app.get("/me", (req, res) => {
   if (!usuario) {
     return res.status(404).json({
       ok: false,
-      erro: "UsuÃ¡rio nÃ£o encontrado"
+      erro: "UsuÃƒÂ¡rio nÃƒÂ£o encontrado"
     });
   }
 
@@ -13543,16 +13584,16 @@ return res.json({
   });
 });
 
-// ================= INTEGRAÃ‡Ã•ES =================
+// ================= INTEGRAÃƒâ€¡Ãƒâ€¢ES =================
 
 const marketplaceRules = integracoesUtils.marketplaceRules;
 
 const MENSAGEM_TESTE_OK = "Teste real OK. Link de teste convertido com sucesso.";
 const MENSAGEM_NAO_CONFIGURADO_ML = "Preencha Tag ID e Cookies para testar.";
 const MENSAGEM_NAO_CONFIGURADO_AMAZON = "Preencha tag e cookies da Amazon para testar.";
-const MENSAGEM_COOKIES_INVALIDOS = "Não conseguimos converter um link de teste. Atualize os cookies e teste novamente.";
-const MENSAGEM_FALHA_CONVERSAO_ML = "Não conseguimos validar a integração agora. Atualize os cookies e teste novamente.";
-const MENSAGEM_FALHA_CONVERSAO_AMAZON = "Não conseguimos validar a integração da Amazon agora. Atualize os cookies e teste novamente.";
+const MENSAGEM_COOKIES_INVALIDOS = "NÃ£o conseguimos converter um link de teste. Atualize os cookies e teste novamente.";
+const MENSAGEM_FALHA_CONVERSAO_ML = "NÃ£o conseguimos validar a integraÃ§Ã£o agora. Atualize os cookies e teste novamente.";
+const MENSAGEM_FALHA_CONVERSAO_AMAZON = "NÃ£o conseguimos validar a integraÃ§Ã£o da Amazon agora. Atualize os cookies e teste novamente.";
 const MENSAGEM_TESTE_PENDENTE = "Credenciais salvas, teste real pendente.";
 const MENSAGEM_ALERTA_ML = MENSAGEM_COOKIES_INVALIDOS;
 const MENSAGEM_ALERTA_AMAZON = MENSAGEM_FALHA_CONVERSAO_AMAZON;
@@ -13958,7 +13999,7 @@ async function testarAmazonConfiguracao(config = {}) {
       "teste_pendente",
       MENSAGEM_TESTE_PENDENTE,
       "teste_pendente",
-      { modo, observacao: "Teste real automático preservado apenas para modo cookies." }
+      { modo, observacao: "Teste real automÃ¡tico preservado apenas para modo cookies." }
     );
   }
 
@@ -14249,7 +14290,7 @@ if (!isAdminMaster(req)) {
   if (!liberados.includes(marketplace)) {
     return res.status(403).json({
       ok: false,
-      erro: `Marketplace ${marketplace} nÃ£o liberado no seu plano`
+      erro: `Marketplace ${marketplace} nÃƒÂ£o liberado no seu plano`
     });
   }
 }
@@ -14323,7 +14364,7 @@ app.delete("/integracoes/:marketplace", (req, res) => {
       marketplace,
       configurado: false,
       status: "nao_configurado",
-      message: "IntegraÃ§Ã£o removida com sucesso"
+      message: "IntegraÃƒÂ§ÃƒÂ£o removida com sucesso"
     });
 
   } catch (e) {
@@ -14331,7 +14372,7 @@ app.delete("/integracoes/:marketplace", (req, res) => {
 
     return res.status(500).json({
       ok: false,
-      erro: "Erro interno ao remover integraÃ§Ã£o"
+      erro: "Erro interno ao remover integraÃƒÂ§ÃƒÂ£o"
     });
   }
 });
@@ -14372,7 +14413,7 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
 
     return res.status(400).json({
       ok: false,
-      erro: "IntegraÃ§Ã£o nÃ£o configurada"
+      erro: "IntegraÃƒÂ§ÃƒÂ£o nÃƒÂ£o configurada"
     });
   }
 
@@ -14573,14 +14614,14 @@ async function importarKabumManualRequest(req, res, opcoes = {}) {
 
       return res.status(401).json({
         ok: false,
-        erro: "Cliente não autenticado para importar KaBuM/AWIN"
+        erro: "Cliente nÃ£o autenticado para importar KaBuM/AWIN"
       });
     }
 
     if (!url) {
       return res.status(400).json({
         ok: false,
-        erro: "URL obrigatória"
+        erro: "URL obrigatÃ³ria"
       });
     }
 
@@ -14744,7 +14785,7 @@ app.post("/awin/gerar-link", async (req, res) => {
     if (!url) {
       return res.status(400).json({
         ok: false,
-        erro: "URL obrigatÃ³ria"
+        erro: "URL obrigatÃƒÂ³ria"
       });
     }
 
@@ -14770,7 +14811,7 @@ app.post("/awin/gerar-link", async (req, res) => {
     if (!linkAfiliado) {
       return res.status(400).json({
         ok: false,
-        erro: "NÃ£o foi possÃ­vel gerar o link afiliado Awin"
+        erro: "NÃƒÂ£o foi possÃƒÂ­vel gerar o link afiliado Awin"
       });
     }
 
@@ -14792,7 +14833,7 @@ app.post("/awin/gerar-link", async (req, res) => {
   }
 });
 
-// ================= HELPERS DE IMPORTAÃ‡ÃƒO =================
+// ================= HELPERS DE IMPORTAÃƒâ€¡ÃƒÆ’O =================
 
 function htmlDecode(str) {
   if (!str) return "";
@@ -15041,9 +15082,9 @@ function aplicarFiltrosUniversais(ofertas = [], opcoes = {}) {
 
       if (!resultado.ok) {
         console.log(
-          "â­ï¸ Oferta ignorada pelo filtro universal:",
+          "Ã¢ÂÂ­Ã¯Â¸Â Oferta ignorada pelo filtro universal:",
           resultado.motivo,
-          oferta.titulo || oferta.nome || "sem tÃ­tulo"
+          oferta.titulo || oferta.nome || "sem tÃƒÂ­tulo"
         );
       }
 
@@ -15248,7 +15289,7 @@ function gerarLinkMagalu(linkOriginal, promoterId) {
   const urlLimpa = String(linkOriginal).trim();
   const loja = String(promoterId).trim();
 
-  // Se jÃ¡ for link da loja do influenciador, mantÃ©m
+  // Se jÃƒÂ¡ for link da loja do influenciador, mantÃƒÂ©m
   if (urlLimpa.includes("magazinevoce.com.br")) {
     return urlLimpa;
   }
@@ -15645,7 +15686,7 @@ const response = await fetch(urlConsulta, {
       linkAfiliado,
       imagem,
       categoria: "Magalu",
-      aviso: "Verifique se hÃ¡ cupons disponÃ­veis na pÃ¡gina"
+      aviso: "Verifique se hÃƒÂ¡ cupons disponÃƒÂ­veis na pÃƒÂ¡gina"
     };
   } catch (e) {
     console.log("[API] erro importarMagalu:", e.message);
@@ -15747,7 +15788,7 @@ app.post("/importar-magalu-manual", async (req, res) => {
     if (!url) {
       return res.status(400).json({
         ok: false,
-        erro: "URL obrigatÃ³ria"
+        erro: "URL obrigatÃƒÂ³ria"
       });
     }
 
@@ -15764,7 +15805,7 @@ app.post("/importar-magalu-manual", async (req, res) => {
     if (!produto?.precoAtual) {
       return res.status(400).json({
         ok: false,
-        erro: "Produto invÃ¡lido"
+        erro: "Produto invÃƒÂ¡lido"
       });
     }
 
@@ -15977,7 +16018,7 @@ function registrarResultadoCupom(marketplace = "", cupom = "", sucesso = false) 
   salvarConfig();
 }
 
-// =========== INTELIGÃŠNCIA GLOBAL DE CUPONS ===========
+// =========== INTELIGÃƒÅ NCIA GLOBAL DE CUPONS ===========
 
 function cupomEstaBloqueado(marketplace = "", cupom = "") {
   const mp = normalizarTexto(marketplace || "");
@@ -16101,7 +16142,7 @@ function categoriaPermitidaNoDestino(oferta, destino) {
 }
 
 //============ FUNCAO FAREJAR CUPOM MERCADO LIVRE ================
-// DESATIVADA: nÃ£o registrar cupons ML automaticamente
+// DESATIVADA: nÃƒÂ£o registrar cupons ML automaticamente
 
 async function farejarCuponsMercadoLivre(html = "") {
   console.log("[INFO] farejarCuponsMercadoLivre desativado");
@@ -16423,7 +16464,7 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
     return "";
 
   } catch (e) {
-    console.log("[ERRO]❌ Erro ao gerar link afiliado do cliente:", {
+    console.log("[ERRO]âŒ Erro ao gerar link afiliado do cliente:", {
       clienteId,
       marketplace,
       erro: e.message
@@ -16441,7 +16482,7 @@ function normalizarSessaoId(clienteId, id = "sessao1") {
 
   let sessao = String(id || "sessao1").trim();
 
-  // remove duplicaÃ§Ã£o
+  // remove duplicaÃƒÂ§ÃƒÂ£o
   if (sessao.startsWith(cliente + "_")) {
     sessao = sessao.slice((cliente + "_").length);
   }
@@ -16609,7 +16650,7 @@ async function distribuirOfertaParaClientes(ofertaBase) {
 
     const mp = normalizarTexto(ofertaBase.marketplace || "");
 
-    console.log("🚨 DISTRIBUIDOR RECEBEU", {
+    console.log("ðŸš¨ DISTRIBUIDOR RECEBEU", {
       clienteId,
       titulo: ofertaBase.titulo,
       marketplace: mp
@@ -16626,7 +16667,7 @@ async function distribuirOfertaParaClientes(ofertaBase) {
     }
 
 
-logDebug("[DEBUG]✅ CHECK INTEGRAO:", {
+logDebug("[DEBUG]âœ… CHECK INTEGRAO:", {
   clienteId,
   marketplace: mp,
   integracao: !!getIntegracaoCliente(clienteId, mp),
@@ -16737,7 +16778,7 @@ ofertaCliente.statusDetalhe = ofertaCliente.statusDetalhe || "Na fila";
 validarCupomMonetarioOferta(ofertaCliente);
 aplicarPrioridadeEnvioOferta(ofertaCliente);
 
-// â­ SCORE V1
+// Ã¢Â­Â SCORE V1
 try {
   const resultadoScore = calcularScoreOferta(ofertaCliente);
 
@@ -16897,17 +16938,17 @@ console.log("[INFO] Oferta distribuda para cliente:", {
             const palavrasBloqueadas = [
               "cabelo",
               "peruca",
-              "extensÃ£o",
-              "extensÃµes",
+              "extensÃƒÂ£o",
+              "extensÃƒÂµes",
               "sapato",
-              "sandÃ¡lia",
+              "sandÃƒÂ¡lia",
               "chinelo",
               "salto",
               "batom",
-              "cÃ­lios",
+              "cÃƒÂ­lios",
               "unha",
               "bolsa",
-              "sutiÃ£",
+              "sutiÃƒÂ£",
               "calcinha",
               "wedding",
               "bridal"
@@ -16927,7 +16968,7 @@ console.log("[INFO] Oferta distribuda para cliente:", {
               Number(cfg.descontoMinimoInternacional) || descontoMinimo;
 
             const minimoDescontoAplicado =
-              tipo === "ðŸŒ"
+              tipo === "Ã°Å¸Å’Â"
                 ? descontoMinimoInternacional
                 : descontoMinimo;
 
@@ -16982,18 +17023,18 @@ console.log("[INFO] Oferta distribuda para cliente:", {
 
             await new Promise(r => setTimeout(r, 1500));
           } catch (e) {
-            console.log("[ERRO]❌ erro produto AliExpress API:", e.message);
+            console.log("[ERRO]âŒ erro produto AliExpress API:", e.message);
           }
         }    
 
     for (const termo of buscasBrasil) {
-      await buscarTermoAliExpress(termo, "ðŸ‡§ðŸ‡·");
+      await buscarTermoAliExpress(termo, "Ã°Å¸â€¡Â§Ã°Å¸â€¡Â·");
       if (adicionadasNestaRodada >= limitePorRodada) break;
     }
 
     if (cfg.permitirInternacionalForte && adicionadasNestaRodada < limitePorRodada) {
       for (const termo of buscasInternacional) {
-        await buscarTermoAliExpress(termo, "ðŸŒ");
+        await buscarTermoAliExpress(termo, "Ã°Å¸Å’Â");
         if (adicionadasNestaRodada >= limitePorRodada) break;
       }
     }
@@ -17008,7 +17049,7 @@ console.log("[INFO] Oferta distribuda para cliente:", {
     );
 
     console.log(
-      ` 🔍Ofertas AliExpress filtros universais: ${ofertasFiltradas.length}`
+      `Â ðŸ”Ofertas AliExpress filtros universais: ${ofertasFiltradas.length}`
     );
 
   for (const oferta of ofertasFiltradas) {
@@ -17079,7 +17120,7 @@ async function farejarMagalu() {
       if (!response.ok) {
 
   console.log(
-    "ðŸ›¡ï¸ Magalu bloqueou status:",
+    "Ã°Å¸â€ºÂ¡Ã¯Â¸Â Magalu bloqueou status:",
     response.status,
     "- parando rodada."
   );
@@ -17285,7 +17326,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
 
     if (!integracaoAwin?.credenciais) {
       console.log(
-        "âŒ Awin sem integraÃ§Ã£o configurada:",
+        "Ã¢ÂÅ’ Awin sem integraÃƒÂ§ÃƒÂ£o configurada:",
         clienteId
       );
       return;
@@ -17329,7 +17370,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
 
     if (!fs.existsSync(caminhoFeed)) {
       console.log(
-        "âŒ Feed Awin nÃ£o encontrado:",
+        "Ã¢ÂÅ’ Feed Awin nÃƒÂ£o encontrado:",
         caminhoFeed
       );
       return;
@@ -17425,7 +17466,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
     );
 
     console.log(
-      `Ã°Å¸Â§Â  Ofertas Awin apÃƒÂ³s filtros universais: ${ofertasFiltradas.length}`
+      `ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Â  Ofertas Awin apÃƒÆ’Ã‚Â³s filtros universais: ${ofertasFiltradas.length}`
     );
 
    const repeticoesCategoriaAwin = {};
@@ -17543,7 +17584,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
       principalMotivoZero: motivoPrincipalAwin || (adicionadasFila > 0 ? "" : "sem_candidato_aprovado")
     };
   } catch (e) {
-    console.log("[ERRO]❌ erro farejador Awin:", e.message);
+    console.log("[ERRO]âŒ erro farejador Awin:", e.message);
   }
 }
 
@@ -17690,7 +17731,7 @@ app.post("/sessoes", (req, res) => {
   if (!isAdminMaster(req) && sessoesCliente.length >= limite) {
   return res.status(403).json({
     ok: false,
-    erro: `Seu plano permite apenas ${limite} sessÃ£o(Ãµes).`
+    erro: `Seu plano permite apenas ${limite} sessÃƒÂ£o(ÃƒÂµes).`
   });
 }
 
@@ -17713,7 +17754,7 @@ const id = normalizarSessaoId(
     if (sessoesMeta[id]) {
       return res.status(400).json({
         ok: false,
-        erro: "SessÃ£o jÃ¡ existe"
+        erro: "SessÃƒÂ£o jÃƒÂ¡ existe"
       });
     }
 
@@ -17726,7 +17767,7 @@ const id = normalizarSessaoId(
 
     salvarSessoesMeta();
 
-console.log("[WHATSAPP]💾 Sesso criada e salva:", sessoesMeta[id]);
+console.log("[WHATSAPP]ðŸ’¾ Sesso criada e salva:", sessoesMeta[id]);
 
     return res.json({
       ok: true,
@@ -17819,7 +17860,7 @@ salvarConfig();
 
     return res.json({
       ok: true,
-      message: "SessÃ£o excluÃ­da com sucesso",
+      message: "SessÃƒÂ£o excluÃƒÂ­da com sucesso",
       id
     });
   } catch (e) {
@@ -17888,12 +17929,12 @@ app.post("/reset/:id", async (req, res) => {
 
     return res.json({
       ok: true,
-      message: "SessÃ£o resetada. Gere novo QR.",
+      message: "SessÃƒÂ£o resetada. Gere novo QR.",
       id
     });
 
   } catch (e) {
-    console.log("[ERRO]❌ [WHATSAPP] erro reset sesso:", e.message);
+    console.log("[ERRO]âŒ [WHATSAPP] erro reset sesso:", e.message);
 
     return res.status(500).json({
       ok: false,
@@ -17902,7 +17943,7 @@ app.post("/reset/:id", async (req, res) => {
   }
 });
 
-// ===================== FUNÃ‡ÃƒO LIMETE SESSÃƒO WHATSAPP ========================
+// ===================== FUNÃƒâ€¡ÃƒÆ’O LIMETE SESSÃƒÆ’O WHATSAPP ========================
 
 function obterLimiteSessoesCliente(clienteId) {
   const usuario = obterUsuario(clienteId);
@@ -17947,7 +17988,7 @@ app.post("/conectar", async (req, res) => {
   const clienteId = getClienteId(req);
 
   if (!clienteId) {
-    return res.status(401).json({ erro: "UsuÃ¡rio nÃ£o identificado" });
+    return res.status(401).json({ erro: "UsuÃƒÂ¡rio nÃƒÂ£o identificado" });
   }
 
   config.sessoesWhatsapp = config.sessoesWhatsapp || [];
@@ -17963,7 +18004,7 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
 
     return res.status(403).json({
       ok: false,
-      erro: `Seu plano permite atÃ© ${limiteSessoes} sessÃ£o(Ãµes) WhatsApp.`,
+      erro: `Seu plano permite atÃƒÂ© ${limiteSessoes} sessÃƒÂ£o(ÃƒÂµes) WhatsApp.`,
       limite: limiteSessoes,
       usadas: sessoesCliente.length
     });
@@ -17985,7 +18026,7 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
   if (config.sessoesWhatsapp.includes(sessaoId)) {
     return res.status(400).json({
       ok: false,
-      erro: "JÃ¡ existe uma conexÃ£o com esse ID. Tente criar uma nova conexÃ£o novamente.",
+      erro: "JÃƒÂ¡ existe uma conexÃƒÂ£o com esse ID. Tente criar uma nova conexÃƒÂ£o novamente.",
       id: sessaoId
     });
   }
@@ -17993,7 +18034,7 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
   config.sessoesWhatsapp.push(sessaoId);
   salvarConfig();
 
-  console.log("[WHATSAPP]💾 Sesso WhatsApp salva para reconexo:", {
+  console.log("[WHATSAPP]ðŸ’¾ Sesso WhatsApp salva para reconexo:", {
     clienteId,
     sessaoId,
     limiteSessoes,
@@ -18004,7 +18045,7 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
 
   return res.json({
     ok: true,
-    message: "SessÃ£o iniciada",
+    message: "SessÃƒÂ£o iniciada",
     id: sessaoId
   });
 });
@@ -18132,7 +18173,7 @@ async function carregarGruposSessao(id, opcoes = {}) {
     const grupos = await sock.groupFetchAllParticipating();
 
     console.log(
-      "👥 Grupos carregados:",
+      "ðŸ‘¥ Grupos carregados:",
       Object.keys(grupos || {}).length
     );
 
@@ -18172,7 +18213,7 @@ app.post("/magalu/gerar-link", (req, res) => {
     if (!promoterId) {
       return res.status(400).json({
         ok: false,
-        erro: "Magalu nÃ£o configurada."
+        erro: "Magalu nÃƒÂ£o configurada."
       });
     }
 
@@ -18211,13 +18252,15 @@ app.get("/grupos/:id", async (req, res) => {
     const id = normalizarSessaoId(clienteId, req.params.id);
     const force = ["true", "1", "sim", "yes"].includes(String(req.query.force || req.query.refresh || "").toLowerCase());
 
-    const status = statusSessao[id];
+    const status = statusSessao[id];
+
 console.log("[INFO] ROTA /grupos buscando:", {
       id,
       force,
       temCache: !!gruposPorSessao[id]?.length,
       totalCache: gruposPorSessao[id]?.length || 0
-    });
+    });
+
     const metaRefreshGrupos = {};
     const grupos = await carregarGruposSessao(id, { force: true, clienteId, meta: metaRefreshGrupos });
 
@@ -18248,7 +18291,8 @@ app.post("/grupos/:id/refresh", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
     const id = normalizarSessaoId(clienteId, req.params.id);
-    const status = statusSessao[id];
+    const status = statusSessao[id];
+
 const metaRefreshGrupos = {};
     const grupos = await carregarGruposSessao(id, { force: true, clienteId, meta: metaRefreshGrupos });
 
@@ -18384,7 +18428,7 @@ const limiteDestinos = isAdminMaster(req)
  destinosPorCliente[clienteId][id] = destinos;
 
  salvarDestinosClientes();
-  console.log("[DESTINO]💾 Destinos salvos na config:", id, destinos);
+  console.log("[DESTINO]ðŸ’¾ Destinos salvos na config:", id, destinos);
 
   return res.json({
     ok: true,
@@ -18440,7 +18484,7 @@ app.post("/campanhas/enviar", async (req, res) => {
     });
 
   } catch (e) {
-    console.log("[ERRO]❌ Erro campanha manual:", e.message);
+    console.log("[ERRO]âŒ Erro campanha manual:", e.message);
 
     return res.status(400).json({
       ok: false,
@@ -18500,7 +18544,7 @@ async function enviarTelegram(oferta, mensagem) {
 }
 
          
-// ================= FUNCÃƒO WHATSAPP =================
+// ================= FUNCÃƒÆ’O WHATSAPP =================
 
 async function iniciarWhatsApp(id, force = false) {
   console.log("[WHATSAPP] Iniciando sesso:", id, "force:", force);
@@ -18578,7 +18622,7 @@ sock.ev.on("messages.upsert", async ({ messages = [] } = {}) => {
       });
     }
   } catch (e) {
-    console.log("[MENSAGEIRO-ERRO]⚠️ messages.upsert:", e.message);
+    console.log("[MENSAGEIRO-ERRO]âš ï¸ messages.upsert:", e.message);
   }
 });
 
@@ -18601,7 +18645,7 @@ sock.ev.on("group-participants.update", async (evento) => {
       evento
     });
   } catch (e) {
-    console.log("[ERRO]⚠️ Erro evento Mensageiro:", e.message);
+    console.log("[ERRO]âš ï¸ Erro evento Mensageiro:", e.message);
   }
 });
 
@@ -18609,7 +18653,7 @@ sock.ev.on("group-participants.update", async (evento) => {
     const { connection, qr, lastDisconnect } = update;
 
     if (qr) {
-      console.log("[WHATSAPP]📲 QR RECEBIDO:", id);
+      console.log("[WHATSAPP]ðŸ“² QR RECEBIDO:", id);
       qrCodes[id] = await qrcode.toDataURL(qr);
       statusSessao[id] = "qr";
     }
@@ -18640,7 +18684,7 @@ salvarSessoesMeta();
   });
   } catch (e) {
     console.log(
-      "⚠️ Erro ao carregar grupos no pos conexao:",
+      "âš ï¸ Erro ao carregar grupos no pos conexao:",
       e.message
     );
   }
@@ -18727,7 +18771,7 @@ async function testarAwinProdutos() {
   } catch (e) {
 
     console.log(
-      "âŒ erro teste awin:",
+      "Ã¢ÂÅ’ erro teste awin:",
       e.response?.data || e.message
     );
 
@@ -18769,6 +18813,13 @@ function podeRodarAgora() {
 
 carregarConfig();
 
+initEngineDatabase().catch((e) => {
+  console.log("[ENGINE-DB-ERRO]", {
+    motivo: "init_exception",
+    erro: e.message
+  });
+});
+
 for (const usuario of usuarios) {
   carregarFila(usuario.id);
 }
@@ -18805,7 +18856,7 @@ console.log("[BOOT] Dados iniciais carregados:", {
 });
 
 app.listen(PORT, () => {
-  console.log("[API]🟢🧠 API ONLINE NA PORTA " + PORT);
+  console.log("[API]ðŸŸ¢ðŸ§  API ONLINE NA PORTA " + PORT);
 
 decairConfiancaCupons();
 
@@ -19048,14 +19099,14 @@ if (!admin) {
     statusMarketplace.ultimoInicio = new Date().toISOString();
     statusMarketplace.ultimoErro = "";
 
-logOptimus("ORQUESTRADOR", opcoes.origem === "boot_mercadolivre" ? "🚀 ML BOOT | Rodada inicial direta" : "Rodada iniciada", {
+logOptimus("ORQUESTRADOR", opcoes.origem === "boot_mercadolivre" ? "ðŸš€ ML BOOT | Rodada inicial direta" : "Rodada iniciada", {
   marketplace,
   rodada: statusMarketplace.rodadas,
   intervaloAtualMinutos: Math.round(intervaloOrquestradorAtualMs() / 60000),
   origem: opcoes.origem || "orquestrador"
 });
 
-logOptimus(categoriaMarketplaceLog, "Início da rodada", {
+logOptimus(categoriaMarketplaceLog, "InÃ­cio da rodada", {
   marketplace,
   rodada: statusMarketplace.rodadas,
   origem: opcoes.origem || "orquestrador"
@@ -19255,7 +19306,7 @@ if (!global.__optimusMlBootTimeoutRegistrado) {
     logFarejadorAutoDesativado("mercadolivre", "boot_mercadolivre", "admin");
   }
   if (!farejadoresAutoDesativados()) setTimeout(() => {
-    logOptimus("MERCADOLIVRE", "🚀 ML BOOT | Disparo inicial apos deploy", {
+    logOptimus("MERCADOLIVRE", "ðŸš€ ML BOOT | Disparo inicial apos deploy", {
       delaySegundos: 60
     });
     rodarMarketplaceEspecifico("mercadolivre", { origem: "boot_mercadolivre" });
@@ -19300,6 +19351,7 @@ setInterval(() => {
   }
 
 }, 10 * 1000);
+
 
 
 
