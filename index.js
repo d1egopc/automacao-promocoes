@@ -1198,7 +1198,8 @@ function obterEstrategiaFarejador(clienteId = "admin", marketplace = "", opcoes 
 }
 
 function farejadoresAutoDesativados() {
-  return String(process.env.DESATIVAR_FAREJADORES_AUTO || "").toLowerCase() === "true";
+  const valor = String(process.env.DESATIVAR_FAREJADORES_AUTO || "").trim().toLowerCase();
+  return !["false", "0", "off", "nao", "no"].includes(valor);
 }
 
 function logFarejadorAutoDesativado(marketplace = "", origem = "automatico", clienteId = "admin") {
@@ -1333,8 +1334,29 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
 
 async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
   const cliente = String(clienteId || "admin");
-  const saude = avaliarSaudeFilaCliente(cliente);
   const simulado = opcoes.simulado === true;
+
+  if (farejadoresAutoDesativados()) {
+    logFarejadorAutoDesativado("mercadolivre", "fila_inteligente", cliente);
+    return {
+      ok: true,
+      clienteId: cliente,
+      abasteceu: false,
+      modo: simulado ? "simulado" : "real",
+      motivo: "farejadores_auto_desativados",
+      abastecimento: {
+        marketplace: "mercadolivre",
+        tentadas: 0,
+        adicionadas: 0,
+        recusadas: 0,
+        motivosRecusa: {},
+        bloqueios: [],
+        erros: ["farejadores_auto_desativados"]
+      }
+    };
+  }
+
+  const saude = avaliarSaudeFilaCliente(cliente);
 
   if (!saude.deveAbastecer) {
     return {
@@ -3516,6 +3538,21 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
     clienteId = String(clienteId || oferta.clienteId || "").trim();
     if (!clienteId) return { enviado: false, motivo: "clienteId_ausente" };
     configCliente = configCliente || configsPorCliente?.[clienteId] || {};
+
+    if (
+      normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || "") === "mercadolivre" &&
+      normalizarTexto(oferta.origem || oferta.fonte || "") === "radar"
+    ) {
+      logRadarMlImagemDebug({
+        clienteId,
+        oferta,
+        linkOriginal: oferta.linkOriginal || oferta.linkOriginalRadar || "",
+        linkResolvido: oferta.linkResolvido || oferta.linkResolvidoRadar || "",
+        imagemImportador: imagemOfertaRadar(oferta),
+        imagemOfertaRadar: imagemOfertaRadar(oferta),
+        imagemFila: oferta.imagem || ""
+      });
+    }
 
     if (!destinoAceitaOferta(destino, oferta)) {
       return { enviado: false, motivo: "nao_aceita" };
@@ -8866,6 +8903,42 @@ function detectarMarketplaceRadarLink(url = "") {
   return detectarMarketplaceManual(url, "");
 }
 
+function imagemOfertaRadar(oferta = {}) {
+  return String(
+    oferta.imagem ||
+    oferta.image ||
+    oferta.foto ||
+    oferta.thumbnail ||
+    oferta.imageUrl ||
+    ""
+  ).trim();
+}
+
+function logRadarMlImagemDebug({
+  clienteId = "admin",
+  oferta = {},
+  linkOriginal = "",
+  linkResolvido = "",
+  imagemImportador = "",
+  imagemOfertaRadar = "",
+  imagemFila = ""
+} = {}) {
+  const marketplace = normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || "");
+  if (marketplace !== "mercadolivre") return;
+
+  console.log("[RADAR-ML-IMAGEM-DEBUG]", {
+    clienteId,
+    titulo: oferta.titulo || oferta.nome || "",
+    linkOriginal,
+    linkResolvido,
+    imagemImportador,
+    imagemOfertaRadar,
+    imagemFila,
+    temImagemImportador: Boolean(imagemImportador),
+    temImagemFila: Boolean(imagemFila)
+  });
+}
+
 function extrairAmazonAsinRadar(pathname = "") {
   const match = String(pathname || "").match(/\/(?:dp|gp\/product|product)\/([A-Z0-9]{10})(?:[/?]|$)/i);
   return match?.[1] || "";
@@ -11047,9 +11120,21 @@ logDebug("🧪 RADAR LINKS EXTRAIDOS", {
       link: importacao.resolucao?.linkOriginalLimpo || importacao.oferta.linkOriginal,
       linkAfiliado: "",
       linkFinal: "",
+      imagem: imagemOfertaRadar(importacao.oferta),
+      image: imagemOfertaRadar(importacao.oferta),
       mensagemOriginalRadar: texto.slice(0, 1000),
       capturadaEm: dataCaptura,
       dataEntradaRadar: dataCaptura
+    });
+
+    logRadarMlImagemDebug({
+      clienteId: adminMasterId,
+      oferta: ofertaRadar,
+      linkOriginal: ofertaRadar.linkOriginal || "",
+      linkResolvido: ofertaRadar.linkResolvidoRadar || ofertaRadar.urlResolvida || "",
+      imagemImportador: imagemOfertaRadar(importacao.oferta),
+      imagemOfertaRadar: imagemOfertaRadar(ofertaRadar),
+      imagemFila: ""
     });
 
     logOptimus("CUPOM", "Oferta preparada", {
@@ -11750,6 +11835,8 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
     linkAfiliado: linkAfiliadoCliente,
     link: linkAfiliadoCliente,
     linkFinal: linkAfiliadoCliente,
+    imagem: imagemOfertaRadar(ofertaPreparada),
+    image: imagemOfertaRadar(ofertaPreparada),
     status: "pendente",
     statusDetalhe: temCupomForte
       ? "Radar: cupom detectado"
@@ -11790,6 +11877,16 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
   validarCupomMonetarioOferta(ofertaCliente);
   aplicarPrioridadeEnvioOferta(ofertaCliente);
   ofertaCliente.prioridadeFila = ofertaCliente.prioridadeEnvio;
+
+  logRadarMlImagemDebug({
+    clienteId,
+    oferta: ofertaCliente,
+    linkOriginal,
+    linkResolvido: ofertaCliente.linkResolvido || ofertaCliente.linkResolvidoRadar || "",
+    imagemImportador: imagemOfertaRadar(ofertaPreparada),
+    imagemOfertaRadar: imagemOfertaRadar(ofertaPreparada),
+    imagemFila: ofertaCliente.imagem || ""
+  });
 
   if (!existeDestinoCompativelRadar(clienteId, ofertaCliente)) {
     logOptimus("DESTINO", "Radar sem destino compativel", {
@@ -18998,13 +19095,21 @@ clientesProcessadosRodada += 1;
 }
 
 async function rodarProximoMarketplace() {
+  if (farejadoresAutoDesativados()) {
+    logFarejadorAutoDesativado("todos", "orquestrador", "admin");
+    return;
+  }
+
   const marketplace = selecionarProximoMarketplaceOrquestrador();
   return rodarMarketplaceEspecifico(marketplace, { origem: "orquestrador" });
 }
 
 if (!global.__optimusMlBootTimeoutRegistrado) {
   global.__optimusMlBootTimeoutRegistrado = true;
-  setTimeout(() => {
+  if (farejadoresAutoDesativados()) {
+    logFarejadorAutoDesativado("mercadolivre", "boot_mercadolivre", "admin");
+  }
+  if (!farejadoresAutoDesativados()) setTimeout(() => {
     logOptimus("MERCADOLIVRE", "🚀 ML BOOT | Disparo inicial apos deploy", {
       delaySegundos: 60
     });
@@ -19014,7 +19119,10 @@ if (!global.__optimusMlBootTimeoutRegistrado) {
 
 if (!global.__optimusOrquestradorMarketplacesIntervalRegistrado) {
   global.__optimusOrquestradorMarketplacesIntervalRegistrado = true;
-  setInterval(() => {
+  if (farejadoresAutoDesativados()) {
+    logFarejadorAutoDesativado("todos", "orquestrador_intervalo", "admin");
+  }
+  if (!farejadoresAutoDesativados()) setInterval(() => {
     const intervaloAtual = intervaloOrquestradorAtualMs();
     const ultimaRodada = ultimaRodadaOrquestradorMs || inicioOrquestradorMarketplacesMs;
 
