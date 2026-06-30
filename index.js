@@ -3355,6 +3355,60 @@ function destinoNomeLog(destino = {}) {
   return String(destino.nome || destino.titulo || destino.label || destino.id || destino.conexaoId || "Destino");
 }
 
+function categoriasDestinoDebug(destino = {}) {
+  const categorias = destino.categorias || destino.categoriasPermitidas || [];
+  return Array.isArray(categorias) ? categorias : [];
+}
+
+function destinoSessaoOkDebug(clienteId = "admin", destino = {}) {
+  const canal = String(destino.tipo || "").toLowerCase();
+
+  if (canal === "whatsapp") {
+    return Boolean(destino.conexaoId && sessoes[destino.conexaoId]);
+  }
+
+  if (canal === "telegram") {
+    try {
+      const telegrams = listarTelegramsCliente(clienteId).map(normalizarTelegramFila);
+      const idsSelecionados = idsTelegramDestinoFila(destino);
+      const telegramsDiretos = telegramsDiretosDestinoFila(destino);
+      const selecionados = idsSelecionados.length
+        ? telegrams.filter(t => idsSelecionados.some(id => t.chaves.includes(id)))
+        : telegrams.filter(t => t.ativo);
+
+      return [...telegramsDiretos, ...selecionados].some(t => t.ativo && t.botToken && t.chatId);
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+function logEnvioDestinoDebug(dados = {}) {
+  const destino = dados.destino || {};
+  const oferta = dados.oferta || {};
+  const analise = dados.analise || analisarDestinoOferta(destino, oferta);
+
+  console.log("[ENVIO-DESTINO-DEBUG]", {
+    clienteId: dados.clienteId || oferta.clienteId || "admin",
+    ofertaTitulo: oferta.titulo || oferta.nome || "",
+    marketplace: oferta.marketplace || oferta.mercado || "",
+    categoriaOferta: oferta.categoria || oferta.categoriaProduto || "",
+    destinosAtivosTotal: Number(dados.destinosAtivosTotal || 0),
+    destinosCompativeis: Number(dados.destinosCompativeis || 0),
+    destinosTentados: Number(dados.destinosTentados || 0),
+    destinoNome: destinoNomeLog(destino),
+    canal: destino.tipo || "",
+    categoriasDestino: categoriasDestinoDebug(destino),
+    dentroHorario: dados.dentroHorario === undefined ? destinoDentroHorario(destino) : Boolean(dados.dentroHorario),
+    automacaoAtiva: Boolean(config.automacaoAtiva),
+    sessaoOk: dados.sessaoOk === undefined ? destinoSessaoOkDebug(dados.clienteId || oferta.clienteId || "admin", destino) : Boolean(dados.sessaoOk),
+    enviado: Boolean(dados.enviado),
+    erro: dados.erro || analise.motivo || ""
+  });
+}
+
 function destinoChaveControle(clienteId = "admin", destino = {}) {
   return `${clienteId}_${destino.id || destino.nome || destino.conexaoId || destino.chatId || "destino"}`;
 }
@@ -3909,6 +3963,8 @@ let houveFalhaReal = false;
 const categoriaOfertaFila = oferta.categoria || oferta.categoriaProduto || classificarCategoriaOferta(oferta, oferta.termo || "");
 const analiseDestinosFila = analisarDestinosCompativeisFila(clienteId, oferta, configCliente);
 const destinosCompativeis = analiseDestinosFila.compativeis;
+const destinosAtivosTotalDebug = analiseDestinosFila.destinosInteligentes.filter(destino => destino?.ativo !== false).length;
+let destinosTentadosDebug = 0;
 const fastLaneCupomTipo = cupomFastLaneTipo(oferta);
 
 if (fastLaneCupomTipo === "real_detectado") {
@@ -3935,6 +3991,19 @@ for (const itemRejeitado of analiseDestinosFila.rejeitados) {
   const destino = itemRejeitado.destino;
   const analise = itemRejeitado.analise;
   const nomeDestino = destinoNomeLog(destino);
+
+  logEnvioDestinoDebug({
+    clienteId,
+    oferta,
+    destino,
+    analise,
+    destinosAtivosTotal: destinosAtivosTotalDebug,
+    destinosCompativeis: destinosCompativeis.length,
+    destinosTentados: destinosTentadosDebug,
+    dentroHorario: destinoDentroHorario(destino),
+    enviado: false,
+    erro: analise.motivo || "nao_compativel"
+  });
 
   if (String(destino.tipo || "").toLowerCase() === "telegram") {
     logFilaTelegramDebug({
@@ -4024,6 +4093,18 @@ for (const item of destinosOrdenados) {
 
   if (!destinoDentroHorario(destino)) {
     pulouPorHorario = true;
+    logEnvioDestinoDebug({
+      clienteId,
+      oferta,
+      destino,
+      analise: item.analise,
+      destinosAtivosTotal: destinosAtivosTotalDebug,
+      destinosCompativeis: destinosCompativeis.length,
+      destinosTentados: destinosTentadosDebug,
+      dentroHorario: false,
+      enviado: false,
+      erro: "fora_horario"
+    });
     logOptimus("DESTINO", "Rejeitada horario", {
       clienteId,
       destino: nomeDestino
@@ -4049,6 +4130,17 @@ for (const item of destinosOrdenados) {
   const limite = destinoLimiteDiarioDisponivel(clienteId, destino);
   if (!limite.ok) {
     pulouPorLimiteDiario = true;
+    logEnvioDestinoDebug({
+      clienteId,
+      oferta,
+      destino,
+      analise: item.analise,
+      destinosAtivosTotal: destinosAtivosTotalDebug,
+      destinosCompativeis: destinosCompativeis.length,
+      destinosTentados: destinosTentadosDebug,
+      enviado: false,
+      erro: "limite_diario"
+    });
     logOptimus("DESTINO", "Rejeitada limite diario", {
       clienteId,
       destino: nomeDestino,
@@ -4075,6 +4167,17 @@ for (const item of destinosOrdenados) {
 
   if (!intervalo.liberado) {
     pulouPorIntervalo = true;
+    logEnvioDestinoDebug({
+      clienteId,
+      oferta,
+      destino,
+      analise: item.analise,
+      destinosAtivosTotal: destinosAtivosTotalDebug,
+      destinosCompativeis: destinosCompativeis.length,
+      destinosTentados: destinosTentadosDebug,
+      enviado: false,
+      erro: "intervalo"
+    });
     logOptimus("DESTINO", "Aguardando intervalo", {
       clienteId,
       destino: nomeDestino,
@@ -4148,6 +4251,19 @@ for (const item of destinosOrdenados) {
     typeof enviado === "object" && enviado !== null
       ? enviado
       : { enviado: enviado === true, motivo: enviado === false ? "nao_enviado" : "" };
+  destinosTentadosDebug += 1;
+
+  logEnvioDestinoDebug({
+    clienteId,
+    oferta,
+    destino,
+    analise: item.analise,
+    destinosAtivosTotal: destinosAtivosTotalDebug,
+    destinosCompativeis: destinosCompativeis.length,
+    destinosTentados: destinosTentadosDebug,
+    enviado: resultadoEnvio.enviado === true,
+    erro: resultadoEnvio.enviado === true ? "" : (resultadoEnvio.erro || resultadoEnvio.motivo || "nao_enviado")
+  });
 
   if (resultadoEnvio.enviado === true) {
     enviouParaAlgumDestino = true;
