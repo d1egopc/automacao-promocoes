@@ -8306,9 +8306,14 @@ function categoriaManualTextoRadarMlDetalhada(texto = "") {
       padrao: /heinz|ketchup|maionese|mostarda|ovomaltine|alpino|nestle|chocolate|achocolatado/
     },
     {
+      regra: "gamer_hardware_texto_radar",
+      categoria: "Gamer e Hardware",
+      padrao: /watercooler|cooler|ventoinha|kitfan|fanrgb|fanargb|fan120mm|fanpc|gabinete|placamae|placadevideo|memoriaram|ssd|fontegamer/
+    },
+    {
       regra: "casa_moveis_decoracao",
       categoria: "Casa, M\u00f3veis e Decora\u00e7\u00e3o",
-      padrao: /painel|madeira|mdf|ripado|cozinha|tigela|panela|cacarola|cadeira|mesa/
+      padrao: /painel|madeira|mdf|ripado|cozinha|tigela|panela|cacarola|cadeira|mesa|prato|talher|copo|taca|xicara|jogodejantar|aparelhodejantar|dormir|jogodecama|roupadecama|travesseiro|edredom|cobertor|lencol|colchao|coberdrom/
     },
     {
       regra: "brinquedos_infantis",
@@ -8420,6 +8425,17 @@ function aplicarFallbackCategoriaRadarMl(oferta = {}, clienteId = "admin") {
       usouTextoRadar,
       regraAplicada: motivo || "sem_alteracao",
       motivo: motivo || "sem_alteracao"
+    });
+  }
+
+  if (categoriaDiversosRadar(categoriaAntes) && !categoriaGenericaRadar(categoriaDepois) && categoriaDepois !== categoriaAntes) {
+    console.log("[RADAR-CATEGORIA-TEXTO-FALLBACK]", {
+      clienteId,
+      tituloImportador: tituloAntes,
+      textoRadarResumo: String(textoRadar || "").slice(0, 300),
+      categoriaAntes,
+      categoriaDepois,
+      regraAplicada: motivo || "categoria_diversos_reclassificada"
     });
   }
 
