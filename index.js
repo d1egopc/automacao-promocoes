@@ -9101,12 +9101,13 @@ function extrairProdutoMercadoLivreDeHtmlRadar(html = "") {
     ...texto.matchAll(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/gi),
     ...texto.matchAll(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/gi),
     ...texto.matchAll(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:url["']/gi),
+    ...texto.matchAll(/(?:href|data-href)=["']([^"']*(?:produto\.mercadolivre\.com\.br\/MLB|mercadolivre\.com\.br\/p\/MLB|permalink\/MLB)[^"']*)["']/gi),
     ...texto.matchAll(/"permalink"\s*:\s*"([^"]*MLB[^"]*)"/gi),
     ...texto.matchAll(/"url"\s*:\s*"([^"]*MLB[^"]*)"/gi),
     ...texto.matchAll(/"canonicalUrl"\s*:\s*"([^"]*MLB[^"]*)"/gi),
-    ...texto.matchAll(/href=["']([^"']*(?:produto\.mercadolivre\.com\.br\/MLB|mercadolivre\.com\.br\/p\/MLB)[^"']*)["']/gi)
+    ...texto.matchAll(/https?:\\?\/\\?\/[^"'<>\\\s]*(?:produto\.mercadolivre\.com\.br\\?\/MLB|mercadolivre\.com\.br\\?\/p\\?\/MLB|permalink\\?\/MLB)[^"'<>\\\s]*/gi)
   ]
-    .map(match => normalizarUrlExtraidaMercadoLivreRadar(match[1]))
+    .map(match => normalizarUrlExtraidaMercadoLivreRadar(match[1] || match[0]))
     .filter(Boolean);
 
   const itemId =
@@ -9120,7 +9121,7 @@ function extrairProdutoMercadoLivreDeHtmlRadar(html = "") {
   for (const candidato of candidatos) {
     const limpo = limparUrlProdutoRadar(candidato, "mercadolivre");
     if (!limpo || isUrlIntermediariaMercadoLivreRadar(limpo)) continue;
-    if (/produto\.mercadolivre\.com\.br\/MLB-?\d+/i.test(limpo) || /mercadolivre\.com\.br\/p\/MLB/i.test(limpo)) {
+    if (/produto\.mercadolivre\.com\.br\/MLB-?\d+/i.test(limpo) || /mercadolivre\.com\.br\/p\/MLB/i.test(limpo) || /mercadolivre\.com\.br\/permalink\/MLB/i.test(limpo)) {
       return limpo;
     }
   }
@@ -9888,6 +9889,17 @@ function logRedirectRadar(dados = {}) {
   });
 }
 
+function logRadarMlSocialResolvido(dados = {}) {
+  console.log("[RADAR-ML-SOCIAL-RESOLVIDO]", {
+    clienteId: dados.clienteId || "",
+    urlSocial: dados.urlSocial || "",
+    encontrouProduto: dados.encontrouProduto === true,
+    linkProduto: dados.linkProduto || "",
+    metodo: dados.metodo || "",
+    motivo: dados.motivo || ""
+  });
+}
+
 function logPromozoneRadar(dados = {}) {
   console.log("[RADAR-PROMOZONE]", {
     urlOriginal: dados.urlOriginal || "",
@@ -10098,8 +10110,11 @@ async function resolverLinkOriginalRadar(url = "") {
         };
       }
 
+      const urlSocialMeli = isUrlIntermediariaMercadoLivreRadar(resolvida) && /mercadolivre\.com\.br\/social\//i.test(resolvida);
       let tipoLinkRadarMeli = urlMercadoLivreProdutoRadar(resolvida) ? "shortlink_meli" : "shortlink_meli_social";
       let linkOriginalLimpo = limparUrlProdutoRadar(resolvida, "mercadolivre") || resolvida;
+      let metodoSocialMeli = "";
+      let motivoSocialMeli = "";
 
       if (tipoLinkRadarMeli === "shortlink_meli_social") {
         const produtoParametro =
@@ -10107,8 +10122,10 @@ async function resolverLinkOriginalRadar(url = "") {
           extrairProdutoDeParametrosIntermediarioRadar(capturada, "mercadolivre");
 
         if (produtoParametro) {
-          linkOriginalLimpo = produtoParametro;
+          linkOriginalLimpo = produtoParametro.url || produtoParametro;
           tipoLinkRadarMeli = "shortlink_meli";
+          metodoSocialMeli = "parametro";
+          motivoSocialMeli = "produto_extraido_parametro";
         } else if (isUrlIntermediariaMercadoLivreRadar(resolvida)) {
           try {
             const paginaIntermediaria = await baixarHtmlRadar(resolvida);
@@ -10121,8 +10138,15 @@ async function resolverLinkOriginalRadar(url = "") {
             if (produtoResolvido) {
               linkOriginalLimpo = produtoResolvido;
               tipoLinkRadarMeli = "shortlink_meli";
+              metodoSocialMeli = produtoHtml ? "html" : "fallback_intermediario";
+              motivoSocialMeli = "produto_extraido_html_social";
+            } else {
+              motivoSocialMeli = paginaIntermediaria.ok === false
+                ? (paginaIntermediaria.erro || `http_${paginaIntermediaria.status || "sem_status"}`)
+                : "produto_nao_encontrado_html_social";
             }
           } catch (e) {
+            motivoSocialMeli = e.message || "erro_baixar_html_social";
             logDebug("[RADAR-LINK] meli.la intermediario mantido para importador", {
               capturada,
               resolvida,
@@ -10130,6 +10154,42 @@ async function resolverLinkOriginalRadar(url = "") {
             });
           }
         }
+      }
+
+      if (urlSocialMeli) {
+        logRadarMlSocialResolvido({
+          clienteId: "admin",
+          urlSocial: resolvida,
+          encontrouProduto: tipoLinkRadarMeli !== "shortlink_meli_social",
+          linkProduto: tipoLinkRadarMeli !== "shortlink_meli_social" ? linkOriginalLimpo : "",
+          metodo: metodoSocialMeli || "html",
+          motivo: motivoSocialMeli || (tipoLinkRadarMeli === "shortlink_meli_social" ? "produto_nao_encontrado_html_social" : "produto_extraido")
+        });
+      }
+
+      if (urlSocialMeli && tipoLinkRadarMeli === "shortlink_meli_social") {
+        logRedirectRadar({
+          urlOriginal: capturada,
+          urlFinal: resolvida,
+          dominioOriginal,
+          dominioFinal,
+          marketplaceDetectado: "mercadolivre",
+          resolveu: false,
+          motivo: "radar_ml_social_sem_produto"
+        });
+
+        return {
+          ok: false,
+          motivo: "radar_ml_social_sem_produto",
+          motivoTecnico: "radar_ml_social_sem_produto",
+          urlCapturada: capturada,
+          urlResolvida: resolvida || "",
+          linkOriginalRadar: capturada,
+          linkResolvido: resolvida || "",
+          marketplaceReal: "mercadolivre",
+          tipoLinkRadar: "shortlink_meli_social",
+          statusHttp: resposta.status || ""
+        };
       }
 
       if (tipoLinkRadarMeli === "shortlink_meli_social") {
