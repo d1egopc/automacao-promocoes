@@ -15529,21 +15529,73 @@ async function buscarCsrfTokenMercadoLivre(cookies, contexto = {}) {
   }
 }
 
-async function gerarLinkAfiliadoMercadoLivre(url, config, contexto = {}) {
-  try {
+function tipoUrlMercadoLivreAfiliado(url = "") {
+  const texto = String(url || "").trim();
+  if (!texto) return "vazia";
+  if (/meli\.la/i.test(texto)) return "meli_la";
 
-if (String(url || "").includes("meli.la")) {
-  console.log("[INFO] Link ML j encurtado detectado. No vou reutilizar para outro cliente.");
-  return "";
+  try {
+    const parsed = new URL(texto);
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname || "";
+
+    if (host.includes("mercadolivre.com.br") && path.toLowerCase().startsWith("/social/")) return "social";
+    if (host.includes("produto.mercadolivre.com.br") && /\/MLB-?\d+/i.test(path)) return "produto_mlb";
+    if (host.includes("mercadolivre.com.br") && /\/p\/MLB/i.test(path)) return "produto_p";
+    if (host.includes("mercadolivre.com.br") && /\/permalink\/MLB/i.test(path)) return "permalink";
+    if (host.includes("mercadolivre.com.br")) return "mercadolivre_outro";
+  } catch {
+    return "url_invalida";
+  }
+
+  return "outro";
 }
 
-    const credenciais = config?.credenciais || {};
+function logMlAfiliadoFalhaDetalhe(dados = {}) {
+  console.log("[ML-AFILIADO-FALHA-DETALHE]", {
+    clienteId: dados.clienteId || "",
+    motivo: dados.motivo || "",
+    statusHttp: dados.statusHttp || null,
+    temCsrf: dados.temCsrf === true,
+    temTag: dados.temTag === true,
+    urlTipo: dados.urlTipo || "",
+    temCookies: dados.temCookies === true
+  });
+}
 
-    const cookies = credenciais.cookies || "";
-    const tag = credenciais.tag || "";
+async function gerarLinkAfiliadoMercadoLivre(url, config, contexto = {}) {
+  const credenciais = config?.credenciais || {};
+  const cookies = credenciais.cookies || "";
+  const tag = credenciais.tag || "";
+  const clienteId = contexto.clienteId || "";
+  const urlTipo = tipoUrlMercadoLivreAfiliado(url);
+
+  try {
+    if (String(url || "").includes("meli.la")) {
+      console.log("[INFO] Link ML j encurtado detectado. No vou reutilizar para outro cliente.");
+      logMlAfiliadoFalhaDetalhe({
+        clienteId,
+        motivo: "meli_la_bloqueado",
+        statusHttp: null,
+        temCsrf: false,
+        temTag: !!tag,
+        temCookies: !!cookies,
+        urlTipo
+      });
+      return "";
+    }
 
     if (!url || !cookies || !tag) {
       console.log("[INFO] ML AFILIADO: faltando cookies ou tag");
+      logMlAfiliadoFalhaDetalhe({
+        clienteId,
+        motivo: !url ? "url_ausente" : (!cookies ? "cookies_ausentes" : "tag_ausente"),
+        statusHttp: null,
+        temCsrf: false,
+        temTag: !!tag,
+        temCookies: !!cookies,
+        urlTipo
+      });
       if (contexto.clienteId) {
         registrarAlertaMercadoLivre(contexto.clienteId, "configuracao_incompleta", {
           faltandoCookies: !cookies,
@@ -15557,6 +15609,15 @@ if (String(url || "").includes("meli.la")) {
 
     if (!csrfToken) {
       console.log("[INFO] ML AFILIADO: csrfToken automtico no encontrado");
+      logMlAfiliadoFalhaDetalhe({
+        clienteId,
+        motivo: "csrf_nao_encontrado",
+        statusHttp: null,
+        temCsrf: false,
+        temTag: !!tag,
+        temCookies: !!cookies,
+        urlTipo
+      });
       if (contexto.clienteId) {
         registrarAlertaMercadoLivre(contexto.clienteId, "cookie_invalido", {
           motivo: "csrf_nao_encontrado"
@@ -15588,10 +15649,19 @@ if (String(url || "").includes("meli.la")) {
 
     const data = await response.json().catch(() => null);
 
-  console.log("[INFO] ML afiliado respondeu");
+    console.log("[INFO] ML afiliado respondeu");
 
     if (!response.ok) {
       console.log("[ERRO] ML AFILIADO ERRO STATUS:", response.status);
+      logMlAfiliadoFalhaDetalhe({
+        clienteId,
+        motivo: "http_status_invalido",
+        statusHttp: response.status,
+        temCsrf: true,
+        temTag: !!tag,
+        temCookies: !!cookies,
+        urlTipo
+      });
       if (contexto.clienteId && [401, 403, 407, 419, 429].includes(Number(response.status))) {
         registrarAlertaMercadoLivre(contexto.clienteId, "cookie_invalido", {
           httpStatus: response.status,
@@ -15601,17 +15671,38 @@ if (String(url || "").includes("meli.la")) {
       return "";
     }
 
- if (contexto.clienteId) {
-   limparAlertaIntegracao(contexto.clienteId, "mercadolivre");
- }
+    if (contexto.clienteId) {
+      limparAlertaIntegracao(contexto.clienteId, "mercadolivre");
+    }
 
- return data?.short_url || data?.shortUrl || data?.url || "";
+    const linkAfiliado = data?.short_url || data?.shortUrl || data?.url || "";
+    if (!linkAfiliado) {
+      logMlAfiliadoFalhaDetalhe({
+        clienteId,
+        motivo: "resposta_sem_link",
+        statusHttp: response.status,
+        temCsrf: true,
+        temTag: !!tag,
+        temCookies: !!cookies,
+        urlTipo
+      });
+    }
+
+    return linkAfiliado;
   } catch (e) {
     console.error("[ERRO] ERRO ML AFILIADO:", e.message);
+    logMlAfiliadoFalhaDetalhe({
+      clienteId,
+      motivo: e.message || "erro_inesperado",
+      statusHttp: null,
+      temCsrf: false,
+      temTag: !!tag,
+      temCookies: !!cookies,
+      urlTipo
+    });
     return "";
   }
 }
-
 const encurtarUrl = async (url) => {
   try {
     const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`);
