@@ -38,6 +38,25 @@ function logEngineAuditoriaConsulta(dados = {}) {
   logEngine("[ENGINE-AUDITORIA-CONSULTA]", dados);
 }
 
+function logEngineProcessadorInicio(dados = {}) {
+  logEngine("[ENGINE-PROCESSADOR-INICIO]", dados);
+}
+
+function logEngineProcessadorJob(dados = {}) {
+  logEngine("[ENGINE-PROCESSADOR-JOB]", dados);
+}
+
+function logEngineProcessadorEtapa(dados = {}) {
+  logEngine("[ENGINE-PROCESSADOR-ETAPA]", dados);
+}
+
+function logEngineProcessadorErro(dados = {}) {
+  logEngine("[ENGINE-PROCESSADOR-ERRO]", dados);
+}
+
+function logEngineProcessadorFim(dados = {}) {
+  logEngine("[ENGINE-PROCESSADOR-FIM]", dados);
+}
 module.exports = {
   logEngineDbOk,
   logEngineDbErro,
@@ -46,5 +65,10 @@ module.exports = {
   logEngineEventoBrutoErro,
   logEngineJobClienteCriado,
   logEngineJobClienteErro,
-  logEngineAuditoriaConsulta
+  logEngineAuditoriaConsulta,
+  logEngineProcessadorInicio,
+  logEngineProcessadorJob,
+  logEngineProcessadorEtapa,
+  logEngineProcessadorErro,
+  logEngineProcessadorFim
 };

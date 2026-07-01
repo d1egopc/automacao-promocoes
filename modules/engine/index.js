@@ -16,11 +16,16 @@ const {
   consultarResumoEngine
 } = require("./audit.service");
 
+const {
+  processarJobsPendentesEngine
+} = require("./processor.runner");
+
 module.exports = {
   initEngineDatabase,
   registrarEventoBruto,
   criarJobsParaClientes,
   consultarEventosEngine,
   consultarJobsEngine,
-  consultarResumoEngine
+  consultarResumoEngine,
+  processarJobsPendentesEngine
 };
