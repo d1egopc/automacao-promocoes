@@ -11258,21 +11258,170 @@ function logarResumoRadarMarketplace(marketplaces = [], janelaMinutos = RADAR_MA
   }
 }
 
-function listarClientesEngineRadar() {
-  try {
-    const ids = Array.isArray(usuarios)
-      ? usuarios.map(usuario => usuario?.id).filter(Boolean)
-      : [];
-    return [...new Set(ids.length ? ids : ["admin"] )];
-  } catch {
-    return ["admin"];
+function detectarMarketplaceEngineRadar(dados = {}) {
+  const candidatos = [
+    dados.marketplace,
+    dados.marketplaceDetectado,
+    dados.marketplace_detectado,
+    ...(Array.isArray(dados.linksExtraidos) ? dados.linksExtraidos : []),
+    ...(Array.isArray(dados.links_extraidos) ? dados.links_extraidos : []),
+    dados.textoOriginal,
+    dados.texto
+  ];
+
+  for (const candidato of candidatos) {
+    const texto = String(candidato || "").toLowerCase();
+    if (!texto) continue;
+    if (texto.includes("mercadolivre.com") || texto.includes("meli.la")) return "mercadolivre";
+    if (texto.includes("shopee.")) return "shopee";
+    if (texto.includes("amazon.") || texto.includes("amzn.to")) return "amazon";
+    if (texto.includes("aliexpress.")) return "aliexpress";
+    if (texto.includes("kabum.com.br")) return "awin";
+    if (texto.includes("awin1.com") || texto.includes("awin.com")) return "awin";
+    if (texto.includes("magazineluiza.com") || texto.includes("magalu.")) return "magalu";
   }
+
+  return "";
 }
 
+function normalizarDestinoEngineRadar(valor = "") {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+function destinoAtivoCompativelEngineRadar(clienteId = "", marketplace = "") {
+  const destinos = destinosClienteNormalizados(clienteId);
+  const marketplaceOferta = normalizarDestinoEngineRadar(marketplace);
+
+  return destinos.some(destino => {
+    if (destino?.ativo !== true) return false;
+
+    const marketplacesDestino = (destino.marketplaces || [])
+      .map(normalizarDestinoEngineRadar)
+      .filter(Boolean);
+
+    return !marketplacesDestino.length ||
+      marketplacesDestino.includes("geral") ||
+      marketplacesDestino.includes("todos") ||
+      marketplacesDestino.includes("todas") ||
+      marketplacesDestino.includes(marketplaceOferta);
+  });
+}
+
+function adminOperacionalEngineRadar(usuario = {}) {
+  const configAdmin = configsPorCliente?.admin || {};
+  return Boolean(
+    usuario?.engineOperacional === true ||
+    usuario?.operacional === true ||
+    usuario?.recebeEngine === true ||
+    configAdmin?.engineOperacional === true ||
+    configAdmin?.operacional === true ||
+    configAdmin?.recebeEngine === true
+  );
+}
+
+function listarClientesEngineRadar(dados = {}) {
+  const marketplace = detectarMarketplaceEngineRadar(dados);
+  const clientesIncluidos = [];
+  const clientesIgnorados = [];
+  const motivosIgnorados = {};
+
+  function ignorar(clienteId, motivo) {
+    clientesIgnorados.push({ clienteId, motivo });
+    motivosIgnorados[motivo] = (motivosIgnorados[motivo] || 0) + 1;
+  }
+
+  try {
+    const listaUsuarios = Array.isArray(usuarios) ? usuarios : [];
+
+    for (const usuario of listaUsuarios) {
+      const clienteId = String(usuario?.id || "").trim();
+      if (!clienteId) continue;
+
+      if (clienteId === "admin" && !adminOperacionalEngineRadar(usuario)) {
+        ignorar(clienteId, "admin_sem_flag_operacional");
+        continue;
+      }
+
+      if (usuario?.ativo === false) {
+        ignorar(clienteId, "usuario_inativo");
+        continue;
+      }
+
+      if (!marketplace) {
+        ignorar(clienteId, "marketplace_nao_detectado");
+        continue;
+      }
+
+      if (!usuarioPodeReceberMarketplace(usuario, marketplace)) {
+        ignorar(clienteId, "plano_nao_permite_marketplace");
+        continue;
+      }
+
+      const configCliente = configsPorCliente?.[clienteId] || {};
+      if (configCliente.automacaoAtiva !== true) {
+        ignorar(clienteId, "automacao_desligada");
+        continue;
+      }
+
+      if (!clienteAceitaMarketplaceAtivo(clienteId, marketplace)) {
+        ignorar(clienteId, "marketplace_desativado_no_cliente");
+        continue;
+      }
+
+      const integracao = getIntegracaoCliente(clienteId, marketplace);
+      if (!integracao) {
+        ignorar(clienteId, "integracao_ausente");
+        continue;
+      }
+
+      const cred = integracao?.credenciais || {};
+      const credenciaisOk = marketplace === "mercadolivre"
+        ? Boolean(cred.tag && cred.cookies)
+        : usuarioTemIntegracaoMarketplace(clienteId, marketplace);
+
+      if (!credenciaisOk) {
+        ignorar(clienteId, "credenciais_incompletas");
+        continue;
+      }
+
+      if (!destinoAtivoCompativelEngineRadar(clienteId, marketplace)) {
+        ignorar(clienteId, "sem_destino_ativo_compativel");
+        continue;
+      }
+
+      clientesIncluidos.push(clienteId);
+    }
+
+    console.log("[ENGINE-CLIENTES-ELEGIVEIS]", {
+      marketplace,
+      totalUsuarios: listaUsuarios.length,
+      clientesIncluidos,
+      clientesIgnorados,
+      motivosIgnorados
+    });
+
+    return [...new Set(clientesIncluidos)];
+  } catch (e) {
+    console.log("[ENGINE-CLIENTES-ELEGIVEIS]", {
+      marketplace,
+      totalUsuarios: 0,
+      clientesIncluidos: [],
+      clientesIgnorados,
+      motivosIgnorados: { erro: 1 },
+      erro: e.message
+    });
+    return [];
+  }
+}
 async function registrarEventoBrutoEngineRadar(dados = {}) {
   try {
     await registrarEventoBruto(dados, {
-      clientes: listarClientesEngineRadar()
+      clientes: listarClientesEngineRadar(dados)
     });
   } catch (e) {
     console.log("[ENGINE-EVENTO-BRUTO-ERRO]", {
