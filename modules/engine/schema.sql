@@ -3,7 +3,12 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
-  NEW.atualizado_em = NOW();
+  IF TG_TABLE_NAME = 'engine_ofertas' THEN
+    NEW.atualizada_em = NOW();
+  ELSE
+    NEW.atualizado_em = NOW();
+  END IF;
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
