@@ -24,7 +24,7 @@ function motivoAdicionar(resumo, motivo = "erro_distribuicao") {
 async function reterOferta(oferta, motivo, detalhes = {}, resumo = null) {
   await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "retida", motivo, detalhes);
   await marcarOfertaStatus(oferta.id, "retida", motivo, { jobId: oferta.job_id, clienteId: oferta.cliente_id });
-  logEngineDistribuidorRetida({ ofertaId: oferta.id, jobId: oferta.job_id, clienteId: oferta.cliente_id, motivo });
+  logEngineDistribuidorRetida({ ofertaId: oferta.id, jobId: oferta.job_id, clienteId: oferta.cliente_id, categoriaOferta: detalhes.categoriaOferta || oferta.categoria || "", categoriasDestino: detalhes.categoriasDestino || [], motivo });
 
   if (resumo) {
     resumo.retidas += 1;

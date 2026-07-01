@@ -156,6 +156,19 @@ function analisarDestinosOferta(clienteId = "admin", oferta = {}, contexto = {})
   return { destinos, compativeis, rejeitados };
 }
 
+function categoriasDestinoRetencao(destinos = []) {
+  const categorias = new Set();
+
+  for (const destino of Array.isArray(destinos) ? destinos : []) {
+    const lista = destino?.categorias || destino?.categoriasPermitidas || [];
+    for (const categoria of Array.isArray(lista) ? lista : []) {
+      const texto = normalizarTexto(categoria);
+      if (texto) categorias.add(texto);
+    }
+  }
+
+  return [...categorias];
+}
 function motivoDestinoRetido(analise = {}) {
   if (!analise.destinos.length) return "sem_destino";
   if (analise.rejeitados.length && analise.rejeitados.every(item => item.analise?.motivo === "marketplace")) return "marketplace_bloqueado";
