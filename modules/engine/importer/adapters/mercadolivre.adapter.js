@@ -49,46 +49,38 @@ function isMeliLa(url = "") {
   return /(^|\/\/)meli\.la\//i.test(String(url || ""));
 }
 
-async function expandirMeliLa(url, contexto = {}) {
+function isSocialMercadoLivre(url = "") {
   try {
-    const response = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache"
-      }
-    });
+    const parsed = new URL(String(url || "").trim());
+    return parsed.hostname.toLowerCase().includes("mercadolivre.com.br") && parsed.pathname.toLowerCase().startsWith("/social/");
+  } catch {
+    return false;
+  }
+}
 
-    const urlFinal = String(response.url || "").trim();
-    const ok = response.ok && urlFinal && !isMeliLa(urlFinal) && /mercadolivre\.com/i.test(urlFinal);
+function isUrlProdutoMercadoLivre(url = "") {
+  try {
+    const parsed = new URL(String(url || "").trim());
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname || "";
 
-    console.log("[ENGINE-ML-REDIRECT]", {
-      ...contexto,
-      urlOriginal: url,
-      urlFinal,
-      httpStatus: response.status,
-      ok
-    });
+    if (!host.endsWith("mercadolivre.com.br")) return false;
+    if (host.includes("produto.mercadolivre.com.br") && /\/MLB-?\d+/i.test(path)) return true;
+    if (/\/p\/MLB/i.test(path)) return true;
+    if (/\/permalink\/MLB/i.test(path)) return true;
+    if (/MLB-?\d+/i.test(path) && !path.toLowerCase().startsWith("/social/")) return true;
 
-    if (!ok) {
-      return { ok: false, motivo: "meli_redirect_falhou", urlFinal, httpStatus: response.status };
-    }
+    return false;
+  } catch {
+    return false;
+  }
+}
 
-    return { ok: true, urlFinal, httpStatus: response.status };
-  } catch (e) {
-    console.log("[ENGINE-ML-REDIRECT]", {
-      ...contexto,
-      urlOriginal: url,
-      ok: false,
-      motivo: "meli_redirect_falhou",
-      erro: e.message
-    });
-    return { ok: false, motivo: "meli_redirect_falhou", erro: e.message };
+function dominioUrl(url = "") {
+  try {
+    return new URL(String(url || "")).hostname.toLowerCase();
+  } catch {
+    return "";
   }
 }
 
@@ -108,7 +100,7 @@ async function atualizarLinkExpandidoEngine(link = null, urlExpandida = "", cont
       urlExpandida,
       dominioUrl(urlExpandida),
       JSON.stringify({
-        expandiuMeliLa: true,
+        usouResolverRadarMl: true,
         linkOriginalEngine: link.url_original || link.url_normalizada || "",
         linkExpandidoEngine: urlExpandida
       })
@@ -116,7 +108,7 @@ async function atualizarLinkExpandidoEngine(link = null, urlExpandida = "", cont
   );
 
   if (!resultado.ok) {
-    console.log("[ENGINE-ML-REDIRECT]", {
+    console.log("[ENGINE-ML-URL-PRODUTO-RESOLVIDA]", {
       ...contexto,
       linkId: link.id,
       urlExpandida,
@@ -127,12 +119,115 @@ async function atualizarLinkExpandidoEngine(link = null, urlExpandida = "", cont
   }
 }
 
-function dominioUrl(url = "") {
-  try {
-    return new URL(String(url || "")).hostname.toLowerCase();
-  } catch {
-    return "";
+function escolherProdutoResolvido(resolucao = {}, urlOriginal = "") {
+  const candidatos = [
+    resolucao.linkOriginalLimpo,
+    resolucao.linkResolvido,
+    resolucao.urlResolvida,
+    urlOriginal
+  ];
+
+  return candidatos
+    .map(url => String(url || "").trim())
+    .find(isUrlProdutoMercadoLivre) || "";
+}
+
+async function resolverUrlProdutoMercadoLivreEngine(urlOriginalEngine = "", deps = {}, contexto = {}) {
+  if (isUrlProdutoMercadoLivre(urlOriginalEngine)) {
+    console.log("[ENGINE-ML-URL-PRODUTO-RESOLVIDA]", {
+      ...contexto,
+      linkOriginalEngine: urlOriginalEngine,
+      linkExpandidoEngine: urlOriginalEngine,
+      usouResolverRadar: false,
+      ok: true,
+      motivo: "url_produto_direta"
+    });
+
+    return {
+      ok: true,
+      urlProduto: urlOriginalEngine,
+      linkExpandidoEngine: urlOriginalEngine,
+      expandiuMeliLa: false,
+      resolucaoRadar: null
+    };
   }
+
+  if (typeof deps.resolverLinkOriginalRadar !== "function") {
+    console.log("[ENGINE-ML-URL-PRODUTO-RESOLVIDA]", {
+      ...contexto,
+      linkOriginalEngine: urlOriginalEngine,
+      ok: false,
+      motivo: "resolver_radar_indisponivel"
+    });
+
+    return { ok: false, motivo: "ml_url_produto_nao_resolvida", detalhe: "resolver_radar_indisponivel" };
+  }
+
+  let resolucao;
+  try {
+    resolucao = await deps.resolverLinkOriginalRadar(urlOriginalEngine);
+  } catch (e) {
+    console.log("[ENGINE-ML-URL-PRODUTO-RESOLVIDA]", {
+      ...contexto,
+      linkOriginalEngine: urlOriginalEngine,
+      ok: false,
+      motivo: "resolver_radar_erro",
+      erro: e.message
+    });
+
+    return { ok: false, motivo: "ml_url_produto_nao_resolvida", detalhe: e.message };
+  }
+
+  const urlSocial = [urlOriginalEngine, resolucao?.urlResolvida, resolucao?.linkResolvido]
+    .map(url => String(url || "").trim())
+    .find(isSocialMercadoLivre) || "";
+
+  if (urlSocial) {
+    console.log("[ENGINE-ML-URL-SOCIAL-DETECTADA]", {
+      ...contexto,
+      linkOriginalEngine: urlOriginalEngine,
+      urlSocial,
+      motivoRadar: resolucao?.motivo || resolucao?.motivoTecnico || ""
+    });
+  }
+
+  const urlProduto = escolherProdutoResolvido(resolucao || {}, urlOriginalEngine);
+  if (!urlProduto) {
+    console.log("[ENGINE-ML-URL-PRODUTO-RESOLVIDA]", {
+      ...contexto,
+      linkOriginalEngine: urlOriginalEngine,
+      urlResolvidaRadar: resolucao?.urlResolvida || "",
+      linkResolvidoRadar: resolucao?.linkResolvido || "",
+      tipoLinkRadar: resolucao?.tipoLinkRadar || "",
+      ok: false,
+      motivo: "ml_url_produto_nao_resolvida"
+    });
+
+    return {
+      ok: false,
+      motivo: "ml_url_produto_nao_resolvida",
+      resolucaoRadar: resolucao || null
+    };
+  }
+
+  console.log("[ENGINE-ML-URL-PRODUTO-RESOLVIDA]", {
+    ...contexto,
+    linkOriginalEngine: urlOriginalEngine,
+    linkExpandidoEngine: urlProduto,
+    urlResolvidaRadar: resolucao?.urlResolvida || "",
+    tipoLinkRadar: resolucao?.tipoLinkRadar || "",
+    usouResolverRadar: true,
+    ok: true,
+    motivo: "url_produto_resolvida_radar"
+  });
+
+  return {
+    ok: true,
+    urlProduto,
+    linkExpandidoEngine: urlProduto,
+    expandiuMeliLa: isMeliLa(urlOriginalEngine) && urlProduto !== urlOriginalEngine,
+    resolucaoRadar: resolucao || null
+  };
 }
 
 async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], deps = {} } = {}) {
@@ -161,42 +256,40 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     return { ok: false, motivo: "integracao_ausente", marketplace: "mercadolivre" };
   }
 
-  let urlImportador = urlOriginalEngine;
-  let linkExpandidoEngine = "";
-  let expandiuMeliLa = false;
+  const credenciais = integracao?.credenciais || {};
+  const temCookies = Boolean(credenciais.cookies);
+  const temTag = Boolean(credenciais.tag);
+  const resolucaoProduto = await resolverUrlProdutoMercadoLivreEngine(urlOriginalEngine, deps, {
+    jobId: job.id,
+    eventoId: job.evento_id,
+    clienteId
+  });
 
-  if (isMeliLa(urlOriginalEngine)) {
-    const redirect = await expandirMeliLa(urlOriginalEngine, {
-      jobId: job.id,
-      eventoId: job.evento_id,
-      clienteId
-    });
-
-    if (!redirect.ok) {
-      return {
-        ok: false,
-        motivo: "meli_redirect_falhou",
-        marketplace: "mercadolivre",
-        linkOriginal: urlOriginalEngine,
-        metadata: {
-          linkOriginalEngine: urlOriginalEngine,
-          linkExpandidoEngine: redirect.urlFinal || "",
-          expandiuMeliLa: false,
-          erroRedirect: redirect.erro || "",
-          httpStatusRedirect: redirect.httpStatus || null
-        }
-      };
-    }
-
-    expandiuMeliLa = true;
-    linkExpandidoEngine = redirect.urlFinal;
-    urlImportador = redirect.urlFinal;
-    await atualizarLinkExpandidoEngine(linkEscolhido.link, linkExpandidoEngine, {
-      jobId: job.id,
-      eventoId: job.evento_id,
-      clienteId
-    });
+  if (!resolucaoProduto.ok) {
+    return {
+      ok: false,
+      motivo: "ml_url_produto_nao_resolvida",
+      marketplace: "mercadolivre",
+      linkOriginal: urlOriginalEngine,
+      metadata: {
+        linkOriginalEngine: urlOriginalEngine,
+        linkExpandidoEngine: resolucaoProduto.linkExpandidoEngine || "",
+        expandiuMeliLa: false,
+        resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
+        detalheResolucao: resolucaoProduto.detalhe || ""
+      }
+    };
   }
+
+  const urlImportador = resolucaoProduto.urlProduto;
+  const linkExpandidoEngine = resolucaoProduto.linkExpandidoEngine || urlImportador;
+  const expandiuMeliLa = resolucaoProduto.expandiuMeliLa === true;
+
+  await atualizarLinkExpandidoEngine(linkEscolhido.link, linkExpandidoEngine, {
+    jobId: job.id,
+    eventoId: job.evento_id,
+    clienteId
+  });
 
   const produto = await deps.importarMercadoLivre(urlImportador, clienteId, {
     getIntegracaoCliente: deps.getIntegracaoCliente,
@@ -218,10 +311,13 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
       jobId: job.id,
       eventoId: job.evento_id,
       clienteId,
+      urlUsada: urlImportador,
       linkOriginalEngine: urlOriginalEngine,
       linkExpandidoEngine,
-      urlImportador,
       expandiuMeliLa,
+      temCookies,
+      temTag,
+      motivo: "link_afiliado_vazio",
       camposProduto: Object.keys(produto || {})
     });
 
@@ -230,11 +326,12 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
       motivo: "link_afiliado_vazio",
       marketplace: "mercadolivre",
       linkOriginal: urlOriginalEngine,
-      linkExpandido: linkExpandidoEngine || urlImportador,
+      linkExpandido: linkExpandidoEngine,
       metadata: {
         linkOriginalEngine: urlOriginalEngine,
         linkExpandidoEngine,
         expandiuMeliLa,
+        resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
         camposProduto: Object.keys(produto || {}),
         produto
       }
@@ -262,6 +359,7 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
       linkOriginalEngine: urlOriginalEngine,
       linkExpandidoEngine,
       expandiuMeliLa,
+      resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
       camposProduto: Object.keys(produto || {}),
       produto
     }
