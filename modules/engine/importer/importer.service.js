@@ -7,6 +7,7 @@ const {
   limitarJobs
 } = require("../processor.service");
 const { normalizarTexto } = require("../normalizers");
+const { classificarCategoriaOferta } = require("../../../marketplaces/inteligencia/classificador-categorias");
 const {
   logEngineImporterErro,
   logEngineImporterOfertaCriada
@@ -29,6 +30,28 @@ function normalizarNumero(valor = null) {
   return Number.isFinite(numero) ? numero : null;
 }
 
+function categoriaGenericaEngine(categoria = "") {
+  const texto = normalizarTexto(categoria)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+
+  return !texto || texto === "mercadolivre" || texto === "ml" || texto === "marketplace" || texto === "generica" || texto === "geral";
+}
+
+function resolverCategoriaEngine(resultado = {}, job = {}) {
+  const categoria = normalizarTexto(resultado.categoria || resultado.categoriaProduto || "");
+  if (!categoriaGenericaEngine(categoria)) return categoria;
+
+  const titulo = normalizarTexto(resultado.titulo || resultado.nome || "");
+  return classificarCategoriaOferta({
+    titulo,
+    nome: titulo,
+    marketplace: resultado.marketplace || job.marketplace || job.marketplace_detectado || ""
+  }, titulo);
+}
 function normalizarTitulo(titulo = "") {
   return normalizarTexto(titulo)
     .normalize("NFD")
@@ -95,7 +118,7 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
     linkOriginal: normalizarTexto(resultado.linkOriginal || ""),
     linkExpandido: normalizarTexto(resultado.linkExpandido || resultado.urlFinal || ""),
     linkAfiliado: normalizarTexto(resultado.linkAfiliado || resultado.linkFinal || resultado.link || ""),
-    categoria: normalizarTexto(resultado.categoria || ""),
+    categoria: resolverCategoriaEngine(resultado, job),
     cupom: normalizarTexto(resultado.cupom || ""),
     cupomTipo: normalizarTexto(resultado.cupomTipo || resultado.tipoCupom || ""),
     score: normalizarNumero(resultado.score),
