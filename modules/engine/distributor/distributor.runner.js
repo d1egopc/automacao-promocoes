@@ -23,7 +23,7 @@ function motivoAdicionar(resumo, motivo = "erro_distribuicao") {
 
 async function reterOferta(oferta, motivo, detalhes = {}, resumo = null) {
   await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "retida", motivo, detalhes);
-  await marcarOfertaStatus(oferta.id, "retida", motivo);
+  await marcarOfertaStatus(oferta.id, "retida", motivo, { clienteId: oferta.cliente_id });
   logEngineDistribuidorRetida({ ofertaId: oferta.id, jobId: oferta.job_id, clienteId: oferta.cliente_id, motivo });
 
   if (resumo) {
@@ -36,7 +36,7 @@ async function reterOferta(oferta, motivo, detalhes = {}, resumo = null) {
 
 async function erroOferta(oferta, motivo, detalhes = {}, resumo = null) {
   await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "erro", motivo, detalhes);
-  await marcarOfertaStatus(oferta.id, "erro_distribuicao", motivo);
+  await marcarOfertaStatus(oferta.id, "erro_distribuicao", motivo, { clienteId: oferta.cliente_id });
   logEngineDistribuidorErro({ ofertaId: oferta.id, jobId: oferta.job_id, clienteId: oferta.cliente_id, motivo, erro: detalhes.erro || "" });
 
   if (resumo) {
@@ -83,7 +83,7 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     return erroOferta(oferta, fila.motivo || "erro_fila", {}, resumo);
   }
 
-  await marcarOfertaStatus(oferta.id, "fila", "adicionada_fila");
+  await marcarOfertaStatus(oferta.id, "fila", "adicionada_fila", { clienteId: oferta.cliente_id });
   await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "ok", "adicionada_fila", {
     ofertaId: oferta.id,
     itemFilaId: fila.itemFila?.id || null
