@@ -64,10 +64,12 @@ function normalizarTitulo(titulo = "") {
 async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
   const params = [];
   const filtros = ["status = 'pronto_para_importar'"];
+  const marketplaceExpr = "LOWER(COALESCE(NULLIF(TRIM(marketplace), ''), NULLIF(TRIM(marketplace_detectado), ''), ''))";
+  const marketplaceFiltro = String(marketplace || "").trim().toLowerCase();
 
-  if (marketplace) {
-    params.push(String(marketplace).trim().toLowerCase());
-    filtros.push(`LOWER(COALESCE(marketplace, marketplace_detectado, '')) = $${params.length}`);
+  if (marketplaceFiltro) {
+    params.push(marketplaceFiltro);
+    filtros.push(`${marketplaceExpr} = $${params.length}`);
   }
 
   params.push(limitarJobs(limite));
@@ -82,10 +84,36 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
     params
   );
 
+  const resumoMarketplace = await queryEngine(
+    `SELECT ${marketplaceExpr} AS marketplace, COUNT(*)::int AS total
+       FROM engine_jobs_cliente
+      WHERE status = 'pronto_para_importar'
+      GROUP BY ${marketplaceExpr}
+      ORDER BY total DESC, marketplace ASC
+      LIMIT 20`
+  );
+
+  const amostra = await queryEngine(
+    `SELECT id, cliente_id, marketplace, marketplace_detectado, status, motivo_final,
+            atualizado_em
+       FROM engine_jobs_cliente
+      WHERE status = 'pronto_para_importar'
+      ORDER BY atualizado_em ASC NULLS FIRST, id ASC
+      LIMIT 5`
+  );
+
+  console.log("[ENGINE-IMPORTER-BUSCA-JOBS]", {
+    statusBuscado: "pronto_para_importar",
+    marketplaceFiltro,
+    totalEncontrados: resultado.ok ? resultado.resultado.rows.length : 0,
+    totalProntoPorMarketplace: resumoMarketplace.ok ? resumoMarketplace.resultado.rows : [],
+    amostraJobs: amostra.ok ? amostra.resultado.rows : [],
+    erro: resultado.ok ? "" : (resultado.erro || resultado.motivo || "")
+  });
+
   if (!resultado.ok) return { ok: false, jobs: [], motivo: resultado.motivo, erro: resultado.erro };
   return { ok: true, jobs: resultado.resultado.rows };
 }
-
 async function tentarMarcarImportando(jobId) {
   const resultado = await queryEngine(
     `UPDATE engine_jobs_cliente
