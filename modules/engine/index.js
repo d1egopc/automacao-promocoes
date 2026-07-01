@@ -13,6 +13,7 @@ const {
 const {
   consultarEventosEngine,
   consultarJobsEngine,
+  consultarOfertasEngine,
   consultarResumoEngine
 } = require("./audit.service");
 
@@ -34,6 +35,7 @@ module.exports = {
   criarJobsParaClientes,
   consultarEventosEngine,
   consultarJobsEngine,
+  consultarOfertasEngine,
   consultarResumoEngine,
   processarJobsPendentesEngine,
   validarJobsDiagnosticadosEngine,

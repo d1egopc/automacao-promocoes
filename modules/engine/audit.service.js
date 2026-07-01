@@ -78,6 +78,37 @@ async function consultarJobsEngine(filtrosEntrada = {}) {
   return { ok: true, jobs: resultado.resultado.rows };
 }
 
+async function consultarOfertasEngine(filtrosEntrada = {}) {
+  const filtros = [];
+  const params = [];
+
+  adicionarFiltro(filtros, params, "o.marketplace", filtrosEntrada.marketplace);
+  adicionarFiltro(filtros, params, "j.cliente_id", filtrosEntrada.clienteId);
+  adicionarFiltro(filtros, params, "o.status", filtrosEntrada.status);
+
+  const limit = limitarConsulta(filtrosEntrada.limit);
+  params.push(limit);
+
+  const where = filtros.length ? `WHERE ${filtros.join(" AND ")}` : "";
+  const resultado = await queryEngine(
+    `SELECT o.id, o.uuid, o.evento_id, j.id AS job_id, j.cliente_id,
+            o.marketplace, o.titulo, o.preco, o.preco_original, o.imagem,
+            o.link_original, o.link_afiliado, o.categoria, o.score,
+            o.status, o.motivo_status, o.criada_em
+       FROM engine_ofertas o
+       LEFT JOIN engine_jobs_cliente j ON j.oferta_id = o.id
+       ${where}
+      ORDER BY o.criada_em DESC NULLS LAST, o.id DESC
+      LIMIT $${params.length}`,
+    params
+  );
+
+  logEngineAuditoriaConsulta({ rota: "/engine/ofertas", filtros: filtrosEntrada, ok: resultado.ok === true });
+
+  if (!resultado.ok) return respostaErro(resultado);
+  return { ok: true, ofertas: resultado.resultado.rows };
+}
+
 async function consultaLista(sql, params = []) {
   const resultado = await queryEngine(sql, params);
   if (!resultado.ok) return { ok: false, rows: [], motivo: resultado.motivo, erro: resultado.erro };
@@ -144,5 +175,6 @@ async function consultarResumoEngine() {
 module.exports = {
   consultarEventosEngine,
   consultarJobsEngine,
+  consultarOfertasEngine,
   consultarResumoEngine
 };
