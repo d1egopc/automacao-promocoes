@@ -1,3 +1,25 @@
+const { classificarCategoriaOferta } = require("../../../../marketplaces/inteligencia/classificador-categorias");
+
+function categoriaGenericaMercadoLivre(categoria = "") {
+  const texto = String(categoria || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+
+  return !texto || texto === "mercadolivre" || texto === "ml" || texto === "marketplace" || texto === "generica" || texto === "geral";
+}
+
+function resolverCategoriaMercadoLivre(produto = {}) {
+  const categoria = produto.categoria || produto.categoriaProduto || "";
+  if (!categoriaGenericaMercadoLivre(categoria)) return categoria;
+
+  return classificarCategoriaOferta({
+    titulo: produto.titulo || produto.nome || "",
+    nome: produto.nome || produto.titulo || ""
+  }, produto.titulo || produto.nome || "");
+}
 function escolherLinkMercadoLivre(links = [], evento = {}) {
   const candidatos = [];
 
@@ -63,7 +85,7 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     linkOriginal: produto.linkOriginal || url,
     linkExpandido: produto.urlFinal || "",
     linkAfiliado: produto.linkAfiliado || produto.linkFinal || produto.link || "",
-    categoria: produto.categoria || "Mercado Livre",
+    categoria: resolverCategoriaMercadoLivre(produto),
     cupom: produto.cupom || "",
     cupomTipo: produto.tipoCupom || "",
     score: produto.score || null,
