@@ -15,6 +15,7 @@ const {
   processarJobsPendentesEngine,
   validarJobsDiagnosticadosEngine,
   importarJobsProntosEngine,
+  limparJobsAntigosEngine,
   distribuirOfertasEngine
 } = require("./modules/engine");
 
@@ -6581,6 +6582,33 @@ app.post("/engine/validar-jobs", async (req, res) => {
   }
 });
 
+app.post("/engine/limpar-jobs-antigos", async (req, res) => {
+  if (!exigirAdminMasterEngine(req, res)) return;
+
+  try {
+    const resultado = await limparJobsAntigosEngine({
+      antesDoId: req.body?.antesDoId,
+      status: req.body?.status || []
+    });
+
+    return res.status(resultado.ok ? 200 : 400).json(resultado);
+  } catch (e) {
+    console.log("[ENGINE-JOB-CLIENTE-ERRO]", {
+      rota: "/engine/limpar-jobs-antigos",
+      motivo: "limpeza_teste_clientes_antigos_falhou",
+      erro: e.message
+    });
+
+    return res.status(500).json({
+      ok: false,
+      motivo: "limpeza_teste_clientes_antigos_falhou",
+      erro: e.message,
+      afetados: 0,
+      porStatus: {},
+      porCliente: {}
+    });
+  }
+});
 app.post("/engine/importar-prontos", async (req, res) => {
   if (!exigirAdminMasterEngine(req, res)) return;
 
