@@ -10,7 +10,8 @@ const {
   registrarEventoBruto,
   consultarEventosEngine,
   consultarJobsEngine,
-  consultarResumoEngine
+  consultarResumoEngine,
+  processarJobsPendentesEngine
 } = require("./modules/engine");
 
 const {
@@ -458,7 +459,7 @@ function logRadarBloqueadoMonitoramento(dados = {}) {
   const chave = `radar-bloqueado:${sessaoId}:${grupoId}`;
   if (!deveLogarThrottle(chave)) return;
 
-  console.log("ÃƒÂ°Ã…Â¸Ã…Â¡Ã‚Â« Radar bloqueado por configuraÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o", evento);
+  console.log("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â« Radar bloqueado por configuraÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o", evento);
 }
 
 if (!fs.existsSync("/data")) {
@@ -743,7 +744,7 @@ function restaurarBrandingOficial() {
   return padrao;
 }
 
-console.log("[OK]ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã¢â‚¬Å¡Salvando dados em:", FILA_FILE);
+console.log("[OK]ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Salvando dados em:", FILA_FILE);
 
 function gerarChaveProduto(titulo = "") {
   return String(titulo)
@@ -1051,7 +1052,7 @@ function marcarOfertaExpirada(oferta = {}) {
   oferta.statusDetalhe = "Oferta/cupom expirado antes do envio";
   oferta.expiradaEm = new Date().toISOString();
 
-  console.log("ÃƒÂ¢Ã‚ÂÃ‚Â° OFERTA EXPIRADA:", {
+  console.log("ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â° OFERTA EXPIRADA:", {
     titulo: oferta.titulo || oferta.nome || "",
     expiraEm: oferta.expiraEm || ""
   });
@@ -1109,7 +1110,7 @@ if (pendentes <= 20) {
 }
 
   console.log(
-    `ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Â  FILA IA: cliente ${cliente} pendentes ${pendentes} status ${status} deveAbastecer ${deveAbastecer}`
+    `ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â§Ãƒâ€šÃ‚Â  FILA IA: cliente ${cliente} pendentes ${pendentes} status ${status} deveAbastecer ${deveAbastecer}`
   );
 
   return {
@@ -1491,7 +1492,7 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
     }
 
     console.log(
-      `ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Â  FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo real`
+      `ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â§Ãƒâ€šÃ‚Â  FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo real`
     );
 
     return {
@@ -1508,7 +1509,7 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
   }
 
   console.log(
-    `ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Â  FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo simulado`
+    `ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â§Ãƒâ€šÃ‚Â  FILA IA ABASTECER: cliente ${cliente} status ${saude.status} modo simulado`
   );
 
   return {
@@ -1672,7 +1673,7 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
   diagnosticosFilaPorCliente.set(clienteLog, diagnostico);
 
   if (deveLogarThrottle(`fila-diagnostico:${clienteLog}`)) {
-    console.log("ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Â  DiagnÃƒÆ’Ã‚Â³stico da fila", diagnostico);
+    console.log("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â§Ãƒâ€šÃ‚Â  DiagnÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³stico da fila", diagnostico);
   }
 
   const pendentes = fila.filter(o => {
@@ -1719,7 +1720,7 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
   diagnosticosFilaPorCliente.set(clienteLog, diagnosticoSemElegivel);
 
   if (deveLogarThrottle(`fila-sem-elegivel:${clienteLog}`)) {
-    console.log("ÃƒÂ°Ã…Â¸Ã…Â¡Ã‚Â¨ Fila sem oferta elegÃƒÆ’Ã‚Â­vel", diagnosticoSemElegivel);
+    console.log("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â¨ Fila sem oferta elegÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­vel", diagnosticoSemElegivel);
   }
 
   return null;
@@ -1827,7 +1828,7 @@ function carregarSessoesMeta() {
 
     console.log("[OK] Sesses meta carregadas:", Object.keys(sessoesMeta).length);
   } catch (e) {
-    console.log("[ERRO]ÃƒÂ¢Ã‚ÂÃ…â€™Erro ao carregar sesses meta:", e.message);
+    console.log("[ERRO]ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢Erro ao carregar sesses meta:", e.message);
     sessoesMeta = {};
   }
 }
@@ -1889,7 +1890,7 @@ function renovarCreditosSeNecessario(usuario) {
   });
 }
 
-// ================ FUNCAO USUARIO TEM CRÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°DITO ==================
+// ================ FUNCAO USUARIO TEM CRÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â°DITO ==================
 
 function usuarioTemCreditos(clienteId, quantidade = 1) {
   const usuario = obterUsuario(clienteId);
@@ -1948,9 +1949,9 @@ function salvarConfig() {
   try {
     writeGlobalJson("config.json", config);
 
-    console.log("[OK]ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â¾ Config salva");
+    console.log("[OK]ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â¾ Config salva");
   } catch (e) {
-    console.error("[ERRO]ÃƒÂ¢Ã‚ÂÃ…â€™ ERRO AO SALVAR CONFIG:", e.message);
+    console.error("[ERRO]ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ ERRO AO SALVAR CONFIG:", e.message);
   }
 }
 
@@ -2153,10 +2154,10 @@ function criarPlanosPadrao() {
 
   salvarPlanos();
 
-  console.log("[OK]ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Planos padro criados");
+  console.log("[OK]ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Planos padro criados");
 }
 
-// ================= FUNÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢O CARREGA CONFIG =================
+// ================= FUNÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢O CARREGA CONFIG =================
 
 function carregarConfig() {
   try {
@@ -2172,14 +2173,14 @@ function carregarConfig() {
         }
       };
 
-      console.log("[OK]ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Config carregada");
+      console.log("[OK]ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Config carregada");
     }
 
          
 usuarios = readGlobalJson("usuarios.json", []);
 
 if (Array.isArray(usuarios) && usuarios.length) {
-  console.log("[OK]ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Usurios carregados");
+  console.log("[OK]ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Usurios carregados");
 }
 
 integracoesPorCliente = carregarMapaClientesJson(
@@ -2188,7 +2189,7 @@ integracoesPorCliente = carregarMapaClientesJson(
 );
 
 if (integracoesPorCliente && Object.keys(integracoesPorCliente).length) {
-  console.log("[OK]ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Integraes carregadas");
+  console.log("[OK]ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Integraes carregadas");
 }
 
 configsPorCliente = carregarMapaClientesJson(
@@ -2197,7 +2198,7 @@ configsPorCliente = carregarMapaClientesJson(
 );
 
 if (configsPorCliente && Object.keys(configsPorCliente).length) {
-  console.log("[OK]ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Configs dos clientes carregadas");
+  console.log("[OK]ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Configs dos clientes carregadas");
 }
 
 destinosPorCliente = carregarMapaClientesJson(
@@ -2212,13 +2213,13 @@ if (destinosPorCliente && Object.keys(destinosPorCliente).length) {
 planos = readGlobalJson("planos.json", {});
 
 if (planos && Object.keys(planos).length) {
-  console.log("[OK]ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Planos carregados");
+  console.log("[OK]ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Planos carregados");
 }
 
 sessoesMeta = readGlobalJson("sessoes.json", {});
 
 if (sessoesMeta && Object.keys(sessoesMeta).length) {
-  console.log("[OK]ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Sesses meta carregadas:", Object.keys(sessoesMeta).length);
+  console.log("[OK]ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Sesses meta carregadas:", Object.keys(sessoesMeta).length);
 }
 
   mensageiro.carregarMensageiro();
@@ -2244,7 +2245,7 @@ console.log("[INFO] CRIANDO ADMIN PADRO");
 
   salvarUsuarios();
 
-  console.log("[OK]ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Usurio admin inicial criado");
+  console.log("[OK]ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Usurio admin inicial criado");
 }
 
   } catch (e) {
@@ -2289,7 +2290,7 @@ function gerarLinkOptimus(linkOriginal = "", marketplace = "") {
 }
 
 
-// ========== LIGAÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢O IMPORTAR AMAZON E SHOPEE ===================
+// ========== LIGAÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢O IMPORTAR AMAZON E SHOPEE ===================
 
 const importarAmazon = criarImportarAmazon({
   extrairJsonLd,
@@ -2860,7 +2861,7 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-const app = express(); // ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“Ãƒâ€¹Ã¢â‚¬Â  MUITO IMPORTANTE ter isso
+const app = express(); // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¹Ã…â€œÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â  MUITO IMPORTANTE ter isso
 
 app.set("trust proxy", 1);
 app.use(helmet());
@@ -2871,7 +2872,7 @@ const horarioInicio = 9;
 const horarioFim = 23;
 
 
-// ================= FUNÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢O RODAR AGORA =================
+// ================= FUNÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢O RODAR AGORA =================
 
 function podeRodarAgora() {
   return true;
@@ -2879,7 +2880,7 @@ function podeRodarAgora() {
 
 let ultimoEnvioFila = 0;
 
-// =================== NÃƒÆ’Ã†â€™Ãƒâ€¦Ã‚Â¡CLEO GLOBAL DE OFERTAS ===================
+// =================== NÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡CLEO GLOBAL DE OFERTAS ===================
 
 function normalizarTexto(valor = "") {
   return String(valor)
@@ -3126,7 +3127,7 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
       oferta.cupomTipo = "provavel";
       oferta.cupomDetectado = true;
       oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(3);
-      oferta.motivoPrioridade = "Cupom provÃƒÆ’Ã‚Â¡vel detectado pelo Radar";
+      oferta.motivoPrioridade = "Cupom provÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡vel detectado pelo Radar";
       return oferta;
     }
 
@@ -3145,7 +3146,7 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
     oferta.prioridadeEnvio = 100;
     oferta.cupomTipo = oferta.cupom ? "detectado" : "nenhum";
     oferta.cupomDetectado = Boolean(oferta.cupom);
-    oferta.motivoPrioridade = "Oferta escolhida manualmente pelo usuÃƒÆ’Ã‚Â¡rio";
+    oferta.motivoPrioridade = "Oferta escolhida manualmente pelo usuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio";
     return oferta;
   }
 
@@ -3175,7 +3176,7 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
     oferta.cupomTipo = "provavel";
     oferta.cupomDetectado = true;
     oferta.expiraEm = oferta.expiraEm || dataExpiracaoPrioridade(3);
-    oferta.motivoPrioridade = "Cupom provÃƒÆ’Ã‚Â¡vel detectado";
+    oferta.motivoPrioridade = "Cupom provÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡vel detectado";
     return oferta;
   }
 
@@ -3188,7 +3189,7 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
 }
 
 function logPrioridadeFila(oferta = {}) {
-  console.log("ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Â  PRIORIDADE FILA:", {
+  console.log("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â§Ãƒâ€šÃ‚Â  PRIORIDADE FILA:", {
     titulo: oferta.titulo || oferta.nome || "",
     origem: oferta.origem || "",
     cupomTipo: oferta.cupomTipo || "",
@@ -3217,7 +3218,7 @@ if (
   ["aliexpress", "amazon", "shopee", "mercadolivre", "magalu", "awin", "kabum"].includes(categoriaNormalizada) ||
   categoriaNormalizada.includes("computador") ||
   categoriaNormalizada.includes("escritorio") ||
-  categoriaNormalizada.includes("escritÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³rio")
+  categoriaNormalizada.includes("escritÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³rio")
 ) {
   oferta.categoria = classificarCategoriaOferta(oferta);
 }
@@ -3321,7 +3322,7 @@ function motivoRetencaoSemDestino(analises = []) {
 
 function marcarOfertaRetida(oferta = {}, motivoRetencao = "retida_sem_destino_compativel") {
   oferta.status = "retida";
-  oferta.statusDetalhe = "Retida por falta de destino compatÃƒÆ’Ã‚Â­vel";
+  oferta.statusDetalhe = "Retida por falta de destino compatÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­vel";
   oferta.motivoRetencao = motivoRetencao;
   oferta.retidaEm = new Date().toISOString();
   oferta.erro = "";
@@ -3906,7 +3907,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
   } catch (e) {
     console.log(
-      "ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ erro destino inteligente:",
+      "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ erro destino inteligente:",
       destino?.nome,
       e.message
     );
@@ -3953,7 +3954,7 @@ if (!oferta) {
     diagnosticarFilaCliente(clienteFila);
 
   if (deveLogarThrottle(`fila-processar-sem-elegivel:${clienteFila}`)) {
-    logOptimus("FILA", "Nenhuma oferta pendente elegÃƒÆ’Ã‚Â­vel", {
+    logOptimus("FILA", "Nenhuma oferta pendente elegÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­vel", {
       clienteId: clienteFila,
       motivoPrincipal: diagnosticoFila.motivoPrincipal,
       diagnostico: diagnosticoFila
@@ -4599,7 +4600,7 @@ app.post("/fila", (req, res) => {
     if (!clienteId) {
       return res.status(401).json({
         ok: false,
-        erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o identificado"
+        erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o identificado"
       });
     }
 
@@ -4703,7 +4704,7 @@ if (deveIgnorarOfertaRepetida(oferta)) {
   return res.json({
     ok: true,
     ignorada: true,
-    motivo: "Oferta repetida recentemente sem queda relevante de preÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§o ou cupom novo.",
+    motivo: "Oferta repetida recentemente sem queda relevante de preÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§o ou cupom novo.",
     oferta
   });
 }
@@ -4805,7 +4806,7 @@ app.get("/r/:codigo", (req, res) => {
     const dados = config.linksGerados[codigo];
 
     if (!dados?.original) {
-      return res.status(404).send("Link nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o encontrado");
+      return res.status(404).send("Link nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o encontrado");
     }
 
     dados.cliques = (dados.cliques || 0) + 1;
@@ -5148,7 +5149,7 @@ app.post("/destinos", (req, res) => {
   if (!Array.isArray(destinos)) {
     return res.status(400).json({
       ok: false,
-      erro: "Formato invÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡lido"
+      erro: "Formato invÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡lido"
     });
   }
 
@@ -5178,7 +5179,7 @@ app.delete("/destinos/:id", (req, res) => {
   });
 });
 
-// ================= AUTOMAÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢O POR CLIENTE =================
+// ================= AUTOMAÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢O POR CLIENTE =================
 
 app.get("/automacao/status", (req, res) => {
   const clienteId = getClienteId(req);
@@ -5186,7 +5187,7 @@ app.get("/automacao/status", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o identificado"
+      erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o identificado"
     });
   }
 
@@ -5323,7 +5324,7 @@ app.get("/automacao", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o identificado"
+      erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o identificado"
     });
   }
 
@@ -5342,7 +5343,7 @@ app.post("/automacao/toggle", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o identificado"
+      erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o identificado"
     });
   }
 
@@ -5378,7 +5379,7 @@ app.delete("/fila/item/:id", (req, res) => {
   if (index === -1) {
     return res.status(404).json({
       ok: false,
-      erro: "Item nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o encontrado para este usuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio"
+      erro: "Item nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o encontrado para este usuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rio"
     });
   }
 
@@ -5434,7 +5435,7 @@ app.delete("/fila/:index", (req, res) => {
   const clienteId = getClienteId(req);
 
   if (isNaN(index) || index < 0 || index >= fila.length) {
-    return res.status(400).send("ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Ândice invÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡lido");
+    return res.status(400).send("ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Ândice invÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡lido");
   }
 
   const oferta = fila[index];
@@ -5442,7 +5443,7 @@ app.delete("/fila/:index", (req, res) => {
   if ((oferta.clienteId || "admin") !== clienteId) {
     return res.status(403).json({
       ok: false,
-      erro: "Sem permissÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o para remover esta oferta"
+      erro: "Sem permissÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o para remover esta oferta"
     });
   }
 
@@ -5473,7 +5474,7 @@ app.post("/fila/:id/reprocessar", (req, res) => {
   if (!oferta) {
     return res.status(404).json({
       ok: false,
-      erro: "Oferta nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o encontrada"
+      erro: "Oferta nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o encontrada"
     });
   }
 
@@ -5532,7 +5533,7 @@ const idBody = String(req.body?.id || req.body?.ofertaId || "").trim();
 if (isNaN(index) || index < 0 || index >= filaCliente.length) {
   return res.status(400).json({
     ok: false,
-    erro: "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Ândice invÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡lido"
+    erro: "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Ândice invÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡lido"
   });
 }
 
@@ -5550,7 +5551,7 @@ const indexReal = fila.findIndex(o => o === oferta);
   if ((oferta.clienteId || "admin") !== clienteIdReq) {
     return res.status(403).json({
       ok: false,
-      erro: "Sem permissÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o para enviar esta oferta"
+      erro: "Sem permissÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o para enviar esta oferta"
     });
   }
 
@@ -5656,7 +5657,7 @@ app.post("/admin/planos", (req, res) => {
   if (!body.nome) {
     return res.status(400).json({
       ok: false,
-      erro: "Nome do plano obrigatÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³rio"
+      erro: "Nome do plano obrigatÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³rio"
     });
   }
 
@@ -5739,7 +5740,7 @@ app.delete("/admin/planos/:nome", (req, res) => {
   if (!planos[nome]) {
     return res.status(404).json({
       ok: false,
-      erro: "Plano nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o encontrado"
+      erro: "Plano nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o encontrado"
     });
   }
 
@@ -5750,7 +5751,7 @@ app.delete("/admin/planos/:nome", (req, res) => {
   if (usuariosUsandoPlano.length > 0) {
     return res.status(400).json({
       ok: false,
-      erro: "NÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â© possÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­vel excluir plano em uso por usuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rios"
+      erro: "NÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â© possÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­vel excluir plano em uso por usuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rios"
     });
   }
 
@@ -5760,7 +5761,7 @@ app.delete("/admin/planos/:nome", (req, res) => {
 
   return res.json({
     ok: true,
-    mensagem: "Plano excluÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­do com sucesso"
+    mensagem: "Plano excluÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­do com sucesso"
   });
 });
 
@@ -5777,7 +5778,7 @@ app.delete("/admin/usuarios/:id", (req, res) => {
   if (id === "admin") {
     return res.status(400).json({
       ok: false,
-      erro: "NÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â© possÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­vel excluir o Admin Master principal"
+      erro: "NÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â© possÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­vel excluir o Admin Master principal"
     });
   }
 
@@ -5788,7 +5789,7 @@ app.delete("/admin/usuarios/:id", (req, res) => {
   if (usuarios.length === antes) {
     return res.status(404).json({
       ok: false,
-      erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o encontrado"
+      erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o encontrado"
     });
   }
 
@@ -5803,7 +5804,7 @@ app.delete("/admin/usuarios/:id", (req, res) => {
 
   return res.json({
     ok: true,
-    mensagem: "UsuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio excluÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­do com sucesso",
+    mensagem: "UsuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rio excluÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­do com sucesso",
     id
   });
 });
@@ -5821,7 +5822,7 @@ app.post("/admin/usuarios", (req, res) => {
   if (!body.nome || !body.email || !body.senha) {
     return res.status(400).json({
       ok: false,
-      erro: "Nome, email e senha obrigatÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³rios"
+      erro: "Nome, email e senha obrigatÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³rios"
     });
   }
 
@@ -5832,7 +5833,7 @@ app.post("/admin/usuarios", (req, res) => {
   if (existe) {
     return res.status(400).json({
       ok: false,
-      erro: "Email jÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ cadastrado"
+      erro: "Email jÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ cadastrado"
     });
   }
 
@@ -5875,7 +5876,7 @@ app.put("/admin/usuarios/:id", (req, res) => {
   if (!usuario) {
     return res.status(404).json({
       ok: false,
-      erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o encontrado"
+      erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o encontrado"
     });
   }
 
@@ -5938,7 +5939,7 @@ app.post("/config", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "Cliente nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o identificado"
+      erro: "Cliente nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o identificado"
     });
   }
 
@@ -5966,7 +5967,7 @@ app.post("/config", (req, res) => {
       configCliente.marketplaces[nome] =
         configCliente.marketplaces[nome] || {};
 
-      // usuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio comum sÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³ liga/desliga
+      // usuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rio comum sÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ liga/desliga
       configCliente.marketplaces[nome].ativo =
         dados?.ativo === true;
 
@@ -6232,7 +6233,7 @@ function exigirClienteAutenticado(req, res) {
   if (!token) {
     res.status(401).json({
       ok: false,
-      erro: "Cliente nÃƒÆ’Ã‚Â£o autenticado"
+      erro: "Cliente nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o autenticado"
     });
     return null;
   }
@@ -6244,7 +6245,7 @@ function exigirClienteAutenticado(req, res) {
     if (!clienteId) {
       res.status(401).json({
         ok: false,
-        erro: "Cliente nÃƒÆ’Ã‚Â£o autenticado"
+        erro: "Cliente nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o autenticado"
       });
       return null;
     }
@@ -6254,7 +6255,7 @@ function exigirClienteAutenticado(req, res) {
   } catch {
     res.status(401).json({
       ok: false,
-      erro: "Cliente nÃƒÆ’Ã‚Â£o autenticado"
+      erro: "Cliente nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o autenticado"
     });
     return null;
   }
@@ -6286,7 +6287,7 @@ function auth(req, res, next) {
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
   if (!token) {
-    return res.status(401).json({ erro: "Token invÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡lido" });
+    return res.status(401).json({ erro: "Token invÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡lido" });
   }
 
   try {
@@ -6300,7 +6301,7 @@ function auth(req, res, next) {
     if (!usuarioExiste || usuarioExiste.ativo === false) {
       return res.status(401).json({
         ok: false,
-        erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o existe ou foi desativado"
+        erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o existe ou foi desativado"
       });
     }
 
@@ -6309,7 +6310,7 @@ function auth(req, res, next) {
 
     next();
   } catch {
-    return res.status(401).json({ erro: "NÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o autorizado" });
+    return res.status(401).json({ erro: "NÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o autorizado" });
   }
 }
 
@@ -6391,6 +6392,41 @@ app.get("/engine/resumo", async (req, res) => {
 });
 
 
+
+function listarClientesValidosEngineProcessor() {
+  try {
+    return Array.isArray(usuarios)
+      ? usuarios.map(usuario => String(usuario?.id || "").trim()).filter(Boolean)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+app.post("/engine/processar-pendentes", async (req, res) => {
+  if (!exigirAdminMasterEngine(req, res)) return;
+
+  try {
+    const resultado = await processarJobsPendentesEngine({
+      limite: req.body?.limite || 20,
+      clientesValidos: listarClientesValidosEngineProcessor()
+    });
+
+    return res.status(resultado.ok ? 200 : 503).json(resultado);
+  } catch (e) {
+    console.log("[ENGINE-PROCESSADOR-ERRO]", {
+      rota: "/engine/processar-pendentes",
+      erro: e.message
+    });
+    return res.status(500).json({
+      ok: false,
+      processados: 0,
+      diagnosticados: 0,
+      erros: 1,
+      erro: e.message
+    });
+  }
+});
 app.get("/fila/inteligencia/status", (req, res) => {
   try {
     const clienteId = getClienteId(req);
@@ -6569,7 +6605,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
     return {
       ok: false,
       statusHttp: 404,
-      erro: "Oferta nÃƒÆ’Ã‚Â£o encontrada"
+      erro: "Oferta nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o encontrada"
     };
   }
 
@@ -6617,7 +6653,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
 
   oferta.status = "pendente";
   oferta.statusDetalhe = estavaExpirada
-    ? "Envio manual solicitado apÃƒÆ’Ã‚Â³s expiraÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o"
+    ? "Envio manual solicitado apÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³s expiraÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o"
     : "Envio manual solicitado";
   oferta.erro = "";
   oferta.erroEm = "";
@@ -7815,7 +7851,7 @@ if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
     sessoesWhatsappMonitoradas: dados.sessoesWhatsappMonitoradas
   });
 
-  logDebug("ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Âª RADAR NORMALIZACAO REPLACE", {
+  logDebug("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â§Ãƒâ€šÃ‚Âª RADAR NORMALIZACAO REPLACE", {
     recebido: dados.sessoesWhatsappMonitoradas,
     salvo: sessoesWhatsappMonitoradas
   });
@@ -7880,7 +7916,7 @@ if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
   };
 
   
-logDebug("ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Âª RADAR PAYLOAD FINAL", {
+logDebug("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â§Ãƒâ€šÃ‚Âª RADAR PAYLOAD FINAL", {
   sessoesWhatsappMonitoradas: payload.sessoesWhatsappMonitoradas,
   gruposMonitorados: payload.gruposMonitorados
 });
@@ -8197,21 +8233,21 @@ function radarPodeCapturarAgora(configRadar = {}, opcoes = {}) {
 function motivoRadarDebug(motivo = "") {
   const chave = String(motivo || "").trim();
   const mapa = {
-    integracao_marketplace_ausente: "sem integraÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o",
-    sem_destino_compativel: "sem destino compatÃƒÆ’Ã‚Â­vel",
+    integracao_marketplace_ausente: "sem integraÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o",
+    sem_destino_compativel: "sem destino compatÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­vel",
     oferta_duplicada: "duplicada",
-    oferta_repetida_na_memoria: "memÃƒÆ’Ã‚Â³ria",
+    oferta_repetida_na_memoria: "memÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³ria",
     limite_radar_pendente_total: "limite Radar",
     limite_radar_com_cupom: "limite Radar",
     limite_radar_sem_cupom: "limite Radar",
     limite_diario_radar_atingido: "limite Radar",
     marketplace_nao_permitido_no_plano: "marketplace bloqueado",
     marketplace_desativado_no_cliente: "marketplace bloqueado",
-    fora_do_horario_monitoramento: "horÃƒÆ’Ã‚Â¡rio fora da janela",
+    fora_do_horario_monitoramento: "horÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio fora da janela",
     categoria_nao_permitida_radar: "categoria bloqueada",
-    link_afiliado_nao_gerado: "link afiliado invÃƒÆ’Ã‚Â¡lido",
-    link_afiliado_igual_original: "link afiliado invÃƒÆ’Ã‚Â¡lido",
-    link_original_nao_resolvido: "link original nÃƒÆ’Ã‚Â£o resolvido",
+    link_afiliado_nao_gerado: "link afiliado invÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡lido",
+    link_afiliado_igual_original: "link afiliado invÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡lido",
+    link_original_nao_resolvido: "link original nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o resolvido",
     link_produto_ml_nao_encontrado: "link_produto_ml_nao_encontrado",
     importacao_incompleta: "importacao_incompleta",
     oferta_sem_cupom_ou_desconto_relevante: "oferta sem cupom ou desconto relevante"
@@ -9465,21 +9501,21 @@ async function extrairProdutoMercadoLivreIntermediarioRadar(url = "") {
     const produto = extrairProdutoMercadoLivreDeHtmlRadar(resposta.data || "");
 
     if (produto) {
-      console.log("[RADAR] ML produto extraÃƒÆ’Ã‚Â­do", {
+      console.log("[RADAR] ML produto extraÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­do", {
         intermediaria: url,
         produto
       });
       return produto;
     }
   } catch (e) {
-    console.log("[RADAR] ML produto nÃƒÆ’Ã‚Â£o encontrado", {
+    console.log("[RADAR] ML produto nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o encontrado", {
       intermediaria: url,
       erro: e.message
     });
     return "";
   }
 
-  console.log("[RADAR] ML produto nÃƒÆ’Ã‚Â£o encontrado", {
+  console.log("[RADAR] ML produto nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o encontrado", {
     intermediaria: url
   });
   return "";
@@ -9523,7 +9559,7 @@ function extrairPrecoFallbackTextoRadar(texto = "") {
   const original = String(texto || "");
   if (!original.trim()) return { ok: false, motivo: "texto_vazio" };
 
-  if (/r\$\s*[\d.,]+\s*(?:a|ate|atÃƒÆ’Ã‚Â©|-)\s*r?\$?\s*[\d.,]+/i.test(original)) {
+  if (/r\$\s*[\d.,]+\s*(?:a|ate|atÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©|-)\s*r?\$?\s*[\d.,]+/i.test(original)) {
     return { ok: false, motivo: "faixa_preco" };
   }
 
@@ -9647,7 +9683,7 @@ function aplicarPrecoFallbackTextoRadarMl(oferta = {}, contexto = {}) {
     preco: oferta.preco || resultado.preco,
     precoAtual: oferta.precoAtual || resultado.preco,
     precoOrigem: "texto_radar",
-    avisoPreco: "PreÃƒÆ’Ã‚Â§o extraÃƒÆ’Ã‚Â­do da mensagem do Radar"
+    avisoPreco: "PreÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§o extraÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­do da mensagem do Radar"
   };
 }
 function limparLinhaTituloKabumRadar(linha = "") {
@@ -9655,8 +9691,8 @@ function limparLinhaTituloKabumRadar(linha = "") {
     .replace(/https?:\/\/\S+/gi, "")
     .replace(/www\.\S+/gi, "")
     .replace(/[\u{1F300}-\u{1FAFF}]/gu, "")
-    .replace(/^[\s\-_*ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢:|]+/g, "")
-    .replace(/[\s\-_*ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢:|]+$/g, "")
+    .replace(/^[\s\-_*ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢:|]+/g, "")
+    .replace(/[\s\-_*ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢:|]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -11101,7 +11137,7 @@ async function processarMensagemRadar({
 
 const links = extrairLinksRadar(texto);
 
-logDebug("ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Âª RADAR LINKS EXTRAIDOS", {
+logDebug("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â§Ãƒâ€šÃ‚Âª RADAR LINKS EXTRAIDOS", {
   sessaoId: sessaoIdTexto,
   grupoId: grupoIdTexto,
   links,
@@ -11549,7 +11585,7 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
     return { ok: false, motivo: "mensagem_nao_monitoravel" };
   }
 
- logDebug("ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Âª RADAR CHAMANDO PROCESSAR", {
+ logDebug("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â§Ãƒâ€šÃ‚Âª RADAR CHAMANDO PROCESSAR", {
   sessaoId,
   remoteJid,
   tamanhoTexto: textoExtraido.length
@@ -11855,7 +11891,7 @@ logRadarBloqueadoMonitoramento({
     return { ok: false, motivo: origemMonitorada.motivo };
   }
 
-console.log("ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ RADAR ORIGEM VALIDADA", {
+console.log("ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ RADAR ORIGEM VALIDADA", {
   clienteId,
   grupoId: ofertaBase.grupoId,
   sessaoId: ofertaBase.sessaoId
@@ -13405,7 +13441,7 @@ app.post("/login", async (req, res) => {
       totalUsuariosCarregados: Array.isArray(usuarios) ? usuarios.length : 0,
       idsCarregados: Array.isArray(usuarios) ? usuarios.map(u => u?.id).filter(Boolean).slice(0, 20) : []
     });
-    return res.status(401).json({ erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio invÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡lido" });
+    return res.status(401).json({ erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rio invÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡lido" });
   }
 
   if (usuario.ativo === false) {
@@ -13417,7 +13453,7 @@ app.post("/login", async (req, res) => {
       ativo: false,
       motivoFalha: "usuario_inativo"
     });
-    return res.status(403).json({ erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio inativo" });
+    return res.status(403).json({ erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rio inativo" });
   }
 
  const diagnosticoSenha = await diagnosticarSenhaUsuario(usuario, pass);
@@ -13442,7 +13478,7 @@ app.post("/login", async (req, res) => {
  });
 
 if (!senhaOk) {
-  return res.status(401).json({ erro: "Senha invÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡lida" });
+  return res.status(401).json({ erro: "Senha invÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡lida" });
 }
 
   const token = jwt.sign(
@@ -13578,7 +13614,7 @@ app.post("/limpar-sessao/:id", async (req, res) => {
 
     return res.json({
       ok: true,
-      message: "SessÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o limpa. Gere um novo QR Code.",
+      message: "SessÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o limpa. Gere um novo QR Code.",
       id
     });
 
@@ -13604,7 +13640,7 @@ app.get("/me", (req, res) => {
   if (!usuario) {
     return res.status(404).json({
       ok: false,
-      erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o encontrado"
+      erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o encontrado"
     });
   }
 
@@ -13661,16 +13697,16 @@ return res.json({
   });
 });
 
-// ================= INTEGRAÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ES =================
+// ================= INTEGRAÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ES =================
 
 const marketplaceRules = integracoesUtils.marketplaceRules;
 
 const MENSAGEM_TESTE_OK = "Teste real OK. Link de teste convertido com sucesso.";
 const MENSAGEM_NAO_CONFIGURADO_ML = "Preencha Tag ID e Cookies para testar.";
 const MENSAGEM_NAO_CONFIGURADO_AMAZON = "Preencha tag e cookies da Amazon para testar.";
-const MENSAGEM_COOKIES_INVALIDOS = "NÃƒÆ’Ã‚Â£o conseguimos converter um link de teste. Atualize os cookies e teste novamente.";
-const MENSAGEM_FALHA_CONVERSAO_ML = "NÃƒÆ’Ã‚Â£o conseguimos validar a integraÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o agora. Atualize os cookies e teste novamente.";
-const MENSAGEM_FALHA_CONVERSAO_AMAZON = "NÃƒÆ’Ã‚Â£o conseguimos validar a integraÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o da Amazon agora. Atualize os cookies e teste novamente.";
+const MENSAGEM_COOKIES_INVALIDOS = "NÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o conseguimos converter um link de teste. Atualize os cookies e teste novamente.";
+const MENSAGEM_FALHA_CONVERSAO_ML = "NÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o conseguimos validar a integraÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o agora. Atualize os cookies e teste novamente.";
+const MENSAGEM_FALHA_CONVERSAO_AMAZON = "NÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o conseguimos validar a integraÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o da Amazon agora. Atualize os cookies e teste novamente.";
 const MENSAGEM_TESTE_PENDENTE = "Credenciais salvas, teste real pendente.";
 const MENSAGEM_ALERTA_ML = MENSAGEM_COOKIES_INVALIDOS;
 const MENSAGEM_ALERTA_AMAZON = MENSAGEM_FALHA_CONVERSAO_AMAZON;
@@ -14076,7 +14112,7 @@ async function testarAmazonConfiguracao(config = {}) {
       "teste_pendente",
       MENSAGEM_TESTE_PENDENTE,
       "teste_pendente",
-      { modo, observacao: "Teste real automÃƒÆ’Ã‚Â¡tico preservado apenas para modo cookies." }
+      { modo, observacao: "Teste real automÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡tico preservado apenas para modo cookies." }
     );
   }
 
@@ -14367,7 +14403,7 @@ if (!isAdminMaster(req)) {
   if (!liberados.includes(marketplace)) {
     return res.status(403).json({
       ok: false,
-      erro: `Marketplace ${marketplace} nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o liberado no seu plano`
+      erro: `Marketplace ${marketplace} nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o liberado no seu plano`
     });
   }
 }
@@ -14441,7 +14477,7 @@ app.delete("/integracoes/:marketplace", (req, res) => {
       marketplace,
       configurado: false,
       status: "nao_configurado",
-      message: "IntegraÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o removida com sucesso"
+      message: "IntegraÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o removida com sucesso"
     });
 
   } catch (e) {
@@ -14449,7 +14485,7 @@ app.delete("/integracoes/:marketplace", (req, res) => {
 
     return res.status(500).json({
       ok: false,
-      erro: "Erro interno ao remover integraÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o"
+      erro: "Erro interno ao remover integraÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o"
     });
   }
 });
@@ -14490,7 +14526,7 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
 
     return res.status(400).json({
       ok: false,
-      erro: "IntegraÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o configurada"
+      erro: "IntegraÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o configurada"
     });
   }
 
@@ -14691,14 +14727,14 @@ async function importarKabumManualRequest(req, res, opcoes = {}) {
 
       return res.status(401).json({
         ok: false,
-        erro: "Cliente nÃƒÆ’Ã‚Â£o autenticado para importar KaBuM/AWIN"
+        erro: "Cliente nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o autenticado para importar KaBuM/AWIN"
       });
     }
 
     if (!url) {
       return res.status(400).json({
         ok: false,
-        erro: "URL obrigatÃƒÆ’Ã‚Â³ria"
+        erro: "URL obrigatÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³ria"
       });
     }
 
@@ -14862,7 +14898,7 @@ app.post("/awin/gerar-link", async (req, res) => {
     if (!url) {
       return res.status(400).json({
         ok: false,
-        erro: "URL obrigatÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³ria"
+        erro: "URL obrigatÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ria"
       });
     }
 
@@ -14888,7 +14924,7 @@ app.post("/awin/gerar-link", async (req, res) => {
     if (!linkAfiliado) {
       return res.status(400).json({
         ok: false,
-        erro: "NÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o foi possÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­vel gerar o link afiliado Awin"
+        erro: "NÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o foi possÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­vel gerar o link afiliado Awin"
       });
     }
 
@@ -14910,7 +14946,7 @@ app.post("/awin/gerar-link", async (req, res) => {
   }
 });
 
-// ================= HELPERS DE IMPORTAÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢O =================
+// ================= HELPERS DE IMPORTAÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢O =================
 
 function htmlDecode(str) {
   if (!str) return "";
@@ -15159,9 +15195,9 @@ function aplicarFiltrosUniversais(ofertas = [], opcoes = {}) {
 
       if (!resultado.ok) {
         console.log(
-          "ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â­ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â Oferta ignorada pelo filtro universal:",
+          "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â Oferta ignorada pelo filtro universal:",
           resultado.motivo,
-          oferta.titulo || oferta.nome || "sem tÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­tulo"
+          oferta.titulo || oferta.nome || "sem tÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­tulo"
         );
       }
 
@@ -15366,7 +15402,7 @@ function gerarLinkMagalu(linkOriginal, promoterId) {
   const urlLimpa = String(linkOriginal).trim();
   const loja = String(promoterId).trim();
 
-  // Se jÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ for link da loja do influenciador, mantÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©m
+  // Se jÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ for link da loja do influenciador, mantÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â©m
   if (urlLimpa.includes("magazinevoce.com.br")) {
     return urlLimpa;
   }
@@ -15763,7 +15799,7 @@ const response = await fetch(urlConsulta, {
       linkAfiliado,
       imagem,
       categoria: "Magalu",
-      aviso: "Verifique se hÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ cupons disponÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­veis na pÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡gina"
+      aviso: "Verifique se hÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ cupons disponÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­veis na pÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡gina"
     };
   } catch (e) {
     console.log("[API] erro importarMagalu:", e.message);
@@ -15865,7 +15901,7 @@ app.post("/importar-magalu-manual", async (req, res) => {
     if (!url) {
       return res.status(400).json({
         ok: false,
-        erro: "URL obrigatÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³ria"
+        erro: "URL obrigatÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ria"
       });
     }
 
@@ -15882,7 +15918,7 @@ app.post("/importar-magalu-manual", async (req, res) => {
     if (!produto?.precoAtual) {
       return res.status(400).json({
         ok: false,
-        erro: "Produto invÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡lido"
+        erro: "Produto invÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡lido"
       });
     }
 
@@ -16095,7 +16131,7 @@ function registrarResultadoCupom(marketplace = "", cupom = "", sucesso = false) 
   salvarConfig();
 }
 
-// =========== INTELIGÃƒÆ’Ã†â€™Ãƒâ€¦Ã‚Â NCIA GLOBAL DE CUPONS ===========
+// =========== INTELIGÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â NCIA GLOBAL DE CUPONS ===========
 
 function cupomEstaBloqueado(marketplace = "", cupom = "") {
   const mp = normalizarTexto(marketplace || "");
@@ -16219,7 +16255,7 @@ function categoriaPermitidaNoDestino(oferta, destino) {
 }
 
 //============ FUNCAO FAREJAR CUPOM MERCADO LIVRE ================
-// DESATIVADA: nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o registrar cupons ML automaticamente
+// DESATIVADA: nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o registrar cupons ML automaticamente
 
 async function farejarCuponsMercadoLivre(html = "") {
   console.log("[INFO] farejarCuponsMercadoLivre desativado");
@@ -16541,7 +16577,7 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
     return "";
 
   } catch (e) {
-    console.log("[ERRO]ÃƒÂ¢Ã‚ÂÃ…â€™ Erro ao gerar link afiliado do cliente:", {
+    console.log("[ERRO]ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ Erro ao gerar link afiliado do cliente:", {
       clienteId,
       marketplace,
       erro: e.message
@@ -16559,7 +16595,7 @@ function normalizarSessaoId(clienteId, id = "sessao1") {
 
   let sessao = String(id || "sessao1").trim();
 
-  // remove duplicaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o
+  // remove duplicaÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o
   if (sessao.startsWith(cliente + "_")) {
     sessao = sessao.slice((cliente + "_").length);
   }
@@ -16727,7 +16763,7 @@ async function distribuirOfertaParaClientes(ofertaBase) {
 
     const mp = normalizarTexto(ofertaBase.marketplace || "");
 
-    console.log("ÃƒÂ°Ã…Â¸Ã…Â¡Ã‚Â¨ DISTRIBUIDOR RECEBEU", {
+    console.log("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â¨ DISTRIBUIDOR RECEBEU", {
       clienteId,
       titulo: ofertaBase.titulo,
       marketplace: mp
@@ -16744,7 +16780,7 @@ async function distribuirOfertaParaClientes(ofertaBase) {
     }
 
 
-logDebug("[DEBUG]ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ CHECK INTEGRAO:", {
+logDebug("[DEBUG]ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ CHECK INTEGRAO:", {
   clienteId,
   marketplace: mp,
   integracao: !!getIntegracaoCliente(clienteId, mp),
@@ -16855,7 +16891,7 @@ ofertaCliente.statusDetalhe = ofertaCliente.statusDetalhe || "Na fila";
 validarCupomMonetarioOferta(ofertaCliente);
 aplicarPrioridadeEnvioOferta(ofertaCliente);
 
-// ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚Â­Ãƒâ€šÃ‚Â SCORE V1
+// ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â SCORE V1
 try {
   const resultadoScore = calcularScoreOferta(ofertaCliente);
 
@@ -17015,17 +17051,17 @@ console.log("[INFO] Oferta distribuda para cliente:", {
             const palavrasBloqueadas = [
               "cabelo",
               "peruca",
-              "extensÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o",
-              "extensÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âµes",
+              "extensÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o",
+              "extensÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âµes",
               "sapato",
-              "sandÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡lia",
+              "sandÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡lia",
               "chinelo",
               "salto",
               "batom",
-              "cÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­lios",
+              "cÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­lios",
               "unha",
               "bolsa",
-              "sutiÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£",
+              "sutiÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£",
               "calcinha",
               "wedding",
               "bridal"
@@ -17045,7 +17081,7 @@ console.log("[INFO] Oferta distribuda para cliente:", {
               Number(cfg.descontoMinimoInternacional) || descontoMinimo;
 
             const minimoDescontoAplicado =
-              tipo === "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã¢â‚¬â„¢Ãƒâ€šÃ‚Â"
+              tipo === "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â"
                 ? descontoMinimoInternacional
                 : descontoMinimo;
 
@@ -17100,18 +17136,18 @@ console.log("[INFO] Oferta distribuda para cliente:", {
 
             await new Promise(r => setTimeout(r, 1500));
           } catch (e) {
-            console.log("[ERRO]ÃƒÂ¢Ã‚ÂÃ…â€™ erro produto AliExpress API:", e.message);
+            console.log("[ERRO]ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ erro produto AliExpress API:", e.message);
           }
         }    
 
     for (const termo of buscasBrasil) {
-      await buscarTermoAliExpress(termo, "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡Ãƒâ€šÃ‚Â·");
+      await buscarTermoAliExpress(termo, "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·");
       if (adicionadasNestaRodada >= limitePorRodada) break;
     }
 
     if (cfg.permitirInternacionalForte && adicionadasNestaRodada < limitePorRodada) {
       for (const termo of buscasInternacional) {
-        await buscarTermoAliExpress(termo, "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã¢â‚¬â„¢Ãƒâ€šÃ‚Â");
+        await buscarTermoAliExpress(termo, "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â");
         if (adicionadasNestaRodada >= limitePorRodada) break;
       }
     }
@@ -17126,7 +17162,7 @@ console.log("[INFO] Oferta distribuda para cliente:", {
     );
 
     console.log(
-      `Ãƒâ€šÃ‚Â ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚ÂOfertas AliExpress filtros universais: ${ofertasFiltradas.length}`
+      `ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚ÂOfertas AliExpress filtros universais: ${ofertasFiltradas.length}`
     );
 
   for (const oferta of ofertasFiltradas) {
@@ -17197,7 +17233,7 @@ async function farejarMagalu() {
       if (!response.ok) {
 
   console.log(
-    "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂºÃƒâ€šÃ‚Â¡ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â Magalu bloqueou status:",
+    "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂºÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â Magalu bloqueou status:",
     response.status,
     "- parando rodada."
   );
@@ -17403,7 +17439,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
 
     if (!integracaoAwin?.credenciais) {
       console.log(
-        "ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ Awin sem integraÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o configurada:",
+        "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Awin sem integraÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o configurada:",
         clienteId
       );
       return;
@@ -17447,7 +17483,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
 
     if (!fs.existsSync(caminhoFeed)) {
       console.log(
-        "ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ Feed Awin nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o encontrado:",
+        "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Feed Awin nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o encontrado:",
         caminhoFeed
       );
       return;
@@ -17543,7 +17579,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
     );
 
     console.log(
-      `ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â  Ofertas Awin apÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³s filtros universais: ${ofertasFiltradas.length}`
+      `ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â  Ofertas Awin apÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³s filtros universais: ${ofertasFiltradas.length}`
     );
 
    const repeticoesCategoriaAwin = {};
@@ -17661,7 +17697,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
       principalMotivoZero: motivoPrincipalAwin || (adicionadasFila > 0 ? "" : "sem_candidato_aprovado")
     };
   } catch (e) {
-    console.log("[ERRO]ÃƒÂ¢Ã‚ÂÃ…â€™ erro farejador Awin:", e.message);
+    console.log("[ERRO]ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ erro farejador Awin:", e.message);
   }
 }
 
@@ -17808,7 +17844,7 @@ app.post("/sessoes", (req, res) => {
   if (!isAdminMaster(req) && sessoesCliente.length >= limite) {
   return res.status(403).json({
     ok: false,
-    erro: `Seu plano permite apenas ${limite} sessÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o(ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âµes).`
+    erro: `Seu plano permite apenas ${limite} sessÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o(ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âµes).`
   });
 }
 
@@ -17831,7 +17867,7 @@ const id = normalizarSessaoId(
     if (sessoesMeta[id]) {
       return res.status(400).json({
         ok: false,
-        erro: "SessÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o jÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ existe"
+        erro: "SessÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o jÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ existe"
       });
     }
 
@@ -17844,7 +17880,7 @@ const id = normalizarSessaoId(
 
     salvarSessoesMeta();
 
-console.log("[WHATSAPP]ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â¾ Sesso criada e salva:", sessoesMeta[id]);
+console.log("[WHATSAPP]ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â¾ Sesso criada e salva:", sessoesMeta[id]);
 
     return res.json({
       ok: true,
@@ -17937,7 +17973,7 @@ salvarConfig();
 
     return res.json({
       ok: true,
-      message: "SessÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o excluÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­da com sucesso",
+      message: "SessÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o excluÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­da com sucesso",
       id
     });
   } catch (e) {
@@ -18006,12 +18042,12 @@ app.post("/reset/:id", async (req, res) => {
 
     return res.json({
       ok: true,
-      message: "SessÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o resetada. Gere novo QR.",
+      message: "SessÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o resetada. Gere novo QR.",
       id
     });
 
   } catch (e) {
-    console.log("[ERRO]ÃƒÂ¢Ã‚ÂÃ…â€™ [WHATSAPP] erro reset sesso:", e.message);
+    console.log("[ERRO]ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ [WHATSAPP] erro reset sesso:", e.message);
 
     return res.status(500).json({
       ok: false,
@@ -18020,7 +18056,7 @@ app.post("/reset/:id", async (req, res) => {
   }
 });
 
-// ===================== FUNÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢O LIMETE SESSÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢O WHATSAPP ========================
+// ===================== FUNÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢O LIMETE SESSÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢O WHATSAPP ========================
 
 function obterLimiteSessoesCliente(clienteId) {
   const usuario = obterUsuario(clienteId);
@@ -18065,7 +18101,7 @@ app.post("/conectar", async (req, res) => {
   const clienteId = getClienteId(req);
 
   if (!clienteId) {
-    return res.status(401).json({ erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o identificado" });
+    return res.status(401).json({ erro: "UsuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡rio nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o identificado" });
   }
 
   config.sessoesWhatsapp = config.sessoesWhatsapp || [];
@@ -18081,7 +18117,7 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
 
     return res.status(403).json({
       ok: false,
-      erro: `Seu plano permite atÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â© ${limiteSessoes} sessÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o(ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âµes) WhatsApp.`,
+      erro: `Seu plano permite atÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â© ${limiteSessoes} sessÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o(ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âµes) WhatsApp.`,
       limite: limiteSessoes,
       usadas: sessoesCliente.length
     });
@@ -18103,7 +18139,7 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
   if (config.sessoesWhatsapp.includes(sessaoId)) {
     return res.status(400).json({
       ok: false,
-      erro: "JÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ existe uma conexÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o com esse ID. Tente criar uma nova conexÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o novamente.",
+      erro: "JÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ existe uma conexÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o com esse ID. Tente criar uma nova conexÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o novamente.",
       id: sessaoId
     });
   }
@@ -18111,7 +18147,7 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
   config.sessoesWhatsapp.push(sessaoId);
   salvarConfig();
 
-  console.log("[WHATSAPP]ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â¾ Sesso WhatsApp salva para reconexo:", {
+  console.log("[WHATSAPP]ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â¾ Sesso WhatsApp salva para reconexo:", {
     clienteId,
     sessaoId,
     limiteSessoes,
@@ -18122,7 +18158,7 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
 
   return res.json({
     ok: true,
-    message: "SessÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o iniciada",
+    message: "SessÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o iniciada",
     id: sessaoId
   });
 });
@@ -18250,7 +18286,7 @@ async function carregarGruposSessao(id, opcoes = {}) {
     const grupos = await sock.groupFetchAllParticipating();
 
     console.log(
-      "ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ‚Â¥ Grupos carregados:",
+      "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“Ãƒâ€šÃ‚Â¥ Grupos carregados:",
       Object.keys(grupos || {}).length
     );
 
@@ -18290,7 +18326,7 @@ app.post("/magalu/gerar-link", (req, res) => {
     if (!promoterId) {
       return res.status(400).json({
         ok: false,
-        erro: "Magalu nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o configurada."
+        erro: "Magalu nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o configurada."
       });
     }
 
@@ -18505,7 +18541,7 @@ const limiteDestinos = isAdminMaster(req)
  destinosPorCliente[clienteId][id] = destinos;
 
  salvarDestinosClientes();
-  console.log("[DESTINO]ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â¾ Destinos salvos na config:", id, destinos);
+  console.log("[DESTINO]ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â¾ Destinos salvos na config:", id, destinos);
 
   return res.json({
     ok: true,
@@ -18561,7 +18597,7 @@ app.post("/campanhas/enviar", async (req, res) => {
     });
 
   } catch (e) {
-    console.log("[ERRO]ÃƒÂ¢Ã‚ÂÃ…â€™ Erro campanha manual:", e.message);
+    console.log("[ERRO]ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ Erro campanha manual:", e.message);
 
     return res.status(400).json({
       ok: false,
@@ -18621,7 +18657,7 @@ async function enviarTelegram(oferta, mensagem) {
 }
 
          
-// ================= FUNCÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢O WHATSAPP =================
+// ================= FUNCÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢O WHATSAPP =================
 
 async function iniciarWhatsApp(id, force = false) {
   console.log("[WHATSAPP] Iniciando sesso:", id, "force:", force);
@@ -18699,7 +18735,7 @@ sock.ev.on("messages.upsert", async ({ messages = [] } = {}) => {
       });
     }
   } catch (e) {
-    console.log("[MENSAGEIRO-ERRO]ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â messages.upsert:", e.message);
+    console.log("[MENSAGEIRO-ERRO]ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â messages.upsert:", e.message);
   }
 });
 
@@ -18722,7 +18758,7 @@ sock.ev.on("group-participants.update", async (evento) => {
       evento
     });
   } catch (e) {
-    console.log("[ERRO]ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â Erro evento Mensageiro:", e.message);
+    console.log("[ERRO]ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â Erro evento Mensageiro:", e.message);
   }
 });
 
@@ -18730,7 +18766,7 @@ sock.ev.on("group-participants.update", async (evento) => {
     const { connection, qr, lastDisconnect } = update;
 
     if (qr) {
-      console.log("[WHATSAPP]ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â² QR RECEBIDO:", id);
+      console.log("[WHATSAPP]ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒâ€šÃ‚Â² QR RECEBIDO:", id);
       qrCodes[id] = await qrcode.toDataURL(qr);
       statusSessao[id] = "qr";
     }
@@ -18761,7 +18797,7 @@ salvarSessoesMeta();
   });
   } catch (e) {
     console.log(
-      "ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â Erro ao carregar grupos no pos conexao:",
+      "ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â Erro ao carregar grupos no pos conexao:",
       e.message
     );
   }
@@ -18848,7 +18884,7 @@ async function testarAwinProdutos() {
   } catch (e) {
 
     console.log(
-      "ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ erro teste awin:",
+      "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ erro teste awin:",
       e.response?.data || e.message
     );
 
@@ -18933,7 +18969,7 @@ console.log("[BOOT] Dados iniciais carregados:", {
 });
 
 app.listen(PORT, () => {
-  console.log("[API]ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¢ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Â  API ONLINE NA PORTA " + PORT);
+  console.log("[API]ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â§Ãƒâ€šÃ‚Â  API ONLINE NA PORTA " + PORT);
 
 decairConfiancaCupons();
 
@@ -19176,14 +19212,14 @@ if (!admin) {
     statusMarketplace.ultimoInicio = new Date().toISOString();
     statusMarketplace.ultimoErro = "";
 
-logOptimus("ORQUESTRADOR", opcoes.origem === "boot_mercadolivre" ? "ÃƒÂ°Ã…Â¸Ã…Â¡Ã¢â€šÂ¬ ML BOOT | Rodada inicial direta" : "Rodada iniciada", {
+logOptimus("ORQUESTRADOR", opcoes.origem === "boot_mercadolivre" ? "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â¡ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ ML BOOT | Rodada inicial direta" : "Rodada iniciada", {
   marketplace,
   rodada: statusMarketplace.rodadas,
   intervaloAtualMinutos: Math.round(intervaloOrquestradorAtualMs() / 60000),
   origem: opcoes.origem || "orquestrador"
 });
 
-logOptimus(categoriaMarketplaceLog, "InÃƒÆ’Ã‚Â­cio da rodada", {
+logOptimus(categoriaMarketplaceLog, "InÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­cio da rodada", {
   marketplace,
   rodada: statusMarketplace.rodadas,
   origem: opcoes.origem || "orquestrador"
@@ -19383,7 +19419,7 @@ if (!global.__optimusMlBootTimeoutRegistrado) {
     logFarejadorAutoDesativado("mercadolivre", "boot_mercadolivre", "admin");
   }
   if (!farejadoresAutoDesativados()) setTimeout(() => {
-    logOptimus("MERCADOLIVRE", "ÃƒÂ°Ã…Â¸Ã…Â¡Ã¢â€šÂ¬ ML BOOT | Disparo inicial apos deploy", {
+    logOptimus("MERCADOLIVRE", "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â¡ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ ML BOOT | Disparo inicial apos deploy", {
       delaySegundos: 60
     });
     rodarMarketplaceEspecifico("mercadolivre", { origem: "boot_mercadolivre" });
