@@ -208,7 +208,8 @@ function montarItemFilaEngine(oferta = {}) {
     logsEnvio: [],
     enviadoEm: "",
     dataEnvio: "",
-    criadoEm: new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })
+    criadoEm: new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }),
+    dataEntradaFila: new Date().toISOString()
   };
 }
 
@@ -357,13 +358,40 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
 async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
   const clienteId = normalizarTexto(oferta.cliente_id);
   const deps = contexto.deps || {};
+  const itemFila = montarItemFilaEngine(oferta);
+
+  if (typeof deps.adicionarOfertaNaFilaGlobal === "function") {
+    const resultadoMemoria = deps.adicionarOfertaNaFilaGlobal(clienteId, itemFila);
+
+    if (resultadoMemoria?.duplicada) {
+      console.log("[ENGINE-DISTRIBUIDOR-FILA-DUPLICADA]", {
+        clienteId,
+        ofertaId: oferta.id,
+        itemId: itemFila.id,
+        motivo: "duplicidade_fila"
+      });
+      return { ok: false, motivo: "duplicidade_fila", itemFila };
+    }
+
+    if (!resultadoMemoria?.ok) {
+      return { ok: false, motivo: resultadoMemoria?.motivo || "erro_fila", erro: resultadoMemoria?.erro || "" };
+    }
+
+    console.log("[ENGINE-DISTRIBUIDOR-FILA-MEMORIA]", {
+      clienteId,
+      ofertaId: oferta.id,
+      itemId: resultadoMemoria.itemFila?.id || itemFila.id
+    });
+
+    return { ok: true, itemFila: resultadoMemoria.itemFila || itemFila };
+  }
+
   const filaCliente = carregarFilaCliente(clienteId, deps);
 
   if (ofertaJaExisteNaFila(filaCliente, oferta)) {
     return { ok: false, motivo: "duplicidade_fila" };
   }
 
-  const itemFila = montarItemFilaEngine(oferta);
   const adicionou = filaOfertas.adicionarOfertaFila(filaCliente, itemFila);
   if (!adicionou) return { ok: false, motivo: "erro_fila" };
 
