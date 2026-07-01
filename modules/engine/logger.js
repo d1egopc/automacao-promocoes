@@ -80,7 +80,32 @@ function logEngineImporterErro(dados = {}) {
 
 function logEngineImporterFim(dados = {}) {
   logEngine("[ENGINE-IMPORTER-FIM]", dados);
-}module.exports = {
+}
+function logEngineDistribuidorInicio(dados = {}) {
+  logEngine("[ENGINE-DISTRIBUIDOR-INICIO]", dados);
+}
+
+function logEngineDistribuidorOferta(dados = {}) {
+  logEngine("[ENGINE-DISTRIBUIDOR-OFERTA]", dados);
+}
+
+function logEngineDistribuidorFila(dados = {}) {
+  logEngine("[ENGINE-DISTRIBUIDOR-FILA]", dados);
+}
+
+function logEngineDistribuidorRetida(dados = {}) {
+  logEngine("[ENGINE-DISTRIBUIDOR-RETIDA]", dados);
+}
+
+function logEngineDistribuidorErro(dados = {}) {
+  logEngine("[ENGINE-DISTRIBUIDOR-ERRO]", dados);
+}
+
+function logEngineDistribuidorFim(dados = {}) {
+  logEngine("[ENGINE-DISTRIBUIDOR-FIM]", dados);
+}
+
+module.exports = {
   logEngineDbOk,
   logEngineDbErro,
   logEngineEventoBrutoSalvo,
@@ -99,5 +124,11 @@ function logEngineImporterFim(dados = {}) {
   logEngineImporterAdapter,
   logEngineImporterOfertaCriada,
   logEngineImporterErro,
-  logEngineImporterFim
+  logEngineImporterFim,
+  logEngineDistribuidorInicio,
+  logEngineDistribuidorOferta,
+  logEngineDistribuidorFila,
+  logEngineDistribuidorRetida,
+  logEngineDistribuidorErro,
+  logEngineDistribuidorFim
 };
