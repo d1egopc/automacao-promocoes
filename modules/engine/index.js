@@ -7,7 +7,8 @@ const {
 } = require("./inbox.service");
 
 const {
-  criarJobsParaClientes
+  criarJobsParaClientes,
+  limparJobsAntigosEngine
 } = require("./jobs.service");
 
 const {
@@ -36,6 +37,7 @@ module.exports = {
   initEngineDatabase,
   registrarEventoBruto,
   criarJobsParaClientes,
+  limparJobsAntigosEngine,
   consultarEventosEngine,
   consultarJobsEngine,
   consultarOfertasEngine,
