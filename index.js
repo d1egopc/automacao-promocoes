@@ -1771,6 +1771,93 @@ function carregarFila(clienteId = "admin") {
   return fila;
 }
 
+
+function normalizarChaveFilaEngine(valor = "") {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function numeroComparavelFilaEngine(valor) {
+  if (valor === null || valor === undefined || valor === "") return "";
+  const numero = Number(valor);
+  return Number.isFinite(numero) ? numero.toFixed(2) : String(valor || "").trim();
+}
+
+function itemEngineDuplicadoFilaGlobal(clienteId = "admin", itemFila = {}) {
+  const cliente = String(clienteId || "admin");
+  const engineOfertaId = itemFila.engineOfertaId || itemFila.engine_oferta_id || "";
+  const linkOriginal = normalizarChaveFilaEngine(itemFila.linkOriginal || itemFila.link_original || "");
+  const linkAfiliado = normalizarChaveFilaEngine(itemFila.linkAfiliado || itemFila.link || itemFila.linkFinal || "");
+  const titulo = normalizarChaveFilaEngine(itemFila.titulo || itemFila.nome || "");
+  const preco = numeroComparavelFilaEngine(itemFila.preco || itemFila.precoAtual);
+
+  return fila.some(item => {
+    if (String(item?.clienteId || "admin") !== cliente) return false;
+    if (engineOfertaId && String(item.engineOfertaId || "") === String(engineOfertaId)) return true;
+
+    const itemLinkOriginal = normalizarChaveFilaEngine(item.linkOriginal || item.link_original || "");
+    const itemLinkAfiliado = normalizarChaveFilaEngine(item.linkAfiliado || item.link || item.linkFinal || "");
+    const itemTitulo = normalizarChaveFilaEngine(item.titulo || item.nome || "");
+    const itemPreco = numeroComparavelFilaEngine(item.preco || item.precoAtual);
+
+    if (linkOriginal && (linkOriginal === itemLinkOriginal || linkOriginal === itemLinkAfiliado)) return true;
+    if (linkAfiliado && (linkAfiliado === itemLinkAfiliado || linkAfiliado === itemLinkOriginal)) return true;
+    return Boolean(titulo && preco && titulo === itemTitulo && preco === itemPreco);
+  });
+}
+
+function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
+  try {
+    const cliente = String(clienteId || itemFila.clienteId || "admin").trim() || "admin";
+    carregarFila(cliente);
+
+    const itemFinal = {
+      ...itemFila,
+      clienteId: cliente,
+      status: itemFila.status || "pendente",
+      origem: itemFila.origem || "engine",
+      origemDetalhe: itemFila.origemDetalhe || "Engine V2"
+    };
+
+    if (itemEngineDuplicadoFilaGlobal(cliente, itemFinal)) {
+      console.log("[ENGINE-DISTRIBUIDOR-FILA-DUPLICADA]", {
+        clienteId: cliente,
+        engineOfertaId: itemFinal.engineOfertaId || null,
+        titulo: itemFinal.titulo || itemFinal.nome || "",
+        linkOriginal: itemFinal.linkOriginal || "",
+        linkAfiliado: itemFinal.linkAfiliado || itemFinal.link || ""
+      });
+      return { ok: false, duplicada: true, motivo: "duplicidade_fila" };
+    }
+
+    fila.push(itemFinal);
+    const salvou = salvarFila(cliente);
+
+    if (!salvou) {
+      return { ok: false, motivo: "erro_fila" };
+    }
+
+    console.log("[ENGINE-DISTRIBUIDOR-FILA-MEMORIA]", {
+      clienteId: cliente,
+      engineOfertaId: itemFinal.engineOfertaId || null,
+      itemId: itemFinal.id || "",
+      totalCliente: fila.filter(item => String(item?.clienteId || "admin") === cliente).length
+    });
+
+    return { ok: true, itemFila: itemFinal };
+  } catch (e) {
+    console.log("[ENGINE-DISTRIBUIDOR-FILA-MEMORIA]", {
+      ok: false,
+      clienteId,
+      erro: e.message
+    });
+    return { ok: false, motivo: "erro_fila", erro: e.message };
+  }
+}
 function garantirIdsFila() {
   let alterou = false;
 
@@ -6542,7 +6629,8 @@ app.post("/engine/distribuir-ofertas", async (req, res) => {
       deps: {
         readClienteJson,
         writeClienteJson,
-        getClientePath
+        getClientePath,
+        adicionarOfertaNaFilaGlobal: adicionarOfertaNaFilaGlobalEngine
       }
     });
 
@@ -19072,6 +19160,7 @@ initEngineDatabase().catch((e) => {
 for (const usuario of usuarios) {
   carregarFila(usuario.id);
 }
+
 
 function garantirIdsFila() {
   let alterou = false;
