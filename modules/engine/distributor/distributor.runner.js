@@ -23,7 +23,7 @@ function motivoAdicionar(resumo, motivo = "erro_distribuicao") {
 
 async function reterOferta(oferta, motivo, detalhes = {}, resumo = null) {
   await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "retida", motivo, detalhes);
-  await marcarOfertaStatus(oferta.id, "retida", motivo, { clienteId: oferta.cliente_id });
+  await marcarOfertaStatus(oferta.id, "retida", motivo, { jobId: oferta.job_id, clienteId: oferta.cliente_id });
   logEngineDistribuidorRetida({ ofertaId: oferta.id, jobId: oferta.job_id, clienteId: oferta.cliente_id, motivo });
 
   if (resumo) {
@@ -36,7 +36,7 @@ async function reterOferta(oferta, motivo, detalhes = {}, resumo = null) {
 
 async function erroOferta(oferta, motivo, detalhes = {}, resumo = null) {
   await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "erro", motivo, detalhes);
-  await marcarOfertaStatus(oferta.id, "erro_distribuicao", motivo, { clienteId: oferta.cliente_id });
+  await marcarOfertaStatus(oferta.id, "erro_distribuicao", motivo, { jobId: oferta.job_id, clienteId: oferta.cliente_id });
   logEngineDistribuidorErro({ ofertaId: oferta.id, jobId: oferta.job_id, clienteId: oferta.cliente_id, motivo, erro: detalhes.erro || "" });
 
   if (resumo) {
@@ -50,7 +50,7 @@ async function erroOferta(oferta, motivo, detalhes = {}, resumo = null) {
 async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null) {
   logEngineDistribuidorOferta({ ofertaId: oferta.id, jobId: oferta.job_id, clienteId: oferta.cliente_id, marketplace: oferta.marketplace });
 
-  const lock = await tentarMarcarDistribuindo(oferta.id);
+  const lock = await tentarMarcarDistribuindo(oferta.id, { jobId: oferta.job_id, clienteId: oferta.cliente_id });
   if (!lock.ok) {
     if (lock.ignorado) return { ok: false, ignorado: true, motivo: "oferta_nao_distribuivel" };
     return erroOferta(oferta, lock.motivo || "erro_distribuicao", { erro: lock.erro || "" }, resumo);
@@ -83,7 +83,7 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     return erroOferta(oferta, fila.motivo || "erro_fila", {}, resumo);
   }
 
-  await marcarOfertaStatus(oferta.id, "fila", "adicionada_fila", { clienteId: oferta.cliente_id });
+  await marcarOfertaStatus(oferta.id, "fila", "adicionada_fila", { jobId: oferta.job_id, clienteId: oferta.cliente_id });
   await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "ok", "adicionada_fila", {
     ofertaId: oferta.id,
     itemFilaId: fila.itemFila?.id || null

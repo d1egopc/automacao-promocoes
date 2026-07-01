@@ -1,6 +1,6 @@
 const path = require("path");
-const { queryEngine } = require("../database");
-const { limitarJobs, registrarProcessamento } = require("../processor.service");
+const { getEnginePool, engineDbHabilitado } = require("../database");
+const { limitarJobs } = require("../processor.service");
 const { normalizarTexto } = require("../normalizers");
 const {
   clienteValidoEngine,
@@ -10,15 +10,46 @@ const filaOfertas = require("../../../utils/fila-ofertas");
 const destinosUtils = require("../../../utils/destinos");
 
 
-function logQueryErroDistribuidor({ etapa = "", ofertaId = null, clienteId = "", resultado = {}, queryResumo = "" } = {}) {
+function logQueryErroDistribuidor({ etapa = "", ofertaId = null, jobId = null, clienteId = "", err = null, resultado = {}, queryResumo = "" } = {}) {
   console.log("[ENGINE-DISTRIBUIDOR-QUERY-ERRO]", {
     etapa,
     ofertaId,
+    jobId,
     clienteId,
-    erroMessage: resultado.erro || resultado.message || "",
-    erroCode: resultado.erroCode || resultado.code || resultado.codigo || "",
+    erroMessage: err?.message || resultado.erro || resultado.message || "",
+    erroCode: err?.code || resultado.erroCode || resultado.code || resultado.codigo || "",
+    erroDetail: err?.detail || resultado.erroDetail || resultado.detail || "",
+    erroHint: err?.hint || resultado.erroHint || resultado.hint || "",
     queryResumo
   });
+}
+
+async function queryDistribuidor({ etapa = "", ofertaId = null, jobId = null, clienteId = "", queryResumo = "", sql = "", params = [] } = {}) {
+  const pool = getEnginePool();
+  if (!pool) {
+    const resultado = {
+      ok: false,
+      motivo: engineDbHabilitado() ? "pool_indisponivel" : "database_url_ausente",
+      erro: engineDbHabilitado() ? "pool_indisponivel" : "database_url_ausente"
+    };
+    logQueryErroDistribuidor({ etapa, ofertaId, jobId, clienteId, resultado, queryResumo });
+    return resultado;
+  }
+
+  try {
+    const resultado = await pool.query(sql, params);
+    return { ok: true, resultado };
+  } catch (err) {
+    logQueryErroDistribuidor({ etapa, ofertaId, jobId, clienteId, err, queryResumo });
+    return {
+      ok: false,
+      motivo: "query_falhou",
+      erro: err.message,
+      erroCode: err.code || "",
+      erroDetail: err.detail || "",
+      erroHint: err.hint || ""
+    };
+  }
 }
 function normalizarMarketplace(valor = "") {
   return normalizarTexto(valor).toLowerCase();
@@ -184,8 +215,10 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
 
   params.push(limitarDistribuicao(limite));
 
-  const resultado = await queryEngine(
-    `SELECT o.id, o.uuid, o.evento_id, o.link_id, o.marketplace, o.titulo,
+  const resultado = await queryDistribuidor({
+    etapa: "buscar_ofertas_distribuiveis",
+    queryResumo: "SELECT engine_ofertas JOIN engine_jobs_cliente",
+    sql: `SELECT o.id, o.uuid, o.evento_id, o.link_id, o.marketplace, o.titulo,
             o.preco, o.preco_original, o.imagem, o.link_original, o.link_expandido,
             o.link_afiliado, o.categoria, o.score, o.status, o.motivo_status,
             o.criada_em, o.atualizada_em, j.id AS job_id, j.cliente_id
@@ -195,67 +228,71 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
       ORDER BY o.atualizada_em ASC NULLS FIRST, o.id ASC
       LIMIT $${params.length}`,
     params
-  );
+  });
 
   if (!resultado.ok) {
-    logQueryErroDistribuidor({
-      etapa: "buscar_ofertas_distribuiveis",
-      resultado,
-      queryResumo: "SELECT engine_ofertas JOIN engine_jobs_cliente"
-    });
-    return { ok: false, ofertas: [], motivo: resultado.motivo, erro: resultado.erro, erroCode: resultado.erroCode || resultado.code || "" };
+    return { ok: false, ofertas: [], motivo: resultado.motivo, erro: resultado.erro, erroCode: resultado.erroCode || "" };
   }
   return { ok: true, ofertas: resultado.resultado.rows };
 }
 
-async function tentarMarcarDistribuindo(ofertaId) {
-  const resultado = await queryEngine(
-    `UPDATE engine_ofertas
+async function tentarMarcarDistribuindo(ofertaId, contextoLog = {}) {
+  const resultado = await queryDistribuidor({
+    etapa: "marcar_distribuindo",
+    ofertaId,
+    queryResumo: "UPDATE engine_ofertas SET status = distribuindo",
+    sql: `UPDATE engine_ofertas
         SET status = 'distribuindo', motivo_status = NULL, atualizada_em = NOW()
       WHERE id = $1 AND status IN ('importada', 'oferta_criada')
       RETURNING id, status`,
-    [ofertaId]
-  );
+    params: [ofertaId]
+  });
 
   if (!resultado.ok) {
-    logQueryErroDistribuidor({
-      etapa: "marcar_distribuindo",
-      ofertaId,
-      resultado,
-      queryResumo: "UPDATE engine_ofertas SET status = distribuindo"
-    });
-    return { ok: false, motivo: resultado.motivo, erro: resultado.erro, erroCode: resultado.erroCode || resultado.code || "" };
+    return { ok: false, motivo: resultado.motivo, erro: resultado.erro, erroCode: resultado.erroCode || "" };
   }
   return { ok: resultado.resultado.rowCount > 0, ignorado: resultado.resultado.rowCount === 0 };
 }
 
 async function marcarOfertaStatus(ofertaId, status, motivo = "", contextoLog = {}) {
-  const resultado = await queryEngine(
-    `UPDATE engine_ofertas
+  const resultado = await queryDistribuidor({
+    etapa: "marcar_status_oferta",
+    ofertaId,
+    clienteId: contextoLog.clienteId || "",
+    queryResumo: "UPDATE engine_ofertas SET status/motivo_status",
+    sql: `UPDATE engine_ofertas
         SET status = $2, motivo_status = $3, atualizada_em = NOW()
       WHERE id = $1
       RETURNING id, status, motivo_status`,
-    [ofertaId, status, motivo || null]
-  );
-
-  if (!resultado.ok) {
-    logQueryErroDistribuidor({
-      etapa: "marcar_status_oferta",
-      ofertaId,
-      clienteId: contextoLog.clienteId || "",
-      resultado,
-      queryResumo: "UPDATE engine_ofertas SET status/motivo_status"
-    });
-  }
+    params: [ofertaId, status, motivo || null]
+  });
 
   return resultado;
 }
 
 async function registrarEtapaDistribuicao(jobId, etapa, status, motivo = "", detalhes = {}) {
-  if (!jobId) return { ok: false, motivo: "job_id_ausente" };
-  return registrarProcessamento(jobId, etapa, status, motivo, {
-    ...detalhes,
-    fase: "distribuicao"
+  if (!jobId) {
+    logQueryErroDistribuidor({
+      etapa,
+      jobId,
+      ofertaId: detalhes.ofertaId || null,
+      clienteId: detalhes.clienteId || "",
+      resultado: { erro: "job_id_ausente" },
+      queryResumo: "INSERT engine_processamentos"
+    });
+    return { ok: false, motivo: "job_id_ausente" };
+  }
+
+  return queryDistribuidor({
+    etapa,
+    jobId,
+    ofertaId: detalhes.ofertaId || null,
+    clienteId: detalhes.clienteId || "",
+    queryResumo: "INSERT engine_processamentos",
+    sql: `INSERT INTO engine_processamentos (job_id, etapa, status, motivo, detalhes)
+     VALUES ($1, $2, $3, $4, $5::jsonb)
+     RETURNING id`,
+    params: [jobId, etapa, status, motivo || null, JSON.stringify({ ...(detalhes || {}), fase: "distribuicao" })]
   });
 }
 
