@@ -6591,7 +6591,8 @@ app.post("/engine/importar-prontos", async (req, res) => {
       deps: {
         importarMercadoLivre,
         getIntegracaoCliente,
-        gerarLinkAfiliadoMercadoLivre
+        gerarLinkAfiliadoMercadoLivre,
+        resolverLinkOriginalRadar
       }
     });
 
@@ -10866,8 +10867,9 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
         mensagemOriginalRadar: textoRadarImportadorMl
       }),
       importarShopee,
-      gerarLinkAfiliadoMercadoLivre
-    });
+      gerarLinkAfiliadoMercadoLivre,
+        resolverLinkOriginalRadar
+      });
 
     if (resultado.status >= 400 || resultado.body?.ok === false) {
       const motivoFalhaImportador = resultado.body?.erro || "importacao_falhou";
@@ -17946,8 +17948,9 @@ app.post("/importar-produto", async (req, res) => {
       importarMercadoLivre,
       importarShopee,
 
-      gerarLinkAfiliadoMercadoLivre
-    });
+      gerarLinkAfiliadoMercadoLivre,
+        resolverLinkOriginalRadar
+      });
 
     const marketplaceResultado = String(resultado.body?.marketplace || "").toLowerCase();
     const avisoResultado = String(resultado.body?.aviso || "").toLowerCase();
@@ -19538,8 +19541,9 @@ const retornoFarejador = await farejador(clienteId, {
     const clienteImportacao = clienteIdAlvo || clienteId;
     return importarMercadoLivre(url, clienteImportacao, {
       getIntegracaoCliente,
-      gerarLinkAfiliadoMercadoLivre
-    });
+      gerarLinkAfiliadoMercadoLivre,
+        resolverLinkOriginalRadar
+      });
   },
   importarAmazon: importarAmazon,
   buscarOfertasShopee,
