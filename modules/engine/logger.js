@@ -1,4 +1,4 @@
-﻿function logEngine(tag, dados = {}) {
+function logEngine(tag, dados = {}) {
   try {
     console.log(tag, dados);
   } catch {
@@ -34,6 +34,10 @@ function logEngineJobClienteErro(dados = {}) {
   logEngine("[ENGINE-JOB-CLIENTE-ERRO]", dados);
 }
 
+function logEngineAuditoriaConsulta(dados = {}) {
+  logEngine("[ENGINE-AUDITORIA-CONSULTA]", dados);
+}
+
 module.exports = {
   logEngineDbOk,
   logEngineDbErro,
@@ -41,5 +45,6 @@ module.exports = {
   logEngineEventoBrutoDuplicado,
   logEngineEventoBrutoErro,
   logEngineJobClienteCriado,
-  logEngineJobClienteErro
+  logEngineJobClienteErro,
+  logEngineAuditoriaConsulta
 };

@@ -1,4 +1,4 @@
-﻿const {
+const {
   initEngineDatabase
 } = require("./database");
 
@@ -10,8 +10,17 @@ const {
   criarJobsParaClientes
 } = require("./jobs.service");
 
+const {
+  consultarEventosEngine,
+  consultarJobsEngine,
+  consultarResumoEngine
+} = require("./audit.service");
+
 module.exports = {
   initEngineDatabase,
   registrarEventoBruto,
-  criarJobsParaClientes
+  criarJobsParaClientes,
+  consultarEventosEngine,
+  consultarJobsEngine,
+  consultarResumoEngine
 };
