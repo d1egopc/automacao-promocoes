@@ -14,7 +14,8 @@ const {
   consultarOfertasEngine,
   processarJobsPendentesEngine,
   validarJobsDiagnosticadosEngine,
-  importarJobsProntosEngine
+  importarJobsProntosEngine,
+  distribuirOfertasEngine
 } = require("./modules/engine");
 
 const {
@@ -6519,6 +6520,45 @@ app.post("/engine/importar-prontos", async (req, res) => {
       ofertaCriada: 0,
       erros: 1,
       motivos: { erro_importacao: 1 },
+      erro: e.message
+    });
+  }
+});
+app.post("/engine/distribuir-ofertas", async (req, res) => {
+  if (!exigirAdminMasterEngine(req, res)) return;
+
+  try {
+    const resultado = await distribuirOfertasEngine({
+      limite: req.body?.limite || 10,
+      marketplace: req.body?.marketplace || "",
+      clienteId: req.body?.clienteId || "",
+      contexto: {
+        clientesValidos: listarClientesValidosEngineProcessor(),
+        configsPorCliente,
+        destinosPorCliente,
+        configGlobal: config,
+        marketplacesAtivosPorCliente: listarMarketplacesAtivosEngineProcessor()
+      },
+      deps: {
+        readClienteJson,
+        writeClienteJson,
+        getClientePath
+      }
+    });
+
+    return res.status(resultado.ok ? 200 : 503).json(resultado);
+  } catch (e) {
+    console.log("[ENGINE-DISTRIBUIDOR-ERRO]", {
+      rota: "/engine/distribuir-ofertas",
+      erro: e.message
+    });
+    return res.status(500).json({
+      ok: false,
+      processadas: 0,
+      adicionadasFila: 0,
+      retidas: 0,
+      erros: 1,
+      motivos: { erro_distribuicao: 1 },
       erro: e.message
     });
   }
