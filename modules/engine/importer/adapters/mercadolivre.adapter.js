@@ -291,6 +291,13 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     clienteId
   });
 
+  console.log("[ENGINE-ML-IMPORTADOR-CHAMADA]", {
+    clienteId,
+    urlUsada: urlImportador,
+    temCookies,
+    temTag
+  });
+
   const produto = await deps.importarMercadoLivre(urlImportador, clienteId, {
     getIntegracaoCliente: deps.getIntegracaoCliente,
     gerarLinkAfiliadoMercadoLivre: deps.gerarLinkAfiliadoMercadoLivre,
@@ -299,6 +306,16 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
       eventoId: job.evento_id,
       clienteId
     }
+  });
+
+  console.log("[ENGINE-ML-IMPORTADOR-RETORNO]", {
+    clienteId,
+    ok: Boolean(produto),
+    titulo: produto?.titulo || produto?.nome || "",
+    camposRetorno: Object.keys(produto || {}),
+    temLinkAfiliado: Boolean(produto?.linkAfiliado),
+    temLinkFinal: Boolean(produto?.linkFinal),
+    temLink: Boolean(produto?.link)
   });
 
   if (!produto) {
