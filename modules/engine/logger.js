@@ -57,7 +57,30 @@ function logEngineProcessadorErro(dados = {}) {
 function logEngineProcessadorFim(dados = {}) {
   logEngine("[ENGINE-PROCESSADOR-FIM]", dados);
 }
-module.exports = {
+
+function logEngineImporterInicio(dados = {}) {
+  logEngine("[ENGINE-IMPORTER-INICIO]", dados);
+}
+
+function logEngineImporterJob(dados = {}) {
+  logEngine("[ENGINE-IMPORTER-JOB]", dados);
+}
+
+function logEngineImporterAdapter(dados = {}) {
+  logEngine("[ENGINE-IMPORTER-ADAPTER]", dados);
+}
+
+function logEngineImporterOfertaCriada(dados = {}) {
+  logEngine("[ENGINE-IMPORTER-OFERTA-CRIADA]", dados);
+}
+
+function logEngineImporterErro(dados = {}) {
+  logEngine("[ENGINE-IMPORTER-ERRO]", dados);
+}
+
+function logEngineImporterFim(dados = {}) {
+  logEngine("[ENGINE-IMPORTER-FIM]", dados);
+}module.exports = {
   logEngineDbOk,
   logEngineDbErro,
   logEngineEventoBrutoSalvo,
@@ -70,5 +93,11 @@ module.exports = {
   logEngineProcessadorJob,
   logEngineProcessadorEtapa,
   logEngineProcessadorErro,
-  logEngineProcessadorFim
+  logEngineProcessadorFim,
+  logEngineImporterInicio,
+  logEngineImporterJob,
+  logEngineImporterAdapter,
+  logEngineImporterOfertaCriada,
+  logEngineImporterErro,
+  logEngineImporterFim
 };
