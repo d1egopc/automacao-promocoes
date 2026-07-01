@@ -24,6 +24,10 @@ const {
   validarJobsDiagnosticadosEngine
 } = require("./validator.runner");
 
+const {
+  importarJobsProntosEngine
+} = require("./importer/importer.runner");
+
 module.exports = {
   initEngineDatabase,
   registrarEventoBruto,
@@ -32,5 +36,6 @@ module.exports = {
   consultarJobsEngine,
   consultarResumoEngine,
   processarJobsPendentesEngine,
-  validarJobsDiagnosticadosEngine
+  validarJobsDiagnosticadosEngine,
+  importarJobsProntosEngine
 };
