@@ -28,6 +28,9 @@ const {
 const {
   importarJobsProntosEngine
 } = require("./importer/importer.runner");
+const {
+  distribuirOfertasEngine
+} = require("./distributor");
 
 module.exports = {
   initEngineDatabase,
@@ -39,5 +42,6 @@ module.exports = {
   consultarResumoEngine,
   processarJobsPendentesEngine,
   validarJobsDiagnosticadosEngine,
-  importarJobsProntosEngine
+  importarJobsProntosEngine,
+  distribuirOfertasEngine
 };
