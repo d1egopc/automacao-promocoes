@@ -142,7 +142,4 @@ async function distribuirOfertasEngine({ limite = 10, marketplace = "", clienteI
   return resumo;
 }
 
-module.exports = {
-  distribuirOfertasEngine,
-  distribuirOfertaEngine
-};
+module.exports = { distribuirOfertasEngine };

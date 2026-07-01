@@ -1,9 +1,3 @@
-const {
-  distribuirOfertasEngine,
-  distribuirOfertaEngine
-} = require("./distributor.runner");
+const { distribuirOfertasEngine } = require("./distributor.runner");
 
-module.exports = {
-  distribuirOfertasEngine,
-  distribuirOfertaEngine
-};
+module.exports = { distribuirOfertasEngine };
