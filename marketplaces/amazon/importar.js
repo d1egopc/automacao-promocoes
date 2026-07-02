@@ -183,7 +183,7 @@
 
     function normalizarCupomTextoAmazon(cupom = "") {
       const codigo = String(cupom || "").toUpperCase().replace(/[^A-Z0-9_-]/g, "").trim();
-      const bloqueados = new Set(["AMAZON", "CUPOM", "CODIGO", "PROMOCAO", "DESCONTO", "OFERTA", "PRIME", "APP", "SITE", "BRASIL", "COMPRE", "GANHE"]);
+      const bloqueados = new Set(["AMAZON", "CUPOM", "CODIGO", "PROMOCAO", "DESCONTO", "OFERTA", "PRIME", "APP", "SITE", "BRASIL", "COMPRE", "GANHE", "CLIENTE", "PARA"]);
       if (!codigo || codigo.length < 4 || codigo.length > 24 || bloqueados.has(codigo)) return "";
       if (!/[A-Z]/.test(codigo)) return "";
       return codigo;
@@ -207,13 +207,21 @@
     function extrairBeneficioTextoRadarAmazon(textoRadar = "") {
       const texto = String(textoRadar || "");
       const valorCupom = texto.match(/(?:cupom|desconto|off|economize)[^\n]{0,50}?(R\$\s*[0-9]{1,5}(?:[,.][0-9]{2})?)/i)?.[1] || "";
-      if (valorCupom) return `Cupom: ${valorCupom.replace(/\s+/g, " ").trim()} OFF`;
+      if (valorCupom) return `${valorCupom.replace(/\s+/g, " ").trim()} OFF no cupom/pagina`;
 
       const percentual = texto.match(/(?:cupom|desconto|off|economize)[^\n]{0,50}?([0-9]{1,3}\s*%)/i)?.[1] || "";
-      if (percentual) return `Cupom: ${percentual.replace(/\s+/g, "").trim()} OFF adicional`;
+      if (percentual) return `${percentual.replace(/\s+/g, "").trim()} OFF no cupom/pagina`;
 
       if (/frete\s+gr[aá]tis|envio\s+gr[aá]tis/i.test(texto)) return "Frete grátis";
       return "";
+    }
+
+    function deveUsarPrecoRadarAmazon(precoHtml = 0, precoRadar = 0) {
+      if (!precoRadar) return false;
+      if (!precoHtml) return true;
+      if (Math.abs(precoHtml - (precoRadar * 100)) < 0.01) return true;
+      const diferencaPercentual = Math.abs(precoHtml - precoRadar) / precoRadar;
+      return diferencaPercentual > 0.25 || precoHtml > precoRadar * 1.5;
     }
 
     function extrairImagemAmazon() {
@@ -288,7 +296,7 @@
     const precoNumeroHtmlInicial = numeroPrecoAmazon(preco);
     let usouFallbackRadarPreco = false;
 
-    if (precoTextoRadar.ok && (!preco || Math.abs(precoNumeroHtmlInicial - (precoTextoRadar.numero * 100)) < 0.01)) {
+    if (precoTextoRadar.ok && deveUsarPrecoRadarAmazon(precoNumeroHtmlInicial, precoTextoRadar.numero)) {
       usouFallbackRadarPreco = true;
       if (!origemPreco) origemPreco = "fallback_radar";
       if (!valorBrutoPreco) valorBrutoPreco = precoTextoRadar.preco;
@@ -498,6 +506,7 @@ const linkFinal = usarLinksOptimus
 module.exports = {
   criarImportarAmazon
 };
+
 
 
 

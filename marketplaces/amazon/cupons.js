@@ -125,8 +125,8 @@ function montarBeneficioAmazon({ tipoCupom, valorCupom = "", percentualCupom = "
     return {
       tipoCupom: tipoCupom || "valor_amazon",
       cupomValor: valorCupom,
-      avisoCupom: `Cupom: ${valorCupom} OFF`,
-      beneficioExtra: `Cupom: ${valorCupom} OFF`,
+      avisoCupom: `${valorCupom} OFF no cupom/pagina`,
+      beneficioExtra: `${valorCupom} OFF no cupom/pagina`,
       beneficioDetectado: valorCupom
     };
   }
@@ -135,8 +135,8 @@ function montarBeneficioAmazon({ tipoCupom, valorCupom = "", percentualCupom = "
     return {
       tipoCupom: tipoCupom || "percentual_amazon",
       cupomPercentual: percentualCupom,
-      avisoCupom: `Cupom: ${percentualCupom} OFF adicional`,
-      beneficioExtra: `Cupom: ${percentualCupom} OFF adicional`,
+      avisoCupom: `${percentualCupom} OFF no cupom/pagina`,
+      beneficioExtra: `${percentualCupom} OFF no cupom/pagina`,
       beneficioDetectado: percentualCupom
     };
   }
@@ -167,7 +167,9 @@ function pareceCupomRealAmazon(texto = "") {
     "JSON",
     "SCRIPT",
     "STYLE",
-    "HTTPS"
+    "HTTPS",
+    "CLIENTE",
+    "PARA"
   ]);
 
   if (bloqueados.has(cupom)) return false;
@@ -411,5 +413,6 @@ module.exports = {
   detectarAvisoCupomAmazon,
   escolherCupomParaOfertaAmazon
 };
+
 
 
