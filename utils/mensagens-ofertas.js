@@ -10,6 +10,7 @@ const {
   deveUsarTemplatePersonalizado,
   montarMensagemTemplatePersonalizado
 } = require("./templates");
+const { formatarOfertaUniversal } = require("../templates/oferta-template");
 
 function precoTemVariacao(valor = "") {
   return /\d[\d.,]*\s+a\s+\d[\d.,]*/i.test(String(valor || ""));
@@ -130,7 +131,11 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
   }
 
   if (marketplace === "mercadolivre" || marketplace === "mercado_livre") {
-    return montarLegendaOferta(oferta);
+    return formatarOfertaUniversal({
+      ...oferta,
+      precoOriginal: oferta.precoOriginal ?? oferta.precoAntigo,
+      beneficioTexto: oferta.beneficioTexto || oferta.beneficioExtra || oferta.avisoCupom || ""
+    }) || montarLegendaOferta(oferta);
   }
 
   return oferta.mensagem || oferta.texto || montarLegendaOferta(oferta);
