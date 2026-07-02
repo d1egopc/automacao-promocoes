@@ -13,6 +13,24 @@ const {
   logEngineImporterOfertaCriada
 } = require("../logger");
 
+let engineOfertasMetadataDisponivel = null;
+
+async function engineOfertasTemMetadata() {
+  if (engineOfertasMetadataDisponivel !== null) return engineOfertasMetadataDisponivel;
+
+  const resultado = await queryEngine(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM information_schema.columns
+        WHERE table_name = 'engine_ofertas'
+          AND column_name = 'metadata'
+     ) AS existe`
+  );
+
+  engineOfertasMetadataDisponivel = Boolean(resultado.ok && resultado.resultado.rows[0]?.existe);
+  return engineOfertasMetadataDisponivel;
+}
+
 function normalizarNumero(valor = null) {
   if (valor === null || valor === undefined || valor === "") return null;
   const texto = String(valor)
@@ -177,35 +195,81 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   ];
 
   let resultado;
+  const metadataOferta = JSON.stringify(oferta.metadata || ofertaEntrada.metadata || {});
+  const usarMetadata = await engineOfertasTemMetadata();
 
   if (job.oferta_id) {
+    if (usarMetadata) {
+      resultado = await queryEngine(
+        `UPDATE engine_ofertas
+            SET evento_id = $1,
+                link_id = $2,
+                marketplace = $3,
+                titulo = $4,
+                titulo_normalizado = $5,
+                preco = $6,
+                preco_original = $7,
+                moeda = 'BRL',
+                cupom = $8,
+                tipo_cupom = $9,
+                beneficio_extra = $10,
+                imagem = $11,
+                link_original = $12,
+                link_expandido = $13,
+                link_afiliado = $14,
+                categoria = $15,
+                score = $16,
+                origem = 'engine_importer',
+                status = 'importada',
+                motivo_status = NULL,
+                capturada_em = $17,
+                metadata = $18::jsonb,
+                atualizada_em = NOW()
+          WHERE id = $19
+          RETURNING id, uuid`,
+        [...valores, metadataOferta, job.oferta_id]
+      );
+    } else {
+      resultado = await queryEngine(
+        `UPDATE engine_ofertas
+            SET evento_id = $1,
+                link_id = $2,
+                marketplace = $3,
+                titulo = $4,
+                titulo_normalizado = $5,
+                preco = $6,
+                preco_original = $7,
+                moeda = 'BRL',
+                cupom = $8,
+                tipo_cupom = $9,
+                beneficio_extra = $10,
+                imagem = $11,
+                link_original = $12,
+                link_expandido = $13,
+                link_afiliado = $14,
+                categoria = $15,
+                score = $16,
+                origem = 'engine_importer',
+                status = 'importada',
+                motivo_status = NULL,
+                capturada_em = $17,
+                atualizada_em = NOW()
+          WHERE id = $18
+          RETURNING id, uuid`,
+        [...valores, job.oferta_id]
+      );
+    }
+  } else if (usarMetadata) {
     resultado = await queryEngine(
-      `UPDATE engine_ofertas
-          SET evento_id = $1,
-              link_id = $2,
-              marketplace = $3,
-              titulo = $4,
-              titulo_normalizado = $5,
-              preco = $6,
-              preco_original = $7,
-              moeda = 'BRL',
-              cupom = $8,
-              tipo_cupom = $9,
-              beneficio_extra = $10,
-              imagem = $11,
-              link_original = $12,
-              link_expandido = $13,
-              link_afiliado = $14,
-              categoria = $15,
-              score = $16,
-              origem = 'engine_importer',
-              status = 'importada',
-              motivo_status = NULL,
-              capturada_em = $17,
-              atualizada_em = NOW()
-        WHERE id = $18
-        RETURNING id, uuid`,
-      [...valores, job.oferta_id]
+      `INSERT INTO engine_ofertas (
+         evento_id, link_id, marketplace, titulo, titulo_normalizado,
+         preco, preco_original, moeda, cupom, tipo_cupom, beneficio_extra,
+         imagem, link_original, link_expandido, link_afiliado, categoria,
+         score, prioridade, origem, status, motivo_status, capturada_em, metadata
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'BRL', $8, $9, $10, $11, $12, $13, $14, $15, $16, 0, 'engine_importer', 'importada', NULL, $17, $18::jsonb)
+       RETURNING id, uuid`,
+      [...valores, metadataOferta]
     );
   } else {
     resultado = await queryEngine(
