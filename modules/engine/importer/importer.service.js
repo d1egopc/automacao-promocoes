@@ -1,4 +1,4 @@
-const { queryEngine } = require("../database");
+﻿const { queryEngine } = require("../database");
 const {
   marcarJobStatus,
   registrarProcessamento,
@@ -295,7 +295,20 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     return { ok: false, motivo: "oferta_nao_retornada" };
   }
 
-  logEngineImporterOfertaCriada({ jobId: job.id, ofertaId, marketplace: oferta.marketplace, atualizada: Boolean(job.oferta_id) });
+  logEngineImporterOfertaCriada({
+    jobId: job.id,
+    ofertaId,
+    clienteId: job.cliente_id || job.clienteId || "",
+    marketplace: oferta.marketplace,
+    titulo: oferta.titulo,
+    preco: oferta.preco,
+    precoOriginal: oferta.precoOriginal,
+    cupom: oferta.cupom,
+    linkAfiliado: oferta.linkAfiliado,
+    categoria: oferta.categoria,
+    status: "importada",
+    atualizada: Boolean(job.oferta_id)
+  });
   return { ok: true, ofertaId, ofertaUuid: resultado.resultado.rows[0]?.uuid, oferta };
 }
 async function marcarJobOfertaCriada(jobId, ofertaId) {
