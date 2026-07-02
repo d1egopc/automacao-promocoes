@@ -1,4 +1,4 @@
-const { queryEngine } = require("../../database");
+﻿const { queryEngine } = require("../../database");
 const { classificarCategoriaOferta } = require("../../../../marketplaces/inteligencia/classificador-categorias");
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
 
@@ -461,9 +461,17 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     temTag
   });
 
+  const textoOriginalRadar = String(evento.texto_original || evento.textoOriginal || "").trim();
   const produto = await deps.importarMercadoLivre(urlImportador, clienteId, {
     getIntegracaoCliente: deps.getIntegracaoCliente,
     gerarLinkAfiliadoMercadoLivre: deps.gerarLinkAfiliadoMercadoLivre,
+    textoOriginal: textoOriginalRadar,
+    contextoRadar: {
+      textoOriginal: textoOriginalRadar,
+      grupoId: evento.grupo_id || "",
+      grupoNome: evento.grupo_nome || "",
+      origem: evento.origem || "engine"
+    },
     contextoEngine: {
       jobId: job.id,
       eventoId: job.evento_id,
@@ -616,3 +624,4 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
 module.exports = {
   importarMercadoLivreEngine
 };
+
