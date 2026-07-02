@@ -10,15 +10,32 @@ function normalizarNumero(valor) {
   if (!temValor(valor)) return null;
   if (typeof valor === "number") return Number.isFinite(valor) ? valor : null;
 
-  const texto = textoLimpo(valor)
+  let texto = textoLimpo(valor)
     .replace(/R\$/gi, "")
-    .replace(/\s+/g, "");
+    .replace(/\s+/g, "")
+    .replace(/[^\d.,-]/g, "");
 
-  const numero = Number(texto);
-  if (Number.isFinite(numero)) return numero;
+  if (!texto) return null;
 
-  const brasileiro = Number(texto.replace(/\./g, "").replace(",", "."));
-  return Number.isFinite(brasileiro) ? brasileiro : null;
+  const negativo = texto.startsWith("-");
+  texto = texto.replace(/-/g, "");
+
+  const temVirgula = texto.includes(",");
+  const temPonto = texto.includes(".");
+
+  if (temVirgula && temPonto) {
+    texto = texto.replace(/\./g, "").replace(",", ".");
+  } else if (temVirgula) {
+    texto = texto.replace(",", ".");
+  } else if (temPonto) {
+    const partes = texto.split(".");
+    const ultimo = partes[partes.length - 1] || "";
+    const milhares = /^\d{1,3}(?:\.\d{3})+$/.test(texto);
+    texto = milhares && ultimo.length === 3 ? texto.replace(/\./g, "") : texto;
+  }
+
+  const numero = Number(`${negativo ? "-" : ""}${texto}`);
+  return Number.isFinite(numero) ? numero : null;
 }
 
 function formatarMoeda(valor) {
