@@ -1,4 +1,4 @@
-function logEngine(tag, dados = {}) {
+﻿function logEngine(tag, dados = {}) {
   try {
     console.log(tag, dados);
   } catch {
@@ -71,7 +71,11 @@ function logEngineImporterAdapter(dados = {}) {
 }
 
 function logEngineImporterOfertaCriada(dados = {}) {
-  logEngine("[ENGINE-IMPORTER-OFERTA-CRIADA]", dados);
+  try {
+    console.log("[ENGINE-IMPORTER-OFERTA-CRIADA]", JSON.stringify(dados));
+  } catch {
+    logEngine("[ENGINE-IMPORTER-OFERTA-CRIADA]", dados);
+  }
 }
 
 function logEngineImporterErro(dados = {}) {
@@ -132,3 +136,4 @@ module.exports = {
   logEngineDistribuidorErro,
   logEngineDistribuidorFim
 };
+
