@@ -63,16 +63,157 @@
     }
 
     function numeroPrecoAmazon(valor) {
-      const numero = Number(
-        String(valor || "")
-          .replace("R$", "")
-          .replace(/\./g, "")
-          .replace(",", ".")
-          .replace(/[^\d.]/g, "")
-          .trim()
-      );
+      if (typeof valor === "number") {
+        return Number.isFinite(valor) && valor > 0 ? valor : 0;
+      }
 
-      return Number.isFinite(numero) ? numero : 0;
+      const texto = String(valor || "")
+        .replace(/R\$/gi, "")
+        .replace(/\s+/g, "")
+        .trim();
+
+      if (!texto) return 0;
+
+      let normalizado = texto.replace(/[^\d.,]/g, "");
+      if (!normalizado) return 0;
+
+      const temVirgula = normalizado.includes(",");
+      const temPonto = normalizado.includes(".");
+
+      if (temVirgula && temPonto) {
+        normalizado = normalizado.replace(/\./g, "").replace(",", ".");
+      } else if (temVirgula) {
+        normalizado = normalizado.replace(",", ".");
+      } else if (temPonto) {
+        const partes = normalizado.split(".");
+        const ultimo = partes[partes.length - 1] || "";
+        const milhares = /^\d{1,3}(?:\.\d{3})+$/.test(normalizado);
+        normalizado = milhares && ultimo.length === 3
+          ? normalizado.replace(/\./g, "")
+          : normalizado;
+      }
+
+      const numero = Number(normalizado);
+      return Number.isFinite(numero) && numero > 0 ? numero : 0;
+    }
+
+    function formatarPrecoAmazon(numero = 0) {
+      return Number(numero).toLocaleString("pt-BR", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    }
+
+    function normalizarPrecoAmazon(valor = "") {
+      const numero = numeroPrecoAmazon(valor);
+      return numero ? formatarPrecoAmazon(numero) : "";
+    }
+
+    function textoOriginalRadarAmazon() {
+      const contexto = config.contextoRadar || config.radar || config.ofertaRadar || config.contexto || {};
+      return [
+        config.textoOriginal,
+        config.mensagemOriginalRadar,
+        config.textoRadar,
+        contexto.textoOriginal,
+        contexto.texto,
+        contexto.mensagemOriginalRadar,
+        contexto.mensagem,
+        contexto.caption,
+        contexto.descricao
+      ]
+        .filter(Boolean)
+        .join("\n")
+        .trim();
+    }
+
+    function extrairPrecoTextoRadarAmazon(textoRadar = "") {
+      const original = String(textoRadar || "");
+      if (!original.trim()) return { ok: false, motivo: "texto_vazio" };
+
+      if (/r\$\s*[\d.,]+\s*(?:a|ate|até|-)\s*r?\$?\s*[\d.,]+/i.test(original)) {
+        return { ok: false, motivo: "faixa_preco" };
+      }
+
+      const padraoPor = /(?:\bpor\b|\bsai\s+por\b|\bsaindo\s+por\b|\bvalor\s+final\b|\bpre[cç]o\s+final\b)\s*:?\s*r\$\s*([0-9]{1,5}(?:\.[0-9]{3})*(?:[,.][0-9]{2})?)/gi;
+      const candidatosPor = [...original.matchAll(padraoPor)]
+        .map(match => numeroPrecoAmazon(match[1]))
+        .filter(numero => numero > 0);
+      const unicosPor = [...new Set(candidatosPor.map(numero => numero.toFixed(2)))];
+
+      if (unicosPor.length === 1) {
+        return {
+          ok: true,
+          preco: formatarPrecoAmazon(Number(unicosPor[0])),
+          numero: Number(unicosPor[0]),
+          origem: "texto_radar_por"
+        };
+      }
+      if (unicosPor.length > 1) return { ok: false, motivo: "multiplos_precos_por" };
+
+      const matches = [...original.matchAll(/r\$\s*([0-9]{1,5}(?:\.[0-9]{3})*(?:[,.][0-9]{2})?)/gi)];
+      const candidatos = [];
+
+      for (const match of matches) {
+        const inicio = Math.max(0, match.index - 35);
+        const fim = Math.min(original.length, match.index + match[0].length + 35);
+        const contextoPreco = original.slice(inicio, fim).toLowerCase();
+        if (/\b(cupom|off|desconto|cashback|frete)\b/i.test(contextoPreco)) continue;
+
+        const numero = numeroPrecoAmazon(match[1]);
+        if (numero > 0) candidatos.push(numero.toFixed(2));
+      }
+
+      const unicos = [...new Set(candidatos)];
+      if (unicos.length === 1 && !/\b(de|era|antes)\s+r\$/i.test(original)) {
+        return {
+          ok: true,
+          preco: formatarPrecoAmazon(Number(unicos[0])),
+          numero: Number(unicos[0]),
+          origem: "texto_radar_preco_unico"
+        };
+      }
+
+      if (matches.length > 0) {
+        return { ok: false, motivo: unicos.length > 1 || candidatos.length !== matches.length ? "ambiguidade" : "preco_nao_confirmado" };
+      }
+
+      return { ok: false, motivo: "sem_preco_texto" };
+    }
+
+    function normalizarCupomTextoAmazon(cupom = "") {
+      const codigo = String(cupom || "").toUpperCase().replace(/[^A-Z0-9_-]/g, "").trim();
+      const bloqueados = new Set(["AMAZON", "CUPOM", "CODIGO", "PROMOCAO", "DESCONTO", "OFERTA", "PRIME", "APP", "SITE", "BRASIL", "COMPRE", "GANHE"]);
+      if (!codigo || codigo.length < 4 || codigo.length > 24 || bloqueados.has(codigo)) return "";
+      if (!/[A-Z]/.test(codigo)) return "";
+      return codigo;
+    }
+
+    function extrairCupomTextoRadarAmazon(textoRadar = "") {
+      const fonte = String(textoRadar || "");
+      const match =
+        fonte.match(/(?:cupom|use o cupom|aplique o cupom|codigo promocional|c[oó]digo promocional|com o c[oó]digo)\s*:?\s*([A-Z0-9_-]{4,24})/i) ||
+        fonte.match(/\b([A-Z]{3,}[A-Z0-9_-]{1,21})\b\s*(?:na amazon|amazon|no carrinho|para ganhar|para desconto|com cupom)/i);
+
+      const cupom = normalizarCupomTextoAmazon(match?.[1] || "");
+      if (!cupom) return { cupom: "", tipoCupom: "", avisoCupom: "" };
+      return {
+        cupom,
+        tipoCupom: "texto_radar",
+        avisoCupom: `Aplique o cupom ${cupom} antes de finalizar.`
+      };
+    }
+
+    function extrairBeneficioTextoRadarAmazon(textoRadar = "") {
+      const texto = String(textoRadar || "");
+      const valorCupom = texto.match(/(?:cupom|desconto|off|economize)[^\n]{0,50}?(R\$\s*[0-9]{1,5}(?:[,.][0-9]{2})?)/i)?.[1] || "";
+      if (valorCupom) return `Cupom: ${valorCupom.replace(/\s+/g, " ").trim()} OFF`;
+
+      const percentual = texto.match(/(?:cupom|desconto|off|economize)[^\n]{0,50}?([0-9]{1,3}\s*%)/i)?.[1] || "";
+      if (percentual) return `Cupom: ${percentual.replace(/\s+/g, "").trim()} OFF adicional`;
+
+      if (/frete\s+gr[aá]tis|envio\s+gr[aá]tis/i.test(texto)) return "Frete grátis";
+      return "";
     }
 
     function extrairImagemAmazon() {
@@ -116,7 +257,21 @@
       extrairMeta(html, "og:price:amount") ||
       "";
 
-    preco = limparPreco(htmlDecode(preco));
+    preco = normalizarPrecoAmazon(htmlDecode(preco)) || limparPreco(htmlDecode(preco));
+
+    const textoRadarAmazon = textoOriginalRadarAmazon();
+    const precoTextoRadar = extrairPrecoTextoRadarAmazon(textoRadarAmazon);
+    const precoNumeroHtmlInicial = numeroPrecoAmazon(preco);
+
+    if (precoTextoRadar.ok && (!preco || Math.abs(precoNumeroHtmlInicial - (precoTextoRadar.numero * 100)) < 0.01)) {
+      preco = precoTextoRadar.preco;
+      console.log("[AMZ-PRECO-FALLBACK-RADAR]", {
+        url,
+        origem: precoTextoRadar.origem,
+        precoTexto: precoTextoRadar.preco,
+        precoHtmlAnterior: precoNumeroHtmlInicial || ""
+      });
+    }
 
     const precoAntigoExtraido = primeiroMatchDetalhado(
       /class=["'][^"']*a-text-price[^"']*["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i,
@@ -125,7 +280,7 @@
 
     let precoAntigo = precoAntigoExtraido.valor || "";
 
-    precoAntigo = limparPreco(htmlDecode(precoAntigo));
+    precoAntigo = normalizarPrecoAmazon(htmlDecode(precoAntigo)) || limparPreco(htmlDecode(precoAntigo));
 
     let origemPrecoAntigo = precoAntigo
       ? {
@@ -228,6 +383,20 @@
         descontoApp = cupomOfertaAmazon.descontoApp || "";
         beneficioExtra = cupomOfertaAmazon.beneficioExtra || "";
       }
+
+      const cupomTextoRadar = extrairCupomTextoRadarAmazon(textoRadarAmazon);
+      const beneficioTextoRadar = extrairBeneficioTextoRadarAmazon(textoRadarAmazon);
+
+      if (!cupom && cupomTextoRadar.cupom) {
+        cupom = cupomTextoRadar.cupom;
+        tipoCupom = cupomTextoRadar.tipoCupom;
+        avisoCupom = avisoCupom || cupomTextoRadar.avisoCupom;
+        beneficioExtra = beneficioExtra || beneficioTextoRadar || cupomTextoRadar.avisoCupom;
+      } else if (!beneficioExtra && !avisoCupom && beneficioTextoRadar) {
+        beneficioExtra = beneficioTextoRadar;
+        avisoCupom = beneficioTextoRadar;
+        tipoCupom = tipoCupom || "texto_radar_beneficio";
+      }
     } else {
       cupom =
         primeiroMatch(/Use o cupom\s+([A-Z0-9]{4,20})/i) ||
@@ -239,6 +408,20 @@
         avisoCupom = `Cupom: ${cupom}`;
         beneficioExtra = `Cupom: ${cupom}`;
         tipoCupom = "confirmado_amazon";
+      }
+
+      const cupomTextoRadar = extrairCupomTextoRadarAmazon(textoRadarAmazon);
+      const beneficioTextoRadar = extrairBeneficioTextoRadarAmazon(textoRadarAmazon);
+
+      if (!cupom && cupomTextoRadar.cupom) {
+        cupom = cupomTextoRadar.cupom;
+        avisoCupom = cupomTextoRadar.avisoCupom;
+        beneficioExtra = beneficioTextoRadar || cupomTextoRadar.avisoCupom;
+        tipoCupom = cupomTextoRadar.tipoCupom;
+      } else if (!beneficioExtra && !avisoCupom && beneficioTextoRadar) {
+        beneficioExtra = beneficioTextoRadar;
+        avisoCupom = beneficioTextoRadar;
+        tipoCupom = "texto_radar_beneficio";
       }
     }
 
@@ -277,4 +460,6 @@ const linkFinal = usarLinksOptimus
 module.exports = {
   criarImportarAmazon
 };
+
+
 
