@@ -263,7 +263,22 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
     temTag: Boolean(integracao?.credenciais?.trackingId || integracao?.credenciais?.partnerTag || integracao?.credenciais?.tag || integracao?.credenciais?.appId)
   });
 
-  const produtoBase = await deps.importarAmazon(urlOriginalEngine, integracao);
+  const textoOriginalRadar = textoOriginalEvento(evento);
+  const produtoBase = await deps.importarAmazon(urlOriginalEngine, {
+    ...integracao,
+    textoOriginal: textoOriginalRadar,
+    contextoRadar: {
+      textoOriginal: textoOriginalRadar,
+      grupoId: evento.grupo_id || "",
+      grupoNome: evento.grupo_nome || "",
+      origem: evento.origem || "engine"
+    },
+    contextoEngine: {
+      jobId: job.id,
+      eventoId: job.evento_id,
+      clienteId
+    }
+  });
   const produto = aplicarFallbackCupomRadar(produtoBase || {}, evento);
 
   console.log("[ENGINE-AMAZON-IMPORTADOR-RETORNO]", JSON.stringify({
@@ -348,3 +363,4 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
 module.exports = {
   importarAmazonEngine
 };
+
