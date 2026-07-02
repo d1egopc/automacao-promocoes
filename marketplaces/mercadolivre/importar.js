@@ -64,6 +64,78 @@ function extrairPrecoMlHtml(html = "") {
   return normalizarPrecoMl(bruto) || limparPreco(bruto);
 }
 
+function textoHtmlMl(html = "") {
+  return htmlDecode(String(html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim());
+}
+
+function extrairCupomMlHtml(html = "") {
+  const texto = textoHtmlMl(html);
+  const match =
+    texto.match(/(?:cupom|use o cupom|aplique o cupom|codigo promocional)\s+([A-Z0-9]{4,24})/i) ||
+    texto.match(/\b([A-Z]{3,}[A-Z0-9]{1,21})\b\s*(?:no carrinho|para ganhar|para desconto)/i);
+
+  const cupom = String(match?.[1] || "").toUpperCase().trim();
+  if (!cupom || ["COPIADO", "APPLIED", "APPEARANCE", "APPLINK", "MERCADOLIVRE"].includes(cupom)) {
+    return { cupom: "", tipoCupom: "", avisoCupom: "" };
+  }
+
+  return {
+    cupom,
+    tipoCupom: "detectado_html",
+    avisoCupom: `Aplique o cupom ${cupom} antes de finalizar.`
+  };
+}
+
+function extrairBeneficiosMlHtml(html = "") {
+  const texto = textoHtmlMl(html);
+  const beneficios = [];
+
+  const temCupomGenerico = /cupom|codigo promocional|desconto extra|aplicar desconto/i.test(texto);
+  const compraNoApp = /(?:desconto|oferta|preco)\s+(?:no|pelo)\s+app|aplicativo/i.test(texto);
+  const freteGratis = /frete\s+gratis|envio\s+gratis/i.test(texto);
+  const cashbackMatch = texto.match(/cashback\s*(?:de|ate)?\s*(R\$\s*[0-9.,]+|[0-9]{1,3}%)/i);
+  const pixMatch = texto.match(/(?:pix|pagamento via pix)[^\.]{0,80}?(R\$\s*[0-9.,]+|[0-9]{1,3}%)/i);
+  const appMatch = texto.match(/(?:app|aplicativo)[^\.]{0,80}?(R\$\s*[0-9.,]+|[0-9]{1,3}%)/i);
+
+  if (freteGratis) beneficios.push("Frete gratis");
+  if (cashbackMatch?.[1]) beneficios.push(`Cashback ${cashbackMatch[1].trim()}`);
+  if (pixMatch?.[1]) beneficios.push(`Desconto no Pix ${pixMatch[1].trim()}`);
+  if (appMatch?.[1]) beneficios.push(`Desconto no app ${appMatch[1].trim()}`);
+  if (compraNoApp) beneficios.push("Pode haver beneficio pelo app do Mercado Livre");
+
+  return {
+    avisoCupomGenerico: temCupomGenerico ? "Pode haver cupom disponivel. Confira no carrinho/app do Mercado Livre." : "",
+    beneficioExtra: beneficios.join(" | "),
+    freteGratis,
+    cashback: cashbackMatch?.[1]?.trim() || "",
+    descontoPix: pixMatch?.[1]?.trim() || "",
+    descontoApp: appMatch?.[1]?.trim() || ""
+  };
+}
+
+function extrairParcelamentoMlHtml(html = "") {
+  const texto = textoHtmlMl(html);
+  const match =
+    texto.match(/(?:em\s+)?(\d{1,2})\s*x\s*(?:de\s*)?R\$\s*([0-9]{1,3}(?:\.[0-9]{3})*,\d{2}|[0-9]+,\d{2})(?:\s*sem\s+juros)?/i) ||
+    texto.match(/(\d{1,2})\s*parcelas\s*(?:de\s*)?R\$\s*([0-9]{1,3}(?:\.[0-9]{3})*,\d{2}|[0-9]+,\d{2})/i);
+
+  if (!match) return "";
+  const semJuros = /sem\s+juros/i.test(match[0]);
+  return `${match[1]}x de R$ ${match[2]}${semJuros ? " sem juros" : ""}`;
+}
+
+function calcularEconomiaMl(precoAntigo = "", precoAtual = "") {
+  const antigo = numeroPrecoMlImportador(precoAntigo);
+  const atual = numeroPrecoMlImportador(precoAtual);
+  if (!antigo || !atual || atual >= antigo) return "";
+  return (antigo - atual).toFixed(2);
+}
+
 function normalizarTextoMlImportador(texto = "") {
   return String(texto || "")
     .normalize("NFD")
@@ -427,6 +499,9 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       html.match(/"discountPercentage"\s*:\s*(\d{1,2})/i) ||
       html.match(/(\d{1,2})\s*%\s*de desconto/i);
     const descontoReal = descontoMatch ? Number(descontoMatch[1]) : 0;
+    const cupomHtml = extrairCupomMlHtml(html);
+    const beneficiosHtml = extrairBeneficiosMlHtml(html);
+    const parcelamento = extrairParcelamentoMlHtml(html);
 
     if (
       Number.isFinite(precoNumero) &&
@@ -476,7 +551,19 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       titulo: tituloLimpo,
       precoAtual: preco,
       precoAntigo,
-      cupom: "",
+      precoOriginal: precoAntigo,
+      descontoPercentual: descontoReal || "",
+      economia: calcularEconomiaMl(precoAntigo, preco),
+      cupom: cupomHtml.cupom || "",
+      tipoCupom: cupomHtml.tipoCupom || (beneficiosHtml.avisoCupomGenerico ? "possivel_html" : ""),
+      cupomTipo: cupomHtml.tipoCupom || (beneficiosHtml.avisoCupomGenerico ? "possivel_html" : ""),
+      avisoCupom: cupomHtml.avisoCupom || beneficiosHtml.avisoCupomGenerico || "",
+      beneficioExtra: beneficiosHtml.beneficioExtra || "",
+      parcelamento,
+      freteGratis: beneficiosHtml.freteGratis === true,
+      cashback: beneficiosHtml.cashback || "",
+      descontoPix: beneficiosHtml.descontoPix || "",
+      descontoApp: beneficiosHtml.descontoApp || "",
       imagem: corrigirImagemUrl(imagem) || imagem
     }, deps, {
       urlOriginal: url,
@@ -499,9 +586,21 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       titulo: produtoComFallbackRadar.titulo,
       nome: produtoComFallbackRadar.nome || produtoComFallbackRadar.titulo,
       precoAntigo: produtoComFallbackRadar.precoAntigo || precoAntigo,
+      precoOriginal: produtoComFallbackRadar.precoOriginal || produtoComFallbackRadar.precoAntigo || precoAntigo,
       precoAtual: produtoComFallbackRadar.precoAtual || produtoComFallbackRadar.preco || "",
       preco: produtoComFallbackRadar.preco || produtoComFallbackRadar.precoAtual || "",
+      descontoPercentual: produtoComFallbackRadar.descontoPercentual || descontoReal || "",
+      economia: produtoComFallbackRadar.economia || calcularEconomiaMl(produtoComFallbackRadar.precoAntigo || precoAntigo, produtoComFallbackRadar.precoAtual || produtoComFallbackRadar.preco || preco),
       cupom: produtoComFallbackRadar.cupom || "",
+      avisoCupom: produtoComFallbackRadar.avisoCupom || "",
+      tipoCupom: produtoComFallbackRadar.tipoCupom || produtoComFallbackRadar.cupomTipo || "",
+      cupomTipo: produtoComFallbackRadar.cupomTipo || produtoComFallbackRadar.tipoCupom || "",
+      beneficioExtra: produtoComFallbackRadar.beneficioExtra || "",
+      parcelamento: produtoComFallbackRadar.parcelamento || "",
+      freteGratis: produtoComFallbackRadar.freteGratis === true,
+      cashback: produtoComFallbackRadar.cashback || "",
+      descontoPix: produtoComFallbackRadar.descontoPix || "",
+      descontoApp: produtoComFallbackRadar.descontoApp || "",
       linkOriginal: url,
       link: linkAfiliadoGerado || "",
       linkAfiliado: linkAfiliadoGerado || "",
