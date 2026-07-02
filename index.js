@@ -19439,6 +19439,7 @@ initEngineDatabase()
       getMarketplacesAtivosPorCliente: listarMarketplacesAtivosEngineProcessor,
       getDepsImportador: () => ({
         importarMercadoLivre,
+        importarAmazon,
         getIntegracaoCliente,
         gerarLinkAfiliadoMercadoLivre,
         resolverLinkOriginalRadar
