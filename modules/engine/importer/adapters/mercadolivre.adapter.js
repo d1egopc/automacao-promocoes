@@ -1,6 +1,115 @@
 const { queryEngine } = require("../../database");
 const { classificarCategoriaOferta } = require("../../../../marketplaces/inteligencia/classificador-categorias");
+const { formatarOfertaUniversal } = require("../../../../templates/oferta-template");
+const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
 
+function resumoTemplateInputAuditoria(templateInput = {}) {
+  return {
+    precoAtual: templateInput.precoAtual ?? "",
+    precoOriginal: templateInput.precoOriginal ?? "",
+    descontoPercentual: templateInput.descontoPercentual ?? "",
+    economia: templateInput.economia ?? "",
+    parcelamento: templateInput.parcelamento || "",
+    cupom: templateInput.cupom || "",
+    cupomTipo: templateInput.cupomTipo || "",
+    beneficioTexto: templateInput.beneficioTexto || "",
+    freteGratis: templateInput.freteGratis === true,
+    cashback: templateInput.cashback || "",
+    linkAfiliado: templateInput.linkAfiliado || ""
+  };
+}
+
+function auditarInteligenciaUniversalMlEngine({ job = {}, produto = {}, ofertaAdapter = {}, linkAfiliado = "" } = {}) {
+  const antes = {
+    preco: produto.precoAtual || produto.preco || "",
+    precoOriginal: produto.precoAntigo || produto.precoOriginal || "",
+    cupom: produto.cupom || "",
+    avisoCupom: produto.avisoCupom || "",
+    tipoCupom: produto.tipoCupom || produto.cupomTipo || "",
+    linkAfiliado,
+    imagem: produto.imagem || "",
+    categoria: produto.categoria || produto.categoriaProduto || "",
+    score: produto.score || null,
+    templateInput: {
+      precoAtual: produto.precoAtual || produto.preco || "",
+      precoOriginal: produto.precoAntigo || produto.precoOriginal || "",
+      cupom: produto.cupom || "",
+      cupomTipo: produto.tipoCupom || produto.cupomTipo || "",
+      beneficioTexto: produto.beneficioTexto || produto.beneficioExtra || produto.avisoCupom || "",
+      linkAfiliado
+    }
+  };
+
+  try {
+    const resultadoV2 = avaliarOfertaUniversal({
+      titulo: ofertaAdapter.titulo || produto.titulo || produto.nome || "",
+      marketplace: "mercadolivre",
+      precoAtual: ofertaAdapter.preco || produto.precoAtual || produto.preco || "",
+      precoOriginal: ofertaAdapter.precoOriginal || produto.precoAntigo || produto.precoOriginal || "",
+      cupom: ofertaAdapter.cupom || produto.cupom || "",
+      cupomTipo: ofertaAdapter.cupomTipo || produto.tipoCupom || produto.cupomTipo || "",
+      beneficioTexto: produto.beneficioTexto || produto.beneficioExtra || produto.avisoCupom || "",
+      linkAfiliado: ofertaAdapter.linkAfiliado || linkAfiliado,
+      linkOriginal: ofertaAdapter.linkOriginal || produto.linkOriginal || "",
+      imagem: ofertaAdapter.imagem || produto.imagem || "",
+      categoria: ofertaAdapter.categoria || produto.categoria || produto.categoriaProduto || "",
+      score: ofertaAdapter.score || produto.score || null,
+      origem: "engine_ml"
+    }, {
+      clienteId: job.cliente_id || job.clienteId || "",
+      origem: "engine_ml",
+      exigirLinkAfiliado: true
+    });
+
+    const depois = {
+      preco: resultadoV2.ofertaUniversal?.precoAtual ?? "",
+      precoOriginal: resultadoV2.ofertaUniversal?.precoOriginal ?? "",
+      cupom: resultadoV2.ofertaUniversal?.cupom || "",
+      avisoCupom: resultadoV2.ofertaUniversal?.beneficioTexto || "",
+      tipoCupom: resultadoV2.ofertaUniversal?.cupomTipo || "",
+      linkAfiliado: resultadoV2.ofertaUniversal?.linkAfiliado || "",
+      imagem: resultadoV2.ofertaUniversal?.imagem || "",
+      categoria: resultadoV2.categoria || "",
+      score: resultadoV2.score?.score ?? null,
+      templateInput: resumoTemplateInputAuditoria(resultadoV2.templateInput || {})
+    };
+
+    console.log("[ENGINE-ML-V2-AUDITORIA]", {
+      jobId: job.id,
+      eventoId: job.evento_id,
+      clienteId: job.cliente_id || job.clienteId || "",
+      titulo: ofertaAdapter.titulo || produto.titulo || produto.nome || "",
+      okV2: resultadoV2.ok,
+      statusV2: resultadoV2.status,
+      motivoV2: resultadoV2.motivo,
+      antes,
+      depois,
+      diferencas: {
+        preco: String(antes.preco || "") !== String(depois.preco || ""),
+        precoOriginal: String(antes.precoOriginal || "") !== String(depois.precoOriginal || ""),
+        cupom: String(antes.cupom || "") !== String(depois.cupom || ""),
+        avisoCupom: String(antes.avisoCupom || "") !== String(depois.avisoCupom || ""),
+        tipoCupom: String(antes.tipoCupom || "") !== String(depois.tipoCupom || ""),
+        linkAfiliado: String(antes.linkAfiliado || "") !== String(depois.linkAfiliado || ""),
+        imagem: String(antes.imagem || "") !== String(depois.imagem || ""),
+        categoria: String(antes.categoria || "") !== String(depois.categoria || ""),
+        score: String(antes.score ?? "") !== String(depois.score ?? "")
+      },
+      logsV2: resultadoV2.logs || []
+    });
+
+    return resultadoV2;
+  } catch (e) {
+    console.log("[ENGINE-ML-V2-AUDITORIA-ERRO]", {
+      jobId: job.id,
+      eventoId: job.evento_id,
+      clienteId: job.cliente_id || job.clienteId || "",
+      erro: e.message,
+      antes
+    });
+    return null;
+  }
+}
 function categoriaGenericaMercadoLivre(categoria = "") {
   const texto = String(categoria || "")
     .normalize("NFD")
@@ -355,7 +464,22 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     };
   }
 
-  return {
+  const mensagemUniversal = formatarOfertaUniversal({
+    titulo: produto.titulo || produto.nome || "",
+    marketplace: "mercadolivre",
+    precoAtual: produto.precoAtual || produto.preco || "",
+    precoOriginal: produto.precoAntigo || produto.precoOriginal || "",
+    descontoPercentual: produto.descontoPercentual,
+    economia: produto.economia,
+    parcelamento: produto.parcelamento || "",
+    cupom: produto.cupom || "",
+    cupomTipo: produto.tipoCupom || produto.cupomTipo || "",
+    beneficioTexto: produto.beneficioTexto || produto.beneficioExtra || produto.avisoCupom || "",
+    freteGratis: produto.freteGratis === true,
+    linkAfiliado
+  });
+
+  const ofertaAdapter = {
     ok: true,
     marketplace: "mercadolivre",
     titulo: produto.titulo || produto.nome || "",
@@ -368,8 +492,31 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     categoria: resolverCategoriaMercadoLivre(produto),
     cupom: produto.cupom || "",
     cupomTipo: produto.tipoCupom || "",
-    score: produto.score || null,
+    beneficioExtra: mensagemUniversal,
+    mensagemUniversal,
+    score: produto.score || null
+  };
+
+  const auditoriaV2 = auditarInteligenciaUniversalMlEngine({
+    job,
+    produto,
+    ofertaAdapter,
+    linkAfiliado
+  });
+
+  return {
+    ...ofertaAdapter,
     metadata: {
+      auditoriaInteligenciaUniversalV2: auditoriaV2 ? {
+        ok: auditoriaV2.ok,
+        status: auditoriaV2.status,
+        motivo: auditoriaV2.motivo,
+        categoria: auditoriaV2.categoria,
+        score: auditoriaV2.score?.score ?? null,
+        prioridade: auditoriaV2.prioridade,
+        templateInput: auditoriaV2.templateInput
+      } : null,
+      mensagemUniversal,
       adapter: "mercadolivre",
       jobId: job.id,
       eventoId: job.evento_id,
