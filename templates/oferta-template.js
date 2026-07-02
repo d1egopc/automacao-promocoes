@@ -92,7 +92,7 @@ function formatarOfertaUniversal(oferta = {}) {
   if (cupom) {
     linhas.push("", `\u{1F39F}\uFE0F Cupom: ${cupom}`);
   } else if (temAvisoCupom(oferta.cupomTipo || oferta.tipoCupom, beneficioTexto)) {
-    linhas.push("", "\u26A0\uFE0F Pode haver cupom disponivel");
+    linhas.push("", "💡 Pode haver benefícios disponíveis na página.");
   }
 
   if (oferta.freteGratis === true) linhas.push("", "\u{1F69A} Frete gratis");
