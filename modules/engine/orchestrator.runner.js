@@ -94,11 +94,21 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       deps: depsImportador
     });
 
+    const contextoDistribuidor = chamarFornecedor(getContextoDistribuidor, {});
+    const depsDistribuidor = chamarFornecedor(getDepsDistribuidor, {});
+
     resumo.etapas.distribuir = await executarEtapa("distribuir_ml", distribuirOfertasEngine, {
       limite: limitesRodada.distribuir,
       marketplace: "mercadolivre",
-      contexto: chamarFornecedor(getContextoDistribuidor, {}),
-      deps: chamarFornecedor(getDepsDistribuidor, {})
+      contexto: contextoDistribuidor,
+      deps: depsDistribuidor
+    });
+
+    resumo.etapas.distribuirAmazon = await executarEtapa("distribuir_amazon", distribuirOfertasEngine, {
+      limite: limitesRodada.distribuirAmazon || limitesRodada.distribuir,
+      marketplace: "amazon",
+      contexto: contextoDistribuidor,
+      deps: depsDistribuidor
     });
 
     resumo.ok = Object.values(resumo.etapas).every(etapa => etapa.ok !== false);
