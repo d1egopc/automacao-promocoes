@@ -74,7 +74,7 @@ function auditarInteligenciaUniversalMlEngine({ job = {}, produto = {}, ofertaAd
       templateInput: resumoTemplateInputAuditoria(resultadoV2.templateInput || {})
     };
 
-    console.log("[ENGINE-ML-V2-AUDITORIA]", {
+    console.log("[ENGINE-ML-V2-AUDITORIA]", JSON.stringify({
       jobId: job.id,
       eventoId: job.evento_id,
       clienteId: job.cliente_id || job.clienteId || "",
@@ -96,17 +96,17 @@ function auditarInteligenciaUniversalMlEngine({ job = {}, produto = {}, ofertaAd
         score: String(antes.score ?? "") !== String(depois.score ?? "")
       },
       logsV2: resultadoV2.logs || []
-    });
+    }));
 
     return resultadoV2;
   } catch (e) {
-    console.log("[ENGINE-ML-V2-AUDITORIA-ERRO]", {
+    console.log("[ENGINE-ML-V2-AUDITORIA-ERRO]", JSON.stringify({
       jobId: job.id,
       eventoId: job.evento_id,
       clienteId: job.cliente_id || job.clienteId || "",
       erro: e.message,
       antes
-    });
+    }));
     return null;
   }
 }
@@ -417,15 +417,28 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     }
   });
 
-  console.log("[ENGINE-ML-IMPORTADOR-RETORNO]", {
+  console.log("[ENGINE-ML-IMPORTADOR-RETORNO]", JSON.stringify({
+    jobId: job.id,
+    eventoId: job.evento_id,
     clienteId,
     ok: Boolean(produto),
     titulo: produto?.titulo || produto?.nome || "",
+    precoAtual: produto?.precoAtual || produto?.preco || "",
+    precoOriginal: produto?.precoOriginal || produto?.precoAntigo || "",
+    cupom: produto?.cupom || "",
+    avisoCupom: produto?.avisoCupom || "",
+    tipoCupom: produto?.tipoCupom || produto?.cupomTipo || "",
+    linkAfiliado: produto?.linkAfiliado || "",
+    linkFinal: produto?.linkFinal || "",
+    link: produto?.link || "",
+    imagem: produto?.imagem || "",
+    categoria: produto?.categoria || produto?.categoriaProduto || "",
+    score: produto?.score || null,
     camposRetorno: Object.keys(produto || {}),
     temLinkAfiliado: Boolean(produto?.linkAfiliado),
     temLinkFinal: Boolean(produto?.linkFinal),
     temLink: Boolean(produto?.link)
-  });
+  }));
 
   if (!produto) {
     return { ok: false, motivo: "importador_sem_retorno", marketplace: "mercadolivre", linkOriginal: urlOriginalEngine };
