@@ -114,6 +114,56 @@ function auditarInteligenciaUniversalMlEngine({ job = {}, produto = {}, ofertaAd
     return null;
   }
 }
+function valorV2Presente(valor) {
+  return valor !== null && valor !== undefined && valor !== "";
+}
+
+function primeiroValorV2(...valores) {
+  for (const valor of valores) {
+    if (valorV2Presente(valor)) return valor;
+  }
+  return "";
+}
+
+function enriquecerOfertaAdapterComV2(ofertaAdapter = {}, auditoriaV2 = null, produto = {}, linkAfiliado = "") {
+  if (!auditoriaV2) return ofertaAdapter;
+
+  const ofertaUniversal = auditoriaV2.ofertaUniversal || {};
+  const templateInput = auditoriaV2.templateInput || {};
+  const scoreV2 = auditoriaV2.score?.score;
+  const beneficioTextoV2 = primeiroValorV2(
+    ofertaUniversal.beneficioTexto,
+    templateInput.beneficioTexto,
+    ofertaAdapter.beneficioTexto,
+    ofertaAdapter.beneficioExtra,
+    produto.beneficioTexto,
+    produto.beneficioExtra,
+    produto.avisoCupom
+  );
+  const cupomTipoV2 = primeiroValorV2(ofertaUniversal.cupomTipo, templateInput.cupomTipo, ofertaAdapter.cupomTipo, produto.tipoCupom, produto.cupomTipo);
+
+  return {
+    ...ofertaAdapter,
+    preco: primeiroValorV2(ofertaUniversal.precoAtual, templateInput.precoAtual, ofertaAdapter.preco),
+    precoOriginal: primeiroValorV2(ofertaUniversal.precoOriginal, templateInput.precoOriginal, ofertaAdapter.precoOriginal),
+    descontoPercentual: primeiroValorV2(ofertaUniversal.descontoPercentual, templateInput.descontoPercentual, ofertaAdapter.descontoPercentual, produto.descontoPercentual),
+    economia: primeiroValorV2(ofertaUniversal.economia, templateInput.economia, ofertaAdapter.economia, produto.economia),
+    cupom: primeiroValorV2(ofertaUniversal.cupom, templateInput.cupom, ofertaAdapter.cupom, produto.cupom),
+    cupomTipo: cupomTipoV2,
+    tipoCupom: cupomTipoV2,
+    avisoCupom: primeiroValorV2(ofertaUniversal.avisoCupom, ofertaUniversal.beneficioTexto, templateInput.beneficioTexto, ofertaAdapter.avisoCupom, produto.avisoCupom),
+    beneficioTexto: beneficioTextoV2,
+    beneficioExtra: beneficioTextoV2,
+    parcelamento: primeiroValorV2(ofertaUniversal.parcelamento, templateInput.parcelamento, ofertaAdapter.parcelamento, produto.parcelamento),
+    freteGratis: ofertaUniversal.freteGratis === true || templateInput.freteGratis === true || ofertaAdapter.freteGratis === true || produto.freteGratis === true,
+    cashback: primeiroValorV2(ofertaUniversal.cashback, templateInput.cashback, ofertaAdapter.cashback, produto.cashback),
+    descontoPix: primeiroValorV2(ofertaUniversal.descontoPix, templateInput.descontoPix, ofertaAdapter.descontoPix, produto.descontoPix),
+    descontoApp: primeiroValorV2(ofertaUniversal.descontoApp, templateInput.descontoApp, ofertaAdapter.descontoApp, produto.descontoApp),
+    categoria: primeiroValorV2(auditoriaV2.categoria, ofertaUniversal.categoria, ofertaAdapter.categoria),
+    score: valorV2Presente(scoreV2) ? scoreV2 : ofertaAdapter.score,
+    linkAfiliado: ofertaAdapter.linkAfiliado || linkAfiliado
+  };
+}
 function categoriaGenericaMercadoLivre(categoria = "") {
   const texto = String(categoria || "")
     .normalize("NFD")
@@ -507,6 +557,8 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     parcelamento: produto.parcelamento || "",
     freteGratis: produto.freteGratis === true,
     cashback: produto.cashback || "",
+    descontoPix: produto.descontoPix || "",
+    descontoApp: produto.descontoApp || "",
     score: produto.score || null
   };
 
@@ -517,8 +569,10 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     linkAfiliado
   });
 
+  const ofertaEnriquecida = enriquecerOfertaAdapterComV2(ofertaAdapter, auditoriaV2, produto, linkAfiliado);
+
   return {
-    ...ofertaAdapter,
+    ...ofertaEnriquecida,
     metadata: {
       auditoriaInteligenciaUniversalV2: auditoriaV2 ? {
         ok: auditoriaV2.ok,
@@ -529,6 +583,23 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
         prioridade: auditoriaV2.prioridade,
         templateInput: auditoriaV2.templateInput
       } : null,
+      enriquecimentoV2: {
+        aplicou: Boolean(auditoriaV2),
+        preco: ofertaEnriquecida.preco,
+        precoOriginal: ofertaEnriquecida.precoOriginal,
+        descontoPercentual: ofertaEnriquecida.descontoPercentual,
+        economia: ofertaEnriquecida.economia,
+        avisoCupom: ofertaEnriquecida.avisoCupom,
+        tipoCupom: ofertaEnriquecida.tipoCupom,
+        beneficioExtra: ofertaEnriquecida.beneficioExtra,
+        parcelamento: ofertaEnriquecida.parcelamento,
+        freteGratis: ofertaEnriquecida.freteGratis === true,
+        cashback: ofertaEnriquecida.cashback,
+        descontoPix: ofertaEnriquecida.descontoPix,
+        descontoApp: ofertaEnriquecida.descontoApp,
+        categoria: ofertaEnriquecida.categoria,
+        score: ofertaEnriquecida.score
+      },
       adapter: "mercadolivre",
       jobId: job.id,
       eventoId: job.evento_id,
