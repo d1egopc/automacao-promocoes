@@ -1,4 +1,4 @@
-let engineOrquestradorRodando = false;
+﻿let engineOrquestradorRodando = false;
 let engineOrquestradorIntervalo = null;
 
 const LIMITES_PADRAO = {
@@ -62,7 +62,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
 
   console.log("[ENGINE-ORQUESTRADOR-INICIO]", {
     limites: limitesRodada,
-    marketplace: "mercadolivre"
+    marketplaces: ["mercadolivre", "amazon"]
   });
 
   try {
@@ -80,10 +80,18 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       marketplacesAtivosPorCliente: chamarFornecedor(getMarketplacesAtivosPorCliente, {})
     });
 
+    const depsImportador = chamarFornecedor(getDepsImportador, {});
+
     resumo.etapas.importar = await executarEtapa("importar_ml", importarJobsProntosEngine, {
       limite: limitesRodada.importar,
       marketplace: "mercadolivre",
-      deps: chamarFornecedor(getDepsImportador, {})
+      deps: depsImportador
+    });
+
+    resumo.etapas.importarAmazon = await executarEtapa("importar_amazon", importarJobsProntosEngine, {
+      limite: limitesRodada.importarAmazon || limitesRodada.importar,
+      marketplace: "amazon",
+      deps: depsImportador
     });
 
     resumo.etapas.distribuir = await executarEtapa("distribuir_ml", distribuirOfertasEngine, {
