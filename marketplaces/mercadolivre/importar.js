@@ -21,30 +21,47 @@ function extrairValorMlHtml(html = "", campos = []) {
   return "";
 }
 
-function normalizarPrecoMl(valor = "") {
+function normalizarNumeroMercadoLivre(valor = "") {
+  if (typeof valor === "number") {
+    return Number.isFinite(valor) && valor > 0 ? valor : 0;
+  }
+
   const texto = String(valor || "")
     .replace(/R\$/gi, "")
     .replace(/\s+/g, "")
     .trim();
 
-  if (!texto) return "";
+  if (!texto) return 0;
 
-  let numero = 0;
+  let normalizado = texto.replace(/[^\d.,]/g, "");
+  if (!normalizado) return 0;
 
-  if (/^\d+(?:\.\d{1,2})$/.test(texto)) {
-    numero = Number(texto);
-  } else if (/^\d+(?:,\d{1,2})$/.test(texto)) {
-    numero = Number(texto.replace(",", "."));
-  } else if (/^\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?$/.test(texto)) {
-    numero = Number(texto.replace(/\./g, "").replace(",", "."));
-  } else if (/^\d+$/.test(texto)) {
-    numero = Number(texto);
+  const temVirgula = normalizado.includes(",");
+  const temPonto = normalizado.includes(".");
+
+  if (temVirgula && temPonto) {
+    normalizado = normalizado.replace(/\./g, "").replace(",", ".");
+  } else if (temVirgula) {
+    normalizado = normalizado.replace(",", ".");
+  } else if (temPonto) {
+    const partes = normalizado.split(".");
+    const ultimo = partes[partes.length - 1] || "";
+    const milhares = /^\d{1,3}(?:\.\d{3})+$/.test(normalizado);
+    normalizado = milhares && ultimo.length === 3
+      ? normalizado.replace(/\./g, "")
+      : normalizado;
   }
 
-  if (!Number.isFinite(numero) || numero <= 0) return "";
+  const numero = Number(normalizado);
+  return Number.isFinite(numero) && numero > 0 ? numero : 0;
+}
+
+function normalizarPrecoMl(valor = "") {
+  const numero = normalizarNumeroMercadoLivre(valor);
+  if (!numero) return "";
 
   return numero.toLocaleString("pt-BR", {
-    minimumFractionDigits: texto.includes(",") || texto.includes(".") ? 2 : 0,
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2
   });
 }
@@ -73,20 +90,44 @@ function textoHtmlMl(html = "") {
     .trim());
 }
 
+function normalizarCupomMercadoLivre(cupom = "") {
+  const codigo = String(cupom || "").toUpperCase().replace(/[^A-Z0-9_-]/g, "").trim();
+  const bloqueados = new Set(["COPIADO", "APPLIED", "APPEARANCE", "APPLINK", "MERCADOLIVRE", "CUPOM", "CODIGO", "PROMOCAO"]);
+
+  if (!codigo || codigo.length < 4 || codigo.length > 24 || bloqueados.has(codigo)) return "";
+  if (!/[A-Z]/.test(codigo)) return "";
+  return codigo;
+}
+
 function extrairCupomMlHtml(html = "") {
   const texto = textoHtmlMl(html);
   const match =
-    texto.match(/(?:cupom|use o cupom|aplique o cupom|codigo promocional)\s+([A-Z0-9]{4,24})/i) ||
-    texto.match(/\b([A-Z]{3,}[A-Z0-9]{1,21})\b\s*(?:no carrinho|para ganhar|para desconto)/i);
+    texto.match(/(?:cupom|use o cupom|aplique o cupom|codigo promocional)\s*:?\s*([A-Z0-9_-]{4,24})/i) ||
+    texto.match(/\b([A-Z]{3,}[A-Z0-9_-]{1,21})\b\s*(?:no carrinho|para ganhar|para desconto)/i);
 
-  const cupom = String(match?.[1] || "").toUpperCase().trim();
-  if (!cupom || ["COPIADO", "APPLIED", "APPEARANCE", "APPLINK", "MERCADOLIVRE"].includes(cupom)) {
-    return { cupom: "", tipoCupom: "", avisoCupom: "" };
-  }
+  const cupom = normalizarCupomMercadoLivre(match?.[1] || "");
+  if (!cupom) return { cupom: "", tipoCupom: "", avisoCupom: "" };
 
   return {
     cupom,
     tipoCupom: "detectado_html",
+    avisoCupom: `Aplique o cupom ${cupom} antes de finalizar.`
+  };
+}
+
+function extrairCupomTextoRadarMl(textoRadar = "") {
+  const texto = String(textoRadar || "");
+  const match =
+    texto.match(/(?:cupom|use o cupom|aplique o cupom|codigo promocional|c[oó]digo promocional)\s*:?\s*([A-Z0-9_-]{4,24})/i) ||
+    texto.match(/\b([A-Z]{3,}[A-Z0-9_-]{1,21})\b\s*(?:no carrinho|para ganhar|para desconto|com cupom)/i);
+
+  const cupom = normalizarCupomMercadoLivre(match?.[1] || "");
+  if (!cupom) return { cupom: "", tipoCupom: "", avisoCupom: "" };
+
+  return {
+    cupom,
+    tipoCupom: "texto_radar",
+    cupomTipo: "texto_radar",
     avisoCupom: `Aplique o cupom ${cupom} antes de finalizar.`
   };
 }
@@ -158,12 +199,7 @@ function formatarPrecoMlImportador(numero = 0) {
 }
 
 function numeroPrecoMlImportador(valor = "") {
-  const texto = String(valor || "")
-    .replace(/\./g, "")
-    .replace(",", ".")
-    .replace(/[^\d.]/g, "");
-  const numero = Number(texto);
-  return Number.isFinite(numero) && numero > 0 ? numero : 0;
+  return normalizarNumeroMercadoLivre(valor);
 }
 
 function limparLinhaTituloRadarMl(linha = "") {
@@ -337,6 +373,22 @@ function aplicarFallbacksRadarMercadoLivre(produto = {}, deps = {}, urls = {}) {
     }
   }
 
+  if (!resultado.cupom) {
+    const cupomTexto = extrairCupomTextoRadarMl(textoRadar);
+    if (cupomTexto.cupom) {
+      resultado.cupom = cupomTexto.cupom;
+      resultado.tipoCupom = cupomTexto.tipoCupom;
+      resultado.cupomTipo = cupomTexto.cupomTipo || cupomTexto.tipoCupom;
+      resultado.avisoCupom = resultado.avisoCupom || cupomTexto.avisoCupom;
+      resultado.cupomOrigem = "texto_radar";
+      eventos.push({
+        campo: "cupom",
+        origem: "texto_radar",
+        valor: cupomTexto.cupom
+      });
+    }
+  }
+
   if (eventos.length) {
     console.log("ml_importador_fallback_radar_usado", {
       link,
@@ -490,7 +542,7 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
         .replace(".", ",");
     }
 
-    let precoNumero = Number(String(preco).replace(",", "."));
+    let precoNumero = numeroPrecoMlImportador(preco);
     let precoAntigo = "";
 
     const descontoMatch =
