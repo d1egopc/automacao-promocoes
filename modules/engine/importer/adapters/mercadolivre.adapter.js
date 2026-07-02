@@ -1,6 +1,5 @@
 const { queryEngine } = require("../../database");
 const { classificarCategoriaOferta } = require("../../../../marketplaces/inteligencia/classificador-categorias");
-const { formatarOfertaUniversal } = require("../../../../templates/oferta-template");
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
 
 function resumoTemplateInputAuditoria(templateInput = {}) {
@@ -35,7 +34,7 @@ function auditarInteligenciaUniversalMlEngine({ job = {}, produto = {}, ofertaAd
       precoOriginal: produto.precoAntigo || produto.precoOriginal || "",
       cupom: produto.cupom || "",
       cupomTipo: produto.tipoCupom || produto.cupomTipo || "",
-      beneficioTexto: produto.beneficioTexto || produto.beneficioExtra || produto.avisoCupom || "",
+      beneficioTexto: ofertaAdapter.beneficioTexto || ofertaAdapter.beneficioExtra || produto.beneficioTexto || produto.beneficioExtra || produto.avisoCupom || "",
       linkAfiliado
     }
   };
@@ -48,12 +47,17 @@ function auditarInteligenciaUniversalMlEngine({ job = {}, produto = {}, ofertaAd
       precoOriginal: ofertaAdapter.precoOriginal || produto.precoAntigo || produto.precoOriginal || "",
       cupom: ofertaAdapter.cupom || produto.cupom || "",
       cupomTipo: ofertaAdapter.cupomTipo || produto.tipoCupom || produto.cupomTipo || "",
-      beneficioTexto: produto.beneficioTexto || produto.beneficioExtra || produto.avisoCupom || "",
+      beneficioTexto: ofertaAdapter.beneficioTexto || ofertaAdapter.beneficioExtra || produto.beneficioTexto || produto.beneficioExtra || produto.avisoCupom || "",
       linkAfiliado: ofertaAdapter.linkAfiliado || linkAfiliado,
       linkOriginal: ofertaAdapter.linkOriginal || produto.linkOriginal || "",
       imagem: ofertaAdapter.imagem || produto.imagem || "",
       categoria: ofertaAdapter.categoria || produto.categoria || produto.categoriaProduto || "",
       score: ofertaAdapter.score || produto.score || null,
+      descontoPercentual: ofertaAdapter.descontoPercentual || produto.descontoPercentual || "",
+      economia: ofertaAdapter.economia || produto.economia || "",
+      parcelamento: ofertaAdapter.parcelamento || produto.parcelamento || "",
+      freteGratis: ofertaAdapter.freteGratis === true || produto.freteGratis === true,
+      cashback: ofertaAdapter.cashback || produto.cashback || "",
       origem: "engine_ml"
     }, {
       clienteId: job.cliente_id || job.clienteId || "",
@@ -477,36 +481,32 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     };
   }
 
-  const mensagemUniversal = formatarOfertaUniversal({
-    titulo: produto.titulo || produto.nome || "",
-    marketplace: "mercadolivre",
-    precoAtual: produto.precoAtual || produto.preco || "",
-    precoOriginal: produto.precoAntigo || produto.precoOriginal || "",
-    descontoPercentual: produto.descontoPercentual,
-    economia: produto.economia,
-    parcelamento: produto.parcelamento || "",
-    cupom: produto.cupom || "",
-    cupomTipo: produto.tipoCupom || produto.cupomTipo || "",
-    beneficioTexto: produto.beneficioTexto || produto.beneficioExtra || produto.avisoCupom || "",
-    freteGratis: produto.freteGratis === true,
-    linkAfiliado
-  });
+  const beneficioExtra = produto.beneficioExtra || produto.beneficioTexto || "";
+  const avisoCupom = produto.avisoCupom || "";
+  const cupomTipo = produto.tipoCupom || produto.cupomTipo || "";
 
   const ofertaAdapter = {
     ok: true,
     marketplace: "mercadolivre",
     titulo: produto.titulo || produto.nome || "",
     preco: produto.precoAtual || produto.preco || "",
-    precoOriginal: produto.precoAntigo || "",
+    precoOriginal: produto.precoOriginal || produto.precoAntigo || "",
+    descontoPercentual: produto.descontoPercentual || "",
+    economia: produto.economia || "",
     imagem: produto.imagem || "",
     linkOriginal: produto.linkOriginal || urlOriginalEngine,
     linkExpandido: produto.urlFinal || linkExpandidoEngine || urlImportador,
     linkAfiliado,
     categoria: resolverCategoriaMercadoLivre(produto),
     cupom: produto.cupom || "",
-    cupomTipo: produto.tipoCupom || "",
-    beneficioExtra: mensagemUniversal,
-    mensagemUniversal,
+    cupomTipo,
+    tipoCupom: cupomTipo,
+    avisoCupom,
+    beneficioTexto: beneficioExtra || avisoCupom,
+    beneficioExtra,
+    parcelamento: produto.parcelamento || "",
+    freteGratis: produto.freteGratis === true,
+    cashback: produto.cashback || "",
     score: produto.score || null
   };
 
@@ -529,7 +529,6 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
         prioridade: auditoriaV2.prioridade,
         templateInput: auditoriaV2.templateInput
       } : null,
-      mensagemUniversal,
       adapter: "mercadolivre",
       jobId: job.id,
       eventoId: job.evento_id,
