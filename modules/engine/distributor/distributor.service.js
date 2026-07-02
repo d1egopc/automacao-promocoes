@@ -180,6 +180,10 @@ function montarItemFilaEngine(oferta = {}) {
   const linkAfiliado = normalizarTexto(oferta.link_afiliado || oferta.link_expandido || oferta.link_original || "");
   const linkOriginal = normalizarTexto(oferta.link_original || oferta.link_expandido || linkAfiliado || "");
   const titulo = normalizarTexto(oferta.titulo || "");
+  const cupom = normalizarTexto(oferta.cupom || "");
+  const cupomTipo = normalizarTexto(oferta.tipo_cupom || oferta.cupomTipo || oferta.tipoCupom || "");
+  const beneficioExtra = normalizarTexto(oferta.beneficio_extra || oferta.beneficioExtra || "");
+  const avisoCupom = normalizarTexto(oferta.aviso_cupom || oferta.avisoCupom || "");
 
   return {
     id: `engine_${oferta.id}_${Date.now()}`,
@@ -200,6 +204,12 @@ function montarItemFilaEngine(oferta = {}) {
     linkFinal: linkAfiliado,
     categoria: normalizarTexto(oferta.categoria || ""),
     score: oferta.score,
+    cupom,
+    tipoCupom: cupomTipo,
+    cupomTipo,
+    avisoCupom,
+    beneficioExtra,
+    beneficioTexto: beneficioExtra,
     origem: "engine",
     origemDetalhe: "Engine V2",
     status: "pendente",
@@ -233,7 +243,8 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
     etapa: "buscar_ofertas_distribuiveis",
     queryResumo: "SELECT engine_ofertas JOIN engine_jobs_cliente",
     sql: `SELECT o.id, o.uuid, o.evento_id, o.link_id, o.marketplace, o.titulo,
-            o.preco, o.preco_original, o.imagem, o.link_original, o.link_expandido,
+            o.preco, o.preco_original, o.cupom, o.tipo_cupom, o.beneficio_extra,
+            o.imagem, o.link_original, o.link_expandido,
             o.link_afiliado, o.categoria, o.score, o.status, o.motivo_status,
             o.criada_em, o.atualizada_em, j.id AS job_id, j.cliente_id
        FROM engine_ofertas o
