@@ -249,21 +249,49 @@
       primeiroMatch(/<span[^>]+id=["']productTitle["'][^>]*>([\s\S]*?)<\/span>/i) ||
       "Produto Amazon";
 
-    let preco =
-      primeiroMatch(/id=["']corePriceDisplay_desktop_feature_div["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
-      primeiroMatch(/class=["'][^"']*priceToPay[^"']*["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) ||
-      jsonLd?.offers?.price ||
-      extrairMeta(html, "product:price:amount") ||
-      extrairMeta(html, "og:price:amount") ||
-      "";
+    const precoCoreDisplay = primeiroMatch(/id=["']corePriceDisplay_desktop_feature_div["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i);
+    const precoPriceToPay = primeiroMatch(/class=["'][^"']*priceToPay[^"']*["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i);
+    const precoJsonLd = jsonLd?.offers?.price || "";
+    const precoProductPrice = extrairMeta(html, "product:price:amount");
+    const precoOgPrice = extrairMeta(html, "og:price:amount");
+
+    let origemPreco = "";
+    let valorBrutoPreco = "";
+    let preco = "";
+
+    if (precoCoreDisplay) {
+      origemPreco = "corePriceDisplay_desktop_feature_div .a-offscreen";
+      valorBrutoPreco = precoCoreDisplay;
+      preco = precoCoreDisplay;
+    } else if (precoPriceToPay) {
+      origemPreco = "priceToPay .a-offscreen";
+      valorBrutoPreco = precoPriceToPay;
+      preco = precoPriceToPay;
+    } else if (precoJsonLd) {
+      origemPreco = "jsonLd.offers.price";
+      valorBrutoPreco = precoJsonLd;
+      preco = precoJsonLd;
+    } else if (precoProductPrice) {
+      origemPreco = "product:price:amount";
+      valorBrutoPreco = precoProductPrice;
+      preco = precoProductPrice;
+    } else if (precoOgPrice) {
+      origemPreco = "og:price:amount";
+      valorBrutoPreco = precoOgPrice;
+      preco = precoOgPrice;
+    }
 
     preco = normalizarPrecoAmazon(htmlDecode(preco)) || limparPreco(htmlDecode(preco));
 
     const textoRadarAmazon = textoOriginalRadarAmazon();
     const precoTextoRadar = extrairPrecoTextoRadarAmazon(textoRadarAmazon);
     const precoNumeroHtmlInicial = numeroPrecoAmazon(preco);
+    let usouFallbackRadarPreco = false;
 
     if (precoTextoRadar.ok && (!preco || Math.abs(precoNumeroHtmlInicial - (precoTextoRadar.numero * 100)) < 0.01)) {
+      usouFallbackRadarPreco = true;
+      if (!origemPreco) origemPreco = "fallback_radar";
+      if (!valorBrutoPreco) valorBrutoPreco = precoTextoRadar.preco;
       preco = precoTextoRadar.preco;
       console.log("[AMZ-PRECO-FALLBACK-RADAR]", {
         url,
@@ -272,6 +300,16 @@
         precoHtmlAnterior: precoNumeroHtmlInicial || ""
       });
     }
+
+    console.log("[AMZ-PRECO-ORIGEM]", JSON.stringify({
+      titulo: htmlDecode(titulo).replace("Amazon.com.br:", "").replace("Amazon.com:", "").trim(),
+      url,
+      origemPreco,
+      valorBruto: valorBrutoPreco,
+      valorNormalizado: preco,
+      usouFallbackRadar: usouFallbackRadarPreco,
+      precoTextoRadar: precoTextoRadar.ok ? precoTextoRadar.preco : ""
+    }));
 
     const precoAntigoExtraido = primeiroMatchDetalhado(
       /class=["'][^"']*a-text-price[^"']*["'][\s\S]*?<span[^>]+class=["'][^"']*a-offscreen[^"']*["'][^>]*>([\s\S]*?)<\/span>/i,
@@ -460,6 +498,7 @@ const linkFinal = usarLinksOptimus
 module.exports = {
   criarImportarAmazon
 };
+
 
 
 
