@@ -1,0 +1,78 @@
+function texto(valor = "") {
+  return String(valor || "").trim();
+}
+
+function numero(valor = null) {
+  if (valor === null || valor === undefined || valor === "") return null;
+  if (typeof valor === "number") return Number.isFinite(valor) ? valor : null;
+
+  const limpo = String(valor)
+    .replace(/R\$/gi, "")
+    .replace(/\s+/g, "")
+    .trim();
+
+  if (!limpo) return null;
+
+  const direto = Number(limpo);
+  if (Number.isFinite(direto)) return direto;
+
+  const brasileiro = Number(limpo.replace(/\./g, "").replace(",", "."));
+  return Number.isFinite(brasileiro) ? brasileiro : null;
+}
+
+function normalizarMarketplace(valor = "") {
+  const m = texto(valor).toLowerCase().replace(/[\s_-]+/g, "");
+  if (m.includes("mercadolivre") || m === "ml") return "mercadolivre";
+  if (m.includes("amazon")) return "amazon";
+  if (m.includes("shopee")) return "shopee";
+  if (m.includes("aliexpress")) return "aliexpress";
+  if (m.includes("awin") || m.includes("kabum")) return m.includes("kabum") ? "kabum" : "awin";
+  return texto(valor).toLowerCase();
+}
+
+function primeiroValor(...valores) {
+  for (const valor of valores) {
+    if (valor !== null && valor !== undefined && texto(valor) !== "") return valor;
+  }
+  return "";
+}
+
+function normalizarOfertaUniversal(oferta = {}, contexto = {}) {
+  const marketplace = normalizarMarketplace(primeiroValor(oferta.marketplace, oferta.mercado, contexto.marketplace));
+  const precoAtual = numero(primeiroValor(oferta.precoAtual, oferta.preco, oferta.valor));
+  const precoOriginal = numero(primeiroValor(oferta.precoOriginal, oferta.precoAntigo, oferta.precoDe));
+  const linkAfiliado = texto(primeiroValor(oferta.linkAfiliado, oferta.linkFinal, oferta.link));
+  const linkOriginal = texto(primeiroValor(oferta.linkOriginal, oferta.linkOriginalRadar, oferta.urlOriginal, oferta.url));
+
+  return {
+    id: primeiroValor(oferta.id, oferta.engineOfertaId, oferta.uuid),
+    clienteId: texto(primeiroValor(oferta.clienteId, oferta.cliente_id, contexto.clienteId)),
+    titulo: texto(primeiroValor(oferta.titulo, oferta.nome, oferta.title)),
+    marketplace,
+    precoAtual,
+    precoOriginal,
+    precoTexto: texto(primeiroValor(oferta.precoAtual, oferta.preco, oferta.valor)),
+    precoOriginalTexto: texto(primeiroValor(oferta.precoOriginal, oferta.precoAntigo, oferta.precoDe)),
+    imagem: texto(primeiroValor(oferta.imagem, oferta.image, oferta.foto, oferta.thumbnail)),
+    linkOriginal,
+    linkAfiliado,
+    link: linkAfiliado || linkOriginal,
+    categoria: texto(primeiroValor(oferta.categoria, oferta.categoriaProduto)),
+    score: numero(oferta.score),
+    cupom: texto(oferta.cupom).toUpperCase(),
+    cupomTipo: texto(primeiroValor(oferta.cupomTipo, oferta.tipoCupom)),
+    beneficioTexto: texto(primeiroValor(oferta.beneficioTexto, oferta.beneficioExtra, oferta.avisoCupom)),
+    freteGratis: oferta.freteGratis === true,
+    cashback: texto(oferta.cashback),
+    parcelamento: texto(oferta.parcelamento),
+    origem: texto(primeiroValor(oferta.origem, contexto.origem)),
+    raw: oferta
+  };
+}
+
+module.exports = {
+  texto,
+  numero,
+  normalizarMarketplace,
+  normalizarOfertaUniversal
+};
