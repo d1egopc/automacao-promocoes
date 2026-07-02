@@ -20,6 +20,10 @@ const {
 } = require("./modules/engine");
 
 const {
+  iniciarOrquestradorEngine
+} = require("./modules/engine/orchestrator.runner");
+
+const {
   farejarMercadoLivre: farejarMercadoLivreModulo,
   importarMercadoLivre
 } = require("./marketplaces/mercadolivre");
@@ -19421,12 +19425,44 @@ function podeRodarAgora() {
 
 carregarConfig();
 
-initEngineDatabase().catch((e) => {
-  console.log("[ENGINE-DB-ERRO]", {
-    motivo: "init_exception",
-    erro: e.message
+initEngineDatabase()
+  .then(() => {
+    iniciarOrquestradorEngine({
+      intervaloMs: 120000,
+      processarJobsPendentesEngine,
+      validarJobsDiagnosticadosEngine,
+      importarJobsProntosEngine,
+      distribuirOfertasEngine,
+      getClientesValidos: listarClientesValidosEngineProcessor,
+      getIntegracoesPorCliente: () => integracoesPorCliente,
+      getMarketplacesAtivosPorCliente: listarMarketplacesAtivosEngineProcessor,
+      getDepsImportador: () => ({
+        importarMercadoLivre,
+        getIntegracaoCliente,
+        gerarLinkAfiliadoMercadoLivre,
+        resolverLinkOriginalRadar
+      }),
+      getContextoDistribuidor: () => ({
+        clientesValidos: listarClientesValidosEngineProcessor(),
+        configsPorCliente,
+        destinosPorCliente,
+        configGlobal: config,
+        marketplacesAtivosPorCliente: listarMarketplacesAtivosEngineProcessor()
+      }),
+      getDepsDistribuidor: () => ({
+        readClienteJson,
+        writeClienteJson,
+        getClientePath,
+        adicionarOfertaNaFilaGlobal: adicionarOfertaNaFilaGlobalEngine
+      })
+    });
+  })
+  .catch((e) => {
+    console.log("[ENGINE-DB-ERRO]", {
+      motivo: "init_exception",
+      erro: e.message
+    });
   });
-});
 
 for (const usuario of usuarios) {
   carregarFila(usuario.id);
