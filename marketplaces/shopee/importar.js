@@ -101,6 +101,67 @@ return async function importarShopee(url, config) {
   }
 
 
+
+  function normalizarCupomShopee(cupom = "") {
+    const codigo = String(cupom || "")
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, "")
+      .trim();
+
+    const bloqueados = new Set([
+      "HTTP",
+      "HTTPS",
+      "WWW",
+      "SHOPEE",
+      "COM",
+      "BR",
+      "CUPOM",
+      "CUPONS",
+      "CODIGO",
+      "VOUCHER",
+      "LINK",
+      "PRODUTO",
+      "PAGINA",
+      "RESGATE",
+      "RESGATAR"
+    ]);
+
+    if (!codigo || bloqueados.has(codigo)) return "";
+    if (codigo.length < 5 || codigo.length > 40) return "";
+    if (!/[A-Z]/.test(codigo)) return "";
+    return codigo;
+  }
+
+  function textoOriginalRadarShopee() {
+    return String(
+      config?.textoOriginal ||
+      config?.texto_original ||
+      config?.contextoRadar?.textoOriginal ||
+      config?.contextoRadar?.texto_original ||
+      ""
+    );
+  }
+
+  function extrairPrecoTextoRadarShopee() {
+    const texto = textoOriginalRadarShopee();
+    const por = Array.from(texto.matchAll(/\bPor\s*:?\s*R\$\s*[\d.]+(?:[,.]\d{1,2})?/gi)).map(m => m[0]);
+    if (por.length === 1) return por[0];
+
+    const precos = Array.from(texto.matchAll(/R\$\s*[\d.]+(?:[,.]\d{1,2})?/gi)).map(m => m[0]);
+    return precos.length === 1 ? precos[0] : "";
+  }
+
+  function logPrecoOrigemShopee({ titulo = "", origemPreco = "", valorBruto = "", valorNormalizado = "" } = {}) {
+    console.log("[SHOPEE-PRECO-ORIGEM]", {
+      titulo: String(titulo || "").trim(),
+      url,
+      origemPreco,
+      valorBruto,
+      valorNormalizado,
+      precoTextoRadar: extrairPrecoTextoRadarShopee()
+    });
+  }
+
   function numeroPrecoShopee(valor) {
     const preco = normalizarPrecoShopee(valor);
     const numero = Number(String(preco || "").replace(",", "."));
@@ -394,6 +455,13 @@ if (precosHtml.length) {
   }
 }
 
+logPrecoOrigemShopee({
+  titulo,
+  origemPreco: precosHtml.length ? "html_regex_rs" : "html_sem_preco",
+  valorBruto: precosHtml[0] || "",
+  valorNormalizado: precoAtual
+});
+
       return {
   marketplace: "shopee",
   titulo: htmlDecode(titulo)
@@ -406,7 +474,7 @@ if (precosHtml.length) {
   precoMax: variacaoPrecoHtml.precoMax,
   temVariacaoPreco: variacaoPrecoHtml.temVariacaoPreco,
   avisoVariacaoPreco: variacaoPrecoHtml.avisoVariacaoPreco,
-  cupom,
+  cupom: normalizarCupomShopee(cupom),
   avisoCupom,
   linkOriginal: url,
   linkAfiliado: url,
@@ -448,6 +516,13 @@ if (temMin && temMax && minNumero !== maxNumero) {
   precoAntigo = "";
 }
 
+logPrecoOrigemShopee({
+  titulo: produto?.productName || keyword || "Produto Shopee",
+  origemPreco: produto ? "api_productOfferV2_priceMin_priceMax" : "api_sem_produto",
+  valorBruto: produto ? JSON.stringify({ priceMin: produto?.priceMin || "", priceMax: produto?.priceMax || "" }) : "",
+  valorNormalizado: precoAtual
+});
+
   let imagem = produto?.imageUrl || "";
   imagem = htmlDecode(imagem).replace(/\\u002F/g, "/");
 
@@ -467,7 +542,7 @@ if (temMin && temMax && minNumero !== maxNumero) {
     precoMax: variacaoPreco.precoMax,
     temVariacaoPreco: variacaoPreco.temVariacaoPreco,
     avisoVariacaoPreco: variacaoPreco.avisoVariacaoPreco,
-    cupom: "",
+    cupom: normalizarCupomShopee(""),
     linkOriginal: url,
     linkAfiliado: produto?.offerLink || produto?.productLink || url,
     imagem: corrigirImagemUrl(imagem) || imagem,
