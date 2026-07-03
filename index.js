@@ -19492,6 +19492,7 @@ initEngineDatabase()
       getDepsImportador: () => ({
         importarMercadoLivre,
         importarAmazon,
+        importarShopee,
         getIntegracaoCliente,
         gerarLinkAfiliadoMercadoLivre,
         resolverLinkOriginalRadar
