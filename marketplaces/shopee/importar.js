@@ -15,6 +15,64 @@ return async function importarShopee(url, config) {
 
   const { appId, secret } = config.credenciais || {};
 
+  function linkCurtoShopee(link = "") {
+    try {
+      const host = new URL(String(link || "").trim()).hostname.toLowerCase().replace(/^www\./, "");
+      return host === "s.shopee.com.br" || host.endsWith(".s.shopee.com.br");
+    } catch {
+      return false;
+    }
+  }
+
+  async function expandirLinkCurtoShopee(link = "") {
+    const urlOriginal = String(link || "").trim();
+    if (!linkCurtoShopee(urlOriginal)) {
+      console.log("[SHOPEE-LINK-EXPANDIDO]", {
+        urlOriginal,
+        urlFinal: urlOriginal,
+        expandiu: false
+      });
+      return urlOriginal;
+    }
+
+    try {
+      const response = await fetch(urlOriginal, {
+        method: "GET",
+        redirect: "follow",
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+          "Accept":
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+          "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+        }
+      });
+
+      if (response.body && typeof response.body.cancel === "function") {
+        try { await response.body.cancel(); } catch {}
+      }
+
+      const urlFinal = response.url || urlOriginal;
+      const expandiu = Boolean(urlFinal && urlFinal !== urlOriginal);
+
+      console.log("[SHOPEE-LINK-EXPANDIDO]", {
+        urlOriginal,
+        urlFinal,
+        expandiu
+      });
+
+      return urlFinal || urlOriginal;
+    } catch (e) {
+      console.log("[SHOPEE-LINK-EXPANDIDO]", {
+        urlOriginal,
+        urlFinal: urlOriginal,
+        expandiu: false,
+        erro: e.message
+      });
+      return urlOriginal;
+    }
+  }
+
   function normalizarPrecoShopee(valor) {
     if (!valor) return "";
 
@@ -185,6 +243,9 @@ return async function importarShopee(url, config) {
 
     return data;
   }
+
+  const urlOriginalShopee = url;
+  url = await expandirLinkCurtoShopee(urlOriginalShopee);
 
   const ids = extrairIdsShopee(url);
   const keyword = gerarKeywordShopee(url);
