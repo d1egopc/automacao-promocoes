@@ -105,6 +105,8 @@ return async function importarShopee(url, config) {
   function normalizarCupomShopee(cupom = "") {
     const codigo = String(cupom || "")
       .toUpperCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
       .replace(/[^A-Z0-9_-]/g, "")
       .trim();
 
@@ -123,7 +125,11 @@ return async function importarShopee(url, config) {
       "PRODUTO",
       "PAGINA",
       "RESGATE",
-      "RESGATAR"
+      "RESGATAR",
+      "DISPON",
+      "DISPONIVEL",
+      "DISPONVEL",
+      "DISPON�VEL"
     ]);
 
     if (!codigo || bloqueados.has(codigo)) return "";
@@ -160,6 +166,34 @@ return async function importarShopee(url, config) {
       valorNormalizado,
       precoTextoRadar: extrairPrecoTextoRadarShopee()
     });
+  }
+
+  function normalizarPrecoApiShopee(valor) {
+    if (!valor) return "";
+
+    const texto = String(valor).trim();
+
+    if (/^\d+$/.test(texto)) {
+      const numero = Number(texto);
+      if (!Number.isFinite(numero) || numero <= 0) return "";
+
+      if (texto.length <= 4) {
+        return numero.toFixed(2).replace(".", ",");
+      }
+
+      return (numero / 100).toFixed(2).replace(".", ",");
+    }
+
+    return normalizarPrecoShopee(texto);
+  }
+
+  function linkShopeeInvalido(link = "") {
+    const valor = String(link || "").toLowerCase();
+    return valor.includes("shope.ee/error_page") || valor.includes("/error_page");
+  }
+
+  function tituloShopeeInvalido(titulo = "") {
+    return String(titulo || "").trim().toLowerCase() === "error page";
   }
 
   function numeroPrecoShopee(valor) {
@@ -308,6 +342,19 @@ return async function importarShopee(url, config) {
   const urlOriginalShopee = url;
   url = await expandirLinkCurtoShopee(urlOriginalShopee);
 
+  if (linkShopeeInvalido(url)) {
+    return {
+      ok: false,
+      marketplace: "shopee",
+      motivo: "link_shopee_invalido",
+      linkOriginal: urlOriginalShopee,
+      linkAfiliado: "",
+      titulo: "",
+      precoAtual: "",
+      imagem: ""
+    };
+  }
+
   const ids = extrairIdsShopee(url);
   const keyword = gerarKeywordShopee(url);
 
@@ -427,6 +474,18 @@ console.log("[SHOPEE] SHOPEE IDS:", ids);
         keyword ||
         "Produto Shopee";
 
+      if (linkShopeeInvalido(url) || tituloShopeeInvalido(titulo)) {
+        return {
+          ok: false,
+          marketplace: "shopee",
+          motivo: "pagina_erro",
+          linkOriginal: url,
+          linkAfiliado: "",
+          titulo: "",
+          precoAtual: "",
+          imagem: ""
+        };
+      }
         const imagem =
         extrairMeta(html, "og:image") ||
         extrairMeta(html, "twitter:image") ||
@@ -486,11 +545,11 @@ logPrecoOrigemShopee({
     }
   }
 
- const precoMin = normalizarPrecoShopee(produto?.priceMin || "");
+ const precoMin = normalizarPrecoApiShopee(produto?.priceMin || "");
 
 console.log("[SHOPEE] SHOPEE PRODUTO API FINAL:", JSON.stringify(produto, null, 2));
 
-const precoMax = normalizarPrecoShopee(produto?.priceMax || "");
+const precoMax = normalizarPrecoApiShopee(produto?.priceMax || "");
 
 let precoAtual = "";
 let precoAntigo = "";
@@ -530,6 +589,18 @@ logPrecoOrigemShopee({
     imagem = "https:" + imagem;
   }
 
+  if (linkShopeeInvalido(produto?.offerLink || produto?.productLink || "") || tituloShopeeInvalido(produto?.productName || "")) {
+    return {
+      ok: false,
+      marketplace: "shopee",
+      motivo: "pagina_erro_api",
+      linkOriginal: url,
+      linkAfiliado: "",
+      titulo: "",
+      precoAtual: "",
+      imagem: ""
+    };
+  }
   return {
     marketplace: "shopee",
     titulo: htmlDecode(produto?.productName || keyword || "Produto Shopee")
