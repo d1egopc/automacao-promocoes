@@ -305,6 +305,8 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     precoOriginal: oferta.precoOriginal,
     cupom: oferta.cupom,
     linkAfiliado: oferta.linkAfiliado,
+    temImagem: Boolean(oferta.imagem),
+    imagemPreview: normalizarTexto(oferta.imagem || "").slice(0, 140),
     categoria: oferta.categoria,
     status: "importada",
     atualizada: Boolean(job.oferta_id)
