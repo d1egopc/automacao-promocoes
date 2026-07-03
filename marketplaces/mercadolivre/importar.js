@@ -523,11 +523,19 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       extrairPrecoMlHtml(html) ||
       "";
 
+    const imagemJsonLd = Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image;
+    const imagemOg = extrairMeta(html, "og:image");
+    const imagemTwitter = extrairMeta(html, "twitter:image");
     const imagem =
-      (Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image) ||
-      extrairMeta(html, "og:image") ||
-      extrairMeta(html, "twitter:image") ||
+      imagemJsonLd ||
+      imagemOg ||
+      imagemTwitter ||
       "";
+    const origemImagem =
+      imagemJsonLd ? "jsonLd.image" :
+      imagemOg ? "og:image" :
+      imagemTwitter ? "twitter:image" :
+      "nenhuma";
 
     preco = normalizarPrecoMl(preco) || limparPreco(preco);
 
@@ -598,6 +606,14 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       .replace(" | MercadoLivre", "")
       .replace(" | Mercado Livre", "")
       .trim();
+
+    console.log("[ML-IMAGEM-ORIGEM]", JSON.stringify({
+      titulo: tituloLimpo,
+      url: response.url || url,
+      temImagem: Boolean(imagem),
+      origemImagem,
+      imagemPreview: String(corrigirImagemUrl(imagem) || imagem || "").slice(0, 140)
+    }));
 
     const produtoComFallbackRadar = aplicarFallbacksRadarMercadoLivre({
       titulo: tituloLimpo,
