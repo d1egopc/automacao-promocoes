@@ -362,7 +362,11 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
   return {
     ok: true,
     destinosCompativeis: destinos.compativeis.length,
-    destinosTotal: destinos.destinos.length
+    destinosTotal: destinos.destinos.length,
+    destinosCompativeisDetalhes: destinos.compativeis.map(item => ({
+      destino: item.destino?.nome || item.destino?.id || item.destino?.destinoId || "",
+      tipoMidia: item.destino?.tipoMidia || ""
+    }))
   };
 }
 
@@ -370,6 +374,18 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
   const clienteId = normalizarTexto(oferta.cliente_id);
   const deps = contexto.deps || {};
   const itemFila = montarItemFilaEngine(oferta);
+
+  console.log("[ENGINE-DISTRIBUIDOR-IMAGEM-AUDITORIA]", {
+    etapa: "montar_item_fila",
+    marketplace: normalizarMarketplace(oferta.marketplace),
+    ofertaId: oferta.id,
+    jobId: oferta.job_id,
+    clienteId,
+    temImagem: Boolean(itemFila.imagem),
+    imagemPreview: normalizarTexto(itemFila.imagem || "").slice(0, 140),
+    destino: "",
+    tipoMidia: ""
+  });
 
   if (typeof deps.adicionarOfertaNaFilaGlobal === "function") {
     const resultadoMemoria = deps.adicionarOfertaNaFilaGlobal(clienteId, itemFila);

@@ -89,7 +89,19 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     itemFilaId: fila.itemFila?.id || null
   });
 
-  logEngineDistribuidorFila({ ofertaId: oferta.id, jobId: oferta.job_id, clienteId: oferta.cliente_id, itemFilaId: fila.itemFila?.id || null });
+  const destinosImagemAuditoria = Array.isArray(validacao.destinosCompativeisDetalhes) ? validacao.destinosCompativeisDetalhes : [];
+  logEngineDistribuidorFila({
+    ofertaId: oferta.id,
+    jobId: oferta.job_id,
+    clienteId: oferta.cliente_id,
+    marketplace: oferta.marketplace,
+    itemFilaId: fila.itemFila?.id || null,
+    temImagem: Boolean(fila.itemFila?.imagem),
+    imagemPreview: String(fila.itemFila?.imagem || "").slice(0, 140),
+    destinos: destinosImagemAuditoria,
+    destino: destinosImagemAuditoria.map(item => item.destino).filter(Boolean).join(" | "),
+    tipoMidia: destinosImagemAuditoria.map(item => item.tipoMidia).filter(Boolean).join(" | ")
+  });
 
   if (resumo) resumo.adicionadasFila += 1;
   return { ok: true, itemFilaId: fila.itemFila?.id || null };
