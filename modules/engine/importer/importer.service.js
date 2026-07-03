@@ -8,6 +8,7 @@ const {
 } = require("../processor.service");
 const { normalizarTexto } = require("../normalizers");
 const { classificarCategoriaOferta } = require("../../../marketplaces/inteligencia/classificador-categorias");
+const { avaliarOfertaUniversal } = require("../../inteligencia-universal");
 const {
   logEngineImporterErro,
   logEngineImporterOfertaCriada
@@ -172,8 +173,182 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
   };
 }
 
+function objetoSeguro(valor = {}) {
+  return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
+}
+
+function normalizarMarketplaceMemoria(valor = "") {
+  return normalizarTexto(valor).toLowerCase();
+}
+
+function mapearOfertaMemoria(row = {}) {
+  return {
+    id: row.id,
+    clienteId: row.cliente_id || "",
+    marketplace: row.marketplace || "",
+    titulo: row.titulo || "",
+    tituloNormalizado: row.titulo_normalizado || "",
+    preco: row.preco,
+    precoAtual: row.preco,
+    precoOriginal: row.preco_original,
+    cupom: row.cupom || "",
+    cupomTipo: row.tipo_cupom || "",
+    tipoCupom: row.tipo_cupom || "",
+    beneficioTexto: row.beneficio_extra || row.metadata?.beneficioTexto || row.metadata?.beneficioExtra || "",
+    beneficioExtra: row.beneficio_extra || row.metadata?.beneficioExtra || "",
+    linkOriginal: row.link_original || "",
+    linkAfiliado: row.link_afiliado || "",
+    categoria: row.categoria || "",
+    score: row.score,
+    prioridade: row.prioridade,
+    capturadaEm: row.capturada_em || row.criada_em || "",
+    criadaEm: row.criada_em || ""
+  };
+}
+
+async function buscarMemoriaAnterioresEngine(oferta = {}, job = {}) {
+  const clienteId = normalizarTexto(job.cliente_id || job.clienteId || "");
+  const marketplace = normalizarMarketplaceMemoria(oferta.marketplace || job.marketplace || job.marketplace_detectado || "");
+
+  if (!clienteId || !marketplace) return [];
+
+  const resultado = await queryEngine(
+    `SELECT o.id, o.marketplace, o.titulo, o.titulo_normalizado,
+            o.preco, o.preco_original, o.cupom, o.tipo_cupom,
+            o.beneficio_extra, o.link_original, o.link_expandido,
+            o.link_afiliado, o.categoria, o.score, o.prioridade,
+            o.metadata, o.capturada_em, o.criada_em, j.cliente_id
+       FROM engine_ofertas o
+       JOIN engine_jobs_cliente j ON j.oferta_id = o.id
+      WHERE j.cliente_id = $1
+        AND LOWER(COALESCE(o.marketplace, '')) = $2
+        AND ($3::bigint IS NULL OR o.id <> $3::bigint)
+        AND COALESCE(o.criada_em, o.capturada_em, NOW()) >= NOW() - INTERVAL '24 hours'
+      ORDER BY COALESCE(o.criada_em, o.capturada_em) DESC NULLS LAST, o.id DESC
+      LIMIT 80`,
+    [clienteId, marketplace, job.oferta_id || null]
+  );
+
+  if (!resultado.ok) {
+    console.log("[ENGINE-V2-MEMORIA-ERRO]", {
+      jobId: job.id,
+      clienteId,
+      marketplace,
+      motivo: resultado.motivo || "query_falhou",
+      erro: resultado.erro || ""
+    });
+    return [];
+  }
+
+  return resultado.resultado.rows.map(mapearOfertaMemoria);
+}
+
+async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada = {}, job = {}) {
+  try {
+    const memoriaAnteriores = await buscarMemoriaAnterioresEngine(oferta, job);
+    const resultadoV2 = avaliarOfertaUniversal({
+      clienteId: job.cliente_id || job.clienteId || "",
+      titulo: oferta.titulo,
+      marketplace: oferta.marketplace,
+      precoAtual: oferta.preco,
+      preco: oferta.preco,
+      precoOriginal: oferta.precoOriginal,
+      precoAntigo: oferta.precoOriginal,
+      cupom: oferta.cupom,
+      cupomTipo: oferta.cupomTipo,
+      tipoCupom: oferta.cupomTipo,
+      beneficioTexto: ofertaEntrada.beneficioTexto || ofertaEntrada.beneficioExtra || ofertaEntrada.avisoCupom || "",
+      beneficioExtra: ofertaEntrada.beneficioExtra || "",
+      avisoCupom: ofertaEntrada.avisoCupom || "",
+      parcelamento: ofertaEntrada.parcelamento || "",
+      freteGratis: ofertaEntrada.freteGratis === true,
+      cashback: ofertaEntrada.cashback || "",
+      imagem: oferta.imagem,
+      linkOriginal: oferta.linkOriginal,
+      linkAfiliado: oferta.linkAfiliado,
+      categoria: oferta.categoria,
+      score: oferta.score,
+      origem: "engine_importer"
+    }, {
+      clienteId: job.cliente_id || job.clienteId || "",
+      origem: "engine_importer",
+      exigirLinkAfiliado: true,
+      memoriaAnteriores
+    });
+
+    const scoreV2 = normalizarNumero(resultadoV2.score);
+    const prioridadeV2 = normalizarNumero(resultadoV2.prioridade);
+    const ofertaUniversal = resultadoV2.ofertaUniversal || {};
+
+    return {
+      ok: true,
+      oferta: {
+        ...oferta,
+        score: scoreV2 !== null ? scoreV2 : oferta.score,
+        prioridade: prioridadeV2 !== null ? prioridadeV2 : 0
+      },
+      metadata: {
+        inteligenciaUniversalV2: {
+          modo: "sombra",
+          ok: resultadoV2.ok === true,
+          status: resultadoV2.status || "",
+          motivo: resultadoV2.motivo || "",
+          motivoDecisao: resultadoV2.motivo || "",
+          score: resultadoV2.score ?? null,
+          prioridade: resultadoV2.prioridade ?? null,
+          categoria: resultadoV2.categoria || "",
+          memoria: resultadoV2.memoria || {},
+          destino: resultadoV2.destino || {},
+          templateInput: resultadoV2.templateInput || {},
+          totalMemoriaAnteriores: memoriaAnteriores.length,
+          comparativo: {
+            precoAntes: oferta.preco,
+            precoDepois: ofertaUniversal.precoAtual ?? oferta.preco,
+            cupomAntes: oferta.cupom || "",
+            cupomDepois: ofertaUniversal.cupom || "",
+            categoriaAntes: oferta.categoria || "",
+            categoriaDepois: resultadoV2.categoria || ofertaUniversal.categoria || "",
+            scoreAntes: oferta.score ?? null,
+            scoreDepois: resultadoV2.score ?? null
+          },
+          logs: resultadoV2.logs || []
+        }
+      }
+    };
+  } catch (err) {
+    console.log("[ENGINE-V2-SOMBRA-ERRO]", {
+      jobId: job.id,
+      clienteId: job.cliente_id || job.clienteId || "",
+      marketplace: oferta.marketplace || "",
+      erro: err.message
+    });
+
+    return {
+      ok: false,
+      oferta: { ...oferta, prioridade: 0 },
+      metadata: {
+        inteligenciaUniversalV2: {
+          modo: "sombra",
+          ok: false,
+          status: "erro_sombra",
+          motivo: "erro_sombra_v2",
+          motivoDecisao: "erro_sombra_v2",
+          erro: err.message
+        }
+      }
+    };
+  }
+}
+
 async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrada = {}) {
-  const oferta = normalizarOfertaImportada(ofertaEntrada, job);
+  let oferta = normalizarOfertaImportada(ofertaEntrada, job);
+  const sombraV2 = await aplicarSombraInteligenciaUniversalV2(oferta, ofertaEntrada, job);
+  oferta = sombraV2.oferta || oferta;
+  const metadataBase = objetoSeguro(oferta.metadata || ofertaEntrada.metadata || {});
+  const metadataFinal = {
+    ...metadataBase,
+    ...objetoSeguro(sombraV2.metadata || {})
+  };
   const valores = [
     job.evento_id,
     link?.id || null,
@@ -191,11 +366,12 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     oferta.linkAfiliado,
     oferta.categoria,
     oferta.score,
+    oferta.prioridade || 0,
     evento?.capturado_em || new Date()
   ];
 
   let resultado;
-  const metadataOferta = JSON.stringify(oferta.metadata || ofertaEntrada.metadata || {});
+  const metadataOferta = JSON.stringify(metadataFinal);
   const usarMetadata = await engineOfertasTemMetadata();
 
   if (job.oferta_id) {
@@ -219,13 +395,14 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
                 link_afiliado = $14,
                 categoria = $15,
                 score = $16,
+                prioridade = $17,
                 origem = 'engine_importer',
                 status = 'importada',
                 motivo_status = NULL,
-                capturada_em = $17,
-                metadata = $18::jsonb,
+                capturada_em = $18,
+                metadata = $19::jsonb,
                 atualizada_em = NOW()
-          WHERE id = $19
+          WHERE id = $20
           RETURNING id, uuid`,
         [...valores, metadataOferta, job.oferta_id]
       );
@@ -249,12 +426,13 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
                 link_afiliado = $14,
                 categoria = $15,
                 score = $16,
+                prioridade = $17,
                 origem = 'engine_importer',
                 status = 'importada',
                 motivo_status = NULL,
-                capturada_em = $17,
+                capturada_em = $18,
                 atualizada_em = NOW()
-          WHERE id = $18
+          WHERE id = $19
           RETURNING id, uuid`,
         [...valores, job.oferta_id]
       );
@@ -267,7 +445,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
          imagem, link_original, link_expandido, link_afiliado, categoria,
          score, prioridade, origem, status, motivo_status, capturada_em, metadata
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'BRL', $8, $9, $10, $11, $12, $13, $14, $15, $16, 0, 'engine_importer', 'importada', NULL, $17, $18::jsonb)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'BRL', $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'engine_importer', 'importada', NULL, $18, $19::jsonb)
        RETURNING id, uuid`,
       [...valores, metadataOferta]
     );
@@ -279,7 +457,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
          imagem, link_original, link_expandido, link_afiliado, categoria,
          score, prioridade, origem, status, motivo_status, capturada_em
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'BRL', $8, $9, $10, $11, $12, $13, $14, $15, $16, 0, 'engine_importer', 'importada', NULL, $17)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'BRL', $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'engine_importer', 'importada', NULL, $18)
        RETURNING id, uuid`,
       valores
     );
@@ -308,6 +486,15 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     temImagem: Boolean(oferta.imagem),
     imagemPreview: normalizarTexto(oferta.imagem || "").slice(0, 140),
     categoria: oferta.categoria,
+    score: oferta.score,
+    prioridade: oferta.prioridade || 0,
+    inteligenciaV2: metadataFinal.inteligenciaUniversalV2 ? {
+      modo: metadataFinal.inteligenciaUniversalV2.modo,
+      status: metadataFinal.inteligenciaUniversalV2.status,
+      motivoDecisao: metadataFinal.inteligenciaUniversalV2.motivoDecisao,
+      memoria: metadataFinal.inteligenciaUniversalV2.memoria?.motivo || "",
+      totalMemoriaAnteriores: metadataFinal.inteligenciaUniversalV2.totalMemoriaAnteriores || 0
+    } : null,
     status: "importada",
     atualizada: Boolean(job.oferta_id)
   });
