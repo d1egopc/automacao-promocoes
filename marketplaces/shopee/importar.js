@@ -486,10 +486,16 @@ console.log("[SHOPEE] SHOPEE IDS:", ids);
           imagem: ""
         };
       }
+        const imagemOg = extrairMeta(html, "og:image");
+        const imagemTwitter = extrairMeta(html, "twitter:image");
         const imagem =
-        extrairMeta(html, "og:image") ||
-        extrairMeta(html, "twitter:image") ||
+        imagemOg ||
+        imagemTwitter ||
         "";
+        const origemImagem =
+        imagemOg ? "og:image" :
+        imagemTwitter ? "twitter:image" :
+        "nenhuma";
 
        console.log("[SHOPEE] SHOPEE PRODUTO RAW:", JSON.stringify(produto, null, 2));
 
@@ -520,6 +526,17 @@ logPrecoOrigemShopee({
   valorBruto: precosHtml[0] || "",
   valorNormalizado: precoAtual
 });
+
+console.log("[SHOPEE-IMAGEM-ORIGEM]", JSON.stringify({
+  titulo: htmlDecode(titulo)
+    .replace(" | Shopee Brasil", "")
+    .replace(" | Shopee", "")
+    .trim(),
+  url,
+  temImagem: Boolean(imagem),
+  origemImagem,
+  imagemPreview: String(corrigirImagemUrl(imagem) || imagem || "").slice(0, 140)
+}));
 
       return {
   marketplace: "shopee",
@@ -583,6 +600,7 @@ logPrecoOrigemShopee({
 });
 
   let imagem = produto?.imageUrl || "";
+  const origemImagemApi = imagem ? "api_productOfferV2.imageUrl" : "nenhuma";
   imagem = htmlDecode(imagem).replace(/\\u002F/g, "/");
 
   if (imagem && imagem.startsWith("//")) {
@@ -601,6 +619,18 @@ logPrecoOrigemShopee({
       imagem: ""
     };
   }
+
+  console.log("[SHOPEE-IMAGEM-ORIGEM]", JSON.stringify({
+    titulo: htmlDecode(produto?.productName || keyword || "Produto Shopee")
+      .replace(" | Shopee Brasil", "")
+      .replace(" | Shopee", "")
+      .trim(),
+    url,
+    temImagem: Boolean(imagem),
+    origemImagem: origemImagemApi,
+    imagemPreview: String(corrigirImagemUrl(imagem) || imagem || "").slice(0, 140)
+  }));
+
   return {
     marketplace: "shopee",
     titulo: htmlDecode(produto?.productName || keyword || "Produto Shopee")
