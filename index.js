@@ -3771,6 +3771,42 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       return { enviado: false, motivo: "sem_creditos" };
     }
 
+    console.log("[EXECUTOR-IMAGEM-AUDITORIA]", {
+
+
+      canal: "whatsapp",
+
+
+      clienteId,
+
+
+      destino: destino.nome || destino.id || "",
+
+
+      tipoMidia: destino.tipoMidia || "",
+
+
+      ofertaId: oferta.id || "",
+
+
+      engineOfertaId: oferta.engineOfertaId || "",
+
+
+      marketplace: oferta.marketplace || "",
+
+
+      temImagem: Boolean(oferta.imagem),
+
+
+      imagemPreview: String(oferta.imagem || "").slice(0, 140),
+
+
+      vaiEnviarImagem: destino.tipoMidia !== "texto" && Boolean(oferta.imagem)
+
+
+    });
+
+
     if (destino.tipoMidia === "texto" || !oferta.imagem) {
       await sock.sendMessage(grupo, { text: mensagem });
     } else {
@@ -3933,6 +3969,42 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           vaiEnviar: true,
           resultado: "tentando"
         });
+
+        console.log("[EXECUTOR-IMAGEM-AUDITORIA]", {
+
+
+          canal: "telegram",
+
+
+          clienteId,
+
+
+          destino: destino.nome || destino.id || tel.chatId || "",
+
+
+          tipoMidia: destino.tipoMidia || "",
+
+
+          ofertaId: oferta.id || "",
+
+
+          engineOfertaId: oferta.engineOfertaId || "",
+
+
+          marketplace: oferta.marketplace || "",
+
+
+          temImagem: Boolean(oferta.imagem),
+
+
+          imagemPreview: String(oferta.imagem || "").slice(0, 140),
+
+
+          vaiEnviarImagem: destino.tipoMidia !== "texto" && Boolean(oferta.imagem)
+
+
+        });
+
 
         if (destino.tipoMidia === "texto" || !oferta.imagem) {
           await axios.post(
