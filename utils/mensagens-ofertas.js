@@ -1,4 +1,4 @@
-const {
+﻿const {
   cortarTitulo,
   formatarPreco,
   normalizarPreco,
@@ -91,7 +91,7 @@ function montarLegendaShopee(oferta = {}) {
   const cupom = montarLinhaCupom(oferta);
   const aplicarCupom = montarLinhaAplicarCupom(oferta);
   const blocoPreco = temVariacaoAuxiliar
-    ? (precoAtual ? `✅ ${precoAtual}` : "")
+    ? (precoAtual ? `âœ… ${precoAtual}` : "")
     : montarBlocoPreco({
         precoAtual,
         precoAntigo,
@@ -123,7 +123,11 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
   const marketplace = String(oferta.marketplace || "").toLowerCase();
 
   if (marketplace === "amazon") {
-    return montarLegendaOferta(oferta);
+    return formatarOfertaUniversal({
+      ...oferta,
+      precoOriginal: oferta.precoOriginal ?? oferta.precoAntigo,
+      beneficioTexto: oferta.beneficioTexto || oferta.beneficioExtra || oferta.avisoCupom || ""
+    }) || montarLegendaOferta(oferta);
   }
 
   if (marketplace === "shopee") {
