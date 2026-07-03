@@ -225,15 +225,30 @@
     }
 
     function extrairImagemAmazon() {
+      const imagemJsonLd = Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image;
+      const imagemOg = extrairMeta(html, "og:image");
+      const imagemTwitter = extrairMeta(html, "twitter:image");
+      const imagemLanding = html.match(/id=["']landingImage["'][^>]+src=["']([^"']+)["']/i)?.[1];
+      const imagemOldHires = html.match(/data-old-hires=["']([^"']+)["']/i)?.[1];
       const imagemMeta =
-        (Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image) ||
-        extrairMeta(html, "og:image") ||
-        extrairMeta(html, "twitter:image") ||
-        html.match(/id=["']landingImage["'][^>]+src=["']([^"']+)["']/i)?.[1] ||
-        html.match(/data-old-hires=["']([^"']+)["']/i)?.[1] ||
+        imagemJsonLd ||
+        imagemOg ||
+        imagemTwitter ||
+        imagemLanding ||
+        imagemOldHires ||
         "";
 
-      if (imagemMeta) return htmlDecode(imagemMeta).replace(/\\u002F/g, "/");
+      if (imagemMeta) {
+        const origemImagem =
+          imagemJsonLd ? "jsonLd.image" :
+          imagemOg ? "og:image" :
+          imagemTwitter ? "twitter:image" :
+          "html/gallery";
+        return {
+          imagem: htmlDecode(imagemMeta).replace(/\\u002F/g, "/"),
+          origemImagem
+        };
+      }
 
       const dynamicImageRaw =
         html.match(/data-a-dynamic-image=["']([^"']+)["']/i)?.[1] || "";
@@ -243,11 +258,19 @@
           const decoded = htmlDecode(dynamicImageRaw).replace(/\\u002F/g, "/");
           const parsed = JSON.parse(decoded);
           const primeira = Object.keys(parsed || {})[0];
-          if (primeira) return primeira;
+          if (primeira) {
+            return {
+              imagem: primeira,
+              origemImagem: "html/gallery"
+            };
+          }
         } catch {}
       }
 
-      return "";
+      return {
+        imagem: "",
+        origemImagem: "nenhuma"
+      };
     }
 
     const titulo =
@@ -369,7 +392,8 @@
       primeiroMatch(/(\d+\s*x\s*R\$\s*[\d.,]+)/i) ||
       "";
 
-    const imagem = extrairImagemAmazon();
+    const imagemAmazon = extrairImagemAmazon();
+    const imagem = imagemAmazon.imagem || "";
 
     let linkAfiliado = url;
 
@@ -394,6 +418,14 @@
       .replace("Amazon.com.br:", "")
       .replace("Amazon.com:", "")
       .trim();
+
+    console.log("[AMZ-IMAGEM-ORIGEM]", JSON.stringify({
+      titulo: tituloLimpo,
+      url,
+      temImagem: Boolean(imagem),
+      origemImagem: imagemAmazon.origemImagem || "nenhuma",
+      imagemPreview: String(corrigirImagemUrl(imagem) || imagem || "").slice(0, 140)
+    }));
 
     let cupom = "";
     let avisoCupom = "";
