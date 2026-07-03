@@ -20,6 +20,23 @@ function textoOriginalEvento(evento = {}) {
   return texto(evento.texto_original || evento.textoOriginal || evento.texto || "");
 }
 
+function contextoLinkShopee(textoCompleto = "", url = "") {
+  const texto = String(textoCompleto || "");
+  const idx = texto.indexOf(url);
+  if (idx < 0) return { antes: "", depois: "" };
+  return {
+    antes: texto.slice(Math.max(0, idx - 100), idx).toLowerCase(),
+    depois: texto.slice(idx + url.length, Math.min(texto.length, idx + url.length + 60)).toLowerCase()
+  };
+}
+
+function contextoIndicaCupomShopee(contexto = {}) {
+  return /resgate|cupom|voucher|cupom na pagina|cupom disponivel|desconto/.test(`${contexto.antes} ${contexto.depois}`);
+}
+
+function contextoIndicaProdutoShopee(contexto = {}) {
+  return /produto aqui|confira aqui|link do produto|produto|comprar|oferta aqui|aqui/.test(`${contexto.antes} ${contexto.depois}`);
+}
 function escolherLinkShopee(links = [], evento = {}) {
   const candidatos = [];
 
@@ -44,25 +61,33 @@ function escolherLinkShopee(links = [], evento = {}) {
 
   if (!validos.length) return { url: "", link: null, campo: "" };
 
-  const textoRadar = textoOriginalEvento(evento).toLowerCase();
-  const urlsTexto = Array.from(textoOriginalEvento(evento).matchAll(/https?:\/\/[^\s]+/gi)).map(match => match[0]);
-  const urlProdutoMarcada = urlsTexto.find((url) => {
-    const idx = textoOriginalEvento(evento).indexOf(url);
-    const antes = idx >= 0 ? textoRadar.slice(Math.max(0, idx - 80), idx) : "";
-    return /produto aqui|confira aqui|produto|comprar|link da oferta|oferta aqui/.test(antes) && /shopee/i.test(url);
-  });
+  const textoRadarOriginal = textoOriginalEvento(evento);
+  const urlsTexto = Array.from(textoRadarOriginal.matchAll(/https?:\/\/[^\s]+/gi)).map(match => match[0]);
+  const urlsProduto = [];
+  const urlsCupom = [];
 
-  if (urlProdutoMarcada) {
-    const marcado = validos.find(candidato => candidato.url === urlProdutoMarcada || candidato.url.includes(urlProdutoMarcada));
+  for (const urlTexto of urlsTexto) {
+    if (!/shopee/i.test(urlTexto)) continue;
+    const contexto = contextoLinkShopee(textoRadarOriginal, urlTexto);
+    if (contextoIndicaCupomShopee(contexto)) urlsCupom.push(urlTexto);
+    if (contextoIndicaProdutoShopee(contexto)) urlsProduto.push(urlTexto);
+  }
+
+  for (const urlProduto of urlsProduto) {
+    const marcado = validos.find(candidato => candidato.url === urlProduto || candidato.url.includes(urlProduto));
     if (marcado) return marcado;
   }
 
-  const naoCupom = validos.filter(candidato => !/(?:cupom|voucher|promotion|promo)/i.test(candidato.url));
-  return naoCupom[naoCupom.length - 1] || validos[validos.length - 1];
+  const naoCupom = validos.filter(candidato => {
+    if (/(?:cupom|voucher|promotion|promo)/i.test(candidato.url)) return false;
+    return !urlsCupom.some(urlCupom => candidato.url === urlCupom || candidato.url.includes(urlCupom));
+  });
+
+  return naoCupom[naoCupom.length - 1] || { url: "", link: null, campo: "somente_link_cupom" };
 }
 
 function pareceCupomRealShopee(codigo = "") {
-  const cupom = texto(codigo).toUpperCase().replace(/[^A-Z0-9_-]/g, "").trim();
+  const cupom = texto(codigo).toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9_-]/g, "").trim();
   if (cupom.length < 5 || cupom.length > 40) return false;
   if (!/[A-Z]/.test(cupom)) return false;
 
@@ -76,8 +101,9 @@ function pareceCupomRealShopee(codigo = "") {
     "RESGATE",
     "RESGATAR",
     "APLIQUE",
+    "DISPON",
     "DISPONIVEL",
-    "DISPONIVEL",
+    "DISPONVEL",
     "CLIENTE",
     "PARA",
     "PRODUTO",
@@ -334,6 +360,14 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
       clienteId
     }
   });
+  if (produtoBase?.ok === false) {
+    return {
+      ok: false,
+      marketplace: "shopee",
+      motivo: produtoBase.motivo || "erro_importador_shopee",
+      linkOriginal: urlOriginalEngine
+    };
+  }
   const produto = aplicarFallbackTextoRadar(produtoBase || {}, evento);
 
   console.log("[ENGINE-SHOPEE-IMPORTADOR-RETORNO]", JSON.stringify({
