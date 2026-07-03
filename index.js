@@ -11583,6 +11583,38 @@ registrarEventoBrutoEngineRadar({
     return { ok: false, motivo: "sem_links" };
   }
 
+  const marketplacesLinksRadar = links
+    .map(link => marketplaceResumoRadarDoLink(link))
+    .filter(Boolean);
+  const somenteAmazonRadar = marketplacesLinksRadar.length > 0 &&
+    marketplacesLinksRadar.every(marketplace => marketplace === "amazon");
+
+  if (somenteAmazonRadar) {
+    logOptimus("RADAR", "Amazon encaminhada somente Engine V2", {
+      links: links.length,
+      origemTipo: origemTipoFinal,
+      grupo: grupoNomeTexto || grupoIdTexto,
+      motivo: "amazon_engine_v2"
+    });
+    registrarRadarMarketplaceEvento({
+      marketplace: "amazon",
+      capturado: true,
+      motivo: "amazon_engine_v2"
+    });
+
+    return {
+      ok: true,
+      links: links.length,
+      adicionadas: 0,
+      resultados: links.map(link => ({
+        link,
+        ok: true,
+        marketplace: "amazon",
+        motivo: "amazon_engine_v2"
+      }))
+    };
+  }
+
   const beneficiosMensagem = analisarBeneficiosMensagemRadar(texto, links);
   logOptimus("CUPOM", "Extracao da mensagem", {
     cupom: beneficiosMensagem.cupom || "",
@@ -11635,6 +11667,26 @@ registrarEventoBrutoEngineRadar({
       url: link,
       grupo: grupoNomeTexto || grupoIdTexto
     });
+    if (marketplaceInicialResumo === "amazon") {
+      logOptimus("RADAR", "Amazon ignorada no fluxo legado", {
+        url: link,
+        grupo: grupoNomeTexto || grupoIdTexto,
+        motivo: "amazon_engine_v2"
+      });
+      registrarRadarMarketplaceEvento({
+        marketplace: "amazon",
+        capturado: true,
+        motivo: "amazon_engine_v2"
+      });
+      resultados.push({
+        link,
+        ok: true,
+        marketplace: "amazon",
+        motivo: "amazon_engine_v2"
+      });
+      continue;
+    }
+
     const beneficiosLink = {
       ...beneficiosMensagem,
       ...(beneficiosMensagem.beneficiosPorLink?.[link] || {})
