@@ -62,7 +62,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
 
   console.log("[ENGINE-ORQUESTRADOR-INICIO]", {
     limites: limitesRodada,
-    marketplaces: ["mercadolivre", "amazon"]
+    marketplaces: ["mercadolivre", "amazon", "shopee"]
   });
 
   try {
@@ -94,6 +94,13 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       deps: depsImportador
     });
 
+
+    resumo.etapas.importarShopee = await executarEtapa("importar_shopee", importarJobsProntosEngine, {
+      limite: limitesRodada.importarShopee || limitesRodada.importar,
+      marketplace: "shopee",
+      deps: depsImportador
+    });
+
     const contextoDistribuidor = chamarFornecedor(getContextoDistribuidor, {});
     const depsDistribuidor = chamarFornecedor(getDepsDistribuidor, {});
 
@@ -107,6 +114,14 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     resumo.etapas.distribuirAmazon = await executarEtapa("distribuir_amazon", distribuirOfertasEngine, {
       limite: limitesRodada.distribuirAmazon || limitesRodada.distribuir,
       marketplace: "amazon",
+      contexto: contextoDistribuidor,
+      deps: depsDistribuidor
+    });
+
+
+    resumo.etapas.distribuirShopee = await executarEtapa("distribuir_shopee", distribuirOfertasEngine, {
+      limite: limitesRodada.distribuirShopee || limitesRodada.distribuir,
+      marketplace: "shopee",
       contexto: contextoDistribuidor,
       deps: depsDistribuidor
     });
