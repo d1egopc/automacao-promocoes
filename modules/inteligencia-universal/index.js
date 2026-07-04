@@ -3,7 +3,7 @@ const { normalizarOfertaUniversal } = require("./normalizacao.service");
 const { validarOfertaUniversal } = require("./validacao.service");
 const { classificarCategoriaUniversal } = require("./categoria.service");
 const { calcularScoreUniversal } = require("./score.service");
-const { avaliarMemoriaUniversal } = require("./memoria.service");
+const { avaliarMemoriaUniversal, detectarIdentidadeProdutoUniversal } = require("./memoria.service");
 const { analisarBeneficiosUniversal } = require("./beneficios.service");
 const { avaliarDestinoUniversal } = require("./destino.service");
 const { decidirOfertaUniversal, calcularPrioridadeUniversal } = require("./decisao.service");
@@ -16,6 +16,7 @@ module.exports = {
   classificarCategoriaUniversal,
   calcularScoreUniversal,
   avaliarMemoriaUniversal,
+  detectarIdentidadeProdutoUniversal,
   analisarBeneficiosUniversal,
   avaliarDestinoUniversal,
   decidirOfertaUniversal,

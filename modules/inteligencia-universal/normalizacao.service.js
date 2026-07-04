@@ -43,6 +43,7 @@ function normalizarOfertaUniversal(oferta = {}, contexto = {}) {
   const precoOriginal = numero(primeiroValor(oferta.precoOriginal, oferta.precoAntigo, oferta.precoDe));
   const linkAfiliado = texto(primeiroValor(oferta.linkAfiliado, oferta.linkFinal, oferta.link));
   const linkOriginal = texto(primeiroValor(oferta.linkOriginal, oferta.linkOriginalRadar, oferta.urlOriginal, oferta.url));
+  const linkExpandido = texto(primeiroValor(oferta.linkExpandido, oferta.urlExpandida, oferta.urlFinal));
 
   return {
     id: primeiroValor(oferta.id, oferta.engineOfertaId, oferta.uuid),
@@ -55,6 +56,7 @@ function normalizarOfertaUniversal(oferta = {}, contexto = {}) {
     precoOriginalTexto: texto(primeiroValor(oferta.precoOriginal, oferta.precoAntigo, oferta.precoDe)),
     imagem: texto(primeiroValor(oferta.imagem, oferta.image, oferta.foto, oferta.thumbnail)),
     linkOriginal,
+    linkExpandido,
     linkAfiliado,
     link: linkAfiliado || linkOriginal,
     categoria: texto(primeiroValor(oferta.categoria, oferta.categoriaProduto)),

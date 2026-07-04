@@ -1,12 +1,95 @@
 const { texto } = require("./normalizacao.service");
 const { cupomValido } = require("./beneficios.service");
 
+function normalizarLinkProduto(valor = "") {
+  const link = texto(valor);
+  if (!link) return "";
+
+  try {
+    const url = new URL(link);
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    const caminho = url.pathname.replace(/\/+$/, "").toLowerCase();
+    return `${host}${caminho}`;
+  } catch {
+    return link.toLowerCase().split("#")[0].split("?")[0].replace(/\/+$/, "");
+  }
+}
+
+function tituloNormalizadoForte(valor = "") {
+  return normalizarComparacao(valor)
+    .replace(/\b(oferta|promocao|original|novo|nova|kit|combo|cupom|desconto|frete gratis)\b/g, " ")
+    .replace(/\b\d{1,3}%\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function detectarIdentidadeProdutoUniversal(oferta = {}) {
+  const raw = oferta.raw && typeof oferta.raw === "object" ? oferta.raw : {};
+  const metadata = raw.metadata && typeof raw.metadata === "object" ? raw.metadata : {};
+  const campos = [
+    oferta.produtoIdDetectado,
+    oferta.idProduto,
+    oferta.productId,
+    oferta.asin,
+    oferta.mlb,
+    oferta.shopId,
+    oferta.itemId,
+    oferta.linkOriginal,
+    oferta.linkExpandido,
+    oferta.linkAfiliado,
+    oferta.link,
+    raw.produtoIdDetectado,
+    raw.idProduto,
+    raw.productId,
+    raw.asin,
+    raw.mlb,
+    raw.shopId,
+    raw.itemId,
+    raw.linkOriginal,
+    raw.linkExpandido,
+    raw.linkAfiliado,
+    metadata.produtoId,
+    metadata.idProduto,
+    metadata.productId,
+    metadata.asin,
+    metadata.mlb,
+    metadata.shopId,
+    metadata.itemId
+  ].filter(Boolean).join(" ");
+
+  const mlb = campos.match(/\bMLB-?(\d{6,})\b/i)?.[1];
+  if (mlb) return { produtoIdDetectado: `MLB${mlb}`, tipoIdentidade: "mlb" };
+
+  const asinExplicito = texto(oferta.asin || raw.asin || metadata.asin).match(/\b([A-Z0-9]{10})\b/i)?.[1];
+  const asinLink = campos.match(/\/(?:dp|gp\/product|product)\/([A-Z0-9]{10})(?:[/?#]|\s|$)/i)?.[1];
+  const asin = asinExplicito || asinLink;
+  if (asin) return { produtoIdDetectado: asin.toUpperCase(), tipoIdentidade: "asin" };
+
+  const shopIdExplicito = texto(oferta.shopId || raw.shopId || metadata.shopId);
+  const itemIdExplicito = texto(oferta.itemId || raw.itemId || metadata.itemId);
+  const shopeeProduct = campos.match(/\/product\/(\d+)\/(\d+)/i);
+  const shopeeAntigo = campos.match(/(?:-i\.|\/i\.)(\d+)\.(\d+)/i);
+  const shopId = shopIdExplicito || shopeeProduct?.[1] || shopeeAntigo?.[1] || campos.match(/[?&]shop_?id=(\d+)/i)?.[1];
+  const itemId = itemIdExplicito || shopeeProduct?.[2] || shopeeAntigo?.[2] || campos.match(/[?&]item_?id=(\d+)/i)?.[1];
+  if (shopId && itemId) return { produtoIdDetectado: `${shopId}/${itemId}`, tipoIdentidade: "shopee" };
+
+  const linkNormalizado = normalizarLinkProduto(
+    oferta.linkExpandido || raw.linkExpandido || oferta.linkOriginal || raw.linkOriginal || oferta.linkAfiliado || raw.linkAfiliado || oferta.link
+  );
+  if (linkNormalizado) return { produtoIdDetectado: `link:${linkNormalizado}`, tipoIdentidade: "link_normalizado" };
+
+  const tituloForte = tituloNormalizadoForte(oferta.titulo || raw.titulo || oferta.tituloNormalizado || raw.tituloNormalizado);
+  if (tituloForte.length >= 12) return { produtoIdDetectado: `titulo:${tituloForte}`, tipoIdentidade: "titulo_normalizado_forte" };
+
+  return { produtoIdDetectado: "", tipoIdentidade: "sem_identidade" };
+}
+
 function chaveMemoriaUniversal(ofertaUniversal = {}) {
+  const identidade = detectarIdentidadeProdutoUniversal(ofertaUniversal);
   return [
     texto(ofertaUniversal.clienteId),
     texto(ofertaUniversal.marketplace),
-    texto(ofertaUniversal.linkOriginal || ofertaUniversal.linkAfiliado || ofertaUniversal.titulo).toLowerCase(),
-    texto(ofertaUniversal.titulo).toLowerCase()
+    identidade.produtoIdDetectado
   ].filter(Boolean).join("|");
 }
 
@@ -77,17 +160,25 @@ function dentroJanelaCurta(oferta = {}, contexto = {}) {
 
 function encontrarAnteriorRelevante(ofertaUniversal = {}, anteriores = []) {
   const chave = chaveMemoriaUniversal(ofertaUniversal);
+  const identidadeAtual = detectarIdentidadeProdutoUniversal(ofertaUniversal);
   const linkAtual = texto(ofertaUniversal.linkOriginal || ofertaUniversal.linkAfiliado).toLowerCase();
   const tituloAtual = normalizarComparacao(ofertaUniversal.titulo);
   const marketplaceAtual = normalizarComparacao(ofertaUniversal.marketplace);
 
   return anteriores.find(item => {
     const chaveItem = texto(item.chave) || chaveMemoriaUniversal(item);
+    const identidadeItem = detectarIdentidadeProdutoUniversal(item);
     const linkItem = texto(item.linkOriginal || item.linkAfiliado).toLowerCase();
     const tituloItem = normalizarComparacao(item.titulo || item.tituloNormalizado);
     const marketplaceItem = normalizarComparacao(item.marketplace);
 
     if (chaveItem && chaveItem === chave) return true;
+    if (
+      identidadeAtual.produtoIdDetectado &&
+      identidadeItem.produtoIdDetectado &&
+      identidadeAtual.produtoIdDetectado === identidadeItem.produtoIdDetectado &&
+      marketplaceAtual === marketplaceItem
+    ) return true;
     if (linkAtual && linkItem && linkAtual === linkItem) return true;
     return Boolean(tituloAtual && tituloItem && tituloAtual === tituloItem && marketplaceAtual === marketplaceItem);
   });
@@ -97,6 +188,7 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
   const chave = chaveMemoriaUniversal(ofertaUniversal);
   const anteriores = Array.isArray(contexto.memoriaAnteriores) ? contexto.memoriaAnteriores : [];
   const anterior = encontrarAnteriorRelevante(ofertaUniversal, anteriores);
+  const identidade = detectarIdentidadeProdutoUniversal(ofertaUniversal);
 
   if (!anterior) {
     return {
@@ -104,7 +196,22 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
       repetida: false,
       bloquear: false,
       motivo: "sem_historico",
-      logs: [{ etapa: "memoria", status: "ok", motivo: "sem_historico" }]
+      motivoMemoria: anteriores.length ? "sem_historico_compativel" : "sem_historico_cliente_marketplace",
+      produtoIdDetectado: identidade.produtoIdDetectado,
+      tipoIdentidade: identidade.tipoIdentidade,
+      totalMemoriaAnteriores: anteriores.length,
+      precoCaiu: false,
+      cupomNovo: false,
+      beneficioMelhorou: false,
+      repeticaoIdentica: false,
+      logs: [{
+        etapa: "memoria",
+        status: "ok",
+        motivo: "sem_historico",
+        motivoMemoria: anteriores.length ? "sem_historico_compativel" : "sem_historico_cliente_marketplace",
+        produtoIdDetectado: identidade.produtoIdDetectado,
+        totalMemoriaAnteriores: anteriores.length
+      }]
     };
   }
 
@@ -126,6 +233,14 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
     repetida: true,
     bloquear,
     motivo,
+    motivoMemoria: motivo,
+    produtoIdDetectado: identidade.produtoIdDetectado,
+    tipoIdentidade: identidade.tipoIdentidade,
+    totalMemoriaAnteriores: anteriores.length,
+    precoCaiu,
+    cupomNovo,
+    beneficioMelhorou: beneficioNovoOuMelhor,
+    repeticaoIdentica: repeticaoRigida,
     detalhes: {
       repeticaoRigida,
       dentroJanelaCurta: dentroJanela,
@@ -138,11 +253,23 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
       origemRadar,
       anteriorId: anterior.id || null
     },
-    logs: [{ etapa: "memoria", status: bloquear ? "bloqueada" : "liberada", motivo }]
+    logs: [{
+      etapa: "memoria",
+      status: bloquear ? "bloqueada" : "liberada",
+      motivo,
+      motivoMemoria: motivo,
+      produtoIdDetectado: identidade.produtoIdDetectado,
+      totalMemoriaAnteriores: anteriores.length,
+      precoCaiu,
+      cupomNovo,
+      beneficioMelhorou: beneficioNovoOuMelhor,
+      repeticaoIdentica: repeticaoRigida
+    }]
   };
 }
 
 module.exports = {
   avaliarMemoriaUniversal,
-  chaveMemoriaUniversal
+  chaveMemoriaUniversal,
+  detectarIdentidadeProdutoUniversal
 };
