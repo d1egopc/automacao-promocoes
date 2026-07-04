@@ -199,17 +199,20 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
       motivoMemoria: anteriores.length ? "sem_historico_compativel" : "sem_historico_cliente_marketplace",
       produtoIdDetectado: identidade.produtoIdDetectado,
       tipoIdentidade: identidade.tipoIdentidade,
+      totalMemoriaCandidatos: anteriores.length,
       totalMemoriaAnteriores: anteriores.length,
       precoCaiu: false,
       cupomNovo: false,
       beneficioMelhorou: false,
       repeticaoIdentica: false,
+      historicoCompativelSemMelhoria: false,
       logs: [{
         etapa: "memoria",
         status: "ok",
         motivo: "sem_historico",
         motivoMemoria: anteriores.length ? "sem_historico_compativel" : "sem_historico_cliente_marketplace",
         produtoIdDetectado: identidade.produtoIdDetectado,
+        totalMemoriaCandidatos: anteriores.length,
         totalMemoriaAnteriores: anteriores.length
       }]
     };
@@ -224,9 +227,12 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
   const precoIgual = mesmoPreco(ofertaUniversal.precoAtual, anterior.precoAtual || anterior.preco);
   const cupomIgual = mesmoCupom(ofertaUniversal.cupom, anterior.cupom);
   const repeticaoRigida = Boolean(dentroJanela && precoIgual && cupomIgual && !cupomNovo && !precoCaiu && !beneficioNovoOuMelhor);
+  const historicoCompativelSemMelhoria = Boolean(
+    !repeticaoRigida && !cupomNovo && !precoCaiu && !beneficioNovoOuMelhor
+  );
 
   const bloquear = repeticaoRigida || !(cupomNovo || precoCaiu || temBeneficio || origemRadar);
-  const motivo = repeticaoRigida ? "repeticao_rigida_janela_curta" : (bloquear ? "repeticao_identica_sem_beneficio" : "repeticao_flexivel_liberada");
+  const motivo = repeticaoRigida ? "repeticao_rigida_janela_curta" : (bloquear ? "historico_compativel_sem_melhoria" : "repeticao_flexivel_liberada");
 
   return {
     chave,
@@ -236,13 +242,16 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
     motivoMemoria: motivo,
     produtoIdDetectado: identidade.produtoIdDetectado,
     tipoIdentidade: identidade.tipoIdentidade,
+    totalMemoriaCandidatos: anteriores.length,
     totalMemoriaAnteriores: anteriores.length,
     precoCaiu,
     cupomNovo,
     beneficioMelhorou: beneficioNovoOuMelhor,
     repeticaoIdentica: repeticaoRigida,
+    historicoCompativelSemMelhoria,
     detalhes: {
       repeticaoRigida,
+      historicoCompativelSemMelhoria,
       dentroJanelaCurta: dentroJanela,
       precoIgual,
       cupomIgual,
@@ -259,11 +268,13 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
       motivo,
       motivoMemoria: motivo,
       produtoIdDetectado: identidade.produtoIdDetectado,
+      totalMemoriaCandidatos: anteriores.length,
       totalMemoriaAnteriores: anteriores.length,
       precoCaiu,
       cupomNovo,
       beneficioMelhorou: beneficioNovoOuMelhor,
-      repeticaoIdentica: repeticaoRigida
+      repeticaoIdentica: repeticaoRigida,
+      historicoCompativelSemMelhoria
     }]
   };
 }
@@ -273,3 +284,5 @@ module.exports = {
   chaveMemoriaUniversal,
   detectarIdentidadeProdutoUniversal
 };
+
+
