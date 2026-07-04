@@ -1,4 +1,4 @@
-﻿const { queryEngine } = require("../database");
+const { queryEngine } = require("../database");
 const {
   marcarJobStatus,
   registrarProcessamento,
@@ -238,6 +238,7 @@ async function buscarMemoriaAnterioresEngine(oferta = {}, job = {}) {
       clienteId,
       marketplace,
       memoria: "sem_historico",
+      totalMemoriaCandidatos: 0,
       totalMemoriaAnteriores: 0,
       motivoMemoria: !clienteId ? "cliente_id_ausente" : "marketplace_ausente",
       produtoIdDetectado: identidadeAtual.produtoIdDetectado
@@ -287,6 +288,7 @@ async function buscarMemoriaAnterioresEngine(oferta = {}, job = {}) {
     clienteId,
     marketplace,
     memoria: memoria.length ? "historico_carregado" : "sem_historico",
+    totalMemoriaCandidatos: memoria.length,
     totalMemoriaAnteriores: memoria.length,
     motivoMemoria: memoria.length ? "historico_cliente_marketplace_30d" : "sem_historico_cliente_marketplace_30d",
     produtoIdDetectado: identidadeAtual.produtoIdDetectado,
@@ -300,7 +302,7 @@ async function buscarMemoriaAnterioresEngine(oferta = {}, job = {}) {
 
 async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada = {}, job = {}) {
   try {
-    const memoriaAnteriores = await buscarMemoriaAnterioresEngine(oferta, job);
+    const memoriaCandidatos = await buscarMemoriaAnterioresEngine(oferta, job);
     const resultadoV2 = avaliarOfertaUniversal({
       clienteId: job.cliente_id || job.clienteId || "",
       titulo: oferta.titulo,
@@ -329,13 +331,30 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       clienteId: job.cliente_id || job.clienteId || "",
       origem: "engine_importer",
       exigirLinkAfiliado: true,
-      memoriaAnteriores
+      memoriaAnteriores: memoriaCandidatos
     });
 
     const scoreV2 = normalizarNumero(resultadoV2.score);
     const prioridadeV2 = normalizarNumero(resultadoV2.prioridade);
     const ofertaUniversal = resultadoV2.ofertaUniversal || {};
     const memoriaV2 = resultadoV2.memoria || {};
+    const totalMemoriaCandidatos = memoriaCandidatos.length;
+
+    console.log("[V2-MEMORIA-DECISAO]", JSON.stringify({
+      clienteId: job.cliente_id || job.clienteId || "",
+      marketplace: oferta.marketplace || "",
+      produtoIdDetectado: memoriaV2.produtoIdDetectado || "",
+      totalMemoriaCandidatos,
+      motivoMemoria: memoriaV2.motivoMemoria || memoriaV2.motivo || "",
+      repeticaoIdentica: memoriaV2.repeticaoIdentica === true,
+      historicoCompativelSemMelhoria: memoriaV2.historicoCompativelSemMelhoria === true,
+      precoCaiu: memoriaV2.precoCaiu === true,
+      cupomNovo: memoriaV2.cupomNovo === true,
+      beneficioMelhorou: memoriaV2.beneficioMelhorou === true,
+      score: scoreV2,
+      prioridade: prioridadeV2,
+      status: resultadoV2.status || ""
+    }));
 
     return {
       ok: true,
@@ -357,13 +376,15 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
           memoria: memoriaV2,
           destino: resultadoV2.destino || {},
           templateInput: resultadoV2.templateInput || {},
-          totalMemoriaAnteriores: memoriaAnteriores.length,
+          totalMemoriaCandidatos,
+          totalMemoriaAnteriores: totalMemoriaCandidatos,
           motivoMemoria: memoriaV2.motivoMemoria || memoriaV2.motivo || "",
           produtoIdDetectado: memoriaV2.produtoIdDetectado || "",
           precoCaiu: memoriaV2.precoCaiu === true,
           cupomNovo: memoriaV2.cupomNovo === true,
           beneficioMelhorou: memoriaV2.beneficioMelhorou === true,
           repeticaoIdentica: memoriaV2.repeticaoIdentica === true,
+          historicoCompativelSemMelhoria: memoriaV2.historicoCompativelSemMelhoria === true,
           comparativo: {
             precoAntes: oferta.preco,
             precoDepois: ofertaUniversal.precoAtual ?? oferta.preco,
@@ -556,13 +577,15 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       status: metadataFinal.inteligenciaUniversalV2.status,
       motivoDecisao: metadataFinal.inteligenciaUniversalV2.motivoDecisao,
       memoria: metadataFinal.inteligenciaUniversalV2.memoria?.motivo || "",
+      totalMemoriaCandidatos: metadataFinal.inteligenciaUniversalV2.totalMemoriaCandidatos || 0,
       totalMemoriaAnteriores: metadataFinal.inteligenciaUniversalV2.totalMemoriaAnteriores || 0,
       motivoMemoria: metadataFinal.inteligenciaUniversalV2.motivoMemoria || "",
       produtoIdDetectado: metadataFinal.inteligenciaUniversalV2.produtoIdDetectado || "",
       precoCaiu: metadataFinal.inteligenciaUniversalV2.precoCaiu === true,
       cupomNovo: metadataFinal.inteligenciaUniversalV2.cupomNovo === true,
       beneficioMelhorou: metadataFinal.inteligenciaUniversalV2.beneficioMelhorou === true,
-      repeticaoIdentica: metadataFinal.inteligenciaUniversalV2.repeticaoIdentica === true
+      repeticaoIdentica: metadataFinal.inteligenciaUniversalV2.repeticaoIdentica === true,
+      historicoCompativelSemMelhoria: metadataFinal.inteligenciaUniversalV2.historicoCompativelSemMelhoria === true
     } : null,
     status: "importada",
     atualizada: Boolean(job.oferta_id)
@@ -601,3 +624,5 @@ module.exports = {
   marcarJobErroImportacao,
   normalizarOfertaImportada
 };
+
+
