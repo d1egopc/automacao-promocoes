@@ -1,5 +1,6 @@
 const { classificarCategoriaOferta } = require("../../../../marketplaces/inteligencia/classificador-categorias");
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
+const { queryEngine } = require("../../database");
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -125,6 +126,34 @@ function aplicarFallbackCupomRadar(produto = {}, evento = {}) {
     avisoCupom: produto.avisoCupom || cupomTexto.avisoCupom,
     beneficioExtra: produto.beneficioExtra || cupomTexto.avisoCupom,
     cupomOrigem: "texto_radar"
+  };
+}
+
+async function buscarPrecoPreservadoAmazon(job = {}, linkEscolhido = {}) {
+  const eventoId = job.evento_id || job.eventoId || null;
+  const linkId = linkEscolhido?.link?.id || null;
+  if (!eventoId) return { preco: "", precoOriginal: "" };
+
+  const resultado = await queryEngine(
+    `SELECT o.preco, o.preco_original
+       FROM engine_ofertas o
+      WHERE o.evento_id = $1
+        AND LOWER(REGEXP_REPLACE(COALESCE(o.marketplace, ''), '[[:space:]_-]+', '', 'g')) LIKE '%amazon%'
+        AND o.preco IS NOT NULL
+        AND o.preco > 0
+        AND ($2::bigint IS NULL OR o.link_id = $2::bigint)
+      ORDER BY COALESCE(o.atualizada_em, o.criada_em, o.capturada_em) DESC NULLS LAST, o.id DESC
+      LIMIT 1`,
+    [eventoId, linkId]
+  );
+
+  if (!resultado.ok || !resultado.resultado.rows.length) {
+    return { preco: "", precoOriginal: "" };
+  }
+
+  return {
+    preco: resultado.resultado.rows[0].preco || "",
+    precoOriginal: resultado.resultado.rows[0].preco_original || ""
   };
 }
 
@@ -266,6 +295,7 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
     temTag: Boolean(integracao?.credenciais?.trackingId || integracao?.credenciais?.partnerTag || integracao?.credenciais?.tag || integracao?.credenciais?.appId)
   });
 
+  const precoPreservado = await buscarPrecoPreservadoAmazon(job, linkEscolhido);
   const textoOriginalRadar = textoOriginalEvento(evento);
   const produtoBase = await deps.importarAmazon(urlOriginalEngine, {
     ...integracao,
@@ -282,7 +312,30 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
       clienteId
     }
   });
-  const produto = aplicarFallbackCupomRadar(produtoBase || {}, evento);
+  const produtoImportado = aplicarFallbackCupomRadar(produtoBase || {}, evento);
+  const precoDepoisAfiliado = primeiroValor(produtoImportado.precoAtual, produtoImportado.preco);
+  const precoFinal = primeiroValor(precoDepoisAfiliado, precoPreservado.preco);
+  const precoOriginalFinal = primeiroValor(
+    produtoImportado.precoOriginal,
+    produtoImportado.precoAntigo,
+    precoPreservado.precoOriginal
+  );
+  const produto = {
+    ...produtoImportado,
+    precoAtual: precoFinal,
+    preco: primeiroValor(produtoImportado.preco, precoFinal),
+    precoOriginal: precoOriginalFinal,
+    precoAntigo: primeiroValor(produtoImportado.precoAntigo, precoOriginalFinal)
+  };
+
+  console.log("[AMAZON-PRECO-PRESERVADO]", JSON.stringify({
+    jobId: job.id,
+    clienteId,
+    titulo: produto.titulo || produto.nome || "",
+    precoAntesAfiliado: precoPreservado.preco || "",
+    precoDepoisAfiliado: precoDepoisAfiliado || "",
+    precoFinal: precoFinal || ""
+  }));
 
   console.log("[ENGINE-AMAZON-IMPORTADOR-RETORNO]", JSON.stringify({
     jobId: job.id,
@@ -368,6 +421,8 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
 module.exports = {
   importarAmazonEngine
 };
+
+
 
 
 
