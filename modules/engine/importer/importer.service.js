@@ -8,7 +8,10 @@ const {
 } = require("../processor.service");
 const { normalizarTexto } = require("../normalizers");
 const { classificarCategoriaOferta } = require("../../../marketplaces/inteligencia/classificador-categorias");
-const { avaliarOfertaUniversal } = require("../../inteligencia-universal");
+const {
+  avaliarOfertaUniversal,
+  detectarIdentidadeProdutoUniversal
+} = require("../../inteligencia-universal");
 const {
   logEngineImporterErro,
   logEngineImporterOfertaCriada
@@ -178,11 +181,18 @@ function objetoSeguro(valor = {}) {
 }
 
 function normalizarMarketplaceMemoria(valor = "") {
-  return normalizarTexto(valor).toLowerCase();
+  const marketplace = normalizarTexto(valor).toLowerCase().replace(/[\s_-]+/g, "");
+  if (marketplace === "ml" || marketplace.includes("mercadolivre")) return "mercadolivre";
+  if (marketplace.includes("amazon")) return "amazon";
+  if (marketplace.includes("shopee")) return "shopee";
+  if (marketplace.includes("aliexpress")) return "aliexpress";
+  if (marketplace.includes("kabum")) return "kabum";
+  if (marketplace.includes("awin")) return "awin";
+  return marketplace;
 }
 
 function mapearOfertaMemoria(row = {}) {
-  return {
+  const oferta = {
     id: row.id,
     clienteId: row.cliente_id || "",
     marketplace: row.marketplace || "",
@@ -197,35 +207,66 @@ function mapearOfertaMemoria(row = {}) {
     beneficioTexto: row.beneficio_extra || row.metadata?.beneficioTexto || row.metadata?.beneficioExtra || "",
     beneficioExtra: row.beneficio_extra || row.metadata?.beneficioExtra || "",
     linkOriginal: row.link_original || "",
+    linkExpandido: row.link_expandido || "",
     linkAfiliado: row.link_afiliado || "",
     categoria: row.categoria || "",
     score: row.score,
     prioridade: row.prioridade,
     capturadaEm: row.capturada_em || row.criada_em || "",
-    criadaEm: row.criada_em || ""
+    criadaEm: row.criada_em || "",
+    metadata: row.metadata || {}
+  };
+
+  const identidade = detectarIdentidadeProdutoUniversal(oferta);
+  return {
+    ...oferta,
+    produtoIdDetectado: identidade.produtoIdDetectado,
+    tipoIdentidade: identidade.tipoIdentidade
   };
 }
 
 async function buscarMemoriaAnterioresEngine(oferta = {}, job = {}) {
   const clienteId = normalizarTexto(job.cliente_id || job.clienteId || "");
   const marketplace = normalizarMarketplaceMemoria(oferta.marketplace || job.marketplace || job.marketplace_detectado || "");
+  const identidadeAtual = detectarIdentidadeProdutoUniversal(oferta);
+  const usarMetadata = await engineOfertasTemMetadata();
+  const campoMetadata = usarMetadata ? "o.metadata" : "'{}'::jsonb AS metadata";
 
-  if (!clienteId || !marketplace) return [];
+  if (!clienteId || !marketplace) {
+    console.log("[ENGINE-V2-MEMORIA]", JSON.stringify({
+      jobId: job.id,
+      clienteId,
+      marketplace,
+      memoria: "sem_historico",
+      totalMemoriaAnteriores: 0,
+      motivoMemoria: !clienteId ? "cliente_id_ausente" : "marketplace_ausente",
+      produtoIdDetectado: identidadeAtual.produtoIdDetectado
+    }));
+    return [];
+  }
 
   const resultado = await queryEngine(
     `SELECT o.id, o.marketplace, o.titulo, o.titulo_normalizado,
             o.preco, o.preco_original, o.cupom, o.tipo_cupom,
             o.beneficio_extra, o.link_original, o.link_expandido,
             o.link_afiliado, o.categoria, o.score, o.prioridade,
-            o.metadata, o.capturada_em, o.criada_em, j.cliente_id
+            ${campoMetadata}, o.capturada_em, o.criada_em, j.cliente_id
        FROM engine_ofertas o
        JOIN engine_jobs_cliente j ON j.oferta_id = o.id
       WHERE j.cliente_id = $1
-        AND LOWER(COALESCE(o.marketplace, '')) = $2
+        AND CASE
+              WHEN LOWER(REGEXP_REPLACE(COALESCE(o.marketplace, ''), '[[:space:]_-]+', '', 'g')) IN ('ml', 'mercadolivre') THEN 'mercadolivre'
+              WHEN LOWER(REGEXP_REPLACE(COALESCE(o.marketplace, ''), '[[:space:]_-]+', '', 'g')) LIKE '%amazon%' THEN 'amazon'
+              WHEN LOWER(REGEXP_REPLACE(COALESCE(o.marketplace, ''), '[[:space:]_-]+', '', 'g')) LIKE '%shopee%' THEN 'shopee'
+              WHEN LOWER(REGEXP_REPLACE(COALESCE(o.marketplace, ''), '[[:space:]_-]+', '', 'g')) LIKE '%aliexpress%' THEN 'aliexpress'
+              WHEN LOWER(REGEXP_REPLACE(COALESCE(o.marketplace, ''), '[[:space:]_-]+', '', 'g')) LIKE '%kabum%' THEN 'kabum'
+              WHEN LOWER(REGEXP_REPLACE(COALESCE(o.marketplace, ''), '[[:space:]_-]+', '', 'g')) LIKE '%awin%' THEN 'awin'
+              ELSE LOWER(REGEXP_REPLACE(COALESCE(o.marketplace, ''), '[[:space:]_-]+', '', 'g'))
+            END = $2
         AND ($3::bigint IS NULL OR o.id <> $3::bigint)
-        AND COALESCE(o.criada_em, o.capturada_em, NOW()) >= NOW() - INTERVAL '24 hours'
+        AND COALESCE(o.criada_em, o.capturada_em, NOW()) >= NOW() - INTERVAL '30 days'
       ORDER BY COALESCE(o.criada_em, o.capturada_em) DESC NULLS LAST, o.id DESC
-      LIMIT 80`,
+      LIMIT 300`,
     [clienteId, marketplace, job.oferta_id || null]
   );
 
@@ -240,7 +281,21 @@ async function buscarMemoriaAnterioresEngine(oferta = {}, job = {}) {
     return [];
   }
 
-  return resultado.resultado.rows.map(mapearOfertaMemoria);
+  const memoria = resultado.resultado.rows.map(mapearOfertaMemoria);
+  console.log("[ENGINE-V2-MEMORIA]", JSON.stringify({
+    jobId: job.id,
+    clienteId,
+    marketplace,
+    memoria: memoria.length ? "historico_carregado" : "sem_historico",
+    totalMemoriaAnteriores: memoria.length,
+    motivoMemoria: memoria.length ? "historico_cliente_marketplace_30d" : "sem_historico_cliente_marketplace_30d",
+    produtoIdDetectado: identidadeAtual.produtoIdDetectado,
+    tipoIdentidade: identidadeAtual.tipoIdentidade,
+    metadataDisponivel: usarMetadata,
+    ofertaAtualIdExcluida: job.oferta_id || null
+  }));
+
+  return memoria;
 }
 
 async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada = {}, job = {}) {
@@ -265,6 +320,7 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       cashback: ofertaEntrada.cashback || "",
       imagem: oferta.imagem,
       linkOriginal: oferta.linkOriginal,
+      linkExpandido: oferta.linkExpandido,
       linkAfiliado: oferta.linkAfiliado,
       categoria: oferta.categoria,
       score: oferta.score,
@@ -279,6 +335,7 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
     const scoreV2 = normalizarNumero(resultadoV2.score);
     const prioridadeV2 = normalizarNumero(resultadoV2.prioridade);
     const ofertaUniversal = resultadoV2.ofertaUniversal || {};
+    const memoriaV2 = resultadoV2.memoria || {};
 
     return {
       ok: true,
@@ -297,10 +354,16 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
           score: resultadoV2.score ?? null,
           prioridade: resultadoV2.prioridade ?? null,
           categoria: resultadoV2.categoria || "",
-          memoria: resultadoV2.memoria || {},
+          memoria: memoriaV2,
           destino: resultadoV2.destino || {},
           templateInput: resultadoV2.templateInput || {},
           totalMemoriaAnteriores: memoriaAnteriores.length,
+          motivoMemoria: memoriaV2.motivoMemoria || memoriaV2.motivo || "",
+          produtoIdDetectado: memoriaV2.produtoIdDetectado || "",
+          precoCaiu: memoriaV2.precoCaiu === true,
+          cupomNovo: memoriaV2.cupomNovo === true,
+          beneficioMelhorou: memoriaV2.beneficioMelhorou === true,
+          repeticaoIdentica: memoriaV2.repeticaoIdentica === true,
           comparativo: {
             precoAntes: oferta.preco,
             precoDepois: ofertaUniversal.precoAtual ?? oferta.preco,
@@ -493,7 +556,13 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       status: metadataFinal.inteligenciaUniversalV2.status,
       motivoDecisao: metadataFinal.inteligenciaUniversalV2.motivoDecisao,
       memoria: metadataFinal.inteligenciaUniversalV2.memoria?.motivo || "",
-      totalMemoriaAnteriores: metadataFinal.inteligenciaUniversalV2.totalMemoriaAnteriores || 0
+      totalMemoriaAnteriores: metadataFinal.inteligenciaUniversalV2.totalMemoriaAnteriores || 0,
+      motivoMemoria: metadataFinal.inteligenciaUniversalV2.motivoMemoria || "",
+      produtoIdDetectado: metadataFinal.inteligenciaUniversalV2.produtoIdDetectado || "",
+      precoCaiu: metadataFinal.inteligenciaUniversalV2.precoCaiu === true,
+      cupomNovo: metadataFinal.inteligenciaUniversalV2.cupomNovo === true,
+      beneficioMelhorou: metadataFinal.inteligenciaUniversalV2.beneficioMelhorou === true,
+      repeticaoIdentica: metadataFinal.inteligenciaUniversalV2.repeticaoIdentica === true
     } : null,
     status: "importada",
     atualizada: Boolean(job.oferta_id)
