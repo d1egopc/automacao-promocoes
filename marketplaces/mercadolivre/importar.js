@@ -479,12 +479,57 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       urlFinal: response.url
     });
 
-    if (
+    const html = await response.text();
+    const jsonLd = extrairJsonLd(html);
+    const tituloJsonLd = jsonLd?.name || "";
+    const tituloOg = extrairMeta(html, "og:title");
+    const tituloTwitter = extrairMeta(html, "twitter:title");
+    const tituloHtml = extrairValorMlHtml(html, ["poly_component_title", "name", "title"]);
+    const precoAuditoriaBruto =
+      jsonLd?.offers?.price ||
+      extrairMeta(html, "product:price:amount") ||
+      extrairMeta(html, "og:price:amount") ||
+      extrairPrecoMlHtml(html) ||
+      "";
+    const imagemJsonLd = Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image;
+    const imagemOg = extrairMeta(html, "og:image");
+    const imagemTwitter = extrairMeta(html, "twitter:image");
+    const imagemAuditoria = imagemJsonLd || imagemOg || imagemTwitter || "";
+    const origemImagemAuditoria =
+      imagemJsonLd ? "jsonLd.image" :
+      imagemOg ? "og:image" :
+      imagemTwitter ? "twitter:image" :
+      "nenhuma";
+    const bloqueioOperacional =
       response.status === 403 ||
       response.status === 429 ||
       response.url.includes("account-verification") ||
-      response.url.includes("login")
-    ) {
+      response.url.includes("login");
+    const temBloqueioAuditoria = Boolean(
+      bloqueioOperacional ||
+      /captcha|account-verification|access denied|robot check|verifique[^<]{0,80}rob/i.test(html)
+    );
+    const contextoEngine = deps.contextoEngine || {};
+
+    if (bloqueioOperacional) {
+      console.log("[ML-HTML-AUDITORIA]", JSON.stringify({
+        clienteId: contextoEngine.clienteId || clienteIdAlvo,
+        jobId: contextoEngine.jobId || null,
+        urlOriginal: url,
+        urlFinal: response.url || url,
+        statusHttp: response.status,
+        tamanhoHtml: html.length,
+        temBloqueio: temBloqueioAuditoria,
+        temTituloProduto: Boolean(tituloJsonLd || tituloOg || tituloTwitter || tituloHtml),
+        temJsonLd: Boolean(jsonLd),
+        temOgTitle: Boolean(tituloOg),
+        temOgImage: Boolean(imagemOg),
+        temTwitterImage: Boolean(imagemTwitter),
+        tituloExtraido: htmlDecode(tituloJsonLd || tituloOg || tituloTwitter || tituloHtml || "").trim(),
+        precoAtual: normalizarPrecoMl(precoAuditoriaBruto) || limparPreco(precoAuditoriaBruto) || "",
+        temImagem: Boolean(imagemAuditoria),
+        origemImagem: origemImagemAuditoria
+      }));
       registrarAlertaIntegracao(clienteIdAlvo, "mercadolivre", {
         tipo: "cookie_invalido",
         status: "atencao",
@@ -502,30 +547,19 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       return null;
     }
 
-    const html = await response.text();
     perf.etapa("download_html", {
       tamanhoHtml: html.length
     });
 
-    const jsonLd = extrairJsonLd(html);
-
     let titulo =
-      jsonLd?.name ||
-      extrairMeta(html, "og:title") ||
-      extrairMeta(html, "twitter:title") ||
-      extrairValorMlHtml(html, ["poly_component_title", "name", "title"]) ||
+      tituloJsonLd ||
+      tituloOg ||
+      tituloTwitter ||
+      tituloHtml ||
       "Produto Mercado Livre";
 
-    let preco =
-      jsonLd?.offers?.price ||
-      extrairMeta(html, "product:price:amount") ||
-      extrairMeta(html, "og:price:amount") ||
-      extrairPrecoMlHtml(html) ||
-      "";
+    let preco = precoAuditoriaBruto;
 
-    const imagemJsonLd = Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image;
-    const imagemOg = extrairMeta(html, "og:image");
-    const imagemTwitter = extrairMeta(html, "twitter:image");
     const imagem =
       imagemJsonLd ||
       imagemOg ||
@@ -637,6 +671,25 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       urlOriginal: url,
       urlFinal: response.url
     });
+
+    console.log("[ML-HTML-AUDITORIA]", JSON.stringify({
+      clienteId: contextoEngine.clienteId || clienteIdAlvo,
+      jobId: contextoEngine.jobId || null,
+      urlOriginal: url,
+      urlFinal: response.url || url,
+      statusHttp: response.status,
+      tamanhoHtml: html.length,
+      temBloqueio: temBloqueioAuditoria,
+      temTituloProduto: Boolean(tituloJsonLd || tituloOg || tituloTwitter || tituloHtml),
+      temJsonLd: Boolean(jsonLd),
+      temOgTitle: Boolean(tituloOg),
+      temOgImage: Boolean(imagemOg),
+      temTwitterImage: Boolean(imagemTwitter),
+      tituloExtraido: produtoComFallbackRadar.titulo || tituloLimpo || "",
+      precoAtual: produtoComFallbackRadar.precoAtual || produtoComFallbackRadar.preco || preco || "",
+      temImagem: Boolean(produtoComFallbackRadar.imagem || imagem),
+      origemImagem
+    }));
 
     limparAlertaIntegracao(clienteIdAlvo, "mercadolivre");
     perf.etapa("salvamento_retorno", {
