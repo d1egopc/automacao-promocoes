@@ -52,24 +52,41 @@ async function existeEventoDuplicado(evento = {}) {
   return resultado.resultado.rows[0] || null;
 }
 
-async function salvarLinksEvento(eventoId, links = []) {
+function localizarRedirectRadar(metadata = {}, linkResolvido = "") {
+  const redirects = Array.isArray(metadata?.redirectsRadar) ? metadata.redirectsRadar : [];
+  return redirects.find(item => String(item?.linkResolvido || "") === String(linkResolvido || "")) || null;
+}
+
+async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}) {
   for (const link of links) {
-    const urlNormalizada = normalizarUrl(link);
-    const marketplaceDetectado = detectarMarketplaceLink(urlNormalizada || link);
+    const redirectRadar = localizarRedirectRadar(metadataEvento, link);
+    const urlOriginal = redirectRadar?.linkOriginalCapturado || link;
+    const urlNormalizada = normalizarUrl(urlOriginal);
+    const urlExpandida = redirectRadar?.linkResolvido || null;
+    const marketplaceDetectado = detectarMarketplaceLink(urlExpandida || urlNormalizada || urlOriginal);
     const resultado = await queryEngine(
       `INSERT INTO engine_links (
          evento_id, url_original, url_normalizada, url_expandida,
          dominio_original, dominio_final, redirect_ok, motivo_redirect,
          marketplace_detectado, metadata
        )
-       VALUES ($1, $2, $3, NULL, $4, NULL, NULL, NULL, $5, $6::jsonb)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)`,
       [
         eventoId,
-        link,
+        urlOriginal,
         urlNormalizada,
-        dominioUrl(link),
+        urlExpandida,
+        dominioUrl(urlOriginal),
+        urlExpandida ? dominioUrl(urlExpandida) : null,
+        redirectRadar ? redirectRadar.status === "resolvido" : null,
+        redirectRadar ? (redirectRadar.motivo || redirectRadar.status || "") : null,
         marketplaceDetectado,
-        JSON.stringify({ fase: "1.1" })
+        JSON.stringify({
+          fase: "1.1",
+          linkOriginalCapturado: redirectRadar?.linkOriginalCapturado || "",
+          linkResolvido: redirectRadar?.linkResolvido || "",
+          tipoLink: redirectRadar ? "redirect_conhecido" : "direto"
+        })
       ]
     );
 
@@ -127,7 +144,7 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
       return { ok: true, duplicado: true, id: null };
     }
 
-    await salvarLinksEvento(id, evento.linksExtraidos);
+    await salvarLinksEvento(id, evento.linksExtraidos, eventoBruto.metadata || {});
 
     logEngineEventoBrutoSalvo({ id, origem: evento.origem, origemTipo: evento.origemTipo, grupoId: evento.grupoId, links: evento.linksExtraidos.length });
 
@@ -149,3 +166,4 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
 module.exports = {
   registrarEventoBruto
 };
+
