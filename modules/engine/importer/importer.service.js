@@ -157,13 +157,17 @@ async function registrarEtapaImportacao(jobId, etapa, status, motivo = "", detal
 }
 
 function normalizarOfertaImportada(resultado = {}, job = {}) {
+  const produtoMetadata = resultado?.metadata?.produto && typeof resultado.metadata.produto === "object"
+    ? resultado.metadata.produto
+    : {};
+
   return {
     ok: resultado.ok !== false,
     marketplace: normalizarTexto(resultado.marketplace || job.marketplace || job.marketplace_detectado),
     titulo: normalizarTexto(resultado.titulo || resultado.nome || ""),
     tituloNormalizado: normalizarTitulo(resultado.titulo || resultado.nome || ""),
-    preco: normalizarNumero(resultado.preco ?? resultado.precoAtual),
-    precoOriginal: normalizarNumero(resultado.precoOriginal ?? resultado.precoAntigo),
+    preco: normalizarNumero(resultado.preco || resultado.precoAtual || produtoMetadata.precoAtual || produtoMetadata.preco),
+    precoOriginal: normalizarNumero(resultado.precoOriginal || resultado.precoAntigo || produtoMetadata.precoOriginal || produtoMetadata.precoAntigo),
     imagem: normalizarTexto(resultado.imagem || resultado.image || ""),
     linkOriginal: normalizarTexto(resultado.linkOriginal || ""),
     linkExpandido: normalizarTexto(resultado.linkExpandido || resultado.urlFinal || ""),
@@ -334,8 +338,10 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       memoriaAnteriores: memoriaCandidatos
     });
 
-    const scoreV2 = normalizarNumero(resultadoV2.score);
-    const prioridadeV2 = normalizarNumero(resultadoV2.prioridade);
+    const scoreCalculadoV2 = normalizarNumero(resultadoV2.score?.score ?? resultadoV2.score);
+    const prioridadeCalculadaV2 = normalizarNumero(resultadoV2.prioridade);
+    const scoreV2 = scoreCalculadoV2 ?? prioridadeCalculadaV2 ?? 0;
+    const prioridadeV2 = prioridadeCalculadaV2 ?? scoreV2;
     const ofertaUniversal = resultadoV2.ofertaUniversal || {};
     const memoriaV2 = resultadoV2.memoria || {};
     const totalMemoriaCandidatos = memoriaCandidatos.length;
@@ -370,8 +376,8 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
           status: resultadoV2.status || "",
           motivo: resultadoV2.motivo || "",
           motivoDecisao: resultadoV2.motivo || "",
-          score: resultadoV2.score ?? null,
-          prioridade: resultadoV2.prioridade ?? null,
+          score: scoreV2,
+          prioridade: prioridadeV2,
           categoria: resultadoV2.categoria || "",
           memoria: memoriaV2,
           destino: resultadoV2.destino || {},
@@ -393,7 +399,7 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
             categoriaAntes: oferta.categoria || "",
             categoriaDepois: resultadoV2.categoria || ofertaUniversal.categoria || "",
             scoreAntes: oferta.score ?? null,
-            scoreDepois: resultadoV2.score ?? null
+            scoreDepois: scoreV2
           },
           logs: resultadoV2.logs || []
         }
@@ -624,5 +630,7 @@ module.exports = {
   marcarJobErroImportacao,
   normalizarOfertaImportada
 };
+
+
 
 
