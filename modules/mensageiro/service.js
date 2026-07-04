@@ -157,15 +157,169 @@ function aplicarDelayAtendimento(delaySegundos = 0) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function executarRespostaRapida({ sock, jid, resposta, delaySegundos = 0 } = {}) {
+function logMensageiroJson(tag, dados = {}) {
+  console.log(`${tag} ${JSON.stringify(dados)}`);
+}
+
+function normalizarJidMensageiro(valor = "") {
+  return String(valor || "").trim();
+}
+
+function jidPrivadoWhatsappValido(jid = "") {
+  return normalizarJidMensageiro(jid).endsWith("@s.whatsapp.net");
+}
+
+function jidGrupoWhatsapp(jid = "") {
+  return normalizarJidMensageiro(jid).endsWith("@g.us");
+}
+
+function jidLidWhatsapp(jid = "") {
+  return normalizarJidMensageiro(jid).endsWith("@lid");
+}
+
+function coletarPossiveisContatosMensageiro(sock) {
+  const fontes = [
+    sock?.__mensageiroLidMap,
+    sock?.contacts,
+    sock?.store?.contacts,
+    sock?.ev?.store?.contacts,
+    sock?.waUploadToServer?.store?.contacts
+  ];
+  const contatos = [];
+
+  for (const fonte of fontes) {
+    if (!fonte) continue;
+
+    if (fonte instanceof Map) {
+      for (const [id, contato] of fonte.entries()) {
+        contatos.push({ chave: id, id, ...(contato || {}) });
+      }
+      continue;
+    }
+
+    if (Array.isArray(fonte)) {
+      contatos.push(...fonte);
+      continue;
+    }
+
+    if (typeof fonte === "object") {
+      for (const [id, contato] of Object.entries(fonte)) {
+        contatos.push({ chave: id, id, ...(contato || {}) });
+      }
+    }
+  }
+
+  return contatos;
+}
+
+function registrarMapeamentoLidMensageiro(sock, lid = "", jid = "") {
+  const lidNormalizado = normalizarJidMensageiro(lid);
+  const jidTexto = normalizarJidMensageiro(jid);
+  const jidNormalizado = /^\d+$/.test(jidTexto) ? `${jidTexto}@s.whatsapp.net` : jidTexto;
+
+  if (!sock || !jidLidWhatsapp(lidNormalizado) || !jidPrivadoWhatsappValido(jidNormalizado)) return;
+
+  sock.__mensageiroLidMap = sock.__mensageiroLidMap || {};
+  sock.__mensageiroLidMap[lidNormalizado] = {
+    id: jidNormalizado,
+    lid: lidNormalizado,
+    jid: jidNormalizado
+  };
+}
+
+function extrairJidWhatsappDeContato(contato = {}, jidOriginal = "") {
+  const lidOriginal = normalizarJidMensageiro(jidOriginal);
+  const usuarioLidOriginal = lidOriginal.split("@")[0];
+  const normalizarCampoJid = valor => {
+    const texto = normalizarJidMensageiro(valor);
+    return /^\d+$/.test(texto) ? `${texto}@s.whatsapp.net` : texto;
+  };
+  const camposLid = [
+    contato.chave,
+    contato.id,
+    contato.lid,
+    contato.lidJid,
+    contato.lidPn,
+    contato.jid,
+    contato.remoteJid,
+    contato.notify
+  ].map(normalizarJidMensageiro);
+
+  if (!camposLid.includes(lidOriginal) && !camposLid.includes(usuarioLidOriginal)) return "";
+
+  const camposJid = [
+    contato.jid,
+    contato.id,
+    contato.pn,
+    contato.phoneNumber,
+    contato.phoneNumberJid,
+    contato.wid,
+    contato.remoteJid
+  ].map(normalizarCampoJid);
+
+  return camposJid.find(jidPrivadoWhatsappValido) || "";
+}
+
+async function tentarResolverLidViaOnWhatsApp(sock, jidOriginal = "") {
+  if (typeof sock?.onWhatsApp !== "function") return "";
+
+  const usuario = normalizarJidMensageiro(jidOriginal).split("@")[0];
+  const candidatos = [
+    normalizarJidMensageiro(jidOriginal),
+    `${usuario}@s.whatsapp.net`,
+    usuario
+  ];
+
+  for (const candidato of candidatos) {
+    try {
+      const resultado = await sock.onWhatsApp(candidato);
+      const lista = Array.isArray(resultado) ? resultado : [resultado];
+      const encontrado = lista.find(item => item?.exists && jidPrivadoWhatsappValido(item?.jid));
+      if (encontrado?.jid) return normalizarJidMensageiro(encontrado.jid);
+    } catch {}
+  }
+
+  return "";
+}
+
+async function resolverJidPrivadoMensageiro(sock, jid, contexto = {}) {
+  const jidOriginal = normalizarJidMensageiro(jid);
+
+  if (!jidOriginal) return "";
+  if (jidGrupoWhatsapp(jidOriginal)) return jidOriginal;
+  if (jidPrivadoWhatsappValido(jidOriginal)) return jidOriginal;
+  if (!jidLidWhatsapp(jidOriginal)) return jidOriginal;
+
+  for (const contato of coletarPossiveisContatosMensageiro(sock)) {
+    const jidResolvido = extrairJidWhatsappDeContato(contato, jidOriginal);
+    if (jidResolvido) return jidResolvido;
+  }
+
+  const jidOnWhatsApp = await tentarResolverLidViaOnWhatsApp(sock, jidOriginal);
+  if (jidOnWhatsApp) return jidOnWhatsApp;
+
+  logMensageiroJson("[MENSAGEIRO-JID-LID-NAO-RESOLVIDO]", {
+    clienteId: contexto.clienteId || "",
+    sessaoId: contexto.sessaoId || "",
+    jidOriginal
+  });
+
+  return "";
+}
+
+async function executarRespostaRapida({ sock, jid, resposta, delaySegundos = 0, clienteId = "", sessaoId = "", jidOriginalLog = "" } = {}) {
   const conteudo = String(resposta?.conteudo || "").trim();
   const tipo = String(resposta?.tipo || "texto").toLowerCase();
 
   if (!sock || !jid || !conteudo) return false;
   if (tipo !== "texto") return false;
 
+  const jidOriginal = normalizarJidMensageiro(jidOriginalLog || jid);
+  const jidFinal = await resolverJidPrivadoMensageiro(sock, jid, { clienteId, sessaoId });
+  if (!jidFinal) return false;
+
   try {
-    await sock.sendPresenceUpdate?.("composing", jid);
+    await sock.sendPresenceUpdate?.("composing", jidFinal);
   } catch (e) {
     console.log("[MENSAGEIRO-FLUXO] digitando indisponivel:", e.message);
   }
@@ -173,21 +327,33 @@ async function executarRespostaRapida({ sock, jid, resposta, delaySegundos = 0 }
   await aplicarDelayAtendimento(delaySegundos);
 
   try {
-    await sock.sendPresenceUpdate?.("paused", jid);
+    await sock.sendPresenceUpdate?.("paused", jidFinal);
   } catch {}
 
-  await sock.sendMessage(jid, { text: conteudo });
+  logMensageiroJson("[MENSAGEIRO-ATENDIMENTO-ENVIO-TENTANDO]", {
+    clienteId,
+    sessaoId,
+    jidOriginal,
+    jidFinal,
+    tipo: "texto",
+    conteudoPreview: conteudo.slice(0, 120)
+  });
+  await sock.sendMessage(jidFinal, { text: conteudo });
   return true;
 }
 
-async function executarRespostaAtendimento({ sock, jid, resposta, clienteId = "", sessaoId = "" } = {}) {
+async function executarRespostaAtendimento({ sock, jid, resposta, clienteId = "", sessaoId = "", jidOriginalLog = "" } = {}) {
   const conteudo = String(resposta?.conteudo || "").trim();
   const tipo = String(resposta?.tipo || "texto");
 
   if (!sock || !jid || !conteudo) return false;
 
+  const jidOriginal = normalizarJidMensageiro(jidOriginalLog || jid);
+  const jidFinal = await resolverJidPrivadoMensageiro(sock, jid, { clienteId, sessaoId });
+  if (!jidFinal) return false;
+
   try {
-    await sock.sendPresenceUpdate?.("composing", jid);
+    await sock.sendPresenceUpdate?.("composing", jidFinal);
   } catch (e) {
     console.log("[MENSAGEIRO-FLUXO] digitando indisponivel:", e.message);
   }
@@ -195,18 +361,34 @@ async function executarRespostaAtendimento({ sock, jid, resposta, clienteId = ""
   await aplicarDelayAtendimento(resposta?.delaySegundos || 0);
 
   try {
-    await sock.sendPresenceUpdate?.("paused", jid);
+    await sock.sendPresenceUpdate?.("paused", jidFinal);
   } catch {}
 
   if (tipo === "imagemUrl") {
-    await sock.sendMessage(jid, {
+    logMensageiroJson("[MENSAGEIRO-ATENDIMENTO-ENVIO-TENTANDO]", {
+      clienteId,
+      sessaoId,
+      jidOriginal,
+      jidFinal,
+      tipo,
+      conteudoPreview: conteudo.slice(0, 120)
+    });
+    await sock.sendMessage(jidFinal, {
       image: { url: conteudo }
     });
     return true;
   }
 
   if (tipo === "videoUrl") {
-    await sock.sendMessage(jid, {
+    logMensageiroJson("[MENSAGEIRO-ATENDIMENTO-ENVIO-TENTANDO]", {
+      clienteId,
+      sessaoId,
+      jidOriginal,
+      jidFinal,
+      tipo,
+      conteudoPreview: conteudo.slice(0, 120)
+    });
+    await sock.sendMessage(jidFinal, {
       video: { url: conteudo }
     });
     return true;
@@ -214,7 +396,15 @@ async function executarRespostaAtendimento({ sock, jid, resposta, clienteId = ""
 
   if (tipo === "arquivoUrl") {
     const nomeArquivo = conteudo.split("/").pop()?.split("?")[0] || "arquivo";
-    await sock.sendMessage(jid, {
+    logMensageiroJson("[MENSAGEIRO-ATENDIMENTO-ENVIO-TENTANDO]", {
+      clienteId,
+      sessaoId,
+      jidOriginal,
+      jidFinal,
+      tipo,
+      conteudoPreview: conteudo.slice(0, 120)
+    });
+    await sock.sendMessage(jidFinal, {
       document: { url: conteudo },
       fileName: nomeArquivo
     });
@@ -222,25 +412,27 @@ async function executarRespostaAtendimento({ sock, jid, resposta, clienteId = ""
   }
 
   if (tipo === "link") {
-    console.log("[MENSAGEIRO-ATENDIMENTO-ENVIO-TENTANDO] " + JSON.stringify({
+    logMensageiroJson("[MENSAGEIRO-ATENDIMENTO-ENVIO-TENTANDO]", {
       clienteId,
       sessaoId,
-      jid,
+      jidOriginal,
+      jidFinal,
       tipo: "texto",
       conteudoPreview: conteudo.slice(0, 120)
-    }));
-    await sock.sendMessage(jid, { text: conteudo });
+    });
+    await sock.sendMessage(jidFinal, { text: conteudo });
     return true;
   }
 
-  console.log("[MENSAGEIRO-ATENDIMENTO-ENVIO-TENTANDO] " + JSON.stringify({
+  logMensageiroJson("[MENSAGEIRO-ATENDIMENTO-ENVIO-TENTANDO]", {
     clienteId,
     sessaoId,
-    jid,
+    jidOriginal,
+    jidFinal,
     tipo: "texto",
     conteudoPreview: conteudo.slice(0, 120)
-  }));
-  await sock.sendMessage(jid, { text: conteudo });
+  });
+  await sock.sendMessage(jidFinal, { text: conteudo });
   return true;
 }
 
@@ -300,13 +492,36 @@ async function tratarMensagemAtendimentoV1({
     return true;
   }
 
-  eventosMensageiroRecentes.set(chaveCooldown, agora);
-
   const respostasEnviadas = [];
+  const jidOriginalAtendimento = normalizarJidMensageiro(jid);
+  const jidFinalAtendimento = await resolverJidPrivadoMensageiro(sock, jidOriginalAtendimento, { clienteId, sessaoId });
+
+  if (!jidFinalAtendimento) {
+    registrarHistoricoSeguro(clienteId, {
+      origem: jid.endsWith("@g.us") ? "grupo" : "privado",
+      contato: jid,
+      grupo: jid.endsWith("@g.us") ? jid : "",
+      mensagemRecebida: texto,
+      gatilhoId: gatilho.id,
+      gatilhoNome: gatilho.nome,
+      respostaEnviada: [],
+      status: "sem_resposta"
+    });
+    return true;
+  }
+
+  eventosMensageiroRecentes.set(chaveCooldown, agora);
 
   try {
     for (const resposta of gatilho.respostas || []) {
-      const enviada = await executarRespostaAtendimento({ sock, jid, resposta, clienteId, sessaoId });
+      const enviada = await executarRespostaAtendimento({
+        sock,
+        jid: jidFinalAtendimento,
+        resposta,
+        clienteId,
+        sessaoId,
+        jidOriginalLog: jidOriginalAtendimento
+      });
       if (enviada) respostasEnviadas.push(`${resposta.tipo}:${String(resposta.conteudo || "").slice(0, 80)}`);
     }
 
@@ -321,23 +536,27 @@ async function tratarMensagemAtendimentoV1({
       status: respostasEnviadas.length ? "enviado" : "sem_resposta"
     });
 
-    console.log("[MENSAGEIRO-ATENDIMENTO-ENVIADO] " + JSON.stringify({
-      clienteId,
-      sessaoId,
-      jid,
-      gatilhoId: gatilho.id,
-      gatilhoNome: gatilho.nome,
-      respostas: respostasEnviadas.length
-    }));
+    if (respostasEnviadas.length) {
+      logMensageiroJson("[MENSAGEIRO-ATENDIMENTO-ENVIADO]", {
+        clienteId,
+        sessaoId,
+        jidOriginal: jidOriginalAtendimento,
+        jidFinal: jidFinalAtendimento,
+        gatilhoId: gatilho.id,
+        gatilhoNome: gatilho.nome,
+        respostas: respostasEnviadas.length
+      });
+    }
 
     return true;
   } catch (e) {
-    console.log("[MENSAGEIRO-ATENDIMENTO-ERRO] " + JSON.stringify({
+    logMensageiroJson("[MENSAGEIRO-ATENDIMENTO-ERRO]", {
       clienteId,
       sessaoId,
-      jid,
+      jidOriginal: jidOriginalAtendimento,
+      jidFinal: jidFinalAtendimento,
       erro: e.message
-    }));
+    });
 
     registrarHistoricoSeguro(clienteId, {
       origem: jid.endsWith("@g.us") ? "grupo" : "privado",
@@ -368,6 +587,12 @@ async function tratarMensagemPrivadaAtendimento({
 
     if (!jid || jid === "status@broadcast") return;
     if (mensagem?.key?.fromMe) return;
+
+    registrarMapeamentoLidMensageiro(
+      sock,
+      mensagem?.key?.remoteJid,
+      mensagem?.key?.senderPn || mensagem?.senderPn
+    );
 
     const texto = extrairTextoMensagemAtendimento(mensagem);
 
@@ -400,18 +625,26 @@ async function tratarMensagemPrivadaAtendimento({
 
     if (!respostaRapida) return;
 
+    const jidOriginalRespostaRapida = normalizarJidMensageiro(jid);
+    const jidFinalRespostaRapida = await resolverJidPrivadoMensageiro(sock, jidOriginalRespostaRapida, { clienteId, sessaoId });
+    if (!jidFinalRespostaRapida) return;
+
     const enviado = await executarRespostaRapida({
       sock,
-      jid,
+      jid: jidFinalRespostaRapida,
       resposta: respostaRapida.resposta,
-      delaySegundos: atendimento.delaySegundos
+      delaySegundos: atendimento.delaySegundos,
+      clienteId,
+      sessaoId,
+      jidOriginalLog: jidOriginalRespostaRapida
     });
 
     if (enviado) {
-      console.log("[MENSAGEIRO-ATENDIMENTO] resposta rapida enviada", {
+      logMensageiroJson("[MENSAGEIRO-ATENDIMENTO-RESPOSTA-RAPIDA-ENVIADA]", {
         clienteId,
         sessaoId,
-        jid,
+        jidOriginal: jidOriginalRespostaRapida,
+        jidFinal: jidFinalRespostaRapida,
         respostaId: respostaRapida.id || ""
       });
     }
@@ -459,7 +692,12 @@ for (const participante of participantes) {
   );
 
   const numero = String(participante).split("@")[0];
-  const destinoPrivado = participante;
+  const jidOriginal = normalizarJidMensageiro(participante);
+  const destinoPrivado = await resolverJidPrivadoMensageiro(sock, jidOriginal, { clienteId, sessaoId });
+
+  if (!destinoPrivado) {
+    continue;
+  }
 
   const textoFinal = String(mensagem || "")
     .replaceAll("{numero}", numero)
@@ -494,27 +732,53 @@ eventosMensageiroRecentes.set(
     const base64 = imagemStr.split(",")[1];
     const buffer = Buffer.from(base64, "base64");
 
+    logMensageiroJson("[MENSAGEIRO-ENVIO-TENTANDO]", {
+      clienteId,
+      sessaoId,
+      jidOriginal,
+      jidFinal: destinoPrivado,
+      tipo: "imagem",
+      conteudoPreview: textoFinal.slice(0, 120)
+    });
     await sock.sendMessage(destinoPrivado, {
       image: buffer,
       caption: textoFinal
     });
   } else {
+    logMensageiroJson("[MENSAGEIRO-ENVIO-TENTANDO]", {
+      clienteId,
+      sessaoId,
+      jidOriginal,
+      jidFinal: destinoPrivado,
+      tipo: "imagem",
+      conteudoPreview: textoFinal.slice(0, 120)
+    });
     await sock.sendMessage(destinoPrivado, {
       image: { url: imagemStr },
       caption: textoFinal
     });
   }
 } else {
+  logMensageiroJson("[MENSAGEIRO-ENVIO-TENTANDO]", {
+    clienteId,
+    sessaoId,
+    jidOriginal,
+    jidFinal: destinoPrivado,
+    tipo: "texto",
+    conteudoPreview: textoFinal.slice(0, 120)
+  });
   await sock.sendMessage(destinoPrivado, {
     text: textoFinal
   });
 }
 
-      console.log("[MENSAGEIRO] Mensageiro enviado:", {
+      logMensageiroJson("[MENSAGEIRO-ENVIADO]", {
         clienteId,
         sessaoId,
         grupoId,
         participante,
+        jidOriginal,
+        jidFinal: destinoPrivado,
         acao
       });
     }
@@ -533,6 +797,7 @@ module.exports = {
   normalizarTextoMensagem,
   encontrarRespostaRapida,
   encontrarGatilhoAtendimento,
+  resolverJidPrivadoMensageiro,
   executarRespostaRapida,
   executarRespostaAtendimento,
   aplicarDelayAtendimento,
