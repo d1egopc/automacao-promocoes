@@ -1,4 +1,4 @@
-﻿const { queryEngine } = require("../../database");
+const { queryEngine } = require("../../database");
 const { classificarCategoriaOferta } = require("../../../../marketplaces/inteligencia/classificador-categorias");
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
 
@@ -82,6 +82,8 @@ function auditarInteligenciaUniversalMlEngine({ job = {}, produto = {}, ofertaAd
       jobId: job.id,
       eventoId: job.evento_id,
       clienteId: job.cliente_id || job.clienteId || "",
+      fonteFinal: false,
+      tipoAvaliacao: "auditoria_adapter_sem_memoria",
       titulo: ofertaAdapter.titulo || produto.titulo || produto.nome || "",
       okV2: resultadoV2.ok,
       statusV2: resultadoV2.status,
@@ -130,7 +132,6 @@ function enriquecerOfertaAdapterComV2(ofertaAdapter = {}, auditoriaV2 = null, pr
 
   const ofertaUniversal = auditoriaV2.ofertaUniversal || {};
   const templateInput = auditoriaV2.templateInput || {};
-  const scoreV2 = auditoriaV2.score?.score;
   const beneficioTextoV2 = primeiroValorV2(
     ofertaUniversal.beneficioTexto,
     templateInput.beneficioTexto,
@@ -160,7 +161,7 @@ function enriquecerOfertaAdapterComV2(ofertaAdapter = {}, auditoriaV2 = null, pr
     descontoPix: primeiroValorV2(ofertaUniversal.descontoPix, templateInput.descontoPix, ofertaAdapter.descontoPix, produto.descontoPix),
     descontoApp: primeiroValorV2(ofertaUniversal.descontoApp, templateInput.descontoApp, ofertaAdapter.descontoApp, produto.descontoApp),
     categoria: primeiroValorV2(auditoriaV2.categoria, ofertaUniversal.categoria, ofertaAdapter.categoria),
-    score: valorV2Presente(scoreV2) ? scoreV2 : ofertaAdapter.score,
+    score: ofertaAdapter.score,
     linkAfiliado: ofertaAdapter.linkAfiliado || linkAfiliado
   };
 }
@@ -583,6 +584,8 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     ...ofertaEnriquecida,
     metadata: {
       auditoriaInteligenciaUniversalV2: auditoriaV2 ? {
+        fonteFinal: false,
+        tipoAvaliacao: "auditoria_adapter_sem_memoria",
         ok: auditoriaV2.ok,
         status: auditoriaV2.status,
         motivo: auditoriaV2.motivo,
@@ -624,4 +627,8 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
 module.exports = {
   importarMercadoLivreEngine
 };
+
+
+
+
 

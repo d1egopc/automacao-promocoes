@@ -157,6 +157,8 @@ function auditarV2Amazon({ job = {}, produto = {}, ofertaAdapter = {} } = {}) {
       jobId: job.id,
       eventoId: job.evento_id,
       clienteId: job.cliente_id || job.clienteId || "",
+      fonteFinal: false,
+      tipoAvaliacao: "auditoria_adapter_sem_memoria",
       titulo: ofertaAdapter.titulo || produto.titulo || produto.nome || "",
       okV2: resultadoV2.ok,
       statusV2: resultadoV2.status,
@@ -200,7 +202,6 @@ function enriquecerComV2(ofertaAdapter = {}, auditoriaV2 = null, produto = {}) {
 
   const ofertaUniversal = auditoriaV2.ofertaUniversal || {};
   const templateInput = auditoriaV2.templateInput || {};
-  const scoreV2 = auditoriaV2.score?.score;
   const beneficioTexto = primeiroValor(
     ofertaUniversal.beneficioTexto,
     templateInput.beneficioTexto,
@@ -226,7 +227,7 @@ function enriquecerComV2(ofertaAdapter = {}, auditoriaV2 = null, produto = {}) {
     freteGratis: ofertaUniversal.freteGratis === true || templateInput.freteGratis === true || ofertaAdapter.freteGratis === true || produto.freteGratis === true,
     cashback: primeiroValor(ofertaUniversal.cashback, templateInput.cashback, ofertaAdapter.cashback, produto.cashback),
     categoria: primeiroValor(auditoriaV2.categoria, ofertaUniversal.categoria, ofertaAdapter.categoria),
-    score: valorPresente(scoreV2) ? scoreV2 : ofertaAdapter.score
+    score: ofertaAdapter.score
   };
 }
 
@@ -350,6 +351,8 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
       camposProduto: Object.keys(produto || {}),
       produto,
       auditoriaInteligenciaUniversalV2: auditoriaV2 ? {
+        fonteFinal: false,
+        tipoAvaliacao: "auditoria_adapter_sem_memoria",
         ok: auditoriaV2.ok,
         status: auditoriaV2.status,
         motivo: auditoriaV2.motivo,
@@ -365,5 +368,9 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
 module.exports = {
   importarAmazonEngine
 };
+
+
+
+
 
 
