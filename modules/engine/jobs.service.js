@@ -14,9 +14,10 @@ function normalizarClientes(clientes = []) {
   const ids = lista
     .map(cliente => typeof cliente === "string" ? cliente : cliente?.id || cliente?.clienteId)
     .map(id => normalizarTexto(id || ""))
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter(id => id.toLowerCase() !== "admin");
 
-  return [...new Set(ids.length ? ids : ["admin"] )];
+  return [...new Set(ids)];
 }
 
 function marketplacePrincipal(links = []) {
@@ -24,12 +25,83 @@ function marketplacePrincipal(links = []) {
   return normalizados.map(detectarMarketplaceLink).find(Boolean) || "";
 }
 
+async function ignorarJobsAdminNaoOperacional() {
+  const motivo = "admin_nao_e_cliente_operacional";
+  const resultado = await queryEngine(
+    `WITH jobs_admin AS (
+       UPDATE engine_jobs_cliente
+          SET status = 'ignorado',
+              motivo_final = $1,
+              atualizado_em = NOW(),
+              metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb
+        WHERE LOWER(TRIM(cliente_id)) = 'admin'
+          AND (status IS DISTINCT FROM 'ignorado' OR motivo_final IS DISTINCT FROM $1)
+        RETURNING id, oferta_id
+     ), ofertas_admin AS (
+       UPDATE engine_ofertas o
+          SET status = 'retida',
+              motivo_status = $1,
+              atualizada_em = NOW()
+        WHERE o.id IN (
+          SELECT j.oferta_id
+            FROM engine_jobs_cliente j
+           WHERE LOWER(TRIM(j.cliente_id)) = 'admin'
+             AND j.oferta_id IS NOT NULL
+        )
+          AND o.status IN ('importada', 'oferta_criada', 'distribuindo')
+        RETURNING o.id
+     )
+     SELECT
+       (SELECT COUNT(*)::int FROM jobs_admin) AS jobs_ignorados,
+       (SELECT COUNT(*)::int FROM ofertas_admin) AS ofertas_retidas`,
+    [motivo, JSON.stringify({ motivo, operacional: false })]
+  );
+
+  if (!resultado.ok) {
+    logEngineJobClienteErro({
+      clienteId: "admin",
+      motivo: resultado.motivo || "admin_jobs_neutralizacao_falhou",
+      erro: resultado.erro || ""
+    });
+    return { ok: false, motivo: resultado.motivo || "admin_jobs_neutralizacao_falhou", erro: resultado.erro || "" };
+  }
+
+  const resumo = resultado.resultado.rows[0] || {};
+  if (resumo.jobs_ignorados || resumo.ofertas_retidas) {
+    console.log("[ENGINE-ADMIN-NAO-OPERACIONAL]", JSON.stringify({
+      motivo,
+      jobsIgnorados: Number(resumo.jobs_ignorados || 0),
+      ofertasRetidas: Number(resumo.ofertas_retidas || 0)
+    }));
+  }
+
+  return {
+    ok: true,
+    motivo,
+    jobsIgnorados: Number(resumo.jobs_ignorados || 0),
+    ofertasRetidas: Number(resumo.ofertas_retidas || 0)
+  };
+}
+
 async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [], marketplaceDetectado = "", linksExtraidos = [] } = {}) {
   if (!eventoId) return { ok: false, motivo: "evento_id_ausente", criados: 0 };
+
+  await ignorarJobsAdminNaoOperacional();
 
   const clientesIds = normalizarClientes(clientes);
   const marketplace = normalizarTexto(marketplaceDetectado || marketplacePrincipal(linksExtraidos));
   let criados = 0;
+
+  const adminIgnorado = (Array.isArray(clientes) ? clientes : [clientes])
+    .some(cliente => normalizarTexto(typeof cliente === "string" ? cliente : cliente?.id || cliente?.clienteId || "").toLowerCase() === "admin");
+
+  if (adminIgnorado) {
+    console.log("[ENGINE-ADMIN-NAO-OPERACIONAL]", JSON.stringify({
+      eventoId,
+      motivo: "admin_nao_e_cliente_operacional",
+      jobCriado: false
+    }));
+  }
 
   for (const clienteId of clientesIds) {
     try {
@@ -140,5 +212,6 @@ async function limparJobsAntigosEngine({ antesDoId = 0, status = [] } = {}) {
 
 module.exports = {
   criarJobsParaClientes,
+  ignorarJobsAdminNaoOperacional,
   limparJobsAntigosEngine
 };

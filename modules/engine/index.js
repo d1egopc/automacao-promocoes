@@ -1,5 +1,5 @@
 const {
-  initEngineDatabase
+  initEngineDatabase: initEngineDatabaseBase
 } = require("./database");
 
 const {
@@ -8,8 +8,15 @@ const {
 
 const {
   criarJobsParaClientes,
+  ignorarJobsAdminNaoOperacional,
   limparJobsAntigosEngine
 } = require("./jobs.service");
+
+async function initEngineDatabase() {
+  const resultado = await initEngineDatabaseBase();
+  if (resultado?.ok) await ignorarJobsAdminNaoOperacional();
+  return resultado;
+}
 
 const {
   consultarEventosEngine,
@@ -37,6 +44,7 @@ module.exports = {
   initEngineDatabase,
   registrarEventoBruto,
   criarJobsParaClientes,
+  ignorarJobsAdminNaoOperacional,
   limparJobsAntigosEngine,
   consultarEventosEngine,
   consultarJobsEngine,
