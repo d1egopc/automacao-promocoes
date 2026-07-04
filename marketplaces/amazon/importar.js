@@ -33,6 +33,13 @@
 
     const html = await response.text();
     const jsonLd = extrairJsonLd(html);
+    const contextoEngine = config.contextoEngine || {};
+    const temCaptchaAuditoria = /captcha|captchacharacters|validateCaptcha/i.test(html);
+    const temRobotCheckAuditoria = /robot check|automated access|api-services-support@amazon|sorry[^<]{0,80}robot/i.test(html);
+    const temProductTitleAuditoria = /id=["']productTitle["']/i.test(html);
+    const temOgTitleAuditoria = Boolean(extrairMeta(html, "og:title"));
+    const temOgImageAuditoria = Boolean(extrairMeta(html, "og:image"));
+    const temDynamicImageAuditoria = /data-a-dynamic-image=["'][^"']+["']/i.test(html);
 
     function limparHtml(texto) {
       if (!texto) return "";
@@ -425,6 +432,26 @@
       temImagem: Boolean(imagem),
       origemImagem: imagemAmazon.origemImagem || "nenhuma",
       imagemPreview: String(corrigirImagemUrl(imagem) || imagem || "").slice(0, 140)
+    }));
+
+    console.log("[AMZ-HTML-AUDITORIA]", JSON.stringify({
+      clienteId: contextoEngine.clienteId || config.clienteId || "",
+      jobId: contextoEngine.jobId || null,
+      urlOriginal: url,
+      urlFinal: response.url || url,
+      statusHttp: response.status,
+      tamanhoHtml: html.length,
+      temCaptcha: temCaptchaAuditoria,
+      temRobotCheck: temRobotCheckAuditoria,
+      temProductTitle: temProductTitleAuditoria,
+      temJsonLd: Boolean(jsonLd),
+      temOgTitle: temOgTitleAuditoria,
+      temOgImage: temOgImageAuditoria,
+      temDynamicImage: temDynamicImageAuditoria,
+      tituloExtraido: tituloLimpo,
+      precoAtual: preco || "",
+      temImagem: Boolean(corrigirImagemUrl(imagem) || imagem),
+      origemImagem: imagemAmazon.origemImagem || "nenhuma"
     }));
 
     let cupom = "";
