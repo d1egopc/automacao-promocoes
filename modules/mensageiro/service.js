@@ -180,7 +180,7 @@ async function executarRespostaRapida({ sock, jid, resposta, delaySegundos = 0 }
   return true;
 }
 
-async function executarRespostaAtendimento({ sock, jid, resposta } = {}) {
+async function executarRespostaAtendimento({ sock, jid, resposta, clienteId = "", sessaoId = "" } = {}) {
   const conteudo = String(resposta?.conteudo || "").trim();
   const tipo = String(resposta?.tipo || "texto");
 
@@ -222,10 +222,24 @@ async function executarRespostaAtendimento({ sock, jid, resposta } = {}) {
   }
 
   if (tipo === "link") {
+    console.log("[MENSAGEIRO-ATENDIMENTO-ENVIO-TENTANDO] " + JSON.stringify({
+      clienteId,
+      sessaoId,
+      jid,
+      tipo: "texto",
+      conteudoPreview: conteudo.slice(0, 120)
+    }));
     await sock.sendMessage(jid, { text: conteudo });
     return true;
   }
 
+  console.log("[MENSAGEIRO-ATENDIMENTO-ENVIO-TENTANDO] " + JSON.stringify({
+    clienteId,
+    sessaoId,
+    jid,
+    tipo: "texto",
+    conteudoPreview: conteudo.slice(0, 120)
+  }));
   await sock.sendMessage(jid, { text: conteudo });
   return true;
 }
@@ -292,7 +306,7 @@ async function tratarMensagemAtendimentoV1({
 
   try {
     for (const resposta of gatilho.respostas || []) {
-      const enviada = await executarRespostaAtendimento({ sock, jid, resposta });
+      const enviada = await executarRespostaAtendimento({ sock, jid, resposta, clienteId, sessaoId });
       if (enviada) respostasEnviadas.push(`${resposta.tipo}:${String(resposta.conteudo || "").slice(0, 80)}`);
     }
 
@@ -307,16 +321,24 @@ async function tratarMensagemAtendimentoV1({
       status: respostasEnviadas.length ? "enviado" : "sem_resposta"
     });
 
-    console.log("[MENSAGEIRO-ATENDIMENTO] gatilho enviado", {
+    console.log("[MENSAGEIRO-ATENDIMENTO-ENVIADO] " + JSON.stringify({
       clienteId,
       sessaoId,
       jid,
       gatilhoId: gatilho.id,
+      gatilhoNome: gatilho.nome,
       respostas: respostasEnviadas.length
-    });
+    }));
 
     return true;
   } catch (e) {
+    console.log("[MENSAGEIRO-ATENDIMENTO-ERRO] " + JSON.stringify({
+      clienteId,
+      sessaoId,
+      jid,
+      erro: e.message
+    }));
+
     registrarHistoricoSeguro(clienteId, {
       origem: jid.endsWith("@g.us") ? "grupo" : "privado",
       contato: jid,
