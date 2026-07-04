@@ -21,6 +21,51 @@ function extrairValorMlHtml(html = "", campos = []) {
   return "";
 }
 
+function extrairMlbUrl(url = "") {
+  return String(url || "").match(/\bMLB-?(\d{6,})\b/i)?.[1] || "";
+}
+
+function urlMercadoLivreCurtaSemSlug(url = "") {
+  try {
+    const parsed = new URL(String(url || ""));
+    return (
+      parsed.hostname.toLowerCase() === "produto.mercadolivre.com.br" &&
+      /^\/MLB-?\d+\/?$/i.test(parsed.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function extrairUrlCanonicaMercadoLivre(html = "") {
+  const canonical =
+    html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)?.[1] ||
+    html.match(/<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i)?.[1] ||
+    extrairMeta(html, "og:url") ||
+    "";
+
+  return htmlDecode(canonical).trim();
+}
+
+function urlCanonicaMercadoLivreSegura(urlCandidata = "", urlOriginal = "") {
+  try {
+    const candidata = new URL(String(urlCandidata || ""));
+    const mlbOriginal = extrairMlbUrl(urlOriginal);
+    const mlbCandidata = extrairMlbUrl(candidata.toString());
+
+    return Boolean(
+      candidata.protocol === "https:" &&
+      candidata.hostname.toLowerCase().endsWith("mercadolivre.com.br") &&
+      mlbOriginal &&
+      mlbCandidata &&
+      mlbOriginal === mlbCandidata &&
+      !urlMercadoLivreCurtaSemSlug(candidata.toString())
+    );
+  } catch {
+    return false;
+  }
+}
+
 function normalizarNumeroMercadoLivre(valor = "") {
   if (typeof valor === "number") {
     return Number.isFinite(valor) && valor > 0 ? valor : 0;
@@ -444,7 +489,7 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       temCookies: !!cookies
     });
 
-    const response = await fetch(url, {
+    const fetchOptions = {
       method: "GET",
       redirect: "follow",
       headers: {
@@ -464,7 +509,8 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
         "Referer": "https://www.google.com/",
         ...(cookies ? { Cookie: cookies } : {})
       }
-    });
+    };
+    let response = await fetch(url, fetchOptions);
 
     perf.etapa("busca_abre_link", {
       httpStatus: response.status,
@@ -479,7 +525,37 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       urlFinal: response.url
     });
 
-    const html = await response.text();
+    let html = await response.text();
+
+    if (urlMercadoLivreCurtaSemSlug(url)) {
+      let urlFinal = response.url || url;
+      let resolveu = !urlMercadoLivreCurtaSemSlug(urlFinal);
+
+      if (!resolveu) {
+        const urlCanonica = extrairUrlCanonicaMercadoLivre(html);
+
+        if (urlCanonicaMercadoLivreSegura(urlCanonica, url)) {
+          try {
+            const responseCanonica = await fetch(urlCanonica, fetchOptions);
+            const htmlCanonico = await responseCanonica.text();
+
+            if (responseCanonica.status < 400 && htmlCanonico) {
+              response = responseCanonica;
+              html = htmlCanonico;
+              urlFinal = responseCanonica.url || urlCanonica;
+              resolveu = !urlMercadoLivreCurtaSemSlug(urlCanonica) || !urlMercadoLivreCurtaSemSlug(urlFinal);
+            }
+          } catch {}
+        }
+      }
+
+      console.log("[ML-LINK-RESOLVIDO]", JSON.stringify({
+        urlOriginal: url,
+        urlFinal: response.url || urlFinal || url,
+        resolveu
+      }));
+    }
+
     const jsonLd = extrairJsonLd(html);
     const tituloJsonLd = jsonLd?.name || "";
     const tituloOg = extrairMeta(html, "og:title");
