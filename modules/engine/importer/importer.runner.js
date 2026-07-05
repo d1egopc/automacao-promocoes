@@ -6,6 +6,7 @@ const {
   carregarLinksEvento,
   gravarOfertaEngine,
   marcarJobOfertaCriada,
+  marcarJobRetidaV2,
   marcarJobErroImportacao
 } = require("./importer.service");
 const { limitarJobs } = require("../processor.service");
@@ -133,6 +134,26 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
     return finalizarErro(job, gravacao.motivo || "oferta_gravacao_falhou", { erro: gravacao.erro || "" }, resumo);
   }
 
+  if (gravacao.retidaV2) {
+    const motivoV2 = gravacao.motivoV2 || "retida_v2";
+    const jobRetido = await marcarJobRetidaV2(job.id, gravacao.ofertaId, motivoV2);
+    if (!jobRetido.ok) {
+      return finalizarErro(job, "falha_marcar_retida_v2", {
+        ofertaId: gravacao.ofertaId,
+        motivoV2,
+        erro: jobRetido.erro || ""
+      }, resumo);
+    }
+    await registrarEtapaImportacao(job.id, "importacao_finalizada", "retida", motivoV2, {
+      ofertaId: gravacao.ofertaId,
+      marketplace,
+      statusV2: gravacao.statusV2 || "retida"
+    });
+
+    if (resumo) resumo.retidasV2 = (resumo.retidasV2 || 0) + 1;
+    return { ok: true, retidaV2: true, ofertaId: gravacao.ofertaId, motivo: motivoV2 };
+  }
+
   await marcarJobOfertaCriada(job.id, gravacao.ofertaId);
   await registrarEtapaImportacao(job.id, "importacao_finalizada", "ok", "oferta_criada", {
     ofertaId: gravacao.ofertaId,
@@ -149,6 +170,7 @@ async function importarJobsProntosEngine({ limite = 10, marketplace = "", deps =
     ok: true,
     processados: 0,
     ofertaCriada: 0,
+    retidasV2: 0,
     erros: 0,
     motivos: {}
   };

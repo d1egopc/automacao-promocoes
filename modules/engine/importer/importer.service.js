@@ -290,8 +290,9 @@ function mapearOfertaMemoria(row = {}) {
     valorEfetivoCentavos: inteligenciaV2.valorEfetivoCentavos ?? null,
     valorEfetivoOrigem: inteligenciaV2.valorEfetivoOrigem || "",
     valorEfetivoDetalhes: inteligenciaV2.valorEfetivoDetalhes || {},
+    status: row.status || "",
     capturadaEm: row.capturada_em || row.criada_em || "",
-    criadaEm: row.criada_em || "",
+    criadaEm: row.memoria_em || row.criada_em || "",
     metadata: row.metadata || {}
   };
 
@@ -315,13 +316,18 @@ async function buscarMemoriaAnterioresEngine(oferta = {}, job = {}) {
       jobId: job.id,
       clienteId,
       marketplace,
+      memoriaDisponivel: false,
       memoria: "sem_historico",
       totalMemoriaCandidatos: 0,
       totalMemoriaAnteriores: 0,
       motivoMemoria: !clienteId ? "cliente_id_ausente" : "marketplace_ausente",
       produtoIdDetectado: identidadeAtual.produtoIdDetectado
     }));
-    return [];
+    return {
+      memoriaDisponivel: false,
+      memoria: [],
+      motivo: !clienteId ? "cliente_id_ausente" : "marketplace_ausente"
+    };
   }
 
   const resultado = await queryEngine(
@@ -329,10 +335,21 @@ async function buscarMemoriaAnterioresEngine(oferta = {}, job = {}) {
             o.preco, o.preco_original, o.cupom, o.tipo_cupom,
             o.beneficio_extra, o.link_original, o.link_expandido,
             o.link_afiliado, o.categoria, o.score, o.prioridade,
-            ${campoMetadata}, o.capturada_em, o.criada_em, j.cliente_id
+            ${campoMetadata}, o.status, o.capturada_em, o.criada_em,
+            COALESCE(publicacao.publicada_em, o.criada_em) AS memoria_em,
+            j.cliente_id
        FROM engine_ofertas o
        JOIN engine_jobs_cliente j ON j.oferta_id = o.id
+       LEFT JOIN LATERAL (
+         SELECT MAX(p.criado_em) AS publicada_em
+           FROM engine_processamentos p
+          WHERE p.job_id = j.id
+            AND p.etapa = 'distribuicao_final'
+            AND p.status = 'ok'
+            AND p.motivo = 'adicionada_fila'
+       ) publicacao ON TRUE
       WHERE j.cliente_id = $1
+        AND o.status = 'fila'
         AND CASE
               WHEN LOWER(REGEXP_REPLACE(COALESCE(o.marketplace, ''), '[[:space:]_-]+', '', 'g')) IN ('ml', 'mercadolivre') THEN 'mercadolivre'
               WHEN LOWER(REGEXP_REPLACE(COALESCE(o.marketplace, ''), '[[:space:]_-]+', '', 'g')) LIKE '%amazon%' THEN 'amazon'
@@ -343,21 +360,26 @@ async function buscarMemoriaAnterioresEngine(oferta = {}, job = {}) {
               ELSE LOWER(REGEXP_REPLACE(COALESCE(o.marketplace, ''), '[[:space:]_-]+', '', 'g'))
             END = $2
         AND ($3::bigint IS NULL OR o.id <> $3::bigint)
-        AND COALESCE(o.criada_em, o.capturada_em, NOW()) >= NOW() - INTERVAL '30 days'
-      ORDER BY COALESCE(o.criada_em, o.capturada_em) DESC NULLS LAST, o.id DESC
+        AND COALESCE(publicacao.publicada_em, o.criada_em) >= NOW() - INTERVAL '30 days'
+      ORDER BY COALESCE(publicacao.publicada_em, o.criada_em) DESC NULLS LAST, o.id DESC
       LIMIT 300`,
     [clienteId, marketplace, job.oferta_id || null]
   );
 
   if (!resultado.ok) {
-    console.log("[ENGINE-V2-MEMORIA-ERRO]", {
+    console.log("[ENGINE-V2-MEMORIA-ERRO]", JSON.stringify({
       jobId: job.id,
       clienteId,
       marketplace,
+      memoriaDisponivel: false,
       motivo: resultado.motivo || "query_falhou",
       erro: resultado.erro || ""
-    });
-    return [];
+    }));
+    return {
+      memoriaDisponivel: false,
+      memoria: [],
+      motivo: "erro_consulta_memoria"
+    };
   }
 
   const memoria = resultado.resultado.rows.map(mapearOfertaMemoria);
@@ -365,22 +387,29 @@ async function buscarMemoriaAnterioresEngine(oferta = {}, job = {}) {
     jobId: job.id,
     clienteId,
     marketplace,
+    memoriaDisponivel: true,
     memoria: memoria.length ? "historico_carregado" : "sem_historico",
     totalMemoriaCandidatos: memoria.length,
     totalMemoriaAnteriores: memoria.length,
-    motivoMemoria: memoria.length ? "historico_cliente_marketplace_30d" : "sem_historico_cliente_marketplace_30d",
+    motivoMemoria: memoria.length ? "historico_operacional_fila_30d" : "sem_historico_operacional_fila_30d",
     produtoIdDetectado: identidadeAtual.produtoIdDetectado,
     tipoIdentidade: identidadeAtual.tipoIdentidade,
     metadataDisponivel: usarMetadata,
+    dataMemoriaOrigem: "engine_processamentos.distribuicao_final; fallback engine_ofertas.criada_em",
     ofertaAtualIdExcluida: job.oferta_id || null
   }));
 
-  return memoria;
+  return {
+    memoriaDisponivel: true,
+    memoria,
+    motivo: memoria.length ? "historico_operacional_fila_30d" : "sem_historico_operacional_fila_30d"
+  };
 }
 
 async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada = {}, job = {}) {
   try {
-    const memoriaCandidatos = await buscarMemoriaAnterioresEngine(oferta, job);
+    const consultaMemoria = await buscarMemoriaAnterioresEngine(oferta, job);
+    const memoriaCandidatos = Array.isArray(consultaMemoria.memoria) ? consultaMemoria.memoria : [];
     const produtoMetadata = objetoSeguro(ofertaEntrada?.metadata?.produto);
     const resultadoV2 = avaliarOfertaUniversal({
       clienteId: job.cliente_id || job.clienteId || "",
@@ -421,7 +450,9 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       clienteId: job.cliente_id || job.clienteId || "",
       origem: "engine_importer",
       exigirLinkAfiliado: true,
-      memoriaAnteriores: memoriaCandidatos
+      memoriaAnteriores: memoriaCandidatos,
+      memoriaDisponivel: consultaMemoria.memoriaDisponivel === true,
+      memoriaMotivoIndisponivel: consultaMemoria.motivo || ""
     });
 
     const scoreCalculadoV2 = normalizarNumero(resultadoV2.score?.score ?? resultadoV2.score);
@@ -437,6 +468,7 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       clienteId: job.cliente_id || job.clienteId || "",
       marketplace: oferta.marketplace || "",
       produtoIdDetectado: memoriaV2.produtoIdDetectado || "",
+      memoriaDisponivel: memoriaV2.memoriaDisponivel === true,
       totalMemoriaCandidatos,
       totalMemoriaCompativeis: memoriaV2.totalMemoriaCompativeis || 0,
       totalMemoriaJanela2h: memoriaV2.totalMemoriaJanela2h || 0,
@@ -457,7 +489,8 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       valorEfetivoComprovado: valorEfetivoDetalhes.comprovado === true,
       score: scoreV2,
       prioridade: prioridadeV2,
-      status: resultadoV2.status || ""
+      status: resultadoV2.status || "",
+      motivoDecisao: resultadoV2.motivo || ""
     }));
 
     return {
@@ -469,7 +502,7 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       },
       metadata: {
         inteligenciaUniversalV2: {
-          modo: "sombra",
+          modo: "oficial",
           ok: resultadoV2.ok === true,
           status: resultadoV2.status || "",
           motivo: resultadoV2.motivo || "",
@@ -480,8 +513,10 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
           valorEfetivo: resultadoV2.valorEfetivo ?? null,
           valorEfetivoCentavos: resultadoV2.valorEfetivoCentavos ?? null,
           valorEfetivoOrigem: resultadoV2.valorEfetivoOrigem || "",
+          valorEfetivoComprovado: valorEfetivoDetalhes.comprovado === true,
           valorEfetivoDetalhes,
           memoria: memoriaV2,
+          memoriaDisponivel: memoriaV2.memoriaDisponivel === true,
           destino: resultadoV2.destino || {},
           templateInput: resultadoV2.templateInput || {},
           totalMemoriaCandidatos,
@@ -492,6 +527,16 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
           menorValorEfetivoJanela: memoriaV2.menorValorEfetivoJanela ?? null,
           memoriaOficialStatus: memoriaV2.memoriaOficialStatus || "neutra",
           memoriaOficialMotivo: memoriaV2.memoriaOficialMotivo || "",
+          memoriaOficial: {
+            disponivel: memoriaV2.memoriaDisponivel === true,
+            status: memoriaV2.memoriaOficialStatus || "neutra",
+            motivo: memoriaV2.memoriaOficialMotivo || "",
+            totalCandidatos: totalMemoriaCandidatos,
+            totalCompativeis: memoriaV2.totalMemoriaCompativeis || 0,
+            totalJanela2h: memoriaV2.totalMemoriaJanela2h || 0,
+            valorEfetivoAtual: memoriaV2.valorEfetivoAtual ?? null,
+            menorValorEfetivoJanela: memoriaV2.menorValorEfetivoJanela ?? null
+          },
           memoriaOficialShadowStatus: memoriaV2.memoriaOficialShadowStatus || "neutra",
           memoriaOficialShadowMotivo: memoriaV2.memoriaOficialShadowMotivo || "",
           motivoMemoria: memoriaV2.motivoMemoria || memoriaV2.motivo || "",
@@ -516,23 +561,40 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       }
     };
   } catch (err) {
-    console.log("[ENGINE-V2-SOMBRA-ERRO]", {
+    console.log("[ENGINE-V2-ERRO]", JSON.stringify({
       jobId: job.id,
       clienteId: job.cliente_id || job.clienteId || "",
       marketplace: oferta.marketplace || "",
       erro: err.message
-    });
+    }));
 
     return {
       ok: false,
       oferta: { ...oferta, prioridade: 0 },
       metadata: {
         inteligenciaUniversalV2: {
-          modo: "sombra",
+          modo: "oficial",
           ok: false,
-          status: "erro_sombra",
-          motivo: "erro_sombra_v2",
-          motivoDecisao: "erro_sombra_v2",
+          status: "retida",
+          motivo: "erro_avaliacao_v2",
+          motivoDecisao: "erro_avaliacao_v2",
+          memoriaDisponivel: false,
+          memoriaOficialStatus: "indisponivel",
+          memoriaOficialMotivo: "erro_avaliacao_v2",
+          memoriaOficial: {
+            disponivel: false,
+            status: "indisponivel",
+            motivo: "erro_avaliacao_v2",
+            totalCandidatos: 0,
+            totalCompativeis: 0,
+            totalJanela2h: 0,
+            valorEfetivoAtual: null,
+            menorValorEfetivoJanela: null
+          },
+          valorEfetivo: null,
+          valorEfetivoOrigem: "erro_avaliacao_v2",
+          valorEfetivoComprovado: false,
+          valorEfetivoDetalhes: { comprovado: false },
           erro: err.message
         }
       }
@@ -563,6 +625,12 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       motivoSemImagem: oferta.imagem ? "" : imagemAnterior.motivo
     }
   };
+  const inteligenciaV2 = objetoSeguro(metadataFinal.inteligenciaUniversalV2);
+  const retidaV2 = inteligenciaV2.status === "retida" || sombraV2.ok === false;
+  const statusPersistencia = retidaV2 ? "retida_v2" : "importada";
+  const motivoPersistencia = retidaV2
+    ? (inteligenciaV2.motivoDecisao || inteligenciaV2.motivo || "retida_v2")
+    : null;
   const valores = [
     job.evento_id,
     link?.id || null,
@@ -581,7 +649,9 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     oferta.categoria,
     oferta.score,
     oferta.prioridade || 0,
-    evento?.capturado_em || new Date()
+    evento?.capturado_em || new Date(),
+    statusPersistencia,
+    motivoPersistencia
   ];
 
   let resultado;
@@ -611,12 +681,12 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
                 score = $16,
                 prioridade = $17,
                 origem = 'engine_importer',
-                status = 'importada',
-                motivo_status = NULL,
+                status = $19,
+                motivo_status = $20,
                 capturada_em = $18,
-                metadata = $19::jsonb,
+                metadata = $21::jsonb,
                 atualizada_em = NOW()
-          WHERE id = $20
+          WHERE id = $22
           RETURNING id, uuid`,
         [...valores, metadataOferta, job.oferta_id]
       );
@@ -642,11 +712,11 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
                 score = $16,
                 prioridade = $17,
                 origem = 'engine_importer',
-                status = 'importada',
-                motivo_status = NULL,
+                status = $19,
+                motivo_status = $20,
                 capturada_em = $18,
                 atualizada_em = NOW()
-          WHERE id = $19
+          WHERE id = $21
           RETURNING id, uuid`,
         [...valores, job.oferta_id]
       );
@@ -659,7 +729,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
          imagem, link_original, link_expandido, link_afiliado, categoria,
          score, prioridade, origem, status, motivo_status, capturada_em, metadata
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'BRL', $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'engine_importer', 'importada', NULL, $18, $19::jsonb)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'BRL', $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'engine_importer', $19, $20, $18, $21::jsonb)
        RETURNING id, uuid`,
       [...valores, metadataOferta]
     );
@@ -671,7 +741,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
          imagem, link_original, link_expandido, link_afiliado, categoria,
          score, prioridade, origem, status, motivo_status, capturada_em
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'BRL', $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'engine_importer', 'importada', NULL, $18)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'BRL', $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'engine_importer', $19, $20, $18)
        RETURNING id, uuid`,
       valores
     );
@@ -707,6 +777,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       status: metadataFinal.inteligenciaUniversalV2.status,
       motivoDecisao: metadataFinal.inteligenciaUniversalV2.motivoDecisao,
       memoria: metadataFinal.inteligenciaUniversalV2.memoria?.motivo || "",
+      memoriaDisponivel: metadataFinal.inteligenciaUniversalV2.memoriaDisponivel === true,
       totalMemoriaCandidatos: metadataFinal.inteligenciaUniversalV2.totalMemoriaCandidatos || 0,
       totalMemoriaAnteriores: metadataFinal.inteligenciaUniversalV2.totalMemoriaAnteriores || 0,
       totalMemoriaCompativeis: metadataFinal.inteligenciaUniversalV2.totalMemoriaCompativeis || 0,
@@ -727,12 +798,21 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       valorEfetivo: metadataFinal.inteligenciaUniversalV2.valorEfetivo ?? null,
       valorEfetivoCentavos: metadataFinal.inteligenciaUniversalV2.valorEfetivoCentavos ?? null,
       valorEfetivoOrigem: metadataFinal.inteligenciaUniversalV2.valorEfetivoOrigem || "",
+      valorEfetivoComprovado: metadataFinal.inteligenciaUniversalV2.valorEfetivoComprovado === true,
       valorEfetivoDetalhes: metadataFinal.inteligenciaUniversalV2.valorEfetivoDetalhes || {}
     } : null,
-    status: "importada",
+    status: statusPersistencia,
     atualizada: Boolean(job.oferta_id)
   });
-  return { ok: true, ofertaId, ofertaUuid: resultado.resultado.rows[0]?.uuid, oferta };
+  return {
+    ok: true,
+    ofertaId,
+    ofertaUuid: resultado.resultado.rows[0]?.uuid,
+    oferta,
+    retidaV2,
+    statusV2: inteligenciaV2.status || "",
+    motivoV2: motivoPersistencia || ""
+  };
 }
 async function marcarJobOfertaCriada(jobId, ofertaId) {
   const resultado = await queryEngine(
@@ -745,6 +825,22 @@ async function marcarJobOfertaCriada(jobId, ofertaId) {
 
   if (!resultado.ok) {
     logEngineImporterErro({ jobId, etapa: "marcar_oferta_criada", motivo: resultado.motivo, erro: resultado.erro || "" });
+  }
+
+  return resultado;
+}
+
+async function marcarJobRetidaV2(jobId, ofertaId, motivo = "retida_v2") {
+  const resultado = await queryEngine(
+    `UPDATE engine_jobs_cliente
+        SET status = 'retida_v2', oferta_id = $2, motivo_final = $3, atualizado_em = NOW()
+      WHERE id = $1
+      RETURNING id, status, oferta_id, motivo_final`,
+    [jobId, ofertaId, motivo || "retida_v2"]
+  );
+
+  if (!resultado.ok) {
+    logEngineImporterErro({ jobId, etapa: "marcar_retida_v2", motivo: resultado.motivo, erro: resultado.erro || "" });
   }
 
   return resultado;
@@ -763,6 +859,7 @@ module.exports = {
   carregarLinksEvento,
   gravarOfertaEngine,
   marcarJobOfertaCriada,
+  marcarJobRetidaV2,
   marcarJobErroImportacao,
   normalizarOfertaImportada
 };
