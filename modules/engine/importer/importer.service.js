@@ -263,6 +263,9 @@ function normalizarMarketplaceMemoria(valor = "") {
 }
 
 function mapearOfertaMemoria(row = {}) {
+  const inteligenciaV2 = row?.metadata?.inteligenciaUniversalV2 && typeof row.metadata.inteligenciaUniversalV2 === "object"
+    ? row.metadata.inteligenciaUniversalV2
+    : {};
   const oferta = {
     id: row.id,
     clienteId: row.cliente_id || "",
@@ -283,6 +286,10 @@ function mapearOfertaMemoria(row = {}) {
     categoria: row.categoria || "",
     score: row.score,
     prioridade: row.prioridade,
+    valorEfetivo: inteligenciaV2.valorEfetivo ?? null,
+    valorEfetivoCentavos: inteligenciaV2.valorEfetivoCentavos ?? null,
+    valorEfetivoOrigem: inteligenciaV2.valorEfetivoOrigem || "",
+    valorEfetivoDetalhes: inteligenciaV2.valorEfetivoDetalhes || {},
     capturadaEm: row.capturada_em || row.criada_em || "",
     criadaEm: row.criada_em || "",
     metadata: row.metadata || {}
@@ -431,6 +438,12 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       marketplace: oferta.marketplace || "",
       produtoIdDetectado: memoriaV2.produtoIdDetectado || "",
       totalMemoriaCandidatos,
+      totalMemoriaCompativeis: memoriaV2.totalMemoriaCompativeis || 0,
+      totalMemoriaJanela2h: memoriaV2.totalMemoriaJanela2h || 0,
+      valorEfetivoAtual: memoriaV2.valorEfetivoAtual ?? null,
+      menorValorEfetivoJanela: memoriaV2.menorValorEfetivoJanela ?? null,
+      memoriaOficialShadowStatus: memoriaV2.memoriaOficialShadowStatus || "neutra",
+      memoriaOficialShadowMotivo: memoriaV2.memoriaOficialShadowMotivo || "",
       motivoMemoria: memoriaV2.motivoMemoria || memoriaV2.motivo || "",
       repeticaoIdentica: memoriaV2.repeticaoIdentica === true,
       historicoCompativelSemMelhoria: memoriaV2.historicoCompativelSemMelhoria === true,
@@ -471,6 +484,12 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
           templateInput: resultadoV2.templateInput || {},
           totalMemoriaCandidatos,
           totalMemoriaAnteriores: totalMemoriaCandidatos,
+          totalMemoriaCompativeis: memoriaV2.totalMemoriaCompativeis || 0,
+          totalMemoriaJanela2h: memoriaV2.totalMemoriaJanela2h || 0,
+          valorEfetivoAtual: memoriaV2.valorEfetivoAtual ?? null,
+          menorValorEfetivoJanela: memoriaV2.menorValorEfetivoJanela ?? null,
+          memoriaOficialShadowStatus: memoriaV2.memoriaOficialShadowStatus || "neutra",
+          memoriaOficialShadowMotivo: memoriaV2.memoriaOficialShadowMotivo || "",
           motivoMemoria: memoriaV2.motivoMemoria || memoriaV2.motivo || "",
           produtoIdDetectado: memoriaV2.produtoIdDetectado || "",
           precoCaiu: memoriaV2.precoCaiu === true,
@@ -686,6 +705,12 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       memoria: metadataFinal.inteligenciaUniversalV2.memoria?.motivo || "",
       totalMemoriaCandidatos: metadataFinal.inteligenciaUniversalV2.totalMemoriaCandidatos || 0,
       totalMemoriaAnteriores: metadataFinal.inteligenciaUniversalV2.totalMemoriaAnteriores || 0,
+      totalMemoriaCompativeis: metadataFinal.inteligenciaUniversalV2.totalMemoriaCompativeis || 0,
+      totalMemoriaJanela2h: metadataFinal.inteligenciaUniversalV2.totalMemoriaJanela2h || 0,
+      valorEfetivoAtual: metadataFinal.inteligenciaUniversalV2.valorEfetivoAtual ?? null,
+      menorValorEfetivoJanela: metadataFinal.inteligenciaUniversalV2.menorValorEfetivoJanela ?? null,
+      memoriaOficialShadowStatus: metadataFinal.inteligenciaUniversalV2.memoriaOficialShadowStatus || "neutra",
+      memoriaOficialShadowMotivo: metadataFinal.inteligenciaUniversalV2.memoriaOficialShadowMotivo || "",
       motivoMemoria: metadataFinal.inteligenciaUniversalV2.motivoMemoria || "",
       produtoIdDetectado: metadataFinal.inteligenciaUniversalV2.produtoIdDetectado || "",
       precoCaiu: metadataFinal.inteligenciaUniversalV2.precoCaiu === true,
