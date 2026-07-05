@@ -9,6 +9,30 @@ const {
 const filaOfertas = require("../../../utils/fila-ofertas");
 const destinosUtils = require("../../../utils/destinos");
 
+let engineOfertasMetadataDisponivel = null;
+
+async function engineOfertasTemMetadataDistribuidor() {
+  if (engineOfertasMetadataDisponivel !== null) return engineOfertasMetadataDisponivel;
+  const pool = getEnginePool();
+  if (!pool) return false;
+
+  try {
+    const resultado = await pool.query(
+      `SELECT EXISTS (
+         SELECT 1
+           FROM information_schema.columns
+          WHERE table_name = 'engine_ofertas'
+            AND column_name = 'metadata'
+       ) AS existe`
+    );
+    engineOfertasMetadataDisponivel = Boolean(resultado.rows[0]?.existe);
+  } catch (_) {
+    engineOfertasMetadataDisponivel = false;
+  }
+
+  return engineOfertasMetadataDisponivel;
+}
+
 
 function logQueryErroDistribuidor({ etapa = "", ofertaId = null, jobId = null, clienteId = "", err = null, resultado = {}, queryResumo = "" } = {}) {
   console.log("[ENGINE-DISTRIBUIDOR-QUERY-ERRO]", {
@@ -238,6 +262,9 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
   }
 
   params.push(limitarDistribuicao(limite));
+  const campoMetadata = await engineOfertasTemMetadataDistribuidor()
+    ? "o.metadata"
+    : "'{}'::jsonb AS metadata";
 
   const resultado = await queryDistribuidor({
     etapa: "buscar_ofertas_distribuiveis",
@@ -246,6 +273,7 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
             o.preco, o.preco_original, o.cupom, o.tipo_cupom, o.beneficio_extra,
             o.imagem, o.link_original, o.link_expandido,
             o.link_afiliado, o.categoria, o.score, o.status, o.motivo_status,
+            ${campoMetadata},
             o.criada_em, o.atualizada_em, j.id AS job_id, j.cliente_id
        FROM engine_ofertas o
        JOIN engine_jobs_cliente j ON j.oferta_id = o.id
@@ -374,6 +402,21 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
   const clienteId = normalizarTexto(oferta.cliente_id);
   const deps = contexto.deps || {};
   const itemFila = montarItemFilaEngine(oferta);
+  const imagemAuditoria = oferta.metadata?.imagemAuditoria && typeof oferta.metadata.imagemAuditoria === "object"
+    ? oferta.metadata.imagemAuditoria
+    : {};
+
+  console.log("[OFERTA-IMAGEM-AUDITORIA]", JSON.stringify({
+    ofertaId: oferta.id,
+    marketplace: normalizarMarketplace(oferta.marketplace),
+    titulo: normalizarTexto(oferta.titulo || ""),
+    temImagemImporter: imagemAuditoria.temImagemImporter === true || (!Object.keys(imagemAuditoria).length && Boolean(oferta.imagem)),
+    temImagemEngine: Boolean(oferta.imagem),
+    temImagemFila: Boolean(itemFila.imagem),
+    campoImagemUsado: imagemAuditoria.campoImagemUsado || (itemFila.imagem ? "engine_ofertas.imagem" : ""),
+    origemImagem: imagemAuditoria.origemImagem || (itemFila.imagem ? "engine_ofertas.imagem" : "nenhuma"),
+    motivoSemImagem: itemFila.imagem ? "" : (imagemAuditoria.motivoSemImagem || "engine_ofertas_sem_imagem")
+  }));
 
   console.log("[ENGINE-DISTRIBUIDOR-IMAGEM-AUDITORIA]", {
     etapa: "montar_item_fila",
