@@ -266,6 +266,7 @@ function calcularMemoriaOficialShadow(ofertaUniversal = {}, anteriores = []) {
   }
 
   return {
+    memoriaDisponivel: true,
     totalMemoriaCandidatos: anteriores.length,
     totalMemoriaCompativeis: compativeis.length,
     totalMemoriaJanela2h: janela2h.length,
@@ -330,7 +331,61 @@ function aplicarMemoriaOficial(resultadoLegado = {}, memoriaOficialShadow = {}, 
   };
 }
 
+function memoriaOficialIndisponivel(ofertaUniversal = {}, motivo = "erro_consulta_memoria") {
+  const identidade = detectarIdentidadeProdutoUniversal(ofertaUniversal);
+  const memoriaLegada = {
+    bloquear: false,
+    motivo: "nao_avaliada_memoria_indisponivel",
+    repetida: false
+  };
+
+  return {
+    chave: chaveMemoriaUniversal(ofertaUniversal),
+    repetida: false,
+    bloquear: true,
+    motivo,
+    motivoMemoria: motivo,
+    produtoIdDetectado: identidade.produtoIdDetectado,
+    tipoIdentidade: identidade.tipoIdentidade,
+    memoriaDisponivel: false,
+    memoriaOficialStatus: "indisponivel",
+    memoriaOficialMotivo: motivo,
+    memoriaOficialShadowStatus: "indisponivel",
+    memoriaOficialShadowMotivo: motivo,
+    totalMemoriaCandidatos: 0,
+    totalMemoriaAnteriores: 0,
+    totalMemoriaCompativeis: 0,
+    totalMemoriaJanela2h: 0,
+    valorEfetivoAtual: ofertaUniversal.valorEfetivo ?? null,
+    menorValorEfetivoJanela: null,
+    precoCaiu: false,
+    cupomNovo: false,
+    beneficioMelhorou: false,
+    repeticaoIdentica: false,
+    historicoCompativelSemMelhoria: false,
+    memoriaLegada,
+    detalhes: { memoriaDisponivel: false, memoriaLegada },
+    logs: [{
+      etapa: "memoria",
+      status: "indisponivel",
+      motivo,
+      motivoMemoria: motivo,
+      memoriaDisponivel: false,
+      memoriaOficialStatus: "indisponivel",
+      memoriaOficialMotivo: motivo,
+      produtoIdDetectado: identidade.produtoIdDetectado,
+      totalMemoriaCandidatos: 0,
+      totalMemoriaCompativeis: 0,
+      totalMemoriaJanela2h: 0
+    }]
+  };
+}
+
 function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
+  if (contexto.memoriaDisponivel === false) {
+    return memoriaOficialIndisponivel(ofertaUniversal, contexto.memoriaMotivoIndisponivel || "erro_consulta_memoria");
+  }
+
   const chave = chaveMemoriaUniversal(ofertaUniversal);
   const anteriores = Array.isArray(contexto.memoriaAnteriores) ? contexto.memoriaAnteriores : [];
   const anterior = encontrarAnteriorRelevante(ofertaUniversal, anteriores);
