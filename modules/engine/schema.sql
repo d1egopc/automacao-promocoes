@@ -85,10 +85,13 @@ CREATE TABLE IF NOT EXISTS engine_ofertas (
   origem TEXT,
   status TEXT DEFAULT 'capturada',
   motivo_status TEXT,
+  metadata JSONB DEFAULT '{}'::jsonb,
   capturada_em TIMESTAMPTZ,
   criada_em TIMESTAMPTZ DEFAULT NOW(),
   atualizada_em TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE engine_ofertas ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS engine_jobs_cliente (
   id BIGSERIAL PRIMARY KEY,
