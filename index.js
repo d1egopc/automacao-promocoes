@@ -120,6 +120,10 @@ const filaOfertas = require("./utils/fila-ofertas");
 const destinosUtils = require("./utils/destinos");
 const integracoesUtils = require("./utils/integracoes");
 const radarCupomMensagem = require("./utils/radar-cupom-mensagem");
+const {
+  dominioRedirectPermitido,
+  resolverRedirectUniversal
+} = require("./modules/radar/redirect/redirect-resolver");
 const alertasIntegracoes = require("./utils/alertas-integracoes");
 const storageUtils = require("./utils/storage");
 
@@ -10282,9 +10286,8 @@ function dominioRadar(url = "") {
   }
 }
 
-function linkPromozoneRadar(url = "") {
-  const host = dominioRadar(url).replace(/^www\./, "");
-  return host === "promozone.ai" || host.endsWith(".promozone.ai");
+function linkRedirectPermitidoRadar(url = "") {
+  return dominioRedirectPermitido(url);
 }
 
 function linkMeliLaRadar(url = "") {
@@ -10390,142 +10393,92 @@ async function resolverLinkOriginalRadar(url = "") {
 
   const marketplaceDireto = dominioMarketplaceConhecidoRadar(capturada);
 
-  if (linkPromozoneRadar(capturada)) {
+  if (linkRedirectPermitidoRadar(capturada)) {
     const marketplacePromozoneSugerido = normalizarMarketplaceRadar(detectarMarketplaceRadarLink(capturada));
+    const redirect = await resolverRedirectUniversal(capturada, {
+      timeout: 4500,
+      maxRedirects: 5
+    });
+    const resolvida = redirect.urlFinal || "";
+    const marketplaceFinal = normalizarMarketplaceRadar(redirect.marketplaceDetectado || "");
+    const motivoFalha = redirect.metodo === "erro_http"
+      ? "promozone_redirect_bloqueado"
+      : "promozone_redirect_nao_resolvido";
+    const motivoLogFalha = redirect.metodo === "erro_http"
+      ? (redirect.motivo || motivoFalha)
+      : motivoFalha;
 
-    try {
-      const resposta = await axios.get(capturada, {
-        maxRedirects: 5,
-        timeout: 4500,
-        validateStatus: () => true,
-        responseType: "stream",
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
-        }
-      });
-
-      if (resposta.data?.destroy) resposta.data.destroy();
-
-      const resolvida =
-        resposta?.request?.res?.responseUrl ||
-        resposta?.request?._redirectable?._currentUrl ||
-        capturada;
-      const dominioFinal = dominioRadar(resolvida);
-      const marketplaceFinal =
-        dominioMarketplaceConhecidoRadar(resolvida) ||
-        normalizarMarketplaceRadar(detectarMarketplaceRadarLink(resolvida));
-
-      if (!marketplaceFinal || resolvida === capturada) {
-        console.log("[RADAR-REDIRECT-FALHOU]", JSON.stringify({
-          linkOriginal: capturada,
-          motivo: "promozone_redirect_nao_resolvido"
-        }));
-
-        logPromozoneRadar({
-          urlOriginal: capturada,
-          urlResolvida: resolvida || "",
-          marketplaceDetectado: marketplaceFinal || marketplacePromozoneSugerido || "",
-          redirectOk: false
-        });
-
-        logRedirectRadar({
-          urlOriginal: capturada,
-          urlFinal: resolvida || "",
-          dominioOriginal,
-          dominioFinal,
-          marketplaceDetectado: marketplaceFinal || marketplacePromozoneSugerido || "",
-          resolveu: false,
-          motivo: "promozone_redirect_nao_resolvido"
-        });
-
-        return {
-          ok: false,
-          motivo: "promozone_redirect_nao_resolvido",
-          motivoTecnico: "promozone_redirect_nao_resolvido",
-          urlCapturada: capturada,
-          urlResolvida: resolvida || "",
-          linkOriginalRadar: capturada,
-          linkResolvido: resolvida || "",
-          marketplaceReal: marketplaceFinal || marketplacePromozoneSugerido || "",
-          tipoLinkRadar: "promozone",
-          statusHttp: resposta.status || ""
-        };
-      }
-
-      const linkOriginalLimpo = limparUrlProdutoRadar(resolvida, marketplaceFinal) || resolvida;
-
-      console.log("[RADAR-REDIRECT-RESOLVIDO]", JSON.stringify({
+    if (!redirect.ok || !marketplaceFinal || !resolvida || resolvida === capturada) {
+      console.log("[RADAR-REDIRECT-FALHOU]", JSON.stringify({
         linkOriginal: capturada,
-        linkResolvido: linkOriginalLimpo,
-        marketplaceDetectado: marketplaceFinal,
-        status: "resolvido"
+        motivo: motivoLogFalha
       }));
 
       logPromozoneRadar({
         urlOriginal: capturada,
         urlResolvida: resolvida,
-        marketplaceDetectado: marketplaceFinal,
-        redirectOk: true
+        marketplaceDetectado: marketplaceFinal || marketplacePromozoneSugerido || "",
+        redirectOk: false
       });
-
       logRedirectRadar({
         urlOriginal: capturada,
         urlFinal: resolvida,
         dominioOriginal,
-        dominioFinal,
-        marketplaceDetectado: marketplaceFinal,
-        resolveu: true,
-        motivo: "promozone_resolvido_marketplace"
-      });
-
-      return {
-        ok: true,
-        urlCapturada: capturada,
-        urlResolvida: resolvida,
-        linkOriginalRadar: capturada,
-        linkResolvido: linkOriginalLimpo,
-        marketplaceReal: marketplaceFinal,
-        linkOriginalLimpo,
-        tipoLinkRadar: "promozone",
-        statusHttp: resposta.status || ""
-      };
-    } catch (e) {
-      console.log("[RADAR-REDIRECT-FALHOU]", JSON.stringify({
-        linkOriginal: capturada,
-        motivo: e.message || "promozone_redirect_bloqueado"
-      }));
-
-      logPromozoneRadar({
-        urlOriginal: capturada,
-        urlResolvida: "",
-        marketplaceDetectado: marketplacePromozoneSugerido || "",
-        redirectOk: false
-      });
-
-      logRedirectRadar({
-        urlOriginal: capturada,
-        urlFinal: "",
-        dominioOriginal,
-        dominioFinal: "",
-        marketplaceDetectado: marketplacePromozoneSugerido || "",
+        dominioFinal: dominioRadar(resolvida),
+        marketplaceDetectado: marketplaceFinal || marketplacePromozoneSugerido || "",
         resolveu: false,
-        motivo: e.message || "promozone_redirect_bloqueado"
+        motivo: motivoLogFalha
       });
 
       return {
         ok: false,
-        motivo: "promozone_redirect_bloqueado",
-        motivoTecnico: "promozone_redirect_bloqueado",
+        motivo: motivoFalha,
+        motivoTecnico: motivoFalha,
         urlCapturada: capturada,
+        urlResolvida: resolvida,
         linkOriginalRadar: capturada,
-        linkResolvido: "",
-        marketplaceReal: marketplacePromozoneSugerido || "",
+        linkResolvido: resolvida,
+        marketplaceReal: marketplaceFinal || marketplacePromozoneSugerido || "",
         tipoLinkRadar: "promozone",
-        erro: e.message
+        statusHttp: redirect.statusHttp || "",
+        erro: redirect.erro || ""
       };
     }
+
+    const linkOriginalLimpo = limparUrlProdutoRadar(resolvida, marketplaceFinal) || resolvida;
+    console.log("[RADAR-REDIRECT-RESOLVIDO]", JSON.stringify({
+      linkOriginal: capturada,
+      linkResolvido: linkOriginalLimpo,
+      marketplaceDetectado: marketplaceFinal,
+      status: "resolvido"
+    }));
+    logPromozoneRadar({
+      urlOriginal: capturada,
+      urlResolvida: resolvida,
+      marketplaceDetectado: marketplaceFinal,
+      redirectOk: true
+    });
+    logRedirectRadar({
+      urlOriginal: capturada,
+      urlFinal: resolvida,
+      dominioOriginal,
+      dominioFinal: dominioRadar(resolvida),
+      marketplaceDetectado: marketplaceFinal,
+      resolveu: true,
+      motivo: "promozone_resolvido_marketplace"
+    });
+
+    return {
+      ok: true,
+      urlCapturada: capturada,
+      urlResolvida: resolvida,
+      linkOriginalRadar: capturada,
+      linkResolvido: linkOriginalLimpo,
+      marketplaceReal: marketplaceFinal,
+      linkOriginalLimpo,
+      tipoLinkRadar: "promozone",
+      statusHttp: redirect.statusHttp || ""
+    };
   }
 
   if (linkMeliLaRadar(capturada)) {
@@ -11546,7 +11499,7 @@ async function prepararLinksRedirectEngineRadar(dados = {}) {
   const linksEngine = [];
 
   for (const link of linksCapturados) {
-    if (!linkPromozoneRadar(link)) {
+    if (!linkRedirectPermitidoRadar(link)) {
       linksEngine.push(link);
       continue;
     }
@@ -11588,7 +11541,7 @@ async function prepararLinksRedirectEngineRadar(dados = {}) {
 async function registrarEventoBrutoEngineRadar(dados = {}) {
   try {
     const linksDados = Array.isArray(dados.linksExtraidos) ? dados.linksExtraidos : [];
-    const temRedirectConhecido = linksDados.some(linkPromozoneRadar);
+    const temRedirectConhecido = linksDados.some(linkRedirectPermitidoRadar);
     const preparacao = temRedirectConhecido
       ? await prepararLinksRedirectEngineRadar(dados)
       : { dados, redirectsRadar: [] };
@@ -11707,7 +11660,7 @@ logDebug("ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚�
   texto: String(texto || "").slice(0, 250)
 });
 
-const temRedirectConhecidoRadar = links.some(linkPromozoneRadar);
+const temRedirectConhecidoRadar = links.some(linkRedirectPermitidoRadar);
 const registroEngineRadarPromise = registrarEventoBrutoEngineRadar({
   origem: "radar",
   origemTipo: origemTipoFinal,
@@ -11825,7 +11778,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
       url: link,
       grupo: grupoNomeTexto || grupoIdTexto
     });
-    if (linkPromozoneRadar(link)) {
+    if (linkRedirectPermitidoRadar(link)) {
       const redirect = registroEngineRadar?.redirectsRadar?.find(item => item.linkOriginalCapturado === link) || {};
       const registroOk = registroEngineRadar?.ok === true && redirect.status === "resolvido";
 
@@ -20230,6 +20183,8 @@ setInterval(() => {
   }
 
 }, 10 * 1000);
+
+
 
 
 
