@@ -374,6 +374,7 @@ async function buscarMemoriaAnterioresEngine(oferta = {}, job = {}) {
 async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada = {}, job = {}) {
   try {
     const memoriaCandidatos = await buscarMemoriaAnterioresEngine(oferta, job);
+    const produtoMetadata = objetoSeguro(ofertaEntrada?.metadata?.produto);
     const resultadoV2 = avaliarOfertaUniversal({
       clienteId: job.cliente_id || job.clienteId || "",
       titulo: oferta.titulo,
@@ -385,12 +386,23 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       cupom: oferta.cupom,
       cupomTipo: oferta.cupomTipo,
       tipoCupom: oferta.cupomTipo,
+      valorCupom: ofertaEntrada.valorCupom || ofertaEntrada.cupomValor || produtoMetadata.valorCupom || produtoMetadata.cupomValor || "",
+      percentualCupom: ofertaEntrada.percentualCupom || ofertaEntrada.cupomPercentual || produtoMetadata.percentualCupom || produtoMetadata.cupomPercentual || "",
+      precoPix: ofertaEntrada.precoPix || produtoMetadata.precoPix || "",
+      descontoPix: ofertaEntrada.descontoPix || produtoMetadata.descontoPix || "",
       beneficioTexto: ofertaEntrada.beneficioTexto || ofertaEntrada.beneficioExtra || ofertaEntrada.avisoCupom || "",
       beneficioExtra: ofertaEntrada.beneficioExtra || "",
       avisoCupom: ofertaEntrada.avisoCupom || "",
       parcelamento: ofertaEntrada.parcelamento || "",
       freteGratis: ofertaEntrada.freteGratis === true,
+      freteValor: ofertaEntrada.freteValor || ofertaEntrada.valorFrete || produtoMetadata.freteValor || produtoMetadata.valorFrete || "",
       cashback: ofertaEntrada.cashback || "",
+      cashbackValor: ofertaEntrada.cashbackValor || produtoMetadata.cashbackValor || "",
+      cashbackPercentual: ofertaEntrada.cashbackPercentual || produtoMetadata.cashbackPercentual || "",
+      beneficios: Array.isArray(ofertaEntrada.beneficios)
+        ? ofertaEntrada.beneficios
+        : (Array.isArray(produtoMetadata.beneficios) ? produtoMetadata.beneficios : []),
+      metadata: ofertaEntrada.metadata || {},
       imagem: oferta.imagem,
       linkOriginal: oferta.linkOriginal,
       linkExpandido: oferta.linkExpandido,
@@ -411,6 +423,7 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
     const prioridadeV2 = prioridadeCalculadaV2 ?? scoreV2;
     const ofertaUniversal = resultadoV2.ofertaUniversal || {};
     const memoriaV2 = resultadoV2.memoria || {};
+    const valorEfetivoDetalhes = objetoSeguro(resultadoV2.valorEfetivoDetalhes);
     const totalMemoriaCandidatos = memoriaCandidatos.length;
 
     console.log("[V2-MEMORIA-DECISAO]", JSON.stringify({
@@ -424,6 +437,9 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       precoCaiu: memoriaV2.precoCaiu === true,
       cupomNovo: memoriaV2.cupomNovo === true,
       beneficioMelhorou: memoriaV2.beneficioMelhorou === true,
+      valorEfetivo: resultadoV2.valorEfetivo ?? null,
+      valorEfetivoOrigem: resultadoV2.valorEfetivoOrigem || "",
+      valorEfetivoComprovado: valorEfetivoDetalhes.comprovado === true,
       score: scoreV2,
       prioridade: prioridadeV2,
       status: resultadoV2.status || ""
@@ -446,6 +462,10 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
           score: scoreV2,
           prioridade: prioridadeV2,
           categoria: resultadoV2.categoria || "",
+          valorEfetivo: resultadoV2.valorEfetivo ?? null,
+          valorEfetivoCentavos: resultadoV2.valorEfetivoCentavos ?? null,
+          valorEfetivoOrigem: resultadoV2.valorEfetivoOrigem || "",
+          valorEfetivoDetalhes,
           memoria: memoriaV2,
           destino: resultadoV2.destino || {},
           templateInput: resultadoV2.templateInput || {},
@@ -672,7 +692,11 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       cupomNovo: metadataFinal.inteligenciaUniversalV2.cupomNovo === true,
       beneficioMelhorou: metadataFinal.inteligenciaUniversalV2.beneficioMelhorou === true,
       repeticaoIdentica: metadataFinal.inteligenciaUniversalV2.repeticaoIdentica === true,
-      historicoCompativelSemMelhoria: metadataFinal.inteligenciaUniversalV2.historicoCompativelSemMelhoria === true
+      historicoCompativelSemMelhoria: metadataFinal.inteligenciaUniversalV2.historicoCompativelSemMelhoria === true,
+      valorEfetivo: metadataFinal.inteligenciaUniversalV2.valorEfetivo ?? null,
+      valorEfetivoCentavos: metadataFinal.inteligenciaUniversalV2.valorEfetivoCentavos ?? null,
+      valorEfetivoOrigem: metadataFinal.inteligenciaUniversalV2.valorEfetivoOrigem || "",
+      valorEfetivoDetalhes: metadataFinal.inteligenciaUniversalV2.valorEfetivoDetalhes || {}
     } : null,
     status: "importada",
     atualizada: Boolean(job.oferta_id)
