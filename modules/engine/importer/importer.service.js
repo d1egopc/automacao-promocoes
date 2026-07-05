@@ -83,6 +83,36 @@ function normalizarTitulo(titulo = "") {
     .trim();
 }
 
+function normalizarValorImagem(valor) {
+  if (typeof valor === "string") return normalizarTexto(valor);
+  if (!valor || typeof valor !== "object" || Array.isArray(valor)) return "";
+  return normalizarTexto(valor.url || valor.src || valor.imagem || valor.image || valor.thumbnail || "");
+}
+
+function resolverImagemImportada(resultado = {}, produtoMetadata = {}) {
+  const candidatos = [
+    ["resultado.imagem", resultado.imagem],
+    ["resultado.image", resultado.image],
+    ["resultado.thumbnail", resultado.thumbnail],
+    ["resultado.imagemUrl", resultado.imagemUrl],
+    ["resultado.foto", resultado.foto],
+    ["resultado.midia", resultado.midia],
+    ["metadata.produto.imagem", produtoMetadata.imagem],
+    ["metadata.produto.image", produtoMetadata.image],
+    ["metadata.produto.thumbnail", produtoMetadata.thumbnail],
+    ["metadata.produto.imagemUrl", produtoMetadata.imagemUrl],
+    ["metadata.produto.foto", produtoMetadata.foto],
+    ["metadata.produto.midia", produtoMetadata.midia]
+  ];
+
+  for (const [campo, valor] of candidatos) {
+    const imagem = normalizarValorImagem(valor);
+    if (imagem) return { imagem, campo };
+  }
+
+  return { imagem: "", campo: "" };
+}
+
 async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
   const params = [];
   const filtros = ["status = 'pronto_para_importar'"];
@@ -160,6 +190,7 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
   const produtoMetadata = resultado?.metadata?.produto && typeof resultado.metadata.produto === "object"
     ? resultado.metadata.produto
     : {};
+  const imagemResolvida = resolverImagemImportada(resultado, produtoMetadata);
 
   return {
     ok: resultado.ok !== false,
@@ -168,7 +199,8 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
     tituloNormalizado: normalizarTitulo(resultado.titulo || resultado.nome || ""),
     preco: normalizarNumero(resultado.preco || resultado.precoAtual || produtoMetadata.precoAtual || produtoMetadata.preco),
     precoOriginal: normalizarNumero(resultado.precoOriginal || resultado.precoAntigo || produtoMetadata.precoOriginal || produtoMetadata.precoAntigo),
-    imagem: normalizarTexto(resultado.imagem || resultado.image || ""),
+    imagem: imagemResolvida.imagem,
+    imagemOrigem: imagemResolvida.campo,
     linkOriginal: normalizarTexto(resultado.linkOriginal || ""),
     linkExpandido: normalizarTexto(resultado.linkExpandido || resultado.urlFinal || ""),
     linkAfiliado: normalizarTexto(resultado.linkAfiliado || resultado.linkFinal || resultado.link || ""),
@@ -178,6 +210,41 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
     score: normalizarNumero(resultado.score),
     metadata: resultado.metadata || resultado
   };
+}
+
+async function buscarImagemAnteriorEngine(oferta = {}, job = {}) {
+  if (oferta.imagem || normalizarMarketplaceMemoria(oferta.marketplace) !== "mercadolivre") {
+    return { imagem: "", origem: "", motivo: oferta.imagem ? "imagem_importer_presente" : "marketplace_nao_ml" };
+  }
+
+  const identidade = detectarIdentidadeProdutoUniversal(oferta);
+  const produtoId = normalizarTexto(identidade.produtoIdDetectado || "").toUpperCase();
+  if (!/^MLB\d+$/.test(produtoId)) {
+    return { imagem: "", origem: "", motivo: "mlb_nao_detectado" };
+  }
+
+  const ofertaAtualId = Number(job.oferta_id) || 0;
+  const resultado = await queryEngine(
+    `SELECT id, imagem
+       FROM engine_ofertas
+      WHERE id <> $2
+        AND NULLIF(TRIM(COALESCE(imagem, '')), '') IS NOT NULL
+        AND LOWER(REGEXP_REPLACE(COALESCE(marketplace, ''), '[[:space:]_-]+', '', 'g')) IN ('ml', 'mercadolivre')
+        AND UPPER(CONCAT_WS(' ', link_original, link_expandido, link_afiliado)) LIKE '%' || $1 || '%'
+      ORDER BY atualizada_em DESC NULLS LAST, id DESC
+      LIMIT 1`,
+    [produtoId, ofertaAtualId]
+  );
+
+  if (!resultado.ok) {
+    return { imagem: "", origem: "", motivo: "consulta_historico_falhou" };
+  }
+
+  const anterior = resultado.resultado.rows[0];
+  const imagem = normalizarTexto(anterior?.imagem || "");
+  return imagem
+    ? { imagem, origem: `engine_ofertas.imagem:${anterior.id}`, motivo: "imagem_historica_mesmo_mlb" }
+    : { imagem: "", origem: "", motivo: "historico_mesmo_mlb_sem_imagem" };
 }
 
 function objetoSeguro(valor = {}) {
@@ -432,12 +499,26 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
 
 async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrada = {}) {
   let oferta = normalizarOfertaImportada(ofertaEntrada, job);
+  const temImagemImporter = Boolean(oferta.imagem);
+  const campoImagemImporter = oferta.imagemOrigem || "";
   const sombraV2 = await aplicarSombraInteligenciaUniversalV2(oferta, ofertaEntrada, job);
   oferta = sombraV2.oferta || oferta;
+  const imagemAnterior = await buscarImagemAnteriorEngine(oferta, job);
+  if (!oferta.imagem && imagemAnterior.imagem) {
+    oferta.imagem = imagemAnterior.imagem;
+    oferta.imagemOrigem = imagemAnterior.origem;
+  }
   const metadataBase = objetoSeguro(oferta.metadata || ofertaEntrada.metadata || {});
   const metadataFinal = {
     ...metadataBase,
-    ...objetoSeguro(sombraV2.metadata || {})
+    ...objetoSeguro(sombraV2.metadata || {}),
+    imagemAuditoria: {
+      temImagemImporter,
+      temImagemEngine: Boolean(oferta.imagem),
+      campoImagemUsado: oferta.imagemOrigem || campoImagemImporter || "",
+      origemImagem: oferta.imagemOrigem || campoImagemImporter || "nenhuma",
+      motivoSemImagem: oferta.imagem ? "" : imagemAnterior.motivo
+    }
   };
   const valores = [
     job.evento_id,
