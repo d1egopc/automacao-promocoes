@@ -46,16 +46,6 @@ function avaliarOfertaUniversal(oferta = {}, contexto = {}) {
   const score = calcularScoreUniversal(ofertaUniversal, contexto);
   logs.push(...score.logs);
 
-  const memoria = avaliarMemoriaUniversal(ofertaUniversal, contexto);
-  logs.push(...memoria.logs);
-
-  const destino = avaliarDestinoUniversal(ofertaUniversal, contexto);
-  logs.push(...destino.logs);
-
-  const prioridade = calcularPrioridadeUniversal(score.score, beneficios, memoria);
-  const decisao = decidirOfertaUniversal({ validacao, score, memoria, destino, beneficios });
-  logs.push({ etapa: "decisao", status: decisao.status, motivo: decisao.motivo, prioridade });
-
   const valorEfetivo = calcularValorEfetivo(ofertaUniversal.valorEfetivoEntrada || { preco: ofertaUniversal.precoAtual });
   ofertaUniversal = { ...ofertaUniversal, ...valorEfetivo };
   logs.push({
@@ -65,6 +55,16 @@ function avaliarOfertaUniversal(oferta = {}, contexto = {}) {
     valorEfetivoOrigem: valorEfetivo.valorEfetivoOrigem,
     comprovado: valorEfetivo.valorEfetivoDetalhes.comprovado
   });
+
+  const memoria = avaliarMemoriaUniversal(ofertaUniversal, contexto);
+  logs.push(...memoria.logs);
+
+  const destino = avaliarDestinoUniversal(ofertaUniversal, contexto);
+  logs.push(...destino.logs);
+
+  const prioridade = calcularPrioridadeUniversal(score.score, beneficios, memoria);
+  const decisao = decidirOfertaUniversal({ validacao, score, memoria, destino, beneficios });
+  logs.push({ etapa: "decisao", status: decisao.status, motivo: decisao.motivo, prioridade });
 
   return {
     ok: decisao.ok,

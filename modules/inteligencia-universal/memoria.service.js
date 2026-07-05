@@ -1,5 +1,8 @@
 const { texto } = require("./normalizacao.service");
 const { cupomValido } = require("./beneficios.service");
+const { calcularValorEfetivo } = require("./valor-efetivo.service");
+
+const JANELA_MEMORIA_OFICIAL_HORAS = 2;
 
 function normalizarLinkProduto(valor = "") {
   const link = texto(valor);
@@ -184,11 +187,99 @@ function encontrarAnteriorRelevante(ofertaUniversal = {}, anteriores = []) {
   });
 }
 
+function ofertaCompativelMemoriaOficial(ofertaUniversal = {}, item = {}) {
+  const identidadeAtual = detectarIdentidadeProdutoUniversal(ofertaUniversal);
+  const identidadeItem = detectarIdentidadeProdutoUniversal(item);
+  const marketplaceAtual = normalizarComparacao(ofertaUniversal.marketplace);
+  const marketplaceItem = normalizarComparacao(item.marketplace);
+  const tiposFortes = new Set(["mlb", "asin", "shopee", "link_normalizado"]);
+
+  if (tiposFortes.has(identidadeAtual.tipoIdentidade) && tiposFortes.has(identidadeItem.tipoIdentidade)) {
+    return identidadeAtual.produtoIdDetectado === identidadeItem.produtoIdDetectado && marketplaceAtual === marketplaceItem;
+  }
+
+  const linkAtual = texto(ofertaUniversal.linkOriginal || ofertaUniversal.linkAfiliado).toLowerCase();
+  const linkItem = texto(item.linkOriginal || item.linkAfiliado).toLowerCase();
+  if (linkAtual && linkItem && linkAtual === linkItem) return true;
+
+  const tituloAtual = normalizarComparacao(ofertaUniversal.titulo);
+  const tituloItem = normalizarComparacao(item.titulo || item.tituloNormalizado);
+  return Boolean(tituloAtual && tituloItem && tituloAtual === tituloItem && marketplaceAtual === marketplaceItem);
+}
+
+function dentroJanelaMemoriaOficial2h(oferta = {}) {
+  const horas = horasDesdeOferta(oferta);
+  return horas !== null && horas >= 0 && horas < JANELA_MEMORIA_OFICIAL_HORAS;
+}
+
+function centavosValorEfetivo(oferta = {}) {
+  const metadataV2 = oferta?.metadata?.inteligenciaUniversalV2 || oferta?.inteligenciaV2 || {};
+  const centavosDiretos = Number(oferta.valorEfetivoCentavos ?? metadataV2.valorEfetivoCentavos);
+  if (Number.isFinite(centavosDiretos) && centavosDiretos >= 0) return Math.round(centavosDiretos);
+
+  const valorDireto = Number(oferta.valorEfetivo ?? metadataV2.valorEfetivo);
+  if (Number.isFinite(valorDireto) && valorDireto >= 0) return Math.round(valorDireto * 100);
+
+  const calculado = calcularValorEfetivo({
+    preco: oferta.precoAtual ?? oferta.preco,
+    precoOriginal: oferta.precoOriginal ?? oferta.precoAntigo,
+    cupom: oferta.cupom,
+    valorCupom: oferta.valorCupom ?? oferta.cupomValor,
+    percentualCupom: oferta.percentualCupom ?? oferta.cupomPercentual,
+    precoPix: oferta.precoPix,
+    descontoPix: oferta.descontoPix,
+    cashbackValor: oferta.cashbackValor,
+    cashbackPercentual: oferta.cashbackPercentual,
+    freteValor: oferta.freteValor ?? oferta.valorFrete,
+    freteGratis: oferta.freteGratis === true,
+    beneficios: oferta.beneficios
+  });
+  return calculado.valorEfetivoDetalhes.comprovado ? calculado.valorEfetivoCentavos : null;
+}
+
+function calcularMemoriaOficialShadow(ofertaUniversal = {}, anteriores = []) {
+  const compativeis = anteriores.filter(item => ofertaCompativelMemoriaOficial(ofertaUniversal, item));
+  const janela2h = compativeis.filter(dentroJanelaMemoriaOficial2h);
+  const valorAtualCentavos = centavosValorEfetivo(ofertaUniversal);
+  const valoresJanela = janela2h.map(centavosValorEfetivo).filter(valor => valor !== null);
+  const menorJanelaCentavos = valoresJanela.length ? Math.min(...valoresJanela) : null;
+  let status = "neutra";
+  let motivo = anteriores.length ? "sem_historico_compativel" : "sem_historico_cliente_marketplace";
+
+  if (compativeis.length && !janela2h.length) {
+    motivo = "historico_fora_janela_2h";
+  } else if (janela2h.length && (valorAtualCentavos === null || menorJanelaCentavos === null)) {
+    motivo = "valor_efetivo_nao_comprovado";
+  } else if (janela2h.length) {
+    const valorMenor = valorAtualCentavos < menorJanelaCentavos;
+    const cupomAtual = texto(ofertaUniversal.cupom).toLowerCase();
+    const codigoCupomNovo = cupomValido(ofertaUniversal.cupom) && !janela2h.some(item => texto(item.cupom).toLowerCase() === cupomAtual);
+    const descontoCupomMensuravel = Number(ofertaUniversal.valorEfetivoDetalhes?.descontoAplicado || 0) > 0 && texto(ofertaUniversal.valorEfetivoOrigem).startsWith("cupom_");
+    const cupomNovoMensuravel = codigoCupomNovo && descontoCupomMensuravel;
+
+    status = valorMenor || cupomNovoMensuravel ? "liberar" : "reter";
+    motivo = valorMenor
+      ? "valor_efetivo_menor"
+      : (cupomNovoMensuravel ? "cupom_novo_desconto_mensuravel" : "sem_melhoria_financeira_janela_2h");
+  }
+
+  return {
+    totalMemoriaCandidatos: anteriores.length,
+    totalMemoriaCompativeis: compativeis.length,
+    totalMemoriaJanela2h: janela2h.length,
+    valorEfetivoAtual: valorAtualCentavos === null ? null : valorAtualCentavos / 100,
+    menorValorEfetivoJanela: menorJanelaCentavos === null ? null : menorJanelaCentavos / 100,
+    memoriaOficialShadowStatus: status,
+    memoriaOficialShadowMotivo: motivo
+  };
+}
+
 function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
   const chave = chaveMemoriaUniversal(ofertaUniversal);
   const anteriores = Array.isArray(contexto.memoriaAnteriores) ? contexto.memoriaAnteriores : [];
   const anterior = encontrarAnteriorRelevante(ofertaUniversal, anteriores);
   const identidade = detectarIdentidadeProdutoUniversal(ofertaUniversal);
+  const memoriaOficialShadow = calcularMemoriaOficialShadow(ofertaUniversal, anteriores);
 
   if (!anterior) {
     return {
@@ -206,6 +297,7 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
       beneficioMelhorou: false,
       repeticaoIdentica: false,
       historicoCompativelSemMelhoria: false,
+      ...memoriaOficialShadow,
       logs: [{
         etapa: "memoria",
         status: "ok",
@@ -213,7 +305,8 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
         motivoMemoria: anteriores.length ? "sem_historico_compativel" : "sem_historico_cliente_marketplace",
         produtoIdDetectado: identidade.produtoIdDetectado,
         totalMemoriaCandidatos: anteriores.length,
-        totalMemoriaAnteriores: anteriores.length
+        totalMemoriaAnteriores: anteriores.length,
+        ...memoriaOficialShadow
       }]
     };
   }
@@ -249,6 +342,7 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
     beneficioMelhorou: beneficioNovoOuMelhor,
     repeticaoIdentica: repeticaoRigida,
     historicoCompativelSemMelhoria,
+    ...memoriaOficialShadow,
     detalhes: {
       repeticaoRigida,
       historicoCompativelSemMelhoria,
@@ -274,7 +368,8 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
       cupomNovo,
       beneficioMelhorou: beneficioNovoOuMelhor,
       repeticaoIdentica: repeticaoRigida,
-      historicoCompativelSemMelhoria
+      historicoCompativelSemMelhoria,
+      ...memoriaOficialShadow
     }]
   };
 }
