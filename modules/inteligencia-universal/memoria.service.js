@@ -245,17 +245,19 @@ function calcularMemoriaOficialShadow(ofertaUniversal = {}, anteriores = []) {
   const menorJanelaCentavos = valoresJanela.length ? Math.min(...valoresJanela) : null;
   let status = "neutra";
   let motivo = anteriores.length ? "sem_historico_compativel" : "sem_historico_cliente_marketplace";
+  let valorMenor = false;
+  let cupomNovoMensuravel = false;
 
   if (compativeis.length && !janela2h.length) {
     motivo = "historico_fora_janela_2h";
   } else if (janela2h.length && (valorAtualCentavos === null || menorJanelaCentavos === null)) {
     motivo = "valor_efetivo_nao_comprovado";
   } else if (janela2h.length) {
-    const valorMenor = valorAtualCentavos < menorJanelaCentavos;
+    valorMenor = valorAtualCentavos < menorJanelaCentavos;
     const cupomAtual = texto(ofertaUniversal.cupom).toLowerCase();
     const codigoCupomNovo = cupomValido(ofertaUniversal.cupom) && !janela2h.some(item => texto(item.cupom).toLowerCase() === cupomAtual);
     const descontoCupomMensuravel = Number(ofertaUniversal.valorEfetivoDetalhes?.descontoAplicado || 0) > 0 && texto(ofertaUniversal.valorEfetivoOrigem).startsWith("cupom_");
-    const cupomNovoMensuravel = codigoCupomNovo && descontoCupomMensuravel;
+    cupomNovoMensuravel = codigoCupomNovo && descontoCupomMensuravel;
 
     status = valorMenor || cupomNovoMensuravel ? "liberar" : "reter";
     motivo = valorMenor
@@ -270,7 +272,61 @@ function calcularMemoriaOficialShadow(ofertaUniversal = {}, anteriores = []) {
     valorEfetivoAtual: valorAtualCentavos === null ? null : valorAtualCentavos / 100,
     menorValorEfetivoJanela: menorJanelaCentavos === null ? null : menorJanelaCentavos / 100,
     memoriaOficialShadowStatus: status,
-    memoriaOficialShadowMotivo: motivo
+    memoriaOficialShadowMotivo: motivo,
+    memoriaOficialShadowValorMenor: valorMenor,
+    memoriaOficialShadowCupomNovoMensuravel: cupomNovoMensuravel
+  };
+}
+
+function aplicarMemoriaOficial(resultadoLegado = {}, memoriaOficialShadow = {}, ofertaUniversal = {}) {
+  const memoriaOficialStatus = memoriaOficialShadow.memoriaOficialShadowStatus || "neutra";
+  const memoriaOficialMotivo = memoriaOficialShadow.memoriaOficialShadowMotivo || "sem_historico_compativel";
+  const reter = memoriaOficialStatus === "reter";
+  const ativa = memoriaOficialStatus === "reter" || memoriaOficialStatus === "liberar";
+  const valorAtual = Number(memoriaOficialShadow.valorEfetivoAtual);
+  const menorJanela = Number(memoriaOficialShadow.menorValorEfetivoJanela);
+  const valorIgual = Number.isFinite(valorAtual) && Number.isFinite(menorJanela) && Math.abs(valorAtual - menorJanela) < 0.01;
+  const valorMenor = memoriaOficialShadow.memoriaOficialShadowValorMenor === true;
+  const cupomNovoMensuravel = memoriaOficialShadow.memoriaOficialShadowCupomNovoMensuravel === true;
+  const origemValorEfetivo = texto(ofertaUniversal.valorEfetivoOrigem);
+  const beneficioFinanceiroMelhorou = valorMenor && !["preco", "preco_com_frete"].includes(origemValorEfetivo);
+  const memoriaLegada = {
+    bloquear: resultadoLegado.bloquear === true,
+    motivo: resultadoLegado.motivo || "",
+    repetida: resultadoLegado.repetida === true
+  };
+
+  return {
+    ...resultadoLegado,
+    repetida: ativa,
+    bloquear: reter,
+    motivo: memoriaOficialMotivo,
+    motivoMemoria: memoriaOficialMotivo,
+    precoCaiu: valorMenor,
+    cupomNovo: cupomNovoMensuravel,
+    beneficioMelhorou: beneficioFinanceiroMelhorou,
+    repeticaoIdentica: reter && valorIgual,
+    historicoCompativelSemMelhoria: reter,
+    ...memoriaOficialShadow,
+    memoriaOficialStatus,
+    memoriaOficialMotivo,
+    memoriaLegada,
+    detalhes: {
+      ...(resultadoLegado.detalhes || {}),
+      memoriaOficialStatus,
+      memoriaOficialMotivo,
+      memoriaLegada
+    },
+    logs: (resultadoLegado.logs || []).map(log => ({
+      ...log,
+      status: memoriaOficialStatus,
+      motivo: memoriaOficialMotivo,
+      motivoMemoria: memoriaOficialMotivo,
+      ...memoriaOficialShadow,
+      memoriaOficialStatus,
+      memoriaOficialMotivo,
+      memoriaLegada
+    }))
   };
 }
 
@@ -282,7 +338,7 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
   const memoriaOficialShadow = calcularMemoriaOficialShadow(ofertaUniversal, anteriores);
 
   if (!anterior) {
-    return {
+    return aplicarMemoriaOficial({
       chave,
       repetida: false,
       bloquear: false,
@@ -308,7 +364,7 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
         totalMemoriaAnteriores: anteriores.length,
         ...memoriaOficialShadow
       }]
-    };
+    }, memoriaOficialShadow, ofertaUniversal);
   }
 
   const cupomNovo = cupomValido(ofertaUniversal.cupom) && texto(ofertaUniversal.cupom).toLowerCase() !== texto(anterior.cupom).toLowerCase();
@@ -327,7 +383,7 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
   const bloquear = repeticaoRigida || !(cupomNovo || precoCaiu || temBeneficio || origemRadar);
   const motivo = repeticaoRigida ? "repeticao_rigida_janela_curta" : (bloquear ? "historico_compativel_sem_melhoria" : "repeticao_flexivel_liberada");
 
-  return {
+  return aplicarMemoriaOficial({
     chave,
     repetida: true,
     bloquear,
@@ -371,7 +427,7 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
       historicoCompativelSemMelhoria,
       ...memoriaOficialShadow
     }]
-  };
+  }, memoriaOficialShadow, ofertaUniversal);
 }
 
 module.exports = {
