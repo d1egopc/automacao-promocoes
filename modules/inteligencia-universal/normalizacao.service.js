@@ -38,12 +38,18 @@ function primeiroValor(...valores) {
 }
 
 function normalizarOfertaUniversal(oferta = {}, contexto = {}) {
+  const produtoMetadata = oferta?.metadata?.produto && typeof oferta.metadata.produto === "object"
+    ? oferta.metadata.produto
+    : {};
   const marketplace = normalizarMarketplace(primeiroValor(oferta.marketplace, oferta.mercado, contexto.marketplace));
   const precoAtual = numero(primeiroValor(oferta.precoAtual, oferta.preco, oferta.valor));
   const precoOriginal = numero(primeiroValor(oferta.precoOriginal, oferta.precoAntigo, oferta.precoDe));
   const linkAfiliado = texto(primeiroValor(oferta.linkAfiliado, oferta.linkFinal, oferta.link));
   const linkOriginal = texto(primeiroValor(oferta.linkOriginal, oferta.linkOriginalRadar, oferta.urlOriginal, oferta.url));
   const linkExpandido = texto(primeiroValor(oferta.linkExpandido, oferta.urlExpandida, oferta.urlFinal));
+  const cashbackValorEfetivo = texto(primeiroValor(oferta.cashback, produtoMetadata.cashback));
+  const cashbackValorExplicito = primeiroValor(oferta.cashbackValor, produtoMetadata.cashbackValor);
+  const cashbackPercentualExplicito = primeiroValor(oferta.cashbackPercentual, produtoMetadata.cashbackPercentual);
 
   return {
     id: primeiroValor(oferta.id, oferta.engineOfertaId, oferta.uuid),
@@ -68,6 +74,22 @@ function normalizarOfertaUniversal(oferta = {}, contexto = {}) {
     cashback: texto(oferta.cashback),
     parcelamento: texto(oferta.parcelamento),
     origem: texto(primeiroValor(oferta.origem, contexto.origem)),
+    valorEfetivoEntrada: {
+      preco: precoAtual,
+      precoOriginal,
+      cupom: texto(oferta.cupom).toUpperCase(),
+      valorCupom: primeiroValor(oferta.valorCupom, oferta.cupomValor, produtoMetadata.valorCupom, produtoMetadata.cupomValor),
+      percentualCupom: primeiroValor(oferta.percentualCupom, oferta.cupomPercentual, produtoMetadata.percentualCupom, produtoMetadata.cupomPercentual),
+      precoPix: primeiroValor(oferta.precoPix, produtoMetadata.precoPix),
+      descontoPix: primeiroValor(oferta.descontoPix, produtoMetadata.descontoPix),
+      cashbackValor: cashbackValorExplicito || (!cashbackValorEfetivo.includes("%") ? cashbackValorEfetivo : ""),
+      cashbackPercentual: cashbackPercentualExplicito || (cashbackValorEfetivo.includes("%") ? cashbackValorEfetivo : ""),
+      freteValor: primeiroValor(oferta.freteValor, oferta.valorFrete, produtoMetadata.freteValor, produtoMetadata.valorFrete),
+      freteGratis: oferta.freteGratis === true,
+      beneficios: Array.isArray(oferta.beneficios)
+        ? oferta.beneficios
+        : (Array.isArray(produtoMetadata.beneficios) ? produtoMetadata.beneficios : [])
+    },
     raw: oferta
   };
 }

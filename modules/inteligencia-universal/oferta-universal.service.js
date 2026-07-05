@@ -6,6 +6,7 @@ const { avaliarMemoriaUniversal } = require("./memoria.service");
 const { analisarBeneficiosUniversal } = require("./beneficios.service");
 const { avaliarDestinoUniversal } = require("./destino.service");
 const { decidirOfertaUniversal, calcularPrioridadeUniversal } = require("./decisao.service");
+const { calcularValorEfetivo } = require("./valor-efetivo.service");
 
 function montarTemplateInput(ofertaUniversal = {}, score = {}, beneficios = {}) {
   return {
@@ -55,6 +56,16 @@ function avaliarOfertaUniversal(oferta = {}, contexto = {}) {
   const decisao = decidirOfertaUniversal({ validacao, score, memoria, destino, beneficios });
   logs.push({ etapa: "decisao", status: decisao.status, motivo: decisao.motivo, prioridade });
 
+  const valorEfetivo = calcularValorEfetivo(ofertaUniversal.valorEfetivoEntrada || { preco: ofertaUniversal.precoAtual });
+  ofertaUniversal = { ...ofertaUniversal, ...valorEfetivo };
+  logs.push({
+    etapa: "valor_efetivo",
+    status: valorEfetivo.valorEfetivoDetalhes.comprovado ? "calculado" : "nao_comprovado",
+    valorEfetivo: valorEfetivo.valorEfetivo,
+    valorEfetivoOrigem: valorEfetivo.valorEfetivoOrigem,
+    comprovado: valorEfetivo.valorEfetivoDetalhes.comprovado
+  });
+
   return {
     ok: decisao.ok,
     status: decisao.status,
@@ -63,6 +74,10 @@ function avaliarOfertaUniversal(oferta = {}, contexto = {}) {
     categoria: categoria.categoria,
     score,
     prioridade,
+    valorEfetivo: valorEfetivo.valorEfetivo,
+    valorEfetivoCentavos: valorEfetivo.valorEfetivoCentavos,
+    valorEfetivoOrigem: valorEfetivo.valorEfetivoOrigem,
+    valorEfetivoDetalhes: valorEfetivo.valorEfetivoDetalhes,
     memoria,
     destino,
     templateInput: montarTemplateInput(ofertaUniversal, score, beneficios),
