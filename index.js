@@ -121,6 +121,10 @@ const destinosUtils = require("./utils/destinos");
 const integracoesUtils = require("./utils/integracoes");
 const radarCupomMensagem = require("./utils/radar-cupom-mensagem");
 const {
+  resultadoTentouEnvio,
+  decidirStatusExecutorSemEnvio
+} = require("./modules/executor/destino-diagnostico");
+const {
   dominioRedirectPermitido,
   resolverRedirectUniversal
 } = require("./modules/radar/redirect/redirect-resolver");
@@ -3562,7 +3566,9 @@ function destinoSessaoOkDebug(clienteId = "admin", destino = {}) {
   const canal = String(destino.tipo || "").toLowerCase();
 
   if (canal === "whatsapp") {
-    return Boolean(destino.conexaoId && sessoes[destino.conexaoId]);
+    const conexaoId = destino.conexaoId || "";
+    const status = statusSessao[conexaoId];
+    return Boolean(conexaoId && sessoes[conexaoId] && (!status || status === "open" || status === "aberto"));
   }
 
   if (canal === "telegram") {
@@ -3605,6 +3611,54 @@ function logEnvioDestinoDebug(dados = {}) {
     enviado: Boolean(dados.enviado),
     erro: dados.erro || analise.motivo || ""
   });
+}
+
+function sessaoStatusDestinosDiagnostico(clienteId = "admin", itens = []) {
+  return (Array.isArray(itens) ? itens : []).map(item => {
+    const destino = item?.destino || item || {};
+    const canal = String(destino.tipo || "").toLowerCase();
+
+    if (canal === "whatsapp") {
+      const conexaoId = destino.conexaoId || "";
+      return {
+        destino: destinoNomeLog(destino),
+        canal,
+        status: statusSessao[conexaoId] || (sessoes[conexaoId] ? "conectada" : "ausente")
+      };
+    }
+
+    if (canal === "telegram") {
+      return {
+        destino: destinoNomeLog(destino),
+        canal,
+        status: destinoSessaoOkDebug(clienteId, destino) ? "ativo" : "inativo_ou_incompleto"
+      };
+    }
+
+    return { destino: destinoNomeLog(destino), canal: canal || "desconhecido", status: "nao_suportado" };
+  });
+}
+
+function logExecutorDestinoDiagnostico({
+  oferta = {},
+  clienteId = "admin",
+  destinosElegiveis = [],
+  destinosTentados = 0,
+  motivoSemEnvio = "",
+  dentroJanela = false,
+  statusFinal = ""
+} = {}) {
+  console.log("[EXECUTOR-DESTINO-DIAGNOSTICO]", JSON.stringify({
+    ofertaId: oferta.id || oferta.engineOfertaId || "",
+    categoria: oferta.categoria || oferta.categoriaProduto || "",
+    marketplace: oferta.marketplace || oferta.mercado || "",
+    destinosElegiveis: Array.isArray(destinosElegiveis) ? destinosElegiveis.length : Number(destinosElegiveis || 0),
+    destinosTentados: Number(destinosTentados || 0),
+    motivoSemEnvio: motivoSemEnvio || "",
+    dentroJanela: Boolean(dentroJanela),
+    sessaoStatus: sessaoStatusDestinosDiagnostico(clienteId, destinosElegiveis),
+    statusFinal: statusFinal || oferta.status || ""
+  }));
 }
 
 function destinoChaveControle(clienteId = "admin", destino = {}) {
@@ -3710,9 +3764,12 @@ function proximaTentativaDestino(oferta, ms = 5 * 60 * 1000) {
 // ========================== ENVIO DESTINO INTELIGENTE ============================
 
 async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId, configCliente, opcoes = {}) {
+  let tentouEnvio = false;
+  let confirmouEnvio = false;
+
   try {
     clienteId = String(clienteId || oferta.clienteId || "").trim();
-    if (!clienteId) return { enviado: false, motivo: "clienteId_ausente" };
+    if (!clienteId) return { enviado: false, tentouEnvio: false, motivo: "clienteId_ausente" };
     configCliente = configCliente || configsPorCliente?.[clienteId] || {};
 
     if (
@@ -3731,14 +3788,14 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
     }
 
     if (!destinoAceitaOferta(destino, oferta)) {
-      return { enviado: false, motivo: "nao_aceita" };
+      return { enviado: false, tentouEnvio: false, motivo: "nao_aceita" };
     }
 
     if (!opcoes.ignorarHorario && !destinoDentroHorario(destino)) {
       logOptimus("DESTINO", "Fora do horario", {
         destino: destino.nome
       });
-      return { enviado: false, motivo: "fora_horario" };
+      return { enviado: false, tentouEnvio: false, motivo: "fora_horario" };
     }
 
  
@@ -3746,12 +3803,21 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
 
 if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
   const sock = sessoes[destino.conexaoId];
+  const statusWhatsapp = statusSessao[destino.conexaoId];
 
   if (!sock) {
     logOptimus("WHATSAPP", "Sessao nao encontrada", {
       conexaoId: destino.conexaoId
     });
-    return { enviado: false, motivo: "sessao_nao_encontrada" };
+    return { enviado: false, tentouEnvio: false, motivo: "sessao_nao_encontrada" };
+  }
+
+  if (statusWhatsapp && !["open", "aberto"].includes(statusWhatsapp)) {
+    logOptimus("WHATSAPP", "Sessao indisponivel", {
+      conexaoId: destino.conexaoId,
+      status: statusWhatsapp
+    });
+    return { enviado: false, tentouEnvio: false, motivo: "sessao_offline" };
   }
 
   const grupos = (destino.gruposWhatsapp || [])
@@ -3766,13 +3832,13 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     logOptimus("WHATSAPP", "Destino sem grupos validos", {
       destino: destino.nome
     });
-    return { enviado: false, motivo: "sem_grupos" };
+    return { enviado: false, tentouEnvio: false, motivo: "sem_grupos" };
   }
 
   for (const grupo of grupos) {
     if (!usuarioTemCreditos(clienteId, 1)) {
       logOptimus("AVISO", "Sem creditos", { clienteId });
-      return { enviado: false, motivo: "sem_creditos" };
+      return { enviado: false, tentouEnvio: false, motivo: "sem_creditos" };
     }
 
     console.log("[EXECUTOR-IMAGEM-AUDITORIA]", {
@@ -3811,6 +3877,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     });
 
 
+    tentouEnvio = true;
     if (destino.tipoMidia === "texto" || !oferta.imagem) {
       await sock.sendMessage(grupo, { text: mensagem });
     } else {
@@ -3822,6 +3889,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       });
     }
 
+    confirmouEnvio = true;
     debitarCreditos(clienteId, 1);
 
     logOptimus("WHATSAPP", "Mensagem enviada", {
@@ -3848,7 +3916,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     await new Promise(r => setTimeout(r, 3000));
   }
 
-  return { enviado: true };
+  return { enviado: true, tentouEnvio: true };
 }
 
 
@@ -3899,7 +3967,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           resultado: "ignorado"
         });
 
-        return { enviado: false, motivo: "nenhum_telegram_selecionado" };
+        return { enviado: false, tentouEnvio: false, motivo: "nenhum_telegram_selecionado" };
       }
 
       let telegramEnviado = false;
@@ -4010,6 +4078,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
         });
 
 
+        tentouEnvio = true;
         if (destino.tipoMidia === "texto" || !oferta.imagem) {
           await axios.post(
             `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
@@ -4031,6 +4100,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
         debitarCreditos(clienteId, 1);
         telegramEnviado = true;
+        confirmouEnvio = true;
 
         logOptimus("TELEGRAM", "Mensagem enviada", {
           clienteId,
@@ -4071,10 +4141,10 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       }
 
       if (telegramEnviado) {
-        return { enviado: true };
+        return { enviado: true, tentouEnvio: true };
       }
 
-      return { enviado: false, motivo: "telegram_nao_enviado" };
+      return { enviado: false, tentouEnvio, motivo: "telegram_nao_enviado" };
     }
 
   } catch (e) {
@@ -4100,10 +4170,14 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       });
     }
 
-    return { enviado: false, motivo: "erro", erro: e.message };
+    if (confirmouEnvio) {
+      return { enviado: true, tentouEnvio: true, parcial: true, erro: e.message };
+    }
+
+    return { enviado: false, tentouEnvio, motivo: "erro", erro: e.message };
   }
 
-  return { enviado: false, motivo: "nao_enviado" };
+  return { enviado: false, tentouEnvio, motivo: "nao_enviado" };
 }
 
 // ================= FUNCAO PROCESSA FILA =================
@@ -4196,13 +4270,12 @@ if (!sessoes[idSessao]) {
       logOptimus("WHATSAPP", "Nenhuma sessao conectada", {
         sessaoId: idSessao
       });
-      return;
+    } else {
+      logOptimus("WHATSAPP", "Sessao escolhida", {
+        sessaoId: idSessao,
+        clienteId
+      });
     }
-
-    logOptimus("WHATSAPP", "Sessao escolhida", {
-      sessaoId: idSessao,
-      clienteId
-    });
 
     const destinosBrutos =
       oferta.destinos?.length
@@ -4245,6 +4318,7 @@ let pulouPorIntervalo = false;
 let pulouPorHorario = false;
 let pulouPorLimiteDiario = false;
 let houveFalhaReal = false;
+const motivosSemEnvio = [];
 const categoriaOfertaFila = oferta.categoria || oferta.categoriaProduto || classificarCategoriaOferta(oferta, oferta.termo || "");
 const analiseDestinosFila = analisarDestinosCompativeisFila(clienteId, oferta, configCliente);
 const destinosCompativeis = analiseDestinosFila.compativeis;
@@ -4334,6 +4408,15 @@ for (const itemRejeitado of analiseDestinosFila.rejeitados) {
 if (!destinosCompativeis.length) {
   marcarOfertaRetida(oferta, analiseDestinosFila.motivoRetencao);
   salvarFila(clienteId);
+  logExecutorDestinoDiagnostico({
+    oferta,
+    clienteId,
+    destinosElegiveis: [],
+    destinosTentados: 0,
+    motivoSemEnvio: analiseDestinosFila.motivoRetencao || "sem_destino_compativel",
+    dentroJanela: false,
+    statusFinal: oferta.status || "retida"
+  });
   logOptimus("FILA", "Oferta retida", {
     clienteId,
     titulo: oferta.titulo || oferta.nome || "",
@@ -4378,6 +4461,7 @@ for (const item of destinosOrdenados) {
 
   if (!destinoDentroHorario(destino)) {
     pulouPorHorario = true;
+    motivosSemEnvio.push("fora_horario");
     logEnvioDestinoDebug({
       clienteId,
       oferta,
@@ -4415,6 +4499,7 @@ for (const item of destinosOrdenados) {
   const limite = destinoLimiteDiarioDisponivel(clienteId, destino);
   if (!limite.ok) {
     pulouPorLimiteDiario = true;
+    motivosSemEnvio.push("limite_diario");
     logEnvioDestinoDebug({
       clienteId,
       oferta,
@@ -4452,6 +4537,7 @@ for (const item of destinosOrdenados) {
 
   if (!intervalo.liberado) {
     pulouPorIntervalo = true;
+    motivosSemEnvio.push("intervalo");
     logEnvioDestinoDebug({
       clienteId,
       oferta,
@@ -4535,8 +4621,12 @@ for (const item of destinosOrdenados) {
   const resultadoEnvio =
     typeof enviado === "object" && enviado !== null
       ? enviado
-      : { enviado: enviado === true, motivo: enviado === false ? "nao_enviado" : "" };
-  destinosTentadosDebug += 1;
+      : { enviado: enviado === true, tentouEnvio: enviado === true, motivo: enviado === false ? "nao_enviado" : "" };
+  const tentouEnvioReal = resultadoTentouEnvio(resultadoEnvio);
+  if (tentouEnvioReal) destinosTentadosDebug += 1;
+  if (resultadoEnvio.enviado !== true) {
+    motivosSemEnvio.push(resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado");
+  }
 
   logEnvioDestinoDebug({
     clienteId,
@@ -4561,19 +4651,22 @@ for (const item of destinosOrdenados) {
     });
   } else if (resultadoEnvio.motivo === "fora_horario") {
     pulouPorHorario = true;
-  } else if (!["nao_aceita"].includes(resultadoEnvio.motivo)) {
+  } else if (tentouEnvioReal) {
     houveFalhaReal = true;
   }
 }
 
+const decisaoSemEnvio = decidirStatusExecutorSemEnvio({
+  destinosElegiveis: destinosCompativeis.length,
+  destinosTentados: destinosTentadosDebug,
+  houveFalhaReal,
+  motivosSemEnvio
+});
+const dentroJanelaExecutor = destinosCompativeis.some(item => destinoDentroHorario(item.destino));
 
-if (!enviouParaAlgumDestino && (pulouPorIntervalo || pulouPorHorario || pulouPorLimiteDiario) && !houveFalhaReal) {
+if (!enviouParaAlgumDestino && decisaoSemEnvio.statusFinal === "pendente") {
   oferta.status = "pendente";
-  oferta.statusDetalhe = pulouPorIntervalo
-    ? `Aguardando intervalo do destino ${destinoNomeLog(destinosOrdenados.find(item => !item.intervalo.liberado)?.destino || {})}`
-    : pulouPorHorario
-      ? "Aguardando horario do destino"
-      : "Aguardando limite diario do destino";
+  oferta.statusDetalhe = `Aguardando envio: ${decisaoSemEnvio.motivoSemEnvio}`;
   oferta.erro = "";
   oferta.erroEm = "";
   const menorEsperaIntervalo = destinosOrdenados
@@ -4585,10 +4678,19 @@ if (!enviouParaAlgumDestino && (pulouPorIntervalo || pulouPorHorario || pulouPor
     Math.max(30 * 1000, Math.min(menorEsperaIntervalo || 5 * 60 * 1000, 15 * 60 * 1000))
   );
   salvarFila(clienteId);
+  logExecutorDestinoDiagnostico({
+    oferta,
+    clienteId,
+    destinosElegiveis: destinosCompativeis,
+    destinosTentados: destinosTentadosDebug,
+    motivoSemEnvio: decisaoSemEnvio.motivoSemEnvio,
+    dentroJanela: dentroJanelaExecutor,
+    statusFinal: "pendente"
+  });
   logOptimus("DESTINO", "Oferta aguardando destino liberar envio", {
     titulo: oferta.titulo || oferta.nome || "",
     clienteId,
-    motivo: pulouPorIntervalo ? "intervalo" : pulouPorHorario ? "horario" : "limite_diario"
+    motivo: decisaoSemEnvio.motivoSemEnvio
   });
 
   if (pulouPorIntervalo && !pulouPorHorario && !pulouPorLimiteDiario) {
@@ -4617,6 +4719,15 @@ if (!enviouParaAlgumDestino) {
     timeZone: "America/Sao_Paulo"
   });
 
+  logExecutorDestinoDiagnostico({
+    oferta,
+    clienteId,
+    destinosElegiveis: destinosCompativeis,
+    destinosTentados: destinosTentadosDebug,
+    motivoSemEnvio: decisaoSemEnvio.motivoSemEnvio,
+    dentroJanela: dentroJanelaExecutor,
+    statusFinal: "erro"
+  });
   salvarFila(clienteId);
   return;
 }
@@ -4633,6 +4744,16 @@ oferta.enviadoEm = new Date().toLocaleString("pt-BR", {
 
 oferta.dataEnvio = oferta.enviadoEm;
 oferta.statusDetalhe = `Enviada para ${destinosEnviadosCount} destino(s)`;
+
+logExecutorDestinoDiagnostico({
+  oferta,
+  clienteId,
+  destinosElegiveis: destinosCompativeis,
+  destinosTentados: destinosTentadosDebug,
+  motivoSemEnvio: "",
+  dentroJanela: dentroJanelaExecutor,
+  statusFinal: "enviado"
+});
 
 oferta.logsEnvio = oferta.logsEnvio || [];
 oferta.logsEnvio.push({
