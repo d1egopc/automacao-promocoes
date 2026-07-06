@@ -1,8 +1,72 @@
 const { classificarCategoriaOferta } = require("../../../../marketplaces/inteligencia/classificador-categorias");
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
+const { queryEngine } = require("../../database");
+const {
+  extrairIdsShopee,
+  tituloShopeeValido
+} = require("../../../../marketplaces/shopee/normalizacao");
 
 function texto(valor = "") {
   return String(valor || "").trim();
+}
+
+function numeroPrecoShopeeAdapter(valor = "") {
+  const bruto = texto(valor).replace(/R\$/gi, "").replace(/\s+/g, "");
+  if (!bruto || /\s+a\s/i.test(texto(valor))) return null;
+  let normalizado = bruto.replace(/[^\d.,]/g, "");
+  if (normalizado.includes(",") && normalizado.includes(".")) normalizado = normalizado.replace(/\./g, "").replace(",", ".");
+  else if (normalizado.includes(",")) normalizado = normalizado.replace(",", ".");
+  const numero = Number(normalizado);
+  return Number.isFinite(numero) && numero > 0 ? numero : null;
+}
+
+async function buscarImagemHistoricaShopee(shopId = "", itemId = "") {
+  if (!/^\d+$/.test(texto(shopId)) || !/^\d+$/.test(texto(itemId))) {
+    return { imagem: "", origem: "", motivo: "shopee_ids_ausentes" };
+  }
+
+  const resultado = await queryEngine(
+    `SELECT id, imagem
+       FROM engine_ofertas
+      WHERE LOWER(REGEXP_REPLACE(COALESCE(marketplace, ''), '[[:space:]_-]+', '', 'g')) LIKE '%shopee%'
+        AND NULLIF(TRIM(COALESCE(imagem, '')), '') IS NOT NULL
+        AND (
+          CONCAT_WS(' ', link_original, link_expandido, link_afiliado, COALESCE(metadata::text, '')) LIKE $1
+          OR CONCAT_WS(' ', link_original, link_expandido, link_afiliado, COALESCE(metadata::text, '')) LIKE $2
+          OR (
+            COALESCE(metadata::text, '') LIKE $3
+            AND COALESCE(metadata::text, '') LIKE $4
+          )
+        )
+      ORDER BY atualizada_em DESC NULLS LAST, id DESC
+      LIMIT 1`,
+    [`%/product/${shopId}/${itemId}%`, `%-i.${shopId}.${itemId}%`, `%${shopId}%`, `%${itemId}%`]
+  );
+
+  if (!resultado.ok) return { imagem: "", origem: "", motivo: "consulta_imagem_historica_falhou" };
+  const anterior = resultado.resultado.rows[0];
+  return anterior?.imagem
+    ? { imagem: texto(anterior.imagem), origem: `engine_ofertas.imagem:${anterior.id}`, motivo: "imagem_historica_shop_item" }
+    : { imagem: "", origem: "", motivo: "imagem_historica_nao_encontrada" };
+}
+
+function logAuditoriaShopee(dados = {}) {
+  console.log("[SHOPEE-IMPORTER-AUDITORIA]", JSON.stringify({
+    jobId: dados.jobId || null,
+    clienteId: dados.clienteId || "",
+    urlOriginal: dados.urlOriginal || "",
+    urlExpandida: dados.urlExpandida || "",
+    shopId: dados.shopId || "",
+    itemId: dados.itemId || "",
+    tituloExtraido: dados.tituloExtraido || "",
+    tituloValido: dados.tituloValido === true,
+    precoExtraido: dados.precoExtraido ?? null,
+    precoValido: dados.precoValido === true,
+    temImagem: Boolean(dados.imagem),
+    origemImagem: dados.origemImagem || "nenhuma",
+    motivoFalha: dados.motivoFalha || "",
+    statusFinal: dados.statusFinal || ""
+  }));
 }
 
 function valorPresente(valor) {
@@ -218,6 +282,10 @@ function auditarV2Shopee({ job = {}, produto = {}, ofertaAdapter = {} } = {}) {
       beneficioTexto: ofertaAdapter.beneficioTexto || ofertaAdapter.beneficioExtra || produto.beneficioTexto || produto.beneficioExtra || produto.avisoCupom || "",
       linkAfiliado: ofertaAdapter.linkAfiliado || produto.linkAfiliado || produto.link || "",
       linkOriginal: ofertaAdapter.linkOriginal || produto.linkOriginal || "",
+      linkExpandido: ofertaAdapter.linkExpandido || produto.linkExpandido || "",
+      shopId: ofertaAdapter.shopId || produto.shopId || "",
+      itemId: ofertaAdapter.itemId || produto.itemId || "",
+      produtoIdDetectado: ofertaAdapter.produtoIdDetectado || produto.produtoId || "",
       imagem: ofertaAdapter.imagem || produto.imagem || "",
       categoria: ofertaAdapter.categoria || produto.categoria || produto.categoriaProduto || "",
       score: ofertaAdapter.score || produto.score || null,
@@ -362,6 +430,23 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     }
   });
   if (produtoBase?.ok === false) {
+    const idsFalha = extrairIdsShopee(produtoBase.linkExpandido || urlOriginalEngine);
+    logAuditoriaShopee({
+      jobId: job.id,
+      clienteId,
+      urlOriginal: urlOriginalEngine,
+      urlExpandida: produtoBase.linkExpandido || "",
+      shopId: produtoBase.shopId || idsFalha.shopId,
+      itemId: produtoBase.itemId || idsFalha.itemId,
+      tituloExtraido: produtoBase.titulo || "",
+      tituloValido: tituloShopeeValido(produtoBase.titulo || ""),
+      precoExtraido: numeroPrecoShopeeAdapter(produtoBase.precoAtual || produtoBase.preco),
+      precoValido: numeroPrecoShopeeAdapter(produtoBase.precoAtual || produtoBase.preco) !== null,
+      imagem: produtoBase.imagem || "",
+      origemImagem: produtoBase.imagemOrigem || "nenhuma",
+      motivoFalha: produtoBase.motivo || "erro_importador_shopee",
+      statusFinal: "falha_parser"
+    });
     return {
       ok: false,
       marketplace: "shopee",
@@ -369,7 +454,44 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
       linkOriginal: urlOriginalEngine
     };
   }
-  const produto = aplicarFallbackTextoRadar(produtoBase || {}, evento);
+  let produto = aplicarFallbackTextoRadar(produtoBase || {}, evento);
+  const idsDetectados = extrairIdsShopee(produto.linkExpandido || produto.linkOriginal || urlOriginalEngine);
+  const idsProduto = {
+    shopId: produto.shopId || idsDetectados.shopId,
+    itemId: produto.itemId || idsDetectados.itemId
+  };
+  const tituloValido = tituloShopeeValido(produto.titulo || produto.nome || "");
+  const precoNumerico = numeroPrecoShopeeAdapter(produto.precoAtual || produto.preco || produto.precoMin || "");
+
+  if (!tituloValido || precoNumerico === null) {
+    const motivo = !tituloValido ? "shopee_titulo_indisponivel" : "shopee_preco_indisponivel";
+    logAuditoriaShopee({
+      jobId: job.id,
+      clienteId,
+      urlOriginal: urlOriginalEngine,
+      urlExpandida: produto.linkExpandido || produto.linkOriginal || "",
+      shopId: idsProduto.shopId,
+      itemId: idsProduto.itemId,
+      tituloExtraido: produto.titulo || produto.nome || "",
+      tituloValido,
+      precoExtraido: precoNumerico,
+      precoValido: precoNumerico !== null,
+      imagem: produto.imagem || "",
+      origemImagem: produto.imagemOrigem || "nenhuma",
+      motivoFalha: motivo,
+      statusFinal: "falha_parser"
+    });
+    return { ok: false, marketplace: "shopee", motivo, linkOriginal: urlOriginalEngine };
+  }
+
+  if (!produto.imagem) {
+    const historica = await buscarImagemHistoricaShopee(idsProduto.shopId, idsProduto.itemId);
+    if (historica.imagem) {
+      produto = { ...produto, imagem: historica.imagem, imagemOrigem: historica.origem };
+    } else if (!produto.motivoFalha) {
+      produto = { ...produto, motivoFalha: historica.motivo || "shopee_imagem_indisponivel" };
+    }
+  }
 
   console.log("[ENGINE-SHOPEE-IMPORTADOR-RETORNO]", JSON.stringify({
     jobId: job.id,
@@ -404,11 +526,12 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     ok: true,
     marketplace: "shopee",
     titulo: produto.titulo || produto.nome || "",
-    preco: produto.precoAtual || produto.preco || produto.precoMin || "",
+    preco: precoNumerico,
     precoOriginal: produto.precoOriginal || produto.precoAntigo || "",
     imagem: produto.imagem || "",
+    imagemOrigem: produto.imagemOrigem || "",
     linkOriginal: urlOriginalEngine,
-    linkExpandido: produto.linkOriginal || urlOriginalEngine,
+    linkExpandido: produto.linkExpandido || produto.linkOriginal || urlOriginalEngine,
     linkAfiliado,
     categoria: resolverCategoriaShopee(produto),
     cupom: produto.cupom || "",
@@ -422,11 +545,31 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     cashback: produto.cashback || "",
     descontoPix: produto.descontoPix || "",
     descontoApp: produto.descontoApp || "",
-    score: produto.score || null
+    score: produto.score || null,
+    shopId: idsProduto.shopId,
+    itemId: idsProduto.itemId,
+    produtoIdDetectado: idsProduto.shopId && idsProduto.itemId ? `${idsProduto.shopId}/${idsProduto.itemId}` : ""
   };
 
   const auditoriaV2 = auditarV2Shopee({ job, produto, ofertaAdapter });
   const ofertaEnriquecida = enriquecerComV2(ofertaAdapter, auditoriaV2, produto);
+
+  logAuditoriaShopee({
+    jobId: job.id,
+    clienteId,
+    urlOriginal: urlOriginalEngine,
+    urlExpandida: ofertaAdapter.linkExpandido,
+    shopId: idsProduto.shopId,
+    itemId: idsProduto.itemId,
+    tituloExtraido: ofertaAdapter.titulo,
+    tituloValido: true,
+    precoExtraido: precoNumerico,
+    precoValido: true,
+    imagem: ofertaAdapter.imagem,
+    origemImagem: ofertaAdapter.imagemOrigem || "nenhuma",
+    motivoFalha: ofertaAdapter.imagem ? "" : (produto.motivoFalha || "shopee_imagem_indisponivel"),
+    statusFinal: auditoriaV2?.status || "pronto_para_v2"
+  });
 
   return {
     ...ofertaEnriquecida,
@@ -435,6 +578,11 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
       jobId: job.id,
       eventoId: job.evento_id,
       linkOriginalEngine: urlOriginalEngine,
+      url_original: urlOriginalEngine,
+      url_expandida: ofertaAdapter.linkExpandido,
+      shopId: idsProduto.shopId,
+      itemId: idsProduto.itemId,
+      produtoId: ofertaAdapter.produtoIdDetectado,
       campoLinkEscolhido: linkEscolhido.campo || "",
       textoRadarTemCupom: Boolean(extrairCupomTextoRadarShopee(textoOriginalRadar).cupom),
       camposProduto: Object.keys(produto || {}),
