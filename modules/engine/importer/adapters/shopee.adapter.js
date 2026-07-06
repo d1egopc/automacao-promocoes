@@ -96,6 +96,11 @@ function logPrecoAuditoriaShopee(dados = {}) {
     precoTemplate: dados.precoTemplate ?? null,
     origemPreco: dados.origemPreco || "",
     motivoEscolhaPreco: dados.motivoEscolhaPreco || "",
+    campoPrecoUsado: dados.campoPrecoUsado || "",
+    tipoCampoPrecoUsado: dados.tipoCampoPrecoUsado || "",
+    precoAntesNormalizacao: dados.precoAntesNormalizacao ?? "",
+    precoDepoisNormalizacao: dados.precoDepoisNormalizacao ?? "",
+    normalizadorAplicado: dados.normalizadorAplicado || "",
     suspeitaFator100: dados.suspeitaFator100 === true
   }));
 }
