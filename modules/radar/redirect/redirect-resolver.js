@@ -15,14 +15,15 @@ function hostname(url = "") {
 }
 
 function detectarMarketplaceRedirect(url = "") {
-  const valor = texto(url).toLowerCase();
-  if (valor.includes("mercadolivre.com") || valor.includes("meli.la")) return "mercadolivre";
-  if (valor.includes("shopee.")) return "shopee";
-  if (valor.includes("amazon.") || valor.includes("amzn.to")) return "amazon";
-  if (valor.includes("aliexpress.")) return "aliexpress";
-  if (valor.includes("kabum.com.br")) return "awin";
-  if (valor.includes("awin1.com") || valor.includes("awin.com")) return "awin";
-  if (valor.includes("magazineluiza.com") || valor.includes("magalu.")) return "magalu";
+  const host = hostname(url);
+  if (!host) return "";
+  if (host === "meli.la" || host.endsWith(".meli.la") || host === "mercadolivre.com" || host.endsWith(".mercadolivre.com") || host === "mercadolivre.com.br" || host.endsWith(".mercadolivre.com.br")) return "mercadolivre";
+  if (host === "shopee.com.br" || host.endsWith(".shopee.com.br")) return "shopee";
+  if (host === "amazon.com.br" || host.endsWith(".amazon.com.br") || host === "amzn.to" || host.endsWith(".amzn.to")) return "amazon";
+  if (host.includes("aliexpress.")) return "aliexpress";
+  if (host === "kabum.com.br" || host.endsWith(".kabum.com.br")) return "awin";
+  if (host === "awin1.com" || host.endsWith(".awin1.com") || host === "awin.com" || host.endsWith(".awin.com")) return "awin";
+  if (host === "magazineluiza.com" || host.endsWith(".magazineluiza.com") || host === "magalu.com" || host.endsWith(".magalu.com")) return "magalu";
   return "";
 }
 
@@ -60,13 +61,37 @@ function urlRespostaHttp(resposta = {}, fallback = "") {
   return texto(
     resposta?.request?.res?.responseUrl ||
     resposta?.request?._redirectable?._currentUrl ||
+    resposta?.config?.url ||
     fallback
   );
 }
 
+function decodificarEscapesUrl(valor = "") {
+  let resultado = texto(valor)
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\\u002[fF]/g, "/")
+    .replace(/\\x2[fF]/g, "/")
+    .replace(/\\\//g, "/");
+
+  if (/%(?:3a|2f)/i.test(resultado)) {
+    try {
+      resultado = decodeURIComponent(resultado);
+    } catch {}
+  }
+
+  return resultado.trim();
+}
+
 function urlAbsoluta(candidata = "", base = "") {
   try {
-    const url = new URL(texto(candidata), texto(base));
+    let valor = decodificarEscapesUrl(candidata).replace(/^["'`]+|["'`]+$/g, "");
+    if (!valor) return "";
+    if (/^(?:www\.)?(?:[\w-]+\.)*(?:mercadolivre\.com(?:\.br)?|meli\.la|shopee\.com\.br|amazon\.com\.br|amzn\.to|aliexpress\.[a-z.]+|kabum\.com\.br|awin1?\.com)(?:\/|$)/i.test(valor)) {
+      valor = `https://${valor.replace(/^www\./i, "www.")}`;
+    }
+    const url = new URL(valor, texto(base));
     if (!/^https?:$/i.test(url.protocol)) return "";
     return url.toString();
   } catch {
@@ -74,131 +99,282 @@ function urlAbsoluta(candidata = "", base = "") {
   }
 }
 
+function atributosHtml(tag = "") {
+  const atributos = {};
+  const regex = /([:\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g;
+  let match;
+  while ((match = regex.exec(String(tag || ""))) !== null) {
+    atributos[match[1].toLowerCase()] = match[2] ?? match[3] ?? match[4] ?? "";
+  }
+  return atributos;
+}
+
 function extrairMetaRefresh(html = "") {
   const metas = String(html || "").match(/<meta\b[^>]*>/gi) || [];
   for (const meta of metas) {
-    if (!/http-equiv\s*=\s*["']?refresh["']?/i.test(meta)) continue;
-    const conteudo = meta.match(/content\s*=\s*["']([^"']+)["']/i)?.[1] ||
-      meta.match(/content\s*=\s*([^\s>]+)/i)?.[1] || "";
-    const destino = conteudo.match(/url\s*=\s*(.+)$/i)?.[1] || "";
-    if (destino) return destino.trim().replace(/^["']|["']$/g, "");
+    const atributos = atributosHtml(meta);
+    if (texto(atributos["http-equiv"]).toLowerCase() !== "refresh") continue;
+
+    const conteudo = decodificarEscapesUrl(atributos.content || "");
+    const destino = conteudo.match(/(?:^|;)\s*url\s*=\s*(?:"([^"]+)"|'([^']+)'|(.+))$/i);
+    const valor = destino?.[1] || destino?.[2] || destino?.[3] || "";
+    if (valor) return valor.trim();
   }
   return "";
 }
 
 function extrairWindowLocation(html = "") {
-  const fonte = String(html || "");
+  const fonte = decodificarEscapesUrl(html);
   const padroes = [
-    /(?:window\.)?location\.(?:replace|assign)\(\s*["']([^"']+)["']\s*\)/i,
-    /(?:window\.)?location\.href\s*=\s*["']([^"']+)["']/i,
-    /(?:window\.)?location\s*=\s*["']([^"']+)["']/i
+    /(?:window\.|document\.)?location\.(?:replace|assign)\s*\(\s*(["'`])([^"'`]+)\1\s*\)/i,
+    /(?:window\.|document\.)?location\.href\s*=\s*(["'`])([^"'`]+)\1/i,
+    /(?:window\.|document\.)?location\s*=\s*(["'`])([^"'`]+)\1/i
   ];
 
   for (const padrao of padroes) {
-    const destino = fonte.match(padrao)?.[1] || "";
+    const destino = fonte.match(padrao)?.[2] || "";
     if (destino) return destino;
   }
   return "";
 }
 
+function urlMarketplaceUtil(url = "") {
+  const marketplace = detectarMarketplaceRedirect(url);
+  if (!marketplace) return false;
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    return !/\.(?:js|css|png|jpe?g|gif|svg|webp|ico|woff2?|ttf)$/.test(path);
+  } catch {
+    return false;
+  }
+}
+
+function pontuarUrlMarketplace(url = "") {
+  const valor = texto(url).toLowerCase();
+  let pontos = 0;
+  if (/\bmlb-?\d+/i.test(valor) || /meli\.la\//i.test(valor)) pontos += 5;
+  if (/amazon\.com\.br\/(?:dp|gp\/product)\//i.test(valor) || /amzn\.to\//i.test(valor)) pontos += 5;
+  if (/s\.shopee\.com\.br\//i.test(valor) || /shopee\.com\.br\/.*-i\.\d+\.\d+/i.test(valor)) pontos += 5;
+  if (/aliexpress\.[^/]+\/(?:item|e)\//i.test(valor)) pontos += 5;
+  if (/kabum\.com\.br\/produto\//i.test(valor)) pontos += 5;
+  if (/awin1?\.com\//i.test(valor)) pontos += 3;
+  return pontos;
+}
+
+function extrairUrlsMarketplaceHtml(html = "", base = "") {
+  const fonte = decodificarEscapesUrl(html);
+  const regex = /(?:(?:https?:)?\/\/|www\.)?(?:[\w-]+\.)*(?:mercadolivre\.com(?:\.br)?|meli\.la|shopee\.com\.br|amazon\.com\.br|amzn\.to|aliexpress\.[a-z.]+|kabum\.com\.br|awin1?\.com)(?:[^\s"'`<>\\)]*)/gi;
+  const urls = [];
+
+  for (const match of fonte.matchAll(regex)) {
+    const url = urlAbsoluta(match[0], base);
+    if (url && urlMarketplaceUtil(url) && !urls.includes(url)) urls.push(url);
+  }
+
+  return urls
+    .map((url, indice) => ({ url, indice, pontos: pontuarUrlMarketplace(url) }))
+    .sort((a, b) => b.pontos - a.pontos || a.indice - b.indice)
+    .map(item => item.url);
+}
+
+function extrairDestinoHtml(html = "", base = "") {
+  const metaRefresh = extrairMetaRefresh(html);
+  const metaUrl = urlAbsoluta(metaRefresh, base);
+  if (metaUrl) return { url: metaUrl, metodo: "meta_refresh" };
+
+  const windowLocation = extrairWindowLocation(html);
+  const jsUrl = urlAbsoluta(windowLocation, base);
+  if (jsUrl) return { url: jsUrl, metodo: "window_location" };
+
+  const urlSolta = extrairUrlsMarketplaceHtml(html, base)[0] || "";
+  if (urlSolta) return { url: urlSolta, metodo: "html_marketplace_url" };
+
+  return { url: "", metodo: "html_sem_redirect" };
+}
+
+function resultadoFalha(urlOriginal, dados = {}) {
+  return {
+    ok: false,
+    urlOriginal,
+    urlFinal: dados.urlFinal || "",
+    urlExpandida: "",
+    marketplaceDetectado: "",
+    status: dados.status || "falhou",
+    statusHttp: dados.statusHttp || "",
+    metodo: dados.metodo || "erro_http",
+    motivo: dados.motivo || "redirect_nao_resolvido",
+    ...(dados.erro ? { erro: dados.erro } : {})
+  };
+}
+
 async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
   const httpClient = contexto.httpClient || axios;
-  const timeout = Number(contexto.timeout || 4500);
-  const maxRedirects = Number(contexto.maxRedirects || 5);
+  const timeoutTotal = Math.max(250, Number(contexto.timeout || 4500));
+  const maxRedirects = Math.max(0, Number(contexto.maxRedirects || 5));
+  const maxHtmlHops = Math.max(1, Math.min(3, Number(contexto.maxHtmlHops || 2)));
+  const inicio = Date.now();
   const headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
     Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
   };
+  let urlAtual = urlOriginal;
+  let urlFinal = urlOriginal;
+  let statusHttp = "";
+  let metodo = "http_sem_redirect";
 
   try {
-    const resposta = await httpClient.get(urlOriginal, {
-      maxRedirects,
-      timeout,
-      validateStatus: () => true,
-      responseType: "stream",
-      headers
-    });
+    for (let hop = 0; hop < maxHtmlHops; hop += 1) {
+      const restante = timeoutTotal - (Date.now() - inicio);
+      if (restante <= 0) throw Object.assign(new Error("redirect_timeout"), { code: "ECONNABORTED" });
 
-    const urlHttp = urlRespostaHttp(resposta, urlOriginal);
-    let urlFinal = urlHttp;
-    let metodo = urlFinal !== urlOriginal ? "http_redirect" : "http_sem_redirect";
-    let marketplaceDetectado = detectarMarketplaceRedirect(urlFinal);
-    let html = typeof resposta.data === "string" ? resposta.data : "";
-
-    if (marketplaceDetectado) {
-      if (resposta.data?.destroy) resposta.data.destroy();
-    } else if (!html) {
-      if (resposta.data?.destroy) resposta.data.destroy();
-      const respostaHtml = await httpClient.get(urlOriginal, {
-        maxRedirects: 0,
-        timeout,
+      const resposta = await httpClient.get(urlAtual, {
+        maxRedirects,
+        timeout: restante,
         validateStatus: () => true,
         responseType: "text",
         maxContentLength: 1024 * 1024,
+        maxBodyLength: 1024 * 1024,
         headers
       });
-      html = typeof respostaHtml.data === "string" ? respostaHtml.data : "";
-    }
 
-    if (!marketplaceDetectado) {
-      const metaRefresh = extrairMetaRefresh(html);
-      const windowLocation = metaRefresh ? "" : extrairWindowLocation(html);
-      const candidata = metaRefresh || windowLocation;
-      const expandidaHtml = urlAbsoluta(candidata, urlHttp || urlOriginal);
+      statusHttp = resposta.status || "";
+      urlFinal = urlRespostaHttp(resposta, urlAtual);
+      if (urlFinal !== urlAtual) metodo = "http_redirect";
 
-      if (expandidaHtml) {
-        urlFinal = expandidaHtml;
-        metodo = metaRefresh ? "meta_refresh" : "window_location";
-        marketplaceDetectado = detectarMarketplaceRedirect(urlFinal);
+      if (Number(statusHttp) >= 400) {
+        return resultadoFalha(urlOriginal, {
+          urlFinal,
+          statusHttp,
+          metodo: "erro_http",
+          motivo: `http_status_${statusHttp}`
+        });
       }
+
+      const marketplaceHttp = detectarMarketplaceRedirect(urlFinal);
+      if (marketplaceHttp && urlFinal !== urlOriginal) {
+        return {
+          ok: true,
+          urlOriginal,
+          urlFinal,
+          urlExpandida: urlFinal,
+          marketplaceDetectado: marketplaceHttp,
+          status: "resolvido",
+          statusHttp,
+          metodo,
+          motivo: "redirect_resolvido_marketplace"
+        };
+      }
+
+      const html = Buffer.isBuffer(resposta.data) ? resposta.data.toString("utf8") : String(resposta.data || "");
+      const destinoHtml = extrairDestinoHtml(html, urlFinal || urlAtual);
+      if (!destinoHtml.url) {
+        return resultadoFalha(urlOriginal, {
+          urlFinal,
+          statusHttp,
+          metodo: destinoHtml.metodo,
+          motivo: "redirect_nao_resolvido"
+        });
+      }
+
+      const marketplaceHtml = detectarMarketplaceRedirect(destinoHtml.url);
+      if (marketplaceHtml) {
+        return {
+          ok: true,
+          urlOriginal,
+          urlFinal: destinoHtml.url,
+          urlExpandida: destinoHtml.url,
+          marketplaceDetectado: marketplaceHtml,
+          status: "resolvido",
+          statusHttp,
+          metodo: destinoHtml.metodo,
+          motivo: "redirect_resolvido_marketplace"
+        };
+      }
+
+      if (!dominioRedirectPermitido(destinoHtml.url) || destinoHtml.url === urlAtual) {
+        return resultadoFalha(urlOriginal, {
+          urlFinal: destinoHtml.url,
+          statusHttp,
+          metodo: destinoHtml.metodo,
+          motivo: "redirect_destino_nao_permitido"
+        });
+      }
+
+      urlAtual = destinoHtml.url;
+      urlFinal = destinoHtml.url;
+      metodo = destinoHtml.metodo;
     }
 
-    const ok = Boolean(marketplaceDetectado && urlFinal && urlFinal !== urlOriginal);
-    return {
-      ok,
-      urlOriginal,
+    return resultadoFalha(urlOriginal, {
       urlFinal,
-      urlExpandida: ok ? urlFinal : "",
-      marketplaceDetectado,
-      status: ok ? "resolvido" : "falhou",
-      statusHttp: resposta.status || "",
+      statusHttp,
       metodo,
-      motivo: ok ? "redirect_resolvido_marketplace" : "redirect_nao_resolvido"
-    };
+      motivo: "limite_redirect_html"
+    });
   } catch (e) {
-    return {
-      ok: false,
-      urlOriginal,
-      urlFinal: "",
-      urlExpandida: "",
-      marketplaceDetectado: "",
-      status: "falhou",
-      statusHttp: e.response?.status || "",
+    const timeout = e.code === "ECONNABORTED" || /timeout/i.test(e.message || "");
+    return resultadoFalha(urlOriginal, {
+      urlFinal,
+      statusHttp: e.response?.status || statusHttp || "",
       metodo: "erro_http",
-      motivo: e.message || "redirect_bloqueado",
+      motivo: timeout ? "redirect_timeout" : (e.message || "redirect_bloqueado"),
       erro: e.message || ""
-    };
+    });
   }
 }
 
+function logAuditoriaRedirect(resultado = {}, tempoMs = 0) {
+  console.log("[REDIRECT-RESOLVER-AUDITORIA]", JSON.stringify({
+    urlOriginal: resultado.urlOriginal || "",
+    urlFinal: resultado.urlFinal || "",
+    urlExpandida: resultado.urlExpandida || "",
+    marketplaceDetectado: resultado.marketplaceDetectado || "",
+    resolver: resultado.resolver || "",
+    metodo: resultado.metodo || "",
+    statusHttp: resultado.statusHttp || "",
+    status: resultado.status || "",
+    motivo: resultado.motivo || "",
+    tempoMs: Math.max(0, Number(tempoMs || 0))
+  }));
+}
+
 async function resolverRedirectUniversal(url = "", opcoes = {}) {
+  const inicio = Date.now();
   const urlOriginal = texto(url);
   const registro = localizarResolverRedirect(urlOriginal);
+
   if (!registro) {
-    return {
+    const ignorado = {
       ok: false,
       urlOriginal,
       urlFinal: "",
       urlExpandida: "",
       marketplaceDetectado: "",
+      resolver: "",
+      metodo: "whitelist",
+      statusHttp: "",
       status: "ignorado",
       motivo: "dominio_redirect_nao_permitido"
     };
+    logAuditoriaRedirect(ignorado, Date.now() - inicio);
+    return ignorado;
   }
 
-  const resultado = await registro.resolver(urlOriginal, opcoes);
-  return { ...resultado, resolver: registro.nome };
+  let resultado;
+  try {
+    resultado = await registro.resolver(urlOriginal, opcoes);
+  } catch (e) {
+    resultado = resultadoFalha(urlOriginal, {
+      metodo: "erro_resolver",
+      motivo: e.message || "resolver_falhou",
+      erro: e.message || ""
+    });
+  }
+
+  const final = { ...resultado, urlOriginal, resolver: registro.nome };
+  logAuditoriaRedirect(final, Date.now() - inicio);
+  return final;
 }
 
 registrarResolverRedirect({
@@ -210,7 +386,9 @@ registrarResolverRedirect({
 module.exports = {
   detectarMarketplaceRedirect,
   dominioRedirectPermitido,
+  extrairDestinoHtml,
   extrairMetaRefresh,
+  extrairUrlsMarketplaceHtml,
   extrairWindowLocation,
   listarResolversRedirect: () => resolversRegistrados.map(item => ({ nome: item.nome, dominios: [...item.dominios] })),
   localizarResolverRedirect,
