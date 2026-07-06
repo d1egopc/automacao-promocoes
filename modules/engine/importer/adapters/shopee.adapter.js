@@ -33,14 +33,15 @@ async function buscarImagemHistoricaShopee(shopId = "", itemId = "") {
         AND (
           CONCAT_WS(' ', link_original, link_expandido, link_afiliado, COALESCE(metadata::text, '')) LIKE $1
           OR CONCAT_WS(' ', link_original, link_expandido, link_afiliado, COALESCE(metadata::text, '')) LIKE $2
+          OR CONCAT_WS(' ', link_original, link_expandido, link_afiliado, COALESCE(metadata::text, '')) LIKE $3
           OR (
-            COALESCE(metadata::text, '') LIKE $3
-            AND COALESCE(metadata::text, '') LIKE $4
+            COALESCE(metadata::text, '') LIKE $4
+            AND COALESCE(metadata::text, '') LIKE $5
           )
         )
       ORDER BY atualizada_em DESC NULLS LAST, id DESC
       LIMIT 1`,
-    [`%/product/${shopId}/${itemId}%`, `%-i.${shopId}.${itemId}%`, `%${shopId}%`, `%${itemId}%`]
+    [`%/product/${shopId}/${itemId}%`, `%-i.${shopId}.${itemId}%`, `%/opaanlp/${shopId}/${itemId}%`, `%${shopId}%`, `%${itemId}%`]
   );
 
   if (!resultado.ok) return { imagem: "", origem: "", motivo: "consulta_imagem_historica_falhou" };
@@ -66,6 +67,36 @@ function logAuditoriaShopee(dados = {}) {
     origemImagem: dados.origemImagem || "nenhuma",
     motivoFalha: dados.motivoFalha || "",
     statusFinal: dados.statusFinal || ""
+  }));
+}
+
+function detectarSuspeitaFator100(precoTextoRadar = "", precoAdapter = null) {
+  const precoRadar = numeroPrecoShopeeAdapter(precoTextoRadar);
+  const precoFinal = numeroPrecoShopeeAdapter(precoAdapter);
+  if (precoRadar === null || precoFinal === null) return false;
+  return Math.abs((precoFinal / precoRadar) - 100) < 0.01;
+}
+
+function logPrecoAuditoriaShopee(dados = {}) {
+  console.log("[SHOPEE-PRECO-AUDITORIA]", JSON.stringify({
+    etapa: dados.etapa || "adapter",
+    jobId: dados.jobId || null,
+    clienteId: dados.clienteId || "",
+    urlOriginal: dados.urlOriginal || "",
+    urlExpandida: dados.urlExpandida || "",
+    shopId: dados.shopId || "",
+    itemId: dados.itemId || "",
+    titulo: dados.titulo || "",
+    precoTextoRadar: dados.precoTextoRadar || "",
+    precoApi: dados.precoApi ?? "",
+    precoBruto: dados.precoBruto ?? "",
+    precoNormalizado: dados.precoNormalizado ?? "",
+    precoAdapter: dados.precoAdapter ?? null,
+    precoEngine: dados.precoEngine ?? null,
+    precoTemplate: dados.precoTemplate ?? null,
+    origemPreco: dados.origemPreco || "",
+    motivoEscolhaPreco: dados.motivoEscolhaPreco || "",
+    suspeitaFator100: dados.suspeitaFator100 === true
   }));
 }
 
@@ -462,6 +493,24 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
   };
   const tituloValido = tituloShopeeValido(produto.titulo || produto.nome || "");
   const precoNumerico = numeroPrecoShopeeAdapter(produto.precoAtual || produto.preco || produto.precoMin || "");
+  const precoAuditoria = produto.precoAuditoria && typeof produto.precoAuditoria === "object"
+    ? produto.precoAuditoria
+    : {};
+  const suspeitaFator100 = detectarSuspeitaFator100(precoAuditoria.precoTextoRadar, precoNumerico);
+
+  logPrecoAuditoriaShopee({
+    etapa: "adapter",
+    jobId: job.id,
+    clienteId,
+    urlOriginal: urlOriginalEngine,
+    urlExpandida: produto.linkExpandido || produto.linkOriginal || "",
+    shopId: idsProduto.shopId,
+    itemId: idsProduto.itemId,
+    titulo: produto.titulo || produto.nome || "",
+    ...precoAuditoria,
+    precoAdapter: precoNumerico,
+    suspeitaFator100
+  });
 
   if (!tituloValido || precoNumerico === null) {
     const motivo = !tituloValido ? "shopee_titulo_indisponivel" : "shopee_preco_indisponivel";
@@ -583,6 +632,11 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
       shopId: idsProduto.shopId,
       itemId: idsProduto.itemId,
       produtoId: ofertaAdapter.produtoIdDetectado,
+      precoAuditoria: {
+        ...precoAuditoria,
+        precoAdapter: precoNumerico,
+        suspeitaFator100
+      },
       campoLinkEscolhido: linkEscolhido.campo || "",
       textoRadarTemCupom: Boolean(extrairCupomTextoRadarShopee(textoOriginalRadar).cupom),
       camposProduto: Object.keys(produto || {}),
