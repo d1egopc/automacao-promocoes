@@ -964,6 +964,11 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       precoTemplate: templateInputV2.precoAtual ?? oferta.preco ?? null,
       origemPreco: precoAuditoria.origemPreco || "",
       motivoEscolhaPreco: precoAuditoria.motivoEscolhaPreco || "",
+      campoPrecoUsado: precoAuditoria.campoPrecoUsado || "",
+      tipoCampoPrecoUsado: precoAuditoria.tipoCampoPrecoUsado || "",
+      precoAntesNormalizacao: precoAuditoria.precoAntesNormalizacao ?? "",
+      precoDepoisNormalizacao: precoAuditoria.precoDepoisNormalizacao ?? "",
+      normalizadorAplicado: precoAuditoria.normalizadorAplicado || "",
       suspeitaFator100: precoAuditoria.suspeitaFator100 === true
     }));
   }
