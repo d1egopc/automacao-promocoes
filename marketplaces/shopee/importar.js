@@ -194,6 +194,26 @@ return async function importarShopee(url, config) {
     });
   }
 
+  function motivoNormalizacaoPrecoApiShopee(valor = "") {
+    const bruto = String(valor ?? "").trim();
+    if (!bruto) return "api_sem_preco_usou_fallback_html";
+    if (/^\d{1,4}$/.test(bruto)) return "regra_atual_api_inteiro_ate_4_digitos_como_reais";
+    if (/^\d{5,}$/.test(bruto)) return "regra_atual_api_inteiro_longo_dividido_por_100";
+    if (/^\d+[.,]0+$/.test(bruto)) return "regra_atual_api_decimal_inteiro_dividido_por_100";
+    return "regra_atual_api_decimal_como_reais";
+  }
+
+  function criarPrecoAuditoriaShopee({ precoApi = "", precoBruto = "", precoNormalizado = "", origemPreco = "", motivoEscolhaPreco = "" } = {}) {
+    return {
+      precoTextoRadar: extrairPrecoTextoRadarShopee(),
+      precoApi: precoApi ?? "",
+      precoBruto: precoBruto ?? "",
+      precoNormalizado: precoNormalizado || "",
+      origemPreco: origemPreco || "",
+      motivoEscolhaPreco: motivoEscolhaPreco || ""
+    };
+  }
+
   function normalizarPrecoApiShopee(valor) {
     if (!valor) return "";
 
@@ -536,12 +556,21 @@ const precosHtml = [...html.matchAll(/R\$\s*[\d.]+,\d{2}/g)]
   .filter(Boolean);
 
 const variacaoPrecoHtml = extrairFaixaPrecosHtmlShopee(precosHtml);
+const precoBrutoHtml = dadosHtml.preco || precosHtml[0] || "";
+const origemPrecoHtml = dadosHtml.preco ? "jsonLd.offers.price" : (precosHtml.length ? "html_regex_rs" : "html_sem_preco");
 let precoAtual = normalizarPrecoWebShopee(dadosHtml.preco);
 
 if (!precoAtual && precosHtml.length) {
   const unicos = [...new Set(precosHtml)];
   precoAtual = normalizarPrecoWebShopee(unicos[0]);
 }
+
+const precoAuditoriaHtml = criarPrecoAuditoriaShopee({
+  precoBruto: precoBrutoHtml,
+  precoNormalizado: precoAtual,
+  origemPreco: origemPrecoHtml,
+  motivoEscolhaPreco: dadosHtml.preco ? "preco_jsonld_normalizado_como_valor_monetario" : "primeiro_preco_html_rs_normalizado"
+});
 
 if (!precoAtual) {
   return {
@@ -555,14 +584,15 @@ if (!precoAtual) {
     precoAtual: "",
     imagem: corrigirImagemUrl(imagem) || imagem,
     shopId: ids.shopId,
-    itemId: ids.itemId
+    itemId: ids.itemId,
+    precoAuditoria: precoAuditoriaHtml
   };
 }
 
 logPrecoOrigemShopee({
   titulo,
-  origemPreco: dadosHtml.preco ? "jsonLd.offers.price" : (precosHtml.length ? "html_regex_rs" : "html_sem_preco"),
-  valorBruto: dadosHtml.preco || precosHtml[0] || "",
+  origemPreco: origemPrecoHtml,
+  valorBruto: precoBrutoHtml,
   valorNormalizado: precoAtual
 });
 
@@ -601,7 +631,8 @@ console.log("[SHOPEE-IMAGEM-ORIGEM]", JSON.stringify({
   itemId: ids.itemId,
   produtoId: ids.shopId && ids.itemId ? `${ids.shopId}/${ids.itemId}` : "",
   statusHttp: response.status,
-  motivoFalha: imagem ? "" : "shopee_imagem_indisponivel"
+  motivoFalha: imagem ? "" : "shopee_imagem_indisponivel",
+  precoAuditoria: precoAuditoriaHtml
 };
   } catch (e) {
    console.error("[ERRO] [SHOPEE] SHOPEE HTML ERRO:", e.message);
@@ -636,7 +667,9 @@ console.log("[SHOPEE-IMAGEM-ORIGEM]", JSON.stringify({
    };
  }
 
- const precoMin = normalizarPrecoApiShopee(produto?.priceMin || "") || normalizarPrecoWebShopee(dadosHtmlApi.preco || "");
+ const precoApiBruto = produto?.priceMin || "";
+ const precoHtmlFallbackBruto = dadosHtmlApi.preco || "";
+ const precoMin = normalizarPrecoApiShopee(precoApiBruto) || normalizarPrecoWebShopee(precoHtmlFallbackBruto);
 
 console.log("[SHOPEE] SHOPEE PRODUTO API FINAL:", JSON.stringify(produto, null, 2));
 
@@ -680,6 +713,16 @@ if (!precoAtual) {
     itemId: ids.itemId || produto?.itemId || ""
   };
 }
+
+const precoAuditoriaApi = criarPrecoAuditoriaShopee({
+  precoApi: precoApiBruto,
+  precoBruto: precoApiBruto || precoHtmlFallbackBruto,
+  precoNormalizado: precoAtual,
+  origemPreco: precoApiBruto ? "api_productOfferV2.priceMin" : "html_fallback",
+  motivoEscolhaPreco: precoApiBruto
+    ? motivoNormalizacaoPrecoApiShopee(precoApiBruto)
+    : "api_sem_preco_usou_fallback_html"
+});
 
 logPrecoOrigemShopee({
   titulo: tituloFinalApi,
@@ -745,8 +788,9 @@ logPrecoOrigemShopee({
     produtoId: (ids.shopId || produto?.shopId) && (ids.itemId || produto?.itemId)
       ? `${ids.shopId || produto.shopId}/${ids.itemId || produto.itemId}`
       : "",
-    statusHttp: dadosHtmlApi.statusHttp ?? resolucaoUrlShopee.statusHttp ?? null,
-    motivoFalha: imagem ? "" : "shopee_imagem_indisponivel"
+  statusHttp: dadosHtmlApi.statusHttp ?? resolucaoUrlShopee.statusHttp ?? null,
+  motivoFalha: imagem ? "" : "shopee_imagem_indisponivel",
+  precoAuditoria: precoAuditoriaApi
   };
  };
 

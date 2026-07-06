@@ -71,10 +71,11 @@ function extrairIdsShopee(url = "") {
   const valor = decodificar(url);
   const semQuery = valor.split("?")[0];
   const product = semQuery.match(/\/product\/(\d+)\/(\d+)/i);
+  const opaanlp = semQuery.match(/\/opaanlp\/(\d+)\/(\d+)(?:\/|$)/i);
   const antigo = semQuery.match(/(?:-i\.|\/i\.)(\d+)\.(\d+)/i);
 
-  if (product || antigo) {
-    const match = product || antigo;
+  if (product || opaanlp || antigo) {
+    const match = product || opaanlp || antigo;
     return { shopId: match[1], itemId: match[2] };
   }
 
