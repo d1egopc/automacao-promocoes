@@ -8,12 +8,24 @@ function htmlDecode(text = "") {
 }
 
 function extrairMeta(html = "", property = "") {
-  const regex = new RegExp(
-    `<meta[^>]+(?:property|name)=["']${property}["'][^>]+content=["']([^"']+)["']`,
-    "i"
-  );
+  const alvo = String(property || "").trim().toLowerCase();
+  if (!alvo) return "";
 
-  return htmlDecode(html.match(regex)?.[1] || "");
+  const tags = String(html || "").match(/<meta\b[^>]*>/gi) || [];
+  for (const tag of tags) {
+    const atributos = {};
+    const regexAtributo = /([:\w-]+)\s*=\s*(["'])([\s\S]*?)\2/g;
+    let match;
+
+    while ((match = regexAtributo.exec(tag)) !== null) {
+      atributos[match[1].toLowerCase()] = match[3];
+    }
+
+    const chave = String(atributos.property || atributos.name || "").trim().toLowerCase();
+    if (chave === alvo && atributos.content) return htmlDecode(atributos.content).trim();
+  }
+
+  return "";
 }
 
 function extrairJsonLd(html = "") {
@@ -26,18 +38,31 @@ function extrairJsonLd(html = "") {
       const raw = htmlDecode(match[1]);
       const data = JSON.parse(raw);
 
-      if (Array.isArray(data)) {
-        const product = data.find((x) => x["@type"] === "Product");
-        if (product) return product;
-      }
-
-      if (data["@type"] === "Product") return data;
-
-      if (data["@graph"]) {
-        const product = data["@graph"].find((x) => x["@type"] === "Product");
-        if (product) return product;
-      }
+      const product = encontrarProdutoJsonLd(data);
+      if (product) return product;
     } catch {}
+  }
+
+  return null;
+}
+
+function encontrarProdutoJsonLd(valor, profundidade = 0) {
+  if (!valor || profundidade > 8) return null;
+  if (Array.isArray(valor)) {
+    for (const item of valor) {
+      const product = encontrarProdutoJsonLd(item, profundidade + 1);
+      if (product) return product;
+    }
+    return null;
+  }
+  if (typeof valor !== "object") return null;
+
+  const tipos = Array.isArray(valor["@type"]) ? valor["@type"] : [valor["@type"]];
+  if (tipos.some(tipo => String(tipo || "").toLowerCase() === "product")) return valor;
+
+  for (const item of Object.values(valor)) {
+    const product = encontrarProdutoJsonLd(item, profundidade + 1);
+    if (product) return product;
   }
 
   return null;
