@@ -1,4 +1,12 @@
 const crypto = require("crypto");
+const {
+  canonicalizarUrlShopee,
+  extrairDadosHtmlShopee,
+  extrairIdsShopee: extrairIdsShopeeNormalizado,
+  gerarKeywordShopee: gerarKeywordShopeeNormalizado,
+  tituloShopeeValido,
+  urlShopeeValida
+} = require("./normalizacao");
 
 function criarImportarShopee(deps = {}) {
   const {
@@ -26,19 +34,27 @@ return async function importarShopee(url, config) {
 
   async function expandirLinkCurtoShopee(link = "") {
     const urlOriginal = String(link || "").trim();
-    if (!linkCurtoShopee(urlOriginal)) {
+    const urlCanonicaLocal = canonicalizarUrlShopee(urlOriginal);
+    const idsLocais = extrairIdsShopeeNormalizado(urlCanonicaLocal);
+    const precisaResolverHttp = linkCurtoShopee(urlOriginal) || !idsLocais.itemId;
+
+    if (!precisaResolverHttp) {
       console.log("[SHOPEE-LINK-EXPANDIDO]", {
         urlOriginal,
-        urlFinal: urlOriginal,
-        expandiu: false
+        urlFinal: urlCanonicaLocal,
+        expandiu: urlCanonicaLocal !== urlOriginal,
+        metodo: "canonicalizacao_local"
       });
-      return urlOriginal;
+      return { urlExpandida: urlCanonicaLocal, statusHttp: null, html: "", motivo: "canonicalizacao_local" };
     }
 
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
     try {
       const response = await fetch(urlOriginal, {
         method: "GET",
         redirect: "follow",
+        signal: controller.signal,
         headers: {
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
@@ -47,12 +63,10 @@ return async function importarShopee(url, config) {
           "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
         }
       });
-
-      if (response.body && typeof response.body.cancel === "function") {
-        try { await response.body.cancel(); } catch {}
-      }
-
-      const urlFinal = response.url || urlOriginal;
+      const html = await response.text();
+      const dadosHtml = extrairDadosHtmlShopee(html);
+      const candidataHtml = urlShopeeValida(dadosHtml.canonical) ? dadosHtml.canonical : "";
+      const urlFinal = canonicalizarUrlShopee(candidataHtml || response.url || urlCanonicaLocal || urlOriginal);
       const expandiu = Boolean(urlFinal && urlFinal !== urlOriginal);
 
       console.log("[SHOPEE-LINK-EXPANDIDO]", {
@@ -61,7 +75,12 @@ return async function importarShopee(url, config) {
         expandiu
       });
 
-      return urlFinal || urlOriginal;
+      return {
+        urlExpandida: urlFinal || urlCanonicaLocal || urlOriginal,
+        statusHttp: response.status,
+        html,
+        motivo: expandiu ? "redirect_ou_canonical_resolvido" : "sem_redirect"
+      };
     } catch (e) {
       console.log("[SHOPEE-LINK-EXPANDIDO]", {
         urlOriginal,
@@ -69,7 +88,14 @@ return async function importarShopee(url, config) {
         expandiu: false,
         erro: e.message
       });
-      return urlOriginal;
+      return {
+        urlExpandida: urlCanonicaLocal || urlOriginal,
+        statusHttp: null,
+        html: "",
+        motivo: e.name === "AbortError" ? "timeout_resolver_shopee" : "erro_resolver_shopee"
+      };
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -187,13 +213,27 @@ return async function importarShopee(url, config) {
     return normalizarPrecoShopee(texto);
   }
 
+  function normalizarPrecoWebShopee(valor) {
+    const bruto = String(valor ?? "").replace(/R\$/gi, "").replace(/\s+/g, "").trim();
+    if (!bruto) return "";
+    let normalizado = bruto.replace(/[^\d.,]/g, "");
+    if (!normalizado) return "";
+    if (normalizado.includes(",") && normalizado.includes(".")) {
+      normalizado = normalizado.replace(/\./g, "").replace(",", ".");
+    } else if (normalizado.includes(",")) {
+      normalizado = normalizado.replace(",", ".");
+    }
+    const numero = Number(normalizado);
+    return Number.isFinite(numero) && numero > 0 ? numero.toFixed(2).replace(".", ",") : "";
+  }
+
   function linkShopeeInvalido(link = "") {
     const valor = String(link || "").toLowerCase();
     return valor.includes("shope.ee/error_page") || valor.includes("/error_page");
   }
 
   function tituloShopeeInvalido(titulo = "") {
-    return String(titulo || "").trim().toLowerCase() === "error page";
+    return !tituloShopeeValido(titulo);
   }
 
   function numeroPrecoShopee(valor) {
@@ -257,56 +297,11 @@ return async function importarShopee(url, config) {
     return diagnosticarVariacaoPrecoShopee(precoMin, precoMax);
   }
   function extrairIdsShopee(link) {
-    const texto = String(link || "").split("?")[0];
-
-    // Formato novo: /product/shopId/itemId
-    const matchProduct = texto.match(/\/product\/(\d+)\/(\d+)/i);
-    if (matchProduct) {
-      return {
-        shopId: matchProduct[1],
-        itemId: matchProduct[2]
-      };
-    }
-
-    // Formato antigo: -i.shopId.itemId
-    const match1 = texto.match(/-i\.(\d+)\.(\d+)/i);
-    if (match1) {
-      return {
-        shopId: match1[1],
-        itemId: match1[2]
-      };
-    }
-
-    // Outro formato: i.shopId.itemId
-    const match2 = texto.match(/i\.(\d+)\.(\d+)/i);
-    if (match2) {
-      return {
-        shopId: match2[1],
-        itemId: match2[2]
-      };
-    }
-
-    return {
-      shopId: "",
-      itemId: ""
-    };
+    return extrairIdsShopeeNormalizado(link);
   }
 
   function gerarKeywordShopee(link) {
-    try {
-      const semQuery = String(link).split("?")[0];
-      const parte = decodeURIComponent(semQuery.split("/").pop() || "");
-      const antesDoId = parte.split("-i.")[0] || parte;
-
-      return antesDoId
-        .replace(/-/g, " ")
-        .replace(/[^\p{L}\p{N}\s]/gu, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 80);
-    } catch {
-      return "";
-    }
+    return gerarKeywordShopeeNormalizado(link);
   }
 
   async function chamarShopeeGraphQL(bodyPayload) {
@@ -340,7 +335,34 @@ return async function importarShopee(url, config) {
   }
 
   const urlOriginalShopee = url;
-  url = await expandirLinkCurtoShopee(urlOriginalShopee);
+  const resolucaoUrlShopee = await expandirLinkCurtoShopee(urlOriginalShopee);
+  url = resolucaoUrlShopee.urlExpandida || canonicalizarUrlShopee(urlOriginalShopee);
+  let cacheHtmlShopee = resolucaoUrlShopee.html || "";
+  let cacheStatusHttpShopee = resolucaoUrlShopee.statusHttp ?? null;
+
+  async function obterDadosHtmlFallbackShopee() {
+    if (!cacheHtmlShopee) {
+      const response = await fetch(url, {
+        method: "GET",
+        redirect: "follow",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+          "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+        }
+      });
+      cacheStatusHttpShopee = response.status;
+      cacheHtmlShopee = await response.text();
+      const canonicalHtml = extrairDadosHtmlShopee(cacheHtmlShopee).canonical;
+      if (urlShopeeValida(canonicalHtml)) url = canonicalizarUrlShopee(canonicalHtml);
+    }
+
+    return {
+      ...extrairDadosHtmlShopee(cacheHtmlShopee),
+      html: cacheHtmlShopee,
+      statusHttp: cacheStatusHttpShopee
+    };
+  }
 
   if (linkShopeeInvalido(url)) {
     return {
@@ -460,6 +482,7 @@ return async function importarShopee(url, config) {
       });
 
       const html = await response.text();
+      const dadosHtml = extrairDadosHtmlShopee(html);
 
 console.log("[SHOPEE] SHOPEE HTML TAMANHO:", html.length);
 console.log("[SHOPEE] SHOPEE HTML TEM R$:", html.includes("R$"));
@@ -469,30 +492,35 @@ console.log("[SHOPEE] SHOPEE IDS:", ids);
 
 
       const titulo =
+        dadosHtml.titulo ||
         extrairMeta(html, "og:title") ||
         extrairMeta(html, "twitter:title") ||
         keyword ||
-        "Produto Shopee";
+        "";
 
       if (linkShopeeInvalido(url) || tituloShopeeInvalido(titulo)) {
         return {
           ok: false,
           marketplace: "shopee",
-          motivo: "pagina_erro",
-          linkOriginal: url,
+          motivo: "shopee_titulo_indisponivel",
+          linkOriginal: urlOriginalShopee,
+          linkExpandido: url,
           linkAfiliado: "",
           titulo: "",
           precoAtual: "",
           imagem: ""
         };
       }
+        const imagemJsonLd = dadosHtml.imagem;
         const imagemOg = extrairMeta(html, "og:image");
         const imagemTwitter = extrairMeta(html, "twitter:image");
         const imagem =
+        imagemJsonLd ||
         imagemOg ||
         imagemTwitter ||
         "";
         const origemImagem =
+        imagemJsonLd ? dadosHtml.origemImagem :
         imagemOg ? "og:image" :
         imagemTwitter ? "twitter:image" :
         "nenhuma";
@@ -508,22 +536,33 @@ const precosHtml = [...html.matchAll(/R\$\s*[\d.]+,\d{2}/g)]
   .filter(Boolean);
 
 const variacaoPrecoHtml = extrairFaixaPrecosHtmlShopee(precosHtml);
-let precoAtual = "";
+let precoAtual = normalizarPrecoWebShopee(dadosHtml.preco);
 
-if (precosHtml.length) {
+if (!precoAtual && precosHtml.length) {
   const unicos = [...new Set(precosHtml)];
+  precoAtual = normalizarPrecoWebShopee(unicos[0]);
+}
 
-  if (unicos.length >= 2) {
-    precoAtual = `${unicos[0].replace("R$", "").trim()} a ${unicos[1].replace("R$", "").trim()}`;
-  } else {
-    precoAtual = unicos[0].replace("R$", "").trim();
-  }
+if (!precoAtual) {
+  return {
+    ok: false,
+    marketplace: "shopee",
+    motivo: "shopee_preco_indisponivel",
+    linkOriginal: urlOriginalShopee,
+    linkExpandido: url,
+    linkAfiliado: "",
+    titulo: htmlDecode(titulo).replace(" | Shopee Brasil", "").replace(" | Shopee", "").trim(),
+    precoAtual: "",
+    imagem: corrigirImagemUrl(imagem) || imagem,
+    shopId: ids.shopId,
+    itemId: ids.itemId
+  };
 }
 
 logPrecoOrigemShopee({
   titulo,
-  origemPreco: precosHtml.length ? "html_regex_rs" : "html_sem_preco",
-  valorBruto: precosHtml[0] || "",
+  origemPreco: dadosHtml.preco ? "jsonLd.offers.price" : (precosHtml.length ? "html_regex_rs" : "html_sem_preco"),
+  valorBruto: dadosHtml.preco || precosHtml[0] || "",
   valorNormalizado: precoAtual
 });
 
@@ -546,27 +585,62 @@ console.log("[SHOPEE-IMAGEM-ORIGEM]", JSON.stringify({
     .trim(),
   precoAntigo: "",
   precoAtual,
-  precoMin: variacaoPrecoHtml.precoMin,
-  precoMax: variacaoPrecoHtml.precoMax,
+  precoMin: precoAtual,
+  precoMax: variacaoPrecoHtml.precoMax || precoAtual,
   temVariacaoPreco: variacaoPrecoHtml.temVariacaoPreco,
   avisoVariacaoPreco: variacaoPrecoHtml.avisoVariacaoPreco,
   cupom: normalizarCupomShopee(cupom),
   avisoCupom,
-  linkOriginal: url,
+  linkOriginal: urlOriginalShopee,
+  linkExpandido: url,
   linkAfiliado: url,
   imagem: corrigirImagemUrl(imagem) || imagem,
-  categoria: "Shopee"
+  imagemOrigem: origemImagem,
+  categoria: "Shopee",
+  shopId: ids.shopId,
+  itemId: ids.itemId,
+  produtoId: ids.shopId && ids.itemId ? `${ids.shopId}/${ids.itemId}` : "",
+  statusHttp: response.status,
+  motivoFalha: imagem ? "" : "shopee_imagem_indisponivel"
 };
   } catch (e) {
    console.error("[ERRO] [SHOPEE] SHOPEE HTML ERRO:", e.message);
     }
   }
 
- const precoMin = normalizarPrecoApiShopee(produto?.priceMin || "");
+ let dadosHtmlApi = {};
+ const precisaHtmlApi = !tituloShopeeValido(produto?.productName || "") || !produto?.priceMin || !produto?.imageUrl;
+ if (precisaHtmlApi) {
+   try {
+     dadosHtmlApi = await obterDadosHtmlFallbackShopee();
+   } catch (e) {
+     console.log("[SHOPEE] FALLBACK HTML API FALHOU:", e.message);
+   }
+ }
+
+ const tituloFinalApi = tituloShopeeValido(produto?.productName || "")
+   ? produto.productName
+   : (tituloShopeeValido(dadosHtmlApi.titulo || "") ? dadosHtmlApi.titulo : "");
+ if (!tituloFinalApi) {
+   return {
+     ok: false,
+     marketplace: "shopee",
+     motivo: "shopee_titulo_indisponivel",
+     linkOriginal: urlOriginalShopee,
+     linkExpandido: url,
+     titulo: "",
+     precoAtual: "",
+     imagem: dadosHtmlApi.imagem || "",
+     shopId: ids.shopId || produto?.shopId || "",
+     itemId: ids.itemId || produto?.itemId || ""
+   };
+ }
+
+ const precoMin = normalizarPrecoApiShopee(produto?.priceMin || "") || normalizarPrecoWebShopee(dadosHtmlApi.preco || "");
 
 console.log("[SHOPEE] SHOPEE PRODUTO API FINAL:", JSON.stringify(produto, null, 2));
 
-const precoMax = normalizarPrecoApiShopee(produto?.priceMax || "");
+const precoMax = normalizarPrecoApiShopee(produto?.priceMax || "") || precoMin;
 
 let precoAtual = "";
 let precoAntigo = "";
@@ -580,7 +654,7 @@ const temMax = Number.isFinite(maxNumero) && maxNumero > 0;
 const variacaoPreco = diagnosticarVariacaoPrecoShopee(precoMin, precoMax);
 
 if (temMin && temMax && minNumero !== maxNumero) {
-  precoAtual = `${precoMin} a ${precoMax}`;
+  precoAtual = precoMin;
 
   // Produto com variação: não inventa preço antigo automático
   precoAntigo = "";
@@ -592,27 +666,43 @@ if (temMin && temMax && minNumero !== maxNumero) {
   precoAntigo = "";
 }
 
+if (!precoAtual) {
+  return {
+    ok: false,
+    marketplace: "shopee",
+    motivo: "shopee_preco_indisponivel",
+    linkOriginal: urlOriginalShopee,
+    linkExpandido: url,
+    titulo: tituloFinalApi,
+    precoAtual: "",
+    imagem: produto?.imageUrl || dadosHtmlApi.imagem || "",
+    shopId: ids.shopId || produto?.shopId || "",
+    itemId: ids.itemId || produto?.itemId || ""
+  };
+}
+
 logPrecoOrigemShopee({
-  titulo: produto?.productName || keyword || "Produto Shopee",
+  titulo: tituloFinalApi,
   origemPreco: produto ? "api_productOfferV2_priceMin_priceMax" : "api_sem_produto",
   valorBruto: produto ? JSON.stringify({ priceMin: produto?.priceMin || "", priceMax: produto?.priceMax || "" }) : "",
   valorNormalizado: precoAtual
 });
 
-  let imagem = produto?.imageUrl || "";
-  const origemImagemApi = imagem ? "api_productOfferV2.imageUrl" : "nenhuma";
+  let imagem = produto?.imageUrl || dadosHtmlApi.imagem || "";
+  const origemImagemApi = produto?.imageUrl ? "api_productOfferV2.imageUrl" : (dadosHtmlApi.origemImagem || "nenhuma");
   imagem = htmlDecode(imagem).replace(/\\u002F/g, "/");
 
   if (imagem && imagem.startsWith("//")) {
     imagem = "https:" + imagem;
   }
 
-  if (linkShopeeInvalido(produto?.offerLink || produto?.productLink || "") || tituloShopeeInvalido(produto?.productName || "")) {
+  if (linkShopeeInvalido(produto?.offerLink || produto?.productLink || "") || !tituloShopeeValido(tituloFinalApi)) {
     return {
       ok: false,
       marketplace: "shopee",
-      motivo: "pagina_erro_api",
-      linkOriginal: url,
+      motivo: "shopee_titulo_indisponivel",
+      linkOriginal: urlOriginalShopee,
+      linkExpandido: url,
       linkAfiliado: "",
       titulo: "",
       precoAtual: "",
@@ -621,7 +711,7 @@ logPrecoOrigemShopee({
   }
 
   console.log("[SHOPEE-IMAGEM-ORIGEM]", JSON.stringify({
-    titulo: htmlDecode(produto?.productName || keyword || "Produto Shopee")
+    titulo: htmlDecode(tituloFinalApi)
       .replace(" | Shopee Brasil", "")
       .replace(" | Shopee", "")
       .trim(),
@@ -633,7 +723,7 @@ logPrecoOrigemShopee({
 
   return {
     marketplace: "shopee",
-    titulo: htmlDecode(produto?.productName || keyword || "Produto Shopee")
+    titulo: htmlDecode(tituloFinalApi)
       .replace(" | Shopee Brasil", "")
       .replace(" | Shopee", "")
       .trim(),
@@ -644,10 +734,19 @@ logPrecoOrigemShopee({
     temVariacaoPreco: variacaoPreco.temVariacaoPreco,
     avisoVariacaoPreco: variacaoPreco.avisoVariacaoPreco,
     cupom: normalizarCupomShopee(""),
-    linkOriginal: url,
+    linkOriginal: urlOriginalShopee,
+    linkExpandido: url,
     linkAfiliado: produto?.offerLink || produto?.productLink || url,
     imagem: corrigirImagemUrl(imagem) || imagem,
-    categoria: "Shopee"
+    imagemOrigem: origemImagemApi,
+    categoria: "Shopee",
+    shopId: ids.shopId || produto?.shopId || "",
+    itemId: ids.itemId || produto?.itemId || "",
+    produtoId: (ids.shopId || produto?.shopId) && (ids.itemId || produto?.itemId)
+      ? `${ids.shopId || produto.shopId}/${ids.itemId || produto.itemId}`
+      : "",
+    statusHttp: dadosHtmlApi.statusHttp ?? resolucaoUrlShopee.statusHttp ?? null,
+    motivoFalha: imagem ? "" : "shopee_imagem_indisponivel"
   };
  };
 
