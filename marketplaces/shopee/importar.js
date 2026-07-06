@@ -17,6 +17,12 @@ function normalizarPrecoApiShopee(valor) {
     return Number.isFinite(centavos) && centavos > 0 ? centavos / 100 : null;
   }
 
+  const decimalInteiro = bruto.match(/^(\d+)[.,]0+$/);
+  if (decimalInteiro) {
+    const centavos = Number(decimalInteiro[1]);
+    return Number.isFinite(centavos) && centavos > 0 ? centavos / 100 : null;
+  }
+
   if (!/^\d+[.,]\d+$/.test(bruto)) return null;
   const numero = Number(bruto.replace(",", "."));
   return Number.isFinite(numero) && numero > 0 ? numero : null;
@@ -217,18 +223,41 @@ return async function importarShopee(url, config) {
     const bruto = String(valor ?? "").trim();
     if (!bruto) return "api_sem_preco_usou_fallback_html";
     if (/^\d+$/.test(bruto)) return "api_inteiro_em_centavos_dividido_por_100";
+    if (/^\d+[.,]0+$/.test(bruto)) return "api_decimal_inteiro_em_centavos_dividido_por_100";
     if (/^\d+[.,]\d+$/.test(bruto)) return "api_decimal_preservado_como_reais";
     return "api_preco_invalido";
   }
 
-  function criarPrecoAuditoriaShopee({ precoApi = "", precoBruto = "", precoNormalizado = "", origemPreco = "", motivoEscolhaPreco = "" } = {}) {
+  function tipoPrecoShopee(valor) {
+    if (valor === null) return "null";
+    if (Array.isArray(valor)) return "array";
+    return typeof valor;
+  }
+
+  function criarPrecoAuditoriaShopee({
+    precoApi = "",
+    precoBruto = "",
+    precoNormalizado = "",
+    origemPreco = "",
+    motivoEscolhaPreco = "",
+    campoPrecoUsado = "",
+    tipoCampoPrecoUsado = "",
+    precoAntesNormalizacao = "",
+    precoDepoisNormalizacao = "",
+    normalizadorAplicado = ""
+  } = {}) {
     return {
       precoTextoRadar: extrairPrecoTextoRadarShopee(),
       precoApi: precoApi ?? "",
       precoBruto: precoBruto ?? "",
       precoNormalizado: precoNormalizado || "",
       origemPreco: origemPreco || "",
-      motivoEscolhaPreco: motivoEscolhaPreco || ""
+      motivoEscolhaPreco: motivoEscolhaPreco || "",
+      campoPrecoUsado: campoPrecoUsado || origemPreco || "",
+      tipoCampoPrecoUsado: tipoCampoPrecoUsado || tipoPrecoShopee(precoBruto),
+      precoAntesNormalizacao: precoAntesNormalizacao ?? precoBruto ?? "",
+      precoDepoisNormalizacao: precoDepoisNormalizacao || precoNormalizado || "",
+      normalizadorAplicado: normalizadorAplicado || ""
     };
   }
 
@@ -568,7 +597,12 @@ const precoAuditoriaHtml = criarPrecoAuditoriaShopee({
   precoBruto: precoBrutoHtml,
   precoNormalizado: precoAtual,
   origemPreco: origemPrecoHtml,
-  motivoEscolhaPreco: dadosHtml.preco ? "preco_jsonld_normalizado_como_valor_monetario" : "primeiro_preco_html_rs_normalizado"
+  motivoEscolhaPreco: dadosHtml.preco ? "preco_jsonld_normalizado_como_valor_monetario" : "primeiro_preco_html_rs_normalizado",
+  campoPrecoUsado: origemPrecoHtml,
+  tipoCampoPrecoUsado: tipoPrecoShopee(precoBrutoHtml),
+  precoAntesNormalizacao: precoBrutoHtml,
+  precoDepoisNormalizacao: precoAtual,
+  normalizadorAplicado: "normalizarPrecoWebShopee"
 });
 
 if (!precoAtual) {
@@ -720,7 +754,12 @@ const precoAuditoriaApi = criarPrecoAuditoriaShopee({
   origemPreco: precoApiBruto ? "api_productOfferV2.priceMin" : "html_fallback",
   motivoEscolhaPreco: precoApiBruto
     ? motivoNormalizacaoPrecoApiShopee(precoApiBruto)
-    : "api_sem_preco_usou_fallback_html"
+    : "api_sem_preco_usou_fallback_html",
+  campoPrecoUsado: precoApiBruto ? "productOfferV2.priceMin" : "html_fallback",
+  tipoCampoPrecoUsado: tipoPrecoShopee(precoApiBruto || precoHtmlFallbackBruto),
+  precoAntesNormalizacao: precoApiBruto || precoHtmlFallbackBruto,
+  precoDepoisNormalizacao: precoAtual,
+  normalizadorAplicado: precoApiBruto ? "normalizarPrecoApiShopee" : "normalizarPrecoWebShopee"
 });
 
 logPrecoOrigemShopee({
