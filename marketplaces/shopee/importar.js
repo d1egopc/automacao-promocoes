@@ -8,6 +8,25 @@ const {
   urlShopeeValida
 } = require("./normalizacao");
 
+function normalizarPrecoApiShopee(valor) {
+  if (valor === null || valor === undefined || String(valor).trim() === "") return null;
+
+  const bruto = String(valor).replace(/R\$/gi, "").replace(/\s+/g, "").trim();
+  if (/^\d+$/.test(bruto)) {
+    const centavos = Number(bruto);
+    return Number.isFinite(centavos) && centavos > 0 ? centavos / 100 : null;
+  }
+
+  if (!/^\d+[.,]\d+$/.test(bruto)) return null;
+  const numero = Number(bruto.replace(",", "."));
+  return Number.isFinite(numero) && numero > 0 ? numero : null;
+}
+
+function formatarPrecoApiShopee(valor) {
+  const numero = normalizarPrecoApiShopee(valor);
+  return numero === null ? "" : numero.toFixed(2).replace(".", ",");
+}
+
 function criarImportarShopee(deps = {}) {
   const {
     limparPreco,
@@ -197,10 +216,9 @@ return async function importarShopee(url, config) {
   function motivoNormalizacaoPrecoApiShopee(valor = "") {
     const bruto = String(valor ?? "").trim();
     if (!bruto) return "api_sem_preco_usou_fallback_html";
-    if (/^\d{1,4}$/.test(bruto)) return "regra_atual_api_inteiro_ate_4_digitos_como_reais";
-    if (/^\d{5,}$/.test(bruto)) return "regra_atual_api_inteiro_longo_dividido_por_100";
-    if (/^\d+[.,]0+$/.test(bruto)) return "regra_atual_api_decimal_inteiro_dividido_por_100";
-    return "regra_atual_api_decimal_como_reais";
+    if (/^\d+$/.test(bruto)) return "api_inteiro_em_centavos_dividido_por_100";
+    if (/^\d+[.,]\d+$/.test(bruto)) return "api_decimal_preservado_como_reais";
+    return "api_preco_invalido";
   }
 
   function criarPrecoAuditoriaShopee({ precoApi = "", precoBruto = "", precoNormalizado = "", origemPreco = "", motivoEscolhaPreco = "" } = {}) {
@@ -212,25 +230,6 @@ return async function importarShopee(url, config) {
       origemPreco: origemPreco || "",
       motivoEscolhaPreco: motivoEscolhaPreco || ""
     };
-  }
-
-  function normalizarPrecoApiShopee(valor) {
-    if (!valor) return "";
-
-    const texto = String(valor).trim();
-
-    if (/^\d+$/.test(texto)) {
-      const numero = Number(texto);
-      if (!Number.isFinite(numero) || numero <= 0) return "";
-
-      if (texto.length <= 4) {
-        return numero.toFixed(2).replace(".", ",");
-      }
-
-      return (numero / 100).toFixed(2).replace(".", ",");
-    }
-
-    return normalizarPrecoShopee(texto);
   }
 
   function normalizarPrecoWebShopee(valor) {
@@ -669,11 +668,11 @@ console.log("[SHOPEE-IMAGEM-ORIGEM]", JSON.stringify({
 
  const precoApiBruto = produto?.priceMin || "";
  const precoHtmlFallbackBruto = dadosHtmlApi.preco || "";
- const precoMin = normalizarPrecoApiShopee(precoApiBruto) || normalizarPrecoWebShopee(precoHtmlFallbackBruto);
+ const precoMin = formatarPrecoApiShopee(precoApiBruto) || normalizarPrecoWebShopee(precoHtmlFallbackBruto);
 
 console.log("[SHOPEE] SHOPEE PRODUTO API FINAL:", JSON.stringify(produto, null, 2));
 
-const precoMax = normalizarPrecoApiShopee(produto?.priceMax || "") || precoMin;
+const precoMax = formatarPrecoApiShopee(produto?.priceMax || "") || precoMin;
 
 let precoAtual = "";
 let precoAntigo = "";
@@ -797,5 +796,6 @@ logPrecoOrigemShopee({
 }
 
 module.exports = {
-  criarImportarShopee
+  criarImportarShopee,
+  normalizarPrecoApiShopee
 };
