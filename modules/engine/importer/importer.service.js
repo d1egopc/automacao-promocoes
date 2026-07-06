@@ -941,6 +941,33 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     return { ok: false, motivo: "oferta_nao_retornada" };
   }
 
+  if (normalizarMarketplaceMemoria(oferta.marketplace) === "shopee") {
+    const precoAuditoria = objetoSeguro(
+      metadataFinal.precoAuditoria || metadataFinal.produto?.precoAuditoria || {}
+    );
+    const templateInputV2 = objetoSeguro(metadataFinal.inteligenciaUniversalV2?.templateInput || {});
+    console.log("[SHOPEE-PRECO-AUDITORIA]", JSON.stringify({
+      etapa: "engine_ofertas",
+      jobId: job.id || null,
+      clienteId: job.cliente_id || job.clienteId || "",
+      urlOriginal: oferta.linkOriginal || link?.url_original || "",
+      urlExpandida: oferta.linkExpandido || link?.url_expandida || "",
+      shopId: oferta.shopId || "",
+      itemId: oferta.itemId || "",
+      titulo: oferta.titulo || "",
+      precoTextoRadar: precoAuditoria.precoTextoRadar || "",
+      precoApi: precoAuditoria.precoApi ?? "",
+      precoBruto: precoAuditoria.precoBruto ?? "",
+      precoNormalizado: precoAuditoria.precoNormalizado ?? "",
+      precoAdapter: precoAuditoria.precoAdapter ?? ofertaEntrada.preco ?? ofertaEntrada.precoAtual ?? null,
+      precoEngine: oferta.preco ?? null,
+      precoTemplate: templateInputV2.precoAtual ?? oferta.preco ?? null,
+      origemPreco: precoAuditoria.origemPreco || "",
+      motivoEscolhaPreco: precoAuditoria.motivoEscolhaPreco || "",
+      suspeitaFator100: precoAuditoria.suspeitaFator100 === true
+    }));
+  }
+
   logEngineImporterOfertaCriada({
     jobId: job.id,
     ofertaId,
