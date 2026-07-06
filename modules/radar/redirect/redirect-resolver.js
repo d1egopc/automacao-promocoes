@@ -1,6 +1,8 @@
 const axios = require("axios");
 
 const resolversRegistrados = [];
+const PROMOZONE_API_BASE = "https://link-shortener-501307668672.southamerica-east1.run.app";
+const MARKETPLACES_PROMOZONE_PERMITIDOS = new Set(["mercadolivre", "shopee", "amazon", "aliexpress", "awin"]);
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -71,14 +73,22 @@ function decodificarEscapesUrl(valor = "") {
     .replace(/&amp;/gi, "&")
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
+    .replace(/&#x([0-9a-f]+);?/gi, (_, codigo) => String.fromCodePoint(parseInt(codigo, 16)))
+    .replace(/&#(\d+);?/g, (_, codigo) => String.fromCodePoint(Number(codigo)))
+    .replace(/\\u003[aA]/g, ":")
     .replace(/\\u002[fF]/g, "/")
+    .replace(/\\u0026/g, "&")
+    .replace(/\\u003[dD]/g, "=")
+    .replace(/\\x3[aA]/g, ":")
     .replace(/\\x2[fF]/g, "/")
     .replace(/\\\//g, "/");
 
-  if (/%(?:3a|2f)/i.test(resultado)) {
+  for (let tentativa = 0; tentativa < 2 && /%[0-9a-f]{2}/i.test(resultado); tentativa += 1) {
     try {
       resultado = decodeURIComponent(resultado);
-    } catch {}
+    } catch {
+      break;
+    }
   }
 
   return resultado.trim();
@@ -207,6 +217,26 @@ function resultadoFalha(urlOriginal, dados = {}) {
   };
 }
 
+function sanitizarHtmlAmostra(html = "") {
+  return String(html || "")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[JWT_REDACTED]")
+    .replace(/([?&](?:access_?token|token|api_?key|secret|signature|auth|authorization)=)[^&\s"'<>]+/gi, "$1[REDACTED]")
+    .replace(/((?:access_?token|token|api_?key|secret|signature|authorization)["'\s]*[:=]["'\s]*)[^,"'\s<>}]+/gi, "$1[REDACTED]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 1000);
+}
+
+function logHtmlAmostraPromozone({ urlOriginal = "", statusHttp = "", html = "" } = {}) {
+  console.log("[REDIRECT-RESOLVER-HTML-AMOSTRA]", JSON.stringify({
+    urlOriginal,
+    statusHttp,
+    tamanhoHtml: Buffer.byteLength(String(html || ""), "utf8"),
+    trechoHtmlSanitizado: sanitizarHtmlAmostra(html)
+  }));
+}
+
 async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
   const httpClient = contexto.httpClient || axios;
   const timeoutTotal = Math.max(250, Number(contexto.timeout || 4500));
@@ -267,6 +297,11 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
       }
 
       const html = Buffer.isBuffer(resposta.data) ? resposta.data.toString("utf8") : String(resposta.data || "");
+      if (typeof contexto.onHtml === "function") {
+        try {
+          contexto.onHtml({ html, urlFinal, statusHttp });
+        } catch {}
+      }
       const destinoHtml = extrairDestinoHtml(html, urlFinal || urlAtual);
       if (!destinoHtml.url) {
         return resultadoFalha(urlOriginal, {
@@ -322,6 +357,118 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
       erro: e.message || ""
     });
   }
+}
+
+function codigoPromozone(url = "") {
+  try {
+    const partes = new URL(url).pathname.split("/").filter(Boolean);
+    const codigo = partes.at(-1) || "";
+    return /^[0-9A-Za-z]{6,8}$/.test(codigo) ? codigo : "";
+  } catch {
+    return "";
+  }
+}
+
+function extrairDestinoRespostaPromozone(dados) {
+  let valor = dados;
+  if (typeof valor === "string") {
+    try {
+      valor = JSON.parse(valor);
+    } catch {
+      return "";
+    }
+  }
+
+  const chaves = ["destinationUrl", "destination", "target", "redirect", "url", "href", "link", "deepLink"];
+  const visitados = new Set();
+
+  function procurar(item, profundidade = 0) {
+    if (!item || typeof item !== "object" || profundidade > 4 || visitados.has(item)) return "";
+    visitados.add(item);
+
+    for (const chave of chaves) {
+      if (typeof item[chave] === "string" && item[chave].trim()) return item[chave];
+    }
+    for (const filho of Object.values(item)) {
+      const encontrado = procurar(filho, profundidade + 1);
+      if (encontrado) return encontrado;
+    }
+    return "";
+  }
+
+  return procurar(valor);
+}
+
+async function resolverPromozone(urlOriginal = "", contexto = {}) {
+  const codigo = codigoPromozone(urlOriginal);
+  const httpClient = contexto.httpClient || axios;
+  const timeout = Math.max(250, Number(contexto.timeout || 4500));
+  let falhaApi = null;
+
+  if (codigo) {
+    try {
+      const urlApi = `${PROMOZONE_API_BASE}/resolve/${encodeURIComponent(codigo)}`;
+      const resposta = await httpClient.get(urlApi, {
+        timeout,
+        maxRedirects: 2,
+        validateStatus: () => true,
+        responseType: "json",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; RedirectResolver/1.0)",
+          Accept: "application/json"
+        }
+      });
+      const statusHttp = resposta?.status || "";
+      const candidata = extrairDestinoRespostaPromozone(resposta?.data);
+      const destino = urlAbsoluta(candidata, urlOriginal);
+      const marketplaceDetectado = detectarMarketplaceRedirect(destino);
+
+      if (Number(statusHttp) < 400 && destino && MARKETPLACES_PROMOZONE_PERMITIDOS.has(marketplaceDetectado)) {
+        return {
+          ok: true,
+          urlOriginal,
+          urlFinal: destino,
+          urlExpandida: destino,
+          marketplaceDetectado,
+          status: "resolvido",
+          statusHttp,
+          metodo: "promozone_api",
+          motivo: "promozone_api_resolvida"
+        };
+      }
+
+      falhaApi = Number(statusHttp) >= 400
+        ? `promozone_api_status_${statusHttp}`
+        : (destino ? "promozone_api_destino_nao_permitido" : "promozone_api_sem_destino");
+    } catch (e) {
+      const timeoutApi = e.code === "ECONNABORTED" || /timeout/i.test(e.message || "");
+      if (timeoutApi) {
+        return resultadoFalha(urlOriginal, {
+          metodo: "promozone_api",
+          motivo: "redirect_timeout",
+          erro: e.message || ""
+        });
+      }
+      falhaApi = e.message || "promozone_api_falhou";
+    }
+  }
+
+  let amostraLogada = false;
+  const resultadoFallback = await resolverHttpGenerico(urlOriginal, {
+    ...contexto,
+    onHtml(dados) {
+      if (!amostraLogada) {
+        logHtmlAmostraPromozone({ urlOriginal, ...dados });
+        amostraLogada = true;
+      }
+      if (typeof contexto.onHtml === "function") contexto.onHtml(dados);
+    }
+  });
+
+  if (!resultadoFallback.ok && falhaApi && resultadoFallback.motivo === "redirect_nao_resolvido") {
+    resultadoFallback.motivo = falhaApi;
+  }
+  return resultadoFallback;
 }
 
 function logAuditoriaRedirect(resultado = {}, tempoMs = 0) {
@@ -380,7 +527,7 @@ async function resolverRedirectUniversal(url = "", opcoes = {}) {
 registrarResolverRedirect({
   nome: "promozone",
   dominios: ["go.promozone.ai", "promozone.ai"],
-  resolver: resolverHttpGenerico
+  resolver: resolverPromozone
 });
 
 module.exports = {
@@ -394,5 +541,6 @@ module.exports = {
   localizarResolverRedirect,
   registrarResolverRedirect,
   resolverHttpGenerico,
+  resolverPromozone,
   resolverRedirectUniversal
 };
