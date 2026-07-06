@@ -9,6 +9,12 @@ const {
 const { normalizarTexto } = require("../normalizers");
 const { classificarCategoriaOferta } = require("../../../marketplaces/inteligencia/classificador-categorias");
 const {
+  htmlDecode,
+  extrairMeta,
+  extrairJsonLd,
+  corrigirImagemUrl
+} = require("../../../marketplaces/mercadolivre/utils");
+const {
   avaliarOfertaUniversal,
   detectarIdentidadeProdutoUniversal
 } = require("../../inteligencia-universal");
@@ -200,7 +206,8 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
     preco: normalizarNumero(resultado.preco || resultado.precoAtual || produtoMetadata.precoAtual || produtoMetadata.preco),
     precoOriginal: normalizarNumero(resultado.precoOriginal || resultado.precoAntigo || produtoMetadata.precoOriginal || produtoMetadata.precoAntigo),
     imagem: imagemResolvida.imagem,
-    imagemOrigem: imagemResolvida.campo,
+    imagemOrigem: normalizarTexto(resultado.imagemOrigem || imagemResolvida.campo),
+    statusHttp: normalizarNumero(resultado.statusHttp),
     linkOriginal: normalizarTexto(resultado.linkOriginal || ""),
     linkExpandido: normalizarTexto(resultado.linkExpandido || resultado.urlFinal || ""),
     linkAfiliado: normalizarTexto(resultado.linkAfiliado || resultado.linkFinal || resultado.link || ""),
@@ -224,13 +231,15 @@ async function buscarImagemAnteriorEngine(oferta = {}, job = {}) {
   }
 
   const ofertaAtualId = Number(job.oferta_id) || 0;
+  const usarMetadata = await engineOfertasTemMetadata();
+  const campoMetadata = usarMetadata ? "COALESCE(metadata::text, '')" : "''";
   const resultado = await queryEngine(
     `SELECT id, imagem
        FROM engine_ofertas
       WHERE id <> $2
         AND NULLIF(TRIM(COALESCE(imagem, '')), '') IS NOT NULL
         AND LOWER(REGEXP_REPLACE(COALESCE(marketplace, ''), '[[:space:]_-]+', '', 'g')) IN ('ml', 'mercadolivre')
-        AND UPPER(CONCAT_WS(' ', link_original, link_expandido, link_afiliado)) LIKE '%' || $1 || '%'
+        AND UPPER(CONCAT_WS(' ', link_original, link_expandido, link_afiliado, ${campoMetadata})) LIKE '%' || $1 || '%'
       ORDER BY atualizada_em DESC NULLS LAST, id DESC
       LIMIT 1`,
     [produtoId, ofertaAtualId]
@@ -244,7 +253,135 @@ async function buscarImagemAnteriorEngine(oferta = {}, job = {}) {
   const imagem = normalizarTexto(anterior?.imagem || "");
   return imagem
     ? { imagem, origem: `engine_ofertas.imagem:${anterior.id}`, motivo: "imagem_historica_mesmo_mlb" }
-    : { imagem: "", origem: "", motivo: "historico_mesmo_mlb_sem_imagem" };
+      : { imagem: "", origem: "", motivo: "historico_mesmo_mlb_sem_imagem" };
+}
+
+function extrairMlbImagem(url = "") {
+  return normalizarTexto(url).match(/\bMLB-?(\d{6,})\b/i)?.[1] || "";
+}
+
+function normalizarImagemMercadoLivre(valor = "") {
+  const bruto = normalizarValorImagem(valor);
+  if (!bruto) return "";
+
+  let imagem = htmlDecode(corrigirImagemUrl(bruto)).trim();
+  if (imagem.startsWith("//")) imagem = `https:${imagem}`;
+
+  try {
+    const parsed = new URL(imagem);
+    const host = parsed.hostname.toLowerCase();
+    const dominioSeguro = host === "mlstatic.com" || host.endsWith(".mlstatic.com") || host.endsWith(".mercadolivre.com.br");
+    return ["http:", "https:"].includes(parsed.protocol) && dominioSeguro ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function extrairImagemHtmlMercadoLivre(html = "") {
+  const jsonLd = extrairJsonLd(html);
+  const candidatos = [
+    ["jsonLd.image", Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image],
+    ["og:image", extrairMeta(html, "og:image")],
+    ["twitter:image", extrairMeta(html, "twitter:image")]
+  ];
+
+  const camposThumbnail = /"(thumbnail|thumbnailUrl|secure_url|picture_url)"\s*:\s*"([^"]+)"/gi;
+  let match;
+  while ((match = camposThumbnail.exec(String(html || ""))) !== null) {
+    candidatos.push([`html.${match[1]}`, match[2]]);
+  }
+
+  for (const [origem, valor] of candidatos) {
+    const imagem = normalizarImagemMercadoLivre(valor);
+    if (imagem) return { imagem, origem };
+  }
+
+  return { imagem: "", origem: "nenhuma" };
+}
+
+function extrairCanonicalImagemMercadoLivre(html = "") {
+  return htmlDecode(
+    String(html || "").match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)?.[1] ||
+    String(html || "").match(/<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i)?.[1] ||
+    extrairMeta(html, "og:url") ||
+    ""
+  ).trim();
+}
+
+function urlCanonicaImagemMercadoLivreSegura(url = "", mlbEsperado = "") {
+  try {
+    const parsed = new URL(normalizarTexto(url));
+    return parsed.protocol === "https:" &&
+      parsed.hostname.toLowerCase().endsWith("mercadolivre.com.br") &&
+      extrairMlbImagem(parsed.toString()) === mlbEsperado;
+  } catch {
+    return false;
+  }
+}
+
+async function buscarImagemCanonicaMercadoLivre(oferta = {}) {
+  const urls = [oferta.linkExpandido, oferta.linkOriginal]
+    .map(normalizarTexto)
+    .filter(Boolean);
+  const urlInicial = urls.find(url => extrairMlbImagem(url) && /mercadolivre\.com\.br/i.test(url));
+  const mlb = extrairMlbImagem(urlInicial);
+
+  if (!urlInicial || !mlb) {
+    return { imagem: "", origem: "", linkResolvido: urlInicial || "", statusHttp: null, motivo: "url_canonica_mlb_ausente" };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6500);
+  const options = {
+    redirect: "follow",
+    signal: controller.signal,
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml",
+      "Accept-Language": "pt-BR,pt;q=0.9"
+    }
+  };
+
+  try {
+    let response = await fetch(urlInicial, options);
+    let html = await response.text();
+    let linkResolvido = response.url || urlInicial;
+    let statusHttp = response.status;
+    let bloqueado = /captcha|account-verification|access denied|robot check|verifique[^<]{0,80}rob/i.test(html);
+    let imagemExtraida = statusHttp < 400 && !bloqueado ? extrairImagemHtmlMercadoLivre(html) : { imagem: "", origem: "nenhuma" };
+    const canonical = extrairCanonicalImagemMercadoLivre(html);
+
+    if (!imagemExtraida.imagem && urlCanonicaImagemMercadoLivreSegura(canonical, mlb) && canonical !== linkResolvido) {
+      response = await fetch(canonical, options);
+      html = await response.text();
+      linkResolvido = response.url || canonical;
+      statusHttp = response.status;
+      bloqueado = /captcha|account-verification|access denied|robot check|verifique[^<]{0,80}rob/i.test(html);
+      imagemExtraida = statusHttp < 400 && !bloqueado ? extrairImagemHtmlMercadoLivre(html) : { imagem: "", origem: "nenhuma" };
+    }
+
+    const motivo = imagemExtraida.imagem
+      ? "imagem_canonica_recuperada"
+      : (statusHttp >= 400 ? `http_${statusHttp}` : (bloqueado ? "html_bloqueado" : "html_sem_imagem_valida"));
+
+    return {
+      imagem: imagemExtraida.imagem,
+      origem: imagemExtraida.imagem ? `canonical.${imagemExtraida.origem}` : "",
+      linkResolvido,
+      statusHttp,
+      motivo
+    };
+  } catch (erro) {
+    return {
+      imagem: "",
+      origem: "",
+      linkResolvido: urlInicial,
+      statusHttp: null,
+      motivo: erro?.name === "AbortError" ? "timeout_url_canonica" : `falha_url_canonica:${erro.message}`
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function objetoSeguro(valor = {}) {
@@ -609,10 +746,48 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   const sombraV2 = await aplicarSombraInteligenciaUniversalV2(oferta, ofertaEntrada, job);
   oferta = sombraV2.oferta || oferta;
   const imagemAnterior = await buscarImagemAnteriorEngine(oferta, job);
+  let imagemCanonica = {
+    imagem: "",
+    origem: "",
+    linkResolvido: oferta.linkExpandido || oferta.linkOriginal || "",
+    statusHttp: oferta.statusHttp ?? ofertaEntrada.statusHttp ?? null,
+    motivo: "nao_necessario"
+  };
+
   if (!oferta.imagem && imagemAnterior.imagem) {
     oferta.imagem = imagemAnterior.imagem;
     oferta.imagemOrigem = imagemAnterior.origem;
   }
+
+  if (!oferta.imagem && normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre") {
+    imagemCanonica = await buscarImagemCanonicaMercadoLivre(oferta);
+    if (imagemCanonica.imagem) {
+      oferta.imagem = imagemCanonica.imagem;
+      oferta.imagemOrigem = imagemCanonica.origem;
+    }
+  }
+
+  const identidadeImagem = detectarIdentidadeProdutoUniversal(oferta);
+  const motivoSemImagem = oferta.imagem
+    ? ""
+    : (imagemCanonica.motivo || imagemAnterior.motivo || "imagem_nao_encontrada");
+
+  if (normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre") {
+    console.log("[ML-IMAGEM-FALLBACK]", JSON.stringify({
+      clienteId: job.cliente_id || job.clienteId || "",
+      titulo: oferta.titulo || "",
+      produtoIdDetectado: identidadeImagem.produtoIdDetectado || "",
+      linkOriginal: oferta.linkOriginal || link?.url_original || "",
+      linkResolvido: imagemCanonica.linkResolvido || oferta.linkExpandido || link?.url_expandida || "",
+      statusHttp: imagemCanonica.statusHttp ?? oferta.statusHttp ?? ofertaEntrada.statusHttp ?? null,
+      temImagemParser: temImagemImporter,
+      temImagemHistorica: Boolean(imagemAnterior.imagem),
+      imagemFinal: oferta.imagem || "",
+      origemImagemFinal: oferta.imagemOrigem || campoImagemImporter || "nenhuma",
+      motivoSemImagem
+    }));
+  }
+
   const metadataBase = objetoSeguro(oferta.metadata || ofertaEntrada.metadata || {});
   const metadataFinal = {
     ...metadataBase,
@@ -622,7 +797,10 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       temImagemEngine: Boolean(oferta.imagem),
       campoImagemUsado: oferta.imagemOrigem || campoImagemImporter || "",
       origemImagem: oferta.imagemOrigem || campoImagemImporter || "nenhuma",
-      motivoSemImagem: oferta.imagem ? "" : imagemAnterior.motivo
+      motivoSemImagem,
+      temImagemHistorica: Boolean(imagemAnterior.imagem),
+      linkResolvidoImagem: imagemCanonica.linkResolvido || oferta.linkExpandido || "",
+      statusHttpImagem: imagemCanonica.statusHttp ?? oferta.statusHttp ?? ofertaEntrada.statusHttp ?? null
     }
   };
   const inteligenciaV2 = objetoSeguro(metadataFinal.inteligenciaUniversalV2);
