@@ -6,49 +6,148 @@
   return texto.slice(0, limite - 3).trim() + "...";
 }
 
-function normalizarPreco(valor) {
-  if (valor == null || valor === "") return 0;
+function analisarPrecoTemplate(valor) {
+  const valorOriginal = valor;
+  const tipoPreco = valor === null ? "null" : typeof valor;
 
-  if (typeof valor === "number") {
-    return Number.isFinite(valor) ? valor : 0;
+  if (valor == null || valor === "") {
+    return {
+      numero: 0,
+      valorOriginal,
+      tipoPreco,
+      normalizadorAplicado: "vazio"
+    };
   }
 
-  const normalizado = String(valor)
+  if (typeof valor === "number") {
+    return {
+      numero: Number.isFinite(valor) ? valor : 0,
+      valorOriginal,
+      tipoPreco,
+      normalizadorAplicado: "numero_direto"
+    };
+  }
+
+  let normalizado = String(valor)
     .replace("R$", "")
-    .replace(/\./g, "")
-    .replace(",", ".")
     .replace(/[^\d.]/g, "")
     .trim();
 
+  const bruto = String(valor)
+    .replace(/R\$/gi, "")
+    .replace(/\s+/g, "")
+    .replace(/[^\d.,-]/g, "")
+    .trim();
+
+  const negativo = bruto.startsWith("-");
+  let texto = bruto.replace(/-/g, "");
+
+  if (texto.includes(",") && texto.includes(".")) {
+    texto = texto.replace(/\./g, "").replace(",", ".");
+    normalizado = texto;
+  } else if (texto.includes(",")) {
+    normalizado = texto.replace(",", ".");
+  } else if (texto.includes(".")) {
+    const partes = texto.split(".");
+    const ultimo = partes[partes.length - 1] || "";
+    const formatoMilhar = /^\d{1,3}(?:\.\d{3})+$/.test(texto);
+    normalizado = formatoMilhar && ultimo.length === 3
+      ? texto.replace(/\./g, "")
+      : texto;
+  } else {
+    normalizado = texto;
+  }
+
+  if (negativo && normalizado) normalizado = `-${normalizado}`;
+
   const numero = Number(normalizado);
-  return Number.isFinite(numero) ? numero : 0;
+  return {
+    numero: Number.isFinite(numero) ? numero : 0,
+    valorOriginal,
+    tipoPreco,
+    normalizadorAplicado: "template_moeda_ptbr_decimal_seguro"
+  };
+}
+
+function normalizarPreco(valor) {
+  return analisarPrecoTemplate(valor).numero;
+}
+
+function logTemplatePrecoAuditoria({ precoFila = "", precoTemplate = "", tipoPreco = "", valorOriginal = "", valorFormatado = "", normalizadorAplicado = "" } = {}) {
+  try {
+    console.log("[TEMPLATE-PRECO-AUDITORIA]", JSON.stringify({
+      precoFila,
+      precoTemplate,
+      tipoPreco,
+      valorOriginal,
+      valorFormatado,
+      normalizadorAplicado
+    }));
+  } catch {}
 }
 
 function formatarPreco(valor) {
   if (typeof valor === "number" && Number.isFinite(valor)) {
-    return `R$ ${valor.toLocaleString("pt-BR", {
+    const formatado = `R$ ${valor.toLocaleString("pt-BR", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     })}`;
+    logTemplatePrecoAuditoria({
+      precoFila: valor,
+      precoTemplate: formatado,
+      tipoPreco: typeof valor,
+      valorOriginal: valor,
+      valorFormatado: formatado,
+      normalizadorAplicado: "numero_direto"
+    });
+    return formatado;
   }
 
   const texto = String(valor || "").trim();
   if (!texto) return "";
 
   if (/^R\$\s*/i.test(texto)) {
-    return texto.replace(/^R\$\s*/i, "R$ ");
+    const formatado = texto.replace(/^R\$\s*/i, "R$ ");
+    logTemplatePrecoAuditoria({
+      precoFila: valor,
+      precoTemplate: formatado,
+      tipoPreco: typeof valor,
+      valorOriginal: valor,
+      valorFormatado: formatado,
+      normalizadorAplicado: "ja_formatado_com_rs"
+    });
+    return formatado;
   }
 
-  const numero = normalizarPreco(texto);
+  const analise = analisarPrecoTemplate(texto);
+  const numero = analise.numero;
 
   if (numero > 0) {
-    return `R$ ${numero.toLocaleString("pt-BR", {
+    const formatado = `R$ ${numero.toLocaleString("pt-BR", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     })}`;
+    logTemplatePrecoAuditoria({
+      precoFila: valor,
+      precoTemplate: formatado,
+      tipoPreco: analise.tipoPreco,
+      valorOriginal: valor,
+      valorFormatado: formatado,
+      normalizadorAplicado: analise.normalizadorAplicado
+    });
+    return formatado;
   }
 
-  return `R$ ${texto}`;
+  const formatado = `R$ ${texto}`;
+  logTemplatePrecoAuditoria({
+    precoFila: valor,
+    precoTemplate: formatado,
+    tipoPreco: typeof valor,
+    valorOriginal: valor,
+    valorFormatado: formatado,
+    normalizadorAplicado: "fallback_texto"
+  });
+  return formatado;
 }
 
 function montarLinhaCupom(oferta = {}) {
