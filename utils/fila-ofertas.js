@@ -144,7 +144,7 @@ function registrarResumoV2Rodada(divergencias = [], logger = console) {
     resumoV2Rodada = criarResumoV2Rodada();
     resumoV2Agendado = false;
 
-    logger.log("[V2-RESUMO]", {
+    const resumoLog = {
       ofertasComparadas: resumo.comparacoes,
       iguais: Math.max(0, resumo.comparacoes - resumo.divergencias),
       divergentes: resumo.divergencias,
@@ -153,7 +153,9 @@ function registrarResumoV2Rodada(divergencias = [], logger = console) {
       preco: resumo.preco,
       cupom: resumo.cupom,
       status: resumo.status
-    });
+    };
+
+    logger.log("[V2-RESUMO]", JSON.stringify(resumoLog));
   });
 }
 
@@ -228,15 +230,17 @@ function aplicarComparacaoV1V2Sombra(oferta = {}, contexto = {}, camposUniversai
       totalDivergencias
     };
 
-    logger.log("[INTELIGENCIA-V1-V2-COMPARACAO]", resumo);
+    logger.log("[INTELIGENCIA-V1-V2-COMPARACAO]", JSON.stringify(resumo));
 
     if (divergenciasLog.length > 0) {
-      logger.log("[INTELIGENCIA-V1-V2-DIVERGENCIA]", {
+      const resumoDivergencia = {
         clienteId: resumo.clienteId,
         marketplace: resumo.marketplace,
         titulo: resumo.titulo,
         divergencias: divergenciasLog
-      });
+      };
+
+      logger.log("[INTELIGENCIA-V1-V2-DIVERGENCIA]", JSON.stringify(resumoDivergencia));
     }
 
     registrarResumoV2Rodada(divergencias, logger);
@@ -290,7 +294,7 @@ function aplicarTemplateUniversalSombra(oferta = {}, contexto = {}, camposUniver
       geradoEm: new Date().toISOString()
     };
 
-    logger.log("[TEMPLATE-UNIVERSAL-SOMBRA]", {
+    const resumoTemplate = {
       marketplace: oferta.templateUniversalV2.marketplace,
       titulo: tituloCurto(ofertaTemplate.titulo || oferta.titulo || ""),
       tamanhoTexto: texto.length,
@@ -298,7 +302,9 @@ function aplicarTemplateUniversalSombra(oferta = {}, contexto = {}, camposUniver
       temCupom: Boolean(ofertaTemplate.cupom),
       temLinkAfiliado: Boolean(ofertaTemplate.linkAfiliado),
       sucesso: true
-    });
+    };
+
+    logger.log("[TEMPLATE-UNIVERSAL-SOMBRA]", JSON.stringify(resumoTemplate));
   } catch (e) {
     oferta.templateUniversalV2 = {
       ativo: true,
