@@ -5115,20 +5115,82 @@ app.get("/fila", (req, res) => {
   const itensCliente = fila.filter((o) =>
     (o.clienteId || "admin") === clienteId
   );
-  const itensPaginados = aplicarLimiteLista(itensCliente, req.query, 100, 500);
-  const itensResposta = itensPaginados.itens.map(decorarItemFilaParaResposta);
+  const resumo = {
+    pendentesTotal: itensCliente.filter((o) => o.status === "pendente").length,
+    enviadasTotal: itensCliente.filter((o) => o.status === "enviado").length,
+    retidasTotal: itensCliente.filter((o) => o.status === "retida").length,
+    errosTotal: itensCliente.filter((o) => o.status === "erro").length
+  };
+
+  const textoFiltroFila = valor => String(valor || "").trim().toLowerCase();
+  const statusFiltro = textoFiltroFila(req.query.status);
+  const marketplaceFiltro = textoFiltroFila(req.query.marketplace);
+  const categoriaFiltro = textoFiltroFila(req.query.categoria);
+  const canalFiltro = textoFiltroFila(req.query.canal);
+  const contemFiltroFila = (valor, filtro) =>
+    !filtro || textoFiltroFila(valor).includes(filtro);
+
+  const itensFiltrados = itensCliente.filter(item => {
+    if (statusFiltro && textoFiltroFila(item.status) !== statusFiltro) return false;
+    if (marketplaceFiltro && textoFiltroFila(item.marketplace) !== marketplaceFiltro) return false;
+    if (
+      categoriaFiltro &&
+      !contemFiltroFila(item.categoria || item.categoriaProduto, categoriaFiltro)
+    ) {
+      return false;
+    }
+
+    if (canalFiltro) {
+      const canais = [
+        item.canal,
+        item.destinoCanal,
+        item.tipoCanal,
+        item.tipoMidia,
+        item.destino?.canal,
+        item.destino?.tipo,
+        item.destino?.tipoMidia,
+        item.destinoTipo,
+        item.destinoNome
+      ];
+
+      if (!canais.some(canal => contemFiltroFila(canal, canalFiltro))) return false;
+    }
+
+    return true;
+  });
+
+  const limit = Math.max(1, Math.min(500, Math.floor(Number(req.query.limit) || 100)));
+  const pageQuery = Math.floor(Number(req.query.page) || 0);
+  const offsetQuery = Math.max(0, Math.floor(Number(req.query.offset) || 0));
+  const page = Math.max(1, pageQuery || Math.floor(offsetQuery / limit) + 1);
+  const offset = (page - 1) * limit;
+  const totalFiltrado = itensFiltrados.length;
+  const totalPages = Math.max(1, Math.ceil(totalFiltrado / limit));
+  const itensResposta = itensFiltrados
+    .slice(offset, offset + limit)
+    .map(decorarItemFilaParaResposta);
 
   res.json({
     ok: true,
     clienteId,
     total: itensCliente.length,
-    limit: itensPaginados.limit,
-    offset: itensPaginados.offset,
-    hasMore: itensPaginados.hasMore,
-    pendentes: itensCliente.filter((o) => o.status === "pendente").length,
-    enviados: itensCliente.filter((o) => o.status === "enviado").length,
-    retidas: itensCliente.filter((o) => o.status === "retida").length,
-    erros: itensCliente.filter((o) => o.status === "erro").length,
+    totalFiltrado,
+    page,
+    limit,
+    offset,
+    totalPages,
+    hasMore: page < totalPages,
+    resumo,
+    filtros: {
+      status: statusFiltro,
+      marketplace: marketplaceFiltro,
+      categoria: categoriaFiltro,
+      canal: canalFiltro
+    },
+    pendentes: resumo.pendentesTotal,
+    enviados: resumo.enviadasTotal,
+    retidas: resumo.retidasTotal,
+    erros: resumo.errosTotal,
     itens: itensResposta,
     fila: itensResposta
   });

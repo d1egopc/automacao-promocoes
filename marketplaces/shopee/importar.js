@@ -17,14 +17,16 @@ function normalizarPrecoApiShopee(valor) {
     return Number.isFinite(centavos) && centavos > 0 ? centavos / 100 : null;
   }
 
-  const decimalInteiro = bruto.match(/^(\d+)[.,]0+$/);
-  if (decimalInteiro) {
-    const centavos = Number(decimalInteiro[1]);
-    return Number.isFinite(centavos) && centavos > 0 ? centavos / 100 : null;
+  let normalizado = bruto.replace(/[^\d.,]/g, "");
+  if (!normalizado) return null;
+
+  if (normalizado.includes(",") && normalizado.includes(".")) {
+    normalizado = normalizado.replace(/\./g, "").replace(",", ".");
+  } else if (normalizado.includes(",")) {
+    normalizado = normalizado.replace(",", ".");
   }
 
-  if (!/^\d+[.,]\d+$/.test(bruto)) return null;
-  const numero = Number(bruto.replace(",", "."));
+  const numero = Number(normalizado);
   return Number.isFinite(numero) && numero > 0 ? numero : null;
 }
 
@@ -136,19 +138,22 @@ return async function importarShopee(url, config) {
         : "";
     }
 
-    const decimalInteiro = texto.match(/^(\d+)[.,]0+$/);
-    if (decimalInteiro) {
-      const centavos = Number(decimalInteiro[1]);
-      return Number.isFinite(centavos) && centavos > 0
-        ? (centavos / 100).toFixed(2).replace(".", ",")
-        : "";
+    let normalizado = texto
+      .replace("R$", "")
+      .replace(/\s+/g, "")
+      .replace(/[^\d.,]/g, "")
+      .trim();
+
+    if (normalizado.includes(",") && normalizado.includes(".")) {
+      normalizado = normalizado.replace(/\./g, "").replace(",", ".");
+    } else if (normalizado.includes(",")) {
+      normalizado = normalizado.replace(",", ".");
     }
 
-    if (/^\d+\.\d+$/.test(texto)) {
-      return Number(texto).toFixed(2).replace(".", ",");
-    }
-
-    return limparPreco(texto);
+    const numero = Number(normalizado);
+    return Number.isFinite(numero) && numero > 0
+      ? numero.toFixed(2).replace(".", ",")
+      : limparPreco(texto);
   }
 
 
