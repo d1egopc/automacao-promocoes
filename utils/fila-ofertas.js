@@ -94,6 +94,18 @@ function scoreUniversal(metadata = {}) {
   return metadata.score?.score ?? metadata.score ?? null;
 }
 
+function statusEquivalenteV1V2(statusV1, statusV2) {
+  const v1 = textoComparacaoNormalizado(statusV1);
+  const v2 = textoComparacaoNormalizado(statusV2);
+
+  if (v1 === "pendente" && v2 === "aprovada") return true;
+  if (v1 === "aprovada" && v2 === "pendente") return true;
+  if (v1 === "retida" && v2 === "retida") return true;
+  if (v1 === "erro" && v2 === "erro") return true;
+
+  return v1 === v2;
+}
+
 function adicionarComparacaoDivergencia(divergencias, campo, v1, v2, comparar = null) {
   const temV1 = v1 !== null && v1 !== undefined && textoComparacao(v1) !== "";
 
@@ -188,7 +200,13 @@ function aplicarComparacaoV1V2Sombra(oferta = {}, contexto = {}, camposUniversai
       if (n1 === null || n2 === null) return textoComparacao(a) === textoComparacao(b);
       return Math.abs(n1 - n2) < 0.01;
     });
-    adicionarComparacaoDivergencia(divergencias, "status", statusV1, statusV2);
+    adicionarComparacaoDivergencia(
+      divergencias,
+      "status",
+      statusV1,
+      statusV2,
+      statusEquivalenteV1V2
+    );
     adicionarComparacaoDivergencia(divergencias, "motivo", motivoV1, motivoV2);
     adicionarComparacaoDivergencia(divergencias, "preco", precoV1, precoV2, (a, b) => {
       const n1 = numeroComparacao(a);
