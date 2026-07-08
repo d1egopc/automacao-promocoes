@@ -14803,7 +14803,7 @@ function extrairCsrfMercadoLivreHtml(html = "") {
 
 function respostaTesteMercadoLivre(status, mensagem, tipo = status, detalhes = {}) {
   return {
-    ok: status === "ok",
+    ok: status === "ok" || status === "afiliado_ok",
     status,
     tipo,
     mensagem,
@@ -14819,9 +14819,9 @@ async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
 
   if (!cookies || !tag) {
     return respostaTesteMercadoLivre(
-      "nao_configurado",
+      !cookies ? "cookie_ausente" : "tag_ausente",
       MENSAGEM_NAO_CONFIGURADO_ML,
-      "configuracao_incompleta",
+      !cookies ? "cookie_ausente" : "tag_ausente",
       { faltandoCookies: !cookies, faltandoTag: !tag }
     );
   }
@@ -14846,23 +14846,20 @@ async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
       textoFalha.includes("account-verification") ||
       textoFalha.includes("suspicious-traffic")
     ) {
+      const bloqueioMl = textoFalha.includes("suspicious-traffic");
       return respostaTesteMercadoLivre(
-        "cookies_invalidos",
+        bloqueioMl ? "bloqueio_ml" : "cookie_expirado",
         MENSAGEM_COOKIES_INVALIDOS,
-        textoFalha.includes("account-verification")
-          ? "account_verification"
-          : textoFalha.includes("suspicious-traffic")
-            ? "suspicious_traffic"
-            : "cookie_invalido",
+        bloqueioMl ? "bloqueio_ml" : "cookie_expirado",
         { httpStatus: response.status, urlFinal }
       );
     }
 
     if (!response.ok) {
       return respostaTesteMercadoLivre(
-        "cookies_invalidos",
+        "cookie_expirado",
         MENSAGEM_COOKIES_INVALIDOS,
-        "cookie_invalido",
+        "cookie_expirado",
         { httpStatus: response.status, urlFinal }
       );
     }
@@ -14871,9 +14868,9 @@ async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
 
     if (!csrfToken) {
       return respostaTesteMercadoLivre(
-        "cookies_invalidos",
+        "cookie_expirado",
         MENSAGEM_COOKIES_INVALIDOS,
-        "cookie_invalido",
+        "cookie_expirado",
         { motivo: "csrf_nao_encontrado", httpStatus: response.status, urlFinal }
       );
     }
@@ -14903,9 +14900,9 @@ async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
 
     if ([401, 403, 419].includes(Number(conversao.status))) {
       return respostaTesteMercadoLivre(
-        "cookies_invalidos",
+        "cookie_expirado",
         MENSAGEM_COOKIES_INVALIDOS,
-        "cookie_invalido",
+        "cookie_expirado",
         { httpStatus: conversao.status }
       );
     }
@@ -14920,9 +14917,9 @@ async function testarMercadoLivreCookies(clienteId = "admin", config = {}) {
     }
 
     return respostaTesteMercadoLivre(
-      "ok",
+      "afiliado_ok",
       MENSAGEM_TESTE_OK,
-      "teste_ok",
+      "afiliado_ok",
       { linkAfiliado }
     );
   } catch (e) {
@@ -14962,9 +14959,9 @@ async function testarAmazonConfiguracao(config = {}) {
     }
 
     return respostaTesteAmazon(
-      "teste_pendente",
+      "teste_nao_implementado",
       MENSAGEM_TESTE_PENDENTE,
-      "teste_pendente",
+      "teste_nao_implementado",
       { modo, observacao: "Teste real automÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡tico preservado apenas para modo cookies." }
     );
   }
@@ -15043,6 +15040,319 @@ async function testarAmazonConfiguracao(config = {}) {
     );
   }
 }
+
+function logTesteIntegracao(tag, dados = {}) {
+  console.log(tag, JSON.stringify(dados));
+}
+
+function montarResultadoTesteIntegracao(marketplace, status, mensagem, tipo = status, detalhes = {}, ok = null) {
+  return {
+    ok: ok === null ? status === "ok" || status === "afiliado_ok" : ok === true,
+    marketplace,
+    status,
+    mensagem,
+    detalhes: detalhes || {},
+    tipo,
+    testadoEm: new Date().toISOString()
+  };
+}
+
+function credenciaisShopeeTeste(credenciais = {}) {
+  return {
+    appId: String(credenciais.appId || credenciais.app_id || "").trim(),
+    secret: String(credenciais.secret || credenciais.appSecret || credenciais.app_secret || "").trim()
+  };
+}
+
+async function testarShopeeIntegracao(config = {}) {
+  const credenciais = credenciaisShopeeTeste(config?.credenciais || {});
+  const marketplace = "shopee";
+
+  if (!credenciais.appId || !credenciais.secret) {
+    return montarResultadoTesteIntegracao(
+      marketplace,
+      "credencial_ausente",
+      "Preencha appId e secret da Shopee para testar.",
+      "credencial_ausente",
+      { faltandoAppId: !credenciais.appId, faltandoSecret: !credenciais.secret },
+      false
+    );
+  }
+
+  try {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const bodyPayload = {
+      query: `
+        query {
+          productOfferV2(keyword: "oferta", page: 1, limit: 1) {
+            nodes {
+              itemId
+              productName
+              offerLink
+            }
+          }
+        }
+      `
+    };
+    const payload = JSON.stringify(bodyPayload);
+    const baseString = `${credenciais.appId}${timestamp}${payload}${credenciais.secret}`;
+    const sign = crypto
+      .createHash("sha256")
+      .update(baseString, "utf8")
+      .digest("hex");
+
+    const response = await fetch("https://open-api.affiliate.shopee.com.br/graphql", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `SHA256 Credential=${credenciais.appId}, Timestamp=${timestamp}, Signature=${sign}`
+      },
+      body: payload
+    });
+
+    const data = await response.json().catch(() => null);
+
+    if ([401, 403].includes(Number(response.status)) || data?.errors?.length) {
+      return montarResultadoTesteIntegracao(
+        marketplace,
+        "credencial_invalida",
+        "Credenciais Shopee invalidas ou recusadas pela API.",
+        "credencial_invalida",
+        { httpStatus: response.status, errors: data?.errors || [] },
+        false
+      );
+    }
+
+    if (!response.ok) {
+      return montarResultadoTesteIntegracao(
+        marketplace,
+        "falha_api",
+        "Falha ao consultar a API da Shopee.",
+        "falha_api",
+        { httpStatus: response.status, resposta: data },
+        false
+      );
+    }
+
+    return montarResultadoTesteIntegracao(
+      marketplace,
+      "ok",
+      "Shopee conectada com sucesso.",
+      "teste_ok",
+      {
+        httpStatus: response.status,
+        itens: data?.data?.productOfferV2?.nodes?.length || 0
+      },
+      true
+    );
+  } catch (e) {
+    return montarResultadoTesteIntegracao(
+      marketplace,
+      "falha_api",
+      "Erro ao testar a API da Shopee.",
+      "erro_teste",
+      { erro: e.message },
+      false
+    );
+  }
+}
+
+function credenciaisAliExpressTeste(credenciais = {}) {
+  return {
+    appKey: String(credenciais.appKey || credenciais.app_key || "").trim(),
+    secret: String(credenciais.secret || credenciais.appSecret || credenciais.app_secret || "").trim(),
+    trackingId: String(credenciais.trackingId || credenciais.tracking_id || "").trim()
+  };
+}
+
+function testarAliExpressIntegracao(config = {}) {
+  const credenciais = credenciaisAliExpressTeste(config?.credenciais || {});
+  const faltando = [];
+  if (!credenciais.appKey) faltando.push("appKey");
+  if (!credenciais.secret) faltando.push("secret");
+  if (!credenciais.trackingId) faltando.push("trackingId");
+
+  if (faltando.length) {
+    return montarResultadoTesteIntegracao(
+      "aliexpress",
+      "credencial_ausente",
+      "Preencha appKey, secret e trackingId da AliExpress para testar.",
+      "credencial_ausente",
+      { faltando },
+      false
+    );
+  }
+
+  return montarResultadoTesteIntegracao(
+    "aliexpress",
+    "teste_nao_implementado",
+    "Credenciais AliExpress presentes; teste real leve ainda nao implementado.",
+    "teste_nao_implementado",
+    { camposPresentes: ["appKey", "secret", "trackingId"] },
+    false
+  );
+}
+
+async function testarAwinOuKabumIntegracao(clienteId = "admin", marketplace = "awin", config = {}) {
+  const integracaoAwin = marketplace === "kabum"
+    ? getIntegracaoCliente(clienteId, "awin")
+    : config;
+  const credenciais = normalizarCredenciaisAwin(integracaoAwin?.credenciais || {});
+  const faltando = [];
+  if (!credenciais.publisherId) faltando.push("publisherId");
+  if (!credenciais.apiToken) faltando.push("apiToken");
+
+  if (faltando.length) {
+    return montarResultadoTesteIntegracao(
+      marketplace,
+      "credencial_ausente",
+      marketplace === "kabum"
+        ? "Preencha publisherId e apiToken da AWIN para testar KaBuM."
+        : "Preencha publisherId e apiToken da AWIN para testar.",
+      "credencial_ausente",
+      { faltando },
+      false
+    );
+  }
+
+  try {
+    const url = `https://api.awin.com/publishers/${credenciais.publisherId}/programmes`;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${credenciais.apiToken}`
+      },
+      params: {
+        relationship: "joined"
+      },
+      timeout: 15000
+    });
+
+    return montarResultadoTesteIntegracao(
+      marketplace,
+      "ok",
+      marketplace === "kabum"
+        ? "AWIN/KaBuM conectada com sucesso."
+        : "AWIN conectada com sucesso.",
+      "teste_ok",
+      { totalProgramas: Array.isArray(response.data) ? response.data.length : 0 },
+      true
+    );
+  } catch (e) {
+    return montarResultadoTesteIntegracao(
+      marketplace,
+      "falha_api",
+      marketplace === "kabum"
+        ? "Falha ao consultar AWIN para KaBuM."
+        : "Falha ao consultar API da AWIN.",
+      "falha_api",
+      { erro: e.response?.data || e.message },
+      false
+    );
+  }
+}
+
+function normalizarResultadoTesteLegado(marketplace, resultado = {}) {
+  return {
+    ok: resultado.ok === true,
+    marketplace,
+    status: resultado.status || (resultado.ok ? "ok" : "falha"),
+    mensagem: resultado.mensagem || resultado.ultimaMensagem || resultado.message || "",
+    detalhes: resultado.detalhes || {},
+    tipo: resultado.tipo || resultado.status || "",
+    testadoEm: resultado.testadoEm || new Date().toISOString()
+  };
+}
+
+function aplicarResultadoTesteIntegracao(clienteId = "admin", marketplace = "", resultado = {}) {
+  const mp = normalizarMarketplaceIntegracao(marketplace);
+  const configAtualizada = salvarResultadoTesteIntegracao(clienteId, mp, {
+    status: resultado.status,
+    mensagem: resultado.mensagem
+  });
+
+  if (resultado.ok) {
+    limparAlertaIntegracao(clienteId, mp);
+    logTesteIntegracao("[INTEGRACAO-ALERTA-LIMPO]", { clienteId, marketplace: mp });
+  } else if (resultado.status !== "teste_nao_implementado") {
+    registrarAlertaIntegracao(clienteId, mp, {
+      tipo: resultado.tipo || resultado.status,
+      status: "atencao",
+      mensagem: resultado.mensagem,
+      detalhes: resultado.detalhes || {}
+    });
+    logTesteIntegracao("[INTEGRACAO-ALERTA-REGISTRADO]", {
+      clienteId,
+      marketplace: mp,
+      tipo: resultado.tipo || resultado.status
+    });
+  }
+
+  return {
+    ...resultado,
+    message: resultado.mensagem,
+    ultimoTesteEm: configAtualizada?.ultimoTesteEm || resultado.testadoEm,
+    ultimoStatus: resultado.status,
+    ultimaMensagem: resultado.mensagem
+  };
+}
+
+async function executarTesteIntegracaoMarketplace(clienteId = "admin", marketplace = "", config = null) {
+  const mp = normalizarMarketplaceIntegracao(marketplace);
+  const integracao = config || getIntegracaoCliente(clienteId, mp);
+
+  logTesteIntegracao("[INTEGRACAO-TESTE-INICIO]", {
+    clienteId,
+    marketplace: mp,
+    temIntegracao: Boolean(integracao)
+  });
+
+  if (!integracao && mp !== "kabum") {
+    return montarResultadoTesteIntegracao(
+      mp,
+      "nao_configurado",
+      "Integracao nao configurada.",
+      "nao_configurado",
+      {},
+      false
+    );
+  }
+
+  let resultado;
+
+  if (mp === "mercadolivre") {
+    resultado = normalizarResultadoTesteLegado(mp, await testarMercadoLivreCookies(clienteId, integracao));
+  } else if (mp === "amazon") {
+    resultado = normalizarResultadoTesteLegado(mp, await testarAmazonConfiguracao(integracao));
+  } else if (mp === "shopee") {
+    resultado = await testarShopeeIntegracao(integracao);
+  } else if (mp === "awin" || mp === "kabum") {
+    resultado = await testarAwinOuKabumIntegracao(clienteId, mp, integracao);
+  } else if (mp === "aliexpress") {
+    resultado = testarAliExpressIntegracao(integracao);
+  } else {
+    resultado = montarResultadoTesteIntegracao(
+      mp,
+      "marketplace_nao_suportado",
+      "Marketplace nao suportado para teste.",
+      "marketplace_nao_suportado",
+      {},
+      false
+    );
+  }
+
+  const final = aplicarResultadoTesteIntegracao(clienteId, mp, resultado);
+
+  logTesteIntegracao(final.ok ? "[INTEGRACAO-TESTE-OK]" : "[INTEGRACAO-TESTE-FALHA]", {
+    clienteId,
+    marketplace: mp,
+    status: final.status,
+    mensagem: final.mensagem,
+    testadoEm: final.testadoEm
+  });
+
+  return final;
+}
+
 function avaliarAlertasConfiguracaoIntegracoes(clienteId = "admin") {
   const integracoes = integracoesPorCliente?.[clienteId] || {};
   const ml = integracoes.mercadolivre;
@@ -15344,6 +15654,34 @@ app.delete("/integracoes/:marketplace", (req, res) => {
 });
 
 app.post("/integracoes/:marketplace/test", async (req, res) => {
+  {
+    try {
+      const clienteId = getClienteId(req);
+      const marketplace = normalizarMarketplaceIntegracao(req.params.marketplace || "");
+      const resultado = await executarTesteIntegracaoMarketplace(clienteId, marketplace);
+      const httpStatus = resultado.status === "nao_configurado" || resultado.status === "credencial_ausente"
+        ? 400
+        : 200;
+
+      return res.status(httpStatus).json(resultado);
+    } catch (e) {
+      console.log("[INTEGRACAO-TESTE-FALHA]", JSON.stringify({
+        marketplace: req.params.marketplace || "",
+        erro: e.message
+      }));
+
+      return res.status(500).json({
+        ok: false,
+        marketplace: req.params.marketplace || "",
+        status: "erro_interno",
+        mensagem: "Erro interno ao testar integracao.",
+        message: "Erro interno ao testar integracao.",
+        detalhes: { erro: e.message },
+        testadoEm: new Date().toISOString()
+      });
+    }
+  }
+
   const clienteId = getClienteId(req);
   const marketplace = req.params.marketplace.toLowerCase();
   const config = integracoesPorCliente[clienteId]?.[marketplace];
