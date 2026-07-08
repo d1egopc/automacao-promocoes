@@ -89,6 +89,10 @@ const {
 } = require("./marketplaces/shopee");
 
 const {
+  testarIntegracaoMarketplace
+} = require("./utils/testar-integracao-marketplace");
+
+const {
   BUSCAS_GLOBAIS,
   gerarBuscasGlobais
 } = require("./marketplaces/inteligencia/buscas-globais");
@@ -15658,8 +15662,58 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
     try {
       const clienteId = getClienteId(req);
       const marketplace = normalizarMarketplaceIntegracao(req.params.marketplace || "");
-      const resultado = await executarTesteIntegracaoMarketplace(clienteId, marketplace);
-      const httpStatus = resultado.status === "nao_configurado" || resultado.status === "credencial_ausente"
+      const config = getIntegracaoCliente(clienteId, marketplace) ||
+        (marketplace === "kabum" ? getIntegracaoCliente(clienteId, "awin") : null);
+
+      console.log("[INTEGRACAO-TESTE-INICIO]", JSON.stringify({
+        clienteId,
+        marketplace
+      }));
+
+      const resultadoTeste = await testarIntegracaoMarketplace(clienteId, marketplace, config || {});
+      const configAtualizada = salvarResultadoTesteIntegracao(clienteId, marketplace, {
+        status: resultadoTeste.status,
+        mensagem: resultadoTeste.mensagem
+      });
+
+      if (resultadoTeste.ok) {
+        limparAlertaIntegracao(clienteId, marketplace);
+        console.log("[INTEGRACAO-TESTE-OK]", JSON.stringify({
+          clienteId,
+          marketplace,
+          status: resultadoTeste.status,
+          codigo: resultadoTeste.codigo
+        }));
+      } else {
+        registrarAlertaIntegracao(clienteId, marketplace, {
+          tipo: resultadoTeste.codigo || resultadoTeste.status,
+          status: "atencao",
+          mensagem: resultadoTeste.mensagem,
+          detalhes: resultadoTeste.detalhes || {}
+        });
+
+        const tagLog = resultadoTeste.status === "teste_nao_implementado"
+          ? "[INTEGRACAO-TESTE-NAO-IMPLEMENTADO]"
+          : "[INTEGRACAO-TESTE-FALHA]";
+
+        console.log(tagLog, JSON.stringify({
+          clienteId,
+          marketplace,
+          status: resultadoTeste.status,
+          codigo: resultadoTeste.codigo
+        }));
+      }
+
+      const resultado = {
+        ...resultadoTeste,
+        message: resultadoTeste.mensagem,
+        ultimoTesteEm: configAtualizada?.ultimoTesteEm || resultadoTeste.testadoEm,
+        ultimoStatus: resultadoTeste.status,
+        ultimaMensagem: resultadoTeste.mensagem
+      };
+
+      const httpStatus = resultado.status === "credencial_ausente" ||
+        resultado.status === "marketplace_nao_suportado"
         ? 400
         : 200;
 
