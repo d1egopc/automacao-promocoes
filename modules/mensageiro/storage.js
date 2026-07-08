@@ -181,6 +181,12 @@ function normalizarGatilhoAtendimento(gatilho = {}, index = 0) {
     ativo: gatilho?.ativo !== false,
     nome: String(gatilho?.nome || `Gatilho ${index + 1}`).trim(),
     modo: MODOS_GATILHO_ATENDIMENTO.has(gatilho?.modo) ? gatilho.modo : "todas",
+    tipoCorrespondencia: String(
+      gatilho?.tipoCorrespondencia ||
+      gatilho?.correspondencia ||
+      gatilho?.match ||
+      "exato"
+    ).toLowerCase(),
     palavrasObrigatorias: normalizarListaPalavras(gatilho?.palavrasObrigatorias),
     palavrasOpcionais: normalizarListaPalavras(gatilho?.palavrasOpcionais),
     respostas: respostas

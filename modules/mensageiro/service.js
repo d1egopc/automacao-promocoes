@@ -92,7 +92,7 @@ function encontrarRespostaRapida(texto = "", respostasRapidas = []) {
     if (!Array.isArray(respostaRapida.gatilhos) || !respostaRapida.gatilhos.length) continue;
 
     const tipoCorrespondencia = String(
-      respostaRapida.tipoCorrespondencia || "contem"
+      respostaRapida.tipoCorrespondencia || "exato"
     ).toLowerCase();
 
     for (const gatilho of respostaRapida.gatilhos) {
@@ -132,15 +132,31 @@ function encontrarGatilhoAtendimento(texto = "", gatilhos = []) {
     if (!obrigatorias.length) continue;
 
     const modo = String(gatilho.modo || "todas").toLowerCase();
-    const contemPalavra = palavra => {
+    const tipoCorrespondencia = String(
+      gatilho.tipoCorrespondencia ||
+      gatilho.correspondencia ||
+      gatilho.match ||
+      "exato"
+    ).toLowerCase();
+    const compararPalavra = palavra => {
       const palavraNormalizada = normalizarTextoMensagem(palavra);
-      return palavraNormalizada && textoNormalizado.includes(palavraNormalizada);
+      if (!palavraNormalizada) return false;
+
+      if (tipoCorrespondencia === "contem" || tipoCorrespondencia === "contém") {
+        return textoNormalizado.includes(palavraNormalizada);
+      }
+
+      if (tipoCorrespondencia === "inicia") {
+        return textoNormalizado.startsWith(palavraNormalizada);
+      }
+
+      return textoNormalizado === palavraNormalizada;
     };
 
     const encontrou =
       modo === "qualquer"
-        ? [...obrigatorias, ...opcionais].some(contemPalavra)
-        : obrigatorias.every(contemPalavra);
+        ? [...obrigatorias, ...opcionais].some(compararPalavra)
+        : obrigatorias.every(compararPalavra);
 
     if (encontrou) return gatilho;
   }
@@ -175,6 +191,57 @@ function jidGrupoWhatsapp(jid = "") {
 
 function jidLidWhatsapp(jid = "") {
   return normalizarJidMensageiro(jid).endsWith("@lid");
+}
+
+function motivoJidAtendimentoIgnorado(jid = "") {
+  const jidNormalizado = normalizarJidMensageiro(jid);
+
+  if (!jidNormalizado) return "jid_vazio";
+  if (jidNormalizado === "status@broadcast") return "status_broadcast";
+  if (jidNormalizado.endsWith("@g.us")) return "grupo";
+  if (jidNormalizado.endsWith("@newsletter")) return "newsletter";
+  if (!jidPrivadoWhatsappValido(jidNormalizado)) return "jid_nao_privado";
+
+  return "";
+}
+
+function logAtendimentoJidIgnorado({ clienteId = "", sessaoId = "", jid = "", motivo = "" } = {}) {
+  logMensageiroJson("[MENSAGEIRO-ATENDIMENTO-JID-IGNORADO]", {
+    clienteId,
+    sessaoId,
+    jid,
+    motivo
+  });
+}
+
+function contarGatilhosAtendimento(gatilhos = []) {
+  if (!Array.isArray(gatilhos)) return 0;
+
+  return gatilhos.filter(gatilho =>
+    gatilho?.ativo !== false &&
+    Array.isArray(gatilho.palavrasObrigatorias) &&
+    gatilho.palavrasObrigatorias.length
+  ).length;
+}
+
+function contarRespostasRapidas(respostasRapidas = []) {
+  if (!Array.isArray(respostasRapidas)) return 0;
+
+  return respostasRapidas.filter(item =>
+    item?.ativo !== false &&
+    Array.isArray(item.gatilhos) &&
+    item.gatilhos.length
+  ).length;
+}
+
+function logGatilhoNaoCorresponde({ clienteId = "", sessaoId = "", jid = "", mensagem = "", gatilhosVerificados = 0 } = {}) {
+  logMensageiroJson("[MENSAGEIRO-GATILHO-NAO-CORRESPONDE]", {
+    clienteId,
+    sessaoId,
+    jid,
+    mensagem: String(mensagem || "").slice(0, 120),
+    gatilhosVerificados
+  });
 }
 
 function coletarPossiveisContatosMensageiro(sock) {
@@ -471,7 +538,18 @@ async function tratarMensagemAtendimentoV1({
   if (!atendimentoEscopoPermitido({ clienteId, jid, escopo: configAtendimento.escopo })) return false;
 
   const gatilho = encontrarGatilhoAtendimento(texto, configAtendimento.gatilhos);
-  if (!gatilho) return false;
+  if (!gatilho) {
+    if (texto) {
+      logGatilhoNaoCorresponde({
+        clienteId,
+        sessaoId,
+        jid,
+        mensagem: texto,
+        gatilhosVerificados: contarGatilhosAtendimento(configAtendimento.gatilhos)
+      });
+    }
+    return false;
+  }
 
   const chaveCooldown = `${clienteId}:${sessaoId}:${jid}:${gatilho.id}`;
   const agora = Date.now();
@@ -584,8 +662,17 @@ async function tratarMensagemPrivadaAtendimento({
     if (planoLiberado !== true) return;
 
     const jid = mensagem?.key?.remoteJid || "";
+    const motivoJidIgnorado = motivoJidAtendimentoIgnorado(jid);
 
-    if (!jid || jid === "status@broadcast") return;
+    if (motivoJidIgnorado) {
+      logAtendimentoJidIgnorado({
+        clienteId,
+        sessaoId,
+        jid,
+        motivo: motivoJidIgnorado
+      });
+      return;
+    }
     if (mensagem?.key?.fromMe) return;
 
     registrarMapeamentoLidMensageiro(
@@ -617,13 +704,23 @@ async function tratarMensagemPrivadaAtendimento({
     if (sessaoAtendimentoLegado && sessaoAtendimentoLegado !== sessaoId) return;
     if (!sessaoAtendimentoLegado && config.sessaoId && config.sessaoId !== sessaoId) return;
 
-    if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") return;
     const respostaRapida = encontrarRespostaRapida(
       texto,
       atendimento.respostasRapidas
     );
 
-    if (!respostaRapida) return;
+    if (!respostaRapida) {
+      if (texto) {
+        logGatilhoNaoCorresponde({
+          clienteId,
+          sessaoId,
+          jid,
+          mensagem: texto,
+          gatilhosVerificados: contarRespostasRapidas(atendimento.respostasRapidas)
+        });
+      }
+      return;
+    }
 
     const jidOriginalRespostaRapida = normalizarJidMensageiro(jid);
     const jidFinalRespostaRapida = await resolverJidPrivadoMensageiro(sock, jidOriginalRespostaRapida, { clienteId, sessaoId });
