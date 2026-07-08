@@ -3,6 +3,8 @@ const path = require("path");
 
 let inteligenciaUniversalCache = null;
 let templateUniversalCache = null;
+let resumoV2Rodada = criarResumoV2Rodada();
+let resumoV2Agendado = false;
 
 function getInteligenciaUniversal() {
   if (inteligenciaUniversalCache) return inteligenciaUniversalCache;
@@ -16,6 +18,18 @@ function getTemplateUniversal() {
 
   templateUniversalCache = require("../modules/template-universal");
   return templateUniversalCache;
+}
+
+function criarResumoV2Rodada() {
+  return {
+    comparacoes: 0,
+    divergencias: 0,
+    categoria: 0,
+    score: 0,
+    preco: 0,
+    cupom: 0,
+    status: 0
+  };
 }
 
 function resumirLogsUniversais(logs = []) {
@@ -102,6 +116,47 @@ function adicionarComparacaoDivergencia(divergencias, campo, v1, v2, comparar = 
   }
 }
 
+function camposDivergentesLog(divergencias = []) {
+  const camposPermitidos = new Set(["categoria", "score", "status", "preco", "cupom"]);
+
+  return divergencias
+    .filter(item => item.status === "divergente" && camposPermitidos.has(item.campo))
+    .map(item => item.campo);
+}
+
+function registrarResumoV2Rodada(divergencias = [], logger = console) {
+  const camposDivergentes = camposDivergentesLog(divergencias);
+
+  resumoV2Rodada.comparacoes += 1;
+  if (camposDivergentes.length > 0) resumoV2Rodada.divergencias += 1;
+
+  camposDivergentes.forEach(campo => {
+    if (Object.prototype.hasOwnProperty.call(resumoV2Rodada, campo)) {
+      resumoV2Rodada[campo] += 1;
+    }
+  });
+
+  if (resumoV2Agendado) return;
+
+  resumoV2Agendado = true;
+  setImmediate(() => {
+    const resumo = resumoV2Rodada;
+    resumoV2Rodada = criarResumoV2Rodada();
+    resumoV2Agendado = false;
+
+    logger.log("[V2-RESUMO]", {
+      ofertasComparadas: resumo.comparacoes,
+      iguais: Math.max(0, resumo.comparacoes - resumo.divergencias),
+      divergentes: resumo.divergencias,
+      categoria: resumo.categoria,
+      score: resumo.score,
+      preco: resumo.preco,
+      cupom: resumo.cupom,
+      status: resumo.status
+    });
+  });
+}
+
 function aplicarComparacaoV1V2Sombra(oferta = {}, contexto = {}, camposUniversais = {}) {
   const logger = contexto.logger || console;
 
@@ -150,6 +205,7 @@ function aplicarComparacaoV1V2Sombra(oferta = {}, contexto = {}, camposUniversai
     const totalDivergencias = divergencias.filter(
       item => item.status === "divergente"
     ).length;
+    const divergenciasLog = camposDivergentesLog(divergencias);
 
     oferta.comparacaoV1V2 = {
       ativo: true,
@@ -163,23 +219,27 @@ function aplicarComparacaoV1V2Sombra(oferta = {}, contexto = {}, camposUniversai
       clienteId: contexto.clienteId || oferta.clienteId || "admin",
       marketplace: camposUniversais.marketplace || oferta.marketplace || "",
       titulo: tituloCurto(camposUniversais.titulo || oferta.titulo || oferta.nome || ""),
-      divergencias: divergencias.map(item => `${item.campo}:${item.status}`),
-      scoreV1: scoreV1 ?? "",
-      scoreV2: scoreV2 ?? "",
       categoriaV1: categoriaV1 || "",
       categoriaV2: categoriaV2 || "",
+      scoreV1: scoreV1 ?? "",
+      scoreV2: scoreV2 ?? "",
       statusV1: statusV1 || "",
-      statusV2: statusV2 || ""
+      statusV2: statusV2 || "",
+      totalDivergencias
     };
 
     logger.log("[INTELIGENCIA-V1-V2-COMPARACAO]", resumo);
 
-    if (totalDivergencias > 0) {
+    if (divergenciasLog.length > 0) {
       logger.log("[INTELIGENCIA-V1-V2-DIVERGENCIA]", {
-        ...resumo,
-        totalDivergencias
+        clienteId: resumo.clienteId,
+        marketplace: resumo.marketplace,
+        titulo: resumo.titulo,
+        divergencias: divergenciasLog
       });
     }
+
+    registrarResumoV2Rodada(divergencias, logger);
   } catch (e) {
     oferta.comparacaoV1V2 = {
       ativo: true,
@@ -231,11 +291,13 @@ function aplicarTemplateUniversalSombra(oferta = {}, contexto = {}, camposUniver
     };
 
     logger.log("[TEMPLATE-UNIVERSAL-SOMBRA]", {
-      clienteId: contexto.clienteId || oferta.clienteId || "admin",
       marketplace: oferta.templateUniversalV2.marketplace,
-      titulo: oferta.titulo || "",
-      temTexto: Boolean(texto),
-      temImagem: oferta.templateUniversalV2.temImagem
+      titulo: tituloCurto(ofertaTemplate.titulo || oferta.titulo || ""),
+      tamanhoTexto: texto.length,
+      temImagem: oferta.templateUniversalV2.temImagem,
+      temCupom: Boolean(ofertaTemplate.cupom),
+      temLinkAfiliado: Boolean(ofertaTemplate.linkAfiliado),
+      sucesso: true
     });
   } catch (e) {
     oferta.templateUniversalV2 = {
