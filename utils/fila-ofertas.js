@@ -171,6 +171,119 @@ function registrarResumoV2Rodada(divergencias = [], logger = console) {
   });
 }
 
+function obterConfigEngineV2() {
+  const modo = textoComparacaoNormalizado(process.env.ENGINE_V2_MODO || "shadow");
+  const modoSeguro = ["shadow", "pilot", "full"].includes(modo) ? modo : "shadow";
+  const clientes = String(process.env.ENGINE_V2_CLIENTES_PILOTO || "user_yxquab4z")
+    .split(/[,\s;]+/)
+    .map(item => item.trim())
+    .filter(Boolean);
+
+  return { modo: modoSeguro, clientes };
+}
+
+function clienteEstaNoPilotV2(clienteId = "", clientes = []) {
+  return clientes.some(item => String(item) === String(clienteId));
+}
+
+function statusOperacionalV2(metadata = {}) {
+  const status = textoComparacaoNormalizado(metadata.status);
+
+  if (status === "aprovada") return "pendente";
+  if (status === "retida") return "retida";
+  if (status === "erro") return "erro";
+
+  return metadata.ok === true ? "pendente" : "retida";
+}
+
+function aplicarDecisaoEngineV2Pilot(oferta = {}, contexto = {}) {
+  const logger = contexto.logger || console;
+  const clienteId = contexto.clienteId || oferta.clienteId || "admin";
+  const config = obterConfigEngineV2();
+  const clientePiloto = clienteEstaNoPilotV2(clienteId, config.clientes);
+  const v2 = oferta.inteligenciaUniversalV2 || {};
+  const resumoModo = {
+    modo: config.modo,
+    clienteId,
+    marketplace: oferta.marketplace || contexto.marketplace || "",
+    clientePiloto
+  };
+
+  logger.log("[ENGINE-V2-MODO]", JSON.stringify(resumoModo));
+
+  if (config.modo === "shadow") {
+    logger.log("[ENGINE-V2-FALLBACK-V1]", JSON.stringify({
+      ...resumoModo,
+      motivo: "modo_shadow"
+    }));
+    return oferta;
+  }
+
+  if (config.modo === "pilot" && !clientePiloto) {
+    logger.log("[ENGINE-V2-PILOT-BYPASS]", JSON.stringify({
+      ...resumoModo,
+      motivo: "cliente_fora_do_piloto"
+    }));
+    logger.log("[ENGINE-V2-FALLBACK-V1]", JSON.stringify({
+      ...resumoModo,
+      motivo: "cliente_fora_do_piloto"
+    }));
+    return oferta;
+  }
+
+  if (textoComparacaoNormalizado(v2.status) === "erro") {
+    logger.log("[ENGINE-V2-FALLBACK-V1]", JSON.stringify({
+      ...resumoModo,
+      motivo: v2.motivo || "erro_v2"
+    }));
+    return oferta;
+  }
+
+  if (config.modo === "pilot") {
+    logger.log("[ENGINE-V2-PILOT-ATIVO]", JSON.stringify(resumoModo));
+  }
+
+  const statusAnterior = oferta.status || "";
+  const prioridadeAnterior = oferta.prioridadeEnvio ?? oferta.prioridadeFila ?? oferta.prioridade ?? "";
+  const statusAplicado = statusOperacionalV2(v2);
+
+  oferta.status = statusAplicado;
+  oferta.statusDetalhe = v2.motivo || oferta.statusDetalhe || "";
+  oferta.motivo = v2.motivo || oferta.motivo || "";
+
+  if (v2.prioridade !== null && v2.prioridade !== undefined) {
+    oferta.prioridadeEnvio = v2.prioridade;
+    oferta.prioridadeFila = v2.prioridade;
+    oferta.prioridade = v2.prioridade;
+    oferta.motivoPrioridade = v2.motivo || "Inteligencia Universal V2";
+  }
+
+  oferta.engineV2Decisao = {
+    ativo: true,
+    modo: config.modo,
+    clientePiloto,
+    statusV2: v2.status || "",
+    statusAplicado,
+    motivo: v2.motivo || "",
+    prioridade: v2.prioridade ?? null,
+    aplicadoEm: new Date().toISOString()
+  };
+
+  logger.log("[ENGINE-V2-DECISAO-APLICADA]", JSON.stringify({
+    clienteId,
+    marketplace: oferta.marketplace || contexto.marketplace || "",
+    titulo: tituloCurto(oferta.titulo || oferta.nome || ""),
+    modo: config.modo,
+    statusAnterior,
+    statusV2: v2.status || "",
+    statusAplicado,
+    prioridadeAnterior,
+    prioridadeV2: v2.prioridade ?? ""
+  }));
+
+  return oferta;
+}
+
 function aplicarComparacaoV1V2Sombra(oferta = {}, contexto = {}, camposUniversais = {}) {
   const logger = contexto.logger || console;
 
@@ -394,6 +507,8 @@ function aplicarPortaUniversalFila(oferta = {}, contexto = {}) {
       valorEfetivo: oferta.inteligenciaUniversalV2.valorEfetivo
     });
 
+    aplicarDecisaoEngineV2Pilot(oferta, contextoUniversal);
+
     const camposUniversaisSombra = montarOfertaTemplateUniversalSombra(
       oferta,
       normalizada,
@@ -417,6 +532,22 @@ function aplicarPortaUniversalFila(oferta = {}, contexto = {}) {
     });
 
     aplicarTemplateUniversalSombra(oferta, contexto);
+    const configEngineV2Erro = obterConfigEngineV2();
+    logger.log("[ENGINE-V2-MODO]", JSON.stringify({
+      modo: configEngineV2Erro.modo,
+      clienteId: contexto.clienteId || oferta.clienteId || "admin",
+      marketplace: oferta.marketplace || "",
+      clientePiloto: clienteEstaNoPilotV2(
+        contexto.clienteId || oferta.clienteId || "admin",
+        configEngineV2Erro.clientes
+      )
+    }));
+    logger.log("[ENGINE-V2-FALLBACK-V1]", JSON.stringify({
+      modo: configEngineV2Erro.modo,
+      clienteId: contexto.clienteId || oferta.clienteId || "admin",
+      marketplace: oferta.marketplace || "",
+      motivo: e.message || "erro_v2"
+    }));
     aplicarComparacaoV1V2Sombra(oferta, contexto);
 
     return oferta;
