@@ -6,6 +6,7 @@ const {
   extrairDetalheProdutoKabum
 } = require("./parser");
 const { avaliarLimiteFilaHotfix } = require("../../utils/performance-hotfix");
+const filaOfertas = require("../../utils/fila-ofertas");
 
 // ================= FAREJADOR KABUM =================
 
@@ -303,7 +304,11 @@ if (!jaExisteKabum) {
     continue;
   }
 
-  fila.push(novaOferta);
+  filaOfertas.adicionarOfertaFila(fila, novaOferta, {
+    clienteId,
+    origem: novaOferta.origem || "farejador_kabum",
+    logger: console
+  });
 
   savesPendentes += 1;
 

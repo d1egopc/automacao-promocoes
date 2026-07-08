@@ -1,6 +1,7 @@
 ﻿
 const { extrairProdutosBuscaML } = require("./parser");
 const { avaliarLimiteFilaHotfix } = require("../../utils/performance-hotfix");
+const filaOfertas = require("../../utils/fila-ofertas");
 
 let obterCuponsMLCliente = async () => [];
 let escolherCupomParaOfertaML = () => null;
@@ -545,7 +546,11 @@ console.log("✅ ML VAI PRA FILA", {
   preco: novaOferta.precoAtual || novaOferta.preco
 });
 
-            fila.push(novaOferta);
+            filaOfertas.adicionarOfertaFila(fila, novaOferta, {
+              clienteId,
+              origem: novaOferta.origem || "farejador_mercadolivre",
+              logger: console
+            });
             resumoML.adicionadosFila += 1;
 
             savesPendentes += 1;

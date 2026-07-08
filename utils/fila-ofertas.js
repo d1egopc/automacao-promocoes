@@ -1,6 +1,105 @@
 const fs = require("fs");
 const path = require("path");
 
+let inteligenciaUniversalCache = null;
+
+function getInteligenciaUniversal() {
+  if (inteligenciaUniversalCache) return inteligenciaUniversalCache;
+
+  inteligenciaUniversalCache = require("../modules/inteligencia-universal");
+  return inteligenciaUniversalCache;
+}
+
+function resumirLogsUniversais(logs = []) {
+  if (!Array.isArray(logs)) return [];
+  return logs.slice(-20);
+}
+
+function montarMetadataUniversalErro(oferta = {}, erro = null) {
+  return {
+    ativo: true,
+    modo: "passivo",
+    ok: false,
+    status: "erro",
+    motivo: erro?.message || "erro_inteligencia_universal",
+    prioridade: null,
+    score: null,
+    categoria: oferta.categoria || "",
+    valorEfetivo: null,
+    valorEfetivoOrigem: "",
+    logs: [{
+      etapa: "porta_fila",
+      status: "erro",
+      motivo: erro?.message || "erro_inteligencia_universal"
+    }]
+  };
+}
+
+function aplicarPortaUniversalFila(oferta = {}, contexto = {}) {
+  const logger = contexto.logger || console;
+
+  try {
+    const {
+      avaliarOfertaUniversal,
+      normalizarOfertaUniversal
+    } = getInteligenciaUniversal();
+
+    const contextoUniversal = {
+      origem: contexto.origem || oferta.origem || "fila",
+      clienteId: contexto.clienteId || oferta.clienteId || "admin",
+      marketplace: contexto.marketplace || oferta.marketplace || ""
+    };
+
+    const normalizada = normalizarOfertaUniversal(oferta, contextoUniversal);
+    const avaliacao = avaliarOfertaUniversal(oferta, contextoUniversal);
+    const score = avaliacao.score?.score ?? avaliacao.score ?? null;
+
+    oferta.ofertaUniversal = true;
+    oferta.versaoOfertaUniversal = "v2-passiva";
+    oferta.inteligenciaUniversalV2 = {
+      ativo: true,
+      modo: "passivo",
+      ok: avaliacao.ok === true,
+      status: avaliacao.status || "avaliada",
+      motivo: avaliacao.motivo || "",
+      prioridade: avaliacao.prioridade ?? null,
+      score,
+      categoria: avaliacao.categoria || normalizada.categoria || oferta.categoria || "",
+      valorEfetivo: avaliacao.valorEfetivo ?? null,
+      valorEfetivoOrigem: avaliacao.valorEfetivoOrigem || "",
+      logs: resumirLogsUniversais(avaliacao.logs)
+    };
+
+    logger.log("[OFERTA-UNIVERSAL-PASSIVA]", {
+      clienteId: contextoUniversal.clienteId,
+      marketplace: normalizada.marketplace,
+      titulo: normalizada.titulo,
+      ok: oferta.inteligenciaUniversalV2.ok,
+      status: oferta.inteligenciaUniversalV2.status,
+      motivo: oferta.inteligenciaUniversalV2.motivo,
+      prioridade: oferta.inteligenciaUniversalV2.prioridade,
+      score: oferta.inteligenciaUniversalV2.score,
+      categoria: oferta.inteligenciaUniversalV2.categoria,
+      valorEfetivo: oferta.inteligenciaUniversalV2.valorEfetivo
+    });
+
+    return oferta;
+  } catch (e) {
+    oferta.ofertaUniversal = true;
+    oferta.versaoOfertaUniversal = "v2-passiva";
+    oferta.inteligenciaUniversalV2 = montarMetadataUniversalErro(oferta, e);
+
+    logger.error("[OFERTA-UNIVERSAL-ERRO]", {
+      clienteId: contexto.clienteId || oferta.clienteId || "admin",
+      marketplace: oferta.marketplace || "",
+      titulo: oferta.titulo || oferta.nome || "",
+      erro: e.message
+    });
+
+    return oferta;
+  }
+}
+
 function getFallbackFileSeguro(getFilaFile, clienteId = "admin") {
   if (typeof getFilaFile !== "function") {
     throw new Error("storage_fila_nao_injetado");
@@ -84,10 +183,47 @@ function carregarFila({ fila = [], clienteId = "admin", getFilaFile, readCliente
   }
 }
 
-function adicionarOfertaFila(fila = [], oferta) {
+function adicionarOfertaFila(fila = [], oferta, contexto = {}) {
   if (!oferta) return false;
 
-  fila.push(oferta);
+  const ofertaFinal = aplicarPortaUniversalFila(oferta, {
+    ...contexto,
+    origem: contexto.origem || oferta.origem || "fila_push"
+  });
+
+  fila.push(ofertaFinal);
+
+  const logger = contexto.logger || console;
+  logger.log("[FILA-PORTA-UNIVERSAL]", {
+    acao: "push",
+    clienteId: ofertaFinal.clienteId || contexto.clienteId || "admin",
+    marketplace: ofertaFinal.marketplace || "",
+    ok: ofertaFinal.inteligenciaUniversalV2?.ok === true,
+    status: ofertaFinal.inteligenciaUniversalV2?.status || ""
+  });
+
+  return true;
+}
+
+function adicionarOfertaInicioFila(fila = [], oferta, contexto = {}) {
+  if (!oferta) return false;
+
+  const ofertaFinal = aplicarPortaUniversalFila(oferta, {
+    ...contexto,
+    origem: contexto.origem || oferta.origem || "fila_unshift"
+  });
+
+  fila.unshift(ofertaFinal);
+
+  const logger = contexto.logger || console;
+  logger.log("[FILA-PORTA-UNIVERSAL]", {
+    acao: "unshift",
+    clienteId: ofertaFinal.clienteId || contexto.clienteId || "admin",
+    marketplace: ofertaFinal.marketplace || "",
+    ok: ofertaFinal.inteligenciaUniversalV2?.ok === true,
+    status: ofertaFinal.inteligenciaUniversalV2?.status || ""
+  });
+
   return true;
 }
 
@@ -154,6 +290,8 @@ function limparFilaAntiga(fila = [], { clienteId = "admin", status = "" } = {}) 
 
 module.exports = {
   adicionarOfertaFila,
+  adicionarOfertaInicioFila,
+  aplicarPortaUniversalFila,
   atualizarStatusFila,
   salvarFila,
   limparFilaAntiga,

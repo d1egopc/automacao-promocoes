@@ -2,6 +2,7 @@ const {
   normalizarOfertaManual,
   agoraBR
 } = require("./normalizar-oferta");
+const filaOfertas = require("../../utils/fila-ofertas");
 
 function ofertaJaExisteNaFila(fila = [], oferta = {}, clienteId = "admin", normalizarTexto) {
   const normalizar =
@@ -70,7 +71,11 @@ function adicionarManualNaFila(body = {}, deps = {}) {
     registrarOfertaVista(oferta);
   }
 
-  fila.unshift(oferta);
+  filaOfertas.adicionarOfertaInicioFila(fila, oferta, {
+    clienteId,
+    origem: oferta.origem || "manual",
+    logger: console
+  });
 
   if (typeof salvarFila === "function") {
     salvarFila(clienteId);

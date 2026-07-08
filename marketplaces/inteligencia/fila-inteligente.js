@@ -2,6 +2,7 @@ const {
   deveIgnorarOfertaRepetida,
   registrarOfertaVista
 } = require("./memoria-ofertas");
+const filaOfertas = require("../../utils/fila-ofertas");
 
 function adicionarOfertaNaFila(fila, oferta, origem = "automatico") {
   if (!oferta) return false;
@@ -18,7 +19,11 @@ function adicionarOfertaNaFila(fila, oferta, origem = "automatico") {
 
   registrarOfertaVista(oferta);
 
-  fila.push(oferta);
+  filaOfertas.adicionarOfertaFila(fila, oferta, {
+    clienteId: oferta.clienteId || "admin",
+    origem,
+    logger: console
+  });
 
   return true;
 }

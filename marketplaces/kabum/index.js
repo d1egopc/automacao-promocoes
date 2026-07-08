@@ -12,6 +12,7 @@ const {
   writeGlobalJson,
   listClientes
 } = require("../../utils/storage");
+const filaOfertas = require("../../utils/fila-ofertas");
 
 const {
   farejarMercadoLivre: farejarMercadoLivreModulo
@@ -277,7 +278,7 @@ function carregarFila(clienteId = "admin") {
           o => String(o.clienteId || "admin") !== String(clienteId)
         );
 
-        fila.push(...filaLimpa);
+        fila.splice(fila.length, 0, ...filaLimpa);
 
         console.log(`✅ Fila carregada do cliente: ${clienteId}`);
     }
@@ -2254,7 +2255,11 @@ app.post("/fila", (req, res) => {
 
  oferta = prepararOfertaGlobal(oferta);
 
- fila.push(oferta);
+ filaOfertas.adicionarOfertaFila(fila, oferta, {
+   clienteId,
+   origem: oferta.origem || "importacao_manual",
+   logger: console
+ });
 
  salvarFila(clienteId);
 
@@ -2314,7 +2319,11 @@ app.post("/enviar-manual", async (req, res) => {
       })
     };
 
-    fila.unshift(oferta);
+    filaOfertas.adicionarOfertaInicioFila(fila, oferta, {
+      clienteId: oferta.clienteId || "admin",
+      origem: oferta.origem || "manual",
+      logger: console
+    });
     salvarFila();
 
 const clienteId = oferta.clienteId || "admin";
@@ -2697,7 +2706,11 @@ const indexReal = fila.findIndex(o => o === oferta);
   });
 
   fila.splice(indexReal, 1);
-  fila.unshift(oferta);
+  filaOfertas.adicionarOfertaInicioFila(fila, oferta, {
+    clienteId: clienteIdReq,
+    origem: oferta.origem || "enviar_agora",
+    logger: console
+  });
 
   salvarFila();
 
@@ -5134,7 +5147,11 @@ const novaOferta = {
   clienteId
 };
 
-    fila.push(novaOferta);
+    filaOfertas.adicionarOfertaFila(fila, novaOferta, {
+      clienteId,
+      origem: novaOferta.origem || "magalu_manual",
+      logger: console
+    });
 
     salvarFila();
 
@@ -6028,7 +6045,11 @@ async function distribuirOfertaParaClientes(ofertaBase) {
 
     if (jaExisteCliente) continue;
 
-  fila.push(ofertaCliente);
+  filaOfertas.adicionarOfertaFila(fila, ofertaCliente, {
+    clienteId,
+    origem: ofertaCliente.origem || "distribuidor",
+    logger: console
+  });
 
   salvarFila(clienteId);
 
@@ -7375,7 +7396,11 @@ if (jaExiste) {
   return;
 }
 
-  fila.push(novaOferta);
+  filaOfertas.adicionarOfertaFila(fila, novaOferta, {
+    clienteId: novaOferta.clienteId || "admin",
+    origem: novaOferta.origem || "automatico",
+    logger: console
+  });
   salvarFila();
 
   console.log("🤖 Oferta adicionada automaticamente:", novaOferta.nome);

@@ -1365,7 +1365,11 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
         return fila.length;
       }
 
-      fila.push(oferta);
+      filaOfertas.adicionarOfertaFila(fila, oferta, {
+        clienteId: oferta?.clienteId || cliente,
+        origem: oferta?.origem || "fila_inteligente",
+        logger: console
+      });
       resultado.adicionadas += 1;
       return fila.length;
     };
@@ -1870,7 +1874,11 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
       return { ok: false, duplicada: true, motivo: "duplicidade_fila" };
     }
 
-    fila.push(itemFinal);
+    filaOfertas.adicionarOfertaFila(fila, itemFinal, {
+      clienteId: cliente,
+      origem: itemFinal.origem || "engine",
+      logger: console
+    });
     const salvou = salvarFila(cliente);
 
     if (!salvou) {
@@ -5040,7 +5048,11 @@ aplicarPrioridadeEnvioOferta(oferta);
 registrarOfertaVista(oferta);
 
 logPrioridadeFila(oferta);
-fila.unshift(oferta);
+filaOfertas.adicionarOfertaInicioFila(fila, oferta, {
+  clienteId,
+  origem: oferta.origem || "manual",
+  logger: console
+});
 salvarFila(clienteId);
 
 const configCliente =
@@ -5893,7 +5905,11 @@ const indexReal = fila.findIndex(o => o === oferta);
 
 if (indexReal >= 0) {
   fila.splice(indexReal, 1);
-  fila.unshift(oferta);
+  filaOfertas.adicionarOfertaInicioFila(fila, oferta, {
+    clienteId: clienteIdReq,
+    origem: oferta.origem || "enviar_agora",
+    logger: console
+  });
 }
 
   const resultado = await enviarOfertaAgoraDireto(oferta, clienteIdReq);
@@ -12492,7 +12508,11 @@ function reterRadarSemDestinoCliente(clienteId = "admin", oferta = {}) {
     };
   }
 
-  fila.push(oferta);
+  filaOfertas.adicionarOfertaFila(fila, oferta, {
+    clienteId,
+    origem: oferta.origem || "radar_retido",
+    logger: console
+  });
   registrarTratamentoRadar(clienteId, oferta, "retida");
   salvarFila(clienteId);
 
@@ -13078,7 +13098,11 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
   }
 
   logPrioridadeFila(oferta);
-  fila.push(oferta);
+  filaOfertas.adicionarOfertaFila(fila, oferta, {
+    clienteId,
+    origem: oferta.origem || "radar",
+    logger: console
+  });
   registrarOfertaVista(oferta);
   registrarTratamentoRadar(clienteId, oferta, "fila");
   salvarFila(clienteId);
@@ -17772,7 +17796,11 @@ try {
 
 if (reterShopeePrecoSuspeitoSeNecessario(ofertaCliente)) {
   registrarOfertaVista(ofertaCliente);
-  fila.push(ofertaCliente);
+  filaOfertas.adicionarOfertaFila(fila, ofertaCliente, {
+    clienteId,
+    origem: ofertaCliente.origem || "distribuidor",
+    logger: console
+  });
   salvarFila(clienteId);
   continue;
 }
@@ -17785,7 +17813,11 @@ if (bloquearAwinKabumAutoNaFila(ofertaCliente, origemEntradaFila, clienteId)) {
 registrarOfertaVista(ofertaCliente);
 
 logPrioridadeFila(ofertaCliente);
-fila.push(ofertaCliente);
+filaOfertas.adicionarOfertaFila(fila, ofertaCliente, {
+  clienteId,
+  origem: ofertaCliente.origem || "distribuidor",
+  logger: console
+});
 
 salvarFila(clienteId);
 
@@ -18515,8 +18547,12 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
        continue;
      }
 
-     fila.push(ofertaFinal);
-     adicionadasFila += 1;
+      filaOfertas.adicionarOfertaFila(fila, ofertaFinal, {
+        clienteId,
+        origem: ofertaFinal.origem || "feed_awin",
+        logger: console
+      });
+      adicionadasFila += 1;
      if (chaveSimilar) similaresRodada.add(chaveSimilar);
      if (categoriaOferta) categoriasRodada[categoriaOferta] = (categoriasRodada[categoriaOferta] || 0) + 1;
 

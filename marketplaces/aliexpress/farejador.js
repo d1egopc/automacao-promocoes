@@ -5,6 +5,7 @@ const {
   gerarLinkCurtoAliExpress
 } = require("./api");
 const { avaliarLimiteFilaHotfix } = require("../../utils/performance-hotfix");
+const filaOfertas = require("../../utils/fila-ofertas");
 
 // ================= FAREJADOR ALIEXPRESS MODULAR =================
 
@@ -386,7 +387,11 @@ for (const oferta of produtosEncontrados) {
     continue;
   }
 
-  fila.push(oferta);
+  filaOfertas.adicionarOfertaFila(fila, oferta, {
+    clienteId,
+    origem: oferta.origem || "farejador_aliexpress",
+    logger: console
+  });
   if (typeof registrarAbastecimento === "function") registrarAbastecimento("adicionada");
 
   adicionadasNaFila++;

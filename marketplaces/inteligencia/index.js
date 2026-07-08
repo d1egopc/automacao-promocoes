@@ -2849,7 +2849,11 @@ aplicarPrioridadeEnvioOferta(oferta);
 registrarOfertaVista(oferta);
 
 logPrioridadeFila(oferta);
-fila.unshift(oferta);
+filaOfertas.adicionarOfertaInicioFila(fila, oferta, {
+  clienteId,
+  origem: oferta.origem || "manual",
+  logger: console
+});
 salvarFila(clienteId);
 
 const configCliente =
@@ -3362,7 +3366,11 @@ const indexReal = fila.findIndex(o => o === oferta);
   });
 
 fila.splice(indexReal, 1);
-fila.unshift(oferta);
+filaOfertas.adicionarOfertaInicioFila(fila, oferta, {
+  clienteId: clienteIdReq,
+  origem: oferta.origem || "enviar_agora",
+  logger: console
+});
 
 const clienteId = clienteIdReq;
 
@@ -7126,7 +7134,11 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
   }
 
   logPrioridadeFila(oferta);
-  fila.push(oferta);
+  filaOfertas.adicionarOfertaFila(fila, oferta, {
+    clienteId,
+    origem: oferta.origem || "radar",
+    logger: console
+  });
   registrarOfertaVista(oferta);
   salvarFila(clienteId);
 
@@ -10338,7 +10350,11 @@ try {
 registrarOfertaVista(ofertaCliente);
 
 logPrioridadeFila(ofertaCliente);
-fila.push(ofertaCliente);
+filaOfertas.adicionarOfertaFila(fila, ofertaCliente, {
+  clienteId,
+  origem: ofertaCliente.origem || "distribuidor",
+  logger: console
+});
 
 salvarFila(clienteId);
 
