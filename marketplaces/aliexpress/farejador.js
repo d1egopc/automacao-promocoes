@@ -4,6 +4,7 @@ const {
   buscarProdutosAliExpressAPI,
   gerarLinkCurtoAliExpress
 } = require("./api");
+const { avaliarLimiteFilaHotfix } = require("../../utils/performance-hotfix");
 
 // ================= FAREJADOR ALIEXPRESS MODULAR =================
 
@@ -371,6 +372,20 @@ for (const oferta of produtosEncontrados) {
 
   registrarOfertaVista(oferta);
 
+  const limiteFila = avaliarLimiteFilaHotfix(fila, oferta, clienteId);
+  if (!limiteFila.permitido) {
+    console.log("[PERFORMANCE-FILA-LIMITE]", {
+      clienteId,
+      origem: "farejador_aliexpress",
+      pendentes: limiteFila.pendentes,
+      motivo: limiteFila.motivo,
+      prioridade: limiteFila.prioridade,
+      cupomForte: limiteFila.cupomForte,
+      titulo: oferta.titulo || oferta.nome || ""
+    });
+    continue;
+  }
+
   fila.push(oferta);
   if (typeof registrarAbastecimento === "function") registrarAbastecimento("adicionada");
 
@@ -379,9 +394,21 @@ for (const oferta of produtosEncontrados) {
 
 if (adicionadasNaFila > 0) {
   salvarFila(clienteId);
+  console.log("[PERFORMANCE-FILA-SAVES]", {
+    clienteId,
+    origem: "farejador_aliexpress",
+    savesEvitados: Math.max(0, adicionadasNaFila - 1),
+    alteracoes: adicionadasNaFila
+  });
 }
 
 console.log("[FILA] AliExpress ofertas enviadas para fila:", produtosEncontrados.length);
+console.log("[PERFORMANCE-RODADA-RESUMO]", {
+  runner: "farejador_aliexpress",
+  clienteId,
+  adicionadas: adicionadasNaFila,
+  encontradas: produtosEncontrados.length
+});
 
    
 return produtosEncontrados;

@@ -5,6 +5,7 @@ const {
   extrairProdutosKabum,
   extrairDetalheProdutoKabum
 } = require("./parser");
+const { avaliarLimiteFilaHotfix } = require("../../utils/performance-hotfix");
 
 // ================= FAREJADOR KABUM =================
 
@@ -27,6 +28,7 @@ async function farejarKabum(clienteId = "admin", deps = {}) {
     bloquearAwinKabumAutoNaFila,
     logAwinEntradaFilaDebug
   } = deps;
+  let savesPendentes = 0;
 
   try {
     console.log("[INFO] Farejando KaBuM stealth...", { clienteId });
@@ -287,9 +289,23 @@ if (!jaExisteKabum) {
     });
   }
 
+  const limiteFila = avaliarLimiteFilaHotfix(fila, novaOferta, clienteId);
+  if (!limiteFila.permitido) {
+    console.log("[PERFORMANCE-FILA-LIMITE]", {
+      clienteId,
+      origem: "farejador_kabum",
+      pendentes: limiteFila.pendentes,
+      motivo: limiteFila.motivo,
+      prioridade: limiteFila.prioridade,
+      cupomForte: limiteFila.cupomForte,
+      titulo: novaOferta.titulo || novaOferta.nome || ""
+    });
+    continue;
+  }
+
   fila.push(novaOferta);
 
-  salvarFila(clienteId);
+  savesPendentes += 1;
 
   console.log("[INFO] Nova oferta KaBuM:", {
 
@@ -329,6 +345,22 @@ if (!jaExisteKabum) {
     }
 
     console.log("[OK] KaBuM modular carregado com sucesso.");
+
+    if (savesPendentes > 0 && typeof salvarFila === "function") {
+      salvarFila(clienteId);
+      console.log("[PERFORMANCE-FILA-SAVES]", {
+        clienteId,
+        origem: "farejador_kabum",
+        savesEvitados: Math.max(0, savesPendentes - 1),
+        alteracoes: savesPendentes
+      });
+    }
+
+    console.log("[PERFORMANCE-RODADA-RESUMO]", {
+      runner: "farejador_kabum",
+      clienteId,
+      adicionadas: savesPendentes
+    });
 
     return [];
   } catch (e) {

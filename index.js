@@ -121,6 +121,13 @@ const destinosUtils = require("./utils/destinos");
 const integracoesUtils = require("./utils/integracoes");
 const radarCupomMensagem = require("./utils/radar-cupom-mensagem");
 const {
+  aplicarLimiteLista,
+  avaliarLimiteFilaHotfix,
+  finalizarRunnerHotfix,
+  iniciarRunnerHotfix,
+  paginaLimiteSeguro
+} = require("./utils/performance-hotfix");
+const {
   resultadoTentouEnvio,
   decidirStatusExecutorSemEnvio
 } = require("./modules/executor/destino-diagnostico");
@@ -1782,6 +1789,22 @@ function carregarFila(clienteId = "admin") {
   });
 
   return fila;
+}
+
+function podeAdicionarOfertaAutomaticaFila(oferta = {}, clienteId = "admin", origem = "automatico") {
+  const resultado = avaliarLimiteFilaHotfix(fila, { ...oferta, origem: oferta.origem || origem }, clienteId);
+  if (!resultado.permitido) {
+    console.log("[PERFORMANCE-FILA-LIMITE]", {
+      clienteId,
+      origem,
+      pendentes: resultado.pendentes,
+      motivo: resultado.motivo,
+      prioridade: resultado.prioridade,
+      cupomForte: resultado.cupomForte,
+      titulo: oferta.titulo || oferta.nome || ""
+    });
+  }
+  return resultado.permitido;
 }
 
 
@@ -4185,7 +4208,14 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 async function processarFila(clienteIdAlvo = null) {
   const clienteFila = clienteIdAlvo || "admin";
 
-  if (enviandoAgoraPorCliente[clienteFila]) return;
+  if (enviandoAgoraPorCliente[clienteFila]) {
+    console.log("[PERFORMANCE-RUNNER-SKIP]", {
+      runner: "processarFila",
+      clienteId: clienteFila,
+      motivo: "envio_em_execucao"
+    });
+    return;
+  }
 
   enviandoAgoraPorCliente[clienteFila] = true;
   let oferta = null;
@@ -5073,12 +5103,16 @@ app.get("/fila", (req, res) => {
   const itensCliente = fila.filter((o) =>
     (o.clienteId || "admin") === clienteId
   );
-  const itensResposta = itensCliente.map(decorarItemFilaParaResposta);
+  const itensPaginados = aplicarLimiteLista(itensCliente, req.query, 100, 500);
+  const itensResposta = itensPaginados.itens.map(decorarItemFilaParaResposta);
 
   res.json({
     ok: true,
     clienteId,
     total: itensCliente.length,
+    limit: itensPaginados.limit,
+    offset: itensPaginados.offset,
+    hasMore: itensPaginados.hasMore,
     pendentes: itensCliente.filter((o) => o.status === "pendente").length,
     enviados: itensCliente.filter((o) => o.status === "enviado").length,
     retidas: itensCliente.filter((o) => o.status === "retida").length,
@@ -13039,6 +13073,10 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
     return { ok: false, motivo: "limite_radar_sem_cupom" };
   }
 
+  if (!podeAdicionarOfertaAutomaticaFila(oferta, clienteId, "radar")) {
+    return { ok: false, motivo: "performance_fila_limite" };
+  }
+
   logPrioridadeFila(oferta);
   fila.push(oferta);
   registrarOfertaVista(oferta);
@@ -13586,11 +13624,12 @@ app.get("/radar/historico", (req, res) => {
       });
     }
 
+    const pagina = paginaLimiteSeguro(req.query, 50, 200);
     const resumo = montarResumoHistoricoRadar(clienteId, {
       grupoId: req.query?.grupoId || "",
       origemTipo: req.query?.origemTipo || "",
       sessaoId: req.query?.sessaoId || "",
-      limit: req.query?.limit || 20
+      limit: pagina.limit
     });
 
     return res.json({
@@ -13599,7 +13638,10 @@ app.get("/radar/historico", (req, res) => {
       grupos: resumo.grupos,
       capturas: resumo.capturas,
       eventos: resumo.eventos,
-      limite: 200
+      limite: pagina.limit,
+      limit: pagina.limit,
+      offset: 0,
+      hasMore: false
     });
   } catch (e) {
     return res.status(500).json({
@@ -13627,11 +13669,12 @@ app.get("/radar/preview", (req, res) => {
       });
     }
 
+    const pagina = paginaLimiteSeguro(req.query, 50, 200);
     const resumo = montarResumoHistoricoRadar(clienteId, {
       grupoId: req.query?.grupoId || "",
       origemTipo: req.query?.origemTipo || "",
       sessaoId: req.query?.sessaoId || "",
-      limit: req.query?.limit || 20
+      limit: pagina.limit
     });
 
     return res.json({
@@ -13640,7 +13683,10 @@ app.get("/radar/preview", (req, res) => {
       grupos: resumo.grupos,
       eventos: resumo.eventos,
       capturas: resumo.capturas,
-      limite: 200
+      limite: pagina.limit,
+      limit: pagina.limit,
+      offset: 0,
+      hasMore: false
     });
   } catch (e) {
     return res.status(500).json({
@@ -13668,11 +13714,12 @@ app.get("/radar/preview/:grupoId", (req, res) => {
       });
     }
 
+    const pagina = paginaLimiteSeguro(req.query, 50, 200);
     const resumo = montarResumoHistoricoRadar(clienteId, {
       grupoId: req.params.grupoId || "",
       origemTipo: req.query?.origemTipo || "",
       sessaoId: req.query?.sessaoId || "",
-      limit: req.query?.limit || 20
+      limit: pagina.limit
     });
 
     return res.json({
@@ -13681,7 +13728,10 @@ app.get("/radar/preview/:grupoId", (req, res) => {
       grupos: resumo.grupos,
       eventos: resumo.eventos,
       capturas: resumo.capturas,
-      limite: 200
+      limite: pagina.limit,
+      limit: pagina.limit,
+      offset: 0,
+      hasMore: false
     });
   } catch (e) {
     return res.status(500).json({
@@ -13746,6 +13796,7 @@ app.get("/radar", (req, res) => {
     }
 
     const clienteId = String(req.query?.clienteId || getClienteId(req) || "admin");
+    const pagina = paginaLimiteSeguro(req.query, 50, 200);
     const radarConfig = carregarRadarConfigCliente(clienteId);
     const descartesRadar = lerDescartesRadar(clienteId);
     const ofertasRadarCliente = lerFilasRadarSomenteLeitura()
@@ -13755,7 +13806,7 @@ app.get("/radar", (req, res) => {
 
     const tratadasRadar = lerTratadasRadar(clienteId);
     const resumoHistoricoRadar = montarResumoHistoricoRadar(clienteId, {
-      limit: req.query?.limit || 50
+      limit: pagina.limit
     });
     const historicoOperacional = resumoHistoricoRadar.eventos;
 
@@ -13853,12 +13904,16 @@ app.get("/radar", (req, res) => {
         };
       })
       .sort((a, b) => (b.radar.radarScore || 0) - (a.radar.radarScore || 0)));
+    const oportunidadesPaginadas = aplicarLimiteLista(oportunidades, req.query, 50, 200);
 
     return res.json({
       ok: true,
       total: oportunidades.length,
       clienteId,
-      oportunidades: oportunidades.slice(0, 50),
+      limit: oportunidadesPaginadas.limit,
+      offset: oportunidadesPaginadas.offset,
+      hasMore: oportunidadesPaginadas.hasMore,
+      oportunidades: oportunidadesPaginadas.itens,
       historicoOperacional,
       ultimasOfertasProcessadas: historicoOperacional,
       capturas: historicoOperacional,
@@ -19981,6 +20036,7 @@ function selecionarProximoMarketplaceOrquestrador() {
 }
 
 async function rodarMarketplaceEspecifico(marketplace = "", opcoes = {}) {
+let runnerLockKey = "";
 
 // Farejador global roda apenas no ADMIN MASTER
 const admin = usuarios.find(u => u.papel === "admin_master");
@@ -19996,9 +20052,12 @@ if (!admin) {
   }
 
   if (farejadorRodando) {
-    logOptimus("INTELIGENCIA", "Farejador ja em execucao", {
+    console.log("[PERFORMANCE-RUNNER-SKIP]", {
+      runner: `farejador:${marketplace || "todos"}`,
+      clienteId: admin.id || "admin",
       marketplace,
-      origem: opcoes.origem || "orquestrador"
+      origem: opcoes.origem || "orquestrador",
+      motivo: "farejador_global_em_execucao"
     });
     return;
   }
@@ -20029,6 +20088,9 @@ if (!admin) {
     console.log(`[INFO] Farejador no encontrado: ${marketplace}`);
     return;
   }
+
+  runnerLockKey = iniciarRunnerHotfix(`farejador:${marketplace || "todos"}`, admin.id || "admin", console);
+  if (!runnerLockKey) return;
 
   try {
     farejadorRodando = true;
@@ -20210,6 +20272,18 @@ clientesProcessadosRodada += 1;
     origem: opcoes.origem || "orquestrador"
   });
 
+  console.log("[PERFORMANCE-RODADA-RESUMO]", {
+    runner: "orquestrador_marketplaces",
+    marketplace,
+    rodada: statusMarketplace.rodadas,
+    clientesProcessados: clientesProcessadosRodada,
+    adicionadas: adicionadasRodada,
+    pendentesAntes: resumoGeralOrquestrador.clientes.reduce((total, item) => total + Number(item.pendentesAntes || 0), 0),
+    pendentesDepois: resumoGeralOrquestrador.clientes.reduce((total, item) => total + Number(item.pendentesDepois || 0), 0),
+    duracaoSegundos,
+    origem: opcoes.origem || "orquestrador"
+  });
+
   console.log("[ORQUESTRADOR-RESUMO-GERAL]", {
     ...resumoGeralOrquestrador,
     clientesProcessados: clientesProcessadosRodada,
@@ -20240,6 +20314,7 @@ clientesProcessadosRodada += 1;
   } finally {
     abastecimentoRodadaAtual = null;
     farejadorRodando = false;
+    finalizarRunnerHotfix(runnerLockKey);
   }
 }
 

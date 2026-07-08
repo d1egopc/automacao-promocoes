@@ -1,5 +1,6 @@
 ﻿
 const { extrairProdutosBuscaML } = require("./parser");
+const { avaliarLimiteFilaHotfix } = require("../../utils/performance-hotfix");
 
 let obterCuponsMLCliente = async () => [];
 let escolherCupomParaOfertaML = () => null;
@@ -52,6 +53,7 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
     ignoradosMemoria: 0,
     adicionadosFila: 0
   };
+  let savesPendentes = 0;
 
   try {
     if (!config.marketplaces?.mercadolivre?.ativo) {
@@ -522,6 +524,20 @@ if (ignoradaMemoria) {
             registrarOfertaVista(novaOferta);
 
             
+const limiteFila = avaliarLimiteFilaHotfix(fila, novaOferta, clienteId);
+if (!limiteFila.permitido) {
+  console.log("[PERFORMANCE-FILA-LIMITE]", {
+    clienteId,
+    origem: "farejador_mercadolivre",
+    pendentes: limiteFila.pendentes,
+    motivo: limiteFila.motivo,
+    prioridade: limiteFila.prioridade,
+    cupomForte: limiteFila.cupomForte,
+    titulo: novaOferta.titulo || novaOferta.nome || ""
+  });
+  continue;
+}
+
 console.log("✅ ML VAI PRA FILA", {
   titulo: novaOferta.titulo,
   clienteId,
@@ -532,7 +548,7 @@ console.log("✅ ML VAI PRA FILA", {
             fila.push(novaOferta);
             resumoML.adicionadosFila += 1;
 
-            salvarFila(clienteId);
+            savesPendentes += 1;
 
             await new Promise(r =>
               setTimeout(r, 3000 + Math.random() * 3000)
@@ -555,7 +571,22 @@ console.log("✅ ML VAI PRA FILA", {
   } catch (e) {
     console.log("[ERRO] [ML] erro farejador:", e.message);
   } finally {
+    if (savesPendentes > 0 && typeof salvarFila === "function") {
+      salvarFila(clienteId);
+      console.log("[PERFORMANCE-FILA-SAVES]", {
+        clienteId,
+        origem: "farejador_mercadolivre",
+        savesEvitados: Math.max(0, savesPendentes - 1),
+        alteracoes: savesPendentes
+      });
+    }
     console.log("[ML-RESUMO-RODADA]", resumoML);
+    console.log("[PERFORMANCE-RODADA-RESUMO]", {
+      runner: "farejador_mercadolivre",
+      clienteId,
+      adicionadas: resumoML.adicionadosFila,
+      buscasExecutadas: resumoML.buscasExecutadas
+    });
   }
 }
 
