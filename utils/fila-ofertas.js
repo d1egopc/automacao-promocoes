@@ -2,12 +2,20 @@ const fs = require("fs");
 const path = require("path");
 
 let inteligenciaUniversalCache = null;
+let templateUniversalCache = null;
 
 function getInteligenciaUniversal() {
   if (inteligenciaUniversalCache) return inteligenciaUniversalCache;
 
   inteligenciaUniversalCache = require("../modules/inteligencia-universal");
   return inteligenciaUniversalCache;
+}
+
+function getTemplateUniversal() {
+  if (templateUniversalCache) return templateUniversalCache;
+
+  templateUniversalCache = require("../modules/template-universal");
+  return templateUniversalCache;
 }
 
 function resumirLogsUniversais(logs = []) {
@@ -35,6 +43,222 @@ function montarMetadataUniversalErro(oferta = {}, erro = null) {
   };
 }
 
+function textoComparacao(valor) {
+  if (valor === null || valor === undefined) return "";
+  return String(valor).trim();
+}
+
+function textoComparacaoNormalizado(valor) {
+  return textoComparacao(valor).toLowerCase();
+}
+
+function numeroComparacao(valor) {
+  if (valor === null || valor === undefined || valor === "") return null;
+  if (typeof valor === "number") return Number.isFinite(valor) ? valor : null;
+
+  const texto = String(valor)
+    .replace(/R\$/gi, "")
+    .replace(/\s/g, "")
+    .trim();
+
+  if (!texto) return null;
+
+  const brasileiro = texto.includes(",")
+    ? texto.replace(/\./g, "").replace(",", ".")
+    : texto;
+
+  const numero = Number(brasileiro);
+  return Number.isFinite(numero) ? numero : null;
+}
+
+function tituloCurto(valor = "") {
+  const texto = textoComparacao(valor);
+  return texto.length > 80 ? `${texto.slice(0, 77)}...` : texto;
+}
+
+function scoreUniversal(metadata = {}) {
+  return metadata.score?.score ?? metadata.score ?? null;
+}
+
+function adicionarComparacaoDivergencia(divergencias, campo, v1, v2, comparar = null) {
+  const temV1 = v1 !== null && v1 !== undefined && textoComparacao(v1) !== "";
+
+  if (!temV1) {
+    divergencias.push({ campo, status: "sem_base_v1" });
+    return;
+  }
+
+  const iguais = typeof comparar === "function"
+    ? comparar(v1, v2)
+    : textoComparacaoNormalizado(v1) === textoComparacaoNormalizado(v2);
+
+  if (!iguais) {
+    divergencias.push({
+      campo,
+      status: "divergente",
+      v1,
+      v2: v2 ?? ""
+    });
+  }
+}
+
+function aplicarComparacaoV1V2Sombra(oferta = {}, contexto = {}, camposUniversais = {}) {
+  const logger = contexto.logger || console;
+
+  try {
+    const v2 = oferta.inteligenciaUniversalV2 || {};
+    const divergencias = [];
+    const scoreV1 = oferta.score ?? oferta.radarScore ?? oferta.prioridadeEnvio;
+    const scoreV2 = scoreUniversal(v2);
+    const categoriaV1 = oferta.categoria || oferta.categoriaProduto;
+    const categoriaV2 = v2.categoria;
+    const statusV1 = oferta.status || oferta.decisao || oferta.decisaoRadar;
+    const statusV2 = v2.status;
+    const motivoV1 = oferta.motivo || oferta.statusDetalhe;
+    const motivoV2 = v2.motivo;
+    const precoV1 = oferta.precoAtual ?? oferta.preco;
+    const precoV2 = v2.valorEfetivo ?? camposUniversais.valorEfetivo ?? camposUniversais.precoAtual;
+    const cupomV1 = oferta.cupom;
+    const cupomV2 = camposUniversais.cupom || oferta.cupomInfo?.cupom || "";
+    const beneficiosV2 = Array.isArray(camposUniversais.beneficios)
+      ? camposUniversais.beneficios.join(" | ")
+      : "";
+
+    adicionarComparacaoDivergencia(divergencias, "categoria", categoriaV1, categoriaV2);
+    adicionarComparacaoDivergencia(divergencias, "score", scoreV1, scoreV2, (a, b) => {
+      const n1 = numeroComparacao(a);
+      const n2 = numeroComparacao(b);
+      if (n1 === null || n2 === null) return textoComparacao(a) === textoComparacao(b);
+      return Math.abs(n1 - n2) < 0.01;
+    });
+    adicionarComparacaoDivergencia(divergencias, "status", statusV1, statusV2);
+    adicionarComparacaoDivergencia(divergencias, "motivo", motivoV1, motivoV2);
+    adicionarComparacaoDivergencia(divergencias, "preco", precoV1, precoV2, (a, b) => {
+      const n1 = numeroComparacao(a);
+      const n2 = numeroComparacao(b);
+      if (n1 === null || n2 === null) return textoComparacao(a) === textoComparacao(b);
+      return Math.abs(n1 - n2) < 0.01;
+    });
+    adicionarComparacaoDivergencia(
+      divergencias,
+      "cupom",
+      cupomV1,
+      cupomV2 || beneficiosV2,
+      (a, b) => textoComparacaoNormalizado(b).includes(textoComparacaoNormalizado(a))
+    );
+
+    const totalDivergencias = divergencias.filter(
+      item => item.status === "divergente"
+    ).length;
+
+    oferta.comparacaoV1V2 = {
+      ativo: true,
+      modo: "sombra",
+      divergencias,
+      totalDivergencias,
+      geradoEm: new Date().toISOString()
+    };
+
+    const resumo = {
+      clienteId: contexto.clienteId || oferta.clienteId || "admin",
+      marketplace: camposUniversais.marketplace || oferta.marketplace || "",
+      titulo: tituloCurto(camposUniversais.titulo || oferta.titulo || oferta.nome || ""),
+      divergencias: divergencias.map(item => `${item.campo}:${item.status}`),
+      scoreV1: scoreV1 ?? "",
+      scoreV2: scoreV2 ?? "",
+      categoriaV1: categoriaV1 || "",
+      categoriaV2: categoriaV2 || "",
+      statusV1: statusV1 || "",
+      statusV2: statusV2 || ""
+    };
+
+    logger.log("[INTELIGENCIA-V1-V2-COMPARACAO]", resumo);
+
+    if (totalDivergencias > 0) {
+      logger.log("[INTELIGENCIA-V1-V2-DIVERGENCIA]", {
+        ...resumo,
+        totalDivergencias
+      });
+    }
+  } catch (e) {
+    oferta.comparacaoV1V2 = {
+      ativo: true,
+      modo: "sombra",
+      divergencias: [{ campo: "comparador", status: "erro", motivo: e.message }],
+      totalDivergencias: 0,
+      geradoEm: new Date().toISOString()
+    };
+  }
+
+  return oferta;
+}
+
+function montarOfertaTemplateUniversalSombra(oferta = {}, normalizada = {}, avaliacao = {}) {
+  const templateInput = avaliacao.templateInput || {};
+
+  return {
+    titulo: normalizada.titulo || oferta.titulo || "",
+    marketplace: normalizada.marketplace || oferta.marketplace || "",
+    precoAtual: normalizada.precoAtual ?? oferta.precoAtual,
+    precoOriginal: normalizada.precoOriginal ?? oferta.precoOriginal,
+    categoria: avaliacao.categoria || normalizada.categoria || oferta.categoria || "",
+    cupom: normalizada.cupom || oferta.cupom || "",
+    cupomTipo: normalizada.cupomTipo || oferta.cupomTipo || "",
+    beneficios: Array.isArray(templateInput.beneficios)
+      ? templateInput.beneficios
+      : (Array.isArray(oferta.beneficios) ? oferta.beneficios : []),
+    valorEfetivo: avaliacao.valorEfetivo ?? oferta.valorEfetivo,
+    linkAfiliado: normalizada.linkAfiliado || oferta.linkAfiliado || "",
+    imagem: normalizada.imagem || oferta.imagem || ""
+  };
+}
+
+function aplicarTemplateUniversalSombra(oferta = {}, contexto = {}, camposUniversais = null) {
+  const logger = contexto.logger || console;
+  const ofertaTemplate = camposUniversais || montarOfertaTemplateUniversalSombra(oferta);
+
+  try {
+    const { gerarTemplateUniversal } = getTemplateUniversal();
+    const texto = gerarTemplateUniversal(ofertaTemplate);
+
+    oferta.templateUniversalV2 = {
+      ativo: true,
+      modo: "sombra",
+      texto,
+      temImagem: Boolean(ofertaTemplate.imagem),
+      marketplace: ofertaTemplate.marketplace || contexto.marketplace || "",
+      geradoEm: new Date().toISOString()
+    };
+
+    logger.log("[TEMPLATE-UNIVERSAL-SOMBRA]", {
+      clienteId: contexto.clienteId || oferta.clienteId || "admin",
+      marketplace: oferta.templateUniversalV2.marketplace,
+      titulo: oferta.titulo || "",
+      temTexto: Boolean(texto),
+      temImagem: oferta.templateUniversalV2.temImagem
+    });
+  } catch (e) {
+    oferta.templateUniversalV2 = {
+      ativo: true,
+      modo: "sombra",
+      texto: "",
+      temImagem: Boolean(ofertaTemplate.imagem),
+      marketplace: ofertaTemplate.marketplace || contexto.marketplace || "",
+      geradoEm: new Date().toISOString(),
+      erro: e.message
+    };
+
+    logger.error("[TEMPLATE-UNIVERSAL-ERRO]", {
+      clienteId: contexto.clienteId || oferta.clienteId || "admin",
+      marketplace: oferta.marketplace || contexto.marketplace || "",
+      titulo: oferta.titulo || "",
+      erro: e.message
+    });
+  }
+
+  return oferta;
+}
+
 function aplicarPortaUniversalFila(oferta = {}, contexto = {}) {
   const logger = contexto.logger || console;
 
@@ -47,7 +271,8 @@ function aplicarPortaUniversalFila(oferta = {}, contexto = {}) {
     const contextoUniversal = {
       origem: contexto.origem || oferta.origem || "fila",
       clienteId: contexto.clienteId || oferta.clienteId || "admin",
-      marketplace: contexto.marketplace || oferta.marketplace || ""
+      marketplace: contexto.marketplace || oferta.marketplace || "",
+      logger
     };
 
     const normalizada = normalizarOfertaUniversal(oferta, contextoUniversal);
@@ -83,6 +308,15 @@ function aplicarPortaUniversalFila(oferta = {}, contexto = {}) {
       valorEfetivo: oferta.inteligenciaUniversalV2.valorEfetivo
     });
 
+    const camposUniversaisSombra = montarOfertaTemplateUniversalSombra(
+      oferta,
+      normalizada,
+      avaliacao
+    );
+
+    aplicarComparacaoV1V2Sombra(oferta, contextoUniversal, camposUniversaisSombra);
+    aplicarTemplateUniversalSombra(oferta, contextoUniversal, camposUniversaisSombra);
+
     return oferta;
   } catch (e) {
     oferta.ofertaUniversal = true;
@@ -95,6 +329,9 @@ function aplicarPortaUniversalFila(oferta = {}, contexto = {}) {
       titulo: oferta.titulo || oferta.nome || "",
       erro: e.message
     });
+
+    aplicarTemplateUniversalSombra(oferta, contexto);
+    aplicarComparacaoV1V2Sombra(oferta, contexto);
 
     return oferta;
   }
@@ -292,6 +529,8 @@ module.exports = {
   adicionarOfertaFila,
   adicionarOfertaInicioFila,
   aplicarPortaUniversalFila,
+  aplicarComparacaoV1V2Sombra,
+  aplicarTemplateUniversalSombra,
   atualizarStatusFila,
   salvarFila,
   limparFilaAntiga,
