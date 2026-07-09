@@ -40,6 +40,36 @@ function formatarMoeda(valor) {
   });
 }
 
+function normalizarComparacao(valor = "") {
+  return normalizarTexto(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function beneficioComercialSeguro(valor = "") {
+  const texto = normalizarTexto(valor);
+  if (!texto) return false;
+
+  const normalizado = normalizarComparacao(texto);
+
+  if (/^[a-z0-9_:-]+$/.test(normalizado)) return false;
+
+  return [
+    "cupom",
+    "pix",
+    "frete",
+    "variacao",
+    "cashback",
+    "desconto",
+    "parcel",
+    "app",
+    "relampago",
+    "oferta",
+    "pagina"
+  ].some(termo => normalizado.includes(termo));
+}
+
 function normalizarBeneficios(beneficios) {
   if (!Array.isArray(beneficios)) return [];
 
@@ -50,67 +80,34 @@ function normalizarBeneficios(beneficios) {
     .slice(0, 3);
 }
 
-function beneficioComercialSeguro(valor = "") {
-  const texto = normalizarTexto(valor);
-  if (!texto) return false;
-
-  const normalizado = texto
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-
-  if (/^[a-z0-9_:-]+$/.test(normalizado)) return false;
-
-  return [
-    "cupom",
-    "pix",
-    "frete",
-    "variacao",
-    "variação",
-    "cashback",
-    "desconto",
-    "parcel",
-    "app"
-  ].some(termo => normalizado.includes(termo));
-}
-
 function marketplaceBonito(valor = "") {
   const texto = normalizarTexto(valor);
-  const chave = texto
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
+  if (!texto) return "";
 
-  const nomes = {
-    mercadolivre: "Mercado Livre",
-    mercadolivrebr: "Mercado Livre",
-    mercadoLivre: "Mercado Livre",
-    meli: "Mercado Livre",
-    amazon: "Amazon",
-    amazonbr: "Amazon",
-    shopee: "Shopee",
-    aliexpress: "AliExpress",
-    aliexpressbr: "AliExpress",
-    kabum: "KaBuM",
-    awin: "AWIN"
-  };
-
-  return nomes[chave] || texto;
+  return texto
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .map(parte => parte.length <= 4
+      ? parte.toUpperCase()
+      : parte.charAt(0).toUpperCase() + parte.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function apresentarScore(score) {
   const numero = normalizarNumero(score);
-  if (numero == null) return null;
+  if (numero == null) return "";
 
   const valor = Math.max(0, Math.min(100, Math.round(numero)));
 
-  if (valor <= 19) return { valor, estrelas: "☆☆☆☆☆" };
-  if (valor <= 39) return { valor, estrelas: "⭐☆☆☆☆" };
-  if (valor <= 59) return { valor, estrelas: "⭐⭐☆☆☆" };
-  if (valor <= 79) return { valor, estrelas: "⭐⭐⭐☆☆" };
-  if (valor <= 94) return { valor, estrelas: "⭐⭐⭐⭐☆" };
-  return { valor, estrelas: "⭐⭐⭐⭐⭐" };
+  if (valor <= 19) return "☆☆☆☆☆";
+  if (valor <= 39) return "⭐☆☆☆☆";
+  if (valor <= 59) return "⭐⭐☆☆☆";
+  if (valor <= 79) return "⭐⭐⭐☆☆";
+  if (valor <= 94) return "⭐⭐⭐⭐☆";
+  return "⭐⭐⭐⭐⭐";
 }
 
 function selecionarCamposUniversais(oferta = {}) {
@@ -123,73 +120,100 @@ function selecionarCamposUniversais(oferta = {}) {
     descontoPercentual: oferta.descontoPercentual,
     categoria: normalizarTexto(oferta.categoria),
     cupom: normalizarTexto(oferta.cupom),
-    cupomTipo: normalizarTexto(oferta.cupomTipo),
     beneficios: normalizarBeneficios(oferta.beneficios),
-    valorEfetivo: oferta.valorEfetivo,
-    valorEfetivoOrigem: normalizarTexto(oferta.valorEfetivoOrigem),
     score: oferta.score,
-    prioridade: oferta.prioridade,
-    linkAfiliado: normalizarTexto(oferta.linkAfiliado),
-    imagem: normalizarTexto(oferta.imagem)
+    linkAfiliado: normalizarTexto(oferta.linkAfiliado)
   };
+}
+
+function economiaReal(precoOriginal, precoAtual, economia) {
+  const economiaInformada = normalizarNumero(economia);
+  if (economiaInformada != null && economiaInformada > 0) return economiaInformada;
+
+  const original = normalizarNumero(precoOriginal);
+  const atual = normalizarNumero(precoAtual);
+
+  if (original != null && atual != null && original > atual) {
+    return original - atual;
+  }
+
+  return null;
+}
+
+function descontoReal(precoOriginal, precoAtual, descontoPercentual) {
+  const descontoInformado = normalizarNumero(descontoPercentual);
+  if (descontoInformado != null && descontoInformado > 0) return descontoInformado;
+
+  const original = normalizarNumero(precoOriginal);
+  const atual = normalizarNumero(precoAtual);
+
+  if (original != null && atual != null && original > atual) {
+    return ((original - atual) / original) * 100;
+  }
+
+  return null;
+}
+
+function beneficioDiferenteDoCupom(beneficio = "", cupom = "") {
+  const texto = normalizarComparacao(beneficio);
+  const codigo = normalizarComparacao(cupom);
+
+  return !codigo || !texto.includes(codigo);
+}
+
+function adicionarBloco(blocos, linhas = []) {
+  const bloco = linhas.map(normalizarTexto).filter(Boolean);
+  if (bloco.length) blocos.push(bloco);
 }
 
 function gerarTemplateUniversal(oferta = {}) {
   const campos = selecionarCamposUniversais(oferta);
-  const linhas = [];
-
-  if (campos.titulo) linhas.push(`🔥 ${campos.titulo}`);
-  linhas.push("");
-  if (campos.marketplace) linhas.push(`🏬 ${marketplaceBonito(campos.marketplace)}`);
-  if (campos.categoria) linhas.push(`📂 ${campos.categoria}`);
-
-  const precoAtual = formatarMoeda(campos.precoAtual);
-  const precoOriginal = formatarMoeda(campos.precoOriginal);
-  const economia = formatarMoeda(campos.economia);
-  const descontoPercentual = normalizarNumero(campos.descontoPercentual);
+  const blocos = [];
+  const precoAtualNumero = normalizarNumero(campos.precoAtual);
+  const precoOriginalNumero = normalizarNumero(campos.precoOriginal);
+  const precoAtual = formatarMoeda(campos.precoAtual) || normalizarTexto(campos.precoAtual);
+  const precoOriginal = precoOriginalNumero != null &&
+    precoAtualNumero != null &&
+    precoOriginalNumero > precoAtualNumero
+      ? formatarMoeda(campos.precoOriginal)
+      : "";
+  const economiaNumero = economiaReal(campos.precoOriginal, campos.precoAtual, campos.economia);
+  const descontoPercentual = descontoReal(campos.precoOriginal, campos.precoAtual, campos.descontoPercentual);
+  const economia = economiaNumero != null && economiaNumero > 0
+    ? formatarMoeda(economiaNumero)
+    : "";
   const score = apresentarScore(campos.score);
+  const beneficioComercial = campos.beneficios.find(beneficio =>
+    beneficioDiferenteDoCupom(beneficio, campos.cupom)
+  );
 
-  if (precoOriginal) linhas.push(`❌ De: ${precoOriginal}`);
-  if (precoAtual) linhas.push(`✅ Por: ${precoAtual}`);
+  adicionarBloco(blocos, [`🔥 ${campos.titulo || "Oferta"}`]);
+  adicionarBloco(blocos, [
+    campos.marketplace ? `🛍️ ${marketplaceBonito(campos.marketplace)}` : "",
+    campos.categoria ? `📂 ${campos.categoria}` : ""
+  ]);
+  adicionarBloco(blocos, [
+    precoOriginal ? `❌ De: ${precoOriginal}` : "",
+    `✅ Por: ${precoAtual}`,
+    economia ? `💸 Economia: ${economia}${descontoPercentual != null && descontoPercentual > 0 ? ` (${descontoPercentual.toFixed(0)}%)` : ""}` : ""
+  ]);
+  adicionarBloco(blocos, [
+    campos.cupom ? `🎟️ Cupom: ${campos.cupom}` : ""
+  ]);
+  adicionarBloco(blocos, [
+    score ? "⭐ Avaliação" : "",
+    score
+  ]);
+  adicionarBloco(blocos, [
+    "🔗 Confira aqui:",
+    campos.linkAfiliado
+  ]);
+  adicionarBloco(blocos, [
+    beneficioComercial ? `⚡ ${beneficioComercial}` : "",
+    "⚠️ Oferta sujeita à alteração de preço."
+  ]);
 
-  if (campos.cupom) {
-    linhas.push("");
-    linhas.push(`🎟️ Cupom: ${campos.cupom}`);
-  }
-
-  const economiaDesconto = [];
-  if (economia) economiaDesconto.push(economia);
-  if (descontoPercentual != null && descontoPercentual > 0) {
-    economiaDesconto.push(`${descontoPercentual.toFixed(0)}% OFF`);
-  }
-
-  if (economiaDesconto.length) {
-    linhas.push(`💸 Economia: ${economiaDesconto.join(" | ")}`);
-  }
-
-  if (campos.beneficios.length > 0) {
-    linhas.push("");
-    campos.beneficios.forEach(beneficio => {
-      linhas.push(`💡 ${beneficio}`);
-    });
-  }
-
-  if (score != null) {
-    linhas.push("");
-    linhas.push("⭐ Avaliação:");
-    linhas.push(`${score.estrelas} (${score.valor}/100)`);
-  }
-
-  if (campos.linkAfiliado) {
-    linhas.push("");
-    linhas.push("🔗 Confira aqui:");
-    linhas.push(campos.linkAfiliado);
-  }
-
-  linhas.push("");
-  linhas.push("⚡ Oferta sujeita à alteração de preço.");
-
-  return linhas.filter(Boolean).join("\n");
+  return blocos.map(bloco => bloco.join("\n")).join("\n\n");
 }
 
 module.exports = {
