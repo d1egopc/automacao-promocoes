@@ -107,6 +107,8 @@ const {
 
 const mensageiro = require("./modules/mensageiro");
 const criarRotasMensageiro = require("./modules/mensageiro/routes");
+const socialModule = require("./modules/social");
+const criarRotasSocial = require("./modules/social/routes");
 
 const {
   calcularScoreOferta
@@ -2362,6 +2364,7 @@ if (sessoesMeta && Object.keys(sessoesMeta).length) {
 }
 
   mensageiro.carregarMensageiro();
+  socialModule.inicializarSocialModule({ logger: console });
 
    criarPlanosPadrao();
 
@@ -14191,6 +14194,14 @@ app.use("/mensageiro", criarRotasMensageiro({
   getAtendimentoConfigCliente: mensageiro.getAtendimentoConfigCliente,
   setAtendimentoConfigCliente: mensageiro.setAtendimentoConfigCliente,
   encontrarGatilhoAtendimento: mensageiro.encontrarGatilhoAtendimento
+}));
+
+// =============== ROTA DO SOCIAL MODULE =================
+
+app.use("/social", criarRotasSocial({
+  getClienteId,
+  getPlanoUsuario,
+  usuarioTemRecurso
 }));
 
 

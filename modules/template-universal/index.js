@@ -240,6 +240,7 @@ function beneficioComercialValidoParaTemplate(beneficio = "", campos = {}) {
   const valores = extrairValoresMonetarios(texto);
 
   if (normalizado.includes("pix")) {
+    if (valorEfetivoConfirmado(campos) != null) return true;
     if (precoAtual == null || !valores.length) return false;
     return valores.some(valor => valor < precoAtual);
   }
@@ -286,12 +287,41 @@ function nomeBeneficioInstrucao(campos = {}, beneficioComercial = "") {
 }
 
 function montarInstrucaoPrecoFinal(campos = {}, beneficioComercial = "", precoFinal = "") {
-  if (!campos.cupom || !precoFinal) return "";
-
   const beneficio = nomeBeneficioInstrucao(campos, beneficioComercial);
-  if (!beneficio || beneficio === "cupom") return "";
 
-  return `Aplique o cupom ${campos.cupom} + ${beneficio} para pagar ${precoFinal}.`;
+  if (campos.cupom && precoFinal && beneficio && beneficio !== "cupom") {
+    return `Aplique o cupom ${campos.cupom} + ${beneficio} para pagar ${precoFinal}.`;
+  }
+
+  if (!campos.cupom && precoFinal && beneficio && beneficio !== "cupom") {
+    return `Use ${beneficio} para pagar ${precoFinal}.`;
+  }
+
+  return "";
+}
+
+function beneficioSugereCupomGenerico(beneficio = "") {
+  const texto = normalizarComparacao(beneficio);
+  return texto.includes("cupom") || texto.includes("carrinho") || texto.includes("app");
+}
+
+function montarInstrucaoComercial(campos = {}, beneficioComercial = "", precoFinal = "") {
+  const instrucaoPrecoFinal = precoFinal
+    ? montarInstrucaoPrecoFinal(campos, beneficioComercial, precoFinal)
+    : "";
+
+  if (instrucaoPrecoFinal) return instrucaoPrecoFinal;
+
+  if (campos.cupom) {
+    return `Aplique o cupom ${campos.cupom} para obter o desconto.`;
+  }
+
+  if (!precoFinal && beneficioSugereCupomGenerico(beneficioComercial)) {
+    const marketplace = marketplaceBonito(campos.marketplace);
+    return `Pode haver cupom disponível no carrinho/app${marketplace ? ` do ${marketplace}` : ""}. Confira antes de finalizar.`;
+  }
+
+  return beneficioComercial;
 }
 
 function adicionarBloco(blocos, linhas = []) {
@@ -321,10 +351,11 @@ function gerarTemplateUniversal(oferta = {}) {
   let beneficioComercial = campos.beneficios.find(beneficio =>
     beneficioComercialValidoParaTemplate(beneficio, campos)
   );
-  const instrucaoPrecoFinal = precoFinalConfirmado != null
-    ? montarInstrucaoPrecoFinal(campos, beneficioComercial, precoAtual)
-    : "";
-  if (instrucaoPrecoFinal) beneficioComercial = instrucaoPrecoFinal;
+  beneficioComercial = montarInstrucaoComercial(
+    campos,
+    beneficioComercial,
+    precoFinalConfirmado != null ? precoAtual : ""
+  );
 
   adicionarBloco(blocos, [`🔥 *${campos.titulo || "Oferta"}*`]);
   adicionarBloco(blocos, [
