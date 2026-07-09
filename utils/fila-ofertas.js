@@ -65,7 +65,7 @@ function resumirLogsUniversais(logs = []) {
 function montarMetadataUniversalErro(oferta = {}, erro = null) {
   return {
     ativo: true,
-    modo: "passivo",
+    modo: "oficial",
     ok: false,
     status: "erro",
     motivo: erro?.message || "erro_inteligencia_universal",
@@ -239,16 +239,7 @@ function registrarResumoV2Rodada(divergencias = [], logger = console, meta = {})
 function obterConfigEngineV2() {
   const modo = textoComparacaoNormalizado(process.env.ENGINE_V2_MODO || "full");
   const modoSeguro = modo === "shadow" ? "shadow" : "full";
-  const clientes = String(process.env.ENGINE_V2_CLIENTES_PILOTO || "")
-    .split(/[,\s;]+/)
-    .map(item => item.trim())
-    .filter(Boolean);
-
-  return { modo: modoSeguro, clientes };
-}
-
-function clienteEstaNoPilotV2(clienteId = "", clientes = []) {
-  return clientes.some(item => String(item) === String(clienteId));
+  return { modo: modoSeguro };
 }
 
 function statusOperacionalV2(metadata = {}) {
@@ -261,17 +252,15 @@ function statusOperacionalV2(metadata = {}) {
   return metadata.ok === true ? "pendente" : "retida";
 }
 
-function aplicarDecisaoEngineV2Pilot(oferta = {}, contexto = {}) {
+function aplicarDecisaoEngineV2Oficial(oferta = {}, contexto = {}) {
   const logger = contexto.logger || console;
   const clienteId = contexto.clienteId || oferta.clienteId || "admin";
   const config = obterConfigEngineV2();
-  const clientePiloto = clienteEstaNoPilotV2(clienteId, config.clientes);
   const v2 = oferta.inteligenciaUniversalV2 || {};
   const resumoModo = {
     modo: config.modo,
     clienteId,
-    marketplace: oferta.marketplace || contexto.marketplace || "",
-    clientePiloto
+    marketplace: oferta.marketplace || contexto.marketplace || ""
   };
 
   logger.log("[ENGINE-V2-MODO]", JSON.stringify(resumoModo));
@@ -279,19 +268,7 @@ function aplicarDecisaoEngineV2Pilot(oferta = {}, contexto = {}) {
   if (config.modo === "shadow") {
     logger.log("[ENGINE-V2-FALLBACK-V1]", JSON.stringify({
       ...resumoModo,
-      motivo: "modo_shadow"
-    }));
-    return oferta;
-  }
-
-  if (config.modo === "pilot" && !clientePiloto) {
-    logger.log("[ENGINE-V2-PILOT-BYPASS]", JSON.stringify({
-      ...resumoModo,
-      motivo: "cliente_fora_do_piloto"
-    }));
-    logger.log("[ENGINE-V2-FALLBACK-V1]", JSON.stringify({
-      ...resumoModo,
-      motivo: "cliente_fora_do_piloto"
+      motivo: "rollback_shadow"
     }));
     return oferta;
   }
@@ -302,10 +279,6 @@ function aplicarDecisaoEngineV2Pilot(oferta = {}, contexto = {}) {
       motivo: v2.motivo || "erro_v2"
     }));
     return oferta;
-  }
-
-  if (config.modo === "pilot") {
-    logger.log("[ENGINE-V2-PILOT-ATIVO]", JSON.stringify(resumoModo));
   }
 
   const statusAnterior = oferta.status || "";
@@ -326,7 +299,6 @@ function aplicarDecisaoEngineV2Pilot(oferta = {}, contexto = {}) {
   oferta.engineV2Decisao = {
     ativo: true,
     modo: config.modo,
-    clientePiloto,
     statusV2: v2.status || "",
     statusAplicado,
     motivo: v2.motivo || "",
@@ -548,10 +520,10 @@ function aplicarPortaUniversalFila(oferta = {}, contexto = {}) {
     const score = avaliacao.score?.score ?? avaliacao.score ?? null;
 
     oferta.ofertaUniversal = true;
-    oferta.versaoOfertaUniversal = "v2-passiva";
+    oferta.versaoOfertaUniversal = "v2-oficial";
     oferta.inteligenciaUniversalV2 = {
       ativo: true,
-      modo: "passivo",
+      modo: "oficial",
       ok: avaliacao.ok === true,
       status: avaliacao.status || "avaliada",
       motivo: avaliacao.motivo || "",
@@ -578,7 +550,7 @@ function aplicarPortaUniversalFila(oferta = {}, contexto = {}) {
       origem: contextoUniversal.origem
     };
 
-    logger.log("[OFERTA-UNIVERSAL-PASSIVA]", JSON.stringify({
+    logger.log("[OFERTA-UNIVERSAL-OFICIAL]", JSON.stringify({
       clienteId: contextoUniversal.clienteId,
       marketplace: normalizada.marketplace,
       titulo: normalizada.titulo,
@@ -616,7 +588,7 @@ function aplicarPortaUniversalFila(oferta = {}, contexto = {}) {
       }
     }));
 
-    aplicarDecisaoEngineV2Pilot(oferta, contextoUniversal);
+    aplicarDecisaoEngineV2Oficial(oferta, contextoUniversal);
 
     const camposUniversaisSombra = montarOfertaTemplateUniversalSombra(
       oferta,
@@ -630,7 +602,7 @@ function aplicarPortaUniversalFila(oferta = {}, contexto = {}) {
     return oferta;
   } catch (e) {
     oferta.ofertaUniversal = true;
-    oferta.versaoOfertaUniversal = "v2-passiva";
+    oferta.versaoOfertaUniversal = "v2-oficial";
     oferta.inteligenciaUniversalV2 = montarMetadataUniversalErro(oferta, e);
 
     logger.error("[OFERTA-UNIVERSAL-ERRO]", {
@@ -645,11 +617,7 @@ function aplicarPortaUniversalFila(oferta = {}, contexto = {}) {
     logger.log("[ENGINE-V2-MODO]", JSON.stringify({
       modo: configEngineV2Erro.modo,
       clienteId: contexto.clienteId || oferta.clienteId || "admin",
-      marketplace: oferta.marketplace || "",
-      clientePiloto: clienteEstaNoPilotV2(
-        contexto.clienteId || oferta.clienteId || "admin",
-        configEngineV2Erro.clientes
-      )
+      marketplace: oferta.marketplace || ""
     }));
     logger.log("[ENGINE-V2-FALLBACK-V1]", JSON.stringify({
       modo: configEngineV2Erro.modo,
