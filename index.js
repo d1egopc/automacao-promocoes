@@ -2210,7 +2210,8 @@ function criarPlanosPadrao() {
         analytics: false,
         cupomInteligente: false,
         campanhas: true,
-        templatePersonalizado: false
+        templatePersonalizado: false,
+        social: false
       },
 
       atualizadoEm: new Date().toISOString()
@@ -2247,7 +2248,8 @@ function criarPlanosPadrao() {
         cupomInteligente: true,
         campanhas: false,
         mensageiro: false,
-        templatePersonalizado: false
+        templatePersonalizado: false,
+        social: false
       },
 
       atualizadoEm: new Date().toISOString()
@@ -2286,7 +2288,8 @@ function criarPlanosPadrao() {
         cupomInteligente: true,
         adminAvancado: true,
         campanhas: true,
-        templatePersonalizado: false
+        templatePersonalizado: false,
+        social: false
       },
 
       atualizadoEm: new Date().toISOString()
@@ -6125,7 +6128,8 @@ app.post("/admin/planos", (req, res) => {
       templatePersonalizado: booleanPlano("templatePersonalizado", recursosAnteriores.templatePersonalizado),
       whatsapp: booleanPlano("whatsapp", recursosAnteriores.whatsapp),
       telegram: booleanPlano("telegram", recursosAnteriores.telegram),
-      automacao: booleanPlano("automacao", recursosAnteriores.automacao)
+      automacao: booleanPlano("automacao", recursosAnteriores.automacao),
+      social: booleanPlano("social", recursosAnteriores.social)
     },
 
     atualizadoEm: new Date().toISOString()
