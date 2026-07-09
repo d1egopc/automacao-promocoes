@@ -282,7 +282,7 @@ function gerarTemplateUniversal(oferta = {}) {
     campos.cupom ? `🎟️ Cupom: *${campos.cupom}*` : ""
   ]);
   adicionarBloco(blocos, [
-    score ? "⭐ *Avaliação*" : "",
+    score ? "✰ Avaliação" : "",
     score
   ]);
   adicionarBloco(blocos, [
