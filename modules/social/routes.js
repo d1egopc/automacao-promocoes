@@ -4,6 +4,10 @@ const { logSocial, logErroSocial } = require("./logs");
 const { payloadTemplateSocialPadrao } = require("./templates");
 const { payloadAgendamentoSocialPadrao } = require("./scheduler");
 const { payloadDirectSocialPadrao } = require("./direct");
+const {
+  concluirCallbackMeta,
+  iniciarConexaoMeta
+} = require("./facebook");
 
 function criarRotasSocial(deps = {}) {
   const router = express.Router();
@@ -51,6 +55,107 @@ function criarRotasSocial(deps = {}) {
       ok: true,
       clienteId,
       config
+    });
+  });
+
+  router.get("/meta/status", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    const clienteId = cliente(req);
+    return res.json({
+      ok: true,
+      clienteId,
+      meta: storage.sanitizarConexaoMeta(storage.getConexaoMetaSocial(clienteId))
+    });
+  });
+
+  router.get("/meta/conectar", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const inicio = iniciarConexaoMeta({
+        clienteId,
+        redirectUri: req.query?.redirectUri || req.query?.redirect_uri || ""
+      });
+
+      logSocial("[SOCIAL-META-OAUTH-INICIO]", {
+        clienteId,
+        provider: "meta",
+        scopes: inicio.scopes
+      });
+
+      return res.json({
+        ok: true,
+        clienteId,
+        provider: "meta",
+        status: inicio.status,
+        authUrl: inicio.authUrl,
+        state: inicio.state,
+        redirectUri: inicio.redirectUri,
+        scopes: inicio.scopes
+      });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "GET /social/meta/conectar" });
+      return res.status(400).json({
+        ok: false,
+        erro: e.message || "meta_oauth_inicio_falhou"
+      });
+    }
+  });
+
+  router.get("/meta/callback", async (req, res) => {
+    try {
+      const resultado = await concluirCallbackMeta({
+        code: req.query?.code || "",
+        state: req.query?.state || "",
+        redirectUri: req.query?.redirectUri || req.query?.redirect_uri || ""
+      });
+      const salvo = storage.setConexaoMetaSocial(resultado.clienteId, resultado);
+      const meta = storage.sanitizarConexaoMeta(salvo);
+
+      logSocial("[SOCIAL-META-OAUTH-CALLBACK]", {
+        clienteId: resultado.clienteId,
+        conectado: meta.conectado,
+        facebook: meta.facebook.conectado,
+        instagram: meta.instagram.conectado,
+        paginas: meta.paginas.length
+      });
+
+      return res.json({
+        ok: true,
+        clienteId: resultado.clienteId,
+        provider: "meta",
+        status: "conectado",
+        meta
+      });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "GET /social/meta/callback" });
+      return res.status(400).json({
+        ok: false,
+        erro: e.message || "meta_oauth_callback_invalido"
+      });
+    }
+  });
+
+  router.post("/meta/desconectar", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    const clienteId = cliente(req);
+    const meta = storage.limparConexaoMetaSocial(clienteId);
+
+    return res.json({
+      ok: true,
+      clienteId,
+      provider: "meta",
+      status: "desconectado",
+      meta
     });
   });
 
@@ -234,6 +339,10 @@ function criarRotasSocial(deps = {}) {
     rotas: [
       "GET /social/config",
       "POST /social/config",
+      "GET /social/meta/status",
+      "GET /social/meta/conectar",
+      "GET /social/meta/callback",
+      "POST /social/meta/desconectar",
       "GET /social/templates",
       "POST /social/templates",
       "GET /social/agendamentos",
