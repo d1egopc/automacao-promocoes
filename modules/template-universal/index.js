@@ -53,6 +53,8 @@ function beneficioComercialSeguro(valor = "") {
 
   const normalizado = normalizarComparacao(texto);
 
+  if (["pix", "app", "cashback"].includes(normalizado)) return true;
+
   if (/^[a-z0-9_:-]+$/.test(normalizado)) return false;
 
   return [
@@ -167,6 +169,9 @@ function selecionarCamposUniversais(oferta = {}) {
     marketplace: normalizarTexto(oferta.marketplace),
     precoAtual: oferta.precoAtual,
     precoOriginal: oferta.precoOriginal,
+    valorEfetivo: oferta.valorEfetivo,
+    valorEfetivoOrigem: normalizarTexto(oferta.valorEfetivoOrigem),
+    valorEfetivoDetalhes: oferta.valorEfetivoDetalhes || {},
     economia: oferta.economia,
     descontoPercentual: oferta.descontoPercentual,
     categoria: normalizarTexto(oferta.categoria),
@@ -244,6 +249,51 @@ function beneficioComercialValidoParaTemplate(beneficio = "", campos = {}) {
   return true;
 }
 
+function origemValorEfetivoComercial(origem = "") {
+  const normalizado = normalizarComparacao(origem);
+
+  return [
+    "cupom",
+    "pix",
+    "app",
+    "cashback",
+    "frete_gratis",
+    "desconto"
+  ].some(termo => normalizado.includes(termo));
+}
+
+function valorEfetivoConfirmado(campos = {}) {
+  const valorEfetivo = normalizarNumero(campos.valorEfetivo);
+  const precoAtual = normalizarNumero(campos.precoAtual);
+
+  if (valorEfetivo == null || precoAtual == null || valorEfetivo >= precoAtual) return null;
+  if (!origemValorEfetivoComercial(campos.valorEfetivoOrigem)) return null;
+
+  return valorEfetivo;
+}
+
+function nomeBeneficioInstrucao(campos = {}, beneficioComercial = "") {
+  const origem = normalizarComparacao(campos.valorEfetivoOrigem);
+  const beneficio = normalizarComparacao(beneficioComercial);
+
+  if (origem.includes("pix") || beneficio.includes("pix")) return "PIX";
+  if (origem.includes("app") || beneficio.includes("app")) return "app";
+  if (origem.includes("cashback") || beneficio.includes("cashback")) return "cashback";
+  if (origem.includes("frete") || beneficio.includes("frete")) return "frete gratis";
+  if (origem.includes("cupom") || beneficio.includes("cupom")) return "cupom";
+
+  return "";
+}
+
+function montarInstrucaoPrecoFinal(campos = {}, beneficioComercial = "", precoFinal = "") {
+  if (!campos.cupom || !precoFinal) return "";
+
+  const beneficio = nomeBeneficioInstrucao(campos, beneficioComercial);
+  if (!beneficio || beneficio === "cupom") return "";
+
+  return `Aplique o cupom ${campos.cupom} + ${beneficio} para pagar ${precoFinal}.`;
+}
+
 function adicionarBloco(blocos, linhas = []) {
   const bloco = linhas.map(normalizarTexto).filter(Boolean);
   if (bloco.length) blocos.push(bloco);
@@ -252,23 +302,29 @@ function adicionarBloco(blocos, linhas = []) {
 function gerarTemplateUniversal(oferta = {}) {
   const campos = selecionarCamposUniversais(oferta);
   const blocos = [];
-  const precoAtualNumero = normalizarNumero(campos.precoAtual);
+  const precoFinalConfirmado = valorEfetivoConfirmado(campos);
+  const precoAtualExibido = precoFinalConfirmado ?? campos.precoAtual;
+  const precoAtualNumero = normalizarNumero(precoAtualExibido);
   const precoOriginalNumero = normalizarNumero(campos.precoOriginal);
-  const precoAtual = formatarMoeda(campos.precoAtual) || normalizarTexto(campos.precoAtual);
+  const precoAtual = formatarMoeda(precoAtualExibido) || normalizarTexto(precoAtualExibido);
   const precoOriginal = precoOriginalNumero != null &&
     precoAtualNumero != null &&
     precoOriginalNumero > precoAtualNumero
       ? formatarMoeda(campos.precoOriginal)
       : "";
-  const economiaNumero = economiaReal(campos.precoOriginal, campos.precoAtual, campos.economia);
-  const descontoPercentual = descontoReal(campos.precoOriginal, campos.precoAtual, campos.descontoPercentual);
+  const economiaNumero = economiaReal(campos.precoOriginal, precoAtualExibido, campos.economia);
+  const descontoPercentual = descontoReal(campos.precoOriginal, precoAtualExibido, campos.descontoPercentual);
   const economia = economiaNumero != null && economiaNumero > 0
     ? formatarMoeda(economiaNumero)
     : "";
   const score = apresentarScore(campos.score);
-  const beneficioComercial = campos.beneficios.find(beneficio =>
+  let beneficioComercial = campos.beneficios.find(beneficio =>
     beneficioComercialValidoParaTemplate(beneficio, campos)
   );
+  const instrucaoPrecoFinal = precoFinalConfirmado != null
+    ? montarInstrucaoPrecoFinal(campos, beneficioComercial, precoAtual)
+    : "";
+  if (instrucaoPrecoFinal) beneficioComercial = instrucaoPrecoFinal;
 
   adicionarBloco(blocos, [`🔥 *${campos.titulo || "Oferta"}*`]);
   adicionarBloco(blocos, [
