@@ -3,7 +3,11 @@ const crypto = require("crypto");
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v20.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
-const META_SCOPES = [
+const META_SCOPES_LOGIN_INICIAL = [
+  "public_profile",
+  "email"
+];
+const META_SCOPES_PUBLICACAO_FUTURA = [
   "pages_show_list",
   "pages_read_engagement",
   "pages_manage_posts",
@@ -100,7 +104,7 @@ function iniciarConexaoMeta({ clienteId = "admin", redirectUri = "" } = {}) {
     redirect_uri: uri,
     state,
     response_type: "code",
-    scope: META_SCOPES.join(",")
+    scope: META_SCOPES_LOGIN_INICIAL.join(",")
   });
 
   return {
@@ -110,7 +114,8 @@ function iniciarConexaoMeta({ clienteId = "admin", redirectUri = "" } = {}) {
     authUrl: `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params.toString()}`,
     state,
     redirectUri: uri,
-    scopes: META_SCOPES
+    scopes: META_SCOPES_LOGIN_INICIAL,
+    scopesFuturos: META_SCOPES_PUBLICACAO_FUTURA
   };
 }
 
