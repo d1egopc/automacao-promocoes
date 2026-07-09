@@ -18,21 +18,12 @@ function normalizarTextoLocal(valor = "") {
 }
 
 function normalizarEngineV2Modo() {
-  const modo = normalizarTextoLocal(process.env.ENGINE_V2_MODO || "shadow").toLowerCase();
-  return ["shadow", "pilot", "full"].includes(modo) ? modo : "shadow";
+  const modo = normalizarTextoLocal(process.env.ENGINE_V2_MODO || "full").toLowerCase();
+  return modo === "shadow" ? "shadow" : "full";
 }
 
-function clientesPilotoEngineV2() {
-  return String(process.env.ENGINE_V2_CLIENTES_PILOTO || "user_yxquab4z")
-    .split(/[,\s;]+/)
-    .map(item => item.trim())
-    .filter(Boolean);
-}
-
-function clienteTemplateUniversalPilot(clienteId = "") {
-  if (normalizarEngineV2Modo() !== "pilot") return false;
-  const id = String(clienteId || "").trim();
-  return clientesPilotoEngineV2().some(item => String(item) === id);
+function templateUniversalOficialAtivo() {
+  return normalizarEngineV2Modo() === "full";
 }
 
 function scoreUniversal(valor) {
@@ -85,10 +76,10 @@ function montarEntradaTemplateUniversalOficial(oferta = {}) {
   };
 }
 
-function tentarTemplateUniversalPilot(oferta = {}, opcoes = {}) {
+function tentarTemplateUniversalOficial(oferta = {}, opcoes = {}) {
   const clienteId = opcoes.clienteId || oferta.clienteId || "admin";
 
-  if (!clienteTemplateUniversalPilot(clienteId)) return "";
+  if (!templateUniversalOficialAtivo()) return "";
 
   const resumo = {
     clienteId,
@@ -98,7 +89,7 @@ function tentarTemplateUniversalPilot(oferta = {}, opcoes = {}) {
 
   try {
     const entradaUniversal = montarEntradaTemplateUniversalOficial(oferta);
-    console.log("[TEMPLATE-UNIVERSAL-PILOT]", JSON.stringify({
+    console.log("[TEMPLATE-UNIVERSAL-OFICIAL]", JSON.stringify({
       ...resumo,
       score: entradaUniversal.score ?? "",
       prioridade: entradaUniversal.prioridade ?? ""
@@ -116,7 +107,7 @@ function tentarTemplateUniversalPilot(oferta = {}, opcoes = {}) {
       cupom: entradaUniversal.cupom || "",
       avaliacao: entradaUniversal.score ?? "",
       origem: opcoes.origem || oferta.origem || "",
-      templateVersao: "v2-universal-oficial-pilot",
+      templateVersao: "v2-universal-oficial",
       tamanhoTexto: texto.length,
       temCupom: Boolean(entradaUniversal.cupom),
       temLinkAfiliado: Boolean(entradaUniversal.linkAfiliado)
@@ -231,8 +222,8 @@ function montarLegendaShopee(oferta = {}) {
 }
 
 function montarMensagemOferta(oferta = {}, opcoes = {}) {
-  const mensagemUniversalPilot = tentarTemplateUniversalPilot(oferta, opcoes);
-  if (mensagemUniversalPilot) return mensagemUniversalPilot;
+  const mensagemUniversalOficial = tentarTemplateUniversalOficial(oferta, opcoes);
+  if (mensagemUniversalOficial) return mensagemUniversalOficial;
 
   if (deveUsarTemplatePersonalizado(opcoes)) {
     const mensagemPersonalizada = montarMensagemTemplatePersonalizado(

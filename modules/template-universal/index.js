@@ -219,7 +219,7 @@ function beneficioDiferenteDoCupom(beneficio = "", cupom = "") {
 }
 
 function extrairValoresMonetarios(texto = "") {
-  const matches = String(texto || "").match(/(?:R\$\s*)?\d{1,3}(?:\.\d{3})*,\d{2}|(?:R\$\s*)?\d+(?:\.\d{2})/g) || [];
+  const matches = String(texto || "").match(/(?:R\$\s*)?\d{1,3}(?:\.\d{3})*,\d{2}|(?:R\$\s*)?\d+(?:\.\d{2})|R\$\s*\d+/g) || [];
   return matches
     .map(valor => normalizarNumero(valor))
     .filter(valor => valor != null);
@@ -231,15 +231,17 @@ function beneficioComercialValidoParaTemplate(beneficio = "", campos = {}) {
   if (!beneficioDiferenteDoCupom(texto, campos.cupom)) return false;
 
   const normalizado = normalizarComparacao(texto);
-  if (!normalizado.includes("pix")) return true;
-
   const precoAtual = normalizarNumero(campos.precoAtual);
-  if (precoAtual == null) return false;
-
   const valores = extrairValoresMonetarios(texto);
-  if (!valores.length) return false;
 
-  return valores.some(valor => valor < precoAtual);
+  if (normalizado.includes("pix")) {
+    if (precoAtual == null || !valores.length) return false;
+    return valores.some(valor => valor < precoAtual);
+  }
+
+  if (precoAtual != null && valores.some(valor => valor >= precoAtual)) return false;
+
+  return true;
 }
 
 function adicionarBloco(blocos, linhas = []) {

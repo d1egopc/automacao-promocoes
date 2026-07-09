@@ -237,9 +237,9 @@ function registrarResumoV2Rodada(divergencias = [], logger = console, meta = {})
 }
 
 function obterConfigEngineV2() {
-  const modo = textoComparacaoNormalizado(process.env.ENGINE_V2_MODO || "shadow");
-  const modoSeguro = ["shadow", "pilot", "full"].includes(modo) ? modo : "shadow";
-  const clientes = String(process.env.ENGINE_V2_CLIENTES_PILOTO || "user_yxquab4z")
+  const modo = textoComparacaoNormalizado(process.env.ENGINE_V2_MODO || "full");
+  const modoSeguro = modo === "shadow" ? "shadow" : "full";
+  const clientes = String(process.env.ENGINE_V2_CLIENTES_PILOTO || "")
     .split(/[,\s;]+/)
     .map(item => item.trim())
     .filter(Boolean);
