@@ -4,10 +4,10 @@ const crypto = require("crypto");
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v20.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
 const META_SCOPES_LOGIN_INICIAL = [
-  "public_profile",
-  "email"
+  "public_profile"
 ];
 const META_SCOPES_PUBLICACAO_FUTURA = [
+  "email",
   "pages_show_list",
   "pages_read_engagement",
   "pages_manage_posts",
