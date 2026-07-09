@@ -109,6 +109,14 @@ function tentarTemplateUniversalPilot(oferta = {}, opcoes = {}) {
 
     console.log("[TEMPLATE-UNIVERSAL-OFICIAL-ENVIADO]", JSON.stringify({
       ...resumo,
+      categoria: entradaUniversal.categoria || "",
+      precoAtual: entradaUniversal.precoAtual ?? "",
+      precoAntigo: entradaUniversal.precoOriginal ?? "",
+      economia: entradaUniversal.economia ?? "",
+      cupom: entradaUniversal.cupom || "",
+      avaliacao: entradaUniversal.score ?? "",
+      origem: opcoes.origem || oferta.origem || "",
+      templateVersao: "v2-universal-oficial-pilot",
       tamanhoTexto: texto.length,
       temCupom: Boolean(entradaUniversal.cupom),
       temLinkAfiliado: Boolean(entradaUniversal.linkAfiliado)

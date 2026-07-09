@@ -4,6 +4,7 @@ const path = require("path");
 let inteligenciaUniversalCache = null;
 let templateUniversalCache = null;
 let resumoV2Rodada = criarResumoV2Rodada();
+let resumoV2Acumulado = criarResumoV2Rodada();
 let resumoV2Agendado = false;
 
 function getInteligenciaUniversal() {
@@ -28,7 +29,31 @@ function criarResumoV2Rodada() {
     score: 0,
     preco: 0,
     cupom: 0,
-    status: 0
+    status: 0,
+    clientes: {},
+    marketplaces: {},
+    statusV2: {}
+  };
+}
+
+function incrementarContadorMapa(mapa = {}, chave = "") {
+  const valor = textoComparacao(chave) || "desconhecido";
+  mapa[valor] = (mapa[valor] || 0) + 1;
+}
+
+function clonarResumoV2(resumo = {}) {
+  return {
+    ofertasComparadas: resumo.comparacoes || 0,
+    iguais: Math.max(0, (resumo.comparacoes || 0) - (resumo.divergencias || 0)),
+    divergentes: resumo.divergencias || 0,
+    categoria: resumo.categoria || 0,
+    score: resumo.score || 0,
+    preco: resumo.preco || 0,
+    cupom: resumo.cupom || 0,
+    status: resumo.status || 0,
+    clientes: resumo.clientes || {},
+    marketplaces: resumo.marketplaces || {},
+    statusV2: resumo.statusV2 || {}
   };
 }
 
@@ -90,6 +115,40 @@ function tituloCurto(valor = "") {
   return texto.length > 80 ? `${texto.slice(0, 77)}...` : texto;
 }
 
+function campoPresente(valor) {
+  if (valor === null || valor === undefined) return false;
+  if (typeof valor === "string") return valor.trim() !== "";
+  if (Array.isArray(valor)) return valor.length > 0;
+  return true;
+}
+
+function economiaOferta(oferta = {}, normalizada = {}) {
+  const economiaDireta = oferta.economia ?? oferta.economiaValor ?? oferta.valorEconomia;
+  if (campoPresente(economiaDireta)) return economiaDireta;
+
+  const precoOriginal = numeroComparacao(normalizada.precoOriginal ?? oferta.precoOriginal ?? oferta.precoAntigo);
+  const precoAtual = numeroComparacao(normalizada.precoAtual ?? oferta.precoAtual ?? oferta.preco);
+
+  if (precoOriginal !== null && precoAtual !== null && precoOriginal > precoAtual) {
+    return precoOriginal - precoAtual;
+  }
+
+  return "";
+}
+
+function temBeneficioComercial(oferta = {}, avaliacao = {}) {
+  const templateInput = avaliacao.templateInput || {};
+  const beneficios = [
+    ...(Array.isArray(templateInput.beneficios) ? templateInput.beneficios : []),
+    ...(Array.isArray(oferta.beneficios) ? oferta.beneficios : []),
+    oferta.beneficioTexto,
+    oferta.avisoCupom,
+    oferta.aviso
+  ].filter(campoPresente);
+
+  return beneficios.length > 0;
+}
+
 function scoreUniversal(metadata = {}) {
   return metadata.score?.score ?? metadata.score ?? null;
 }
@@ -136,15 +195,27 @@ function camposDivergentesLog(divergencias = []) {
     .map(item => item.campo);
 }
 
-function registrarResumoV2Rodada(divergencias = [], logger = console) {
+function registrarResumoV2Rodada(divergencias = [], logger = console, meta = {}) {
   const camposDivergentes = camposDivergentesLog(divergencias);
 
   resumoV2Rodada.comparacoes += 1;
+  resumoV2Acumulado.comparacoes += 1;
   if (camposDivergentes.length > 0) resumoV2Rodada.divergencias += 1;
+  if (camposDivergentes.length > 0) resumoV2Acumulado.divergencias += 1;
+
+  incrementarContadorMapa(resumoV2Rodada.clientes, meta.clienteId);
+  incrementarContadorMapa(resumoV2Rodada.marketplaces, meta.marketplace);
+  incrementarContadorMapa(resumoV2Rodada.statusV2, meta.statusV2);
+  incrementarContadorMapa(resumoV2Acumulado.clientes, meta.clienteId);
+  incrementarContadorMapa(resumoV2Acumulado.marketplaces, meta.marketplace);
+  incrementarContadorMapa(resumoV2Acumulado.statusV2, meta.statusV2);
 
   camposDivergentes.forEach(campo => {
     if (Object.prototype.hasOwnProperty.call(resumoV2Rodada, campo)) {
       resumoV2Rodada[campo] += 1;
+    }
+    if (Object.prototype.hasOwnProperty.call(resumoV2Acumulado, campo)) {
+      resumoV2Acumulado[campo] += 1;
     }
   });
 
@@ -157,14 +228,8 @@ function registrarResumoV2Rodada(divergencias = [], logger = console) {
     resumoV2Agendado = false;
 
     const resumoLog = {
-      ofertasComparadas: resumo.comparacoes,
-      iguais: Math.max(0, resumo.comparacoes - resumo.divergencias),
-      divergentes: resumo.divergencias,
-      categoria: resumo.categoria,
-      score: resumo.score,
-      preco: resumo.preco,
-      cupom: resumo.cupom,
-      status: resumo.status
+      rodada: clonarResumoV2(resumo),
+      acumulado: clonarResumoV2(resumoV2Acumulado)
     };
 
     logger.log("[V2-RESUMO]", JSON.stringify(resumoLog));
@@ -374,7 +439,11 @@ function aplicarComparacaoV1V2Sombra(oferta = {}, contexto = {}, camposUniversai
       logger.log("[INTELIGENCIA-V1-V2-DIVERGENCIA]", JSON.stringify(resumoDivergencia));
     }
 
-    registrarResumoV2Rodada(divergencias, logger);
+    registrarResumoV2Rodada(divergencias, logger, {
+      clienteId: resumo.clienteId,
+      marketplace: resumo.marketplace,
+      statusV2: resumo.statusV2
+    });
   } catch (e) {
     oferta.comparacaoV1V2 = {
       ativo: true,
@@ -494,7 +563,22 @@ function aplicarPortaUniversalFila(oferta = {}, contexto = {}) {
       logs: resumirLogsUniversais(avaliacao.logs)
     };
 
-    logger.log("[OFERTA-UNIVERSAL-PASSIVA]", {
+    const auditoriaCampos = {
+      clienteId: contextoUniversal.clienteId,
+      marketplace: normalizada.marketplace || oferta.marketplace || "",
+      titulo: tituloCurto(normalizada.titulo || oferta.titulo || oferta.nome || ""),
+      categoria: oferta.inteligenciaUniversalV2.categoria || "",
+      precoAtual: normalizada.precoAtual ?? oferta.precoAtual ?? oferta.preco ?? "",
+      precoAntigo: normalizada.precoOriginal ?? oferta.precoOriginal ?? oferta.precoAntigo ?? "",
+      economia: economiaOferta(oferta, normalizada),
+      cupom: normalizada.cupom || oferta.cupom || "",
+      avaliacao: score,
+      linkAfiliado: campoPresente(normalizada.linkAfiliado || oferta.linkAfiliado || oferta.linkFinal || oferta.link),
+      beneficioComercial: temBeneficioComercial(oferta, avaliacao),
+      origem: contextoUniversal.origem
+    };
+
+    logger.log("[OFERTA-UNIVERSAL-PASSIVA]", JSON.stringify({
       clienteId: contextoUniversal.clienteId,
       marketplace: normalizada.marketplace,
       titulo: normalizada.titulo,
@@ -504,8 +588,33 @@ function aplicarPortaUniversalFila(oferta = {}, contexto = {}) {
       prioridade: oferta.inteligenciaUniversalV2.prioridade,
       score: oferta.inteligenciaUniversalV2.score,
       categoria: oferta.inteligenciaUniversalV2.categoria,
-      valorEfetivo: oferta.inteligenciaUniversalV2.valorEfetivo
-    });
+      precoAtual: auditoriaCampos.precoAtual,
+      precoAntigo: auditoriaCampos.precoAntigo,
+      economia: auditoriaCampos.economia,
+      cupom: auditoriaCampos.cupom,
+      temLinkAfiliado: auditoriaCampos.linkAfiliado,
+      beneficioComercial: auditoriaCampos.beneficioComercial,
+      origem: contextoUniversal.origem
+    }));
+
+    logger.log("[ENGINE-V2-AUDITORIA-CAMPOS]", JSON.stringify({
+      clienteId: auditoriaCampos.clienteId,
+      marketplace: auditoriaCampos.marketplace,
+      titulo: auditoriaCampos.titulo,
+      origem: auditoriaCampos.origem,
+      campos: {
+        marketplace: campoPresente(auditoriaCampos.marketplace),
+        titulo: campoPresente(auditoriaCampos.titulo),
+        categoria: campoPresente(auditoriaCampos.categoria),
+        precoAtual: campoPresente(auditoriaCampos.precoAtual),
+        precoAntigo: campoPresente(auditoriaCampos.precoAntigo),
+        economia: campoPresente(auditoriaCampos.economia),
+        cupom: campoPresente(auditoriaCampos.cupom),
+        avaliacao: campoPresente(auditoriaCampos.avaliacao),
+        linkAfiliado: auditoriaCampos.linkAfiliado,
+        beneficioComercial: auditoriaCampos.beneficioComercial
+      }
+    }));
 
     aplicarDecisaoEngineV2Pilot(oferta, contextoUniversal);
 
