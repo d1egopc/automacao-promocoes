@@ -202,25 +202,25 @@ function gerarTemplateUniversal(oferta = {}) {
     beneficioDiferenteDoCupom(beneficio, campos.cupom)
   );
 
-  adicionarBloco(blocos, [`🔥 ${campos.titulo || "Oferta"}`]);
+  adicionarBloco(blocos, [`🔥 *${campos.titulo || "Oferta"}*`]);
   adicionarBloco(blocos, [
     campos.marketplace ? `🛍️ ${marketplaceBonito(campos.marketplace)}` : "",
     campos.categoria ? `📂 ${campos.categoria}` : ""
   ]);
   adicionarBloco(blocos, [
-    precoOriginal ? `❌ De: ${precoOriginal}` : "",
-    `✅ Por: ${precoAtual}`,
-    economia ? `💸 Economia: ${economia}${descontoPercentual != null && descontoPercentual > 0 ? ` (${descontoPercentual.toFixed(0)}%)` : ""}` : ""
+    precoOriginal ? `❌ De: *${precoOriginal}*` : "",
+    `✅ Por: *${precoAtual}*`,
+    economia ? `💸 Economia: *${economia}${descontoPercentual != null && descontoPercentual > 0 ? ` (${descontoPercentual.toFixed(0)}%)` : ""}*` : ""
   ]);
   adicionarBloco(blocos, [
-    campos.cupom ? `🎟️ Cupom: ${campos.cupom}` : ""
+    campos.cupom ? `🎟️ Cupom: *${campos.cupom}*` : ""
   ]);
   adicionarBloco(blocos, [
-    score ? "⭐ Avaliação" : "",
+    score ? "⭐ *Avaliação*" : "",
     score
   ]);
   adicionarBloco(blocos, [
-    "🔗 Confira aqui:",
+    "🔗 *Confira aqui:*",
     campos.linkAfiliado
   ]);
   adicionarBloco(blocos, [
