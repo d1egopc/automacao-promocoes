@@ -471,6 +471,21 @@ async function resolverPromozone(urlOriginal = "", contexto = {}) {
   return resultadoFallback;
 }
 
+async function resolverAOferta(urlOriginal = "", contexto = {}) {
+  const resultado = await resolverHttpGenerico(urlOriginal, contexto);
+  const pistaKabum = /-kabum\/?$/i.test(new URL(urlOriginal).pathname || "");
+
+  if (!resultado.ok && pistaKabum && !resultado.marketplaceDetectado) {
+    return {
+      ...resultado,
+      pistaMarketplace: "kabum",
+      motivo: "aoferta_kabum_nao_resolvido"
+    };
+  }
+
+  return resultado;
+}
+
 function logAuditoriaRedirect(resultado = {}, tempoMs = 0) {
   console.log("[REDIRECT-RESOLVER-AUDITORIA]", JSON.stringify({
     urlOriginal: resultado.urlOriginal || "",
@@ -530,6 +545,12 @@ registrarResolverRedirect({
   resolver: resolverPromozone
 });
 
+registrarResolverRedirect({
+  nome: "aoferta",
+  dominios: ["aoferta.net"],
+  resolver: resolverAOferta
+});
+
 module.exports = {
   detectarMarketplaceRedirect,
   dominioRedirectPermitido,
@@ -540,6 +561,7 @@ module.exports = {
   listarResolversRedirect: () => resolversRegistrados.map(item => ({ nome: item.nome, dominios: [...item.dominios] })),
   localizarResolverRedirect,
   registrarResolverRedirect,
+  resolverAOferta,
   resolverHttpGenerico,
   resolverPromozone,
   resolverRedirectUniversal
