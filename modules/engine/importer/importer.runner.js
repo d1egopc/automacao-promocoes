@@ -28,7 +28,8 @@ const ADAPTERS = {
   amazon: importarAmazonEngine,
   shopee: importarShopeeEngine,
   aliexpress: importarAliExpressEngine,
-  awin: importarAwinEngine
+  awin: importarAwinEngine,
+  kabum: importarAwinEngine
 };
 
 function marketplaceJob(job = {}) {

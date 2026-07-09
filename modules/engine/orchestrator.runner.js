@@ -62,7 +62,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
 
   console.log("[ENGINE-ORQUESTRADOR-INICIO]", {
     limites: limitesRodada,
-    marketplaces: ["mercadolivre", "amazon", "shopee"]
+    marketplaces: ["mercadolivre", "amazon", "shopee", "awin", "kabum"]
   });
 
   try {
@@ -98,6 +98,18 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     resumo.etapas.importarShopee = await executarEtapa("importar_shopee", importarJobsProntosEngine, {
       limite: limitesRodada.importarShopee || limitesRodada.importar,
       marketplace: "shopee",
+      deps: depsImportador
+    });
+
+    resumo.etapas.importarAwin = await executarEtapa("importar_awin", importarJobsProntosEngine, {
+      limite: limitesRodada.importarAwin || limitesRodada.importar,
+      marketplace: "awin",
+      deps: depsImportador
+    });
+
+    resumo.etapas.importarKabum = await executarEtapa("importar_kabum", importarJobsProntosEngine, {
+      limite: limitesRodada.importarKabum || limitesRodada.importar,
+      marketplace: "kabum",
       deps: depsImportador
     });
 

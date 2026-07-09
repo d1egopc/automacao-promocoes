@@ -6941,7 +6941,9 @@ app.post("/engine/importar-prontos", async (req, res) => {
         importarAmazon,
         getIntegracaoCliente,
         gerarLinkAfiliadoMercadoLivre,
-        resolverLinkOriginalRadar
+        resolverLinkOriginalRadar,
+        importarProdutoKabumViaAwin,
+        gerarDeepLinkAwin
       }
     });
 
@@ -20303,7 +20305,9 @@ initEngineDatabase()
         importarShopee,
         getIntegracaoCliente,
         gerarLinkAfiliadoMercadoLivre,
-        resolverLinkOriginalRadar
+        resolverLinkOriginalRadar,
+        importarProdutoKabumViaAwin,
+        gerarDeepLinkAwin
       }),
       getContextoDistribuidor: () => ({
         clientesValidos: listarClientesValidosEngineProcessor(),
