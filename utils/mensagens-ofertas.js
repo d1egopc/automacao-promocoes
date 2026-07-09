@@ -11,6 +11,118 @@
   montarMensagemTemplatePersonalizado
 } = require("./templates");
 const { formatarOfertaUniversal } = require("../templates/oferta-template");
+const { gerarTemplateUniversal } = require("../modules/template-universal");
+
+function normalizarTextoLocal(valor = "") {
+  return String(valor || "").trim();
+}
+
+function normalizarEngineV2Modo() {
+  const modo = normalizarTextoLocal(process.env.ENGINE_V2_MODO || "shadow").toLowerCase();
+  return ["shadow", "pilot", "full"].includes(modo) ? modo : "shadow";
+}
+
+function clientesPilotoEngineV2() {
+  return String(process.env.ENGINE_V2_CLIENTES_PILOTO || "user_yxquab4z")
+    .split(/[,\s;]+/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function clienteTemplateUniversalPilot(clienteId = "") {
+  if (normalizarEngineV2Modo() !== "pilot") return false;
+  const id = String(clienteId || "").trim();
+  return clientesPilotoEngineV2().some(item => String(item) === id);
+}
+
+function scoreUniversal(valor) {
+  if (valor && typeof valor === "object") {
+    return valor.score ?? valor.valor ?? valor.total ?? null;
+  }
+
+  return valor ?? null;
+}
+
+function beneficiosUniversais(oferta = {}, v2 = {}) {
+  const logs = Array.isArray(v2.logs) ? v2.logs : [];
+  const beneficios = [];
+
+  if (Array.isArray(oferta.beneficios)) beneficios.push(...oferta.beneficios);
+  if (Array.isArray(v2.beneficios)) beneficios.push(...v2.beneficios);
+  if (oferta.beneficioTexto) beneficios.push(oferta.beneficioTexto);
+  if (oferta.avisoCupom) beneficios.push(oferta.avisoCupom);
+  if (oferta.aviso) beneficios.push(oferta.aviso);
+
+  logs.forEach(item => {
+    if (typeof item === "string") beneficios.push(item);
+    else if (item?.mensagem) beneficios.push(item.mensagem);
+    else if (item?.motivo) beneficios.push(item.motivo);
+  });
+
+  return [...new Set(beneficios.map(normalizarTextoLocal).filter(Boolean))].slice(0, 5);
+}
+
+function montarEntradaTemplateUniversalOficial(oferta = {}) {
+  const v2 = oferta.inteligenciaUniversalV2 || {};
+
+  return {
+    titulo: oferta.titulo || oferta.nome || "",
+    marketplace: oferta.marketplace || "",
+    precoAtual: oferta.precoAtual ?? oferta.preco,
+    precoOriginal: oferta.precoOriginal ?? oferta.precoAntigo,
+    economia: oferta.economia ?? oferta.economiaValor ?? oferta.valorEconomia,
+    descontoPercentual: oferta.descontoPercentual ?? oferta.desconto,
+    categoria: v2.categoria || oferta.categoria || "",
+    cupom: oferta.cupom || oferta.cupomCodigo || "",
+    cupomTipo: oferta.cupomTipo || oferta.tipoCupom || "",
+    beneficios: beneficiosUniversais(oferta, v2),
+    valorEfetivo: v2.valorEfetivo ?? oferta.valorEfetivo,
+    valorEfetivoOrigem: v2.valorEfetivoOrigem || oferta.valorEfetivoOrigem || "",
+    prioridade: v2.prioridade ?? oferta.prioridadeEnvio ?? oferta.prioridadeFila ?? oferta.prioridade,
+    score: scoreUniversal(v2.score),
+    linkAfiliado: oferta.linkAfiliado || oferta.linkFinal || oferta.link || "",
+    imagem: oferta.imagem || ""
+  };
+}
+
+function tentarTemplateUniversalPilot(oferta = {}, opcoes = {}) {
+  const clienteId = opcoes.clienteId || oferta.clienteId || "admin";
+
+  if (!clienteTemplateUniversalPilot(clienteId)) return "";
+
+  const resumo = {
+    clienteId,
+    marketplace: oferta.marketplace || "",
+    titulo: cortarTitulo(oferta.titulo || oferta.nome || "", 80)
+  };
+
+  try {
+    const entradaUniversal = montarEntradaTemplateUniversalOficial(oferta);
+    console.log("[TEMPLATE-UNIVERSAL-PILOT]", JSON.stringify({
+      ...resumo,
+      score: entradaUniversal.score ?? "",
+      prioridade: entradaUniversal.prioridade ?? ""
+    }));
+
+    const texto = gerarTemplateUniversal(entradaUniversal);
+    if (!texto) throw new Error("template_universal_vazio");
+
+    console.log("[TEMPLATE-UNIVERSAL-OFICIAL-ENVIADO]", JSON.stringify({
+      ...resumo,
+      tamanhoTexto: texto.length,
+      temCupom: Boolean(entradaUniversal.cupom),
+      temLinkAfiliado: Boolean(entradaUniversal.linkAfiliado)
+    }));
+
+    return texto;
+  } catch (e) {
+    console.log("[TEMPLATE-UNIVERSAL-FALLBACK-V1]", JSON.stringify({
+      ...resumo,
+      erro: e.message
+    }));
+    return "";
+  }
+}
 
 function precoTemVariacao(valor = "") {
   return /\d[\d.,]*\s+a\s+\d[\d.,]*/i.test(String(valor || ""));
@@ -111,6 +223,9 @@ function montarLegendaShopee(oferta = {}) {
 }
 
 function montarMensagemOferta(oferta = {}, opcoes = {}) {
+  const mensagemUniversalPilot = tentarTemplateUniversalPilot(oferta, opcoes);
+  if (mensagemUniversalPilot) return mensagemUniversalPilot;
+
   if (deveUsarTemplatePersonalizado(opcoes)) {
     const mensagemPersonalizada = montarMensagemTemplatePersonalizado(
       oferta,
