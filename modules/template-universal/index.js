@@ -112,6 +112,42 @@ function marketplaceBonito(valor = "") {
     .join(" ");
 }
 
+function categoriaConfiavel(campos = {}) {
+  const categoria = normalizarTexto(campos.categoria);
+  if (!categoria) return false;
+
+  const categoriaNormalizada = normalizarComparacao(categoria);
+  const marketplaceNormalizado = normalizarComparacao(campos.marketplace);
+  const categoriasFracas = [
+    "diversos",
+    "shopee",
+    "mercado livre",
+    "mercadolivre",
+    "amazon"
+  ];
+
+  if (categoriasFracas.includes(categoriaNormalizada)) return false;
+  if (marketplaceNormalizado && categoriaNormalizada === marketplaceNormalizado) return false;
+
+  if (
+    campos.categoriaGenerica === true ||
+    campos.categoriaBaixaConfianca === true ||
+    campos.baixaConfiancaCategoria === true
+  ) {
+    return false;
+  }
+
+  const confiancaCategoria = normalizarNumero(campos.categoriaConfianca ?? campos.confiancaCategoria);
+  if (confiancaCategoria != null && confiancaCategoria < 0.5) return false;
+
+  const score = normalizarNumero(campos.score);
+  const prioridade = normalizarNumero(campos.prioridade);
+  if (score != null && score < 45) return false;
+  if (prioridade != null && prioridade < 45) return false;
+
+  return true;
+}
+
 function apresentarScore(score) {
   const numero = normalizarNumero(score);
   if (numero == null) return "";
@@ -134,9 +170,15 @@ function selecionarCamposUniversais(oferta = {}) {
     economia: oferta.economia,
     descontoPercentual: oferta.descontoPercentual,
     categoria: normalizarTexto(oferta.categoria),
+    categoriaConfianca: oferta.categoriaConfianca,
+    confiancaCategoria: oferta.confiancaCategoria,
+    categoriaGenerica: oferta.categoriaGenerica,
+    categoriaBaixaConfianca: oferta.categoriaBaixaConfianca,
+    baixaConfiancaCategoria: oferta.baixaConfiancaCategoria,
     cupom: normalizarTexto(oferta.cupom),
     beneficios: normalizarBeneficios(oferta.beneficios),
     score: oferta.score,
+    prioridade: oferta.prioridade,
     linkAfiliado: normalizarTexto(oferta.linkAfiliado)
   };
 }
@@ -176,6 +218,30 @@ function beneficioDiferenteDoCupom(beneficio = "", cupom = "") {
   return !codigo || !texto.includes(codigo);
 }
 
+function extrairValoresMonetarios(texto = "") {
+  const matches = String(texto || "").match(/(?:R\$\s*)?\d{1,3}(?:\.\d{3})*,\d{2}|(?:R\$\s*)?\d+(?:\.\d{2})/g) || [];
+  return matches
+    .map(valor => normalizarNumero(valor))
+    .filter(valor => valor != null);
+}
+
+function beneficioComercialValidoParaTemplate(beneficio = "", campos = {}) {
+  const texto = normalizarTexto(beneficio);
+  if (!texto || !beneficioComercialSeguro(texto)) return false;
+  if (!beneficioDiferenteDoCupom(texto, campos.cupom)) return false;
+
+  const normalizado = normalizarComparacao(texto);
+  if (!normalizado.includes("pix")) return true;
+
+  const precoAtual = normalizarNumero(campos.precoAtual);
+  if (precoAtual == null) return false;
+
+  const valores = extrairValoresMonetarios(texto);
+  if (!valores.length) return false;
+
+  return valores.some(valor => valor < precoAtual);
+}
+
 function adicionarBloco(blocos, linhas = []) {
   const bloco = linhas.map(normalizarTexto).filter(Boolean);
   if (bloco.length) blocos.push(bloco);
@@ -199,13 +265,13 @@ function gerarTemplateUniversal(oferta = {}) {
     : "";
   const score = apresentarScore(campos.score);
   const beneficioComercial = campos.beneficios.find(beneficio =>
-    beneficioDiferenteDoCupom(beneficio, campos.cupom)
+    beneficioComercialValidoParaTemplate(beneficio, campos)
   );
 
   adicionarBloco(blocos, [`🔥 *${campos.titulo || "Oferta"}*`]);
   adicionarBloco(blocos, [
     campos.marketplace ? `🛍️ ${marketplaceBonito(campos.marketplace)}` : "",
-    campos.categoria ? `📂 ${campos.categoria}` : ""
+    categoriaConfiavel(campos) ? `📂 ${campos.categoria}` : ""
   ]);
   adicionarBloco(blocos, [
     precoOriginal ? `❌ De: *${precoOriginal}*` : "",
