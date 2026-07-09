@@ -200,6 +200,7 @@ function motivoJidAtendimentoIgnorado(jid = "") {
   if (jidNormalizado === "status@broadcast") return "status_broadcast";
   if (jidNormalizado.endsWith("@g.us")) return "grupo";
   if (jidNormalizado.endsWith("@newsletter")) return "newsletter";
+  if (jidLidWhatsapp(jidNormalizado)) return "";
   if (!jidPrivadoWhatsappValido(jidNormalizado)) return "jid_nao_privado";
 
   return "";
@@ -790,9 +791,11 @@ for (const participante of participantes) {
 
   const numero = String(participante).split("@")[0];
   const jidOriginal = normalizarJidMensageiro(participante);
-  const destinoPrivado = await resolverJidPrivadoMensageiro(sock, jidOriginal, { clienteId, sessaoId });
+  const destinoPrivado =
+    await resolverJidPrivadoMensageiro(sock, jidOriginal, { clienteId, sessaoId }) ||
+    jidOriginal;
 
-  if (!destinoPrivado) {
+  if (!destinoPrivado || destinoPrivado === "status@broadcast" || destinoPrivado.endsWith("@newsletter") || destinoPrivado.endsWith("@g.us")) {
     continue;
   }
 
