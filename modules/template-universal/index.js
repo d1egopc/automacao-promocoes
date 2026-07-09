@@ -84,6 +84,22 @@ function marketplaceBonito(valor = "") {
   const texto = normalizarTexto(valor);
   if (!texto) return "";
 
+  const chave = texto
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  const nomes = {
+    mercadolivre: "Mercado Livre",
+    shopee: "Shopee",
+    amazon: "Amazon",
+    aliexpress: "AliExpress",
+    kabum: "KaBuM",
+    awin: "AWIN"
+  };
+
+  if (nomes[chave]) return nomes[chave];
+
   return texto
     .replace(/[_-]+/g, " ")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
@@ -102,11 +118,10 @@ function apresentarScore(score) {
 
   const valor = Math.max(0, Math.min(100, Math.round(numero)));
 
-  if (valor <= 19) return "☆☆☆☆☆";
-  if (valor <= 39) return "⭐☆☆☆☆";
-  if (valor <= 59) return "⭐⭐☆☆☆";
-  if (valor <= 79) return "⭐⭐⭐☆☆";
-  if (valor <= 94) return "⭐⭐⭐⭐☆";
+  if (valor <= 24) return "⭐☆☆☆☆";
+  if (valor <= 44) return "⭐⭐☆☆☆";
+  if (valor <= 64) return "⭐⭐⭐☆☆";
+  if (valor <= 84) return "⭐⭐⭐⭐☆";
   return "⭐⭐⭐⭐⭐";
 }
 
