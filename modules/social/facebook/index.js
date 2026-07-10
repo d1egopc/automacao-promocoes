@@ -59,6 +59,10 @@ function redirectUriMeta(valor = "") {
   return texto(valor || process.env.META_REDIRECT_URI);
 }
 
+function configIdMeta() {
+  return texto(process.env.META_CONFIG_ID);
+}
+
 function segredoStateMeta() {
   return texto(process.env.META_OAUTH_STATE_SECRET || appSecretMeta() || "social-meta-state-local");
 }
@@ -186,6 +190,7 @@ function validarStateMeta(state = "") {
 function iniciarConexaoMeta({ clienteId = "admin", redirectUri = "" } = {}) {
   const appId = appIdMeta();
   const uri = redirectUriMeta(redirectUri);
+  const configId = configIdMeta();
 
   if (!appId) throw new Error("meta_app_id_ausente");
   if (!uri) throw new Error("meta_redirect_uri_ausente");
@@ -197,6 +202,15 @@ function iniciarConexaoMeta({ clienteId = "admin", redirectUri = "" } = {}) {
     state,
     response_type: "code",
     scope: scopesConexaoMeta().join(",")
+  });
+
+  if (configId) {
+    params.set("config_id", configId);
+  }
+
+  logMetaSeguro("[SOCIAL-META-OAUTH-MODO]", {
+    modoOAuth: configId ? "business_config" : "classico",
+    configIdPresente: Boolean(configId)
   });
 
   return {
