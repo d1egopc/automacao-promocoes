@@ -8,6 +8,10 @@ function texto(valor = "") {
   return String(valor || "").trim();
 }
 
+function logRadarRedirectSeguro(evento, payload = {}) {
+  console.log(evento, JSON.stringify(payload));
+}
+
 function hostname(url = "") {
   try {
     return new URL(texto(url)).hostname.toLowerCase().replace(/^www\./, "");
@@ -22,11 +26,93 @@ function detectarMarketplaceRedirect(url = "") {
   if (host === "meli.la" || host.endsWith(".meli.la") || host === "mercadolivre.com" || host.endsWith(".mercadolivre.com") || host === "mercadolivre.com.br" || host.endsWith(".mercadolivre.com.br")) return "mercadolivre";
   if (host === "shopee.com.br" || host.endsWith(".shopee.com.br")) return "shopee";
   if (host === "amazon.com.br" || host.endsWith(".amazon.com.br") || host === "amzn.to" || host.endsWith(".amzn.to")) return "amazon";
+  if (reconhecerLinkAliExpressRedirect(url)) return "aliexpress";
   if (host.includes("aliexpress.")) return "aliexpress";
   if (host === "kabum.com.br" || host.endsWith(".kabum.com.br")) return "awin";
   if (host === "awin1.com" || host.endsWith(".awin1.com") || host === "awin.com" || host.endsWith(".awin.com")) return "awin";
   if (host === "magazineluiza.com" || host.endsWith(".magazineluiza.com") || host === "magalu.com" || host.endsWith(".magalu.com")) return "magalu";
   return "";
+}
+
+function reconhecerLinkAliExpressRedirect(url = "") {
+  const host = hostname(url);
+  const reconhecido = host === "a.aliexpress.com" || host === "s.click.aliexpress.com";
+
+  if (reconhecido) {
+    logRadarRedirectSeguro("[RADAR-ALIEXPRESS-LINK-RECONHECIDO]", {
+      host,
+      tipo: host === "a.aliexpress.com" ? "app" : "redirect"
+    });
+  }
+
+  return reconhecido;
+}
+
+function decodificarParametroAwin(valor = "") {
+  let resultado = texto(valor);
+  for (let tentativa = 0; tentativa < 3 && /%[0-9a-f]{2}/i.test(resultado); tentativa += 1) {
+    try {
+      const decodificado = decodeURIComponent(resultado);
+      if (decodificado === resultado) break;
+      resultado = decodificado;
+    } catch {
+      break;
+    }
+  }
+  return resultado;
+}
+
+function extrairProdutoIdKabum(url = "") {
+  try {
+    const parsed = new URL(texto(url));
+    if (!hostname(parsed.toString()).endsWith("kabum.com.br")) return "";
+    return parsed.pathname.match(/\/produto\/(\d+)/i)?.[1] || "";
+  } catch {
+    return "";
+  }
+}
+
+function diagnosticarAwinKabum(url = "") {
+  const host = hostname(url);
+  if (!(host === "awin1.com" || host.endsWith(".awin1.com") || host === "awin.com" || host.endsWith(".awin.com"))) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(texto(url));
+    const uedBruto = parsed.searchParams.get("ued") || "";
+    const urlDestino = decodificarParametroAwin(uedBruto);
+    const produtoId = extrairProdutoIdKabum(urlDestino);
+    const diagnostico = {
+      awinmid: parsed.searchParams.get("awinmid") || "",
+      awinaffidPresente: Boolean(parsed.searchParams.get("awinaffid")),
+      clickrefPresente: Boolean(parsed.searchParams.get("clickref")),
+      uedPresente: Boolean(uedBruto),
+      urlDestino,
+      produtoId,
+      chaveCanonica: produtoId ? `kabum:${produtoId}` : ""
+    };
+
+    if (diagnostico.uedPresente || diagnostico.produtoId) {
+      logRadarRedirectSeguro("[RADAR-AWIN-KABUM-DECODIFICADO]", {
+        awinmid: diagnostico.awinmid,
+        awinaffidPresente: diagnostico.awinaffidPresente,
+        clickrefPresente: diagnostico.clickrefPresente,
+        uedPresente: diagnostico.uedPresente,
+        destinoKabum: Boolean(produtoId),
+        produtoId: diagnostico.produtoId,
+        chaveCanonica: diagnostico.chaveCanonica
+      });
+    }
+
+    return diagnostico;
+  } catch {
+    logRadarRedirectSeguro("[RADAR-ENRIQUECIMENTO-FALLBACK-LEGADO]", {
+      motivo: "awin_kabum_diagnostico_invalido",
+      host
+    });
+    return null;
+  }
 }
 
 function dominioCompativel(host = "", dominio = "") {
@@ -166,8 +252,12 @@ function pontuarUrlMarketplace(url = "") {
   if (/amazon\.com\.br\/(?:dp|gp\/product)\//i.test(valor) || /amzn\.to\//i.test(valor)) pontos += 5;
   if (/s\.shopee\.com\.br\//i.test(valor) || /shopee\.com\.br\/.*-i\.\d+\.\d+/i.test(valor)) pontos += 5;
   if (/aliexpress\.[^/]+\/(?:item|e)\//i.test(valor)) pontos += 5;
+  if (/a\.aliexpress\.com\//i.test(valor) || /s\.click\.aliexpress\.com\//i.test(valor)) pontos += 5;
   if (/kabum\.com\.br\/produto\//i.test(valor)) pontos += 5;
-  if (/awin1?\.com\//i.test(valor)) pontos += 3;
+  if (/awin1?\.com\//i.test(valor)) {
+    const awinKabum = diagnosticarAwinKabum(url);
+    pontos += awinKabum?.produtoId ? 5 : 3;
+  }
   return pontos;
 }
 
@@ -552,15 +642,18 @@ registrarResolverRedirect({
 });
 
 module.exports = {
+  diagnosticarAwinKabum,
   detectarMarketplaceRedirect,
   dominioRedirectPermitido,
   extrairDestinoHtml,
+  extrairProdutoIdKabum,
   extrairMetaRefresh,
   extrairUrlsMarketplaceHtml,
   extrairWindowLocation,
   listarResolversRedirect: () => resolversRegistrados.map(item => ({ nome: item.nome, dominios: [...item.dominios] })),
   localizarResolverRedirect,
   registrarResolverRedirect,
+  reconhecerLinkAliExpressRedirect,
   resolverAOferta,
   resolverHttpGenerico,
   resolverPromozone,
