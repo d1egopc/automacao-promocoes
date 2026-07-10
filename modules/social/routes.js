@@ -348,12 +348,23 @@ function criarRotasSocial(deps = {}) {
     }
 
     const clienteId = cliente(req);
+    const limiteSeguro = Math.min(limite(req, 50), 50);
+    logSocial("[SOCIAL-OPORTUNIDADES-CONSULTA]", {
+      clienteId,
+      limite: limiteSeguro
+    });
+
+    const oportunidades = storage.listarOportunidadesSocial(clienteId, limiteSeguro);
+    logSocial("[SOCIAL-OPORTUNIDADES-RESULTADO]", {
+      clienteId,
+      total: oportunidades.length
+    });
+
     return res.json({
       ok: true,
       clienteId,
-      origem: "social-storage",
-      observacao: "O Social Module consome ofertas universais prontas; a coleta externa sera conectada em sprint futura.",
-      oportunidades: storage.listarOportunidadesSocial(clienteId, limite(req))
+      total: oportunidades.length,
+      oportunidades
     });
   });
 

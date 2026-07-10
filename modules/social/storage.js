@@ -32,6 +32,52 @@ function texto(valor = "") {
   return String(valor ?? "").trim();
 }
 
+function numero(valor) {
+  if (valor === null || valor === undefined || valor === "") return null;
+  if (typeof valor === "number") return Number.isFinite(valor) ? valor : null;
+
+  const limpo = texto(valor)
+    .replace(/R\$/gi, "")
+    .replace(/\s/g, "")
+    .trim();
+
+  if (!limpo) return null;
+
+  const normalizado = limpo.includes(",")
+    ? limpo.replace(/\./g, "").replace(",", ".")
+    : limpo;
+  const resultado = Number(normalizado);
+  return Number.isFinite(resultado) ? resultado : null;
+}
+
+function dataMs(valor = "") {
+  const data = Date.parse(texto(valor));
+  return Number.isFinite(data) ? data : 0;
+}
+
+function normalizarChave(valor = "") {
+  return texto(valor)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/[?#].*$/, "")
+    .replace(/\/+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function temImagemValida(valor = "") {
+  const imagem = texto(valor);
+  return /^https?:\/\//i.test(imagem);
+}
+
+function temLinkValido(valor = "") {
+  const link = texto(valor);
+  return /^https?:\/\//i.test(link);
+}
+
 function caminhoLogicoCliente(clienteId = "admin", tipo = "") {
   return `${process.env.DATA_DIR || "/data"}/clientes/${texto(clienteId || "admin")}/${ARQUIVOS[tipo] || ""}`;
 }
@@ -390,9 +436,105 @@ function registrarPublicacaoSocial(clienteId = "admin", dados = {}) {
 }
 
 function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
-  return lista(lerCliente(clienteId, "oportunidades", []))
-    .slice(-limite)
-    .reverse();
+  const limiteSeguro = Math.max(1, Math.min(50, Number(limite || 50) || 50));
+  const itens = lista(readClienteJson(clienteId, "fila.json", []))
+    .filter(item => texto(item?.clienteId || "admin") === texto(clienteId || "admin"));
+  const vistas = new Set();
+  const oportunidades = [];
+
+  for (const item of itens) {
+    const v2 = item.inteligenciaUniversalV2 || {};
+    const titulo = texto(item.titulo || item.nome);
+    const marketplace = texto(item.marketplace);
+    const imagem = texto(item.imagem || item.image || item.thumbnail);
+    const linkAfiliado = texto(item.linkAfiliado || item.linkFinal || item.link);
+    const linkOriginal = texto(item.linkOriginal || item.urlOriginal || item.url || item.link);
+    const precoAtual = numero(v2.valorEfetivo ?? item.valorEfetivo ?? item.precoAtual ?? item.preco);
+    const precoOriginal = numero(item.precoOriginal ?? item.precoAntigo ?? item.precoDe);
+    const score = numero(v2.score?.score ?? v2.score ?? item.score ?? item.radarScore);
+    const prioridade = numero(v2.prioridade ?? item.prioridade ?? item.prioridadeEnvio ?? item.prioridadeFila);
+    const cupom = texto(item.cupom || item.cupomCodigo || item.cupomInfo?.cupom);
+    const expiraEm = texto(item.expiraEm || item.validadeCupom || item.cupomExpiraEm);
+    const statusOperacional = texto(item.status).toLowerCase();
+    const statusV2 = texto(v2.status).toLowerCase();
+    const expirado =
+      ["expirada", "expirado"].includes(statusOperacional) ||
+      texto(item.statusDetalhe).toLowerCase().includes("expirado") ||
+      (expiraEm && dataMs(expiraEm) > 0 && dataMs(expiraEm) < Date.now());
+    const bloqueada =
+      ["retida", "erro", "reprovada"].includes(statusOperacional) ||
+      ["retida", "erro", "reprovada"].includes(statusV2);
+    const aprovadoV2 =
+      v2.ok === true ||
+      ["aprovada", "aprovado"].includes(statusV2) ||
+      item.ofertaUniversal === true ||
+      texto(item.versaoOfertaUniversal).startsWith("v2");
+
+    if (!titulo || !marketplace || !temImagemValida(imagem) || !temLinkValido(linkAfiliado)) continue;
+    if (precoAtual === null || precoAtual <= 0) continue;
+    if (expirado) continue;
+    if (bloqueada) continue;
+    if (!aprovadoV2 && !(score !== null && score >= 60) && !cupom) continue;
+
+    const chave =
+      texto(item.produtoId || item.productId || item.sku) ||
+      normalizarChave(linkOriginal) ||
+      normalizarChave(linkAfiliado) ||
+      `${normalizarChave(titulo)}|${normalizarChave(marketplace)}`;
+
+    if (!chave || vistas.has(chave)) continue;
+    vistas.add(chave);
+
+    const criadoEm = texto(item.criadoEm || item.dataCriacao || item.createdAt || item.recebidoEm || item.atualizadoEm);
+    const idBase = texto(item.id || item.ofertaId || item.produtoId || chave);
+
+    oportunidades.push({
+      id: `social_${normalizarChave(idBase).replace(/[^a-z0-9_-]/g, "_").slice(0, 80) || criarId("oportunidade")}`,
+      ofertaUniversalId: texto(item.ofertaUniversalId || item.id || item.ofertaId),
+      titulo,
+      imagem,
+      marketplace,
+      categoria: texto(v2.categoria || item.categoria),
+      precoAtual,
+      precoOriginal,
+      valorEfetivo: numero(v2.valorEfetivo ?? item.valorEfetivo),
+      cupom,
+      score,
+      prioridade,
+      origem: texto(item.origem || "fila"),
+      linkAfiliadoPresente: true,
+      criadoEm,
+      expiraEm,
+      statusSocial: "nova",
+      _ordenacao: {
+        cupom: cupom ? 1 : 0,
+        score: score ?? 0,
+        prioridade: prioridade ?? 0,
+        criadoEm: dataMs(criadoEm)
+      }
+    });
+  }
+
+  oportunidades.sort((a, b) =>
+    b._ordenacao.cupom - a._ordenacao.cupom ||
+    b._ordenacao.score - a._ordenacao.score ||
+    b._ordenacao.prioridade - a._ordenacao.prioridade ||
+    b._ordenacao.criadoEm - a._ordenacao.criadoEm
+  );
+
+  const resultado = oportunidades
+    .slice(0, limiteSeguro)
+    .map(({ _ordenacao, ...item }) => item);
+
+  logSocial("[SOCIAL-OPORTUNIDADES-FONTE]", {
+    clienteId,
+    fonte: "fila_cliente",
+    totalFonte: itens.length,
+    elegiveis: oportunidades.length,
+    retornadas: resultado.length
+  });
+
+  return resultado;
 }
 
 function getConexaoMetaSocial(clienteId = "admin") {
