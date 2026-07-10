@@ -110,6 +110,17 @@ function criarRotasSocial(deps = {}) {
 
   router.get("/meta/callback", async (req, res) => {
     try {
+      logSocial("[SOCIAL-META-CALLBACK-INICIO]", {
+        codeFinal: String(req.query?.code || "").slice(-6),
+        temState: Boolean(req.query?.state),
+        redirectUriQuery: req.query?.redirectUri || req.query?.redirect_uri || "",
+        env: {
+          META_APP_ID: Boolean(process.env.META_APP_ID),
+          META_APP_SECRET: Boolean(process.env.META_APP_SECRET),
+          META_REDIRECT_URI: Boolean(process.env.META_REDIRECT_URI)
+        }
+      });
+
       const resultado = await concluirCallbackMeta({
         code: req.query?.code || "",
         state: req.query?.state || "",

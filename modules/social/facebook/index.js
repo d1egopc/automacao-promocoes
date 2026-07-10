@@ -28,15 +28,15 @@ function clienteIdSeguro(clienteId = "admin") {
 }
 
 function appIdMeta() {
-  return texto(process.env.META_APP_ID || process.env.FACEBOOK_APP_ID);
+  return texto(process.env.META_APP_ID);
 }
 
 function appSecretMeta() {
-  return texto(process.env.META_APP_SECRET || process.env.FACEBOOK_APP_SECRET);
+  return texto(process.env.META_APP_SECRET);
 }
 
 function redirectUriMeta(valor = "") {
-  return texto(valor || process.env.META_REDIRECT_URI || process.env.FACEBOOK_REDIRECT_URI);
+  return texto(valor || process.env.META_REDIRECT_URI);
 }
 
 function segredoStateMeta() {
@@ -54,9 +54,31 @@ function assinarEstado(payload = "") {
     .digest("base64url");
 }
 
-function criarStateMeta(clienteId = "admin") {
+function codeFinal(code = "") {
+  return texto(code).slice(-6);
+}
+
+function erroMetaSeguro(erro) {
+  const metaErro = erro?.response?.data?.error || erro?.response?.data || {};
+  const mensagem = texto(metaErro.message || erro?.message || "meta_token_erro");
+
+  return {
+    statusHttp: erro?.response?.status || "",
+    type: texto(metaErro.type),
+    code: metaErro.code ?? "",
+    errorSubcode: metaErro.error_subcode ?? "",
+    message: mensagem.slice(0, 300)
+  };
+}
+
+function logMetaSeguro(tag, payload = {}) {
+  console.log(tag, JSON.stringify(payload || {}));
+}
+
+function criarStateMeta(clienteId = "admin", redirectUri = "") {
   const payload = base64UrlJson({
     clienteId: clienteIdSeguro(clienteId),
+    redirectUri: redirectUriMeta(redirectUri),
     nonce: crypto.randomBytes(12).toString("hex"),
     exp: Date.now() + 15 * 60 * 1000
   });
@@ -87,6 +109,7 @@ function validarStateMeta(state = "") {
 
   return {
     clienteId: clienteIdSeguro(dados.clienteId),
+    redirectUri: redirectUriMeta(dados.redirectUri),
     exp: dados.exp
   };
 }
@@ -98,7 +121,7 @@ function iniciarConexaoMeta({ clienteId = "admin", redirectUri = "" } = {}) {
   if (!appId) throw new Error("meta_app_id_ausente");
   if (!uri) throw new Error("meta_redirect_uri_ausente");
 
-  const state = criarStateMeta(clienteId);
+  const state = criarStateMeta(clienteId, uri);
   const params = new URLSearchParams({
     client_id: appId,
     redirect_uri: uri,
@@ -135,19 +158,55 @@ async function trocarCodePorToken({ code = "", redirectUri = "", httpClient = ax
   if (!uri) throw new Error("meta_redirect_uri_ausente");
   if (!texto(code)) throw new Error("code_obrigatorio");
 
-  const resposta = await httpClient.get(`${GRAPH_BASE}/oauth/access_token`, {
-    params: {
-      client_id: appId,
-      client_secret: appSecret,
-      redirect_uri: uri,
-      code
-    },
-    timeout: 10000
+  logMetaSeguro("[SOCIAL-META-TOKEN-REQUEST]", {
+    graphBase: GRAPH_BASE,
+    codeFinal: codeFinal(code),
+    redirectUri: uri,
+    env: {
+      META_APP_ID: Boolean(appId),
+      META_APP_SECRET: Boolean(appSecret),
+      META_REDIRECT_URI: Boolean(process.env.META_REDIRECT_URI)
+    }
   });
 
-  const dados = resposta?.data || {};
-  if (!dados.access_token) throw new Error("meta_token_nao_retornado");
-  return dados;
+  try {
+    const resposta = await httpClient.get(`${GRAPH_BASE}/oauth/access_token`, {
+      params: {
+        client_id: appId,
+        client_secret: appSecret,
+        redirect_uri: uri,
+        code
+      },
+      timeout: 10000
+    });
+
+    const dados = resposta?.data || {};
+    if (!dados.access_token) {
+      logMetaSeguro("[SOCIAL-META-TOKEN-ERRO]", {
+        codeFinal: codeFinal(code),
+        redirectUri: uri,
+        erro: "meta_token_nao_retornado"
+      });
+      throw new Error("meta_token_nao_retornado");
+    }
+
+    logMetaSeguro("[SOCIAL-META-TOKEN-OK]", {
+      codeFinal: codeFinal(code),
+      redirectUri: uri,
+      tokenType: texto(dados.token_type || "bearer"),
+      expiresIn: dados.expires_in ?? null
+    });
+
+    return dados;
+  } catch (e) {
+    const erro = erroMetaSeguro(e);
+    logMetaSeguro("[SOCIAL-META-TOKEN-ERRO]", {
+      codeFinal: codeFinal(code),
+      redirectUri: uri,
+      erro
+    });
+    throw new Error(erro.code ? `meta_token_erro_${erro.code}` : "meta_token_erro");
+  }
 }
 
 async function listarPaginasMeta({ accessToken = "", httpClient = axios } = {}) {
@@ -179,7 +238,8 @@ function normalizarPaginasMeta(paginas = []) {
 
 async function concluirCallbackMeta({ code = "", state = "", redirectUri = "", httpClient = axios } = {}) {
   const estado = validarStateMeta(state);
-  const token = await trocarCodePorToken({ code, redirectUri, httpClient });
+  const uri = redirectUriMeta(redirectUri || estado.redirectUri);
+  const token = await trocarCodePorToken({ code, redirectUri: uri, httpClient });
   const paginas = normalizarPaginasMeta(await listarPaginasMeta({
     accessToken: token.access_token,
     httpClient
