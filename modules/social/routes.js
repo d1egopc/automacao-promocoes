@@ -30,6 +30,19 @@ function criarRotasSocial(deps = {}) {
     return Math.max(1, Math.min(500, Number(req.query?.limit || padrao) || padrao));
   }
 
+  function redirectFrontendMeta(status = "") {
+    const frontendUrl = String(process.env.FRONTEND_URL || "").trim();
+    if (!frontendUrl) return "";
+
+    try {
+      const destino = new URL("/social", frontendUrl);
+      destino.searchParams.set("meta", status);
+      return destino.toString();
+    } catch {
+      return "";
+    }
+  }
+
   router.get("/config", (req, res) => {
     if (!socialPermitido(req)) {
       return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
@@ -138,6 +151,11 @@ function criarRotasSocial(deps = {}) {
         paginas: meta.paginas.length
       });
 
+      const redirectSucesso = redirectFrontendMeta("conectado");
+      if (redirectSucesso) {
+        return res.redirect(302, redirectSucesso);
+      }
+
       return res.json({
         ok: true,
         clienteId: resultado.clienteId,
@@ -147,6 +165,11 @@ function criarRotasSocial(deps = {}) {
       });
     } catch (e) {
       logErroSocial({ erro: e.message, rota: "GET /social/meta/callback" });
+      const redirectErro = redirectFrontendMeta("erro");
+      if (redirectErro) {
+        return res.redirect(302, redirectErro);
+      }
+
       return res.status(400).json({
         ok: false,
         erro: e.message || "meta_oauth_callback_invalido"
