@@ -75,6 +75,50 @@ function logMetaSeguro(tag, payload = {}) {
   console.log(tag, JSON.stringify(payload || {}));
 }
 
+function mascararValorExato(valor, sensiveis = []) {
+  if (typeof valor === "string") {
+    return sensiveis.reduce((textoAtual, sensivel) => {
+      const alvo = texto(sensivel);
+      return alvo ? textoAtual.split(alvo).join("[MASCARADO]") : textoAtual;
+    }, valor);
+  }
+
+  if (Array.isArray(valor)) {
+    return valor.map(item => mascararValorExato(item, sensiveis));
+  }
+
+  if (valor && typeof valor === "object") {
+    return Object.fromEntries(
+      Object.entries(valor).map(([chave, item]) => [
+        chave,
+        mascararValorExato(item, sensiveis)
+      ])
+    );
+  }
+
+  return valor;
+}
+
+function logRespostaMetaTokenBruta(resposta = {}, contexto = {}) {
+  const sensiveis = [contexto.code, contexto.appSecret].filter(Boolean);
+
+  logMetaSeguro("[SOCIAL-META-TOKEN-RAW-RESPONSE]", {
+    request: {
+      url: `${GRAPH_BASE}/oauth/access_token`,
+      client_id: contexto.appId || "",
+      redirect_uri: contexto.redirectUri || "",
+      grant_type: contexto.grantType || "",
+      code: contexto.code ? "[MASCARADO]" : "",
+      client_secret: contexto.appSecret ? "[MASCARADO]" : ""
+    },
+    response: {
+      status: resposta?.status || "",
+      data: mascararValorExato(resposta?.data ?? null, sensiveis),
+      headers: mascararValorExato(resposta?.headers || {}, sensiveis)
+    }
+  });
+}
+
 function criarStateMeta(clienteId = "admin", redirectUri = "") {
   const payload = base64UrlJson({
     clienteId: clienteIdSeguro(clienteId),
@@ -161,7 +205,9 @@ async function trocarCodePorToken({ code = "", redirectUri = "", httpClient = ax
   logMetaSeguro("[SOCIAL-META-TOKEN-REQUEST]", {
     graphBase: GRAPH_BASE,
     codeFinal: codeFinal(code),
+    client_id: appId,
     redirectUri: uri,
+    grant_type: "nao_enviado",
     env: {
       META_APP_ID: Boolean(appId),
       META_APP_SECRET: Boolean(appSecret),
@@ -182,6 +228,13 @@ async function trocarCodePorToken({ code = "", redirectUri = "", httpClient = ax
 
     const dados = resposta?.data || {};
     if (!dados.access_token) {
+      logRespostaMetaTokenBruta(resposta, {
+        appId,
+        appSecret,
+        code,
+        redirectUri: uri,
+        grantType: "nao_enviado"
+      });
       logMetaSeguro("[SOCIAL-META-TOKEN-ERRO]", {
         codeFinal: codeFinal(code),
         redirectUri: uri,
@@ -199,6 +252,15 @@ async function trocarCodePorToken({ code = "", redirectUri = "", httpClient = ax
 
     return dados;
   } catch (e) {
+    if (e.response) {
+      logRespostaMetaTokenBruta(e.response, {
+        appId,
+        appSecret,
+        code,
+        redirectUri: uri,
+        grantType: "nao_enviado"
+      });
+    }
     const erro = erroMetaSeguro(e);
     logMetaSeguro("[SOCIAL-META-TOKEN-ERRO]", {
       codeFinal: codeFinal(code),
