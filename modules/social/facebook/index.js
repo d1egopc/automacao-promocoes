@@ -151,8 +151,13 @@ function validarStateMeta(state = "") {
     throw new Error("state_expirado");
   }
 
+  const clienteId = clienteIdSeguro(dados.clienteId);
+  logMetaSeguro("[SOCIAL-META-STATE-CLIENTE]", {
+    clienteId
+  });
+
   return {
-    clienteId: clienteIdSeguro(dados.clienteId),
+    clienteId,
     redirectUri: redirectUriMeta(dados.redirectUri),
     exp: dados.exp
   };

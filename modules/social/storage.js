@@ -32,6 +32,18 @@ function texto(valor = "") {
   return String(valor ?? "").trim();
 }
 
+function caminhoLogicoCliente(clienteId = "admin", tipo = "") {
+  return `${process.env.DATA_DIR || "/data"}/clientes/${texto(clienteId || "admin")}/${ARQUIVOS[tipo] || ""}`;
+}
+
+function resumoMetaStorage(meta = {}) {
+  return {
+    conectado: meta.conectado === true,
+    tokenPresente: Boolean(texto(meta.token?.accessToken || meta.accessToken)),
+    paginasTotal: lista(meta.paginas).length
+  };
+}
+
 function normalizarRede(rede = "") {
   const valor = texto(rede).toLowerCase();
   return REDES_SUPORTADAS.has(valor) ? valor : "";
@@ -390,7 +402,7 @@ function getConexaoMetaSocial(clienteId = "admin") {
   const token = dados.token && typeof dados.token === "object" ? dados.token : {};
   const accessToken = texto(dados.accessToken || token.accessToken);
 
-  return {
+  const conexao = {
     ...padrao,
     ...dados,
     clienteId,
@@ -420,6 +432,14 @@ function getConexaoMetaSocial(clienteId = "admin") {
     paginas,
     atualizadoEm: texto(dados.atualizadoEm || agoraIso())
   };
+
+  logSocial("[SOCIAL-META-STORAGE-LER]", {
+    clienteId,
+    caminhoLogico: caminhoLogicoCliente(clienteId, "meta"),
+    ...resumoMetaStorage(conexao)
+  });
+
+  return conexao;
 }
 
 function setConexaoMetaSocial(clienteId = "admin", dados = {}) {
@@ -431,7 +451,21 @@ function setConexaoMetaSocial(clienteId = "admin", dados = {}) {
     atualizadoEm: agoraIso()
   };
 
-  escreverCliente(clienteId, "meta", atualizado);
+  const gravou = escreverCliente(clienteId, "meta", atualizado);
+  logSocial("[SOCIAL-META-STORAGE-SALVAR]", {
+    clienteId,
+    caminhoLogico: caminhoLogicoCliente(clienteId, "meta"),
+    gravou,
+    ...resumoMetaStorage({
+      ...atualizado,
+      conectado: Boolean(atualizado.token?.accessToken || atualizado.accessToken)
+    })
+  });
+
+  if (!gravou) {
+    throw new Error("social_meta_storage_salvar_falhou");
+  }
+
   logSocial("[SOCIAL-META-CONEXAO]", {
     clienteId,
     conectado: Boolean(atualizado.token?.accessToken || atualizado.accessToken),
