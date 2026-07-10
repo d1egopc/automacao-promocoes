@@ -6689,6 +6689,7 @@ function auth(req, res, next) {
     req.path === "/" ||
     req.path === "/login" ||
     (req.method === "GET" && req.path === "/branding") ||
+    (req.method === "GET" && req.path === "/social/meta/callback") ||
     req.path === "/kabum/importar" ||
     req.path === "/kabum/importar-teste" ||
     req.path === "/conectar" ||
