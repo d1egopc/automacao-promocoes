@@ -5,6 +5,7 @@ const { payloadTemplateSocialPadrao } = require("./templates");
 const { payloadAgendamentoSocialPadrao } = require("./scheduler");
 const { payloadDirectSocialPadrao } = require("./direct");
 const {
+  consultarAtivosMeta,
   concluirCallbackMeta,
   iniciarConexaoMeta
 } = require("./facebook");
@@ -82,6 +83,82 @@ function criarRotasSocial(deps = {}) {
       clienteId,
       meta: storage.sanitizarConexaoMeta(storage.getConexaoMetaSocial(clienteId))
     });
+  });
+
+  router.get("/meta/ativos", async (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const conexao = storage.getConexaoMetaSocial(clienteId);
+      const accessToken = conexao.token?.accessToken || "";
+
+      if (!accessToken) {
+        return res.status(400).json({
+          ok: false,
+          clienteId,
+          status: "desconectado",
+          erro: "meta_token_ausente"
+        });
+      }
+
+      const ativos = await consultarAtivosMeta({
+        clienteId,
+        accessToken
+      });
+      const salvo = storage.setConexaoMetaSocial(clienteId, {
+        ...conexao,
+        paginas: ativos.paginas || [],
+        ativos: {
+          status: ativos.status,
+          motivo: ativos.motivo || "",
+          atualizadoEm: new Date().toISOString()
+        }
+      });
+      const meta = storage.sanitizarConexaoMeta(salvo);
+
+      return res.status(ativos.ok ? 200 : 409).json({
+        ok: ativos.ok,
+        clienteId,
+        status: ativos.status,
+        motivo: ativos.motivo || "",
+        meta,
+        paginas: meta.paginas
+      });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "GET /social/meta/ativos" });
+      return res.status(500).json({
+        ok: false,
+        erro: e.message || "meta_ativos_erro"
+      });
+    }
+  });
+
+  router.post("/meta/selecionar", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const salvo = storage.selecionarAtivoMetaSocial(clienteId, req.body || {});
+      const meta = storage.sanitizarConexaoMeta(salvo);
+
+      return res.json({
+        ok: true,
+        clienteId,
+        status: "ativo_selecionado",
+        meta
+      });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "POST /social/meta/selecionar" });
+      return res.status(400).json({
+        ok: false,
+        erro: e.message || "meta_ativo_selecao_invalida"
+      });
+    }
   });
 
   router.get("/meta/conectar", (req, res) => {
@@ -375,6 +452,8 @@ function criarRotasSocial(deps = {}) {
       "GET /social/config",
       "POST /social/config",
       "GET /social/meta/status",
+      "GET /social/meta/ativos",
+      "POST /social/meta/selecionar",
       "GET /social/meta/conectar",
       "GET /social/meta/callback",
       "POST /social/meta/desconectar",

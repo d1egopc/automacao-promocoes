@@ -85,6 +85,11 @@ function criarMetaPadrao(clienteId = "admin") {
       username: "",
       name: ""
     },
+    ativos: {
+      status: "pendente",
+      motivo: "",
+      atualizadoEm: ""
+    },
     token: {
       accessToken: "",
       tokenType: "",
@@ -120,6 +125,11 @@ function sanitizarConexaoMeta(meta = {}) {
       username: texto(meta.instagram?.username),
       name: texto(meta.instagram?.name)
     },
+    ativos: {
+      status: texto(meta.ativos?.status || "pendente"),
+      motivo: texto(meta.ativos?.motivo),
+      atualizadoEm: texto(meta.ativos?.atualizadoEm)
+    },
     token: {
       presente: temToken(token.accessToken),
       tokenType: texto(token.tokenType),
@@ -133,6 +143,7 @@ function sanitizarConexaoMeta(meta = {}) {
       username: texto(pagina.username),
       instagramBusinessAccountId: texto(pagina.instagramBusinessAccountId),
       instagramUsername: texto(pagina.instagramUsername),
+      instagramName: texto(pagina.instagramName),
       conectado: pagina.conectado === true
     })),
     atualizadoEm: texto(meta.atualizadoEm)
@@ -429,6 +440,10 @@ function getConexaoMetaSocial(clienteId = "admin") {
       ...token,
       accessToken
     },
+    ativos: {
+      ...padrao.ativos,
+      ...(dados.ativos && typeof dados.ativos === "object" ? dados.ativos : {})
+    },
     paginas,
     atualizadoEm: texto(dados.atualizadoEm || agoraIso())
   };
@@ -474,6 +489,63 @@ function setConexaoMetaSocial(clienteId = "admin", dados = {}) {
   return getConexaoMetaSocial(clienteId);
 }
 
+function selecionarAtivoMetaSocial(clienteId = "admin", selecao = {}) {
+  const atual = getConexaoMetaSocial(clienteId);
+  const pageId = texto(selecao.pageId || selecao.paginaId || selecao.facebookPageId);
+  const instagramId = texto(selecao.instagramBusinessAccountId || selecao.instagramId);
+
+  if (!pageId) {
+    throw new Error("social_meta_pageId_obrigatorio");
+  }
+
+  const paginas = lista(atual.paginas);
+  const paginaSelecionada = paginas.find(pagina => texto(pagina.id) === pageId);
+
+  if (!paginaSelecionada) {
+    throw new Error("social_meta_pagina_nao_autorizada");
+  }
+
+  if (instagramId && texto(paginaSelecionada.instagramBusinessAccountId) !== instagramId) {
+    throw new Error("social_meta_instagram_nao_autorizado");
+  }
+
+  const paginasAtualizadas = paginas.map(pagina => ({
+    ...pagina,
+    conectado: texto(pagina.id) === pageId
+  }));
+  const instagramSelecionado = instagramId || texto(paginaSelecionada.instagramBusinessAccountId);
+  const atualizado = setConexaoMetaSocial(clienteId, {
+    ...atual,
+    facebook: {
+      conectado: true,
+      pageId: texto(paginaSelecionada.id),
+      pageName: texto(paginaSelecionada.name),
+      pageUsername: texto(paginaSelecionada.username)
+    },
+    instagram: {
+      conectado: Boolean(instagramSelecionado),
+      instagramBusinessAccountId: instagramSelecionado,
+      username: texto(paginaSelecionada.instagramUsername),
+      name: texto(paginaSelecionada.instagramName)
+    },
+    paginas: paginasAtualizadas,
+    ativos: {
+      ...(atual.ativos || {}),
+      status: "ativo_selecionado",
+      atualizadoEm: agoraIso()
+    }
+  });
+
+  logSocial("[SOCIAL-META-ATIVO-SELECIONADO]", {
+    clienteId,
+    pageId: texto(paginaSelecionada.id),
+    instagramBusinessAccountId: instagramSelecionado,
+    instagramConectado: Boolean(instagramSelecionado)
+  });
+
+  return atualizado;
+}
+
 function limparConexaoMetaSocial(clienteId = "admin") {
   const desconectado = criarMetaPadrao(clienteId);
   escreverCliente(clienteId, "meta", desconectado);
@@ -497,6 +569,7 @@ module.exports = {
   criarMetaPadrao,
   getConexaoMetaSocial,
   setConexaoMetaSocial,
+  selecionarAtivoMetaSocial,
   limparConexaoMetaSocial,
   sanitizarConexaoMeta,
   resumirOfertaUniversal

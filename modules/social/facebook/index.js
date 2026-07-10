@@ -3,20 +3,40 @@ const crypto = require("crypto");
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v20.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
-const META_SCOPES_LOGIN_INICIAL = [
+const META_SCOPES_CONEXAO_PADRAO = [
   "public_profile"
 ];
-const META_SCOPES_PUBLICACAO_FUTURA = [
-  "email",
+const META_SCOPES_ATIVOS_PADRAO = [
   "pages_show_list",
   "pages_read_engagement",
+  "instagram_basic"
+];
+const META_SCOPES_PUBLICACAO_FUTURA = [
   "pages_manage_posts",
-  "instagram_basic",
   "instagram_content_publish"
 ];
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
+}
+
+function listaScopes(valor = "", fallback = []) {
+  const itens = texto(valor)
+    .split(",")
+    .map(item => item.trim())
+    .filter(Boolean);
+  return itens.length ? itens : fallback;
+}
+
+function scopesConexaoMeta() {
+  return listaScopes(process.env.META_SCOPES_CONEXAO, [
+    ...META_SCOPES_CONEXAO_PADRAO,
+    ...META_SCOPES_ATIVOS_PADRAO
+  ]);
+}
+
+function scopesPublicacaoFuturaMeta() {
+  return listaScopes(process.env.META_SCOPES_PUBLICACAO_FUTURA, META_SCOPES_PUBLICACAO_FUTURA);
 }
 
 function clienteIdSeguro(clienteId = "admin") {
@@ -176,7 +196,7 @@ function iniciarConexaoMeta({ clienteId = "admin", redirectUri = "" } = {}) {
     redirect_uri: uri,
     state,
     response_type: "code",
-    scope: META_SCOPES_LOGIN_INICIAL.join(",")
+    scope: scopesConexaoMeta().join(",")
   });
 
   return {
@@ -186,8 +206,8 @@ function iniciarConexaoMeta({ clienteId = "admin", redirectUri = "" } = {}) {
     authUrl: `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params.toString()}`,
     state,
     redirectUri: uri,
-    scopes: META_SCOPES_LOGIN_INICIAL,
-    scopesFuturos: META_SCOPES_PUBLICACAO_FUTURA
+    scopes: scopesConexaoMeta(),
+    scopesFuturos: scopesPublicacaoFuturaMeta()
   };
 }
 
@@ -290,6 +310,13 @@ async function listarPaginasMeta({ accessToken = "", httpClient = axios } = {}) 
   return Array.isArray(resposta?.data?.data) ? resposta.data.data : [];
 }
 
+function erroPermissaoMeta(erro) {
+  const metaErro = erro?.response?.data?.error || {};
+  const codigo = Number(metaErro.code || 0);
+  const mensagem = texto(metaErro.message || erro?.message || "").toLowerCase();
+  return codigo === 10 || codigo === 200 || mensagem.includes("permission") || mensagem.includes("permiss");
+}
+
 function normalizarPaginasMeta(paginas = []) {
   return (Array.isArray(paginas) ? paginas : []).map((pagina, index) => ({
     id: texto(pagina.id),
@@ -303,14 +330,66 @@ function normalizarPaginasMeta(paginas = []) {
   })).filter(pagina => pagina.id);
 }
 
+async function consultarAtivosMeta({ clienteId = "", accessToken = "", httpClient = axios } = {}) {
+  logMetaSeguro("[SOCIAL-META-ATIVOS-CONSULTA]", {
+    clienteId,
+    tokenPresente: Boolean(texto(accessToken))
+  });
+
+  try {
+    const paginas = normalizarPaginasMeta(await listarPaginasMeta({ accessToken, httpClient }));
+
+    logMetaSeguro("[SOCIAL-META-PAGINAS-ENCONTRADAS]", {
+      clienteId,
+      paginasTotal: paginas.length
+    });
+
+    for (const pagina of paginas) {
+      if (pagina.instagramBusinessAccountId) {
+        logMetaSeguro("[SOCIAL-META-INSTAGRAM-ENCONTRADO]", {
+          clienteId,
+          pageId: pagina.id,
+          instagramBusinessAccountId: pagina.instagramBusinessAccountId,
+          instagramUsername: pagina.instagramUsername
+        });
+      }
+    }
+
+    return {
+      ok: true,
+      status: paginas.length ? "ativos_encontrados" : "nenhuma_pagina",
+      paginas
+    };
+  } catch (e) {
+    const permissaoInsuficiente = erroPermissaoMeta(e);
+    const erro = erroMetaSeguro(e);
+    if (permissaoInsuficiente) {
+      logMetaSeguro("[SOCIAL-META-PERMISSAO-INSUFICIENTE]", {
+        clienteId,
+        erro
+      });
+    }
+
+    return {
+      ok: false,
+      status: permissaoInsuficiente ? "permissao_insuficiente" : "erro_graph_api",
+      motivo: erro.message || "meta_ativos_erro",
+      erro,
+      paginas: []
+    };
+  }
+}
+
 async function concluirCallbackMeta({ code = "", state = "", redirectUri = "", httpClient = axios } = {}) {
   const estado = validarStateMeta(state);
   const uri = redirectUriMeta(redirectUri || estado.redirectUri);
   const token = await trocarCodePorToken({ code, redirectUri: uri, httpClient });
-  const paginas = normalizarPaginasMeta(await listarPaginasMeta({
+  const ativos = await consultarAtivosMeta({
+    clienteId: estado.clienteId,
     accessToken: token.access_token,
     httpClient
-  }));
+  });
+  const paginas = ativos.paginas || [];
   const paginaPrincipal = paginas[0] || {};
 
   return {
@@ -336,6 +415,11 @@ async function concluirCallbackMeta({ code = "", state = "", redirectUri = "", h
       username: texto(paginaPrincipal.instagramUsername),
       name: texto(paginaPrincipal.instagramName)
     },
+    ativos: {
+      status: ativos.status,
+      motivo: ativos.motivo || "",
+      atualizadoEm: new Date().toISOString()
+    },
     paginas
   };
 }
@@ -351,7 +435,10 @@ function criarAdaptadorFacebook() {
 
 module.exports = {
   criarAdaptadorFacebook,
+  consultarAtivosMeta,
   concluirCallbackMeta,
   iniciarConexaoMeta,
+  scopesConexaoMeta,
+  scopesPublicacaoFuturaMeta,
   validarStateMeta
 };
