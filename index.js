@@ -20069,6 +20069,7 @@ app.get("/fila/status", (req, res) => {
     total: itensCliente.length,
     pendentes: itensCliente.filter(o => o.status === "pendente").length,
     enviados: itensCliente.filter(o => o.status === "enviado").length,
+    retidas: itensCliente.filter(o => o.status === "retida").length,
     erros: itensCliente.filter(o => o.status === "erro").length
   });
 });
