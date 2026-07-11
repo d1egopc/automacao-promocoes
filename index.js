@@ -601,6 +601,7 @@ aliexpress: {
 let fila = [];
 let enviandoAgoraPorCliente = {};
 let controleEnvio = {}; // por cliente
+let controleIntervaloEnvioPorCliente = {};
 let historicoOfertas = {};
 let cuponsAtivos = config.cuponsAtivos || [];
 let usuarios = [];
@@ -623,6 +624,7 @@ const CONFIG_FILE = "/data/config.json";
 const USUARIOS_FILE = "/data/usuarios.json";
 const CONFIGS_CLIENTES_FILE = "/data/configs_clientes.json";
 const DESTINOS_CLIENTES_FILE = "/data/destinos_clientes.json";
+const CONTROLE_INTERVALO_DESTINOS_FILE = "controle-envio-destinos.json";
 const PLANOS_FILE = "/data/planos.json";
 const SESSOES_FILE = "/data/sessoes.json";
 const INTEGRACOES_FILE = "/data/integracoes.json";
@@ -2086,6 +2088,122 @@ function salvarDestinosClientes() {
   salvarMapaClientesJson("destinos.json", destinosPorCliente);
 }
 
+function normalizarDestinoContrato(destino = {}) {
+  if (!destino || typeof destino !== "object" || Array.isArray(destino)) return destino;
+  return {
+    ...destino,
+    prioridadeCupomAtiva: destino.prioridadeCupomAtiva === true
+  };
+}
+
+function normalizarDestinosContrato(valor) {
+  if (Array.isArray(valor)) {
+    return valor.map(item => normalizarDestinoContrato(item));
+  }
+
+  if (valor && typeof valor === "object") {
+    return Object.fromEntries(
+      Object.entries(valor).map(([chave, item]) => [
+        chave,
+        Array.isArray(item) ? normalizarDestinosContrato(item) : item
+      ])
+    );
+  }
+
+  return valor;
+}
+
+function numeroIntervaloValido(valor) {
+  const numero = Number(valor);
+  return Number.isFinite(numero) && numero > 0 ? numero : null;
+}
+
+function destinoIdIntervalo(destino = {}) {
+  return String(
+    destino.id ||
+    destino.destinoId ||
+    destino.conexaoId ||
+    destino.chatId ||
+    destino.grupoId ||
+    destino.nome ||
+    "destino"
+  );
+}
+
+function canalDestinoIntervalo(destino = {}) {
+  return String(destino.tipo || destino.canal || "").toLowerCase();
+}
+
+function dataIsoIntervalo(ms = 0) {
+  const valor = Number(ms || 0);
+  return Number.isFinite(valor) && valor > 0 ? new Date(valor).toISOString() : "";
+}
+
+function timestampIntervalo(valor = "") {
+  const ms = Date.parse(String(valor || ""));
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function logFilaIntervalo(tag, payload = {}) {
+  console.log(tag, JSON.stringify(payload));
+}
+
+function controleIntervaloCliente(clienteId = "admin") {
+  const cliente = String(clienteId || "admin");
+  if (!controleIntervaloEnvioPorCliente[cliente] || typeof controleIntervaloEnvioPorCliente[cliente] !== "object") {
+    controleIntervaloEnvioPorCliente[cliente] = {};
+  }
+  return controleIntervaloEnvioPorCliente[cliente];
+}
+
+function lerControleIntervaloPersistido(clienteId = "admin") {
+  const dados = readClienteJson(clienteId, CONTROLE_INTERVALO_DESTINOS_FILE, {});
+  const limpo = removerClienteIdRaiz(dados);
+  return limpo && typeof limpo === "object" && !Array.isArray(limpo) ? limpo : {};
+}
+
+function salvarControleIntervaloCliente(clienteId = "admin") {
+  writeClienteJson(clienteId, CONTROLE_INTERVALO_DESTINOS_FILE, controleIntervaloCliente(clienteId));
+}
+
+function restaurarControleIntervaloEnvio() {
+  controleIntervaloEnvioPorCliente = {};
+
+  for (const clienteId of listClientes()) {
+    const controles = lerControleIntervaloPersistido(clienteId);
+    const normalizados = {};
+
+    for (const [chaveControle, item] of Object.entries(controles)) {
+      if (!item || typeof item !== "object") continue;
+      const ultimoEnvioMs = timestampIntervalo(item.ultimoEnvioEm);
+      normalizados[chaveControle] = {
+        ...item,
+        ultimoEnvioEm: dataIsoIntervalo(ultimoEnvioMs),
+        proximoEnvioPermitidoEm: String(item.proximoEnvioPermitidoEm || "")
+      };
+      if (ultimoEnvioMs > 0) controleEnvio[chaveControle] = ultimoEnvioMs;
+
+      logFilaIntervalo("[FILA-CONTROLE-INTERVALO-RESTAURADO]", {
+        clienteId,
+        destinoId: item.destinoId || chaveControle,
+        canal: item.canal || "",
+        ofertaId: "",
+        ofertaTemCupomReal: false,
+        prioridadeCupomAtiva: item.prioridadeCupomAtiva === true,
+        intervaloConfigurado: Number(item.intervaloConfiguradoMinutos || item.intervaloConfigurado || 0),
+        intervaloAplicado: Number(item.intervaloAplicadoMinutos || item.intervaloAplicado || 0),
+        ultimoEnvioEm: normalizados[chaveControle].ultimoEnvioEm,
+        proximoEnvioPermitidoEm: normalizados[chaveControle].proximoEnvioPermitidoEm,
+        tentativaEm: new Date().toISOString(),
+        permitido: false,
+        motivo: "controle_restaurado"
+      });
+    }
+
+    controleIntervaloEnvioPorCliente[clienteId] = normalizados;
+  }
+}
+
 function salvarConfig() {
   try {
     writeGlobalJson("config.json", config);
@@ -2349,10 +2467,13 @@ destinosPorCliente = carregarMapaClientesJson(
   "destinos.json",
   readGlobalJson("destinos_clientes.json", {})
 );
+destinosPorCliente = normalizarDestinosContrato(destinosPorCliente);
 
 if (destinosPorCliente && Object.keys(destinosPorCliente).length) {
   console.log("[DESTINO] Destinos dos clientes carregados");
 }
+
+restaurarControleIntervaloEnvio();
 
 planos = readGlobalJson("planos.json", {});
 
@@ -3760,46 +3881,127 @@ function destinoLimiteDiarioDisponivel(clienteId = "admin", destino = {}) {
 }
 
 function intervaloTurboCupomMinutos(oferta = {}) {
-  const tipoFastLane = cupomFastLaneTipo(oferta);
-  if (tipoFastLane === "real_detectado" && cupomQuenteParaTurboOferta(oferta)) return 2;
-  if (tipoFastLane === "real_detectado") return 2.5;
-  if (tipoFastLane === "provavel") return 4;
-  return null;
+  return cupomFastLaneTipo(oferta) === "real_detectado" ? 3 : null;
+}
+
+function resolverIntervaloConfiguradoDestino(destino = {}, configCliente = {}) {
+  return (
+    numeroIntervaloValido(destino.intervaloMinutos) ||
+    numeroIntervaloValido(destino.intervalo) ||
+    numeroIntervaloValido(configCliente.intervaloMinutos) ||
+    numeroIntervaloValido(configCliente.intervaloEnvioMinutos) ||
+    numeroIntervaloValido(config.intervaloEnvioMinutos) ||
+    5
+  );
+}
+
+function payloadIntervaloDestino(clienteId = "admin", destino = {}, oferta = {}, intervalo = {}, extras = {}) {
+  return {
+    clienteId,
+    destinoId: destinoIdIntervalo(destino),
+    canal: canalDestinoIntervalo(destino),
+    ofertaId: oferta.id || oferta.ofertaId || oferta.engineOfertaId || "",
+    ofertaTemCupomReal: intervalo.ofertaTemCupomReal === true,
+    prioridadeCupomAtiva: intervalo.prioridadeCupomAtiva === true,
+    intervaloConfigurado: intervalo.intervaloDestinoMin,
+    intervaloAplicado: intervalo.intervaloAplicadoMin,
+    ultimoEnvioEm: dataIsoIntervalo(intervalo.ultimoEnvio),
+    proximoEnvioPermitidoEm: intervalo.proximoEnvioPermitidoEm || "",
+    tentativaEm: intervalo.tentativaEm || new Date().toISOString(),
+    permitido: intervalo.liberado === true,
+    motivo: intervalo.motivo || "",
+    ...extras
+  };
 }
 
 function intervaloDestinoInfo(clienteId = "admin", destino = {}, configCliente = {}, oferta = {}) {
   const chaveControle = destinoChaveControle(clienteId, destino);
-  const intervaloDestinoMin = Number(
-    destino.intervaloMinutos ||
-    destino.intervalo ||
-    configCliente.intervaloMinutos ||
-    config.intervaloMinutos ||
-    2
-  );
-  const turboCupomMin = intervaloTurboCupomMinutos(oferta);
+  const intervaloDestinoMin = resolverIntervaloConfiguradoDestino(destino, configCliente);
+  const prioridadeCupomAtiva = destino.prioridadeCupomAtiva === true;
+  const agora = Date.now();
+  const ofertaTemCupomReal = cupomFastLaneTipo(oferta, agora) === "real_detectado";
+  const turboCupomMin = prioridadeCupomAtiva && ofertaTemCupomReal
+    ? intervaloTurboCupomMinutos(oferta)
+    : null;
   const intervaloAplicadoMin = Number.isFinite(turboCupomMin)
-    ? turboCupomMin
+    ? Math.max(3, turboCupomMin)
     : intervaloDestinoMin;
   const intervaloMs = Math.max(0, intervaloAplicadoMin) * 60 * 1000;
-  const ultimoEnvio = controleEnvio[chaveControle] || 0;
-  const agora = Date.now();
+  const controleCliente = controleIntervaloCliente(clienteId);
+  const controlePersistido = controleCliente[chaveControle] || {};
+  const ultimoEnvioPersistido = timestampIntervalo(controlePersistido.ultimoEnvioEm);
+  const ultimoEnvio = Math.max(Number(controleEnvio[chaveControle] || 0), ultimoEnvioPersistido);
   const restanteMs = Math.max(0, intervaloMs - (agora - ultimoEnvio));
+  const proximoEnvioPermitidoEm = ultimoEnvio
+    ? dataIsoIntervalo(ultimoEnvio + intervaloMs)
+    : "";
+  const tentativaEm = new Date(agora).toISOString();
+  const motivo = restanteMs <= 0
+    ? (ultimoEnvio ? "intervalo_cumprido" : "sem_envio_anterior")
+    : "intervalo_aguardando";
 
-  return {
+  const info = {
     chaveControle,
     intervaloDestinoMin,
     intervaloAplicadoMin,
     turboCupomMin,
     fastLaneCupomTipo: cupomFastLaneTipo(oferta, agora),
+    ofertaTemCupomReal,
+    prioridadeCupomAtiva,
     intervaloMs,
     ultimoEnvio,
     liberado: restanteMs <= 0,
-    restanteMs
+    restanteMs,
+    proximoEnvioPermitidoEm,
+    tentativaEm,
+    motivo
   };
+
+  logFilaIntervalo("[FILA-INTERVALO-AVALIADO]", payloadIntervaloDestino(clienteId, destino, oferta, info));
+
+  if (prioridadeCupomAtiva && ofertaTemCupomReal) {
+    logFilaIntervalo("[FILA-CUPOM-INTERVALO-MINIMO]", payloadIntervaloDestino(clienteId, destino, oferta, info, {
+      minimoMinutos: 3
+    }));
+  }
+
+  return info;
 }
 
 function proximaTentativaDestino(oferta, ms = 5 * 60 * 1000) {
   oferta.proximaTentativaEnvioEm = new Date(Date.now() + ms).toISOString();
+}
+
+function atualizarUltimoEnvioDestino(clienteId = "admin", destino = {}, oferta = {}, intervalo = {}) {
+  const agora = Date.now();
+  const chaveControle = intervalo.chaveControle || destinoChaveControle(clienteId, destino);
+  const intervaloAplicadoMinutos = Number(intervalo.intervaloAplicadoMin || 5);
+  const proximoMs = agora + Math.max(0, intervaloAplicadoMinutos) * 60 * 1000;
+  const registro = {
+    clienteId,
+    destinoId: destinoIdIntervalo(destino),
+    canal: canalDestinoIntervalo(destino),
+    ultimoEnvioEm: dataIsoIntervalo(agora),
+    proximoEnvioPermitidoEm: dataIsoIntervalo(proximoMs),
+    ultimoTipoOferta: intervalo.ofertaTemCupomReal ? "cupom" : "comum",
+    intervaloConfiguradoMinutos: intervalo.intervaloDestinoMin,
+    intervaloAplicadoMinutos,
+    prioridadeCupomAtiva: intervalo.prioridadeCupomAtiva === true,
+    atualizadoEm: dataIsoIntervalo(agora)
+  };
+
+  controleEnvio[chaveControle] = agora;
+  controleIntervaloCliente(clienteId)[chaveControle] = registro;
+  salvarControleIntervaloCliente(clienteId);
+
+  logFilaIntervalo("[FILA-ULTIMO-ENVIO-ATUALIZADO]", payloadIntervaloDestino(clienteId, destino, oferta, {
+    ...intervalo,
+    ultimoEnvio: agora,
+    proximoEnvioPermitidoEm: registro.proximoEnvioPermitidoEm,
+    tentativaEm: registro.atualizadoEm,
+    liberado: true,
+    motivo: "envio_confirmado"
+  }));
 }
 
 // ========================== ENVIO DESTINO INTELIGENTE ============================
@@ -4586,6 +4788,7 @@ for (const item of destinosOrdenados) {
   if (!intervalo.liberado) {
     pulouPorIntervalo = true;
     motivosSemEnvio.push("intervalo");
+    logFilaIntervalo("[FILA-DESTINO-BLOQUEADO-INTERVALO]", payloadIntervaloDestino(clienteId, destino, oferta, intervalo));
     logEnvioDestinoDebug({
       clienteId,
       oferta,
@@ -4623,19 +4826,23 @@ for (const item of destinosOrdenados) {
     continue;
   }
 
+  logFilaIntervalo("[FILA-DESTINO-LIBERADO]", payloadIntervaloDestino(clienteId, destino, oferta, intervalo));
+
   if (intervalo.fastLaneCupomTipo === "real_detectado") {
-    logOptimus("CUPOM", intervalo.turboCupomMin === 2 ? "Turbo quente aplicado 2min" : "Turbo aplicado 2.5min", {
+    logOptimus("CUPOM", intervalo.prioridadeCupomAtiva ? "Cupom Turbo aplicado 3min" : "Cupom usando intervalo normal", {
       clienteId,
       destino: nomeDestino,
       cupom: oferta.cupom || "",
       score: oferta.radarScore || oferta.score || "",
-      intervaloOriginalMinutos: intervalo.intervaloDestinoMin
+      intervaloOriginalMinutos: intervalo.intervaloDestinoMin,
+      intervaloAplicadoMinutos: intervalo.intervaloAplicadoMin
     });
   } else if (intervalo.fastLaneCupomTipo === "provavel") {
-    logOptimus("CUPOM", "Turbo aplicado 4min", {
+    logOptimus("CUPOM", "Cupom provavel usando intervalo normal", {
       clienteId,
       destino: nomeDestino,
-      intervaloOriginalMinutos: intervalo.intervaloDestinoMin
+      intervaloOriginalMinutos: intervalo.intervaloDestinoMin,
+      intervaloAplicadoMinutos: intervalo.intervaloAplicadoMin
     });
   }
 
@@ -4691,7 +4898,7 @@ for (const item of destinosOrdenados) {
   if (resultadoEnvio.enviado === true) {
     enviouParaAlgumDestino = true;
     destinosEnviadosCount += 1;
-    controleEnvio[intervalo.chaveControle] = Date.now();
+    atualizarUltimoEnvioDestino(clienteId, destino, oferta, intervalo);
     logOptimus("DESTINO", "Enviado", {
       clienteId,
       destino: nomeDestino,
@@ -5546,7 +5753,7 @@ app.get("/destinos", (req, res) => {
   if (!clienteId) return;
 
   const destinos =
-    destinosPorCliente?.[clienteId] || [];
+    normalizarDestinosContrato(destinosPorCliente?.[clienteId] || []);
 
   return res.json(destinos);
 });
@@ -5555,7 +5762,7 @@ app.post("/destinos", (req, res) => {
   const clienteId = exigirClienteAutenticado(req, res);
   if (!clienteId) return;
 
-  const destinos = req.body;
+  const destinos = normalizarDestinosContrato(req.body);
 
   if (!Array.isArray(destinos)) {
     return res.status(400).json({
@@ -5580,7 +5787,7 @@ app.delete("/destinos/:id", (req, res) => {
   const { id } = req.params;
 
   destinosPorCliente[clienteId] =
-    (destinosPorCliente?.[clienteId] || [])
+    (normalizarDestinosContrato(destinosPorCliente?.[clienteId] || []))
       .filter(d => d.id !== id);
 
   salvarDestinosClientes();
@@ -19870,7 +20077,7 @@ app.get("/fila/status", (req, res) => {
 // =================== POST DESTINOS ================================
 
 app.post("/destinos/:id", (req, res) => {
-  const { destinos } = req.body;
+  const destinos = normalizarDestinosContrato(req.body?.destinos);
 
   if (!Array.isArray(destinos)) {
     return res.status(400).json({ erro: "destinos deve ser array" });
@@ -19925,7 +20132,7 @@ app.get("/destinos/:id", (req, res) => {
  );
 
   const destinos =
-    destinosPorCliente?.[clienteId]?.[id] || [];
+    normalizarDestinosContrato(destinosPorCliente?.[clienteId]?.[id] || []);
 
   return res.json({
     ok: true,
