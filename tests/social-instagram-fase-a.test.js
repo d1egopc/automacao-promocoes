@@ -12,6 +12,8 @@ process.env.INSTAGRAM_OAUTH_STATE_SECRET = "state_secret_optimus";
 
 const instagram = require("../modules/social/instagram");
 const socialStorage = require("../modules/social/storage");
+const routesFonte = fs.readFileSync(path.join(__dirname, "..", "modules", "social", "routes.js"), "utf8");
+const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
 
 function clienteFile(clienteId, arquivo) {
   return path.join(dataDir, "clientes", clienteId, arquivo);
@@ -82,7 +84,7 @@ async function conectarCliente(clienteId, sufixo = clienteId) {
 
   await assert.rejects(
     () => instagram.concluirCallbackInstagram({ code: "", state: inicio.state, httpClient: mockHttpClient() }),
-    /instagram_code_obrigatorio/
+    /code_ausente/
   );
 
   const expiradoPayload = Buffer.from(JSON.stringify({
@@ -97,7 +99,7 @@ async function conectarCliente(clienteId, sufixo = clienteId) {
     .digest("base64url");
   assert.throws(
     () => instagram.decodificarStateInstagram(`${expiradoPayload}.${assinaturaExpirada}`),
-    /instagram_state_expirado/
+    /state_expirado/
   );
 
   const conectadoA = await instagram.concluirCallbackInstagram({
@@ -127,7 +129,7 @@ async function conectarCliente(clienteId, sufixo = clienteId) {
       state: inicioErroToken.state,
       httpClient: mockHttpClient({ erroTokenCurto: true })
     }),
-    /token_curto_falhou/
+    /troca_token_falhou/
   );
 
   const inicioErroMe = instagram.iniciarConexaoInstagram({ clienteId: "cliente_erro_me" });
@@ -137,8 +139,16 @@ async function conectarCliente(clienteId, sufixo = clienteId) {
       state: inicioErroMe.state,
       httpClient: mockHttpClient({ erroMe: true })
     }),
-    /me_falhou/
+    /consulta_conta_falhou/
   );
+
+  const env = { ...process.env };
+  delete process.env.INSTAGRAM_APP_ID;
+  assert.throws(
+    () => instagram.iniciarConexaoInstagram({ clienteId: "cliente_sem_config" }),
+    /instagram_nao_configurado/
+  );
+  process.env.INSTAGRAM_APP_ID = env.INSTAGRAM_APP_ID;
 
   await conectarCliente("cliente_b", "cliente_b");
   const statusA = instagram.sanitizarConexaoInstagram(instagram.lerConexaoInstagram("cliente_a"));
@@ -169,6 +179,16 @@ async function conectarCliente(clienteId, sufixo = clienteId) {
   assert.strictEqual(instagramDesconectado.conectado, false);
   assert.strictEqual(instagramDesconectado.tokenPresente, false);
   assert.strictEqual(metaDepois.token.accessToken, "facebook_token", "desconexao instagram nao remove Facebook");
+
+  assert.ok(
+    indexFonte.includes('(req.method === "GET" && req.path === "/social/instagram/callback")'),
+    "callback instagram deve ser publico no auth global"
+  );
+  assert.ok(indexFonte.includes('erro: "Token inválido"'), "resposta Token inválido deve estar em UTF-8");
+  assert.ok(!indexFonte.includes("Token invÃ"), "index.js nao deve manter Token invalido mojibake");
+  assert.ok(routesFonte.includes('return res.json({\n        ok: true,\n        authUrl: inicio.authUrl\n      });'), "conectar deve retornar somente ok/authUrl");
+  assert.ok(routesFonte.includes('return res.json(payloadStatusInstagram(lerConexaoInstagram(clienteId)));'), "status deve usar contrato sanitizado achatado");
+  assert.ok(routesFonte.includes('return res.json({\n      ok: true,\n      conectado: false\n    });'), "desconectar deve retornar ok/conectado false");
 
   console.log("social-instagram-fase-a: ok");
 })().catch(erro => {

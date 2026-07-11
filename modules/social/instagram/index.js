@@ -65,11 +65,11 @@ function agoraIso() {
 }
 
 function appIdInstagram() {
-  return texto(process.env.INSTAGRAM_APP_ID || process.env.META_APP_ID);
+  return texto(process.env.INSTAGRAM_APP_ID);
 }
 
 function appSecretInstagram() {
-  return texto(process.env.INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET);
+  return texto(process.env.INSTAGRAM_APP_SECRET);
 }
 
 function redirectUriInstagram(valor = "") {
@@ -133,7 +133,7 @@ function gerarStateInstagram(clienteId = "admin") {
 
 function decodificarStateInstagram(state = "") {
   const [payload, assinatura] = texto(state).split(".");
-  if (!payload || !assinatura) throw new Error("instagram_state_invalido");
+  if (!payload || !assinatura) throw new Error("state_invalido");
 
   const esperada = assinarState(payload);
   const recebidaBuffer = Buffer.from(assinatura);
@@ -142,12 +142,17 @@ function decodificarStateInstagram(state = "") {
     recebidaBuffer.length !== esperadaBuffer.length ||
     !crypto.timingSafeEqual(recebidaBuffer, esperadaBuffer)
   ) {
-    throw new Error("instagram_state_assinatura_invalida");
+    throw new Error("state_invalido");
   }
 
-  const dados = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-  if (!dados?.clienteId || !dados?.nonce) throw new Error("instagram_state_invalido");
-  if (Number(dados.exp || 0) < Date.now()) throw new Error("instagram_state_expirado");
+  let dados;
+  try {
+    dados = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  } catch {
+    throw new Error("state_invalido");
+  }
+  if (!dados?.clienteId || !dados?.nonce) throw new Error("state_invalido");
+  if (Number(dados.exp || 0) < Date.now()) throw new Error("state_expirado");
 
   return {
     clienteId: texto(dados.clienteId),
@@ -256,8 +261,7 @@ function scopesInstagramConexao() {
 function iniciarConexaoInstagram({ clienteId = "admin", redirectUri = "" } = {}) {
   const appId = appIdInstagram();
   const uri = redirectUriInstagram(redirectUri);
-  if (!appId) throw new Error("instagram_app_id_ausente");
-  if (!uri) throw new Error("instagram_redirect_uri_ausente");
+  if (!appId || !appSecretInstagram() || !uri) throw new Error("instagram_nao_configurado");
 
   const { nonce, state } = gerarStateInstagram(clienteId);
   const { exp } = decodificarStateInstagram(state);
@@ -295,10 +299,8 @@ async function trocarCodePorTokenCurto({ code = "", redirectUri = "", httpClient
   const appId = appIdInstagram();
   const appSecret = appSecretInstagram();
   const uri = redirectUriInstagram(redirectUri);
-  if (!appId) throw new Error("instagram_app_id_ausente");
-  if (!appSecret) throw new Error("instagram_app_secret_ausente");
-  if (!uri) throw new Error("instagram_redirect_uri_ausente");
-  if (!texto(code)) throw new Error("instagram_code_obrigatorio");
+  if (!appId || !appSecret || !uri) throw new Error("instagram_nao_configurado");
+  if (!texto(code)) throw new Error("code_ausente");
 
   const body = new URLSearchParams({
     client_id: appId,
@@ -307,57 +309,69 @@ async function trocarCodePorTokenCurto({ code = "", redirectUri = "", httpClient
     redirect_uri: uri,
     code
   });
-  const resposta = await httpClient.post(INSTAGRAM_TOKEN_URL, body.toString(), {
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    timeout: 10000
-  });
-  const dados = resposta?.data || {};
-  if (!dados.access_token) throw new Error("instagram_token_curto_nao_retornado");
-  return dados;
+  try {
+    const resposta = await httpClient.post(INSTAGRAM_TOKEN_URL, body.toString(), {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      timeout: 10000
+    });
+    const dados = resposta?.data || {};
+    if (!dados.access_token) throw new Error("token_curto_nao_retornado");
+    return dados;
+  } catch {
+    throw new Error("troca_token_falhou");
+  }
 }
 
 async function trocarTokenLongaDuracao({ accessToken = "", httpClient = httpClientPadrao() } = {}) {
   const appSecret = appSecretInstagram();
-  if (!appSecret) throw new Error("instagram_app_secret_ausente");
-  if (!texto(accessToken)) throw new Error("instagram_access_token_obrigatorio");
+  if (!appSecret) throw new Error("instagram_nao_configurado");
+  if (!texto(accessToken)) throw new Error("troca_token_falhou");
 
-  const resposta = await httpClient.get(`${INSTAGRAM_GRAPH_BASE}/access_token`, {
-    params: {
-      grant_type: "ig_exchange_token",
-      client_secret: appSecret,
-      access_token: accessToken
-    },
-    timeout: 10000
-  });
-  const dados = resposta?.data || {};
-  if (!dados.access_token) throw new Error("instagram_token_longo_nao_retornado");
-  return dados;
+  try {
+    const resposta = await httpClient.get(`${INSTAGRAM_GRAPH_BASE}/access_token`, {
+      params: {
+        grant_type: "ig_exchange_token",
+        client_secret: appSecret,
+        access_token: accessToken
+      },
+      timeout: 10000
+    });
+    const dados = resposta?.data || {};
+    if (!dados.access_token) throw new Error("token_longo_nao_retornado");
+    return dados;
+  } catch {
+    throw new Error("troca_token_falhou");
+  }
 }
 
 async function consultarContaInstagram({ accessToken = "", httpClient = httpClientPadrao() } = {}) {
-  if (!texto(accessToken)) throw new Error("instagram_access_token_obrigatorio");
+  if (!texto(accessToken)) throw new Error("consulta_conta_falhou");
 
-  const resposta = await httpClient.get(`${INSTAGRAM_GRAPH_BASE}/me`, {
-    params: {
-      fields: "user_id,username,account_type,profile_picture_url",
-      access_token: accessToken
-    },
-    timeout: 10000
-  });
-  const dados = resposta?.data || {};
-  const instagramUserId = texto(dados.user_id || dados.id);
-  if (!instagramUserId) throw new Error("instagram_me_id_nao_retornado");
+  try {
+    const resposta = await httpClient.get(`${INSTAGRAM_GRAPH_BASE}/me`, {
+      params: {
+        fields: "user_id,username,account_type,profile_picture_url",
+        access_token: accessToken
+      },
+      timeout: 10000
+    });
+    const dados = resposta?.data || {};
+    const instagramUserId = texto(dados.user_id || dados.id);
+    if (!instagramUserId) throw new Error("me_id_nao_retornado");
 
-  return {
-    instagramUserId,
-    username: texto(dados.username),
-    accountType: texto(dados.account_type),
-    profilePictureUrl: texto(dados.profile_picture_url)
-  };
+    return {
+      instagramUserId,
+      username: texto(dados.username),
+      accountType: texto(dados.account_type),
+      profilePictureUrl: texto(dados.profile_picture_url)
+    };
+  } catch {
+    throw new Error("consulta_conta_falhou");
+  }
 }
 
 async function concluirCallbackInstagram({ code = "", state = "", redirectUri = "", httpClient = httpClientPadrao() } = {}) {
-  if (!texto(code)) throw new Error("instagram_code_obrigatorio");
+  if (!texto(code)) throw new Error("code_ausente");
 
   const estado = decodificarStateInstagram(state);
   consumirStatePendente(estado.clienteId, estado.nonce);
