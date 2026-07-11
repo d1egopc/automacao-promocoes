@@ -12,6 +12,7 @@ process.env.INSTAGRAM_OAUTH_STATE_SECRET = "state_secret_optimus";
 
 const instagram = require("../modules/social/instagram");
 const socialStorage = require("../modules/social/storage");
+const { writeClienteJson } = require("../utils/storage");
 const routesFonte = fs.readFileSync(path.join(__dirname, "..", "modules", "social", "routes.js"), "utf8");
 const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
 
@@ -25,6 +26,22 @@ function mockHttpClient(opcoes = {}) {
     chamadas,
     async post(url, body, config) {
       chamadas.push({ metodo: "post", url, body, config });
+      if (url.endsWith("/media")) {
+        if (opcoes.erroContainer) {
+          const erro = new Error("meta_container_falhou");
+          erro.response = { data: { error: { message: "Container recusado pela Meta", code: 190, type: "OAuthException" } } };
+          throw erro;
+        }
+        return { data: { id: `container_${opcoes.sufixo || "token"}` } };
+      }
+      if (url.endsWith("/media_publish")) {
+        if (opcoes.erroPublish) {
+          const erro = new Error("meta_publish_falhou");
+          erro.response = { data: { error: { message: "Publicacao recusada pela Meta", code: 10, type: "OAuthException" } } };
+          throw erro;
+        }
+        return { data: { id: `media_${opcoes.sufixo || "token"}` } };
+      }
       if (opcoes.erroTokenCurto) throw new Error("token_curto_falhou");
       return {
         data: {
@@ -70,6 +87,22 @@ async function conectarCliente(clienteId, sufixo = clienteId) {
     httpClient
   });
   return { inicio, httpClient, conexao };
+}
+
+function salvarFilaCliente(clienteId, itens) {
+  writeClienteJson(clienteId, "fila.json", itens.map(item => ({
+    clienteId,
+    marketplace: "amazon",
+    titulo: "Echo Dot 5",
+    precoAtual: 199.9,
+    precoOriginal: 299.9,
+    cupom: "PROMO10",
+    imagem: "https://cdn.optimus.test/echo.jpg",
+    linkAfiliado: `https://go.optimus.test/${clienteId}/echo`,
+    ofertaUniversal: true,
+    versaoOfertaUniversal: "v2-oficial",
+    ...item
+  })));
 }
 
 (async () => {
@@ -191,6 +224,149 @@ async function conectarCliente(clienteId, sufixo = clienteId) {
   assert.ok(routesFonte.includes('return res.json({\n        ok: true,\n        authUrl: inicio.authUrl\n      });'), "conectar deve retornar somente ok/authUrl");
   assert.ok(routesFonte.includes('return res.json(payloadStatusInstagram(lerConexaoInstagram(clienteId)));'), "status deve usar contrato sanitizado achatado");
   assert.ok(routesFonte.includes('return res.json({\n      ok: true,\n      conectado: false\n    });'), "desconectar deve retornar ok/conectado false");
+  assert.ok(routesFonte.includes('router.post("/instagram/publicar"'), "rota publicar instagram deve existir");
+  assert.ok(routesFonte.includes('router.get("/instagram/publicacoes"'), "rota listar publicacoes instagram deve existir");
+
+  await assert.rejects(
+    () => instagram.publicarImagemInstagram({
+      clienteId: "cliente_sem_instagram",
+      ofertaId: "oferta_1",
+      templateId: "padrao-instagram",
+      httpClient: mockHttpClient()
+    }),
+    /instagram_nao_conectado/
+  );
+
+  await conectarCliente("cliente_pub_a", "pub_a");
+  await conectarCliente("cliente_pub_b", "pub_b");
+  salvarFilaCliente("cliente_pub_a", [{ id: "oferta_pub_a" }]);
+  salvarFilaCliente("cliente_pub_b", [{ id: "oferta_pub_b", linkAfiliado: "https://go.optimus.test/cliente_pub_b/item" }]);
+
+  await assert.rejects(
+    () => instagram.publicarImagemInstagram({
+      clienteId: "cliente_pub_a",
+      ofertaId: "nao_existe",
+      templateId: "padrao-instagram",
+      httpClient: mockHttpClient()
+    }),
+    /oferta_nao_encontrada/
+  );
+  await assert.rejects(
+    () => instagram.publicarImagemInstagram({
+      clienteId: "cliente_pub_a",
+      ofertaId: "oferta_pub_b",
+      templateId: "padrao-instagram",
+      httpClient: mockHttpClient()
+    }),
+    /oferta_nao_encontrada/
+  );
+
+  await conectarCliente("cliente_sem_id_item", "sem_id_item");
+  salvarFilaCliente("cliente_sem_id_item", [{ id: "oferta_sem_id_item", clienteId: undefined }]);
+  const publicadaSemIdItem = await instagram.publicarImagemInstagram({
+    clienteId: "cliente_sem_id_item",
+    ofertaId: "oferta_sem_id_item",
+    templateId: "padrao-instagram",
+    httpClient: mockHttpClient({ sufixo: "sem_id_item" })
+  });
+  assert.strictEqual(publicadaSemIdItem.publicacao.status, "publicada");
+
+  salvarFilaCliente("cliente_img_ausente", [{ id: "oferta_sem_imagem", imagem: "" }]);
+  await conectarCliente("cliente_img_ausente", "img_ausente");
+  await assert.rejects(
+    () => instagram.publicarImagemInstagram({
+      clienteId: "cliente_img_ausente",
+      ofertaId: "oferta_sem_imagem",
+      templateId: "padrao-instagram",
+      httpClient: mockHttpClient()
+    }),
+    /imagem_ausente/
+  );
+
+  salvarFilaCliente("cliente_img_privada", [{ id: "oferta_img_privada", imagem: "http://localhost/imagem.jpg" }]);
+  await conectarCliente("cliente_img_privada", "img_privada");
+  await assert.rejects(
+    () => instagram.publicarImagemInstagram({
+      clienteId: "cliente_img_privada",
+      ofertaId: "oferta_img_privada",
+      templateId: "padrao-instagram",
+      httpClient: mockHttpClient()
+    }),
+    /imagem_nao_publica/
+  );
+
+  const conexaoExpirada = instagram.lerConexaoInstagram("cliente_pub_a");
+  writeClienteJson("cliente_pub_a", "social-instagram.json", {
+    ...conexaoExpirada,
+    token: {
+      ...conexaoExpirada.token,
+      expiresAt: "2000-01-01T00:00:00.000Z"
+    }
+  });
+  await assert.rejects(
+    () => instagram.publicarImagemInstagram({
+      clienteId: "cliente_pub_a",
+      ofertaId: "oferta_pub_a",
+      templateId: "padrao-instagram",
+      httpClient: mockHttpClient()
+    }),
+    /instagram_token_expirado/
+  );
+
+  await conectarCliente("cliente_pub_a", "pub_a2");
+  const publicada = await instagram.publicarImagemInstagram({
+    clienteId: "cliente_pub_a",
+    ofertaId: "oferta_pub_a",
+    templateId: "padrao-instagram",
+    httpClient: mockHttpClient({ sufixo: "pub_a" })
+  });
+  assert.strictEqual(publicada.publicacao.status, "publicada");
+  assert.strictEqual(publicada.publicacao.instagramContainerId, "container_pub_a");
+  assert.strictEqual(publicada.publicacao.instagramMediaId, "media_pub_a");
+  assert.strictEqual(publicada.publicacao.linkAfiliadoPresente, true);
+  assert.ok(!JSON.stringify(publicada.publicacao).includes("long_pub_a"), "publicacao sanitizada nao deve expor token");
+
+  const duplicada = await instagram.publicarImagemInstagram({
+    clienteId: "cliente_pub_a",
+    ofertaId: "oferta_pub_a",
+    templateId: "padrao-instagram",
+    httpClient: mockHttpClient({ sufixo: "duplicada" })
+  });
+  assert.strictEqual(duplicada.duplicada, true, "clique duplicado deve retornar publicacao existente");
+  assert.strictEqual(duplicada.publicacao.id, publicada.publicacao.id);
+
+  salvarFilaCliente("cliente_meta_erro", [{ id: "oferta_meta_erro" }]);
+  await conectarCliente("cliente_meta_erro", "meta_erro");
+  const falhaMeta = await instagram.publicarImagemInstagram({
+    clienteId: "cliente_meta_erro",
+    ofertaId: "oferta_meta_erro",
+    templateId: "padrao-instagram",
+    httpClient: mockHttpClient({ erroContainer: true })
+  });
+  assert.strictEqual(falhaMeta.publicacao.status, "erro");
+  assert.strictEqual(falhaMeta.publicacao.erro.code, 190);
+  assert.ok(!JSON.stringify(falhaMeta.publicacao).includes("accessToken"), "erro/listagem nao deve expor token");
+
+  salvarFilaCliente("cliente_publish_erro", [{ id: "oferta_publish_erro" }]);
+  await conectarCliente("cliente_publish_erro", "publish_erro");
+  const falhaPublish = await instagram.publicarImagemInstagram({
+    clienteId: "cliente_publish_erro",
+    ofertaId: "oferta_publish_erro",
+    templateId: "padrao-instagram",
+    httpClient: mockHttpClient({ sufixo: "publish_erro", erroPublish: true })
+  });
+  assert.strictEqual(falhaPublish.publicacao.status, "erro");
+  assert.strictEqual(falhaPublish.publicacao.instagramContainerId, "container_publish_erro");
+  assert.strictEqual(falhaPublish.publicacao.erro.code, 10);
+  assert.ok(!JSON.stringify(falhaPublish.publicacao).includes("long_publish_erro"), "falha no publish nao deve expor token");
+
+  const listaA = instagram.listarPublicacoesInstagram("cliente_pub_a");
+  const listaB = instagram.listarPublicacoesInstagram("cliente_pub_b");
+  assert.strictEqual(listaA.length, 1);
+  assert.strictEqual(listaB.length, 0);
+  assert.ok(!JSON.stringify(listaA).includes("long_"), "listagem nao deve expor token");
+  assert.strictEqual(instagram.getPublicacaoInstagram("cliente_pub_a", publicada.publicacao.id).id, publicada.publicacao.id);
+  assert.strictEqual(instagram.getPublicacaoInstagram("cliente_pub_b", publicada.publicacao.id), null, "cliente B nao ve publicacao do cliente A");
 
   console.log("social-instagram-fase-a: ok");
 })().catch(erro => {

@@ -9,6 +9,7 @@ const INSTAGRAM_AUTH_URL = "https://www.instagram.com/oauth/authorize";
 const INSTAGRAM_TOKEN_URL = "https://api.instagram.com/oauth/access_token";
 const INSTAGRAM_GRAPH_BASE = "https://graph.instagram.com";
 const ARQUIVO_INSTAGRAM = "social-instagram.json";
+const ARQUIVO_PUBLICACOES = "social-publicacoes.json";
 const SCOPE_BASICO = "instagram_business_basic";
 const STATE_TTL_MS = 15 * 60 * 1000;
 
@@ -60,8 +61,23 @@ function lista(valor) {
   return Array.isArray(valor) ? valor : [];
 }
 
+function numero(valor) {
+  if (valor === null || valor === undefined || valor === "") return null;
+  if (typeof valor === "number") return Number.isFinite(valor) ? valor : null;
+  const limpo = texto(valor).replace(/R\$/gi, "").replace(/\s/g, "");
+  const normalizado = limpo.includes(",")
+    ? limpo.replace(/\./g, "").replace(",", ".")
+    : limpo;
+  const resultado = Number(normalizado);
+  return Number.isFinite(resultado) ? resultado : null;
+}
+
 function agoraIso() {
   return new Date().toISOString();
+}
+
+function criarId(prefixo = "igpub") {
+  return `${prefixo}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function appIdInstagram() {
@@ -211,6 +227,190 @@ function sanitizarConexaoInstagram(conexao = {}) {
     expiresAt: texto(conexao.token?.expiresAt),
     scopes: lista(conexao.scopes).map(texto).filter(Boolean)
   };
+}
+
+function sanitizarErroInstagram(erro) {
+  const metaErro = erro?.response?.data?.error || erro?.response?.data || {};
+  const mensagem = texto(metaErro.message || erro?.message || "instagram_publicacao_erro");
+  return {
+    code: metaErro.code ?? "",
+    type: texto(metaErro.type),
+    message: mensagem.slice(0, 220)
+  };
+}
+
+function publicacaoSanitizada(publicacao = {}) {
+  return {
+    id: texto(publicacao.id),
+    ofertaId: texto(publicacao.ofertaId),
+    templateId: texto(publicacao.templateId),
+    instagramUserId: texto(publicacao.instagramUserId),
+    imagemUrl: texto(publicacao.imagemUrl),
+    legenda: texto(publicacao.legenda),
+    linkAfiliadoPresente: Boolean(texto(publicacao.linkAfiliado)),
+    status: texto(publicacao.status),
+    instagramContainerId: texto(publicacao.instagramContainerId),
+    instagramMediaId: texto(publicacao.instagramMediaId),
+    criadoEm: texto(publicacao.criadoEm),
+    publicadoEm: texto(publicacao.publicadoEm),
+    erro: publicacao.erro && typeof publicacao.erro === "object" ? publicacao.erro : null
+  };
+}
+
+function listarPublicacoesInstagram(clienteId = "admin", limite = 100) {
+  const max = Math.max(1, Math.min(200, Number(limite || 100) || 100));
+  return lista(readClienteJson(clienteId, ARQUIVO_PUBLICACOES, []))
+    .filter(item => texto(item?.rede || "instagram") === "instagram")
+    .slice(-max)
+    .reverse()
+    .map(publicacaoSanitizada);
+}
+
+function getPublicacaoInstagram(clienteId = "admin", id = "") {
+  const publicacao = lista(readClienteJson(clienteId, ARQUIVO_PUBLICACOES, []))
+    .find(item => texto(item?.id) === texto(id) && texto(item?.rede || "instagram") === "instagram");
+  return publicacao ? publicacaoSanitizada(publicacao) : null;
+}
+
+function salvarPublicacaoInstagram(clienteId = "admin", publicacao = {}) {
+  const atuais = lista(readClienteJson(clienteId, ARQUIVO_PUBLICACOES, []));
+  const item = {
+    ...publicacao,
+    clienteId,
+    rede: "instagram",
+    atualizadoEm: agoraIso()
+  };
+  const publicacoes = [
+    ...atuais.filter(atual => texto(atual?.id) !== texto(item.id)),
+    item
+  ].slice(-500);
+  writeClienteJson(clienteId, ARQUIVO_PUBLICACOES, publicacoes);
+  return item;
+}
+
+function encontrarPublicacaoDuplicada(clienteId = "admin", ofertaId = "", templateId = "") {
+  return lista(readClienteJson(clienteId, ARQUIVO_PUBLICACOES, []))
+    .find(item =>
+      texto(item?.rede || "instagram") === "instagram" &&
+      texto(item?.ofertaId) === texto(ofertaId) &&
+      texto(item?.templateId) === texto(templateId) &&
+      ["publicando", "publicada"].includes(texto(item?.status))
+    );
+}
+
+function normalizarChave(valor = "") {
+  return texto(valor)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/[?#].*$/, "")
+    .replace(/\/+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function idsOferta(item = {}) {
+  const idBase = texto(item.id || item.ofertaId || item.ofertaUniversalId || item.produtoId || item.productId || item.sku);
+  const linkOriginal = texto(item.linkOriginal || item.urlOriginal || item.url || item.link);
+  const linkAfiliado = texto(item.linkAfiliado || item.linkFinal || item.link);
+  const titulo = texto(item.titulo || item.nome);
+  const marketplace = texto(item.marketplace);
+  const ids = [
+    idBase,
+    texto(item.ofertaUniversalId),
+    texto(item.produtoId || item.productId || item.sku)
+  ].filter(Boolean);
+  const chave =
+    texto(item.produtoId || item.productId || item.sku) ||
+    normalizarChave(linkOriginal) ||
+    normalizarChave(linkAfiliado) ||
+    `${normalizarChave(titulo)}|${normalizarChave(marketplace)}`;
+  const socialId = `social_${normalizarChave(idBase || chave).replace(/[^a-z0-9_-]/g, "_").slice(0, 80)}`;
+  return new Set([...ids, socialId].filter(Boolean));
+}
+
+function carregarOfertaCliente(clienteId = "admin", ofertaId = "") {
+  const alvo = texto(ofertaId);
+  if (!alvo) throw new Error("oferta_id_obrigatorio");
+
+  const clienteSeguro = texto(clienteId || "admin");
+  const ofertas = lista(readClienteJson(clienteSeguro, "fila.json", []))
+    .filter(item => !texto(item?.clienteId) || texto(item?.clienteId) === clienteSeguro);
+  const oferta = ofertas.find(item => idsOferta(item).has(alvo));
+  if (!oferta) throw new Error("oferta_nao_encontrada");
+
+  const v2 = oferta.inteligenciaUniversalV2 || {};
+  const imagem = texto(oferta.imagem || oferta.image || oferta.thumbnail);
+  const linkAfiliado = texto(oferta.linkAfiliado || oferta.linkFinal || oferta.link);
+  const titulo = texto(oferta.titulo || oferta.nome);
+  const marketplace = texto(oferta.marketplace);
+  const precoAtual = numero(v2.valorEfetivo ?? oferta.valorEfetivo ?? oferta.precoAtual ?? oferta.preco);
+
+  return {
+    id: alvo,
+    fonteId: texto(oferta.id || oferta.ofertaId || oferta.ofertaUniversalId),
+    clienteId,
+    titulo,
+    marketplace,
+    imagem,
+    linkAfiliado,
+    precoAtual,
+    precoOriginal: numero(oferta.precoOriginal ?? oferta.precoAntigo ?? oferta.precoDe),
+    desconto: texto(oferta.desconto || oferta.percentualDesconto || oferta.descontoPercentual),
+    cupom: texto(oferta.cupom || oferta.cupomCodigo || oferta.cupomInfo?.cupom),
+    categoria: texto(v2.categoria || oferta.categoria)
+  };
+}
+
+function moeda(valor) {
+  const n = numero(valor);
+  if (n === null) return "";
+  return `R$ ${n.toFixed(2).replace(".", ",")}`;
+}
+
+function montarLegendaInstagram(oferta = {}, templateId = "padrao-instagram") {
+  const linhas = [];
+  linhas.push(oferta.titulo);
+  if (oferta.precoAtual !== null) linhas.push(`Por: ${moeda(oferta.precoAtual)}`);
+  if (oferta.precoOriginal !== null && oferta.precoOriginal > oferta.precoAtual) {
+    linhas.push(`De: ${moeda(oferta.precoOriginal)}`);
+  }
+  if (oferta.desconto) linhas.push(`Desconto: ${oferta.desconto}`);
+  if (oferta.cupom) linhas.push(`Cupom: ${oferta.cupom}`);
+  linhas.push("Confira pelo link oficial da oferta.");
+  if (oferta.marketplace) linhas.push(`#${normalizarChave(oferta.marketplace).replace(/[^a-z0-9]/g, "")}`);
+  linhas.push("#promocao #oferta");
+
+  return {
+    templateId,
+    legenda: linhas.filter(Boolean).join("\n")
+  };
+}
+
+function validarImagemPublica(url = "") {
+  const valor = texto(url);
+  if (!valor) throw new Error("imagem_ausente");
+  let parsed;
+  try {
+    parsed = new URL(valor);
+  } catch {
+    throw new Error("imagem_nao_publica");
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("imagem_nao_publica");
+  const host = parsed.hostname.toLowerCase();
+  if (
+    host === "localhost" ||
+    host.endsWith(".local") ||
+    host === "127.0.0.1" ||
+    host.startsWith("10.") ||
+    host.startsWith("192.168.") ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+  ) {
+    throw new Error("imagem_nao_publica");
+  }
+  return valor;
 }
 
 function removerStatesExpirados(states = {}) {
@@ -371,6 +571,145 @@ async function consultarContaInstagram({ accessToken = "", httpClient = httpClie
   }
 }
 
+async function criarContainerImagemInstagram({ instagramUserId = "", imagemUrl = "", legenda = "", accessToken = "", httpClient = httpClientPadrao() } = {}) {
+  const igId = texto(instagramUserId);
+  if (!igId || !texto(accessToken)) throw new Error("instagram_nao_conectado");
+
+  const resposta = await httpClient.post(`${INSTAGRAM_GRAPH_BASE}/${encodeURIComponent(igId)}/media`, new URLSearchParams({
+    image_url: imagemUrl,
+    caption: legenda,
+    access_token: accessToken
+  }).toString(), {
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    timeout: 15000
+  });
+  const id = texto(resposta?.data?.id);
+  if (!id) throw new Error("instagram_container_nao_retornado");
+  return id;
+}
+
+async function publicarContainerInstagram({ instagramUserId = "", containerId = "", accessToken = "", httpClient = httpClientPadrao() } = {}) {
+  const igId = texto(instagramUserId);
+  const creationId = texto(containerId);
+  if (!igId || !creationId || !texto(accessToken)) throw new Error("instagram_nao_conectado");
+
+  const resposta = await httpClient.post(`${INSTAGRAM_GRAPH_BASE}/${encodeURIComponent(igId)}/media_publish`, new URLSearchParams({
+    creation_id: creationId,
+    access_token: accessToken
+  }).toString(), {
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    timeout: 15000
+  });
+  const id = texto(resposta?.data?.id);
+  if (!id) throw new Error("instagram_media_nao_retornada");
+  return id;
+}
+
+async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", templateId = "padrao-instagram", httpClient = httpClientPadrao() } = {}) {
+  const tpl = texto(templateId || "padrao-instagram") || "padrao-instagram";
+  const ofertaIdSeguro = texto(ofertaId);
+  if (!ofertaIdSeguro) throw new Error("oferta_id_obrigatorio");
+
+  const conexao = lerConexaoInstagram(clienteId);
+  if (!conexao.conectado || !texto(conexao.token?.accessToken) || !texto(conexao.instagramUserId)) {
+    throw new Error("instagram_nao_conectado");
+  }
+
+  if (conexao.token?.expiresAt && Date.parse(conexao.token.expiresAt) <= Date.now()) {
+    throw new Error("instagram_token_expirado");
+  }
+
+  const duplicada = encontrarPublicacaoDuplicada(clienteId, ofertaIdSeguro, tpl);
+  if (duplicada) {
+    return {
+      duplicada: true,
+      publicacao: publicacaoSanitizada(duplicada)
+    };
+  }
+
+  const oferta = carregarOfertaCliente(clienteId, ofertaIdSeguro);
+  if (!oferta.linkAfiliado) throw new Error("oferta_link_ausente");
+  const imagemUrl = validarImagemPublica(oferta.imagem);
+  const { legenda } = montarLegendaInstagram(oferta, tpl);
+  const id = criarId("igpub");
+  const base = {
+    id,
+    ofertaId: ofertaIdSeguro,
+    templateId: tpl,
+    instagramUserId: conexao.instagramUserId,
+    imagemUrl,
+    legenda,
+    linkAfiliado: oferta.linkAfiliado,
+    status: "publicando",
+    instagramContainerId: "",
+    instagramMediaId: "",
+    criadoEm: agoraIso(),
+    publicadoEm: "",
+    erro: null
+  };
+
+  salvarPublicacaoInstagram(clienteId, base);
+
+  let instagramContainerId = "";
+  try {
+    instagramContainerId = await criarContainerImagemInstagram({
+      instagramUserId: conexao.instagramUserId,
+      imagemUrl,
+      legenda,
+      accessToken: conexao.token.accessToken,
+      httpClient
+    });
+    const comContainer = salvarPublicacaoInstagram(clienteId, {
+      ...base,
+      instagramContainerId
+    });
+    const instagramMediaId = await publicarContainerInstagram({
+      instagramUserId: conexao.instagramUserId,
+      containerId: instagramContainerId,
+      accessToken: conexao.token.accessToken,
+      httpClient
+    });
+    const publicada = salvarPublicacaoInstagram(clienteId, {
+      ...comContainer,
+      status: "publicada",
+      instagramMediaId,
+      publicadoEm: agoraIso(),
+      erro: null
+    });
+
+    logSocial("[SOCIAL-INSTAGRAM-PUBLICACAO-OK]", {
+      clienteId,
+      ofertaId: ofertaIdSeguro,
+      publicacaoId: id,
+      instagramUserId: conexao.instagramUserId,
+      instagramMediaId
+    });
+
+    return {
+      duplicada: false,
+      publicacao: publicacaoSanitizada(publicada)
+    };
+  } catch (e) {
+    const erro = sanitizarErroInstagram(e);
+    const falha = salvarPublicacaoInstagram(clienteId, {
+      ...base,
+      instagramContainerId,
+      status: "erro",
+      erro
+    });
+    logSocial("[SOCIAL-INSTAGRAM-PUBLICACAO-ERRO]", {
+      clienteId,
+      ofertaId: ofertaIdSeguro,
+      publicacaoId: id,
+      erro
+    });
+    return {
+      duplicada: false,
+      publicacao: publicacaoSanitizada(falha)
+    };
+  }
+}
+
 async function concluirCallbackInstagram({ code = "", state = "", redirectUri = "", httpClient = httpClientPadrao() } = {}) {
   if (!texto(code)) throw new Error("code_ausente");
 
@@ -429,6 +768,7 @@ function criarAdaptadorInstagram() {
 
 module.exports = {
   ARQUIVO_INSTAGRAM,
+  ARQUIVO_PUBLICACOES,
   INSTAGRAM_AUTH_URL,
   INSTAGRAM_GRAPH_BASE,
   SCOPE_BASICO,
@@ -438,6 +778,12 @@ module.exports = {
   concluirCallbackInstagram,
   lerConexaoInstagram,
   limparConexaoInstagram,
+  listarPublicacoesInstagram,
+  getPublicacaoInstagram,
+  publicarImagemInstagram,
+  carregarOfertaCliente,
+  montarLegendaInstagram,
+  validarImagemPublica,
   sanitizarConexaoInstagram,
   decodificarStateInstagram,
   scopesInstagramConexao

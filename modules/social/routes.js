@@ -11,9 +11,12 @@ const {
 } = require("./facebook");
 const {
   concluirCallbackInstagram,
+  getPublicacaoInstagram,
   iniciarConexaoInstagram,
   lerConexaoInstagram,
+  listarPublicacoesInstagram,
   limparConexaoInstagram,
+  publicarImagemInstagram,
   sanitizarConexaoInstagram
 } = require("./instagram");
 
@@ -72,7 +75,14 @@ function criarRotasSocial(deps = {}) {
       "state_expirado",
       "code_ausente",
       "troca_token_falhou",
-      "consulta_conta_falhou"
+      "consulta_conta_falhou",
+      "instagram_nao_conectado",
+      "instagram_token_expirado",
+      "oferta_id_obrigatorio",
+      "oferta_nao_encontrada",
+      "oferta_link_ausente",
+      "imagem_ausente",
+      "imagem_nao_publica"
     ]);
     return permitidos.has(codigo) ? codigo : "instagram_oauth_falhou";
   }
@@ -440,6 +450,66 @@ function criarRotasSocial(deps = {}) {
     });
   });
 
+  router.post("/instagram/publicar", async (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const resultado = await publicarImagemInstagram({
+        clienteId,
+        ofertaId: req.body?.ofertaId || "",
+        templateId: req.body?.templateId || "padrao-instagram"
+      });
+
+      return res.status(resultado.publicacao.status === "erro" ? 502 : 200).json({
+        ok: resultado.publicacao.status !== "erro",
+        duplicada: resultado.duplicada,
+        publicacao: resultado.publicacao
+      });
+    } catch (e) {
+      const erro = erroInstagramSeguro(e.message);
+      logErroSocial({ erro, rota: "POST /social/instagram/publicar" });
+      return res.status(400).json({
+        ok: false,
+        erro
+      });
+    }
+  });
+
+  router.get("/instagram/publicacoes", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    const clienteId = cliente(req);
+    return res.json({
+      ok: true,
+      publicacoes: listarPublicacoesInstagram(clienteId, limite(req, 100))
+    });
+  });
+
+  router.get("/instagram/publicacoes/:id", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    const clienteId = cliente(req);
+    const publicacao = getPublicacaoInstagram(clienteId, req.params.id);
+    if (!publicacao) {
+      return res.status(404).json({
+        ok: false,
+        erro: "publicacao_nao_encontrada"
+      });
+    }
+
+    return res.json({
+      ok: true,
+      publicacao
+    });
+  });
+
   router.get("/templates", (req, res) => {
     if (!socialPermitido(req)) {
       return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
@@ -641,6 +711,9 @@ function criarRotasSocial(deps = {}) {
       "GET /social/instagram/conectar",
       "GET /social/instagram/callback",
       "POST /social/instagram/desconectar",
+      "POST /social/instagram/publicar",
+      "GET /social/instagram/publicacoes",
+      "GET /social/instagram/publicacoes/:id",
       "GET /social/templates",
       "POST /social/templates",
       "GET /social/agendamentos",
