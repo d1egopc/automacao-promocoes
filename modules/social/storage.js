@@ -78,6 +78,23 @@ function temLinkValido(valor = "") {
   return /^https?:\/\//i.test(link);
 }
 
+function idOfertaOficialSocial(item = {}) {
+  const candidatos = [
+    item.ofertaId,
+    item.ofertaUniversalId,
+    item.engineOfertaId,
+    item.engineOfertaUuid,
+    item.produtoId,
+    item.productId,
+    item.sku,
+    item.id
+  ];
+  return texto(candidatos.find(valor => {
+    const id = texto(valor);
+    return id && !id.startsWith("social_");
+  }));
+}
+
 function caminhoLogicoCliente(clienteId = "admin", tipo = "") {
   return `${process.env.DATA_DIR || "/data"}/clientes/${texto(clienteId || "admin")}/${ARQUIVOS[tipo] || ""}`;
 }
@@ -437,8 +454,9 @@ function registrarPublicacaoSocial(clienteId = "admin", dados = {}) {
 
 function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
   const limiteSeguro = Math.max(1, Math.min(50, Number(limite || 50) || 50));
-  const itens = lista(readClienteJson(clienteId, "fila.json", []))
-    .filter(item => texto(item?.clienteId || "admin") === texto(clienteId || "admin"));
+  const clienteSeguro = texto(clienteId || "admin");
+  const itens = lista(readClienteJson(clienteSeguro, "fila.json", []))
+    .filter(item => !texto(item?.clienteId) || texto(item?.clienteId) === clienteSeguro);
   const vistas = new Set();
   const oportunidades = [];
 
@@ -447,8 +465,9 @@ function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
     const titulo = texto(item.titulo || item.nome);
     const marketplace = texto(item.marketplace);
     const imagem = texto(item.imagem || item.image || item.thumbnail);
-    const linkAfiliado = texto(item.linkAfiliado || item.linkFinal || item.link);
+    const linkAfiliado = texto(item.linkAfiliado || item.linkFinal || item.link_afiliado);
     const linkOriginal = texto(item.linkOriginal || item.urlOriginal || item.url || item.link);
+    const linkReferencia = linkAfiliado || linkOriginal;
     const precoAtual = numero(v2.valorEfetivo ?? item.valorEfetivo ?? item.precoAtual ?? item.preco);
     const precoOriginal = numero(item.precoOriginal ?? item.precoAntigo ?? item.precoDe);
     const score = numero(v2.score?.score ?? v2.score ?? item.score ?? item.radarScore);
@@ -469,8 +488,10 @@ function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
       ["aprovada", "aprovado"].includes(statusV2) ||
       item.ofertaUniversal === true ||
       texto(item.versaoOfertaUniversal).startsWith("v2");
+    const ofertaId = idOfertaOficialSocial(item);
+    const linkAfiliadoPresente = temLinkValido(linkAfiliado);
 
-    if (!titulo || !marketplace || !temImagemValida(imagem) || !temLinkValido(linkAfiliado)) continue;
+    if (!ofertaId || !titulo || !marketplace || !temImagemValida(imagem)) continue;
     if (precoAtual === null || precoAtual <= 0) continue;
     if (expirado) continue;
     if (bloqueada) continue;
@@ -479,7 +500,8 @@ function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
     const chave =
       texto(item.produtoId || item.productId || item.sku) ||
       normalizarChave(linkOriginal) ||
-      normalizarChave(linkAfiliado) ||
+      normalizarChave(linkReferencia) ||
+      normalizarChave(ofertaId) ||
       `${normalizarChave(titulo)}|${normalizarChave(marketplace)}`;
 
     if (!chave || vistas.has(chave)) continue;
@@ -487,14 +509,17 @@ function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
 
     const criadoEm = texto(item.criadoEm || item.dataCriacao || item.createdAt || item.recebidoEm || item.atualizadoEm);
     const idBase = texto(item.id || item.ofertaId || item.produtoId || chave);
+    const motivoIndisponivel = linkAfiliadoPresente ? "" : "sem_link_afiliado";
 
     oportunidades.push({
       id: `social_${normalizarChave(idBase).replace(/[^a-z0-9_-]/g, "_").slice(0, 80) || criarId("oportunidade")}`,
+      ofertaId,
       ofertaUniversalId: texto(item.ofertaUniversalId || item.id || item.ofertaId),
       titulo,
       imagem,
       marketplace,
       categoria: texto(v2.categoria || item.categoria),
+      preco: precoAtual,
       precoAtual,
       precoOriginal,
       valorEfetivo: numero(v2.valorEfetivo ?? item.valorEfetivo),
@@ -502,7 +527,9 @@ function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
       score,
       prioridade,
       origem: texto(item.origem || "fila"),
-      linkAfiliadoPresente: true,
+      linkAfiliadoPresente,
+      publicavel: linkAfiliadoPresente,
+      motivoIndisponivel,
       criadoEm,
       expiraEm,
       statusSocial: "nova",

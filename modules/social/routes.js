@@ -601,7 +601,6 @@ function criarRotasSocial(deps = {}) {
 
     return res.json({
       ok: true,
-      clienteId,
       total: oportunidades.length,
       oportunidades
     });

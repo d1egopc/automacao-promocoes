@@ -319,7 +319,10 @@ function idsOferta(item = {}) {
   const marketplace = texto(item.marketplace);
   const ids = [
     idBase,
+    texto(item.ofertaId),
     texto(item.ofertaUniversalId),
+    texto(item.engineOfertaId),
+    texto(item.engineOfertaUuid),
     texto(item.produtoId || item.productId || item.sku)
   ].filter(Boolean);
   const chave =
