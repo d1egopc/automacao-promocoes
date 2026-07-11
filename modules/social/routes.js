@@ -9,6 +9,13 @@ const {
   concluirCallbackMeta,
   iniciarConexaoMeta
 } = require("./facebook");
+const {
+  concluirCallbackInstagram,
+  iniciarConexaoInstagram,
+  lerConexaoInstagram,
+  limparConexaoInstagram,
+  sanitizarConexaoInstagram
+} = require("./instagram");
 
 function criarRotasSocial(deps = {}) {
   const router = express.Router();
@@ -38,6 +45,19 @@ function criarRotasSocial(deps = {}) {
     try {
       const destino = new URL("/social", frontendUrl);
       destino.searchParams.set("meta", status);
+      return destino.toString();
+    } catch {
+      return "";
+    }
+  }
+
+  function redirectFrontendInstagram(status = "") {
+    const frontendUrl = String(process.env.FRONTEND_URL || "").trim();
+    if (!frontendUrl) return "";
+
+    try {
+      const destino = new URL("/social", frontendUrl);
+      destino.searchParams.set("instagram", status);
       return destino.toString();
     } catch {
       return "";
@@ -271,6 +291,120 @@ function criarRotasSocial(deps = {}) {
     });
   });
 
+  router.get("/instagram/status", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    const clienteId = cliente(req);
+    return res.json({
+      ok: true,
+      clienteId,
+      instagram: sanitizarConexaoInstagram(lerConexaoInstagram(clienteId))
+    });
+  });
+
+  router.get("/instagram/conectar", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const inicio = iniciarConexaoInstagram({
+        clienteId,
+        redirectUri: req.query?.redirectUri || req.query?.redirect_uri || ""
+      });
+
+      logSocial("[SOCIAL-INSTAGRAM-OAUTH-INICIO]", {
+        clienteId,
+        provider: "instagram",
+        redirectUri: inicio.redirectUri,
+        scopes: inicio.scopes
+      });
+
+      return res.json({
+        ok: true,
+        clienteId,
+        provider: "instagram",
+        status: inicio.status,
+        authUrl: inicio.authUrl,
+        state: inicio.state,
+        redirectUri: inicio.redirectUri,
+        scopes: inicio.scopes
+      });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "GET /social/instagram/conectar" });
+      return res.status(400).json({
+        ok: false,
+        erro: e.message || "instagram_oauth_inicio_falhou"
+      });
+    }
+  });
+
+  router.get("/instagram/callback", async (req, res) => {
+    try {
+      logSocial("[SOCIAL-INSTAGRAM-CALLBACK-INICIO]", {
+        codeFinal: String(req.query?.code || "").slice(-6),
+        temState: Boolean(req.query?.state),
+        redirectUriQuery: req.query?.redirectUri || req.query?.redirect_uri || "",
+        env: {
+          INSTAGRAM_APP_ID: Boolean(process.env.INSTAGRAM_APP_ID || process.env.META_APP_ID),
+          INSTAGRAM_APP_SECRET: Boolean(process.env.INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET),
+          INSTAGRAM_REDIRECT_URI: Boolean(process.env.INSTAGRAM_REDIRECT_URI)
+        }
+      });
+
+      const conexao = await concluirCallbackInstagram({
+        code: req.query?.code || "",
+        state: req.query?.state || "",
+        redirectUri: req.query?.redirectUri || req.query?.redirect_uri || ""
+      });
+      const instagram = sanitizarConexaoInstagram(conexao);
+
+      const redirectSucesso = redirectFrontendInstagram("conectado");
+      if (redirectSucesso) {
+        return res.redirect(302, redirectSucesso);
+      }
+
+      return res.json({
+        ok: true,
+        clienteId: conexao.clienteId,
+        provider: "instagram",
+        status: "conectado",
+        instagram
+      });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "GET /social/instagram/callback" });
+      const redirectErro = redirectFrontendInstagram("erro");
+      if (redirectErro) {
+        return res.redirect(302, redirectErro);
+      }
+
+      return res.status(400).json({
+        ok: false,
+        erro: e.message || "instagram_oauth_callback_invalido"
+      });
+    }
+  });
+
+  router.post("/instagram/desconectar", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    const clienteId = cliente(req);
+    const conexao = limparConexaoInstagram(clienteId);
+
+    return res.json({
+      ok: true,
+      clienteId,
+      provider: "instagram",
+      status: "desconectado",
+      instagram: sanitizarConexaoInstagram(conexao)
+    });
+  });
+
   router.get("/templates", (req, res) => {
     if (!socialPermitido(req)) {
       return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
@@ -468,6 +602,10 @@ function criarRotasSocial(deps = {}) {
       "GET /social/meta/conectar",
       "GET /social/meta/callback",
       "POST /social/meta/desconectar",
+      "GET /social/instagram/status",
+      "GET /social/instagram/conectar",
+      "GET /social/instagram/callback",
+      "POST /social/instagram/desconectar",
       "GET /social/templates",
       "POST /social/templates",
       "GET /social/agendamentos",
