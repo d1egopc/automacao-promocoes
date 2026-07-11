@@ -5,7 +5,7 @@ const {
 } = require("../../../utils/storage");
 const { logSocial } = require("../logs");
 
-const INSTAGRAM_AUTH_URL = "https://api.instagram.com/oauth/authorize";
+const INSTAGRAM_AUTH_URL = "https://www.instagram.com/oauth/authorize";
 const INSTAGRAM_TOKEN_URL = "https://api.instagram.com/oauth/access_token";
 const INSTAGRAM_GRAPH_BASE = "https://graph.instagram.com";
 const ARQUIVO_INSTAGRAM = "social-instagram.json";
@@ -272,6 +272,7 @@ function iniciarConexaoInstagram({ clienteId = "admin", redirectUri = "" } = {})
     redirect_uri: uri,
     response_type: "code",
     scope: scopesInstagramConexao().join(","),
+    force_reauth: "true",
     state
   });
 

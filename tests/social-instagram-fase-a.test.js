@@ -78,7 +78,9 @@ async function conectarCliente(clienteId, sufixo = clienteId) {
   assert.strictEqual(estado.clienteId, "cliente_a", "state deve carregar clienteId");
   assert.ok(estado.nonce, "state deve carregar nonce");
   assert.ok(estado.exp > Date.now(), "state deve carregar expiracao");
-  assert.ok(inicio.authUrl.startsWith("https://api.instagram.com/oauth/authorize?"));
+  assert.ok(inicio.authUrl.startsWith("https://www.instagram.com/oauth/authorize?"));
+  assert.ok(inicio.authUrl.includes("client_id=app_optimus"));
+  assert.ok(inicio.authUrl.includes("force_reauth=true"));
   assert.ok(inicio.authUrl.includes("scope=instagram_business_basic"));
   assert.ok(!inicio.authUrl.includes("client_secret"));
 
