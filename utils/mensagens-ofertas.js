@@ -232,7 +232,8 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
       clienteId,
       destino,
       oferta,
-      canal: opcoes.canal || destino.canal || destino.tipo
+      canal: opcoes.canal || destino.canal || destino.tipo,
+      templatePersonalizadoHabilitado: opcoes.plano ? opcoes.plano?.recursos?.templatePersonalizado === true : true
     });
   } catch (erro) {
     console.warn("[TEMPLATE-ERRO-FALLBACK-UNIVERSAL]", {

@@ -16,14 +16,40 @@ function payloadErro(e) {
 function criarRotasTemplatesClientes(deps = {}) {
   const router = express.Router();
   const getClienteId = typeof deps.getClienteId === "function" ? deps.getClienteId : () => "admin";
+  const usuarioTemRecurso = typeof deps.usuarioTemRecurso === "function"
+    ? deps.usuarioTemRecurso
+    : () => true;
 
   function cliente(req) {
     return getClienteId(req) || "admin";
   }
 
+  function recursoHabilitado(req) {
+    return usuarioTemRecurso(req, "templatePersonalizado") === true;
+  }
+
+  function respostaRecursoIndisponivel(res) {
+    return res.status(403).json({
+      ok: false,
+      erro: "template_personalizado_indisponivel"
+    });
+  }
+
   router.get("/", (req, res) => {
     try {
-      return res.json(service.listarTemplates(cliente(req)));
+      if (!recursoHabilitado(req)) {
+        return res.json({
+          ok: true,
+          recursoHabilitado: false,
+          padrao: { ...service.TEMPLATE_PADRAO_OPTIMUS },
+          templates: []
+        });
+      }
+
+      return res.json({
+        ...service.listarTemplates(cliente(req)),
+        recursoHabilitado: true
+      });
     } catch (e) {
       return res.status(statusErro(e)).json(payloadErro(e));
     }
@@ -31,6 +57,7 @@ function criarRotasTemplatesClientes(deps = {}) {
 
   router.post("/", (req, res) => {
     try {
+      if (!recursoHabilitado(req)) return respostaRecursoIndisponivel(res);
       const resultado = service.criarTemplate(cliente(req), req.body?.template || req.body || {});
       return res.status(201).json(resultado);
     } catch (e) {
@@ -40,6 +67,7 @@ function criarRotasTemplatesClientes(deps = {}) {
 
   router.post("/preview", (req, res) => {
     try {
+      if (!recursoHabilitado(req)) return respostaRecursoIndisponivel(res);
       const resultado = service.previewTemplate(cliente(req), req.body || {});
       return res.status(resultado.ok ? 200 : 400).json(resultado);
     } catch (e) {
@@ -49,6 +77,7 @@ function criarRotasTemplatesClientes(deps = {}) {
 
   router.get("/:id", (req, res) => {
     try {
+      if (!recursoHabilitado(req)) return respostaRecursoIndisponivel(res);
       return res.json({ ok: true, template: service.buscarTemplate(cliente(req), req.params.id) });
     } catch (e) {
       return res.status(statusErro(e)).json(payloadErro(e));
@@ -57,6 +86,7 @@ function criarRotasTemplatesClientes(deps = {}) {
 
   router.put("/:id", (req, res) => {
     try {
+      if (!recursoHabilitado(req)) return respostaRecursoIndisponivel(res);
       return res.json(service.atualizarTemplate(cliente(req), req.params.id, req.body?.template || req.body || {}));
     } catch (e) {
       return res.status(statusErro(e)).json(payloadErro(e));
@@ -65,6 +95,7 @@ function criarRotasTemplatesClientes(deps = {}) {
 
   router.post("/:id/duplicar", (req, res) => {
     try {
+      if (!recursoHabilitado(req)) return respostaRecursoIndisponivel(res);
       return res.status(201).json(service.duplicarTemplate(cliente(req), req.params.id));
     } catch (e) {
       return res.status(statusErro(e)).json(payloadErro(e));
@@ -73,6 +104,7 @@ function criarRotasTemplatesClientes(deps = {}) {
 
   router.delete("/:id", (req, res) => {
     try {
+      if (!recursoHabilitado(req)) return respostaRecursoIndisponivel(res);
       return res.json(service.excluirTemplate(cliente(req), req.params.id));
     } catch (e) {
       return res.status(statusErro(e)).json(payloadErro(e));

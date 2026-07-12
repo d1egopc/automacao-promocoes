@@ -14435,7 +14435,8 @@ app.use("/social", criarRotasSocial({
 // =============== ROTA DE TEMPLATES DE OFERTAS =================
 
 app.use("/templates-ofertas", criarRotasTemplatesClientes({
-  getClienteId
+  getClienteId,
+  usuarioTemRecurso
 }));
 
 

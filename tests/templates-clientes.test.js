@@ -204,4 +204,181 @@ assert.strictEqual(mensagemErroResolver, mensagemUniversalPadrao, "erro inespera
 
 const storageAntesContrato = lerStorageTemplates("cliente_a");
 assert.ok(storageAntesContrato.templates.every(template => !template.templateId), "templates nao persistem objeto de destino");
-console.log("templates-clientes.test.js OK");
+// Fase 3 - permissao de plano templatePersonalizado
+const Module = require("module");
+const originalModuleLoad = Module._load;
+let ultimoRouterFake = null;
+
+function criarRouterFake() {
+  const rotas = [];
+  const router = { rotas };
+  for (const method of ["get", "post", "put", "delete"]) {
+    router[method] = (path, handler) => {
+      rotas.push({ method: method.toUpperCase(), path, handler });
+      return router;
+    };
+  }
+  ultimoRouterFake = router;
+  return router;
+}
+
+Module._load = function carregarModuloComExpressFake(request, parent, isMain) {
+  if (request === "express") {
+    return { Router: criarRouterFake };
+  }
+  return originalModuleLoad.call(this, request, parent, isMain);
+};
+const criarRotasTemplatesClientes = require("../modules/templates-clientes/routes");
+Module._load = originalModuleLoad;
+
+function criarServidorTemplates({ clienteId = "cliente_perm", habilitado = true } = {}) {
+  ultimoRouterFake = null;
+  const router = criarRotasTemplatesClientes({
+    getClienteId: () => clienteId,
+    usuarioTemRecurso: (_req, recurso) => {
+      assert.strictEqual(recurso, "templatePersonalizado", "usa permissao oficial existente");
+      return habilitado === true;
+    }
+  });
+  return Promise.resolve({ baseUrl: router, close: () => Promise.resolve() });
+}
+
+function normalizarCaminhoRota(caminho) {
+  const semPrefixo = String(caminho || "").replace(/^\/templates-ofertas/, "") || "/";
+  if (semPrefixo === "/" || semPrefixo === "/preview") return { path: semPrefixo, params: {} };
+  const duplicar = semPrefixo.match(/^\/([^/]+)\/duplicar$/);
+  if (duplicar) return { path: "/:id/duplicar", params: { id: decodeURIComponent(duplicar[1]) } };
+  const id = semPrefixo.match(/^\/([^/]+)$/);
+  if (id) return { path: "/:id", params: { id: decodeURIComponent(id[1]) } };
+  return { path: semPrefixo, params: {} };
+}
+
+function requestJson(router, method, caminho, body) {
+  const rotaInfo = normalizarCaminhoRota(caminho);
+  const rota = router.rotas.find(item => item.method === method && item.path === rotaInfo.path);
+  assert.ok(rota, `rota ${method} ${caminho} registrada`);
+
+  const req = { body, params: rotaInfo.params };
+  const res = {
+    statusCode: 200,
+    body: undefined,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.body = payload;
+      return this;
+    }
+  };
+  rota.handler(req, res);
+  return Promise.resolve({ statusCode: res.statusCode, body: res.body });
+}
+
+async function executarTestesFase3() {
+  const clientePermissao = "cliente_perm";
+  const templatePermissao = criarTemplate(clientePermissao, {
+    ...payloadValido,
+    nome: "Template Permissao Plano"
+  }).template;
+
+  const servidorHabilitado = await criarServidorTemplates({ clienteId: clientePermissao, habilitado: true });
+  try {
+    const listaHabilitada = await requestJson(servidorHabilitado.baseUrl, "GET", "/templates-ofertas");
+    assert.strictEqual(listaHabilitada.statusCode, 200, "GET habilitado retorna 200");
+    assert.strictEqual(listaHabilitada.body.recursoHabilitado, true, "GET habilitado informa recurso ativo");
+    assert.ok(listaHabilitada.body.templates.some(t => t.id === templatePermissao.id), "recurso habilitado lista templates personalizados");
+
+    const outroCliente = await criarServidorTemplates({ clienteId: "cliente_perm_outro", habilitado: true });
+    try {
+      const listaOutro = await requestJson(outroCliente.baseUrl, "GET", "/templates-ofertas");
+      assert.ok(!listaOutro.body.templates.some(t => t.id === templatePermissao.id), "nao expoe templates entre clientes");
+      const buscaOutro = await requestJson(outroCliente.baseUrl, "GET", `/templates-ofertas/${templatePermissao.id}`);
+      assert.strictEqual(buscaOutro.statusCode, 404, "outro cliente nao acessa template por id");
+    } finally {
+      await outroCliente.close();
+    }
+  } finally {
+    await servidorHabilitado.close();
+  }
+
+  const servidorDesabilitado = await criarServidorTemplates({ clienteId: clientePermissao, habilitado: false });
+  try {
+    const listaDesabilitada = await requestJson(servidorDesabilitado.baseUrl, "GET", "/templates-ofertas");
+    assert.strictEqual(listaDesabilitada.statusCode, 200, "GET desabilitado mantem 200");
+    assert.strictEqual(listaDesabilitada.body.recursoHabilitado, false, "GET desabilitado informa recurso inativo");
+    assert.strictEqual(listaDesabilitada.body.padrao.id, "padrao_optimus", "GET desabilitado mantem Template padrao");
+    assert.deepStrictEqual(listaDesabilitada.body.templates, [], "GET desabilitado nao expoe personalizados");
+
+    for (const caso of [
+      ["POST", "/templates-ofertas", { template: payloadValido }],
+      ["PUT", `/templates-ofertas/${templatePermissao.id}`, { template: { ...payloadValido, nome: "Bloqueado" } }],
+      ["POST", `/templates-ofertas/${templatePermissao.id}/duplicar`, {}],
+      ["DELETE", `/templates-ofertas/${templatePermissao.id}`],
+      ["POST", "/templates-ofertas/preview", { template: payloadValido }],
+      ["GET", `/templates-ofertas/${templatePermissao.id}`]
+    ]) {
+      const [method, caminho, body] = caso;
+      const resposta = await requestJson(servidorDesabilitado.baseUrl, method, caminho, body);
+      assert.strictEqual(resposta.statusCode, 403, `${method} ${caminho} bloqueado por permissao`);
+      assert.strictEqual(resposta.body.erro, "template_personalizado_indisponivel");
+    }
+  } finally {
+    await servidorDesabilitado.close();
+  }
+
+  assert.ok(
+    lerStorageTemplates(clientePermissao).templates.some(t => t.id === templatePermissao.id),
+    "templates permanecem no storage apos desabilitar"
+  );
+
+  const servidorReativado = await criarServidorTemplates({ clienteId: clientePermissao, habilitado: true });
+  try {
+    const listaReativada = await requestJson(servidorReativado.baseUrl, "GET", "/templates-ofertas");
+    assert.ok(listaReativada.body.templates.some(t => t.id === templatePermissao.id), "ao reativar templates reaparecem");
+  } finally {
+    await servidorReativado.close();
+  }
+
+  const destinoComTemplate = { id: "destino_perm", templateId: templatePermissao.id, tipo: "whatsapp" };
+  const templateIdAntes = destinoComTemplate.templateId;
+  const planoHabilitado = { recursos: { templatePersonalizado: true } };
+  const planoDesabilitado = { recursos: { templatePersonalizado: false } };
+
+  const mensagemEnvioHabilitado = montarMensagemOferta(ofertaIntegracao, {
+    clienteId: clientePermissao,
+    destino: destinoComTemplate,
+    plano: planoHabilitado
+  });
+  assert.ok(mensagemEnvioHabilitado.includes("Linha 1\nLinha 2"), "envio habilitado usa template personalizado");
+
+  const mensagemEnvioDesabilitado = montarMensagemOferta(ofertaIntegracao, {
+    clienteId: clientePermissao,
+    destino: destinoComTemplate,
+    plano: planoDesabilitado
+  });
+  const mensagemUniversalDireta = montarMensagemOferta(ofertaIntegracao, {
+    clienteId: clientePermissao,
+    destino: { ...destinoComTemplate, templateId: "padrao_optimus" },
+    plano: planoDesabilitado
+  });
+  assert.strictEqual(mensagemEnvioDesabilitado, mensagemUniversalDireta, "envio desabilitado cai no Template Universal");
+  assert.strictEqual(destinoComTemplate.templateId, templateIdAntes, "templateId do destino nao e alterado");
+
+  const mensagemTelegramDesabilitado = montarMensagemOferta(ofertaIntegracao, {
+    clienteId: clientePermissao,
+    destino: { ...destinoComTemplate, tipo: "telegram" },
+    plano: planoDesabilitado
+  });
+  assert.strictEqual(typeof mensagemTelegramDesabilitado, "string", "permissao desabilitada nao quebra Telegram");
+  assert.ok(mensagemTelegramDesabilitado.length > 0, "permissao desabilitada nao quebra fluxo de envio/fila");
+}
+
+executarTestesFase3()
+  .then(() => {
+    console.log("templates-clientes.test.js OK");
+  })
+  .catch(erro => {
+    console.error(erro);
+    process.exitCode = 1;
+  });

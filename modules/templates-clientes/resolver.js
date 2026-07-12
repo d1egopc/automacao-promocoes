@@ -47,7 +47,17 @@ function resultadoUniversal(motivo, contexto = {}) {
   };
 }
 
-function resolverTemplateMensagem({ clienteId = "admin", destino = {}, oferta = {}, canal = "" } = {}) {
+function recursoTemplateHabilitado(valor) {
+  return valor !== false;
+}
+
+function resolverTemplateMensagem({
+  clienteId = "admin",
+  destino = {},
+  oferta = {},
+  canal = "",
+  templatePersonalizadoHabilitado = true
+} = {}) {
   const canalNormalizado = normalizarCanal(canal, destino);
   const templateId = normalizarTemplateIdDestino(destino);
   const contexto = { clienteId, templateId, canal: canalNormalizado };
@@ -58,6 +68,15 @@ function resolverTemplateMensagem({ clienteId = "admin", destino = {}, oferta = 
       tipo: "universal"
     });
     return resultadoUniversal(templateId === TEMPLATE_PADRAO_ID ? "template_padrao" : "template_ausente", contexto);
+  }
+
+  if (!recursoTemplateHabilitado(templatePersonalizadoHabilitado)) {
+    logTemplateResolver("[TEMPLATE-FALLBACK-RECURSO-DESABILITADO]", {
+      clienteId,
+      destinoId: destino.id || null,
+      templateId
+    });
+    return resultadoUniversal("recurso_desabilitado", contexto);
   }
 
   const template = listarTemplatesCliente(clienteId).find(item => String(item.id) === String(templateId));
@@ -116,5 +135,6 @@ module.exports = {
   TEMPLATE_PADRAO_ID,
   normalizarCanal,
   normalizarTemplateIdDestino,
+  recursoTemplateHabilitado,
   resolverTemplateMensagem
 };
