@@ -116,6 +116,40 @@ function contemGatilhoSeguro(comentario = "", palavra = "") {
   return re.test(textoComentario);
 }
 
+function detectarAlgoritmoAssinaturaWebhookInstagram(assinatura = "") {
+  const valor = texto(assinatura);
+  if (!valor) return "";
+  const [algoritmo] = valor.split("=");
+  return texto(algoritmo).toLowerCase();
+}
+
+function resumoPayloadWebhookInstagram(payload = {}) {
+  const entries = lista(payload?.entry);
+  const changes = entries.flatMap(entry => lista(entry?.changes));
+  const fields = [...new Set(changes.map(change => texto(change?.field)).filter(Boolean))];
+  const eventTypes = [...new Set(changes
+    .map(change => {
+      const value = change?.value || {};
+      return texto(value.event_type || value.eventType || value.item || value.verb || change?.field);
+    })
+    .filter(Boolean))];
+
+  return {
+    object: texto(payload?.object),
+    entryCount: entries.length,
+    changesCount: changes.length,
+    field: fields.join(","),
+    eventType: eventTypes.join(",")
+  };
+}
+
+function logWebhookDescartadoInstagram(motivo = "", dados = {}) {
+  logSocial("[INSTAGRAM-WEBHOOK-DESCARTADO]", {
+    motivo: texto(motivo),
+    ...dados
+  });
+}
+
 function urlHttps(valor = "") {
   const url = texto(valor);
   if (!url) return "";
@@ -1242,6 +1276,11 @@ function encontrarPublicacaoPorMedia(instagramUserId = "", instagramMediaId = ""
       instagramMediaId,
       total: candidatos.length
     });
+    logWebhookDescartadoInstagram("cliente_nao_encontrado", {
+      instagramUserId,
+      instagramMediaId,
+      total: candidatos.length
+    });
     return null;
   }
   return candidatos[0] || null;
@@ -1287,15 +1326,38 @@ function montarMensagemDirectInstagram({ oferta = {}, gatilho = {} } = {}) {
 
 async function processarEventoComentarioInstagram(evento = {}, { httpClient = httpClientPadrao() } = {}) {
   const encontrado = encontrarPublicacaoPorMedia(evento.instagramUserId, evento.instagramMediaId);
-  if (!encontrado) return { status: "ignorado", motivo: "publicacao_nao_optimus" };
+  if (!encontrado) {
+    logWebhookDescartadoInstagram("media_nao_encontrada", {
+      instagramUserId: evento.instagramUserId,
+      instagramMediaId: evento.instagramMediaId,
+      instagramCommentId: evento.instagramCommentId
+    });
+    return { status: "ignorado", motivo: "publicacao_nao_optimus" };
+  }
 
   const { clienteId, conexao, publicacao } = encontrado;
+  logSocial("[INSTAGRAM-WEBHOOK-COMENTARIO-DETECTADO]", {
+    clienteId,
+    instagramUserId: evento.instagramUserId,
+    instagramMediaId: evento.instagramMediaId,
+    instagramCommentId: evento.instagramCommentId,
+    field: texto(evento.field)
+  });
+
   const existente = encontrarInteracaoPorComentario(clienteId, evento.instagramCommentId);
   const podeRetentarPrivateReply =
     existente &&
     texto(existente.respostaPublicaStatus) === "concluida" &&
     texto(existente.privateReplyStatus || existente.directStatus) === "erro";
-  if (existente && !podeRetentarPrivateReply) return { status: "duplicado", interacao: interacaoSanitizada(existente) };
+  if (existente && !podeRetentarPrivateReply) {
+    logWebhookDescartadoInstagram("duplicado", {
+      clienteId,
+      instagramUserId: evento.instagramUserId,
+      instagramMediaId: evento.instagramMediaId,
+      instagramCommentId: evento.instagramCommentId
+    });
+    return { status: "duplicado", interacao: interacaoSanitizada(existente) };
+  }
 
   const gatilho = sanitizarGatilhoInstagram(publicacao.gatilho, { corrigirCta: true });
   const base = {
@@ -1319,19 +1381,51 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
     erro: null
   };
 
-  if (!gatilho.ativo) return { status: "ignorado", interacao: interacaoSanitizada(salvarInteracaoInstagram(clienteId, { ...base, statusGeral: "ignorado", erro: { message: "gatilho_inativo" } })) };
+  if (!gatilho.ativo) {
+    logWebhookDescartadoInstagram("gatilho_inativo", {
+      clienteId,
+      instagramUserId: evento.instagramUserId,
+      instagramMediaId: evento.instagramMediaId,
+      instagramCommentId: evento.instagramCommentId
+    });
+    return { status: "ignorado", interacao: interacaoSanitizada(salvarInteracaoInstagram(clienteId, { ...base, statusGeral: "ignorado", erro: { message: "gatilho_inativo" } })) };
+  }
   if (!evento.instagramCommentId || !evento.textoComentario || evento.removido) {
+    logWebhookDescartadoInstagram("payload_invalido", {
+      clienteId,
+      instagramUserId: evento.instagramUserId,
+      instagramMediaId: evento.instagramMediaId,
+      instagramCommentId: evento.instagramCommentId
+    });
     return { status: "ignorado", interacao: interacaoSanitizada(salvarInteracaoInstagram(clienteId, { ...base, statusGeral: "ignorado", erro: { message: "comentario_invalido" } })) };
   }
   if (texto(evento.fromId) && texto(evento.fromId) === texto(conexao.instagramUserId)) {
+    logWebhookDescartadoInstagram("comentario_proprio", {
+      clienteId,
+      instagramUserId: evento.instagramUserId,
+      instagramMediaId: evento.instagramMediaId,
+      instagramCommentId: evento.instagramCommentId
+    });
     return { status: "ignorado", interacao: interacaoSanitizada(salvarInteracaoInstagram(clienteId, { ...base, statusGeral: "ignorado", erro: { message: "comentario_proprio" } })) };
   }
   if (!contemGatilhoSeguro(evento.textoComentario, gatilho.palavra)) {
+    logWebhookDescartadoInstagram("gatilho_nao_corresponde", {
+      clienteId,
+      instagramUserId: evento.instagramUserId,
+      instagramMediaId: evento.instagramMediaId,
+      instagramCommentId: evento.instagramCommentId
+    });
     return { status: "ignorado", interacao: interacaoSanitizada(salvarInteracaoInstagram(clienteId, { ...base, statusGeral: "ignorado", erro: { message: "sem_gatilho" } })) };
   }
 
   const oferta = carregarOfertaCliente(clienteId, publicacao.ofertaId);
   if (!oferta.linkAfiliado) {
+    logWebhookDescartadoInstagram("oferta_link_ausente", {
+      clienteId,
+      instagramUserId: evento.instagramUserId,
+      instagramMediaId: evento.instagramMediaId,
+      instagramCommentId: evento.instagramCommentId
+    });
     return { status: "erro", interacao: interacaoSanitizada(salvarInteracaoInstagram(clienteId, { ...base, statusGeral: "erro", erro: { message: "oferta_link_ausente" } })) };
   }
 
@@ -1354,6 +1448,13 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
         respostaPublicaStatus: "concluida",
         respostaPublicaEnviadaEm: agoraIso()
       });
+      logSocial("[INSTAGRAM-WEBHOOK-RESPOSTA-PUBLICA]", {
+        clienteId,
+        instagramUserId: evento.instagramUserId,
+        instagramMediaId: evento.instagramMediaId,
+        instagramCommentId: evento.instagramCommentId,
+        status: "concluida"
+      });
     } catch (e) {
       const erro = sanitizarErroInstagram(e);
       atual = salvarInteracaoInstagram(clienteId, {
@@ -1361,6 +1462,21 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
         statusGeral: "erro",
         respostaPublicaStatus: "erro",
         erro
+      });
+      logSocial("[INSTAGRAM-WEBHOOK-RESPOSTA-PUBLICA]", {
+        clienteId,
+        instagramUserId: evento.instagramUserId,
+        instagramMediaId: evento.instagramMediaId,
+        instagramCommentId: evento.instagramCommentId,
+        status: "erro",
+        erro
+      });
+      logSocial("[INSTAGRAM-WEBHOOK-CONCLUIDO]", {
+        clienteId,
+        instagramUserId: evento.instagramUserId,
+        instagramMediaId: evento.instagramMediaId,
+        instagramCommentId: evento.instagramCommentId,
+        status: atual.statusGeral
       });
       return { status: "erro", interacao: interacaoSanitizada(atual) };
     }
@@ -1381,6 +1497,13 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
       respondidoEm: agoraIso(),
       erro: null
     });
+    logSocial("[INSTAGRAM-WEBHOOK-DIRECT]", {
+      clienteId,
+      instagramUserId: evento.instagramUserId,
+      instagramMediaId: evento.instagramMediaId,
+      instagramCommentId: evento.instagramCommentId,
+      status: "concluido"
+    });
   } catch (e) {
     atual = salvarInteracaoInstagram(clienteId, {
       ...atual,
@@ -1389,7 +1512,23 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
       respondidoEm: agoraIso(),
       erro: sanitizarErroInstagram(e)
     });
+    logSocial("[INSTAGRAM-WEBHOOK-DIRECT]", {
+      clienteId,
+      instagramUserId: evento.instagramUserId,
+      instagramMediaId: evento.instagramMediaId,
+      instagramCommentId: evento.instagramCommentId,
+      status: "erro",
+      erro: atual.erro
+    });
   }
+
+  logSocial("[INSTAGRAM-WEBHOOK-CONCLUIDO]", {
+    clienteId,
+    instagramUserId: evento.instagramUserId,
+    instagramMediaId: evento.instagramMediaId,
+    instagramCommentId: evento.instagramCommentId,
+    status: atual.statusGeral
+  });
 
   return { status: atual.statusGeral, interacao: interacaoSanitizada(atual) };
 }
@@ -1399,12 +1538,40 @@ async function processarWebhookInstagram({ payload = {}, assinatura = "", rawBod
   if (!validarAssinaturaWebhookInstagram({ assinatura, rawBody: raw })) {
     throw new Error("assinatura_invalida");
   }
-  const eventos = normalizarEventosWebhookInstagram(payload)
+  const resumo = resumoPayloadWebhookInstagram(payload);
+  logSocial("[INSTAGRAM-WEBHOOK-PAYLOAD]", resumo);
+
+  if (!payload || typeof payload !== "object" || !lista(payload.entry).length) {
+    logWebhookDescartadoInstagram("payload_invalido", resumo);
+  }
+  if (resumo.object && resumo.object !== "instagram") {
+    logWebhookDescartadoInstagram("objeto_desconhecido", resumo);
+  }
+
+  const eventosNormalizados = normalizarEventosWebhookInstagram(payload);
+  const eventos = eventosNormalizados
     .filter(evento => ["comments", "mentions"].includes(texto(evento.field)) || evento.instagramCommentId);
+  for (const evento of eventosNormalizados) {
+    if (!eventos.includes(evento)) {
+      logWebhookDescartadoInstagram("field_nao_monitorado", {
+        instagramUserId: evento.instagramUserId,
+        instagramMediaId: evento.instagramMediaId,
+        instagramCommentId: evento.instagramCommentId,
+        field: texto(evento.field)
+      });
+    }
+  }
+  if (!eventos.length && eventosNormalizados.length) {
+    logWebhookDescartadoInstagram("field_nao_monitorado", resumo);
+  }
   const resultados = [];
   for (const evento of eventos) {
     resultados.push(await processarEventoComentarioInstagram(evento, { httpClient }));
   }
+  logSocial("[INSTAGRAM-WEBHOOK-CONCLUIDO]", {
+    status: "processado",
+    total: resultados.length
+  });
   return { ok: true, total: resultados.length, resultados };
 }
 

@@ -507,11 +507,41 @@ function criarRotasSocial(deps = {}) {
   });
 
   router.post("/instagram/webhook", (req, res) => {
+    logSocial("[INSTAGRAM-WEBHOOK-POST-RECEBIDO]", {
+      recebidoEm: new Date().toISOString(),
+      metodo: req.method,
+      path: req.path,
+      contentType: String(req.headers["content-type"] || ""),
+      userAgent: String(req.headers["user-agent"] || ""),
+      bodyTamanho: Buffer.isBuffer(req.rawBody)
+        ? req.rawBody.length
+        : Buffer.byteLength(JSON.stringify(req.body || {})),
+      temAssinaturaSha256: Boolean(req.headers["x-hub-signature-256"]),
+      temAssinaturaLegacy: Boolean(req.headers["x-hub-signature"])
+    });
     const assinatura = String(req.headers["x-hub-signature-256"] || "");
+    const assinaturaLegacy = String(req.headers["x-hub-signature"] || "");
+    const algoritmoDetectado = assinatura ? "sha256" : (assinaturaLegacy ? "sha1" : "");
     const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
-    if (!validarAssinaturaWebhookInstagram({ assinatura, rawBody })) {
+    logSocial("[INSTAGRAM-WEBHOOK-ASSINATURA-INICIO]", {
+      status: "iniciando",
+      motivo: "",
+      algoritmo: algoritmoDetectado
+    });
+    const assinaturaValida = validarAssinaturaWebhookInstagram({ assinatura, rawBody });
+    if (!assinaturaValida) {
+      logSocial("[INSTAGRAM-WEBHOOK-ASSINATURA-INVALIDA]", {
+        status: "invalida",
+        motivo: assinatura ? "hmac_invalido" : "assinatura_sha256_ausente",
+        algoritmo: algoritmoDetectado
+      });
       return res.status(403).json({ ok: false, erro: "assinatura_invalida" });
     }
+    logSocial("[INSTAGRAM-WEBHOOK-ASSINATURA-OK]", {
+      status: "ok",
+      motivo: "",
+      algoritmo: algoritmoDetectado
+    });
 
     setImmediate(() => {
       processarWebhookInstagram({
