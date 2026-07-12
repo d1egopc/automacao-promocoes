@@ -16,6 +16,7 @@ const SCOPE_BASICO = "instagram_business_basic";
 const SCOPE_PUBLICAR_CONTEUDO = "instagram_business_content_publish";
 const SCOPE_GERENCIAR_COMENTARIOS = "instagram_business_manage_comments";
 const SCOPE_GERENCIAR_MENSAGENS = "instagram_business_manage_messages";
+const WEBHOOK_CAMPOS_CONTA = ["comments", "messages"];
 const CONTAINER_STATUS_PRIMEIRA_ESPERA_MS = 1500;
 const CONTAINER_STATUS_INTERVALO_MS = 3000;
 const CONTAINER_STATUS_MAX_TENTATIVAS = 10;
@@ -158,6 +159,11 @@ function criarInstagramPadrao(clienteId = "admin") {
       recebidoEm: ""
     },
     scopes: [],
+    webhookContaAssinada: false,
+    webhookCampos: [],
+    webhookAssinadoEm: "",
+    webhookErro: null,
+    webhookVerificadoEm: "",
     oauthStates: {},
     atualizadoEm: agoraIso()
   };
@@ -233,7 +239,9 @@ function lerConexaoInstagram(clienteId = "admin") {
     ...padrao,
     ...(dados && typeof dados === "object" ? dados : {}),
     clienteId,
-    status: accessToken ? "conectado" : "desconectado",
+    status: accessToken
+      ? (texto(dados.status) && texto(dados.status) !== "desconectado" ? texto(dados.status) : "conectado")
+      : "desconectado",
     conectado: Boolean(accessToken),
     instagramUserId: texto(dados.instagramUserId || dados.userId || dados.id),
     username: texto(dados.username),
@@ -245,6 +253,11 @@ function lerConexaoInstagram(clienteId = "admin") {
       accessToken
     },
     scopes: lista(dados.scopes).map(texto).filter(Boolean),
+    webhookContaAssinada: dados.webhookContaAssinada === true,
+    webhookCampos: lista(dados.webhookCampos).map(texto).filter(Boolean),
+    webhookAssinadoEm: texto(dados.webhookAssinadoEm),
+    webhookErro: dados.webhookErro && typeof dados.webhookErro === "object" ? dados.webhookErro : null,
+    webhookVerificadoEm: texto(dados.webhookVerificadoEm),
     oauthStates: dados.oauthStates && typeof dados.oauthStates === "object" ? dados.oauthStates : {},
     atualizadoEm: texto(dados.atualizadoEm || agoraIso())
   };
@@ -265,13 +278,19 @@ function salvarConexaoInstagram(clienteId = "admin", dados = {}) {
 function sanitizarConexaoInstagram(conexao = {}) {
   return {
     conectado: conexao.conectado === true,
+    status: texto(conexao.status || (conexao.conectado ? "conectado" : "desconectado")),
     instagramUserId: texto(conexao.instagramUserId),
     username: texto(conexao.username),
     accountType: texto(conexao.accountType),
     profilePictureUrl: texto(conexao.profilePictureUrl),
     tokenPresente: Boolean(texto(conexao.token?.accessToken)),
     expiresAt: texto(conexao.token?.expiresAt),
-    scopes: lista(conexao.scopes).map(texto).filter(Boolean)
+    scopes: lista(conexao.scopes).map(texto).filter(Boolean),
+    webhookContaAssinada: conexao.webhookContaAssinada === true,
+    webhookCampos: lista(conexao.webhookCampos).map(texto).filter(Boolean),
+    webhookAssinadoEm: texto(conexao.webhookAssinadoEm),
+    webhookErro: conexao.webhookErro && typeof conexao.webhookErro === "object" ? conexao.webhookErro : null,
+    webhookVerificadoEm: texto(conexao.webhookVerificadoEm)
   };
 }
 
@@ -283,6 +302,44 @@ function sanitizarErroInstagram(erro) {
     type: texto(metaErro.type),
     message: mensagem.slice(0, 220)
   };
+}
+
+function sanitizarErroWebhookInstagram(erro) {
+  const metaErro = erro?.response?.data?.error || erro?.response?.data || {};
+  const mensagem = texto(metaErro.message || erro?.message || "instagram_webhook_conta_erro");
+  return {
+    statusCode: erro?.response?.status || "",
+    code: metaErro.code ?? "",
+    type: texto(metaErro.type),
+    message: mensagem.slice(0, 220)
+  };
+}
+
+function normalizarCamposWebhookInstagram(valor = []) {
+  if (Array.isArray(valor)) {
+    return valor
+      .flatMap(item => normalizarCamposWebhookInstagram(item))
+      .map(texto)
+      .filter(Boolean);
+  }
+
+  if (valor && typeof valor === "object") {
+    return [
+      ...normalizarCamposWebhookInstagram(valor.subscribed_fields),
+      ...normalizarCamposWebhookInstagram(valor.fields),
+      ...normalizarCamposWebhookInstagram(valor.field)
+    ];
+  }
+
+  return texto(valor)
+    .split(",")
+    .map(item => texto(item))
+    .filter(Boolean);
+}
+
+function camposWebhookContaConfirmados(campos = []) {
+  const atuais = new Set(normalizarCamposWebhookInstagram(campos));
+  return WEBHOOK_CAMPOS_CONTA.every(campo => atuais.has(campo));
 }
 
 function publicacaoSanitizada(publicacao = {}) {
@@ -758,6 +815,132 @@ async function consultarContaInstagram({ accessToken = "", httpClient = httpClie
     };
   } catch {
     throw new Error("consulta_conta_falhou");
+  }
+}
+
+async function consultarAssinaturasWebhookContaInstagram({ instagramUserId = "", accessToken = "", httpClient = httpClientPadrao() } = {}) {
+  const igId = texto(instagramUserId);
+  if (!igId || !texto(accessToken)) throw new Error("instagram_webhook_conta_nao_conectada");
+
+  const resposta = await httpClient.get(`${INSTAGRAM_GRAPH_BASE}/${encodeURIComponent(igId)}/subscribed_apps`, {
+    params: {
+      access_token: accessToken
+    },
+    timeout: 10000
+  });
+  const dados = resposta?.data || {};
+  const registros = Array.isArray(dados.data) ? dados.data : [dados];
+  const campos = [...new Set(normalizarCamposWebhookInstagram(registros))];
+
+  return {
+    campos,
+    confirmado: camposWebhookContaConfirmados(campos),
+    brutoDisponivel: Boolean(resposta)
+  };
+}
+
+async function inscreverContaWebhookInstagram({ clienteId = "admin", instagramUserId = "", accessToken = "", httpClient = httpClientPadrao() } = {}) {
+  const igId = texto(instagramUserId);
+  const token = texto(accessToken);
+  if (!igId || !token) throw new Error("instagram_webhook_conta_nao_conectada");
+
+  logSocial("[INSTAGRAM-WEBHOOK-CONTA-ASSINATURA-INICIO]", {
+    clienteId,
+    instagramUserId: igId,
+    campos: WEBHOOK_CAMPOS_CONTA,
+    status: "iniciando"
+  });
+
+  try {
+    await httpClient.post(`${INSTAGRAM_GRAPH_BASE}/${encodeURIComponent(igId)}/subscribed_apps`, new URLSearchParams({
+      subscribed_fields: WEBHOOK_CAMPOS_CONTA.join(","),
+      access_token: token
+    }).toString(), {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      timeout: 10000
+    });
+
+    let diagnostico = {
+      campos: [...WEBHOOK_CAMPOS_CONTA],
+      confirmado: true,
+      brutoDisponivel: false
+    };
+
+    try {
+      diagnostico = await consultarAssinaturasWebhookContaInstagram({
+        instagramUserId: igId,
+        accessToken: token,
+        httpClient
+      });
+    } catch (erroDiagnostico) {
+      diagnostico = {
+        campos: [...WEBHOOK_CAMPOS_CONTA],
+        confirmado: true,
+        brutoDisponivel: false,
+        erro: sanitizarErroWebhookInstagram(erroDiagnostico)
+      };
+    }
+
+    logSocial("[INSTAGRAM-WEBHOOK-CONTA-DIAGNOSTICO]", {
+      clienteId,
+      instagramUserId: igId,
+      campos: diagnostico.campos,
+      status: diagnostico.confirmado ? "confirmado" : "incompleto",
+      statusCode: diagnostico.erro?.statusCode || "",
+      erro: diagnostico.erro || null
+    });
+
+    if (!diagnostico.confirmado) {
+      const erro = new Error("instagram_webhook_campos_nao_confirmados");
+      erro.response = {
+        status: "",
+        data: {
+          error: {
+            message: "comments_messages_nao_confirmados",
+            type: "WebhookSubscription",
+            code: "campos_nao_confirmados"
+          }
+        }
+      };
+      throw erro;
+    }
+
+    const agora = agoraIso();
+    const resultado = {
+      webhookContaAssinada: true,
+      webhookCampos: [...WEBHOOK_CAMPOS_CONTA],
+      webhookAssinadoEm: agora,
+      webhookErro: null,
+      webhookVerificadoEm: diagnostico.brutoDisponivel ? agora : ""
+    };
+
+    logSocial("[INSTAGRAM-WEBHOOK-CONTA-ASSINADA]", {
+      clienteId,
+      instagramUserId: igId,
+      campos: resultado.webhookCampos,
+      status: "assinado",
+      statusCode: ""
+    });
+
+    return resultado;
+  } catch (erro) {
+    const erroSanitizado = sanitizarErroWebhookInstagram(erro);
+    logSocial("[INSTAGRAM-WEBHOOK-CONTA-ASSINATURA-ERRO]", {
+      clienteId,
+      instagramUserId: igId,
+      campos: WEBHOOK_CAMPOS_CONTA,
+      status: "erro",
+      statusCode: erroSanitizado.statusCode,
+      erro: erroSanitizado
+    });
+
+    return {
+      webhookContaAssinada: false,
+      webhookCampos: [],
+      webhookAssinadoEm: "",
+      webhookErro: erroSanitizado,
+      webhookVerificadoEm: ""
+    };
   }
 }
 
@@ -1242,7 +1425,7 @@ async function concluirCallbackInstagram({ code = "", state = "", redirectUri = 
     httpClient
   });
 
-  const conexao = salvarConexaoInstagram(estado.clienteId, {
+  salvarConexaoInstagram(estado.clienteId, {
     status: "conectado",
     conectado: true,
     ...conta,
@@ -1251,13 +1434,30 @@ async function concluirCallbackInstagram({ code = "", state = "", redirectUri = 
     oauthStates: lerConexaoInstagram(estado.clienteId).oauthStates
   });
 
+  const assinaturaWebhook = await inscreverContaWebhookInstagram({
+    clienteId: estado.clienteId,
+    instagramUserId: conta.instagramUserId,
+    accessToken: token.accessToken,
+    httpClient
+  });
+
+  const conexao = salvarConexaoInstagram(estado.clienteId, {
+    ...lerConexaoInstagram(estado.clienteId),
+    status: assinaturaWebhook.webhookContaAssinada ? "conectado_webhook_pronto" : "conectado_webhook_erro",
+    conectado: true,
+    ...assinaturaWebhook
+  });
+
   logSocial("[SOCIAL-INSTAGRAM-OAUTH-CONECTADO]", {
     clienteId: estado.clienteId,
     instagramUserId: conta.instagramUserId,
     username: conta.username,
     tokenPresente: Boolean(token.accessToken),
     expiresAt: token.expiresAt,
-    scopes: scopesInstagramConexao()
+    scopes: scopesInstagramConexao(),
+    webhookContaAssinada: conexao.webhookContaAssinada,
+    webhookCampos: conexao.webhookCampos,
+    webhookErro: conexao.webhookErro
   });
 
   return conexao;
@@ -1291,10 +1491,13 @@ module.exports = {
   SCOPE_PUBLICAR_CONTEUDO,
   SCOPE_GERENCIAR_COMENTARIOS,
   SCOPE_GERENCIAR_MENSAGENS,
+  WEBHOOK_CAMPOS_CONTA,
   criarAdaptadorInstagram,
   criarInstagramPadrao,
   iniciarConexaoInstagram,
   concluirCallbackInstagram,
+  consultarAssinaturasWebhookContaInstagram,
+  inscreverContaWebhookInstagram,
   lerConexaoInstagram,
   limparConexaoInstagram,
   listarPublicacoesInstagram,

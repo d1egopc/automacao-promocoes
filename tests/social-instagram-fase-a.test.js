@@ -30,6 +30,19 @@ function mockHttpClient(opcoes = {}) {
     chamadas,
     async post(url, body, config) {
       chamadas.push({ metodo: "post", url, body, config });
+      if (url.endsWith("/subscribed_apps")) {
+        if (opcoes.erroWebhookPermissao) {
+          const erro = new Error("permissao_webhook_falhou");
+          erro.response = { status: 403, data: { error: { message: "Missing permission", code: 10, type: "OAuthException" } } };
+          throw erro;
+        }
+        if (opcoes.erroWebhookMeta) {
+          const erro = new Error("webhook_meta_falhou");
+          erro.response = { status: 400, data: { error: { message: "Webhook recusado pela Meta", code: 190, type: "OAuthException" } } };
+          throw erro;
+        }
+        return { data: { success: true } };
+      }
       if (url.endsWith("/media")) {
         if (opcoes.erroContainer) {
           const erro = new Error("meta_container_falhou");
@@ -83,6 +96,22 @@ function mockHttpClient(opcoes = {}) {
             username: `optimus_${opcoes.sufixo || "user"}`,
             account_type: "BUSINESS",
             profile_picture_url: "https://cdn.optimus.test/profile.jpg"
+          }
+        };
+      }
+      if (url.endsWith("/subscribed_apps")) {
+        if (opcoes.erroWebhookDiagnostico) {
+          const erro = new Error("diagnostico_webhook_falhou");
+          erro.response = { status: 404, data: { error: { message: "Endpoint indisponivel", code: 100, type: "GraphMethodException" } } };
+          throw erro;
+        }
+        return {
+          data: {
+            data: [{
+              subscribed_fields: Array.isArray(opcoes.webhookCampos)
+                ? opcoes.webhookCampos
+                : ["comments", "messages"]
+            }]
           }
         };
       }
@@ -159,11 +188,60 @@ function salvarFilaCliente(clienteId, itens) {
     httpClient: mockHttpClient({ sufixo: "cliente_a" })
   });
   assert.strictEqual(conectadoA.conectado, true);
+  assert.strictEqual(conectadoA.status, "conectado_webhook_pronto");
   assert.strictEqual(conectadoA.instagramUserId, "ig_cliente_a");
   assert.strictEqual(conectadoA.username, "optimus_cliente_a");
   assert.strictEqual(conectadoA.accountType, "BUSINESS");
   assert.ok(conectadoA.token.accessToken.startsWith("long_"));
   assert.deepStrictEqual(conectadoA.scopes, ["instagram_business_basic", "instagram_business_content_publish", "instagram_business_manage_comments", "instagram_business_manage_messages"]);
+  assert.strictEqual(conectadoA.webhookContaAssinada, true);
+  assert.deepStrictEqual(conectadoA.webhookCampos, ["comments", "messages"]);
+  assert.ok(conectadoA.webhookAssinadoEm);
+  assert.ok(conectadoA.webhookVerificadoEm);
+  assert.strictEqual(conectadoA.webhookErro, null);
+
+  const inicioJaAssinado = instagram.iniciarConexaoInstagram({ clienteId: "cliente_webhook_ja_assinado" });
+  const httpJaAssinado = mockHttpClient({ sufixo: "webhook_ja_assinado", webhookCampos: ["comments", "messages", "mentions"] });
+  const jaAssinado = await instagram.concluirCallbackInstagram({
+    code: "code_webhook_ja_assinado",
+    state: inicioJaAssinado.state,
+    httpClient: httpJaAssinado
+  });
+  assert.strictEqual(jaAssinado.webhookContaAssinada, true, "conta ja inscrita deve ser tratada como sucesso idempotente");
+  assert.strictEqual(httpJaAssinado.chamadas.filter(chamada => chamada.metodo === "post" && chamada.url.endsWith("/subscribed_apps")).length, 1);
+
+  const inicioWebhookMetaErro = instagram.iniciarConexaoInstagram({ clienteId: "cliente_webhook_meta_erro" });
+  const webhookMetaErro = await instagram.concluirCallbackInstagram({
+    code: "code_webhook_meta_erro",
+    state: inicioWebhookMetaErro.state,
+    httpClient: mockHttpClient({ sufixo: "webhook_meta_erro", erroWebhookMeta: true })
+  });
+  assert.strictEqual(webhookMetaErro.conectado, true, "falha no webhook nao deve apagar OAuth valido");
+  assert.strictEqual(webhookMetaErro.status, "conectado_webhook_erro");
+  assert.strictEqual(webhookMetaErro.webhookContaAssinada, false);
+  assert.strictEqual(webhookMetaErro.webhookErro.code, 190);
+
+  const inicioSemPermissao = instagram.iniciarConexaoInstagram({ clienteId: "cliente_webhook_sem_permissao" });
+  const semPermissao = await instagram.concluirCallbackInstagram({
+    code: "code_webhook_sem_permissao",
+    state: inicioSemPermissao.state,
+    httpClient: mockHttpClient({ sufixo: "webhook_sem_permissao", erroWebhookPermissao: true })
+  });
+  assert.strictEqual(semPermissao.conectado, true);
+  assert.strictEqual(semPermissao.webhookContaAssinada, false);
+  assert.strictEqual(semPermissao.webhookErro.statusCode, 403);
+  assert.strictEqual(semPermissao.webhookErro.code, 10);
+
+  const logsOriginais = console.log;
+  const logs = [];
+  console.log = (...args) => logs.push(args.join(" "));
+  try {
+    await conectarCliente("cliente_log_seguro", "log_seguro");
+  } finally {
+    console.log = logsOriginais;
+  }
+  assert.ok(!logs.join("\n").includes("long_log_seguro"), "logs nao devem expor token longo");
+  assert.ok(!logs.join("\n").includes("short_log_seguro"), "logs nao devem expor token curto");
 
   await assert.rejects(
     () => instagram.concluirCallbackInstagram({
@@ -203,14 +281,56 @@ function salvarFilaCliente(clienteId, itens) {
   process.env.INSTAGRAM_APP_ID = env.INSTAGRAM_APP_ID;
 
   await conectarCliente("cliente_b", "cliente_b");
+  const httpClienteTokenA = mockHttpClient({ sufixo: "token_cliente_a" });
+  await instagram.concluirCallbackInstagram({
+    code: "code_token_cliente_a",
+    state: instagram.iniciarConexaoInstagram({ clienteId: "cliente_token_a" }).state,
+    httpClient: httpClienteTokenA
+  });
+  const httpClienteTokenB = mockHttpClient({ sufixo: "token_cliente_b" });
+  await instagram.concluirCallbackInstagram({
+    code: "code_token_cliente_b",
+    state: instagram.iniciarConexaoInstagram({ clienteId: "cliente_token_b" }).state,
+    httpClient: httpClienteTokenB
+  });
+  const assinaturaTokenA = httpClienteTokenA.chamadas.find(chamada => chamada.metodo === "post" && chamada.url.endsWith("/subscribed_apps"));
+  const assinaturaTokenB = httpClienteTokenB.chamadas.find(chamada => chamada.metodo === "post" && chamada.url.endsWith("/subscribed_apps"));
+  assert.ok(String(assinaturaTokenA.body).includes("subscribed_fields=comments%2Cmessages"), "payload deve assinar comments,messages");
+  assert.ok(String(assinaturaTokenA.body).includes("access_token=long_token_cliente_a"), "assinatura deve usar token do cliente A");
+  assert.ok(String(assinaturaTokenB.body).includes("access_token=long_token_cliente_b"), "assinatura deve usar token do cliente B");
+  assert.ok(!String(assinaturaTokenA.body).includes("long_token_cliente_b"), "cliente A nao deve usar token do cliente B");
+
   const statusA = instagram.sanitizarConexaoInstagram(instagram.lerConexaoInstagram("cliente_a"));
   const statusB = instagram.sanitizarConexaoInstagram(instagram.lerConexaoInstagram("cliente_b"));
   assert.strictEqual(statusA.instagramUserId, "ig_cliente_a");
   assert.strictEqual(statusB.instagramUserId, "ig_cliente_b");
   assert.strictEqual(statusA.tokenPresente, true);
+  assert.strictEqual(statusA.status, "conectado_webhook_pronto");
+  assert.strictEqual(statusA.webhookContaAssinada, true);
+  assert.deepStrictEqual(statusA.webhookCampos, ["comments", "messages"]);
   assert.deepStrictEqual(statusA.scopes, ["instagram_business_basic", "instagram_business_content_publish", "instagram_business_manage_comments", "instagram_business_manage_messages"]);
   assert.ok(!Object.prototype.hasOwnProperty.call(statusA, "accessToken"), "status nao deve expor token");
   assert.ok(JSON.stringify(statusA).includes("long_") === false, "status nunca deve conter token");
+
+  writeClienteJson("cliente_oauth_antigo", "social-instagram.json", {
+    status: "conectado",
+    conectado: true,
+    instagramUserId: "ig_oauth_antigo",
+    username: "optimus_antigo",
+    token: {
+      accessToken: "token_legado",
+      tokenType: "bearer",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      recebidoEm: "2026-01-01T00:00:00.000Z"
+    },
+    scopes: ["instagram_business_basic"],
+    oauthStates: {}
+  });
+  const statusAntigo = instagram.sanitizarConexaoInstagram(instagram.lerConexaoInstagram("cliente_oauth_antigo"));
+  assert.strictEqual(statusAntigo.conectado, true, "OAuth antigo sem webhook deve continuar conectado");
+  assert.strictEqual(statusAntigo.webhookContaAssinada, false);
+  assert.deepStrictEqual(statusAntigo.webhookCampos, []);
+  assert.ok(!JSON.stringify(statusAntigo).includes("token_legado"), "status legado nao deve expor token");
 
   const persistido = JSON.parse(fs.readFileSync(clienteFile("cliente_a", "social-instagram.json"), "utf8"));
   assert.strictEqual(persistido.token.accessToken, "long_cliente_a");
@@ -241,6 +361,7 @@ function salvarFilaCliente(clienteId, itens) {
   assert.ok(!indexFonte.includes("Token invÃ"), "index.js nao deve manter Token invalido mojibake");
   assert.ok(routesFonte.includes('return res.json({\n        ok: true,\n        authUrl: inicio.authUrl\n      });'), "conectar deve retornar somente ok/authUrl");
   assert.ok(routesFonte.includes('return res.json(payloadStatusInstagram(lerConexaoInstagram(clienteId)));'), "status deve usar contrato sanitizado achatado");
+  assert.ok(routesFonte.includes("webhookContaAssinada: instagram.webhookContaAssinada"), "status deve expor assinatura webhook sanitizada");
   assert.ok(routesFonte.includes('return res.json({\n      ok: true,\n      conectado: false\n    });'), "desconectar deve retornar ok/conectado false");
   assert.ok(routesFonte.includes('router.post("/instagram/publicar"'), "rota publicar instagram deve existir");
   assert.ok(routesFonte.includes('router.get("/instagram/publicacoes"'), "rota listar publicacoes instagram deve existir");

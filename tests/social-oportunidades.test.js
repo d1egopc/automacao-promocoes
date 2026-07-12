@@ -39,6 +39,7 @@ function filaBase(item = {}) {
 function mockHttpClient() {
   return {
     async post(url) {
+      if (url.endsWith("/subscribed_apps")) return { data: { success: true } };
       if (url.endsWith("/media")) return { data: { id: "container_oportunidade" } };
       if (url.endsWith("/media_publish")) return { data: { id: "media_oportunidade" } };
       return { data: { access_token: "short_token", token_type: "bearer" } };
@@ -49,6 +50,9 @@ function mockHttpClient() {
       }
       if (url.endsWith("/access_token")) {
         return { data: { access_token: "long_token", token_type: "bearer", expires_in: 5184000 } };
+      }
+      if (url.endsWith("/subscribed_apps")) {
+        return { data: { data: [{ subscribed_fields: ["comments", "messages"] }] } };
       }
       return {
         data: {

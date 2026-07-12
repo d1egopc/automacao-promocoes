@@ -104,14 +104,19 @@ function criarRotasSocial(deps = {}) {
     return {
       ok: true,
       conectado: true,
-      status: "conectado",
+      status: instagram.status,
       instagramUserId: instagram.instagramUserId,
       username: instagram.username,
       accountType: instagram.accountType,
       profilePictureUrl: instagram.profilePictureUrl,
       tokenPresente: instagram.tokenPresente,
       expiresAt: instagram.expiresAt,
-      scopes: instagram.scopes
+      scopes: instagram.scopes,
+      webhookContaAssinada: instagram.webhookContaAssinada,
+      webhookCampos: instagram.webhookCampos,
+      webhookAssinadoEm: instagram.webhookAssinadoEm,
+      webhookErro: instagram.webhookErro,
+      webhookVerificadoEm: instagram.webhookVerificadoEm
     };
   }
 
@@ -418,7 +423,12 @@ function criarRotasSocial(deps = {}) {
         profilePictureUrl: instagram.profilePictureUrl,
         tokenPresente: instagram.tokenPresente,
         expiresAt: instagram.expiresAt,
-        scopes: instagram.scopes
+        scopes: instagram.scopes,
+        webhookContaAssinada: instagram.webhookContaAssinada,
+        webhookCampos: instagram.webhookCampos,
+        webhookAssinadoEm: instagram.webhookAssinadoEm,
+        webhookErro: instagram.webhookErro,
+        webhookVerificadoEm: instagram.webhookVerificadoEm
       });
     } catch (e) {
       const erro = erroInstagramSeguro(e.message);
