@@ -12,6 +12,10 @@ const ARQUIVO_INSTAGRAM = "social-instagram.json";
 const ARQUIVO_PUBLICACOES = "social-publicacoes.json";
 const SCOPE_BASICO = "instagram_business_basic";
 const SCOPE_PUBLICAR_CONTEUDO = "instagram_business_content_publish";
+const CONTAINER_STATUS_PRIMEIRA_ESPERA_MS = 1500;
+const CONTAINER_STATUS_INTERVALO_MS = 3000;
+const CONTAINER_STATUS_MAX_TENTATIVAS = 10;
+const PUBLICACAO_EM_ANDAMENTO_TTL_MS = 15 * 60 * 1000;
 const STATE_TTL_MS = 15 * 60 * 1000;
 
 function texto(valor = "") {
@@ -290,13 +294,20 @@ function salvarPublicacaoInstagram(clienteId = "admin", publicacao = {}) {
 }
 
 function encontrarPublicacaoDuplicada(clienteId = "admin", ofertaId = "", templateId = "") {
+  const agora = Date.now();
   return lista(readClienteJson(clienteId, ARQUIVO_PUBLICACOES, []))
-    .find(item =>
-      texto(item?.rede || "instagram") === "instagram" &&
-      texto(item?.ofertaId) === texto(ofertaId) &&
-      texto(item?.templateId) === texto(templateId) &&
-      ["publicando", "publicada"].includes(texto(item?.status))
-    );
+    .find(item => {
+      if (texto(item?.rede || "instagram") !== "instagram") return false;
+      if (texto(item?.ofertaId) !== texto(ofertaId)) return false;
+      if (texto(item?.templateId) !== texto(templateId)) return false;
+
+      const status = texto(item?.status);
+      if (status === "publicada") return true;
+      if (!["publicando", "processando"].includes(status)) return false;
+
+      const atualizadoMs = Date.parse(texto(item?.atualizadoEm || item?.criadoEm));
+      return Number.isFinite(atualizadoMs) && agora - atualizadoMs <= PUBLICACAO_EM_ANDAMENTO_TTL_MS;
+    });
 }
 
 function normalizarChave(valor = "") {
@@ -609,7 +620,72 @@ async function publicarContainerInstagram({ instagramUserId = "", containerId = 
   return id;
 }
 
-async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", templateId = "padrao-instagram", httpClient = httpClientPadrao() } = {}) {
+function aguardar(ms = 0) {
+  const tempo = Math.max(0, Number(ms) || 0);
+  if (!tempo) return Promise.resolve();
+  return new Promise(resolve => setTimeout(resolve, tempo));
+}
+
+async function consultarStatusContainerInstagram({ containerId = "", accessToken = "", httpClient = httpClientPadrao() } = {}) {
+  const id = texto(containerId);
+  if (!id || !texto(accessToken)) throw new Error("instagram_nao_conectado");
+
+  const resposta = await httpClient.get(`${INSTAGRAM_GRAPH_BASE}/${encodeURIComponent(id)}`, {
+    params: {
+      fields: "status_code,status",
+      access_token: accessToken
+    },
+    timeout: 10000
+  });
+  const dados = resposta?.data || {};
+  return {
+    statusCode: texto(dados.status_code).toUpperCase(),
+    status: texto(dados.status)
+  };
+}
+
+async function aguardarContainerProntoInstagram({
+  containerId = "",
+  accessToken = "",
+  httpClient = httpClientPadrao(),
+  polling = {}
+} = {}) {
+  const primeiraEsperaMs = Math.max(0, Number(polling.primeiraEsperaMs ?? CONTAINER_STATUS_PRIMEIRA_ESPERA_MS) || 0);
+  const intervaloMs = Math.max(0, Number(polling.intervaloMs ?? CONTAINER_STATUS_INTERVALO_MS) || 0);
+  const maxTentativas = Math.max(1, Math.min(20, Number(polling.maxTentativas ?? CONTAINER_STATUS_MAX_TENTATIVAS) || CONTAINER_STATUS_MAX_TENTATIVAS));
+
+  await aguardar(primeiraEsperaMs);
+
+  for (let tentativa = 1; tentativa <= maxTentativas; tentativa += 1) {
+    const status = await consultarStatusContainerInstagram({ containerId, accessToken, httpClient });
+    logSocial("[INSTAGRAM-CONTAINER-STATUS]", {
+      containerId,
+      tentativa,
+      statusCode: status.statusCode,
+      status: status.status
+    });
+
+    if (status.statusCode === "FINISHED") {
+      logSocial("[INSTAGRAM-CONTAINER-PRONTO]", { containerId, tentativa });
+      return status;
+    }
+    if (status.statusCode === "ERROR") {
+      const erro = new Error(status.status || "container_processamento_erro");
+      erro.instagramStatusCode = "ERROR";
+      throw erro;
+    }
+    if (status.statusCode === "EXPIRED") {
+      throw new Error("container_expirado");
+    }
+
+    if (tentativa < maxTentativas) await aguardar(intervaloMs);
+  }
+
+  logSocial("[INSTAGRAM-CONTAINER-TIMEOUT]", { containerId, tentativas: maxTentativas });
+  throw new Error("processamento_midia_timeout");
+}
+
+async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", templateId = "padrao-instagram", httpClient = httpClientPadrao(), polling = {} } = {}) {
   const tpl = texto(templateId || "padrao-instagram") || "padrao-instagram";
   const ofertaIdSeguro = texto(ofertaId);
   if (!ofertaIdSeguro) throw new Error("oferta_id_obrigatorio");
@@ -663,9 +739,22 @@ async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", tem
       accessToken: conexao.token.accessToken,
       httpClient
     });
+    logSocial("[INSTAGRAM-CONTAINER-CRIADO]", {
+      clienteId,
+      ofertaId: ofertaIdSeguro,
+      publicacaoId: id,
+      instagramContainerId
+    });
     const comContainer = salvarPublicacaoInstagram(clienteId, {
       ...base,
+      status: "processando",
       instagramContainerId
+    });
+    await aguardarContainerProntoInstagram({
+      containerId: instagramContainerId,
+      accessToken: conexao.token.accessToken,
+      httpClient,
+      polling
     });
     const instagramMediaId = await publicarContainerInstagram({
       instagramUserId: conexao.instagramUserId,
@@ -681,6 +770,13 @@ async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", tem
       erro: null
     });
 
+    logSocial("[INSTAGRAM-PUBLICACAO-CONCLUIDA]", {
+      clienteId,
+      ofertaId: ofertaIdSeguro,
+      publicacaoId: id,
+      instagramUserId: conexao.instagramUserId,
+      instagramMediaId
+    });
     logSocial("[SOCIAL-INSTAGRAM-PUBLICACAO-OK]", {
       clienteId,
       ofertaId: ofertaIdSeguro,
@@ -705,6 +801,13 @@ async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", tem
       clienteId,
       ofertaId: ofertaIdSeguro,
       publicacaoId: id,
+      erro
+    });
+    logSocial("[INSTAGRAM-PUBLICACAO-ERRO]", {
+      clienteId,
+      ofertaId: ofertaIdSeguro,
+      publicacaoId: id,
+      instagramContainerId,
       erro
     });
     return {

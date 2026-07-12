@@ -9,6 +9,7 @@ process.env.INSTAGRAM_APP_ID = "app_optimus";
 process.env.INSTAGRAM_APP_SECRET = "secret_optimus";
 process.env.INSTAGRAM_REDIRECT_URI = "https://api.optimus.test/social/instagram/callback";
 process.env.INSTAGRAM_OAUTH_STATE_SECRET = "state_secret_optimus";
+const POLLING_TESTE = { primeiraEsperaMs: 0, intervaloMs: 0, maxTentativas: 3 };
 
 const storage = require("../modules/social/storage");
 const instagram = require("../modules/social/instagram");
@@ -43,6 +44,9 @@ function mockHttpClient() {
       return { data: { access_token: "short_token", token_type: "bearer" } };
     },
     async get(url) {
+      if (url.includes("graph.instagram.com/container_oportunidade")) {
+        return { data: { status_code: "FINISHED", status: "FINISHED" } };
+      }
       if (url.endsWith("/access_token")) {
         return { data: { access_token: "long_token", token_type: "bearer", expires_in: 5184000 } };
       }
@@ -114,7 +118,8 @@ function mockHttpClient() {
     clienteId: "cliente_a",
     ofertaId: comLink.ofertaId,
     templateId: "padrao-instagram",
-    httpClient: mockHttpClient()
+    httpClient: mockHttpClient(),
+    polling: POLLING_TESTE
   });
   assert.strictEqual(publicada.publicacao.status, "publicada");
   assert.strictEqual(publicada.publicacao.ofertaId, "oferta_engine_oficial_123");

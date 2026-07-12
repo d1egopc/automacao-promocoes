@@ -15,6 +15,7 @@ const socialStorage = require("../modules/social/storage");
 const { writeClienteJson } = require("../utils/storage");
 const routesFonte = fs.readFileSync(path.join(__dirname, "..", "modules", "social", "routes.js"), "utf8");
 const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
+const POLLING_TESTE = { primeiraEsperaMs: 0, intervaloMs: 0, maxTentativas: 3 };
 
 function clienteFile(clienteId, arquivo) {
   return path.join(dataDir, "clientes", clienteId, arquivo);
@@ -22,6 +23,9 @@ function clienteFile(clienteId, arquivo) {
 
 function mockHttpClient(opcoes = {}) {
   const chamadas = [];
+  const statuses = Array.isArray(opcoes.statusesContainer) && opcoes.statusesContainer.length
+    ? [...opcoes.statusesContainer]
+    : ["FINISHED"];
   return {
     chamadas,
     async post(url, body, config) {
@@ -52,6 +56,15 @@ function mockHttpClient(opcoes = {}) {
     },
     async get(url, config) {
       chamadas.push({ metodo: "get", url, config });
+      if (url.includes("graph.instagram.com/container_")) {
+        const status = statuses.length > 1 ? statuses.shift() : statuses[0];
+        return {
+          data: {
+            status_code: status,
+            status: status === "ERROR" ? "Container recusado pela Meta" : status
+          }
+        };
+      }
       if (url.endsWith("/access_token")) {
         if (opcoes.erroTokenLongo) throw new Error("token_longo_falhou");
         return {
@@ -272,7 +285,8 @@ function salvarFilaCliente(clienteId, itens) {
     clienteId: "cliente_sem_id_item",
     ofertaId: "oferta_sem_id_item",
     templateId: "padrao-instagram",
-    httpClient: mockHttpClient({ sufixo: "sem_id_item" })
+    httpClient: mockHttpClient({ sufixo: "sem_id_item" }),
+    polling: POLLING_TESTE
   });
   assert.strictEqual(publicadaSemIdItem.publicacao.status, "publicada");
 
@@ -319,17 +333,23 @@ function salvarFilaCliente(clienteId, itens) {
   );
 
   await conectarCliente("cliente_pub_a", "pub_a2");
+  const httpPublicada = mockHttpClient({ sufixo: "pub_a", statusesContainer: ["IN_PROGRESS", "FINISHED"] });
   const publicada = await instagram.publicarImagemInstagram({
     clienteId: "cliente_pub_a",
     ofertaId: "oferta_pub_a",
     templateId: "padrao-instagram",
-    httpClient: mockHttpClient({ sufixo: "pub_a" })
+    httpClient: httpPublicada,
+    polling: POLLING_TESTE
   });
   assert.strictEqual(publicada.publicacao.status, "publicada");
   assert.strictEqual(publicada.publicacao.instagramContainerId, "container_pub_a");
   assert.strictEqual(publicada.publicacao.instagramMediaId, "media_pub_a");
   assert.strictEqual(publicada.publicacao.linkAfiliadoPresente, true);
   assert.ok(!JSON.stringify(publicada.publicacao).includes("long_pub_a"), "publicacao sanitizada nao deve expor token");
+  const primeiraConsultaStatus = httpPublicada.chamadas.findIndex(chamada => chamada.metodo === "get" && chamada.url.includes("/container_pub_a"));
+  const chamadaPublish = httpPublicada.chamadas.findIndex(chamada => chamada.metodo === "post" && chamada.url.endsWith("/media_publish"));
+  assert.ok(primeiraConsultaStatus >= 0, "status do container deve ser consultado");
+  assert.ok(chamadaPublish > primeiraConsultaStatus, "media_publish deve ocorrer somente depois do status FINISHED");
 
   const duplicada = await instagram.publicarImagemInstagram({
     clienteId: "cliente_pub_a",
@@ -346,7 +366,8 @@ function salvarFilaCliente(clienteId, itens) {
     clienteId: "cliente_meta_erro",
     ofertaId: "oferta_meta_erro",
     templateId: "padrao-instagram",
-    httpClient: mockHttpClient({ erroContainer: true })
+    httpClient: mockHttpClient({ erroContainer: true }),
+    polling: POLLING_TESTE
   });
   assert.strictEqual(falhaMeta.publicacao.status, "erro");
   assert.strictEqual(falhaMeta.publicacao.erro.code, 190);
@@ -358,12 +379,64 @@ function salvarFilaCliente(clienteId, itens) {
     clienteId: "cliente_publish_erro",
     ofertaId: "oferta_publish_erro",
     templateId: "padrao-instagram",
-    httpClient: mockHttpClient({ sufixo: "publish_erro", erroPublish: true })
+    httpClient: mockHttpClient({ sufixo: "publish_erro", erroPublish: true }),
+    polling: POLLING_TESTE
   });
   assert.strictEqual(falhaPublish.publicacao.status, "erro");
   assert.strictEqual(falhaPublish.publicacao.instagramContainerId, "container_publish_erro");
   assert.strictEqual(falhaPublish.publicacao.erro.code, 10);
   assert.ok(!JSON.stringify(falhaPublish.publicacao).includes("long_publish_erro"), "falha no publish nao deve expor token");
+
+  salvarFilaCliente("cliente_container_error", [{ id: "oferta_container_error" }]);
+  await conectarCliente("cliente_container_error", "container_error");
+  const httpContainerError = mockHttpClient({ sufixo: "container_error", statusesContainer: ["ERROR"] });
+  const falhaContainerError = await instagram.publicarImagemInstagram({
+    clienteId: "cliente_container_error",
+    ofertaId: "oferta_container_error",
+    templateId: "padrao-instagram",
+    httpClient: httpContainerError,
+    polling: POLLING_TESTE
+  });
+  assert.strictEqual(falhaContainerError.publicacao.status, "erro");
+  assert.strictEqual(falhaContainerError.publicacao.instagramContainerId, "container_container_error");
+  assert.ok(falhaContainerError.publicacao.erro.message.includes("Container recusado"));
+  assert.strictEqual(httpContainerError.chamadas.some(chamada => chamada.metodo === "post" && chamada.url.endsWith("/media_publish")), false);
+
+  salvarFilaCliente("cliente_container_expired", [{ id: "oferta_container_expired" }]);
+  await conectarCliente("cliente_container_expired", "container_expired");
+  const falhaContainerExpired = await instagram.publicarImagemInstagram({
+    clienteId: "cliente_container_expired",
+    ofertaId: "oferta_container_expired",
+    templateId: "padrao-instagram",
+    httpClient: mockHttpClient({ sufixo: "container_expired", statusesContainer: ["EXPIRED"] }),
+    polling: POLLING_TESTE
+  });
+  assert.strictEqual(falhaContainerExpired.publicacao.status, "erro");
+  assert.strictEqual(falhaContainerExpired.publicacao.erro.message, "container_expirado");
+
+  salvarFilaCliente("cliente_container_timeout", [{ id: "oferta_container_timeout" }]);
+  await conectarCliente("cliente_container_timeout", "container_timeout");
+  const httpTimeout = mockHttpClient({ sufixo: "container_timeout", statusesContainer: ["IN_PROGRESS", "IN_PROGRESS", "IN_PROGRESS"] });
+  const falhaTimeout = await instagram.publicarImagemInstagram({
+    clienteId: "cliente_container_timeout",
+    ofertaId: "oferta_container_timeout",
+    templateId: "padrao-instagram",
+    httpClient: httpTimeout,
+    polling: POLLING_TESTE
+  });
+  assert.strictEqual(falhaTimeout.publicacao.status, "erro");
+  assert.strictEqual(falhaTimeout.publicacao.erro.message, "processamento_midia_timeout");
+  assert.strictEqual(httpTimeout.chamadas.filter(chamada => chamada.metodo === "get" && chamada.url.includes("/container_container_timeout")).length, 3);
+  assert.strictEqual(httpTimeout.chamadas.some(chamada => chamada.metodo === "post" && chamada.url.endsWith("/media_publish")), false);
+
+  const novaTentativa = await instagram.publicarImagemInstagram({
+    clienteId: "cliente_container_timeout",
+    ofertaId: "oferta_container_timeout",
+    templateId: "padrao-instagram",
+    httpClient: mockHttpClient({ sufixo: "container_timeout_retry", statusesContainer: ["FINISHED"] }),
+    polling: POLLING_TESTE
+  });
+  assert.strictEqual(novaTentativa.publicacao.status, "publicada", "falha anterior deve permitir nova tentativa");
 
   const listaA = instagram.listarPublicacoesInstagram("cliente_pub_a");
   const listaB = instagram.listarPublicacoesInstagram("cliente_pub_b");
