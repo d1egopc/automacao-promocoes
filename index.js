@@ -109,6 +109,7 @@ const mensageiro = require("./modules/mensageiro");
 const criarRotasMensageiro = require("./modules/mensageiro/routes");
 const socialModule = require("./modules/social");
 const criarRotasSocial = require("./modules/social/routes");
+const criarRotasTemplatesClientes = require("./modules/templates-clientes/routes");
 
 const {
   calcularScoreOferta
@@ -14422,6 +14423,12 @@ app.use("/social", criarRotasSocial({
   getClienteId,
   getPlanoUsuario,
   usuarioTemRecurso
+}));
+
+// =============== ROTA DE TEMPLATES DE OFERTAS =================
+
+app.use("/templates-ofertas", criarRotasTemplatesClientes({
+  getClienteId
 }));
 
 
