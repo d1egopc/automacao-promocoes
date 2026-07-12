@@ -91,8 +91,27 @@ function normalizarTitulo(titulo = "") {
 
 function normalizarValorImagem(valor) {
   if (typeof valor === "string") return normalizarTexto(valor);
-  if (!valor || typeof valor !== "object" || Array.isArray(valor)) return "";
-  return normalizarTexto(valor.url || valor.src || valor.imagem || valor.image || valor.thumbnail || "");
+  if (Array.isArray(valor)) {
+    for (const item of valor) {
+      const imagem = normalizarValorImagem(item);
+      if (imagem) return imagem;
+    }
+    return "";
+  }
+  if (!valor || typeof valor !== "object") return "";
+  return normalizarTexto(
+    valor.url ||
+    valor.src ||
+    valor.imagem ||
+    valor.image ||
+    valor.thumbnail ||
+    valor.imagemUrl ||
+    valor.imageUrl ||
+    valor.urlImagem ||
+    valor.picture ||
+    valor.pictureUrl ||
+    ""
+  );
 }
 
 function resolverImagemImportada(resultado = {}, produtoMetadata = {}) {
@@ -119,6 +138,118 @@ function resolverImagemImportada(resultado = {}, produtoMetadata = {}) {
   return { imagem: "", campo: "" };
 }
 
+function adicionarCandidatoImagem(candidatos = [], origem = "", valor = "", tipo = "fallback") {
+  const imagem = normalizarValorImagem(valor);
+  if (!imagem) return;
+  candidatos.push({ imagem, origem, tipo });
+}
+
+function adicionarCamposImagem(candidatos = [], prefixo = "", fonte = {}, tipo = "fallback") {
+  const objeto = objetoSeguro(fonte);
+  const camposDiretos = [
+    "imagem",
+    "image",
+    "thumbnail",
+    "imagemUrl",
+    "imageUrl",
+    "urlImagem",
+    "foto",
+    "midia",
+    "imagemRadar",
+    "imagemOriginal",
+    "imageOriginal",
+    "picture",
+    "pictureUrl"
+  ];
+  const camposAlternativos = [
+    "imagens",
+    "images",
+    "imageUrls",
+    "image_urls",
+    "fotos",
+    "thumbnails",
+    "galeria",
+    "pictures",
+    "imagensAlternativas",
+    "alternativeImages",
+    "product_small_image_urls"
+  ];
+
+  for (const campo of camposDiretos) {
+    adicionarCandidatoImagem(candidatos, `${prefixo}.${campo}`, objeto[campo], tipo);
+  }
+
+  for (const campo of camposAlternativos) {
+    adicionarCandidatoImagem(candidatos, `${prefixo}.${campo}`, objeto[campo], "fallback_alternativo");
+  }
+}
+
+function resolverImagemEngineFallback({ oferta = {}, ofertaEntrada = {}, evento = {}, job = {}, link = {} } = {}) {
+  const candidatos = [];
+  const metadataEntrada = objetoSeguro(ofertaEntrada.metadata);
+  const produtoMetadata = objetoSeguro(metadataEntrada.produto);
+  const eventoMetadata = objetoSeguro(evento.metadata);
+  const jobMetadata = objetoSeguro(job.metadata);
+  const linkMetadata = objetoSeguro(link.metadata);
+
+  adicionarCandidatoImagem(candidatos, "engine_ofertas.imagem", oferta.imagem, "principal");
+
+  adicionarCamposImagem(candidatos, "resultado", ofertaEntrada, "principal");
+  adicionarCamposImagem(candidatos, "metadata.produto", produtoMetadata, "principal");
+
+  adicionarCamposImagem(candidatos, "evento.metadata", eventoMetadata, "fallback_radar");
+  adicionarCamposImagem(candidatos, "link.metadata", linkMetadata, "fallback_radar");
+
+  adicionarCamposImagem(candidatos, "job.metadata", jobMetadata, "fallback_job");
+  adicionarCandidatoImagem(candidatos, "job.metadata.imagemRadar", jobMetadata.imagemRadar, "fallback_job");
+  adicionarCandidatoImagem(candidatos, "job.metadata.imagemEventoOriginal", jobMetadata.imagemEventoOriginal, "fallback_job");
+  adicionarCamposImagem(candidatos, "job.metadata.metadataEvento", objetoSeguro(jobMetadata.metadataEvento), "fallback_job");
+  adicionarCamposImagem(candidatos, "metadata.importacao", metadataEntrada, "fallback_importacao");
+
+  const primeiro = candidatos.find(item => item.imagem);
+  if (!primeiro) {
+    return {
+      imagem: "",
+      origem: "",
+      tipo: "ausente",
+      fallbackUsado: false,
+      motivo: "nenhuma_fonte_de_imagem"
+    };
+  }
+
+  return {
+    imagem: primeiro.imagem,
+    origem: primeiro.origem,
+    tipo: primeiro.tipo,
+    fallbackUsado: primeiro.tipo !== "principal",
+    motivo: ""
+  };
+}
+
+function logResolucaoImagemEngine({ job = {}, oferta = {}, resolucao = {}, motivoSemImagem = "" } = {}) {
+  const base = {
+    jobId: job.id || null,
+    clienteId: job.cliente_id || job.clienteId || "",
+    marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",
+    titulo: oferta.titulo || "",
+    origem: resolucao.origem || oferta.imagemOrigem || "nenhuma",
+    fallbackUsado: resolucao.fallbackUsado === true,
+    motivo: motivoSemImagem || resolucao.motivo || ""
+  };
+
+  if (oferta.imagem && resolucao.fallbackUsado === true) {
+    console.log("[ENGINE-IMAGEM-FALLBACK-USADO]", JSON.stringify(base));
+    return;
+  }
+
+  if (oferta.imagem) {
+    console.log("[ENGINE-IMAGEM-ORIGEM]", JSON.stringify(base));
+    return;
+  }
+
+  console.log("[ENGINE-IMAGEM-AUSENTE]", JSON.stringify(base));
+}
+
 async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
   const params = [];
   const filtros = ["status = 'pronto_para_importar'"];
@@ -134,7 +265,7 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
 
   const resultado = await queryEngine(
     `SELECT id, uuid, evento_id, oferta_id, cliente_id, marketplace_detectado,
-            marketplace, status, motivo_final, criado_em, atualizado_em
+            marketplace, status, motivo_final, metadata, criado_em, atualizado_em
        FROM engine_jobs_cliente
       WHERE ${filtros.join(" AND ")}
       ORDER BY atualizado_em ASC NULLS FIRST, id ASC
@@ -751,6 +882,13 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   const campoImagemImporter = oferta.imagemOrigem || "";
   const sombraV2 = await aplicarSombraInteligenciaUniversalV2(oferta, ofertaEntrada, job);
   oferta = sombraV2.oferta || oferta;
+  let imagemResolucaoEngine = resolverImagemEngineFallback({ oferta, ofertaEntrada, evento, job, link });
+
+  if (!oferta.imagem && imagemResolucaoEngine.imagem) {
+    oferta.imagem = imagemResolucaoEngine.imagem;
+    oferta.imagemOrigem = imagemResolucaoEngine.origem;
+  }
+
   const imagemAnterior = await buscarImagemAnteriorEngine(oferta, job);
   let imagemCanonica = {
     imagem: "",
@@ -763,6 +901,13 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   if (!oferta.imagem && imagemAnterior.imagem) {
     oferta.imagem = imagemAnterior.imagem;
     oferta.imagemOrigem = imagemAnterior.origem;
+    imagemResolucaoEngine = {
+      imagem: imagemAnterior.imagem,
+      origem: imagemAnterior.origem,
+      tipo: "fallback_historico",
+      fallbackUsado: true,
+      motivo: imagemAnterior.motivo || ""
+    };
   }
 
   if (!oferta.imagem && normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre") {
@@ -770,6 +915,13 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     if (imagemCanonica.imagem) {
       oferta.imagem = imagemCanonica.imagem;
       oferta.imagemOrigem = imagemCanonica.origem;
+      imagemResolucaoEngine = {
+        imagem: imagemCanonica.imagem,
+        origem: imagemCanonica.origem,
+        tipo: "fallback_canonico_ml",
+        fallbackUsado: true,
+        motivo: imagemCanonica.motivo || ""
+      };
     }
   }
 
@@ -777,6 +929,19 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   const motivoSemImagem = oferta.imagem
     ? ""
     : (imagemCanonica.motivo || imagemAnterior.motivo || "imagem_nao_encontrada");
+  const imagemOrigemFinal = oferta.imagemOrigem || campoImagemImporter || "nenhuma";
+  const imagemFallbackUsado = Boolean(oferta.imagem && (imagemResolucaoEngine.fallbackUsado === true || !temImagemImporter));
+  const imagemAusenteMotivo = oferta.imagem ? "" : motivoSemImagem;
+  logResolucaoImagemEngine({
+    job,
+    oferta,
+    resolucao: {
+      ...imagemResolucaoEngine,
+      origem: imagemOrigemFinal,
+      fallbackUsado: imagemFallbackUsado
+    },
+    motivoSemImagem: imagemAusenteMotivo
+  });
 
   if (normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre") {
     console.log("[ML-IMAGEM-FALLBACK]", JSON.stringify({
@@ -789,7 +954,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       temImagemParser: temImagemImporter,
       temImagemHistorica: Boolean(imagemAnterior.imagem),
       imagemFinal: oferta.imagem || "",
-      origemImagemFinal: oferta.imagemOrigem || campoImagemImporter || "nenhuma",
+      origemImagemFinal: imagemOrigemFinal,
       motivoSemImagem
     }));
   }
@@ -798,12 +963,17 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   const metadataFinal = {
     ...metadataBase,
     ...objetoSeguro(sombraV2.metadata || {}),
+    imagemOrigem: imagemOrigemFinal,
+    imagemFallbackUsado,
+    imagemAusenteMotivo,
     imagemAuditoria: {
       temImagemImporter,
       temImagemEngine: Boolean(oferta.imagem),
-      campoImagemUsado: oferta.imagemOrigem || campoImagemImporter || "",
-      origemImagem: oferta.imagemOrigem || campoImagemImporter || "nenhuma",
-      motivoSemImagem,
+      campoImagemUsado: imagemOrigemFinal === "nenhuma" ? "" : imagemOrigemFinal,
+      origemImagem: imagemOrigemFinal,
+      fallbackUsado: imagemFallbackUsado,
+      ausenciaMotivo: imagemAusenteMotivo,
+      motivoSemImagem: imagemAusenteMotivo,
       temImagemHistorica: Boolean(imagemAnterior.imagem),
       linkResolvidoImagem: imagemCanonica.linkResolvido || oferta.linkExpandido || "",
       statusHttpImagem: imagemCanonica.statusHttp ?? oferta.statusHttp ?? ofertaEntrada.statusHttp ?? null
@@ -1069,6 +1239,7 @@ async function marcarJobErroImportacao(jobId, motivo = "erro_importacao", detalh
 
 module.exports = {
   buscarJobsProntos,
+  resolverImagemEngineFallback,
   tentarMarcarImportando,
   registrarEtapaImportacao,
   carregarEventoBruto,

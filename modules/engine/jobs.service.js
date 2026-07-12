@@ -83,13 +83,19 @@ async function ignorarJobsAdminNaoOperacional() {
   };
 }
 
-async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [], marketplaceDetectado = "", linksExtraidos = [] } = {}) {
+async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [], marketplaceDetectado = "", linksExtraidos = [], metadataEvento = {} } = {}) {
   if (!eventoId) return { ok: false, motivo: "evento_id_ausente", criados: 0 };
 
   await ignorarJobsAdminNaoOperacional();
 
   const clientesIds = normalizarClientes(clientes);
   const marketplace = normalizarTexto(marketplaceDetectado || marketplacePrincipal(linksExtraidos));
+  const metadataJob = {
+    fase: "1.1",
+    imagemRadar: metadataEvento?.imagem || metadataEvento?.image || metadataEvento?.thumbnail || metadataEvento?.imagemUrl || "",
+    imagemEventoOriginal: metadataEvento?.imagemOriginal || metadataEvento?.imagemRadar || metadataEvento?.foto || metadataEvento?.midia || "",
+    metadataEvento
+  };
   let criados = 0;
 
   const adminIgnorado = (Array.isArray(clientes) ? clientes : [clientes])
@@ -112,7 +118,7 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
          )
          VALUES ($1, $2, $3, $4, $4, 'pendente', 0, 0, $5::jsonb)
          RETURNING id`,
-        [eventoId, ofertaId, clienteId, marketplace, JSON.stringify({ fase: "1.1" })]
+        [eventoId, ofertaId, clienteId, marketplace, JSON.stringify(metadataJob)]
       );
 
       if (!insert.ok) {

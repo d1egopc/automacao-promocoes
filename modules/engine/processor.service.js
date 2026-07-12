@@ -13,7 +13,7 @@ function limitarJobs(valor = 20) {
 async function buscarJobsPendentes(limite = 20) {
   const resultado = await queryEngine(
     `SELECT id, uuid, evento_id, oferta_id, cliente_id, marketplace_detectado,
-            marketplace, status, motivo_final, criado_em, atualizado_em
+            marketplace, status, motivo_final, metadata, criado_em, atualizado_em
        FROM engine_jobs_cliente
       WHERE status = 'pendente'
       ORDER BY criado_em ASC, id ASC
@@ -97,7 +97,8 @@ async function registrarProcessamento(jobId, etapa, status, motivo = "", detalhe
 async function carregarEventoBruto(eventoId) {
   const resultado = await queryEngine(
     `SELECT id, uuid, origem, origem_tipo, sessao_id, grupo_id, grupo_nome,
-            texto_original, links_extraidos, marketplace_detectado, capturado_em, criado_em
+            texto_original, links_extraidos, marketplace_detectado, metadata,
+            capturado_em, criado_em
        FROM engine_eventos_brutos
       WHERE id = $1
       LIMIT 1`,

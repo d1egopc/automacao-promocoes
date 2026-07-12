@@ -153,7 +153,8 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
       eventoId: id,
       clientes,
       marketplaceDetectado,
-      linksExtraidos: evento.linksExtraidos
+      linksExtraidos: evento.linksExtraidos,
+      metadataEvento: eventoBruto.metadata || {}
     });
 
     return { ok: true, id, duplicado: false };

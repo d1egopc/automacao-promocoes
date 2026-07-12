@@ -200,6 +200,110 @@ function motivoDestinoRetido(analise = {}) {
   return "sem_destino";
 }
 
+function objetoSeguro(valor = {}) {
+  return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
+}
+
+function normalizarValorImagemFila(valor) {
+  if (typeof valor === "string") return normalizarTexto(valor);
+  if (Array.isArray(valor)) {
+    for (const item of valor) {
+      const imagem = normalizarValorImagemFila(item);
+      if (imagem) return imagem;
+    }
+    return "";
+  }
+  if (!valor || typeof valor !== "object") return "";
+  return normalizarTexto(
+    valor.url ||
+    valor.src ||
+    valor.imagem ||
+    valor.image ||
+    valor.thumbnail ||
+    valor.imagemUrl ||
+    valor.imageUrl ||
+    valor.urlImagem ||
+    valor.picture ||
+    valor.pictureUrl ||
+    ""
+  );
+}
+
+function adicionarImagemFila(candidatos = [], origem = "", valor = "", tipo = "fallback") {
+  const imagem = normalizarValorImagemFila(valor);
+  if (imagem) candidatos.push({ imagem, origem, tipo });
+}
+
+function adicionarCamposImagemFila(candidatos = [], prefixo = "", fonte = {}, tipo = "fallback") {
+  const objeto = objetoSeguro(fonte);
+  const diretos = ["imagem", "image", "thumbnail", "imagemUrl", "imageUrl", "urlImagem", "foto", "midia", "imagemRadar", "imagemOriginal", "imageOriginal", "picture", "pictureUrl"];
+  const alternativos = ["imagens", "images", "imageUrls", "image_urls", "fotos", "thumbnails", "galeria", "pictures", "imagensAlternativas", "alternativeImages", "product_small_image_urls"];
+
+  for (const campo of diretos) {
+    adicionarImagemFila(candidatos, `${prefixo}.${campo}`, objeto[campo], tipo);
+  }
+
+  for (const campo of alternativos) {
+    adicionarImagemFila(candidatos, `${prefixo}.${campo}`, objeto[campo], "fallback_alternativo");
+  }
+}
+
+function resolverImagemFilaEngine(oferta = {}) {
+  const candidatos = [];
+  const metadata = objetoSeguro(oferta.metadata);
+  const produtoMetadata = objetoSeguro(metadata.produto);
+  const eventoMetadata = objetoSeguro(oferta.evento_metadata);
+  const jobMetadata = objetoSeguro(oferta.job_metadata);
+
+  adicionarImagemFila(candidatos, "engine_ofertas.imagem", oferta.imagem, "principal");
+  adicionarCamposImagemFila(candidatos, "metadata.produto", produtoMetadata, "principal");
+  adicionarCamposImagemFila(candidatos, "evento.metadata", eventoMetadata, "fallback_radar");
+  adicionarCamposImagemFila(candidatos, "job.metadata", jobMetadata, "fallback_job");
+  adicionarCamposImagemFila(candidatos, "job.metadata.metadataEvento", objetoSeguro(jobMetadata.metadataEvento), "fallback_job");
+  adicionarCamposImagemFila(candidatos, "metadata.importacao", metadata, "fallback_importacao");
+
+  const escolhido = candidatos.find(item => item.imagem);
+  if (!escolhido) {
+    return {
+      imagem: "",
+      origem: "nenhuma",
+      fallbackUsado: false,
+      ausenciaMotivo: "nenhuma_fonte_de_imagem"
+    };
+  }
+
+  return {
+    imagem: escolhido.imagem,
+    origem: escolhido.origem,
+    fallbackUsado: escolhido.tipo !== "principal",
+    ausenciaMotivo: ""
+  };
+}
+
+function logImagemFilaEngine(oferta = {}, resolucao = {}) {
+  const base = {
+    ofertaId: oferta.id || null,
+    jobId: oferta.job_id || null,
+    clienteId: oferta.cliente_id || "",
+    marketplace: oferta.marketplace || "",
+    origem: resolucao.origem || "nenhuma",
+    fallbackUsado: resolucao.fallbackUsado === true,
+    motivo: resolucao.ausenciaMotivo || ""
+  };
+
+  if (resolucao.imagem && resolucao.fallbackUsado === true) {
+    console.log("[ENGINE-IMAGEM-FALLBACK-USADO]", JSON.stringify(base));
+    return;
+  }
+
+  if (resolucao.imagem) {
+    console.log("[ENGINE-IMAGEM-ORIGEM]", JSON.stringify(base));
+    return;
+  }
+
+  console.log("[ENGINE-IMAGEM-AUSENTE]", JSON.stringify(base));
+}
+
 function montarItemFilaEngine(oferta = {}) {
   const linkAfiliado = normalizarTexto(oferta.link_afiliado || oferta.link_expandido || oferta.link_original || "");
   const linkOriginal = normalizarTexto(oferta.link_original || oferta.link_expandido || linkAfiliado || "");
@@ -208,6 +312,7 @@ function montarItemFilaEngine(oferta = {}) {
   const cupomTipo = normalizarTexto(oferta.tipo_cupom || oferta.cupomTipo || oferta.tipoCupom || "");
   const beneficioExtra = normalizarTexto(oferta.beneficio_extra || oferta.beneficioExtra || "");
   const avisoCupom = normalizarTexto(oferta.aviso_cupom || oferta.avisoCupom || "");
+  const imagemResolvida = resolverImagemFilaEngine(oferta);
 
   return {
     id: `engine_${oferta.id}_${Date.now()}`,
@@ -221,7 +326,10 @@ function montarItemFilaEngine(oferta = {}) {
     preco: oferta.preco,
     precoAtual: oferta.preco,
     precoOriginal: oferta.preco_original,
-    imagem: normalizarTexto(oferta.imagem || ""),
+    imagem: imagemResolvida.imagem,
+    imagemOrigem: imagemResolvida.origem,
+    imagemFallbackUsado: imagemResolvida.fallbackUsado,
+    imagemAusenteMotivo: imagemResolvida.ausenciaMotivo,
     linkOriginal,
     linkAfiliado,
     link: linkAfiliado,
@@ -274,9 +382,11 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
             o.imagem, o.link_original, o.link_expandido,
             o.link_afiliado, o.categoria, o.score, o.status, o.motivo_status,
             ${campoMetadata},
-            o.criada_em, o.atualizada_em, j.id AS job_id, j.cliente_id
+            o.criada_em, o.atualizada_em, j.id AS job_id, j.cliente_id,
+            j.metadata AS job_metadata, e.metadata AS evento_metadata
        FROM engine_ofertas o
        JOIN engine_jobs_cliente j ON j.oferta_id = o.id
+       LEFT JOIN engine_eventos_brutos e ON e.id = o.evento_id
       WHERE ${filtros.join(" AND ")}
       ORDER BY o.atualizada_em ASC NULLS FIRST, o.id ASC
       LIMIT $${params.length}`,
@@ -402,6 +512,12 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
   const clienteId = normalizarTexto(oferta.cliente_id);
   const deps = contexto.deps || {};
   const itemFila = montarItemFilaEngine(oferta);
+  logImagemFilaEngine(oferta, {
+    imagem: itemFila.imagem,
+    origem: itemFila.imagemOrigem,
+    fallbackUsado: itemFila.imagemFallbackUsado,
+    ausenciaMotivo: itemFila.imagemAusenteMotivo
+  });
   const imagemAuditoria = oferta.metadata?.imagemAuditoria && typeof oferta.metadata.imagemAuditoria === "object"
     ? oferta.metadata.imagemAuditoria
     : {};
@@ -480,5 +596,6 @@ module.exports = {
   validarOfertaParaDistribuicao,
   adicionarOfertaNaFilaCliente,
   montarItemFilaEngine,
+  resolverImagemFilaEngine,
   ofertaJaExisteNaFila
 };
