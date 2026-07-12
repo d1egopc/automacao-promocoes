@@ -8,6 +8,7 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-social-gatilho-")
 process.env.DATA_DIR = dataDir;
 process.env.INSTAGRAM_APP_ID = "app_optimus";
 process.env.INSTAGRAM_APP_SECRET = "secret_optimus";
+process.env.META_APP_SECRET = "secret_meta_optimus";
 process.env.INSTAGRAM_REDIRECT_URI = "https://api.optimus.test/social/instagram/callback";
 process.env.INSTAGRAM_OAUTH_STATE_SECRET = "state_secret_optimus";
 process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN = "verify_optimus";
@@ -18,8 +19,12 @@ const routesFonte = fs.readFileSync(path.join(__dirname, "..", "modules", "socia
 const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
 
 function assinar(payload) {
+  return assinarComSecret(payload, process.env.META_APP_SECRET);
+}
+
+function assinarComSecret(payload, secret) {
   const rawBody = Buffer.from(JSON.stringify(payload));
-  const assinatura = `sha256=${crypto.createHmac("sha256", process.env.INSTAGRAM_APP_SECRET).update(rawBody).digest("hex")}`;
+  const assinatura = `sha256=${crypto.createHmac("sha256", secret).update(rawBody).digest("hex")}`;
   return { rawBody, assinatura };
 }
 
@@ -124,7 +129,27 @@ function mockHttpClient(opcoes = {}) {
   const payload = payloadComentario();
   const { rawBody, assinatura } = assinar(payload);
   assert.strictEqual(instagram.validarAssinaturaWebhookInstagram({ assinatura, rawBody }), true);
+  const assinaturaFallback = assinarComSecret(payload, process.env.INSTAGRAM_APP_SECRET);
+  assert.strictEqual(instagram.validarAssinaturaWebhookInstagram(assinaturaFallback), true, "fallback com INSTAGRAM_APP_SECRET deve ser aceito durante diagnostico");
+  const assinaturaInvalida = assinarComSecret(payload, "secret_errado");
+  assert.strictEqual(instagram.validarAssinaturaWebhookInstagram(assinaturaInvalida), false, "assinatura invalida deve falhar contra ambos os secrets");
   assert.strictEqual(instagram.validarAssinaturaWebhookInstagram({ assinatura: "sha256=deadbeef", rawBody }), false);
+  const logsOriginais = console.log;
+  const logs = [];
+  console.log = (...args) => logs.push(args.join(" "));
+  try {
+    assert.strictEqual(instagram.validarAssinaturaWebhookInstagram({ assinatura, rawBody }), true);
+    assert.strictEqual(instagram.validarAssinaturaWebhookInstagram(assinaturaFallback), true);
+    assert.strictEqual(instagram.validarAssinaturaWebhookInstagram(assinaturaInvalida), false);
+  } finally {
+    console.log = logsOriginais;
+  }
+  const logsTexto = logs.join("\n");
+  assert.ok(logsTexto.includes("[INSTAGRAM-WEBHOOK-SECRET-CORRESPONDENTE]"), "origem do secret correspondente deve ser logada");
+  assert.ok(logsTexto.includes("meta_app_secret"), "META_APP_SECRET deve ser priorizado no HMAC");
+  assert.ok(logsTexto.includes("instagram_app_secret"), "INSTAGRAM_APP_SECRET deve aparecer somente como fallback correspondente");
+  assert.ok(!logsTexto.includes(process.env.META_APP_SECRET), "logs nao devem expor META_APP_SECRET");
+  assert.ok(!logsTexto.includes(process.env.INSTAGRAM_APP_SECRET), "logs nao devem expor INSTAGRAM_APP_SECRET");
 
   const http = mockHttpClient();
   const resultado = await instagram.processarWebhookInstagram({ payload, assinatura, rawBody, httpClient: http });

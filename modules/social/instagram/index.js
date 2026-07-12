@@ -169,6 +169,10 @@ function appSecretInstagram() {
   return texto(process.env.INSTAGRAM_APP_SECRET);
 }
 
+function appSecretMeta() {
+  return texto(process.env.META_APP_SECRET);
+}
+
 function redirectUriInstagram(valor = "") {
   return texto(valor || process.env.INSTAGRAM_REDIRECT_URI);
 }
@@ -1217,17 +1221,41 @@ function rawBodyBuffer(body, rawBody) {
   return Buffer.from(JSON.stringify(body || {}));
 }
 
-function validarAssinaturaWebhookInstagram({ assinatura = "", rawBody = Buffer.alloc(0), secret = "" } = {}) {
-  const valor = texto(assinatura);
-  const segredo = texto(secret || appSecretInstagram());
-  if (!valor || !segredo || !valor.startsWith("sha256=")) return false;
-  const recebido = valor.slice("sha256=".length);
-  const esperado = crypto.createHmac("sha256", segredo).update(rawBody).digest("hex");
+function assinaturaWebhookConfere({ recebido = "", rawBody = Buffer.alloc(0), secret = "" } = {}) {
+  if (!texto(recebido) || !texto(secret)) return false;
+  const esperado = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
   try {
     return crypto.timingSafeEqual(Buffer.from(recebido, "hex"), Buffer.from(esperado, "hex"));
   } catch {
     return false;
   }
+}
+
+function validarAssinaturaWebhookInstagram({ assinatura = "", rawBody = Buffer.alloc(0), secret = "" } = {}) {
+  const valor = texto(assinatura);
+  if (!valor || !valor.startsWith("sha256=")) return false;
+  const recebido = valor.slice("sha256=".length);
+
+  const segredoExplicito = texto(secret);
+  if (segredoExplicito) {
+    return assinaturaWebhookConfere({ recebido, rawBody, secret: segredoExplicito });
+  }
+
+  const candidatos = [
+    { origem: "meta_app_secret", secret: appSecretMeta() },
+    { origem: "instagram_app_secret", secret: appSecretInstagram() }
+  ].filter(item => texto(item.secret));
+
+  for (const candidato of candidatos) {
+    if (assinaturaWebhookConfere({ recebido, rawBody, secret: candidato.secret })) {
+      logSocial("[INSTAGRAM-WEBHOOK-SECRET-CORRESPONDENTE]", {
+        origem: candidato.origem
+      });
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function normalizarEventosWebhookInstagram(payload = {}) {
