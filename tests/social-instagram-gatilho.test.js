@@ -203,6 +203,27 @@ function mockHttpClient(opcoes = {}) {
   assert.strictEqual(semCupom.resultados[0].status, "respondida");
   assert.strictEqual(httpSemCupom.chamadas.find(chamada => chamada.url.endsWith("/private_replies")).body.includes("Cupom"), false);
 
+  salvarClienteInstagram("cliente_antigo_sem_gatilho", {
+    ig: "ig_antigo_sem_gatilho",
+    media: "media_antigo_sem_gatilho",
+    oferta: "oferta_antigo_sem_gatilho"
+  });
+  const publicacoesAntigas = readClienteJson("cliente_antigo_sem_gatilho", "social-publicacoes.json", []);
+  delete publicacoesAntigas[0].gatilho;
+  writeClienteJson("cliente_antigo_sem_gatilho", "social-publicacoes.json", publicacoesAntigas);
+  const antigoPayload = payloadComentario({
+    ig: "ig_antigo_sem_gatilho",
+    media: "media_antigo_sem_gatilho",
+    comment: "comment_antigo_sem_gatilho",
+    text: "EU QUERO"
+  });
+  const antigoAssinado = assinar(antigoPayload);
+  const httpAntigo = mockHttpClient();
+  const antigo = await instagram.processarWebhookInstagram({ payload: antigoPayload, ...antigoAssinado, httpClient: httpAntigo });
+  assert.strictEqual(antigo.resultados[0].status, "ignorado");
+  assert.strictEqual(antigo.resultados[0].interacao.erro.message, "gatilho_inativo");
+  assert.strictEqual(httpAntigo.chamadas.length, 0, "publicacao antiga sem gatilho nao deve disparar respostas");
+
   salvarClienteInstagram("cliente_dup_a", { ig: "ig_duplicado", media: "media_dup", oferta: "oferta_dup_a" });
   salvarClienteInstagram("cliente_dup_b", { ig: "ig_duplicado", media: "media_dup", oferta: "oferta_dup_b" });
   const duplicadoClientePayload = payloadComentario({ ig: "ig_duplicado", media: "media_dup", comment: "comment_cliente_dup" });

@@ -345,6 +345,8 @@ function salvarFilaCliente(clienteId, itens) {
   assert.strictEqual(publicada.publicacao.instagramContainerId, "container_pub_a");
   assert.strictEqual(publicada.publicacao.instagramMediaId, "media_pub_a");
   assert.strictEqual(publicada.publicacao.linkAfiliadoPresente, true);
+  assert.strictEqual(publicada.publicacao.gatilho, null, "publicacao sem payload gatilho nao deve criar gatilho padrao");
+  assert.ok(!publicada.publicacao.legenda.includes("Comente "), "publicacao sem gatilho nao deve conter CTA de comentario");
   assert.ok(!JSON.stringify(publicada.publicacao).includes("long_pub_a"), "publicacao sanitizada nao deve expor token");
   const primeiraConsultaStatus = httpPublicada.chamadas.findIndex(chamada => chamada.metodo === "get" && chamada.url.includes("/container_pub_a"));
   const chamadaPublish = httpPublicada.chamadas.findIndex(chamada => chamada.metodo === "post" && chamada.url.endsWith("/media_publish"));
@@ -359,6 +361,48 @@ function salvarFilaCliente(clienteId, itens) {
   });
   assert.strictEqual(duplicada.duplicada, true, "clique duplicado deve retornar publicacao existente");
   assert.strictEqual(duplicada.publicacao.id, publicada.publicacao.id);
+
+  salvarFilaCliente("cliente_gatilho_quero", [{ id: "oferta_gatilho_quero" }]);
+  await conectarCliente("cliente_gatilho_quero", "gatilho_quero");
+  const publicadaQuero = await instagram.publicarImagemInstagram({
+    clienteId: "cliente_gatilho_quero",
+    ofertaId: "oferta_gatilho_quero",
+    templateId: "padrao-instagram",
+    gatilho: {
+      ativo: true,
+      palavra: "QUERO",
+      respostaPublica: "Pronto! Enviei no Direct.",
+      mensagemDirect: "Aqui esta a oferta:"
+    },
+    httpClient: mockHttpClient({ sufixo: "gatilho_quero" }),
+    polling: POLLING_TESTE
+  });
+  assert.strictEqual(publicadaQuero.publicacao.status, "publicada");
+  assert.strictEqual(publicadaQuero.publicacao.gatilho.palavra, "QUERO");
+  assert.ok(publicadaQuero.publicacao.gatilho.ctaPublico.includes("QUERO"));
+  assert.ok(publicadaQuero.publicacao.legenda.includes("Comente QUERO"));
+
+  salvarFilaCliente("cliente_gatilho_divergente", [{ id: "oferta_gatilho_divergente" }]);
+  await conectarCliente("cliente_gatilho_divergente", "gatilho_divergente");
+  const httpDivergente = mockHttpClient({ sufixo: "gatilho_divergente" });
+  await assert.rejects(
+    () => instagram.publicarImagemInstagram({
+      clienteId: "cliente_gatilho_divergente",
+      ofertaId: "oferta_gatilho_divergente",
+      templateId: "padrao-instagram",
+      gatilho: {
+        ativo: true,
+        palavra: "QUERO",
+        ctaPublico: "Comente PROMO para receber no Direct.",
+        respostaPublica: "Pronto! Enviei no Direct.",
+        mensagemDirect: "Aqui esta a oferta:"
+      },
+      httpClient: httpDivergente,
+      polling: POLLING_TESTE
+    }),
+    /instagram_gatilho_cta_incoerente/
+  );
+  assert.strictEqual(httpDivergente.chamadas.length, 0, "CTA divergente deve ser bloqueado antes de chamar a Meta");
 
   salvarFilaCliente("cliente_meta_erro", [{ id: "oferta_meta_erro" }]);
   await conectarCliente("cliente_meta_erro", "meta_erro");

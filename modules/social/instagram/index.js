@@ -299,7 +299,10 @@ function publicacaoSanitizada(publicacao = {}) {
     instagramMediaId: texto(publicacao.instagramMediaId),
     criadoEm: texto(publicacao.criadoEm),
     publicadoEm: texto(publicacao.publicadoEm),
-    erro: publicacao.erro && typeof publicacao.erro === "object" ? publicacao.erro : null
+    erro: publicacao.erro && typeof publicacao.erro === "object" ? publicacao.erro : null,
+    gatilho: publicacao.gatilho && typeof publicacao.gatilho === "object"
+      ? sanitizarGatilhoInstagram(publicacao.gatilho, { corrigirCta: true })
+      : null
   };
 }
 
@@ -316,16 +319,56 @@ function gatilhoPadraoInstagram() {
   };
 }
 
-function sanitizarGatilhoInstagram(gatilho = {}) {
-  const padrao = gatilhoPadraoInstagram();
-  const entrada = gatilho && typeof gatilho === "object" ? gatilho : {};
-  const palavra = limitarTexto(entrada.palavra || padrao.palavra, 40).toUpperCase();
+function gatilhoInativoInstagram() {
   return {
-    ativo: entrada.ativo !== false,
+    ativo: false,
+    palavra: "",
+    ctaPublico: "",
+    respostaPublica: "",
+    textoDirect: "",
+    textoFinal: "",
+    grupoUrl: "",
+    grupoTexto: ""
+  };
+}
+
+function ctaPublicoPadraoInstagram(palavra = "") {
+  const palavraSegura = limitarTexto(palavra, 40).toUpperCase();
+  return palavraSegura
+    ? `Comente ${palavraSegura} para receber o link e o cupom no Direct.`
+    : "";
+}
+
+function validarCtaGatilhoInstagram({ ativo = false, palavra = "", ctaPublico = "" } = {}) {
+  if (!ativo || !texto(ctaPublico)) return;
+  if (!contemGatilhoSeguro(ctaPublico, palavra)) {
+    throw new Error("instagram_gatilho_cta_incoerente");
+  }
+}
+
+function sanitizarGatilhoInstagram(gatilho = null, opcoes = {}) {
+  const padrao = gatilhoPadraoInstagram();
+  const entrada = gatilho && typeof gatilho === "object" ? gatilho : null;
+  if (!entrada) return gatilhoInativoInstagram();
+
+  const palavraEntrada = texto(entrada.palavra || entrada.keyword);
+  const palavra = limitarTexto(palavraEntrada || padrao.palavra, 40).toUpperCase();
+  const ativo = entrada.ativo !== false;
+  let ctaPublico = limitarTexto(entrada.ctaPublico || ctaPublicoPadraoInstagram(palavra), 220);
+
+  try {
+    validarCtaGatilhoInstagram({ ativo, palavra, ctaPublico });
+  } catch (e) {
+    if (!opcoes.corrigirCta) throw e;
+    ctaPublico = ctaPublicoPadraoInstagram(palavra);
+  }
+
+  return {
+    ativo,
     palavra,
-    ctaPublico: limitarTexto(entrada.ctaPublico || `Comente ${palavra} para receber o link e o cupom no Direct.`, 220),
+    ctaPublico,
     respostaPublica: limitarTexto(entrada.respostaPublica || padrao.respostaPublica, 220),
-    textoDirect: limitarTexto(entrada.textoDirect || padrao.textoDirect, 300),
+    textoDirect: limitarTexto(entrada.textoDirect || entrada.mensagemDirect || padrao.textoDirect, 300),
     textoFinal: limitarTexto(entrada.textoFinal || "", 300),
     grupoUrl: urlHttps(entrada.grupoUrl || ""),
     grupoTexto: limitarTexto(entrada.grupoTexto || "", 180)
@@ -842,7 +885,7 @@ async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", tem
   const oferta = carregarOfertaCliente(clienteId, ofertaIdSeguro);
   if (!oferta.linkAfiliado) throw new Error("oferta_link_ausente");
   const imagemUrl = validarImagemPublica(oferta.imagem);
-  const gatilhoSeguro = sanitizarGatilhoInstagram(gatilho);
+  const gatilhoSeguro = gatilho && typeof gatilho === "object" ? sanitizarGatilhoInstagram(gatilho) : null;
   const { legenda } = montarLegendaInstagram(oferta, tpl, gatilhoSeguro);
   const id = criarId("igpub");
   const base = {
@@ -1071,7 +1114,7 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
     texto(existente.privateReplyStatus || existente.directStatus) === "erro";
   if (existente && !podeRetentarPrivateReply) return { status: "duplicado", interacao: interacaoSanitizada(existente) };
 
-  const gatilho = sanitizarGatilhoInstagram(publicacao.gatilho);
+  const gatilho = sanitizarGatilhoInstagram(publicacao.gatilho, { corrigirCta: true });
   const base = {
     ...(existente || {}),
     id: texto(existente?.id) || criarId("igint"),
