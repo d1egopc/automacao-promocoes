@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const {
+  listClientes,
   readClienteJson,
   writeClienteJson
 } = require("../../../utils/storage");
@@ -10,8 +11,11 @@ const INSTAGRAM_TOKEN_URL = "https://api.instagram.com/oauth/access_token";
 const INSTAGRAM_GRAPH_BASE = "https://graph.instagram.com";
 const ARQUIVO_INSTAGRAM = "social-instagram.json";
 const ARQUIVO_PUBLICACOES = "social-publicacoes.json";
+const ARQUIVO_INTERACOES = "social-interacoes.json";
 const SCOPE_BASICO = "instagram_business_basic";
 const SCOPE_PUBLICAR_CONTEUDO = "instagram_business_content_publish";
+const SCOPE_GERENCIAR_COMENTARIOS = "instagram_business_manage_comments";
+const SCOPE_GERENCIAR_MENSAGENS = "instagram_business_manage_messages";
 const CONTAINER_STATUS_PRIMEIRA_ESPERA_MS = 1500;
 const CONTAINER_STATUS_INTERVALO_MS = 3000;
 const CONTAINER_STATUS_MAX_TENTATIVAS = 10;
@@ -83,6 +87,43 @@ function agoraIso() {
 
 function criarId(prefixo = "igpub") {
   return `${prefixo}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function limitarTexto(valor = "", max = 500) {
+  return texto(valor).replace(/\s+/g, " ").slice(0, max).trim();
+}
+
+function normalizarTextoComparacao(valor = "") {
+  return texto(valor)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function escaparRegex(valor = "") {
+  return texto(valor).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function contemGatilhoSeguro(comentario = "", palavra = "") {
+  const alvo = normalizarTextoComparacao(palavra);
+  const textoComentario = normalizarTextoComparacao(comentario);
+  if (!alvo || !textoComentario) return false;
+  const re = new RegExp(`(^|\\s)${escaparRegex(alvo)}(\\s|$)`);
+  return re.test(textoComentario);
+}
+
+function urlHttps(valor = "") {
+  const url = texto(valor);
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
 }
 
 function appIdInstagram() {
@@ -262,6 +303,92 @@ function publicacaoSanitizada(publicacao = {}) {
   };
 }
 
+function gatilhoPadraoInstagram() {
+  return {
+    ativo: true,
+    palavra: "EU QUERO",
+    ctaPublico: "Comente EU QUERO para receber o link e o cupom no Direct.",
+    respostaPublica: "Pronto! Enviei os detalhes no seu Direct 🚀",
+    textoDirect: "Olá! Aqui está a oferta que você pediu:",
+    textoFinal: "",
+    grupoUrl: "",
+    grupoTexto: ""
+  };
+}
+
+function sanitizarGatilhoInstagram(gatilho = {}) {
+  const padrao = gatilhoPadraoInstagram();
+  const entrada = gatilho && typeof gatilho === "object" ? gatilho : {};
+  const palavra = limitarTexto(entrada.palavra || padrao.palavra, 40).toUpperCase();
+  return {
+    ativo: entrada.ativo !== false,
+    palavra,
+    ctaPublico: limitarTexto(entrada.ctaPublico || `Comente ${palavra} para receber o link e o cupom no Direct.`, 220),
+    respostaPublica: limitarTexto(entrada.respostaPublica || padrao.respostaPublica, 220),
+    textoDirect: limitarTexto(entrada.textoDirect || padrao.textoDirect, 300),
+    textoFinal: limitarTexto(entrada.textoFinal || "", 300),
+    grupoUrl: urlHttps(entrada.grupoUrl || ""),
+    grupoTexto: limitarTexto(entrada.grupoTexto || "", 180)
+  };
+}
+
+function interacaoSanitizada(interacao = {}) {
+  return {
+    id: texto(interacao.id),
+    instagramUserId: texto(interacao.instagramUserId),
+    instagramMediaId: texto(interacao.instagramMediaId),
+    instagramCommentId: texto(interacao.instagramCommentId),
+    ofertaId: texto(interacao.ofertaId),
+    publicacaoId: texto(interacao.publicacaoId),
+    username: limitarTexto(interacao.username, 80),
+    textoComentario: limitarTexto(interacao.textoComentario, 300),
+    palavraGatilho: texto(interacao.palavraGatilho),
+    status: texto(interacao.statusGeral || interacao.status),
+    statusGeral: texto(interacao.statusGeral || interacao.status),
+    respostaPublicaStatus: texto(interacao.respostaPublicaStatus),
+    respostaPublicaEnviadaEm: texto(interacao.respostaPublicaEnviadaEm),
+    privateReplyStatus: texto(interacao.privateReplyStatus || interacao.directStatus),
+    privateReplyEnviadoEm: texto(interacao.privateReplyEnviadoEm),
+    criadoEm: texto(interacao.criadoEm),
+    respondidoEm: texto(interacao.respondidoEm),
+    erro: interacao.erro && typeof interacao.erro === "object" ? interacao.erro : null
+  };
+}
+
+function listarInteracoesInstagram(clienteId = "admin", limite = 100) {
+  const max = Math.max(1, Math.min(200, Number(limite || 100) || 100));
+  return lista(readClienteJson(clienteId, ARQUIVO_INTERACOES, []))
+    .slice(-max)
+    .reverse()
+    .map(interacaoSanitizada);
+}
+
+function getInteracaoInstagram(clienteId = "admin", id = "") {
+  const interacao = lista(readClienteJson(clienteId, ARQUIVO_INTERACOES, []))
+    .find(item => texto(item?.id) === texto(id));
+  return interacao ? interacaoSanitizada(interacao) : null;
+}
+
+function salvarInteracaoInstagram(clienteId = "admin", interacao = {}) {
+  const atuais = lista(readClienteJson(clienteId, ARQUIVO_INTERACOES, []));
+  const item = {
+    ...interacao,
+    clienteId,
+    atualizadoEm: agoraIso()
+  };
+  const interacoes = [
+    ...atuais.filter(atual => texto(atual?.id) !== texto(item.id)),
+    item
+  ].slice(-1000);
+  writeClienteJson(clienteId, ARQUIVO_INTERACOES, interacoes);
+  return item;
+}
+
+function encontrarInteracaoPorComentario(clienteId = "admin", instagramCommentId = "") {
+  return lista(readClienteJson(clienteId, ARQUIVO_INTERACOES, []))
+    .find(item => texto(item?.instagramCommentId) === texto(instagramCommentId));
+}
+
 function listarPublicacoesInstagram(clienteId = "admin", limite = 100) {
   const max = Math.max(1, Math.min(200, Number(limite || 100) || 100));
   return lista(readClienteJson(clienteId, ARQUIVO_PUBLICACOES, []))
@@ -385,7 +512,7 @@ function moeda(valor) {
   return `R$ ${n.toFixed(2).replace(".", ",")}`;
 }
 
-function montarLegendaInstagram(oferta = {}, templateId = "padrao-instagram") {
+function montarLegendaInstagram(oferta = {}, templateId = "padrao-instagram", gatilho = null) {
   const linhas = [];
   linhas.push(oferta.titulo);
   if (oferta.precoAtual !== null) linhas.push(`Por: ${moeda(oferta.precoAtual)}`);
@@ -394,7 +521,12 @@ function montarLegendaInstagram(oferta = {}, templateId = "padrao-instagram") {
   }
   if (oferta.desconto) linhas.push(`Desconto: ${oferta.desconto}`);
   if (oferta.cupom) linhas.push(`Cupom: ${oferta.cupom}`);
-  linhas.push("Confira pelo link oficial da oferta.");
+  if (gatilho?.ativo && gatilho.ctaPublico) {
+    linhas.push("");
+    linhas.push(gatilho.ctaPublico);
+  } else {
+    linhas.push("Confira pelo link oficial da oferta.");
+  }
   if (oferta.marketplace) linhas.push(`#${normalizarChave(oferta.marketplace).replace(/[^a-z0-9]/g, "")}`);
   linhas.push("#promocao #oferta");
 
@@ -470,7 +602,7 @@ function consumirStatePendente(clienteId = "admin", nonce = "") {
 }
 
 function scopesInstagramConexao() {
-  return [SCOPE_BASICO, SCOPE_PUBLICAR_CONTEUDO];
+  return [SCOPE_BASICO, SCOPE_PUBLICAR_CONTEUDO, SCOPE_GERENCIAR_COMENTARIOS, SCOPE_GERENCIAR_MENSAGENS];
 }
 
 function iniciarConexaoInstagram({ clienteId = "admin", redirectUri = "" } = {}) {
@@ -685,7 +817,7 @@ async function aguardarContainerProntoInstagram({
   throw new Error("processamento_midia_timeout");
 }
 
-async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", templateId = "padrao-instagram", httpClient = httpClientPadrao(), polling = {} } = {}) {
+async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", templateId = "padrao-instagram", gatilho = undefined, httpClient = httpClientPadrao(), polling = {} } = {}) {
   const tpl = texto(templateId || "padrao-instagram") || "padrao-instagram";
   const ofertaIdSeguro = texto(ofertaId);
   if (!ofertaIdSeguro) throw new Error("oferta_id_obrigatorio");
@@ -710,7 +842,8 @@ async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", tem
   const oferta = carregarOfertaCliente(clienteId, ofertaIdSeguro);
   if (!oferta.linkAfiliado) throw new Error("oferta_link_ausente");
   const imagemUrl = validarImagemPublica(oferta.imagem);
-  const { legenda } = montarLegendaInstagram(oferta, tpl);
+  const gatilhoSeguro = sanitizarGatilhoInstagram(gatilho);
+  const { legenda } = montarLegendaInstagram(oferta, tpl, gatilhoSeguro);
   const id = criarId("igpub");
   const base = {
     id,
@@ -723,6 +856,7 @@ async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", tem
     status: "publicando",
     instagramContainerId: "",
     instagramMediaId: "",
+    gatilho: gatilhoSeguro,
     criadoEm: agoraIso(),
     publicadoEm: "",
     erro: null
@@ -817,6 +951,237 @@ async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", tem
   }
 }
 
+function rawBodyBuffer(body, rawBody) {
+  if (Buffer.isBuffer(rawBody)) return rawBody;
+  if (typeof rawBody === "string") return Buffer.from(rawBody);
+  return Buffer.from(JSON.stringify(body || {}));
+}
+
+function validarAssinaturaWebhookInstagram({ assinatura = "", rawBody = Buffer.alloc(0), secret = "" } = {}) {
+  const valor = texto(assinatura);
+  const segredo = texto(secret || appSecretInstagram());
+  if (!valor || !segredo || !valor.startsWith("sha256=")) return false;
+  const recebido = valor.slice("sha256=".length);
+  const esperado = crypto.createHmac("sha256", segredo).update(rawBody).digest("hex");
+  try {
+    return crypto.timingSafeEqual(Buffer.from(recebido, "hex"), Buffer.from(esperado, "hex"));
+  } catch {
+    return false;
+  }
+}
+
+function normalizarEventosWebhookInstagram(payload = {}) {
+  const eventos = [];
+  for (const entry of lista(payload.entry)) {
+    const instagramUserId = texto(entry.id || entry.uid);
+    for (const change of lista(entry.changes)) {
+      const value = change?.value || {};
+      const mediaId = texto(value.media?.id || value.media_id || value.mediaId);
+      const commentId = texto(value.id || value.comment_id || value.commentId);
+      const comentario = texto(value.text || value.message || value.comment_text);
+      const from = value.from || value.user || {};
+      eventos.push({
+        field: texto(change.field),
+        instagramUserId: texto(value.instagram_user_id || value.ig_user_id || instagramUserId),
+        instagramMediaId: mediaId,
+        instagramCommentId: commentId,
+        textoComentario: comentario,
+        username: limitarTexto(from.username || value.username, 80),
+        fromId: texto(from.id || value.user_id || value.sender_id),
+        removido: value.is_deleted === true || value.deleted === true || texto(value.verb).toLowerCase() === "remove"
+      });
+    }
+  }
+  return eventos.filter(evento => evento.instagramCommentId || evento.instagramMediaId || evento.textoComentario);
+}
+
+function encontrarPublicacaoPorMedia(instagramUserId = "", instagramMediaId = "") {
+  const candidatos = [];
+  for (const clienteId of listClientes()) {
+    let conexao;
+    try {
+      conexao = lerConexaoInstagram(clienteId);
+    } catch (e) {
+      logSocial("[INSTAGRAM-WEBHOOK-CONEXAO-INVALIDA]", { clienteId, erro: e.message });
+      continue;
+    }
+    if (texto(conexao.instagramUserId) !== texto(instagramUserId)) continue;
+    const publicacao = lista(readClienteJson(clienteId, ARQUIVO_PUBLICACOES, []))
+      .find(item => texto(item?.instagramMediaId) === texto(instagramMediaId) && texto(item?.status) === "publicada");
+    if (publicacao) candidatos.push({ clienteId, conexao, publicacao });
+  }
+  if (candidatos.length > 1) {
+    logSocial("[INSTAGRAM-WEBHOOK-CLIENTE-DUPLICADO]", {
+      instagramUserId,
+      instagramMediaId,
+      total: candidatos.length
+    });
+    return null;
+  }
+  return candidatos[0] || null;
+}
+
+async function responderComentarioInstagram({ commentId = "", mensagem = "", accessToken = "", httpClient = httpClientPadrao() } = {}) {
+  const resposta = await httpClient.post(`${INSTAGRAM_GRAPH_BASE}/${encodeURIComponent(texto(commentId))}/replies`, new URLSearchParams({
+    message: limitarTexto(mensagem, 220),
+    access_token: accessToken
+  }).toString(), {
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    timeout: 10000
+  });
+  return texto(resposta?.data?.id || resposta?.data?.comment_id || "ok");
+}
+
+async function responderPrivadoComentarioInstagram({ commentId = "", mensagem = "", accessToken = "", httpClient = httpClientPadrao() } = {}) {
+  const resposta = await httpClient.post(`${INSTAGRAM_GRAPH_BASE}/${encodeURIComponent(texto(commentId))}/private_replies`, new URLSearchParams({
+    message: mensagem.slice(0, 950),
+    access_token: accessToken
+  }).toString(), {
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    timeout: 10000
+  });
+  return texto(resposta?.data?.id || resposta?.data?.message_id || "ok");
+}
+
+function montarMensagemDirectInstagram({ oferta = {}, gatilho = {} } = {}) {
+  const linhas = [];
+  if (gatilho.textoDirect) linhas.push(gatilho.textoDirect);
+  if (oferta.titulo) linhas.push(oferta.titulo);
+  if (oferta.precoAtual !== null) linhas.push(`Por: ${moeda(oferta.precoAtual)}`);
+  if (oferta.cupom) linhas.push(`Cupom: ${oferta.cupom}`);
+  linhas.push("Link:");
+  linhas.push(oferta.linkAfiliado);
+  if (gatilho.grupoUrl) {
+    if (gatilho.grupoTexto) linhas.push(gatilho.grupoTexto);
+    linhas.push(gatilho.grupoUrl);
+  }
+  if (gatilho.textoFinal) linhas.push(gatilho.textoFinal);
+  return linhas.filter(Boolean).join("\n");
+}
+
+async function processarEventoComentarioInstagram(evento = {}, { httpClient = httpClientPadrao() } = {}) {
+  const encontrado = encontrarPublicacaoPorMedia(evento.instagramUserId, evento.instagramMediaId);
+  if (!encontrado) return { status: "ignorado", motivo: "publicacao_nao_optimus" };
+
+  const { clienteId, conexao, publicacao } = encontrado;
+  const existente = encontrarInteracaoPorComentario(clienteId, evento.instagramCommentId);
+  const podeRetentarPrivateReply =
+    existente &&
+    texto(existente.respostaPublicaStatus) === "concluida" &&
+    texto(existente.privateReplyStatus || existente.directStatus) === "erro";
+  if (existente && !podeRetentarPrivateReply) return { status: "duplicado", interacao: interacaoSanitizada(existente) };
+
+  const gatilho = sanitizarGatilhoInstagram(publicacao.gatilho);
+  const base = {
+    ...(existente || {}),
+    id: texto(existente?.id) || criarId("igint"),
+    instagramUserId: evento.instagramUserId,
+    instagramMediaId: evento.instagramMediaId,
+    instagramCommentId: evento.instagramCommentId,
+    ofertaId: publicacao.ofertaId,
+    publicacaoId: publicacao.id,
+    username: evento.username,
+    textoComentario: limitarTexto(evento.textoComentario, 300),
+    palavraGatilho: gatilho.palavra,
+    statusGeral: "ignorado",
+    respostaPublicaStatus: texto(existente?.respostaPublicaStatus) || "nao_enviada",
+    respostaPublicaEnviadaEm: texto(existente?.respostaPublicaEnviadaEm),
+    privateReplyStatus: texto(existente?.privateReplyStatus || existente?.directStatus) || "nao_enviado",
+    privateReplyEnviadoEm: texto(existente?.privateReplyEnviadoEm),
+    criadoEm: texto(existente?.criadoEm) || agoraIso(),
+    respondidoEm: texto(existente?.respondidoEm),
+    erro: null
+  };
+
+  if (!gatilho.ativo) return { status: "ignorado", interacao: interacaoSanitizada(salvarInteracaoInstagram(clienteId, { ...base, statusGeral: "ignorado", erro: { message: "gatilho_inativo" } })) };
+  if (!evento.instagramCommentId || !evento.textoComentario || evento.removido) {
+    return { status: "ignorado", interacao: interacaoSanitizada(salvarInteracaoInstagram(clienteId, { ...base, statusGeral: "ignorado", erro: { message: "comentario_invalido" } })) };
+  }
+  if (texto(evento.fromId) && texto(evento.fromId) === texto(conexao.instagramUserId)) {
+    return { status: "ignorado", interacao: interacaoSanitizada(salvarInteracaoInstagram(clienteId, { ...base, statusGeral: "ignorado", erro: { message: "comentario_proprio" } })) };
+  }
+  if (!contemGatilhoSeguro(evento.textoComentario, gatilho.palavra)) {
+    return { status: "ignorado", interacao: interacaoSanitizada(salvarInteracaoInstagram(clienteId, { ...base, statusGeral: "ignorado", erro: { message: "sem_gatilho" } })) };
+  }
+
+  const oferta = carregarOfertaCliente(clienteId, publicacao.ofertaId);
+  if (!oferta.linkAfiliado) {
+    return { status: "erro", interacao: interacaoSanitizada(salvarInteracaoInstagram(clienteId, { ...base, statusGeral: "erro", erro: { message: "oferta_link_ausente" } })) };
+  }
+
+  let atual = salvarInteracaoInstagram(clienteId, {
+    ...base,
+    statusGeral: "processando",
+    privateReplyStatus: podeRetentarPrivateReply ? "processando" : base.privateReplyStatus
+  });
+
+  if (texto(atual.respostaPublicaStatus) !== "concluida") {
+    try {
+      await responderComentarioInstagram({
+        commentId: evento.instagramCommentId,
+        mensagem: gatilho.respostaPublica,
+        accessToken: conexao.token.accessToken,
+        httpClient
+      });
+      atual = salvarInteracaoInstagram(clienteId, {
+        ...atual,
+        respostaPublicaStatus: "concluida",
+        respostaPublicaEnviadaEm: agoraIso()
+      });
+    } catch (e) {
+      const erro = sanitizarErroInstagram(e);
+      atual = salvarInteracaoInstagram(clienteId, {
+        ...atual,
+        statusGeral: "erro",
+        respostaPublicaStatus: "erro",
+        erro
+      });
+      return { status: "erro", interacao: interacaoSanitizada(atual) };
+    }
+  }
+
+  try {
+    await responderPrivadoComentarioInstagram({
+      commentId: evento.instagramCommentId,
+      mensagem: montarMensagemDirectInstagram({ oferta, gatilho }),
+      accessToken: conexao.token.accessToken,
+      httpClient
+    });
+    atual = salvarInteracaoInstagram(clienteId, {
+      ...atual,
+      statusGeral: "respondida",
+      privateReplyStatus: "concluido",
+      privateReplyEnviadoEm: agoraIso(),
+      respondidoEm: agoraIso(),
+      erro: null
+    });
+  } catch (e) {
+    atual = salvarInteracaoInstagram(clienteId, {
+      ...atual,
+      statusGeral: "parcial",
+      privateReplyStatus: "erro",
+      respondidoEm: agoraIso(),
+      erro: sanitizarErroInstagram(e)
+    });
+  }
+
+  return { status: atual.statusGeral, interacao: interacaoSanitizada(atual) };
+}
+
+async function processarWebhookInstagram({ payload = {}, assinatura = "", rawBody = null, httpClient = httpClientPadrao() } = {}) {
+  const raw = rawBodyBuffer(payload, rawBody);
+  if (!validarAssinaturaWebhookInstagram({ assinatura, rawBody: raw })) {
+    throw new Error("assinatura_invalida");
+  }
+  const eventos = normalizarEventosWebhookInstagram(payload)
+    .filter(evento => ["comments", "mentions"].includes(texto(evento.field)) || evento.instagramCommentId);
+  const resultados = [];
+  for (const evento of eventos) {
+    resultados.push(await processarEventoComentarioInstagram(evento, { httpClient }));
+  }
+  return { ok: true, total: resultados.length, resultados };
+}
+
 async function concluirCallbackInstagram({ code = "", state = "", redirectUri = "", httpClient = httpClientPadrao() } = {}) {
   if (!texto(code)) throw new Error("code_ausente");
 
@@ -876,10 +1241,13 @@ function criarAdaptadorInstagram() {
 module.exports = {
   ARQUIVO_INSTAGRAM,
   ARQUIVO_PUBLICACOES,
+  ARQUIVO_INTERACOES,
   INSTAGRAM_AUTH_URL,
   INSTAGRAM_GRAPH_BASE,
   SCOPE_BASICO,
   SCOPE_PUBLICAR_CONTEUDO,
+  SCOPE_GERENCIAR_COMENTARIOS,
+  SCOPE_GERENCIAR_MENSAGENS,
   criarAdaptadorInstagram,
   criarInstagramPadrao,
   iniciarConexaoInstagram,
@@ -888,7 +1256,15 @@ module.exports = {
   limparConexaoInstagram,
   listarPublicacoesInstagram,
   getPublicacaoInstagram,
+  listarInteracoesInstagram,
+  getInteracaoInstagram,
   publicarImagemInstagram,
+  processarWebhookInstagram,
+  processarEventoComentarioInstagram,
+  validarAssinaturaWebhookInstagram,
+  normalizarEventosWebhookInstagram,
+  sanitizarGatilhoInstagram,
+  contemGatilhoSeguro,
   carregarOfertaCliente,
   montarLegendaInstagram,
   validarImagemPublica,

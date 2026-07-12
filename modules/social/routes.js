@@ -12,12 +12,16 @@ const {
 const {
   concluirCallbackInstagram,
   getPublicacaoInstagram,
+  getInteracaoInstagram,
   iniciarConexaoInstagram,
   lerConexaoInstagram,
+  listarInteracoesInstagram,
   listarPublicacoesInstagram,
   limparConexaoInstagram,
   publicarImagemInstagram,
-  sanitizarConexaoInstagram
+  processarWebhookInstagram,
+  sanitizarConexaoInstagram,
+  validarAssinaturaWebhookInstagram
 } = require("./instagram");
 
 function criarRotasSocial(deps = {}) {
@@ -460,7 +464,8 @@ function criarRotasSocial(deps = {}) {
       const resultado = await publicarImagemInstagram({
         clienteId,
         ofertaId: req.body?.ofertaId || "",
-        templateId: req.body?.templateId || "padrao-instagram"
+        templateId: req.body?.templateId || "padrao-instagram",
+        gatilho: req.body?.gatilho
       });
 
       return res.status(resultado.publicacao.status === "erro" ? 502 : 200).json({
@@ -476,6 +481,39 @@ function criarRotasSocial(deps = {}) {
         erro
       });
     }
+  });
+
+  router.get("/instagram/webhook", (req, res) => {
+    const verifyToken = String(process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN || "").trim();
+    const mode = String(req.query?.["hub.mode"] || "").trim();
+    const token = String(req.query?.["hub.verify_token"] || "").trim();
+    const challenge = String(req.query?.["hub.challenge"] || "").trim();
+
+    if (verifyToken && mode === "subscribe" && token === verifyToken) {
+      return res.status(200).send(challenge);
+    }
+
+    return res.status(403).json({ ok: false, erro: "verify_token_invalido" });
+  });
+
+  router.post("/instagram/webhook", (req, res) => {
+    const assinatura = String(req.headers["x-hub-signature-256"] || "");
+    const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
+    if (!validarAssinaturaWebhookInstagram({ assinatura, rawBody })) {
+      return res.status(403).json({ ok: false, erro: "assinatura_invalida" });
+    }
+
+    setImmediate(() => {
+      processarWebhookInstagram({
+        payload: req.body || {},
+        assinatura,
+        rawBody
+      }).catch(e => {
+        logErroSocial({ erro: e.message || "webhook_instagram_falhou", rota: "POST /social/instagram/webhook" });
+      });
+    });
+
+    return res.status(200).json({ ok: true });
   });
 
   router.get("/instagram/publicacoes", (req, res) => {
@@ -508,6 +546,32 @@ function criarRotasSocial(deps = {}) {
       ok: true,
       publicacao
     });
+  });
+
+  router.get("/instagram/interacoes", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    const clienteId = cliente(req);
+    return res.json({
+      ok: true,
+      interacoes: listarInteracoesInstagram(clienteId, limite(req, 100))
+    });
+  });
+
+  router.get("/instagram/interacoes/:id", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    const clienteId = cliente(req);
+    const interacao = getInteracaoInstagram(clienteId, req.params.id);
+    if (!interacao) {
+      return res.status(404).json({ ok: false, erro: "interacao_nao_encontrada" });
+    }
+
+    return res.json({ ok: true, interacao });
   });
 
   router.get("/templates", (req, res) => {
@@ -711,8 +775,12 @@ function criarRotasSocial(deps = {}) {
       "GET /social/instagram/callback",
       "POST /social/instagram/desconectar",
       "POST /social/instagram/publicar",
+      "GET /social/instagram/webhook",
+      "POST /social/instagram/webhook",
       "GET /social/instagram/publicacoes",
       "GET /social/instagram/publicacoes/:id",
+      "GET /social/instagram/interacoes",
+      "GET /social/instagram/interacoes/:id",
       "GET /social/templates",
       "POST /social/templates",
       "GET /social/agendamentos",

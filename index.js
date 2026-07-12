@@ -3129,10 +3129,14 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const app = express(); // ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â  MUITO IMPORTANTE ter isso
 
+function capturarRawBody(req, res, buf) {
+  if (buf && buf.length) req.rawBody = Buffer.from(buf);
+}
+
 app.set("trust proxy", 1);
 app.use(helmet());
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "10mb", verify: capturarRawBody }));
 
 const horarioInicio = 9;
 const horarioFim = 23;
@@ -5065,7 +5069,7 @@ app.options("*", cors({
   origin: true,
   credentials: true
 }));
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "10mb", verify: capturarRawBody }));
 
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -6898,6 +6902,7 @@ function auth(req, res, next) {
     (req.method === "GET" && req.path === "/branding") ||
     (req.method === "GET" && req.path === "/social/meta/callback") ||
     (req.method === "GET" && req.path === "/social/instagram/callback") ||
+    req.path === "/social/instagram/webhook" ||
     req.path === "/kabum/importar" ||
     req.path === "/kabum/importar-teste" ||
     req.path === "/conectar" ||
