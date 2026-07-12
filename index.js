@@ -2089,10 +2089,17 @@ function salvarDestinosClientes() {
   salvarMapaClientesJson("destinos.json", destinosPorCliente);
 }
 
+function normalizarTemplateIdDestinoContrato(valor) {
+  const id = String(valor || "").trim();
+  if (!id || id === "padrao_optimus") return id || null;
+  return /^tpl_[a-zA-Z0-9_-]+$/.test(id) ? id : null;
+}
+
 function normalizarDestinoContrato(destino = {}) {
   if (!destino || typeof destino !== "object" || Array.isArray(destino)) return destino;
   return {
     ...destino,
+    templateId: normalizarTemplateIdDestinoContrato(destino.templateId),
     prioridadeCupomAtiva: destino.prioridadeCupomAtiva === true
   };
 }

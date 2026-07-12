@@ -114,4 +114,94 @@ assert.ok(!sujo.mensagem.includes("undefined"));
 assert.ok(!sujo.mensagem.includes("null"));
 assert.ok(!sujo.mensagem.includes("NaN"));
 
+
+// Fase 2 - integracao backend com resolver e montarMensagemOferta
+const { resolverTemplateMensagem } = require("../modules/templates-clientes/resolver");
+const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
+const { salvarTemplatesCliente } = require("../modules/templates-clientes/storage");
+
+const ofertaIntegracao = {
+  clienteId: "cliente_a",
+  titulo: "Produto Integracao",
+  marketplace: "amazon",
+  categoria: "Casa",
+  precoOriginal: 199.9,
+  precoAtual: 149.9,
+  economia: 50,
+  cupom: "PROMO10",
+  linkAfiliado: "https://example.com/integracao"
+};
+
+function assertUniversal(resultado, mensagem) {
+  assert.strictEqual(resultado.usarUniversal, true, mensagem);
+  assert.strictEqual(resultado.ok, false, mensagem);
+}
+
+assertUniversal(
+  resolverTemplateMensagem({ clienteId: "cliente_a", destino: {}, oferta: ofertaIntegracao, canal: "whatsapp" }),
+  "sem templateId usa universal"
+);
+
+assertUniversal(
+  resolverTemplateMensagem({ clienteId: "cliente_a", destino: { templateId: "padrao_optimus" }, oferta: ofertaIntegracao, canal: "whatsapp" }),
+  "template padrao usa universal"
+);
+
+const resolvidoValido = resolverTemplateMensagem({
+  clienteId: "cliente_a",
+  destino: { templateId: criado.id, tipo: "whatsapp" },
+  oferta: ofertaIntegracao
+});
+assert.strictEqual(resolvidoValido.ok, true, "template valido resolve personalizado");
+assert.strictEqual(resolvidoValido.templateIdUsado, criado.id);
+assert.ok(resolvidoValido.mensagem.includes("Linha 1\nLinha 2"));
+
+const mensagemPersonalizada = montarMensagemOferta(ofertaIntegracao, {
+  clienteId: "cliente_a",
+  destino: { templateId: criado.id, tipo: "whatsapp" }
+});
+assert.ok(mensagemPersonalizada.includes("Linha 1\nLinha 2"), "montarMensagemOferta usa renderer personalizado");
+
+assertUniversal(
+  resolverTemplateMensagem({ clienteId: "cliente_a", destino: { templateId: "tpl_inexistente" }, oferta: ofertaIntegracao, canal: "whatsapp" }),
+  "template inexistente cai no universal"
+);
+
+const inativo = criarTemplate("cliente_a", { ...payloadValido, nome: "Template Inativo", ativo: false }).template;
+assertUniversal(
+  resolverTemplateMensagem({ clienteId: "cliente_a", destino: { templateId: inativo.id }, oferta: ofertaIntegracao, canal: "whatsapp" }),
+  "template inativo cai no universal"
+);
+
+const outroCliente = criarTemplate("cliente_b", { ...payloadValido, nome: "Outro Cliente" }).template;
+assertUniversal(
+  resolverTemplateMensagem({ clienteId: "cliente_a", destino: { templateId: outroCliente.id }, oferta: ofertaIntegracao, canal: "whatsapp" }),
+  "template de outro cliente cai no universal"
+);
+
+const apenasTelegram = criarTemplate("cliente_a", { ...payloadValido, nome: "So Telegram", canais: ["telegram"] }).template;
+assertUniversal(
+  resolverTemplateMensagem({ clienteId: "cliente_a", destino: { templateId: apenasTelegram.id }, oferta: ofertaIntegracao, canal: "whatsapp" }),
+  "canal incompativel cai no universal"
+);
+
+const mensagemFallbackUniversal = montarMensagemOferta(ofertaIntegracao, {
+  clienteId: "cliente_a",
+  destino: { templateId: "tpl_inexistente", tipo: "whatsapp" }
+});
+assert.ok(mensagemFallbackUniversal.includes("Produto Integracao"), "fallback Universal retorna mensagem");
+assert.ok(!mensagemFallbackUniversal.includes("Linha 1\nLinha 2"), "fallback Universal nao usa template personalizado");
+
+const mensagemUniversalPadrao = montarMensagemOferta(ofertaIntegracao, {
+  clienteId: "cliente/invalido",
+  destino: { templateId: "padrao_optimus", tipo: "whatsapp" }
+});
+const mensagemErroResolver = montarMensagemOferta(ofertaIntegracao, {
+  clienteId: "cliente/invalido",
+  destino: { templateId: "tpl_forca_storage", tipo: "whatsapp" }
+});
+assert.strictEqual(mensagemErroResolver, mensagemUniversalPadrao, "erro inesperado do resolver cai no Template Universal");
+
+const storageAntesContrato = lerStorageTemplates("cliente_a");
+assert.ok(storageAntesContrato.templates.every(template => !template.templateId), "templates nao persistem objeto de destino");
 console.log("templates-clientes.test.js OK");

@@ -1,4 +1,4 @@
-﻿const {
+const {
   cortarTitulo,
   formatarPreco,
   normalizarPreco,
@@ -12,6 +12,7 @@
 } = require("./templates");
 const { formatarOfertaUniversal } = require("../templates/oferta-template");
 const { gerarTemplateUniversal } = require("../modules/template-universal");
+const { resolverTemplateMensagem } = require("../modules/templates-clientes/resolver");
 
 function normalizarTextoLocal(valor = "") {
   return String(valor || "").trim();
@@ -222,6 +223,30 @@ function montarLegendaShopee(oferta = {}) {
 }
 
 function montarMensagemOferta(oferta = {}, opcoes = {}) {
+  const clienteId = opcoes.clienteId || oferta.clienteId || "admin";
+  const destino = opcoes.destino || {};
+  let resolucaoTemplate = null;
+
+  try {
+    resolucaoTemplate = resolverTemplateMensagem({
+      clienteId,
+      destino,
+      oferta,
+      canal: opcoes.canal || destino.canal || destino.tipo
+    });
+  } catch (erro) {
+    console.warn("[TEMPLATE-ERRO-FALLBACK-UNIVERSAL]", {
+      clienteId,
+      destinoId: destino.id || null,
+      templateId: destino.templateId || null,
+      erro: String(erro?.message || erro || "erro_desconhecido").slice(0, 200)
+    });
+  }
+
+  if (resolucaoTemplate?.ok && resolucaoTemplate.mensagem) {
+    return resolucaoTemplate.mensagem;
+  }
+
   const mensagemUniversalOficial = tentarTemplateUniversalOficial(oferta, opcoes);
   if (mensagemUniversalOficial) return mensagemUniversalOficial;
 
