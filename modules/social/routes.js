@@ -11,6 +11,7 @@ const {
 } = require("./facebook");
 const {
   concluirCallbackInstagram,
+  diagnosticarComentariosPublicacaoInstagram,
   getPublicacaoInstagram,
   getInteracaoInstagram,
   iniciarConexaoInstagram,
@@ -588,6 +589,29 @@ function criarRotasSocial(deps = {}) {
     });
   });
 
+  router.post("/instagram/diagnostico-comentarios", async (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const resultado = await diagnosticarComentariosPublicacaoInstagram({
+        clienteId,
+        publicacaoId: req.body?.publicacaoId || ""
+      });
+      return res.status(resultado.ok ? 200 : 502).json(resultado);
+    } catch (e) {
+      const codigo = String(e.message || "instagram_diagnostico_comentarios_falhou").trim();
+      const status = codigo === "publicacao_nao_encontrada" ? 404 : 400;
+      logErroSocial({ erro: codigo, rota: "POST /social/instagram/diagnostico-comentarios" });
+      return res.status(status).json({
+        ok: false,
+        erro: codigo
+      });
+    }
+  });
+
   router.get("/instagram/interacoes", (req, res) => {
     if (!socialPermitido(req)) {
       return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
@@ -819,6 +843,7 @@ function criarRotasSocial(deps = {}) {
       "POST /social/instagram/webhook",
       "GET /social/instagram/publicacoes",
       "GET /social/instagram/publicacoes/:id",
+      "POST /social/instagram/diagnostico-comentarios",
       "GET /social/instagram/interacoes",
       "GET /social/instagram/interacoes/:id",
       "GET /social/templates",

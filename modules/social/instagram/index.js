@@ -150,6 +150,17 @@ function logWebhookDescartadoInstagram(motivo = "", dados = {}) {
   });
 }
 
+function textoParcialDiagnostico(valor = "", max = 32) {
+  return limitarTexto(valor, max);
+}
+
+function usernameParcialDiagnostico(valor = "") {
+  const nome = limitarTexto(valor, 80);
+  if (!nome) return "";
+  if (nome.length <= 3) return `${nome[0] || ""}***`;
+  return `${nome.slice(0, 3)}***`;
+}
+
 function urlHttps(valor = "") {
   const url = texto(valor);
   if (!url) return "";
@@ -1040,6 +1051,143 @@ async function consultarStatusContainerInstagram({ containerId = "", accessToken
   };
 }
 
+function sanitizarErroDiagnosticoInstagram(erro) {
+  const metaErro = erro?.response?.data?.error || erro?.response?.data || {};
+  const mensagem = texto(metaErro.message || erro?.message || "instagram_diagnostico_erro");
+  return {
+    statusCode: erro?.response?.status || "",
+    code: metaErro.code ?? "",
+    subcode: metaErro.error_subcode ?? metaErro.subcode ?? "",
+    type: texto(metaErro.type),
+    message: mensagem.slice(0, 220)
+  };
+}
+
+async function consultarGraphDiagnosticoInstagram({ url = "", params = {}, httpClient = httpClientPadrao() } = {}) {
+  try {
+    const resposta = await httpClient.get(url, {
+      params,
+      timeout: 10000
+    });
+    return {
+      ok: true,
+      statusCode: resposta?.status || resposta?.statusCode || 200,
+      data: resposta?.data || {},
+      erro: null
+    };
+  } catch (erro) {
+    const erroSanitizado = sanitizarErroDiagnosticoInstagram(erro);
+    return {
+      ok: false,
+      statusCode: erroSanitizado.statusCode || 0,
+      data: {},
+      erro: erroSanitizado
+    };
+  }
+}
+
+function sanitizarComentarioDiagnosticoInstagram(comentario = {}) {
+  return {
+    id: texto(comentario.id),
+    usernameParcial: usernameParcialDiagnostico(comentario.username),
+    textoNormalizadoParcial: textoParcialDiagnostico(normalizarTextoComparacao(comentario.text), 32),
+    timestamp: texto(comentario.timestamp)
+  };
+}
+
+function extrairCamposAssinaturaDiagnosticoInstagram(dados = {}) {
+  const registros = Array.isArray(dados.data) ? dados.data : [];
+  return [...new Set(normalizarCamposWebhookInstagram(registros))];
+}
+
+async function diagnosticarComentariosPublicacaoInstagram({ clienteId = "admin", publicacaoId = "", httpClient = httpClientPadrao() } = {}) {
+  const clienteSeguro = texto(clienteId || "admin") || "admin";
+  const idPublicacao = texto(publicacaoId);
+  if (!idPublicacao) throw new Error("publicacao_id_obrigatorio");
+
+  logSocial("[INSTAGRAM-DIAGNOSTICO-COMENTARIOS-INICIO]", {
+    clienteId: clienteSeguro,
+    publicacaoId: idPublicacao
+  });
+
+  try {
+    const publicacao = lista(readClienteJson(clienteSeguro, ARQUIVO_PUBLICACOES, []))
+      .find(item => texto(item?.id) === idPublicacao && texto(item?.rede || "instagram") === "instagram");
+    if (!publicacao) throw new Error("publicacao_nao_encontrada");
+
+    const conexao = lerConexaoInstagram(clienteSeguro);
+    const instagramMediaId = texto(publicacao.instagramMediaId);
+    const instagramUserId = texto(conexao.instagramUserId || publicacao.instagramUserId);
+    const accessToken = texto(conexao.token?.accessToken);
+    if (!instagramMediaId) throw new Error("instagram_media_id_ausente");
+    if (!instagramUserId || !accessToken) throw new Error("instagram_nao_conectado");
+
+    const comentarios = await consultarGraphDiagnosticoInstagram({
+      url: `${INSTAGRAM_GRAPH_BASE}/${encodeURIComponent(instagramMediaId)}/comments`,
+      params: {
+        fields: "id,text,username,timestamp",
+        access_token: accessToken
+      },
+      httpClient
+    });
+
+    const assinatura = await consultarGraphDiagnosticoInstagram({
+      url: `${INSTAGRAM_GRAPH_BASE}/${encodeURIComponent(instagramUserId)}/subscribed_apps`,
+      params: {
+        access_token: accessToken
+      },
+      httpClient
+    });
+
+    const comentariosLista = Array.isArray(comentarios.data?.data) ? comentarios.data.data : [];
+    const amostraComentarios = comentariosLista
+      .slice(0, 10)
+      .map(sanitizarComentarioDiagnosticoInstagram);
+    const comentarioEncontrado = amostraComentarios
+      .some(item => contemGatilhoSeguro(item.textoNormalizadoParcial, "promo"));
+    const webhookCampos = assinatura.ok ? extrairCamposAssinaturaDiagnosticoInstagram(assinatura.data) : [];
+    const webhookContaAssinada = webhookCampos.includes("comments") && webhookCampos.includes("messages");
+    const erroSanitizado = comentarios.erro || assinatura.erro || null;
+
+    const resultado = {
+      ok: comentarios.ok && assinatura.ok,
+      clienteId: clienteSeguro,
+      publicacaoId: idPublicacao,
+      instagramMediaId,
+      comentarioEncontrado,
+      totalComentarios: comentariosLista.length,
+      amostraComentarios,
+      webhookContaAssinada,
+      webhookCampos,
+      statusCodeComentarios: comentarios.statusCode,
+      statusCodeAssinatura: assinatura.statusCode,
+      erroSanitizado
+    };
+
+    logSocial("[INSTAGRAM-DIAGNOSTICO-COMENTARIOS-RESULTADO]", {
+      clienteId: clienteSeguro,
+      publicacaoId: idPublicacao,
+      instagramMediaId,
+      comentarioEncontrado,
+      totalComentarios: resultado.totalComentarios,
+      webhookContaAssinada,
+      statusCodeComentarios: resultado.statusCodeComentarios,
+      statusCodeAssinatura: resultado.statusCodeAssinatura,
+      erroSanitizado
+    });
+
+    return resultado;
+  } catch (erro) {
+    const erroSanitizado = sanitizarErroDiagnosticoInstagram(erro);
+    logSocial("[INSTAGRAM-DIAGNOSTICO-COMENTARIOS-ERRO]", {
+      clienteId: clienteSeguro,
+      publicacaoId: idPublicacao,
+      erro: erroSanitizado
+    });
+    throw erro;
+  }
+}
+
 async function aguardarContainerProntoInstagram({
   containerId = "",
   accessToken = "",
@@ -1691,6 +1839,7 @@ module.exports = {
   criarInstagramPadrao,
   iniciarConexaoInstagram,
   concluirCallbackInstagram,
+  diagnosticarComentariosPublicacaoInstagram,
   consultarAssinaturasWebhookContaInstagram,
   inscreverContaWebhookInstagram,
   lerConexaoInstagram,
