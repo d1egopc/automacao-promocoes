@@ -11,6 +11,7 @@ const INSTAGRAM_GRAPH_BASE = "https://graph.instagram.com";
 const ARQUIVO_INSTAGRAM = "social-instagram.json";
 const ARQUIVO_PUBLICACOES = "social-publicacoes.json";
 const SCOPE_BASICO = "instagram_business_basic";
+const SCOPE_PUBLICAR_CONTEUDO = "instagram_business_content_publish";
 const STATE_TTL_MS = 15 * 60 * 1000;
 
 function texto(valor = "") {
@@ -458,7 +459,7 @@ function consumirStatePendente(clienteId = "admin", nonce = "") {
 }
 
 function scopesInstagramConexao() {
-  return [SCOPE_BASICO];
+  return [SCOPE_BASICO, SCOPE_PUBLICAR_CONTEUDO];
 }
 
 function iniciarConexaoInstagram({ clienteId = "admin", redirectUri = "" } = {}) {
@@ -775,6 +776,7 @@ module.exports = {
   INSTAGRAM_AUTH_URL,
   INSTAGRAM_GRAPH_BASE,
   SCOPE_BASICO,
+  SCOPE_PUBLICAR_CONTEUDO,
   criarAdaptadorInstagram,
   criarInstagramPadrao,
   iniciarConexaoInstagram,

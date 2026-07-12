@@ -114,7 +114,10 @@ function salvarFilaCliente(clienteId, itens) {
   assert.ok(inicio.authUrl.startsWith("https://www.instagram.com/oauth/authorize?"));
   assert.ok(inicio.authUrl.includes("client_id=app_optimus"));
   assert.ok(inicio.authUrl.includes("force_reauth=true"));
-  assert.ok(inicio.authUrl.includes("scope=instagram_business_basic"));
+  assert.strictEqual(
+    new URL(inicio.authUrl).searchParams.get("scope"),
+    "instagram_business_basic,instagram_business_content_publish"
+  );
   assert.ok(!inicio.authUrl.includes("client_secret"));
 
   await assert.rejects(
@@ -147,6 +150,7 @@ function salvarFilaCliente(clienteId, itens) {
   assert.strictEqual(conectadoA.username, "optimus_cliente_a");
   assert.strictEqual(conectadoA.accountType, "BUSINESS");
   assert.ok(conectadoA.token.accessToken.startsWith("long_"));
+  assert.deepStrictEqual(conectadoA.scopes, ["instagram_business_basic", "instagram_business_content_publish"]);
 
   await assert.rejects(
     () => instagram.concluirCallbackInstagram({
@@ -191,6 +195,7 @@ function salvarFilaCliente(clienteId, itens) {
   assert.strictEqual(statusA.instagramUserId, "ig_cliente_a");
   assert.strictEqual(statusB.instagramUserId, "ig_cliente_b");
   assert.strictEqual(statusA.tokenPresente, true);
+  assert.deepStrictEqual(statusA.scopes, ["instagram_business_basic", "instagram_business_content_publish"]);
   assert.ok(!Object.prototype.hasOwnProperty.call(statusA, "accessToken"), "status nao deve expor token");
   assert.ok(JSON.stringify(statusA).includes("long_") === false, "status nunca deve conter token");
 
