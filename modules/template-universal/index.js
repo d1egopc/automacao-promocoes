@@ -318,7 +318,7 @@ function montarInstrucaoComercial(campos = {}, beneficioComercial = "", precoFin
 
   if (!precoFinal && beneficioSugereCupomGenerico(beneficioComercial)) {
     const marketplace = marketplaceBonito(campos.marketplace);
-    return `Pode haver cupom disponível no carrinho/app${marketplace ? ` do ${marketplace}` : ""}. Confira antes de finalizar.`;
+    return `Pode haver benefício disponível na página/app${marketplace ? ` do ${marketplace}` : ""}. Confira antes de finalizar.`;
   }
 
   return beneficioComercial;
