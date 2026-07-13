@@ -9,6 +9,7 @@ const { logSocial } = require("../logs");
 const INSTAGRAM_AUTH_URL = "https://www.instagram.com/oauth/authorize";
 const INSTAGRAM_TOKEN_URL = "https://api.instagram.com/oauth/access_token";
 const INSTAGRAM_GRAPH_BASE = "https://graph.instagram.com";
+const INSTAGRAM_GRAPH_VERSION = "";
 const ARQUIVO_INSTAGRAM = "social-instagram.json";
 const ARQUIVO_PUBLICACOES = "social-publicacoes.json";
 const ARQUIVO_INTERACOES = "social-interacoes.json";
@@ -351,6 +352,20 @@ function sanitizarErroInstagram(erro) {
     type: texto(metaErro.type),
     message: mensagem.slice(0, 220)
   };
+}
+
+function codigoErroInstagram(erro) {
+  const metaErro = erro?.response?.data?.error || erro?.response?.data || {};
+  return metaErro.code ?? metaErro.error_code ?? erro?.code ?? "";
+}
+
+function tipoErroInstagram(erro) {
+  const metaErro = erro?.response?.data?.error || erro?.response?.data || {};
+  return texto(metaErro.type || erro?.type);
+}
+
+function endpointComentarioInstagram(commentId = "") {
+  return `${INSTAGRAM_GRAPH_BASE}/${encodeURIComponent(texto(commentId))}`;
 }
 
 function sanitizarErroWebhookInstagram(erro) {
@@ -1463,7 +1478,7 @@ function encontrarPublicacaoPorMedia(instagramUserId = "", instagramMediaId = ""
 }
 
 async function responderComentarioInstagram({ commentId = "", mensagem = "", accessToken = "", httpClient = httpClientPadrao() } = {}) {
-  const resposta = await httpClient.post(`${INSTAGRAM_GRAPH_BASE}/${encodeURIComponent(texto(commentId))}/replies`, new URLSearchParams({
+  const resposta = await httpClient.post(`${endpointComentarioInstagram(commentId)}/replies`, new URLSearchParams({
     message: limitarTexto(mensagem, 220),
     access_token: accessToken
   }).toString(), {
@@ -1473,8 +1488,81 @@ async function responderComentarioInstagram({ commentId = "", mensagem = "", acc
   return texto(resposta?.data?.id || resposta?.data?.comment_id || "ok");
 }
 
-async function responderPrivadoComentarioInstagram({ commentId = "", mensagem = "", accessToken = "", httpClient = httpClientPadrao() } = {}) {
-  const resposta = await httpClient.post(`${INSTAGRAM_GRAPH_BASE}/${encodeURIComponent(texto(commentId))}/private_replies`, new URLSearchParams({
+function configurarPrivateReplyInstagram({ commentId = "", tokenType = "" } = {}) {
+  const id = texto(commentId);
+  return {
+    host: INSTAGRAM_GRAPH_BASE,
+    versaoGraph: INSTAGRAM_GRAPH_VERSION || "sem_versao_explicita",
+    commentId: id,
+    endpoint: `${endpointComentarioInstagram(id)}/private_replies`,
+    tokenType: texto(tokenType || "bearer").toLowerCase()
+  };
+}
+
+async function diagnosticarComentarioInstagram({ commentId = "", accessToken = "", httpClient = httpClientPadrao() } = {}) {
+  try {
+    await httpClient.get(endpointComentarioInstagram(commentId), {
+      params: {
+        fields: "id",
+        access_token: accessToken
+      },
+      timeout: 10000
+    });
+    const resultado = { commentId: texto(commentId), consultavel: true, codigoErro: "", tipoErro: "" };
+    logSocial("[INSTAGRAM-COMENTARIO-DIAGNOSTICO]", resultado);
+    return resultado;
+  } catch (e) {
+    const resultado = {
+      commentId: texto(commentId),
+      consultavel: false,
+      codigoErro: codigoErroInstagram(e),
+      tipoErro: tipoErroInstagram(e)
+    };
+    logSocial("[INSTAGRAM-COMENTARIO-DIAGNOSTICO]", resultado);
+    return resultado;
+  }
+}
+
+function normalizarPermissaoInstagram(item = {}) {
+  return {
+    nome: texto(item.permission || item.name || item.scope),
+    concedida: ["granted", "installed"].includes(texto(item.status || item.value).toLowerCase()) || item.granted === true
+  };
+}
+
+function diagnosticoPermissoesConexaoInstagram(conexao = {}, origem = "conexao_salva") {
+  const scopes = lista(conexao.scopes).map(texto).filter(Boolean);
+  return {
+    manageComments: scopes.includes(SCOPE_GERENCIAR_COMENTARIOS),
+    manageMessages: scopes.includes(SCOPE_GERENCIAR_MENSAGENS),
+    origem
+  };
+}
+
+async function diagnosticarPermissoesTokenInstagram({ conexao = {}, accessToken = "", httpClient = httpClientPadrao() } = {}) {
+  try {
+    const resposta = await httpClient.get(`${INSTAGRAM_GRAPH_BASE}/me/permissions`, {
+      params: { access_token: accessToken },
+      timeout: 10000
+    });
+    const permissoes = lista(resposta?.data?.data).map(normalizarPermissaoInstagram);
+    const resultado = {
+      manageComments: permissoes.some(item => item.nome === SCOPE_GERENCIAR_COMENTARIOS && item.concedida),
+      manageMessages: permissoes.some(item => item.nome === SCOPE_GERENCIAR_MENSAGENS && item.concedida),
+      origem: "introspeccao"
+    };
+    logSocial("[INSTAGRAM-TOKEN-PERMISSOES]", resultado);
+    return resultado;
+  } catch {
+    const resultado = diagnosticoPermissoesConexaoInstagram(conexao, "conexao_salva");
+    logSocial("[INSTAGRAM-TOKEN-PERMISSOES]", resultado);
+    return resultado;
+  }
+}
+
+async function responderPrivadoComentarioInstagram({ commentId = "", mensagem = "", accessToken = "", tokenType = "", httpClient = httpClientPadrao() } = {}) {
+  const chamada = configurarPrivateReplyInstagram({ commentId, tokenType });
+  const resposta = await httpClient.post(chamada.endpoint, new URLSearchParams({
     message: mensagem.slice(0, 950),
     access_token: accessToken
   }).toString(), {
@@ -1658,11 +1746,23 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
     }
   }
 
+  await diagnosticarComentarioInstagram({
+    commentId: evento.instagramCommentId,
+    accessToken: conexao.token.accessToken,
+    httpClient
+  });
+  await diagnosticarPermissoesTokenInstagram({
+    conexao,
+    accessToken: conexao.token.accessToken,
+    httpClient
+  });
+
   try {
     await responderPrivadoComentarioInstagram({
       commentId: evento.instagramCommentId,
       mensagem: montarMensagemDirectInstagram({ oferta, gatilho }),
       accessToken: conexao.token.accessToken,
+      tokenType: conexao.token.tokenType,
       httpClient
     });
     atual = salvarInteracaoInstagram(clienteId, {
@@ -1695,6 +1795,11 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
       instagramCommentId: evento.instagramCommentId,
       status: "erro",
       erro: atual.erro
+    });
+    logSocial("[INSTAGRAM-PRIVATE-REPLY-INDISPONIVEL]", {
+      commentId: evento.instagramCommentId,
+      codigoErro: atual.erro.code,
+      motivo: atual.erro.message
     });
   }
 
@@ -1830,6 +1935,7 @@ module.exports = {
   ARQUIVO_INTERACOES,
   INSTAGRAM_AUTH_URL,
   INSTAGRAM_GRAPH_BASE,
+  INSTAGRAM_GRAPH_VERSION,
   SCOPE_BASICO,
   SCOPE_PUBLICAR_CONTEUDO,
   SCOPE_GERENCIAR_COMENTARIOS,
@@ -1851,6 +1957,9 @@ module.exports = {
   publicarImagemInstagram,
   processarWebhookInstagram,
   processarEventoComentarioInstagram,
+  configurarPrivateReplyInstagram,
+  diagnosticarComentarioInstagram,
+  diagnosticarPermissoesTokenInstagram,
   validarAssinaturaWebhookInstagram,
   normalizarEventosWebhookInstagram,
   sanitizarGatilhoInstagram,

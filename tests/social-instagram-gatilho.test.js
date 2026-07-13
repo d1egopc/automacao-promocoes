@@ -87,15 +87,39 @@ function salvarClienteInstagram(clienteId, { ig = "ig_cliente_a", media = "media
 
 function mockHttpClient(opcoes = {}) {
   const chamadas = [];
+  const permissoes = opcoes.permissoes || [
+    { permission: "instagram_business_manage_comments", status: "granted" },
+    { permission: "instagram_business_manage_messages", status: "granted" }
+  ];
   return {
     chamadas,
+    async get(url, config = {}) {
+      chamadas.push({ metodo: "get", url, params: config.params || {} });
+      if (url.endsWith("/me/permissions")) {
+        if (opcoes.erroPermissoes) {
+          const erro = new Error("permissoes_indisponiveis");
+          erro.response = { data: { error: { code: 190, type: "OAuthException", message: "Cannot inspect token" } } };
+          throw erro;
+        }
+        return { data: { data: permissoes } };
+      }
+      if (url.includes("/comment_")) {
+        if (opcoes.comentarioNaoConsultavel) {
+          const erro = new Error("comentario_nao_consultavel");
+          erro.response = { data: { error: { code: 100, type: "IGApiException", message: "Unsupported get request" } } };
+          throw erro;
+        }
+        return { data: { id: url.split("/").pop() } };
+      }
+      throw new Error(`url_inesperada:${url}`);
+    },
     async post(url, body) {
       chamadas.push({ metodo: "post", url, body: String(body || "") });
       if (url.endsWith("/replies")) return { data: { id: "reply_1" } };
       if (url.endsWith("/private_replies")) {
         if (opcoes.erroDirect) {
           const erro = new Error("direct_recusado");
-          erro.response = { data: { error: { code: 10, type: "IGApiException", message: "Private reply not allowed" } } };
+          erro.response = { data: { error: { code: 100, type: "IGApiException", message: "Private reply not allowed" } } };
           throw erro;
         }
         return { data: { id: "direct_1" } };
@@ -123,6 +147,10 @@ function mockHttpClient(opcoes = {}) {
 
   assert.ok(instagram.scopesInstagramConexao().includes("instagram_business_manage_comments"));
   assert.ok(instagram.scopesInstagramConexao().includes("instagram_business_manage_messages"));
+  const privateReplyConfig = instagram.configurarPrivateReplyInstagram({ commentId: "comment_1", tokenType: "bearer" });
+  assert.strictEqual(privateReplyConfig.host, instagram.INSTAGRAM_GRAPH_BASE);
+  assert.strictEqual(privateReplyConfig.endpoint, `${instagram.INSTAGRAM_GRAPH_BASE}/comment_1/private_replies`);
+  assert.strictEqual(privateReplyConfig.tokenType, "bearer");
   assert.strictEqual(instagram.contemGatilhoSeguro("Êu  quérõ por favor", "EU QUERO"), true);
   assert.strictEqual(instagram.contemGatilhoSeguro("eu querolandia", "EU QUERO"), false);
 
@@ -157,6 +185,8 @@ function mockHttpClient(opcoes = {}) {
   assert.strictEqual(resultado.resultados[0].status, "respondida");
   assert.strictEqual(http.chamadas.filter(chamada => chamada.url.endsWith("/replies")).length, 1);
   assert.strictEqual(http.chamadas.filter(chamada => chamada.url.endsWith("/private_replies")).length, 1);
+  assert.strictEqual(http.chamadas.filter(chamada => chamada.metodo === "get" && chamada.url.endsWith("/comment_1")).length, 1);
+  assert.strictEqual(http.chamadas.filter(chamada => chamada.metodo === "get" && chamada.url.endsWith("/me/permissions")).length, 1);
   assert.ok(http.chamadas.find(chamada => chamada.url.endsWith("/private_replies")).body.includes("https%3A%2F%2Fgo.optimus.test%2Fa%2Foferta"));
   assert.ok(!JSON.stringify(instagram.listarInteracoesInstagram("cliente_a")).includes("token_cliente_a"));
 
@@ -172,6 +202,17 @@ function mockHttpClient(opcoes = {}) {
   const proprioAssinado = assinar(proprioPayload);
   const proprio = await instagram.processarWebhookInstagram({ payload: proprioPayload, ...proprioAssinado, httpClient: mockHttpClient() });
   assert.strictEqual(proprio.resultados[0].interacao.erro.message, "comentario_proprio");
+
+  const comentarioNaoConsultavelPayload = payloadComentario({ comment: "comment_nao_consultavel" });
+  const comentarioNaoConsultavelAssinado = assinar(comentarioNaoConsultavelPayload);
+  const httpComentarioNaoConsultavel = mockHttpClient({ comentarioNaoConsultavel: true });
+  const comentarioNaoConsultavel = await instagram.processarWebhookInstagram({
+    payload: comentarioNaoConsultavelPayload,
+    ...comentarioNaoConsultavelAssinado,
+    httpClient: httpComentarioNaoConsultavel
+  });
+  assert.strictEqual(comentarioNaoConsultavel.resultados[0].status, "respondida");
+  assert.strictEqual(httpComentarioNaoConsultavel.chamadas.filter(chamada => chamada.url.endsWith("/private_replies")).length, 1);
 
   const naoOptimusPayload = payloadComentario({ comment: "comment_outro", media: "media_nao_optimus" });
   const naoOptimusAssinado = assinar(naoOptimusPayload);
@@ -195,7 +236,25 @@ function mockHttpClient(opcoes = {}) {
   assert.strictEqual(directErro.resultados[0].status, "parcial");
   assert.strictEqual(directErro.resultados[0].interacao.respostaPublicaStatus, "concluida");
   assert.strictEqual(directErro.resultados[0].interacao.privateReplyStatus, "erro");
+  assert.strictEqual(directErro.resultados[0].interacao.erro.code, 100);
   assert.ok(directErro.resultados[0].interacao.respostaPublicaEnviadaEm);
+
+  const semMensagensPayload = payloadComentario({ comment: "comment_sem_mensagens" });
+  const semMensagensAssinado = assinar(semMensagensPayload);
+  const httpSemMensagens = mockHttpClient({
+    permissoes: [
+      { permission: "instagram_business_manage_comments", status: "granted" },
+      { permission: "instagram_business_manage_messages", status: "declined" }
+    ]
+  });
+  const semMensagens = await instagram.processarWebhookInstagram({ payload: semMensagensPayload, ...semMensagensAssinado, httpClient: httpSemMensagens });
+  assert.strictEqual(semMensagens.resultados[0].status, "respondida");
+
+  const fallbackPermissoesPayload = payloadComentario({ comment: "comment_permissoes_fallback" });
+  const fallbackPermissoesAssinado = assinar(fallbackPermissoesPayload);
+  const httpFallbackPermissoes = mockHttpClient({ erroPermissoes: true });
+  const fallbackPermissoes = await instagram.processarWebhookInstagram({ payload: fallbackPermissoesPayload, ...fallbackPermissoesAssinado, httpClient: httpFallbackPermissoes });
+  assert.strictEqual(fallbackPermissoes.resultados[0].status, "respondida");
 
   const httpRetry = mockHttpClient();
   const retryDirect = await instagram.processarWebhookInstagram({ payload: directErroPayload, ...directErroAssinado, httpClient: httpRetry });
