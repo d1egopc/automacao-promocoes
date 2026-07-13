@@ -303,6 +303,112 @@ function textoIndicaPaginaResgateCupomRadar(texto = "") {
   );
 }
 
+function linkShopeeRadar(link = "") {
+  const host = dominioLinkRadar(link);
+  return host === "shopee.com.br" ||
+    host.endsWith(".shopee.com.br") ||
+    host === "s.shopee.com.br" ||
+    host.endsWith(".s.shopee.com.br");
+}
+
+function textoResumoResgateRadar(trecho = "") {
+  const linhas = String(trecho || "")
+    .split(/\r?\n| {2,}/)
+    .map(linha => linha.replace(/https?:\/\/\S+/gi, "").replace(/^[-:•\s]+/, "").trim())
+    .filter(Boolean)
+    .filter(linha => /cupom|voucher|resgat|pegue|pegar|colet|apli|off/i.test(linha));
+
+  return (linhas[0] || "").slice(0, 160);
+}
+
+function pontuarResgateShopeeRadar(trecho = "") {
+  const fonte = String(trecho || "");
+  const normalizado = normalizarTextoCupomRadar(fonte);
+  let score = 0;
+
+  if (
+    normalizado.includes("resgateocupom") ||
+    normalizado.includes("resgatecupom") ||
+    normalizado.includes("resgatarcupom") ||
+    normalizado.includes("pegueocupom") ||
+    normalizado.includes("pegarcupom") ||
+    normalizado.includes("coletarcupom") ||
+    normalizado.includes("aplicarcupom") ||
+    normalizado.includes("apliqueocupom")
+  ) {
+    score += 3;
+  }
+
+  if (
+    normalizado.includes("cupomdisponivel") ||
+    normalizado.includes("cupomexclusivo") ||
+    normalizado.includes("voucher") ||
+    normalizado.includes("cupom")
+  ) {
+    score += 2;
+  }
+
+  if (/\b\d{1,5}\s*(?:off|%|por cento|reais?)\b/i.test(fonte)) score += 1;
+  if (/(?:^|\n)\s*(?:cupom|voucher)\s*[:\-]/i.test(fonte)) score += 1;
+  if (/(?:^|\n)\s*(?:produto|oferta)\s*[:\-]/i.test(fonte)) score -= 2;
+
+  return score;
+}
+
+function enriquecerLinksResgateShopeeRadar(texto = "", links = [], estado = {}) {
+  const linksShopee = links.filter(linkShopeeRadar);
+  if (linksShopee.length < 2) return estado;
+
+  const candidatosResgate = linksShopee
+    .map(link => {
+      const trecho = trechoProximoLinkRadar(texto, link);
+      return {
+        link,
+        trecho,
+        score: pontuarResgateShopeeRadar(trecho),
+        textoResgate: textoResumoResgateRadar(trecho)
+      };
+    })
+    .filter(item => item.score >= 3);
+
+  if (!candidatosResgate.length) return estado;
+
+  const linksResgateSet = new Set(estado.linksResgate || []);
+  const candidatosProduto = linksShopee.filter(link =>
+    !linksResgateSet.has(link) &&
+    !candidatosResgate.some(item => item.link === link)
+  );
+
+  if (!candidatosProduto.length) return estado;
+
+  const beneficiosPorLink = { ...(estado.beneficiosPorLink || {}) };
+  const linksResgate = [...(estado.linksResgate || [])];
+
+  for (const item of candidatosResgate) {
+    if (!linksResgate.includes(item.link)) linksResgate.push(item.link);
+    beneficiosPorLink[item.link] = {
+      ...(beneficiosPorLink[item.link] || {}),
+      tipoCupom: "resgate",
+      beneficioExtra: item.textoResgate || item.link,
+      avisoCupom: item.textoResgate || "Link de resgate de cupom detectado na mensagem",
+      linkResgateCupom: item.link,
+      resgateShopeeSemantico: true
+    };
+  }
+
+  const principal = candidatosResgate[0];
+  return {
+    ...estado,
+    linksResgate,
+    beneficiosPorLink,
+    tipoCupom: estado.tipoCupom || "resgate",
+    beneficioExtra: estado.beneficioExtra || principal.textoResgate || principal.link,
+    avisoCupom: estado.avisoCupom || principal.textoResgate || "Link de resgate de cupom detectado na mensagem",
+    linkResgateCupom: estado.linkResgateCupom || principal.link,
+    resgateShopeeSemantico: true
+  };
+}
+
 function analisarBeneficiosMensagemRadar(texto = "", links = []) {
   const fonte = limparUnicodeInvisivelRadar(texto);
   const cupom = extrairCupomTextoRadarGenerico(fonte);
@@ -343,7 +449,7 @@ function analisarBeneficiosMensagemRadar(texto = "", links = []) {
   const beneficioResgate = linksResgate[0] || "";
   const beneficioExtra = beneficioResgate || (normalizarTextoCupomRadar(fonte).includes("fretegratis") ? "Frete gratis" : "");
 
-  return {
+  return enriquecerLinksResgateShopeeRadar(fonte, links, {
     cupom,
     cupons: enriquecimento.cupons,
     modoCupom: enriquecimento.modoCupom,
@@ -360,7 +466,7 @@ function analisarBeneficiosMensagemRadar(texto = "", links = []) {
     linkResgateCupom: beneficioResgate,
     linksResgate,
     beneficiosPorLink
-  };
+  });
 }
 
 module.exports = {
@@ -374,5 +480,6 @@ module.exports = {
   textoIndicaResgateCupomRadar,
   linkPareceResgateCupomRadar,
   textoIndicaPaginaResgateCupomRadar,
+  enriquecerLinksResgateShopeeRadar,
   analisarBeneficiosMensagemRadar
 };

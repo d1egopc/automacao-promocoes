@@ -105,6 +105,93 @@ function testarCuponsETexto() {
   assert.strictEqual(beneficios.freteInformado, true);
 }
 
+function testarSelecaoSemanticaShopee() {
+  const linkCupom = "https://s.shopee.com.br/9zuqGaAvwi";
+  const linkProduto = "https://s.shopee.com.br/1VxQIcIvJj";
+  const outroProduto = "https://s.shopee.com.br/2AbProduto";
+
+  const produtoMaisCupom = [
+    "Produto:",
+    linkProduto,
+    "Cupom:",
+    "Resgate o cupom de 100 OFF",
+    linkCupom
+  ].join("\n");
+  const beneficiosProdutoMaisCupom = analisarBeneficiosMensagemRadar(
+    produtoMaisCupom,
+    extrairLinksRadar(produtoMaisCupom)
+  );
+  assert.deepStrictEqual(beneficiosProdutoMaisCupom.linksResgate, [linkCupom], "produto + cupom marca apenas o link de resgate");
+  assert.strictEqual(beneficiosProdutoMaisCupom.linkResgateCupom, linkCupom, "link de resgate fica disponivel como beneficio");
+  assert.ok(/100 OFF/i.test(beneficiosProdutoMaisCupom.beneficioExtra), "texto do resgate enriquece a oferta");
+  assert.ok(!beneficiosProdutoMaisCupom.linksResgate.includes(linkProduto), "produto nao e marcado como resgate");
+
+  const cupomMaisProduto = [
+    "Cupom:",
+    "Pegue o cupom exclusivo de 100 OFF",
+    linkCupom,
+    "Produto:",
+    linkProduto
+  ].join("\n");
+  const beneficiosCupomMaisProduto = analisarBeneficiosMensagemRadar(
+    cupomMaisProduto,
+    extrairLinksRadar(cupomMaisProduto)
+  );
+  assert.deepStrictEqual(beneficiosCupomMaisProduto.linksResgate, [linkCupom], "cupom + produto preserva produto para importacao");
+  assert.ok(/cupom exclusivo/i.test(beneficiosCupomMaisProduto.beneficioExtra));
+
+  const apenasProduto = `Oferta do dia\n${linkProduto}`;
+  assert.deepStrictEqual(
+    analisarBeneficiosMensagemRadar(apenasProduto, extrairLinksRadar(apenasProduto)).linksResgate,
+    [],
+    "apenas produto Shopee continua sem resgate"
+  );
+
+  const apenasCupom = `Resgate o cupom de 100 OFF\n${linkCupom}`;
+  assert.deepStrictEqual(
+    analisarBeneficiosMensagemRadar(apenasCupom, extrairLinksRadar(apenasCupom)).linksResgate,
+    [],
+    "apenas cupom Shopee preserva comportamento anterior"
+  );
+
+  const doisProdutos = [
+    "Produto 1:",
+    linkProduto,
+    "Produto 2:",
+    outroProduto
+  ].join("\n");
+  assert.deepStrictEqual(
+    analisarBeneficiosMensagemRadar(doisProdutos, extrairLinksRadar(doisProdutos)).linksResgate,
+    [],
+    "dois produtos Shopee nao sao tratados como cupom"
+  );
+
+  const voucherMaisProduto = [
+    "Voucher disponivel",
+    "Aplicar cupom no app",
+    linkCupom,
+    "Oferta:",
+    linkProduto
+  ].join("\n");
+  const beneficiosVoucher = analisarBeneficiosMensagemRadar(voucherMaisProduto, extrairLinksRadar(voucherMaisProduto));
+  assert.deepStrictEqual(beneficiosVoucher.linksResgate, [linkCupom], "voucher Shopee + produto Shopee identifica resgate");
+
+  const outrosMarketplaces = [
+    "Cupom:",
+    "Resgate o cupom de 100 OFF",
+    "https://www.mercadolivre.com.br/produto/teste",
+    "Produto:",
+    "https://www.amazon.com.br/dp/B000TESTE",
+    "https://www.aliexpress.com/item/100500.html",
+    "https://www.kabum.com.br/produto/123456/produto-teste"
+  ].join("\n");
+  assert.deepStrictEqual(
+    analisarBeneficiosMensagemRadar(outrosMarketplaces, extrairLinksRadar(outrosMarketplaces)).linksResgate,
+    [],
+    "semantica Shopee nao altera demais marketplaces"
+  );
+}
+
 function testarAwinKabum() {
   const destino = encodeURIComponent("https://www.kabum.com.br/produto/123456/produto-teste");
   const awin1 = `https://www.awin1.com/cread.php?awinmid=17729&awinaffid=999&clickref=abc&ued=${destino}`;
@@ -123,6 +210,7 @@ testarRegressoesLinks();
 testarAliExpressLinks();
 testarLimpezaEDeduplicacao();
 testarCuponsETexto();
+testarSelecaoSemanticaShopee();
 testarAwinKabum();
 
 console.log("radar-enriquecimento-conservador: ok");
