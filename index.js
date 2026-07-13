@@ -3664,7 +3664,7 @@ function motivoRetencaoSemDestino(analises = []) {
 
 function marcarOfertaRetida(oferta = {}, motivoRetencao = "retida_sem_destino_compativel") {
   oferta.status = "retida";
-  oferta.statusDetalhe = "Retida por falta de destino compatÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­vel";
+  oferta.statusDetalhe = "Retida por falta de destino compatível.";
   oferta.motivoRetencao = motivoRetencao;
   oferta.retidaEm = new Date().toISOString();
   oferta.erro = "";
@@ -11363,6 +11363,34 @@ async function resolverLinkOriginalRadar(url = "") {
   }
 }
 
+function motivoKabumIncompletoControlado(motivo = "") {
+  return [
+    "kabum_titulo_generico",
+    "kabum_produto_nao_comprovado",
+    "kabum_html_intermediario"
+  ].includes(String(motivo || "").trim());
+}
+
+function logKabumRadarDescartadaIncompleta(motivo = "", erro = {}, resolucao = {}) {
+  const diagnostico = erro?.kabumDiagnostico || {};
+  const link = resolucao.linkOriginalLimpo || resolucao.urlResolvida || resolucao.urlCapturada || "";
+  const host = diagnostico.host || (() => {
+    try {
+      return new URL(String(link || "")).hostname.toLowerCase();
+    } catch {
+      return "";
+    }
+  })();
+
+  console.log("[RADAR-KABUM-DESCARTADA-INCOMPLETA]", {
+    motivo,
+    host,
+    temProdutoId: diagnostico.temProdutoId === true,
+    temImagem: diagnostico.temImagem === true,
+    tituloNormalizado: String(diagnostico.tituloNormalizado || "").slice(0, 120)
+  });
+}
+
 async function importarOfertaRadarPorLink(url = "", contexto = {}) {
   const adminMasterId = obterClienteIdAdminMaster();
   const resolucao = await resolverLinkOriginalRadar(url);
@@ -11423,6 +11451,18 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
           }
         };
       } catch (e) {
+        const motivoKabumControlado = e.motivo || e.codigo || e.message || "";
+        if (motivoKabumIncompletoControlado(motivoKabumControlado)) {
+          logKabumRadarDescartadaIncompleta(motivoKabumControlado, e, resolucao);
+          return {
+            ok: false,
+            motivo: motivoKabumControlado,
+            motivoTecnico: motivoKabumControlado,
+            resolucao,
+            detalhes: e.kabumDiagnostico || {}
+          };
+        }
+
         if (!erroKabumHtml403(e)) {
           throw e;
         }
@@ -12924,6 +12964,17 @@ function retidaEquivalenteJaExiste(clienteId = "admin", oferta = {}) {
   });
 }
 
+function retidaCanonicaJaExiste(clienteId = "admin", oferta = {}) {
+  const chaveCanonica = chaveCanonicaRadarOferta(oferta);
+  if (!chaveCanonica) return null;
+
+  return fila.find(item => {
+    if (String(item.clienteId || "admin") !== String(clienteId || "admin")) return false;
+    if (normalizarTexto(item.status || "") !== "retida") return false;
+    return chaveCanonicaRadarOferta(item) === chaveCanonica;
+  }) || null;
+}
+
 function reterRadarSemDestinoCliente(clienteId = "admin", oferta = {}) {
   marcarOfertaRetida(oferta, "retida_sem_destino_compativel");
   oferta.statusRadar = "retida";
@@ -12932,6 +12983,24 @@ function reterRadarSemDestinoCliente(clienteId = "admin", oferta = {}) {
   oferta.motivo = "sem_destino_compativel";
   oferta.motivoTecnico = "sem_destino_compativel";
   oferta.motivoFinal = "retida_sem_destino_compativel";
+
+  const chaveCanonicaRetida = chaveCanonicaRadarOferta(oferta);
+  if (chaveCanonicaRetida && retidaCanonicaJaExiste(clienteId, oferta)) {
+    console.log("[RADAR-RETIDA-CANONICA-DUPLICADA]", {
+      clienteId,
+      chaveCanonica: chaveCanonicaRetida,
+      motivo: "retida_canonica_ja_existente"
+    });
+
+    return {
+      ok: true,
+      adicionada: false,
+      retida: true,
+      duplicada: true,
+      motivo: "retida_sem_destino_compativel",
+      oferta
+    };
+  }
 
   if (retidaEquivalenteJaExiste(clienteId, oferta)) {
     logOptimus("FILA", "Radar retido duplicado ignorado", {

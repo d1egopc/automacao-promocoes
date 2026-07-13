@@ -1,4 +1,7 @@
 const axios = require("axios");
+const {
+  camposIdentidadeCanonicaOferta
+} = require("../../modules/radar/produto-canonico");
 
 const KABUM_HTML_TIMEOUT_MS = 20000;
 
@@ -39,6 +42,154 @@ async function baixarHtmlKabum(url) {
 
     throw e;
   }
+}
+
+function textoKabumSeguro(valor = "") {
+  return String(valor || "").trim();
+}
+
+function normalizarTituloKabum(valor = "") {
+  return textoKabumSeguro(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&[a-z0-9#]+;/gi, " ")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function limparSufixoTituloKabum(titulo = "") {
+  return textoKabumSeguro(titulo)
+    .replace(/\s*(?:\||-)\s*(?:KaBuM!?|Kabum BR|BR Kabum)\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tituloGenericoKabum(titulo = "") {
+  const normalizadoOriginal = normalizarTituloKabum(titulo);
+  const normalizadoLimpo = normalizarTituloKabum(limparSufixoTituloKabum(titulo));
+
+  if (["access denied", "just a moment", "cloudflare"].some(item => normalizadoOriginal.includes(item))) {
+    return {
+      generico: true,
+      motivo: "kabum_html_intermediario",
+      tituloNormalizado: normalizadoOriginal
+    };
+  }
+
+  const genericosExatos = new Set([
+    "br kabum",
+    "kabum br",
+    "kabum",
+    "loja kabum",
+    "pagina kabum",
+    "produto importado de awin"
+  ]);
+
+  if (!normalizadoLimpo || genericosExatos.has(normalizadoLimpo)) {
+    return {
+      generico: true,
+      motivo: "kabum_titulo_generico",
+      tituloNormalizado: normalizadoLimpo || normalizadoOriginal
+    };
+  }
+
+  const termosProduto = normalizadoLimpo
+    .split(" ")
+    .filter(Boolean)
+    .filter(termo => !["br", "kabum", "loja", "pagina", "produto"].includes(termo));
+
+  if (termosProduto.length < 2) {
+    return {
+      generico: true,
+      motivo: "kabum_titulo_generico",
+      tituloNormalizado: normalizadoLimpo
+    };
+  }
+
+  return {
+    generico: false,
+    motivo: "",
+    tituloNormalizado: normalizadoLimpo
+  };
+}
+
+function decodeUrlKabumSeguro(url = "") {
+  let atual = textoKabumSeguro(url);
+  for (let i = 0; i < 3 && /%[0-9a-f]{2}/i.test(atual); i += 1) {
+    try {
+      const decodificada = decodeURIComponent(atual);
+      if (decodificada === atual) break;
+      atual = decodificada;
+    } catch {
+      break;
+    }
+  }
+  return atual;
+}
+
+function diagnosticarProdutoKabum(url = "", titulo = "", imagem = "") {
+  const tituloDiagnostico = tituloGenericoKabum(titulo);
+  const identidade = camposIdentidadeCanonicaOferta({
+    marketplace: "kabum",
+    urlOriginal: url,
+    linkOriginal: url,
+    urlFinal: url
+  });
+  const host = (() => {
+    try {
+      return new URL(textoKabumSeguro(url)).hostname.toLowerCase();
+    } catch {
+      return "";
+    }
+  })();
+  const produtoIdCanonico = textoKabumSeguro(identidade.produtoIdCanonico || identidade.produtoId);
+  const urlTexto = textoKabumSeguro(url);
+  const urlDecodificada = decodeUrlKabumSeguro(urlTexto);
+  const temProdutoId = Boolean(produtoIdCanonico);
+  const urlKabumProduto = /kabum\.com\.br\/produto\/\d+/i.test(urlTexto);
+  const awinComProduto = /awin1?\.com/i.test(host) && /kabum\.com\.br\/produto\/\d+/i.test(urlDecodificada);
+  const urlValida = urlKabumProduto || awinComProduto || (temProdutoId && /kabum\.com\.br|awin1?\.com/i.test(urlTexto));
+
+  const base = {
+    host,
+    temProdutoId,
+    temImagem: Boolean(imagem),
+    tituloNormalizado: tituloDiagnostico.tituloNormalizado,
+    chaveCanonica: identidade.chaveCanonica || "",
+    produtoIdCanonico
+  };
+
+  if (tituloDiagnostico.generico) {
+    return {
+      ...base,
+      ok: false,
+      motivo: tituloDiagnostico.motivo
+    };
+  }
+
+  if (!urlValida || !temProdutoId) {
+    return {
+      ...base,
+      ok: false,
+      motivo: "kabum_produto_nao_comprovado"
+    };
+  }
+
+  return {
+    ...base,
+    ok: true,
+    motivo: ""
+  };
+}
+
+function erroKabumControlado(motivo = "kabum_produto_nao_comprovado", diagnostico = {}) {
+  const erro = new Error(motivo);
+  erro.codigo = motivo;
+  erro.motivo = motivo;
+  erro.kabumDiagnostico = diagnostico;
+  return erro;
 }
 
 // ============================= FUNCAO IMPORTA AWIN/KABUM =====================================
@@ -99,6 +250,13 @@ if (imagem) {
 console.log("[INFO] IMAGEM KABUM:", imagem);
 
   // ================= EXTRAIR PREÃ‡O =================
+
+const tituloFinal = limparSufixoTituloKabum(titulo);
+const diagnosticoProduto = diagnosticarProdutoKabum(url, tituloFinal || titulo, imagem);
+
+if (!diagnosticoProduto.ok) {
+  throw erroKabumControlado(diagnosticoProduto.motivo, diagnosticoProduto);
+}
 
 let precoAtual = "";
 let precoAntigo = "";
@@ -227,7 +385,10 @@ avisoPagamento = avisoPagamento || "";
 
   return {
   marketplace: "kabum",
-  titulo: titulo.replace(/\|.*?KaBuM.*/i, "").trim(),
+  titulo: tituloFinal,
+  produtoId: diagnosticoProduto.produtoIdCanonico || "",
+  produtoIdCanonico: diagnosticoProduto.produtoIdCanonico || "",
+  chaveCanonica: diagnosticoProduto.chaveCanonica || "",
   precoAtual,
   preco: precoAtual,
   precoAntigo,
@@ -243,5 +404,9 @@ avisoPagamento = avisoPagamento || "";
 }
 
 module.exports = {
-  importarProdutoKabumViaAwin
+  importarProdutoKabumViaAwin,
+  diagnosticarProdutoKabum,
+  limparSufixoTituloKabum,
+  normalizarTituloKabum,
+  tituloGenericoKabum
 };
