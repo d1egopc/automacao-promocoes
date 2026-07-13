@@ -95,6 +95,39 @@ function valorVendas(oferta = {}) {
   return numeroInteiro(oferta.vendas ?? oferta.sales ?? oferta.vendasShopee ?? oferta.totalVendas);
 }
 
+function normalizarComparacao(valor = "") {
+  return textoUtil(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function nomeBeneficioFraseCupom(oferta = {}) {
+  const frete = valorFrete(oferta);
+  const beneficio = valorBeneficio(oferta);
+  const fonte = normalizarComparacao([frete, beneficio].filter(Boolean).join(" "));
+
+  if (frete || oferta.freteGratis === true || fonte.includes("frete")) return "frete grátis";
+  if (fonte.includes("pix")) return "PIX";
+  if (fonte.includes("app") || fonte.includes("aplicativo")) return "app";
+  if (fonte.includes("cashback")) return "cashback";
+
+  return "";
+}
+
+function montarFraseCupom(oferta = {}) {
+  const cupom = primeiroTexto(oferta.cupom, oferta.codigoCupom, oferta.cupomCodigo);
+  if (!cupom) return "";
+
+  const precoFinal = formatarMoeda(oferta.valorEfetivo);
+  const beneficio = nomeBeneficioFraseCupom(oferta);
+  if (precoFinal && beneficio) {
+    return `⚡ Aplique o cupom ${cupom} + ${beneficio} para pagar ${precoFinal}.`;
+  }
+
+  return `⚡ Aplique o cupom ${cupom} para obter o desconto.`;
+}
+
 function resolverLinha(bloco, oferta = {}) {
   const tipo = bloco.tipo;
 
@@ -131,8 +164,7 @@ function resolverLinha(bloco, oferta = {}) {
     return cupom ? `🎟️ Cupom: ${cupom}` : "";
   }
   if (tipo === "frase_cupom") {
-    const cupom = primeiroTexto(oferta.cupom, oferta.codigoCupom, oferta.cupomCodigo);
-    return cupom ? `⚡ Aplique o cupom ${cupom} para obter o desconto.` : "";
+    return montarFraseCupom(oferta);
   }
   if (tipo === "beneficio") {
     const beneficio = valorBeneficio(oferta);

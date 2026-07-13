@@ -150,7 +150,7 @@ for (const trecho of [
   "✅ Por:",
   "📉 38% OFF",
   "🎟️ Cupom: PROMO10",
-  "⚡ Aplique o cupom PROMO10 para obter o desconto.",
+  "⚡ Aplique o cupom PROMO10 + frete grátis para pagar R$ 44,90.",
   "💳 Ou 3x de R$ 16,63 sem juros",
   "🚚 Frete gratis",
   "⭐ Avaliacao: 4,8/5",
@@ -181,6 +181,21 @@ const semCupomV11 = renderizarTemplatePersonalizado({
 });
 assert.ok(!semCupomV11.mensagem.includes("Aplique o cupom"), "frase de cupom some sem cupom");
 assert.ok(!semCupomV11.mensagem.includes("Cupom:"), "cupom some sem cupom");
+
+const fraseCupomFallbackV11 = renderizarTemplatePersonalizado({
+  oferta: { cupom: "PROMO10" },
+  template: {
+    id: "tpl_frase_cupom_fallback",
+    canais: ["whatsapp"],
+    blocos: [{ tipo: "frase_cupom", ativo: true, ordem: 10 }]
+  },
+  canal: "whatsapp"
+});
+assert.strictEqual(
+  fraseCupomFallbackV11.mensagem,
+  "⚡ Aplique o cupom PROMO10 para obter o desconto.",
+  "frase de cupom usa fallback sem valor efetivo e beneficio oficial"
+);
 
 const economiaInvalidaV11 = renderizarTemplatePersonalizado({
   oferta: { ...ofertaPreviewV11, precoOriginal: 100, precoAtual: 50, economia: "" },
