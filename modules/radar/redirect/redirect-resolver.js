@@ -1,4 +1,9 @@
 const axios = require("axios");
+const {
+  camposIdentidadeCanonicaOferta,
+  extrairProdutoIdKabumUrl,
+  resolverIdentidadeCanonicaOferta
+} = require("../produto-canonico");
 
 const resolversRegistrados = [];
 const PROMOZONE_API_BASE = "https://link-shortener-501307668672.southamerica-east1.run.app";
@@ -63,13 +68,7 @@ function decodificarParametroAwin(valor = "") {
 }
 
 function extrairProdutoIdKabum(url = "") {
-  try {
-    const parsed = new URL(texto(url));
-    if (!hostname(parsed.toString()).endsWith("kabum.com.br")) return "";
-    return parsed.pathname.match(/\/produto\/(\d+)/i)?.[1] || "";
-  } catch {
-    return "";
-  }
+  return extrairProdutoIdKabumUrl(url);
 }
 
 function diagnosticarAwinKabum(url = "") {
@@ -591,6 +590,27 @@ function logAuditoriaRedirect(resultado = {}, tempoMs = 0) {
   }));
 }
 
+function aplicarIdentidadeCanonicaRedirect(resultado = {}) {
+  const diagnosticoAwin =
+    diagnosticarAwinKabum(resultado.urlOriginal || "") ||
+    diagnosticarAwinKabum(resultado.urlFinal || "") ||
+    null;
+  const identidade = resolverIdentidadeCanonicaOferta({
+    marketplace: resultado.marketplaceDetectado || "",
+    urlOriginal: resultado.urlOriginal || "",
+    urlFinal: resultado.urlFinal || resultado.urlExpandida || "",
+    diagnosticoRedirect: diagnosticoAwin || {}
+  });
+  const camposCanonicos = camposIdentidadeCanonicaOferta(identidade);
+
+  if (!camposCanonicos.chaveCanonica) return resultado;
+
+  return {
+    ...resultado,
+    ...camposCanonicos
+  };
+}
+
 async function resolverRedirectUniversal(url = "", opcoes = {}) {
   const inicio = Date.now();
   const urlOriginal = texto(url);
@@ -624,7 +644,7 @@ async function resolverRedirectUniversal(url = "", opcoes = {}) {
     });
   }
 
-  const final = { ...resultado, urlOriginal, resolver: registro.nome };
+  const final = aplicarIdentidadeCanonicaRedirect({ ...resultado, urlOriginal, resolver: registro.nome });
   logAuditoriaRedirect(final, Date.now() - inicio);
   return final;
 }

@@ -142,6 +142,12 @@ const {
   dominioRedirectPermitido,
   resolverRedirectUniversal
 } = require("./modules/radar/redirect/redirect-resolver");
+const {
+  camposIdentidadeCanonicaOferta,
+  compararIdentidadeCanonicaOfertas,
+  origemDominioCanonicoOferta,
+  resolverIdentidadeCanonicaOferta
+} = require("./modules/radar/produto-canonico");
 const alertasIntegracoes = require("./utils/alertas-integracoes");
 const storageUtils = require("./utils/storage");
 
@@ -2810,6 +2816,48 @@ function linksDuplicidadeRadar(oferta = {}) {
   return [...new Set(links)];
 }
 
+function identidadeCanonicaRadar(oferta = {}) {
+  return resolverIdentidadeCanonicaOferta(oferta);
+}
+
+function chaveCanonicaRadarOferta(oferta = {}) {
+  return identidadeCanonicaRadar(oferta).chaveCanonica || "";
+}
+
+function aplicarIdentidadeCanonicaRadar(oferta = {}) {
+  const camposCanonicos = camposIdentidadeCanonicaOferta(oferta);
+  if (!camposCanonicos.chaveCanonica) return oferta;
+
+  return {
+    ...oferta,
+    ...camposCanonicos
+  };
+}
+
+function logProdutoCanonicoRadar(oferta = {}) {
+  const identidade = identidadeCanonicaRadar(oferta);
+  if (!identidade.chaveCanonica) return;
+
+  console.log("[RADAR-PRODUTO-CANONICO]", {
+    origemDominio: identidade.origemDominio || origemDominioCanonicoOferta(oferta),
+    marketplaceCanonico: identidade.marketplaceCanonico,
+    produtoIdCanonico: identidade.produtoIdCanonico,
+    chaveCanonica: identidade.chaveCanonica
+  });
+}
+
+function logDuplicidadeCanonicaRadar({ oferta = {}, existente = {}, janela = "" } = {}) {
+  const chaveCanonica = chaveCanonicaRadarOferta(oferta) || chaveCanonicaRadarOferta(existente);
+  if (!chaveCanonica) return;
+
+  console.log("[RADAR-DUPLICIDADE-CANONICA-BLOQUEADA]", {
+    chaveCanonica,
+    origemAtual: origemDominioCanonicoOferta(oferta),
+    origemExistente: origemDominioCanonicoOferta(existente),
+    janela
+  });
+}
+
 function precoNumericoDuplicidadeRadar(oferta = {}) {
   return numeroMoedaOferta(
     oferta.precoAtual ||
@@ -2882,6 +2930,15 @@ function motivoDuplicidadeRadarItem(item = {}, oferta = {}, contexto = {}) {
   const tituloNovo = contexto.tituloNovo || normalizarTexto(oferta.titulo || oferta.nome || "");
   const marketplaceNovo = contexto.marketplaceNovo || normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || "");
   const faixaPrecoNova = contexto.faixaPrecoNova || faixaPrecoDuplicidadeRadar(oferta);
+  const comparacaoCanonica = compararIdentidadeCanonicaOfertas(oferta, item);
+
+  if (comparacaoCanonica.duplicada) {
+    return comparacaoCanonica.motivo;
+  }
+
+  if (comparacaoCanonica.ambasCanonicas) {
+    return "";
+  }
 
   const linksExistentes = linksDuplicidadeRadar(item);
   if (linksNovos.some(link => linksExistentes.includes(link))) {
@@ -2974,6 +3031,13 @@ function duplicidadeRadarNaFilaCliente(oferta = {}, clienteId = "admin") {
 
     if (motivoDuplicidade) {
       const statusDuplicada = normalizarTexto(item.status || item.statusRadar || "");
+      if (motivoDuplicidade === "mesma_chave_canonica") {
+        logDuplicidadeCanonicaRadar({
+          oferta,
+          existente: item,
+          janela: statusDuplicada || "fila"
+        });
+      }
       logDecisaoDuplicidadeRadar({
         clienteId: cliente,
         oferta,
@@ -7688,6 +7752,7 @@ function chavesRemocaoRadar(oferta = {}) {
 
 function chavesTratamentoRadar(oferta = {}) {
   const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
+  const chaveCanonica = chaveCanonicaRadarOferta(oferta);
   const marketplace = normalizarMarketplaceRadar(
     oferta.marketplace ||
     oferta.mercado ||
@@ -7715,6 +7780,7 @@ function chavesTratamentoRadar(oferta = {}) {
 
   return [
     oferta.id ? `id:${oferta.id}` : "",
+    chaveCanonica ? `canonica:${chaveCanonica}` : "",
     ...links.map(link => `link:${link}`),
     marketplace && titulo && preco ? `produto:${marketplace}|${titulo}|${preco}` : "",
     marketplace && titulo && grupo && preco ? `produto_grupo:${marketplace}|${titulo}|${grupo}|${preco}` : ""
@@ -10860,6 +10926,10 @@ async function resolverLinkOriginalRadar(url = "") {
   }
 
   const marketplaceDireto = dominioMarketplaceConhecidoRadar(capturada);
+  const camposCanonicosCapturada = camposIdentidadeCanonicaOferta({
+    urlOriginal: capturada,
+    linkOriginal: capturada
+  });
 
   if (linkRedirectPermitidoRadar(capturada)) {
     const marketplacePromozoneSugerido = normalizarMarketplaceRadar(detectarMarketplaceRadarLink(capturada));
@@ -10875,6 +10945,12 @@ async function resolverLinkOriginalRadar(url = "") {
     const motivoLogFalha = redirect.metodo === "erro_http"
       ? (redirect.motivo || motivoFalha)
       : motivoFalha;
+    const camposCanonicosRedirect = camposIdentidadeCanonicaOferta({
+      ...redirect,
+      marketplace: marketplaceFinal || marketplacePromozoneSugerido || "",
+      urlOriginal: capturada,
+      urlFinal: resolvida
+    });
 
     if (!redirect.ok || !marketplaceFinal || !resolvida || resolvida === capturada) {
       console.log("[RADAR-REDIRECT-FALHOU]", JSON.stringify({
@@ -10902,6 +10978,7 @@ async function resolverLinkOriginalRadar(url = "") {
         ok: false,
         motivo: motivoFalha,
         motivoTecnico: motivoFalha,
+        ...camposCanonicosRedirect,
         urlCapturada: capturada,
         urlResolvida: resolvida,
         linkOriginalRadar: capturada,
@@ -10914,6 +10991,11 @@ async function resolverLinkOriginalRadar(url = "") {
     }
 
     const linkOriginalLimpo = limparUrlProdutoRadar(resolvida, marketplaceFinal) || resolvida;
+    logProdutoCanonicoRadar({
+      ...camposCanonicosRedirect,
+      urlOriginal: capturada,
+      urlFinal: resolvida
+    });
     console.log("[RADAR-REDIRECT-RESOLVIDO]", JSON.stringify({
       linkOriginal: capturada,
       linkResolvido: linkOriginalLimpo,
@@ -10938,6 +11020,7 @@ async function resolverLinkOriginalRadar(url = "") {
 
     return {
       ok: true,
+      ...camposCanonicosRedirect,
       urlCapturada: capturada,
       urlResolvida: resolvida,
       linkOriginalRadar: capturada,
@@ -11131,6 +11214,16 @@ async function resolverLinkOriginalRadar(url = "") {
 
   if (marketplaceDireto) {
     const linkOriginalLimpo = limparUrlProdutoRadar(capturada, marketplaceDireto) || capturada;
+    const camposCanonicosDireto = camposIdentidadeCanonicaOferta({
+      marketplace: marketplaceDireto,
+      urlOriginal: capturada,
+      urlFinal: capturada
+    });
+    logProdutoCanonicoRadar({
+      ...camposCanonicosDireto,
+      urlOriginal: capturada,
+      urlFinal: capturada
+    });
 
     logRedirectRadar({
       urlOriginal: capturada,
@@ -11144,6 +11237,7 @@ async function resolverLinkOriginalRadar(url = "") {
 
     return {
       ok: true,
+      ...camposCanonicosDireto,
       urlCapturada: capturada,
       urlResolvida: capturada,
       linkOriginalRadar: capturada,
@@ -11195,6 +11289,7 @@ async function resolverLinkOriginalRadar(url = "") {
         ok: false,
         motivo,
         motivoTecnico: motivo,
+        ...camposCanonicosCapturada,
         urlCapturada: capturada,
         urlResolvida: resolvida || "",
         linkOriginalRadar: capturada,
@@ -11206,6 +11301,16 @@ async function resolverLinkOriginalRadar(url = "") {
     }
 
     const linkOriginalLimpo = limparUrlProdutoRadar(resolvida, marketplaceFinal) || resolvida;
+    const camposCanonicosIntermediario = camposIdentidadeCanonicaOferta({
+      marketplace: marketplaceFinal,
+      urlOriginal: capturada,
+      urlFinal: resolvida
+    });
+    logProdutoCanonicoRadar({
+      ...camposCanonicosIntermediario,
+      urlOriginal: capturada,
+      urlFinal: resolvida
+    });
 
     logRedirectRadar({
       urlOriginal: capturada,
@@ -11219,6 +11324,7 @@ async function resolverLinkOriginalRadar(url = "") {
 
     return {
       ok: true,
+      ...camposCanonicosIntermediario,
       urlCapturada: capturada,
       urlResolvida: resolvida,
       linkOriginalRadar: capturada,
@@ -11248,6 +11354,7 @@ async function resolverLinkOriginalRadar(url = "") {
       ok: false,
       motivo: "redirect_bloqueado",
       motivoTecnico: "redirect_bloqueado",
+      ...camposCanonicosCapturada,
       urlCapturada: capturada,
       linkOriginalRadar: capturada,
       linkResolvido: "",
@@ -11964,10 +12071,20 @@ function listarClientesEngineRadar(dados = {}) {
 async function prepararLinksRedirectEngineRadar(dados = {}) {
   const linksCapturados = Array.isArray(dados.linksExtraidos) ? dados.linksExtraidos : [];
   const redirectsRadar = [];
+  const identidadesCanonicas = [];
   const linksEngine = [];
 
   for (const link of linksCapturados) {
     if (!linkRedirectPermitidoRadar(link)) {
+      const camposCanonicosLink = camposIdentidadeCanonicaOferta({ urlOriginal: link, linkOriginal: link });
+      if (camposCanonicosLink.chaveCanonica) {
+        identidadesCanonicas.push({
+          linkOriginalCapturado: link,
+          chaveCanonica: camposCanonicosLink.chaveCanonica,
+          produtoIdCanonico: camposCanonicosLink.produtoIdCanonico,
+          marketplaceCanonico: camposCanonicosLink.marketplaceCanonico
+        });
+      }
       linksEngine.push(link);
       continue;
     }
@@ -11981,9 +12098,20 @@ async function prepararLinksRedirectEngineRadar(dados = {}) {
       linkOriginalCapturado: link,
       linkResolvido,
       marketplaceDetectado: resolucao?.marketplaceReal || "",
+      chaveCanonica: resolucao?.chaveCanonica || "",
+      produtoIdCanonico: resolucao?.produtoIdCanonico || "",
+      marketplaceCanonico: resolucao?.marketplaceCanonico || "",
       status: resolucao?.ok ? "resolvido" : "falhou",
       motivo: resolucao?.ok ? "" : (resolucao?.motivo || resolucao?.motivoTecnico || "redirect_falhou")
     });
+    if (resolucao?.chaveCanonica) {
+      identidadesCanonicas.push({
+        linkOriginalCapturado: link,
+        chaveCanonica: resolucao.chaveCanonica,
+        produtoIdCanonico: resolucao.produtoIdCanonico || "",
+        marketplaceCanonico: resolucao.marketplaceCanonico || ""
+      });
+    }
     linksEngine.push(linkResolvido || link);
   }
 
@@ -11996,10 +12124,12 @@ async function prepararLinksRedirectEngineRadar(dados = {}) {
       ...dados,
       linksExtraidos: linksEngine,
       marketplaceDetectado,
+      chaveCanonica: identidadesCanonicas.length === 1 ? identidadesCanonicas[0].chaveCanonica : dados.chaveCanonica || "",
       metadata: {
         ...(dados.metadata || {}),
         linksOriginaisCapturados: linksCapturados,
-        redirectsRadar
+        redirectsRadar,
+        identidadesCanonicas
       }
     },
     redirectsRadar
@@ -12010,7 +12140,10 @@ async function registrarEventoBrutoEngineRadar(dados = {}) {
   try {
     const linksDados = Array.isArray(dados.linksExtraidos) ? dados.linksExtraidos : [];
     const temRedirectConhecido = linksDados.some(linkRedirectPermitidoRadar);
-    const preparacao = temRedirectConhecido
+    const temIdentidadeCanonica = linksDados.some(link =>
+      Boolean(camposIdentidadeCanonicaOferta({ urlOriginal: link, linkOriginal: link }).chaveCanonica)
+    );
+    const preparacao = temRedirectConhecido || temIdentidadeCanonica
       ? await prepararLinksRedirectEngineRadar(dados)
       : { dados, redirectsRadar: [] };
     const dadosEngine = preparacao.dados;
@@ -12435,7 +12568,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
       cupomImportado: importacao.oferta?.cupom || "",
       cupomMensagem: beneficiosLink.cupom || ""
     });
-    const ofertaRadar = prepararOfertaGlobal({
+    const ofertaRadar = aplicarIdentidadeCanonicaRadar(prepararOfertaGlobal({
       ...importacao.oferta,
       cupom: importacao.oferta?.cupom || beneficiosLink.cupom || "",
       avisoCupom: importacao.oferta?.avisoCupom || beneficiosLink.avisoCupom || "",
@@ -12465,7 +12598,8 @@ const registroEngineRadar = temRedirectConhecidoRadar
       mensagemOriginalRadar: texto.slice(0, 1000),
       capturadaEm: dataCaptura,
       dataEntradaRadar: dataCaptura
-    });
+    }));
+    logProdutoCanonicoRadar(ofertaRadar);
 
     logRadarMlImagemDebug({
       clienteId: adminMasterId,
@@ -12535,6 +12669,9 @@ const registroEngineRadar = temRedirectConhecidoRadar
       linkOriginal: ofertaRadar.linkOriginal || "",
       linkAfiliado: primeiraFila.linkAfiliado || "",
       idOfertaFila: primeiraFila.idOfertaFila || "",
+      chaveCanonica: ofertaRadar.chaveCanonica || "",
+      produtoIdCanonico: ofertaRadar.produtoIdCanonico || "",
+      marketplaceCanonico: ofertaRadar.marketplaceCanonico || "",
       marketplace: ofertaRadar.marketplace || "",
       marketplaceDetectado: importacao.resolucao?.marketplaceReal || ofertaRadar.marketplace || "",
       tipoLink: importacao.resolucao?.tipoLinkRadar === "intermediario" ? "intermediario" : "produto",
@@ -12758,6 +12895,16 @@ function precoChaveRetidaOferta(oferta = {}) {
 }
 
 function chaveRetidaOferta(clienteId = "admin", oferta = {}) {
+  const chaveCanonica = chaveCanonicaRadarOferta(oferta);
+  if (chaveCanonica) {
+    return [
+      String(clienteId || oferta.clienteId || "admin"),
+      "canonica",
+      chaveCanonica,
+      "retida"
+    ].join("|");
+  }
+
   return [
     String(clienteId || oferta.clienteId || "admin"),
     normalizarTexto(oferta.marketplace || oferta.mercado || ""),
@@ -12964,6 +13111,8 @@ console.log("ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â�
     ...(ofertaBase || {}),
     ...origemMonitorada.origem
   });
+  ofertaPreparada = aplicarIdentidadeCanonicaRadar(ofertaPreparada);
+  logProdutoCanonicoRadar(ofertaPreparada);
   const cupomRadar = normalizarBeneficiosRadarOferta(ofertaPreparada);
   ofertaPreparada.cupom = cupomRadar.cupom;
   ofertaPreparada.avisoCupom = cupomRadar.avisoCupom;
