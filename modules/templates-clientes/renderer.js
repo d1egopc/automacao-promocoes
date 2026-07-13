@@ -19,9 +19,24 @@ function primeiroTexto(...valores) {
 function numeroUtil(valor) {
   if (valor === undefined || valor === null || valor === "") return null;
   if (typeof valor === "string" && ["undefined", "null", "nan"].includes(valor.trim().toLowerCase())) return null;
-  const normalizado = typeof valor === "string"
-    ? valor.replace(/R\$/gi, "").replace(/%/g, "").replace(/\./g, "").replace(",", ".").trim()
-    : valor;
+
+  if (typeof valor === "number") return Number.isFinite(valor) && valor > 0 ? valor : null;
+
+  const texto = String(valor)
+    .replace(/R\$/gi, "")
+    .replace(/%/g, "")
+    .replace(/\s/g, "")
+    .trim();
+
+  if (!texto) return null;
+
+  const temVirgula = texto.includes(",");
+  const temPonto = texto.includes(".");
+  const normalizado = temVirgula && temPonto
+    ? texto.replace(/\./g, "").replace(",", ".")
+    : temVirgula
+      ? texto.replace(",", ".")
+      : texto;
   const numero = Number(normalizado);
   return Number.isFinite(numero) && numero > 0 ? numero : null;
 }
@@ -95,6 +110,24 @@ function valorVendas(oferta = {}) {
   return numeroInteiro(oferta.vendas ?? oferta.sales ?? oferta.vendasShopee ?? oferta.totalVendas);
 }
 
+function valorEfetivoConfirmado(oferta = {}) {
+  const valorEfetivo = numeroUtil(oferta.valorEfetivo);
+  const precoAtual = numeroUtil(oferta.precoAtual ?? oferta.precoPor ?? oferta.preco);
+  const origem = normalizarComparacao(oferta.valorEfetivoOrigem);
+
+  if (valorEfetivo == null || precoAtual == null || valorEfetivo >= precoAtual) return null;
+  if (!["cupom", "pix", "app", "cashback", "frete_gratis", "desconto"].some(termo => origem.includes(termo))) {
+    return null;
+  }
+
+  return valorEfetivo;
+}
+
+function valorPrecoPor(oferta = {}) {
+  const valorEfetivo = valorEfetivoConfirmado(oferta);
+  return valorEfetivo ?? oferta.precoAtual ?? oferta.precoPor ?? oferta.preco;
+}
+
 function normalizarComparacao(valor = "") {
   return textoUtil(valor)
     .normalize("NFD")
@@ -119,7 +152,7 @@ function montarFraseCupom(oferta = {}) {
   const cupom = primeiroTexto(oferta.cupom, oferta.codigoCupom, oferta.cupomCodigo);
   if (!cupom) return "";
 
-  const precoFinal = formatarMoeda(oferta.valorEfetivo);
+  const precoFinal = formatarMoeda(valorEfetivoConfirmado(oferta));
   const beneficio = nomeBeneficioFraseCupom(oferta);
   if (precoFinal && beneficio) {
     return `⚡ Aplique o cupom ${cupom} + ${beneficio} para pagar ${precoFinal}.`;
@@ -148,7 +181,7 @@ function resolverLinha(bloco, oferta = {}) {
     return preco ? `❌ De: ${preco}` : "";
   }
   if (tipo === "preco_por") {
-    const preco = formatarMoeda(oferta.valorEfetivo ?? oferta.precoAtual ?? oferta.precoPor ?? oferta.preco);
+    const preco = formatarMoeda(valorPrecoPor(oferta));
     return preco ? `✅ Por: ${preco}` : "";
   }
   if (tipo === "desconto_percentual") {
@@ -213,13 +246,44 @@ function resolverLinha(bloco, oferta = {}) {
   return "";
 }
 
+function grupoBlocoTemplate(tipo = "") {
+  if (tipo === "titulo") return "identificacao";
+  if (["marketplace", "categoria"].includes(tipo)) return "origem";
+  if (["preco_de", "preco_por", "desconto_percentual", "economia"].includes(tipo)) return "precos";
+  if (["cupom", "beneficio", "descricao_adicional", "parcelamento"].includes(tipo)) return "beneficios";
+  if (["avaliacao", "quantidade_avaliacoes", "vendas", "frete"].includes(tipo)) return "prova";
+  if (["cta", "link"].includes(tipo)) return "link";
+  if (tipo === "frase_cupom") return "frase_cupom";
+  if (["aviso_preco", "aviso_alteracao"].includes(tipo)) return "avisos";
+  if (tipo === "rodape") return "rodape";
+  return "outros";
+}
+
 function limparLinhas(linhas = []) {
   return linhas
     .map(linha => String(linha || "").trimEnd())
-    .filter(linha => textoUtil(linha))
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function montarMensagemAgrupada(entradas = []) {
+  const linhas = [];
+  let grupoAnterior = "";
+
+  for (const entrada of entradas) {
+    const linha = String(entrada?.linha || "").trim();
+    if (!textoUtil(linha)) continue;
+
+    const grupo = grupoBlocoTemplate(entrada.tipo);
+    if (linhas.length && grupo && grupoAnterior && grupo !== grupoAnterior) {
+      linhas.push("");
+    }
+    linhas.push(linha);
+    grupoAnterior = grupo;
+  }
+
+  return limparLinhas(linhas);
 }
 
 function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "whatsapp" } = {}) {
@@ -253,14 +317,14 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
       blocosIgnorados.push({ tipo: bloco.tipo, motivo: "sem_dados" });
       continue;
     }
-    linhas.push(linha);
+    linhas.push({ tipo: bloco.tipo, linha });
     blocosRenderizados.push(bloco.tipo);
   }
 
   if (template.rodape?.ativo) {
     const rodape = String(template.rodape.texto ?? "").trim();
     if (textoUtil(rodape)) {
-      linhas.push(rodape);
+      linhas.push({ tipo: "rodape", linha: rodape });
       blocosRenderizados.push("rodape");
     } else {
       blocosIgnorados.push({ tipo: "rodape", motivo: "sem_dados" });
@@ -269,7 +333,7 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
 
   return {
     ok: true,
-    mensagem: limparLinhas(linhas),
+    mensagem: montarMensagemAgrupada(linhas),
     templateIdUsado: template.id || "",
     blocosRenderizados,
     blocosIgnorados

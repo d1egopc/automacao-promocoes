@@ -197,6 +197,93 @@ assert.strictEqual(
   "frase de cupom usa fallback sem valor efetivo e beneficio oficial"
 );
 
+const precoMercadoLivreRealV11 = renderizarTemplatePersonalizado({
+  oferta: {
+    titulo: "Kit 3 Calca Sarja Masculina",
+    marketplace: "mercadolivre",
+    categoria: "Moda",
+    precoOriginal: "225.91",
+    precoAtual: "198.80",
+    cupom: "MODASEMPRE",
+    linkAfiliado: "https://meli.la/1Raac5j",
+    avisoAlteracao: "Oferta sujeita a alteracao de preco."
+  },
+  template: {
+    id: "tpl_preco_ml",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "titulo", ativo: true, ordem: 10 },
+      { tipo: "marketplace", ativo: true, ordem: 20 },
+      { tipo: "categoria", ativo: true, ordem: 30 },
+      { tipo: "preco_de", ativo: true, ordem: 40 },
+      { tipo: "preco_por", ativo: true, ordem: 50 },
+      { tipo: "cupom", ativo: true, ordem: 60 },
+      { tipo: "cta", ativo: true, ordem: 70 },
+      { tipo: "link", ativo: true, ordem: 80 },
+      { tipo: "aviso_alteracao", ativo: true, ordem: 90 }
+    ]
+  },
+  canal: "whatsapp"
+});
+assert.ok(precoMercadoLivreRealV11.mensagem.includes("❌ De: R$ 225,91"), "preco original decimal com ponto nao vira centavos");
+assert.ok(precoMercadoLivreRealV11.mensagem.includes("✅ Por: R$ 198,80"), "preco atual decimal com ponto nao vira centavos");
+assert.ok(!precoMercadoLivreRealV11.mensagem.includes("22.591"), "nao multiplica preco original por 100");
+assert.ok(!precoMercadoLivreRealV11.mensagem.includes("19.880"), "nao multiplica preco atual por 100");
+assert.ok(
+  precoMercadoLivreRealV11.mensagem.includes("🔗 Confira aqui:\nhttps://meli.la/1Raac5j"),
+  "CTA e link permanecem juntos"
+);
+assert.ok(
+  precoMercadoLivreRealV11.mensagem.includes("🎟️ Cupom: MODASEMPRE\n\n🔗 Confira aqui:"),
+  "cupom e CTA ficam em grupos separados"
+);
+assert.ok(
+  precoMercadoLivreRealV11.mensagem.includes("https://meli.la/1Raac5j\n\n⚠️ Oferta sujeita"),
+  "aviso final fica separado"
+);
+
+const precoDecimalNumeroV11 = renderizarTemplatePersonalizado({
+  oferta: { precoAtual: 79.9 },
+  template: { id: "tpl_preco_decimal", canais: ["whatsapp"], blocos: [{ tipo: "preco_por", ativo: true, ordem: 10 }] },
+  canal: "whatsapp"
+});
+assert.strictEqual(precoDecimalNumeroV11.mensagem, "✅ Por: R$ 79,90", "preco decimal numerico continua correto");
+
+const precoStringBrasilV11 = renderizarTemplatePersonalizado({
+  oferta: { precoAtual: "198,80" },
+  template: { id: "tpl_preco_br", canais: ["whatsapp"], blocos: [{ tipo: "preco_por", ativo: true, ordem: 10 }] },
+  canal: "whatsapp"
+});
+assert.strictEqual(precoStringBrasilV11.mensagem, "✅ Por: R$ 198,80", "preco string brasileira continua aceito");
+
+const precoFormatadoV11 = renderizarTemplatePersonalizado({
+  oferta: { precoAtual: "R$ 198,80" },
+  template: { id: "tpl_preco_formatado", canais: ["whatsapp"], blocos: [{ tipo: "preco_por", ativo: true, ordem: 10 }] },
+  canal: "whatsapp"
+});
+assert.strictEqual(precoFormatadoV11.mensagem, "✅ Por: R$ 198,80", "preco ja formatado nao e formatado duas vezes");
+
+const semBuracoV11 = renderizarTemplatePersonalizado({
+  oferta: {
+    titulo: "Produto sem buraco",
+    precoAtual: 79.9,
+    linkAfiliado: "https://example.com"
+  },
+  template: {
+    id: "tpl_sem_buraco",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "titulo", ativo: true, ordem: 10 },
+      { tipo: "cupom", ativo: false, ordem: 20 },
+      { tipo: "preco_por", ativo: true, ordem: 30 },
+      { tipo: "link", ativo: true, ordem: 40 }
+    ]
+  },
+  canal: "whatsapp"
+});
+assert.ok(!/\n{3,}/.test(semBuracoV11.mensagem), "bloco desabilitado nao deixa buraco");
+assert.ok(semBuracoV11.mensagem.includes("Produto sem buraco\n\n✅ Por:"), "grupos diferentes recebem uma linha vazia");
+
 const economiaInvalidaV11 = renderizarTemplatePersonalizado({
   oferta: { ...ofertaPreviewV11, precoOriginal: 100, precoAtual: 50, economia: "" },
   template: {
