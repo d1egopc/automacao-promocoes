@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const { listarCatalogoBlocos } = require("./catalogo-blocos");
+const { gerarTemplateUniversal } = require("../template-universal");
 const { normalizarTemplatePayload } = require("./validator");
 const { lerStorageTemplates, salvarTemplatesCliente } = require("./storage");
 const { renderizarTemplatePersonalizado } = require("./renderer");
@@ -31,10 +32,12 @@ function clonar(objeto) {
 }
 
 function listarTemplates(clienteId) {
+  const catalogoBlocos = listarCatalogoBlocos();
   return {
     ok: true,
     padrao: { ...TEMPLATE_PADRAO_OPTIMUS },
-    catalogo: listarCatalogoBlocos(),
+    catalogo: catalogoBlocos,
+    catalogoBlocos,
     templates: lerStorageTemplates(clienteId).templates
   };
 }
@@ -123,8 +126,23 @@ function excluirTemplate(clienteId, templateId) {
 function previewTemplate(clienteId, payload = {}) {
   try {
     const canal = payload.canal || "whatsapp";
+    if (payload.templateId === TEMPLATE_PADRAO_OPTIMUS.id) {
+      const mensagem = gerarTemplateUniversal(obterOfertaPreviewOficial());
+      return {
+        ok: true,
+        mensagem,
+        templateIdUsado: TEMPLATE_PADRAO_OPTIMUS.id,
+        blocosRenderizados: [],
+        blocosIgnorados: []
+      };
+    }
+
     const templatePayload = payload.template || payload;
-    const template = normalizarTemplatePayload(templatePayload, { clienteId, id: "preview_template" });
+    const templatePreview = {
+      ...templatePayload,
+      nome: templatePayload.nome || "Preview do template"
+    };
+    const template = normalizarTemplatePayload(templatePreview, { clienteId, id: "preview_template" });
     const resultado = renderizarTemplatePersonalizado({ oferta: obterOfertaPreviewOficial(), template, canal });
     logTemplate("[TEMPLATE-PREVIEW]", {
       clienteId,

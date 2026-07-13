@@ -38,10 +38,13 @@ function criarRotasTemplatesClientes(deps = {}) {
   router.get("/", (req, res) => {
     try {
       if (!recursoHabilitado(req)) {
+        const lista = service.listarTemplates(cliente(req));
         return res.json({
           ok: true,
           recursoHabilitado: false,
           padrao: { ...service.TEMPLATE_PADRAO_OPTIMUS },
+          catalogo: lista.catalogo,
+          catalogoBlocos: lista.catalogoBlocos,
           templates: []
         });
       }

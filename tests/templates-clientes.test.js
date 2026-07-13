@@ -14,7 +14,10 @@ const {
   previewTemplate
 } = require("../modules/templates-clientes/service");
 const { renderizarTemplatePersonalizado } = require("../modules/templates-clientes/renderer");
+const { listarCatalogoBlocos } = require("../modules/templates-clientes/catalogo-blocos");
+const { obterOfertaPreviewOficial } = require("../modules/templates-clientes/oferta-preview");
 const { lerStorageTemplates } = require("../modules/templates-clientes/storage");
+const { gerarTemplateUniversal } = require("../modules/template-universal");
 
 function assertThrowsCodigo(fn, codigo) {
   assert.throws(fn, erro => erro && (erro.codigo === codigo || erro.message === codigo));
@@ -89,6 +92,138 @@ assert.ok(preview.blocosRenderizados.includes("link"));
 const storage = lerStorageTemplates("cliente_a");
 assert.ok(!storage.templates.some(template => template.id === "padrao_optimus"), "Template padrao nao aparece no storage do cliente");
 assert.strictEqual(listarTemplates("cliente_a").padrao.id, "padrao_optimus");
+
+// V1.1 - catalogo completo e preview fiel
+const catalogoV11 = listarCatalogoBlocos();
+const tiposCatalogoV11 = catalogoV11.map(item => item.tipo);
+for (const tipo of [
+  "titulo",
+  "preco_de",
+  "preco_por",
+  "cupom",
+  "economia",
+  "cta",
+  "link",
+  "categoria",
+  "marketplace",
+  "desconto_percentual",
+  "frase_cupom",
+  "beneficio",
+  "descricao_adicional",
+  "parcelamento",
+  "frete",
+  "avaliacao",
+  "quantidade_avaliacoes",
+  "vendas",
+  "aviso_preco",
+  "aviso_alteracao"
+]) {
+  assert.ok(tiposCatalogoV11.includes(tipo), `catalogo inclui ${tipo}`);
+}
+assert.ok(catalogoV11.every(item => item.nomeVisual && item.descricaoVisual && item.emojiPadrao !== undefined), "catalogo expoe metadados visuais");
+assert.ok(catalogoV11.every(item => item.ordemPadrao % 10 === 0), "ordem padrao usa multiplos de 10");
+assert.ok(listarTemplates("cliente_a").catalogoBlocos.some(item => item.tipo === "parcelamento"), "GET expõe catalogoBlocos");
+
+const templatePadraoNovo = criarTemplate("cliente_a", { nome: "Completo Padrao V11" }).template;
+assert.ok(templatePadraoNovo.blocos.some(bloco => bloco.tipo === "frase_cupom" && bloco.ativo === true), "novo template nasce com blocos uteis ativos");
+assert.ok(templatePadraoNovo.blocos.some(bloco => bloco.tipo === "economia" && bloco.ativo === false), "economia nasce desligada para nao induzir recalculo");
+assert.ok(templatePadraoNovo.blocos.every(bloco => bloco.id === bloco.tipo), "id final do bloco acompanha o tipo");
+
+const blocosCompletosV11 = tiposCatalogoV11.map((tipo, indice) => ({ tipo, ativo: true, ordem: (indice + 1) * 10 }));
+const ofertaPreviewV11 = obterOfertaPreviewOficial();
+const renderCompletoV11 = renderizarTemplatePersonalizado({
+  oferta: ofertaPreviewV11,
+  template: {
+    id: "tpl_v11",
+    canais: ["whatsapp", "telegram", "social"],
+    blocos: blocosCompletosV11,
+    rodape: { ativo: true, texto: "Rodape livre\nSegunda linha" }
+  },
+  canal: "whatsapp"
+});
+assert.strictEqual(renderCompletoV11.ok, true, "preview personalizado completo renderiza");
+for (const trecho of [
+  "🔥 Kit 4 Caixas Sabonetes Natura Tododia",
+  "🛍️ Amazon",
+  "📂 Beleza e cuidados pessoais",
+  "❌ De:",
+  "✅ Por:",
+  "📉 38% OFF",
+  "🎟️ Cupom: PROMO10",
+  "⚡ Aplique o cupom PROMO10 para obter o desconto.",
+  "💳 Ou 3x de R$ 16,63 sem juros",
+  "🚚 Frete gratis",
+  "⭐ Avaliacao: 4,8/5",
+  "👥 1.240 avaliacoes",
+  "🛒 5.200 vendidos",
+  "🔗 Confira aqui:",
+  "https://optimuspromo.com.br/oferta/preview-template",
+  "⚠️ Preco promocional por tempo limitado.",
+  "⚠️ Oferta sujeita a alteracao de preco.",
+  "Rodape livre\nSegunda linha"
+]) {
+  assert.ok(renderCompletoV11.mensagem.includes(trecho), `preview inclui: ${trecho}`);
+}
+assert.ok(!/[ÃÅ¢ï¿½�]/.test(renderCompletoV11.mensagem), "preview personalizado nao contem mojibake");
+
+const semCupomV11 = renderizarTemplatePersonalizado({
+  oferta: { ...ofertaPreviewV11, cupom: "", cupomCodigo: "" },
+  template: {
+    id: "tpl_sem_cupom",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "frase_cupom", ativo: true, ordem: 10 },
+      { tipo: "cupom", ativo: true, ordem: 20 },
+      { tipo: "link", ativo: true, ordem: 30 }
+    ]
+  },
+  canal: "whatsapp"
+});
+assert.ok(!semCupomV11.mensagem.includes("Aplique o cupom"), "frase de cupom some sem cupom");
+assert.ok(!semCupomV11.mensagem.includes("Cupom:"), "cupom some sem cupom");
+
+const economiaInvalidaV11 = renderizarTemplatePersonalizado({
+  oferta: { ...ofertaPreviewV11, precoOriginal: 100, precoAtual: 50, economia: "" },
+  template: {
+    id: "tpl_economia",
+    canais: ["whatsapp"],
+    blocos: [{ tipo: "economia", ativo: true, ordem: 10 }]
+  },
+  canal: "whatsapp"
+});
+assert.ok(!economiaInvalidaV11.mensagem.includes("Economia:"), "economia nao e recalculada no template personalizado");
+
+const blocoDesabilitadoV11 = renderizarTemplatePersonalizado({
+  oferta: ofertaPreviewV11,
+  template: {
+    id: "tpl_desabilitado",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "titulo", ativo: false, ordem: 10 },
+      { tipo: "link", ativo: true, ordem: 20 }
+    ]
+  },
+  canal: "whatsapp"
+});
+assert.ok(!blocoDesabilitadoV11.mensagem.includes("Kit 4 Caixas"), "bloco desabilitado some do preview");
+
+const previewPadrao = previewTemplate("cliente_a", { canal: "whatsapp", templateId: "padrao_optimus" });
+assert.strictEqual(previewPadrao.ok, true, "preview padrao funciona");
+assert.strictEqual(previewPadrao.templateIdUsado, "padrao_optimus");
+assert.deepStrictEqual(previewPadrao.blocosRenderizados, []);
+assert.strictEqual(previewPadrao.mensagem, gerarTemplateUniversal(obterOfertaPreviewOficial()), "preview padrao usa Template Universal real");
+assert.ok(!/[ÃÅ¢ï¿½�]/.test(previewPadrao.mensagem), "preview padrao nao contem mojibake");
+
+const previewSemNome = previewTemplate("cliente_a", {
+  canal: "whatsapp",
+  template: {
+    canais: ["whatsapp"],
+    blocos: [{ tipo: "titulo", ativo: true, ordem: 10 }]
+  }
+});
+assert.strictEqual(previewSemNome.template.nome, "Preview do template", "preview usa nome temporario valido");
+
+assertThrowsCodigo(() => criarTemplate("cliente_a", { blocos: [{ tipo: "titulo", ativo: true, ordem: 10 }] }), "template_nome_invalido");
 
 const incompat = renderizarTemplatePersonalizado({
   oferta: { titulo: "Teste", precoAtual: 10, linkAfiliado: "https://example.com" },

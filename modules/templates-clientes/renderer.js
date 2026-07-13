@@ -1,4 +1,4 @@
-﻿const { CANAIS_PERMITIDOS, getBlocoCatalogo } = require("./catalogo-blocos");
+const { CANAIS_PERMITIDOS, getBlocoCatalogo } = require("./catalogo-blocos");
 
 function textoUtil(valor) {
   if (valor === undefined || valor === null) return "";
@@ -8,10 +8,20 @@ function textoUtil(valor) {
   return texto;
 }
 
+function primeiroTexto(...valores) {
+  for (const valor of valores) {
+    const texto = textoUtil(valor);
+    if (texto) return texto;
+  }
+  return "";
+}
+
 function numeroUtil(valor) {
   if (valor === undefined || valor === null || valor === "") return null;
   if (typeof valor === "string" && ["undefined", "null", "nan"].includes(valor.trim().toLowerCase())) return null;
-  const normalizado = typeof valor === "string" ? valor.replace(/\./g, "").replace(",", ".") : valor;
+  const normalizado = typeof valor === "string"
+    ? valor.replace(/R\$/gi, "").replace(/%/g, "").replace(/\./g, "").replace(",", ".").trim()
+    : valor;
   const numero = Number(normalizado);
   return Number.isFinite(numero) && numero > 0 ? numero : null;
 }
@@ -22,51 +32,152 @@ function formatarMoeda(valor) {
   return numero.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+function numeroInteiro(valor) {
+  const numero = numeroUtil(valor);
+  if (!numero) return "";
+  return String(Math.round(numero));
+}
+
+function formatarPercentual(valor) {
+  const numero = numeroUtil(valor);
+  if (!numero) return "";
+  return `${Math.round(numero)}%`;
+}
+
+function formatarQuantidade(valor) {
+  const numero = numeroUtil(valor);
+  if (!numero) return "";
+  return Math.round(numero).toLocaleString("pt-BR");
+}
+
 function valorEconomia(oferta = {}) {
-  const direto = numeroUtil(oferta.economia ?? oferta.valorEconomia);
-  if (direto) return direto;
-  const de = numeroUtil(oferta.precoOriginal ?? oferta.precoDe ?? oferta.precoAntigo);
-  const por = numeroUtil(oferta.precoAtual ?? oferta.precoPor ?? oferta.preco);
-  if (de && por && de > por) return de - por;
-  return null;
+  return numeroUtil(oferta.economia ?? oferta.valorEconomia ?? oferta.economiaValor);
+}
+
+function valorBeneficio(oferta = {}) {
+  if (Array.isArray(oferta.beneficios)) {
+    const primeiro = oferta.beneficios.map(textoUtil).find(Boolean);
+    if (primeiro) return primeiro;
+  }
+
+  return primeiroTexto(
+    oferta.beneficioTexto,
+    oferta.beneficioExtra,
+    oferta.avisoCupom,
+    oferta.beneficioDetectado
+  );
+}
+
+function valorFrete(oferta = {}) {
+  const texto = primeiroTexto(oferta.frete, oferta.freteTexto, oferta.avisoFrete);
+  if (texto) return texto;
+  return oferta.freteGratis === true ? "Frete gratis" : "";
+}
+
+function valorAvaliacao(oferta = {}) {
+  const texto = primeiroTexto(oferta.avaliacao, oferta.rating, oferta.nota);
+  if (texto) return texto;
+  const score = numeroUtil(oferta.score);
+  return score ? `${Math.round(score)}/100` : "";
+}
+
+function valorQuantidadeAvaliacoes(oferta = {}) {
+  return numeroInteiro(
+    oferta.quantidadeAvaliacoes ??
+    oferta.totalAvaliacoes ??
+    oferta.avaliacoes ??
+    oferta.reviews ??
+    oferta.reviewCount
+  );
+}
+
+function valorVendas(oferta = {}) {
+  return numeroInteiro(oferta.vendas ?? oferta.sales ?? oferta.vendasShopee ?? oferta.totalVendas);
 }
 
 function resolverLinha(bloco, oferta = {}) {
-  if (bloco.tipo === "titulo") {
-    const titulo = textoUtil(oferta.titulo || oferta.nome);
-    return titulo ? `ðŸ”¥ ${titulo}` : "";
+  const tipo = bloco.tipo;
+
+  if (tipo === "titulo") {
+    const titulo = primeiroTexto(oferta.titulo, oferta.nome);
+    return titulo ? `🔥 ${titulo}` : "";
   }
-  if (bloco.tipo === "marketplace") {
-    const marketplace = textoUtil(oferta.marketplace || oferta.loja);
-    return marketplace ? `ðŸ›ï¸ ${marketplace}` : "";
+  if (tipo === "marketplace") {
+    const marketplace = primeiroTexto(oferta.marketplace, oferta.loja);
+    return marketplace ? `🛍️ ${marketplace}` : "";
   }
-  if (bloco.tipo === "categoria") {
+  if (tipo === "categoria") {
     const categoria = textoUtil(oferta.categoria);
-    return categoria ? `ðŸ“ ${categoria}` : "";
+    return categoria ? `📂 ${categoria}` : "";
   }
-  if (bloco.tipo === "preco_de") {
+  if (tipo === "preco_de") {
     const preco = formatarMoeda(oferta.precoOriginal ?? oferta.precoDe ?? oferta.precoAntigo);
-    return preco ? `âŒ De: ${preco}` : "";
+    return preco ? `❌ De: ${preco}` : "";
   }
-  if (bloco.tipo === "preco_por") {
-    const preco = formatarMoeda(oferta.precoAtual ?? oferta.precoPor ?? oferta.preco);
-    return preco ? `âœ… Por: ${preco}` : "";
+  if (tipo === "preco_por") {
+    const preco = formatarMoeda(oferta.valorEfetivo ?? oferta.precoAtual ?? oferta.precoPor ?? oferta.preco);
+    return preco ? `✅ Por: ${preco}` : "";
   }
-  if (bloco.tipo === "economia") {
+  if (tipo === "desconto_percentual") {
+    const desconto = formatarPercentual(oferta.descontoPercentual ?? oferta.desconto);
+    return desconto ? `📉 ${desconto} OFF` : "";
+  }
+  if (tipo === "economia") {
     const economia = formatarMoeda(valorEconomia(oferta));
-    return economia ? `ðŸ’¸ Economia: ${economia}` : "";
+    return economia ? `💸 Economia: ${economia}` : "";
   }
-  if (bloco.tipo === "cupom") {
-    const cupom = textoUtil(oferta.cupom || oferta.codigoCupom);
-    return cupom ? `ðŸŽŸï¸ Cupom: ${cupom}` : "";
+  if (tipo === "cupom") {
+    const cupom = primeiroTexto(oferta.cupom, oferta.codigoCupom, oferta.cupomCodigo);
+    return cupom ? `🎟️ Cupom: ${cupom}` : "";
   }
-  if (bloco.tipo === "cta") {
-    const cta = textoUtil(oferta.ctaPublico || oferta.cta || "Confira aqui:");
-    return cta ? `ðŸ”— ${cta}` : "";
+  if (tipo === "frase_cupom") {
+    const cupom = primeiroTexto(oferta.cupom, oferta.codigoCupom, oferta.cupomCodigo);
+    return cupom ? `⚡ Aplique o cupom ${cupom} para obter o desconto.` : "";
   }
-  if (bloco.tipo === "link") {
-    return textoUtil(oferta.linkAfiliado || oferta.link || oferta.url);
+  if (tipo === "beneficio") {
+    const beneficio = valorBeneficio(oferta);
+    return beneficio ? `⚡ ${beneficio}` : "";
   }
+  if (tipo === "descricao_adicional") {
+    const descricao = primeiroTexto(oferta.descricaoAdicional, oferta.descricao, oferta.textoResumo, oferta.mensagemResumo);
+    return descricao ? `📝 ${descricao}` : "";
+  }
+  if (tipo === "parcelamento") {
+    const parcelamento = textoUtil(oferta.parcelamento);
+    return parcelamento ? `💳 ${parcelamento}` : "";
+  }
+  if (tipo === "frete") {
+    const frete = valorFrete(oferta);
+    return frete ? `🚚 ${frete}` : "";
+  }
+  if (tipo === "avaliacao") {
+    const avaliacao = valorAvaliacao(oferta);
+    return avaliacao ? `⭐ Avaliacao: ${avaliacao}` : "";
+  }
+  if (tipo === "quantidade_avaliacoes") {
+    const quantidade = valorQuantidadeAvaliacoes(oferta);
+    return quantidade ? `👥 ${formatarQuantidade(quantidade)} avaliacoes` : "";
+  }
+  if (tipo === "vendas") {
+    const vendas = valorVendas(oferta);
+    return vendas ? `🛒 ${formatarQuantidade(vendas)} vendidos` : "";
+  }
+  if (tipo === "cta") {
+    const cta = primeiroTexto(oferta.ctaPublico, oferta.cta, "Confira aqui:");
+    return cta ? `🔗 ${cta}` : "";
+  }
+  if (tipo === "link") {
+    return primeiroTexto(oferta.linkAfiliado, oferta.linkFinal, oferta.link, oferta.url);
+  }
+  if (tipo === "aviso_preco") {
+    const aviso = primeiroTexto(oferta.avisoPreco, oferta.avisoPagamento, oferta.avisoVariacaoPreco);
+    return aviso ? `⚠️ ${aviso}` : "";
+  }
+  if (tipo === "aviso_alteracao") {
+    const aviso = primeiroTexto(oferta.avisoAlteracao, oferta.aviso);
+    return aviso ? `⚠️ ${aviso}` : "";
+  }
+
   return "";
 }
 

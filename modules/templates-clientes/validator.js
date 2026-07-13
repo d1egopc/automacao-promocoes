@@ -60,7 +60,7 @@ function blocosPadrao() {
     return {
       id: item.tipo,
       tipo: item.tipo,
-      ativo: !["categoria", "marketplace"].includes(item.tipo),
+      ativo: item.ativoPorPadrao === true,
       ordem: item.ordemPadrao
     };
   });
