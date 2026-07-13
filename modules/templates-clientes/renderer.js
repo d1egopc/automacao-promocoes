@@ -1,4 +1,8 @@
 const { CANAIS_PERMITIDOS, getBlocoCatalogo } = require("./catalogo-blocos");
+const {
+  prepararDadosOficiaisTemplate,
+  diagnosticoDadosOficiaisTemplate
+} = require("./dados-oficiais");
 
 function textoUtil(valor) {
   if (valor === undefined || valor === null) return "";
@@ -124,6 +128,10 @@ function valorEfetivoConfirmado(oferta = {}) {
 }
 
 function valorPrecoPor(oferta = {}) {
+  if (oferta.fontePrecoExibido && oferta.precoExibido !== undefined && oferta.precoExibido !== null && oferta.precoExibido !== "") {
+    return oferta.precoExibido;
+  }
+
   const valorEfetivo = valorEfetivoConfirmado(oferta);
   return valorEfetivo ?? oferta.precoAtual ?? oferta.precoPor ?? oferta.preco;
 }
@@ -298,6 +306,12 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
   }
 
   const blocos = Array.isArray(template.blocos) ? [...template.blocos] : [];
+  const ofertaOficial = prepararDadosOficiaisTemplate(oferta, { modo: "personalizado" });
+
+  if (process.env.NODE_ENV === "test" || process.env.TEMPLATE_DADOS_OFICIAIS_LOG === "1") {
+    console.log("[TEMPLATE-DADOS-OFICIAIS]", JSON.stringify(diagnosticoDadosOficiaisTemplate(ofertaOficial)));
+  }
+
   const ativosOrdenados = blocos
     .filter(bloco => bloco && bloco.ativo !== false)
     .sort((a, b) => Number(a.ordem || 0) - Number(b.ordem || 0) || String(a.tipo).localeCompare(String(b.tipo)));
@@ -312,7 +326,7 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
       blocosIgnorados.push({ tipo: bloco.tipo || "", motivo: "bloco_incompativel" });
       continue;
     }
-    const linha = resolverLinha(bloco, oferta);
+    const linha = resolverLinha(bloco, ofertaOficial);
     if (!textoUtil(linha)) {
       blocosIgnorados.push({ tipo: bloco.tipo, motivo: "sem_dados" });
       continue;

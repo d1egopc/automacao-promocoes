@@ -18,6 +18,7 @@ const { listarCatalogoBlocos } = require("../modules/templates-clientes/catalogo
 const { obterOfertaPreviewOficial } = require("../modules/templates-clientes/oferta-preview");
 const { lerStorageTemplates } = require("../modules/templates-clientes/storage");
 const { gerarTemplateUniversal } = require("../modules/template-universal");
+const { prepararDadosOficiaisTemplate } = require("../modules/templates-clientes/dados-oficiais");
 
 function assertThrowsCodigo(fn, codigo) {
   assert.throws(fn, erro => erro && (erro.codigo === codigo || erro.message === codigo));
@@ -263,6 +264,106 @@ const precoFormatadoV11 = renderizarTemplatePersonalizado({
 });
 assert.strictEqual(precoFormatadoV11.mensagem, "✅ Por: R$ 198,80", "preco ja formatado nao e formatado duas vezes");
 
+function moedaLegivel(texto) {
+  return String(texto || "").replace(/\u00A0/g, " ");
+}
+
+const templatePrecoCupomShopeeV11 = {
+  id: "tpl_shopee_preco_cupom",
+  canais: ["whatsapp"],
+  blocos: [
+    { tipo: "preco_de", ativo: true, ordem: 10 },
+    { tipo: "preco_por", ativo: true, ordem: 20 },
+    { tipo: "cupom", ativo: true, ordem: 30 },
+    { tipo: "frase_cupom", ativo: true, ordem: 40 },
+    { tipo: "link", ativo: true, ordem: 50 }
+  ]
+};
+
+const shopeeIphoneParidadeV11 = renderizarTemplatePersonalizado({
+  oferta: {
+    titulo: "iPhone Shopee",
+    marketplace: "shopee",
+    precoAtual: 8735,
+    preco: 8735,
+    valorEfetivo: 84.57,
+    valorEfetivoOrigem: "desconto_pix_valor_fixo",
+    valorCupom: 84.57,
+    cupomCodigo: "PROMO10",
+    cupom: "PROMO10",
+    beneficioTexto: "Pix com cupom",
+    beneficios: ["Pix com cupom"],
+    linkAfiliado: "https://shopee.test/iphone",
+    inteligenciaUniversalV2: {
+      valorEfetivo: 8185,
+      valorEfetivoOrigem: "preco_pix_cupom",
+      beneficios: ["Pix com cupom"]
+    }
+  },
+  template: templatePrecoCupomShopeeV11,
+  canal: "whatsapp"
+});
+const msgIphoneShopeeV11 = moedaLegivel(shopeeIphoneParidadeV11.mensagem);
+assert.ok(msgIphoneShopeeV11.includes("Por: R$ 8.185,00"), "Shopee iPhone usa valor efetivo oficial V2");
+assert.ok(!msgIphoneShopeeV11.includes("R$ 84,57"), "valor de desconto nao vira preco final");
+assert.ok(msgIphoneShopeeV11.includes("Cupom:"), "cupom valido aparece");
+assert.ok(msgIphoneShopeeV11.includes("PROMO10"), "cupom oficial e preservado");
+
+const shopeeGabineteParidadeV11 = renderizarTemplatePersonalizado({
+  oferta: {
+    titulo: "Gabinete Shopee",
+    marketplace: "shopee",
+    precoAtual: 275.99,
+    preco: 275.99,
+    cupomCodigo: "GAB10",
+    cupom: "GAB10",
+    beneficioTexto: "Pix com cupom",
+    beneficios: ["Pix com cupom"],
+    linkAfiliado: "https://shopee.test/gabinete",
+    inteligenciaUniversalV2: {
+      valorEfetivo: 234.60,
+      valorEfetivoOrigem: "preco_pix_cupom",
+      beneficios: ["Pix com cupom"]
+    }
+  },
+  template: templatePrecoCupomShopeeV11,
+  canal: "whatsapp"
+});
+const msgGabineteShopeeV11 = moedaLegivel(shopeeGabineteParidadeV11.mensagem);
+assert.ok(msgGabineteShopeeV11.includes("Por: R$ 234,60"), "Shopee gabinete usa valor efetivo oficial");
+assert.ok(!msgGabineteShopeeV11.includes("Por: R$ 275,99"), "Shopee gabinete nao cai no preco sem cupom quando valor efetivo oficial existe");
+
+const shopeeClassificacaoNaoCupomV11 = renderizarTemplatePersonalizado({
+  oferta: {
+    titulo: "Oferta Shopee Classificada",
+    marketplace: "shopee",
+    precoAtual: 199.9,
+    cupom: "EXCELENTE",
+    nivel: "excelente",
+    linkAfiliado: "https://shopee.test/classificacao"
+  },
+  template: templatePrecoCupomShopeeV11,
+  canal: "whatsapp"
+});
+assert.ok(!shopeeClassificacaoNaoCupomV11.mensagem.includes("Cupom: EXCELENTE"), "classificacao EXCELENTE nao vira cupom");
+
+for (const ofertaMarketplace of [
+  { marketplace: "mercadolivre", precoAtual: 198.8, linkAfiliado: "https://meli.la/teste" },
+  { marketplace: "amazon", precoAtual: 79.9, linkAfiliado: "https://amzn.to/teste" },
+  { marketplace: "kabum", precoAtual: 299.9, linkAfiliado: "https://kabum.test/oferta" },
+  { marketplace: "awin", precoAtual: 299.9, linkAfiliado: "https://awin.test/oferta" },
+  { marketplace: "aliexpress", precoAtual: 59.9, linkAfiliado: "https://ali.test/oferta" }
+]) {
+  const renderMarketplace = renderizarTemplatePersonalizado({
+    oferta: { titulo: `Oferta ${ofertaMarketplace.marketplace}`, ...ofertaMarketplace },
+    template: { id: `tpl_${ofertaMarketplace.marketplace}`, canais: ["whatsapp"], blocos: [{ tipo: "preco_por", ativo: true, ordem: 10 }, { tipo: "link", ativo: true, ordem: 20 }] },
+    canal: "whatsapp"
+  });
+  assert.strictEqual(renderMarketplace.ok, true, `${ofertaMarketplace.marketplace} continua renderizando`);
+  assert.ok(renderMarketplace.mensagem.includes("Por:"), `${ofertaMarketplace.marketplace} preserva preco`);
+  assert.ok(renderMarketplace.mensagem.includes(ofertaMarketplace.linkAfiliado), `${ofertaMarketplace.marketplace} preserva link`);
+}
+
 const semBuracoV11 = renderizarTemplatePersonalizado({
   oferta: {
     titulo: "Produto sem buraco",
@@ -315,6 +416,106 @@ assert.strictEqual(previewPadrao.templateIdUsado, "padrao_optimus");
 assert.deepStrictEqual(previewPadrao.blocosRenderizados, []);
 assert.strictEqual(previewPadrao.mensagem, gerarTemplateUniversal(obterOfertaPreviewOficial()), "preview padrao usa Template Universal real");
 assert.ok(!/[ÃÅ¢ï¿½�]/.test(previewPadrao.mensagem), "preview padrao nao contem mojibake");
+
+function scoreUniversalReferencia(valor) {
+  if (valor && typeof valor === "object") {
+    return valor.score ?? valor.valor ?? valor.total ?? null;
+  }
+
+  return valor ?? null;
+}
+
+function beneficiosUniversaisReferencia(oferta = {}, v2 = {}) {
+  const logs = Array.isArray(v2.logs) ? v2.logs : [];
+  const beneficios = [];
+
+  if (Array.isArray(oferta.beneficios)) beneficios.push(...oferta.beneficios);
+  if (Array.isArray(v2.beneficios)) beneficios.push(...v2.beneficios);
+  if (oferta.beneficioTexto) beneficios.push(oferta.beneficioTexto);
+  if (oferta.avisoCupom) beneficios.push(oferta.avisoCupom);
+  if (oferta.aviso) beneficios.push(oferta.aviso);
+
+  logs.forEach(item => {
+    if (typeof item === "string") beneficios.push(item);
+    else if (item?.mensagem) beneficios.push(item.mensagem);
+    else if (item?.motivo) beneficios.push(item.motivo);
+  });
+
+  return [...new Set(beneficios.map(valor => String(valor || "").trim()).filter(Boolean))].slice(0, 5);
+}
+
+function montarEntradaUniversalReferencia(oferta = {}) {
+  const v2 = oferta.inteligenciaUniversalV2 || {};
+
+  return {
+    titulo: oferta.titulo || oferta.nome || "",
+    marketplace: oferta.marketplace || "",
+    precoAtual: oferta.precoAtual ?? oferta.preco,
+    precoOriginal: oferta.precoOriginal ?? oferta.precoAntigo,
+    economia: oferta.economia ?? oferta.economiaValor ?? oferta.valorEconomia,
+    descontoPercentual: oferta.descontoPercentual ?? oferta.desconto,
+    categoria: v2.categoria || oferta.categoria || "",
+    cupom: oferta.cupom || oferta.cupomCodigo || "",
+    cupomTipo: oferta.cupomTipo || oferta.tipoCupom || "",
+    beneficios: beneficiosUniversaisReferencia(oferta, v2),
+    valorEfetivo: v2.valorEfetivo ?? oferta.valorEfetivo,
+    valorEfetivoOrigem: v2.valorEfetivoOrigem || oferta.valorEfetivoOrigem || "",
+    prioridade: v2.prioridade ?? oferta.prioridadeEnvio ?? oferta.prioridadeFila ?? oferta.prioridade,
+    score: scoreUniversalReferencia(v2.score),
+    linkAfiliado: oferta.linkAfiliado || oferta.linkFinal || oferta.link || "",
+    imagem: oferta.imagem || ""
+  };
+}
+
+const ofertaUniversalBaseParidade = {
+  titulo: "Oferta Paridade Universal",
+  marketplace: "shopee",
+  categoria: "Categoria Top Level",
+  precoOriginal: 1000,
+  precoAtual: 900,
+  preco: 900,
+  valorEfetivo: 850,
+  valorEfetivoOrigem: "cupom_valor_fixo",
+  cupom: "PROMO10",
+  cupomCodigo: "PROMOCODIGO",
+  beneficios: ["Pix com cupom"],
+  beneficioTexto: "Beneficio top level",
+  avisoCupom: "Aviso cupom",
+  desconto: 10,
+  economiaValor: 100,
+  score: 99,
+  prioridadeEnvio: 80,
+  linkAfiliado: "https://example.com/paridade",
+  imagem: "https://example.com/paridade.jpg"
+};
+
+for (const [nome, ofertaParidade] of [
+  ["v2.score presente", { ...ofertaUniversalBaseParidade, inteligenciaUniversalV2: { score: { score: 91 } } }],
+  ["somente oferta.score top-level", { ...ofertaUniversalBaseParidade, inteligenciaUniversalV2: {} }],
+  ["cupom e cupomCodigo diferentes", { ...ofertaUniversalBaseParidade, cupom: "CUPOM_A", cupomCodigo: "CUPOM_B" }],
+  ["somente cupom", { ...ofertaUniversalBaseParidade, cupomCodigo: "" }],
+  ["somente cupomCodigo", { ...ofertaUniversalBaseParidade, cupom: "" }],
+  ["cupom EXCELENTE", { ...ofertaUniversalBaseParidade, cupom: "EXCELENTE", cupomCodigo: "PROMO10" }],
+  ["categoria v2 versus top-level", { ...ofertaUniversalBaseParidade, inteligenciaUniversalV2: { categoria: "Categoria V2" } }],
+  ["valorEfetivo v2 versus top-level", { ...ofertaUniversalBaseParidade, inteligenciaUniversalV2: { valorEfetivo: 777, valorEfetivoOrigem: "preco_pix" } }],
+  ["beneficios", { ...ofertaUniversalBaseParidade, beneficios: ["Beneficio A"], inteligenciaUniversalV2: { beneficios: ["Beneficio B"], logs: [{ mensagem: "Beneficio C" }] } }],
+  ["oferta completa", { ...ofertaUniversalBaseParidade, inteligenciaUniversalV2: { categoria: "Categoria V2", score: 88, valorEfetivo: 820, valorEfetivoOrigem: "cupom_valor_fixo", prioridade: 95, beneficios: ["Beneficio V2"] } }]
+]) {
+  const entradaReferencia = montarEntradaUniversalReferencia(ofertaParidade);
+  const entradaAtual = prepararDadosOficiaisTemplate(ofertaParidade, { modo: "universal" });
+  assert.deepStrictEqual(entradaAtual, entradaReferencia, `modo universal preserva objeto antigo: ${nome}`);
+  assert.strictEqual(
+    gerarTemplateUniversal(entradaAtual),
+    gerarTemplateUniversal(entradaReferencia),
+    `modo universal preserva string final: ${nome}`
+  );
+}
+
+assert.throws(
+  () => prepararDadosOficiaisTemplate(ofertaUniversalBaseParidade),
+  /modo_template_invalido/,
+  "helper exige modo explicito"
+);
 
 const previewSemNome = previewTemplate("cliente_a", {
   canal: "whatsapp",

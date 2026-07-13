@@ -13,6 +13,7 @@ const {
 const { formatarOfertaUniversal } = require("../templates/oferta-template");
 const { gerarTemplateUniversal } = require("../modules/template-universal");
 const { resolverTemplateMensagem } = require("../modules/templates-clientes/resolver");
+const { prepararDadosOficiaisTemplate } = require("../modules/templates-clientes/dados-oficiais");
 
 function normalizarTextoLocal(valor = "") {
   return String(valor || "").trim();
@@ -55,26 +56,7 @@ function beneficiosUniversais(oferta = {}, v2 = {}) {
 }
 
 function montarEntradaTemplateUniversalOficial(oferta = {}) {
-  const v2 = oferta.inteligenciaUniversalV2 || {};
-
-  return {
-    titulo: oferta.titulo || oferta.nome || "",
-    marketplace: oferta.marketplace || "",
-    precoAtual: oferta.precoAtual ?? oferta.preco,
-    precoOriginal: oferta.precoOriginal ?? oferta.precoAntigo,
-    economia: oferta.economia ?? oferta.economiaValor ?? oferta.valorEconomia,
-    descontoPercentual: oferta.descontoPercentual ?? oferta.desconto,
-    categoria: v2.categoria || oferta.categoria || "",
-    cupom: oferta.cupom || oferta.cupomCodigo || "",
-    cupomTipo: oferta.cupomTipo || oferta.tipoCupom || "",
-    beneficios: beneficiosUniversais(oferta, v2),
-    valorEfetivo: v2.valorEfetivo ?? oferta.valorEfetivo,
-    valorEfetivoOrigem: v2.valorEfetivoOrigem || oferta.valorEfetivoOrigem || "",
-    prioridade: v2.prioridade ?? oferta.prioridadeEnvio ?? oferta.prioridadeFila ?? oferta.prioridade,
-    score: scoreUniversal(v2.score),
-    linkAfiliado: oferta.linkAfiliado || oferta.linkFinal || oferta.link || "",
-    imagem: oferta.imagem || ""
-  };
+  return prepararDadosOficiaisTemplate(oferta, { modo: "universal" });
 }
 
 function tentarTemplateUniversalOficial(oferta = {}, opcoes = {}) {
