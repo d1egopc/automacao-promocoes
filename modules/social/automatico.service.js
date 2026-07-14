@@ -160,6 +160,7 @@ function gatilhoAutomatico(config = {}) {
 async function executarAutomaticoCliente({
   clienteId = "admin",
   agora = new Date(),
+  renderizadorArte,
   httpClient,
   polling
 } = {}) {
@@ -187,6 +188,7 @@ async function executarAutomaticoCliente({
       gatilho: gatilhoAutomatico(config),
       respostaPublica: texto(config.gatilho?.respostaPublica),
       idempotencyKey: `auto:${clienteSeguro}:${ofertaId}:${janela}`,
+      renderizadorArte,
       httpClient,
       polling
     });
@@ -214,6 +216,7 @@ function agendamentoVencido(agendamento = {}, agora = new Date()) {
 async function executarAgendamentosPendentesCliente({
   clienteId = "admin",
   agora = new Date(),
+  renderizadorArte,
   httpClient,
   polling
 } = {}) {
@@ -239,6 +242,7 @@ async function executarAgendamentosPendentesCliente({
         respostaPublica: emProcessamento.respostaPublica,
         agendamentoId: emProcessamento.id,
         idempotencyKey: `agendada:${clienteSeguro}:${emProcessamento.id}`,
+        renderizadorArte,
         httpClient,
         polling
       });

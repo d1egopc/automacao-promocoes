@@ -3,6 +3,7 @@ const {
   publicarImagemLivreInstagram
 } = require("./instagram");
 const { logSocial } = require("./logs");
+const { renderizarArtePublicacaoSocial } = require("./social-art-renderer.client");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -41,6 +42,7 @@ async function publicarNoInstagram({
   respostaPublica = "",
   agendamentoId = "",
   idempotencyKey = "",
+  renderizadorArte = renderizarArtePublicacaoSocial,
   httpClient,
   polling
 } = {}) {
@@ -77,6 +79,7 @@ async function publicarNoInstagram({
     tipoPublicacao: tipoSeguro,
     agendamentoId: texto(agendamentoId),
     idempotencyKey: chave,
+    renderizadorArte,
     httpClient,
     polling
   };

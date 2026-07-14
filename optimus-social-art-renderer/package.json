@@ -1,0 +1,19 @@
+{
+  "name": "optimus-social-art-renderer",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "render:sample": "node scripts/render-sample.js",
+    "test": "node tests/renderer.test.js",
+    "check": "node --check src/server.js && node --check src/renderer.service.js && node --check src/image-proxy.js && node --check src/social-art-storage.js && node --check src/contract.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.616.0",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.2.0",
+    "helmet": "^7.1.0",
+    "playwright": "^1.45.3"
+  }
+}

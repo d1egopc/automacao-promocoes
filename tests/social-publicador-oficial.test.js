@@ -69,6 +69,22 @@ function mockHttpClient(sufixo = "ok") {
   };
 }
 
+function rendererOk(sufixo = "render") {
+  const chamadas = [];
+  const fn = async ({ clienteId, ofertaId, oferta, templateId, gatilho }) => {
+    chamadas.push({ clienteId, ofertaId, oferta, templateId, gatilho });
+    return {
+      ok: true,
+      imagemUrlPublica: `https://cdn-art.optimus.test/${clienteId}/${ofertaId}/${sufixo}.png`,
+      hash: `hash_${sufixo}`,
+      templateVersao: 1,
+      cache: false
+    };
+  };
+  fn.chamadas = chamadas;
+  return fn;
+}
+
 (async () => {
   conectar("cliente_a", "a");
   conectar("cliente_b", "b");
@@ -91,6 +107,7 @@ function mockHttpClient(sufixo = "ok") {
   ]);
 
   const httpOferta = mockHttpClient("oferta");
+  const renderOferta = rendererOk("oferta");
   const legendaCustom = "Legenda custom da oferta";
   const publicadaOferta = await publicarNoInstagram({
     clienteId: "cliente_a",
@@ -100,6 +117,7 @@ function mockHttpClient(sufixo = "ok") {
     templateId: "padrao-instagram",
     legenda: legendaCustom,
     idempotencyKey: "cliente_a:oferta_a:manual",
+    renderizadorArte: renderOferta,
     httpClient: httpOferta,
     polling: POLLING_TESTE
   });
@@ -107,6 +125,11 @@ function mockHttpClient(sufixo = "ok") {
   assert.strictEqual(publicadaOferta.publicacao.origem, "manual");
   assert.strictEqual(publicadaOferta.publicacao.tipoPublicacao, "oferta");
   assert.strictEqual(publicadaOferta.publicacao.legenda, legendaCustom, "publicador oficial nao deve descartar legenda recebida");
+  assert.strictEqual(publicadaOferta.publicacao.renderizado, true, "publicacao de oferta deve usar arte renderizada");
+  assert.strictEqual(publicadaOferta.publicacao.imagemOriginalUrl, "https://cdn.optimus.test/produto-a.jpg");
+  assert.strictEqual(publicadaOferta.publicacao.imagemPublicadaUrl, "https://cdn-art.optimus.test/cliente_a/oferta_a/oferta.png");
+  assert.strictEqual(renderOferta.chamadas.length, 1);
+  assert.strictEqual(renderOferta.chamadas[0].oferta.imagem, "https://cdn.optimus.test/produto-a.jpg");
   assert.strictEqual(publicadaOferta.publicacao.idempotencyKey, "cliente_a:oferta_a:manual");
   assert.ok(httpOferta.chamadas.some(chamada => chamada.url.includes("/ig_a/media")));
   assert.ok(
@@ -114,9 +137,10 @@ function mockHttpClient(sufixo = "ok") {
     "criacao do container deve enviar caption junto com image_url"
   );
   assert.ok(
-    httpOferta.chamadas.some(chamada => chamada.url.includes("/ig_a/media") && chamada.body.includes("image_url=https%3A%2F%2Fcdn.optimus.test%2Fproduto-a.jpg")),
-    "criacao do container deve enviar image_url"
+    httpOferta.chamadas.some(chamada => chamada.url.includes("/ig_a/media") && chamada.body.includes("image_url=https%3A%2F%2Fcdn-art.optimus.test%2Fcliente_a%2Foferta_a%2Foferta.png")),
+    "criacao do container deve enviar image_url renderizada"
   );
+  assert.ok(!httpOferta.chamadas.some(chamada => chamada.url.includes("/ig_a/media") && chamada.body.includes("cdn.optimus.test%2Fproduto-a.jpg")), "imagem original nao deve ser publicada quando existe arte renderizada");
   assert.ok(!JSON.stringify(publicadaOferta).includes("token_a"));
 
   conectar("cliente_legenda_vazia", "legenda_vazia");
@@ -131,12 +155,14 @@ function mockHttpClient(sufixo = "ok") {
     })
   ]);
   const httpLegendaVazia = mockHttpClient("legenda_vazia");
+  const renderLegendaVazia = rendererOk("legenda_vazia");
   const publicadaLegendaVazia = await publicarNoInstagram({
     clienteId: "cliente_legenda_vazia",
     origem: "manual",
     tipoPublicacao: "oferta",
     ofertaId: "oferta_legenda_vazia",
     legenda: "",
+    renderizadorArte: renderLegendaVazia,
     httpClient: httpLegendaVazia,
     polling: POLLING_TESTE
   });
@@ -150,12 +176,40 @@ function mockHttpClient(sufixo = "ok") {
     "legenda padrao deve ir como caption quando a legenda do payload vier vazia"
   );
 
+  conectar("cliente_renderer_erro", "renderer_erro");
+  writeClienteJson("cliente_renderer_erro", "fila.json", [
+    oferta({
+      id: "oferta_renderer_erro",
+      ofertaId: "oferta_renderer_erro",
+      produtoId: "produto_renderer_erro",
+      titulo: "Produto Renderer Erro",
+      imagem: "https://cdn.optimus.test/renderer-erro.jpg",
+      linkAfiliado: "https://go.optimus.test/renderer-erro"
+    })
+  ]);
+  const httpRendererErro = mockHttpClient("renderer_erro");
+  const publicadaRendererErro = await publicarNoInstagram({
+    clienteId: "cliente_renderer_erro",
+    origem: "manual",
+    tipoPublicacao: "oferta",
+    ofertaId: "oferta_renderer_erro",
+    renderizadorArte: async () => { throw new Error("renderer_indisponivel"); },
+    httpClient: httpRendererErro,
+    polling: POLLING_TESTE
+  });
+  assert.strictEqual(publicadaRendererErro.publicacao.status, "erro");
+  assert.strictEqual(publicadaRendererErro.publicacao.renderizado, false);
+  assert.strictEqual(publicadaRendererErro.publicacao.imagemOriginalUrl, "https://cdn.optimus.test/renderer-erro.jpg");
+  assert.ok(publicadaRendererErro.publicacao.erro.message.includes("renderer_indisponivel"));
+  assert.ok(!httpRendererErro.chamadas.some(chamada => chamada.url.includes("/media")), "falha de renderer nao deve publicar imagem original");
+
   const duplicada = await publicarNoInstagram({
     clienteId: "cliente_a",
     origem: "manual",
     tipoPublicacao: "oferta",
     ofertaId: "oferta_a",
     idempotencyKey: "cliente_a:oferta_a:manual",
+    renderizadorArte: rendererOk("duplicada"),
     httpClient: mockHttpClient("duplicada"),
     polling: POLLING_TESTE
   });
@@ -184,6 +238,7 @@ function mockHttpClient(sufixo = "ok") {
       origem: "manual",
       tipoPublicacao: "oferta",
       ofertaId: "oferta_a",
+      renderizadorArte: rendererOk("isolamento"),
       httpClient: mockHttpClient("isolamento"),
       polling: POLLING_TESTE
     }),
@@ -240,12 +295,14 @@ function mockHttpClient(sufixo = "ok") {
   const execAuto = await executarAutomaticoCliente({
     clienteId: "cliente_auto",
     agora: new Date("2026-07-14T12:00:00.000Z"),
+    renderizadorArte: rendererOk("auto"),
     httpClient: mockHttpClient("auto"),
     polling: POLLING_TESTE
   });
   assert.strictEqual(execAuto.publicado, true);
   assert.strictEqual(execAuto.publicacao.origem, "automatica");
   assert.strictEqual(execAuto.publicacao.ofertaId, "oferta_auto");
+  assert.strictEqual(execAuto.publicacao.renderizado, true);
 
   conectar("cliente_agendada", "agendada");
   const agendamento = storage.salvarAgendamentoSocial("cliente_agendada", {

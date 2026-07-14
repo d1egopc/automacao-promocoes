@@ -417,6 +417,11 @@ function publicacaoSanitizada(publicacao = {}) {
     idempotencyKey: texto(publicacao.idempotencyKey),
     instagramUserId: texto(publicacao.instagramUserId),
     imagemUrl: texto(publicacao.imagemUrl),
+    imagemOriginalUrl: texto(publicacao.imagemOriginalUrl),
+    imagemPublicadaUrl: texto(publicacao.imagemPublicadaUrl),
+    renderizado: publicacao.renderizado === true,
+    renderHash: texto(publicacao.renderHash),
+    templateVersao: publicacao.templateVersao ?? null,
     legenda: texto(publicacao.legenda),
     linkAfiliadoPresente: Boolean(texto(publicacao.linkAfiliado)),
     status: texto(publicacao.status),
@@ -1269,7 +1274,8 @@ async function publicarImagemInstagram({
   agendamentoId = "",
   idempotencyKey = "",
   httpClient = httpClientPadrao(),
-  polling = {}
+  polling = {},
+  renderizadorArte = null
 } = {}) {
   const tpl = texto(templateId || "padrao-instagram") || "padrao-instagram";
   const ofertaIdSeguro = texto(ofertaId);
@@ -1302,12 +1308,13 @@ async function publicarImagemInstagram({
 
   const oferta = carregarOfertaCliente(clienteId, ofertaIdSeguro);
   if (!oferta.linkAfiliado) throw new Error("oferta_link_ausente");
-  const imagemUrl = validarImagemPublica(oferta.imagem);
+  const imagemOriginalUrl = validarImagemPublica(oferta.imagem);
   const gatilhoSeguro = gatilho && typeof gatilho === "object" ? sanitizarGatilhoInstagram(gatilho) : null;
   const legendaMontada = montarLegendaInstagram(oferta, tpl, gatilhoSeguro).legenda;
   const legendaFinal = limitarTexto(legenda || legendaMontada, 2200);
   const id = criarId("igpub");
-  const base = {
+  let imagemUrl = imagemOriginalUrl;
+  let publicacaoAtual = {
     id,
     origem: texto(origem || "manual"),
     tipoPublicacao: texto(tipoPublicacao || "oferta") || "oferta",
@@ -1317,6 +1324,11 @@ async function publicarImagemInstagram({
     idempotencyKey: texto(idempotencyKey),
     instagramUserId: conexao.instagramUserId,
     imagemUrl,
+    imagemOriginalUrl,
+    imagemPublicadaUrl: "",
+    renderizado: false,
+    renderHash: "",
+    templateVersao: null,
     legenda: legendaFinal,
     linkAfiliado: oferta.linkAfiliado,
     status: "publicando",
@@ -1330,10 +1342,34 @@ async function publicarImagemInstagram({
     erro: null
   };
 
-  salvarPublicacaoInstagram(clienteId, base);
+  publicacaoAtual = salvarPublicacaoInstagram(clienteId, publicacaoAtual);
 
   let instagramContainerId = "";
   try {
+    if (typeof renderizadorArte === "function") {
+      const arte = await renderizadorArte({
+        clienteId,
+        ofertaId: ofertaIdSeguro,
+        oferta: {
+          ...oferta,
+          imagem: imagemOriginalUrl
+        },
+        templateId: tpl,
+        gatilho: gatilhoSeguro
+      });
+      imagemUrl = validarImagemPublica(arte?.imagemUrlPublica || arte?.imagemUrl || arte?.url);
+      publicacaoAtual = salvarPublicacaoInstagram(clienteId, {
+        ...publicacaoAtual,
+        imagemUrl,
+        imagemOriginalUrl,
+        imagemPublicadaUrl: imagemUrl,
+        renderizado: true,
+        renderHash: texto(arte?.hash),
+        templateVersao: arte?.templateVersao ?? null,
+        atualizadoEm: agoraIso()
+      });
+    }
+
     instagramContainerId = await criarContainerImagemInstagram({
       instagramUserId: conexao.instagramUserId,
       imagemUrl,
@@ -1348,7 +1384,7 @@ async function publicarImagemInstagram({
       instagramContainerId
     });
     const comContainer = salvarPublicacaoInstagram(clienteId, {
-      ...base,
+      ...publicacaoAtual,
       status: "processando",
       instagramContainerId
     });
@@ -1395,7 +1431,7 @@ async function publicarImagemInstagram({
   } catch (e) {
     const erro = sanitizarErroInstagram(e);
     const falha = salvarPublicacaoInstagram(clienteId, {
-      ...base,
+      ...publicacaoAtual,
       instagramContainerId,
       status: "erro",
       erro
