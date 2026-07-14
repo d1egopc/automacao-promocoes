@@ -34,13 +34,56 @@ function posicaoCard(posicao = "bottom-left") {
   return mapa[posicao] || mapa["bottom-left"];
 }
 
+function posicaoSelo(posicao = "top-right") {
+  const mapa = {
+    "bottom-left": "left: 16px; bottom: 16px;",
+    "bottom-right": "right: 16px; bottom: 16px;",
+    "top-left": "left: 16px; top: 16px;",
+    "top-right": "right: 16px; top: 16px;"
+  };
+  return mapa[posicao] || mapa["top-right"];
+}
+
+function alinhamentoFlex(alinhamento = "center") {
+  const mapa = {
+    left: "justify-content: flex-start; text-align: left; padding-left: 32px;",
+    center: "justify-content: center; text-align: center;",
+    right: "justify-content: flex-end; text-align: right; padding-right: 32px;"
+  };
+  return mapa[alinhamento] || mapa.center;
+}
+
+function tamanhoFaixaSuperior(tamanho = "md") {
+  const mapa = {
+    sm: "height: 34px; font-size: 18px;",
+    md: "height: 48px; font-size: 22px;",
+    lg: "height: 62px; font-size: 28px;"
+  };
+  return mapa[tamanho] || mapa.md;
+}
+
+function tamanhoFaixaInferior(tamanho = "md") {
+  const mapa = {
+    sm: "height: 52px; font-size: 21px;",
+    md: "height: 64px; font-size: 25px;",
+    lg: "height: 78px; font-size: 31px;"
+  };
+  return mapa[tamanho] || mapa.md;
+}
+
 function margemCard(cfg = {}) {
   const top = cfg.faixaSuperiorAtiva && texto(cfg.posicaoCard).startsWith("top") ? "margin-top: 56px;" : "";
   const bottom = cfg.faixaInferiorAtiva && texto(cfg.posicaoCard).startsWith("bottom") ? "margin-bottom: 64px;" : "";
   return `${top}${bottom}`;
 }
 
-function htmlPreview({ template = {}, dados = {}, cta = "", imagemSrc = "" } = {}) {
+function margemSelo(cfg = {}) {
+  const top = cfg.faixaSuperiorAtiva && texto(cfg.seloPosicao).startsWith("top") ? "margin-top: 56px;" : "";
+  const bottom = cfg.faixaInferiorAtiva && texto(cfg.seloPosicao).startsWith("bottom") ? "margin-bottom: 72px;" : "";
+  return `${top}${bottom}`;
+}
+
+function htmlPreviewLegado({ template = {}, dados = {}, cta = "", imagemSrc = "" } = {}) {
   const precoAntigo = template.mostrarPrecoAntigo && dados.precoAntigo
     ? `<span class="old">De ${escaparHtml(formatarPrecoBRL(dados.precoAntigo))}</span>`
     : "";
@@ -85,6 +128,64 @@ function htmlPreview({ template = {}, dados = {}, cta = "", imagemSrc = "" } = {
   <div class="art">
     <div class="image-wrap"><img src="${imagemSrc}" alt="" /></div>
     ${faixaSuperior}
+    <div class="card"><div class="stack">${precoAntigo}${preco}${cupom}${marketplace}</div></div>
+    ${faixaInferior}
+  </div>
+</body>
+</html>`;
+}
+
+function htmlPreview({ template = {}, dados = {}, cta = "", imagemSrc = "" } = {}) {
+  const precoAntigo = template.mostrarPrecoAntigo && dados.precoAntigo
+    ? `<span class="old">De ${escaparHtml(formatarPrecoBRL(dados.precoAntigo))}</span>`
+    : "";
+  const preco = dados.preco
+    ? `<span class="price" style="color:${template.corDestaquePreco}">${escaparHtml(formatarPrecoBRL(dados.preco))}</span>`
+    : "";
+  const cupom = template.mostrarCupom && dados.cupom
+    ? `<span class="coupon" style="background:${template.corDestaquePreco}"><span>\uD83C\uDF9F\uFE0F</span><span>${escaparHtml(dados.cupom)}</span></span>`
+    : "";
+  const marketplace = template.mostrarMarketplace && dados.marketplace
+    ? `<span class="market">${escaparHtml(dados.marketplace)}</span>`
+    : "";
+  const faixaSuperior = template.faixaSuperiorAtiva
+    ? `<div class="top-band" style="background:${template.faixaSuperiorCor}; color:${template.faixaSuperiorCorTexto}; ${tamanhoFaixaSuperior(template.faixaSuperiorTamanho)} ${alinhamentoFlex(template.faixaSuperiorAlinhamento)}"><span>${escaparHtml(template.faixaSuperiorTexto)}</span></div>`
+    : "";
+  const selo = template.seloAtivo && template.seloTexto
+    ? `<div class="badge" style="${posicaoSelo(template.seloPosicao)} ${margemSelo(template)} background:${template.seloCor}; color:${template.seloCorTexto};">${escaparHtml(template.seloTexto)}</div>`
+    : "";
+  const faixaInferior = template.faixaInferiorAtiva
+    ? `<div class="bottom-band" style="background:${template.faixaInferiorCor}; color:${template.faixaInferiorCorTexto}; ${tamanhoFaixaInferior(template.faixaInferiorTamanho)} ${alinhamentoFlex(template.faixaInferiorAlinhamento)}"><span>\uD83D\uDD25</span><span>${escaparHtml(cta)}</span></div>`
+    : "";
+
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  * { box-sizing: border-box; }
+  html, body { width: 1080px; height: 1080px; margin: 0; overflow: hidden; background: transparent; font-family: Inter, Arial, Helvetica, sans-serif; }
+  .art { position: relative; width: 1080px; height: 1080px; overflow: hidden; background: #eef2f7; border: 8px solid ${template.corMoldura}; }
+  .image-wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #f1f5f9; }
+  .image-wrap img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .top-band { position: absolute; inset: 0 0 auto 0; display: flex; align-items: center; font-weight: 800; text-transform: uppercase; letter-spacing: .15em; box-shadow: 0 2px 8px rgba(15, 23, 42, .18); }
+  .top-band span, .bottom-band span:last-child { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .badge { position: absolute; z-index: 10; border-radius: 12px; padding: 10px 18px; font-size: 21px; font-weight: 950; line-height: 1; text-transform: uppercase; letter-spacing: .08em; box-shadow: 0 8px 18px rgba(15, 23, 42, .22); }
+  .card { position: absolute; ${posicaoCard(template.posicaoCard)} ${margemCard(template)} max-width: 54%; min-width: 290px; padding: 34px 42px; border-radius: 32px; text-align: center; background: ${template.corCard}; border: 4px solid ${template.corMoldura}; box-shadow: 0 24px 52px rgba(15, 23, 42, .24); }
+  .stack { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .old { color: #94a3b8; font-size: 22px; font-weight: 600; line-height: 1; text-decoration: line-through; font-variant-numeric: tabular-nums; }
+  .price { font-size: 78px; font-weight: 950; line-height: .95; letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .coupon { margin-top: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 999px; padding: 14px 28px; color: #fff; font-size: 22px; font-weight: 850; line-height: 1; text-transform: uppercase; letter-spacing: .08em; box-shadow: 0 4px 14px rgba(15, 23, 42, .18); }
+  .market { margin-top: 7px; color: rgba(100, 116, 139, .85); font-size: 17px; font-weight: 700; line-height: 1; text-transform: uppercase; letter-spacing: .14em; }
+  .bottom-band { position: absolute; inset: auto 0 0 0; display: flex; align-items: center; gap: 14px; font-weight: 850; text-transform: uppercase; letter-spacing: .14em; box-shadow: 0 -2px 12px rgba(15, 23, 42, .22); }
+</style>
+</head>
+<body>
+  <div class="art">
+    <div class="image-wrap"><img src="${imagemSrc}" alt="" /></div>
+    ${faixaSuperior}
+    ${selo}
     <div class="card"><div class="stack">${precoAntigo}${preco}${cupom}${marketplace}</div></div>
     ${faixaInferior}
   </div>

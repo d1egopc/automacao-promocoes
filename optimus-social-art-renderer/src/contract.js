@@ -3,22 +3,36 @@ const crypto = require("crypto");
 const VERSAO_TEMPLATE_VISUAL = 1;
 const MAX_PAYLOAD_BYTES = Number(process.env.RENDERER_MAX_PAYLOAD_BYTES || 64 * 1024);
 const POSICOES_VALIDAS = new Set(["bottom-left", "bottom-right", "top-left", "top-right"]);
+const ALINHAMENTOS_VALIDOS = new Set(["left", "center", "right"]);
+const TAMANHOS_VALIDOS = new Set(["sm", "md", "lg"]);
 
 const CONFIG_PADRAO = Object.freeze({
   versao: VERSAO_TEMPLATE_VISUAL,
   faixaSuperiorAtiva: true,
   faixaSuperiorTexto: "\uD83D\uDE80 OFERTA RELAMPAGO",
   faixaSuperiorCor: "#f97316",
+  faixaSuperiorCorTexto: "#ffffff",
+  faixaSuperiorTamanho: "md",
+  faixaSuperiorAlinhamento: "center",
   mostrarPrecoAntigo: true,
   mostrarCupom: true,
   mostrarMarketplace: true,
   faixaInferiorAtiva: true,
+  faixaInferiorCor: "#0f172a",
+  faixaInferiorCorTexto: "#ffffff",
+  faixaInferiorTamanho: "md",
+  faixaInferiorAlinhamento: "center",
   gatilho: "PROMO",
   ctaTemplate: 'COMENTE "{gatilho}"',
   posicaoCard: "bottom-left",
   corMoldura: "#0f172a",
   corCard: "#ffffff",
-  corDestaquePreco: "#16a34a"
+  corDestaquePreco: "#16a34a",
+  seloAtivo: false,
+  seloTexto: "OFERTA DO DIA",
+  seloPosicao: "top-right",
+  seloCor: "#dc2626",
+  seloCorTexto: "#ffffff"
 });
 
 function texto(valor = "") {
@@ -33,22 +47,39 @@ function cor(valor = "", fallback = "#000000") {
 function normalizarTemplateVisual(valor = {}) {
   const entrada = valor && typeof valor === "object" ? valor : {};
   const posicao = texto(entrada.posicaoCard || CONFIG_PADRAO.posicaoCard);
+  const alinhamentoSuperior = texto(entrada.faixaSuperiorAlinhamento || CONFIG_PADRAO.faixaSuperiorAlinhamento);
+  const alinhamentoInferior = texto(entrada.faixaInferiorAlinhamento || CONFIG_PADRAO.faixaInferiorAlinhamento);
+  const tamanhoSuperior = texto(entrada.faixaSuperiorTamanho || CONFIG_PADRAO.faixaSuperiorTamanho);
+  const tamanhoInferior = texto(entrada.faixaInferiorTamanho || CONFIG_PADRAO.faixaInferiorTamanho);
+  const seloPosicao = texto(entrada.seloPosicao || CONFIG_PADRAO.seloPosicao);
   return {
     ...CONFIG_PADRAO,
     versao: VERSAO_TEMPLATE_VISUAL,
     faixaSuperiorAtiva: entrada.faixaSuperiorAtiva === true,
     faixaSuperiorTexto: texto(entrada.faixaSuperiorTexto || CONFIG_PADRAO.faixaSuperiorTexto).slice(0, 80),
     faixaSuperiorCor: cor(entrada.faixaSuperiorCor, CONFIG_PADRAO.faixaSuperiorCor),
+    faixaSuperiorCorTexto: cor(entrada.faixaSuperiorCorTexto, CONFIG_PADRAO.faixaSuperiorCorTexto),
+    faixaSuperiorTamanho: TAMANHOS_VALIDOS.has(tamanhoSuperior) ? tamanhoSuperior : CONFIG_PADRAO.faixaSuperiorTamanho,
+    faixaSuperiorAlinhamento: ALINHAMENTOS_VALIDOS.has(alinhamentoSuperior) ? alinhamentoSuperior : CONFIG_PADRAO.faixaSuperiorAlinhamento,
     mostrarPrecoAntigo: entrada.mostrarPrecoAntigo !== false,
     mostrarCupom: entrada.mostrarCupom !== false,
     mostrarMarketplace: entrada.mostrarMarketplace !== false,
     faixaInferiorAtiva: entrada.faixaInferiorAtiva === true,
+    faixaInferiorCor: cor(entrada.faixaInferiorCor, cor(entrada.corMoldura, CONFIG_PADRAO.faixaInferiorCor)),
+    faixaInferiorCorTexto: cor(entrada.faixaInferiorCorTexto, CONFIG_PADRAO.faixaInferiorCorTexto),
+    faixaInferiorTamanho: TAMANHOS_VALIDOS.has(tamanhoInferior) ? tamanhoInferior : CONFIG_PADRAO.faixaInferiorTamanho,
+    faixaInferiorAlinhamento: ALINHAMENTOS_VALIDOS.has(alinhamentoInferior) ? alinhamentoInferior : CONFIG_PADRAO.faixaInferiorAlinhamento,
     gatilho: texto(entrada.gatilho || CONFIG_PADRAO.gatilho).slice(0, 40),
     ctaTemplate: texto(entrada.ctaTemplate || CONFIG_PADRAO.ctaTemplate).slice(0, 120),
     posicaoCard: POSICOES_VALIDAS.has(posicao) ? posicao : CONFIG_PADRAO.posicaoCard,
     corMoldura: cor(entrada.corMoldura, CONFIG_PADRAO.corMoldura),
     corCard: cor(entrada.corCard, CONFIG_PADRAO.corCard),
-    corDestaquePreco: cor(entrada.corDestaquePreco, CONFIG_PADRAO.corDestaquePreco)
+    corDestaquePreco: cor(entrada.corDestaquePreco, CONFIG_PADRAO.corDestaquePreco),
+    seloAtivo: entrada.seloAtivo === true,
+    seloTexto: texto(entrada.seloTexto || CONFIG_PADRAO.seloTexto).slice(0, 40),
+    seloPosicao: POSICOES_VALIDAS.has(seloPosicao) ? seloPosicao : CONFIG_PADRAO.seloPosicao,
+    seloCor: cor(entrada.seloCor, CONFIG_PADRAO.seloCor),
+    seloCorTexto: cor(entrada.seloCorTexto, CONFIG_PADRAO.seloCorTexto)
   };
 }
 

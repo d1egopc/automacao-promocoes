@@ -20,16 +20,28 @@ function payload(overrides = {}) {
       faixaSuperiorAtiva: true,
       faixaSuperiorTexto: "OFERTA",
       faixaSuperiorCor: "#f97316",
+      faixaSuperiorCorTexto: "#ffffff",
+      faixaSuperiorTamanho: "md",
+      faixaSuperiorAlinhamento: "center",
       mostrarPrecoAntigo: true,
       mostrarCupom: true,
       mostrarMarketplace: true,
       faixaInferiorAtiva: true,
+      faixaInferiorCor: "#0f172a",
+      faixaInferiorCorTexto: "#ffffff",
+      faixaInferiorTamanho: "md",
+      faixaInferiorAlinhamento: "center",
       gatilho: "PROMO",
       ctaTemplate: 'COMENTE "{gatilho}"',
       posicaoCard: "bottom-left",
       corMoldura: "#0f172a",
       corCard: "#ffffff",
-      corDestaquePreco: "#16a34a"
+      corDestaquePreco: "#16a34a",
+      seloAtivo: false,
+      seloTexto: "OFERTA DO DIA",
+      seloPosicao: "top-right",
+      seloCor: "#dc2626",
+      seloCorTexto: "#ffffff"
     },
     dados: {
       titulo: "Produto Teste",
@@ -77,6 +89,55 @@ function fakeBrowser() {
   assert.strictEqual(normal.versao, 1);
   assert.strictEqual(normal.dados.titulo, "Produto Teste");
   assert.strictEqual(normal.template.faixaInferiorAtiva, true);
+  assert.strictEqual(normal.template.faixaSuperiorCorTexto, "#ffffff");
+  assert.strictEqual(normal.template.faixaInferiorCor, "#0f172a");
+  assert.strictEqual(normal.template.seloAtivo, false);
+
+  const antigo = normalizarPayloadRenderer(payload({
+    template: {
+      faixaSuperiorAtiva: true,
+      faixaSuperiorTexto: "LEGADO",
+      faixaSuperiorCor: "#111111",
+      mostrarPrecoAntigo: true,
+      mostrarCupom: true,
+      mostrarMarketplace: true,
+      faixaInferiorAtiva: true,
+      gatilho: "PROMO",
+      ctaTemplate: 'COMENTE "{gatilho}"',
+      posicaoCard: "top-right",
+      corMoldura: "#222222",
+      corCard: "#ffffff",
+      corDestaquePreco: "#16a34a"
+    }
+  }));
+  assert.strictEqual(antigo.template.faixaSuperiorCorTexto, "#ffffff", "template antigo recebe default de cor de texto");
+  assert.strictEqual(antigo.template.faixaInferiorCor, "#222222", "template antigo usa corMoldura como fallback da faixa inferior");
+  assert.strictEqual(antigo.template.seloAtivo, false, "selo novo deve ser opcional");
+
+  const v2 = normalizarPayloadRenderer(payload({
+    template: {
+      ...payload().template,
+      faixaSuperiorCorTexto: "#101010",
+      faixaSuperiorTamanho: "lg",
+      faixaSuperiorAlinhamento: "left",
+      faixaInferiorCor: "#334155",
+      faixaInferiorCorTexto: "#f8fafc",
+      faixaInferiorTamanho: "sm",
+      faixaInferiorAlinhamento: "right",
+      seloAtivo: true,
+      seloTexto: "CUPOM",
+      seloPosicao: "bottom-right",
+      seloCor: "#dc2626",
+      seloCorTexto: "#ffffff"
+    }
+  }));
+  assert.strictEqual(v2.template.faixaSuperiorTamanho, "lg");
+  assert.strictEqual(v2.template.faixaInferiorAlinhamento, "right");
+  assert.strictEqual(v2.template.seloAtivo, true);
+  const htmlV2 = htmlPreview({ template: v2.template, dados: v2.dados, cta: v2.cta, imagemSrc: "data:image/png;base64,AA==" });
+  assert.ok(htmlV2.includes("class=\"badge\""));
+  assert.ok(htmlV2.includes("CUPOM"));
+  assert.ok(htmlV2.includes("background:#334155"));
 
   const semCupom = normalizarPayloadRenderer(payload({ dados: { ...payload().dados, cupom: "" } }));
   assert.strictEqual(semCupom.dados.cupom, "", "cupom ausente deve ser aceito");
