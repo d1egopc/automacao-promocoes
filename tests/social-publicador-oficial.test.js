@@ -91,12 +91,14 @@ function mockHttpClient(sufixo = "ok") {
   ]);
 
   const httpOferta = mockHttpClient("oferta");
+  const legendaCustom = "Legenda custom da oferta";
   const publicadaOferta = await publicarNoInstagram({
     clienteId: "cliente_a",
     origem: "manual",
     tipoPublicacao: "oferta",
     ofertaId: "oferta_a",
     templateId: "padrao-instagram",
+    legenda: legendaCustom,
     idempotencyKey: "cliente_a:oferta_a:manual",
     httpClient: httpOferta,
     polling: POLLING_TESTE
@@ -104,9 +106,49 @@ function mockHttpClient(sufixo = "ok") {
   assert.strictEqual(publicadaOferta.publicacao.status, "publicada");
   assert.strictEqual(publicadaOferta.publicacao.origem, "manual");
   assert.strictEqual(publicadaOferta.publicacao.tipoPublicacao, "oferta");
+  assert.strictEqual(publicadaOferta.publicacao.legenda, legendaCustom, "publicador oficial nao deve descartar legenda recebida");
   assert.strictEqual(publicadaOferta.publicacao.idempotencyKey, "cliente_a:oferta_a:manual");
   assert.ok(httpOferta.chamadas.some(chamada => chamada.url.includes("/ig_a/media")));
+  assert.ok(
+    httpOferta.chamadas.some(chamada => chamada.url.includes("/ig_a/media") && chamada.body.includes("caption=Legenda+custom+da+oferta")),
+    "criacao do container deve enviar caption junto com image_url"
+  );
+  assert.ok(
+    httpOferta.chamadas.some(chamada => chamada.url.includes("/ig_a/media") && chamada.body.includes("image_url=https%3A%2F%2Fcdn.optimus.test%2Fproduto-a.jpg")),
+    "criacao do container deve enviar image_url"
+  );
   assert.ok(!JSON.stringify(publicadaOferta).includes("token_a"));
+
+  conectar("cliente_legenda_vazia", "legenda_vazia");
+  writeClienteJson("cliente_legenda_vazia", "fila.json", [
+    oferta({
+      id: "oferta_legenda_vazia",
+      ofertaId: "oferta_legenda_vazia",
+      produtoId: "produto_legenda_vazia",
+      titulo: "Produto Legenda Vazia",
+      imagem: "https://cdn.optimus.test/legenda-vazia.jpg",
+      linkAfiliado: "https://go.optimus.test/legenda-vazia"
+    })
+  ]);
+  const httpLegendaVazia = mockHttpClient("legenda_vazia");
+  const publicadaLegendaVazia = await publicarNoInstagram({
+    clienteId: "cliente_legenda_vazia",
+    origem: "manual",
+    tipoPublicacao: "oferta",
+    ofertaId: "oferta_legenda_vazia",
+    legenda: "",
+    httpClient: httpLegendaVazia,
+    polling: POLLING_TESTE
+  });
+  assert.strictEqual(publicadaLegendaVazia.publicacao.status, "publicada");
+  assert.ok(
+    publicadaLegendaVazia.publicacao.legenda.includes("Produto Legenda Vazia"),
+    "legenda vazia deve usar comportamento padrao existente"
+  );
+  assert.ok(
+    httpLegendaVazia.chamadas.some(chamada => chamada.url.includes("/ig_legenda_vazia/media") && chamada.body.includes("caption=Produto+Legenda+Vazia")),
+    "legenda padrao deve ir como caption quando a legenda do payload vier vazia"
+  );
 
   const duplicada = await publicarNoInstagram({
     clienteId: "cliente_a",

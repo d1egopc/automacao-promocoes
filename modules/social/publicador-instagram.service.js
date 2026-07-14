@@ -81,6 +81,13 @@ async function publicarNoInstagram({
     polling
   };
 
+  logSocial("[SOCIAL-INSTAGRAM-LEGENDA]", {
+    clienteId: clienteSeguro,
+    origem: origemSegura,
+    legendaPresente: Boolean(parametros.legenda),
+    tamanhoLegenda: parametros.legenda.length
+  });
+
   if (tipoSeguro === "livre") {
     const resultado = await publicarImagemLivreInstagram({
       ...parametros,
