@@ -140,10 +140,10 @@ function mockHttpClient(opcoes = {}) {
     async post(url, body) {
       chamadas.push({ metodo: "post", url, body: String(body || "") });
       if (url.endsWith("/replies")) return { data: { id: "reply_1" } };
-      if (url.includes("graph.facebook.com") && url.endsWith("/messages")) {
+      if (url.includes("graph.instagram.com") && url.endsWith("/messages")) {
         if (opcoes.erroDirect) {
           const erro = new Error("direct_recusado");
-          erro.response = { data: { error: { code: 100, type: "OAuthException", message: "Private reply not allowed" } } };
+          erro.response = { status: 400, data: { error: { code: 100, type: "OAuthException", message: "Private reply not allowed" } } };
           throw erro;
         }
         return { data: { recipient_id: "recipient_1", message_id: "direct_1" } };
@@ -171,10 +171,6 @@ function mockHttpClient(opcoes = {}) {
 
   assert.ok(instagram.scopesInstagramConexao().includes("instagram_business_manage_comments"));
   assert.ok(instagram.scopesInstagramConexao().includes("instagram_business_manage_messages"));
-  const privateReplyConfig = instagram.configurarPrivateReplyInstagram({ pageId: "page_cliente_a", commentId: "comment_1", tokenType: "page_access_token" });
-  assert.strictEqual(privateReplyConfig.host, "https://graph.facebook.com");
-  assert.strictEqual(privateReplyConfig.endpoint, "https://graph.facebook.com/v20.0/page_cliente_a/messages");
-  assert.strictEqual(privateReplyConfig.tokenType, "page_access_token");
   assert.strictEqual(instagram.contemGatilhoSeguro("Êu  quérõ por favor", "EU QUERO"), true);
   assert.strictEqual(instagram.contemGatilhoSeguro("eu querolandia", "EU QUERO"), false);
 
@@ -211,7 +207,13 @@ function mockHttpClient(opcoes = {}) {
   assert.strictEqual(http.chamadas.filter(chamada => chamada.url.endsWith("/messages")).length, 1);
   assert.strictEqual(http.chamadas.filter(chamada => chamada.metodo === "get" && chamada.url.endsWith("/comment_1")).length, 1);
   assert.strictEqual(http.chamadas.filter(chamada => chamada.metodo === "get" && chamada.url.endsWith("/me/permissions")).length, 1);
-  assert.ok(http.chamadas.find(chamada => chamada.url.endsWith("/messages")).body.includes("https%3A%2F%2Fgo.optimus.test%2Fa%2Foferta"));
+  const chamadaDirect = http.chamadas.find(chamada => chamada.url.endsWith("/messages"));
+  assert.ok(chamadaDirect.url.includes("graph.instagram.com/ig_cliente_a/messages"), "Direct deve usar graph.instagram.com com instagramUserId");
+  assert.ok(chamadaDirect.body.includes("access_token=token_cliente_a"), "Direct deve usar Instagram User Access Token");
+  assert.ok(chamadaDirect.body.includes("recipient=%7B%22comment_id%22%3A%22comment_1%22%7D"), "payload deve usar recipient.comment_id");
+  assert.ok(chamadaDirect.body.includes("https%3A%2F%2Fgo.optimus.test%2Fa%2Foferta"));
+  assert.ok(!chamadaDirect.url.includes("page_cliente_a"), "Direct nao deve depender de pageId");
+  assert.ok(!chamadaDirect.body.includes("page_token_cliente_a"), "Direct nao deve usar Page Access Token");
   assert.ok(!JSON.stringify(instagram.listarInteracoesInstagram("cliente_a")).includes("token_cliente_a"));
 
   const duplicado = await instagram.processarWebhookInstagram({ payload, assinatura, rawBody, httpClient: mockHttpClient() });
@@ -261,6 +263,8 @@ function mockHttpClient(opcoes = {}) {
   assert.strictEqual(directErro.resultados[0].interacao.respostaPublicaStatus, "concluida");
   assert.strictEqual(directErro.resultados[0].interacao.privateReplyStatus, "erro");
   assert.strictEqual(directErro.resultados[0].interacao.erro.code, 100);
+  assert.strictEqual(directErro.resultados[0].interacao.erro.type, "OAuthException");
+  assert.ok(!JSON.stringify(directErro.resultados[0].interacao.erro).includes("token_cliente_a"), "erro Graph sanitizado nao deve expor token");
   assert.ok(directErro.resultados[0].interacao.respostaPublicaEnviadaEm);
 
   const semMensagensPayload = payloadComentario({ comment: "comment_sem_mensagens" });
