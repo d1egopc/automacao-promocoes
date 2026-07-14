@@ -4,6 +4,8 @@ const { logSocial } = require("./logs");
 const { criarAdaptadorInstagram } = require("./instagram");
 const { criarAdaptadorFacebook } = require("./facebook");
 const { criarAdaptadorTelegramSocial } = require("./telegram");
+const publicadorInstagram = require("./publicador-instagram.service");
+const automaticoSocial = require("./automatico.service");
 
 function inicializarSocialModule(deps = {}) {
   const logger = deps.logger || console;
@@ -27,6 +29,8 @@ function inicializarSocialModule(deps = {}) {
 
 module.exports = {
   ...storage,
+  ...publicadorInstagram,
+  ...automaticoSocial,
   criarRotasSocial,
   inicializarSocialModule
 };

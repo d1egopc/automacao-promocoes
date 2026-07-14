@@ -10,7 +10,8 @@ const ARQUIVOS = {
   templates: "social-templates.json",
   agendamentos: "social-agendamentos.json",
   publicacoes: "social-publicacoes.json",
-  oportunidades: "social-oportunidades.json"
+  oportunidades: "social-oportunidades.json",
+  automatico: "social-automatico.json"
 };
 
 const REDES_SUPORTADAS = new Set(["instagram", "facebook", "telegram"]);
@@ -48,6 +49,28 @@ function numero(valor) {
     : limpo;
   const resultado = Number(normalizado);
   return Number.isFinite(resultado) ? resultado : null;
+}
+
+function inteiro(valor, fallback = 0, min = 0, max = 9999) {
+  const n = Number(valor);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+function hora(valor = "", fallback = "") {
+  const v = texto(valor);
+  return /^\d{2}:\d{2}$/.test(v) ? v : fallback;
+}
+
+function urlHttpsOpcional(valor = "") {
+  const v = texto(valor);
+  if (!v) return "";
+  try {
+    const parsed = new URL(v);
+    return parsed.protocol === "https:" ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
 }
 
 function dataMs(valor = "") {
@@ -165,6 +188,40 @@ function criarMetaPadrao(clienteId = "admin") {
   };
 }
 
+function criarConfigAutomaticoPadrao(clienteId = "admin") {
+  return {
+    clienteId,
+    ativo: false,
+    templatePadraoId: "padrao-instagram",
+    horarios: [],
+    quantidadeDiaria: 1,
+    janelaFuncionamento: {
+      inicio: "08:00",
+      fim: "22:00"
+    },
+    intervaloMinimoMinutos: 180,
+    marketplacesPermitidos: [],
+    categoriasPermitidas: [],
+    scoreMinimo: 70,
+    exigirCupom: false,
+    permitirOfertaComum: true,
+    evitarProdutoRepetidoDias: 30,
+    gatilho: {
+      ativo: false,
+      palavra: "PROMO",
+      respostaPublica: ""
+    },
+    cta: {
+      destino: "bio",
+      linkGrupo: "",
+      whatsapp: "",
+      linkBio: ""
+    },
+    criadoEm: agoraIso(),
+    atualizadoEm: agoraIso()
+  };
+}
+
 function temToken(valor = "") {
   return Boolean(texto(valor));
 }
@@ -277,6 +334,9 @@ function normalizarAgendamento(clienteId, agendamento = {}, index = 0) {
   const redes = lista(agendamento.redes)
     .map(normalizarRede)
     .filter(Boolean);
+  const status = texto(agendamento.status || "pendente");
+  const tipoPublicacao = texto(agendamento.tipoPublicacao || agendamento.tipo || "oferta").toLowerCase();
+  const origem = texto(agendamento.origem || "agendada").toLowerCase();
 
   return {
     id: texto(agendamento.id || criarId("agendamento")),
@@ -284,9 +344,21 @@ function normalizarAgendamento(clienteId, agendamento = {}, index = 0) {
     nome: texto(agendamento.nome || `Agendamento Social ${index + 1}`),
     ativo: agendamento.ativo !== false,
     redes,
+    origem: ["manual", "automatica", "agendada"].includes(origem) ? origem : "agendada",
+    tipoPublicacao: ["oferta", "livre"].includes(tipoPublicacao) ? tipoPublicacao : "oferta",
+    status: STATUS_PUBLICACAO.has(status) ? status : "pendente",
+    ofertaId: texto(agendamento.ofertaId || agendamento.oportunidadeId),
+    imagemUrl: texto(agendamento.imagemUrl || agendamento.imagem),
+    legenda: texto(agendamento.legenda || agendamento.mensagem),
+    templateId: texto(agendamento.templateId || "padrao-instagram"),
+    gatilho: agendamento.gatilho && typeof agendamento.gatilho === "object" ? agendamento.gatilho : null,
+    respostaPublica: texto(agendamento.respostaPublica || agendamento.gatilho?.respostaPublica),
+    agendadoPara: texto(agendamento.agendadoPara || agendamento.horarioExecucao),
     horario: texto(agendamento.horario),
     timezone: texto(agendamento.timezone || "America/Sao_Paulo"),
     regras: agendamento.regras && typeof agendamento.regras === "object" ? agendamento.regras : {},
+    publicacaoId: texto(agendamento.publicacaoId),
+    erro: agendamento.erro && typeof agendamento.erro === "object" ? agendamento.erro : null,
     criadoEm: agendamento.criadoEm || agoraIso(),
     atualizadoEm: agoraIso()
   };
@@ -377,6 +449,50 @@ function getConfigSocial(clienteId = "admin") {
     conexoes: {
       meta
     }
+  };
+}
+
+function normalizarConfigAutomatico(clienteId = "admin", config = {}) {
+  const padrao = criarConfigAutomaticoPadrao(clienteId);
+  const janela = config.janelaFuncionamento && typeof config.janelaFuncionamento === "object"
+    ? config.janelaFuncionamento
+    : {};
+  const gatilho = config.gatilho && typeof config.gatilho === "object" ? config.gatilho : {};
+  const cta = config.cta && typeof config.cta === "object" ? config.cta : {};
+  const destino = texto(cta.destino || padrao.cta.destino).toLowerCase();
+
+  return {
+    ...padrao,
+    ...config,
+    clienteId,
+    ativo: config.ativo === true,
+    templatePadraoId: texto(config.templatePadraoId || padrao.templatePadraoId),
+    horarios: lista(config.horarios).map(item => hora(item)).filter(Boolean).slice(0, 24),
+    quantidadeDiaria: inteiro(config.quantidadeDiaria, padrao.quantidadeDiaria, 1, 24),
+    janelaFuncionamento: {
+      inicio: hora(janela.inicio, padrao.janelaFuncionamento.inicio),
+      fim: hora(janela.fim, padrao.janelaFuncionamento.fim)
+    },
+    intervaloMinimoMinutos: inteiro(config.intervaloMinimoMinutos, padrao.intervaloMinimoMinutos, 15, 1440),
+    marketplacesPermitidos: lista(config.marketplacesPermitidos).map(texto).filter(Boolean),
+    categoriasPermitidas: lista(config.categoriasPermitidas).map(texto).filter(Boolean),
+    scoreMinimo: inteiro(config.scoreMinimo, padrao.scoreMinimo, 0, 100),
+    exigirCupom: config.exigirCupom === true,
+    permitirOfertaComum: config.permitirOfertaComum !== false,
+    evitarProdutoRepetidoDias: inteiro(config.evitarProdutoRepetidoDias, padrao.evitarProdutoRepetidoDias, 0, 365),
+    gatilho: {
+      ativo: gatilho.ativo === true,
+      palavra: texto(gatilho.palavra || padrao.gatilho.palavra).slice(0, 40),
+      respostaPublica: texto(gatilho.respostaPublica).slice(0, 220)
+    },
+    cta: {
+      destino: ["bio", "grupo", "whatsapp"].includes(destino) ? destino : "bio",
+      linkGrupo: urlHttpsOpcional(cta.linkGrupo),
+      whatsapp: texto(cta.whatsapp).slice(0, 120),
+      linkBio: urlHttpsOpcional(cta.linkBio)
+    },
+    criadoEm: config.criadoEm || agoraIso(),
+    atualizadoEm: agoraIso()
   };
 }
 
@@ -564,6 +680,29 @@ function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
   return resultado;
 }
 
+function getConfigAutomaticoSocial(clienteId = "admin") {
+  return normalizarConfigAutomatico(
+    clienteId,
+    lerCliente(clienteId, "automatico", criarConfigAutomaticoPadrao(clienteId))
+  );
+}
+
+function setConfigAutomaticoSocial(clienteId = "admin", dados = {}) {
+  const atual = getConfigAutomaticoSocial(clienteId);
+  const config = normalizarConfigAutomatico(clienteId, {
+    ...atual,
+    ...(dados && typeof dados === "object" ? dados : {})
+  });
+  escreverCliente(clienteId, "automatico", config);
+  logSocial("[SOCIAL-AUTOMATICO-CONFIG]", {
+    clienteId,
+    ativo: config.ativo,
+    quantidadeDiaria: config.quantidadeDiaria,
+    scoreMinimo: config.scoreMinimo
+  });
+  return config;
+}
+
 function getConexaoMetaSocial(clienteId = "admin") {
   const padrao = criarMetaPadrao(clienteId);
   const dados = lerCliente(clienteId, "meta", padrao);
@@ -734,6 +873,9 @@ module.exports = {
   salvarTemplateSocial,
   listarAgendamentosSocial,
   salvarAgendamentoSocial,
+  criarConfigAutomaticoPadrao,
+  getConfigAutomaticoSocial,
+  setConfigAutomaticoSocial,
   listarPublicacoesSocial,
   registrarPublicacaoSocial,
   listarOportunidadesSocial,

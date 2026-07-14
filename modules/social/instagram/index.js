@@ -409,8 +409,12 @@ function camposWebhookContaConfirmados(campos = []) {
 function publicacaoSanitizada(publicacao = {}) {
   return {
     id: texto(publicacao.id),
+    origem: texto(publicacao.origem || "manual"),
+    tipoPublicacao: texto(publicacao.tipoPublicacao || (texto(publicacao.ofertaId) ? "oferta" : "livre")),
     ofertaId: texto(publicacao.ofertaId),
     templateId: texto(publicacao.templateId),
+    agendamentoId: texto(publicacao.agendamentoId),
+    idempotencyKey: texto(publicacao.idempotencyKey),
     instagramUserId: texto(publicacao.instagramUserId),
     imagemUrl: texto(publicacao.imagemUrl),
     legenda: texto(publicacao.legenda),
@@ -421,6 +425,7 @@ function publicacaoSanitizada(publicacao = {}) {
     criadoEm: texto(publicacao.criadoEm),
     publicadoEm: texto(publicacao.publicadoEm),
     erro: publicacao.erro && typeof publicacao.erro === "object" ? publicacao.erro : null,
+    respostaPublica: texto(publicacao.respostaPublica),
     gatilho: publicacao.gatilho && typeof publicacao.gatilho === "object"
       ? sanitizarGatilhoInstagram(publicacao.gatilho, { corrigirCta: true })
       : null
@@ -599,6 +604,14 @@ function encontrarPublicacaoDuplicada(clienteId = "admin", ofertaId = "", templa
       const atualizadoMs = Date.parse(texto(item?.atualizadoEm || item?.criadoEm));
       return Number.isFinite(atualizadoMs) && agora - atualizadoMs <= PUBLICACAO_EM_ANDAMENTO_TTL_MS;
     });
+}
+
+function encontrarPublicacaoPorIdempotency(clienteId = "admin", idempotencyKey = "") {
+  const chave = texto(idempotencyKey);
+  if (!chave) return null;
+
+  return lista(readClienteJson(clienteId, ARQUIVO_PUBLICACOES, []))
+    .find(item => texto(item?.rede || "instagram") === "instagram" && texto(item?.idempotencyKey) === chave);
 }
 
 function normalizarChave(valor = "") {
@@ -1244,7 +1257,20 @@ async function aguardarContainerProntoInstagram({
   throw new Error("processamento_midia_timeout");
 }
 
-async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", templateId = "padrao-instagram", gatilho = undefined, httpClient = httpClientPadrao(), polling = {} } = {}) {
+async function publicarImagemInstagram({
+  clienteId = "admin",
+  ofertaId = "",
+  templateId = "padrao-instagram",
+  gatilho = undefined,
+  legenda = "",
+  respostaPublica = "",
+  origem = "manual",
+  tipoPublicacao = "oferta",
+  agendamentoId = "",
+  idempotencyKey = "",
+  httpClient = httpClientPadrao(),
+  polling = {}
+} = {}) {
   const tpl = texto(templateId || "padrao-instagram") || "padrao-instagram";
   const ofertaIdSeguro = texto(ofertaId);
   if (!ofertaIdSeguro) throw new Error("oferta_id_obrigatorio");
@@ -1256,6 +1282,14 @@ async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", tem
 
   if (conexao.token?.expiresAt && Date.parse(conexao.token.expiresAt) <= Date.now()) {
     throw new Error("instagram_token_expirado");
+  }
+
+  const duplicadaIdempotente = encontrarPublicacaoPorIdempotency(clienteId, idempotencyKey);
+  if (duplicadaIdempotente) {
+    return {
+      duplicada: true,
+      publicacao: publicacaoSanitizada(duplicadaIdempotente)
+    };
   }
 
   const duplicada = encontrarPublicacaoDuplicada(clienteId, ofertaIdSeguro, tpl);
@@ -1270,21 +1304,28 @@ async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", tem
   if (!oferta.linkAfiliado) throw new Error("oferta_link_ausente");
   const imagemUrl = validarImagemPublica(oferta.imagem);
   const gatilhoSeguro = gatilho && typeof gatilho === "object" ? sanitizarGatilhoInstagram(gatilho) : null;
-  const { legenda } = montarLegendaInstagram(oferta, tpl, gatilhoSeguro);
+  const legendaMontada = montarLegendaInstagram(oferta, tpl, gatilhoSeguro).legenda;
+  const legendaFinal = limitarTexto(legenda || legendaMontada, 2200);
   const id = criarId("igpub");
   const base = {
     id,
+    origem: texto(origem || "manual"),
+    tipoPublicacao: texto(tipoPublicacao || "oferta") || "oferta",
     ofertaId: ofertaIdSeguro,
     templateId: tpl,
+    agendamentoId: texto(agendamentoId),
+    idempotencyKey: texto(idempotencyKey),
     instagramUserId: conexao.instagramUserId,
     imagemUrl,
-    legenda,
+    legenda: legendaFinal,
     linkAfiliado: oferta.linkAfiliado,
     status: "publicando",
     instagramContainerId: "",
     instagramMediaId: "",
     gatilho: gatilhoSeguro,
+    respostaPublica: limitarTexto(respostaPublica || gatilhoSeguro?.respostaPublica || "", 220),
     criadoEm: agoraIso(),
+    tentativaEm: agoraIso(),
     publicadoEm: "",
     erro: null
   };
@@ -1296,7 +1337,7 @@ async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", tem
     instagramContainerId = await criarContainerImagemInstagram({
       instagramUserId: conexao.instagramUserId,
       imagemUrl,
-      legenda,
+      legenda: legendaFinal,
       accessToken: conexao.token.accessToken,
       httpClient
     });
@@ -1328,6 +1369,7 @@ async function publicarImagemInstagram({ clienteId = "admin", ofertaId = "", tem
       status: "publicada",
       instagramMediaId,
       publicadoEm: agoraIso(),
+      atualizadoEm: agoraIso(),
       erro: null
     });
 
@@ -1486,6 +1528,138 @@ async function responderComentarioInstagram({ commentId = "", mensagem = "", acc
     timeout: 10000
   });
   return texto(resposta?.data?.id || resposta?.data?.comment_id || "ok");
+}
+
+async function publicarImagemLivreInstagram({
+  clienteId = "admin",
+  imagemUrl = "",
+  legenda = "",
+  templateId = "livre-instagram",
+  gatilho = undefined,
+  respostaPublica = "",
+  origem = "manual",
+  tipoPublicacao = "livre",
+  agendamentoId = "",
+  idempotencyKey = "",
+  httpClient = httpClientPadrao(),
+  polling = {}
+} = {}) {
+  const tpl = texto(templateId || "livre-instagram") || "livre-instagram";
+  const imagemPublica = validarImagemPublica(imagemUrl);
+  const legendaFinal = limitarTexto(legenda, 2200);
+  if (!legendaFinal) throw new Error("legenda_obrigatoria");
+
+  const conexao = lerConexaoInstagram(clienteId);
+  if (!conexao.conectado || !texto(conexao.token?.accessToken) || !texto(conexao.instagramUserId)) {
+    throw new Error("instagram_nao_conectado");
+  }
+
+  if (conexao.token?.expiresAt && Date.parse(conexao.token.expiresAt) <= Date.now()) {
+    throw new Error("instagram_token_expirado");
+  }
+
+  const duplicadaIdempotente = encontrarPublicacaoPorIdempotency(clienteId, idempotencyKey);
+  if (duplicadaIdempotente) {
+    return {
+      duplicada: true,
+      publicacao: publicacaoSanitizada(duplicadaIdempotente)
+    };
+  }
+
+  const gatilhoSeguro = gatilho && typeof gatilho === "object" ? sanitizarGatilhoInstagram(gatilho) : null;
+  const id = criarId("igpub");
+  const base = {
+    id,
+    origem: texto(origem || "manual"),
+    tipoPublicacao: texto(tipoPublicacao || "livre") || "livre",
+    ofertaId: "",
+    templateId: tpl,
+    agendamentoId: texto(agendamentoId),
+    idempotencyKey: texto(idempotencyKey),
+    instagramUserId: conexao.instagramUserId,
+    imagemUrl: imagemPublica,
+    legenda: legendaFinal,
+    linkAfiliado: "",
+    status: "publicando",
+    instagramContainerId: "",
+    instagramMediaId: "",
+    gatilho: gatilhoSeguro,
+    respostaPublica: limitarTexto(respostaPublica || gatilhoSeguro?.respostaPublica || "", 220),
+    criadoEm: agoraIso(),
+    tentativaEm: agoraIso(),
+    publicadoEm: "",
+    erro: null
+  };
+
+  salvarPublicacaoInstagram(clienteId, base);
+
+  let instagramContainerId = "";
+  try {
+    instagramContainerId = await criarContainerImagemInstagram({
+      instagramUserId: conexao.instagramUserId,
+      imagemUrl: imagemPublica,
+      legenda: legendaFinal,
+      accessToken: conexao.token.accessToken,
+      httpClient
+    });
+    const comContainer = salvarPublicacaoInstagram(clienteId, {
+      ...base,
+      status: "processando",
+      instagramContainerId
+    });
+    await aguardarContainerProntoInstagram({
+      containerId: instagramContainerId,
+      accessToken: conexao.token.accessToken,
+      httpClient,
+      polling
+    });
+    const instagramMediaId = await publicarContainerInstagram({
+      instagramUserId: conexao.instagramUserId,
+      containerId: instagramContainerId,
+      accessToken: conexao.token.accessToken,
+      httpClient
+    });
+    const publicada = salvarPublicacaoInstagram(clienteId, {
+      ...comContainer,
+      status: "publicada",
+      instagramMediaId,
+      publicadoEm: agoraIso(),
+      atualizadoEm: agoraIso(),
+      erro: null
+    });
+
+    logSocial("[SOCIAL-INSTAGRAM-PUBLICACAO-LIVRE-OK]", {
+      clienteId,
+      publicacaoId: id,
+      origem: base.origem,
+      instagramUserId: conexao.instagramUserId,
+      instagramMediaId
+    });
+
+    return {
+      duplicada: false,
+      publicacao: publicacaoSanitizada(publicada)
+    };
+  } catch (e) {
+    const erro = sanitizarErroInstagram(e);
+    const falha = salvarPublicacaoInstagram(clienteId, {
+      ...base,
+      instagramContainerId,
+      status: "erro",
+      erro
+    });
+    logSocial("[SOCIAL-INSTAGRAM-PUBLICACAO-LIVRE-ERRO]", {
+      clienteId,
+      publicacaoId: id,
+      origem: base.origem,
+      instagramContainerId,
+      erro
+    });
+    return {
+      duplicada: false,
+      publicacao: publicacaoSanitizada(falha)
+    };
+  }
 }
 
 async function diagnosticarComentarioInstagram({ commentId = "", accessToken = "", httpClient = httpClientPadrao() } = {}) {
@@ -2007,6 +2181,7 @@ module.exports = {
   listarInteracoesInstagram,
   getInteracaoInstagram,
   publicarImagemInstagram,
+  publicarImagemLivreInstagram,
   processarWebhookInstagram,
   processarEventoComentarioInstagram,
   diagnosticarComentarioInstagram,

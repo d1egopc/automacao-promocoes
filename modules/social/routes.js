@@ -4,6 +4,13 @@ const { logSocial, logErroSocial } = require("./logs");
 const { payloadTemplateSocialPadrao } = require("./templates");
 const { payloadAgendamentoSocialPadrao } = require("./scheduler");
 const { payloadDirectSocialPadrao } = require("./direct");
+const { publicarNoInstagram } = require("./publicador-instagram.service");
+const {
+  executarAgendamentosPendentesCliente,
+  executarAutomaticoCliente,
+  simularSelecaoAutomatica
+} = require("./automatico.service");
+const socialMediaStorage = require("./social-media-storage");
 const {
   consultarAtivosMeta,
   concluirCallbackMeta,
@@ -19,7 +26,6 @@ const {
   listarInteracoesInstagram,
   listarPublicacoesInstagram,
   limparConexaoInstagram,
-  publicarImagemInstagram,
   processarWebhookInstagram,
   sanitizarConexaoInstagram,
   validarAssinaturaWebhookInstagram
@@ -87,7 +93,12 @@ function criarRotasSocial(deps = {}) {
       "oferta_nao_encontrada",
       "oferta_link_ausente",
       "imagem_ausente",
-      "imagem_nao_publica"
+      "imagem_nao_publica",
+      "legenda_obrigatoria",
+      "social_media_storage_nao_configurado",
+      "social_media_arquivo_obrigatorio",
+      "social_media_arquivo_muito_grande",
+      "social_media_tipo_invalido"
     ]);
     return permitidos.has(codigo) ? codigo : "instagram_oauth_falhou";
   }
@@ -493,11 +504,18 @@ function criarRotasSocial(deps = {}) {
 
     try {
       const clienteId = cliente(req);
-      const resultado = await publicarImagemInstagram({
+      const resultado = await publicarNoInstagram({
         clienteId,
+        origem: req.body?.origem || "manual",
+        tipoPublicacao: req.body?.tipoPublicacao || req.body?.tipo || "oferta",
         ofertaId: req.body?.ofertaId || "",
+        imagemUrl: req.body?.imagemUrl || "",
+        legenda: req.body?.legenda || "",
         templateId: req.body?.templateId || "padrao-instagram",
-        gatilho: req.body?.gatilho
+        gatilho: req.body?.gatilho,
+        respostaPublica: req.body?.respostaPublica || req.body?.gatilho?.respostaPublica || "",
+        agendamentoId: req.body?.agendamentoId || "",
+        idempotencyKey: req.body?.idempotencyKey || ""
       });
 
       return res.status(resultado.publicacao.status === "erro" ? 502 : 200).json({
@@ -717,6 +735,121 @@ function criarRotasSocial(deps = {}) {
     });
   });
 
+  router.get("/automatico/config", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    const clienteId = cliente(req);
+    return res.json({
+      ok: true,
+      clienteId,
+      config: storage.getConfigAutomaticoSocial(clienteId)
+    });
+  });
+
+  router.post("/automatico/config", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const config = storage.setConfigAutomaticoSocial(clienteId, req.body?.config || req.body || {});
+      return res.json({
+        ok: true,
+        clienteId,
+        config
+      });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "POST /social/automatico/config" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_automatico_config_invalida" });
+    }
+  });
+
+  router.post("/automatico/simular", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const resultado = simularSelecaoAutomatica({
+        clienteId,
+        limite: Math.min(limite(req, 50), 50)
+      });
+      return res.json(resultado);
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "POST /social/automatico/simular" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_automatico_simulacao_falhou" });
+    }
+  });
+
+  router.post("/automatico/executar", async (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const resultado = await executarAutomaticoCliente({ clienteId });
+      return res.status(resultado.ok ? 200 : 409).json(resultado);
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "POST /social/automatico/executar" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_automatico_execucao_falhou" });
+    }
+  });
+
+  router.post("/agendamentos/executar", async (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const resultado = await executarAgendamentosPendentesCliente({ clienteId });
+      return res.json(resultado);
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "POST /social/agendamentos/executar" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_agendamentos_execucao_falhou" });
+    }
+  });
+
+  router.post(
+    "/midia/upload",
+    express.raw({ type: ["image/jpeg", "image/png", "image/webp"], limit: process.env.SOCIAL_MEDIA_MAX_BYTES || "8mb" }),
+    (req, res) => {
+      if (!socialPermitido(req)) {
+        return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+      }
+
+      try {
+        const clienteId = cliente(req);
+        const resultado = socialMediaStorage.salvar({
+          clienteId,
+          buffer: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
+          mimeType: req.headers["content-type"] || "",
+          nomeLogico: req.query?.nome || "publicacao_livre"
+        });
+        return res.json({
+          ok: true,
+          clienteId,
+          midia: {
+            url: resultado.url,
+            mimeType: resultado.mimeType,
+            bytes: resultado.bytes,
+            hash: resultado.hash.slice(0, 12)
+          }
+        });
+      } catch (e) {
+        const erro = erroInstagramSeguro(e.message);
+        logErroSocial({ erro, rota: "POST /social/midia/upload" });
+        const status = erro === "social_media_storage_nao_configurado" ? 501 : 400;
+        return res.status(status).json({ ok: false, erro });
+      }
+    }
+  );
+
   router.get("/publicacoes", (req, res) => {
     if (!socialPermitido(req)) {
       return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
@@ -871,6 +1004,12 @@ function criarRotasSocial(deps = {}) {
       "POST /social/templates",
       "GET /social/agendamentos",
       "POST /social/agendamentos",
+      "GET /social/automatico/config",
+      "POST /social/automatico/config",
+      "POST /social/automatico/simular",
+      "POST /social/automatico/executar",
+      "POST /social/agendamentos/executar",
+      "POST /social/midia/upload",
       "GET /social/publicacoes",
       "GET /social/oportunidades",
       "POST /social/publicar"
