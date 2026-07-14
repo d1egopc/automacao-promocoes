@@ -183,11 +183,32 @@ function criarRotasSocial(deps = {}) {
 
       const ativos = await consultarAtivosMeta({
         clienteId,
-        accessToken
+        accessToken,
+        selecaoAtual: {
+          pageId: conexao.facebook?.pageId,
+          instagramBusinessAccountId: conexao.instagram?.instagramBusinessAccountId
+        }
       });
+      const paginas = ativos.paginas || [];
+      const paginaSelecionada = paginas.find(pagina => pagina.conectado === true) || {};
       const salvo = storage.setConexaoMetaSocial(clienteId, {
         ...conexao,
-        paginas: ativos.paginas || [],
+        facebook: {
+          ...(conexao.facebook || {}),
+          conectado: Boolean(paginaSelecionada.id),
+          pageId: paginaSelecionada.id || "",
+          pageAccessToken: paginaSelecionada.accessToken || "",
+          pageName: paginaSelecionada.name || "",
+          pageUsername: paginaSelecionada.username || ""
+        },
+        instagram: {
+          ...(conexao.instagram || {}),
+          conectado: Boolean(paginaSelecionada.instagramBusinessAccountId),
+          instagramBusinessAccountId: paginaSelecionada.instagramBusinessAccountId || "",
+          username: paginaSelecionada.instagramUsername || "",
+          name: paginaSelecionada.instagramName || ""
+        },
+        paginas,
         ativos: {
           status: ativos.status,
           motivo: ativos.motivo || "",

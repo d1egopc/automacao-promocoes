@@ -593,6 +593,7 @@ function getConexaoMetaSocial(clienteId = "admin") {
       ...(dados.facebook && typeof dados.facebook === "object" ? dados.facebook : {}),
       conectado: Boolean(paginaPrincipal.id),
       pageId: texto(dados.facebook?.pageId || paginaPrincipal.id),
+      pageAccessToken: texto(dados.facebook?.pageAccessToken || paginaPrincipal.accessToken),
       pageName: texto(dados.facebook?.pageName || paginaPrincipal.name),
       pageUsername: texto(dados.facebook?.pageUsername || paginaPrincipal.username)
     },
@@ -688,6 +689,7 @@ function selecionarAtivoMetaSocial(clienteId = "admin", selecao = {}) {
     facebook: {
       conectado: true,
       pageId: texto(paginaSelecionada.id),
+      pageAccessToken: texto(paginaSelecionada.accessToken),
       pageName: texto(paginaSelecionada.name),
       pageUsername: texto(paginaSelecionada.username)
     },

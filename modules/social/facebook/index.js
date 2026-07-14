@@ -9,7 +9,9 @@ const META_SCOPES_CONEXAO_PADRAO = [
 const META_SCOPES_ATIVOS_PADRAO = [
   "pages_show_list",
   "pages_read_engagement",
-  "instagram_basic"
+  "instagram_basic",
+  "instagram_manage_comments",
+  "pages_messaging"
 ];
 const META_SCOPES_PUBLICACAO_FUTURA = [
   "pages_manage_posts",
@@ -331,8 +333,26 @@ function erroPermissaoMeta(erro) {
   return codigo === 10 || codigo === 200 || mensagem.includes("permission") || mensagem.includes("permiss");
 }
 
-function normalizarPaginasMeta(paginas = []) {
-  return (Array.isArray(paginas) ? paginas : []).map((pagina, index) => ({
+function paginaValidaMessaging(pagina = {}) {
+  return Boolean(texto(pagina.id) && texto(pagina.accessToken) && texto(pagina.instagramBusinessAccountId));
+}
+
+function selecionarPaginaMetaConservadora(paginas = [], selecaoAtual = {}) {
+  const listaPaginas = Array.isArray(paginas) ? paginas : [];
+  const pageIdAtual = texto(selecaoAtual.pageId || selecaoAtual.facebook?.pageId);
+  const instagramIdAtual = texto(selecaoAtual.instagramBusinessAccountId || selecaoAtual.instagram?.instagramBusinessAccountId);
+  const selecionadaAtual = listaPaginas.find(pagina =>
+    (pageIdAtual && texto(pagina.id) === pageIdAtual) ||
+    (instagramIdAtual && texto(pagina.instagramBusinessAccountId) === instagramIdAtual)
+  );
+  if (selecionadaAtual) return selecionadaAtual;
+
+  const validas = listaPaginas.filter(paginaValidaMessaging);
+  return validas.length === 1 ? validas[0] : null;
+}
+
+function normalizarPaginasMeta(paginas = [], selecaoAtual = {}) {
+  const normalizadas = (Array.isArray(paginas) ? paginas : []).map(pagina => ({
     id: texto(pagina.id),
     name: texto(pagina.name),
     username: texto(pagina.username),
@@ -340,18 +360,35 @@ function normalizarPaginasMeta(paginas = []) {
     instagramBusinessAccountId: texto(pagina.instagram_business_account?.id),
     instagramUsername: texto(pagina.instagram_business_account?.username),
     instagramName: texto(pagina.instagram_business_account?.name),
-    conectado: index === 0
+    conectado: false
   })).filter(pagina => pagina.id);
+  const selecionada = selecionarPaginaMetaConservadora(normalizadas, selecaoAtual);
+  return normalizadas.map(pagina => ({
+    ...pagina,
+    conectado: Boolean(selecionada && texto(pagina.id) === texto(selecionada.id))
+  }));
 }
 
-async function consultarAtivosMeta({ clienteId = "", accessToken = "", httpClient = axios } = {}) {
+function resumoAtivosMeta(clienteId = "", paginas = []) {
+  const paginaSelecionada = (Array.isArray(paginas) ? paginas : []).find(pagina => pagina.conectado === true) || {};
+  return {
+    clienteId,
+    quantidadePaginas: paginas.length,
+    paginasComToken: paginas.filter(pagina => Boolean(texto(pagina.accessToken))).length,
+    paginasComInstagramBusiness: paginas.filter(pagina => Boolean(texto(pagina.instagramBusinessAccountId))).length,
+    pageIdSelecionado: texto(paginaSelecionada.id),
+    instagramBusinessAccountIdSelecionado: texto(paginaSelecionada.instagramBusinessAccountId)
+  };
+}
+
+async function consultarAtivosMeta({ clienteId = "", accessToken = "", selecaoAtual = {}, httpClient = axios } = {}) {
   logMetaSeguro("[SOCIAL-META-ATIVOS-CONSULTA]", {
     clienteId,
     tokenPresente: Boolean(texto(accessToken))
   });
 
   try {
-    const paginas = normalizarPaginasMeta(await listarPaginasMeta({ accessToken, httpClient }));
+    const paginas = normalizarPaginasMeta(await listarPaginasMeta({ accessToken, httpClient }), selecaoAtual);
 
     logMetaSeguro("[SOCIAL-META-PAGINAS-ENCONTRADAS]", {
       clienteId,
@@ -368,6 +405,7 @@ async function consultarAtivosMeta({ clienteId = "", accessToken = "", httpClien
         });
       }
     }
+    logMetaSeguro("[INSTAGRAM-META-ATIVOS-DESCOBERTOS]", resumoAtivosMeta(clienteId, paginas));
 
     return {
       ok: true,
@@ -404,7 +442,7 @@ async function concluirCallbackMeta({ code = "", state = "", redirectUri = "", h
     httpClient
   });
   const paginas = ativos.paginas || [];
-  const paginaPrincipal = paginas[0] || {};
+  const paginaPrincipal = paginas.find(pagina => pagina.conectado === true) || {};
 
   return {
     clienteId: estado.clienteId,
@@ -420,6 +458,7 @@ async function concluirCallbackMeta({ code = "", state = "", redirectUri = "", h
     facebook: {
       conectado: Boolean(paginaPrincipal.id),
       pageId: texto(paginaPrincipal.id),
+      pageAccessToken: texto(paginaPrincipal.accessToken),
       pageName: texto(paginaPrincipal.name),
       pageUsername: texto(paginaPrincipal.username)
     },

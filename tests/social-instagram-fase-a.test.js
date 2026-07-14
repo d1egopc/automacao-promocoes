@@ -359,10 +359,13 @@ function salvarFilaCliente(clienteId, itens) {
   );
   assert.ok(indexFonte.includes('erro: "Token inválido"'), "resposta Token inválido deve estar em UTF-8");
   assert.ok(!indexFonte.includes("Token invÃ"), "index.js nao deve manter Token invalido mojibake");
-  assert.ok(routesFonte.includes('return res.json({\n        ok: true,\n        authUrl: inicio.authUrl\n      });'), "conectar deve retornar somente ok/authUrl");
+  assert.ok(routesFonte.includes("authUrl: inicio.authUrl"), "conectar deve retornar authUrl");
+  assert.ok(!routesFonte.includes("accessToken: inicio"), "conectar nao deve retornar token");
   assert.ok(routesFonte.includes('return res.json(payloadStatusInstagram(lerConexaoInstagram(clienteId)));'), "status deve usar contrato sanitizado achatado");
   assert.ok(routesFonte.includes("webhookContaAssinada: instagram.webhookContaAssinada"), "status deve expor assinatura webhook sanitizada");
-  assert.ok(routesFonte.includes('return res.json({\n      ok: true,\n      conectado: false\n    });'), "desconectar deve retornar ok/conectado false");
+  assert.ok(routesFonte.includes('router.post("/instagram/desconectar"'), "rota desconectar instagram deve existir");
+  assert.ok(routesFonte.includes("limparConexaoInstagram(clienteId)"), "desconectar deve limpar conexao instagram");
+  assert.ok(routesFonte.includes("conectado: false"), "desconectar deve retornar conectado false");
   assert.ok(routesFonte.includes('router.post("/instagram/publicar"'), "rota publicar instagram deve existir");
   assert.ok(routesFonte.includes('router.get("/instagram/publicacoes"'), "rota listar publicacoes instagram deve existir");
 
