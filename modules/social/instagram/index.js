@@ -4,12 +4,14 @@ const {
   readClienteJson,
   writeClienteJson
 } = require("../../../utils/storage");
+const { getConexaoMetaSocial } = require("../storage");
 const { logSocial } = require("../logs");
 
 const INSTAGRAM_AUTH_URL = "https://www.instagram.com/oauth/authorize";
 const INSTAGRAM_TOKEN_URL = "https://api.instagram.com/oauth/access_token";
 const INSTAGRAM_GRAPH_BASE = "https://graph.instagram.com";
 const INSTAGRAM_GRAPH_VERSION = "";
+const META_GRAPH_HOST = "https://graph.facebook.com";
 const ARQUIVO_INSTAGRAM = "social-instagram.json";
 const ARQUIVO_PUBLICACOES = "social-publicacoes.json";
 const ARQUIVO_INTERACOES = "social-interacoes.json";
@@ -1488,14 +1490,44 @@ async function responderComentarioInstagram({ commentId = "", mensagem = "", acc
   return texto(resposta?.data?.id || resposta?.data?.comment_id || "ok");
 }
 
-function configurarPrivateReplyInstagram({ commentId = "", tokenType = "" } = {}) {
-  const id = texto(commentId);
+function metaGraphVersion() {
+  return texto(process.env.META_GRAPH_VERSION);
+}
+
+function metaGraphBaseMessaging() {
+  const versao = metaGraphVersion();
+  return versao ? `${META_GRAPH_HOST}/${encodeURIComponent(versao)}` : META_GRAPH_HOST;
+}
+
+function selecionarAtivoMessagingInstagram(conexaoMeta = {}) {
+  const pageIdSalvo = texto(conexaoMeta.facebook?.pageId);
+  const instagramBusinessAccountIdSalvo = texto(conexaoMeta.instagram?.instagramBusinessAccountId);
+  const paginas = lista(conexaoMeta.paginas);
+  const paginaSelecionada =
+    paginas.find(pagina => pageIdSalvo && texto(pagina.id) === pageIdSalvo) ||
+    paginas.find(pagina => texto(pagina.instagramBusinessAccountId) && texto(pagina.instagramBusinessAccountId) === instagramBusinessAccountIdSalvo) ||
+    paginas.find(pagina => pagina.conectado === true) ||
+    paginas[0] ||
+    {};
+
   return {
-    host: INSTAGRAM_GRAPH_BASE,
-    versaoGraph: INSTAGRAM_GRAPH_VERSION || "sem_versao_explicita",
+    pageId: pageIdSalvo || texto(paginaSelecionada.id),
+    pageAccessToken: texto(paginaSelecionada.accessToken || paginaSelecionada.pageAccessToken || conexaoMeta.facebook?.pageAccessToken),
+    instagramBusinessAccountId: instagramBusinessAccountIdSalvo || texto(paginaSelecionada.instagramBusinessAccountId)
+  };
+}
+
+function configurarPrivateReplyInstagram({ pageId = "", commentId = "", tokenType = "" } = {}) {
+  const id = texto(commentId);
+  const pagina = texto(pageId);
+  const base = metaGraphBaseMessaging();
+  return {
+    host: META_GRAPH_HOST,
+    versaoGraph: metaGraphVersion() || "sem_versao_explicita",
+    pageId: pagina,
     commentId: id,
-    endpoint: `${endpointComentarioInstagram(id)}/private_replies`,
-    tokenType: texto(tokenType || "bearer").toLowerCase()
+    endpoint: `${base}/${encodeURIComponent(pagina)}/messages`,
+    tokenType: texto(tokenType || "page_access_token").toLowerCase()
   };
 }
 
@@ -1560,16 +1592,73 @@ async function diagnosticarPermissoesTokenInstagram({ conexao = {}, accessToken 
   }
 }
 
-async function responderPrivadoComentarioInstagram({ commentId = "", mensagem = "", accessToken = "", tokenType = "", httpClient = httpClientPadrao() } = {}) {
-  const chamada = configurarPrivateReplyInstagram({ commentId, tokenType });
-  const resposta = await httpClient.post(chamada.endpoint, new URLSearchParams({
-    message: mensagem.slice(0, 950),
-    access_token: accessToken
-  }).toString(), {
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    timeout: 10000
+async function responderPrivadoComentarioInstagram({ clienteId = "", commentId = "", mensagem = "", httpClient = httpClientPadrao() } = {}) {
+  const conexaoMeta = getConexaoMetaSocial(clienteId);
+  const ativo = selecionarAtivoMessagingInstagram(conexaoMeta);
+  const chamada = configurarPrivateReplyInstagram({
+    pageId: ativo.pageId,
+    commentId,
+    tokenType: "page_access_token"
   });
-  return texto(resposta?.data?.id || resposta?.data?.message_id || "ok");
+  const contextoLog = {
+    clienteId: texto(clienteId),
+    pageId: ativo.pageId,
+    instagramBusinessAccountId: ativo.instagramBusinessAccountId,
+    commentId: texto(commentId),
+    versaoGraph: chamada.versaoGraph,
+    tokenPresente: Boolean(ativo.pageAccessToken)
+  };
+
+  logSocial("[INSTAGRAM-MESSAGING-INICIO]", contextoLog);
+
+  if (!ativo.pageId) {
+    const erro = new Error("instagram_messaging_page_id_ausente");
+    logSocial("[INSTAGRAM-MESSAGING-ERRO]", { ...contextoLog, erro: sanitizarErroInstagram(erro) });
+    throw erro;
+  }
+  if (!ativo.pageAccessToken) {
+    const erro = new Error("instagram_messaging_page_token_ausente");
+    logSocial("[INSTAGRAM-MESSAGING-ERRO]", { ...contextoLog, erro: sanitizarErroInstagram(erro) });
+    throw erro;
+  }
+  if (!texto(commentId)) {
+    const erro = new Error("instagram_messaging_comment_id_ausente");
+    logSocial("[INSTAGRAM-MESSAGING-ERRO]", { ...contextoLog, erro: sanitizarErroInstagram(erro) });
+    throw erro;
+  }
+
+  logSocial("[INSTAGRAM-MESSAGING-REQUEST]", {
+    ...contextoLog,
+    host: chamada.host,
+    endpoint: `/${ativo.pageId}/messages`,
+    payload: ["recipient.comment_id", "message.text"]
+  });
+
+  try {
+    const resposta = await httpClient.post(chamada.endpoint, new URLSearchParams({
+      recipient: JSON.stringify({ comment_id: texto(commentId) }),
+      message: JSON.stringify({ text: mensagem.slice(0, 950) }),
+      access_token: ativo.pageAccessToken
+    }).toString(), {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      timeout: 10000
+    });
+    const resultado = {
+      recipientIdPresente: Boolean(texto(resposta?.data?.recipient_id)),
+      messageIdPresente: Boolean(texto(resposta?.data?.message_id || resposta?.data?.id))
+    };
+    logSocial("[INSTAGRAM-MESSAGING-SUCESSO]", {
+      ...contextoLog,
+      ...resultado
+    });
+    return texto(resposta?.data?.message_id || resposta?.data?.id || "ok");
+  } catch (e) {
+    logSocial("[INSTAGRAM-MESSAGING-ERRO]", {
+      ...contextoLog,
+      erro: sanitizarErroInstagram(e)
+    });
+    throw e;
+  }
 }
 
 function montarMensagemDirectInstagram({ oferta = {}, gatilho = {} } = {}) {
@@ -1759,10 +1848,9 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
 
   try {
     await responderPrivadoComentarioInstagram({
+      clienteId,
       commentId: evento.instagramCommentId,
       mensagem: montarMensagemDirectInstagram({ oferta, gatilho }),
-      accessToken: conexao.token.accessToken,
-      tokenType: conexao.token.tokenType,
       httpClient
     });
     atual = salvarInteracaoInstagram(clienteId, {

@@ -12,6 +12,7 @@ process.env.META_APP_SECRET = "secret_meta_optimus";
 process.env.INSTAGRAM_REDIRECT_URI = "https://api.optimus.test/social/instagram/callback";
 process.env.INSTAGRAM_OAUTH_STATE_SECRET = "state_secret_optimus";
 process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN = "verify_optimus";
+process.env.META_GRAPH_VERSION = "v20.0";
 
 const instagram = require("../modules/social/instagram");
 const { readClienteJson, writeClienteJson } = require("../utils/storage");
@@ -54,6 +55,29 @@ function salvarClienteInstagram(clienteId, { ig = "ig_cliente_a", media = "media
     username: `${clienteId}_perfil`,
     token: { accessToken: `token_${clienteId}`, expiresAt: "2099-01-01T00:00:00.000Z" },
     scopes: instagram.scopesInstagramConexao()
+  });
+  writeClienteJson(clienteId, "social-meta.json", {
+    clienteId,
+    conectado: true,
+    token: { accessToken: `meta_user_token_${clienteId}` },
+    facebook: {
+      conectado: true,
+      pageId: `page_${clienteId}`,
+      pageName: `Pagina ${clienteId}`
+    },
+    instagram: {
+      conectado: true,
+      instagramBusinessAccountId: `iba_${clienteId}`,
+      username: `${clienteId}_perfil`
+    },
+    paginas: [{
+      id: `page_${clienteId}`,
+      name: `Pagina ${clienteId}`,
+      accessToken: `page_token_${clienteId}`,
+      instagramBusinessAccountId: `iba_${clienteId}`,
+      instagramUsername: `${clienteId}_perfil`,
+      conectado: true
+    }]
   });
   writeClienteJson(clienteId, "fila.json", [{
     id: oferta,
@@ -116,13 +140,13 @@ function mockHttpClient(opcoes = {}) {
     async post(url, body) {
       chamadas.push({ metodo: "post", url, body: String(body || "") });
       if (url.endsWith("/replies")) return { data: { id: "reply_1" } };
-      if (url.endsWith("/private_replies")) {
+      if (url.includes("graph.facebook.com") && url.endsWith("/messages")) {
         if (opcoes.erroDirect) {
           const erro = new Error("direct_recusado");
-          erro.response = { data: { error: { code: 100, type: "IGApiException", message: "Private reply not allowed" } } };
+          erro.response = { data: { error: { code: 100, type: "OAuthException", message: "Private reply not allowed" } } };
           throw erro;
         }
-        return { data: { id: "direct_1" } };
+        return { data: { recipient_id: "recipient_1", message_id: "direct_1" } };
       }
       throw new Error(`url_inesperada:${url}`);
     }
@@ -147,10 +171,10 @@ function mockHttpClient(opcoes = {}) {
 
   assert.ok(instagram.scopesInstagramConexao().includes("instagram_business_manage_comments"));
   assert.ok(instagram.scopesInstagramConexao().includes("instagram_business_manage_messages"));
-  const privateReplyConfig = instagram.configurarPrivateReplyInstagram({ commentId: "comment_1", tokenType: "bearer" });
-  assert.strictEqual(privateReplyConfig.host, instagram.INSTAGRAM_GRAPH_BASE);
-  assert.strictEqual(privateReplyConfig.endpoint, `${instagram.INSTAGRAM_GRAPH_BASE}/comment_1/private_replies`);
-  assert.strictEqual(privateReplyConfig.tokenType, "bearer");
+  const privateReplyConfig = instagram.configurarPrivateReplyInstagram({ pageId: "page_cliente_a", commentId: "comment_1", tokenType: "page_access_token" });
+  assert.strictEqual(privateReplyConfig.host, "https://graph.facebook.com");
+  assert.strictEqual(privateReplyConfig.endpoint, "https://graph.facebook.com/v20.0/page_cliente_a/messages");
+  assert.strictEqual(privateReplyConfig.tokenType, "page_access_token");
   assert.strictEqual(instagram.contemGatilhoSeguro("Êu  quérõ por favor", "EU QUERO"), true);
   assert.strictEqual(instagram.contemGatilhoSeguro("eu querolandia", "EU QUERO"), false);
 
@@ -184,10 +208,10 @@ function mockHttpClient(opcoes = {}) {
   assert.strictEqual(resultado.total, 1);
   assert.strictEqual(resultado.resultados[0].status, "respondida");
   assert.strictEqual(http.chamadas.filter(chamada => chamada.url.endsWith("/replies")).length, 1);
-  assert.strictEqual(http.chamadas.filter(chamada => chamada.url.endsWith("/private_replies")).length, 1);
+  assert.strictEqual(http.chamadas.filter(chamada => chamada.url.endsWith("/messages")).length, 1);
   assert.strictEqual(http.chamadas.filter(chamada => chamada.metodo === "get" && chamada.url.endsWith("/comment_1")).length, 1);
   assert.strictEqual(http.chamadas.filter(chamada => chamada.metodo === "get" && chamada.url.endsWith("/me/permissions")).length, 1);
-  assert.ok(http.chamadas.find(chamada => chamada.url.endsWith("/private_replies")).body.includes("https%3A%2F%2Fgo.optimus.test%2Fa%2Foferta"));
+  assert.ok(http.chamadas.find(chamada => chamada.url.endsWith("/messages")).body.includes("https%3A%2F%2Fgo.optimus.test%2Fa%2Foferta"));
   assert.ok(!JSON.stringify(instagram.listarInteracoesInstagram("cliente_a")).includes("token_cliente_a"));
 
   const duplicado = await instagram.processarWebhookInstagram({ payload, assinatura, rawBody, httpClient: mockHttpClient() });
@@ -212,7 +236,7 @@ function mockHttpClient(opcoes = {}) {
     httpClient: httpComentarioNaoConsultavel
   });
   assert.strictEqual(comentarioNaoConsultavel.resultados[0].status, "respondida");
-  assert.strictEqual(httpComentarioNaoConsultavel.chamadas.filter(chamada => chamada.url.endsWith("/private_replies")).length, 1);
+  assert.strictEqual(httpComentarioNaoConsultavel.chamadas.filter(chamada => chamada.url.endsWith("/messages")).length, 1);
 
   const naoOptimusPayload = payloadComentario({ comment: "comment_outro", media: "media_nao_optimus" });
   const naoOptimusAssinado = assinar(naoOptimusPayload);
@@ -260,7 +284,7 @@ function mockHttpClient(opcoes = {}) {
   const retryDirect = await instagram.processarWebhookInstagram({ payload: directErroPayload, ...directErroAssinado, httpClient: httpRetry });
   assert.strictEqual(retryDirect.resultados[0].status, "respondida");
   assert.strictEqual(httpRetry.chamadas.filter(chamada => chamada.url.endsWith("/replies")).length, 0, "retry de Direct nao deve repetir resposta publica");
-  assert.strictEqual(httpRetry.chamadas.filter(chamada => chamada.url.endsWith("/private_replies")).length, 1);
+  assert.strictEqual(httpRetry.chamadas.filter(chamada => chamada.url.endsWith("/messages")).length, 1);
 
   const concorrentePayload = payloadComentario({ comment: "comment_concorrente" });
   const concorrenteAssinado = assinar(concorrentePayload);
@@ -272,7 +296,7 @@ function mockHttpClient(opcoes = {}) {
   assert.strictEqual([concorrenteA.resultados[0].status, concorrenteB.resultados[0].status].filter(status => status === "respondida").length, 1);
   assert.strictEqual([concorrenteA.resultados[0].status, concorrenteB.resultados[0].status].filter(status => status === "duplicado").length, 1);
   assert.strictEqual(httpConcorrente.chamadas.filter(chamada => chamada.url.endsWith("/replies")).length, 1);
-  assert.strictEqual(httpConcorrente.chamadas.filter(chamada => chamada.url.endsWith("/private_replies")).length, 1);
+  assert.strictEqual(httpConcorrente.chamadas.filter(chamada => chamada.url.endsWith("/messages")).length, 1);
 
   salvarClienteInstagram("cliente_sem_cupom", {
     ig: "ig_sem_cupom",
@@ -285,7 +309,7 @@ function mockHttpClient(opcoes = {}) {
   const httpSemCupom = mockHttpClient();
   const semCupom = await instagram.processarWebhookInstagram({ payload: semCupomPayload, ...semCupomAssinado, httpClient: httpSemCupom });
   assert.strictEqual(semCupom.resultados[0].status, "respondida");
-  assert.strictEqual(httpSemCupom.chamadas.find(chamada => chamada.url.endsWith("/private_replies")).body.includes("Cupom"), false);
+  assert.strictEqual(httpSemCupom.chamadas.find(chamada => chamada.url.endsWith("/messages")).body.includes("Cupom"), false);
 
   salvarClienteInstagram("cliente_antigo_sem_gatilho", {
     ig: "ig_antigo_sem_gatilho",
