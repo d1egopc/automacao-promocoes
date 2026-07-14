@@ -504,14 +504,17 @@ function criarRotasSocial(deps = {}) {
 
     try {
       const clienteId = cliente(req);
+      const tipoSolicitado = String(req.body?.tipoPublicacao || req.body?.tipo || "oferta").trim().toLowerCase();
+      const tipoPublicacao = ["oferta", "livre"].includes(tipoSolicitado) ? tipoSolicitado : "oferta";
+      const templatePadrao = tipoPublicacao === "livre" ? "livre-instagram" : "padrao-instagram";
       const resultado = await publicarNoInstagram({
         clienteId,
         origem: req.body?.origem || "manual",
-        tipoPublicacao: req.body?.tipoPublicacao || req.body?.tipo || "oferta",
+        tipoPublicacao,
         ofertaId: req.body?.ofertaId || "",
         imagemUrl: req.body?.imagemUrl || "",
         legenda: req.body?.legenda || "",
-        templateId: req.body?.templateId || "padrao-instagram",
+        templateId: req.body?.templateId || templatePadrao,
         gatilho: req.body?.gatilho,
         respostaPublica: req.body?.respostaPublica || req.body?.gatilho?.respostaPublica || "",
         agendamentoId: req.body?.agendamentoId || "",

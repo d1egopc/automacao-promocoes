@@ -11,7 +11,7 @@ function texto(valor = "") {
 
 function normalizarOrigem(origem = "") {
   const valor = texto(origem || "manual").toLowerCase();
-  return ["manual", "automatica", "agendada"].includes(valor) ? valor : "manual";
+  return ["manual", "personalizada", "automatica", "agendada"].includes(valor) ? valor : "manual";
 }
 
 function normalizarTipo(tipo = "") {

@@ -409,6 +409,7 @@ function camposWebhookContaConfirmados(campos = []) {
 function publicacaoSanitizada(publicacao = {}) {
   return {
     id: texto(publicacao.id),
+    rede: texto(publicacao.rede || "instagram"),
     origem: texto(publicacao.origem || "manual"),
     tipoPublicacao: texto(publicacao.tipoPublicacao || (texto(publicacao.ofertaId) ? "oferta" : "livre")),
     ofertaId: texto(publicacao.ofertaId),
@@ -1614,6 +1615,11 @@ async function publicarImagemLivreInstagram({
     idempotencyKey: texto(idempotencyKey),
     instagramUserId: conexao.instagramUserId,
     imagemUrl: imagemPublica,
+    imagemOriginalUrl: imagemPublica,
+    imagemPublicadaUrl: imagemPublica,
+    renderizado: false,
+    renderHash: "",
+    templateVersao: null,
     legenda: legendaFinal,
     linkAfiliado: "",
     status: "publicando",

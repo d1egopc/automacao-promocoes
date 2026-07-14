@@ -8,7 +8,7 @@ process.env.DATA_DIR = dataDir;
 
 const { writeClienteJson } = require("../utils/storage");
 const storage = require("../modules/social/storage");
-const { publicarNoInstagram } = require("../modules/social/publicador-instagram.service");
+const { publicarNoInstagram, normalizarOrigem } = require("../modules/social/publicador-instagram.service");
 const {
   executarAgendamentosPendentesCliente,
   executarAutomaticoCliente,
@@ -83,6 +83,14 @@ function rendererOk(sufixo = "render") {
   };
   fn.chamadas = chamadas;
   return fn;
+}
+
+function restaurarEnv(nome, valorAnterior) {
+  if (valorAnterior === undefined) {
+    delete process.env[nome];
+    return;
+  }
+  process.env[nome] = valorAnterior;
 }
 
 (async () => {
@@ -219,18 +227,27 @@ function rendererOk(sufixo = "render") {
   const httpLivre = mockHttpClient("livre");
   const publicadaLivre = await publicarNoInstagram({
     clienteId: "cliente_a",
-    origem: "manual",
+    origem: "personalizada",
     tipoPublicacao: "livre",
     imagemUrl: "https://cdn.optimus.test/campanha.jpg",
     legenda: "Campanha institucional",
     templateId: "livre-instagram",
+    gatilho: { ativo: true, palavra: "promo", respostaPublica: "Respondi no direct." },
     httpClient: httpLivre,
     polling: POLLING_TESTE
   });
   assert.strictEqual(publicadaLivre.publicacao.status, "publicada");
+  assert.strictEqual(publicadaLivre.publicacao.rede, "instagram");
+  assert.strictEqual(publicadaLivre.publicacao.origem, "personalizada");
   assert.strictEqual(publicadaLivre.publicacao.tipoPublicacao, "livre");
   assert.strictEqual(publicadaLivre.publicacao.ofertaId, "");
+  assert.strictEqual(publicadaLivre.publicacao.imagemUrl, "https://cdn.optimus.test/campanha.jpg");
+  assert.strictEqual(publicadaLivre.publicacao.imagemPublicadaUrl, "https://cdn.optimus.test/campanha.jpg");
+  assert.strictEqual(publicadaLivre.publicacao.legenda, "Campanha institucional");
+  assert.strictEqual(publicadaLivre.publicacao.respostaPublica, "Respondi no direct.");
   assert.ok(httpLivre.chamadas.some(chamada => chamada.body.includes("Campanha+institucional")));
+  assert.ok(httpLivre.chamadas.some(chamada => chamada.body.includes("image_url=https%3A%2F%2Fcdn.optimus.test%2Fcampanha.jpg")));
+  assert.strictEqual(normalizarOrigem("personalizada"), "personalizada");
 
   await assert.rejects(
     () => publicarNoInstagram({
@@ -271,6 +288,27 @@ function rendererOk(sufixo = "render") {
     }),
     /social_media_storage_nao_configurado/
   );
+
+  const storageMidiaDir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-social-midia-"));
+  const envStorageDir = process.env.SOCIAL_MEDIA_STORAGE_DIR;
+  const envStorageBase = process.env.SOCIAL_MEDIA_PUBLIC_BASE_URL;
+  const envStorageMax = process.env.SOCIAL_MEDIA_MAX_BYTES;
+  process.env.SOCIAL_MEDIA_STORAGE_DIR = storageMidiaDir;
+  process.env.SOCIAL_MEDIA_PUBLIC_BASE_URL = "https://cdn-media.optimus.test/social/";
+  process.env.SOCIAL_MEDIA_MAX_BYTES = String(1024 * 1024);
+  const pngMinimo = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+  const midiaSalva = socialMediaStorage.salvar({
+    clienteId: "cliente_a",
+    buffer: pngMinimo,
+    mimeType: "image/png",
+    nomeLogico: "publicacao_personalizada"
+  });
+  assert.strictEqual(midiaSalva.mimeType, "image/png");
+  assert.strictEqual(midiaSalva.bytes, pngMinimo.length);
+  assert.ok(midiaSalva.url.startsWith("https://cdn-media.optimus.test/social/cliente_a/publicacao_personalizada_"));
+  restaurarEnv("SOCIAL_MEDIA_STORAGE_DIR", envStorageDir);
+  restaurarEnv("SOCIAL_MEDIA_PUBLIC_BASE_URL", envStorageBase);
+  restaurarEnv("SOCIAL_MEDIA_MAX_BYTES", envStorageMax);
 
   conectar("cliente_auto", "auto");
   writeClienteJson("cliente_auto", "fila.json", [
