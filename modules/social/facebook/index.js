@@ -101,6 +101,49 @@ function logMetaSeguro(tag, payload = {}) {
   console.log(tag, JSON.stringify(payload || {}));
 }
 
+function camposRaizPayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+  return Object.keys(payload).sort();
+}
+
+function normalizarPermissaoMeta(item = {}) {
+  return {
+    permission: texto(item.permission || item.name || item.scope),
+    status: texto(item.status || item.value).toLowerCase()
+  };
+}
+
+async function diagnosticarPermissoesMeta({ accessToken = "", httpClient = axios } = {}) {
+  if (!texto(accessToken)) return [];
+
+  try {
+    const resposta = await httpClient.get(`${GRAPH_BASE}/me/permissions`, {
+      params: {
+        access_token: accessToken
+      },
+      timeout: 10000
+    });
+    const permissoes = (Array.isArray(resposta?.data?.data) ? resposta.data.data : [])
+      .map(normalizarPermissaoMeta)
+      .filter(item => item.permission || item.status);
+
+    logMetaSeguro("[SOCIAL-META-PERMISSOES]", {
+      permissoes,
+      totalConcedidas: permissoes.filter(item => item.status === "granted").length,
+      totalRecusadas: permissoes.filter(item => item.status === "declined").length
+    });
+
+    return permissoes;
+  } catch {
+    logMetaSeguro("[SOCIAL-META-PERMISSOES]", {
+      permissoes: [],
+      totalConcedidas: 0,
+      totalRecusadas: 0
+    });
+    return [];
+  }
+}
+
 function mascararValorExato(valor, sensiveis = []) {
   if (typeof valor === "string") {
     return sensiveis.reduce((textoAtual, sensivel) => {
@@ -315,15 +358,41 @@ async function trocarCodePorToken({ code = "", redirectUri = "", httpClient = ax
 async function listarPaginasMeta({ accessToken = "", httpClient = axios } = {}) {
   if (!texto(accessToken)) return [];
 
-  const resposta = await httpClient.get(`${GRAPH_BASE}/me/accounts`, {
-    params: {
-      access_token: accessToken,
-      fields: "id,name,username,access_token,instagram_business_account{id,username,name}"
-    },
-    timeout: 10000
-  });
+  try {
+    const resposta = await httpClient.get(`${GRAPH_BASE}/me/accounts`, {
+      params: {
+        access_token: accessToken,
+        fields: "id,name,username,access_token,instagram_business_account{id,username,name}"
+      },
+      timeout: 10000
+    });
+    const payload = resposta?.data;
+    const temDataArray = Array.isArray(payload?.data);
+    const paginas = temDataArray ? payload.data : [];
 
-  return Array.isArray(resposta?.data?.data) ? resposta.data.data : [];
+    logMetaSeguro("[SOCIAL-META-PAGINAS-RESPOSTA]", {
+      statusHttp: resposta?.status || "",
+      temDataArray,
+      paginasTotal: paginas.length,
+      camposRaiz: camposRaizPayload(payload),
+      diagnostico: temDataArray
+        ? (paginas.length ? "ok" : "data_vazio")
+        : "payload_inesperado"
+    });
+
+    return paginas;
+  } catch (e) {
+    const payload = e?.response?.data;
+    logMetaSeguro("[SOCIAL-META-PAGINAS-RESPOSTA]", {
+      statusHttp: e?.response?.status || "",
+      temDataArray: false,
+      paginasTotal: 0,
+      camposRaiz: camposRaizPayload(payload),
+      diagnostico: "erro_graph_api",
+      erro: erroMetaSeguro(e)
+    });
+    throw e;
+  }
 }
 
 function erroPermissaoMeta(erro) {
@@ -436,6 +505,7 @@ async function concluirCallbackMeta({ code = "", state = "", redirectUri = "", h
   const estado = validarStateMeta(state);
   const uri = redirectUriMeta(redirectUri || estado.redirectUri);
   const token = await trocarCodePorToken({ code, redirectUri: uri, httpClient });
+  await diagnosticarPermissoesMeta({ accessToken: token.access_token, httpClient });
   const ativos = await consultarAtivosMeta({
     clienteId: estado.clienteId,
     accessToken: token.access_token,

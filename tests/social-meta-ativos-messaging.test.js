@@ -33,7 +33,7 @@ function paginaMeta({ id, token, iba = "", username = "" }) {
   };
 }
 
-function mockHttpClient(paginas = []) {
+function mockHttpClient(paginas = [], opcoes = {}) {
   const chamadas = [];
   return {
     chamadas,
@@ -48,12 +48,45 @@ function mockHttpClient(paginas = []) {
           }
         };
       }
+      if (url.endsWith("/me/permissions")) {
+        return {
+          status: 200,
+          data: {
+            data: opcoes.permissoes || [
+              { permission: "pages_show_list", status: "granted" },
+              { permission: "pages_messaging", status: "declined" }
+            ]
+          }
+        };
+      }
       if (url.endsWith("/me/accounts")) {
-        return { data: { data: paginas } };
+        if (opcoes.accountsErro) throw opcoes.accountsErro;
+        return {
+          status: opcoes.statusHttp || 200,
+          data: Object.prototype.hasOwnProperty.call(opcoes, "accountsPayload")
+            ? opcoes.accountsPayload
+            : { data: paginas }
+        };
       }
       throw new Error(`url_inesperada:${url}`);
     }
   };
+}
+
+function erroGraphApi() {
+  const erro = new Error("Graph API falhou");
+  erro.response = {
+    status: 400,
+    data: {
+      error: {
+        message: "Invalid OAuth access token.",
+        type: "OAuthException",
+        code: 190,
+        fbtrace_id: "trace_teste"
+      }
+    }
+  };
+  return erro;
 }
 
 (async () => {
@@ -104,6 +137,7 @@ function mockHttpClient(paginas = []) {
       chamadaAccounts.params.fields,
       "id,name,username,access_token,instagram_business_account{id,username,name}"
     );
+    assert.ok(http.chamadas.find(chamada => chamada.url.endsWith("/me/permissions")), "/me/permissions deve ser consultado");
 
     const ativosMultiplos = await facebook.consultarAtivosMeta({
       clienteId: "user_meta_multi",
@@ -127,12 +161,47 @@ function mockHttpClient(paginas = []) {
     });
     assert.strictEqual(ativosSelecaoAtual.paginas.find(pagina => pagina.id === "page_b").conectado, true);
     assert.strictEqual(ativosSelecaoAtual.paginas.find(pagina => pagina.id === "page_a").conectado, false);
+
+    const ativosDataVazio = await facebook.consultarAtivosMeta({
+      clienteId: "user_meta_vazio",
+      accessToken: "meta_user_token_vazio",
+      httpClient: mockHttpClient([], { accountsPayload: { data: [] } })
+    });
+    assert.strictEqual(ativosDataVazio.ok, true);
+    assert.strictEqual(ativosDataVazio.status, "nenhuma_pagina");
+    assert.deepStrictEqual(ativosDataVazio.paginas, []);
+
+    const ativosPayloadInesperado = await facebook.consultarAtivosMeta({
+      clienteId: "user_meta_payload",
+      accessToken: "meta_user_token_payload",
+      httpClient: mockHttpClient([], { accountsPayload: { paging: { cursors: {} } } })
+    });
+    assert.strictEqual(ativosPayloadInesperado.ok, true);
+    assert.strictEqual(ativosPayloadInesperado.status, "nenhuma_pagina");
+    assert.deepStrictEqual(ativosPayloadInesperado.paginas, []);
+
+    const ativosErroGraph = await facebook.consultarAtivosMeta({
+      clienteId: "user_meta_erro",
+      accessToken: "meta_user_token_erro",
+      httpClient: mockHttpClient([], { accountsErro: erroGraphApi() })
+    });
+    assert.strictEqual(ativosErroGraph.ok, false);
+    assert.strictEqual(ativosErroGraph.status, "erro_graph_api");
+    assert.strictEqual(ativosErroGraph.erro.code, 190);
   } finally {
     console.log = logsOriginais;
   }
 
   const logsTexto = logs.join("\n");
   assert.ok(logsTexto.includes("[INSTAGRAM-META-ATIVOS-DESCOBERTOS]"));
+  assert.ok(logsTexto.includes("[SOCIAL-META-PERMISSOES]"));
+  assert.ok(logsTexto.includes('"permission":"pages_show_list"'));
+  assert.ok(logsTexto.includes('"status":"granted"'));
+  assert.ok(logsTexto.includes('"totalConcedidas":1'));
+  assert.ok(logsTexto.includes('"totalRecusadas":1'));
+  assert.ok(logsTexto.includes('"diagnostico":"data_vazio"'));
+  assert.ok(logsTexto.includes('"diagnostico":"payload_inesperado"'));
+  assert.ok(logsTexto.includes('"diagnostico":"erro_graph_api"'));
   assert.ok(!logsTexto.includes("page_token_unico"));
   assert.ok(!logsTexto.includes("page_token_a"));
   assert.ok(!logsTexto.includes("page_token_b"));
