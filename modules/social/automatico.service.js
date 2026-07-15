@@ -234,7 +234,12 @@ function respeitaDistancia(ms = 0, ocupados = [], intervaloMinutos = 40) {
 
 function proximosHorariosDisponiveis({ config = {}, agendamentos = [], agora = new Date(), quantidade = 0 } = {}) {
   const intervalo = Math.max(20, Number(config.intervaloMinimoMinutos || 40) || 40);
-  const janela = janelaDoDia(config, agora);
+  let janela = janelaDoDia(config, agora);
+  if (agora.getTime() > janela.fim.getTime()) {
+    const proximoDia = new Date(agora);
+    proximoDia.setDate(proximoDia.getDate() + 1);
+    janela = janelaDoDia(config, proximoDia);
+  }
   const ocupados = horariosOcupados(agendamentos, agora);
   const horarios = [];
   const passoMs = 60 * 1000;

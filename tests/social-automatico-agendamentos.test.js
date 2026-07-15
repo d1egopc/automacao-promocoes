@@ -110,6 +110,10 @@ function minutosEntre(a, b) {
   return Math.abs(Date.parse(a) - Date.parse(b)) / 60000;
 }
 
+function dataLocal(ano, mes, dia, hora, minuto = 0) {
+  return new Date(ano, mes - 1, dia, hora, minuto, 0, 0);
+}
+
 (async () => {
   conectar("cliente_off", "off");
   storage.salvarAgendamentoSocial("cliente_off", {
@@ -420,6 +424,47 @@ function minutosEntre(a, b) {
     "publicador oficial permanece o ponto de publicacao"
   );
   assert.ok(rodadaSchedulerVencido.totalExecutados >= 1, "resumo da rodada informa vencidos executados");
+
+  async function horarioAutomaticoPara(clienteId, agora) {
+    conectar(clienteId, clienteId);
+    writeClienteJson(clienteId, "fila.json", [
+      oferta(`${clienteId}_oferta`, {
+        cupom: "HORA",
+        score: 99,
+        criadoEm: new Date(agora.getTime() - 10 * 60 * 1000).toISOString()
+      })
+    ]);
+    storage.setConfigAutomaticoSocial(clienteId, configAutomatico({
+      quantidadeDiaria: 1,
+      intervaloMinimoMinutos: 40,
+      idadeMaximaHoras: 48,
+      janelaFuncionamento: { inicio: "08:00", fim: "22:00" }
+    }));
+    const rodada = await executarAutomaticoCliente({ clienteId, agora });
+    assert.strictEqual(rodada.agendamentosCriados.length, 1);
+    return rodada.agendamentosCriados[0].agendadoPara;
+  }
+
+  const horarioHojeNoite = await horarioAutomaticoPara("cliente_horario_2000", dataLocal(2026, 7, 14, 20, 0));
+  assert.strictEqual(
+    horarioHojeNoite,
+    dataLocal(2026, 7, 14, 20, 1).toISOString(),
+    "20:00 agenda hoje no proximo minuto disponivel"
+  );
+
+  const horarioAposJanela = await horarioAutomaticoPara("cliente_horario_2343", dataLocal(2026, 7, 14, 23, 43));
+  assert.strictEqual(
+    horarioAposJanela,
+    dataLocal(2026, 7, 15, 8, 0).toISOString(),
+    "23:43 agenda na janela do proximo dia"
+  );
+
+  const horarioAntesJanela = await horarioAutomaticoPara("cliente_horario_0700", dataLocal(2026, 7, 14, 7, 0));
+  assert.strictEqual(
+    horarioAntesJanela,
+    dataLocal(2026, 7, 14, 8, 0).toISOString(),
+    "07:00 agenda no inicio da janela do mesmo dia"
+  );
 
   console.log("social-automatico-agendamentos: ok");
 })().catch(erro => {
