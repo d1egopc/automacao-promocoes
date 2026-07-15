@@ -478,6 +478,78 @@ async function executarAutomaticoCliente({
   }
 }
 
+async function executarAutomaticoTodosClientes({ agora = new Date() } = {}) {
+  const clientes = typeof storage.listClientes === "function" ? storage.listClientes() : [];
+  const resultados = [];
+  const erros = [];
+  let totalAgendados = 0;
+  let clientesExecutados = 0;
+
+  logSocial("[SOCIAL-AUTOMATICO-TODOS-INICIO]", {
+    agora: agora.toISOString(),
+    clientes: clientes.length
+  });
+
+  for (const clienteId of clientes) {
+    clientesExecutados += 1;
+    try {
+      const resultado = await executarAutomaticoCliente({ clienteId, agora });
+      const agendamentosCriados = Number(
+        resultado.totalAgendamentosCriados ?? resultado.agendamentosCriados?.length ?? 0
+      ) || 0;
+      totalAgendados += agendamentosCriados;
+      resultados.push({
+        ok: resultado.ok !== false,
+        clienteId,
+        agendamentosCriados,
+        motivo: texto(resultado.motivo)
+      });
+      logSocial("[SOCIAL-AUTOMATICO-TODOS-CLIENTE]", {
+        clienteId,
+        ok: resultado.ok !== false,
+        agendamentosCriados,
+        motivo: texto(resultado.motivo)
+      });
+    } catch (e) {
+      const erro = {
+        clienteId,
+        erro: texto(e.message || "social_automatico_cliente_falhou")
+      };
+      erros.push(erro);
+      resultados.push({
+        ok: false,
+        clienteId,
+        agendamentosCriados: 0,
+        erro: erro.erro
+      });
+      logSocial("[SOCIAL-AUTOMATICO-TODOS-CLIENTE]", {
+        clienteId,
+        ok: false,
+        agendamentosCriados: 0,
+        erro: erro.erro
+      });
+    }
+  }
+
+  const resumo = {
+    ok: erros.length === 0,
+    clientes: clientes.length,
+    clientesExecutados,
+    totalAgendados,
+    erros,
+    resultados
+  };
+
+  logSocial("[SOCIAL-AUTOMATICO-TODOS-FIM]", {
+    clientes: resumo.clientes,
+    clientesExecutados: resumo.clientesExecutados,
+    totalAgendados: resumo.totalAgendados,
+    erros: resumo.erros.length
+  });
+
+  return resumo;
+}
+
 function agendamentoVencido(agendamento = {}, agora = new Date()) {
   const status = texto(agendamento.status || "pendente");
   if (agendamento.ativo === false) return false;
@@ -674,6 +746,7 @@ async function executarAgendamentosPendentesTodosClientes({
 module.exports = {
   simularSelecaoAutomatica,
   executarAutomaticoCliente,
+  executarAutomaticoTodosClientes,
   executarAgendamentosPendentesCliente,
   executarAgendamentosPendentesTodosClientes,
   publicarAgendamentoAgora,

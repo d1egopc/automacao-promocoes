@@ -10,9 +10,11 @@ const { writeClienteJson } = require("../utils/storage");
 const storage = require("../modules/social/storage");
 const {
   executarAutomaticoCliente,
+  executarAutomaticoTodosClientes,
   executarAgendamentosPendentesCliente,
   simularSelecaoAutomatica
 } = require("../modules/social/automatico.service");
+const { executarRodadaSchedulerAgendamentosSocial } = require("../modules/social/scheduler");
 
 const AGORA = new Date("2026-07-14T12:00:00.000Z");
 const POLLING_TESTE = { primeiraEsperaMs: 0, intervaloMs: 0, maxTentativas: 2 };
@@ -311,6 +313,113 @@ function minutosEntre(a, b) {
     "limpeza automatica remove antigas antes da rodada sem bloquear oferta recente"
   );
   assert.ok(!storage.listarOportunidadesSocial("cliente_limpeza_auto", 10).some(item => item.ofertaId === "auto_velha"));
+
+  conectar("cliente_auto_erro", "auto_erro");
+  writeClienteJson("cliente_auto_erro", "fila.json", [
+    oferta("auto_erro_oferta", { cupom: "ERR", score: 99 })
+  ]);
+  storage.setConfigAutomaticoSocial("cliente_auto_erro", configAutomatico({ quantidadeDiaria: 1 }));
+  conectar("cliente_auto_ok", "auto_ok");
+  writeClienteJson("cliente_auto_ok", "fila.json", [
+    oferta("auto_ok_oferta", { cupom: "OK", score: 99 })
+  ]);
+  storage.setConfigAutomaticoSocial("cliente_auto_ok", configAutomatico({ quantidadeDiaria: 1 }));
+  const listarOportunidadesOriginal = storage.listarOportunidadesSocial;
+  try {
+    storage.listarOportunidadesSocial = (clienteId, ...args) => {
+      if (clienteId === "cliente_auto_erro") throw new Error("falha_cliente_teste");
+      return listarOportunidadesOriginal.call(storage, clienteId, ...args);
+    };
+    const todosComErro = await executarAutomaticoTodosClientes({ agora: AGORA });
+    assert.ok(todosComErro.erros.some(item => item.clienteId === "cliente_auto_erro"), "erro por cliente fica isolado");
+    assert.ok(
+      storage.listarAgendamentosSocial("cliente_auto_ok").some(item => item.ofertaId === "auto_ok_oferta"),
+      "erro em um cliente nao impede os demais"
+    );
+  } finally {
+    storage.listarOportunidadesSocial = listarOportunidadesOriginal;
+  }
+
+  conectar("cliente_scheduler_oficial", "scheduler_oficial");
+  writeClienteJson("cliente_scheduler_oficial", "fila.json", [
+    oferta("scheduler_oficial_auto", { cupom: "RUN", score: 99, criadoEm: "2026-07-14T11:59:00.000Z" })
+  ]);
+  storage.setConfigAutomaticoSocial("cliente_scheduler_oficial", configAutomatico({ quantidadeDiaria: 1 }));
+  const httpSchedulerOficial = mockHttpClient("scheduler_oficial");
+  const rendererSchedulerOficial = rendererOk("scheduler_oficial");
+  const rodadaSchedulerOficial = await executarRodadaSchedulerAgendamentosSocial({
+    agora: AGORA,
+    renderizadorArte: rendererSchedulerOficial,
+    httpClient: httpSchedulerOficial,
+    polling: POLLING_TESTE
+  });
+  const agendamentosSchedulerOficial = storage
+    .listarAgendamentosSocial("cliente_scheduler_oficial")
+    .filter(item => item.ofertaId === "scheduler_oficial_auto");
+  assert.ok(rodadaSchedulerOficial.automatico, "scheduler chama automatico na rodada oficial");
+  assert.ok(rodadaSchedulerOficial.agendamentos, "scheduler executa pendentes na mesma rodada oficial");
+  assert.strictEqual(agendamentosSchedulerOficial.length, 1, "oportunidade elegivel vira agendamento na rodada");
+  assert.ok(Date.parse(agendamentosSchedulerOficial[0].agendadoPara) > AGORA.getTime(), "automatico agenda para horario futuro");
+  assert.strictEqual(httpSchedulerOficial.chamadas.length, 0, "agendamento futuro nao e publicado imediatamente");
+  const segundaRodadaSchedulerOficial = await executarRodadaSchedulerAgendamentosSocial({
+    agora: AGORA,
+    renderizadorArte: rendererSchedulerOficial,
+    httpClient: httpSchedulerOficial,
+    polling: POLLING_TESTE
+  });
+  const agendamentosSchedulerOficialAposSegunda = storage
+    .listarAgendamentosSocial("cliente_scheduler_oficial")
+    .filter(item => item.ofertaId === "scheduler_oficial_auto");
+  assert.ok(segundaRodadaSchedulerOficial.automatico.totalAgendados >= 0);
+  assert.strictEqual(agendamentosSchedulerOficialAposSegunda.length, 1, "duas rodadas do scheduler nao duplicam");
+
+  conectar("cliente_scheduler_desligado", "scheduler_desligado");
+  writeClienteJson("cliente_scheduler_desligado", "fila.json", [
+    oferta("scheduler_desligado_auto", { cupom: "OFF", score: 99 })
+  ]);
+  storage.setConfigAutomaticoSocial("cliente_scheduler_desligado", configAutomatico({ ativo: false, quantidadeDiaria: 1 }));
+  await executarRodadaSchedulerAgendamentosSocial({
+    agora: AGORA,
+    renderizadorArte: rendererSchedulerOficial,
+    httpClient: httpSchedulerOficial,
+    polling: POLLING_TESTE
+  });
+  assert.ok(
+    !storage.listarAgendamentosSocial("cliente_scheduler_desligado").some(item => item.ofertaId === "scheduler_desligado_auto"),
+    "automatico desligado nao agenda pela rodada oficial"
+  );
+
+  conectar("cliente_scheduler_vencido", "scheduler_vencido");
+  writeClienteJson("cliente_scheduler_vencido", "fila.json", [
+    oferta("scheduler_vencido_auto", { cupom: "DUE", score: 99 })
+  ]);
+  storage.setConfigAutomaticoSocial("cliente_scheduler_vencido", configAutomatico({ ativo: false }));
+  storage.salvarAgendamentoSocial("cliente_scheduler_vencido", {
+    origem: "automatico",
+    tipoPublicacao: "oferta",
+    ofertaId: "scheduler_vencido_auto",
+    status: "agendada",
+    ativo: true,
+    agendadoPara: "2026-07-14T11:50:00.000Z"
+  });
+  const httpSchedulerVencido = mockHttpClient("scheduler_vencido");
+  const rendererSchedulerVencido = rendererOk("scheduler_vencido");
+  const rodadaSchedulerVencido = await executarRodadaSchedulerAgendamentosSocial({
+    agora: AGORA,
+    renderizadorArte: rendererSchedulerVencido,
+    httpClient: httpSchedulerVencido,
+    polling: POLLING_TESTE
+  });
+  const agendamentoVencidoPublicado = storage
+    .listarAgendamentosSocial("cliente_scheduler_vencido")
+    .find(item => item.ofertaId === "scheduler_vencido_auto");
+  assert.strictEqual(agendamentoVencidoPublicado.status, "publicada", "agendamento vencido continua publicado pelo scheduler oficial");
+  assert.strictEqual(rendererSchedulerVencido.chamadas.length, 1, "publicacao passa pelo publicador oficial/renderizador");
+  assert.ok(
+    httpSchedulerVencido.chamadas.some(item => item.metodo === "post" && item.url.endsWith("/media_publish")),
+    "publicador oficial permanece o ponto de publicacao"
+  );
+  assert.ok(rodadaSchedulerVencido.totalExecutados >= 1, "resumo da rodada informa vencidos executados");
 
   console.log("social-automatico-agendamentos: ok");
 })().catch(erro => {

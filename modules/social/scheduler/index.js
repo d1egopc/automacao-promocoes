@@ -1,4 +1,7 @@
-const { executarAgendamentosPendentesTodosClientes } = require("../automatico.service");
+const {
+  executarAutomaticoTodosClientes,
+  executarAgendamentosPendentesTodosClientes
+} = require("../automatico.service");
 const { logSocial, logErroSocial } = require("../logs");
 
 let intervaloScheduler = null;
@@ -25,7 +28,12 @@ function schedulerAgendamentosAtivo() {
   return String(process.env.SOCIAL_AGENDAMENTOS_SCHEDULER || "true").trim().toLowerCase() !== "false";
 }
 
-async function executarRodadaSchedulerAgendamentosSocial({ agora = new Date() } = {}) {
+async function executarRodadaSchedulerAgendamentosSocial({
+  agora = new Date(),
+  renderizadorArte,
+  httpClient,
+  polling
+} = {}) {
   if (executando) {
     logSocial("[SOCIAL-AGENDAMENTOS-SCHEDULER-SKIP]", { motivo: "rodada_em_execucao" });
     return { ok: false, motivo: "rodada_em_execucao" };
@@ -34,9 +42,24 @@ async function executarRodadaSchedulerAgendamentosSocial({ agora = new Date() } 
   executando = true;
   try {
     logSocial("[SOCIAL-AGENDAMENTOS-SCHEDULER-INICIO]", { agora: agora.toISOString() });
-    const resultado = await executarAgendamentosPendentesTodosClientes({ agora });
+    const automatico = await executarAutomaticoTodosClientes({ agora });
+    const agendamentos = await executarAgendamentosPendentesTodosClientes({
+      agora,
+      renderizadorArte,
+      httpClient,
+      polling
+    });
+    const resultado = {
+      ok: automatico.ok !== false && agendamentos.ok !== false,
+      clientes: agendamentos.clientes,
+      totalAgendadosAutomatico: automatico.totalAgendados || 0,
+      totalExecutados: agendamentos.totalExecutados || 0,
+      automatico,
+      agendamentos
+    };
     logSocial("[SOCIAL-AGENDAMENTOS-SCHEDULER-FIM]", {
       clientes: resultado.clientes,
+      totalAgendadosAutomatico: resultado.totalAgendadosAutomatico,
       totalExecutados: resultado.totalExecutados
     });
     return resultado;
