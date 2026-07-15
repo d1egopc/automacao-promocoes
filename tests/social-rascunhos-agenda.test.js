@@ -57,17 +57,38 @@ function mockHttpClient(sufixo = "ok") {
     tipoPublicacao: "livre",
     imagemUrl: "https://cdn.optimus.test/livre-a.jpg",
     legenda: "Legenda personalizada",
-    gatilho: { ativo: true, palavra: "promo", respostaPublica: "Chamei no direct." },
+    gatilho: { ativo: true, palavra: "promo", respostaPublica: "Chamei no direct.", textoDirect: "Mensagem privada do rascunho." },
     respostaPublica: "Chamei no direct.",
-    redirect: { destino: "bio" },
-    cta: { destino: "bio" }
+    mensagemPrivada: "Mensagem privada do rascunho.",
+    urlDestino: "https://go.optimus.test/rascunho",
+    linkAfiliado: "https://go.optimus.test/rascunho",
+    direct: { habilitado: true },
+    redirect: { destino: "bio", urlDestino: "https://go.optimus.test/rascunho" },
+    cta: { destino: "bio", urlDestino: "https://go.optimus.test/rascunho" }
   });
 
   assert.strictEqual(rascunho.clienteId, "cliente_a");
   assert.strictEqual(rascunho.origem, "personalizada");
   assert.strictEqual(rascunho.tipoPublicacao, "livre");
+  assert.strictEqual(rascunho.status, "rascunho");
   assert.strictEqual(rascunho.templateId, "livre-instagram");
+  assert.strictEqual(rascunho.mensagemPrivada, "Mensagem privada do rascunho.");
+  assert.strictEqual(rascunho.urlDestino, "https://go.optimus.test/rascunho");
+  assert.strictEqual(rascunho.linkAfiliado, "https://go.optimus.test/rascunho");
   assert.strictEqual(storage.listarRascunhosSocial("cliente_b").length, 0, "rascunho nao pode vazar para outro cliente");
+  assert.strictEqual(storage.listarAgendamentosSocial("cliente_a").some(item => item.id === rascunho.id), false, "salvar rascunho nao deve criar agendamento");
+
+  const agendamentoComStatusRascunho = storage.salvarAgendamentoSocial("cliente_a", {
+    id: "agendamento_status_rascunho",
+    origem: "agendada",
+    tipoPublicacao: "livre",
+    imagemUrl: "https://cdn.optimus.test/status-rascunho.jpg",
+    legenda: "Status rascunho nao permitido em agenda",
+    status: "rascunho",
+    ativo: false,
+    agendadoPara: "2099-01-01T10:00:00.000Z"
+  });
+  assert.strictEqual(agendamentoComStatusRascunho.status, "pendente", "agendamento nao deve ser classificado como rascunho");
 
   const editado = storage.salvarRascunhoSocial("cliente_a", {
     ...rascunho,
@@ -86,6 +107,10 @@ function mockHttpClient(sufixo = "ok") {
   assert.strictEqual(agendamento.tipoPublicacao, "livre");
   assert.strictEqual(agendamento.templateId, "livre-instagram");
   assert.strictEqual(agendamento.status, "agendada");
+  assert.strictEqual(agendamento.mensagemPrivada, "Mensagem privada do rascunho.");
+  assert.strictEqual(agendamento.urlDestino, "https://go.optimus.test/rascunho");
+  assert.strictEqual(agendamento.linkAfiliado, "https://go.optimus.test/rascunho");
+  assert.ok(storage.listarAgendamentosSocial("cliente_a").some(item => item.id === agendamento.id), "agendamento deve aparecer em agendamentos");
 
   const httpAgora = mockHttpClient("agenda_a");
   const publicadoAgora = await publicarAgendamentoAgora({
@@ -99,6 +124,8 @@ function mockHttpClient(sufixo = "ok") {
   assert.strictEqual(publicadoAgora.publicacao.tipoPublicacao, "livre");
   assert.strictEqual(publicadoAgora.publicacao.origem, "agendada");
   assert.strictEqual(publicadoAgora.publicacao.imagemUrl, "https://cdn.optimus.test/livre-a.jpg");
+  assert.strictEqual(publicadoAgora.publicacao.urlDestino, "https://go.optimus.test/rascunho");
+  assert.strictEqual(publicadoAgora.publicacao.mensagemPrivadaPresente, true);
   assert.ok(httpAgora.chamadas.some(chamada => chamada.body.includes("caption=Legenda+editada")));
   assert.ok(storage.listarAgendamentosSocial("cliente_a").find(item => item.id === agendamento.id && item.status === "publicada"));
 

@@ -233,6 +233,10 @@ function restaurarEnv(nome, valorAnterior) {
     legenda: "Campanha institucional",
     templateId: "livre-instagram",
     gatilho: { ativo: true, palavra: "promo", respostaPublica: "Respondi no direct." },
+    mensagemPrivada: "Mensagem privada livre.",
+    urlDestino: "https://go.optimus.test/livre",
+    redirect: { urlDestino: "https://go.optimus.test/livre" },
+    cta: { urlDestino: "https://go.optimus.test/livre" },
     httpClient: httpLivre,
     polling: POLLING_TESTE
   });
@@ -245,9 +249,30 @@ function restaurarEnv(nome, valorAnterior) {
   assert.strictEqual(publicadaLivre.publicacao.imagemPublicadaUrl, "https://cdn.optimus.test/campanha.jpg");
   assert.strictEqual(publicadaLivre.publicacao.legenda, "Campanha institucional");
   assert.strictEqual(publicadaLivre.publicacao.respostaPublica, "Respondi no direct.");
+  assert.strictEqual(publicadaLivre.publicacao.urlDestino, "https://go.optimus.test/livre");
+  assert.strictEqual(publicadaLivre.publicacao.mensagemPrivadaPresente, true);
+  assert.strictEqual(publicadaLivre.publicacao.redirectPresente, true);
+  assert.strictEqual(publicadaLivre.publicacao.ctaPresente, true);
   assert.ok(httpLivre.chamadas.some(chamada => chamada.body.includes("Campanha+institucional")));
   assert.ok(httpLivre.chamadas.some(chamada => chamada.body.includes("image_url=https%3A%2F%2Fcdn.optimus.test%2Fcampanha.jpg")));
   assert.strictEqual(normalizarOrigem("personalizada"), "personalizada");
+
+  const httpLivreSemConversao = mockHttpClient("livre_sem_conversao");
+  const publicadaLivreSemConversao = await publicarNoInstagram({
+    clienteId: "cliente_a",
+    origem: "personalizada",
+    tipoPublicacao: "livre",
+    imagemUrl: "https://cdn.optimus.test/livre-sem-conversao.jpg",
+    legenda: "Campanha sem conversao",
+    templateId: "livre-instagram",
+    httpClient: httpLivreSemConversao,
+    polling: POLLING_TESTE
+  });
+  assert.strictEqual(publicadaLivreSemConversao.publicacao.status, "publicada");
+  assert.strictEqual(publicadaLivreSemConversao.publicacao.tipoPublicacao, "livre");
+  assert.strictEqual(publicadaLivreSemConversao.publicacao.gatilho, null);
+  assert.strictEqual(publicadaLivreSemConversao.publicacao.urlDestino, "");
+  assert.strictEqual(publicadaLivreSemConversao.publicacao.mensagemPrivadaPresente, false);
 
   await assert.rejects(
     () => publicarNoInstagram({

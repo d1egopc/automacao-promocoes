@@ -126,9 +126,39 @@ function criarRotasSocial(deps = {}) {
     return texto(fallback);
   }
 
+  function valorObjeto(dados = {}, chaves = [], fallback = undefined) {
+    for (const chave of chaves) {
+      if (dados?.[chave] && typeof dados[chave] === "object") return dados[chave];
+    }
+    return fallback && typeof fallback === "object" ? fallback : undefined;
+  }
+
+  function mensagemPrivadaPayload(dados = {}, fallback = {}) {
+    return valorTexto(dados, ["mensagemPrivada", "mensagemDirect", "textoDirect"], "") ||
+      valorTexto(dados.direct || {}, ["mensagem", "texto", "textoDirect"], "") ||
+      valorTexto(dados.gatilho || {}, ["mensagemPrivada", "mensagemDirect", "textoDirect"], "") ||
+      texto(fallback.mensagemPrivada || fallback.gatilho?.textoDirect);
+  }
+
+  function urlDestinoPayload(dados = {}, fallback = {}) {
+    return valorTexto(dados, ["urlDestino", "linkDestino", "linkAfiliado"], "") ||
+      valorTexto(dados.direct || {}, ["urlDestino", "url", "link"], "") ||
+      valorTexto(dados.redirect || {}, ["urlDestino", "url", "link"], "") ||
+      valorTexto(dados.cta || {}, ["urlDestino", "url", "link", "linkBio", "linkGrupo"], "") ||
+      texto(fallback.urlDestino || fallback.linkAfiliado);
+  }
+
   function payloadPublicacaoSocial(dados = {}, fallback = {}) {
     const entrada = dados && typeof dados === "object" ? dados : {};
     const tipoPublicacao = tipoPublicacaoSeguro({ ...fallback, ...entrada });
+    const mensagemPrivada = mensagemPrivadaPayload(entrada, fallback);
+    const gatilhoEntrada = entrada.gatilho && typeof entrada.gatilho === "object" ? { ...entrada.gatilho } : fallback.gatilho;
+    const gatilho = gatilhoEntrada && typeof gatilhoEntrada === "object"
+      ? {
+        ...gatilhoEntrada,
+        ...(mensagemPrivada && !texto(gatilhoEntrada.textoDirect) ? { textoDirect: mensagemPrivada } : {})
+      }
+      : gatilhoEntrada;
     return {
       ...fallback,
       ...entrada,
@@ -141,9 +171,13 @@ function criarRotasSocial(deps = {}) {
       respostaPublica: Object.prototype.hasOwnProperty.call(entrada, "respostaPublica")
         ? texto(entrada.respostaPublica)
         : texto(entrada.gatilho?.respostaPublica || fallback.respostaPublica),
-      gatilho: entrada.gatilho && typeof entrada.gatilho === "object" ? entrada.gatilho : fallback.gatilho,
-      redirect: entrada.redirect && typeof entrada.redirect === "object" ? entrada.redirect : fallback.redirect,
-      cta: entrada.cta && typeof entrada.cta === "object" ? entrada.cta : fallback.cta
+      gatilho,
+      mensagemPrivada,
+      direct: valorObjeto(entrada, ["direct"], fallback.direct),
+      redirect: valorObjeto(entrada, ["redirect"], fallback.redirect),
+      urlDestino: urlDestinoPayload(entrada, fallback),
+      cta: valorObjeto(entrada, ["cta"], fallback.cta),
+      linkAfiliado: valorTexto(entrada, ["linkAfiliado"], fallback.linkAfiliado)
     };
   }
 
@@ -159,6 +193,7 @@ function criarRotasSocial(deps = {}) {
   function validarDataAgendamento(agendadoPara = "") {
     const ms = Date.parse(texto(agendadoPara));
     if (!Number.isFinite(ms)) throw new Error("agendamento_data_invalida");
+    if (ms <= Date.now()) throw new Error("agendamento_data_passada");
   }
 
   async function publicarPayloadSocial(clienteId, payload = {}, extras = {}) {
@@ -173,6 +208,12 @@ function criarRotasSocial(deps = {}) {
       templateId: payload.templateId,
       gatilho: payload.gatilho,
       respostaPublica: payload.respostaPublica,
+      mensagemPrivada: payload.mensagemPrivada,
+      direct: payload.direct,
+      redirect: payload.redirect,
+      urlDestino: payload.urlDestino,
+      cta: payload.cta,
+      linkAfiliado: payload.linkAfiliado,
       ...extras
     });
   }
@@ -578,19 +619,23 @@ function criarRotasSocial(deps = {}) {
 
     try {
       const clienteId = cliente(req);
-      const tipoSolicitado = String(req.body?.tipoPublicacao || req.body?.tipo || "oferta").trim().toLowerCase();
-      const tipoPublicacao = ["oferta", "livre"].includes(tipoSolicitado) ? tipoSolicitado : "oferta";
-      const templatePadrao = tipoPublicacao === "livre" ? "livre-instagram" : "padrao-instagram";
+      const payload = payloadPublicacaoSocial(req.body || {});
       const resultado = await publicarNoInstagram({
         clienteId,
-        origem: req.body?.origem || "manual",
-        tipoPublicacao,
-        ofertaId: req.body?.ofertaId || "",
-        imagemUrl: req.body?.imagemUrl || "",
-        legenda: req.body?.legenda || "",
-        templateId: req.body?.templateId || templatePadrao,
-        gatilho: req.body?.gatilho,
-        respostaPublica: req.body?.respostaPublica || req.body?.gatilho?.respostaPublica || "",
+        origem: payload.origem,
+        tipoPublicacao: payload.tipoPublicacao,
+        ofertaId: payload.ofertaId,
+        imagemUrl: payload.imagemUrl,
+        legenda: payload.legenda,
+        templateId: payload.templateId,
+        gatilho: payload.gatilho,
+        respostaPublica: payload.respostaPublica,
+        mensagemPrivada: payload.mensagemPrivada,
+        direct: payload.direct,
+        redirect: payload.redirect,
+        urlDestino: payload.urlDestino,
+        cta: payload.cta,
+        linkAfiliado: payload.linkAfiliado,
         agendamentoId: req.body?.agendamentoId || "",
         idempotencyKey: req.body?.idempotencyKey || ""
       });
@@ -947,12 +992,13 @@ function criarRotasSocial(deps = {}) {
       validarDataAgendamento(agendadoPara);
       const payload = payloadPublicacaoSocial(entrada, { origem: "agendada" });
       validarPayloadPublicavel(payload);
+      const statusSolicitado = texto(entrada.status || "agendada");
       const agendamento = storage.salvarAgendamentoSocial(clienteId, {
         ...payload,
         id: entrada.id,
         nome: entrada.nome,
         ativo: entrada.ativo !== false,
-        status: entrada.status || "agendada",
+        status: statusSolicitado === "rascunho" ? "agendada" : statusSolicitado,
         agendadoPara,
         horario: entrada.horario,
         timezone: entrada.timezone,

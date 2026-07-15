@@ -109,6 +109,42 @@ function salvarClienteInstagram(clienteId, { ig = "ig_cliente_a", media = "media
   }]);
 }
 
+function salvarClienteInstagramPersonalizado(clienteId, {
+  ig = `ig_${clienteId}`,
+  media = `media_${clienteId}`,
+  gatilho = null,
+  link = "",
+  mensagemPrivada = ""
+} = {}) {
+  writeClienteJson(clienteId, "social-instagram.json", {
+    clienteId,
+    conectado: true,
+    instagramUserId: ig,
+    username: `${clienteId}_perfil`,
+    token: { accessToken: `token_${clienteId}`, expiresAt: "2099-01-01T00:00:00.000Z" },
+    scopes: instagram.scopesInstagramConexao()
+  });
+  writeClienteJson(clienteId, "social-publicacoes.json", [{
+    id: `pub_${clienteId}`,
+    clienteId,
+    rede: "instagram",
+    origem: "personalizada",
+    tipoPublicacao: "livre",
+    status: "publicada",
+    ofertaId: "",
+    imagemUrl: "https://cdn.optimus.test/personalizada.jpg",
+    legenda: "Post personalizado",
+    linkAfiliado: link,
+    urlDestino: link,
+    mensagemPrivada,
+    redirect: link ? { urlDestino: link } : null,
+    cta: link ? { urlDestino: link } : null,
+    instagramUserId: ig,
+    instagramMediaId: media,
+    gatilho
+  }]);
+}
+
 function mockHttpClient(opcoes = {}) {
   const chamadas = [];
   const permissoes = opcoes.permissoes || [
@@ -314,6 +350,61 @@ function mockHttpClient(opcoes = {}) {
   const semCupom = await instagram.processarWebhookInstagram({ payload: semCupomPayload, ...semCupomAssinado, httpClient: httpSemCupom });
   assert.strictEqual(semCupom.resultados[0].status, "respondida");
   assert.strictEqual(httpSemCupom.chamadas.find(chamada => chamada.url.endsWith("/messages")).body.includes("Cupom"), false);
+
+  salvarClienteInstagramPersonalizado("cliente_livre_sem_conversao", {
+    ig: "ig_livre_sem_conversao",
+    media: "media_livre_sem_conversao"
+  });
+  const livreSemConversaoPayload = payloadComentario({
+    ig: "ig_livre_sem_conversao",
+    media: "media_livre_sem_conversao",
+    comment: "comment_livre_sem_conversao",
+    text: "PROMO"
+  });
+  const livreSemConversaoAssinado = assinar(livreSemConversaoPayload);
+  const httpLivreSemConversao = mockHttpClient();
+  const livreSemConversao = await instagram.processarWebhookInstagram({
+    payload: livreSemConversaoPayload,
+    ...livreSemConversaoAssinado,
+    httpClient: httpLivreSemConversao
+  });
+  assert.strictEqual(livreSemConversao.resultados[0].status, "ignorado");
+  assert.strictEqual(livreSemConversao.resultados[0].interacao.erro.message, "gatilho_inativo");
+  assert.strictEqual(httpLivreSemConversao.chamadas.length, 0, "personalizada sem conversao nao deve responder nem enviar Direct");
+
+  salvarClienteInstagramPersonalizado("cliente_livre_com_conversao", {
+    ig: "ig_livre_com_conversao",
+    media: "media_livre_com_conversao",
+    link: "https://go.optimus.test/personalizada",
+    mensagemPrivada: "Mensagem privada personalizada:",
+    gatilho: {
+      ativo: true,
+      palavra: "PROMO",
+      respostaPublica: "Te chamei no Direct.",
+      textoDirect: "Mensagem privada personalizada:"
+    }
+  });
+  const livreComConversaoPayload = payloadComentario({
+    ig: "ig_livre_com_conversao",
+    media: "media_livre_com_conversao",
+    comment: "comment_livre_com_conversao",
+    text: "promo"
+  });
+  const livreComConversaoAssinado = assinar(livreComConversaoPayload);
+  const httpLivreComConversao = mockHttpClient();
+  const livreComConversao = await instagram.processarWebhookInstagram({
+    payload: livreComConversaoPayload,
+    ...livreComConversaoAssinado,
+    httpClient: httpLivreComConversao
+  });
+  assert.strictEqual(livreComConversao.resultados[0].status, "respondida");
+  assert.strictEqual(httpLivreComConversao.chamadas.filter(chamada => chamada.url.endsWith("/replies")).length, 1);
+  assert.strictEqual(httpLivreComConversao.chamadas.filter(chamada => chamada.url.endsWith("/messages")).length, 1);
+  const directLivre = httpLivreComConversao.chamadas.find(chamada => chamada.url.endsWith("/messages"));
+  assert.ok(directLivre.url.includes("graph.instagram.com/ig_livre_com_conversao/messages"));
+  assert.ok(directLivre.body.includes("recipient=%7B%22comment_id%22%3A%22comment_livre_com_conversao%22%7D"));
+  assert.ok(directLivre.body.includes("Mensagem+privada+personalizada"));
+  assert.ok(directLivre.body.includes("https%3A%2F%2Fgo.optimus.test%2Fpersonalizada"));
 
   salvarClienteInstagram("cliente_antigo_sem_gatilho", {
     ig: "ig_antigo_sem_gatilho",

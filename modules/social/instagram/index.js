@@ -173,6 +173,25 @@ function urlHttps(valor = "") {
   }
 }
 
+function urlHttpsDeCampos(objeto = {}, campos = []) {
+  if (!objeto || typeof objeto !== "object") return "";
+  for (const campo of campos) {
+    const url = urlHttps(objeto[campo]);
+    if (url) return url;
+  }
+  return "";
+}
+
+function urlDestinoConversaoPublicacao(dados = {}) {
+  return urlHttps(dados.urlDestino) ||
+    urlHttps(dados.linkAfiliado) ||
+    urlHttps(dados.linkDestino) ||
+    urlHttpsDeCampos(dados.direct, ["urlDestino", "url", "link"]) ||
+    urlHttpsDeCampos(dados.redirect, ["urlDestino", "url", "link"]) ||
+    urlHttpsDeCampos(dados.cta, ["urlDestino", "url", "link", "linkBio", "linkGrupo"]) ||
+    urlHttpsDeCampos(dados.gatilho, ["grupoUrl"]);
+}
+
 function appIdInstagram() {
   return texto(process.env.INSTAGRAM_APP_ID);
 }
@@ -425,6 +444,10 @@ function publicacaoSanitizada(publicacao = {}) {
     templateVersao: publicacao.templateVersao ?? null,
     legenda: texto(publicacao.legenda),
     linkAfiliadoPresente: Boolean(texto(publicacao.linkAfiliado)),
+    urlDestino: urlDestinoConversaoPublicacao(publicacao),
+    mensagemPrivadaPresente: Boolean(texto(publicacao.mensagemPrivada)),
+    redirectPresente: Boolean(publicacao.redirect && typeof publicacao.redirect === "object"),
+    ctaPresente: Boolean(publicacao.cta && typeof publicacao.cta === "object"),
     status: texto(publicacao.status),
     instagramContainerId: texto(publicacao.instagramContainerId),
     instagramMediaId: texto(publicacao.instagramMediaId),
@@ -500,7 +523,7 @@ function sanitizarGatilhoInstagram(gatilho = null, opcoes = {}) {
     palavra,
     ctaPublico,
     respostaPublica: limitarTexto(entrada.respostaPublica || padrao.respostaPublica, 220),
-    textoDirect: limitarTexto(entrada.textoDirect || entrada.mensagemDirect || padrao.textoDirect, 300),
+    textoDirect: limitarTexto(entrada.textoDirect || entrada.mensagemDirect || entrada.mensagemPrivada || padrao.textoDirect, 300),
     textoFinal: limitarTexto(entrada.textoFinal || "", 300),
     grupoUrl: urlHttps(entrada.grupoUrl || ""),
     grupoTexto: limitarTexto(entrada.grupoTexto || "", 180)
@@ -686,6 +709,25 @@ function carregarOfertaCliente(clienteId = "admin", ofertaId = "") {
     desconto: texto(oferta.desconto || oferta.percentualDesconto || oferta.descontoPercentual),
     cupom: texto(oferta.cupom || oferta.cupomCodigo || oferta.cupomInfo?.cupom),
     categoria: texto(v2.categoria || oferta.categoria)
+  };
+}
+
+function ofertaDaPublicacaoLivre(publicacao = {}) {
+  const linkAfiliado = urlDestinoConversaoPublicacao(publicacao);
+  const primeiraLinhaLegenda = limitarTexto(texto(publicacao.legenda).split(/\r?\n/)[0], 120);
+  return {
+    id: texto(publicacao.id),
+    fonteId: texto(publicacao.id),
+    clienteId: texto(publicacao.clienteId),
+    titulo: primeiraLinhaLegenda || "Publicacao personalizada",
+    marketplace: "instagram",
+    imagem: texto(publicacao.imagemPublicadaUrl || publicacao.imagemUrl),
+    linkAfiliado,
+    precoAtual: null,
+    precoOriginal: null,
+    desconto: "",
+    cupom: "",
+    categoria: "social"
   };
 }
 
@@ -1574,6 +1616,12 @@ async function publicarImagemLivreInstagram({
   templateId = "livre-instagram",
   gatilho = undefined,
   respostaPublica = "",
+  mensagemPrivada = "",
+  direct = undefined,
+  redirect = undefined,
+  urlDestino = "",
+  cta = undefined,
+  linkAfiliado = "",
   origem = "manual",
   tipoPublicacao = "livre",
   agendamentoId = "",
@@ -1603,7 +1651,31 @@ async function publicarImagemLivreInstagram({
     };
   }
 
-  const gatilhoSeguro = gatilho && typeof gatilho === "object" ? sanitizarGatilhoInstagram(gatilho) : null;
+  const destinoConversao = urlDestinoConversaoPublicacao({
+    urlDestino,
+    linkAfiliado,
+    redirect,
+    cta,
+    gatilho
+  });
+  const mensagemPrivadaFinal = limitarTexto(
+    mensagemPrivada ||
+    direct?.mensagem ||
+    direct?.texto ||
+    direct?.textoDirect ||
+    gatilho?.mensagemPrivada ||
+    gatilho?.mensagemDirect ||
+    gatilho?.textoDirect ||
+    "",
+    300
+  );
+  const gatilhoEntrada = gatilho && typeof gatilho === "object"
+    ? {
+      ...gatilho,
+      ...(mensagemPrivadaFinal && !texto(gatilho.textoDirect) ? { textoDirect: mensagemPrivadaFinal } : {})
+    }
+    : null;
+  const gatilhoSeguro = gatilhoEntrada ? sanitizarGatilhoInstagram(gatilhoEntrada) : null;
   const id = criarId("igpub");
   const base = {
     id,
@@ -1621,7 +1693,12 @@ async function publicarImagemLivreInstagram({
     renderHash: "",
     templateVersao: null,
     legenda: legendaFinal,
-    linkAfiliado: "",
+    linkAfiliado: destinoConversao,
+    urlDestino: destinoConversao,
+    mensagemPrivada: mensagemPrivadaFinal,
+    direct: direct && typeof direct === "object" ? direct : null,
+    redirect: redirect && typeof redirect === "object" ? redirect : null,
+    cta: cta && typeof cta === "object" ? cta : null,
     status: "publicando",
     instagramContainerId: "",
     instagramMediaId: "",
@@ -1951,7 +2028,9 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
     return { status: "ignorado", interacao: interacaoSanitizada(salvarInteracaoInstagram(clienteId, { ...base, statusGeral: "ignorado", erro: { message: "sem_gatilho" } })) };
   }
 
-  const oferta = carregarOfertaCliente(clienteId, publicacao.ofertaId);
+  const oferta = texto(publicacao.ofertaId)
+    ? carregarOfertaCliente(clienteId, publicacao.ofertaId)
+    : ofertaDaPublicacaoLivre({ ...publicacao, clienteId });
   if (!oferta.linkAfiliado) {
     logWebhookDescartadoInstagram("oferta_link_ausente", {
       clienteId,

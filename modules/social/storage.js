@@ -352,7 +352,8 @@ function normalizarAgendamento(clienteId, agendamento = {}, index = 0) {
   const redes = lista(agendamento.redes)
     .map(normalizarRede)
     .filter(Boolean);
-  const status = texto(agendamento.status || "pendente");
+  const statusEntrada = texto(agendamento.status || "pendente");
+  const status = statusEntrada === "rascunho" ? "pendente" : statusEntrada;
   const tipoPublicacao = normalizarTipoPublicacao(agendamento.tipoPublicacao || agendamento.tipo, "oferta");
   const origem = normalizarOrigemSocial(agendamento.origem, "agendada");
 
@@ -371,8 +372,12 @@ function normalizarAgendamento(clienteId, agendamento = {}, index = 0) {
     templateId: texto(agendamento.templateId || (tipoPublicacao === "livre" ? "livre-instagram" : "padrao-instagram")),
     gatilho: objetoOpcional(agendamento.gatilho),
     respostaPublica: texto(agendamento.respostaPublica || agendamento.gatilho?.respostaPublica),
+    mensagemPrivada: texto(agendamento.mensagemPrivada || agendamento.mensagemDirect || agendamento.textoDirect || agendamento.gatilho?.textoDirect),
+    direct: objetoOpcional(agendamento.direct),
     redirect: objetoOpcional(agendamento.redirect),
+    urlDestino: texto(agendamento.urlDestino || agendamento.linkDestino || agendamento.linkAfiliado || agendamento.direct?.urlDestino || agendamento.direct?.url || agendamento.redirect?.urlDestino || agendamento.redirect?.url || agendamento.cta?.urlDestino || agendamento.cta?.url),
     cta: objetoOpcional(agendamento.cta),
+    linkAfiliado: texto(agendamento.linkAfiliado || agendamento.urlDestino),
     agendadoPara: texto(agendamento.agendadoPara || agendamento.horarioExecucao),
     horario: texto(agendamento.horario),
     timezone: texto(agendamento.timezone || "America/Sao_Paulo"),
@@ -402,8 +407,12 @@ function normalizarRascunho(clienteId, rascunho = {}, index = 0) {
     templateId: texto(rascunho.templateId || (tipoPublicacao === "livre" ? "livre-instagram" : "padrao-instagram")),
     gatilho: objetoOpcional(rascunho.gatilho),
     respostaPublica: texto(rascunho.respostaPublica || rascunho.gatilho?.respostaPublica),
+    mensagemPrivada: texto(rascunho.mensagemPrivada || rascunho.mensagemDirect || rascunho.textoDirect || rascunho.gatilho?.textoDirect),
+    direct: objetoOpcional(rascunho.direct),
     redirect: objetoOpcional(rascunho.redirect),
+    urlDestino: texto(rascunho.urlDestino || rascunho.linkDestino || rascunho.linkAfiliado || rascunho.direct?.urlDestino || rascunho.direct?.url || rascunho.redirect?.urlDestino || rascunho.redirect?.url || rascunho.cta?.urlDestino || rascunho.cta?.url),
     cta: objetoOpcional(rascunho.cta),
+    linkAfiliado: texto(rascunho.linkAfiliado || rascunho.urlDestino),
     agendadoPara: texto(rascunho.agendadoPara || rascunho.horarioExecucao),
     agendamentoId: texto(rascunho.agendamentoId),
     publicacaoId: texto(rascunho.publicacaoId),
