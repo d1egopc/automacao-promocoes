@@ -1683,6 +1683,7 @@ async function publicarImagemLivreInstagram({
     }
     : null;
   const gatilhoSeguro = gatilhoEntrada ? sanitizarGatilhoInstagram(gatilhoEntrada) : null;
+  const respostaPublicaFinal = limitarTexto(respostaPublica || gatilhoEntrada?.respostaPublica || "", 220);
   const id = criarId("igpub");
   const base = {
     id,
@@ -1710,7 +1711,7 @@ async function publicarImagemLivreInstagram({
     instagramContainerId: "",
     instagramMediaId: "",
     gatilho: gatilhoSeguro,
-    respostaPublica: limitarTexto(respostaPublica || gatilhoSeguro?.respostaPublica || "", 220),
+    respostaPublica: respostaPublicaFinal,
     criadoEm: agoraIso(),
     tentativaEm: agoraIso(),
     publicadoEm: "",
@@ -1931,8 +1932,10 @@ function montarMensagemDirectInstagram({ oferta = {}, gatilho = {} } = {}) {
   if (oferta.titulo) linhas.push(oferta.titulo);
   if (oferta.precoAtual !== null) linhas.push(`Por: ${moeda(oferta.precoAtual)}`);
   if (oferta.cupom) linhas.push(`Cupom: ${oferta.cupom}`);
-  linhas.push("Link:");
-  linhas.push(oferta.linkAfiliado);
+  if (oferta.linkAfiliado) {
+    linhas.push("Link:");
+    linhas.push(oferta.linkAfiliado);
+  }
   if (gatilho.grupoUrl) {
     if (gatilho.grupoTexto) linhas.push(gatilho.grupoTexto);
     linhas.push(gatilho.grupoUrl);
@@ -2042,6 +2045,22 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
   if (tipoPublicacaoWebhook === "livre") {
     oferta.linkAfiliado = texto(oferta.linkAfiliado) || linkFinalPublicacaoLivre(publicacao);
   }
+  const publicacaoLivre = tipoPublicacaoWebhook === "livre";
+  const respostaPublicaLivre = texto(publicacao.respostaPublica);
+  const mensagemPrivadaLivre = texto(
+    publicacao.mensagemPrivada ||
+    publicacao.direct?.mensagem ||
+    publicacao.direct?.texto ||
+    publicacao.direct?.textoDirect
+  );
+  const deveEnviarRespostaPublica = publicacaoLivre ? Boolean(respostaPublicaLivre) : true;
+  const deveEnviarDirect = publicacaoLivre ? Boolean(mensagemPrivadaLivre) : true;
+  const gatilhoParaResposta = publicacaoLivre && respostaPublicaLivre
+    ? { ...gatilho, respostaPublica: respostaPublicaLivre }
+    : gatilho;
+  const gatilhoParaDirect = publicacaoLivre && mensagemPrivadaLivre
+    ? { ...gatilho, textoDirect: mensagemPrivadaLivre }
+    : gatilho;
   logSocial("[INSTAGRAM-WEBHOOK-LINK-DIAGNOSTICO]", {
     clienteId,
     instagramUserId: evento.instagramUserId,
@@ -2055,7 +2074,7 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
     ctaUrlPresente: Boolean(urlHttpsDeCampos(publicacao.cta, ["urlDestino"])),
     linkFinalPresente: Boolean(texto(oferta.linkAfiliado))
   });
-  if (!oferta.linkAfiliado) {
+  if (!oferta.linkAfiliado && !publicacaoLivre) {
     logWebhookDescartadoInstagram("oferta_link_ausente", {
       clienteId,
       instagramUserId: evento.instagramUserId,
@@ -2064,6 +2083,15 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
     });
     return { status: "erro", interacao: interacaoSanitizada(salvarInteracaoInstagram(clienteId, { ...base, statusGeral: "erro", erro: { message: "oferta_link_ausente" } })) };
   }
+  if (publicacaoLivre && !deveEnviarRespostaPublica && !deveEnviarDirect) {
+    logWebhookDescartadoInstagram("acao_configurada_ausente", {
+      clienteId,
+      instagramUserId: evento.instagramUserId,
+      instagramMediaId: evento.instagramMediaId,
+      instagramCommentId: evento.instagramCommentId
+    });
+    return { status: "ignorado", interacao: interacaoSanitizada(salvarInteracaoInstagram(clienteId, { ...base, statusGeral: "ignorado", erro: { message: "acao_configurada_ausente" } })) };
+  }
 
   let atual = salvarInteracaoInstagram(clienteId, {
     ...base,
@@ -2071,11 +2099,11 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
     privateReplyStatus: podeRetentarPrivateReply ? "processando" : base.privateReplyStatus
   });
 
-  if (texto(atual.respostaPublicaStatus) !== "concluida") {
+  if (deveEnviarRespostaPublica && texto(atual.respostaPublicaStatus) !== "concluida") {
     try {
       await responderComentarioInstagram({
         commentId: evento.instagramCommentId,
-        mensagem: gatilho.respostaPublica,
+        mensagem: gatilhoParaResposta.respostaPublica,
         accessToken: conexao.token.accessToken,
         httpClient
       });
@@ -2118,6 +2146,23 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
     }
   }
 
+  if (!deveEnviarDirect) {
+    atual = salvarInteracaoInstagram(clienteId, {
+      ...atual,
+      statusGeral: "respondida",
+      respondidoEm: agoraIso(),
+      erro: null
+    });
+    logSocial("[INSTAGRAM-WEBHOOK-CONCLUIDO]", {
+      clienteId,
+      instagramUserId: evento.instagramUserId,
+      instagramMediaId: evento.instagramMediaId,
+      instagramCommentId: evento.instagramCommentId,
+      status: atual.statusGeral
+    });
+    return { status: atual.statusGeral, interacao: interacaoSanitizada(atual) };
+  }
+
   await diagnosticarComentarioInstagram({
     commentId: evento.instagramCommentId,
     accessToken: conexao.token.accessToken,
@@ -2133,7 +2178,7 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
     await responderPrivadoComentarioInstagram({
       clienteId,
       commentId: evento.instagramCommentId,
-      mensagem: montarMensagemDirectInstagram({ oferta, gatilho }),
+      mensagem: montarMensagemDirectInstagram({ oferta, gatilho: gatilhoParaDirect }),
       httpClient
     });
     atual = salvarInteracaoInstagram(clienteId, {

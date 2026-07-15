@@ -116,7 +116,8 @@ function salvarClienteInstagramPersonalizado(clienteId, {
   link = "",
   urlDestino = link,
   gravarLinkAfiliado = true,
-  mensagemPrivada = ""
+  mensagemPrivada = "",
+  respostaPublica = gatilho?.respostaPublica || ""
 } = {}) {
   writeClienteJson(clienteId, "social-instagram.json", {
     clienteId,
@@ -139,6 +140,7 @@ function salvarClienteInstagramPersonalizado(clienteId, {
     linkAfiliado: gravarLinkAfiliado ? link : "",
     urlDestino,
     mensagemPrivada,
+    respostaPublica,
     redirect: urlDestino ? { urlDestino } : null,
     cta: urlDestino ? { urlDestino } : null,
     instagramUserId: ig,
@@ -352,6 +354,97 @@ function mockHttpClient(opcoes = {}) {
   const semCupom = await instagram.processarWebhookInstagram({ payload: semCupomPayload, ...semCupomAssinado, httpClient: httpSemCupom });
   assert.strictEqual(semCupom.resultados[0].status, "respondida");
   assert.strictEqual(httpSemCupom.chamadas.find(chamada => chamada.url.endsWith("/messages")).body.includes("Cupom"), false);
+
+  salvarClienteInstagramPersonalizado("cliente_livre_resposta_sem_link", {
+    ig: "ig_livre_resposta_sem_link",
+    media: "media_livre_resposta_sem_link",
+    link: "",
+    gravarLinkAfiliado: false,
+    gatilho: {
+      ativo: true,
+      palavra: "PROMO",
+      respostaPublica: "Mensagem publica personalizada."
+    }
+  });
+  const livreRespostaSemLinkPayload = payloadComentario({
+    ig: "ig_livre_resposta_sem_link",
+    media: "media_livre_resposta_sem_link",
+    comment: "comment_livre_resposta_sem_link",
+    text: "PROMO"
+  });
+  const livreRespostaSemLinkAssinado = assinar(livreRespostaSemLinkPayload);
+  const httpLivreRespostaSemLink = mockHttpClient();
+  const livreRespostaSemLink = await instagram.processarWebhookInstagram({
+    payload: livreRespostaSemLinkPayload,
+    ...livreRespostaSemLinkAssinado,
+    httpClient: httpLivreRespostaSemLink
+  });
+  assert.strictEqual(livreRespostaSemLink.resultados[0].status, "respondida");
+  assert.notStrictEqual(livreRespostaSemLink.resultados[0].interacao?.erro?.message, "oferta_link_ausente");
+  assert.strictEqual(httpLivreRespostaSemLink.chamadas.filter(chamada => chamada.url.endsWith("/replies")).length, 1);
+  assert.strictEqual(httpLivreRespostaSemLink.chamadas.filter(chamada => chamada.url.endsWith("/messages")).length, 0);
+
+  salvarClienteInstagramPersonalizado("cliente_livre_direct_sem_link", {
+    ig: "ig_livre_direct_sem_link",
+    media: "media_livre_direct_sem_link",
+    link: "",
+    gravarLinkAfiliado: false,
+    mensagemPrivada: "Mensagem privada sem link.",
+    gatilho: {
+      ativo: true,
+      palavra: "PROMO",
+      textoDirect: "Mensagem privada sem link."
+    }
+  });
+  const livreDirectSemLinkPayload = payloadComentario({
+    ig: "ig_livre_direct_sem_link",
+    media: "media_livre_direct_sem_link",
+    comment: "comment_livre_direct_sem_link",
+    text: "PROMO"
+  });
+  const livreDirectSemLinkAssinado = assinar(livreDirectSemLinkPayload);
+  const httpLivreDirectSemLink = mockHttpClient();
+  const livreDirectSemLink = await instagram.processarWebhookInstagram({
+    payload: livreDirectSemLinkPayload,
+    ...livreDirectSemLinkAssinado,
+    httpClient: httpLivreDirectSemLink
+  });
+  assert.strictEqual(livreDirectSemLink.resultados[0].status, "respondida");
+  assert.notStrictEqual(livreDirectSemLink.resultados[0].interacao?.erro?.message, "oferta_link_ausente");
+  assert.strictEqual(httpLivreDirectSemLink.chamadas.filter(chamada => chamada.url.endsWith("/replies")).length, 0);
+  assert.strictEqual(httpLivreDirectSemLink.chamadas.filter(chamada => chamada.url.endsWith("/messages")).length, 1);
+  const directLivreSemLink = httpLivreDirectSemLink.chamadas.find(chamada => chamada.url.endsWith("/messages"));
+  assert.ok(directLivreSemLink.body.includes("Mensagem+privada+sem+link"));
+  assert.ok(!directLivreSemLink.body.includes("Link%3A"));
+  assert.ok(!directLivreSemLink.body.includes("https%3A%2F%2Fgo.optimus.test"));
+
+  salvarClienteInstagramPersonalizado("cliente_livre_sem_acao_configurada", {
+    ig: "ig_livre_sem_acao_configurada",
+    media: "media_livre_sem_acao_configurada",
+    link: "",
+    gravarLinkAfiliado: false,
+    gatilho: {
+      ativo: true,
+      palavra: "PROMO"
+    }
+  });
+  const livreSemAcaoPayload = payloadComentario({
+    ig: "ig_livre_sem_acao_configurada",
+    media: "media_livre_sem_acao_configurada",
+    comment: "comment_livre_sem_acao_configurada",
+    text: "PROMO"
+  });
+  const livreSemAcaoAssinado = assinar(livreSemAcaoPayload);
+  const httpLivreSemAcao = mockHttpClient();
+  const livreSemAcao = await instagram.processarWebhookInstagram({
+    payload: livreSemAcaoPayload,
+    ...livreSemAcaoAssinado,
+    httpClient: httpLivreSemAcao
+  });
+  assert.strictEqual(livreSemAcao.resultados[0].status, "ignorado");
+  assert.strictEqual(livreSemAcao.resultados[0].interacao.erro.message, "acao_configurada_ausente");
+  assert.strictEqual(httpLivreSemAcao.chamadas.filter(chamada => chamada.url.endsWith("/replies")).length, 0);
+  assert.strictEqual(httpLivreSemAcao.chamadas.filter(chamada => chamada.url.endsWith("/messages")).length, 0);
 
   salvarClienteInstagramPersonalizado("cliente_livre_sem_conversao", {
     ig: "ig_livre_sem_conversao",
