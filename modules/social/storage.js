@@ -178,11 +178,15 @@ function recenciaOportunidade(criadoEm = "", agoraMs = Date.now(), idadeMaximaHo
   const recenciaConfiavel = ms > 0;
   const idadeEmMinutos = recenciaConfiavel ? Math.max(0, Math.floor((agoraMs - ms) / 60000)) : null;
   const idadeMaximaMinutos = Math.max(1, Number(idadeMaximaHoras || 6) || 6) * 60;
+  const idadeAcimaLimite = recenciaConfiavel && idadeEmMinutos > idadeMaximaMinutos;
 
   return {
     idadeEmMinutos,
     recenciaConfiavel,
-    antigaParaAutomatico: !recenciaConfiavel || idadeEmMinutos > idadeMaximaMinutos
+    antigaParaAutomatico: !recenciaConfiavel || idadeAcimaLimite,
+    motivoForaAutomatico: !recenciaConfiavel
+      ? "sem_data_confiavel"
+      : (idadeAcimaLimite ? "idade_acima_limite" : null)
   };
 }
 
@@ -1000,6 +1004,7 @@ function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
       idadeEmMinutos: recencia.idadeEmMinutos,
       recenciaConfiavel: recencia.recenciaConfiavel,
       antigaParaAutomatico: recencia.antigaParaAutomatico,
+      motivoForaAutomatico: recencia.motivoForaAutomatico,
       expiraEm,
       statusSocial: "nova",
       _ordenacao: {
