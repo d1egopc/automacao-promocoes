@@ -394,15 +394,24 @@ function restaurarEnv(nome, valorAnterior) {
   });
   const execAuto = await executarAutomaticoCliente({
     clienteId: "cliente_auto",
-    agora: new Date("2026-07-14T12:00:00.000Z"),
+    agora: new Date("2026-07-14T12:00:00.000Z")
+  });
+  assert.strictEqual(execAuto.publicado, false);
+  assert.strictEqual(execAuto.agendamentosCriados.length, 1);
+  assert.strictEqual(execAuto.agendamentosCriados[0].origem, "automatico");
+  assert.strictEqual(execAuto.agendamentosCriados[0].ofertaId, "oferta_auto");
+
+  const execAutoAgendada = await executarAgendamentosPendentesCliente({
+    clienteId: "cliente_auto",
+    agora: new Date(Date.parse(execAuto.agendamentosCriados[0].agendadoPara) + 60 * 1000),
     renderizadorArte: rendererOk("auto"),
     httpClient: mockHttpClient("auto"),
     polling: POLLING_TESTE
   });
-  assert.strictEqual(execAuto.publicado, true);
-  assert.strictEqual(execAuto.publicacao.origem, "automatica");
-  assert.strictEqual(execAuto.publicacao.ofertaId, "oferta_auto");
-  assert.strictEqual(execAuto.publicacao.renderizado, true);
+  assert.strictEqual(execAutoAgendada.executados.length, 1);
+  assert.strictEqual(execAutoAgendada.executados[0].publicacao.origem, "automatica");
+  assert.strictEqual(execAutoAgendada.executados[0].publicacao.ofertaId, "oferta_auto");
+  assert.strictEqual(execAutoAgendada.executados[0].publicacao.renderizado, true);
 
   conectar("cliente_agendada", "agendada");
   const agendamento = storage.salvarAgendamentoSocial("cliente_agendada", {

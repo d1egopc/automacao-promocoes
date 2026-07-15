@@ -6,6 +6,7 @@ const { logSocial } = require("./logs");
 const locksCliente = new Set();
 const locksAgendamentosCliente = new Set();
 const PROCESSANDO_TTL_MINUTOS = Math.max(5, Math.min(180, Number(process.env.SOCIAL_AGENDAMENTOS_PROCESSANDO_TTL_MINUTOS || 30) || 30));
+const STATUS_AGENDAMENTO_ATIVO = new Set(["pendente", "agendada", "aguardando_aprovacao", "processando"]);
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -19,19 +20,57 @@ function normalizar(valor = "") {
     .trim();
 }
 
+function numero(valor) {
+  if (valor === null || valor === undefined || valor === "") return null;
+  if (typeof valor === "number") return Number.isFinite(valor) ? valor : null;
+  const limpo = texto(valor).replace(/R\$/gi, "").replace(/\s/g, "");
+  if (!limpo) return null;
+  const normalizado = limpo.includes(",") ? limpo.replace(/\./g, "").replace(",", ".") : limpo;
+  const n = Number(normalizado);
+  return Number.isFinite(n) ? n : null;
+}
+
 function minutosHora(valor = "") {
   const [h, m] = texto(valor).split(":").map(Number);
   if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
   return h * 60 + m;
 }
 
+function dataMs(valor = "") {
+  const ms = Date.parse(texto(valor));
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function inicioDia(data = new Date()) {
+  const d = new Date(data);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function chaveDia(data = new Date()) {
+  return inicioDia(data).toISOString().slice(0, 10);
+}
+
+function dataNoDia(data = new Date(), minutos = 0) {
+  const d = inicioDia(data);
+  d.setMinutes(minutos, 0, 0);
+  return d;
+}
+
+function janelaDoDia(config = {}, agora = new Date()) {
+  const inicio = minutosHora(config.janelaFuncionamento?.inicio || "08:00") ?? 8 * 60;
+  const fim = minutosHora(config.janelaFuncionamento?.fim || "22:00") ?? 22 * 60;
+  const inicioData = dataNoDia(agora, inicio);
+  const fimData = dataNoDia(agora, fim);
+  if (fim < inicio) fimData.setDate(fimData.getDate() + 1);
+  return { inicio: inicioData, fim: fimData };
+}
+
 function dentroJanela(config = {}, agora = new Date()) {
-  const inicio = minutosHora(config.janelaFuncionamento?.inicio || "08:00");
-  const fim = minutosHora(config.janelaFuncionamento?.fim || "22:00");
-  if (inicio === null || fim === null) return true;
-  const atual = agora.getHours() * 60 + agora.getMinutes();
-  if (inicio <= fim) return atual >= inicio && atual <= fim;
-  return atual >= inicio || atual <= fim;
+  const janela = janelaDoDia(config, agora);
+  const ms = agora.getTime();
+  return ms >= janela.inicio.getTime() && ms <= janela.fim.getTime();
 }
 
 function publicadoRecentemente(publicacoes = [], ofertaId = "", dias = 0, agora = Date.now()) {
@@ -39,111 +78,212 @@ function publicadoRecentemente(publicacoes = [], ofertaId = "", dias = 0, agora 
   const limiteMs = Number(dias) * 24 * 60 * 60 * 1000;
   return publicacoes.some(item => {
     if (texto(item.ofertaId) !== texto(ofertaId)) return false;
-    const data = Date.parse(texto(item.publicadoEm || item.criadoEm));
-    return Number.isFinite(data) && agora - data <= limiteMs;
+    const data = dataMs(item.publicadoEm || item.criadoEm);
+    return data > 0 && agora - data <= limiteMs;
   });
 }
 
-function atingiuLimiteDiario(publicacoes = [], limite = 1, agora = new Date()) {
-  const dia = agora.toISOString().slice(0, 10);
-  const total = publicacoes.filter(item =>
-    texto(item.status) === "publicada" &&
-    texto(item.origem || "manual") === "automatica" &&
-    texto(item.publicadoEm || item.criadoEm).startsWith(dia)
-  ).length;
-  return total >= Number(limite || 1);
+function jaPublicado(publicacoes = [], ofertaId = "") {
+  if (!texto(ofertaId)) return false;
+  return publicacoes.some(item =>
+    texto(item.ofertaId) === texto(ofertaId) &&
+    texto(item.status || item.statusGeral) === "publicada"
+  );
 }
 
-function respeitaIntervalo(publicacoes = [], intervaloMinimoMinutos = 180, agora = Date.now()) {
-  const ultima = publicacoes
-    .filter(item => texto(item.status) === "publicada" && texto(item.origem || "manual") === "automatica")
-    .map(item => Date.parse(texto(item.publicadoEm || item.criadoEm)))
-    .filter(Number.isFinite)
-    .sort((a, b) => b - a)[0];
-  if (!ultima) return true;
-  return agora - ultima >= Number(intervaloMinimoMinutos || 180) * 60 * 1000;
+function agendamentoAtivo(agendamento = {}) {
+  if (agendamento.ativo === false) return false;
+  const status = texto(agendamento.status || "pendente");
+  return STATUS_AGENDAMENTO_ATIVO.has(status);
 }
 
-function escolherOferta({ oportunidades = [], config = {}, publicacoes = [], agora = new Date() } = {}) {
-  const diagnostico = [];
+function jaAgendado(agendamentos = [], ofertaId = "") {
+  if (!texto(ofertaId)) return false;
+  return agendamentos.some(item => texto(item.ofertaId) === texto(ofertaId) && agendamentoAtivo(item));
+}
+
+function agendamentosAutomaticosNoDia(agendamentos = [], agora = new Date()) {
+  const dia = chaveDia(agora);
+  return agendamentos.filter(item =>
+    texto(item.origem) === "automatico" &&
+    agendamentoAtivo(item) &&
+    texto(item.agendadoPara || item.horario).startsWith(dia)
+  );
+}
+
+function descontoOferta(oferta = {}) {
+  const direto = numero(oferta.desconto || oferta.percentualDesconto || oferta.descontoPercentual);
+  if (direto !== null) return direto;
+  const atual = numero(oferta.precoAtual ?? oferta.preco);
+  const original = numero(oferta.precoOriginal);
+  if (atual === null || original === null || original <= 0 || atual >= original) return 0;
+  return Math.round(((original - atual) / original) * 10000) / 100;
+}
+
+function recenciaMs(oferta = {}) {
+  return dataMs(oferta.criadoEm || oferta.capturadaEm || oferta.recebidoEm || oferta.atualizadoEm);
+}
+
+function validarElegibilidadeOferta({ oferta = {}, config = {}, publicacoes = [], agendamentos = [], agora = new Date() } = {}) {
+  const motivos = [];
+  const score = Number(oferta.score ?? 0);
+  const marketplace = normalizar(oferta.marketplace);
+  const categoria = normalizar(oferta.categoria);
+  const cupom = texto(oferta.cupom);
+  const ofertaId = texto(oferta.ofertaId);
   const permitidosMarketplace = new Set((config.marketplacesPermitidos || []).map(normalizar).filter(Boolean));
   const permitidasCategorias = new Set((config.categoriasPermitidas || []).map(normalizar).filter(Boolean));
-  const agoraMs = agora.getTime();
-  const bloqueioGlobal = [];
+  const capturadaMs = recenciaMs(oferta);
+  const idadeMs = capturadaMs ? agora.getTime() - capturadaMs : Infinity;
+  const idadeMaximaMs = Number(config.idadeMaximaHoras || 6) * 60 * 60 * 1000;
 
-  if (!config.ativo) bloqueioGlobal.push("automatico_desativado");
-  if (!dentroJanela(config, agora)) bloqueioGlobal.push("fora_janela");
-  if (atingiuLimiteDiario(publicacoes, config.quantidadeDiaria, agora)) bloqueioGlobal.push("limite_diario");
-  if (!respeitaIntervalo(publicacoes, config.intervaloMinimoMinutos, agoraMs)) bloqueioGlobal.push("intervalo_minimo");
+  if (!config.ativo) motivos.push("automatico_desativado");
+  if (!ofertaId) motivos.push("oferta_id_ausente");
+  if (!texto(oferta.imagem)) motivos.push("sem_imagem");
+  if (oferta.linkAfiliadoPresente === false || oferta.publicavel === false) motivos.push("sem_link");
+  if (permitidosMarketplace.size && !permitidosMarketplace.has(marketplace)) motivos.push("marketplace_bloqueado");
+  if (permitidasCategorias.size && !permitidasCategorias.has(categoria)) motivos.push("categoria_bloqueada");
+  if (score < Number(config.scoreMinimo || 0)) motivos.push("score_baixo");
+  if (config.exigirCupom === true && !cupom) motivos.push("sem_cupom");
+  if (config.exigirCupom !== true && config.permitirOfertaComum === false && !cupom) motivos.push("sem_cupom");
+  if (!capturadaMs || idadeMs < 0 || idadeMs > idadeMaximaMs) motivos.push("fora_idade_maxima");
+  if (jaPublicado(publicacoes, ofertaId)) motivos.push("ja_publicada");
+  if (publicadoRecentemente(publicacoes, ofertaId, config.evitarProdutoRepetidoDias, agora.getTime())) motivos.push("repetida");
+  if (jaAgendado(agendamentos, ofertaId)) motivos.push("ja_agendada");
+
+  return motivos;
+}
+
+function diagnosticoOferta(oferta = {}, motivos = []) {
+  return {
+    ofertaId: texto(oferta.ofertaId),
+    titulo: texto(oferta.titulo),
+    marketplace: texto(oferta.marketplace),
+    categoria: texto(oferta.categoria),
+    score: Number(oferta.score ?? 0),
+    cupomPresente: Boolean(texto(oferta.cupom)),
+    capturadaEm: texto(oferta.criadoEm || oferta.capturadaEm || oferta.recebidoEm || oferta.atualizadoEm),
+    decisao: motivos.length ? "ignorada" : "candidata",
+    motivos
+  };
+}
+
+function ordenarCandidatas(candidatas = []) {
+  return [...candidatas].sort((a, b) =>
+    (texto(b.cupom) ? 1 : 0) - (texto(a.cupom) ? 1 : 0) ||
+    Number(b.score ?? 0) - Number(a.score ?? 0) ||
+    recenciaMs(b) - recenciaMs(a) ||
+    descontoOferta(b) - descontoOferta(a) ||
+    normalizar(a.marketplace).localeCompare(normalizar(b.marketplace)) ||
+    normalizar(a.categoria).localeCompare(normalizar(b.categoria)) ||
+    texto(a.ofertaId).localeCompare(texto(b.ofertaId))
+  );
+}
+
+function selecionarOportunidades({ oportunidades = [], config = {}, publicacoes = [], agendamentos = [], agora = new Date(), limite = 1 } = {}) {
+  const diagnostico = [];
+  const candidatas = [];
 
   for (const oferta of oportunidades) {
-    const motivos = [...bloqueioGlobal];
-    const score = Number(oferta.score ?? 0);
-    const marketplace = normalizar(oferta.marketplace);
-    const categoria = normalizar(oferta.categoria);
-    const cupom = texto(oferta.cupom);
-
-    if (!texto(oferta.imagem)) motivos.push("sem_imagem");
-    if (oferta.linkAfiliadoPresente === false || oferta.publicavel === false) motivos.push("sem_link");
-    if (permitidosMarketplace.size && !permitidosMarketplace.has(marketplace)) motivos.push("marketplace_bloqueado");
-    if (permitidasCategorias.size && !permitidasCategorias.has(categoria)) motivos.push("categoria_bloqueada");
-    if (score < Number(config.scoreMinimo || 0)) motivos.push("score_baixo");
-    if (config.exigirCupom === true && !cupom) motivos.push("sem_cupom");
-    if (config.permitirOfertaComum === false && !cupom) motivos.push("sem_cupom");
-    if (publicadoRecentemente(publicacoes, oferta.ofertaId, config.evitarProdutoRepetidoDias, agoraMs)) {
-      motivos.push("repetida");
-    }
-
-    diagnostico.push({
-      ofertaId: texto(oferta.ofertaId),
-      titulo: texto(oferta.titulo),
-      marketplace: texto(oferta.marketplace),
-      categoria: texto(oferta.categoria),
-      score,
-      cupomPresente: Boolean(cupom),
-      decisao: motivos.length ? "ignorada" : "candidata",
-      motivos
-    });
+    const motivos = validarElegibilidadeOferta({ oferta, config, publicacoes, agendamentos, agora });
+    const itemDiagnostico = diagnosticoOferta(oferta, motivos);
+    diagnostico.push(itemDiagnostico);
+    if (!motivos.length) candidatas.push(oferta);
   }
 
-  const candidatas = oportunidades
-    .filter(oferta => {
-      const item = diagnostico.find(d => d.ofertaId === texto(oferta.ofertaId));
-      return item && item.decisao === "candidata";
-    })
-    .sort((a, b) =>
-      (texto(b.cupom) ? 1 : 0) - (texto(a.cupom) ? 1 : 0) ||
-      Number(b.score ?? 0) - Number(a.score ?? 0) ||
-      Date.parse(texto(b.criadoEm)) - Date.parse(texto(a.criadoEm))
-    );
+  const ordenadas = ordenarCandidatas(candidatas);
+  const selecionadas = ordenadas.slice(0, Math.max(0, Number(limite || 0) || 0));
+  for (const selecionada of selecionadas) {
+    const item = diagnostico.find(d => d.ofertaId === texto(selecionada.ofertaId));
+    if (item) item.decisao = "selecionada";
+  }
 
-  const escolhida = candidatas[0] || null;
+  return { selecionadas, diagnostico, candidatas: ordenadas };
+}
+
+function escolherOferta({ oportunidades = [], config = {}, publicacoes = [], agendamentos = [], agora = new Date() } = {}) {
+  const { selecionadas, diagnostico } = selecionarOportunidades({
+    oportunidades,
+    config,
+    publicacoes,
+    agendamentos,
+    agora,
+    limite: 1
+  });
+  const escolhida = selecionadas[0] || null;
   if (escolhida) {
     const item = diagnostico.find(d => d.ofertaId === texto(escolhida.ofertaId));
     if (item) item.decisao = "escolhida";
   }
-
   return { escolhida, diagnostico };
+}
+
+function horariosOcupados(agendamentos = [], agora = new Date()) {
+  const dia = chaveDia(agora);
+  return agendamentos
+    .filter(agendamentoAtivo)
+    .map(item => dataMs(item.agendadoPara || item.horario))
+    .filter(ms => ms > 0 && new Date(ms).toISOString().slice(0, 10) === dia)
+    .sort((a, b) => a - b);
+}
+
+function respeitaDistancia(ms = 0, ocupados = [], intervaloMinutos = 40) {
+  const distancia = Number(intervaloMinutos || 40) * 60 * 1000;
+  return ocupados.every(ocupado => Math.abs(ms - ocupado) >= distancia);
+}
+
+function proximosHorariosDisponiveis({ config = {}, agendamentos = [], agora = new Date(), quantidade = 0 } = {}) {
+  const intervalo = Math.max(20, Number(config.intervaloMinimoMinutos || 40) || 40);
+  const janela = janelaDoDia(config, agora);
+  const ocupados = horariosOcupados(agendamentos, agora);
+  const horarios = [];
+  const passoMs = 60 * 1000;
+  const intervaloMs = intervalo * 60 * 1000;
+  let cursor = Math.max(agora.getTime() + passoMs, janela.inicio.getTime());
+
+  while (cursor <= janela.fim.getTime() && horarios.length < quantidade) {
+    if (respeitaDistancia(cursor, ocupados, intervalo)) {
+      horarios.push(new Date(cursor));
+      ocupados.push(cursor);
+      ocupados.sort((a, b) => a - b);
+      cursor += intervaloMs;
+      continue;
+    }
+    cursor += passoMs;
+  }
+
+  return horarios;
 }
 
 function simularSelecaoAutomatica({ clienteId = "admin", limite = 50, agora = new Date() } = {}) {
   const config = storage.getConfigAutomaticoSocial(clienteId);
   const oportunidades = storage.listarOportunidadesSocial(clienteId, limite);
   const publicacoes = listarPublicacoesInstagram(clienteId, 200);
-  const { escolhida, diagnostico } = escolherOferta({ oportunidades, config, publicacoes, agora });
+  const agendamentos = storage.listarAgendamentosSocial(clienteId);
+  const restantes = Math.max(0, Number(config.quantidadeDiaria || 5) - agendamentosAutomaticosNoDia(agendamentos, agora).length);
+  const { selecionadas, diagnostico } = selecionarOportunidades({
+    oportunidades,
+    config,
+    publicacoes,
+    agendamentos,
+    agora,
+    limite: restantes || 1
+  });
 
   logSocial("[SOCIAL-AUTOMATICO-SIMULAR]", {
     clienteId,
     ativo: config.ativo,
     totalOportunidades: oportunidades.length,
-    escolhida: texto(escolhida?.ofertaId)
+    selecionadas: selecionadas.length,
+    primeira: texto(selecionadas[0]?.ofertaId)
   });
 
   return {
     ok: true,
     clienteId,
-    publicaria: Boolean(escolhida),
-    oferta: escolhida,
+    publicaria: Boolean(selecionadas[0]),
+    oferta: selecionadas[0] || null,
+    selecionadas,
     diagnostico,
     config
   };
@@ -159,50 +299,172 @@ function gatilhoAutomatico(config = {}) {
   };
 }
 
+function resumoConfigAutomatico(config = {}) {
+  return {
+    quantidadeDiaria: Number(config.quantidadeDiaria || 5),
+    intervaloMinimoMinutos: Number(config.intervaloMinimoMinutos || 40),
+    janelaFuncionamento: config.janelaFuncionamento,
+    scoreMinimo: Number(config.scoreMinimo || 0),
+    exigirCupom: config.exigirCupom === true,
+    permitirOfertaComum: config.permitirOfertaComum !== false,
+    idadeMaximaHoras: Number(config.idadeMaximaHoras || 6),
+    aprovacaoManual: config.aprovacaoManual === true,
+    templatePadraoId: texto(config.templatePadraoId || "padrao-instagram")
+  };
+}
+
+function auditoriaAgendamentoAutomatico(oferta = {}, config = {}, agendadoPara = new Date()) {
+  return {
+    origem: "automatico",
+    ofertaId: texto(oferta.ofertaId),
+    score: Number(oferta.score ?? 0),
+    motivoSelecao: texto(oferta.cupom) ? "cupom_score_recencia" : "score_recencia",
+    cupomPresente: Boolean(texto(oferta.cupom)),
+    marketplace: texto(oferta.marketplace),
+    categoria: texto(oferta.categoria),
+    capturadaEm: texto(oferta.criadoEm || oferta.capturadaEm || oferta.recebidoEm || oferta.atualizadoEm),
+    agendadoPara: agendadoPara.toISOString(),
+    config: resumoConfigAutomatico(config)
+  };
+}
+
 async function executarAutomaticoCliente({
   clienteId = "admin",
-  agora = new Date(),
-  renderizadorArte,
-  httpClient,
-  polling
+  agora = new Date()
 } = {}) {
   const clienteSeguro = texto(clienteId || "admin") || "admin";
   if (locksCliente.has(clienteSeguro)) {
-    return { ok: false, clienteId: clienteSeguro, motivo: "lock_ativo" };
+    return { ok: false, clienteId: clienteSeguro, motivo: "lock_ativo", agendamentosCriados: [] };
   }
 
   locksCliente.add(clienteSeguro);
   try {
-    const simulacao = simularSelecaoAutomatica({ clienteId: clienteSeguro, agora });
-    if (!simulacao.publicaria || !simulacao.oferta?.ofertaId) {
-      return { ok: true, clienteId: clienteSeguro, publicado: false, motivo: "sem_oferta_elegivel", simulacao };
+    logSocial("[SOCIAL-AUTOMATICO-RODADA-INICIO]", { clienteId: clienteSeguro, agora: agora.toISOString() });
+    const config = storage.getConfigAutomaticoSocial(clienteSeguro);
+    logSocial("[SOCIAL-AUTOMATICO-CONFIG]", {
+      clienteId: clienteSeguro,
+      ativo: config.ativo,
+      quantidadeDiaria: config.quantidadeDiaria,
+      intervaloMinimoMinutos: config.intervaloMinimoMinutos,
+      scoreMinimo: config.scoreMinimo,
+      idadeMaximaHoras: config.idadeMaximaHoras
+    });
+
+    if (!config.ativo) {
+      logSocial("[SOCIAL-AUTOMATICO-RODADA-FIM]", { clienteId: clienteSeguro, motivo: "automatico_desativado", agendamentosCriados: 0 });
+      return { ok: true, clienteId: clienteSeguro, publicado: false, agendamentosCriados: [], motivo: "automatico_desativado" };
     }
 
-    const config = simulacao.config;
-    const ofertaId = texto(simulacao.oferta.ofertaId);
-    const janela = agora.toISOString().slice(0, 13);
-    const resultado = await publicarNoInstagram({
+    const oportunidades = storage.listarOportunidadesSocial(clienteSeguro, 50);
+    const publicacoes = listarPublicacoesInstagram(clienteSeguro, 200);
+    const agendamentos = storage.listarAgendamentosSocial(clienteSeguro);
+    const jaCriadosHoje = agendamentosAutomaticosNoDia(agendamentos, agora);
+    const quantidadeDiaria = Math.min(10, Math.max(1, Number(config.quantidadeDiaria || 5) || 5));
+    const restanteDia = Math.max(0, quantidadeDiaria - jaCriadosHoje.length);
+
+    logSocial("[SOCIAL-AUTOMATICO-CANDIDATOS]", {
       clienteId: clienteSeguro,
-      origem: "automatica",
-      tipoPublicacao: "oferta",
-      ofertaId,
-      templateId: config.templatePadraoId || "padrao-instagram",
-      gatilho: gatilhoAutomatico(config),
-      respostaPublica: texto(config.gatilho?.respostaPublica),
-      idempotencyKey: `auto:${clienteSeguro}:${ofertaId}:${janela}`,
-      renderizadorArte,
-      httpClient,
-      polling
+      totalOportunidades: oportunidades.length,
+      agendamentosAutomaticosHoje: jaCriadosHoje.length,
+      restanteDia
+    });
+
+    if (restanteDia <= 0) {
+      logSocial("[SOCIAL-AUTOMATICO-LIMITE]", { clienteId: clienteSeguro, limite: quantidadeDiaria, motivo: "limite_diario" });
+      return { ok: true, clienteId: clienteSeguro, publicado: false, agendamentosCriados: [], motivo: "limite_diario" };
+    }
+
+    const { selecionadas, diagnostico } = selecionarOportunidades({
+      oportunidades,
+      config,
+      publicacoes,
+      agendamentos,
+      agora,
+      limite: restanteDia
+    });
+
+    for (const item of diagnostico.filter(d => d.decisao === "ignorada").slice(0, 20)) {
+      logSocial("[SOCIAL-AUTOMATICO-IGNORADA]", {
+        clienteId: clienteSeguro,
+        ofertaId: item.ofertaId,
+        motivos: item.motivos
+      });
+    }
+
+    const horarios = proximosHorariosDisponiveis({
+      config,
+      agendamentos,
+      agora,
+      quantidade: Math.min(restanteDia, selecionadas.length)
+    });
+
+    if (!selecionadas.length || !horarios.length) {
+      const motivo = selecionadas.length ? "sem_espaco_janela" : "sem_oportunidade_elegivel";
+      logSocial("[SOCIAL-AUTOMATICO-RODADA-FIM]", { clienteId: clienteSeguro, motivo, agendamentosCriados: 0 });
+      return { ok: true, clienteId: clienteSeguro, publicado: false, agendamentosCriados: [], motivo, diagnostico };
+    }
+
+    const criados = [];
+    for (let i = 0; i < Math.min(selecionadas.length, horarios.length); i += 1) {
+      const oferta = selecionadas[i];
+      const agendadoPara = horarios[i];
+      const automatico = auditoriaAgendamentoAutomatico(oferta, config, agendadoPara);
+      logSocial("[SOCIAL-AUTOMATICO-SELECIONADA]", {
+        clienteId: clienteSeguro,
+        ofertaId: texto(oferta.ofertaId),
+        score: Number(oferta.score ?? 0),
+        cupomPresente: Boolean(texto(oferta.cupom)),
+        marketplace: texto(oferta.marketplace),
+        categoria: texto(oferta.categoria)
+      });
+      const agendamento = storage.salvarAgendamentoSocial(clienteSeguro, {
+        origem: "automatico",
+        tipoPublicacao: "oferta",
+        status: config.aprovacaoManual ? "aguardando_aprovacao" : "agendada",
+        ativo: true,
+        redes: ["instagram"],
+        ofertaId: texto(oferta.ofertaId),
+        templateId: config.templatePadraoId || "padrao-instagram",
+        gatilho: gatilhoAutomatico(config),
+        respostaPublica: texto(config.gatilho?.respostaPublica),
+        agendadoPara: agendadoPara.toISOString(),
+        horario: agendadoPara.toISOString(),
+        timezone: "America/Sao_Paulo",
+        automatico,
+        regras: {
+          automatico
+        }
+      });
+      criados.push(agendamento);
+      agendamentos.push(agendamento);
+      logSocial("[SOCIAL-AUTOMATICO-AGENDADA]", {
+        clienteId: clienteSeguro,
+        agendamentoId: agendamento.id,
+        ofertaId: agendamento.ofertaId,
+        agendadoPara: agendamento.agendadoPara,
+        status: agendamento.status
+      });
+    }
+
+    logSocial("[SOCIAL-AUTOMATICO-RODADA-FIM]", {
+      clienteId: clienteSeguro,
+      agendamentosCriados: criados.length
     });
 
     return {
-      ok: resultado.publicacao?.status !== "erro",
+      ok: true,
       clienteId: clienteSeguro,
-      publicado: resultado.publicacao?.status === "publicada",
-      duplicada: resultado.duplicada === true,
-      publicacao: resultado.publicacao,
-      simulacao
+      publicado: false,
+      agendamentosCriados: criados,
+      totalAgendamentosCriados: criados.length,
+      diagnostico
     };
+  } catch (e) {
+    logSocial("[SOCIAL-AUTOMATICO-ERRO]", {
+      clienteId: clienteSeguro,
+      erro: texto(e.message || "social_automatico_erro")
+    });
+    throw e;
   } finally {
     locksCliente.delete(clienteSeguro);
   }
@@ -212,19 +474,20 @@ function agendamentoVencido(agendamento = {}, agora = new Date()) {
   const status = texto(agendamento.status || "pendente");
   if (agendamento.ativo === false) return false;
   if (status === "processando") {
-    const atualizadoMs = Date.parse(texto(agendamento.atualizadoEm || agendamento.criadoEm));
-    return Number.isFinite(atualizadoMs) && agora.getTime() - atualizadoMs >= PROCESSANDO_TTL_MINUTOS * 60 * 1000;
+    const atualizadoMs = dataMs(agendamento.atualizadoEm || agendamento.criadoEm);
+    return atualizadoMs > 0 && agora.getTime() - atualizadoMs >= PROCESSANDO_TTL_MINUTOS * 60 * 1000;
   }
   if (!["pendente", "agendada"].includes(status)) return false;
-  const data = Date.parse(texto(agendamento.agendadoPara || agendamento.horario));
-  return Number.isFinite(data) && data <= agora.getTime();
+  const data = dataMs(agendamento.agendadoPara || agendamento.horario);
+  return data > 0 && data <= agora.getTime();
 }
 
 function payloadPublicadorAgendamento(clienteSeguro = "admin", agendamento = {}, extras = {}) {
   const tipoPublicacao = texto(agendamento.tipoPublicacao || "oferta") || "oferta";
+  const origemAgendamento = texto(agendamento.origem || "agendada") || "agendada";
   return {
     clienteId: clienteSeguro,
-    origem: "agendada",
+    origem: origemAgendamento === "automatico" ? "automatica" : origemAgendamento,
     tipoPublicacao,
     ofertaId: agendamento.ofertaId,
     imagemUrl: agendamento.imagemUrl,

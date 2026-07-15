@@ -17,8 +17,8 @@ const ARQUIVOS = {
 };
 
 const REDES_SUPORTADAS = new Set(["instagram", "facebook", "telegram"]);
-const STATUS_PUBLICACAO = new Set(["rascunho", "agendada", "pendente", "processando", "publicada", "erro", "cancelada"]);
-const ORIGENS_PUBLICACAO = new Set(["manual", "personalizada", "automatica", "agendada"]);
+const STATUS_PUBLICACAO = new Set(["rascunho", "agendada", "pendente", "aguardando_aprovacao", "processando", "publicada", "erro", "cancelada"]);
+const ORIGENS_PUBLICACAO = new Set(["manual", "personalizada", "automatica", "automatico", "agendada"]);
 const TIPOS_PUBLICACAO = new Set(["oferta", "livre"]);
 
 function agoraIso() {
@@ -212,17 +212,19 @@ function criarConfigAutomaticoPadrao(clienteId = "admin") {
     ativo: false,
     templatePadraoId: "padrao-instagram",
     horarios: [],
-    quantidadeDiaria: 1,
+    quantidadeDiaria: 5,
     janelaFuncionamento: {
       inicio: "08:00",
       fim: "22:00"
     },
-    intervaloMinimoMinutos: 180,
+    intervaloMinimoMinutos: 40,
+    idadeMaximaHoras: 6,
     marketplacesPermitidos: [],
     categoriasPermitidas: [],
     scoreMinimo: 70,
     exigirCupom: false,
     permitirOfertaComum: true,
+    aprovacaoManual: false,
     evitarProdutoRepetidoDias: 30,
     gatilho: {
       ativo: false,
@@ -382,6 +384,7 @@ function normalizarAgendamento(clienteId, agendamento = {}, index = 0) {
     horario: texto(agendamento.horario),
     timezone: texto(agendamento.timezone || "America/Sao_Paulo"),
     regras: agendamento.regras && typeof agendamento.regras === "object" ? agendamento.regras : {},
+    automatico: agendamento.automatico && typeof agendamento.automatico === "object" ? agendamento.automatico : null,
     publicacaoId: texto(agendamento.publicacaoId),
     erro: agendamento.erro && typeof agendamento.erro === "object" ? agendamento.erro : null,
     criadoEm: agendamento.criadoEm || agoraIso(),
@@ -526,17 +529,19 @@ function normalizarConfigAutomatico(clienteId = "admin", config = {}) {
     ativo: config.ativo === true,
     templatePadraoId: texto(config.templatePadraoId || padrao.templatePadraoId),
     horarios: lista(config.horarios).map(item => hora(item)).filter(Boolean).slice(0, 24),
-    quantidadeDiaria: inteiro(config.quantidadeDiaria, padrao.quantidadeDiaria, 1, 24),
+    quantidadeDiaria: inteiro(config.quantidadeDiaria, padrao.quantidadeDiaria, 1, 10),
     janelaFuncionamento: {
       inicio: hora(janela.inicio, padrao.janelaFuncionamento.inicio),
       fim: hora(janela.fim, padrao.janelaFuncionamento.fim)
     },
-    intervaloMinimoMinutos: inteiro(config.intervaloMinimoMinutos, padrao.intervaloMinimoMinutos, 15, 1440),
+    intervaloMinimoMinutos: inteiro(config.intervaloMinimoMinutos, padrao.intervaloMinimoMinutos, 20, 1440),
+    idadeMaximaHoras: inteiro(config.idadeMaximaHoras, padrao.idadeMaximaHoras, 1, 168),
     marketplacesPermitidos: lista(config.marketplacesPermitidos).map(texto).filter(Boolean),
     categoriasPermitidas: lista(config.categoriasPermitidas).map(texto).filter(Boolean),
     scoreMinimo: inteiro(config.scoreMinimo, padrao.scoreMinimo, 0, 100),
     exigirCupom: config.exigirCupom === true,
     permitirOfertaComum: config.permitirOfertaComum !== false,
+    aprovacaoManual: config.aprovacaoManual === true,
     evitarProdutoRepetidoDias: inteiro(config.evitarProdutoRepetidoDias, padrao.evitarProdutoRepetidoDias, 0, 365),
     gatilho: {
       ativo: gatilho.ativo === true,
