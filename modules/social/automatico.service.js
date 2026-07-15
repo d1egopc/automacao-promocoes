@@ -239,7 +239,9 @@ function proximosHorariosDisponiveis({ config = {}, agendamentos = [], agora = n
   const horarios = [];
   const passoMs = 60 * 1000;
   const intervaloMs = intervalo * 60 * 1000;
-  let cursor = Math.max(agora.getTime() + passoMs, janela.inicio.getTime());
+  const cursorInicial = Math.max(agora.getTime() + passoMs, janela.inicio.getTime());
+  let cursor = cursorInicial;
+  let rejeitadosPorIntervalo = 0;
 
   while (cursor <= janela.fim.getTime() && horarios.length < quantidade) {
     if (respeitaDistancia(cursor, ocupados, intervalo)) {
@@ -249,8 +251,31 @@ function proximosHorariosDisponiveis({ config = {}, agendamentos = [], agora = n
       cursor += intervaloMs;
       continue;
     }
+    rejeitadosPorIntervalo += 1;
     cursor += passoMs;
   }
+
+  let motivo = "slots_calculados";
+  if (Number(quantidade || 0) <= 0) {
+    motivo = "quantidade_zero";
+  } else if (horarios.length < quantidade && cursorInicial > janela.fim.getTime()) {
+    motivo = "cursor_inicial_fora_da_janela";
+  } else if (horarios.length < quantidade && horarios.length === 0 && rejeitadosPorIntervalo > 0) {
+    motivo = "todos_eliminados_por_intervalo_minimo";
+  } else if (horarios.length < quantidade) {
+    motivo = "janela_sem_slots_suficientes";
+  }
+
+  logSocial("[SOCIAL-AUTOMATICO-HORARIOS-TEMP]", {
+    janelaInicio: janela.inicio.toISOString(),
+    janelaFim: janela.fim.toISOString(),
+    agora: agora.toISOString(),
+    intervaloMinimo: intervalo,
+    quantidadeDiaria: Number(config.quantidadeDiaria || 5),
+    slotsCalculados: horarios.length,
+    proximoHorario: horarios[0]?.toISOString() || "",
+    motivo
+  });
 
   return horarios;
 }
