@@ -93,6 +93,11 @@ function criarRotasSocial(deps = {}) {
       "oferta_id_obrigatorio",
       "oferta_nao_encontrada",
       "oferta_link_ausente",
+      "oferta_status_invalido",
+      "oferta_cupom_expirado",
+      "oferta_bloqueada_inativa",
+      "oferta_ja_publicada",
+      "oferta_ja_agendada",
       "imagem_ausente",
       "imagem_nao_publica",
       "legenda_obrigatoria",
@@ -190,6 +195,12 @@ function criarRotasSocial(deps = {}) {
     if (!texto(payload.ofertaId)) throw new Error("oferta_id_obrigatorio");
   }
 
+  function revalidarOportunidadeManual(clienteId, payload = {}, opcoes = {}) {
+    if (payload.tipoPublicacao !== "oferta") return;
+    const resultado = storage.validarOportunidadeSocialManual(clienteId, payload.ofertaId, opcoes);
+    if (!resultado.ok) throw new Error(resultado.motivo || "oferta_nao_encontrada");
+  }
+
   function validarDataAgendamento(agendadoPara = "") {
     const ms = Date.parse(texto(agendadoPara));
     if (!Number.isFinite(ms)) throw new Error("agendamento_data_invalida");
@@ -198,6 +209,7 @@ function criarRotasSocial(deps = {}) {
 
   async function publicarPayloadSocial(clienteId, payload = {}, extras = {}) {
     validarPayloadPublicavel(payload);
+    revalidarOportunidadeManual(clienteId, payload);
     return publicarNoInstagram({
       clienteId,
       origem: payload.origem,
@@ -620,6 +632,8 @@ function criarRotasSocial(deps = {}) {
     try {
       const clienteId = cliente(req);
       const payload = payloadPublicacaoSocial(req.body || {});
+      validarPayloadPublicavel(payload);
+      revalidarOportunidadeManual(clienteId, payload);
       const resultado = await publicarNoInstagram({
         clienteId,
         origem: payload.origem,
@@ -945,6 +959,7 @@ function criarRotasSocial(deps = {}) {
       validarDataAgendamento(agendadoPara);
       const payload = payloadPublicacaoSocial(req.body?.agendamento || req.body || {}, rascunho);
       validarPayloadPublicavel(payload);
+      revalidarOportunidadeManual(clienteId, payload);
       const agendamento = storage.salvarAgendamentoSocial(clienteId, {
         ...payload,
         nome: req.body?.nome || req.body?.agendamento?.nome || rascunho.nome,
@@ -992,6 +1007,7 @@ function criarRotasSocial(deps = {}) {
       validarDataAgendamento(agendadoPara);
       const payload = payloadPublicacaoSocial(entrada, { origem: "agendada" });
       validarPayloadPublicavel(payload);
+      revalidarOportunidadeManual(clienteId, payload);
       const statusSolicitado = texto(entrada.status || "agendada");
       const agendamento = storage.salvarAgendamentoSocial(clienteId, {
         ...payload,
@@ -1033,6 +1049,7 @@ function criarRotasSocial(deps = {}) {
       validarDataAgendamento(agendadoPara);
       const payload = payloadPublicacaoSocial(entrada, existente);
       validarPayloadPublicavel(payload);
+      revalidarOportunidadeManual(clienteId, payload, { ignorarAgendamentoId: existente.id });
       const agendamento = storage.salvarAgendamentoSocial(clienteId, {
         ...payload,
         id: existente.id,
@@ -1110,6 +1127,9 @@ function criarRotasSocial(deps = {}) {
 
     try {
       const clienteId = cliente(req);
+      const agendamento = storage.getAgendamentoSocial(clienteId, req.params.id);
+      if (!agendamento) return res.status(404).json({ ok: false, erro: "agendamento_nao_encontrado" });
+      revalidarOportunidadeManual(clienteId, agendamento, { ignorarAgendamentoId: agendamento.id });
       const resultado = await publicarAgendamentoAgora({
         clienteId,
         agendamentoId: req.params.id
@@ -1274,6 +1294,27 @@ function criarRotasSocial(deps = {}) {
     });
   });
 
+  router.post("/oportunidades/limpar", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const modoSolicitado = texto(req.body?.modo || req.body?.tipo || "galeria").toLowerCase();
+      const modo = modoSolicitado === "antigas" ? "antigas" : "galeria";
+      const config = storage.getConfigAutomaticoSocial(clienteId);
+      const resultado = storage.limparOportunidadesSocial(clienteId, {
+        modo,
+        idadeMaximaHoras: config.idadeMaximaHoras
+      });
+      return res.json(resultado);
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "POST /social/oportunidades/limpar" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_oportunidades_limpeza_falhou" });
+    }
+  });
+
   router.post("/publicar", (req, res) => {
     if (!socialPermitido(req)) {
       return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
@@ -1409,6 +1450,7 @@ function criarRotasSocial(deps = {}) {
       "POST /social/midia/upload",
       "GET /social/publicacoes",
       "GET /social/oportunidades",
+      "POST /social/oportunidades/limpar",
       "POST /social/publicar"
     ]
   });

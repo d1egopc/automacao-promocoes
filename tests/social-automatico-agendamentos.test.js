@@ -268,6 +268,23 @@ function minutosEntre(a, b) {
   assert.strictEqual(execScheduler.executados[0].publicacao.ofertaId, "scheduler_auto");
   assert.strictEqual(rendererScheduler.chamadas.length, 1, "publicador oficial/renderizador sao usados no scheduler");
 
+  conectar("cliente_limpeza_auto", "limpeza_auto");
+  writeClienteJson("cliente_limpeza_auto", "fila.json", [
+    oferta("auto_velha", { score: 99, cupom: "OLD", criadoEm: "2026-07-14T00:00:00.000Z" }),
+    oferta("auto_nova", { score: 80, cupom: "", criadoEm: "2026-07-14T11:55:00.000Z" })
+  ]);
+  storage.setConfigAutomaticoSocial("cliente_limpeza_auto", configAutomatico({
+    quantidadeDiaria: 2,
+    limparAutomaticamenteOportunidadesAntigas: true
+  }));
+  const rodadaLimpezaAuto = await executarAutomaticoCliente({ clienteId: "cliente_limpeza_auto", agora: AGORA });
+  assert.deepStrictEqual(
+    rodadaLimpezaAuto.agendamentosCriados.map(item => item.ofertaId),
+    ["auto_nova"],
+    "limpeza automatica remove antigas antes da rodada sem bloquear oferta recente"
+  );
+  assert.ok(!storage.listarOportunidadesSocial("cliente_limpeza_auto", 10).some(item => item.ofertaId === "auto_velha"));
+
   console.log("social-automatico-agendamentos: ok");
 })().catch(erro => {
   console.error(erro);

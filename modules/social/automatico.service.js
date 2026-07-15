@@ -355,6 +355,14 @@ async function executarAutomaticoCliente({
       return { ok: true, clienteId: clienteSeguro, publicado: false, agendamentosCriados: [], motivo: "automatico_desativado" };
     }
 
+    if (config.limparAutomaticamenteOportunidadesAntigas === true) {
+      storage.limparOportunidadesSocial(clienteSeguro, {
+        modo: "antigas",
+        idadeMaximaHoras: config.idadeMaximaHoras,
+        agora
+      });
+    }
+
     const oportunidades = storage.listarOportunidadesSocial(clienteSeguro, 50);
     const publicacoes = listarPublicacoesInstagram(clienteSeguro, 200);
     const agendamentos = storage.listarAgendamentosSocial(clienteSeguro);

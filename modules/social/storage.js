@@ -20,6 +20,26 @@ const REDES_SUPORTADAS = new Set(["instagram", "facebook", "telegram"]);
 const STATUS_PUBLICACAO = new Set(["rascunho", "agendada", "pendente", "aguardando_aprovacao", "processando", "publicada", "erro", "cancelada"]);
 const ORIGENS_PUBLICACAO = new Set(["manual", "personalizada", "automatica", "automatico", "agendada"]);
 const TIPOS_PUBLICACAO = new Set(["oferta", "livre"]);
+const STATUS_INVALIDOS_OPORTUNIDADE = new Set([
+  "retida",
+  "retido",
+  "erro",
+  "reprovada",
+  "reprovado",
+  "expirada",
+  "expirado",
+  "bloqueada",
+  "bloqueado",
+  "inativa",
+  "inativo",
+  "pausada",
+  "pausado",
+  "cancelada",
+  "cancelado",
+  "descartada",
+  "descartado"
+]);
+const STATUS_AGENDAMENTO_ATIVO_SOCIAL = new Set(["pendente", "agendada", "aguardando_aprovacao", "processando"]);
 
 function agoraIso() {
   return new Date().toISOString();
@@ -136,6 +156,65 @@ function idOfertaOficialSocial(item = {}) {
   }));
 }
 
+function idsOfertaSocial(item = {}) {
+  return new Set([
+    item.ofertaId,
+    item.ofertaUniversalId,
+    item.engineOfertaId,
+    item.engineOfertaUuid,
+    item.produtoId,
+    item.productId,
+    item.sku,
+    item.id
+  ].map(texto).filter(Boolean));
+}
+
+function dataRecenciaOportunidade(item = {}) {
+  return texto(item.criadoEm || item.dataCriacao || item.createdAt || item.recebidoEm || item.capturadaEm || item.dataEntradaFila || item.atualizadoEm);
+}
+
+function recenciaOportunidade(criadoEm = "", agoraMs = Date.now(), idadeMaximaHoras = 6) {
+  const ms = dataMs(criadoEm);
+  const recenciaConfiavel = ms > 0;
+  const idadeEmMinutos = recenciaConfiavel ? Math.max(0, Math.floor((agoraMs - ms) / 60000)) : null;
+  const idadeMaximaMinutos = Math.max(1, Number(idadeMaximaHoras || 6) || 6) * 60;
+
+  return {
+    idadeEmMinutos,
+    recenciaConfiavel,
+    antigaParaAutomatico: !recenciaConfiavel || idadeEmMinutos > idadeMaximaMinutos
+  };
+}
+
+function statusOportunidadeInvalido(item = {}) {
+  const v2 = item.inteligenciaUniversalV2 || {};
+  const candidatos = [
+    item.status,
+    item.statusOperacional,
+    item.statusSocial,
+    item.statusOferta,
+    v2.status
+  ].map(valor => texto(valor).toLowerCase()).filter(Boolean);
+  return candidatos.find(status => STATUS_INVALIDOS_OPORTUNIDADE.has(status)) || "";
+}
+
+function cupomExplicitamenteExpirado(item = {}) {
+  const expiraEm = texto(item.expiraEm || item.validadeCupom || item.cupomExpiraEm);
+  if (expiraEm && dataMs(expiraEm) > 0 && dataMs(expiraEm) < Date.now()) return true;
+  return texto(item.statusDetalhe).toLowerCase().includes("expirado");
+}
+
+function oportunidadeBloqueadaOuInativa(item = {}) {
+  return item.ativo === false ||
+    item.bloqueada === true ||
+    item.bloqueado === true ||
+    item.inativa === true ||
+    item.inativo === true ||
+    item.disponivel === false ||
+    item.publicavel === false ||
+    item.statusBloqueio === true;
+}
+
 function caminhoLogicoCliente(clienteId = "admin", tipo = "") {
   return `${process.env.DATA_DIR || "/data"}/clientes/${texto(clienteId || "admin")}/${ARQUIVOS[tipo] || ""}`;
 }
@@ -224,6 +303,7 @@ function criarConfigAutomaticoPadrao(clienteId = "admin") {
     scoreMinimo: 70,
     exigirCupom: false,
     permitirOfertaComum: true,
+    limparAutomaticamenteOportunidadesAntigas: false,
     aprovacaoManual: false,
     evitarProdutoRepetidoDias: 30,
     gatilho: {
@@ -541,6 +621,7 @@ function normalizarConfigAutomatico(clienteId = "admin", config = {}) {
     scoreMinimo: inteiro(config.scoreMinimo, padrao.scoreMinimo, 0, 100),
     exigirCupom: config.exigirCupom === true,
     permitirOfertaComum: config.permitirOfertaComum !== false,
+    limparAutomaticamenteOportunidadesAntigas: config.limparAutomaticamenteOportunidadesAntigas === true,
     aprovacaoManual: config.aprovacaoManual === true,
     evitarProdutoRepetidoDias: inteiro(config.evitarProdutoRepetidoDias, padrao.evitarProdutoRepetidoDias, 0, 365),
     gatilho: {
@@ -700,9 +781,144 @@ function registrarPublicacaoSocial(clienteId = "admin", dados = {}) {
   return publicacao;
 }
 
+function normalizarControleOportunidadesSocial(clienteId = "admin", dados = {}) {
+  const base = dados && typeof dados === "object" && !Array.isArray(dados) ? dados : {};
+  const ocultas = base.ocultas && typeof base.ocultas === "object" && !Array.isArray(base.ocultas)
+    ? base.ocultas
+    : {};
+  return {
+    clienteId,
+    ocultas,
+    atualizadoEm: texto(base.atualizadoEm)
+  };
+}
+
+function getControleOportunidadesSocial(clienteId = "admin") {
+  return normalizarControleOportunidadesSocial(
+    clienteId,
+    lerCliente(clienteId, "oportunidades", { clienteId, ocultas: {}, atualizadoEm: "" })
+  );
+}
+
+function salvarControleOportunidadesSocial(clienteId = "admin", controle = {}) {
+  const normalizado = normalizarControleOportunidadesSocial(clienteId, {
+    ...controle,
+    atualizadoEm: agoraIso()
+  });
+  escreverCliente(clienteId, "oportunidades", normalizado);
+  return normalizado;
+}
+
+function oportunidadeEstaOculta(controle = {}, item = {}) {
+  const ids = idsOfertaSocial(item);
+  const chave = texto(item._chaveSocialOportunidade || item.chaveCanonica || item.chave);
+  for (const id of ids) {
+    if (controle.ocultas?.[id]) return true;
+  }
+  return Boolean(chave && controle.ocultas?.[chave]);
+}
+
+function publicacaoInstagramDaOferta(clienteId = "admin", ofertaId = "") {
+  const alvo = texto(ofertaId);
+  if (!alvo) return null;
+  return lista(readClienteJson(clienteId, "social-publicacoes.json", []))
+    .find(item =>
+      texto(item?.rede || "instagram") === "instagram" &&
+      texto(item?.ofertaId) === alvo &&
+      ["publicada", "concluida", "sucesso", "processando"].includes(texto(item?.status || item?.statusGeral).toLowerCase())
+    ) || null;
+}
+
+function agendamentoAtivoDaOferta(clienteId = "admin", ofertaId = "", ignorarAgendamentoId = "") {
+  const alvo = texto(ofertaId);
+  const ignorar = texto(ignorarAgendamentoId);
+  if (!alvo) return null;
+  return listarAgendamentosSocial(clienteId)
+    .find(item =>
+      texto(item?.ofertaId) === alvo &&
+      (!ignorar || texto(item?.id) !== ignorar) &&
+      item?.ativo !== false &&
+      STATUS_AGENDAMENTO_ATIVO_SOCIAL.has(texto(item?.status || "pendente").toLowerCase())
+    ) || null;
+}
+
+function encontrarItemFilaSocial(clienteId = "admin", ofertaId = "") {
+  const alvo = texto(ofertaId);
+  if (!alvo) return null;
+  const clienteSeguro = texto(clienteId || "admin");
+  return lista(readClienteJson(clienteSeguro, "fila.json", []))
+    .filter(item => !texto(item?.clienteId) || texto(item?.clienteId) === clienteSeguro)
+    .find(item => idsOfertaSocial(item).has(alvo)) || null;
+}
+
+function validarOportunidadeSocialManual(clienteId = "admin", ofertaId = "", opcoes = {}) {
+  const clienteSeguro = texto(clienteId || "admin");
+  const item = encontrarItemFilaSocial(clienteSeguro, ofertaId);
+  const id = texto(ofertaId);
+  if (!item) return { ok: false, motivo: "oferta_nao_encontrada" };
+
+  const statusInvalido = statusOportunidadeInvalido(item);
+  if (statusInvalido) return { ok: false, motivo: "oferta_status_invalido", status: statusInvalido };
+  if (cupomExplicitamenteExpirado(item)) return { ok: false, motivo: "oferta_cupom_expirado" };
+  if (oportunidadeBloqueadaOuInativa(item)) return { ok: false, motivo: "oferta_bloqueada_inativa" };
+
+  const imagem = texto(item.imagem || item.image || item.thumbnail);
+  if (!temImagemValida(imagem)) return { ok: false, motivo: "imagem_ausente" };
+
+  const linkAfiliado = texto(item.linkAfiliado || item.linkFinal || item.link_afiliado);
+  if (!temLinkValido(linkAfiliado)) return { ok: false, motivo: "oferta_link_ausente" };
+
+  if (publicacaoInstagramDaOferta(clienteSeguro, id)) return { ok: false, motivo: "oferta_ja_publicada" };
+  if (agendamentoAtivoDaOferta(clienteSeguro, id, opcoes.ignorarAgendamentoId)) return { ok: false, motivo: "oferta_ja_agendada" };
+
+  return { ok: true, motivo: "", ofertaId: id };
+}
+
+function limparOportunidadesSocial(clienteId = "admin", { modo = "galeria", idadeMaximaHoras = 6, agora = new Date() } = {}) {
+  const clienteSeguro = texto(clienteId || "admin");
+  const controle = getControleOportunidadesSocial(clienteSeguro);
+  const fila = lista(readClienteJson(clienteSeguro, "fila.json", []))
+    .filter(item => !texto(item?.clienteId) || texto(item?.clienteId) === clienteSeguro);
+  const agoraMs = agora instanceof Date ? agora.getTime() : Number(agora || Date.now());
+  const limiteMinutos = Math.max(1, Number(idadeMaximaHoras || 6) || 6) * 60;
+  const ofertasVisiveis = modo === "galeria"
+    ? new Set(listarOportunidadesSocial(clienteSeguro, 50).map(item => texto(item.ofertaId)).filter(Boolean))
+    : null;
+  let ocultadas = 0;
+
+  for (const item of fila) {
+    const ofertaId = idOfertaOficialSocial(item);
+    if (!ofertaId) continue;
+    if (ofertasVisiveis && !ofertasVisiveis.has(ofertaId)) continue;
+    if (publicacaoInstagramDaOferta(clienteSeguro, ofertaId)) continue;
+    if (agendamentoAtivoDaOferta(clienteSeguro, ofertaId)) continue;
+    if (modo === "antigas") {
+      const recencia = recenciaOportunidade(dataRecenciaOportunidade(item), agoraMs, idadeMaximaHoras);
+      if (!recencia.recenciaConfiavel || recencia.idadeEmMinutos <= limiteMinutos) continue;
+    }
+    if (!controle.ocultas[ofertaId]) ocultadas += 1;
+    controle.ocultas[ofertaId] = {
+      motivo: modo === "antigas" ? "limpeza_antigas" : "limpeza_galeria",
+      ocultadaEm: agoraIso()
+    };
+  }
+
+  salvarControleOportunidadesSocial(clienteSeguro, controle);
+  logSocial("[SOCIAL-OPORTUNIDADES-LIMPEZA]", {
+    clienteId: clienteSeguro,
+    modo,
+    ocultadas
+  });
+
+  return { ok: true, clienteId: clienteSeguro, modo, ocultadas };
+}
+
 function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
   const limiteSeguro = Math.max(1, Math.min(50, Number(limite || 50) || 50));
   const clienteSeguro = texto(clienteId || "admin");
+  const configAutomatico = getConfigAutomaticoSocial(clienteSeguro);
+  const controle = getControleOportunidadesSocial(clienteSeguro);
+  const agora = Date.now();
   const itens = lista(readClienteJson(clienteSeguro, "fila.json", []))
     .filter(item => !texto(item?.clienteId) || texto(item?.clienteId) === clienteSeguro);
   const vistas = new Set();
@@ -739,6 +955,7 @@ function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
     const ofertaId = idOfertaOficialSocial(item);
     const linkAfiliadoPresente = temLinkValido(linkAfiliado);
 
+    if (oportunidadeEstaOculta(controle, item)) continue;
     if (!ofertaId || !titulo || !marketplace || !temImagemValida(imagem)) continue;
     if (precoAtual === null || precoAtual <= 0) continue;
     if (expirado) continue;
@@ -755,7 +972,8 @@ function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
     if (!chave || vistas.has(chave)) continue;
     vistas.add(chave);
 
-    const criadoEm = texto(item.criadoEm || item.dataCriacao || item.createdAt || item.recebidoEm || item.atualizadoEm);
+    const criadoEm = dataRecenciaOportunidade(item);
+    const recencia = recenciaOportunidade(criadoEm, agora, configAutomatico.idadeMaximaHoras);
     const idBase = texto(item.id || item.ofertaId || item.produtoId || chave);
     const motivoIndisponivel = linkAfiliadoPresente ? "" : "sem_link_afiliado";
 
@@ -779,6 +997,9 @@ function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
       publicavel: linkAfiliadoPresente,
       motivoIndisponivel,
       criadoEm,
+      idadeEmMinutos: recencia.idadeEmMinutos,
+      recenciaConfiavel: recencia.recenciaConfiavel,
+      antigaParaAutomatico: recencia.antigaParaAutomatico,
       expiraEm,
       statusSocial: "nova",
       _ordenacao: {
@@ -1017,6 +1238,8 @@ module.exports = {
   listarPublicacoesSocial,
   registrarPublicacaoSocial,
   listarOportunidadesSocial,
+  validarOportunidadeSocialManual,
+  limparOportunidadesSocial,
   criarMetaPadrao,
   getConexaoMetaSocial,
   setConexaoMetaSocial,

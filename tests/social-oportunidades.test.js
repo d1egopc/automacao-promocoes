@@ -101,6 +101,9 @@ function mockHttpClient() {
   assert.strictEqual(comLink.publicavel, true);
   assert.strictEqual(comLink.preco, 199.9);
   assert.strictEqual(comLink.origem, "engine");
+  assert.strictEqual(typeof comLink.idadeEmMinutos, "number");
+  assert.strictEqual(comLink.recenciaConfiavel, true);
+  assert.strictEqual(typeof comLink.antigaParaAutomatico, "boolean");
   assert.ok(!JSON.stringify(oportunidadesA).includes("https://go.optimus.test"), "oportunidades nao devem expor link afiliado");
 
   assert.ok(semLink, "oportunidade sem link deve continuar visivel");
@@ -111,6 +114,77 @@ function mockHttpClient() {
   assert.ok(!oportunidadesA.some(item => item.ofertaId === "oferta_cliente_b"), "cliente A nao recebe oferta do cliente B");
   assert.ok(oportunidadesB.some(item => item.ofertaId === "oferta_cliente_b"), "cliente B mantem propria oportunidade");
   assert.strictEqual(JSON.stringify(readClienteJson("cliente_a", "fila.json", [])), filaAntes, "listar oportunidades nao altera fila historica");
+
+  writeClienteJson("cliente_validacao", "fila.json", [
+    filaBase({ ofertaId: "manual_antiga", criadoEm: "2026-07-01T10:00:00.000Z" }),
+    filaBase({ ofertaId: "manual_retida", status: "retida" }),
+    filaBase({ ofertaId: "manual_expirada", validadeCupom: "2026-07-01T10:00:00.000Z" }),
+    filaBase({ ofertaId: "manual_sem_imagem", imagem: "" }),
+    filaBase({ ofertaId: "manual_sem_link", linkAfiliado: "" }),
+    filaBase({ ofertaId: "manual_publicada" }),
+    filaBase({ ofertaId: "manual_agendada" }),
+    filaBase({ ofertaId: "manual_inativa", ativo: false })
+  ]);
+  writeClienteJson("cliente_validacao", "social-publicacoes.json", [{
+    id: "pub_manual_publicada",
+    rede: "instagram",
+    status: "publicada",
+    ofertaId: "manual_publicada"
+  }]);
+  storage.salvarAgendamentoSocial("cliente_validacao", {
+    origem: "manual",
+    tipoPublicacao: "oferta",
+    ofertaId: "manual_agendada",
+    status: "agendada",
+    ativo: true,
+    agendadoPara: "2026-07-20T10:00:00.000Z"
+  });
+  assert.strictEqual(storage.validarOportunidadeSocialManual("cliente_validacao", "manual_antiga").ok, true, "manual aceita oferta antiga valida");
+  assert.strictEqual(storage.validarOportunidadeSocialManual("cliente_validacao", "manual_retida").motivo, "oferta_status_invalido");
+  assert.strictEqual(storage.validarOportunidadeSocialManual("cliente_validacao", "manual_expirada").motivo, "oferta_cupom_expirado");
+  assert.strictEqual(storage.validarOportunidadeSocialManual("cliente_validacao", "manual_sem_imagem").motivo, "imagem_ausente");
+  assert.strictEqual(storage.validarOportunidadeSocialManual("cliente_validacao", "manual_sem_link").motivo, "oferta_link_ausente");
+  assert.strictEqual(storage.validarOportunidadeSocialManual("cliente_validacao", "manual_publicada").motivo, "oferta_ja_publicada");
+  assert.strictEqual(storage.validarOportunidadeSocialManual("cliente_validacao", "manual_agendada").motivo, "oferta_ja_agendada");
+  assert.strictEqual(storage.validarOportunidadeSocialManual("cliente_validacao", "manual_agendada", { ignorarAgendamentoId: storage.listarAgendamentosSocial("cliente_validacao")[0].id }).ok, true);
+  assert.strictEqual(storage.validarOportunidadeSocialManual("cliente_validacao", "manual_inativa").motivo, "oferta_bloqueada_inativa");
+
+  const agoraTeste = Date.now();
+  const recenteTeste = new Date(agoraTeste - 60 * 60 * 1000).toISOString();
+  const antigaTeste = new Date(agoraTeste - 10 * 60 * 60 * 1000).toISOString();
+  writeClienteJson("cliente_limpeza", "fila.json", [
+    filaBase({ ofertaId: "nova_limpeza", produtoId: "produto_nova_limpeza", linkOriginal: "https://amazon.test/nova-limpeza", criadoEm: recenteTeste }),
+    filaBase({ ofertaId: "velha_limpeza", produtoId: "produto_velha_limpeza", linkOriginal: "https://amazon.test/velha-limpeza", criadoEm: antigaTeste }),
+    filaBase({ ofertaId: "velha_publicada", produtoId: "produto_velha_publicada", linkOriginal: "https://amazon.test/velha-publicada", criadoEm: antigaTeste }),
+    filaBase({ ofertaId: "velha_agendada", produtoId: "produto_velha_agendada", linkOriginal: "https://amazon.test/velha-agendada", criadoEm: antigaTeste })
+  ]);
+  storage.setConfigAutomaticoSocial("cliente_limpeza", { idadeMaximaHoras: 6 });
+  writeClienteJson("cliente_limpeza", "social-publicacoes.json", [{
+    id: "pub_velha_publicada",
+    rede: "instagram",
+    status: "publicada",
+    ofertaId: "velha_publicada"
+  }]);
+  storage.salvarAgendamentoSocial("cliente_limpeza", {
+    origem: "manual",
+    tipoPublicacao: "oferta",
+    ofertaId: "velha_agendada",
+    status: "agendada",
+    ativo: true,
+    agendadoPara: "2026-07-20T10:00:00.000Z"
+  });
+  const filaLimpezaAntes = JSON.stringify(readClienteJson("cliente_limpeza", "fila.json", []));
+  const antigas = storage.limparOportunidadesSocial("cliente_limpeza", { modo: "antigas", idadeMaximaHoras: 6 });
+  assert.strictEqual(antigas.ocultadas, 1, "limpeza antiga oculta somente velha nao publicada/agendada");
+  const aposAntigas = storage.listarOportunidadesSocial("cliente_limpeza", 10);
+  assert.ok(aposAntigas.some(item => item.ofertaId === "nova_limpeza"));
+  assert.ok(!aposAntigas.some(item => item.ofertaId === "velha_limpeza"));
+  assert.ok(aposAntigas.some(item => item.ofertaId === "velha_publicada"));
+  assert.ok(aposAntigas.some(item => item.ofertaId === "velha_agendada"));
+  assert.strictEqual(JSON.stringify(readClienteJson("cliente_limpeza", "fila.json", [])), filaLimpezaAntes, "limpeza nao altera fila oficial");
+  const galeria = storage.limparOportunidadesSocial("cliente_limpeza", { modo: "galeria", idadeMaximaHoras: 6 });
+  assert.ok(galeria.ocultadas >= 1, "limpeza de galeria oculta oportunidades restantes");
+  assert.strictEqual(storage.listarOportunidadesSocial("cliente_limpeza", 10).length, 2, "publicada e agendada seguem protegidas");
 
   await instagram.concluirCallbackInstagram({
     code: "code_cliente_a",
