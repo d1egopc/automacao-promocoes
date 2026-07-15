@@ -3210,6 +3210,32 @@ app.use(helmet());
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "10mb", verify: capturarRawBody }));
 
+function configurarRotaPublicaMidiaSocial() {
+  const dir = String(process.env.SOCIAL_MEDIA_STORAGE_DIR || "").trim();
+  if (!dir) return;
+
+  const raiz = path.resolve(dir);
+  app.use("/social/midia/publica", express.static(raiz, {
+    dotfiles: "deny",
+    fallthrough: false,
+    index: false,
+    immutable: true,
+    maxAge: "30d",
+    redirect: false,
+    setHeaders(res) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    }
+  }));
+
+  console.log("[SOCIAL-MIDIA-PUBLICA]", {
+    rota: "/social/midia/publica",
+    storageConfigurado: true
+  });
+}
+
+configurarRotaPublicaMidiaSocial();
+
 const horarioInicio = 9;
 const horarioFim = 23;
 
