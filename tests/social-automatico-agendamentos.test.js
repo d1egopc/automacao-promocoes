@@ -183,6 +183,33 @@ function minutosEntre(a, b) {
   const recencia = await executarAutomaticoCliente({ clienteId: "cliente_recencia", agora: AGORA });
   assert.strictEqual(recencia.agendamentosCriados[0].ofertaId, "nova", "recencia desempata");
 
+  conectar("cliente_recencia_data_fila", "recencia_data_fila");
+  writeClienteJson("cliente_recencia_data_fila", "fila.json", [
+    oferta("antiga_data_fila", {
+      score: 99,
+      cupom: "OLD",
+      criadoEm: "14/07/2026, 08:00:00",
+      dataEntradaFila: "2026-07-14T00:00:00.000Z"
+    }),
+    oferta("nova_data_fila", {
+      score: 80,
+      cupom: "",
+      criadoEm: "14/07/2026, 08:00:00",
+      dataEntradaFila: "2026-07-14T11:55:00.000Z"
+    })
+  ]);
+  storage.setConfigAutomaticoSocial("cliente_recencia_data_fila", configAutomatico({ quantidadeDiaria: 2 }));
+  const recenciaDataFila = await executarAutomaticoCliente({ clienteId: "cliente_recencia_data_fila", agora: AGORA });
+  assert.deepStrictEqual(
+    recenciaDataFila.agendamentosCriados.map(item => item.ofertaId),
+    ["nova_data_fila"],
+    "recem-chegada com dataEntradaFila valida fica elegivel e antiga real continua fora"
+  );
+  assert.ok(
+    recenciaDataFila.diagnostico.some(item => item.ofertaId === "antiga_data_fila" && item.motivos.includes("fora_idade_maxima")),
+    "oferta antiga com data real nao deve ser rejuvenescida"
+  );
+
   conectar("cliente_filtros", "filtros");
   writeClienteJson("cliente_filtros", "fila.json", [
     oferta("sem_imagem", { imagem: "" }),

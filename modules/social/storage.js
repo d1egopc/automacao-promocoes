@@ -111,9 +111,61 @@ function urlHttpsOpcional(valor = "") {
   }
 }
 
+const DATA_MINIMA_CONFIAVEL_MS = Date.UTC(2000, 0, 1);
+const DATA_MAXIMA_CONFIAVEL_MS = Date.UTC(2100, 0, 1);
+const CAMPOS_DATA_RECENCIA = [
+  "dataEntradaFila",
+  "emFilaEm",
+  "dataTratamento",
+  "recebidoEm",
+  "capturadaEm",
+  "dataEntradaRadar",
+  "criadoEm",
+  "dataCriacao",
+  "createdAt",
+  "atualizadoEm"
+];
+
+function timestampNumericoMs(valor) {
+  if (typeof valor !== "number" && typeof valor !== "string") return 0;
+  const bruto = typeof valor === "number" ? valor : texto(valor);
+  if (bruto === "") return 0;
+  if (typeof bruto === "string" && !/^\d{10,13}$/.test(bruto)) return 0;
+  const n = Number(bruto);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  const ms = n < 1000000000000 ? n * 1000 : n;
+  return ms >= DATA_MINIMA_CONFIAVEL_MS && ms <= DATA_MAXIMA_CONFIAVEL_MS ? ms : 0;
+}
+
+function dataPtBrMs(valor = "") {
+  const v = texto(valor);
+  const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!m) return 0;
+  const dia = Number(m[1]);
+  const mes = Number(m[2]);
+  const ano = Number(m[3]);
+  const hora = Number(m[4] || 0);
+  const minuto = Number(m[5] || 0);
+  const segundo = Number(m[6] || 0);
+  if (mes < 1 || mes > 12 || dia < 1 || dia > 31 || hora > 23 || minuto > 59 || segundo > 59) return 0;
+  const calendario = new Date(Date.UTC(ano, mes - 1, dia));
+  if (
+    calendario.getUTCFullYear() !== ano ||
+    calendario.getUTCMonth() !== mes - 1 ||
+    calendario.getUTCDate() !== dia
+  ) return 0;
+  const ms = Date.UTC(ano, mes - 1, dia, hora + 3, minuto, segundo);
+  return ms >= DATA_MINIMA_CONFIAVEL_MS && ms <= DATA_MAXIMA_CONFIAVEL_MS ? ms : 0;
+}
+
 function dataMs(valor = "") {
-  const data = Date.parse(texto(valor));
-  return Number.isFinite(data) ? data : 0;
+  const numerico = timestampNumericoMs(valor);
+  if (numerico) return numerico;
+  const raw = texto(valor);
+  if (!raw) return 0;
+  const iso = Date.parse(raw);
+  if (Number.isFinite(iso)) return iso;
+  return dataPtBrMs(raw);
 }
 
 function normalizarChave(valor = "") {
@@ -170,7 +222,12 @@ function idsOfertaSocial(item = {}) {
 }
 
 function dataRecenciaOportunidade(item = {}) {
-  return texto(item.criadoEm || item.dataCriacao || item.createdAt || item.recebidoEm || item.capturadaEm || item.dataEntradaFila || item.atualizadoEm);
+  for (const campo of CAMPOS_DATA_RECENCIA) {
+    const valor = item?.[campo];
+    if (valor === null || valor === undefined || valor === "") continue;
+    if (dataMs(valor) > 0) return texto(valor);
+  }
+  return "";
 }
 
 function recenciaOportunidade(criadoEm = "", agoraMs = Date.now(), idadeMaximaHoras = 6) {

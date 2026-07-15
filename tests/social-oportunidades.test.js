@@ -115,6 +115,60 @@ function mockHttpClient() {
   assert.ok(oportunidadesB.some(item => item.ofertaId === "oferta_cliente_b"), "cliente B mantem propria oportunidade");
   assert.strictEqual(JSON.stringify(readClienteJson("cliente_a", "fila.json", [])), filaAntes, "listar oportunidades nao altera fila historica");
 
+  const agoraRecencia = Date.now();
+  const isoRecente = new Date(agoraRecencia - 10 * 60 * 1000).toISOString();
+  const isoRecente2 = new Date(agoraRecencia - 20 * 60 * 1000).toISOString();
+  const timestampRecente = agoraRecencia - 30 * 60 * 1000;
+  const isoAntiga = new Date(agoraRecencia - 10 * 60 * 60 * 1000).toISOString();
+  writeClienteJson("cliente_recencia_datas", "fila.json", [
+    filaBase({
+      ofertaId: "ptbr_com_iso",
+      produtoId: "produto_ptbr_com_iso",
+      criadoEm: "15/07/2026, 20:01:02",
+      dataEntradaFila: isoRecente
+    }),
+    filaBase({
+      ofertaId: "vazio_segundo_iso",
+      produtoId: "produto_vazio_segundo_iso",
+      criadoEm: "",
+      dataEntradaFila: "",
+      emFilaEm: isoRecente2
+    }),
+    filaBase({
+      ofertaId: "timestamp_numerico",
+      produtoId: "produto_timestamp_numerico",
+      criadoEm: "",
+      dataEntradaFila: timestampRecente
+    }),
+    filaBase({
+      ofertaId: "datas_invalidas",
+      produtoId: "produto_datas_invalidas",
+      criadoEm: "32/15/2026, 99:99:99",
+      dataEntradaFila: "sem-data",
+      emFilaEm: "tambem-invalida"
+    }),
+    filaBase({
+      ofertaId: "antiga_real",
+      produtoId: "produto_antiga_real",
+      criadoEm: "15/07/2026, 20:01:02",
+      dataEntradaFila: isoAntiga
+    })
+  ]);
+  storage.setConfigAutomaticoSocial("cliente_recencia_datas", { idadeMaximaHoras: 6 });
+  const oportunidadesRecencia = storage.listarOportunidadesSocial("cliente_recencia_datas", 10);
+  const porIdRecencia = Object.fromEntries(oportunidadesRecencia.map(item => [item.ofertaId, item]));
+  assert.strictEqual(porIdRecencia.ptbr_com_iso.criadoEm, isoRecente, "dataEntradaFila ISO deve vencer criadoEm pt-BR");
+  assert.strictEqual(porIdRecencia.ptbr_com_iso.recenciaConfiavel, true);
+  assert.strictEqual(porIdRecencia.vazio_segundo_iso.criadoEm, isoRecente2, "campo vazio deve cair para o segundo valido");
+  assert.strictEqual(porIdRecencia.vazio_segundo_iso.recenciaConfiavel, true);
+  assert.strictEqual(porIdRecencia.timestamp_numerico.criadoEm, String(timestampRecente), "timestamp numerico valido deve ser aceito");
+  assert.strictEqual(porIdRecencia.timestamp_numerico.recenciaConfiavel, true);
+  assert.strictEqual(porIdRecencia.datas_invalidas.recenciaConfiavel, false, "datas invalidas seguem sem recencia confiavel");
+  assert.strictEqual(porIdRecencia.datas_invalidas.motivoForaAutomatico, "sem_data_confiavel");
+  assert.strictEqual(porIdRecencia.antiga_real.recenciaConfiavel, true);
+  assert.strictEqual(porIdRecencia.antiga_real.antigaParaAutomatico, true, "oferta antiga real continua fora do automatico");
+  assert.strictEqual(porIdRecencia.antiga_real.motivoForaAutomatico, "idade_acima_limite");
+
   writeClienteJson("cliente_validacao", "fila.json", [
     filaBase({ ofertaId: "manual_antiga", criadoEm: "2026-07-01T10:00:00.000Z" }),
     filaBase({ ofertaId: "manual_retida", status: "retida" }),
