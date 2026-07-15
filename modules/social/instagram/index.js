@@ -192,6 +192,13 @@ function urlDestinoConversaoPublicacao(dados = {}) {
     urlHttpsDeCampos(dados.gatilho, ["grupoUrl"]);
 }
 
+function linkFinalPublicacaoLivre(publicacao = {}) {
+  return urlHttps(publicacao.urlDestino) ||
+    urlHttps(publicacao.linkAfiliado) ||
+    urlHttpsDeCampos(publicacao.redirect, ["urlDestino"]) ||
+    urlHttpsDeCampos(publicacao.cta, ["urlDestino"]);
+}
+
 function appIdInstagram() {
   return texto(process.env.INSTAGRAM_APP_ID);
 }
@@ -713,7 +720,7 @@ function carregarOfertaCliente(clienteId = "admin", ofertaId = "") {
 }
 
 function ofertaDaPublicacaoLivre(publicacao = {}) {
-  const linkAfiliado = urlDestinoConversaoPublicacao(publicacao);
+  const linkAfiliado = linkFinalPublicacaoLivre(publicacao);
   const primeiraLinhaLegenda = limitarTexto(texto(publicacao.legenda).split(/\r?\n/)[0], 120);
   return {
     id: texto(publicacao.id),
@@ -2028,9 +2035,26 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
     return { status: "ignorado", interacao: interacaoSanitizada(salvarInteracaoInstagram(clienteId, { ...base, statusGeral: "ignorado", erro: { message: "sem_gatilho" } })) };
   }
 
+  const tipoPublicacaoWebhook = texto(publicacao.tipoPublicacao || (texto(publicacao.ofertaId) ? "oferta" : "livre"));
   const oferta = texto(publicacao.ofertaId)
     ? carregarOfertaCliente(clienteId, publicacao.ofertaId)
     : ofertaDaPublicacaoLivre({ ...publicacao, clienteId });
+  if (tipoPublicacaoWebhook === "livre") {
+    oferta.linkAfiliado = texto(oferta.linkAfiliado) || linkFinalPublicacaoLivre(publicacao);
+  }
+  logSocial("[INSTAGRAM-WEBHOOK-LINK-DIAGNOSTICO]", {
+    clienteId,
+    instagramUserId: evento.instagramUserId,
+    instagramMediaId: evento.instagramMediaId,
+    instagramCommentId: evento.instagramCommentId,
+    tipoPublicacao: tipoPublicacaoWebhook,
+    origem: texto(publicacao.origem),
+    urlDestinoPresente: Boolean(urlHttps(publicacao.urlDestino)),
+    linkAfiliadoPresente: Boolean(urlHttps(publicacao.linkAfiliado)),
+    redirectPresente: Boolean(publicacao.redirect && typeof publicacao.redirect === "object"),
+    ctaUrlPresente: Boolean(urlHttpsDeCampos(publicacao.cta, ["urlDestino"])),
+    linkFinalPresente: Boolean(texto(oferta.linkAfiliado))
+  });
   if (!oferta.linkAfiliado) {
     logWebhookDescartadoInstagram("oferta_link_ausente", {
       clienteId,

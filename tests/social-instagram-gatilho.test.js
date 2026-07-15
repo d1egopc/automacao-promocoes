@@ -114,6 +114,8 @@ function salvarClienteInstagramPersonalizado(clienteId, {
   media = `media_${clienteId}`,
   gatilho = null,
   link = "",
+  urlDestino = link,
+  gravarLinkAfiliado = true,
   mensagemPrivada = ""
 } = {}) {
   writeClienteJson(clienteId, "social-instagram.json", {
@@ -134,11 +136,11 @@ function salvarClienteInstagramPersonalizado(clienteId, {
     ofertaId: "",
     imagemUrl: "https://cdn.optimus.test/personalizada.jpg",
     legenda: "Post personalizado",
-    linkAfiliado: link,
-    urlDestino: link,
+    linkAfiliado: gravarLinkAfiliado ? link : "",
+    urlDestino,
     mensagemPrivada,
-    redirect: link ? { urlDestino: link } : null,
-    cta: link ? { urlDestino: link } : null,
+    redirect: urlDestino ? { urlDestino } : null,
+    cta: urlDestino ? { urlDestino } : null,
     instagramUserId: ig,
     instagramMediaId: media,
     gatilho
@@ -405,6 +407,38 @@ function mockHttpClient(opcoes = {}) {
   assert.ok(directLivre.body.includes("recipient=%7B%22comment_id%22%3A%22comment_livre_com_conversao%22%7D"));
   assert.ok(directLivre.body.includes("Mensagem+privada+personalizada"));
   assert.ok(directLivre.body.includes("https%3A%2F%2Fgo.optimus.test%2Fpersonalizada"));
+
+  salvarClienteInstagramPersonalizado("cliente_livre_url_destino", {
+    ig: "ig_livre_url_destino",
+    media: "media_livre_url_destino",
+    link: "",
+    urlDestino: "https://go.optimus.test/url-destino",
+    gravarLinkAfiliado: false,
+    mensagemPrivada: "Mensagem por urlDestino:",
+    gatilho: {
+      ativo: true,
+      palavra: "PROMO",
+      respostaPublica: "Te chamei no Direct.",
+      textoDirect: "Mensagem por urlDestino:"
+    }
+  });
+  const livreUrlDestinoPayload = payloadComentario({
+    ig: "ig_livre_url_destino",
+    media: "media_livre_url_destino",
+    comment: "comment_livre_url_destino",
+    text: "PROMO"
+  });
+  const livreUrlDestinoAssinado = assinar(livreUrlDestinoPayload);
+  const httpLivreUrlDestino = mockHttpClient();
+  const livreUrlDestino = await instagram.processarWebhookInstagram({
+    payload: livreUrlDestinoPayload,
+    ...livreUrlDestinoAssinado,
+    httpClient: httpLivreUrlDestino
+  });
+  assert.notStrictEqual(livreUrlDestino.resultados[0].interacao?.erro?.message, "oferta_link_ausente");
+  assert.strictEqual(livreUrlDestino.resultados[0].status, "respondida");
+  const directUrlDestino = httpLivreUrlDestino.chamadas.find(chamada => chamada.url.endsWith("/messages"));
+  assert.ok(directUrlDestino.body.includes("https%3A%2F%2Fgo.optimus.test%2Furl-destino"));
 
   salvarClienteInstagram("cliente_antigo_sem_gatilho", {
     ig: "ig_antigo_sem_gatilho",
