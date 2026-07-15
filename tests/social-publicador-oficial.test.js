@@ -257,6 +257,43 @@ function restaurarEnv(nome, valorAnterior) {
   assert.ok(httpLivre.chamadas.some(chamada => chamada.body.includes("image_url=https%3A%2F%2Fcdn.optimus.test%2Fcampanha.jpg")));
   assert.strictEqual(normalizarOrigem("personalizada"), "personalizada");
 
+  const payloadLivreIdempotente = {
+    clienteId: "cliente_a",
+    origem: "personalizada",
+    tipoPublicacao: "livre",
+    imagemUrl: "https://cdn.optimus.test/livre-idempotente.jpg",
+    legenda: "Campanha idempotente",
+    templateId: "livre-instagram",
+    idempotencyKey: "livre:retry-mesma-requisicao",
+    polling: POLLING_TESTE
+  };
+  const primeiraTentativaLivre = await publicarNoInstagram({
+    ...payloadLivreIdempotente,
+    httpClient: mockHttpClient("livre_retry_1")
+  });
+  const retryLivre = await publicarNoInstagram({
+    ...payloadLivreIdempotente,
+    httpClient: mockHttpClient("livre_retry_2")
+  });
+  assert.strictEqual(primeiraTentativaLivre.publicacao.status, "publicada");
+  assert.strictEqual(retryLivre.duplicada, true, "retry da mesma requisicao deve ser idempotente");
+  assert.strictEqual(retryLivre.publicacao.id, primeiraTentativaLivre.publicacao.id);
+
+  const cliqueLivreA = await publicarNoInstagram({
+    ...payloadLivreIdempotente,
+    idempotencyKey: "livre:novo-clique-a",
+    httpClient: mockHttpClient("livre_clique_a")
+  });
+  const cliqueLivreB = await publicarNoInstagram({
+    ...payloadLivreIdempotente,
+    idempotencyKey: "livre:novo-clique-b",
+    httpClient: mockHttpClient("livre_clique_b")
+  });
+  assert.strictEqual(cliqueLivreA.duplicada, false);
+  assert.strictEqual(cliqueLivreB.duplicada, false);
+  assert.notStrictEqual(cliqueLivreA.publicacao.idempotencyKey, cliqueLivreB.publicacao.idempotencyKey);
+  assert.notStrictEqual(cliqueLivreA.publicacao.id, cliqueLivreB.publicacao.id);
+
   const httpLivreSemConversao = mockHttpClient("livre_sem_conversao");
   const publicadaLivreSemConversao = await publicarNoInstagram({
     clienteId: "cliente_a",
