@@ -6,6 +6,7 @@ const { criarAdaptadorFacebook } = require("./facebook");
 const { criarAdaptadorTelegramSocial } = require("./telegram");
 const publicadorInstagram = require("./publicador-instagram.service");
 const automaticoSocial = require("./automatico.service");
+const schedulerSocial = require("./scheduler");
 
 function inicializarSocialModule(deps = {}) {
   const logger = deps.logger || console;
@@ -20,6 +21,7 @@ function inicializarSocialModule(deps = {}) {
     publicacaoAutomatica: false,
     integracoes
   }, logger);
+  schedulerSocial.iniciarSchedulerAgendamentosSocial();
 
   return {
     integracoes,
@@ -31,6 +33,7 @@ module.exports = {
   ...storage,
   ...publicadorInstagram,
   ...automaticoSocial,
+  ...schedulerSocial,
   criarRotasSocial,
   inicializarSocialModule
 };

@@ -4,6 +4,8 @@ const { publicarNoInstagram } = require("./publicador-instagram.service");
 const { logSocial } = require("./logs");
 
 const locksCliente = new Set();
+const locksAgendamentosCliente = new Set();
+const PROCESSANDO_TTL_MINUTOS = Math.max(5, Math.min(180, Number(process.env.SOCIAL_AGENDAMENTOS_PROCESSANDO_TTL_MINUTOS || 30) || 30));
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -208,9 +210,72 @@ async function executarAutomaticoCliente({
 
 function agendamentoVencido(agendamento = {}, agora = new Date()) {
   const status = texto(agendamento.status || "pendente");
+  if (agendamento.ativo === false) return false;
+  if (status === "processando") {
+    const atualizadoMs = Date.parse(texto(agendamento.atualizadoEm || agendamento.criadoEm));
+    return Number.isFinite(atualizadoMs) && agora.getTime() - atualizadoMs >= PROCESSANDO_TTL_MINUTOS * 60 * 1000;
+  }
   if (!["pendente", "agendada"].includes(status)) return false;
   const data = Date.parse(texto(agendamento.agendadoPara || agendamento.horario));
   return Number.isFinite(data) && data <= agora.getTime();
+}
+
+function payloadPublicadorAgendamento(clienteSeguro = "admin", agendamento = {}, extras = {}) {
+  const tipoPublicacao = texto(agendamento.tipoPublicacao || "oferta") || "oferta";
+  return {
+    clienteId: clienteSeguro,
+    origem: "agendada",
+    tipoPublicacao,
+    ofertaId: agendamento.ofertaId,
+    imagemUrl: agendamento.imagemUrl,
+    legenda: agendamento.legenda,
+    templateId: agendamento.templateId || (tipoPublicacao === "livre" ? "livre-instagram" : "padrao-instagram"),
+    gatilho: agendamento.gatilho,
+    respostaPublica: agendamento.respostaPublica,
+    agendamentoId: agendamento.id,
+    idempotencyKey: `agendada:${clienteSeguro}:${agendamento.id}`,
+    ...extras
+  };
+}
+
+async function publicarAgendamentoSocial({
+  clienteId = "admin",
+  agendamento = {},
+  renderizadorArte,
+  httpClient,
+  polling
+} = {}) {
+  const clienteSeguro = texto(clienteId || "admin") || "admin";
+  const agendamentoId = texto(agendamento.id);
+  if (!agendamentoId) throw new Error("agendamento_id_obrigatorio");
+
+  const emProcessamento = storage.salvarAgendamentoSocial(clienteSeguro, {
+    ...agendamento,
+    status: "processando"
+  });
+
+  try {
+    const resultado = await publicarNoInstagram(payloadPublicadorAgendamento(clienteSeguro, emProcessamento, {
+      renderizadorArte,
+      httpClient,
+      polling
+    }));
+    const status = resultado.publicacao?.status === "publicada" ? "publicada" : "erro";
+    const final = storage.salvarAgendamentoSocial(clienteSeguro, {
+      ...emProcessamento,
+      status,
+      publicacaoId: resultado.publicacao?.id || "",
+      erro: resultado.publicacao?.erro || null
+    });
+    return { agendamentoId: emProcessamento.id, status, agendamento: final, publicacao: resultado.publicacao };
+  } catch (e) {
+    const final = storage.salvarAgendamentoSocial(clienteSeguro, {
+      ...emProcessamento,
+      status: "erro",
+      erro: { message: texto(e.message || "agendamento_publicacao_falhou") }
+    });
+    return { agendamentoId: emProcessamento.id, status: "erro", agendamento: final, erro: texto(e.message) };
+  }
 }
 
 async function executarAgendamentosPendentesCliente({
@@ -221,47 +286,32 @@ async function executarAgendamentosPendentesCliente({
   polling
 } = {}) {
   const clienteSeguro = texto(clienteId || "admin") || "admin";
-  const agendamentos = storage.listarAgendamentosSocial(clienteSeguro);
+  if (locksAgendamentosCliente.has(clienteSeguro)) {
+    return { ok: false, clienteId: clienteSeguro, motivo: "lock_ativo", executados: [] };
+  }
+
+  locksAgendamentosCliente.add(clienteSeguro);
   const executados = [];
 
-  for (const agendamento of agendamentos.filter(item => agendamentoVencido(item, agora))) {
-    const emProcessamento = storage.salvarAgendamentoSocial(clienteSeguro, {
-      ...agendamento,
-      status: "processando"
-    });
-    try {
-      const resultado = await publicarNoInstagram({
+  try {
+    const agendamentos = storage.listarAgendamentosSocial(clienteSeguro);
+    for (const agendamento of agendamentos.filter(item => agendamentoVencido(item, agora))) {
+      const resultado = await publicarAgendamentoSocial({
         clienteId: clienteSeguro,
-        origem: "agendada",
-        tipoPublicacao: emProcessamento.tipoPublicacao,
-        ofertaId: emProcessamento.ofertaId,
-        imagemUrl: emProcessamento.imagemUrl,
-        legenda: emProcessamento.legenda,
-        templateId: emProcessamento.templateId,
-        gatilho: emProcessamento.gatilho,
-        respostaPublica: emProcessamento.respostaPublica,
-        agendamentoId: emProcessamento.id,
-        idempotencyKey: `agendada:${clienteSeguro}:${emProcessamento.id}`,
+        agendamento,
         renderizadorArte,
         httpClient,
         polling
       });
-      const status = resultado.publicacao?.status === "publicada" ? "publicada" : "erro";
-      storage.salvarAgendamentoSocial(clienteSeguro, {
-        ...emProcessamento,
-        status,
-        publicacaoId: resultado.publicacao?.id || "",
-        erro: resultado.publicacao?.erro || null
+      executados.push({
+        agendamentoId: resultado.agendamentoId,
+        status: resultado.status,
+        publicacao: resultado.publicacao,
+        erro: resultado.erro
       });
-      executados.push({ agendamentoId: emProcessamento.id, status, publicacao: resultado.publicacao });
-    } catch (e) {
-      storage.salvarAgendamentoSocial(clienteSeguro, {
-        ...emProcessamento,
-        status: "erro",
-        erro: { message: texto(e.message || "agendamento_publicacao_falhou") }
-      });
-      executados.push({ agendamentoId: emProcessamento.id, status: "erro", erro: texto(e.message) });
     }
+  } finally {
+    locksAgendamentosCliente.delete(clienteSeguro);
   }
 
   logSocial("[SOCIAL-AGENDAMENTOS-EXECUTADOS]", {
@@ -276,9 +326,79 @@ async function executarAgendamentosPendentesCliente({
   };
 }
 
+async function publicarAgendamentoAgora({
+  clienteId = "admin",
+  agendamentoId = "",
+  renderizadorArte,
+  httpClient,
+  polling
+} = {}) {
+  const clienteSeguro = texto(clienteId || "admin") || "admin";
+  const agendamento = storage.getAgendamentoSocial(clienteSeguro, agendamentoId);
+  if (!agendamento) throw new Error("agendamento_nao_encontrado");
+  if (["publicada", "processando"].includes(texto(agendamento.status))) {
+    return { ok: false, clienteId: clienteSeguro, motivo: "agendamento_nao_publicavel", agendamento };
+  }
+
+  const resultado = await publicarAgendamentoSocial({
+    clienteId: clienteSeguro,
+    agendamento,
+    renderizadorArte,
+    httpClient,
+    polling
+  });
+
+  return {
+    ok: resultado.status === "publicada",
+    clienteId: clienteSeguro,
+    ...resultado
+  };
+}
+
+async function executarAgendamentosPendentesTodosClientes({
+  agora = new Date(),
+  renderizadorArte,
+  httpClient,
+  polling
+} = {}) {
+  const clientes = typeof storage.listClientes === "function" ? storage.listClientes() : [];
+  const resultados = [];
+
+  for (const clienteId of clientes) {
+    try {
+      const resultado = await executarAgendamentosPendentesCliente({
+        clienteId,
+        agora,
+        renderizadorArte,
+        httpClient,
+        polling
+      });
+      if (resultado.executados.length || resultado.ok === false) resultados.push(resultado);
+    } catch (e) {
+      resultados.push({ ok: false, clienteId, erro: texto(e.message), executados: [] });
+    }
+  }
+
+  const totalExecutados = resultados.reduce((total, item) => total + (item.executados?.length || 0), 0);
+  logSocial("[SOCIAL-AGENDAMENTOS-SCHEDULER-RODADA]", {
+    clientes: clientes.length,
+    clientesComExecucao: resultados.length,
+    totalExecutados
+  });
+
+  return {
+    ok: true,
+    clientes: clientes.length,
+    totalExecutados,
+    resultados
+  };
+}
+
 module.exports = {
   simularSelecaoAutomatica,
   executarAutomaticoCliente,
   executarAgendamentosPendentesCliente,
+  executarAgendamentosPendentesTodosClientes,
+  publicarAgendamentoAgora,
   escolherOferta
 };

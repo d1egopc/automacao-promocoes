@@ -1,6 +1,7 @@
 const {
   readClienteJson,
-  writeClienteJson
+  writeClienteJson,
+  listClientes
 } = require("../../utils/storage");
 const { logSocial, logErroSocial } = require("./logs");
 
@@ -8,6 +9,7 @@ const ARQUIVOS = {
   config: "social-config.json",
   meta: "social-meta.json",
   templates: "social-templates.json",
+  rascunhos: "social-rascunhos.json",
   agendamentos: "social-agendamentos.json",
   publicacoes: "social-publicacoes.json",
   oportunidades: "social-oportunidades.json",
@@ -15,7 +17,9 @@ const ARQUIVOS = {
 };
 
 const REDES_SUPORTADAS = new Set(["instagram", "facebook", "telegram"]);
-const STATUS_PUBLICACAO = new Set(["rascunho", "agendada", "pendente", "publicada", "erro", "cancelada"]);
+const STATUS_PUBLICACAO = new Set(["rascunho", "agendada", "pendente", "processando", "publicada", "erro", "cancelada"]);
+const ORIGENS_PUBLICACAO = new Set(["manual", "personalizada", "automatica", "agendada"]);
+const TIPOS_PUBLICACAO = new Set(["oferta", "livre"]);
 
 function agoraIso() {
   return new Date().toISOString();
@@ -31,6 +35,20 @@ function lista(valor) {
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
+}
+
+function normalizarOrigemSocial(valor = "", fallback = "manual") {
+  const origem = texto(valor || fallback).toLowerCase();
+  return ORIGENS_PUBLICACAO.has(origem) ? origem : fallback;
+}
+
+function normalizarTipoPublicacao(valor = "", fallback = "oferta") {
+  const tipo = texto(valor || fallback).toLowerCase();
+  return TIPOS_PUBLICACAO.has(tipo) ? tipo : fallback;
+}
+
+function objetoOpcional(valor) {
+  return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : null;
 }
 
 function numero(valor) {
@@ -335,8 +353,8 @@ function normalizarAgendamento(clienteId, agendamento = {}, index = 0) {
     .map(normalizarRede)
     .filter(Boolean);
   const status = texto(agendamento.status || "pendente");
-  const tipoPublicacao = texto(agendamento.tipoPublicacao || agendamento.tipo || "oferta").toLowerCase();
-  const origem = texto(agendamento.origem || "agendada").toLowerCase();
+  const tipoPublicacao = normalizarTipoPublicacao(agendamento.tipoPublicacao || agendamento.tipo, "oferta");
+  const origem = normalizarOrigemSocial(agendamento.origem, "agendada");
 
   return {
     id: texto(agendamento.id || criarId("agendamento")),
@@ -344,15 +362,17 @@ function normalizarAgendamento(clienteId, agendamento = {}, index = 0) {
     nome: texto(agendamento.nome || `Agendamento Social ${index + 1}`),
     ativo: agendamento.ativo !== false,
     redes,
-    origem: ["manual", "automatica", "agendada"].includes(origem) ? origem : "agendada",
-    tipoPublicacao: ["oferta", "livre"].includes(tipoPublicacao) ? tipoPublicacao : "oferta",
+    origem,
+    tipoPublicacao,
     status: STATUS_PUBLICACAO.has(status) ? status : "pendente",
     ofertaId: texto(agendamento.ofertaId || agendamento.oportunidadeId),
     imagemUrl: texto(agendamento.imagemUrl || agendamento.imagem),
     legenda: texto(agendamento.legenda || agendamento.mensagem),
-    templateId: texto(agendamento.templateId || "padrao-instagram"),
-    gatilho: agendamento.gatilho && typeof agendamento.gatilho === "object" ? agendamento.gatilho : null,
+    templateId: texto(agendamento.templateId || (tipoPublicacao === "livre" ? "livre-instagram" : "padrao-instagram")),
+    gatilho: objetoOpcional(agendamento.gatilho),
     respostaPublica: texto(agendamento.respostaPublica || agendamento.gatilho?.respostaPublica),
+    redirect: objetoOpcional(agendamento.redirect),
+    cta: objetoOpcional(agendamento.cta),
     agendadoPara: texto(agendamento.agendadoPara || agendamento.horarioExecucao),
     horario: texto(agendamento.horario),
     timezone: texto(agendamento.timezone || "America/Sao_Paulo"),
@@ -360,6 +380,35 @@ function normalizarAgendamento(clienteId, agendamento = {}, index = 0) {
     publicacaoId: texto(agendamento.publicacaoId),
     erro: agendamento.erro && typeof agendamento.erro === "object" ? agendamento.erro : null,
     criadoEm: agendamento.criadoEm || agoraIso(),
+    atualizadoEm: agoraIso()
+  };
+}
+
+function normalizarRascunho(clienteId, rascunho = {}, index = 0) {
+  const status = texto(rascunho.status || "rascunho");
+  const tipoPublicacao = normalizarTipoPublicacao(rascunho.tipoPublicacao || rascunho.tipo, "oferta");
+  const origem = normalizarOrigemSocial(rascunho.origem, tipoPublicacao === "livre" ? "personalizada" : "manual");
+
+  return {
+    id: texto(rascunho.id || criarId("rascunho")),
+    clienteId,
+    nome: texto(rascunho.nome || `Rascunho Social ${index + 1}`),
+    origem,
+    tipoPublicacao,
+    status: STATUS_PUBLICACAO.has(status) ? status : "rascunho",
+    ofertaId: texto(rascunho.ofertaId || rascunho.oportunidadeId),
+    imagemUrl: texto(rascunho.imagemUrl || rascunho.imagem),
+    legenda: texto(rascunho.legenda || rascunho.mensagem),
+    templateId: texto(rascunho.templateId || (tipoPublicacao === "livre" ? "livre-instagram" : "padrao-instagram")),
+    gatilho: objetoOpcional(rascunho.gatilho),
+    respostaPublica: texto(rascunho.respostaPublica || rascunho.gatilho?.respostaPublica),
+    redirect: objetoOpcional(rascunho.redirect),
+    cta: objetoOpcional(rascunho.cta),
+    agendadoPara: texto(rascunho.agendadoPara || rascunho.horarioExecucao),
+    agendamentoId: texto(rascunho.agendamentoId),
+    publicacaoId: texto(rascunho.publicacaoId),
+    erro: objetoOpcional(rascunho.erro),
+    criadoEm: rascunho.criadoEm || agoraIso(),
     atualizadoEm: agoraIso()
   };
 }
@@ -530,15 +579,84 @@ function listarAgendamentosSocial(clienteId = "admin") {
   );
 }
 
+function listarRascunhosSocial(clienteId = "admin") {
+  return lista(lerCliente(clienteId, "rascunhos", [])).map((item, index) =>
+    normalizarRascunho(clienteId, item, index)
+  );
+}
+
+function getRascunhoSocial(clienteId = "admin", id = "") {
+  const rascunhoId = texto(id);
+  if (!rascunhoId) return null;
+  return listarRascunhosSocial(clienteId).find(item => item.id === rascunhoId) || null;
+}
+
+function salvarRascunhoSocial(clienteId = "admin", dados = {}) {
+  const atuais = listarRascunhosSocial(clienteId);
+  const existente = texto(dados.id)
+    ? atuais.find(item => item.id === texto(dados.id))
+    : null;
+  const novo = normalizarRascunho(clienteId, {
+    ...(existente || {}),
+    ...dados,
+    status: dados.status || existente?.status || "rascunho",
+    criadoEm: existente?.criadoEm || dados.criadoEm
+  }, atuais.length);
+  const rascunhos = [...atuais.filter(item => item.id !== novo.id), novo].slice(-500);
+
+  escreverCliente(clienteId, "rascunhos", rascunhos);
+  logSocial("[SOCIAL-RASCUNHO]", {
+    clienteId,
+    id: novo.id,
+    origem: novo.origem,
+    tipoPublicacao: novo.tipoPublicacao,
+    status: novo.status
+  });
+  return novo;
+}
+
+function removerRascunhoSocial(clienteId = "admin", id = "") {
+  const rascunhoId = texto(id);
+  const atuais = listarRascunhosSocial(clienteId);
+  const existente = atuais.find(item => item.id === rascunhoId) || null;
+  if (!existente) return null;
+  escreverCliente(clienteId, "rascunhos", atuais.filter(item => item.id !== rascunhoId));
+  logSocial("[SOCIAL-RASCUNHO-EXCLUIDO]", { clienteId, id: rascunhoId });
+  return existente;
+}
+
 function salvarAgendamentoSocial(clienteId = "admin", dados = {}) {
   const atuais = listarAgendamentosSocial(clienteId);
-  const novo = normalizarAgendamento(clienteId, dados, atuais.length);
+  const existente = texto(dados.id)
+    ? atuais.find(item => item.id === texto(dados.id))
+    : null;
+  const novo = normalizarAgendamento(clienteId, {
+    ...(existente || {}),
+    ...dados,
+    criadoEm: existente?.criadoEm || dados.criadoEm
+  }, atuais.length);
   const semAtual = atuais.filter(item => item.id !== novo.id);
   const agendamentos = [...semAtual, novo];
 
   escreverCliente(clienteId, "agendamentos", agendamentos);
   logSocial("[SOCIAL-AGENDAMENTO]", { clienteId, id: novo.id, redes: novo.redes });
   return novo;
+}
+
+function getAgendamentoSocial(clienteId = "admin", id = "") {
+  const agendamentoId = texto(id);
+  if (!agendamentoId) return null;
+  return listarAgendamentosSocial(clienteId).find(item => item.id === agendamentoId) || null;
+}
+
+function removerAgendamentoSocial(clienteId = "admin", id = "") {
+  const agendamentoId = texto(id);
+  const atuais = listarAgendamentosSocial(clienteId);
+  const existente = atuais.find(item => item.id === agendamentoId) || null;
+  if (!existente) return null;
+  escreverCliente(clienteId, "agendamentos", atuais.filter(item => item.id !== agendamentoId));
+  logSocial("[SOCIAL-AGENDAMENTO-EXCLUIDO]", { clienteId, id: agendamentoId });
+  return existente;
 }
 
 function listarPublicacoesSocial(clienteId = "admin", limite = 100) {
@@ -871,8 +989,14 @@ module.exports = {
   setConfigSocial,
   listarTemplatesSocial,
   salvarTemplateSocial,
+  listarRascunhosSocial,
+  getRascunhoSocial,
+  salvarRascunhoSocial,
+  removerRascunhoSocial,
   listarAgendamentosSocial,
   salvarAgendamentoSocial,
+  getAgendamentoSocial,
+  removerAgendamentoSocial,
   criarConfigAutomaticoPadrao,
   getConfigAutomaticoSocial,
   setConfigAutomaticoSocial,
@@ -885,5 +1009,6 @@ module.exports = {
   selecionarAtivoMetaSocial,
   limparConexaoMetaSocial,
   sanitizarConexaoMeta,
-  resumirOfertaUniversal
+  resumirOfertaUniversal,
+  listClientes
 };

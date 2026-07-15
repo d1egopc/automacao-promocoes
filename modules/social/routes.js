@@ -8,6 +8,7 @@ const { publicarNoInstagram } = require("./publicador-instagram.service");
 const {
   executarAgendamentosPendentesCliente,
   executarAutomaticoCliente,
+  publicarAgendamentoAgora,
   simularSelecaoAutomatica
 } = require("./automatico.service");
 const socialMediaStorage = require("./social-media-storage");
@@ -101,6 +102,79 @@ function criarRotasSocial(deps = {}) {
       "social_media_tipo_invalido"
     ]);
     return permitidos.has(codigo) ? codigo : "instagram_oauth_falhou";
+  }
+
+  function texto(valor = "") {
+    return String(valor ?? "").trim();
+  }
+
+  function tipoPublicacaoSeguro(dados = {}) {
+    const tipo = texto(dados.tipoPublicacao || dados.tipo || "oferta").toLowerCase();
+    return ["oferta", "livre"].includes(tipo) ? tipo : "oferta";
+  }
+
+  function origemPublicacaoSegura(dados = {}, tipo = "oferta", fallback = "") {
+    const padrao = fallback || (tipo === "livre" ? "personalizada" : "manual");
+    const origem = texto(dados.origem || padrao).toLowerCase();
+    return ["manual", "personalizada", "automatica", "agendada"].includes(origem) ? origem : padrao;
+  }
+
+  function valorTexto(dados = {}, chaves = [], fallback = "") {
+    for (const chave of chaves) {
+      if (Object.prototype.hasOwnProperty.call(dados, chave)) return texto(dados[chave]);
+    }
+    return texto(fallback);
+  }
+
+  function payloadPublicacaoSocial(dados = {}, fallback = {}) {
+    const entrada = dados && typeof dados === "object" ? dados : {};
+    const tipoPublicacao = tipoPublicacaoSeguro({ ...fallback, ...entrada });
+    return {
+      ...fallback,
+      ...entrada,
+      origem: origemPublicacaoSegura({ ...fallback, ...entrada }, tipoPublicacao, fallback.origem),
+      tipoPublicacao,
+      ofertaId: valorTexto(entrada, ["ofertaId", "oportunidadeId"], fallback.ofertaId),
+      imagemUrl: valorTexto(entrada, ["imagemUrl", "imagem"], fallback.imagemUrl),
+      legenda: valorTexto(entrada, ["legenda", "mensagem"], fallback.legenda),
+      templateId: texto(entrada.templateId || fallback.templateId || (tipoPublicacao === "livre" ? "livre-instagram" : "padrao-instagram")),
+      respostaPublica: Object.prototype.hasOwnProperty.call(entrada, "respostaPublica")
+        ? texto(entrada.respostaPublica)
+        : texto(entrada.gatilho?.respostaPublica || fallback.respostaPublica),
+      gatilho: entrada.gatilho && typeof entrada.gatilho === "object" ? entrada.gatilho : fallback.gatilho,
+      redirect: entrada.redirect && typeof entrada.redirect === "object" ? entrada.redirect : fallback.redirect,
+      cta: entrada.cta && typeof entrada.cta === "object" ? entrada.cta : fallback.cta
+    };
+  }
+
+  function validarPayloadPublicavel(payload = {}) {
+    if (payload.tipoPublicacao === "livre") {
+      if (!texto(payload.imagemUrl)) throw new Error("imagem_url_obrigatoria");
+      if (!texto(payload.legenda)) throw new Error("legenda_obrigatoria");
+      return;
+    }
+    if (!texto(payload.ofertaId)) throw new Error("oferta_id_obrigatorio");
+  }
+
+  function validarDataAgendamento(agendadoPara = "") {
+    const ms = Date.parse(texto(agendadoPara));
+    if (!Number.isFinite(ms)) throw new Error("agendamento_data_invalida");
+  }
+
+  async function publicarPayloadSocial(clienteId, payload = {}, extras = {}) {
+    validarPayloadPublicavel(payload);
+    return publicarNoInstagram({
+      clienteId,
+      origem: payload.origem,
+      tipoPublicacao: payload.tipoPublicacao,
+      ofertaId: payload.ofertaId,
+      imagemUrl: payload.imagemUrl,
+      legenda: payload.legenda,
+      templateId: payload.templateId,
+      gatilho: payload.gatilho,
+      respostaPublica: payload.respostaPublica,
+      ...extras
+    });
   }
 
   function payloadStatusInstagram(conexao = {}) {
@@ -709,6 +783,144 @@ function criarRotasSocial(deps = {}) {
     });
   });
 
+  router.get("/rascunhos", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    const clienteId = cliente(req);
+    return res.json({
+      ok: true,
+      clienteId,
+      rascunhos: storage.listarRascunhosSocial(clienteId)
+    });
+  });
+
+  router.post("/rascunhos", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const payload = payloadPublicacaoSocial(req.body?.rascunho || req.body || {});
+      const rascunho = storage.salvarRascunhoSocial(clienteId, {
+        ...payload,
+        id: req.body?.id || req.body?.rascunho?.id,
+        nome: req.body?.nome || req.body?.rascunho?.nome,
+        status: "rascunho",
+        agendadoPara: req.body?.agendadoPara || req.body?.rascunho?.agendadoPara || ""
+      });
+      return res.json({ ok: true, clienteId, rascunho });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "POST /social/rascunhos" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_rascunho_invalido" });
+    }
+  });
+
+  router.put("/rascunhos/:id", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const existente = storage.getRascunhoSocial(clienteId, req.params.id);
+      if (!existente) return res.status(404).json({ ok: false, erro: "rascunho_nao_encontrado" });
+      const payload = payloadPublicacaoSocial(req.body?.rascunho || req.body || {}, existente);
+      const rascunho = storage.salvarRascunhoSocial(clienteId, {
+        ...payload,
+        id: existente.id,
+        nome: req.body?.nome || req.body?.rascunho?.nome || existente.nome,
+        status: "rascunho",
+        agendadoPara: req.body?.agendadoPara || req.body?.rascunho?.agendadoPara || existente.agendadoPara
+      });
+      return res.json({ ok: true, clienteId, rascunho });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "PUT /social/rascunhos/:id" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_rascunho_invalido" });
+    }
+  });
+
+  router.delete("/rascunhos/:id", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    const clienteId = cliente(req);
+    const rascunho = storage.removerRascunhoSocial(clienteId, req.params.id);
+    if (!rascunho) return res.status(404).json({ ok: false, erro: "rascunho_nao_encontrado" });
+    return res.json({ ok: true, clienteId, rascunho });
+  });
+
+  router.post("/rascunhos/:id/publicar", async (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const rascunho = storage.getRascunhoSocial(clienteId, req.params.id);
+      if (!rascunho) return res.status(404).json({ ok: false, erro: "rascunho_nao_encontrado" });
+      const payload = payloadPublicacaoSocial(req.body?.rascunho || req.body || {}, rascunho);
+      const resultado = await publicarPayloadSocial(clienteId, payload, {
+        idempotencyKey: `rascunho:${clienteId}:${rascunho.id}`
+      });
+      const status = resultado.publicacao?.status === "publicada" ? "publicada" : "erro";
+      const atualizado = storage.salvarRascunhoSocial(clienteId, {
+        ...payload,
+        id: rascunho.id,
+        nome: rascunho.nome,
+        status,
+        publicacaoId: resultado.publicacao?.id || "",
+        erro: resultado.publicacao?.erro || null
+      });
+      return res.status(status === "erro" ? 502 : 200).json({
+        ok: status !== "erro",
+        clienteId,
+        rascunho: atualizado,
+        publicacao: resultado.publicacao
+      });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "POST /social/rascunhos/:id/publicar" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_rascunho_publicacao_falhou" });
+    }
+  });
+
+  router.post("/rascunhos/:id/agendar", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const rascunho = storage.getRascunhoSocial(clienteId, req.params.id);
+      if (!rascunho) return res.status(404).json({ ok: false, erro: "rascunho_nao_encontrado" });
+      const agendadoPara = texto(req.body?.agendadoPara || req.body?.agendamento?.agendadoPara || rascunho.agendadoPara);
+      validarDataAgendamento(agendadoPara);
+      const payload = payloadPublicacaoSocial(req.body?.agendamento || req.body || {}, rascunho);
+      validarPayloadPublicavel(payload);
+      const agendamento = storage.salvarAgendamentoSocial(clienteId, {
+        ...payload,
+        nome: req.body?.nome || req.body?.agendamento?.nome || rascunho.nome,
+        origem: "agendada",
+        status: "agendada",
+        ativo: true,
+        agendadoPara
+      });
+      const rascunhoAtualizado = storage.salvarRascunhoSocial(clienteId, {
+        ...rascunho,
+        status: "agendada",
+        agendadoPara,
+        agendamentoId: agendamento.id
+      });
+      return res.json({ ok: true, clienteId, rascunho: rascunhoAtualizado, agendamento });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "POST /social/rascunhos/:id/agendar" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_rascunho_agendamento_falhou" });
+    }
+  });
+
   router.get("/agendamentos", (req, res) => {
     if (!socialPermitido(req)) {
       return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
@@ -728,14 +940,139 @@ function criarRotasSocial(deps = {}) {
       return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
     }
 
-    const clienteId = cliente(req);
-    const agendamento = storage.salvarAgendamentoSocial(clienteId, req.body?.agendamento || req.body || {});
+    try {
+      const clienteId = cliente(req);
+      const entrada = req.body?.agendamento || req.body || {};
+      const agendadoPara = texto(entrada.agendadoPara || req.body?.agendadoPara);
+      validarDataAgendamento(agendadoPara);
+      const payload = payloadPublicacaoSocial(entrada, { origem: "agendada" });
+      validarPayloadPublicavel(payload);
+      const agendamento = storage.salvarAgendamentoSocial(clienteId, {
+        ...payload,
+        id: entrada.id,
+        nome: entrada.nome,
+        ativo: entrada.ativo !== false,
+        status: entrada.status || "agendada",
+        agendadoPara,
+        horario: entrada.horario,
+        timezone: entrada.timezone,
+        regras: entrada.regras
+      });
 
-    return res.json({
-      ok: true,
-      clienteId,
-      agendamento
+      return res.json({
+        ok: true,
+        clienteId,
+        agendamento
+      });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "POST /social/agendamentos" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_agendamento_invalido" });
+    }
+  });
+
+  router.put("/agendamentos/:id", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const existente = storage.getAgendamentoSocial(clienteId, req.params.id);
+      if (!existente) return res.status(404).json({ ok: false, erro: "agendamento_nao_encontrado" });
+      if (["publicada", "processando"].includes(texto(existente.status))) {
+        return res.status(409).json({ ok: false, erro: "agendamento_nao_editavel" });
+      }
+      const entrada = req.body?.agendamento || req.body || {};
+      const agendadoPara = texto(entrada.agendadoPara || existente.agendadoPara);
+      validarDataAgendamento(agendadoPara);
+      const payload = payloadPublicacaoSocial(entrada, existente);
+      validarPayloadPublicavel(payload);
+      const agendamento = storage.salvarAgendamentoSocial(clienteId, {
+        ...payload,
+        id: existente.id,
+        nome: entrada.nome || existente.nome,
+        ativo: entrada.ativo !== false,
+        status: entrada.status || "agendada",
+        agendadoPara,
+        horario: entrada.horario || existente.horario,
+        timezone: entrada.timezone || existente.timezone,
+        regras: entrada.regras || existente.regras
+      });
+      return res.json({ ok: true, clienteId, agendamento });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "PUT /social/agendamentos/:id" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_agendamento_invalido" });
+    }
+  });
+
+  router.post("/agendamentos/:id/reagendar", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const existente = storage.getAgendamentoSocial(clienteId, req.params.id);
+      if (!existente) return res.status(404).json({ ok: false, erro: "agendamento_nao_encontrado" });
+      const agendadoPara = texto(req.body?.agendadoPara || req.body?.agendamento?.agendadoPara);
+      validarDataAgendamento(agendadoPara);
+      const agendamento = storage.salvarAgendamentoSocial(clienteId, {
+        ...existente,
+        agendadoPara,
+        status: "agendada",
+        ativo: true,
+        erro: null
+      });
+      return res.json({ ok: true, clienteId, agendamento });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "POST /social/agendamentos/:id/reagendar" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_agendamento_reagendar_falhou" });
+    }
+  });
+
+  router.post("/agendamentos/:id/cancelar", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    const clienteId = cliente(req);
+    const existente = storage.getAgendamentoSocial(clienteId, req.params.id);
+    if (!existente) return res.status(404).json({ ok: false, erro: "agendamento_nao_encontrado" });
+    const agendamento = storage.salvarAgendamentoSocial(clienteId, {
+      ...existente,
+      status: "cancelada",
+      ativo: false
     });
+    return res.json({ ok: true, clienteId, agendamento });
+  });
+
+  router.delete("/agendamentos/:id", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    const clienteId = cliente(req);
+    const agendamento = storage.removerAgendamentoSocial(clienteId, req.params.id);
+    if (!agendamento) return res.status(404).json({ ok: false, erro: "agendamento_nao_encontrado" });
+    return res.json({ ok: true, clienteId, agendamento });
+  });
+
+  router.post("/agendamentos/:id/publicar", async (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const resultado = await publicarAgendamentoAgora({
+        clienteId,
+        agendamentoId: req.params.id
+      });
+      return res.status(resultado.ok ? 200 : 409).json(resultado);
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "POST /social/agendamentos/:id/publicar" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_agendamento_publicacao_falhou" });
+    }
   });
 
   router.get("/automatico/config", (req, res) => {
@@ -1005,8 +1342,19 @@ function criarRotasSocial(deps = {}) {
       "GET /social/instagram/interacoes/:id",
       "GET /social/templates",
       "POST /social/templates",
+      "GET /social/rascunhos",
+      "POST /social/rascunhos",
+      "PUT /social/rascunhos/:id",
+      "DELETE /social/rascunhos/:id",
+      "POST /social/rascunhos/:id/publicar",
+      "POST /social/rascunhos/:id/agendar",
       "GET /social/agendamentos",
       "POST /social/agendamentos",
+      "PUT /social/agendamentos/:id",
+      "POST /social/agendamentos/:id/reagendar",
+      "POST /social/agendamentos/:id/cancelar",
+      "DELETE /social/agendamentos/:id",
+      "POST /social/agendamentos/:id/publicar",
       "GET /social/automatico/config",
       "POST /social/automatico/config",
       "POST /social/automatico/simular",
