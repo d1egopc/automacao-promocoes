@@ -110,8 +110,17 @@ function minutosEntre(a, b) {
   return Math.abs(Date.parse(a) - Date.parse(b)) / 60000;
 }
 
-function dataLocal(ano, mes, dia, hora, minuto = 0) {
-  return new Date(ano, mes - 1, dia, hora, minuto, 0, 0);
+function dataSaoPauloUtc(ano, mes, dia, hora, minuto = 0) {
+  return new Date(Date.UTC(ano, mes - 1, dia, hora + 3, minuto, 0, 0));
+}
+
+function horaSaoPaulo(input) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).format(new Date(input));
 }
 
 (async () => {
@@ -161,6 +170,7 @@ function dataLocal(ano, mes, dia, hora, minuto = 0) {
   const autosLimite = storage.listarAgendamentosSocial("cliente_limite").filter(item => item.origem === "automatico");
   assert.strictEqual(autosLimite.length, 10);
   assert.ok(autosLimite.every(item => item.status === "agendada"));
+  assert.ok(autosLimite.every(item => item.imagemUrl), "automaticos carregam miniatura da oferta");
   assert.ok(autosLimite.every(item => Date.parse(item.agendadoPara) > AGORA.getTime()), "nao agenda no passado");
   assert.ok(autosLimite.every(item => item.agendadoPara.startsWith("2026-07-14")), "respeita janela do dia");
   const ordenadosLimite = autosLimite.map(item => item.agendadoPara).sort();
@@ -425,45 +435,70 @@ function dataLocal(ano, mes, dia, hora, minuto = 0) {
   );
   assert.ok(rodadaSchedulerVencido.totalExecutados >= 1, "resumo da rodada informa vencidos executados");
 
-  async function horarioAutomaticoPara(clienteId, agora) {
+  async function horariosAutomaticosPara(clienteId, agora, extraConfig = {}, totalOfertas = 1) {
     conectar(clienteId, clienteId);
-    writeClienteJson(clienteId, "fila.json", [
-      oferta(`${clienteId}_oferta`, {
+    writeClienteJson(clienteId, "fila.json", Array.from({ length: totalOfertas }, (_, i) =>
+      oferta(`${clienteId}_oferta_${i}`, {
         cupom: "HORA",
-        score: 99,
+        score: 99 - i,
         criadoEm: new Date(agora.getTime() - 10 * 60 * 1000).toISOString()
       })
-    ]);
+    ));
     storage.setConfigAutomaticoSocial(clienteId, configAutomatico({
-      quantidadeDiaria: 1,
+      quantidadeDiaria: totalOfertas,
       intervaloMinimoMinutos: 40,
       idadeMaximaHoras: 48,
-      janelaFuncionamento: { inicio: "08:00", fim: "22:00" }
+      janelaFuncionamento: { inicio: "08:00", fim: "22:00" },
+      ...extraConfig
     }));
     const rodada = await executarAutomaticoCliente({ clienteId, agora });
-    assert.strictEqual(rodada.agendamentosCriados.length, 1);
-    return rodada.agendamentosCriados[0].agendadoPara;
+    assert.strictEqual(rodada.agendamentosCriados.length, totalOfertas);
+    return rodada.agendamentosCriados.map(item => item.agendadoPara);
   }
 
-  const horarioHojeNoite = await horarioAutomaticoPara("cliente_horario_2000", dataLocal(2026, 7, 14, 20, 0));
+  async function horarioAutomaticoPara(clienteId, agora, extraConfig = {}) {
+    const horarios = await horariosAutomaticosPara(clienteId, agora, extraConfig, 1);
+    return horarios[0];
+  }
+
+  const horarioHojeNoite = await horarioAutomaticoPara("cliente_horario_2000", dataSaoPauloUtc(2026, 7, 14, 20, 0));
   assert.strictEqual(
     horarioHojeNoite,
-    dataLocal(2026, 7, 14, 20, 1).toISOString(),
+    dataSaoPauloUtc(2026, 7, 14, 20, 1).toISOString(),
     "20:00 agenda hoje no proximo minuto disponivel"
   );
+  assert.strictEqual(horaSaoPaulo(horarioHojeNoite), "20:01", "tela em Sao Paulo mostra 20:01");
 
-  const horarioAposJanela = await horarioAutomaticoPara("cliente_horario_2343", dataLocal(2026, 7, 14, 23, 43));
+  const horarioAposJanela = await horarioAutomaticoPara("cliente_horario_2343", dataSaoPauloUtc(2026, 7, 14, 23, 43));
   assert.strictEqual(
     horarioAposJanela,
-    dataLocal(2026, 7, 15, 8, 0).toISOString(),
+    dataSaoPauloUtc(2026, 7, 15, 8, 0).toISOString(),
     "23:43 agenda na janela do proximo dia"
   );
+  assert.strictEqual(horaSaoPaulo(horarioAposJanela), "08:00", "tela em Sao Paulo mostra 08:00");
 
-  const horarioAntesJanela = await horarioAutomaticoPara("cliente_horario_0700", dataLocal(2026, 7, 14, 7, 0));
+  const horarioAntesJanela = await horarioAutomaticoPara("cliente_horario_0700", dataSaoPauloUtc(2026, 7, 14, 7, 0));
   assert.strictEqual(
     horarioAntesJanela,
-    dataLocal(2026, 7, 14, 8, 0).toISOString(),
+    dataSaoPauloUtc(2026, 7, 14, 8, 0).toISOString(),
     "07:00 agenda no inicio da janela do mesmo dia"
+  );
+  assert.strictEqual(horaSaoPaulo(horarioAntesJanela), "08:00", "tela em Sao Paulo mostra 08:00");
+
+  const horariosJanelaCruzada = await horariosAutomaticosPara(
+    "cliente_horario_cruza_meia_noite",
+    dataSaoPauloUtc(2026, 7, 14, 23, 43),
+    {
+      quantidadeDiaria: 3,
+      intervaloMinimoMinutos: 40,
+      janelaFuncionamento: { inicio: "07:00", fim: "02:00" }
+    },
+    3
+  );
+  assert.deepStrictEqual(
+    horariosJanelaCruzada.map(horaSaoPaulo),
+    ["23:44", "00:24", "01:04"],
+    "janela 07:00-02:00 atravessa a meia-noite local"
   );
 
   console.log("social-automatico-agendamentos: ok");

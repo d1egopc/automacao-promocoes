@@ -7,6 +7,7 @@ const locksCliente = new Set();
 const locksAgendamentosCliente = new Set();
 const PROCESSANDO_TTL_MINUTOS = Math.max(5, Math.min(180, Number(process.env.SOCIAL_AGENDAMENTOS_PROCESSANDO_TTL_MINUTOS || 30) || 30));
 const STATUS_AGENDAMENTO_ATIVO = new Set(["pendente", "agendada", "aguardando_aprovacao", "processando"]);
+const TIMEZONE_SOCIAL_PADRAO = "America/Sao_Paulo";
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -58,12 +59,89 @@ function dataNoDia(data = new Date(), minutos = 0) {
   return d;
 }
 
+function partesDataTimezone(data = new Date(), timezone = TIMEZONE_SOCIAL_PADRAO) {
+  const partes = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(data);
+  const mapa = {};
+  for (const parte of partes) {
+    if (parte.type !== "literal") mapa[parte.type] = Number(parte.value);
+  }
+  return {
+    year: mapa.year,
+    month: mapa.month,
+    day: mapa.day,
+    hour: mapa.hour || 0,
+    minute: mapa.minute || 0,
+    second: mapa.second || 0
+  };
+}
+
+function adicionarDiasLocal(partes = {}, dias = 0) {
+  const base = new Date(Date.UTC(partes.year, partes.month - 1, partes.day + dias, 12, 0, 0, 0));
+  return {
+    year: base.getUTCFullYear(),
+    month: base.getUTCMonth() + 1,
+    day: base.getUTCDate()
+  };
+}
+
+function dataLocalParaUtc({
+  timezone = TIMEZONE_SOCIAL_PADRAO,
+  year,
+  month,
+  day,
+  hour = 0,
+  minute = 0,
+  second = 0
+} = {}) {
+  const alvoUtc = Date.UTC(year, month - 1, day, hour, minute, second, 0);
+  let utc = alvoUtc;
+  for (let i = 0; i < 3; i += 1) {
+    const partes = partesDataTimezone(new Date(utc), timezone);
+    const atualComoUtc = Date.UTC(
+      partes.year,
+      partes.month - 1,
+      partes.day,
+      partes.hour,
+      partes.minute,
+      partes.second,
+      0
+    );
+    const diferenca = alvoUtc - atualComoUtc;
+    if (diferenca === 0) break;
+    utc += diferenca;
+  }
+  return new Date(utc);
+}
+
+function dataNoDiaTimezone(partesDia = {}, minutos = 0, timezone = TIMEZONE_SOCIAL_PADRAO) {
+  return dataLocalParaUtc({
+    timezone,
+    year: partesDia.year,
+    month: partesDia.month,
+    day: partesDia.day,
+    hour: Math.floor(minutos / 60),
+    minute: minutos % 60,
+    second: 0
+  });
+}
+
 function janelaDoDia(config = {}, agora = new Date()) {
   const inicio = minutosHora(config.janelaFuncionamento?.inicio || "08:00") ?? 8 * 60;
   const fim = minutosHora(config.janelaFuncionamento?.fim || "22:00") ?? 22 * 60;
-  const inicioData = dataNoDia(agora, inicio);
-  const fimData = dataNoDia(agora, fim);
-  if (fim < inicio) fimData.setDate(fimData.getDate() + 1);
+  const timezone = texto(config.timezone || TIMEZONE_SOCIAL_PADRAO) || TIMEZONE_SOCIAL_PADRAO;
+  const partesInicio = partesDataTimezone(agora, timezone);
+  const partesFim = fim < inicio ? adicionarDiasLocal(partesInicio, 1) : partesInicio;
+  const inicioData = dataNoDiaTimezone(partesInicio, inicio, timezone);
+  const fimData = dataNoDiaTimezone(partesFim, fim, timezone);
   return { inicio: inicioData, fim: fimData };
 }
 
@@ -462,6 +540,7 @@ async function executarAutomaticoCliente({
         ativo: true,
         redes: ["instagram"],
         ofertaId: texto(oferta.ofertaId),
+        imagemUrl: texto(oferta.imagem || oferta.image || oferta.thumbnail),
         templateId: config.templatePadraoId || "padrao-instagram",
         gatilho: gatilhoAutomatico(config),
         respostaPublica: texto(config.gatilho?.respostaPublica),
