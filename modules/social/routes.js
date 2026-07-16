@@ -842,6 +842,17 @@ function criarRotasSocial(deps = {}) {
     });
   });
 
+  router.delete("/templates/:id", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    const clienteId = cliente(req);
+    const template = storage.removerTemplateSocial(clienteId, req.params.id);
+    if (!template) return res.status(404).json({ ok: false, erro: "template_nao_encontrado" });
+    return res.json({ ok: true, clienteId, template });
+  });
+
   router.get("/rascunhos", (req, res) => {
     if (!socialPermitido(req)) {
       return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
@@ -1429,6 +1440,7 @@ function criarRotasSocial(deps = {}) {
       "GET /social/instagram/interacoes/:id",
       "GET /social/templates",
       "POST /social/templates",
+      "DELETE /social/templates/:id",
       "GET /social/rascunhos",
       "POST /social/rascunhos",
       "PUT /social/rascunhos/:id",

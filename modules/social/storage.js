@@ -773,6 +773,33 @@ function salvarTemplateSocial(clienteId = "admin", dados = {}) {
   return novo;
 }
 
+function removerTemplateSocial(clienteId = "admin", id = "") {
+  const templateId = texto(id);
+  if (!templateId || templateId === "padrao-instagram") return null;
+
+  const atuais = listarTemplatesSocial(clienteId);
+  const existente = atuais.find(item => item.id === templateId) || null;
+  if (!existente) return null;
+
+  const templates = atuais.filter(item => item.id !== templateId);
+  escreverCliente(clienteId, "templates", templates);
+
+  const config = getConfigAutomaticoSocial(clienteId);
+  if (texto(config.templatePadraoId) === templateId || existente.padrao === true) {
+    setConfigAutomaticoSocial(clienteId, {
+      ...config,
+      templatePadraoId: "padrao-instagram"
+    });
+  }
+
+  logSocial("[SOCIAL-TEMPLATE-EXCLUIDO]", {
+    clienteId,
+    id: templateId,
+    eraPadrao: existente.padrao === true
+  });
+  return existente;
+}
+
 function listarAgendamentosSocial(clienteId = "admin") {
   return lista(lerCliente(clienteId, "agendamentos", [])).map((item, index) =>
     normalizarAgendamento(clienteId, item, index)
@@ -1330,6 +1357,7 @@ module.exports = {
   setConfigSocial,
   listarTemplatesSocial,
   salvarTemplateSocial,
+  removerTemplateSocial,
   listarRascunhosSocial,
   getRascunhoSocial,
   salvarRascunhoSocial,

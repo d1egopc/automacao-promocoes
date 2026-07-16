@@ -154,6 +154,35 @@ function rendererOk(sufixo = "render") {
   assert.strictEqual(storage.getConfigAutomaticoSocial("cliente_tpl").templatePadraoId, "padrao-instagram", "sem personalizado marcado volta ao Padrao Optimus");
   assert.strictEqual(resolverTemplateSocial("cliente_tpl", "__padrao_cliente").templateId, "padrao-instagram");
 
+  storage.salvarTemplateSocial("cliente_delete", {
+    id: "tpl_delete_comum",
+    nome: "Delete Comum",
+    padrao: false,
+    visual: { faixaSuperiorTexto: "DELETE" },
+    gatilho: { ativo: false, palavra: "DEL" }
+  });
+  assert.ok(storage.removerTemplateSocial("cliente_delete", "tpl_delete_comum"), "remove template comum");
+  assert.ok(
+    !storage.listarTemplatesSocial("cliente_delete").some(item => item.id === "tpl_delete_comum"),
+    "template comum removido sai do storage oficial"
+  );
+  storage.salvarTemplateSocial("cliente_delete", {
+    id: "tpl_delete_padrao",
+    nome: "Delete Padrao",
+    padrao: true,
+    visual: { faixaSuperiorTexto: "DELETE PADRAO" },
+    gatilho: { ativo: true, palavra: "PADRAO" }
+  });
+  assert.strictEqual(storage.getConfigAutomaticoSocial("cliente_delete").templatePadraoId, "tpl_delete_padrao");
+  const removidoPadrao = storage.removerTemplateSocial("cliente_delete", "tpl_delete_padrao");
+  assert.strictEqual(removidoPadrao.id, "tpl_delete_padrao", "remove template marcado como padrao");
+  assert.strictEqual(
+    storage.getConfigAutomaticoSocial("cliente_delete").templatePadraoId,
+    "padrao-instagram",
+    "excluir padrao volta para Template Oficial Optimus"
+  );
+  assert.strictEqual(storage.removerTemplateSocial("cliente_delete", "padrao-instagram"), null, "Template Oficial Optimus nao pode ser excluido");
+
   conectar("cliente_auto_tpl", "auto_tpl");
   writeClienteJson("cliente_auto_tpl", "fila.json", [oferta("auto_tpl_1")]);
   storage.salvarTemplateSocial("cliente_auto_tpl", {
