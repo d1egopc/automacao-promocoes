@@ -179,6 +179,27 @@ function rendererOk(sufixo = "render") {
   assert.strictEqual(agendamento.templateId, "tpl_auto", "Automatico usa o template padrao escolhido");
   assert.strictEqual(agendamento.gatilho.palavra, "AUTO");
   assert.strictEqual(agendamento.automatico.template.id, "tpl_auto", "Automatico grava snapshot completo");
+  storage.salvarTemplateSocial("cliente_auto_tpl", {
+    id: "tpl_auto",
+    nome: "Template Automatico Editado",
+    padrao: true,
+    legenda: "Legenda editada depois",
+    visual: { faixaSuperiorTexto: "EDITADO" },
+    gatilho: {
+      ativo: true,
+      palavra: "EDITADO",
+      ctaPublico: "Comente EDITADO",
+      respostaPublica: "Resposta editada",
+      mensagemDirect: "Direct editado"
+    }
+  });
+  const agendamentoSalvo = storage.listarAgendamentosSocial("cliente_auto_tpl")
+    .find(item => item.id === agendamento.id);
+  assert.strictEqual(
+    agendamentoSalvo.automatico.template.gatilho.palavra,
+    "AUTO",
+    "snapshot protege agendamentos ja criados"
+  );
 
   conectar("cliente_auto_default", "auto_default");
   writeClienteJson("cliente_auto_default", "fila.json", [oferta("auto_default_1")]);
@@ -192,7 +213,8 @@ function rendererOk(sufixo = "render") {
   conectar("cliente_manual_tpl", "manual_tpl");
   writeClienteJson("cliente_manual_tpl", "fila.json", [
     oferta("manual_a"),
-    oferta("manual_b", { titulo: "Produto Manual B" })
+    oferta("manual_b", { titulo: "Produto Manual B" }),
+    oferta("manual_c", { titulo: "Produto Manual C", linkAfiliado: "https://go.optimus.test/manual-c" })
   ]);
   storage.salvarTemplateSocial("cliente_manual_tpl", {
     id: "tpl_padrao_manual",
@@ -209,6 +231,21 @@ function rendererOk(sufixo = "render") {
     legenda: "Legenda escolhida manual",
     visual: { faixaSuperiorTexto: "ESCOLHIDO" },
     gatilho: { ativo: false, palavra: "OFF", respostaPublica: "Nao usar", mensagemDirect: "Nao usar" }
+  });
+  storage.salvarTemplateSocial("cliente_manual_tpl", {
+    id: "tpl_ligado_manual",
+    nome: "Ligado Manual",
+    padrao: false,
+    legenda: "Legenda ligada manual",
+    visual: { faixaSuperiorTexto: "LIGADO" },
+    gatilho: {
+      ativo: true,
+      palavra: "LIGA",
+      ctaPublico: "Comente LIGA",
+      respostaPublica: "Resposta ligada",
+      mensagemDirect: "Direct ligado"
+    },
+    cta: { tipo: "direct", texto: "Comente LIGA" }
   });
   const httpManual = mockHttpClient("manual_tpl");
   const renderManual = rendererOk("manual_tpl");
@@ -229,6 +266,24 @@ function rendererOk(sufixo = "render") {
   assert.ok(!publicadaManual.publicacao.gatilho?.ativo, "gatilho desligado publica como post comum");
   assert.strictEqual(storage.getConfigAutomaticoSocial("cliente_manual_tpl").templatePadraoId, "tpl_padrao_manual", "escolha manual nao altera padrao global");
   assert.strictEqual(renderManual.chamadas[0].templateId, "tpl_escolhido_manual", "renderer atual recebe o templateId resolvido");
+
+  const httpLigado = mockHttpClient("manual_ligado");
+  const renderLigado = rendererOk("manual_ligado");
+  const publicadaLigada = await publicarNoInstagram({
+    clienteId: "cliente_manual_tpl",
+    origem: "manual",
+    tipoPublicacao: "oferta",
+    ofertaId: "manual_c",
+    templateId: "tpl_ligado_manual",
+    renderizadorArte: renderLigado,
+    httpClient: httpLigado,
+    polling: POLLING_TESTE
+  });
+  assert.strictEqual(publicadaLigada.publicacao.gatilho.palavra, "LIGA");
+  assert.strictEqual(publicadaLigada.publicacao.respostaPublica, "Resposta ligada");
+  assert.strictEqual(publicadaLigada.publicacao.gatilho.textoDirect, "Direct ligado");
+  assert.strictEqual(publicadaLigada.publicacao.gatilho.ctaPublico, "Comente LIGA");
+  assert.strictEqual(publicadaLigada.publicacao.urlDestino, "https://go.optimus.test/manual-c");
 
   const httpPadrao = mockHttpClient("padrao_tpl");
   const renderPadrao = rendererOk("padrao_tpl");
