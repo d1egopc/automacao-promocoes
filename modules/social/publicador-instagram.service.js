@@ -4,6 +4,10 @@ const {
 } = require("./instagram");
 const { logSocial } = require("./logs");
 const { renderizarArtePublicacaoSocial } = require("./social-art-renderer.client");
+const {
+  resolverTemplateSocial,
+  payloadTemplatePersonalizadoSocial
+} = require("./templates/resolver");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -55,7 +59,12 @@ async function publicarNoInstagram({
   const clienteSeguro = texto(clienteId || "admin") || "admin";
   const origemSegura = normalizarOrigem(origem);
   const tipoSeguro = normalizarTipo(tipoPublicacao);
-  const templateSeguro = texto(templateId || (tipoSeguro === "livre" ? "livre-instagram" : "padrao-instagram"));
+  const templateSolicitado = texto(templateId || (tipoSeguro === "livre" ? "livre-instagram" : "padrao-instagram"));
+  const templateResolvido = tipoSeguro === "livre"
+    ? { templateId: templateSolicitado, template: null }
+    : resolverTemplateSocial(clienteSeguro, templateSolicitado);
+  const templatePersonalizado = payloadTemplatePersonalizadoSocial(templateResolvido);
+  const templateSeguro = texto(templateResolvido.templateId || templateSolicitado || "padrao-instagram");
   const chave = texto(idempotencyKey) || chaveIdempotencia({
     clienteId: clienteSeguro,
     origem: origemSegura,
@@ -78,14 +87,14 @@ async function publicarNoInstagram({
   const parametros = {
     clienteId: clienteSeguro,
     templateId: templateSeguro,
-    gatilho,
-    legenda: texto(legenda),
-    respostaPublica: texto(respostaPublica),
-    mensagemPrivada: texto(mensagemPrivada),
+    gatilho: templatePersonalizado ? templatePersonalizado.gatilho : gatilho,
+    legenda: texto(templatePersonalizado?.legenda || legenda),
+    respostaPublica: texto(templatePersonalizado ? templatePersonalizado.respostaPublica : respostaPublica),
+    mensagemPrivada: texto(templatePersonalizado ? templatePersonalizado.mensagemPrivada : mensagemPrivada),
     direct,
     redirect,
     urlDestino: texto(urlDestino),
-    cta,
+    cta: templatePersonalizado ? templatePersonalizado.cta : cta,
     linkAfiliado: texto(linkAfiliado),
     origem: origemSegura,
     tipoPublicacao: tipoSeguro,

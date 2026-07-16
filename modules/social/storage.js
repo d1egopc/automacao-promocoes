@@ -71,6 +71,10 @@ function objetoOpcional(valor) {
   return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : null;
 }
 
+function objeto(valor) {
+  return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
+}
+
 function numero(valor) {
   if (valor === null || valor === undefined || valor === "") return null;
   if (typeof valor === "number") return Number.isFinite(valor) ? valor : null;
@@ -476,6 +480,18 @@ function normalizarConfig(clienteId, dados = {}) {
 
 function normalizarTemplate(clienteId, template = {}, index = 0) {
   const rede = normalizarRede(template.rede) || "instagram";
+  const gatilhoEntrada = objeto(template.gatilho);
+  const ctaEntrada = objeto(template.cta);
+  const visual = objeto(template.visual || template.visualConfig || template.templateVisual);
+  const mensagemDirect = texto(
+    template.mensagemDirect ||
+    template.mensagemPrivada ||
+    gatilhoEntrada.mensagemDirect ||
+    gatilhoEntrada.textoDirect ||
+    gatilhoEntrada.mensagemPrivada
+  );
+  const respostaPublica = texto(template.respostaPublica || gatilhoEntrada.respostaPublica);
+  const palavraGatilho = texto(gatilhoEntrada.palavra || gatilhoEntrada.keyword || "PROMO").slice(0, 40);
 
   return {
     id: texto(template.id || criarId("template")),
@@ -483,8 +499,22 @@ function normalizarTemplate(clienteId, template = {}, index = 0) {
     nome: texto(template.nome || `Template Social ${index + 1}`),
     rede,
     ativo: template.ativo !== false,
+    padrao: template.padrao === true || template.padraoAutomatico === true,
     formato: texto(template.formato || "post"),
     conteudo: texto(template.conteudo || ""),
+    legenda: texto(template.legenda || template.conteudo || ""),
+    visual,
+    gatilho: {
+      ativo: gatilhoEntrada.ativo === true,
+      palavra: palavraGatilho,
+      ctaPublico: texto(gatilhoEntrada.ctaPublico || "").slice(0, 220),
+      respostaPublica: respostaPublica.slice(0, 220),
+      mensagemDirect: mensagemDirect.slice(0, 300),
+      textoDirect: mensagemDirect.slice(0, 300)
+    },
+    respostaPublica: respostaPublica.slice(0, 220),
+    mensagemPrivada: mensagemDirect.slice(0, 300),
+    cta: Object.keys(ctaEntrada).length ? ctaEntrada : null,
     camposOfertaUniversal: lista(template.camposOfertaUniversal).map(texto).filter(Boolean),
     criadoEm: template.criadoEm || agoraIso(),
     atualizadoEm: agoraIso()
@@ -721,10 +751,24 @@ function listarTemplatesSocial(clienteId = "admin") {
 function salvarTemplateSocial(clienteId = "admin", dados = {}) {
   const atuais = listarTemplatesSocial(clienteId);
   const novo = normalizarTemplate(clienteId, dados, atuais.length);
-  const semAtual = atuais.filter(item => item.id !== novo.id);
+  const semAtual = atuais
+    .filter(item => item.id !== novo.id)
+    .map(item => (novo.padrao ? { ...item, padrao: false } : item));
   const templates = [...semAtual, novo];
 
   escreverCliente(clienteId, "templates", templates);
+  const config = getConfigAutomaticoSocial(clienteId);
+  if (novo.padrao) {
+    setConfigAutomaticoSocial(clienteId, {
+      ...config,
+      templatePadraoId: novo.id
+    });
+  } else if (texto(config.templatePadraoId) === novo.id && !templates.some(item => item.padrao === true)) {
+    setConfigAutomaticoSocial(clienteId, {
+      ...config,
+      templatePadraoId: "padrao-instagram"
+    });
+  }
   logSocial("[SOCIAL-TEMPLATE]", { clienteId, id: novo.id, rede: novo.rede });
   return novo;
 }

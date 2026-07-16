@@ -2,6 +2,11 @@ const storage = require("./storage");
 const { listarPublicacoesInstagram } = require("./instagram");
 const { publicarNoInstagram } = require("./publicador-instagram.service");
 const { logSocial } = require("./logs");
+const {
+  resolverTemplateSocial,
+  payloadTemplatePersonalizadoSocial,
+  snapshotTemplateSocial
+} = require("./templates/resolver");
 
 const locksCliente = new Set();
 const locksAgendamentosCliente = new Set();
@@ -436,6 +441,17 @@ function auditoriaAgendamentoAutomatico(oferta = {}, config = {}, agendadoPara =
   };
 }
 
+function dadosTemplateAutomatico(clienteId = "admin", templateId = "") {
+  const resolvido = resolverTemplateSocial(clienteId, templateId || "padrao-instagram");
+  const personalizado = payloadTemplatePersonalizadoSocial(resolvido);
+  return {
+    resolvido,
+    personalizado,
+    templateId: resolvido.templateId || "padrao-instagram",
+    snapshot: personalizado?.snapshot || snapshotTemplateSocial(resolvido)
+  };
+}
+
 async function executarAutomaticoCliente({
   clienteId = "admin",
   agora = new Date()
@@ -520,11 +536,28 @@ async function executarAutomaticoCliente({
       return { ok: true, clienteId: clienteSeguro, publicado: false, agendamentosCriados: [], motivo, diagnostico };
     }
 
+    const templateAutomatico = dadosTemplateAutomatico(clienteSeguro, config.templatePadraoId);
     const criados = [];
     for (let i = 0; i < Math.min(selecionadas.length, horarios.length); i += 1) {
       const oferta = selecionadas[i];
       const agendadoPara = horarios[i];
       const automatico = auditoriaAgendamentoAutomatico(oferta, config, agendadoPara);
+      const payloadTemplate = templateAutomatico.personalizado || {};
+      const gatilhoAgendamento = templateAutomatico.personalizado
+        ? payloadTemplate.gatilho
+        : gatilhoAutomatico(config);
+      const respostaPublicaAgendamento = templateAutomatico.personalizado
+        ? payloadTemplate.respostaPublica
+        : texto(config.gatilho?.respostaPublica);
+      const mensagemPrivadaAgendamento = templateAutomatico.personalizado
+        ? payloadTemplate.mensagemPrivada
+        : "";
+      const ctaAgendamento = templateAutomatico.personalizado ? payloadTemplate.cta : undefined;
+      const legendaAgendamento = templateAutomatico.personalizado ? payloadTemplate.legenda : "";
+      const automaticoComTemplate = {
+        ...automatico,
+        template: templateAutomatico.snapshot
+      };
       logSocial("[SOCIAL-AUTOMATICO-SELECIONADA]", {
         clienteId: clienteSeguro,
         ofertaId: texto(oferta.ofertaId),
@@ -541,15 +574,18 @@ async function executarAutomaticoCliente({
         redes: ["instagram"],
         ofertaId: texto(oferta.ofertaId),
         imagemUrl: texto(oferta.imagem || oferta.image || oferta.thumbnail),
-        templateId: config.templatePadraoId || "padrao-instagram",
-        gatilho: gatilhoAutomatico(config),
-        respostaPublica: texto(config.gatilho?.respostaPublica),
+        legenda: legendaAgendamento,
+        templateId: templateAutomatico.templateId,
+        gatilho: gatilhoAgendamento,
+        respostaPublica: respostaPublicaAgendamento,
+        mensagemPrivada: mensagemPrivadaAgendamento,
+        cta: ctaAgendamento,
         agendadoPara: agendadoPara.toISOString(),
         horario: agendadoPara.toISOString(),
         timezone: "America/Sao_Paulo",
-        automatico,
+        automatico: automaticoComTemplate,
         regras: {
-          automatico
+          automatico: automaticoComTemplate
         }
       });
       criados.push(agendamento);
