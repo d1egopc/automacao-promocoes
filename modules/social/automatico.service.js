@@ -317,12 +317,8 @@ function respeitaDistancia(ms = 0, ocupados = [], intervaloMinutos = 40) {
 
 function proximosHorariosDisponiveis({ config = {}, agendamentos = [], agora = new Date(), quantidade = 0 } = {}) {
   const intervalo = Math.max(20, Number(config.intervaloMinimoMinutos || 40) || 40);
-  let janela = janelaDoDia(config, agora);
-  if (agora.getTime() > janela.fim.getTime()) {
-    const proximoDia = new Date(agora);
-    proximoDia.setDate(proximoDia.getDate() + 1);
-    janela = janelaDoDia(config, proximoDia);
-  }
+  const janela = janelaDoDia(config, agora);
+  const foraDaRodadaDoDia = agora.getTime() > janela.fim.getTime();
   const ocupados = horariosOcupados(agendamentos, agora);
   const horarios = [];
   const passoMs = 60 * 1000;
@@ -330,6 +326,10 @@ function proximosHorariosDisponiveis({ config = {}, agendamentos = [], agora = n
   const cursorInicial = Math.max(agora.getTime() + passoMs, janela.inicio.getTime());
   let cursor = cursorInicial;
   let rejeitadosPorIntervalo = 0;
+
+  if (foraDaRodadaDoDia) {
+    cursor = janela.fim.getTime() + passoMs;
+  }
 
   while (cursor <= janela.fim.getTime() && horarios.length < quantidade) {
     if (respeitaDistancia(cursor, ocupados, intervalo)) {
@@ -346,6 +346,8 @@ function proximosHorariosDisponiveis({ config = {}, agendamentos = [], agora = n
   let motivo = "slots_calculados";
   if (Number(quantidade || 0) <= 0) {
     motivo = "quantidade_zero";
+  } else if (foraDaRodadaDoDia) {
+    motivo = "rodada_diaria_encerrada";
   } else if (horarios.length < quantidade && cursorInicial > janela.fim.getTime()) {
     motivo = "cursor_inicial_fora_da_janela";
   } else if (horarios.length < quantidade && horarios.length === 0 && rejeitadosPorIntervalo > 0) {

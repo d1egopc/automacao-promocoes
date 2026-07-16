@@ -181,6 +181,27 @@ function horaSaoPaulo(input) {
   const segundaRodadaLimite = await executarAutomaticoCliente({ clienteId: "cliente_limite", agora: AGORA });
   assert.strictEqual(segundaRodadaLimite.agendamentosCriados.length, 0, "duas rodadas nao duplicam oportunidades");
 
+  conectar("cliente_repreenche_dia", "repreenche_dia");
+  writeClienteJson("cliente_repreenche_dia", "fila.json", Array.from({ length: 6 }, (_, i) =>
+    oferta(`repreenche_${i}`, {
+      score: 95 - i,
+      cupom: "HOJE",
+      criadoEm: `2026-07-14T11:${String(50 - i).padStart(2, "0")}:00.000Z`
+    })
+  ));
+  storage.setConfigAutomaticoSocial("cliente_repreenche_dia", configAutomatico({ quantidadeDiaria: 6 }));
+  const rodadaRepreencheInicial = await executarAutomaticoCliente({ clienteId: "cliente_repreenche_dia", agora: AGORA });
+  assert.strictEqual(rodadaRepreencheInicial.agendamentosCriados.length, 6, "preenche os 6 horarios do dia corrente");
+  for (const agendamento of rodadaRepreencheInicial.agendamentosCriados) {
+    storage.removerAgendamentoSocial("cliente_repreenche_dia", agendamento.id);
+  }
+  const rodadaRepreencheAposLimpeza = await executarAutomaticoCliente({ clienteId: "cliente_repreenche_dia", agora: new Date(AGORA.getTime() + 5 * 60 * 1000) });
+  assert.strictEqual(rodadaRepreencheAposLimpeza.agendamentosCriados.length, 6, "se o usuario apagar os automaticos de hoje, a proxima rodada repoe somente o dia corrente");
+  assert.ok(
+    rodadaRepreencheAposLimpeza.agendamentosCriados.every(item => item.agendadoPara.startsWith("2026-07-14")),
+    "repreenchimento nao cria agendamentos em dias futuros"
+  );
+
   conectar("cliente_prioridade", "prioridade");
   writeClienteJson("cliente_prioridade", "fila.json", [
     oferta("sem_cupom_score_alto", { score: 99, cupom: "", criadoEm: "2026-07-14T11:55:00.000Z" }),
@@ -469,13 +490,25 @@ function horaSaoPaulo(input) {
   );
   assert.strictEqual(horaSaoPaulo(horarioHojeNoite), "20:01", "tela em Sao Paulo mostra 20:01");
 
-  const horarioAposJanela = await horarioAutomaticoPara("cliente_horario_2343", dataSaoPauloUtc(2026, 7, 14, 23, 43));
-  assert.strictEqual(
-    horarioAposJanela,
-    dataSaoPauloUtc(2026, 7, 15, 8, 0).toISOString(),
-    "23:43 agenda na janela do proximo dia"
-  );
-  assert.strictEqual(horaSaoPaulo(horarioAposJanela), "08:00", "tela em Sao Paulo mostra 08:00");
+  const agoraAposJanela = dataSaoPauloUtc(2026, 7, 14, 23, 43);
+  conectar("cliente_horario_2343", "horario_2343");
+  writeClienteJson("cliente_horario_2343", "fila.json", [
+    oferta("cliente_horario_2343_oferta_0", {
+      cupom: "HORA",
+      score: 99,
+      criadoEm: new Date(agoraAposJanela.getTime() - 10 * 60 * 1000).toISOString()
+    })
+  ]);
+  storage.setConfigAutomaticoSocial("cliente_horario_2343", configAutomatico({
+    quantidadeDiaria: 1,
+    intervaloMinimoMinutos: 40,
+    idadeMaximaHoras: 48,
+    janelaFuncionamento: { inicio: "08:00", fim: "22:00" }
+  }));
+  const rodadaAposJanela = await executarAutomaticoCliente({ clienteId: "cliente_horario_2343", agora: agoraAposJanela });
+  assert.strictEqual(rodadaAposJanela.agendamentosCriados.length, 0, "23:43 nao agenda na janela do proximo dia");
+  assert.strictEqual(rodadaAposJanela.motivo, "sem_espaco_janela");
+  assert.strictEqual(storage.listarAgendamentosSocial("cliente_horario_2343").length, 0, "rodada diaria encerrada nao cria agendamento futuro");
 
   const horarioAntesJanela = await horarioAutomaticoPara("cliente_horario_0700", dataSaoPauloUtc(2026, 7, 14, 7, 0));
   assert.strictEqual(
