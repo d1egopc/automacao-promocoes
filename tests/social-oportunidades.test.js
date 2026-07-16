@@ -229,16 +229,50 @@ function mockHttpClient() {
   });
   const filaLimpezaAntes = JSON.stringify(readClienteJson("cliente_limpeza", "fila.json", []));
   const antigas = storage.limparOportunidadesSocial("cliente_limpeza", { modo: "antigas", idadeMaximaHoras: 6 });
-  assert.strictEqual(antigas.ocultadas, 1, "limpeza antiga oculta somente velha nao publicada/agendada");
+  assert.strictEqual(antigas.ocultadas, 3, "limpeza antiga oculta todas as velhas, inclusive publicadas/agendadas");
   const aposAntigas = storage.listarOportunidadesSocial("cliente_limpeza", 10);
   assert.ok(aposAntigas.some(item => item.ofertaId === "nova_limpeza"));
   assert.ok(!aposAntigas.some(item => item.ofertaId === "velha_limpeza"));
-  assert.ok(aposAntigas.some(item => item.ofertaId === "velha_publicada"));
-  assert.ok(aposAntigas.some(item => item.ofertaId === "velha_agendada"));
+  assert.ok(!aposAntigas.some(item => item.ofertaId === "velha_publicada"));
+  assert.ok(!aposAntigas.some(item => item.ofertaId === "velha_agendada"));
   assert.strictEqual(JSON.stringify(readClienteJson("cliente_limpeza", "fila.json", [])), filaLimpezaAntes, "limpeza nao altera fila oficial");
-  const galeria = storage.limparOportunidadesSocial("cliente_limpeza", { modo: "galeria", idadeMaximaHoras: 6 });
-  assert.ok(galeria.ocultadas >= 1, "limpeza de galeria oculta oportunidades restantes");
-  assert.strictEqual(storage.listarOportunidadesSocial("cliente_limpeza", 10).length, 2, "publicada e agendada seguem protegidas");
+
+  writeClienteJson("cliente_limpeza_galeria", "fila.json", [
+    filaBase({ ofertaId: "galeria_nova", produtoId: "produto_galeria_nova", linkOriginal: "https://amazon.test/galeria-nova", criadoEm: recenteTeste }),
+    filaBase({ ofertaId: "galeria_publicada", produtoId: "produto_galeria_publicada", linkOriginal: "https://amazon.test/galeria-publicada", criadoEm: recenteTeste }),
+    filaBase({ ofertaId: "galeria_agendada", produtoId: "produto_galeria_agendada", linkOriginal: "https://amazon.test/galeria-agendada", criadoEm: recenteTeste })
+  ]);
+  writeClienteJson("cliente_limpeza_galeria", "social-publicacoes.json", [{
+    id: "pub_galeria_publicada",
+    rede: "instagram",
+    status: "publicada",
+    ofertaId: "galeria_publicada"
+  }]);
+  storage.salvarAgendamentoSocial("cliente_limpeza_galeria", {
+    origem: "manual",
+    tipoPublicacao: "oferta",
+    ofertaId: "galeria_agendada",
+    status: "agendada",
+    ativo: true,
+    agendadoPara: "2026-07-20T10:00:00.000Z"
+  });
+  const filaGaleriaAntes = JSON.stringify(readClienteJson("cliente_limpeza_galeria", "fila.json", []));
+  const historicoGaleriaAntes = JSON.stringify(readClienteJson("cliente_limpeza_galeria", "social-publicacoes.json", []));
+  const agendaGaleriaAntes = storage.listarAgendamentosSocial("cliente_limpeza_galeria");
+  const antesGaleria = storage.listarOportunidadesSocial("cliente_limpeza_galeria", 10);
+  assert.ok(antesGaleria.some(item => item.ofertaId === "galeria_publicada"), "oferta publicada esta visivel antes da limpeza");
+  assert.ok(antesGaleria.some(item => item.ofertaId === "galeria_agendada"), "oferta agendada esta visivel antes da limpeza");
+  const galeria = storage.limparOportunidadesSocial("cliente_limpeza_galeria", { modo: "galeria", idadeMaximaHoras: 6 });
+  assert.strictEqual(galeria.ocultadas, 3, "limpeza de galeria oculta todas as oportunidades visiveis");
+  assert.strictEqual(storage.listarOportunidadesSocial("cliente_limpeza_galeria", 10).length, 0, "limpeza de galeria remove publicadas/agendadas da galeria");
+  assert.strictEqual(JSON.stringify(readClienteJson("cliente_limpeza_galeria", "fila.json", [])), filaGaleriaAntes, "limpeza de galeria nao altera fila oficial");
+  assert.strictEqual(JSON.stringify(readClienteJson("cliente_limpeza_galeria", "social-publicacoes.json", [])), historicoGaleriaAntes, "limpeza de galeria preserva historico");
+  const agendaGaleriaDepois = storage.listarAgendamentosSocial("cliente_limpeza_galeria");
+  assert.strictEqual(agendaGaleriaDepois.length, agendaGaleriaAntes.length, "limpeza de galeria preserva quantidade de agendamentos");
+  assert.ok(
+    agendaGaleriaDepois.some(item => item.ofertaId === "galeria_agendada" && item.status === "agendada" && item.ativo === true),
+    "limpeza de galeria preserva agendamento ativo"
+  );
 
   await instagram.concluirCallbackInstagram({
     code: "code_cliente_a",

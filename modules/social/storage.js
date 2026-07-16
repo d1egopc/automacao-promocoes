@@ -1022,8 +1022,6 @@ function limparOportunidadesSocial(clienteId = "admin", { modo = "galeria", idad
     const ofertaId = idOfertaOficialSocial(item);
     if (!ofertaId) continue;
     if (ofertasVisiveis && !ofertasVisiveis.has(ofertaId)) continue;
-    if (publicacaoInstagramDaOferta(clienteSeguro, ofertaId)) continue;
-    if (agendamentoAtivoDaOferta(clienteSeguro, ofertaId)) continue;
     if (modo === "antigas") {
       const recencia = recenciaOportunidade(dataRecenciaOportunidade(item), agoraMs, idadeMaximaHoras);
       if (!recencia.recenciaConfiavel || recencia.idadeEmMinutos <= limiteMinutos) continue;
