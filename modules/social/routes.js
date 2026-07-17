@@ -1120,6 +1120,22 @@ function criarRotasSocial(deps = {}) {
     return res.json({ ok: true, clienteId, agendamento });
   });
 
+  router.delete("/agendamentos", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const modo = texto(req.body?.modo || req.query?.modo);
+      const resultado = storage.limparAgendamentosSocial(clienteId, modo);
+      return res.json({ ok: true, clienteId, ...resultado });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "DELETE /social/agendamentos" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_agendamentos_limpeza_invalida" });
+    }
+  });
+
   router.delete("/agendamentos/:id", (req, res) => {
     if (!socialPermitido(req)) {
       return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
@@ -1452,6 +1468,7 @@ function criarRotasSocial(deps = {}) {
       "PUT /social/agendamentos/:id",
       "POST /social/agendamentos/:id/reagendar",
       "POST /social/agendamentos/:id/cancelar",
+      "DELETE /social/agendamentos",
       "DELETE /social/agendamentos/:id",
       "POST /social/agendamentos/:id/publicar",
       "GET /social/automatico/config",

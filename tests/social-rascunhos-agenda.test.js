@@ -6,7 +6,7 @@ const path = require("path");
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-social-rascunhos-"));
 process.env.DATA_DIR = dataDir;
 
-const { writeClienteJson } = require("../utils/storage");
+const { readClienteJson, writeClienteJson } = require("../utils/storage");
 const storage = require("../modules/social/storage");
 const {
   executarAgendamentosPendentesTodosClientes,
@@ -159,6 +159,96 @@ function mockHttpClient(sufixo = "ok") {
   assert.ok(rodada.resultados.some(item => item.clienteId === "cliente_b" && item.executados.length === 1));
   assert.ok(!rodada.resultados.some(item => item.clienteId === "cliente_a" && item.executados.some(exec => exec.status === "publicada")), "scheduler nao deve republicar agendamento ja publicado nem futuro");
 
+
+  storage.registrarPublicacaoSocial("cliente_limpeza_agenda", {
+    id: "pub_real_preservada",
+    origem: "agendada",
+    tipoPublicacao: "livre",
+    status: "publicada",
+    instagramMediaId: "media_real_preservada",
+    imagemUrl: "https://cdn.optimus.test/publicada.jpg"
+  });
+  writeClienteJson("cliente_limpeza_agenda", "fila.json", [{ ofertaId: "fila_preservada" }]);
+  writeClienteJson("cliente_limpeza_agenda", "social-oportunidades.json", [{ ofertaId: "oportunidade_preservada" }]);
+  storage.salvarAgendamentoSocial("cliente_limpeza_agenda", {
+    id: "agenda_erro",
+    origem: "agendada",
+    tipoPublicacao: "livre",
+    imagemUrl: "https://cdn.optimus.test/erro.jpg",
+    legenda: "Erro",
+    status: "erro",
+    ativo: false,
+    agendadoPara: "2099-01-01T10:00:00.000Z"
+  });
+  storage.salvarAgendamentoSocial("cliente_limpeza_agenda", {
+    id: "agenda_cancelada",
+    origem: "agendada",
+    tipoPublicacao: "livre",
+    imagemUrl: "https://cdn.optimus.test/cancelada.jpg",
+    legenda: "Cancelada",
+    status: "cancelada",
+    ativo: false,
+    agendadoPara: "2099-01-01T11:00:00.000Z"
+  });
+  storage.salvarAgendamentoSocial("cliente_limpeza_agenda", {
+    id: "agenda_publicada",
+    origem: "agendada",
+    tipoPublicacao: "livre",
+    imagemUrl: "https://cdn.optimus.test/publicada-local.jpg",
+    legenda: "Publicada local",
+    status: "publicada",
+    ativo: false,
+    agendadoPara: "2099-01-01T12:00:00.000Z"
+  });
+  storage.salvarAgendamentoSocial("cliente_limpeza_agenda", {
+    id: "agenda_futura",
+    origem: "agendada",
+    tipoPublicacao: "livre",
+    imagemUrl: "https://cdn.optimus.test/futura.jpg",
+    legenda: "Futura",
+    status: "agendada",
+    ativo: true,
+    agendadoPara: "2099-01-01T13:00:00.000Z"
+  });
+
+  assert.strictEqual(storage.limparAgendamentosSocial("cliente_limpeza_agenda", "erro").removidos, 1, "limpar erro remove somente erros");
+  assert.strictEqual(storage.getAgendamentoSocial("cliente_limpeza_agenda", "agenda_erro"), null);
+  assert.ok(storage.getAgendamentoSocial("cliente_limpeza_agenda", "agenda_cancelada"), "cancelada permanece apos limpar erro");
+
+  assert.strictEqual(storage.limparAgendamentosSocial("cliente_limpeza_agenda", "cancelada").removidos, 1, "limpar cancelada remove somente canceladas");
+  assert.strictEqual(storage.getAgendamentoSocial("cliente_limpeza_agenda", "agenda_cancelada"), null);
+
+  assert.strictEqual(storage.limparAgendamentosSocial("cliente_limpeza_agenda", "publicada").removidos, 1, "limpar publicada remove apenas registro local da agenda");
+  assert.strictEqual(storage.getAgendamentoSocial("cliente_limpeza_agenda", "agenda_publicada"), null);
+  assert.ok(storage.listarPublicacoesSocial("cliente_limpeza_agenda").some(item => item.id === "pub_real_preservada"), "publicacao real permanece no historico");
+
+  assert.strictEqual(storage.limparAgendamentosSocial("cliente_limpeza_agenda", "agendada").removidos, 1, "limpar agendada remove ativos futuros");
+  assert.strictEqual(storage.getAgendamentoSocial("cliente_limpeza_agenda", "agenda_futura"), null, "agendada removida nao executa futuramente");
+  assert.ok(readClienteJson("cliente_limpeza_agenda", "fila.json", []).some(item => item.ofertaId === "fila_preservada"), "fila oficial permanece intacta");
+  assert.ok(readClienteJson("cliente_limpeza_agenda", "social-oportunidades.json", []).some(item => item.ofertaId === "oportunidade_preservada"), "oportunidades permanecem intactas");
+
+  storage.salvarAgendamentoSocial("cliente_limpeza_tudo", {
+    id: "agenda_tudo_erro",
+    origem: "agendada",
+    tipoPublicacao: "livre",
+    imagemUrl: "https://cdn.optimus.test/tudo-erro.jpg",
+    legenda: "Tudo erro",
+    status: "erro",
+    ativo: false,
+    agendadoPara: "2099-01-01T10:00:00.000Z"
+  });
+  storage.salvarAgendamentoSocial("cliente_limpeza_tudo", {
+    id: "agenda_tudo_futura",
+    origem: "agendada",
+    tipoPublicacao: "livre",
+    imagemUrl: "https://cdn.optimus.test/tudo-futura.jpg",
+    legenda: "Tudo futura",
+    status: "agendada",
+    ativo: true,
+    agendadoPara: "2099-01-01T11:00:00.000Z"
+  });
+  assert.strictEqual(storage.limparAgendamentosSocial("cliente_limpeza_tudo", "tudo").removidos, 2, "limpar tudo remove todos os agendamentos");
+  assert.strictEqual(storage.listarAgendamentosSocial("cliente_limpeza_tudo").length, 0, "limpar tudo zera social-agendamentos.json");
   const removido = storage.removerRascunhoSocial("cliente_a", rascunho.id);
   assert.strictEqual(removido.id, rascunho.id);
   assert.strictEqual(storage.getRascunhoSocial("cliente_a", rascunho.id), null);

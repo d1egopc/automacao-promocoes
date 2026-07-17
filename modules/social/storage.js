@@ -876,6 +876,19 @@ function getAgendamentoSocial(clienteId = "admin", id = "") {
   return listarAgendamentosSocial(clienteId).find(item => item.id === agendamentoId) || null;
 }
 
+const STATUS_AGENDAMENTO_LIMPEZA_ATIVA = new Set(["pendente", "agendada", "aguardando_aprovacao"]);
+const MODOS_LIMPEZA_AGENDAMENTOS = new Set(["erro", "cancelada", "publicada", "agendada", "tudo"]);
+
+function agendamentoEntraNaLimpeza(agendamento = {}, modo = "") {
+  const status = texto(agendamento.status || "pendente").toLowerCase();
+  if (modo === "tudo") return true;
+  if (["erro", "cancelada", "publicada"].includes(modo)) return status === modo;
+  if (modo === "agendada") {
+    return agendamento.ativo !== false && STATUS_AGENDAMENTO_LIMPEZA_ATIVA.has(status);
+  }
+  return false;
+}
+
 function removerAgendamentoSocial(clienteId = "admin", id = "") {
   const agendamentoId = texto(id);
   const atuais = listarAgendamentosSocial(clienteId);
@@ -884,6 +897,42 @@ function removerAgendamentoSocial(clienteId = "admin", id = "") {
   escreverCliente(clienteId, "agendamentos", atuais.filter(item => item.id !== agendamentoId));
   logSocial("[SOCIAL-AGENDAMENTO-EXCLUIDO]", { clienteId, id: agendamentoId });
   return existente;
+}
+
+function limparAgendamentosSocial(clienteId = "admin", modoEntrada = "") {
+  const modo = texto(modoEntrada).toLowerCase();
+  if (!MODOS_LIMPEZA_AGENDAMENTOS.has(modo)) {
+    const erro = new Error("modo_limpeza_agendamentos_invalido");
+    erro.codigo = "modo_limpeza_agendamentos_invalido";
+    throw erro;
+  }
+
+  const atuais = listarAgendamentosSocial(clienteId);
+  const removidos = [];
+  const mantidos = [];
+
+  for (const agendamento of atuais) {
+    if (agendamentoEntraNaLimpeza(agendamento, modo)) {
+      removidos.push(agendamento);
+    } else {
+      mantidos.push(agendamento);
+    }
+  }
+
+  escreverCliente(clienteId, "agendamentos", mantidos);
+  logSocial("[SOCIAL-AGENDAMENTOS-LIMPEZA]", {
+    clienteId,
+    modo,
+    removidos: removidos.length,
+    restantes: mantidos.length
+  });
+
+  return {
+    modo,
+    totalAntes: atuais.length,
+    removidos: removidos.length,
+    restantes: mantidos.length
+  };
 }
 
 function listarPublicacoesSocial(clienteId = "admin", limite = 100) {
@@ -1364,6 +1413,7 @@ module.exports = {
   salvarAgendamentoSocial,
   getAgendamentoSocial,
   removerAgendamentoSocial,
+  limparAgendamentosSocial,
   criarConfigAutomaticoPadrao,
   getConfigAutomaticoSocial,
   setConfigAutomaticoSocial,
