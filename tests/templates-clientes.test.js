@@ -50,6 +50,21 @@ assert.strictEqual(criado.nome, "Grupo VIP");
 assert.strictEqual(criado.blocos.length, blocosBase.length);
 assert.ok(!criado.blocos.some(bloco => bloco.tipo === "avaliacao"), "template antigo/salvo sem avaliacao continua sem adicionar bloco silenciosamente");
 
+const templateOrdemSalva = criarTemplate("cliente_a", {
+  ...payloadValido,
+  nome: "Ordem salva antiga",
+  blocos: [
+    { tipo: "cta", ativo: true, ordem: 10 },
+    { tipo: "avaliacao", ativo: true, ordem: 20 },
+    { tipo: "cupom", ativo: true, ordem: 30 }
+  ]
+}).template;
+assert.deepStrictEqual(
+  buscarTemplate("cliente_a", templateOrdemSalva.id).blocos.map(bloco => bloco.tipo),
+  ["cta", "avaliacao", "cupom"],
+  "template antigo/salvo preserva ordem recebida e nao e reordenado pelo catalogo"
+);
+
 assertThrowsCodigo(() => criarTemplate("cliente_a", { ...payloadValido, nome: " " }), "template_nome_invalido");
 assertThrowsCodigo(() => criarTemplate("cliente_a", { ...payloadValido, blocos: [{ tipo: "html_livre", ativo: true, ordem: 1 }] }), "template_bloco_invalido");
 
@@ -129,6 +144,12 @@ assert.ok(listarTemplates("cliente_a").catalogoBlocos.some(item => item.tipo ===
 const templatePadraoNovo = criarTemplate("cliente_a", { nome: "Completo Padrao V11" }).template;
 assert.ok(templatePadraoNovo.blocos.some(bloco => bloco.tipo === "frase_cupom" && bloco.ativo === true), "novo template nasce com blocos uteis ativos");
 assert.ok(templatePadraoNovo.blocos.some(bloco => bloco.tipo === "avaliacao" && bloco.ativo === true), "novo template nasce com avaliacao ativa como o padrao Optimus");
+const ordemTemplatePadraoNovo = templatePadraoNovo.blocos.map(bloco => bloco.tipo);
+assert.deepStrictEqual(
+  ordemTemplatePadraoNovo.filter(tipo => ["cupom", "avaliacao", "cta"].includes(tipo)),
+  ["cupom", "avaliacao", "cta"],
+  "novo template nasce com cupom antes de avaliacao e avaliacao antes de chamada"
+);
 assert.ok(templatePadraoNovo.blocos.some(bloco => bloco.tipo === "economia" && bloco.ativo === false), "economia nasce desligada para nao induzir recalculo");
 assert.ok(templatePadraoNovo.blocos.every(bloco => bloco.id === bloco.tipo), "id final do bloco acompanha o tipo");
 

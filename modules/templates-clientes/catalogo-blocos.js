@@ -145,7 +145,7 @@ const CATALOGO_BLOCOS = Object.freeze({
     nomeVisual: "Avaliação",
     descricaoVisual: "Avaliação calculada a partir do score oficial da oferta.",
     campoOrigem: "score|inteligenciaUniversalV2.score",
-    ordemPadrao: 140,
+    ordemPadrao: 90,
     ativoPorPadrao: true,
     emojiPadrao: "✰"
   }),
