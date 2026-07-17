@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { resolverImagemUniversal } = require("../modules/imagens/resolver-imagem-universal");
 
 let inteligenciaUniversalCache = null;
 let templateUniversalCache = null;
@@ -500,6 +501,7 @@ function aplicarTemplateUniversalSombra(oferta = {}, contexto = {}, camposUniver
 }
 
 function aplicarPortaUniversalFila(oferta = {}, contexto = {}) {
+  oferta = resolverImagemUniversal(oferta, { origem: contexto.origem || "fila_legacy" });
   const logger = contexto.logger || console;
 
   try {

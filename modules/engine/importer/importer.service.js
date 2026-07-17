@@ -18,6 +18,7 @@ const {
   avaliarOfertaUniversal,
   detectarIdentidadeProdutoUniversal
 } = require("../../inteligencia-universal");
+const { resolverImagemUniversal } = require("../../imagens/resolver-imagem-universal");
 const {
   logEngineImporterErro,
   logEngineImporterOfertaCriada
@@ -878,6 +879,13 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
 
 async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrada = {}) {
   let oferta = normalizarOfertaImportada(ofertaEntrada, job);
+  oferta = resolverImagemUniversal(oferta, {
+    origem: "engine_importer",
+    ofertaEntrada,
+    evento,
+    job,
+    link,
+  });
   const temImagemImporter = Boolean(oferta.imagem);
   const campoImagemImporter = oferta.imagemOrigem || "";
   const sombraV2 = await aplicarSombraInteligenciaUniversalV2(oferta, ofertaEntrada, job);

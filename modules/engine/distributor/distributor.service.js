@@ -8,6 +8,7 @@ const {
 } = require("../validator.service");
 const filaOfertas = require("../../../utils/fila-ofertas");
 const destinosUtils = require("../../../utils/destinos");
+const { resolverImagemUniversal } = require("../../imagens/resolver-imagem-universal");
 
 let engineOfertasMetadataDisponivel = null;
 
@@ -75,6 +76,7 @@ async function queryDistribuidor({ etapa = "", ofertaId = null, jobId = null, cl
     };
   }
 }
+
 function normalizarMarketplace(valor = "") {
   return normalizarTexto(valor).toLowerCase();
 }
@@ -248,35 +250,44 @@ function adicionarCamposImagemFila(candidatos = [], prefixo = "", fonte = {}, ti
   }
 }
 
+function origemImagemFilaCompat(origem = "") {
+  if (origem === "imagem") return "engine_ofertas.imagem";
+  if (origem === "imagemUrl") return "engine_ofertas.imagemUrl";
+  if (/^metadata\.produto\.images\[\d+\]/.test(origem)) return "metadata.produto.images";
+  if (/^metadata\.produto\.imagens\[\d+\]/.test(origem)) return "metadata.produto.imagens";
+  if (/^evento_metadata\./.test(origem)) return origem.replace(/^evento_metadata\./, "evento.metadata.");
+  if (/^job_metadata\./.test(origem)) return origem.replace(/^job_metadata\./, "job.metadata.");
+  if (/^link_metadata\./.test(origem)) return origem.replace(/^link_metadata\./, "link.metadata.");
+  return origem || "nenhuma";
+}
+
 function resolverImagemFilaEngine(oferta = {}) {
-  const candidatos = [];
-  const metadata = objetoSeguro(oferta.metadata);
-  const produtoMetadata = objetoSeguro(metadata.produto);
-  const eventoMetadata = objetoSeguro(oferta.evento_metadata);
-  const jobMetadata = objetoSeguro(oferta.job_metadata);
+  const resolvida = resolverImagemUniversal(oferta, { origem: "engine_distributor" });
+  const imagem = resolvida.imagem || resolvida.imagemUrl || "";
 
-  adicionarImagemFila(candidatos, "engine_ofertas.imagem", oferta.imagem, "principal");
-  adicionarCamposImagemFila(candidatos, "metadata.produto", produtoMetadata, "principal");
-  adicionarCamposImagemFila(candidatos, "evento.metadata", eventoMetadata, "fallback_radar");
-  adicionarCamposImagemFila(candidatos, "job.metadata", jobMetadata, "fallback_job");
-  adicionarCamposImagemFila(candidatos, "job.metadata.metadataEvento", objetoSeguro(jobMetadata.metadataEvento), "fallback_job");
-  adicionarCamposImagemFila(candidatos, "metadata.importacao", metadata, "fallback_importacao");
-
-  const escolhido = candidatos.find(item => item.imagem);
-  if (!escolhido) {
+  if (!imagem) {
     return {
       imagem: "",
       origem: "nenhuma",
       fallbackUsado: false,
-      ausenciaMotivo: "nenhuma_fonte_de_imagem"
+      ausenciaMotivo: "nenhuma_fonte_de_imagem",
+      imagemStatus: resolvida.imagemStatus || "nao_resolvida",
+      imagemConfianca: resolvida.imagemConfianca || 0,
+      imagemTentativas: resolvida.imagemTentativas || [],
     };
   }
 
+  const origem = origemImagemFilaCompat(resolvida.imagemOrigem);
+
   return {
-    imagem: escolhido.imagem,
-    origem: escolhido.origem,
-    fallbackUsado: escolhido.tipo !== "principal",
-    ausenciaMotivo: ""
+    imagem,
+    origem,
+    fallbackUsado: origem !== "engine_ofertas.imagem",
+    ausenciaMotivo: "",
+    imagemStatus: resolvida.imagemStatus,
+    imagemConfianca: resolvida.imagemConfianca,
+    imagemResolvidaEm: resolvida.imagemResolvidaEm,
+    imagemTentativas: resolvida.imagemTentativas || [],
   };
 }
 
@@ -327,9 +338,14 @@ function montarItemFilaEngine(oferta = {}) {
     precoAtual: oferta.preco,
     precoOriginal: oferta.preco_original,
     imagem: imagemResolvida.imagem,
+    imagemUrl: imagemResolvida.imagem,
     imagemOrigem: imagemResolvida.origem,
     imagemFallbackUsado: imagemResolvida.fallbackUsado,
     imagemAusenteMotivo: imagemResolvida.ausenciaMotivo,
+    imagemStatus: imagemResolvida.imagemStatus,
+    imagemConfianca: imagemResolvida.imagemConfianca,
+    imagemResolvidaEm: imagemResolvida.imagemResolvidaEm,
+    imagemTentativas: imagemResolvida.imagemTentativas,
     linkOriginal,
     linkAfiliado,
     link: linkAfiliado,
