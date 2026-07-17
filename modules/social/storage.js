@@ -17,7 +17,7 @@ const ARQUIVOS = {
 };
 
 const REDES_SUPORTADAS = new Set(["instagram", "facebook", "telegram"]);
-const STATUS_PUBLICACAO = new Set(["rascunho", "agendada", "pendente", "aguardando_aprovacao", "processando", "publicada", "erro", "cancelada"]);
+const STATUS_PUBLICACAO = new Set(["rascunho", "agendada", "pendente", "aguardando_aprovacao", "processando", "publicando", "publicada", "erro", "cancelada"]);
 const ORIGENS_PUBLICACAO = new Set(["manual", "personalizada", "automatica", "automatico", "agendada"]);
 const TIPOS_PUBLICACAO = new Set(["oferta", "livre"]);
 const STATUS_INVALIDOS_OPORTUNIDADE = new Set([
@@ -39,7 +39,7 @@ const STATUS_INVALIDOS_OPORTUNIDADE = new Set([
   "descartada",
   "descartado"
 ]);
-const STATUS_AGENDAMENTO_ATIVO_SOCIAL = new Set(["pendente", "agendada", "aguardando_aprovacao", "processando"]);
+const STATUS_AGENDAMENTO_ATIVO_SOCIAL = new Set(["pendente", "agendada", "aguardando_aprovacao", "processando", "publicando"]);
 
 function agoraIso() {
   return new Date().toISOString();
@@ -357,6 +357,8 @@ function criarConfigAutomaticoPadrao(clienteId = "admin") {
     templatePadraoId: "padrao-instagram",
     horarios: [],
     quantidadeDiaria: 5,
+    limiteDiarioAutomaticoAtivo: false,
+    maxPublicacoesAutomaticasPorDia: 5,
     janelaFuncionamento: {
       inicio: "08:00",
       fim: "22:00"
@@ -539,6 +541,7 @@ function normalizarAgendamento(clienteId, agendamento = {}, index = 0) {
     origem,
     tipoPublicacao,
     status: STATUS_PUBLICACAO.has(status) ? status : "pendente",
+    motivo: texto(agendamento.motivo),
     ofertaId: texto(agendamento.ofertaId || agendamento.oportunidadeId),
     imagemUrl: texto(agendamento.imagemUrl || agendamento.imagem),
     legenda: texto(agendamento.legenda || agendamento.mensagem),
@@ -701,6 +704,8 @@ function normalizarConfigAutomatico(clienteId = "admin", config = {}) {
     templatePadraoId: texto(config.templatePadraoId || padrao.templatePadraoId),
     horarios: lista(config.horarios).map(item => hora(item)).filter(Boolean).slice(0, 24),
     quantidadeDiaria: inteiro(config.quantidadeDiaria, padrao.quantidadeDiaria, 1, 10),
+    limiteDiarioAutomaticoAtivo: config.limiteDiarioAutomaticoAtivo === true,
+    maxPublicacoesAutomaticasPorDia: inteiro(config.maxPublicacoesAutomaticasPorDia, padrao.maxPublicacoesAutomaticasPorDia, 1, 10),
     janelaFuncionamento: {
       inicio: hora(janela.inicio, padrao.janelaFuncionamento.inicio),
       fim: hora(janela.fim, padrao.janelaFuncionamento.fim)
@@ -1220,6 +1225,89 @@ function getConfigAutomaticoSocial(clienteId = "admin") {
   );
 }
 
+const STATUS_LIMITE_DIARIO_AUTOMATICO = new Set(["pendente", "agendada", "aguardando_aprovacao", "processando", "publicando", "publicada"]);
+
+function chaveDiaAgendamentoSocial(agendamento = {}) {
+  const valor = texto(agendamento.agendadoPara || agendamento.horario);
+  return /^\d{4}-\d{2}-\d{2}/.test(valor) ? valor.slice(0, 10) : "";
+}
+
+function ocupaLimiteAutomaticoSocial(agendamento = {}) {
+  if (texto(agendamento.origem) !== "automatico") return false;
+  const status = texto(agendamento.status || "pendente").toLowerCase();
+  return STATUS_LIMITE_DIARIO_AUTOMATICO.has(status);
+}
+
+function scoreAgendamentoAutomatico(agendamento = {}) {
+  const automatico = agendamento.automatico && typeof agendamento.automatico === "object" ? agendamento.automatico : {};
+  const score = Number(automatico.score ?? agendamento.score ?? 0);
+  return Number.isFinite(score) ? score : 0;
+}
+
+function reconciliarLimiteDiarioAutomaticoSocial(clienteId = "admin", config = {}) {
+  if (config.limiteDiarioAutomaticoAtivo !== true) return { canceladasExcedentes: 0 };
+
+  const limite = inteiro(config.maxPublicacoesAutomaticasPorDia, 5, 1, 10);
+  const atuais = listarAgendamentosSocial(clienteId);
+  const agora = Date.now();
+  const grupos = new Map();
+
+  for (const agendamento of atuais) {
+    if (!ocupaLimiteAutomaticoSocial(agendamento)) continue;
+    const dia = chaveDiaAgendamentoSocial(agendamento);
+    if (!dia) continue;
+    if (!grupos.has(dia)) grupos.set(dia, []);
+    grupos.get(dia).push(agendamento);
+  }
+
+  const cancelarIds = new Set();
+  for (const [dia, itens] of grupos.entries()) {
+    if (itens.length <= limite) continue;
+
+    const naoCancelaveis = itens.filter(item => {
+      const status = texto(item.status || "").toLowerCase();
+      const data = Date.parse(texto(item.agendadoPara || item.horario));
+      return status === "publicada" || status === "processando" || status === "publicando" || !(Number.isFinite(data) && data > agora);
+    });
+    const vagasParaFuturos = Math.max(0, limite - naoCancelaveis.length);
+    const futurosCancelaveis = itens
+      .filter(item => !naoCancelaveis.some(fixo => fixo.id === item.id))
+      .sort((a, b) =>
+        scoreAgendamentoAutomatico(b) - scoreAgendamentoAutomatico(a) ||
+        Date.parse(texto(a.agendadoPara || a.horario)) - Date.parse(texto(b.agendadoPara || b.horario)) ||
+        texto(a.id).localeCompare(texto(b.id))
+      );
+
+    for (const excedente of futurosCancelaveis.slice(vagasParaFuturos)) {
+      cancelarIds.add(excedente.id);
+    }
+
+    if (cancelarIds.size) {
+      logSocial("[SOCIAL-AUTO-LIMITE-DIARIO]", {
+        clienteId,
+        data: dia,
+        limiteAtivo: true,
+        limite,
+        publicadas: itens.filter(item => texto(item.status).toLowerCase() === "publicada").length,
+        pendentes: itens.filter(item => texto(item.status).toLowerCase() !== "publicada").length,
+        vagas: Math.max(0, limite - itens.length),
+        criadas: 0,
+        canceladasExcedentes: cancelarIds.size,
+        motivo: "limite_diario_reduzido"
+      });
+    }
+  }
+
+  if (!cancelarIds.size) return { canceladasExcedentes: 0 };
+
+  const atualizados = atuais.map(item => cancelarIds.has(item.id)
+    ? { ...item, ativo: false, status: "cancelada", motivo: "limite_diario_reduzido", atualizadoEm: agoraIso() }
+    : item
+  );
+  escreverCliente(clienteId, "agendamentos", atualizados);
+  return { canceladasExcedentes: cancelarIds.size };
+}
+
 function setConfigAutomaticoSocial(clienteId = "admin", dados = {}) {
   const atual = getConfigAutomaticoSocial(clienteId);
   const config = normalizarConfigAutomatico(clienteId, {
@@ -1227,10 +1315,19 @@ function setConfigAutomaticoSocial(clienteId = "admin", dados = {}) {
     ...(dados && typeof dados === "object" ? dados : {})
   });
   escreverCliente(clienteId, "automatico", config);
+  const limiteReduzido = atual.limiteDiarioAutomaticoAtivo === true &&
+    config.limiteDiarioAutomaticoAtivo === true &&
+    Number(config.maxPublicacoesAutomaticasPorDia) < Number(atual.maxPublicacoesAutomaticasPorDia);
+  const reconciliacao = limiteReduzido
+    ? reconciliarLimiteDiarioAutomaticoSocial(clienteId, config)
+    : { canceladasExcedentes: 0 };
   logSocial("[SOCIAL-AUTOMATICO-CONFIG]", {
     clienteId,
     ativo: config.ativo,
     quantidadeDiaria: config.quantidadeDiaria,
+    limiteDiarioAutomaticoAtivo: config.limiteDiarioAutomaticoAtivo,
+    maxPublicacoesAutomaticasPorDia: config.maxPublicacoesAutomaticasPorDia,
+    canceladasExcedentes: reconciliacao.canceladasExcedentes,
     scoreMinimo: config.scoreMinimo
   });
   return config;

@@ -181,6 +181,150 @@ function horaSaoPaulo(input) {
   const segundaRodadaLimite = await executarAutomaticoCliente({ clienteId: "cliente_limite", agora: AGORA });
   assert.strictEqual(segundaRodadaLimite.agendamentosCriados.length, 0, "duas rodadas nao duplicam oportunidades");
 
+  conectar("cliente_limite_diario_on", "limite_diario_on");
+  writeClienteJson("cliente_limite_diario_on", "fila.json", Array.from({ length: 8 }, (_, i) =>
+    oferta(`limite_diario_on_${i}`, { score: 99 - i, cupom: "MAX" })
+  ));
+  storage.setConfigAutomaticoSocial("cliente_limite_diario_on", configAutomatico({
+    quantidadeDiaria: 10,
+    limiteDiarioAutomaticoAtivo: true,
+    maxPublicacoesAutomaticasPorDia: 5
+  }));
+  const rodadaLimiteDiarioOn = await executarAutomaticoCliente({ clienteId: "cliente_limite_diario_on", agora: AGORA });
+  assert.strictEqual(rodadaLimiteDiarioOn.agendamentosCriados.length, 5, "limite diario ativo cria no maximo 5 ocupacoes automaticas no dia");
+  const rodadaLimiteDiarioOnRetry = await executarAutomaticoCliente({ clienteId: "cliente_limite_diario_on", agora: AGORA });
+  assert.strictEqual(rodadaLimiteDiarioOnRetry.agendamentosCriados.length, 0, "execucao repetida nao duplica quando limite diario esta cheio");
+
+  conectar("cliente_limite_publicadas", "limite_publicadas");
+  writeClienteJson("cliente_limite_publicadas", "fila.json", [
+    oferta("limite_publicadas_nova", { score: 99, cupom: "FULL" })
+  ]);
+  storage.setConfigAutomaticoSocial("cliente_limite_publicadas", configAutomatico({
+    limiteDiarioAutomaticoAtivo: true,
+    maxPublicacoesAutomaticasPorDia: 5
+  }));
+  for (let i = 0; i < 3; i += 1) {
+    storage.salvarAgendamentoSocial("cliente_limite_publicadas", {
+      origem: "automatico",
+      tipoPublicacao: "oferta",
+      ofertaId: `limite_publicada_${i}`,
+      status: "publicada",
+      ativo: true,
+      agendadoPara: `2026-07-14T${String(8 + i).padStart(2, "0")}:00:00.000Z`
+    });
+  }
+  for (let i = 0; i < 2; i += 1) {
+    storage.salvarAgendamentoSocial("cliente_limite_publicadas", {
+      origem: "automatico",
+      tipoPublicacao: "oferta",
+      ofertaId: `limite_agendada_${i}`,
+      status: "agendada",
+      ativo: true,
+      agendadoPara: `2026-07-14T1${i}:00:00.000Z`
+    });
+  }
+  const rodadaLimitePublicadas = await executarAutomaticoCliente({ clienteId: "cliente_limite_publicadas", agora: AGORA });
+  assert.strictEqual(rodadaLimitePublicadas.agendamentosCriados.length, 0, "3 publicadas + 2 agendadas impedem novas quando limite maximo e 5");
+
+  conectar("cliente_limite_erro", "limite_erro");
+  writeClienteJson("cliente_limite_erro", "fila.json", [
+    oferta("limite_erro_nova", { score: 99, cupom: "ERR" })
+  ]);
+  storage.setConfigAutomaticoSocial("cliente_limite_erro", configAutomatico({
+    limiteDiarioAutomaticoAtivo: true,
+    maxPublicacoesAutomaticasPorDia: 1
+  }));
+  storage.salvarAgendamentoSocial("cliente_limite_erro", {
+    origem: "automatico",
+    tipoPublicacao: "oferta",
+    ofertaId: "limite_erro_antigo",
+    status: "erro",
+    ativo: true,
+    agendadoPara: "2026-07-14T09:00:00.000Z"
+  });
+  const rodadaLimiteErro = await executarAutomaticoCliente({ clienteId: "cliente_limite_erro", agora: AGORA });
+  assert.strictEqual(rodadaLimiteErro.agendamentosCriados.length, 1, "erro nao ocupa vaga do limite diario");
+
+  conectar("cliente_limite_aumenta", "limite_aumenta");
+  writeClienteJson("cliente_limite_aumenta", "fila.json", Array.from({ length: 4 }, (_, i) =>
+    oferta(`limite_aumenta_nova_${i}`, { score: 90 - i, cupom: "UP" })
+  ));
+  storage.setConfigAutomaticoSocial("cliente_limite_aumenta", configAutomatico({
+    quantidadeDiaria: 10,
+    limiteDiarioAutomaticoAtivo: true,
+    maxPublicacoesAutomaticasPorDia: 5
+  }));
+  for (let i = 0; i < 5; i += 1) {
+    storage.salvarAgendamentoSocial("cliente_limite_aumenta", {
+      origem: "automatico",
+      tipoPublicacao: "oferta",
+      ofertaId: `limite_aumenta_existente_${i}`,
+      status: "agendada",
+      ativo: true,
+      agendadoPara: `2026-07-14T${String(7 + i).padStart(2, "0")}:00:00.000Z`
+    });
+  }
+  storage.setConfigAutomaticoSocial("cliente_limite_aumenta", configAutomatico({
+    quantidadeDiaria: 10,
+    limiteDiarioAutomaticoAtivo: true,
+    maxPublicacoesAutomaticasPorDia: 7
+  }));
+  const rodadaLimiteAumenta = await executarAutomaticoCliente({ clienteId: "cliente_limite_aumenta", agora: AGORA });
+  assert.strictEqual(rodadaLimiteAumenta.agendamentosCriados.length, 2, "aumento de 5 para 7 abre somente 2 vagas");
+
+  conectar("cliente_limite_ativa_sem_limpar", "limite_ativa_sem_limpar");
+  for (let i = 0; i < 5; i += 1) {
+    storage.salvarAgendamentoSocial("cliente_limite_ativa_sem_limpar", {
+      origem: "automatico",
+      tipoPublicacao: "oferta",
+      ofertaId: `limite_ativa_existente_${i}`,
+      status: "agendada",
+      ativo: true,
+      agendadoPara: `2099-07-14T1${i}:00:00.000Z`,
+      automatico: { score: 100 - i }
+    });
+  }
+  storage.setConfigAutomaticoSocial("cliente_limite_ativa_sem_limpar", configAutomatico({
+    limiteDiarioAutomaticoAtivo: true,
+    maxPublicacoesAutomaticasPorDia: 3
+  }));
+  const agendamentosAtivacaoLimite = storage.listarAgendamentosSocial("cliente_limite_ativa_sem_limpar");
+  assert.strictEqual(agendamentosAtivacaoLimite.filter(item => item.status === "agendada").length, 5, "ativar limite pela primeira vez nao limpa excedentes existentes");
+  assert.strictEqual(agendamentosAtivacaoLimite.filter(item => item.status === "cancelada").length, 0, "ativar limite nao cancela retroativamente");
+
+  conectar("cliente_limite_reduz", "limite_reduz");
+  storage.salvarAgendamentoSocial("cliente_limite_reduz", {
+    origem: "manual",
+    tipoPublicacao: "oferta",
+    ofertaId: "manual_preservado",
+    status: "agendada",
+    ativo: true,
+    agendadoPara: "2099-07-14T13:00:00.000Z"
+  });
+  storage.setConfigAutomaticoSocial("cliente_limite_reduz", configAutomatico({
+    limiteDiarioAutomaticoAtivo: true,
+    maxPublicacoesAutomaticasPorDia: 7
+  }));
+  for (let i = 0; i < 5; i += 1) {
+    storage.salvarAgendamentoSocial("cliente_limite_reduz", {
+      origem: "automatico",
+      tipoPublicacao: "oferta",
+      ofertaId: `limite_reduz_${i}`,
+      status: "agendada",
+      ativo: true,
+      agendadoPara: `2099-07-14T1${i}:00:00.000Z`,
+      automatico: { score: 100 - i }
+    });
+  }
+  storage.setConfigAutomaticoSocial("cliente_limite_reduz", configAutomatico({
+    limiteDiarioAutomaticoAtivo: true,
+    maxPublicacoesAutomaticasPorDia: 3
+  }));
+  const agendamentosReduzidos = storage.listarAgendamentosSocial("cliente_limite_reduz");
+  assert.strictEqual(agendamentosReduzidos.filter(item => item.origem === "manual" && item.status === "agendada").length, 1, "agendamento manual nao e cancelado");
+  assert.strictEqual(agendamentosReduzidos.filter(item => item.origem === "automatico" && item.status === "agendada").length, 3, "reducao mantem somente os melhores futuros automaticos necessarios");
+  assert.strictEqual(agendamentosReduzidos.filter(item => item.origem === "automatico" && item.status === "cancelada" && item.motivo === "limite_diario_reduzido").length, 2, "reducao cancela excedentes futuros automaticos sem apagar");
+
   conectar("cliente_repreenche_dia", "repreenche_dia");
   writeClienteJson("cliente_repreenche_dia", "fila.json", Array.from({ length: 6 }, (_, i) =>
     oferta(`repreenche_${i}`, {
@@ -489,6 +633,33 @@ function horaSaoPaulo(input) {
     "20:00 agenda hoje no proximo minuto disponivel"
   );
   assert.strictEqual(horaSaoPaulo(horarioHojeNoite), "20:01", "tela em Sao Paulo mostra 20:01");
+
+  conectar("cliente_horario_limite_sem_clamp", "horario_limite_sem_clamp");
+  writeClienteJson("cliente_horario_limite_sem_clamp", "fila.json", Array.from({ length: 10 }, (_, i) =>
+    oferta(`cliente_horario_limite_sem_clamp_oferta_${i}`, {
+      cupom: "HORA",
+      score: 99 - i,
+      criadoEm: "2026-07-14T23:40:00.000Z"
+    })
+  ));
+  storage.setConfigAutomaticoSocial("cliente_horario_limite_sem_clamp", configAutomatico({
+    quantidadeDiaria: 10,
+    limiteDiarioAutomaticoAtivo: true,
+    maxPublicacoesAutomaticasPorDia: 10,
+    intervaloMinimoMinutos: 40,
+    idadeMaximaHoras: 48,
+    janelaFuncionamento: { inicio: "21:00", fim: "22:00" }
+  }));
+  const rodadaSemClamp = await executarAutomaticoCliente({
+    clienteId: "cliente_horario_limite_sem_clamp",
+    agora: dataSaoPauloUtc(2026, 7, 14, 21, 50)
+  });
+  assert.ok(rodadaSemClamp.agendamentosCriados.length < 10, "horario acima da janela para de agendar em vez de concentrar excedentes");
+  assert.strictEqual(
+    new Set(rodadaSemClamp.agendamentosCriados.map(item => item.agendadoPara)).size,
+    rodadaSemClamp.agendamentosCriados.length,
+    "nao cria dois automaticos no mesmo horario"
+  );
 
   const agoraAposJanela = dataSaoPauloUtc(2026, 7, 14, 23, 43);
   conectar("cliente_horario_2343", "horario_2343");

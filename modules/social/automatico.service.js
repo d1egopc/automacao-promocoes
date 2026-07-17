@@ -11,7 +11,8 @@ const {
 const locksCliente = new Set();
 const locksAgendamentosCliente = new Set();
 const PROCESSANDO_TTL_MINUTOS = Math.max(5, Math.min(180, Number(process.env.SOCIAL_AGENDAMENTOS_PROCESSANDO_TTL_MINUTOS || 30) || 30));
-const STATUS_AGENDAMENTO_ATIVO = new Set(["pendente", "agendada", "aguardando_aprovacao", "processando"]);
+const STATUS_AGENDAMENTO_ATIVO = new Set(["pendente", "agendada", "aguardando_aprovacao", "processando", "publicando"]);
+const STATUS_LIMITE_DIARIO_AUTOMATICO = new Set(["pendente", "agendada", "aguardando_aprovacao", "processando", "publicando", "publicada"]);
 const TIMEZONE_SOCIAL_PADRAO = "America/Sao_Paulo";
 
 function texto(valor = "") {
@@ -192,6 +193,59 @@ function agendamentosAutomaticosNoDia(agendamentos = [], agora = new Date()) {
     agendamentoAtivo(item) &&
     texto(item.agendadoPara || item.horario).startsWith(dia)
   );
+}
+
+function ocupaLimiteDiarioAutomatico(agendamento = {}) {
+  if (texto(agendamento.origem) !== "automatico") return false;
+  const status = texto(agendamento.status || "pendente").toLowerCase();
+  return STATUS_LIMITE_DIARIO_AUTOMATICO.has(status);
+}
+
+function agendamentosAutomaticosOcupamDia(agendamentos = [], agora = new Date()) {
+  const dia = chaveDia(agora);
+  return agendamentos.filter(item =>
+    ocupaLimiteDiarioAutomatico(item) &&
+    texto(item.agendadoPara || item.horario).startsWith(dia)
+  );
+}
+
+function resumoOcupacaoAutomaticaDia(agendamentos = [], agora = new Date()) {
+  const ocupadas = agendamentosAutomaticosOcupamDia(agendamentos, agora);
+  const publicadas = ocupadas.filter(item => texto(item.status).toLowerCase() === "publicada").length;
+  return {
+    data: chaveDia(agora),
+    ocupadas,
+    publicadas,
+    pendentes: ocupadas.length - publicadas
+  };
+}
+
+function calcularVagasAutomaticasDia({ config = {}, agendamentos = [], agora = new Date() } = {}) {
+  const limiteAtivo = config.limiteDiarioAutomaticoAtivo === true;
+  if (!limiteAtivo) {
+    const quantidadeDiaria = Math.min(10, Math.max(1, Number(config.quantidadeDiaria || 5) || 5));
+    const jaCriadosHoje = agendamentosAutomaticosNoDia(agendamentos, agora);
+    return {
+      data: chaveDia(agora),
+      limiteAtivo: false,
+      limite: quantidadeDiaria,
+      publicadas: 0,
+      pendentes: jaCriadosHoje.length,
+      ocupadas: jaCriadosHoje,
+      vagas: Math.max(0, quantidadeDiaria - jaCriadosHoje.length),
+      motivo: "compatibilidade_quantidade_diaria"
+    };
+  }
+
+  const limite = Math.min(10, Math.max(1, Number(config.maxPublicacoesAutomaticasPorDia || 5) || 5));
+  const ocupacao = resumoOcupacaoAutomaticaDia(agendamentos, agora);
+  return {
+    ...ocupacao,
+    limiteAtivo: true,
+    limite,
+    vagas: Math.max(0, limite - ocupacao.ocupadas.length),
+    motivo: "limite_diario_automatico"
+  };
 }
 
 function descontoOferta(oferta = {}) {
@@ -375,14 +429,14 @@ function simularSelecaoAutomatica({ clienteId = "admin", limite = 50, agora = ne
   const oportunidades = storage.listarOportunidadesSocial(clienteId, limite);
   const publicacoes = listarPublicacoesInstagram(clienteId, 200);
   const agendamentos = storage.listarAgendamentosSocial(clienteId);
-  const restantes = Math.max(0, Number(config.quantidadeDiaria || 5) - agendamentosAutomaticosNoDia(agendamentos, agora).length);
+  const limiteDia = calcularVagasAutomaticasDia({ config, agendamentos, agora });
   const { selecionadas, diagnostico } = selecionarOportunidades({
     oportunidades,
     config,
     publicacoes,
     agendamentos,
     agora,
-    limite: restantes || 1
+    limite: limiteDia.vagas || 1
   });
 
   logSocial("[SOCIAL-AUTOMATICO-SIMULAR]", {
@@ -424,7 +478,9 @@ function resumoConfigAutomatico(config = {}) {
     permitirOfertaComum: config.permitirOfertaComum !== false,
     idadeMaximaHoras: Number(config.idadeMaximaHoras || 6),
     aprovacaoManual: config.aprovacaoManual === true,
-    templatePadraoId: texto(config.templatePadraoId || "padrao-instagram")
+    templatePadraoId: texto(config.templatePadraoId || "padrao-instagram"),
+    limiteDiarioAutomaticoAtivo: config.limiteDiarioAutomaticoAtivo === true,
+    maxPublicacoesAutomaticasPorDia: Number(config.maxPublicacoesAutomaticasPorDia || 5)
   };
 }
 
@@ -473,7 +529,9 @@ async function executarAutomaticoCliente({
       quantidadeDiaria: config.quantidadeDiaria,
       intervaloMinimoMinutos: config.intervaloMinimoMinutos,
       scoreMinimo: config.scoreMinimo,
-      idadeMaximaHoras: config.idadeMaximaHoras
+      idadeMaximaHoras: config.idadeMaximaHoras,
+      limiteDiarioAutomaticoAtivo: config.limiteDiarioAutomaticoAtivo,
+      maxPublicacoesAutomaticasPorDia: config.maxPublicacoesAutomaticasPorDia
     });
 
     if (!config.ativo) {
@@ -492,20 +550,33 @@ async function executarAutomaticoCliente({
     const oportunidades = storage.listarOportunidadesSocial(clienteSeguro, 50);
     const publicacoes = listarPublicacoesInstagram(clienteSeguro, 200);
     const agendamentos = storage.listarAgendamentosSocial(clienteSeguro);
-    const jaCriadosHoje = agendamentosAutomaticosNoDia(agendamentos, agora);
-    const quantidadeDiaria = Math.min(10, Math.max(1, Number(config.quantidadeDiaria || 5) || 5));
-    const restanteDia = Math.max(0, quantidadeDiaria - jaCriadosHoje.length);
+    const limiteDia = calcularVagasAutomaticasDia({ config, agendamentos, agora });
+    const restanteDia = limiteDia.vagas;
+
+    logSocial("[SOCIAL-AUTO-LIMITE-DIARIO]", {
+      clienteId: clienteSeguro,
+      data: limiteDia.data,
+      limiteAtivo: limiteDia.limiteAtivo,
+      limite: limiteDia.limite,
+      publicadas: limiteDia.publicadas,
+      pendentes: limiteDia.pendentes,
+      vagas: restanteDia,
+      criadas: 0,
+      canceladasExcedentes: 0,
+      motivo: limiteDia.motivo
+    });
 
     logSocial("[SOCIAL-AUTOMATICO-CANDIDATOS]", {
       clienteId: clienteSeguro,
       totalOportunidades: oportunidades.length,
-      agendamentosAutomaticosHoje: jaCriadosHoje.length,
+      agendamentosAutomaticosHoje: limiteDia.ocupadas.length,
       restanteDia
     });
 
     if (restanteDia <= 0) {
-      logSocial("[SOCIAL-AUTOMATICO-LIMITE]", { clienteId: clienteSeguro, limite: quantidadeDiaria, motivo: "limite_diario" });
-      return { ok: true, clienteId: clienteSeguro, publicado: false, agendamentosCriados: [], motivo: "limite_diario" };
+      const motivoLimite = limiteDia.limiteAtivo ? "limite_diario_automatico" : "limite_diario";
+      logSocial("[SOCIAL-AUTOMATICO-LIMITE]", { clienteId: clienteSeguro, limite: limiteDia.limite, motivo: motivoLimite });
+      return { ok: true, clienteId: clienteSeguro, publicado: false, agendamentosCriados: [], motivo: motivoLimite };
     }
 
     const { selecionadas, diagnostico } = selecionarOportunidades({
@@ -600,6 +671,19 @@ async function executarAutomaticoCliente({
         status: agendamento.status
       });
     }
+
+    logSocial("[SOCIAL-AUTO-LIMITE-DIARIO]", {
+      clienteId: clienteSeguro,
+      data: limiteDia.data,
+      limiteAtivo: limiteDia.limiteAtivo,
+      limite: limiteDia.limite,
+      publicadas: limiteDia.publicadas,
+      pendentes: limiteDia.pendentes,
+      vagas: Math.max(0, restanteDia - criados.length),
+      criadas: criados.length,
+      canceladasExcedentes: 0,
+      motivo: criados.length ? "agendamentos_criados" : "sem_criacao"
+    });
 
     logSocial("[SOCIAL-AUTOMATICO-RODADA-FIM]", {
       clienteId: clienteSeguro,
