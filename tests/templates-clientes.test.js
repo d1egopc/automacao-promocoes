@@ -17,7 +17,7 @@ const { renderizarTemplatePersonalizado } = require("../modules/templates-client
 const { listarCatalogoBlocos } = require("../modules/templates-clientes/catalogo-blocos");
 const { obterOfertaPreviewOficial } = require("../modules/templates-clientes/oferta-preview");
 const { lerStorageTemplates } = require("../modules/templates-clientes/storage");
-const { gerarTemplateUniversal } = require("../modules/template-universal");
+const { gerarTemplateUniversal, apresentarScore } = require("../modules/template-universal");
 const { prepararDadosOficiaisTemplate } = require("../modules/templates-clientes/dados-oficiais");
 
 function assertThrowsCodigo(fn, codigo) {
@@ -48,6 +48,7 @@ assert.ok(criado.id.startsWith("tpl_"), "cria template valido com ID backend");
 assert.strictEqual(criado.clienteId, "cliente_a", "nao aceita clienteId do body");
 assert.strictEqual(criado.nome, "Grupo VIP");
 assert.strictEqual(criado.blocos.length, blocosBase.length);
+assert.ok(!criado.blocos.some(bloco => bloco.tipo === "avaliacao"), "template antigo/salvo sem avaliacao continua sem adicionar bloco silenciosamente");
 
 assertThrowsCodigo(() => criarTemplate("cliente_a", { ...payloadValido, nome: " " }), "template_nome_invalido");
 assertThrowsCodigo(() => criarTemplate("cliente_a", { ...payloadValido, blocos: [{ tipo: "html_livre", ativo: true, ordem: 1 }] }), "template_bloco_invalido");
@@ -127,6 +128,7 @@ assert.ok(listarTemplates("cliente_a").catalogoBlocos.some(item => item.tipo ===
 
 const templatePadraoNovo = criarTemplate("cliente_a", { nome: "Completo Padrao V11" }).template;
 assert.ok(templatePadraoNovo.blocos.some(bloco => bloco.tipo === "frase_cupom" && bloco.ativo === true), "novo template nasce com blocos uteis ativos");
+assert.ok(templatePadraoNovo.blocos.some(bloco => bloco.tipo === "avaliacao" && bloco.ativo === true), "novo template nasce com avaliacao ativa como o padrao Optimus");
 assert.ok(templatePadraoNovo.blocos.some(bloco => bloco.tipo === "economia" && bloco.ativo === false), "economia nasce desligada para nao induzir recalculo");
 assert.ok(templatePadraoNovo.blocos.every(bloco => bloco.id === bloco.tipo), "id final do bloco acompanha o tipo");
 
@@ -154,7 +156,7 @@ for (const trecho of [
   "⚡ Aplique o cupom PROMO10 + frete grátis para pagar R$ 44,90.",
   "💳 Ou 3x de R$ 16,63 sem juros",
   "🚚 Frete gratis",
-  "⭐ Avaliacao: 4,8/5",
+  "✰ Avaliação\n⭐⭐⭐⭐⭐",
   "👥 1.240 avaliacoes",
   "🛒 5.200 vendidos",
   "🔗 Confira aqui:",

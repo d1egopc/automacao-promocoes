@@ -1,4 +1,5 @@
 const { CANAIS_PERMITIDOS, getBlocoCatalogo } = require("./catalogo-blocos");
+const { apresentarScore } = require("../template-universal");
 const {
   prepararDadosOficiaisTemplate,
   diagnosticoDadosOficiaisTemplate
@@ -93,11 +94,14 @@ function valorFrete(oferta = {}) {
   return oferta.freteGratis === true ? "Frete gratis" : "";
 }
 
+function estrelasPreenchidas(avaliacao = "") {
+  return (String(avaliacao || "").match(/⭐/g) || []).length;
+}
+
 function valorAvaliacao(oferta = {}) {
-  const texto = primeiroTexto(oferta.avaliacao, oferta.rating, oferta.nota);
-  if (texto) return texto;
-  const score = numeroUtil(oferta.score);
-  return score ? `${Math.round(score)}/100` : "";
+  const avaliacao = apresentarScore(oferta.score);
+  if (!avaliacao) return "";
+  return estrelasPreenchidas(avaliacao) >= 2 ? avaliacao : "";
 }
 
 function valorQuantidadeAvaliacoes(oferta = {}) {
@@ -225,7 +229,7 @@ function resolverLinha(bloco, oferta = {}) {
   }
   if (tipo === "avaliacao") {
     const avaliacao = valorAvaliacao(oferta);
-    return avaliacao ? `⭐ Avaliacao: ${avaliacao}` : "";
+    return avaliacao ? `✰ Avaliação\n${avaliacao}` : "";
   }
   if (tipo === "quantidade_avaliacoes") {
     const quantidade = valorQuantidadeAvaliacoes(oferta);

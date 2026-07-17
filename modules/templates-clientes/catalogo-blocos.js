@@ -142,12 +142,12 @@ const CATALOGO_BLOCOS = Object.freeze({
   }),
   avaliacao: bloco({
     tipo: "avaliacao",
-    nomeVisual: "Avaliacao",
-    descricaoVisual: "Nota, score ou avaliacao ja presente na oferta.",
-    campoOrigem: "avaliacao|rating|score",
+    nomeVisual: "Avaliação",
+    descricaoVisual: "Avaliação calculada a partir do score oficial da oferta.",
+    campoOrigem: "score|inteligenciaUniversalV2.score",
     ordemPadrao: 140,
-    ativoPorPadrao: false,
-    emojiPadrao: "⭐"
+    ativoPorPadrao: true,
+    emojiPadrao: "✰"
   }),
   quantidade_avaliacoes: bloco({
     tipo: "quantidade_avaliacoes",

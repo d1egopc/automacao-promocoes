@@ -387,5 +387,6 @@ function gerarTemplateUniversal(oferta = {}) {
 }
 
 module.exports = {
-  gerarTemplateUniversal
+  gerarTemplateUniversal,
+  apresentarScore
 };
