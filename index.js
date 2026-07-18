@@ -105,6 +105,28 @@ const {
   enviarCampanhaManual
 } = require("./campanhas/enviarCampanha");
 
+const {
+  salvarMidiaTemporaria,
+  excluirMidiaTemporaria,
+  limparMidiasOrfas,
+  parseMultipartFormData
+} = require("./campanhas/midiaTemporaria");
+
+const {
+  listarHistoricoCampanhas,
+  obterCampanhaHistorico
+} = require("./campanhas/historicoCampanhas");
+
+const {
+  salvarAgendamentoCampanha,
+  listarAgendamentosCampanhas,
+  obterAgendamentoCampanha,
+  cancelarAgendamentoCampanha,
+  removerAgendamentoCampanha,
+  executarAgendamentoCampanha,
+  executarAgendamentosPendentesTodosClientes
+} = require("./campanhas/agendamentosCampanhas");
+
 const mensageiro = require("./modules/mensageiro");
 const criarRotasMensageiro = require("./modules/mensageiro/routes");
 const socialModule = require("./modules/social");
@@ -20408,6 +20430,155 @@ app.get("/destinos/:id", (req, res) => {
 
 // ================ CAMPANHAS =======================
 
+
+function depsCampanhasManual() {
+  return {
+    destinosPorCliente,
+    sessoes,
+    configsPorCliente,
+    usuarioTemCreditos,
+    debitarCreditos,
+    corrigirImagemUrl
+  };
+}
+app.post(
+  "/campanhas/midia/upload",
+  express.raw({
+    type: req => /^multipart\/form-data/i.test(String(req.headers["content-type"] || "")),
+    limit: process.env.CAMPANHAS_MEDIA_MAX_BODY || "55mb"
+  }),
+  (req, res) => {
+    try {
+      const clienteId = getClienteId(req);
+      limparMidiasOrfas({ clienteId });
+      const multipart = parseMultipartFormData(
+        Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
+        req.headers["content-type"] || ""
+      );
+      const arquivo = multipart.arquivos.find(item => item.campo === "arquivo") || multipart.arquivos[0];
+      if (!arquivo) throw new Error("campanhas_midia_arquivo_obrigatorio");
+      const midia = salvarMidiaTemporaria({
+        clienteId,
+        buffer: arquivo.buffer,
+        nomeOriginal: arquivo.nomeOriginal,
+        mimeType: arquivo.mimeType,
+        tipo: multipart.campos.tipo || multipart.campos.midiaTipo || ""
+      });
+      return res.json({ ok: true, clienteId, midia });
+    } catch (e) {
+      return res.status(400).json({ ok: false, erro: e.message || "campanhas_midia_upload_falhou" });
+    }
+  }
+);
+
+app.delete("/campanhas/midia/:midiaId", (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    const midia = excluirMidiaTemporaria(clienteId, req.params.midiaId);
+    return res.json({ ok: true, clienteId, midia });
+  } catch (e) {
+    const status = e.message === "campanhas_midia_nao_encontrada" ? 404 : 400;
+    return res.status(status).json({ ok: false, erro: e.message || "campanhas_midia_exclusao_falhou" });
+  }
+});
+
+
+app.get("/campanhas/historico", (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    const limite = Number(req.query?.limite || req.query?.limit || 100);
+    return res.json({
+      ok: true,
+      clienteId,
+      historico: listarHistoricoCampanhas(clienteId, { limite })
+    });
+  } catch (e) {
+    return res.status(400).json({ ok: false, erro: e.message || "campanhas_historico_consulta_falhou" });
+  }
+});
+
+app.get("/campanhas/historico/:campanhaId", (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    const campanha = obterCampanhaHistorico(clienteId, req.params.campanhaId);
+    if (!campanha) return res.status(404).json({ ok: false, erro: "campanha_historico_nao_encontrada" });
+    return res.json({ ok: true, clienteId, campanha });
+  } catch (e) {
+    return res.status(400).json({ ok: false, erro: e.message || "campanhas_historico_consulta_falhou" });
+  }
+});
+app.get("/campanhas/agendamentos", (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    const limite = Number(req.query?.limite || req.query?.limit || 100);
+    const status = req.query?.status || "";
+    return res.json({
+      ok: true,
+      clienteId,
+      agendamentos: listarAgendamentosCampanhas(clienteId, { limite, status })
+    });
+  } catch (e) {
+    return res.status(400).json({ ok: false, erro: e.message || "campanhas_agendamentos_consulta_falhou" });
+  }
+});
+
+app.post("/campanhas/agendamentos", (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    const agendamento = salvarAgendamentoCampanha(clienteId, req.body || {});
+    return res.json({ ok: true, clienteId, agendamento });
+  } catch (e) {
+    return res.status(400).json({ ok: false, erro: e.message || "campanhas_agendamento_criacao_falhou" });
+  }
+});
+
+app.get("/campanhas/agendamentos/:agendamentoId", (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    const agendamento = obterAgendamentoCampanha(clienteId, req.params.agendamentoId);
+    if (!agendamento) return res.status(404).json({ ok: false, erro: "campanhas_agendamento_nao_encontrado" });
+    return res.json({ ok: true, clienteId, agendamento });
+  } catch (e) {
+    return res.status(400).json({ ok: false, erro: e.message || "campanhas_agendamento_consulta_falhou" });
+  }
+});
+
+app.post("/campanhas/agendamentos/:agendamentoId/cancelar", (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    const agendamento = cancelarAgendamentoCampanha(clienteId, req.params.agendamentoId);
+    return res.json({ ok: true, clienteId, agendamento });
+  } catch (e) {
+    const status = e.message === "campanhas_agendamento_nao_encontrado" ? 404 : 400;
+    return res.status(status).json({ ok: false, erro: e.message || "campanhas_agendamento_cancelamento_falhou" });
+  }
+});
+
+app.delete("/campanhas/agendamentos/:agendamentoId", (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    const agendamento = removerAgendamentoCampanha(clienteId, req.params.agendamentoId);
+    return res.json({ ok: true, clienteId, agendamento });
+  } catch (e) {
+    const status = e.message === "campanhas_agendamento_nao_encontrado" ? 404 : 400;
+    return res.status(status).json({ ok: false, erro: e.message || "campanhas_agendamento_exclusao_falhou" });
+  }
+});
+
+app.post("/campanhas/agendamentos/:agendamentoId/executar", async (req, res) => {
+  try {
+    const clienteId = getClienteId(req);
+    const resultado = await executarAgendamentoCampanha({
+      clienteId,
+      agendamentoId: req.params.agendamentoId,
+      deps: depsCampanhasManual()
+    });
+    return res.status(resultado.ok ? 200 : 400).json({ clienteId, ...resultado });
+  } catch (e) {
+    const status = e.message === "campanhas_agendamento_nao_encontrado" ? 404 : 400;
+    return res.status(status).json({ ok: false, erro: e.message || "campanhas_agendamento_execucao_falhou" });
+  }
+});
 app.post("/campanhas/enviar", async (req, res) => {
   try {
     const clienteId = getClienteId(req);
@@ -20415,6 +20586,7 @@ app.post("/campanhas/enviar", async (req, res) => {
     const {
       mensagem,
       imagemUrl,
+      midiaId,
       destinosIds
     } = req.body || {};
 
@@ -20422,6 +20594,7 @@ app.post("/campanhas/enviar", async (req, res) => {
       clienteId,
       mensagem,
       imagemUrl,
+      midiaId,
       destinosIds,
       destinosPorCliente,
       sessoes,
@@ -20445,6 +20618,23 @@ app.post("/campanhas/enviar", async (req, res) => {
     });
   }
 });
+let campanhasAgendamentosRodando = false;
+async function rodarAgendamentosCampanhasPendentes() {
+  if (campanhasAgendamentosRodando) return;
+  campanhasAgendamentosRodando = true;
+  try {
+    await executarAgendamentosPendentesTodosClientes({ deps: depsCampanhasManual() });
+  } catch (e) {
+    console.log("[CAMPANHAS-AGENDAMENTO-SCHEDULER-ERRO]", { erro: e.message });
+  } finally {
+    campanhasAgendamentosRodando = false;
+  }
+}
+
+if (process.env.CAMPANHAS_AGENDAMENTOS_SCHEDULER !== "false" && !global.__optimusCampanhasAgendamentosScheduler) {
+  global.__optimusCampanhasAgendamentosScheduler = true;
+  setInterval(rodarAgendamentosCampanhasPendentes, Number(process.env.CAMPANHAS_AGENDAMENTOS_INTERVALO_MS || 60000));
+}
 
 // ================= TELEGRAM =================
 
