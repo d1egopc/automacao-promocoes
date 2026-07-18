@@ -71,9 +71,9 @@ function normalizarCupomAmazon(cupom = "") {
     "AMAZON.COM",
     "CUPOM",
     "CODIGO",
-    "CÓDIGO",
+    "CÃ“DIGO",
     "PROMOCAO",
-    "PROMOÇÃO",
+    "PROMOÃ‡ÃƒO",
     "DESCONTO",
     "OFERTA",
     "PRIME",
@@ -94,7 +94,7 @@ function normalizarCupomAmazon(cupom = "") {
 function extrairCupomTextoRadarAmazon(textoRadar = "") {
   const fonte = String(textoRadar || "");
   const match =
-    fonte.match(/(?:cupom|use o cupom|aplique o cupom|codigo promocional|c[oó]digo promocional|com o c[oó]digo)\s*:?\s*([A-Z0-9_-]{4,24})/i) ||
+    fonte.match(/(?:cupom|use o cupom|aplique o cupom|codigo promocional|c[oÃ³]digo promocional|com o c[oÃ³]digo)\s*:?\s*([A-Z0-9_-]{4,24})/i) ||
     fonte.match(/\b([A-Z]{3,}[A-Z0-9_-]{1,21})\b\s*(?:na amazon|amazon|no carrinho|para ganhar|para desconto|com cupom)/i);
 
   const cupom = normalizarCupomAmazon(match?.[1] || "");

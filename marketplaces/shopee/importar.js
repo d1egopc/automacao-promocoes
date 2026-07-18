@@ -238,7 +238,7 @@ return async function importarShopee(url, config) {
       "DISPON",
       "DISPONIVEL",
       "DISPONVEL",
-      "DISPON�VEL"
+      "DISPONÍVEL"
     ]);
 
     if (!codigo || bloqueados.has(codigo)) return "";

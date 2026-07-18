@@ -202,7 +202,7 @@ async function importarProdutoKabumViaAwin(
   const { gerarDeepLinkAwin } = deps;
 
   if (typeof gerarDeepLinkAwin !== "function") {
-    throw new Error("gerarDeepLinkAwin nÃ£o recebido no importador KaBuM");
+    throw new Error("gerarDeepLinkAwin não recebido no importador KaBuM");
   }
   const response = await baixarHtmlKabum(url);
 

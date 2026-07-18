@@ -78,7 +78,7 @@ router.get("/config", (req, res) => {
   if (!mensageiroPermitido(req, clienteId)) {
     return res.status(403).json({
       ok: false,
-      erro: "Mensageiro nÃ£o disponÃ­vel no seu plano"
+      erro: "Mensageiro não disponível no seu plano"
     });
   }
 
@@ -97,7 +97,7 @@ router.post("/config", (req, res) => {
   if (!mensageiroPermitido(req, clienteId)) {
     return res.status(403).json({
       ok: false,
-      erro: "Mensageiro nÃ£o disponÃ­vel no seu plano"
+      erro: "Mensageiro não disponível no seu plano"
     });
   }
 
@@ -120,7 +120,7 @@ router.get("/historico", (req, res) => {
   if (!mensageiroPermitido(req, clienteId)) {
     return res.status(403).json({
       ok: false,
-      erro: "Mensageiro nÃ£o disponÃ­vel no seu plano"
+      erro: "Mensageiro não disponível no seu plano"
     });
   }
 
@@ -142,7 +142,7 @@ router.post("/testar-gatilho", (req, res) => {
   if (!mensageiroPermitido(req, clienteId)) {
     return res.status(403).json({
       ok: false,
-      erro: "Mensageiro nÃ£o disponÃ­vel no seu plano"
+      erro: "Mensageiro não disponível no seu plano"
     });
   }
 
@@ -176,7 +176,7 @@ router.get("/", (req, res) => {
   if (!mensageiroPermitido(req, clienteId)) {
     return res.status(403).json({
       ok: false,
-      erro: "Mensageiro nÃ£o disponÃ­vel no seu plano"
+      erro: "Mensageiro não disponível no seu plano"
     });
   }
 
@@ -197,7 +197,7 @@ router.post("/", async (req, res) => {
   if (!mensageiroPermitido(req, clienteId)) {
     return res.status(403).json({
       ok: false,
-      erro: "Mensageiro nÃ£o disponÃ­vel no seu plano"
+      erro: "Mensageiro não disponível no seu plano"
     });
   }
 

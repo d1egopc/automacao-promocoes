@@ -2732,7 +2732,7 @@ app.post("/fila", (req, res) => {
     if (!clienteId) {
       return res.status(401).json({
         ok: false,
-        erro: "UsuÃ¡rio nÃ£o identificado"
+        erro: "Usuário não identificado"
       });
     }
 
@@ -2836,7 +2836,7 @@ if (deveIgnorarOfertaRepetida(oferta)) {
   return res.json({
     ok: true,
     ignorada: true,
-    motivo: "Oferta repetida recentemente sem queda relevante de preÃ§o ou cupom novo.",
+    motivo: "Oferta repetida recentemente sem queda relevante de preço ou cupom novo.",
     oferta
   });
 }
@@ -2909,7 +2909,7 @@ app.get("/r/:codigo", (req, res) => {
     const dados = config.linksGerados[codigo];
 
     if (!dados?.original) {
-      return res.status(404).send("Link nÃ£o encontrado");
+      return res.status(404).send("Link não encontrado");
     }
 
     dados.cliques = (dados.cliques || 0) + 1;
@@ -3019,7 +3019,7 @@ app.post("/destinos", (req, res) => {
   if (!Array.isArray(destinos)) {
     return res.status(400).json({
       ok: false,
-      erro: "Formato invÃ¡lido"
+      erro: "Formato inválido"
     });
   }
 
@@ -3057,7 +3057,7 @@ app.get("/automacao/status", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "UsuÃ¡rio nÃ£o identificado"
+      erro: "Usuário não identificado"
     });
   }
 
@@ -3188,7 +3188,7 @@ app.get("/automacao", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "UsuÃ¡rio nÃ£o identificado"
+      erro: "Usuário não identificado"
     });
   }
 
@@ -3207,7 +3207,7 @@ app.post("/automacao/toggle", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "UsuÃ¡rio nÃ£o identificado"
+      erro: "Usuário não identificado"
     });
   }
 
@@ -3243,7 +3243,7 @@ app.delete("/fila/item/:id", (req, res) => {
   if (index === -1) {
     return res.status(404).json({
       ok: false,
-      erro: "Item nÃ£o encontrado para este usuÃ¡rio"
+      erro: "Item não encontrado para este usuário"
     });
   }
 
@@ -3299,7 +3299,7 @@ app.delete("/fila/:index", (req, res) => {
   const clienteId = getClienteId(req);
 
   if (isNaN(index) || index < 0 || index >= fila.length) {
-    return res.status(400).send("Ãndice invÃ¡lido");
+    return res.status(400).send("Índice inválido");
   }
 
   const oferta = fila[index];
@@ -3307,7 +3307,7 @@ app.delete("/fila/:index", (req, res) => {
   if ((oferta.clienteId || "admin") !== clienteId) {
     return res.status(403).json({
       ok: false,
-      erro: "Sem permissÃ£o para remover esta oferta"
+      erro: "Sem permissão para remover esta oferta"
     });
   }
 
@@ -3339,7 +3339,7 @@ const filaCliente = fila.filter(o =>
 if (isNaN(index) || index < 0 || index >= filaCliente.length) {
   return res.status(400).json({
     ok: false,
-    erro: "Ãndice invÃ¡lido"
+    erro: "Índice inválido"
   });
 }
 
@@ -3350,7 +3350,7 @@ const indexReal = fila.findIndex(o => o === oferta);
   if ((oferta.clienteId || "admin") !== clienteIdReq) {
     return res.status(403).json({
       ok: false,
-      erro: "Sem permissÃ£o para enviar esta oferta"
+      erro: "Sem permissão para enviar esta oferta"
     });
   }
 
@@ -3480,7 +3480,7 @@ app.post("/admin/planos", (req, res) => {
   if (!body.nome) {
     return res.status(400).json({
       ok: false,
-      erro: "Nome do plano obrigatÃ³rio"
+      erro: "Nome do plano obrigatório"
     });
   }
 
@@ -3563,7 +3563,7 @@ app.delete("/admin/planos/:nome", (req, res) => {
   if (!planos[nome]) {
     return res.status(404).json({
       ok: false,
-      erro: "Plano nÃ£o encontrado"
+      erro: "Plano não encontrado"
     });
   }
 
@@ -3574,7 +3574,7 @@ app.delete("/admin/planos/:nome", (req, res) => {
   if (usuariosUsandoPlano.length > 0) {
     return res.status(400).json({
       ok: false,
-      erro: "NÃ£o Ã© possÃ­vel excluir plano em uso por usuÃ¡rios"
+      erro: "Não é possível excluir plano em uso por usuários"
     });
   }
 
@@ -3584,7 +3584,7 @@ app.delete("/admin/planos/:nome", (req, res) => {
 
   return res.json({
     ok: true,
-    mensagem: "Plano excluÃ­do com sucesso"
+    mensagem: "Plano excluído com sucesso"
   });
 });
 
@@ -3601,7 +3601,7 @@ app.delete("/admin/usuarios/:id", (req, res) => {
   if (id === "admin") {
     return res.status(400).json({
       ok: false,
-      erro: "NÃ£o Ã© possÃ­vel excluir o Admin Master principal"
+      erro: "Não é possível excluir o Admin Master principal"
     });
   }
 
@@ -3612,7 +3612,7 @@ app.delete("/admin/usuarios/:id", (req, res) => {
   if (usuarios.length === antes) {
     return res.status(404).json({
       ok: false,
-      erro: "UsuÃ¡rio nÃ£o encontrado"
+      erro: "Usuário não encontrado"
     });
   }
 
@@ -3627,7 +3627,7 @@ app.delete("/admin/usuarios/:id", (req, res) => {
 
   return res.json({
     ok: true,
-    mensagem: "UsuÃ¡rio excluÃ­do com sucesso",
+    mensagem: "Usuário excluído com sucesso",
     id
   });
 });
@@ -3645,7 +3645,7 @@ app.post("/admin/usuarios", (req, res) => {
   if (!body.nome || !body.email || !body.senha) {
     return res.status(400).json({
       ok: false,
-      erro: "Nome, email e senha obrigatÃ³rios"
+      erro: "Nome, email e senha obrigatórios"
     });
   }
 
@@ -3656,7 +3656,7 @@ app.post("/admin/usuarios", (req, res) => {
   if (existe) {
     return res.status(400).json({
       ok: false,
-      erro: "Email jÃ¡ cadastrado"
+      erro: "Email já cadastrado"
     });
   }
 
@@ -3699,7 +3699,7 @@ app.put("/admin/usuarios/:id", (req, res) => {
   if (!usuario) {
     return res.status(404).json({
       ok: false,
-      erro: "UsuÃ¡rio nÃ£o encontrado"
+      erro: "Usuário não encontrado"
     });
   }
 
@@ -3762,7 +3762,7 @@ app.post("/config", (req, res) => {
   if (!clienteId) {
     return res.status(401).json({
       ok: false,
-      erro: "Cliente nÃ£o identificado"
+      erro: "Cliente não identificado"
     });
   }
 
@@ -4031,7 +4031,7 @@ function auth(req, res, next) {
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
   if (!token) {
-    return res.status(401).json({ erro: "Token invÃ¡lido" });
+    return res.status(401).json({ erro: "Token inválido" });
   }
 
   try {
@@ -4045,7 +4045,7 @@ function auth(req, res, next) {
     if (!usuarioExiste || usuarioExiste.ativo === false) {
       return res.status(401).json({
         ok: false,
-        erro: "UsuÃ¡rio nÃ£o existe ou foi desativado"
+        erro: "Usuário não existe ou foi desativado"
       });
     }
 
@@ -4054,7 +4054,7 @@ function auth(req, res, next) {
 
     next();
   } catch {
-    return res.status(401).json({ erro: "NÃ£o autorizado" });
+    return res.status(401).json({ erro: "Não autorizado" });
   }
 }
 
@@ -7869,11 +7869,11 @@ app.post("/login", async (req, res) => {
   );
 
   if (!usuario) {
-    return res.status(401).json({ erro: "UsuÃ¡rio invÃ¡lido" });
+    return res.status(401).json({ erro: "Usuário inválido" });
   }
 
   if (usuario.ativo === false) {
-    return res.status(403).json({ erro: "UsuÃ¡rio inativo" });
+    return res.status(403).json({ erro: "Usuário inativo" });
   }
 
  let senhaOk = false;
@@ -7881,7 +7881,7 @@ app.post("/login", async (req, res) => {
 senhaOk = String(usuario.senha || "") === String(pass || "");
 
 if (!senhaOk) {
-  return res.status(401).json({ erro: "Senha invÃ¡lida" });
+  return res.status(401).json({ erro: "Senha inválida" });
 }
 
   const token = jwt.sign(
@@ -8017,7 +8017,7 @@ app.post("/limpar-sessao/:id", async (req, res) => {
 
     return res.json({
       ok: true,
-      message: "SessÃ£o limpa. Gere um novo QR Code.",
+      message: "Sessão limpa. Gere um novo QR Code.",
       id
     });
 
@@ -8043,7 +8043,7 @@ app.get("/me", (req, res) => {
   if (!usuario) {
     return res.status(404).json({
       ok: false,
-      erro: "UsuÃ¡rio nÃ£o encontrado"
+      erro: "Usuário não encontrado"
     });
   }
 
@@ -8193,7 +8193,7 @@ if (!isAdminMaster(req)) {
   if (!liberados.includes(marketplace)) {
     return res.status(403).json({
       ok: false,
-      erro: `Marketplace ${marketplace} nÃ£o liberado no seu plano`
+      erro: `Marketplace ${marketplace} não liberado no seu plano`
     });
   }
 }
@@ -8245,7 +8245,7 @@ app.delete("/integracoes/:marketplace", (req, res) => {
       marketplace,
       configurado: false,
       status: "nao_configurado",
-      message: "IntegraÃ§Ã£o removida com sucesso"
+      message: "Integração removida com sucesso"
     });
 
   } catch (e) {
@@ -8253,7 +8253,7 @@ app.delete("/integracoes/:marketplace", (req, res) => {
 
     return res.status(500).json({
       ok: false,
-      erro: "Erro interno ao remover integraÃ§Ã£o"
+      erro: "Erro interno ao remover integração"
     });
   }
 });
@@ -8266,7 +8266,7 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
   if (!config) {
     return res.status(400).json({
       ok: false,
-      erro: "IntegraÃ§Ã£o nÃ£o configurada"
+      erro: "Integração não configurada"
     });
   }
 
@@ -8443,7 +8443,7 @@ app.post("/awin/gerar-link", async (req, res) => {
     if (!url) {
       return res.status(400).json({
         ok: false,
-        erro: "URL obrigatÃ³ria"
+        erro: "URL obrigatória"
       });
     }
 
@@ -8469,7 +8469,7 @@ app.post("/awin/gerar-link", async (req, res) => {
     if (!linkAfiliado) {
       return res.status(400).json({
         ok: false,
-        erro: "NÃ£o foi possÃ­vel gerar o link afiliado Awin"
+        erro: "Não foi possível gerar o link afiliado Awin"
       });
     }
 
@@ -8949,7 +8949,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
       urlEntrada.match(/[?&]productId=(\d+)/i)?.[1];
 
     if (!productId) {
-      throw new Error("Product ID nÃ£o encontrado no link AliExpress");
+      throw new Error("Product ID não encontrado no link AliExpress");
     }
 
     const credenciais = marketplace === "awin"
@@ -9073,7 +9073,7 @@ console.log("[INFO] AliExpress produto encontrado");
     imagem: "",
     categoria: "AliExpress",
     avisoCupom,
-    aviso: "AliExpress nÃ£o retornou dados pela API. PreÃ§os extraÃ­dos do link quando disponÃ­veis."
+    aviso: "AliExpress não retornou dados pela API. Preços extraídos do link quando disponíveis."
   };
 }
     
@@ -9297,7 +9297,7 @@ const response = await fetch(urlConsulta, {
       linkAfiliado,
       imagem,
       categoria: "Magalu",
-      aviso: "Verifique se hÃ¡ cupons disponÃ­veis na pÃ¡gina"
+      aviso: "Verifique se há cupons disponíveis na página"
     };
   } catch (e) {
     console.log("[API] erro importarMagalu:", e.message);
@@ -9399,7 +9399,7 @@ app.post("/importar-magalu-manual", async (req, res) => {
     if (!url) {
       return res.status(400).json({
         ok: false,
-        erro: "URL obrigatÃ³ria"
+        erro: "URL obrigatória"
       });
     }
 
@@ -9416,7 +9416,7 @@ app.post("/importar-magalu-manual", async (req, res) => {
     if (!produto?.precoAtual) {
       return res.status(400).json({
         ok: false,
-        erro: "Produto invÃ¡lido"
+        erro: "Produto inválido"
       });
     }
 
@@ -10985,7 +10985,7 @@ app.post("/sessoes", (req, res) => {
   if (!isAdminMaster(req) && sessoesCliente.length >= limite) {
   return res.status(403).json({
     ok: false,
-    erro: `Seu plano permite apenas ${limite} sessÃ£o(Ãµes).`
+    erro: `Seu plano permite apenas ${limite} sessão(ões).`
   });
 }
 
@@ -11008,7 +11008,7 @@ const id = normalizarSessaoId(
     if (sessoesMeta[id]) {
       return res.status(400).json({
         ok: false,
-        erro: "SessÃ£o jÃ¡ existe"
+        erro: "Sessão já existe"
       });
     }
 
@@ -11114,7 +11114,7 @@ salvarConfig();
 
     return res.json({
       ok: true,
-      message: "SessÃ£o excluÃ­da com sucesso",
+      message: "Sessão excluída com sucesso",
       id
     });
   } catch (e) {
@@ -11183,7 +11183,7 @@ app.post("/reset/:id", async (req, res) => {
 
     return res.json({
       ok: true,
-      message: "SessÃ£o resetada. Gere novo QR.",
+      message: "Sessão resetada. Gere novo QR.",
       id
     });
 
@@ -11242,7 +11242,7 @@ app.post("/conectar", async (req, res) => {
   const clienteId = getClienteId(req);
 
   if (!clienteId) {
-    return res.status(401).json({ erro: "UsuÃ¡rio nÃ£o identificado" });
+    return res.status(401).json({ erro: "Usuário não identificado" });
   }
 
   config.sessoesWhatsapp = config.sessoesWhatsapp || [];
@@ -11258,7 +11258,7 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
 
     return res.status(403).json({
       ok: false,
-      erro: `Seu plano permite atÃ© ${limiteSessoes} sessÃ£o(Ãµes) WhatsApp.`,
+      erro: `Seu plano permite até ${limiteSessoes} sessão(ões) WhatsApp.`,
       limite: limiteSessoes,
       usadas: sessoesCliente.length
     });
@@ -11280,7 +11280,7 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
   if (config.sessoesWhatsapp.includes(sessaoId)) {
     return res.status(400).json({
       ok: false,
-      erro: "JÃ¡ existe uma conexÃ£o com esse ID. Tente criar uma nova conexÃ£o novamente.",
+      erro: "Já existe uma conexão com esse ID. Tente criar uma nova conexão novamente.",
       id: sessaoId
     });
   }
@@ -11299,7 +11299,7 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
 
   return res.json({
     ok: true,
-    message: "SessÃ£o iniciada",
+    message: "Sessão iniciada",
     id: sessaoId
   });
 });
@@ -11392,7 +11392,7 @@ app.post("/magalu/gerar-link", (req, res) => {
     if (!promoterId) {
       return res.status(400).json({
         ok: false,
-        erro: "Magalu nÃ£o configurada."
+        erro: "Magalu não configurada."
       });
     }
 
@@ -11442,7 +11442,7 @@ app.get("/grupos/:id", async (req, res) => {
         grupos: gruposPorSessao[id] || [],
         gruposLista: gruposPorSessao[id] || [],
         cache: true,
-        aviso: "SessÃ£o nÃ£o estÃ¡ conectada."
+        aviso: "Sessão não está conectada."
       });
     }
 

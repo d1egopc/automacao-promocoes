@@ -188,7 +188,7 @@ for (const trecho of [
 ]) {
   assert.ok(renderCompletoV11.mensagem.includes(trecho), `preview inclui: ${trecho}`);
 }
-assert.ok(!/[ÃÅ¢ï¿½�]/.test(renderCompletoV11.mensagem), "preview personalizado nao contem mojibake");
+assert.ok(!/[\u00c3\u00c5\u00a2\u00ef\u00bf\u00bd\uFFFD]/u.test(renderCompletoV11.mensagem), "preview personalizado nao contem mojibake");
 
 const semCupomV11 = renderizarTemplatePersonalizado({
   oferta: { ...ofertaPreviewV11, cupom: "", cupomCodigo: "" },
@@ -438,7 +438,7 @@ assert.strictEqual(previewPadrao.ok, true, "preview padrao funciona");
 assert.strictEqual(previewPadrao.templateIdUsado, "padrao_optimus");
 assert.deepStrictEqual(previewPadrao.blocosRenderizados, []);
 assert.strictEqual(previewPadrao.mensagem, gerarTemplateUniversal(obterOfertaPreviewOficial()), "preview padrao usa Template Universal real");
-assert.ok(!/[ÃÅ¢ï¿½�]/.test(previewPadrao.mensagem), "preview padrao nao contem mojibake");
+assert.ok(!/[\u00c3\u00c5\u00a2\u00ef\u00bf\u00bd\uFFFD]/u.test(previewPadrao.mensagem), "preview padrao nao contem mojibake");
 
 function scoreUniversalReferencia(valor) {
   if (valor && typeof valor === "object") {
