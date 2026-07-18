@@ -357,7 +357,7 @@ function criarConfigAutomaticoPadrao(clienteId = "admin") {
     templatePadraoId: "padrao-instagram",
     horarios: [],
     quantidadeDiaria: 5,
-    limiteDiarioAutomaticoAtivo: false,
+    limiteDiarioAutomaticoAtivo: true,
     maxPublicacoesAutomaticasPorDia: 5,
     janelaFuncionamento: {
       inicio: "08:00",
@@ -695,6 +695,12 @@ function normalizarConfigAutomatico(clienteId = "admin", config = {}) {
   const gatilho = config.gatilho && typeof config.gatilho === "object" ? config.gatilho : {};
   const cta = config.cta && typeof config.cta === "object" ? config.cta : {};
   const destino = texto(cta.destino || padrao.cta.destino).toLowerCase();
+  const quantidadeDiaria = inteiro(
+    config.quantidadeDiaria ?? config.maxPublicacoesAutomaticasPorDia,
+    padrao.quantidadeDiaria,
+    1,
+    20
+  );
 
   return {
     ...padrao,
@@ -703,14 +709,14 @@ function normalizarConfigAutomatico(clienteId = "admin", config = {}) {
     ativo: config.ativo === true,
     templatePadraoId: texto(config.templatePadraoId || padrao.templatePadraoId),
     horarios: lista(config.horarios).map(item => hora(item)).filter(Boolean).slice(0, 24),
-    quantidadeDiaria: inteiro(config.quantidadeDiaria, padrao.quantidadeDiaria, 1, 10),
-    limiteDiarioAutomaticoAtivo: config.limiteDiarioAutomaticoAtivo === true,
-    maxPublicacoesAutomaticasPorDia: inteiro(config.maxPublicacoesAutomaticasPorDia, padrao.maxPublicacoesAutomaticasPorDia, 1, 10),
+    quantidadeDiaria,
+    limiteDiarioAutomaticoAtivo: true,
+    maxPublicacoesAutomaticasPorDia: quantidadeDiaria,
     janelaFuncionamento: {
       inicio: hora(janela.inicio, padrao.janelaFuncionamento.inicio),
       fim: hora(janela.fim, padrao.janelaFuncionamento.fim)
     },
-    intervaloMinimoMinutos: inteiro(config.intervaloMinimoMinutos, padrao.intervaloMinimoMinutos, 20, 1440),
+    intervaloMinimoMinutos: inteiro(config.intervaloMinimoMinutos, padrao.intervaloMinimoMinutos, 10, 1440),
     idadeMaximaHoras: inteiro(config.idadeMaximaHoras, padrao.idadeMaximaHoras, 1, 168),
     marketplacesPermitidos: lista(config.marketplacesPermitidos).map(texto).filter(Boolean),
     categoriasPermitidas: lista(config.categoriasPermitidas).map(texto).filter(Boolean),
@@ -1247,7 +1253,7 @@ function scoreAgendamentoAutomatico(agendamento = {}) {
 function reconciliarLimiteDiarioAutomaticoSocial(clienteId = "admin", config = {}) {
   if (config.limiteDiarioAutomaticoAtivo !== true) return { canceladasExcedentes: 0 };
 
-  const limite = inteiro(config.maxPublicacoesAutomaticasPorDia, 5, 1, 10);
+  const limite = inteiro(config.quantidadeDiaria ?? config.maxPublicacoesAutomaticasPorDia, 5, 1, 20);
   const atuais = listarAgendamentosSocial(clienteId);
   const agora = Date.now();
   const grupos = new Map();
@@ -1310,14 +1316,21 @@ function reconciliarLimiteDiarioAutomaticoSocial(clienteId = "admin", config = {
 
 function setConfigAutomaticoSocial(clienteId = "admin", dados = {}) {
   const atual = getConfigAutomaticoSocial(clienteId);
+  const entrada = dados && typeof dados === "object" ? { ...dados } : {};
+  if (Object.prototype.hasOwnProperty.call(entrada, "quantidadeDiaria") &&
+    !Object.prototype.hasOwnProperty.call(entrada, "maxPublicacoesAutomaticasPorDia")) {
+    entrada.maxPublicacoesAutomaticasPorDia = entrada.quantidadeDiaria;
+  }
+  if (!Object.prototype.hasOwnProperty.call(entrada, "quantidadeDiaria") &&
+    Object.prototype.hasOwnProperty.call(entrada, "maxPublicacoesAutomaticasPorDia")) {
+    entrada.quantidadeDiaria = entrada.maxPublicacoesAutomaticasPorDia;
+  }
   const config = normalizarConfigAutomatico(clienteId, {
     ...atual,
-    ...(dados && typeof dados === "object" ? dados : {})
+    ...entrada
   });
   escreverCliente(clienteId, "automatico", config);
-  const limiteReduzido = atual.limiteDiarioAutomaticoAtivo === true &&
-    config.limiteDiarioAutomaticoAtivo === true &&
-    Number(config.maxPublicacoesAutomaticasPorDia) < Number(atual.maxPublicacoesAutomaticasPorDia);
+  const limiteReduzido = Number(config.quantidadeDiaria) < Number(atual.quantidadeDiaria);
   const reconciliacao = limiteReduzido
     ? reconciliarLimiteDiarioAutomaticoSocial(clienteId, config)
     : { canceladasExcedentes: 0 };

@@ -211,40 +211,27 @@ function agendamentosAutomaticosOcupamDia(agendamentos = [], agora = new Date())
 
 function resumoOcupacaoAutomaticaDia(agendamentos = [], agora = new Date()) {
   const ocupadas = agendamentosAutomaticosOcupamDia(agendamentos, agora);
-  const publicadas = ocupadas.filter(item => texto(item.status).toLowerCase() === "publicada").length;
+  const publicadas = ocupadas.filter(item => texto(item.status).toLowerCase() === "publicada");
+  const agendadasAtivas = ocupadas.filter(item => texto(item.status).toLowerCase() !== "publicada");
+  const dia = chaveDia(agora);
   return {
-    data: chaveDia(agora),
+    data: dia,
     ocupadas,
-    publicadas,
-    pendentes: ocupadas.length - publicadas
+    publicadas: publicadas.length,
+    pendentes: agendadasAtivas.length,
+    agendadasAtivas: agendadasAtivas.length
   };
 }
 
 function calcularVagasAutomaticasDia({ config = {}, agendamentos = [], agora = new Date() } = {}) {
-  const limiteAtivo = config.limiteDiarioAutomaticoAtivo === true;
-  if (!limiteAtivo) {
-    const quantidadeDiaria = Math.min(10, Math.max(1, Number(config.quantidadeDiaria || 5) || 5));
-    const jaCriadosHoje = agendamentosAutomaticosNoDia(agendamentos, agora);
-    return {
-      data: chaveDia(agora),
-      limiteAtivo: false,
-      limite: quantidadeDiaria,
-      publicadas: 0,
-      pendentes: jaCriadosHoje.length,
-      ocupadas: jaCriadosHoje,
-      vagas: Math.max(0, quantidadeDiaria - jaCriadosHoje.length),
-      motivo: "compatibilidade_quantidade_diaria"
-    };
-  }
-
-  const limite = Math.min(10, Math.max(1, Number(config.maxPublicacoesAutomaticasPorDia || 5) || 5));
+  const limite = Math.min(20, Math.max(1, Number(config.quantidadeDiaria ?? config.maxPublicacoesAutomaticasPorDia ?? 5) || 5));
   const ocupacao = resumoOcupacaoAutomaticaDia(agendamentos, agora);
   return {
     ...ocupacao,
     limiteAtivo: true,
     limite,
     vagas: Math.max(0, limite - ocupacao.ocupadas.length),
-    motivo: "limite_diario_automatico"
+    motivo: "meta_operacional_diaria"
   };
 }
 
@@ -370,7 +357,7 @@ function respeitaDistancia(ms = 0, ocupados = [], intervaloMinutos = 40) {
 }
 
 function proximosHorariosDisponiveis({ config = {}, agendamentos = [], agora = new Date(), quantidade = 0 } = {}) {
-  const intervalo = Math.max(20, Number(config.intervaloMinimoMinutos || 40) || 40);
+  const intervalo = Math.max(10, Number(config.intervaloMinimoMinutos || 40) || 40);
   const janela = janelaDoDia(config, agora);
   const foraDaRodadaDoDia = agora.getTime() > janela.fim.getTime();
   const ocupados = horariosOcupados(agendamentos, agora);
@@ -553,6 +540,14 @@ async function executarAutomaticoCliente({
     const limiteDia = calcularVagasAutomaticasDia({ config, agendamentos, agora });
     const restanteDia = limiteDia.vagas;
 
+    logSocial("[SOCIAL-AUTOMACAO-CONTAGEM]", {
+      clienteId: clienteSeguro,
+      limite: limiteDia.limite,
+      publicadasOperacionais: limiteDia.publicadas,
+      agendadasAtivas: limiteDia.agendadasAtivas,
+      faltantes: restanteDia
+    });
+
     logSocial("[SOCIAL-AUTO-LIMITE-DIARIO]", {
       clienteId: clienteSeguro,
       data: limiteDia.data,
@@ -574,7 +569,12 @@ async function executarAutomaticoCliente({
     });
 
     if (restanteDia <= 0) {
-      const motivoLimite = limiteDia.limiteAtivo ? "limite_diario_automatico" : "limite_diario";
+      const motivoLimite = "limite_diario_automatico";
+      logSocial("[SOCIAL-AUTOMACAO-LIMITE-ATINGIDO]", {
+        clienteId: clienteSeguro,
+        limite: limiteDia.limite,
+        ocupacaoAtual: limiteDia.ocupadas.length
+      });
       logSocial("[SOCIAL-AUTOMATICO-LIMITE]", { clienteId: clienteSeguro, limite: limiteDia.limite, motivo: motivoLimite });
       return { ok: true, clienteId: clienteSeguro, publicado: false, agendamentosCriados: [], motivo: motivoLimite };
     }
@@ -671,6 +671,17 @@ async function executarAutomaticoCliente({
         status: agendamento.status
       });
     }
+
+    const ignoradasDuplicidade = diagnostico.filter(item =>
+      item.motivos?.some(motivo => ["ja_agendada", "ja_publicada", "repetida"].includes(motivo))
+    ).length;
+
+    logSocial("[SOCIAL-AUTOMACAO-CRIACAO]", {
+      clienteId: clienteSeguro,
+      solicitadas: restanteDia,
+      criadas: criados.length,
+      ignoradasDuplicidade
+    });
 
     logSocial("[SOCIAL-AUTO-LIMITE-DIARIO]", {
       clienteId: clienteSeguro,

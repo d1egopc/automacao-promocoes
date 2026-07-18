@@ -57,7 +57,7 @@ function oferta(id, dados = {}) {
 }
 
 function configAutomatico(extra = {}) {
-  return {
+  const config = {
     ativo: true,
     quantidadeDiaria: 5,
     intervaloMinimoMinutos: 40,
@@ -70,6 +70,10 @@ function configAutomatico(extra = {}) {
     marketplacesPermitidos: [],
     ...extra
   };
+  if (extra.quantidadeDiaria == null && extra.maxPublicacoesAutomaticasPorDia != null) {
+    config.quantidadeDiaria = extra.maxPublicacoesAutomaticasPorDia;
+  }
+  return config;
 }
 
 function mockHttpClient(sufixo = "ok") {
@@ -142,8 +146,13 @@ function horaSaoPaulo(input) {
     quantidadeDiaria: 12,
     intervaloMinimoMinutos: 10
   }));
-  assert.strictEqual(configNormalizada.quantidadeDiaria, 10);
-  assert.strictEqual(configNormalizada.intervaloMinimoMinutos, 20);
+  assert.strictEqual(configNormalizada.quantidadeDiaria, 12);
+  assert.strictEqual(configNormalizada.maxPublicacoesAutomaticasPorDia, 12);
+  assert.strictEqual(configNormalizada.intervaloMinimoMinutos, 10);
+  const configNormalizadaMax = storage.setConfigAutomaticoSocial("cliente_norm_max", configAutomatico({ quantidadeDiaria: 25 }));
+  assert.strictEqual(configNormalizadaMax.quantidadeDiaria, 20);
+  const configFallbackMax = storage.setConfigAutomaticoSocial("cliente_norm_fallback", { ativo: true, maxPublicacoesAutomaticasPorDia: 8 });
+  assert.strictEqual(configFallbackMax.quantidadeDiaria, 8);
 
   conectar("cliente_limite", "limite");
   writeClienteJson("cliente_limite", "fila.json", Array.from({ length: 12 }, (_, i) =>
@@ -166,18 +175,18 @@ function horaSaoPaulo(input) {
     intervaloMinimoMinutos: 10
   }));
   const rodadaLimite = await executarAutomaticoCliente({ clienteId: "cliente_limite", agora: AGORA });
-  assert.strictEqual(rodadaLimite.agendamentosCriados.length, 10, "nunca deve ultrapassar 10 automaticos no dia");
+  assert.strictEqual(rodadaLimite.agendamentosCriados.length, 12, "nunca deve ultrapassar o limite canonico automatico no dia");
   const autosLimite = storage.listarAgendamentosSocial("cliente_limite").filter(item => item.origem === "automatico");
-  assert.strictEqual(autosLimite.length, 10);
+  assert.strictEqual(autosLimite.length, 12);
   assert.ok(autosLimite.every(item => item.status === "agendada"));
   assert.ok(autosLimite.every(item => item.imagemUrl), "automaticos carregam miniatura da oferta");
   assert.ok(autosLimite.every(item => Date.parse(item.agendadoPara) > AGORA.getTime()), "nao agenda no passado");
   assert.ok(autosLimite.every(item => item.agendadoPara.startsWith("2026-07-14")), "respeita janela do dia");
   const ordenadosLimite = autosLimite.map(item => item.agendadoPara).sort();
   for (let i = 1; i < ordenadosLimite.length; i += 1) {
-    assert.ok(minutosEntre(ordenadosLimite[i], ordenadosLimite[i - 1]) >= 20, "respeita intervalo minimo absoluto");
+    assert.ok(minutosEntre(ordenadosLimite[i], ordenadosLimite[i - 1]) >= 10, "respeita intervalo minimo absoluto");
   }
-  assert.ok(minutosEntre(ordenadosLimite[0], "2026-07-14T12:01:00.000Z") >= 20, "considera agendamento manual existente");
+  assert.ok(minutosEntre(ordenadosLimite[0], "2026-07-14T12:01:00.000Z") >= 10, "considera agendamento manual existente");
   const segundaRodadaLimite = await executarAutomaticoCliente({ clienteId: "cliente_limite", agora: AGORA });
   assert.strictEqual(segundaRodadaLimite.agendamentosCriados.length, 0, "duas rodadas nao duplicam oportunidades");
 
@@ -186,12 +195,12 @@ function horaSaoPaulo(input) {
     oferta(`limite_diario_on_${i}`, { score: 99 - i, cupom: "MAX" })
   ));
   storage.setConfigAutomaticoSocial("cliente_limite_diario_on", configAutomatico({
-    quantidadeDiaria: 10,
+    quantidadeDiaria: 5,
     limiteDiarioAutomaticoAtivo: true,
     maxPublicacoesAutomaticasPorDia: 5
   }));
   const rodadaLimiteDiarioOn = await executarAutomaticoCliente({ clienteId: "cliente_limite_diario_on", agora: AGORA });
-  assert.strictEqual(rodadaLimiteDiarioOn.agendamentosCriados.length, 5, "limite diario ativo cria no maximo 5 ocupacoes automaticas no dia");
+  assert.strictEqual(rodadaLimiteDiarioOn.agendamentosCriados.length, 5, "quantidadeDiaria canonica controla as ocupacoes automaticas do dia");
   const rodadaLimiteDiarioOnRetry = await executarAutomaticoCliente({ clienteId: "cliente_limite_diario_on", agora: AGORA });
   assert.strictEqual(rodadaLimiteDiarioOnRetry.agendamentosCriados.length, 0, "execucao repetida nao duplica quando limite diario esta cheio");
 
@@ -250,7 +259,7 @@ function horaSaoPaulo(input) {
     oferta(`limite_aumenta_nova_${i}`, { score: 90 - i, cupom: "UP" })
   ));
   storage.setConfigAutomaticoSocial("cliente_limite_aumenta", configAutomatico({
-    quantidadeDiaria: 10,
+    quantidadeDiaria: 5,
     limiteDiarioAutomaticoAtivo: true,
     maxPublicacoesAutomaticasPorDia: 5
   }));
@@ -265,7 +274,7 @@ function horaSaoPaulo(input) {
     });
   }
   storage.setConfigAutomaticoSocial("cliente_limite_aumenta", configAutomatico({
-    quantidadeDiaria: 10,
+    quantidadeDiaria: 7,
     limiteDiarioAutomaticoAtivo: true,
     maxPublicacoesAutomaticasPorDia: 7
   }));
@@ -289,8 +298,8 @@ function horaSaoPaulo(input) {
     maxPublicacoesAutomaticasPorDia: 3
   }));
   const agendamentosAtivacaoLimite = storage.listarAgendamentosSocial("cliente_limite_ativa_sem_limpar");
-  assert.strictEqual(agendamentosAtivacaoLimite.filter(item => item.status === "agendada").length, 5, "ativar limite pela primeira vez nao limpa excedentes existentes");
-  assert.strictEqual(agendamentosAtivacaoLimite.filter(item => item.status === "cancelada").length, 0, "ativar limite nao cancela retroativamente");
+  assert.strictEqual(agendamentosAtivacaoLimite.filter(item => item.status === "agendada").length, 3, "reduzir quantidadeDiaria mantem somente os melhores futuros automaticos necessarios");
+  assert.strictEqual(agendamentosAtivacaoLimite.filter(item => item.status === "cancelada" && item.motivo === "limite_diario_reduzido").length, 2, "reduzir quantidadeDiaria cancela excedentes futuros automaticos sem apagar");
 
   conectar("cliente_limite_reduz", "limite_reduz");
   storage.salvarAgendamentoSocial("cliente_limite_reduz", {
