@@ -32,6 +32,27 @@ const {
   validarAssinaturaWebhookInstagram
 } = require("./instagram");
 
+const FRONTEND_URL_OFICIAL_SOCIAL = "https://optimuspromo.vercel.app";
+
+function frontendUrlSocialOficial() {
+  const configurada = String(process.env.FRONTEND_URL || "").trim();
+  const candidatos = [configurada, FRONTEND_URL_OFICIAL_SOCIAL].filter(Boolean);
+
+  for (const candidato of candidatos) {
+    try {
+      const url = new URL(candidato);
+      const host = url.hostname.toLowerCase();
+      if (url.protocol !== "https:") continue;
+      if (host === "lovable.app" || host.endsWith(".lovable.app")) continue;
+      return url.origin;
+    } catch {
+      // tenta o proximo candidato seguro
+    }
+  }
+
+  return FRONTEND_URL_OFICIAL_SOCIAL;
+}
+
 function criarRotasSocial(deps = {}) {
   const router = express.Router();
   const getClienteId = typeof deps.getClienteId === "function"
@@ -54,7 +75,7 @@ function criarRotasSocial(deps = {}) {
   }
 
   function redirectFrontendMeta(status = "") {
-    const frontendUrl = String(process.env.FRONTEND_URL || "").trim();
+    const frontendUrl = frontendUrlSocialOficial();
     if (!frontendUrl) return "";
 
     try {
@@ -67,7 +88,7 @@ function criarRotasSocial(deps = {}) {
   }
 
   function redirectFrontendInstagram(status = "") {
-    const frontendUrl = String(process.env.FRONTEND_URL || "").trim();
+    const frontendUrl = frontendUrlSocialOficial();
     if (!frontendUrl) return "";
 
     try {
