@@ -66,6 +66,125 @@ function urlCanonicaMercadoLivreSegura(urlCandidata = "", urlOriginal = "") {
   }
 }
 
+const MAX_CANDIDATOS_IMAGEM_ML = 12;
+
+function decodificarStringImagemMl(valor = "") {
+  const texto = String(valor || "").trim();
+  if (!texto) return "";
+  try {
+    return JSON.parse("\"" + texto + "\"");
+  } catch {
+    return texto
+      .replace(/\\u002f/gi, "/")
+      .replace(/\\\//g, "/")
+      .replace(/&amp;/g, "&");
+  }
+}
+
+function normalizarUrlImagemMercadoLivreCandidata(valor = "") {
+  let imagem = htmlDecode(decodificarStringImagemMl(corrigirImagemUrl(valor) || valor)).trim();
+  if (!imagem) return "";
+  if (/^(data|blob):/i.test(imagem)) return "";
+  if (imagem.startsWith("//")) imagem = "https:" + imagem;
+  if (/[<>{}\s]/.test(imagem)) return "";
+
+  try {
+    const url = new URL(imagem);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    if (url.username || url.password) return "";
+    const host = url.hostname.toLowerCase();
+    if (host !== "mlstatic.com" && !host.endsWith(".mlstatic.com")) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function adicionarCandidatoImagemMercadoLivre(candidatos, origem, valor, tipo = "alias") {
+  if (candidatos.length >= MAX_CANDIDATOS_IMAGEM_ML) return;
+  const url = normalizarUrlImagemMercadoLivreCandidata(valor);
+  if (!url || candidatos.some((item) => item.url === url)) return;
+  candidatos.push({ url, origem, tipo });
+}
+
+function extrairCamposImagemMercadoLivreHtml(html = "", campo = "") {
+  const texto = String(html || "");
+  const encontrados = [];
+  const regex = new RegExp("\"" + campo + "\"\\s*:\\s*\"([^\"\\n\\r]{1,2048})\"", "gi");
+  let match;
+  while ((match = regex.exec(texto)) && encontrados.length < MAX_CANDIDATOS_IMAGEM_ML) {
+    encontrados.push(match[1]);
+  }
+  return encontrados;
+}
+
+function montarMetadadosImagemMercadoLivre(candidatos = []) {
+  const imagens = candidatos.map((item) => ({ url: item.url, origem: item.origem, tipo: item.tipo }));
+  const pictures = candidatos
+    .filter((item) => /pictures|picture_url|secure_url/i.test(item.origem))
+    .map((item) => item.origem.includes("secure_url")
+      ? { secure_url: item.url, origem: item.origem, tipo: item.tipo }
+      : { url: item.url, origem: item.origem, tipo: item.tipo });
+  const primeiroPorOrigem = (padrao) => candidatos.find((item) => padrao.test(item.origem))?.url || "";
+  const tipos = [...new Set(candidatos.map((item) => item.tipo).filter(Boolean))];
+
+  return {
+    imagemCandidatos: imagens,
+    images: imagens,
+    pictures,
+    secure_thumbnail: primeiroPorOrigem(/secure_thumbnail/i),
+    thumbnail: primeiroPorOrigem(/(^|\.)thumbnail$/i),
+    thumbnailUrl: primeiroPorOrigem(/thumbnailUrl|thumbnail_url/i),
+    picture_url: primeiroPorOrigem(/picture_url/i),
+    imagemCandidatosTipos: tipos
+  };
+}
+
+function extrairCandidatosImagemMercadoLivre({ html = "", jsonLd = null, imagemOg = "", imagemTwitter = "" } = {}) {
+  const candidatos = [];
+  const imagensJsonLd = Array.isArray(jsonLd?.image) ? jsonLd.image : [jsonLd?.image].filter(Boolean);
+
+  imagensJsonLd.forEach((valor, indice) => {
+    adicionarCandidatoImagemMercadoLivre(candidatos, "jsonLd.image[" + indice + "]", valor, "jsonLd.image");
+  });
+  adicionarCandidatoImagemMercadoLivre(candidatos, "og:image", imagemOg, "og:image");
+  adicionarCandidatoImagemMercadoLivre(candidatos, "twitter:image", imagemTwitter, "twitter:image");
+
+  const aliases = ["secure_thumbnail", "thumbnail", "thumbnailUrl", "thumbnail_url", "picture_url", "image_url", "imageUrl", "original_picture"];
+  aliases.forEach((campo) => {
+    extrairCamposImagemMercadoLivreHtml(html, campo).forEach((valor) => {
+      adicionarCandidatoImagemMercadoLivre(candidatos, campo, valor, campo);
+    });
+  });
+
+  const blocosPictures = [...String(html || "").matchAll(/"pictures"\s*:\s*\[([\s\S]{0,12000}?)\]/gi)];
+  blocosPictures.slice(0, 3).forEach((bloco, indiceBloco) => {
+    ["secure_url", "url"].forEach((campo) => {
+      const regex = new RegExp("\"" + campo + "\"\\s*:\\s*\"([^\"\\n\\r]{1,2048})\"", "gi");
+      let match;
+      while ((match = regex.exec(bloco[1])) && candidatos.length < MAX_CANDIDATOS_IMAGEM_ML) {
+        adicionarCandidatoImagemMercadoLivre(candidatos, "pictures[" + indiceBloco + "]." + campo, match[1], "pictures." + campo);
+      }
+    });
+  });
+
+  ["secure_url", "picture_url"].forEach((campo) => {
+    extrairCamposImagemMercadoLivreHtml(html, campo).forEach((valor) => {
+      adicionarCandidatoImagemMercadoLivre(candidatos, campo, valor, campo);
+    });
+  });
+
+  return montarMetadadosImagemMercadoLivre(candidatos);
+}
+
+function logImagemMercadoLivre(evento, dados = {}) {
+  try {
+    console.log(evento, JSON.stringify(dados));
+  } catch {
+    console.log(evento);
+  }
+}
+
 function normalizarNumeroMercadoLivre(valor = "") {
   if (typeof valor === "number") {
     return Number.isFinite(valor) && valor > 0 ? valor : 0;
@@ -570,6 +689,7 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
     const imagemJsonLd = Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image;
     const imagemOg = extrairMeta(html, "og:image");
     const imagemTwitter = extrairMeta(html, "twitter:image");
+    const imagensMercadoLivre = extrairCandidatosImagemMercadoLivre({ html, jsonLd, imagemOg, imagemTwitter });
     const imagemAuditoria = imagemJsonLd || imagemOg || imagemTwitter || "";
     const origemImagemAuditoria =
       imagemJsonLd ? "jsonLd.image" :
@@ -586,6 +706,14 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       /captcha|account-verification|access denied|robot check|verifique[^<]{0,80}rob/i.test(html)
     );
     const contextoEngine = deps.contextoEngine || {};
+    const produtoIdImagemMl = extrairMlbUrl(response.url || url) || "";
+    logImagemMercadoLivre("[ML-IMAGEM-CANDIDATOS]", {
+      clienteId: contextoEngine.clienteId || clienteIdAlvo,
+      jobId: contextoEngine.jobId || null,
+      produtoId: produtoIdImagemMl,
+      quantidade: imagensMercadoLivre.imagemCandidatos.length,
+      tipos: imagensMercadoLivre.imagemCandidatosTipos
+    });
 
     if (bloqueioOperacional) {
       console.log("[ML-HTML-AUDITORIA]", JSON.stringify({
@@ -742,6 +870,14 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       cashback: beneficiosHtml.cashback || "",
       descontoPix: beneficiosHtml.descontoPix || "",
       descontoApp: beneficiosHtml.descontoApp || "",
+      imagemCandidatos: imagensMercadoLivre.imagemCandidatos,
+      imagemCandidatosTipos: imagensMercadoLivre.imagemCandidatosTipos,
+      images: imagensMercadoLivre.images,
+      pictures: imagensMercadoLivre.pictures,
+      secure_thumbnail: imagensMercadoLivre.secure_thumbnail,
+      thumbnail: imagensMercadoLivre.thumbnail,
+      thumbnailUrl: imagensMercadoLivre.thumbnailUrl,
+      picture_url: imagensMercadoLivre.picture_url,
       imagem: corrigirImagemUrl(imagem) || imagem
     }, deps, {
       urlOriginal: url,
@@ -766,6 +902,25 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       temImagem: Boolean(produtoComFallbackRadar.imagem || imagem),
       origemImagem
     }));
+    if (produtoComFallbackRadar.imagem) {
+      logImagemMercadoLivre("[ML-IMAGEM-RESOLVIDA]", {
+        clienteId: contextoEngine.clienteId || clienteIdAlvo,
+        jobId: contextoEngine.jobId || null,
+        produtoId: produtoIdImagemMl,
+        quantidadeCandidatos: imagensMercadoLivre.imagemCandidatos.length,
+        origem: origemImagem,
+        imagemStatus: "principal"
+      });
+    } else {
+      logImagemMercadoLivre("[ML-IMAGEM-NAO-RESOLVIDA]", {
+        clienteId: contextoEngine.clienteId || clienteIdAlvo,
+        jobId: contextoEngine.jobId || null,
+        produtoId: produtoIdImagemMl,
+        quantidadeCandidatos: imagensMercadoLivre.imagemCandidatos.length,
+        imagemStatus: imagensMercadoLivre.imagemCandidatos.length ? "candidatos_preservados" : "nao_resolvida",
+        motivo: imagensMercadoLivre.imagemCandidatos.length ? "sem_imagem_principal" : "sem_candidato_valido"
+      });
+    }
 
     limparAlertaIntegracao(clienteIdAlvo, "mercadolivre");
     perf.etapa("salvamento_retorno", {
@@ -806,6 +961,26 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       linkFinal: linkAfiliadoGerado || "",
       imagem: produtoComFallbackRadar.imagem || "",
       imagemOrigem: produtoComFallbackRadar.imagem ? origemImagem : "nenhuma",
+      imagemCandidatos: produtoComFallbackRadar.imagemCandidatos || imagensMercadoLivre.imagemCandidatos,
+      imagemCandidatosTipos: produtoComFallbackRadar.imagemCandidatosTipos || imagensMercadoLivre.imagemCandidatosTipos,
+      images: produtoComFallbackRadar.images || imagensMercadoLivre.images,
+      pictures: produtoComFallbackRadar.pictures || imagensMercadoLivre.pictures,
+      secure_thumbnail: produtoComFallbackRadar.secure_thumbnail || imagensMercadoLivre.secure_thumbnail,
+      thumbnail: produtoComFallbackRadar.thumbnail || imagensMercadoLivre.thumbnail,
+      thumbnailUrl: produtoComFallbackRadar.thumbnailUrl || imagensMercadoLivre.thumbnailUrl,
+      picture_url: produtoComFallbackRadar.picture_url || imagensMercadoLivre.picture_url,
+      metadata: {
+        produto: {
+          imagemCandidatos: produtoComFallbackRadar.imagemCandidatos || imagensMercadoLivre.imagemCandidatos,
+          imagemCandidatosTipos: produtoComFallbackRadar.imagemCandidatosTipos || imagensMercadoLivre.imagemCandidatosTipos,
+          images: produtoComFallbackRadar.images || imagensMercadoLivre.images,
+          pictures: produtoComFallbackRadar.pictures || imagensMercadoLivre.pictures,
+          secure_thumbnail: produtoComFallbackRadar.secure_thumbnail || imagensMercadoLivre.secure_thumbnail,
+          thumbnail: produtoComFallbackRadar.thumbnail || imagensMercadoLivre.thumbnail,
+          thumbnailUrl: produtoComFallbackRadar.thumbnailUrl || imagensMercadoLivre.thumbnailUrl,
+          picture_url: produtoComFallbackRadar.picture_url || imagensMercadoLivre.picture_url
+        }
+      },
       categoria: "Mercado Livre",
       tituloOrigem: produtoComFallbackRadar.tituloOrigem,
       precoOrigem: produtoComFallbackRadar.precoOrigem,

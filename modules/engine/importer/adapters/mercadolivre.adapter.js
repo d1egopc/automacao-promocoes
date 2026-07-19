@@ -116,6 +116,28 @@ function auditarInteligenciaUniversalMlEngine({ job = {}, produto = {}, ofertaAd
     return null;
   }
 }
+function objetoSeguro(valor) {
+  return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
+}
+
+function listaSegura(valor) {
+  return Array.isArray(valor) ? valor : [];
+}
+
+function metadadosImagemMercadoLivre(produto = {}) {
+  const metadataProduto = objetoSeguro(objetoSeguro(produto.metadata).produto);
+  return {
+    imagemCandidatos: listaSegura(produto.imagemCandidatos).length ? produto.imagemCandidatos : listaSegura(metadataProduto.imagemCandidatos),
+    imagemCandidatosTipos: listaSegura(produto.imagemCandidatosTipos).length ? produto.imagemCandidatosTipos : listaSegura(metadataProduto.imagemCandidatosTipos),
+    images: listaSegura(produto.images).length ? produto.images : listaSegura(metadataProduto.images),
+    pictures: listaSegura(produto.pictures).length ? produto.pictures : listaSegura(metadataProduto.pictures),
+    secure_thumbnail: produto.secure_thumbnail || metadataProduto.secure_thumbnail || "",
+    thumbnail: produto.thumbnail || metadataProduto.thumbnail || "",
+    thumbnailUrl: produto.thumbnailUrl || metadataProduto.thumbnailUrl || "",
+    picture_url: produto.picture_url || metadataProduto.picture_url || ""
+  };
+}
+
 function valorV2Presente(valor) {
   return valor !== null && valor !== undefined && valor !== "";
 }
@@ -543,6 +565,7 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
   const beneficioExtra = produto.beneficioExtra || produto.beneficioTexto || "";
   const avisoCupom = produto.avisoCupom || "";
   const cupomTipo = produto.tipoCupom || produto.cupomTipo || "";
+  const imagensMercadoLivre = metadadosImagemMercadoLivre(produto);
 
   const ofertaAdapter = {
     ok: true,
@@ -554,6 +577,14 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     economia: produto.economia || "",
     imagem: produto.imagem || "",
     imagemOrigem: produto.imagemOrigem || "",
+    imagemCandidatos: imagensMercadoLivre.imagemCandidatos,
+    imagemCandidatosTipos: imagensMercadoLivre.imagemCandidatosTipos,
+    images: imagensMercadoLivre.images,
+    pictures: imagensMercadoLivre.pictures,
+    secure_thumbnail: imagensMercadoLivre.secure_thumbnail,
+    thumbnail: imagensMercadoLivre.thumbnail,
+    thumbnailUrl: imagensMercadoLivre.thumbnailUrl,
+    picture_url: imagensMercadoLivre.picture_url,
     statusHttp: produto.statusHttp ?? null,
     linkOriginal: produto.linkOriginal || urlOriginalEngine,
     linkExpandido: produto.urlFinal || linkExpandidoEngine || urlImportador,
@@ -624,7 +655,11 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
       expandiuMeliLa,
       resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
       camposProduto: Object.keys(produto || {}),
-      produto
+      produto: {
+        ...produto,
+        ...imagensMercadoLivre,
+        metadata: produto.metadata || {}
+      }
     }
   };
 }

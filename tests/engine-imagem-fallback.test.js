@@ -106,8 +106,40 @@ function testarIsolamentoPorCliente() {
   assert.strictEqual(itemB.imagem, "https://cliente-b.test/imagem.jpg");
 }
 
+function testarFallbackMercadoLivrePictures() {
+  const item = montarItemFilaEngine(ofertaBase({
+    id: "ml-pictures",
+    marketplace: "mercadolivre",
+    imagem: "",
+    metadata: {
+      produto: {
+        pictures: [{ secure_url: "https://cdn.test/ml-picture-secure.jpg" }]
+      }
+    }
+  }));
+
+  assert.strictEqual(item.imagem, "https://cdn.test/ml-picture-secure.jpg");
+  assert.strictEqual(item.imagemOrigem, "metadata.produto.pictures[0].secure_url");
+  assert.strictEqual(item.imagemFallbackUsado, true);
+}
+
+function testarImagemPrincipalPreservadaComThumbnailMl() {
+  const item = montarItemFilaEngine(ofertaBase({
+    id: "ml-principal",
+    marketplace: "mercadolivre",
+    imagem: "https://cdn.test/ml-principal.jpg",
+    metadata: { produto: { thumbnail: "https://cdn.test/ml-thumb.jpg" } }
+  }));
+
+  assert.strictEqual(item.imagem, "https://cdn.test/ml-principal.jpg");
+  assert.strictEqual(item.imagemOrigem, "engine_ofertas.imagem");
+  assert.strictEqual(item.imagemFallbackUsado, false);
+}
+
 testarImagemPrincipal();
 testarFallbackAlternativo();
+testarFallbackMercadoLivrePictures();
+testarImagemPrincipalPreservadaComThumbnailMl();
 testarFallbackRadar();
 testarAusenciaReal();
 testarIsolamentoPorCliente();

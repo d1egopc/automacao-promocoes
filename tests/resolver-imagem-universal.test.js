@@ -185,4 +185,38 @@ function semDatas(resultado) {
   assert(oportunidades.some((item) => item.ofertaId === "oferta_social_1" && item.imagem === url("social")));
 }
 
+{
+  const secureThumb = resolverImagemUniversal({ secure_thumbnail: url("ml-secure-thumb") });
+  assert.strictEqual(secureThumb.imagem, url("ml-secure-thumb"));
+  assert.strictEqual(secureThumb.imagemOrigem, "secure_thumbnail");
+
+  const pictureUrl = resolverImagemUniversal({ picture_url: url("ml-picture-url") });
+  assert.strictEqual(pictureUrl.imagem, url("ml-picture-url"));
+  assert.strictEqual(pictureUrl.imagemOrigem, "picture_url");
+
+  const metaSecure = resolverImagemUniversal({ metadata: { produto: { pictures: [{ secure_url: url("ml-meta-secure") }] } } });
+  assert.strictEqual(metaSecure.imagem, url("ml-meta-secure"));
+  assert.strictEqual(metaSecure.imagemOrigem, "metadata.produto.pictures[0].secure_url");
+
+  const metaUrl = resolverImagemUniversal({ metadata: { produto: { pictures: [{ url: url("ml-meta-url") }] } } });
+  assert.strictEqual(metaUrl.imagem, url("ml-meta-url"));
+  assert.strictEqual(metaUrl.imagemOrigem, "metadata.produto.pictures[0].url");
+}
+
+{
+  const saida = resolverImagemUniversal({
+    imagem: url("principal-ml"),
+    metadata: { produto: { secure_thumbnail: url("thumb-ml") } }
+  });
+  assert.strictEqual(saida.imagem, url("principal-ml"));
+  assert.strictEqual(saida.imagemOrigem, "imagem");
+}
+
+{
+  const saida = resolverImagemUniversal({ metadata: { produto: { images: ["data:image/png;base64,abc", "data:image/png;base64,abc"] } } });
+  assert.strictEqual(saida.imagemStatus, "nao_resolvida");
+  assert.strictEqual(saida.imagem, "");
+  assert.strictEqual(imagemUrlValidaUniversal("data:image/png;base64,abc").ok, false);
+}
+
 console.log("resolver-imagem-universal.test.js OK");
