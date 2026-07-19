@@ -22,13 +22,20 @@ const CONTAINER_STATUS_PRIMEIRA_ESPERA_MS = 1500;
 const CONTAINER_STATUS_INTERVALO_MS = 3000;
 const CONTAINER_STATUS_MAX_TENTATIVAS = 10;
 const REELS_STATUS_PRIMEIRA_ESPERA_MS = 1500;
-const REELS_STATUS_INTERVALO_MS = 3000;
-const REELS_STATUS_MAX_TENTATIVAS = 10;
+const REELS_STATUS_INTERVALO_MS = 5000;
+const REELS_STATUS_MAX_TENTATIVAS = 60;
+const REELS_STATUS_MAX_TENTATIVAS_LIMITE = 180;
 const PUBLICACAO_EM_ANDAMENTO_TTL_MS = 15 * 60 * 1000;
 const STATE_TTL_MS = 15 * 60 * 1000;
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
+}
+
+function numeroInteiroAmbiente(nome, padrao, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const valor = Number(process.env[nome]);
+  if (!Number.isFinite(valor)) return padrao;
+  return Math.max(min, Math.min(max, Math.trunc(valor)));
 }
 
 async function httpFetchPadrao(url, opcoes = {}) {
@@ -1403,9 +1410,30 @@ async function aguardarContainerReelProntoInstagram({
   httpClient = httpClientPadrao(),
   polling = {}
 } = {}) {
-  const primeiraEsperaMs = Math.max(0, Number(polling.primeiraEsperaMs ?? REELS_STATUS_PRIMEIRA_ESPERA_MS) || 0);
-  const intervaloMs = Math.max(0, Number(polling.intervaloMs ?? REELS_STATUS_INTERVALO_MS) || 0);
-  const maxTentativas = Math.max(1, Math.min(20, Number(polling.maxTentativas ?? REELS_STATUS_MAX_TENTATIVAS) || REELS_STATUS_MAX_TENTATIVAS));
+  const primeiraEsperaPadrao = numeroInteiroAmbiente(
+    "INSTAGRAM_REELS_POLL_PRIMEIRA_ESPERA_MS",
+    REELS_STATUS_PRIMEIRA_ESPERA_MS,
+    { min: 0, max: 60000 }
+  );
+  const intervaloPadrao = numeroInteiroAmbiente(
+    "INSTAGRAM_REELS_POLL_INTERVALO_MS",
+    REELS_STATUS_INTERVALO_MS,
+    { min: 0, max: 60000 }
+  );
+  const maxTentativasPadrao = numeroInteiroAmbiente(
+    "INSTAGRAM_REELS_POLL_MAX_TENTATIVAS",
+    REELS_STATUS_MAX_TENTATIVAS,
+    { min: 1, max: REELS_STATUS_MAX_TENTATIVAS_LIMITE }
+  );
+  const primeiraEsperaMs = Math.max(0, Number(polling.primeiraEsperaMs ?? primeiraEsperaPadrao) || 0);
+  const intervaloMs = Math.max(0, Number(polling.intervaloMs ?? intervaloPadrao) || 0);
+  const maxTentativas = Math.max(
+    1,
+    Math.min(
+      REELS_STATUS_MAX_TENTATIVAS_LIMITE,
+      Number(polling.maxTentativas ?? maxTentativasPadrao) || maxTentativasPadrao
+    )
+  );
 
   await aguardar(primeiraEsperaMs);
 

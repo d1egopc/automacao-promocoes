@@ -45,6 +45,11 @@ function salvarFila(clienteId, itens = []) {
   })));
 }
 
+function restaurarEnv(nome, valor) {
+  if (valor === undefined) delete process.env[nome];
+  else process.env[nome] = valor;
+}
+
 function mockHttpClient(opcoes = {}) {
   const chamadas = [];
   const statuses = Array.isArray(opcoes.statuses) && opcoes.statuses.length
@@ -152,6 +157,40 @@ function rendererOk() {
   assert.strictEqual(reels.publicacao.mensagemPrivadaPresente, true);
   assert.strictEqual(reels.publicacao.redirectPresente, true);
   assert.strictEqual(reels.publicacao.ctaPresente, true);
+
+  const envPrimeiraEspera = process.env.INSTAGRAM_REELS_POLL_PRIMEIRA_ESPERA_MS;
+  const envIntervalo = process.env.INSTAGRAM_REELS_POLL_INTERVALO_MS;
+  const envMaxTentativas = process.env.INSTAGRAM_REELS_POLL_MAX_TENTATIVAS;
+  process.env.INSTAGRAM_REELS_POLL_PRIMEIRA_ESPERA_MS = "0";
+  process.env.INSTAGRAM_REELS_POLL_INTERVALO_MS = "0";
+  process.env.INSTAGRAM_REELS_POLL_MAX_TENTATIVAS = "4";
+  try {
+    const httpReelsLento = mockHttpClient({
+      sufixo: "reels_lento",
+      statuses: ["IN_PROGRESS", "IN_PROGRESS", "IN_PROGRESS", "FINISHED"]
+    });
+    const reelsLento = await publicarNoInstagram({
+      clienteId: "cliente_reels",
+      origem: "personalizada",
+      tipoPublicacao: "livre",
+      formato: "reels",
+      videoUrl: "https://cdn.optimus.test/video-reels-lento.mp4",
+      mimeType: "video/mp4",
+      legenda: "Legenda reels lento",
+      httpClient: httpReelsLento
+    });
+    assert.strictEqual(reelsLento.publicacao.status, "publicada");
+    assert.strictEqual(
+      httpReelsLento.chamadas.filter(chamada => chamada.metodo === "get" && chamada.url.includes("/container_reels_lento")).length,
+      4,
+      "polling configuravel continua ate FINISHED"
+    );
+    assert.ok(httpReelsLento.chamadas.some(chamada => chamada.metodo === "post" && chamada.url.endsWith("/media_publish")));
+  } finally {
+    restaurarEnv("INSTAGRAM_REELS_POLL_PRIMEIRA_ESPERA_MS", envPrimeiraEspera);
+    restaurarEnv("INSTAGRAM_REELS_POLL_INTERVALO_MS", envIntervalo);
+    restaurarEnv("INSTAGRAM_REELS_POLL_MAX_TENTATIVAS", envMaxTentativas);
+  }
 
   const httpInProgress = mockHttpClient({ sufixo: "reels_in_progress", statuses: ["IN_PROGRESS"] });
   const inProgress = await publicarNoInstagram({
