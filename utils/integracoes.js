@@ -1,4 +1,4 @@
-﻿const marketplaceRules = {
+const marketplaceRules = {
   shopee: {
     nome: "Shopee",
     required: ["appId", "secret"],

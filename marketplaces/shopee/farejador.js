@@ -1,4 +1,4 @@
-﻿// ================= FAREJADOR SHOPEE =================
+// ================= FAREJADOR SHOPEE =================
 
 const {
   extrairCuponsShopeeDoHtml,

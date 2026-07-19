@@ -1,4 +1,4 @@
-﻿const eventosMensageiroRecentes = new Map();
+const eventosMensageiroRecentes = new Map();
 
 const {
   getMensageiroCliente,
@@ -47,7 +47,7 @@ function obterMensagemBoasVindas(clienteId) {
   return (
     getMensageiroCliente(clienteId)
       ?.mensagemBoasVindas ||
-    "ðŸ‘‹ Seja bem-vindo!"
+    "👋 Seja bem-vindo!"
   );
 }
 
@@ -55,7 +55,7 @@ function obterMensagemDespedida(clienteId) {
   return (
     getMensageiroCliente(clienteId)
       ?.mensagemDespedida ||
-    "ðŸ˜¢ Obrigado por participar."
+    "😢 Obrigado por participar."
   );
 }
 function normalizarTextoMensagem(texto = "") {
@@ -785,7 +785,7 @@ async function tratarEventoGrupoMensageiro({
 for (const participante of participantes) {
 
   console.log(
-    "ðŸ“± PARTICIPANTE:",
+    "📱 PARTICIPANTE:",
     participante
   );
 
@@ -804,7 +804,7 @@ for (const participante of participantes) {
     .replaceAll("{grupo}", grupoId)
     .replaceAll("{acao}", acao);
 
-    // ANTI DUPLICAÃ‡ÃƒO
+    // ANTI DUPLICAÇÃO
 const chaveEvento =
   `${clienteId}:${sessaoId}:${grupoId}:${participante}:${acao}`;
 

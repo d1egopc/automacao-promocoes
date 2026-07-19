@@ -1,4 +1,4 @@
-﻿const fs = require("fs");
+const fs = require("fs");
 const path = require("path");
 const {
   getClienteJsonPath,
@@ -80,7 +80,7 @@ function carregarMensageiro() {
     mensageiroPorCliente = readGlobalJson("mensageiro.json", {});
 
     console.log(
-      "âœ… Mensageiro carregado:",
+      "✅ Mensageiro carregado:",
       Object.keys(mensageiroPorCliente).length
     );
   } catch (e) {
@@ -110,9 +110,9 @@ function criarConfigPadraoMensageiro(clienteId) {
     despedidaAtivo: false,
 
     mensagemBoasVindas:
-      "ðŸ‘‹ Seja bem-vindo ao grupo!\n\nAproveite as ofertas e promoÃ§Ãµes.",
+      "👋 Seja bem-vindo ao grupo!\n\nAproveite as ofertas e promoções.",
     mensagemDespedida:
-      "ðŸ˜¢ Obrigado por ter participado do grupo.\n\nVolte quando quiser!",
+      "😢 Obrigado por ter participado do grupo.\n\nVolte quando quiser!",
 
     imagemBoasVindas: "",
     imagemDespedida: "",

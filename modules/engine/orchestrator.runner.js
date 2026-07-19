@@ -1,4 +1,4 @@
-﻿let engineOrquestradorRodando = false;
+let engineOrquestradorRodando = false;
 let engineOrquestradorIntervalo = null;
 
 const LIMITES_PADRAO = {

@@ -1,4 +1,4 @@
-﻿const { registrarRadarCupons } = require("../cupons/radar");
+const { registrarRadarCupons } = require("../cupons/radar");
 
 let ultimoTotalCuponsShopee = 0;
 

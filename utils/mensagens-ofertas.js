@@ -185,7 +185,7 @@ function montarLegendaShopee(oferta = {}) {
   const cupom = montarLinhaCupom(oferta);
   const aplicarCupom = montarLinhaAplicarCupom(oferta);
   const blocoPreco = temVariacaoAuxiliar
-    ? (precoAtual ? `âœ… ${precoAtual}` : "")
+    ? (precoAtual ? `✅ ${precoAtual}` : "")
     : montarBlocoPreco({
         precoAtual,
         precoAntigo,

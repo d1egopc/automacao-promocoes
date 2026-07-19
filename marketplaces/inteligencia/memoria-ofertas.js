@@ -188,7 +188,7 @@ function deveIgnorarOfertaRepetida(oferta = {}) {
   const vistas = carregarOfertasVistas();
   const chave = chaveOferta(oferta);
 
-  
+
 let anterior = null;
 for (let i = vistas.length - 1; i >= 0; i--) {
   if (vistas[i].chave === chave) {

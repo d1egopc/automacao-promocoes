@@ -1,4 +1,4 @@
-﻿const axios = require("axios");
+const axios = require("axios");
 const {
   readGlobalJson,
   writeGlobalJson
@@ -15,7 +15,7 @@ const CUPONS_CONFIRMADOS_ML = [
     ativo: true,
     validoAte: "2026-06-10",
     confianca: 100,
-    palavras: ["moda", "camiseta", "t-shirt", "roupa", "moletom", "calÃ§a", "blusa", "vestido", "short", "saia", "polo", "oversized", "insider", "jeans", "cropped", "legging", "jaqueta"]
+    palavras: ["moda", "camiseta", "t-shirt", "roupa", "moletom", "calça", "blusa", "vestido", "short", "saia", "polo", "oversized", "insider", "jeans", "cropped", "legging", "jaqueta"]
   },
   {
     cupom: "ESQUENTABELEZA",
@@ -23,7 +23,7 @@ const CUPONS_CONFIRMADOS_ML = [
     ativo: true,
     validoAte: "2026-06-10",
     confianca: 100,
-    palavras: ["beleza", "perfume", "perfumaria", "lattafa", "yara", "edp", "eau de parfum", "cosmÃ©tico", "cosmetico", "maquiagem", "skincare", "hidratante", "protetor solar", "serum", "sÃ©rum", "shampoo", "condicionador", "batom"]
+    palavras: ["beleza", "perfume", "perfumaria", "lattafa", "yara", "edp", "eau de parfum", "cosmético", "cosmetico", "maquiagem", "skincare", "hidratante", "protetor solar", "serum", "sérum", "shampoo", "condicionador", "batom"]
   },
   {
     cupom: "6DO6SPORTS",
@@ -31,7 +31,7 @@ const CUPONS_CONFIRMADOS_ML = [
     ativo: true,
     validoAte: "2026-06-05",
     confianca: 100,
-    palavras: ["esporte", "fitness", "bicicleta", "spinning", "bike", "academia", "musculaÃ§Ã£o", "musculacao", "treino", "esteira", "squeeze"]
+    palavras: ["esporte", "fitness", "bicicleta", "spinning", "bike", "academia", "musculação", "musculacao", "treino", "esteira", "squeeze"]
   }
 ];
 
@@ -125,7 +125,7 @@ function buscarCupomConfirmadoML(oferta = {}) {
   const cuponsConfirmados = carregarCuponsML();
 
   for (const regra of cuponsConfirmados) {
-   
+
     if (!regra.ativo) continue;
     if (regra.validoAte && regra.validoAte < hoje) continue;
 
@@ -239,7 +239,7 @@ if (cupomCampanha) return cupomCampanha;
       cupomMarketplace: "mercadolivre",
       avisoCupom:
         trechoCupom ||
-        "Verifique na pÃ¡gina do Mercado Livre se hÃ¡ cupom disponÃ­vel para aplicar.",
+        "Verifique na página do Mercado Livre se há cupom disponível para aplicar.",
       cupomValor: "",
       cupomPercentual: ""
     };
@@ -337,7 +337,7 @@ const bloqueados = new Set([
   "INATIVO",
   "ATIVO",
   "MODA",
-  "TÃŠNIS",
+  "TÊNIS",
   "PRESENTES",
   "VENDEDORES",
   "ORIGINAIS",
@@ -370,16 +370,16 @@ const bloqueados = new Set([
   const palavrasPorCategoria = {
     moda: [
       "moda", "roupa", "roupas", "camiseta", "t-shirt", "blusa",
-      "calÃ§a", "vestido", "short", "polo", "insider", "feminina",
+      "calça", "vestido", "short", "polo", "insider", "feminina",
       "masculina"
     ],
     tenis: [
-      "tÃªnis", "tenis", "sapato", "chinelo", "adidas", "nike",
+      "tênis", "tenis", "sapato", "chinelo", "adidas", "nike",
       "mizuno", "olympikus"
     ],
     informatica: [
-      "informÃ¡tica", "informatica", "computador", "notebook", "pc",
-      "ssd", "fonte", "fonte gamer", "placa de vÃ­deo", "placa de video",
+      "informática", "informatica", "computador", "notebook", "pc",
+      "ssd", "fonte", "fonte gamer", "placa de vídeo", "placa de video",
       "monitor", "teclado", "mouse", "hardware", "gamer"
     ],
     ferramentas: [
@@ -391,7 +391,7 @@ const bloqueados = new Set([
       "yopro", "galderma"
     ],
     papelaria: [
-      "papelaria", "escritÃ³rio", "escritorio", "escola", "caderno",
+      "papelaria", "escritório", "escritorio", "escola", "caderno",
       "caneta", "mochila"
     ]
   };
@@ -426,7 +426,7 @@ if (cupom.includes("PRA")) pontos += 100;
 
 if (cupom.includes("OFF")) pontos += 20;
 
-if (cupom.includes("TENIS") || cupom.includes("TÃŠNIS")) pontos += 80;
+if (cupom.includes("TENIS") || cupom.includes("TÊNIS")) pontos += 80;
 
 const ofertaEhModa =
   textoOferta.includes("moda") ||
@@ -455,18 +455,18 @@ for (const [grupo, palavras] of Object.entries(palavrasPorCategoria)) {
     pontos += 40;
   }
 
-  if (grupo === "informatica" && ofertaCombina && trecho.includes("informÃ¡tica")) {
+  if (grupo === "informatica" && ofertaCombina && trecho.includes("informática")) {
     pontos += 40;
   }
 }
 
     if (trecho.includes("pix")) pontos += 10;
-    if (trecho.includes("vÃ¡lido") || trecho.includes("valido")) pontos += 10;
+    if (trecho.includes("válido") || trecho.includes("valido")) pontos += 10;
     if (trecho.includes("inativo")) pontos -= 100;
     if (trecho.includes("expirado")) pontos -= 100;
 
     if (preco > 0) {
-      const minMatch = trecho.match(/(?:acima de|mÃ­nimo|minimo|a partir de)\s*r?\$?\s*([\d.,]+)/i);
+      const minMatch = trecho.match(/(?:acima de|mínimo|minimo|a partir de)\s*r?\$?\s*([\d.,]+)/i);
       if (minMatch) {
         const minimo = Number(
           minMatch[1].replace(".", "").replace(",", ".")

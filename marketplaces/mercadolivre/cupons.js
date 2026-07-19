@@ -1,4 +1,4 @@
-﻿const axios = require("axios");
+const axios = require("axios");
 const { registrarRadarCupons } = require("../cupons/radar");
 
 const CACHE_TTL_MS = 60 * 60 * 1000;
@@ -206,19 +206,19 @@ function escolherCupomParaOfertaML(oferta = {}, cupons = []) {
     let score = 0;
 
     const ofertaModa =
-      /moda|camiseta|camisa|roupa|calca|calÃ§a|jeans|tenis|tÃªnis|sapato|chinelo|vestido|blusa|bermuda|short|polo|moletom|jaqueta/i
+      /moda|camiseta|camisa|roupa|calca|calça|jeans|tenis|tênis|sapato|chinelo|vestido|blusa|bermuda|short|polo|moletom|jaqueta/i
         .test(textoOferta);
 
     const ofertaBeleza =
-      /beleza|perfume|perfumaria|cosmetico|cosmÃ©tico|maquiagem|skincare|hidratante|shampoo|condicionador|protetor solar/i
+      /beleza|perfume|perfumaria|cosmetico|cosmético|maquiagem|skincare|hidratante|shampoo|condicionador|protetor solar/i
         .test(textoOferta);
 
     const ofertaEsporte =
-      /esporte|fitness|academia|bicicleta|bike|treino|musculacao|musculaÃ§Ã£o|esteira|suplemento|whey/i
+      /esporte|fitness|academia|bicicleta|bike|treino|musculacao|musculação|esteira|suplemento|whey/i
         .test(textoOferta);
 
     const ofertaMercado =
-      /mercado|supermercado|alimento|limpeza|cafe|cafÃ©|arroz|feijao|feijÃ£o|azeite|chocolate|biscoito/i
+      /mercado|supermercado|alimento|limpeza|cafe|café|arroz|feijao|feijão|azeite|chocolate|biscoito/i
         .test(textoOferta);
 
     if (cupom.includes("CUPOM")) score += 30;
@@ -227,19 +227,19 @@ function escolherCupomParaOfertaML(oferta = {}, cupons = []) {
     if (cupom.includes("PIX")) score += 10;
     if (/[A-Z]{3,}\d{1,}/.test(cupom)) score += 10;
 
-    if (ofertaModa && /MODA|TENIS|TÃŠNIS|ROUPA/.test(cupom)) score += 70;
+    if (ofertaModa && /MODA|TENIS|TÊNIS|ROUPA/.test(cupom)) score += 70;
     if (ofertaBeleza && /BELEZA|PERFUME|COSMET/.test(cupom)) score += 70;
     if (ofertaEsporte && /SPORT|ESPORTE|FIT/.test(cupom)) score += 70;
     if (ofertaMercado && /MERCADO|SUPER|ALIMENTO/.test(cupom)) score += 70;
 
-    if (ofertaModa && /moda|roupa|camiseta|tenis|tÃªnis/.test(trecho)) score += 35;
-    if (ofertaBeleza && /beleza|perfume|cosmetico|cosmÃ©tico/.test(trecho)) score += 35;
+    if (ofertaModa && /moda|roupa|camiseta|tenis|tênis/.test(trecho)) score += 35;
+    if (ofertaBeleza && /beleza|perfume|cosmetico|cosmético/.test(trecho)) score += 35;
     if (ofertaEsporte && /esporte|fitness|academia/.test(trecho)) score += 35;
     if (ofertaMercado && /mercado|supermercado|alimento|limpeza/.test(trecho)) score += 35;
 
     if (trecho.includes("pix")) score += 10;
     if (trecho.includes("app")) score += 10;
-    if (trecho.includes("valido") || trecho.includes("vÃ¡lido")) score += 10;
+    if (trecho.includes("valido") || trecho.includes("válido")) score += 10;
     if (trecho.includes("inativo")) score -= 100;
     if (trecho.includes("expirado")) score -= 100;
 

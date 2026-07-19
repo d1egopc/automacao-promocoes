@@ -92,7 +92,7 @@ console.log(
 
 
 for (const termo of buscasBrasilRodada) {
-  
+
 try {
     if (produtosEncontrados.length >= limitePorRodada) break;
 
@@ -130,12 +130,12 @@ try {
         item.promotion_link_short ||
         item.promotion_link ||
         linkOriginal;
-       
+
         console.log("[INFO] ALI LINKS:", {
         short: item.promotion_link_short,
         normal: item.promotion_link
         });
-       
+
         if (!linkAfiliadoOriginal) {
           if (typeof registrarAbastecimento === "function") registrarAbastecimento("recusada", { motivo: "sem_link_afiliado" });
           continue;
@@ -230,7 +230,7 @@ let linkFinal =
     integracao.credenciais
   );
 
-console.log("[INFO] LINK FINAL ALI:", linkFinal);       
+console.log("[INFO] LINK FINAL ALI:", linkFinal);
 
 const tituloLower = String(titulo || "").toLowerCase();
 
@@ -415,7 +415,7 @@ console.log("[PERFORMANCE-RODADA-RESUMO]", {
   encontradas: produtosEncontrados.length
 });
 
-   
+
 return produtosEncontrados;
 
   } catch (e) {

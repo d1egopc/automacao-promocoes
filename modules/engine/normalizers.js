@@ -1,4 +1,4 @@
-﻿function normalizarTexto(valor = "") {
+function normalizarTexto(valor = "") {
   return String(valor || "").trim();
 }
 

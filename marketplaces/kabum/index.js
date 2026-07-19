@@ -710,7 +710,7 @@ function produtoSuspeito(oferta = {}) {
    "pendrive usb",
    "flash drive",
    "super armazenamento",
-   "armazenamento movel",                   
+   "armazenamento movel",
   ];
 
   if (suspeitos.some(p => texto.includes(normalizarTexto(p)))) {
@@ -830,9 +830,9 @@ const BUSCAS_GLOBAIS = {
     "shampoo promocao",  "kit perfume","kit locao", "kit shampoo",
     "desodorante promocao", "kit creme", "promocao de creme",
     "hidratante promocao", "kit hidratante", "sabonete", "eudora",
-    "maquiagem", "esmalt", "glos labial", "baton", "pulseira" 
-  ], 
- 
+    "maquiagem", "esmalt", "glos labial", "baton", "pulseira"
+  ],
+
   hardware: [
     "nvme 1tb m2", "nvme", "ssd 500 gb", "ssd kingston",
     "ssd 1tb promocao", "ssd 1tb kootion", "hd exos",
@@ -841,14 +841,14 @@ const BUSCAS_GLOBAIS = {
     "placa de video promocao", "monitor gamer",
     "headset gamer oferta", "monitor gamer oferta",
     "netac", "m2 movespeed", "movespeed", "sandisk",
-    "fonte gamer", "fonte gamer promocao", "corsair", 
+    "fonte gamer", "fonte gamer promocao", "corsair",
     "knup", "revengers", "master cool", "deep cool",
     "air cooler gamer", "water cooler", "water gamer",
     "teclado magnetico", "mini teclado", "rise mode",
     "headset promocao", "headset barato", "mouse sem fio",
     "headset rise", "headset havit", "headset headset binnune",
-    "tgt", "corsair", "montech", "gabinte gamer", "binnune", 
-    "nvidia", "amd", "ryzen", "intel", "redragon", "rise"  
+    "tgt", "corsair", "montech", "gabinte gamer", "binnune",
+    "nvidia", "amd", "ryzen", "intel", "redragon", "rise"
   ],
 
   tenis: [
@@ -859,7 +859,7 @@ const BUSCAS_GLOBAIS = {
     "new balance promocao", "chinelo promocao", "kappa promocao", "reebok promocao",
     "chinelo nike", "chinelo promocao", "chinelo rider", "sandalha", "rasteirinha",
     "chinelo cropped masculino", "chinelo cropped feminino", "chinelo havaianas",
-    "nike", "olympicus", "mizuno", "kappa", "new balance", "havaianas", "asics"   
+    "nike", "olympicus", "mizuno", "kappa", "new balance", "havaianas", "asics"
   ],
 
   casa: [
@@ -895,11 +895,11 @@ eletrodomesticos: [
 
 eletroportateis: [
   "escova secadora", "secador de cabelo", "chapinha", "multi cook philco",
-  "barbeador eletrico", "maquina cortar cabelo", "massageador eletrico", 
+  "barbeador eletrico", "maquina cortar cabelo", "massageador eletrico",
   "cafeteira", "liquidificador", "batedeira", "multi cook", "grill",
   "espremedor", "panela eletrica", "grill eletrico", "sanduicheira",
   "fritadeira eletrica", "vaporizador", "passadeira vapor",
-  "aspirador portatil", "multi cook philco antiaderente" 
+  "aspirador portatil", "multi cook philco antiaderente"
 ],
 
 limpeza: [
@@ -911,7 +911,7 @@ limpeza: [
   "amo 4 kg", "omo", "ype", "tira mancha venesh", "venesh",
   "limpador multiuso", "veja", "downy", "cif multiuso",
   "brilhante", "downy amaciante ", "dwayne ", "bom ar"
-],  
+],
 
 notebooksPc: [
   "notebook gamer", "notebook promocao", "pc gamer",
@@ -1057,11 +1057,11 @@ esporte: [
 brinquedos: [
   "lego promocao", "boneca infantil", "caminhao de controle",
   "carrinho controle remoto", "hot wheels", "lancha de controle",
-  "piscina infantil", "patinete", "trator de controle remoto", 
+  "piscina infantil", "patinete", "trator de controle remoto",
   "bola de futebol", "skate infantil", "brinquedo educativo",
   "losa magica", "motoca", "kit de carrinho", "brinquedo educativo",
   "boneca", "boneco", "pistola de agua", "caminhao de terra",
-  "batman", "homem aranha", "hulk", "robo", "homem de ferro" 
+  "batman", "homem aranha", "hulk", "robo", "homem de ferro"
 ],
 
 
@@ -1072,8 +1072,8 @@ brinquedos: [
     "macaco jacaré", "macaco hidraulico", "extitor automotivo", "chave philips",
     "kit parafusadeira", "extintor de incendio veicular", "chave de fenda",
     "jogo de chave combinada", "kit chave de fenda", "kit chave philips",
-    "combo chave de impacto", "compressor de ar", "chave inglesa"    
-  ], 
+    "combo chave de impacto", "compressor de ar", "chave inglesa"
+  ],
 
   celulares: [
     "smartphone promocao", "smartphone promocao relâmpago",
@@ -1088,7 +1088,7 @@ brinquedos: [
     "tv 43 promocao", "tv monitor", "suporte para tv",
     "tv 55 promocao", "tv oled 144hz", "home theater",
     "tv 65 oferta", "conversor digital", "tv stick wi-fi",
-    "tv 75 oferta", "box ip tv", "tv stick adroid", 
+    "tv 75 oferta", "box ip tv", "tv stick adroid",
     "caixa de som bluetooth", "caixa de som jbl", "cabo hdmi",
     "caixa de som aiwa", "soundbar promocao", "samsung",
     "lg", "philco", "philips", "tcl", "roku","panassonic"
@@ -1141,7 +1141,7 @@ if (cupomEstaBloqueado(regra.marketplace, regra.cupom)) {
   console.log("🚫 Cupom ignorado por status expirado:", regra.cupom);
   return false;
 }
-  
+
 if (
     !regra?.cupom ||
     !limparCuponsInvalidos([regra.cupom]).length
@@ -1151,7 +1151,7 @@ if (
   }
 
   config.cuponsAtivos = config.cuponsAtivos || [];
-  
+
   config.cuponsAtivos = config.cuponsAtivos.filter(c =>
   limparCuponsInvalidos([c?.cupom]).length
   );
@@ -1284,7 +1284,7 @@ function prepararOfertaGlobal(oferta = {}) {
 // ================= CATEGORIAS GLOBAIS =================
 
 const CATEGORIAS_GLOBAIS = {
-  
+
  pesca: {
     nome: "Pesca e Pescaria",
     palavras: [
@@ -1293,9 +1293,9 @@ const CATEGORIAS_GLOBAIS = {
       "linha de multifilamento", "camiseta uv", "camisa pesca", "lanterna",
       "oculos polarisado", "oculos de pesca", "canivete", "daiwa", "nelson nakamura",
       "caixa organizadora de isca", "box de anzol", "iscas de pesca", "divisórias pesca",
-      "jennerlure", "jogá", "nautika", "monster 3x", "lixxada", "camping", "bravinha", 
-      "jennerlure", "luri", "caixa de isca", "caixa pesca", "divisórias pesca", "camping",   
-      "divisorias pesca","farolete de pesca", "lampião pesca", "barraca", "rede de dormir"    
+      "jennerlure", "jogá", "nautika", "monster 3x", "lixxada", "camping", "bravinha",
+      "jennerlure", "luri", "caixa de isca", "caixa pesca", "divisórias pesca", "camping",
+      "divisorias pesca","farolete de pesca", "lampião pesca", "barraca", "rede de dormir"
     ]
   },
 
@@ -1329,7 +1329,7 @@ const CATEGORIAS_GLOBAIS = {
       "tenis", "tênis", "chinelo", "sandalia", "sandália",
       "havaianas", "papete", "salto alto", "loafer", "puma",
       "rider", "reebok", "under armor", "new balance", "adidas",
-      "mocassin", "mizuno", "asics", "nike", "olympikus", "penalty"   
+      "mocassin", "mizuno", "asics", "nike", "olympikus", "penalty"
     ]
   },
 
@@ -1348,7 +1348,7 @@ audioTv: {
     "tv 65pl", "tv 55pl", "tv 75ol", "lg", "tcl", "philips",
     "tv", "smart tv", "televisor", "televisao", "televisão",
     "caixa de som", "soundbar", "jbl", "boombox",
-    "radio", "rádio", "conversor digital", "iptv", "jbl" 
+    "radio", "rádio", "conversor digital", "iptv", "jbl"
   ]
 },
 
@@ -1361,7 +1361,7 @@ eletroportateis: {
     "panela elétrica", "processador de alimentos"
   ]
 },
-  
+
 automotivo: {
   nome: "Automotivo",
   palavras: [
@@ -1529,7 +1529,7 @@ games: {
     nome: "Roupas e Moda Feminina",
     palavras: [
       "blusinha", "lingerie", "calcinha", "biquini", "saia",
-      "vestido", "sandalia feminina", "shorts feminino", 
+      "vestido", "sandalia feminina", "shorts feminino",
       "shorts feminino", "kit calca feminina", "shorts feminino",
       "calça jeans feminina", "shortes jeans feminino", "colar"
     ]
@@ -1627,7 +1627,7 @@ if (categoriasDestino.length && categoriaOferta) {
     return false;
   }
 }
-  
+
   return true;
 }
 
@@ -1675,8 +1675,8 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
       console.log(
       "🧪 DESTINO COMPLETO PARA ENVIO:",
       JSON.stringify(destino, null, 2)
-      );   
-     
+      );
+
     const sock = sessoes[destino.conexaoId];
 
       if (!sock) {
@@ -1687,13 +1687,13 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
       const grupos = destino.gruposWhatsapp || [];
 
       for (const grupo of grupos) {
-        
+
       if (!usuarioTemCreditos(clienteId, 1)) {
       console.log("🚫 Sem créditos:", clienteId);
       continue;
       }
 
-      debitarCreditos(clienteId, 1);            
+      debitarCreditos(clienteId, 1);
 
         if (destino.tipoMidia === "texto" || !oferta.imagem) {
           await sock.sendMessage(grupo, { text: mensagem });
@@ -1741,20 +1741,20 @@ const selecionados = telegramsSelecionados.length
       telegramsSelecionados.includes(String(t.chatId))
     )
   : telegrams.filter(t => t.ativo);
-  
+
       if (!selecionados.length) {
         console.log("⚠️ Nenhum Telegram selecionado para este destino:", destino.nome);
       }
 
       for (const tel of selecionados) {
-       
+
       if (!usuarioTemCreditos(clienteId, 1)) {
       console.log("🚫 Sem créditos:", clienteId);
       continue;
       }
 
-      debitarCreditos(clienteId, 1); 
-            
+      debitarCreditos(clienteId, 1);
+
         if (!tel.ativo) continue;
 
         if (destino.tipoMidia === "texto" || !oferta.imagem) {
@@ -1988,7 +1988,7 @@ console.log(
   enviandoAgora = false;
   return;
 }
-    
+
 const titulo = oferta.nome || oferta.titulo || "Oferta";
 
 const precoAtual = oferta.preco || oferta.precoAtual || "";
@@ -2067,7 +2067,7 @@ if (cupom) {
 mensagem += `
 
 🛒 Comprar:
-${link}`;  
+${link}`;
 
 function parsePreco(valor) {
   if (!valor) return 0;
@@ -2160,7 +2160,7 @@ console.log("✅ Enviado com controle de tempo");
   enviandoAgora = false;
 }
 }
-   
+
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -2338,7 +2338,7 @@ configCliente.automacaoAtiva = true;
 await processarFila(clienteId);
 
 configCliente.automacaoAtiva = automacaoAnterior;
-  
+
     return res.json({
       ok: true,
       mensagem: "Oferta enviada manualmente",
@@ -2805,7 +2805,7 @@ return res.json({
   planos,
   lista: Object.values(planos || {})
  });
-}); 
+});
 
 app.post("/admin/planos", (req, res) => {
   if (!isAdminMaster(req)) {
@@ -3551,7 +3551,7 @@ app.get("/me", (req, res) => {
       marketplacesLiberados: getPlanoUsuario(req)?.marketplaces || []
     },
     marketplacesLiberados:getPlanoUsuario(req)?.marketplaces || [],
-       
+
     consumo: {
       enviosHoje,
       sessoes: sessoesUsuario.length,
@@ -4419,7 +4419,7 @@ async function buscarCsrfTokenMercadoLivre(cookies) {
     }
 
     console.log("🧪 HTML INICIO:");
-    console.log(html.slice(0, 3000)); 
+    console.log(html.slice(0, 3000));
 
     const patterns = [
       /x-csrf-token["']?\s*[:=]\s*["']([^"']+)["']/i,
@@ -4514,7 +4514,7 @@ const encurtarUrl = async (url) => {
 
 async function importarMercadoLivre(url, clienteIdAlvo = "admin") {
   const cookies = config?.credenciais?.cookies || "";
-  
+
   console.log("🌐 ML URL:", url);
 
   const response = await fetch(url, {
@@ -4542,7 +4542,7 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin") {
     "Sec-Fetch-User": "?1",
 
     "Sec-Fetch-User": "?1",
-    "Referer": "https://www.google.com/"  
+    "Referer": "https://www.google.com/"
  }
 });
 
@@ -4579,7 +4579,7 @@ if (response.url.includes("account-verification")) {
 
   let precoNumero = Number(String(preco).replace(",", "."));
   let precoAntigo = "";
-  
+
   const descontoMatch =
   html.match(/(\d{1,2})\s*%\s*OFF/i) ||
   html.match(/"discount_rate"\s*:\s*(\d{1,2})/i) ||
@@ -4738,7 +4738,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
   ? "🇧🇷 Produto no Brasil. Confira cupom ou desconto com moedas na página."
   : "🌍 Compra internacional. Pode haver imposto/taxa. Confira cupom ou desconto com moedas na página.";
 
-      
+
       if (!produto || Object.keys(produto).length === 0) {
   console.log("⚠️ AliExpress sem produto retornado pela API:", productId);
 
@@ -4779,7 +4779,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
     aviso: "AliExpress não retornou dados pela API. Preços extraídos do link quando disponíveis."
   };
 }
-    
+
     let titulo =
       produto.product_title ||
       produto.title ||
@@ -4792,7 +4792,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
       produto.product_small_image_urls?.[0] ||
       produto.image_url ||
       "";
-     
+
  let precoAtual =
   produto.target_sale_price ||
   produto.sale_price ||
@@ -4804,8 +4804,8 @@ async function importarAliExpress(urlEntrada, config = {}) {
 
 precoAtual = String(precoAtual).trim();
 console.log("✅ ALI PREÇO ESCOLHIDO:", precoAtual);
-   
-   
+
+
   let precoAntigo =
   produto.target_original_price ||
   produto.original_price ||
@@ -4829,11 +4829,11 @@ if (precoAntigo === precoAtual) {
   original_price: produto.original_price
 });
 
-  
+
   if (produto.discount === "0%" && limparPreco(precoAtual) === limparPreco(precoAntigo)) {
   precoAntigo = "";
 }
- 
+
 // 🔥 PRIORIDADE: preço real da URL (AliExpress promo)
 try {
   const urlDecodificada = decodeURIComponent(urlEntrada);
@@ -5218,7 +5218,7 @@ function limparCuponsInvalidos(cupons = []) {
     "OFFER",
     "OFFSETHEIGHT",
     "APPLEWEBKIT",
-    "MELIDATA",   
+    "MELIDATA",
     "MELISEARCH",
     "MELISESSION",
     "MELISTORE",
@@ -6073,7 +6073,7 @@ async function farejarAliExpressOld(clienteIdAlvo = "admin", deps = {}) {
     console.log("🛒 Farejando ofertas AliExpress...");
 
     const cfg = config.marketplaces?.aliexpress || {};
-    
+
     const limitePorRodada = cfg.limitePorRodada || 5;
     let adicionadasNestaRodada = 0;
     let ofertasEncontradas = [];
@@ -6437,12 +6437,12 @@ const html = await response.text();
         try {
          const produto = await importarMagalu(link);
 
-          console.log("🧪 PRODUTO MAGALU IMPORTADO:", produto);     
+          console.log("🧪 PRODUTO MAGALU IMPORTADO:", produto);
 
           if (!produto?.precoAtual) continue;
 
         const clienteId = clienteIdAlvo || "admin";
-          
+
         let novaOferta = {
             nome: produto.titulo,
             titulo: produto.titulo,
@@ -6530,7 +6530,7 @@ async function farejarAwin() {
     });
 
     console.log("📦 Produtos no feed Awin:", produtos.length);
-    
+
     console.log("🧪 PRIMEIRO PRODUTO AWIN:", produtos[0]);
 
     let adicionadas = 0;
@@ -6817,7 +6817,7 @@ console.log("🔎 AMAZON TEM CUPOM?", /cupom/i.test(html));
 
 linkAfiliado = limparLinkAmazon(linkAfiliado);
 
-const linkFinal = gerarLinkOptimus(linkAfiliado, "amazon"); 
+const linkFinal = gerarLinkOptimus(linkAfiliado, "amazon");
 
 return {
     marketplace: "amazon",
@@ -7090,7 +7090,7 @@ async function importarShopee(url, config) {
         precoAntigo: "",
         precoAtual: "",
         cupom,
-        avisoCupom, 
+        avisoCupom,
         linkOriginal: url,
         linkAfiliado: url,
         imagem: corrigirImagemUrl(imagem) || imagem,
@@ -7308,7 +7308,7 @@ if (marketplace === "magalu") {
         });
       }
 
-       
+
  const cupomEscolhido = escolherMelhorCupom(
   "mercadolivre",
   produto.nome || produto.titulo,
@@ -7390,7 +7390,7 @@ if (!temCupom && descontoPercentual < 10) {
 if (jaExiste) {
   console.log("⚠️ Oferta já existe na fila:", novaOferta.nome);
 } else {
-  
+
   if (produtoRepetidoRecentemente(novaOferta.nome, 12)) {
   console.log("🔁 Oferta parecida ignorada:", novaOferta.titulo);
   return;
@@ -7759,7 +7759,7 @@ async function carregarGruposSessao(id) {
 console.log("🔎 Tentando carregar grupos da sessão:", id);
 console.log("📌 Sessões abertas:", Object.keys(sessoes));
 console.log("📌 Status sessões:", statusSessao);
-  
+
 const sock = sessoes[id]?.sock || sessoes[id];
 
 if (gruposPorSessao[id]?.length) {
@@ -8418,7 +8418,7 @@ setInterval(() => {
 
   setTimeout(() => {
     console.log("🔄 Reconectando sessões WhatsApp automaticamente...");
- 
+
 let sessoesParaReconectar = [
   ...new Set(config?.sessoesWhatsapp || [])
 ];
@@ -8574,7 +8574,7 @@ await farejador(clienteId, {
 });
 }
   console.log(`✅ Rodada multiusuário finalizada: ${marketplace}`);
- 
+
   } catch (e) {
     console.log(`❌ Erro na rodada ${marketplace}:`, e.message);
   } finally {

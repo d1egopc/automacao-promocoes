@@ -83,15 +83,15 @@ console.log("[AMZ] DENTRO FAREJADOR:", typeof importarAmazon);
       typeof deps.ofertaTemBeneficioFarejador === "function"
         ? deps.ofertaTemBeneficioFarejador
         : (oferta) => Boolean(oferta?.cupom || oferta?.avisoCupom || oferta?.beneficioExtra);
-  
-  
+
+
     let adicionadasNestaRodada = 0;
     let ofertasEncontradas = [];
-    
+
     const limitePorRodada =
     config.marketplaces?.amazon?.limitePorRodada || 5;
 
-    
+
     buscaAmazon:
     for (const termo of buscas) {
       const url = `https://www.amazon.com.br/s?k=${encodeURIComponent(termo)}&rh=p_n_deal_type%3A23565492011`;
@@ -122,7 +122,7 @@ console.log("[AMZ] DENTRO FAREJADOR:", typeof importarAmazon);
     console.log("[AMZ] HTML Amazon muito pequeno ou invlido.");
     continue;
     }
-   
+
 const links =
   extrairLinksAmazon(html)
     .slice(0, 2);
@@ -130,7 +130,7 @@ if (typeof registrarAbastecimento === "function") registrarAbastecimento("encont
 
 for (const link of links) {
   try {
-  
+
 const integracaoAmazon =
   typeof getIntegracaoCliente === "function"
     ? getIntegracaoCliente(clienteId, "amazon")
@@ -319,7 +319,7 @@ const ofertasFiltradas =
   aplicarFiltrosUniversais(ofertasEncontradas);
 
 console.log(
-  `ðŸ§  Ofertas Amazon apÃ³s filtros universais: ${ofertasFiltradas.length}`
+  `🧠 Ofertas Amazon após filtros universais: ${ofertasFiltradas.length}`
 );
 
 for (const oferta of ofertasFiltradas) {
@@ -327,7 +327,7 @@ for (const oferta of ofertasFiltradas) {
 }
 
 console.log(
-  `âœ… Amazon finalizado. Adicionadas: ${ofertasFiltradas.length}`
+  `✅ Amazon finalizado. Adicionadas: ${ofertasFiltradas.length}`
 );
 
 } catch (e) {

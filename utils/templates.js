@@ -1,4 +1,4 @@
-﻿function cortarTitulo(titulo = "", limite = 120) {
+function cortarTitulo(titulo = "", limite = 120) {
   const texto = String(titulo || "Oferta").replace(/\s+/g, " ").trim();
 
   if (texto.length <= limite) return texto;

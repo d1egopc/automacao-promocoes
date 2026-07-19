@@ -1,4 +1,4 @@
-﻿// ================= PARSER MERCADO LIVRE =================
+// ================= PARSER MERCADO LIVRE =================
 
 function limparTextoML(texto = "") {
   return String(texto)
@@ -110,14 +110,14 @@ const tituloUrl = limparTextoML(
   !titulo ||
   titulo.toLowerCase().includes("ordenar por") ||
   titulo.toLowerCase().includes("mais relevantes") ||
-  titulo.toLowerCase().includes("menor preÃ§o") ||
-  titulo.toLowerCase().includes("maior preÃ§o") ||
+  titulo.toLowerCase().includes("menor preço") ||
+  titulo.toLowerCase().includes("maior preço") ||
   titulo.toLowerCase().includes("outras pessoas pesquisaram") ||
-  titulo.toLowerCase().includes("pesquisaram tambÃ©m") ||
+  titulo.toLowerCase().includes("pesquisaram também") ||
   titulo.toLowerCase().includes("produtos relacionados") ||
   titulo.toLowerCase().includes("formato de venda") ||
   titulo.toLowerCase().includes("lojas oficiais") ||
-  titulo.toLowerCase().includes("mercadolÃ­deres") ||
+  titulo.toLowerCase().includes("mercadolíderes") ||
   titulo.toLowerCase().includes("mercado lideres") ||
   titulo.toLowerCase().includes("filtro") ||
   titulo.toLowerCase() === "p";

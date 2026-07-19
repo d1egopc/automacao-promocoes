@@ -1,4 +1,4 @@
-﻿const radarCupons = {
+const radarCupons = {
   ml: { confirmados: 0, avisos: 0 },
   shopee: { confirmados: 0, avisos: 0 },
   amazon: { confirmados: 0, avisos: 0 }

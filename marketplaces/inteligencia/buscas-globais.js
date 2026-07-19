@@ -19,9 +19,9 @@ const BUSCAS_GLOBAIS = {
     "shampoo promocao",  "kit perfume","kit locao", "kit shampoo",
     "desodorante promocao", "kit creme", "promocao de creme",
     "hidratante promocao", "kit hidratante", "sabonete", "eudora",
-    "maquiagem", "esmalt", "glos labial", "baton", "pulseira" 
-  ], 
- 
+    "maquiagem", "esmalt", "glos labial", "baton", "pulseira"
+  ],
+
   hardware: [
     "nvme 1tb m2", "nvme", "ssd 500 gb", "ssd kingston",
     "ssd 1tb promocao", "ssd 1tb kootion", "hd exos",
@@ -30,14 +30,14 @@ const BUSCAS_GLOBAIS = {
     "placa de video promocao", "monitor gamer",
     "headset gamer oferta", "monitor gamer oferta",
     "netac", "m2 movespeed", "movespeed", "sandisk",
-    "fonte gamer", "fonte gamer promocao", "corsair", 
+    "fonte gamer", "fonte gamer promocao", "corsair",
     "knup", "revengers", "master cool", "deep cool",
     "air cooler gamer", "water cooler", "water gamer",
     "teclado magnetico", "mini teclado", "rise mode",
     "headset promocao", "headset barato", "mouse sem fio",
     "headset rise", "headset havit", "headset headset binnune",
-    "tgt", "corsair", "montech", "gabinte gamer", "binnune", 
-    "nvidia", "amd", "ryzen", "intel", "redragon", "rise"  
+    "tgt", "corsair", "montech", "gabinte gamer", "binnune",
+    "nvidia", "amd", "ryzen", "intel", "redragon", "rise"
   ],
 
   tenis: [
@@ -48,7 +48,7 @@ const BUSCAS_GLOBAIS = {
     "new balance promocao", "chinelo promocao", "kappa promocao", "reebok promocao",
     "chinelo nike", "chinelo promocao", "chinelo rider", "sandalha", "rasteirinha",
     "chinelo cropped masculino", "chinelo cropped feminino", "chinelo havaianas",
-    "nike", "olympicus", "mizuno", "kappa", "new balance", "havaianas", "asics"   
+    "nike", "olympicus", "mizuno", "kappa", "new balance", "havaianas", "asics"
   ],
 
   casa: [
@@ -84,11 +84,11 @@ eletrodomesticos: [
 
 eletroportateis: [
   "escova secadora", "secador de cabelo", "chapinha", "multi cook philco",
-  "barbeador eletrico", "maquina cortar cabelo", "massageador eletrico", 
+  "barbeador eletrico", "maquina cortar cabelo", "massageador eletrico",
   "cafeteira", "liquidificador", "batedeira", "multi cook", "grill",
   "espremedor", "panela eletrica", "grill eletrico", "sanduicheira",
   "fritadeira eletrica", "vaporizador", "passadeira vapor",
-  "aspirador portatil", "multi cook philco antiaderente" 
+  "aspirador portatil", "multi cook philco antiaderente"
 ],
 
 limpeza: [
@@ -100,7 +100,7 @@ limpeza: [
   "amo 4 kg", "omo", "ype", "tira mancha venesh", "venesh",
   "limpador multiuso", "veja", "downy", "cif multiuso",
   "brilhante", "downy amaciante ", "dwayne ", "bom ar"
-],  
+],
 
 notebooksPc: [
   "notebook gamer", "notebook promocao", "pc gamer",
@@ -246,11 +246,11 @@ esporte: [
 brinquedos: [
   "lego promocao", "boneca infantil", "caminhao de controle",
   "carrinho controle remoto", "hot wheels", "lancha de controle",
-  "piscina infantil", "patinete", "trator de controle remoto", 
+  "piscina infantil", "patinete", "trator de controle remoto",
   "bola de futebol", "skate infantil", "brinquedo educativo",
   "losa magica", "motoca", "kit de carrinho", "brinquedo educativo",
   "boneca", "boneco", "pistola de agua", "caminhao de terra",
-  "batman", "homem aranha", "hulk", "robo", "homem de ferro" 
+  "batman", "homem aranha", "hulk", "robo", "homem de ferro"
 ],
 
 
@@ -261,8 +261,8 @@ brinquedos: [
     "macaco jacaré", "macaco hidraulico", "extitor automotivo", "chave philips",
     "kit parafusadeira", "extintor de incendio veicular", "chave de fenda",
     "jogo de chave combinada", "kit chave de fenda", "kit chave philips",
-    "combo chave de impacto", "compressor de ar", "chave inglesa"    
-  ], 
+    "combo chave de impacto", "compressor de ar", "chave inglesa"
+  ],
 
   celulares: [
     "smartphone promocao", "smartphone promocao relâmpago",
@@ -277,7 +277,7 @@ brinquedos: [
     "tv 43 promocao", "tv monitor", "suporte para tv",
     "tv 55 promocao", "tv oled 144hz", "home theater",
     "tv 65 oferta", "conversor digital", "tv stick wi-fi",
-    "tv 75 oferta", "box ip tv", "tv stick adroid", 
+    "tv 75 oferta", "box ip tv", "tv stick adroid",
     "caixa de som bluetooth", "caixa de som jbl", "cabo hdmi",
     "caixa de som aiwa", "soundbar promocao", "samsung",
     "lg", "philco", "philips", "tcl", "roku","panassonic"

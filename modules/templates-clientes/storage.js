@@ -1,4 +1,4 @@
-﻿const { readClienteJson, writeClienteJson, normalizarClienteId } = require("../../utils/storage");
+const { readClienteJson, writeClienteJson, normalizarClienteId } = require("../../utils/storage");
 
 const ARQUIVO_TEMPLATES_OFERTAS = "templates-ofertas.json";
 const STORAGE_VERSION = 1;

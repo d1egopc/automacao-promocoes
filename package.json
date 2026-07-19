@@ -4,7 +4,8 @@
     "main":  "index.js",
     "scripts":  {
                     "start":  "node index.js",
-                    "test:radar-cupom":  "node tests/radar-cupom-mensagem.test.js"
+                    "test:radar-cupom":  "node tests/radar-cupom-mensagem.test.js",
+                    "audit:encoding":  "node scripts/audit-encoding.cjs"
                 },
     "dependencies":  {
                          "@whiskeysockets/baileys":  "^6.7.7",

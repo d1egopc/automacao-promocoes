@@ -1,4 +1,4 @@
-﻿
+
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
@@ -819,7 +819,7 @@ function renovarCreditosSeNecessario(usuario) {
   });
 }
 
-// ================ FUNCAO USUARIO TEM CRÃ‰DITO ==================
+// ================ FUNCAO USUARIO TEM CRÉDITO ==================
 
 function usuarioTemCreditos(clienteId, quantidade = 1) {
   const usuario = obterUsuario(clienteId);
@@ -1096,7 +1096,7 @@ function criarPlanosPadrao() {
   console.log("[OK]✅ Planos padro criados");
 }
 
-// ================= FUNÃ‡ÃƒO CARREGA CONFIG =================
+// ================= FUNÇÃO CARREGA CONFIG =================
 
 function carregarConfig() {
   try {
@@ -1117,7 +1117,7 @@ function carregarConfig() {
       console.log("[OK]✅ Config carregada");
     }
 
-         
+
 if (fs.existsSync(USUARIOS_FILE)) {
   usuarios = JSON.parse(
     fs.readFileSync(USUARIOS_FILE, "utf8")
@@ -1234,7 +1234,7 @@ function gerarLinkOptimus(linkOriginal = "", marketplace = "") {
 }
 
 
-// ========== LIGAÃ‡ÃƒO IMPORTAR AMAZON E SHOPEE ===================
+// ========== LIGAÇÃO IMPORTAR AMAZON E SHOPEE ===================
 
 const importarAmazon = criarImportarAmazon({
   extrairJsonLd,
@@ -1580,7 +1580,7 @@ function produtoSuspeito(oferta = {}) {
    "pendrive usb",
    "flash drive",
    "super armazenamento",
-   "armazenamento movel",                   
+   "armazenamento movel",
   ];
 
   if (suspeitos.some(p => texto.includes(normalizarTexto(p)))) {
@@ -1660,7 +1660,7 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-const app = express(); // ðŸ‘ˆ MUITO IMPORTANTE ter isso
+const app = express(); // 👈 MUITO IMPORTANTE ter isso
 
 app.set("trust proxy", 1);
 app.use(helmet());
@@ -1671,7 +1671,7 @@ const horarioInicio = 9;
 const horarioFim = 23;
 
 
-// ================= FUNÃ‡ÃƒO RODAR AGORA =================
+// ================= FUNÇÃO RODAR AGORA =================
 
 function podeRodarAgora() {
   return true;
@@ -1679,7 +1679,7 @@ function podeRodarAgora() {
 
 let ultimoEnvioFila = 0;
 
-// =================== NÃšCLEO GLOBAL DE OFERTAS ===================
+// =================== NÚCLEO GLOBAL DE OFERTAS ===================
 
 function normalizarTexto(valor = "") {
   return String(valor)
@@ -1947,7 +1947,7 @@ function logPrioridadeFila(oferta = {}) {
 }
 
 function prepararOfertaGlobal(oferta = {}) {
- 
+
 if (!oferta.id) {
     oferta.id = `oferta_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   }
@@ -1966,7 +1966,7 @@ if (
   ["aliexpress", "amazon", "shopee", "mercadolivre", "magalu", "awin", "kabum"].includes(categoriaNormalizada) ||
   categoriaNormalizada.includes("computador") ||
   categoriaNormalizada.includes("escritorio") ||
-  categoriaNormalizada.includes("escritÃ³rio")
+  categoriaNormalizada.includes("escritório")
 ) {
   oferta.categoria = classificarCategoriaOferta(oferta);
 }
@@ -2154,7 +2154,7 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
       return { enviado: false, motivo: "fora_horario" };
     }
 
- 
+
 // =========================== WHATSAPP ================================
 
 if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
@@ -2238,20 +2238,20 @@ const selecionados = telegramsSelecionados.length
       telegramsSelecionados.includes(String(t.chatId))
     )
   : telegrams.filter(t => t.ativo);
-  
+
       if (!selecionados.length) {
         console.log("[TELEGRAM] Nenhum Telegram selecionado para este destino:", destino.nome);
       }
 
       for (const tel of selecionados) {
-       
+
       if (!usuarioTemCreditos(clienteId, 1)) {
       console.log("[AVISO] Sem crditos:", clienteId);
       continue;
       }
 
-      debitarCreditos(clienteId, 1); 
-            
+      debitarCreditos(clienteId, 1);
+
         if (!tel.ativo) continue;
 
         if (destino.tipoMidia === "texto" || !oferta.imagem) {
@@ -2304,7 +2304,7 @@ const selecionados = telegramsSelecionados.length
 
   } catch (e) {
     console.log(
-      "âŒ erro destino inteligente:",
+      "❌ erro destino inteligente:",
       destino?.nome,
       e.message
     );
@@ -2315,7 +2315,7 @@ const selecionados = telegramsSelecionados.length
   return { enviado: false, motivo: "nao_enviado" };
 }
 
-// ================= FUNCÃƒO PROCESSA FILA =================
+// ================= FUNCÃO PROCESSA FILA =================
 
 async function processarFila(clienteIdAlvo = null) {
   const clienteFila = clienteIdAlvo || "admin";
@@ -2679,7 +2679,7 @@ console.log("[ENVIO] Enviado com controle de tempo");
   enviandoAgoraPorCliente[clienteFila] = false;
 }
 }
-   
+
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -2865,7 +2865,7 @@ configCliente.automacaoAtiva = true;
 await processarFila(clienteId);
 
 configCliente.automacaoAtiva = automacaoAnterior;
-  
+
     return res.json({
       ok: true,
       mensagem: "Oferta enviada manualmente",
@@ -2981,7 +2981,7 @@ app.post("/telegram/testar", async (req, res) => {
       `https://api.telegram.org/bot${destino.botToken}/sendMessage`,
       {
         chat_id: destino.chatId,
-        text: "ðŸ§ª Teste Telegram Optimus Promo enviado com sucesso!"
+        text: "🧪 Teste Telegram Optimus Promo enviado com sucesso!"
       }
     );
 
@@ -3049,7 +3049,7 @@ app.delete("/destinos/:id", (req, res) => {
   });
 });
 
-// ================= AUTOMAÃ‡ÃƒO POR CLIENTE =================
+// ================= AUTOMAÇÃO POR CLIENTE =================
 
 app.get("/automacao/status", (req, res) => {
   const clienteId = getClienteId(req);
@@ -3465,7 +3465,7 @@ return res.json({
   planos,
   lista: Object.values(planos || {})
  });
-}); 
+});
 
 app.post("/admin/planos", (req, res) => {
   if (!isAdminMaster(req)) {
@@ -3790,7 +3790,7 @@ app.post("/config", (req, res) => {
       configCliente.marketplaces[nome] =
         configCliente.marketplaces[nome] || {};
 
-      // usuÃ¡rio comum sÃ³ liga/desliga
+      // usuário comum só liga/desliga
       configCliente.marketplaces[nome].ativo =
         dados?.ativo === true;
 
@@ -3970,12 +3970,12 @@ function getIntegracaoCliente(clienteId = "admin", marketplace = "") {
   const mp = String(marketplace || "").toLowerCase();
   const cid = String(clienteId || "admin");
 
-  // Admin pode usar integraÃ§Ãµes do admin
+  // Admin pode usar integrações do admin
   if (cid === "admin") {
     return integracoesPorCliente?.admin?.[mp] || null;
   }
 
-  // UsuÃ¡rio comum sÃ³ pode usar integraÃ§Ã£o prÃ³pria
+  // Usuário comum só pode usar integração própria
   return integracoesPorCliente?.[cid]?.[mp] || null;
 }
 
@@ -8086,7 +8086,7 @@ return res.json({
     limites: planoAtual.limites || {}
   },
   marketplacesLiberados: planoAtual.marketplaces || [],
-      
+
     consumo: {
       enviosHoje,
       sessoes: sessoesUsuario.length,
@@ -8100,7 +8100,7 @@ return res.json({
   });
 });
 
-// ================= INTEGRAÃ‡Ã•ES =================
+// ================= INTEGRAÇÕES =================
 
 const marketplaceRules = integracoesUtils.marketplaceRules;
 
@@ -8491,7 +8491,7 @@ app.post("/awin/gerar-link", async (req, res) => {
   }
 });
 
-// ================= HELPERS DE IMPORTAÃ‡ÃƒO =================
+// ================= HELPERS DE IMPORTAÇÃO =================
 
 function htmlDecode(str) {
   if (!str) return "";
@@ -8740,9 +8740,9 @@ function aplicarFiltrosUniversais(ofertas = [], opcoes = {}) {
 
       if (!resultado.ok) {
         console.log(
-          "â­ï¸ Oferta ignorada pelo filtro universal:",
+          "⏭️ Oferta ignorada pelo filtro universal:",
           resultado.motivo,
-          oferta.titulo || oferta.nome || "sem tÃ­tulo"
+          oferta.titulo || oferta.nome || "sem título"
         );
       }
 
@@ -8921,7 +8921,7 @@ function gerarLinkMagalu(linkOriginal, promoterId) {
   const urlLimpa = String(linkOriginal).trim();
   const loja = String(promoterId).trim();
 
-  // Se jÃ¡ for link da loja do influenciador, mantÃ©m
+  // Se já for link da loja do influenciador, mantém
   if (urlLimpa.includes("magazinevoce.com.br")) {
     return urlLimpa;
   }
@@ -9032,10 +9032,10 @@ console.log("[INFO] AliExpress produto encontrado");
       {};
 
   const avisoCupom = ehBrasil
-  ? "ðŸ‡§ðŸ‡· Produto no Brasil. Confira cupom ou desconto com moedas na pÃ¡gina."
-  : "ðŸŒ Compra internacional. Pode haver imposto/taxa. Confira cupom ou desconto com moedas na pÃ¡gina.";
+  ? "🇧🇷 Produto no Brasil. Confira cupom ou desconto com moedas na página."
+  : "🌍 Compra internacional. Pode haver imposto/taxa. Confira cupom ou desconto com moedas na página.";
 
-      
+
       if (!produto || Object.keys(produto).length === 0) {
   console.log("[AVISO] AliExpress sem produto retornado pela API:", productId);
 
@@ -9076,7 +9076,7 @@ console.log("[INFO] AliExpress produto encontrado");
     aviso: "AliExpress não retornou dados pela API. Preços extraídos do link quando disponíveis."
   };
 }
-    
+
     let titulo =
       produto.product_title ||
       produto.title ||
@@ -9089,7 +9089,7 @@ console.log("[INFO] AliExpress produto encontrado");
       produto.product_small_image_urls?.[0] ||
       produto.image_url ||
       "";
-     
+
  let precoAtual =
   produto.target_sale_price ||
   produto.sale_price ||
@@ -9101,8 +9101,8 @@ console.log("[INFO] AliExpress produto encontrado");
 
 precoAtual = String(precoAtual).trim();
 console.log("[INFO] ALI PREO ESCOLHIDO:", precoAtual);
-   
-   
+
+
   let precoAntigo =
   produto.target_original_price ||
   produto.original_price ||
@@ -9126,23 +9126,23 @@ if (precoAntigo === precoAtual) {
   original_price: produto.original_price
 });
 
-  
+
   if (produto.discount === "0%" && limparPreco(precoAtual) === limparPreco(precoAntigo)) {
   precoAntigo = "";
 }
- 
-// ðŸ”¥ PRIORIDADE: preÃ§o real da URL (AliExpress promo)
+
+// 🔥 PRIORIDADE: preço real da URL (AliExpress promo)
 try {
   const urlDecodificada = decodeURIComponent(urlEntrada);
 
-  // pega exatamente o padrÃ£o pdp_npi
+  // pega exatamente o padrão pdp_npi
   const match = urlDecodificada.match(/BRL!([\d.]+)!([\d.]+)/);
 
   if (match) {
     const antigo = match[1];
     const atual = match[2];
 
-    // sÃ³ usa se fizer sentido (evita bug tipo 8.93)
+    // só usa se fizer sentido (evita bug tipo 8.93)
     if (parseFloat(atual) < parseFloat(antigo)) {
       precoAntigo = antigo;
       precoAtual = atual;
@@ -9160,7 +9160,7 @@ try {
   produto.product_url ||
   urlEntrada;
 
-// ðŸ”¥ Limpar link gigante AliExpress
+// 🔥 Limpar link gigante AliExpress
 if (
   linkAfiliado.includes("s.click.aliexpress.com/s/")
 ) {
@@ -9177,7 +9177,7 @@ if (
   }
 }
 
-// Se jÃ¡ vier link oficial curto da Ali, mantÃ©m ele.
+// Se já vier link oficial curto da Ali, mantém ele.
 const linkAliOficial = String(linkAfiliado || "").includes("s.click.aliexpress.com")
   ? linkAfiliado
   : linkAfiliado;
@@ -9267,7 +9267,7 @@ const response = await fetch(urlConsulta, {
 
     const html = await response.text();
 
- 
+
     const titulo =
       html.match(/<title>(.*?)<\/title>/i)?.[1]
         ?.replace(" | Magazine Luiza", "")
@@ -9516,7 +9516,7 @@ function limparCuponsInvalidos(cupons = []) {
     "OFFER",
     "OFFSETHEIGHT",
     "APPLEWEBKIT",
-    "MELIDATA",   
+    "MELIDATA",
     "MELISEARCH",
     "MELISESSION",
     "MELISTORE",
@@ -9629,7 +9629,7 @@ function registrarResultadoCupom(marketplace = "", cupom = "", sucesso = false) 
   salvarConfig();
 }
 
-// =========== INTELIGÃŠNCIA GLOBAL DE CUPONS ===========
+// =========== INTELIGÊNCIA GLOBAL DE CUPONS ===========
 
 function cupomEstaBloqueado(marketplace = "", cupom = "") {
   const mp = normalizarTexto(marketplace || "");
@@ -9753,7 +9753,7 @@ function categoriaPermitidaNoDestino(oferta, destino) {
 }
 
 //============ FUNCAO FAREJAR CUPOM MERCADO LIVRE ================
-// DESATIVADA: nÃ£o registrar cupons ML automaticamente
+// DESATIVADA: não registrar cupons ML automaticamente
 
 async function farejarCuponsMercadoLivre(html = "") {
   console.log("[INFO] farejarCuponsMercadoLivre desativado");
@@ -10089,7 +10089,7 @@ function normalizarSessaoId(clienteId, id = "sessao1") {
 
   let sessao = String(id || "sessao1").trim();
 
-  // remove duplicaÃ§Ã£o
+  // remove duplicação
   if (sessao.startsWith(cliente + "_")) {
     sessao = sessao.slice((cliente + "_").length);
   }
@@ -10326,7 +10326,7 @@ ofertaCliente.statusDetalhe = ofertaCliente.statusDetalhe || "Na fila";
 validarCupomMonetarioOferta(ofertaCliente);
 aplicarPrioridadeEnvioOferta(ofertaCliente);
 
-// â­ SCORE V1
+// ⭐ SCORE V1
 try {
   const resultadoScore = calcularScoreOferta(ofertaCliente);
 
@@ -10478,17 +10478,17 @@ console.log("[INFO] Oferta distribuda para cliente:", {
             const palavrasBloqueadas = [
               "cabelo",
               "peruca",
-              "extensÃ£o",
-              "extensÃµes",
+              "extensão",
+              "extensões",
               "sapato",
-              "sandÃ¡lia",
+              "sandália",
               "chinelo",
               "salto",
               "batom",
-              "cÃ­lios",
+              "cílios",
               "unha",
               "bolsa",
-              "sutiÃ£",
+              "sutiã",
               "calcinha",
               "wedding",
               "bridal"
@@ -10508,7 +10508,7 @@ console.log("[INFO] Oferta distribuda para cliente:", {
               Number(cfg.descontoMinimoInternacional) || descontoMinimo;
 
             const minimoDescontoAplicado =
-              tipo === "ðŸŒ"
+              tipo === "🌍"
                 ? descontoMinimoInternacional
                 : descontoMinimo;
 
@@ -10565,16 +10565,16 @@ console.log("[INFO] Oferta distribuda para cliente:", {
           } catch (e) {
             console.log("[ERRO]❌ erro produto AliExpress API:", e.message);
           }
-        }    
+        }
 
     for (const termo of buscasBrasil) {
-      await buscarTermoAliExpress(termo, "ðŸ‡§ðŸ‡·");
+      await buscarTermoAliExpress(termo, "🇧🇷");
       if (adicionadasNestaRodada >= limitePorRodada) break;
     }
 
     if (cfg.permitirInternacionalForte && adicionadasNestaRodada < limitePorRodada) {
       for (const termo of buscasInternacional) {
-        await buscarTermoAliExpress(termo, "ðŸŒ");
+        await buscarTermoAliExpress(termo, "🌍");
         if (adicionadasNestaRodada >= limitePorRodada) break;
       }
     }
@@ -10660,7 +10660,7 @@ async function farejarMagalu() {
       if (!response.ok) {
 
   console.log(
-    "ðŸ›¡ï¸ Magalu bloqueou status:",
+    "🛡️ Magalu bloqueou status:",
     response.status,
     "- parando rodada."
   );
@@ -10704,12 +10704,12 @@ const html = await response.text();
         try {
          const produto = await importarMagalu(link);
 
-          console.log("[API] PRODUTO MAGALU IMPORTADO:", produto);     
+          console.log("[API] PRODUTO MAGALU IMPORTADO:", produto);
 
           if (!produto?.precoAtual) continue;
 
         const clienteId = getClienteId(req);
-          
+
         let novaOferta = {
             nome: produto.titulo,
             titulo: produto.titulo,
@@ -10789,7 +10789,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
 
     if (!integracaoAwin?.credenciais) {
       console.log(
-        "âŒ Awin sem integraÃ§Ã£o configurada:",
+        "❌ Awin sem integração configurada:",
         clienteId
       );
       return;
@@ -10803,7 +10803,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
 
     if (!fs.existsSync(caminhoFeed)) {
       console.log(
-        "âŒ Feed Awin nÃ£o encontrado:",
+        "❌ Feed Awin não encontrado:",
         caminhoFeed
       );
       return;
@@ -10824,7 +10824,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
     });
 
     console.log("[INFO] Produtos no feed Awin:", produtos.length);
-    
+
     let adicionadas = 0;
     let ofertasEncontradas = [];
 
@@ -10899,7 +10899,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
     );
 
     console.log(
-      `ðŸ§  Ofertas Awin apÃ³s filtros universais: ${ofertasFiltradas.length}`
+      `🧠 Ofertas Awin após filtros universais: ${ofertasFiltradas.length}`
     );
 
    for (const oferta of ofertasFiltradas) {
@@ -11174,8 +11174,8 @@ app.post("/reset/:id", async (req, res) => {
     salvarConfigsClientes();
     salvarConfig();
     salvarSessoesMeta();
-       
-     
+
+
     fs.rmSync("/data/auth_" + id, {
       recursive: true,
       force: true
@@ -11197,7 +11197,7 @@ app.post("/reset/:id", async (req, res) => {
   }
 });
 
-// ===================== FUNÃ‡ÃƒO LIMETE SESSÃƒO WHATSAPP ========================
+// ===================== FUNÇÃO LIMETE SESSÃO WHATSAPP ========================
 
 function obterLimiteSessoesCliente(clienteId) {
   const usuario = obterUsuario(clienteId);
@@ -11755,8 +11755,8 @@ async function enviarTelegram(oferta, mensagem) {
   }
 }
 
-         
-// ================= FUNCÃƒO WHATSAPP =================
+
+// ================= FUNCÃO WHATSAPP =================
 
 async function iniciarWhatsApp(id, force = false) {
   console.log("[WHATSAPP] Iniciando sesso:", id, "force:", force);
@@ -11842,7 +11842,7 @@ sock.ev.on("messages.upsert", async ({ messages = [] } = {}) => {
 });
 
 sock.ev.on("group-participants.update", async (evento) => {
-  
+
   console.log("[INFO] EVENTO GRUPO MENSAGEIRO:", {
     quando: new Date().toISOString(),
     clienteIdMensageiro,
@@ -11986,7 +11986,7 @@ async function testarAwinProdutos() {
   } catch (e) {
 
     console.log(
-      "âŒ erro teste awin:",
+      "❌ erro teste awin:",
       e.response?.data || e.message
     );
 
@@ -12074,7 +12074,7 @@ setInterval(() => {
 
   setTimeout(() => {
     console.log("[WHATSAPP] Reconectando sesses WhatsApp automaticamente...");
- 
+
 let sessoesParaReconectar = [
   ...new Set(config?.sessoesWhatsapp || [])
 ];
@@ -12246,9 +12246,9 @@ await farejador(clienteId, {
 
 });
 }
-  
+
   console.log(`[INFO] Rodada multiusurio finalizada: ${marketplace}`);
- 
+
   } catch (e) {
     console.log(`[ERRO] Erro na rodada ${marketplace}:`, e.message);
   } finally {
@@ -12272,7 +12272,7 @@ await farejador(clienteId, {
 
  }, 60 * 1000);
 
- 
+
 
 setInterval(() => {
   rodarProximoMarketplace();

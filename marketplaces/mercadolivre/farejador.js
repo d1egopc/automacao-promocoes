@@ -1,4 +1,4 @@
-﻿
+
 const { extrairProdutosBuscaML } = require("./parser");
 const { avaliarLimiteFilaHotfix } = require("../../utils/performance-hotfix");
 const filaOfertas = require("../../utils/fila-ofertas");
@@ -524,7 +524,7 @@ if (ignoradaMemoria) {
 
             registrarOfertaVista(novaOferta);
 
-            
+
 const limiteFila = avaliarLimiteFilaHotfix(fila, novaOferta, clienteId);
 if (!limiteFila.permitido) {
   console.log("[PERFORMANCE-FILA-LIMITE]", {

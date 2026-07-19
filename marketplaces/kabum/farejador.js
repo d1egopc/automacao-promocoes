@@ -109,7 +109,7 @@ console.log(
 
 
 for (let produto of produtos.slice(0, estrategiaFarejador.filaCritica ? Math.max(cfg.limitePorRodada || 2, 3) : cfg.limitePorRodada || 2)) {
-  
+
 const titulo = produto.titulo;
 
   if (!titulo) continue;
@@ -341,7 +341,7 @@ if (!jaExisteKabum) {
   }
 
 }
-    
+
   const integracaoAwin =
   integracoesPorCliente?.[clienteId]?.awin;
 

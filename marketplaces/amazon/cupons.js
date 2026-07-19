@@ -1,4 +1,4 @@
-﻿const { registrarRadarCupons } = require("../cupons/radar");
+const { registrarRadarCupons } = require("../cupons/radar");
 
 let ultimoTotalCuponsAmazon = 0;
 
@@ -33,19 +33,19 @@ function normalizarTextoAmazon(html = "") {
 
 function corrigirMojibakeAmazon(texto = "") {
   return String(texto || "")
-    .replace(/HÃ¡/g, "Há")
-    .replace(/hÃ¡/g, "há")
-    .replace(/pÃ¡gina/g, "página")
-    .replace(/disponÃ­vel/g, "disponível")
-    .replace(/cÃ³digo/g, "código")
-    .replace(/nÃ£o/g, "não")
-    .replace(/Ã£/g, "ã")
-    .replace(/Ã¡/g, "á")
-    .replace(/Ã©/g, "é")
-    .replace(/Ã­/g, "í")
-    .replace(/Ã³/g, "ó")
-    .replace(/Ãº/g, "ú")
-    .replace(/Ã§/g, "ç");
+    .replace(/H\u00c3\u00a1/g, "Há")
+    .replace(/h\u00c3\u00a1/g, "há")
+    .replace(/p\u00c3\u00a1gina/g, "página")
+    .replace(/dispon\u00c3\u00advel/g, "disponível")
+    .replace(/c\u00c3\u00b3digo/g, "código")
+    .replace(/n\u00c3\u00a3o/g, "não")
+    .replace(/\u00c3\u00a3/g, "ã")
+    .replace(/\u00c3\u00a1/g, "á")
+    .replace(/\u00c3\u00a9/g, "é")
+    .replace(/\u00c3\u00ad/g, "í")
+    .replace(/\u00c3\u00b3/g, "ó")
+    .replace(/\u00c3\u00ba/g, "ú")
+    .replace(/\u00c3\u00a7/g, "ç");
 }
 
 function limparBeneficioAmazon(texto = "") {

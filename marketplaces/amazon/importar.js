@@ -1,4 +1,4 @@
-﻿function criarImportarAmazon(deps = {}) {
+function criarImportarAmazon(deps = {}) {
   const {
     extrairJsonLd,
     extrairMeta,

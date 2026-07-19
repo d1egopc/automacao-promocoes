@@ -1,4 +1,4 @@
-﻿function logEngine(tag, dados = {}) {
+function logEngine(tag, dados = {}) {
   try {
     console.log(tag, dados);
   } catch {

@@ -1,4 +1,4 @@
-﻿// ================= SCORE DE OFERTA V1 =================
+// ================= SCORE DE OFERTA V1 =================
 
 function precoParaNumero(valor = "") {
   return Number(
@@ -35,16 +35,16 @@ function calcularScoreOferta(oferta = {}) {
     oferta.precoAtual || oferta.preco
   );
 
-  // preÃ§o baixo
+  // preço baixo
   if (precoAtual > 0 && precoAtual <= 30) {
     score += 10;
-    motivos.push("preÃ§o atÃ© R$30");
+    motivos.push("preço até R$30");
   } else if (precoAtual <= 50) {
     score += 8;
-    motivos.push("preÃ§o atÃ© R$50");
+    motivos.push("preço até R$50");
   } else if (precoAtual <= 100) {
     score += 5;
-    motivos.push("preÃ§o atÃ© R$100");
+    motivos.push("preço até R$100");
   }
 
   // desconto
@@ -108,7 +108,7 @@ function calcularScoreOferta(oferta = {}) {
     motivos.push("categoria quente");
   } else if (
     categoria.includes("perfumaria") ||
-    categoria.includes("tÃªnis") ||
+    categoria.includes("tênis") ||
     categoria.includes("tenis")
   ) {
     score += 10;

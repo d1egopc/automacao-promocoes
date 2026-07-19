@@ -1,4 +1,4 @@
-﻿const { CANAIS_PERMITIDOS, getBlocoCatalogo, tiposBlocosOficiais } = require("./catalogo-blocos");
+const { CANAIS_PERMITIDOS, getBlocoCatalogo, tiposBlocosOficiais } = require("./catalogo-blocos");
 
 const SCHEMA_VERSION = 1;
 

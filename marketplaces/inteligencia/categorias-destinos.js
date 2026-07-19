@@ -8,7 +8,7 @@ const CATEGORIAS_DESTINOS = {
       "camiseta", "camisa", "regata", "oversized", "algodao", "algodão",
       "malhao", "malhão", "cueca", "kit cuecas", "bermuda", "caterpillar",
       "calca masculina", "calça", "moletom", "bermuda", "kit cuecas", "corta vento",
-      "carteira", "cinto", "jaqueta", "capa de chuva", "bone", "canguru", 
+      "carteira", "cinto", "jaqueta", "capa de chuva", "bone", "canguru",
       "cueca", "cuecas", "boxer", "cueca boxer", "microfibra", "blusa de frio",
       "jaqueta de couro feminina", "conjunto moletom"
     ]
@@ -42,7 +42,7 @@ const CATEGORIAS_DESTINOS = {
       "havaianas", "papete", "salto alto", "loafer", "puma", "tenis puma",
       "rider", "reebok", "under armor", "new balance", "adidas", "rasteira",
       "mocassim", "mizuno", "asics", "nike", "olympikus", "penalty",
-      "bota", "botina", "coturno", "sapato", "sapatenis", "sapatenis", "casual unissex"    
+      "bota", "botina", "coturno", "sapato", "sapatenis", "sapatenis", "casual unissex"
     ]
   },
 
@@ -107,7 +107,7 @@ const CATEGORIAS_DESTINOS = {
       "fone bluetooth", "fone de ouvido", "fones de ouvido",
       "ear hook", "headphone", "tws", "bluetooth 5.3", "airpods",
       "smartwatch", "relogio inteligente", "relógio inteligente",
-      "smart watch", "smart band", "amplificador de áudio", "soundcore" 
+      "smart watch", "smart band", "amplificador de áudio", "soundcore"
     ]
   },
 
@@ -199,7 +199,7 @@ const CATEGORIAS_DESTINOS = {
       "potes plásticos", "cobertor casal", "cobertor casal", "manta", "unidades manta",
       "jogo de lençol", "Xícaras Bebidas Fria", "top e legging", "fechadura digital",
       "formas assadeiras", "amolador de facas", "torneira gourmet", "faca de chef",
-      "tapete sala"       
+      "tapete sala"
     ]
   },
 

@@ -219,7 +219,7 @@ console.log("[DEBUG] KABUM HTML DEBUG:", {
   trechoImagem: html.match(/https?:\/\/[^"']+\.(jpg|jpeg|png|webp)/i)?.[0] || ""
 });
 
-      // ================= EXTRAIR TÃTULO =================
+      // ================= EXTRAIR TÍTULO =================
 
     const titulo =
       html.match(/<title>(.*?)<\/title>/i)?.[1]
@@ -249,7 +249,7 @@ if (imagem) {
 
 console.log("[INFO] IMAGEM KABUM:", imagem);
 
-  // ================= EXTRAIR PREÃ‡O =================
+  // ================= EXTRAIR PREÇO =================
 
 const tituloFinal = limparSufixoTituloKabum(titulo);
 const diagnosticoProduto = diagnosticarProdutoKabum(url, tituloFinal || titulo, imagem);
@@ -284,17 +284,17 @@ const precosNumericos = precosEncontrados
   .filter(p => Number.isFinite(p.numero) && p.numero > 0);
 
 const pixMatch =
-  html.match(/(R\$\s?[\d\.]+,\d{2})\s*Ã€ vista no PIX/i) ||
-  html.match(/(R\$\s?[\d\.]+,\d{2})\s*Ã€ vista no PIX com/i);
+  html.match(/(R\$\s?[\d\.]+,\d{2})\s*À vista no PIX/i) ||
+  html.match(/(R\$\s?[\d\.]+,\d{2})\s*À vista no PIX com/i);
 
 console.log("[INFO] PIX MATCH:", pixMatch?.[1]);
 
 const parcelamentoMatch =
-  html.match(/em\s+atÃ©\s+(\d+)x[\s\S]{0,80}de\s+(R\$\s?[\d\.]+,\d{2})[\s\S]{0,80}sem\s+juros/i) ||
+  html.match(/em\s+até\s+(\d+)x[\s\S]{0,80}de\s+(R\$\s?[\d\.]+,\d{2})[\s\S]{0,80}sem\s+juros/i) ||
   html.match(/(\d+)x[\s\S]{0,40}de\s+(R\$\s?[\d\.]+,\d{2})[\s\S]{0,80}sem\s+juros/i);
 
 if (parcelamentoMatch?.[1] && parcelamentoMatch?.[2]) {
-  parcelamento = `ðŸ’³ Ou ${parcelamentoMatch[1]}x de ${parcelamentoMatch[2]} sem juros`;
+  parcelamento = `💳 Ou ${parcelamentoMatch[1]}x de ${parcelamentoMatch[2]} sem juros`;
 }
 
 if (!parcelamento) {
@@ -310,18 +310,18 @@ if (!parcelamento) {
     const vezes = Math.round(precoTotalParcelado.numero / precoParcela.numero);
 
     if (vezes >= 2 && vezes <= 12) {
-      parcelamento = `ðŸ’³ Ou ${vezes}x de ${precoParcela.texto} sem juros`;
+      parcelamento = `💳 Ou ${vezes}x de ${precoParcela.texto} sem juros`;
     }
   }
 }
 
 if (pixMatch?.[1]) {
   precoAtual = pixMatch[1].trim();
-  avisoPagamento = "Ã€ vista no PIX";
+  avisoPagamento = "À vista no PIX";
 }
 
 if (!avisoPagamento && precoAtual && html.toLowerCase().includes("vista no pix")) {
-  avisoPagamento = "Ã€ vista no PIX";
+  avisoPagamento = "À vista no PIX";
 }
 
 const precosValidos = precosNumericos.filter((p) => {
