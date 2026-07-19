@@ -149,10 +149,13 @@ function horaSaoPaulo(input) {
   assert.strictEqual(configNormalizada.quantidadeDiaria, 12);
   assert.strictEqual(configNormalizada.maxPublicacoesAutomaticasPorDia, 12);
   assert.strictEqual(configNormalizada.intervaloMinimoMinutos, 10);
+  assert.deepStrictEqual(configNormalizada.formatos, ["feed"], "config antiga sem formatos deve assumir feed");
   const configNormalizadaMax = storage.setConfigAutomaticoSocial("cliente_norm_max", configAutomatico({ quantidadeDiaria: 25 }));
   assert.strictEqual(configNormalizadaMax.quantidadeDiaria, 20);
   const configFallbackMax = storage.setConfigAutomaticoSocial("cliente_norm_fallback", { ativo: true, maxPublicacoesAutomaticasPorDia: 8 });
   assert.strictEqual(configFallbackMax.quantidadeDiaria, 8);
+  const configFormatos = storage.setConfigAutomaticoSocial("cliente_norm_formatos", configAutomatico({ formatos: ["feed", "reels", "invalido"] }));
+  assert.deepStrictEqual(configFormatos.formatos, ["feed", "reels"], "config automatica preserva somente formatos suportados");
 
   conectar("cliente_limite", "limite");
   writeClienteJson("cliente_limite", "fila.json", Array.from({ length: 12 }, (_, i) =>
@@ -179,6 +182,7 @@ function horaSaoPaulo(input) {
   const autosLimite = storage.listarAgendamentosSocial("cliente_limite").filter(item => item.origem === "automatico");
   assert.strictEqual(autosLimite.length, 12);
   assert.ok(autosLimite.every(item => item.status === "agendada"));
+  assert.ok(autosLimite.every(item => item.formato === "feed"), "automatico atual agenda feed por compatibilidade");
   assert.ok(autosLimite.every(item => item.imagemUrl), "automaticos carregam miniatura da oferta");
   assert.ok(autosLimite.every(item => Date.parse(item.agendadoPara) > AGORA.getTime()), "nao agenda no passado");
   assert.ok(autosLimite.every(item => item.agendadoPara.startsWith("2026-07-14")), "respeita janela do dia");

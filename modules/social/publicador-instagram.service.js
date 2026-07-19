@@ -1,6 +1,7 @@
 const {
   publicarImagemInstagram,
-  publicarImagemLivreInstagram
+  publicarImagemLivreInstagram,
+  publicarReelInstagram
 } = require("./instagram");
 const { logSocial } = require("./logs");
 const { renderizarArtePublicacaoSocial } = require("./social-art-renderer.client");
@@ -23,14 +24,22 @@ function normalizarTipo(tipo = "") {
   return ["oferta", "livre"].includes(valor) ? valor : "oferta";
 }
 
-function chaveIdempotencia({ clienteId = "", origem = "", tipoPublicacao = "", ofertaId = "", imagemUrl = "", agendamentoId = "" } = {}) {
+function normalizarFormato(formato = "", { falharInvalido = false } = {}) {
+  const informado = texto(formato);
+  const valor = texto(informado || "feed").toLowerCase();
+  if (falharInvalido && informado && !["feed", "reels"].includes(valor)) throw new Error("formato_publicacao_invalido");
+  return ["feed", "reels"].includes(valor) ? valor : "feed";
+}
+
+function chaveIdempotencia({ clienteId = "", origem = "", tipoPublicacao = "", formato = "", ofertaId = "", imagemUrl = "", videoUrl = "", agendamentoId = "" } = {}) {
   return [
     "instagram",
     texto(clienteId || "admin"),
     normalizarOrigem(origem),
     normalizarTipo(tipoPublicacao),
+    normalizarFormato(formato),
     texto(agendamentoId),
-    texto(ofertaId) || texto(imagemUrl)
+    texto(ofertaId) || texto(imagemUrl) || texto(videoUrl)
   ].join(":");
 }
 
@@ -38,8 +47,16 @@ async function publicarNoInstagram({
   clienteId = "admin",
   origem = "manual",
   tipoPublicacao = "oferta",
+  formato = "feed",
   ofertaId = "",
   imagemUrl = "",
+  videoUrl = "",
+  mediaUrl = "",
+  midiaUrl = "",
+  mimeType = "",
+  mediaMimeType = "",
+  midiaMimeType = "",
+  videoMimeType = "",
   legenda = "",
   templateId = "padrao-instagram",
   gatilho = undefined,
@@ -59,6 +76,7 @@ async function publicarNoInstagram({
   const clienteSeguro = texto(clienteId || "admin") || "admin";
   const origemSegura = normalizarOrigem(origem);
   const tipoSeguro = normalizarTipo(tipoPublicacao);
+  const formatoSeguro = normalizarFormato(formato, { falharInvalido: true });
   const templateSolicitado = texto(templateId || (tipoSeguro === "livre" ? "livre-instagram" : "padrao-instagram"));
   const templateResolvido = tipoSeguro === "livre"
     ? { templateId: templateSolicitado, template: null }
@@ -69,8 +87,10 @@ async function publicarNoInstagram({
     clienteId: clienteSeguro,
     origem: origemSegura,
     tipoPublicacao: tipoSeguro,
+    formato: formatoSeguro,
     ofertaId,
     imagemUrl,
+    videoUrl,
     agendamentoId
   });
 
@@ -78,6 +98,7 @@ async function publicarNoInstagram({
     clienteId: clienteSeguro,
     origem: origemSegura,
     tipoPublicacao: tipoSeguro,
+    formato: formatoSeguro,
     ofertaId: texto(ofertaId),
     templateId: templateSeguro,
     agendamentoId: texto(agendamentoId),
@@ -93,11 +114,19 @@ async function publicarNoInstagram({
     mensagemPrivada: texto(templatePersonalizado ? templatePersonalizado.mensagemPrivada : mensagemPrivada),
     direct,
     redirect,
+    videoUrl: texto(videoUrl),
+    mediaUrl: texto(mediaUrl),
+    midiaUrl: texto(midiaUrl),
+    mimeType: texto(mimeType),
+    mediaMimeType: texto(mediaMimeType),
+    midiaMimeType: texto(midiaMimeType),
+    videoMimeType: texto(videoMimeType),
     urlDestino: texto(urlDestino),
     cta: templatePersonalizado ? templatePersonalizado.cta : cta,
     linkAfiliado: texto(linkAfiliado),
     origem: origemSegura,
     tipoPublicacao: tipoSeguro,
+    formato: formatoSeguro,
     agendamentoId: texto(agendamentoId),
     idempotencyKey: chave,
     renderizadorArte,
@@ -112,6 +141,31 @@ async function publicarNoInstagram({
     tamanhoLegenda: parametros.legenda.length
   });
 
+  if (formatoSeguro === "reels") {
+    const resultado = await publicarReelInstagram({
+      ...parametros,
+      ofertaId: texto(ofertaId),
+      imagemUrl,
+      videoUrl,
+      mediaUrl,
+      midiaUrl,
+      mimeType,
+      mediaMimeType,
+      midiaMimeType,
+      videoMimeType
+    });
+    logSocial("[SOCIAL-PUBLICADOR-FIM]", {
+      clienteId: clienteSeguro,
+      origem: origemSegura,
+      tipoPublicacao: tipoSeguro,
+      formato: formatoSeguro,
+      ofertaId: texto(ofertaId),
+      status: resultado.publicacao?.status || "",
+      duplicada: resultado.duplicada === true
+    });
+    return resultado;
+  }
+
   if (tipoSeguro === "livre") {
     const resultado = await publicarImagemLivreInstagram({
       ...parametros,
@@ -121,6 +175,7 @@ async function publicarNoInstagram({
       clienteId: clienteSeguro,
       origem: origemSegura,
       tipoPublicacao: tipoSeguro,
+      formato: formatoSeguro,
       status: resultado.publicacao?.status || "",
       duplicada: resultado.duplicada === true
     });
@@ -138,6 +193,7 @@ async function publicarNoInstagram({
     clienteId: clienteSeguro,
     origem: origemSegura,
     tipoPublicacao: tipoSeguro,
+    formato: formatoSeguro,
     ofertaId: ofertaIdSeguro,
     status: resultado.publicacao?.status || "",
     duplicada: resultado.duplicada === true
@@ -149,5 +205,6 @@ module.exports = {
   publicarNoInstagram,
   chaveIdempotencia,
   normalizarOrigem,
-  normalizarTipo
+  normalizarTipo,
+  normalizarFormato
 };

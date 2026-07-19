@@ -20,6 +20,7 @@ const REDES_SUPORTADAS = new Set(["instagram", "facebook", "telegram"]);
 const STATUS_PUBLICACAO = new Set(["rascunho", "agendada", "pendente", "aguardando_aprovacao", "processando", "publicando", "publicada", "erro", "cancelada"]);
 const ORIGENS_PUBLICACAO = new Set(["manual", "personalizada", "automatica", "automatico", "agendada"]);
 const TIPOS_PUBLICACAO = new Set(["oferta", "livre"]);
+const FORMATOS_PUBLICACAO = new Set(["feed", "reels"]);
 const STATUS_INVALIDOS_OPORTUNIDADE = new Set([
   "retida",
   "retido",
@@ -65,6 +66,18 @@ function normalizarOrigemSocial(valor = "", fallback = "manual") {
 function normalizarTipoPublicacao(valor = "", fallback = "oferta") {
   const tipo = texto(valor || fallback).toLowerCase();
   return TIPOS_PUBLICACAO.has(tipo) ? tipo : fallback;
+}
+
+function normalizarFormatoPublicacao(valor = "", fallback = "feed") {
+  const formato = texto(valor || fallback).toLowerCase();
+  return FORMATOS_PUBLICACAO.has(formato) ? formato : fallback;
+}
+
+function normalizarFormatosPublicacao(valor = []) {
+  const formatos = lista(valor)
+    .map(item => normalizarFormatoPublicacao(item, ""))
+    .filter(Boolean);
+  return Array.from(new Set(formatos)).filter(item => FORMATOS_PUBLICACAO.has(item));
 }
 
 function objetoOpcional(valor) {
@@ -359,6 +372,7 @@ function criarConfigAutomaticoPadrao(clienteId = "admin") {
     quantidadeDiaria: 5,
     limiteDiarioAutomaticoAtivo: true,
     maxPublicacoesAutomaticasPorDia: 5,
+    formatos: ["feed"],
     janelaFuncionamento: {
       inicio: "08:00",
       fim: "22:00"
@@ -540,10 +554,13 @@ function normalizarAgendamento(clienteId, agendamento = {}, index = 0) {
     redes,
     origem,
     tipoPublicacao,
+    formato: normalizarFormatoPublicacao(agendamento.formato || agendamento.formatoPublicacao, "feed"),
     status: STATUS_PUBLICACAO.has(status) ? status : "pendente",
     motivo: texto(agendamento.motivo),
     ofertaId: texto(agendamento.ofertaId || agendamento.oportunidadeId),
     imagemUrl: texto(agendamento.imagemUrl || agendamento.imagem),
+    videoUrl: texto(agendamento.videoUrl || agendamento.video_url || agendamento.mediaUrl || agendamento.midiaUrl),
+    mimeType: texto(agendamento.mimeType || agendamento.videoMimeType || agendamento.mediaMimeType || agendamento.midiaMimeType),
     legenda: texto(agendamento.legenda || agendamento.mensagem),
     templateId: texto(agendamento.templateId || (tipoPublicacao === "livre" ? "livre-instagram" : "padrao-instagram")),
     gatilho: objetoOpcional(agendamento.gatilho),
@@ -577,9 +594,12 @@ function normalizarRascunho(clienteId, rascunho = {}, index = 0) {
     nome: texto(rascunho.nome || `Rascunho Social ${index + 1}`),
     origem,
     tipoPublicacao,
+    formato: normalizarFormatoPublicacao(rascunho.formato || rascunho.formatoPublicacao, "feed"),
     status: STATUS_PUBLICACAO.has(status) ? status : "rascunho",
     ofertaId: texto(rascunho.ofertaId || rascunho.oportunidadeId),
     imagemUrl: texto(rascunho.imagemUrl || rascunho.imagem),
+    videoUrl: texto(rascunho.videoUrl || rascunho.video_url || rascunho.mediaUrl || rascunho.midiaUrl),
+    mimeType: texto(rascunho.mimeType || rascunho.videoMimeType || rascunho.mediaMimeType || rascunho.midiaMimeType),
     legenda: texto(rascunho.legenda || rascunho.mensagem),
     templateId: texto(rascunho.templateId || (tipoPublicacao === "livre" ? "livre-instagram" : "padrao-instagram")),
     gatilho: objetoOpcional(rascunho.gatilho),
@@ -629,6 +649,7 @@ function normalizarPublicacao(clienteId, publicacao = {}, index = 0) {
     clienteId,
     redes: lista(publicacao.redes).map(normalizarRede).filter(Boolean),
     status: STATUS_PUBLICACAO.has(status) ? status : "rascunho",
+    formato: normalizarFormatoPublicacao(publicacao.formato || publicacao.formatoPublicacao, "feed"),
     modo: texto(publicacao.modo || "manual"),
     oferta: publicacao.oferta ? resumirOfertaUniversal(publicacao.oferta) : (publicacao.ofertaUniversal || null),
     conteudo: publicacao.conteudo && typeof publicacao.conteudo === "object" ? publicacao.conteudo : {},
@@ -701,6 +722,7 @@ function normalizarConfigAutomatico(clienteId = "admin", config = {}) {
     1,
     20
   );
+  const formatos = normalizarFormatosPublicacao(config.formatos || config.formatosPublicacao);
 
   return {
     ...padrao,
@@ -712,6 +734,7 @@ function normalizarConfigAutomatico(clienteId = "admin", config = {}) {
     quantidadeDiaria,
     limiteDiarioAutomaticoAtivo: true,
     maxPublicacoesAutomaticasPorDia: quantidadeDiaria,
+    formatos: formatos.length ? formatos : padrao.formatos,
     janelaFuncionamento: {
       inicio: hora(janela.inicio, padrao.janelaFuncionamento.inicio),
       fim: hora(janela.fim, padrao.janelaFuncionamento.fim)

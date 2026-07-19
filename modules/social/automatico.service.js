@@ -642,6 +642,7 @@ async function executarAutomaticoCliente({
       const agendamento = storage.salvarAgendamentoSocial(clienteSeguro, {
         origem: "automatico",
         tipoPublicacao: "oferta",
+        formato: "feed",
         status: config.aprovacaoManual ? "aguardando_aprovacao" : "agendada",
         ativo: true,
         redes: ["instagram"],
@@ -811,8 +812,11 @@ function payloadPublicadorAgendamento(clienteSeguro = "admin", agendamento = {},
     clienteId: clienteSeguro,
     origem: origemAgendamento === "automatico" ? "automatica" : origemAgendamento,
     tipoPublicacao,
+    formato: agendamento.formato || "feed",
     ofertaId: agendamento.ofertaId,
     imagemUrl: agendamento.imagemUrl,
+    videoUrl: agendamento.videoUrl,
+    mimeType: agendamento.mimeType,
     legenda: agendamento.legenda,
     templateId: agendamento.templateId || (tipoPublicacao === "livre" ? "livre-instagram" : "padrao-instagram"),
     gatilho: agendamento.gatilho,
@@ -824,7 +828,7 @@ function payloadPublicadorAgendamento(clienteSeguro = "admin", agendamento = {},
     cta: agendamento.cta,
     linkAfiliado: agendamento.linkAfiliado,
     agendamentoId: agendamento.id,
-    idempotencyKey: `agendada:${clienteSeguro}:${agendamento.id}`,
+    idempotencyKey: `agendada:${clienteSeguro}:${agendamento.id}:${agendamento.formato || "feed"}`,
     ...extras
   };
 }

@@ -70,6 +70,7 @@ function mockHttpClient(sufixo = "ok") {
   assert.strictEqual(rascunho.clienteId, "cliente_a");
   assert.strictEqual(rascunho.origem, "personalizada");
   assert.strictEqual(rascunho.tipoPublicacao, "livre");
+  assert.strictEqual(rascunho.formato, "feed", "rascunho antigo sem formato deve assumir feed");
   assert.strictEqual(rascunho.status, "rascunho");
   assert.strictEqual(rascunho.templateId, "livre-instagram");
   assert.strictEqual(rascunho.mensagemPrivada, "Mensagem privada do rascunho.");
@@ -82,6 +83,7 @@ function mockHttpClient(sufixo = "ok") {
     id: "agendamento_status_rascunho",
     origem: "agendada",
     tipoPublicacao: "livre",
+    formato: "reels",
     imagemUrl: "https://cdn.optimus.test/status-rascunho.jpg",
     legenda: "Status rascunho nao permitido em agenda",
     status: "rascunho",
@@ -89,6 +91,7 @@ function mockHttpClient(sufixo = "ok") {
     agendadoPara: "2099-01-01T10:00:00.000Z"
   });
   assert.strictEqual(agendamentoComStatusRascunho.status, "pendente", "agendamento nao deve ser classificado como rascunho");
+  assert.strictEqual(agendamentoComStatusRascunho.formato, "reels", "agendamento preserva formato informado");
 
   const editado = storage.salvarRascunhoSocial("cliente_a", {
     ...rascunho,
@@ -105,6 +108,7 @@ function mockHttpClient(sufixo = "ok") {
     agendadoPara: "2026-07-14T10:00:00.000Z"
   });
   assert.strictEqual(agendamento.tipoPublicacao, "livre");
+  assert.strictEqual(agendamento.formato, "feed");
   assert.strictEqual(agendamento.templateId, "livre-instagram");
   assert.strictEqual(agendamento.status, "agendada");
   assert.strictEqual(agendamento.mensagemPrivada, "Mensagem privada do rascunho.");

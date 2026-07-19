@@ -33,6 +33,14 @@ const {
 } = require("./instagram");
 
 const FRONTEND_URL_OFICIAL_SOCIAL = "https://optimuspromo.vercel.app";
+const SOCIAL_MEDIA_UPLOAD_MIMES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "video/mp4",
+  "video/quicktime",
+  "video/webm"
+];
 
 function frontendUrlSocialOficial() {
   const configurada = String(process.env.FRONTEND_URL || "").trim();
@@ -51,6 +59,13 @@ function frontendUrlSocialOficial() {
   }
 
   return FRONTEND_URL_OFICIAL_SOCIAL;
+}
+
+function limiteUploadMidiaSocial() {
+  const imagem = Number(process.env.SOCIAL_MEDIA_MAX_BYTES || 8 * 1024 * 1024);
+  const video = Number(process.env.SOCIAL_MEDIA_VIDEO_MAX_BYTES || 64 * 1024 * 1024);
+  const limites = [imagem, video].filter(valor => Number.isFinite(valor) && valor > 0);
+  return Math.max(...limites, 8 * 1024 * 1024);
 }
 
 function criarRotasSocial(deps = {}) {
@@ -125,7 +140,15 @@ function criarRotasSocial(deps = {}) {
       "social_media_storage_nao_configurado",
       "social_media_arquivo_obrigatorio",
       "social_media_arquivo_muito_grande",
-      "social_media_tipo_invalido"
+      "social_media_tipo_invalido",
+      "formato_publicacao_invalido",
+      "reels_video_ausente",
+      "reels_video_invalido",
+      "reels_container_erro",
+      "reels_container_expirado",
+      "reels_container_estado_desconhecido",
+      "reels_processamento_timeout",
+      "reels_publicacao_meta_erro"
     ]);
     return permitidos.has(codigo) ? codigo : "instagram_oauth_falhou";
   }
@@ -137,6 +160,14 @@ function criarRotasSocial(deps = {}) {
   function tipoPublicacaoSeguro(dados = {}) {
     const tipo = texto(dados.tipoPublicacao || dados.tipo || "oferta").toLowerCase();
     return ["oferta", "livre"].includes(tipo) ? tipo : "oferta";
+  }
+
+  function formatoPublicacaoSeguro(dados = {}) {
+    const informado = Object.prototype.hasOwnProperty.call(dados, "formato") ||
+      Object.prototype.hasOwnProperty.call(dados, "formatoPublicacao");
+    const formato = texto(dados.formato || dados.formatoPublicacao || "feed").toLowerCase();
+    if (informado && !["feed", "reels"].includes(formato)) throw new Error("formato_publicacao_invalido");
+    return ["feed", "reels"].includes(formato) ? formato : "feed";
   }
 
   function origemPublicacaoSegura(dados = {}, tipo = "oferta", fallback = "") {
@@ -190,8 +221,11 @@ function criarRotasSocial(deps = {}) {
       ...entrada,
       origem: origemPublicacaoSegura({ ...fallback, ...entrada }, tipoPublicacao, fallback.origem),
       tipoPublicacao,
+      formato: formatoPublicacaoSeguro({ ...fallback, ...entrada }),
       ofertaId: valorTexto(entrada, ["ofertaId", "oportunidadeId"], fallback.ofertaId),
       imagemUrl: valorTexto(entrada, ["imagemUrl", "imagem"], fallback.imagemUrl),
+      videoUrl: valorTexto(entrada, ["videoUrl", "video_url", "mediaUrl", "midiaUrl"], fallback.videoUrl || fallback.mediaUrl || fallback.midiaUrl),
+      mimeType: valorTexto(entrada, ["mimeType", "mediaMimeType", "midiaMimeType", "videoMimeType"], fallback.mimeType || fallback.mediaMimeType || fallback.midiaMimeType || fallback.videoMimeType),
       legenda: valorTexto(entrada, ["legenda", "mensagem"], fallback.legenda),
       templateId: texto(entrada.templateId || fallback.templateId || (tipoPublicacao === "livre" ? "livre-instagram" : "padrao-instagram")),
       respostaPublica: Object.prototype.hasOwnProperty.call(entrada, "respostaPublica")
@@ -209,7 +243,11 @@ function criarRotasSocial(deps = {}) {
 
   function validarPayloadPublicavel(payload = {}) {
     if (payload.tipoPublicacao === "livre") {
-      if (!texto(payload.imagemUrl)) throw new Error("imagem_url_obrigatoria");
+      if (payload.formato === "reels") {
+        if (!texto(payload.videoUrl)) throw new Error("reels_video_ausente");
+      } else if (!texto(payload.imagemUrl)) {
+        throw new Error("imagem_url_obrigatoria");
+      }
       if (!texto(payload.legenda)) throw new Error("legenda_obrigatoria");
       return;
     }
@@ -235,8 +273,11 @@ function criarRotasSocial(deps = {}) {
       clienteId,
       origem: payload.origem,
       tipoPublicacao: payload.tipoPublicacao,
+      formato: payload.formato,
       ofertaId: payload.ofertaId,
       imagemUrl: payload.imagemUrl,
+      videoUrl: payload.videoUrl,
+      mimeType: payload.mimeType,
       legenda: payload.legenda,
       templateId: payload.templateId,
       gatilho: payload.gatilho,
@@ -659,8 +700,11 @@ function criarRotasSocial(deps = {}) {
         clienteId,
         origem: payload.origem,
         tipoPublicacao: payload.tipoPublicacao,
+        formato: payload.formato,
         ofertaId: payload.ofertaId,
         imagemUrl: payload.imagemUrl,
+        videoUrl: payload.videoUrl,
+        mimeType: payload.mimeType,
         legenda: payload.legenda,
         templateId: payload.templateId,
         gatilho: payload.gatilho,
@@ -955,7 +999,7 @@ function criarRotasSocial(deps = {}) {
       if (!rascunho) return res.status(404).json({ ok: false, erro: "rascunho_nao_encontrado" });
       const payload = payloadPublicacaoSocial(req.body?.rascunho || req.body || {}, rascunho);
       const resultado = await publicarPayloadSocial(clienteId, payload, {
-        idempotencyKey: `rascunho:${clienteId}:${rascunho.id}`
+        idempotencyKey: `rascunho:${clienteId}:${rascunho.id}:${payload.formato || "feed"}`
       });
       const status = resultado.publicacao?.status === "publicada" ? "publicada" : "erro";
       const atualizado = storage.salvarRascunhoSocial(clienteId, {
@@ -1271,7 +1315,7 @@ function criarRotasSocial(deps = {}) {
 
   router.post(
     "/midia/upload",
-    express.raw({ type: ["image/jpeg", "image/png", "image/webp"], limit: process.env.SOCIAL_MEDIA_MAX_BYTES || "8mb" }),
+    express.raw({ type: SOCIAL_MEDIA_UPLOAD_MIMES, limit: limiteUploadMidiaSocial() }),
     (req, res) => {
       if (!socialPermitido(req)) {
         return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
@@ -1288,9 +1332,13 @@ function criarRotasSocial(deps = {}) {
         return res.json({
           ok: true,
           clienteId,
+          url: resultado.url,
+          mimeType: resultado.mimeType,
+          tipo: resultado.tipo,
           midia: {
             url: resultado.url,
             mimeType: resultado.mimeType,
+            tipo: resultado.tipo,
             bytes: resultado.bytes,
             hash: resultado.hash.slice(0, 12)
           }
@@ -1301,6 +1349,13 @@ function criarRotasSocial(deps = {}) {
         const status = erro === "social_media_storage_nao_configurado" ? 501 : 400;
         return res.status(status).json({ ok: false, erro });
       }
+    },
+    (erro, req, res, next) => {
+      if (erro?.type === "entity.too.large") {
+        logErroSocial({ erro: "social_media_arquivo_muito_grande", rota: "POST /social/midia/upload" });
+        return res.status(413).json({ ok: false, erro: "social_media_arquivo_muito_grande" });
+      }
+      return next(erro);
     }
   );
 

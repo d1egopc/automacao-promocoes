@@ -8,7 +8,7 @@ process.env.DATA_DIR = dataDir;
 
 const { writeClienteJson } = require("../utils/storage");
 const storage = require("../modules/social/storage");
-const { publicarNoInstagram, normalizarOrigem } = require("../modules/social/publicador-instagram.service");
+const { publicarNoInstagram, normalizarOrigem, chaveIdempotencia } = require("../modules/social/publicador-instagram.service");
 const {
   executarAgendamentosPendentesCliente,
   executarAutomaticoCliente,
@@ -94,6 +94,12 @@ function restaurarEnv(nome, valorAnterior) {
 }
 
 (async () => {
+  assert.notStrictEqual(
+    chaveIdempotencia({ clienteId: "cliente_a", tipoPublicacao: "oferta", formato: "feed", ofertaId: "oferta_a" }),
+    chaveIdempotencia({ clienteId: "cliente_a", tipoPublicacao: "oferta", formato: "reels", ofertaId: "oferta_a" }),
+    "idempotencia deve considerar formato"
+  );
+
   conectar("cliente_a", "a");
   conectar("cliente_b", "b");
   writeClienteJson("cliente_a", "fila.json", [
@@ -132,6 +138,7 @@ function restaurarEnv(nome, valorAnterior) {
   assert.strictEqual(publicadaOferta.publicacao.status, "publicada");
   assert.strictEqual(publicadaOferta.publicacao.origem, "manual");
   assert.strictEqual(publicadaOferta.publicacao.tipoPublicacao, "oferta");
+  assert.strictEqual(publicadaOferta.publicacao.formato, "feed", "publicacao sem formato explicito deve continuar feed");
   assert.strictEqual(publicadaOferta.publicacao.legenda, legendaCustom, "publicador oficial nao deve descartar legenda recebida");
   assert.strictEqual(publicadaOferta.publicacao.renderizado, true, "publicacao de oferta deve usar arte renderizada");
   assert.strictEqual(publicadaOferta.publicacao.imagemOriginalUrl, "https://cdn.optimus.test/produto-a.jpg");
