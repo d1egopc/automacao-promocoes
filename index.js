@@ -2595,6 +2595,183 @@ function montarUrlLinkOptimus(codigo = "", configBase = config) {
   return dominio + "/r/" + codigo;
 }
 
+function origemDominioLinkOptimus(configBase = config) {
+  const dominioConfig = normalizarDominioLinkOptimus(configBase?.linksOptimus?.dominio);
+  if (dominioConfig) {
+    return {
+      dominio: dominioConfig,
+      origem: "config"
+    };
+  }
+
+  const dominioRailway = normalizarDominioLinkOptimus(process.env.RAILWAY_PUBLIC_DOMAIN || "");
+  if (dominioRailway) {
+    return {
+      dominio: dominioRailway,
+      origem: "railway"
+    };
+  }
+
+  return {
+    dominio: "",
+    origem: "indisponivel"
+  };
+}
+
+function montarRespostaConfigLinksOptimus(configBase = config) {
+  const efetivo = origemDominioLinkOptimus(configBase);
+  return {
+    dominio: normalizarDominioLinkOptimus(configBase?.linksOptimus?.dominio),
+    dominioEfetivo: efetivo.dominio,
+    origem: efetivo.origem
+  };
+}
+
+function normalizarDominioConfigLinkOptimus(valor = "") {
+  const texto = String(valor || "").trim();
+  if (!texto) {
+    return {
+      ok: true,
+      dominio: ""
+    };
+  }
+
+  if (!/^https?:\/\//i.test(texto)) {
+    return {
+      ok: false,
+      erro: "dominio_deve_incluir_http_ou_https"
+    };
+  }
+
+  try {
+    const url = new URL(texto);
+    if (!["http:", "https:"].includes(url.protocol) || !url.hostname) {
+      return {
+        ok: false,
+        erro: "dominio_invalido"
+      };
+    }
+
+    if ((url.pathname && url.pathname !== "/") || url.search || url.hash) {
+      return {
+        ok: false,
+        erro: "dominio_nao_deve_conter_caminho_query_ou_fragmento"
+      };
+    }
+
+    url.pathname = "/";
+    url.search = "";
+    url.hash = "";
+
+    return {
+      ok: true,
+      dominio: url.toString().replace(/\/+$/, "")
+    };
+  } catch (erro) {
+    return {
+      ok: false,
+      erro: "dominio_invalido"
+    };
+  }
+}
+
+function logConfigLinkOptimus(evento, dados = {}) {
+  console.log(evento, {
+    adminId: dados.adminId || "",
+    origem: dados.origem || "",
+    dominioConfigurado: Boolean(dados.dominioConfigurado),
+    dominioEfetivo: Boolean(dados.dominioEfetivo),
+    motivo: dados.motivo || ""
+  });
+}
+
+function adminMasterAutorizadoLinksOptimus(req, res) {
+  if (req.usuario?.papel === "admin_master") return true;
+  res.status(403).json({
+    ok: false,
+    erro: "Acesso restrito ao admin_master"
+  });
+  return false;
+}
+
+function responderAdminConfigLinksOptimus(req, res) {
+  try {
+    if (!adminMasterAutorizadoLinksOptimus(req, res)) return;
+
+    const linksOptimus = montarRespostaConfigLinksOptimus(config);
+    logConfigLinkOptimus("[LINK-OPTIMUS-CONFIG-LIDA]", {
+      adminId: req.usuario?.id || req.clienteId || "",
+      origem: linksOptimus.origem,
+      dominioConfigurado: Boolean(linksOptimus.dominio),
+      dominioEfetivo: Boolean(linksOptimus.dominioEfetivo)
+    });
+
+    return res.json({
+      ok: true,
+      linksOptimus
+    });
+  } catch (erro) {
+    logConfigLinkOptimus("[LINK-OPTIMUS-CONFIG-ERRO]", {
+      adminId: req.usuario?.id || req.clienteId || "",
+      motivo: "leitura"
+    });
+    return res.status(500).json({
+      ok: false,
+      erro: "Nao foi possivel carregar a configuracao do Link Optimus"
+    });
+  }
+}
+
+function salvarAdminConfigLinksOptimus(req, res) {
+  try {
+    if (!adminMasterAutorizadoLinksOptimus(req, res)) return;
+
+    const resultado = normalizarDominioConfigLinkOptimus(req.body?.dominio || "");
+    if (!resultado.ok) {
+      logConfigLinkOptimus("[LINK-OPTIMUS-CONFIG-ERRO]", {
+        adminId: req.usuario?.id || req.clienteId || "",
+        motivo: resultado.erro || "dominio_invalido"
+      });
+      return res.status(400).json({
+        ok: false,
+        erro: resultado.erro || "dominio_invalido"
+      });
+    }
+
+    config.linksOptimus = {
+      ativo: config.linksOptimus?.ativo !== false,
+      formato: config.linksOptimus?.formato || "/r",
+      rastrearCliques: config.linksOptimus?.rastrearCliques !== false,
+      ...config.linksOptimus,
+      dominio: resultado.dominio
+    };
+
+    salvarConfig();
+
+    const linksOptimus = montarRespostaConfigLinksOptimus(config);
+    logConfigLinkOptimus(resultado.dominio ? "[LINK-OPTIMUS-CONFIG-SALVA]" : "[LINK-OPTIMUS-CONFIG-LIMPA]", {
+      adminId: req.usuario?.id || req.clienteId || "",
+      origem: linksOptimus.origem,
+      dominioConfigurado: Boolean(linksOptimus.dominio),
+      dominioEfetivo: Boolean(linksOptimus.dominioEfetivo)
+    });
+
+    return res.json({
+      ok: true,
+      linksOptimus
+    });
+  } catch (erro) {
+    logConfigLinkOptimus("[LINK-OPTIMUS-CONFIG-ERRO]", {
+      adminId: req.usuario?.id || req.clienteId || "",
+      motivo: "salvar"
+    });
+    return res.status(500).json({
+      ok: false,
+      erro: "Nao foi possivel salvar a configuracao do Link Optimus"
+    });
+  }
+}
+
 function extrairLinkAfiliadoOferta(oferta = {}) {
   return String(
     oferta.linkAfiliado ||
@@ -7250,6 +7427,8 @@ carregarConfig();
 
 
 app.use(auth);
+app.get("/admin/config/links-optimus", responderAdminConfigLinksOptimus);
+app.put("/admin/config/links-optimus", salvarAdminConfigLinksOptimus);
 
 function exigirAdminMasterEngine(req, res) {
   if (req.usuario?.papel !== "admin_master") {
