@@ -531,7 +531,7 @@ let config = {
 
 linksOptimus: {
   ativo: true,
-  dominio: "https://automacao-promocoes-production.up.railway.app",
+  dominio: "",
   formato: "/r",
   rastrearCliques: true
 },
@@ -2123,12 +2123,17 @@ function normalizarTemplateIdDestinoContrato(valor) {
   return /^tpl_[a-zA-Z0-9_-]+$/.test(id) ? id : null;
 }
 
+function normalizarModoLinkDestino(valor = "") {
+  return String(valor || "").trim().toLowerCase() === "optimus" ? "optimus" : "original";
+}
+
 function normalizarDestinoContrato(destino = {}) {
   if (!destino || typeof destino !== "object" || Array.isArray(destino)) return destino;
   return {
     ...destino,
     templateId: normalizarTemplateIdDestinoContrato(destino.templateId),
-    prioridadeCupomAtiva: destino.prioridadeCupomAtiva === true
+    prioridadeCupomAtiva: destino.prioridadeCupomAtiva === true,
+    modoLink: normalizarModoLinkDestino(destino.modoLink)
   };
 }
 
@@ -2557,38 +2562,205 @@ console.log("[INFO] CRIANDO ADMIN PADRO");
 
 // =========== LINK GLOBAL OPTIMUS ===========
 
-function gerarLinkOptimus(linkOriginal = "", marketplace = "") {
+function normalizarDominioLinkOptimus(valor = "") {
+  const texto = String(valor || "").trim();
+  if (!texto) return "";
+  const candidato = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(texto) ? texto : "https://" + texto;
+  try {
+    const url = new URL(candidato);
+    if (!["http:", "https:"].includes(url.protocol) || !url.hostname) return "";
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/+$/, "");
+  } catch (erro) {
+    return "";
+  }
+}
 
-  if (!linkOriginal) return "";
+function normalizarFormatoLinkOptimus(valor = "/r") {
+  const texto = String(valor || "/r").trim() || "/r";
+  const comBarra = texto.startsWith("/") ? texto : "/" + texto;
+  return comBarra.replace(/\/+$/, "") || "/r";
+}
 
-  if (!config?.linksOptimus?.ativo) {
-    return linkOriginal;
+function resolverDominioBaseLinkOptimus(configBase = config) {
+  const dominioConfigurado = normalizarDominioLinkOptimus(configBase?.linksOptimus?.dominio);
+  if (dominioConfigurado) return dominioConfigurado;
+  return normalizarDominioLinkOptimus(process.env.RAILWAY_PUBLIC_DOMAIN || "");
+}
+
+function montarUrlLinkOptimus(codigo = "", configBase = config) {
+  const dominio = resolverDominioBaseLinkOptimus(configBase);
+  if (!dominio || !codigo) return "";
+  return dominio + "/r/" + codigo;
+}
+
+function extrairLinkAfiliadoOferta(oferta = {}) {
+  return String(
+    oferta.linkAfiliado ||
+    oferta.linkFinal ||
+    oferta.link ||
+    oferta.urlAfiliada ||
+    oferta.url ||
+    ""
+  ).trim();
+}
+
+function localizarLinkOptimusExistente({ clienteId = "", linkOriginal = "", marketplace = "", configBase = config } = {}) {
+  const linksGerados = configBase?.linksGerados || {};
+  const cliente = String(clienteId || "").trim();
+  const link = String(linkOriginal || "").trim();
+  if (!link) return null;
+
+  for (const [codigo, dados] of Object.entries(linksGerados)) {
+    if (!dados || typeof dados !== "object") continue;
+    const linkGerado = String(dados.urlOriginal || dados.original || "").trim();
+    const clienteGerado = String(dados.clienteId || "").trim();
+    if (linkGerado !== link) continue;
+    if (clienteGerado !== cliente) continue;
+    const url = montarUrlLinkOptimus(codigo, configBase);
+    if (!url) continue;
+    return { codigo, url, dados };
   }
 
-  config.linksGerados = config.linksGerados || {};
+  return null;
+}
 
-  const dominio =
-    config.linksOptimus.dominio || "https://optimus-promo.com";
+function gerarCodigoLinkOptimus(configBase = config) {
+  const linksGerados = configBase.linksGerados || {};
+  for (let tentativa = 0; tentativa < 10; tentativa += 1) {
+    const codigo = Math.random().toString(36).substring(2, 8);
+    if (codigo && !linksGerados[codigo]) return codigo;
+  }
+  return Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+}
 
-  const formato =
-    config.linksOptimus.formato || "/r";
+function criarLinkOptimus(linkOriginal = "", marketplace = "", opcoes = {}) {
+  const configBase = opcoes.configGlobal || config;
+  const link = String(linkOriginal || "").trim();
+  const clienteId = String(opcoes.clienteId || "").trim();
+  if (!link) return { ok: false, motivo: "link_original_ausente" };
+  if (configBase?.linksOptimus?.ativo !== true) return { ok: false, motivo: "config_desativada" };
+  if (!resolverDominioBaseLinkOptimus(configBase)) return { ok: false, motivo: "dominio_ausente" };
 
-  const codigo = Math.random()
-    .toString(36)
-    .substring(2, 8);
+  configBase.linksGerados = configBase.linksGerados || {};
+  const existente = localizarLinkOptimusExistente({ clienteId, linkOriginal: link, marketplace, configBase });
+  if (existente) {
+    return { ok: true, url: existente.url, codigo: existente.codigo, reutilizado: true };
+  }
 
-  config.linksGerados[codigo] = {
-  original: linkOriginal,
-  urlOriginal: linkOriginal,
-  marketplace,
-  cliques: 0,
-  ultimoClique: null,
-  criadoEm: new Date().toISOString()
-};
+  const codigo = gerarCodigoLinkOptimus(configBase);
+  configBase.linksGerados[codigo] = {
+    original: link,
+    urlOriginal: link,
+    marketplace,
+    clienteId,
+    cliques: 0,
+    ultimoClique: null,
+    criadoEm: new Date().toISOString()
+  };
 
-  salvarConfig();
+  try {
+    salvarConfig();
+  } catch (erro) {
+    delete configBase.linksGerados[codigo];
+    throw erro;
+  }
 
-  return `${dominio}${formato}/${codigo}`;
+  return { ok: true, url: montarUrlLinkOptimus(codigo, configBase), codigo, reutilizado: false };
+}
+
+function gerarLinkOptimus(linkOriginal = "", marketplace = "", opcoes = {}) {
+  const resultado = criarLinkOptimus(linkOriginal, marketplace, opcoes);
+  return resultado.ok ? resultado.url : String(linkOriginal || "");
+}
+
+function logLinkOptimus(tag, payload = {}) {
+  const seguro = {
+    clienteId: payload.clienteId || "",
+    destinoId: payload.destinoId || "",
+    marketplace: payload.marketplace || "",
+    motivo: payload.motivo || "",
+    codigo: payload.codigo || ""
+  };
+  console.log(tag, JSON.stringify(seguro));
+}
+
+function copiarOfertaComLinkResolvido(oferta = {}, linkResolvido = "", linkOriginal = "") {
+  return {
+    ...oferta,
+    linkAfiliadoOriginal: oferta.linkAfiliado || "",
+    linkFinalOriginal: oferta.linkFinal || "",
+    linkOriginalAntesLinkOptimus: linkOriginal,
+    linkAfiliado: linkResolvido,
+    linkFinal: linkResolvido,
+    link: linkResolvido,
+    urlAfiliada: linkResolvido,
+    url: linkResolvido,
+    linkOptimusAplicado: true
+  };
+}
+
+function resolverLinkOfertaPorDestino({ oferta = {}, destino = {}, clienteId = "admin", plano = null, recursos = null, configGlobal = config } = {}) {
+  const linkOriginal = extrairLinkAfiliadoOferta(oferta);
+  const marketplace = String(oferta.marketplace || oferta.mercado || "").toLowerCase();
+  const destinoId = destinoIdIntervalo(destino);
+  const recursosPlano = recursos || plano?.recursos || {};
+  const modoLink = normalizarModoLinkDestino(destino?.modoLink);
+
+  const baseLog = { clienteId, destinoId, marketplace };
+
+  if (modoLink !== "optimus") {
+    logLinkOptimus("[LINK-OPTIMUS-ORIGINAL]", { ...baseLog, motivo: "modo_original" });
+    return { oferta, linkOriginal, linkFinal: linkOriginal, aplicado: false, motivo: "modo_original" };
+  }
+
+  if (!linkOriginal) {
+    logLinkOptimus("[LINK-OPTIMUS-FALLBACK]", { ...baseLog, motivo: "link_original_ausente" });
+    return { oferta, linkOriginal, linkFinal: linkOriginal, aplicado: false, motivo: "link_original_ausente" };
+  }
+
+  if (recursosPlano?.linkOptimus !== true) {
+    logLinkOptimus("[LINK-OPTIMUS-FALLBACK]", { ...baseLog, motivo: "plano_sem_permissao" });
+    return { oferta, linkOriginal, linkFinal: linkOriginal, aplicado: false, motivo: "plano_sem_permissao" };
+  }
+
+  if (configGlobal?.linksOptimus?.ativo !== true) {
+    logLinkOptimus("[LINK-OPTIMUS-FALLBACK]", { ...baseLog, motivo: "config_desativada" });
+    return { oferta, linkOriginal, linkFinal: linkOriginal, aplicado: false, motivo: "config_desativada" };
+  }
+
+  if (!resolverDominioBaseLinkOptimus(configGlobal)) {
+    logLinkOptimus("[LINK-OPTIMUS-FALLBACK]", { ...baseLog, motivo: "dominio_ausente" });
+    return { oferta, linkOriginal, linkFinal: linkOriginal, aplicado: false, motivo: "dominio_ausente" };
+  }
+
+  try {
+    const resultado = criarLinkOptimus(linkOriginal, marketplace, { clienteId, configGlobal });
+    if (!resultado.ok || !resultado.url) {
+      logLinkOptimus("[LINK-OPTIMUS-FALLBACK]", { ...baseLog, motivo: resultado.motivo || "geracao_indisponivel" });
+      return { oferta, linkOriginal, linkFinal: linkOriginal, aplicado: false, motivo: resultado.motivo || "geracao_indisponivel" };
+    }
+
+    const ofertaResolvida = copiarOfertaComLinkResolvido(oferta, resultado.url, linkOriginal);
+    logLinkOptimus(resultado.reutilizado ? "[LINK-OPTIMUS-REUTILIZADO]" : "[LINK-OPTIMUS-APLICADO]", {
+      ...baseLog,
+      motivo: resultado.reutilizado ? "redirect_existente" : "redirect_criado",
+      codigo: resultado.codigo
+    });
+    return {
+      oferta: ofertaResolvida,
+      linkOriginal,
+      linkFinal: resultado.url,
+      codigo: resultado.codigo,
+      aplicado: true,
+      reutilizado: resultado.reutilizado === true,
+      motivo: resultado.reutilizado ? "redirect_existente" : "redirect_criado"
+    };
+  } catch (erro) {
+    logLinkOptimus("[LINK-OPTIMUS-FALLBACK]", { ...baseLog, motivo: "erro_geracao" });
+    return { oferta, linkOriginal, linkFinal: linkOriginal, aplicado: false, motivo: "erro_geracao" };
+  }
 }
 
 
@@ -4984,7 +5156,17 @@ for (const item of destinosOrdenados) {
     });
   }
 
-  const mensagem = montarMensagemOferta(oferta, {
+  const linkOfertaDestino = resolverLinkOfertaPorDestino({
+    oferta,
+    destino,
+    clienteId,
+    plano,
+    recursos: plano?.recursos,
+    configGlobal: config
+  });
+  const ofertaParaMensagem = linkOfertaDestino.oferta || oferta;
+
+  const mensagem = montarMensagemOferta(ofertaParaMensagem, {
     destino,
     plano,
     clienteId
@@ -7600,7 +7782,17 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
       continue;
     }
 
-    const mensagem = montarMensagemOferta(oferta, {
+    const linkOfertaDestino = resolverLinkOfertaPorDestino({
+      oferta,
+      destino,
+      clienteId,
+      plano,
+      recursos: plano?.recursos,
+      configGlobal: config
+    });
+    const ofertaParaMensagem = linkOfertaDestino.oferta || oferta;
+
+    const mensagem = montarMensagemOferta(ofertaParaMensagem, {
       destino,
       plano,
       clienteId
