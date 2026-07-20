@@ -23,6 +23,7 @@ function payload(overrides = {}) {
       faixaSuperiorCorTexto: "#ffffff",
       faixaSuperiorTamanho: "md",
       faixaSuperiorAlinhamento: "center",
+      mostrarCardPreco: true,
       mostrarPrecoAntigo: true,
       mostrarCupom: true,
       mostrarMarketplace: true,
@@ -92,6 +93,7 @@ function fakeBrowser() {
   assert.strictEqual(normal.template.faixaSuperiorCorTexto, "#ffffff");
   assert.strictEqual(normal.template.faixaInferiorCor, "#0f172a");
   assert.strictEqual(normal.template.seloAtivo, false);
+  assert.strictEqual(normal.template.mostrarCardPreco, true);
 
   const antigo = normalizarPayloadRenderer(payload({
     template: {
@@ -113,6 +115,7 @@ function fakeBrowser() {
   assert.strictEqual(antigo.template.faixaSuperiorCorTexto, "#ffffff", "template antigo recebe default de cor de texto");
   assert.strictEqual(antigo.template.faixaInferiorCor, "#222222", "template antigo usa corMoldura como fallback da faixa inferior");
   assert.strictEqual(antigo.template.seloAtivo, false, "selo novo deve ser opcional");
+  assert.strictEqual(antigo.template.mostrarCardPreco, true, "template antigo deve exibir card de preco por padrao");
 
   const v2 = normalizarPayloadRenderer(payload({
     template: {
@@ -155,6 +158,19 @@ function fakeBrowser() {
   const gatilhoLigado = htmlPreview({ template: normal.template, dados: normal.dados, cta: normal.cta, imagemSrc: "data:image/png;base64,AA==" });
   assert.ok(gatilhoLigado.includes("bottom-band"));
   assert.ok(gatilhoLigado.includes("COMENTE"));
+
+  const semCardPreco = normalizarPayloadRenderer(payload({
+    template: { ...payload().template, mostrarCardPreco: false }
+  }));
+  assert.strictEqual(semCardPreco.template.mostrarCardPreco, false);
+  const htmlSemCardPreco = htmlPreview({
+    template: semCardPreco.template,
+    dados: semCardPreco.dados,
+    cta: semCardPreco.cta,
+    imagemSrc: "data:image/png;base64,AA=="
+  });
+  assert.ok(!htmlSemCardPreco.includes('class="card"'), "card de preco desligado nao deve renderizar moldura/card");
+  assert.ok(!htmlSemCardPreco.includes("PROMO10"), "card desligado nao deve renderizar cupom");
 
   assert.doesNotThrow(() => validarUrlImagem("https://cdn.exemplo.com/a.jpg"));
   assert.throws(() => validarUrlImagem("http://127.0.0.1/a.jpg"), /imagem_host_bloqueado/);

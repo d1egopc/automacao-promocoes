@@ -96,6 +96,9 @@ function htmlPreviewLegado({ template = {}, dados = {}, cta = "", imagemSrc = ""
   const marketplace = template.mostrarMarketplace && dados.marketplace
     ? `<span class="market">${escaparHtml(dados.marketplace)}</span>`
     : "";
+  const cardPreco = template.mostrarCardPreco !== false
+    ? `<div class="card"><div class="stack">${precoAntigo}${preco}${cupom}${marketplace}</div></div>`
+    : "";
   const faixaSuperior = template.faixaSuperiorAtiva
     ? `<div class="top-band" style="background:${template.faixaSuperiorCor}">${escaparHtml(template.faixaSuperiorTexto)}</div>`
     : "";
@@ -128,7 +131,7 @@ function htmlPreviewLegado({ template = {}, dados = {}, cta = "", imagemSrc = ""
   <div class="art">
     <div class="image-wrap"><img src="${imagemSrc}" alt="" /></div>
     ${faixaSuperior}
-    <div class="card"><div class="stack">${precoAntigo}${preco}${cupom}${marketplace}</div></div>
+    ${cardPreco}
     ${faixaInferior}
   </div>
 </body>
@@ -147,6 +150,9 @@ function htmlPreview({ template = {}, dados = {}, cta = "", imagemSrc = "" } = {
     : "";
   const marketplace = template.mostrarMarketplace && dados.marketplace
     ? `<span class="market">${escaparHtml(dados.marketplace)}</span>`
+    : "";
+  const cardPreco = template.mostrarCardPreco !== false
+    ? `<div class="card"><div class="stack">${precoAntigo}${preco}${cupom}${marketplace}</div></div>`
     : "";
   const faixaSuperior = template.faixaSuperiorAtiva
     ? `<div class="top-band" style="background:${template.faixaSuperiorCor}; color:${template.faixaSuperiorCorTexto}; ${tamanhoFaixaSuperior(template.faixaSuperiorTamanho)} ${alinhamentoFlex(template.faixaSuperiorAlinhamento)}"><span>${escaparHtml(template.faixaSuperiorTexto)}</span></div>`
@@ -186,7 +192,7 @@ function htmlPreview({ template = {}, dados = {}, cta = "", imagemSrc = "" } = {
     <div class="image-wrap"><img src="${imagemSrc}" alt="" /></div>
     ${faixaSuperior}
     ${selo}
-    <div class="card"><div class="stack">${precoAntigo}${preco}${cupom}${marketplace}</div></div>
+    ${cardPreco}
     ${faixaInferior}
   </div>
 </body>
