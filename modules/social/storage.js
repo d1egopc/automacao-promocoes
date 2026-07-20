@@ -19,7 +19,7 @@ const ARQUIVOS = {
 };
 
 const REDES_SUPORTADAS = new Set(["instagram", "facebook", "telegram"]);
-const STATUS_PUBLICACAO = new Set(["rascunho", "agendada", "pendente", "aguardando_aprovacao", "processando", "publicando", "publicada", "erro", "cancelada"]);
+const STATUS_PUBLICACAO = new Set(["rascunho", "agendada", "pendente", "aguardando_aprovacao", "processando", "publicando", "publicada", "concluida", "erro", "cancelada"]);
 const ORIGENS_PUBLICACAO = new Set(["manual", "personalizada", "automatica", "automatico", "agendada"]);
 const TIPOS_PUBLICACAO = new Set(["oferta", "livre"]);
 const FORMATOS_PUBLICACAO = new Set(["feed", "reels"]);
@@ -43,6 +43,7 @@ const STATUS_INVALIDOS_OPORTUNIDADE = new Set([
   "descartado"
 ]);
 const STATUS_AGENDAMENTO_ATIVO_SOCIAL = new Set(["pendente", "agendada", "aguardando_aprovacao", "processando", "publicando"]);
+const STATUS_AGENDAMENTO_CONCLUIDO_LIMPAVEL = new Set(["publicada", "concluida", "cancelada"]);
 
 function agoraIso() {
   return new Date().toISOString();
@@ -387,6 +388,7 @@ function criarConfigAutomaticoPadrao(clienteId = "admin") {
     exigirCupom: false,
     permitirOfertaComum: true,
     limparAutomaticamenteOportunidadesAntigas: false,
+    limparConcluidosAutomaticamente: false,
     aprovacaoManual: false,
     evitarProdutoRepetidoDias: 30,
     gatilho: {
@@ -757,6 +759,7 @@ function normalizarConfigAutomatico(clienteId = "admin", config = {}) {
     exigirCupom: config.exigirCupom === true,
     permitirOfertaComum: config.permitirOfertaComum !== false,
     limparAutomaticamenteOportunidadesAntigas: config.limparAutomaticamenteOportunidadesAntigas === true,
+    limparConcluidosAutomaticamente: config.limparConcluidosAutomaticamente === true,
     aprovacaoManual: config.aprovacaoManual === true,
     evitarProdutoRepetidoDias: inteiro(config.evitarProdutoRepetidoDias, padrao.evitarProdutoRepetidoDias, 0, 365),
     gatilho: {
@@ -999,6 +1002,75 @@ function limparAgendamentosSocial(clienteId = "admin", modoEntrada = "") {
     totalAntes: atuais.length,
     removidos: removidos.length,
     restantes: mantidos.length
+  };
+}
+
+function dataReferenciaConclusaoAgendamento(agendamento = {}) {
+  const candidatos = [
+    agendamento.concluidoEm,
+    agendamento.publicadoEm,
+    agendamento.canceladoEm,
+    agendamento.atualizadoEm,
+    agendamento.criadoEm
+  ];
+  for (const candidato of candidatos) {
+    const ms = Date.parse(texto(candidato));
+    if (Number.isFinite(ms)) return ms;
+  }
+  return 0;
+}
+
+function agendamentoConcluidoLimpavel(agendamento = {}, { agoraMs = Date.now(), idadeMinimaMinutos = 0 } = {}) {
+  const status = texto(agendamento.status || "pendente").toLowerCase();
+  if (!STATUS_AGENDAMENTO_CONCLUIDO_LIMPAVEL.has(status)) return false;
+  if (idadeMinimaMinutos <= 0) return true;
+  const referenciaMs = dataReferenciaConclusaoAgendamento(agendamento);
+  if (!referenciaMs) return false;
+  return agoraMs - referenciaMs >= idadeMinimaMinutos * 60 * 1000;
+}
+
+function contarStatusAgendamentos(itens = []) {
+  return lista(itens).reduce((acc, item) => {
+    const status = texto(item.status || "pendente").toLowerCase() || "pendente";
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+function limparAgendamentosConcluidosSocial(clienteId = "admin", opcoes = {}) {
+  const idadeMinimaMinutos = Math.max(0, Number(opcoes.idadeMinimaMinutos || 0) || 0);
+  const agoraMs = Number.isFinite(Number(opcoes.agoraMs)) ? Number(opcoes.agoraMs) : Date.now();
+  const atuais = lista(lerCliente(clienteId, "agendamentos", []));
+  const removidos = [];
+  const mantidos = [];
+
+  for (const agendamento of atuais) {
+    if (agendamentoConcluidoLimpavel(agendamento, { agoraMs, idadeMinimaMinutos })) {
+      removidos.push(agendamento);
+    } else {
+      mantidos.push(agendamento);
+    }
+  }
+
+  if (removidos.length > 0) {
+    escreverCliente(clienteId, "agendamentos", mantidos);
+  }
+
+  const removidosPorStatus = contarStatusAgendamentos(removidos);
+  logSocial("[SOCIAL-AGENDAMENTOS-CONCLUIDOS-LIMPEZA]", {
+    clienteId,
+    removidos: removidos.length,
+    restantes: mantidos.length,
+    removidosPorStatus,
+    idadeMinimaMinutos,
+    automatico: opcoes.automatico === true
+  });
+
+  return {
+    totalAntes: atuais.length,
+    removidos: removidos.length,
+    restantes: mantidos.length,
+    removidosPorStatus
   };
 }
 
@@ -1691,6 +1763,7 @@ module.exports = {
   getAgendamentoSocial,
   removerAgendamentoSocial,
   limparAgendamentosSocial,
+  limparAgendamentosConcluidosSocial,
   criarConfigAutomaticoPadrao,
   getConfigAutomaticoSocial,
   setConfigAutomaticoSocial,

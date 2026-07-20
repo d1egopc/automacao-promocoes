@@ -1,6 +1,7 @@
 const {
   executarAutomaticoTodosClientes,
-  executarAgendamentosPendentesTodosClientes
+  executarAgendamentosPendentesTodosClientes,
+  limparAgendamentosConcluidosAutomaticamenteTodosClientes
 } = require("../automatico.service");
 const { logSocial, logErroSocial } = require("../logs");
 
@@ -49,18 +50,22 @@ async function executarRodadaSchedulerAgendamentosSocial({
       httpClient,
       polling
     });
+    const limpezaConcluidos = limparAgendamentosConcluidosAutomaticamenteTodosClientes({ agora });
     const resultado = {
-      ok: automatico.ok !== false && agendamentos.ok !== false,
+      ok: automatico.ok !== false && agendamentos.ok !== false && limpezaConcluidos.ok !== false,
       clientes: agendamentos.clientes,
       totalAgendadosAutomatico: automatico.totalAgendados || 0,
       totalExecutados: agendamentos.totalExecutados || 0,
+      totalConcluidosRemovidos: limpezaConcluidos.totalRemovidos || 0,
       automatico,
-      agendamentos
+      agendamentos,
+      limpezaConcluidos
     };
     logSocial("[SOCIAL-AGENDAMENTOS-SCHEDULER-FIM]", {
       clientes: resultado.clientes,
       totalAgendadosAutomatico: resultado.totalAgendadosAutomatico,
-      totalExecutados: resultado.totalExecutados
+      totalExecutados: resultado.totalExecutados,
+      totalConcluidosRemovidos: resultado.totalConcluidosRemovidos
     });
     return resultado;
   } catch (e) {

@@ -989,12 +989,82 @@ async function executarAgendamentosPendentesTodosClientes({
   };
 }
 
+function limparAgendamentosConcluidosAutomaticamenteCliente({
+  clienteId,
+  agora = new Date(),
+  idadeMinimaMinutos = 10
+} = {}) {
+  const clienteSeguro = texto(clienteId || "admin") || "admin";
+  const config = storage.getConfigAutomaticoSocial(clienteSeguro);
+  if (config.limparConcluidosAutomaticamente !== true) {
+    return {
+      ok: true,
+      clienteId: clienteSeguro,
+      removidos: 0,
+      motivo: "limpeza_concluidos_desativada"
+    };
+  }
+
+  const resultado = storage.limparAgendamentosConcluidosSocial(clienteSeguro, {
+    agoraMs: agora.getTime(),
+    idadeMinimaMinutos,
+    automatico: true
+  });
+
+  return {
+    ok: true,
+    clienteId: clienteSeguro,
+    ...resultado
+  };
+}
+
+function limparAgendamentosConcluidosAutomaticamenteTodosClientes({
+  agora = new Date(),
+  idadeMinimaMinutos = 10
+} = {}) {
+  const clientes = typeof storage.listClientes === "function" ? storage.listClientes() : [];
+  const resultados = [];
+  let totalRemovidos = 0;
+
+  for (const clienteId of clientes) {
+    try {
+      const resultado = limparAgendamentosConcluidosAutomaticamenteCliente({
+        clienteId,
+        agora,
+        idadeMinimaMinutos
+      });
+      if (resultado.removidos > 0) {
+        totalRemovidos += resultado.removidos;
+        resultados.push(resultado);
+      }
+    } catch (e) {
+      resultados.push({ ok: false, clienteId, erro: texto(e.message), removidos: 0 });
+    }
+  }
+
+  logSocial("[SOCIAL-AGENDAMENTOS-CONCLUIDOS-AUTO-LIMPEZA]", {
+    clientes: clientes.length,
+    clientesComRemocao: resultados.filter(item => item.removidos > 0).length,
+    totalRemovidos,
+    idadeMinimaMinutos
+  });
+
+  return {
+    ok: resultados.every(item => item.ok !== false),
+    clientes: clientes.length,
+    totalRemovidos,
+    resultados
+  };
+}
+
 module.exports = {
   simularSelecaoAutomatica,
   executarAutomaticoCliente,
   executarAutomaticoTodosClientes,
   executarAgendamentosPendentesCliente,
   executarAgendamentosPendentesTodosClientes,
+  limparAgendamentosConcluidosAutomaticamenteCliente,
+  limparAgendamentosConcluidosAutomaticamenteTodosClientes,
   publicarAgendamentoAgora,
   escolherOferta
 };
