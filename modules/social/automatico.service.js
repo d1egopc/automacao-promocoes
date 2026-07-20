@@ -142,7 +142,7 @@ function dataNoDiaTimezone(partesDia = {}, minutos = 0, timezone = TIMEZONE_SOCI
 
 function janelaDoDia(config = {}, agora = new Date()) {
   const inicio = minutosHora(config.janelaFuncionamento?.inicio || "08:00") ?? 8 * 60;
-  const fim = minutosHora(config.janelaFuncionamento?.fim || "22:00") ?? 22 * 60;
+  const fim = minutosHora(config.janelaFuncionamento?.fim || "23:50") ?? (23 * 60 + 50);
   const timezone = texto(config.timezone || TIMEZONE_SOCIAL_PADRAO) || TIMEZONE_SOCIAL_PADRAO;
   const partesInicio = partesDataTimezone(agora, timezone);
   const partesFim = fim < inicio ? adicionarDiasLocal(partesInicio, 1) : partesInicio;

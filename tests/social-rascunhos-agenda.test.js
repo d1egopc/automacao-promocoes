@@ -206,7 +206,7 @@ function mockHttpClient(sufixo = "ok") {
   });
   storage.salvarAgendamentoSocial("cliente_limpeza_agenda", {
     id: "agenda_futura",
-    origem: "agendada",
+    origem: "automatico",
     tipoPublicacao: "livre",
     imagemUrl: "https://cdn.optimus.test/futura.jpg",
     legenda: "Futura",

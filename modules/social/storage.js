@@ -1,4 +1,6 @@
+const fs = require("fs");
 const {
+  getClienteJsonPath,
   readClienteJson,
   writeClienteJson,
   listClientes
@@ -375,7 +377,7 @@ function criarConfigAutomaticoPadrao(clienteId = "admin") {
     formatos: ["feed"],
     janelaFuncionamento: {
       inicio: "08:00",
-      fim: "22:00"
+      fim: "23:50"
     },
     intervaloMinimoMinutos: 40,
     idadeMaximaHoras: 6,
@@ -669,6 +671,14 @@ function lerCliente(clienteId, tipo, fallback) {
   }
 }
 
+function arquivoClienteExiste(clienteId, tipo) {
+  try {
+    return fs.existsSync(getClienteJsonPath(clienteId, ARQUIVOS[tipo]));
+  } catch {
+    return false;
+  }
+}
+
 function escreverCliente(clienteId, tipo, dados) {
   try {
     writeClienteJson(clienteId, ARQUIVOS[tipo], dados);
@@ -913,14 +923,37 @@ function getAgendamentoSocial(clienteId = "admin", id = "") {
 const STATUS_AGENDAMENTO_LIMPEZA_ATIVA = new Set(["pendente", "agendada", "aguardando_aprovacao"]);
 const MODOS_LIMPEZA_AGENDAMENTOS = new Set(["erro", "cancelada", "publicada", "agendada", "tudo"]);
 
+function agendamentoAutomaticoFuturoLimpavel(agendamento = {}, agoraMs = Date.now()) {
+  if (agendamento.ativo === false) return false;
+  if (texto(agendamento.origem) !== "automatico") return false;
+  const status = texto(agendamento.status || "pendente").toLowerCase();
+  if (!STATUS_AGENDAMENTO_LIMPEZA_ATIVA.has(status)) return false;
+  const data = Date.parse(texto(agendamento.agendadoPara || agendamento.horario));
+  return Number.isFinite(data) && data > agoraMs;
+}
+
 function agendamentoEntraNaLimpeza(agendamento = {}, modo = "") {
   const status = texto(agendamento.status || "pendente").toLowerCase();
   if (modo === "tudo") return true;
   if (["erro", "cancelada", "publicada"].includes(modo)) return status === modo;
   if (modo === "agendada") {
-    return agendamento.ativo !== false && STATUS_AGENDAMENTO_LIMPEZA_ATIVA.has(status);
+    return agendamentoAutomaticoFuturoLimpavel(agendamento);
   }
   return false;
+}
+
+function cancelarAgendamentosAutomaticosFuturosSocial(clienteId = "admin", motivo = "config_automatico_recalculada") {
+  const atuais = listarAgendamentosSocial(clienteId);
+  let canceladas = 0;
+  const atualizados = atuais.map(item => {
+    if (!agendamentoAutomaticoFuturoLimpavel(item)) return item;
+    canceladas += 1;
+    return { ...item, ativo: false, status: "cancelada", motivo, atualizadoEm: agoraIso() };
+  });
+  if (canceladas > 0) {
+    escreverCliente(clienteId, "agendamentos", atualizados);
+  }
+  return { canceladas };
 }
 
 function removerAgendamentoSocial(clienteId = "admin", id = "") {
@@ -1274,7 +1307,9 @@ function scoreAgendamentoAutomatico(agendamento = {}) {
 }
 
 function reconciliarLimiteDiarioAutomaticoSocial(clienteId = "admin", config = {}) {
-  if (config.limiteDiarioAutomaticoAtivo !== true) return { canceladasExcedentes: 0 };
+  if (config.limiteDiarioAutomaticoAtivo !== true) {
+    return { canceladasExcedentes: 0, canceladasDuplicadas: 0 };
+  }
 
   const limite = inteiro(config.quantidadeDiaria ?? config.maxPublicacoesAutomaticasPorDia, 5, 1, 20);
   const atuais = listarAgendamentosSocial(clienteId);
@@ -1289,29 +1324,44 @@ function reconciliarLimiteDiarioAutomaticoSocial(clienteId = "admin", config = {
     grupos.get(dia).push(agendamento);
   }
 
-  const cancelarIds = new Set();
+  const cancelamentos = new Map();
+  const cancelavel = item => {
+    const status = texto(item.status || "").toLowerCase();
+    const data = Date.parse(texto(item.agendadoPara || item.horario));
+    return !(status === "publicada" || status === "processando" || status === "publicando") &&
+      Number.isFinite(data) && data > agora;
+  };
+  const ordenarFuturos = (a, b) =>
+    scoreAgendamentoAutomatico(b) - scoreAgendamentoAutomatico(a) ||
+    Date.parse(texto(a.agendadoPara || a.horario)) - Date.parse(texto(b.agendadoPara || b.horario)) ||
+    texto(a.id).localeCompare(texto(b.id));
+
   for (const [dia, itens] of grupos.entries()) {
-    if (itens.length <= limite) continue;
-
-    const naoCancelaveis = itens.filter(item => {
-      const status = texto(item.status || "").toLowerCase();
-      const data = Date.parse(texto(item.agendadoPara || item.horario));
-      return status === "publicada" || status === "processando" || status === "publicando" || !(Number.isFinite(data) && data > agora);
-    });
-    const vagasParaFuturos = Math.max(0, limite - naoCancelaveis.length);
-    const futurosCancelaveis = itens
-      .filter(item => !naoCancelaveis.some(fixo => fixo.id === item.id))
-      .sort((a, b) =>
-        scoreAgendamentoAutomatico(b) - scoreAgendamentoAutomatico(a) ||
-        Date.parse(texto(a.agendadoPara || a.horario)) - Date.parse(texto(b.agendadoPara || b.horario)) ||
-        texto(a.id).localeCompare(texto(b.id))
-      );
-
-    for (const excedente of futurosCancelaveis.slice(vagasParaFuturos)) {
-      cancelarIds.add(excedente.id);
+    const horarios = new Set();
+    for (const item of itens.filter(cancelavel).sort(ordenarFuturos)) {
+      const horarioMs = Date.parse(texto(item.agendadoPara || item.horario));
+      const chaveHorario = new Date(horarioMs).toISOString();
+      if (horarios.has(chaveHorario)) {
+        cancelamentos.set(item.id, "horario_automatico_duplicado");
+      } else {
+        horarios.add(chaveHorario);
+      }
     }
 
-    if (cancelarIds.size) {
+    const itensSemDuplicados = itens.filter(item => !cancelamentos.has(item.id));
+    if (itensSemDuplicados.length <= limite) continue;
+
+    const naoCancelaveis = itensSemDuplicados.filter(item => !cancelavel(item));
+    const vagasParaFuturos = Math.max(0, limite - naoCancelaveis.length);
+    const futurosCancelaveis = itensSemDuplicados
+      .filter(item => cancelavel(item))
+      .sort(ordenarFuturos);
+
+    for (const excedente of futurosCancelaveis.slice(vagasParaFuturos)) {
+      cancelamentos.set(excedente.id, "limite_diario_reduzido");
+    }
+
+    if (cancelamentos.size) {
       logSocial("[SOCIAL-AUTO-LIMITE-DIARIO]", {
         clienteId,
         data: dia,
@@ -1321,23 +1371,60 @@ function reconciliarLimiteDiarioAutomaticoSocial(clienteId = "admin", config = {
         pendentes: itens.filter(item => texto(item.status).toLowerCase() !== "publicada").length,
         vagas: Math.max(0, limite - itens.length),
         criadas: 0,
-        canceladasExcedentes: cancelarIds.size,
-        motivo: "limite_diario_reduzido"
+        canceladasExcedentes: Array.from(cancelamentos.values()).filter(motivo => motivo === "limite_diario_reduzido").length,
+        canceladasDuplicadas: Array.from(cancelamentos.values()).filter(motivo => motivo === "horario_automatico_duplicado").length,
+        motivo: "ciclo_automatico_reconciliado"
       });
     }
   }
 
-  if (!cancelarIds.size) return { canceladasExcedentes: 0 };
+  if (!cancelamentos.size) return { canceladasExcedentes: 0, canceladasDuplicadas: 0 };
 
-  const atualizados = atuais.map(item => cancelarIds.has(item.id)
-    ? { ...item, ativo: false, status: "cancelada", motivo: "limite_diario_reduzido", atualizadoEm: agoraIso() }
+  const atualizados = atuais.map(item => cancelamentos.has(item.id)
+    ? { ...item, ativo: false, status: "cancelada", motivo: cancelamentos.get(item.id), atualizadoEm: agoraIso() }
     : item
   );
   escreverCliente(clienteId, "agendamentos", atualizados);
-  return { canceladasExcedentes: cancelarIds.size };
+  return {
+    canceladasExcedentes: Array.from(cancelamentos.values()).filter(motivo => motivo === "limite_diario_reduzido").length,
+    canceladasDuplicadas: Array.from(cancelamentos.values()).filter(motivo => motivo === "horario_automatico_duplicado").length
+  };
+}
+function chaveRecalculoAutomaticoSocial(config = {}) {
+  const normalizada = config && typeof config === "object" ? config : {};
+  const janela = normalizada.janelaFuncionamento && typeof normalizada.janelaFuncionamento === "object"
+    ? normalizada.janelaFuncionamento
+    : {};
+  const gatilho = normalizada.gatilho && typeof normalizada.gatilho === "object" ? normalizada.gatilho : {};
+  const cta = normalizada.cta && typeof normalizada.cta === "object" ? normalizada.cta : {};
+  const listaOrdenada = valor => lista(valor).map(texto).filter(Boolean).sort();
+  return JSON.stringify({
+    templatePadraoId: texto(normalizada.templatePadraoId),
+    intervaloMinimoMinutos: inteiro(normalizada.intervaloMinimoMinutos, 40, 10, 1440),
+    idadeMaximaHoras: inteiro(normalizada.idadeMaximaHoras, 6, 1, 168),
+    marketplacesPermitidos: listaOrdenada(normalizada.marketplacesPermitidos),
+    categoriasPermitidas: listaOrdenada(normalizada.categoriasPermitidas),
+    scoreMinimo: inteiro(normalizada.scoreMinimo, 70, 0, 100),
+    exigirCupom: normalizada.exigirCupom === true,
+    permitirOfertaComum: normalizada.permitirOfertaComum !== false,
+    limparAutomaticamenteOportunidadesAntigas: normalizada.limparAutomaticamenteOportunidadesAntigas === true,
+    aprovacaoManual: normalizada.aprovacaoManual === true,
+    evitarProdutoRepetidoDias: inteiro(normalizada.evitarProdutoRepetidoDias, 30, 0, 365),
+    formatos: listaOrdenada(normalizada.formatos),
+    janelaInicio: texto(janela.inicio),
+    janelaFim: texto(janela.fim),
+    gatilhoAtivo: gatilho.ativo === true,
+    gatilhoPalavra: texto(gatilho.palavra),
+    gatilhoRespostaPublica: texto(gatilho.respostaPublica),
+    ctaDestino: texto(cta.destino),
+    ctaLinkGrupo: texto(cta.linkGrupo),
+    ctaWhatsapp: texto(cta.whatsapp),
+    ctaLinkBio: texto(cta.linkBio)
+  });
 }
 
 function setConfigAutomaticoSocial(clienteId = "admin", dados = {}) {
+  const configJaPersistida = arquivoClienteExiste(clienteId, "automatico");
   const atual = getConfigAutomaticoSocial(clienteId);
   const entrada = dados && typeof dados === "object" ? { ...dados } : {};
   if (Object.prototype.hasOwnProperty.call(entrada, "quantidadeDiaria") &&
@@ -1353,8 +1440,25 @@ function setConfigAutomaticoSocial(clienteId = "admin", dados = {}) {
     ...entrada
   });
   escreverCliente(clienteId, "automatico", config);
-  const limiteReduzido = Number(config.quantidadeDiaria) < Number(atual.quantidadeDiaria);
-  const reconciliacao = limiteReduzido
+  const ativoAnterior = configJaPersistida && atual.ativo === true;
+  const desligou = config.ativo !== true;
+  const ligou = config.ativo === true && !ativoAnterior;
+  const regrasAlteradas = configJaPersistida && ativoAnterior && config.ativo === true &&
+    chaveRecalculoAutomaticoSocial(atual) !== chaveRecalculoAutomaticoSocial(config);
+  let recalculo = { canceladas: 0, motivo: "config_sincronizada" };
+  if (desligou) {
+    recalculo = {
+      ...cancelarAgendamentosAutomaticosFuturosSocial(clienteId, "automatico_desligado"),
+      motivo: "automatico_desligado"
+    };
+  } else if (ligou || regrasAlteradas) {
+    const motivo = ligou ? "ciclo_automatico_reiniciado" : "config_automatico_recalculada";
+    recalculo = {
+      ...cancelarAgendamentosAutomaticosFuturosSocial(clienteId, motivo),
+      motivo
+    };
+  }
+  const reconciliacao = config.ativo === true
     ? reconciliarLimiteDiarioAutomaticoSocial(clienteId, config)
     : { canceladasExcedentes: 0 };
   logSocial("[SOCIAL-AUTOMATICO-CONFIG]", {
@@ -1364,6 +1468,8 @@ function setConfigAutomaticoSocial(clienteId = "admin", dados = {}) {
     limiteDiarioAutomaticoAtivo: config.limiteDiarioAutomaticoAtivo,
     maxPublicacoesAutomaticasPorDia: config.maxPublicacoesAutomaticasPorDia,
     canceladasExcedentes: reconciliacao.canceladasExcedentes,
+    canceladasRecalculo: recalculo.canceladas,
+    motivoCiclo: recalculo.motivo,
     scoreMinimo: config.scoreMinimo
   });
   return config;

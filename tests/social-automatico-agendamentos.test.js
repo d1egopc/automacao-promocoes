@@ -135,12 +135,15 @@ function horaSaoPaulo(input) {
     ofertaId: "existente",
     status: "agendada",
     ativo: true,
-    agendadoPara: "2026-07-14T14:00:00.000Z"
+    agendadoPara: "2099-07-14T14:00:00.000Z"
   });
   storage.setConfigAutomaticoSocial("cliente_off", configAutomatico({ ativo: false }));
   const desligado = await executarAutomaticoCliente({ clienteId: "cliente_off", agora: AGORA });
   assert.strictEqual(desligado.motivo, "automatico_desativado");
-  assert.strictEqual(storage.listarAgendamentosSocial("cliente_off").length, 1, "desligar nao apaga agendamento existente");
+  const agendamentosOff = storage.listarAgendamentosSocial("cliente_off");
+  assert.strictEqual(agendamentosOff.length, 1, "desligar nao apaga historico local do agendamento");
+  assert.strictEqual(agendamentosOff[0].status, "cancelada", "desligar cancela agendamento automatico futuro");
+  assert.strictEqual(agendamentosOff[0].motivo, "automatico_desligado", "desligar registra motivo controlado");
 
   const configNormalizada = storage.setConfigAutomaticoSocial("cliente_norm", configAutomatico({
     quantidadeDiaria: 12,
@@ -302,8 +305,8 @@ function horaSaoPaulo(input) {
     maxPublicacoesAutomaticasPorDia: 3
   }));
   const agendamentosAtivacaoLimite = storage.listarAgendamentosSocial("cliente_limite_ativa_sem_limpar");
-  assert.strictEqual(agendamentosAtivacaoLimite.filter(item => item.status === "agendada").length, 3, "reduzir quantidadeDiaria mantem somente os melhores futuros automaticos necessarios");
-  assert.strictEqual(agendamentosAtivacaoLimite.filter(item => item.status === "cancelada" && item.motivo === "limite_diario_reduzido").length, 2, "reduzir quantidadeDiaria cancela excedentes futuros automaticos sem apagar");
+  assert.strictEqual(agendamentosAtivacaoLimite.filter(item => item.status === "agendada").length, 0, "ligar automacao inicia ciclo limpo sem preservar futuros antigos");
+  assert.strictEqual(agendamentosAtivacaoLimite.filter(item => item.status === "cancelada" && item.motivo === "ciclo_automatico_reiniciado").length, 5, "ligar automacao cancela futuros automaticos anteriores sem apagar");
 
   conectar("cliente_limite_reduz", "limite_reduz");
   storage.salvarAgendamentoSocial("cliente_limite_reduz", {
@@ -338,6 +341,24 @@ function horaSaoPaulo(input) {
   assert.strictEqual(agendamentosReduzidos.filter(item => item.origem === "automatico" && item.status === "agendada").length, 3, "reducao mantem somente os melhores futuros automaticos necessarios");
   assert.strictEqual(agendamentosReduzidos.filter(item => item.origem === "automatico" && item.status === "cancelada" && item.motivo === "limite_diario_reduzido").length, 2, "reducao cancela excedentes futuros automaticos sem apagar");
 
+  conectar("cliente_horario_duplicado", "horario_duplicado");
+  storage.setConfigAutomaticoSocial("cliente_horario_duplicado", configAutomatico({ quantidadeDiaria: 5 }));
+  for (let i = 0; i < 2; i += 1) {
+    storage.salvarAgendamentoSocial("cliente_horario_duplicado", {
+      origem: "automatico",
+      tipoPublicacao: "oferta",
+      ofertaId: `horario_duplicado_${i}`,
+      status: "agendada",
+      ativo: true,
+      agendadoPara: "2099-07-14T12:00:00.000Z",
+      automatico: { score: 90 - i }
+    });
+  }
+  storage.setConfigAutomaticoSocial("cliente_horario_duplicado", configAutomatico({ quantidadeDiaria: 5 }));
+  const agendamentosHorarioDuplicado = storage.listarAgendamentosSocial("cliente_horario_duplicado");
+  assert.strictEqual(agendamentosHorarioDuplicado.filter(item => item.status === "agendada").length, 1, "sincronizacao mantem apenas um automatico ativo por horario");
+  assert.strictEqual(agendamentosHorarioDuplicado.filter(item => item.status === "cancelada" && item.motivo === "horario_automatico_duplicado").length, 1, "sincronizacao cancela duplicata de horario automatico");
+
   conectar("cliente_repreenche_dia", "repreenche_dia");
   writeClienteJson("cliente_repreenche_dia", "fila.json", Array.from({ length: 6 }, (_, i) =>
     oferta(`repreenche_${i}`, {
@@ -358,6 +379,115 @@ function horaSaoPaulo(input) {
     rodadaRepreencheAposLimpeza.agendamentosCriados.every(item => item.agendadoPara.startsWith("2026-07-14")),
     "repreenchimento nao cria agendamentos em dias futuros"
   );
+
+  conectar("cliente_config_idempotente", "config_idempotente");
+  writeClienteJson("cliente_config_idempotente", "fila.json", Array.from({ length: 10 }, (_, i) =>
+    oferta(`config_idempotente_oferta_${i}`, { score: 99 - i, cupom: "SYNC" })
+  ));
+  const configIdempotente5 = configAutomatico({
+    quantidadeDiaria: 5,
+    limiteDiarioAutomaticoAtivo: true,
+    maxPublicacoesAutomaticasPorDia: 5
+  });
+  storage.setConfigAutomaticoSocial("cliente_config_idempotente", configIdempotente5);
+  const rodadaConfigIdempotente1 = await executarAutomaticoCliente({ clienteId: "cliente_config_idempotente", agora: AGORA });
+  assert.strictEqual(rodadaConfigIdempotente1.agendamentosCriados.length, 5, "primeiro salvamento sincroniza ate o limite diario");
+  storage.setConfigAutomaticoSocial("cliente_config_idempotente", configIdempotente5);
+  const rodadaConfigIdempotente2 = await executarAutomaticoCliente({ clienteId: "cliente_config_idempotente", agora: AGORA });
+  assert.strictEqual(rodadaConfigIdempotente2.agendamentosCriados.length, 0, "repetir o mesmo salvamento nao cria nova leva");
+  storage.setConfigAutomaticoSocial("cliente_config_idempotente", configAutomatico({
+    quantidadeDiaria: 7,
+    limiteDiarioAutomaticoAtivo: true,
+    maxPublicacoesAutomaticasPorDia: 7
+  }));
+  const rodadaConfigIdempotente3 = await executarAutomaticoCliente({ clienteId: "cliente_config_idempotente", agora: AGORA });
+  assert.strictEqual(rodadaConfigIdempotente3.agendamentosCriados.length, 2, "aumento de limite cria somente a diferenca faltante");
+  const autosConfigIdempotente = storage.listarAgendamentosSocial("cliente_config_idempotente")
+    .filter(item => item.origem === "automatico" && item.status === "agendada");
+  assert.strictEqual(autosConfigIdempotente.length, 7, "ocupacao final respeita quantidadeDiaria");
+  assert.strictEqual(new Set(autosConfigIdempotente.map(item => item.agendadoPara)).size, 7, "nao cria dois automaticos no mesmo horario");
+
+  conectar("cliente_config_recalcula_regras", "config_recalcula_regras");
+  storage.setConfigAutomaticoSocial("cliente_config_recalcula_regras", configAutomatico({
+    quantidadeDiaria: 3,
+    janelaFuncionamento: { inicio: "00:00", fim: "23:59" }
+  }));
+  storage.salvarAgendamentoSocial("cliente_config_recalcula_regras", {
+    origem: "automatico",
+    tipoPublicacao: "oferta",
+    ofertaId: "auto_futuro_recalculo",
+    status: "agendada",
+    ativo: true,
+    agendadoPara: "2099-07-14T12:00:00.000Z"
+  });
+  storage.salvarAgendamentoSocial("cliente_config_recalcula_regras", {
+    origem: "manual",
+    tipoPublicacao: "oferta",
+    ofertaId: "manual_preservado_recalculo",
+    status: "agendada",
+    ativo: true,
+    agendadoPara: "2099-07-14T13:00:00.000Z"
+  });
+  storage.salvarAgendamentoSocial("cliente_config_recalcula_regras", {
+    origem: "automatico",
+    tipoPublicacao: "oferta",
+    ofertaId: "auto_publicado_recalculo",
+    status: "publicada",
+    ativo: true,
+    agendadoPara: "2099-07-14T14:00:00.000Z"
+  });
+  storage.setConfigAutomaticoSocial("cliente_config_recalcula_regras", configAutomatico({
+    quantidadeDiaria: 3,
+    janelaFuncionamento: { inicio: "08:00", fim: "10:00" }
+  }));
+  const recalculadosPorRegra = storage.listarAgendamentosSocial("cliente_config_recalcula_regras");
+  assert.strictEqual(
+    recalculadosPorRegra.filter(item => item.origem === "automatico" && item.status === "cancelada" && item.motivo === "config_automatico_recalculada").length,
+    1,
+    "alteracao de regra cancela automaticos futuros para recalculo"
+  );
+  assert.ok(recalculadosPorRegra.some(item => item.ofertaId === "manual_preservado_recalculo" && item.status === "agendada"), "recalculo preserva manual");
+  assert.ok(recalculadosPorRegra.some(item => item.ofertaId === "auto_publicado_recalculo" && item.status === "publicada"), "recalculo preserva publicado");
+
+  conectar("cliente_limpeza_futuros_auto", "limpeza_futuros_auto");
+  storage.salvarAgendamentoSocial("cliente_limpeza_futuros_auto", {
+    origem: "automatico",
+    tipoPublicacao: "oferta",
+    ofertaId: "auto_futuro",
+    status: "agendada",
+    ativo: true,
+    agendadoPara: "2099-07-14T12:00:00.000Z"
+  });
+  storage.salvarAgendamentoSocial("cliente_limpeza_futuros_auto", {
+    origem: "manual",
+    tipoPublicacao: "oferta",
+    ofertaId: "manual_futuro",
+    status: "agendada",
+    ativo: true,
+    agendadoPara: "2099-07-14T13:00:00.000Z"
+  });
+  storage.salvarAgendamentoSocial("cliente_limpeza_futuros_auto", {
+    origem: "automatico",
+    tipoPublicacao: "oferta",
+    ofertaId: "auto_publicado",
+    status: "publicada",
+    ativo: true,
+    agendadoPara: "2099-07-14T14:00:00.000Z"
+  });
+  storage.salvarAgendamentoSocial("cliente_limpeza_futuros_auto", {
+    origem: "automatico",
+    tipoPublicacao: "oferta",
+    ofertaId: "auto_passado",
+    status: "agendada",
+    ativo: true,
+    agendadoPara: "2020-07-14T14:00:00.000Z"
+  });
+  const limpezaFuturosAuto = storage.limparAgendamentosSocial("cliente_limpeza_futuros_auto", "agendada");
+  assert.strictEqual(limpezaFuturosAuto.removidos, 1, "limpeza agendada remove somente automaticos futuros nao publicados");
+  const restantesLimpezaFuturos = storage.listarAgendamentosSocial("cliente_limpeza_futuros_auto");
+  assert.ok(restantesLimpezaFuturos.some(item => item.ofertaId === "manual_futuro"), "limpeza nao remove agendamento manual");
+  assert.ok(restantesLimpezaFuturos.some(item => item.ofertaId === "auto_publicado"), "limpeza nao remove automatico ja publicado");
+  assert.ok(restantesLimpezaFuturos.some(item => item.ofertaId === "auto_passado"), "limpeza nao remove agendamento passado");
 
   conectar("cliente_prioridade", "prioridade");
   writeClienteJson("cliente_prioridade", "fila.json", [

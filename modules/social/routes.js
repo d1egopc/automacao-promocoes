@@ -1246,7 +1246,7 @@ function criarRotasSocial(deps = {}) {
     });
   });
 
-  router.post("/automatico/config", (req, res) => {
+  router.post("/automatico/config", async (req, res) => {
     if (!socialPermitido(req)) {
       return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
     }
@@ -1257,7 +1257,11 @@ function criarRotasSocial(deps = {}) {
       return res.json({
         ok: true,
         clienteId,
-        config
+        config,
+        sincronizacao: {
+          agendamentosCriados: 0,
+          motivo: config.ativo ? "ciclo_automatico_sincronizado" : "automatico_desativado"
+        }
       });
     } catch (e) {
       logErroSocial({ erro: e.message, rota: "POST /social/automatico/config" });
