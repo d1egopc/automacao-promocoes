@@ -1029,6 +1029,44 @@ function registrarPublicacaoSocial(clienteId = "admin", dados = {}) {
   return publicacao;
 }
 
+function removerPublicacaoSocial(clienteId = "admin", id = "") {
+  const idSeguro = texto(id);
+  const atuais = lista(lerCliente(clienteId, "publicacoes", []));
+  const mantidas = atuais.filter(item => texto(item?.id) !== idSeguro);
+  const removidos = atuais.length - mantidas.length;
+
+  if (removidos > 0) escreverCliente(clienteId, "publicacoes", mantidas);
+  logSocial("[SOCIAL-PUBLICACAO-REMOVIDA]", {
+    clienteId,
+    id: idSeguro,
+    removidos,
+    restantes: mantidas.length
+  });
+
+  return {
+    id: idSeguro,
+    totalAntes: atuais.length,
+    removidos,
+    restantes: mantidas.length
+  };
+}
+
+function limparPublicacoesSocial(clienteId = "admin") {
+  const atuais = lista(lerCliente(clienteId, "publicacoes", []));
+  escreverCliente(clienteId, "publicacoes", []);
+  logSocial("[SOCIAL-PUBLICACOES-LIMPEZA]", {
+    clienteId,
+    removidos: atuais.length,
+    restantes: 0
+  });
+
+  return {
+    totalAntes: atuais.length,
+    removidos: atuais.length,
+    restantes: 0
+  };
+}
+
 function normalizarControleOportunidadesSocial(clienteId = "admin", dados = {}) {
   const base = dados && typeof dados === "object" && !Array.isArray(dados) ? dados : {};
   const ocultas = base.ocultas && typeof base.ocultas === "object" && !Array.isArray(base.ocultas)
@@ -1658,6 +1696,8 @@ module.exports = {
   setConfigAutomaticoSocial,
   listarPublicacoesSocial,
   registrarPublicacaoSocial,
+  removerPublicacaoSocial,
+  limparPublicacoesSocial,
   listarOportunidadesSocial,
   validarOportunidadeSocialManual,
   limparOportunidadesSocial,

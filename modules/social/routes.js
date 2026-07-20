@@ -1376,6 +1376,53 @@ function criarRotasSocial(deps = {}) {
     });
   });
 
+  router.delete("/publicacoes/:id", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const resultado = storage.removerPublicacaoSocial(clienteId, req.params.id);
+      if (resultado.removidos === 0) {
+        return res.status(404).json({
+          ok: false,
+          clienteId,
+          erro: "publicacao_nao_encontrada",
+          ...resultado
+        });
+      }
+
+      return res.json({
+        ok: true,
+        clienteId,
+        ...resultado
+      });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "DELETE /social/publicacoes/:id" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_publicacao_remocao_falhou" });
+    }
+  });
+
+  router.delete("/publicacoes", (req, res) => {
+    if (!socialPermitido(req)) {
+      return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
+    }
+
+    try {
+      const clienteId = cliente(req);
+      const resultado = storage.limparPublicacoesSocial(clienteId);
+      return res.json({
+        ok: true,
+        clienteId,
+        ...resultado
+      });
+    } catch (e) {
+      logErroSocial({ erro: e.message, rota: "DELETE /social/publicacoes" });
+      return res.status(400).json({ ok: false, erro: e.message || "social_publicacoes_limpeza_falhou" });
+    }
+  });
+
   router.get("/oportunidades", (req, res) => {
     if (!socialPermitido(req)) {
       return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
@@ -1558,6 +1605,8 @@ function criarRotasSocial(deps = {}) {
       "POST /social/agendamentos/executar",
       "POST /social/midia/upload",
       "GET /social/publicacoes",
+      "DELETE /social/publicacoes/:id",
+      "DELETE /social/publicacoes",
       "GET /social/oportunidades",
       "POST /social/oportunidades/limpar",
       "POST /social/publicar"
