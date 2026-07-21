@@ -7,6 +7,8 @@ function erroPareceTimeout(resultado = {}) {
 
 function adaptarMercadoLivre(resultado = {}) {
   const status = String(resultado.status || resultado.codigo || "").toLowerCase();
+  const origem = resultado.origem || "teste_manual";
+  const testeManual = origem === "teste_manual";
   const detalhes = sanitizarDetalhes(resultado.detalhes || {}) || {};
 
   if (resultado.ok === true || status === "ok") {
@@ -15,7 +17,7 @@ function adaptarMercadoLivre(resultado = {}) {
       estado: "ok",
       codigo: "link_convertido",
       mensagem: resultado.mensagem || "Link de teste convertido com sucesso.",
-      origem: "teste_manual",
+      origem,
       detalhes
     };
   }
@@ -26,7 +28,18 @@ function adaptarMercadoLivre(resultado = {}) {
       estado: "invalida",
       codigo: status || "credencial_invalida",
       mensagem: resultado.mensagem || "Credenciais ausentes, expiradas ou inválidas.",
-      origem: "teste_manual",
+      origem,
+      detalhes
+    };
+  }
+
+  if (testeManual) {
+    return {
+      marketplace: "mercadolivre",
+      estado: "invalida",
+      codigo: erroPareceTimeout(resultado) ? "timeout" : (status || "falha_teste"),
+      mensagem: resultado.mensagem || "Teste manual não comprovou importação com link afiliado válido.",
+      origem,
       detalhes
     };
   }
@@ -37,7 +50,7 @@ function adaptarMercadoLivre(resultado = {}) {
       estado: "ok",
       codigo: "bloqueio_temporario",
       mensagem: resultado.mensagem || "Mercado Livre bloqueou temporariamente a validação.",
-      origem: "teste_manual",
+      origem,
       falhaTemporaria: true,
       detalhes
     };
@@ -48,7 +61,7 @@ function adaptarMercadoLivre(resultado = {}) {
     estado: "ok",
     codigo: erroPareceTimeout(resultado) ? "timeout" : (status || "falha_teste"),
     mensagem: resultado.mensagem || "Não foi possível confirmar o Mercado Livre agora.",
-    origem: "teste_manual",
+    origem,
     falhaTemporaria: true,
     detalhes
   };

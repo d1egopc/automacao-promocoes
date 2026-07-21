@@ -11,7 +11,8 @@ const { testarIntegracaoMarketplace } = require("../utils/testar-integracao-mark
     "mercadolivre",
     {
       credenciais: {
-        cookies: "cookie-funcional-sem-validacao-paralela"
+        cookies: "cookie-funcional-sem-validacao-paralela",
+        tag: "tag-oficial"
       },
       urlTeste: "https://produto.mercadolivre.com.br/MLB-123456-produto-teste-_JM"
     },
@@ -19,7 +20,7 @@ const { testarIntegracaoMarketplace } = require("../utils/testar-integracao-mark
       getIntegracaoCliente: (clienteId, marketplace) => {
         assert.strictEqual(clienteId, "cliente_ml");
         assert.strictEqual(marketplace, "mercadolivre");
-        return { credenciais: { cookies: "cookie-funcional-sem-validacao-paralela" } };
+        return { credenciais: { cookies: "cookie-funcional-sem-validacao-paralela", tag: "tag-oficial" } };
       },
       gerarLinkAfiliadoMercadoLivre: async () => "https://meli.la/oficial",
       importarMercadoLivre: async (url, clienteId, deps) => {
@@ -45,7 +46,7 @@ const { testarIntegracaoMarketplace } = require("../utils/testar-integracao-mark
   assert.strictEqual(sucesso.status, "ok");
   assert.strictEqual(sucesso.detalhes.origem, "importador_oficial");
 
-  const semTagMasImportadorOk = await testarIntegracaoMarketplace(
+  const semTagNaoTestaFluxo = await testarIntegracaoMarketplace(
     "cliente_ml_sem_tag",
     "mercadolivre",
     { credenciais: { cookies: "cookie-existe" } },
@@ -60,15 +61,15 @@ const { testarIntegracaoMarketplace } = require("../utils/testar-integracao-mark
     }
   );
 
-  assert.strictEqual(semTagMasImportadorOk.ok, true, "não deve falhar por tag ausente antes do importador");
-  assert.strictEqual(semTagMasImportadorOk.status, "ok");
+  assert.strictEqual(semTagNaoTestaFluxo.ok, false, "Tag ID ausente nao comprova fluxo oficial");
+  assert.strictEqual(semTagNaoTestaFluxo.status, "tag_ausente");
 
   const falhaImportador = await testarIntegracaoMarketplace(
     "cliente_ml_falha",
     "mercadolivre",
-    { credenciais: { cookies: "cookie" } },
+    { credenciais: { cookies: "cookie", tag: "tag-oficial" } },
     {
-      getIntegracaoCliente: () => ({ credenciais: { cookies: "cookie" } }),
+      getIntegracaoCliente: () => ({ credenciais: { cookies: "cookie", tag: "tag-oficial" } }),
       gerarLinkAfiliadoMercadoLivre: async () => "",
       importarMercadoLivre: async () => ({
         titulo: "Produto",
@@ -82,7 +83,81 @@ const { testarIntegracaoMarketplace } = require("../utils/testar-integracao-mark
   assert.strictEqual(falhaImportador.status, "cookie_invalido_retorno_importador");
   assert.strictEqual(falhaImportador.mensagem, "cookie_invalido_retorno_importador");
 
-  const semImportador = await testarIntegracaoMarketplace("cliente_ml_sem_importador", "mercadolivre", {});
+  let geradorTentadoComCookieAleatorio = false;
+  const cookieAleatorioSemAfiliado = await testarIntegracaoMarketplace(
+    "cliente_ml_cookie_aleatorio",
+    "mercadolivre",
+    {
+      credenciais: {
+        cookies: "fdfdfdfdfds43343ererererer",
+        tag: "optimus-teste"
+      },
+      urlTeste: "https://www.mercadolivre.com.br/produto-publico-teste"
+    },
+    {
+      getIntegracaoCliente: () => ({
+        credenciais: {
+          cookies: "fdfdfdfdfds43343ererererer",
+          tag: "optimus-teste"
+        }
+      }),
+      gerarLinkAfiliadoMercadoLivre: async () => {
+        geradorTentadoComCookieAleatorio = true;
+        return "";
+      },
+      importarMercadoLivre: async (url, clienteId, deps) => {
+        const linkGerado = await deps.gerarLinkAfiliadoMercadoLivre(url, {}, { clienteId });
+        return {
+          titulo: "Produto publico Mercado Livre",
+          precoAtual: "299,90",
+          linkOriginal: url,
+          urlFinal: url,
+          link: url,
+          linkAfiliado: linkGerado,
+          linkFinal: linkGerado
+        };
+      }
+    }
+  );
+
+  assert.strictEqual(geradorTentadoComCookieAleatorio, true, "deve tentar o gerador oficial");
+  assert.strictEqual(cookieAleatorioSemAfiliado.ok, false);
+  assert.strictEqual(cookieAleatorioSemAfiliado.status, "link_afiliado_ausente");
+  assert.strictEqual(cookieAleatorioSemAfiliado.detalhes.temTitulo, true);
+  assert.strictEqual(cookieAleatorioSemAfiliado.detalhes.temPreco, true);
+
+  const linkPublicoNoCampoAfiliado = await testarIntegracaoMarketplace(
+    "cliente_ml_link_publico",
+    "mercadolivre",
+    {
+      credenciais: {
+        cookies: "cookie",
+        tag: "optimus-teste"
+      },
+      urlTeste: "https://www.mercadolivre.com.br/produto-publico-teste"
+    },
+    {
+      getIntegracaoCliente: () => ({ credenciais: { cookies: "cookie", tag: "optimus-teste" } }),
+      gerarLinkAfiliadoMercadoLivre: async () => "https://www.mercadolivre.com.br/produto-publico-teste",
+      importarMercadoLivre: async (url) => ({
+        titulo: "Produto publico Mercado Livre",
+        precoAtual: "299,90",
+        linkOriginal: url,
+        urlFinal: url,
+        linkAfiliado: url,
+        linkFinal: url
+      })
+    }
+  );
+
+  assert.strictEqual(linkPublicoNoCampoAfiliado.ok, false, "link publico nao comprova afiliacao");
+  assert.strictEqual(linkPublicoNoCampoAfiliado.status, "link_afiliado_ausente");
+
+  const semImportador = await testarIntegracaoMarketplace(
+    "cliente_ml_sem_importador",
+    "mercadolivre",
+    { credenciais: { cookies: "cookie", tag: "tag-oficial" } }
+  );
   assert.strictEqual(semImportador.ok, false);
   assert.strictEqual(semImportador.status, "importador_ml_indisponivel");
 

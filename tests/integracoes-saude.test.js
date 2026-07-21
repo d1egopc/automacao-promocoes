@@ -52,8 +52,8 @@ ml = saude.registrarResultadoTesteIntegracao("cliente_ml_bloqueio", "mercadolivr
   mensagem: "Suspicious traffic.",
   detalhes: { httpStatus: 200 }
 });
-assert.strictEqual(ml.estado, "ok");
-assert.strictEqual(ml.codigo, "bloqueio_temporario");
+assert.strictEqual(ml.estado, "invalida");
+assert.strictEqual(ml.codigo, "bloqueio_ml");
 
 ml = saude.registrarResultadoTesteIntegracao("cliente_ml_timeout", "mercadolivre", {
   ok: false,
@@ -61,7 +61,7 @@ ml = saude.registrarResultadoTesteIntegracao("cliente_ml_timeout", "mercadolivre
   mensagem: "timeout",
   detalhes: { erro: "ETIMEDOUT" }
 });
-assert.strictEqual(ml.estado, "ok");
+assert.strictEqual(ml.estado, "invalida");
 assert.strictEqual(ml.codigo, "timeout");
 
 ml = saude.registrarResultadoTesteIntegracao("cliente_ml_falha", "mercadolivre", {
@@ -70,7 +70,20 @@ ml = saude.registrarResultadoTesteIntegracao("cliente_ml_falha", "mercadolivre",
   mensagem: "Sem link curto válido.",
   detalhes: { httpStatus: 200 }
 });
-assert.strictEqual(ml.estado, "ok");
+assert.strictEqual(ml.estado, "invalida");
+
+ml = saude.registrarResultadoTesteIntegracao("cliente_ml_cookie_aleatorio", "mercadolivre", {
+  ok: false,
+  status: "link_afiliado_ausente",
+  mensagem: "Importador oficial não retornou link afiliado.",
+  detalhes: {
+    temTitulo: true,
+    temPreco: true,
+    cookiesInformados: true
+  }
+});
+assert.strictEqual(ml.estado, "invalida", "teste manual sem link afiliado deve ficar visivel");
+assert.strictEqual(ml.codigo, "link_afiliado_ausente");
 
 let amazon = saude.registrarResultadoTesteIntegracao("cliente_amz_ok", "amazon", {
   ok: true,
@@ -103,7 +116,7 @@ amazon = saude.registrarResultadoTesteIntegracao("cliente_amz_robot", "amazon", 
   mensagem: "Robot check.",
   detalhes: { httpStatus: 503 }
 });
-assert.strictEqual(amazon.estado, "ok");
+assert.strictEqual(amazon.estado, "invalida");
 assert.strictEqual(amazon.codigo, "bloqueio_temporario");
 
 amazon = saude.registrarResultadoTesteIntegracao("cliente_amz_429", "amazon", {
@@ -112,7 +125,7 @@ amazon = saude.registrarResultadoTesteIntegracao("cliente_amz_429", "amazon", {
   mensagem: "Too many requests.",
   detalhes: { httpStatus: 429 }
 });
-assert.strictEqual(amazon.estado, "ok");
+assert.strictEqual(amazon.estado, "invalida");
 
 amazon = saude.registrarResultadoTesteIntegracao("cliente_amz_timeout", "amazon", {
   ok: false,
@@ -120,7 +133,7 @@ amazon = saude.registrarResultadoTesteIntegracao("cliente_amz_timeout", "amazon"
   mensagem: "timeout",
   detalhes: { erro: "timeout" }
 });
-assert.strictEqual(amazon.estado, "ok");
+assert.strictEqual(amazon.estado, "invalida");
 assert.strictEqual(amazon.codigo, "timeout");
 
 amazon = saude.registrarResultadoTesteIntegracao("cliente_amz_api", "amazon", {
@@ -129,7 +142,33 @@ amazon = saude.registrarResultadoTesteIntegracao("cliente_amz_api", "amazon", {
   mensagem: "Teste API pendente.",
   detalhes: { modo: "api" }
 });
+assert.strictEqual(amazon.estado, "invalida");
+
+amazon = saude.registrarResultadoOperacionalIntegracao("cliente_amz_prod_robot", "amazon", {
+  ok: false,
+  status: "cookie_expirado",
+  mensagem: "Robot check.",
+  detalhes: { httpStatus: 503 }
+});
 assert.strictEqual(amazon.estado, "ok");
+assert.strictEqual(amazon.codigo, "bloqueio_temporario");
+
+let shopeeManual = saude.registrarResultadoTesteIntegracao("cliente_shopee_manual", "shopee", {
+  ok: false,
+  status: "link_afiliado_ausente",
+  mensagem: "Offer link ausente.",
+  detalhes: { temProduto: true }
+});
+assert.strictEqual(shopeeManual.estado, "invalida");
+
+let shopeeProducao = saude.registrarResultadoOperacionalIntegracao("cliente_shopee_prod", "shopee", {
+  ok: false,
+  status: "falha_teste",
+  mensagem: "timeout",
+  detalhes: { erro: "timeout" }
+});
+assert.strictEqual(shopeeProducao.estado, "ok");
+assert.strictEqual(shopeeProducao.falhasConsecutivas, 1);
 
 const clienteStorage = "cliente_storage";
 let registro = saude.registrarConfiguracaoIntegracao(clienteStorage, "mercadolivre", {
@@ -147,7 +186,7 @@ registro = saude.registrarResultadoTesteIntegracao(clienteStorage, "mercadolivre
 const ultimoSucessoEm = registro.ultimoSucessoEm;
 assert.ok(ultimoSucessoEm);
 
-registro = saude.registrarResultadoTesteIntegracao(clienteStorage, "mercadolivre", {
+registro = saude.registrarResultadoOperacionalIntegracao(clienteStorage, "mercadolivre", {
   ok: false,
   status: "bloqueio_ml",
   mensagem: "captcha",
@@ -167,13 +206,30 @@ assert.strictEqual(registro.falhasConsecutivas, 0, "sucesso zera falhas consecut
 
 registro = saude.registrarResultadoTesteIntegracao(clienteStorage, "mercadolivre", {
   ok: false,
+  status: "link_afiliado_ausente",
+  mensagem: "Importador oficial não retornou link afiliado.",
+  detalhes: { temTitulo: true, temPreco: true }
+});
+assert.strictEqual(registro.estado, "invalida", "teste manual sem afiliado nao pode manter badge verde");
+assert.strictEqual(registro.codigo, "link_afiliado_ausente");
+
+registro = saude.registrarResultadoTesteIntegracao(clienteStorage, "mercadolivre", {
+  ok: true,
+  status: "ok",
+  mensagem: "ok",
+  detalhes: { linkAfiliado: "https://meli.la/abc" }
+});
+assert.strictEqual(registro.estado, "ok", "sucesso manual real recupera integracao invalida");
+
+registro = saude.registrarResultadoTesteIntegracao(clienteStorage, "mercadolivre", {
+  ok: false,
   status: "cookie_expirado",
   mensagem: "cookie expirado",
   detalhes: { httpStatus: 401 }
 });
 assert.strictEqual(registro.estado, "invalida", "falha confirmada invalida a integracao");
 
-registro = saude.registrarResultadoTesteIntegracao(clienteStorage, "mercadolivre", {
+registro = saude.registrarResultadoOperacionalIntegracao(clienteStorage, "mercadolivre", {
   ok: false,
   status: "bloqueio_ml",
   mensagem: "bloqueio temporario",

@@ -80,6 +80,8 @@ function statusCredencialInvalida(status = "") {
 function adaptarResultadoGenerico(marketplace = "", resultado = {}) {
   const mp = normalizarMarketplaceSaude(marketplace || resultado.marketplace);
   const status = String(resultado.status || resultado.codigo || "").toLowerCase();
+  const origem = resultado.origem || "teste_manual";
+  const testeManual = origem === "teste_manual";
   const detalhes = sanitizarDetalhes(resultado.detalhes || {}) || {};
 
   if (resultado.ok === true || status === "ok") {
@@ -88,7 +90,7 @@ function adaptarResultadoGenerico(marketplace = "", resultado = {}) {
       estado: "ok",
       codigo: status || "ok",
       mensagem: resultado.mensagem || "Fluxo oficial executado com sucesso.",
-      origem: resultado.origem || "fluxo_oficial",
+      origem,
       detalhes
     };
   }
@@ -99,7 +101,18 @@ function adaptarResultadoGenerico(marketplace = "", resultado = {}) {
       estado: "invalida",
       codigo: status || "credencial_invalida",
       mensagem: resultado.mensagem || "Credenciais inválidas ou rejeitadas.",
-      origem: resultado.origem || "fluxo_oficial",
+      origem,
+      detalhes
+    };
+  }
+
+  if (testeManual) {
+    return {
+      marketplace: mp,
+      estado: "invalida",
+      codigo: status || "falha_teste",
+      mensagem: resultado.mensagem || "Teste manual não comprovou o fluxo oficial de afiliado.",
+      origem,
       detalhes
     };
   }
@@ -109,7 +122,7 @@ function adaptarResultadoGenerico(marketplace = "", resultado = {}) {
     estado: "ok",
     codigo: status || "falha_temporaria",
     mensagem: resultado.mensagem || "Falha temporária registrada pelo fluxo oficial.",
-    origem: resultado.origem || "fluxo_oficial",
+    origem,
     falhaTemporaria: true,
     detalhes
   };
@@ -161,7 +174,10 @@ function registrarConfiguracaoIntegracao(clienteId = "admin", marketplace = "", 
 function registrarResultadoTesteIntegracao(clienteId = "admin", marketplace = "", resultado = {}) {
   const mp = normalizarMarketplaceSaude(marketplace || resultado.marketplace);
   if (!marketplaceSuportadoSaude(mp)) return null;
-  const adaptado = adaptarResultadoMarketplace(mp, resultado);
+  const adaptado = adaptarResultadoMarketplace(mp, {
+    ...resultado,
+    origem: resultado.origem || "teste_manual"
+  });
   if (!adaptado) return null;
   const atual = lerSaudeMarketplace(clienteId, mp) || registroPadrao(mp);
   const registro = aplicarResultado(atual, mp, adaptado);
