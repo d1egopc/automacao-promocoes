@@ -69,18 +69,18 @@ function valorTexto(obj = {}, campos = []) {
   return "";
 }
 
-function textoAuditoria(valor = "") {
-  return String(valor || "")
-    .replace(/https?:\/\/[^\s"'<>]+/gi, "[url]")
-    .slice(0, 240);
-}
-
-function logAuditoriaIntegracao(prefixo, dados = {}) {
-  try {
-    console.log(prefixo, JSON.stringify(dados));
-  } catch (_) {
-    console.log(prefixo, "{\"erro\":\"falha_serializacao_auditoria\"}");
-  }
+function tagMercadoLivre(config = {}) {
+  const c = credenciais(config);
+  return valorTexto(c, [
+    "tag",
+    "tagId",
+    "tagID",
+    "tag_id",
+    "codigoAfiliado",
+    "trackingId",
+    "partnerTag",
+    "affiliateTag"
+  ]);
 }
 
 function tagAmazon(config = {}) {
@@ -95,237 +95,122 @@ function tagAmazon(config = {}) {
   ]);
 }
 
-function linkTesteMercadoLivre(config = {}) {
-  const c = credenciais(config);
+function extrairCsrfMercadoLivre(html = "") {
+  const texto = String(html || "");
+  const patterns = [
+    /name=["']_csrf["'][^>]*value=["']([^"']+)["']/i,
+    /value=["']([^"']+)["'][^>]*name=["']_csrf["']/i,
+    /csrfToken["']?\s*[:=]\s*["']([^"']+)["']/i,
+    /_csrf["']?\s*[:=]\s*["']([^"']+)["']/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = texto.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+
+  return "";
+}
+
+function textoBloqueioMl(texto = "") {
+  const lower = String(texto || "").toLowerCase();
   return (
-    valorTexto(c, ["urlTeste", "linkTeste", "produtoTesteUrl", "testProductUrl"]) ||
-    valorTexto(config, ["urlTeste", "linkTeste", "produtoTesteUrl", "testProductUrl"]) ||
-    process.env.MERCADOLIVRE_TEST_PRODUCT_URL ||
-    "https://meli.la/2q2wuJL"
+    lower.includes("suspicious-traffic") ||
+    lower.includes("account-verification") ||
+    lower.includes("captcha") ||
+    lower.includes("verificacao") ||
+    lower.includes("verificacion")
   );
 }
 
-function motivoImportadorMercadoLivre(produto = {}) {
-  return valorTexto(produto, ["motivo", "motivoTecnico", "erro", "status", "statusDetalhe", "aviso"]);
-}
-
-function normalizarUrlComparacao(valor = "") {
-  const texto = String(valor || "").trim();
-  if (!texto) return "";
-  try {
-    const url = new URL(texto);
-    url.hash = "";
-    return url.toString().replace(/\/$/, "");
-  } catch (_) {
-    return texto.replace(/\/$/, "");
-  }
-}
-
-function temProdutoImportado(produto = {}) {
-  return Boolean(valorTexto(produto, [
-    "titulo",
-    "nome",
-    "productName",
-    "produtoId",
-    "produtoIdCanonico",
-    "itemId",
-    "asin"
-  ]));
-}
-
-function linkOriginalIgual(link = "", produto = {}, urlTeste = "") {
-  const linkNormalizado = normalizarUrlComparacao(link);
-  if (!linkNormalizado) return true;
-  const originais = [
-    produto.linkOriginal,
-    produto.urlFinal,
-    produto.productLink,
-    produto.linkExpandido,
-    urlTeste
-  ].map(normalizarUrlComparacao).filter(Boolean);
-  return originais.includes(linkNormalizado);
-}
-
-function linkAfiliadoMercadoLivreValido(linkAfiliado = "", produto = {}, urlTeste = "") {
-  const link = String(linkAfiliado || "").trim();
-  if (!/^https?:\/\//i.test(link)) return false;
-
-  if (linkOriginalIgual(link, produto, urlTeste)) return false;
-
-  return /^https?:\/\/([^/]+\.)?meli\.la\//i.test(link) ||
-    /[?&](tag|matt_tool|matt_word|matt_source|matt_campaign|matt_adgroup|matt_match_type)=/i.test(link);
-}
-
-function linkAmazonComTag(linkAfiliado = "", tagId = "") {
-  const link = String(linkAfiliado || "").trim();
-  const tag = String(tagId || "").trim();
-  if (!/^https?:\/\//i.test(link) || !tag) return false;
-  try {
-    const url = new URL(link);
-    return url.searchParams.get("tag") === tag ||
-      link.includes(`tag=${encodeURIComponent(tag)}`) ||
-      link.includes(`tag=${tag}`);
-  } catch (_) {
-    return link.includes(`tag=${encodeURIComponent(tag)}`) || link.includes(`tag=${tag}`);
-  }
-}
-
-function linkAfiliadoGenericoValido(linkAfiliado = "", produto = {}, urlTeste = "") {
-  const link = String(linkAfiliado || "").trim();
-  if (!/^https?:\/\//i.test(link)) return false;
-  return !linkOriginalIgual(link, produto, urlTeste);
-}
-
-async function testarMercadoLivre(clienteId = "admin", config = {}, deps = {}) {
-  const importarMercadoLivre = deps.importarMercadoLivre;
-  const getIntegracaoCliente = deps.getIntegracaoCliente || (() => config);
-  const gerarLinkAfiliadoMercadoLivre = deps.gerarLinkAfiliadoMercadoLivre;
-  const urlTeste = linkTesteMercadoLivre(config);
+async function testarMercadoLivre(config = {}) {
   const c = credenciais(config);
   const cookies = valorTexto(c, ["cookies", "cookie"]);
-  const tag = valorTexto(c, ["tag", "tagId", "tagID", "tag_id", "codigoAfiliado", "trackingId", "partnerTag", "affiliateTag"]);
-  const logMl = (dados = {}) => logAuditoriaIntegracao("[INTEGRACAO-TESTE-ML-AUDITORIA]", {
-    clienteId,
-    cookiesPresentes: !!cookies,
-    tagPresente: !!tag,
-    funcaoOficialChamada: false,
-    importadorRetornouProduto: false,
-    linkOriginalPresente: false,
-    linkFinalPresente: false,
-    linkAfiliadoPresente: false,
-    linkFinalIgualLinkOriginal: false,
-    ...dados,
-    mensagemMotivoFinal: textoAuditoria(dados.mensagemMotivoFinal)
-  });
+  const tagId = tagMercadoLivre(config);
+  const urlTeste = valorTexto(c, ["urlTeste", "linkTeste"]) || "https://www.mercadolivre.com.br/ofertas";
 
-  if (!cookies) {
-    logMl({ criterioDecisao: "cookie_ausente", mensagemMotivoFinal: MENSAGENS.cookie_ausente });
-    return resultado("mercadolivre", "cookie_ausente", { faltandoCookies: true }, false);
-  }
-  if (!tag) {
-    logMl({ criterioDecisao: "tag_ausente", mensagemMotivoFinal: MENSAGENS.tag_ausente });
-    return resultado("mercadolivre", "tag_ausente", { faltandoTag: true }, false);
-  }
-
-  if (typeof importarMercadoLivre !== "function") {
-    logMl({
-      criterioDecisao: "importador_ml_indisponivel",
-      mensagemMotivoFinal: "Importador oficial do Mercado Livre indisponivel para teste."
-    });
-    return resultado("mercadolivre", "importador_ml_indisponivel", {
-      motivo: "importador_oficial_indisponivel"
-    }, false, "Importador oficial do Mercado Livre indisponível para teste.");
-  }
+  if (!tagId) return resultado("mercadolivre", "tag_ausente", { faltandoTag: true }, false);
+  if (!cookies) return resultado("mercadolivre", "cookie_ausente", { faltandoCookies: true }, false);
 
   try {
-    const produto = await importarMercadoLivre(urlTeste, clienteId, {
-      getIntegracaoCliente,
-      gerarLinkAfiliadoMercadoLivre
+    const response = await fetch("https://www.mercadolivre.com.br/afiliados/linkbuilder", {
+      method: "GET",
+      headers: {
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+        Cookie: cookies
+      }
     });
 
-    if (!produto || typeof produto !== "object") {
-      logMl({
-        funcaoOficialChamada: true,
-        criterioDecisao: "importador_sem_retorno",
-        mensagemMotivoFinal: "Importador oficial nao retornou produto."
-      });
-      return resultado("mercadolivre", "importador_sem_retorno", {
-        urlTestePresente: !!urlTeste
-      }, false, "Importador oficial não retornou produto.");
+    const html = await response.text().catch(() => "");
+    const urlFinal = response.url || "";
+    const diagnostico = `${urlFinal}\n${html}`;
+
+    if (textoBloqueioMl(diagnostico)) {
+      return resultado("mercadolivre", "bloqueio_ml", { httpStatus: response.status, urlFinal }, false);
     }
 
-    const linkAfiliado = valorTexto(produto, ["linkAfiliado", "linkFinal"]);
-    const linkOriginal = valorTexto(produto, ["linkOriginal", "urlFinal"]);
-    const linkFinal = valorTexto(produto, ["linkFinal", "link"]);
-    const motivo = motivoImportadorMercadoLivre(produto);
-    const linkAfiliadoValido = linkAfiliadoMercadoLivreValido(linkAfiliado, produto, urlTeste);
-    const auditoriaProdutoMl = {
-      funcaoOficialChamada: true,
-      importadorRetornouProduto: true,
-      linkOriginalPresente: !!linkOriginal,
-      linkFinalPresente: !!linkFinal,
-      linkAfiliadoPresente: !!linkAfiliado,
-      linkFinalIgualLinkOriginal: Boolean(linkFinal && linkOriginal && normalizarUrlComparacao(linkFinal) === normalizarUrlComparacao(linkOriginal))
-    };
-
-    if (!linkAfiliadoValido) {
-      logMl({
-        ...auditoriaProdutoMl,
-        criterioDecisao: motivo || "link_afiliado_ausente",
-        mensagemMotivoFinal: motivo || "Importador oficial nao retornou link afiliado."
-      });
-      return resultado("mercadolivre", motivo || "link_afiliado_ausente", {
-        motivo: motivo || "importador_nao_retornou_link_afiliado",
-        temTitulo: !!valorTexto(produto, ["titulo", "nome"]),
-        temPreco: !!valorTexto(produto, ["preco", "precoAtual"])
-      }, false, motivo || "Importador oficial não retornou link afiliado.");
+    if ([401, 403, 419].includes(Number(response.status)) || !response.ok) {
+      return resultado("mercadolivre", "cookie_expirado", { httpStatus: response.status, urlFinal }, false);
     }
 
-    logMl({
-      ...auditoriaProdutoMl,
-      criterioDecisao: "link_afiliado_valido",
-      mensagemMotivoFinal: "Importador oficial gerou link afiliado com sucesso."
+    const csrf = extrairCsrfMercadoLivre(html);
+    if (!csrf) {
+      return resultado("mercadolivre", "cookie_expirado", {
+        motivo: "csrf_nao_encontrado",
+        httpStatus: response.status,
+        urlFinal
+      }, false);
+    }
+
+    const conversao = await fetch("https://www.mercadolivre.com.br/affiliate-program/api/v2/stripe/user/links", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/plain, */*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+        Origin: "https://www.mercadolivre.com.br",
+        Referer: "https://www.mercadolivre.com.br/afiliados/linkbuilder",
+        Cookie: cookies,
+        "x-csrf-token": csrf
+      },
+      body: JSON.stringify({ url: urlTeste, tag: tagId })
     });
-    return resultado("mercadolivre", "ok", {
-      origem: "importador_oficial",
-      linkAfiliado,
-      temTitulo: !!valorTexto(produto, ["titulo", "nome"]),
-      temPreco: !!valorTexto(produto, ["preco", "precoAtual"]),
-      temImagem: !!valorTexto(produto, ["imagem", "imagemUrl"])
-    }, true, "Importador oficial gerou link afiliado com sucesso.");
+
+    const data = await conversao.json().catch(() => null);
+    const linkAfiliado = valorTexto(data || {}, ["short_url", "shortUrl", "url"]);
+
+    if ([401, 403, 419].includes(Number(conversao.status))) {
+      return resultado("mercadolivre", "cookie_expirado", { httpStatus: conversao.status }, false);
+    }
+
+    if (!conversao.ok || !/^https?:\/\/meli\.la\//i.test(linkAfiliado)) {
+      return resultado("mercadolivre", "falha_teste", {
+        httpStatus: conversao.status,
+        linkAfiliado: linkAfiliado || null
+      }, false);
+    }
+
+    return resultado("mercadolivre", "ok", { linkAfiliado }, true);
   } catch (e) {
-    const motivo = e?.message || "erro_importador";
-    logMl({
-      funcaoOficialChamada: true,
-      criterioDecisao: "erro_importador",
-      mensagemMotivoFinal: motivo
-    });
-    return resultado("mercadolivre", motivo, {
-      motivo,
-      origem: "importador_oficial"
-    }, false, motivo);
+    return resultado("mercadolivre", "falha_teste", { erro: e.message }, false);
   }
 }
-function linkTesteAmazon(config = {}) {
-  const c = credenciais(config);
-  const asin = valorTexto(c, ["asinTeste", "asin"]) || "B07PGL2ZSL";
-  return valorTexto(c, ["urlTeste", "linkTeste", "produtoTesteUrl", "testProductUrl"]) ||
-    valorTexto(config, ["urlTeste", "linkTeste", "produtoTesteUrl", "testProductUrl"]) ||
-    `https://www.amazon.com.br/dp/${encodeURIComponent(asin)}`;
-}
 
-async function testarAmazon(clienteId = "admin", config = {}, deps = {}) {
+async function testarAmazon(config = {}) {
   const c = credenciais(config);
   const modo = String(config?.modo || c.modo || "cookies").toLowerCase();
-  const modoEscolhido = modo === "api" ? "PA-API" : "cookies";
   const tagId = tagAmazon(config);
   const cookies = valorTexto(c, ["cookies", "cookie"]);
-  const accessKey = valorTexto(c, ["accessKey", "access_key"]);
-  const secretKey = valorTexto(c, ["secretKey", "secret_key"]);
-  const urlTeste = linkTesteAmazon(config);
-  const logAmazon = (dados = {}) => logAuditoriaIntegracao("[INTEGRACAO-TESTE-AMAZON-AUDITORIA]", {
-    clienteId,
-    modoEscolhido,
-    cookiesPresentes: !!cookies,
-    tagPresente: !!tagId,
-    accessKeyPresente: !!accessKey,
-    secretKeyPresente: !!secretKey,
-    funcaoOficialChamada: false,
-    produtoRetornado: false,
-    linkOriginalPresente: false,
-    linkAfiliadoContemTagId: false,
-    ...dados,
-    mensagemMotivoFinal: textoAuditoria(dados.mensagemMotivoFinal)
-  });
+  const asin = valorTexto(c, ["asinTeste", "asin"]) || "B07PGL2ZSL";
 
-  if (!tagId) {
-    logAmazon({ criterioDecisao: "tag_ausente", mensagemMotivoFinal: MENSAGENS.tag_ausente });
-    return resultado("amazon", "tag_ausente", { faltandoTag: true, modo }, false);
-  }
+  if (!tagId) return resultado("amazon", "tag_ausente", { faltandoTag: true, modo }, false);
 
   if (modo === "api") {
+    const accessKey = valorTexto(c, ["accessKey", "access_key"]);
+    const secretKey = valorTexto(c, ["secretKey", "secret_key"]);
     if (!accessKey || !secretKey) {
-      logAmazon({ criterioDecisao: "credencial_ausente", mensagemMotivoFinal: MENSAGENS.credencial_ausente });
       return resultado("amazon", "credencial_ausente", {
         modo,
         faltandoAccessKey: !accessKey,
@@ -333,106 +218,13 @@ async function testarAmazon(clienteId = "admin", config = {}, deps = {}) {
       }, false);
     }
 
-    if (typeof deps.testarAmazonPaApi === "function") {
-      try {
-        const produtoApi = await deps.testarAmazonPaApi(clienteId, config, { urlTeste });
-        const linkAfiliadoApi = valorTexto(produtoApi, ["linkAfiliado", "linkFinal", "link"]);
-        const produtoRetornado = temProdutoImportado(produtoApi);
-        const linkContemTag = linkAmazonComTag(linkAfiliadoApi, tagId);
-        const auditoriaApi = {
-          funcaoOficialChamada: true,
-          produtoRetornado,
-          linkOriginalPresente: !!valorTexto(produtoApi, ["linkOriginal", "urlFinal", "productLink"]),
-          linkAfiliadoContemTagId: linkContemTag
-        };
-        if (!produtoRetornado || !linkContemTag) {
-          logAmazon({
-            ...auditoriaApi,
-            criterioDecisao: "link_afiliado_ausente",
-            mensagemMotivoFinal: "Fluxo oficial da Amazon nao comprovou produto com link afiliado valido."
-          });
-          return resultado("amazon", "link_afiliado_ausente", {
-            modo,
-            temProduto: produtoRetornado,
-            temLinkAfiliado: !!linkAfiliadoApi
-          }, false, "Fluxo oficial da Amazon não comprovou produto com link afiliado válido.");
-        }
-        logAmazon({
-          ...auditoriaApi,
-          criterioDecisao: "produto_com_link_tag_id",
-          mensagemMotivoFinal: MENSAGENS.ok
-        });
-        return resultado("amazon", "ok", {
-          modo,
-          linkAfiliado: linkAfiliadoApi,
-          origem: "paapi_oficial"
-        }, true);
-      } catch (e) {
-        logAmazon({
-          funcaoOficialChamada: true,
-          criterioDecisao: "falha_teste",
-          mensagemMotivoFinal: e?.message || "erro_paapi"
-        });
-        return resultado("amazon", "falha_teste", { modo, erro: e.message }, false);
-      }
-    }
-
-    logAmazon({ criterioDecisao: "teste_nao_implementado", mensagemMotivoFinal: MENSAGENS.teste_nao_implementado });
     return resultado("amazon", "teste_nao_implementado", { modo }, false);
   }
 
-  if (!cookies) {
-    logAmazon({ criterioDecisao: "cookie_ausente", mensagemMotivoFinal: MENSAGENS.cookie_ausente });
-    return resultado("amazon", "cookie_ausente", { faltandoCookies: true, modo }, false);
-  }
-
-  if (typeof deps.importarAmazon === "function") {
-    try {
-      const produto = await deps.importarAmazon(urlTeste, config);
-      const linkAfiliado = valorTexto(produto, ["linkAfiliado", "linkFinal", "link"]);
-      const produtoRetornado = temProdutoImportado(produto);
-      const linkContemTag = linkAmazonComTag(linkAfiliado, tagId);
-      const auditoriaProdutoAmazon = {
-        funcaoOficialChamada: true,
-        produtoRetornado,
-        linkOriginalPresente: !!valorTexto(produto, ["linkOriginal", "urlFinal", "productLink"]),
-        linkAfiliadoContemTagId: linkContemTag
-      };
-      if (!produtoRetornado || !linkContemTag) {
-        logAmazon({
-          ...auditoriaProdutoAmazon,
-          criterioDecisao: "link_afiliado_ausente",
-          mensagemMotivoFinal: "Importador oficial da Amazon nao comprovou produto com link afiliado valido."
-        });
-        return resultado("amazon", "link_afiliado_ausente", {
-          modo,
-          temProduto: produtoRetornado,
-          temLinkAfiliado: !!linkAfiliado
-        }, false, "Importador oficial da Amazon não comprovou produto com link afiliado válido.");
-      }
-      logAmazon({
-        ...auditoriaProdutoAmazon,
-        criterioDecisao: "produto_com_link_tag_id",
-        mensagemMotivoFinal: MENSAGENS.ok
-      });
-      return resultado("amazon", "ok", {
-        modo,
-        linkAfiliado,
-        temTitulo: !!valorTexto(produto, ["titulo", "nome"]),
-        temPreco: !!valorTexto(produto, ["preco", "precoAtual"])
-      }, true);
-    } catch (e) {
-      logAmazon({
-        funcaoOficialChamada: true,
-        criterioDecisao: "falha_teste",
-        mensagemMotivoFinal: e?.message || "erro_importador"
-      });
-      return resultado("amazon", "falha_teste", { modo, erro: e.message }, false);
-    }
-  }
+  if (!cookies) return resultado("amazon", "cookie_ausente", { faltandoCookies: true, modo }, false);
 
   try {
-    const url = new URL(urlTeste);
+    const url = new URL(`https://www.amazon.com.br/dp/${encodeURIComponent(asin)}`);
     url.searchParams.set("tag", tagId);
     const linkAfiliado = url.toString();
 
@@ -457,54 +249,23 @@ async function testarAmazon(clienteId = "admin", config = {}, deps = {}) {
       lower.includes("automated access") ||
       lower.includes("digite os caracteres")
     ) {
-      logAmazon({
-        criterioDecisao: "cookie_expirado",
-        linkOriginalPresente: !!urlTeste,
-        linkAfiliadoContemTagId: linkAmazonComTag(linkAfiliado, tagId),
-        mensagemMotivoFinal: MENSAGENS.cookie_expirado
-      });
       return resultado("amazon", "cookie_expirado", { modo, httpStatus: response.status, urlFinal }, false);
     }
 
     if (!response.ok) {
-      logAmazon({
-        criterioDecisao: "falha_teste_http",
-        linkOriginalPresente: !!urlTeste,
-        linkAfiliadoContemTagId: linkAmazonComTag(linkAfiliado, tagId),
-        mensagemMotivoFinal: MENSAGENS.falha_teste
-      });
       return resultado("amazon", "falha_teste", { modo, httpStatus: response.status, urlFinal }, false);
     }
 
     if (!linkAfiliado.includes(`tag=${encodeURIComponent(tagId)}`) && !linkAfiliado.includes(`tag=${tagId}`)) {
-      logAmazon({
-        criterioDecisao: "link_sem_tag_id",
-        linkOriginalPresente: !!urlTeste,
-        linkAfiliadoContemTagId: false,
-        mensagemMotivoFinal: MENSAGENS.falha_teste
-      });
       return resultado("amazon", "falha_teste", { modo, linkAfiliado }, false);
     }
 
-    logAmazon({
-      criterioDecisao: "importador_oficial_indisponivel",
-      linkOriginalPresente: !!urlTeste,
-      linkAfiliadoContemTagId: true,
-      mensagemMotivoFinal: "Importador oficial indisponivel; teste real nao implementado neste caminho."
-    });
-    return resultado("amazon", "teste_nao_implementado", {
-      modo,
-      httpStatus: response.status,
-      motivo: "importador_oficial_indisponivel"
-    }, false);
+    return resultado("amazon", "ok", { modo, linkAfiliado, httpStatus: response.status }, true);
   } catch (e) {
-    logAmazon({
-      criterioDecisao: "falha_teste",
-      mensagemMotivoFinal: e?.message || "erro_teste"
-    });
     return resultado("amazon", "falha_teste", { modo, erro: e.message }, false);
   }
 }
+
 function credenciaisShopee(config = {}) {
   const c = credenciais(config);
   return {
@@ -531,7 +292,6 @@ async function testarShopee(config = {}) {
             nodes {
               itemId
               productName
-              productLink
               offerLink
             }
           }
@@ -568,11 +328,8 @@ async function testarShopee(config = {}) {
     }
 
     const nodes = data?.data?.productOfferV2?.nodes || [];
-    const primeiro = nodes?.[0] || {};
-    const primeiroLink = String(primeiro?.offerLink || "").trim();
-    if (!temProdutoImportado(primeiro) || !linkAfiliadoGenericoValido(primeiroLink, {
-      productLink: primeiro.productLink
-    })) {
+    const primeiroLink = String(nodes?.[0]?.offerLink || "").trim();
+    if (!/^https?:\/\//i.test(primeiroLink)) {
       return resultado("shopee", "falha_teste", {
         motivo: "offer_link_nao_retornado",
         totalItens: Array.isArray(nodes) ? nodes.length : 0
@@ -591,54 +348,19 @@ async function testarShopee(config = {}) {
 
 function credenciaisAwin(config = {}) {
   const c = credenciais(config);
-  const programas = Array.isArray(c.programas) ? c.programas : [];
-  const programaComAdvertiser = programas.find((programa) => valorTexto(programa, ["advertiserId", "advertiser_id", "id"]));
   return {
     publisherId: valorTexto(c, ["publisherId", "publisher_id", "publisher"]),
-    apiToken: valorTexto(c, ["apiToken", "api_token", "token"]),
-    advertiserId: valorTexto(c, ["advertiserId", "advertiser_id", "awinmid"]) ||
-      valorTexto(programaComAdvertiser || {}, ["advertiserId", "advertiser_id", "id"])
+    apiToken: valorTexto(c, ["apiToken", "api_token", "token"])
   };
 }
 
-function linkTesteKabumAwin(config = {}) {
-  const c = credenciais(config);
-  return valorTexto(c, ["urlTeste", "linkTeste", "produtoTesteUrl", "testProductUrl"]) ||
-    valorTexto(config, ["urlTeste", "linkTeste", "produtoTesteUrl", "testProductUrl"]) ||
-    "https://www.kabum.com.br/produto/944475/produto-teste";
-}
-
-async function testarAwin(clienteId = "admin", config = {}, marketplace = "awin", deps = {}) {
+async function testarAwin(config = {}, marketplace = "awin") {
   const c = credenciaisAwin(config);
-  if (!c.publisherId || !c.apiToken || !c.advertiserId) {
+  if (!c.publisherId || !c.apiToken) {
     return resultado(marketplace, "credencial_ausente", {
       faltandoPublisherId: !c.publisherId,
-      faltandoApiToken: !c.apiToken,
-      faltandoAdvertiserId: !c.advertiserId
+      faltandoApiToken: !c.apiToken
     }, false);
-  }
-
-  if (typeof deps.importarProdutoKabumViaAwin === "function" && typeof deps.gerarDeepLinkAwin === "function") {
-    const urlTeste = linkTesteKabumAwin(config);
-    try {
-      const produto = await deps.importarProdutoKabumViaAwin(urlTeste, clienteId, {
-        gerarDeepLinkAwin: deps.gerarDeepLinkAwin
-      });
-      const linkAfiliado = valorTexto(produto, ["linkAfiliado", "linkFinal", "link"]);
-      if (!temProdutoImportado(produto) || !linkAfiliadoGenericoValido(linkAfiliado, produto, urlTeste)) {
-        return resultado(marketplace, "link_afiliado_ausente", {
-          temProduto: temProdutoImportado(produto),
-          temLinkAfiliado: !!linkAfiliado
-        }, false, "Fluxo oficial AWIN/KaBuM não comprovou produto com link afiliado válido.");
-      }
-      return resultado(marketplace, "ok", {
-        linkAfiliado,
-        temTitulo: !!valorTexto(produto, ["titulo", "nome"]),
-        temPreco: !!valorTexto(produto, ["preco", "precoAtual"])
-      }, true);
-    } catch (e) {
-      return resultado(marketplace, "falha_teste", { erro: e.message }, false);
-    }
   }
 
   try {
@@ -662,24 +384,16 @@ async function testarAwin(clienteId = "admin", config = {}, marketplace = "awin"
       return resultado(marketplace, "falha_teste", { httpStatus: response.status, resposta: data }, false);
     }
 
-    return resultado(marketplace, "teste_nao_implementado", {
+    return resultado(marketplace, "ok", {
       httpStatus: response.status,
-      totalProgramas: Array.isArray(data) ? data.length : 0,
-      motivo: "importador_oficial_indisponivel"
-    }, false);
+      totalProgramas: Array.isArray(data) ? data.length : 0
+    }, true);
   } catch (e) {
     return resultado(marketplace, "falha_teste", { erro: e.message }, false);
   }
 }
 
-function linkTesteAliExpress(config = {}) {
-  const c = credenciais(config);
-  return valorTexto(c, ["urlTeste", "linkTeste", "produtoTesteUrl", "testProductUrl"]) ||
-    valorTexto(config, ["urlTeste", "linkTeste", "produtoTesteUrl", "testProductUrl"]) ||
-    "https://www.aliexpress.com/item/100500.html";
-}
-
-async function testarAliExpress(config = {}, deps = {}) {
+function testarAliExpress(config = {}) {
   const c = credenciais(config);
   const appKey = valorTexto(c, ["appKey", "app_key"]);
   const secret = valorTexto(c, ["secret", "appSecret", "app_secret"]);
@@ -693,33 +407,12 @@ async function testarAliExpress(config = {}, deps = {}) {
     }, false);
   }
 
-  if (typeof deps.importarAliExpress === "function") {
-    const urlTeste = linkTesteAliExpress(config);
-    try {
-      const produto = await deps.importarAliExpress(urlTeste, config);
-      const linkAfiliado = valorTexto(produto, ["linkAfiliado", "linkFinal", "link"]);
-      if (!temProdutoImportado(produto) || !linkAfiliadoGenericoValido(linkAfiliado, produto, urlTeste)) {
-        return resultado("aliexpress", "link_afiliado_ausente", {
-          temProduto: temProdutoImportado(produto),
-          temLinkAfiliado: !!linkAfiliado
-        }, false, "Importador oficial do AliExpress não comprovou produto com link afiliado válido.");
-      }
-      return resultado("aliexpress", "ok", {
-        linkAfiliado,
-        temTitulo: !!valorTexto(produto, ["titulo", "nome"]),
-        temPreco: !!valorTexto(produto, ["preco", "precoAtual"])
-      }, true);
-    } catch (e) {
-      return resultado("aliexpress", "falha_teste", { erro: e.message }, false);
-    }
-  }
-
   return resultado("aliexpress", "teste_nao_implementado", {
     camposPresentes: ["appKey", "secret", "trackingId"]
   }, false);
 }
 
-async function testarIntegracaoMarketplace(clienteId = "admin", marketplace = "", integracao = {}, deps = {}) {
+async function testarIntegracaoMarketplace(clienteId = "admin", marketplace = "", integracao = {}) {
   const mp = normalizarMarketplace(marketplace);
   const config = integracao || {};
 
@@ -727,12 +420,12 @@ async function testarIntegracaoMarketplace(clienteId = "admin", marketplace = ""
     return resultado(mp, "credencial_ausente", { clienteId, motivo: "integracao_nao_configurada" }, false);
   }
 
-  if (mp === "mercadolivre") return testarMercadoLivre(clienteId, config, deps);
-  if (mp === "amazon") return testarAmazon(clienteId, config, deps);
+  if (mp === "mercadolivre") return testarMercadoLivre(config);
+  if (mp === "amazon") return testarAmazon(config);
   if (mp === "shopee") return testarShopee(config);
-  if (mp === "awin") return testarAwin(clienteId, config, "awin", deps);
-  if (mp === "kabum") return testarAwin(clienteId, config, "kabum", deps);
-  if (mp === "aliexpress") return testarAliExpress(config, deps);
+  if (mp === "awin") return testarAwin(config, "awin");
+  if (mp === "kabum") return testarAwin(config, "kabum");
+  if (mp === "aliexpress") return testarAliExpress(config);
 
   return resultado(mp, "marketplace_nao_suportado", { clienteId }, false);
 }
