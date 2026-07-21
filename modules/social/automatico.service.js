@@ -56,7 +56,7 @@ function inicioDia(data = new Date()) {
 }
 
 function chaveDia(data = new Date()) {
-  return inicioDia(data).toISOString().slice(0, 10);
+  return storage.chaveDiaOperacionalSocial(data, TIMEZONE_SOCIAL_PADRAO);
 }
 
 function dataNoDia(data = new Date(), minutos = 0) {
@@ -191,7 +191,7 @@ function agendamentosAutomaticosNoDia(agendamentos = [], agora = new Date()) {
   return agendamentos.filter(item =>
     texto(item.origem) === "automatico" &&
     agendamentoAtivo(item) &&
-    texto(item.agendadoPara || item.horario).startsWith(dia)
+    chaveDia(item.agendadoPara || item.horario) === dia
   );
 }
 
@@ -205,7 +205,7 @@ function agendamentosAutomaticosOcupamDia(agendamentos = [], agora = new Date())
   const dia = chaveDia(agora);
   return agendamentos.filter(item =>
     ocupaLimiteDiarioAutomatico(item) &&
-    texto(item.agendadoPara || item.horario).startsWith(dia)
+    chaveDia(item.agendadoPara || item.horario) === dia
   );
 }
 

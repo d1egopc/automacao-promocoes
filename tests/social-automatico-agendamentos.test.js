@@ -991,6 +991,105 @@ function horaSaoPaulo(input) {
     "janela 07:00-02:00 atravessa a meia-noite local"
   );
 
+  assert.strictEqual(
+    storage.chaveDiaOperacionalSocial("2026-07-21T00:46:00.000Z"),
+    "2026-07-20",
+    "21/07 00:46 UTC ainda pertence ao dia operacional 20/07 em Sao Paulo"
+  );
+  assert.strictEqual(
+    storage.chaveDiaOperacionalSocial("2026-07-21T03:02:00.000Z"),
+    "2026-07-21",
+    "21/07 03:02 UTC pertence ao dia operacional 21/07 em Sao Paulo"
+  );
+  assert.strictEqual(
+    storage.chaveDiaOperacionalSocial("2026-07-21T15:00:00.000Z"),
+    "2026-07-21",
+    "data comum durante o dia permanece no mesmo dia operacional"
+  );
+
+  const clienteDiaOperacional = "cliente_dia_operacional_sp";
+  conectar(clienteDiaOperacional, "dia_operacional_sp");
+  writeClienteJson(clienteDiaOperacional, "social-agendamentos.json", [
+    {
+      id: "auto_noite_1",
+      origem: "automatico",
+      status: "publicada",
+      ativo: true,
+      ofertaId: "auto_noite_1",
+      agendadoPara: "2026-07-21T00:46:00.000Z"
+    },
+    {
+      id: "auto_noite_2",
+      origem: "automatico",
+      status: "publicada",
+      ativo: true,
+      ofertaId: "auto_noite_2",
+      agendadoPara: "2026-07-21T01:31:00.000Z"
+    },
+    {
+      id: "auto_noite_3",
+      origem: "automatico",
+      status: "publicada",
+      ativo: true,
+      ofertaId: "auto_noite_3",
+      agendadoPara: "2026-07-21T02:16:00.000Z"
+    },
+    {
+      id: "auto_dia_1",
+      origem: "automatico",
+      status: "publicada",
+      ativo: true,
+      ofertaId: "auto_dia_1",
+      agendadoPara: "2026-07-21T03:02:00.000Z"
+    },
+    {
+      id: "auto_dia_2",
+      origem: "automatico",
+      status: "publicada",
+      ativo: true,
+      ofertaId: "auto_dia_2",
+      agendadoPara: dataSaoPauloUtc(2026, 7, 21, 8, 1).toISOString()
+    },
+    {
+      id: "auto_dia_3",
+      origem: "automatico",
+      status: "publicada",
+      ativo: true,
+      ofertaId: "auto_dia_3",
+      agendadoPara: dataSaoPauloUtc(2026, 7, 21, 8, 45).toISOString()
+    }
+  ]);
+  storage.setConfigAutomaticoSocial(clienteDiaOperacional, configAutomatico({
+    quantidadeDiaria: 6,
+    intervaloMinimoMinutos: 45,
+    idadeMaximaHoras: 48,
+    janelaFuncionamento: { inicio: "08:00", fim: "23:50" }
+  }));
+  writeClienteJson(clienteDiaOperacional, "fila.json", [0, 1, 2, 3, 4].map(i =>
+    oferta(`dia_operacional_nova_${i}`, {
+      score: 95 - i,
+      criadoEm: dataSaoPauloUtc(2026, 7, 21, 8, 50).toISOString()
+    })
+  ));
+  const rodadaDiaOperacional = await executarAutomaticoCliente({
+    clienteId: clienteDiaOperacional,
+    agora: dataSaoPauloUtc(2026, 7, 21, 9, 0)
+  });
+  assert.strictEqual(
+    rodadaDiaOperacional.agendamentosCriados.length,
+    3,
+    "apenas as 3 publicadas no dia civil 21/07 ocupam a cota; as 3 da noite de 20/07 nao ocupam"
+  );
+  assert.strictEqual(
+    storage.listarAgendamentosSocial(clienteDiaOperacional).filter(item =>
+      item.origem === "automatico" &&
+      ["agendada", "publicada"].includes(item.status) &&
+      storage.chaveDiaOperacionalSocial(item.agendadoPara || item.horario) === "2026-07-21"
+    ).length,
+    6,
+    "agendamento automatico publicado ocupa a cota do proprio dia operacional"
+  );
+
   console.log("social-automatico-agendamentos: ok");
 })().catch(erro => {
   console.error(erro);

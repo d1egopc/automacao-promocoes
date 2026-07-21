@@ -1398,10 +1398,28 @@ function getConfigAutomaticoSocial(clienteId = "admin") {
 }
 
 const STATUS_LIMITE_DIARIO_AUTOMATICO = new Set(["pendente", "agendada", "aguardando_aprovacao", "processando", "publicando", "publicada"]);
+const TIMEZONE_SOCIAL_PADRAO = "America/Sao_Paulo";
+
+function chaveDiaOperacionalSocial(data = new Date(), timezone = TIMEZONE_SOCIAL_PADRAO) {
+  const valor = data instanceof Date ? data : new Date(texto(data));
+  if (!Number.isFinite(valor.getTime())) return "";
+  const partes = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(valor);
+  const mapa = {};
+  for (const parte of partes) {
+    if (parte.type !== "literal") mapa[parte.type] = parte.value;
+  }
+  if (!mapa.year || !mapa.month || !mapa.day) return "";
+  return [mapa.year, mapa.month, mapa.day].join("-");
+}
 
 function chaveDiaAgendamentoSocial(agendamento = {}) {
   const valor = texto(agendamento.agendadoPara || agendamento.horario);
-  return /^\d{4}-\d{2}-\d{2}/.test(valor) ? valor.slice(0, 10) : "";
+  return chaveDiaOperacionalSocial(valor);
 }
 
 function ocupaLimiteAutomaticoSocial(agendamento = {}) {
@@ -1781,5 +1799,6 @@ module.exports = {
   limparConexaoMetaSocial,
   sanitizarConexaoMeta,
   resumirOfertaUniversal,
+  chaveDiaOperacionalSocial,
   listClientes
 };
