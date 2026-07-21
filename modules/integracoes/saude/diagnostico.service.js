@@ -37,6 +37,15 @@ function configConfigurada(marketplace = "", config = {}) {
     if (modo === "cookies") return Boolean(tag && cookies);
     return Boolean((tag && cookies) || api);
   }
+  if (mp === "shopee") {
+    return Boolean(valorTexto(c, ["appId", "app_id"]) && valorTexto(c, ["secret", "secretKey", "appSecret", "app_secret"]));
+  }
+  if (mp === "aliexpress") {
+    return Boolean(valorTexto(c, ["appKey", "app_key"]) && valorTexto(c, ["secret", "appSecret", "app_secret"]) && valorTexto(c, ["trackingId", "tracking_id"]));
+  }
+  if (mp === "awin" || mp === "kabum") {
+    return Boolean(valorTexto(c, ["publisherId", "publisher_id", "publisher"]) && valorTexto(c, ["apiToken", "api_token", "token"]));
+  }
   return false;
 }
 
@@ -60,7 +69,50 @@ function adaptarResultadoMarketplace(marketplace = "", resultado = {}) {
   const mp = normalizarMarketplaceSaude(marketplace || resultado.marketplace);
   if (mp === "amazon") return adaptarAmazon(resultado);
   if (mp === "mercadolivre") return adaptarMercadoLivre(resultado);
-  return null;
+  return adaptarResultadoGenerico(mp, resultado);
+}
+
+function statusCredencialInvalida(status = "") {
+  const valor = String(status || "").toLowerCase();
+  return /credencial|credential|cookie|token|secret|publisher|tag|api[_-]?key|app[_-]?key|unauthorized|unauthorised|forbidden|401|403|invalid|invalido|inv[aá]lido|expirad|ausente|rejeitad/.test(valor);
+}
+
+function adaptarResultadoGenerico(marketplace = "", resultado = {}) {
+  const mp = normalizarMarketplaceSaude(marketplace || resultado.marketplace);
+  const status = String(resultado.status || resultado.codigo || "").toLowerCase();
+  const detalhes = sanitizarDetalhes(resultado.detalhes || {}) || {};
+
+  if (resultado.ok === true || status === "ok") {
+    return {
+      marketplace: mp,
+      estado: "ok",
+      codigo: status || "ok",
+      mensagem: resultado.mensagem || "Fluxo oficial executado com sucesso.",
+      origem: resultado.origem || "fluxo_oficial",
+      detalhes
+    };
+  }
+
+  if (statusCredencialInvalida(status) || statusCredencialInvalida(resultado.mensagem)) {
+    return {
+      marketplace: mp,
+      estado: "invalida",
+      codigo: status || "credencial_invalida",
+      mensagem: resultado.mensagem || "Credenciais inválidas ou rejeitadas.",
+      origem: resultado.origem || "fluxo_oficial",
+      detalhes
+    };
+  }
+
+  return {
+    marketplace: mp,
+    estado: "ok",
+    codigo: status || "falha_temporaria",
+    mensagem: resultado.mensagem || "Falha temporária registrada pelo fluxo oficial.",
+    origem: resultado.origem || "fluxo_oficial",
+    falhaTemporaria: true,
+    detalhes
+  };
 }
 
 function obterSaudeIntegracao(clienteId = "admin", marketplace = "", config = null) {
@@ -73,12 +125,12 @@ function obterSaudeIntegracao(clienteId = "admin", marketplace = "", config = nu
     return publico({
       ...registro,
       configurada,
-      estado: !configurada ? "nao_configurada" : semHistorico ? "pendente" : registro.estado,
-      codigo: !configurada ? "credenciais_ausentes" : semHistorico ? "validacao_pendente" : registro.codigo,
+      estado: !configurada ? "nao_configurada" : semHistorico ? "ok" : registro.estado,
+      codigo: !configurada ? "credenciais_ausentes" : semHistorico ? "configurada" : registro.codigo,
       mensagem: !configurada
         ? "Credenciais obrigatórias ausentes."
         : semHistorico
-          ? "Credenciais salvas, teste real pendente."
+          ? "Integração configurada."
           : registro.mensagem
     }, mp);
   }
@@ -88,7 +140,7 @@ function obterSaudeIntegracao(clienteId = "admin", marketplace = "", config = nu
 function listarSaudeIntegracoes(clienteId = "admin", configs = {}) {
   const registros = lerSaudeIntegracoes(clienteId);
   const saida = {};
-  for (const marketplace of ["amazon", "mercadolivre"]) {
+  for (const marketplace of ["amazon", "mercadolivre", "shopee", "aliexpress", "awin", "kabum"]) {
     const config = configs?.[marketplace] || null;
     saida[marketplace] = obterSaudeIntegracao(clienteId, marketplace, config || null) || publico(registros[marketplace] || registroPadrao(marketplace), marketplace);
   }
@@ -116,6 +168,13 @@ function registrarResultadoTesteIntegracao(clienteId = "admin", marketplace = ""
   return publico(salvarSaudeMarketplace(clienteId, mp, registro), mp);
 }
 
+function registrarResultadoOperacionalIntegracao(clienteId = "admin", marketplace = "", resultado = {}) {
+  return registrarResultadoTesteIntegracao(clienteId, marketplace, {
+    ...resultado,
+    origem: resultado.origem || "producao"
+  });
+}
+
 module.exports = {
   normalizarMarketplaceSaude,
   marketplaceSuportadoSaude,
@@ -126,6 +185,7 @@ module.exports = {
   obterSaudeIntegracao,
   listarSaudeIntegracoes,
   registrarConfiguracaoIntegracao,
-  registrarResultadoTesteIntegracao
+  registrarResultadoTesteIntegracao,
+  registrarResultadoOperacionalIntegracao
 };
 

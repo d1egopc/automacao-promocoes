@@ -1,5 +1,5 @@
-﻿const ESTADOS_SAUDE = new Set(["nao_configurada", "pendente", "saudavel", "atencao", "invalida"]);
-const MARKETPLACES_SAUDE = new Set(["amazon", "mercadolivre"]);
+﻿const ESTADOS_SAUDE = new Set(["nao_configurada", "ok", "invalida"]);
+const MARKETPLACES_SAUDE = new Set(["amazon", "mercadolivre", "shopee", "aliexpress", "awin", "kabum"]);
 
 function agoraIso() {
   return new Date().toISOString();
@@ -25,9 +25,11 @@ function marketplaceSuportadoSaude(marketplace = "") {
   return MARKETPLACES_SAUDE.has(normalizarMarketplaceSaude(marketplace));
 }
 
-function estadoSeguro(estado = "pendente") {
+function estadoSeguro(estado = "ok") {
   const valor = texto(estado).toLowerCase();
-  return ESTADOS_SAUDE.has(valor) ? valor : "pendente";
+  if (valor === "saudavel") return "ok";
+  if (valor === "pendente" || valor === "atencao") return "ok";
+  return ESTADOS_SAUDE.has(valor) ? valor : "ok";
 }
 
 function sanitizarDetalhes(valor, profundidade = 0) {
@@ -109,11 +111,9 @@ function aplicarConfiguracao(registroAtual = {}, marketplace = "", opcoes = {}) 
   }
 
   if (!registro.ultimoTesteEm || hashMudou || registro.estado === "nao_configurada") {
-    registro.estado = "pendente";
-    registro.codigo = hashMudou ? "configuracao_alterada" : "validacao_pendente";
-    registro.mensagem = hashMudou
-      ? "Credenciais alteradas. Execute um teste real para validar novamente."
-      : "Credenciais salvas, teste real pendente.";
+    registro.estado = "ok";
+    registro.codigo = hashMudou ? "configuracao_alterada" : "configurada";
+    registro.mensagem = "Integração configurada.";
     registro.ultimoResultadoEm = agora;
   }
 
@@ -123,7 +123,10 @@ function aplicarConfiguracao(registroAtual = {}, marketplace = "", opcoes = {}) 
 function aplicarResultado(registroAtual = {}, marketplace = "", resultado = {}) {
   const agora = agoraIso();
   const registro = normalizarRegistro(registroAtual, marketplace || resultado.marketplace);
-  const estado = estadoSeguro(resultado.estado || "atencao");
+  const estadoAnterior = registro.estado;
+  const codigoAnterior = registro.codigo;
+  const mensagemAnterior = registro.mensagem;
+  const estado = estadoSeguro(resultado.estado || "ok");
   const codigo = texto(resultado.codigo || resultado.status || "falha_teste") || "falha_teste";
   const mensagem = texto(resultado.mensagem) || "Resultado de integração registrado.";
   const detalhes = sanitizarDetalhes(resultado.detalhes || {}) || {};
@@ -146,14 +149,26 @@ function aplicarResultado(registroAtual = {}, marketplace = "", resultado = {}) 
   registro.ultimoResultadoEm = agora;
   registro.detalhes = detalhes;
 
-  if (estado === "saudavel") {
+  if (estado === "ok" && resultado.falhaTemporaria !== true) {
     registro.ultimoSucessoEm = agora;
     registro.ultimoSucesso = resumo;
     registro.falhasConsecutivas = 0;
     return registro;
   }
 
-  if (["atencao", "invalida", "nao_configurada"].includes(estado)) {
+  if (resultado.falhaTemporaria === true) {
+    if (estadoAnterior === "invalida") {
+      registro.estado = "invalida";
+      registro.codigo = codigoAnterior || registro.codigo;
+      registro.mensagem = mensagemAnterior || registro.mensagem;
+    }
+    registro.ultimaFalhaEm = agora;
+    registro.ultimaFalha = resumo;
+    registro.falhasConsecutivas = Number(registro.falhasConsecutivas || 0) + 1;
+    return registro;
+  }
+
+  if (["invalida", "nao_configurada"].includes(estado)) {
     registro.ultimaFalhaEm = agora;
     registro.ultimaFalha = resumo;
     registro.falhasConsecutivas = Number(registro.falhasConsecutivas || 0) + 1;
@@ -180,3 +195,4 @@ module.exports = {
   aplicarResultado,
   publico
 };
+

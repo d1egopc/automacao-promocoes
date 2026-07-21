@@ -468,6 +468,47 @@ function normalizarRetornoFarejadorOrquestrador(retorno, marketplace = "", delta
   };
 }
 
+function motivoPareceCredencialIntegracao(motivo = "") {
+  return /credencial|credential|cookie|token|secret|publisher|tag|api[_-]?key|app[_-]?key|unauthorized|forbidden|401|403|invalid|invalido|inv[aá]lido|expirad|rejeitad/i
+    .test(String(motivo || ""));
+}
+
+function registrarEstadoOperacionalProducao(clienteId = "admin", marketplace = "", resumo = {}) {
+  try {
+    const adicionados = Number(resumo?.adicionados || 0);
+    const motivo = String(resumo?.principalMotivoZero || resumo?.statusHttpBusca || "").trim();
+
+    if (adicionados > 0) {
+      return saudeIntegracoes.registrarResultadoOperacionalIntegracao(clienteId, marketplace, {
+        ok: true,
+        status: "ok",
+        mensagem: "Fluxo oficial adicionou oferta em produção.",
+        detalhes: { adicionados }
+      });
+    }
+
+    if (!motivo || !motivoPareceCredencialIntegracao(motivo)) return null;
+
+    return saudeIntegracoes.registrarResultadoOperacionalIntegracao(clienteId, marketplace, {
+      ok: false,
+      status: motivo,
+      mensagem: "Fluxo oficial indicou problema de credenciais.",
+      detalhes: {
+        motivo,
+        statusHttpBusca: resumo?.statusHttpBusca || "",
+        adicionados
+      }
+    });
+  } catch (e) {
+    console.log("[INTEGRACAO-ESTADO-PRODUCAO-FALHA]", {
+      clienteId,
+      marketplace,
+      erro: e.message
+    });
+    return null;
+  }
+}
+
 function criarItemResumoClienteOrquestrador(clienteId = "admin", marketplace = "", saudeFila = {}) {
   return {
     clienteId,
@@ -16523,13 +16564,11 @@ const saude = saudeIntegracoes.registrarConfiguracaoIntegracao(
   integracoesPorCliente[clienteId][marketplace]
 );
 
-if (!saude) {
-  limparAlertaIntegracaoSeValida(
-    clienteId,
-    marketplace,
-    integracoesPorCliente[clienteId][marketplace]
-  );
-}
+limparAlertaIntegracaoSeValida(
+  clienteId,
+  marketplace,
+  integracoesPorCliente[clienteId][marketplace]
+);
 
 return res.json({
   ok: true,
@@ -21828,6 +21867,11 @@ resumoClienteOrquestrador.marketplaces[marketplace] = normalizarRetornoFarejador
   marketplace,
   deltaAbastecimentoCliente,
   Math.max(0, totalFilaClienteDepois - totalFilaClienteAntes)
+);
+registrarEstadoOperacionalProducao(
+  clienteId,
+  marketplaceIntegracao,
+  resumoClienteOrquestrador.marketplaces[marketplace]
 );
 clientesProcessadosRodada += 1;
 }

@@ -18,7 +18,7 @@ function adaptarAmazon(resultado = {}) {
   if (resultado.ok === true || status === "ok") {
     return {
       marketplace: "amazon",
-      estado: "saudavel",
+      estado: "ok",
       codigo: "produto_consultado",
       mensagem: resultado.mensagem || "Produto consultado com sucesso. Cookie e tag aceitos.",
       origem: "teste_manual",
@@ -41,12 +41,13 @@ function adaptarAmazon(resultado = {}) {
     const temporario = [403, 429, 503].includes(httpStatus) || erroPareceTimeout(resultado);
     return {
       marketplace: "amazon",
-      estado: temporario ? "atencao" : "invalida",
+      estado: temporario ? "ok" : "invalida",
       codigo: temporario ? "bloqueio_temporario" : "cookie_expirado",
       mensagem: resultado.mensagem || (temporario
         ? "Amazon retornou bloqueio temporário. Tente novamente mais tarde."
         : "Cookie expirado ou autenticação inválida."),
       origem: "teste_manual",
+      falhaTemporaria: temporario,
       detalhes
     };
   }
@@ -54,20 +55,22 @@ function adaptarAmazon(resultado = {}) {
   if (status === "teste_nao_implementado") {
     return {
       marketplace: "amazon",
-      estado: "atencao",
+      estado: "ok",
       codigo: "teste_nao_implementado",
       mensagem: resultado.mensagem || "Teste real ainda não implementado para este modo.",
       origem: "teste_manual",
+      falhaTemporaria: true,
       detalhes
     };
   }
 
   return {
     marketplace: "amazon",
-    estado: "atencao",
+    estado: "ok",
     codigo: erroPareceTimeout(resultado) ? "timeout" : (status || "falha_teste"),
-    mensagem: resultado.mensagem || "Não foi possível confirmar a saúde da Amazon agora.",
+    mensagem: resultado.mensagem || "Não foi possível confirmar a Amazon agora.",
     origem: "teste_manual",
+    falhaTemporaria: true,
     detalhes
   };
 }
