@@ -19,7 +19,7 @@ const ARQUIVOS = {
 };
 
 const REDES_SUPORTADAS = new Set(["instagram", "facebook", "telegram"]);
-const STATUS_PUBLICACAO = new Set(["rascunho", "agendada", "pendente", "aguardando_aprovacao", "processando", "publicando", "publicada", "concluida", "erro", "cancelada"]);
+const STATUS_PUBLICACAO = new Set(["rascunho", "agendada", "pendente", "aguardando_aprovacao", "processando", "publicando", "publicada", "erro", "cancelada"]);
 const ORIGENS_PUBLICACAO = new Set(["manual", "personalizada", "automatica", "automatico", "agendada"]);
 const TIPOS_PUBLICACAO = new Set(["oferta", "livre"]);
 const FORMATOS_PUBLICACAO = new Set(["feed", "reels"]);
@@ -43,7 +43,6 @@ const STATUS_INVALIDOS_OPORTUNIDADE = new Set([
   "descartado"
 ]);
 const STATUS_AGENDAMENTO_ATIVO_SOCIAL = new Set(["pendente", "agendada", "aguardando_aprovacao", "processando", "publicando"]);
-const STATUS_AGENDAMENTO_CONCLUIDO_LIMPAVEL = new Set(["publicada", "concluida", "cancelada"]);
 
 function agoraIso() {
   return new Date().toISOString();
@@ -388,7 +387,6 @@ function criarConfigAutomaticoPadrao(clienteId = "admin") {
     exigirCupom: false,
     permitirOfertaComum: true,
     limparAutomaticamenteOportunidadesAntigas: false,
-    limparConcluidosAutomaticamente: false,
     aprovacaoManual: false,
     evitarProdutoRepetidoDias: 30,
     gatilho: {
@@ -759,7 +757,6 @@ function normalizarConfigAutomatico(clienteId = "admin", config = {}) {
     exigirCupom: config.exigirCupom === true,
     permitirOfertaComum: config.permitirOfertaComum !== false,
     limparAutomaticamenteOportunidadesAntigas: config.limparAutomaticamenteOportunidadesAntigas === true,
-    limparConcluidosAutomaticamente: config.limparConcluidosAutomaticamente === true,
     aprovacaoManual: config.aprovacaoManual === true,
     evitarProdutoRepetidoDias: inteiro(config.evitarProdutoRepetidoDias, padrao.evitarProdutoRepetidoDias, 0, 365),
     gatilho: {
@@ -1005,75 +1002,6 @@ function limparAgendamentosSocial(clienteId = "admin", modoEntrada = "") {
   };
 }
 
-function dataReferenciaConclusaoAgendamento(agendamento = {}) {
-  const candidatos = [
-    agendamento.concluidoEm,
-    agendamento.publicadoEm,
-    agendamento.canceladoEm,
-    agendamento.atualizadoEm,
-    agendamento.criadoEm
-  ];
-  for (const candidato of candidatos) {
-    const ms = Date.parse(texto(candidato));
-    if (Number.isFinite(ms)) return ms;
-  }
-  return 0;
-}
-
-function agendamentoConcluidoLimpavel(agendamento = {}, { agoraMs = Date.now(), idadeMinimaMinutos = 0 } = {}) {
-  const status = texto(agendamento.status || "pendente").toLowerCase();
-  if (!STATUS_AGENDAMENTO_CONCLUIDO_LIMPAVEL.has(status)) return false;
-  if (idadeMinimaMinutos <= 0) return true;
-  const referenciaMs = dataReferenciaConclusaoAgendamento(agendamento);
-  if (!referenciaMs) return false;
-  return agoraMs - referenciaMs >= idadeMinimaMinutos * 60 * 1000;
-}
-
-function contarStatusAgendamentos(itens = []) {
-  return lista(itens).reduce((acc, item) => {
-    const status = texto(item.status || "pendente").toLowerCase() || "pendente";
-    acc[status] = (acc[status] || 0) + 1;
-    return acc;
-  }, {});
-}
-
-function limparAgendamentosConcluidosSocial(clienteId = "admin", opcoes = {}) {
-  const idadeMinimaMinutos = Math.max(0, Number(opcoes.idadeMinimaMinutos || 0) || 0);
-  const agoraMs = Number.isFinite(Number(opcoes.agoraMs)) ? Number(opcoes.agoraMs) : Date.now();
-  const atuais = lista(lerCliente(clienteId, "agendamentos", []));
-  const removidos = [];
-  const mantidos = [];
-
-  for (const agendamento of atuais) {
-    if (agendamentoConcluidoLimpavel(agendamento, { agoraMs, idadeMinimaMinutos })) {
-      removidos.push(agendamento);
-    } else {
-      mantidos.push(agendamento);
-    }
-  }
-
-  if (removidos.length > 0) {
-    escreverCliente(clienteId, "agendamentos", mantidos);
-  }
-
-  const removidosPorStatus = contarStatusAgendamentos(removidos);
-  logSocial("[SOCIAL-AGENDAMENTOS-CONCLUIDOS-LIMPEZA]", {
-    clienteId,
-    removidos: removidos.length,
-    restantes: mantidos.length,
-    removidosPorStatus,
-    idadeMinimaMinutos,
-    automatico: opcoes.automatico === true
-  });
-
-  return {
-    totalAntes: atuais.length,
-    removidos: removidos.length,
-    restantes: mantidos.length,
-    removidosPorStatus
-  };
-}
-
 function listarPublicacoesSocial(clienteId = "admin", limite = 100) {
   return lista(lerCliente(clienteId, "publicacoes", []))
     .map((item, index) => normalizarPublicacao(clienteId, item, index))
@@ -1099,44 +1027,6 @@ function registrarPublicacaoSocial(clienteId = "admin", dados = {}) {
     motivo: publicacao.motivo
   });
   return publicacao;
-}
-
-function removerPublicacaoSocial(clienteId = "admin", id = "") {
-  const idSeguro = texto(id);
-  const atuais = lista(lerCliente(clienteId, "publicacoes", []));
-  const mantidas = atuais.filter(item => texto(item?.id) !== idSeguro);
-  const removidos = atuais.length - mantidas.length;
-
-  if (removidos > 0) escreverCliente(clienteId, "publicacoes", mantidas);
-  logSocial("[SOCIAL-PUBLICACAO-REMOVIDA]", {
-    clienteId,
-    id: idSeguro,
-    removidos,
-    restantes: mantidas.length
-  });
-
-  return {
-    id: idSeguro,
-    totalAntes: atuais.length,
-    removidos,
-    restantes: mantidas.length
-  };
-}
-
-function limparPublicacoesSocial(clienteId = "admin") {
-  const atuais = lista(lerCliente(clienteId, "publicacoes", []));
-  escreverCliente(clienteId, "publicacoes", []);
-  logSocial("[SOCIAL-PUBLICACOES-LIMPEZA]", {
-    clienteId,
-    removidos: atuais.length,
-    restantes: 0
-  });
-
-  return {
-    totalAntes: atuais.length,
-    removidos: atuais.length,
-    restantes: 0
-  };
 }
 
 function normalizarControleOportunidadesSocial(clienteId = "admin", dados = {}) {
@@ -1398,28 +1288,10 @@ function getConfigAutomaticoSocial(clienteId = "admin") {
 }
 
 const STATUS_LIMITE_DIARIO_AUTOMATICO = new Set(["pendente", "agendada", "aguardando_aprovacao", "processando", "publicando", "publicada"]);
-const TIMEZONE_SOCIAL_PADRAO = "America/Sao_Paulo";
-
-function chaveDiaOperacionalSocial(data = new Date(), timezone = TIMEZONE_SOCIAL_PADRAO) {
-  const valor = data instanceof Date ? data : new Date(texto(data));
-  if (!Number.isFinite(valor.getTime())) return "";
-  const partes = new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(valor);
-  const mapa = {};
-  for (const parte of partes) {
-    if (parte.type !== "literal") mapa[parte.type] = parte.value;
-  }
-  if (!mapa.year || !mapa.month || !mapa.day) return "";
-  return [mapa.year, mapa.month, mapa.day].join("-");
-}
 
 function chaveDiaAgendamentoSocial(agendamento = {}) {
   const valor = texto(agendamento.agendadoPara || agendamento.horario);
-  return chaveDiaOperacionalSocial(valor);
+  return /^\d{4}-\d{2}-\d{2}/.test(valor) ? valor.slice(0, 10) : "";
 }
 
 function ocupaLimiteAutomaticoSocial(agendamento = {}) {
@@ -1781,14 +1653,11 @@ module.exports = {
   getAgendamentoSocial,
   removerAgendamentoSocial,
   limparAgendamentosSocial,
-  limparAgendamentosConcluidosSocial,
   criarConfigAutomaticoPadrao,
   getConfigAutomaticoSocial,
   setConfigAutomaticoSocial,
   listarPublicacoesSocial,
   registrarPublicacaoSocial,
-  removerPublicacaoSocial,
-  limparPublicacoesSocial,
   listarOportunidadesSocial,
   validarOportunidadeSocialManual,
   limparOportunidadesSocial,
@@ -1799,6 +1668,5 @@ module.exports = {
   limparConexaoMetaSocial,
   sanitizarConexaoMeta,
   resumirOfertaUniversal,
-  chaveDiaOperacionalSocial,
   listClientes
 };
