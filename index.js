@@ -475,6 +475,9 @@ function motivoPareceCredencialIntegracao(motivo = "") {
 
 function registrarEstadoOperacionalProducao(clienteId = "admin", marketplace = "", resumo = {}) {
   try {
+    const mp = normalizarMarketplaceIntegracao(marketplace || "");
+    if (mp === "mercadolivre") return null;
+
     const adicionados = Number(resumo?.adicionados || 0);
     const motivo = String(resumo?.principalMotivoZero || resumo?.statusHttpBusca || "").trim();
 
@@ -15595,6 +15598,102 @@ function salvarResultadoTesteIntegracao(clienteId = "admin", marketplace = "", r
   return integracoesPorCliente[clienteId][mp];
 }
 
+function normalizarUrlComparacaoIntegracao(valor = "") {
+  const texto = String(valor || "").trim();
+  if (!texto) return "";
+  try {
+    const url = new URL(texto);
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch (_) {
+    return texto.replace(/\/$/, "");
+  }
+}
+
+function linkConvertidoMercadoLivreValido(urlOriginal = "", linkConvertido = "") {
+  const original = normalizarUrlComparacaoIntegracao(urlOriginal);
+  const convertido = normalizarUrlComparacaoIntegracao(linkConvertido);
+  if (!original || !convertido) return false;
+  if (original === convertido) return false;
+  if (!/^https?:\/\//i.test(linkConvertido)) return false;
+  try {
+    const url = new URL(linkConvertido);
+    const host = url.hostname.toLowerCase();
+    const path = url.pathname.toLowerCase();
+    return host === "meli.la" ||
+      host.endsWith(".meli.la") ||
+      (host.endsWith("mercadolivre.com.br") && path.startsWith("/social/"));
+  } catch (_) {
+    return false;
+  }
+}
+
+function salvarEstadoMercadoLivreIntegracao(clienteId = "admin", estado = "invalido", dados = {}) {
+  integracoesPorCliente[clienteId] = integracoesPorCliente[clienteId] || {};
+  const atual = integracoesPorCliente[clienteId].mercadolivre || {
+    marketplace: "mercadolivre",
+    nome: marketplaceRules?.mercadolivre?.nome || "Mercado Livre",
+    credenciais: {}
+  };
+  const agora = new Date().toISOString();
+  const status = estado === "ok" ? "ok" : "invalido";
+
+  integracoesPorCliente[clienteId].mercadolivre = {
+    ...atual,
+    marketplace: "mercadolivre",
+    nome: atual.nome || marketplaceRules?.mercadolivre?.nome || "Mercado Livre",
+    ...(dados.credenciais ? { credenciais: dados.credenciais } : {}),
+    status,
+    ultimoStatus: status,
+    ultimaMensagem: dados.mensagem || (status === "ok"
+      ? "Cookie funcionando! URL convertida."
+      : "Não foi possível converter o link."),
+    ultimoTesteEm: agora,
+    atualizadoEm: agora,
+    ultimaUrlConvertida: status === "ok" && dados.urlConvertida ? dados.urlConvertida : null
+  };
+
+  salvarIntegracoesPersistidas();
+  return integracoesPorCliente[clienteId].mercadolivre;
+}
+
+function modoAmazonConfiguracao(config = {}) {
+  const credenciais = config?.credenciais || config || {};
+  const modo = String(config?.modo || credenciais?.modo || "").toLowerCase();
+  if (modo) return modo;
+  if (credenciais.accessKey && credenciais.secretKey && credenciais.appId) return "api";
+  return "cookies";
+}
+
+function salvarEstadoAmazonCookiesIntegracao(clienteId = "admin", estado = "nao_validado", dados = {}) {
+  integracoesPorCliente[clienteId] = integracoesPorCliente[clienteId] || {};
+  const atual = integracoesPorCliente[clienteId].amazon || {
+    marketplace: "amazon",
+    nome: marketplaceRules?.amazon?.nome || "Amazon",
+    modo: "cookies",
+    credenciais: {}
+  };
+  const agora = new Date().toISOString();
+  const status = estado === "invalido" ? "invalido" : "nao_validado";
+
+  integracoesPorCliente[clienteId].amazon = {
+    ...atual,
+    marketplace: "amazon",
+    nome: atual.nome || marketplaceRules?.amazon?.nome || "Amazon",
+    modo: "cookies",
+    ...(dados.credenciais ? { credenciais: dados.credenciais } : {}),
+    status,
+    ultimoStatus: status,
+    ultimaMensagem: dados.mensagem || "Amazon Cookies ainda não tem validação autenticada oficial.",
+    ultimoTesteEm: agora,
+    atualizadoEm: agora,
+    ultimaUrlConvertida: null
+  };
+
+  salvarIntegracoesPersistidas();
+  return integracoesPorCliente[clienteId].amazon;
+}
+
 function extrairTagAmazonIntegracao(config = {}) {
   const credenciais = config?.credenciais || {};
   return String(
@@ -15630,7 +15729,7 @@ function normalizarStatusSalvoIntegracao(marketplace = "", status = "") {
   if (mp === "mercadolivre" && valor === "tag_invalida") return "falha_conversao";
   if (mp === "amazon" && ["configuracao_invalida", "tag_invalida", "falha_geracao_link"].includes(valor)) return "falha_conversao";
 
-  if (["ok", "teste_pendente", "nao_configurado", "cookies_invalidos", "falha_conversao"].includes(valor)) return valor;
+  if (["ok", "invalido", "teste_pendente", "nao_configurado", "cookies_invalidos", "falha_conversao"].includes(valor)) return valor;
 
   return valor || "teste_pendente";
 }
@@ -15640,6 +15739,7 @@ function normalizarMensagemStatusIntegracao(marketplace = "", status = "", mensa
   const statusNormalizado = normalizarStatusSalvoIntegracao(mp, status);
 
   if (statusNormalizado === "ok") return MENSAGEM_TESTE_OK;
+  if (statusNormalizado === "invalido") return mensagem || "Não foi possível converter o link.";
   if (statusNormalizado === "teste_pendente") return MENSAGEM_TESTE_PENDENTE;
   if (statusNormalizado === "cookies_invalidos") return MENSAGEM_COOKIES_INVALIDOS;
   if (statusNormalizado === "nao_configurado") return mp === "mercadolivre"
@@ -16468,10 +16568,6 @@ app.get("/integracoes", (req, res) => {
         ? credenciais
         : mascararIntegracao(credenciais);
 
-    const saude = saudeIntegracoes.marketplaceSuportadoSaude(marketplace)
-      ? saudeIntegracoes.obterSaudeIntegracao(clienteId, marketplace, config)
-      : null;
-
     resposta[marketplace] = {
       marketplace,
       nome: marketplaceRules?.[marketplace]?.nome || marketplace,
@@ -16482,6 +16578,10 @@ app.get("/integracoes", (req, res) => {
       camposConfigurados,
       credenciais: credenciaisResposta,
       atualizadoEm: config?.atualizadoEm || null,
+      ultimoStatus: config?.ultimoStatus || null,
+      ultimaMensagem: config?.ultimaMensagem || null,
+      ultimoTesteEm: config?.ultimoTesteEm || null,
+      ultimaUrlConvertida: config?.ultimaUrlConvertida || null,
       configuracao: {
         configurado,
         status: configurado
@@ -16489,8 +16589,7 @@ app.get("/integracoes", (req, res) => {
           : "incompleto",
         camposConfigurados,
         atualizadoEm: config?.atualizadoEm || null
-      },
-      ...(saude ? { saude } : {})
+      }
     };
   }
 
@@ -16558,24 +16657,11 @@ if (!isAdminMaster(req)) {
 
 salvarIntegracoesPersistidas();
 
-const saude = saudeIntegracoes.registrarConfiguracaoIntegracao(
-  clienteId,
-  marketplace,
-  integracoesPorCliente[clienteId][marketplace]
-);
-
-limparAlertaIntegracaoSeValida(
-  clienteId,
-  marketplace,
-  integracoesPorCliente[clienteId][marketplace]
-);
-
 return res.json({
   ok: true,
   message: `${marketplace} configurado com sucesso`,
   marketplace,
-  status: "configurado",
-  ...(saude ? { saude } : {})
+  status: "configurado"
 });
 });
 
@@ -16611,6 +16697,200 @@ app.delete("/integracoes/:marketplace", (req, res) => {
   }
 });
 
+app.post("/integracoes/mercadolivre/testar-conversao-link", async (req, res) => {
+  const clienteId = getClienteId(req);
+  const urlOriginal = String(req.body?.url || req.body?.urlProduto || req.body?.link || "").trim();
+  const credenciaisPayload = req.body?.credenciais && typeof req.body.credenciais === "object"
+    ? req.body.credenciais
+    : null;
+  const configSalva = getIntegracaoCliente(clienteId, "mercadolivre") || {};
+  const credenciaisBase = credenciaisPayload || configSalva?.credenciais || {};
+  const validacao = validarIntegracao("mercadolivre", credenciaisBase);
+  const credenciais = validacao.ok ? validacao.clean : credenciaisBase;
+
+  if (!urlOriginal) {
+    return res.status(400).json({
+      ok: false,
+      marketplace: "mercadolivre",
+      status: "invalido",
+      ultimoStatus: "invalido",
+      message: "Informe a URL de um produto do Mercado Livre.",
+      ultimaMensagem: "Informe a URL de um produto do Mercado Livre."
+    });
+  }
+
+  if (!validacao.ok) {
+    const mensagem = "Preencha Cookies e Tag ID antes de testar.";
+    const configAtualizada = salvarEstadoMercadoLivreIntegracao(clienteId, "invalido", {
+      credenciais,
+      mensagem
+    });
+
+    return res.status(400).json({
+      ok: false,
+      marketplace: "mercadolivre",
+      status: "invalido",
+      ultimoStatus: "invalido",
+      ultimoTesteEm: configAtualizada?.ultimoTesteEm || null,
+      message: mensagem,
+      ultimaMensagem: mensagem
+    });
+  }
+
+  try {
+    const linkConvertido = await gerarLinkAfiliadoMercadoLivre(
+      urlOriginal,
+      { marketplace: "mercadolivre", credenciais },
+      {}
+    );
+    const sucesso = linkConvertidoMercadoLivreValido(urlOriginal, linkConvertido);
+
+    if (sucesso) {
+      const mensagem = "Cookie funcionando! URL convertida.";
+      const configAtualizada = salvarEstadoMercadoLivreIntegracao(clienteId, "ok", {
+        credenciais,
+        mensagem,
+        urlConvertida: linkConvertido
+      });
+      limparAlertaIntegracao(clienteId, "mercadolivre");
+
+      return res.json({
+        ok: true,
+        marketplace: "mercadolivre",
+        status: "ok",
+        ultimoStatus: "ok",
+        ultimoTesteEm: configAtualizada?.ultimoTesteEm || null,
+        message: "Cookie funcionando! URL convertida:",
+        ultimaMensagem: mensagem,
+        urlConvertida: linkConvertido,
+        ultimaUrlConvertida: linkConvertido
+      });
+    }
+
+    const mensagem = "Não foi possível converter o link.";
+    const configAtualizada = salvarEstadoMercadoLivreIntegracao(clienteId, "invalido", {
+      credenciais,
+      mensagem
+    });
+
+    return res.json({
+      ok: false,
+      marketplace: "mercadolivre",
+      status: "invalido",
+      ultimoStatus: "invalido",
+      ultimoTesteEm: configAtualizada?.ultimoTesteEm || null,
+      message: mensagem,
+      ultimaMensagem: mensagem
+    });
+  } catch (e) {
+    const mensagem = "Não foi possível converter o link.";
+    const configAtualizada = salvarEstadoMercadoLivreIntegracao(clienteId, "invalido", {
+      credenciais,
+      mensagem
+    });
+
+    return res.json({
+      ok: false,
+      marketplace: "mercadolivre",
+      status: "invalido",
+      ultimoStatus: "invalido",
+      ultimoTesteEm: configAtualizada?.ultimoTesteEm || null,
+      message: mensagem,
+      ultimaMensagem: mensagem,
+      detalhes: { erro: e.message }
+    });
+  }
+});
+
+app.post("/integracoes/amazon/testar-conversao-link", async (req, res) => {
+  const clienteId = getClienteId(req);
+  const urlOriginal = String(req.body?.url || req.body?.urlProduto || req.body?.link || "").trim();
+  const credenciaisPayload = req.body?.credenciais && typeof req.body.credenciais === "object"
+    ? req.body.credenciais
+    : null;
+  const configSalva = getIntegracaoCliente(clienteId, "amazon") || {};
+  const credenciaisBase = {
+    ...(credenciaisPayload || configSalva?.credenciais || {}),
+    modo: "cookies"
+  };
+  const validacao = validarIntegracao("amazon", credenciaisBase);
+  const credenciais = validacao.ok ? validacao.clean : credenciaisBase;
+
+  if (!urlOriginal) {
+    return res.status(400).json({
+      ok: false,
+      marketplace: "amazon",
+      status: "nao_validado",
+      ultimoStatus: "nao_validado",
+      message: "Informe a URL de um produto da Amazon.",
+      ultimaMensagem: "Informe a URL de um produto da Amazon."
+    });
+  }
+
+  if (!validacao.ok) {
+    const mensagem = "Preencha Cookies e Tag ID antes de testar.";
+    const configAtualizada = salvarEstadoAmazonCookiesIntegracao(clienteId, "nao_validado", {
+      credenciais,
+      mensagem
+    });
+
+    return res.status(400).json({
+      ok: false,
+      marketplace: "amazon",
+      status: "nao_validado",
+      ultimoStatus: "nao_validado",
+      ultimoTesteEm: configAtualizada?.ultimoTesteEm || null,
+      message: mensagem,
+      ultimaMensagem: mensagem
+    });
+  }
+
+  try {
+    const produto = await importarAmazon(urlOriginal, {
+      marketplace: "amazon",
+      modo: "cookies",
+      credenciais,
+      linksOptimus: { ativo: false }
+    });
+    const importacaoOk = Boolean(produto && typeof produto === "object");
+    const mensagem = importacaoOk
+      ? "Importação da página funcionando. Amazon Cookies ainda não tem validação autenticada oficial."
+      : "Não foi possível importar a página da Amazon.";
+    const configAtualizada = salvarEstadoAmazonCookiesIntegracao(clienteId, "nao_validado", {
+      credenciais,
+      mensagem
+    });
+
+    return res.json({
+      ok: importacaoOk,
+      marketplace: "amazon",
+      status: "nao_validado",
+      ultimoStatus: "nao_validado",
+      ultimoTesteEm: configAtualizada?.ultimoTesteEm || null,
+      message: mensagem,
+      ultimaMensagem: mensagem,
+      importacaoPaginaOk: importacaoOk
+    });
+  } catch (e) {
+    const mensagem = "Não foi possível importar a página da Amazon.";
+    const configAtualizada = salvarEstadoAmazonCookiesIntegracao(clienteId, "nao_validado", {
+      credenciais,
+      mensagem
+    });
+
+    return res.json({
+      ok: false,
+      marketplace: "amazon",
+      status: "nao_validado",
+      ultimoStatus: "nao_validado",
+      ultimoTesteEm: configAtualizada?.ultimoTesteEm || null,
+      message: mensagem,
+      ultimaMensagem: mensagem,
+      detalhes: { erro: e.message }
+    });
+  }
+});
+
 app.post("/integracoes/:marketplace/test", async (req, res) => {
   {
     try {
@@ -16618,6 +16898,28 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
       const marketplace = normalizarMarketplaceIntegracao(req.params.marketplace || "");
       const config = getIntegracaoCliente(clienteId, marketplace) ||
         (marketplace === "kabum" ? getIntegracaoCliente(clienteId, "awin") : null);
+
+      if (marketplace === "mercadolivre") {
+        return res.status(400).json({
+          ok: false,
+          marketplace: "mercadolivre",
+          status: "invalido",
+          ultimoStatus: "invalido",
+          message: "Use o teste de conversão de link do Mercado Livre.",
+          ultimaMensagem: "Use o teste de conversão de link do Mercado Livre."
+        });
+      }
+
+      if (marketplace === "amazon" && modoAmazonConfiguracao(config) !== "api") {
+        return res.status(400).json({
+          ok: false,
+          marketplace: "amazon",
+          status: "invalido",
+          ultimoStatus: "invalido",
+          message: "Use o teste de conversão de link da Amazon.",
+          ultimaMensagem: "Use o teste de conversão de link da Amazon."
+        });
+      }
 
       console.log("[INTEGRACAO-TESTE-INICIO]", JSON.stringify({
         clienteId,
@@ -18811,6 +19113,17 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
         { clienteId }
       );
 
+      if (linkConvertidoMercadoLivreValido(linkBase, linkML)) {
+        salvarEstadoMercadoLivreIntegracao(clienteId, "ok", {
+          mensagem: "Link afiliado gerado em produção.",
+          urlConvertida: linkML
+        });
+      } else {
+        salvarEstadoMercadoLivreIntegracao(clienteId, "invalido", {
+          mensagem: "Não foi possível gerar link afiliado em produção."
+        });
+      }
+
       return linkML || "";
     }
 
@@ -18840,8 +19153,9 @@ async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, of
   try {
     const u = new URL(linkBase);
     u.searchParams.set("tag", trackingId);
+    const linkAmazon = u.toString();
     limparAlertaIntegracao(clienteId, "amazon");
-    return u.toString();
+    return linkAmazon;
   } catch {
     return "";
   }
