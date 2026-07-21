@@ -69,20 +69,6 @@ function valorTexto(obj = {}, campos = []) {
   return "";
 }
 
-function tagMercadoLivre(config = {}) {
-  const c = credenciais(config);
-  return valorTexto(c, [
-    "tag",
-    "tagId",
-    "tagID",
-    "tag_id",
-    "codigoAfiliado",
-    "trackingId",
-    "partnerTag",
-    "affiliateTag"
-  ]);
-}
-
 function tagAmazon(config = {}) {
   const c = credenciais(config);
   return valorTexto(c, [
@@ -95,106 +81,68 @@ function tagAmazon(config = {}) {
   ]);
 }
 
-function extrairCsrfMercadoLivre(html = "") {
-  const texto = String(html || "");
-  const patterns = [
-    /name=["']_csrf["'][^>]*value=["']([^"']+)["']/i,
-    /value=["']([^"']+)["'][^>]*name=["']_csrf["']/i,
-    /csrfToken["']?\s*[:=]\s*["']([^"']+)["']/i,
-    /_csrf["']?\s*[:=]\s*["']([^"']+)["']/i
-  ];
-
-  for (const pattern of patterns) {
-    const match = texto.match(pattern);
-    if (match?.[1]) return match[1];
-  }
-
-  return "";
-}
-
-function textoBloqueioMl(texto = "") {
-  const lower = String(texto || "").toLowerCase();
+function linkTesteMercadoLivre(config = {}) {
+  const c = credenciais(config);
   return (
-    lower.includes("suspicious-traffic") ||
-    lower.includes("account-verification") ||
-    lower.includes("captcha") ||
-    lower.includes("verificacao") ||
-    lower.includes("verificacion")
+    valorTexto(c, ["urlTeste", "linkTeste", "produtoTesteUrl", "testProductUrl"]) ||
+    valorTexto(config, ["urlTeste", "linkTeste", "produtoTesteUrl", "testProductUrl"]) ||
+    process.env.MERCADOLIVRE_TEST_PRODUCT_URL ||
+    "https://meli.la/2q2wuJL"
   );
 }
 
-async function testarMercadoLivre(config = {}) {
-  const c = credenciais(config);
-  const cookies = valorTexto(c, ["cookies", "cookie"]);
-  const tagId = tagMercadoLivre(config);
-  const urlTeste = valorTexto(c, ["urlTeste", "linkTeste"]) || "https://www.mercadolivre.com.br/ofertas";
+function motivoImportadorMercadoLivre(produto = {}) {
+  return valorTexto(produto, ["motivo", "motivoTecnico", "erro", "status", "statusDetalhe", "aviso"]);
+}
 
-  if (!tagId) return resultado("mercadolivre", "tag_ausente", { faltandoTag: true }, false);
-  if (!cookies) return resultado("mercadolivre", "cookie_ausente", { faltandoCookies: true }, false);
+async function testarMercadoLivre(clienteId = "admin", config = {}, deps = {}) {
+  const importarMercadoLivre = deps.importarMercadoLivre;
+  const getIntegracaoCliente = deps.getIntegracaoCliente || (() => config);
+  const gerarLinkAfiliadoMercadoLivre = deps.gerarLinkAfiliadoMercadoLivre;
+  const urlTeste = linkTesteMercadoLivre(config);
+
+  if (typeof importarMercadoLivre !== "function") {
+    return resultado("mercadolivre", "importador_ml_indisponivel", {
+      motivo: "importador_oficial_indisponivel"
+    }, false, "Importador oficial do Mercado Livre indisponível para teste.");
+  }
 
   try {
-    const response = await fetch("https://www.mercadolivre.com.br/afiliados/linkbuilder", {
-      method: "GET",
-      headers: {
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
-        Cookie: cookies
-      }
+    const produto = await importarMercadoLivre(urlTeste, clienteId, {
+      getIntegracaoCliente,
+      gerarLinkAfiliadoMercadoLivre
     });
 
-    const html = await response.text().catch(() => "");
-    const urlFinal = response.url || "";
-    const diagnostico = `${urlFinal}\n${html}`;
-
-    if (textoBloqueioMl(diagnostico)) {
-      return resultado("mercadolivre", "bloqueio_ml", { httpStatus: response.status, urlFinal }, false);
+    if (!produto || typeof produto !== "object") {
+      return resultado("mercadolivre", "importador_sem_retorno", {
+        urlTestePresente: !!urlTeste
+      }, false, "Importador oficial não retornou produto.");
     }
 
-    if ([401, 403, 419].includes(Number(response.status)) || !response.ok) {
-      return resultado("mercadolivre", "cookie_expirado", { httpStatus: response.status, urlFinal }, false);
+    const linkAfiliado = valorTexto(produto, ["linkAfiliado", "linkFinal", "link"]);
+    const motivo = motivoImportadorMercadoLivre(produto);
+
+    if (!/^https?:\/\//i.test(linkAfiliado)) {
+      return resultado("mercadolivre", motivo || "link_afiliado_ausente", {
+        motivo: motivo || "importador_nao_retornou_link_afiliado",
+        temTitulo: !!valorTexto(produto, ["titulo", "nome"]),
+        temPreco: !!valorTexto(produto, ["preco", "precoAtual"])
+      }, false, motivo || "Importador oficial não retornou link afiliado.");
     }
 
-    const csrf = extrairCsrfMercadoLivre(html);
-    if (!csrf) {
-      return resultado("mercadolivre", "cookie_expirado", {
-        motivo: "csrf_nao_encontrado",
-        httpStatus: response.status,
-        urlFinal
-      }, false);
-    }
-
-    const conversao = await fetch("https://www.mercadolivre.com.br/affiliate-program/api/v2/stripe/user/links", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json, text/plain, */*",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
-        Origin: "https://www.mercadolivre.com.br",
-        Referer: "https://www.mercadolivre.com.br/afiliados/linkbuilder",
-        Cookie: cookies,
-        "x-csrf-token": csrf
-      },
-      body: JSON.stringify({ url: urlTeste, tag: tagId })
-    });
-
-    const data = await conversao.json().catch(() => null);
-    const linkAfiliado = valorTexto(data || {}, ["short_url", "shortUrl", "url"]);
-
-    if ([401, 403, 419].includes(Number(conversao.status))) {
-      return resultado("mercadolivre", "cookie_expirado", { httpStatus: conversao.status }, false);
-    }
-
-    if (!conversao.ok || !/^https?:\/\/meli\.la\//i.test(linkAfiliado)) {
-      return resultado("mercadolivre", "falha_teste", {
-        httpStatus: conversao.status,
-        linkAfiliado: linkAfiliado || null
-      }, false);
-    }
-
-    return resultado("mercadolivre", "ok", { linkAfiliado }, true);
+    return resultado("mercadolivre", "ok", {
+      origem: "importador_oficial",
+      linkAfiliado,
+      temTitulo: !!valorTexto(produto, ["titulo", "nome"]),
+      temPreco: !!valorTexto(produto, ["preco", "precoAtual"]),
+      temImagem: !!valorTexto(produto, ["imagem", "imagemUrl"])
+    }, true, "Importador oficial gerou link afiliado com sucesso.");
   } catch (e) {
-    return resultado("mercadolivre", "falha_teste", { erro: e.message }, false);
+    const motivo = e?.message || "erro_importador";
+    return resultado("mercadolivre", motivo, {
+      motivo,
+      origem: "importador_oficial"
+    }, false, motivo);
   }
 }
 
@@ -412,7 +360,7 @@ function testarAliExpress(config = {}) {
   }, false);
 }
 
-async function testarIntegracaoMarketplace(clienteId = "admin", marketplace = "", integracao = {}) {
+async function testarIntegracaoMarketplace(clienteId = "admin", marketplace = "", integracao = {}, deps = {}) {
   const mp = normalizarMarketplace(marketplace);
   const config = integracao || {};
 
@@ -420,7 +368,7 @@ async function testarIntegracaoMarketplace(clienteId = "admin", marketplace = ""
     return resultado(mp, "credencial_ausente", { clienteId, motivo: "integracao_nao_configurada" }, false);
   }
 
-  if (mp === "mercadolivre") return testarMercadoLivre(config);
+  if (mp === "mercadolivre") return testarMercadoLivre(clienteId, config, deps);
   if (mp === "amazon") return testarAmazon(config);
   if (mp === "shopee") return testarShopee(config);
   if (mp === "awin") return testarAwin(config, "awin");

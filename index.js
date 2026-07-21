@@ -16585,7 +16585,11 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
         marketplace
       }));
 
-      const resultadoTeste = await testarIntegracaoMarketplace(clienteId, marketplace, config || {});
+      const resultadoTeste = await testarIntegracaoMarketplace(clienteId, marketplace, config || {}, {
+        getIntegracaoCliente,
+        importarMercadoLivre,
+        gerarLinkAfiliadoMercadoLivre
+      });
       const configAtualizada = salvarResultadoTesteIntegracao(clienteId, marketplace, {
         status: resultadoTeste.status,
         mensagem: resultadoTeste.mensagem
