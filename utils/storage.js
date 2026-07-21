@@ -1,5 +1,21 @@
 const fs = require("fs");
 const path = require("path");
+const PERF_STORAGE_MIN_MS = Number(process.env.PERF_STORAGE_MIN_MS || 100);
+
+function perfStorageMs(inicio) {
+  return Number(process.hrtime.bigint() - inicio) / 1e6;
+}
+
+function logStorageLento(operacao, file, inicio, extra = {}) {
+  const tempoMs = Math.round(perfStorageMs(inicio));
+  if (tempoMs < PERF_STORAGE_MIN_MS) return;
+  console.log("[PERF STORAGE]", JSON.stringify({
+    operacao,
+    arquivo: path.basename(file || ""),
+    tempoMs,
+    ...extra
+  }));
+}
 
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const CLIENTES_DIR = path.join(DATA_DIR, "clientes");
@@ -67,21 +83,28 @@ function clonarFallback(fallback) {
 }
 
 function readJsonFile(file, fallback) {
+  const inicio = process.hrtime.bigint();
   try {
-    if (!fs.existsSync(file)) return clonarFallback(fallback);
+    if (!fs.existsSync(file)) {
+      logStorageLento("readJsonFile", file, inicio, { existe: false });
+      return clonarFallback(fallback);
+    }
     const texto = fs.readFileSync(file, "utf8");
+    logStorageLento("readJsonFile", file, inicio, { existe: true, bytes: Buffer.byteLength(texto || "", "utf8") });
     if (!texto) return clonarFallback(fallback);
     return JSON.parse(texto);
   } catch {
+    logStorageLento("readJsonFile", file, inicio, { erro: true });
     return clonarFallback(fallback);
   }
 }
 
 function writeJsonFileAtomic(file, dados) {
+  const inicio = process.hrtime.bigint();
   garantirDir(path.dirname(file));
 
-  const tmp = `${file}.tmp`;
-  const bak = `${file}.bak`;
+  const tmp = file + ".tmp";
+  const bak = file + ".bak";
   const conteudo = JSON.stringify(dados, null, 2);
 
   if (fs.existsSync(file)) {
@@ -92,6 +115,7 @@ function writeJsonFileAtomic(file, dados) {
 
   fs.writeFileSync(tmp, conteudo);
   fs.renameSync(tmp, file);
+  logStorageLento("writeJsonFileAtomic", file, inicio, { bytes: Buffer.byteLength(conteudo || "", "utf8") });
   return true;
 }
 

@@ -3570,6 +3570,82 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const { monitorEventLoopDelay } = require("perf_hooks");
+const PERF_DIAGNOSTICO_ATIVO = process.env.PERF_DIAGNOSTICO !== "0";
+
+function perfTempoMs(inicio) {
+  return Number(process.hrtime.bigint() - inicio) / 1e6;
+}
+
+function arredondarMs(valor) {
+  return Math.round(Number(valor || 0));
+}
+
+function memoriaPerfResumo() {
+  const memoria = process.memoryUsage();
+  return {
+    heapUsedMb: Math.round(memoria.heapUsed / 1024 / 1024),
+    heapTotalMb: Math.round(memoria.heapTotal / 1024 / 1024),
+    rssMb: Math.round(memoria.rss / 1024 / 1024)
+  };
+}
+
+function criarPerfTimer(tag, contexto = {}) {
+  const inicio = process.hrtime.bigint();
+  const cpuInicio = process.cpuUsage();
+  const etapas = [];
+
+  function registrarEtapa(nome, inicioEtapa) {
+    etapas.push({ etapa: nome, ms: arredondarMs(perfTempoMs(inicioEtapa)) });
+  }
+
+  return {
+    etapaSync(nome, fn) {
+      const inicioEtapa = process.hrtime.bigint();
+      try {
+        return fn();
+      } finally {
+        registrarEtapa(nome, inicioEtapa);
+      }
+    },
+    async etapa(nome, fn) {
+      const inicioEtapa = process.hrtime.bigint();
+      try {
+        return await fn();
+      } finally {
+        registrarEtapa(nome, inicioEtapa);
+      }
+    },
+    fim(extra = {}) {
+      if (!PERF_DIAGNOSTICO_ATIVO) return;
+      const cpu = process.cpuUsage(cpuInicio);
+      console.log(`[${tag}]`, JSON.stringify({
+        ...contexto,
+        ...extra,
+        etapas,
+        totalMs: arredondarMs(perfTempoMs(inicio)),
+        cpuMs: arredondarMs((cpu.user + cpu.system) / 1000),
+        memoria: memoriaPerfResumo()
+      }));
+    }
+  };
+}
+
+function iniciarDiagnosticoRuntime() {
+  if (!PERF_DIAGNOSTICO_ATIVO || typeof monitorEventLoopDelay !== "function") return;
+  const histograma = monitorEventLoopDelay({ resolution: 20 });
+  histograma.enable();
+  setInterval(() => {
+    const maxMs = Math.round(histograma.max / 1e6);
+    const meanMs = Math.round(histograma.mean / 1e6);
+    if (maxMs >= Number(process.env.PERF_EVENT_LOOP_MIN_MS || 100)) {
+      console.log("[EVENT LOOP]", JSON.stringify({ maxMs, meanMs, memoria: memoriaPerfResumo() }));
+    }
+    histograma.reset();
+  }, Number(process.env.PERF_EVENT_LOOP_INTERVAL_MS || 30000)).unref?.();
+}
+
+iniciarDiagnosticoRuntime();
 const app = express(); // 👈 MUITO IMPORTANTE ter isso
 
 function capturarRawBody(req, res, buf) {
@@ -6232,12 +6308,19 @@ app.post("/telegram/:id/testar", testarTelegram);
 // ============== DESTINOS INTELIGENTES =================
 
 app.get("/destinos", (req, res) => {
-  const clienteId = exigirClienteAutenticado(req, res);
-  if (!clienteId) return;
+  const perf = criarPerfTimer("PERF DESTINOS");
+  const clienteId = perf.etapaSync("cliente", () => exigirClienteAutenticado(req, res));
+  if (!clienteId) {
+    perf.fim({ statusCode: res.statusCode || 401, clienteAutenticado: false });
+    return;
+  }
 
-  const destinos =
-    normalizarDestinosContrato(destinosPorCliente?.[clienteId] || []);
+  const origem = perf.etapaSync("storage_memoria", () => destinosPorCliente?.[clienteId] || []);
+  const destinos = perf.etapaSync("normalizar_payload", () =>
+    normalizarDestinosContrato(origem)
+  );
 
+  perf.fim({ clienteId, statusCode: 200, destinos: Array.isArray(destinos) ? destinos.length : 0 });
   return res.json(destinos);
 });
 
@@ -15164,14 +15247,15 @@ async function verificarSenhaUsuario(usuario = {}, senhaInformada = "") {
 }
 
 app.post("/login", async (req, res) => {
+  const perf = criarPerfTimer("PERF LOGIN");
   const { user, pass } = req.body || {};
 
   const login = String(user || "").trim().toLowerCase();
 
-  const usuario = usuarios.find(u =>
+  const usuario = perf.etapaSync("buscar_usuario", () => usuarios.find(u =>
     String(u.email || "").toLowerCase() === login ||
     String(u.id || "").toLowerCase() === login
-  );
+  ));
 
   if (!usuario) {
     console.log("[AUTH-LOGIN]", {
@@ -15181,7 +15265,8 @@ app.post("/login", async (req, res) => {
       totalUsuariosCarregados: Array.isArray(usuarios) ? usuarios.length : 0,
       idsCarregados: Array.isArray(usuarios) ? usuarios.map(u => u?.id).filter(Boolean).slice(0, 20) : []
     });
-    return res.status(401).json({ erro: "Usuário inválido" });
+    perf.fim({ usuarioEncontrado: false, statusCode: 401 });
+    return res.status(401).json({ erro: "UsuÃ¡rio invÃ¡lido" });
   }
 
   if (usuario.ativo === false) {
@@ -15193,35 +15278,37 @@ app.post("/login", async (req, res) => {
       ativo: false,
       motivoFalha: "usuario_inativo"
     });
-    return res.status(403).json({ erro: "Usuário inativo" });
+    perf.fim({ clienteId: usuario.id || "", usuarioEncontrado: true, ativo: false, statusCode: 403 });
+    return res.status(403).json({ erro: "UsuÃ¡rio inativo" });
   }
 
- const diagnosticoSenha = await diagnosticarSenhaUsuario(usuario, pass);
- const senhaOk = diagnosticoSenha.ok === true;
+  const diagnosticoSenha = await perf.etapa("validacao_senha", () => diagnosticarSenhaUsuario(usuario, pass));
+  const senhaOk = diagnosticoSenha.ok === true;
 
- console.log("[AUTH-LOGIN]", {
-   versao: AUTH_DEBUG_VERSION,
-   usuarioInformado: login,
-   usuarioEncontrado: true,
-   usuarioId: usuario.id || "",
-   email: usuario.email || "",
-   papel: usuario.papel || "",
-   ativo: usuario.ativo !== false,
-   camposPresentes: diagnosticoSenha.camposPresentes,
-   tiposCampos: diagnosticoSenha.tiposCampos,
-   textoPuroPassou: diagnosticoSenha.textoPuroPassou,
-   campoTextoUsado: diagnosticoSenha.campoTextoUsado,
-   bcryptTentou: diagnosticoSenha.bcryptTentou,
-   bcryptPassou: diagnosticoSenha.bcryptPassou,
-   camposBcryptTentados: diagnosticoSenha.camposBcryptTentados,
-   motivoFalha: diagnosticoSenha.motivoFalha || ""
- });
+  console.log("[AUTH-LOGIN]", {
+    versao: AUTH_DEBUG_VERSION,
+    usuarioInformado: login,
+    usuarioEncontrado: true,
+    usuarioId: usuario.id || "",
+    email: usuario.email || "",
+    papel: usuario.papel || "",
+    ativo: usuario.ativo !== false,
+    camposPresentes: diagnosticoSenha.camposPresentes,
+    tiposCampos: diagnosticoSenha.tiposCampos,
+    textoPuroPassou: diagnosticoSenha.textoPuroPassou,
+    campoTextoUsado: diagnosticoSenha.campoTextoUsado,
+    bcryptTentou: diagnosticoSenha.bcryptTentou,
+    bcryptPassou: diagnosticoSenha.bcryptPassou,
+    camposBcryptTentados: diagnosticoSenha.camposBcryptTentados,
+    motivoFalha: diagnosticoSenha.motivoFalha || ""
+  });
 
-if (!senhaOk) {
-  return res.status(401).json({ erro: "Senha inválida" });
-}
+  if (!senhaOk) {
+    perf.fim({ clienteId: usuario.id || "", usuarioEncontrado: true, senhaOk: false, statusCode: 401 });
+    return res.status(401).json({ erro: "Senha invÃ¡lida" });
+  }
 
-  const token = jwt.sign(
+  const token = perf.etapaSync("jwt", () => jwt.sign(
     {
       clienteId: usuario.id,
       papel: usuario.papel || "cliente",
@@ -15229,9 +15316,9 @@ if (!senhaOk) {
     },
     JWT_SECRET,
     { expiresIn: "7d" }
-  );
+  ));
 
-  return res.json({
+  const payload = perf.etapaSync("payload", () => ({
     ok: true,
     token,
     usuario: {
@@ -15243,7 +15330,10 @@ if (!senhaOk) {
       creditos: usuario.creditos,
       ativo: usuario.ativo
     }
-  });
+  }));
+
+  perf.fim({ clienteId: usuario.id || "", usuarioEncontrado: true, senhaOk: true, statusCode: 200 });
+  return res.json(payload);
 });
 
 app.get("/", (req, res) => {
@@ -15371,59 +15461,59 @@ app.post("/limpar-sessao/:id", async (req, res) => {
 // ================= ME ==========================
 
 app.get("/me", (req, res) => {
-  const clienteId = getClienteId(req);
+  const perf = criarPerfTimer("PERF ME");
+  const clienteId = perf.etapaSync("cliente", () => getClienteId(req));
 
-  const usuario = usuarios.find(
+  const usuario = perf.etapaSync("buscar_usuario", () => usuarios.find(
     u => String(u.id) === String(clienteId)
-  );
+  ));
 
   if (!usuario) {
+    perf.fim({ clienteId, statusCode: 404, usuarioEncontrado: false });
     return res.status(404).json({
       ok: false,
-      erro: "Usuário não encontrado"
+      erro: "UsuÃ¡rio nÃ£o encontrado"
     });
   }
 
-  renovarCreditosSeNecessario(usuario);
+  perf.etapaSync("renovar_creditos", () => renovarCreditosSeNecessario(usuario));
 
-  const sessoesUsuario = Object.values(sessoesMeta || {}).filter(s =>
+  const sessoesUsuario = perf.etapaSync("sessoes", () => Object.values(sessoesMeta || {}).filter(s =>
     String(s.id || "").startsWith(clienteId + "_") ||
     (clienteId === "admin" && !String(s.id || "").includes("_"))
-  );
+  ));
 
-  const destinosUsuario =
-    destinosPorCliente?.[clienteId] || {};
+  const destinosUsuario = perf.etapaSync("destinos", () => destinosPorCliente?.[clienteId] || {});
 
-  const filaUsuario = fila.filter(o =>
+  const filaUsuario = perf.etapaSync("fila", () => fila.filter(o =>
     String(o.clienteId || "admin") === String(clienteId)
-  );
+  ));
 
   const hoje = new Date().toLocaleDateString("pt-BR", {
     timeZone: "America/Sao_Paulo"
   });
 
-  const enviosHoje = filaUsuario.filter(o =>
+  const enviosHoje = perf.etapaSync("consumo_hoje", () => filaUsuario.filter(o =>
     String(o.enviadoEm || "").startsWith(hoje)
-  ).length;
+  ).length);
 
- const planoAtual = getPlanoUsuario(req) || {};
+  const planoAtual = perf.etapaSync("plano", () => getPlanoUsuario(req) || {});
 
-return res.json({
-  ok: true,
-  usuario: {
-    id: usuario.id,
-    nome: usuario.nome,
-    email: usuario.email,
-    plano: usuario.plano,
-    creditos: usuario.creditos,
-    papel: usuario.papel,
-    ativo: usuario.ativo,
+  const payload = perf.etapaSync("payload", () => ({
+    ok: true,
+    usuario: {
+      id: usuario.id,
+      nome: usuario.nome,
+      email: usuario.email,
+      plano: usuario.plano,
+      creditos: usuario.creditos,
+      papel: usuario.papel,
+      ativo: usuario.ativo,
+      marketplacesLiberados: planoAtual.marketplaces || [],
+      recursos: planoAtual.recursos || {},
+      limites: planoAtual.limites || {}
+    },
     marketplacesLiberados: planoAtual.marketplaces || [],
-    recursos: planoAtual.recursos || {},
-    limites: planoAtual.limites || {}
-  },
-  marketplacesLiberados: planoAtual.marketplaces || [],
-
     consumo: {
       enviosHoje,
       sessoes: sessoesUsuario.length,
@@ -15434,7 +15524,16 @@ return res.json({
     status: {
       automacaoAtiva: configsPorCliente?.[clienteId]?.automacaoAtiva === true
     }
+  }));
+
+  perf.fim({
+    clienteId,
+    statusCode: 200,
+    sessoes: sessoesUsuario.length,
+    destinos: Object.keys(destinosUsuario).length,
+    fila: filaUsuario.length
   });
+  return res.json(payload);
 });
 
 // ================= INTEGRAÇÕES =================
@@ -16353,14 +16452,15 @@ function logKabumManual(dados = {}) {
 //============= ROTA INTEGRACOES =======================================
 
 app.get("/integracoes/alertas", (req, res) => {
-  const clienteId = getClienteId(req);
+  const perf = criarPerfTimer("PERF INTEGRACOES ALERTAS");
+  const clienteId = perf.etapaSync("cliente", () => getClienteId(req));
 
-  const status = {
+  const status = perf.etapaSync("status", () => ({
     mercadolivre: statusResumoIntegracao(clienteId, "mercadolivre"),
     amazon: statusResumoIntegracao(clienteId, "amazon")
-  };
+  }));
 
-  const alertas = listarAlertasIntegracoes(clienteId)
+  const alertas = perf.etapaSync("storage_alertas", () => listarAlertasIntegracoes(clienteId))
     .filter(alerta =>
       status[String(alerta.marketplace || "").toLowerCase()]?.status !== "ok"
     )
@@ -16380,62 +16480,72 @@ app.get("/integracoes/alertas", (req, res) => {
       return alerta;
     });
 
-  return res.json({
+  const payload = perf.etapaSync("payload", () => ({
     ok: true,
     status,
     alertas
-  });
+  }));
+
+  perf.fim({ clienteId, statusCode: 200, alertas: alertas.length });
+  return res.json(payload);
 });
 app.get("/integracoes", (req, res) => {
-  const clienteId = getClienteId(req);
-  const data = integracoesPorCliente[clienteId] || {};
+  const perf = criarPerfTimer("PERF INTEGRACOES");
+  const clienteId = perf.etapaSync("cliente", () => getClienteId(req));
+  const data = perf.etapaSync("storage_memoria", () => integracoesPorCliente[clienteId] || {});
   const resposta = {};
 
-  const reveal =
+  const reveal = perf.etapaSync("query", () =>
     req.query.reveal === "1" ||
-    req.query.reveal === "true";
+    req.query.reveal === "true"
+  );
 
-  for (const [marketplace, config] of Object.entries(data)) {
-    const credenciais = marketplace === "awin"
-      ? normalizarCredenciaisAwin(config?.credenciais || {})
-      : config?.credenciais || {};
+  perf.etapaSync("marketplaces", () => {
+    for (const [marketplace, config] of Object.entries(data)) {
+      const credenciais = marketplace === "awin"
+        ? normalizarCredenciaisAwin(config?.credenciais || {})
+        : config?.credenciais || {};
 
-    const camposConfigurados = Object.keys(credenciais).filter(k => {
-      const valor = credenciais[k];
+      const camposConfigurados = Object.keys(credenciais).filter(k => {
+        const valor = credenciais[k];
 
-      return (
-        valor !== undefined &&
-        valor !== null &&
-        String(valor).trim() !== ""
-      );
-    });
+        return (
+          valor !== undefined &&
+          valor !== null &&
+          String(valor).trim() !== ""
+        );
+      });
 
-    const configurado = camposConfigurados.length > 0;
+      const configurado = camposConfigurados.length > 0;
 
-    const credenciaisResposta =
-      reveal
-        ? credenciais
-        : mascararIntegracao(credenciais);
+      const credenciaisResposta =
+        reveal
+          ? credenciais
+          : mascararIntegracao(credenciais);
 
-    resposta[marketplace] = {
-      marketplace,
-      nome: marketplaceRules?.[marketplace]?.nome || marketplace,
-      configurado,
-      status: configurado
-        ? (config.status || "conectado")
-        : "incompleto",
-      camposConfigurados,
-      credenciais: credenciaisResposta,
-      atualizadoEm: config?.atualizadoEm || null
-    };
-  }
+      resposta[marketplace] = {
+        marketplace,
+        nome: marketplaceRules?.[marketplace]?.nome || marketplace,
+        configurado,
+        status: configurado
+          ? (config.status || "conectado")
+          : "incompleto",
+        camposConfigurados,
+        credenciais: credenciaisResposta,
+        atualizadoEm: config?.atualizadoEm || null
+      };
+    }
+  });
 
-  return res.json({
+  const payload = perf.etapaSync("payload", () => ({
     ok: true,
     clienteId,
     reveal,
     integracoes: resposta
-  });
+  }));
+
+  perf.fim({ clienteId, statusCode: 200, marketplaces: Object.keys(resposta).length });
+  return res.json(payload);
 });
 
 
@@ -20039,13 +20149,17 @@ app.post("/importar-produto", async (req, res) => {
 // ================= WHATSAPP SESSOES =================
 
 app.get("/sessoes", (req, res) => {
-  const clienteId = getClienteId(req);
-  const lista = listarSessoesWhatsappCliente(clienteId);
+  const perf = criarPerfTimer("PERF SESSOES");
+  const clienteId = perf.etapaSync("cliente", () => getClienteId(req));
+  const lista = perf.etapaSync("listar_sessoes_whatsapp", () => listarSessoesWhatsappCliente(clienteId));
 
-  return res.json({
+  const payload = perf.etapaSync("payload", () => ({
     ok: true,
     sessoes: lista
-  });
+  }));
+
+  perf.fim({ clienteId, statusCode: 200, sessoes: Array.isArray(lista) ? lista.length : 0 });
+  return res.json(payload);
 });
 
 app.post("/sessoes", (req, res) => {
@@ -20715,13 +20829,14 @@ app.get("/status/:id", (req, res) => {
 });
 
 app.get("/fila/status", (req, res) => {
-  const clienteId = getClienteId(req);
+  const perf = criarPerfTimer("PERF FILA STATUS");
+  const clienteId = perf.etapaSync("cliente", () => getClienteId(req));
 
-  const itensCliente = fila.filter(o =>
+  const itensCliente = perf.etapaSync("filtrar_fila", () => fila.filter(o =>
     String(o.clienteId || "admin") === String(clienteId)
-  );
+  ));
 
-  return res.json({
+  const payload = perf.etapaSync("payload", () => ({
     ok: true,
     clienteId,
     total: itensCliente.length,
@@ -20729,7 +20844,10 @@ app.get("/fila/status", (req, res) => {
     enviados: itensCliente.filter(o => o.status === "enviado").length,
     retidas: itensCliente.filter(o => o.status === "retida").length,
     erros: itensCliente.filter(o => o.status === "erro").length
-  });
+  }));
+
+  perf.fim({ clienteId, statusCode: 200, total: itensCliente.length });
+  return res.json(payload);
 });
 
 
