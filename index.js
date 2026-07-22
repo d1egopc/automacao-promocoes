@@ -10458,6 +10458,58 @@ function listarClientesElegiveisRadar() {
   return [...mapa.values()];
 }
 
+function selecionarClienteImportacaoRadar(marketplace = "") {
+  const mp = normalizarMarketplaceRadar(marketplace);
+  const motivosExclusao = {};
+  const registrarMotivo = motivo => {
+    motivosExclusao[motivo] = (motivosExclusao[motivo] || 0) + 1;
+  };
+
+  if (!mp) {
+    return { clienteId: "", marketplace: "", motivosExclusao: { marketplace_ausente: 1 } };
+  }
+
+  const clientes = listarClientesElegiveisRadar();
+  const ordenarAdminPorUltimo = cliente =>
+    String(cliente?.id || "") === "admin" ? 1 : 0;
+
+  for (const usuario of [...clientes].sort((a, b) => ordenarAdminPorUltimo(a) - ordenarAdminPorUltimo(b))) {
+    const clienteId = String(usuario?.id || "").trim();
+    if (!clienteId) {
+      registrarMotivo("cliente_sem_id");
+      continue;
+    }
+
+    if (usuario?.ativo === false) {
+      registrarMotivo("cliente_inativo");
+      continue;
+    }
+
+    if (!usuarioPodeReceberMarketplace(usuario, mp)) {
+      registrarMotivo("plano_nao_permite_marketplace");
+      continue;
+    }
+
+    if (!clienteAceitaMarketplaceAtivo(clienteId, mp)) {
+      registrarMotivo("marketplace_desativado_no_cliente");
+      continue;
+    }
+
+    if (!usuarioTemIntegracaoMarketplace(clienteId, mp)) {
+      registrarMotivo("integracao_ausente");
+      continue;
+    }
+
+    return {
+      clienteId,
+      marketplace: mp,
+      motivosExclusao
+    };
+  }
+
+  return { clienteId: "", marketplace: mp, motivosExclusao };
+}
+
 function extrairMensagemInternaRadar(conteudo = {}) {
   let atual = conteudo || {};
 
@@ -12060,11 +12112,25 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
 
   const marketplaceDetectado = resolucao.marketplaceReal;
   const linkOriginalLimpo = resolucao.linkOriginalLimpo;
+  const clienteImportacaoRadar = selecionarClienteImportacaoRadar(marketplaceDetectado);
+
+  if (!clienteImportacaoRadar.clienteId) {
+    return {
+      ok: false,
+      motivo: "integracao_cliente_ausente_para_importacao_radar",
+      motivoTecnico: "integracao_cliente_ausente_para_importacao_radar",
+      resolucao,
+      detalhes: {
+        marketplace: clienteImportacaoRadar.marketplace || marketplaceDetectado || "",
+        motivosExclusao: clienteImportacaoRadar.motivosExclusao || {}
+      }
+    };
+  }
 
   try {
     if (marketplaceDetectado === "kabum") {
       try {
-        const produtoKabum = await importarProdutoKabumViaAwin(linkOriginalLimpo, adminMasterId, {
+        const produtoKabum = await importarProdutoKabumViaAwin(linkOriginalLimpo, clienteImportacaoRadar.clienteId, {
           gerarDeepLinkAwin: async () => linkOriginalLimpo
         });
 
@@ -12188,7 +12254,7 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
     }
 
     const resultado = await importarProdutoManual({
-      clienteId: adminMasterId,
+      clienteId: clienteImportacaoRadar.clienteId,
       headers: {},
       body: {
         url: linkOriginalLimpo,
@@ -12390,6 +12456,18 @@ async function adicionarRadarCapturadoNaFilaClientes(ofertaBase = {}, opcoes = {
   const resultados = [];
   const radarConfigFontes = opcoes.radarConfigFontes || carregarRadarConfigAdminMaster();
   const clientesAtivos = listarClientesElegiveisRadar();
+  const marketplaceResumo = normalizarMarketplaceRadar(ofertaBase.marketplace || ofertaBase.marketplaceDetectado || "");
+  const resumoDistributor = {
+    marketplace: marketplaceResumo,
+    clientesAvaliados: 0,
+    clientesElegiveis: 0,
+    filasCriadas: 0,
+    motivosExclusao: {}
+  };
+  const registrarExclusaoDistributor = motivo => {
+    const chave = String(motivo || "nao_adicionada");
+    resumoDistributor.motivosExclusao[chave] = (resumoDistributor.motivosExclusao[chave] || 0) + 1;
+  };
 
   logOptimus("RADAR", "Clientes elegiveis encontrados", { total: clientesAtivos.length });
 
@@ -12401,6 +12479,29 @@ async function adicionarRadarCapturadoNaFilaClientes(ofertaBase = {}, opcoes = {
     const resultado = await adicionarRadarNaFilaCliente(ofertaBase, clienteId, {
       radarConfigFontes
     });
+    const resultadoDistribuidor = resultado.adicionada
+      ? "fila_criada"
+      : (resultado.motivo || "nao_adicionada");
+    resumoDistributor.clientesAvaliados += 1;
+
+    if (resultado.ok) {
+      resumoDistributor.clientesElegiveis += 1;
+    }
+
+    if (resultado.adicionada) {
+      resumoDistributor.filasCriadas += 1;
+    } else {
+      registrarExclusaoDistributor(resultadoDistribuidor);
+    }
+
+    console.log("[DISTRIBUTOR-CLIENTE-AVALIADO]", JSON.stringify({
+      clienteId,
+      marketplace: marketplaceResumo,
+      integracaoConfigurada: marketplaceResumo ? usuarioTemIntegracaoMarketplace(clienteId, marketplaceResumo) : false,
+      destinoCompativel: resultado.adicionada ? true : existeDestinoCompativelRadar(clienteId, resultado.oferta || ofertaBase),
+      creditos: usuario.creditos ?? usuario.creditosDisponiveis ?? null,
+      resultado: resultadoDistribuidor
+    }));
 
     if (!resultado.ok || !resultado.adicionada) {
       logRadarRejeitado(resultado.motivo || "nao_adicionada", {
@@ -12437,6 +12538,8 @@ async function adicionarRadarCapturadoNaFilaClientes(ofertaBase = {}, opcoes = {
       retida: !!resultado.retida
     });
   }
+
+  console.log("[DISTRIBUTOR-RESUMO]", JSON.stringify(resumoDistributor));
 
   return resultados;
 }
@@ -13353,6 +13456,14 @@ const registroEngineRadar = temRedirectConhecidoRadar
       mensagemOriginalRadar: texto.slice(0, 1000),
       capturadaEm: dataCaptura,
       dataEntradaRadar: dataCaptura
+    }));
+    const resolucaoCaptura = resolverClienteMensageiroPorSessao(sessaoIdTexto);
+    console.log("[RADAR-OFERTA-BASE-CRIADA]", JSON.stringify({
+      marketplace: ofertaRadar.marketplace || importacao.resolucao?.marketplaceReal || "",
+      sessaoCapturaId: sessaoIdTexto,
+      capturadoPorClienteId: resolucaoCaptura.clienteIdMensageiro || adminMasterId,
+      clienteIdImportacao: clienteImportacaoRadar.clienteId,
+      integracaoAdminIgnorada: clienteImportacaoRadar.clienteId !== adminMasterId
     }));
     logProdutoCanonicoRadar(ofertaRadar);
 
@@ -22361,11 +22472,6 @@ setInterval(() => {
     });
   });
 }, 10 * 1000);
-
-
-
-
-
 
 
 
