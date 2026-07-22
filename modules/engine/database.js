@@ -20,6 +20,41 @@ function logDbPerf(operacao, inicio, extra = {}) {
   }));
 }
 
+function tipoQueryEngine(texto = "") {
+  const sql = String(texto || "").trim().replace(/\s+/g, " ");
+  const match = sql.match(/^(SELECT|INSERT|UPDATE|DELETE|WITH|CREATE|ALTER|DROP|TRUNCATE)\b/i);
+  const comando = match ? match[1].toUpperCase() : "SQL";
+
+  const tabelaMatch = sql.match(/\b(?:FROM|INTO|UPDATE|TABLE)\s+([a-zA-Z0-9_."]+)/i);
+  const tabela = tabelaMatch ? tabelaMatch[1].replace(/"/g, "").slice(0, 80) : null;
+
+  return tabela ? `${comando} ${tabela}` : comando;
+}
+
+function resumoSqlEngine(texto = "") {
+  return String(texto || "").replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+function estadoPoolEngine(clientPool, sufixo = "") {
+  if (!clientPool) return {};
+  const sufixoFinal = sufixo ? String(sufixo) : "";
+  return {
+    [`poolTotal${sufixoFinal}`]: Number(clientPool.totalCount || 0),
+    [`poolIdle${sufixoFinal}`]: Number(clientPool.idleCount || 0),
+    [`poolWaiting${sufixoFinal}`]: Number(clientPool.waitingCount || 0),
+    [`poolMax${sufixoFinal}`]: Number(clientPool.options?.max || 0) || null
+  };
+}
+
+function erroSanitizadoDb(erro) {
+  const mensagem = String(erro?.message || "erro_desconhecido").slice(0, 180);
+  return {
+    erroCodigo: erro?.code ? String(erro.code).slice(0, 40) : null,
+    erroMensagem: mensagem,
+    connectionTerminated: /connection terminated unexpectedly/i.test(mensagem)
+  };
+}
+
 function carregarPg() {
   if (pgDisponivel !== null) return pgDisponivel;
 
@@ -64,20 +99,63 @@ function getEnginePool() {
 
 async function queryEngine(texto, params = []) {
   const inicio = process.hrtime.bigint();
+  const tipoQuery = tipoQueryEngine(texto);
   const clientPool = getEnginePool();
   if (!clientPool) {
-    logDbPerf("queryEngine", inicio, { ok: false, motivo: engineDbHabilitado() ? "pool_indisponivel" : "database_url_ausente" });
+    logDbPerf("queryEngine", inicio, {
+      ok: false,
+      motivo: engineDbHabilitado() ? "pool_indisponivel" : "database_url_ausente",
+      tipoQuery,
+      tempoPoolMs: null,
+      tempoSqlMs: null
+    });
     return { ok: false, motivo: engineDbHabilitado() ? "pool_indisponivel" : "database_url_ausente" };
   }
 
+  const poolAntes = estadoPoolEngine(clientPool, "Antes");
+  const inicioPool = process.hrtime.bigint();
+  let client = null;
+  let tempoPoolMs = null;
+  let tempoSqlMs = null;
+
   try {
-    const resultado = await clientPool.query(texto, params);
-    logDbPerf("queryEngine", inicio, { ok: true, linhas: resultado?.rowCount ?? null, sql: String(texto || "").replace(/\s+/g, " ").slice(0, 120) });
+    client = await clientPool.connect();
+    tempoPoolMs = Math.round(perfDbMs(inicioPool));
+
+    const inicioSql = process.hrtime.bigint();
+    const resultado = await client.query(texto, params);
+    tempoSqlMs = Math.round(perfDbMs(inicioSql));
+
+    logDbPerf("queryEngine", inicio, {
+      ok: true,
+      tipoQuery,
+      tempoPoolMs,
+      tempoSqlMs,
+      linhas: resultado?.rowCount ?? null,
+      sql: resumoSqlEngine(texto),
+      ...poolAntes,
+      ...estadoPoolEngine(clientPool, "Depois")
+    });
     return { ok: true, resultado };
   } catch (e) {
-    logDbPerf("queryEngine", inicio, { ok: false, motivo: "query_falhou" });
-    logEngineDbErro({ motivo: "query_falhou", erro: e.message });
+    if (tempoPoolMs === null) tempoPoolMs = Math.round(perfDbMs(inicioPool));
+    const erroDb = erroSanitizadoDb(e);
+    logDbPerf("queryEngine", inicio, {
+      ok: false,
+      motivo: "query_falhou",
+      tipoQuery,
+      tempoPoolMs,
+      tempoSqlMs,
+      duracaoAteConnectionTerminatedMs: erroDb.connectionTerminated ? Math.round(perfDbMs(inicio)) : null,
+      ...erroDb,
+      sql: resumoSqlEngine(texto),
+      ...poolAntes,
+      ...estadoPoolEngine(clientPool, "Depois")
+    });
+    logEngineDbErro({ motivo: "query_falhou", erro: erroDb.erroMensagem, codigo: erroDb.erroCodigo || undefined });
     return { ok: false, motivo: "query_falhou", erro: e.message };
+  } finally {
+    if (client) client.release();
   }
 }
 
