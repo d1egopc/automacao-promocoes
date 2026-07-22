@@ -3581,6 +3581,25 @@ function arredondarMs(valor) {
   return Math.round(Number(valor || 0));
 }
 
+let proximoRequestIdPerf = 1;
+
+function criarRequestIdPerf(req) {
+  const recebidoEmMs = Date.now();
+  const id = `http_${recebidoEmMs}_${proximoRequestIdPerf++}`;
+  req.perfRequestId = id;
+  req.perfRecebidoHr = process.hrtime.bigint();
+  req.perfRecebidoEmMs = recebidoEmMs;
+  return id;
+}
+
+function contextoPerfHttp(req) {
+  return {
+    requestId: req?.perfRequestId || "",
+    metodo: req?.method || "",
+    path: req?.originalUrl || req?.path || ""
+  };
+}
+
 function memoriaPerfResumo() {
   const memoria = process.memoryUsage();
   return {
@@ -3594,6 +3613,15 @@ function criarPerfTimer(tag, contexto = {}) {
   const inicio = process.hrtime.bigint();
   const cpuInicio = process.cpuUsage();
   const etapas = [];
+  if (PERF_DIAGNOSTICO_ATIVO && contexto?.requestId) {
+    console.log("[PERF HTTP HANDLER]", {
+      requestId: contexto.requestId,
+      tag,
+      metodo: contexto.metodo || "",
+      path: contexto.path || "",
+      iniciadoEm: new Date().toISOString()
+    });
+  }
 
   function registrarEtapa(nome, inicioEtapa) {
     etapas.push({ etapa: nome, ms: arredondarMs(perfTempoMs(inicioEtapa)) });
@@ -5673,10 +5701,22 @@ function rotaPerfDiagnostico(path = "") {
 app.use((req, res, next) => {
   if (!rotaPerfDiagnostico(req.path)) return next();
 
+  const requestId = criarRequestIdPerf(req);
   const inicio = process.hrtime.bigint();
+  const recebidoEm = new Date(req.perfRecebidoEmMs || Date.now()).toISOString();
+
+  console.log("[PERF HTTP RECEBIDO]", {
+    requestId,
+    metodo: req.method,
+    path: req.originalUrl || req.path,
+    recebidoEm
+  });
 
   res.on("finish", () => {
     const duracaoMs = Number(process.hrtime.bigint() - inicio) / 1e6;
+    const totalDesdeRecebidoMs = req.perfRecebidoHr
+      ? Number(process.hrtime.bigint() - req.perfRecebidoHr) / 1e6
+      : duracaoMs;
     const clienteId = (() => {
       try {
         return getClienteId(req) || "admin";
@@ -5686,10 +5726,12 @@ app.use((req, res, next) => {
     })();
 
     console.log("[PERF]", {
+      requestId,
       metodo: req.method,
       path: req.originalUrl || req.path,
       clienteId,
       duracaoMs: Math.round(duracaoMs),
+      totalDesdeRecebidoMs: Math.round(totalDesdeRecebidoMs),
       statusCode: res.statusCode
     });
   });
@@ -6308,7 +6350,7 @@ app.post("/telegram/:id/testar", testarTelegram);
 // ============== DESTINOS INTELIGENTES =================
 
 app.get("/destinos", (req, res) => {
-  const perf = criarPerfTimer("PERF DESTINOS");
+  const perf = criarPerfTimer("PERF DESTINOS", contextoPerfHttp(req));
   const clienteId = perf.etapaSync("cliente", () => exigirClienteAutenticado(req, res));
   if (!clienteId) {
     perf.fim({ statusCode: res.statusCode || 401, clienteAutenticado: false });
@@ -15247,7 +15289,7 @@ async function verificarSenhaUsuario(usuario = {}, senhaInformada = "") {
 }
 
 app.post("/login", async (req, res) => {
-  const perf = criarPerfTimer("PERF LOGIN");
+  const perf = criarPerfTimer("PERF LOGIN", contextoPerfHttp(req));
   const { user, pass } = req.body || {};
 
   const login = String(user || "").trim().toLowerCase();
@@ -15461,7 +15503,7 @@ app.post("/limpar-sessao/:id", async (req, res) => {
 // ================= ME ==========================
 
 app.get("/me", (req, res) => {
-  const perf = criarPerfTimer("PERF ME");
+  const perf = criarPerfTimer("PERF ME", contextoPerfHttp(req));
   const clienteId = perf.etapaSync("cliente", () => getClienteId(req));
 
   const usuario = perf.etapaSync("buscar_usuario", () => usuarios.find(
@@ -16452,7 +16494,7 @@ function logKabumManual(dados = {}) {
 //============= ROTA INTEGRACOES =======================================
 
 app.get("/integracoes/alertas", (req, res) => {
-  const perf = criarPerfTimer("PERF INTEGRACOES ALERTAS");
+  const perf = criarPerfTimer("PERF INTEGRACOES ALERTAS", contextoPerfHttp(req));
   const clienteId = perf.etapaSync("cliente", () => getClienteId(req));
 
   const status = perf.etapaSync("status", () => ({
@@ -16490,7 +16532,7 @@ app.get("/integracoes/alertas", (req, res) => {
   return res.json(payload);
 });
 app.get("/integracoes", (req, res) => {
-  const perf = criarPerfTimer("PERF INTEGRACOES");
+  const perf = criarPerfTimer("PERF INTEGRACOES", contextoPerfHttp(req));
   const clienteId = perf.etapaSync("cliente", () => getClienteId(req));
   const data = perf.etapaSync("storage_memoria", () => integracoesPorCliente[clienteId] || {});
   const resposta = {};
@@ -22041,7 +22083,6 @@ setInterval(() => {
   }
 
 }, 10 * 1000);
-
 
 
 
