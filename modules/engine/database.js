@@ -394,7 +394,11 @@ async function queryEngine(texto, params = []) {
       tempoPoolMs: null,
       tempoSqlMs: null
     });
-    return { ok: false, motivo: engineDbHabilitado() ? "pool_indisponivel" : "database_url_ausente" };
+    return {
+      ok: false,
+      motivo: engineDbHabilitado() ? "pool_indisponivel" : "database_url_ausente",
+      metricas: { tempoPoolMs: null, tempoSqlMs: null }
+    };
   }
 
   const poolAntes = estadoPoolEngine(clientPool, "Antes");
@@ -421,7 +425,7 @@ async function queryEngine(texto, params = []) {
       ...poolAntes,
       ...estadoPoolEngine(clientPool, "Depois")
     });
-    return { ok: true, resultado };
+    return { ok: true, resultado, metricas: { tempoPoolMs, tempoSqlMs } };
   } catch (e) {
     if (tempoPoolMs === null) tempoPoolMs = Math.round(perfDbMs(inicioPool));
     const erroDb = erroSanitizadoDb(e);
@@ -444,7 +448,12 @@ async function queryEngine(texto, params = []) {
       origem: "queryEngine"
     });
     logEngineDbErro({ motivo: "query_falhou", erro: erroDb.erroMensagem, codigo: erroDb.erroCodigo || undefined, poolRecriado });
-    return { ok: false, motivo: "query_falhou", erro: e.message };
+    return {
+      ok: false,
+      motivo: "query_falhou",
+      erro: e.message,
+      metricas: { tempoPoolMs, tempoSqlMs }
+    };
   } finally {
     if (client) client.release();
   }

@@ -12721,8 +12721,28 @@ async function prepararLinksRedirectEngineRadar(dados = {}) {
 }
 
 async function registrarEventoBrutoEngineRadar(dados = {}) {
+  const inicioBloco = process.hrtime.bigint();
+  const rodadaId = `radar_evento_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const linksDados = Array.isArray(dados.linksExtraidos) ? dados.linksExtraidos : [];
+  const clientesDados = listarClientesEngineRadar(dados);
+  console.log("[PERF ENGINE BLOCO EVENTOS INICIO]", {
+    rodadaId,
+    funcao: "registrarEventoBrutoEngineRadar",
+    arquivo: "index.js",
+    totalItens: linksDados.length || 1,
+    processados: 0,
+    sucesso: null,
+    duracaoMs: 0,
+    concorrenciaObservada: null,
+    clienteId: clientesDados[0] || "",
+    origem: dados.origem || "",
+    origemTipo: dados.origemTipo || "",
+    sessaoId: dados.sessaoId || "",
+    grupoId: dados.grupoId || "",
+    tamanhoTextoOriginal: String(dados.textoOriginal || "").length
+  });
+
   try {
-    const linksDados = Array.isArray(dados.linksExtraidos) ? dados.linksExtraidos : [];
     const temRedirectConhecido = linksDados.some(linkRedirectPermitidoRadar);
     const temIdentidadeCanonica = linksDados.some(link =>
       Boolean(camposIdentidadeCanonicaOferta({ urlOriginal: link, linkOriginal: link }).chaveCanonica)
@@ -12732,10 +12752,50 @@ async function registrarEventoBrutoEngineRadar(dados = {}) {
       : { dados, redirectsRadar: [] };
     const dadosEngine = preparacao.dados;
     const resultado = await registrarEventoBruto(dadosEngine, {
-      clientes: listarClientesEngineRadar(dadosEngine)
+      clientes: listarClientesEngineRadar(dadosEngine),
+      perf: {
+        rodadaId,
+        clienteId: clientesDados[0] || "",
+        origem: dadosEngine.origem || "",
+        origemTipo: dadosEngine.origemTipo || "",
+        sessaoId: dadosEngine.sessaoId || "",
+        grupoId: dadosEngine.grupoId || "",
+        indiceItem: 1,
+        totalItens: linksDados.length || 1
+      }
+    });
+    console.log("[PERF ENGINE BLOCO EVENTOS FIM]", {
+      rodadaId,
+      funcao: "registrarEventoBrutoEngineRadar",
+      arquivo: "index.js",
+      totalItens: linksDados.length || 1,
+      processados: 1,
+      sucesso: Boolean(resultado.ok),
+      duracaoMs: Math.round(Number(process.hrtime.bigint() - inicioBloco) / 1e6),
+      concorrenciaObservada: null,
+      clienteId: clientesDados[0] || "",
+      origem: dadosEngine.origem || "",
+      origemTipo: dadosEngine.origemTipo || "",
+      sessaoId: dadosEngine.sessaoId || "",
+      grupoId: dadosEngine.grupoId || ""
     });
     return { ...resultado, redirectsRadar: preparacao.redirectsRadar };
   } catch (e) {
+    console.log("[PERF ENGINE BLOCO EVENTOS FIM]", {
+      rodadaId,
+      funcao: "registrarEventoBrutoEngineRadar",
+      arquivo: "index.js",
+      totalItens: linksDados.length || 1,
+      processados: 0,
+      sucesso: false,
+      duracaoMs: Math.round(Number(process.hrtime.bigint() - inicioBloco) / 1e6),
+      concorrenciaObservada: null,
+      clienteId: clientesDados[0] || "",
+      origem: dados.origem || "",
+      origemTipo: dados.origemTipo || "",
+      sessaoId: dados.sessaoId || "",
+      grupoId: dados.grupoId || ""
+    });
     console.log("[ENGINE-EVENTO-BRUTO-ERRO]", {
       motivo: "radar_chamada_falhou",
       erro: e.message
@@ -22083,7 +22143,6 @@ setInterval(() => {
   }
 
 }, 10 * 1000);
-
 
 
 

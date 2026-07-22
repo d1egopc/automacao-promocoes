@@ -13,6 +13,40 @@ const {
   logEngineEventoBrutoErro
 } = require("./logger");
 
+let proximoIdOperacaoEventoBruto = 1;
+let chamadasAtivasEventoBruto = 0;
+
+function perfMsEventoBruto(inicio) {
+  return Number(process.hrtime.bigint() - inicio) / 1e6;
+}
+
+function criarOperacaoIdEventoBruto() {
+  return `evento_bruto_${Date.now()}_${proximoIdOperacaoEventoBruto++}`;
+}
+
+function logPerfEventoBruto(tag, payload = {}) {
+  console.log(tag, {
+    operacaoId: payload.operacaoId || "",
+    rodadaId: payload.rodadaId || "",
+    clienteId: payload.clienteId || "",
+    origem: payload.origem || "",
+    origemTipo: payload.origemTipo || "",
+    sessaoId: payload.sessaoId || "",
+    grupoId: payload.grupoId || "",
+    tamanhoTextoOriginal: Number(payload.tamanhoTextoOriginal || 0),
+    indiceItem: Number(payload.indiceItem || 0),
+    totalItens: Number(payload.totalItens || 0),
+    chamadasAtivasDaOperacao: Number(payload.chamadasAtivasDaOperacao || 0),
+    timestamp: payload.timestamp || new Date().toISOString(),
+    duracaoTotalMs: payload.duracaoTotalMs,
+    tempoPoolMs: payload.tempoPoolMs,
+    tempoSqlMs: payload.tempoSqlMs,
+    sucesso: payload.sucesso,
+    encontrouDuplicado: payload.encontrouDuplicado,
+    erroMensagem: payload.erroMensagem || ""
+  });
+}
+
 function dominioUrl(url = "") {
   try {
     return new URL(String(url || "")).hostname.toLowerCase();
@@ -35,21 +69,68 @@ function marketplacePrincipal(links = []) {
   return (links || []).map(detectarMarketplaceLink).find(Boolean) || "";
 }
 
-async function existeEventoDuplicado(evento = {}) {
-  const resultado = await queryEngine(
-    `SELECT id
-       FROM engine_eventos_brutos
-      WHERE COALESCE(grupo_id, '') = COALESCE($1, '')
-        AND COALESCE(texto_original, '') = COALESCE($2, '')
-        AND links_extraidos = $3::jsonb
-        AND criado_em >= NOW() - INTERVAL '5 minutes'
-      ORDER BY id DESC
-      LIMIT 1`,
-    [evento.grupoId, evento.textoOriginal, JSON.stringify(evento.linksExtraidos)]
-  );
+async function existeEventoDuplicado(evento = {}, contextoPerf = {}) {
+  const inicio = process.hrtime.bigint();
+  const operacaoId = criarOperacaoIdEventoBruto();
+  chamadasAtivasEventoBruto += 1;
+  const contextoLog = {
+    operacaoId,
+    rodadaId: contextoPerf.rodadaId || "",
+    clienteId: contextoPerf.clienteId || "",
+    origem: contextoPerf.origem || evento.origem || "",
+    origemTipo: contextoPerf.origemTipo || evento.origemTipo || "",
+    sessaoId: contextoPerf.sessaoId || evento.sessaoId || "",
+    grupoId: contextoPerf.grupoId || evento.grupoId || "",
+    tamanhoTextoOriginal: String(evento.textoOriginal || "").length,
+    indiceItem: contextoPerf.indiceItem || 0,
+    totalItens: contextoPerf.totalItens || 1,
+    chamadasAtivasDaOperacao: chamadasAtivasEventoBruto
+  };
 
-  if (!resultado.ok) return null;
-  return resultado.resultado.rows[0] || null;
+  logPerfEventoBruto("[PERF ENGINE EVENTO BRUTO INICIO]", contextoLog);
+
+  try {
+    const resultado = await queryEngine(
+      `SELECT id
+         FROM engine_eventos_brutos
+        WHERE COALESCE(grupo_id, '') = COALESCE($1, '')
+          AND COALESCE(texto_original, '') = COALESCE($2, '')
+          AND links_extraidos = $3::jsonb
+          AND criado_em >= NOW() - INTERVAL '5 minutes'
+        ORDER BY id DESC
+        LIMIT 1`,
+      [evento.grupoId, evento.textoOriginal, JSON.stringify(evento.linksExtraidos)]
+    );
+
+    const duplicado = resultado.ok ? (resultado.resultado.rows[0] || null) : null;
+    chamadasAtivasEventoBruto = Math.max(0, chamadasAtivasEventoBruto - 1);
+    logPerfEventoBruto("[PERF ENGINE EVENTO BRUTO FIM]", {
+      ...contextoLog,
+      chamadasAtivasDaOperacao: chamadasAtivasEventoBruto,
+      duracaoTotalMs: Math.round(perfMsEventoBruto(inicio)),
+      tempoPoolMs: resultado.metricas?.tempoPoolMs ?? null,
+      tempoSqlMs: resultado.metricas?.tempoSqlMs ?? null,
+      sucesso: Boolean(resultado.ok),
+      encontrouDuplicado: Boolean(duplicado),
+      erroMensagem: resultado.ok ? "" : String(resultado.erro || resultado.motivo || "").slice(0, 180)
+    });
+
+    if (!resultado.ok) return null;
+    return duplicado;
+  } catch (e) {
+    chamadasAtivasEventoBruto = Math.max(0, chamadasAtivasEventoBruto - 1);
+    logPerfEventoBruto("[PERF ENGINE EVENTO BRUTO FIM]", {
+      ...contextoLog,
+      chamadasAtivasDaOperacao: chamadasAtivasEventoBruto,
+      duracaoTotalMs: Math.round(perfMsEventoBruto(inicio)),
+      tempoPoolMs: null,
+      tempoSqlMs: null,
+      sucesso: false,
+      encontrouDuplicado: false,
+      erroMensagem: String(e.message || "erro_inesperado").slice(0, 180)
+    });
+    throw e;
+  }
 }
 
 function localizarRedirectRadar(metadata = {}, linkResolvido = "") {
@@ -102,7 +183,14 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
   const marketplaceDetectado = eventoBruto.marketplaceDetectado || eventoBruto.marketplace_detectado || marketplacePrincipal(evento.linksExtraidos);
 
   try {
-    const duplicado = await existeEventoDuplicado(evento);
+    const duplicado = await existeEventoDuplicado(evento, {
+      ...(opcoes.perf || {}),
+      clienteId: opcoes.perf?.clienteId || (Array.isArray(opcoes.clientes) ? opcoes.clientes[0] : ""),
+      origem: evento.origem,
+      origemTipo: evento.origemTipo,
+      sessaoId: evento.sessaoId,
+      grupoId: evento.grupoId
+    });
     if (duplicado) {
       logEngineEventoBrutoDuplicado({ id: duplicado.id, grupoId: evento.grupoId, links: evento.linksExtraidos.length });
       return { ok: true, duplicado: true, id: duplicado.id };
@@ -167,4 +255,3 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
 module.exports = {
   registrarEventoBruto
 };
-
