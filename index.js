@@ -629,6 +629,7 @@ aliexpress: {
 
 let fila = [];
 let enviandoAgoraPorCliente = {};
+let processadorFilaGlobalRodando = false;
 let controleEnvio = {}; // por cliente
 let controleIntervaloEnvioPorCliente = {};
 let historicoOfertas = {};
@@ -5069,10 +5070,39 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
 // ================= FUNCAO PROCESSA FILA =================
 
+function logProcessarFilaResumo(dados = {}) {
+  console.log("[FILA-PROCESSAR-RESUMO]", JSON.stringify({
+    clienteId: dados.clienteId || "",
+    ofertasExaminadas: Number(dados.ofertasExaminadas || 0),
+    ofertaSelecionada: dados.ofertaSelecionada || "",
+    motivoPulo: dados.motivoPulo || "",
+    duracaoMs: Number(dados.duracaoMs || 0),
+    cpuMs: Number(dados.cpuMs || 0),
+    sobreposicaoEvitada: dados.sobreposicaoEvitada === true
+  }));
+}
+
 async function processarFila(clienteIdAlvo = null) {
   const clienteFila = clienteIdAlvo || "admin";
+  const inicioProcessarFila = process.hrtime.bigint();
+  const cpuInicioProcessarFila = process.cpuUsage();
+  const resumoFila = {
+    clienteId: clienteFila,
+    ofertasExaminadas: 0,
+    ofertaSelecionada: "",
+    motivoPulo: "",
+    sobreposicaoEvitada: false
+  };
 
   if (enviandoAgoraPorCliente[clienteFila]) {
+    resumoFila.motivoPulo = "envio_em_execucao";
+    resumoFila.sobreposicaoEvitada = true;
+    const cpu = process.cpuUsage(cpuInicioProcessarFila);
+    logProcessarFilaResumo({
+      ...resumoFila,
+      duracaoMs: Math.round(perfTempoMs(inicioProcessarFila)),
+      cpuMs: Math.round((cpu.user + cpu.system) / 1000)
+    });
     console.log("[PERFORMANCE-RUNNER-SKIP]", {
       runner: "processarFila",
       clienteId: clienteFila,
@@ -5094,6 +5124,8 @@ async function processarFila(clienteIdAlvo = null) {
 if (!oferta) {
   const diagnosticoFila = diagnosticosFilaPorCliente.get(String(clienteFila)) ||
     diagnosticarFilaCliente(clienteFila);
+  resumoFila.ofertasExaminadas = diagnosticoFila.pendentesTotal || 0;
+  resumoFila.motivoPulo = diagnosticoFila.motivoPrincipal || "sem_oferta_elegivel";
 
   if (deveLogarThrottle(`fila-processar-sem-elegivel:${clienteFila}`)) {
     logOptimus("FILA", "Nenhuma oferta pendente elegível", {
@@ -5106,6 +5138,9 @@ if (!oferta) {
 }
 
 const clienteId = oferta.clienteId || "admin";
+const diagnosticoOfertaSelecionada = diagnosticosFilaPorCliente.get(String(clienteFila));
+resumoFila.ofertasExaminadas = diagnosticoOfertaSelecionada?.pendentesTotal || 1;
+resumoFila.ofertaSelecionada = oferta.id || oferta.engineOfertaId || oferta.ofertaId || "";
 
 if (oferta.sessaoId === "sessao1") {
   oferta.sessaoId = normalizarSessaoId(clienteId, "sessao1");
@@ -5119,11 +5154,13 @@ const clienteAtivo =
   configCliente.automacaoAtiva === true;
 
 if (!clienteAtivo) {
+  resumoFila.motivoPulo = "automacao_desligada";
   logOptimus("FILA", "Automacao desligada para cliente", { clienteId });
   return;
 }
 
     if (!podeRodarAgora()) {
+      resumoFila.motivoPulo = "fora_janela_global";
       return;
     }
 
@@ -5302,6 +5339,7 @@ for (const itemRejeitado of analiseDestinosFila.rejeitados) {
   });
 
 if (!destinosCompativeis.length) {
+  resumoFila.motivoPulo = analiseDestinosFila.motivoRetencao || "sem_destino_compativel";
   marcarOfertaRetida(oferta, analiseDestinosFila.motivoRetencao);
   salvarFila(clienteId);
   logExecutorDestinoDiagnostico({
@@ -5576,6 +5614,7 @@ const decisaoSemEnvio = decidirStatusExecutorSemEnvio({
 const dentroJanelaExecutor = destinosCompativeis.some(item => destinoDentroHorario(item.destino));
 
 if (!enviouParaAlgumDestino && decisaoSemEnvio.statusFinal === "pendente") {
+  resumoFila.motivoPulo = decisaoSemEnvio.motivoSemEnvio || "aguardando_destino";
   oferta.status = "pendente";
   oferta.statusDetalhe = `Aguardando envio: ${decisaoSemEnvio.motivoSemEnvio}`;
   oferta.erro = "";
@@ -5604,21 +5643,11 @@ if (!enviouParaAlgumDestino && decisaoSemEnvio.statusFinal === "pendente") {
     motivo: decisaoSemEnvio.motivoSemEnvio
   });
 
-  if (pulouPorIntervalo && !pulouPorHorario && !pulouPorLimiteDiario) {
-    setTimeout(() => {
-      processarFila(clienteId).catch(e => {
-        logOptimus("ERRO", "Falha ao continuar fila apos intervalo", {
-          clienteId,
-          erro: e.message
-        });
-      });
-    }, 250);
-  }
-
   return;
 }
 
 if (!enviouParaAlgumDestino) {
+  resumoFila.motivoPulo = decisaoSemEnvio.motivoSemEnvio || "nenhum_destino_confirmou_envio";
   logOptimus("ERRO", "Oferta nao enviada; marcando erro tecnico", {
     titulo: oferta.titulo || oferta.nome || ""
   });
@@ -5647,6 +5676,7 @@ if (!enviouParaAlgumDestino) {
 ultimoEnvioFila = Date.now();
 
 oferta.status = "enviado";
+resumoFila.motivoPulo = "";
 oferta.proximaTentativaEnvioEm = "";
 
 oferta.enviadoEm = new Date().toLocaleString("pt-BR", {
@@ -5679,6 +5709,7 @@ console.log("[ENVIO] Enviado com controle de tempo");
 
  } catch (e) {
   okPerf = false;
+  resumoFila.motivoPulo = `erro:${e.message || "erro"}`;
   console.log("[ERRO] ERRO:", e.message);
 
   if (oferta) {
@@ -5701,6 +5732,12 @@ console.log("[ENVIO] Enviado com controle de tempo");
 
 } finally {
   enviandoAgoraPorCliente[clienteFila] = false;
+  const cpu = process.cpuUsage(cpuInicioProcessarFila);
+  logProcessarFilaResumo({
+    ...resumoFila,
+    duracaoMs: Math.round(perfTempoMs(inicioProcessarFila)),
+    cpuMs: Math.round((cpu.user + cpu.system) / 1000)
+  });
   finalizarPerf(okPerf, {
     clienteId: clienteFila,
     ofertaId: oferta?.id || ""
@@ -22218,10 +22255,59 @@ if (!global.__optimusOrquestradorMarketplacesIntervalRegistrado) {
 
 let ultimoLogPausaFila = 0;
 
-setInterval(() => {
+function cederEventLoopFila() {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
+function avaliarPuloRapidoClienteFila(usuario = {}) {
+  const clienteId = String(usuario?.id || "").trim();
+  if (!clienteId) return { motivo: "cliente_invalido", pendentes: 0 };
+  if (!usuario?.ativo) return { motivo: "usuario_inativo", pendentes: 0 };
+
+  const configCliente = configsPorCliente?.[clienteId] || config;
+  if (configCliente.automacaoAtiva !== true) {
+    return { motivo: "automacao_desligada", pendentes: 0 };
+  }
+
+  if (!usuarioTemCreditos(clienteId, 1)) {
+    return { motivo: "sem_creditos", pendentes: 0 };
+  }
+
+  const agora = Date.now();
+  const pendentes = fila.filter(item => {
+    if (String(item?.clienteId || "admin") !== clienteId) return false;
+    if (item?.status !== "pendente") return false;
+    const proxima = item.proximaTentativaEnvioEm ? Date.parse(item.proximaTentativaEnvioEm) : NaN;
+    return !(Number.isFinite(proxima) && proxima > agora);
+  }).length;
+
+  if (!pendentes) {
+    return { motivo: "sem_pendentes", pendentes };
+  }
+
+  const destinos = obterDestinosInteligentesCliente(clienteId, configCliente);
+  const temDestinoAtivo = destinos.some(destino => destino?.ativo !== false);
+  if (!temDestinoAtivo) {
+    return { motivo: "sem_destino_ativo", pendentes };
+  }
+
+  return { motivo: "", pendentes };
+}
+
+async function rodarProcessadorFilaGlobal() {
+  if (processadorFilaGlobalRodando) {
+    console.log("[FILA-PROCESSADOR-GLOBAL-SKIP]", JSON.stringify({
+      motivo: "rodada_em_execucao",
+      sobreposicaoEvitada: true
+    }));
+    return;
+  }
+
+  processadorFilaGlobalRodando = true;
   const finalizarPerf = iniciarPerfBackground("fila_intervalo_disparo");
   let okPerf = true;
-  let usuariosDisparados = 0;
+  let usuariosAvaliados = 0;
+  let usuariosPulados = 0;
   try {
   if (!podeRodarAgora()) {
     const agora = Date.now();
@@ -22235,26 +22321,46 @@ setInterval(() => {
   }
 
   for (const usuario of usuarios) {
-    if (!usuario?.ativo) continue;
+    const clienteId = String(usuario?.id || "").trim();
+    const puloRapido = avaliarPuloRapidoClienteFila(usuario);
+    if (puloRapido.motivo) {
+      usuariosPulados += 1;
+      logProcessarFilaResumo({
+        clienteId,
+        ofertasExaminadas: puloRapido.pendentes,
+        motivoPulo: puloRapido.motivo,
+        duracaoMs: 0,
+        cpuMs: 0,
+        sobreposicaoEvitada: false
+      });
+      continue;
+    }
 
-    usuariosDisparados += 1;
-    processarFila(usuario.id);
+    usuariosAvaliados += 1;
+    await processarFila(clienteId);
+    await cederEventLoopFila();
   }
   } catch (e) {
     okPerf = false;
     throw e;
   } finally {
+    processadorFilaGlobalRodando = false;
     finalizarPerf(okPerf, {
-      usuariosDisparados,
+      usuariosDisparados: usuariosAvaliados,
+      usuariosAvaliados,
+      usuariosPulados,
       usuariosTotal: Array.isArray(usuarios) ? usuarios.length : 0
     });
   }
+}
 
+setInterval(() => {
+  rodarProcessadorFilaGlobal().catch(e => {
+    logOptimus("ERRO", "Falha no processador global da fila", {
+      erro: e.message
+    });
+  });
 }, 10 * 1000);
-
-
-
-
 
 
 
