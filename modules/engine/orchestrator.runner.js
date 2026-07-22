@@ -25,6 +25,10 @@ function memoriaPerfResumo() {
   };
 }
 
+function logPerfBackground(tag, payload) {
+  console.log(`${tag} ${JSON.stringify(payload || {})}`);
+}
+
 function iniciarPerfBackground(rotina = "background") {
   const nomeRotina = String(rotina || "background");
   const rodadaId = criarRodadaIdPerf();
@@ -37,7 +41,7 @@ function iniciarPerfBackground(rotina = "background") {
   perfBackgroundAtivos.set(nomeRotina, chamadasAtivas);
 
   if (chamadasAtivas > 1) {
-    console.log("[PERF BACKGROUND SOBREPOSICAO]", {
+    logPerfBackground("[PERF BACKGROUND SOBREPOSICAO]", {
       rotina: nomeRotina,
       chamadasAtivas
     });
@@ -46,7 +50,7 @@ function iniciarPerfBackground(rotina = "background") {
   const timerInicio = setTimeout(() => {
     if (finalizado) return;
     inicioLogado = true;
-    console.log("[PERF BACKGROUND INICIO]", {
+    logPerfBackground("[PERF BACKGROUND INICIO]", {
       rotina: nomeRotina,
       rodadaId,
       chamadasAtivas,
@@ -70,7 +74,7 @@ function iniciarPerfBackground(rotina = "background") {
     if (!inicioLogado && duracaoMs < PERF_BACKGROUND_MIN_MS) return;
 
     const cpu = process.cpuUsage(cpuInicio);
-    console.log("[PERF BACKGROUND FIM]", {
+    logPerfBackground("[PERF BACKGROUND FIM]", {
       rotina: nomeRotina,
       rodadaId,
       duracaoMs,

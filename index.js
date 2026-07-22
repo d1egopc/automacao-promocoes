@@ -3663,6 +3663,10 @@ const PERF_BACKGROUND_MIN_MS = Number(process.env.PERF_BACKGROUND_MIN_MS || 200)
 const perfBackgroundAtivos = new Map();
 let proximoIdRodadaBackground = 1;
 
+function logPerfBackground(tag, payload) {
+  console.log(`${tag} ${JSON.stringify(payload || {})}`);
+}
+
 function iniciarPerfBackground(rotina = "background") {
   const nomeRotina = String(rotina || "background");
   const rodadaId = `bg_${Date.now()}_${proximoIdRodadaBackground++}`;
@@ -3675,7 +3679,7 @@ function iniciarPerfBackground(rotina = "background") {
   perfBackgroundAtivos.set(nomeRotina, chamadasAtivas);
 
   if (PERF_DIAGNOSTICO_ATIVO && chamadasAtivas > 1) {
-    console.log("[PERF BACKGROUND SOBREPOSICAO]", {
+    logPerfBackground("[PERF BACKGROUND SOBREPOSICAO]", {
       rotina: nomeRotina,
       chamadasAtivas
     });
@@ -3684,7 +3688,7 @@ function iniciarPerfBackground(rotina = "background") {
   const timerInicio = setTimeout(() => {
     if (finalizado || !PERF_DIAGNOSTICO_ATIVO) return;
     inicioLogado = true;
-    console.log("[PERF BACKGROUND INICIO]", {
+    logPerfBackground("[PERF BACKGROUND INICIO]", {
       rotina: nomeRotina,
       rodadaId,
       chamadasAtivas,
@@ -3709,7 +3713,7 @@ function iniciarPerfBackground(rotina = "background") {
     if (!PERF_DIAGNOSTICO_ATIVO || (!inicioLogado && duracaoMs < PERF_BACKGROUND_MIN_MS)) return;
 
     const cpu = process.cpuUsage(cpuInicio);
-    console.log("[PERF BACKGROUND FIM]", {
+    logPerfBackground("[PERF BACKGROUND FIM]", {
       rotina: nomeRotina,
       rodadaId,
       duracaoMs,
@@ -22247,7 +22251,6 @@ setInterval(() => {
   }
 
 }, 10 * 1000);
-
 
 
 
