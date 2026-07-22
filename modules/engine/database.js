@@ -8,6 +8,11 @@ const {
 
 let pool = null;
 let pgDisponivel = null;
+let poolVersao = 0;
+let ultimaRecriacaoPoolEm = 0;
+
+const ENGINE_DB_POOL_RECREATE_COOLDOWN_MS = limitarInteiroDb(process.env.ENGINE_DB_POOL_RECREATE_COOLDOWN_MS, 30000, 5000, 300000);
+
 function perfDbMs(inicio) {
   return Number(process.hrtime.bigint() - inicio) / 1e6;
 }
@@ -18,6 +23,16 @@ function logDbPerf(operacao, inicio, extra = {}) {
     tempoMs: Math.round(perfDbMs(inicio)),
     ...extra
   }));
+}
+
+function limitarInteiroDb(valor, padrao, minimo, maximo) {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero)) return padrao;
+  return Math.max(minimo, Math.min(maximo, Math.floor(numero)));
+}
+
+function logDbPool(evento, dados = {}) {
+  console.log("[PERF DB POOL]", JSON.stringify({ evento, ...dados }));
 }
 
 function tipoQueryEngine(texto = "") {
@@ -44,6 +59,66 @@ function estadoPoolEngine(clientPool, sufixo = "") {
     [`poolWaiting${sufixoFinal}`]: Number(clientPool.waitingCount || 0),
     [`poolMax${sufixoFinal}`]: Number(clientPool.options?.max || 0) || null
   };
+}
+
+function criarConfigPoolEngine() {
+  return {
+    connectionString: engineDatabaseUrl(),
+    ssl: process.env.PGSSLMODE === "disable" ? false : { rejectUnauthorized: false },
+    max: limitarInteiroDb(process.env.ENGINE_DB_POOL_MAX, 10, 1, 20),
+    connectionTimeoutMillis: limitarInteiroDb(process.env.ENGINE_DB_CONNECTION_TIMEOUT_MS, 8000, 1000, 30000),
+    idleTimeoutMillis: limitarInteiroDb(process.env.ENGINE_DB_IDLE_TIMEOUT_MS, 30000, 5000, 300000),
+    keepAlive: process.env.ENGINE_DB_KEEP_ALIVE === "0" ? false : true,
+    keepAliveInitialDelayMillis: limitarInteiroDb(process.env.ENGINE_DB_KEEP_ALIVE_INITIAL_DELAY_MS, 10000, 1000, 60000)
+  };
+}
+
+function erroConexaoDb(erroDb) {
+  const codigo = String(erroDb?.erroCodigo || "").toUpperCase();
+  const mensagem = String(erroDb?.erroMensagem || "");
+  return Boolean(
+    erroDb?.connectionTerminated ||
+    ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"].includes(codigo) ||
+    /connection terminated|timeout|timed out|connect econn|connection refused|getaddrinfo/i.test(mensagem)
+  );
+}
+
+function recriarPoolEngineSeNecessario({ clientPool, erroDb, duranteConnect = false } = {}) {
+  if (!clientPool || clientPool !== pool) return false;
+  if (!duranteConnect || !erroConexaoDb(erroDb)) return false;
+
+  const agora = Date.now();
+  const desdeUltima = agora - ultimaRecriacaoPoolEm;
+  if (desdeUltima < ENGINE_DB_POOL_RECREATE_COOLDOWN_MS) {
+    logDbPool("recriacao_pulada_cooldown", {
+      poolVersao,
+      desdeUltimaMs: desdeUltima,
+      cooldownMs: ENGINE_DB_POOL_RECREATE_COOLDOWN_MS,
+      erroCodigo: erroDb?.erroCodigo || null,
+      erroMensagem: erroDb?.erroMensagem || ""
+    });
+    return false;
+  }
+
+  ultimaRecriacaoPoolEm = agora;
+  const poolAntigo = pool;
+  pool = null;
+  logDbPool("recriacao_agendada", {
+    poolVersao,
+    motivo: "falha_ao_obter_conexao",
+    erroCodigo: erroDb?.erroCodigo || null,
+    erroMensagem: erroDb?.erroMensagem || "",
+    ...estadoPoolEngine(poolAntigo, "")
+  });
+
+  poolAntigo.end().catch((erro) => {
+    logDbPool("recriacao_end_erro", {
+      poolVersao,
+      erroMensagem: String(erro?.message || "erro_desconhecido").slice(0, 180)
+    });
+  });
+
+  return true;
 }
 
 function erroSanitizadoDb(erro) {
@@ -85,13 +160,46 @@ function getEnginePool() {
     return null;
   }
 
-  pool = new pg.Pool({
-    connectionString: engineDatabaseUrl(),
-    ssl: process.env.PGSSLMODE === "disable" ? false : { rejectUnauthorized: false }
+  const configPool = criarConfigPoolEngine();
+  poolVersao += 1;
+  pool = new pg.Pool(configPool);
+
+  logDbPool("criado", {
+    poolVersao,
+    max: configPool.max,
+    connectionTimeoutMillis: configPool.connectionTimeoutMillis,
+    idleTimeoutMillis: configPool.idleTimeoutMillis,
+    keepAlive: configPool.keepAlive,
+    keepAliveInitialDelayMillis: configPool.keepAliveInitialDelayMillis,
+    ssl: Boolean(configPool.ssl)
+  });
+
+  pool.on("connect", () => {
+    logDbPool("connect", { poolVersao, ...estadoPoolEngine(pool, "") });
+  });
+
+  pool.on("acquire", () => {
+    logDbPool("acquire", { poolVersao, ...estadoPoolEngine(pool, "") });
+  });
+
+  pool.on("remove", () => {
+    logDbPool("remove", { poolVersao, ...estadoPoolEngine(pool, "") });
   });
 
   pool.on("error", (erro) => {
-    logEngineDbErro({ motivo: "pool_error", erro: erro.message });
+    const erroDb = erroSanitizadoDb(erro);
+    const poolAtual = pool;
+    logDbPool("error", {
+      poolVersao,
+      ...erroDb,
+      ...estadoPoolEngine(poolAtual, "")
+    });
+    const poolRecriado = recriarPoolEngineSeNecessario({
+      clientPool: poolAtual,
+      erroDb,
+      duranteConnect: true
+    });
+    logEngineDbErro({ motivo: "pool_error", erro: erroDb.erroMensagem, codigo: erroDb.erroCodigo || undefined, poolRecriado });
   });
 
   return pool;
@@ -152,7 +260,12 @@ async function queryEngine(texto, params = []) {
       ...poolAntes,
       ...estadoPoolEngine(clientPool, "Depois")
     });
-    logEngineDbErro({ motivo: "query_falhou", erro: erroDb.erroMensagem, codigo: erroDb.erroCodigo || undefined });
+    const poolRecriado = recriarPoolEngineSeNecessario({
+      clientPool,
+      erroDb,
+      duranteConnect: !client
+    });
+    logEngineDbErro({ motivo: "query_falhou", erro: erroDb.erroMensagem, codigo: erroDb.erroCodigo || undefined, poolRecriado });
     return { ok: false, motivo: "query_falhou", erro: e.message };
   } finally {
     if (client) client.release();
