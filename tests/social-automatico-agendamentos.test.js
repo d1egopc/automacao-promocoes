@@ -12,6 +12,7 @@ const {
   executarAutomaticoCliente,
   executarAutomaticoTodosClientes,
   executarAgendamentosPendentesCliente,
+  limparAgendamentosConcluidosAutomaticamenteCliente,
   simularSelecaoAutomatica
 } = require("../modules/social/automatico.service");
 const { executarRodadaSchedulerAgendamentosSocial } = require("../modules/social/scheduler");
@@ -489,6 +490,66 @@ function horaSaoPaulo(input) {
   assert.ok(restantesLimpezaFuturos.some(item => item.ofertaId === "auto_publicado"), "limpeza nao remove automatico ja publicado");
   assert.ok(restantesLimpezaFuturos.some(item => item.ofertaId === "auto_passado"), "limpeza nao remove agendamento passado");
 
+  conectar("cliente_limpeza_concluidos", "limpeza_concluidos");
+  for (const [ofertaId, status] of [
+    ["limpa_publicada", "publicada"],
+    ["limpa_concluida", "concluida"],
+    ["limpa_cancelada", "cancelada"],
+    ["preserva_pendente", "pendente"],
+    ["preserva_agendada", "agendada"],
+    ["preserva_processando", "processando"],
+    ["preserva_publicando", "publicando"],
+    ["preserva_erro", "erro"]
+  ]) {
+    storage.salvarAgendamentoSocial("cliente_limpeza_concluidos", {
+      origem: "automatico",
+      tipoPublicacao: "oferta",
+      ofertaId,
+      status,
+      ativo: true,
+      concluidoEm: "2026-07-14T10:00:00.000Z",
+      agendadoPara: "2026-07-14T09:00:00.000Z"
+    });
+  }
+  writeClienteJson("cliente_limpeza_concluidos", "social-publicacoes.json", [
+    { id: "pub_historico", status: "publicada", ofertaId: "limpa_publicada" }
+  ]);
+  const limpezaConcluidos = storage.limparAgendamentosConcluidosSocial("cliente_limpeza_concluidos", {
+    agoraMs: Date.parse("2026-07-14T12:00:00.000Z")
+  });
+  assert.strictEqual(limpezaConcluidos.removidos, 3, "limpeza remove publicada, concluida e cancelada");
+  const restantesConcluidos = storage.listarAgendamentosSocial("cliente_limpeza_concluidos");
+  assert.ok(!restantesConcluidos.some(item => item.ofertaId === "limpa_publicada"), "publicada sai da agenda");
+  assert.ok(!restantesConcluidos.some(item => item.ofertaId === "limpa_concluida"), "concluida sai da agenda");
+  assert.ok(!restantesConcluidos.some(item => item.ofertaId === "limpa_cancelada"), "cancelada sai da agenda");
+  for (const ofertaId of ["preserva_pendente", "preserva_agendada", "preserva_processando", "preserva_publicando", "preserva_erro"]) {
+    assert.ok(restantesConcluidos.some(item => item.ofertaId === ofertaId), `${ofertaId} permanece na agenda`);
+  }
+  assert.strictEqual(storage.listarPublicacoesSocial("cliente_limpeza_concluidos").length, 1, "limpeza nao apaga historico de publicacoes");
+
+  const configLimpezaDefault = storage.getConfigAutomaticoSocial("cliente_limpeza_default");
+  assert.strictEqual(configLimpezaDefault.limparConcluidosAutomaticamente, false, "configuracao default nao limpa concluidos automaticamente");
+  conectar("cliente_limpeza_auto_desativada", "limpeza_auto_desativada");
+  storage.setConfigAutomaticoSocial("cliente_limpeza_auto_desativada", configAutomatico({ limparConcluidosAutomaticamente: false }));
+  storage.salvarAgendamentoSocial("cliente_limpeza_auto_desativada", {
+    origem: "automatico",
+    tipoPublicacao: "oferta",
+    ofertaId: "publicada_desativada",
+    status: "publicada",
+    ativo: true,
+    concluidoEm: "2026-07-14T10:00:00.000Z",
+    agendadoPara: "2026-07-14T09:00:00.000Z"
+  });
+  const limpezaAutoDesativada = limparAgendamentosConcluidosAutomaticamenteCliente({
+    clienteId: "cliente_limpeza_auto_desativada",
+    agora: AGORA
+  });
+  assert.strictEqual(limpezaAutoDesativada.removidos, 0, "limpeza automatica desativada nao remove concluidos");
+  assert.ok(
+    storage.listarAgendamentosSocial("cliente_limpeza_auto_desativada").some(item => item.ofertaId === "publicada_desativada"),
+    "scheduler/limpeza automatica preserva concluidos quando toggle esta desligado"
+  );
+
   conectar("cliente_prioridade", "prioridade");
   writeClienteJson("cliente_prioridade", "fila.json", [
     oferta("sem_cupom_score_alto", { score: 99, cupom: "", criadoEm: "2026-07-14T11:55:00.000Z" }),
@@ -695,6 +756,33 @@ function horaSaoPaulo(input) {
   assert.ok(segundaRodadaSchedulerOficial.automatico.totalAgendados >= 0);
   assert.strictEqual(agendamentosSchedulerOficialAposSegunda.length, 1, "duas rodadas do scheduler nao duplicam");
 
+  conectar("cliente_scheduler_limpeza_desativada", "scheduler_limpeza_desativada");
+  storage.setConfigAutomaticoSocial("cliente_scheduler_limpeza_desativada", configAutomatico({
+    ativo: false,
+    limparConcluidosAutomaticamente: false
+  }));
+  storage.salvarAgendamentoSocial("cliente_scheduler_limpeza_desativada", {
+    origem: "automatico",
+    tipoPublicacao: "oferta",
+    ofertaId: "scheduler_publicada_desativada",
+    status: "publicada",
+    ativo: true,
+    concluidoEm: "2026-07-14T10:00:00.000Z",
+    agendadoPara: "2026-07-14T09:00:00.000Z"
+  });
+  const rodadaSchedulerLimpezaDesativada = await executarRodadaSchedulerAgendamentosSocial({
+    agora: AGORA,
+    renderizadorArte: rendererSchedulerOficial,
+    httpClient: httpSchedulerOficial,
+    polling: POLLING_TESTE
+  });
+  assert.ok(rodadaSchedulerLimpezaDesativada.limpezaConcluidos, "scheduler reporta etapa de limpeza de concluidos");
+  assert.strictEqual(rodadaSchedulerLimpezaDesativada.totalConcluidosRemovidos, 0, "scheduler nao remove concluidos quando limpeza esta desativada");
+  assert.ok(
+    storage.listarAgendamentosSocial("cliente_scheduler_limpeza_desativada").some(item => item.ofertaId === "scheduler_publicada_desativada"),
+    "scheduler preserva concluido quando limpeza automatica esta desligada"
+  );
+
   conectar("cliente_scheduler_desligado", "scheduler_desligado");
   writeClienteJson("cliente_scheduler_desligado", "fila.json", [
     oferta("scheduler_desligado_auto", { cupom: "OFF", score: 99 })
@@ -847,6 +935,68 @@ function horaSaoPaulo(input) {
     ["23:44", "00:24", "01:04"],
     "janela 07:00-02:00 atravessa a meia-noite local"
   );
+
+  assert.strictEqual(
+    storage.chaveDiaOperacionalSocial("2026-07-21T00:46:00.000Z"),
+    "2026-07-20",
+    "23h do Brasil nao ocupa o dia UTC seguinte"
+  );
+  assert.strictEqual(
+    storage.chaveDiaOperacionalSocial("2026-07-21T03:02:00.000Z"),
+    "2026-07-21",
+    "00h02 do Brasil ocupa o proprio dia operacional"
+  );
+  assert.strictEqual(
+    storage.chaveDiaOperacionalSocial("2026-07-21T15:00:00.000Z"),
+    "2026-07-21",
+    "data comum durante o dia mantem a chave operacional"
+  );
+
+  conectar("cliente_dia_operacional_sp", "dia_operacional_sp");
+  const publicadasNoiteAnterior = [
+    "2026-07-21T00:46:00.000Z",
+    "2026-07-21T01:31:00.000Z",
+    "2026-07-21T02:16:00.000Z"
+  ];
+  const publicadasDiaAtual = [
+    "2026-07-21T03:02:00.000Z",
+    dataSaoPauloUtc(2026, 7, 21, 8, 1).toISOString(),
+    dataSaoPauloUtc(2026, 7, 21, 8, 45).toISOString()
+  ];
+  for (const [idx, horario] of [...publicadasNoiteAnterior, ...publicadasDiaAtual].entries()) {
+    storage.salvarAgendamentoSocial("cliente_dia_operacional_sp", {
+      origem: "automatico",
+      tipoPublicacao: "oferta",
+      ofertaId: `dia_operacional_publicada_${idx}`,
+      status: "publicada",
+      ativo: true,
+      agendadoPara: horario,
+      publicadoEm: horario
+    });
+  }
+  writeClienteJson("cliente_dia_operacional_sp", "fila.json", [
+    oferta("dia_operacional_1", { criadoEm: "2026-07-21T11:50:00.000Z" }),
+    oferta("dia_operacional_2", { criadoEm: "2026-07-21T11:51:00.000Z" }),
+    oferta("dia_operacional_3", { criadoEm: "2026-07-21T11:52:00.000Z" }),
+    oferta("dia_operacional_4", { criadoEm: "2026-07-21T11:53:00.000Z" })
+  ]);
+  storage.setConfigAutomaticoSocial("cliente_dia_operacional_sp", configAutomatico({
+    quantidadeDiaria: 6,
+    intervaloMinimoMinutos: 45,
+    idadeMaximaHoras: 48,
+    janelaFuncionamento: { inicio: "08:00", fim: "23:50" }
+  }));
+  const rodadaDiaOperacional = await executarAutomaticoCliente({
+    clienteId: "cliente_dia_operacional_sp",
+    agora: dataSaoPauloUtc(2026, 7, 21, 9, 0)
+  });
+  assert.strictEqual(rodadaDiaOperacional.agendamentosCriados.length, 3, "somente publicadas do dia civil brasileiro ocupam a cota de 21/07");
+  const ocupacaoDiaOperacional = storage
+    .listarAgendamentosSocial("cliente_dia_operacional_sp")
+    .filter(item => item.origem === "automatico")
+    .filter(item => ["agendada", "publicada"].includes(item.status))
+    .filter(item => storage.chaveDiaOperacionalSocial(item.agendadoPara || item.horario || item.publicadoEm) === "2026-07-21");
+  assert.strictEqual(ocupacaoDiaOperacional.length, 6, "dia operacional em America/Sao_Paulo fecha exatamente no limite configurado");
 
   console.log("social-automatico-agendamentos: ok");
 })().catch(erro => {
