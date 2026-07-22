@@ -9,9 +9,78 @@ const LIMITES_PADRAO = {
 };
 
 let proximoIdRodadaPerf = 1;
+const PERF_BACKGROUND_MIN_MS = Number(process.env.PERF_BACKGROUND_MIN_MS || 200);
+const perfBackgroundAtivos = new Map();
 
 function criarRodadaIdPerf() {
   return `engine_${Date.now()}_${proximoIdRodadaPerf++}`;
+}
+
+function memoriaPerfResumo() {
+  const memoria = process.memoryUsage();
+  return {
+    heapUsedMb: Math.round(memoria.heapUsed / 1024 / 1024),
+    heapTotalMb: Math.round(memoria.heapTotal / 1024 / 1024),
+    rssMb: Math.round(memoria.rss / 1024 / 1024)
+  };
+}
+
+function iniciarPerfBackground(rotina = "background") {
+  const nomeRotina = String(rotina || "background");
+  const rodadaId = criarRodadaIdPerf();
+  const inicioHr = process.hrtime.bigint();
+  const cpuInicio = process.cpuUsage();
+  const chamadasAtivas = (perfBackgroundAtivos.get(nomeRotina) || 0) + 1;
+  let finalizado = false;
+  let inicioLogado = false;
+
+  perfBackgroundAtivos.set(nomeRotina, chamadasAtivas);
+
+  if (chamadasAtivas > 1) {
+    console.log("[PERF BACKGROUND SOBREPOSICAO]", {
+      rotina: nomeRotina,
+      chamadasAtivas
+    });
+  }
+
+  const timerInicio = setTimeout(() => {
+    if (finalizado) return;
+    inicioLogado = true;
+    console.log("[PERF BACKGROUND INICIO]", {
+      rotina: nomeRotina,
+      rodadaId,
+      chamadasAtivas,
+      iniciadoEm: new Date().toISOString()
+    });
+  }, Math.max(1, PERF_BACKGROUND_MIN_MS));
+  timerInicio.unref?.();
+
+  return function finalizarPerfBackground(ok = true, extra = {}) {
+    if (finalizado) return;
+    finalizado = true;
+    clearTimeout(timerInicio);
+    const atuais = Math.max(0, (perfBackgroundAtivos.get(nomeRotina) || 1) - 1);
+    if (atuais > 0) {
+      perfBackgroundAtivos.set(nomeRotina, atuais);
+    } else {
+      perfBackgroundAtivos.delete(nomeRotina);
+    }
+
+    const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicioHr) / 1e6);
+    if (!inicioLogado && duracaoMs < PERF_BACKGROUND_MIN_MS) return;
+
+    const cpu = process.cpuUsage(cpuInicio);
+    console.log("[PERF BACKGROUND FIM]", {
+      rotina: nomeRotina,
+      rodadaId,
+      duracaoMs,
+      cpuMs: Math.round((cpu.user + cpu.system) / 1000),
+      chamadasAtivas: atuais,
+      memoria: memoriaPerfResumo(),
+      ok: ok !== false,
+      ...extra
+    });
+  };
 }
 
 function resumoItensProcessados(resultado) {
@@ -96,6 +165,8 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
   }
 
   engineOrquestradorRodando = true;
+  const finalizarPerfBackground = iniciarPerfBackground("engine_v2_orquestrador");
+  let okPerfBackground = true;
   const inicio = Date.now();
   const rodadaId = criarRodadaIdPerf();
   const limitesRodada = { ...LIMITES_PADRAO, ...(limites || {}) };
@@ -247,6 +318,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     console.log("[ENGINE-ORQUESTRADOR-RESUMO]", resumo);
     return resumo;
   } catch (e) {
+    okPerfBackground = false;
     logPerfEtapaEngine({
       rodadaId,
       etapa: "erro_rodada",
@@ -260,6 +332,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     return { ok: false, erro: e.message };
   } finally {
     engineOrquestradorRodando = false;
+    finalizarPerfBackground(okPerfBackground, { engineRodadaId: rodadaId });
   }
 }
 

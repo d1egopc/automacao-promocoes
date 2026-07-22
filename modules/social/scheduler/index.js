@@ -6,6 +6,76 @@ const { logSocial, logErroSocial } = require("../logs");
 
 let intervaloScheduler = null;
 let executando = false;
+let proximoIdRodadaBackground = 1;
+const PERF_BACKGROUND_MIN_MS = Number(process.env.PERF_BACKGROUND_MIN_MS || 200);
+const perfBackgroundAtivos = new Map();
+
+function memoriaPerfResumo() {
+  const memoria = process.memoryUsage();
+  return {
+    heapUsedMb: Math.round(memoria.heapUsed / 1024 / 1024),
+    heapTotalMb: Math.round(memoria.heapTotal / 1024 / 1024),
+    rssMb: Math.round(memoria.rss / 1024 / 1024)
+  };
+}
+
+function iniciarPerfBackground(rotina = "background") {
+  const nomeRotina = String(rotina || "background");
+  const rodadaId = `bg_${Date.now()}_${proximoIdRodadaBackground++}`;
+  const inicioHr = process.hrtime.bigint();
+  const cpuInicio = process.cpuUsage();
+  const chamadasAtivas = (perfBackgroundAtivos.get(nomeRotina) || 0) + 1;
+  let finalizado = false;
+  let inicioLogado = false;
+
+  perfBackgroundAtivos.set(nomeRotina, chamadasAtivas);
+
+  if (chamadasAtivas > 1) {
+    console.log("[PERF BACKGROUND SOBREPOSICAO]", {
+      rotina: nomeRotina,
+      chamadasAtivas
+    });
+  }
+
+  const timerInicio = setTimeout(() => {
+    if (finalizado) return;
+    inicioLogado = true;
+    console.log("[PERF BACKGROUND INICIO]", {
+      rotina: nomeRotina,
+      rodadaId,
+      chamadasAtivas,
+      iniciadoEm: new Date().toISOString()
+    });
+  }, Math.max(1, PERF_BACKGROUND_MIN_MS));
+  timerInicio.unref?.();
+
+  return function finalizarPerfBackground(ok = true, extra = {}) {
+    if (finalizado) return;
+    finalizado = true;
+    clearTimeout(timerInicio);
+    const atuais = Math.max(0, (perfBackgroundAtivos.get(nomeRotina) || 1) - 1);
+    if (atuais > 0) {
+      perfBackgroundAtivos.set(nomeRotina, atuais);
+    } else {
+      perfBackgroundAtivos.delete(nomeRotina);
+    }
+
+    const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicioHr) / 1e6);
+    if (!inicioLogado && duracaoMs < PERF_BACKGROUND_MIN_MS) return;
+
+    const cpu = process.cpuUsage(cpuInicio);
+    console.log("[PERF BACKGROUND FIM]", {
+      rotina: nomeRotina,
+      rodadaId,
+      duracaoMs,
+      cpuMs: Math.round((cpu.user + cpu.system) / 1000),
+      chamadasAtivas: atuais,
+      memoria: memoriaPerfResumo(),
+      ok: ok !== false,
+      ...extra
+    });
+  };
+}
 
 function payloadAgendamentoSocialPadrao() {
   return {
@@ -40,6 +110,8 @@ async function executarRodadaSchedulerAgendamentosSocial({
   }
 
   executando = true;
+  const finalizarPerf = iniciarPerfBackground("social_agendamentos_scheduler");
+  let okPerf = true;
   try {
     logSocial("[SOCIAL-AGENDAMENTOS-SCHEDULER-INICIO]", { agora: agora.toISOString() });
     const automatico = await executarAutomaticoTodosClientes({ agora });
@@ -64,10 +136,12 @@ async function executarRodadaSchedulerAgendamentosSocial({
     });
     return resultado;
   } catch (e) {
+    okPerf = false;
     logErroSocial({ erro: e.message, origem: "SOCIAL-AGENDAMENTOS-SCHEDULER" });
     return { ok: false, erro: e.message || "social_scheduler_agendamentos_falhou" };
   } finally {
     executando = false;
+    finalizarPerf(okPerf);
   }
 }
 

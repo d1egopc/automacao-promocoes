@@ -3659,6 +3659,69 @@ function criarPerfTimer(tag, contexto = {}) {
   };
 }
 
+const PERF_BACKGROUND_MIN_MS = Number(process.env.PERF_BACKGROUND_MIN_MS || 200);
+const perfBackgroundAtivos = new Map();
+let proximoIdRodadaBackground = 1;
+
+function iniciarPerfBackground(rotina = "background") {
+  const nomeRotina = String(rotina || "background");
+  const rodadaId = `bg_${Date.now()}_${proximoIdRodadaBackground++}`;
+  const inicioHr = process.hrtime.bigint();
+  const cpuInicio = process.cpuUsage();
+  const chamadasAtivas = (perfBackgroundAtivos.get(nomeRotina) || 0) + 1;
+  let finalizado = false;
+  let inicioLogado = false;
+
+  perfBackgroundAtivos.set(nomeRotina, chamadasAtivas);
+
+  if (PERF_DIAGNOSTICO_ATIVO && chamadasAtivas > 1) {
+    console.log("[PERF BACKGROUND SOBREPOSICAO]", {
+      rotina: nomeRotina,
+      chamadasAtivas
+    });
+  }
+
+  const timerInicio = setTimeout(() => {
+    if (finalizado || !PERF_DIAGNOSTICO_ATIVO) return;
+    inicioLogado = true;
+    console.log("[PERF BACKGROUND INICIO]", {
+      rotina: nomeRotina,
+      rodadaId,
+      chamadasAtivas,
+      iniciadoEm: new Date().toISOString()
+    });
+  }, Math.max(1, PERF_BACKGROUND_MIN_MS));
+  timerInicio.unref?.();
+
+  return function finalizarPerfBackground(ok = true, extra = {}) {
+    if (finalizado) return;
+    finalizado = true;
+    clearTimeout(timerInicio);
+
+    const atuais = Math.max(0, (perfBackgroundAtivos.get(nomeRotina) || 1) - 1);
+    if (atuais > 0) {
+      perfBackgroundAtivos.set(nomeRotina, atuais);
+    } else {
+      perfBackgroundAtivos.delete(nomeRotina);
+    }
+
+    const duracaoMs = Math.round(perfTempoMs(inicioHr));
+    if (!PERF_DIAGNOSTICO_ATIVO || (!inicioLogado && duracaoMs < PERF_BACKGROUND_MIN_MS)) return;
+
+    const cpu = process.cpuUsage(cpuInicio);
+    console.log("[PERF BACKGROUND FIM]", {
+      rotina: nomeRotina,
+      rodadaId,
+      duracaoMs,
+      cpuMs: Math.round((cpu.user + cpu.system) / 1000),
+      chamadasAtivas: atuais,
+      memoria: memoriaPerfResumo(),
+      ok: ok !== false,
+      ...extra
+    });
+  };
+}
+
 function iniciarDiagnosticoRuntime() {
   if (!PERF_DIAGNOSTICO_ATIVO || typeof monitorEventLoopDelay !== "function") return;
   const histograma = monitorEventLoopDelay({ resolution: 20 });
@@ -5015,6 +5078,8 @@ async function processarFila(clienteIdAlvo = null) {
   }
 
   enviandoAgoraPorCliente[clienteFila] = true;
+  const finalizarPerf = iniciarPerfBackground(`processar_fila:${clienteFila}`);
+  let okPerf = true;
   let oferta = null;
 
   try {
@@ -5609,6 +5674,7 @@ salvarFila(clienteId);
 console.log("[ENVIO] Enviado com controle de tempo");
 
  } catch (e) {
+  okPerf = false;
   console.log("[ERRO] ERRO:", e.message);
 
   if (oferta) {
@@ -5631,6 +5697,10 @@ console.log("[ENVIO] Enviado com controle de tempo");
 
 } finally {
   enviandoAgoraPorCliente[clienteFila] = false;
+  finalizarPerf(okPerf, {
+    clienteId: clienteFila,
+    ofertaId: oferta?.id || ""
+  });
 }
 }
 
@@ -18624,6 +18694,8 @@ function registrarSucessoCupom(marketplace = "", cupom = "") {
 // =========== DECAIMENTO GLOBAL DE CUPONS ===========
 
 function decairConfiancaCupons() {
+  const finalizarPerf = iniciarPerfBackground("decair_confianca_cupons");
+  let okPerf = true;
   try {
     config.cuponsStatus = config.cuponsStatus || {};
     const agora = Date.now();
@@ -18657,7 +18729,10 @@ function decairConfiancaCupons() {
 
     salvarConfig();
   } catch (e) {
+    okPerf = false;
     console.log("[ERRO] erro decairConfiancaCupons:", e.message);
+  } finally {
+    finalizarPerf(okPerf);
   }
 }
 
@@ -21213,12 +21288,16 @@ let campanhasAgendamentosRodando = false;
 async function rodarAgendamentosCampanhasPendentes() {
   if (campanhasAgendamentosRodando) return;
   campanhasAgendamentosRodando = true;
+  const finalizarPerf = iniciarPerfBackground("campanhas_agendamentos_scheduler");
+  let ok = true;
   try {
     await executarAgendamentosPendentesTodosClientes({ deps: depsCampanhasManual() });
   } catch (e) {
+    ok = false;
     console.log("[CAMPANHAS-AGENDAMENTO-SCHEDULER-ERRO]", { erro: e.message });
   } finally {
     campanhasAgendamentosRodando = false;
+    finalizarPerf(ok);
   }
 }
 
@@ -21856,6 +21935,10 @@ if (!admin) {
   runnerLockKey = iniciarRunnerHotfix(`farejador:${marketplace || "todos"}`, admin.id || "admin", console);
   if (!runnerLockKey) return;
 
+  const finalizarPerf = iniciarPerfBackground(`farejador_marketplace:${marketplace || "todos"}`);
+  let okPerf = true;
+  let clientesProcessadosPerf = 0;
+
   try {
     farejadorRodando = true;
     ultimaRodadaOrquestradorMs = Date.now();
@@ -22008,6 +22091,7 @@ resumoClienteOrquestrador.marketplaces[marketplace] = normalizarRetornoFarejador
   Math.max(0, totalFilaClienteDepois - totalFilaClienteAntes)
 );
 clientesProcessadosRodada += 1;
+clientesProcessadosPerf = clientesProcessadosRodada;
 }
 
   statusMarketplace.ultimaFinalizacao = new Date().toISOString();
@@ -22066,6 +22150,7 @@ clientesProcessadosRodada += 1;
   });
 
   } catch (e) {
+    okPerf = false;
     const statusMarketplace = obterStatusOrquestradorMarketplace(marketplace);
     statusMarketplace.ultimoErro = e.message || "erro_rodada_marketplace";
     statusMarketplace.cooldownAte = Date.now() + 15 * 60 * 1000;
@@ -22079,6 +22164,11 @@ clientesProcessadosRodada += 1;
     abastecimentoRodadaAtual = null;
     farejadorRodando = false;
     finalizarRunnerHotfix(runnerLockKey);
+    finalizarPerf(okPerf, {
+      marketplace,
+      origem: opcoes.origem || "orquestrador",
+      clientesProcessados: clientesProcessadosPerf
+    });
   }
 }
 
@@ -22125,6 +22215,10 @@ if (!global.__optimusOrquestradorMarketplacesIntervalRegistrado) {
 let ultimoLogPausaFila = 0;
 
 setInterval(() => {
+  const finalizarPerf = iniciarPerfBackground("fila_intervalo_disparo");
+  let okPerf = true;
+  let usuariosDisparados = 0;
+  try {
   if (!podeRodarAgora()) {
     const agora = Date.now();
 
@@ -22139,16 +22233,20 @@ setInterval(() => {
   for (const usuario of usuarios) {
     if (!usuario?.ativo) continue;
 
+    usuariosDisparados += 1;
     processarFila(usuario.id);
+  }
+  } catch (e) {
+    okPerf = false;
+    throw e;
+  } finally {
+    finalizarPerf(okPerf, {
+      usuariosDisparados,
+      usuariosTotal: Array.isArray(usuarios) ? usuarios.length : 0
+    });
   }
 
 }, 10 * 1000);
-
-
-
-
-
-
 
 
 
