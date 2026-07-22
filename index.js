@@ -12115,6 +12115,11 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
   const clienteImportacaoRadar = selecionarClienteImportacaoRadar(marketplaceDetectado);
 
   if (!clienteImportacaoRadar.clienteId) {
+    console.log("[RADAR-IMPORTACAO-SEM-CLIENTE-INTEGRADO]", JSON.stringify({
+      marketplace: clienteImportacaoRadar.marketplace || marketplaceDetectado || "",
+      motivosExclusao: clienteImportacaoRadar.motivosExclusao || {}
+    }));
+
     return {
       ok: false,
       motivo: "integracao_cliente_ausente_para_importacao_radar",
@@ -12126,6 +12131,8 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
       }
     };
   }
+
+  resolucao.clienteIdImportacaoRadar = clienteImportacaoRadar.clienteId;
 
   try {
     if (marketplaceDetectado === "kabum") {
@@ -13462,8 +13469,8 @@ const registroEngineRadar = temRedirectConhecidoRadar
       marketplace: ofertaRadar.marketplace || importacao.resolucao?.marketplaceReal || "",
       sessaoCapturaId: sessaoIdTexto,
       capturadoPorClienteId: resolucaoCaptura.clienteIdMensageiro || adminMasterId,
-      clienteIdImportacao: clienteImportacaoRadar.clienteId,
-      integracaoAdminIgnorada: clienteImportacaoRadar.clienteId !== adminMasterId
+      clienteIdImportacao: importacao.resolucao?.clienteIdImportacaoRadar || "",
+      integracaoAdminIgnorada: Boolean(importacao.resolucao?.clienteIdImportacaoRadar && importacao.resolucao.clienteIdImportacaoRadar !== adminMasterId)
     }));
     logProdutoCanonicoRadar(ofertaRadar);
 
