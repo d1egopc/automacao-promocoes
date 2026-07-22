@@ -35,6 +35,96 @@ function logDbPool(evento, dados = {}) {
   console.log("[PERF DB POOL]", JSON.stringify({ evento, ...dados }));
 }
 
+function aguardarDb(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function idadeDesdeDb(valor, agora = Date.now()) {
+  const numero = Number(valor || 0);
+  if (!Number.isFinite(numero) || numero <= 0) return null;
+  return Math.max(0, agora - numero);
+}
+
+function metadadosPoolEngine(clientPool) {
+  return clientPool ? metadadosPools.get(clientPool) || {} : {};
+}
+
+function metadadosConexaoEngine(client, poolMeta = {}) {
+  if (!client) return null;
+  let dados = metadadosConexoesPool.get(client);
+  if (!dados) {
+    const agora = Date.now();
+    dados = {
+      id: proximoIdConexaoPool,
+      poolVersao: poolMeta.versao || null,
+      criadaEm: agora,
+      ultimaUtilizacaoEm: null
+    };
+    proximoIdConexaoPool += 1;
+    metadadosConexoesPool.set(client, dados);
+  }
+  return dados;
+}
+
+function resumoConexaoEngine(client, poolMeta = {}, agora = Date.now()) {
+  const dados = metadadosConexaoEngine(client, poolMeta);
+  if (!dados) {
+    return {
+      conexaoId: null,
+      conexaoCriadaEm: null,
+      idadeConexaoMs: null,
+      ultimaUtilizacaoEm: null,
+      idadeUltimaUtilizacaoMs: null
+    };
+  }
+
+  return {
+    conexaoId: dados.id,
+    conexaoCriadaEm: new Date(dados.criadaEm).toISOString(),
+    idadeConexaoMs: idadeDesdeDb(dados.criadaEm, agora),
+    ultimaUtilizacaoEm: dados.ultimaUtilizacaoEm ? new Date(dados.ultimaUtilizacaoEm).toISOString() : null,
+    idadeUltimaUtilizacaoMs: idadeDesdeDb(dados.ultimaUtilizacaoEm, agora)
+  };
+}
+
+function marcarUsoConexaoEngine(client, poolMeta = {}) {
+  const dados = metadadosConexaoEngine(client, poolMeta);
+  if (dados) dados.ultimaUtilizacaoEm = Date.now();
+  return resumoConexaoEngine(client, poolMeta);
+}
+
+function encerrarPoolAntigoSeguro(poolAntigo, poolMeta = {}) {
+  if (!poolAntigo) return;
+  const versao = poolMeta.versao || null;
+  const inicio = Date.now();
+  poolMeta.encerrando = true;
+  poolMeta.encerramentoIniciadoEm = inicio;
+
+  logDbPool("encerramento_inicio", {
+    poolVersao: versao,
+    encerrando: true,
+    encerramentoIniciadoEm: new Date(inicio).toISOString(),
+    ...estadoPoolEngine(poolAntigo, "")
+  });
+
+  poolAntigo.end()
+    .then(() => {
+      logDbPool("encerramento_sucesso", {
+        poolVersao: versao,
+        duracaoMs: Date.now() - inicio,
+        encerrando: true
+      });
+    })
+    .catch((erro) => {
+      logDbPool("encerramento_erro", {
+        poolVersao: versao,
+        duracaoMs: Date.now() - inicio,
+        erroMensagem: String(erro?.message || "erro_desconhecido").slice(0, 180),
+        encerrando: true
+      });
+    });
+}
+
 function tipoQueryEngine(texto = "") {
   const sql = String(texto || "").trim().replace(/\s+/g, " ");
   const match = sql.match(/^(SELECT|INSERT|UPDATE|DELETE|WITH|CREATE|ALTER|DROP|TRUNCATE)\b/i);
@@ -83,15 +173,39 @@ function erroConexaoDb(erroDb) {
   );
 }
 
-function recriarPoolEngineSeNecessario({ clientPool, erroDb, duranteConnect = false } = {}) {
+async function recriarPoolEngineSeNecessario({ clientPool, erroDb, duranteConnect = false, origem = "query" } = {}) {
   if (!clientPool || clientPool !== pool) return false;
   if (!duranteConnect || !erroConexaoDb(erroDb)) return false;
+
+  const poolMeta = metadadosPoolEngine(clientPool);
+  if (poolMeta.encerrando) {
+    logDbPool("recriacao_pulada_pool_encerrando", {
+      poolVersao: poolMeta.versao || poolVersao,
+      origem,
+      erroCodigo: erroDb?.erroCodigo || null,
+      erroMensagem: erroDb?.erroMensagem || "",
+      encerrando: true,
+      idadeEncerramentoMs: idadeDesdeDb(poolMeta.encerramentoIniciadoEm)
+    });
+    return false;
+  }
+
+  if (recriacaoPoolPromessa) {
+    logDbPool("recriacao_single_flight_reutilizada", {
+      poolVersao: poolMeta.versao || poolVersao,
+      origem,
+      erroCodigo: erroDb?.erroCodigo || null,
+      erroMensagem: erroDb?.erroMensagem || ""
+    });
+    return recriacaoPoolPromessa;
+  }
 
   const agora = Date.now();
   const desdeUltima = agora - ultimaRecriacaoPoolEm;
   if (desdeUltima < ENGINE_DB_POOL_RECREATE_COOLDOWN_MS) {
     logDbPool("recriacao_pulada_cooldown", {
-      poolVersao,
+      poolVersao: poolMeta.versao || poolVersao,
+      origem,
       desdeUltimaMs: desdeUltima,
       cooldownMs: ENGINE_DB_POOL_RECREATE_COOLDOWN_MS,
       erroCodigo: erroDb?.erroCodigo || null,
@@ -101,24 +215,43 @@ function recriarPoolEngineSeNecessario({ clientPool, erroDb, duranteConnect = fa
   }
 
   ultimaRecriacaoPoolEm = agora;
-  const poolAntigo = pool;
+  const poolAntigo = clientPool;
+  const versaoAntiga = poolMeta.versao || poolVersao;
   pool = null;
-  logDbPool("recriacao_agendada", {
-    poolVersao,
+  poolMeta.encerrando = true;
+  poolMeta.encerramentoIniciadoEm = agora;
+
+  logDbPool("recriacao_iniciada", {
+    poolVersao: versaoAntiga,
+    origem,
     motivo: "falha_ao_obter_conexao",
     erroCodigo: erroDb?.erroCodigo || null,
     erroMensagem: erroDb?.erroMensagem || "",
+    encerrando: true,
     ...estadoPoolEngine(poolAntigo, "")
   });
 
-  poolAntigo.end().catch((erro) => {
-    logDbPool("recriacao_end_erro", {
-      poolVersao,
-      erroMensagem: String(erro?.message || "erro_desconhecido").slice(0, 180)
-    });
-  });
+  encerrarPoolAntigoSeguro(poolAntigo, poolMeta);
 
-  return true;
+  let promessa = null;
+  promessa = (async () => {
+    try {
+      getEnginePool();
+      await aguardarDb(ENGINE_DB_POOL_RECREATE_COOLDOWN_MS);
+      return true;
+    } finally {
+      if (recriacaoPoolPromessa === promessa) {
+        recriacaoPoolPromessa = null;
+        logDbPool("recriacao_single_flight_liberada", {
+          poolVersaoAtual: poolVersao,
+          cooldownMs: ENGINE_DB_POOL_RECREATE_COOLDOWN_MS
+        });
+      }
+    }
+  })();
+
+  recriacaoPoolPromessa = promessa;
+  return promessa;
 }
 
 function erroSanitizadoDb(erro) {
@@ -161,11 +294,22 @@ function getEnginePool() {
   }
 
   const configPool = criarConfigPoolEngine();
-  poolVersao += 1;
-  pool = new pg.Pool(configPool);
+  const versaoAtual = poolVersao + 1;
+  const poolNovo = new pg.Pool(configPool);
+  const poolMeta = {
+    versao: versaoAtual,
+    criadoEm: Date.now(),
+    encerrando: false,
+    encerramentoIniciadoEm: null
+  };
+
+  poolVersao = versaoAtual;
+  pool = poolNovo;
+  metadadosPools.set(poolNovo, poolMeta);
 
   logDbPool("criado", {
-    poolVersao,
+    poolVersao: versaoAtual,
+    criadoEm: new Date(poolMeta.criadoEm).toISOString(),
     max: configPool.max,
     connectionTimeoutMillis: configPool.connectionTimeoutMillis,
     idleTimeoutMillis: configPool.idleTimeoutMillis,
@@ -174,35 +318,68 @@ function getEnginePool() {
     ssl: Boolean(configPool.ssl)
   });
 
-  pool.on("connect", () => {
-    logDbPool("connect", { poolVersao, ...estadoPoolEngine(pool, "") });
+  poolNovo.on("connect", (client) => {
+    const conexao = metadadosConexaoEngine(client, poolMeta);
+    logDbPool("connect", {
+      poolVersao: versaoAtual,
+      conexaoId: conexao?.id || null,
+      conexaoCriadaEm: conexao?.criadaEm ? new Date(conexao.criadaEm).toISOString() : null,
+      encerrando: Boolean(poolMeta.encerrando),
+      idadePoolMs: idadeDesdeDb(poolMeta.criadoEm),
+      ...estadoPoolEngine(poolNovo, "")
+    });
   });
 
-  pool.on("acquire", () => {
-    logDbPool("acquire", { poolVersao, ...estadoPoolEngine(pool, "") });
+  poolNovo.on("acquire", (client) => {
+    const conexaoAntes = resumoConexaoEngine(client, poolMeta);
+    const conexaoDepois = marcarUsoConexaoEngine(client, poolMeta);
+    logDbPool("acquire", {
+      poolVersao: versaoAtual,
+      ...conexaoDepois,
+      idadeUltimaUtilizacaoAnteriorMs: conexaoAntes.idadeUltimaUtilizacaoMs,
+      encerrando: Boolean(poolMeta.encerrando),
+      idadePoolMs: idadeDesdeDb(poolMeta.criadoEm),
+      ...estadoPoolEngine(poolNovo, "")
+    });
   });
 
-  pool.on("remove", () => {
-    logDbPool("remove", { poolVersao, ...estadoPoolEngine(pool, "") });
+  poolNovo.on("remove", (client) => {
+    logDbPool("remove", {
+      poolVersao: versaoAtual,
+      ...resumoConexaoEngine(client, poolMeta),
+      encerrando: Boolean(poolMeta.encerrando),
+      durantePoolEnd: Boolean(poolMeta.encerrando),
+      encerramentoIniciadoEm: poolMeta.encerramentoIniciadoEm ? new Date(poolMeta.encerramentoIniciadoEm).toISOString() : null,
+      idadeEncerramentoMs: idadeDesdeDb(poolMeta.encerramentoIniciadoEm),
+      idadePoolMs: idadeDesdeDb(poolMeta.criadoEm),
+      ...estadoPoolEngine(poolNovo, "")
+    });
   });
 
-  pool.on("error", (erro) => {
+  poolNovo.on("error", (erro, client) => {
     const erroDb = erroSanitizadoDb(erro);
-    const poolAtual = pool;
     logDbPool("error", {
-      poolVersao,
+      poolVersao: versaoAtual,
+      ...resumoConexaoEngine(client, poolMeta),
+      encerrando: Boolean(poolMeta.encerrando),
       ...erroDb,
-      ...estadoPoolEngine(poolAtual, "")
+      ...estadoPoolEngine(poolNovo, "")
     });
-    const poolRecriado = recriarPoolEngineSeNecessario({
-      clientPool: poolAtual,
+    recriarPoolEngineSeNecessario({
+      clientPool: poolNovo,
       erroDb,
-      duranteConnect: true
-    });
-    logEngineDbErro({ motivo: "pool_error", erro: erroDb.erroMensagem, codigo: erroDb.erroCodigo || undefined, poolRecriado });
+      duranteConnect: true,
+      origem: "pool_error"
+    })
+      .then(poolRecriado => {
+        logEngineDbErro({ motivo: "pool_error", erro: erroDb.erroMensagem, codigo: erroDb.erroCodigo || undefined, poolRecriado });
+      })
+      .catch(e => {
+        logEngineDbErro({ motivo: "pool_error_recriacao_falhou", erro: String(e?.message || "erro_desconhecido").slice(0, 180) });
+      });
   });
 
-  return pool;
+  return poolNovo;
 }
 
 async function queryEngine(texto, params = []) {
@@ -260,10 +437,11 @@ async function queryEngine(texto, params = []) {
       ...poolAntes,
       ...estadoPoolEngine(clientPool, "Depois")
     });
-    const poolRecriado = recriarPoolEngineSeNecessario({
+    const poolRecriado = await recriarPoolEngineSeNecessario({
       clientPool,
       erroDb,
-      duranteConnect: !client
+      duranteConnect: !client,
+      origem: "queryEngine"
     });
     logEngineDbErro({ motivo: "query_falhou", erro: erroDb.erroMensagem, codigo: erroDb.erroCodigo || undefined, poolRecriado });
     return { ok: false, motivo: "query_falhou", erro: e.message };
