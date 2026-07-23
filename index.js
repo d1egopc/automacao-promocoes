@@ -89,14 +89,8 @@ const {
 } = require("./marketplaces/shopee");
 
 const {
-  criarGerarLinkMercadoLivre,
-  criarGerarLinkAmazon,
-  criarGerarLinkShopee,
-  criarGerarLinkAliExpress,
-  criarGerarDeepLinkAwin,
-  gerarLinkMagalu: gerarLinkMagaluConverter,
-  criarGerarLinkAfiliadoCliente
-} = require("./modules/marketplaces/conversores");
+  criarConversores
+} = require("./modules/marketplaces/conversores/registry");
 
 const {
   testarIntegracaoMarketplace
@@ -17015,11 +17009,21 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
 
 // ================= AWIN IMPORTAR DEEP LINK MANUAL =================
 
-const gerarDeepLinkAwin = criarGerarDeepLinkAwin({
+const conversoresAfiliados = criarConversores({
   axios,
   getIntegracaoCliente,
-  obterProgramaAwin
+  obterProgramaAwin,
+  buscarCsrfTokenMercadoLivre,
+  tipoUrlMercadoLivreAfiliado,
+  logMlAfiliadoFalhaDetalhe,
+  registrarAlertaMercadoLivre,
+  registrarAlertaAmazon,
+  limparAlertaIntegracao,
+  timestampGMT8,
+  assinar,
+  logDebug
 });
+const gerarDeepLinkAwin = conversoresAfiliados.gerarDeepLinkAwin;
 
 
 app.get("/teste-kabum-rota", (req, res) => {
@@ -17657,13 +17661,7 @@ function logMlAfiliadoFalhaDetalhe(dados = {}) {
   });
 }
 
-const gerarLinkAfiliadoMercadoLivre = criarGerarLinkMercadoLivre({
-  buscarCsrfTokenMercadoLivre,
-  tipoUrlMercadoLivreAfiliado,
-  logMlAfiliadoFalhaDetalhe,
-  registrarAlertaMercadoLivre,
-  limparAlertaIntegracao
-});
+const gerarLinkAfiliadoMercadoLivre = conversoresAfiliados.gerarLinkAfiliadoMercadoLivre;
 const encurtarUrl = async (url) => {
   try {
     const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`);
@@ -17674,7 +17672,7 @@ const encurtarUrl = async (url) => {
 };
 
 
-const gerarLinkMagalu = gerarLinkMagaluConverter;
+const gerarLinkMagalu = conversoresAfiliados.gerarLinkMagalu;
 
 function extrairProductIdAliExpressManual(urlEntrada = "") {
   const urlTexto = String(urlEntrada || "");
@@ -18578,10 +18576,7 @@ function limparLinkAmazon(url = "") {
 
 // =================== LINK CURTO OFICIAL ALIEXPRESS ===================
 
-const gerarLinkCurtoAliExpress = criarGerarLinkAliExpress({
-  timestampGMT8,
-  assinar
-});
+const gerarLinkCurtoAliExpress = conversoresAfiliados.gerarLinkCurtoAliExpress;
 
 // ======================= FUNCAO PLANO NOME =========================================
 
@@ -18604,28 +18599,11 @@ function getPlanoPorNome(nome = "free") {
 
 // =============== FUNCAO GERAR LINK AFILIADO SHOPEE ========================================
 
-const gerarLinkShopeeCliente = criarGerarLinkShopee({
-  getIntegracaoCliente,
-  logDebug
-});
+const gerarLinkShopeeCliente = conversoresAfiliados.gerarLinkShopeeCliente;
 
 // =============== FUNCAO GERAR LINK AFILIADO VARIOS MARKTPLACES  ============================
 
-const gerarLinkAmazon = criarGerarLinkAmazon({
-  registrarAlertaAmazon,
-  limparAlertaIntegracao
-});
-
-const gerarLinkAfiliadoCliente = criarGerarLinkAfiliadoCliente({
-  getIntegracaoCliente,
-  logDebug,
-  gerarLinkMercadoLivre: gerarLinkAfiliadoMercadoLivre,
-  gerarLinkAmazon,
-  gerarLinkShopee: gerarLinkShopeeCliente,
-  gerarLinkAliExpress: gerarLinkCurtoAliExpress,
-  gerarDeepLinkAwin,
-  gerarLinkMagalu
-});
+const gerarLinkAfiliadoCliente = conversoresAfiliados.gerarLinkAfiliadoCliente;
 
 // =========================== HEPERS DE WHATSAPP =================================
 
