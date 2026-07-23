@@ -13,7 +13,8 @@ const {
   executarAutomaticoTodosClientes,
   executarAgendamentosPendentesCliente,
   limparAgendamentosConcluidosAutomaticamenteCliente,
-  simularSelecaoAutomatica
+  simularSelecaoAutomatica,
+  escolherOferta
 } = require("../modules/social/automatico.service");
 const { executarRodadaSchedulerAgendamentosSocial } = require("../modules/social/scheduler");
 
@@ -594,6 +595,57 @@ function horaSaoPaulo(input) {
     recenciaDataFila.diagnostico.some(item => item.ofertaId === "antiga_data_fila" && item.motivos.includes("fora_idade_maxima")),
     "oferta antiga com data real nao deve ser rejuvenescida"
   );
+
+  const recenciaConfig = configAutomatico({ quantidadeDiaria: 1, scoreMinimo: 70, idadeMaximaHoras: 6 });
+  const escolherPorRecencia = ({ ofertaItem, publicacoes = [], agendamentos = [] }) =>
+    escolherOferta({
+      oportunidades: [ofertaItem],
+      config: recenciaConfig,
+      publicacoes,
+      agendamentos,
+      agora: AGORA
+    });
+  assert.strictEqual(
+    escolherPorRecencia({ ofertaItem: oferta("timestamp_ms_4min", { criadoEm: String(AGORA.getTime() - 4 * 60 * 1000) }) }).escolhida.ofertaId,
+    "timestamp_ms_4min",
+    "timestamp em milissegundos recente nao deve cair em fora_idade_maxima"
+  );
+  assert.strictEqual(
+    escolherPorRecencia({ ofertaItem: oferta("timestamp_s_2h", { criadoEm: String(Math.floor((AGORA.getTime() - 2 * 60 * 60 * 1000) / 1000)) }) }).escolhida.ofertaId,
+    "timestamp_s_2h",
+    "timestamp em segundos recente nao deve cair em fora_idade_maxima"
+  );
+  assert.strictEqual(
+    escolherPorRecencia({ ofertaItem: oferta("ptbr_2h", { criadoEm: "14/07/2026, 07:00:00" }) }).escolhida.ofertaId,
+    "ptbr_2h",
+    "data brasileira recente nao deve cair em fora_idade_maxima"
+  );
+  assert.strictEqual(
+    escolherPorRecencia({ ofertaItem: oferta("iso_5h59", { criadoEm: "2026-07-14T06:01:00.000Z" }) }).escolhida.ofertaId,
+    "iso_5h59",
+    "oferta com cinco horas e cinquenta e nove minutos segue elegivel"
+  );
+  const recenciaAntiga = escolherPorRecencia({ ofertaItem: oferta("iso_6h01", { criadoEm: "2026-07-14T05:59:00.000Z" }) });
+  assert.strictEqual(recenciaAntiga.escolhida, null);
+  assert.ok(recenciaAntiga.diagnostico[0].motivos.includes("fora_idade_maxima"), "oferta acima de seis horas segue rejeitada por idade");
+  const recenciaInvalida = escolherPorRecencia({ ofertaItem: oferta("data_invalida", { criadoEm: "sem-data-confiavel" }) });
+  assert.strictEqual(recenciaInvalida.escolhida, null);
+  assert.ok(recenciaInvalida.diagnostico[0].motivos.includes("fora_idade_maxima"), "data invalida continua rejeitada de forma segura");
+  const scoreBaixo = escolherPorRecencia({ ofertaItem: oferta("score_baixo_recencia", { score: 69, criadoEm: String(AGORA.getTime() - 4 * 60 * 1000) }) });
+  assert.strictEqual(scoreBaixo.escolhida, null);
+  assert.ok(scoreBaixo.diagnostico[0].motivos.includes("score_baixo"), "regra de score continua preservada");
+  const jaPublicada = escolherPorRecencia({
+    ofertaItem: oferta("ja_publicada_recencia", { criadoEm: String(AGORA.getTime() - 4 * 60 * 1000) }),
+    publicacoes: [{ ofertaId: "ja_publicada_recencia", status: "publicada", publicadoEm: "2026-07-14T10:00:00.000Z" }]
+  });
+  assert.strictEqual(jaPublicada.escolhida, null);
+  assert.ok(jaPublicada.diagnostico[0].motivos.includes("ja_publicada"), "regra de ja publicada continua preservada");
+  const publicadaRecente = escolherPorRecencia({
+    ofertaItem: oferta("repetida_recencia", { criadoEm: String(AGORA.getTime() - 4 * 60 * 1000) }),
+    publicacoes: [{ ofertaId: "repetida_recencia", status: "erro", publicadoEm: "2026-07-13T12:00:00.000Z" }]
+  });
+  assert.strictEqual(publicadaRecente.escolhida, null);
+  assert.ok(publicadaRecente.diagnostico[0].motivos.includes("repetida"), "memoria de repeticao continua preservada");
 
   conectar("cliente_filtros", "filtros");
   writeClienteJson("cliente_filtros", "fila.json", [

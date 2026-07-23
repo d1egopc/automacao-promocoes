@@ -44,9 +44,30 @@ function minutosHora(valor = "") {
   return h * 60 + m;
 }
 
-function dataMs(valor = "") {
-  const ms = Date.parse(texto(valor));
+function timestampNumericoMs(valor = "") {
+  const bruto = texto(valor);
+  if (!/^\d{10,13}$/.test(bruto)) return 0;
+  const numero = Number(bruto);
+  if (!Number.isFinite(numero)) return 0;
+  return bruto.length <= 10 ? numero * 1000 : numero;
+}
+
+function dataPtBrMs(valor = "") {
+  const match = texto(valor).match(/^(\d{2})\/(\d{2})\/(\d{4})(?:,?\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!match) return 0;
+  const [, dia, mes, ano, hora = "00", minuto = "00", segundo = "00"] = match;
+  const ms = Date.UTC(Number(ano), Number(mes) - 1, Number(dia), Number(hora) + 3, Number(minuto), Number(segundo));
   return Number.isFinite(ms) ? ms : 0;
+}
+
+function dataMs(valor = "") {
+  const timestampMs = timestampNumericoMs(valor);
+  if (timestampMs) return timestampMs;
+  const ms = Date.parse(texto(valor));
+  if (Number.isFinite(ms)) return ms;
+  const ptBrMs = dataPtBrMs(valor);
+  if (ptBrMs) return ptBrMs;
+  return 0;
 }
 
 function inicioDia(data = new Date()) {
