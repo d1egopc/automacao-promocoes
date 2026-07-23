@@ -89,6 +89,16 @@ const {
 } = require("./marketplaces/shopee");
 
 const {
+  criarGerarLinkMercadoLivre,
+  criarGerarLinkAmazon,
+  criarGerarLinkShopee,
+  criarGerarLinkAliExpress,
+  criarGerarDeepLinkAwin,
+  gerarLinkMagalu: gerarLinkMagaluConverter,
+  criarGerarLinkAfiliadoCliente
+} = require("./modules/marketplaces/conversores");
+
+const {
   testarIntegracaoMarketplace
 } = require("./utils/testar-integracao-marketplace");
 
@@ -17005,51 +17015,11 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
 
 // ================= AWIN IMPORTAR DEEP LINK MANUAL =================
 
-async function gerarDeepLinkAwin(urlOriginal, clienteId = "admin") {
-  const integracao =
-  getIntegracaoCliente(clienteId, "awin");
-  const credenciais = integracao?.credenciais || {};
-
-  const { publisherId, apiToken } = credenciais;
-  const programaAwin = obterProgramaAwin(credenciais, urlOriginal);
-  const advertiserId = programaAwin?.advertiserId || "";
-
-if (!publisherId || !apiToken || !advertiserId) {
-  console.log("[AVISO] AWIN sem credenciais/programa:", {
-    clienteId,
-    programa: programaAwin?.nome || ""
-  });
-}
-  if (!publisherId || !apiToken || !advertiserId) {
-    throw new Error("Awin sem publisherId, apiToken ou programa advertiserId configurado.");
-  }
-
-  const response = await axios.post(
-    `https://api.awin.com/publishers/${publisherId}/linkbuilder/generate`,
-    {
-      advertiserId: Number(advertiserId),
-      destinationUrl: urlOriginal
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        "Content-Type": "application/json"
-      },
-      timeout: 15000
-    }
-  );
-
-console.log("[INFO] AWIN Deeplink OK");
-
-  return (
-    response.data?.shortUrl ||
-    response.data?.url ||
-    response.data?.link ||
-    response.data?.trackingLink ||
-    response.data?.clickUrl ||
-    ""
-  );
-}
+const gerarDeepLinkAwin = criarGerarDeepLinkAwin({
+  axios,
+  getIntegracaoCliente,
+  obterProgramaAwin
+});
 
 
 app.get("/teste-kabum-rota", (req, res) => {
@@ -17687,146 +17657,13 @@ function logMlAfiliadoFalhaDetalhe(dados = {}) {
   });
 }
 
-async function gerarLinkAfiliadoMercadoLivre(url, config, contexto = {}) {
-  const credenciais = config?.credenciais || {};
-  const cookies = credenciais.cookies || "";
-  const tag = credenciais.tag || "";
-  const clienteId = contexto.clienteId || "";
-  const urlTipo = tipoUrlMercadoLivreAfiliado(url);
-
-  try {
-    if (String(url || "").includes("meli.la")) {
-      console.log("[INFO] Link ML j encurtado detectado. No vou reutilizar para outro cliente.");
-      logMlAfiliadoFalhaDetalhe({
-        clienteId,
-        motivo: "meli_la_bloqueado",
-        statusHttp: null,
-        temCsrf: false,
-        temTag: !!tag,
-        temCookies: !!cookies,
-        urlTipo
-      });
-      return "";
-    }
-
-    if (!url || !cookies || !tag) {
-      console.log("[INFO] ML AFILIADO: faltando cookies ou tag");
-      logMlAfiliadoFalhaDetalhe({
-        clienteId,
-        motivo: !url ? "url_ausente" : (!cookies ? "cookies_ausentes" : "tag_ausente"),
-        statusHttp: null,
-        temCsrf: false,
-        temTag: !!tag,
-        temCookies: !!cookies,
-        urlTipo
-      });
-      if (contexto.clienteId) {
-        registrarAlertaMercadoLivre(contexto.clienteId, "configuracao_incompleta", {
-          faltandoCookies: !cookies,
-          faltandoTag: !tag
-        });
-      }
-      return "";
-    }
-
-    const csrfToken = await buscarCsrfTokenMercadoLivre(cookies, contexto);
-
-    if (!csrfToken) {
-      console.log("[INFO] ML AFILIADO: csrfToken automtico no encontrado");
-      logMlAfiliadoFalhaDetalhe({
-        clienteId,
-        motivo: "csrf_nao_encontrado",
-        statusHttp: null,
-        temCsrf: false,
-        temTag: !!tag,
-        temCookies: !!cookies,
-        urlTipo
-      });
-      if (contexto.clienteId) {
-        registrarAlertaMercadoLivre(contexto.clienteId, "cookie_invalido", {
-          motivo: "csrf_nao_encontrado"
-        });
-      }
-      return "";
-    }
-
-    const response = await fetch(
-      "https://www.mercadolivre.com.br/affiliate-program/api/v2/stripe/user/links",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json, text/plain, */*",
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-          "Origin": "https://www.mercadolivre.com.br",
-          "Referer": "https://www.mercadolivre.com.br/afiliados/linkbuilder",
-          "Cookie": cookies,
-          "x-csrf-token": csrfToken
-        },
-        body: JSON.stringify({
-          url,
-          tag
-        })
-      }
-    );
-
-    const data = await response.json().catch(() => null);
-
-    console.log("[INFO] ML afiliado respondeu");
-
-    if (!response.ok) {
-      console.log("[ERRO] ML AFILIADO ERRO STATUS:", response.status);
-      logMlAfiliadoFalhaDetalhe({
-        clienteId,
-        motivo: "http_status_invalido",
-        statusHttp: response.status,
-        temCsrf: true,
-        temTag: !!tag,
-        temCookies: !!cookies,
-        urlTipo
-      });
-      if (contexto.clienteId && [401, 403, 407, 419, 429].includes(Number(response.status))) {
-        registrarAlertaMercadoLivre(contexto.clienteId, "cookie_invalido", {
-          httpStatus: response.status,
-          origem: "link_afiliado"
-        });
-      }
-      return "";
-    }
-
-    if (contexto.clienteId) {
-      limparAlertaIntegracao(contexto.clienteId, "mercadolivre");
-    }
-
-    const linkAfiliado = data?.short_url || data?.shortUrl || data?.url || "";
-    if (!linkAfiliado) {
-      logMlAfiliadoFalhaDetalhe({
-        clienteId,
-        motivo: "resposta_sem_link",
-        statusHttp: response.status,
-        temCsrf: true,
-        temTag: !!tag,
-        temCookies: !!cookies,
-        urlTipo
-      });
-    }
-
-    return linkAfiliado;
-  } catch (e) {
-    console.error("[ERRO] ERRO ML AFILIADO:", e.message);
-    logMlAfiliadoFalhaDetalhe({
-      clienteId,
-      motivo: e.message || "erro_inesperado",
-      statusHttp: null,
-      temCsrf: false,
-      temTag: !!tag,
-      temCookies: !!cookies,
-      urlTipo
-    });
-    return "";
-  }
-}
+const gerarLinkAfiliadoMercadoLivre = criarGerarLinkMercadoLivre({
+  buscarCsrfTokenMercadoLivre,
+  tipoUrlMercadoLivreAfiliado,
+  logMlAfiliadoFalhaDetalhe,
+  registrarAlertaMercadoLivre,
+  limparAlertaIntegracao
+});
 const encurtarUrl = async (url) => {
   try {
     const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`);
@@ -17837,23 +17674,7 @@ const encurtarUrl = async (url) => {
 };
 
 
-function gerarLinkMagalu(linkOriginal, promoterId) {
-  if (!linkOriginal || !promoterId) return linkOriginal;
-
-  const urlLimpa = String(linkOriginal).trim();
-  const loja = String(promoterId).trim();
-
-  // Se já for link da loja do influenciador, mantém
-  if (urlLimpa.includes("magazinevoce.com.br")) {
-    return urlLimpa;
-  }
-
-  // Converte link comum do Magalu para link da loja
-  return urlLimpa.replace(
-    "https://www.magazineluiza.com.br",
-    `https://www.magazinevoce.com.br/${loja}`
-  );
-}
+const gerarLinkMagalu = gerarLinkMagaluConverter;
 
 function extrairProductIdAliExpressManual(urlEntrada = "") {
   const urlTexto = String(urlEntrada || "");
@@ -18757,54 +18578,10 @@ function limparLinkAmazon(url = "") {
 
 // =================== LINK CURTO OFICIAL ALIEXPRESS ===================
 
-async function gerarLinkCurtoAliExpress(urlOriginal, credenciais = {}) {
-  try {
-    const appKey = credenciais.appKey || "";
-    const secret = credenciais.secret || "";
-    const trackingId = credenciais.trackingId || "";
-
-    if (!appKey || !secret || !trackingId || !urlOriginal) {
-      return urlOriginal;
-    }
-
-    const params = {
-      method: "aliexpress.affiliate.link.generate",
-      app_key: appKey,
-      timestamp: timestampGMT8(),
-      sign_method: "md5",
-      format: "json",
-      v: "2.0",
-      promotion_link_type: "0",
-      source_values: urlOriginal,
-      tracking_id: trackingId
-    };
-
-    params.sign = assinar(params, secret);
-
-    const response = await fetch("https://api-sg.aliexpress.com/sync", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded;charset=utf-8"
-      },
-      body: new URLSearchParams(params)
-    });
-
-    const data = await response.json();
-
-   console.log("[INFO] Ali link");
-
-    const linkGerado =
-      data?.aliexpress_affiliate_link_generate_response?.resp_result?.result?.promotion_links?.promotion_link?.[0]?.promotion_link ||
-      data?.resp_result?.result?.promotion_links?.promotion_link?.[0]?.promotion_link ||
-      "";
-
-    return linkGerado || urlOriginal;
-
-  } catch (e) {
-    console.log("[ERRO] Erro gerar link curto AliExpress:", e.message);
-    return urlOriginal;
-  }
-}
+const gerarLinkCurtoAliExpress = criarGerarLinkAliExpress({
+  timestampGMT8,
+  assinar
+});
 
 // ======================= FUNCAO PLANO NOME =========================================
 
@@ -18827,211 +18604,28 @@ function getPlanoPorNome(nome = "free") {
 
 // =============== FUNCAO GERAR LINK AFILIADO SHOPEE ========================================
 
-async function gerarLinkShopeeCliente(clienteId, ofertaBase = {}) {
-  try {
-    const integracao = getIntegracaoCliente(clienteId, "shopee");
-
-    logDebug("[INFO] CLIENTE:", clienteId);
-    logDebug("[INFO] MARKETPLACE:", "shopee");
-    logDebug("[INFO] Integrao encontrada?", !!integracao);
-    logDebug("[INFO] Tem credenciais?", !!integracao?.credenciais);
-
-    const appId = integracao?.credenciais?.appId || "";
-    const secret = integracao?.credenciais?.secret || "";
-
-    if (!appId || !secret) {
-      return "";
-    }
-
-    const keyword = String(
-      ofertaBase.titulo ||
-      ofertaBase.nome ||
-      ""
-    )
-      .replace(/"/g, "")
-      .slice(0, 80);
-
-    if (!keyword) {
-      return "";
-    }
-
-    const timestamp = Math.floor(Date.now() / 1000);
-
-    const bodyPayload = {
-      query: `
-        query {
-          productOfferV2(
-            keyword: "${keyword}",
-            page: 1,
-            limit: 5
-          ) {
-            nodes {
-              productName
-              productLink
-              offerLink
-              itemId
-              shopId
-            }
-          }
-        }
-      `
-    };
-
-    const payload = JSON.stringify(bodyPayload);
-    const baseString = `${appId}${timestamp}${payload}${secret}`;
-
-    const sign = crypto
-      .createHash("sha256")
-      .update(baseString, "utf8")
-      .digest("hex");
-
-    const response = await fetch(
-      "https://open-api.affiliate.shopee.com.br/graphql",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${sign}`
-        },
-        body: payload
-      }
-    );
-
-    const data = await response.json().catch(() => null);
-    const nodes = data?.data?.productOfferV2?.nodes || [];
-
-    const ofertaTitulo = String(ofertaBase.titulo || ofertaBase.nome || "")
-      .toLowerCase()
-      .slice(0, 40);
-
-    const produto =
-      nodes.find(n =>
-        String(n.productName || "")
-          .toLowerCase()
-          .includes(ofertaTitulo.slice(0, 20))
-      ) || nodes[0];
-
-    return produto?.offerLink || "";
-
-  } catch (e) {
-    console.log("[ERRO] erro gerarLinkShopeeCliente:", e.message);
-    return "";
-  }
-}
+const gerarLinkShopeeCliente = criarGerarLinkShopee({
+  getIntegracaoCliente,
+  logDebug
+});
 
 // =============== FUNCAO GERAR LINK AFILIADO VARIOS MARKTPLACES  ============================
 
-async function gerarLinkAfiliadoCliente(clienteId, marketplace, linkOriginal, ofertaBase = {}) {
-  try {
-    const mp = String(marketplace || "").toLowerCase();
+const gerarLinkAmazon = criarGerarLinkAmazon({
+  registrarAlertaAmazon,
+  limparAlertaIntegracao
+});
 
-    const integracao = getIntegracaoCliente(clienteId, mp);
-
-    logDebug("[INFO] ====================================");
-    logDebug("[INFO] CLIENTE:", clienteId);
-    logDebug("[INFO] MARKETPLACE:", mp);
-    logDebug("[INFO] Integrao encontrada?", !!integracao);
-    logDebug("[INFO] Tem credenciais?", !!integracao?.credenciais);
-    logDebug("[INFO] ====================================");
-
-    const linkBase =
-      linkOriginal ||
-      ofertaBase.linkOriginal ||
-      ofertaBase.link ||
-      "";
-
-    if (!linkBase) {
-      return "";
-    }
-
-    if (mp === "mercadolivre") {
-      const linkML = await gerarLinkAfiliadoMercadoLivre(
-        linkBase,
-        integracao,
-        { clienteId }
-      );
-
-      return linkML || "";
-    }
-
-    if (mp === "shopee") {
-      return await gerarLinkShopeeCliente(clienteId, ofertaBase);
-    }
-
-    if (mp === "amazon") {
-  const trackingId =
-    integracao?.credenciais?.trackingId ||
-    integracao?.credenciais?.partnerTag ||
-    integracao?.credenciais?.tag ||
-    integracao?.credenciais?.affiliateTag ||
-    "";
-
-  if (!trackingId) {
-    console.log("[AVISO] Amazon sem trackingId/tag afiliada:", {
-      clienteId,
-      credenciais: Object.keys(integracao?.credenciais || {})
-    });
-    registrarAlertaAmazon(clienteId, "tag_ausente", {
-      credenciais: Object.keys(integracao?.credenciais || {})
-    });
-    return "";
-  }
-
-  try {
-    const u = new URL(linkBase);
-    u.searchParams.set("tag", trackingId);
-    limparAlertaIntegracao(clienteId, "amazon");
-    return u.toString();
-  } catch {
-    return "";
-  }
-}
-
-    if (mp === "aliexpress") {
-      const linkAli = await gerarLinkCurtoAliExpress(
-        linkBase,
-        integracao?.credenciais || {}
-      );
-
-      return linkAli || "";
-    }
-
-    if (mp === "awin") {
-      const linkAwin = await gerarDeepLinkAwin(
-        linkBase,
-        clienteId
-      );
-
-      return linkAwin || "";
-    }
-
-    if (mp === "magalu") {
-      const promoterId =
-        integracao?.credenciais?.promoterId || "";
-
-      if (!promoterId) {
-        return "";
-      }
-
-      try {
-        return gerarLinkMagalu(linkBase, promoterId) || "";
-      } catch {
-        return "";
-      }
-    }
-
-    return "";
-
-  } catch (e) {
-    console.log("[ERRO]❌ Erro ao gerar link afiliado do cliente:", {
-      clienteId,
-      marketplace,
-      erro: e.message
-    });
-
-    return "";
-  }
-}
+const gerarLinkAfiliadoCliente = criarGerarLinkAfiliadoCliente({
+  getIntegracaoCliente,
+  logDebug,
+  gerarLinkMercadoLivre: gerarLinkAfiliadoMercadoLivre,
+  gerarLinkAmazon,
+  gerarLinkShopee: gerarLinkShopeeCliente,
+  gerarLinkAliExpress: gerarLinkCurtoAliExpress,
+  gerarDeepLinkAwin,
+  gerarLinkMagalu
+});
 
 // =========================== HEPERS DE WHATSAPP =================================
 
@@ -22260,5 +21854,3 @@ setInterval(() => {
     });
   });
 }, 10 * 1000);
-
-
