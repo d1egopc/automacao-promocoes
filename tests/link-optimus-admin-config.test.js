@@ -2,6 +2,7 @@ const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
+const linksPuros = require("../modules/links");
 
 const indexPath = path.join(__dirname, "..", "index.js");
 const fonte = fs.readFileSync(indexPath, "utf8");
@@ -31,6 +32,7 @@ const sandbox = {
     linksGerados: {}
   },
   salvouConfig: 0,
+  linksPuros,
   salvarConfig() {
     sandbox.salvouConfig += 1;
   },

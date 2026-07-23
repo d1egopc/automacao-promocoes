@@ -176,6 +176,7 @@ const {
 } = require("./modules/radar/produto-canonico");
 const alertasIntegracoes = require("./utils/alertas-integracoes");
 const storageUtils = require("./utils/storage");
+const linksPuros = require("./modules/links");
 
 const {
   storage,
@@ -2129,7 +2130,7 @@ function normalizarTemplateIdDestinoContrato(valor) {
 }
 
 function normalizarModoLinkDestino(valor = "") {
-  return String(valor || "").trim().toLowerCase() === "optimus" ? "optimus" : "original";
+  return linksPuros.normalizarModoLinkDestino(valor);
 }
 
 function normalizarDestinoContrato(destino = {}) {
@@ -2568,116 +2569,31 @@ console.log("[INFO] CRIANDO ADMIN PADRO");
 // =========== LINK GLOBAL OPTIMUS ===========
 
 function normalizarDominioLinkOptimus(valor = "") {
-  const texto = String(valor || "").trim();
-  if (!texto) return "";
-  const candidato = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(texto) ? texto : "https://" + texto;
-  try {
-    const url = new URL(candidato);
-    if (!["http:", "https:"].includes(url.protocol) || !url.hostname) return "";
-    url.search = "";
-    url.hash = "";
-    return url.toString().replace(/\/+$/, "");
-  } catch (erro) {
-    return "";
-  }
+  return linksPuros.normalizarDominioLinkOptimus(valor);
 }
 
 function normalizarFormatoLinkOptimus(valor = "/r") {
-  const texto = String(valor || "/r").trim() || "/r";
-  const comBarra = texto.startsWith("/") ? texto : "/" + texto;
-  return comBarra.replace(/\/+$/, "") || "/r";
+  return linksPuros.normalizarFormatoLinkOptimus(valor);
 }
 
 function resolverDominioBaseLinkOptimus(configBase = config) {
-  const dominioConfigurado = normalizarDominioLinkOptimus(configBase?.linksOptimus?.dominio);
-  if (dominioConfigurado) return dominioConfigurado;
-  return normalizarDominioLinkOptimus(process.env.RAILWAY_PUBLIC_DOMAIN || "");
+  return linksPuros.resolverDominioBaseLinkOptimus(configBase, process.env.RAILWAY_PUBLIC_DOMAIN || "");
 }
 
 function montarUrlLinkOptimus(codigo = "", configBase = config) {
-  const dominio = resolverDominioBaseLinkOptimus(configBase);
-  if (!dominio || !codigo) return "";
-  return dominio + "/r/" + codigo;
+  return linksPuros.montarUrlLinkOptimus(codigo, configBase, process.env.RAILWAY_PUBLIC_DOMAIN || "");
 }
 
 function origemDominioLinkOptimus(configBase = config) {
-  const dominioConfig = normalizarDominioLinkOptimus(configBase?.linksOptimus?.dominio);
-  if (dominioConfig) {
-    return {
-      dominio: dominioConfig,
-      origem: "config"
-    };
-  }
-
-  const dominioRailway = normalizarDominioLinkOptimus(process.env.RAILWAY_PUBLIC_DOMAIN || "");
-  if (dominioRailway) {
-    return {
-      dominio: dominioRailway,
-      origem: "railway"
-    };
-  }
-
-  return {
-    dominio: "",
-    origem: "indisponivel"
-  };
+  return linksPuros.origemDominioLinkOptimus(configBase, process.env.RAILWAY_PUBLIC_DOMAIN || "");
 }
 
 function montarRespostaConfigLinksOptimus(configBase = config) {
-  const efetivo = origemDominioLinkOptimus(configBase);
-  return {
-    dominio: normalizarDominioLinkOptimus(configBase?.linksOptimus?.dominio),
-    dominioEfetivo: efetivo.dominio,
-    origem: efetivo.origem
-  };
+  return linksPuros.montarRespostaConfigLinksOptimus(configBase, process.env.RAILWAY_PUBLIC_DOMAIN || "");
 }
 
 function normalizarDominioConfigLinkOptimus(valor = "") {
-  const texto = String(valor || "").trim();
-  if (!texto) {
-    return {
-      ok: true,
-      dominio: ""
-    };
-  }
-
-  if (!/^https?:\/\//i.test(texto)) {
-    return {
-      ok: false,
-      erro: "dominio_deve_incluir_http_ou_https"
-    };
-  }
-
-  try {
-    const url = new URL(texto);
-    if (!["http:", "https:"].includes(url.protocol) || !url.hostname) {
-      return {
-        ok: false,
-        erro: "dominio_invalido"
-      };
-    }
-
-    if ((url.pathname && url.pathname !== "/") || url.search || url.hash) {
-      return {
-        ok: false,
-        erro: "dominio_nao_deve_conter_caminho_query_ou_fragmento"
-      };
-    }
-
-    url.pathname = "/";
-    url.search = "";
-    url.hash = "";
-
-    return {
-      ok: true,
-      dominio: url.toString().replace(/\/+$/, "")
-    };
-  } catch (erro) {
-    return {
-      ok: false,
-      erro: "dominio_invalido"
-    };
-  }
+  return linksPuros.normalizarDominioConfigLinkOptimus(valor);
 }
 
 function logConfigLinkOptimus(evento, dados = {}) {
@@ -2778,14 +2694,7 @@ function salvarAdminConfigLinksOptimus(req, res) {
 }
 
 function extrairLinkAfiliadoOferta(oferta = {}) {
-  return String(
-    oferta.linkAfiliado ||
-    oferta.linkFinal ||
-    oferta.link ||
-    oferta.urlAfiliada ||
-    oferta.url ||
-    ""
-  ).trim();
+  return linksPuros.extrairLinkAfiliadoOferta(oferta);
 }
 
 function localizarLinkOptimusExistente({ clienteId = "", linkOriginal = "", marketplace = "", configBase = config } = {}) {
@@ -2869,18 +2778,7 @@ function logLinkOptimus(tag, payload = {}) {
 }
 
 function copiarOfertaComLinkResolvido(oferta = {}, linkResolvido = "", linkOriginal = "") {
-  return {
-    ...oferta,
-    linkAfiliadoOriginal: oferta.linkAfiliado || "",
-    linkFinalOriginal: oferta.linkFinal || "",
-    linkOriginalAntesLinkOptimus: linkOriginal,
-    linkAfiliado: linkResolvido,
-    linkFinal: linkResolvido,
-    link: linkResolvido,
-    urlAfiliada: linkResolvido,
-    url: linkResolvido,
-    linkOptimusAplicado: true
-  };
+  return linksPuros.copiarOfertaComLinkResolvido(oferta, linkResolvido, linkOriginal);
 }
 
 function resolverLinkOfertaPorDestino({ oferta = {}, destino = {}, clienteId = "admin", plano = null, recursos = null, configGlobal = config } = {}) {
@@ -22397,7 +22295,6 @@ setInterval(() => {
     });
   });
 }, 10 * 1000);
-
 
 
 
