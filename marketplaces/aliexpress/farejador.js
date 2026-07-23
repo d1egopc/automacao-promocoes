@@ -2,7 +2,7 @@ const { gerarBuscasAliExpress } = require("./buscas");
 
 const {
   buscarProdutosAliExpressAPI,
-  gerarLinkCurtoAliExpress
+  gerarLinkCurtoAliExpress: gerarLinkCurtoAliExpressLegado
 } = require("./api");
 const { avaliarLimiteFilaHotfix } = require("../../utils/performance-hotfix");
 const filaOfertas = require("../../utils/fila-ofertas");
@@ -27,6 +27,10 @@ async function farejarAliExpress(clienteId = "admin", deps = {}) {
     encurtarUrl,
     registrarAbastecimento
   } = deps;
+  const gerarLinkCurtoAliExpress =
+    typeof deps.gerarLinkCurtoAliExpress === "function"
+      ? deps.gerarLinkCurtoAliExpress
+      : gerarLinkCurtoAliExpressLegado;
 
   try {
     console.log("[INFO] Farejando ofertas AliExpress modular...", { clienteId });

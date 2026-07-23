@@ -21583,6 +21583,7 @@ const retornoFarejador = await farejador(clienteId, {
   aplicarFiltrosUniversais,
   distribuirOfertaParaClientes,
   encurtarUrl,
+  gerarLinkCurtoAliExpress,
   gerarDeepLinkAwin: (url, clienteIdAlvo = clienteId) =>
     gerarDeepLinkAwin(url, clienteIdAlvo || clienteId),
   importarProdutoKabumViaAwin,
