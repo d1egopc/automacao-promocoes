@@ -166,6 +166,11 @@ const destinosUtils = require("./utils/destinos");
 const integracoesUtils = require("./utils/integracoes");
 const radarCupomMensagem = require("./utils/radar-cupom-mensagem");
 const {
+  extrairEvidenciasRadarLocal,
+  resumirExtratorLocalParaLog,
+  gerarComparacaoPassivaRadarLocal
+} = require("./modules/radar/extrator-local");
+const {
   aplicarLimiteLista,
   avaliarLimiteFilaHotfix,
   finalizarRunnerHotfix,
@@ -12902,6 +12907,40 @@ const links = extrairLinksRadar(texto);
 const marketplaceDetectadoLinks = links
   .map(link => detectarMarketplaceRadarLink(link))
   .find(Boolean) || "";
+let extracaoRadarLocal = null;
+
+try {
+  const inicioExtratorLocal = Date.now();
+  extracaoRadarLocal = extrairEvidenciasRadarLocal({
+    textoOriginal: texto,
+    links,
+    marketplaceDetectado: marketplaceDetectadoLinks,
+    origemTipo: origemTipoFinal,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto,
+    capturadaEm: capturadaEm || new Date().toISOString(),
+    metadadosMidia: {
+      imagemPresente: Boolean(
+        raw?.message?.imageMessage ||
+        raw?.image ||
+        raw?.photo ||
+        raw?.media?.type === "image"
+      )
+    }
+  }, { radarCupomMensagem });
+
+  console.log("[RADAR-HIBRIDO-EXTRATOR-LOCAL]", JSON.stringify(
+    resumirExtratorLocalParaLog(extracaoRadarLocal, Date.now() - inicioExtratorLocal)
+  ));
+} catch (erroExtratorLocal) {
+  console.log("[RADAR-HIBRIDO-EXTRATOR-ERRO]", JSON.stringify({
+    origemTipo: origemTipoFinal,
+    marketplaceDetectado: marketplaceDetectadoLinks,
+    etapa: "extracao_local",
+    erro: erroExtratorLocal?.message || "erro_extrator_local",
+    duracaoMs: 0
+  }));
+}
 
 console.log("[RADAR-LINKS-DETECTADOS]", JSON.stringify({
   clienteId: adminMasterId,
@@ -13136,6 +13175,21 @@ const registroEngineRadar = temRedirectConhecidoRadar
       textoOriginal: texto,
       raw
     });
+    if (extracaoRadarLocal) {
+      try {
+        console.log("[RADAR-HIBRIDO-COMPARACAO]", JSON.stringify(
+          gerarComparacaoPassivaRadarLocal(extracaoRadarLocal, importacao.oferta || {})
+        ));
+      } catch (erroComparacaoRadarLocal) {
+        console.log("[RADAR-HIBRIDO-EXTRATOR-ERRO]", JSON.stringify({
+          origemTipo: origemTipoFinal,
+          marketplaceDetectado: marketplaceInicialResumo,
+          etapa: "comparacao_passiva",
+          erro: erroComparacaoRadarLocal?.message || "erro_comparacao_passiva",
+          duracaoMs: 0
+        }));
+      }
+    }
     const marketplaceImportacaoResumo = normalizarMarketplaceResumoRadar(
       importacao.resolucao?.marketplaceReal ||
       importacao.oferta?.marketplace ||
