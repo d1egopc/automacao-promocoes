@@ -2698,72 +2698,40 @@ function extrairLinkAfiliadoOferta(oferta = {}) {
 }
 
 function localizarLinkOptimusExistente({ clienteId = "", linkOriginal = "", marketplace = "", configBase = config } = {}) {
-  const linksGerados = configBase?.linksGerados || {};
-  const cliente = String(clienteId || "").trim();
-  const link = String(linkOriginal || "").trim();
-  if (!link) return null;
-
-  for (const [codigo, dados] of Object.entries(linksGerados)) {
-    if (!dados || typeof dados !== "object") continue;
-    const linkGerado = String(dados.urlOriginal || dados.original || "").trim();
-    const clienteGerado = String(dados.clienteId || "").trim();
-    if (linkGerado !== link) continue;
-    if (clienteGerado !== cliente) continue;
-    const url = montarUrlLinkOptimus(codigo, configBase);
-    if (!url) continue;
-    return { codigo, url, dados };
-  }
-
-  return null;
+  return linksPuros.localizarLinkOptimusExistente({
+    clienteId,
+    linkOriginal,
+    marketplace,
+    repository: linksPuros.criarLinkOptimusRepository({ configBase, salvarConfig }),
+    configBase,
+    dominioFallback: process.env.RAILWAY_PUBLIC_DOMAIN || ""
+  });
 }
 
 function gerarCodigoLinkOptimus(configBase = config) {
-  const linksGerados = configBase.linksGerados || {};
-  for (let tentativa = 0; tentativa < 10; tentativa += 1) {
-    const codigo = Math.random().toString(36).substring(2, 8);
-    if (codigo && !linksGerados[codigo]) return codigo;
-  }
-  return Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  return linksPuros.gerarCodigoLinkOptimus(
+    linksPuros.criarLinkOptimusRepository({ configBase, salvarConfig })
+  );
 }
 
 function criarLinkOptimus(linkOriginal = "", marketplace = "", opcoes = {}) {
   const configBase = opcoes.configGlobal || config;
-  const link = String(linkOriginal || "").trim();
-  const clienteId = String(opcoes.clienteId || "").trim();
-  if (!link) return { ok: false, motivo: "link_original_ausente" };
-  if (configBase?.linksOptimus?.ativo !== true) return { ok: false, motivo: "config_desativada" };
-  if (!resolverDominioBaseLinkOptimus(configBase)) return { ok: false, motivo: "dominio_ausente" };
-
-  configBase.linksGerados = configBase.linksGerados || {};
-  const existente = localizarLinkOptimusExistente({ clienteId, linkOriginal: link, marketplace, configBase });
-  if (existente) {
-    return { ok: true, url: existente.url, codigo: existente.codigo, reutilizado: true };
-  }
-
-  const codigo = gerarCodigoLinkOptimus(configBase);
-  configBase.linksGerados[codigo] = {
-    original: link,
-    urlOriginal: link,
-    marketplace,
-    clienteId,
-    cliques: 0,
-    ultimoClique: null,
-    criadoEm: new Date().toISOString()
-  };
-
-  try {
-    salvarConfig();
-  } catch (erro) {
-    delete configBase.linksGerados[codigo];
-    throw erro;
-  }
-
-  return { ok: true, url: montarUrlLinkOptimus(codigo, configBase), codigo, reutilizado: false };
+  return linksPuros.criarLinkOptimus(linkOriginal, marketplace, {
+    ...opcoes,
+    configGlobal: configBase,
+    dominioFallback: process.env.RAILWAY_PUBLIC_DOMAIN || "",
+    repository: linksPuros.criarLinkOptimusRepository({ configBase, salvarConfig })
+  });
 }
 
 function gerarLinkOptimus(linkOriginal = "", marketplace = "", opcoes = {}) {
-  const resultado = criarLinkOptimus(linkOriginal, marketplace, opcoes);
-  return resultado.ok ? resultado.url : String(linkOriginal || "");
+  const configBase = opcoes.configGlobal || config;
+  return linksPuros.gerarLinkOptimus(linkOriginal, marketplace, {
+    ...opcoes,
+    configGlobal: configBase,
+    dominioFallback: process.env.RAILWAY_PUBLIC_DOMAIN || "",
+    repository: linksPuros.criarLinkOptimusRepository({ configBase, salvarConfig })
+  });
 }
 
 function logLinkOptimus(tag, payload = {}) {
@@ -5947,18 +5915,15 @@ app.get("/r/:codigo", (req, res) => {
   try {
     const codigo = req.params.codigo;
 
-    config.linksGerados = config.linksGerados || {};
-
-    const dados = config.linksGerados[codigo];
+    const repository = linksPuros.criarLinkOptimusRepository({ configBase: config, salvarConfig });
+    const registro = repository.buscarPorCodigo(codigo);
+    const dados = registro?.dados;
 
     if (!dados?.original) {
       return res.status(404).send("Link não encontrado");
     }
 
-    dados.cliques = (dados.cliques || 0) + 1;
-    dados.ultimoClique = new Date().toISOString();
-
-    salvarConfig();
+    repository.incrementarClique(codigo);
 
     return res.redirect(dados.original);
 
@@ -22295,7 +22260,5 @@ setInterval(() => {
     });
   });
 }, 10 * 1000);
-
-
 
 
