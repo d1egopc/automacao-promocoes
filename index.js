@@ -137,6 +137,14 @@ const socialModule = require("./modules/social");
 const criarRotasSocial = require("./modules/social/routes");
 const criarRotasTemplatesClientes = require("./modules/templates-clientes/routes");
 const {
+  resolveWorkspaceId,
+  isAdminMaster: usuarioEhAdminMaster
+} = require("./modules/workspace/identity");
+const {
+  resolverCanal,
+  canalPertenceAoWorkspace
+} = require("./modules/workspace/channel-registry");
+const {
   registrarMiddlewaresBase,
   registrarMiddlewaresOperacionais
 } = require("./bootstrap/middlewares");
@@ -6395,15 +6403,7 @@ app.get("/automacao/status", (req, res) => {
     .length;
 
   const sessoesAtivas = Object.values(sessoesMeta || {})
-    .filter(sessao => {
-      const id = String(sessao.id || "");
-
-      return (
-        id.startsWith(clienteId + "_") ||
-        id === clienteId ||
-        (clienteId === "admin" && id.startsWith("admin_"))
-      );
-    })
+    .filter(sessao => canalPertenceAoWorkspace(sessao, clienteId, { usuarios }))
     .filter(sessao => {
       const id = sessao.id;
       return statusSessao[id] === "open" || statusSessao[id] === "aberto";
@@ -7208,7 +7208,7 @@ function isAdminMaster(req) {
   const clienteId = getClienteId(req);
   const usuario = usuarios.find(u => u.id === clienteId);
 
-  return usuario?.papel === "admin_master";
+  return usuarioEhAdminMaster(usuario);
 }
 
 
@@ -7246,7 +7246,7 @@ function usuarioTemRecurso(req, recurso) {
 
   if (!usuario) return false;
 
-  if (usuario.papel === "admin_master") {
+  if (usuarioEhAdminMaster(usuario)) {
     return true;
   }
 
@@ -7259,7 +7259,7 @@ function clienteTemRecursoMensageiro(clienteId = "admin") {
   const usuario = usuarios.find(u => u.id === clienteId) || null;
 
   if (!usuario) return clienteId === "admin";
-  if (usuario.papel === "admin_master") return true;
+  if (usuarioEhAdminMaster(usuario)) return true;
 
   const nomePlano = String(usuario.plano || "").trim().toLowerCase();
   const plano = Object.values(planos || {}).find(p =>
@@ -7310,7 +7310,10 @@ function chavesPossiveisIntegracao(marketplace = "") {
 }
 
 function getIntegracaoCliente(clienteId = "admin", marketplace = "") {
-  const cid = String(clienteId || "admin").trim() || "admin";
+  const cid = resolveWorkspaceId(clienteId, {
+    origem: "integracoes",
+    motivo: "cliente_ausente"
+  });
   const integracoesCliente = integracoesPorCliente?.[cid] || null;
 
   if (!integracoesCliente) return null;
@@ -7341,13 +7344,24 @@ function getClienteId(req) {
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
-  if (!token) return "admin";
+  if (!token) {
+    return resolveWorkspaceId("", {
+      origem: "request",
+      motivo: "token_ausente"
+    });
+  }
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    return decoded.clienteId || "admin";
+    return resolveWorkspaceId(decoded.clienteId, {
+      origem: "request",
+      motivo: "jwt_sem_clienteId"
+    });
   } catch {
-    return "admin";
+    return resolveWorkspaceId("", {
+      origem: "request",
+      motivo: "token_invalido"
+    });
   }
 }
 
@@ -7422,7 +7436,10 @@ function auth(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const clienteId = decoded.clienteId || "admin";
+    const clienteId = resolveWorkspaceId(decoded.clienteId, {
+      origem: "auth",
+      motivo: "jwt_sem_clienteId"
+    });
 
     const usuarioExiste = usuarios.find(u =>
       String(u.id) === String(clienteId)
@@ -8851,15 +8868,7 @@ function montarResumoHistoricoRadar(clienteId = "admin", opcoes = {}) {
 
 function listarSessoesWhatsappCliente(clienteId = "admin") {
   return Object.values(sessoesMeta || {})
-    .filter(sessao => {
-      const id = String(sessao.id || "");
-
-      return (
-        id.startsWith(clienteId + "_") ||
-        id === clienteId ||
-        (clienteId === "admin" && id.startsWith("admin_"))
-      );
-    })
+    .filter(sessao => canalPertenceAoWorkspace(sessao, clienteId, { usuarios }))
     .map(sessao => {
       const id = sessao.id;
       const totalGrupos = gruposPorSessao[id]?.length || 0;
@@ -18627,48 +18636,17 @@ function normalizarSessaoId(clienteId, id = "sessao1") {
 function resolverClienteMensageiroPorSessao(sessao = "") {
   const idSessao = String(sessao || "").trim();
 
-  if (/^admin(?:_|$)/.test(idSessao)) {
+  const canal = resolverCanal(sessoesMeta?.[idSessao] || { id: idSessao }, {
+    sessoesMeta,
+    usuarios
+  });
+
+  if (canal.workspaceId) {
     return {
-      clienteIdMensageiro: "admin",
-      origemResolucao: "prefixo_sessao"
-    };
-  }
-
-  const usuarioPrefixo = (usuarios || [])
-    .map(usuario => String(usuario?.id || "").trim())
-    .filter(clienteId =>
-      clienteId.startsWith("user_") &&
-      (idSessao === clienteId || idSessao.startsWith(`${clienteId}_`))
-    )
-    .sort((a, b) => b.length - a.length)[0];
-
-  if (usuarioPrefixo) {
-    return {
-      clienteIdMensageiro: usuarioPrefixo,
-      origemResolucao: "prefixo_sessao"
-    };
-  }
-
-  const matchUser = idSessao.match(/^(user_[^_]+)(?:_|$)/);
-  if (matchUser?.[1]) {
-    return {
-      clienteIdMensageiro: matchUser[1],
-      origemResolucao: "prefixo_sessao"
-    };
-  }
-
-  const meta = sessoesMeta?.[idSessao] || {};
-  const clienteMapa = String(
-    meta.clienteId ||
-    meta.clienteIdMensageiro ||
-    meta.donoClienteId ||
-    ""
-  ).trim();
-
-  if (clienteMapa) {
-    return {
-      clienteIdMensageiro: clienteMapa,
-      origemResolucao: "mapa_sessao"
+      clienteIdMensageiro: canal.workspaceId,
+      origemResolucao: canal.origemWorkspace === "mapa_sessao"
+        ? "mapa_sessao"
+        : "prefixo_sessao"
     };
   }
 
@@ -19866,15 +19844,7 @@ app.post("/sessoes", (req, res) => {
   : Number(planoUsuario?.limites?.sessoes || 1);
 
  const sessoesCliente = Object.values(sessoesMeta)
-  .filter(s => {
-    const id = String(s.id || "");
-
-    return (
-      id.startsWith(clienteId + "_") ||
-      id === clienteId ||
-      (clienteId === "admin" && id.startsWith("admin_"))
-    );
-  });
+  .filter(s => canalPertenceAoWorkspace(s, clienteId, { usuarios }));
 
   if (!isAdminMaster(req) && sessoesCliente.length >= limite) {
   return res.status(403).json({
@@ -19908,6 +19878,8 @@ const id = normalizarSessaoId(
 
     sessoesMeta[id] = {
       id,
+      clienteId,
+      workspaceId: clienteId,
       nome,
       tipo,
       criadoEm: new Date().toISOString()
@@ -20109,7 +20081,7 @@ function listarSessoesCliente(clienteId) {
   config.sessoesWhatsapp = config.sessoesWhatsapp || [];
 
   return config.sessoesWhatsapp.filter(id =>
-    String(id).startsWith(`${clienteId}_`)
+    canalPertenceAoWorkspace({ id, tipo: "whatsapp" }, clienteId, { usuarios })
   );
 }
 
@@ -20992,12 +20964,16 @@ sock.ev.on("group-participants.update", async (evento) => {
 
 sessoesMeta[id] = sessoesMeta[id] || {
   id,
+  clienteId: clienteIdMensageiro,
+  workspaceId: clienteIdMensageiro,
   nome: id,
   tipo: "whatsapp",
   criadoEm: new Date().toISOString()
 };
 
 sessoesMeta[id].status = "open";
+sessoesMeta[id].clienteId = sessoesMeta[id].clienteId || clienteIdMensageiro;
+sessoesMeta[id].workspaceId = sessoesMeta[id].workspaceId || sessoesMeta[id].clienteId;
 sessoesMeta[id].conectadoEm = new Date().toISOString();
 
 salvarSessoesMeta();
