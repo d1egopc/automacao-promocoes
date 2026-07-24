@@ -276,12 +276,13 @@ function assinarState(payload = "") {
     .digest("base64url");
 }
 
-function gerarStateInstagram(clienteId = "admin") {
+function gerarStateInstagram(clienteId = "admin", retornoFrontend = "") {
   const nonce = crypto.randomBytes(16).toString("hex");
   const payload = base64UrlJson({
     clienteId: texto(clienteId || "admin"),
     nonce,
-    exp: Date.now() + STATE_TTL_MS
+    exp: Date.now() + STATE_TTL_MS,
+    ...(texto(retornoFrontend) ? { retornoFrontend: texto(retornoFrontend) } : {})
   });
   return {
     nonce,
@@ -315,7 +316,8 @@ function decodificarStateInstagram(state = "") {
   return {
     clienteId: texto(dados.clienteId),
     nonce: texto(dados.nonce),
-    exp: Number(dados.exp || 0)
+    exp: Number(dados.exp || 0),
+    retornoFrontend: texto(dados.retornoFrontend)
   };
 }
 
@@ -915,12 +917,12 @@ function scopesInstagramConexao() {
   return [SCOPE_BASICO, SCOPE_PUBLICAR_CONTEUDO, SCOPE_GERENCIAR_COMENTARIOS, SCOPE_GERENCIAR_MENSAGENS];
 }
 
-function iniciarConexaoInstagram({ clienteId = "admin", redirectUri = "" } = {}) {
+function iniciarConexaoInstagram({ clienteId = "admin", redirectUri = "", retornoFrontend = "" } = {}) {
   const appId = appIdInstagram();
   const uri = redirectUriInstagram(redirectUri);
   if (!appId || !appSecretInstagram() || !uri) throw new Error("instagram_nao_configurado");
 
-  const { nonce, state } = gerarStateInstagram(clienteId);
+  const { nonce, state } = gerarStateInstagram(clienteId, retornoFrontend);
   const { exp } = decodificarStateInstagram(state);
   registrarStatePendente(clienteId, nonce, exp);
 
@@ -2706,7 +2708,10 @@ async function concluirCallbackInstagram({ code = "", state = "", redirectUri = 
     webhookErro: conexao.webhookErro
   });
 
-  return conexao;
+  return {
+    ...conexao,
+    retornoFrontend: estado.retornoFrontend
+  };
 }
 
 function limparConexaoInstagram(clienteId = "admin") {

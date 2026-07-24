@@ -19,6 +19,7 @@ const {
 } = require("./facebook");
 const {
   concluirCallbackInstagram,
+  decodificarStateInstagram,
   diagnosticarComentariosPublicacaoInstagram,
   getPublicacaoInstagram,
   getInteracaoInstagram,
@@ -32,7 +33,12 @@ const {
   validarAssinaturaWebhookInstagram
 } = require("./instagram");
 
-const FRONTEND_URL_OFICIAL_SOCIAL = "https://optimuspromo.vercel.app";
+const FRONTEND_URL_OFICIAL_SOCIAL = "https://www.optimuspromo.com.br";
+const FRONTEND_URLS_COMPATIVEIS_SOCIAL = [
+  FRONTEND_URL_OFICIAL_SOCIAL,
+  "https://optimuspromo.com.br",
+  "https://optimuspromo.vercel.app"
+];
 const SOCIAL_MEDIA_UPLOAD_MIMES = [
   "image/jpeg",
   "image/png",
@@ -42,17 +48,27 @@ const SOCIAL_MEDIA_UPLOAD_MIMES = [
   "video/webm"
 ];
 
-function frontendUrlSocialOficial() {
+function frontendUrlSocialOficial(preferida = "") {
   const configurada = String(process.env.FRONTEND_URL || "").trim();
-  const candidatos = [configurada, FRONTEND_URL_OFICIAL_SOCIAL].filter(Boolean);
+  const origensPermitidas = new Set(
+    [configurada, ...FRONTEND_URLS_COMPATIVEIS_SOCIAL]
+      .map(candidato => {
+        try {
+          const url = new URL(candidato);
+          return url.protocol === "https:" ? url.origin : "";
+        } catch {
+          return "";
+        }
+      })
+      .filter(Boolean)
+  );
+  const candidatos = [preferida, configurada, ...FRONTEND_URLS_COMPATIVEIS_SOCIAL].filter(Boolean);
 
   for (const candidato of candidatos) {
     try {
       const url = new URL(candidato);
-      const host = url.hostname.toLowerCase();
       if (url.protocol !== "https:") continue;
-      if (host === "lovable.app" || host.endsWith(".lovable.app")) continue;
-      return url.origin;
+      if (origensPermitidas.has(url.origin)) return url.origin;
     } catch {
       // tenta o proximo candidato seguro
     }
@@ -102,8 +118,8 @@ function criarRotasSocial(deps = {}) {
     }
   }
 
-  function redirectFrontendInstagram(status = "") {
-    const frontendUrl = frontendUrlSocialOficial();
+  function redirectFrontendInstagram(status = "", origemPreferida = "") {
+    const frontendUrl = frontendUrlSocialOficial(origemPreferida);
     if (!frontendUrl) return "";
 
     try {
@@ -587,7 +603,10 @@ function criarRotasSocial(deps = {}) {
       const clienteId = cliente(req);
       const inicio = iniciarConexaoInstagram({
         clienteId,
-        redirectUri: req.query?.redirectUri || req.query?.redirect_uri || ""
+        redirectUri: req.query?.redirectUri || req.query?.redirect_uri || "",
+        retornoFrontend: frontendUrlSocialOficial(
+          req.query?.retornoFrontend || req.query?.frontendOrigin || ""
+        )
       });
 
       logSocial("[SOCIAL-INSTAGRAM-OAUTH-INICIO]", {
@@ -612,6 +631,13 @@ function criarRotasSocial(deps = {}) {
   });
 
   router.get("/instagram/callback", async (req, res) => {
+    let contextoState = {};
+    try {
+      contextoState = decodificarStateInstagram(req.query?.state || "");
+    } catch {
+      contextoState = {};
+    }
+
     try {
       logSocial("[SOCIAL-INSTAGRAM-CALLBACK-INICIO]", {
         codePresente: Boolean(req.query?.code),
@@ -630,8 +656,16 @@ function criarRotasSocial(deps = {}) {
       });
       const instagram = sanitizarConexaoInstagram(conexao);
 
-      const redirectSucesso = redirectFrontendInstagram("conectado");
+      const redirectSucesso = redirectFrontendInstagram(
+        "conectado",
+        conexao.retornoFrontend || contextoState.retornoFrontend || ""
+      );
       if (redirectSucesso) {
+        logSocial("[SOCIAL-INSTAGRAM-REDIRECT-SUCESSO]", {
+          clienteId: conexao.clienteId || contextoState.clienteId || "",
+          destinoFinal: redirectSucesso,
+          motivo: "oauth_concluido"
+        });
         return res.redirect(302, redirectSucesso);
       }
 
@@ -655,13 +689,21 @@ function criarRotasSocial(deps = {}) {
     } catch (e) {
       const erro = erroInstagramSeguro(e.message);
       logErroSocial({ erro, rota: "GET /social/instagram/callback" });
-      const redirectErroBase = redirectFrontendInstagram("erro");
+      const redirectErroBase = redirectFrontendInstagram(
+        "erro",
+        contextoState.retornoFrontend || ""
+      );
       const redirectErro = redirectErroBase ? (() => {
         const destino = new URL(redirectErroBase);
         destino.searchParams.set("erro", erro);
         return destino.toString();
       })() : "";
       if (redirectErro) {
+        logSocial("[SOCIAL-INSTAGRAM-REDIRECT-ERRO]", {
+          clienteId: contextoState.clienteId || "",
+          destinoFinal: redirectErro,
+          motivo: erro
+        });
         return res.redirect(302, redirectErro);
       }
 

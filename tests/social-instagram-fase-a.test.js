@@ -11,6 +11,7 @@ process.env.INSTAGRAM_REDIRECT_URI = "https://api.optimus.test/social/instagram/
 process.env.INSTAGRAM_OAUTH_STATE_SECRET = "state_secret_optimus";
 
 const instagram = require("../modules/social/instagram");
+const criarRotasSocial = require("../modules/social/routes");
 const socialStorage = require("../modules/social/storage");
 const { writeClienteJson } = require("../utils/storage");
 const routesFonte = fs.readFileSync(path.join(__dirname, "..", "modules", "social", "routes.js"), "utf8");
@@ -147,10 +148,60 @@ function salvarFilaCliente(clienteId, itens) {
   })));
 }
 
+function iniciarInstagramPelaRota(retornoFrontend) {
+  const router = criarRotasSocial({
+    getClienteId: () => "cliente_rota",
+    usuarioTemRecurso: () => true
+  });
+  const camada = router.stack.find(item =>
+    item.route?.path === "/instagram/conectar" &&
+    item.route?.methods?.get
+  );
+  let payload = null;
+  const res = {
+    status() {
+      return this;
+    },
+    json(dados) {
+      payload = dados;
+      return dados;
+    }
+  };
+  camada.route.stack[0].handle({
+    usuario: { papel: "admin_master" },
+    query: { retornoFrontend }
+  }, res);
+  return payload;
+}
+
 (async () => {
-  const inicio = instagram.iniciarConexaoInstagram({ clienteId: "cliente_a" });
+  const inicioRotaOficial = iniciarInstagramPelaRota("https://optimuspromo.vercel.app");
+  const stateRotaOficial = new URL(inicioRotaOficial.authUrl).searchParams.get("state");
+  assert.strictEqual(
+    instagram.decodificarStateInstagram(stateRotaOficial).retornoFrontend,
+    "https://optimuspromo.vercel.app",
+    "origem oficial iniciadora deve ser preservada"
+  );
+
+  const inicioRotaExterna = iniciarInstagramPelaRota("https://externo-invalido.test");
+  const stateRotaExterna = new URL(inicioRotaExterna.authUrl).searchParams.get("state");
+  assert.strictEqual(
+    instagram.decodificarStateInstagram(stateRotaExterna).retornoFrontend,
+    "https://www.optimuspromo.com.br",
+    "origem externa nao pode controlar o redirect"
+  );
+
+  const inicio = instagram.iniciarConexaoInstagram({
+    clienteId: "cliente_a",
+    retornoFrontend: "https://www.optimuspromo.com.br"
+  });
   const estado = instagram.decodificarStateInstagram(inicio.state);
   assert.strictEqual(estado.clienteId, "cliente_a", "state deve carregar clienteId");
+  assert.strictEqual(
+    estado.retornoFrontend,
+    "https://www.optimuspromo.com.br",
+    "state deve preservar a origem do frontend"
+  );
   assert.ok(estado.nonce, "state deve carregar nonce");
   assert.ok(estado.exp > Date.now(), "state deve carregar expiracao");
   assert.ok(inicio.authUrl.startsWith("https://www.instagram.com/oauth/authorize?"));
@@ -192,6 +243,11 @@ function salvarFilaCliente(clienteId, itens) {
   assert.strictEqual(conectadoA.instagramUserId, "ig_cliente_a");
   assert.strictEqual(conectadoA.username, "optimus_cliente_a");
   assert.strictEqual(conectadoA.accountType, "BUSINESS");
+  assert.strictEqual(
+    conectadoA.retornoFrontend,
+    "https://www.optimuspromo.com.br",
+    "callback deve devolver a origem assinada para o redirect"
+  );
   assert.ok(conectadoA.token.accessToken.startsWith("long_"));
   assert.deepStrictEqual(conectadoA.scopes, ["instagram_business_basic", "instagram_business_content_publish", "instagram_business_manage_comments", "instagram_business_manage_messages"]);
   assert.strictEqual(conectadoA.webhookContaAssinada, true);
@@ -360,6 +416,8 @@ function salvarFilaCliente(clienteId, itens) {
   assert.ok(indexFonte.includes('erro: "Token inválido"'), "resposta Token inválido deve estar em UTF-8");
   assert.ok(!indexFonte.includes("Token invÃ"), "index.js nao deve manter Token invalido mojibake");
   assert.ok(routesFonte.includes("authUrl: inicio.authUrl"), "conectar deve retornar authUrl");
+  assert.ok(routesFonte.includes("SOCIAL-INSTAGRAM-REDIRECT-SUCESSO"), "callback deve logar redirect de sucesso");
+  assert.ok(routesFonte.includes("SOCIAL-INSTAGRAM-REDIRECT-ERRO"), "callback deve logar redirect de erro");
   assert.ok(!routesFonte.includes("accessToken: inicio"), "conectar nao deve retornar token");
   assert.ok(routesFonte.includes('return res.json(payloadStatusInstagram(lerConexaoInstagram(clienteId)));'), "status deve usar contrato sanitizado achatado");
   assert.ok(routesFonte.includes("webhookContaAssinada: instagram.webhookContaAssinada"), "status deve expor assinatura webhook sanitizada");
