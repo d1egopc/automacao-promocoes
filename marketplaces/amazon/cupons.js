@@ -1,3 +1,4 @@
+const { normalizarNumeroMoeda } = require("../../utils/moeda");
 const { registrarRadarCupons } = require("../cupons/radar");
 
 let ultimoTotalCuponsAmazon = 0;
@@ -66,20 +67,8 @@ function formatarPercentualCupomAmazon(texto = "") {
 }
 
 function numeroMoedaAmazon(valor = "") {
-  if (typeof valor === "number" && Number.isFinite(valor)) return valor;
-
-  const texto = String(valor || "");
-  const match = texto.match(/R\$\s*\d{1,6}(?:\.\d{3})*(?:[,.]\d{1,2})?|\d{1,6}(?:\.\d{3})*(?:[,.]\d{1,2})?/i);
-  if (!match) return 0;
-
-  const normalizado = match[0]
-    .replace(/R\$/gi, "")
-    .replace(/\s+/g, "")
-    .replace(/\./g, "")
-    .replace(",", ".");
-
-  const numero = Number(normalizado);
-  return Number.isFinite(numero) ? numero : 0;
+  const numero = normalizarNumeroMoeda(valor);
+  return numero !== null ? numero : 0;
 }
 
 function validarCupomMonetarioAmazon(oferta = {}, item = {}) {

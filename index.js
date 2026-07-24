@@ -4,6 +4,7 @@ const path = require("path");
 const axios = require("axios");
 const csv = require("csv-parser");
 const zlib = require("zlib");
+const { normalizarPrecoTextoBR } = require("./utils/moeda");
 
 const {
   initEngineDatabase,
@@ -12084,7 +12085,9 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
         mensagemOriginalRadar: textoRadarImportadorMl
       }),
       importarShopee,
+      importarProdutoKabumViaAwin,
       gerarLinkAfiliadoMercadoLivre,
+      gerarDeepLinkAwin,
         resolverLinkOriginalRadar
       });
 
@@ -13175,11 +13178,11 @@ const registroEngineRadar = temRedirectConhecidoRadar
       textoOriginal: texto,
       raw
     });
+    let comparacaoRadarLocal = null;
     if (extracaoRadarLocal) {
       try {
-        console.log("[RADAR-HIBRIDO-COMPARACAO]", JSON.stringify(
-          gerarComparacaoPassivaRadarLocal(extracaoRadarLocal, importacao.oferta || {})
-        ));
+        comparacaoRadarLocal = gerarComparacaoPassivaRadarLocal(extracaoRadarLocal, importacao.oferta || {});
+        console.log("[RADAR-HIBRIDO-COMPARACAO]", JSON.stringify(comparacaoRadarLocal));
       } catch (erroComparacaoRadarLocal) {
         console.log("[RADAR-HIBRIDO-EXTRATOR-ERRO]", JSON.stringify({
           origemTipo: origemTipoFinal,
@@ -13310,7 +13313,15 @@ const registroEngineRadar = temRedirectConhecidoRadar
       image: imagemOfertaRadar(importacao.oferta),
       mensagemOriginalRadar: texto.slice(0, 1000),
       capturadaEm: dataCaptura,
-      dataEntradaRadar: dataCaptura
+      dataEntradaRadar: dataCaptura,
+      metadata: {
+        ...(importacao.oferta?.metadata && typeof importacao.oferta.metadata === "object" ? importacao.oferta.metadata : {}),
+        comparacaoRadarLocal,
+        radarHibrido: {
+          ...(importacao.oferta?.metadata?.radarHibrido && typeof importacao.oferta.metadata.radarHibrido === "object" ? importacao.oferta.metadata.radarHibrido : {}),
+          comparacao: comparacaoRadarLocal
+        }
+      }
     }));
     const resolucaoCaptura = resolverClienteMensageiroPorSessao(sessaoIdTexto);
     console.log("[RADAR-OFERTA-BASE-CRIADA]", JSON.stringify({
@@ -17594,37 +17605,7 @@ function aplicarFiltrosUniversais(ofertas = [], opcoes = {}) {
 }
 
 function limparPreco(valor) {
-  if (!valor) return "";
-
-  let texto = String(valor).trim();
-
-  texto = texto
-    .replace("R$", "")
-    .replace(/\s/g, "");
-
-  if (/^\d+\.\d{1,2}$/.test(texto)) {
-  const numero = Number(texto);
-  return numero.toFixed(2).replace(".", ",");
-}
-
-  if (texto.includes(",")) {
-    texto = texto.replace(/\./g, "").replace(",", ".");
-    const numero = Number(texto);
-    if (!Number.isFinite(numero)) return "";
-    return numero.toFixed(2).replace(".", ",");
-  }
-
-  texto = texto.replace(/\D/g, "");
-
-  if (!texto) return "";
-
-  let numero = Number(texto);
-
-  if (numero > 10000) {
-  numero = numero / 100;
-}
-
-  return numero.toFixed(2).replace(".", ",");
+  return normalizarPrecoTextoBR(valor);
 }
 
 function corrigirImagemUrl(imagem) {
@@ -19783,8 +19764,10 @@ app.post("/importar-produto", async (req, res) => {
       importarMagalu,
       importarMercadoLivre,
       importarShopee,
+      importarProdutoKabumViaAwin,
 
       gerarLinkAfiliadoMercadoLivre,
+      gerarDeepLinkAwin,
         resolverLinkOriginalRadar
       });
 

@@ -1,3 +1,4 @@
+const { normalizarNumeroMoeda } = require("../../utils/moeda");
 function criarImportarAmazon(deps = {}) {
   const {
     extrairJsonLd,
@@ -70,38 +71,7 @@ function criarImportarAmazon(deps = {}) {
     }
 
     function numeroPrecoAmazon(valor) {
-      if (typeof valor === "number") {
-        return Number.isFinite(valor) && valor > 0 ? valor : 0;
-      }
-
-      const texto = String(valor || "")
-        .replace(/R\$/gi, "")
-        .replace(/\s+/g, "")
-        .trim();
-
-      if (!texto) return 0;
-
-      let normalizado = texto.replace(/[^\d.,]/g, "");
-      if (!normalizado) return 0;
-
-      const temVirgula = normalizado.includes(",");
-      const temPonto = normalizado.includes(".");
-
-      if (temVirgula && temPonto) {
-        normalizado = normalizado.replace(/\./g, "").replace(",", ".");
-      } else if (temVirgula) {
-        normalizado = normalizado.replace(",", ".");
-      } else if (temPonto) {
-        const partes = normalizado.split(".");
-        const ultimo = partes[partes.length - 1] || "";
-        const milhares = /^\d{1,3}(?:\.\d{3})+$/.test(normalizado);
-        normalizado = milhares && ultimo.length === 3
-          ? normalizado.replace(/\./g, "")
-          : normalizado;
-      }
-
-      const numero = Number(normalizado);
-      return Number.isFinite(numero) && numero > 0 ? numero : 0;
+      return normalizarNumeroMoeda(valor) || 0;
     }
 
     function formatarPrecoAmazon(numero = 0) {
@@ -565,7 +535,6 @@ const linkFinal = usarLinksOptimus
 module.exports = {
   criarImportarAmazon
 };
-
 
 
 

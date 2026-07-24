@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { normalizarPrecoTextoBR } = require("../../utils/moeda");
 
 // ================= IMPORTADOR API ALIEXPRESS =================
 
@@ -23,7 +24,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
 
     const credenciais = config?.credenciais || config || {};
     const appKey = credenciais.appKey || "";
-    const secret = credenciais.secret || "";
+    const secret = credenciais.secret || credenciais.appSecret || "";
     const trackingId = credenciais.trackingId || "";
 
     if (!appKey || !secret || !trackingId) {
@@ -38,6 +39,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
       format: "json",
       v: "2.0",
       product_ids: productId,
+      fields: "product_title,product_main_image_url,product_small_image_urls,target_sale_price,sale_price,target_app_sale_price,app_sale_price,target_min_sale_price,min_sale_price,target_original_price,original_price,discount,promotion_link,promotion_link_short,product_detail_url,product_url,first_level_category_name,second_level_category_name",
       target_currency: "BRL",
       target_language: "PT",
       ship_to_country: "BR",
@@ -64,12 +66,20 @@ async function importarAliExpress(urlEntrada, config = {}) {
       data?.result ||
       {};
 
-    const produto =
-      result?.products?.product?.[0] ||
-      result?.products?.[0] ||
-      result?.product?.[0] ||
-      result?.product ||
-      {};
+    const listaProdutos = [];
+    const adicionarProduto = valor => {
+      if (Array.isArray(valor)) {
+        for (const item of valor) adicionarProduto(item);
+        return;
+      }
+      if (valor && typeof valor === "object") listaProdutos.push(valor);
+    };
+
+    adicionarProduto(result?.products?.product);
+    adicionarProduto(result?.products);
+    adicionarProduto(result?.product);
+
+    const produto = listaProdutos.find(item => item && typeof item === "object" && !Array.isArray(item)) || {};
 
     const avisoCupom = ehBrasil
       ? "🇧🇷 Produto no Brasil. Confira cupom ou desconto com moedas na página."
@@ -230,14 +240,7 @@ function assinar(params, appSecret) {
 }
 
 function limparPreco(valor) {
-  if (!valor) return "";
-
-  return String(valor)
-    .replace("R$", "")
-    .replace(/\s/g, "")
-    .replace(",", ".")
-    .replace(/[^\d.]/g, "")
-    .trim();
+  return normalizarPrecoTextoBR(valor);
 }
 
 function htmlDecode(str = "") {

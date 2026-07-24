@@ -1,4 +1,5 @@
 const { queryEngine } = require("../database");
+const { normalizarNumeroMoeda } = require("../../../utils/moeda");
 const {
   marcarJobStatus,
   registrarProcessamento,
@@ -19,6 +20,7 @@ const {
   detectarIdentidadeProdutoUniversal
 } = require("../../inteligencia-universal");
 const { resolverImagemUniversal } = require("../../imagens/resolver-imagem-universal");
+const { validarCoerenciaPreco } = require("../../inteligencia-universal/preco-coerencia.service");
 const {
   logEngineImporterErro,
   logEngineImporterOfertaCriada
@@ -43,20 +45,7 @@ async function engineOfertasTemMetadata() {
 }
 
 function normalizarNumero(valor = null) {
-  if (valor === null || valor === undefined || valor === "") return null;
-  const texto = String(valor)
-    .replace(/R\$/gi, "")
-    .replace(/\s+/g, "")
-    .trim();
-
-  if (!texto) return null;
-
-  let numero = Number(texto);
-  if (!Number.isFinite(numero)) {
-    numero = Number(texto.replace(/\./g, "").replace(",", "."));
-  }
-
-  return Number.isFinite(numero) ? numero : null;
+  return normalizarNumeroMoeda(valor);
 }
 
 function categoriaGenericaEngine(categoria = "") {
@@ -738,6 +727,36 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
     const memoriaV2 = resultadoV2.memoria || {};
     const valorEfetivoDetalhes = objetoSeguro(resultadoV2.valorEfetivoDetalhes);
     const totalMemoriaCandidatos = memoriaCandidatos.length;
+    const coerenciaPreco = validarCoerenciaPreco({
+      ...oferta,
+      precoAtual: oferta.preco,
+      preco: oferta.preco,
+      precoOriginal: oferta.precoOriginal,
+      valorCupom: ofertaEntrada.valorCupom || ofertaEntrada.cupomValor || produtoMetadata.valorCupom || produtoMetadata.cupomValor || "",
+      percentualCupom: ofertaEntrada.percentualCupom || ofertaEntrada.cupomPercentual || produtoMetadata.percentualCupom || produtoMetadata.cupomPercentual || "",
+      cupomTipo: oferta.cupomTipo || ofertaEntrada.cupomTipo || ofertaEntrada.tipoCupom || produtoMetadata.cupomTipo || produtoMetadata.tipoCupom || ""
+    }, {
+      ofertaEntrada,
+      job
+    });
+    const statusFinalV2 = coerenciaPreco.bloquear ? "retida" : (resultadoV2.status || "");
+    const motivoFinalV2 = coerenciaPreco.bloquear ? coerenciaPreco.motivo : (resultadoV2.motivo || "");
+    const okFinalV2 = resultadoV2.ok === true && coerenciaPreco.bloquear !== true;
+
+    if (coerenciaPreco.bloquear) {
+      console.log("[PRECO-COERENCIA]", JSON.stringify({
+        jobId: job.id,
+        clienteId: job.cliente_id || job.clienteId || "",
+        marketplace: oferta.marketplace || "",
+        classificacao: coerenciaPreco.classificacao,
+        motivo: coerenciaPreco.motivo,
+        precoAtual: coerenciaPreco.precoAtual,
+        precoOriginal: coerenciaPreco.precoOriginal,
+        radarPrecoAtual: coerenciaPreco.radarPrecoAtual,
+        importadorPrecoAtual: coerenciaPreco.importadorPrecoAtual,
+        cupomConfirmado: coerenciaPreco.cupomConfirmado === true
+      }));
+    }
 
     console.log("[V2-MEMORIA-DECISAO]", JSON.stringify({
       clienteId: job.cliente_id || job.clienteId || "",
@@ -764,12 +783,12 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       valorEfetivoComprovado: valorEfetivoDetalhes.comprovado === true,
       score: scoreV2,
       prioridade: prioridadeV2,
-      status: resultadoV2.status || "",
-      motivoDecisao: resultadoV2.motivo || ""
+      status: statusFinalV2,
+      motivoDecisao: motivoFinalV2
     }));
 
     return {
-      ok: true,
+      ok: okFinalV2,
       oferta: {
         ...oferta,
         score: scoreV2 !== null ? scoreV2 : oferta.score,
@@ -778,10 +797,10 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       metadata: {
         inteligenciaUniversalV2: {
           modo: "oficial",
-          ok: resultadoV2.ok === true,
-          status: resultadoV2.status || "",
-          motivo: resultadoV2.motivo || "",
-          motivoDecisao: resultadoV2.motivo || "",
+          ok: okFinalV2,
+          status: statusFinalV2,
+          motivo: motivoFinalV2,
+          motivoDecisao: motivoFinalV2,
           score: scoreV2,
           prioridade: prioridadeV2,
           categoria: resultadoV2.categoria || "",
@@ -790,6 +809,7 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
           valorEfetivoOrigem: resultadoV2.valorEfetivoOrigem || "",
           valorEfetivoComprovado: valorEfetivoDetalhes.comprovado === true,
           valorEfetivoDetalhes,
+          precoCoerencia: coerenciaPreco,
           memoria: memoriaV2,
           memoriaDisponivel: memoriaV2.memoriaDisponivel === true,
           destino: resultadoV2.destino || {},

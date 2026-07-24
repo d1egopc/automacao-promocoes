@@ -1,3 +1,4 @@
+const { centavosMonetarios: centavosMoeda } = require("../../utils/moeda");
 function texto(valor = "") {
   return String(valor ?? "").trim();
 }

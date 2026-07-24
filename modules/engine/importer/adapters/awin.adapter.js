@@ -1,3 +1,4 @@
+const { normalizarNumeroMoeda } = require("../../../../utils/moeda");
 function texto(valor = "") {
   return String(valor || "").trim();
 }
@@ -14,19 +15,7 @@ function primeiroValor(...valores) {
 }
 
 function numeroPreco(valor = "") {
-  if (valor === null || valor === undefined || valor === "") return null;
-  const bruto = texto(valor).replace(/R\$/gi, "").replace(/\s+/g, "");
-  if (!bruto) return null;
-
-  let normalizado = bruto.replace(/[^\d.,]/g, "");
-  if (normalizado.includes(",") && normalizado.includes(".")) {
-    normalizado = normalizado.replace(/\./g, "").replace(",", ".");
-  } else if (normalizado.includes(",")) {
-    normalizado = normalizado.replace(",", ".");
-  }
-
-  const numero = Number(normalizado);
-  return Number.isFinite(numero) && numero > 0 ? numero : null;
+  return normalizarNumeroMoeda(valor);
 }
 
 function extrairUrlKabumDeAwin(url = "") {

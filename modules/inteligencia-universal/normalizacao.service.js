@@ -1,3 +1,4 @@
+const { normalizarNumeroMoeda } = require("../../utils/moeda");
 function texto(valor = "") {
   return String(valor || "").trim();
 }

@@ -1,3 +1,4 @@
+const { analisarValorMonetario } = require("./moeda");
 function cortarTitulo(titulo = "", limite = 120) {
   const texto = String(titulo || "Oferta").replace(/\s+/g, " ").trim();
 
