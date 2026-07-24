@@ -6933,8 +6933,39 @@ app.post("/admin/planos", (req, res) => {
   });
 });
 
+function confirmacaoExclusaoValida(req) {
+  return String(req.body?.confirmacao || "").trim() === "EXCLUIR";
+}
+
+function logAuditoriaExclusaoAdmin({
+  entidade = "",
+  id = "",
+  adminId = "",
+  acao = "",
+  resultado = "",
+  motivo = ""
+} = {}) {
+  console.log("[ADMIN-EXCLUSAO]", JSON.stringify({
+    entidade,
+    id,
+    administrador: adminId,
+    acao,
+    resultado,
+    motivo,
+    timestamp: new Date().toISOString()
+  }));
+}
+
 app.delete("/admin/planos/:nome", (req, res) => {
   if (!isAdminMaster(req)) {
+    logAuditoriaExclusaoAdmin({
+      entidade: "plano",
+      id: req.params?.nome || "",
+      adminId: req.usuario?.clienteId || "",
+      acao: "excluir",
+      resultado: "bloqueado",
+      motivo: "permissao_insuficiente"
+    });
     return res.status(403).json({
       ok: false,
       erro: "Acesso restrito ao Admin Master"
@@ -6942,8 +6973,32 @@ app.delete("/admin/planos/:nome", (req, res) => {
   }
 
   const { nome } = req.params;
+  const adminId = req.usuario?.clienteId || "";
+
+  if (!confirmacaoExclusaoValida(req)) {
+    logAuditoriaExclusaoAdmin({
+      entidade: "plano",
+      id: nome,
+      adminId,
+      acao: "excluir",
+      resultado: "bloqueado",
+      motivo: "confirmacao_invalida"
+    });
+    return res.status(400).json({
+      ok: false,
+      erro: "Confirmacao EXCLUIR obrigatoria"
+    });
+  }
 
   if (!planos[nome]) {
+    logAuditoriaExclusaoAdmin({
+      entidade: "plano",
+      id: nome,
+      adminId,
+      acao: "excluir",
+      resultado: "bloqueado",
+      motivo: "plano_nao_encontrado"
+    });
     return res.status(404).json({
       ok: false,
       erro: "Plano não encontrado"
@@ -6955,6 +7010,14 @@ app.delete("/admin/planos/:nome", (req, res) => {
   );
 
   if (usuariosUsandoPlano.length > 0) {
+    logAuditoriaExclusaoAdmin({
+      entidade: "plano",
+      id: nome,
+      adminId,
+      acao: "excluir",
+      resultado: "bloqueado",
+      motivo: "plano_em_uso"
+    });
     return res.status(400).json({
       ok: false,
       erro: "Não é possível excluir plano em uso por usuários"
@@ -6964,6 +7027,14 @@ app.delete("/admin/planos/:nome", (req, res) => {
   delete planos[nome];
 
   salvarPlanos();
+  logAuditoriaExclusaoAdmin({
+    entidade: "plano",
+    id: nome,
+    adminId,
+    acao: "excluir",
+    resultado: "sucesso",
+    motivo: "plano_removido"
+  });
 
   return res.json({
     ok: true,
@@ -6973,6 +7044,14 @@ app.delete("/admin/planos/:nome", (req, res) => {
 
 app.delete("/admin/usuarios/:id", (req, res) => {
   if (!isAdminMaster(req)) {
+    logAuditoriaExclusaoAdmin({
+      entidade: "workspace",
+      id: req.params?.id || "",
+      adminId: req.usuario?.clienteId || "",
+      acao: "excluir",
+      resultado: "bloqueado",
+      motivo: "permissao_insuficiente"
+    });
     return res.status(403).json({
       ok: false,
       erro: "Acesso restrito ao Admin Master"
@@ -6980,8 +7059,49 @@ app.delete("/admin/usuarios/:id", (req, res) => {
   }
 
   const { id } = req.params;
+  const adminId = req.usuario?.clienteId || "";
 
-  if (id === "admin") {
+  if (!confirmacaoExclusaoValida(req)) {
+    logAuditoriaExclusaoAdmin({
+      entidade: "workspace",
+      id,
+      adminId,
+      acao: "excluir",
+      resultado: "bloqueado",
+      motivo: "confirmacao_invalida"
+    });
+    return res.status(400).json({
+      ok: false,
+      erro: "Confirmacao EXCLUIR obrigatoria"
+    });
+  }
+
+  const usuarioExcluir = usuarios.find(u => String(u.id) === String(id));
+
+  if (!usuarioExcluir) {
+    logAuditoriaExclusaoAdmin({
+      entidade: "workspace",
+      id,
+      adminId,
+      acao: "excluir",
+      resultado: "bloqueado",
+      motivo: "usuario_nao_encontrado"
+    });
+    return res.status(404).json({
+      ok: false,
+      erro: "Usuario nao encontrado"
+    });
+  }
+
+  if (id === "admin" || usuarioExcluir.papel === "admin_master") {
+    logAuditoriaExclusaoAdmin({
+      entidade: "workspace",
+      id,
+      adminId,
+      acao: "excluir",
+      resultado: "bloqueado",
+      motivo: "admin_master_protegido"
+    });
     return res.status(400).json({
       ok: false,
       erro: "Não é possível excluir o Admin Master principal"
@@ -6999,14 +7119,15 @@ app.delete("/admin/usuarios/:id", (req, res) => {
     });
   }
 
-  delete configsPorCliente[id];
-  delete destinosPorCliente[id];
-  delete integracoesPorCliente[id];
-
   salvarUsuarios();
-  salvarConfigsClientes();
-  salvarDestinosClientes();
-  salvarIntegracoesPersistidas();
+  logAuditoriaExclusaoAdmin({
+    entidade: "workspace",
+    id,
+    adminId,
+    acao: "excluir",
+    resultado: usuarios.length < antes ? "sucesso" : "bloqueado",
+    motivo: usuarios.length < antes ? "registro_removido_dados_preservados" : "usuario_nao_encontrado"
+  });
 
   return res.json({
     ok: true,
