@@ -995,6 +995,25 @@ function logTrocaTokenInstagramSeguro(tag, payload = {}) {
   console.log(tag, JSON.stringify(payload));
 }
 
+function logErroEtapaOAuthInstagram(tag, {
+  clienteId = "",
+  etapa = "",
+  erro,
+  camposEsperadosPresentes = {}
+} = {}) {
+  const detalhe = detalheErroTrocaTokenInstagram(erro);
+  logTrocaTokenInstagramSeguro(tag, {
+    clienteId: texto(clienteId),
+    etapa: texto(etapa),
+    statusHttp: detalhe.statusHttp,
+    errorType: detalhe.error.type,
+    errorCode: detalhe.error.code,
+    errorSubcode: detalhe.error.error_subcode,
+    mensagem: detalhe.error.message,
+    camposEsperadosPresentes
+  });
+}
+
 async function trocarCodePorTokenCurto({
   clienteId = "",
   code = "",
@@ -1050,11 +1069,19 @@ async function trocarCodePorTokenCurto({
   }
 }
 
-async function trocarTokenLongaDuracao({ accessToken = "", httpClient = httpClientPadrao() } = {}) {
+async function trocarTokenLongaDuracao({
+  clienteId = "",
+  accessToken = "",
+  httpClient = httpClientPadrao()
+} = {}) {
   const appSecret = appSecretInstagram();
   if (!appSecret) throw new Error("instagram_nao_configurado");
-  if (!texto(accessToken)) throw new Error("troca_token_falhou");
+  if (!texto(accessToken)) throw new Error("token_longo_falhou");
 
+  logTrocaTokenInstagramSeguro("[SOCIAL-INSTAGRAM-TOKEN-LONGO-INICIO]", {
+    clienteId: texto(clienteId),
+    etapa: "token_curto_por_token_longo"
+  });
   try {
     const resposta = await httpClient.get(`${INSTAGRAM_GRAPH_BASE}/access_token`, {
       params: {
@@ -1065,16 +1092,47 @@ async function trocarTokenLongaDuracao({ accessToken = "", httpClient = httpClie
       timeout: 10000
     });
     const dados = resposta?.data || {};
-    if (!dados.access_token) throw new Error("token_longo_nao_retornado");
+    if (!dados.access_token) {
+      const erro = new Error("token_longo_nao_retornado");
+      erro.response = {
+        status: resposta?.status || resposta?.statusCode || 200,
+        data: dados
+      };
+      throw erro;
+    }
+    logTrocaTokenInstagramSeguro("[SOCIAL-INSTAGRAM-TOKEN-LONGO-SUCESSO]", {
+      clienteId: texto(clienteId),
+      etapa: "token_curto_por_token_longo",
+      statusHttp: resposta?.status || resposta?.statusCode || 200,
+      tokenPresente: true,
+      expiresInPresente: Number.isFinite(Number(dados.expires_in)) && Number(dados.expires_in) > 0
+    });
     return dados;
-  } catch {
-    throw new Error("troca_token_falhou");
+  } catch (erro) {
+    logErroEtapaOAuthInstagram("[SOCIAL-INSTAGRAM-TOKEN-LONGO-ERRO]", {
+      clienteId,
+      etapa: "token_curto_por_token_longo",
+      erro,
+      camposEsperadosPresentes: {
+        tokenPresente: false,
+        expiresInPresente: false
+      }
+    });
+    throw new Error("token_longo_falhou");
   }
 }
 
-async function consultarContaInstagram({ accessToken = "", httpClient = httpClientPadrao() } = {}) {
-  if (!texto(accessToken)) throw new Error("consulta_conta_falhou");
+async function consultarContaInstagram({
+  clienteId = "",
+  accessToken = "",
+  httpClient = httpClientPadrao()
+} = {}) {
+  if (!texto(accessToken)) throw new Error("consulta_perfil_falhou");
 
+  logTrocaTokenInstagramSeguro("[SOCIAL-INSTAGRAM-PERFIL-INICIO]", {
+    clienteId: texto(clienteId),
+    etapa: "consulta_perfil"
+  });
   try {
     const resposta = await httpClient.get(`${INSTAGRAM_GRAPH_BASE}/me`, {
       params: {
@@ -1085,16 +1143,44 @@ async function consultarContaInstagram({ accessToken = "", httpClient = httpClie
     });
     const dados = resposta?.data || {};
     const instagramUserId = texto(dados.user_id || dados.id);
-    if (!instagramUserId) throw new Error("me_id_nao_retornado");
+    if (!instagramUserId) {
+      const erro = new Error("me_id_nao_retornado");
+      erro.response = {
+        status: resposta?.status || resposta?.statusCode || 200,
+        data: dados
+      };
+      throw erro;
+    }
 
-    return {
+    const perfil = {
       instagramUserId,
       username: texto(dados.username),
       accountType: texto(dados.account_type),
       profilePictureUrl: texto(dados.profile_picture_url)
     };
-  } catch {
-    throw new Error("consulta_conta_falhou");
+    logTrocaTokenInstagramSeguro("[SOCIAL-INSTAGRAM-PERFIL-SUCESSO]", {
+      clienteId: texto(clienteId),
+      etapa: "consulta_perfil",
+      statusHttp: resposta?.status || resposta?.statusCode || 200,
+      idPresente: Boolean(perfil.instagramUserId),
+      usernamePresente: Boolean(perfil.username),
+      accountTypePresente: Boolean(perfil.accountType),
+      accountType: perfil.accountType
+    });
+    return perfil;
+  } catch (erro) {
+    const dados = erro?.response?.data || {};
+    logErroEtapaOAuthInstagram("[SOCIAL-INSTAGRAM-PERFIL-ERRO]", {
+      clienteId,
+      etapa: "consulta_perfil",
+      erro,
+      camposEsperadosPresentes: {
+        idPresente: Boolean(texto(dados.user_id || dados.id)),
+        usernamePresente: Boolean(texto(dados.username)),
+        accountTypePresente: Boolean(texto(dados.account_type))
+      }
+    });
+    throw new Error("consulta_perfil_falhou");
   }
 }
 
@@ -2724,6 +2810,41 @@ async function processarWebhookInstagram({ payload = {}, assinatura = "", rawBod
   return { ok: true, total: resultados.length, resultados };
 }
 
+function persistirConexaoOAuthInstagram(clienteId = "", etapa = "", montarDados = atual => atual) {
+  logTrocaTokenInstagramSeguro("[SOCIAL-INSTAGRAM-STORAGE-INICIO]", {
+    clienteId: texto(clienteId),
+    etapa: texto(etapa)
+  });
+  try {
+    const atual = lerConexaoInstagram(clienteId);
+    const dados = montarDados(atual);
+    const confirmada = salvarConexaoInstagram(clienteId, dados);
+    logTrocaTokenInstagramSeguro("[SOCIAL-INSTAGRAM-STORAGE-SUCESSO]", {
+      clienteId: texto(clienteId),
+      etapa: texto(etapa),
+      conectado: confirmada.conectado === true,
+      camposEsperadosPresentes: {
+        idPresente: Boolean(texto(confirmada.instagramUserId)),
+        tokenPresente: Boolean(texto(confirmada.token?.accessToken)),
+        statusPresente: Boolean(texto(confirmada.status))
+      }
+    });
+    return confirmada;
+  } catch (erro) {
+    logErroEtapaOAuthInstagram("[SOCIAL-INSTAGRAM-STORAGE-ERRO]", {
+      clienteId,
+      etapa,
+      erro,
+      camposEsperadosPresentes: {
+        idPresente: false,
+        tokenPresente: false,
+        statusPresente: false
+      }
+    });
+    throw new Error("persistencia_falhou");
+  }
+}
+
 async function concluirCallbackInstagram({ code = "", state = "", redirectUri = "", httpClient = httpClientPadrao() } = {}) {
   if (!texto(code)) throw new Error("code_ausente");
 
@@ -2737,37 +2858,87 @@ async function concluirCallbackInstagram({ code = "", state = "", redirectUri = 
     httpClient
   });
   const tokenLongo = await trocarTokenLongaDuracao({
+    clienteId: estado.clienteId,
     accessToken: tokenCurto.access_token,
     httpClient
   });
   const token = normalizarToken(tokenLongo);
   const conta = await consultarContaInstagram({
+    clienteId: estado.clienteId,
     accessToken: token.accessToken,
     httpClient
   });
 
-  salvarConexaoInstagram(estado.clienteId, {
+  persistirConexaoOAuthInstagram(estado.clienteId, "persistencia_conexao_inicial", atual => ({
     status: "conectado",
     conectado: true,
     ...conta,
     token,
     scopes: scopesInstagramConexao(),
-    oauthStates: lerConexaoInstagram(estado.clienteId).oauthStates
-  });
+    oauthStates: atual.oauthStates
+  }));
 
-  const assinaturaWebhook = await inscreverContaWebhookInstagram({
+  logTrocaTokenInstagramSeguro("[SOCIAL-INSTAGRAM-WEBHOOK-INICIO]", {
     clienteId: estado.clienteId,
-    instagramUserId: conta.instagramUserId,
-    accessToken: token.accessToken,
-    httpClient
+    etapa: "assinatura_webhook"
   });
+  let assinaturaWebhook;
+  try {
+    assinaturaWebhook = await inscreverContaWebhookInstagram({
+      clienteId: estado.clienteId,
+      instagramUserId: conta.instagramUserId,
+      accessToken: token.accessToken,
+      httpClient
+    });
+  } catch (erro) {
+    logErroEtapaOAuthInstagram("[SOCIAL-INSTAGRAM-WEBHOOK-ERRO]", {
+      clienteId: estado.clienteId,
+      etapa: "assinatura_webhook",
+      erro,
+      camposEsperadosPresentes: {
+        contaAssinada: false,
+        camposPresentes: false
+      }
+    });
+    throw new Error("webhook_falhou");
+  }
 
-  const conexao = salvarConexaoInstagram(estado.clienteId, {
-    ...lerConexaoInstagram(estado.clienteId),
-    status: assinaturaWebhook.webhookContaAssinada ? "conectado_webhook_pronto" : "conectado_webhook_erro",
-    conectado: true,
-    ...assinaturaWebhook
-  });
+  if (assinaturaWebhook.webhookContaAssinada) {
+    logTrocaTokenInstagramSeguro("[SOCIAL-INSTAGRAM-WEBHOOK-SUCESSO]", {
+      clienteId: estado.clienteId,
+      etapa: "assinatura_webhook",
+      contaAssinada: true,
+      camposPresentes: Array.isArray(assinaturaWebhook.webhookCampos) &&
+        assinaturaWebhook.webhookCampos.length > 0
+    });
+  } else {
+    const webhookErro = assinaturaWebhook.webhookErro || {};
+    const erro = new Error(webhookErro.message || "webhook_falhou");
+    erro.response = {
+      status: webhookErro.statusCode || "",
+      data: { error: webhookErro }
+    };
+    logErroEtapaOAuthInstagram("[SOCIAL-INSTAGRAM-WEBHOOK-ERRO]", {
+      clienteId: estado.clienteId,
+      etapa: "assinatura_webhook",
+      erro,
+      camposEsperadosPresentes: {
+        contaAssinada: false,
+        camposPresentes: false
+      }
+    });
+  }
+
+  const conexao = persistirConexaoOAuthInstagram(
+    estado.clienteId,
+    "persistencia_resultado_webhook",
+    atual => ({
+      ...atual,
+      status: assinaturaWebhook.webhookContaAssinada ? "conectado_webhook_pronto" : "conectado_webhook_erro",
+      conectado: true,
+      ...assinaturaWebhook
+    })
+  );
 
   logSocial("[SOCIAL-INSTAGRAM-OAUTH-CONECTADO]", {
     clienteId: estado.clienteId,
