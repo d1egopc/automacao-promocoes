@@ -60,11 +60,27 @@ function mockHttpClient(opcoes = {}) {
         }
         return { data: { id: `media_${opcoes.sufixo || "token"}` } };
       }
-      if (opcoes.erroTokenCurto) throw new Error("token_curto_falhou");
+      if (opcoes.erroTokenCurto) {
+        const erro = new Error("token_curto_falhou");
+        erro.response = {
+          status: 400,
+          data: {
+            error: {
+              type: "OAuthException",
+              code: 190,
+              error_subcode: 1234567,
+              message: "Invalid code=code_erro client_secret=secret_optimus"
+            }
+          }
+        };
+        throw erro;
+      }
       return {
+        status: 200,
         data: {
           access_token: `short_${opcoes.sufixo || "token"}`,
-          token_type: "bearer"
+          token_type: "bearer",
+          user_id: `ig_${opcoes.sufixo || "user"}`
         }
       };
     },
@@ -298,6 +314,9 @@ function iniciarInstagramPelaRota(retornoFrontend) {
   }
   assert.ok(!logs.join("\n").includes("long_log_seguro"), "logs nao devem expor token longo");
   assert.ok(!logs.join("\n").includes("short_log_seguro"), "logs nao devem expor token curto");
+  assert.ok(logs.join("\n").includes("SOCIAL-INSTAGRAM-TROCA-TOKEN-SUCESSO"), "troca curta deve registrar sucesso");
+  assert.ok(logs.join("\n").includes('"tokenPresente":true'), "sucesso deve registrar somente presenca do token");
+  assert.ok(logs.join("\n").includes('"userIdPresente":true'), "sucesso deve registrar presenca do user id");
 
   await assert.rejects(
     () => instagram.concluirCallbackInstagram({
@@ -309,14 +328,28 @@ function iniciarInstagramPelaRota(retornoFrontend) {
   );
 
   const inicioErroToken = instagram.iniciarConexaoInstagram({ clienteId: "cliente_erro_token" });
-  await assert.rejects(
-    () => instagram.concluirCallbackInstagram({
-      code: "code_erro",
-      state: inicioErroToken.state,
-      httpClient: mockHttpClient({ erroTokenCurto: true })
-    }),
-    /troca_token_falhou/
-  );
+  const logsErroToken = [];
+  console.log = (...args) => logsErroToken.push(args.join(" "));
+  try {
+    await assert.rejects(
+      () => instagram.concluirCallbackInstagram({
+        code: "code_erro",
+        state: inicioErroToken.state,
+        httpClient: mockHttpClient({ erroTokenCurto: true })
+      }),
+      /troca_token_falhou/
+    );
+  } finally {
+    console.log = logsOriginais;
+  }
+  const logErroToken = logsErroToken.join("\n");
+  assert.ok(logErroToken.includes("SOCIAL-INSTAGRAM-TROCA-TOKEN-ERRO-DETALHE"), "falha deve registrar detalhe");
+  assert.ok(logErroToken.includes('"statusHttp":400'), "falha deve registrar status HTTP");
+  assert.ok(logErroToken.includes('"type":"OAuthException"'), "falha deve registrar tipo");
+  assert.ok(logErroToken.includes('"code":190'), "falha deve registrar codigo");
+  assert.ok(logErroToken.includes('"error_subcode":1234567'), "falha deve registrar subcodigo");
+  assert.ok(!logErroToken.includes("code_erro"), "falha nao deve registrar authorization code");
+  assert.ok(!logErroToken.includes("secret_optimus"), "falha nao deve registrar client secret");
 
   const inicioErroMe = instagram.iniciarConexaoInstagram({ clienteId: "cliente_erro_me" });
   await assert.rejects(

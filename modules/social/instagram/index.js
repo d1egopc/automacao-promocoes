@@ -955,7 +955,52 @@ function normalizarToken(dados = {}) {
   };
 }
 
-async function trocarCodePorTokenCurto({ code = "", redirectUri = "", httpClient = httpClientPadrao() } = {}) {
+function sanitizarMensagemErroTrocaTokenInstagram(valor = "") {
+  return texto(valor)
+    .replace(
+      /\b(access[_ -]?token|client[_ -]?secret|authorization[_ -]?code|code)\s*[:=]\s*[^\s,;]+/gi,
+      "$1=***"
+    )
+    .replace(/\b[A-Za-z0-9_-]{40,}\b/g, "***")
+    .slice(0, 220);
+}
+
+function sanitizarRedirectUriTrocaTokenInstagram(valor = "") {
+  try {
+    const url = new URL(texto(valor));
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return "";
+  }
+}
+
+function detalheErroTrocaTokenInstagram(erro) {
+  const resposta = erro?.response || {};
+  const dados = resposta?.data && typeof resposta.data === "object" ? resposta.data : {};
+  const metaErro = dados?.error && typeof dados.error === "object" ? dados.error : dados;
+  return {
+    statusHttp: resposta.status || resposta.statusCode || "",
+    error: {
+      type: texto(metaErro?.type),
+      code: metaErro?.code ?? metaErro?.error_code ?? "",
+      error_subcode: metaErro?.error_subcode ?? metaErro?.subcode ?? "",
+      message: sanitizarMensagemErroTrocaTokenInstagram(
+        metaErro?.message || erro?.message || "troca_token_falhou"
+      )
+    }
+  };
+}
+
+function logTrocaTokenInstagramSeguro(tag, payload = {}) {
+  console.log(tag, JSON.stringify(payload));
+}
+
+async function trocarCodePorTokenCurto({
+  clienteId = "",
+  code = "",
+  redirectUri = "",
+  httpClient = httpClientPadrao()
+} = {}) {
   const appId = appIdInstagram();
   const appSecret = appSecretInstagram();
   const uri = redirectUriInstagram(redirectUri);
@@ -975,9 +1020,32 @@ async function trocarCodePorTokenCurto({ code = "", redirectUri = "", httpClient
       timeout: 10000
     });
     const dados = resposta?.data || {};
-    if (!dados.access_token) throw new Error("token_curto_nao_retornado");
+    if (!dados.access_token) {
+      const erro = new Error("token_curto_nao_retornado");
+      erro.response = {
+        status: resposta?.status || resposta?.statusCode || 200,
+        data: dados
+      };
+      throw erro;
+    }
+    logTrocaTokenInstagramSeguro("[SOCIAL-INSTAGRAM-TROCA-TOKEN-SUCESSO]", {
+      clienteId: texto(clienteId),
+      statusHttp: resposta?.status || resposta?.statusCode || 200,
+      provider: "instagram",
+      tokenPresente: true,
+      userIdPresente: Boolean(texto(dados.user_id || dados.userId))
+    });
     return dados;
-  } catch {
+  } catch (erro) {
+    const detalhe = detalheErroTrocaTokenInstagram(erro);
+    logTrocaTokenInstagramSeguro("[SOCIAL-INSTAGRAM-TROCA-TOKEN-ERRO-DETALHE]", {
+      clienteId: texto(clienteId),
+      statusHttp: detalhe.statusHttp,
+      provider: "instagram",
+      error: detalhe.error,
+      redirectUri: sanitizarRedirectUriTrocaTokenInstagram(uri),
+      etapa: "authorization_code_por_access_token"
+    });
     throw new Error("troca_token_falhou");
   }
 }
@@ -2662,7 +2730,12 @@ async function concluirCallbackInstagram({ code = "", state = "", redirectUri = 
   const estado = decodificarStateInstagram(state);
   consumirStatePendente(estado.clienteId, estado.nonce);
   const uri = redirectUriInstagram(redirectUri);
-  const tokenCurto = await trocarCodePorTokenCurto({ code, redirectUri: uri, httpClient });
+  const tokenCurto = await trocarCodePorTokenCurto({
+    clienteId: estado.clienteId,
+    code,
+    redirectUri: uri,
+    httpClient
+  });
   const tokenLongo = await trocarTokenLongaDuracao({
     accessToken: tokenCurto.access_token,
     httpClient
