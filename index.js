@@ -42,6 +42,18 @@ const {
   farejarAliExpress
 } = require("./marketplaces/aliexpress/farejador");
 
+const {
+  importarAliExpress: importarAliExpressManualModular
+} = require("./marketplaces/aliexpress/importar");
+
+function importarAliExpressModularComLinks(url, configAli = {}) {
+  return importarAliExpressManualModular(url, {
+    ...configAli,
+    gerarLinkCurtoAliExpress,
+    gerarLinkOptimus
+  });
+}
+
 const farejarKabum =
 require("./marketplaces/kabum/farejador");
 
@@ -12072,7 +12084,14 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
       integracoesPorCliente,
       getIntegracaoCliente,
       importarAmazon,
-      importarAliExpress,
+      importarAliExpress: (urlAli, configAli = {}) => {
+        console.log("[RADAR-ALIEXPRESS-IMPORTADOR-MODULAR]", JSON.stringify({
+          clienteId: configAli?.clienteId || configAli?.cliente || "",
+          temCredenciais: Boolean(configAli?.credenciais),
+          temTrackingId: Boolean(configAli?.credenciais?.trackingId)
+        }));
+        return importarAliExpressModularComLinks(urlAli, configAli);
+      },
       importarMagalu,
       importarMercadoLivre: (url, clienteIdAlvo, depsMl = {}) => importarMercadoLivre(url, clienteIdAlvo, {
         ...depsMl,
@@ -19760,7 +19779,7 @@ app.post("/importar-produto", async (req, res) => {
       getIntegracaoCliente,
 
       importarAmazon,
-      importarAliExpress,
+      importarAliExpress: importarAliExpressModularComLinks,
       importarMagalu,
       importarMercadoLivre,
       importarShopee,
