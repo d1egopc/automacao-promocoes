@@ -5,14 +5,19 @@ const path = require("path");
 
 const originalLoad = Module._load;
 let htmlKabum = "";
+let ultimaUrlBaixada = "";
+let ultimoDeepLinkOriginal = "";
 
 Module._load = function loadComAxiosMock(request, parent, isMain) {
   if (request === "axios") {
     return {
-      get: async () => ({
-        status: 200,
-        data: htmlKabum
-      })
+      get: async (url) => {
+        ultimaUrlBaixada = url;
+        return {
+          status: 200,
+          data: htmlKabum
+        };
+      }
     };
   }
 
@@ -41,9 +46,18 @@ function htmlProduto(titulo, extras = {}) {
 
 async function importarComHtml(url, html) {
   htmlKabum = html;
+  ultimaUrlBaixada = "";
+  ultimoDeepLinkOriginal = "";
   return importarProdutoKabumViaAwin(url, "admin", {
-    gerarDeepLinkAwin: async (link) => `https://awin.test/?ued=${encodeURIComponent(link)}`
+    gerarDeepLinkAwin: async (link) => {
+      ultimoDeepLinkOriginal = link;
+      return `https://awin.test/?ued=${encodeURIComponent(link)}`;
+    }
   });
+}
+
+function normalizarEspacosTeste(valor = "") {
+  return String(valor).replace(/\u00a0/g, " ");
 }
 
 async function assertImportacaoRejeitada(titulo, motivoEsperado) {
@@ -86,6 +100,33 @@ async function testarProdutoComprovado() {
   assert.strictEqual(produto.produtoIdCanonico, "944475");
   assert.strictEqual(produto.chaveCanonica, "kabum:944475");
   assert.strictEqual(produto.imagem, "");
+  assert.strictEqual(ultimaUrlBaixada, urlDireta);
+
+  const urlWaterCooler = "https://www.kabum.com.br/produto/921292/water-cooler-mach1-logic-rgb-120mm-amd-e-intel-preto-gk120";
+  const urlWaterCoolerComTracking = `${urlWaterCooler}?gad_source=1&gad_campaignid=abc&gbraid=def&gclid=ghi&utm_source=google&cor=preto`;
+  const urlWaterCoolerHttpEsperada = `${urlWaterCooler}?cor=preto`;
+  const htmlWaterCooler = htmlProduto(
+    "Water Cooler MACH1 Logic, RGB, 120mm, AMD e Intel, Preto - GK120 | KaBuM!",
+    {
+      texto: [
+        '<script type="application/ld+json">',
+        '{"offers":{"price":199.99},"image":"https://images.kabum.com.br/produtos/fotos/921292/water-cooler-mach1-logic-rgb-120mm.jpg"}',
+        "</script>"
+      ].join("")
+    }
+  );
+  const produtoWaterCooler = await importarComHtml(urlWaterCoolerComTracking, htmlWaterCooler);
+  assert.strictEqual(produtoWaterCooler.titulo, "Water Cooler MACH1 Logic, RGB, 120mm, AMD e Intel, Preto - GK120");
+  assert.strictEqual(normalizarEspacosTeste(produtoWaterCooler.precoAtual), "R$ 199,99");
+  assert.strictEqual(
+    produtoWaterCooler.imagem,
+    "https://images.kabum.com.br/produtos/fotos/921292/water-cooler-mach1-logic-rgb-120mm.jpg"
+  );
+  assert.strictEqual(produtoWaterCooler.produtoIdCanonico, "921292");
+  assert.strictEqual(ultimaUrlBaixada, urlWaterCoolerHttpEsperada);
+  assert.strictEqual(ultimoDeepLinkOriginal, urlWaterCoolerComTracking);
+  assert.ok(produtoWaterCooler.linkAfiliado.startsWith("https://awin.test/?ued="));
+  assert.notStrictEqual(produtoWaterCooler.linkAfiliado, urlWaterCoolerComTracking);
 }
 
 function testarContratoIndex() {
