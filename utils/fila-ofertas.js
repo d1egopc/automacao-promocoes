@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { resolverImagemUniversal } = require("../modules/imagens/resolver-imagem-universal");
+const { reservarOfertaAutomatica2h } = require("../marketplaces/inteligencia/memoria-ofertas");
 
 let inteligenciaUniversalCache = null;
 let templateUniversalCache = null;
@@ -724,6 +725,20 @@ function adicionarOfertaFila(fila = [], oferta, contexto = {}) {
     origem: contexto.origem || oferta.origem || "fila_push"
   });
 
+  const reserva = reservarOfertaAutomatica2h(ofertaFinal, {
+    ...contexto,
+    origem: contexto.origem || ofertaFinal.origem || oferta.origem || "fila_push"
+  });
+
+  if (reserva?.bloqueada) {
+    ofertaFinal.antiRepeticao2h = {
+      bloqueada: true,
+      motivo: reserva.motivo,
+      identidade: reserva.identidade
+    };
+    return false;
+  }
+
   fila.push(ofertaFinal);
 
   const logger = contexto.logger || console;
@@ -745,6 +760,20 @@ function adicionarOfertaInicioFila(fila = [], oferta, contexto = {}) {
     ...contexto,
     origem: contexto.origem || oferta.origem || "fila_unshift"
   });
+
+  const reserva = reservarOfertaAutomatica2h(ofertaFinal, {
+    ...contexto,
+    origem: contexto.origem || ofertaFinal.origem || oferta.origem || "fila_unshift"
+  });
+
+  if (reserva?.bloqueada) {
+    ofertaFinal.antiRepeticao2h = {
+      bloqueada: true,
+      motivo: reserva.motivo,
+      identidade: reserva.identidade
+    };
+    return false;
+  }
 
   fila.unshift(ofertaFinal);
 
