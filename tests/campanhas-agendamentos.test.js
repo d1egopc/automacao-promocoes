@@ -7,7 +7,7 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-campanhas-agendam
 process.env.DATA_DIR = dataDir;
 process.env.CAMPANHAS_MEDIA_ORFA_TTL_MS = "1000";
 
-const { readClienteJson, writeClienteJson } = require("../utils/storage");
+const { readClienteJson, writeClienteJson, writeGlobalJson } = require("../utils/storage");
 const {
   salvarMidiaTemporaria,
   obterMidiaTemporaria
@@ -63,6 +63,14 @@ function contexto(clienteId = "cliente_a") {
     }
   };
 }
+
+writeGlobalJson("usuarios.json", [
+  { id: "cliente_exec", ativo: true },
+  { id: "cliente_recupera", ativo: true },
+  { id: "cliente_recente", ativo: true },
+  { id: "cliente_hist", ativo: true },
+  { id: "cliente_all", ativo: true }
+]);
 
 (async () => {
   const base = new Date("2026-07-18T12:00:00.000Z");

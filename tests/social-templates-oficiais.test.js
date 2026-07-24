@@ -6,7 +6,7 @@ const path = require("path");
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-social-templates-"));
 process.env.DATA_DIR = dataDir;
 
-const { writeClienteJson } = require("../utils/storage");
+const { writeClienteJson, writeGlobalJson } = require("../utils/storage");
 const storage = require("../modules/social/storage");
 const { publicarNoInstagram } = require("../modules/social/publicador-instagram.service");
 const { executarAutomaticoCliente } = require("../modules/social/automatico.service");
@@ -14,8 +14,15 @@ const { resolverTemplateSocial } = require("../modules/social/templates/resolver
 
 const POLLING_TESTE = { primeiraEsperaMs: 0, intervaloMs: 0, maxTentativas: 2 };
 const AGORA = new Date("2026-07-14T12:00:00.000Z");
+const usuariosTeste = new Map();
+
+function registrarUsuarioAtivo(clienteId) {
+  usuariosTeste.set(clienteId, { id: clienteId, ativo: true });
+  writeGlobalJson("usuarios.json", Array.from(usuariosTeste.values()));
+}
 
 function conectar(clienteId, sufixo = clienteId) {
+  registrarUsuarioAtivo(clienteId);
   writeClienteJson(clienteId, "social-instagram.json", {
     clienteId,
     conectado: true,

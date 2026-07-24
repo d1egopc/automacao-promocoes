@@ -9,6 +9,10 @@ const {
 const filaOfertas = require("../../../utils/fila-ofertas");
 const destinosUtils = require("../../../utils/destinos");
 const { resolverImagemUniversal } = require("../../imagens/resolver-imagem-universal");
+const {
+  usuarioAtivo,
+  logUsuarioInativoIgnorado
+} = require("../../../utils/usuarios-atividade");
 
 let engineOfertasMetadataDisponivel = null;
 
@@ -480,6 +484,11 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
   const marketplace = normalizarMarketplace(oferta.marketplace);
   const configCliente = contexto.configsPorCliente?.[clienteId] || {};
 
+  if (!usuarioAtivo(clienteId)) {
+    logUsuarioInativoIgnorado({ clienteId, fluxo: "engine_distributor_validacao" });
+    return { ok: false, motivo: "usuario_inativo" };
+  }
+
   if (!clienteValidoEngine(clienteId, contexto.clientesValidos || [])) {
     return { ok: false, motivo: "cliente_invalido" };
   }
@@ -527,6 +536,12 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
 async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
   const clienteId = normalizarTexto(oferta.cliente_id);
   const deps = contexto.deps || {};
+
+  if (!usuarioAtivo(clienteId)) {
+    logUsuarioInativoIgnorado({ clienteId, fluxo: "engine_distributor_adicionar_fila" });
+    return { ok: false, motivo: "usuario_inativo" };
+  }
+
   const itemFila = montarItemFilaEngine(oferta);
   logImagemFilaEngine(oferta, {
     imagem: itemFila.imagem,

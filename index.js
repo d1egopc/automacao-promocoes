@@ -207,6 +207,11 @@ const {
 const alertasIntegracoes = require("./utils/alertas-integracoes");
 const storageUtils = require("./utils/storage");
 const linksPuros = require("./modules/links");
+const {
+  usuarioAtivo,
+  listarClientesAtivos,
+  logUsuarioInativoIgnorado
+} = require("./utils/usuarios-atividade");
 
 const {
   storage,
@@ -218,6 +223,18 @@ const {
   writeGlobalJson,
   mascararSecrets
 } = storageUtils;
+
+function usuarioAtivoOperacional(clienteId = "admin") {
+  return usuarioAtivo(clienteId, { usuarios });
+}
+
+function listarClientesAtivosOperacionais() {
+  return listarClientesAtivos({ usuarios });
+}
+
+function logUsuarioInativoOperacional(clienteId = "", fluxo = "") {
+  return logUsuarioInativoIgnorado({ clienteId, fluxo });
+}
 
 const LOG_OPTIMUS_ICONS = {
   FILA: "\u{1F4E6}",
@@ -1513,6 +1530,17 @@ async function abastecerFilaSeNecessario(clienteId = "admin", opcoes = {}) {
   const cliente = String(clienteId || "admin");
   const simulado = opcoes.simulado === true;
 
+  if (!usuarioAtivoOperacional(cliente)) {
+    logUsuarioInativoOperacional(cliente, "fila_abastecimento");
+    return {
+      ok: false,
+      clienteId: cliente,
+      abasteceu: false,
+      modo: simulado ? "simulado" : "real",
+      motivo: "usuario_inativo"
+    };
+  }
+
   if (farejadoresAutoDesativados()) {
     logFarejadorAutoDesativado("mercadolivre", "fila_inteligente", cliente);
     return {
@@ -1926,6 +1954,11 @@ function itemEngineDuplicadoFilaGlobal(clienteId = "admin", itemFila = {}) {
 function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
   try {
     const cliente = String(clienteId || itemFila.clienteId || "admin").trim() || "admin";
+    if (!usuarioAtivoOperacional(cliente)) {
+      logUsuarioInativoOperacional(cliente, "engine_distributor_fila");
+      return { ok: false, motivo: "usuario_inativo" };
+    }
+
     carregarFila(cliente);
 
     const itemFinal = {
@@ -2101,6 +2134,11 @@ function renovarCreditosSeNecessario(usuario) {
 // ================ FUNCAO USUARIO TEM CRÉDITO ==================
 
 function usuarioTemCreditos(clienteId, quantidade = 1) {
+  if (!usuarioAtivoOperacional(clienteId)) {
+    logUsuarioInativoOperacional(clienteId, "creditos_validacao");
+    return false;
+  }
+
   const usuario = obterUsuario(clienteId);
 
   if (!usuario) return false;
@@ -2111,6 +2149,11 @@ function usuarioTemCreditos(clienteId, quantidade = 1) {
 }
 
 function debitarCreditos(clienteId, quantidade = 1) {
+  if (!usuarioAtivoOperacional(clienteId)) {
+    logUsuarioInativoOperacional(clienteId, "creditos_debito");
+    return false;
+  }
+
   const usuario = obterUsuario(clienteId);
 
   if (!usuario) return false;
@@ -4996,6 +5039,18 @@ async function processarFila(clienteIdAlvo = null) {
     sobreposicaoEvitada: false
   };
 
+  if (!usuarioAtivoOperacional(clienteFila)) {
+    resumoFila.motivoPulo = "usuario_inativo";
+    logUsuarioInativoOperacional(clienteFila, "executor_processar_fila");
+    const cpu = process.cpuUsage(cpuInicioProcessarFila);
+    logProcessarFilaResumo({
+      ...resumoFila,
+      duracaoMs: Math.round(perfTempoMs(inicioProcessarFila)),
+      cpuMs: Math.round((cpu.user + cpu.system) / 1000)
+    });
+    return;
+  }
+
   if (enviandoAgoraPorCliente[clienteFila]) {
     resumoFila.motivoPulo = "envio_em_execucao";
     resumoFila.sobreposicaoEvitada = true;
@@ -5043,6 +5098,12 @@ const clienteId = oferta.clienteId || "admin";
 const diagnosticoOfertaSelecionada = diagnosticosFilaPorCliente.get(String(clienteFila));
 resumoFila.ofertasExaminadas = diagnosticoOfertaSelecionada?.pendentesTotal || 1;
 resumoFila.ofertaSelecionada = oferta.id || oferta.engineOfertaId || oferta.ofertaId || "";
+
+if (!usuarioAtivoOperacional(clienteId)) {
+  resumoFila.motivoPulo = "usuario_inativo";
+  logUsuarioInativoOperacional(clienteId, "executor_oferta_fila");
+  return;
+}
 
 if (oferta.sessaoId === "sessao1") {
   oferta.sessaoId = normalizarSessaoId(clienteId, "sessao1");
@@ -7583,9 +7644,7 @@ app.get("/engine/resumo", async (req, res) => {
 
 function listarClientesValidosEngineProcessor() {
   try {
-    return Array.isArray(usuarios)
-      ? usuarios.map(usuario => String(usuario?.id || "").trim()).filter(Boolean)
-      : [];
+    return listarClientesAtivosOperacionais();
   } catch {
     return [];
   }
@@ -7623,6 +7682,10 @@ function listarMarketplacesAtivosEngineProcessor() {
     for (const usuario of Array.isArray(usuarios) ? usuarios : []) {
       const clienteId = String(usuario?.id || "").trim();
       if (!clienteId) continue;
+      if (!usuarioAtivoOperacional(clienteId)) {
+        logUsuarioInativoOperacional(clienteId, "engine_marketplaces_ativos");
+        continue;
+      }
       const configCliente = configsPorCliente?.[clienteId] || {};
       mapa[clienteId] = configCliente.marketplaces || {};
     }
@@ -10255,9 +10318,12 @@ function listarClientesElegiveisRadar() {
   }
 
   for (const usuario of usuarios) {
-    if (!usuario?.ativo) continue;
+    const clienteId = String(usuario?.id || "").trim();
+    if (!usuarioAtivoOperacional(clienteId)) {
+      logUsuarioInativoOperacional(clienteId, "radar_clientes_elegiveis");
+      continue;
+    }
 
-    const clienteId = String(usuario.id || "");
     if (!clienteId) continue;
 
     if (usuario.papel === "admin_master" && clienteId !== "admin") {
@@ -12623,8 +12689,9 @@ function listarClientesEngineRadar(dados = {}) {
         continue;
       }
 
-      if (usuario?.ativo === false) {
+      if (!usuarioAtivoOperacional(clienteId)) {
         ignorar(clienteId, "usuario_inativo");
+        logUsuarioInativoOperacional(clienteId, "engine_radar_clientes");
         continue;
       }
 
@@ -13860,7 +13927,8 @@ function radarCupomRepetidoProdutoDiferente(clienteId = "admin", oferta = {}) {
 async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admin", opcoes = {}) {
   const usuario = getUsuarioClienteRadar(clienteId);
 
-  if (!usuario || usuario.ativo === false) {
+  if (!usuario || !usuarioAtivoOperacional(clienteId)) {
+    logUsuarioInativoOperacional(clienteId, "radar_preparar_oferta_cliente");
     return { ok: false, motivo: "cliente_inativo_ou_inexistente" };
   }
 
@@ -18713,7 +18781,11 @@ function resolverClienteMensageiroPorSessao(sessao = "") {
 
 function usuarioPodeReceberMarketplace(usuario, marketplace) {
 
-  if (!usuario?.ativo) return false;
+  const clienteIdUsuario = String(usuario?.id || "").trim();
+  if (!usuarioAtivoOperacional(clienteIdUsuario)) {
+    logUsuarioInativoOperacional(clienteIdUsuario, "distribuidor_usuario_marketplace");
+    return false;
+  }
 
   if (usuario.papel === "admin_master") {
     return true;
@@ -18806,7 +18878,10 @@ async function distribuirOfertaParaClientes(ofertaBase) {
   ofertaBase = prepararOfertaGlobal(ofertaBase);
 
   for (const usuario of usuarios) {
-    if (!usuario?.ativo) continue;
+    if (!usuarioAtivoOperacional(usuario?.id)) {
+      logUsuarioInativoOperacional(usuario?.id, "distribuidor_legado");
+      continue;
+    }
 
     const clienteId = usuario.id;
     const adminMaster = usuario.papel === "admin_master";
@@ -20904,6 +20979,15 @@ async function iniciarWhatsApp(id, force = false) {
 
   const chaveSessao = id;
   const statusAtual = statusSessao[chaveSessao];
+  const resolucaoClienteMensageiro = resolverClienteMensageiroPorSessao(id);
+  const clienteIdMensageiro = resolucaoClienteMensageiro.clienteIdMensageiro;
+
+  if (!usuarioAtivoOperacional(clienteIdMensageiro)) {
+    logUsuarioInativoOperacional(clienteIdMensageiro, "whatsapp_reconexao_automatica");
+    statusSessao[id] = "inativo";
+    reconectando[id] = false;
+    return null;
+  }
 
   if (!force && sessoes[id] && ["connecting", "qr", "open", "reconnecting"].includes(statusAtual)) {
     console.log("[WHATSAPP] Sesso j em andamento, no vou recriar:", id, statusAtual);
@@ -20946,9 +21030,6 @@ async function iniciarWhatsApp(id, force = false) {
 
   sock.ev.on("creds.update", saveCreds);
 
-const resolucaoClienteMensageiro = resolverClienteMensageiroPorSessao(id);
-const clienteIdMensageiro = resolucaoClienteMensageiro.clienteIdMensageiro;
-
 console.log("[INFO] Cliente mensageiro resolvido:", {
   sessao: id,
   clienteIdMensageiro,
@@ -20960,6 +21041,11 @@ console.log("[INFO] Cliente mensageiro resolvido:", {
 sock.ev.on("messages.upsert", async ({ messages = [] } = {}) => {
   try {
     for (const mensagem of messages) {
+      if (!usuarioAtivoOperacional(clienteIdMensageiro)) {
+        logUsuarioInativoOperacional(clienteIdMensageiro, "whatsapp_messages_upsert");
+        continue;
+      }
+
       await processarMensagemRadarAutomatica({
         mensagem,
         sessaoId: id,
@@ -20991,6 +21077,11 @@ sock.ev.on("group-participants.update", async (evento) => {
   });
 
    try {
+    if (!usuarioAtivoOperacional(clienteIdMensageiro)) {
+      logUsuarioInativoOperacional(clienteIdMensageiro, "mensageiro_grupo_evento");
+      return;
+    }
+
     await mensageiro.tratarEventoGrupoMensageiro({
       clienteId: clienteIdMensageiro,
       sessaoId: id,
@@ -21069,6 +21160,12 @@ salvarSessoesMeta();
         reconectando[id] = true;
 
         setTimeout(() => {
+          if (!usuarioAtivoOperacional(clienteIdMensageiro)) {
+            logUsuarioInativoOperacional(clienteIdMensageiro, "whatsapp_reconexao_automatica");
+            reconectando[id] = false;
+            statusSessao[id] = "inativo";
+            return;
+          }
           iniciarWhatsApp(id).catch((e) => {
             console.error("[ERRO] ERRO AO RECONECTAR:", e);
             statusSessao[id] = "offline";
@@ -21766,7 +21863,10 @@ function cederEventLoopFila() {
 function avaliarPuloRapidoClienteFila(usuario = {}) {
   const clienteId = String(usuario?.id || "").trim();
   if (!clienteId) return { motivo: "cliente_invalido", pendentes: 0 };
-  if (!usuario?.ativo) return { motivo: "usuario_inativo", pendentes: 0 };
+  if (!usuarioAtivoOperacional(clienteId)) {
+    logUsuarioInativoOperacional(clienteId, "fila_intervalo_disparo");
+    return { motivo: "usuario_inativo", pendentes: 0 };
+  }
 
   const configCliente = configsPorCliente?.[clienteId] || config;
   if (configCliente.automacaoAtiva !== true) {

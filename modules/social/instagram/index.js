@@ -4,6 +4,10 @@ const {
   readClienteJson,
   writeClienteJson
 } = require("../../../utils/storage");
+const {
+  usuarioAtivo,
+  logUsuarioInativoIgnorado
+} = require("../../../utils/usuarios-atividade");
 const { logSocial } = require("../logs");
 
 const INSTAGRAM_AUTH_URL = "https://www.instagram.com/oauth/authorize";
@@ -1947,6 +1951,11 @@ function normalizarEventosWebhookInstagram(payload = {}) {
 function encontrarPublicacaoPorMedia(instagramUserId = "", instagramMediaId = "") {
   const candidatos = [];
   for (const clienteId of listClientes()) {
+    if (!usuarioAtivo(clienteId)) {
+      logUsuarioInativoIgnorado({ clienteId, fluxo: "social_instagram_webhook" });
+      continue;
+    }
+
     let conexao;
     try {
       conexao = lerConexaoInstagram(clienteId);

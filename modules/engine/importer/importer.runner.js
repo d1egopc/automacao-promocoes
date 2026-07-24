@@ -22,6 +22,10 @@ const { importarAmazonEngine } = require("./adapters/amazon.adapter");
 const { importarShopeeEngine } = require("./adapters/shopee.adapter");
 const { importarAliExpressEngine } = require("./adapters/aliexpress.adapter");
 const { importarAwinEngine } = require("./adapters/awin.adapter");
+const {
+  usuarioAtivo,
+  logUsuarioInativoIgnorado
+} = require("../../../utils/usuarios-atividade");
 
 const ADAPTERS = {
   mercadolivre: importarMercadoLivreEngine,
@@ -53,6 +57,11 @@ async function finalizarErro(job, motivo, detalhes = {}, resumo) {
 async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
   const marketplace = marketplaceJob(job);
   logEngineImporterJob({ jobId: job.id, eventoId: job.evento_id, clienteId: job.cliente_id, marketplace });
+
+  if (!usuarioAtivo(job.cliente_id)) {
+    logUsuarioInativoIgnorado({ clienteId: job.cliente_id, fluxo: "engine_importer_job" });
+    return finalizarErro(job, "usuario_inativo", { clienteId: job.cliente_id }, resumo);
+  }
 
   const lock = await tentarMarcarImportando(job.id);
   if (!lock.ok) {

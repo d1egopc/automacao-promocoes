@@ -3,6 +3,11 @@ const { listarPublicacoesInstagram } = require("./instagram");
 const { publicarNoInstagram } = require("./publicador-instagram.service");
 const { logSocial } = require("./logs");
 const {
+  usuarioAtivo,
+  listarClientesAtivos,
+  logUsuarioInativoIgnorado
+} = require("../../utils/usuarios-atividade");
+const {
   resolverTemplateSocial,
   payloadTemplatePersonalizadoSocial,
   snapshotTemplateSocial
@@ -523,6 +528,18 @@ async function executarAutomaticoCliente({
   agora = new Date()
 } = {}) {
   const clienteSeguro = texto(clienteId || "admin") || "admin";
+  if (!usuarioAtivo(clienteSeguro)) {
+    logUsuarioInativoIgnorado({ clienteId: clienteSeguro, fluxo: "social_automatico_cliente" });
+    return {
+      ok: false,
+      clienteId: clienteSeguro,
+      publicado: false,
+      agendamentosCriados: [],
+      totalAgendamentosCriados: 0,
+      motivo: "usuario_inativo"
+    };
+  }
+
   if (locksCliente.has(clienteSeguro)) {
     return { ok: false, clienteId: clienteSeguro, motivo: "lock_ativo", agendamentosCriados: [] };
   }
@@ -743,7 +760,7 @@ async function executarAutomaticoCliente({
 }
 
 async function executarAutomaticoTodosClientes({ agora = new Date() } = {}) {
-  const clientes = typeof storage.listClientes === "function" ? storage.listClientes() : [];
+  const clientes = listarClientesAtivos();
   const resultados = [];
   const erros = [];
   let totalAgendados = 0;
@@ -902,6 +919,11 @@ async function executarAgendamentosPendentesCliente({
   polling
 } = {}) {
   const clienteSeguro = texto(clienteId || "admin") || "admin";
+  if (!usuarioAtivo(clienteSeguro)) {
+    logUsuarioInativoIgnorado({ clienteId: clienteSeguro, fluxo: "social_agendamentos_cliente" });
+    return { ok: false, clienteId: clienteSeguro, motivo: "usuario_inativo", executados: [] };
+  }
+
   if (locksAgendamentosCliente.has(clienteSeguro)) {
     return { ok: false, clienteId: clienteSeguro, motivo: "lock_ativo", executados: [] };
   }
@@ -977,7 +999,7 @@ async function executarAgendamentosPendentesTodosClientes({
   httpClient,
   polling
 } = {}) {
-  const clientes = typeof storage.listClientes === "function" ? storage.listClientes() : [];
+  const clientes = listarClientesAtivos();
   const resultados = [];
 
   for (const clienteId of clientes) {
@@ -1016,6 +1038,11 @@ function limparAgendamentosConcluidosAutomaticamenteCliente({
   idadeMinimaMinutos = 10
 } = {}) {
   const clienteSeguro = texto(clienteId || "admin") || "admin";
+  if (!usuarioAtivo(clienteSeguro)) {
+    logUsuarioInativoIgnorado({ clienteId: clienteSeguro, fluxo: "social_limpeza_concluidos_cliente" });
+    return { ok: false, clienteId: clienteSeguro, motivo: "usuario_inativo", removidos: 0 };
+  }
+
   const config = storage.getConfigAutomaticoSocial(clienteSeguro);
   if (config.limparConcluidosAutomaticamente !== true) {
     return {
@@ -1043,7 +1070,7 @@ function limparAgendamentosConcluidosAutomaticamenteTodosClientes({
   agora = new Date(),
   idadeMinimaMinutos = 10
 } = {}) {
-  const clientes = typeof storage.listClientes === "function" ? storage.listClientes() : [];
+  const clientes = listarClientesAtivos();
   const resultados = [];
   let totalRemovidos = 0;
 

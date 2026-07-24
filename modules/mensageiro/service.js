@@ -6,6 +6,10 @@ const {
   getAtendimentoConfigCliente,
   registrarHistoricoAtendimento
 } = require("./storage");
+const {
+  usuarioAtivo,
+  logUsuarioInativoIgnorado
+} = require("../../utils/usuarios-atividade");
 
 const COOLDOWN_ATENDIMENTO_MS = 10 * 60 * 1000;
 
@@ -660,6 +664,11 @@ async function tratarMensagemPrivadaAtendimento({
   planoLiberado = false
 } = {}) {
   try {
+    if (!usuarioAtivo(clienteId)) {
+      logUsuarioInativoIgnorado({ clienteId, fluxo: "mensageiro_atendimento_privado" });
+      return;
+    }
+
     if (planoLiberado !== true) return;
 
     const jid = mensagem?.key?.remoteJid || "";
@@ -758,6 +767,11 @@ async function tratarEventoGrupoMensageiro({
   evento
 }) {
   try {
+    if (!usuarioAtivo(clienteId)) {
+      logUsuarioInativoIgnorado({ clienteId, fluxo: "mensageiro_evento_grupo" });
+      return;
+    }
+
     const config = getMensageiroCliente(clienteId);
 
     if (!config?.ativo) return;

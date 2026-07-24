@@ -5,6 +5,11 @@ const {
   listClientes,
   normalizarClienteId
 } = require("../utils/storage");
+const {
+  usuarioAtivo,
+  listarClientesAtivos,
+  logUsuarioInativoIgnorado
+} = require("../utils/usuarios-atividade");
 const { enviarCampanhaManual } = require("./enviarCampanha");
 const {
   associarMidiaTemporaria,
@@ -240,6 +245,16 @@ function vencido(item = {}, agora = new Date()) {
 async function executarAgendamentoCampanha({ clienteId = "admin", agendamentoId = "", deps = {}, agora = new Date(), recuperarProcessando = false } = {}) {
   const clienteIdSeguro = clienteSeguro(clienteId);
   const id = texto(agendamentoId);
+  if (!usuarioAtivo(clienteIdSeguro)) {
+    logUsuarioInativoIgnorado({ clienteId: clienteIdSeguro, fluxo: "campanhas_agendamento_execucao" });
+    return {
+      ok: false,
+      clienteId: clienteIdSeguro,
+      agendamentoId: id,
+      erro: "usuario_inativo"
+    };
+  }
+
   const lock = `${clienteIdSeguro}:${id}`;
   if (!id) throw new Error("campanhas_agendamento_id_obrigatorio");
   if (locks.has(lock)) return { ok: true, ignorado: true, motivo: "em_processamento" };
@@ -371,6 +386,11 @@ async function executarAgendamentoCampanha({ clienteId = "admin", agendamentoId 
 
 async function executarAgendamentosPendentesCliente({ clienteId = "admin", deps = {}, agora = new Date() } = {}) {
   const clienteIdSeguro = clienteSeguro(clienteId);
+  if (!usuarioAtivo(clienteIdSeguro)) {
+    logUsuarioInativoIgnorado({ clienteId: clienteIdSeguro, fluxo: "campanhas_agendamentos_cliente" });
+    return { ok: false, clienteId: clienteIdSeguro, processados: 0, resultados: [], motivo: "usuario_inativo" };
+  }
+
   const pendentes = lerAgendamentosCampanhas(clienteIdSeguro)
     .filter(item => {
       const status = texto(item.status).toLowerCase();
@@ -385,7 +405,12 @@ async function executarAgendamentosPendentesCliente({ clienteId = "admin", deps 
 }
 
 async function executarAgendamentosPendentesTodosClientes({ deps = {}, agora = new Date(), clientes = null } = {}) {
-  const ids = Array.isArray(clientes) ? clientes.map(texto).filter(Boolean) : listClientes();
+  const idsBase = Array.isArray(clientes) ? clientes.map(texto).filter(Boolean) : listarClientesAtivos();
+  const ids = idsBase.filter(clienteId => {
+    if (usuarioAtivo(clienteId)) return true;
+    logUsuarioInativoIgnorado({ clienteId, fluxo: "campanhas_agendamentos_todos" });
+    return false;
+  });
   const resultados = [];
   for (const clienteId of ids) {
     resultados.push(await executarAgendamentosPendentesCliente({ clienteId, deps, agora }));
