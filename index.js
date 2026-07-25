@@ -5335,6 +5335,41 @@ const destinosOrdenados = destinosCompativeis
   })
   .sort((a, b) => a.ultimoEnvio - b.ultimoEnvio);
 
+const repeticaoExecutor = filaOfertas.consultarEnvioRecenteExecutor2h(fila, oferta);
+if (!repeticaoExecutor.ok) {
+  resumoFila.motivoPulo = repeticaoExecutor.motivo;
+  console.log("[ANTI-REPETICAO-EXECUTOR-2H-ERRO]", JSON.stringify({
+    clienteId,
+    ofertaId: oferta.id || oferta.engineOfertaId || "",
+    marketplace: oferta.marketplace || oferta.mercado || "",
+    motivo: repeticaoExecutor.motivo,
+    erro: repeticaoExecutor.erro || ""
+  }));
+  salvarFila(clienteId);
+  return;
+}
+
+if (repeticaoExecutor.bloqueada) {
+  oferta.status = "retida";
+  oferta.statusDetalhe = "Retida: oferta enviada nas ultimas 2 horas";
+  oferta.motivo = "repetida_no_executor_2h";
+  oferta.motivoRetencao = "repetida_no_executor_2h";
+  oferta.retidaEm = new Date().toISOString();
+  resumoFila.motivoPulo = "repetida_no_executor_2h";
+  console.log("[ANTI-REPETICAO-EXECUTOR-2H]", JSON.stringify({
+    clienteId,
+    ofertaId: oferta.id || oferta.engineOfertaId || "",
+    marketplace: oferta.marketplace || oferta.mercado || "",
+    identidade: repeticaoExecutor.identidade || "",
+    ofertaAnteriorId: repeticaoExecutor.ofertaAnterior?.id ||
+      repeticaoExecutor.ofertaAnterior?.engineOfertaId || "",
+    enviadaEmAnterior: repeticaoExecutor.enviadaEmAnterior || "",
+    decisao: "bloquear_repetida"
+  }));
+  salvarFila(clienteId);
+  return;
+}
+
 for (const item of destinosOrdenados) {
   const destino = item.destino;
   const nomeDestino = destinoNomeLog(destino);
@@ -21459,6 +21494,26 @@ function garantirIdsFila() {
 }
 
 garantirIdsFila();
+
+if (!global.__optimusFilaDuplicatasPendentesSaneada) {
+  global.__optimusFilaDuplicatasPendentesSaneada = true;
+  const saneamentoFila = filaOfertas.sanearDuplicatasPendentes2h(fila);
+
+  if (!saneamentoFila.ok) {
+    console.log("[ANTI-REPETICAO-SANEAMENTO-ERRO]", JSON.stringify({
+      motivo: "saneamento_fila_falhou",
+      erro: saneamentoFila.erro || ""
+    }));
+  } else if (saneamentoFila.alterou) {
+    for (const [clienteId, quantidade] of Object.entries(saneamentoFila.saneadasPorCliente)) {
+      salvarFila(clienteId);
+      console.log("[ANTI-REPETICAO-SANEAMENTO-2H]", JSON.stringify({
+        clienteId,
+        quantidadeSaneada: quantidade
+      }));
+    }
+  }
+}
 
 console.log("[BOOT] Dados iniciais carregados:", {
   fila: fila.length,

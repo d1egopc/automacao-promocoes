@@ -60,17 +60,22 @@ function descontoNumero(oferta = {}) {
 
 function normalizarUrlProdutoMemoria(valor = "") {
   const texto = String(valor || "").trim();
-  if (!texto) return "";
+  if (!texto || /^data:/i.test(texto)) return "";
+  const textoUrl = /^[a-z][a-z\d+.-]*:\/\//i.test(texto)
+    ? texto
+    : (/^[\w.-]+\.[a-z]{2,}(?:\/|$)/i.test(texto) ? `https://${texto}` : "");
+  if (!textoUrl) return "";
 
   try {
-    const url = new URL(texto);
+    const url = new URL(textoUrl);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
     url.hash = "";
     url.search = "";
     url.hostname = url.hostname.toLowerCase().replace(/^www\./, "");
-    url.pathname = url.pathname.replace(/\/+$/, "");
+    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
     return `${url.hostname}${url.pathname}`.toLowerCase();
   } catch {
-    return texto.split("#")[0].split("?")[0].replace(/\/+$/, "").toLowerCase();
+    return "";
   }
 }
 
@@ -138,6 +143,14 @@ function percentualCupomMemoria(oferta = {}) {
   );
 }
 
+function percentualDescontoMemoria(oferta = {}) {
+  return numeroFinanceiro(
+    oferta.descontoPercentual ??
+    oferta.percentualDesconto ??
+    oferta.desconto
+  );
+}
+
 function economiaMemoria(oferta = {}) {
   const direta = numeroFinanceiro(oferta.economia ?? oferta.economiaValor ?? oferta.valorEconomia);
   if (direta !== null) return direta;
@@ -151,36 +164,164 @@ function economiaMemoria(oferta = {}) {
   return null;
 }
 
-function identidadeAntiRepeticaoAutomatica(oferta = {}) {
-  const clienteId = normalizarTextoLocal(oferta.clienteId || "admin");
-  const marketplace = normalizarTextoLocal(oferta.marketplace || oferta.mercado || "geral");
-  const produtoId = extrairProdutoId(oferta) ||
-    String(oferta.produtoIdCanonico || oferta.produtoId || oferta.idProduto || oferta.itemId || oferta.asin || oferta.mlb || "").trim();
-  const link = normalizarUrlProdutoMemoria(
-    oferta.linkOriginal ||
-    oferta.linkResolvidoRadar ||
-    oferta.linkCapturado ||
-    oferta.link ||
-    oferta.linkAfiliado ||
-    oferta.linkFinal ||
+function normalizarMarketplaceAntiRepeticao(valor = "") {
+  const chave = normalizarTextoLocal(valor).replace(/[\s_-]+/g, "");
+  const aliases = {
+    mercadolivre: "mercadolivre",
+    ml: "mercadolivre",
+    amazon: "amazon",
+    shopee: "shopee",
+    aliexpress: "aliexpress",
+    kabum: "kabum",
+    awin: "awin"
+  };
+  return aliases[chave] || chave || "geral";
+}
+
+function basePersistidaAntiRepeticao(oferta = {}) {
+  const identidade = String(
+    oferta.identidadeBaseAntiRepeticao2h ||
+    oferta.identidadeAntiRepeticao2h ||
     ""
   );
-  const titulo = tituloNormalizadoForteMemoria(oferta.titulo || oferta.nome || "");
-  const preco = numeroFinanceiro(oferta.valorEfetivo ?? oferta.precoAtual ?? oferta.preco);
-  const condicao = preco === null ? "preco:indisponivel" : `preco:${preco.toFixed(2)}`;
-  const base = produtoId
-    ? `produto:${normalizarTextoLocal(produtoId)}`
-    : (link ? `url:${link}` : `titulo:${titulo}`);
+  return identidade.split("|").slice(2).join("|").replace(/\|preco:.*$/i, "");
+}
+
+function urlsCanonicasAntiRepeticao(oferta = {}) {
+  const basePersistida = basePersistidaAntiRepeticao(oferta);
+  return [...new Set([
+    oferta.linkOriginal,
+    oferta.permalink,
+    oferta.linkPermanente,
+    oferta.linkResolvido,
+    oferta.linkResolvidoRadar,
+    oferta.linkCapturado,
+    oferta.linkAfiliado,
+    oferta.linkFinal,
+    oferta.link,
+    oferta.url,
+    oferta.metadata?.produto?.permalink,
+    oferta.metadata?.produto?.linkOriginal,
+    oferta.metadata?.produto?.url,
+    basePersistida.startsWith("url:") ? basePersistida.slice(4) : "",
+    ...(Array.isArray(oferta.urlsAntiRepeticao2h) ? oferta.urlsAntiRepeticao2h : [])
+  ].map(normalizarUrlProdutoMemoria).filter(Boolean))];
+}
+
+function identificadoresAntiRepeticao(oferta = {}, urls = []) {
+  const basePersistida = basePersistidaAntiRepeticao(oferta);
+  const diretos = [
+    oferta.produtoIdCanonico,
+    oferta.produtoId,
+    oferta.productId,
+    oferta.idProduto,
+    oferta.itemId,
+    oferta.asin,
+    oferta.mlb,
+    oferta.metadata?.produto?.produtoId,
+    oferta.metadata?.produto?.productId,
+    oferta.metadata?.produto?.asin,
+    oferta.metadata?.produto?.mlb,
+    basePersistida.startsWith("produto:") ? basePersistida : "",
+    ...(Array.isArray(oferta.identificadoresAntiRepeticao2h)
+      ? oferta.identificadoresAntiRepeticao2h
+      : [])
+  ];
+  const ids = new Set();
+
+  for (const candidato of [...diretos, ...urls]) {
+    const valor = String(candidato || "").trim();
+    if (!valor) continue;
+
+    const idJaCanonico = valor.match(/^(produto|mlb|asin|aliexpress|kabum):(.+)$/i);
+    if (idJaCanonico) {
+      const tipo = idJaCanonico[1].toLowerCase();
+      const id = normalizarTextoLocal(idJaCanonico[2]).replace(/\s+/g, "");
+      if (id) {
+        ids.add(`produto:${id}`);
+        if (tipo !== "produto") ids.add(`${tipo}:${id}`);
+      }
+      continue;
+    }
+
+    const mlb = valor.match(/\bMLB-?(\d{6,})\b/i);
+    if (mlb) {
+      ids.add(`produto:${mlb[1]}`);
+      ids.add(`mlb:${mlb[1]}`);
+    }
+
+    const asinUrl = valor.match(/\/(?:dp|gp\/product|product)\/([A-Z0-9]{10})(?:[/?]|$)/i);
+    const asinDireto = valor.match(/^[A-Z0-9]{10}$/i);
+    const asin = asinUrl?.[1] || asinDireto?.[0];
+    if (asin) {
+      ids.add(`produto:${asin.toUpperCase()}`);
+      ids.add(`asin:${asin.toUpperCase()}`);
+    }
+
+    const aliexpress = valor.match(/\/item\/(\d{8,})\.html/i);
+    if (aliexpress) {
+      ids.add(`produto:${aliexpress[1]}`);
+      ids.add(`aliexpress:${aliexpress[1]}`);
+    }
+
+    const kabum = valor.match(/\/produto\/(\d{3,})(?:\/|$)/i);
+    if (kabum) {
+      ids.add(`produto:${kabum[1]}`);
+      ids.add(`kabum:${kabum[1]}`);
+    }
+
+    if (!mlb && !asin && !aliexpress && !kabum && diretos.includes(candidato)) {
+      const normalizado = normalizarTextoLocal(valor);
+      if (normalizado) ids.add(normalizado.startsWith("produto:") ? normalizado : `produto:${normalizado}`);
+    }
+  }
+
+  return [...ids];
+}
+
+function identidadeAntiRepeticaoAutomatica(oferta = {}) {
+  const clienteId = normalizarTextoLocal(oferta.clienteId || oferta.cliente_id || "admin");
+  const marketplace = normalizarMarketplaceAntiRepeticao(oferta.marketplace || oferta.mercado || "geral");
+  const urls = urlsCanonicasAntiRepeticao(oferta);
+  const ids = identificadoresAntiRepeticao(oferta, urls);
+  const titulo = tituloNormalizadoForteMemoria(
+    oferta.tituloNormalizadoAntiRepeticao2h ||
+    oferta.titulo ||
+    oferta.nome ||
+    ""
+  );
+  const identidadeForte = ids.find(id => id.startsWith("produto:")) || ids[0] || "";
+  const base = identidadeForte
+    ? identidadeForte
+    : (urls[0] ? `url:${urls[0]}` : `titulo:${titulo}`);
   const identidadeBase = `${clienteId}|${marketplace}|${base}`;
 
   return {
     clienteId,
     marketplace,
-    produtoId,
+    produtoId: identidadeForte.replace(/^produto:/, ""),
+    ids,
+    urls,
+    titulo,
     identidadeBase,
-    identidade: `${identidadeBase}|${condicao}`,
-    preco
+    identidade: identidadeBase,
+    preco: numeroFinanceiro(oferta.valorEfetivo ?? oferta.precoAtual ?? oferta.preco)
   };
+}
+
+function ofertasEquivalentesAntiRepeticao(ofertaA = {}, ofertaB = {}) {
+  const a = identidadeAntiRepeticaoAutomatica(ofertaA);
+  const b = identidadeAntiRepeticaoAutomatica(ofertaB);
+  if (a.clienteId !== b.clienteId || a.marketplace !== b.marketplace) return false;
+
+  const idsB = new Set(b.ids);
+  if (a.ids.some(id => idsB.has(id))) return true;
+
+  const urlsB = new Set(b.urls);
+  if (a.urls.some(url => urlsB.has(url))) return true;
+
+  if (a.ids.length || b.ids.length || a.urls.length || b.urls.length) return false;
+  return Boolean(a.titulo && a.titulo === b.titulo);
 }
 
 function logAntiRepeticao2h(dados = {}) {
@@ -213,6 +354,8 @@ function melhoriaFinanceiraComprovada(oferta = {}, anterior = {}) {
   const valorCupomAnterior = valorCupomMemoria(anterior);
   const percentualCupomAtual = percentualCupomMemoria(oferta);
   const percentualCupomAnterior = percentualCupomMemoria(anterior);
+  const percentualDescontoAtual = percentualDescontoMemoria(oferta);
+  const percentualDescontoAnterior = percentualDescontoMemoria(anterior);
 
   if (precoAtual !== null && precoAnterior !== null && precoAtual < precoAnterior) {
     return { ok: true, motivo: "queda_real_preco", precoAtual, precoAnterior, cupomAtual, cupomAnterior, economiaAtual, economiaAnterior };
@@ -231,6 +374,14 @@ function melhoriaFinanceiraComprovada(oferta = {}, anterior = {}) {
 
   if (economiaAtual !== null && economiaAnterior !== null && economiaAtual > economiaAnterior) {
     return { ok: true, motivo: "economia_real_maior", precoAtual, precoAnterior, cupomAtual, cupomAnterior, economiaAtual, economiaAnterior };
+  }
+
+  if (
+    percentualDescontoAtual !== null &&
+    percentualDescontoAnterior !== null &&
+    percentualDescontoAtual > percentualDescontoAnterior
+  ) {
+    return { ok: true, motivo: "desconto_percentual_maior", precoAtual, precoAnterior, cupomAtual, cupomAnterior, economiaAtual, economiaAnterior };
   }
 
   const tipoCupom = normalizarTextoLocal(oferta.cupomTipo || oferta.tipoCupom || "");
@@ -256,11 +407,16 @@ const ORIGENS_MANUAIS_PRESERVADAS_ANTI_REPETICAO = new Set([
   "magalu_manual"
 ]);
 
-function reservarOfertaAutomatica2h(oferta = {}, contexto = {}) {
+function ofertaManualPreservadaAntiRepeticao(oferta = {}, contexto = {}) {
   const origem = normalizarTextoLocal(contexto.origem || oferta.origem || "");
-  const manual = oferta.manual === true ||
+  return oferta.manual === true ||
     oferta.origemManual === true ||
     ORIGENS_MANUAIS_PRESERVADAS_ANTI_REPETICAO.has(origem);
+}
+
+function reservarOfertaAutomatica2h(oferta = {}, contexto = {}) {
+  const origem = normalizarTextoLocal(contexto.origem || oferta.origem || "");
+  const manual = ofertaManualPreservadaAntiRepeticao(oferta, contexto);
   const identidade = identidadeAntiRepeticaoAutomatica(oferta);
 
   if (manual) {
@@ -279,7 +435,8 @@ function reservarOfertaAutomatica2h(oferta = {}, contexto = {}) {
   const vistas = carregarOfertasVistas();
   const anterior = [...vistas].reverse().find(item =>
     item.tipoMemoria === "anti_repeticao_automatica_2h" &&
-    (item.identidadeBaseAntiRepeticao2h === identidade.identidadeBase ||
+    (ofertasEquivalentesAntiRepeticao(oferta, item) ||
+      item.identidadeBaseAntiRepeticao2h === identidade.identidadeBase ||
       item.identidadeAntiRepeticao2h === identidade.identidade)
   );
 
@@ -329,6 +486,9 @@ function reservarOfertaAutomatica2h(oferta = {}, contexto = {}) {
     identidadeBaseAntiRepeticao2h: identidade.identidadeBase,
     identidadeAntiRepeticao2h: identidade.identidade,
     produtoId: identidade.produtoId,
+    identificadoresAntiRepeticao2h: identidade.ids,
+    urlsAntiRepeticao2h: identidade.urls,
+    tituloNormalizadoAntiRepeticao2h: identidade.titulo,
     chave: identidade.identidade,
     clienteId: oferta.clienteId || "admin",
     marketplace: oferta.marketplace || oferta.mercado || "",
@@ -585,5 +745,8 @@ module.exports = {
   deveIgnorarOfertaRepetida,
   registrarOfertaVista,
   reservarOfertaAutomatica2h,
-  identidadeAntiRepeticaoAutomatica
+  identidadeAntiRepeticaoAutomatica,
+  ofertasEquivalentesAntiRepeticao,
+  ofertaManualPreservadaAntiRepeticao,
+  melhoriaFinanceiraComprovada
 };

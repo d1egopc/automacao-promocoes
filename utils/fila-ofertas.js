@@ -1,7 +1,15 @@
 const fs = require("fs");
 const path = require("path");
 const { resolverImagemUniversal } = require("../modules/imagens/resolver-imagem-universal");
-const { reservarOfertaAutomatica2h } = require("../marketplaces/inteligencia/memoria-ofertas");
+const {
+  reservarOfertaAutomatica2h,
+  identidadeAntiRepeticaoAutomatica,
+  ofertasEquivalentesAntiRepeticao,
+  ofertaManualPreservadaAntiRepeticao,
+  melhoriaFinanceiraComprovada
+} = require("../marketplaces/inteligencia/memoria-ofertas");
+
+const JANELA_ANTI_REPETICAO_EXECUTOR_MS = 2 * 60 * 60 * 1000;
 
 let inteligenciaUniversalCache = null;
 let templateUniversalCache = null;
@@ -91,6 +99,173 @@ function textoComparacao(valor) {
 
 function textoComparacaoNormalizado(valor) {
   return textoComparacao(valor).toLowerCase();
+}
+
+function timestampFila(valor) {
+  if (valor instanceof Date) return valor.getTime();
+  if (typeof valor === "number") return Number.isFinite(valor) ? valor : NaN;
+  const texto = String(valor || "").trim();
+  if (!texto) return NaN;
+
+  const direto = Date.parse(texto);
+  if (Number.isFinite(direto)) return direto;
+
+  const brasileiro = texto.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!brasileiro) return NaN;
+  return new Date(
+    Number(brasileiro[3]),
+    Number(brasileiro[2]) - 1,
+    Number(brasileiro[1]),
+    Number(brasileiro[4]),
+    Number(brasileiro[5]),
+    Number(brasileiro[6] || 0)
+  ).getTime();
+}
+
+function timestampReferenciaOfertaFila(oferta = {}) {
+  return timestampFila(
+    oferta.enviadoEm ||
+    oferta.dataEnvio ||
+    oferta.dataEntradaFila ||
+    oferta.criadoEm ||
+    oferta.dataCriacao
+  );
+}
+
+function consultarEnvioRecenteExecutor2h(fila = [], oferta = {}, opcoes = {}) {
+  try {
+    const itens = typeof opcoes.obterItens === "function"
+      ? opcoes.obterItens()
+      : fila;
+    if (!Array.isArray(itens)) throw new Error("fila_invalida");
+    if (ofertaManualPreservadaAntiRepeticao(oferta, opcoes)) {
+      return { ok: true, bloqueada: false, motivo: "oferta_manual_preservada" };
+    }
+
+    const agora = Number(opcoes.agora || Date.now());
+    const identidade = identidadeAntiRepeticaoAutomatica(oferta);
+    const anteriores = itens
+      .filter(item =>
+        item !== oferta &&
+        String(item?.status || "").toLowerCase() === "enviado" &&
+        ofertasEquivalentesAntiRepeticao(oferta, item)
+      )
+      .map(item => ({ item, enviadaEmMs: timestampFila(item.enviadoEm || item.dataEnvio) }))
+      .filter(registro =>
+        Number.isFinite(registro.enviadaEmMs) &&
+        registro.enviadaEmMs <= agora &&
+        agora - registro.enviadaEmMs < JANELA_ANTI_REPETICAO_EXECUTOR_MS
+      )
+      .sort((a, b) => b.enviadaEmMs - a.enviadaEmMs);
+
+    for (const anterior of anteriores) {
+      if (melhoriaFinanceiraComprovada(oferta, anterior.item).ok) continue;
+      return {
+        ok: true,
+        bloqueada: true,
+        motivo: "repetida_no_executor_2h",
+        identidade: identidade.identidade,
+        ofertaAnterior: anterior.item,
+        enviadaEmAnterior: anterior.item.enviadoEm || anterior.item.dataEnvio || ""
+      };
+    }
+
+    return {
+      ok: true,
+      bloqueada: false,
+      motivo: "sem_envio_equivalente_recente",
+      identidade: identidade.identidade
+    };
+  } catch (erro) {
+    return {
+      ok: false,
+      bloqueada: false,
+      motivo: "consulta_executor_2h_falhou",
+      erro: erro?.message || "erro_consulta"
+    };
+  }
+}
+
+function sanearDuplicatasPendentes2h(fila = [], opcoes = {}) {
+  try {
+    if (!Array.isArray(fila)) throw new Error("fila_invalida");
+    const agora = Number(opcoes.agora || Date.now());
+    const pendentes = fila
+      .map((item, indice) => ({ item, indice, criadoEmMs: timestampReferenciaOfertaFila(item) }))
+      .filter(registro =>
+        String(registro.item?.status || "").toLowerCase() === "pendente" &&
+        !ofertaManualPreservadaAntiRepeticao(registro.item)
+      )
+      .sort((a, b) => {
+        if (Number.isFinite(a.criadoEmMs) && Number.isFinite(b.criadoEmMs)) {
+          return a.criadoEmMs - b.criadoEmMs;
+        }
+        if (Number.isFinite(a.criadoEmMs)) return -1;
+        if (Number.isFinite(b.criadoEmMs)) return 1;
+        return a.indice - b.indice;
+      });
+    const mantidas = [];
+    const atualizacoes = [];
+    const saneadasPorCliente = {};
+
+    for (const atual of pendentes) {
+      const identidadeAtual = identidadeAntiRepeticaoAutomatica(atual.item);
+      const duplicada = mantidas.find(anterior => {
+        if (!ofertasEquivalentesAntiRepeticao(atual.item, anterior.item)) return false;
+        const ambosComData = Number.isFinite(atual.criadoEmMs) && Number.isFinite(anterior.criadoEmMs);
+        if (!ambosComData) return false;
+        if (Math.abs(atual.criadoEmMs - anterior.criadoEmMs) >= JANELA_ANTI_REPETICAO_EXECUTOR_MS) {
+          return false;
+        }
+        return !melhoriaFinanceiraComprovada(atual.item, anterior.item).ok;
+      });
+
+      if (!duplicada) {
+        mantidas.push({ ...atual, identidade: identidadeAtual });
+        continue;
+      }
+
+      atualizacoes.push({
+        indice: atual.indice,
+        clienteId: identidadeAtual.clienteId,
+        identidade: identidadeAtual.identidade,
+        ofertaAnteriorId: duplicada.item.id || duplicada.item.engineOfertaId || ""
+      });
+      saneadasPorCliente[identidadeAtual.clienteId] =
+        Number(saneadasPorCliente[identidadeAtual.clienteId] || 0) + 1;
+    }
+
+    for (const atualizacao of atualizacoes) {
+      const item = fila[atualizacao.indice];
+      item.status = "retida";
+      item.statusDetalhe = "Retida: repetida pendente na janela de 2 horas";
+      item.motivo = "repetida_pendente_saneada_2h";
+      item.motivoRetencao = "repetida_pendente_saneada_2h";
+      item.retidaEm = new Date(agora).toISOString();
+      item.antiRepeticao2h = {
+        bloqueada: true,
+        motivo: "repetida_pendente_saneada_2h",
+        identidade: atualizacao.identidade,
+        ofertaAnteriorId: atualizacao.ofertaAnteriorId
+      };
+    }
+
+    return {
+      ok: true,
+      alterou: atualizacoes.length > 0,
+      totalSaneado: atualizacoes.length,
+      saneadasPorCliente,
+      atualizacoes
+    };
+  } catch (erro) {
+    return {
+      ok: false,
+      alterou: false,
+      totalSaneado: 0,
+      saneadasPorCliente: {},
+      erro: erro?.message || "erro_saneamento"
+    };
+  }
 }
 
 function numeroComparacao(valor) {
@@ -853,6 +1028,8 @@ function limparFilaAntiga(fila = [], { clienteId = "admin", status = "" } = {}) 
 module.exports = {
   adicionarOfertaFila,
   adicionarOfertaInicioFila,
+  consultarEnvioRecenteExecutor2h,
+  sanearDuplicatasPendentes2h,
   aplicarPortaUniversalFila,
   aplicarComparacaoV1V2Sombra,
   aplicarTemplateUniversalSombra,
