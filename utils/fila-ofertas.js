@@ -10,6 +10,7 @@ const {
 } = require("../marketplaces/inteligencia/memoria-ofertas");
 
 const JANELA_ANTI_REPETICAO_EXECUTOR_MS = 2 * 60 * 60 * 1000;
+const TIMEZONE_FILA_BR = "America/Sao_Paulo";
 
 let inteligenciaUniversalCache = null;
 let templateUniversalCache = null;
@@ -101,25 +102,99 @@ function textoComparacaoNormalizado(valor) {
   return textoComparacao(valor).toLowerCase();
 }
 
-function timestampFila(valor) {
+function partesDataTimezone(data, timezone = TIMEZONE_FILA_BR) {
+  const partes = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).formatToParts(data).reduce((acc, parte) => {
+    if (parte.type !== "literal") acc[parte.type] = parte.value;
+    return acc;
+  }, {});
+
+  return {
+    year: Number(partes.year),
+    month: Number(partes.month),
+    day: Number(partes.day),
+    hour: Number(partes.hour === "24" ? "0" : partes.hour),
+    minute: Number(partes.minute),
+    second: Number(partes.second)
+  };
+}
+
+function timestampTimezoneLocal({ year, month, day, hour = 0, minute = 0, second = 0 }, timezone = TIMEZONE_FILA_BR) {
+  const chuteUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  const partesNoTimezone = partesDataTimezone(new Date(chuteUtc), timezone);
+  const timezoneComoUtc = Date.UTC(
+    partesNoTimezone.year,
+    partesNoTimezone.month - 1,
+    partesNoTimezone.day,
+    partesNoTimezone.hour,
+    partesNoTimezone.minute,
+    partesNoTimezone.second
+  );
+  const offsetMs = timezoneComoUtc - chuteUtc;
+  const corrigido = chuteUtc - offsetMs;
+  const validacao = partesDataTimezone(new Date(corrigido), timezone);
+
+  if (
+    validacao.year === year &&
+    validacao.month === month &&
+    validacao.day === day &&
+    validacao.hour === hour &&
+    validacao.minute === minute &&
+    validacao.second === second
+  ) {
+    return corrigido;
+  }
+
+  return corrigido + (chuteUtc - Date.UTC(
+    validacao.year,
+    validacao.month - 1,
+    validacao.day,
+    validacao.hour,
+    validacao.minute,
+    validacao.second
+  ));
+}
+
+function timestampFila(valor, opcoes = {}) {
   if (valor instanceof Date) return valor.getTime();
   if (typeof valor === "number") return Number.isFinite(valor) ? valor : NaN;
   const texto = String(valor || "").trim();
   if (!texto) return NaN;
 
+  const brasileiro = texto.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (brasileiro) {
+    const convertido = timestampTimezoneLocal({
+      year: Number(brasileiro[3]),
+      month: Number(brasileiro[2]),
+      day: Number(brasileiro[1]),
+      hour: Number(brasileiro[4]),
+      minute: Number(brasileiro[5]),
+      second: Number(brasileiro[6] || 0)
+    }, TIMEZONE_FILA_BR);
+
+    if (opcoes.logarLegado && opcoes.logger?.log) {
+      opcoes.logger.log("[FILA-DATA-LEGADA-CONVERTIDA]", JSON.stringify({
+        valor: texto,
+        timezone: TIMEZONE_FILA_BR,
+        iso: Number.isFinite(convertido) ? new Date(convertido).toISOString() : ""
+      }));
+    }
+
+    return convertido;
+  }
+
   const direto = Date.parse(texto);
   if (Number.isFinite(direto)) return direto;
 
-  const brasileiro = texto.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-  if (!brasileiro) return NaN;
-  return new Date(
-    Number(brasileiro[3]),
-    Number(brasileiro[2]) - 1,
-    Number(brasileiro[1]),
-    Number(brasileiro[4]),
-    Number(brasileiro[5]),
-    Number(brasileiro[6] || 0)
-  ).getTime();
+  return NaN;
 }
 
 function timestampReferenciaOfertaFila(oferta = {}) {
@@ -150,7 +225,13 @@ function consultarEnvioRecenteExecutor2h(fila = [], oferta = {}, opcoes = {}) {
         String(item?.status || "").toLowerCase() === "enviado" &&
         ofertasEquivalentesAntiRepeticao(oferta, item)
       )
-      .map(item => ({ item, enviadaEmMs: timestampFila(item.enviadoEm || item.dataEnvio) }))
+      .map(item => ({
+        item,
+        enviadaEmMs: timestampFila(item.enviadoEm || item.dataEnvio, {
+          logger: opcoes.logger,
+          logarLegado: opcoes.logarLegado === true
+        })
+      }))
       .filter(registro =>
         Number.isFinite(registro.enviadaEmMs) &&
         registro.enviadaEmMs <= agora &&
@@ -184,6 +265,242 @@ function consultarEnvioRecenteExecutor2h(fila = [], oferta = {}, opcoes = {}) {
       erro: erro?.message || "erro_consulta"
     };
   }
+}
+
+function statusFilaNormalizado(valor = "") {
+  return String(valor || "").trim().toLowerCase();
+}
+
+function ofertaPendenteFila(oferta = {}) {
+  return statusFilaNormalizado(oferta.status || "pendente") === "pendente";
+}
+
+function idOfertaFila(oferta = {}) {
+  return String(oferta.id || oferta.ofertaId || oferta.engineOfertaId || "").trim();
+}
+
+function relocalizarOfertaFila(fila = [], oferta = {}, opcoes = {}) {
+  if (!Array.isArray(fila)) {
+    return { ok: false, motivo: "fila_invalida", oferta: null, index: -1 };
+  }
+
+  const clienteId = String(opcoes.clienteId || oferta.clienteId || "admin");
+  const id = String(opcoes.id || idOfertaFila(oferta));
+  if (id) {
+    const index = fila.findIndex(item =>
+      String(item?.clienteId || "admin") === clienteId &&
+      idOfertaFila(item) === id
+    );
+
+    if (index >= 0) {
+      return { ok: true, motivo: "id", oferta: fila[index], index };
+    }
+  }
+
+  const indexPorIdentidade = fila.findIndex(item =>
+    item !== oferta &&
+    String(item?.clienteId || "admin") === clienteId &&
+    ofertasEquivalentesAntiRepeticao(item, oferta)
+  );
+
+  if (indexPorIdentidade >= 0) {
+    return { ok: true, motivo: "identidade", oferta: fila[indexPorIdentidade], index: indexPorIdentidade };
+  }
+
+  const indexReferencia = fila.findIndex(item => item === oferta);
+  if (indexReferencia >= 0) {
+    return { ok: true, motivo: "referencia", oferta: fila[indexReferencia], index: indexReferencia };
+  }
+
+  return { ok: false, motivo: "nao_encontrada", oferta: null, index: -1 };
+}
+
+function avaliarDuplicidadeAntesProcessarFila(fila = [], oferta = {}, opcoes = {}) {
+  try {
+    if (!Array.isArray(fila)) throw new Error("fila_invalida");
+    if (ofertaManualPreservadaAntiRepeticao(oferta, opcoes)) {
+      return { ok: true, bloquear: false, motivo: "oferta_manual_preservada" };
+    }
+
+    const agora = Number(opcoes.agora || Date.now());
+    const localizacao = relocalizarOfertaFila(fila, oferta, opcoes);
+    const indiceAtual = localizacao.index;
+    const criadoAtual = timestampReferenciaOfertaFila(oferta);
+
+    for (let indice = 0; indice < fila.length; indice += 1) {
+      const item = fila[indice];
+      if (!item || item === oferta || indice === indiceAtual) continue;
+      if (!ofertasEquivalentesAntiRepeticao(oferta, item)) continue;
+      if (melhoriaFinanceiraComprovada(oferta, item).ok) continue;
+
+      const status = statusFilaNormalizado(item.status);
+      if (status === "processando" || status === "enviando") {
+        return {
+          ok: true,
+          bloquear: true,
+          motivo: "duplicata_ja_processando",
+          statusAnterior: status,
+          ofertaAnterior: item,
+          identidade: identidadeAntiRepeticaoAutomatica(oferta).identidade
+        };
+      }
+
+      if (status === "enviado") {
+        const enviadaEmMs = timestampFila(item.enviadoEm || item.dataEnvio);
+        if (
+          Number.isFinite(enviadaEmMs) &&
+          enviadaEmMs <= agora &&
+          agora - enviadaEmMs < JANELA_ANTI_REPETICAO_EXECUTOR_MS
+        ) {
+          return {
+            ok: true,
+            bloquear: true,
+            motivo: "repetida_no_executor_2h",
+            statusAnterior: status,
+            ofertaAnterior: item,
+            identidade: identidadeAntiRepeticaoAutomatica(oferta).identidade
+          };
+        }
+      }
+
+      if (status === "pendente") {
+        const criadoItem = timestampReferenciaOfertaFila(item);
+        const itemTemPrecedencia = (
+          Number.isFinite(criadoItem) &&
+          Number.isFinite(criadoAtual) &&
+          criadoItem < criadoAtual &&
+          criadoAtual - criadoItem < JANELA_ANTI_REPETICAO_EXECUTOR_MS
+        ) || (
+          !Number.isFinite(criadoItem) &&
+          !Number.isFinite(criadoAtual) &&
+          indiceAtual >= 0 &&
+          indice < indiceAtual
+        );
+
+        if (itemTemPrecedencia) {
+          return {
+            ok: true,
+            bloquear: true,
+            motivo: "duplicata_pendente_com_precedencia",
+            statusAnterior: status,
+            ofertaAnterior: item,
+            identidade: identidadeAntiRepeticaoAutomatica(oferta).identidade
+          };
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      bloquear: false,
+      motivo: "sem_duplicidade_ativa",
+      identidade: identidadeAntiRepeticaoAutomatica(oferta).identidade
+    };
+  } catch (erro) {
+    return {
+      ok: false,
+      bloquear: false,
+      motivo: "avaliacao_duplicidade_processamento_falhou",
+      erro: erro?.message || "erro_duplicidade_processamento"
+    };
+  }
+}
+
+function marcarOfertaRetidaDuplicidadeFila(oferta = {}, motivo = "repetida_no_executor_2h", dados = {}) {
+  oferta.status = "retida";
+  oferta.statusDetalhe = dados.statusDetalhe || "Retida por repeticao na janela de 2 horas";
+  oferta.motivo = motivo;
+  oferta.motivoRetencao = motivo;
+  oferta.retidaEm = dados.agoraIso || new Date().toISOString();
+  oferta.antiRepeticao2h = {
+    bloqueada: true,
+    motivo,
+    identidade: dados.identidade || identidadeAntiRepeticaoAutomatica(oferta).identidade,
+    ofertaAnteriorId: dados.ofertaAnteriorId || ""
+  };
+  delete oferta.processandoEm;
+  return oferta;
+}
+
+function reservarOfertaProcessandoFila(fila = [], oferta = {}, opcoes = {}) {
+  const agoraIso = opcoes.agoraIso || new Date().toISOString();
+  const localizacao = relocalizarOfertaFila(fila, oferta, opcoes);
+  if (!localizacao.ok || !localizacao.oferta) {
+    return { ok: false, motivo: "oferta_nao_relocalizada", localizacao };
+  }
+
+  if (!ofertaPendenteFila(localizacao.oferta)) {
+    return {
+      ok: false,
+      motivo: "status_nao_pendente",
+      statusAtual: localizacao.oferta.status || "",
+      localizacao
+    };
+  }
+
+  const statusAnterior = localizacao.oferta.status || "pendente";
+  localizacao.oferta.status = "processando";
+  localizacao.oferta.processandoEm = agoraIso;
+  localizacao.oferta.statusDetalhe = "Processando envio";
+  localizacao.oferta.erro = "";
+  localizacao.oferta.erroEm = "";
+
+  return {
+    ok: true,
+    oferta: localizacao.oferta,
+    index: localizacao.index,
+    statusAnterior,
+    statusNovo: "processando",
+    processandoEm: agoraIso,
+    localizacao
+  };
+}
+
+function finalizarOfertaEnviadaFila(fila = [], oferta = {}, dados = {}) {
+  const localizacao = relocalizarOfertaFila(fila, oferta, dados);
+  if (!localizacao.ok || !localizacao.oferta) {
+    return { ok: false, motivo: "oferta_nao_relocalizada", localizacao };
+  }
+
+  const alvo = localizacao.oferta;
+  const enviadoEm = dados.enviadoEm || new Date().toISOString();
+  alvo.status = "enviado";
+  alvo.proximaTentativaEnvioEm = "";
+  alvo.processandoEm = "";
+  alvo.enviadoEm = enviadoEm;
+  alvo.dataEnvio = enviadoEm;
+  alvo.statusDetalhe = dados.statusDetalhe || alvo.statusDetalhe || "Enviada";
+  alvo.logsEnvio = Array.isArray(alvo.logsEnvio) ? alvo.logsEnvio : [];
+  alvo.logsEnvio.push({
+    tipo: "sucesso",
+    mensagem: alvo.statusDetalhe,
+    data: enviadoEm
+  });
+
+  return { ok: true, oferta: alvo, index: localizacao.index, localizacao };
+}
+
+function marcarErroEnvioFila(fila = [], oferta = {}, dados = {}) {
+  const localizacao = relocalizarOfertaFila(fila, oferta, dados);
+  if (!localizacao.ok || !localizacao.oferta) {
+    return { ok: false, motivo: "oferta_nao_relocalizada", localizacao };
+  }
+
+  const alvo = localizacao.oferta;
+  const erroEm = dados.erroEm || new Date().toISOString();
+  alvo.status = dados.status || "erro";
+  alvo.statusDetalhe = dados.statusDetalhe || "Erro no envio";
+  alvo.erro = dados.erro || "";
+  alvo.erroEm = erroEm;
+  alvo.processandoEm = "";
+  alvo.logsEnvio = Array.isArray(alvo.logsEnvio) ? alvo.logsEnvio : [];
+  alvo.logsEnvio.push({
+    tipo: "erro",
+    mensagem: alvo.statusDetalhe,
+    data: erroEm
+  });
+
+  return { ok: true, oferta: alvo, index: localizacao.index, localizacao };
 }
 
 function sanearDuplicatasPendentes2h(fila = [], opcoes = {}) {
@@ -1002,8 +1319,9 @@ function atualizarStatusFila(fila = [], { id, clienteId = "admin", status, statu
   return resultado.oferta;
 }
 
-function limparFilaAntiga(fila = [], { clienteId = "admin", status = "" } = {}) {
+function limparFilaAntiga(fila = [], { clienteId = "admin", status = "", agora = Date.now() } = {}) {
   const antes = fila.length;
+  let preservadosHistorico = 0;
 
   const novaFila = fila.filter(item => {
     const dono = String(item.clienteId || "admin");
@@ -1016,12 +1334,28 @@ function limparFilaAntiga(fila = [], { clienteId = "admin", status = "" } = {}) 
         ? String(item.status) === String(status)
         : true;
 
-    return !(mesmoCliente && mesmoStatus);
+    if (!(mesmoCliente && mesmoStatus)) return true;
+
+    const statusItem = statusFilaNormalizado(item.status);
+    const limpezaIncluiEnviado = !status || statusFilaNormalizado(status) === "enviado";
+    if (limpezaIncluiEnviado && statusItem === "enviado") {
+      const enviadoEmMs = timestampFila(item.enviadoEm || item.dataEnvio);
+      if (
+        Number.isFinite(enviadoEmMs) &&
+        Number(agora) - enviadoEmMs < JANELA_ANTI_REPETICAO_EXECUTOR_MS
+      ) {
+        preservadosHistorico += 1;
+        return true;
+      }
+    }
+
+    return false;
   });
 
   return {
     fila: novaFila,
-    removidos: antes - novaFila.length
+    removidos: antes - novaFila.length,
+    preservadosHistorico
   };
 }
 
@@ -1029,7 +1363,14 @@ module.exports = {
   adicionarOfertaFila,
   adicionarOfertaInicioFila,
   consultarEnvioRecenteExecutor2h,
+  avaliarDuplicidadeAntesProcessarFila,
+  reservarOfertaProcessandoFila,
+  relocalizarOfertaFila,
+  finalizarOfertaEnviadaFila,
+  marcarErroEnvioFila,
+  marcarOfertaRetidaDuplicidadeFila,
   sanearDuplicatasPendentes2h,
+  timestampFila,
   aplicarPortaUniversalFila,
   aplicarComparacaoV1V2Sombra,
   aplicarTemplateUniversalSombra,

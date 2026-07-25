@@ -2,7 +2,12 @@ const assert = require("assert");
 
 const {
   consultarEnvioRecenteExecutor2h,
-  sanearDuplicatasPendentes2h
+  sanearDuplicatasPendentes2h,
+  reservarOfertaProcessandoFila,
+  finalizarOfertaEnviadaFila,
+  marcarErroEnvioFila,
+  limparFilaAntiga,
+  timestampFila
 } = require("../utils/fila-ofertas");
 const {
   identidadeAntiRepeticaoAutomatica,
@@ -10,6 +15,7 @@ const {
 } = require("../marketplaces/inteligencia/memoria-ofertas");
 
 const AGORA = new Date("2026-07-24T23:00:00.000Z").getTime();
+const AGORA_BR_1738 = new Date("2026-07-25T20:38:00.000Z").getTime();
 
 function oferta(overrides = {}) {
   return {
@@ -27,6 +33,37 @@ function oferta(overrides = {}) {
 }
 
 {
+  const enviadaLegada = oferta({
+    id: "legada_br",
+    status: "enviado",
+    enviadoEm: "25/07/2026, 17:35:00"
+  });
+  const atual = oferta({ id: "atual_legada" });
+  const resultado = consultarEnvioRecenteExecutor2h([enviadaLegada, atual], atual, {
+    agora: AGORA_BR_1738
+  });
+  assert.strictEqual(resultado.bloqueada, true, "timestamp brasileiro legado deve bloquear em processo UTC");
+  assert.strictEqual(
+    new Date(timestampFila("25/07/2026, 17:35:00")).toISOString(),
+    "2026-07-25T20:35:00.000Z",
+    "timestamp brasileiro deve ser interpretado explicitamente como America/Sao_Paulo"
+  );
+}
+
+{
+  const enviadaIso = oferta({
+    id: "iso_utc",
+    status: "enviado",
+    enviadoEm: "2026-07-25T20:35:00.000Z"
+  });
+  const atual = oferta({ id: "atual_iso" });
+  const resultado = consultarEnvioRecenteExecutor2h([enviadaIso, atual], atual, {
+    agora: AGORA_BR_1738
+  });
+  assert.strictEqual(resultado.bloqueada, true, "timestamp ISO UTC deve bloquear corretamente");
+}
+
+{
   const primeira = oferta({
     id: "primeira",
     status: "pendente"
@@ -40,6 +77,56 @@ function oferta(overrides = {}) {
   resultado = consultarEnvioRecenteExecutor2h([primeira, segunda], segunda, { agora: AGORA });
   assert.strictEqual(resultado.bloqueada, true, "segunda copia deve ser bloqueada depois do primeiro envio");
   assert.strictEqual(resultado.ofertaAnterior.id, "primeira");
+}
+
+{
+  const fila = [oferta({ id: "em_envio" })];
+  const reserva = reservarOfertaProcessandoFila(fila, fila[0], {
+    clienteId: "cliente_a",
+    agoraIso: "2026-07-25T20:30:00.000Z"
+  });
+  assert.strictEqual(reserva.ok, true, "deve reservar pendente antes do envio");
+  assert.strictEqual(fila[0].status, "processando");
+  assert.strictEqual(fila[0].processandoEm, "2026-07-25T20:30:00.000Z");
+
+  const filaRecarregada = JSON.parse(JSON.stringify(fila));
+  const finalizacao = finalizarOfertaEnviadaFila(filaRecarregada, fila[0], {
+    clienteId: "cliente_a",
+    enviadoEm: "2026-07-25T20:35:00.000Z",
+    statusDetalhe: "Enviada para 1 destino(s)"
+  });
+  assert.strictEqual(finalizacao.ok, true, "deve relocalizar item apos recarga da fila");
+  assert.strictEqual(finalizacao.oferta.status, "enviado");
+  assert.strictEqual(finalizacao.oferta.enviadoEm, "2026-07-25T20:35:00.000Z");
+  assert.strictEqual(filaRecarregada[0].status, "enviado");
+  assert.strictEqual(fila[0].status, "processando", "referencia antiga nao deve ser a fonte final persistida");
+}
+
+{
+  const fila = [oferta({ id: "falha_envio" })];
+  const reserva = reservarOfertaProcessandoFila(fila, fila[0], {
+    clienteId: "cliente_a"
+  });
+  assert.strictEqual(reserva.ok, true);
+  const erro = marcarErroEnvioFila(fila, fila[0], {
+    clienteId: "cliente_a",
+    erro: "falha_mock",
+    erroEm: "2026-07-25T20:40:00.000Z",
+    statusDetalhe: "Erro no envio: falha_mock"
+  });
+  assert.strictEqual(erro.ok, true);
+  assert.strictEqual(fila[0].status, "erro");
+  assert.strictEqual(fila[0].processandoEm, "", "falha nao deve deixar item processando para sempre");
+}
+
+{
+  const fila = [];
+  const antiga = oferta({ id: "perdida" });
+  const finalizacao = finalizarOfertaEnviadaFila(fila, antiga, {
+    clienteId: "cliente_a"
+  });
+  assert.strictEqual(finalizacao.ok, false, "referencia perdida nao deve ser finalizada silenciosamente");
+  assert.strictEqual(antiga.status, "pendente", "objeto obsoleto nao deve ser marcado enviado");
 }
 
 {
@@ -169,6 +256,30 @@ for (const origem of ["manual", "manual-kabum-awin", "manual-magalu", "importaca
   assert.strictEqual(resultado.ok, false);
   assert.strictEqual(resultado.bloqueada, false, "falha de consulta nao descarta oferta");
   assert.strictEqual(atual.status, "pendente");
+}
+
+{
+  const fila = [
+    oferta({
+      id: "historico_recente",
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 10 * 60 * 1000).toISOString()
+    }),
+    oferta({
+      id: "historico_antigo",
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 3 * 60 * 60 * 1000).toISOString()
+    }),
+    oferta({ id: "ativa_pendente" })
+  ];
+  const limpeza = limparFilaAntiga(fila, {
+    clienteId: "cliente_a",
+    agora: AGORA
+  });
+  assert.strictEqual(limpeza.preservadosHistorico, 1, "limpeza deve preservar enviado recente usado pela barreira");
+  assert.strictEqual(limpeza.removidos, 2, "limpeza remove ativos e historico antigo");
+  assert.strictEqual(limpeza.fila.length, 1);
+  assert.strictEqual(limpeza.fila[0].id, "historico_recente");
 }
 
 {

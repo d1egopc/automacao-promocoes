@@ -686,6 +686,7 @@ aliexpress: {
 let fila = [];
 let enviandoAgoraPorCliente = {};
 let processadorFilaGlobalRodando = false;
+const mutacaoFilaPorCliente = new Set();
 let controleEnvio = {}; // por cliente
 let controleIntervaloEnvioPorCliente = {};
 let historicoOfertas = {};
@@ -1876,7 +1877,40 @@ function aplicarDiversidadeFila(clienteId = "admin") {
   });
 }
 
+function executarMutacaoFilaCliente(clienteId = "admin", fluxo = "fila", mutacao = () => null) {
+  const cliente = String(clienteId || "admin");
+  const inicio = Date.now();
+  const sobreposta = mutacaoFilaPorCliente.has(cliente);
+
+  if (sobreposta) {
+    console.log("[FILA-MUTACAO-SERIALIZADA]", JSON.stringify({
+      clienteId: cliente,
+      fluxo,
+      motivo: "mutacao_reentrante",
+      timestamp: new Date().toISOString()
+    }));
+  }
+
+  mutacaoFilaPorCliente.add(cliente);
+
+  try {
+    return mutacao();
+  } finally {
+    mutacaoFilaPorCliente.delete(cliente);
+    const duracaoMs = Date.now() - inicio;
+    if (sobreposta || duracaoMs > 100) {
+      console.log("[FILA-MUTACAO-SERIALIZADA]", JSON.stringify({
+        clienteId: cliente,
+        fluxo,
+        duracaoMs,
+        timestamp: new Date().toISOString()
+      }));
+    }
+  }
+}
+
 function salvarFila(clienteId = "admin") {
+  return executarMutacaoFilaCliente(clienteId, "salvarFila", () => {
   aplicarDiversidadeFila(clienteId);
 
   return filaOfertas.salvarFila({
@@ -1886,9 +1920,11 @@ function salvarFila(clienteId = "admin") {
     writeClienteJson,
     logger: console
   });
+  });
 }
 
 function carregarFila(clienteId = "admin") {
+  return executarMutacaoFilaCliente(clienteId, "carregarFila", () => {
   fila = filaOfertas.carregarFila({
     fila,
     clienteId,
@@ -1898,6 +1934,33 @@ function carregarFila(clienteId = "admin") {
   });
 
   return fila;
+  });
+}
+
+function sanearDuplicatasPendentesFilaCliente(clienteId = "admin", fluxo = "processador_fila") {
+  const resultado = filaOfertas.sanearDuplicatasPendentes2h(fila);
+  if (!resultado.ok) {
+    console.log("[ANTI-REPETICAO-SANEAMENTO-ERRO]", JSON.stringify({
+      clienteId,
+      fluxo,
+      erro: resultado.erro || ""
+    }));
+    return resultado;
+  }
+
+  const saneadasCliente = Number(resultado.saneadasPorCliente?.[String(clienteId || "admin")] || 0);
+  if (saneadasCliente > 0) {
+    salvarFila(clienteId);
+    console.log("[FILA-DUPLICATA-PENDENTE-RETIDA]", JSON.stringify({
+      clienteId,
+      fluxo,
+      quantidade: saneadasCliente,
+      motivo: "saneamento_duplicatas_pendentes_2h",
+      timestamp: new Date().toISOString()
+    }));
+  }
+
+  return resultado;
 }
 
 function podeAdicionarOfertaAutomaticaFila(oferta = {}, clienteId = "admin", origem = "automatico") {
@@ -5079,6 +5142,7 @@ async function processarFila(clienteIdAlvo = null) {
 
   try {
     sanearExpiradosFila(clienteFila);
+    sanearDuplicatasPendentesFilaCliente(clienteFila, "processar_fila");
 
     oferta = selecionarProximaOfertaFila(clienteFila);
 
@@ -5339,7 +5403,10 @@ const destinosOrdenados = destinosCompativeis
   })
   .sort((a, b) => a.ultimoEnvio - b.ultimoEnvio);
 
-const repeticaoExecutor = filaOfertas.consultarEnvioRecenteExecutor2h(fila, oferta);
+const repeticaoExecutor = filaOfertas.consultarEnvioRecenteExecutor2h(fila, oferta, {
+  logger: console,
+  logarLegado: true
+});
 if (!repeticaoExecutor.ok) {
   resumoFila.motivoPulo = repeticaoExecutor.motivo;
   console.log("[ANTI-REPETICAO-EXECUTOR-2H-ERRO]", JSON.stringify({
@@ -5370,9 +5437,81 @@ if (repeticaoExecutor.bloqueada) {
     enviadaEmAnterior: repeticaoExecutor.enviadaEmAnterior || "",
     decisao: "bloquear_repetida"
   }));
+  console.log("[FILA-DUPLICATA-ENVIADA-BLOQUEADA]", JSON.stringify({
+    clienteId,
+    ofertaId: oferta.id || oferta.engineOfertaId || "",
+    marketplace: oferta.marketplace || oferta.mercado || "",
+    identidade: repeticaoExecutor.identidade || "",
+    ofertaAnteriorId: repeticaoExecutor.ofertaAnterior?.id ||
+      repeticaoExecutor.ofertaAnterior?.engineOfertaId || "",
+    enviadaEmAnterior: repeticaoExecutor.enviadaEmAnterior || "",
+    motivo: "repetida_no_executor_2h",
+    timestamp: new Date().toISOString()
+  }));
   salvarFila(clienteId);
   return;
 }
+
+const duplicidadeProcessamento = filaOfertas.avaliarDuplicidadeAntesProcessarFila(fila, oferta, {
+  clienteId
+});
+if (!duplicidadeProcessamento.ok) {
+  resumoFila.motivoPulo = duplicidadeProcessamento.motivo;
+  console.log("[FILA-DUPLICATA-AVALIACAO-ERRO]", JSON.stringify({
+    clienteId,
+    ofertaId: oferta.id || oferta.engineOfertaId || "",
+    erro: duplicidadeProcessamento.erro || "",
+    motivo: duplicidadeProcessamento.motivo
+  }));
+  return;
+}
+
+if (duplicidadeProcessamento.bloquear) {
+  filaOfertas.marcarOfertaRetidaDuplicidadeFila(oferta, duplicidadeProcessamento.motivo, {
+    identidade: duplicidadeProcessamento.identidade || "",
+    ofertaAnteriorId: duplicidadeProcessamento.ofertaAnterior?.id ||
+      duplicidadeProcessamento.ofertaAnterior?.engineOfertaId || "",
+    statusDetalhe: "Retida: duplicata ativa na janela de 2 horas"
+  });
+  resumoFila.motivoPulo = duplicidadeProcessamento.motivo;
+  console.log("[FILA-DUPLICATA-PENDENTE-RETIDA]", JSON.stringify({
+    clienteId,
+    ofertaId: oferta.id || oferta.engineOfertaId || "",
+    identidade: duplicidadeProcessamento.identidade || "",
+    motivo: duplicidadeProcessamento.motivo,
+    statusAnterior: duplicidadeProcessamento.statusAnterior || "",
+    ofertaAnteriorId: duplicidadeProcessamento.ofertaAnterior?.id ||
+      duplicidadeProcessamento.ofertaAnterior?.engineOfertaId || "",
+    timestamp: new Date().toISOString()
+  }));
+  salvarFila(clienteId);
+  return;
+}
+
+const reservaProcessamento = filaOfertas.reservarOfertaProcessandoFila(fila, oferta, {
+  clienteId
+});
+if (!reservaProcessamento.ok) {
+  resumoFila.motivoPulo = reservaProcessamento.motivo;
+  console.log("[FILA-REFERENCIA-OBSOLETA-EVITADA]", JSON.stringify({
+    clienteId,
+    ofertaId: oferta.id || oferta.engineOfertaId || "",
+    motivo: reservaProcessamento.motivo,
+    statusAtual: reservaProcessamento.statusAtual || "",
+    timestamp: new Date().toISOString()
+  }));
+  return;
+}
+
+oferta = reservaProcessamento.oferta;
+console.log("[FILA-PROCESSANDO-RESERVADA]", JSON.stringify({
+  clienteId,
+  ofertaId: oferta.id || oferta.engineOfertaId || "",
+  statusAnterior: reservaProcessamento.statusAnterior,
+  statusNovo: reservaProcessamento.statusNovo,
+  processandoEm: reservaProcessamento.processandoEm
+}));
+salvarFila(clienteId);
 
 for (const item of destinosOrdenados) {
   const destino = item.destino;
@@ -5607,6 +5746,29 @@ for (const item of destinosOrdenados) {
   }
 }
 
+const relocalizacaoPosEnvio = filaOfertas.relocalizarOfertaFila(fila, oferta, { clienteId });
+if (!relocalizacaoPosEnvio.ok || !relocalizacaoPosEnvio.oferta) {
+  resumoFila.motivoPulo = "oferta_nao_relocalizada_pos_envio";
+  console.log("[FILA-REFERENCIA-OBSOLETA-EVITADA]", JSON.stringify({
+    clienteId,
+    ofertaId: oferta.id || oferta.engineOfertaId || "",
+    motivo: "oferta_nao_relocalizada_pos_envio",
+    destinosEnviados: destinosEnviadosCount,
+    timestamp: new Date().toISOString()
+  }));
+  return;
+}
+
+if (relocalizacaoPosEnvio.oferta !== oferta) {
+  console.log("[FILA-ITEM-RELOCALIZADO]", JSON.stringify({
+    clienteId,
+    ofertaId: oferta.id || oferta.engineOfertaId || "",
+    motivo: relocalizacaoPosEnvio.motivo,
+    timestamp: new Date().toISOString()
+  }));
+  oferta = relocalizacaoPosEnvio.oferta;
+}
+
 const decisaoSemEnvio = decidirStatusExecutorSemEnvio({
   destinosElegiveis: destinosCompativeis.length,
   destinosTentados: destinosTentadosDebug,
@@ -5618,6 +5780,7 @@ const dentroJanelaExecutor = destinosCompativeis.some(item => destinoDentroHorar
 if (!enviouParaAlgumDestino && decisaoSemEnvio.statusFinal === "pendente") {
   resumoFila.motivoPulo = decisaoSemEnvio.motivoSemEnvio || "aguardando_destino";
   oferta.status = "pendente";
+  oferta.processandoEm = "";
   oferta.statusDetalhe = `Aguardando envio: ${decisaoSemEnvio.motivoSemEnvio}`;
   oferta.erro = "";
   oferta.erroEm = "";
@@ -5657,9 +5820,8 @@ if (!enviouParaAlgumDestino) {
   oferta.status = "erro";
   oferta.statusDetalhe = "Falha ao enviar para destinos";
   oferta.erro = "Nenhum destino confirmou envio";
-  oferta.erroEm = new Date().toLocaleString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-  });
+  oferta.erroEm = new Date().toISOString();
+  oferta.processandoEm = "";
 
   logExecutorDestinoDiagnostico({
     oferta,
@@ -5677,16 +5839,25 @@ if (!enviouParaAlgumDestino) {
 
 ultimoEnvioFila = Date.now();
 
-oferta.status = "enviado";
 resumoFila.motivoPulo = "";
-oferta.proximaTentativaEnvioEm = "";
-
-oferta.enviadoEm = new Date().toLocaleString("pt-BR", {
-  timeZone: "America/Sao_Paulo"
+const finalizacaoEnvio = filaOfertas.finalizarOfertaEnviadaFila(fila, oferta, {
+  clienteId,
+  enviadoEm: new Date().toISOString(),
+  statusDetalhe: `Enviada para ${destinosEnviadosCount} destino(s)`
 });
 
-oferta.dataEnvio = oferta.enviadoEm;
-oferta.statusDetalhe = `Enviada para ${destinosEnviadosCount} destino(s)`;
+if (!finalizacaoEnvio.ok || !finalizacaoEnvio.oferta) {
+  resumoFila.motivoPulo = finalizacaoEnvio.motivo || "oferta_nao_relocalizada_finalizacao";
+  console.log("[FILA-REFERENCIA-OBSOLETA-EVITADA]", JSON.stringify({
+    clienteId,
+    ofertaId: oferta.id || oferta.engineOfertaId || "",
+    motivo: finalizacaoEnvio.motivo || "oferta_nao_relocalizada_finalizacao",
+    timestamp: new Date().toISOString()
+  }));
+  return;
+}
+
+oferta = finalizacaoEnvio.oferta;
 
 logExecutorDestinoDiagnostico({
   oferta,
@@ -5696,13 +5867,6 @@ logExecutorDestinoDiagnostico({
   motivoSemEnvio: "",
   dentroJanela: dentroJanelaExecutor,
   statusFinal: "enviado"
-});
-
-oferta.logsEnvio = oferta.logsEnvio || [];
-oferta.logsEnvio.push({
-  tipo: "sucesso",
-  mensagem: oferta.statusDetalhe,
-  data: oferta.enviadoEm
 });
 
 salvarFila(clienteId);
@@ -5715,21 +5879,26 @@ console.log("[ENVIO] Enviado com controle de tempo");
   console.log("[ERRO] ERRO:", e.message);
 
   if (oferta) {
-    oferta.status = "erro";
-    oferta.erro = e.message;
-    oferta.erroEm = new Date().toLocaleString("pt-BR", {
-      timeZone: "America/Sao_Paulo"
-    });
-    oferta.statusDetalhe = `Erro no envio: ${e.message}`;
-
-    oferta.logsEnvio = oferta.logsEnvio || [];
-    oferta.logsEnvio.push({
-      tipo: "erro",
-      mensagem: oferta.statusDetalhe,
-      data: oferta.erroEm
+    const clienteErro = oferta.clienteId || clienteFila || "admin";
+    const erroFila = filaOfertas.marcarErroEnvioFila(fila, oferta, {
+      clienteId: clienteErro,
+      erro: e.message,
+      erroEm: new Date().toISOString(),
+      statusDetalhe: `Erro no envio: ${e.message}`
     });
 
-    salvarFila(oferta.clienteId || "admin");
+    if (erroFila.ok) {
+      oferta = erroFila.oferta;
+      salvarFila(clienteErro);
+    } else {
+      console.log("[FILA-REFERENCIA-OBSOLETA-EVITADA]", JSON.stringify({
+        clienteId: clienteErro,
+        ofertaId: oferta.id || oferta.engineOfertaId || "",
+        motivo: erroFila.motivo || "erro_nao_relocalizado",
+        erro: e.message || "",
+        timestamp: new Date().toISOString()
+      }));
+    }
   }
 
 } finally {
@@ -6636,37 +6805,28 @@ app.delete("/fila/limpar", (req, res) => {
   const clienteId = getClienteId(req);
   const status = req.query.status;
 
-  const antes = fila.length;
-
-  fila = fila.filter(item => {
-    const dono = String(item.clienteId || "admin");
-
-    const mesmoCliente =
-      dono === String(clienteId);
-
-    const mesmoStatus =
-      status
-        ? String(item.status) === String(status)
-        : true;
-
-    return !(mesmoCliente && mesmoStatus);
+  const limpeza = filaOfertas.limparFilaAntiga(fila, {
+    clienteId,
+    status
   });
-
-  const removidos = antes - fila.length;
+  fila = limpeza.fila;
+  const removidos = limpeza.removidos;
 
   salvarFila(clienteId);
 
   logOptimus("FILA", "Limpeza da fila", {
     clienteId,
     status: status || "todos",
-    removidos
+    removidos,
+    preservadosHistorico: limpeza.preservadosHistorico || 0
   });
 
   return res.json({
     ok: true,
     clienteId,
     status: status || "todos",
-    removidos
+    removidos,
+    preservadosHistorico: limpeza.preservadosHistorico || 0
   });
 });
 
