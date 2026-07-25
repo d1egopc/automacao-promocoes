@@ -2,11 +2,6 @@ const ALIASES_DIRETOS = [
   "imageUrl",
   "image_url",
   "image",
-  "thumbnail",
-  "thumbnailUrl",
-  "thumbnail_url",
-  "secure_thumbnail",
-  "secureThumbnail",
   "foto",
   "fotoUrl",
   "imagemOriginal",
@@ -19,6 +14,15 @@ const ALIASES_DIRETOS = [
   "ogImage",
   "twitterImage",
   "imagemRadar",
+  "urlImagem",
+];
+
+const ALIASES_THUMBNAIL = [
+  "thumbnail",
+  "thumbnailUrl",
+  "thumbnail_url",
+  "secure_thumbnail",
+  "secureThumbnail",
 ];
 
 const ALIASES_OBJETO = [
@@ -28,6 +32,7 @@ const ALIASES_OBJETO = [
   "secureUrl",
   "imageUrl",
   "imagemUrl",
+  "secure_thumbnail",
 ];
 
 const ESTRUTURAS_CONHECIDAS = [
@@ -36,11 +41,14 @@ const ESTRUTURAS_CONHECIDAS = [
   "pictures",
   "fotos",
   "product_small_image_urls",
+  "galeria",
+  "imagemCandidatos",
 ];
 
 const CONTAINERS_BRUTOS = [
   "metadata",
   "produto",
+  "dadosProduto",
   "payload",
   "raw",
   "dadosBrutos",
@@ -51,6 +59,7 @@ const CONTAINERS_BRUTOS = [
 
 const MAX_PROFUNDIDADE = 5;
 const MAX_TENTATIVAS = 30;
+const MAX_CANDIDATOS_IMAGEM = 30;
 
 function decodificarEntidadesBasicas(valor) {
   return String(valor || "").trim().replace(/&amp;/g, "&");
@@ -117,152 +126,184 @@ function candidato(valor, origem, camada, confianca) {
   return { valor, origem, camada, confianca };
 }
 
-function coletarDeValor(valor, origem, camada, confianca, candidatos, visitados, profundidade = 0) {
-  if (valor == null || profundidade > MAX_PROFUNDIDADE) return;
+function limiteCandidatosAtingido(estado) {
+  return estado.candidatos.length >= MAX_CANDIDATOS_IMAGEM;
+}
+
+function adicionarCandidatoImagem(valor, origem, camada, confianca, estado) {
+  if (limiteCandidatosAtingido(estado)) return;
+  const normalizado = decodificarEntidadesBasicas(valor);
+  if (!normalizado || estado.urls.has(normalizado)) return;
+  estado.urls.add(normalizado);
+  estado.candidatos.push(candidato(normalizado, origem, camada, confianca));
+}
+
+function coletarDeValor(valor, origem, camada, confianca, estado, profundidade = 0) {
+  if (valor == null || profundidade > MAX_PROFUNDIDADE || limiteCandidatosAtingido(estado)) return;
 
   if (typeof valor === "string") {
-    candidatos.push(candidato(valor, origem, camada, confianca));
+    adicionarCandidatoImagem(valor, origem, camada, confianca, estado);
     return;
   }
 
   if (Array.isArray(valor)) {
-    valor.forEach((item, index) => {
-      coletarDeValor(item, `${origem}[${index}]`, camada, confianca, candidatos, visitados, profundidade + 1);
-    });
+    for (let index = 0; index < valor.length && !limiteCandidatosAtingido(estado); index += 1) {
+      coletarDeValor(valor[index], `${origem}[${index}]`, camada, confianca, estado, profundidade + 1);
+    }
     return;
   }
 
   if (typeof valor !== "object") return;
-  if (visitados.has(valor)) return;
-  visitados.add(valor);
+  if (estado.visitados.has(valor)) return;
+  estado.visitados.add(valor);
 
   for (const alias of ALIASES_OBJETO) {
+    if (limiteCandidatosAtingido(estado)) break;
     if (Object.prototype.hasOwnProperty.call(valor, alias)) {
-      coletarDeValor(valor[alias], `${origem}.${alias}`, camada, confianca, candidatos, visitados, profundidade + 1);
+      coletarDeValor(valor[alias], `${origem}.${alias}`, camada, confianca, estado, profundidade + 1);
     }
   }
 
-  if (Object.prototype.hasOwnProperty.call(valor, "string")) {
-    coletarDeValor(valor.string, `${origem}.string`, camada, confianca, candidatos, visitados, profundidade + 1);
+  if (!limiteCandidatosAtingido(estado) && Object.prototype.hasOwnProperty.call(valor, "string")) {
+    coletarDeValor(valor.string, `${origem}.string`, camada, confianca, estado, profundidade + 1);
   }
 }
 
-function coletarDoContainerBruto(valor, origem, candidatos, visitados, profundidade = 0) {
-  if (valor == null || profundidade > MAX_PROFUNDIDADE) return;
+function coletarDoContainerBruto(valor, origem, estado, profundidade = 0) {
+  if (valor == null || profundidade > MAX_PROFUNDIDADE || limiteCandidatosAtingido(estado)) return;
   if (typeof valor === "string" || Array.isArray(valor)) {
-    coletarDeValor(valor, origem, "payload", 70, candidatos, visitados, profundidade);
+    coletarDeValor(valor, origem, "payload", 70, estado, profundidade);
     return;
   }
   if (typeof valor !== "object") return;
-  if (visitados.has(valor)) return;
-  visitados.add(valor);
+  if (estado.visitados.has(valor)) return;
+  estado.visitados.add(valor);
 
-  for (const alias of ["imagemUrl", "imagem", ...ALIASES_DIRETOS, ...ALIASES_OBJETO]) {
+  for (const alias of ["imagemUrl", "imagem", ...ALIASES_DIRETOS, ...ALIASES_THUMBNAIL, ...ALIASES_OBJETO]) {
+    if (limiteCandidatosAtingido(estado)) break;
     if (Object.prototype.hasOwnProperty.call(valor, alias)) {
-      coletarDeValor(valor[alias], `${origem}.${alias}`, "payload", 70, candidatos, visitados, profundidade + 1);
+      coletarDeValor(valor[alias], `${origem}.${alias}`, "payload", 70, estado, profundidade + 1);
     }
   }
 
   for (const estrutura of ESTRUTURAS_CONHECIDAS) {
+    if (limiteCandidatosAtingido(estado)) break;
     if (Object.prototype.hasOwnProperty.call(valor, estrutura)) {
-      coletarDeValor(valor[estrutura], `${origem}.${estrutura}`, "payload", 70, candidatos, visitados, profundidade + 1);
+      coletarDeValor(valor[estrutura], `${origem}.${estrutura}`, "payload", 70, estado, profundidade + 1);
     }
   }
 
-  if (valor.jsonLd && Object.prototype.hasOwnProperty.call(valor.jsonLd, "image")) {
-    coletarDeValor(valor.jsonLd.image, `${origem}.jsonLd.image`, "payload", 70, candidatos, visitados, profundidade + 1);
+  if (!limiteCandidatosAtingido(estado) && valor.jsonLd && Object.prototype.hasOwnProperty.call(valor.jsonLd, "image")) {
+    coletarDeValor(valor.jsonLd.image, `${origem}.jsonLd.image`, "payload", 70, estado, profundidade + 1);
   }
 
   for (const container of CONTAINERS_BRUTOS) {
+    if (limiteCandidatosAtingido(estado)) break;
     if (Object.prototype.hasOwnProperty.call(valor, container)) {
-      coletarDoContainerBruto(valor[container], `${origem}.${container}`, candidatos, visitados, profundidade + 1);
+      coletarDoContainerBruto(valor[container], `${origem}.${container}`, estado, profundidade + 1);
     }
   }
 }
 
-function coletarCamposImagemConhecidos(valor, origem, candidatos, visitados, profundidade = 0) {
-  if (valor == null || profundidade > MAX_PROFUNDIDADE) return;
+function coletarCamposImagemConhecidos(valor, origem, estado, profundidade = 0) {
+  if (valor == null || profundidade > MAX_PROFUNDIDADE || limiteCandidatosAtingido(estado)) return;
   if (typeof valor === "string" || Array.isArray(valor)) {
-    coletarDeValor(valor, origem, "payload", 70, candidatos, visitados, profundidade);
+    coletarDeValor(valor, origem, "payload", 70, estado, profundidade);
     return;
   }
   if (typeof valor !== "object") return;
-  if (visitados.has(valor)) return;
-  visitados.add(valor);
+  if (estado.visitados.has(valor)) return;
+  estado.visitados.add(valor);
 
-  for (const alias of ["imagemUrl", "imagem", ...ALIASES_DIRETOS]) {
+  for (const alias of ["imagemUrl", "imagem", ...ALIASES_DIRETOS, ...ALIASES_THUMBNAIL]) {
+    if (limiteCandidatosAtingido(estado)) break;
     if (Object.prototype.hasOwnProperty.call(valor, alias)) {
-      coletarDeValor(valor[alias], `${origem}.${alias}`, "payload", 70, candidatos, visitados, profundidade + 1);
+      coletarDeValor(valor[alias], `${origem}.${alias}`, "payload", 70, estado, profundidade + 1);
     }
   }
 
   for (const estrutura of ESTRUTURAS_CONHECIDAS) {
+    if (limiteCandidatosAtingido(estado)) break;
     if (Object.prototype.hasOwnProperty.call(valor, estrutura)) {
-      coletarDeValor(valor[estrutura], `${origem}.${estrutura}`, "payload", 70, candidatos, visitados, profundidade + 1);
+      coletarDeValor(valor[estrutura], `${origem}.${estrutura}`, "payload", 70, estado, profundidade + 1);
     }
   }
 
-  if (valor.jsonLd && Object.prototype.hasOwnProperty.call(valor.jsonLd, "image")) {
-    coletarDeValor(valor.jsonLd.image, `${origem}.jsonLd.image`, "payload", 70, candidatos, visitados, profundidade + 1);
+  if (!limiteCandidatosAtingido(estado) && valor.jsonLd && Object.prototype.hasOwnProperty.call(valor.jsonLd, "image")) {
+    coletarDeValor(valor.jsonLd.image, `${origem}.jsonLd.image`, "payload", 70, estado, profundidade + 1);
   }
 }
 
-function coletarDoContextoConhecido(valor, origem, candidatos, visitados, profundidade = 0) {
-  if (valor == null || profundidade > MAX_PROFUNDIDADE) return;
+function coletarDoContextoConhecido(valor, origem, estado, profundidade = 0) {
+  if (valor == null || profundidade > MAX_PROFUNDIDADE || limiteCandidatosAtingido(estado)) return;
   if (typeof valor !== "object") return;
-  if (visitados.has(valor)) return;
-  visitados.add(valor);
+  if (estado.visitados.has(valor)) return;
+  estado.visitados.add(valor);
 
-  coletarCamposImagemConhecidos(valor, origem, candidatos, visitados, profundidade);
+  coletarCamposImagemConhecidos(valor, origem, estado, profundidade);
 
-  if (valor.metadata && typeof valor.metadata === "object") {
-    coletarCamposImagemConhecidos(valor.metadata, `${origem}.metadata`, candidatos, visitados, profundidade + 1);
+  if (!limiteCandidatosAtingido(estado) && valor.metadata && typeof valor.metadata === "object") {
+    coletarCamposImagemConhecidos(valor.metadata, `${origem}.metadata`, estado, profundidade + 1);
     if (valor.metadata.produto && typeof valor.metadata.produto === "object") {
-      coletarCamposImagemConhecidos(valor.metadata.produto, `${origem}.metadata.produto`, candidatos, visitados, profundidade + 2);
+      coletarCamposImagemConhecidos(valor.metadata.produto, `${origem}.metadata.produto`, estado, profundidade + 2);
     }
-    if (valor.metadata.importacao && typeof valor.metadata.importacao === "object") {
-      coletarCamposImagemConhecidos(valor.metadata.importacao, `${origem}.metadata.importacao`, candidatos, visitados, profundidade + 2);
+    if (!limiteCandidatosAtingido(estado) && valor.metadata.importacao && typeof valor.metadata.importacao === "object") {
+      coletarCamposImagemConhecidos(valor.metadata.importacao, `${origem}.metadata.importacao`, estado, profundidade + 2);
     }
   }
 
   for (const container of ["metadataEvento", "evento_metadata", "job_metadata", "link_metadata"]) {
+    if (limiteCandidatosAtingido(estado)) break;
     if (valor[container] && typeof valor[container] === "object") {
-      coletarCamposImagemConhecidos(valor[container], `${origem}.${container}`, candidatos, visitados, profundidade + 1);
+      coletarCamposImagemConhecidos(valor[container], `${origem}.${container}`, estado, profundidade + 1);
     }
   }
 }
 
 
 function coletarCandidatos(oferta, contexto = {}) {
-  const candidatos = [];
-  const visitados = new WeakSet();
+  const estado = {
+    candidatos: [],
+    visitados: new WeakSet(),
+    urls: new Set(),
+  };
 
   if (Object.prototype.hasOwnProperty.call(oferta, "imagemUrl")) {
-    coletarDeValor(oferta.imagemUrl, "imagemUrl", "oficial", 100, candidatos, visitados);
+    coletarDeValor(oferta.imagemUrl, "imagemUrl", "oficial", 100, estado);
   }
-  if (Object.prototype.hasOwnProperty.call(oferta, "imagem")) {
-    coletarDeValor(oferta.imagem, "imagem", "oficial", 100, candidatos, visitados);
+  if (!limiteCandidatosAtingido(estado) && Object.prototype.hasOwnProperty.call(oferta, "imagem")) {
+    coletarDeValor(oferta.imagem, "imagem", "oficial", 100, estado);
   }
 
   for (const alias of ALIASES_DIRETOS) {
+    if (limiteCandidatosAtingido(estado)) break;
     if (Object.prototype.hasOwnProperty.call(oferta, alias)) {
-      coletarDeValor(oferta[alias], alias, "alias", 90, candidatos, visitados);
+      coletarDeValor(oferta[alias], alias, "alias", 90, estado);
+    }
+  }
+
+  for (const alias of ALIASES_THUMBNAIL) {
+    if (limiteCandidatosAtingido(estado)) break;
+    if (Object.prototype.hasOwnProperty.call(oferta, alias)) {
+      coletarDeValor(oferta[alias], alias, "alias", 90, estado);
     }
   }
 
   for (const estrutura of ESTRUTURAS_CONHECIDAS) {
+    if (limiteCandidatosAtingido(estado)) break;
     if (Object.prototype.hasOwnProperty.call(oferta, estrutura)) {
-      coletarDeValor(oferta[estrutura], estrutura, "estrutura", 80, candidatos, visitados);
+      coletarDeValor(oferta[estrutura], estrutura, "estrutura", 80, estado);
     }
   }
 
-  if (oferta.jsonLd && Object.prototype.hasOwnProperty.call(oferta.jsonLd, "image")) {
-    coletarDeValor(oferta.jsonLd.image, "jsonLd.image", "estrutura", 80, candidatos, visitados);
+  if (!limiteCandidatosAtingido(estado) && oferta.jsonLd && Object.prototype.hasOwnProperty.call(oferta.jsonLd, "image")) {
+    coletarDeValor(oferta.jsonLd.image, "jsonLd.image", "estrutura", 80, estado);
   }
 
   for (const container of CONTAINERS_BRUTOS) {
+    if (limiteCandidatosAtingido(estado)) break;
     if (Object.prototype.hasOwnProperty.call(oferta, container)) {
-      coletarDoContainerBruto(oferta[container], container, candidatos, visitados);
+      coletarDoContainerBruto(oferta[container], container, estado);
     }
   }
 
@@ -274,10 +315,44 @@ function coletarCandidatos(oferta, contexto = {}) {
   ];
 
   for (const [origem, valor] of fontesContexto) {
-    if (valor) coletarDoContextoConhecido(valor, origem, candidatos, visitados);
+    if (limiteCandidatosAtingido(estado)) break;
+    if (valor) coletarDoContextoConhecido(valor, origem, estado);
   }
 
-  return candidatos;
+  return estado.candidatos;
+}
+
+function coletarCandidatosImagemUniversal(oferta = {}, contexto = {}) {
+  const candidatos = coletarCandidatos(
+    oferta && typeof oferta === "object" ? oferta : {},
+    contexto && typeof contexto === "object" ? contexto : {}
+  );
+  return candidatos
+    .slice(0, MAX_CANDIDATOS_IMAGEM)
+    .map((item) => item.valor);
+}
+
+function preservarCandidatosImagemUniversal(ofertaEntrada = {}, contexto = {}) {
+  const oferta = ofertaEntrada && typeof ofertaEntrada === "object" ? ofertaEntrada : {};
+  const metadata = oferta.metadata && typeof oferta.metadata === "object" && !Array.isArray(oferta.metadata)
+    ? oferta.metadata
+    : {};
+  const produto = metadata.produto && typeof metadata.produto === "object" && !Array.isArray(metadata.produto)
+    ? metadata.produto
+    : {};
+  const imagemCandidatos = coletarCandidatosImagemUniversal(oferta, contexto)
+    .slice(0, MAX_CANDIDATOS_IMAGEM);
+
+  return {
+    ...oferta,
+    metadata: {
+      ...metadata,
+      produto: {
+        ...produto,
+        imagemCandidatos,
+      },
+    },
+  };
 }
 
 function statusParaCamada(camada) {
@@ -293,7 +368,7 @@ function resolverImagemUniversal(ofertaEntrada = {}, contexto = {}) {
   if (oferta.imagemStatus && imagemUrlValidaUniversal(oferta.imagemUrl).ok) {
     const validacao = imagemUrlValidaUniversal(oferta.imagemUrl);
     return {
-      ...oferta,
+      ...preservarCandidatosImagemUniversal(oferta, contexto),
       imagem: validacao.url,
       imagemUrl: validacao.url,
       imagemOrigem: oferta.imagemOrigem || "imagemUrl",
@@ -305,6 +380,7 @@ function resolverImagemUniversal(ofertaEntrada = {}, contexto = {}) {
 
   const tentativas = [];
   const candidatos = coletarCandidatos(oferta, contexto);
+  const ofertaComCandidatos = preservarCandidatosImagemUniversal(oferta, contexto);
   const urlsAvaliadas = new Set();
 
   for (const item of candidatos) {
@@ -320,7 +396,7 @@ function resolverImagemUniversal(ofertaEntrada = {}, contexto = {}) {
 
     registrarTentativa(tentativas, item.origem, "selecionada", "", item.confianca);
     return {
-      ...oferta,
+      ...ofertaComCandidatos,
       imagem: validacao.url,
       imagemUrl: validacao.url,
       imagemStatus: statusParaCamada(item.camada),
@@ -332,7 +408,7 @@ function resolverImagemUniversal(ofertaEntrada = {}, contexto = {}) {
   }
 
   return {
-    ...oferta,
+    ...ofertaComCandidatos,
     imagem: "",
     imagemUrl: "",
     imagemStatus: "nao_resolvida",
@@ -344,6 +420,9 @@ function resolverImagemUniversal(ofertaEntrada = {}, contexto = {}) {
 }
 
 module.exports = {
+  MAX_CANDIDATOS_IMAGEM,
   resolverImagemUniversal,
   imagemUrlValidaUniversal,
+  coletarCandidatosImagemUniversal,
+  preservarCandidatosImagemUniversal,
 };

@@ -2,6 +2,9 @@
 const { extrairProdutosBuscaML } = require("./parser");
 const { avaliarLimiteFilaHotfix } = require("../../utils/performance-hotfix");
 const filaOfertas = require("../../utils/fila-ofertas");
+const {
+  preservarCandidatosImagemUniversal
+} = require("../../modules/imagens/resolver-imagem-universal");
 
 let obterCuponsMLCliente = async () => [];
 let escolherCupomParaOfertaML = () => null;
@@ -422,7 +425,7 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
                 termo
               );
 
-            let novaOferta = {
+            let novaOferta = preservarCandidatosImagemUniversal({
               id: `ml_${Date.now()}_${Math.random().toString(36).slice(2)}`,
               nome: produto.titulo,
               titulo: produto.titulo,
@@ -437,12 +440,29 @@ async function farejarMercadoLivre(clienteId = "admin", deps = {}) {
               linkAfiliado: produto.linkAfiliado,
               linkFinal: produto.linkAfiliado,
               imagem: produto.imagem || "",
+              imagemUrl: produto.imagemUrl || "",
+              image: produto.image || "",
+              imageUrl: produto.imageUrl || "",
+              thumbnail: produto.thumbnail || "",
+              thumbnailUrl: produto.thumbnailUrl || "",
+              secure_thumbnail: produto.secure_thumbnail || "",
+              picture_url: produto.picture_url || "",
+              pictures: produto.pictures,
+              images: produto.images,
+              imagens: produto.imagens,
+              fotos: produto.fotos,
+              galeria: produto.galeria,
+              product_main_image_url: produto.product_main_image_url || "",
+              product_small_image_urls: produto.product_small_image_urls,
+              metadata: produto.metadata && typeof produto.metadata === "object"
+                ? produto.metadata
+                : {},
               marketplace: "mercadolivre",
               categoria: categoriaProduto,
               sessaoId: "sessao1",
               status: "pendente",
               clienteId
-            };
+            });
 
             novaOferta = prepararOfertaGlobal(novaOferta);
 
@@ -598,4 +618,3 @@ console.log("✅ ML VAI PRA FILA", {
 module.exports = {
   farejarMercadoLivre
 };
-

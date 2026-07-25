@@ -1,4 +1,8 @@
 const { normalizarNumeroMoeda } = require("../../utils/moeda");
+const {
+  preservarCandidatosImagemUniversal
+} = require("../imagens/resolver-imagem-universal");
+
 function texto(valor = "") {
   return String(valor || "").trim();
 }
@@ -39,8 +43,9 @@ function primeiroValor(...valores) {
 }
 
 function normalizarOfertaUniversal(oferta = {}, contexto = {}) {
-  const produtoMetadata = oferta?.metadata?.produto && typeof oferta.metadata.produto === "object"
-    ? oferta.metadata.produto
+  const ofertaComCandidatos = preservarCandidatosImagemUniversal(oferta);
+  const produtoMetadata = ofertaComCandidatos?.metadata?.produto && typeof ofertaComCandidatos.metadata.produto === "object"
+    ? ofertaComCandidatos.metadata.produto
     : {};
   const marketplace = normalizarMarketplace(primeiroValor(oferta.marketplace, oferta.mercado, contexto.marketplace));
   const precoAtual = numero(primeiroValor(oferta.precoAtual, oferta.preco, oferta.valor));
@@ -75,6 +80,7 @@ function normalizarOfertaUniversal(oferta = {}, contexto = {}) {
     cashback: texto(oferta.cashback),
     parcelamento: texto(oferta.parcelamento),
     origem: texto(primeiroValor(oferta.origem, contexto.origem)),
+    metadata: ofertaComCandidatos.metadata,
     valorEfetivoEntrada: {
       preco: precoAtual,
       precoOriginal,

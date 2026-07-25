@@ -1,3 +1,7 @@
+const {
+  preservarCandidatosImagemUniversal
+} = require("../../modules/imagens/resolver-imagem-universal");
+
 function gerarIdManual(prefixo = "manual") {
   return `${prefixo}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
@@ -6,6 +10,34 @@ function agoraBR() {
   return new Date().toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo"
   });
+}
+
+function camposImagemPermitidosManual(body = {}) {
+  return {
+    imagem: body.imagem || "",
+    imagemUrl: body.imagemUrl || "",
+    image: body.image || "",
+    imageUrl: body.imageUrl || "",
+    image_url: body.image_url || "",
+    thumbnail: body.thumbnail || "",
+    thumbnailUrl: body.thumbnailUrl || "",
+    secure_thumbnail: body.secure_thumbnail || "",
+    foto: body.foto || "",
+    fotoUrl: body.fotoUrl || "",
+    picture_url: body.picture_url || "",
+    pictures: body.pictures,
+    images: body.images,
+    imagens: body.imagens,
+    fotos: body.fotos,
+    product_main_image_url: body.product_main_image_url || "",
+    product_small_image_urls: body.product_small_image_urls,
+    landingImage: body.landingImage || "",
+    ogImage: body.ogImage || "",
+    twitterImage: body.twitterImage || "",
+    imagemRadar: body.imagemRadar || "",
+    urlImagem: body.urlImagem || "",
+    galeria: body.galeria,
+  };
 }
 
 function normalizarOfertaManual(body = {}, deps = {}) {
@@ -17,6 +49,8 @@ function normalizarOfertaManual(body = {}, deps = {}) {
   const titulo = body.titulo || body.nome || "Oferta";
   const marketplace = body.marketplace || "";
   const agora = agoraBR();
+  const camposImagem = camposImagemPermitidosManual(body);
+  const imagemComCandidatos = preservarCandidatosImagemUniversal(camposImagem);
 
   const categoriaDetectada =
     typeof classificarCategoriaOferta === "function"
@@ -57,7 +91,8 @@ function normalizarOfertaManual(body = {}, deps = {}) {
     linkOriginal: body.linkOriginal || body.link || body.linkAfiliado || "",
     linkAfiliado: body.linkAfiliado || body.link || body.linkOriginal || "",
 
-    imagem: body.imagem || "",
+    ...camposImagem,
+    metadata: imagemComCandidatos.metadata,
 
     manual: true,
 

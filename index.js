@@ -5,6 +5,10 @@ const axios = require("axios");
 const csv = require("csv-parser");
 const zlib = require("zlib");
 const { normalizarPrecoTextoBR } = require("./utils/moeda");
+const {
+  preservarCandidatosImagemUniversal,
+  resolverImagemUniversal
+} = require("./modules/imagens/resolver-imagem-universal");
 
 const {
   initEngineDatabase,
@@ -10699,14 +10703,9 @@ function detectarMarketplaceRadarLink(url = "") {
 }
 
 function imagemOfertaRadar(oferta = {}) {
-  return String(
-    oferta.imagem ||
-    oferta.image ||
-    oferta.foto ||
-    oferta.thumbnail ||
-    oferta.imageUrl ||
-    ""
-  ).trim();
+  return String(resolverImagemUniversal(oferta, {
+    origem: "radar_preparacao"
+  }).imagem || "").trim();
 }
 
 function logRadarMlImagemDebug({
@@ -13526,7 +13525,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
       cupomImportado: importacao.oferta?.cupom || "",
       cupomMensagem: beneficiosLink.cupom || ""
     });
-    const ofertaRadar = aplicarIdentidadeCanonicaRadar(prepararOfertaGlobal({
+    const ofertaRadar = aplicarIdentidadeCanonicaRadar(prepararOfertaGlobal(preservarCandidatosImagemUniversal({
       ...importacao.oferta,
       cupom: importacao.oferta?.cupom || beneficiosLink.cupom || "",
       avisoCupom: importacao.oferta?.avisoCupom || beneficiosLink.avisoCupom || "",
@@ -13564,7 +13563,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
           comparacao: comparacaoRadarLocal
         }
       }
-    }));
+    })));
     const resolucaoCaptura = resolverClienteMensageiroPorSessao(sessaoIdTexto);
     console.log("[RADAR-OFERTA-BASE-CRIADA]", JSON.stringify({
       marketplace: ofertaRadar.marketplace || importacao.resolucao?.marketplaceReal || "",
@@ -14304,7 +14303,7 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
     timeZone: "America/Sao_Paulo"
   });
 
-  const ofertaCliente = {
+  const ofertaCliente = preservarCandidatosImagemUniversal({
     ...ofertaPreparada,
     clienteId,
     origem: "radar",
@@ -14369,7 +14368,7 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
     emFilaEm: new Date().toISOString(),
     dataEntradaFila: agoraBR,
     criadoEm: ofertaPreparada.criadoEm || agoraBR
-  };
+  });
 
   validarCupomMonetarioOferta(ofertaCliente);
   aplicarPrioridadeEnvioOferta(ofertaCliente);

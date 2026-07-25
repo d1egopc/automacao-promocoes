@@ -5,7 +5,11 @@ const path = require("path");
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-resolver-img-"));
 
-const { resolverImagemUniversal, imagemUrlValidaUniversal } = require("../modules/imagens/resolver-imagem-universal");
+const {
+  resolverImagemUniversal,
+  imagemUrlValidaUniversal,
+  coletarCandidatosImagemUniversal
+} = require("../modules/imagens/resolver-imagem-universal");
 const { resolverImagemFilaEngine } = require("../modules/engine/distributor/distributor.service");
 const { adicionarOfertaFila } = require("../utils/fila-ofertas");
 const { writeClienteJson } = require("../utils/storage");
@@ -74,6 +78,22 @@ function semDatas(resultado) {
   assert.strictEqual(saida.imagemStatus, "resolvida_payload_bruto");
   assert.strictEqual(saida.imagemOrigem, "metadata.produto.imageUrl");
   assert.strictEqual(saida.imagemConfianca, 70);
+}
+
+{
+  const saida = resolverImagemUniversal({
+    metadata: {
+      produto: {
+        imagemCandidatos: [url("contrato-canonico"), url("contrato-secundario")]
+      }
+    }
+  });
+  assert.strictEqual(saida.imagem, url("contrato-canonico"));
+  assert.strictEqual(saida.imagemOrigem, "metadata.produto.imagemCandidatos[0]");
+  assert.deepStrictEqual(coletarCandidatosImagemUniversal(saida), [
+    url("contrato-canonico"),
+    url("contrato-secundario")
+  ]);
 }
 
 {
