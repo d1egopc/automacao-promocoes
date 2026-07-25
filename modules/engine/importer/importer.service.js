@@ -20,6 +20,11 @@ const {
   detectarIdentidadeProdutoUniversal
 } = require("../../inteligencia-universal");
 const { resolverImagemUniversal } = require("../../imagens/resolver-imagem-universal");
+const {
+  compararRadarMirrorComImportador,
+  mergeRadarMirrorMetadata,
+  resumirRadarMirrorLog
+} = require("../../radar/radar-mirror");
 const { validarCoerenciaPreco } = require("../../inteligencia-universal/preco-coerencia.service");
 const {
   logEngineImporterErro,
@@ -987,8 +992,14 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     }));
   }
 
+  const metadataEvento = objetoSeguro(evento.metadata || {});
   const metadataBase = objetoSeguro(oferta.metadata || ofertaEntrada.metadata || {});
-  const metadataFinal = {
+  const radarMirrorBase = metadataBase.radarMirror || metadataEvento.radarMirror || null;
+  const radarMirrorComparado = radarMirrorBase
+    ? compararRadarMirrorComImportador(radarMirrorBase, oferta)
+    : null;
+  const metadataFinal = mergeRadarMirrorMetadata({
+    ...metadataEvento,
     ...metadataBase,
     ...objetoSeguro(sombraV2.metadata || {}),
     imagemOrigem: imagemOrigemFinal,
@@ -1006,7 +1017,16 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       linkResolvidoImagem: imagemCanonica.linkResolvido || oferta.linkExpandido || "",
       statusHttpImagem: imagemCanonica.statusHttp ?? oferta.statusHttp ?? ofertaEntrada.statusHttp ?? null
     }
-  };
+  }, radarMirrorComparado);
+  if (radarMirrorComparado) {
+    console.log("[RADAR-MIRROR-PRESERVADO]", JSON.stringify({
+      ...resumirRadarMirrorLog(radarMirrorComparado, {
+        clienteId: job.cliente_id || job.clienteId || "",
+        marketplace: oferta.marketplace || ""
+      }),
+      etapa: "engine_ofertas"
+    }));
+  }
   const inteligenciaV2 = objetoSeguro(metadataFinal.inteligenciaUniversalV2);
   const retidaV2 = inteligenciaV2.status === "retida" || sombraV2.ok === false;
   const statusPersistencia = retidaV2 ? "retida_v2" : "importada";

@@ -364,6 +364,7 @@ function montarItemFilaEngine(oferta = {}) {
     beneficioTexto: beneficioExtra,
     origem: "engine",
     origemDetalhe: "Engine V2",
+    metadata: oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {},
     status: "pendente",
     statusDetalhe: "Aguardando envio",
     destinosEnviados: [],
@@ -543,6 +544,14 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
   }
 
   const itemFila = montarItemFilaEngine(oferta);
+  if (itemFila.metadata?.radarMirror) {
+    console.log("[RADAR-MIRROR-PRESERVADO]", JSON.stringify({
+      clienteId,
+      marketplace: itemFila.marketplace || "",
+      ofertaId: oferta.id || "",
+      etapa: "fila"
+    }));
+  }
   logImagemFilaEngine(oferta, {
     imagem: itemFila.imagem,
     origem: itemFila.imagemOrigem,

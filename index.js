@@ -188,6 +188,12 @@ const {
   gerarComparacaoPassivaRadarLocal
 } = require("./modules/radar/extrator-local");
 const {
+  criarRadarMirror,
+  compararRadarMirrorComImportador,
+  mergeRadarMirrorMetadata,
+  resumirRadarMirrorLog
+} = require("./modules/radar/radar-mirror");
+const {
   aplicarLimiteLista,
   avaliarLimiteFilaHotfix,
   finalizarRunnerHotfix,
@@ -13363,6 +13369,26 @@ logDebug("🧪 RADAR LINKS EXTRAIDOS", {
   texto: String(texto || "").slice(0, 250)
 });
 
+const beneficiosMensagem = analisarBeneficiosMensagemRadar(texto, links);
+const radarMirrorBase = criarRadarMirror({
+  origemTipo: origemTipoFinal,
+  clienteId: adminMasterId,
+  sessaoId: sessaoIdTexto,
+  grupoId: grupoIdTexto,
+  grupoNome: grupoNomeTexto,
+  capturadaEm: capturadaEm || new Date().toISOString(),
+  textoOriginal: texto,
+  links,
+  extracaoRadarLocal,
+  beneficiosMensagem,
+  raw,
+  marketplace: marketplaceDetectadoLinks
+});
+console.log("[RADAR-MIRROR-CRIADO]", JSON.stringify(resumirRadarMirrorLog(radarMirrorBase, {
+  clienteId: adminMasterId,
+  marketplace: marketplaceDetectadoLinks
+})));
+
 const temRedirectConhecidoRadar = links.some(linkRedirectPermitidoRadar);
 const registroEngineRadarPromise = registrarEventoBrutoEngineRadar({
   origem: "radar",
@@ -13372,7 +13398,8 @@ const registroEngineRadarPromise = registrarEventoBrutoEngineRadar({
   grupoNome: grupoNomeTexto,
   textoOriginal: texto,
   linksExtraidos: links,
-  capturadoEm: capturadaEm || new Date()
+  capturadoEm: capturadaEm || new Date(),
+  metadata: mergeRadarMirrorMetadata({}, radarMirrorBase)
 });
 const registroEngineRadar = temRedirectConhecidoRadar
   ? await registroEngineRadarPromise
@@ -13429,7 +13456,6 @@ const registroEngineRadar = temRedirectConhecidoRadar
     };
   }
 
-  const beneficiosMensagem = analisarBeneficiosMensagemRadar(texto, links);
   logOptimus("CUPOM", "Extracao da mensagem", {
     cupom: beneficiosMensagem.cupom || "",
     cupomOrigem: beneficiosMensagem.cupomOrigem || "",
@@ -13577,7 +13603,8 @@ const registroEngineRadar = temRedirectConhecidoRadar
       grupoId: grupoIdTexto,
       grupoNome: grupoNomeTexto,
       textoOriginal: texto,
-      raw
+      raw,
+      radarMirror: radarMirrorBase
     });
     let comparacaoRadarLocal = null;
     if (extracaoRadarLocal) {
@@ -13600,6 +13627,23 @@ const registroEngineRadar = temRedirectConhecidoRadar
       marketplaceInicialResumo
     );
     marketplacesResumoRadar.add(marketplaceImportacaoResumo);
+    const radarMirrorComparado = importacao.ok
+      ? compararRadarMirrorComImportador(radarMirrorBase, importacao.oferta || {})
+      : radarMirrorBase;
+    if (importacao.ok) {
+      const comparacaoImportadorRadar = radarMirrorComparado?.comparacaoImportador || {};
+      console.log("[RADAR-MIRROR-COMPARADO]", JSON.stringify({
+        clienteId: adminMasterId,
+        marketplace: marketplaceImportacaoResumo,
+        divergenciaPreco: comparacaoImportadorRadar.divergenciaPreco === true,
+        precoRadar: radarMirrorComparado?.preco?.atualCapturado ?? null,
+        precoImportador: comparacaoImportadorRadar.precoImportador ?? null,
+        divergenciaCupom: comparacaoImportadorRadar.divergenciaCupom === true,
+        cupomRadarPresente: Boolean(radarMirrorComparado?.cupom?.codigoCapturado),
+        cupomImportadorPresente: Boolean(comparacaoImportadorRadar.cupomImportador),
+        possuiDoisLinks: radarMirrorComparado?.evidencias?.possuiDoisLinks === true
+      }));
+    }
 
     if (!importacao.ok) {
       logOptimus("RADAR", "Importacao falhou", {
@@ -13715,14 +13759,14 @@ const registroEngineRadar = temRedirectConhecidoRadar
       mensagemOriginalRadar: texto.slice(0, 1000),
       capturadaEm: dataCaptura,
       dataEntradaRadar: dataCaptura,
-      metadata: {
+      metadata: mergeRadarMirrorMetadata({
         ...(importacao.oferta?.metadata && typeof importacao.oferta.metadata === "object" ? importacao.oferta.metadata : {}),
         comparacaoRadarLocal,
         radarHibrido: {
           ...(importacao.oferta?.metadata?.radarHibrido && typeof importacao.oferta.metadata.radarHibrido === "object" ? importacao.oferta.metadata.radarHibrido : {}),
           comparacao: comparacaoRadarLocal
         }
-      }
+      }, radarMirrorComparado)
     })));
     const resolucaoCaptura = resolverClienteMensageiroPorSessao(sessaoIdTexto);
     console.log("[RADAR-OFERTA-BASE-CRIADA]", JSON.stringify({
