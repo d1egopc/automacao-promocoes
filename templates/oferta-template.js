@@ -75,6 +75,24 @@ function listaTexto(...valores) {
   return resultado;
 }
 
+function listaObjetosLinks(links = []) {
+  const resultado = [];
+  const vistos = new Set();
+
+  for (const item of Array.isArray(links) ? links : []) {
+    if (!item || typeof item !== "object") continue;
+    const url = primeiroTexto(item.afiliado, item.resolvido, item.original, item.link, item.url);
+    if (!url || vistos.has(url)) continue;
+    vistos.add(url);
+    resultado.push({
+      tipo: textoLimpo(item.tipo || "produto"),
+      url
+    });
+  }
+
+  return resultado;
+}
+
 function cupomOfertaFallback(oferta = {}) {
   const cupons = listaTexto(
     Array.isArray(oferta.cupons) ? oferta.cupons : [],
@@ -137,6 +155,19 @@ function formatarOfertaUniversal(oferta = {}) {
   const parcelamento = textoLimpo(oferta.parcelamento);
   if (parcelamento) linhas.push("", `\u{1F4B3} ${parcelamento}`);
   if (precoUnitario) linhas.push("", `\u2139\uFE0F Pre\u00E7o unit\u00E1rio: ${precoUnitario}`);
+  for (const detalhe of listaTexto(
+    oferta.ofertaRelampago === true ? "Oferta Relampago" : "",
+    oferta.validade,
+    oferta.cashback,
+    Array.isArray(oferta.condicoes) ? oferta.condicoes : [],
+    Array.isArray(oferta.observacoes) ? oferta.observacoes : [],
+    Array.isArray(oferta.tamanhos) && oferta.tamanhos.length ? `Tamanhos: ${oferta.tamanhos.join(", ")}` : "",
+    Array.isArray(oferta.cores) && oferta.cores.length ? `Cores: ${oferta.cores.join(", ")}` : "",
+    Array.isArray(oferta.variantes) ? oferta.variantes : [],
+    oferta.voltagem ? `Voltagem: ${oferta.voltagem}` : ""
+  ).slice(0, 8)) {
+    linhas.push(`\u26A1 ${detalhe}`);
+  }
 
   const cupom = cupomOfertaFallback(oferta);
   const instrucaoCupom = primeiroTexto(oferta.instrucaoCupom, oferta.condicaoCupom, oferta.condicaoComercial, oferta.avisoCupom);
@@ -144,6 +175,8 @@ function formatarOfertaUniversal(oferta = {}) {
   if (cupom) {
     linhas.push("", `\u{1F39F}\uFE0F Cupom: ${cupom}`);
     if (instrucaoCupom && !instrucaoCupomRedundante(instrucaoCupom, cupom)) linhas.push(`\u26A1 ${instrucaoCupom}`);
+  } else if (instrucaoCupom) {
+    linhas.push("", `\u26A1 ${instrucaoCupom}`);
   } else if (temAvisoCupom(oferta.cupomTipo || oferta.tipoCupom, beneficioTexto)) {
     linhas.push("", "💡 Pode haver benefícios disponíveis na página.");
   }
@@ -152,6 +185,13 @@ function formatarOfertaUniversal(oferta = {}) {
 
   const linkAfiliado = textoLimpo(oferta.linkAfiliado || oferta.linkFinal || oferta.link);
   if (linkAfiliado) linhas.push("", "\u{1F517} Confira aqui:", linkAfiliado);
+  const linksAdicionais = listaObjetosLinks(oferta.linksComerciais)
+    .filter(item => item.url !== linkAfiliado)
+    .filter(item => ["resgate", "cupom", "landing", "adicional"].includes(item.tipo))
+    .slice(0, 3);
+  for (const item of linksAdicionais) {
+    linhas.push(`\u{1F517} ${item.tipo === "adicional" ? "Link adicional" : "Resgate/cupom"}: ${item.url}`);
+  }
 
   return linhas.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }

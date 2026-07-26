@@ -46,6 +46,15 @@ function beneficiosUniversais(oferta = {}, v2 = {}) {
   if (oferta.beneficioTexto) beneficios.push(oferta.beneficioTexto);
   if (oferta.avisoCupom) beneficios.push(oferta.avisoCupom);
   if (oferta.aviso) beneficios.push(oferta.aviso);
+  if (oferta.ofertaRelampago === true) beneficios.push("Oferta Relampago");
+  if (oferta.validade) beneficios.push(oferta.validade);
+  if (Array.isArray(oferta.condicoes)) beneficios.push(...oferta.condicoes);
+  if (Array.isArray(oferta.observacoes)) beneficios.push(...oferta.observacoes);
+  if (Array.isArray(oferta.variantes)) beneficios.push(...oferta.variantes);
+  if (Array.isArray(oferta.tamanhos) && oferta.tamanhos.length) beneficios.push(`Tamanhos: ${oferta.tamanhos.join(", ")}`);
+  if (Array.isArray(oferta.cores) && oferta.cores.length) beneficios.push(`Cores: ${oferta.cores.join(", ")}`);
+  if (oferta.voltagem) beneficios.push(`Voltagem: ${oferta.voltagem}`);
+  if (oferta.cashback) beneficios.push(oferta.cashback);
 
   logs.forEach(item => {
     if (typeof item === "string") beneficios.push(item);
@@ -128,6 +137,21 @@ function listaTextoUnica(valores = []) {
   return resultado;
 }
 
+function listaObjetosUnica(valores = []) {
+  const resultado = [];
+  const vistos = new Set();
+
+  for (const valor of Array.isArray(valores) ? valores : []) {
+    if (!valor || typeof valor !== "object") continue;
+    const chave = texto(valor.original || valor.resolvido || valor.afiliado || valor.link || valor.url || "");
+    if (!chave || vistos.has(chave)) continue;
+    vistos.add(chave);
+    resultado.push({ ...valor });
+  }
+
+  return resultado;
+}
+
 function cuponsOficiais(oferta = {}) {
   const multiplos = listaTextoUnica([
     ...(Array.isArray(oferta.cupons) ? oferta.cupons : []),
@@ -142,12 +166,26 @@ function cuponsOficiais(oferta = {}) {
   ]);
 }
 
+function ofertaRadarEspelhoComercial(oferta = {}) {
+  return oferta.origem === "radar" ||
+    oferta.radar === true ||
+    oferta.fonteComercial === "radar_espelho_comercial" ||
+    oferta.fonteComercial === "radar_mirror" ||
+    oferta.metadata?.fonteComercial === "radar_espelho_comercial" ||
+    oferta.metadata?.fonteComercial === "radar_mirror" ||
+    oferta.metadata?.radarEspelhoComercial?.origem === "radar_mirror" ||
+    Boolean(oferta.metadata?.radarEspelhoComercial?.contratoComercial);
+}
+
 function prepararDadosUniversaisTemplate(oferta = {}) {
   const v2 = oferta.inteligenciaUniversalV2 || {};
   const cupons = cuponsOficiais(oferta);
-  const cupom = cupons.length ? cupons.join(" ou ") : (oferta.cupom || oferta.cupomCodigo || oferta.codigoCupom || "");
+  const radarEspelho = ofertaRadarEspelhoComercial(oferta);
+  const cupom = radarEspelho && cupons.length
+    ? cupons.join(" ou ")
+    : (oferta.cupom || oferta.cupomCodigo || oferta.codigoCupom || "");
 
-  return {
+  const dados = {
     titulo: oferta.titulo || oferta.nome || "",
     marketplace: oferta.marketplace || "",
     precoAtual: oferta.precoAtual ?? oferta.preco,
@@ -156,25 +194,52 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
     descontoPercentual: oferta.descontoPercentual ?? oferta.desconto,
     categoria: v2.categoria || oferta.categoria || "",
     cupom,
-    cupomTexto: oferta.cupomTexto || cupom,
-    codigoCupom: cupom,
-    codigosCupom: cupons,
-    cupons,
-    instrucaoCupom: oferta.instrucaoCupom || "",
     cupomTipo: oferta.cupomTipo || oferta.tipoCupom || "",
     beneficios: beneficiosUniversais(oferta, v2),
     valorEfetivo: v2.valorEfetivo ?? oferta.valorEfetivo,
     valorEfetivoOrigem: v2.valorEfetivoOrigem || oferta.valorEfetivoOrigem || "",
     prioridade: v2.prioridade ?? oferta.prioridadeEnvio ?? oferta.prioridadeFila ?? oferta.prioridade,
     score: scoreUniversal(v2.score),
-    precoPix: oferta.precoPix || v2.precoPix || "",
-    condicaoPix: oferta.condicaoPix || oferta.precoPix || v2.precoPix || "",
-    parcelamento: oferta.parcelamento || "",
-    avaliacao: oferta.avaliacao || oferta.rating || oferta.nota || "",
-    rating: oferta.rating,
-    nota: oferta.nota,
     linkAfiliado: oferta.linkAfiliado || oferta.linkFinal || oferta.link || "",
     imagem: oferta.imagem || ""
+  };
+
+  if (!radarEspelho) return dados;
+
+  return {
+    ...dados,
+    cupomTexto: oferta.cupomTexto || cupom,
+    codigoCupom: cupom,
+    codigosCupom: cupons,
+    cupons,
+    instrucaoCupom: oferta.instrucaoCupom || "",
+    beneficioExtra: oferta.beneficioExtra || "",
+    condicoes: listaTextoUnica(oferta.condicoes),
+    observacoes: listaTextoUnica(oferta.observacoes),
+    precoPix: oferta.precoPix || v2.precoPix || "",
+    condicaoPix: oferta.condicaoPix || oferta.precoPix || v2.precoPix || "",
+    precoUnitario: oferta.precoUnitario || oferta.unitarioCapturado || "",
+    quantidade: oferta.quantidade || "",
+    parcelamento: oferta.parcelamento || "",
+    quantidadeParcelas: oferta.quantidadeParcelas || "",
+    valorParcela: oferta.valorParcela || "",
+    cashback: oferta.cashback || "",
+    frete: oferta.frete || oferta.freteTexto || "",
+    freteGratis: oferta.freteGratis === true,
+    variantes: listaTextoUnica(oferta.variantes),
+    tamanhos: listaTextoUnica(oferta.tamanhos),
+    cores: listaTextoUnica(oferta.cores),
+    voltagem: oferta.voltagem || "",
+    ofertaRelampago: oferta.ofertaRelampago === true,
+    validade: oferta.validade || "",
+    textoComercialCanonico: oferta.textoComercialCanonico || oferta.documentoComercialCanonico || "",
+    textoComercialOriginal: oferta.textoComercialOriginal || "",
+    linksComerciais: listaObjetosUnica(oferta.linksComerciais),
+    linksProduto: listaObjetosUnica(oferta.linksProduto),
+    linksResgate: listaObjetosUnica(oferta.linksResgate),
+    avaliacao: oferta.avaliacao || oferta.rating || oferta.nota || "",
+    rating: oferta.rating,
+    nota: oferta.nota
   };
 }
 
@@ -205,6 +270,10 @@ function prepararDadosPersonalizadosTemplate(oferta = {}) {
     textoResumo: oferta.textoResumo || "",
     mensagemResumo: oferta.mensagemResumo || "",
     parcelamento: oferta.parcelamento || "",
+    precoUnitario: oferta.precoUnitario || oferta.unitarioCapturado || "",
+    quantidade: oferta.quantidade || "",
+    quantidadeParcelas: oferta.quantidadeParcelas || "",
+    valorParcela: oferta.valorParcela || "",
     frete: oferta.frete || "",
     freteTexto: oferta.freteTexto || "",
     avisoFrete: oferta.avisoFrete || "",
@@ -223,6 +292,21 @@ function prepararDadosPersonalizadosTemplate(oferta = {}) {
     aviso: oferta.aviso || "",
     descontoPix: oferta.descontoPix || v2.descontoPix || "",
     precoPix: oferta.precoPix || v2.precoPix || "",
+    condicaoPix: oferta.condicaoPix || oferta.precoPix || v2.precoPix || "",
+    condicoes: listaTextoUnica(oferta.condicoes),
+    observacoes: listaTextoUnica(oferta.observacoes),
+    cashback: oferta.cashback || "",
+    variantes: listaTextoUnica(oferta.variantes),
+    tamanhos: listaTextoUnica(oferta.tamanhos),
+    cores: listaTextoUnica(oferta.cores),
+    voltagem: oferta.voltagem || "",
+    ofertaRelampago: oferta.ofertaRelampago === true,
+    validade: oferta.validade || "",
+    textoComercialCanonico: oferta.textoComercialCanonico || oferta.documentoComercialCanonico || "",
+    textoComercialOriginal: oferta.textoComercialOriginal || "",
+    linksComerciais: listaObjetosUnica(oferta.linksComerciais),
+    linksProduto: listaObjetosUnica(oferta.linksProduto),
+    linksResgate: listaObjetosUnica(oferta.linksResgate),
     beneficioExtraShopee: oferta.beneficioExtraShopee || ""
   };
 

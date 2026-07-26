@@ -82,6 +82,44 @@ function normalizarBeneficios(beneficios) {
     .slice(0, 3);
 }
 
+function listaTextoUnica(valores = []) {
+  const resultado = [];
+  const vistos = new Set();
+
+  for (const valor of Array.isArray(valores) ? valores : []) {
+    const item = normalizarTexto(valor);
+    if (!item || vistos.has(item)) continue;
+    vistos.add(item);
+    resultado.push(item);
+  }
+
+  return resultado;
+}
+
+function linksComerciaisUnicos(links = []) {
+  const resultado = [];
+  const vistos = new Set();
+
+  for (const link of Array.isArray(links) ? links : []) {
+    if (!link || typeof link !== "object") continue;
+    const afiliado = normalizarTexto(link.afiliado);
+    const resolvido = normalizarTexto(link.resolvido);
+    const original = normalizarTexto(link.original);
+    const url = afiliado || resolvido || original;
+    if (!url || vistos.has(url)) continue;
+    vistos.add(url);
+    resultado.push({
+      tipo: normalizarTexto(link.tipo || "produto"),
+      original,
+      resolvido,
+      afiliado,
+      status: normalizarTexto(link.status || "")
+    });
+  }
+
+  return resultado;
+}
+
 function marketplaceBonito(valor = "") {
   const texto = normalizarTexto(valor);
   if (!texto) return "";
@@ -191,7 +229,24 @@ function selecionarCamposUniversais(oferta = {}) {
     instrucaoCupom: normalizarTexto(oferta.instrucaoCupom),
     precoPix: normalizarTexto(oferta.precoPix || oferta.condicaoPix),
     condicaoPix: normalizarTexto(oferta.condicaoPix || oferta.precoPix),
+    precoUnitario: normalizarTexto(oferta.precoUnitario || oferta.unitarioCapturado),
     parcelamento: normalizarTexto(oferta.parcelamento),
+    quantidade: normalizarTexto(oferta.quantidade),
+    quantidadeParcelas: normalizarTexto(oferta.quantidadeParcelas),
+    valorParcela: oferta.valorParcela,
+    cashback: normalizarTexto(oferta.cashback),
+    frete: normalizarTexto(oferta.frete || oferta.freteTexto),
+    freteGratis: oferta.freteGratis === true,
+    condicoes: listaTextoUnica(oferta.condicoes),
+    observacoes: listaTextoUnica(oferta.observacoes),
+    variantes: listaTextoUnica(oferta.variantes),
+    tamanhos: listaTextoUnica(oferta.tamanhos),
+    cores: listaTextoUnica(oferta.cores),
+    voltagem: normalizarTexto(oferta.voltagem),
+    ofertaRelampago: oferta.ofertaRelampago === true,
+    validade: normalizarTexto(oferta.validade),
+    linksComerciais: linksComerciaisUnicos(oferta.linksComerciais),
+    linksResgate: linksComerciaisUnicos(oferta.linksResgate),
     avaliacao: normalizarTexto(oferta.avaliacao || oferta.rating || oferta.nota),
     beneficios: normalizarBeneficios(oferta.beneficios),
     score: oferta.score,
@@ -374,11 +429,39 @@ function gerarTemplateUniversal(oferta = {}) {
   let beneficioComercial = campos.beneficios.find(beneficio =>
     beneficioComercialValidoParaTemplate(beneficio, campos)
   );
-  beneficioComercial = montarInstrucaoComercial(
-    campos,
-    beneficioComercial,
-    ""
-  );
+  beneficioComercial = campos.instrucaoCupom
+    ? beneficioComercial
+    : montarInstrucaoComercial(
+        campos,
+        beneficioComercial,
+        ""
+      );
+  const detalhesComerciais = [
+    campos.precoUnitario ? `ℹ️ Preço unitário: *${campos.precoUnitario}*` : "",
+    campos.cashback ? `💰 ${campos.cashback}` : "",
+    campos.freteGratis ? "🚚 Frete gratis" : (campos.frete ? `🚚 ${campos.frete}` : ""),
+    campos.ofertaRelampago ? "⚡ Oferta Relampago" : "",
+    campos.validade ? `⏳ ${campos.validade}` : "",
+    ...campos.condicoes,
+    ...campos.observacoes,
+    ...(campos.tamanhos.length ? [`⚠️ Tamanhos: ${campos.tamanhos.join(", ")}`] : []),
+    ...(campos.cores.length ? [`🎨 Cores: ${campos.cores.join(", ")}`] : []),
+    ...(campos.variantes.length ? campos.variantes : []),
+    campos.voltagem ? `🔌 ${campos.voltagem}` : ""
+  ].map(normalizarTexto).filter(Boolean).slice(0, 8);
+  const linkPrincipal = normalizarTexto(campos.linkAfiliado);
+  const linksAdicionais = campos.linksComerciais
+    .filter(item => normalizarTexto(item.afiliado || item.resolvido || item.original) !== linkPrincipal)
+    .filter(item => ["resgate", "cupom", "landing", "adicional"].includes(normalizarComparacao(item.tipo)))
+    .map(item => {
+      const url = normalizarTexto(item.afiliado || item.resolvido || item.original);
+      const tipo = normalizarComparacao(item.tipo).includes("resgate") || normalizarComparacao(item.tipo).includes("cupom")
+        ? "Resgate/cupom"
+        : "Link adicional";
+      return url ? `🔗 ${tipo}: ${url}` : "";
+    })
+    .filter(Boolean)
+    .slice(0, 3);
 
   adicionarBloco(blocos, [`🔥 *${campos.titulo || "Oferta"}*`]);
   adicionarBloco(blocos, [
@@ -391,6 +474,7 @@ function gerarTemplateUniversal(oferta = {}) {
     campos.parcelamento ? `💳 Ou *${campos.parcelamento}*` : "",
     economia ? `💸 Economia: *${economia}${descontoPercentual != null && descontoPercentual > 0 ? ` (${descontoPercentual.toFixed(0)}%)` : ""}*` : ""
   ]);
+  adicionarBloco(blocos, detalhesComerciais);
   adicionarBloco(blocos, [
     campos.cupom ? `🎟️ Cupom: *${campos.cupom}*` : "",
     campos.instrucaoCupom && campos.instrucaoCupom !== campos.cupomTexto ? `⚡ ${campos.instrucaoCupom}` : ""
@@ -403,6 +487,7 @@ function gerarTemplateUniversal(oferta = {}) {
     "🔗 *Confira aqui:*",
     campos.linkAfiliado
   ]);
+  adicionarBloco(blocos, linksAdicionais);
   adicionarBloco(blocos, [
     beneficioComercial ? `⚡ ${beneficioComercial}` : "",
     "⚠️ Oferta sujeita à alteração de preço."

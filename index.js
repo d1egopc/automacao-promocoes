@@ -195,11 +195,16 @@ const {
   resumirRadarMirrorLog
 } = require("./modules/radar/radar-mirror");
 const {
-  resolverPrecedenciaComercialRadar,
   resumirPrecedenciaComercialLog,
   deveLogarDivergenciaComercial,
   emitirLogRadarPrecoSuspeito
 } = require("./modules/radar/comercial-precedencia");
+const {
+  aplicarAfiliadoLinkComercialRadar,
+  aplicarContratoComercialRadar,
+  motivoImportadorIgnoravelPeloEspelho,
+  montarOfertaRadarEspelhoComercial
+} = require("./modules/radar/espelho-comercial");
 const {
   aplicarLimiteLista,
   avaliarLimiteFilaHotfix,
@@ -10312,11 +10317,22 @@ function avisoCupomGenericoRadar(texto = "") {
   );
 }
 
+function origemComercialRadarMirror(valor = {}) {
+  if (!valor || typeof valor !== "object") return false;
+  return Boolean(
+    valor.radarMirror ||
+    valor.metadata?.radarMirror ||
+    valor.fonteComercial === "radar_mirror" ||
+    valor.fonteComercial === "radar_espelho_comercial" ||
+    valor.metadata?.fonteComercial === "radar_mirror" ||
+    valor.metadata?.fonteComercial === "radar_espelho_comercial" ||
+    valor.metadata?.radarEspelhoComercial?.origem === "radar_mirror" ||
+    valor.metadata?.precedenciaComercial?.fonteComercial === "radar_mirror"
+  );
+}
+
 function normalizarBeneficiosRadarOferta(oferta = {}) {
-  const fonteComercialRadarMirror =
-    oferta.fonteComercial === "radar_mirror" ||
-    oferta.metadata?.fonteComercial === "radar_mirror" ||
-    oferta.metadata?.precedenciaComercial?.fonteComercial === "radar_mirror";
+  const fonteComercialRadarMirror = origemComercialRadarMirror(oferta);
   const cupomRadar = normalizarCupomRadar(oferta);
   const avisoOriginal = textoRadarId(oferta.avisoCupom || "");
   const avisoUtil = avisoCupomGenericoRadar(avisoOriginal) ? "" : avisoOriginal;
@@ -10978,6 +10994,54 @@ function imagemOfertaRadar(oferta = {}) {
   }).imagem || "").trim();
 }
 
+async function converterLinksComerciaisRadarCliente(oferta = {}, clienteId = "admin", marketplace = "", linkPrincipal = "", linkAfiliadoPrincipal = "") {
+  let proxima = aplicarContratoComercialRadar(oferta);
+  const links = Array.isArray(proxima.linksComerciais) ? proxima.linksComerciais : [];
+  if (!links.length) return proxima;
+
+  for (const item of links) {
+    const tipo = textoRadarId(item.tipo || "produto");
+    const linkBase = textoRadarId(item.resolvido || item.original || "");
+    if (!linkBase) continue;
+
+    if (
+      linkBase === textoRadarId(linkPrincipal) ||
+      textoRadarId(item.original || "") === textoRadarId(linkPrincipal)
+    ) {
+      proxima = aplicarAfiliadoLinkComercialRadar(proxima, {
+        original: item.original || linkBase,
+        resolvido: item.resolvido || linkBase,
+        afiliado: linkAfiliadoPrincipal,
+        status: "convertido"
+      });
+      continue;
+    }
+
+    if (!["produto", "resgate", "cupom", "landing"].includes(tipo)) continue;
+
+    try {
+      const afiliado = await gerarLinkAfiliadoCliente(clienteId, marketplace, linkBase, proxima);
+      if (afiliado) {
+        proxima = aplicarAfiliadoLinkComercialRadar(proxima, {
+          original: item.original || linkBase,
+          resolvido: item.resolvido || linkBase,
+          afiliado,
+          status: "convertido"
+        });
+      }
+    } catch (erro) {
+      console.log("[RADAR-LINK-COMERCIAL-CONVERSAO-ERRO]", JSON.stringify({
+        clienteId,
+        marketplace,
+        tipo,
+        motivo: String(erro?.message || erro || "erro_desconhecido").slice(0, 160)
+      }));
+    }
+  }
+
+  return proxima;
+}
+
 function logRadarMlImagemDebug({
   clienteId = "admin",
   correlationId = "",
@@ -11501,6 +11565,11 @@ function aplicarTituloFallbackTextoRadarMl(oferta = {}, contexto = {}) {
   const link = contexto.linkOriginal || contexto.link || "";
   const tituloAtual = oferta.titulo || oferta.nome || "";
 
+  if (origemComercialRadarMirror(contexto) || origemComercialRadarMirror(oferta)) {
+    console.log("ml_titulo_fallback_texto_radar_bloqueado_espelho", { link });
+    return oferta;
+  }
+
   if (!tituloGenericoMercadoLivreRadar(tituloAtual)) return oferta;
 
   const tituloTexto = extrairTituloKabumFallbackRadar(
@@ -11543,6 +11612,11 @@ function aplicarPrecoFallbackTextoRadarMl(oferta = {}, contexto = {}) {
   const texto = contexto.textoOriginal || contexto.texto || contexto.mensagemOriginalRadar || "";
   const link = contexto.linkOriginal || contexto.link || "";
   const resultado = extrairPrecoFallbackTextoRadar(texto);
+
+  if (origemComercialRadarMirror(contexto) || origemComercialRadarMirror(oferta)) {
+    console.log("ml_preco_fallback_texto_radar_bloqueado_espelho", { link });
+    return oferta;
+  }
 
   if (!resultado.ok) {
     console.log("ml_preco_fallback_texto_radar_ambiguidade", {
@@ -11600,6 +11674,28 @@ function extrairTituloKabumFallbackRadar(texto = "") {
 
 function montarOfertaMercadoLivreRadarFallbackTexto(linkOriginal = "", contexto = {}) {
   const texto = contexto.textoOriginal || contexto.texto || contexto.mensagemOriginalRadar || "";
+  if (origemComercialRadarMirror(contexto)) {
+    return {
+      ok: true,
+      oferta: {
+        marketplace: "mercadolivre",
+        linkOriginal,
+        linkOriginalRadar: contexto.linkOriginalRadar || linkOriginal,
+        linkResolvido: contexto.linkResolvido || linkOriginal,
+        link: linkOriginal,
+        linkAfiliado: "",
+        linkFinal: "",
+        origem: "radar",
+        radar: true,
+        status: "rascunho",
+        tipoLinkRadar: "shortlink_meli_social",
+        fallbackMercadoLivreRadarTexto: true,
+        fallbackTecnicoRadarMirror: true,
+        motivoFallback: "meli_social_importador_falhou_espelho_comercial"
+      }
+    };
+  }
+
   const titulo = extrairTituloKabumFallbackRadar(texto);
   const precoExtraido = extrairPrecoFallbackTextoRadar(texto);
   const imagem = extrairImagemMensagemRadarRaw(contexto.raw || {});
@@ -11707,6 +11803,28 @@ function erroKabumHtml403(e = {}) {
 
 function montarOfertaKabumRadarFallback403(linkOriginal = "", contexto = {}) {
   const texto = contexto.textoOriginal || contexto.texto || contexto.mensagemOriginalRadar || "";
+  if (origemComercialRadarMirror(contexto)) {
+    return {
+      ok: true,
+      oferta: {
+        marketplace: "kabum",
+        marketplaceOriginalRadar: "kabum",
+        linkOriginal,
+        linkOriginalRadar: linkOriginal,
+        linkResolvido: linkOriginal,
+        link: linkOriginal,
+        linkAfiliado: "",
+        linkFinal: "",
+        origem: "radar",
+        radar: true,
+        status: "rascunho",
+        fallbackKabumRadar403: true,
+        fallbackTecnicoRadarMirror: true,
+        motivoFallback: "kabum_http_403_espelho_comercial"
+      }
+    };
+  }
+
   const titulo = extrairTituloKabumFallbackRadar(texto);
   const precoExtraido = extrairPrecoFallbackTextoRadar(texto);
   const imagem = extrairImagemMensagemRadarRaw(contexto.raw || {});
@@ -12715,10 +12833,12 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
     let produtoImportadoRadar = resultado.body || {};
 
     if (marketplaceDetectado === "mercadolivre") {
-      produtoImportadoRadar = aplicarTituloFallbackTextoRadarMl(produtoImportadoRadar, {
-        textoOriginal: contexto.textoOriginal || contexto.texto || "",
-        linkOriginal: linkOriginalLimpo
-      });
+      if (!motivoImportadorIgnoravelPeloEspelho("importacao_sem_titulo", contexto.radarMirror)) {
+        produtoImportadoRadar = aplicarTituloFallbackTextoRadarMl(produtoImportadoRadar, {
+          textoOriginal: contexto.textoOriginal || contexto.texto || "",
+          linkOriginal: linkOriginalLimpo
+        });
+      }
       const validacaoProdutoMl = validarProdutoMercadoLivreRadar({
         correlationId,
         linkOriginalRadar: resolucao.linkOriginalRadar || resolucao.urlCapturada || url,
@@ -12741,12 +12861,31 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
 
     let motivoIncompleta = motivoImportacaoRadarIncompleta(produtoImportadoRadar, marketplaceDetectado);
 
+    if (motivoIncompleta && motivoImportadorIgnoravelPeloEspelho(motivoIncompleta, contexto.radarMirror)) {
+      console.log("[RADAR-IMPORTADOR-INCOMPLETO-IGNORADO-PELO-ESPELHO]", JSON.stringify({
+        correlationId,
+        marketplace: marketplaceDetectado,
+        motivo: motivoIncompleta,
+        fonteComercial: "radar_espelho_comercial"
+      }));
+      motivoIncompleta = "";
+    }
+
     if (marketplaceDetectado === "mercadolivre" && motivoIncompleta === "importacao_sem_preco") {
       produtoImportadoRadar = aplicarPrecoFallbackTextoRadarMl(produtoImportadoRadar, {
         textoOriginal: contexto.textoOriginal || contexto.texto || "",
         linkOriginal: linkOriginalLimpo
       });
       motivoIncompleta = motivoImportacaoRadarIncompleta(produtoImportadoRadar, marketplaceDetectado);
+      if (motivoIncompleta && motivoImportadorIgnoravelPeloEspelho(motivoIncompleta, contexto.radarMirror)) {
+        console.log("[RADAR-IMPORTADOR-INCOMPLETO-IGNORADO-PELO-ESPELHO]", JSON.stringify({
+          correlationId,
+          marketplace: marketplaceDetectado,
+          motivo: motivoIncompleta,
+          fonteComercial: "radar_espelho_comercial"
+        }));
+        motivoIncompleta = "";
+      }
     }
 
     if (motivoIncompleta) {
@@ -13832,14 +13971,29 @@ const registroEngineRadar = temRedirectConhecidoRadar
         cupomImportadorPresente: Boolean(comparacaoImportadorRadar.cupomImportador),
         possuiDoisLinks: radarMirrorComparado?.evidencias?.possuiDoisLinks === true
       }));
-      resultadoPrecedenciaComercial = resolverPrecedenciaComercialRadar({
+      const resultadoEspelhoComercial = montarOfertaRadarEspelhoComercial({
         ofertaImportador: importacao.oferta || {},
         radarMirror: radarMirrorComparado,
         metadata: importacao.oferta?.metadata || {},
         clienteId: adminMasterId,
-        marketplace: marketplaceImportacaoResumo
+        marketplace: marketplaceImportacaoResumo,
+        resolucao: importacao.resolucao || {},
+        contexto: {
+          correlationId,
+          linkOriginal: importacao.resolucao?.linkOriginalLimpo || link,
+          linkCapturado: link
+        }
       });
-      ofertaImportadorRadar = resultadoPrecedenciaComercial?.oferta || importacao.oferta || {};
+      resultadoPrecedenciaComercial = resultadoEspelhoComercial?.resultadoPrecedencia || null;
+      ofertaImportadorRadar = resultadoEspelhoComercial?.oferta || {};
+      console.log("[RADAR-ESPELHO-COMERCIAL-OFICIAL]", JSON.stringify({
+        correlationId,
+        clienteId: adminMasterId,
+        marketplace: marketplaceImportacaoResumo,
+        fonteComercial: ofertaImportadorRadar.fonteComercial || "",
+        importadorUsadoComo: ofertaImportadorRadar.metadata?.radarEspelhoComercial?.importadorUsadoComo || "",
+        camposTecnicosImportador: ofertaImportadorRadar.metadata?.radarEspelhoComercial?.camposTecnicosImportador || []
+      }));
       console.log("[RADAR-COMERCIAL-RESOLVIDO]", JSON.stringify({
         ...resumirPrecedenciaComercialLog(resultadoPrecedenciaComercial),
         etapa: "radar_legado"
@@ -14528,6 +14682,7 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
     ...(ofertaBase || {}),
     ...origemMonitorada.origem
   });
+  ofertaPreparada = aplicarContratoComercialRadar(ofertaPreparada);
   ofertaPreparada = aplicarIdentidadeCanonicaRadar(ofertaPreparada);
   logProdutoCanonicoRadar(ofertaPreparada);
   const cupomRadar = normalizarBeneficiosRadarOferta(ofertaPreparada);
@@ -14543,6 +14698,7 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
   ofertaPreparada.beneficioExtra = cupomRadar.beneficioExtra;
   ofertaPreparada.cupomConfirmado = cupomRadar.cupomConfirmado;
   ofertaPreparada.possivelCupom = cupomRadar.possivelCupom;
+  ofertaPreparada = aplicarContratoComercialRadar(ofertaPreparada);
   ofertaPreparada.categoria = categoriaRadarReclassificada(ofertaPreparada);
   ofertaPreparada = aplicarFallbackCategoriaRadarMl(ofertaPreparada, clienteId);
 
@@ -14729,6 +14885,14 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
     linkOriginal,
     linkAfiliado: linkAfiliadoCliente
   });
+
+  ofertaPreparada = await converterLinksComerciaisRadarCliente(
+    ofertaPreparada,
+    clienteId,
+    marketplace,
+    linkOriginal,
+    linkAfiliadoCliente
+  );
 
   if (marketplace === "mercadolivre") {
     console.log("[RADAR-ML-AFILIADO-CORRELACAO]", JSON.stringify({

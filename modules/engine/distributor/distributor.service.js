@@ -319,6 +319,59 @@ function logImagemFilaEngine(oferta = {}, resolucao = {}) {
   console.log("[ENGINE-IMAGEM-AUSENTE]", JSON.stringify(base));
 }
 
+function copiarCamposComerciaisRadarFila(oferta = {}) {
+  const contrato = oferta.metadata?.radarEspelhoComercial?.contratoComercial &&
+    typeof oferta.metadata.radarEspelhoComercial.contratoComercial === "object"
+      ? oferta.metadata.radarEspelhoComercial.contratoComercial
+      : {};
+  const origem = { ...contrato, ...oferta };
+  const campos = {};
+
+  for (const campo of [
+    "textoComercialCanonico",
+    "documentoComercialCanonico",
+    "textoComercialOriginal",
+    "descricao",
+    "precoAnterior",
+    "precoPix",
+    "condicaoPix",
+    "precoUnitario",
+    "quantidade",
+    "parcelamento",
+    "quantidadeParcelas",
+    "valorParcela",
+    "codigoCupom",
+    "cupons",
+    "codigosCupom",
+    "instrucaoCupom",
+    "beneficioExtra",
+    "beneficios",
+    "condicoes",
+    "observacoes",
+    "cashback",
+    "frete",
+    "freteGratis",
+    "variantes",
+    "tamanhos",
+    "cores",
+    "voltagem",
+    "ofertaRelampago",
+    "validade",
+    "linksComerciais",
+    "linksProduto",
+    "linksResgate",
+    "produtoId"
+  ]) {
+    const valor = origem[campo];
+    if (valor === null || valor === undefined || valor === "") continue;
+    campos[campo] = Array.isArray(valor)
+      ? valor.map(item => item && typeof item === "object" ? { ...item } : item)
+      : (valor && typeof valor === "object" ? { ...valor } : valor);
+  }
+
+  return campos;
+}
+
 function montarItemFilaEngine(oferta = {}) {
   const linkAfiliado = normalizarTexto(oferta.link_afiliado || oferta.link_expandido || oferta.link_original || "");
   const linkOriginal = normalizarTexto(oferta.link_original || oferta.link_expandido || linkAfiliado || "");
@@ -328,6 +381,7 @@ function montarItemFilaEngine(oferta = {}) {
   const beneficioExtra = normalizarTexto(oferta.beneficio_extra || oferta.beneficioExtra || "");
   const avisoCupom = normalizarTexto(oferta.aviso_cupom || oferta.avisoCupom || "");
   const imagemResolvida = resolverImagemFilaEngine(oferta);
+  const camposComerciaisRadar = copiarCamposComerciaisRadarFila(oferta);
 
   return {
     id: `engine_${oferta.id}_${Date.now()}`,
@@ -341,6 +395,7 @@ function montarItemFilaEngine(oferta = {}) {
     preco: oferta.preco,
     precoAtual: oferta.preco,
     precoOriginal: oferta.preco_original,
+    ...camposComerciaisRadar,
     imagem: imagemResolvida.imagem,
     imagemUrl: imagemResolvida.imagem,
     imagemOrigem: imagemResolvida.origem,

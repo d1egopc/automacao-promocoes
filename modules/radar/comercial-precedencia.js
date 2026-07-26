@@ -32,7 +32,7 @@ function normalizarCupom(valor = "") {
 
 function normalizarCupons(valor = "") {
   const entradas = Array.isArray(valor) ? valor : [valor];
-  const bloqueados = new Set(["CUPOM", "CODIGO", "CODE", "APLICAR", "RESGATE", "DESCONTO", "OFERTA", "PROMOCAO", "GRATIS", "FRETE", "CARRINHO", "OU", "E", "OR"]);
+  const bloqueados = new Set(["CUPOM", "CODIGO", "CODE", "APLICAR", "RESGATE", "DESCONTO", "OFERTA", "PROMOCAO", "GRATIS", "FRETE", "CARRINHO", "ANUNCIO", "OU", "E", "OR"]);
   const resultado = [];
   const vistos = new Set();
 
@@ -194,18 +194,21 @@ function resolverPreco({ ofertaImportador = {}, radarMirror = {}, cupomRadarConf
 function resolverCupom({ ofertaImportador = {}, radarMirror = {} } = {}) {
   const cupomComercial = radarMirror?.comercial?.cupom || {};
   const cupomProvavel = cupomComercial.provavel === true;
-  const cuponsRadar = normalizarCupons([
+  const cuponsExplicitosRadar = normalizarCupons([
     ...(Array.isArray(radarMirror?.cupom?.codigosCapturados) ? radarMirror.cupom.codigosCapturados : []),
     ...(Array.isArray(cupomComercial?.codigos) ? cupomComercial.codigos : []),
     ...(Array.isArray(cupomComercial?.cupons) ? cupomComercial.cupons : []),
     radarMirror?.cupom?.codigoCapturado || "",
-    cupomComercial?.codigo || "",
+    cupomComercial?.codigo || ""
+  ]);
+  const cuponsTextoRadar = cuponsExplicitosRadar.length ? [] : normalizarCupons([
     cupomProvavel ? "" : (radarMirror?.cupom?.textoCapturado || ""),
     cupomProvavel ? "" : (radarMirror?.cupom?.condicaoCapturada || ""),
     cupomProvavel ? "" : (cupomComercial?.texto || ""),
     cupomProvavel ? "" : (cupomComercial?.instrucao || ""),
     cupomProvavel ? "" : (cupomComercial?.evidencia || "")
   ]);
+  const cuponsRadar = [...cuponsExplicitosRadar, ...cuponsTextoRadar];
   const cupomRadar = cuponsRadar[0] || null;
   const cupomPublicacao = textoCupons(cuponsRadar);
   const cupomImportador = normalizarCupom(ofertaImportador.cupom || ofertaImportador.codigoCupom || "");

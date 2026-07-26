@@ -1,0 +1,256 @@
+const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
+
+const {
+  espelhoComercialRadarSuficiente,
+  extrairDadosTecnicosImportador,
+  motivoImportadorIgnoravelPeloEspelho,
+  montarOfertaRadarEspelhoComercial
+} = require("../modules/radar/espelho-comercial");
+
+function campo(valor, confianca = "alta", evidencia = "", extras = {}) {
+  return { valor, confianca, evidencia, ...extras };
+}
+
+function criarMirror() {
+  return {
+    versao: 1,
+    origem: { clienteId: "admin", tipo: "whatsapp" },
+    texto: {
+      original: [
+        "MODELO PERFEITINHO MENINAS",
+        "Tenis Puma Carina Street BDP",
+        "DE 499 | POR 205 no Pix ou 215,83 ate 6x",
+        "CUPOM: FASHION ou MODACOMVC",
+        "https://meli.la/2GTPyMb"
+      ].join("\n"),
+      limpo: [
+        "MODELO PERFEITINHO MENINAS",
+        "Tenis Puma Carina Street BDP",
+        "DE 499 | POR 205 no Pix ou 215,83 ate 6x",
+        "CUPOM: FASHION ou MODACOMVC",
+        "https://meli.la/2GTPyMb"
+      ].join("\n")
+    },
+    produto: {
+      tituloCapturado: "Tenis Puma Carina Street BDP"
+    },
+    preco: {
+      atualCapturado: 205,
+      anteriorCapturado: 499,
+      confianca: "alta",
+      tipoCapturado: "pix",
+      evidenciaCapturada: "POR 205 no Pix",
+      marcadorComercial: "por"
+    },
+    cupom: {
+      codigoCapturado: "FASHION",
+      codigosCapturados: ["FASHION", "MODACOMVC"],
+      textoCapturado: "CUPOM: FASHION ou MODACOMVC",
+      condicaoCapturada: "CUPOM: FASHION ou MODACOMVC",
+      confianca: "alta"
+    },
+    links: {
+      encontrados: ["https://meli.la/2GTPyMb"],
+      produtoOriginal: "https://meli.la/2GTPyMb",
+      resgateCupom: null,
+      adicionais: [],
+      quantidadeEncontrada: 1
+    },
+    comercial: {
+      precoAtual: campo(205, "alta", "POR 205 no Pix", {
+        tipo: "pix",
+        tipoCandidato: "preco_atual",
+        marcadorAnterior: "por",
+        possuiCifrao: false,
+        nivelEvidencia: "alta"
+      }),
+      precoAntigo: campo(499, "media", "DE 499"),
+      precoPix: campo(205, "alta", "R$ 205 no Pix"),
+      precoUnitario: campo(null, "ausente", null),
+      parcelamento: { quantidade: 6, valorParcela: 215.83, semJuros: false, confianca: "alta", evidencia: "R$ 215,83 ate 6x" },
+      cupom: {
+        codigo: "FASHION",
+        codigos: ["FASHION", "MODACOMVC"],
+        texto: "CUPOM: FASHION ou MODACOMVC",
+        instrucao: "CUPOM: FASHION ou MODACOMVC",
+        confianca: "alta",
+        provavel: false
+      },
+      cashback: campo(null, "ausente", null),
+      freteGratis: campo(false, "ausente", null),
+      descontoPercentual: campo(null, "ausente", null),
+      links: { produto: "https://meli.la/2GTPyMb", classificados: [{ link: "https://meli.la/2GTPyMb", tipo: "produto" }] }
+    },
+    comparacaoImportador: {}
+  };
+}
+
+const importadorDivergente = {
+  marketplace: "mercadolivre",
+  titulo: "Titulo da pagina que nao deve entrar",
+  nome: "Titulo da pagina que nao deve entrar",
+  preco: 999,
+  precoAtual: 999,
+  precoOriginal: 1200,
+  cupom: "PAGINA10",
+  codigoCupom: "PAGINA10",
+  avisoCupom: "Cupom da pagina",
+  beneficioExtra: "Beneficio da pagina",
+  categoria: "Calcados",
+  produtoId: "MLB123456789",
+  permalink: "https://www.mercadolivre.com.br/p/MLB123456789",
+  imagem: "https://cdn.example.com/produto.jpg",
+  metadata: {
+    produto: {
+      produtoId: "MLB123456789",
+      precoAtual: 999,
+      cupom: "PAGINA10",
+      imagemCandidatos: ["https://cdn.example.com/produto.jpg"]
+    }
+  }
+};
+
+{
+  const mirror = criarMirror();
+  assert.strictEqual(espelhoComercialRadarSuficiente(mirror), true);
+  assert.strictEqual(motivoImportadorIgnoravelPeloEspelho("importacao_sem_preco", mirror), true);
+}
+
+{
+  const tecnico = extrairDadosTecnicosImportador(importadorDivergente);
+  assert.strictEqual(tecnico.titulo, undefined);
+  assert.strictEqual(tecnico.precoAtual, undefined);
+  assert.strictEqual(tecnico.cupom, undefined);
+  assert.strictEqual(tecnico.produtoId, "MLB123456789");
+  assert.strictEqual(tecnico.imagem, "https://cdn.example.com/produto.jpg");
+  assert.deepStrictEqual(tecnico.metadata.produto.imagemCandidatos, ["https://cdn.example.com/produto.jpg"]);
+  assert.strictEqual(tecnico.metadata.produto.precoAtual, undefined);
+}
+
+{
+  const resultado = montarOfertaRadarEspelhoComercial({
+    radarMirror: criarMirror(),
+    ofertaImportador: importadorDivergente,
+    metadata: importadorDivergente.metadata,
+    clienteId: "admin",
+    marketplace: "mercadolivre",
+    resolucao: {
+      urlCapturada: "https://meli.la/2GTPyMb",
+      linkOriginalRadar: "https://meli.la/2GTPyMb",
+      linkOriginalLimpo: "https://www.mercadolivre.com.br/p/MLB123456789",
+      urlResolvida: "https://www.mercadolivre.com.br/p/MLB123456789",
+      tipoLinkRadar: "shortlink_meli_social"
+    },
+    contexto: { correlationId: "radar_teste_1" }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.oferta.titulo, "Tenis Puma Carina Street BDP");
+  assert.strictEqual(resultado.oferta.precoAtual, 205);
+  assert.strictEqual(resultado.oferta.preco, 205);
+  assert.strictEqual(resultado.oferta.precoOriginal, 499);
+  assert.strictEqual(resultado.oferta.cupom, "FASHION ou MODACOMVC");
+  assert.deepStrictEqual(resultado.oferta.codigosCupom, ["FASHION", "MODACOMVC"]);
+  assert.strictEqual(resultado.oferta.precoPix, "R$ 205 no Pix");
+  assert.strictEqual(resultado.oferta.parcelamento, "R$ 215,83 ate 6x");
+  assert.strictEqual(resultado.oferta.imagem, "https://cdn.example.com/produto.jpg");
+  assert.strictEqual(resultado.oferta.produtoId, "MLB123456789");
+  assert.strictEqual(resultado.oferta.categoria, "Calcados");
+  assert.strictEqual(resultado.oferta.linkAfiliado, "");
+  assert.strictEqual(resultado.oferta.fonteComercial, "radar_espelho_comercial");
+  assert.ok(resultado.oferta.documentoComercialCanonico.includes("CUPOM: FASHION ou MODACOMVC"));
+  assert.strictEqual(resultado.oferta.metadata.radarEspelhoComercial.importadorUsadoComo, "enriquecimento_tecnico");
+}
+
+{
+  const resultado = montarOfertaRadarEspelhoComercial({
+    radarMirror: criarMirror(),
+    ofertaImportador: {
+      marketplace: "mercadolivre",
+      titulo: "Produto Mercado Livre",
+      nome: "Produto Mercado Livre",
+      preco: 2.58,
+      precoAtual: 2.58,
+      precoOriginal: 3,
+      cupom: "FALLBACK10",
+      avisoCupom: "Cupom criado pelo fallback",
+      beneficioExtra: "Frete gratis inventado",
+      fallbackMercadoLivreRadarTexto: true,
+      fallbackTecnicoRadarMirror: true,
+      motivoFallback: "meli_social_importador_falhou_espelho_comercial",
+      linkOriginal: "https://www.mercadolivre.com.br/p/MLB123456789"
+    },
+    metadata: {},
+    clienteId: "admin",
+    marketplace: "mercadolivre",
+    resolucao: {
+      urlCapturada: "https://meli.la/2GTPyMb",
+      linkOriginalRadar: "https://meli.la/2GTPyMb",
+      linkOriginalLimpo: "https://www.mercadolivre.com.br/p/MLB123456789",
+      urlResolvida: "https://www.mercadolivre.com.br/p/MLB123456789",
+      tipoLinkRadar: "shortlink_meli_social"
+    },
+    contexto: { correlationId: "radar_teste_fallback_ml" }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.oferta.titulo, "Tenis Puma Carina Street BDP");
+  assert.strictEqual(resultado.oferta.precoAtual, 205);
+  assert.strictEqual(resultado.oferta.precoOriginal, 499);
+  assert.strictEqual(resultado.oferta.cupom, "FASHION ou MODACOMVC");
+  assert.deepStrictEqual(resultado.oferta.codigosCupom, ["FASHION", "MODACOMVC"]);
+  assert.strictEqual(String(resultado.oferta.beneficioExtra || "").includes("Frete gratis inventado"), false);
+  assert.strictEqual(resultado.oferta.metadata.radarEspelhoComercial.importadorUsadoComo, "enriquecimento_tecnico");
+}
+
+{
+  const resultado = montarOfertaRadarEspelhoComercial({
+    radarMirror: criarMirror(),
+    ofertaImportador: {
+      marketplace: "kabum",
+      marketplaceOriginalRadar: "kabum",
+      titulo: "Titulo reconstruido KaBuM",
+      nome: "Titulo reconstruido KaBuM",
+      preco: 111,
+      precoAtual: 111,
+      cupom: "KABUMFAKE",
+      fallbackKabumRadar403: true,
+      fallbackTecnicoRadarMirror: true,
+      motivoFallback: "kabum_http_403_espelho_comercial",
+      linkOriginal: "https://www.kabum.com.br/produto/123"
+    },
+    metadata: {},
+    clienteId: "admin",
+    marketplace: "kabum",
+    resolucao: {
+      urlCapturada: "https://www.kabum.com.br/produto/123",
+      linkOriginalRadar: "https://www.kabum.com.br/produto/123",
+      linkOriginalLimpo: "https://www.kabum.com.br/produto/123",
+      urlResolvida: "https://www.kabum.com.br/produto/123",
+      tipoLinkRadar: "produto"
+    },
+    contexto: { correlationId: "radar_teste_fallback_kabum" }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.oferta.titulo, "Tenis Puma Carina Street BDP");
+  assert.strictEqual(resultado.oferta.precoAtual, 205);
+  assert.strictEqual(resultado.oferta.precoOriginal, 499);
+  assert.strictEqual(resultado.oferta.cupom, "FASHION ou MODACOMVC");
+  assert.strictEqual(resultado.oferta.codigoCupom, "FASHION ou MODACOMVC");
+  assert.deepStrictEqual(resultado.oferta.codigosCupom, ["FASHION", "MODACOMVC"]);
+  assert.strictEqual(resultado.oferta.metadata.radarEspelhoComercial.importadorUsadoComo, "enriquecimento_tecnico");
+}
+
+{
+  const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
+  assert.ok(indexFonte.includes("ml_titulo_fallback_texto_radar_bloqueado_espelho"));
+  assert.ok(indexFonte.includes("ml_preco_fallback_texto_radar_bloqueado_espelho"));
+  assert.ok(indexFonte.includes("fallbackTecnicoRadarMirror"));
+  assert.ok(indexFonte.includes("meli_social_importador_falhou_espelho_comercial"));
+  assert.ok(indexFonte.includes("kabum_http_403_espelho_comercial"));
+}
+
+console.log("radar-espelho-comercial.test.js OK");
