@@ -85,6 +85,11 @@ function selecionarPrecoRadar(radarMirror = {}) {
           valor: null,
           confianca: confianca(candidato.confianca || candidato.campo?.confianca || "ausente"),
           marcadorExplicito: temMarcadorPrecoExplicito(radarMirror, candidato.campo),
+          tipoCandidato: texto(candidato.campo?.tipoCandidato || ""),
+          marcadorPrecoEscolhido: texto(candidato.campo?.marcadorAnterior || candidato.campo?.marcadorPosterior || ""),
+          possuiCifrao: candidato.campo?.possuiCifrao === true,
+          nivelEvidencia: texto(candidato.campo?.nivelEvidencia || "ausente"),
+          motivos: Array.isArray(candidato.campo?.motivos) ? candidato.campo.motivos.filter(Boolean).slice(0, 12) : [],
           invalido: true
         };
       }
@@ -95,6 +100,11 @@ function selecionarPrecoRadar(radarMirror = {}) {
       valor,
       confianca: confianca(candidato.confianca || candidato.campo?.confianca || "ausente"),
       marcadorExplicito: temMarcadorPrecoExplicito(radarMirror, candidato.campo),
+      tipoCandidato: texto(candidato.campo?.tipoCandidato || ""),
+      marcadorPrecoEscolhido: texto(candidato.campo?.marcadorAnterior || candidato.campo?.marcadorPosterior || ""),
+      possuiCifrao: candidato.campo?.possuiCifrao === true,
+      nivelEvidencia: texto(candidato.campo?.nivelEvidencia || "ausente"),
+      motivos: Array.isArray(candidato.campo?.motivos) ? candidato.campo.motivos.filter(Boolean).slice(0, 12) : [],
       invalido: false
     };
   }
@@ -106,7 +116,7 @@ function calcularDivergenciaPercentual(precoRadar, precoImportador) {
   return Number(((Math.abs(precoRadar - precoImportador) / precoImportador) * 100).toFixed(2));
 }
 
-function resolverPreco({ ofertaImportador = {}, radarMirror = {} } = {}) {
+function resolverPreco({ ofertaImportador = {}, radarMirror = {}, cupomRadarConfirmado = false } = {}) {
   const radar = selecionarPrecoRadar(radarMirror);
   const precoImportador = precoValido(ofertaImportador.precoAtual ?? ofertaImportador.preco ?? ofertaImportador.valor);
   const precoRadar = radar.valor;
@@ -117,18 +127,22 @@ function resolverPreco({ ofertaImportador = {}, radarMirror = {} } = {}) {
   let motivo = "radar_ausente";
 
   if (precoRadar !== null) {
+    const divergenciaExtrema = divergenciaPercentual !== null && divergenciaPercentual >= DIVERGENCIA_PERCENTUAL_SUSPEITA;
     if (radar.confianca === "alta" || (radar.confianca === "media" && radar.marcadorExplicito)) {
       const evidenciaSemanticaForte = radar.nivelEvidencia === "alta" || radar.nivelEvidencia === "ausente" || !radar.nivelEvidencia;
       const evidenciaForte = radar.confianca === "alta" && evidenciaSemanticaForte && radar.marcadorExplicito;
-      if (divergenciaPercentual !== null && divergenciaPercentual >= DIVERGENCIA_PERCENTUAL_SUSPEITA && !evidenciaForte) {
+      if (divergenciaExtrema && !cupomRadarConfirmado) {
+        statusComparacaoPreco = "revisao_divergencia_extrema";
+        motivo = "divergencia_extrema_sem_cupom_confirmado";
+      } else if (divergenciaExtrema && !evidenciaForte) {
         statusComparacaoPreco = "revisao_semantica";
         motivo = "divergencia_alta_com_evidencia_fraca";
       } else {
         origemPreco = "radar";
         precoPublicacao = precoRadar;
         statusComparacaoPreco = divergenciaPercentual !== null && divergenciaPercentual >= 0.01 ? "divergente" : "coerente";
-        motivo = divergenciaPercentual !== null && divergenciaPercentual >= DIVERGENCIA_PERCENTUAL_SUSPEITA
-          ? "divergencia_alta_com_evidencia_forte"
+        motivo = divergenciaExtrema
+          ? "divergencia_extrema_com_cupom_confirmado"
           : (radar.confianca === "alta" ? "radar_alta_confianca" : "radar_media_com_marcador");
       }
     } else if (radar.confianca === "media") {
@@ -154,6 +168,11 @@ function resolverPreco({ ofertaImportador = {}, radarMirror = {} } = {}) {
     tipoPrecoRadar: radar.tipo,
     campoPrecoRadar: radar.nome,
     marcadorPrecoExplicito: radar.marcadorExplicito,
+    tipoCandidato: radar.tipoCandidato,
+    marcadorPrecoEscolhido: radar.marcadorPrecoEscolhido,
+    possuiCifrao: radar.possuiCifrao === true,
+    nivelEvidencia: radar.nivelEvidencia,
+    motivos: Array.isArray(radar.motivos) ? radar.motivos : [],
     motivo
   };
 }
@@ -314,8 +333,9 @@ function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror 
     };
   }
 
-  const preco = resolverPreco({ ofertaImportador, radarMirror: mirror });
   const cupom = resolverCupom({ ofertaImportador, radarMirror: mirror });
+  const cupomRadarConfirmado = cupom.origemCupom === "radar" && Boolean(cupom.cupomRadar) && ["alta", "media"].includes(cupom.confiancaCupomRadar);
+  const preco = resolverPreco({ ofertaImportador, radarMirror: mirror, cupomRadarConfirmado });
   const links = resumirLinks(mirror, ofertaImportador);
   const condicoesComerciais = montarCondicoesComerciais(mirror);
   const confiancaComercial = montarConfiancaComercial(mirror, preco, cupom);
@@ -402,7 +422,13 @@ function resumirPrecedenciaComercialLog(resultado = {}) {
     cupomImportadorPresente: Boolean(resolucao.cupomImportador),
     linkProdutoHost: resolucao.linksClassificados?.produtoHost || "",
     linkResgateHost: resolucao.linksClassificados?.resgateHost || "",
-    linkAfiliadoHost: resolucao.linksClassificados?.afiliadoHost || ""
+    linkAfiliadoHost: resolucao.linksClassificados?.afiliadoHost || "",
+    quantidadeCandidatosPreco: Number(resolucao.quantidadeCandidatosPreco || 0),
+    tipoCandidatoEscolhido: resolucao.tipoCandidatoEscolhido || "",
+    marcadorPrecoEscolhido: resolucao.marcadorPrecoEscolhido || "",
+    possuiCifraoPrecoEscolhido: resolucao.possuiCifraoPrecoEscolhido === true,
+    motivosConfiancaPreco: Array.isArray(resolucao.motivosConfiancaPreco) ? resolucao.motivosConfiancaPreco.slice(0, 12) : [],
+    candidatosRejeitadosPorTipo: resolucao.candidatosRejeitadosPorTipo && typeof resolucao.candidatosRejeitadosPorTipo === "object" ? resolucao.candidatosRejeitadosPorTipo : {}
   };
 }
 
@@ -412,8 +438,7 @@ function deveLogarPrecoSuspeito(resultado = {}) {
     resolucao.statusComparacaoPreco === "revisao_semantica" ||
     resolucao.statusComparacaoPreco === "radar_invalido" ||
     (typeof resolucao.divergenciaPercentual === "number" &&
-      resolucao.divergenciaPercentual >= DIVERGENCIA_PERCENTUAL_SUSPEITA &&
-      resolucao.origemPreco !== "radar")
+      resolucao.divergenciaPercentual >= DIVERGENCIA_PERCENTUAL_SUSPEITA)
   );
 }
 
@@ -432,6 +457,7 @@ module.exports = {
   resolverPrecedenciaComercialRadar,
   resumirPrecedenciaComercialLog,
   deveLogarDivergenciaComercial,
+  deveLogarPrecoSuspeito,
   resolverPreco,
   resolverCupom
 };

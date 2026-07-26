@@ -3,7 +3,8 @@
 const {
   resolverPrecedenciaComercialRadar,
   resumirPrecedenciaComercialLog,
-  deveLogarDivergenciaComercial
+  deveLogarDivergenciaComercial,
+  deveLogarPrecoSuspeito
 } = require("../modules/radar/comercial-precedencia");
 const { montarItemFilaEngine } = require("../modules/engine/distributor/distributor.service");
 
@@ -322,6 +323,112 @@ function testarResumoLogSanitizado() {
   assert.strictEqual(Object.values(log).some(valor => String(valor).includes("/p/MLB123")), false);
 }
 
+function removerCupomRadar(m = {}) {
+  m.cupom = {
+    codigoCapturado: null,
+    textoCapturado: null,
+    condicaoCapturada: null,
+    confianca: "ausente"
+  };
+  m.comercial = {
+    ...(m.comercial || {}),
+    cupom: { codigo: null, texto: null, instrucao: null, confianca: "ausente", provavel: false }
+  };
+  return m;
+}
+
+function aplicarPrecoRadar(m = {}, valor = 99.9, confianca = "alta", evidencia = `Por R$ ${String(valor).replace(".", ",")}`) {
+  m.preco.atualCapturado = valor;
+  m.preco.confianca = confianca;
+  m.preco.tipoCapturado = "final";
+  m.preco.evidenciaCapturada = evidencia;
+  m.preco.marcadorComercial = evidencia;
+  m.comercial.precoAtual = campo(valor, confianca, evidencia, {
+    tipo: "final",
+    tipoCandidato: "preco_atual",
+    marcadorAnterior: "por",
+    possuiCifrao: true,
+    nivelEvidencia: "alta",
+    motivos: ["preco_radar_marcador_explicito", "evidencia_forte_preco"]
+  });
+  return m;
+}
+
+function testarDivergenciaExtremaImportadorGeraAlerta() {
+  const m = mirrorSemPreco();
+  m.preco.atualCapturado = 50;
+  m.preco.confianca = "media";
+  m.preco.condicionado = false;
+  m.preco.marcadorComercial = null;
+  m.comercial.precoAtual = campo(50, "media", "50", { tipo: "inferido_unico", tipoCandidato: "desconhecido", nivelEvidencia: "media" });
+  const r = resolver(oferta({ marketplace: "amazon", preco: 419.06, precoAtual: 419.06 }), m, envOff);
+  assert.strictEqual(r.resolucao.origemPreco, "importador");
+  assert.strictEqual(r.resolucao.statusComparacaoPreco, "radar_media_sem_marcador");
+  assert.ok(r.resolucao.divergenciaPercentual >= 80);
+  assert.strictEqual(deveLogarPrecoSuspeito(r), true);
+}
+
+function testarDivergenciaExtremaRadarGeraAlerta() {
+  const m = mirror();
+  const r = resolver(oferta({ preco: 10, precoAtual: 10 }), m, envOff);
+  assert.strictEqual(r.resolucao.origemPreco, "radar");
+  assert.ok(r.resolucao.divergenciaPercentual >= 80);
+  assert.strictEqual(deveLogarPrecoSuspeito(r), true);
+}
+
+function testarRadarExtremoSemCupomNaoGanhaPrecedencia() {
+  const m = removerCupomRadar(aplicarPrecoRadar(mirror(), 4.69, "alta", "Por R$ 4,69"));
+  const r = resolver(oferta({ preco: 207, precoAtual: 207, cupom: "" }), m, envOn);
+  assert.strictEqual(r.resolucao.origemPreco, "importador");
+  assert.strictEqual(r.resolucao.statusComparacaoPreco, "revisao_divergencia_extrema");
+  assert.strictEqual(r.oferta.preco, 207);
+  assert.strictEqual(deveLogarPrecoSuspeito(r), true);
+}
+
+function testarRadarExtremoComCupomConfirmadoFicaAuditavel() {
+  const m = aplicarPrecoRadar(mirror(), 4.69, "alta", "Por R$ 4,69");
+  m.comercial.resolucaoPreco = {
+    quantidadeCandidatosPreco: 3,
+    tipoCandidatoEscolhido: "preco_atual",
+    marcadorPrecoEscolhido: "por",
+    possuiCifraoPrecoEscolhido: true,
+    motivosConfiancaPreco: ["preco_radar_marcador_explicito"],
+    candidatosRejeitadosPorTipo: { quantidade: 1, frete: 1 }
+  };
+  const r = resolver(oferta({ preco: 207, precoAtual: 207, cupom: "" }), m, envOn);
+  const log = resumirPrecedenciaComercialLog(r);
+  assert.strictEqual(r.resolucao.origemPreco, "radar");
+  assert.strictEqual(r.oferta.preco, 4.69);
+  assert.strictEqual(deveLogarPrecoSuspeito(r), true);
+  assert.strictEqual(log.quantidadeCandidatosPreco, 3);
+  assert.strictEqual(log.tipoCandidatoEscolhido, "preco_atual");
+  assert.strictEqual(log.marcadorPrecoEscolhido, "por");
+  assert.strictEqual(log.possuiCifraoPrecoEscolhido, true);
+  assert.deepStrictEqual(log.motivosConfiancaPreco, ["preco_radar_marcador_explicito", "evidencia_forte_preco"]);
+  assert.deepStrictEqual(log.candidatosRejeitadosPorTipo, { quantidade: 1, frete: 1 });
+}
+
+function testarDivergenciaAbaixoLimiteMantemComportamentoAtual() {
+  const r = resolver(oferta({ preco: 199.9, precoAtual: 199.9 }), mirror(), envOn);
+  assert.strictEqual(r.resolucao.origemPreco, "radar");
+  assert.ok(r.resolucao.divergenciaPercentual < 80);
+  assert.strictEqual(deveLogarPrecoSuspeito(r), false);
+}
+
+function testarPrecoCoerenteNaoGeraAlerta() {
+  const r = resolver(oferta({ preco: 99.9, precoAtual: 99.9 }), mirror(), envOn);
+  assert.strictEqual(r.resolucao.statusComparacaoPreco, "coerente");
+  assert.strictEqual(deveLogarPrecoSuspeito(r), false);
+}
+
+function testarPrecoBaixoRealCoerenteContinuaPermitido() {
+  const m = aplicarPrecoRadar(mirror(), 4.69, "alta", "Por R$ 4,69");
+  const r = resolver(oferta({ preco: 4.69, precoAtual: 4.69 }), m, envOn);
+  assert.strictEqual(r.resolucao.origemPreco, "radar");
+  assert.strictEqual(r.resolucao.statusComparacaoPreco, "coerente");
+  assert.strictEqual(r.oferta.preco, 4.69);
+  assert.strictEqual(deveLogarPrecoSuspeito(r), false);
+}
 const testes = [
   testarPrecoAltaCoerente,
   testarPrecoAltaDivergente,
@@ -343,7 +450,14 @@ const testes = [
   testarImportadorAbsurdoCorrigidoPorRadar,
   testarPrecoRadarInvalidoNaoAplica,
   testarPreservacaoAteFila,
-  testarResumoLogSanitizado
+  testarResumoLogSanitizado,
+  testarDivergenciaExtremaImportadorGeraAlerta,
+  testarDivergenciaExtremaRadarGeraAlerta,
+  testarRadarExtremoSemCupomNaoGanhaPrecedencia,
+  testarRadarExtremoComCupomConfirmadoFicaAuditavel,
+  testarDivergenciaAbaixoLimiteMantemComportamentoAtual,
+  testarPrecoCoerenteNaoGeraAlerta,
+  testarPrecoBaixoRealCoerenteContinuaPermitido
 ];
 
 for (const teste of testes) teste();
