@@ -25,6 +25,11 @@ const {
   mergeRadarMirrorMetadata,
   resumirRadarMirrorLog
 } = require("../../radar/radar-mirror");
+const {
+  resolverPrecedenciaComercialRadar,
+  resumirPrecedenciaComercialLog,
+  deveLogarDivergenciaComercial
+} = require("../../radar/comercial-precedencia");
 const { validarCoerenciaPreco } = require("../../inteligencia-universal/preco-coerencia.service");
 const {
   logEngineImporterErro,
@@ -998,7 +1003,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   const radarMirrorComparado = radarMirrorBase
     ? compararRadarMirrorComImportador(radarMirrorBase, oferta)
     : null;
-  const metadataFinal = mergeRadarMirrorMetadata({
+  let metadataFinal = mergeRadarMirrorMetadata({
     ...metadataEvento,
     ...metadataBase,
     ...objetoSeguro(sombraV2.metadata || {}),
@@ -1026,6 +1031,25 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       }),
       etapa: "engine_ofertas"
     }));
+    const resultadoPrecedenciaComercial = resolverPrecedenciaComercialRadar({
+      ofertaImportador: oferta,
+      radarMirror: radarMirrorComparado,
+      metadata: metadataFinal,
+      clienteId: job.cliente_id || job.clienteId || "",
+      marketplace: oferta.marketplace || ""
+    });
+    metadataFinal = resultadoPrecedenciaComercial?.metadata || metadataFinal;
+    oferta = resultadoPrecedenciaComercial?.oferta || oferta;
+    console.log("[RADAR-COMERCIAL-RESOLVIDO]", JSON.stringify({
+      ...resumirPrecedenciaComercialLog(resultadoPrecedenciaComercial),
+      etapa: "engine_ofertas"
+    }));
+    if (deveLogarDivergenciaComercial(resultadoPrecedenciaComercial)) {
+      console.log("[RADAR-COMERCIAL-DIVERGENCIA]", JSON.stringify({
+        ...resumirPrecedenciaComercialLog(resultadoPrecedenciaComercial),
+        etapa: "engine_ofertas"
+      }));
+    }
   }
   const inteligenciaV2 = objetoSeguro(metadataFinal.inteligenciaUniversalV2);
   const retidaV2 = inteligenciaV2.status === "retida" || sombraV2.ok === false;
@@ -1298,7 +1322,3 @@ module.exports = {
   marcarJobErroImportacao,
   normalizarOfertaImportada
 };
-
-
-
-

@@ -1,4 +1,4 @@
-﻿const { normalizarNumeroMoeda } = require("../../utils/moeda");
+const { normalizarNumeroMoeda } = require("../../utils/moeda");
 
 const RADAR_MIRROR_VERSAO = 1;
 const CONFIANCA_VALORES = new Set(["alta", "media", "baixa", "ausente"]);
@@ -146,6 +146,81 @@ function condicaoPrecoRadar(extracao = {}, beneficios = {}) {
   };
 }
 
+function campoComercial(campo = {}) {
+  if (!campo || typeof campo !== "object") return { valor: null, confianca: "ausente", evidencia: null };
+  return {
+    valor: campo.valor ?? null,
+    confianca: confianca(campo.confianca || "ausente"),
+    evidencia: textoOuNull(campo.evidencia || ""),
+    tipo: textoOuNull(campo.tipo || "")
+  };
+}
+
+function resumirLinksComerciais(comercial = {}) {
+  const links = comercial?.links || {};
+  return {
+    encontrados: linksUnicos(links.encontrados || []),
+    produto: textoOuNull(links.produto),
+    resgate: textoOuNull(links.resgate),
+    cupom: textoOuNull(links.cupom),
+    landing: linksUnicos(links.landing || []),
+    encurtadores: linksUnicos(links.encurtadores || []),
+    redirecionadores: linksUnicos(links.redirecionadores || []),
+    afiliados: linksUnicos(links.afiliados || []),
+    adicionais: linksUnicos(links.adicionais || []),
+    classificados: Array.isArray(links.classificados)
+      ? links.classificados.slice(0, 30).map(item => ({ link: textoOuNull(item.link), tipo: textoOuNull(item.tipo) })).filter(item => item.link)
+      : []
+  };
+}
+
+function resumirComercialRadar(extracao = {}) {
+  const comercial = extracao?.comercial && typeof extracao.comercial === "object" ? extracao.comercial : {};
+  return {
+    versao: comercial.versao || null,
+    precoAtual: campoComercial(comercial.precoAtual),
+    precoAntigo: campoComercial(comercial.precoAntigo),
+    precoPix: campoComercial(comercial.precoPix),
+    precoBoleto: campoComercial(comercial.precoBoleto),
+    precoCartao: campoComercial(comercial.precoCartao),
+    precoParcelado: campoComercial(comercial.precoParcelado),
+    parcelamento: {
+      quantidade: comercial.parcelamento?.quantidade ?? null,
+      valorParcela: comercial.parcelamento?.valorParcela ?? null,
+      semJuros: comercial.parcelamento?.semJuros === true,
+      confianca: confianca(comercial.parcelamento?.confianca || "ausente"),
+      evidencia: textoOuNull(comercial.parcelamento?.evidencia || "")
+    },
+    descontoPercentual: campoComercial(comercial.descontoPercentual),
+    valorEconomia: campoComercial(comercial.valorEconomia),
+    cupom: {
+      codigo: normalizarCupom(comercial.cupom?.codigo || ""),
+      texto: textoOuNull(comercial.cupom?.texto || ""),
+      instrucao: textoOuNull(comercial.cupom?.instrucao || ""),
+      valor: comercial.cupom?.valor ?? null,
+      percentual: comercial.cupom?.percentual ?? null,
+      confianca: confianca(comercial.cupom?.confianca || "ausente"),
+      evidencia: textoOuNull(comercial.cupom?.evidencia || ""),
+      provavel: comercial.cupom?.provavel === true
+    },
+    cashback: campoComercial(comercial.cashback),
+    freteGratis: campoComercial(comercial.freteGratis),
+    marketplace: campoComercial(comercial.marketplace),
+    categoria: campoComercial(comercial.categoria),
+    avaliacao: campoComercial(comercial.avaliacao),
+    quantidadeVendida: campoComercial(comercial.quantidadeVendida),
+    estoque: campoComercial(comercial.estoque),
+    seloOficial: campoComercial(comercial.seloOficial),
+    moedasShopee: campoComercial(comercial.moedasShopee),
+    brindes: Array.isArray(comercial.brindes) ? comercial.brindes.filter(Boolean).slice(0, 10) : [],
+    condicoesEspeciais: Array.isArray(comercial.condicoesEspeciais) ? comercial.condicoesEspeciais.filter(Boolean).slice(0, 20) : [],
+    links: resumirLinksComerciais(comercial),
+    camposEncontrados: Array.isArray(comercial.camposEncontrados) ? comercial.camposEncontrados.slice(0, 40) : [],
+    camposAusentes: Array.isArray(comercial.camposAusentes) ? comercial.camposAusentes.slice(0, 40) : [],
+    tiposReconhecidos: Array.isArray(comercial.tiposReconhecidos) ? comercial.tiposReconhecidos.slice(0, 40) : []
+  };
+}
+
 function criarRadarMirror({
   origemTipo = null,
   clienteId = null,
@@ -166,6 +241,7 @@ function criarRadarMirror({
   const linksClassificados = classificarLinksRadar(links, beneficiosMensagem);
   const midia = imagemOriginalRadar(extracaoRadarLocal, raw || {});
   const condicao = condicaoPrecoRadar(extracaoRadarLocal, beneficiosMensagem);
+  const comercial = resumirComercialRadar(extracaoRadarLocal);
 
   return {
     versao: RADAR_MIRROR_VERSAO,
@@ -193,7 +269,10 @@ function criarRadarMirror({
       origem: precoAtual !== null || precoAnterior !== null ? "texto_radar" : "ausente",
       confianca: precoAtual !== null ? confianca(extracaoRadarLocal?.precoAtual?.confianca) : "ausente",
       condicionado: condicao.condicionado,
-      condicaoTexto: condicao.condicaoTexto
+      condicaoTexto: condicao.condicaoTexto,
+      tipoCapturado: textoOuNull(extracaoRadarLocal?.precoAtual?.tipo || extracaoRadarLocal?.precoAtual?.metadados?.tipo || comercial.precoAtual?.tipo),
+      evidenciaCapturada: textoOuNull(extracaoRadarLocal?.precoAtual?.evidencia || comercial.precoAtual?.evidencia),
+      marcadorComercial: textoOuNull(comercial.precoAtual?.tipo || comercial.precoPix?.evidencia || comercial.cupom?.instrucao)
     },
     cupom: {
       codigoCapturado: cupomCodigo,
@@ -202,6 +281,7 @@ function criarRadarMirror({
       confianca: cupomCodigo ? confianca(extracaoRadarLocal?.cupom?.confianca || (beneficiosMensagem.cupom ? "media" : "ausente")) : "ausente"
     },
     links: linksClassificados,
+    comercial,
     midia,
     evidencias: {
       possuiPreco: precoAtual !== null,

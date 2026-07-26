@@ -195,6 +195,11 @@ const {
   resumirRadarMirrorLog
 } = require("./modules/radar/radar-mirror");
 const {
+  resolverPrecedenciaComercialRadar,
+  resumirPrecedenciaComercialLog,
+  deveLogarDivergenciaComercial
+} = require("./modules/radar/comercial-precedencia");
+const {
   aplicarLimiteLista,
   avaliarLimiteFilaHotfix,
   finalizarRunnerHotfix,
@@ -13636,6 +13641,8 @@ const registroEngineRadar = temRedirectConhecidoRadar
     const radarMirrorComparado = importacao.ok
       ? compararRadarMirrorComImportador(radarMirrorBase, importacao.oferta || {})
       : radarMirrorBase;
+    let resultadoPrecedenciaComercial = null;
+    let ofertaImportadorRadar = importacao.oferta || {};
     if (importacao.ok) {
       const comparacaoImportadorRadar = radarMirrorComparado?.comparacaoImportador || {};
       console.log("[RADAR-MIRROR-COMPARADO]", JSON.stringify({
@@ -13649,6 +13656,24 @@ const registroEngineRadar = temRedirectConhecidoRadar
         cupomImportadorPresente: Boolean(comparacaoImportadorRadar.cupomImportador),
         possuiDoisLinks: radarMirrorComparado?.evidencias?.possuiDoisLinks === true
       }));
+      resultadoPrecedenciaComercial = resolverPrecedenciaComercialRadar({
+        ofertaImportador: importacao.oferta || {},
+        radarMirror: radarMirrorComparado,
+        metadata: importacao.oferta?.metadata || {},
+        clienteId: adminMasterId,
+        marketplace: marketplaceImportacaoResumo
+      });
+      ofertaImportadorRadar = resultadoPrecedenciaComercial?.oferta || importacao.oferta || {};
+      console.log("[RADAR-COMERCIAL-RESOLVIDO]", JSON.stringify({
+        ...resumirPrecedenciaComercialLog(resultadoPrecedenciaComercial),
+        etapa: "radar_legado"
+      }));
+      if (deveLogarDivergenciaComercial(resultadoPrecedenciaComercial)) {
+        console.log("[RADAR-COMERCIAL-DIVERGENCIA]", JSON.stringify({
+          ...resumirPrecedenciaComercialLog(resultadoPrecedenciaComercial),
+          etapa: "radar_legado"
+        }));
+      }
     }
 
     if (!importacao.ok) {
@@ -13727,49 +13752,49 @@ const registroEngineRadar = temRedirectConhecidoRadar
     logOptimus("RADAR", "Importacao concluida", {
       linkCapturado: link,
       urlResolvida: importacao.resolucao?.urlResolvida || "",
-      linkOriginal: importacao.resolucao?.linkOriginalLimpo || importacao.oferta?.linkOriginal || "",
-      marketplace: importacao.oferta?.marketplace || importacao.resolucao?.marketplaceReal || "",
-      titulo: importacao.oferta?.titulo || importacao.oferta?.nome || "",
-      preco: importacao.oferta?.precoAtual || importacao.oferta?.preco || "",
-      categoria: importacao.oferta?.categoria || "",
-      cupomImportado: importacao.oferta?.cupom || "",
+      linkOriginal: importacao.resolucao?.linkOriginalLimpo || ofertaImportadorRadar?.linkOriginal || "",
+      marketplace: ofertaImportadorRadar?.marketplace || importacao.resolucao?.marketplaceReal || "",
+      titulo: ofertaImportadorRadar?.titulo || ofertaImportadorRadar?.nome || "",
+      preco: ofertaImportadorRadar?.precoAtual || ofertaImportadorRadar?.preco || "",
+      categoria: ofertaImportadorRadar?.categoria || "",
+      cupomImportado: ofertaImportadorRadar?.cupom || "",
       cupomMensagem: beneficiosLink.cupom || ""
     });
     const ofertaRadar = aplicarIdentidadeCanonicaRadar(prepararOfertaGlobal(preservarCandidatosImagemUniversal({
-      ...importacao.oferta,
-      cupom: importacao.oferta?.cupom || beneficiosLink.cupom || "",
-      avisoCupom: importacao.oferta?.avisoCupom || beneficiosLink.avisoCupom || "",
-      tipoCupom: importacao.oferta?.tipoCupom || beneficiosLink.tipoCupom || "",
-      beneficioExtra: importacao.oferta?.beneficioExtra || beneficiosLink.beneficioExtra || "",
-      linkResgateCupom: importacao.oferta?.linkResgateCupom || beneficiosLink.linkResgateCupom || "",
-      cupomOrigem: importacao.oferta?.cupomOrigem || beneficiosLink.cupomOrigem || "",
-      cupomDetectadoTexto: Boolean(importacao.oferta?.cupomDetectadoTexto || beneficiosLink.cupomDetectadoTexto),
+      ...ofertaImportadorRadar,
+      cupom: ofertaImportadorRadar?.cupom || beneficiosLink.cupom || "",
+      avisoCupom: ofertaImportadorRadar?.avisoCupom || beneficiosLink.avisoCupom || "",
+      tipoCupom: ofertaImportadorRadar?.tipoCupom || beneficiosLink.tipoCupom || "",
+      beneficioExtra: ofertaImportadorRadar?.beneficioExtra || beneficiosLink.beneficioExtra || "",
+      linkResgateCupom: ofertaImportadorRadar?.linkResgateCupom || beneficiosLink.linkResgateCupom || "",
+      cupomOrigem: ofertaImportadorRadar?.cupomOrigem || beneficiosLink.cupomOrigem || "",
+      cupomDetectadoTexto: Boolean(ofertaImportadorRadar?.cupomDetectadoTexto || beneficiosLink.cupomDetectadoTexto),
       ...origemBase,
       origemClienteId: adminMasterId,
       origem: "radar",
       origemTipo: origemTipoFinal,
       radar: true,
-      linkOriginal: importacao.resolucao?.linkOriginalLimpo || importacao.oferta.linkOriginal,
+      linkOriginal: importacao.resolucao?.linkOriginalLimpo || ofertaImportadorRadar.linkOriginal,
       linkCapturado: importacao.resolucao?.urlCapturada || link,
-      urlResolvida: importacao.resolucao?.urlResolvida || importacao.oferta.linkResolvidoRadar || "",
-      linkResolvidoRadar: importacao.resolucao?.urlResolvida || importacao.oferta.linkResolvidoRadar || "",
-      marketplaceDetectado: importacao.resolucao?.marketplaceReal || importacao.oferta.marketplace || "",
+      urlResolvida: importacao.resolucao?.urlResolvida || ofertaImportadorRadar.linkResolvidoRadar || "",
+      linkResolvidoRadar: importacao.resolucao?.urlResolvida || ofertaImportadorRadar.linkResolvidoRadar || "",
+      marketplaceDetectado: importacao.resolucao?.marketplaceReal || ofertaImportadorRadar.marketplace || "",
       tipoLink: importacao.resolucao?.tipoLinkRadar === "intermediario" ? "intermediario" : "produto",
       tipoLinkRadar: importacao.resolucao?.tipoLinkRadar || "produto",
       motivoTecnico: "",
-      link: importacao.resolucao?.linkOriginalLimpo || importacao.oferta.linkOriginal,
+      link: importacao.resolucao?.linkOriginalLimpo || ofertaImportadorRadar.linkOriginal,
       linkAfiliado: "",
       linkFinal: "",
-      imagem: imagemOfertaRadar(importacao.oferta),
-      image: imagemOfertaRadar(importacao.oferta),
+      imagem: imagemOfertaRadar(ofertaImportadorRadar),
+      image: imagemOfertaRadar(ofertaImportadorRadar),
       mensagemOriginalRadar: texto.slice(0, 1000),
       capturadaEm: dataCaptura,
       dataEntradaRadar: dataCaptura,
       metadata: mergeRadarMirrorMetadata({
-        ...(importacao.oferta?.metadata && typeof importacao.oferta.metadata === "object" ? importacao.oferta.metadata : {}),
+        ...(resultadoPrecedenciaComercial?.metadata && typeof resultadoPrecedenciaComercial.metadata === "object" ? resultadoPrecedenciaComercial.metadata : (ofertaImportadorRadar?.metadata && typeof ofertaImportadorRadar.metadata === "object" ? ofertaImportadorRadar.metadata : {})),
         comparacaoRadarLocal,
         radarHibrido: {
-          ...(importacao.oferta?.metadata?.radarHibrido && typeof importacao.oferta.metadata.radarHibrido === "object" ? importacao.oferta.metadata.radarHibrido : {}),
+          ...(ofertaImportadorRadar?.metadata?.radarHibrido && typeof ofertaImportadorRadar.metadata.radarHibrido === "object" ? ofertaImportadorRadar.metadata.radarHibrido : {}),
           comparacao: comparacaoRadarLocal
         }
       }, radarMirrorComparado)
@@ -13789,7 +13814,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
       oferta: ofertaRadar,
       linkOriginal: ofertaRadar.linkOriginal || "",
       linkResolvido: ofertaRadar.linkResolvidoRadar || ofertaRadar.urlResolvida || "",
-      imagemImportador: imagemOfertaRadar(importacao.oferta),
+      imagemImportador: imagemOfertaRadar(ofertaImportadorRadar),
       imagemOfertaRadar: imagemOfertaRadar(ofertaRadar),
       imagemFila: ""
     });
