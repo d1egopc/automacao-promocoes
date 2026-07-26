@@ -10238,9 +10238,29 @@ function avisoCupomGenericoRadar(texto = "") {
 }
 
 function normalizarBeneficiosRadarOferta(oferta = {}) {
+  const fonteComercialRadarMirror =
+    oferta.fonteComercial === "radar_mirror" ||
+    oferta.metadata?.fonteComercial === "radar_mirror" ||
+    oferta.metadata?.precedenciaComercial?.fonteComercial === "radar_mirror";
   const cupomRadar = normalizarCupomRadar(oferta);
   const avisoOriginal = textoRadarId(oferta.avisoCupom || "");
   const avisoUtil = avisoCupomGenericoRadar(avisoOriginal) ? "" : avisoOriginal;
+
+  if (fonteComercialRadarMirror) {
+    return {
+      cupom: cupomRadar.cupom,
+      avisoCupom: avisoUtil,
+      tipoCupom: cupomRadar.tipoCupom,
+      valorCupom: cupomRadar.valorCupom,
+      percentualCupom: cupomRadar.percentualCupom,
+      descontoPix: textoRadarId(oferta.descontoPix || ""),
+      descontoApp: textoRadarId(oferta.descontoApp || ""),
+      beneficioExtra: textoRadarId(oferta.beneficioExtra || ""),
+      cupomConfirmado: cupomRadar.cupomConfirmado,
+      possivelCupom: false
+    };
+  }
+
   const textoBeneficio = normalizarTexto([
     avisoOriginal,
     cupomRadar.tipoCupom,

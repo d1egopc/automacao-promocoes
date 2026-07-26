@@ -68,10 +68,7 @@ function temMarcadorPrecoExplicito(radarMirror = {}, campo = {}) {
 function selecionarPrecoRadar(radarMirror = {}) {
   const comercial = radarMirror?.comercial || {};
   const candidatos = [
-    { nome: "precoAtual", valor: radarMirror?.preco?.atualCapturado, confianca: radarMirror?.preco?.confianca, campo: comercial.precoAtual || {}, tipo: comercial.precoAtual?.tipo || radarMirror?.preco?.tipoCapturado || "atual" },
-    { nome: "precoPix", valor: campoValor(comercial.precoPix), confianca: campoConfianca(comercial.precoPix), campo: comercial.precoPix || {}, tipo: "pix" },
-    { nome: "precoBoleto", valor: campoValor(comercial.precoBoleto), confianca: campoConfianca(comercial.precoBoleto), campo: comercial.precoBoleto || {}, tipo: "boleto" },
-    { nome: "precoCartao", valor: campoValor(comercial.precoCartao), confianca: campoConfianca(comercial.precoCartao), campo: comercial.precoCartao || {}, tipo: "cartao" }
+    { nome: "precoAtual", valor: radarMirror?.preco?.atualCapturado, confianca: radarMirror?.preco?.confianca, campo: comercial.precoAtual || {}, tipo: comercial.precoAtual?.tipo || radarMirror?.preco?.tipoCapturado || "atual" }
   ];
 
   let invalido = null;
@@ -121,8 +118,8 @@ function resolverPreco({ ofertaImportador = {}, radarMirror = {}, cupomRadarConf
   const precoImportador = precoValido(ofertaImportador.precoAtual ?? ofertaImportador.preco ?? ofertaImportador.valor);
   const precoRadar = radar.valor;
   const divergenciaPercentual = calcularDivergenciaPercentual(precoRadar, precoImportador);
-  let origemPreco = precoImportador !== null ? "importador" : "ausente";
-  let precoPublicacao = precoImportador;
+  let origemPreco = "ausente";
+  let precoPublicacao = null;
   let statusComparacaoPreco = "sem_radar";
   let motivo = "radar_ausente";
 
@@ -130,20 +127,17 @@ function resolverPreco({ ofertaImportador = {}, radarMirror = {}, cupomRadarConf
     const divergenciaExtrema = divergenciaPercentual !== null && divergenciaPercentual >= DIVERGENCIA_PERCENTUAL_SUSPEITA;
     if (radar.confianca === "alta" || (radar.confianca === "media" && radar.marcadorExplicito)) {
       const evidenciaSemanticaForte = radar.nivelEvidencia === "alta" || radar.nivelEvidencia === "ausente" || !radar.nivelEvidencia;
-      const evidenciaForte = radar.confianca === "alta" && evidenciaSemanticaForte && radar.marcadorExplicito;
-      if (divergenciaExtrema && !cupomRadarConfirmado) {
-        statusComparacaoPreco = "revisao_divergencia_extrema";
-        motivo = "divergencia_extrema_sem_cupom_confirmado";
-      } else if (divergenciaExtrema && !evidenciaForte) {
-        statusComparacaoPreco = "revisao_semantica";
-        motivo = "divergencia_alta_com_evidencia_fraca";
-      } else {
+      const evidenciaAceita = radar.confianca === "media" || evidenciaSemanticaForte || radar.marcadorExplicito;
+      if (evidenciaAceita) {
         origemPreco = "radar";
         precoPublicacao = precoRadar;
         statusComparacaoPreco = divergenciaPercentual !== null && divergenciaPercentual >= 0.01 ? "divergente" : "coerente";
         motivo = divergenciaExtrema
-          ? "divergencia_extrema_com_cupom_confirmado"
+          ? (cupomRadarConfirmado ? "divergencia_extrema_com_cupom_confirmado" : "divergencia_extrema_radar_fiel")
           : (radar.confianca === "alta" ? "radar_alta_confianca" : "radar_media_com_marcador");
+      } else {
+        statusComparacaoPreco = "revisao_semantica";
+        motivo = "radar_evidencia_fraca";
       }
     } else if (radar.confianca === "media") {
       statusComparacaoPreco = "radar_media_sem_marcador";
@@ -199,8 +193,8 @@ function resolverCupom({ ofertaImportador = {}, radarMirror = {} } = {}) {
   }
 
   return {
-    cupomPublicacao: cupomImportador,
-    origemCupom: cupomImportador ? "importador" : "ausente",
+    cupomPublicacao: null,
+    origemCupom: "ausente",
     cupomRadar,
     cupomImportador,
     confiancaCupomRadar,
@@ -287,47 +281,140 @@ function resumirLinks(radarMirror = {}, ofertaImportador = {}) {
   };
 }
 
-function precedenciaComercialAtiva(env = process.env) {
-  return texto(env?.RADAR_PRECEDENCIA_COMERCIAL_ATIVA).toLowerCase() === "true";
+function valorCondicaoTexto(condicao = {}, fallback = "") {
+  if (!condicao || typeof condicao !== "object") return "";
+  const valor = condicao.valor;
+  if (valor === null || valor === undefined || valor === "" || valor === false) return "";
+  return texto(condicao.evidencia || fallback || valor);
 }
 
-function aplicarCamposAtivos(oferta = {}, resolucao = {}) {
+function limparCamposComerciaisImportador(oferta = {}) {
   const proxima = { ...oferta };
-  if (resolucao.origemPreco === "radar" && resolucao.precoPublicacao !== null) {
-    proxima.preco = resolucao.precoPublicacao;
-    proxima.precoAtual = resolucao.precoPublicacao;
-    proxima.precoPublicacao = resolucao.precoPublicacao;
-    proxima.origemPreco = "radar";
-    const precoAnteriorRadar = precoValido(resolucao.precoAnteriorRadar);
-    if (precoAnteriorRadar !== null) {
-      proxima.precoOriginal = precoAnteriorRadar;
-      proxima.precoAnterior = precoAnteriorRadar;
-    }
+  for (const campo of [
+    "titulo",
+    "nome",
+    "descricao",
+    "preco",
+    "preco_atual",
+    "precoAtual",
+    "precoPublicacao",
+    "preco_publicacao",
+    "precoOriginal",
+    "preco_original",
+    "precoAnterior",
+    "preco_anterior",
+    "precoAntigo",
+    "preco_antigo",
+    "precoDe",
+    "preco_de",
+    "valor",
+    "cupom",
+    "codigoCupom",
+    "codigo_cupom",
+    "avisoCupom",
+    "aviso_cupom",
+    "tipoCupom",
+    "cupomTipo",
+    "cupom_tipo",
+    "valorCupom",
+    "cupomValor",
+    "valor_cupom",
+    "cupom_valor",
+    "percentualCupom",
+    "cupomPercentual",
+    "percentual_cupom",
+    "cupom_percentual",
+    "beneficioExtra",
+    "beneficioTexto",
+    "descricaoBeneficio",
+    "descontoPix",
+    "descontoApp",
+    "precoPix",
+    "precoBoleto",
+    "precoCartao",
+    "cashback",
+    "cashbackValor",
+    "cashbackPercentual"
+  ]) {
+    delete proxima[campo];
   }
-  if (resolucao.origemCupom === "radar" && resolucao.cupomPublicacao) {
-    proxima.cupom = resolucao.cupomPublicacao;
-    proxima.codigoCupom = resolucao.cupomPublicacao;
-    proxima.origemCupom = "radar";
-    proxima.cupomOrigem = proxima.cupomOrigem || "radar_comercial";
-    proxima.cupomDetectadoTexto = true;
-  }
-  if (resolucao.linkProdutoOriginal) proxima.linkProdutoOriginal = resolucao.linkProdutoOriginal;
-  if (resolucao.linkResgateCupom) proxima.linkResgateCupom = proxima.linkResgateCupom || resolucao.linkResgateCupom;
-  proxima.condicoesComerciais = resolucao.condicoesComerciais;
-  proxima.confiancaComercial = resolucao.confiancaComercial;
+  proxima.freteGratis = false;
+  proxima.cupomConfirmado = false;
+  proxima.possivelCupom = false;
   return proxima;
 }
 
-function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror = null, metadata = {}, clienteId = "", marketplace = "", env = process.env } = {}) {
+function aplicarRadarMirrorFiel(oferta = {}, resolucao = {}) {
+  const proxima = { ...oferta };
+  const condicoes = resolucao.condicoesComerciais || {};
+
+  if (resolucao.tituloRadar) {
+    proxima.titulo = resolucao.tituloRadar;
+    proxima.nome = resolucao.tituloRadar;
+  }
+
+  if (resolucao.origemPreco === "radar" && resolucao.precoPublicacao !== null) {
+    proxima.preco = resolucao.precoPublicacao;
+    proxima.precoAtual = resolucao.precoPublicacao;
+    proxima.preco_atual = resolucao.precoPublicacao;
+    proxima.precoPublicacao = resolucao.precoPublicacao;
+    proxima.origemPreco = "radar";
+    const precoAnteriorRadar = precoValido(resolucao.precoAnteriorRadar);
+    if (precoAnteriorRadar !== null && precoAnteriorRadar > resolucao.precoPublicacao) {
+      proxima.precoOriginal = precoAnteriorRadar;
+      proxima.precoAnterior = precoAnteriorRadar;
+      proxima.preco_original = precoAnteriorRadar;
+    }
+  }
+
+  if (resolucao.origemCupom === "radar" && resolucao.cupomPublicacao) {
+    proxima.cupom = resolucao.cupomPublicacao;
+    proxima.codigoCupom = resolucao.cupomPublicacao;
+    proxima.codigo_cupom = resolucao.cupomPublicacao;
+    proxima.origemCupom = "radar";
+    proxima.cupomOrigem = proxima.cupomOrigem || "radar_comercial";
+    proxima.cupomDetectadoTexto = true;
+    proxima.cupomConfirmado = true;
+    proxima.possivelCupom = false;
+    proxima.avisoCupom = resolucao.instrucaoCupom || resolucao.textoCupomRadar || "";
+  } else {
+    proxima.origemCupom = "ausente";
+    proxima.cupomConfirmado = false;
+    proxima.possivelCupom = false;
+  }
+
+  const precoPix = valorCondicaoTexto(condicoes.pix, "Preco PIX");
+  const precoBoleto = valorCondicaoTexto(condicoes.boleto, "Preco boleto");
+  const precoCartao = valorCondicaoTexto(condicoes.cartao, "Preco cartao");
+  const cashback = valorCondicaoTexto(condicoes.cashback, "Cashback");
+  const freteGratis = condicoes.freteGratis?.valor === true;
+  const desconto = valorCondicaoTexto(condicoes.descontoPercentual, "Desconto");
+
+  if (precoPix) proxima.precoPix = precoPix;
+  if (precoBoleto) proxima.precoBoleto = precoBoleto;
+  if (precoCartao) proxima.precoCartao = precoCartao;
+  if (cashback) proxima.cashback = cashback;
+  if (freteGratis) proxima.freteGratis = true;
+  if (desconto) proxima.descontoRadar = desconto;
+
+  if (resolucao.linkProdutoOriginal) proxima.linkProdutoOriginal = resolucao.linkProdutoOriginal;
+  if (resolucao.linkResgateCupom) proxima.linkResgateCupom = resolucao.linkResgateCupom;
+  proxima.condicoesComerciais = resolucao.condicoesComerciais;
+  proxima.confiancaComercial = resolucao.confiancaComercial;
+  proxima.fonteComercial = "radar_mirror";
+  return proxima;
+}
+
+function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror = null, metadata = {}, clienteId = "", marketplace = "" } = {}) {
   const mirror = radarMirror || metadata?.radarMirror || null;
   const metadataBase = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {};
-  const ativa = precedenciaComercialAtiva(env);
+  const ativa = Boolean(mirror && typeof mirror === "object");
 
   if (!mirror || typeof mirror !== "object") {
     return {
       aplicavel: false,
-      ativa,
-      modo: ativa ? "ativo" : "simulacao",
+      ativa: false,
+      modo: "inaplicavel",
       oferta: { ...ofertaImportador },
       metadata: { ...metadataBase }
     };
@@ -344,10 +431,12 @@ function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror 
 
   const resolucao = {
     versao: VERSAO_PRECEDENCIA_COMERCIAL,
-    modo: ativa ? "ativo" : "simulacao",
+    modo: "radar_mirror_fiel",
     ativa,
+    fonteComercial: "radar_mirror",
     clienteId: texto(clienteId || mirror?.origem?.clienteId || ""),
     marketplace: texto(marketplace || ofertaImportador.marketplace || mirror?.comparacaoImportador?.marketplace || ""),
+    tituloRadar: textoOuNull(mirror?.produto?.tituloCapturado || ""),
     precoPublicacao: preco.precoPublicacao,
     origemPreco: preco.origemPreco,
     precoRadar: preco.precoRadar,
@@ -385,13 +474,14 @@ function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror 
 
   const metadataResolvida = {
     ...metadataBase,
+    fonteComercial: "radar_mirror",
     precedenciaComercial: resolucao
   };
 
-  const ofertaBase = {
+  const ofertaBase = limparCamposComerciaisImportador({
     ...ofertaImportador,
     metadata: metadataResolvida
-  };
+  });
 
   return {
     aplicavel: true,
@@ -399,7 +489,7 @@ function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror 
     modo: resolucao.modo,
     resolucao,
     metadata: metadataResolvida,
-    oferta: ativa ? aplicarCamposAtivos(ofertaBase, resolucao) : ofertaBase
+    oferta: aplicarRadarMirrorFiel(ofertaBase, resolucao)
   };
 }
 
@@ -407,7 +497,7 @@ function resumirPrecedenciaComercialLog(resultado = {}) {
   const resolucao = resultado.resolucao || {};
   return {
     versao: resolucao.versao || VERSAO_PRECEDENCIA_COMERCIAL,
-    modo: resolucao.modo || (resultado.ativa ? "ativo" : "simulacao"),
+    modo: resolucao.modo || (resultado.ativa ? "radar_mirror_fiel" : "inaplicavel"),
     clienteId: resolucao.clienteId || "",
     marketplace: resolucao.marketplace || "",
     origemPreco: resolucao.origemPreco || "ausente",
@@ -469,7 +559,6 @@ function deveLogarDivergenciaComercial(resultado = {}) {
 
 module.exports = {
   VERSAO_PRECEDENCIA_COMERCIAL,
-  precedenciaComercialAtiva,
   resolverPrecedenciaComercialRadar,
   resumirPrecedenciaComercialLog,
   deveLogarDivergenciaComercial,

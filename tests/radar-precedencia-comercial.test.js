@@ -116,17 +116,13 @@ function oferta(overrides = {}) {
   };
 }
 
-const envOn = { RADAR_PRECEDENCIA_COMERCIAL_ATIVA: "true" };
-const envOff = { RADAR_PRECEDENCIA_COMERCIAL_ATIVA: "false" };
-
-function resolver(ofertaImportador, radarMirror, env = envOn) {
+function resolver(ofertaImportador, radarMirror) {
   return resolverPrecedenciaComercialRadar({
     ofertaImportador,
     radarMirror,
     metadata: ofertaImportador.metadata || {},
     clienteId: "user_teste",
-    marketplace: ofertaImportador.marketplace || "mercadolivre",
-    env
+    marketplace: ofertaImportador.marketplace || "mercadolivre"
   });
 }
 
@@ -148,8 +144,9 @@ function testarPrecoAltaDivergente() {
 function testarSemPrecoRadarUsaImportador() {
   const m = mirrorSemPreco({ comercial: { cupom: {} } });
   const r = resolver(oferta({ preco: 88.8, precoAtual: 88.8 }), m);
-  assert.strictEqual(r.resolucao.origemPreco, "importador");
-  assert.strictEqual(r.resolucao.precoPublicacao, 88.8);
+  assert.strictEqual(r.resolucao.origemPreco, "ausente");
+  assert.strictEqual(r.resolucao.precoPublicacao, null);
+  assert.strictEqual(r.oferta.preco, undefined);
 }
 
 function testarMediaComMarcador() {
@@ -172,8 +169,8 @@ function testarMediaSemMarcadorNaoAplica() {
   m.preco.condicionado = false;
   m.comercial.precoAtual = campo(77.7, "media", "77,70", { tipo: "inferido_unico" });
   const r = resolver(oferta({ preco: 90, precoAtual: 90 }), m);
-  assert.strictEqual(r.resolucao.origemPreco, "importador");
-  assert.strictEqual(r.oferta.preco, 90);
+  assert.strictEqual(r.resolucao.origemPreco, "ausente");
+  assert.strictEqual(r.oferta.preco, undefined);
 }
 
 function testarParcelaNaoViraTotal() {
@@ -181,15 +178,16 @@ function testarParcelaNaoViraTotal() {
   m.comercial.precoParcelado = campo(19.99, "alta", "10x R$ 19,99", { tipo: "parcela" });
   m.comercial.parcelamento = { quantidade: 10, valorParcela: 19.99, semJuros: true, confianca: "alta" };
   const r = resolver(oferta({ preco: 199.9, precoAtual: 199.9 }), m);
-  assert.strictEqual(r.resolucao.origemPreco, "importador");
+  assert.strictEqual(r.resolucao.origemPreco, "ausente");
   assert.strictEqual(r.resolucao.condicoesComerciais.parcelamento.quantidade, 10);
+  assert.strictEqual(r.oferta.preco, undefined);
 }
 
 function testarPercentualNaoViraPreco() {
   const m = mirrorSemPreco({ comercial: { descontoPercentual: campo(50, "alta", "50% OFF"), cupom: {} } });
   const r = resolver(oferta({ preco: 129.9, precoAtual: 129.9 }), m);
-  assert.strictEqual(r.resolucao.origemPreco, "importador");
-  assert.strictEqual(r.resolucao.precoPublicacao, 129.9);
+  assert.strictEqual(r.resolucao.origemPreco, "ausente");
+  assert.strictEqual(r.resolucao.precoPublicacao, null);
 }
 
 function testarCupomRadarClaro() {
@@ -204,8 +202,9 @@ function testarCupomImportadorFallback() {
   m.cupom.confianca = "ausente";
   m.comercial.cupom = { codigo: null, provavel: false, confianca: "ausente" };
   const r = resolver(oferta({ cupom: "IMP10" }), m);
-  assert.strictEqual(r.resolucao.origemCupom, "importador");
-  assert.strictEqual(r.resolucao.cupomPublicacao, "IMP10");
+  assert.strictEqual(r.resolucao.origemCupom, "ausente");
+  assert.strictEqual(r.resolucao.cupomPublicacao, null);
+  assert.strictEqual(r.oferta.cupom, undefined);
 }
 
 function testarCupomProvavelNaoAplica() {
@@ -231,8 +230,9 @@ function testarLinksProdutoEResgate() {
 function testarAmazonPix() {
   const m = mirrorSemPreco(); m.comercial.precoPix = campo(299.9, "alta", "No Pix R$ 299,90");
   const r = resolver(oferta({ marketplace: "amazon", preco: 329.9, precoAtual: 329.9 }), m);
-  assert.strictEqual(r.resolucao.origemPreco, "radar");
-  assert.strictEqual(r.oferta.preco, 299.9);
+  assert.strictEqual(r.resolucao.origemPreco, "ausente");
+  assert.strictEqual(r.oferta.preco, undefined);
+  assert.strictEqual(r.resolucao.condicoesComerciais.pix.valor, 299.9);
 }
 
 function testarMercadoLivreCupom() {
@@ -252,21 +252,21 @@ function testarKabumAwin() {
 }
 
 function testarManualSemMetadataNaoAplica() {
-  const r = resolverPrecedenciaComercialRadar({ ofertaImportador: oferta({ origem: "manual" }), metadata: {}, env: envOn });
+  const r = resolverPrecedenciaComercialRadar({ ofertaImportador: oferta({ origem: "manual" }), metadata: {} });
   assert.strictEqual(r.aplicavel, false);
 }
 
-function testarFlagOffSimulaSemAlterarPreco() {
-  const r = resolver(oferta({ preco: 199.9, precoAtual: 199.9 }), mirror(), envOff);
-  assert.strictEqual(r.modo, "simulacao");
+function testarRadarMirrorFielPadrao() {
+  const r = resolver(oferta({ preco: 199.9, precoAtual: 199.9 }), mirror());
+  assert.strictEqual(r.modo, "radar_mirror_fiel");
   assert.strictEqual(r.resolucao.origemPreco, "radar");
-  assert.strictEqual(r.oferta.preco, 199.9);
+  assert.strictEqual(r.oferta.preco, 99.9);
   assert.strictEqual(r.metadata.precedenciaComercial.precoPublicacao, 99.9);
 }
 
-function testarFlagOnAplicaPreco() {
-  const r = resolver(oferta({ preco: 199.9, precoAtual: 199.9 }), mirror(), envOn);
-  assert.strictEqual(r.modo, "ativo");
+function testarRadarMirrorAplicaPreco() {
+  const r = resolver(oferta({ preco: 199.9, precoAtual: 199.9 }), mirror());
+  assert.strictEqual(r.modo, "radar_mirror_fiel");
   assert.strictEqual(r.oferta.preco, 99.9);
 }
 
@@ -289,13 +289,13 @@ function testarPrecoRadarInvalidoNaoAplica() {
   m.preco.tipoCapturado = "final";
   m.comercial.precoAtual = campo(0, "alta", "Por R$ 0,00", { tipo: "final" });
   const r = resolver(oferta({ preco: 55.5, precoAtual: 55.5 }), m);
-  assert.strictEqual(r.resolucao.origemPreco, "importador");
+  assert.strictEqual(r.resolucao.origemPreco, "ausente");
   assert.strictEqual(r.resolucao.statusComparacaoPreco, "radar_invalido");
-  assert.strictEqual(r.oferta.preco, 55.5);
+  assert.strictEqual(r.oferta.preco, undefined);
 }
 
 function testarPreservacaoAteFila() {
-  const r = resolver(oferta({ preco: 199.9, precoAtual: 199.9 }), mirror(), envOn);
+  const r = resolver(oferta({ preco: 199.9, precoAtual: 199.9 }), mirror());
   const item = montarItemFilaEngine({
     id: 10,
     uuid: "u10",
@@ -362,8 +362,8 @@ function testarDivergenciaExtremaImportadorGeraAlerta() {
   m.preco.condicionado = false;
   m.preco.marcadorComercial = null;
   m.comercial.precoAtual = campo(50, "media", "50", { tipo: "inferido_unico", tipoCandidato: "desconhecido", nivelEvidencia: "media" });
-  const r = resolver(oferta({ marketplace: "amazon", preco: 419.06, precoAtual: 419.06 }), m, envOff);
-  assert.strictEqual(r.resolucao.origemPreco, "importador");
+  const r = resolver(oferta({ marketplace: "amazon", preco: 419.06, precoAtual: 419.06 }), m);
+  assert.strictEqual(r.resolucao.origemPreco, "ausente");
   assert.strictEqual(r.resolucao.statusComparacaoPreco, "radar_media_sem_marcador");
   assert.ok(r.resolucao.divergenciaPercentual >= 80);
   assert.strictEqual(deveLogarPrecoSuspeito(r), true);
@@ -371,7 +371,7 @@ function testarDivergenciaExtremaImportadorGeraAlerta() {
 
 function testarDivergenciaExtremaRadarGeraAlerta() {
   const m = mirror();
-  const r = resolver(oferta({ preco: 10, precoAtual: 10 }), m, envOff);
+  const r = resolver(oferta({ preco: 10, precoAtual: 10 }), m);
   assert.strictEqual(r.resolucao.origemPreco, "radar");
   assert.ok(r.resolucao.divergenciaPercentual >= 80);
   assert.strictEqual(deveLogarPrecoSuspeito(r), true);
@@ -379,10 +379,10 @@ function testarDivergenciaExtremaRadarGeraAlerta() {
 
 function testarRadarExtremoSemCupomNaoGanhaPrecedencia() {
   const m = removerCupomRadar(aplicarPrecoRadar(mirror(), 4.69, "alta", "Por R$ 4,69"));
-  const r = resolver(oferta({ preco: 207, precoAtual: 207, cupom: "" }), m, envOn);
-  assert.strictEqual(r.resolucao.origemPreco, "importador");
-  assert.strictEqual(r.resolucao.statusComparacaoPreco, "revisao_divergencia_extrema");
-  assert.strictEqual(r.oferta.preco, 207);
+  const r = resolver(oferta({ preco: 207, precoAtual: 207, cupom: "" }), m);
+  assert.strictEqual(r.resolucao.origemPreco, "radar");
+  assert.strictEqual(r.resolucao.statusComparacaoPreco, "divergente");
+  assert.strictEqual(r.oferta.preco, 4.69);
   assert.strictEqual(deveLogarPrecoSuspeito(r), true);
 }
 
@@ -396,7 +396,7 @@ function testarRadarExtremoComCupomConfirmadoFicaAuditavel() {
     motivosConfiancaPreco: ["preco_radar_marcador_explicito"],
     candidatosRejeitadosPorTipo: { quantidade: 1, frete: 1 }
   };
-  const r = resolver(oferta({ preco: 207, precoAtual: 207, cupom: "" }), m, envOn);
+  const r = resolver(oferta({ preco: 207, precoAtual: 207, cupom: "" }), m);
   const log = resumirPrecedenciaComercialLog(r);
   assert.strictEqual(r.resolucao.origemPreco, "radar");
   assert.strictEqual(r.oferta.preco, 4.69);
@@ -410,21 +410,21 @@ function testarRadarExtremoComCupomConfirmadoFicaAuditavel() {
 }
 
 function testarDivergenciaAbaixoLimiteMantemComportamentoAtual() {
-  const r = resolver(oferta({ preco: 199.9, precoAtual: 199.9 }), mirror(), envOn);
+  const r = resolver(oferta({ preco: 199.9, precoAtual: 199.9 }), mirror());
   assert.strictEqual(r.resolucao.origemPreco, "radar");
   assert.ok(r.resolucao.divergenciaPercentual < 80);
   assert.strictEqual(deveLogarPrecoSuspeito(r), false);
 }
 
 function testarPrecoCoerenteNaoGeraAlerta() {
-  const r = resolver(oferta({ preco: 99.9, precoAtual: 99.9 }), mirror(), envOn);
+  const r = resolver(oferta({ preco: 99.9, precoAtual: 99.9 }), mirror());
   assert.strictEqual(r.resolucao.statusComparacaoPreco, "coerente");
   assert.strictEqual(deveLogarPrecoSuspeito(r), false);
 }
 
 function testarPrecoBaixoRealCoerenteContinuaPermitido() {
   const m = aplicarPrecoRadar(mirror(), 4.69, "alta", "Por R$ 4,69");
-  const r = resolver(oferta({ preco: 4.69, precoAtual: 4.69 }), m, envOn);
+  const r = resolver(oferta({ preco: 4.69, precoAtual: 4.69 }), m);
   assert.strictEqual(r.resolucao.origemPreco, "radar");
   assert.strictEqual(r.resolucao.statusComparacaoPreco, "coerente");
   assert.strictEqual(r.oferta.preco, 4.69);
@@ -452,7 +452,7 @@ function resultadoComDivergencia(divergenciaPercentual, origemPreco = "importado
   return {
     resolucao: {
       versao: "radar_precedencia_comercial_v1",
-      modo: overrides.modo || "simulacao",
+      modo: overrides.modo || "radar_mirror_fiel",
       clienteId: "user_teste",
       marketplace: "amazon",
       origemPreco,
@@ -508,12 +508,12 @@ function testarLoggingOrigemImportadorEmite() {
   assert.strictEqual(eventosPrecoSuspeito(eventos).length, 1);
 }
 
-function testarLoggingModoSimulacaoEmite() {
-  const { eventos } = capturarLogsPrecoSuspeito(() => emitirLogRadarPrecoSuspeito(resultadoComDivergencia(84.44, "importador", { modo: "simulacao" }), "teste"));
+function testarLoggingModoFielEmite() {
+  const { eventos } = capturarLogsPrecoSuspeito(() => emitirLogRadarPrecoSuspeito(resultadoComDivergencia(84.44, "importador", { modo: "radar_mirror_fiel" }), "teste"));
   const suspeitos = eventosPrecoSuspeito(eventos);
   assert.strictEqual(suspeitos.length, 1);
   const payload = JSON.parse(suspeitos[0][1]);
-  assert.strictEqual(payload.modo, "simulacao");
+  assert.strictEqual(payload.modo, "radar_mirror_fiel");
   assert.strictEqual(payload.etapa, "teste");
   assert.strictEqual(payload.quantidadeCandidatosPreco, 2);
   assert.strictEqual(payload.tipoCandidatoEscolhido, "preco_atual");
@@ -534,8 +534,8 @@ const testes = [
   testarMercadoLivreCupom,
   testarKabumAwin,
   testarManualSemMetadataNaoAplica,
-  testarFlagOffSimulaSemAlterarPreco,
-  testarFlagOnAplicaPreco,
+  testarRadarMirrorFielPadrao,
+  testarRadarMirrorAplicaPreco,
   testarImportadorAbsurdoCorrigidoPorRadar,
   testarPrecoRadarInvalidoNaoAplica,
   testarPreservacaoAteFila,
@@ -553,7 +553,7 @@ const testes = [
   testarLoggingEmiteEm29100,
   testarLoggingOrigemRadarComCupomEmite,
   testarLoggingOrigemImportadorEmite,
-  testarLoggingModoSimulacaoEmite
+  testarLoggingModoFielEmite
 ];
 
 for (const teste of testes) teste();

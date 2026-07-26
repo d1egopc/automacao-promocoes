@@ -169,23 +169,23 @@ function testar1331MonetarioValido() {
 }
 
 function testarManualSemRadar() {
-  const resultado = resolverPrecedenciaComercialRadar({ ofertaImportador: { preco: 10, origem: "manual" }, metadata: {}, env: { RADAR_PRECEDENCIA_COMERCIAL_ATIVA: "true" } });
+  const resultado = resolverPrecedenciaComercialRadar({ ofertaImportador: { preco: 10, origem: "manual" }, metadata: {} });
   assert.strictEqual(resultado.aplicavel, false);
 }
 
-function testarModoSimulacao() {
+function testarRadarMirrorFielPadrao() {
   const comercial = extrair("Por R$ 59,90");
   const mirror = criarRadarMirror({ textoOriginal: "Por R$ 59,90", links: [], extracaoRadarLocal: { precoAtual: comercial.precoAtual, comercial }, marketplace: "amazon" });
-  const resultado = resolverPrecedenciaComercialRadar({ ofertaImportador: { preco: 99.9, precoAtual: 99.9, marketplace: "amazon", metadata: {} }, radarMirror: mirror, metadata: {}, env: {} });
-  assert.strictEqual(resultado.modo, "simulacao");
-  assert.strictEqual(resultado.oferta.preco, 99.9);
+  const resultado = resolverPrecedenciaComercialRadar({ ofertaImportador: { preco: 99.9, precoAtual: 99.9, marketplace: "amazon", metadata: {} }, radarMirror: mirror, metadata: {} });
+  assert.strictEqual(resultado.modo, "radar_mirror_fiel");
+  assert.strictEqual(resultado.oferta.preco, 59.9);
   assert.strictEqual(resultado.metadata.precedenciaComercial.precoPublicacao, 59.9);
 }
 
 function testarMetadataPrecedencia() {
   const comercial = extrair("1.331 vendidos - R$ 18,99");
   const mirror = criarRadarMirror({ textoOriginal: "1.331 vendidos - R$ 18,99", links: [], extracaoRadarLocal: { precoAtual: comercial.precoAtual, comercial }, marketplace: "mercadolivre" });
-  const resultado = resolverPrecedenciaComercialRadar({ ofertaImportador: { preco: 20, precoAtual: 20, marketplace: "mercadolivre", metadata: {} }, radarMirror: mirror, metadata: {}, env: { RADAR_PRECEDENCIA_COMERCIAL_ATIVA: "false" } });
+  const resultado = resolverPrecedenciaComercialRadar({ ofertaImportador: { preco: 20, precoAtual: 20, marketplace: "mercadolivre", metadata: {} }, radarMirror: mirror, metadata: {} });
   assert.strictEqual(resultado.metadata.precedenciaComercial.quantidadeCandidatosPreco >= 2, true);
   assert.strictEqual(resultado.metadata.precedenciaComercial.tipoCandidatoEscolhido, "preco_atual");
 }
@@ -217,7 +217,7 @@ const testes = [
   testar1331SemContexto,
   testar1331MonetarioValido,
   testarManualSemRadar,
-  testarModoSimulacao,
+  testarRadarMirrorFielPadrao,
   testarMetadataPrecedencia
 ];
 
