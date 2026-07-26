@@ -1,4 +1,8 @@
-﻿const { normalizarNumeroMoeda } = require("../../utils/moeda");
+const { normalizarNumeroMoeda } = require("../../utils/moeda");
+const {
+  resolverPrecoSemantico,
+  campoDeCandidato
+} = require("./preco-semantico");
 
 const VERSAO_EXTRATOR_COMERCIAL = "radar_comercial_universal_v1";
 const CONFIANCA = {
@@ -193,91 +197,52 @@ function primeiroValorPorMarcador(valores = [], regex, confianca = CONFIANCA.ALT
 
 function extrairPrecosComerciais(textoFonte = "") {
   const fonte = textoNormalizado(textoFonte);
-  const valores = coletarValores(fonte);
+  const semantico = resolverPrecoSemantico(fonte);
   const resultado = {
-    precoAtual: criarCampoAusente({ tipo: "desconhecido" }),
-    precoAntigo: criarCampoAusente(),
-    precoPix: criarCampoAusente(),
-    precoBoleto: criarCampoAusente(),
-    precoCartao: criarCampoAusente(),
-    precoParcelado: criarCampoAusente(),
-    parcelamento: { quantidade: null, valorParcela: null, semJuros: false, confianca: CONFIANCA.AUSENTE, evidencia: null },
+    precoAtual: campoDeCandidato(semantico.precoAtual, CONFIANCA.AUSENTE),
+    precoAntigo: campoDeCandidato(semantico.precoAntigo, CONFIANCA.AUSENTE),
+    precoPix: campoDeCandidato(semantico.precoPix, CONFIANCA.AUSENTE),
+    precoBoleto: campoDeCandidato(semantico.precoBoleto, CONFIANCA.AUSENTE),
+    precoCartao: campoDeCandidato(semantico.precoCartao, CONFIANCA.AUSENTE),
+    precoParcelado: campoDeCandidato(semantico.parcela, CONFIANCA.AUSENTE),
+    parcelamento: {
+      quantidade: null,
+      valorParcela: semantico.parcela?.valor ?? null,
+      semJuros: /sem\s+juros/i.test(semantico.parcela?.trechoOrigem || ""),
+      confianca: semantico.parcela?.nivelEvidencia || CONFIANCA.AUSENTE,
+      evidencia: semantico.parcela?.trechoOrigem || null
+    },
     descontoPercentual: criarCampoAusente(),
-    valorEconomia: criarCampoAusente(),
-    ambiguidades: []
+    valorEconomia: campoDeCandidato(semantico.economia, CONFIANCA.AUSENTE),
+    valorCupom: campoDeCandidato(semantico.cupomValor, CONFIANCA.AUSENTE),
+    frete: campoDeCandidato(semantico.frete, CONFIANCA.AUSENTE),
+    cashbackValor: campoDeCandidato(semantico.cashback, CONFIANCA.AUSENTE),
+    ambiguidades: semantico.ambiguidades || [],
+    candidatosPreco: semantico.candidatos || [],
+    resolucaoPreco: {
+      versao: semantico.versao,
+      quantidadeCandidatosPreco: semantico.quantidadeCandidatosPreco || 0,
+      tipoCandidatoEscolhido: semantico.escolhido?.tipoCandidato || "ausente",
+      marcadorPrecoEscolhido: semantico.escolhido?.marcadorAnterior || semantico.escolhido?.marcadorPosterior || "",
+      possuiCifraoPrecoEscolhido: semantico.escolhido?.possuiCifrao === true,
+      motivosConfiancaPreco: semantico.motivosConfiancaPreco || [],
+      candidatosRejeitadosPorTipo: semantico.candidatosRejeitadosPorTipo || {}
+    }
   };
 
-  const dePor = fonte.match(new RegExp(`(?:\\bde|antes|era|preco antigo|preço antigo)\\s*:?\\s*(?:R\\$\\s*)?(${PADRAO_VALOR})[\\s\\S]{0,50}?(?:\\bpor|agora|sai por|apenas)\\s*:?\\s*(?:R\\$\\s*)?(${PADRAO_VALOR})`, "i"));
-  if (dePor) {
-    const anterior = valorMoeda(dePor[1]);
-    const atual = valorMoeda(dePor[2]);
-    if (anterior !== null) resultado.precoAntigo = campo(anterior, CONFIANCA.ALTA, dePor[0]);
-    if (atual !== null) resultado.precoAtual = campo(atual, CONFIANCA.ALTA, dePor[0], { tipo: "final" });
-  }
-
-  resultado.precoPix = primeiroValorPorMarcador(valores, /\b(pix|a vista|avista)\b/);
-  resultado.precoBoleto = primeiroValorPorMarcador(valores, /\b(boleto)\b/);
-  resultado.precoCartao = primeiroValorPorMarcador(valores, /\b(cartao|cartao de credito|credito)\b/);
-
-  const parcela = fonte.match(new RegExp(`\\b(\\d{1,2})\\s*x\\s*(?:de\\s*)?(?:R\\$\\s*)?(${PADRAO_VALOR})(?:[^\\n]{0,30})?`, "i"));
-  if (parcela) {
-    resultado.parcelamento = {
-      quantidade: Number(parcela[1]),
-      valorParcela: valorMoeda(parcela[2]),
-      semJuros: /sem\s+juros/i.test(parcela[0]),
-      confianca: CONFIANCA.ALTA,
-      evidencia: evidencia(parcela[0])
-    };
-    resultado.precoParcelado = campo(resultado.parcelamento.valorParcela, CONFIANCA.ALTA, parcela[0], { tipo: "parcela" });
+  if (semantico.parcela) {
+    const parcela = fonte.match(/\b(\d{1,2})\s*x\s*(?:de\s*)?(?:R\$\s*)?\d/i);
+    if (parcela) resultado.parcelamento.quantidade = Number(parcela[1]);
   }
 
   const percentual = fonte.match(/\b(\d{1,2})\s*%\s*(?:off|OFF|de desconto|desconto)?|\b(?:off|desconto)\s*(?:de\s*)?(\d{1,2})\s*%/i);
   if (percentual) {
     const valor = Number(percentual[1] || percentual[2]);
-    if (Number.isFinite(valor) && valor > 0) resultado.descontoPercentual = campo(valor, CONFIANCA.ALTA, percentual[0]);
-  }
-
-  const economia = fonte.match(new RegExp(`\\b(?:economize|economia|desconto)\\s*(?:de\\s*)?(?:R\\$\\s*)?(${PADRAO_VALOR})`, "i"));
-  if (economia) resultado.valorEconomia = campo(valorMoeda(economia[1]), CONFIANCA.MEDIA, economia[0]);
-
-  if (!resultado.precoAntigo.valor) {
-    const anterior = primeiroValorPorMarcador(valores, /\b(de|antes|era|preco antigo|preco de|valor antigo)\b/, CONFIANCA.MEDIA);
-    if (anterior.valor !== null) resultado.precoAntigo = anterior;
-  }
-
-  if (!resultado.precoAtual.valor) {
-    const final = primeiroValorPorMarcador(valores, /\b(por|agora|sai por|saindo por|apenas|hoje|final|leva por|fica por|no pix|pix)\b/, CONFIANCA.ALTA);
-    if (final.valor !== null) resultado.precoAtual = { ...final, tipo: resultado.precoPix.valor === final.valor ? "pix" : "final" };
-  }
-
-  if (!resultado.precoAtual.valor && resultado.precoPix.valor !== null) {
-    resultado.precoAtual = { ...resultado.precoPix, tipo: "pix" };
-  }
-
-  if (!resultado.precoAtual.valor) {
-    const valoresProduto = valores.filter(item => !linhaTem(item.linha, /\b(cupom|cashback|frete|acima de|valor minimo|parcela|x de|economize|economia)\b/));
-    if (valoresProduto.length === 1) {
-      const unico = valoresProduto[0];
-      if (/R\$|[,.]\d{2}/i.test(unico.linha || unico.evidencia || "")) {
-        resultado.precoAtual = campo(unico.valor, CONFIANCA.MEDIA, unico.linha, { tipo: "inferido_unico" });
-      }
-    } else if (valoresProduto.length > 1) {
-      resultado.ambiguidades.push({ tipo: "multiplos_precos_comerciais", quantidade: valoresProduto.length });
-    }
-  }
-
-  if (!resultado.precoAntigo.valor && resultado.precoAtual.valor && valores.length >= 2) {
-    const maiores = valores
-      .filter(item => item.valor > resultado.precoAtual.valor)
-      .sort((a, b) => b.valor - a.valor);
-    if (maiores[0] && /\b(de|antes|era|preco|valor)\b/i.test(maiores[0].linha)) {
-      resultado.precoAntigo = campo(maiores[0].valor, CONFIANCA.BAIXA, maiores[0].linha);
-    }
+    if (Number.isFinite(valor) && valor > 0) resultado.descontoPercentual = campo(valor, CONFIANCA.ALTA, percentual[0], { tipo: "percentual" });
   }
 
   return resultado;
 }
-
 function normalizarCupom(codigo = "") {
   return texto(codigo)
     .toUpperCase()
@@ -456,6 +421,11 @@ function extrairComercialUniversal(entrada = {}) {
     brindes: condicoes.brindes,
     condicoesEspeciais: condicoes.especiais,
     links,
+    valorCupom: precos.valorCupom,
+    frete: precos.frete,
+    cashbackValor: precos.cashbackValor,
+    candidatosPreco: precos.candidatosPreco,
+    resolucaoPreco: precos.resolucaoPreco,
     ambiguidades: precos.ambiguidades,
     regexUtilizadas: [],
     camposEncontrados: [],
@@ -464,7 +434,7 @@ function extrairComercialUniversal(entrada = {}) {
   };
 
   resultado.camposEncontrados = camposEncontrados(resultado);
-  const todosCampos = ["precoAtual", "precoAntigo", "precoPix", "precoBoleto", "precoCartao", "parcelamento", "descontoPercentual", "cupom", "cashback", "freteGratis", "marketplace", "categoria", "avaliacao", "quantidadeVendida", "estoque", "seloOficial", "moedasShopee", "brindes", "links"];
+  const todosCampos = ["precoAtual", "precoAntigo", "precoPix", "precoBoleto", "precoCartao", "parcelamento", "descontoPercentual", "valorCupom", "valorEconomia", "frete", "cashbackValor", "cupom", "cashback", "freteGratis", "marketplace", "categoria", "avaliacao", "quantidadeVendida", "estoque", "seloOficial", "moedasShopee", "brindes", "links"];
   resultado.camposAusentes = todosCampos.filter(campoNome => !resultado.camposEncontrados.includes(campoNome));
   resultado.tiposReconhecidos = [...new Set([
     ...resultado.camposEncontrados,

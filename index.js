@@ -13674,6 +13674,13 @@ const registroEngineRadar = temRedirectConhecidoRadar
           etapa: "radar_legado"
         }));
       }
+      if (deveLogarPrecoSuspeito(resultadoPrecedenciaComercial)) {
+        console.log("[RADAR-PRECO-SUSPEITO]", JSON.stringify({
+          ...resumirPrecedenciaComercialLog(resultadoPrecedenciaComercial),
+          motivos: resultadoPrecedenciaComercial?.resolucao?.motivosConfiancaPreco || [],
+          etapa: "radar_legado"
+        }));
+      }
     }
 
     if (!importacao.ok) {

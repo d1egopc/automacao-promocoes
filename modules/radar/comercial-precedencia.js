@@ -1,7 +1,8 @@
-﻿const { normalizarNumeroMoeda } = require("../../utils/moeda");
+const { normalizarNumeroMoeda } = require("../../utils/moeda");
 
 const VERSAO_PRECEDENCIA_COMERCIAL = "radar_precedencia_comercial_v1";
 const DIVERGENCIA_PERCENTUAL_LOG = 20;
+const DIVERGENCIA_PERCENTUAL_SUSPEITA = 80;
 const CONFIANCAS_VALIDAS = new Set(["alta", "media", "baixa", "ausente"]);
 
 function texto(valor = "") {
@@ -97,7 +98,7 @@ function selecionarPrecoRadar(radarMirror = {}) {
       invalido: false
     };
   }
-  return invalido || { nome: "ausente", valor: null, confianca: "ausente", campo: {}, tipo: "ausente", marcadorExplicito: false, invalido: false };
+  return invalido || { nome: "ausente", valor: null, confianca: "ausente", campo: {}, tipo: "ausente", tipoCandidato: "ausente", marcadorPrecoEscolhido: "", possuiCifrao: false, nivelEvidencia: "ausente", motivos: [], marcadorExplicito: false, invalido: false };
 }
 
 function calcularDivergenciaPercentual(precoRadar, precoImportador) {
@@ -117,10 +118,19 @@ function resolverPreco({ ofertaImportador = {}, radarMirror = {} } = {}) {
 
   if (precoRadar !== null) {
     if (radar.confianca === "alta" || (radar.confianca === "media" && radar.marcadorExplicito)) {
-      origemPreco = "radar";
-      precoPublicacao = precoRadar;
-      statusComparacaoPreco = divergenciaPercentual !== null && divergenciaPercentual >= 0.01 ? "divergente" : "coerente";
-      motivo = radar.confianca === "alta" ? "radar_alta_confianca" : "radar_media_com_marcador";
+      const evidenciaSemanticaForte = radar.nivelEvidencia === "alta" || radar.nivelEvidencia === "ausente" || !radar.nivelEvidencia;
+      const evidenciaForte = radar.confianca === "alta" && evidenciaSemanticaForte && radar.marcadorExplicito;
+      if (divergenciaPercentual !== null && divergenciaPercentual >= DIVERGENCIA_PERCENTUAL_SUSPEITA && !evidenciaForte) {
+        statusComparacaoPreco = "revisao_semantica";
+        motivo = "divergencia_alta_com_evidencia_fraca";
+      } else {
+        origemPreco = "radar";
+        precoPublicacao = precoRadar;
+        statusComparacaoPreco = divergenciaPercentual !== null && divergenciaPercentual >= 0.01 ? "divergente" : "coerente";
+        motivo = divergenciaPercentual !== null && divergenciaPercentual >= DIVERGENCIA_PERCENTUAL_SUSPEITA
+          ? "divergencia_alta_com_evidencia_forte"
+          : (radar.confianca === "alta" ? "radar_alta_confianca" : "radar_media_com_marcador");
+      }
     } else if (radar.confianca === "media") {
       statusComparacaoPreco = "radar_media_sem_marcador";
       motivo = "radar_media_sem_marcador";
@@ -309,6 +319,7 @@ function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror 
   const links = resumirLinks(mirror, ofertaImportador);
   const condicoesComerciais = montarCondicoesComerciais(mirror);
   const confiancaComercial = montarConfiancaComercial(mirror, preco, cupom);
+  const resolucaoPrecoComercial = mirror?.comercial?.resolucaoPreco || {};
   const precoAnteriorRadar = precoValido(mirror?.preco?.anteriorCapturado ?? mirror?.comercial?.precoAntigo?.valor);
 
   const resolucao = {
@@ -328,6 +339,12 @@ function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror 
     tipoPrecoRadar: preco.tipoPrecoRadar,
     campoPrecoRadar: preco.campoPrecoRadar,
     marcadorPrecoExplicito: preco.marcadorPrecoExplicito,
+    tipoCandidatoEscolhido: texto(preco.tipoCandidato || resolucaoPrecoComercial.tipoCandidatoEscolhido || ""),
+    marcadorPrecoEscolhido: texto(preco.marcadorPrecoEscolhido || resolucaoPrecoComercial.marcadorPrecoEscolhido || ""),
+    possuiCifraoPrecoEscolhido: preco.possuiCifrao === true || resolucaoPrecoComercial.possuiCifraoPrecoEscolhido === true,
+    motivosConfiancaPreco: Array.isArray(preco.motivos) && preco.motivos.length ? preco.motivos.slice(0, 12) : (Array.isArray(resolucaoPrecoComercial.motivosConfiancaPreco) ? resolucaoPrecoComercial.motivosConfiancaPreco.slice(0, 12) : []),
+    quantidadeCandidatosPreco: Number(resolucaoPrecoComercial.quantidadeCandidatosPreco || 0),
+    candidatosRejeitadosPorTipo: resolucaoPrecoComercial.candidatosRejeitadosPorTipo && typeof resolucaoPrecoComercial.candidatosRejeitadosPorTipo === "object" ? resolucaoPrecoComercial.candidatosRejeitadosPorTipo : {},
     motivoPreco: preco.motivo,
     cupomPublicacao: cupom.cupomPublicacao,
     origemCupom: cupom.origemCupom,
@@ -389,6 +406,17 @@ function resumirPrecedenciaComercialLog(resultado = {}) {
   };
 }
 
+function deveLogarPrecoSuspeito(resultado = {}) {
+  const resolucao = resultado.resolucao || {};
+  return Boolean(
+    resolucao.statusComparacaoPreco === "revisao_semantica" ||
+    resolucao.statusComparacaoPreco === "radar_invalido" ||
+    (typeof resolucao.divergenciaPercentual === "number" &&
+      resolucao.divergenciaPercentual >= DIVERGENCIA_PERCENTUAL_SUSPEITA &&
+      resolucao.origemPreco !== "radar")
+  );
+}
+
 function deveLogarDivergenciaComercial(resultado = {}) {
   const resolucao = resultado.resolucao || {};
   return Boolean(
@@ -407,5 +435,3 @@ module.exports = {
   resolverPreco,
   resolverCupom
 };
-
-

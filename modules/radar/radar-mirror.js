@@ -152,7 +152,14 @@ function campoComercial(campo = {}) {
     valor: campo.valor ?? null,
     confianca: confianca(campo.confianca || "ausente"),
     evidencia: textoOuNull(campo.evidencia || ""),
-    tipo: textoOuNull(campo.tipo || "")
+    tipo: textoOuNull(campo.tipo || ""),
+    tipoCandidato: textoOuNull(campo.tipoCandidato || ""),
+    marcadorAnterior: textoOuNull(campo.marcadorAnterior || ""),
+    marcadorPosterior: textoOuNull(campo.marcadorPosterior || ""),
+    possuiCifrao: campo.possuiCifrao === true,
+    possuiMoeda: campo.possuiMoeda === true,
+    nivelEvidencia: textoOuNull(campo.nivelEvidencia || ""),
+    motivos: Array.isArray(campo.motivos) ? campo.motivos.filter(Boolean).slice(0, 12) : []
   };
 }
 
@@ -215,6 +222,15 @@ function resumirComercialRadar(extracao = {}) {
     brindes: Array.isArray(comercial.brindes) ? comercial.brindes.filter(Boolean).slice(0, 10) : [],
     condicoesEspeciais: Array.isArray(comercial.condicoesEspeciais) ? comercial.condicoesEspeciais.filter(Boolean).slice(0, 20) : [],
     links: resumirLinksComerciais(comercial),
+    resolucaoPreco: comercial.resolucaoPreco && typeof comercial.resolucaoPreco === "object" ? {
+      versao: textoOuNull(comercial.resolucaoPreco.versao || ""),
+      quantidadeCandidatosPreco: Number(comercial.resolucaoPreco.quantidadeCandidatosPreco || 0),
+      tipoCandidatoEscolhido: textoOuNull(comercial.resolucaoPreco.tipoCandidatoEscolhido || ""),
+      marcadorPrecoEscolhido: textoOuNull(comercial.resolucaoPreco.marcadorPrecoEscolhido || ""),
+      possuiCifraoPrecoEscolhido: comercial.resolucaoPreco.possuiCifraoPrecoEscolhido === true,
+      motivosConfiancaPreco: Array.isArray(comercial.resolucaoPreco.motivosConfiancaPreco) ? comercial.resolucaoPreco.motivosConfiancaPreco.filter(Boolean).slice(0, 12) : [],
+      candidatosRejeitadosPorTipo: comercial.resolucaoPreco.candidatosRejeitadosPorTipo && typeof comercial.resolucaoPreco.candidatosRejeitadosPorTipo === "object" ? comercial.resolucaoPreco.candidatosRejeitadosPorTipo : {}
+    } : null,
     camposEncontrados: Array.isArray(comercial.camposEncontrados) ? comercial.camposEncontrados.slice(0, 40) : [],
     camposAusentes: Array.isArray(comercial.camposAusentes) ? comercial.camposAusentes.slice(0, 40) : [],
     tiposReconhecidos: Array.isArray(comercial.tiposReconhecidos) ? comercial.tiposReconhecidos.slice(0, 40) : []
