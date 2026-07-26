@@ -1,3 +1,8 @@
+const {
+  extrairComercialUniversal,
+  resumirExtratorComercialParaLog
+} = require("./extrator-comercial-universal");
+
 const RADAR_EXTRATOR_LOCAL_MODO = "observacao";
 const VERSAO_EXTRATOR_LOCAL = "radar_extrator_local_v1";
 
@@ -359,6 +364,83 @@ function extrairCupom(texto = "", radarCupomMensagem = {}) {
   };
 }
 
+function campoComercialParaLocal(comercialCampo = {}, extras = {}) {
+  if (!comercialCampo || comercialCampo.valor === null || comercialCampo.valor === undefined) return campo(null, CONFIANCA.AUSENTE, null, extras);
+  return campo(comercialCampo.valor, comercialCampo.confianca || CONFIANCA.MEDIA, comercialCampo.evidencia || null, extras);
+}
+
+function aplicarComercialUniversal(resultado = {}, comercial = null) {
+  if (!comercial || typeof comercial !== "object") return resultado;
+  resultado.comercial = comercial;
+  resultado.precoPix = comercial.precoPix;
+  resultado.precoBoleto = comercial.precoBoleto;
+  resultado.precoCartao = comercial.precoCartao;
+  resultado.precoParcelado = comercial.precoParcelado;
+  resultado.cashback = comercial.cashback;
+  resultado.freteGratis = comercial.freteGratis;
+  resultado.categoria = comercial.categoria;
+  resultado.avaliacao = comercial.avaliacao;
+  resultado.quantidadeVendida = comercial.quantidadeVendida;
+  resultado.estoque = comercial.estoque;
+  resultado.seloOficial = comercial.seloOficial;
+  resultado.moedasShopee = comercial.moedasShopee;
+  resultado.brindes = comercial.brindes;
+  resultado.condicoesEspeciais = comercial.condicoesEspeciais;
+  resultado.linksClassificados = comercial.links;
+
+  if (!resultado.marketplace?.valor && resultado.marketplace?.confianca === CONFIANCA.AUSENTE && comercial.marketplace?.valor) {
+    resultado.marketplace = campoComercialParaLocal(comercial.marketplace);
+  }
+
+  if (resultado.precoAtual?.valor == null && comercial.precoAtual?.valor != null) {
+    resultado.precoAtual = campoComercialParaLocal(comercial.precoAtual, { tipo: comercial.precoAtual.tipo || "comercial" });
+  }
+
+  if (resultado.precoAnterior?.valor == null && comercial.precoAntigo?.valor != null) {
+    resultado.precoAnterior = campoComercialParaLocal(comercial.precoAntigo);
+  }
+
+  if (resultado.parcelamento?.quantidade == null && comercial.parcelamento?.quantidade != null) {
+    resultado.parcelamento = {
+      quantidade: comercial.parcelamento.quantidade,
+      valorParcela: comercial.parcelamento.valorParcela,
+      semJuros: comercial.parcelamento.semJuros === true,
+      confianca: comercial.parcelamento.confianca || CONFIANCA.MEDIA,
+      evidencia: comercial.parcelamento.evidencia || null
+    };
+  }
+
+  if (resultado.desconto?.percentual == null && comercial.descontoPercentual?.valor != null) {
+    resultado.desconto.percentual = comercial.descontoPercentual.valor;
+    resultado.desconto.confianca = comercial.descontoPercentual.confianca || CONFIANCA.MEDIA;
+  }
+  if (resultado.desconto?.valorEconomia == null && comercial.valorEconomia?.valor != null) {
+    resultado.desconto.valorEconomia = comercial.valorEconomia.valor;
+    resultado.desconto.confianca = comercial.valorEconomia.confianca || resultado.desconto.confianca || CONFIANCA.MEDIA;
+  }
+
+  if (!resultado.cupom?.codigo && !resultado.cupom?.beneficioTexto) {
+    resultado.cupom = {
+      codigo: comercial.cupom?.codigo || null,
+      beneficioTexto: comercial.cupom?.texto || null,
+      instrucao: comercial.cupom?.instrucao || null,
+      valor: comercial.cupom?.valor ?? null,
+      percentual: comercial.cupom?.percentual ?? null,
+      confianca: comercial.cupom?.confianca || CONFIANCA.AUSENTE,
+      evidencia: comercial.cupom?.evidencia || comercial.cupom?.texto || null,
+      provavel: comercial.cupom?.provavel === true
+    };
+  } else if (!resultado.cupom.instrucao && comercial.cupom?.instrucao) {
+    resultado.cupom.instrucao = comercial.cupom.instrucao;
+  }
+
+  for (const ambiguidade of Array.isArray(comercial.ambiguidades) ? comercial.ambiguidades : []) {
+    adicionarLimitado(resultado.ambiguidades, ambiguidade, LIMITES_EXTRATOR_LOCAL.AMBIGUIDADES_MAX);
+  }
+
+  return resultado;
+}
+
 function extrairValidade(texto = "") {
   const fonte = normalizarTexto(texto);
   const padroes = [
@@ -425,6 +507,12 @@ function extrairEvidenciasRadarLocal(entrada = {}, deps = {}) {
     adicionarLimitado(resultado.avisos, { tipo: "shortlink_sem_resolucao" }, LIMITES_EXTRATOR_LOCAL.AVISOS_MAX);
   }
 
+  const inicioComercial = Date.now();
+  const comercial = extrairComercialUniversal({
+    textoOriginal: texto,
+    links: resultado.links,
+    marketplaceDetectado
+  });
   resultado.titulo = extrairTitulo(texto, resultado.links);
   const precos = extrairPrecos(texto);
   resultado.precoAtual = precos.precoAtual;
@@ -436,6 +524,8 @@ function extrairEvidenciasRadarLocal(entrada = {}, deps = {}) {
   resultado.parcelamento = extrairParcelamento(texto);
   resultado.cupom = extrairCupom(texto, deps.radarCupomMensagem);
   resultado.validade = extrairValidade(texto);
+  aplicarComercialUniversal(resultado, comercial);
+  resultado.comercial.duracaoMs = Date.now() - inicioComercial;
 
   return resultado;
 }
@@ -455,6 +545,8 @@ function resumirExtratorLocalParaLog(extracao = {}, duracaoMs = 0) {
     precoAnteriorConfianca: extracao.precoAnterior?.confianca || CONFIANCA.AUSENTE,
     cupomCodigoEncontrado: Boolean(extracao.cupom?.codigo),
     cupomConfianca: extracao.cupom?.confianca || CONFIANCA.AUSENTE,
+    comercialCamposEncontrados: extracao.comercial?.camposEncontrados || [],
+    comercialTiposReconhecidos: extracao.comercial?.tiposReconhecidos || [],
     validadeEncontrada: Boolean(extracao.validade?.valorTexto),
     imagemMensagemPresente: Boolean(extracao.imagemMensagem?.presente),
     quantidadeAmbiguidades: Array.isArray(extracao.ambiguidades) ? extracao.ambiguidades.length : 0,
@@ -523,5 +615,6 @@ module.exports = {
   extrairEvidenciasRadarLocal,
   resumirExtratorLocalParaLog,
   gerarComparacaoPassivaRadarLocal,
-  normalizarPrecoBrasileiro
+  normalizarPrecoBrasileiro,
+  resumirExtratorComercialParaLog
 };

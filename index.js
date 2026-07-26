@@ -185,7 +185,8 @@ const radarCupomMensagem = require("./utils/radar-cupom-mensagem");
 const {
   extrairEvidenciasRadarLocal,
   resumirExtratorLocalParaLog,
-  gerarComparacaoPassivaRadarLocal
+  gerarComparacaoPassivaRadarLocal,
+  resumirExtratorComercialParaLog
 } = require("./modules/radar/extrator-local");
 const {
   criarRadarMirror,
@@ -13342,6 +13343,11 @@ try {
   console.log("[RADAR-HIBRIDO-EXTRATOR-LOCAL]", JSON.stringify(
     resumirExtratorLocalParaLog(extracaoRadarLocal, Date.now() - inicioExtratorLocal)
   ));
+  if (extracaoRadarLocal?.comercial) {
+    console.log("[RADAR-COMERCIAL-EXTRATOR]", JSON.stringify(
+      resumirExtratorComercialParaLog(extracaoRadarLocal.comercial, extracaoRadarLocal.comercial.duracaoMs || 0)
+    ));
+  }
 } catch (erroExtratorLocal) {
   console.log("[RADAR-HIBRIDO-EXTRATOR-ERRO]", JSON.stringify({
     origemTipo: origemTipoFinal,
