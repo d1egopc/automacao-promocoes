@@ -205,6 +205,7 @@ function extrairPrecosComerciais(textoFonte = "") {
     precoBoleto: campoDeCandidato(semantico.precoBoleto, CONFIANCA.AUSENTE),
     precoCartao: campoDeCandidato(semantico.precoCartao, CONFIANCA.AUSENTE),
     precoParcelado: campoDeCandidato(semantico.parcela, CONFIANCA.AUSENTE),
+    precoUnitario: campoDeCandidato(semantico.precoUnitario, CONFIANCA.AUSENTE),
     parcelamento: {
       quantidade: null,
       valorParcela: semantico.parcela?.valor ?? null,
@@ -403,6 +404,7 @@ function extrairComercialUniversal(entrada = {}) {
     precoBoleto: precos.precoBoleto,
     precoCartao: precos.precoCartao,
     precoParcelado: precos.precoParcelado,
+    precoUnitario: precos.precoUnitario,
     parcelamento: precos.parcelamento,
     descontoPercentual: precos.descontoPercentual,
     valorEconomia: precos.valorEconomia,
@@ -434,7 +436,7 @@ function extrairComercialUniversal(entrada = {}) {
   };
 
   resultado.camposEncontrados = camposEncontrados(resultado);
-  const todosCampos = ["precoAtual", "precoAntigo", "precoPix", "precoBoleto", "precoCartao", "parcelamento", "descontoPercentual", "valorCupom", "valorEconomia", "frete", "cashbackValor", "cupom", "cashback", "freteGratis", "marketplace", "categoria", "avaliacao", "quantidadeVendida", "estoque", "seloOficial", "moedasShopee", "brindes", "links"];
+  const todosCampos = ["precoAtual", "precoAntigo", "precoPix", "precoBoleto", "precoCartao", "precoUnitario", "parcelamento", "descontoPercentual", "valorCupom", "valorEconomia", "frete", "cashbackValor", "cupom", "cashback", "freteGratis", "marketplace", "categoria", "avaliacao", "quantidadeVendida", "estoque", "seloOficial", "moedasShopee", "brindes", "links"];
   resultado.camposAusentes = todosCampos.filter(campoNome => !resultado.camposEncontrados.includes(campoNome));
   resultado.tiposReconhecidos = [...new Set([
     ...resultado.camposEncontrados,

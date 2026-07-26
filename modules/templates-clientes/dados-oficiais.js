@@ -121,7 +121,7 @@ function listaTextoUnica(valores = []) {
   const vistos = new Set();
   for (const valor of Array.isArray(valores) ? valores : []) {
     const item = texto(valor);
-    if (!item || vistos.has(item)) continue;
+    if (!item || cupomBloqueado(item) || vistos.has(item)) continue;
     vistos.add(item);
     resultado.push(item);
   }

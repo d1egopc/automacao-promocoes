@@ -231,7 +231,7 @@ function obterConfigMensagemOferta(destino = {}) {
 }
 
 function deveUsarTemplatePersonalizado(opcoes = {}) {
-  const { plano = {}, destino = {} } = opcoes || {};
+  const { plano = {}, destino = {}, oferta = {} } = opcoes || {};
 
   if (!planoPermiteTemplatePersonalizado(plano)) return false;
 
@@ -239,18 +239,57 @@ function deveUsarTemplatePersonalizado(opcoes = {}) {
 
   if (mensagemOferta.modo !== "personalizado") return false;
   if (!mensagemOferta.template) return false;
+  if (templatePersonalizadoLegadoIncompleto(mensagemOferta.template, oferta)) return false;
 
   return true;
+}
+
+function templateTemPlaceholder(template = "", nomes = []) {
+  const placeholders = new Set(
+    [...String(template || "").matchAll(/\{([^{}]+)\}/g)]
+      .map(match => String(match[1] || "").trim())
+      .filter(Boolean)
+  );
+  return nomes.some(nome => placeholders.has(nome));
+}
+
+function temValorOferta(valor) {
+  return valor !== null && valor !== undefined && String(valor).trim() !== "";
+}
+
+function templatePersonalizadoLegadoIncompleto(template = "", oferta = {}) {
+  const precoAtual = normalizarPreco(oferta.precoAtual ?? oferta.precoPor ?? oferta.preco);
+  const precoAntigo = normalizarPreco(oferta.precoOriginal ?? oferta.precoAntigo ?? oferta.precoDe);
+  const temPrecoDe = precoAntigo > 0 && precoAtual > 0 && precoAntigo > precoAtual;
+  const temCupom = temValorOferta(oferta.cupom) ||
+    (Array.isArray(oferta.cupons) && oferta.cupons.length > 0) ||
+    (Array.isArray(oferta.codigosCupom) && oferta.codigosCupom.length > 0);
+  const temInstrucao = temValorOferta(oferta.instrucaoCupom || oferta.condicaoCupom || oferta.condicaoComercial || oferta.avisoCupom);
+  const temPix = temValorOferta(oferta.condicaoPix || oferta.precoPix);
+  const temParcelamento = temValorOferta(oferta.parcelamento);
+
+  if (temPrecoDe && !templateTemPlaceholder(template, ["precoAntigo", "preco_antigo", "precoOriginal", "preco_original", "precoDe", "preco_de"])) return true;
+  if (temCupom && !templateTemPlaceholder(template, ["cupom", "codigoCupom", "codigo_cupom", "codigosCupom", "codigos_cupom", "cupons"])) return true;
+  if (temInstrucao && !templateTemPlaceholder(template, ["instrucaoCupom", "instrucao_cupom", "avisoCupom", "aviso_cupom", "condicaoCupom", "condicao_cupom", "condicaoComercial", "condicao_comercial"])) return true;
+  if (temPix && !templateTemPlaceholder(template, ["condicaoPix", "condicao_pix", "precoPix", "preco_pix"])) return true;
+  if (temParcelamento && !templateTemPlaceholder(template, ["parcelamento"])) return true;
+
+  return false;
 }
 
 function montarDadosTemplateOferta(oferta = {}) {
   const titulo = cortarTitulo(oferta.titulo || oferta.nome || "Oferta", 120);
   const preco = formatarPreco(oferta.precoAtual || oferta.preco);
-  const precoAntigo = formatarPreco(oferta.precoAntigo);
+  const precoAntigo = formatarPreco(oferta.precoOriginal ?? oferta.precoAntigo);
   const desconto = montarLinhaDesconto(oferta);
   const cupom = montarLinhaCupom(oferta);
   const parcelamento = montarLinhaParcelamento(oferta);
   const link = oferta.linkAfiliado || oferta.link || oferta.linkOriginal || "";
+  const codigosCupom = Array.isArray(oferta.codigosCupom)
+    ? oferta.codigosCupom.join(" ou ")
+    : (Array.isArray(oferta.cupons) ? oferta.cupons.join(" ou ") : String(oferta.codigoCupom || oferta.cupom || "").trim());
+  const instrucaoCupom = String(oferta.instrucaoCupom || oferta.condicaoCupom || oferta.condicaoComercial || oferta.avisoCupom || "").trim();
+  const condicaoPix = String(oferta.condicaoPix || oferta.precoPix || "").trim();
 
   return {
     titulo,
@@ -262,8 +301,25 @@ function montarDadosTemplateOferta(oferta = {}) {
     preco_antigo: precoAntigo,
     desconto,
     cupom,
+    codigoCupom: codigosCupom,
+    codigo_cupom: codigosCupom,
+    codigosCupom,
+    codigos_cupom: codigosCupom,
+    cupons: codigosCupom,
     avisoCupom: String(oferta.avisoCupom || "").trim(),
     aviso_cupom: String(oferta.avisoCupom || "").trim(),
+    instrucaoCupom,
+    instrucao_cupom: instrucaoCupom,
+    condicaoCupom: String(oferta.condicaoCupom || "").trim(),
+    condicao_cupom: String(oferta.condicaoCupom || "").trim(),
+    condicaoComercial: String(oferta.condicaoComercial || "").trim(),
+    condicao_comercial: String(oferta.condicaoComercial || "").trim(),
+    condicaoPix,
+    condicao_pix: condicaoPix,
+    precoPix: condicaoPix,
+    preco_pix: condicaoPix,
+    precoUnitario: String(oferta.precoUnitario || oferta.unitarioCapturado || "").trim(),
+    preco_unitario: String(oferta.precoUnitario || oferta.unitarioCapturado || "").trim(),
     parcelamento,
     link,
     linkAfiliado: link,
@@ -302,6 +358,7 @@ module.exports = {
   planoPermiteTemplatePersonalizado,
   obterConfigMensagemOferta,
   deveUsarTemplatePersonalizado,
+  templatePersonalizadoLegadoIncompleto,
   montarDadosTemplateOferta,
   montarMensagemTemplatePersonalizado
 };

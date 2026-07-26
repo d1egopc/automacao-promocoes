@@ -10980,6 +10980,7 @@ function imagemOfertaRadar(oferta = {}) {
 
 function logRadarMlImagemDebug({
   clienteId = "admin",
+  correlationId = "",
   oferta = {},
   linkOriginal = "",
   linkResolvido = "",
@@ -10992,6 +10993,7 @@ function logRadarMlImagemDebug({
 
   console.log("[RADAR-ML-IMAGEM-DEBUG]", {
     clienteId,
+    correlationId,
     titulo: oferta.titulo || oferta.nome || "",
     linkOriginal,
     linkResolvido,
@@ -12401,9 +12403,61 @@ function logKabumRadarDescartadaIncompleta(motivo = "", erro = {}, resolucao = {
   });
 }
 
+function criarCorrelationIdRadar() {
+  return `radar_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function extrairMlbRadarValor(...valores) {
+  for (const valor of valores) {
+    const match = String(valor || "").match(/\bMLB-?\d{6,}\b/i);
+    if (match) return match[0].replace("-", "").toUpperCase();
+  }
+  return "";
+}
+
+function validarProdutoMercadoLivreRadar({ correlationId = "", linkOriginalRadar = "", linkResolvido = "", produtoImportado = {} } = {}) {
+  const mlbOriginal = extrairMlbRadarValor(linkOriginalRadar);
+  const mlbImportador = extrairMlbRadarValor(
+    produtoImportado.produtoId,
+    produtoImportado.idProduto,
+    produtoImportado.itemId,
+    produtoImportado.urlFinal,
+    produtoImportado.permalink,
+    produtoImportado.linkOriginal,
+    produtoImportado.linkResolvido,
+    produtoImportado.link,
+    linkResolvido
+  );
+  const divergente = Boolean(mlbOriginal && mlbImportador && mlbOriginal !== mlbImportador);
+
+  console.log("[RADAR-ML-PRODUTO-VALIDACAO]", JSON.stringify({
+    correlationId,
+    linkOriginalRadar,
+    linkResolvido,
+    mlbOriginal,
+    mlbImportador,
+    tituloImportador: String(produtoImportado.titulo || produtoImportado.nome || "").slice(0, 160),
+    permalinkImportador: produtoImportado.permalink || produtoImportado.urlFinal || "",
+    decisao: divergente ? "bloquear_divergente" : "aceitar_ou_sem_mlb_original"
+  }));
+
+  if (divergente) {
+    return {
+      ok: false,
+      motivo: "radar_produto_divergente",
+      mlbOriginal,
+      mlbImportador
+    };
+  }
+
+  return { ok: true, mlbOriginal, mlbImportador };
+}
+
 async function importarOfertaRadarPorLink(url = "", contexto = {}) {
+  const correlationId = contexto.correlationId || criarCorrelationIdRadar();
   const adminMasterId = obterClienteIdAdminMaster();
   const resolucao = await resolverLinkOriginalRadar(url);
+  resolucao.correlationId = correlationId;
 
   if (!resolucao.ok) {
     return {
@@ -12556,6 +12610,7 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
 
     if (marketplaceDetectado === "mercadolivre") {
       console.log("[RADAR-ML-CONTEXTO-IMPORTADOR]", {
+        correlationId,
         temTextoRadar: Boolean(textoRadarImportadorMl.trim()),
         tamanhoTextoRadar: textoRadarImportadorMl.length,
         link: linkOriginalLimpo,
@@ -12664,6 +12719,24 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
         textoOriginal: contexto.textoOriginal || contexto.texto || "",
         linkOriginal: linkOriginalLimpo
       });
+      const validacaoProdutoMl = validarProdutoMercadoLivreRadar({
+        correlationId,
+        linkOriginalRadar: resolucao.linkOriginalRadar || resolucao.urlCapturada || url,
+        linkResolvido: resolucao.linkResolvido || resolucao.linkOriginalLimpo || resolucao.urlResolvida || linkOriginalLimpo,
+        produtoImportado: produtoImportadoRadar
+      });
+      if (!validacaoProdutoMl.ok) {
+        return {
+          ok: false,
+          motivo: validacaoProdutoMl.motivo,
+          motivoTecnico: validacaoProdutoMl.motivo,
+          resolucao: {
+            ...resolucao,
+            mlbOriginal: validacaoProdutoMl.mlbOriginal,
+            mlbImportador: validacaoProdutoMl.mlbImportador
+          }
+        };
+      }
     }
 
     let motivoIncompleta = motivoImportacaoRadarIncompleta(produtoImportadoRadar, marketplaceDetectado);
@@ -12748,6 +12821,7 @@ async function importarOfertaRadarPorLink(url = "", contexto = {}) {
         ...produtoEnriquecido,
         ...beneficioRadar,
         marketplace: produtoEnriquecido.marketplace || marketplaceDetectado,
+        correlationId,
         linkOriginal: linkOriginalLimpo,
         linkCapturado: resolucao.urlCapturada,
         linkOriginalRadar: resolucao.linkOriginalRadar || resolucao.urlCapturada,
@@ -13609,10 +13683,12 @@ const registroEngineRadar = temRedirectConhecidoRadar
   });
 
   for (const link of links) {
+    const correlationId = criarCorrelationIdRadar();
     const marketplaceInicialResumo = marketplaceResumoRadarDoLink(link);
     marketplacesResumoRadar.add(marketplaceInicialResumo);
 
     logOptimus("RADAR", "Link capturado", {
+      correlationId,
       url: link,
       grupo: grupoNomeTexto || grupoIdTexto
     });
@@ -13707,6 +13783,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
     }
 
     const importacao = await importarOfertaRadarPorLink(link, {
+      correlationId,
       origemTipo: origemTipoFinal,
       sessaoId: sessaoIdTexto,
       grupoId: grupoIdTexto,
@@ -13744,6 +13821,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
     if (importacao.ok) {
       const comparacaoImportadorRadar = radarMirrorComparado?.comparacaoImportador || {};
       console.log("[RADAR-MIRROR-COMPARADO]", JSON.stringify({
+        correlationId,
         clienteId: adminMasterId,
         marketplace: marketplaceImportacaoResumo,
         divergenciaPreco: comparacaoImportadorRadar.divergenciaPreco === true,
@@ -13900,6 +13978,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
     })));
     const resolucaoCaptura = resolverClienteMensageiroPorSessao(sessaoIdTexto);
     console.log("[RADAR-OFERTA-BASE-CRIADA]", JSON.stringify({
+      correlationId,
       marketplace: ofertaRadar.marketplace || importacao.resolucao?.marketplaceReal || "",
       sessaoCapturaId: sessaoIdTexto,
       capturadoPorClienteId: resolucaoCaptura.clienteIdMensageiro || adminMasterId,
@@ -13910,6 +13989,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
 
     logRadarMlImagemDebug({
       clienteId: adminMasterId,
+      correlationId,
       oferta: ofertaRadar,
       linkOriginal: ofertaRadar.linkOriginal || "",
       linkResolvido: ofertaRadar.linkResolvidoRadar || ofertaRadar.urlResolvida || "",
@@ -14598,6 +14678,21 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
     return { ok: false, motivo: "oferta_sem_cupom_ou_desconto_relevante" };
   }
 
+  if (marketplace === "mercadolivre") {
+    console.log("[RADAR-ML-AFILIADO-CORRELACAO]", JSON.stringify({
+      correlationId: ofertaPreparada.correlationId || "",
+      etapa: "antes_conversor",
+      clienteId,
+      marketplace,
+      tituloOriginal: String(ofertaPreparada.titulo || ofertaPreparada.nome || "").slice(0, 160),
+      linkOriginalRadar: ofertaPreparada.linkOriginalRadar || ofertaPreparada.linkCapturado || "",
+      linkResolvido: ofertaPreparada.linkResolvidoRadar || ofertaPreparada.urlResolvida || "",
+      mlbOriginal: extrairMlbRadarValor(ofertaPreparada.linkOriginalRadar || ofertaPreparada.linkCapturado || ""),
+      mlbResolvido: extrairMlbRadarValor(linkOriginal),
+      linkConversor: linkOriginal
+    }));
+  }
+
   const linkAfiliadoCliente = await gerarLinkAfiliadoCliente(
     clienteId,
     marketplace,
@@ -14635,6 +14730,18 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
     linkAfiliado: linkAfiliadoCliente
   });
 
+  if (marketplace === "mercadolivre") {
+    console.log("[RADAR-ML-AFILIADO-CORRELACAO]", JSON.stringify({
+      correlationId: ofertaPreparada.correlationId || "",
+      etapa: "apos_conversor",
+      clienteId,
+      marketplace,
+      linkConversor: linkOriginal,
+      linkAfiliado: linkAfiliadoCliente,
+      mlbFinal: extrairMlbRadarValor(linkAfiliadoCliente, linkOriginal)
+    }));
+  }
+
   const agoraBR = new Date().toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo"
   });
@@ -14642,6 +14749,7 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
   const ofertaCliente = preservarCandidatosImagemUniversal({
     ...ofertaPreparada,
     clienteId,
+    correlationId: ofertaPreparada.correlationId || "",
     origem: "radar",
     radar: true,
     fonte: "radar",
@@ -14712,6 +14820,7 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
 
   logRadarMlImagemDebug({
     clienteId,
+    correlationId: ofertaCliente.correlationId || "",
     oferta: ofertaCliente,
     linkOriginal,
     linkResolvido: ofertaCliente.linkResolvido || ofertaCliente.linkResolvidoRadar || "",
@@ -14765,6 +14874,7 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
 
   logOptimus("SUCESSO", "Radar aprovado", {
     clienteId,
+    correlationId: ofertaCliente.correlationId || "",
     aprovado: true,
     decisao: radar.decisao,
     tipoRadar,
@@ -14888,6 +14998,18 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
     origem: oferta.origem || "radar",
     logger: console
   });
+  if (normalizarMarketplaceRadar(oferta.marketplace || "") === "mercadolivre") {
+    console.log("[RADAR-ML-FILA-CORRELACAO]", JSON.stringify({
+      correlationId: oferta.correlationId || "",
+      clienteId,
+      ofertaId: oferta.id || oferta.ofertaId || "",
+      marketplace: oferta.marketplace || "",
+      linkOriginalRadar: oferta.linkOriginalRadar || "",
+      linkResolvido: oferta.linkResolvido || oferta.linkResolvidoRadar || "",
+      linkAfiliado: oferta.linkAfiliado || oferta.linkFinal || "",
+      mlbFinal: extrairMlbRadarValor(oferta.linkAfiliado, oferta.linkFinal, oferta.linkOriginal, oferta.linkResolvido)
+    }));
+  }
   registrarOfertaVista(oferta);
   registrarTratamentoRadar(clienteId, oferta, "fila");
   salvarFila(clienteId);

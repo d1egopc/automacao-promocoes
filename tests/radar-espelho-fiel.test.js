@@ -3,6 +3,8 @@ const assert = require("assert");
 const {
   resolverPrecedenciaComercialRadar
 } = require("../modules/radar/comercial-precedencia");
+const { extrairComercialUniversal } = require("../modules/radar/extrator-comercial-universal");
+const { criarRadarMirror } = require("../modules/radar/radar-mirror");
 const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
 
 function campo(valor, confianca = "alta", evidencia = "", extras = {}) {
@@ -254,6 +256,53 @@ function testarMensagemPumaPreservaCupomPixParcelamento() {
   assert.ok(!/Avalia/i.test(mensagem));
 }
 
+function testarChapaTaiffPreservaPrecoAntigoECupom() {
+  const textoOriginal = [
+    "Chapa Gloss Rose 230°C Bivolt 110V/220V Taiff",
+    "",
+    "De: R$ 359,90",
+    "Por: R$ 152,32 (Com Cupom)",
+    "",
+    "Cupom:",
+    "MELI26TODOSITE",
+    "",
+    "https://meli.la/17UvmFr"
+  ].join("\n");
+  const comercial = extrairComercialUniversal({
+    textoOriginal,
+    links: ["https://meli.la/17UvmFr"],
+    marketplaceDetectado: "mercadolivre"
+  });
+  const mirror = criarRadarMirror({
+    textoOriginal,
+    links: ["https://meli.la/17UvmFr"],
+    extracaoRadarLocal: {
+      titulo: { valor: "Chapa Gloss Rose 230°C Bivolt 110V/220V Taiff", confianca: "alta" },
+      precoAtual: comercial.precoAtual,
+      precoAntigo: comercial.precoAntigo,
+      cupom: comercial.cupom,
+      comercial
+    },
+    marketplace: "mercadolivre"
+  });
+  const { resultado, mensagem } = renderizarOfertaRadar(mirror, ofertaImportador({
+    preco: 200,
+    precoAtual: 200,
+    precoOriginal: "",
+    cupom: "",
+    codigoCupom: ""
+  }));
+
+  assert.strictEqual(mirror.preco.anteriorCapturado, 359.9);
+  assert.strictEqual(resultado.oferta.precoOriginal, 359.9);
+  assert.strictEqual(resultado.oferta.precoAtual, 152.32);
+  assert.strictEqual(resultado.oferta.cupom, "MELI26TODOSITE");
+  assert.ok(mensagem.includes("R$ 359,90"));
+  assert.ok(mensagem.includes("R$ 152,32"));
+  assert.ok(mensagem.includes("MELI26TODOSITE"));
+  assert.ok(/cupom/i.test(mensagem));
+}
+
 function testarCupomUnicoRenderizado() {
   const { mensagem } = renderizarOfertaRadar(mirrorBase());
   assert.ok(mensagem.includes("RADAR10"));
@@ -328,6 +377,7 @@ const testes = [
   testarPrecoPixFicaCondicaoSeparada,
   testarPrecoDeSoMaiorQuePor,
   testarMensagemPumaPreservaCupomPixParcelamento,
+  testarChapaTaiffPreservaPrecoAntigoECupom,
   testarCupomUnicoRenderizado,
   testarDoisCuponsSeparadosPorOu,
   testarCupomComInstrucao,

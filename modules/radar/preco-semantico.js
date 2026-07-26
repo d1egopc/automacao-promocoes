@@ -14,6 +14,7 @@ const TIPOS_CANDIDATO = {
   PRECO_PIX: "preco_pix",
   PRECO_CARTAO: "preco_cartao",
   PRECO_BOLETO: "preco_boleto",
+  PRECO_UNITARIO: "preco_unitario",
   PARCELA: "parcela",
   VALOR_CUPOM: "valor_cupom",
   ECONOMIA: "economia",
@@ -102,6 +103,8 @@ function marcadorPosterior(contextoPosterior = "") {
     ["vendidos", /^\s*(vendidos?|comprados?|vendas?)\b/],
     ["avaliacoes", /^\s*(avaliacoes?|reviews?|estrelas?)\b/],
     ["unidades", /^\s*(unidades?|pecas?|em estoque|estoque)\b/],
+    ["unitario", /^\s*(?:cada|unidade|por unidade|cada um|por un\.?|\/un)\b/],
+    ["medida", /^\s*(?:ml|l|litros?|v|volts?|w|watts?|°\s*c|º\s*c|c\b)/],
     ["modelo", /^\s*(modelo|versao|codigo|cod|sku|ref)\b/],
     ["pix", /^\s*(?:no pix|pix)\b/],
     ["por", /\b(por|agora|sai por|saindo por|apenas|fica por|leva por)\b/],
@@ -141,6 +144,14 @@ function classificarTipo(base = {}) {
     return { tipo: TIPOS_CANDIDATO.QUANTIDADE, motivos };
   }
   if (posterior === "unidades" || anterior === "estoque") {
+    motivos.push("candidato_classificado_como_quantidade");
+    return { tipo: TIPOS_CANDIDATO.QUANTIDADE, motivos };
+  }
+  if (posterior === "unitario") {
+    motivos.push("candidato_classificado_como_preco_unitario");
+    return { tipo: TIPOS_CANDIDATO.PRECO_UNITARIO, motivos };
+  }
+  if (posterior === "medida") {
     motivos.push("candidato_classificado_como_quantidade");
     return { tipo: TIPOS_CANDIDATO.QUANTIDADE, motivos };
   }
@@ -211,7 +222,7 @@ function classificarTipo(base = {}) {
 function nivelEvidencia(base = {}, totalMonetarios = 0) {
   const motivos = [...(base.motivos || [])];
   const tipo = base.tipoCandidato;
-  if ([TIPOS_CANDIDATO.PERCENTUAL, TIPOS_CANDIDATO.QUANTIDADE, TIPOS_CANDIDATO.IDENTIFICADOR, TIPOS_CANDIDATO.PARCELA, TIPOS_CANDIDATO.VALOR_CUPOM, TIPOS_CANDIDATO.ECONOMIA, TIPOS_CANDIDATO.FRETE, TIPOS_CANDIDATO.CASHBACK].includes(tipo)) {
+  if ([TIPOS_CANDIDATO.PERCENTUAL, TIPOS_CANDIDATO.QUANTIDADE, TIPOS_CANDIDATO.IDENTIFICADOR, TIPOS_CANDIDATO.PRECO_UNITARIO, TIPOS_CANDIDATO.PARCELA, TIPOS_CANDIDATO.VALOR_CUPOM, TIPOS_CANDIDATO.ECONOMIA, TIPOS_CANDIDATO.FRETE, TIPOS_CANDIDATO.CASHBACK].includes(tipo)) {
     return { nivel: CONFIANCA.BAIXA, motivos };
   }
   if ([TIPOS_CANDIDATO.PRECO_ATUAL, TIPOS_CANDIDATO.PRECO_PIX, TIPOS_CANDIDATO.PRECO_ANTIGO].includes(tipo)) {
@@ -271,7 +282,7 @@ function coletarCandidatosPreco(textoFonte = "") {
 
   const totalMonetarios = candidatos.filter(item => (
     item.possuiCifrao || pareceDecimalMonetario(item.textoOriginal)
-  ) && ![TIPOS_CANDIDATO.PERCENTUAL, TIPOS_CANDIDATO.QUANTIDADE, TIPOS_CANDIDATO.IDENTIFICADOR].includes(item.tipoCandidato)).length;
+  ) && ![TIPOS_CANDIDATO.PERCENTUAL, TIPOS_CANDIDATO.QUANTIDADE, TIPOS_CANDIDATO.IDENTIFICADOR, TIPOS_CANDIDATO.PRECO_UNITARIO].includes(item.tipoCandidato)).length;
 
   return candidatos.map(item => {
     const evidenciaFinal = nivelEvidencia(item, totalMonetarios);
@@ -340,6 +351,7 @@ function resolverPrecoSemantico(textoFonte = "") {
   const cartao = primeiroPorTipo(candidatos, TIPOS_CANDIDATO.PRECO_CARTAO);
   const boleto = primeiroPorTipo(candidatos, TIPOS_CANDIDATO.PRECO_BOLETO);
   const parcela = primeiroPorTipo(candidatos, TIPOS_CANDIDATO.PARCELA);
+  const unitario = primeiroPorTipo(candidatos, TIPOS_CANDIDATO.PRECO_UNITARIO);
   const economia = primeiroPorTipo(candidatos, TIPOS_CANDIDATO.ECONOMIA);
   const cupomValor = primeiroPorTipo(candidatos, TIPOS_CANDIDATO.VALOR_CUPOM);
   const frete = primeiroPorTipo(candidatos, TIPOS_CANDIDATO.FRETE);
@@ -362,6 +374,7 @@ function resolverPrecoSemantico(textoFonte = "") {
     precoPix: pix,
     precoCartao: cartao,
     precoBoleto: boleto,
+    precoUnitario: unitario,
     parcela,
     economia,
     cupomValor,

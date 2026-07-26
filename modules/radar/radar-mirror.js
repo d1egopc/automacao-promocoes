@@ -27,6 +27,14 @@ function numeroOuNull(valor) {
   return numero === null ? null : numero;
 }
 
+function primeiroNumeroOuNull(...valores) {
+  for (const valor of valores) {
+    const numero = numeroOuNull(valor);
+    if (numero !== null) return numero;
+  }
+  return null;
+}
+
 function confianca(valor = "") {
   const normalizada = texto(valor).toLowerCase();
   return CONFIANCA_VALORES.has(normalizada) ? normalizada : "ausente";
@@ -155,7 +163,13 @@ function condicaoPrecoRadar(extracao = {}, beneficios = {}) {
     extracao?.precoAtual?.evidencia,
     beneficios.beneficioExtra,
     beneficios.avisoCupom,
-    extracao?.cupom?.beneficioTexto
+    extracao?.cupom?.beneficioTexto,
+    extracao?.cupom?.instrucao,
+    extracao?.cupom?.evidencia,
+    extracao?.instrucaoCupom,
+    extracao?.condicaoComercial,
+    extracao?.comercial?.cupom?.instrucao,
+    extracao?.comercial?.cupom?.evidencia
   ].map(texto).filter(Boolean);
   const condicaoTexto = textos.find(item => /app|pix|moeda|cupom|cashback|frete|boleto|cartao|cart[aã]o/i.test(item)) || null;
 
@@ -182,6 +196,38 @@ function campoComercial(campo = {}) {
   };
 }
 
+function campoComercialPossuiDado(campo = {}) {
+  if (!campo || typeof campo !== "object") return false;
+  if (campo.valor !== null && campo.valor !== undefined && campo.valor !== "") return true;
+  if (textoOuNull(campo.evidencia || "")) return true;
+  if (textoOuNull(campo.tipo || campo.tipoCandidato || "")) return true;
+  if (textoOuNull(campo.marcadorAnterior || campo.marcadorPosterior || "")) return true;
+  if (Array.isArray(campo.motivos) && campo.motivos.filter(Boolean).length) return true;
+  return false;
+}
+
+function campoComercialPreferido(...campos) {
+  for (const campo of campos) {
+    if (campoComercialPossuiDado(campo)) return campoComercial(campo);
+  }
+  return campoComercial(null);
+}
+
+function primeiroTextoOuNull(...valores) {
+  for (const valor of valores) {
+    const texto = textoOuNull(valor);
+    if (texto) return texto;
+  }
+  return null;
+}
+
+function primeiroValorDefinido(...valores) {
+  for (const valor of valores) {
+    if (valor !== null && valor !== undefined && valor !== "") return valor;
+  }
+  return null;
+}
+
 function resumirLinksComerciais(comercial = {}) {
   const links = comercial?.links || {};
   return {
@@ -202,14 +248,43 @@ function resumirLinksComerciais(comercial = {}) {
 
 function resumirComercialRadar(extracao = {}) {
   const comercial = extracao?.comercial && typeof extracao.comercial === "object" ? extracao.comercial : {};
+  const cupomComercial = comercial.cupom || {};
+  const cupomTopLevel = extracao?.cupom || {};
+  const cupomCodigo = normalizarCupom(
+    cupomComercial.codigo ||
+    cupomTopLevel.codigo ||
+    extracao.codigoCupom ||
+    extracao.cupomCodigo ||
+    cupomComercial.texto ||
+    cupomTopLevel.texto ||
+    ""
+  );
+  const cupomInstrucao = primeiroTextoOuNull(
+    cupomComercial.instrucao,
+    cupomTopLevel.instrucao,
+    extracao.instrucaoCupom,
+    extracao.condicaoComercial,
+    cupomTopLevel.evidencia,
+    cupomTopLevel.beneficioTexto
+  );
+  const cupomTexto = primeiroTextoOuNull(
+    cupomComercial.texto,
+    cupomTopLevel.texto,
+    extracao.cupomTexto,
+    cupomTopLevel.beneficioTexto,
+    cupomInstrucao
+  );
   return {
     versao: comercial.versao || null,
-    precoAtual: campoComercial(comercial.precoAtual),
-    precoAntigo: campoComercial(comercial.precoAntigo),
-    precoPix: campoComercial(comercial.precoPix),
-    precoBoleto: campoComercial(comercial.precoBoleto),
-    precoCartao: campoComercial(comercial.precoCartao),
-    precoParcelado: campoComercial(comercial.precoParcelado),
+    precoAtual: campoComercialPreferido(comercial.precoAtual, extracao.precoAtual),
+    precoAnterior: campoComercialPreferido(comercial.precoAnterior, extracao.precoAnterior),
+    precoAntigo: campoComercialPreferido(comercial.precoAntigo, extracao.precoAntigo, extracao.precoOriginal, extracao.precoAnterior),
+    precoOriginal: campoComercialPreferido(comercial.precoOriginal, extracao.precoOriginal, extracao.precoAntigo, extracao.precoAnterior),
+    precoPix: campoComercialPreferido(comercial.precoPix, extracao.precoPix),
+    precoBoleto: campoComercialPreferido(comercial.precoBoleto, extracao.precoBoleto),
+    precoCartao: campoComercialPreferido(comercial.precoCartao, extracao.precoCartao),
+    precoParcelado: campoComercialPreferido(comercial.precoParcelado, extracao.precoParcelado),
+    precoUnitario: campoComercialPreferido(comercial.precoUnitario, extracao.precoUnitario),
     parcelamento: {
       quantidade: comercial.parcelamento?.quantidade ?? null,
       valorParcela: comercial.parcelamento?.valorParcela ?? null,
@@ -220,22 +295,32 @@ function resumirComercialRadar(extracao = {}) {
     descontoPercentual: campoComercial(comercial.descontoPercentual),
     valorEconomia: campoComercial(comercial.valorEconomia),
     cupom: {
-      codigo: normalizarCupom(comercial.cupom?.codigo || comercial.cupom?.texto || ""),
+      codigo: cupomCodigo,
       codigos: normalizarCupons([
-        ...(Array.isArray(comercial.cupom?.codigos) ? comercial.cupom.codigos : []),
-        ...(Array.isArray(comercial.cupom?.cupons) ? comercial.cupom.cupons : []),
-        comercial.cupom?.codigo || "",
-        comercial.cupom?.texto || "",
-        comercial.cupom?.instrucao || "",
-        comercial.cupom?.evidencia || ""
+        ...(Array.isArray(cupomComercial.codigos) ? cupomComercial.codigos : []),
+        ...(Array.isArray(cupomComercial.cupons) ? cupomComercial.cupons : []),
+        ...(Array.isArray(cupomTopLevel.codigos) ? cupomTopLevel.codigos : []),
+        ...(Array.isArray(cupomTopLevel.cupons) ? cupomTopLevel.cupons : []),
+        ...(Array.isArray(extracao.codigosCupom) ? extracao.codigosCupom : []),
+        ...(Array.isArray(extracao.cupons) ? extracao.cupons : []),
+        cupomComercial.codigo || "",
+        cupomTopLevel.codigo || "",
+        extracao.codigoCupom || "",
+        extracao.cupomCodigo || "",
+        cupomComercial.texto || "",
+        cupomTopLevel.texto || "",
+        cupomComercial.instrucao || "",
+        cupomTopLevel.instrucao || "",
+        cupomComercial.evidencia || "",
+        cupomTopLevel.evidencia || ""
       ]),
-      texto: textoOuNull(comercial.cupom?.texto || ""),
-      instrucao: textoOuNull(comercial.cupom?.instrucao || ""),
-      valor: comercial.cupom?.valor ?? null,
-      percentual: comercial.cupom?.percentual ?? null,
-      confianca: confianca(comercial.cupom?.confianca || "ausente"),
-      evidencia: textoOuNull(comercial.cupom?.evidencia || ""),
-      provavel: comercial.cupom?.provavel === true
+      texto: cupomTexto,
+      instrucao: cupomInstrucao,
+      valor: primeiroValorDefinido(cupomComercial.valor, cupomTopLevel.valor),
+      percentual: primeiroValorDefinido(cupomComercial.percentual, cupomTopLevel.percentual),
+      confianca: confianca(cupomComercial.confianca || cupomTopLevel.confianca || "ausente"),
+      evidencia: primeiroTextoOuNull(cupomComercial.evidencia, cupomTopLevel.evidencia),
+      provavel: cupomComercial.provavel === true || cupomTopLevel.provavel === true
     },
     cashback: campoComercial(comercial.cashback),
     freteGratis: campoComercial(comercial.freteGratis),
@@ -278,12 +363,32 @@ function criarRadarMirror({
   raw = null,
   marketplace = ""
 } = {}) {
-  const precoAtual = numeroOuNull(extracaoRadarLocal?.precoAtual?.valor);
-  const precoAnterior = numeroOuNull(extracaoRadarLocal?.precoAnterior?.valor);
+  const comercial = resumirComercialRadar(extracaoRadarLocal);
+  const precoAtual = primeiroNumeroOuNull(
+    extracaoRadarLocal?.precoAtual?.valor,
+    comercial.precoAtual?.valor
+  );
+  const precoAnterior = primeiroNumeroOuNull(
+    extracaoRadarLocal?.precoAnterior?.valor,
+    extracaoRadarLocal?.precoAntigo?.valor,
+    extracaoRadarLocal?.precoOriginal?.valor,
+    extracaoRadarLocal?.precoDe?.valor,
+    comercial.precoAnterior?.valor,
+    comercial.precoAntigo?.valor,
+    comercial.precoOriginal?.valor
+  );
   const cupomCodigos = normalizarCupons([
+    ...(Array.isArray(comercial?.cupom?.codigos) ? comercial.cupom.codigos : []),
     ...(Array.isArray(extracaoRadarLocal?.cupom?.codigos) ? extracaoRadarLocal.cupom.codigos : []),
+    ...(Array.isArray(extracaoRadarLocal?.codigosCupom) ? extracaoRadarLocal.codigosCupom : []),
+    ...(Array.isArray(extracaoRadarLocal?.cupons) ? extracaoRadarLocal.cupons : []),
     ...(Array.isArray(beneficiosMensagem.cupons) ? beneficiosMensagem.cupons : []),
+    comercial?.cupom?.codigo || "",
     extracaoRadarLocal?.cupom?.codigo || "",
+    extracaoRadarLocal?.codigoCupom || "",
+    extracaoRadarLocal?.cupomCodigo || "",
+    comercial?.cupom?.texto || "",
+    comercial?.cupom?.instrucao || "",
     extracaoRadarLocal?.cupom?.beneficioTexto || "",
     extracaoRadarLocal?.cupom?.evidencia || "",
     beneficiosMensagem.cupom || "",
@@ -294,7 +399,6 @@ function criarRadarMirror({
   const linksClassificados = classificarLinksRadar(links, beneficiosMensagem);
   const midia = imagemOriginalRadar(extracaoRadarLocal, raw || {});
   const condicao = condicaoPrecoRadar(extracaoRadarLocal, beneficiosMensagem);
-  const comercial = resumirComercialRadar(extracaoRadarLocal);
 
   return {
     versao: RADAR_MIRROR_VERSAO,
@@ -319,6 +423,7 @@ function criarRadarMirror({
     preco: {
       atualCapturado: precoAtual,
       anteriorCapturado: precoAnterior,
+      unitarioCapturado: primeiroNumeroOuNull(extracaoRadarLocal?.precoUnitario?.valor, comercial.precoUnitario?.valor),
       origem: precoAtual !== null || precoAnterior !== null ? "texto_radar" : "ausente",
       confianca: precoAtual !== null ? confianca(extracaoRadarLocal?.precoAtual?.confianca) : "ausente",
       condicionado: condicao.condicionado,
@@ -330,8 +435,8 @@ function criarRadarMirror({
     cupom: {
       codigoCapturado: cupomCodigo,
       codigosCapturados: cupomCodigos,
-      textoCapturado: textoOuNull(extracaoRadarLocal?.cupom?.beneficioTexto || beneficiosMensagem.beneficioExtra || beneficiosMensagem.avisoCupom),
-      condicaoCapturada: textoOuNull(extracaoRadarLocal?.cupom?.evidencia || beneficiosMensagem.tipoCupom),
+      textoCapturado: textoOuNull(comercial?.cupom?.texto || extracaoRadarLocal?.cupom?.beneficioTexto || beneficiosMensagem.beneficioExtra || beneficiosMensagem.avisoCupom),
+      condicaoCapturada: textoOuNull(comercial?.cupom?.instrucao || comercial?.cupom?.evidencia || extracaoRadarLocal?.cupom?.evidencia || beneficiosMensagem.tipoCupom),
       confianca: cupomCodigo ? confianca(extracaoRadarLocal?.cupom?.confianca || (beneficiosMensagem.cupom ? "media" : "ausente")) : "ausente"
     },
     links: linksClassificados,

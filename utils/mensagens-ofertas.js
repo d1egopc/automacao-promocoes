@@ -19,6 +19,22 @@ function normalizarTextoLocal(valor = "") {
   return String(valor || "").trim();
 }
 
+function normalizarComparacaoLocal(valor = "") {
+  return normalizarTextoLocal(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/^cupom\s*:?\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function instrucaoCupomRedundanteLocal(instrucao = "", cupom = "") {
+  const textoInstrucao = normalizarComparacaoLocal(instrucao);
+  const textoCupom = normalizarComparacaoLocal(cupom);
+  return Boolean(textoInstrucao && textoCupom && textoInstrucao === textoCupom);
+}
+
 function normalizarEngineV2Modo() {
   const modo = normalizarTextoLocal(process.env.ENGINE_V2_MODO || "full").toLowerCase();
   return modo === "shadow" ? "shadow" : "full";
@@ -59,6 +75,36 @@ function montarEntradaTemplateUniversalOficial(oferta = {}) {
   return prepararDadosOficiaisTemplate(oferta, { modo: "universal" });
 }
 
+function montarOfertaRenderizacaoOficial(oferta = {}) {
+  const dadosUniversal = prepararDadosOficiaisTemplate(oferta, { modo: "universal" });
+  const dadosPersonalizado = prepararDadosOficiaisTemplate(oferta, { modo: "personalizado" });
+  const precoAtual = dadosUniversal.precoAtual ?? dadosPersonalizado.precoAtual ?? oferta.precoAtual ?? oferta.preco;
+  const precoOriginal = dadosUniversal.precoOriginal ?? dadosPersonalizado.precoOriginal ?? oferta.precoOriginal ?? oferta.precoAntigo;
+  const linkAfiliado = dadosUniversal.linkAfiliado || dadosPersonalizado.linkAfiliado || oferta.linkAfiliado || oferta.linkFinal || oferta.link || "";
+  const cupom = dadosUniversal.cupom || dadosPersonalizado.cupom || oferta.cupom || "";
+
+  return {
+    ...oferta,
+    ...dadosPersonalizado,
+    ...dadosUniversal,
+    precoAtual,
+    preco: precoAtual,
+    precoPor: precoAtual,
+    precoOriginal,
+    precoAntigo: precoOriginal,
+    precoDe: precoOriginal,
+    cupom,
+    cupomTexto: dadosUniversal.cupomTexto || dadosPersonalizado.cupomTexto || cupom,
+    codigoCupom: dadosUniversal.codigoCupom || dadosPersonalizado.codigoCupom || cupom,
+    codigosCupom: Array.isArray(dadosUniversal.codigosCupom) ? dadosUniversal.codigosCupom : [],
+    cupons: Array.isArray(dadosUniversal.cupons) ? dadosUniversal.cupons : [],
+    linkAfiliado,
+    linkFinal: oferta.linkFinal || linkAfiliado,
+    link: oferta.link || linkAfiliado,
+    fonteDadosMensagem: "dados_oficiais_template"
+  };
+}
+
 function tentarTemplateUniversalOficial(oferta = {}, opcoes = {}) {
   const clienteId = opcoes.clienteId || oferta.clienteId || "admin";
 
@@ -71,7 +117,7 @@ function tentarTemplateUniversalOficial(oferta = {}, opcoes = {}) {
   };
 
   try {
-    const entradaUniversal = montarEntradaTemplateUniversalOficial(oferta);
+    const entradaUniversal = opcoes.dadosOficiaisUniversal || montarEntradaTemplateUniversalOficial(oferta);
     console.log("[TEMPLATE-UNIVERSAL-OFICIAL]", JSON.stringify({
       ...resumo,
       score: entradaUniversal.score ?? "",
@@ -137,21 +183,27 @@ function montarBlocoPreco({ precoAtual = "", precoAntigo = "", variacao = false 
 function montarLegendaOferta(oferta = {}) {
   const titulo = cortarTitulo(oferta.titulo || oferta.nome || "Oferta", 120);
   const precoAtual = formatarPreco(oferta.precoAtual || oferta.preco);
-  const precoAntigo = formatarPreco(oferta.precoAntigo);
+  const precoAntigo = formatarPreco(oferta.precoOriginal ?? oferta.precoAntigo);
   const desconto = montarLinhaDesconto(oferta);
   const parcelamento = montarLinhaParcelamento(oferta);
   const cupom = montarLinhaCupom(oferta);
   const aplicarCupom = montarLinhaAplicarCupom(oferta);
+  const instrucaoCupom = normalizarTextoLocal(oferta.instrucaoCupom || oferta.condicaoCupom || oferta.condicaoComercial);
+  const condicaoPix = normalizarTextoLocal(oferta.condicaoPix || oferta.precoPix);
+  const precoUnitario = normalizarTextoLocal(oferta.precoUnitario || oferta.unitarioCapturado);
   const blocoPreco = montarBlocoPreco({ precoAtual, precoAntigo });
 
   return removerLinhasVazias([
     `\uD83D\uDD25 ${titulo}`,
     blocoPreco,
+    condicaoPix ? `\u26A1 ${condicaoPix}` : "",
+    precoUnitario ? `\u2139\uFE0F Pre\u00E7o unit\u00E1rio: ${precoUnitario}` : "",
     desconto ? `\uD83D\uDD25 ${desconto}` : "",
     parcelamento,
     cupom,
+    instrucaoCupom && !instrucaoCupomRedundanteLocal(instrucaoCupom, oferta.cupom) ? `\u26A1 ${instrucaoCupom}` : "",
     montarLinkCompra(oferta),
-    aplicarCupom
+    aplicarCupom && !instrucaoCupom ? aplicarCupom : ""
   ]);
 }
 
@@ -208,12 +260,17 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
   const clienteId = opcoes.clienteId || oferta.clienteId || "admin";
   const destino = opcoes.destino || {};
   let resolucaoTemplate = null;
+  const ofertaOficial = montarOfertaRenderizacaoOficial({
+    ...oferta,
+    clienteId
+  });
+  const dadosOficiaisUniversal = montarEntradaTemplateUniversalOficial(ofertaOficial);
 
   try {
     resolucaoTemplate = resolverTemplateMensagem({
       clienteId,
       destino,
-      oferta,
+      oferta: ofertaOficial,
       canal: opcoes.canal || destino.canal || destino.tipo,
       templatePersonalizadoHabilitado: opcoes.plano ? opcoes.plano?.recursos?.templatePersonalizado === true : true
     });
@@ -230,41 +287,44 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
     return resolucaoTemplate.mensagem;
   }
 
-  const mensagemUniversalOficial = tentarTemplateUniversalOficial(oferta, opcoes);
+  const mensagemUniversalOficial = tentarTemplateUniversalOficial(ofertaOficial, {
+    ...opcoes,
+    dadosOficiaisUniversal
+  });
   if (mensagemUniversalOficial) return mensagemUniversalOficial;
 
-  if (deveUsarTemplatePersonalizado(opcoes)) {
+  if (deveUsarTemplatePersonalizado({ ...opcoes, oferta: ofertaOficial })) {
     const mensagemPersonalizada = montarMensagemTemplatePersonalizado(
-      oferta,
+      ofertaOficial,
       opcoes.destino
     );
 
     if (mensagemPersonalizada) return mensagemPersonalizada;
   }
 
-  const marketplace = String(oferta.marketplace || "").toLowerCase();
+  const marketplace = String(ofertaOficial.marketplace || "").toLowerCase();
 
   if (marketplace === "amazon") {
     return formatarOfertaUniversal({
-      ...oferta,
-      precoOriginal: oferta.precoOriginal ?? oferta.precoAntigo,
-      beneficioTexto: oferta.beneficioTexto || oferta.beneficioExtra || oferta.avisoCupom || ""
-    }) || montarLegendaOferta(oferta);
+      ...ofertaOficial,
+      precoOriginal: ofertaOficial.precoOriginal ?? ofertaOficial.precoAntigo,
+      beneficioTexto: ofertaOficial.beneficioTexto || ofertaOficial.beneficioExtra || ofertaOficial.avisoCupom || ""
+    }) || montarLegendaOferta(ofertaOficial);
   }
 
   if (marketplace === "shopee") {
-    return montarLegendaShopee(oferta);
+    return montarLegendaShopee(ofertaOficial);
   }
 
   if (marketplace === "mercadolivre" || marketplace === "mercado_livre") {
     return formatarOfertaUniversal({
-      ...oferta,
-      precoOriginal: oferta.precoOriginal ?? oferta.precoAntigo,
-      beneficioTexto: oferta.beneficioTexto || oferta.beneficioExtra || oferta.avisoCupom || ""
-    }) || montarLegendaOferta(oferta);
+      ...ofertaOficial,
+      precoOriginal: ofertaOficial.precoOriginal ?? ofertaOficial.precoAntigo,
+      beneficioTexto: ofertaOficial.beneficioTexto || ofertaOficial.beneficioExtra || ofertaOficial.avisoCupom || ""
+    }) || montarLegendaOferta(ofertaOficial);
   }
 
-  return oferta.mensagem || oferta.texto || montarLegendaOferta(oferta);
+  return montarLegendaOferta(ofertaOficial) || ofertaOficial.mensagem || ofertaOficial.texto || "";
 }
 
 module.exports = {

@@ -256,6 +256,7 @@ function montarCondicoesComerciais(radarMirror = {}) {
     pix: campoCondicao(comercial.precoPix),
     boleto: campoCondicao(comercial.precoBoleto),
     cartao: campoCondicao(comercial.precoCartao),
+    unitario: campoCondicao(comercial.precoUnitario),
     parcelamento: {
       quantidade: comercial.parcelamento?.quantidade ?? null,
       valorParcela: precoValido(comercial.parcelamento?.valorParcela) ?? null,
@@ -383,6 +384,7 @@ function limparCamposComerciaisImportador(oferta = {}) {
     "descontoPix",
     "descontoApp",
     "precoPix",
+    "precoUnitario",
     "precoBoleto",
     "precoCartao",
     "cashback",
@@ -441,6 +443,7 @@ function aplicarRadarMirrorFiel(oferta = {}, resolucao = {}) {
   }
 
   const precoPix = valorCondicaoTexto(condicoes.pix, "Preco PIX");
+  const precoUnitario = valorCondicaoTexto(condicoes.unitario, "Preco unitario");
   const precoBoleto = valorCondicaoTexto(condicoes.boleto, "Preco boleto");
   const precoCartao = valorCondicaoTexto(condicoes.cartao, "Preco cartao");
   const parcelamento = textoParcelamentoRadar(condicoes.parcelamento);
@@ -450,6 +453,7 @@ function aplicarRadarMirrorFiel(oferta = {}, resolucao = {}) {
 
   if (precoPix) proxima.precoPix = precoPix;
   if (precoPix) proxima.condicaoPix = precoPix;
+  if (precoUnitario) proxima.precoUnitario = precoUnitario;
   if (precoBoleto) proxima.precoBoleto = precoBoleto;
   if (precoCartao) proxima.precoCartao = precoCartao;
   if (parcelamento) proxima.parcelamento = parcelamento;

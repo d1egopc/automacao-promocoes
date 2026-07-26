@@ -55,6 +55,51 @@ function formatarPercentual(valor) {
   return `${Math.round(numero)}%`;
 }
 
+function primeiroTexto(...valores) {
+  for (const valor of valores) {
+    const texto = textoLimpo(valor);
+    if (texto) return texto;
+  }
+  return "";
+}
+
+function listaTexto(...valores) {
+  const resultado = [];
+  const vistos = new Set();
+  for (const valor of valores.flat()) {
+    const texto = textoLimpo(valor);
+    if (!texto || vistos.has(texto)) continue;
+    vistos.add(texto);
+    resultado.push(texto);
+  }
+  return resultado;
+}
+
+function cupomOfertaFallback(oferta = {}) {
+  const cupons = listaTexto(
+    Array.isArray(oferta.cupons) ? oferta.cupons : [],
+    Array.isArray(oferta.codigosCupom) ? oferta.codigosCupom : []
+  );
+  if (cupons.length) return cupons.join(" ou ");
+  return primeiroTexto(oferta.cupom, oferta.codigoCupom, oferta.cupomCodigo);
+}
+
+function normalizarInstrucaoCupom(valor = "") {
+  return textoLimpo(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/^cupom\s*:?\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function instrucaoCupomRedundante(instrucao = "", cupom = "") {
+  const textoInstrucao = normalizarInstrucaoCupom(instrucao);
+  const textoCupom = normalizarInstrucaoCupom(cupom);
+  return Boolean(textoInstrucao && textoCupom && textoInstrucao === textoCupom);
+}
+
 function temAvisoCupom(cupomTipo = "", beneficioTexto = "") {
   const texto = `${cupomTipo} ${beneficioTexto}`
     .normalize("NFD")
@@ -70,12 +115,17 @@ function formatarOfertaUniversal(oferta = {}) {
 
   const precoOriginal = formatarMoeda(oferta.precoOriginal);
   const precoAtual = formatarMoeda(oferta.precoAtual ?? oferta.preco);
+  const condicaoPix = primeiroTexto(oferta.condicaoPix, oferta.precoPix);
+  const condicaoPixTemValor = /(?:R\$|\d)/i.test(condicaoPix);
+  const condicaoPixSufixo = condicaoPix && !condicaoPixTemValor ? condicaoPix : "";
+  const precoUnitario = primeiroTexto(oferta.precoUnitario, oferta.unitarioCapturado);
 
   if (precoOriginal) linhas.push("", `\u274C De: ${precoOriginal}`);
   if (precoAtual) {
     if (!precoOriginal) linhas.push("");
-    linhas.push(`\u2705 Por: ${precoAtual}`);
+    linhas.push(`\u2705 Por: ${precoAtual}${condicaoPixSufixo ? ` ${condicaoPixSufixo}` : ""}`);
   }
+  if (condicaoPix && condicaoPixTemValor) linhas.push(`\u26A1 ${condicaoPix}`);
 
   const desconto = formatarPercentual(oferta.descontoPercentual);
   const economia = formatarMoeda(oferta.economia);
@@ -86,11 +136,14 @@ function formatarOfertaUniversal(oferta = {}) {
 
   const parcelamento = textoLimpo(oferta.parcelamento);
   if (parcelamento) linhas.push("", `\u{1F4B3} ${parcelamento}`);
+  if (precoUnitario) linhas.push("", `\u2139\uFE0F Pre\u00E7o unit\u00E1rio: ${precoUnitario}`);
 
-  const cupom = textoLimpo(oferta.cupom).toUpperCase();
+  const cupom = cupomOfertaFallback(oferta);
+  const instrucaoCupom = primeiroTexto(oferta.instrucaoCupom, oferta.condicaoCupom, oferta.condicaoComercial, oferta.avisoCupom);
   const beneficioTexto = textoLimpo(oferta.beneficioTexto || oferta.beneficioExtra || oferta.avisoCupom);
   if (cupom) {
     linhas.push("", `\u{1F39F}\uFE0F Cupom: ${cupom}`);
+    if (instrucaoCupom && !instrucaoCupomRedundante(instrucaoCupom, cupom)) linhas.push(`\u26A1 ${instrucaoCupom}`);
   } else if (temAvisoCupom(oferta.cupomTipo || oferta.tipoCupom, beneficioTexto)) {
     linhas.push("", "💡 Pode haver benefícios disponíveis na página.");
   }

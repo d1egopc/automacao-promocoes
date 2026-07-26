@@ -1,5 +1,4 @@
 const { CANAIS_PERMITIDOS, getBlocoCatalogo } = require("./catalogo-blocos");
-const { apresentarScore } = require("../template-universal");
 const {
   prepararDadosOficiaisTemplate,
   diagnosticoDadosOficiaisTemplate
@@ -19,6 +18,27 @@ function primeiroTexto(...valores) {
     if (texto) return texto;
   }
   return "";
+}
+
+function listaTexto(...valores) {
+  const resultado = [];
+  const vistos = new Set();
+  for (const valor of valores.flat()) {
+    const item = textoUtil(valor);
+    if (!item || vistos.has(item)) continue;
+    vistos.add(item);
+    resultado.push(item);
+  }
+  return resultado;
+}
+
+function valorCupomTemplate(oferta = {}) {
+  const cupons = listaTexto(
+    Array.isArray(oferta.cupons) ? oferta.cupons : [],
+    Array.isArray(oferta.codigosCupom) ? oferta.codigosCupom : []
+  );
+  if (cupons.length) return cupons.join(" ou ");
+  return textoUtil(oferta.cupom);
 }
 
 function numeroUtil(valor) {
@@ -95,13 +115,25 @@ function valorFrete(oferta = {}) {
 }
 
 function estrelasPreenchidas(avaliacao = "") {
-  return (String(avaliacao || "").match(/⭐/g) || []).length;
+  return (String(avaliacao || "").match(/⭐|★/g) || []).length;
+}
+
+function formatarAvaliacaoReal(valor = "") {
+  const avaliacao = textoUtil(valor);
+  if (!avaliacao) return "";
+  if (/⭐|★|☆/.test(avaliacao)) return estrelasPreenchidas(avaliacao) >= 2 ? avaliacao : "";
+
+  const match = avaliacao.replace(",", ".").match(/\b([0-5](?:\.\d+)?)\b(?:\s*\/\s*5)?/);
+  if (!match) return avaliacao;
+
+  const numero = Number(match[1]);
+  if (!Number.isFinite(numero) || numero <= 0 || numero > 5) return "";
+  const cheias = Math.max(1, Math.min(5, Math.round(numero)));
+  return `${"⭐".repeat(cheias)}${"☆".repeat(5 - cheias)}`;
 }
 
 function valorAvaliacao(oferta = {}) {
-  const avaliacao = apresentarScore(oferta.score);
-  if (!avaliacao) return "";
-  return estrelasPreenchidas(avaliacao) >= 2 ? avaliacao : "";
+  return formatarAvaliacaoReal(primeiroTexto(oferta.avaliacao, oferta.rating, oferta.nota));
 }
 
 function valorQuantidadeAvaliacoes(oferta = {}) {
@@ -146,6 +178,18 @@ function normalizarComparacao(valor = "") {
     .toLowerCase();
 }
 
+function avisoCupomGenericoTemplate(valor = "") {
+  const normalizado = normalizarComparacao(valor);
+  if (!normalizado) return false;
+  return (
+    normalizado.includes("cupom disponivel na pagina") ||
+    normalizado.includes("cupons disponiveis na pagina") ||
+    normalizado.includes("resgate antes de finalizar") ||
+    normalizado.includes("confira antes de finalizar") ||
+    normalizado.includes("pode haver beneficio")
+  );
+}
+
 function nomeBeneficioFraseCupom(oferta = {}) {
   const frete = valorFrete(oferta);
   const beneficio = valorBeneficio(oferta);
@@ -160,8 +204,11 @@ function nomeBeneficioFraseCupom(oferta = {}) {
 }
 
 function montarFraseCupom(oferta = {}) {
-  const cupom = primeiroTexto(oferta.cupom, oferta.codigoCupom, oferta.cupomCodigo);
+  const cupom = valorCupomTemplate(oferta);
   if (!cupom) return "";
+  const avisoCupom = avisoCupomGenericoTemplate(oferta.avisoCupom) ? "" : oferta.avisoCupom;
+  const instrucao = primeiroTexto(oferta.instrucaoCupom, oferta.condicaoCupom, oferta.condicaoComercial, avisoCupom);
+  if (instrucao && instrucao !== cupom) return `⚡ ${instrucao}`;
 
   return `⚡ Aplique o cupom ${cupom} para obter o desconto.`;
 }
@@ -202,7 +249,7 @@ function resolverLinha(bloco, oferta = {}) {
     return economia ? `💸 Economia: ${economia}` : "";
   }
   if (tipo === "cupom") {
-    const cupom = primeiroTexto(oferta.cupom, oferta.codigoCupom, oferta.cupomCodigo);
+    const cupom = valorCupomTemplate(oferta);
     return cupom ? `🎟️ Cupom: ${cupom}` : "";
   }
   if (tipo === "frase_cupom") {

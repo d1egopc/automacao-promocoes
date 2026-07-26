@@ -82,6 +82,23 @@ function testarModeloNaoPreco() {
   assertTipo("modelo 1949 - R$ 23,30", 1949, TIPOS_CANDIDATO.IDENTIFICADOR, "modelo id");
 }
 
+function testarPrecoUnitarioNaoSubstituiTotal() {
+  const r = extrair("DE 75 | POR 31 (2,58 cada)");
+  assertValor(r.precoAntigo, 75, "preco antigo total");
+  assertValor(r.precoAtual, 31, "preco atual total");
+  assertValor(r.precoUnitario, 2.58, "preco unitario preservado");
+  assertTipo("DE 75 | POR 31 (2,58 cada)", 2.58, TIPOS_CANDIDATO.PRECO_UNITARIO, "cada nao vira preco principal");
+}
+
+function testarNumerosDoTituloNaoViraramPreco() {
+  const r = extrair("Chapa Gloss Rose 230°C Bivolt 110V/220V Taiff\nDe: R$ 359,90\nPor: R$ 152,32 (Com Cupom)\nCupom: MELI26TODOSITE");
+  assertValor(r.precoAntigo, 359.9, "preco antigo chapa");
+  assertValor(r.precoAtual, 152.32, "preco atual chapa");
+  assert.strictEqual(r.cupom.codigo, "MELI26TODOSITE");
+  assertTipo("Chapa 230°C por R$ 152,32", 230, TIPOS_CANDIDATO.QUANTIDADE, "temperatura nao vira preco");
+  assertTipo("Bivolt 110V/220V por R$ 152,32", 110, TIPOS_CANDIDATO.QUANTIDADE, "voltagem nao vira preco");
+}
+
 function testarDePor() {
   const r = extrair("De R$ 199,90 por R$ 129,90");
   assertValor(r.precoAntigo, 199.9, "preco antigo");
@@ -201,6 +218,8 @@ const testes = [
   testarVendidosNaoPreco,
   testarAvaliacoesNaoPreco,
   testarModeloNaoPreco,
+  testarPrecoUnitarioNaoSubstituiTotal,
+  testarNumerosDoTituloNaoViraramPreco,
   testarDePor,
   testarBasePix,
   testarPrecoUnicoComCifrao,
