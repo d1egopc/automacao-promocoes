@@ -187,9 +187,8 @@ function prepararDadosPersonalizadosTemplate(oferta = {}) {
     beneficioExtraShopee: oferta.beneficioExtraShopee || ""
   };
 
-  const precoFinalConfirmado = valorEfetivoConfirmado(dados);
-  dados.precoExibido = precoFinalConfirmado ?? dados.precoAtual;
-  dados.fontePrecoExibido = precoFinalConfirmado != null ? "valor_efetivo" : "preco_atual";
+  dados.precoExibido = dados.precoAtual;
+  dados.fontePrecoExibido = "preco_atual";
   return dados;
 }
 

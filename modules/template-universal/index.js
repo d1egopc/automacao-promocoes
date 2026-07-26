@@ -332,8 +332,7 @@ function adicionarBloco(blocos, linhas = []) {
 function gerarTemplateUniversal(oferta = {}) {
   const campos = selecionarCamposUniversais(oferta);
   const blocos = [];
-  const precoFinalConfirmado = valorEfetivoConfirmado(campos);
-  const precoAtualExibido = precoFinalConfirmado ?? campos.precoAtual;
+  const precoAtualExibido = campos.precoAtual;
   const precoAtualNumero = normalizarNumero(precoAtualExibido);
   const precoOriginalNumero = normalizarNumero(campos.precoOriginal);
   const precoAtual = formatarMoeda(precoAtualExibido) || normalizarTexto(precoAtualExibido);
@@ -354,7 +353,7 @@ function gerarTemplateUniversal(oferta = {}) {
   beneficioComercial = montarInstrucaoComercial(
     campos,
     beneficioComercial,
-    precoFinalConfirmado != null ? precoAtual : ""
+    ""
   );
 
   adicionarBloco(blocos, [`🔥 *${campos.titulo || "Oferta"}*`]);

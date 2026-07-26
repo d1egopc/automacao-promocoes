@@ -730,7 +730,7 @@ function carregarOfertaCliente(clienteId = "admin", ofertaId = "") {
   const linkAfiliado = texto(oferta.linkAfiliado || oferta.linkFinal || oferta.link);
   const titulo = texto(oferta.titulo || oferta.nome);
   const marketplace = texto(oferta.marketplace);
-  const precoAtual = numero(v2.valorEfetivo ?? oferta.valorEfetivo ?? oferta.precoAtual ?? oferta.preco);
+  const precoAtual = numero(oferta.precoAtual ?? oferta.preco ?? oferta.precoPor ?? oferta.valor);
 
   return {
     id: alvo,

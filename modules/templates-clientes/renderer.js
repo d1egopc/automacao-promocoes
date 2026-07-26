@@ -136,8 +136,7 @@ function valorPrecoPor(oferta = {}) {
     return oferta.precoExibido;
   }
 
-  const valorEfetivo = valorEfetivoConfirmado(oferta);
-  return valorEfetivo ?? oferta.precoAtual ?? oferta.precoPor ?? oferta.preco;
+  return oferta.precoAtual ?? oferta.precoPor ?? oferta.preco;
 }
 
 function normalizarComparacao(valor = "") {
@@ -164,12 +163,6 @@ function montarFraseCupom(oferta = {}) {
   const cupom = primeiroTexto(oferta.cupom, oferta.codigoCupom, oferta.cupomCodigo);
   if (!cupom) return "";
 
-  const precoFinal = formatarMoeda(valorEfetivoConfirmado(oferta));
-  const beneficio = nomeBeneficioFraseCupom(oferta);
-  if (precoFinal && beneficio) {
-    return `⚡ Aplique o cupom ${cupom} + ${beneficio} para pagar ${precoFinal}.`;
-  }
-
   return `⚡ Aplique o cupom ${cupom} para obter o desconto.`;
 }
 
@@ -189,7 +182,11 @@ function resolverLinha(bloco, oferta = {}) {
     return categoria ? `📂 ${categoria}` : "";
   }
   if (tipo === "preco_de") {
-    const preco = formatarMoeda(oferta.precoOriginal ?? oferta.precoDe ?? oferta.precoAntigo);
+    const precoPor = numeroUtil(valorPrecoPor(oferta));
+    const precoDe = numeroUtil(oferta.precoOriginal ?? oferta.precoDe ?? oferta.precoAntigo);
+    const preco = precoDe != null && precoPor != null && precoDe > precoPor
+      ? formatarMoeda(precoDe)
+      : "";
     return preco ? `❌ De: ${preco}` : "";
   }
   if (tipo === "preco_por") {

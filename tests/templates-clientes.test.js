@@ -174,7 +174,7 @@ for (const trecho of [
   "✅ Por:",
   "📉 38% OFF",
   "🎟️ Cupom: PROMO10",
-  "⚡ Aplique o cupom PROMO10 + frete grátis para pagar R$ 44,90.",
+  "⚡ Aplique o cupom PROMO10 para obter o desconto.",
   "💳 Ou 3x de R$ 16,63 sem juros",
   "🚚 Frete gratis",
   "✰ Avaliação\n⭐⭐⭐⭐⭐",
@@ -327,7 +327,7 @@ const shopeeIphoneParidadeV11 = renderizarTemplatePersonalizado({
   canal: "whatsapp"
 });
 const msgIphoneShopeeV11 = moedaLegivel(shopeeIphoneParidadeV11.mensagem);
-assert.ok(msgIphoneShopeeV11.includes("Por: R$ 8.185,00"), "Shopee iPhone usa valor efetivo oficial V2");
+assert.ok(msgIphoneShopeeV11.includes("Por: R$ 8.735,00"), "Shopee iPhone usa preco atual oficial preservado");
 assert.ok(!msgIphoneShopeeV11.includes("R$ 84,57"), "valor de desconto nao vira preco final");
 assert.ok(msgIphoneShopeeV11.includes("Cupom:"), "cupom valido aparece");
 assert.ok(msgIphoneShopeeV11.includes("PROMO10"), "cupom oficial e preservado");
@@ -353,8 +353,8 @@ const shopeeGabineteParidadeV11 = renderizarTemplatePersonalizado({
   canal: "whatsapp"
 });
 const msgGabineteShopeeV11 = moedaLegivel(shopeeGabineteParidadeV11.mensagem);
-assert.ok(msgGabineteShopeeV11.includes("Por: R$ 234,60"), "Shopee gabinete usa valor efetivo oficial");
-assert.ok(!msgGabineteShopeeV11.includes("Por: R$ 275,99"), "Shopee gabinete nao cai no preco sem cupom quando valor efetivo oficial existe");
+assert.ok(msgGabineteShopeeV11.includes("Por: R$ 275,99"), "Shopee gabinete usa preco atual oficial preservado");
+assert.ok(!msgGabineteShopeeV11.includes("Por: R$ 234,60"), "Shopee gabinete nao usa valor efetivo como preco principal");
 
 const shopeeClassificacaoNaoCupomV11 = renderizarTemplatePersonalizado({
   oferta: {
