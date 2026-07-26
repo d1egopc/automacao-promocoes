@@ -3,6 +3,7 @@ const assert = require("assert");
 const {
   resolverPrecedenciaComercialRadar
 } = require("../modules/radar/comercial-precedencia");
+const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
 
 function campo(valor, confianca = "alta", evidencia = "", extras = {}) {
   return { valor, confianca, evidencia, ...extras };
@@ -180,12 +181,161 @@ function testarPrecoDeSoMaiorQuePor() {
   assert.strictEqual(r.oferta.precoAnterior, undefined);
 }
 
+function renderizarOfertaRadar(mirror, oferta = ofertaImportador({ score: 82 })) {
+  const r = resolver(mirror, oferta);
+  return {
+    resultado: r,
+    mensagem: montarMensagemOferta(r.oferta, { clienteId: "user_teste" })
+  };
+}
+
+function testarMensagemPumaPreservaCupomPixParcelamento() {
+  const textoOriginal = [
+    "MODELO PERFEITINHO MENINAS",
+    "",
+    "👟 Tênis Puma Carina Street BDP (6 cores)",
+    "",
+    "🔥 DE 499 | POR 205 no Pix ou 215,83 até 6x",
+    "🎟️ CUPOM: FASHION ou MODACOMVC",
+    "",
+    "🔗 https://meli.la/2GTPyMb"
+  ].join("\n");
+  const mirror = mirrorBase({
+    texto: { original: textoOriginal },
+    produto: { tituloCapturado: "MODELO PERFEITINHO MENINAS" },
+    preco: {
+      atualCapturado: 205,
+      anteriorCapturado: 499,
+      confianca: "alta",
+      tipoCapturado: "pix",
+      evidenciaCapturada: "POR 205 no Pix",
+      marcadorComercial: "por"
+    },
+    cupom: {
+      codigoCapturado: "FASHION",
+      codigosCapturados: ["FASHION", "MODACOMVC"],
+      textoCapturado: "CUPOM: FASHION ou MODACOMVC",
+      condicaoCapturada: "CUPOM: FASHION ou MODACOMVC",
+      confianca: "alta"
+    }
+  });
+  mirror.comercial.precoAtual = campo(205, "alta", "POR 205 no Pix", { tipo: "pix", possuiCifrao: false, nivelEvidencia: "alta" });
+  mirror.comercial.precoAntigo = campo(499, "media", "DE 499");
+  mirror.comercial.precoPix = campo(205, "alta", "R$ 205 no Pix");
+  mirror.comercial.parcelamento = { quantidade: 6, valorParcela: 215.83, semJuros: false, confianca: "alta", evidencia: "R$ 215,83 em ate 6x" };
+  mirror.comercial.cupom = {
+    codigo: "FASHION ou MODACOMVC",
+    codigos: ["FASHION", "MODACOMVC"],
+    texto: "CUPOM: FASHION ou MODACOMVC",
+    instrucao: "CUPOM: FASHION ou MODACOMVC",
+    confianca: "alta",
+    provavel: false
+  };
+
+  const { resultado, mensagem } = renderizarOfertaRadar(mirror, ofertaImportador({
+    preco: 349.9,
+    precoAtual: 349.9,
+    precoOriginal: 599.9,
+    cupom: "PAGINA10",
+    codigoCupom: "PAGINA10",
+    score: 88
+  }));
+
+  assert.strictEqual(resultado.oferta.precoAtual, 205);
+  assert.strictEqual(resultado.oferta.precoOriginal, 499);
+  assert.deepStrictEqual(resultado.oferta.cupons, ["FASHION", "MODACOMVC"]);
+  assert.ok(mensagem.includes("R$ 499,00"));
+  assert.ok(mensagem.includes("R$ 205,00"));
+  assert.ok(/Pix/i.test(mensagem));
+  assert.ok(mensagem.includes("R$ 215,83"));
+  assert.ok(mensagem.includes("6x"));
+  assert.ok(mensagem.includes("FASHION"));
+  assert.ok(mensagem.includes("MODACOMVC"));
+  assert.ok(!/Avalia/i.test(mensagem));
+}
+
+function testarCupomUnicoRenderizado() {
+  const { mensagem } = renderizarOfertaRadar(mirrorBase());
+  assert.ok(mensagem.includes("RADAR10"));
+}
+
+function testarDoisCuponsSeparadosPorOu() {
+  const mirror = mirrorBase();
+  mirror.cupom.codigoCapturado = "MODA10";
+  mirror.cupom.codigosCapturados = ["MODA10", "MODA20"];
+  mirror.cupom.textoCapturado = "Cupom: MODA10 ou MODA20";
+  mirror.cupom.condicaoCapturada = "Cupom: MODA10 ou MODA20";
+  mirror.comercial.cupom = { codigo: "MODA10 ou MODA20", codigos: ["MODA10", "MODA20"], texto: "Cupom: MODA10 ou MODA20", instrucao: "Cupom: MODA10 ou MODA20", confianca: "alta", provavel: false };
+  const { resultado, mensagem } = renderizarOfertaRadar(mirror);
+  assert.deepStrictEqual(resultado.oferta.codigosCupom, ["MODA10", "MODA20"]);
+  assert.ok(mensagem.includes("MODA10 ou MODA20"));
+}
+
+function testarCupomComInstrucao() {
+  const mirror = mirrorBase();
+  mirror.cupom.condicaoCapturada = "Use o cupom RADAR10 no carrinho";
+  mirror.comercial.cupom.instrucao = "Use o cupom RADAR10 no carrinho";
+  const { mensagem } = renderizarOfertaRadar(mirror);
+  assert.ok(mensagem.includes("RADAR10"));
+  assert.ok(mensagem.includes("carrinho"));
+  assert.ok(!mensagem.includes("RADAR10 ou CARRINHO"));
+}
+
+function testarPrecoPixEParceladoRenderizados() {
+  const { mensagem } = renderizarOfertaRadar(mirrorBase());
+  assert.ok(/Pix/i.test(mensagem));
+  assert.ok(mensagem.includes("16,63"));
+  assert.ok(mensagem.includes("3x"));
+}
+
+function testarOfertaSemCupomNaoInventaCupom() {
+  const mirror = mirrorBase();
+  mirror.cupom = { codigoCapturado: null, textoCapturado: null, condicaoCapturada: null, confianca: "ausente" };
+  mirror.comercial.cupom = { codigo: null, texto: null, instrucao: null, confianca: "ausente", provavel: false };
+  const { mensagem } = renderizarOfertaRadar(mirror);
+  assert.ok(!/Cupom:/i.test(mensagem));
+}
+
+function testarImportadorDiferenteNaoApagaRadar() {
+  const mirror = mirrorBase();
+  const { resultado, mensagem } = renderizarOfertaRadar(mirror, ofertaImportador({
+    precoAtual: 300,
+    precoOriginal: 400,
+    cupom: "IMPORTADOR99",
+    codigoCupom: "IMPORTADOR99"
+  }));
+  assert.strictEqual(resultado.oferta.precoAtual, 49.9);
+  assert.strictEqual(resultado.oferta.cupom, "RADAR10");
+  assert.ok(mensagem.includes("RADAR10"));
+  assert.ok(!mensagem.includes("IMPORTADOR99"));
+}
+
+function testarRendererNaoApagaRadarMirror() {
+  const r = resolver(mirrorBase());
+  montarMensagemOferta(r.oferta, { clienteId: "user_teste" });
+  assert.ok(r.oferta.metadata.radarMirror || r.oferta.metadata.precedenciaComercial);
+}
+
+function testarAvaliacaoSemFallbackInventado() {
+  const { mensagem } = renderizarOfertaRadar(mirrorBase(), ofertaImportador({ score: 99 }));
+  assert.ok(!/Avalia/i.test(mensagem));
+}
+
 const testes = [
   testarRadarMirrorAssumeCamposComerciais,
   testarCupomDaPaginaNaoPublica,
   testarPrecoPaginaNaoSubstituiRadar,
   testarPrecoPixFicaCondicaoSeparada,
-  testarPrecoDeSoMaiorQuePor
+  testarPrecoDeSoMaiorQuePor,
+  testarMensagemPumaPreservaCupomPixParcelamento,
+  testarCupomUnicoRenderizado,
+  testarDoisCuponsSeparadosPorOu,
+  testarCupomComInstrucao,
+  testarPrecoPixEParceladoRenderizados,
+  testarOfertaSemCupomNaoInventaCupom,
+  testarImportadorDiferenteNaoApagaRadar,
+  testarRendererNaoApagaRadarMirror,
+  testarAvaliacaoSemFallbackInventado
 ];
 
 for (const teste of testes) teste();

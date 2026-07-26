@@ -37,7 +37,7 @@ function formatarMoeda(valor) {
   return numero.toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL"
-  });
+  }).replace(/\u00A0/g, " ");
 }
 
 function normalizarComparacao(valor = "") {
@@ -164,6 +164,12 @@ function apresentarScore(score) {
 }
 
 function selecionarCamposUniversais(oferta = {}) {
+  const cupons = [
+    ...(Array.isArray(oferta.cupons) ? oferta.cupons : []),
+    ...(Array.isArray(oferta.codigosCupom) ? oferta.codigosCupom : [])
+  ].map(normalizarTexto).filter(Boolean);
+  const cupom = cupons.length ? cupons.join(" ou ") : normalizarTexto(oferta.cupom || oferta.codigoCupom || oferta.cupomCodigo);
+
   return {
     titulo: normalizarTexto(oferta.titulo),
     marketplace: normalizarTexto(oferta.marketplace),
@@ -180,12 +186,29 @@ function selecionarCamposUniversais(oferta = {}) {
     categoriaGenerica: oferta.categoriaGenerica,
     categoriaBaixaConfianca: oferta.categoriaBaixaConfianca,
     baixaConfiancaCategoria: oferta.baixaConfiancaCategoria,
-    cupom: normalizarTexto(oferta.cupom),
+    cupom,
+    cupomTexto: normalizarTexto(oferta.cupomTexto || cupom),
+    instrucaoCupom: normalizarTexto(oferta.instrucaoCupom),
+    precoPix: normalizarTexto(oferta.precoPix || oferta.condicaoPix),
+    condicaoPix: normalizarTexto(oferta.condicaoPix || oferta.precoPix),
+    parcelamento: normalizarTexto(oferta.parcelamento),
+    avaliacao: normalizarTexto(oferta.avaliacao || oferta.rating || oferta.nota),
     beneficios: normalizarBeneficios(oferta.beneficios),
     score: oferta.score,
     prioridade: oferta.prioridade,
     linkAfiliado: normalizarTexto(oferta.linkAfiliado)
   };
+}
+
+function textoIndicaPix(valor = "") {
+  return normalizarComparacao(valor).includes("pix");
+}
+
+function textoPrecoAtualComCondicao(precoAtual = "", campos = {}) {
+  if (!precoAtual) return precoAtual;
+  const condicaoPix = campos.condicaoPix || campos.precoPix || "";
+  if (textoIndicaPix(condicaoPix)) return `${precoAtual} no Pix`;
+  return precoAtual;
 }
 
 function economiaReal(precoOriginal, precoAtual, economia) {
@@ -336,6 +359,7 @@ function gerarTemplateUniversal(oferta = {}) {
   const precoAtualNumero = normalizarNumero(precoAtualExibido);
   const precoOriginalNumero = normalizarNumero(campos.precoOriginal);
   const precoAtual = formatarMoeda(precoAtualExibido) || normalizarTexto(precoAtualExibido);
+  const precoAtualComCondicao = textoPrecoAtualComCondicao(precoAtual, campos);
   const precoOriginal = precoOriginalNumero != null &&
     precoAtualNumero != null &&
     precoOriginalNumero > precoAtualNumero
@@ -346,7 +370,7 @@ function gerarTemplateUniversal(oferta = {}) {
   const economia = economiaNumero != null && economiaNumero > 0
     ? formatarMoeda(economiaNumero)
     : "";
-  const score = apresentarScore(campos.score);
+  const avaliacao = normalizarTexto(campos.avaliacao);
   let beneficioComercial = campos.beneficios.find(beneficio =>
     beneficioComercialValidoParaTemplate(beneficio, campos)
   );
@@ -363,15 +387,17 @@ function gerarTemplateUniversal(oferta = {}) {
   ]);
   adicionarBloco(blocos, [
     precoOriginal ? `❌ De: *${precoOriginal}*` : "",
-    `✅ Por: *${precoAtual}*`,
+    `✅ Por: *${precoAtualComCondicao}*`,
+    campos.parcelamento ? `💳 Ou *${campos.parcelamento}*` : "",
     economia ? `💸 Economia: *${economia}${descontoPercentual != null && descontoPercentual > 0 ? ` (${descontoPercentual.toFixed(0)}%)` : ""}*` : ""
   ]);
   adicionarBloco(blocos, [
-    campos.cupom ? `🎟️ Cupom: *${campos.cupom}*` : ""
+    campos.cupom ? `🎟️ Cupom: *${campos.cupom}*` : "",
+    campos.instrucaoCupom && campos.instrucaoCupom !== campos.cupomTexto ? `⚡ ${campos.instrucaoCupom}` : ""
   ]);
   adicionarBloco(blocos, [
-    score ? "✰ Avaliação" : "",
-    score
+    avaliacao ? "✰ Avaliação" : "",
+    avaliacao
   ]);
   adicionarBloco(blocos, [
     "🔗 *Confira aqui:*",
@@ -384,7 +410,6 @@ function gerarTemplateUniversal(oferta = {}) {
 
   return blocos.map(bloco => bloco.join("\n")).join("\n\n");
 }
-
 module.exports = {
   gerarTemplateUniversal,
   apresentarScore

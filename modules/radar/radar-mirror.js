@@ -33,13 +33,32 @@ function confianca(valor = "") {
 }
 
 function normalizarCupom(valor = "") {
-  const cupom = texto(valor)
+  const cupom = normalizarCupons(valor)[0] || null;
+  return cupom;
+}
+
+function normalizarCupons(valor = "") {
+  const entradas = Array.isArray(valor) ? valor : [valor];
+  const bloqueados = new Set(["CUPOM", "CODIGO", "CODIGO:", "APLICAR", "RESGATE", "DESCONTO", "OFERTA", "PROMOCAO", "GRATIS", "FRETE", "CARRINHO", "OU", "E", "OR"]);
+  const resultado = [];
+  const vistos = new Set();
+
+  for (const entrada of entradas) {
+    const base = texto(entrada)
     .toUpperCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^A-Z0-9_-]/g, "")
+      .replace(/\b(CUPOM|CODIGO|CODE|USE|UTILIZE|APLIQUE|RESGATE)\b\s*:?\s*/g, " ")
     .trim();
-  return cupom || null;
+    const partes = base.match(/\b[A-Z0-9][A-Z0-9_-]{3,39}\b/g) || [];
+    for (const parte of partes) {
+      if (bloqueados.has(parte) || vistos.has(parte)) continue;
+      vistos.add(parte);
+      resultado.push(parte);
+    }
+  }
+
+  return resultado;
 }
 
 function normalizarTituloComparacao(valor = "") {
@@ -201,7 +220,15 @@ function resumirComercialRadar(extracao = {}) {
     descontoPercentual: campoComercial(comercial.descontoPercentual),
     valorEconomia: campoComercial(comercial.valorEconomia),
     cupom: {
-      codigo: normalizarCupom(comercial.cupom?.codigo || ""),
+      codigo: normalizarCupom(comercial.cupom?.codigo || comercial.cupom?.texto || ""),
+      codigos: normalizarCupons([
+        ...(Array.isArray(comercial.cupom?.codigos) ? comercial.cupom.codigos : []),
+        ...(Array.isArray(comercial.cupom?.cupons) ? comercial.cupom.cupons : []),
+        comercial.cupom?.codigo || "",
+        comercial.cupom?.texto || "",
+        comercial.cupom?.instrucao || "",
+        comercial.cupom?.evidencia || ""
+      ]),
       texto: textoOuNull(comercial.cupom?.texto || ""),
       instrucao: textoOuNull(comercial.cupom?.instrucao || ""),
       valor: comercial.cupom?.valor ?? null,
@@ -253,7 +280,17 @@ function criarRadarMirror({
 } = {}) {
   const precoAtual = numeroOuNull(extracaoRadarLocal?.precoAtual?.valor);
   const precoAnterior = numeroOuNull(extracaoRadarLocal?.precoAnterior?.valor);
-  const cupomCodigo = normalizarCupom(extracaoRadarLocal?.cupom?.codigo || beneficiosMensagem.cupom || "");
+  const cupomCodigos = normalizarCupons([
+    ...(Array.isArray(extracaoRadarLocal?.cupom?.codigos) ? extracaoRadarLocal.cupom.codigos : []),
+    ...(Array.isArray(beneficiosMensagem.cupons) ? beneficiosMensagem.cupons : []),
+    extracaoRadarLocal?.cupom?.codigo || "",
+    extracaoRadarLocal?.cupom?.beneficioTexto || "",
+    extracaoRadarLocal?.cupom?.evidencia || "",
+    beneficiosMensagem.cupom || "",
+    beneficiosMensagem.beneficioExtra || "",
+    beneficiosMensagem.avisoCupom || ""
+  ]);
+  const cupomCodigo = cupomCodigos[0] || null;
   const linksClassificados = classificarLinksRadar(links, beneficiosMensagem);
   const midia = imagemOriginalRadar(extracaoRadarLocal, raw || {});
   const condicao = condicaoPrecoRadar(extracaoRadarLocal, beneficiosMensagem);
@@ -292,6 +329,7 @@ function criarRadarMirror({
     },
     cupom: {
       codigoCapturado: cupomCodigo,
+      codigosCapturados: cupomCodigos,
       textoCapturado: textoOuNull(extracaoRadarLocal?.cupom?.beneficioTexto || beneficiosMensagem.beneficioExtra || beneficiosMensagem.avisoCupom),
       condicaoCapturada: textoOuNull(extracaoRadarLocal?.cupom?.evidencia || beneficiosMensagem.tipoCupom),
       confianca: cupomCodigo ? confianca(extracaoRadarLocal?.cupom?.confianca || (beneficiosMensagem.cupom ? "media" : "ausente")) : "ausente"

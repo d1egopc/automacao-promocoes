@@ -116,8 +116,36 @@ function cupomOficial(oferta = {}, v2 = {}) {
   return cupom;
 }
 
+function listaTextoUnica(valores = []) {
+  const resultado = [];
+  const vistos = new Set();
+  for (const valor of Array.isArray(valores) ? valores : []) {
+    const item = texto(valor);
+    if (!item || vistos.has(item)) continue;
+    vistos.add(item);
+    resultado.push(item);
+  }
+  return resultado;
+}
+
+function cuponsOficiais(oferta = {}) {
+  const multiplos = listaTextoUnica([
+    ...(Array.isArray(oferta.cupons) ? oferta.cupons : []),
+    ...(Array.isArray(oferta.codigosCupom) ? oferta.codigosCupom : [])
+  ]);
+  if (multiplos.length) return multiplos;
+
+  return listaTextoUnica([
+    oferta.cupom || "",
+    oferta.codigoCupom || "",
+    oferta.cupomCodigo || ""
+  ]);
+}
+
 function prepararDadosUniversaisTemplate(oferta = {}) {
   const v2 = oferta.inteligenciaUniversalV2 || {};
+  const cupons = cuponsOficiais(oferta);
+  const cupom = cupons.length ? cupons.join(" ou ") : (oferta.cupom || oferta.cupomCodigo || oferta.codigoCupom || "");
 
   return {
     titulo: oferta.titulo || oferta.nome || "",
@@ -127,13 +155,24 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
     economia: oferta.economia ?? oferta.economiaValor ?? oferta.valorEconomia,
     descontoPercentual: oferta.descontoPercentual ?? oferta.desconto,
     categoria: v2.categoria || oferta.categoria || "",
-    cupom: oferta.cupom || oferta.cupomCodigo || "",
+    cupom,
+    cupomTexto: oferta.cupomTexto || cupom,
+    codigoCupom: cupom,
+    codigosCupom: cupons,
+    cupons,
+    instrucaoCupom: oferta.instrucaoCupom || "",
     cupomTipo: oferta.cupomTipo || oferta.tipoCupom || "",
     beneficios: beneficiosUniversais(oferta, v2),
     valorEfetivo: v2.valorEfetivo ?? oferta.valorEfetivo,
     valorEfetivoOrigem: v2.valorEfetivoOrigem || oferta.valorEfetivoOrigem || "",
     prioridade: v2.prioridade ?? oferta.prioridadeEnvio ?? oferta.prioridadeFila ?? oferta.prioridade,
     score: scoreUniversal(v2.score),
+    precoPix: oferta.precoPix || v2.precoPix || "",
+    condicaoPix: oferta.condicaoPix || oferta.precoPix || v2.precoPix || "",
+    parcelamento: oferta.parcelamento || "",
+    avaliacao: oferta.avaliacao || oferta.rating || oferta.nota || "",
+    rating: oferta.rating,
+    nota: oferta.nota,
     linkAfiliado: oferta.linkAfiliado || oferta.linkFinal || oferta.link || "",
     imagem: oferta.imagem || ""
   };

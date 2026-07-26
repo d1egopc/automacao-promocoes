@@ -27,15 +27,35 @@ function precoValido(valor) {
 }
 
 function normalizarCupom(valor = "") {
-  const cupom = texto(valor)
+  return normalizarCupons(valor)[0] || null;
+}
+
+function normalizarCupons(valor = "") {
+  const entradas = Array.isArray(valor) ? valor : [valor];
+  const bloqueados = new Set(["CUPOM", "CODIGO", "CODE", "APLICAR", "RESGATE", "DESCONTO", "OFERTA", "PROMOCAO", "GRATIS", "FRETE", "CARRINHO", "OU", "E", "OR"]);
+  const resultado = [];
+  const vistos = new Set();
+
+  for (const entrada of entradas) {
+    const base = texto(entrada)
     .toUpperCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^A-Z0-9_-]/g, "")
+      .replace(/\b(CUPOM|CODIGO|CODE|USE|UTILIZE|APLIQUE|RESGATE)\b\s*:?\s*/g, " ")
     .trim();
-  const bloqueados = new Set(["CUPOM", "CODIGO", "APLICAR", "RESGATE", "DESCONTO", "OFERTA", "PROMOCAO", "GRATIS", "FRETE"]);
-  if (!cupom || cupom.length < 4 || bloqueados.has(cupom)) return null;
-  return cupom;
+    const partes = base.match(/\b[A-Z0-9][A-Z0-9_-]{3,39}\b/g) || [];
+    for (const parte of partes) {
+      if (bloqueados.has(parte) || vistos.has(parte)) continue;
+      vistos.add(parte);
+      resultado.push(parte);
+    }
+  }
+
+  return resultado;
+}
+
+function textoCupons(cupons = []) {
+  return Array.isArray(cupons) && cupons.length ? cupons.join(" ou ") : "";
 }
 
 function campoValor(campo = {}) {
@@ -172,18 +192,33 @@ function resolverPreco({ ofertaImportador = {}, radarMirror = {}, cupomRadarConf
 }
 
 function resolverCupom({ ofertaImportador = {}, radarMirror = {} } = {}) {
-  const cupomRadar = normalizarCupom(radarMirror?.cupom?.codigoCapturado || radarMirror?.comercial?.cupom?.codigo || "");
+  const cupomComercial = radarMirror?.comercial?.cupom || {};
+  const cupomProvavel = cupomComercial.provavel === true;
+  const cuponsRadar = normalizarCupons([
+    ...(Array.isArray(radarMirror?.cupom?.codigosCapturados) ? radarMirror.cupom.codigosCapturados : []),
+    ...(Array.isArray(cupomComercial?.codigos) ? cupomComercial.codigos : []),
+    ...(Array.isArray(cupomComercial?.cupons) ? cupomComercial.cupons : []),
+    radarMirror?.cupom?.codigoCapturado || "",
+    cupomComercial?.codigo || "",
+    cupomProvavel ? "" : (radarMirror?.cupom?.textoCapturado || ""),
+    cupomProvavel ? "" : (radarMirror?.cupom?.condicaoCapturada || ""),
+    cupomProvavel ? "" : (cupomComercial?.texto || ""),
+    cupomProvavel ? "" : (cupomComercial?.instrucao || ""),
+    cupomProvavel ? "" : (cupomComercial?.evidencia || "")
+  ]);
+  const cupomRadar = cuponsRadar[0] || null;
+  const cupomPublicacao = textoCupons(cuponsRadar);
   const cupomImportador = normalizarCupom(ofertaImportador.cupom || ofertaImportador.codigoCupom || "");
   const confiancaCupomRadar = confianca(radarMirror?.cupom?.confianca || radarMirror?.comercial?.cupom?.confianca || "ausente");
   const textoCupomRadar = textoOuNull(radarMirror?.cupom?.textoCapturado || radarMirror?.comercial?.cupom?.texto || "");
   const instrucaoCupom = textoOuNull(radarMirror?.comercial?.cupom?.instrucao || radarMirror?.cupom?.condicaoCapturada || "");
-  const cupomProvavel = radarMirror?.comercial?.cupom?.provavel === true && !cupomRadar;
 
-  if (cupomRadar && ["alta", "media"].includes(confiancaCupomRadar)) {
+  if (cupomRadar && !cupomProvavel && ["alta", "media"].includes(confiancaCupomRadar)) {
     return {
-      cupomPublicacao: cupomRadar,
+      cupomPublicacao,
       origemCupom: "radar",
       cupomRadar,
+      cuponsRadar,
       cupomImportador,
       confiancaCupomRadar,
       textoCupomRadar,
@@ -196,6 +231,7 @@ function resolverCupom({ ofertaImportador = {}, radarMirror = {} } = {}) {
     cupomPublicacao: null,
     origemCupom: "ausente",
     cupomRadar,
+    cuponsRadar,
     cupomImportador,
     confiancaCupomRadar,
     textoCupomRadar,
@@ -224,7 +260,8 @@ function montarCondicoesComerciais(radarMirror = {}) {
       quantidade: comercial.parcelamento?.quantidade ?? null,
       valorParcela: precoValido(comercial.parcelamento?.valorParcela) ?? null,
       semJuros: comercial.parcelamento?.semJuros === true,
-      confianca: confianca(comercial.parcelamento?.confianca || "ausente")
+      confianca: confianca(comercial.parcelamento?.confianca || "ausente"),
+      evidencia: textoOuNull(comercial.parcelamento?.evidencia || "")
     },
     cashback: campoCondicao(comercial.cashback),
     freteGratis: campoCondicao(comercial.freteGratis),
@@ -286,6 +323,22 @@ function valorCondicaoTexto(condicao = {}, fallback = "") {
   const valor = condicao.valor;
   if (valor === null || valor === undefined || valor === "" || valor === false) return "";
   return texto(condicao.evidencia || fallback || valor);
+}
+
+function formatarMoedaBRL(valor) {
+  const numero = precoValido(valor);
+  if (numero === null) return "";
+  return numero.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function textoParcelamentoRadar(parcelamento = {}) {
+  if (!parcelamento || typeof parcelamento !== "object") return "";
+  const evidencia = texto(parcelamento.evidencia || "");
+  if (evidencia) return evidencia;
+  const quantidade = Number(parcelamento.quantidade || 0);
+  const valorParcela = formatarMoedaBRL(parcelamento.valorParcela);
+  if (!quantidade || !valorParcela) return "";
+  return `${valorParcela} em ate ${quantidade}x${parcelamento.semJuros ? " sem juros" : ""}`;
 }
 
 function limparCamposComerciaisImportador(oferta = {}) {
@@ -371,6 +424,10 @@ function aplicarRadarMirrorFiel(oferta = {}, resolucao = {}) {
     proxima.cupom = resolucao.cupomPublicacao;
     proxima.codigoCupom = resolucao.cupomPublicacao;
     proxima.codigo_cupom = resolucao.cupomPublicacao;
+    proxima.cupons = Array.isArray(resolucao.cuponsRadar) ? [...resolucao.cuponsRadar] : [];
+    proxima.codigosCupom = Array.isArray(resolucao.cuponsRadar) ? [...resolucao.cuponsRadar] : [];
+    proxima.cupomTexto = resolucao.textoCupomRadar || resolucao.cupomPublicacao;
+    proxima.instrucaoCupom = resolucao.instrucaoCupom || resolucao.textoCupomRadar || "";
     proxima.origemCupom = "radar";
     proxima.cupomOrigem = proxima.cupomOrigem || "radar_comercial";
     proxima.cupomDetectadoTexto = true;
@@ -386,13 +443,16 @@ function aplicarRadarMirrorFiel(oferta = {}, resolucao = {}) {
   const precoPix = valorCondicaoTexto(condicoes.pix, "Preco PIX");
   const precoBoleto = valorCondicaoTexto(condicoes.boleto, "Preco boleto");
   const precoCartao = valorCondicaoTexto(condicoes.cartao, "Preco cartao");
+  const parcelamento = textoParcelamentoRadar(condicoes.parcelamento);
   const cashback = valorCondicaoTexto(condicoes.cashback, "Cashback");
   const freteGratis = condicoes.freteGratis?.valor === true;
   const desconto = valorCondicaoTexto(condicoes.descontoPercentual, "Desconto");
 
   if (precoPix) proxima.precoPix = precoPix;
+  if (precoPix) proxima.condicaoPix = precoPix;
   if (precoBoleto) proxima.precoBoleto = precoBoleto;
   if (precoCartao) proxima.precoCartao = precoCartao;
+  if (parcelamento) proxima.parcelamento = parcelamento;
   if (cashback) proxima.cashback = cashback;
   if (freteGratis) proxima.freteGratis = true;
   if (desconto) proxima.descontoRadar = desconto;
@@ -402,6 +462,7 @@ function aplicarRadarMirrorFiel(oferta = {}, resolucao = {}) {
   proxima.condicoesComerciais = resolucao.condicoesComerciais;
   proxima.confiancaComercial = resolucao.confiancaComercial;
   proxima.fonteComercial = "radar_mirror";
+  proxima.textoComercialOriginal = resolucao.textoComercialOriginal || proxima.textoComercialOriginal;
   return proxima;
 }
 
@@ -458,6 +519,7 @@ function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror 
     cupomPublicacao: cupom.cupomPublicacao,
     origemCupom: cupom.origemCupom,
     cupomRadar: cupom.cupomRadar,
+    cuponsRadar: cupom.cuponsRadar,
     cupomImportador: cupom.cupomImportador,
     confiancaCupomRadar: cupom.confiancaCupomRadar,
     textoCupomRadar: cupom.textoCupomRadar,
@@ -469,6 +531,7 @@ function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror 
     linkAfiliado: links.linkAfiliado,
     linkResgateCupom: links.linkResgateCupom,
     linksClassificados: links.classificacao,
+    textoComercialOriginal: textoOuNull(mirror?.texto?.original || ""),
     aplicadoEm: new Date().toISOString()
   };
 
