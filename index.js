@@ -197,7 +197,8 @@ const {
 const {
   resolverPrecedenciaComercialRadar,
   resumirPrecedenciaComercialLog,
-  deveLogarDivergenciaComercial
+  deveLogarDivergenciaComercial,
+  emitirLogRadarPrecoSuspeito
 } = require("./modules/radar/comercial-precedencia");
 const {
   aplicarLimiteLista,
@@ -13674,13 +13675,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
           etapa: "radar_legado"
         }));
       }
-      if (deveLogarPrecoSuspeito(resultadoPrecedenciaComercial)) {
-        console.log("[RADAR-PRECO-SUSPEITO]", JSON.stringify({
-          ...resumirPrecedenciaComercialLog(resultadoPrecedenciaComercial),
-          motivos: resultadoPrecedenciaComercial?.resolucao?.motivosConfiancaPreco || [],
-          etapa: "radar_legado"
-        }));
-      }
+      emitirLogRadarPrecoSuspeito(resultadoPrecedenciaComercial, "radar_legado");
     }
 
     if (!importacao.ok) {

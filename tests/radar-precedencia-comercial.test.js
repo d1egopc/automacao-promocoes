@@ -4,7 +4,8 @@ const {
   resolverPrecedenciaComercialRadar,
   resumirPrecedenciaComercialLog,
   deveLogarDivergenciaComercial,
-  deveLogarPrecoSuspeito
+  deveLogarPrecoSuspeito,
+  emitirLogRadarPrecoSuspeito
 } = require("../modules/radar/comercial-precedencia");
 const { montarItemFilaEngine } = require("../modules/engine/distributor/distributor.service");
 
@@ -429,6 +430,94 @@ function testarPrecoBaixoRealCoerenteContinuaPermitido() {
   assert.strictEqual(r.oferta.preco, 4.69);
   assert.strictEqual(deveLogarPrecoSuspeito(r), false);
 }
+function capturarLogsPrecoSuspeito(fn) {
+  const original = console.log;
+  const eventos = [];
+  console.log = (...args) => {
+    eventos.push(args);
+  };
+  try {
+    const retorno = fn();
+    return { eventos, retorno };
+  } finally {
+    console.log = original;
+  }
+}
+
+function eventosPrecoSuspeito(eventos = []) {
+  return eventos.filter(args => args[0] === "[RADAR-PRECO-SUSPEITO]");
+}
+
+function resultadoComDivergencia(divergenciaPercentual, origemPreco = "importador", overrides = {}) {
+  return {
+    resolucao: {
+      versao: "radar_precedencia_comercial_v1",
+      modo: overrides.modo || "simulacao",
+      clienteId: "user_teste",
+      marketplace: "amazon",
+      origemPreco,
+      precoRadar: 100,
+      precoImportador: 100,
+      precoPublicacao: origemPreco === "radar" ? 100 : 200,
+      confiancaPrecoRadar: "alta",
+      divergenciaPercentual,
+      statusComparacaoPreco: overrides.statusComparacaoPreco || "divergente",
+      origemCupom: overrides.origemCupom || "ausente",
+      cupomRadar: overrides.cupomRadar || null,
+      cupomImportador: null,
+      linksClassificados: {},
+      quantidadeCandidatosPreco: 2,
+      tipoCandidatoEscolhido: "preco_atual",
+      marcadorPrecoEscolhido: "por",
+      possuiCifraoPrecoEscolhido: true,
+      motivosConfiancaPreco: ["preco_radar_marcador_explicito"],
+      candidatosRejeitadosPorTipo: { quantidade: 1 }
+    }
+  };
+}
+
+function testarLoggingNaoEmiteAbaixoDe80() {
+  const { eventos, retorno } = capturarLogsPrecoSuspeito(() => emitirLogRadarPrecoSuspeito(resultadoComDivergencia(79.99), "teste"));
+  assert.strictEqual(retorno, false);
+  assert.strictEqual(eventosPrecoSuspeito(eventos).length, 0);
+}
+
+function testarLoggingEmiteEm80() {
+  const { eventos, retorno } = capturarLogsPrecoSuspeito(() => emitirLogRadarPrecoSuspeito(resultadoComDivergencia(80), "teste"));
+  assert.strictEqual(retorno, true);
+  assert.strictEqual(eventosPrecoSuspeito(eventos).length, 1);
+}
+
+function testarLoggingEmiteEm193() {
+  const { eventos } = capturarLogsPrecoSuspeito(() => emitirLogRadarPrecoSuspeito(resultadoComDivergencia(193.53), "teste"));
+  assert.strictEqual(eventosPrecoSuspeito(eventos).length, 1);
+}
+
+function testarLoggingEmiteEm29100() {
+  const { eventos } = capturarLogsPrecoSuspeito(() => emitirLogRadarPrecoSuspeito(resultadoComDivergencia(29100), "teste"));
+  assert.strictEqual(eventosPrecoSuspeito(eventos).length, 1);
+}
+
+function testarLoggingOrigemRadarComCupomEmite() {
+  const { eventos } = capturarLogsPrecoSuspeito(() => emitirLogRadarPrecoSuspeito(resultadoComDivergencia(121.64, "radar", { origemCupom: "radar", cupomRadar: "PROMO10" }), "teste"));
+  assert.strictEqual(eventosPrecoSuspeito(eventos).length, 1);
+}
+
+function testarLoggingOrigemImportadorEmite() {
+  const { eventos } = capturarLogsPrecoSuspeito(() => emitirLogRadarPrecoSuspeito(resultadoComDivergencia(114.19, "importador"), "teste"));
+  assert.strictEqual(eventosPrecoSuspeito(eventos).length, 1);
+}
+
+function testarLoggingModoSimulacaoEmite() {
+  const { eventos } = capturarLogsPrecoSuspeito(() => emitirLogRadarPrecoSuspeito(resultadoComDivergencia(84.44, "importador", { modo: "simulacao" }), "teste"));
+  const suspeitos = eventosPrecoSuspeito(eventos);
+  assert.strictEqual(suspeitos.length, 1);
+  const payload = JSON.parse(suspeitos[0][1]);
+  assert.strictEqual(payload.modo, "simulacao");
+  assert.strictEqual(payload.etapa, "teste");
+  assert.strictEqual(payload.quantidadeCandidatosPreco, 2);
+  assert.strictEqual(payload.tipoCandidatoEscolhido, "preco_atual");
+}
 const testes = [
   testarPrecoAltaCoerente,
   testarPrecoAltaDivergente,
@@ -457,7 +546,14 @@ const testes = [
   testarRadarExtremoComCupomConfirmadoFicaAuditavel,
   testarDivergenciaAbaixoLimiteMantemComportamentoAtual,
   testarPrecoCoerenteNaoGeraAlerta,
-  testarPrecoBaixoRealCoerenteContinuaPermitido
+  testarPrecoBaixoRealCoerenteContinuaPermitido,
+  testarLoggingNaoEmiteAbaixoDe80,
+  testarLoggingEmiteEm80,
+  testarLoggingEmiteEm193,
+  testarLoggingEmiteEm29100,
+  testarLoggingOrigemRadarComCupomEmite,
+  testarLoggingOrigemImportadorEmite,
+  testarLoggingModoSimulacaoEmite
 ];
 
 for (const teste of testes) teste();

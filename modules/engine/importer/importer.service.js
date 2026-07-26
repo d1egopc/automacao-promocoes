@@ -28,7 +28,8 @@ const {
 const {
   resolverPrecedenciaComercialRadar,
   resumirPrecedenciaComercialLog,
-  deveLogarDivergenciaComercial
+  deveLogarDivergenciaComercial,
+  emitirLogRadarPrecoSuspeito
 } = require("../../radar/comercial-precedencia");
 const { validarCoerenciaPreco } = require("../../inteligencia-universal/preco-coerencia.service");
 const {
@@ -1050,13 +1051,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
         etapa: "engine_ofertas"
       }));
     }
-    if (deveLogarPrecoSuspeito(resultadoPrecedenciaComercial)) {
-      console.log("[RADAR-PRECO-SUSPEITO]", JSON.stringify({
-        ...resumirPrecedenciaComercialLog(resultadoPrecedenciaComercial),
-        motivos: resultadoPrecedenciaComercial?.resolucao?.motivosConfiancaPreco || [],
-        etapa: "engine_ofertas"
-      }));
-    }
+    emitirLogRadarPrecoSuspeito(resultadoPrecedenciaComercial, "engine_ofertas");
   }
   const inteligenciaV2 = objetoSeguro(metadataFinal.inteligenciaUniversalV2);
   const retidaV2 = inteligenciaV2.status === "retida" || sombraV2.ok === false;

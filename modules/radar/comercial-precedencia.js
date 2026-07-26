@@ -432,14 +432,30 @@ function resumirPrecedenciaComercialLog(resultado = {}) {
   };
 }
 
-function deveLogarPrecoSuspeito(resultado = {}) {
-  const resolucao = resultado.resolucao || {};
+function deveLogarResumoPrecoSuspeito(resumo = {}) {
+  const divergencia = Number(resumo.divergenciaPercentual);
   return Boolean(
-    resolucao.statusComparacaoPreco === "revisao_semantica" ||
-    resolucao.statusComparacaoPreco === "radar_invalido" ||
-    (typeof resolucao.divergenciaPercentual === "number" &&
-      resolucao.divergenciaPercentual >= DIVERGENCIA_PERCENTUAL_SUSPEITA)
+    resumo.statusComparacaoPreco === "revisao_semantica" ||
+    resumo.statusComparacaoPreco === "radar_invalido" ||
+    (Number.isFinite(divergencia) && divergencia >= DIVERGENCIA_PERCENTUAL_SUSPEITA)
   );
+}
+
+function deveLogarPrecoSuspeito(resultado = {}) {
+  return deveLogarResumoPrecoSuspeito(resumirPrecedenciaComercialLog(resultado));
+}
+
+function emitirLogRadarPrecoSuspeito(resultado = {}, etapa = "") {
+  const resumo = {
+    ...resumirPrecedenciaComercialLog(resultado),
+    etapa: texto(etapa || "")
+  };
+  if (!deveLogarResumoPrecoSuspeito(resumo)) return false;
+  console.log("[RADAR-PRECO-SUSPEITO]", JSON.stringify({
+    ...resumo,
+    motivos: resumo.motivosConfiancaPreco || []
+  }));
+  return true;
 }
 
 function deveLogarDivergenciaComercial(resultado = {}) {
@@ -458,6 +474,7 @@ module.exports = {
   resumirPrecedenciaComercialLog,
   deveLogarDivergenciaComercial,
   deveLogarPrecoSuspeito,
+  emitirLogRadarPrecoSuspeito,
   resolverPreco,
   resolverCupom
 };
