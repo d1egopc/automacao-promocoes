@@ -32,7 +32,7 @@ function normalizarCupom(valor = "") {
 
 function normalizarCupons(valor = "") {
   const entradas = Array.isArray(valor) ? valor : [valor];
-  const bloqueados = new Set(["CUPOM", "CODIGO", "CODE", "APLICAR", "RESGATE", "DESCONTO", "OFERTA", "PROMOCAO", "GRATIS", "FRETE", "CARRINHO", "ANUNCIO", "OU", "E", "OR"]);
+  const bloqueados = new Set(["CUPOM", "CODIGO", "CODE", "APLICAR", "RESGATE", "DESCONTO", "OFERTA", "PROMOCAO", "GRATIS", "FRETE", "CARRINHO", "ANUNCIO", "MENSAGEM", "DETECTADO", "HTTP", "HTTPS", "OU", "E", "OR"]);
   const resultado = [];
   const vistos = new Set();
 
@@ -46,6 +46,8 @@ function normalizarCupons(valor = "") {
     const partes = base.match(/\b[A-Z0-9][A-Z0-9_-]{3,39}\b/g) || [];
     for (const parte of partes) {
       if (bloqueados.has(parte) || vistos.has(parte)) continue;
+      if (/(?:^|_)O?CUPOMDE\d/i.test(parte)) continue;
+      if (/(ANUNCIO|MENSAGEM|DETECTADO|HTTPS?)/i.test(parte)) continue;
       vistos.add(parte);
       resultado.push(parte);
     }

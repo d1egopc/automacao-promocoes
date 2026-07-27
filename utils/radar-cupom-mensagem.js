@@ -111,6 +111,11 @@ function normalizarCupomMensagemRadar(cupom = "") {
     "DESSE",
     "DESSA",
     "PAGINA",
+    "ANUNCIO",
+    "MENSAGEM",
+    "DETECTADO",
+    "HTTP",
+    "HTTPS",
     "LOJA",
     "OFICIAL",
     "LINK",
@@ -129,6 +134,9 @@ function normalizarCupomMensagemRadar(cupom = "") {
 
   if (!codigo || codigo.length < 4 || codigo.length > 30) return "";
   if (bloqueados.has(codigo)) return "";
+  if (/\b\d{1,2}\s*%/.test(original) && /\b(?:cupom|desconto)\s+de\b/i.test(original)) return "";
+  if (/(?:^|_)O?CUPOMDE\d/i.test(codigo)) return "";
+  if (/(ANUNCIO|MENSAGEM|DETECTADO|HTTPS?)/i.test(codigo)) return "";
   if (/^(HTTP|HTTPS|WWW|TAG|UTM|AWINAFFID|LINKCODE|CREATIVE|CAMP|REF)$/i.test(codigo)) return "";
   if (originalLower.includes("tag=") || originalLower.includes("utm_")) return "";
 
@@ -186,6 +194,7 @@ function extrairCuponsMultiplosRadar(texto = "") {
     while ((match = padrao.exec(fonte))) {
       const trecho = String(match[1] || "")
         .split(/\s+(?:no|na|em|para|por|pelo|pela|link|site|app)\b/i)[0];
+      if (/\b\d{1,2}\s*%/.test(trecho) && /\b(?:cupom|desconto)\s+de\b/i.test(trecho)) continue;
       const temOu = /\bou\b/i.test(trecho);
       const temCombinado = /[+,]|(?:\s+e\s+)/i.test(trecho);
       const partes = trecho.split(/\s+ou\s+|[+,]|\s+e\s+/i);

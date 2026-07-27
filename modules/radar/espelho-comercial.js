@@ -5,6 +5,7 @@ const {
 const {
   mergeRadarMirrorMetadata
 } = require("./radar-mirror");
+const { normalizarNumeroMoeda } = require("../../utils/moeda");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -53,11 +54,70 @@ function normalizarCupomComparacao(valor = "") {
     .trim();
 }
 
+function normalizarTextoComparacao(valor = "") {
+  return texto(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function textosEquivalentes(a = "", b = "") {
+  const chaveA = normalizarTextoComparacao(a);
+  const chaveB = normalizarTextoComparacao(b);
+  return Boolean(chaveA && chaveB && chaveA === chaveB);
+}
+
 function dividirCuponsContrato(valor = "") {
   return texto(valor)
     .split(/\s+(?:ou|e)\s+|[,;/|]+/i)
     .map(texto)
     .filter(Boolean);
+}
+
+function normalizarCodigoCupomContrato(valor = "") {
+  const original = texto(valor);
+  if (!original) return "";
+  if (/\b\d{1,2}\s*%/.test(original) && /\b(?:cupom|desconto)\s+de\b/i.test(original)) return "";
+
+  const preparado = original
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^\s*(?:CUPOM|CODIGO|CODE|USE|UTILIZE|APLIQUE|APLICAR|RESGATE)\s*:?\s*/i, "")
+    .replace(/[^A-Z0-9_-]/g, "")
+    .trim();
+
+  const bloqueados = new Set([
+    "CUPOM",
+    "CUPONS",
+    "CODIGO",
+    "CODE",
+    "APLICAR",
+    "RESGATE",
+    "DESCONTO",
+    "OFERTA",
+    "PROMOCAO",
+    "GRATIS",
+    "FRETE",
+    "CARRINHO",
+    "ANUNCIO",
+    "MENSAGEM",
+    "DETECTADO",
+    "HTTP",
+    "HTTPS",
+    "OU",
+    "E",
+    "OR"
+  ]);
+
+  if (!preparado || preparado.length < 4 || preparado.length > 30) return "";
+  if (bloqueados.has(preparado)) return "";
+  if (/(?:^|_)O?CUPOMDE\d/i.test(preparado)) return "";
+  if (/(ANUNCIO|MENSAGEM|DETECTADO|HTTPS?)/i.test(preparado)) return "";
+  return preparado;
 }
 
 function cuponsContratoUnicos(valores = []) {
@@ -66,10 +126,11 @@ function cuponsContratoUnicos(valores = []) {
 
   for (const valor of Array.isArray(valores) ? valores : []) {
     for (const item of dividirCuponsContrato(valor)) {
-      const chave = normalizarCupomComparacao(item);
+      const codigo = normalizarCodigoCupomContrato(item);
+      const chave = normalizarCupomComparacao(codigo);
       if (!chave || vistos.has(chave)) continue;
       vistos.add(chave);
-      resultado.push(item);
+      resultado.push(codigo);
     }
   }
 
@@ -97,6 +158,32 @@ function instrucaoCupomUtilContrato(instrucao = "", cupons = []) {
   if (!normalizado || ["cupom", "codigo", "cod", "desconto"].includes(normalizado)) return "";
 
   return original;
+}
+
+function formatarMoedaBRLContrato(valor) {
+  const numero = normalizarNumeroMoeda(valor);
+  if (numero === null || !Number.isFinite(numero)) return "";
+  return numero.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }).replace(/\u00A0/g, " ");
+}
+
+function normalizarPrecoUnitarioContrato(...valores) {
+  for (const valor of valores) {
+    const fonte = texto(valor?.evidencia || valor?.texto || valor?.valor || valor);
+    if (!fonte) continue;
+
+    const match = fonte.match(/(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+(?:[,.]\d{2}))\s*(?:cada|unidade|por unidade|cada um|por un\.?|\/un)\b/i);
+    if (!match) continue;
+
+    const moeda = formatarMoedaBRLContrato(match[1]);
+    if (!moeda) continue;
+    return `${moeda} cada`;
+  }
+
+  return "";
+}
+
+function filtrarTextosSemDuplicarInstrucao(valores = [], instrucaoCupom = "") {
+  return listaTextoUnica(valores).filter(item => !textosEquivalentes(item, instrucaoCupom));
 }
 
 function adicionarLinkComercial(lista, entrada = {}) {
@@ -175,6 +262,7 @@ function camposComerciaisEspelho({ radarMirror = {}, resultadoPrecedencia = {}, 
     oferta.codigoCupom || "",
     oferta.cupom || ""
   ]);
+  const cupomPublicacao = cupons.join(" ou ");
   const instrucaoCupom = instrucaoCupomUtilContrato(
     oferta.instrucaoCupom ||
       resultadoPrecedencia.resolucao?.instrucaoCupom ||
@@ -183,6 +271,16 @@ function camposComerciaisEspelho({ radarMirror = {}, resultadoPrecedencia = {}, 
       "",
     cupons
   );
+  const precoUnitario = normalizarPrecoUnitarioContrato(
+    oferta.precoUnitario,
+    condicoes.unitario,
+    comercial.precoUnitario,
+    radarMirror?.texto?.limpo,
+    radarMirror?.texto?.original
+  );
+  const beneficioExtra = textosEquivalentes(oferta.beneficioExtra, instrucaoCupom)
+    ? ""
+    : texto(oferta.beneficioExtra || "");
   const condicoesEspeciais = listaTextoUnica([
     ...(Array.isArray(comercial.condicoesEspeciais) ? comercial.condicoesEspeciais : []),
     radarMirror?.preco?.condicaoTexto,
@@ -208,24 +306,27 @@ function camposComerciaisEspelho({ radarMirror = {}, resultadoPrecedencia = {}, 
     precoOriginal: oferta.precoOriginal ?? oferta.precoAnterior,
     precoPix: oferta.precoPix || "",
     condicaoPix: oferta.condicaoPix || oferta.precoPix || "",
-    precoUnitario: oferta.precoUnitario || "",
+    precoUnitario,
     quantidade: produto.quantidadeCapturada || comercial.quantidade?.valor || "",
     parcelamento: oferta.parcelamento || "",
     quantidadeParcelas: condicoes.parcelamento?.quantidade || "",
     valorParcela: condicoes.parcelamento?.valorParcela || "",
-    cupom: oferta.cupom || "",
-    codigoCupom: oferta.codigoCupom || oferta.cupom || "",
+    cupom: cupomPublicacao,
+    codigoCupom: cupomPublicacao,
+    codigo_cupom: cupomPublicacao,
+    cupomTexto: cupomPublicacao,
     cupons,
     codigosCupom: [...cupons],
     instrucaoCupom,
-    beneficioExtra: oferta.beneficioExtra || "",
-    beneficios: listaTextoUnica([
+    avisoCupom: "",
+    beneficioExtra,
+    beneficios: filtrarTextosSemDuplicarInstrucao([
       ...(Array.isArray(oferta.beneficios) ? oferta.beneficios : []),
       ...(Array.isArray(comercial.beneficios) ? comercial.beneficios : []),
       ...(Array.isArray(comercial.brindes) ? comercial.brindes : []),
       oferta.beneficioExtra,
       oferta.avisoCupom
-    ]),
+    ], instrucaoCupom),
     condicoes: condicoesEspeciais,
     observacoes,
     cashback: oferta.cashback || condicoes.cashback?.evidencia || "",
@@ -253,9 +354,19 @@ function aplicarContratoComercialRadar(oferta = {}, contrato = null) {
   const origem = contrato || oferta.metadata?.radarEspelhoComercial?.contratoComercial || {};
   if (!origem || typeof origem !== "object") return oferta;
   const proxima = { ...oferta };
+  const camposLimpaveis = new Set([
+    "cupom",
+    "codigoCupom",
+    "codigo_cupom",
+    "cupomTexto",
+    "instrucaoCupom",
+    "avisoCupom",
+    "beneficioExtra",
+    "precoUnitario"
+  ]);
 
   for (const [campo, valor] of Object.entries(origem)) {
-    if (valor === null || valor === undefined || (valor === "" && campo !== "instrucaoCupom")) continue;
+    if (valor === null || valor === undefined || (valor === "" && !camposLimpaveis.has(campo))) continue;
     if (Array.isArray(valor)) {
       proxima[campo] = valor.map(item => item && typeof item === "object" ? { ...item } : item);
       continue;

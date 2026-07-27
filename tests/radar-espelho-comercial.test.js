@@ -1,6 +1,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
+const radarCupomMensagem = require("../utils/radar-cupom-mensagem");
 
 const {
   espelhoComercialRadarSuficiente,
@@ -97,6 +98,52 @@ function criarMirrorComCupom(codigo, instrucao) {
   mirror.comercial.cupom.codigos = [codigo];
   mirror.comercial.cupom.texto = instrucao;
   mirror.comercial.cupom.instrucao = instrucao;
+  return mirror;
+}
+
+function criarMirrorCupomPercentualSemCodigo() {
+  const mirror = criarMirror();
+  const textoOriginal = [
+    "Pack com 12 unidades de 250ml",
+    "DE 98 | POR 64,89 (5,41 cada)",
+    "Aplique o cupom de 10% OFF no anuncio"
+  ].join("\n");
+
+  mirror.texto.original = textoOriginal;
+  mirror.texto.limpo = textoOriginal;
+  mirror.produto.tituloCapturado = "Pack com 12 unidades de 250ml";
+  mirror.preco.atualCapturado = 64.89;
+  mirror.preco.anteriorCapturado = 98;
+  mirror.preco.evidenciaCapturada = "POR 64,89 (5,41 cada)";
+  mirror.cupom.codigoCapturado = "OCUPOMDE10";
+  mirror.cupom.codigosCapturados = ["OCUPOMDE10", "ANUNCIO", "OCUPOMDE10", "ANUNCIO"];
+  mirror.cupom.textoCapturado = "cupom de 10% OFF no anuncio";
+  mirror.cupom.condicaoCapturada = "Aplique o cupom de 10% OFF no anuncio";
+  mirror.cupom.confianca = "media";
+  mirror.comercial.precoAtual = campo(64.89, "alta", "POR 64,89", {
+    tipo: "preco_atual",
+    tipoCandidato: "preco_atual",
+    marcadorAnterior: "por"
+  });
+  mirror.comercial.precoAntigo = campo(98, "alta", "DE 98");
+  mirror.comercial.precoPix = campo(null, "ausente", null);
+  mirror.comercial.precoUnitario = campo(5.41, "baixa", "Pack com 12 unidades de 250ml DE 98 | POR 64,89 (5,41 cada) Aplique o cupom de 10% OFF no anuncio", {
+    tipo: "preco_unitario",
+    tipoCandidato: "preco_unitario",
+    marcadorPosterior: "unitario"
+  });
+  mirror.comercial.parcelamento = { quantidade: null, valorParcela: null, semJuros: false, confianca: "ausente", evidencia: null };
+  mirror.comercial.cupom = {
+    codigo: "OCUPOMDE10",
+    codigos: ["OCUPOMDE10", "ANUNCIO", "OCUPOMDE10", "ANUNCIO"],
+    texto: "cupom de 10% OFF no anuncio",
+    instrucao: "Aplique o cupom de 10% OFF no anuncio",
+    confianca: "media",
+    evidencia: "cupom de 10% OFF no anuncio",
+    provavel: false
+  };
+  mirror.comercial.beneficios = ["Aplique o cupom de 10% OFF no anuncio"];
+  mirror.comercial.condicoesEspeciais = ["Aplique o cupom de 10% OFF no anuncio"];
   return mirror;
 }
 
@@ -217,6 +264,46 @@ const importadorDivergente = {
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(resultado.oferta.cupom, "MODACOMVC");
   assert.strictEqual(resultado.oferta.instrucaoCupom, "Somente no App. Nao acumulativo.");
+}
+
+{
+  assert.strictEqual(radarCupomMensagem.normalizarCupomMensagemRadar("o cupom de 10% OFF no anuncio"), "");
+  assert.deepStrictEqual(
+    radarCupomMensagem.extrairCuponsMultiplosRadar("Aplique o cupom de 10% OFF no anuncio").cupons,
+    []
+  );
+
+  const resultado = montarOfertaEspelhoTeste(criarMirrorCupomPercentualSemCodigo());
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.oferta.precoUnitario, "R$ 5,41 cada");
+  assert.strictEqual(resultado.oferta.cupom, "");
+  assert.strictEqual(resultado.oferta.codigoCupom, "");
+  assert.strictEqual(resultado.oferta.cupomTexto, "");
+  assert.deepStrictEqual(resultado.oferta.codigosCupom, []);
+  assert.strictEqual(resultado.oferta.instrucaoCupom, "Aplique o cupom de 10% OFF no anuncio");
+  assert.strictEqual(resultado.oferta.avisoCupom, "");
+  assert.strictEqual(resultado.oferta.beneficios.includes("Aplique o cupom de 10% OFF no anuncio"), false);
+  assert.strictEqual(resultado.oferta.metadata.radarEspelhoComercial.contratoComercial.precoUnitario, "R$ 5,41 cada");
+  assert.deepStrictEqual(resultado.oferta.metadata.radarEspelhoComercial.contratoComercial.codigosCupom, []);
+}
+
+{
+  const mirror = criarMirrorComCupom("MODACOMVC", "Cupom: MODACOMVC ou MELICOM20");
+  mirror.cupom.codigosCapturados = ["MODACOMVC", "MELICOM20"];
+  mirror.comercial.cupom.codigos = ["MODACOMVC", "MELICOM20"];
+  const resultado = montarOfertaEspelhoTeste(mirror);
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.oferta.cupom, "MODACOMVC ou MELICOM20");
+  assert.deepStrictEqual(resultado.oferta.codigosCupom, ["MODACOMVC", "MELICOM20"]);
+}
+
+{
+  const mirror = criarMirrorComCupom("MODACOMVC", "Aplique no carrinho.");
+  mirror.cupom.codigosCapturados = ["MODACOMVC", "MODACOMVC"];
+  mirror.comercial.cupom.codigos = ["MODACOMVC", "MODACOMVC"];
+  const resultado = montarOfertaEspelhoTeste(mirror);
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(resultado.oferta.codigosCupom, ["MODACOMVC"]);
 }
 
 {
