@@ -74,13 +74,6 @@ function textosEquivalentes(a = "", b = "") {
   return Boolean(chaveA && chaveB && chaveA === chaveB);
 }
 
-function dividirCuponsContrato(valor = "") {
-  return texto(valor)
-    .split(/\s+(?:ou|e)\s+|[,;/|]+/i)
-    .map(texto)
-    .filter(Boolean);
-}
-
 function normalizarCodigoCupomContrato(valor = "") {
   return normalizarCodigoCupomSemantico(valor);
 }
@@ -101,9 +94,27 @@ function cuponsContratoUnicos(valores = []) {
   return resultado;
 }
 
+function textoTecnicoInternoContrato(valor = "") {
+  const chave = normalizarTextoComparacao(valor);
+  return Boolean(
+    /\b(?:cupom|codigo|token)\s+(?:detectado|encontrado|identificado)\b/.test(chave) ||
+    /\b(?:extraido|detectado)\s+(?:da|de|automaticamente|mensagem)\b/.test(chave) ||
+    /\b(?:mensagem|diagnostico|interno)\b.*\b(?:detectado|extraido|identificado)\b/.test(chave) ||
+    /\b(?:sshopeecombr|https|http|combr)\b/.test(chave)
+  );
+}
+
+function gerarInstrucaoCupomPadrao(cupons = []) {
+  const lista = Array.isArray(cupons) ? cupons.filter(Boolean) : [];
+  if (lista.length === 1) return `Aplique o cupom ${lista[0]} para obter o desconto.`;
+  if (lista.length > 1) return `Aplique um dos cupons ${lista.join(" ou ")} para obter o desconto.`;
+  return "";
+}
+
 function instrucaoCupomUtilContrato(instrucao = "", cupons = []) {
   const original = texto(instrucao);
   if (!original) return "";
+  if (textoTecnicoInternoContrato(original)) return "";
 
   let normalizado = normalizarCupomComparacao(original);
   if (!normalizado) return "";
@@ -285,7 +296,7 @@ function camposComerciaisEspelho({ radarMirror = {}, resultadoPrecedencia = {}, 
     oferta.cupom || ""
   ]);
   const cupomPublicacao = cupons.join(" ou ");
-  const instrucaoCupom = instrucaoCupomUtilContrato(
+  const instrucaoCupomOriginal = instrucaoCupomUtilContrato(
     oferta.instrucaoCupom ||
       resultadoPrecedencia.resolucao?.instrucaoCupom ||
       radarMirror?.comercial?.cupom?.instrucao ||
@@ -293,6 +304,7 @@ function camposComerciaisEspelho({ radarMirror = {}, resultadoPrecedencia = {}, 
       "",
     cupons
   );
+  const instrucaoCupom = instrucaoCupomOriginal || gerarInstrucaoCupomPadrao(cupons);
   const precoUnitario = normalizarPrecoUnitarioContrato(
     oferta.precoUnitario,
     condicoes.unitario,

@@ -235,7 +235,7 @@ const importadorDivergente = {
   assert.strictEqual(resultado.oferta.precoOriginal, 499);
   assert.strictEqual(resultado.oferta.cupom, "FASHION ou MODACOMVC");
   assert.deepStrictEqual(resultado.oferta.codigosCupom, ["FASHION", "MODACOMVC"]);
-  assert.strictEqual(resultado.oferta.instrucaoCupom, "");
+  assert.strictEqual(resultado.oferta.instrucaoCupom, "Aplique um dos cupons FASHION ou MODACOMVC para obter o desconto.");
   assert.strictEqual(resultado.oferta.precoPix, "R$ 205 no Pix");
   assert.strictEqual(resultado.oferta.parcelamento, "R$ 215,83 ate 6x");
   assert.strictEqual(resultado.oferta.imagem, "https://cdn.example.com/produto.jpg");
@@ -252,8 +252,8 @@ const importadorDivergente = {
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(resultado.oferta.cupom, "MODACOMVC");
   assert.deepStrictEqual(resultado.oferta.codigosCupom, ["MODACOMVC"]);
-  assert.strictEqual(resultado.oferta.instrucaoCupom, "");
-  assert.strictEqual(resultado.oferta.metadata.radarEspelhoComercial.contratoComercial.instrucaoCupom, "");
+  assert.strictEqual(resultado.oferta.instrucaoCupom, "Aplique o cupom MODACOMVC para obter o desconto.");
+  assert.strictEqual(resultado.oferta.metadata.radarEspelhoComercial.contratoComercial.instrucaoCupom, "Aplique o cupom MODACOMVC para obter o desconto.");
 }
 
 {
@@ -268,6 +268,14 @@ const importadorDivergente = {
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(resultado.oferta.cupom, "MODACOMVC");
   assert.strictEqual(resultado.oferta.instrucaoCupom, "Somente no App. Nao acumulativo.");
+}
+
+{
+  const resultado = montarOfertaEspelhoTeste(criarMirrorComCupom("MODACOMVC", "Cupom detectado na mensagem: MODACOMVC"));
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.oferta.cupom, "MODACOMVC");
+  assert.strictEqual(resultado.oferta.instrucaoCupom, "Aplique o cupom MODACOMVC para obter o desconto.");
+  assert.strictEqual(resultado.oferta.instrucaoCupom.includes("detectado"), false);
 }
 
 {
