@@ -1,4 +1,8 @@
 const { normalizarNumeroMoeda } = require("../../utils/moeda");
+const {
+  normalizarCodigoCupomSemantico,
+  normalizarCuponsSemanticos
+} = require("./cupom-semantico");
 
 const VERSAO_PRECEDENCIA_COMERCIAL = "radar_precedencia_comercial_v1";
 const DIVERGENCIA_PERCENTUAL_LOG = 20;
@@ -27,10 +31,12 @@ function precoValido(valor) {
 }
 
 function normalizarCupom(valor = "") {
-  return normalizarCupons(valor)[0] || null;
+  return normalizarCodigoCupomSemantico(valor) || normalizarCuponsSemanticos(valor)[0] || null;
 }
 
 function normalizarCupons(valor = "") {
+  return normalizarCuponsSemanticos(valor);
+
   const entradas = Array.isArray(valor) ? valor : [valor];
   const bloqueados = new Set(["CUPOM", "CODIGO", "CODE", "APLICAR", "RESGATE", "DESCONTO", "OFERTA", "PROMOCAO", "GRATIS", "FRETE", "CARRINHO", "ANUNCIO", "MENSAGEM", "DETECTADO", "HTTP", "HTTPS", "OU", "E", "OR"]);
   const resultado = [];

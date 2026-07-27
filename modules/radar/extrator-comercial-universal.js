@@ -3,6 +3,10 @@ const {
   resolverPrecoSemantico,
   campoDeCandidato
 } = require("./preco-semantico");
+const {
+  extrairCodigosCupomSemanticos,
+  normalizarCodigoCupomSemantico
+} = require("./cupom-semantico");
 
 const VERSAO_EXTRATOR_COMERCIAL = "radar_comercial_universal_v1";
 const CONFIANCA = {
@@ -245,6 +249,8 @@ function extrairPrecosComerciais(textoFonte = "") {
   return resultado;
 }
 function normalizarCupom(codigo = "") {
+  return normalizarCodigoCupomSemantico(codigo);
+
   return texto(codigo)
     .toUpperCase()
     .normalize("NFD")
@@ -253,7 +259,35 @@ function normalizarCupom(codigo = "") {
     .trim();
 }
 
+function extrairCupomComercialSemantico(textoFonte = "") {
+  const fonte = textoNormalizado(textoFonte);
+  const codigos = extrairCodigosCupomSemanticos(fonte);
+  const codigo = codigos[0] || null;
+  const evidenciaCodigo = codigo
+    ? ((fonte.match(/\b(?:cupom|cupons|codigo|codigos|c[o\u00f3]digo|c[o\u00f3]digos|coupon|promocode|voucher|use|utilize|aplique|aplicar)[^\n]{0,90}/i) || [])[0] || codigo)
+    : null;
+  const beneficioValor = fonte.match(new RegExp(`\\b(?:cupom|desconto)\\s*(?:de\\s*)?(?:R\\$\\s*)?(${PADRAO_VALOR})`, "i"));
+  const percentual = fonte.match(/\b(?:cupom|desconto|ganhe)\s+(\d{1,2})\s*%|\b(\d{1,2})\s*%\s*(?:com\s+)?cupom/i);
+  const instrucao = fonte.match(/\b(?:use|utilize|aplique|aplicar|resgate|resgate o cupom)[^\n]{0,90}/i);
+  const textoCupom = fonte.match(/\b(?:cupom|codigo|c[o\u00f3]digo|coupon|promocode|voucher)[^\n]{0,90}/i);
+  const provavel = /\b(?:tem cupom|cupom disponivel|cupom na pagina|desconto no carrinho|aplique o cupom da pagina)\b/i.test(fonte);
+
+  return {
+    codigo,
+    codigos,
+    texto: textoCupom ? evidencia(textoCupom[0]) : null,
+    instrucao: instrucao ? evidencia(instrucao[0]) : null,
+    valor: beneficioValor ? valorMoeda(beneficioValor[1]) : null,
+    percentual: percentual ? Number(percentual[1] || percentual[2]) : null,
+    confianca: codigo ? CONFIANCA.ALTA : (beneficioValor || percentual || provavel ? CONFIANCA.MEDIA : CONFIANCA.AUSENTE),
+    evidencia: evidenciaCodigo || (textoCupom ? textoCupom[0] : null),
+    provavel: Boolean(provavel && !codigo)
+  };
+}
+
 function extrairCupomComercial(textoFonte = "") {
+  return extrairCupomComercialSemantico(textoFonte);
+
   const fonte = textoNormalizado(textoFonte);
   const padroesCodigo = [
     /\b(?:cupom|codigo|c[oó]digo|coupon|promocode|voucher)\s*:?\s*([A-Z0-9][A-Z0-9_-]{3,39})\b/i,

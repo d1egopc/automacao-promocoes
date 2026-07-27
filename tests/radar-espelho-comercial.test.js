@@ -2,6 +2,10 @@ const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 const radarCupomMensagem = require("../utils/radar-cupom-mensagem");
+const {
+  normalizarCodigoCupomSemantico,
+  normalizarCuponsSemanticos
+} = require("../modules/radar/cupom-semantico");
 
 const {
   espelhoComercialRadarSuficiente,
@@ -267,6 +271,21 @@ const importadorDivergente = {
 }
 
 {
+  for (const falso of ["AQUI", "HTTPS", "MENSAGEM", "DETECTADO", "PAGINA", "OCUPOM", "DISPONIVEL", "ANUNCIO", "TODOS", "CUPONS"]) {
+    assert.strictEqual(normalizarCodigoCupomSemantico(falso), "");
+  }
+
+  for (const real of ["MODALIVRE", "AMOCUPOM", "MODAPRAVC", "OFFCASA", "SEMANANOVA", "CELULAR26", "CUPOMDANOITE", "D1AD0SP41S", "5Q0QOV4DWS"]) {
+    assert.strictEqual(normalizarCodigoCupomSemantico(real), real);
+  }
+
+  assert.deepStrictEqual(normalizarCuponsSemanticos("Cupom: MODALIVRE ou AMOCUPOM"), ["MODALIVRE", "AMOCUPOM"]);
+  assert.deepStrictEqual(normalizarCuponsSemanticos("Use o cupom de 10% OFF disponivel no anuncio"), []);
+  assert.deepStrictEqual(normalizarCuponsSemanticos("Resgate todos os cupons desta pagina"), []);
+  assert.deepStrictEqual(normalizarCuponsSemanticos("Use cupom: CUPOMDANOITE ou resgate no anuncio"), ["CUPOMDANOITE"]);
+}
+
+{
   assert.strictEqual(radarCupomMensagem.normalizarCupomMensagemRadar("o cupom de 10% OFF no anuncio"), "");
   assert.deepStrictEqual(
     radarCupomMensagem.extrairCuponsMultiplosRadar("Aplique o cupom de 10% OFF no anuncio").cupons,
@@ -288,6 +307,14 @@ const importadorDivergente = {
 }
 
 {
+  const mirror = criarMirrorCupomPercentualSemCodigo();
+  mirror.comercial.precoUnitario.evidencia = "sai R$ 17 cada cueca";
+  const resultado = montarOfertaEspelhoTeste(mirror);
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.oferta.precoUnitario, "R$ 17 cada cueca");
+}
+
+{
   const mirror = criarMirrorComCupom("MODACOMVC", "Cupom: MODACOMVC ou MELICOM20");
   mirror.cupom.codigosCapturados = ["MODACOMVC", "MELICOM20"];
   mirror.comercial.cupom.codigos = ["MODACOMVC", "MELICOM20"];
@@ -304,6 +331,51 @@ const importadorDivergente = {
   const resultado = montarOfertaEspelhoTeste(mirror);
   assert.strictEqual(resultado.ok, true);
   assert.deepStrictEqual(resultado.oferta.codigosCupom, ["MODACOMVC"]);
+}
+
+{
+  const produtoShopee = "https://s.shopee.com.br/produto-real";
+  const resgateShopee = "https://s.shopee.com.br/cupom-resgate";
+  const mirror = criarMirror();
+  mirror.links.encontrados = [resgateShopee, produtoShopee];
+  mirror.links.resgateCupom = resgateShopee;
+  mirror.links.produtoOriginal = produtoShopee;
+  mirror.links.adicionais = [];
+  mirror.comercial.links = {
+    produto: produtoShopee,
+    resgate: resgateShopee,
+    classificados: [
+      { link: resgateShopee, tipo: "resgate" },
+      { link: produtoShopee, tipo: "produto" }
+    ]
+  };
+
+  const resultado = montarOfertaRadarEspelhoComercial({
+    radarMirror: mirror,
+    ofertaImportador: {
+      marketplace: "shopee",
+      produtoId: "SHOPEE123",
+      linkResolvido: produtoShopee,
+      permalink: produtoShopee
+    },
+    metadata: {},
+    clienteId: "admin",
+    marketplace: "shopee",
+    resolucao: {
+      urlCapturada: resgateShopee,
+      linkOriginalRadar: resgateShopee,
+      linkOriginalLimpo: resgateShopee,
+      urlResolvida: resgateShopee,
+      tipoLinkRadar: "resgate"
+    },
+    contexto: { correlationId: "radar_teste_shopee_dois_links" }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.oferta.linksProduto[0].original, produtoShopee);
+  assert.strictEqual(resultado.oferta.linksProduto[0].resolvido, produtoShopee);
+  assert.strictEqual(resultado.oferta.linksResgate[0].original, resgateShopee);
+  assert.notStrictEqual(resultado.oferta.linksProduto[0].resolvido, resgateShopee);
 }
 
 {

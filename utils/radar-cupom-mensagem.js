@@ -1,3 +1,8 @@
+const {
+  extrairCodigosCupomSemanticos,
+  normalizarCodigoCupomSemantico
+} = require("../modules/radar/cupom-semantico");
+
 function logRadarSeguro(evento, payload = {}) {
   console.log(evento, JSON.stringify(payload));
 }
@@ -81,6 +86,8 @@ function normalizarTextoCupomRadar(texto = "") {
 }
 
 function normalizarCupomMensagemRadar(cupom = "") {
+  return normalizarCodigoCupomSemantico(cupom);
+
   const original = String(cupom || "").trim();
   const originalLower = original.toLowerCase();
 
@@ -144,6 +151,8 @@ function normalizarCupomMensagemRadar(cupom = "") {
 }
 
 function extrairCupomTextoRadar(texto = "") {
+  return extrairCodigosCupomSemanticos(texto)[0] || "";
+
   const fonte = String(texto || "");
   const padroes = [
     /(?:use\s+o\s+cupom|use\s+cupom|use|cupom|resgate\s+o\s+cupom|resgate\s+cupom|resgate|aplique\s+o\s+cupom|aplique\s+cupom|aplique|com\s+o\s+cupom|com\s+cupom|usando\s+o\s+cupom|utilize\s+o\s+cupom)\s*[:\-]?\s*([A-Z0-9][A-Z0-9_-]{3,29})/gi,
@@ -163,6 +172,8 @@ function extrairCupomTextoRadar(texto = "") {
 }
 
 function extrairCupomTextoRadarGenerico(texto = "") {
+  return extrairCodigosCupomSemanticos(limparUnicodeInvisivelRadar(texto))[0] || "";
+
   const fonte = limparUnicodeInvisivelRadar(texto);
   const padroes = [
     /(?:use\s+o\s+cupom|use\s+cupom|use|cupom|resgate\s+o\s+cupom|resgate\s+cupom|resgate|aplique\s+o\s+cupom|aplique\s+cupom|aplique|com\s+o\s+cupom|com\s+cupom|usando\s+o\s+cupom|utilize\s+o\s+cupom)\s*[:\-]?\s*([A-Z0-9][A-Z0-9_-]{3,29})/gi,
@@ -182,6 +193,24 @@ function extrairCupomTextoRadarGenerico(texto = "") {
 }
 
 function extrairCuponsMultiplosRadar(texto = "") {
+  const fonteSemantica = limparUnicodeInvisivelRadar(texto);
+  const resultadosSemanticos = extrairCodigosCupomSemanticos(fonteSemantica);
+  const modoSemantico = resultadosSemanticos.length > 1
+    ? (/\bou\b/i.test(fonteSemantica) ? "alternativo" : ((/[+,;]/.test(fonteSemantica) || /\s+e\s+/i.test(fonteSemantica)) ? "combinado" : "multiplo"))
+    : "";
+
+  if (resultadosSemanticos.length > 1) {
+    logRadarSeguro("[RADAR-CUPONS-MULTIPLOS-EXTRAIDOS]", {
+      total: resultadosSemanticos.length,
+      modoCupom: modoSemantico || "multiplo"
+    });
+  }
+
+  return {
+    cupons: resultadosSemanticos,
+    modoCupom: resultadosSemanticos.length > 1 ? (modoSemantico || "multiplo") : ""
+  };
+
   const fonte = limparUnicodeInvisivelRadar(texto);
   const resultados = [];
   let modoCupom = "";

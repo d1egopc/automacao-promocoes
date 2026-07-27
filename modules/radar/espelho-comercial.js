@@ -6,6 +6,10 @@ const {
   mergeRadarMirrorMetadata
 } = require("./radar-mirror");
 const { normalizarNumeroMoeda } = require("../../utils/moeda");
+const {
+  normalizarCodigoCupomSemantico,
+  normalizarCuponsSemanticos
+} = require("./cupom-semantico");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -78,46 +82,7 @@ function dividirCuponsContrato(valor = "") {
 }
 
 function normalizarCodigoCupomContrato(valor = "") {
-  const original = texto(valor);
-  if (!original) return "";
-  if (/\b\d{1,2}\s*%/.test(original) && /\b(?:cupom|desconto)\s+de\b/i.test(original)) return "";
-
-  const preparado = original
-    .toUpperCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/^\s*(?:CUPOM|CODIGO|CODE|USE|UTILIZE|APLIQUE|APLICAR|RESGATE)\s*:?\s*/i, "")
-    .replace(/[^A-Z0-9_-]/g, "")
-    .trim();
-
-  const bloqueados = new Set([
-    "CUPOM",
-    "CUPONS",
-    "CODIGO",
-    "CODE",
-    "APLICAR",
-    "RESGATE",
-    "DESCONTO",
-    "OFERTA",
-    "PROMOCAO",
-    "GRATIS",
-    "FRETE",
-    "CARRINHO",
-    "ANUNCIO",
-    "MENSAGEM",
-    "DETECTADO",
-    "HTTP",
-    "HTTPS",
-    "OU",
-    "E",
-    "OR"
-  ]);
-
-  if (!preparado || preparado.length < 4 || preparado.length > 30) return "";
-  if (bloqueados.has(preparado)) return "";
-  if (/(?:^|_)O?CUPOMDE\d/i.test(preparado)) return "";
-  if (/(ANUNCIO|MENSAGEM|DETECTADO|HTTPS?)/i.test(preparado)) return "";
-  return preparado;
+  return normalizarCodigoCupomSemantico(valor);
 }
 
 function cuponsContratoUnicos(valores = []) {
@@ -125,8 +90,7 @@ function cuponsContratoUnicos(valores = []) {
   const vistos = new Set();
 
   for (const valor of Array.isArray(valores) ? valores : []) {
-    for (const item of dividirCuponsContrato(valor)) {
-      const codigo = normalizarCodigoCupomContrato(item);
+    for (const codigo of normalizarCuponsSemanticos(valor)) {
       const chave = normalizarCupomComparacao(codigo);
       if (!chave || vistos.has(chave)) continue;
       vistos.add(chave);
@@ -160,10 +124,15 @@ function instrucaoCupomUtilContrato(instrucao = "", cupons = []) {
   return original;
 }
 
-function formatarMoedaBRLContrato(valor) {
+function formatarMoedaBRLContrato(valor, opcoes = {}) {
   const numero = normalizarNumeroMoeda(valor);
   if (numero === null || !Number.isFinite(numero)) return "";
-  return numero.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }).replace(/\u00A0/g, " ");
+  return numero.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: opcoes.semCentavos ? 0 : 2,
+    maximumFractionDigits: 2
+  }).replace(/\u00A0/g, " ");
 }
 
 function normalizarPrecoUnitarioContrato(...valores) {
@@ -171,12 +140,18 @@ function normalizarPrecoUnitarioContrato(...valores) {
     const fonte = texto(valor?.evidencia || valor?.texto || valor?.valor || valor);
     if (!fonte) continue;
 
-    const match = fonte.match(/(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+(?:[,.]\d{2}))\s*(?:cada|unidade|por unidade|cada um|por un\.?|\/un)\b/i);
-    if (!match) continue;
+    const padraoUnitario = /(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+(?:[,.]\d{2})?)(?:\s*(?:\/\s*un|por\s+un\.?|por\s+unidade|cada\s+um|cada|unidade)(?:\s+[A-Za-zÀ-ÿ0-9]{2,24})?)/ig;
+    let match;
+    while ((match = padraoUnitario.exec(fonte))) {
+      if (!/R\$/i.test(match[0]) && !/[,.]\d{2}\b/.test(match[1])) continue;
 
-    const moeda = formatarMoedaBRLContrato(match[1]);
-    if (!moeda) continue;
-    return `${moeda} cada`;
+      const trecho = match[0].replace(/\s+/g, " ").trim();
+      const unidade = (trecho.match(/(?:\/\s*un|por\s+un\.?|por\s+unidade|cada\s+um|cada|unidade)(?:\s+[A-Za-zÀ-ÿ0-9]{2,24})?/i) || [])[0] || "cada";
+      const unidadeNormalizada = unidade.replace(/^\/\s*un$/i, "por unidade").replace(/\s+/g, " ").trim();
+      const moeda = formatarMoedaBRLContrato(match[1], { semCentavos: !/[,.]\d{2}\b/.test(match[1]) });
+      if (!moeda) continue;
+      return `${moeda} ${unidadeNormalizada}`;
+    }
   }
 
   return "";
@@ -184,6 +159,27 @@ function normalizarPrecoUnitarioContrato(...valores) {
 
 function filtrarTextosSemDuplicarInstrucao(valores = [], instrucaoCupom = "") {
   return listaTextoUnica(valores).filter(item => !textosEquivalentes(item, instrucaoCupom));
+}
+
+function textoDuplicadoDeCampoClassificado(item = "", { instrucaoCupom = "", precoUnitario = "", cupons = [] } = {}) {
+  const chaveItem = normalizarTextoComparacao(item);
+  if (!chaveItem) return true;
+  if (instrucaoCupom && textosEquivalentes(item, instrucaoCupom)) return true;
+
+  const chaveInstrucao = normalizarTextoComparacao(instrucaoCupom);
+  if (chaveInstrucao && chaveItem.includes(chaveInstrucao)) return true;
+
+  const chaveUnitario = normalizarTextoComparacao(precoUnitario);
+  if (chaveUnitario && (chaveItem === chaveUnitario || (/\bcada\b|\bunidade\b|\bunitario\b/i.test(item) && chaveItem.includes(chaveUnitario)))) return true;
+
+  const chavesCupom = (Array.isArray(cupons) ? cupons : []).map(normalizarCupomComparacao).filter(Boolean);
+  if (chavesCupom.includes(normalizarCupomComparacao(item))) return true;
+
+  return false;
+}
+
+function filtrarTextosSemDuplicarCampos(valores = [], campos = {}) {
+  return listaTextoUnica(valores).filter(item => !textoDuplicadoDeCampoClassificado(item, campos));
 }
 
 function adicionarLinkComercial(lista, entrada = {}) {
@@ -205,22 +201,48 @@ function adicionarLinkComercial(lista, entrada = {}) {
   });
 }
 
+function normalizarLinkComparacao(link = "") {
+  return texto(link).replace(/\/+$/g, "");
+}
+
+function linksEquivalentes(a = "", b = "") {
+  const chaveA = normalizarLinkComparacao(a);
+  const chaveB = normalizarLinkComparacao(b);
+  return Boolean(chaveA && chaveB && chaveA === chaveB);
+}
+
 function montarLinksComerciaisEspelho(radarMirror = {}, resolucao = {}, tecnicaImportador = {}, marketplace = "") {
   const links = [];
   const mp = texto(marketplace || tecnicaImportador.marketplace || "");
   const mirrorLinks = radarMirror?.links || {};
   const comerciais = radarMirror?.comercial?.links || {};
+  const produtoOriginal = primeiroTexto(
+    mirrorLinks.produtoOriginal,
+    comerciais.produto,
+    resolucao.urlCapturada,
+    resolucao.linkOriginalRadar
+  );
+  const resgateOriginal = primeiroTexto(
+    mirrorLinks.resgateCupom,
+    comerciais.resgate,
+    comerciais.cupom
+  );
+  const linkCapturadoResolucao = primeiroTexto(resolucao.urlCapturada, resolucao.linkOriginalRadar);
+  const resolucaoEhDoProduto = !produtoOriginal || !linkCapturadoResolucao || linksEquivalentes(linkCapturadoResolucao, produtoOriginal);
+  const produtoResolvido = resolucaoEhDoProduto
+    ? primeiroTexto(resolucao.linkOriginalLimpo, resolucao.linkResolvido, resolucao.urlResolvida, tecnicaImportador.linkResolvido, tecnicaImportador.permalink, produtoOriginal)
+    : primeiroTexto(tecnicaImportador.linkResolvido, tecnicaImportador.permalink, tecnicaImportador.urlFinal, produtoOriginal);
 
   adicionarLinkComercial(links, {
     tipo: "produto",
-    original: mirrorLinks.produtoOriginal || comerciais.produto || resolucao.urlCapturada || resolucao.linkOriginalRadar,
-    resolvido: resolucao.linkOriginalLimpo || resolucao.linkResolvido || resolucao.urlResolvida || tecnicaImportador.linkResolvido,
+    original: produtoOriginal,
+    resolvido: produtoResolvido,
     marketplace: mp
   });
 
   adicionarLinkComercial(links, {
     tipo: "resgate",
-    original: mirrorLinks.resgateCupom || comerciais.resgate || comerciais.cupom,
+    original: resgateOriginal,
     marketplace: mp
   });
 
@@ -320,14 +342,14 @@ function camposComerciaisEspelho({ radarMirror = {}, resultadoPrecedencia = {}, 
     instrucaoCupom,
     avisoCupom: "",
     beneficioExtra,
-    beneficios: filtrarTextosSemDuplicarInstrucao([
+    beneficios: filtrarTextosSemDuplicarCampos([
       ...(Array.isArray(oferta.beneficios) ? oferta.beneficios : []),
       ...(Array.isArray(comercial.beneficios) ? comercial.beneficios : []),
       ...(Array.isArray(comercial.brindes) ? comercial.brindes : []),
       oferta.beneficioExtra,
       oferta.avisoCupom
-    ], instrucaoCupom),
-    condicoes: condicoesEspeciais,
+    ], { instrucaoCupom, precoUnitario, cupons }),
+    condicoes: filtrarTextosSemDuplicarCampos(condicoesEspeciais, { instrucaoCupom, precoUnitario, cupons }),
     observacoes,
     cashback: oferta.cashback || condicoes.cashback?.evidencia || "",
     frete: oferta.frete || "",

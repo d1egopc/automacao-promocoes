@@ -1,4 +1,8 @@
 const { normalizarNumeroMoeda } = require("../../utils/moeda");
+const {
+  normalizarCodigoCupomSemantico,
+  normalizarCuponsSemanticos
+} = require("./cupom-semantico");
 
 const RADAR_MIRROR_VERSAO = 1;
 const CONFIANCA_VALORES = new Set(["alta", "media", "baixa", "ausente"]);
@@ -41,11 +45,12 @@ function confianca(valor = "") {
 }
 
 function normalizarCupom(valor = "") {
-  const cupom = normalizarCupons(valor)[0] || null;
-  return cupom;
+  return normalizarCodigoCupomSemantico(valor) || normalizarCuponsSemanticos(valor)[0] || null;
 }
 
 function normalizarCupons(valor = "") {
+  return normalizarCuponsSemanticos(valor);
+
   const entradas = Array.isArray(valor) ? valor : [valor];
   const bloqueados = new Set(["CUPOM", "CODIGO", "CODIGO:", "APLICAR", "RESGATE", "DESCONTO", "OFERTA", "PROMOCAO", "GRATIS", "FRETE", "CARRINHO", "OU", "E", "OR"]);
   const resultado = [];
@@ -387,13 +392,7 @@ function criarRadarMirror({
     extracaoRadarLocal?.cupom?.codigo || "",
     extracaoRadarLocal?.codigoCupom || "",
     extracaoRadarLocal?.cupomCodigo || "",
-    comercial?.cupom?.texto || "",
-    comercial?.cupom?.instrucao || "",
-    extracaoRadarLocal?.cupom?.beneficioTexto || "",
-    extracaoRadarLocal?.cupom?.evidencia || "",
-    beneficiosMensagem.cupom || "",
-    beneficiosMensagem.beneficioExtra || "",
-    beneficiosMensagem.avisoCupom || ""
+    beneficiosMensagem.cupom || ""
   ]);
   const cupomCodigo = cupomCodigos[0] || null;
   const linksClassificados = classificarLinksRadar(links, beneficiosMensagem);
