@@ -87,6 +87,37 @@ function criarMirror() {
   };
 }
 
+function criarMirrorComCupom(codigo, instrucao) {
+  const mirror = criarMirror();
+  mirror.cupom.codigoCapturado = codigo;
+  mirror.cupom.codigosCapturados = [codigo];
+  mirror.cupom.textoCapturado = instrucao;
+  mirror.cupom.condicaoCapturada = instrucao;
+  mirror.comercial.cupom.codigo = codigo;
+  mirror.comercial.cupom.codigos = [codigo];
+  mirror.comercial.cupom.texto = instrucao;
+  mirror.comercial.cupom.instrucao = instrucao;
+  return mirror;
+}
+
+function montarOfertaEspelhoTeste(radarMirror) {
+  return montarOfertaRadarEspelhoComercial({
+    radarMirror,
+    ofertaImportador: importadorDivergente,
+    metadata: importadorDivergente.metadata,
+    clienteId: "admin",
+    marketplace: "mercadolivre",
+    resolucao: {
+      urlCapturada: "https://meli.la/2GTPyMb",
+      linkOriginalRadar: "https://meli.la/2GTPyMb",
+      linkOriginalLimpo: "https://www.mercadolivre.com.br/p/MLB123456789",
+      urlResolvida: "https://www.mercadolivre.com.br/p/MLB123456789",
+      tipoLinkRadar: "shortlink_meli_social"
+    },
+    contexto: { correlationId: "radar_teste_cupom" }
+  });
+}
+
 const importadorDivergente = {
   marketplace: "mercadolivre",
   titulo: "Titulo da pagina que nao deve entrar",
@@ -153,6 +184,7 @@ const importadorDivergente = {
   assert.strictEqual(resultado.oferta.precoOriginal, 499);
   assert.strictEqual(resultado.oferta.cupom, "FASHION ou MODACOMVC");
   assert.deepStrictEqual(resultado.oferta.codigosCupom, ["FASHION", "MODACOMVC"]);
+  assert.strictEqual(resultado.oferta.instrucaoCupom, "");
   assert.strictEqual(resultado.oferta.precoPix, "R$ 205 no Pix");
   assert.strictEqual(resultado.oferta.parcelamento, "R$ 215,83 ate 6x");
   assert.strictEqual(resultado.oferta.imagem, "https://cdn.example.com/produto.jpg");
@@ -162,6 +194,29 @@ const importadorDivergente = {
   assert.strictEqual(resultado.oferta.fonteComercial, "radar_espelho_comercial");
   assert.ok(resultado.oferta.documentoComercialCanonico.includes("CUPOM: FASHION ou MODACOMVC"));
   assert.strictEqual(resultado.oferta.metadata.radarEspelhoComercial.importadorUsadoComo, "enriquecimento_tecnico");
+}
+
+{
+  const resultado = montarOfertaEspelhoTeste(criarMirrorComCupom("MODACOMVC", "CUPOM: MODACOMVC"));
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.oferta.cupom, "MODACOMVC");
+  assert.deepStrictEqual(resultado.oferta.codigosCupom, ["MODACOMVC"]);
+  assert.strictEqual(resultado.oferta.instrucaoCupom, "");
+  assert.strictEqual(resultado.oferta.metadata.radarEspelhoComercial.contratoComercial.instrucaoCupom, "");
+}
+
+{
+  const resultado = montarOfertaEspelhoTeste(criarMirrorComCupom("MODACOMVC", "Aplique no carrinho."));
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.oferta.cupom, "MODACOMVC");
+  assert.strictEqual(resultado.oferta.instrucaoCupom, "Aplique no carrinho.");
+}
+
+{
+  const resultado = montarOfertaEspelhoTeste(criarMirrorComCupom("MODACOMVC", "Somente no App. Nao acumulativo."));
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.oferta.cupom, "MODACOMVC");
+  assert.strictEqual(resultado.oferta.instrucaoCupom, "Somente no App. Nao acumulativo.");
 }
 
 {

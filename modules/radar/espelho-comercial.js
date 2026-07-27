@@ -42,6 +42,63 @@ function listaTextoUnica(valores = []) {
   return resultado;
 }
 
+function normalizarCupomComparacao(valor = "") {
+  return texto(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\b(cupom|codigo|cod|use|utilize|aplique|aplicar|no|na|o|a|ou|e)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function dividirCuponsContrato(valor = "") {
+  return texto(valor)
+    .split(/\s+(?:ou|e)\s+|[,;/|]+/i)
+    .map(texto)
+    .filter(Boolean);
+}
+
+function cuponsContratoUnicos(valores = []) {
+  const resultado = [];
+  const vistos = new Set();
+
+  for (const valor of Array.isArray(valores) ? valores : []) {
+    for (const item of dividirCuponsContrato(valor)) {
+      const chave = normalizarCupomComparacao(item);
+      if (!chave || vistos.has(chave)) continue;
+      vistos.add(chave);
+      resultado.push(item);
+    }
+  }
+
+  return resultado;
+}
+
+function instrucaoCupomUtilContrato(instrucao = "", cupons = []) {
+  const original = texto(instrucao);
+  if (!original) return "";
+
+  let normalizado = normalizarCupomComparacao(original);
+  if (!normalizado) return "";
+
+  const chavesCupom = cupons.map(normalizarCupomComparacao).filter(Boolean);
+  if (chavesCupom.includes(normalizado)) return "";
+
+  for (const chave of chavesCupom) {
+    const escapada = chave.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    normalizado = normalizado
+      .replace(new RegExp(`(^|\\s)${escapada}(?=\\s|$)`, "g"), " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  if (!normalizado || ["cupom", "codigo", "cod", "desconto"].includes(normalizado)) return "";
+
+  return original;
+}
+
 function adicionarLinkComercial(lista, entrada = {}) {
   const original = primeiroTexto(entrada.original, entrada.link, entrada.url);
   const resolvido = primeiroTexto(entrada.resolvido, entrada.urlResolvida, original);
@@ -110,9 +167,22 @@ function camposComerciaisEspelho({ radarMirror = {}, resultadoPrecedencia = {}, 
   const condicoes = objeto(resultadoPrecedencia.resolucao?.condicoesComerciais);
   const textoCanonico = documentoComercialCanonico(radarMirror);
   const linksComerciais = montarLinksComerciaisEspelho(radarMirror, resolucao, tecnicaImportador, marketplace);
-  const cupons = Array.isArray(oferta.codigosCupom)
+  const cuponsOriginais = Array.isArray(oferta.codigosCupom)
     ? oferta.codigosCupom
     : (Array.isArray(resultadoPrecedencia.resolucao?.cuponsRadar) ? resultadoPrecedencia.resolucao.cuponsRadar : []);
+  const cupons = cuponsContratoUnicos([
+    ...(Array.isArray(cuponsOriginais) ? cuponsOriginais : []),
+    oferta.codigoCupom || "",
+    oferta.cupom || ""
+  ]);
+  const instrucaoCupom = instrucaoCupomUtilContrato(
+    oferta.instrucaoCupom ||
+      resultadoPrecedencia.resolucao?.instrucaoCupom ||
+      radarMirror?.comercial?.cupom?.instrucao ||
+      radarMirror?.cupom?.condicaoCapturada ||
+      "",
+    cupons
+  );
   const condicoesEspeciais = listaTextoUnica([
     ...(Array.isArray(comercial.condicoesEspeciais) ? comercial.condicoesEspeciais : []),
     radarMirror?.preco?.condicaoTexto,
@@ -145,13 +215,9 @@ function camposComerciaisEspelho({ radarMirror = {}, resultadoPrecedencia = {}, 
     valorParcela: condicoes.parcelamento?.valorParcela || "",
     cupom: oferta.cupom || "",
     codigoCupom: oferta.codigoCupom || oferta.cupom || "",
-    cupons: Array.isArray(cupons) ? [...cupons] : [],
-    codigosCupom: Array.isArray(cupons) ? [...cupons] : [],
-    instrucaoCupom: oferta.instrucaoCupom ||
-      resultadoPrecedencia.resolucao?.instrucaoCupom ||
-      radarMirror?.comercial?.cupom?.instrucao ||
-      radarMirror?.cupom?.condicaoCapturada ||
-      "",
+    cupons,
+    codigosCupom: [...cupons],
+    instrucaoCupom,
     beneficioExtra: oferta.beneficioExtra || "",
     beneficios: listaTextoUnica([
       ...(Array.isArray(oferta.beneficios) ? oferta.beneficios : []),
@@ -189,7 +255,7 @@ function aplicarContratoComercialRadar(oferta = {}, contrato = null) {
   const proxima = { ...oferta };
 
   for (const [campo, valor] of Object.entries(origem)) {
-    if (valor === null || valor === undefined || valor === "") continue;
+    if (valor === null || valor === undefined || (valor === "" && campo !== "instrucaoCupom")) continue;
     if (Array.isArray(valor)) {
       proxima[campo] = valor.map(item => item && typeof item === "object" ? { ...item } : item);
       continue;
