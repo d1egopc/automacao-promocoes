@@ -551,6 +551,7 @@ function criarItemResumoClienteOrquestrador(clienteId = "admin", marketplace = "
   };
 }
 const DEBUG_LOGS = String(process.env.DEBUG_LOGS || "").toLowerCase() === "true";
+const RADAR_DEBUG_PAYLOAD_SEM_LINK = String(process.env.RADAR_DEBUG_PAYLOAD_SEM_LINK || "").toLowerCase() === "true";
 const LOG_THROTTLE_MS = 60 * 1000;
 const logsThrottle = new Map();
 const radarListenerRecentes = [];
@@ -10902,6 +10903,162 @@ function extrairTextoMensagemRadar(mensagem = {}) {
     .trim();
 }
 
+function radarValorObjetoSeguro(valor) {
+  return valor && typeof valor === "object" && !Array.isArray(valor) &&
+    !(typeof Buffer !== "undefined" && Buffer.isBuffer(valor)) &&
+    !(valor instanceof Uint8Array);
+}
+
+function radarChaveBinariaPayload(chave = "") {
+  const normalizada = String(chave || "").toLowerCase();
+  return normalizada.includes("thumbnail") ||
+    normalizada.includes("jpeg") ||
+    normalizada.includes("mediaKey".toLowerCase()) ||
+    normalizada.includes("fileSha") ||
+    normalizada.includes("directPath".toLowerCase());
+}
+
+function radarPossuiPadraoUrl(valor = "") {
+  return /https?:\/\//i.test(valor) ||
+    /\bwww\./i.test(valor) ||
+    /\bmeli\.la\b/i.test(valor) ||
+    /\bamzn\b/i.test(valor) ||
+    /\bshopee\b/i.test(valor);
+}
+
+function radarSanitizarUrlPayload(url = "") {
+  const texto = String(url || "").trim();
+  try {
+    const parsed = new URL(texto);
+    return `${parsed.origin}${parsed.pathname}${parsed.search ? "?[params]" : ""}${parsed.hash ? "#[hash]" : ""}`;
+  } catch (_) {
+    return texto
+      .replace(/\?[^#\s]+/g, "?[params]")
+      .replace(/#[^\s]+/g, "#[hash]");
+  }
+}
+
+function radarSanitizarTrechoPayload(valor = "", limite = 220) {
+  const texto = String(valor || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/https?:\/\/[^\s]+/gi, match => radarSanitizarUrlPayload(match))
+    .replace(/\bwww\.[^\s]+/gi, match => radarSanitizarUrlPayload(`https://${match}`).replace(/^https:\/\//, ""))
+    .replace(/\+?\d[\d\s().-]{8,}\d/g, "[telefone]");
+
+  return texto.length > limite ? `${texto.slice(0, limite)}...` : texto;
+}
+
+function radarColetarChavesPayload(valor = {}, prefixo = "", profundidade = 0, resultado = []) {
+  if (!radarValorObjetoSeguro(valor) || profundidade > 6 || resultado.length >= 180) return resultado;
+
+  for (const chave of Object.keys(valor)) {
+    if (resultado.length >= 180) break;
+    const caminho = prefixo ? `${prefixo}.${chave}` : chave;
+    resultado.push(caminho);
+
+    if (radarChaveBinariaPayload(chave)) continue;
+    const proximo = valor[chave];
+    if (radarValorObjetoSeguro(proximo)) {
+      radarColetarChavesPayload(proximo, caminho, profundidade + 1, resultado);
+    }
+  }
+
+  return resultado;
+}
+
+function radarPayloadPossuiChave(valor = {}, alvo = "", visitados = new WeakSet(), profundidade = 0) {
+  if (!radarValorObjetoSeguro(valor) || profundidade > 8 || visitados.has(valor)) return false;
+  visitados.add(valor);
+  const procurada = String(alvo || "");
+
+  for (const chave of Object.keys(valor)) {
+    if (chave === procurada) return true;
+    if (radarChaveBinariaPayload(chave)) continue;
+    if (radarPayloadPossuiChave(valor[chave], procurada, visitados, profundidade + 1)) return true;
+  }
+
+  return false;
+}
+
+function radarCampoTextualPayload(caminho = "", chave = "", valor = "") {
+  const chaveTexto = String(chave || "").toLowerCase();
+  const caminhoTexto = String(caminho || "").toLowerCase();
+
+  return radarPossuiPadraoUrl(valor) ||
+    ["conversation", "text", "caption", "title", "contenttext", "selecteddisplaytext", "matchedtext", "sourceurl", "canonicalurl"].includes(chaveTexto) ||
+    chaveTexto.endsWith("url") ||
+    caminhoTexto.includes("externaladreply") ||
+    caminhoTexto.includes("contextinfo");
+}
+
+function radarColetarCamposTextuaisPayload(valor = {}, prefixo = "", profundidade = 0, resultado = []) {
+  if (!radarValorObjetoSeguro(valor) || profundidade > 8 || resultado.length >= 80) return resultado;
+
+  for (const [chave, item] of Object.entries(valor)) {
+    if (resultado.length >= 80) break;
+    if (radarChaveBinariaPayload(chave)) continue;
+    const caminho = prefixo ? `${prefixo}.${chave}` : chave;
+
+    if (typeof item === "string" && item.trim() && radarCampoTextualPayload(caminho, chave, item)) {
+      resultado.push({
+        campo: caminho,
+        tamanho: item.length,
+        possuiPadraoUrl: radarPossuiPadraoUrl(item),
+        trecho: radarSanitizarTrechoPayload(item)
+      });
+      continue;
+    }
+
+    if (radarValorObjetoSeguro(item)) {
+      radarColetarCamposTextuaisPayload(item, caminho, profundidade + 1, resultado);
+    }
+  }
+
+  return resultado;
+}
+
+function criarDiagnosticoPayloadBaileysSemLink({ mensagem = {}, conteudo = {}, textoExtraido = "" } = {}) {
+  const payload = mensagem?.message || {};
+  const texto = String(textoExtraido || "");
+
+  return {
+    tiposPayloadOriginal: Object.keys(payload || {}),
+    tiposPayloadInterno: Object.keys(conteudo || {}),
+    chavesPayload: radarColetarChavesPayload(payload).slice(0, 180),
+    wrappersEncontrados: {
+      ephemeral: radarPayloadPossuiChave(payload, "ephemeralMessage"),
+      viewOnce: radarPayloadPossuiChave(payload, "viewOnceMessage") || radarPayloadPossuiChave(payload, "viewOnceMessageV2"),
+      edited: radarPayloadPossuiChave(payload, "editedMessage") || radarPayloadPossuiChave(payload, "protocolMessage"),
+      documentWithCaption: radarPayloadPossuiChave(payload, "documentWithCaptionMessage"),
+      newsletter: radarPayloadPossuiChave(payload, "newsletter") || String(mensagem?.key?.remoteJid || "").endsWith("@newsletter")
+    },
+    camposTextuaisEncontrados: radarColetarCamposTextuaisPayload(payload),
+    textoExtraido: {
+      tamanho: texto.length,
+      possuiPadraoUrl: radarPossuiPadraoUrl(texto),
+      trecho: radarSanitizarTrechoPayload(texto)
+    }
+  };
+}
+
+function logRadarPayloadBaileysSemLink({
+  sessaoId = "",
+  grupoNome = "",
+  debugPayloadSemLink = null,
+  links = []
+} = {}) {
+  if (!RADAR_DEBUG_PAYLOAD_SEM_LINK) return;
+
+  console.log("[RADAR-BAILEYS-PAYLOAD-SEM-LINK]", JSON.stringify({
+    sessaoId: textoRadarId(sessaoId),
+    grupoNome: textoRadarId(grupoNome),
+    ...(debugPayloadSemLink || {}),
+    linksExtraidos: Array.isArray(links) ? links : [],
+    totalLinks: Array.isArray(links) ? links.length : 0
+  }));
+}
+
 
 function limparLinkRadar(link = "") {
   return radarCupomMensagem.limparLinkRadar(link);
@@ -13558,7 +13715,8 @@ async function processarMensagemRadar({
   grupoNome,
   texto,
   capturadaEm,
-  raw
+  raw,
+  debugPayloadSemLink
 } = {}) {
   const tipo = normalizarTexto(origemTipo || "");
   const origemTipoFinal = tipo.includes("telegram") ? "telegram" : tipo.includes("whatsapp") ? "whatsapp" : "";
@@ -13734,6 +13892,12 @@ const registroEngineRadar = temRedirectConhecidoRadar
     grupo: grupoNomeTexto || grupoIdTexto
   });
   if (!links.length) {
+    logRadarPayloadBaileysSemLink({
+      sessaoId: sessaoIdTexto,
+      grupoNome: grupoNomeTexto || grupoIdTexto,
+      debugPayloadSemLink,
+      links
+    });
     logOptimus("RADAR", "Sem links", {
       motivo: "sem_links",
       origemTipo: origemTipoFinal,
@@ -14295,6 +14459,9 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
   const remoteJid = mensagem?.key?.remoteJid || "";
   const textoExtraido = extrairTextoMensagemRadar(mensagem);
   const conteudo = extrairMensagemInternaRadar(mensagem?.message || {});
+  const debugPayloadSemLink = RADAR_DEBUG_PAYLOAD_SEM_LINK
+    ? criarDiagnosticoPayloadBaileysSemLink({ mensagem, conteudo, textoExtraido })
+    : null;
   const tiposMensagem = Object.keys(conteudo || {});
 
   registrarRadarListenerRecebido({
@@ -14334,7 +14501,8 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
     grupoId: remoteJid,
     grupoNome: obterNomeGrupoRadar(sessaoId, remoteJid),
     texto: textoExtraido,
-    raw: mensagem
+    raw: mensagem,
+    debugPayloadSemLink
   });
 }
 
