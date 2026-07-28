@@ -155,6 +155,10 @@ function classificarTipo(base = {}) {
     motivos.push("candidato_classificado_como_quantidade");
     return { tipo: TIPOS_CANDIDATO.QUANTIDADE, motivos };
   }
+  if (["preco_final", "com_cupom", "por", "total"].includes(anterior)) {
+    motivos.push("preco_radar_marcador_explicito");
+    return { tipo: TIPOS_CANDIDATO.PRECO_ATUAL, motivos };
+  }
   if (anterior === "modelo" || posterior === "modelo") {
     motivos.push("candidato_classificado_como_identificador");
     return { tipo: TIPOS_CANDIDATO.IDENTIFICADOR, motivos };
@@ -182,10 +186,6 @@ function classificarTipo(base = {}) {
   if (anterior === "de") {
     motivos.push("candidato_classificado_como_preco_antigo");
     return { tipo: TIPOS_CANDIDATO.PRECO_ANTIGO, motivos };
-  }
-  if (["preco_final", "com_cupom", "por", "total"].includes(anterior)) {
-    motivos.push("preco_radar_marcador_explicito");
-    return { tipo: TIPOS_CANDIDATO.PRECO_ATUAL, motivos };
   }
   if (anterior === "pix" || posterior === "pix") {
     motivos.push("preco_radar_marcador_pix");

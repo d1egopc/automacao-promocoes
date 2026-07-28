@@ -6,6 +6,9 @@ const {
   normalizarCodigoCupomSemantico,
   normalizarCuponsSemanticos
 } = require("../modules/radar/cupom-semantico");
+const {
+  prepararDadosOficiaisTemplate
+} = require("../modules/templates-clientes/dados-oficiais");
 
 const {
   espelhoComercialRadarSuficiente,
@@ -94,6 +97,15 @@ function criarMirror() {
 
 function criarMirrorComCupom(codigo, instrucao) {
   const mirror = criarMirror();
+  const linhaCupom = instrucao || (codigo ? `Cupom: ${codigo}` : "");
+  mirror.texto.original = [
+    "MODELO PERFEITINHO MENINAS",
+    "Tenis Puma Carina Street BDP",
+    "DE 499 | POR 205 no Pix ou 215,83 ate 6x",
+    linhaCupom,
+    "https://meli.la/2GTPyMb"
+  ].filter(Boolean).join("\n");
+  mirror.texto.limpo = mirror.texto.original;
   mirror.cupom.codigoCapturado = codigo;
   mirror.cupom.codigosCapturados = [codigo];
   mirror.cupom.textoCapturado = instrucao;
@@ -110,7 +122,8 @@ function criarMirrorCupomPercentualSemCodigo() {
   const textoOriginal = [
     "Pack com 12 unidades de 250ml",
     "DE 98 | POR 64,89 (5,41 cada)",
-    "Aplique o cupom de 10% OFF no anuncio"
+    "Aplique o cupom de 10% OFF no anuncio",
+    "https://meli.la/pack12"
   ].join("\n");
 
   mirror.texto.original = textoOriginal;
@@ -148,6 +161,9 @@ function criarMirrorCupomPercentualSemCodigo() {
   };
   mirror.comercial.beneficios = ["Aplique o cupom de 10% OFF no anuncio"];
   mirror.comercial.condicoesEspeciais = ["Aplique o cupom de 10% OFF no anuncio"];
+  mirror.links.encontrados = ["https://meli.la/pack12"];
+  mirror.links.produtoOriginal = "https://meli.la/pack12";
+  mirror.comercial.links = { produto: "https://meli.la/pack12", classificados: [{ link: "https://meli.la/pack12", tipo: "produto" }] };
   return mirror;
 }
 
@@ -193,6 +209,29 @@ const importadorDivergente = {
     }
   }
 };
+
+function criarMirrorComTextoComercial(textoOriginal, ajustes = {}) {
+  const mirror = JSON.parse(JSON.stringify(criarMirror()));
+  mirror.texto.original = textoOriginal;
+  mirror.texto.limpo = textoOriginal;
+  mirror.produto.tituloCapturado = ajustes.tituloCapturado ?? "Titulo potencialmente errado";
+  mirror.preco.atualCapturado = ajustes.precoAtual ?? 29;
+  mirror.preco.anteriorCapturado = ajustes.precoAnterior ?? 600;
+  mirror.preco.evidenciaCapturada = ajustes.evidenciaPreco ?? "Por R$ 29";
+  mirror.cupom.codigoCapturado = ajustes.cupom ?? "ERRADO10";
+  mirror.cupom.codigosCapturados = ajustes.codigosCupom ?? [mirror.cupom.codigoCapturado].filter(Boolean);
+  mirror.comercial.cupom.codigo = mirror.cupom.codigoCapturado;
+  mirror.comercial.cupom.codigos = [...mirror.cupom.codigosCapturados];
+  mirror.comercial.cupom.instrucao = ajustes.instrucaoCupom ?? "";
+  mirror.links.encontrados = ajustes.links || Array.from(textoOriginal.matchAll(/https?:\/\/[^\s]+/g)).map(match => match[0]);
+  mirror.links.produtoOriginal = ajustes.produtoOriginal || mirror.links.encontrados[0] || "";
+  mirror.links.quantidadeEncontrada = mirror.links.encontrados.length;
+  mirror.comercial.links = {
+    produto: mirror.links.produtoOriginal,
+    classificados: mirror.links.encontrados.map(link => ({ link, tipo: "produto" }))
+  };
+  return mirror;
+}
 
 {
   const mirror = criarMirror();
@@ -279,7 +318,7 @@ const importadorDivergente = {
 }
 
 {
-  for (const falso of ["AQUI", "HTTPS", "MENSAGEM", "DETECTADO", "PAGINA", "OCUPOM", "DISPONIVEL", "ANUNCIO", "TODOS", "CUPONS"]) {
+  for (const falso of ["AQUI", "PARA", "OBTER", "HTTPS", "HTTP", "MENSAGEM", "DETECTADO", "PAGINA", "OCUPOM", "DISPONIVEL", "ANUNCIO", "TODOS", "CUPONS", "SSHOPEECOMBR", "AMAZONCOMBR", "MELILA", "COMBR", "SHOPEE"]) {
     assert.strictEqual(normalizarCodigoCupomSemantico(falso), "");
   }
 
@@ -291,6 +330,7 @@ const importadorDivergente = {
   assert.deepStrictEqual(normalizarCuponsSemanticos("Use o cupom de 10% OFF disponivel no anuncio"), []);
   assert.deepStrictEqual(normalizarCuponsSemanticos("Resgate todos os cupons desta pagina"), []);
   assert.deepStrictEqual(normalizarCuponsSemanticos("Use cupom: CUPOMDANOITE ou resgate no anuncio"), ["CUPOMDANOITE"]);
+  assert.deepStrictEqual(normalizarCuponsSemanticos("Aplique o cupom MLSAUDE para obter o desconto."), ["MLSAUDE"]);
 }
 
 {
@@ -323,6 +363,23 @@ const importadorDivergente = {
 }
 
 {
+  const resultado = montarOfertaEspelhoTeste(criarMirrorComCupom("MLSAUDE", ""));
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(resultado.oferta.codigosCupom, ["MLSAUDE"]);
+  assert.strictEqual(resultado.oferta.cupom, "MLSAUDE");
+  assert.strictEqual(resultado.oferta.instrucaoCupom, "Aplique o cupom MLSAUDE para obter o desconto.");
+  assert.strictEqual(resultado.oferta.codigosCupom.includes("PARA"), false);
+  assert.strictEqual(resultado.oferta.codigosCupom.includes("OBTER"), false);
+}
+
+{
+  const resultado = montarOfertaEspelhoTeste(criarMirrorComCupom("15ACESS", ""));
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(resultado.oferta.codigosCupom, ["15ACESS"]);
+  assert.strictEqual(resultado.oferta.instrucaoCupom, "Aplique o cupom 15ACESS para obter o desconto.");
+}
+
+{
   const mirror = criarMirrorComCupom("MODACOMVC", "Cupom: MODACOMVC ou MELICOM20");
   mirror.cupom.codigosCapturados = ["MODACOMVC", "MELICOM20"];
   mirror.comercial.cupom.codigos = ["MODACOMVC", "MELICOM20"];
@@ -342,9 +399,51 @@ const importadorDivergente = {
 }
 
 {
+  const mirror = criarMirrorComCupom("MLSAUDE", "Aplique o cupom MLSAUDE para obter o desconto.");
+  mirror.comercial.cupom.codigos = ["MLSAUDE"];
+  mirror.comercial.cupom.instrucao = "Aplique o cupom MLSAUDE para obter o desconto.";
+  const resultado = montarOfertaEspelhoTeste(mirror);
+  const reaplicado = montarOfertaRadarEspelhoComercial({
+    radarMirror: {
+      ...mirror,
+      comercial: {
+        ...mirror.comercial,
+        cupom: {
+          ...mirror.comercial.cupom,
+          codigos: resultado.oferta.codigosCupom,
+          instrucao: resultado.oferta.instrucaoCupom
+        }
+      }
+    },
+    ofertaImportador: {
+      marketplace: "mercadolivre",
+      produtoId: "MLB123456789"
+    },
+    metadata: {},
+    clienteId: "admin",
+    marketplace: "mercadolivre",
+    resolucao: {
+      urlCapturada: "https://meli.la/2GTPyMb",
+      linkOriginalRadar: "https://meli.la/2GTPyMb"
+    },
+    contexto: { correlationId: "radar_teste_reprocessamento_proibido" }
+  });
+  assert.deepStrictEqual(reaplicado.oferta.codigosCupom, ["MLSAUDE"]);
+}
+
+{
   const produtoShopee = "https://s.shopee.com.br/produto-real";
   const resgateShopee = "https://s.shopee.com.br/cupom-resgate";
   const mirror = criarMirror();
+  mirror.texto.original = [
+    "Tenis Puma Carina Street BDP",
+    "DE 499 | POR 205 no Pix ou 215,83 ate 6x",
+    "Resgate os cupons aqui:",
+    resgateShopee,
+    "Produto:",
+    produtoShopee
+  ].join("\n");
+  mirror.texto.limpo = mirror.texto.original;
   mirror.links.encontrados = [resgateShopee, produtoShopee];
   mirror.links.resgateCupom = resgateShopee;
   mirror.links.produtoOriginal = produtoShopee;
@@ -384,6 +483,85 @@ const importadorDivergente = {
   assert.strictEqual(resultado.oferta.linksProduto[0].resolvido, produtoShopee);
   assert.strictEqual(resultado.oferta.linksResgate[0].original, resgateShopee);
   assert.notStrictEqual(resultado.oferta.linksProduto[0].resolvido, resgateShopee);
+}
+
+{
+  const produtoShopee = "https://s.shopee.com.br/3LPZvNiItu";
+  const resgateShopee = "https://s.shopee.com.br/5q0qoV4Dws";
+  const mirror = criarMirrorComCupom("", "Resgate os cupons aqui:");
+  mirror.texto.original = [
+    "Tenis Puma Carina Street BDP",
+    "DE 499 | POR 205 no Pix",
+    "Resgate os cupons aqui:",
+    resgateShopee,
+    "",
+    "Produto:",
+    produtoShopee
+  ].join("\n");
+  mirror.texto.limpo = mirror.texto.original;
+  mirror.cupom.codigoCapturado = null;
+  mirror.cupom.codigosCapturados = [];
+  mirror.comercial.cupom.codigo = null;
+  mirror.comercial.cupom.codigos = [];
+  mirror.comercial.cupom.instrucao = "Resgate os cupons aqui:";
+  mirror.links.encontrados = [resgateShopee, produtoShopee];
+  mirror.links.resgateCupom = resgateShopee;
+  mirror.links.produtoOriginal = produtoShopee;
+  mirror.comercial.links = {
+    produto: produtoShopee,
+    resgate: resgateShopee,
+    classificados: [
+      { link: resgateShopee, tipo: "resgate" },
+      { link: produtoShopee, tipo: "produto" }
+    ]
+  };
+
+  const resultado = montarOfertaRadarEspelhoComercial({
+    radarMirror: mirror,
+    ofertaImportador: { marketplace: "shopee", linkResolvido: produtoShopee },
+    metadata: {},
+    clienteId: "admin",
+    marketplace: "shopee",
+    resolucao: {
+      urlCapturada: resgateShopee,
+      linkOriginalRadar: resgateShopee,
+      linkOriginalLimpo: resgateShopee
+    },
+    contexto: { correlationId: "radar_teste_shopee_resgate_sem_codigo" }
+  });
+
+  assert.deepStrictEqual(resultado.oferta.codigosCupom, []);
+  assert.strictEqual(resultado.oferta.instrucaoCupom, "Resgate os cupons aqui:");
+  assert.strictEqual(JSON.stringify(resultado.oferta).includes("SSHOPEECOMBR"), false);
+  assert.strictEqual(JSON.stringify(resultado.oferta).includes("HTTPS"), false);
+  assert.strictEqual(JSON.stringify(resultado.oferta).includes("Cupom detectado na mensagem"), false);
+}
+
+{
+  const resultado = montarOfertaEspelhoTeste(criarMirrorComCupom("5Q0QOV4DWS", "Cupom: 5Q0QOV4DWS"));
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(resultado.oferta.codigosCupom, ["5Q0QOV4DWS"]);
+  assert.strictEqual(resultado.oferta.cupom.includes("SSHOPEECOMBR"), false);
+}
+
+{
+  const resultado = montarOfertaEspelhoTeste(criarMirrorComCupom("D1AD0SP41S", "Cupom detectado na mensagem: D1AD0SP41S"));
+  const dados = prepararDadosOficiaisTemplate(resultado.oferta, { modo: "universal" });
+  const serializadoOfertaRenderizavel = JSON.stringify({
+    descricao: resultado.oferta.descricao,
+    textoComercialCanonico: resultado.oferta.textoComercialCanonico,
+    textoComercialOriginal: resultado.oferta.textoComercialOriginal,
+    instrucaoCupom: resultado.oferta.instrucaoCupom,
+    avisoCupom: resultado.oferta.avisoCupom,
+    beneficioExtra: resultado.oferta.beneficioExtra,
+    beneficios: resultado.oferta.beneficios,
+    condicoes: resultado.oferta.condicoes
+  });
+  const serializadoDados = JSON.stringify(dados);
+  assert.strictEqual(serializadoOfertaRenderizavel.includes("Cupom detectado na mensagem"), false);
+  assert.strictEqual(serializadoDados.includes("Cupom detectado na mensagem"), false);
+  assert.strictEqual(serializadoOfertaRenderizavel.includes("Código detectado"), false);
+  assert.strictEqual(serializadoDados.includes("Código detectado"), false);
 }
 
 {
@@ -473,6 +651,115 @@ const importadorDivergente = {
   assert.ok(indexFonte.includes("fallbackTecnicoRadarMirror"));
   assert.ok(indexFonte.includes("meli_social_importador_falhou_espelho_comercial"));
   assert.ok(indexFonte.includes("kabum_http_403_espelho_comercial"));
+}
+
+{
+  const textoOriginal = [
+    "OFERTA DO MERCADO",
+    "Produto A Coerente",
+    "De R$ 100,00",
+    "Por R$ 50,00",
+    "Cupom: A10REAL",
+    "https://meli.la/produtoA",
+    "",
+    "Produto B Incoerente",
+    "De R$ 600,00",
+    "Por R$ 29,00",
+    "Cupom: B10REAL",
+    "https://meli.la/produtoB"
+  ].join("\n");
+  const resultado = montarOfertaEspelhoTeste(criarMirrorComTextoComercial(textoOriginal, {
+    tituloCapturado: "Tirei hoje no supermercado",
+    precoAtual: 29,
+    precoAnterior: 600,
+    cupom: "B10REAL"
+  }));
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "radar_contrato_comercial_ambiguo");
+  assert.strictEqual(resultado.motivoTecnico, "multiplos_blocos_comerciais");
+}
+
+{
+  const textoOriginal = [
+    "Produto Um Oficial",
+    "Por R$ 89,90",
+    "https://meli.la/um",
+    "Produto Dois Oficial",
+    "Por R$ 129,90",
+    "https://meli.la/dois"
+  ].join("\n");
+  const resultado = montarOfertaEspelhoTeste(criarMirrorComTextoComercial(textoOriginal, {
+    tituloCapturado: "Produto Dois Oficial",
+    precoAtual: 129.9,
+    cupom: ""
+  }));
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "radar_contrato_comercial_ambiguo");
+  assert.strictEqual(resultado.motivoTecnico, "multiplos_blocos_comerciais");
+}
+
+{
+  const textoOriginal = [
+    "CHAMADA 1",
+    "Produto Chamada Um",
+    "De R$ 75,00",
+    "Por R$ 31,00",
+    "https://meli.la/chamada1",
+    "",
+    "CHAMADA 2",
+    "Produto Chamada Dois",
+    "De R$ 200,00",
+    "Por R$ 80,00",
+    "https://meli.la/chamada2"
+  ].join("\n");
+  const resultado = montarOfertaEspelhoTeste(criarMirrorComTextoComercial(textoOriginal, {
+    tituloCapturado: "CHAMADA 2",
+    precoAtual: 80,
+    precoAnterior: 200
+  }));
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "radar_contrato_comercial_ambiguo");
+  assert.strictEqual(resultado.motivoTecnico, "multiplos_blocos_comerciais");
+}
+
+{
+  const textoOriginal = [
+    "Produto Sem Preco",
+    "Cupom: SEMPRECO",
+    "https://meli.la/sem-preco"
+  ].join("\n");
+  const resultado = montarOfertaEspelhoTeste(criarMirrorComTextoComercial(textoOriginal, {
+    tituloCapturado: "Produto Sem Preco",
+    precoAtual: null,
+    precoAnterior: null,
+    cupom: "SEMPRECO"
+  }));
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "radar_contrato_comercial_ambiguo");
+  assert.strictEqual(resultado.motivoTecnico, "titulo_sem_preco");
+}
+
+{
+  const textoOriginal = [
+    "Tirei hoje no supermercado",
+    "De R$ 600,00",
+    "Por R$ 29,00",
+    "https://meli.la/preco-sem-produto"
+  ].join("\n");
+  const resultado = montarOfertaEspelhoTeste(criarMirrorComTextoComercial(textoOriginal, {
+    tituloCapturado: "Tirei hoje no supermercado",
+    precoAtual: 29,
+    precoAnterior: 600,
+    cupom: ""
+  }));
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "radar_contrato_comercial_ambiguo");
+  assert.strictEqual(resultado.motivoTecnico, "preco_sem_produto");
 }
 
 console.log("radar-espelho-comercial.test.js OK");

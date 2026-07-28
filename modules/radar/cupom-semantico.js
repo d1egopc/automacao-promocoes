@@ -19,11 +19,17 @@ function limparMarcadorCupom(valor = "") {
 
 const PALAVRAS_BLOQUEADAS = new Set([
   "AQUI",
+  "PARA",
+  "OBTER",
   "HTTPS",
   "HTTP",
   "WWW",
   "SHOPEE",
+  "SSHOPEECOMBR",
   "AMAZON",
+  "AMAZONCOMBR",
+  "MELILA",
+  "COMBR",
   "MERCADOLIVRE",
   "MERCADOLIVRECOMBR",
   "MENSAGEM",
@@ -101,6 +107,7 @@ function normalizarCodigoCupomSemantico(candidato = "") {
 
   if (!limpo || limpo.length < 4 || limpo.length > 30) return "";
   if (!/^[A-Z0-9][A-Z0-9_-]{3,29}$/.test(limpo)) return "";
+  if (/^CUPOM[_-]?$/i.test(limpo)) return "";
   if (PALAVRAS_BLOQUEADAS.has(limpo)) return "";
   if (pareceTrechoConcatenadoDeFrase(limpo)) return "";
 
@@ -179,6 +186,8 @@ function normalizarCuponsSemanticos(valores = []) {
 
     if (
       pareceFrasePercentualSemCodigo(original) ||
+      /\r?\n/.test(original) ||
+      /https?:\/\/|www\./i.test(original) ||
       /\b(?:resgate|aplique|aplicar|use|utilize).*\bcupons?.*(?:pagina|anuncio|disponivel|%)/i.test(original)
     ) {
       continue;

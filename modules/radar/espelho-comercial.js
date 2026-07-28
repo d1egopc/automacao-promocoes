@@ -10,6 +10,9 @@ const {
   normalizarCodigoCupomSemantico,
   normalizarCuponsSemanticos
 } = require("./cupom-semantico");
+const {
+  resolverBlocoComercialCanonico
+} = require("./bloco-comercial-canonico");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -94,6 +97,39 @@ function cuponsContratoUnicos(valores = []) {
   return resultado;
 }
 
+function adicionarCodigoCupomFechado(resultado, vistos, valor = "") {
+  const codigo = normalizarCodigoCupomContrato(valor);
+  const chave = normalizarCupomComparacao(codigo);
+  if (!codigo || !chave || vistos.has(chave)) return;
+  vistos.add(chave);
+  resultado.push(codigo);
+}
+
+function fecharCodigosCupomContrato({ oferta = {}, resultadoPrecedencia = {}, radarMirror = {} } = {}) {
+  const resultado = [];
+  const vistos = new Set();
+  const resolucao = resultadoPrecedencia.resolucao || {};
+  const comercialCupom = radarMirror?.comercial?.cupom || {};
+  const mirrorCupom = radarMirror?.cupom || {};
+  const fontesPrimarias = [
+    ...(Array.isArray(oferta.codigosCupom) ? oferta.codigosCupom : []),
+    ...(Array.isArray(oferta.cupons) ? oferta.cupons : []),
+    ...(Array.isArray(resolucao.cuponsRadar) ? resolucao.cuponsRadar : []),
+    ...(Array.isArray(comercialCupom.codigos) ? comercialCupom.codigos : []),
+    ...(Array.isArray(comercialCupom.cupons) ? comercialCupom.cupons : []),
+    ...(Array.isArray(mirrorCupom.codigosCapturados) ? mirrorCupom.codigosCapturados : []),
+    comercialCupom.codigo || "",
+    mirrorCupom.codigoCapturado || "",
+    resolucao.cupomRadar || ""
+  ];
+
+  for (const valor of fontesPrimarias) {
+    adicionarCodigoCupomFechado(resultado, vistos, valor);
+  }
+
+  return resultado;
+}
+
 function textoTecnicoInternoContrato(valor = "") {
   const chave = normalizarTextoComparacao(valor);
   return Boolean(
@@ -102,6 +138,22 @@ function textoTecnicoInternoContrato(valor = "") {
     /\b(?:mensagem|diagnostico|interno)\b.*\b(?:detectado|extraido|identificado)\b/.test(chave) ||
     /\b(?:sshopeecombr|https|http|combr)\b/.test(chave)
   );
+}
+
+function limparTextoComercialRenderizavel(valor = "") {
+  const original = texto(valor);
+  if (!original) return "";
+
+  const linhas = original
+    .split(/\r?\n/)
+    .map(linha => linha.trim())
+    .filter(linha => linha && !textoTecnicoInternoContrato(linha));
+
+  return linhas
+    .join(" ")
+    .replace(/\b(?:cupom|codigo|token)\s+(?:detectado|encontrado|identificado)(?:\s+(?:na|no|da|do|de)\s+(?:mensagem|texto))?\s*:?\s*[A-Z0-9_-]{4,30}/ig, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function gerarInstrucaoCupomPadrao(cupons = []) {
@@ -175,6 +227,7 @@ function filtrarTextosSemDuplicarInstrucao(valores = [], instrucaoCupom = "") {
 function textoDuplicadoDeCampoClassificado(item = "", { instrucaoCupom = "", precoUnitario = "", cupons = [] } = {}) {
   const chaveItem = normalizarTextoComparacao(item);
   if (!chaveItem) return true;
+  if (textoTecnicoInternoContrato(item)) return true;
   if (instrucaoCupom && textosEquivalentes(item, instrucaoCupom)) return true;
 
   const chaveInstrucao = normalizarTextoComparacao(instrucaoCupom);
@@ -222,21 +275,15 @@ function linksEquivalentes(a = "", b = "") {
   return Boolean(chaveA && chaveB && chaveA === chaveB);
 }
 
-function montarLinksComerciaisEspelho(radarMirror = {}, resolucao = {}, tecnicaImportador = {}, marketplace = "") {
+function montarLinksComerciaisEspelho(radarMirror = {}, resolucao = {}, tecnicaImportador = {}, marketplace = "", blocoCanonico = null) {
   const links = [];
   const mp = texto(marketplace || tecnicaImportador.marketplace || "");
-  const mirrorLinks = radarMirror?.links || {};
-  const comerciais = radarMirror?.comercial?.links || {};
   const produtoOriginal = primeiroTexto(
-    mirrorLinks.produtoOriginal,
-    comerciais.produto,
-    resolucao.urlCapturada,
-    resolucao.linkOriginalRadar
+    ...(Array.isArray(blocoCanonico?.links?.produto) ? blocoCanonico.links.produto : []),
+    ...(Array.isArray(blocoCanonico?.links?.afiliado) ? blocoCanonico.links.afiliado : [])
   );
   const resgateOriginal = primeiroTexto(
-    mirrorLinks.resgateCupom,
-    comerciais.resgate,
-    comerciais.cupom
+    ...(Array.isArray(blocoCanonico?.links?.resgate) ? blocoCanonico.links.resgate : [])
   );
   const linkCapturadoResolucao = primeiroTexto(resolucao.urlCapturada, resolucao.linkOriginalRadar);
   const resolucaoEhDoProduto = !produtoOriginal || !linkCapturadoResolucao || linksEquivalentes(linkCapturadoResolucao, produtoOriginal);
@@ -257,62 +304,49 @@ function montarLinksComerciaisEspelho(radarMirror = {}, resolucao = {}, tecnicaI
     marketplace: mp
   });
 
-  const classificados = [
-    ...(Array.isArray(comerciais.classificados) ? comerciais.classificados : []),
-    ...(Array.isArray(mirrorLinks.classificados) ? mirrorLinks.classificados : [])
-  ];
-
-  for (const item of classificados) {
-    adicionarLinkComercial(links, {
-      tipo: item.tipo || "produto",
-      original: item.link,
-      resolvido: item.resolvido,
-      afiliado: item.afiliado,
-      marketplace: item.marketplace || mp,
-      status: item.status
-    });
+  for (const link of Array.isArray(blocoCanonico?.links?.afiliado) ? blocoCanonico.links.afiliado : []) {
+    adicionarLinkComercial(links, { tipo: "afiliado", original: link, marketplace: mp });
   }
-
-  for (const link of Array.isArray(mirrorLinks.adicionais) ? mirrorLinks.adicionais : []) {
+  for (const link of Array.isArray(blocoCanonico?.links?.imagem) ? blocoCanonico.links.imagem : []) {
+    adicionarLinkComercial(links, { tipo: "imagem", original: link, marketplace: mp });
+  }
+  for (const link of Array.isArray(blocoCanonico?.links?.outros) ? blocoCanonico.links.outros : []) {
     adicionarLinkComercial(links, { tipo: "adicional", original: link, marketplace: mp });
   }
 
   return links;
 }
 
-function camposComerciaisEspelho({ radarMirror = {}, resultadoPrecedencia = {}, resolucao = {}, tecnicaImportador = {}, marketplace = "" } = {}) {
+function camposComerciaisEspelho({ radarMirror = {}, resultadoPrecedencia = {}, resolucao = {}, tecnicaImportador = {}, marketplace = "", blocoCanonico = null, coerenciaComercial = null } = {}) {
   const oferta = objeto(resultadoPrecedencia.oferta);
   const comercial = objeto(radarMirror?.comercial);
   const produto = objeto(radarMirror?.produto);
   const condicoes = objeto(resultadoPrecedencia.resolucao?.condicoesComerciais);
-  const textoCanonico = documentoComercialCanonico(radarMirror);
-  const linksComerciais = montarLinksComerciaisEspelho(radarMirror, resolucao, tecnicaImportador, marketplace);
-  const cuponsOriginais = Array.isArray(oferta.codigosCupom)
-    ? oferta.codigosCupom
-    : (Array.isArray(resultadoPrecedencia.resolucao?.cuponsRadar) ? resultadoPrecedencia.resolucao.cuponsRadar : []);
-  const cupons = cuponsContratoUnicos([
-    ...(Array.isArray(cuponsOriginais) ? cuponsOriginais : []),
-    oferta.codigoCupom || "",
-    oferta.cupom || ""
-  ]);
+  const blocoCoerente = blocoCanonico || null;
+  const coerencia = coerenciaComercial || { ok: Boolean(blocoCoerente), motivo: blocoCoerente ? "bloco_comercial_canonico" : "bloco_comercial_ausente" };
+  const textoCanonico = blocoCoerente ? limparTextoComercialRenderizavel(blocoCoerente.texto) : "";
+  const linksComerciais = montarLinksComerciaisEspelho(radarMirror, resolucao, tecnicaImportador, marketplace, blocoCoerente);
+  const cupons = blocoCoerente?.cupons?.length
+    ? blocoCoerente.cupons
+    : fecharCodigosCupomContrato({ oferta, resultadoPrecedencia, radarMirror });
   const cupomPublicacao = cupons.join(" ou ");
   const instrucaoCupomOriginal = instrucaoCupomUtilContrato(
     oferta.instrucaoCupom ||
       resultadoPrecedencia.resolucao?.instrucaoCupom ||
       radarMirror?.comercial?.cupom?.instrucao ||
-      radarMirror?.cupom?.condicaoCapturada ||
+    radarMirror?.cupom?.condicaoCapturada ||
       "",
     cupons
   );
   const instrucaoCupom = instrucaoCupomOriginal || gerarInstrucaoCupomPadrao(cupons);
   const precoUnitario = normalizarPrecoUnitarioContrato(
+    blocoCoerente?.condicoes?.precoUnitario,
     oferta.precoUnitario,
     condicoes.unitario,
     comercial.precoUnitario,
-    radarMirror?.texto?.limpo,
-    radarMirror?.texto?.original
+    blocoCoerente?.texto
   );
-  const beneficioExtra = textosEquivalentes(oferta.beneficioExtra, instrucaoCupom)
+  const beneficioExtra = textosEquivalentes(oferta.beneficioExtra, instrucaoCupom) || textoTecnicoInternoContrato(oferta.beneficioExtra)
     ? ""
     : texto(oferta.beneficioExtra || "");
   const condicoesEspeciais = listaTextoUnica([
@@ -330,21 +364,21 @@ function camposComerciaisEspelho({ radarMirror = {}, resultadoPrecedencia = {}, 
   return {
     textoComercialCanonico: textoCanonico,
     documentoComercialCanonico: textoCanonico,
-    textoComercialOriginal: texto(radarMirror?.texto?.original || textoCanonico),
-    titulo: oferta.titulo || produto.tituloCapturado || "",
-    nome: oferta.nome || oferta.titulo || produto.tituloCapturado || "",
-    descricao: texto(comercial.descricao?.valor || radarMirror?.texto?.limpo || ""),
-    preco: oferta.preco,
-    precoAtual: oferta.precoAtual,
-    precoAnterior: oferta.precoAnterior ?? oferta.precoOriginal,
-    precoOriginal: oferta.precoOriginal ?? oferta.precoAnterior,
-    precoPix: oferta.precoPix || "",
-    condicaoPix: oferta.condicaoPix || oferta.precoPix || "",
+    textoComercialOriginal: textoCanonico,
+    titulo: blocoCoerente?.titulo || "",
+    nome: blocoCoerente?.titulo || "",
+    descricao: textoCanonico,
+    preco: blocoCoerente?.precoAtual,
+    precoAtual: blocoCoerente?.precoAtual,
+    precoAnterior: blocoCoerente?.precoAnterior,
+    precoOriginal: blocoCoerente?.precoAnterior,
+    precoPix: oferta.precoPix || blocoCoerente?.condicoes?.pix || "",
+    condicaoPix: oferta.condicaoPix || blocoCoerente?.condicoes?.pix || oferta.precoPix || "",
     precoUnitario,
     quantidade: produto.quantidadeCapturada || comercial.quantidade?.valor || "",
-    parcelamento: oferta.parcelamento || "",
-    quantidadeParcelas: condicoes.parcelamento?.quantidade || "",
-    valorParcela: condicoes.parcelamento?.valorParcela || "",
+    parcelamento: oferta.parcelamento || blocoCoerente?.condicoes?.parcelamento || "",
+    quantidadeParcelas: condicoes.parcelamento?.quantidade || blocoCoerente?.precos?.parcelado?.quantidade || "",
+    valorParcela: condicoes.parcelamento?.valorParcela || blocoCoerente?.precos?.parcelado?.valorParcela || blocoCoerente?.precos?.parcelado?.valor || "",
     cupom: cupomPublicacao,
     codigoCupom: cupomPublicacao,
     codigo_cupom: cupomPublicacao,
@@ -380,7 +414,12 @@ function camposComerciaisEspelho({ radarMirror = {}, resultadoPrecedencia = {}, 
     linksResgate: linksComerciais.filter(item => ["resgate", "cupom"].includes(item.tipo)),
     marketplace: oferta.marketplace || marketplace || tecnicaImportador.marketplace || "",
     produtoId: oferta.produtoId || tecnicaImportador.produtoId || tecnicaImportador.idProduto || tecnicaImportador.itemId || "",
-    categoria: oferta.categoria || tecnicaImportador.categoria || ""
+    categoria: oferta.categoria || tecnicaImportador.categoria || "",
+    coerenciaComercial: {
+      ok: coerencia.ok,
+      motivo: coerencia.motivo,
+      blocoSelecionado: blocoCoerente?.indice ?? null
+    }
   };
 }
 
@@ -524,8 +563,8 @@ function extrairDadosTecnicosImportador(ofertaImportador = {}) {
 
 function documentoComercialCanonico(radarMirror = {}) {
   return primeiroTexto(
-    radarMirror?.texto?.limpo,
-    radarMirror?.texto?.original
+    limparTextoComercialRenderizavel(radarMirror?.texto?.original),
+    limparTextoComercialRenderizavel(radarMirror?.texto?.limpo)
   );
 }
 
@@ -577,6 +616,18 @@ function montarOfertaRadarEspelhoComercial({
   const metadataBase = mergeRadarMirrorMetadata({
     ...metadataPermitida
   }, mirror);
+  const coerenciaComercial = resolverBlocoComercialCanonico(mirror || {});
+
+  if (!coerenciaComercial.ok) {
+    return {
+      ok: false,
+      motivo: "radar_contrato_comercial_ambiguo",
+      motivoTecnico: coerenciaComercial.motivo || "radar_contrato_comercial_ambiguo",
+      coerenciaComercial
+    };
+  }
+
+  const blocoCanonico = coerenciaComercial.bloco || null;
 
   const resultadoPrecedencia = resolverPrecedenciaComercialRadar({
     ofertaImportador: {
@@ -597,13 +648,15 @@ function montarOfertaRadarEspelhoComercial({
     tecnicaImportador.urlFinal,
     contexto.linkOriginal
   );
-  const textoOriginal = documentoComercialCanonico(mirror || {});
+  const textoOriginal = limparTextoComercialRenderizavel(blocoCanonico?.texto || "");
   const contratoComercial = camposComerciaisEspelho({
     radarMirror: mirror || {},
     resultadoPrecedencia,
     resolucao,
     tecnicaImportador,
-    marketplace
+    marketplace,
+    blocoCanonico,
+    coerenciaComercial
   });
   const ofertaEspelhoBase = {
     ...(resultadoPrecedencia.oferta || {}),
@@ -633,6 +686,11 @@ function montarOfertaRadarEspelhoComercial({
         origem: "radar_mirror",
         importadorUsadoComo: "enriquecimento_tecnico",
         camposTecnicosImportador: Object.keys(tecnicaImportador).filter(campo => campo !== "metadata"),
+        blocoComercialCanonico: {
+          indice: blocoCanonico?.indice ?? null,
+          motivo: coerenciaComercial.motivo || "",
+          evidencias: blocoCanonico?.evidencias || {}
+        },
         contratoComercial,
         resumoPrecedencia: resumirPrecedenciaComercialLog(resultadoPrecedencia)
       }

@@ -2,6 +2,10 @@ const {
   extrairCodigosCupomSemanticos,
   normalizarCodigoCupomSemantico
 } = require("../modules/radar/cupom-semantico");
+const {
+  classificarLinkComercial,
+  classificarLinksComerciais
+} = require("../modules/radar/links-comerciais");
 
 function logRadarSeguro(evento, payload = {}) {
   console.log(evento, JSON.stringify(payload));
@@ -311,19 +315,7 @@ function textoIndicaResgateCupomRadar(texto = "") {
 }
 
 function linkPareceResgateCupomRadar(link = "") {
-  const url = String(link || "").toLowerCase();
-
-  if (!url) return false;
-
-  return (
-    url.includes("/voucher") ||
-    url.includes("/coupon") ||
-    url.includes("/cupom") ||
-    url.includes("coupon") ||
-    url.includes("voucher") ||
-    url.includes("cupon") ||
-    url.includes("cupons")
-  );
+  return classificarLinkComercial({ url: link }).tipo === "resgate";
 }
 
 function textoIndicaPaginaResgateCupomRadar(texto = "") {
@@ -359,55 +351,29 @@ function textoResumoResgateRadar(trecho = "") {
   return (linhas[0] || "").slice(0, 160);
 }
 
-function pontuarResgateShopeeRadar(trecho = "") {
-  const fonte = String(trecho || "");
-  const normalizado = normalizarTextoCupomRadar(fonte);
-  let score = 0;
-
-  if (
-    normalizado.includes("resgateocupom") ||
-    normalizado.includes("resgatecupom") ||
-    normalizado.includes("resgatarcupom") ||
-    normalizado.includes("pegueocupom") ||
-    normalizado.includes("pegarcupom") ||
-    normalizado.includes("coletarcupom") ||
-    normalizado.includes("aplicarcupom") ||
-    normalizado.includes("apliqueocupom")
-  ) {
-    score += 3;
-  }
-
-  if (
-    normalizado.includes("cupomdisponivel") ||
-    normalizado.includes("cupomexclusivo") ||
-    normalizado.includes("voucher") ||
-    normalizado.includes("cupom")
-  ) {
-    score += 2;
-  }
-
-  if (/\b\d{1,5}\s*(?:off|%|por cento|reais?)\b/i.test(fonte)) score += 1;
-  if (/(?:^|\n)\s*(?:cupom|voucher)\s*[:\-]/i.test(fonte)) score += 1;
-  if (/(?:^|\n)\s*(?:produto|oferta)\s*[:\-]/i.test(fonte)) score -= 2;
-
-  return score;
-}
-
 function enriquecerLinksResgateShopeeRadar(texto = "", links = [], estado = {}) {
   const linksShopee = links.filter(linkShopeeRadar);
   if (linksShopee.length < 2) return estado;
+  const classificacoes = new Map(
+    (classificarLinksComerciais({ texto }).classificados || []).map(item => [item.url, item])
+  );
 
   const candidatosResgate = linksShopee
     .map(link => {
       const trecho = trechoProximoLinkRadar(texto, link);
+      const classificacao = classificacoes.get(link) || classificarLinkComercial({
+        url: link,
+        linhaAtual: trecho,
+        contexto: trecho
+      });
       return {
         link,
         trecho,
-        score: pontuarResgateShopeeRadar(trecho),
+        tipo: classificacao.tipo,
         textoResgate: textoResumoResgateRadar(trecho)
       };
     })
-    .filter(item => item.score >= 3);
+    .filter(item => item.tipo === "resgate");
 
   if (!candidatosResgate.length) return estado;
 
@@ -428,7 +394,7 @@ function enriquecerLinksResgateShopeeRadar(texto = "", links = [], estado = {}) 
       ...(beneficiosPorLink[item.link] || {}),
       tipoCupom: "resgate",
       beneficioExtra: item.textoResgate || item.link,
-      avisoCupom: item.textoResgate || "Link de resgate de cupom detectado na mensagem",
+      avisoCupom: item.textoResgate || "Resgate os cupons pelo link da oferta.",
       linkResgateCupom: item.link,
       resgateShopeeSemantico: true
     };
@@ -441,7 +407,7 @@ function enriquecerLinksResgateShopeeRadar(texto = "", links = [], estado = {}) 
     beneficiosPorLink,
     tipoCupom: estado.tipoCupom || "resgate",
     beneficioExtra: estado.beneficioExtra || principal.textoResgate || principal.link,
-    avisoCupom: estado.avisoCupom || principal.textoResgate || "Link de resgate de cupom detectado na mensagem",
+    avisoCupom: estado.avisoCupom || principal.textoResgate || "Resgate os cupons pelo link da oferta.",
     linkResgateCupom: estado.linkResgateCupom || principal.link,
     resgateShopeeSemantico: true
   };
@@ -453,12 +419,20 @@ function analisarBeneficiosMensagemRadar(texto = "", links = []) {
   const enriquecimento = analisarEnriquecimentoTextoRadar(fonte);
   const linksResgate = [];
   const beneficiosPorLink = {};
+  const classificacoes = new Map(
+    (classificarLinksComerciais({ texto: fonte }).classificados || []).map(item => [item.url, item])
+  );
 
   for (const link of links) {
     const trecho = trechoProximoLinkRadar(fonte, link);
     const cupomTrecho = extrairCupomTextoRadarGenerico(trecho);
+    const classificacaoLink = classificacoes.get(link) || classificarLinkComercial({
+      url: link,
+      linhaAtual: trecho,
+      contexto: trecho
+    });
     const resgate =
-      linkPareceResgateCupomRadar(link) &&
+      classificacaoLink.tipo === "resgate" &&
       textoIndicaPaginaResgateCupomRadar(trecho);
 
     if (cupomTrecho) {
@@ -468,7 +442,7 @@ function analisarBeneficiosMensagemRadar(texto = "", links = []) {
         cupomOrigem: "texto_grupo",
         cupomDetectadoTexto: true,
         tipoCupom: "texto",
-        avisoCupom: `Cupom detectado na mensagem: ${cupomTrecho}`
+        avisoCupom: ""
       };
     }
 
@@ -478,7 +452,7 @@ function analisarBeneficiosMensagemRadar(texto = "", links = []) {
         ...(beneficiosPorLink[link] || {}),
         tipoCupom: "resgate",
         beneficioExtra: link,
-        avisoCupom: "Link de resgate de cupom detectado na mensagem",
+        avisoCupom: "Resgate os cupons pelo link da oferta.",
         linkResgateCupom: link
       };
     }
@@ -500,7 +474,7 @@ function analisarBeneficiosMensagemRadar(texto = "", links = []) {
     estoqueBrasil: enriquecimento.estoqueBrasil,
     freteInformado: enriquecimento.freteInformado,
     beneficioExtra,
-    avisoCupom: cupom ? `Cupom detectado na mensagem: ${cupom}` : (beneficioResgate ? "Link de resgate de cupom detectado na mensagem" : ""),
+    avisoCupom: beneficioResgate ? "Resgate os cupons pelo link da oferta." : "",
     linkResgateCupom: beneficioResgate,
     linksResgate,
     beneficiosPorLink

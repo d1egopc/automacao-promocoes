@@ -7,6 +7,10 @@ const {
   extrairCodigosCupomSemanticos,
   normalizarCodigoCupomSemantico
 } = require("./cupom-semantico");
+const {
+  classificarLinksComerciais: classificarLinksComerciaisOficial,
+  linksUnicos
+} = require("./links-comerciais");
 
 const VERSAO_EXTRATOR_COMERCIAL = "radar_comercial_universal_v1";
 const CONFIANCA = {
@@ -25,8 +29,6 @@ const LIMITES = {
 };
 
 const PADRAO_VALOR = "\\d{1,3}(?:\\.\\d{3})*(?:,\\d{2})?|\\d+(?:[,.]\\d{2})?";
-const REGEX_LINK = /https?:\/\/[^\s<>()\]"']+|www\.[^\s<>()\]"']+/gi;
-
 function texto(valor = "") {
   return String(valor ?? "").trim();
 }
@@ -80,6 +82,15 @@ function criarCampoAusente(extras = {}) {
   return campo(null, CONFIANCA.AUSENTE, null, extras);
 }
 
+function hostLink(link = "") {
+  try {
+    const url = new URL(String(link || "").startsWith("http") ? String(link || "") : `https://${link}`);
+    return url.hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
 function detectarMarketplacePorTexto(textoFonte = "", links = []) {
   const fonte = semAcentos(`${textoFonte}\n${links.join("\n")}`);
   const regras = [
@@ -112,58 +123,36 @@ function categoriaPorTexto(textoFonte = "") {
   return criarCampoAusente();
 }
 
-function coletarLinks(textoFonte = "", linksEntrada = []) {
-  const encontrados = [];
-  const fonte = textoNormalizado(textoFonte);
-  const linksBody = [];
-  let match;
-  while ((match = REGEX_LINK.exec(fonte))) {
-    linksBody.push(match[0].replace(/[.,;!?)\]]+$/g, ""));
-  }
-  for (const link of [...(Array.isArray(linksEntrada) ? linksEntrada : []), ...linksBody]) {
-    const valor = texto(link);
-    if (!valor || encontrados.includes(valor) || encontrados.length >= LIMITES.LINKS_MAX) continue;
-    encontrados.push(valor);
-  }
-  return encontrados;
-}
-
-function hostLink(link = "") {
-  try {
-    const url = new URL(link.startsWith("http") ? link : `https://${link}`);
-    return url.hostname.toLowerCase().replace(/^www\./, "");
-  } catch {
-    return "";
-  }
-}
-
-function tipoLink(link = "") {
-  const host = hostLink(link);
-  const valor = link.toLowerCase();
-  if (/awin1\.com|s\.click\.aliexpress|mercadolivre\.com\/jms/.test(host)) return "affiliate";
-  if (["meli.la", "amzn.to", "s.shopee.com.br", "a.aliexpress.com", "bit.ly", "tinyurl.com"].includes(host)) return "encurtador";
-  if (/cupom|coupon|resgate|promocode|voucher/.test(host) || /(?:cupom|coupon|resgate|voucher|promocode)/.test(valor)) return "resgate";
-  if (/promo|campanha|landing|ofertas?|collection|search|lista|loja/.test(valor)) return "landing";
-  if (/mercadolivre|amazon|shopee|aliexpress|kabum|magazineluiza|magalu/.test(host)) return "produto";
-  return "desconhecido";
-}
-
 function classificarLinksComerciais(textoFonte = "", linksEntrada = []) {
-  const encontrados = coletarLinks(textoFonte, linksEntrada);
-  const classificados = encontrados.map(link => ({ link, tipo: tipoLink(link, textoFonte) }));
-  const produto = classificados.find(item => item.tipo === "produto")?.link || null;
-  const resgate = classificados.find(item => item.tipo === "resgate")?.link || null;
+  const resultado = classificarLinksComerciaisOficial({
+    texto: [
+      textoFonte,
+      ...linksUnicos(Array.isArray(linksEntrada) ? linksEntrada : [])
+    ].filter(Boolean).join("\n")
+  });
+  const classificados = (resultado.classificados || []).map(item => ({
+    link: item.url,
+    tipo: item.tipo === "afiliado" ? "affiliate" : item.tipo,
+    confianca: item.confianca,
+    origem: item.origem,
+    evidencias: item.evidencias
+  }));
+  const produto = resultado.produto[0] || resultado.afiliado[0] || null;
+  const resgate = resultado.resgate[0] || null;
+  const encurtadores = (resultado.classificados || [])
+    .filter(item => Array.isArray(item.evidencias) && item.evidencias.includes("dominio_encurtador"))
+    .map(item => item.url);
   return {
-    encontrados,
+    encontrados: resultado.encontrados.slice(0, LIMITES.LINKS_MAX),
     classificados,
     produto,
     resgate,
-    cupom: classificados.find(item => item.tipo === "resgate")?.link || null,
-    landing: classificados.filter(item => item.tipo === "landing").map(item => item.link),
-    encurtadores: classificados.filter(item => item.tipo === "encurtador").map(item => item.link),
-    redirecionadores: classificados.filter(item => item.tipo === "affiliate").map(item => item.link),
-    afiliados: classificados.filter(item => item.tipo === "affiliate").map(item => item.link),
-    adicionais: classificados.filter(item => !["produto", "resgate"].includes(item.tipo)).map(item => item.link)
+    cupom: resgate,
+    landing: resultado.landing || [],
+    encurtadores: linksUnicos([...(resultado.encurtador || []), ...encurtadores]),
+    redirecionadores: resultado.afiliado || [],
+    afiliados: resultado.afiliado || [],
+    adicionais: resultado.encontrados.filter(link => link !== produto && link !== resgate)
   };
 }
 

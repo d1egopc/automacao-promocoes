@@ -210,11 +210,7 @@ function resolverCupom({ ofertaImportador = {}, radarMirror = {} } = {}) {
     cupomComercial?.codigo || ""
   ]);
   const cuponsTextoRadar = cuponsExplicitosRadar.length ? [] : normalizarCupons([
-    cupomProvavel ? "" : (radarMirror?.cupom?.textoCapturado || ""),
-    cupomProvavel ? "" : (radarMirror?.cupom?.condicaoCapturada || ""),
-    cupomProvavel ? "" : (cupomComercial?.texto || ""),
-    cupomProvavel ? "" : (cupomComercial?.instrucao || ""),
-    cupomProvavel ? "" : (cupomComercial?.evidencia || "")
+    cupomProvavel ? "" : (radarMirror?.texto?.original || radarMirror?.texto?.limpo || "")
   ]);
   const cuponsRadar = [...cuponsExplicitosRadar, ...cuponsTextoRadar];
   const cupomRadar = cuponsRadar[0] || null;

@@ -14148,8 +14148,22 @@ const registroEngineRadar = temRedirectConhecidoRadar
           linkCapturado: link
         }
       });
-      resultadoPrecedenciaComercial = resultadoEspelhoComercial?.resultadoPrecedencia || null;
-      ofertaImportadorRadar = resultadoEspelhoComercial?.oferta || {};
+      if (resultadoEspelhoComercial?.ok === false) {
+        importacao = {
+          ...importacao,
+          ok: false,
+          motivo: resultadoEspelhoComercial.motivo || "radar_contrato_comercial_ambiguo",
+          motivoTecnico: resultadoEspelhoComercial.motivoTecnico || resultadoEspelhoComercial.motivo || "radar_contrato_comercial_ambiguo",
+          resolucao: {
+            ...(importacao.resolucao || {}),
+            coerenciaComercial: resultadoEspelhoComercial.coerenciaComercial || null
+          }
+        };
+        ofertaImportadorRadar = {};
+      } else {
+        resultadoPrecedenciaComercial = resultadoEspelhoComercial?.resultadoPrecedencia || null;
+        ofertaImportadorRadar = resultadoEspelhoComercial?.oferta || {};
+      }
       console.log("[RADAR-ESPELHO-COMERCIAL-OFICIAL]", JSON.stringify({
         correlationId,
         clienteId: adminMasterId,
@@ -14158,17 +14172,19 @@ const registroEngineRadar = temRedirectConhecidoRadar
         importadorUsadoComo: ofertaImportadorRadar.metadata?.radarEspelhoComercial?.importadorUsadoComo || "",
         camposTecnicosImportador: ofertaImportadorRadar.metadata?.radarEspelhoComercial?.camposTecnicosImportador || []
       }));
-      console.log("[RADAR-COMERCIAL-RESOLVIDO]", JSON.stringify({
-        ...resumirPrecedenciaComercialLog(resultadoPrecedenciaComercial),
-        etapa: "radar_legado"
-      }));
-      if (deveLogarDivergenciaComercial(resultadoPrecedenciaComercial)) {
-        console.log("[RADAR-COMERCIAL-DIVERGENCIA]", JSON.stringify({
+      if (resultadoPrecedenciaComercial) {
+        console.log("[RADAR-COMERCIAL-RESOLVIDO]", JSON.stringify({
           ...resumirPrecedenciaComercialLog(resultadoPrecedenciaComercial),
           etapa: "radar_legado"
         }));
+        if (deveLogarDivergenciaComercial(resultadoPrecedenciaComercial)) {
+          console.log("[RADAR-COMERCIAL-DIVERGENCIA]", JSON.stringify({
+            ...resumirPrecedenciaComercialLog(resultadoPrecedenciaComercial),
+            etapa: "radar_legado"
+          }));
+        }
+        emitirLogRadarPrecoSuspeito(resultadoPrecedenciaComercial, "radar_legado");
       }
-      emitirLogRadarPrecoSuspeito(resultadoPrecedenciaComercial, "radar_legado");
     }
 
     if (!importacao.ok) {

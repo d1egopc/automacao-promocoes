@@ -3,6 +3,10 @@ const {
   normalizarCodigoCupomSemantico,
   normalizarCuponsSemanticos
 } = require("./cupom-semantico");
+const {
+  classificarLinksComerciais,
+  linksUnicos
+} = require("./links-comerciais");
 
 const RADAR_MIRROR_VERSAO = 1;
 const CONFIANCA_VALORES = new Set(["alta", "media", "baixa", "ausente"]);
@@ -82,53 +86,6 @@ function normalizarTituloComparacao(valor = "") {
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function linksUnicos(links = []) {
-  const resultado = [];
-  const vistos = new Set();
-  for (const link of Array.isArray(links) ? links : []) {
-    const valor = texto(link);
-    if (!valor || vistos.has(valor)) continue;
-    vistos.add(valor);
-    resultado.push(valor);
-  }
-  return resultado;
-}
-
-function linkPareceProdutoRadar(link = "") {
-  const valor = texto(link).toLowerCase();
-  if (!valor) return false;
-  return Boolean(
-    /mercadolivre\.com\.br\/(?:[^\s?#]+\/p\/|p\/|produto\/|MLB-?\d+|.*[?&]item_id=MLB\d+)/i.test(valor) ||
-    /(?:amazon\.com\.br|amzn\.to)\/(?:dp\/|gp\/product\/|[^\s?#]*\/dp\/|[A-Z0-9]{10})(?:[/?#]|$)/i.test(valor) ||
-    /(?:shopee\.com\.br|s\.shopee\.com\.br)\//i.test(valor) ||
-    /aliexpress\.[^/]+\/item\//i.test(valor) ||
-    /kabum\.com\.br\/produto\//i.test(valor)
-  );
-}
-
-function classificarLinksRadar(links = [], beneficios = {}) {
-  const encontrados = linksUnicos(links);
-  const linksResgate = linksUnicos([
-    beneficios.linkResgateCupom,
-    ...(Array.isArray(beneficios.linksResgate) ? beneficios.linksResgate : [])
-  ]);
-  const resgateCupom = linksResgate.find(link => encontrados.includes(link)) || linksResgate[0] || null;
-  const candidatosProduto = encontrados.filter(link => link !== resgateCupom);
-  const produtoPorPadrao = candidatosProduto.find(linkPareceProdutoRadar) || null;
-  const produtoOriginal = produtoPorPadrao || (
-    resgateCupom && candidatosProduto.length === 1 ? candidatosProduto[0] : null
-  );
-  const adicionais = encontrados.filter(link => link !== produtoOriginal && link !== resgateCupom);
-
-  return {
-    encontrados,
-    produtoOriginal,
-    resgateCupom,
-    adicionais,
-    quantidadeEncontrada: encontrados.length
-  };
 }
 
 function imagemOriginalRadar(extracao = {}, raw = {}) {
@@ -260,8 +217,6 @@ function resumirComercialRadar(extracao = {}) {
     cupomTopLevel.codigo ||
     extracao.codigoCupom ||
     extracao.cupomCodigo ||
-    cupomComercial.texto ||
-    cupomTopLevel.texto ||
     ""
   );
   const cupomInstrucao = primeiroTextoOuNull(
@@ -311,13 +266,7 @@ function resumirComercialRadar(extracao = {}) {
         cupomComercial.codigo || "",
         cupomTopLevel.codigo || "",
         extracao.codigoCupom || "",
-        extracao.cupomCodigo || "",
-        cupomComercial.texto || "",
-        cupomTopLevel.texto || "",
-        cupomComercial.instrucao || "",
-        cupomTopLevel.instrucao || "",
-        cupomComercial.evidencia || "",
-        cupomTopLevel.evidencia || ""
+        extracao.cupomCodigo || ""
       ]),
       texto: cupomTexto,
       instrucao: cupomInstrucao,
@@ -395,7 +344,21 @@ function criarRadarMirror({
     beneficiosMensagem.cupom || ""
   ]);
   const cupomCodigo = cupomCodigos[0] || null;
-  const linksClassificados = classificarLinksRadar(links, beneficiosMensagem);
+  const linksClassificados = classificarLinksComerciais({
+    texto: [
+      textoOriginal,
+      ...linksUnicos(links)
+    ].filter(Boolean).join("\n"),
+    marketplace,
+    linksConhecidos: {
+      resgateCupom: beneficiosMensagem.linkResgateCupom,
+      classificados: [
+        ...(Array.isArray(beneficiosMensagem.linksResgate) ? beneficiosMensagem.linksResgate.map(link => ({ link, tipo: "resgate", origem: "beneficios_linksResgate" })) : [])
+      ]
+    }
+  });
+  linksClassificados.produtoOriginal = textoOuNull(linksClassificados.produtoOriginal);
+  linksClassificados.resgateCupom = textoOuNull(linksClassificados.resgateCupom);
   const midia = imagemOriginalRadar(extracaoRadarLocal, raw || {});
   const condicao = condicaoPrecoRadar(extracaoRadarLocal, beneficiosMensagem);
 

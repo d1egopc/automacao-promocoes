@@ -82,6 +82,18 @@ function montarMirrorNewBalance() {
 
 function montarMirrorDoisLinks() {
   const mirror = montarMirrorNewBalance();
+  const textoOriginal = [
+    "Tenis New Balance 480 Low",
+    "DE 549,90 | POR 165,59 no Pix ou 220,79 ate 5x",
+    "Aplique o Cupom de 20% OFF no Anuncio.",
+    "https://mercadolivre.com.br/produto/MLB999",
+    "Resgate o cupom aqui:",
+    "https://mercadolivre.com.br/cupons/resgate",
+    "Oferta Relampago.",
+    "Valor referente ao tamanho: 40, 41 e 42"
+  ].join("\n");
+  mirror.texto.original = textoOriginal;
+  mirror.texto.limpo = textoOriginal;
   mirror.links.encontrados = [
     "https://mercadolivre.com.br/produto/MLB999",
     "https://mercadolivre.com.br/cupons/resgate"
