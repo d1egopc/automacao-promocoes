@@ -22854,6 +22854,74 @@ async function enviarTelegram(oferta, mensagem) {
 
 // ================= FUNCÃO WHATSAPP =================
 
+function serializarDiagnosticoWhatsApp(valor, vistos = new WeakSet()) {
+  if (valor === null || valor === undefined) return valor;
+
+  const tipo = typeof valor;
+  if (tipo === "bigint") return valor.toString();
+  if (tipo === "symbol" || tipo === "function") return String(valor);
+  if (tipo !== "object") return valor;
+
+  if (vistos.has(valor)) return "[Circular]";
+  vistos.add(valor);
+
+  if (valor instanceof Error) {
+    const erro = {
+      constructorName: valor.constructor?.name || "",
+      name: valor.name,
+      message: valor.message,
+      stack: valor.stack
+    };
+
+    for (const chave of Object.getOwnPropertyNames(valor)) {
+      if (Object.prototype.hasOwnProperty.call(erro, chave)) continue;
+      erro[chave] = serializarDiagnosticoWhatsApp(valor[chave], vistos);
+    }
+
+    return erro;
+  }
+
+  if (Array.isArray(valor)) {
+    return valor.map(item => serializarDiagnosticoWhatsApp(item, vistos));
+  }
+
+  const saida = {};
+  for (const chave of Object.getOwnPropertyNames(valor)) {
+    saida[chave] = serializarDiagnosticoWhatsApp(valor[chave], vistos);
+  }
+
+  return saida;
+}
+
+function resolverDisconnectReasonWhatsApp(statusCode) {
+  const entrada = Object.entries(DisconnectReason || {})
+    .find(([, valor]) => String(valor) === String(statusCode));
+
+  return entrada?.[0] || "";
+}
+
+function registrarLastDisconnectWhatsApp(id, lastDisconnect) {
+  try {
+    const erro = lastDisconnect?.error;
+    const output = erro?.output;
+    const statusCode = output?.statusCode;
+
+    console.log("[WHATSAPP-LAST-DISCONNECT]", JSON.stringify({
+      sessaoId: id,
+      errorConstructorName: erro?.constructor?.name || "",
+      errorMessage: erro?.message || "",
+      errorStack: erro?.stack || "",
+      errorOutput: serializarDiagnosticoWhatsApp(output),
+      errorOutputStatusCode: statusCode ?? null,
+      errorOutputPayload: serializarDiagnosticoWhatsApp(output?.payload),
+      disconnectReasonResolvido: resolverDisconnectReasonWhatsApp(statusCode),
+      lastDisconnect: serializarDiagnosticoWhatsApp(lastDisconnect)
+    }));
+  } catch (e) {
+    console.log("[WHATSAPP-LAST-DISCONNECT-ERRO]", e.message);
+  }
+}
+
 async function iniciarWhatsApp(id, force = false) {
   console.log("[WHATSAPP] Iniciando sesso:", id, "force:", force);
 
@@ -23094,6 +23162,7 @@ salvarSessoesMeta();
 
       console.log("[WHATSAPP] WHATSAPP DESCONECTADO:", id);
       console.log("[INFO] Motivo:", motivo);
+      registrarLastDisconnectWhatsApp(id, lastDisconnect);
 
     qrCodes[id] = null;
     delete sessoes[id];
