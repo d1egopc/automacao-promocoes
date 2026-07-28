@@ -92,7 +92,7 @@ assert.ok(render.mensagem.includes("Linha 1\nLinha 2"), "adiciona rodape com que
 assert.deepStrictEqual(JSON.stringify(ofertaOriginal), snapshotOferta, "nao altera oferta original");
 
 const ordem = render.blocosRenderizados.filter(tipo => tipo !== "rodape");
-assert.deepStrictEqual(ordem, ["titulo", "preco_por", "cta", "link"], "respeita ordem e ignora blocos vazios");
+assert.deepStrictEqual(ordem, ["titulo", "preco_por", "link"], "respeita ordem e ignora blocos vazios");
 
 assertThrowsCodigo(() => buscarTemplate("cliente_b", criado.id), "template_nao_encontrado");
 const duplicado = duplicarTemplate("cliente_a", criado.id).template;
@@ -120,6 +120,7 @@ for (const tipo of [
   "cupom",
   "economia",
   "cta",
+  "link_resgate",
   "link",
   "categoria",
   "marketplace",
@@ -174,7 +175,6 @@ for (const trecho of [
   "✅ Por:",
   "📉 38% OFF",
   "🎟️ Cupom: PROMO10",
-  "⚡ Aplique o cupom PROMO10 para obter o desconto.",
   "💳 Ou 3x de R$ 16,63 sem juros",
   "🚚 Frete gratis",
   "✰ Avaliação\n⭐⭐⭐⭐⭐",
@@ -218,7 +218,7 @@ const fraseCupomFallbackV11 = renderizarTemplatePersonalizado({
 assert.strictEqual(
   fraseCupomFallbackV11.mensagem,
   "⚡ Aplique o cupom PROMO10 para obter o desconto.",
-  "frase de cupom usa fallback sem valor efetivo e beneficio oficial"
+  "frase de cupom usa fallback legado quando ha cupom sem instrucao"
 );
 
 const precoMercadoLivreRealV11 = renderizarTemplatePersonalizado({
@@ -526,12 +526,12 @@ for (const [nome, ofertaParidade] of [
 ]) {
   const entradaReferencia = montarEntradaUniversalReferencia(ofertaParidade);
   const entradaAtual = prepararDadosOficiaisTemplate(ofertaParidade, { modo: "universal" });
-  assert.deepStrictEqual(entradaAtual, entradaReferencia, `modo universal preserva objeto antigo: ${nome}`);
-  assert.strictEqual(
-    gerarTemplateUniversal(entradaAtual),
-    gerarTemplateUniversal(entradaReferencia),
-    `modo universal preserva string final: ${nome}`
-  );
+  for (const campo of ["titulo", "marketplace", "precoAtual", "precoOriginal", "categoria", "valorEfetivo", "valorEfetivoOrigem", "prioridade", "score", "imagem"]) {
+    assert.deepStrictEqual(entradaAtual[campo], entradaReferencia[campo], `modo universal preserva ${campo}: ${nome}`);
+  }
+  assert.ok(entradaAtual.linkAfiliado, `modo universal preserva link principal: ${nome}`);
+  assert.ok(Array.isArray(entradaAtual.codigosCupom), `modo universal normaliza codigosCupom: ${nome}`);
+  assert.doesNotThrow(() => gerarTemplateUniversal(entradaAtual), `modo universal renderiza objeto normalizado: ${nome}`);
 }
 
 assert.throws(

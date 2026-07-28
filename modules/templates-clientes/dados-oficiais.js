@@ -1,3 +1,7 @@
+const {
+  normalizarApresentacaoComercial
+} = require("./normalizador-apresentacao-comercial");
+
 function texto(valor = "") {
   return String(valor ?? "").trim();
 }
@@ -204,9 +208,9 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
     imagem: oferta.imagem || ""
   };
 
-  if (!radarEspelho) return dados;
+  if (!radarEspelho) return normalizarApresentacaoComercial(dados, oferta);
 
-  return {
+  return normalizarApresentacaoComercial({
     ...dados,
     cupomTexto: oferta.cupomTexto || cupom,
     codigoCupom: cupom,
@@ -240,7 +244,7 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
     avaliacao: oferta.avaliacao || oferta.rating || oferta.nota || "",
     rating: oferta.rating,
     nota: oferta.nota
-  };
+  }, oferta);
 }
 
 function prepararDadosPersonalizadosTemplate(oferta = {}) {
@@ -312,7 +316,7 @@ function prepararDadosPersonalizadosTemplate(oferta = {}) {
 
   dados.precoExibido = dados.precoAtual;
   dados.fontePrecoExibido = "preco_atual";
-  return dados;
+  return normalizarApresentacaoComercial(dados, oferta);
 }
 
 function prepararDadosOficiaisTemplate(oferta = {}, opcoes = {}) {

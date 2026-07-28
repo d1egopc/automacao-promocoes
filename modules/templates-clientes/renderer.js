@@ -213,6 +213,21 @@ function montarFraseCupom(oferta = {}) {
   return `⚡ Aplique o cupom ${cupom} para obter o desconto.`;
 }
 
+function textoIndicaPix(valor = "") {
+  return normalizarComparacao(valor).includes("pix");
+}
+
+function aplicarCondicaoPixPreco(preco = "", oferta = {}) {
+  const textoPreco = textoUtil(preco);
+  if (!textoPreco) return "";
+  if (textoIndicaPix(textoPreco)) return textoPreco;
+
+  const condicaoPix = primeiroTexto(oferta.condicaoPix, oferta.precoPix, oferta.descontoPix);
+  if (!textoIndicaPix(condicaoPix)) return textoPreco;
+
+  return `${textoPreco} no Pix`;
+}
+
 function resolverLinha(bloco, oferta = {}) {
   const tipo = bloco.tipo;
 
@@ -238,7 +253,8 @@ function resolverLinha(bloco, oferta = {}) {
   }
   if (tipo === "preco_por") {
     const preco = formatarMoeda(valorPrecoPor(oferta));
-    return preco ? `✅ Por: ${preco}` : "";
+    const precoComCondicao = aplicarCondicaoPixPreco(preco, oferta);
+    return precoComCondicao ? `✅ Por: ${precoComCondicao}` : "";
   }
   if (tipo === "desconto_percentual") {
     const desconto = formatarPercentual(oferta.descontoPercentual ?? oferta.desconto);
@@ -287,8 +303,13 @@ function resolverLinha(bloco, oferta = {}) {
     const cta = primeiroTexto(oferta.ctaPublico, oferta.cta, "Confira aqui:");
     return cta ? `🔗 ${cta}` : "";
   }
+  if (tipo === "link_resgate") {
+    const link = primeiroTexto(oferta.linkResgate);
+    return link ? `\uD83C\uDF9F\uFE0F Resgate os cupons:\n${link}` : "";
+  }
   if (tipo === "link") {
-    return primeiroTexto(oferta.linkAfiliado, oferta.linkFinal, oferta.link, oferta.url);
+    const link = primeiroTexto(oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link, oferta.url);
+    return link ? `🔗 Confira aqui:\n${link}` : "";
   }
   if (tipo === "aviso_preco") {
     const aviso = primeiroTexto(oferta.avisoPreco, oferta.avisoPagamento, oferta.avisoVariacaoPreco);
@@ -308,7 +329,9 @@ function grupoBlocoTemplate(tipo = "") {
   if (["preco_de", "preco_por", "desconto_percentual", "economia"].includes(tipo)) return "precos";
   if (["cupom", "beneficio", "descricao_adicional", "parcelamento"].includes(tipo)) return "beneficios";
   if (["avaliacao", "quantidade_avaliacoes", "vendas", "frete"].includes(tipo)) return "prova";
-  if (["cta", "link"].includes(tipo)) return "link";
+  if (tipo === "cta") return "cta";
+  if (tipo === "link_resgate") return "link_resgate";
+  if (tipo === "link") return "link";
   if (tipo === "frase_cupom") return "frase_cupom";
   if (["aviso_preco", "aviso_alteracao"].includes(tipo)) return "avisos";
   if (tipo === "rodape") return "rodape";
@@ -360,7 +383,23 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
     console.log("[TEMPLATE-DADOS-OFICIAIS]", JSON.stringify(diagnosticoDadosOficiaisTemplate(ofertaOficial)));
   }
 
-  const ativosOrdenados = blocos
+  const possuiBlocoLinkResgate = blocos.some(bloco => bloco?.tipo === "link_resgate");
+  const existeLinkResgate = textoUtil(ofertaOficial.linkResgate);
+  const blocosComCompatibilidade = [...blocos];
+  if (!possuiBlocoLinkResgate && existeLinkResgate) {
+    const indiceLink = blocosComCompatibilidade.findIndex(bloco => bloco?.tipo === "link" && bloco.ativo !== false);
+    if (indiceLink >= 0) {
+      const ordemLink = Number(blocosComCompatibilidade[indiceLink].ordem || 0);
+      blocosComCompatibilidade.splice(indiceLink, 0, {
+        tipo: "link_resgate",
+        ativo: true,
+        ordem: ordemLink - 0.1,
+        compatibilidadePassiva: true
+      });
+    }
+  }
+
+  const ativosOrdenados = blocosComCompatibilidade
     .filter(bloco => bloco && bloco.ativo !== false)
     .sort((a, b) => Number(a.ordem || 0) - Number(b.ordem || 0) || String(a.tipo).localeCompare(String(b.tipo)));
 
@@ -372,6 +411,21 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
     const catalogo = getBlocoCatalogo(bloco.tipo);
     if (!catalogo || !catalogo.canais.includes(canalNormalizado)) {
       blocosIgnorados.push({ tipo: bloco.tipo || "", motivo: "bloco_incompativel" });
+      continue;
+    }
+    const ctaNormalizada = normalizarComparacao(primeiroTexto(ofertaOficial.ctaPublico, ofertaOficial.cta, "Confira aqui:"))
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+    const existeLinkRenderizavel = primeiroTexto(
+      ofertaOficial.linkProduto,
+      ofertaOficial.linkAfiliado,
+      ofertaOficial.linkFinal,
+      ofertaOficial.link,
+      ofertaOficial.url,
+      ofertaOficial.linkResgate
+    );
+    if (bloco.tipo === "cta" && existeLinkRenderizavel && ctaNormalizada === "confira aqui") {
+      blocosIgnorados.push({ tipo: bloco.tipo, motivo: "cta_coberta_pelo_bloco_link" });
       continue;
     }
     const linha = resolverLinha(bloco, ofertaOficial);

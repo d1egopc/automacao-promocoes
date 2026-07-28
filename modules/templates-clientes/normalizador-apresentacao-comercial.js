@@ -1,0 +1,271 @@
+function texto(valor = "") {
+  return String(valor ?? "").trim();
+}
+
+function normalizarComparacao(valor = "") {
+  return texto(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function chaveCupom(valor = "") {
+  return normalizarComparacao(valor).replace(/\s+/g, "");
+}
+
+function chaveUrl(valor = "") {
+  return texto(valor).replace(/#.*$/, "").trim();
+}
+
+function valorLink(item = {}) {
+  if (typeof item === "string") return texto(item);
+  if (!item || typeof item !== "object") return "";
+  return texto(item.afiliado || item.resolvido || item.original || item.link || item.url || "");
+}
+
+function itemLink(item = {}, tipoPadrao = "produto") {
+  if (typeof item === "string") {
+    const url = texto(item);
+    return url ? { tipo: tipoPadrao, original: url, resolvido: "", afiliado: "" } : null;
+  }
+  if (!item || typeof item !== "object") return null;
+  const url = valorLink(item);
+  if (!url) return null;
+  return {
+    ...item,
+    tipo: texto(item.tipo || tipoPadrao),
+    original: texto(item.original || item.link || item.url || url),
+    resolvido: texto(item.resolvido || ""),
+    afiliado: texto(item.afiliado || "")
+  };
+}
+
+function listaLinksUnicos(valores = [], tipoPadrao = "produto") {
+  const resultado = [];
+  const vistos = new Set();
+  for (const valor of Array.isArray(valores) ? valores : []) {
+    const item = itemLink(valor, tipoPadrao);
+    const url = valorLink(item);
+    const chave = chaveUrl(url);
+    if (!item || !chave || vistos.has(chave)) continue;
+    vistos.add(chave);
+    resultado.push(item);
+  }
+  return resultado;
+}
+
+function partesCupom(valor = "") {
+  const entrada = texto(valor);
+  if (!entrada) return [];
+  return entrada
+    .split(/\s+(?:ou|e)\s+|[,;/|]+/i)
+    .map(texto)
+    .filter(Boolean);
+}
+
+function cupomBloqueado(valor = "") {
+  const chave = chaveCupom(valor);
+  return !chave || [
+    "resgate",
+    "produto",
+    "modocupom",
+    "tipocupom",
+    "linksresgate",
+    "linksproduto",
+    "excelente",
+    "otimo",
+    "bom",
+    "boa",
+    "regular",
+    "medio",
+    "media",
+    "ruim",
+    "baixo",
+    "baixa",
+    "alto",
+    "alta",
+    "copiado",
+    "cupomcopiado",
+    "semcupom",
+    "todos",
+    "cupons",
+    "desta",
+    "pagina",
+    "http",
+    "https",
+    "www",
+    "com",
+    "br",
+    "combr",
+    "undefined",
+    "null",
+    "nan"
+  ].includes(chave);
+}
+
+function cupomComGrafiaPreferivel(atual = "", candidato = "") {
+  const a = texto(atual);
+  const b = texto(candidato);
+  if (!a) return b;
+  if (!b) return a;
+  const letrasAtual = a.replace(/[^A-Za-z]/g, "");
+  const letrasCandidato = b.replace(/[^A-Za-z]/g, "");
+  const atualMaiusculo = letrasAtual && letrasAtual === letrasAtual.toUpperCase();
+  const candidatoMaiusculo = letrasCandidato && letrasCandidato === letrasCandidato.toUpperCase();
+  if (!atualMaiusculo && candidatoMaiusculo) return b;
+  return a;
+}
+
+function normalizarCuponsApresentacao(...fontes) {
+  const resultado = [];
+  const indices = new Map();
+
+  for (const fonte of fontes) {
+    const valores = Array.isArray(fonte) ? fonte : [fonte];
+    for (const valor of valores) {
+      for (const parte of partesCupom(valor)) {
+        const cupom = texto(parte);
+        const chave = chaveCupom(cupom);
+        if (cupomBloqueado(cupom)) continue;
+        if (indices.has(chave)) {
+          const indice = indices.get(chave);
+          resultado[indice] = cupomComGrafiaPreferivel(resultado[indice], cupom);
+          continue;
+        }
+        indices.set(chave, resultado.length);
+        resultado.push(cupom);
+      }
+    }
+  }
+
+  return resultado;
+}
+
+function instrucaoTecnicaOuVazia(instrucao = "") {
+  const normalizada = normalizarComparacao(instrucao);
+  return !normalizada || [
+    "resgate",
+    "produto",
+    "modocupom",
+    "tipocupom",
+    "linksresgate",
+    "linksproduto"
+  ].includes(normalizada.replace(/\s+/g, ""));
+}
+
+function instrucaoRedundanteCupom(instrucao = "", cupons = []) {
+  const normalizada = normalizarComparacao(instrucao);
+  if (!normalizada) return true;
+
+  return cupons.some(cupom => {
+    const codigo = normalizarComparacao(cupom);
+    if (!codigo) return false;
+
+    const padroesRedundantes = [
+      `cupom ${codigo}`,
+      `codigo ${codigo}`,
+      `cod ${codigo}`,
+      `use ${codigo}`,
+      `use o cupom ${codigo}`,
+      `utilize ${codigo}`,
+      `utilize o cupom ${codigo}`
+    ];
+
+    return padroesRedundantes.includes(normalizada);
+  });
+}
+
+function normalizarInstrucaoApresentacao(instrucao = "", cupons = []) {
+  const valor = texto(instrucao);
+  if (!valor || instrucaoTecnicaOuVazia(valor)) return "";
+  if (cupons.length && instrucaoRedundanteCupom(valor, cupons)) return "";
+  return valor;
+}
+
+function separarLinksApresentacao(dados = {}) {
+  const linksProduto = listaLinksUnicos(dados.linksProduto, "produto");
+  const linksResgate = listaLinksUnicos(dados.linksResgate, "resgate");
+  const linksComerciais = listaLinksUnicos(dados.linksComerciais, "produto");
+  const linksOutros = [];
+
+  for (const item of linksComerciais) {
+    const tipo = normalizarComparacao(item.tipo);
+    if (["resgate", "cupom"].includes(tipo)) {
+      linksResgate.push(itemLink(item, "resgate"));
+    } else if (["produto", "afiliado"].includes(tipo)) {
+      linksProduto.push(itemLink(item, "produto"));
+    } else {
+      linksOutros.push(item);
+    }
+  }
+
+  const linkTopo = texto(dados.linkAfiliado || dados.linkFinal || dados.link || dados.url || "");
+  if (linkTopo && !linksProduto.some(item => chaveUrl(valorLink(item)) === chaveUrl(linkTopo)) && !linksResgate.some(item => chaveUrl(valorLink(item)) === chaveUrl(linkTopo))) {
+    linksProduto.push({ tipo: "produto", original: linkTopo, resolvido: "", afiliado: linkTopo });
+  }
+
+  const produtoUnico = listaLinksUnicos(linksProduto, "produto");
+  const resgateUnico = listaLinksUnicos(linksResgate, "resgate")
+    .filter(item => !produtoUnico.some(produto => chaveUrl(valorLink(produto)) === chaveUrl(valorLink(item))));
+
+  const linkProduto = valorLink(produtoUnico[0]);
+  const linkResgate = valorLink(resgateUnico[0]);
+
+  return {
+    linksProduto: produtoUnico,
+    linksResgate: resgateUnico,
+    linksComerciais: listaLinksUnicos([...produtoUnico, ...resgateUnico, ...linksOutros], "produto"),
+    linkProduto,
+    linkResgate
+  };
+}
+
+function normalizarApresentacaoComercial(dados = {}, origem = {}) {
+  const cupons = normalizarCuponsApresentacao(
+    origem.cupons,
+    origem.codigosCupom,
+    origem.cupom,
+    origem.codigoCupom,
+    origem.cupomCodigo,
+    dados.cupons,
+    dados.codigosCupom,
+    dados.cupom,
+    dados.codigoCupom,
+    dados.cupomCodigo
+  );
+  const cupom = cupons.join(" ou ");
+  const instrucaoCupom = normalizarInstrucaoApresentacao(
+    dados.instrucaoCupom || origem.instrucaoCupom || "",
+    cupons
+  );
+  const links = separarLinksApresentacao({ ...origem, ...dados });
+  const linkPrincipal = links.linkProduto || texto(dados.linkAfiliado || dados.linkFinal || dados.link || origem.linkAfiliado || origem.linkFinal || origem.link || "");
+
+  return {
+    ...dados,
+    cupom,
+    codigoCupom: cupom,
+    cupomCodigo: cupom,
+    cupomTexto: cupom,
+    cupons,
+    codigosCupom: [...cupons],
+    instrucaoCupom,
+    linksComerciais: links.linksComerciais,
+    linksProduto: links.linksProduto,
+    linksResgate: links.linksResgate,
+    linkProduto: links.linkProduto || linkPrincipal,
+    linkResgate: links.linkResgate,
+    linkAfiliado: linkPrincipal,
+    linkFinal: dados.linkFinal || linkPrincipal,
+    link: dados.link || linkPrincipal
+  };
+}
+
+module.exports = {
+  normalizarApresentacaoComercial,
+  normalizarCuponsApresentacao,
+  normalizarInstrucaoApresentacao,
+  separarLinksApresentacao
+};

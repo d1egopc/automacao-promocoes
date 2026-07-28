@@ -1,3 +1,7 @@
+const {
+  normalizarApresentacaoComercial
+} = require("../templates-clientes/normalizador-apresentacao-comercial");
+
 function normalizarTexto(valor) {
   if (valor == null) return "";
   return String(valor).trim();
@@ -202,56 +206,56 @@ function apresentarScore(score) {
 }
 
 function selecionarCamposUniversais(oferta = {}) {
-  const cupons = [
-    ...(Array.isArray(oferta.cupons) ? oferta.cupons : []),
-    ...(Array.isArray(oferta.codigosCupom) ? oferta.codigosCupom : [])
-  ].map(normalizarTexto).filter(Boolean);
-  const cupom = cupons.length ? cupons.join(" ou ") : normalizarTexto(oferta.cupom || oferta.codigoCupom || oferta.cupomCodigo);
+  const ofertaApresentacao = normalizarApresentacaoComercial(oferta);
+  const cupom = normalizarTexto(ofertaApresentacao.cupom);
 
   return {
-    titulo: normalizarTexto(oferta.titulo),
-    marketplace: normalizarTexto(oferta.marketplace),
-    precoAtual: oferta.precoAtual,
-    precoOriginal: oferta.precoOriginal,
-    valorEfetivo: oferta.valorEfetivo,
-    valorEfetivoOrigem: normalizarTexto(oferta.valorEfetivoOrigem),
-    valorEfetivoDetalhes: oferta.valorEfetivoDetalhes || {},
-    economia: oferta.economia,
-    descontoPercentual: oferta.descontoPercentual,
-    categoria: normalizarTexto(oferta.categoria),
-    categoriaConfianca: oferta.categoriaConfianca,
-    confiancaCategoria: oferta.confiancaCategoria,
-    categoriaGenerica: oferta.categoriaGenerica,
-    categoriaBaixaConfianca: oferta.categoriaBaixaConfianca,
-    baixaConfiancaCategoria: oferta.baixaConfiancaCategoria,
+    titulo: normalizarTexto(ofertaApresentacao.titulo),
+    marketplace: normalizarTexto(ofertaApresentacao.marketplace),
+    precoAtual: ofertaApresentacao.precoAtual,
+    precoOriginal: ofertaApresentacao.precoOriginal,
+    valorEfetivo: ofertaApresentacao.valorEfetivo,
+    valorEfetivoOrigem: normalizarTexto(ofertaApresentacao.valorEfetivoOrigem),
+    valorEfetivoDetalhes: ofertaApresentacao.valorEfetivoDetalhes || {},
+    economia: ofertaApresentacao.economia,
+    descontoPercentual: ofertaApresentacao.descontoPercentual,
+    categoria: normalizarTexto(ofertaApresentacao.categoria),
+    categoriaConfianca: ofertaApresentacao.categoriaConfianca,
+    confiancaCategoria: ofertaApresentacao.confiancaCategoria,
+    categoriaGenerica: ofertaApresentacao.categoriaGenerica,
+    categoriaBaixaConfianca: ofertaApresentacao.categoriaBaixaConfianca,
+    baixaConfiancaCategoria: ofertaApresentacao.baixaConfiancaCategoria,
     cupom,
-    cupomTexto: normalizarTexto(oferta.cupomTexto || cupom),
-    instrucaoCupom: normalizarTexto(oferta.instrucaoCupom),
-    precoPix: normalizarTexto(oferta.precoPix || oferta.condicaoPix),
-    condicaoPix: normalizarTexto(oferta.condicaoPix || oferta.precoPix),
-    precoUnitario: normalizarTexto(oferta.precoUnitario || oferta.unitarioCapturado),
-    parcelamento: normalizarTexto(oferta.parcelamento),
-    quantidade: normalizarTexto(oferta.quantidade),
-    quantidadeParcelas: normalizarTexto(oferta.quantidadeParcelas),
-    valorParcela: oferta.valorParcela,
-    cashback: normalizarTexto(oferta.cashback),
-    frete: normalizarTexto(oferta.frete || oferta.freteTexto),
-    freteGratis: oferta.freteGratis === true,
-    condicoes: listaTextoUnica(oferta.condicoes),
-    observacoes: listaTextoUnica(oferta.observacoes),
-    variantes: listaTextoUnica(oferta.variantes),
-    tamanhos: listaTextoUnica(oferta.tamanhos),
-    cores: listaTextoUnica(oferta.cores),
-    voltagem: normalizarTexto(oferta.voltagem),
-    ofertaRelampago: oferta.ofertaRelampago === true,
-    validade: normalizarTexto(oferta.validade),
-    linksComerciais: linksComerciaisUnicos(oferta.linksComerciais),
-    linksResgate: linksComerciaisUnicos(oferta.linksResgate),
-    avaliacao: normalizarTexto(oferta.avaliacao || oferta.rating || oferta.nota),
-    beneficios: normalizarBeneficios(oferta.beneficios),
-    score: oferta.score,
-    prioridade: oferta.prioridade,
-    linkAfiliado: normalizarTexto(oferta.linkAfiliado)
+    cupomTexto: normalizarTexto(ofertaApresentacao.cupomTexto || cupom),
+    instrucaoCupom: normalizarTexto(ofertaApresentacao.instrucaoCupom),
+    precoPix: normalizarTexto(ofertaApresentacao.precoPix || ofertaApresentacao.condicaoPix),
+    condicaoPix: normalizarTexto(ofertaApresentacao.condicaoPix || ofertaApresentacao.precoPix),
+    precoUnitario: normalizarTexto(ofertaApresentacao.precoUnitario || ofertaApresentacao.unitarioCapturado),
+    parcelamento: normalizarTexto(ofertaApresentacao.parcelamento),
+    quantidade: normalizarTexto(ofertaApresentacao.quantidade),
+    quantidadeParcelas: normalizarTexto(ofertaApresentacao.quantidadeParcelas),
+    valorParcela: ofertaApresentacao.valorParcela,
+    cashback: normalizarTexto(ofertaApresentacao.cashback),
+    frete: normalizarTexto(ofertaApresentacao.frete || ofertaApresentacao.freteTexto),
+    freteGratis: ofertaApresentacao.freteGratis === true,
+    condicoes: listaTextoUnica(ofertaApresentacao.condicoes),
+    observacoes: listaTextoUnica(ofertaApresentacao.observacoes),
+    variantes: listaTextoUnica(ofertaApresentacao.variantes),
+    tamanhos: listaTextoUnica(ofertaApresentacao.tamanhos),
+    cores: listaTextoUnica(ofertaApresentacao.cores),
+    voltagem: normalizarTexto(ofertaApresentacao.voltagem),
+    ofertaRelampago: ofertaApresentacao.ofertaRelampago === true,
+    validade: normalizarTexto(ofertaApresentacao.validade),
+    linksComerciais: linksComerciaisUnicos(ofertaApresentacao.linksComerciais),
+    linksProduto: linksComerciaisUnicos(ofertaApresentacao.linksProduto),
+    linksResgate: linksComerciaisUnicos(ofertaApresentacao.linksResgate),
+    linkProduto: normalizarTexto(ofertaApresentacao.linkProduto),
+    linkResgate: normalizarTexto(ofertaApresentacao.linkResgate),
+    avaliacao: normalizarTexto(ofertaApresentacao.avaliacao || ofertaApresentacao.rating || ofertaApresentacao.nota),
+    beneficios: normalizarBeneficios(ofertaApresentacao.beneficios),
+    score: ofertaApresentacao.score,
+    prioridade: ofertaApresentacao.prioridade,
+    linkAfiliado: normalizarTexto(ofertaApresentacao.linkProduto || ofertaApresentacao.linkAfiliado)
   };
 }
 
@@ -420,8 +424,8 @@ function gerarTemplateUniversal(oferta = {}) {
     precoOriginalNumero > precoAtualNumero
       ? formatarMoeda(campos.precoOriginal)
       : "";
-  const economiaNumero = economiaReal(campos.precoOriginal, precoAtualExibido, campos.economia);
-  const descontoPercentual = descontoReal(campos.precoOriginal, precoAtualExibido, campos.descontoPercentual);
+  const economiaNumero = normalizarNumero(campos.economia);
+  const descontoPercentual = normalizarNumero(campos.descontoPercentual);
   const economia = economiaNumero != null && economiaNumero > 0
     ? formatarMoeda(economiaNumero)
     : "";
@@ -429,13 +433,6 @@ function gerarTemplateUniversal(oferta = {}) {
   let beneficioComercial = campos.beneficios.find(beneficio =>
     beneficioComercialValidoParaTemplate(beneficio, campos)
   );
-  beneficioComercial = campos.instrucaoCupom
-    ? beneficioComercial
-    : montarInstrucaoComercial(
-        campos,
-        beneficioComercial,
-        ""
-      );
   const detalhesComerciais = [
     campos.precoUnitario ? `ℹ️ Preço unitário: *${campos.precoUnitario}*` : "",
     campos.cashback ? `💰 ${campos.cashback}` : "",
@@ -450,8 +447,10 @@ function gerarTemplateUniversal(oferta = {}) {
     campos.voltagem ? `🔌 ${campos.voltagem}` : ""
   ].map(normalizarTexto).filter(Boolean).slice(0, 8);
   const linkPrincipal = normalizarTexto(campos.linkAfiliado);
+  const linkResgate = normalizarTexto(campos.linkResgate);
   const linksAdicionais = campos.linksComerciais
     .filter(item => normalizarTexto(item.afiliado || item.resolvido || item.original) !== linkPrincipal)
+    .filter(item => normalizarTexto(item.afiliado || item.resolvido || item.original) !== linkResgate)
     .filter(item => ["resgate", "cupom", "landing", "adicional"].includes(normalizarComparacao(item.tipo)))
     .map(item => {
       const url = normalizarTexto(item.afiliado || item.resolvido || item.original);
@@ -477,14 +476,22 @@ function gerarTemplateUniversal(oferta = {}) {
   adicionarBloco(blocos, detalhesComerciais);
   adicionarBloco(blocos, [
     campos.cupom ? `🎟️ Cupom: *${campos.cupom}*` : "",
-    campos.instrucaoCupom && campos.instrucaoCupom !== campos.cupomTexto ? `⚡ ${campos.instrucaoCupom}` : ""
+    campos.instrucaoCupom && campos.instrucaoCupom !== campos.cupomTexto
+      ? `⚡ ${campos.instrucaoCupom}`
+      : campos.cupom
+        ? `⚡ Aplique o cupom ${campos.cupom} para obter o desconto.`
+        : ""
   ]);
   adicionarBloco(blocos, [
     avaliacao ? "✰ Avaliação" : "",
     avaliacao
   ]);
   adicionarBloco(blocos, [
-    "🔗 *Confira aqui:*",
+    linkResgate ? "\uD83C\uDF9F\uFE0F *Resgate os cupons:*" : "",
+    linkResgate
+  ]);
+  adicionarBloco(blocos, [
+    campos.linkAfiliado ? "\uD83D\uDD17 *Confira aqui:*" : "",
     campos.linkAfiliado
   ]);
   adicionarBloco(blocos, linksAdicionais);

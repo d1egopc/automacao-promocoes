@@ -177,6 +177,14 @@ const CATALOGO_BLOCOS = Object.freeze({
     aceitaVazio: true,
     emojiPadrao: "🔗"
   }),
+  link_resgate: bloco({
+    tipo: "link_resgate",
+    nomeVisual: "Link de resgate",
+    descricaoVisual: "Link de resgate de cupons quando existir na oferta.",
+    campoOrigem: "linkResgate|linksResgate",
+    ordemPadrao: 170,
+    emojiPadrao: "\uD83C\uDF9F\uFE0F"
+  }),
   link: bloco({
     tipo: "link",
     nomeVisual: "Link",
