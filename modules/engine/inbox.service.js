@@ -12,6 +12,7 @@ const {
   logEngineEventoBrutoDuplicado,
   logEngineEventoBrutoErro
 } = require("./logger");
+const coberturaRadar = require("../radar/cobertura-v1");
 
 let proximoIdOperacaoEventoBruto = 1;
 let chamadasAtivasEventoBruto = 0;
@@ -181,6 +182,22 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
   const evento = normalizarEventoBruto(eventoBruto);
   const hashEvento = eventoBruto.hashEvento || eventoBruto.hash_evento || gerarHashEvento(evento);
   const marketplaceDetectado = eventoBruto.marketplaceDetectado || eventoBruto.marketplace_detectado || marketplacePrincipal(evento.linksExtraidos);
+  const metadataEvento = eventoBruto.metadata && typeof eventoBruto.metadata === "object" ? eventoBruto.metadata : {};
+  const contextoCobertura = {
+    coberturaTraceId: eventoBruto.coberturaTraceId || metadataEvento.coberturaTraceId || "",
+    fidelidadeTraceId: eventoBruto.fidelidadeTraceId || metadataEvento.fidelidadeTraceId || "",
+    clienteId: Array.isArray(opcoes.clientes) ? opcoes.clientes[0] : "",
+    sessaoId: evento.sessaoId,
+    grupoId: evento.grupoId,
+    grupoNome: evento.grupoNome,
+    marketplace: marketplaceDetectado,
+    links: evento.linksExtraidos,
+    chaveDeduplicacao: hashEvento
+  };
+  coberturaRadar.registrar("engine_evento_inicio", {
+    ...contextoCobertura,
+    decisao: "iniciado"
+  });
 
   try {
     const duplicado = await existeEventoDuplicado(evento, {
@@ -193,7 +210,20 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
     });
     if (duplicado) {
       logEngineEventoBrutoDuplicado({ id: duplicado.id, grupoId: evento.grupoId, links: evento.linksExtraidos.length });
-      return { ok: true, duplicado: true, id: duplicado.id };
+      coberturaRadar.registrar("engine_evento_duplicado", {
+        ...contextoCobertura,
+        decisao: "reaproveitado",
+        motivo: "duplicidade",
+        eventoEngineId: duplicado.id,
+        eventoOriginalId: duplicado.id,
+        jobNovoCriado: false
+      });
+      return {
+        ok: true,
+        duplicado: true,
+        id: duplicado.id,
+        ...(coberturaRadar.flagAtiva() ? { hashEvento, jobNovoCriado: false } : {})
+      };
     }
 
     const insert = await queryEngine(
@@ -223,13 +253,32 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
 
     if (!insert.ok) {
       logEngineEventoBrutoErro({ motivo: insert.motivo || "insert_falhou", erro: insert.erro || "" });
+      coberturaRadar.registrar("engine_evento_erro", {
+        ...contextoCobertura,
+        decisao: "erro",
+        motivo: insert.motivo || "insert_falhou",
+        erro: insert.erro || ""
+      });
       return { ok: false, motivo: insert.motivo || "insert_falhou", erro: insert.erro || "" };
     }
 
     const id = insert.resultado.rows[0]?.id;
     if (!id) {
       logEngineEventoBrutoDuplicado({ grupoId: evento.grupoId, links: evento.linksExtraidos.length, hashEvento });
-      return { ok: true, duplicado: true, id: null };
+      coberturaRadar.registrar("engine_evento_duplicado", {
+        ...contextoCobertura,
+        decisao: "reaproveitado",
+        motivo: "duplicidade",
+        eventoEngineId: "",
+        eventoOriginalId: "",
+        jobNovoCriado: false
+      });
+      return {
+        ok: true,
+        duplicado: true,
+        id: null,
+        ...(coberturaRadar.flagAtiva() ? { hashEvento, jobNovoCriado: false } : {})
+      };
     }
 
     await salvarLinksEvento(id, evento.linksExtraidos, eventoBruto.metadata || {});
@@ -237,7 +286,7 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
     logEngineEventoBrutoSalvo({ id, origem: evento.origem, origemTipo: evento.origemTipo, grupoId: evento.grupoId, links: evento.linksExtraidos.length });
 
     const clientes = opcoes.clientes || eventoBruto.clientes || ["admin"];
-    await criarJobsParaClientes({
+    const jobs = await criarJobsParaClientes({
       eventoId: id,
       clientes,
       marketplaceDetectado,
@@ -245,9 +294,27 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
       metadataEvento: eventoBruto.metadata || {}
     });
 
-    return { ok: true, id, duplicado: false };
+    coberturaRadar.registrar("engine_evento_criado", {
+      ...contextoCobertura,
+      decisao: "aceito",
+      motivo: "evento_criado",
+      eventoEngineId: id,
+      jobNovoCriado: Number(jobs.criados || 0) > 0
+    });
+    return {
+      ok: true,
+      id,
+      duplicado: false,
+      ...(coberturaRadar.flagAtiva() ? { hashEvento, jobNovoCriado: Number(jobs.criados || 0) > 0 } : {})
+    };
   } catch (e) {
     logEngineEventoBrutoErro({ motivo: "erro_inesperado", erro: e.message });
+    coberturaRadar.registrar("engine_evento_erro", {
+      ...contextoCobertura,
+      decisao: "erro",
+      motivo: "erro_inesperado",
+      erro: e.message
+    });
     return { ok: false, motivo: "erro_inesperado", erro: e.message };
   }
 }

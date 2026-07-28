@@ -26,6 +26,7 @@ const {
   usuarioAtivo,
   logUsuarioInativoIgnorado
 } = require("../../../utils/usuarios-atividade");
+const coberturaRadar = require("../../radar/cobertura-v1");
 
 const ADAPTERS = {
   mercadolivre: importarMercadoLivreEngine,
@@ -45,6 +46,31 @@ function motivoAdicionar(resumo, motivo = "erro_importacao") {
   resumo.motivos[chave] = (resumo.motivos[chave] || 0) + 1;
 }
 
+function metadataJob(job = {}) {
+  return job.metadata && typeof job.metadata === "object" ? job.metadata : {};
+}
+
+function contextoCoberturaImporter(job = {}, extras = {}) {
+  const metadata = metadataJob(job);
+  const metadataEvento = metadata.metadataEvento && typeof metadata.metadataEvento === "object"
+    ? metadata.metadataEvento
+    : {};
+  const links = Array.isArray(extras.links)
+    ? extras.links.map(item => item.url_original || item.url_expandida || item.url || item).filter(Boolean)
+    : [];
+  return {
+    coberturaTraceId: metadata.coberturaTraceId || metadataEvento.coberturaTraceId || "",
+    fidelidadeTraceId: metadata.fidelidadeTraceId || metadataEvento.fidelidadeTraceId || "",
+    clienteId: job.cliente_id || "",
+    marketplace: marketplaceJob(job),
+    eventoEngineId: job.evento_id || "",
+    jobId: job.id || "",
+    ofertaId: extras.ofertaId || job.oferta_id || "",
+    links,
+    link: links[0] || ""
+  };
+}
+
 async function finalizarErro(job, motivo, detalhes = {}, resumo) {
   await marcarJobErroImportacao(job.id, motivo, detalhes);
   if (resumo) {
@@ -57,16 +83,38 @@ async function finalizarErro(job, motivo, detalhes = {}, resumo) {
 async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
   const marketplace = marketplaceJob(job);
   logEngineImporterJob({ jobId: job.id, eventoId: job.evento_id, clienteId: job.cliente_id, marketplace });
+  coberturaRadar.registrar("engine_importer_inicio", {
+    ...contextoCoberturaImporter(job),
+    decisao: "iniciado"
+  });
 
   if (!usuarioAtivo(job.cliente_id)) {
     logUsuarioInativoIgnorado({ clienteId: job.cliente_id, fluxo: "engine_importer_job" });
+    coberturaRadar.registrar("engine_importer_rejeitado", {
+      ...contextoCoberturaImporter(job),
+      decisao: "rejeitado",
+      motivo: "usuario_inativo"
+    });
     return finalizarErro(job, "usuario_inativo", { clienteId: job.cliente_id }, resumo);
   }
 
   const lock = await tentarMarcarImportando(job.id);
   if (!lock.ok) {
-    if (lock.ignorado) return { ok: false, ignorado: true, motivo: "job_nao_pronto" };
+    if (lock.ignorado) {
+      coberturaRadar.registrar("engine_job_nao_pronto", {
+        ...contextoCoberturaImporter(job),
+        decisao: "ignorado",
+        motivo: "job_nao_pronto"
+      });
+      return { ok: false, ignorado: true, motivo: "job_nao_pronto" };
+    }
     logEngineImporterErro({ jobId: job.id, etapa: "marcar_importando", motivo: lock.motivo || "lock_falhou", erro: lock.erro || "" });
+    coberturaRadar.registrar("engine_importer_erro", {
+      ...contextoCoberturaImporter(job),
+      decisao: "erro",
+      motivo: lock.motivo || "lock_falhou",
+      erro: lock.erro || ""
+    });
     return finalizarErro(job, lock.motivo || "lock_falhou", { erro: lock.erro || "" }, resumo);
   }
 
@@ -82,6 +130,11 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
   });
 
   if (!eventoResultado.ok || !eventoResultado.evento) {
+    coberturaRadar.registrar("engine_importer_erro", {
+      ...contextoCoberturaImporter(job),
+      decisao: "erro",
+      motivo: "evento_nao_encontrado"
+    });
     return finalizarErro(job, "evento_nao_encontrado", { eventoId: job.evento_id }, resumo);
   }
 
@@ -92,6 +145,11 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
   });
 
   if (!linksResultado.ok) {
+    coberturaRadar.registrar("engine_importer_erro", {
+      ...contextoCoberturaImporter(job),
+      decisao: "erro",
+      motivo: "links_nao_carregados"
+    });
     return finalizarErro(job, "links_nao_carregados", { eventoId: job.evento_id }, resumo);
   }
 
@@ -100,6 +158,11 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
   logEngineImporterAdapter({ jobId: job.id, marketplace, adapterOk: Boolean(adapter) });
 
   if (!adapter) {
+    coberturaRadar.registrar("engine_importer_rejeitado", {
+      ...contextoCoberturaImporter(job, { links: linksResultado.links }),
+      decisao: "rejeitado",
+      motivo: "adapter_nao_implementado"
+    });
     return finalizarErro(job, "adapter_nao_implementado", { marketplace }, resumo);
   }
 
@@ -114,6 +177,12 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
   } catch (e) {
     logEngineImporterErro({ jobId: job.id, etapa: "importador_executado", motivo: "erro_importador", erro: e.message });
     await registrarEtapaImportacao(job.id, "importador_executado", "erro", "erro_importador", { erro: e.message });
+    coberturaRadar.registrar("engine_importer_erro", {
+      ...contextoCoberturaImporter(job, { links: linksResultado.links }),
+      decisao: "erro",
+      motivo: "erro_importador",
+      erro: e.message
+    });
     return finalizarErro(job, "erro_importador", { erro: e.message }, resumo);
   }
 
@@ -123,6 +192,11 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
   });
 
   if (!resultadoAdapter?.ok) {
+    coberturaRadar.registrar("engine_importer_rejeitado", {
+      ...contextoCoberturaImporter(job, { links: linksResultado.links }),
+      decisao: "rejeitado",
+      motivo: resultadoAdapter?.motivo || "erro_importacao"
+    });
     return finalizarErro(job, resultadoAdapter?.motivo || "erro_importacao", { marketplace }, resumo);
   }
 
@@ -141,6 +215,12 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
   });
 
   if (!gravacao.ok) {
+    coberturaRadar.registrar("engine_importer_erro", {
+      ...contextoCoberturaImporter(job, { links: linksResultado.links }),
+      decisao: "erro",
+      motivo: gravacao.motivo || "oferta_gravacao_falhou",
+      erro: gravacao.erro || ""
+    });
     return finalizarErro(job, gravacao.motivo || "oferta_gravacao_falhou", { erro: gravacao.erro || "" }, resumo);
   }
 
@@ -160,6 +240,12 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
       statusV2: gravacao.statusV2 || "retida"
     });
 
+    coberturaRadar.registrar("engine_importer_rejeitado", {
+      ...contextoCoberturaImporter(job, { links: linksResultado.links, ofertaId: gravacao.ofertaId }),
+      decisao: "retido",
+      motivo: motivoV2,
+      ofertaId: gravacao.ofertaId
+    });
     if (resumo) resumo.retidasV2 = (resumo.retidasV2 || 0) + 1;
     return { ok: true, retidaV2: true, ofertaId: gravacao.ofertaId, motivo: motivoV2 };
   }
@@ -170,6 +256,12 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
     marketplace
   });
 
+  coberturaRadar.registrar("engine_importer_ok", {
+    ...contextoCoberturaImporter(job, { links: linksResultado.links, ofertaId: gravacao.ofertaId }),
+    decisao: "aceito",
+    motivo: "oferta_criada",
+    ofertaId: gravacao.ofertaId
+  });
   if (resumo) resumo.ofertaCriada += 1;
   return { ok: true, ofertaId: gravacao.ofertaId };
 }

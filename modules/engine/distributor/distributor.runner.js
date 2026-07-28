@@ -15,10 +15,41 @@ const {
   logEngineDistribuidorErro,
   logEngineDistribuidorFim
 } = require("../logger");
+const coberturaRadar = require("../../radar/cobertura-v1");
 
 function motivoAdicionar(resumo, motivo = "erro_distribuicao") {
   const chave = motivo || "erro_distribuicao";
   resumo.motivos[chave] = (resumo.motivos[chave] || 0) + 1;
+}
+
+function metadataObjeto(valor = {}) {
+  return valor && typeof valor === "object" ? valor : {};
+}
+
+function contextoCoberturaDistributor(oferta = {}, extras = {}) {
+  const metadata = metadataObjeto(oferta.metadata);
+  const jobMetadata = metadataObjeto(oferta.job_metadata);
+  const eventoMetadata = metadataObjeto(oferta.evento_metadata);
+  const links = [
+    oferta.link_original,
+    oferta.link_expandido,
+    oferta.link_afiliado
+  ].filter(Boolean);
+  const destino = extras.destino || {};
+  return {
+    coberturaTraceId: metadata.coberturaTraceId || jobMetadata.coberturaTraceId || jobMetadata.metadataEvento?.coberturaTraceId || eventoMetadata.coberturaTraceId || "",
+    fidelidadeTraceId: metadata.fidelidadeTraceId || jobMetadata.fidelidadeTraceId || jobMetadata.metadataEvento?.fidelidadeTraceId || eventoMetadata.fidelidadeTraceId || "",
+    clienteId: oferta.cliente_id || "",
+    marketplace: oferta.marketplace || "",
+    links,
+    link: oferta.link_original || oferta.link_expandido || oferta.link_afiliado || "",
+    eventoEngineId: oferta.evento_id || "",
+    jobId: oferta.job_id || "",
+    ofertaId: oferta.id || "",
+    destinoId: destino.id || destino.destinoId || destino.nome || "",
+    destinoEncontrado: extras.destinoEncontrado === true,
+    filaRecebeu: extras.filaRecebeu === true
+  };
 }
 
 async function reterOferta(oferta, motivo, detalhes = {}, resumo = null) {
@@ -49,10 +80,29 @@ async function erroOferta(oferta, motivo, detalhes = {}, resumo = null) {
 
 async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null) {
   logEngineDistribuidorOferta({ ofertaId: oferta.id, jobId: oferta.job_id, clienteId: oferta.cliente_id, marketplace: oferta.marketplace });
+  coberturaRadar.registrar("engine_distributor_inicio", {
+    ...contextoCoberturaDistributor(oferta),
+    decisao: "iniciado"
+  });
 
   const lock = await tentarMarcarDistribuindo(oferta.id, { jobId: oferta.job_id, clienteId: oferta.cliente_id });
   if (!lock.ok) {
-    if (lock.ignorado) return { ok: false, ignorado: true, motivo: "oferta_nao_distribuivel" };
+    if (lock.ignorado) {
+      coberturaRadar.registrar("engine_distributor_nao_distribuivel", {
+        ...contextoCoberturaDistributor(oferta),
+        decisao: "ignorado",
+        motivo: "oferta_nao_distribuivel",
+        filaRecebeu: false
+      });
+      return { ok: false, ignorado: true, motivo: "oferta_nao_distribuivel" };
+    }
+    coberturaRadar.registrar("engine_distributor_erro", {
+      ...contextoCoberturaDistributor(oferta),
+      decisao: "erro",
+      motivo: lock.motivo || "erro_distribuicao",
+      erro: lock.erro || "",
+      filaRecebeu: false
+    });
     return erroOferta(oferta, lock.motivo || "erro_distribuicao", { erro: lock.erro || "" }, resumo);
   }
 
@@ -66,6 +116,14 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
   await registrarEtapaDistribuicao(oferta.job_id, "validar_oferta", validacao.ok ? "ok" : "retida", validacao.ok ? "oferta_validada" : validacao.motivo, validacao);
 
   if (!validacao.ok) {
+    coberturaRadar.registrar("engine_distributor_retida", {
+      ...contextoCoberturaDistributor(oferta, {
+        destinoEncontrado: false,
+        filaRecebeu: false
+      }),
+      decisao: "retido",
+      motivo: validacao.motivo || "validacao_distribuicao_rejeitada"
+    });
     return reterOferta(oferta, validacao.motivo, validacao.detalhes || {}, resumo);
   }
 
@@ -77,9 +135,25 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
 
   if (!fila.ok) {
     if (fila.motivo === "duplicidade_fila") {
+      coberturaRadar.registrar("engine_distributor_retida", {
+        ...contextoCoberturaDistributor(oferta, {
+          destinoEncontrado: true,
+          filaRecebeu: false
+        }),
+        decisao: "retido",
+        motivo: "duplicidade_fila"
+      });
       return reterOferta(oferta, "duplicidade_fila", {}, resumo);
     }
 
+    coberturaRadar.registrar("engine_distributor_erro", {
+      ...contextoCoberturaDistributor(oferta, {
+        destinoEncontrado: true,
+        filaRecebeu: false
+      }),
+      decisao: "erro",
+      motivo: fila.motivo || "erro_fila"
+    });
     return erroOferta(oferta, fila.motivo || "erro_fila", {}, resumo);
   }
 
@@ -101,6 +175,17 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     destinos: destinosImagemAuditoria,
     destino: destinosImagemAuditoria.map(item => item.destino).filter(Boolean).join(" | "),
     tipoMidia: destinosImagemAuditoria.map(item => item.tipoMidia).filter(Boolean).join(" | ")
+  });
+  coberturaRadar.registrar("engine_distributor_fila", {
+    ...contextoCoberturaDistributor(oferta, {
+      destino: destinosImagemAuditoria[0]?.destino || {},
+      destinoEncontrado: true,
+      filaRecebeu: true
+    }),
+    decisao: "aceito",
+    motivo: "adicionada_fila",
+    ofertaId: oferta.id,
+    filaRecebeu: true
   });
 
   if (resumo) resumo.adicionadasFila += 1;
@@ -146,6 +231,13 @@ async function distribuirOfertasEngine({ limite = 10, marketplace = "", clienteI
       resumo.erros += 1;
       motivoAdicionar(resumo, "erro_distribuicao");
       logEngineDistribuidorErro({ ofertaId: oferta.id, jobId: oferta.job_id, etapa: "distribuir_oferta", motivo: "erro_distribuicao", erro: e.message });
+      coberturaRadar.registrar("engine_distributor_erro", {
+        ...contextoCoberturaDistributor(oferta),
+        decisao: "erro",
+        motivo: "erro_distribuicao",
+        erro: e.message,
+        filaRecebeu: false
+      });
       await erroOferta(oferta, "erro_distribuicao", { erro: e.message });
     }
   }

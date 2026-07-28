@@ -13,6 +13,7 @@ const {
   normalizarCuponsSemanticos
 } = require("./modules/radar/cupom-semantico");
 const fidelidadeObs = require("./modules/fidelidade/observabilidade-v1");
+const coberturaRadar = require("./modules/radar/cobertura-v1");
 
 const {
   initEngineDatabase,
@@ -4693,7 +4694,14 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
 
   try {
     clienteId = String(clienteId || oferta.clienteId || "").trim();
-    if (!clienteId) return { enviado: false, tentouEnvio: false, motivo: "clienteId_ausente" };
+    if (!clienteId) {
+      registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId || "", destino, {
+        decisao: "bloqueado",
+        motivo: "clienteId_ausente",
+        filaRecebeu: true
+      });
+      return { enviado: false, tentouEnvio: false, motivo: "clienteId_ausente" };
+    }
     configCliente = configCliente || configsPorCliente?.[clienteId] || {};
     const fidelidadeTraceIdExecutor = fidelidadeObs.flagAtiva()
       ? fidelidadeObs.resolverFidelidadeTraceId(oferta, oferta?.metadata, opcoes)
@@ -4718,12 +4726,22 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
     }
 
     if (!destinoAceitaOferta(destino, oferta)) {
+      registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+        decisao: "bloqueado",
+        motivo: "item_nao_elegivel",
+        filaRecebeu: true
+      });
       return { enviado: false, tentouEnvio: false, motivo: "nao_aceita" };
     }
 
     if (!opcoes.ignorarHorario && !destinoDentroHorario(destino)) {
       logOptimus("DESTINO", "Fora do horario", {
         destino: destino.nome
+      });
+      registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+        decisao: "bloqueado",
+        motivo: "fora_da_janela",
+        filaRecebeu: true
       });
       return { enviado: false, tentouEnvio: false, motivo: "fora_horario" };
     }
@@ -4739,6 +4757,11 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     logOptimus("WHATSAPP", "Sessao nao encontrada", {
       conexaoId: destino.conexaoId
     });
+    registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+      decisao: "bloqueado",
+      motivo: "sessao_desconectada",
+      filaRecebeu: true
+    });
     return { enviado: false, tentouEnvio: false, motivo: "sessao_nao_encontrada" };
   }
 
@@ -4746,6 +4769,11 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     logOptimus("WHATSAPP", "Sessao indisponivel", {
       conexaoId: destino.conexaoId,
       status: statusWhatsapp
+    });
+    registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+      decisao: "bloqueado",
+      motivo: "sessao_desconectada",
+      filaRecebeu: true
     });
     return { enviado: false, tentouEnvio: false, motivo: "sessao_offline" };
   }
@@ -4762,12 +4790,23 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     logOptimus("WHATSAPP", "Destino sem grupos validos", {
       destino: destino.nome
     });
+    registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+      decisao: "bloqueado",
+      motivo: "grupo_nao_encontrado",
+      filaRecebeu: true
+    });
     return { enviado: false, tentouEnvio: false, motivo: "sem_grupos" };
   }
 
   for (const grupo of grupos) {
     if (!usuarioTemCreditos(clienteId, 1)) {
       logOptimus("AVISO", "Sem creditos", { clienteId });
+      registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+        decisao: "bloqueado",
+        motivo: "sem_creditos",
+        grupoId: grupo,
+        filaRecebeu: true
+      });
       return { enviado: false, tentouEnvio: false, motivo: "sem_creditos" };
     }
 
@@ -4808,6 +4847,12 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
 
     tentouEnvio = true;
+    registrarCoberturaExecutor("executor_inicio", oferta, clienteId, destino, {
+      decisao: "iniciado",
+      grupoId: grupo,
+      tentativaEnvio: true,
+      filaRecebeu: true
+    });
     fidelidadeObs.registrarExecutor("executor_entrada", {
       ...contextoFidelidadeExecutor,
       canal: "whatsapp",
@@ -4832,6 +4877,14 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     }
 
     confirmouEnvio = true;
+    registrarCoberturaExecutor("executor_enviado", oferta, clienteId, destino, {
+      decisao: "enviado",
+      motivo: "envio_confirmado",
+      grupoId: grupo,
+      tentativaEnvio: true,
+      enviadoEm: new Date().toISOString(),
+      filaRecebeu: true
+    });
     fidelidadeObs.registrarExecutor("executor_resultado", {
       ...contextoFidelidadeExecutor,
       canal: "whatsapp",
@@ -4921,6 +4974,11 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           resultado: "ignorado"
         });
 
+        registrarCoberturaExecutor("executor_ignorado", oferta, clienteId, destino, {
+          decisao: "ignorado",
+          motivo: "grupo_nao_encontrado",
+          filaRecebeu: true
+        });
         return { enviado: false, tentouEnvio: false, motivo: "nenhum_telegram_selecionado" };
       }
 
@@ -4944,6 +5002,13 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
             vaiEnviar: false,
             resultado: "ignorado"
           });
+          registrarCoberturaExecutor("executor_ignorado", oferta, clienteId, destino, {
+            decisao: "ignorado",
+            motivo: "destino_inativo",
+            destinoId: destino.id || destino.destinoId || tel.chatId || "",
+            destinoNome: destino.nome || tel.nome || "Telegram",
+            filaRecebeu: true
+          });
           continue;
         }
 
@@ -4960,6 +5025,13 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
             temChatId,
             vaiEnviar: false,
             resultado: "erro"
+          });
+          registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+            decisao: "bloqueado",
+            motivo: "grupo_nao_encontrado",
+            destinoId: destino.id || destino.destinoId || tel.chatId || "",
+            destinoNome: destino.nome || tel.nome || "Telegram",
+            filaRecebeu: true
           });
           continue;
         }
@@ -4978,6 +5050,13 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
             temChatId,
             vaiEnviar: false,
             resultado: "erro"
+          });
+          registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+            decisao: "bloqueado",
+            motivo: "sem_creditos",
+            destinoId: destino.id || destino.destinoId || tel.chatId || "",
+            destinoNome: destino.nome || tel.nome || "Telegram",
+            filaRecebeu: true
           });
           continue;
         }
@@ -5033,6 +5112,13 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
 
         tentouEnvio = true;
+        registrarCoberturaExecutor("executor_inicio", oferta, clienteId, destino, {
+          decisao: "iniciado",
+          destinoId: destino.id || destino.destinoId || tel.chatId || "",
+          destinoNome: destino.nome || tel.nome || "Telegram",
+          tentativaEnvio: true,
+          filaRecebeu: true
+        });
         fidelidadeObs.registrarExecutor("executor_entrada", {
           ...contextoFidelidadeExecutor,
           canal: "telegram",
@@ -5067,6 +5153,15 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
         debitarCreditos(clienteId, 1);
         telegramEnviado = true;
         confirmouEnvio = true;
+        registrarCoberturaExecutor("executor_enviado", oferta, clienteId, destino, {
+          decisao: "enviado",
+          motivo: "envio_confirmado",
+          destinoId: destino.id || destino.destinoId || tel.chatId || "",
+          destinoNome: destino.nome || tel.nome || "Telegram",
+          tentativaEnvio: true,
+          enviadoEm: new Date().toISOString(),
+          filaRecebeu: true
+        });
         fidelidadeObs.registrarExecutor("executor_resultado", {
           ...contextoFidelidadeExecutor,
           canal: "telegram",
@@ -5122,6 +5217,13 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
         return { enviado: true, tentouEnvio: true };
       }
 
+      registrarCoberturaExecutor(tentouEnvio ? "executor_erro" : "executor_ignorado", oferta, clienteId, destino, {
+        decisao: tentouEnvio ? "erro" : "ignorado",
+        motivo: "telegram_nao_enviado",
+        tentativaEnvio: tentouEnvio,
+        erroEnvio: tentouEnvio ? "telegram_nao_enviado" : "",
+        filaRecebeu: true
+      });
       return { enviado: false, tentouEnvio, motivo: "telegram_nao_enviado" };
     }
 
@@ -5144,6 +5246,13 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       caiuParaTexto: destino?.tipoMidia === "texto" || !oferta?.imagem,
       resultado: confirmouEnvio ? "parcial" : "erro",
       motivoTecnico: e.message || "erro_envio"
+    });
+    registrarCoberturaExecutor("executor_erro", oferta, clienteId, destino, {
+      decisao: confirmouEnvio ? "parcial" : "erro",
+      motivo: "erro",
+      tentativaEnvio: tentouEnvio,
+      erroEnvio: e.message || "erro_envio",
+      filaRecebeu: true
     });
 
     if (String(destino?.tipo || "").toLowerCase() === "telegram") {
@@ -5169,6 +5278,12 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     return { enviado: false, tentouEnvio, motivo: "erro", erro: e.message };
   }
 
+  registrarCoberturaExecutor("executor_ignorado", oferta, clienteId, destino, {
+    decisao: "ignorado",
+    motivo: "outro motivo existente",
+    tentativaEnvio: tentouEnvio,
+    filaRecebeu: true
+  });
   return { enviado: false, tentouEnvio, motivo: "nao_enviado" };
 }
 
@@ -5186,6 +5301,54 @@ function logProcessarFilaResumo(dados = {}) {
   }));
 }
 
+function coberturaDestinoId(destino = {}) {
+  return String(destino.id || destino.destinoId || destino.chatId || destino.conexaoId || destino.value || "").trim();
+}
+
+function contextoCoberturaExecutor(oferta = {}, clienteId = "admin", destino = {}, extras = {}) {
+  const base = contextoCoberturaRadarOferta(oferta, clienteId);
+  return {
+    ...base,
+    filaItemId: oferta.id || oferta.filaItemId || oferta.itemFilaId || "",
+    destinoId: coberturaDestinoId(destino),
+    destinoNome: destinoNomeLog(destino),
+    sessaoId: extras.sessaoId || oferta.sessaoId || oferta.origemSessaoId || "",
+    grupoId: extras.grupoId || oferta.origemGrupoId || oferta.grupoId || "",
+    statusFilaAntes: extras.statusFilaAntes || oferta.status || "",
+    statusFilaDepois: extras.statusFilaDepois || "",
+    tentativaEnvio: extras.tentativaEnvio ?? "",
+    enviadoEm: extras.enviadoEm || "",
+    erroEnvio: extras.erroEnvio || "",
+    destinoEncontrado: extras.destinoEncontrado === true,
+    filaRecebeu: extras.filaRecebeu === true
+  };
+}
+
+function registrarCoberturaExecutor(etapa = "", oferta = {}, clienteId = "admin", destino = {}, dados = {}) {
+  return coberturaRadar.registrar(etapa, {
+    ...contextoCoberturaExecutor(oferta, clienteId, destino, dados),
+    ...dados
+  });
+}
+
+function motivoCoberturaDestino(motivo = "") {
+  const chave = String(motivo || "").trim();
+  const mapa = {
+    marketplace: "marketplace_nao_permitido",
+    categoria: "categoria_incompativel",
+    fora_horario: "fora_da_janela",
+    intervalo: "intervalo_nao_atingido",
+    intervalo_aguardando: "intervalo_nao_atingido",
+    envio_em_execucao: "lock_em_execucao",
+    automacao_desligada: "automacao_inativa",
+    fora_janela_global: "fora_da_janela",
+    status_nao_pendente: "item_nao_elegivel",
+    oferta_nao_relocalizada: "item_nao_elegivel",
+    repetida_no_executor_2h: "cooldown"
+  };
+  return mapa[chave] || chave || "outro motivo existente";
+}
+
 async function processarFila(clienteIdAlvo = null) {
   const clienteFila = clienteIdAlvo || "admin";
   const inicioProcessarFila = process.hrtime.bigint();
@@ -5201,6 +5364,11 @@ async function processarFila(clienteIdAlvo = null) {
   if (!usuarioAtivoOperacional(clienteFila)) {
     resumoFila.motivoPulo = "usuario_inativo";
     logUsuarioInativoOperacional(clienteFila, "executor_processar_fila");
+    coberturaRadar.registrar("executor_ignorado", {
+      clienteId: clienteFila,
+      decisao: "ignorado",
+      motivo: "usuario_inativo"
+    });
     const cpu = process.cpuUsage(cpuInicioProcessarFila);
     logProcessarFilaResumo({
       ...resumoFila,
@@ -5213,6 +5381,11 @@ async function processarFila(clienteIdAlvo = null) {
   if (enviandoAgoraPorCliente[clienteFila]) {
     resumoFila.motivoPulo = "envio_em_execucao";
     resumoFila.sobreposicaoEvitada = true;
+    coberturaRadar.registrar("executor_bloqueado", {
+      clienteId: clienteFila,
+      decisao: "bloqueado",
+      motivo: "lock_em_execucao"
+    });
     const cpu = process.cpuUsage(cpuInicioProcessarFila);
     logProcessarFilaResumo({
       ...resumoFila,
@@ -5251,6 +5424,12 @@ if (!oferta) {
       diagnostico: diagnosticoFila
     });
   }
+  coberturaRadar.registrar("executor_ignorado", {
+    clienteId: clienteFila,
+    decisao: "ignorado",
+    motivo: motivoCoberturaDestino(diagnosticoFila.motivoPrincipal || "sem_oferta_elegivel"),
+    statusFilaAntes: "sem_oferta"
+  });
   return;
 }
 
@@ -5258,10 +5437,27 @@ const clienteId = oferta.clienteId || "admin";
 const diagnosticoOfertaSelecionada = diagnosticosFilaPorCliente.get(String(clienteFila));
 resumoFila.ofertasExaminadas = diagnosticoOfertaSelecionada?.pendentesTotal || 1;
 resumoFila.ofertaSelecionada = oferta.id || oferta.engineOfertaId || oferta.ofertaId || "";
+registrarCoberturaExecutor("executor_item_selecionado", oferta, clienteId, {}, {
+  decisao: "selecionado",
+  motivo: "item_selecionado",
+  filaRecebeu: true,
+  statusFilaAntes: oferta.status || ""
+});
+registrarCoberturaExecutor("fila_item_pendente", oferta, clienteId, {}, {
+  decisao: "pendente",
+  motivo: "item_pendente",
+  filaRecebeu: true,
+  statusFilaAntes: oferta.status || ""
+});
 
 if (!usuarioAtivoOperacional(clienteId)) {
   resumoFila.motivoPulo = "usuario_inativo";
   logUsuarioInativoOperacional(clienteId, "executor_oferta_fila");
+  registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
+    decisao: "bloqueado",
+    motivo: "usuario_inativo",
+    filaRecebeu: true
+  });
   return;
 }
 
@@ -5279,11 +5475,21 @@ const clienteAtivo =
 if (!clienteAtivo) {
   resumoFila.motivoPulo = "automacao_desligada";
   logOptimus("FILA", "Automacao desligada para cliente", { clienteId });
+  registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
+    decisao: "bloqueado",
+    motivo: "automacao_inativa",
+    filaRecebeu: true
+  });
   return;
 }
 
     if (!podeRodarAgora()) {
       resumoFila.motivoPulo = "fora_janela_global";
+      registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
+        decisao: "bloqueado",
+        motivo: "fora_da_janela",
+        filaRecebeu: true
+      });
       return;
     }
 
@@ -5382,6 +5588,16 @@ const destinosAtivosTotalDebug = analiseDestinosFila.destinosInteligentes.filter
 let destinosTentadosDebug = 0;
 const fastLaneCupomTipo = cupomFastLaneTipo(oferta);
 
+for (const itemCompativel of destinosCompativeis) {
+  registrarCoberturaExecutor("destino_candidato", oferta, clienteId, itemCompativel.destino, {
+    decisao: "candidato",
+    motivo: "destino_compativel",
+    destinoEncontrado: true,
+    filaRecebeu: true,
+    statusFilaAntes: oferta.status || ""
+  });
+}
+
 if (fastLaneCupomTipo === "real_detectado") {
   logOptimus("CUPOM", "Fast Lane aplicada", {
     clienteId,
@@ -5406,6 +5622,15 @@ for (const itemRejeitado of analiseDestinosFila.rejeitados) {
   const destino = itemRejeitado.destino;
   const analise = itemRejeitado.analise;
   const nomeDestino = destinoNomeLog(destino);
+  const motivoDestinoRejeitado = motivoCoberturaDestino(analise.motivo || "nao_compativel");
+
+  registrarCoberturaExecutor("destino_rejeitado", oferta, clienteId, destino, {
+    decisao: "rejeitado",
+    motivo: motivoDestinoRejeitado,
+    destinoEncontrado: false,
+    filaRecebeu: true,
+    statusFilaAntes: oferta.status || ""
+  });
 
   logEnvioDestinoDebug({
     clienteId,
@@ -5465,6 +5690,21 @@ if (!destinosCompativeis.length) {
   resumoFila.motivoPulo = analiseDestinosFila.motivoRetencao || "sem_destino_compativel";
   marcarOfertaRetida(oferta, analiseDestinosFila.motivoRetencao);
   salvarFila(clienteId);
+  registrarCoberturaExecutor("fila_item_retido", oferta, clienteId, {}, {
+    decisao: "retido",
+    motivo: "item_retido",
+    destinoEncontrado: false,
+    filaRecebeu: true,
+    statusFilaAntes: "pendente",
+    statusFilaDepois: oferta.status || "retida"
+  });
+  registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
+    decisao: "bloqueado",
+    motivo: "sem_destino_compativel",
+    destinoEncontrado: false,
+    filaRecebeu: true,
+    statusFilaDepois: oferta.status || "retida"
+  });
   logExecutorDestinoDiagnostico({
     oferta,
     clienteId,
@@ -5501,6 +5741,11 @@ const repeticaoExecutor = filaOfertas.consultarEnvioRecenteExecutor2h(fila, ofer
 });
 if (!repeticaoExecutor.ok) {
   resumoFila.motivoPulo = repeticaoExecutor.motivo;
+  registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
+    decisao: "bloqueado",
+    motivo: motivoCoberturaDestino(repeticaoExecutor.motivo || "erro_repeticao_executor"),
+    filaRecebeu: true
+  });
   console.log("[ANTI-REPETICAO-EXECUTOR-2H-ERRO]", JSON.stringify({
     clienteId,
     ofertaId: oferta.id || oferta.engineOfertaId || "",
@@ -5540,6 +5785,19 @@ if (repeticaoExecutor.bloqueada) {
     motivo: "repetida_no_executor_2h",
     timestamp: new Date().toISOString()
   }));
+  registrarCoberturaExecutor("fila_item_retido", oferta, clienteId, {}, {
+    decisao: "retido",
+    motivo: "cooldown",
+    filaRecebeu: true,
+    statusFilaAntes: "pendente",
+    statusFilaDepois: oferta.status || "retida"
+  });
+  registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
+    decisao: "bloqueado",
+    motivo: "cooldown",
+    filaRecebeu: true,
+    statusFilaDepois: oferta.status || "retida"
+  });
   salvarFila(clienteId);
   return;
 }
@@ -5549,6 +5807,11 @@ const duplicidadeProcessamento = filaOfertas.avaliarDuplicidadeAntesProcessarFil
 });
 if (!duplicidadeProcessamento.ok) {
   resumoFila.motivoPulo = duplicidadeProcessamento.motivo;
+  registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
+    decisao: "bloqueado",
+    motivo: motivoCoberturaDestino(duplicidadeProcessamento.motivo || "erro_duplicidade"),
+    filaRecebeu: true
+  });
   console.log("[FILA-DUPLICATA-AVALIACAO-ERRO]", JSON.stringify({
     clienteId,
     ofertaId: oferta.id || oferta.engineOfertaId || "",
@@ -5576,6 +5839,19 @@ if (duplicidadeProcessamento.bloquear) {
       duplicidadeProcessamento.ofertaAnterior?.engineOfertaId || "",
     timestamp: new Date().toISOString()
   }));
+  registrarCoberturaExecutor("fila_item_retido", oferta, clienteId, {}, {
+    decisao: "retido",
+    motivo: "item_retido",
+    filaRecebeu: true,
+    statusFilaAntes: "pendente",
+    statusFilaDepois: oferta.status || "retida"
+  });
+  registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
+    decisao: "bloqueado",
+    motivo: "item_retido",
+    filaRecebeu: true,
+    statusFilaDepois: oferta.status || "retida"
+  });
   salvarFila(clienteId);
   return;
 }
@@ -5585,6 +5861,12 @@ const reservaProcessamento = filaOfertas.reservarOfertaProcessandoFila(fila, ofe
 });
 if (!reservaProcessamento.ok) {
   resumoFila.motivoPulo = reservaProcessamento.motivo;
+  registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
+    decisao: "bloqueado",
+    motivo: motivoCoberturaDestino(reservaProcessamento.motivo || "item_nao_elegivel"),
+    filaRecebeu: true,
+    statusFilaAntes: reservaProcessamento.statusAtual || oferta.status || ""
+  });
   console.log("[FILA-REFERENCIA-OBSOLETA-EVITADA]", JSON.stringify({
     clienteId,
     ofertaId: oferta.id || oferta.engineOfertaId || "",
@@ -5596,6 +5878,13 @@ if (!reservaProcessamento.ok) {
 }
 
 oferta = reservaProcessamento.oferta;
+registrarCoberturaExecutor("fila_item_pendente", oferta, clienteId, {}, {
+  decisao: "processando",
+  motivo: "item_reservado",
+  filaRecebeu: true,
+  statusFilaAntes: reservaProcessamento.statusAnterior,
+  statusFilaDepois: reservaProcessamento.statusNovo
+});
 console.log("[FILA-PROCESSANDO-RESERVADA]", JSON.stringify({
   clienteId,
   ofertaId: oferta.id || oferta.engineOfertaId || "",
@@ -5645,6 +5934,13 @@ for (const item of destinosOrdenados) {
       clienteId,
       destino: nomeDestino
     });
+    registrarCoberturaExecutor("destino_rejeitado", oferta, clienteId, destino, {
+      decisao: "rejeitado",
+      motivo: "fora_da_janela",
+      destinoEncontrado: true,
+      filaRecebeu: true,
+      statusFilaAntes: oferta.status || ""
+    });
     if (String(destino.tipo || "").toLowerCase() === "telegram") {
       logFilaTelegramDebug({
         clienteId,
@@ -5683,6 +5979,13 @@ for (const item of destinosOrdenados) {
       destino: nomeDestino,
       usados: limite.usados,
       limite: limite.limite
+    });
+    registrarCoberturaExecutor("destino_rejeitado", oferta, clienteId, destino, {
+      decisao: "rejeitado",
+      motivo: "limite_diario",
+      destinoEncontrado: true,
+      filaRecebeu: true,
+      statusFilaAntes: oferta.status || ""
     });
     if (String(destino.tipo || "").toLowerCase() === "telegram") {
       logFilaTelegramDebug({
@@ -5725,6 +6028,14 @@ for (const item of destinosOrdenados) {
       turboCupomMinutos: intervalo.turboCupomMin,
       restanteSegundos: Math.ceil(intervalo.restanteMs / 1000)
     });
+    registrarCoberturaExecutor("destino_rejeitado", oferta, clienteId, destino, {
+      decisao: "rejeitado",
+      motivo: "intervalo_nao_atingido",
+      destinoEncontrado: true,
+      filaRecebeu: true,
+      statusFilaAntes: oferta.status || "",
+      proximoEnvioPermitidoEm: intervalo.proximoEnvioPermitidoEm || ""
+    });
     if (String(destino.tipo || "").toLowerCase() === "telegram") {
       logFilaTelegramDebug({
         clienteId,
@@ -5744,6 +6055,13 @@ for (const item of destinosOrdenados) {
   }
 
   logFilaIntervalo("[FILA-DESTINO-LIBERADO]", payloadIntervaloDestino(clienteId, destino, oferta, intervalo));
+  registrarCoberturaExecutor("destino_selecionado", oferta, clienteId, destino, {
+    decisao: "selecionado",
+    motivo: "destino_liberado",
+    destinoEncontrado: true,
+    filaRecebeu: true,
+    statusFilaAntes: oferta.status || ""
+  });
 
   if (intervalo.fastLaneCupomTipo === "real_detectado") {
     logOptimus("CUPOM", intervalo.prioridadeCupomAtiva ? "Cupom Turbo aplicado 3min" : "Cupom usando intervalo normal", {
@@ -5808,6 +6126,15 @@ for (const item of destinosOrdenados) {
   if (tentouEnvioReal) destinosTentadosDebug += 1;
   if (resultadoEnvio.enviado !== true) {
     motivosSemEnvio.push(resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado");
+    registrarCoberturaExecutor(tentouEnvioReal ? "executor_erro" : "executor_ignorado", oferta, clienteId, destino, {
+      decisao: tentouEnvioReal ? "erro" : "ignorado",
+      motivo: motivoCoberturaDestino(resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado"),
+      tentativaEnvio: tentouEnvioReal,
+      erroEnvio: resultadoEnvio.erro || "",
+      destinoEncontrado: true,
+      filaRecebeu: true,
+      statusFilaAntes: oferta.status || ""
+    });
   }
 
   logEnvioDestinoDebug({
@@ -5885,6 +6212,21 @@ if (!enviouParaAlgumDestino && decisaoSemEnvio.statusFinal === "pendente") {
     Math.max(30 * 1000, Math.min(menorEsperaIntervalo || 5 * 60 * 1000, 15 * 60 * 1000))
   );
   salvarFila(clienteId);
+  registrarCoberturaExecutor("fila_item_pendente", oferta, clienteId, {}, {
+    decisao: "pendente",
+    motivo: motivoCoberturaDestino(decisaoSemEnvio.motivoSemEnvio),
+    destinoEncontrado: destinosCompativeis.length > 0,
+    filaRecebeu: true,
+    statusFilaAntes: "processando",
+    statusFilaDepois: oferta.status || "pendente"
+  });
+  registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
+    decisao: "bloqueado",
+    motivo: motivoCoberturaDestino(decisaoSemEnvio.motivoSemEnvio),
+    destinoEncontrado: destinosCompativeis.length > 0,
+    filaRecebeu: true,
+    statusFilaDepois: oferta.status || "pendente"
+  });
   logExecutorDestinoDiagnostico({
     oferta,
     clienteId,
@@ -5914,6 +6256,15 @@ if (!enviouParaAlgumDestino) {
   oferta.erro = "Nenhum destino confirmou envio";
   oferta.erroEm = new Date().toISOString();
   oferta.processandoEm = "";
+  registrarCoberturaExecutor("executor_erro", oferta, clienteId, {}, {
+    decisao: "erro",
+    motivo: motivoCoberturaDestino(decisaoSemEnvio.motivoSemEnvio || "nenhum_destino_confirmou_envio"),
+    destinoEncontrado: destinosCompativeis.length > 0,
+    filaRecebeu: true,
+    statusFilaAntes: "processando",
+    statusFilaDepois: "erro",
+    erroEnvio: oferta.erro || "Nenhum destino confirmou envio"
+  });
 
   logExecutorDestinoDiagnostico({
     oferta,
@@ -5940,6 +6291,13 @@ const finalizacaoEnvio = filaOfertas.finalizarOfertaEnviadaFila(fila, oferta, {
 
 if (!finalizacaoEnvio.ok || !finalizacaoEnvio.oferta) {
   resumoFila.motivoPulo = finalizacaoEnvio.motivo || "oferta_nao_relocalizada_finalizacao";
+  registrarCoberturaExecutor("executor_erro", oferta, clienteId, {}, {
+    decisao: "erro",
+    motivo: motivoCoberturaDestino(finalizacaoEnvio.motivo || "oferta_nao_relocalizada_finalizacao"),
+    filaRecebeu: true,
+    statusFilaAntes: oferta.status || "",
+    erroEnvio: finalizacaoEnvio.motivo || "oferta_nao_relocalizada_finalizacao"
+  });
   console.log("[FILA-REFERENCIA-OBSOLETA-EVITADA]", JSON.stringify({
     clienteId,
     ofertaId: oferta.id || oferta.engineOfertaId || "",
@@ -5950,6 +6308,15 @@ if (!finalizacaoEnvio.ok || !finalizacaoEnvio.oferta) {
 }
 
 oferta = finalizacaoEnvio.oferta;
+registrarCoberturaExecutor("executor_enviado", oferta, clienteId, {}, {
+  decisao: "enviado",
+  motivo: "envio_confirmado",
+  destinoEncontrado: true,
+  filaRecebeu: true,
+  statusFilaAntes: "processando",
+  statusFilaDepois: oferta.status || "enviado",
+  enviadoEm: oferta.enviadoEm || oferta.dataEnvio || ""
+});
 
 logExecutorDestinoDiagnostico({
   oferta,
@@ -5982,7 +6349,20 @@ console.log("[ENVIO] Enviado com controle de tempo");
     if (erroFila.ok) {
       oferta = erroFila.oferta;
       salvarFila(clienteErro);
+      registrarCoberturaExecutor("executor_erro", oferta, clienteErro, {}, {
+        decisao: "erro",
+        motivo: "erro",
+        filaRecebeu: true,
+        statusFilaDepois: oferta.status || "erro",
+        erroEnvio: e.message || "erro_envio"
+      });
     } else {
+      registrarCoberturaExecutor("executor_erro", oferta, clienteErro, {}, {
+        decisao: "erro",
+        motivo: motivoCoberturaDestino(erroFila.motivo || "erro_nao_relocalizado"),
+        filaRecebeu: true,
+        erroEnvio: e.message || "erro_envio"
+      });
       console.log("[FILA-REFERENCIA-OBSOLETA-EVITADA]", JSON.stringify({
         clienteId: clienteErro,
         ofertaId: oferta.id || oferta.engineOfertaId || "",
@@ -13159,6 +13539,14 @@ async function adicionarRadarCapturadoNaFilaClientes(ofertaBase = {}, opcoes = {
     const resultadoDistribuidor = resultado.adicionada
       ? "fila_criada"
       : (resultado.motivo || "nao_adicionada");
+    coberturaRadar.registrar("cliente_avaliado", {
+      ...contextoCoberturaRadarOferta(resultado.oferta || ofertaBase, clienteId),
+      decisao: resultado.adicionada ? "aceito" : "rejeitado",
+      motivo: resultado.adicionada ? "fila_criada" : resultadoDistribuidor,
+      marketplace: marketplaceResumo,
+      destinoEncontrado: resultado.adicionada ? true : existeDestinoCompativelRadar(clienteId, resultado.oferta || ofertaBase),
+      filaRecebeu: Boolean(resultado.adicionada)
+    });
     resumoDistributor.clientesAvaliados += 1;
 
     if (resultado.ok) {
@@ -13617,6 +14005,17 @@ async function registrarEventoBrutoEngineRadar(dados = {}) {
   const rodadaId = `radar_evento_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const linksDados = Array.isArray(dados.linksExtraidos) ? dados.linksExtraidos : [];
   const clientesDados = listarClientesEngineRadar(dados);
+  coberturaRadar.registrar("engine_evento_inicio", {
+    coberturaTraceId: dados.coberturaTraceId || dados.metadata?.coberturaTraceId || "",
+    fidelidadeTraceId: dados.fidelidadeTraceId || dados.metadata?.fidelidadeTraceId || "",
+    decisao: "iniciado",
+    clienteId: clientesDados[0] || "",
+    sessaoId: dados.sessaoId || "",
+    grupoId: dados.grupoId || "",
+    grupoNome: dados.grupoNome || "",
+    marketplace: dados.marketplaceDetectado || "",
+    links: linksDados
+  });
   console.log("[PERF ENGINE BLOCO EVENTOS INICIO]", {
     rodadaId,
     funcao: "registrarEventoBrutoEngineRadar",
@@ -13656,6 +14055,22 @@ async function registrarEventoBrutoEngineRadar(dados = {}) {
         totalItens: linksDados.length || 1
       }
     });
+    coberturaRadar.registrar(resultado.duplicado ? "engine_evento_duplicado" : "engine_evento_criado", {
+      coberturaTraceId: dadosEngine.coberturaTraceId || dadosEngine.metadata?.coberturaTraceId || "",
+      fidelidadeTraceId: dadosEngine.fidelidadeTraceId || dadosEngine.metadata?.fidelidadeTraceId || "",
+      decisao: resultado.duplicado ? "reaproveitado" : "aceito",
+      motivo: resultado.duplicado ? "duplicidade" : "evento_criado",
+      clienteId: clientesDados[0] || "",
+      sessaoId: dadosEngine.sessaoId || "",
+      grupoId: dadosEngine.grupoId || "",
+      grupoNome: dadosEngine.grupoNome || "",
+      marketplace: dadosEngine.marketplaceDetectado || "",
+      links: linksDados,
+      eventoEngineId: resultado.id || "",
+      eventoOriginalId: resultado.id || "",
+      jobNovoCriado: resultado.duplicado ? false : undefined,
+      chaveDeduplicacao: resultado.hashEvento || ""
+    });
     console.log("[PERF ENGINE BLOCO EVENTOS FIM]", {
       rodadaId,
       funcao: "registrarEventoBrutoEngineRadar",
@@ -13673,6 +14088,17 @@ async function registrarEventoBrutoEngineRadar(dados = {}) {
     });
     return { ...resultado, redirectsRadar: preparacao.redirectsRadar };
   } catch (e) {
+    coberturaRadar.registrar("engine_evento_erro", {
+      coberturaTraceId: dados.coberturaTraceId || dados.metadata?.coberturaTraceId || "",
+      fidelidadeTraceId: dados.fidelidadeTraceId || dados.metadata?.fidelidadeTraceId || "",
+      decisao: "erro",
+      motivo: "radar_chamada_falhou",
+      sessaoId: dados.sessaoId || "",
+      grupoId: dados.grupoId || "",
+      grupoNome: dados.grupoNome || "",
+      links: linksDados,
+      erro: e.message
+    });
     console.log("[PERF ENGINE BLOCO EVENTOS FIM]", {
       rodadaId,
       funcao: "registrarEventoBrutoEngineRadar",
@@ -13704,13 +14130,38 @@ async function processarMensagemRadar({
   texto,
   capturadaEm,
   raw,
-  debugPayloadSemLink
+  debugPayloadSemLink,
+  coberturaTraceId
 } = {}) {
   const tipo = normalizarTexto(origemTipo || "");
   const origemTipoFinal = tipo.includes("telegram") ? "telegram" : tipo.includes("whatsapp") ? "whatsapp" : "";
   const grupoIdTexto = textoRadarId(grupoId);
   const grupoNomeTexto = textoRadarId(grupoNome);
   const sessaoIdTexto = textoRadarId(sessaoId || (origemTipoFinal === "telegram" ? "telegram" : ""));
+  const coberturaTraceIdRadar = coberturaRadar.flagAtiva()
+    ? (coberturaTraceId || coberturaRadar.criarCoberturaTraceId(raw, {
+      sessaoId: sessaoIdTexto,
+      remoteJid: grupoIdTexto
+    }))
+    : "";
+  const mensagemIdRadar = coberturaRadar.extrairMensagemId(raw);
+  const contextoCoberturaRadar = {
+    coberturaTraceId: coberturaTraceIdRadar,
+    fidelidadeTraceId: fidelidadeObs.flagAtiva()
+      ? fidelidadeObs.resolverFidelidadeTraceId({ raw, mensagemId: mensagemIdRadar })
+      : "",
+    mensagemId: mensagemIdRadar,
+    clienteId: obterClienteIdAdminMaster(),
+    sessaoId: sessaoIdTexto,
+    remoteJid: grupoIdTexto,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto
+  };
+
+  coberturaRadar.registrar("radar_inicio", {
+    ...contextoCoberturaRadar,
+    decisao: "iniciado"
+  });
 
   if (!["whatsapp", "telegram"].includes(origemTipoFinal)) {
     logOptimus("CAPTURA", "Rejeitada", {
@@ -13719,6 +14170,11 @@ async function processarMensagemRadar({
     });
     logRadarRejeitado("origem_tipo_invalida", {
       origemTipo
+    });
+    coberturaRadar.registrar("origem_monitorada_rejeitada", {
+      ...contextoCoberturaRadar,
+      decisao: "rejeitado",
+      motivo: "origem_tipo_invalida"
     });
     return { ok: false, motivo: "origem_tipo_invalida" };
   }
@@ -13730,6 +14186,11 @@ async function processarMensagemRadar({
     });
     logRadarRejeitado("grupo_ou_chat_ausente", {
       origemTipo: origemTipoFinal
+    });
+    coberturaRadar.registrar("origem_monitorada_rejeitada", {
+      ...contextoCoberturaRadar,
+      decisao: "rejeitado",
+      motivo: "grupo_ou_chat_ausente"
     });
     return { ok: false, motivo: "grupo_ou_chat_ausente" };
   }
@@ -13758,8 +14219,18 @@ async function processarMensagemRadar({
     grupoNome: grupoNomeTexto
   });
 
+  coberturaRadar.registrar("origem_monitorada_rejeitada", {
+    ...contextoCoberturaRadar,
+    decisao: "rejeitado",
+    motivo: origemMonitorada.motivo || "origem_nao_monitorada"
+  });
   return { ok: false, motivo: origemMonitorada.motivo, ignorada: true };
 }
+
+  coberturaRadar.registrar("origem_monitorada_ok", {
+    ...contextoCoberturaRadar,
+    decisao: "aceito"
+  });
 
   logOptimus("CAPTURA", "Mensagem recebida", {
     origemTipo: origemTipoFinal || origemTipo,
@@ -13780,6 +14251,20 @@ const links = extrairLinksRadar(texto);
 const marketplaceDetectadoLinks = links
   .map(link => detectarMarketplaceRadarLink(link))
   .find(Boolean) || "";
+  coberturaRadar.registrar("links_extraidos", {
+    ...contextoCoberturaRadar,
+    decisao: links.length ? "aceito" : "rejeitado",
+    motivo: links.length ? "" : "sem_links",
+    marketplace: marketplaceDetectadoLinks,
+    links
+  });
+  coberturaRadar.registrar(marketplaceDetectadoLinks ? "marketplace_identificado" : "marketplace_ausente", {
+    ...contextoCoberturaRadar,
+    decisao: marketplaceDetectadoLinks ? "aceito" : "rejeitado",
+    motivo: marketplaceDetectadoLinks ? "" : "marketplace_ausente",
+    marketplace: marketplaceDetectadoLinks,
+    links
+  });
 let extracaoRadarLocal = null;
 const observabilidadeFidelidadeAtiva = fidelidadeObs.flagAtiva();
 const capturadaEmFidelidadeRadar = observabilidadeFidelidadeAtiva ? (capturadaEm || new Date().toISOString()) : "";
@@ -13893,6 +14378,7 @@ const radarMirrorBase = criarRadarMirror({
   beneficiosMensagem,
   raw,
   marketplace: marketplaceDetectadoLinks,
+  ...(coberturaTraceIdRadar ? { coberturaTraceId: coberturaTraceIdRadar } : {}),
   fidelidadeTraceId: fidelidadeTraceIdPrincipal,
   mensagemId: raw?.key?.id || ""
 });
@@ -13938,6 +14424,12 @@ console.log("[RADAR-MIRROR-CRIADO]", JSON.stringify(resumirRadarMirrorLog(radarM
   clienteId: adminMasterId,
   marketplace: marketplaceDetectadoLinks
 })));
+coberturaRadar.registrar("radar_mirror_criado", {
+  ...contextoCoberturaRadar,
+  decisao: "aceito",
+  marketplace: marketplaceDetectadoLinks,
+  links
+});
 
 const temRedirectConhecidoRadar = links.some(linkRedirectPermitidoRadar);
 const registroEngineRadarPromise = registrarEventoBrutoEngineRadar({
@@ -13949,7 +14441,12 @@ const registroEngineRadarPromise = registrarEventoBrutoEngineRadar({
   textoOriginal: texto,
   linksExtraidos: links,
   capturadoEm: capturadaEm || new Date(),
-  metadata: mergeRadarMirrorMetadata({}, radarMirrorBase)
+  coberturaTraceId: coberturaTraceIdRadar,
+  fidelidadeTraceId: fidelidadeTraceIdPrincipal,
+  metadata: {
+    ...mergeRadarMirrorMetadata({}, radarMirrorBase),
+    ...(coberturaTraceIdRadar ? { coberturaTraceId: coberturaTraceIdRadar } : {})
+  }
 });
 const registroEngineRadar = temRedirectConhecidoRadar
   ? await registroEngineRadarPromise
@@ -13977,6 +14474,13 @@ const registroEngineRadar = temRedirectConhecidoRadar
       origemTipo: origemTipoFinal,
       grupo: grupoNomeTexto || grupoIdTexto
     });
+    coberturaRadar.registrar("sem_links", {
+      ...contextoCoberturaRadar,
+      decisao: "rejeitado",
+      motivo: "sem_links",
+      marketplace: marketplaceDetectadoLinks,
+      links
+    });
     return { ok: false, motivo: "sem_links" };
   }
 
@@ -13987,6 +14491,13 @@ const registroEngineRadar = temRedirectConhecidoRadar
     marketplacesLinksRadar.every(marketplace => marketplace === "amazon");
 
   if (somenteAmazonRadar) {
+    coberturaRadar.registrar("fluxo_engine_v2_selecionado", {
+      ...contextoCoberturaRadar,
+      decisao: "aceito",
+      motivo: "amazon_engine_v2",
+      marketplace: "amazon",
+      links
+    });
     logOptimus("RADAR", "Amazon encaminhada somente Engine V2", {
       links: links.length,
       origemTipo: origemTipoFinal,
@@ -14038,6 +14549,16 @@ const registroEngineRadar = temRedirectConhecidoRadar
   });
 
   if (!capturaPermitida.ok) {
+    const etapaCoberturaCaptura = capturaPermitida.motivo === "fora_do_horario_monitoramento"
+      ? "radar_janela_rejeitada"
+      : (capturaPermitida.motivo === "limite_diario_radar_atingido" ? "radar_limite_rejeitado" : "radar_janela_rejeitada");
+    coberturaRadar.registrar(etapaCoberturaCaptura, {
+      ...contextoCoberturaRadar,
+      decisao: "rejeitado",
+      motivo: capturaPermitida.motivo || "captura_nao_permitida",
+      marketplace: marketplaceDetectadoLinks,
+      links
+    });
     logOptimus("CAPTURA", "Rejeitada", {
       motivo: capturaPermitida.motivo,
       origemTipo: origemTipoFinal,
@@ -14049,6 +14570,18 @@ const registroEngineRadar = temRedirectConhecidoRadar
     });
     return capturaPermitida;
   }
+  coberturaRadar.registrar("radar_janela_ok", {
+    ...contextoCoberturaRadar,
+    decisao: "aceito",
+    marketplace: marketplaceDetectadoLinks,
+    links
+  });
+  coberturaRadar.registrar("radar_limite_ok", {
+    ...contextoCoberturaRadar,
+    decisao: "aceito",
+    marketplace: marketplaceDetectadoLinks,
+    links
+  });
   const resultados = [];
   const marketplacesResumoRadar = new Set();
   const dataCaptura = capturadaEm || new Date().toLocaleString("pt-BR", {
@@ -14066,6 +14599,21 @@ const registroEngineRadar = temRedirectConhecidoRadar
       grupo: grupoNomeTexto || grupoIdTexto
     });
     if (linkRedirectPermitidoRadar(link)) {
+      coberturaRadar.registrar("redirect_engine_v2_identificado", {
+        ...contextoCoberturaRadar,
+        decisao: "aceito",
+        marketplace: marketplaceInicialResumo,
+        link,
+        links
+      });
+      coberturaRadar.registrar("fluxo_engine_v2_selecionado", {
+        ...contextoCoberturaRadar,
+        decisao: "aceito",
+        motivo: "redirect_engine_v2",
+        marketplace: marketplaceInicialResumo,
+        link,
+        links
+      });
       const redirect = registroEngineRadar?.redirectsRadar?.find(item => item.linkOriginalCapturado === link) || {};
       const registroOk = registroEngineRadar?.ok === true && redirect.status === "resolvido";
 
@@ -14086,6 +14634,14 @@ const registroEngineRadar = temRedirectConhecidoRadar
     }
 
     if (marketplaceInicialResumo === "amazon") {
+      coberturaRadar.registrar("fluxo_engine_v2_selecionado", {
+        ...contextoCoberturaRadar,
+        decisao: "aceito",
+        motivo: "amazon_engine_v2",
+        marketplace: "amazon",
+        link,
+        links
+      });
       logOptimus("RADAR", "Amazon ignorada no fluxo legado", {
         url: link,
         grupo: grupoNomeTexto || grupoIdTexto,
@@ -14109,6 +14665,13 @@ const registroEngineRadar = temRedirectConhecidoRadar
       ...beneficiosMensagem,
       ...(beneficiosMensagem.beneficiosPorLink?.[link] || {})
     };
+    coberturaRadar.registrar("fluxo_legacy_selecionado", {
+      ...contextoCoberturaRadar,
+      decisao: "aceito",
+      marketplace: marketplaceInicialResumo,
+      link,
+      links
+    });
     const linkEhResgate = beneficiosMensagem.linksResgate.includes(link);
 
     if (linkEhResgate) {
@@ -14155,6 +14718,13 @@ const registroEngineRadar = temRedirectConhecidoRadar
       continue;
     }
 
+    coberturaRadar.registrar("legacy_importador_inicio", {
+      ...contextoCoberturaRadar,
+      decisao: "iniciado",
+      marketplace: marketplaceInicialResumo,
+      link,
+      links
+    });
     const importacao = await importarOfertaRadarPorLink(link, {
       correlationId,
       origemTipo: origemTipoFinal,
@@ -14164,6 +14734,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
       textoOriginal: texto,
       raw,
       radarMirror: radarMirrorBase,
+      coberturaTraceId: coberturaTraceIdRadar,
       ...(fidelidadeTraceIdPrincipal ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal } : {})
     });
     let comparacaoRadarLocal = null;
@@ -14259,6 +14830,14 @@ const registroEngineRadar = temRedirectConhecidoRadar
     }
 
     if (!importacao.ok) {
+      coberturaRadar.registrar(importacao.erro ? "legacy_importador_erro" : "legacy_importador_rejeitado", {
+        ...contextoCoberturaRadar,
+        decisao: importacao.erro ? "erro" : "rejeitado",
+        motivo: importacao.motivoTecnico || importacao.motivo || "importacao_falhou",
+        marketplace: importacao.resolucao?.marketplaceReal || marketplaceInicialResumo,
+        link,
+        links
+      });
       logOptimus("RADAR", "Importacao falhou", {
         motivo: importacao.motivo || "importacao_falhou",
         motivoTecnico: importacao.motivoTecnico || importacao.motivo || "importacao_falhou",
@@ -14331,6 +14910,13 @@ const registroEngineRadar = temRedirectConhecidoRadar
       continue;
     }
 
+    coberturaRadar.registrar("legacy_importador_ok", {
+      ...contextoCoberturaRadar,
+      decisao: "aceito",
+      marketplace: ofertaImportadorRadar?.marketplace || importacao.resolucao?.marketplaceReal || marketplaceInicialResumo,
+      link,
+      links
+    });
     logOptimus("RADAR", "Importacao concluida", {
       linkCapturado: link,
       urlResolvida: importacao.resolucao?.urlResolvida || "",
@@ -14370,11 +14956,13 @@ const registroEngineRadar = temRedirectConhecidoRadar
       imagem: imagemOfertaRadar(ofertaImportadorRadar),
       image: imagemOfertaRadar(ofertaImportadorRadar),
       mensagemOriginalRadar: texto.slice(0, 1000),
+      ...(coberturaTraceIdRadar ? { coberturaTraceId: coberturaTraceIdRadar } : {}),
       ...(fidelidadeTraceIdPrincipal ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal } : {}),
       capturadaEm: dataCaptura,
       dataEntradaRadar: dataCaptura,
       metadata: mergeRadarMirrorMetadata({
         ...(resultadoPrecedenciaComercial?.metadata && typeof resultadoPrecedenciaComercial.metadata === "object" ? resultadoPrecedenciaComercial.metadata : (ofertaImportadorRadar?.metadata && typeof ofertaImportadorRadar.metadata === "object" ? ofertaImportadorRadar.metadata : {})),
+        ...(coberturaTraceIdRadar ? { coberturaTraceId: coberturaTraceIdRadar } : {}),
         ...(fidelidadeTraceIdPrincipal ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal } : {}),
         comparacaoRadarLocal,
         radarHibrido: {
@@ -14383,6 +14971,14 @@ const registroEngineRadar = temRedirectConhecidoRadar
         }
       }, radarMirrorComparado)
     })));
+    coberturaRadar.registrar("oferta_preparada", {
+      ...contextoCoberturaRadar,
+      decisao: "aceito",
+      marketplace: ofertaRadar.marketplace || importacao.resolucao?.marketplaceReal || marketplaceImportacaoResumo,
+      link,
+      links,
+      ofertaId: ofertaRadar.id || ofertaRadar.ofertaId || ""
+    });
     const resolucaoCaptura = resolverClienteMensageiroPorSessao(sessaoIdTexto);
     fidelidadeObs.registrarSnapshot("espelho_comercial_saida", {
       fidelidadeTraceId: fidelidadeTraceIdPrincipal,
@@ -14573,15 +15169,34 @@ const registroEngineRadar = temRedirectConhecidoRadar
   };
 }
 
-async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {}) {
+async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock, coberturaTraceId: coberturaTraceIdRecebido } = {}) {
   const remoteJid = mensagem?.key?.remoteJid || "";
   const textoExtraido = extrairTextoMensagemRadar(mensagem);
   const conteudo = extrairMensagemInternaRadar(mensagem?.message || {});
+  const coberturaTraceId = coberturaTraceIdRecebido || coberturaRadar.criarCoberturaTraceId(mensagem, {
+    sessaoId,
+    remoteJid
+  });
+  const contextoCoberturaAutomatica = {
+    coberturaTraceId,
+    fidelidadeTraceId: coberturaRadar.extrairFidelidadeTraceId(mensagem),
+    mensagemId: coberturaRadar.extrairMensagemId(mensagem),
+    sessaoId,
+    remoteJid,
+    grupoId: remoteJid,
+    grupoNome: obterNomeGrupoRadar(sessaoId, remoteJid)
+  };
   const debugPayloadSemLink = RADAR_DEBUG_PAYLOAD_SEM_LINK
     ? criarDiagnosticoPayloadBaileysSemLink({ mensagem, conteudo, textoExtraido })
     : null;
   const tiposMensagem = Object.keys(conteudo || {});
 
+  coberturaRadar.registrar("radar_automatica_inicio", {
+    ...contextoCoberturaAutomatica,
+    decisao: "iniciado",
+    tiposMensagem,
+    tamanhoTexto: textoExtraido.length
+  });
   registrarRadarListenerRecebido({
     sessaoId,
     remoteJid,
@@ -14598,11 +15213,21 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
   });
 
   if (!remoteJid || !remoteJid.endsWith("@g.us") || mensagem?.key?.fromMe) {
+    const motivoCobertura = mensagem?.key?.fromMe
+      ? "fromMe"
+      : (!remoteJid ? "remoteJid_ausente" : "nao_grupo");
     logOptimus("CAPTURA", "Mensagem nao monitoravel", {
       sessaoId,
       remoteJid,
       fromMe: Boolean(mensagem?.key?.fromMe),
       motivo: "mensagem_nao_monitoravel"
+    });
+    coberturaRadar.registrar("radar_automatica_rejeitada", {
+      ...contextoCoberturaAutomatica,
+      decisao: "rejeitado",
+      motivo: motivoCobertura,
+      tiposMensagem,
+      tamanhoTexto: textoExtraido.length
     });
     return { ok: false, motivo: "mensagem_nao_monitoravel" };
   }
@@ -14613,6 +15238,12 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
   tamanhoTexto: textoExtraido.length
 });
 
+  coberturaRadar.registrar("radar_automatica_encaminhada", {
+    ...contextoCoberturaAutomatica,
+    decisao: "aceito",
+    tiposMensagem,
+    tamanhoTexto: textoExtraido.length
+  });
  return processarMensagemRadar({
     origemTipo: "whatsapp",
     sessaoId,
@@ -14620,7 +15251,8 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock } = {
     grupoNome: obterNomeGrupoRadar(sessaoId, remoteJid),
     texto: textoExtraido,
     raw: mensagem,
-    debugPayloadSemLink
+    debugPayloadSemLink,
+    coberturaTraceId
   });
 }
 
@@ -14933,11 +15565,46 @@ function diagnosticarRadarCupomRepetido(clienteId = "admin", oferta = {}) {
 function radarCupomRepetidoProdutoDiferente(clienteId = "admin", oferta = {}) {
   return diagnosticarRadarCupomRepetido(clienteId, oferta).produtoDiferente;
 }
+
+function contextoCoberturaRadarOferta(oferta = {}, clienteId = "admin") {
+  const metadata = oferta?.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
+  const links = [
+    oferta.linkCapturado,
+    oferta.linkOriginalRadar,
+    oferta.linkOriginal,
+    oferta.linkResolvidoRadar,
+    oferta.linkResolvido,
+    oferta.linkAfiliado,
+    oferta.linkFinal,
+    oferta.link
+  ].filter(Boolean);
+
+  return {
+    coberturaTraceId: oferta.coberturaTraceId || metadata.coberturaTraceId || "",
+    fidelidadeTraceId: oferta.fidelidadeTraceId || metadata.fidelidadeTraceId || "",
+    mensagemId: oferta.mensagemId || metadata.mensagemId || metadata.radarMirror?.origem?.mensagemId || "",
+    clienteId,
+    sessaoId: oferta.origemSessaoId || oferta.sessaoId || "",
+    remoteJid: oferta.origemGrupoId || oferta.grupoId || "",
+    grupoId: oferta.origemGrupoId || oferta.grupoId || "",
+    grupoNome: oferta.origemGrupoNome || oferta.grupoNome || "",
+    marketplace: oferta.marketplace || oferta.marketplaceDetectado || "",
+    links,
+    link: oferta.linkOriginal || oferta.linkCapturado || oferta.link || "",
+    ofertaId: oferta.id || oferta.ofertaId || ""
+  };
+}
+
 async function prepararOfertaRadarParaCliente(ofertaBase = {}, clienteId = "admin", opcoes = {}) {
   const usuario = getUsuarioClienteRadar(clienteId);
 
   if (!usuario || !usuarioAtivoOperacional(clienteId)) {
     logUsuarioInativoOperacional(clienteId, "radar_preparar_oferta_cliente");
+    coberturaRadar.registrar("cliente_avaliado", {
+      ...contextoCoberturaRadarOferta(ofertaBase, clienteId),
+      decisao: "rejeitado",
+      motivo: "cliente_inativo_ou_inexistente"
+    });
     return { ok: false, motivo: "cliente_inativo_ou_inexistente" };
   }
 
@@ -14955,6 +15622,11 @@ logRadarBloqueadoMonitoramento({
     grupoNome: ofertaBase.grupoNome
   });
 
+    coberturaRadar.registrar("origem_monitorada_rejeitada", {
+      ...contextoCoberturaRadarOferta(ofertaBase, clienteId),
+      decisao: "rejeitado",
+      motivo: origemMonitorada.motivo || "origem_nao_monitorada"
+    });
     return { ok: false, motivo: origemMonitorada.motivo };
   }
 
@@ -14999,6 +15671,11 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
     );
 
     if (!permitido) {
+      coberturaRadar.registrar("categoria_bloqueou", {
+        ...contextoCoberturaRadarOferta(ofertaPreparada, clienteId),
+        decisao: "rejeitado",
+        motivo: "categoria_nao_permitida_radar"
+      });
       return { ok: false, motivo: "categoria_nao_permitida_radar" };
     }
   }
@@ -15012,6 +15689,11 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
   const marketplace = normalizarMarketplaceRadar(marketplaceOriginal);
 
   if (!marketplace) {
+    coberturaRadar.registrar("marketplace_ausente", {
+      ...contextoCoberturaRadarOferta(ofertaPreparada, clienteId),
+      decisao: "rejeitado",
+      motivo: "marketplace_ausente"
+    });
     return { ok: false, motivo: "marketplace_ausente" };
   }
 
@@ -15022,10 +15704,22 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
   }
 
   if (!usuarioPodeReceberMarketplace(usuario, marketplace)) {
+    coberturaRadar.registrar("marketplace_plano_bloqueou", {
+      ...contextoCoberturaRadarOferta(ofertaPreparada, clienteId),
+      decisao: "rejeitado",
+      motivo: "marketplace_nao_permitido_no_plano",
+      marketplace
+    });
     return { ok: false, motivo: "marketplace_nao_permitido_no_plano" };
   }
 
   if (!clienteAceitaMarketplaceAtivo(clienteId, marketplace)) {
+    coberturaRadar.registrar("marketplace_cliente_bloqueou", {
+      ...contextoCoberturaRadarOferta(ofertaPreparada, clienteId),
+      decisao: "rejeitado",
+      motivo: "marketplace_desativado_no_cliente",
+      marketplace
+    });
     return { ok: false, motivo: "marketplace_desativado_no_cliente" };
   }
 
@@ -15040,9 +15734,21 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
         clienteId,
         motivo: "awin_kabum_integracao_ausente_cliente"
       });
+      coberturaRadar.registrar("integracao_ausente", {
+        ...contextoCoberturaRadarOferta(ofertaPreparada, clienteId),
+        decisao: "rejeitado",
+        motivo: "awin_kabum_integracao_ausente_cliente",
+        marketplace
+      });
       return { ok: false, motivo: "awin_kabum_integracao_ausente_cliente" };
     }
 
+    coberturaRadar.registrar("integracao_ausente", {
+      ...contextoCoberturaRadarOferta(ofertaPreparada, clienteId),
+      decisao: "rejeitado",
+      motivo: "integracao_marketplace_ausente",
+      marketplace
+    });
     return { ok: false, motivo: "integracao_marketplace_ausente" };
   }
 
@@ -15065,6 +15771,12 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
         clienteId,
         motivo: "awin_kabum_integracao_ausente_cliente",
         faltando: validacaoAwinKabum.faltando || []
+      });
+      coberturaRadar.registrar("integracao_ausente", {
+        ...contextoCoberturaRadarOferta(ofertaPreparada, clienteId),
+        decisao: "rejeitado",
+        motivo: "awin_kabum_integracao_ausente_cliente",
+        marketplace
       });
       return { ok: false, motivo: "awin_kabum_integracao_ausente_cliente" };
     }
@@ -15102,6 +15814,12 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
       aprovado: false,
       motivo: "link_original_ausente"
     });
+    coberturaRadar.registrar("legacy_importador_rejeitado", {
+      ...contextoCoberturaRadarOferta(ofertaPreparada, clienteId),
+      decisao: "rejeitado",
+      motivo: "link_original_ausente",
+      marketplace
+    });
     return { ok: false, motivo: "link_original_ausente" };
   }
 
@@ -15116,6 +15834,12 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
       cupom: ofertaPreparada.cupom || "",
       cupomConfirmado: Boolean(cupomRadar.cupomConfirmado),
       beneficioUtil: Boolean(temBeneficioUtil)
+    });
+    coberturaRadar.registrar("legacy_importador_rejeitado", {
+      ...contextoCoberturaRadarOferta(ofertaPreparada, clienteId),
+      decisao: "rejeitado",
+      motivo: "oferta_sem_cupom_ou_desconto_relevante",
+      marketplace
     });
     return { ok: false, motivo: "oferta_sem_cupom_ou_desconto_relevante" };
   }
@@ -15153,6 +15877,12 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
       aprovado: false,
       motivo: motivoLinkAfiliadoNaoGerado
     });
+    coberturaRadar.registrar("legacy_importador_rejeitado", {
+      ...contextoCoberturaRadarOferta(ofertaPreparada, clienteId),
+      decisao: "rejeitado",
+      motivo: motivoLinkAfiliadoNaoGerado,
+      marketplace
+    });
     return { ok: false, motivo: motivoLinkAfiliadoNaoGerado };
   }
 
@@ -15161,6 +15891,12 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
       clienteId,
       aprovado: false,
       motivo: "link_afiliado_igual_original"
+    });
+    coberturaRadar.registrar("legacy_importador_rejeitado", {
+      ...contextoCoberturaRadarOferta(ofertaPreparada, clienteId),
+      decisao: "rejeitado",
+      motivo: "link_afiliado_igual_original",
+      marketplace
     });
     return { ok: false, motivo: "link_afiliado_igual_original" };
   }
@@ -15295,12 +16031,33 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
           categoria: ofertaCliente.categoria || "",
           marketplace: ofertaCliente.marketplace || ""
         });
+        coberturaRadar.registrar("duplicidade_bloqueou", {
+          ...contextoCoberturaRadarOferta(ofertaCliente, clienteId),
+          decisao: "rejeitado",
+          motivo: "oferta_duplicada",
+          destinoEncontrado: false,
+          filaRecebeu: false
+        });
         return { ok: false, motivo: "oferta_duplicada" };
       }
 
+      coberturaRadar.registrar("sem_destino", {
+        ...contextoCoberturaRadarOferta(ofertaCliente, clienteId),
+        decisao: "retido",
+        motivo: "retida_sem_destino_compativel",
+        destinoEncontrado: false,
+        filaRecebeu: false
+      });
       return reterRadarSemDestinoCliente(clienteId, ofertaCliente);
     }
 
+    coberturaRadar.registrar("sem_destino", {
+      ...contextoCoberturaRadarOferta(ofertaCliente, clienteId),
+      decisao: "rejeitado",
+      motivo: "sem_destino_compativel",
+      destinoEncontrado: false,
+      filaRecebeu: false
+    });
     return { ok: false, motivo: "sem_destino_compativel" };
   }
 
@@ -15310,6 +16067,12 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
       aprovado: false,
       motivo: "radar_duplicada_mesma_oferta"
     });
+    coberturaRadar.registrar("duplicidade_bloqueou", {
+      ...contextoCoberturaRadarOferta(ofertaCliente, clienteId),
+      decisao: "rejeitado",
+      motivo: "oferta_duplicada",
+      filaRecebeu: false
+    });
     return { ok: false, motivo: "oferta_duplicada" };
   }
 
@@ -15318,6 +16081,12 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
       clienteId,
       aprovado: false,
       motivo: "oferta_repetida_na_memoria"
+    });
+    coberturaRadar.registrar("memoria_bloqueou", {
+      ...contextoCoberturaRadarOferta(ofertaCliente, clienteId),
+      decisao: "rejeitado",
+      motivo: "oferta_repetida_na_memoria",
+      filaRecebeu: false
     });
     return { ok: false, motivo: "oferta_repetida_na_memoria" };
   }
@@ -15331,6 +16100,12 @@ console.log("✅ RADAR ORIGEM VALIDADA", {
     cupom: ofertaCliente.cupom || "",
     linkOriginal,
     linkAfiliado: linkAfiliadoCliente
+  });
+  coberturaRadar.registrar("cliente_avaliado", {
+    ...contextoCoberturaRadarOferta(ofertaCliente, clienteId),
+    decisao: "aceito",
+    destinoEncontrado: true,
+    filaRecebeu: false
   });
 
   return { ok: true, oferta: ofertaCliente };
@@ -15372,6 +16147,12 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
     }
 
     logRadarDuplicadaBloqueada(clienteId, oferta, duplicidadeRadar.motivo);
+    coberturaRadar.registrar("duplicidade_bloqueou", {
+      ...contextoCoberturaRadarOferta(oferta, clienteId),
+      decisao: "rejeitado",
+      motivo: duplicidadeRadar.motivo || "radar_duplicada_bloqueada",
+      filaRecebeu: false
+    });
     return { ok: false, motivo: "radar_duplicada_bloqueada" };
   }
 
@@ -15411,6 +16192,12 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
       totalComCupom,
       totalSemCupom
     });
+    coberturaRadar.registrar("fila_erro", {
+      ...contextoCoberturaRadarOferta(oferta, clienteId),
+      decisao: "rejeitado",
+      motivo: "limite_radar_pendente_total",
+      filaRecebeu: false
+    });
     return { ok: false, motivo: "limite_radar_pendente_total" };
   }
 
@@ -15422,6 +16209,12 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
       totalRadar,
       totalComCupom,
       totalSemCupom
+    });
+    coberturaRadar.registrar("fila_erro", {
+      ...contextoCoberturaRadarOferta(oferta, clienteId),
+      decisao: "rejeitado",
+      motivo: "limite_radar_com_cupom",
+      filaRecebeu: false
     });
     return { ok: false, motivo: "limite_radar_com_cupom" };
   }
@@ -15435,10 +16228,22 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
       totalComCupom,
       totalSemCupom
     });
+    coberturaRadar.registrar("fila_erro", {
+      ...contextoCoberturaRadarOferta(oferta, clienteId),
+      decisao: "rejeitado",
+      motivo: "limite_radar_sem_cupom",
+      filaRecebeu: false
+    });
     return { ok: false, motivo: "limite_radar_sem_cupom" };
   }
 
   if (!podeAdicionarOfertaAutomaticaFila(oferta, clienteId, "radar")) {
+    coberturaRadar.registrar("fila_erro", {
+      ...contextoCoberturaRadarOferta(oferta, clienteId),
+      decisao: "rejeitado",
+      motivo: "performance_fila_limite",
+      filaRecebeu: false
+    });
     return { ok: false, motivo: "performance_fila_limite" };
   }
 
@@ -15447,6 +16252,12 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
     clienteId,
     origem: oferta.origem || "radar",
     logger: console
+  });
+  registrarCoberturaExecutor("fila_item_criado", oferta, clienteId, {}, {
+    decisao: "aceito",
+    motivo: "item_criado",
+    filaRecebeu: true,
+    statusFilaDepois: oferta.status || "pendente"
   });
   if (normalizarMarketplaceRadar(oferta.marketplace || "") === "mercadolivre") {
     console.log("[RADAR-ML-FILA-CORRELACAO]", JSON.stringify({
@@ -15463,6 +16274,12 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
   registrarOfertaVista(oferta);
   registrarTratamentoRadar(clienteId, oferta, "fila");
   salvarFila(clienteId);
+  coberturaRadar.registrar("fila_ok", {
+    ...contextoCoberturaRadarOferta(oferta, clienteId),
+    decisao: "aceito",
+    motivo: "adicionada_fila",
+    filaRecebeu: true
+  });
 
   return {
     ok: true,
@@ -22102,17 +22919,60 @@ console.log("[INFO] Cliente mensageiro resolvido:", {
 // =============== EVENTO MENSAGEIRO =================
 
 sock.ev.on("messages.upsert", async ({ messages = [] } = {}) => {
+  const loteTraceIdCobertura = coberturaRadar.flagAtiva()
+    ? `lote_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    : "";
+  let indiceMensagemCobertura = -1;
+  let mensagemAtualCobertura = null;
+  coberturaRadar.registrar("listener_lote_inicio", {
+    coberturaTraceId: loteTraceIdCobertura,
+    decisao: "iniciado",
+    clienteId: clienteIdMensageiro,
+    sessaoId: id,
+    totalMensagensLote: messages.length
+  });
   try {
-    for (const mensagem of messages) {
+    for (let indiceMensagem = 0; indiceMensagem < messages.length; indiceMensagem += 1) {
+      const mensagem = messages[indiceMensagem];
+      indiceMensagemCobertura = indiceMensagem;
+      mensagemAtualCobertura = mensagem;
+      const coberturaTraceId = coberturaRadar.criarCoberturaTraceId(mensagem, {
+        sessaoId: id,
+        remoteJid: mensagem?.key?.remoteJid || "",
+        loteTraceId: loteTraceIdCobertura,
+        indiceLote: indiceMensagem
+      });
+      const contextoListenerCobertura = {
+        coberturaTraceId,
+        fidelidadeTraceId: coberturaRadar.extrairFidelidadeTraceId(mensagem),
+        mensagemId: coberturaRadar.extrairMensagemId(mensagem),
+        clienteId: clienteIdMensageiro,
+        sessaoId: id,
+        remoteJid: mensagem?.key?.remoteJid || "",
+        grupoId: mensagem?.key?.remoteJid || "",
+        grupoNome: obterNomeGrupoRadar(id, mensagem?.key?.remoteJid || ""),
+        indiceMensagem,
+        totalMensagensLote: messages.length
+      };
+      coberturaRadar.registrar("listener_recebeu", {
+        ...contextoListenerCobertura,
+        decisao: "recebido"
+      });
       if (!usuarioAtivoOperacional(clienteIdMensageiro)) {
         logUsuarioInativoOperacional(clienteIdMensageiro, "whatsapp_messages_upsert");
+        coberturaRadar.registrar("listener_ignorado", {
+          ...contextoListenerCobertura,
+          decisao: "ignorado",
+          motivo: "usuario_inativo"
+        });
         continue;
       }
 
       await processarMensagemRadarAutomatica({
         mensagem,
         sessaoId: id,
-        sock
+        sock,
+        coberturaTraceId
       });
 
       await mensageiro.tratarMensagemPrivadaAtendimento({
@@ -22123,7 +22983,34 @@ sock.ev.on("messages.upsert", async ({ messages = [] } = {}) => {
         planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
       });
     }
+    coberturaRadar.registrar("listener_lote_fim", {
+      coberturaTraceId: loteTraceIdCobertura,
+      decisao: "concluido",
+      clienteId: clienteIdMensageiro,
+      sessaoId: id,
+      totalMensagensLote: messages.length
+    });
   } catch (e) {
+    coberturaRadar.registrar("listener_erro_mensagem", {
+      coberturaTraceId: coberturaRadar.criarCoberturaTraceId(mensagemAtualCobertura, {
+        sessaoId: id,
+        remoteJid: mensagemAtualCobertura?.key?.remoteJid || "",
+        loteTraceId: loteTraceIdCobertura,
+        indiceLote: indiceMensagemCobertura
+      }),
+      fidelidadeTraceId: coberturaRadar.extrairFidelidadeTraceId(mensagemAtualCobertura),
+      mensagemId: coberturaRadar.extrairMensagemId(mensagemAtualCobertura),
+      clienteId: clienteIdMensageiro,
+      sessaoId: id,
+      remoteJid: mensagemAtualCobertura?.key?.remoteJid || "",
+      grupoId: mensagemAtualCobertura?.key?.remoteJid || "",
+      grupoNome: obterNomeGrupoRadar(id, mensagemAtualCobertura?.key?.remoteJid || ""),
+      decisao: "erro",
+      motivo: e.message || "messages_upsert_erro",
+      indiceMensagem: indiceMensagemCobertura,
+      totalMensagensLote: messages.length,
+      posterioresNaoPercorridas: Math.max(0, messages.length - indiceMensagemCobertura - 1)
+    });
     console.log("[MENSAGEIRO-ERRO]⚠️ messages.upsert:", e.message);
   }
 });

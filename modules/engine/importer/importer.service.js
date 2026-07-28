@@ -37,6 +37,7 @@ const {
   logEngineImporterOfertaCriada
 } = require("../logger");
 const fidelidadeObs = require("../../fidelidade/observabilidade-v1");
+const coberturaRadar = require("../../radar/cobertura-v1");
 
 let engineOfertasMetadataDisponivel = null;
 
@@ -956,6 +957,28 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       }
     };
   }
+  const coberturaTraceIdPrincipal = coberturaRadar.flagAtiva()
+    ? (
+      ofertaEntrada.coberturaTraceId ||
+      ofertaEntrada.metadata?.coberturaTraceId ||
+      evento.coberturaTraceId ||
+      evento.metadata?.coberturaTraceId ||
+      job.coberturaTraceId ||
+      job.metadata?.coberturaTraceId ||
+      job.metadata?.metadataEvento?.coberturaTraceId ||
+      ""
+    )
+    : "";
+  if (coberturaTraceIdPrincipal) {
+    oferta = {
+      ...oferta,
+      coberturaTraceId: coberturaTraceIdPrincipal,
+      metadata: {
+        ...(oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {}),
+        coberturaTraceId: coberturaTraceIdPrincipal
+      }
+    };
+  }
   oferta = resolverImagemUniversal(oferta, {
     origem: "engine_importer",
     ofertaEntrada,
@@ -1103,6 +1126,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     ...metadataEvento,
     ...metadataBase,
     ...objetoSeguro(sombraV2.metadata || {}),
+    ...(coberturaTraceIdPrincipal ? { coberturaTraceId: coberturaTraceIdPrincipal } : {}),
     ...(fidelidadeTraceIdPrincipal ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal } : {}),
     imagemOrigem: imagemOrigemFinal,
     imagemFallbackUsado,

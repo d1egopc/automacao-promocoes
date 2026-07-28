@@ -8,6 +8,7 @@ const {
   logEngineJobClienteCriado,
   logEngineJobClienteErro
 } = require("./logger");
+const coberturaRadar = require("../radar/cobertura-v1");
 
 function normalizarClientes(clientes = []) {
   const lista = Array.isArray(clientes) ? clientes : [clientes].filter(Boolean);
@@ -84,7 +85,27 @@ async function ignorarJobsAdminNaoOperacional() {
 }
 
 async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [], marketplaceDetectado = "", linksExtraidos = [], metadataEvento = {} } = {}) {
-  if (!eventoId) return { ok: false, motivo: "evento_id_ausente", criados: 0 };
+  const contextoCobertura = {
+    coberturaTraceId: metadataEvento?.coberturaTraceId || "",
+    fidelidadeTraceId: metadataEvento?.fidelidadeTraceId || "",
+    eventoEngineId: eventoId || "",
+    ofertaId: ofertaId || "",
+    marketplace: marketplaceDetectado || marketplacePrincipal(linksExtraidos),
+    links: linksExtraidos
+  };
+  coberturaRadar.registrar("engine_job_inicio", {
+    ...contextoCobertura,
+    decisao: "iniciado"
+  });
+  if (!eventoId) {
+    coberturaRadar.registrar("engine_job_nao_criado", {
+      ...contextoCobertura,
+      decisao: "rejeitado",
+      motivo: "evento_id_ausente",
+      jobNovoCriado: false
+    });
+    return { ok: false, motivo: "evento_id_ausente", criados: 0 };
+  }
 
   await ignorarJobsAdminNaoOperacional();
 
@@ -92,6 +113,8 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
   const marketplace = normalizarTexto(marketplaceDetectado || marketplacePrincipal(linksExtraidos));
   const metadataJob = {
     fase: "1.1",
+    ...(coberturaRadar.flagAtiva() && metadataEvento?.coberturaTraceId ? { coberturaTraceId: metadataEvento.coberturaTraceId } : {}),
+    ...(coberturaRadar.flagAtiva() && metadataEvento?.fidelidadeTraceId ? { fidelidadeTraceId: metadataEvento.fidelidadeTraceId } : {}),
     imagemRadar: metadataEvento?.imagem || metadataEvento?.image || metadataEvento?.thumbnail || metadataEvento?.imagemUrl || "",
     imagemEventoOriginal: metadataEvento?.imagemOriginal || metadataEvento?.imagemRadar || metadataEvento?.foto || metadataEvento?.midia || "",
     metadataEvento
@@ -107,6 +130,22 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
       motivo: "admin_nao_e_cliente_operacional",
       jobCriado: false
     }));
+    coberturaRadar.registrar("engine_job_nao_criado", {
+      ...contextoCobertura,
+      clienteId: "admin",
+      decisao: "rejeitado",
+      motivo: "admin_nao_e_cliente_operacional",
+      jobNovoCriado: false
+    });
+  }
+
+  if (!clientesIds.length) {
+    coberturaRadar.registrar("engine_job_nao_criado", {
+      ...contextoCobertura,
+      decisao: "rejeitado",
+      motivo: "sem_clientes_operacionais",
+      jobNovoCriado: false
+    });
   }
 
   for (const clienteId of clientesIds) {
@@ -123,13 +162,37 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
 
       if (!insert.ok) {
         logEngineJobClienteErro({ eventoId, clienteId, motivo: insert.motivo || "insert_falhou", erro: insert.erro || "" });
+        coberturaRadar.registrar("engine_job_erro", {
+          ...contextoCobertura,
+          clienteId,
+          decisao: "erro",
+          motivo: insert.motivo || "insert_falhou",
+          erro: insert.erro || "",
+          jobNovoCriado: false
+        });
         continue;
       }
 
       criados += 1;
       logEngineJobClienteCriado({ id: insert.resultado.rows[0]?.id, eventoId, clienteId, marketplaceDetectado: marketplace });
+      coberturaRadar.registrar("engine_job_criado", {
+        ...contextoCobertura,
+        clienteId,
+        decisao: "aceito",
+        motivo: "job_criado",
+        jobId: insert.resultado.rows[0]?.id || "",
+        jobNovoCriado: true
+      });
     } catch (e) {
       logEngineJobClienteErro({ eventoId, clienteId, motivo: "erro_inesperado", erro: e.message });
+      coberturaRadar.registrar("engine_job_erro", {
+        ...contextoCobertura,
+        clienteId,
+        decisao: "erro",
+        motivo: "erro_inesperado",
+        erro: e.message,
+        jobNovoCriado: false
+      });
     }
   }
 

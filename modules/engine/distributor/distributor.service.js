@@ -10,6 +10,7 @@ const filaOfertas = require("../../../utils/fila-ofertas");
 const destinosUtils = require("../../../utils/destinos");
 const { resolverImagemUniversal } = require("../../imagens/resolver-imagem-universal");
 const fidelidadeObs = require("../../fidelidade/observabilidade-v1");
+const coberturaRadar = require("../../radar/cobertura-v1");
 const {
   usuarioAtivo,
   logUsuarioInativoIgnorado
@@ -616,6 +617,29 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
       }
     };
   }
+  const metadataOfertaCobertura = oferta?.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
+  const metadataJobCobertura = oferta?.job_metadata && typeof oferta.job_metadata === "object" ? oferta.job_metadata : {};
+  const metadataEventoCobertura = oferta?.evento_metadata && typeof oferta.evento_metadata === "object" ? oferta.evento_metadata : {};
+  const coberturaTraceIdPrincipal = coberturaRadar.flagAtiva()
+    ? (
+      oferta.coberturaTraceId ||
+      metadataOfertaCobertura.coberturaTraceId ||
+      metadataJobCobertura.coberturaTraceId ||
+      metadataJobCobertura.metadataEvento?.coberturaTraceId ||
+      metadataEventoCobertura.coberturaTraceId ||
+      ""
+    )
+    : "";
+  if (coberturaTraceIdPrincipal) {
+    itemFila = {
+      ...itemFila,
+      coberturaTraceId: coberturaTraceIdPrincipal,
+      metadata: {
+        ...(itemFila.metadata && typeof itemFila.metadata === "object" ? itemFila.metadata : {}),
+        coberturaTraceId: coberturaTraceIdPrincipal
+      }
+    };
+  }
   fidelidadeObs.registrarSnapshot("distributor_entrada", {
     ...contextoFidelidadeDistributor,
     clienteId,
@@ -715,6 +739,18 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
       ofertaId: oferta.id,
       itemId: resultadoMemoria.itemFila?.id || itemFila.id
     });
+    coberturaRadar.registrar("fila_item_criado", {
+      coberturaTraceId: coberturaTraceIdPrincipal,
+      fidelidadeTraceId: fidelidadeTraceIdPrincipal,
+      clienteId,
+      marketplace: itemFila.marketplace || oferta.marketplace || "",
+      ofertaId: oferta.id || "",
+      filaItemId: resultadoMemoria.itemFila?.id || itemFila.id || "",
+      decisao: "aceito",
+      motivo: "item_criado",
+      filaRecebeu: true,
+      statusFilaDepois: resultadoMemoria.itemFila?.status || itemFila.status || "pendente"
+    });
 
     return { ok: true, itemFila: resultadoMemoria.itemFila || itemFila };
   }
@@ -730,6 +766,18 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
 
   const salvou = salvarFilaCliente(clienteId, filaCliente, deps);
   if (!salvou) return { ok: false, motivo: "erro_fila" };
+  coberturaRadar.registrar("fila_item_criado", {
+    coberturaTraceId: coberturaTraceIdPrincipal,
+    fidelidadeTraceId: fidelidadeTraceIdPrincipal,
+    clienteId,
+    marketplace: itemFila.marketplace || oferta.marketplace || "",
+    ofertaId: oferta.id || "",
+    filaItemId: itemFila.id || "",
+    decisao: "aceito",
+    motivo: "item_criado",
+    filaRecebeu: true,
+    statusFilaDepois: itemFila.status || "pendente"
+  });
 
   return { ok: true, itemFila };
 }
