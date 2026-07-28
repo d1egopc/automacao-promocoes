@@ -599,14 +599,32 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
     return { ok: false, motivo: "usuario_inativo" };
   }
 
-  const itemFila = montarItemFilaEngine(oferta);
+  let itemFila = montarItemFilaEngine(oferta);
+  const fidelidadeTraceIdPrincipal = fidelidadeObs.flagAtiva()
+    ? fidelidadeObs.resolverFidelidadeTraceId(oferta, oferta.metadata, itemFila, itemFila.metadata, contexto)
+    : "";
+  const contextoFidelidadeDistributor = fidelidadeTraceIdPrincipal
+    ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal }
+    : {};
+  if (fidelidadeTraceIdPrincipal) {
+    itemFila = {
+      ...itemFila,
+      fidelidadeTraceId: fidelidadeTraceIdPrincipal,
+      metadata: {
+        ...(itemFila.metadata && typeof itemFila.metadata === "object" ? itemFila.metadata : {}),
+        fidelidadeTraceId: fidelidadeTraceIdPrincipal
+      }
+    };
+  }
   fidelidadeObs.registrarSnapshot("distributor_entrada", {
+    ...contextoFidelidadeDistributor,
     clienteId,
     oferta,
     marketplace: oferta.marketplace || "",
     observacoes: "entrada_distributor"
   });
   fidelidadeObs.registrarImagem("distributor_entrada", {
+    ...contextoFidelidadeDistributor,
     clienteId,
     oferta,
     imagem: oferta.imagem || "",
@@ -614,16 +632,19 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
     status: oferta.imagem ? "URL_http_presente" : "perdida_entre_etapas"
   });
   fidelidadeObs.registrarSnapshot("fila_entrada", {
+    ...contextoFidelidadeDistributor,
     clienteId,
     oferta: itemFila,
     marketplace: itemFila.marketplace || "",
     observacoes: "item_montado_para_fila"
   });
   fidelidadeObs.registrarLinks("fila_entrada", {
+    ...contextoFidelidadeDistributor,
     clienteId,
     oferta: itemFila
   });
   fidelidadeObs.registrarImagem("fila_entrada", {
+    ...contextoFidelidadeDistributor,
     clienteId,
     oferta: itemFila,
     imagem: itemFila.imagem || "",

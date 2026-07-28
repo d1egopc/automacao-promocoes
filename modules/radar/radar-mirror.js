@@ -315,7 +315,9 @@ function criarRadarMirror({
   extracaoRadarLocal = {},
   beneficiosMensagem = {},
   raw = null,
-  marketplace = ""
+  marketplace = "",
+  fidelidadeTraceId = "",
+  mensagemId = ""
 } = {}) {
   const comercial = resumirComercialRadar(extracaoRadarLocal);
   const precoAtual = primeiroNumeroOuNull(
@@ -361,9 +363,12 @@ function criarRadarMirror({
   linksClassificados.resgateCupom = textoOuNull(linksClassificados.resgateCupom);
   const midia = imagemOriginalRadar(extracaoRadarLocal, raw || {});
   const condicao = condicaoPrecoRadar(extracaoRadarLocal, beneficiosMensagem);
+  const traceObservabilidade = textoOuNull(fidelidadeTraceId);
+  const mensagemIdObservabilidade = traceObservabilidade ? textoOuNull(mensagemId || raw?.key?.id) : "";
 
   return {
     versao: RADAR_MIRROR_VERSAO,
+    ...(traceObservabilidade ? { fidelidadeTraceId: traceObservabilidade } : {}),
     criadoEm: new Date().toISOString(),
     origem: {
       tipo: textoOuNull(origemTipo),
@@ -371,7 +376,9 @@ function criarRadarMirror({
       sessaoId: textoOuNull(sessaoId),
       grupoId: textoOuNull(grupoId),
       grupoNome: textoOuNull(grupoNome),
-      capturadaEm: textoOuNull(capturadaEm)
+      capturadaEm: textoOuNull(capturadaEm),
+      ...(mensagemIdObservabilidade ? { mensagemId: mensagemIdObservabilidade } : {}),
+      ...(traceObservabilidade ? { fidelidadeTraceId: traceObservabilidade } : {})
     },
     texto: {
       original: textoOuNull(textoOriginal),

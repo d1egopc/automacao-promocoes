@@ -4689,11 +4689,18 @@ function atualizarUltimoEnvioDestino(clienteId = "admin", destino = {}, oferta =
 async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId, configCliente, opcoes = {}) {
   let tentouEnvio = false;
   let confirmouEnvio = false;
+  let contextoFidelidadeExecutor = {};
 
   try {
     clienteId = String(clienteId || oferta.clienteId || "").trim();
     if (!clienteId) return { enviado: false, tentouEnvio: false, motivo: "clienteId_ausente" };
     configCliente = configCliente || configsPorCliente?.[clienteId] || {};
+    const fidelidadeTraceIdExecutor = fidelidadeObs.flagAtiva()
+      ? fidelidadeObs.resolverFidelidadeTraceId(oferta, oferta?.metadata, opcoes)
+      : "";
+    contextoFidelidadeExecutor = fidelidadeTraceIdExecutor
+      ? { fidelidadeTraceId: fidelidadeTraceIdExecutor }
+      : {};
 
     if (
       normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || "") === "mercadolivre" &&
@@ -4802,6 +4809,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
     tentouEnvio = true;
     fidelidadeObs.registrarExecutor("executor_entrada", {
+      ...contextoFidelidadeExecutor,
       canal: "whatsapp",
       clienteId,
       destino: destino.nome || destino.id || "",
@@ -4825,6 +4833,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
     confirmouEnvio = true;
     fidelidadeObs.registrarExecutor("executor_resultado", {
+      ...contextoFidelidadeExecutor,
       canal: "whatsapp",
       clienteId,
       destino: destino.nome || destino.id || "",
@@ -5025,6 +5034,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
         tentouEnvio = true;
         fidelidadeObs.registrarExecutor("executor_entrada", {
+          ...contextoFidelidadeExecutor,
           canal: "telegram",
           clienteId,
           destino: destino.nome || destino.id || "",
@@ -5058,6 +5068,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
         telegramEnviado = true;
         confirmouEnvio = true;
         fidelidadeObs.registrarExecutor("executor_resultado", {
+          ...contextoFidelidadeExecutor,
           canal: "telegram",
           clienteId,
           destino: destino.nome || destino.id || "",
@@ -5122,6 +5133,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     );
 
     fidelidadeObs.registrarExecutor("executor_resultado", {
+      ...contextoFidelidadeExecutor,
       canal: String(destino?.tipo || "").toLowerCase() || "",
       clienteId,
       destino: destino?.nome || destino?.id || destino?.destinoId || "",
@@ -13769,45 +13781,42 @@ const marketplaceDetectadoLinks = links
   .map(link => detectarMarketplaceRadarLink(link))
   .find(Boolean) || "";
 let extracaoRadarLocal = null;
-
-fidelidadeObs.registrarTrace("captura_radar", {
+const observabilidadeFidelidadeAtiva = fidelidadeObs.flagAtiva();
+const capturadaEmFidelidadeRadar = observabilidadeFidelidadeAtiva ? (capturadaEm || new Date().toISOString()) : "";
+const contextoFidelidadeRadar = {
   clienteId: adminMasterId,
   origemTipo: origemTipoFinal,
   grupoId: grupoIdTexto,
   grupoNome: grupoNomeTexto,
   mensagemId: raw?.key?.id || "",
+  capturadaEm: capturadaEmFidelidadeRadar,
   textoOriginal: texto,
   linksExtraidos: links,
   raw,
-  marketplace: marketplaceDetectadoLinks,
+  marketplace: marketplaceDetectadoLinks
+};
+const fidelidadeTraceIdPrincipal = observabilidadeFidelidadeAtiva
+  ? fidelidadeObs.resolverFidelidadeTraceId(contextoFidelidadeRadar, raw)
+  : "";
+
+fidelidadeObs.registrarTrace("captura_radar_inicio", {
+  ...contextoFidelidadeRadar,
+  fidelidadeTraceId: fidelidadeTraceIdPrincipal,
   observacoes: "mensagem_recebida_radar"
 });
 fidelidadeObs.registrarSnapshot("origem_capturada", {
-  clienteId: adminMasterId,
-  origemTipo: origemTipoFinal,
-  grupoId: grupoIdTexto,
-  grupoNome: grupoNomeTexto,
-  mensagemId: raw?.key?.id || "",
-  textoOriginal: texto,
+  ...contextoFidelidadeRadar,
+  fidelidadeTraceId: fidelidadeTraceIdPrincipal,
   linksEncontrados: links,
-  raw,
-  marketplace: marketplaceDetectadoLinks
 });
-fidelidadeObs.registrarLinks("captura_radar", {
-  clienteId: adminMasterId,
-  origemTipo: origemTipoFinal,
-  grupoId: grupoIdTexto,
-  grupoNome: grupoNomeTexto,
-  mensagemId: raw?.key?.id || "",
-  links,
-  marketplace: marketplaceDetectadoLinks
+fidelidadeObs.registrarLinks("captura_radar_links", {
+  ...contextoFidelidadeRadar,
+  fidelidadeTraceId: fidelidadeTraceIdPrincipal,
+  links
 });
-fidelidadeObs.registrarImagem("captura_radar", {
-  clienteId: adminMasterId,
-  origemTipo: origemTipoFinal,
-  grupoId: grupoIdTexto,
-  grupoNome: grupoNomeTexto,
-  mensagemId: raw?.key?.id || "",
+fidelidadeObs.registrarImagem("captura_radar_imagem", {
+  ...contextoFidelidadeRadar,
+  fidelidadeTraceId: fidelidadeTraceIdPrincipal,
   imagem: raw?.message?.imageMessage?.url || raw?.image || raw?.photo || raw?.media?.url || "",
   jpegThumbnailPresente: Boolean(raw?.message?.imageMessage?.jpegThumbnail || raw?.message?.extendedTextMessage?.jpegThumbnail),
   status: raw?.message?.imageMessage || raw?.image || raw?.photo || raw?.media?.type === "image"
@@ -13883,9 +13892,12 @@ const radarMirrorBase = criarRadarMirror({
   extracaoRadarLocal,
   beneficiosMensagem,
   raw,
-  marketplace: marketplaceDetectadoLinks
+  marketplace: marketplaceDetectadoLinks,
+  fidelidadeTraceId: fidelidadeTraceIdPrincipal,
+  mensagemId: raw?.key?.id || ""
 });
 fidelidadeObs.registrarSnapshot("radar_mirror", {
+  fidelidadeTraceId: fidelidadeTraceIdPrincipal,
   clienteId: adminMasterId,
   origemTipo: origemTipoFinal,
   grupoId: grupoIdTexto,
@@ -13904,7 +13916,9 @@ fidelidadeObs.registrarSnapshot("radar_mirror", {
   observacoes: "radar_mirror_criado"
 });
 fidelidadeObs.registrarPreco("radar_mirror", {
+  fidelidadeTraceId: fidelidadeTraceIdPrincipal,
   clienteId: adminMasterId,
+  mensagemId: raw?.key?.id || "",
   textoComercial: texto,
   precoDe: radarMirrorBase?.preco?.anteriorCapturado ?? "",
   precoPor: radarMirrorBase?.preco?.atualCapturado ?? "",
@@ -13912,7 +13926,9 @@ fidelidadeObs.registrarPreco("radar_mirror", {
   parcelamento: radarMirrorBase?.parcelamento?.texto || ""
 });
 fidelidadeObs.registrarCupom("radar_mirror", {
+  fidelidadeTraceId: fidelidadeTraceIdPrincipal,
   clienteId: adminMasterId,
+  mensagemId: raw?.key?.id || "",
   textoOriginal: texto,
   cupom: radarMirrorBase?.cupom?.codigoCapturado || "",
   instrucao: radarMirrorBase?.cupom?.condicaoCapturada || "",
@@ -14147,7 +14163,8 @@ const registroEngineRadar = temRedirectConhecidoRadar
       grupoNome: grupoNomeTexto,
       textoOriginal: texto,
       raw,
-      radarMirror: radarMirrorBase
+      radarMirror: radarMirrorBase,
+      ...(fidelidadeTraceIdPrincipal ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal } : {})
     });
     let comparacaoRadarLocal = null;
     if (extracaoRadarLocal) {
@@ -14353,10 +14370,12 @@ const registroEngineRadar = temRedirectConhecidoRadar
       imagem: imagemOfertaRadar(ofertaImportadorRadar),
       image: imagemOfertaRadar(ofertaImportadorRadar),
       mensagemOriginalRadar: texto.slice(0, 1000),
+      ...(fidelidadeTraceIdPrincipal ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal } : {}),
       capturadaEm: dataCaptura,
       dataEntradaRadar: dataCaptura,
       metadata: mergeRadarMirrorMetadata({
         ...(resultadoPrecedenciaComercial?.metadata && typeof resultadoPrecedenciaComercial.metadata === "object" ? resultadoPrecedenciaComercial.metadata : (ofertaImportadorRadar?.metadata && typeof ofertaImportadorRadar.metadata === "object" ? ofertaImportadorRadar.metadata : {})),
+        ...(fidelidadeTraceIdPrincipal ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal } : {}),
         comparacaoRadarLocal,
         radarHibrido: {
           ...(ofertaImportadorRadar?.metadata?.radarHibrido && typeof ofertaImportadorRadar.metadata.radarHibrido === "object" ? ofertaImportadorRadar.metadata.radarHibrido : {}),
@@ -14366,6 +14385,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
     })));
     const resolucaoCaptura = resolverClienteMensageiroPorSessao(sessaoIdTexto);
     fidelidadeObs.registrarSnapshot("espelho_comercial_saida", {
+      fidelidadeTraceId: fidelidadeTraceIdPrincipal,
       clienteId: adminMasterId,
       mensagemId: raw?.key?.id || "",
       oferta: ofertaRadar,
@@ -14373,7 +14393,9 @@ const registroEngineRadar = temRedirectConhecidoRadar
       observacoes: "oferta_radar_preparada"
     });
     fidelidadeObs.registrarIdentidade("espelho_comercial_saida", {
+      fidelidadeTraceId: fidelidadeTraceIdPrincipal,
       clienteId: adminMasterId,
+      mensagemId: raw?.key?.id || "",
       oferta: ofertaRadar,
       marketplaceInicial: marketplaceDetectadoLinks,
       marketplaceImportador: ofertaImportadorRadar?.marketplace || "",
@@ -14383,7 +14405,9 @@ const registroEngineRadar = temRedirectConhecidoRadar
       produtoIdImportado: ofertaRadar.produtoIdDetectado || ofertaRadar.produtoId || ""
     });
     fidelidadeObs.registrarImagem("espelho_comercial_saida", {
+      fidelidadeTraceId: fidelidadeTraceIdPrincipal,
       clienteId: adminMasterId,
+      mensagemId: raw?.key?.id || "",
       oferta: ofertaRadar,
       imagem: ofertaRadar.imagem || "",
       imagemOrigem: ofertaRadar.imagemOrigem || "",

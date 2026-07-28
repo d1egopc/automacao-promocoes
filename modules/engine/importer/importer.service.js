@@ -910,7 +910,14 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
 }
 
 async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrada = {}) {
+  const fidelidadeTraceIdPrincipal = fidelidadeObs.flagAtiva()
+    ? fidelidadeObs.resolverFidelidadeTraceId(ofertaEntrada, ofertaEntrada.metadata, evento, evento.metadata, job, link)
+    : "";
+  const contextoFidelidadeImportador = fidelidadeTraceIdPrincipal
+    ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal }
+    : {};
   fidelidadeObs.registrarSnapshot("importador_entrada", {
+    ...contextoFidelidadeImportador,
     job,
     evento,
     link,
@@ -919,6 +926,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     marketplace: job.marketplace || job.marketplace_detectado || ""
   });
   fidelidadeObs.registrarLinks("importador_entrada", {
+    ...contextoFidelidadeImportador,
     job,
     evento,
     link,
@@ -927,6 +935,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     linkProduto: link.url_expandida || link.url_original || ofertaEntrada.linkOriginal || ""
   });
   fidelidadeObs.registrarImagem("importador_entrada", {
+    ...contextoFidelidadeImportador,
     job,
     evento,
     link,
@@ -937,6 +946,16 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       : "ausente_no_importador"
   });
   let oferta = normalizarOfertaImportada(ofertaEntrada, job);
+  if (fidelidadeTraceIdPrincipal) {
+    oferta = {
+      ...oferta,
+      fidelidadeTraceId: fidelidadeTraceIdPrincipal,
+      metadata: {
+        ...(oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {}),
+        fidelidadeTraceId: fidelidadeTraceIdPrincipal
+      }
+    };
+  }
   oferta = resolverImagemUniversal(oferta, {
     origem: "engine_importer",
     ofertaEntrada,
@@ -947,6 +966,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   const temImagemImporter = Boolean(oferta.imagem);
   const campoImagemImporter = oferta.imagemOrigem || "";
   fidelidadeObs.registrarSnapshot("importador_saida", {
+    ...contextoFidelidadeImportador,
     job,
     evento,
     link,
@@ -955,6 +975,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || ""
   });
   fidelidadeObs.registrarImagem("importador_saida", {
+    ...contextoFidelidadeImportador,
     job,
     evento,
     link,
@@ -965,6 +986,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     motivo: oferta.imagem ? "" : "imagem_nao_resolvida_apos_importador"
   });
   fidelidadeObs.registrarIdentidade("importador_saida", {
+    ...contextoFidelidadeImportador,
     job,
     evento,
     link,
@@ -976,6 +998,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     produtoIdImportado: oferta.produtoIdDetectado || oferta.itemId || ""
   });
   fidelidadeObs.registrarPreco("importador_saida", {
+    ...contextoFidelidadeImportador,
     job,
     evento,
     oferta,
@@ -984,6 +1007,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     precoImportador: ofertaEntrada.preco || ofertaEntrada.precoAtual || ""
   });
   fidelidadeObs.registrarCupom("importador_saida", {
+    ...contextoFidelidadeImportador,
     job,
     evento,
     oferta,
@@ -1079,6 +1103,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     ...metadataEvento,
     ...metadataBase,
     ...objetoSeguro(sombraV2.metadata || {}),
+    ...(fidelidadeTraceIdPrincipal ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal } : {}),
     imagemOrigem: imagemOrigemFinal,
     imagemFallbackUsado,
     imagemAusenteMotivo,

@@ -265,8 +265,15 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
     ...oferta,
     clienteId
   });
+  const fidelidadeTraceIdPrincipal = fidelidadeObs.flagAtiva()
+    ? fidelidadeObs.resolverFidelidadeTraceId(oferta, oferta.metadata, ofertaOficial, ofertaOficial.metadata)
+    : "";
+  const contextoFidelidadeTemplate = fidelidadeTraceIdPrincipal
+    ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal }
+    : {};
   const registrarTemplate = (templateTipo, mensagem) => {
     fidelidadeObs.registrarTemplate("template_saida", {
+      ...contextoFidelidadeTemplate,
       clienteId,
       destinoId: destino.id || destino.destinoId || "",
       canal: opcoes.canal || destino.canal || destino.tipo || "",
@@ -277,6 +284,7 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
     return mensagem;
   };
   fidelidadeObs.registrarTemplate("template_entrada", {
+    ...contextoFidelidadeTemplate,
     clienteId,
     destinoId: destino.id || destino.destinoId || "",
     canal: opcoes.canal || destino.canal || destino.tipo || "",

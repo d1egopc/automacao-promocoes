@@ -340,7 +340,14 @@ function montarMensagemTemplatePersonalizado(oferta = {}, destino = {}) {
 
   if (!mensagemOferta.template) return "";
 
+  const fidelidadeTraceIdPrincipal = fidelidadeObs.flagAtiva()
+    ? fidelidadeObs.resolverFidelidadeTraceId(oferta, oferta.metadata)
+    : "";
+  const contextoFidelidadeTemplate = fidelidadeTraceIdPrincipal
+    ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal }
+    : {};
   fidelidadeObs.registrarTemplate("template_personalizado_legado_entrada", {
+    ...contextoFidelidadeTemplate,
     oferta,
     destinoId: destino.id || destino.destinoId || "",
     templateTipo: "personalizado_legado"
@@ -350,6 +357,7 @@ function montarMensagemTemplatePersonalizado(oferta = {}, destino = {}) {
     montarDadosTemplateOferta(oferta)
   ).trim();
   fidelidadeObs.registrarTemplate("template_personalizado_legado_saida", {
+    ...contextoFidelidadeTemplate,
     oferta,
     destinoId: destino.id || destino.destinoId || "",
     templateTipo: "personalizado_legado",

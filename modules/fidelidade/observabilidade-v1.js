@@ -158,6 +158,28 @@ function linksDaOferta(oferta = {}) {
     }));
 }
 
+function assinaturaMensagemSemId(item = {}) {
+  const fonte = objeto(item);
+  const raw = objeto(fonte.raw);
+  const key = objeto(fonte.key || raw.key);
+  const partes = [
+    fonte.clienteId || fonte.cliente_id,
+    fonte.origemTipo || fonte.origem_tipo,
+    fonte.grupoId || fonte.grupo_id,
+    fonte.grupoNome || fonte.grupo_nome,
+    fonte.sessaoId || fonte.sessao_id,
+    fonte.capturadaEm || fonte.capturado_em || fonte.recebidaEm || fonte.recebido_em,
+    fonte.timestamp || fonte.messageTimestamp || raw.messageTimestamp,
+    key.remoteJid,
+    key.participant,
+    key.fromMe === true ? "from_me" : "",
+    raw.pushName,
+    raw.participant,
+    raw.remoteJid
+  ].map(texto).filter(Boolean);
+  return partes.length >= 2 ? partes.join("|") : "";
+}
+
 function resolverFidelidadeTraceId(...fontes) {
   const candidatos = [];
   for (const fonte of fontes) {
@@ -179,11 +201,22 @@ function resolverFidelidadeTraceId(...fontes) {
       item.metadata?.fidelidadeTraceId,
       item.metadata?.radarMirror?.fidelidadeTraceId,
       item.metadata?.radarEspelhoComercial?.fidelidadeTraceId,
-      item.key?.id ? `mensagem:${item.key.id}` : ""
+      item.metadata?.contratoComercialCanonico?.rastreamento?.fidelidadeTraceId,
+      item.metadata?.contratoComercialCanonico?.rastreamento?.mensagemId,
+      item.metadata?.radarEspelhoComercial?.contratoComercial?.rastreamento?.fidelidadeTraceId,
+      item.metadata?.radarEspelhoComercial?.contratoComercial?.rastreamento?.mensagemId,
+      item.rastreamento?.fidelidadeTraceId,
+      item.rastreamento?.mensagemId,
+      item.origem?.fidelidadeTraceId,
+      item.origem?.mensagemId,
+      item.key?.id
     );
   }
   const explicito = candidatos.map(texto).find(Boolean);
   if (explicito) return explicito.startsWith("fid_") ? explicito : `fid_${hashCurto(explicito)}`;
+
+  const assinaturaSemId = fontes.map(assinaturaMensagemSemId).filter(Boolean).join("||");
+  if (assinaturaSemId) return `fid_${hashCurto(`mensagem_sem_id|${assinaturaSemId}`)}`;
 
   const base = fontes.map(fonte => {
     const item = objeto(fonte);

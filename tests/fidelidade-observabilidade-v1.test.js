@@ -8,6 +8,7 @@ process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-fidelidade
 const obs = require("../modules/fidelidade/observabilidade-v1");
 const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
 const { renderizarTemplatePersonalizado } = require("../modules/templates-clientes/renderer");
+const { criarRadarMirror } = require("../modules/radar/radar-mirror");
 
 function clonar(valor) {
   return JSON.parse(JSON.stringify(valor));
@@ -23,6 +24,15 @@ function capturarLogs(fn) {
   } finally {
     console.log = original;
   }
+}
+
+function parsearLogsFidelidade(logs = []) {
+  return logs
+    .filter(linha => linha.includes("[FIDELIDADE-V1-"))
+    .map(linha => {
+      const inicioJson = linha.indexOf("{");
+      return JSON.parse(linha.slice(inicioJson));
+    });
 }
 
 const ofertaBase = {
@@ -78,6 +88,58 @@ const ofertaBase = {
 }
 
 {
+  const semTrace = criarRadarMirror({
+    clienteId: "cliente_fid",
+    textoOriginal: "Oferta sem trace",
+    links: ["https://produto.mercadolivre.com.br/MLB-123456"],
+    raw: { key: { id: "3EB0247F557B8785BE77DE" } }
+  });
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(semTrace, "fidelidadeTraceId"), false);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(semTrace.origem, "fidelidadeTraceId"), false);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(semTrace.origem, "mensagemId"), false);
+
+  const comTrace = criarRadarMirror({
+    clienteId: "cliente_fid",
+    textoOriginal: "Oferta com trace",
+    links: ["https://produto.mercadolivre.com.br/MLB-123456"],
+    raw: { key: { id: "3EB0247F557B8785BE77DE" } },
+    fidelidadeTraceId: "fid_f0b74def6d93c6c7",
+    mensagemId: "3EB0247F557B8785BE77DE"
+  });
+  assert.strictEqual(comTrace.fidelidadeTraceId, "fid_f0b74def6d93c6c7");
+  assert.strictEqual(comTrace.origem.fidelidadeTraceId, "fid_f0b74def6d93c6c7");
+  assert.strictEqual(comTrace.origem.mensagemId, "3EB0247F557B8785BE77DE");
+}
+
+{
+  const baseSemMensagemId = {
+    clienteId: "cliente_fid",
+    origemTipo: "whatsapp",
+    grupoId: "grupo_ofertas",
+    grupoNome: "Grupo Ofertas",
+    textoOriginal: "Produto repetido por R$ 10",
+    linksExtraidos: ["https://produto.example/oferta"]
+  };
+  const traceMensagemA = obs.resolverFidelidadeTraceId({
+    ...baseSemMensagemId,
+    raw: {
+      messageTimestamp: 111,
+      key: { remoteJid: "grupo_ofertas@g.us", participant: "5511999999999@s.whatsapp.net" }
+    }
+  });
+  const traceMensagemB = obs.resolverFidelidadeTraceId({
+    ...baseSemMensagemId,
+    raw: {
+      messageTimestamp: 112,
+      key: { remoteJid: "grupo_ofertas@g.us", participant: "5511999999999@s.whatsapp.net" }
+    }
+  });
+  assert(traceMensagemA.startsWith("fid_"));
+  assert(traceMensagemB.startsWith("fid_"));
+  assert.notStrictEqual(traceMensagemA, traceMensagemB, "mensagens sem mensagemId nao devem reutilizar trace apenas por texto/link/grupo iguais");
+}
+
+{
   const links = obs.linksDaOferta(ofertaBase);
   assert.strictEqual(links.length, 3);
   assert(links.some(item => item.url.includes("?[params]")));
@@ -126,6 +188,59 @@ const ofertaBase = {
 
   assert.deepStrictEqual(comFlag, semFlag, "observabilidade nao deve mudar renderer personalizado");
   assert(logs.some(linha => linha.includes("[FIDELIDADE-V1-TEMPLATE]")));
+}
+
+{
+  process.env.FIDELIDADE_OBSERVABILIDADE_ENABLED = "1";
+  const mensagemId = "3EB0247F557B8785BE77DE";
+  const fidelidadeTraceId = obs.resolverFidelidadeTraceId({ mensagemId });
+  assert.strictEqual(fidelidadeTraceId, "fid_f0b74def6d93c6c7");
+
+  const oferta = {
+    ...clonar(ofertaBase),
+    mensagemId,
+    fidelidadeTraceId,
+    condicaoPix: "Resgate o cupom 50% OFF",
+    cupom: "50OFF",
+    metadata: {
+      fidelidadeTraceId,
+      radarMirror: {
+        fidelidadeTraceId,
+        origem: {
+          mensagemId,
+          fidelidadeTraceId
+        }
+      }
+    }
+  };
+  const contexto = { fidelidadeTraceId, mensagemId, clienteId: "cliente_fid", oferta };
+  const { logs } = capturarLogs(() => {
+    obs.registrarTrace("captura_radar_inicio", contexto);
+    obs.registrarSnapshot("origem_capturada", contexto);
+    obs.registrarLinks("captura_radar_links", { ...contexto, links: oferta.linksOriginais });
+    obs.registrarImagem("captura_radar_imagem", { ...contexto, imagem: oferta.imagem });
+    obs.registrarIdentidade("espelho_comercial_saida", contexto);
+    obs.registrarPreco("radar_mirror", contexto);
+    obs.registrarCupom("radar_mirror", contexto);
+    obs.registrarTemplate("template_entrada", { ...contexto, mensagem: "texto renderizado" });
+    obs.registrarExecutor("executor_entrada", {
+      ...contexto,
+      canal: "telegram",
+      tipoMidia: "imagem",
+      tentativaImagem: true,
+      caiuParaTexto: false
+    });
+  });
+
+  const payloads = parsearLogsFidelidade(logs);
+  assert(payloads.length >= 9);
+  assert(payloads.every(payload => payload.fidelidadeTraceId === fidelidadeTraceId), "todos os logs da mesma oferta devem usar o mesmo fidelidadeTraceId");
+
+  const chavesCaptura = payloads
+    .filter(payload => String(payload.etapa || "").startsWith("captura_radar"))
+    .map(payload => payload.etapa);
+  assert.deepStrictEqual(chavesCaptura, ["captura_radar_inicio", "captura_radar_links", "captura_radar_imagem"]);
+  assert.strictEqual(new Set(chavesCaptura).size, chavesCaptura.length, "etapas captura_radar devem ser diferenciadas para nao parecer duplicidade");
 }
 
 {

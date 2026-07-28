@@ -379,7 +379,14 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
 
   const blocos = Array.isArray(template.blocos) ? [...template.blocos] : [];
   const ofertaOficial = prepararDadosOficiaisTemplate(oferta, { modo: "personalizado" });
+  const fidelidadeTraceIdPrincipal = fidelidadeObs.flagAtiva()
+    ? fidelidadeObs.resolverFidelidadeTraceId(oferta, oferta.metadata, ofertaOficial, ofertaOficial.metadata)
+    : "";
+  const contextoFidelidadeTemplate = fidelidadeTraceIdPrincipal
+    ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal }
+    : {};
   fidelidadeObs.registrarTemplate("template_personalizado_renderer_entrada", {
+    ...contextoFidelidadeTemplate,
     oferta: ofertaOficial,
     templateTipo: "personalizado_renderer",
     canal: canalNormalizado,
@@ -456,6 +463,7 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
 
   const mensagem = montarMensagemAgrupada(linhas);
   fidelidadeObs.registrarTemplate("template_personalizado_renderer_saida", {
+    ...contextoFidelidadeTemplate,
     oferta: ofertaOficial,
     templateTipo: "personalizado_renderer",
     canal: canalNormalizado,
