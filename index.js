@@ -9,6 +9,9 @@ const {
   preservarCandidatosImagemUniversal,
   resolverImagemUniversal
 } = require("./modules/imagens/resolver-imagem-universal");
+const {
+  normalizarCuponsSemanticos
+} = require("./modules/radar/cupom-semantico");
 
 const {
   initEngineDatabase,
@@ -10181,102 +10184,17 @@ function extrairCuponsRadarOferta(oferta = {}) {
     ...(Array.isArray(oferta.metadata?.radarMirror?.comercial?.cupom?.codigos) ? oferta.metadata.radarMirror.comercial.cupom.codigos : []),
     oferta.cupom || "",
     oferta.codigoCupom || "",
-    oferta.cupomTexto || "",
-    oferta.instrucaoCupom || "",
     oferta.metadata?.radarMirror?.cupom?.codigoCapturado || "",
-    oferta.metadata?.radarMirror?.cupom?.textoCapturado || "",
-    oferta.metadata?.radarMirror?.cupom?.condicaoCapturada || "",
-    oferta.metadata?.radarMirror?.comercial?.cupom?.codigo || "",
-    oferta.metadata?.radarMirror?.comercial?.cupom?.texto || "",
-    oferta.metadata?.radarMirror?.comercial?.cupom?.instrucao || ""
+    oferta.metadata?.radarMirror?.comercial?.cupom?.codigo || ""
   ];
-  const bloqueados = new Set([
-    "VER NO APP",
-    "COPIADO",
-    "APPLIED",
-    "APPEARANCE",
-    "APPLINK",
-    "CUPOM",
-    "CODIGO",
-    "CODE",
-    "DESCONTO",
-    "CONFIRA",
-    "RESGATE",
-    "COMPRAR",
-    "COMPRE",
-    "VER OFERTA",
-    "PEGAR OFERTA",
-    "ABRIR OFERTA",
-    "BOTAO",
-    "BUTTON",
-    "TEMA",
-    "APLICAR",
-    "VALIDO",
-    "CARRINHO",
-    "OU",
-    "E",
-    "OR"
-  ]);
-  const vistos = new Set();
-  const cupons = [];
-
-  for (const entrada of entradas) {
-    const base = textoRadarId(entrada)
-      .toUpperCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/\b(CUPOM|CODIGO|CODE|USE|UTILIZE|APLIQUE|RESGATE)\b\s*:?\s*/g, " ")
-      .trim();
-    const partes = base.match(/\b[A-Z0-9][A-Z0-9_-]{3,39}\b/g) || [];
-    for (const parte of partes) {
-      if (
-        bloqueados.has(parte) ||
-        vistos.has(parte) ||
-        /^(VER|CONFIRA|COMPR|PEGAR|ABRIR|APLICAR|RESGAT)/i.test(parte)
-      ) {
-        continue;
-      }
-      vistos.add(parte);
-      cupons.push(parte);
-    }
-  }
-
-  return cupons;
+  return normalizarCuponsSemanticos(entradas);
 }
 
 function normalizarCupomRadar(oferta = {}) {
   const cupons = extrairCuponsRadarOferta(oferta);
   const cupom = cupons.join(" ou ");
-  const bloqueados = new Set([
-    "VER NO APP",
-    "COPIADO",
-    "APPLIED",
-    "APPEARANCE",
-    "APPLINK",
-    "CUPOM",
-    "DESCONTO",
-    "CONFIRA",
-    "RESGATE",
-    "COMPRAR",
-    "COMPRE",
-    "VER OFERTA",
-    "PEGAR OFERTA",
-    "ABRIR OFERTA",
-    "BOTAO",
-    "BUTTON",
-    "TEMA",
-    "APLICAR",
-    "VALIDO"
-  ]);
   const cupomOrigem = normalizarTexto(oferta.cupomOrigem || "");
-  const cupomValido = Boolean(
-    cupons.length &&
-    cupons.every(codigo =>
-      !bloqueados.has(codigo) &&
-      !/^(VER|CONFIRA|COMPR|PEGAR|ABRIR|APLICAR|RESGAT)/i.test(codigo) &&
-      /^[A-Z0-9][A-Z0-9_-]{3,39}$/.test(codigo)
-    )
-  );
+  const cupomValido = cupons.length > 0;
   const cupomConfirmado = cupomValido && !["texto_grupo", "mensagem"].includes(cupomOrigem);
   const avisoCupom = textoRadarId(oferta.avisoCupom || oferta.aviso_cupom || "");
   const possivelCupom = !cupomConfirmado && Boolean(cupom || avisoCupom);

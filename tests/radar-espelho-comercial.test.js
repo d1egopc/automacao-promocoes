@@ -329,6 +329,7 @@ function criarMirrorComTextoComercial(textoOriginal, ajustes = {}) {
   assert.deepStrictEqual(normalizarCuponsSemanticos("Cupom: MODALIVRE ou AMOCUPOM"), ["MODALIVRE", "AMOCUPOM"]);
   assert.deepStrictEqual(normalizarCuponsSemanticos("Use o cupom de 10% OFF disponivel no anuncio"), []);
   assert.deepStrictEqual(normalizarCuponsSemanticos("Resgate todos os cupons desta pagina"), []);
+  assert.deepStrictEqual(normalizarCuponsSemanticos("Resgate todos os cupons desta página:"), []);
   assert.deepStrictEqual(normalizarCuponsSemanticos("Use cupom: CUPOMDANOITE ou resgate no anuncio"), ["CUPOMDANOITE"]);
   assert.deepStrictEqual(normalizarCuponsSemanticos("Aplique o cupom MLSAUDE para obter o desconto."), ["MLSAUDE"]);
 }
@@ -760,6 +761,17 @@ function criarMirrorComTextoComercial(textoOriginal, ajustes = {}) {
   assert.strictEqual(resultado.ok, false);
   assert.strictEqual(resultado.motivo, "radar_contrato_comercial_ambiguo");
   assert.strictEqual(resultado.motivoTecnico, "preco_sem_produto");
+}
+
+{
+  const indexSource = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
+  const matchFuncao = indexSource.match(/function extrairCuponsRadarOferta\(oferta = \{\}\) \{([\s\S]*?)\n\}/);
+  assert.ok(matchFuncao, "extrairCuponsRadarOferta deve existir no index.js");
+  const corpo = matchFuncao[1];
+  assert.ok(corpo.includes("normalizarCuponsSemanticos(entradas)"), "index deve delegar cupons ao Cupom Semantico");
+  assert.strictEqual(/\.match\(/.test(corpo), false, "index nao pode tokenizar cupom com regex propria");
+  assert.strictEqual(/new Set\(/.test(corpo), false, "index nao pode manter blacklist propria de cupom");
+  assert.strictEqual(/replace\(/.test(corpo), false, "index nao pode normalizar cupom manualmente");
 }
 
 console.log("radar-espelho-comercial.test.js OK");
