@@ -3,6 +3,7 @@ const {
   prepararDadosOficiaisTemplate,
   diagnosticoDadosOficiaisTemplate
 } = require("./dados-oficiais");
+const fidelidadeObs = require("../fidelidade/observabilidade-v1");
 
 function textoUtil(valor) {
   if (valor === undefined || valor === null) return "";
@@ -378,6 +379,12 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
 
   const blocos = Array.isArray(template.blocos) ? [...template.blocos] : [];
   const ofertaOficial = prepararDadosOficiaisTemplate(oferta, { modo: "personalizado" });
+  fidelidadeObs.registrarTemplate("template_personalizado_renderer_entrada", {
+    oferta: ofertaOficial,
+    templateTipo: "personalizado_renderer",
+    canal: canalNormalizado,
+    templateId: template.id || ""
+  });
 
   if (process.env.NODE_ENV === "test" || process.env.TEMPLATE_DADOS_OFICIAIS_LOG === "1") {
     console.log("[TEMPLATE-DADOS-OFICIAIS]", JSON.stringify(diagnosticoDadosOficiaisTemplate(ofertaOficial)));
@@ -447,9 +454,20 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
     }
   }
 
+  const mensagem = montarMensagemAgrupada(linhas);
+  fidelidadeObs.registrarTemplate("template_personalizado_renderer_saida", {
+    oferta: ofertaOficial,
+    templateTipo: "personalizado_renderer",
+    canal: canalNormalizado,
+    templateId: template.id || "",
+    mensagem,
+    blocosRenderizados,
+    blocosIgnorados
+  });
+
   return {
     ok: true,
-    mensagem: montarMensagemAgrupada(linhas),
+    mensagem,
     templateIdUsado: template.id || "",
     blocosRenderizados,
     blocosIgnorados

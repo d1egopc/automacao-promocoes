@@ -9,6 +9,7 @@ const {
 const filaOfertas = require("../../../utils/fila-ofertas");
 const destinosUtils = require("../../../utils/destinos");
 const { resolverImagemUniversal } = require("../../imagens/resolver-imagem-universal");
+const fidelidadeObs = require("../../fidelidade/observabilidade-v1");
 const {
   usuarioAtivo,
   logUsuarioInativoIgnorado
@@ -599,6 +600,36 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
   }
 
   const itemFila = montarItemFilaEngine(oferta);
+  fidelidadeObs.registrarSnapshot("distributor_entrada", {
+    clienteId,
+    oferta,
+    marketplace: oferta.marketplace || "",
+    observacoes: "entrada_distributor"
+  });
+  fidelidadeObs.registrarImagem("distributor_entrada", {
+    clienteId,
+    oferta,
+    imagem: oferta.imagem || "",
+    imagemOrigem: oferta.metadata?.imagemOrigem || "",
+    status: oferta.imagem ? "URL_http_presente" : "perdida_entre_etapas"
+  });
+  fidelidadeObs.registrarSnapshot("fila_entrada", {
+    clienteId,
+    oferta: itemFila,
+    marketplace: itemFila.marketplace || "",
+    observacoes: "item_montado_para_fila"
+  });
+  fidelidadeObs.registrarLinks("fila_entrada", {
+    clienteId,
+    oferta: itemFila
+  });
+  fidelidadeObs.registrarImagem("fila_entrada", {
+    clienteId,
+    oferta: itemFila,
+    imagem: itemFila.imagem || "",
+    imagemOrigem: itemFila.imagemOrigem || "",
+    status: itemFila.imagem ? "URL_http_presente" : "perdida_entre_etapas"
+  });
   if (itemFila.metadata?.radarMirror) {
     console.log("[RADAR-MIRROR-PRESERVADO]", JSON.stringify({
       clienteId,

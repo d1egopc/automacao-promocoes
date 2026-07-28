@@ -12,6 +12,7 @@ const {
 const {
   normalizarCuponsSemanticos
 } = require("./modules/radar/cupom-semantico");
+const fidelidadeObs = require("./modules/fidelidade/observabilidade-v1");
 
 const {
   initEngineDatabase,
@@ -4800,6 +4801,17 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
 
     tentouEnvio = true;
+    fidelidadeObs.registrarExecutor("executor_entrada", {
+      canal: "whatsapp",
+      clienteId,
+      destino: destino.nome || destino.id || "",
+      tipoMidia: destino.tipoMidia || "",
+      oferta,
+      imagem: oferta.imagem || "",
+      tentativaImagem: destino.tipoMidia !== "texto" && Boolean(oferta.imagem),
+      caiuParaTexto: destino.tipoMidia === "texto" || !oferta.imagem,
+      motivoTecnico: !oferta.imagem ? "imagem_ausente" : (destino.tipoMidia === "texto" ? "destino_tipo_midia_texto" : "")
+    });
     if (destino.tipoMidia === "texto" || !oferta.imagem) {
       await sock.sendMessage(grupo, { text: mensagem });
     } else {
@@ -4812,6 +4824,17 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     }
 
     confirmouEnvio = true;
+    fidelidadeObs.registrarExecutor("executor_resultado", {
+      canal: "whatsapp",
+      clienteId,
+      destino: destino.nome || destino.id || "",
+      tipoMidia: destino.tipoMidia || "",
+      oferta,
+      imagem: oferta.imagem || "",
+      tentativaImagem: destino.tipoMidia !== "texto" && Boolean(oferta.imagem),
+      caiuParaTexto: destino.tipoMidia === "texto" || !oferta.imagem,
+      resultado: "enviado"
+    });
     debitarCreditos(clienteId, 1);
 
     logOptimus("WHATSAPP", "Mensagem enviada", {
@@ -5001,6 +5024,17 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
 
         tentouEnvio = true;
+        fidelidadeObs.registrarExecutor("executor_entrada", {
+          canal: "telegram",
+          clienteId,
+          destino: destino.nome || destino.id || "",
+          tipoMidia: destino.tipoMidia || "",
+          oferta,
+          imagem: oferta.imagem || "",
+          tentativaImagem: destino.tipoMidia !== "texto" && Boolean(oferta.imagem),
+          caiuParaTexto: destino.tipoMidia === "texto" || !oferta.imagem,
+          motivoTecnico: !oferta.imagem ? "imagem_ausente" : (destino.tipoMidia === "texto" ? "destino_tipo_midia_texto" : "")
+        });
         if (destino.tipoMidia === "texto" || !oferta.imagem) {
           await axios.post(
             `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
@@ -5023,6 +5057,17 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
         debitarCreditos(clienteId, 1);
         telegramEnviado = true;
         confirmouEnvio = true;
+        fidelidadeObs.registrarExecutor("executor_resultado", {
+          canal: "telegram",
+          clienteId,
+          destino: destino.nome || destino.id || "",
+          tipoMidia: destino.tipoMidia || "",
+          oferta,
+          imagem: oferta.imagem || "",
+          tentativaImagem: destino.tipoMidia !== "texto" && Boolean(oferta.imagem),
+          caiuParaTexto: destino.tipoMidia === "texto" || !oferta.imagem,
+          resultado: "enviado"
+        });
 
         logOptimus("TELEGRAM", "Mensagem enviada", {
           clienteId,
@@ -5075,6 +5120,19 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       destino?.nome,
       e.message
     );
+
+    fidelidadeObs.registrarExecutor("executor_resultado", {
+      canal: String(destino?.tipo || "").toLowerCase() || "",
+      clienteId,
+      destino: destino?.nome || destino?.id || destino?.destinoId || "",
+      tipoMidia: destino?.tipoMidia || "",
+      oferta,
+      imagem: oferta?.imagem || "",
+      tentativaImagem: destino?.tipoMidia !== "texto" && Boolean(oferta?.imagem),
+      caiuParaTexto: destino?.tipoMidia === "texto" || !oferta?.imagem,
+      resultado: confirmouEnvio ? "parcial" : "erro",
+      motivoTecnico: e.message || "erro_envio"
+    });
 
     if (String(destino?.tipo || "").toLowerCase() === "telegram") {
       logFilaTelegramDebug({
@@ -13712,6 +13770,51 @@ const marketplaceDetectadoLinks = links
   .find(Boolean) || "";
 let extracaoRadarLocal = null;
 
+fidelidadeObs.registrarTrace("captura_radar", {
+  clienteId: adminMasterId,
+  origemTipo: origemTipoFinal,
+  grupoId: grupoIdTexto,
+  grupoNome: grupoNomeTexto,
+  mensagemId: raw?.key?.id || "",
+  textoOriginal: texto,
+  linksExtraidos: links,
+  raw,
+  marketplace: marketplaceDetectadoLinks,
+  observacoes: "mensagem_recebida_radar"
+});
+fidelidadeObs.registrarSnapshot("origem_capturada", {
+  clienteId: adminMasterId,
+  origemTipo: origemTipoFinal,
+  grupoId: grupoIdTexto,
+  grupoNome: grupoNomeTexto,
+  mensagemId: raw?.key?.id || "",
+  textoOriginal: texto,
+  linksEncontrados: links,
+  raw,
+  marketplace: marketplaceDetectadoLinks
+});
+fidelidadeObs.registrarLinks("captura_radar", {
+  clienteId: adminMasterId,
+  origemTipo: origemTipoFinal,
+  grupoId: grupoIdTexto,
+  grupoNome: grupoNomeTexto,
+  mensagemId: raw?.key?.id || "",
+  links,
+  marketplace: marketplaceDetectadoLinks
+});
+fidelidadeObs.registrarImagem("captura_radar", {
+  clienteId: adminMasterId,
+  origemTipo: origemTipoFinal,
+  grupoId: grupoIdTexto,
+  grupoNome: grupoNomeTexto,
+  mensagemId: raw?.key?.id || "",
+  imagem: raw?.message?.imageMessage?.url || raw?.image || raw?.photo || raw?.media?.url || "",
+  jpegThumbnailPresente: Boolean(raw?.message?.imageMessage?.jpegThumbnail || raw?.message?.extendedTextMessage?.jpegThumbnail),
+  status: raw?.message?.imageMessage || raw?.image || raw?.photo || raw?.media?.type === "image"
+    ? "presente_na_origem"
+    : (raw?.message?.imageMessage?.jpegThumbnail || raw?.message?.extendedTextMessage?.jpegThumbnail ? "thumbnail_presente" : "motivo_nao_determinado")
+});
+
 try {
   const inicioExtratorLocal = Date.now();
   extracaoRadarLocal = extrairEvidenciasRadarLocal({
@@ -13781,6 +13884,39 @@ const radarMirrorBase = criarRadarMirror({
   beneficiosMensagem,
   raw,
   marketplace: marketplaceDetectadoLinks
+});
+fidelidadeObs.registrarSnapshot("radar_mirror", {
+  clienteId: adminMasterId,
+  origemTipo: origemTipoFinal,
+  grupoId: grupoIdTexto,
+  grupoNome: grupoNomeTexto,
+  mensagemId: raw?.key?.id || "",
+  oferta: {
+    marketplace: marketplaceDetectadoLinks,
+    titulo: radarMirrorBase?.produto?.tituloCapturado || "",
+    precoAtual: radarMirrorBase?.preco?.atualCapturado ?? "",
+    precoOriginal: radarMirrorBase?.preco?.anteriorCapturado ?? "",
+    cupom: radarMirrorBase?.cupom?.codigoCapturado || "",
+    linksOriginais: links,
+    imagem: radarMirrorBase?.midia?.imagemOriginal || "",
+    imagemOrigem: radarMirrorBase?.midia?.imagemOrigem || ""
+  },
+  observacoes: "radar_mirror_criado"
+});
+fidelidadeObs.registrarPreco("radar_mirror", {
+  clienteId: adminMasterId,
+  textoComercial: texto,
+  precoDe: radarMirrorBase?.preco?.anteriorCapturado ?? "",
+  precoPor: radarMirrorBase?.preco?.atualCapturado ?? "",
+  pix: radarMirrorBase?.preco?.condicaoTexto || "",
+  parcelamento: radarMirrorBase?.parcelamento?.texto || ""
+});
+fidelidadeObs.registrarCupom("radar_mirror", {
+  clienteId: adminMasterId,
+  textoOriginal: texto,
+  cupom: radarMirrorBase?.cupom?.codigoCapturado || "",
+  instrucao: radarMirrorBase?.cupom?.condicaoCapturada || "",
+  linkResgate: radarMirrorBase?.links?.resgateCupom || ""
 });
 console.log("[RADAR-MIRROR-CRIADO]", JSON.stringify(resumirRadarMirrorLog(radarMirrorBase, {
   clienteId: adminMasterId,
@@ -14229,6 +14365,30 @@ const registroEngineRadar = temRedirectConhecidoRadar
       }, radarMirrorComparado)
     })));
     const resolucaoCaptura = resolverClienteMensageiroPorSessao(sessaoIdTexto);
+    fidelidadeObs.registrarSnapshot("espelho_comercial_saida", {
+      clienteId: adminMasterId,
+      mensagemId: raw?.key?.id || "",
+      oferta: ofertaRadar,
+      linksEncontrados: links,
+      observacoes: "oferta_radar_preparada"
+    });
+    fidelidadeObs.registrarIdentidade("espelho_comercial_saida", {
+      clienteId: adminMasterId,
+      oferta: ofertaRadar,
+      marketplaceInicial: marketplaceDetectadoLinks,
+      marketplaceImportador: ofertaImportadorRadar?.marketplace || "",
+      marketplaceFinal: ofertaRadar.marketplace || "",
+      urlOriginal: importacao.resolucao?.linkOriginalLimpo || ofertaRadar.linkOriginal || "",
+      produtoIdOriginal: radarMirrorComparado?.produto?.produtoIdOriginal || "",
+      produtoIdImportado: ofertaRadar.produtoIdDetectado || ofertaRadar.produtoId || ""
+    });
+    fidelidadeObs.registrarImagem("espelho_comercial_saida", {
+      clienteId: adminMasterId,
+      oferta: ofertaRadar,
+      imagem: ofertaRadar.imagem || "",
+      imagemOrigem: ofertaRadar.imagemOrigem || "",
+      status: ofertaRadar.imagem ? "URL_http_presente" : "ausente_no_importador"
+    });
     console.log("[RADAR-OFERTA-BASE-CRIADA]", JSON.stringify({
       correlationId,
       marketplace: ofertaRadar.marketplace || importacao.resolucao?.marketplaceReal || "",

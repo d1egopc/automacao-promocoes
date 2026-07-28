@@ -1,4 +1,5 @@
 const { analisarValorMonetario } = require("./moeda");
+const fidelidadeObs = require("../modules/fidelidade/observabilidade-v1");
 function cortarTitulo(titulo = "", limite = 120) {
   const texto = String(titulo || "Oferta").replace(/\s+/g, " ").trim();
 
@@ -339,10 +340,22 @@ function montarMensagemTemplatePersonalizado(oferta = {}, destino = {}) {
 
   if (!mensagemOferta.template) return "";
 
-  return substituirPlaceholders(
+  fidelidadeObs.registrarTemplate("template_personalizado_legado_entrada", {
+    oferta,
+    destinoId: destino.id || destino.destinoId || "",
+    templateTipo: "personalizado_legado"
+  });
+  const mensagem = substituirPlaceholders(
     mensagemOferta.template,
     montarDadosTemplateOferta(oferta)
   ).trim();
+  fidelidadeObs.registrarTemplate("template_personalizado_legado_saida", {
+    oferta,
+    destinoId: destino.id || destino.destinoId || "",
+    templateTipo: "personalizado_legado",
+    mensagem
+  });
+  return mensagem;
 }
 
 module.exports = {

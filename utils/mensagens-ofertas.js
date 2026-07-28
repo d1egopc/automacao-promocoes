@@ -14,6 +14,7 @@ const { formatarOfertaUniversal } = require("../templates/oferta-template");
 const { gerarTemplateUniversal } = require("../modules/template-universal");
 const { resolverTemplateMensagem } = require("../modules/templates-clientes/resolver");
 const { prepararDadosOficiaisTemplate } = require("../modules/templates-clientes/dados-oficiais");
+const fidelidadeObs = require("../modules/fidelidade/observabilidade-v1");
 
 function normalizarTextoLocal(valor = "") {
   return String(valor || "").trim();
@@ -264,6 +265,24 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
     ...oferta,
     clienteId
   });
+  const registrarTemplate = (templateTipo, mensagem) => {
+    fidelidadeObs.registrarTemplate("template_saida", {
+      clienteId,
+      destinoId: destino.id || destino.destinoId || "",
+      canal: opcoes.canal || destino.canal || destino.tipo || "",
+      oferta: ofertaOficial,
+      templateTipo,
+      mensagem
+    });
+    return mensagem;
+  };
+  fidelidadeObs.registrarTemplate("template_entrada", {
+    clienteId,
+    destinoId: destino.id || destino.destinoId || "",
+    canal: opcoes.canal || destino.canal || destino.tipo || "",
+    oferta: ofertaOficial,
+    templateTipo: "resolver_mensagem_oferta"
+  });
   const dadosOficiaisUniversal = montarEntradaTemplateUniversalOficial(ofertaOficial);
 
   try {
@@ -284,14 +303,14 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
   }
 
   if (resolucaoTemplate?.ok && resolucaoTemplate.mensagem) {
-    return resolucaoTemplate.mensagem;
+    return registrarTemplate("personalizado_resolver", resolucaoTemplate.mensagem);
   }
 
   const mensagemUniversalOficial = tentarTemplateUniversalOficial(ofertaOficial, {
     ...opcoes,
     dadosOficiaisUniversal
   });
-  if (mensagemUniversalOficial) return mensagemUniversalOficial;
+  if (mensagemUniversalOficial) return registrarTemplate("universal_oficial", mensagemUniversalOficial);
 
   if (deveUsarTemplatePersonalizado({ ...opcoes, oferta: ofertaOficial })) {
     const mensagemPersonalizada = montarMensagemTemplatePersonalizado(
@@ -299,32 +318,34 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
       opcoes.destino
     );
 
-    if (mensagemPersonalizada) return mensagemPersonalizada;
+    if (mensagemPersonalizada) return registrarTemplate("personalizado_legado", mensagemPersonalizada);
   }
 
   const marketplace = String(ofertaOficial.marketplace || "").toLowerCase();
 
   if (marketplace === "amazon") {
-    return formatarOfertaUniversal({
+    const mensagemAmazon = formatarOfertaUniversal({
       ...ofertaOficial,
       precoOriginal: ofertaOficial.precoOriginal ?? ofertaOficial.precoAntigo,
       beneficioTexto: ofertaOficial.beneficioTexto || ofertaOficial.beneficioExtra || ofertaOficial.avisoCupom || ""
     }) || montarLegendaOferta(ofertaOficial);
+    return registrarTemplate("fallback_amazon", mensagemAmazon);
   }
 
   if (marketplace === "shopee") {
-    return montarLegendaShopee(ofertaOficial);
+    return registrarTemplate("fallback_shopee", montarLegendaShopee(ofertaOficial));
   }
 
   if (marketplace === "mercadolivre" || marketplace === "mercado_livre") {
-    return formatarOfertaUniversal({
+    const mensagemMl = formatarOfertaUniversal({
       ...ofertaOficial,
       precoOriginal: ofertaOficial.precoOriginal ?? ofertaOficial.precoAntigo,
       beneficioTexto: ofertaOficial.beneficioTexto || ofertaOficial.beneficioExtra || ofertaOficial.avisoCupom || ""
     }) || montarLegendaOferta(ofertaOficial);
+    return registrarTemplate("fallback_mercadolivre", mensagemMl);
   }
 
-  return montarLegendaOferta(ofertaOficial) || ofertaOficial.mensagem || ofertaOficial.texto || "";
+  return registrarTemplate("fallback_padrao", montarLegendaOferta(ofertaOficial) || ofertaOficial.mensagem || ofertaOficial.texto || "");
 }
 
 module.exports = {

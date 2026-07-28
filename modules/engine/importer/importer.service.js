@@ -36,6 +36,7 @@ const {
   logEngineImporterErro,
   logEngineImporterOfertaCriada
 } = require("../logger");
+const fidelidadeObs = require("../../fidelidade/observabilidade-v1");
 
 let engineOfertasMetadataDisponivel = null;
 
@@ -909,6 +910,32 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
 }
 
 async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrada = {}) {
+  fidelidadeObs.registrarSnapshot("importador_entrada", {
+    job,
+    evento,
+    link,
+    oferta: ofertaEntrada,
+    clienteId: job.cliente_id || job.clienteId || "",
+    marketplace: job.marketplace || job.marketplace_detectado || ""
+  });
+  fidelidadeObs.registrarLinks("importador_entrada", {
+    job,
+    evento,
+    link,
+    oferta: ofertaEntrada,
+    links: evento.links_extraidos || [],
+    linkProduto: link.url_expandida || link.url_original || ofertaEntrada.linkOriginal || ""
+  });
+  fidelidadeObs.registrarImagem("importador_entrada", {
+    job,
+    evento,
+    link,
+    oferta: ofertaEntrada,
+    imagem: ofertaEntrada.imagem || ofertaEntrada.image || ofertaEntrada.imagemUrl || ofertaEntrada.thumbnail || "",
+    status: ofertaEntrada.imagem || ofertaEntrada.image || ofertaEntrada.imagemUrl || ofertaEntrada.thumbnail
+      ? "URL_http_presente"
+      : "ausente_no_importador"
+  });
   let oferta = normalizarOfertaImportada(ofertaEntrada, job);
   oferta = resolverImagemUniversal(oferta, {
     origem: "engine_importer",
@@ -919,6 +946,50 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   });
   const temImagemImporter = Boolean(oferta.imagem);
   const campoImagemImporter = oferta.imagemOrigem || "";
+  fidelidadeObs.registrarSnapshot("importador_saida", {
+    job,
+    evento,
+    link,
+    oferta,
+    clienteId: job.cliente_id || job.clienteId || "",
+    marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || ""
+  });
+  fidelidadeObs.registrarImagem("importador_saida", {
+    job,
+    evento,
+    link,
+    oferta,
+    imagem: oferta.imagem || "",
+    imagemOrigem: oferta.imagemOrigem || "",
+    status: oferta.imagem ? "URL_http_presente" : "ausente_no_importador",
+    motivo: oferta.imagem ? "" : "imagem_nao_resolvida_apos_importador"
+  });
+  fidelidadeObs.registrarIdentidade("importador_saida", {
+    job,
+    evento,
+    link,
+    oferta,
+    marketplaceInicial: job.marketplace_detectado || "",
+    marketplaceImportador: oferta.marketplace || "",
+    marketplaceFinal: oferta.marketplace || "",
+    urlOriginal: oferta.linkOriginal || link.url_original || "",
+    produtoIdImportado: oferta.produtoIdDetectado || oferta.itemId || ""
+  });
+  fidelidadeObs.registrarPreco("importador_saida", {
+    job,
+    evento,
+    oferta,
+    precoDe: oferta.precoOriginal,
+    precoPor: oferta.preco,
+    precoImportador: ofertaEntrada.preco || ofertaEntrada.precoAtual || ""
+  });
+  fidelidadeObs.registrarCupom("importador_saida", {
+    job,
+    evento,
+    oferta,
+    cupom: oferta.cupom,
+    produzidoPor: "normalizarOfertaImportada"
+  });
   const sombraV2 = await aplicarSombraInteligenciaUniversalV2(oferta, ofertaEntrada, job);
   oferta = sombraV2.oferta || oferta;
   let imagemResolucaoEngine = resolverImagemEngineFallback({ oferta, ofertaEntrada, evento, job, link });
