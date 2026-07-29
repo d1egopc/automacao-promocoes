@@ -26,6 +26,11 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [] 
 
   const pendentes = await buscarJobsPendentes(limiteFinal);
   if (!pendentes.ok) {
+    console.log("[ENGINE-WORKER-ERRO]", {
+      etapa: "buscar_jobs_pendentes",
+      motivo: pendentes.motivo || "buscar_jobs_falhou",
+      erro: pendentes.erro || ""
+    });
     logEngineProcessadorErro({ etapa: "buscar_jobs", motivo: pendentes.motivo || "buscar_jobs_falhou", erro: pendentes.erro || "" });
     return {
       ok: false,
@@ -37,13 +42,32 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [] 
     };
   }
 
+  console.log("[ENGINE-WORKER-JOBS-ENCONTRADOS]", {
+    statusBuscado: "pendente",
+    total: pendentes.jobs.length,
+    limite: limiteFinal
+  });
+
   for (const job of pendentes.jobs) {
+    console.log("[ENGINE-WORKER-JOB-PROCESSANDO]", {
+      jobId: job.id,
+      eventoId: job.evento_id,
+      clienteId: job.cliente_id,
+      marketplace: job.marketplace || job.marketplace_detectado || "",
+      status: job.status
+    });
     logEngineProcessadorJob({ jobId: job.id, eventoId: job.evento_id, clienteId: job.cliente_id });
 
     const lock = await tentarMarcarProcessando(job.id);
     if (!lock.ok) {
       if (lock.ignorado) continue;
       resumo.erros += 1;
+      console.log("[ENGINE-WORKER-ERRO]", {
+        etapa: "marcar_processando",
+        jobId: job.id,
+        motivo: lock.motivo || "lock_falhou",
+        erro: lock.erro || ""
+      });
       logEngineProcessadorErro({ jobId: job.id, etapa: "marcar_processando", motivo: lock.motivo || "lock_falhou", erro: lock.erro || "" });
       continue;
     }
@@ -59,6 +83,12 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [] 
       }
     } catch (e) {
       resumo.erros += 1;
+      console.log("[ENGINE-WORKER-ERRO]", {
+        etapa: "processar_job",
+        jobId: job.id,
+        motivo: "erro_inesperado",
+        erro: e.message
+      });
       logEngineProcessadorErro({ jobId: job.id, etapa: "processar_job", motivo: "erro_inesperado", erro: e.message });
       await registrarProcessamento(job.id, "diagnostico_final", "erro", "erro_inesperado", { erro: e.message });
       await marcarJobStatus(job.id, "erro", "erro_inesperado");

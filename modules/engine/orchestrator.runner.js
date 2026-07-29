@@ -348,8 +348,19 @@ function iniciarOrquestradorEngine(opcoes = {}) {
   const intervaloMs = Number(opcoes.intervaloMs || 120000);
   const intervaloFinal = Number.isFinite(intervaloMs) && intervaloMs > 0 ? intervaloMs : 120000;
 
+  console.log("[ENGINE-WORKER-INICIALIZADO]", {
+    intervaloMs: intervaloFinal
+  });
+
   engineOrquestradorIntervalo = setInterval(() => {
+    console.log("[ENGINE-WORKER-CICLO-INICIO]", {
+      intervaloMs: intervaloFinal
+    });
     executarRodadaEngineOrquestrador(opcoes).catch((e) => {
+      console.log("[ENGINE-WORKER-ERRO]", {
+        etapa: "intervalo",
+        erro: e.message
+      });
       console.log("[ENGINE-ORQUESTRADOR-ERRO]", {
         etapa: "intervalo",
         erro: e.message

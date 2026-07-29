@@ -10,6 +10,10 @@ let pool = null;
 let pgDisponivel = null;
 let poolVersao = 0;
 let ultimaRecriacaoPoolEm = 0;
+const metadadosPools = new WeakMap();
+const metadadosConexoesPool = new WeakMap();
+let proximoIdConexaoPool = 1;
+let recriacaoPoolPromessa = null;
 
 const ENGINE_DB_POOL_RECREATE_COOLDOWN_MS = limitarInteiroDb(process.env.ENGINE_DB_POOL_RECREATE_COOLDOWN_MS, 30000, 5000, 300000);
 
