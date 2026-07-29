@@ -120,6 +120,7 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
     metadataEvento
   };
   let criados = 0;
+  let existentes = 0;
 
   const adminIgnorado = (Array.isArray(clientes) ? clientes : [clientes])
     .some(cliente => normalizarTexto(typeof cliente === "string" ? cliente : cliente?.id || cliente?.clienteId || "").toLowerCase() === "admin");
@@ -155,7 +156,13 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
            evento_id, oferta_id, cliente_id, marketplace_detectado, marketplace,
            status, prioridade, tentativas, metadata
          )
-         VALUES ($1, $2, $3, $4, $4, 'pendente', 0, 0, $5::jsonb)
+         SELECT $1, $2, $3, $4, $4, 'pendente', 0, 0, $5::jsonb
+          WHERE NOT EXISTS (
+            SELECT 1
+              FROM engine_jobs_cliente
+             WHERE evento_id = $1
+               AND cliente_id = $3
+          )
          RETURNING id`,
         [eventoId, ofertaId, clienteId, marketplace, JSON.stringify(metadataJob)]
       );
@@ -173,14 +180,27 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
         continue;
       }
 
+      const jobId = insert.resultado.rows[0]?.id;
+      if (!jobId) {
+        existentes += 1;
+        coberturaRadar.registrar("engine_job_existente", {
+          ...contextoCobertura,
+          clienteId,
+          decisao: "reaproveitado",
+          motivo: "job_existente",
+          jobNovoCriado: false
+        });
+        continue;
+      }
+
       criados += 1;
-      logEngineJobClienteCriado({ id: insert.resultado.rows[0]?.id, eventoId, clienteId, marketplaceDetectado: marketplace });
+      logEngineJobClienteCriado({ id: jobId, eventoId, clienteId, marketplaceDetectado: marketplace });
       coberturaRadar.registrar("engine_job_criado", {
         ...contextoCobertura,
         clienteId,
         decisao: "aceito",
         motivo: "job_criado",
-        jobId: insert.resultado.rows[0]?.id || "",
+        jobId,
         jobNovoCriado: true
       });
     } catch (e) {
@@ -196,7 +216,7 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
     }
   }
 
-  return { ok: true, criados };
+  return { ok: true, criados, existentes };
 }
 
 function normalizarStatusLimpeza(status = []) {

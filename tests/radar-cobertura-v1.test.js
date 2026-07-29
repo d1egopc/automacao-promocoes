@@ -92,8 +92,10 @@ function mockModulo(relativo, exports) {
     });
     let jobChamado = false;
     mockModulo("../modules/engine/jobs.service", {
-      criarJobsParaClientes: async () => {
+      criarJobsParaClientes: async (entrada) => {
         jobChamado = true;
+        assert.strictEqual(entrada.eventoId, 77);
+        assert.deepStrictEqual(entrada.clientes, ["cliente_1"]);
         return { ok: true, criados: 1 };
       }
     });
@@ -109,21 +111,26 @@ function mockModulo(relativo, exports) {
     }, { clientes: ["cliente_1"] }));
     const eventos = payloadsCobertura(logs);
     assert.strictEqual(retorno.duplicado, true);
-    assert.strictEqual(jobChamado, false);
+    assert.strictEqual(jobChamado, true);
+    assert.strictEqual(retorno.jobsCriados, 1);
     assert(eventos.some(evento =>
       evento.etapa === "engine_evento_duplicado" &&
       evento.coberturaTraceId === trace &&
       evento.motivo === "duplicidade" &&
-      evento.jobNovoCriado === false
+      evento.jobNovoCriado === true
     ));
   }
 
   {
     limparModulo("../modules/engine/jobs.service");
+    const clientesInseridos = [];
     mockModulo("../modules/engine/database", {
-      queryEngine: async (sql) => {
+      queryEngine: async (sql, params = []) => {
         if (/WITH jobs_admin/i.test(sql)) return { ok: true, resultado: { rows: [{ jobs_ignorados: 0, ofertas_retidas: 0 }] } };
-        if (/INSERT INTO engine_jobs_cliente/i.test(sql)) return { ok: true, resultado: { rows: [{ id: 88 }] } };
+        if (/INSERT INTO engine_jobs_cliente/i.test(sql)) {
+          clientesInseridos.push(params[2]);
+          return { ok: true, resultado: { rows: [{ id: 80 + clientesInseridos.length }] } };
+        }
         return { ok: true, resultado: { rows: [] } };
       }
     });
@@ -138,7 +145,75 @@ function mockModulo(relativo, exports) {
     }));
     const eventos = payloadsCobertura(logs);
     assert.strictEqual(retorno.criados, 1);
-    assert(eventos.some(evento => evento.etapa === "engine_job_criado" && evento.coberturaTraceId === trace && evento.jobId === 88));
+    assert.deepStrictEqual(clientesInseridos, ["cliente_1"]);
+    assert(eventos.some(evento => evento.etapa === "engine_job_criado" && evento.coberturaTraceId === trace && evento.jobId === 81));
+  }
+
+  {
+    limparModulo("../modules/engine/jobs.service");
+    const clientesInseridos = [];
+    mockModulo("../modules/engine/database", {
+      queryEngine: async (sql, params = []) => {
+        if (/WITH jobs_admin/i.test(sql)) return { ok: true, resultado: { rows: [{ jobs_ignorados: 0, ofertas_retidas: 0 }] } };
+        if (/INSERT INTO engine_jobs_cliente/i.test(sql)) {
+          clientesInseridos.push(params[2]);
+          return { ok: true, resultado: { rows: [{ id: 200 + clientesInseridos.length }] } };
+        }
+        return { ok: true, resultado: { rows: [] } };
+      }
+    });
+    const jobs = require("../modules/engine/jobs.service");
+    const clientesAtivosDescobertos = [
+      "d1egopc_teste",
+      "roger_teste",
+      "wolf_teste"
+    ];
+    clientesAtivosDescobertos.push("quarto_workspace_teste");
+
+    const { retorno } = await capturarLogs(() => jobs.criarJobsParaClientes({
+      eventoId: 78,
+      clientes: clientesAtivosDescobertos,
+      marketplaceDetectado: "shopee",
+      linksExtraidos: ["https://s.shopee.com.br/903wBcqhYS"],
+      metadataEvento: { coberturaTraceId: "cov_quarto_workspace" }
+    }));
+
+    assert.strictEqual(retorno.criados, 4);
+    assert.deepStrictEqual(clientesInseridos, clientesAtivosDescobertos);
+    assert(clientesInseridos.includes("quarto_workspace_teste"), "quarto workspace deve entrar automaticamente no fan-out dinamico");
+  }
+
+  {
+    limparModulo("../modules/engine/jobs.service");
+    const clientesInseridos = [];
+    mockModulo("../modules/engine/database", {
+      queryEngine: async (sql, params = []) => {
+        if (/WITH jobs_admin/i.test(sql)) return { ok: true, resultado: { rows: [{ jobs_ignorados: 0, ofertas_retidas: 0 }] } };
+        if (/INSERT INTO engine_jobs_cliente/i.test(sql)) {
+          clientesInseridos.push(params[2]);
+          return {
+            ok: true,
+            resultado: {
+              rows: params[2] === "cliente_existente" ? [] : [{ id: 300 + clientesInseridos.length }]
+            }
+          };
+        }
+        return { ok: true, resultado: { rows: [] } };
+      }
+    });
+    const jobs = require("../modules/engine/jobs.service");
+    const { logs, retorno } = await capturarLogs(() => jobs.criarJobsParaClientes({
+      eventoId: 79,
+      clientes: ["cliente_existente", "cliente_ausente"],
+      marketplaceDetectado: "amazon",
+      linksExtraidos: ["https://amzn.to/produto"],
+      metadataEvento: { coberturaTraceId: "cov_idempotente" }
+    }));
+    const eventos = payloadsCobertura(logs);
+    assert.strictEqual(retorno.criados, 1);
+    assert.strictEqual(retorno.existentes, 1);
+    assert.deepStrictEqual(clientesInseridos, ["cliente_existente", "cliente_ausente"]);
+    assert(eventos.some(evento => evento.etapa === "engine_job_existente" && evento.clienteId === "cliente_existente"));
   }
 
   {
@@ -272,6 +347,34 @@ function mockModulo(relativo, exports) {
     assert(eventos.some(evento => evento.etapa === "destino_candidato" && evento.destinoNome === "OP Geral"));
     assert(eventos.some(evento => evento.etapa === "executor_bloqueado" && evento.motivo === "intervalo_nao_atingido"));
     assert(eventos.some(evento => evento.etapa === "executor_enviado" && evento.tentativaEnvio === true && evento.statusFilaDepois === "enviado"));
+  }
+
+  {
+    limparModulo("../modules/engine/distributor/distributor.service");
+    const distributorService = require("../modules/engine/distributor/distributor.service");
+    const retorno = await distributorService.validarOfertaParaDistribuicao({
+      id: 122,
+      cliente_id: "cliente_1",
+      marketplace: "mercadolivre",
+      titulo: "Produto com automacao desligada",
+      categoria: "casa"
+    }, {
+      clientesValidos: ["cliente_1"],
+      configsPorCliente: { cliente_1: { automacaoAtiva: false } },
+      marketplacesAtivosPorCliente: { cliente_1: { mercadolivre: true } },
+      destinosPorCliente: {
+        cliente_1: [{
+          id: "destino_1",
+          nome: "OP Geral",
+          ativo: true,
+          marketplace: "mercadolivre",
+          marketplaces: ["mercadolivre"],
+          categorias: ["casa"]
+        }]
+      }
+    });
+
+    assert.strictEqual(retorno.ok, true, "automacaoAtiva=false nao deve bloquear distribuicao/fila");
   }
 
   {

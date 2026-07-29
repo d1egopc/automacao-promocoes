@@ -540,7 +540,6 @@ async function registrarEtapaDistribuicao(jobId, etapa, status, motivo = "", det
 async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
   const clienteId = normalizarTexto(oferta.cliente_id);
   const marketplace = normalizarMarketplace(oferta.marketplace);
-  const configCliente = contexto.configsPorCliente?.[clienteId] || {};
 
   if (!usuarioAtivo(clienteId)) {
     logUsuarioInativoIgnorado({ clienteId, fluxo: "engine_distributor_validacao" });
@@ -549,10 +548,6 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
 
   if (!clienteValidoEngine(clienteId, contexto.clientesValidos || [])) {
     return { ok: false, motivo: "cliente_invalido" };
-  }
-
-  if (configCliente.automacaoAtiva !== true) {
-    return { ok: false, motivo: "automacao_desligada" };
   }
 
   if (!marketplaceAtivoClienteEngine(clienteId, marketplace, contexto.marketplacesAtivosPorCliente || {})) {

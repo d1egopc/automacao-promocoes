@@ -183,6 +183,7 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
   const hashEvento = eventoBruto.hashEvento || eventoBruto.hash_evento || gerarHashEvento(evento);
   const marketplaceDetectado = eventoBruto.marketplaceDetectado || eventoBruto.marketplace_detectado || marketplacePrincipal(evento.linksExtraidos);
   const metadataEvento = eventoBruto.metadata && typeof eventoBruto.metadata === "object" ? eventoBruto.metadata : {};
+  const clientes = opcoes.clientes || eventoBruto.clientes || ["admin"];
   const contextoCobertura = {
     coberturaTraceId: eventoBruto.coberturaTraceId || metadataEvento.coberturaTraceId || "",
     fidelidadeTraceId: eventoBruto.fidelidadeTraceId || metadataEvento.fidelidadeTraceId || "",
@@ -209,6 +210,13 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
       grupoId: evento.grupoId
     });
     if (duplicado) {
+      const jobs = await criarJobsParaClientes({
+        eventoId: duplicado.id,
+        clientes,
+        marketplaceDetectado,
+        linksExtraidos: evento.linksExtraidos,
+        metadataEvento: eventoBruto.metadata || {}
+      });
       logEngineEventoBrutoDuplicado({ id: duplicado.id, grupoId: evento.grupoId, links: evento.linksExtraidos.length });
       coberturaRadar.registrar("engine_evento_duplicado", {
         ...contextoCobertura,
@@ -216,13 +224,15 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
         motivo: "duplicidade",
         eventoEngineId: duplicado.id,
         eventoOriginalId: duplicado.id,
-        jobNovoCriado: false
+        jobNovoCriado: Number(jobs.criados || 0) > 0
       });
       return {
         ok: true,
         duplicado: true,
         id: duplicado.id,
-        ...(coberturaRadar.flagAtiva() ? { hashEvento, jobNovoCriado: false } : {})
+        jobsCriados: Number(jobs.criados || 0),
+        jobsExistentes: Number(jobs.existentes || 0),
+        ...(coberturaRadar.flagAtiva() ? { hashEvento, jobNovoCriado: Number(jobs.criados || 0) > 0 } : {})
       };
     }
 
@@ -264,20 +274,40 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
 
     const id = insert.resultado.rows[0]?.id;
     if (!id) {
+      const existente = await queryEngine(
+        `SELECT id
+           FROM engine_eventos_brutos
+          WHERE hash_evento = $1
+          ORDER BY id DESC
+          LIMIT 1`,
+        [hashEvento]
+      );
+      const eventoExistenteId = existente.ok ? existente.resultado.rows[0]?.id : null;
+      const jobs = eventoExistenteId
+        ? await criarJobsParaClientes({
+            eventoId: eventoExistenteId,
+            clientes,
+            marketplaceDetectado,
+            linksExtraidos: evento.linksExtraidos,
+            metadataEvento: eventoBruto.metadata || {}
+          })
+        : { criados: 0, existentes: 0 };
       logEngineEventoBrutoDuplicado({ grupoId: evento.grupoId, links: evento.linksExtraidos.length, hashEvento });
       coberturaRadar.registrar("engine_evento_duplicado", {
         ...contextoCobertura,
         decisao: "reaproveitado",
         motivo: "duplicidade",
-        eventoEngineId: "",
-        eventoOriginalId: "",
-        jobNovoCriado: false
+        eventoEngineId: eventoExistenteId || "",
+        eventoOriginalId: eventoExistenteId || "",
+        jobNovoCriado: Number(jobs.criados || 0) > 0
       });
       return {
         ok: true,
         duplicado: true,
-        id: null,
-        ...(coberturaRadar.flagAtiva() ? { hashEvento, jobNovoCriado: false } : {})
+        id: eventoExistenteId || null,
+        jobsCriados: Number(jobs.criados || 0),
+        jobsExistentes: Number(jobs.existentes || 0),
+        ...(coberturaRadar.flagAtiva() ? { hashEvento, jobNovoCriado: Number(jobs.criados || 0) > 0 } : {})
       };
     }
 
@@ -285,7 +315,6 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
 
     logEngineEventoBrutoSalvo({ id, origem: evento.origem, origemTipo: evento.origemTipo, grupoId: evento.grupoId, links: evento.linksExtraidos.length });
 
-    const clientes = opcoes.clientes || eventoBruto.clientes || ["admin"];
     const jobs = await criarJobsParaClientes({
       eventoId: id,
       clientes,

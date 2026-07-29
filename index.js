@@ -13825,18 +13825,6 @@ function destinoAtivoCompativelEngineRadar(clienteId = "", marketplace = "") {
   });
 }
 
-function adminOperacionalEngineRadar(usuario = {}) {
-  const configAdmin = configsPorCliente?.admin || {};
-  return Boolean(
-    usuario?.engineOperacional === true ||
-    usuario?.operacional === true ||
-    usuario?.recebeEngine === true ||
-    configAdmin?.engineOperacional === true ||
-    configAdmin?.operacional === true ||
-    configAdmin?.recebeEngine === true
-  );
-}
-
 function listarClientesEngineRadar(dados = {}) {
   const marketplace = detectarMarketplaceEngineRadar(dados);
   const clientesIncluidos = [];
@@ -13855,8 +13843,8 @@ function listarClientesEngineRadar(dados = {}) {
       const clienteId = String(usuario?.id || "").trim();
       if (!clienteId) continue;
 
-      if (clienteId === "admin" && !adminOperacionalEngineRadar(usuario)) {
-        ignorar(clienteId, "admin_sem_flag_operacional");
+      if (clienteId === "admin") {
+        ignorar(clienteId, "admin_nao_e_cliente_operacional");
         continue;
       }
 
@@ -13868,43 +13856,6 @@ function listarClientesEngineRadar(dados = {}) {
 
       if (!marketplace) {
         ignorar(clienteId, "marketplace_nao_detectado");
-        continue;
-      }
-
-      if (!usuarioPodeReceberMarketplace(usuario, marketplace)) {
-        ignorar(clienteId, "plano_nao_permite_marketplace");
-        continue;
-      }
-
-      const configCliente = configsPorCliente?.[clienteId] || {};
-      if (configCliente.automacaoAtiva !== true) {
-        ignorar(clienteId, "automacao_desligada");
-        continue;
-      }
-
-      if (!clienteAceitaMarketplaceAtivo(clienteId, marketplace)) {
-        ignorar(clienteId, "marketplace_desativado_no_cliente");
-        continue;
-      }
-
-      const integracao = getIntegracaoCliente(clienteId, marketplace);
-      if (!integracao) {
-        ignorar(clienteId, "integracao_ausente");
-        continue;
-      }
-
-      const cred = integracao?.credenciais || {};
-      const credenciaisOk = marketplace === "mercadolivre"
-        ? Boolean(cred.tag && cred.cookies)
-        : usuarioTemIntegracaoMarketplace(clienteId, marketplace);
-
-      if (!credenciaisOk) {
-        ignorar(clienteId, "credenciais_incompletas");
-        continue;
-      }
-
-      if (!destinoAtivoCompativelEngineRadar(clienteId, marketplace)) {
-        ignorar(clienteId, "sem_destino_ativo_compativel");
         continue;
       }
 
