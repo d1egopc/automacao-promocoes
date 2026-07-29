@@ -12130,7 +12130,7 @@ const farejadoresMarketplaces = {
 let indiceMarketplaceAtual = 0;
 let farejadorRodando = false;
 
-async function rodarProximoMarketplace() {
+async function executarRodadaMarketplaceLegada() {
 
 // Farejador global roda apenas no ADMIN MASTER
 const admin = usuarios.find(u => u.papel === "admin_master");
@@ -12258,56 +12258,6 @@ await farejador(clienteId, {
 
 // ============================= TESTE MANUAL =========================
 
- setTimeout(async () => {
-   console.log("[INFO] TESTE MANUAL ORQUESTRADOR ML");
-
-  const indicemercadolivre =
-   ordemMarketplaces.indexOf("mercadolivre");
-
-   if (indicemercadolivre >= 0) {
-     indiceMarketplaceAtual = indicemercadolivre;
-  }
-
-  await rodarProximoMarketplace();
-
- }, 60 * 1000);
-
-
-
-setInterval(() => {
-  rodarProximoMarketplace();
-}, (config.intervaloFarejadorGlobalMinutos || 10) * 60 * 1000);
-
-setTimeout(() => {
-  console.log("[INFO] Primeira rodada do orquestrador em 1 minuto...");
-  rodarProximoMarketplace();
-}, 1 * 60 * 1000);
-
 // ================= PROCESSADOR DA FILA =================
-
-let ultimoLogPausaFila = 0;
-
-setInterval(() => {
-  if (!podeRodarAgora()) {
-    const agora = Date.now();
-
-    if (agora - ultimoLogPausaFila > 5 * 60 * 1000) {
-      console.log("[FILA] Fila pausada fora do horrio configurado");
-      ultimoLogPausaFila = agora;
-    }
-
-    return;
-  }
-
-  for (const usuario of usuarios) {
-    if (!usuario?.ativo) continue;
-
-    processarFila(usuario.id);
-  }
-
-}, 10 * 1000);
-
-
-
 
 

@@ -8465,7 +8465,7 @@ const farejadoresMarketplaces = {
 let indiceMarketplaceAtual = 0;
 let farejadorRodando = false;
 
-async function rodarProximoMarketplace() {
+async function executarRodadaMarketplaceLegada() {
   console.log("🧪 ORQUESTRADOR TENTOU RODAR", {
     farejadorRodando,
     automacaoAtiva: config.automacaoAtiva,
@@ -8582,56 +8582,4 @@ await farejador(clienteId, {
   }
 }
 
-setTimeout(async () => {
- console.log("🧪 TESTE MANUAL KABUM");
-
-   await farejadoresMarketplaces.kabum("admin", {
-    config,
-    integracoesPorCliente,
-    fila,
-    salvarFila,
-    prepararOfertaGlobal,
-    ofertaJaExiste,
-    classificarCategoriaOferta,
-    gerarBuscasGlobais,
-    gerarHeadersStealth,
-    farejarCuponsMercadoLivre,
-    importarMercadoLivre,
-    importarAmazon,
-    buscarOfertasShopee,
-    normalizarSessaoId,
-    aplicarFiltrosUniversais,
-    distribuirOfertaParaClientes,
-    encurtarUrl,
-    gerarDeepLinkAwin
-  });
-
-}, 60 * 1000);
-
-setInterval(() => {
-  rodarProximoMarketplace();
-}, (config.intervaloFarejadorGlobalMinutos || 27) * 60 * 1000);
-
-setTimeout(() => {
-  console.log("⏳ Primeira rodada do orquestrador em 5 minutos...");
-  rodarProximoMarketplace();
-}, 5 * 60 * 1000);
-
 // ================= PROCESSADOR DA FILA =================
-
-let ultimoLogPausaFila = 0;
-
-setInterval(() => {
-  if (!podeRodarAgora()) {
-    const agora = Date.now();
-
-    if (agora - ultimoLogPausaFila > 5 * 60 * 1000) {
-      console.log("🌙 Fila pausada fora do horário configurado");
-      ultimoLogPausaFila = agora;
-    }
-
-    return;
-  }
-
-  processarFila();
-}, 10 * 1000);

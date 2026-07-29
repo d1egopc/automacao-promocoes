@@ -1390,8 +1390,7 @@ function obterEstrategiaFarejador(clienteId = "admin", marketplace = "", opcoes 
 }
 
 function farejadoresAutoDesativados() {
-  const valor = String(process.env.DESATIVAR_FAREJADORES_AUTO || "").trim().toLowerCase();
-  return !["false", "0", "off", "nao", "no"].includes(valor);
+  return true;
 }
 
 function logFarejadorAutoDesativado(marketplace = "", origem = "automatico", clienteId = "admin", detalhes = {}) {
@@ -1402,7 +1401,7 @@ function logFarejadorAutoDesativado(marketplace = "", origem = "automatico", cli
     origem,
     clienteId: String(clienteId || "admin"),
     titulo: detalhes.titulo || detalhes.nome || "",
-    motivo: "modo_radar_diagnostico"
+    motivo: "engine_v2_pipeline_automatico_unico"
   });
 }
 
@@ -23335,6 +23334,11 @@ function podeRodarAgora() {
 
 carregarConfig();
 
+console.log("[ENGINE-V2-PIPELINE-AUTOMATICO-UNICO]", {
+  automaticoOficial: "engine_v2",
+  produtoresAutomaticosLegados: "desligados_definitivamente"
+});
+
 initEngineDatabase()
   .then(() => {
     iniciarOrquestradorEngine({
@@ -23692,7 +23696,7 @@ if (!admin) {
     statusMarketplace.ultimoInicio = new Date().toISOString();
     statusMarketplace.ultimoErro = "";
 
-logOptimus("ORQUESTRADOR", opcoes.origem === "boot_mercadolivre" ? "🚀 ML BOOT | Rodada inicial direta" : "Rodada iniciada", {
+logOptimus("ORQUESTRADOR", "Rodada iniciada", {
   marketplace,
   rodada: statusMarketplace.rodadas,
   intervaloAtualMinutos: Math.round(intervaloOrquestradorAtualMs() / 60000),
@@ -23905,43 +23909,6 @@ clientesProcessadosPerf = clientesProcessadosRodada;
   }
 }
 
-async function rodarProximoMarketplace() {
-  if (farejadoresAutoDesativados()) {
-    logFarejadorAutoDesativado("todos", "orquestrador", "admin");
-    return;
-  }
-
-  const marketplace = selecionarProximoMarketplaceOrquestrador();
-  return rodarMarketplaceEspecifico(marketplace, { origem: "orquestrador" });
-}
-
-if (!global.__optimusMlBootTimeoutRegistrado) {
-  global.__optimusMlBootTimeoutRegistrado = true;
-  if (farejadoresAutoDesativados()) {
-    logFarejadorAutoDesativado("mercadolivre", "boot_mercadolivre", "admin");
-  }
-  if (!farejadoresAutoDesativados()) setTimeout(() => {
-    logOptimus("MERCADOLIVRE", "🚀 ML BOOT | Disparo inicial apos deploy", {
-      delaySegundos: 60
-    });
-    rodarMarketplaceEspecifico("mercadolivre", { origem: "boot_mercadolivre" });
-  }, 60 * 1000);
-}
-
-if (!global.__optimusOrquestradorMarketplacesIntervalRegistrado) {
-  global.__optimusOrquestradorMarketplacesIntervalRegistrado = true;
-  if (farejadoresAutoDesativados()) {
-    logFarejadorAutoDesativado("todos", "orquestrador_intervalo", "admin");
-  }
-  if (!farejadoresAutoDesativados()) setInterval(() => {
-    const intervaloAtual = intervaloOrquestradorAtualMs();
-    const ultimaRodada = ultimaRodadaOrquestradorMs || inicioOrquestradorMarketplacesMs;
-
-    if (Date.now() - ultimaRodada < intervaloAtual) return;
-
-    rodarProximoMarketplace();
-  }, 30 * 1000);
-}
 
 // ================= PROCESSADOR DA FILA =================
 
