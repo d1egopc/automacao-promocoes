@@ -10497,6 +10497,37 @@ function logRadarRejeitado(motivo = "", contexto = {}) {
   });
 }
 
+function registrarRadarEventoRejeitado(dados = {}) {
+  const motivo = textoRadarId(dados.motivo || "marketplace_nao_suportado_engine_v2");
+  const link = textoRadarId(dados.link || dados.urlOriginal || "");
+  const marketplaceDetectado = normalizarMarketplaceRadar(
+    dados.marketplaceDetectado || dados.marketplace || detectarMarketplaceRadarLink(link)
+  );
+  const capturadaEm = dados.capturadaEm || new Date().toISOString();
+  const payload = {
+    motivo,
+    urlOriginal: link,
+    origem: dados.origem || dados.origemTipo || "",
+    marketplace_detectado: marketplaceDetectado,
+    data: capturadaEm,
+    cliente: dados.clienteId || dados.workspaceId || "",
+    workspace: dados.workspaceId || dados.clienteId || "",
+    grupo: dados.grupoNome || dados.grupoId || "",
+    grupoId: dados.grupoId || "",
+    sessaoId: dados.sessaoId || "",
+    textoOriginal: String(dados.textoOriginal || "").slice(0, 1000)
+  };
+
+  console.log("[RADAR-EVENTO-REJEITADO]", JSON.stringify(payload));
+  logRadarRejeitado(motivo, {
+    link,
+    marketplace: marketplaceDetectado,
+    grupo: payload.grupo,
+    origemTipo: payload.origem
+  });
+  return payload;
+}
+
 function dataHoraRadarOferta(oferta = {}) {
   return textoRadarId(
     oferta.dataEntradaRadar ||
@@ -14709,419 +14740,30 @@ const registroEngineRadar = temRedirectConhecidoRadar
       continue;
     }
 
-    const beneficiosLink = {
-      ...beneficiosMensagem,
-      ...(beneficiosMensagem.beneficiosPorLink?.[link] || {})
-    };
-    coberturaRadar.registrar("fluxo_legacy_selecionado", {
-      ...contextoCoberturaRadar,
-      decisao: "aceito",
-      marketplace: marketplaceInicialResumo,
+    const motivoRejeicaoEngineV2 = marketplaceInicialResumo
+      ? "marketplace_sem_rota_engine_v2"
+      : "marketplace_nao_identificado";
+    const descarteAuditadoRadar = registrarRadarEventoRejeitado({
+      motivo: motivoRejeicaoEngineV2,
       link,
-      links
-    });
-    const linkEhResgate = beneficiosMensagem.linksResgate.includes(link);
-
-    if (linkEhResgate) {
-      const temOutroLinkProduto = links.some(linkMensagem => !beneficiosMensagem.linksResgate.includes(linkMensagem));
-      registrarHistoricoRadar(adminMasterId, {
-        origemTipo: origemTipoFinal,
-        origemSessaoId: sessaoIdTexto,
-        origemGrupoId: grupoIdTexto,
-        origemGrupoNome: grupoNomeTexto,
-        capturadaEm: dataCaptura,
-        mensagemResumo: texto,
-        linkCapturado: link,
-        linkOriginal: "",
-        marketplace: detectarMarketplaceRadarLink(link) || "",
-        cupom: beneficiosMensagem.cupom || "",
-        avisoCupom: beneficiosMensagem.avisoCupom || "",
-        tipoCupom: "resgate",
-        cupomOrigem: beneficiosMensagem.cupomOrigem || "",
-        cupomDetectadoTexto: Boolean(beneficiosMensagem.cupomDetectadoTexto),
-        beneficioExtra: beneficiosMensagem.beneficioExtra || link,
-        linkResgateCupom: beneficiosMensagem.linkResgateCupom || link,
-        status: temOutroLinkProduto ? "detectado" : "erro",
-        statusRadar: temOutroLinkProduto ? "detectada" : "erro",
-        statusCaptura: temOutroLinkProduto ? "sucesso" : "erro",
-        motivo: temOutroLinkProduto ? "link_resgate_cupom_detectado" : "link_resgate_cupom_sem_produto",
-        motivoTecnico: temOutroLinkProduto ? "link_resgate_cupom_detectado" : "link_resgate_cupom_sem_produto",
-        motivoFinal: temOutroLinkProduto ? "link_resgate_cupom_detectado" : "link_resgate_cupom_sem_produto",
-        tipoLink: "cupom_resgate",
-        tipoLinkRadar: "resgate_cupom",
-        marketplaceDetectado: detectarMarketplaceRadarLink(link) || "",
-        urlResolvida: "",
-        linksDetectados: 1
-      });
-      registrarRadarMarketplaceEvento({
-        marketplace: detectarMarketplaceRadarLink(link) || marketplaceInicialResumo,
-        capturado: true,
-        motivo: temOutroLinkProduto ? "link_resgate_cupom_detectado" : "link_resgate_cupom_sem_produto"
-      });
-      logOptimus("CUPOM", "Link de resgate detectado", {
-        link,
-        tipoCupom: "resgate",
-        temOutroLinkProduto
-      });
-      continue;
-    }
-
-    coberturaRadar.registrar("legacy_importador_inicio", {
-      ...contextoCoberturaRadar,
-      decisao: "iniciado",
-      marketplace: marketplaceInicialResumo,
-      link,
-      links
-    });
-    let importacao = await importarOfertaRadarPorLink(link, {
-      correlationId,
       origemTipo: origemTipoFinal,
+      clienteId: adminMasterId,
+      workspaceId: adminMasterId,
       sessaoId: sessaoIdTexto,
       grupoId: grupoIdTexto,
       grupoNome: grupoNomeTexto,
-      textoOriginal: texto,
-      raw,
-      radarMirror: radarMirrorBase,
-      coberturaTraceId: coberturaTraceIdRadar,
-      ...(fidelidadeTraceIdPrincipal ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal } : {})
+      marketplaceDetectado: marketplaceInicialResumo,
+      capturadaEm: dataCaptura,
+      textoOriginal: texto
     });
-    let comparacaoRadarLocal = null;
-    if (extracaoRadarLocal) {
-      try {
-        comparacaoRadarLocal = gerarComparacaoPassivaRadarLocal(extracaoRadarLocal, importacao.oferta || {});
-        console.log("[RADAR-HIBRIDO-COMPARACAO]", JSON.stringify(comparacaoRadarLocal));
-      } catch (erroComparacaoRadarLocal) {
-        console.log("[RADAR-HIBRIDO-EXTRATOR-ERRO]", JSON.stringify({
-          origemTipo: origemTipoFinal,
-          marketplaceDetectado: marketplaceInicialResumo,
-          etapa: "comparacao_passiva",
-          erro: erroComparacaoRadarLocal?.message || "erro_comparacao_passiva",
-          duracaoMs: 0
-        }));
-      }
-    }
-    const marketplaceImportacaoResumo = normalizarMarketplaceResumoRadar(
-      importacao.resolucao?.marketplaceReal ||
-      importacao.oferta?.marketplace ||
-      marketplaceInicialResumo
-    );
-    marketplacesResumoRadar.add(marketplaceImportacaoResumo);
-    const radarMirrorComparado = importacao.ok
-      ? compararRadarMirrorComImportador(radarMirrorBase, importacao.oferta || {})
-      : radarMirrorBase;
-    let resultadoPrecedenciaComercial = null;
-    let ofertaImportadorRadar = importacao.oferta || {};
-    if (importacao.ok) {
-      const comparacaoImportadorRadar = radarMirrorComparado?.comparacaoImportador || {};
-      console.log("[RADAR-MIRROR-COMPARADO]", JSON.stringify({
-        correlationId,
-        clienteId: adminMasterId,
-        marketplace: marketplaceImportacaoResumo,
-        divergenciaPreco: comparacaoImportadorRadar.divergenciaPreco === true,
-        precoRadar: radarMirrorComparado?.preco?.atualCapturado ?? null,
-        precoImportador: comparacaoImportadorRadar.precoImportador ?? null,
-        divergenciaCupom: comparacaoImportadorRadar.divergenciaCupom === true,
-        cupomRadarPresente: Boolean(radarMirrorComparado?.cupom?.codigoCapturado),
-        cupomImportadorPresente: Boolean(comparacaoImportadorRadar.cupomImportador),
-        possuiDoisLinks: radarMirrorComparado?.evidencias?.possuiDoisLinks === true
-      }));
-      const resultadoEspelhoComercial = montarOfertaRadarEspelhoComercial({
-        ofertaImportador: importacao.oferta || {},
-        radarMirror: radarMirrorComparado,
-        metadata: importacao.oferta?.metadata || {},
-        clienteId: adminMasterId,
-        marketplace: marketplaceImportacaoResumo,
-        resolucao: importacao.resolucao || {},
-        contexto: {
-          correlationId,
-          linkOriginal: importacao.resolucao?.linkOriginalLimpo || link,
-          linkCapturado: link
-        }
-      });
-      if (resultadoEspelhoComercial?.ok === false) {
-        importacao = {
-          ...importacao,
-          ok: false,
-          motivo: resultadoEspelhoComercial.motivo || "radar_contrato_comercial_ambiguo",
-          motivoTecnico: resultadoEspelhoComercial.motivoTecnico || resultadoEspelhoComercial.motivo || "radar_contrato_comercial_ambiguo",
-          resolucao: {
-            ...(importacao.resolucao || {}),
-            coerenciaComercial: resultadoEspelhoComercial.coerenciaComercial || null
-          }
-        };
-        ofertaImportadorRadar = {};
-      } else {
-        resultadoPrecedenciaComercial = resultadoEspelhoComercial?.resultadoPrecedencia || null;
-        ofertaImportadorRadar = resultadoEspelhoComercial?.oferta || {};
-      }
-      console.log("[RADAR-ESPELHO-COMERCIAL-OFICIAL]", JSON.stringify({
-        correlationId,
-        clienteId: adminMasterId,
-        marketplace: marketplaceImportacaoResumo,
-        fonteComercial: ofertaImportadorRadar.fonteComercial || "",
-        importadorUsadoComo: ofertaImportadorRadar.metadata?.radarEspelhoComercial?.importadorUsadoComo || "",
-        camposTecnicosImportador: ofertaImportadorRadar.metadata?.radarEspelhoComercial?.camposTecnicosImportador || []
-      }));
-      if (resultadoPrecedenciaComercial) {
-        console.log("[RADAR-COMERCIAL-RESOLVIDO]", JSON.stringify({
-          ...resumirPrecedenciaComercialLog(resultadoPrecedenciaComercial),
-          etapa: "radar_legado"
-        }));
-        if (deveLogarDivergenciaComercial(resultadoPrecedenciaComercial)) {
-          console.log("[RADAR-COMERCIAL-DIVERGENCIA]", JSON.stringify({
-            ...resumirPrecedenciaComercialLog(resultadoPrecedenciaComercial),
-            etapa: "radar_legado"
-          }));
-        }
-        emitirLogRadarPrecoSuspeito(resultadoPrecedenciaComercial, "radar_legado");
-      }
-    }
-
-    if (!importacao.ok) {
-      coberturaRadar.registrar(importacao.erro ? "legacy_importador_erro" : "legacy_importador_rejeitado", {
-        ...contextoCoberturaRadar,
-        decisao: importacao.erro ? "erro" : "rejeitado",
-        motivo: importacao.motivoTecnico || importacao.motivo || "importacao_falhou",
-        marketplace: importacao.resolucao?.marketplaceReal || marketplaceInicialResumo,
-        link,
-        links
-      });
-      logOptimus("RADAR", "Importacao falhou", {
-        motivo: importacao.motivo || "importacao_falhou",
-        motivoTecnico: importacao.motivoTecnico || importacao.motivo || "importacao_falhou",
-        link,
-        urlResolvida: importacao.resolucao?.urlResolvida || "",
-        linkOriginal: importacao.resolucao?.linkOriginalLimpo || "",
-        marketplace: importacao.resolucao?.marketplaceReal || "",
-        tipoLinkRadar: importacao.resolucao?.tipoLinkRadar || "produto"
-      });
-      logRadarRejeitado(importacao.motivo || "importacao_falhou", {
-        link,
-        urlResolvida: importacao.resolucao?.urlResolvida || "",
-        marketplace: importacao.resolucao?.marketplaceReal || ""
-      });
-      logRadarPipelineDebug({
-        clienteId: adminMasterId,
-        grupoNome: grupoNomeTexto || grupoIdTexto,
-        linkOriginal: importacao.resolucao?.linkOriginalRadar || link,
-        linkResolvido: importacao.resolucao?.linkResolvido || importacao.resolucao?.urlResolvida || "",
-        marketplace: importacao.resolucao?.marketplaceReal || detectarMarketplaceRadarLink(link) || "",
-        cupom: beneficiosMensagem.cupom || "",
-        precoTexto: "",
-        tituloTexto: "",
-        importadorChamado: Boolean(importacao.resolucao?.ok),
-        linkAfiliadoOk: false,
-        adicionouFila: false,
-        motivoRecusa: importacao.motivoTecnico || importacao.motivo || "importacao_falhou"
-      });
-
-      registrarHistoricoRadar(adminMasterId, {
-        origemTipo: origemTipoFinal,
-        origemSessaoId: sessaoIdTexto,
-        origemGrupoId: grupoIdTexto,
-        origemGrupoNome: grupoNomeTexto,
-        capturadaEm: dataCaptura,
-        mensagemResumo: texto,
-        linkCapturado: link,
-        linkOriginal: importacao.resolucao?.linkOriginalLimpo || "",
-        urlResolvida: importacao.resolucao?.urlResolvida || "",
-        linkResolvidoRadar: importacao.resolucao?.urlResolvida || "",
-        marketplace: importacao.resolucao?.marketplaceReal || "",
-        marketplaceDetectado: importacao.resolucao?.marketplaceReal || detectarMarketplaceRadarLink(link) || "",
-        tipoLink: importacao.resolucao?.tipoLinkRadar === "intermediario" ? "intermediario" : "produto",
-        tipoLinkRadar: importacao.resolucao?.tipoLinkRadar || "produto",
-        statusCaptura: "erro",
-        motivoTecnico: importacao.motivoTecnico || importacao.motivo || "importacao_falhou",
-        motivoFinal: importacao.motivoTecnico || importacao.motivo || "importacao_falhou",
-        statusHttp: importacao.resolucao?.statusHttp || "",
-        erroTecnico: importacao.resolucao?.erroTecnico || importacao.erro || "",
-        cupom: beneficiosMensagem.cupom || "",
-        avisoCupom: beneficiosMensagem.avisoCupom || "",
-        tipoCupom: beneficiosMensagem.tipoCupom || "",
-        cupomOrigem: beneficiosMensagem.cupomOrigem || "",
-        cupomDetectadoTexto: Boolean(beneficiosMensagem.cupomDetectadoTexto),
-        beneficioExtra: beneficiosMensagem.beneficioExtra || "",
-        linkResgateCupom: beneficiosMensagem.linkResgateCupom || "",
-        status: "erro",
-        statusRadar: "erro",
-        motivo: importacao.motivo || "importacao_falhou",
-        linksDetectados: 1
-      });
-      registrarRadarMarketplaceEvento({
-        marketplace: marketplaceImportacaoResumo,
-        capturado: true,
-        redirectOk: importacao.resolucao?.ok === true || Boolean(importacao.resolucao?.urlResolvida),
-        importadorChamado: importacao.resolucao?.ok === true,
-        motivo: importacao.motivoTecnico || importacao.motivo || "importacao_falhou"
-      });
-      resultados.push({ link, ok: false, motivo: importacao.motivo });
-      continue;
-    }
-
-    coberturaRadar.registrar("legacy_importador_ok", {
+    coberturaRadar.registrar("radar_evento_rejeitado", {
       ...contextoCoberturaRadar,
-      decisao: "aceito",
-      marketplace: ofertaImportadorRadar?.marketplace || importacao.resolucao?.marketplaceReal || marketplaceInicialResumo,
+      decisao: "rejeitado",
+      motivo: motivoRejeicaoEngineV2,
+      marketplace: marketplaceInicialResumo,
       link,
       links
     });
-    logOptimus("RADAR", "Importacao concluida", {
-      linkCapturado: link,
-      urlResolvida: importacao.resolucao?.urlResolvida || "",
-      linkOriginal: importacao.resolucao?.linkOriginalLimpo || ofertaImportadorRadar?.linkOriginal || "",
-      marketplace: ofertaImportadorRadar?.marketplace || importacao.resolucao?.marketplaceReal || "",
-      titulo: ofertaImportadorRadar?.titulo || ofertaImportadorRadar?.nome || "",
-      preco: ofertaImportadorRadar?.precoAtual || ofertaImportadorRadar?.preco || "",
-      categoria: ofertaImportadorRadar?.categoria || "",
-      cupomImportado: ofertaImportadorRadar?.cupom || "",
-      cupomMensagem: beneficiosLink.cupom || ""
-    });
-    const ofertaRadar = aplicarIdentidadeCanonicaRadar(prepararOfertaGlobal(preservarCandidatosImagemUniversal({
-      ...ofertaImportadorRadar,
-      cupom: ofertaImportadorRadar?.cupom || beneficiosLink.cupom || "",
-      avisoCupom: ofertaImportadorRadar?.avisoCupom || beneficiosLink.avisoCupom || "",
-      tipoCupom: ofertaImportadorRadar?.tipoCupom || beneficiosLink.tipoCupom || "",
-      beneficioExtra: ofertaImportadorRadar?.beneficioExtra || beneficiosLink.beneficioExtra || "",
-      linkResgateCupom: ofertaImportadorRadar?.linkResgateCupom || beneficiosLink.linkResgateCupom || "",
-      cupomOrigem: ofertaImportadorRadar?.cupomOrigem || beneficiosLink.cupomOrigem || "",
-      cupomDetectadoTexto: Boolean(ofertaImportadorRadar?.cupomDetectadoTexto || beneficiosLink.cupomDetectadoTexto),
-      ...origemBase,
-      origemClienteId: adminMasterId,
-      origem: "radar",
-      origemTipo: origemTipoFinal,
-      radar: true,
-      linkOriginal: importacao.resolucao?.linkOriginalLimpo || ofertaImportadorRadar.linkOriginal,
-      linkCapturado: importacao.resolucao?.urlCapturada || link,
-      urlResolvida: importacao.resolucao?.urlResolvida || ofertaImportadorRadar.linkResolvidoRadar || "",
-      linkResolvidoRadar: importacao.resolucao?.urlResolvida || ofertaImportadorRadar.linkResolvidoRadar || "",
-      marketplaceDetectado: importacao.resolucao?.marketplaceReal || ofertaImportadorRadar.marketplace || "",
-      tipoLink: importacao.resolucao?.tipoLinkRadar === "intermediario" ? "intermediario" : "produto",
-      tipoLinkRadar: importacao.resolucao?.tipoLinkRadar || "produto",
-      motivoTecnico: "",
-      link: importacao.resolucao?.linkOriginalLimpo || ofertaImportadorRadar.linkOriginal,
-      linkAfiliado: "",
-      linkFinal: "",
-      imagem: imagemOfertaRadar(ofertaImportadorRadar),
-      image: imagemOfertaRadar(ofertaImportadorRadar),
-      mensagemOriginalRadar: texto.slice(0, 1000),
-      ...(coberturaTraceIdRadar ? { coberturaTraceId: coberturaTraceIdRadar } : {}),
-      ...(fidelidadeTraceIdPrincipal ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal } : {}),
-      capturadaEm: dataCaptura,
-      dataEntradaRadar: dataCaptura,
-      metadata: mergeRadarMirrorMetadata({
-        ...(resultadoPrecedenciaComercial?.metadata && typeof resultadoPrecedenciaComercial.metadata === "object" ? resultadoPrecedenciaComercial.metadata : (ofertaImportadorRadar?.metadata && typeof ofertaImportadorRadar.metadata === "object" ? ofertaImportadorRadar.metadata : {})),
-        ...(coberturaTraceIdRadar ? { coberturaTraceId: coberturaTraceIdRadar } : {}),
-        ...(fidelidadeTraceIdPrincipal ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal } : {}),
-        comparacaoRadarLocal,
-        radarHibrido: {
-          ...(ofertaImportadorRadar?.metadata?.radarHibrido && typeof ofertaImportadorRadar.metadata.radarHibrido === "object" ? ofertaImportadorRadar.metadata.radarHibrido : {}),
-          comparacao: comparacaoRadarLocal
-        }
-      }, radarMirrorComparado)
-    })));
-    coberturaRadar.registrar("oferta_preparada", {
-      ...contextoCoberturaRadar,
-      decisao: "aceito",
-      marketplace: ofertaRadar.marketplace || importacao.resolucao?.marketplaceReal || marketplaceImportacaoResumo,
-      link,
-      links,
-      ofertaId: ofertaRadar.id || ofertaRadar.ofertaId || ""
-    });
-    const resolucaoCaptura = resolverClienteMensageiroPorSessao(sessaoIdTexto);
-    fidelidadeObs.registrarSnapshot("espelho_comercial_saida", {
-      fidelidadeTraceId: fidelidadeTraceIdPrincipal,
-      clienteId: adminMasterId,
-      mensagemId: raw?.key?.id || "",
-      oferta: ofertaRadar,
-      linksEncontrados: links,
-      observacoes: "oferta_radar_preparada"
-    });
-    fidelidadeObs.registrarIdentidade("espelho_comercial_saida", {
-      fidelidadeTraceId: fidelidadeTraceIdPrincipal,
-      clienteId: adminMasterId,
-      mensagemId: raw?.key?.id || "",
-      oferta: ofertaRadar,
-      marketplaceInicial: marketplaceDetectadoLinks,
-      marketplaceImportador: ofertaImportadorRadar?.marketplace || "",
-      marketplaceFinal: ofertaRadar.marketplace || "",
-      urlOriginal: importacao.resolucao?.linkOriginalLimpo || ofertaRadar.linkOriginal || "",
-      produtoIdOriginal: radarMirrorComparado?.produto?.produtoIdOriginal || "",
-      produtoIdImportado: ofertaRadar.produtoIdDetectado || ofertaRadar.produtoId || ""
-    });
-    fidelidadeObs.registrarImagem("espelho_comercial_saida", {
-      fidelidadeTraceId: fidelidadeTraceIdPrincipal,
-      clienteId: adminMasterId,
-      mensagemId: raw?.key?.id || "",
-      oferta: ofertaRadar,
-      imagem: ofertaRadar.imagem || "",
-      imagemOrigem: ofertaRadar.imagemOrigem || "",
-      status: ofertaRadar.imagem ? "URL_http_presente" : "ausente_no_importador"
-    });
-    console.log("[RADAR-OFERTA-BASE-CRIADA]", JSON.stringify({
-      correlationId,
-      marketplace: ofertaRadar.marketplace || importacao.resolucao?.marketplaceReal || "",
-      sessaoCapturaId: sessaoIdTexto,
-      capturadoPorClienteId: resolucaoCaptura.clienteIdMensageiro || adminMasterId,
-      clienteIdImportacao: importacao.resolucao?.clienteIdImportacaoRadar || "",
-      integracaoAdminIgnorada: Boolean(importacao.resolucao?.clienteIdImportacaoRadar && importacao.resolucao.clienteIdImportacaoRadar !== adminMasterId)
-    }));
-    logProdutoCanonicoRadar(ofertaRadar);
-
-    logRadarMlImagemDebug({
-      clienteId: adminMasterId,
-      correlationId,
-      oferta: ofertaRadar,
-      linkOriginal: ofertaRadar.linkOriginal || "",
-      linkResolvido: ofertaRadar.linkResolvidoRadar || ofertaRadar.urlResolvida || "",
-      imagemImportador: imagemOfertaRadar(ofertaImportadorRadar),
-      imagemOfertaRadar: imagemOfertaRadar(ofertaRadar),
-      imagemFila: ""
-    });
-
-    logOptimus("CUPOM", "Oferta preparada", {
-      titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
-      cupom: ofertaRadar.cupom || "",
-      avisoCupom: ofertaRadar.avisoCupom || "",
-      tipoCupom: ofertaRadar.tipoCupom || "",
-      cupomOrigem: ofertaRadar.cupomOrigem || "",
-      beneficioExtra: ofertaRadar.beneficioExtra || "",
-      linkResgateCupom: ofertaRadar.linkResgateCupom || ""
-    });
-
-    const clientes = await adicionarRadarCapturadoNaFilaClientes(ofertaRadar, {
-      radarConfigFontes: radarConfig
-    });
-    const adicionadasLink = clientes.filter(cliente => cliente.adicionada).length;
-    const houveRetidaDestino = clientes.some(cliente => cliente.retida);
-    const primeiraRejeicao = clientes.find(cliente => !cliente.adicionada)?.motivo || "";
-    const aprovadoLink = clientes.some(cliente => cliente.ok === true || cliente.adicionada === true);
-    const beneficio = beneficioResumoRadar(ofertaRadar);
-    const economiaRadar = calcularEconomiaRadar(ofertaRadar);
-    const clienteIdsAdicionados = clientes
-      .filter(cliente => cliente.adicionada)
-      .map(cliente => cliente.clienteId)
-      .filter(Boolean);
-    const clientesAdicionados = clientes
-      .filter(cliente => cliente.adicionada)
-      .map(cliente => ({
-        clienteId: cliente.clienteId,
-        idOfertaFila: cliente.idOfertaFila || "",
-        linkAfiliado: cliente.linkAfiliado || "",
-        statusRadar: cliente.statusRadar || "fila",
-        statusFila: cliente.statusFila || "pendente"
-      }));
-    const primeiraFila = clientesAdicionados[0] || {};
-
-    logDebug("[RADAR-DECISAO] distribuicao concluida", {
-      linkCapturado: importacao.resolucao?.urlCapturada || link,
-      titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
-      marketplace: ofertaRadar.marketplace || "",
-      cupom: ofertaRadar.cupom || "",
-      clientesAnalisados: clientes.length,
-      adicionadas: adicionadasLink,
-      primeiraRejeicao: primeiraRejeicao || ""
-    });
-
     registrarHistoricoRadar(adminMasterId, {
       origemTipo: origemTipoFinal,
       origemSessaoId: sessaoIdTexto,
@@ -15129,63 +14771,35 @@ const registroEngineRadar = temRedirectConhecidoRadar
       origemGrupoNome: grupoNomeTexto,
       capturadaEm: dataCaptura,
       mensagemResumo: texto,
-      imagem: ofertaRadar.imagem || ofertaRadar.image || ofertaRadar.foto || "",
-      linkCapturado: importacao.resolucao?.urlCapturada || link,
-      urlResolvida: importacao.resolucao?.urlResolvida || "",
-      linkResolvidoRadar: importacao.resolucao?.urlResolvida || "",
-      linkOriginal: ofertaRadar.linkOriginal || "",
-      linkAfiliado: primeiraFila.linkAfiliado || "",
-      idOfertaFila: primeiraFila.idOfertaFila || "",
-      chaveCanonica: ofertaRadar.chaveCanonica || "",
-      produtoIdCanonico: ofertaRadar.produtoIdCanonico || "",
-      marketplaceCanonico: ofertaRadar.marketplaceCanonico || "",
-      marketplace: ofertaRadar.marketplace || "",
-      marketplaceDetectado: importacao.resolucao?.marketplaceReal || ofertaRadar.marketplace || "",
-      tipoLink: importacao.resolucao?.tipoLinkRadar === "intermediario" ? "intermediario" : "produto",
-      tipoLinkRadar: importacao.resolucao?.tipoLinkRadar || "produto",
-      statusCaptura: adicionadasLink > 0 ? "fila" : (houveRetidaDestino || primeiraRejeicao?.startsWith("retida") ? "retida" : "erro"),
-      motivoFinal: adicionadasLink > 0 ? "enviado_para_fila" : primeiraRejeicao || "nenhum_cliente_adicionado",
-      motivoTecnico: adicionadasLink > 0 ? "" : primeiraRejeicao || "nenhum_cliente_adicionado",
-      titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
-      preco: ofertaRadar.precoAtual || ofertaRadar.preco || "",
-      precoAtual: ofertaRadar.precoAtual || ofertaRadar.preco || "",
-      precoAntigo: ofertaRadar.precoAntigo || "",
-      categoria: ofertaRadar.categoria || "",
-      economiaValor: economiaRadar.economiaValor,
-      economiaPercentual: economiaRadar.economiaPercentual,
-      cupom: ofertaRadar.cupom || "",
-      avisoCupom: ofertaRadar.avisoCupom || "",
-      tipoCupom: ofertaRadar.tipoCupom || "",
-      cupomOrigem: ofertaRadar.cupomOrigem || "",
-      cupomDetectadoTexto: Boolean(ofertaRadar.cupomDetectadoTexto),
-      linkResgateCupom: ofertaRadar.linkResgateCupom || "",
-      beneficioExtra: ofertaRadar.beneficioExtra || beneficio,
-      beneficio,
-      status: adicionadasLink > 0 ? "fila" : (houveRetidaDestino ? "retida" : "ignorada"),
-      statusRadar: adicionadasLink > 0 ? "fila" : (houveRetidaDestino ? "retida" : "ignorada"),
-      motivo: adicionadasLink > 0 ? "" : primeiraRejeicao || "nenhum_cliente_adicionado",
-      linksDetectados: 1,
-      adicionadas: adicionadasLink,
-      clienteIdsAdicionados,
-      clientesAdicionados
+      linkCapturado: link,
+      linkOriginal: "",
+      urlResolvida: "",
+      marketplace: marketplaceInicialResumo,
+      marketplaceDetectado: marketplaceInicialResumo,
+      statusCaptura: "descartado",
+      status: "descartado",
+      statusRadar: "descartado",
+      motivo: motivoRejeicaoEngineV2,
+      motivoTecnico: motivoRejeicaoEngineV2,
+      motivoFinal: motivoRejeicaoEngineV2,
+      tipoLink: "desconhecido",
+      tipoLinkRadar: "desconhecido",
+      linksDetectados: 1
     });
     registrarRadarMarketplaceEvento({
-      marketplace: ofertaRadar.marketplace || marketplaceImportacaoResumo,
-      capturado: true,
-      redirectOk: importacao.resolucao?.ok === true || Boolean(importacao.resolucao?.urlResolvida),
-      importadorChamado: importacao.resolucao?.ok === true,
-      importado: Boolean(ofertaRadar.titulo || ofertaRadar.nome) && Boolean(ofertaRadar.precoAtual || ofertaRadar.preco),
-      aprovado: aprovadoLink,
-      adicionadoFila: adicionadasLink > 0,
-      motivo: adicionadasLink > 0 ? "" : primeiraRejeicao || "nenhum_cliente_adicionado"
+      marketplace: marketplaceInicialResumo,
+      capturado: false,
+      motivo: motivoRejeicaoEngineV2
     });
-
     resultados.push({
       link,
-      ok: true,
-      marketplace: ofertaRadar.marketplace,
-      clientes
+      ok: false,
+      marketplace: marketplaceInicialResumo,
+      motivo: motivoRejeicaoEngineV2,
+      descarte: descarteAuditadoRadar
     });
+    continue;
+
   }
 
   const resumoRodada = resumirResultadosRadarMensagem(resultados);

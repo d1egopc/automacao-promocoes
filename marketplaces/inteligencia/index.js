@@ -6373,184 +6373,31 @@ async function processarMensagemRadar({
       url: link,
       grupo: grupoNomeTexto || grupoIdTexto
     });
-    const linkEhResgate = beneficiosMensagem.linksResgate.includes(link);
-
-    if (linkEhResgate && links.length > beneficiosMensagem.linksResgate.length) {
-      registrarHistoricoRadar(adminMasterId, {
-        origemTipo: origemTipoFinal,
-        origemSessaoId: sessaoIdTexto,
-        origemGrupoId: grupoIdTexto,
-        origemGrupoNome: grupoNomeTexto,
-        capturadaEm: dataCaptura,
-        mensagemResumo: texto,
-        linkCapturado: link,
-        linkOriginal: "",
-        marketplace: detectarMarketplaceRadarLink(link) || "",
-        cupom: beneficiosMensagem.cupom || "",
-        avisoCupom: beneficiosMensagem.avisoCupom || "",
-        tipoCupom: "resgate",
-        cupomOrigem: beneficiosMensagem.cupomOrigem || "",
-        cupomDetectadoTexto: Boolean(beneficiosMensagem.cupomDetectadoTexto),
-        beneficioExtra: beneficiosMensagem.beneficioExtra || link,
-        linkResgateCupom: beneficiosMensagem.linkResgateCupom || link,
-        status: "detectado",
-        statusRadar: "detectada",
-        motivo: "link_resgate_cupom_detectado",
-        linksDetectados: 1
-      });
-      console.log("[RADAR-CUPOM] link de resgate detectado", {
-        link,
-        tipoCupom: "resgate"
-      });
-      continue;
-    }
-
-    const importacao = await importarOfertaRadarPorLink(link, {
-      origemTipo: origemTipoFinal,
-      sessaoId: sessaoIdTexto,
+    const marketplaceDetectado = detectarMarketplaceRadarLink(link) || "";
+    const motivoRejeicaoEngineV2 = marketplaceDetectado
+      ? "radar_legado_desativado_engine_v2_obrigatoria"
+      : "marketplace_nao_identificado";
+    const descarteAuditadoRadar = {
+      motivo: motivoRejeicaoEngineV2,
+      urlOriginal: link,
+      origem: origemTipoFinal,
+      marketplace_detectado: marketplaceDetectado,
+      data: dataCaptura,
+      cliente: adminMasterId,
+      workspace: adminMasterId,
+      grupo: grupoNomeTexto || grupoIdTexto,
       grupoId: grupoIdTexto,
-      grupoNome: grupoNomeTexto
-    });
+      sessaoId: sessaoIdTexto,
+      textoOriginal: String(texto || "").slice(0, 1000)
+    };
 
-    if (!importacao.ok) {
-      console.log("[RADAR-IMPORTACAO] falhou", {
-        motivo: importacao.motivo || "importacao_falhou",
-        link,
-        urlResolvida: importacao.resolucao?.urlResolvida || "",
-        linkOriginal: importacao.resolucao?.linkOriginalLimpo || "",
-        marketplace: importacao.resolucao?.marketplaceReal || ""
-      });
-      console.log("[RADAR] importação falhou:", {
-        motivo: importacao.motivo || "importacao_falhou",
-        link,
-        urlResolvida: importacao.resolucao?.urlResolvida || "",
-        marketplace: importacao.resolucao?.marketplaceReal || ""
-      });
-      logRadarRejeitado(importacao.motivo || "importacao_falhou", {
-        link,
-        urlResolvida: importacao.resolucao?.urlResolvida || "",
-        marketplace: importacao.resolucao?.marketplaceReal || ""
-      });
-      registrarHistoricoRadar(adminMasterId, {
-        origemTipo: origemTipoFinal,
-        origemSessaoId: sessaoIdTexto,
-        origemGrupoId: grupoIdTexto,
-        origemGrupoNome: grupoNomeTexto,
-        capturadaEm: dataCaptura,
-        mensagemResumo: texto,
-        linkCapturado: link,
-        linkOriginal: importacao.resolucao?.linkOriginalLimpo || "",
-        marketplace: importacao.resolucao?.marketplaceReal || "",
-        cupom: beneficiosMensagem.cupom || "",
-        avisoCupom: beneficiosMensagem.avisoCupom || "",
-        tipoCupom: beneficiosMensagem.tipoCupom || "",
-        cupomOrigem: beneficiosMensagem.cupomOrigem || "",
-        cupomDetectadoTexto: Boolean(beneficiosMensagem.cupomDetectadoTexto),
-        beneficioExtra: beneficiosMensagem.beneficioExtra || "",
-        linkResgateCupom: beneficiosMensagem.linkResgateCupom || "",
-        status: "erro",
-        statusRadar: "erro",
-        motivo: importacao.motivo || "importacao_falhou",
-        linksDetectados: 1
-      });
-      resultados.push({ link, ok: false, motivo: importacao.motivo });
-      continue;
-    }
-
-    console.log("[RADAR-IMPORTACAO] sucesso", {
-      linkCapturado: link,
-      urlResolvida: importacao.resolucao?.urlResolvida || "",
-      linkOriginal: importacao.resolucao?.linkOriginalLimpo || importacao.oferta?.linkOriginal || "",
-      marketplace: importacao.oferta?.marketplace || importacao.resolucao?.marketplaceReal || "",
-      titulo: importacao.oferta?.titulo || importacao.oferta?.nome || "",
-      preco: importacao.oferta?.precoAtual || importacao.oferta?.preco || "",
-      categoria: importacao.oferta?.categoria || "",
-      cupomImportado: importacao.oferta?.cupom || "",
-      cupomMensagem: beneficiosMensagem.cupom || ""
-    });
-    console.log("[RADAR] URL resolvida", {
-      capturada: importacao.resolucao?.urlCapturada || link,
-      resolvida: importacao.resolucao?.urlResolvida || ""
-    });
-    console.log("[RADAR] marketplace real", {
-      marketplace: importacao.resolucao?.marketplaceReal || importacao.oferta?.marketplace || ""
-    });
-    console.log("[RADAR] link original limpo", {
-      linkOriginal: importacao.resolucao?.linkOriginalLimpo || importacao.oferta?.linkOriginal || ""
-    });
-    console.log("[RADAR] importação sucesso", {
+    console.log("[RADAR-EVENTO-REJEITADO]", JSON.stringify(descarteAuditadoRadar));
+    logRadarRejeitado(motivoRejeicaoEngineV2, {
       link,
-      marketplace: importacao.oferta?.marketplace || importacao.resolucao?.marketplaceReal || "",
-      titulo: importacao.oferta?.titulo || importacao.oferta?.nome || ""
+      marketplace: marketplaceDetectado,
+      grupo: grupoNomeTexto || grupoIdTexto,
+      origemTipo: origemTipoFinal
     });
-
-    const ofertaRadar = prepararOfertaGlobal({
-      ...importacao.oferta,
-      cupom: importacao.oferta?.cupom || beneficiosMensagem.cupom || "",
-      avisoCupom: importacao.oferta?.avisoCupom || beneficiosMensagem.avisoCupom || "",
-      tipoCupom: importacao.oferta?.tipoCupom || beneficiosMensagem.tipoCupom || "",
-      beneficioExtra: importacao.oferta?.beneficioExtra || beneficiosMensagem.beneficioExtra || "",
-      linkResgateCupom: importacao.oferta?.linkResgateCupom || beneficiosMensagem.linkResgateCupom || "",
-      cupomOrigem: importacao.oferta?.cupomOrigem || beneficiosMensagem.cupomOrigem || "",
-      cupomDetectadoTexto: Boolean(importacao.oferta?.cupomDetectadoTexto || beneficiosMensagem.cupomDetectadoTexto),
-      ...origemBase,
-      origemClienteId: adminMasterId,
-      origem: "radar",
-      origemTipo: origemTipoFinal,
-      radar: true,
-      linkOriginal: importacao.resolucao?.linkOriginalLimpo || importacao.oferta.linkOriginal,
-      linkCapturado: importacao.resolucao?.urlCapturada || link,
-      linkResolvidoRadar: importacao.resolucao?.urlResolvida || importacao.oferta.linkResolvidoRadar || "",
-      link: importacao.resolucao?.linkOriginalLimpo || importacao.oferta.linkOriginal,
-      linkAfiliado: "",
-      linkFinal: "",
-      mensagemOriginalRadar: texto.slice(0, 1000),
-      capturadaEm: dataCaptura,
-      dataEntradaRadar: dataCaptura
-    });
-
-    console.log("[RADAR-CUPOM] oferta preparada", {
-      titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
-      cupom: ofertaRadar.cupom || "",
-      avisoCupom: ofertaRadar.avisoCupom || "",
-      tipoCupom: ofertaRadar.tipoCupom || "",
-      cupomOrigem: ofertaRadar.cupomOrigem || "",
-      beneficioExtra: ofertaRadar.beneficioExtra || "",
-      linkResgateCupom: ofertaRadar.linkResgateCupom || ""
-    });
-
-    const clientes = await adicionarRadarCapturadoNaFilaClientes(ofertaRadar, {
-      radarConfigFontes: radarConfig
-    });
-    const adicionadasLink = clientes.filter(cliente => cliente.adicionada).length;
-    const primeiraRejeicao = clientes.find(cliente => !cliente.adicionada)?.motivo || "";
-    const beneficio = beneficioResumoRadar(ofertaRadar);
-    const economiaRadar = calcularEconomiaRadar(ofertaRadar);
-    const clienteIdsAdicionados = clientes
-      .filter(cliente => cliente.adicionada)
-      .map(cliente => cliente.clienteId)
-      .filter(Boolean);
-    const clientesAdicionados = clientes
-      .filter(cliente => cliente.adicionada)
-      .map(cliente => ({
-        clienteId: cliente.clienteId,
-        idOfertaFila: cliente.idOfertaFila || "",
-        linkAfiliado: cliente.linkAfiliado || "",
-        statusRadar: cliente.statusRadar || "fila",
-        statusFila: cliente.statusFila || "pendente"
-      }));
-    const primeiraFila = clientesAdicionados[0] || {};
-
-    console.log("[RADAR-DECISAO] distribuicao concluida", {
-      linkCapturado: importacao.resolucao?.urlCapturada || link,
-      titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
-      marketplace: ofertaRadar.marketplace || "",
-      cupom: ofertaRadar.cupom || "",
-      clientesAnalisados: clientes.length,
-      adicionadas: adicionadasLink,
-      primeiraRejeicao: primeiraRejeicao || ""
-    });
-
     registrarHistoricoRadar(adminMasterId, {
       origemTipo: origemTipoFinal,
       origemSessaoId: sessaoIdTexto,
@@ -6558,41 +6405,24 @@ async function processarMensagemRadar({
       origemGrupoNome: grupoNomeTexto,
       capturadaEm: dataCaptura,
       mensagemResumo: texto,
-      imagem: ofertaRadar.imagem || ofertaRadar.image || ofertaRadar.foto || "",
-      linkCapturado: importacao.resolucao?.urlCapturada || link,
-      linkOriginal: ofertaRadar.linkOriginal || "",
-      linkAfiliado: primeiraFila.linkAfiliado || "",
-      idOfertaFila: primeiraFila.idOfertaFila || "",
-      marketplace: ofertaRadar.marketplace || "",
-      titulo: ofertaRadar.titulo || ofertaRadar.nome || "",
-      preco: ofertaRadar.precoAtual || ofertaRadar.preco || "",
-      precoAtual: ofertaRadar.precoAtual || ofertaRadar.preco || "",
-      precoAntigo: ofertaRadar.precoAntigo || "",
-      categoria: ofertaRadar.categoria || "",
-      economiaValor: economiaRadar.economiaValor,
-      economiaPercentual: economiaRadar.economiaPercentual,
-      cupom: ofertaRadar.cupom || "",
-      avisoCupom: ofertaRadar.avisoCupom || "",
-      tipoCupom: ofertaRadar.tipoCupom || "",
-      cupomOrigem: ofertaRadar.cupomOrigem || "",
-      cupomDetectadoTexto: Boolean(ofertaRadar.cupomDetectadoTexto),
-      linkResgateCupom: ofertaRadar.linkResgateCupom || "",
-      beneficioExtra: ofertaRadar.beneficioExtra || beneficio,
-      beneficio,
-      status: adicionadasLink > 0 ? "fila" : "ignorada",
-      statusRadar: adicionadasLink > 0 ? "fila" : "ignorada",
-      motivo: adicionadasLink > 0 ? "" : primeiraRejeicao || "nenhum_cliente_adicionado",
-      linksDetectados: 1,
-      adicionadas: adicionadasLink,
-      clienteIdsAdicionados,
-      clientesAdicionados
+      linkCapturado: link,
+      linkOriginal: "",
+      marketplace: marketplaceDetectado,
+      marketplaceDetectado,
+      status: "descartado",
+      statusRadar: "descartado",
+      statusCaptura: "descartado",
+      motivo: motivoRejeicaoEngineV2,
+      motivoTecnico: motivoRejeicaoEngineV2,
+      motivoFinal: motivoRejeicaoEngineV2,
+      linksDetectados: 1
     });
-
     resultados.push({
       link,
-      ok: true,
-      marketplace: ofertaRadar.marketplace,
-      clientes
+      ok: false,
+      marketplace: marketplaceDetectado,
+      motivo: motivoRejeicaoEngineV2,
+      descarte: descarteAuditadoRadar
     });
   }
 

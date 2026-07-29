@@ -554,27 +554,42 @@ function mockModulo(relativo, exports) {
 
   {
     const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
-    assert(indexFonte.includes("let importacao = await importarOfertaRadarPorLink"), "fluxo Radar precisa permitir ajuste controlado de importacao apos mirror");
-    assert(!indexFonte.includes("const importacao = await importarOfertaRadarPorLink"), "const importacao causa Assignment to constant variable apos RADAR-MIRROR-COMPARADO");
+    const fluxoLegacy = ["fluxo", "legacy", "selecionado"].join("_");
+    assert(indexFonte.includes("[RADAR-EVENTO-REJEITADO]"), "Radar deve auditar descarte quando nao houver rota Engine V2");
+    assert(indexFonte.includes("radar_evento_rejeitado"), "cobertura deve registrar descarte auditado");
+    assert(!indexFonte.includes(fluxoLegacy), "Radar automatico nao pode selecionar fluxo legado");
   }
 
   {
     const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
     const normalizers = require("../modules/engine/normalizers");
+    const linkMercadoLivre = "https://meli.la/2HRuzPf";
+    const linkShopee = "https://s.shopee.com.br/903wBcqhYS";
     const linkAmazonDivulgador = "https://amzn.divulgador.link/gUXR2tSr";
+    const linkDesconhecido = "https://links.example.invalid/produto";
     const inicioLoop = indexFonte.indexOf("for (const link of links)");
     const inicioEngineV2 = indexFonte.indexOf("if (linkEngineV2Radar(link))", inicioLoop);
-    const inicioLegacy = indexFonte.indexOf("fluxo_legacy_selecionado", inicioLoop);
-    const inicioImportadorLegacy = indexFonte.indexOf("let importacao = await importarOfertaRadarPorLink", inicioLoop);
-    const inicioFanoutLegacy = indexFonte.indexOf("adicionarRadarCapturadoNaFilaClientes(ofertaRadar", inicioLoop);
+    const inicioRejeicao = indexFonte.indexOf("radar_evento_rejeitado", inicioLoop);
+    const inicioContinueRejeicao = indexFonte.indexOf("continue;", inicioRejeicao);
+    const chamadaImportadorLegacy = ["let importacao = await ", "importarOfertaRadarPorLink"].join("");
+    const chamadaFanoutLegacy = ["adicionarRadarCapturadoNaFilaClientes", "(ofertaRadar"].join("");
+    const inicioImportadorLegacy = indexFonte.indexOf(chamadaImportadorLegacy, inicioLoop);
+    const inicioFanoutLegacy = indexFonte.indexOf(chamadaFanoutLegacy, inicioLoop);
 
+    assert.strictEqual(normalizers.detectarMarketplaceLink(linkMercadoLivre), "mercadolivre");
+    assert.strictEqual(normalizers.detectarMarketplaceLink(linkShopee), "shopee");
     assert.strictEqual(normalizers.detectarMarketplaceLink(linkAmazonDivulgador), "amazon");
+    assert.strictEqual(normalizers.detectarMarketplaceLink(linkDesconhecido), "");
     assert(indexFonte.includes("function dominioAmazonDivulgadorRadar"));
     assert(indexFonte.includes("if (dominioAmazonDivulgadorRadar(urlLower))"));
     assert(indexFonte.includes("if (dominioAmazonDivulgadorRadar(host)) return \"amazon\";"));
-    assert(inicioEngineV2 > -1 && inicioLegacy > -1 && inicioEngineV2 < inicioLegacy, "Engine V2 precisa ser avaliada antes do legado");
-    assert(inicioLegacy < inicioImportadorLegacy, "importador legado so pode ocorrer depois da selecao legacy");
-    assert(inicioLegacy < inicioFanoutLegacy, "fan-out legado so pode ocorrer depois da selecao legacy");
+    assert(indexFonte.includes("if (host === \"meli.la\" || host.endsWith(\".meli.la\")) return \"mercadolivre\";"));
+    assert(indexFonte.includes("if (host === \"shopee.com.br\" || host.endsWith(\".shopee.com.br\")) return \"shopee\";"));
+    assert(inicioEngineV2 > -1 && inicioRejeicao > -1 && inicioEngineV2 < inicioRejeicao, "Engine V2 precisa ser avaliada antes do descarte");
+    assert(inicioContinueRejeicao > inicioRejeicao, "descarte auditado deve encerrar o processamento do link");
+    assert(inicioImportadorLegacy === -1 || inicioContinueRejeicao < inicioImportadorLegacy, "importador legado nao pode ser alcancado pelo Radar automatico");
+    assert(inicioFanoutLegacy === -1 || inicioContinueRejeicao < inicioFanoutLegacy, "fan-out legado nao pode ser alcancado pelo Radar automatico");
+    assert(indexFonte.includes("motivoRejeicaoEngineV2"), "link desconhecido deve ter motivo padronizado de rejeicao");
   }
 
   delete process.env.RADAR_COBERTURA_AUDITORIA_ENABLED;
