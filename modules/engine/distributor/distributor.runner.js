@@ -188,6 +188,19 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     filaRecebeu: true
   });
 
+  console.log("[ENGINE-V2-DISTRIBUICAO-CONCLUIDA]", JSON.stringify({
+    ofertaId: oferta.id || null,
+    jobId: oferta.job_id || null,
+    eventoId: oferta.evento_id || null,
+    workspaceId: oferta.cliente_id || "",
+    marketplace: oferta.marketplace || "",
+    filaItemId: fila.itemFila?.id || null,
+    filaRecebeu: true,
+    destinosCompativeis: validacao.destinosCompativeis || 0,
+    temImagem: Boolean(fila.itemFila?.imagem),
+    ofertaUniversalSchemaVersion: oferta.metadata?.ofertaUniversalSchemaVersion || oferta.metadata?.ofertaUniversal?.schemaVersion || ""
+  }));
+
   if (resumo) resumo.adicionadasFila += 1;
   return { ok: true, itemFilaId: fila.itemFila?.id || null };
 }

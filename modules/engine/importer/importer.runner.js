@@ -200,6 +200,18 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
     return finalizarErro(job, resultadoAdapter?.motivo || "erro_importacao", { marketplace }, resumo);
   }
 
+  console.log("[ENGINE-V2-IMPORTACAO-CONCLUIDA]", JSON.stringify({
+    jobId: job.id || null,
+    eventoId: job.evento_id || null,
+    workspaceId: job.cliente_id || "",
+    marketplace,
+    temTitulo: Boolean(resultadoAdapter.titulo || resultadoAdapter.nome),
+    temPreco: Boolean(resultadoAdapter.preco || resultadoAdapter.precoAtual),
+    temImagem: Boolean(resultadoAdapter.imagem || resultadoAdapter.image || resultadoAdapter.imagemUrl || resultadoAdapter.thumbnail),
+    temLinkAfiliado: Boolean(resultadoAdapter.linkAfiliado || resultadoAdapter.linkFinal || resultadoAdapter.link),
+    cupomStatus: resultadoAdapter.cupom ? "confirmado" : (resultadoAdapter.avisoCupom ? "provavel" : "ausente")
+  }));
+
   await registrarEtapaImportacao(job.id, "oferta_normalizada", "ok", "oferta_normalizada", {
     titulo: resultadoAdapter.titulo || "",
     temPreco: Boolean(resultadoAdapter.preco),

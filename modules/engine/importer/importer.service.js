@@ -36,6 +36,12 @@ const {
   logEngineImporterErro,
   logEngineImporterOfertaCriada
 } = require("../logger");
+const {
+  montarOfertaUniversalEngine,
+  validarContratoOfertaUniversal,
+  congelarOfertaUniversal,
+  resumoOfertaUniversalLog
+} = require("../oferta-universal.contract");
 const fidelidadeObs = require("../../fidelidade/observabilidade-v1");
 const coberturaRadar = require("../../radar/cobertura-v1");
 
@@ -1179,6 +1185,52 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   const motivoPersistencia = retidaV2
     ? (inteligenciaV2.motivoDecisao || inteligenciaV2.motivo || "retida_v2")
     : null;
+  const ofertaUniversalInicial = montarOfertaUniversalEngine({
+    oferta,
+    ofertaEntrada,
+    job,
+    evento,
+    link,
+    metadata: metadataFinal,
+    status: statusPersistencia,
+    motivo: motivoPersistencia || ""
+  });
+  const validacaoOfertaUniversal = validarContratoOfertaUniversal(ofertaUniversalInicial);
+  metadataFinal = {
+    ...metadataFinal,
+    ofertaUniversalSchemaVersion: ofertaUniversalInicial.schemaVersion,
+    ofertaUniversal: congelarOfertaUniversal(ofertaUniversalInicial),
+    ofertaUniversalValidacao: validacaoOfertaUniversal
+  };
+
+  console.log("[OFERTA-UNIVERSAL-CRIADA]", JSON.stringify(resumoOfertaUniversalLog(ofertaUniversalInicial, validacaoOfertaUniversal)));
+  console.log(validacaoOfertaUniversal.ok ? "[OFERTA-UNIVERSAL-VALIDADA]" : "[OFERTA-UNIVERSAL-REJEITADA]", JSON.stringify(resumoOfertaUniversalLog(ofertaUniversalInicial, validacaoOfertaUniversal)));
+  if (retidaV2) {
+    console.log("[OFERTA-UNIVERSAL-RETIDA]", JSON.stringify({
+      ...resumoOfertaUniversalLog(ofertaUniversalInicial, validacaoOfertaUniversal),
+      motivo: motivoPersistencia || "retida_v2"
+    }));
+  }
+  console.log("[ENGINE-V2-INTELIGENCIA-APLICADA]", JSON.stringify({
+    jobId: job.id || null,
+    eventoId: job.evento_id || null,
+    workspaceId: job.cliente_id || job.clienteId || "",
+    marketplace: oferta.marketplace || "",
+    score: inteligenciaV2.score ?? oferta.score ?? null,
+    prioridade: inteligenciaV2.prioridade ?? oferta.prioridade ?? null,
+    categoria: inteligenciaV2.categoria || oferta.categoria || "",
+    status: inteligenciaV2.status || "",
+    motivo: inteligenciaV2.motivoDecisao || inteligenciaV2.motivo || ""
+  }));
+  console.log("[ENGINE-V2-AFILIACAO-CONCLUIDA]", JSON.stringify({
+    jobId: job.id || null,
+    eventoId: job.evento_id || null,
+    workspaceId: job.cliente_id || job.clienteId || "",
+    marketplace: oferta.marketplace || "",
+    statusConversao: ofertaUniversalInicial.afiliacao.statusConversao,
+    temUrlBase: Boolean(ofertaUniversalInicial.afiliacao.urlBase),
+    temUrlAfiliada: Boolean(ofertaUniversalInicial.afiliacao.urlAfiliada)
+  }));
   const valores = [
     job.evento_id,
     link?.id || null,
@@ -1303,6 +1355,40 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   const ofertaId = resultado.resultado.rows[0]?.id;
   if (!ofertaId) {
     return { ok: false, motivo: "oferta_nao_retornada" };
+  }
+
+  if (usarMetadata) {
+    const ofertaUniversalPersistida = congelarOfertaUniversal({
+      ...metadataFinal.ofertaUniversal,
+      ofertaId,
+      atualizadoEm: new Date().toISOString()
+    });
+    metadataFinal = {
+      ...metadataFinal,
+      ofertaUniversal: ofertaUniversalPersistida
+    };
+    const atualizacaoMetadata = await queryEngine(
+      `UPDATE engine_ofertas
+          SET metadata = $2::jsonb,
+              atualizada_em = NOW()
+        WHERE id = $1
+        RETURNING id`,
+      [ofertaId, JSON.stringify(metadataFinal)]
+    );
+    if (!atualizacaoMetadata.ok) {
+      logEngineImporterErro({
+        jobId: job.id,
+        ofertaId,
+        etapa: "oferta_universal_metadata",
+        motivo: atualizacaoMetadata.motivo || "metadata_update_falhou",
+        erro: atualizacaoMetadata.erro || ""
+      });
+      return {
+        ok: false,
+        motivo: atualizacaoMetadata.motivo || "oferta_universal_metadata_falhou",
+        erro: atualizacaoMetadata.erro || ""
+      };
+    }
   }
 
   if (normalizarMarketplaceMemoria(oferta.marketplace) === "shopee") {
