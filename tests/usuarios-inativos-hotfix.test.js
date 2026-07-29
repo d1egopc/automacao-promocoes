@@ -192,7 +192,7 @@ assert.deepStrictEqual(listarClientesAtivos(), ["cliente_ativo"], "pasta orfa na
 
   const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
   assert.ok(indexFonte.includes("logUsuarioInativoOperacional(clienteId, \"creditos_debito\")"), "debitarCreditos deve bloquear inativo");
-  assert.ok(indexFonte.includes("return listarClientesAtivosOperacionais();"), "Engine Processor deve listar apenas usuarios ativos");
+  assert.ok(indexFonte.includes("return listarWorkspaceIdsElegiveisEngineOperacional();"), "Engine Processor deve listar apenas workspaces elegiveis");
   assert.ok(indexFonte.includes("logUsuarioInativoOperacional(clienteFila, \"executor_processar_fila\")"), "processarFila direto deve bloquear inativo");
   assert.ok(indexFonte.includes("logUsuarioInativoOperacional(clienteIdMensageiro, \"whatsapp_reconexao_automatica\")"), "WhatsApp deve bloquear reconexao automatica de inativo");
   assert.ok(indexFonte.includes("logUsuarioInativoOperacional(clienteIdMensageiro, \"whatsapp_messages_upsert\")"), "WhatsApp conectado deve ignorar eventos de inativo");

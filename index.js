@@ -239,6 +239,7 @@ const {
   listarClientesAtivos,
   logUsuarioInativoIgnorado
 } = require("./utils/usuarios-atividade");
+const workspaceRegistry = require("./modules/workspace");
 
 const {
   storage,
@@ -261,6 +262,45 @@ function listarClientesAtivosOperacionais() {
 
 function logUsuarioInativoOperacional(clienteId = "", fluxo = "") {
   return logUsuarioInativoIgnorado({ clienteId, fluxo });
+}
+
+// DEPRECATED — compatibilidade temporaria.
+// Origem legada: contexto global do index.js com mapas por cliente.
+// Destino oficial: WorkspaceRegistry consumindo fonte unica de Workspaces.
+// Consumidor atual: Engine V2 no processo principal.
+// Remover na Fase: 3, quando os runners receberem WorkspaceRegistry diretamente.
+function fontesWorkspaceRegistryOperacional() {
+  return {
+    usuarios,
+    planos,
+    integracoesPorCliente,
+    configsPorCliente,
+    destinosPorCliente
+  };
+}
+
+// DEPRECATED — compatibilidade temporaria.
+// Origem legada: chamadas internas que ainda esperam lista de ids.
+// Destino oficial: listarWorkspacesElegiveisEngine() com objetos Workspace.
+// Consumidor atual: orquestrador, rotas administrativas da Engine e contexto do Processor.
+// Remover na Fase: 3, junto com a troca de clientesValidos por workspacesElegiveis.
+function listarWorkspaceIdsElegiveisEngineOperacional(opcoes = {}) {
+  return workspaceRegistry.listarWorkspaceIdsElegiveisEngine({
+    fontes: fontesWorkspaceRegistryOperacional(),
+    ...opcoes
+  });
+}
+
+// DEPRECATED — compatibilidade temporaria.
+// Origem legada: Processor valida jobs por cliente_id do banco.
+// Destino oficial: avaliar Workspace por workspaceId antes de qualquer Job.
+// Consumidor atual: processarJobsPendentesEngine e processarJobEngine.
+// Remover na Fase: 3, quando JobWorkspace expuser workspaceId canonico.
+function avaliarWorkspaceEngineOperacional(workspaceId = "", opcoes = {}) {
+  return workspaceRegistry.avaliarWorkspaceParaEngine(workspaceId, {
+    fontes: fontesWorkspaceRegistryOperacional(),
+    ...opcoes
+  });
 }
 
 const LOG_OPTIMUS_ICONS = {
@@ -8434,9 +8474,14 @@ app.get("/engine/resumo", async (req, res) => {
 
 
 
+// DEPRECATED — compatibilidade temporaria.
+// Origem legada: nome "clientesValidos" usado pelo Processor/Validator.
+// Destino oficial: WorkspaceRegistry.listarWorkspacesElegiveisEngine().
+// Consumidor atual: Processor, Validator e contexto legado do Distributor.
+// Remover na Fase: 3 para Processor/Validator e Fase 6 para Distributor.
 function listarClientesValidosEngineProcessor() {
   try {
-    return listarClientesAtivosOperacionais();
+    return listarWorkspaceIdsElegiveisEngineOperacional();
   } catch {
     return [];
   }
@@ -8448,7 +8493,8 @@ app.post("/engine/processar-pendentes", async (req, res) => {
   try {
     const resultado = await processarJobsPendentesEngine({
       limite: req.body?.limite || 20,
-      clientesValidos: listarClientesValidosEngineProcessor()
+      clientesValidos: listarClientesValidosEngineProcessor(),
+      avaliarWorkspaceParaEngine: avaliarWorkspaceEngineOperacional
     });
 
     return res.status(resultado.ok ? 200 : 503).json(resultado);
@@ -8471,13 +8517,12 @@ function listarMarketplacesAtivosEngineProcessor() {
   const mapa = {};
 
   try {
-    for (const usuario of Array.isArray(usuarios) ? usuarios : []) {
-      const clienteId = String(usuario?.id || "").trim();
+    for (const workspace of workspaceRegistry.listarWorkspacesElegiveisEngine({
+      fontes: fontesWorkspaceRegistryOperacional(),
+      log: false
+    })) {
+      const clienteId = String(workspace?.workspaceId || "").trim();
       if (!clienteId) continue;
-      if (!usuarioAtivoOperacional(clienteId)) {
-        logUsuarioInativoOperacional(clienteId, "engine_marketplaces_ativos");
-        continue;
-      }
       const configCliente = configsPorCliente?.[clienteId] || {};
       mapa[clienteId] = configCliente.marketplaces || {};
     }
@@ -13845,6 +13890,11 @@ function destinoAtivoCompativelEngineRadar(clienteId = "", marketplace = "") {
   });
 }
 
+// DEPRECATED — compatibilidade temporaria.
+// Origem legada: Radar solicitava lista de clientes para fan-out.
+// Destino oficial: Fan-out por Workspace comercial elegivel via WorkspaceRegistry.
+// Consumidor atual: registrarEventoBrutoEngineRadar.
+// Remover na Fase: 3, quando o fan-out receber Workspaces diretamente.
 function listarClientesEngineRadar(dados = {}) {
   const marketplace = detectarMarketplaceEngineRadar(dados);
   const clientesIncluidos = [];
@@ -13857,20 +13907,17 @@ function listarClientesEngineRadar(dados = {}) {
   }
 
   try {
-    const listaUsuarios = Array.isArray(usuarios) ? usuarios : [];
+    const workspaces = workspaceRegistry.listarWorkspaces({
+      fontes: fontesWorkspaceRegistryOperacional()
+    });
 
-    for (const usuario of listaUsuarios) {
-      const clienteId = String(usuario?.id || "").trim();
+    for (const workspace of workspaces) {
+      const clienteId = String(workspace?.workspaceId || "").trim();
       if (!clienteId) continue;
 
-      if (clienteId === "admin") {
-        ignorar(clienteId, "admin_nao_e_cliente_operacional");
-        continue;
-      }
-
-      if (!usuarioAtivoOperacional(clienteId)) {
-        ignorar(clienteId, "usuario_inativo");
-        logUsuarioInativoOperacional(clienteId, "engine_radar_clientes");
+      const avaliacao = avaliarWorkspaceEngineOperacional(clienteId);
+      if (!avaliacao.elegivelEngine) {
+        ignorar(clienteId, avaliacao.motivo || "workspace_nao_operacional");
         continue;
       }
 
@@ -13884,7 +13931,7 @@ function listarClientesEngineRadar(dados = {}) {
 
     console.log("[ENGINE-CLIENTES-ELEGIVEIS]", {
       marketplace,
-      totalUsuarios: listaUsuarios.length,
+      totalUsuarios: workspaces.length,
       clientesIncluidos,
       clientesIgnorados,
       motivosIgnorados
@@ -23292,7 +23339,10 @@ initEngineDatabase()
   .then(() => {
     iniciarOrquestradorEngine({
       intervaloMs: 120000,
-      processarJobsPendentesEngine,
+      processarJobsPendentesEngine: (opcoes = {}) => processarJobsPendentesEngine({
+        ...opcoes,
+        avaliarWorkspaceParaEngine: avaliarWorkspaceEngineOperacional
+      }),
       validarJobsDiagnosticadosEngine,
       importarJobsProntosEngine,
       distribuirOfertasEngine,

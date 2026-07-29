@@ -13,7 +13,24 @@ const {
   logEngineProcessadorFim
 } = require("./logger");
 
-async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [] } = {}) {
+function logEngineProcessadorJobErro(job = {}, erroJob = {}) {
+  console.log("[ENGINE-PROCESSADOR-JOB-ERRO]", {
+    jobId: job.id || erroJob.jobId || "",
+    eventoId: job.evento_id || job.eventoId || erroJob.eventoId || "",
+    clienteId: job.cliente_id || job.clienteId || erroJob.clienteId || "",
+    etapa: erroJob.etapa || "processar_job",
+    motivo: erroJob.motivo || "erro_processamento",
+    erro: erroJob.erro || "",
+    stack: erroJob.stack || ""
+  });
+}
+
+// DEPRECATED — compatibilidade temporaria.
+// Origem legada: Processor recebe clientesValidos como lista de ids.
+// Destino oficial: Processor receber Workspaces avaliados pelo WorkspaceRegistry.
+// Consumidor atual: orquestrador Engine V2 e rota /engine/processar-pendentes.
+// Remover na Fase: 3, mantendo cliente_id apenas na persistencia fisica do banco.
+async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [], avaliarWorkspaceParaEngine = null } = {}) {
   const limiteFinal = limitarJobs(limite);
   const resumo = {
     ok: true,
@@ -75,14 +92,21 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [] 
     resumo.processados += 1;
 
     try {
-      const resultado = await processarJobEngine(job, { clientesValidos });
+      const resultado = await processarJobEngine(job, { clientesValidos, avaliarWorkspaceParaEngine });
       if (resultado.ok && resultado.status === "diagnosticado") {
         resumo.diagnosticados += 1;
       } else {
         resumo.erros += 1;
+        logEngineProcessadorJobErro(job, resultado);
       }
     } catch (e) {
       resumo.erros += 1;
+      logEngineProcessadorJobErro(job, {
+        etapa: "processar_job",
+        motivo: "erro_inesperado",
+        erro: e.message,
+        stack: e.stack || ""
+      });
       console.log("[ENGINE-WORKER-ERRO]", {
         etapa: "processar_job",
         jobId: job.id,

@@ -6,7 +6,23 @@ const path = require("path");
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-radar-cobertura-v1-"));
 
 const { writeGlobalJson } = require("../utils/storage");
-writeGlobalJson("usuarios.json", [{ id: "cliente_1", ativo: true }]);
+writeGlobalJson("usuarios.json", [
+  { id: "cliente_1", ativo: true, plano: "pro" },
+  { id: "d1egopc_teste", ativo: true, plano: "pro" },
+  { id: "roger_teste", ativo: true, plano: "pro" },
+  { id: "wolf_teste", ativo: true, plano: "pro" },
+  { id: "quarto_workspace_teste", ativo: true, plano: "pro" },
+  { id: "cliente_existente", ativo: true, plano: "pro" },
+  { id: "cliente_ausente", ativo: true, plano: "pro" }
+]);
+writeGlobalJson("planos.json", {
+  pro: {
+    nome: "pro",
+    ativo: true,
+    marketplaces: ["mercadolivre", "shopee", "amazon"],
+    recursos: { automacao: true }
+  }
+});
 
 function clonar(valor) {
   return JSON.parse(JSON.stringify(valor));

@@ -9,16 +9,53 @@ const {
   logEngineJobClienteErro
 } = require("./logger");
 const coberturaRadar = require("../radar/cobertura-v1");
+const {
+  avaliarWorkspaceParaEngine
+} = require("../workspace");
+
+// DEPRECATED — compatibilidade temporaria.
+// Origem legada: chamadas de fan-out ainda podem enviar id/clienteId.
+// Destino oficial: receber somente workspaceId na aplicacao.
+// Consumidor atual: registrarEventoBruto/criarJobsParaClientes em testes e Engine V2.
+// Remover na Fase: 3, mantendo cliente_id apenas na persistencia fisica do banco.
+function idClienteEntrada(cliente) {
+  return typeof cliente === "string"
+    ? cliente
+    : cliente?.workspaceId || cliente?.id || cliente?.clienteId;
+}
 
 function normalizarClientes(clientes = []) {
   const lista = Array.isArray(clientes) ? clientes : [clientes].filter(Boolean);
   const ids = lista
-    .map(cliente => typeof cliente === "string" ? cliente : cliente?.id || cliente?.clienteId)
+    .map(idClienteEntrada)
     .map(id => normalizarTexto(id || ""))
-    .filter(Boolean)
-    .filter(id => id.toLowerCase() !== "admin");
+    .filter(Boolean);
 
   return [...new Set(ids)];
+}
+
+function avaliarClientesParaJobs(clientes = []) {
+  const ids = normalizarClientes(clientes);
+  const clientesIds = [];
+  const ignorados = [];
+
+  for (const clienteId of ids) {
+    const avaliacao = avaliarWorkspaceParaEngine(clienteId);
+    if (avaliacao.elegivelEngine) {
+      clientesIds.push(clienteId);
+    } else {
+      ignorados.push({
+        clienteId,
+        motivo: avaliacao.motivo || "workspace_nao_operacional",
+        motivos: avaliacao.motivos || []
+      });
+    }
+  }
+
+  return {
+    clientesIds,
+    ignorados
+  };
 }
 
 function marketplacePrincipal(links = []) {
@@ -115,7 +152,8 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
 
   await ignorarJobsAdminNaoOperacional();
 
-  const clientesIds = normalizarClientes(clientes);
+  const avaliacaoClientes = avaliarClientesParaJobs(clientes);
+  const clientesIds = avaliacaoClientes.clientesIds;
   const marketplace = normalizarTexto(marketplaceDetectado || marketplacePrincipal(linksExtraidos));
   const metadataJob = {
     fase: "1.1",
@@ -128,8 +166,8 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
   let criados = 0;
   let existentes = 0;
 
-  const adminIgnorado = (Array.isArray(clientes) ? clientes : [clientes])
-    .some(cliente => normalizarTexto(typeof cliente === "string" ? cliente : cliente?.id || cliente?.clienteId || "").toLowerCase() === "admin");
+  const adminIgnorado = avaliacaoClientes.ignorados
+    .some(item => item.motivos.includes("workspace_admin") || normalizarTexto(item.clienteId).toLowerCase() === "admin");
 
   if (adminIgnorado) {
     console.log("[ENGINE-ADMIN-NAO-OPERACIONAL]", JSON.stringify({
@@ -142,6 +180,16 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
       clienteId: "admin",
       decisao: "rejeitado",
       motivo: "admin_nao_e_cliente_operacional",
+      jobNovoCriado: false
+    });
+  }
+
+  for (const ignorado of avaliacaoClientes.ignorados.filter(item => normalizarTexto(item.clienteId).toLowerCase() !== "admin")) {
+    coberturaRadar.registrar("engine_job_nao_criado", {
+      ...contextoCobertura,
+      clienteId: ignorado.clienteId,
+      decisao: "rejeitado",
+      motivo: ignorado.motivo || "workspace_nao_operacional",
       jobNovoCriado: false
     });
   }

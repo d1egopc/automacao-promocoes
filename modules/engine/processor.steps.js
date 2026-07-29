@@ -5,17 +5,49 @@ const {
   registrarProcessamento
 } = require("./processor.service");
 const { detectarMarketplaceLink } = require("./normalizers");
+const { avaliarWorkspaceParaEngine } = require("../workspace");
 
-function clienteExiste(job = {}, contexto = {}) {
+// DEPRECATED — compatibilidade temporaria.
+// Origem legada: engine_jobs_cliente expõe cliente_id como coluna fisica.
+// Destino oficial: JobWorkspace com workspaceId canonico na aplicacao.
+// Consumidor atual: processarJobEngine.
+// Remover na Fase: 3, sem migrar schema nesta Fase 1.
+function avaliarClienteEngine(job = {}, contexto = {}) {
   const clienteId = String(job.cliente_id || job.clienteId || "").trim();
-  if (!clienteId) return false;
+  if (!clienteId) {
+    return { ok: false, motivo: "workspace_inexistente", motivos: ["workspace_inexistente"] };
+  }
 
   const clientesValidos = Array.isArray(contexto.clientesValidos)
     ? contexto.clientesValidos.map(id => String(id || "").trim()).filter(Boolean)
     : [];
 
-  if (!clientesValidos.length) return true;
-  return clientesValidos.includes(clienteId);
+  if (clientesValidos.includes(clienteId)) {
+    return { ok: true, motivo: "elegivel", motivos: [] };
+  }
+
+  const avaliacao = typeof contexto.avaliarWorkspaceParaEngine === "function"
+    ? contexto.avaliarWorkspaceParaEngine(clienteId)
+    : avaliarWorkspaceParaEngine(clienteId, { log: false });
+
+  if (avaliacao.elegivelEngine) {
+    return { ok: true, motivo: "elegivel", motivos: [] };
+  }
+
+  return {
+    ok: false,
+    motivo: avaliacao.motivo || "workspace_nao_operacional",
+    motivos: avaliacao.motivos || []
+  };
+}
+
+// DEPRECATED — compatibilidade temporaria.
+// Origem legada: testes/modulos ainda importam clienteExiste().
+// Destino oficial: avaliarClienteEngine()/avaliarWorkspaceParaEngine().
+// Consumidor atual: export publico de processor.steps.
+// Remover na Fase: 3, apos troca dos consumidores para Workspace.
+function clienteExiste(job = {}, contexto = {}) {
+  return avaliarClienteEngine(job, contexto).ok;
 }
 
 function detectarMarketplaceJob(job = {}, evento = {}, links = []) {
@@ -41,10 +73,17 @@ function detectarMarketplaceJob(job = {}, evento = {}, links = []) {
   return "";
 }
 
-async function finalizarErro(job, motivo, detalhes = {}) {
+async function finalizarErro(job, motivo, detalhes = {}, etapa = "diagnostico_final") {
   await registrarProcessamento(job.id, "diagnostico_final", "erro", motivo, detalhes);
   await marcarJobStatus(job.id, "erro", motivo);
-  return { ok: false, status: "erro", motivo };
+  return {
+    ok: false,
+    status: "erro",
+    etapa,
+    motivo,
+    erro: detalhes.erro || motivo || "",
+    stack: detalhes.stack || ""
+  };
 }
 
 async function processarJobEngine(job = {}, contexto = {}) {
@@ -61,7 +100,10 @@ async function processarJobEngine(job = {}, contexto = {}) {
   });
 
   if (!eventoResultado.ok || !eventoResultado.evento) {
-    return finalizarErro(job, "evento_nao_encontrado", { eventoId: job.evento_id });
+    return finalizarErro(job, "evento_nao_encontrado", {
+      eventoId: job.evento_id,
+      erro: eventoResultado.erro || ""
+    }, "carregar_evento");
   }
 
   const linksResultado = await carregarLinksEvento(job.evento_id);
@@ -71,7 +113,10 @@ async function processarJobEngine(job = {}, contexto = {}) {
   });
 
   if (!linksResultado.ok) {
-    return finalizarErro(job, "links_nao_carregados", { eventoId: job.evento_id });
+    return finalizarErro(job, "links_nao_carregados", {
+      eventoId: job.evento_id,
+      erro: linksResultado.erro || ""
+    }, "carregar_links");
   }
 
   const marketplace = detectarMarketplaceJob(job, eventoResultado.evento, linksResultado.links);
@@ -81,16 +126,22 @@ async function processarJobEngine(job = {}, contexto = {}) {
   });
 
   if (!marketplace) {
-    return finalizarErro(job, "marketplace_nao_detectado", { eventoId: job.evento_id });
+    return finalizarErro(job, "marketplace_nao_detectado", { eventoId: job.evento_id }, "detectar_marketplace");
   }
 
-  const clienteOk = clienteExiste(job, contexto);
-  await registrarProcessamento(job.id, "validar_cliente", clienteOk ? "ok" : "erro", clienteOk ? "cliente_validado" : "cliente_nao_encontrado", {
-    clienteId: job.cliente_id
+  const avaliacaoCliente = avaliarClienteEngine(job, contexto);
+  const clienteOk = avaliacaoCliente.ok;
+  await registrarProcessamento(job.id, "validar_cliente", clienteOk ? "ok" : "erro", clienteOk ? "cliente_validado" : avaliacaoCliente.motivo, {
+    clienteId: job.cliente_id,
+    motivos: avaliacaoCliente.motivos || []
   });
 
   if (!clienteOk) {
-    return finalizarErro(job, "cliente_nao_encontrado", { clienteId: job.cliente_id });
+    return finalizarErro(job, avaliacaoCliente.motivo || "workspace_nao_operacional", {
+      clienteId: job.cliente_id,
+      clientesValidosTotal: Array.isArray(contexto.clientesValidos) ? contexto.clientesValidos.length : 0,
+      motivos: avaliacaoCliente.motivos || []
+    }, "validar_cliente");
   }
 
   await registrarProcessamento(job.id, "diagnostico_final", "ok", "job_diagnosticado", {
@@ -111,5 +162,6 @@ async function processarJobEngine(job = {}, contexto = {}) {
 module.exports = {
   processarJobEngine,
   detectarMarketplaceJob,
-  clienteExiste
+  clienteExiste,
+  avaliarClienteEngine
 };

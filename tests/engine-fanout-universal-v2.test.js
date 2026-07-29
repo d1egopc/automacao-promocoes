@@ -8,16 +8,24 @@ process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-engine-fan
 const { writeGlobalJson } = require("../utils/storage");
 
 const CLIENTES_BASE = [
-  { id: "d1egopc_teste", nome: "D1EGOPCOFICIAL", ativo: true },
-  { id: "roger_teste", nome: "ROGEROFICIAL", ativo: true },
-  { id: "wolf_teste", nome: "WOLFOFICIAL", ativo: true }
+  { id: "d1egopc_teste", nome: "D1EGOPCOFICIAL", ativo: true, plano: "pro" },
+  { id: "roger_teste", nome: "ROGEROFICIAL", ativo: true, plano: "pro" },
+  { id: "wolf_teste", nome: "WOLFOFICIAL", ativo: true, plano: "pro" }
 ];
 
 writeGlobalJson("usuarios.json", [
   { id: "admin", nome: "Admin", ativo: true, papel: "admin_master" },
   ...CLIENTES_BASE,
-  { id: "quarto_workspace_teste", nome: "QUARTO TESTE", ativo: true }
+  { id: "quarto_workspace_teste", nome: "QUARTO TESTE", ativo: true, plano: "pro" }
 ]);
+writeGlobalJson("planos.json", {
+  pro: {
+    nome: "pro",
+    ativo: true,
+    marketplaces: ["mercadolivre", "shopee", "amazon"],
+    recursos: { automacao: true }
+  }
+});
 
 function limparModulo(relativo) {
   const resolvido = require.resolve(relativo);
