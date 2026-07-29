@@ -26,6 +26,12 @@ function marketplacePrincipal(links = []) {
   return normalizados.map(detectarMarketplaceLink).find(Boolean) || "";
 }
 
+function jsonbParam(valor, fallback) {
+  const base = valor === undefined ? fallback : valor;
+  const serializado = JSON.stringify(base);
+  return serializado === undefined ? JSON.stringify(fallback) : serializado;
+}
+
 async function ignorarJobsAdminNaoOperacional() {
   const motivo = "admin_nao_e_cliente_operacional";
   const resultado = await queryEngine(
@@ -55,7 +61,7 @@ async function ignorarJobsAdminNaoOperacional() {
      SELECT
        (SELECT COUNT(*)::int FROM jobs_admin) AS jobs_ignorados,
        (SELECT COUNT(*)::int FROM ofertas_admin) AS ofertas_retidas`,
-    [motivo, JSON.stringify({ motivo, operacional: false })]
+    [motivo, jsonbParam({ motivo, operacional: false }, {})]
   );
 
   if (!resultado.ok) {
@@ -164,7 +170,7 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
                AND cliente_id = $3
           )
          RETURNING id`,
-        [eventoId, ofertaId, clienteId, marketplace, JSON.stringify(metadataJob)]
+        [eventoId, ofertaId, clienteId, marketplace, jsonbParam(metadataJob, {})]
       );
 
       if (!insert.ok) {

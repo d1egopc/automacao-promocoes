@@ -122,6 +122,137 @@ function mockModulo(relativo, exports) {
   }
 
   {
+    limparModulo("../modules/engine/inbox.service");
+    const jsonbRecebidos = [];
+    mockModulo("../modules/engine/database", {
+      queryEngine: async (sql, params = []) => {
+        if (/SELECT id\s+FROM engine_eventos_brutos/i.test(sql)) {
+          jsonbRecebidos.push(params[2]);
+          JSON.parse(params[2]);
+          return { ok: true, resultado: { rows: [] }, metricas: {} };
+        }
+        if (/INSERT INTO engine_eventos_brutos/i.test(sql)) {
+          jsonbRecebidos.push(params[7], params[10]);
+          JSON.parse(params[7]);
+          JSON.parse(params[10]);
+          return { ok: true, resultado: { rows: [{ id: 177 }] }, metricas: {} };
+        }
+        if (/INSERT INTO engine_links/i.test(sql)) {
+          jsonbRecebidos.push(params[9]);
+          JSON.parse(params[9]);
+          return { ok: true, resultado: { rows: [] }, metricas: {} };
+        }
+        return { ok: true, resultado: { rows: [] }, metricas: {} };
+      }
+    });
+    mockModulo("../modules/engine/jobs.service", {
+      criarJobsParaClientes: async () => ({ ok: true, criados: 1, existentes: 0 })
+    });
+    const inbox = require("../modules/engine/inbox.service");
+    const retorno = await inbox.registrarEventoBruto({
+      origem: "radar",
+      origemTipo: "whatsapp",
+      sessaoId: "admin_Zoio Claro",
+      grupoId: "120363420033826376@g.us",
+      grupoNome: "Lobao das Promocoes #92",
+      textoOriginal: "Oferta ML real https://meli.la/2g5ULLB",
+      linksExtraidos: ["https://meli.la/2g5ULLB"],
+      metadata: {
+        coberturaTraceId: "cov_payload_real",
+        linksOriginaisCapturados: ["https://meli.la/2g5ULLB"],
+        redirectsRadar: [],
+        identidadesCanonicas: []
+      }
+    }, { clientes: ["cliente_1"] });
+
+    assert.strictEqual(retorno.ok, true);
+    assert(jsonbRecebidos.length >= 3);
+  }
+
+  {
+    limparModulo("../modules/engine/inbox.service");
+    const linkAmazonDivulgador = "https://amzn.divulgador.link/gUXR2tSr";
+    let marketplaceEvento = "";
+    let entradaJobs = null;
+    mockModulo("../modules/engine/database", {
+      queryEngine: async (sql, params = []) => {
+        if (/SELECT id\s+FROM engine_eventos_brutos/i.test(sql)) {
+          return { ok: true, resultado: { rows: [] }, metricas: {} };
+        }
+        if (/INSERT INTO engine_eventos_brutos/i.test(sql)) {
+          marketplaceEvento = params[8];
+          return { ok: true, resultado: { rows: [{ id: 178 }] }, metricas: {} };
+        }
+        if (/INSERT INTO engine_links/i.test(sql)) {
+          return { ok: true, resultado: { rows: [] }, metricas: {} };
+        }
+        return { ok: true, resultado: { rows: [] }, metricas: {} };
+      }
+    });
+    mockModulo("../modules/engine/jobs.service", {
+      criarJobsParaClientes: async (entrada) => {
+        entradaJobs = entrada;
+        return { ok: true, criados: 1, existentes: 0 };
+      }
+    });
+
+    const inbox = require("../modules/engine/inbox.service");
+    const { logs, retorno } = await capturarLogs(() => inbox.registrarEventoBruto({
+      origem: "radar",
+      origemTipo: "whatsapp",
+      grupoId: "grupo@g.us",
+      textoOriginal: `Oferta Amazon ${linkAmazonDivulgador}`,
+      linksExtraidos: [linkAmazonDivulgador],
+      metadata: { coberturaTraceId: "cov_amzn_divulgador" }
+    }, { clientes: ["cliente_1"] }));
+    const eventos = payloadsCobertura(logs);
+
+    assert.strictEqual(retorno.ok, true);
+    assert.strictEqual(marketplaceEvento, "amazon");
+    assert.strictEqual(entradaJobs.marketplaceDetectado, "amazon");
+    assert.deepStrictEqual(entradaJobs.linksExtraidos, [linkAmazonDivulgador]);
+    assert(eventos.some(evento =>
+      evento.etapa === "engine_evento_criado" &&
+      evento.marketplace === "amazon" &&
+      evento.jobNovoCriado === true
+    ));
+  }
+
+  {
+    limparModulo("../modules/engine/inbox.service");
+    mockModulo("../modules/engine/database", {
+      queryEngine: async (sql) => {
+        if (/SELECT id\s+FROM engine_eventos_brutos/i.test(sql)) {
+          return { ok: true, resultado: { rows: [] }, metricas: {} };
+        }
+        if (/INSERT INTO engine_eventos_brutos/i.test(sql)) {
+          return { ok: false, motivo: "query_falhou", erro: "invalid input syntax for type json", metricas: {} };
+        }
+        throw new Error("query_nao_esperada");
+      }
+    });
+    mockModulo("../modules/engine/jobs.service", {
+      criarJobsParaClientes: async () => {
+        throw new Error("jobs_nao_deveriam_ser_criados");
+      }
+    });
+    const inbox = require("../modules/engine/inbox.service");
+    const { logs, retorno } = await capturarLogs(() => inbox.registrarEventoBruto({
+      origem: "radar",
+      origemTipo: "whatsapp",
+      grupoId: "grupo@g.us",
+      textoOriginal: "Produto com falha JSON",
+      linksExtraidos: ["https://meli.la/falha"]
+    }, { clientes: ["cliente_1"] }));
+    const eventos = payloadsCobertura(logs);
+
+    assert.strictEqual(retorno.ok, false);
+    assert.strictEqual(retorno.motivo, "query_falhou");
+    assert(eventos.some(evento => evento.etapa === "engine_evento_erro" && evento.motivo === "query_falhou"));
+    assert(!eventos.some(evento => evento.etapa === "engine_evento_criado"), "falha de query nao pode virar evento criado");
+  }
+
+  {
     limparModulo("../modules/engine/jobs.service");
     const clientesInseridos = [];
     mockModulo("../modules/engine/database", {
@@ -403,6 +534,31 @@ function mockModulo(relativo, exports) {
       evento.filaItemId === "fila_engine_1" &&
       evento.filaRecebeu === true
     ));
+  }
+
+  {
+    const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
+    assert(indexFonte.includes("let importacao = await importarOfertaRadarPorLink"), "fluxo Radar precisa permitir ajuste controlado de importacao apos mirror");
+    assert(!indexFonte.includes("const importacao = await importarOfertaRadarPorLink"), "const importacao causa Assignment to constant variable apos RADAR-MIRROR-COMPARADO");
+  }
+
+  {
+    const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
+    const normalizers = require("../modules/engine/normalizers");
+    const linkAmazonDivulgador = "https://amzn.divulgador.link/gUXR2tSr";
+    const inicioLoop = indexFonte.indexOf("for (const link of links)");
+    const inicioEngineV2 = indexFonte.indexOf("if (linkEngineV2Radar(link))", inicioLoop);
+    const inicioLegacy = indexFonte.indexOf("fluxo_legacy_selecionado", inicioLoop);
+    const inicioImportadorLegacy = indexFonte.indexOf("let importacao = await importarOfertaRadarPorLink", inicioLoop);
+    const inicioFanoutLegacy = indexFonte.indexOf("adicionarRadarCapturadoNaFilaClientes(ofertaRadar", inicioLoop);
+
+    assert.strictEqual(normalizers.detectarMarketplaceLink(linkAmazonDivulgador), "amazon");
+    assert(indexFonte.includes("function dominioAmazonDivulgadorRadar"));
+    assert(indexFonte.includes("if (dominioAmazonDivulgadorRadar(urlLower))"));
+    assert(indexFonte.includes("if (dominioAmazonDivulgadorRadar(host)) return \"amazon\";"));
+    assert(inicioEngineV2 > -1 && inicioLegacy > -1 && inicioEngineV2 < inicioLegacy, "Engine V2 precisa ser avaliada antes do legado");
+    assert(inicioLegacy < inicioImportadorLegacy, "importador legado so pode ocorrer depois da selecao legacy");
+    assert(inicioLegacy < inicioFanoutLegacy, "fan-out legado so pode ocorrer depois da selecao legacy");
   }
 
   delete process.env.RADAR_COBERTURA_AUDITORIA_ENABLED;

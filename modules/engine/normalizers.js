@@ -23,6 +23,7 @@ function detectarMarketplaceLink(url = "") {
   if (!texto) return "";
   if (texto.includes("mercadolivre.com") || texto.includes("meli.la")) return "mercadolivre";
   if (texto.includes("shopee.")) return "shopee";
+  if (texto.includes("amzn.divulgador.link")) return "amazon";
   if (texto.includes("amazon.") || texto.includes("amzn.to")) return "amazon";
   if (texto.includes("magazineluiza.com") || texto.includes("magalu.")) return "magalu";
   if (texto.includes("aliexpress.")) return "aliexpress";

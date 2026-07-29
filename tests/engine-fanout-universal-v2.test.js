@@ -210,6 +210,41 @@ async function executarFanoutJobs({ marketplace, links, clientes, existentes = [
     }
   }
 
+  {
+    limparModulo("../modules/engine/distributor/distributor.service");
+    const distributor = require("../modules/engine/distributor/distributor.service");
+    const itensFila = new Set();
+    const ofertaEngine = {
+      id: 501,
+      job_id: 1001,
+      cliente_id: "d1egopc_teste",
+      marketplace: "mercadolivre",
+      titulo: "Oferta criada pela Engine",
+      preco: 55,
+      categoria: "geral",
+      link_original: "https://produto.mercadolivre.com.br/MLB-501",
+      link_afiliado: "https://meli.la/afiliado501",
+      metadata: { coberturaTraceId: "cov_distributor_fila" }
+    };
+    const deps = {
+      adicionarOfertaNaFilaGlobal: (_clienteId, itemFila) => {
+        const chave = `${itemFila.clienteId}:${itemFila.engineOfertaId}`;
+        if (itensFila.has(chave)) return { ok: false, duplicada: true, motivo: "duplicidade_fila", itemFila };
+        itensFila.add(chave);
+        return { ok: true, itemFila: { ...itemFila, id: "fila_501", status: "pendente" } };
+      }
+    };
+
+    const primeira = await distributor.adicionarOfertaNaFilaCliente(ofertaEngine, { deps });
+    const repetida = await distributor.adicionarOfertaNaFilaCliente(ofertaEngine, { deps });
+
+    assert.strictEqual(primeira.ok, true);
+    assert.strictEqual(primeira.itemFila.id, "fila_501");
+    assert.strictEqual(repetida.ok, false);
+    assert.strictEqual(repetida.motivo, "duplicidade_fila");
+    assert.strictEqual(itensFila.size, 1);
+  }
+
   console.log("engine-fanout-universal-v2.test.js OK");
 })().catch((e) => {
   console.error(e);

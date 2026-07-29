@@ -11467,6 +11467,17 @@ function obterNomeGrupoRadar(sessaoId = "", grupoId = "") {
   return grupo?.nome || grupo?.name || grupo?.subject || grupo?.titulo || grupo?.label || "";
 }
 
+function dominioAmazonDivulgadorRadar(valor = "") {
+  const texto = String(valor || "").trim().toLowerCase();
+  let host = texto.replace(/^www\./, "");
+  try {
+    host = new URL(texto).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    host = host.split(/[/?#]/)[0].replace(/^www\./, "");
+  }
+  return host === "amzn.divulgador.link" || host.endsWith(".amzn.divulgador.link");
+}
+
 function detectarMarketplaceRadarLink(url = "") {
   const urlLower = String(url || "").toLowerCase();
 
@@ -11492,6 +11503,10 @@ function detectarMarketplaceRadarLink(url = "") {
 
   if (urlLower.includes("shopee.com") || urlLower.includes("s.shopee.")) {
     return "shopee";
+  }
+
+  if (dominioAmazonDivulgadorRadar(urlLower)) {
+    return "amazon";
   }
 
   if (urlLower.includes("amazon.") || urlLower.includes("amzn.to")) {
@@ -12459,6 +12474,7 @@ function dominioMarketplaceConhecidoRadar(url = "") {
     if (host === "meli.la" || host.endsWith(".meli.la")) return "mercadolivre";
     if (host === "mercadolivre.com.br" || host.endsWith(".mercadolivre.com.br")) return "mercadolivre";
     if (host === "kabum.com.br" || host.endsWith(".kabum.com.br")) return "kabum";
+    if (dominioAmazonDivulgadorRadar(host)) return "amazon";
     if (host === "amazon.com.br" || host.endsWith(".amazon.com.br")) return "amazon";
     if (host === "aliexpress.com" || host.endsWith(".aliexpress.com")) return "aliexpress";
     if (host === "shopee.com.br" || host.endsWith(".shopee.com.br")) return "shopee";
@@ -12477,6 +12493,10 @@ function dominioRadar(url = "") {
 
 function linkRedirectPermitidoRadar(url = "") {
   return dominioRedirectPermitido(url);
+}
+
+function linkEngineV2Radar(url = "") {
+  return linkRedirectPermitidoRadar(url) || Boolean(dominioMarketplaceConhecidoRadar(url));
 }
 
 function linkMeliLaRadar(url = "") {
@@ -14006,6 +14026,37 @@ async function registrarEventoBrutoEngineRadar(dados = {}) {
         totalItens: linksDados.length || 1
       }
     });
+    if (resultado.ok !== true) {
+      coberturaRadar.registrar("engine_evento_erro", {
+        coberturaTraceId: dadosEngine.coberturaTraceId || dadosEngine.metadata?.coberturaTraceId || "",
+        fidelidadeTraceId: dadosEngine.fidelidadeTraceId || dadosEngine.metadata?.fidelidadeTraceId || "",
+        decisao: "erro",
+        motivo: resultado.motivo || "engine_evento_falhou",
+        clienteId: clientesDados[0] || "",
+        sessaoId: dadosEngine.sessaoId || "",
+        grupoId: dadosEngine.grupoId || "",
+        grupoNome: dadosEngine.grupoNome || "",
+        marketplace: dadosEngine.marketplaceDetectado || "",
+        links: dadosEngine.linksExtraidos || linksDados,
+        erro: resultado.erro || ""
+      });
+      console.log("[PERF ENGINE BLOCO EVENTOS FIM]", {
+        rodadaId,
+        funcao: "registrarEventoBrutoEngineRadar",
+        arquivo: "index.js",
+        totalItens: linksDados.length || 1,
+        processados: 0,
+        sucesso: false,
+        duracaoMs: Math.round(Number(process.hrtime.bigint() - inicioBloco) / 1e6),
+        concorrenciaObservada: null,
+        clienteId: clientesDados[0] || "",
+        origem: dadosEngine.origem || "",
+        origemTipo: dadosEngine.origemTipo || "",
+        sessaoId: dadosEngine.sessaoId || "",
+        grupoId: dadosEngine.grupoId || ""
+      });
+      return { ...resultado, redirectsRadar: preparacao.redirectsRadar };
+    }
     coberturaRadar.registrar(resultado.duplicado ? "engine_evento_duplicado" : "engine_evento_criado", {
       coberturaTraceId: dadosEngine.coberturaTraceId || dadosEngine.metadata?.coberturaTraceId || "",
       fidelidadeTraceId: dadosEngine.fidelidadeTraceId || dadosEngine.metadata?.fidelidadeTraceId || "",
@@ -14382,7 +14433,7 @@ coberturaRadar.registrar("radar_mirror_criado", {
   links
 });
 
-const temRedirectConhecidoRadar = links.some(linkRedirectPermitidoRadar);
+const temRedirectConhecidoRadar = links.some(linkEngineV2Radar);
 const registroEngineRadarPromise = registrarEventoBrutoEngineRadar({
   origem: "radar",
   origemTipo: origemTipoFinal,
@@ -14549,7 +14600,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
       url: link,
       grupo: grupoNomeTexto || grupoIdTexto
     });
-    if (linkRedirectPermitidoRadar(link)) {
+    if (linkEngineV2Radar(link)) {
       coberturaRadar.registrar("redirect_engine_v2_identificado", {
         ...contextoCoberturaRadar,
         decisao: "aceito",
@@ -14566,9 +14617,9 @@ const registroEngineRadar = temRedirectConhecidoRadar
         links
       });
       const redirect = registroEngineRadar?.redirectsRadar?.find(item => item.linkOriginalCapturado === link) || {};
-      const registroOk = registroEngineRadar?.ok === true && redirect.status === "resolvido";
+      const registroOk = registroEngineRadar?.ok === true && (!redirect.linkOriginalCapturado || redirect.status === "resolvido");
 
-      logOptimus("RADAR", "Redirect encaminhado somente Engine V2", {
+      logOptimus("RADAR", "Link encaminhado somente Engine V2", {
         url: link,
         linkResolvido: redirect.linkResolvido || "",
         marketplace: redirect.marketplaceDetectado || marketplaceInicialResumo,
@@ -14676,7 +14727,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
       link,
       links
     });
-    const importacao = await importarOfertaRadarPorLink(link, {
+    let importacao = await importarOfertaRadarPorLink(link, {
       correlationId,
       origemTipo: origemTipoFinal,
       sessaoId: sessaoIdTexto,

@@ -70,6 +70,12 @@ function marketplacePrincipal(links = []) {
   return (links || []).map(detectarMarketplaceLink).find(Boolean) || "";
 }
 
+function jsonbParam(valor, fallback) {
+  const base = valor === undefined ? fallback : valor;
+  const serializado = JSON.stringify(base);
+  return serializado === undefined ? JSON.stringify(fallback) : serializado;
+}
+
 async function existeEventoDuplicado(evento = {}, contextoPerf = {}) {
   const inicio = process.hrtime.bigint();
   const operacaoId = criarOperacaoIdEventoBruto();
@@ -100,7 +106,7 @@ async function existeEventoDuplicado(evento = {}, contextoPerf = {}) {
           AND criado_em >= NOW() - INTERVAL '5 minutes'
         ORDER BY id DESC
         LIMIT 1`,
-      [evento.grupoId, evento.textoOriginal, JSON.stringify(evento.linksExtraidos)]
+      [evento.grupoId, evento.textoOriginal, jsonbParam(evento.linksExtraidos, [])]
     );
 
     const duplicado = resultado.ok ? (resultado.resultado.rows[0] || null) : null;
@@ -163,12 +169,12 @@ async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}) {
         redirectRadar ? redirectRadar.status === "resolvido" : null,
         redirectRadar ? (redirectRadar.motivo || redirectRadar.status || "") : null,
         marketplaceDetectado,
-        JSON.stringify({
+        jsonbParam({
           fase: "1.1",
           linkOriginalCapturado: redirectRadar?.linkOriginalCapturado || "",
           linkResolvido: redirectRadar?.linkResolvido || "",
           tipoLink: redirectRadar ? "redirect_conhecido" : "direto"
-        })
+        }, {})
       ]
     );
 
@@ -253,10 +259,10 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
         evento.grupoId,
         evento.grupoNome,
         evento.textoOriginal,
-        JSON.stringify(evento.linksExtraidos),
+        jsonbParam(evento.linksExtraidos, []),
         marketplaceDetectado,
         hashEvento,
-        JSON.stringify(eventoBruto.metadata || {}),
+        jsonbParam(eventoBruto.metadata, {}),
         evento.capturadoEm
       ]
     );
