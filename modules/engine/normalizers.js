@@ -21,6 +21,18 @@ function normalizarLinksExtraidos(links = []) {
 function detectarMarketplaceLink(url = "") {
   const texto = normalizarTexto(url).toLowerCase();
   if (!texto) return "";
+  try {
+    const host = new URL(texto).hostname.toLowerCase().replace(/^www\./, "");
+    if (host === "meli.la" || host.endsWith(".meli.la") || host === "mercadolivre.com" || host.endsWith(".mercadolivre.com") || host === "mercadolivre.com.br" || host.endsWith(".mercadolivre.com.br")) return "mercadolivre";
+    if (host === "shopee.com.br" || host.endsWith(".shopee.com.br") || host.includes("shopee.")) return "shopee";
+    if (host === "amzn.divulgador.link" || host.endsWith(".amzn.divulgador.link")) return "amazon";
+    if (host === "amazon.com.br" || host.endsWith(".amazon.com.br") || host === "amzn.to" || host.endsWith(".amzn.to") || host.includes("amazon.")) return "amazon";
+    if (host.includes("aliexpress.")) return "aliexpress";
+    if (host === "kabum.com.br" || host.endsWith(".kabum.com.br")) return "kabum";
+    if (host === "awin1.com" || host.endsWith(".awin1.com") || host === "awin.com" || host.endsWith(".awin.com")) return "awin";
+    if (host === "magazineluiza.com" || host.endsWith(".magazineluiza.com") || host === "magalu.com" || host.endsWith(".magalu.com")) return "magalu";
+  } catch {}
+
   if (texto.includes("mercadolivre.com") || texto.includes("meli.la")) return "mercadolivre";
   if (texto.includes("shopee.")) return "shopee";
   if (texto.includes("amzn.divulgador.link")) return "amazon";

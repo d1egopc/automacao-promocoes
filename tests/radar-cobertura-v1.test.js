@@ -566,6 +566,8 @@ function mockModulo(relativo, exports) {
     const linkMercadoLivre = "https://meli.la/2HRuzPf";
     const linkShopee = "https://s.shopee.com.br/903wBcqhYS";
     const linkAmazonDivulgador = "https://amzn.divulgador.link/gUXR2tSr";
+    const linkAwinKabum = "https://www.awin1.com/cread.php?awinmid=17729&awinaffid=1062989&clickref=sophie&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F516956";
+    const linkKabumDireto = "https://www.kabum.com.br/produto/516956/stream-deck";
     const linkDesconhecido = "https://links.example.invalid/produto";
     const inicioLoop = indexFonte.indexOf("for (const link of links)");
     const inicioEngineV2 = indexFonte.indexOf("if (linkEngineV2Radar(link))", inicioLoop);
@@ -579,7 +581,11 @@ function mockModulo(relativo, exports) {
     assert.strictEqual(normalizers.detectarMarketplaceLink(linkMercadoLivre), "mercadolivre");
     assert.strictEqual(normalizers.detectarMarketplaceLink(linkShopee), "shopee");
     assert.strictEqual(normalizers.detectarMarketplaceLink(linkAmazonDivulgador), "amazon");
+    assert.strictEqual(normalizers.detectarMarketplaceLink(linkAwinKabum), "awin");
+    assert.strictEqual(normalizers.detectarMarketplaceLink(linkKabumDireto), "kabum");
     assert.strictEqual(normalizers.detectarMarketplaceLink(linkDesconhecido), "");
+    assert(indexFonte.includes("const marketplaceEngine = detectarMarketplaceEngineLink(url);"));
+    assert(indexFonte.includes("if (marketplaceEngine === \"awin\" || marketplaceEngine === \"kabum\") return marketplaceEngine;"));
     assert(indexFonte.includes("function dominioAmazonDivulgadorRadar"));
     assert(indexFonte.includes("if (dominioAmazonDivulgadorRadar(urlLower))"));
     assert(indexFonte.includes("if (dominioAmazonDivulgadorRadar(host)) return \"amazon\";"));

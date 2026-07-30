@@ -226,6 +226,9 @@ const {
   resolverRedirectUniversal
 } = require("./modules/radar/redirect/redirect-resolver");
 const {
+  detectarMarketplaceLink: detectarMarketplaceEngineLink
+} = require("./modules/engine/normalizers");
+const {
   camposIdentidadeCanonicaOferta,
   compararIdentidadeCanonicaOfertas,
   origemDominioCanonicoOferta,
@@ -11572,6 +11575,9 @@ function detectarMarketplaceRadarLink(url = "") {
     return "amazon";
   }
 
+  const marketplaceEngine = detectarMarketplaceEngineLink(url);
+  if (marketplaceEngine) return marketplaceEngine;
+
   if (urlLower.includes("mercadolivre.com") || urlLower.includes("mercadolivre.com.br") || urlLower.includes("meli.la")) {
     return "mercadolivre";
   }
@@ -12542,6 +12548,9 @@ function oportunidadeRadarBoa(oferta = {}, radar = {}, cupomRadar = {}) {
 }
 
 function dominioMarketplaceConhecidoRadar(url = "") {
+  const marketplaceEngine = detectarMarketplaceEngineLink(url);
+  if (marketplaceEngine === "awin" || marketplaceEngine === "kabum") return marketplaceEngine;
+
   try {
     const parsed = new URL(String(url || "").trim());
     const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
@@ -13878,6 +13887,9 @@ function detectarMarketplaceEngineRadar(dados = {}) {
   ];
 
   for (const candidato of candidatos) {
+    const marketplaceEngine = detectarMarketplaceEngineLink(candidato);
+    if (marketplaceEngine) return marketplaceEngine;
+
     const texto = String(candidato || "").toLowerCase();
     if (!texto) continue;
     if (texto.includes("mercadolivre.com") || texto.includes("meli.la")) return "mercadolivre";
