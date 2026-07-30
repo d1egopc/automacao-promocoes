@@ -1,4 +1,8 @@
 const { normalizarNumeroMoeda } = require("../../../../utils/moeda");
+const {
+  escolherProdutoPrincipal,
+  resumoLinksClassificados
+} = require("../../link-role.service");
 function texto(valor = "") {
   return String(valor || "").trim();
 }
@@ -63,7 +67,7 @@ function escolherLinkAwinKabum(links = [], evento = {}) {
     }
   }
 
-  return candidatos
+  const validos = candidatos
     .map(candidato => ({
       ...candidato,
       url: texto(candidato.url)
@@ -72,12 +76,10 @@ function escolherLinkAwinKabum(links = [], evento = {}) {
       ...candidato,
       urlProduto: extrairUrlKabumDeAwin(candidato.url) || candidato.url
     }))
-    .filter(candidato => /kabum\.com\.br|awin1\.com|awin\.com/i.test(candidato.url))
-    .sort((a, b) => {
-      const aKabum = /kabum\.com\.br/i.test(a.urlProduto) ? 1 : 0;
-      const bKabum = /kabum\.com\.br/i.test(b.urlProduto) ? 1 : 0;
-      return bKabum - aKabum;
-    })[0] || { url: "", urlProduto: "", link: null, campo: "" };
+    .filter(candidato => /kabum\.com\.br|awin1\.com|awin\.com/i.test(candidato.url));
+
+  if (!validos.length) return { url: "", urlProduto: "", link: null, campo: "" };
+  return escolherProdutoPrincipal(validos, "kabum", evento);
 }
 
 function normalizarMarketplaceAwinKabum(produto = {}, url = "") {
@@ -130,7 +132,15 @@ async function importarAwinEngine({ job = {}, evento = {}, links = [], deps = {}
   }
 
   if (!urlOriginalEngine) {
-    return { ok: false, marketplace: "awin", motivo: "link_awin_kabum_nao_encontrado" };
+    return {
+      ok: false,
+      marketplace: "awin",
+      motivo: linkEscolhido.papelLinkMotivo || "link_produto_kabum_nao_confirmado",
+      metadata: {
+        adapter: "awin_kabum",
+        linksClassificados: resumoLinksClassificados(links, evento, "kabum")
+      }
+    };
   }
 
   if (typeof deps.importarProdutoKabumViaAwin !== "function") {
@@ -160,6 +170,8 @@ async function importarAwinEngine({ job = {}, evento = {}, links = [], deps = {}
     urlUsada: urlOriginalEngine,
     urlCapturada: urlCapturadaEngine,
     campoLink: linkEscolhido.campo || "",
+    papelLink: linkEscolhido.papelLink || "",
+    papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
     temPublisherId: Boolean(integracao?.credenciais?.publisherId || integracao?.credenciais?.publisher_id),
     temApiToken: Boolean(integracao?.credenciais?.apiToken || integracao?.credenciais?.token)
   });
@@ -281,6 +293,9 @@ async function importarAwinEngine({ job = {}, evento = {}, links = [], deps = {}
       linkOriginalEngine: urlOriginalEngine,
       linkCapturadoEngine: urlCapturadaEngine,
       campoLinkEscolhido: linkEscolhido.campo || "",
+      papelLinkEscolhido: linkEscolhido.papelLink || "",
+      papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
+      linksClassificados: resumoLinksClassificados(links, evento, marketplace),
       integracaoUsada: integracaoAwin ? "awin" : "kabum",
       camposProduto: Object.keys(produto || {}),
       produto

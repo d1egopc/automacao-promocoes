@@ -5,6 +5,10 @@ const {
   extrairIdsShopee,
   tituloShopeeValido
 } = require("../../../../marketplaces/shopee/normalizacao");
+const {
+  escolherProdutoPrincipal,
+  resumoLinksClassificados
+} = require("../../link-role.service");
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -120,23 +124,6 @@ function textoOriginalEvento(evento = {}) {
   return texto(evento.texto_original || evento.textoOriginal || evento.texto || "");
 }
 
-function contextoLinkShopee(textoCompleto = "", url = "") {
-  const texto = String(textoCompleto || "");
-  const idx = texto.indexOf(url);
-  if (idx < 0) return { antes: "", depois: "" };
-  return {
-    antes: texto.slice(Math.max(0, idx - 100), idx).toLowerCase(),
-    depois: texto.slice(idx + url.length, Math.min(texto.length, idx + url.length + 60)).toLowerCase()
-  };
-}
-
-function contextoIndicaCupomShopee(contexto = {}) {
-  return /resgate|cupom|voucher|cupom na pagina|cupom disponivel|desconto/.test(`${contexto.antes} ${contexto.depois}`);
-}
-
-function contextoIndicaProdutoShopee(contexto = {}) {
-  return /produto aqui|confira aqui|link do produto|produto|comprar|oferta aqui|aqui/.test(`${contexto.antes} ${contexto.depois}`);
-}
 function escolherLinkShopee(links = [], evento = {}) {
   const candidatos = [];
 
@@ -161,29 +148,7 @@ function escolherLinkShopee(links = [], evento = {}) {
 
   if (!validos.length) return { url: "", link: null, campo: "" };
 
-  const textoRadarOriginal = textoOriginalEvento(evento);
-  const urlsTexto = Array.from(textoRadarOriginal.matchAll(/https?:\/\/[^\s]+/gi)).map(match => match[0]);
-  const urlsProduto = [];
-  const urlsCupom = [];
-
-  for (const urlTexto of urlsTexto) {
-    if (!/shopee/i.test(urlTexto)) continue;
-    const contexto = contextoLinkShopee(textoRadarOriginal, urlTexto);
-    if (contextoIndicaCupomShopee(contexto)) urlsCupom.push(urlTexto);
-    if (contextoIndicaProdutoShopee(contexto)) urlsProduto.push(urlTexto);
-  }
-
-  for (const urlProduto of urlsProduto) {
-    const marcado = validos.find(candidato => candidato.url === urlProduto || candidato.url.includes(urlProduto));
-    if (marcado) return marcado;
-  }
-
-  const naoCupom = validos.filter(candidato => {
-    if (/(?:cupom|voucher|promotion|promo)/i.test(candidato.url)) return false;
-    return !urlsCupom.some(urlCupom => candidato.url === urlCupom || candidato.url.includes(urlCupom));
-  });
-
-  return naoCupom[naoCupom.length - 1] || { url: "", link: null, campo: "somente_link_cupom" };
+  return escolherProdutoPrincipal(validos, "shopee", evento);
 }
 
 function pareceCupomRealShopee(codigo = "") {
@@ -433,7 +398,15 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
   }
 
   if (!urlOriginalEngine) {
-    return { ok: false, marketplace: "shopee", motivo: "link_shopee_nao_encontrado" };
+    return {
+      ok: false,
+      marketplace: "shopee",
+      motivo: linkEscolhido.papelLinkMotivo || "link_produto_shopee_nao_confirmado",
+      metadata: {
+        adapter: "shopee",
+        linksClassificados: resumoLinksClassificados(links, evento, "shopee")
+      }
+    };
   }
 
   if (typeof deps.importarShopee !== "function") {
@@ -454,6 +427,8 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     eventoId: job.evento_id,
     clienteId,
     urlUsada: urlOriginalEngine,
+    papelLink: linkEscolhido.papelLink || "",
+    papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
     temAppId: Boolean(integracao?.credenciais?.appId),
     temSecret: Boolean(integracao?.credenciais?.secret)
   });
@@ -661,6 +636,9 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
         suspeitaFator100
       },
       campoLinkEscolhido: linkEscolhido.campo || "",
+      papelLinkEscolhido: linkEscolhido.papelLink || "",
+      papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
+      linksClassificados: resumoLinksClassificados(links, evento, "shopee"),
       textoRadarTemCupom: Boolean(extrairCupomTextoRadarShopee(textoOriginalRadar).cupom),
       camposProduto: Object.keys(produto || {}),
       produto,
@@ -682,7 +660,5 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
 module.exports = {
   importarShopeeEngine
 };
-
-
 
 

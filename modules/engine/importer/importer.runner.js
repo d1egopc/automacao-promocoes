@@ -22,6 +22,7 @@ const { importarAmazonEngine } = require("./adapters/amazon.adapter");
 const { importarShopeeEngine } = require("./adapters/shopee.adapter");
 const { importarAliExpressEngine } = require("./adapters/aliexpress.adapter");
 const { importarAwinEngine } = require("./adapters/awin.adapter");
+const { escolherProdutoPrincipal } = require("../link-role.service");
 const {
   usuarioAtivo,
   logUsuarioInativoIgnorado
@@ -69,6 +70,23 @@ function contextoCoberturaImporter(job = {}, extras = {}) {
     links,
     link: links[0] || ""
   };
+}
+
+function escolherLinkPrincipalOferta(links = [], evento = {}, marketplace = "") {
+  if (["shopee", "aliexpress", "awin", "kabum"].includes(marketplace)) {
+    const candidatos = [];
+    for (const link of Array.isArray(links) ? links : []) {
+      candidatos.push({ url: link.url_expandida, link, campo: "url_expandida" });
+      candidatos.push({ url: link.url_normalizada, link, campo: "url_normalizada" });
+      candidatos.push({ url: link.url_original, link, campo: "url_original" });
+    }
+    const produto = escolherProdutoPrincipal(candidatos, marketplace, evento);
+    if (produto.link) return produto.link;
+  }
+
+  return (Array.isArray(links) ? links : []).find(link => String(link.marketplace_detectado || "").toLowerCase() === marketplace) ||
+    (Array.isArray(links) ? links[0] : null) ||
+    null;
 }
 
 async function finalizarErro(job, motivo, detalhes = {}, resumo) {
@@ -219,7 +237,7 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
     temLinkAfiliado: Boolean(resultadoAdapter.linkAfiliado)
   });
 
-  const linkPrincipal = linksResultado.links.find(link => String(link.marketplace_detectado || "").toLowerCase() === marketplace) || linksResultado.links[0] || null;
+  const linkPrincipal = escolherLinkPrincipalOferta(linksResultado.links, eventoResultado.evento, marketplace);
   const gravacao = await gravarOfertaEngine(job, eventoResultado.evento, linkPrincipal, resultadoAdapter);
   await registrarEtapaImportacao(job.id, "oferta_gravada", gravacao.ok ? "ok" : "erro", gravacao.ok ? "oferta_gravada" : (gravacao.motivo || "oferta_gravacao_falhou"), {
     ofertaId: gravacao.ofertaId || null,

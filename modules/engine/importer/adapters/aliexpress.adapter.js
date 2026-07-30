@@ -1,5 +1,9 @@
 const { normalizarNumeroMoeda } = require("../../../../utils/moeda");
 const { importarAliExpress } = require("../../../../marketplaces/aliexpress/importar");
+const {
+  escolherProdutoPrincipal,
+  resumoLinksClassificados
+} = require("../../link-role.service");
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -35,12 +39,15 @@ function escolherLinkAliExpress(links = [], evento = {}) {
     }
   }
 
-  return candidatos
+  const validos = candidatos
     .map(candidato => ({
       ...candidato,
       url: texto(candidato.url)
     }))
-    .find(candidato => /aliexpress\./i.test(candidato.url)) || { url: "", link: null, campo: "" };
+    .filter(candidato => /aliexpress\./i.test(candidato.url));
+
+  if (!validos.length) return { url: "", link: null, campo: "" };
+  return escolherProdutoPrincipal(validos, "aliexpress", evento);
 }
 
 function calcularEconomia(precoAtual, precoOriginal) {
@@ -128,7 +135,15 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
   }
 
   if (!urlOriginalEngine) {
-    return { ok: false, marketplace: "aliexpress", motivo: "link_aliexpress_nao_encontrado" };
+    return {
+      ok: false,
+      marketplace: "aliexpress",
+      motivo: linkEscolhido.papelLinkMotivo || "link_produto_aliexpress_nao_confirmado",
+      metadata: {
+        adapter: "aliexpress",
+        linksClassificados: resumoLinksClassificados(links, evento, "aliexpress")
+      }
+    };
   }
 
   if (typeof deps.getIntegracaoCliente !== "function") {
@@ -151,6 +166,8 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     clienteId,
     urlUsada: urlOriginalEngine,
     campoLink: linkEscolhido.campo || "",
+    papelLink: linkEscolhido.papelLink || "",
+    papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
     temAppKey: Boolean(credenciais.appKey),
     temSecret: Boolean(credenciais.secret || credenciais.appSecret),
     temTrackingId: Boolean(credenciais.trackingId)
@@ -274,6 +291,9 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       clienteId,
       linkOriginalEngine: urlOriginalEngine,
       campoLinkEscolhido: linkEscolhido.campo || "",
+      papelLinkEscolhido: linkEscolhido.papelLink || "",
+      papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
+      linksClassificados: resumoLinksClassificados(links, evento, "aliexpress"),
       textoRadarTemCupom: Boolean(cupomTexto),
       camposProduto: Object.keys(produto || {}),
       produto

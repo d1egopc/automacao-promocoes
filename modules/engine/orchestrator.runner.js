@@ -258,6 +258,12 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       deps: depsImportador
     }, { rodadaId });
 
+    resumo.etapas.importarAliExpress = await executarEtapa("importar_aliexpress", importarJobsProntosEngine, {
+      limite: limitesRodada.importarAliExpress || limitesRodada.importar,
+      marketplace: "aliexpress",
+      deps: depsImportador
+    }, { rodadaId });
+
     resumo.etapas.importarAwin = await executarEtapa("importar_awin", importarJobsProntosEngine, {
       limite: limitesRodada.importarAwin || limitesRodada.importar,
       marketplace: "awin",
@@ -302,6 +308,27 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     resumo.etapas.distribuirShopee = await executarEtapa("distribuir_shopee", distribuirOfertasEngine, {
       limite: limitesRodada.distribuirShopee || limitesRodada.distribuir,
       marketplace: "shopee",
+      contexto: contextoDistribuidor,
+      deps: depsDistribuidor
+    }, { rodadaId });
+
+    resumo.etapas.distribuirAliExpress = await executarEtapa("distribuir_aliexpress", distribuirOfertasEngine, {
+      limite: limitesRodada.distribuirAliExpress || limitesRodada.distribuir,
+      marketplace: "aliexpress",
+      contexto: contextoDistribuidor,
+      deps: depsDistribuidor
+    }, { rodadaId });
+
+    resumo.etapas.distribuirAwin = await executarEtapa("distribuir_awin", distribuirOfertasEngine, {
+      limite: limitesRodada.distribuirAwin || limitesRodada.distribuir,
+      marketplace: "awin",
+      contexto: contextoDistribuidor,
+      deps: depsDistribuidor
+    }, { rodadaId });
+
+    resumo.etapas.distribuirKabum = await executarEtapa("distribuir_kabum", distribuirOfertasEngine, {
+      limite: limitesRodada.distribuirKabum || limitesRodada.distribuir,
+      marketplace: "kabum",
       contexto: contextoDistribuidor,
       deps: depsDistribuidor
     }, { rodadaId });

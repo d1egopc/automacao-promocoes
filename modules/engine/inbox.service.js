@@ -13,6 +13,7 @@ const {
   logEngineEventoBrutoErro
 } = require("./logger");
 const coberturaRadar = require("../radar/cobertura-v1");
+const { classificarLinkEngine } = require("./link-role.service");
 
 let proximoIdOperacaoEventoBruto = 1;
 let chamadasAtivasEventoBruto = 0;
@@ -145,13 +146,28 @@ function localizarRedirectRadar(metadata = {}, linkResolvido = "") {
   return redirects.find(item => String(item?.linkResolvido || "") === String(linkResolvido || "")) || null;
 }
 
-async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}) {
+async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}, evento = {}) {
   for (const link of links) {
     const redirectRadar = localizarRedirectRadar(metadataEvento, link);
     const urlOriginal = redirectRadar?.linkOriginalCapturado || link;
     const urlNormalizada = normalizarUrl(urlOriginal);
     const urlExpandida = redirectRadar?.linkResolvido || null;
     const marketplaceDetectado = detectarMarketplaceLink(urlExpandida || urlNormalizada || urlOriginal);
+    const classificacao = classificarLinkEngine({
+      marketplace: marketplaceDetectado,
+      evento,
+      link: {
+        url_original: urlOriginal,
+        url_normalizada: urlNormalizada,
+        url_expandida: urlExpandida,
+        marketplace_detectado: marketplaceDetectado,
+        metadata: {
+          linkOriginalCapturado: redirectRadar?.linkOriginalCapturado || "",
+          linkResolvido: redirectRadar?.linkResolvido || ""
+        }
+      },
+      url: urlExpandida || urlNormalizada || urlOriginal
+    });
     const resultado = await queryEngine(
       `INSERT INTO engine_links (
          evento_id, url_original, url_normalizada, url_expandida,
@@ -173,7 +189,11 @@ async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}) {
           fase: "1.1",
           linkOriginalCapturado: redirectRadar?.linkOriginalCapturado || "",
           linkResolvido: redirectRadar?.linkResolvido || "",
-          tipoLink: redirectRadar ? "redirect_conhecido" : "direto"
+          tipoLink: redirectRadar ? "redirect_conhecido" : "direto",
+          papelLink: classificacao.papelLink,
+          papelLinkMotivo: classificacao.motivo,
+          papelLinkConfianca: classificacao.confianca,
+          urlProduto: classificacao.urlProduto || ""
         }, {})
       ]
     );
@@ -317,7 +337,7 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
       };
     }
 
-    await salvarLinksEvento(id, evento.linksExtraidos, eventoBruto.metadata || {});
+    await salvarLinksEvento(id, evento.linksExtraidos, eventoBruto.metadata || {}, evento);
 
     logEngineEventoBrutoSalvo({ id, origem: evento.origem, origemTipo: evento.origemTipo, grupoId: evento.grupoId, links: evento.linksExtraidos.length });
 

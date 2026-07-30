@@ -111,10 +111,10 @@ async function carregarEventoBruto(eventoId) {
 
 async function carregarLinksEvento(eventoId) {
   const resultado = await queryEngine(
-    `SELECT id, uuid, evento_id, url_original, url_normalizada, url_expandida,
-            dominio_original, dominio_final, redirect_ok, motivo_redirect,
-            marketplace_detectado, criado_em
-       FROM engine_links
+     `SELECT id, uuid, evento_id, url_original, url_normalizada, url_expandida,
+             dominio_original, dominio_final, redirect_ok, motivo_redirect,
+             marketplace_detectado, metadata, criado_em
+        FROM engine_links
       WHERE evento_id = $1
       ORDER BY id ASC`,
     [eventoId]

@@ -30,11 +30,21 @@ function chavesPossiveisIntegracaoEngine(marketplace = "") {
     chaves.add("magazine_luiza");
   }
 
-  if (mp === "awin") {
+  if (mp === "awin" || mp === "kabum") {
     ["awin", "feed_awin", "feedAwin", "feedkabum", "feed_kabum"].forEach(chave => chaves.add(chave));
+    chaves.add("kabum");
   }
 
   return [...chaves].filter(Boolean);
+}
+
+function marketplacesEquivalentesEngine(marketplace = "") {
+  const mp = normalizarMarketplaceEngine(marketplace);
+  const equivalentes = new Set([mp]);
+  if (mp === "kabum" || mp === "awin") {
+    ["kabum", "awin", "feed_awin", "feedAwin", "feedkabum", "feed_kabum"].forEach(chave => equivalentes.add(normalizarMarketplaceEngine(chave)));
+  }
+  return [...equivalentes].filter(Boolean);
 }
 
 function obterIntegracaoClienteEngine(integracoesPorCliente = {}, clienteId = "", marketplace = "") {
@@ -95,9 +105,19 @@ function marketplaceAtivoClienteEngine(clienteId = "", marketplace = "", marketp
 
   const ativos = marketplacesAtivosPorCliente?.[cid];
   if (!ativos) return true;
-  if (Array.isArray(ativos)) return ativos.map(normalizarMarketplaceEngine).includes(mp);
+  const equivalentes = marketplacesEquivalentesEngine(mp);
+  if (Array.isArray(ativos)) {
+    const normalizados = ativos.map(normalizarMarketplaceEngine);
+    return equivalentes.some(chave => normalizados.includes(chave));
+  }
   if (typeof ativos === "object") {
-    const config = ativos[mp];
+    let config;
+    for (const chave of equivalentes) {
+      if (ativos[chave] !== undefined) {
+        config = ativos[chave];
+        break;
+      }
+    }
     if (config === undefined) return true;
     if (typeof config === "boolean") return config;
     return config?.ativo !== false;
