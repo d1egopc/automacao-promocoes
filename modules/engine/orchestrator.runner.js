@@ -110,6 +110,20 @@ function logPerfEtapaEngine({ rodadaId, etapa, inicioMs, itensProcessados = {}, 
   });
 }
 
+function logDiagnosticoOrquestrador(tag, { rodadaId = "", etapa = "", funcao = "", args = {}, inicioMs = null, extra = {} } = {}) {
+  const agora = Date.now();
+  console.log(tag, {
+    rodadaId,
+    etapa,
+    funcao,
+    marketplace: args?.marketplace || "",
+    limite: args?.limite || null,
+    horario: new Date(agora).toISOString(),
+    duracaoMs: inicioMs ? agora - inicioMs : undefined,
+    ...extra
+  });
+}
+
 function chamarFornecedor(fn, fallback) {
   try {
     return typeof fn === "function" ? fn() : fallback;
@@ -120,8 +134,23 @@ function chamarFornecedor(fn, fallback) {
 
 async function executarEtapa(nome, fn, args = {}, contextoPerf = {}) {
   const inicioEtapaMs = Date.now();
+  const funcao = fn?.name || "anonima";
+  logDiagnosticoOrquestrador("[ENGINE-ORQUESTRADOR-FUNCAO-INICIO]", {
+    rodadaId: contextoPerf.rodadaId || "",
+    etapa: nome,
+    funcao,
+    args,
+    inicioMs: inicioEtapaMs
+  });
   try {
     const resultado = await fn(args);
+    logDiagnosticoOrquestrador("[ENGINE-ORQUESTRADOR-FUNCAO-FIM]", {
+      rodadaId: contextoPerf.rodadaId || "",
+      etapa: nome,
+      funcao,
+      args,
+      inicioMs: inicioEtapaMs
+    });
     logPerfEtapaEngine({
       rodadaId: contextoPerf.rodadaId || "",
       etapa: nome,
@@ -131,6 +160,14 @@ async function executarEtapa(nome, fn, args = {}, contextoPerf = {}) {
     });
     return { ok: true, nome, resultado };
   } catch (e) {
+    logDiagnosticoOrquestrador("[ENGINE-ORQUESTRADOR-FUNCAO-ERRO]", {
+      rodadaId: contextoPerf.rodadaId || "",
+      etapa: nome,
+      funcao,
+      args,
+      inicioMs: inicioEtapaMs,
+      extra: { erro: e.message }
+    });
     logPerfEtapaEngine({
       rodadaId: contextoPerf.rodadaId || "",
       etapa: nome,
@@ -144,6 +181,26 @@ async function executarEtapa(nome, fn, args = {}, contextoPerf = {}) {
     });
     return { ok: false, nome, erro: e.message };
   }
+}
+
+async function executarEtapaRastreada(nome, fn, args = {}, contextoPerf = {}) {
+  const inicioMs = Date.now();
+  logDiagnosticoOrquestrador("[ENGINE-ORQUESTRADOR-ETAPA-INICIO]", {
+    rodadaId: contextoPerf.rodadaId || "",
+    etapa: nome,
+    funcao: fn?.name || "anonima",
+    args,
+    inicioMs
+  });
+  const resultado = await executarEtapa(nome, fn, args, contextoPerf);
+  logDiagnosticoOrquestrador("[ENGINE-ORQUESTRADOR-ETAPA-FIM]", {
+    rodadaId: contextoPerf.rodadaId || "",
+    etapa: nome,
+    funcao: fn?.name || "anonima",
+    args,
+    inicioMs
+  });
+  return resultado;
 }
 
 async function executarRodadaEngineOrquestrador(opcoes = {}) {
@@ -204,7 +261,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       itensProcessados: { clientes: Array.isArray(clientesValidosProcessar) ? clientesValidosProcessar.length : 0 }
     });
 
-    resumo.etapas.processar = await executarEtapa("processar", processarJobsPendentesEngine, {
+    resumo.etapas.processar = await executarEtapaRastreada("processar", processarJobsPendentesEngine, {
       limite: limitesRodada.processar,
       clientesValidos: clientesValidosProcessar
     }, { rodadaId });
@@ -223,7 +280,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       }
     });
 
-    resumo.etapas.validar = await executarEtapa("validar", validarJobsDiagnosticadosEngine, {
+    resumo.etapas.validar = await executarEtapaRastreada("validar", validarJobsDiagnosticadosEngine, {
       limite: limitesRodada.validar,
       clientesValidos: clientesValidosValidar,
       integracoesPorCliente,
@@ -239,38 +296,38 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       itensProcessados: { deps: depsImportador && typeof depsImportador === "object" ? Object.keys(depsImportador).length : 0 }
     });
 
-    resumo.etapas.importar = await executarEtapa("importar_ml", importarJobsProntosEngine, {
+    resumo.etapas.importar = await executarEtapaRastreada("importar_ml", importarJobsProntosEngine, {
       limite: limitesRodada.importar,
       marketplace: "mercadolivre",
       deps: depsImportador
     }, { rodadaId });
 
-    resumo.etapas.importarAmazon = await executarEtapa("importar_amazon", importarJobsProntosEngine, {
+    resumo.etapas.importarAmazon = await executarEtapaRastreada("importar_amazon", importarJobsProntosEngine, {
       limite: limitesRodada.importarAmazon || limitesRodada.importar,
       marketplace: "amazon",
       deps: depsImportador
     }, { rodadaId });
 
 
-    resumo.etapas.importarShopee = await executarEtapa("importar_shopee", importarJobsProntosEngine, {
+    resumo.etapas.importarShopee = await executarEtapaRastreada("importar_shopee", importarJobsProntosEngine, {
       limite: limitesRodada.importarShopee || limitesRodada.importar,
       marketplace: "shopee",
       deps: depsImportador
     }, { rodadaId });
 
-    resumo.etapas.importarAliExpress = await executarEtapa("importar_aliexpress", importarJobsProntosEngine, {
+    resumo.etapas.importarAliExpress = await executarEtapaRastreada("importar_aliexpress", importarJobsProntosEngine, {
       limite: limitesRodada.importarAliExpress || limitesRodada.importar,
       marketplace: "aliexpress",
       deps: depsImportador
     }, { rodadaId });
 
-    resumo.etapas.importarAwin = await executarEtapa("importar_awin", importarJobsProntosEngine, {
+    resumo.etapas.importarAwin = await executarEtapaRastreada("importar_awin", importarJobsProntosEngine, {
       limite: limitesRodada.importarAwin || limitesRodada.importar,
       marketplace: "awin",
       deps: depsImportador
     }, { rodadaId });
 
-    resumo.etapas.importarKabum = await executarEtapa("importar_kabum", importarJobsProntosEngine, {
+    resumo.etapas.importarKabum = await executarEtapaRastreada("importar_kabum", importarJobsProntosEngine, {
       limite: limitesRodada.importarKabum || limitesRodada.importar,
       marketplace: "kabum",
       deps: depsImportador
@@ -290,14 +347,14 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       }
     });
 
-    resumo.etapas.distribuir = await executarEtapa("distribuir_ml", distribuirOfertasEngine, {
+    resumo.etapas.distribuir = await executarEtapaRastreada("distribuir_ml", distribuirOfertasEngine, {
       limite: limitesRodada.distribuir,
       marketplace: "mercadolivre",
       contexto: contextoDistribuidor,
       deps: depsDistribuidor
     }, { rodadaId });
 
-    resumo.etapas.distribuirAmazon = await executarEtapa("distribuir_amazon", distribuirOfertasEngine, {
+    resumo.etapas.distribuirAmazon = await executarEtapaRastreada("distribuir_amazon", distribuirOfertasEngine, {
       limite: limitesRodada.distribuirAmazon || limitesRodada.distribuir,
       marketplace: "amazon",
       contexto: contextoDistribuidor,
@@ -305,28 +362,28 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     }, { rodadaId });
 
 
-    resumo.etapas.distribuirShopee = await executarEtapa("distribuir_shopee", distribuirOfertasEngine, {
+    resumo.etapas.distribuirShopee = await executarEtapaRastreada("distribuir_shopee", distribuirOfertasEngine, {
       limite: limitesRodada.distribuirShopee || limitesRodada.distribuir,
       marketplace: "shopee",
       contexto: contextoDistribuidor,
       deps: depsDistribuidor
     }, { rodadaId });
 
-    resumo.etapas.distribuirAliExpress = await executarEtapa("distribuir_aliexpress", distribuirOfertasEngine, {
+    resumo.etapas.distribuirAliExpress = await executarEtapaRastreada("distribuir_aliexpress", distribuirOfertasEngine, {
       limite: limitesRodada.distribuirAliExpress || limitesRodada.distribuir,
       marketplace: "aliexpress",
       contexto: contextoDistribuidor,
       deps: depsDistribuidor
     }, { rodadaId });
 
-    resumo.etapas.distribuirAwin = await executarEtapa("distribuir_awin", distribuirOfertasEngine, {
+    resumo.etapas.distribuirAwin = await executarEtapaRastreada("distribuir_awin", distribuirOfertasEngine, {
       limite: limitesRodada.distribuirAwin || limitesRodada.distribuir,
       marketplace: "awin",
       contexto: contextoDistribuidor,
       deps: depsDistribuidor
     }, { rodadaId });
 
-    resumo.etapas.distribuirKabum = await executarEtapa("distribuir_kabum", distribuirOfertasEngine, {
+    resumo.etapas.distribuirKabum = await executarEtapaRastreada("distribuir_kabum", distribuirOfertasEngine, {
       limite: limitesRodada.distribuirKabum || limitesRodada.distribuir,
       marketplace: "kabum",
       contexto: contextoDistribuidor,
