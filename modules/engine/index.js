@@ -39,6 +39,11 @@ const {
 const {
   distribuirOfertasEngine
 } = require("./distributor");
+const {
+  executarObservabilidadeOfc,
+  coletarMetricasOfc,
+  criarPlanoShadowOfc
+} = require("./ofc");
 
 module.exports = {
   initEngineDatabase,
@@ -53,5 +58,8 @@ module.exports = {
   processarJobsPendentesEngine,
   validarJobsDiagnosticadosEngine,
   importarJobsProntosEngine,
-  distribuirOfertasEngine
+  distribuirOfertasEngine,
+  executarObservabilidadeOfc,
+  coletarMetricasOfc,
+  criarPlanoShadowOfc
 };

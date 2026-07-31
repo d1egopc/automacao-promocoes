@@ -1,6 +1,8 @@
 let engineOrquestradorRodando = false;
 let engineOrquestradorIntervalo = null;
 
+const { executarObservabilidadeOfc } = require("./ofc");
+
 const LIMITES_PADRAO = {
   processar: 30,
   validar: 30,
@@ -252,6 +254,11 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
   });
 
   try {
+    resumo.etapas.ofc = await executarObservabilidadeOfc({
+      rodadaId,
+      janelaConsumoMinutos: 15
+    });
+
     let inicioFornecedorMs = Date.now();
     const clientesValidosProcessar = chamarFornecedor(getClientesValidos, []);
     logPerfEtapaEngine({
