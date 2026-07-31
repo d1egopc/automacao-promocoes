@@ -1,4 +1,5 @@
 const { consultarCandidatosFilaAtivaOfc } = require("./active-queue.repository");
+const { criarPlanoOperacionalV2Shadow } = require("./operational-shadow.service");
 
 const MODO_FILA_ATIVA_OFC = "shadow";
 const LIMITE_PERCENTUAL_MARKETPLACE_PADRAO = 0.4;
@@ -87,6 +88,7 @@ function selecionarFilaAtivaShadow(jobs = [], opcoes = {}) {
   const selecionadosPorStatus = {};
   const selecionadosPorMarketplace = {};
   const selecionadosPorCliente = {};
+  const idsSelecionados = [];
   let bloqueadosPorLimite = 0;
 
   for (const job of ordenarJobsFilaAtiva(jobs)) {
@@ -109,6 +111,7 @@ function selecionarFilaAtivaShadow(jobs = [], opcoes = {}) {
     }
 
     selecionados.push(job);
+    idsSelecionados.push(job.id);
     incrementarContador(selecionadosPorStatus, status);
     incrementarContador(selecionadosPorMarketplace, marketplace);
     incrementarContador(selecionadosPorCliente, clienteId);
@@ -125,7 +128,7 @@ function selecionarFilaAtivaShadow(jobs = [], opcoes = {}) {
     }
   }
 
-  return {
+  const resumo = {
     ok: true,
     modo: MODO_FILA_ATIVA_OFC,
     aplicouMudancas: false,
@@ -139,6 +142,12 @@ function selecionarFilaAtivaShadow(jobs = [], opcoes = {}) {
     motivoSelecaoIncompleta,
     duracaoMs: Date.now() - inicio
   };
+
+  if (opcoes.incluirIdsSelecionados === true) {
+    resumo.idsSelecionados = idsSelecionados;
+  }
+
+  return resumo;
 }
 
 async function criarFilaAtivaShadowOfc({ plano = {} } = {}, opcoes = {}) {
@@ -178,12 +187,22 @@ async function criarFilaAtivaShadowOfc({ plano = {} } = {}, opcoes = {}) {
       tamanhoAlvo,
       limiteMarketplacePercentual: opcoes.limiteMarketplacePercentual,
       limiteClientePercentual: opcoes.limiteClientePercentual,
-      limiteAmostraIds: opcoes.limiteAmostraIds
+      limiteAmostraIds: opcoes.limiteAmostraIds,
+      incluirIdsSelecionados: true
     });
 
+    const operacionalV2 = criarPlanoOperacionalV2Shadow({
+      jobs: consulta.jobs || [],
+      filaAtiva: resumo,
+      metricas: opcoes.metricas || {},
+      agoraMs: opcoes.agoraMs
+    });
+    const { idsSelecionados, ...resumoPublico } = resumo;
+
     return {
-      ...resumo,
+      ...resumoPublico,
       quantidadeDisponivelAvaliada: Number(consulta.totalAvaliado ?? resumo.quantidadeDisponivelAvaliada),
+      operacionalV2,
       duracaoMs: Date.now() - inicio
     };
   } catch (e) {

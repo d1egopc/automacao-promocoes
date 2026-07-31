@@ -15,7 +15,9 @@ async function consultarCandidatosFilaAtivaOfc({ limite = 1000 } = {}) {
             cliente_id,
             status,
             COALESCE(NULLIF(TRIM(marketplace), ''), NULLIF(TRIM(marketplace_detectado), ''), 'desconhecido') AS marketplace,
-            criado_em
+            metadata,
+            criado_em,
+            atualizado_em
        FROM engine_jobs_cliente
       WHERE status = ANY($1::text[])
       ORDER BY CASE status

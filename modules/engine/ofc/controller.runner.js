@@ -45,7 +45,10 @@ async function executarObservabilidadeOfc(opcoes = {}) {
 
     const filaAtiva = await criarFilaAtivaShadowOfc({
       plano
-    }, opcoes.filaAtiva || {});
+    }, {
+      ...(opcoes.filaAtiva || {}),
+      metricas
+    });
 
     if (filaAtiva.ok) {
       logOfc("[OFC-FILA-ATIVA-SHADOW]", {
@@ -62,6 +65,23 @@ async function executarObservabilidadeOfc(opcoes = {}) {
         motivoSelecaoIncompleta: filaAtiva.motivoSelecaoIncompleta,
         duracaoMs: filaAtiva.duracaoMs
       });
+      if (filaAtiva.operacionalV2) {
+        logOfc("[OFC-OPERACIONAL-V2-SHADOW]", {
+          rodadaId,
+          modo: filaAtiva.operacionalV2.modo,
+          aplicouMudancas: filaAtiva.operacionalV2.aplicouMudancas,
+          totalAvaliado: filaAtiva.operacionalV2.totalAvaliado,
+          pressaoOperacional: filaAtiva.operacionalV2.pressaoOperacional,
+          saudeOperacional: filaAtiva.operacionalV2.saudeOperacional,
+          temperaturas: filaAtiva.operacionalV2.temperaturas,
+          estados: filaAtiva.operacionalV2.estados,
+          ttlOperacional: filaAtiva.operacionalV2.ttlOperacional,
+          aguaNova: filaAtiva.operacionalV2.aguaNova,
+          activeQueueDefinitiva: filaAtiva.operacionalV2.activeQueueDefinitiva,
+          reservaOperacional: filaAtiva.operacionalV2.reservaOperacional,
+          expiracaoOperacional: filaAtiva.operacionalV2.expiracaoOperacional
+        });
+      }
     } else {
       logOfc("[OFC-FILA-ATIVA-ERRO]", {
         rodadaId,

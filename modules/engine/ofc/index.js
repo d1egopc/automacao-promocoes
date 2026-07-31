@@ -12,6 +12,17 @@ const {
   selecionarFilaAtivaShadow,
   criarFilaAtivaShadowOfc
 } = require("./active-queue.service");
+const {
+  detectarSinaisOperacionais,
+  ttlOperacionalSugeridoMs,
+  temperaturaOperacionalSugerida,
+  avaliarOportunidadeOperacional
+} = require("./policy.service");
+const {
+  calcularPressaoOperacionalV2,
+  calcularSaudeOperacional,
+  criarPlanoOperacionalV2Shadow
+} = require("./operational-shadow.service");
 
 module.exports = {
   executarObservabilidadeOfc,
@@ -21,5 +32,12 @@ module.exports = {
   calcularReservaDinamicaOfc,
   criarPlanoShadowOfc,
   selecionarFilaAtivaShadow,
-  criarFilaAtivaShadowOfc
+  criarFilaAtivaShadowOfc,
+  detectarSinaisOperacionais,
+  ttlOperacionalSugeridoMs,
+  temperaturaOperacionalSugerida,
+  avaliarOportunidadeOperacional,
+  calcularPressaoOperacionalV2,
+  calcularSaudeOperacional,
+  criarPlanoOperacionalV2Shadow
 };
