@@ -12,15 +12,20 @@ async function consultarReservatorioOfc() {
   );
 
   const marketplaces = await queryEngine(
-    `SELECT COALESCE(NULLIF(TRIM(marketplace), ''), NULLIF(TRIM(marketplace_detectado), ''), 'desconhecido') AS marketplace,
+    `SELECT marketplace_ofc AS marketplace,
             status,
             COUNT(*)::int AS total,
             MIN(criado_em) AS mais_antigo_em,
             MAX(criado_em) AS mais_novo_em
-       FROM engine_jobs_cliente
-      WHERE status IN ('pendente', 'diagnosticado', 'pronto_para_importar', 'processando', 'importando')
-      GROUP BY marketplace, status
-      ORDER BY total DESC, marketplace ASC, status ASC
+       FROM (
+         SELECT COALESCE(NULLIF(TRIM(marketplace), ''), NULLIF(TRIM(marketplace_detectado), ''), 'desconhecido') AS marketplace_ofc,
+                status,
+                criado_em
+           FROM engine_jobs_cliente
+          WHERE status IN ('pendente', 'diagnosticado', 'pronto_para_importar', 'processando', 'importando')
+       ) jobs_ofc
+      GROUP BY marketplace_ofc, status
+      ORDER BY total DESC, marketplace_ofc ASC, status ASC
       LIMIT 60`
   );
 
