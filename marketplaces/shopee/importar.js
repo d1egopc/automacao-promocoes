@@ -154,6 +154,15 @@ return async function importarShopee(url, config) {
         urlFinal,
         expandiu
       });
+      if (linkCurtoShopee(urlOriginal)) {
+        console.log("[SHOPEE-SHORTLINK-EXPANDIDO]", {
+          urlOriginal,
+          urlFinal,
+          expandiu,
+          statusHttp: response.status,
+          motivo: expandiu ? "redirect_ou_canonical_resolvido" : "sem_redirect"
+        });
+      }
 
       return {
         urlExpandida: urlFinal || urlCanonicaLocal || urlOriginal,
@@ -168,6 +177,15 @@ return async function importarShopee(url, config) {
         expandiu: false,
         erro: e.message
       });
+      if (linkCurtoShopee(urlOriginal)) {
+        console.log("[SHOPEE-SHORTLINK-EXPANDIDO]", {
+          urlOriginal,
+          urlFinal: urlOriginal,
+          expandiu: false,
+          statusHttp: null,
+          motivo: e.name === "AbortError" ? "timeout_resolver_shopee" : "erro_resolver_shopee"
+        });
+      }
       return {
         urlExpandida: urlCanonicaLocal || urlOriginal,
         statusHttp: null,
