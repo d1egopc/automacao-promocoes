@@ -1,5 +1,6 @@
 const { coletarMetricasOfc } = require("./metrics.service");
 const { criarPlanoShadowOfc } = require("./planner.service");
+const { criarFilaAtivaShadowOfc } = require("./active-queue.service");
 
 function logOfc(tag, payload = {}) {
   try {
@@ -42,13 +43,45 @@ async function executarObservabilidadeOfc(opcoes = {}) {
       ...plano
     });
 
+    const filaAtiva = await criarFilaAtivaShadowOfc({
+      plano
+    }, opcoes.filaAtiva || {});
+
+    if (filaAtiva.ok) {
+      logOfc("[OFC-FILA-ATIVA-SHADOW]", {
+        rodadaId,
+        modo: filaAtiva.modo,
+        aplicouMudancas: filaAtiva.aplicouMudancas,
+        tamanhoAlvo: filaAtiva.tamanhoAlvo,
+        totalSelecionado: filaAtiva.totalSelecionado,
+        selecionadosPorStatus: filaAtiva.selecionadosPorStatus,
+        selecionadosPorMarketplace: filaAtiva.selecionadosPorMarketplace,
+        selecionadosPorCliente: filaAtiva.selecionadosPorCliente,
+        quantidadeDisponivelAvaliada: filaAtiva.quantidadeDisponivelAvaliada,
+        idsAmostra: filaAtiva.idsAmostra,
+        motivoSelecaoIncompleta: filaAtiva.motivoSelecaoIncompleta,
+        duracaoMs: filaAtiva.duracaoMs
+      });
+    } else {
+      logOfc("[OFC-FILA-ATIVA-ERRO]", {
+        rodadaId,
+        modo: filaAtiva.modo,
+        aplicouMudancas: false,
+        failSafe: true,
+        motivo: filaAtiva.motivoSelecaoIncompleta || "erro_fila_ativa_shadow",
+        erro: String(filaAtiva.erro || "erro_desconhecido").slice(0, 180),
+        duracaoMs: filaAtiva.duracaoMs
+      });
+    }
+
     return {
       ok: true,
       modo: "shadow",
       aplicouMudancas: false,
       duracaoMs: Date.now() - inicio,
       metricas,
-      plano
+      plano,
+      filaAtiva
     };
   } catch (e) {
     logOfc("[OFC-ERRO]", {
