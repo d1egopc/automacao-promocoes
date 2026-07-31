@@ -23,6 +23,10 @@ const {
   calcularSaudeOperacional,
   criarPlanoOperacionalV2Shadow
 } = require("./operational-shadow.service");
+const {
+  calcularFluxoVivoShadow,
+  criarFluxoVivoShadowOfc
+} = require("./live-flow.service");
 
 module.exports = {
   executarObservabilidadeOfc,
@@ -39,5 +43,7 @@ module.exports = {
   avaliarOportunidadeOperacional,
   calcularPressaoOperacionalV2,
   calcularSaudeOperacional,
-  criarPlanoOperacionalV2Shadow
+  criarPlanoOperacionalV2Shadow,
+  calcularFluxoVivoShadow,
+  criarFluxoVivoShadowOfc
 };

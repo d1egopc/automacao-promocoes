@@ -1,6 +1,7 @@
 const { coletarMetricasOfc } = require("./metrics.service");
 const { criarPlanoShadowOfc } = require("./planner.service");
 const { criarFilaAtivaShadowOfc } = require("./active-queue.service");
+const { criarFluxoVivoShadowOfc } = require("./live-flow.service");
 
 function logOfc(tag, payload = {}) {
   try {
@@ -8,6 +9,51 @@ function logOfc(tag, payload = {}) {
   } catch {
     console.log(tag, payload);
   }
+}
+
+function logarFluxoVivoShadow(rodadaId, fluxoVivo = {}) {
+  if (fluxoVivo.ok) {
+    logOfc("[OFC-FLUXO-VIVO-SHADOW]", {
+      rodadaId,
+      modo: fluxoVivo.modo,
+      aplicouMudancas: fluxoVivo.aplicouMudancas,
+      janelaMinutos: fluxoVivo.janelaMinutos,
+      fluxoVivoPercentual: fluxoVivo.fluxoVivoPercentual,
+      idadeJobMaisNovoParadoMs: fluxoVivo.idadeJobMaisNovoParadoMs,
+      idadeJobMaisAntigoCirculavelMs: fluxoVivo.idadeJobMaisAntigoCirculavelMs,
+      idadeMediaJobsVivosMs: fluxoVivo.idadeMediaJobsVivosMs,
+      idadeMaximaJobsVivosMs: fluxoVivo.idadeMaximaJobsVivosMs,
+      tempoMedioPermanenciaMs: fluxoVivo.tempoMedioPermanenciaMs,
+      tempoMedioRadarOfertaMs: fluxoVivo.tempoMedioRadarOfertaMs,
+      tempoMedioAtePrimeiraTentativaMs: fluxoVivo.tempoMedioAtePrimeiraTentativaMs,
+      entradaPorMinuto: fluxoVivo.entradaPorMinuto,
+      consumoPorMinuto: fluxoVivo.consumoPorMinuto,
+      expiracaoPorMinuto: fluxoVivo.expiracaoPorMinuto,
+      expiracaoPorHora: fluxoVivo.expiracaoPorHora,
+      pressaoOperacional: fluxoVivo.pressaoOperacional,
+      activeQueueSugerida: fluxoVivo.activeQueueSugerida,
+      reservaSugerida: fluxoVivo.reservaSugerida,
+      totalJobsVivos: fluxoVivo.totalJobsVivos,
+      totalJobsCirculaveis: fluxoVivo.totalJobsCirculaveis,
+      percentualAguaNova: fluxoVivo.percentualAguaNova,
+      aguaNova: fluxoVivo.aguaNova,
+      ttl: fluxoVivo.ttl,
+      amostra: fluxoVivo.amostra,
+      filaAtivaShadowAtual: fluxoVivo.filaAtivaShadowAtual,
+      duracaoMs: fluxoVivo.duracaoMs
+    });
+    return;
+  }
+
+  logOfc("[OFC-FLUXO-VIVO-ERRO]", {
+    rodadaId,
+    modo: fluxoVivo.modo,
+    aplicouMudancas: false,
+    failSafe: true,
+    motivo: fluxoVivo.motivo || "erro_fluxo_vivo_shadow",
+    erro: String(fluxoVivo.erro || "erro_desconhecido").slice(0, 180),
+    duracaoMs: fluxoVivo.duracaoMs
+  });
 }
 
 async function executarObservabilidadeOfc(opcoes = {}) {
@@ -94,6 +140,13 @@ async function executarObservabilidadeOfc(opcoes = {}) {
       });
     }
 
+    const fluxoVivo = await criarFluxoVivoShadowOfc({
+      metricas,
+      plano,
+      filaAtiva
+    }, opcoes.fluxoVivo || {});
+    logarFluxoVivoShadow(rodadaId, fluxoVivo);
+
     return {
       ok: true,
       modo: "shadow",
@@ -101,7 +154,8 @@ async function executarObservabilidadeOfc(opcoes = {}) {
       duracaoMs: Date.now() - inicio,
       metricas,
       plano,
-      filaAtiva
+      filaAtiva,
+      fluxoVivo
     };
   } catch (e) {
     logOfc("[OFC-ERRO]", {
