@@ -101,25 +101,29 @@ function criarDepsBase({ dryRun = {}, lotes = [], validarTotal = null, rollbackR
       chamadas.push(`validarSnapshot:${lote.loteNumero}`);
       return validarTotal === null ? 1 : validarTotal;
     },
+    async marcarSnapshotConcorrenciaLote(_client, lote) {
+      chamadas.push(`marcarConcorrencia:${lote.loteNumero}`);
+      return 1;
+    },
     async expirarLoteSnapshot(_client, lote) {
       chamadas.push(`expirar:${lote.loteNumero}`);
-      return 1;
+      return validarTotal === null ? 1 : validarTotal;
     },
     async contarProcessamentosOriginaisLote(_client, lote) {
       chamadas.push(`contarProcessamentos:${lote.loteNumero}`);
-      return 2;
+      return validarTotal === 0 ? 0 : 2;
     },
     async arquivarProcessamentosLote(_client, lote) {
       chamadas.push(`arquivarProcessamentos:${lote.loteNumero}`);
-      return 2;
+      return validarTotal === 0 ? 0 : 2;
     },
     async arquivarJobsLote(_client, lote) {
       chamadas.push(`arquivarJobs:${lote.loteNumero}`);
-      return 1;
+      return validarTotal === null ? 1 : validarTotal;
     },
     async removerJobsArquivadosLote(_client, lote) {
       chamadas.push(`removerJobs:${lote.loteNumero}`);
-      return 1;
+      return validarTotal === null ? 1 : validarTotal;
     }
   };
 
@@ -268,11 +272,10 @@ assert.strictEqual(
       lotes: [{ operation_id: "op1", lote_numero: 1, grupo_acao: GRUPOS_RESET.EXPIRAR, status: "pendente", total_snapshot: 1 }],
       validarTotal: 0
     });
-    await assert.rejects(
-      () => executarResetOperacional({ operationId: "op1", confirmOperationId: "op1" }, deps),
-      /snapshot_nao_confere_com_jobs_atuais/
-    );
-    assert(deps.chamadas.includes("ROLLBACK"), "concorrencia deve abortar lote atomicamente");
+    const resultado = await executarResetOperacional({ operationId: "op1", confirmOperationId: "op1" }, deps);
+    assert.strictEqual(resultado.puladosConcorrencia, 1, "concorrencia deve ser pulada e auditada");
+    assert(deps.chamadas.includes("marcarConcorrencia:1"), "snapshot deve registrar jobs pulados por concorrencia");
+    assert(deps.chamadas.includes("COMMIT"), "lote com concorrencia pulada deve concluir sem alterar o job divergente");
   }
 
   {

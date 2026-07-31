@@ -242,6 +242,28 @@ async function validarSnapshotContraJobsAtuais(client, { operationId, loteNumero
   return Number(resultado.rows[0]?.total_ok || 0);
 }
 
+async function marcarSnapshotConcorrenciaLote(client, { operationId, loteNumero, grupoAcao }) {
+  const resultado = await client.query(
+    `UPDATE engine_reset_operacional_snapshot s
+        SET estado_reset = 'pulado_concorrencia',
+            atualizado_em = NOW()
+       WHERE s.operation_id = $1
+         AND s.lote_numero = $2
+         AND s.grupo_acao = $3
+         AND s.estado_reset = 'snapshot'
+         AND NOT EXISTS (
+           SELECT 1
+             FROM engine_jobs_cliente j
+            WHERE j.id = s.job_id
+              AND j.status = s.status_anterior
+              AND j.criado_em = s.criado_em_original
+         )
+      RETURNING s.job_id`,
+    [operationId, loteNumero, grupoAcao]
+  );
+  return resultado.rowCount;
+}
+
 async function expirarLoteSnapshot(client, { operationId, loteNumero, grupoAcao }) {
   const resultado = await client.query(
     `UPDATE engine_jobs_cliente j
@@ -281,9 +303,12 @@ async function arquivarProcessamentosLote(client, { operationId, loteNumero, gru
      SELECT $1, $2, p.id, p.job_id, to_jsonb(p)
        FROM engine_processamentos p
        JOIN engine_reset_operacional_snapshot s ON s.job_id = p.job_id
+       JOIN engine_jobs_cliente j ON j.id = s.job_id
       WHERE s.operation_id = $1
         AND s.lote_numero = $2
         AND s.grupo_acao = $3
+        AND j.status = s.status_anterior
+        AND j.criado_em = s.criado_em_original
      ON CONFLICT (operation_id, processamento_id_original) DO NOTHING`,
     [operationId, loteNumero, grupoAcao]
   );
@@ -295,9 +320,12 @@ async function contarProcessamentosOriginaisLote(client, { operationId, loteNume
     `SELECT COUNT(*)::int AS total
        FROM engine_processamentos p
        JOIN engine_reset_operacional_snapshot s ON s.job_id = p.job_id
+       JOIN engine_jobs_cliente j ON j.id = s.job_id
       WHERE s.operation_id = $1
         AND s.lote_numero = $2
-        AND s.grupo_acao = $3`,
+        AND s.grupo_acao = $3
+        AND j.status = s.status_anterior
+        AND j.criado_em = s.criado_em_original`,
     [operationId, loteNumero, grupoAcao]
   );
   return Number(resultado.rows[0]?.total || 0);
@@ -365,6 +393,7 @@ module.exports = {
   contarProcessamentosOriginaisLote,
   expirarLoteSnapshot,
   materializarSnapshotReset,
+  marcarSnapshotConcorrenciaLote,
   removerJobsArquivadosLote,
   validarSnapshotContraJobsAtuais
 };

@@ -218,11 +218,17 @@ async function executarLoteReset(client, { repo, snapshot, operacao, lote }) {
     grupoAcao,
     cutoffCongelado: operacao.cutoff_congelado
   });
-  if (totalValidos !== linhasSnapshot.length) {
-    throw erroOperacional("concorrencia_detectada", "snapshot_nao_confere_com_jobs_atuais", {
+  const totalPuladosConcorrencia = Math.max(0, linhasSnapshot.length - totalValidos);
+  if (totalPuladosConcorrencia > 0) {
+    await snapshot.marcarSnapshotConcorrenciaLote(client, { operationId, loteNumero, grupoAcao });
+    logResetConcorrenciaBloqueada({
+      operationId,
       loteNumero,
-      esperado: linhasSnapshot.length,
-      validos: totalValidos
+      grupoAcao,
+      totalSnapshot: linhasSnapshot.length,
+      totalValidos,
+      totalPuladosConcorrencia,
+      decisao: "pular_jobs_alterados_por_concorrencia"
     });
   }
 
@@ -256,10 +262,10 @@ async function executarLoteReset(client, { repo, snapshot, operacao, lote }) {
     throw erroOperacional("grupo_acao_nao_executavel", "grupo_acao_nao_executavel", { grupoAcao });
   }
 
-  if (totalAlterado !== linhasSnapshot.length) {
+  if (totalAlterado !== totalValidos) {
     throw erroOperacional("alteracao_lote_incompativel", "alteracao_lote_total_incompativel", {
       loteNumero,
-      esperado: linhasSnapshot.length,
+      esperado: totalValidos,
       alterado: totalAlterado
     });
   }
@@ -272,7 +278,7 @@ async function executarLoteReset(client, { repo, snapshot, operacao, lote }) {
     totalAlterado,
     totalArquivado,
     totalProcessamentosArquivados,
-    totalPuladosConcorrencia: 0
+    totalPuladosConcorrencia
   });
 
   const duracaoMs = Date.now() - inicio;
@@ -283,10 +289,11 @@ async function executarLoteReset(client, { repo, snapshot, operacao, lote }) {
     totalAlterado,
     totalArquivado,
     totalProcessamentosArquivados,
+    totalPuladosConcorrencia,
     duracaoMs
   });
 
-  return { loteNumero, grupoAcao, totalAlterado, totalArquivado, totalProcessamentosArquivados, duracaoMs };
+  return { loteNumero, grupoAcao, totalAlterado, totalArquivado, totalProcessamentosArquivados, totalPuladosConcorrencia, duracaoMs };
 }
 
 async function executarResetOperacional(opcoes = {}, deps = {}) {
@@ -295,6 +302,7 @@ async function executarResetOperacional(opcoes = {}, deps = {}) {
   const confirmOperationId = opcoes.confirmOperationId;
   const maxLotes = Number(opcoes.maxLotes || 0);
   const resumo = { ok: true, modo: "execute", operationId, lotes: 0, alterados: 0, arquivados: 0, processamentosArquivados: 0 };
+  resumo.puladosConcorrencia = 0;
 
   let operacaoInicial = null;
   await repo.comTransacao(async (client) => {
@@ -330,6 +338,7 @@ async function executarResetOperacional(opcoes = {}, deps = {}) {
     resumo.alterados += resultadoLote.totalAlterado || 0;
     resumo.arquivados += resultadoLote.totalArquivado || 0;
     resumo.processamentosArquivados += resultadoLote.totalProcessamentosArquivados || 0;
+    resumo.puladosConcorrencia += resultadoLote.totalPuladosConcorrencia || 0;
   }
 
   await repo.comTransacao(async (client) => {
