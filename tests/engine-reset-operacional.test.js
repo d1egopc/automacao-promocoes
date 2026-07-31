@@ -1,6 +1,8 @@
 "use strict";
 
 const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
 const {
   classificarJobReset,
   GRUPOS_RESET,
@@ -13,6 +15,19 @@ const {
 } = require("../modules/engine/reset-operacional/reset.runner");
 
 const cutoff = "2026-07-31T21:12:46.952Z";
+const resetRepositoryFonte = fs.readFileSync(
+  path.join(__dirname, "..", "modules", "engine", "reset-operacional", "reset.repository.js"),
+  "utf8"
+);
+
+assert(
+  resetRepositoryFonte.includes("PRIMARY KEY (operation_id, lote_numero, grupo_acao)"),
+  "lotes devem permitir o mesmo numero para grupos diferentes quando a fronteira do lote cruza grupos"
+);
+assert(
+  resetRepositoryFonte.includes("DROP CONSTRAINT engine_reset_operacional_lotes_pkey"),
+  "schema deve migrar PK auxiliar antiga de lotes de forma idempotente"
+);
 
 function criarDepsBase({ dryRun = {}, lotes = [], validarTotal = null, rollbackResultado = null, idsHashAtual = null } = {}) {
   const chamadas = [];

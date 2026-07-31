@@ -65,8 +65,25 @@ async function inicializarSchemaReset(client) {
       finalizado_em TIMESTAMPTZ,
       criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      PRIMARY KEY (operation_id, lote_numero)
+      PRIMARY KEY (operation_id, lote_numero, grupo_acao)
     );
+
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+          FROM pg_constraint
+         WHERE conrelid = 'engine_reset_operacional_lotes'::regclass
+           AND conname = 'engine_reset_operacional_lotes_pkey'
+           AND pg_get_constraintdef(oid) NOT ILIKE '%grupo_acao%'
+      ) THEN
+        ALTER TABLE engine_reset_operacional_lotes
+          DROP CONSTRAINT engine_reset_operacional_lotes_pkey;
+        ALTER TABLE engine_reset_operacional_lotes
+          ADD PRIMARY KEY (operation_id, lote_numero, grupo_acao);
+      END IF;
+    END;
+    $$;
 
     CREATE TABLE IF NOT EXISTS engine_reset_operacional_snapshot (
       operation_id TEXT NOT NULL REFERENCES engine_reset_operacional_operacoes(operation_id) ON DELETE CASCADE,
