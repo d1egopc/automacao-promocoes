@@ -101,6 +101,29 @@ function ids(fila) {
   );
 
   {
+    limpar();
+    const dataDirFiltro = path.join(tmpRoot, "caso-workspace-filtro");
+    escreverFila(dataDirFiltro, "ws_alvo", [
+      item("alvo-expirar", { dataEntradaFila: "2026-07-31T20:00:00.000Z" })
+    ]);
+    escreverFila(dataDirFiltro, "ws_outro", [
+      item("outro-expirar", { dataEntradaFila: "2026-07-31T20:00:00.000Z" })
+    ]);
+
+    const dryFiltrado = await executarDryRunResetEsteiras({
+      dataDir: dataDirFiltro,
+      operationId: "op-ws",
+      operationStartedAt: "2026-08-01T00:00:00.000Z",
+      workspaceId: "ws_alvo"
+    });
+
+    assert.deepStrictEqual(Object.keys(dryFiltrado.porWorkspace), ["ws_alvo"], "dry-run filtrado deve materializar somente o workspace solicitado");
+    assert.strictEqual(dryFiltrado.totais.expirar, 1, "dry-run filtrado deve contar apenas elegiveis do workspace solicitado");
+    assert(fs.existsSync(path.join(dataDirFiltro, "reset-esteiras", "op-ws", "snapshot", "ws_alvo.json")), "snapshot do workspace alvo deve existir");
+    assert(!fs.existsSync(path.join(dataDirFiltro, "reset-esteiras", "op-ws", "snapshot", "ws_outro.json")), "snapshot de outro workspace nao deve ser criado");
+  }
+
+  {
     await assert.rejects(
       () => executarResetEsteiras({ dataDir, operationId: "op-dry" }),
       /execute_exige_confirm_operation_id/,

@@ -87,6 +87,11 @@ function caminhosOperacao(operationId = "", opcoes = {}) {
 function listarWorkspaces(opcoes = {}) {
   const dir = clientesDir(opcoes);
   if (!fs.existsSync(dir)) return [];
+  const workspaceFiltro = String(opcoes.workspaceId || "").trim();
+  if (workspaceFiltro) {
+    const workspaceId = workspaceSeguro(workspaceFiltro);
+    return fs.existsSync(path.join(dir, workspaceId, "fila.json")) ? [workspaceId] : [];
+  }
   return fs.readdirSync(dir, { withFileTypes: true })
     .filter(entrada => entrada.isDirectory())
     .map(entrada => entrada.name)

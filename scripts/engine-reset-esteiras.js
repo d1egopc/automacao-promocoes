@@ -20,7 +20,8 @@ function parseArgs(argv = []) {
     maxLotes: opcoes.maxLotes || "",
     cutoffCongelado: opcoes.cutoffCongelado || "",
     operationStartedAt: opcoes.operationStartedAt || "",
-    dataDir: opcoes.dataDir || ""
+    dataDir: opcoes.dataDir || "",
+    workspaceId: opcoes.workspaceId || ""
   };
 }
 
