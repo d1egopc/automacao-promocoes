@@ -3,12 +3,17 @@ const fs = require("fs");
 const path = require("path");
 
 const {
+  BUCKET_STATUS,
+  CAMPOS_TIMESTAMP_FILA,
   criarGateAbsorcaoShadowOfc,
   montarGateWorkspace,
   classificarEstadoEsteira,
   classificarStatusFila,
+  classificarItemEsteiraShadow,
   resumoFilaWorkspace,
-  capacidadeDestinoShadow
+  capacidadeDestinoShadow,
+  timestampFila,
+  slotsCobertura
 } = require("../modules/engine/ofc/absorption-gate.service");
 const {
   consultarEventosAbsorcaoPorWorkspace
@@ -35,40 +40,91 @@ const destinoTurbo = {
 };
 
 const filaComHistorico = [
-  { id: "p1", status: "pendente", criadoEm: new Date(agora - 20 * 60 * 1000).toISOString() },
-  { id: "p2", status: "enviando", criadoEm: new Date(agora - 10 * 60 * 1000).toISOString() },
-  { id: "p3", status: "erro_temporario", criadoEm: new Date(agora - 5 * 60 * 1000).toISOString() },
+  { id: "p1", status: "pendente", marketplace: "mercadolivre", destinoId: "destino_a", criadoEm: new Date(agora - 20 * 60 * 1000).toISOString(), cupom: "MODA10" },
+  { id: "p2", status: "enviando", marketplace: "amazon", destinoId: "destino_a", dataEntradaFila: new Date(agora - 70 * 60 * 1000).toISOString() },
+  { id: "p3", status: "erro_temporario", marketplace: "shopee", destinoId: "destino_b", adicionado_em: new Date(agora - 3 * 60 * 60 * 1000).toISOString() },
+  { id: "sem_timestamp", status: "pendente", marketplace: "amazon" },
+  { id: "desconhecido", status: "misterioso", marketplace: "amazon", criadoEm: new Date(agora - 5 * 60 * 1000).toISOString() },
   ...Array.from({ length: 500 }, (_, i) => ({ id: `h${i}`, status: "enviado", criadoEm: new Date(agora - 60 * 60 * 1000).toISOString() })),
   { id: "erro_final", status: "erro", criadoEm: new Date(agora - 50 * 60 * 1000).toISOString() },
   { id: "cancelado", status: "cancelado", criadoEm: new Date(agora - 50 * 60 * 1000).toISOString() },
   { id: "expirado", status: "expirado", criadoEm: new Date(agora - 50 * 60 * 1000).toISOString() }
 ];
 
-assert.strictEqual(classificarStatusFila({ status: "pendente" }), "pendentesVivos");
-assert.strictEqual(classificarStatusFila({ status: "enviando" }), "emTentativaEnvio");
-assert.strictEqual(classificarStatusFila({ status: "erro_temporario" }), "errosTemporariosRecuperaveis");
-assert.strictEqual(classificarStatusFila({ status: "enviado" }), "enviados");
-assert.strictEqual(classificarStatusFila({ status: "erro" }), "errosFinais");
+assert(CAMPOS_TIMESTAMP_FILA.includes("dataEntradaFila"));
+assert(CAMPOS_TIMESTAMP_FILA.includes("adicionado_em"));
+assert.strictEqual(classificarStatusFila({ status: "pendente" }), BUCKET_STATUS.PENDENTE_VIVO);
+assert.strictEqual(classificarStatusFila({ status: "enviando" }), BUCKET_STATUS.EM_TENTATIVA);
+assert.strictEqual(classificarStatusFila({ status: "erro_temporario" }), BUCKET_STATUS.ERRO_TEMPORARIO_RECUPERAVEL);
+assert.strictEqual(classificarStatusFila({ status: "enviado" }), BUCKET_STATUS.ENVIADO_HISTORICO);
+assert.strictEqual(classificarStatusFila({ status: "erro" }), BUCKET_STATUS.ERRO_FINAL);
+assert.strictEqual(classificarStatusFila({ status: "misterioso" }), BUCKET_STATUS.STATUS_DESCONHECIDO);
+assert.strictEqual(classificarStatusFila({}), BUCKET_STATUS.STATUS_DESCONHECIDO);
+
+assert.strictEqual(timestampFila({ dataEntradaFila: "2026-07-31T21:00:00.000Z" }).campo, "dataEntradaFila");
+assert.strictEqual(timestampFila({ adicionado_em: "2026-07-31T21:00:00.000Z" }).campo, "adicionado_em");
+assert.strictEqual(timestampFila({}).ms, null);
+
+assert.strictEqual(classificarItemEsteiraShadow(filaComHistorico[0], { agoraMs: agora, janelaAbertaAgora: true }), "aindaVivos");
+assert.strictEqual(classificarItemEsteiraShadow(filaComHistorico[2], { agoraMs: agora, janelaAbertaAgora: true }), "vencidosOperacionalmente");
+assert.strictEqual(classificarItemEsteiraShadow(filaComHistorico[3], { agoraMs: agora, janelaAbertaAgora: true }), "aguardandoAuditoria");
+assert.strictEqual(classificarItemEsteiraShadow(filaComHistorico[4], { agoraMs: agora, janelaAbertaAgora: true }), "aguardandoAuditoria");
+assert.strictEqual(classificarItemEsteiraShadow(filaComHistorico[1], { agoraMs: agora, janelaAbertaAgora: false }), "candidatosExpiracao");
 
 const resumoFila = resumoFilaWorkspace("user_pressao", {
   agoraMs: agora,
+  janelaAbertaAgora: true,
   readClienteJson: () => filaComHistorico
 });
-assert.strictEqual(resumoFila.pendentesVivos, 1);
+assert.strictEqual(resumoFila.pendentesVivos, 2);
 assert.strictEqual(resumoFila.emTentativaEnvio, 1);
 assert.strictEqual(resumoFila.errosTemporariosRecuperaveis, 1);
-assert.strictEqual(resumoFila.pressaoEsteiraViva, 3);
+assert.strictEqual(resumoFila.pressaoEsteiraViva, 4);
+assert.strictEqual(resumoFila.status_desconhecido, 1);
 assert.strictEqual(resumoFila.enviados, 500);
 assert.strictEqual(resumoFila.totalEnviadosHistorico, 500);
 assert.strictEqual(resumoFila.errosFinais, 1);
 assert.strictEqual(resumoFila.cancelados, 1);
 assert.strictEqual(resumoFila.expirados, 1);
-assert.strictEqual(resumoFila.idadeMaisAntigaViva, 20 * 60 * 1000);
+assert.strictEqual(resumoFila.itensSemTimestamp, 1);
+assert.strictEqual(resumoFila.idadeMinimaVivaMs, 20 * 60 * 1000);
+assert.strictEqual(resumoFila.idadeMedianaVivaMs, 70 * 60 * 1000);
+assert.strictEqual(resumoFila.idadeP95VivaMs, 3 * 60 * 60 * 1000);
+assert.strictEqual(resumoFila.idadeMaximaVivaMs, 3 * 60 * 60 * 1000);
+assert.strictEqual(resumoFila.itens15a30Min, 1);
+assert.strictEqual(resumoFila.itens1a2h, 1);
+assert.strictEqual(resumoFila.itensAcima2h, 1);
+assert.strictEqual(resumoFila.porMarketplace.amazon, 2);
+assert.strictEqual(resumoFila.porDestino.destino_a, 2);
+assert.strictEqual(resumoFila.porTipoOperacional.cupom, 1);
+assert.strictEqual(resumoFila.camposTimestampEncontrados.criadoEm, 1);
+assert.strictEqual(resumoFila.camposTimestampEncontrados.dataEntradaFila, 1);
+assert.strictEqual(resumoFila.camposTimestampEncontrados.adicionado_em, 1);
+assert.strictEqual(resumoFila.aindaVivos, 2);
+assert.strictEqual(resumoFila.vencidosOperacionalmente, 1);
+assert.strictEqual(resumoFila.aguardandoAuditoria, 1);
+
+const resumoFechado = resumoFilaWorkspace("user_fechado", {
+  agoraMs: agora,
+  janelaAbertaAgora: false,
+  readClienteJson: () => filaComHistorico
+});
+assert.strictEqual(resumoFechado.candidatosExpiracao, 1);
+assert.strictEqual(resumoFechado.vencidosOperacionalmente, 1);
+assert.strictEqual(resumoFechado.aguardandoAuditoria, 1);
+
+assert.strictEqual(slotsCobertura(5, 3.5), 1);
+assert.strictEqual(slotsCobertura(10, 3.5), 2);
+assert.strictEqual(slotsCobertura(15, 3.5), 4);
+assert.strictEqual(slotsCobertura(5, 10), 0);
 
 const capacidadeNormal = capacidadeDestinoShadow(destinoApto, 0, []);
 assert.strictEqual(capacidadeNormal.aptoAgora, true);
 assert.strictEqual(capacidadeNormal.intervaloNormal, 5);
 assert.strictEqual(capacidadeNormal.turboAplicavel, false);
+assert.strictEqual(capacidadeNormal.slots5Min, 1);
+assert.strictEqual(capacidadeNormal.slots10Min, 2);
+assert.strictEqual(capacidadeNormal.slots15Min, 3);
 assert.strictEqual(capacidadeNormal.capacidade5Min, 1);
 assert.strictEqual(capacidadeNormal.capacidade10Min, 2);
 assert.strictEqual(capacidadeNormal.capacidade15Min, 3);
@@ -76,9 +132,9 @@ assert.strictEqual(capacidadeNormal.capacidade15Min, 3);
 const capacidadeTurbo = capacidadeDestinoShadow(destinoTurbo, 0, []);
 assert.strictEqual(capacidadeTurbo.turboAplicavel, true);
 assert.strictEqual(capacidadeTurbo.intervaloEfetivo, 2.5);
-assert.strictEqual(capacidadeTurbo.capacidade5Min, 2);
-assert.strictEqual(capacidadeTurbo.capacidade10Min, 4);
-assert.strictEqual(capacidadeTurbo.capacidade15Min, 6);
+assert.strictEqual(capacidadeTurbo.slots5Min, 2);
+assert.strictEqual(capacidadeTurbo.slots10Min, 4);
+assert.strictEqual(capacidadeTurbo.slots15Min, 6);
 
 const capacidadeFechada = capacidadeDestinoShadow({ ...destinoApto, horarioInicio: "23:58", horarioFim: "23:59" }, 0, []);
 assert.strictEqual(capacidadeFechada.aptoAgora, false);
@@ -104,6 +160,7 @@ assert.strictEqual(gateLivre.estado, "LIVRE");
 assert.strictEqual(gateLivre.filaAlvo5Min, 3);
 assert.strictEqual(gateLivre.filaAlvo10Min, 6);
 assert.strictEqual(gateLivre.filaAlvo15Min, 9);
+assert.strictEqual(gateLivre.filaAlvo, 6);
 assert.strictEqual(gateLivre.capacidadeAbsorcaoAgora, 9);
 assert.strictEqual(gateLivre.quantidadeQueAceitariaAgora, 9);
 assert.strictEqual(gateLivre.turboAplicavel, true);
@@ -118,8 +175,11 @@ const gateSaturado = montarGateWorkspace({
   janelaMinutos: 15
 });
 assert.strictEqual(gateSaturado.estado, "SATURADA");
-assert.strictEqual(gateSaturado.pressaoEsteiraViva, 3);
-assert.strictEqual(gateSaturado.quantidadeFilaAtual, 3);
+assert.strictEqual(gateSaturado.pressaoEsteiraViva, 4);
+assert.strictEqual(gateSaturado.pressaoVivaConfirmada, 4);
+assert.strictEqual(gateSaturado.statusDesconhecido, 1);
+assert.strictEqual(gateSaturado.itensSemTimestamp, 1);
+assert.strictEqual(gateSaturado.quantidadeFilaAtual, 4);
 assert.strictEqual(gateSaturado.totalEnviadosHistorico, 500);
 assert.strictEqual(gateSaturado.capacidadeAbsorcaoAgora, 0);
 assert.strictEqual(gateSaturado.quantidadeQueRecusariaAgora, 1);
@@ -127,17 +187,23 @@ assert.strictEqual(gateSaturado.entrada15Min, 5);
 assert.strictEqual(gateSaturado.saida15Min, 0);
 assert.strictEqual(gateSaturado.entrandoMaisQueSaindo, true);
 assert.strictEqual(gateSaturado.tempoEstimadoEsvaziarEsteira, null);
+assert.strictEqual(gateSaturado.faixasIdade.itensAcima2h, 1);
+assert.strictEqual(gateSaturado.vencidosOperacionalmente, 1);
 
 const gateFechado = montarGateWorkspace({
   clienteId: "user_fechado",
   usuario: { id: "user_fechado" },
   destinos: [{ ...destinoApto, horarioInicio: "23:58", horarioFim: "23:59" }],
-  fila: resumoFilaWorkspace("user_fechado", { readClienteJson: () => [], agoraMs: agora }),
+  fila: resumoFilaWorkspace("user_fechado", { readClienteJson: () => filaComHistorico, agoraMs: agora, janelaAbertaAgora: false }),
   eventos: {},
   janelaMinutos: 15
 });
 assert.strictEqual(gateFechado.estado, "FECHADA");
 assert.strictEqual(gateFechado.capacidadeAbsorcaoAgora, 0);
+assert.strictEqual(gateFechado.filaAlvo15Min, 0);
+assert.strictEqual(gateFechado.candidatosExpiracao, 1);
+assert.strictEqual(gateFechado.vencidosOperacionalmente, 1);
+assert.strictEqual(gateFechado.aguardandoAuditoria, 1);
 
 const classificadoFechado = classificarEstadoEsteira({
   automacaoAtiva: false,
@@ -166,7 +232,7 @@ assert.strictEqual(classificadoFechado.estado, "FECHADA");
     agoraMs: agora,
     readClienteJson: (clienteId, arquivo, fallback) => {
       if (arquivo !== "fila.json") return fallback;
-      if (clienteId === "user_saturado") return filaComHistorico;
+      if (clienteId === "user_saturado" || clienteId === "user_fechado") return filaComHistorico;
       return [];
     },
     consultarEventosAbsorcao: async () => ({
@@ -186,12 +252,15 @@ assert.strictEqual(classificadoFechado.estado, "FECHADA");
   assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_livre").estado, "LIVRE");
   assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_saturado").estado, "SATURADA");
   assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_fechado").estado, "FECHADA");
-  assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_saturado").pressaoEsteiraViva, 3);
+  assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_saturado").pressaoEsteiraViva, 4);
   assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_saturado").totalEnviadosHistorico, 500);
+  assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_fechado").filaAlvo15Min, 0);
   assert.strictEqual(gate.resumo.porEstado.LIVRE, 1);
   assert.strictEqual(gate.resumo.porEstado.SATURADA, 1);
   assert.strictEqual(gate.resumo.porEstado.FECHADA, 1);
-  assert.strictEqual(gate.resumo.pressaoEsteiraViva, 3);
+  assert.strictEqual(gate.resumo.pressaoEsteiraViva, 8);
+  assert.strictEqual(gate.resumo.statusDesconhecido, 2);
+  assert.strictEqual(gate.resumo.itensSemTimestamp, 2);
 
   const falha = await criarGateAbsorcaoShadowOfc({
     consultarEventosAbsorcao: async () => ({ ok: false, motivo: "query_falhou", erro: "db" })
@@ -217,6 +286,8 @@ assert.strictEqual(classificadoFechado.estado, "FECHADA");
   const controller = fs.readFileSync(path.join(__dirname, "..", "modules", "engine", "ofc", "controller.runner.js"), "utf8");
   assert(controller.includes("[OFC-GATE-ABSORCAO-DINAMICO-SHADOW]"));
   assert(controller.includes("[OFC-GATE-ABSORCAO-ERRO]"));
+  assert(controller.includes("[OFC-GATE-ESTEIRA-VIVA-SHADOW]"));
+  assert(controller.includes("[OFC-GATE-ESTEIRA-VIVA-ERRO]"));
 
   for (const arquivoWorker of [
     path.join("modules", "engine", "orchestrator.runner.js"),

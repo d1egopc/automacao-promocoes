@@ -7,8 +7,18 @@ const {
 } = require("./commercial-capacity.service");
 const { consultarEventosAbsorcaoPorWorkspace } = require("./absorption-gate.repository");
 
+const BUCKET_STATUS = {
+  PENDENTE_VIVO: "pendente_vivo",
+  EM_TENTATIVA: "em_tentativa",
+  ERRO_TEMPORARIO_RECUPERAVEL: "erro_temporario_recuperavel",
+  ENVIADO_HISTORICO: "enviado_historico",
+  ERRO_FINAL: "erro_final",
+  CANCELADO: "cancelado",
+  EXPIRADO: "expirado",
+  STATUS_DESCONHECIDO: "status_desconhecido"
+};
+
 const STATUS_PENDENTES_VIVOS = new Set([
-  "",
   "pendente",
   "novo",
   "aguardando",
@@ -74,14 +84,40 @@ const STATUS_EXPIRADOS = new Set([
 
 const STATUS_HISTORICO = new Set([
   "historico",
-  "histórico",
+  "historico_operacional",
   "arquivado",
   "arquivada",
   "arquivo"
 ]);
 
+const CAMPOS_TIMESTAMP_FILA = [
+  "criadoEm",
+  "criado_em",
+  "adicionadoEm",
+  "adicionado_em",
+  "dataEntradaFila",
+  "dataEntrada",
+  "entradaFilaEm",
+  "dataFila",
+  "dataCriacao",
+  "createdAt",
+  "timestamp",
+  "incluidoEm",
+  "inseridoEm",
+  "recebidoEm",
+  "importadoEm"
+];
+
+const TTL_ESTEIRA_MS = {
+  cupom_turbo: 30 * 60 * 1000,
+  resgate: 30 * 60 * 1000,
+  cupom: 60 * 60 * 1000,
+  radar: 2 * 60 * 60 * 1000,
+  comum: 2 * 60 * 60 * 1000,
+  desconhecido: 60 * 60 * 1000
+};
+
 const INTERVALO_TURBO_PADRAO_MINUTOS = 2.5;
-const COBERTURA_PRINCIPAL_MINUTOS = 15;
 
 function lista(valor) {
   return Array.isArray(valor) ? valor : [];
@@ -113,24 +149,28 @@ function porMinuto(total, janelaMinutos) {
 }
 
 function statusFila(item = {}) {
-  return String(item?.status || item?.situacao || "pendente").toLowerCase().trim();
+  return String(item?.status ?? item?.situacao ?? "").toLowerCase().trim();
 }
 
 function classificarStatusFila(item = {}) {
   const status = statusFila(item);
-  if (STATUS_PENDENTES_VIVOS.has(status)) return "pendentesVivos";
-  if (STATUS_EM_TENTATIVA.has(status)) return "emTentativaEnvio";
-  if (STATUS_ERROS_TEMPORARIOS.has(status)) return "errosTemporariosRecuperaveis";
-  if (STATUS_ENVIADOS.has(status)) return "enviados";
-  if (STATUS_ERROS_FINAIS.has(status)) return "errosFinais";
-  if (STATUS_CANCELADOS.has(status)) return "cancelados";
-  if (STATUS_EXPIRADOS.has(status)) return "expirados";
-  if (STATUS_HISTORICO.has(status)) return "historico";
-  return "pendentesVivos";
+  if (STATUS_PENDENTES_VIVOS.has(status)) return BUCKET_STATUS.PENDENTE_VIVO;
+  if (STATUS_EM_TENTATIVA.has(status)) return BUCKET_STATUS.EM_TENTATIVA;
+  if (STATUS_ERROS_TEMPORARIOS.has(status)) return BUCKET_STATUS.ERRO_TEMPORARIO_RECUPERAVEL;
+  if (STATUS_ENVIADOS.has(status)) return BUCKET_STATUS.ENVIADO_HISTORICO;
+  if (STATUS_ERROS_FINAIS.has(status)) return BUCKET_STATUS.ERRO_FINAL;
+  if (STATUS_CANCELADOS.has(status)) return BUCKET_STATUS.CANCELADO;
+  if (STATUS_EXPIRADOS.has(status)) return BUCKET_STATUS.EXPIRADO;
+  if (STATUS_HISTORICO.has(status)) return BUCKET_STATUS.ENVIADO_HISTORICO;
+  return BUCKET_STATUS.STATUS_DESCONHECIDO;
 }
 
 function itemVivoFila(item = {}) {
-  return ["pendentesVivos", "emTentativaEnvio", "errosTemporariosRecuperaveis"].includes(classificarStatusFila(item));
+  return [
+    BUCKET_STATUS.PENDENTE_VIVO,
+    BUCKET_STATUS.EM_TENTATIVA,
+    BUCKET_STATUS.ERRO_TEMPORARIO_RECUPERAVEL
+  ].includes(classificarStatusFila(item));
 }
 
 function destinosDoCliente(mapa = {}, clienteId = "") {
@@ -155,22 +195,12 @@ function usuarioPorId(usuarios = [], clienteId = "") {
 }
 
 function timestampFila(item = {}) {
-  const candidatos = [
-    item.criadoEm,
-    item.criado_em,
-    item.adicionadoEm,
-    item.adicionado_em,
-    item.dataCriacao,
-    item.createdAt,
-    item.timestamp
-  ];
-
-  for (const candidato of candidatos) {
-    const data = new Date(candidato || "");
+  for (const campo of CAMPOS_TIMESTAMP_FILA) {
+    const data = new Date(item?.[campo] || "");
     const ms = data.getTime();
-    if (Number.isFinite(ms)) return ms;
+    if (Number.isFinite(ms)) return { ms, campo };
   }
-  return null;
+  return { ms: null, campo: "" };
 }
 
 function destinoId(destino = {}, indice = 0) {
@@ -197,49 +227,217 @@ function itemDestinadoAoDestino(item = {}, destino = {}, indice = 0) {
   return candidatos.includes(id);
 }
 
+function destinoItem(item = {}) {
+  return String(
+    item.destinoId ||
+    item.destino_id ||
+    item.destino ||
+    item.chatId ||
+    item.grupoId ||
+    item.jid ||
+    item.canalId ||
+    "sem_destino"
+  ).trim() || "sem_destino";
+}
+
+function marketplaceItem(item = {}) {
+  return normalizarTexto(
+    item.marketplace ||
+    item.marketplaceDetectado ||
+    item.marketplace_detectado ||
+    item.loja ||
+    item.origemMarketplace ||
+    "desconhecido"
+  ) || "desconhecido";
+}
+
+function possuiValor(item = {}, campos = []) {
+  for (const campo of campos) {
+    const valor = item?.[campo];
+    if (Array.isArray(valor) && valor.length) return true;
+    if (valor && typeof valor === "object" && Object.keys(valor).length) return true;
+    if (String(valor || "").trim()) return true;
+  }
+  return false;
+}
+
+function tipoOperacionalFila(item = {}) {
+  if (item.cupomTurbo === true || item.turbo === true || normalizarTexto(item.modoEnvio || item.modo) === "cupomturbo") return "cupom_turbo";
+  if (possuiValor(item, ["linkResgate", "linksResgate", "urlResgate"]) || possuiValor(objeto(item.links), ["resgate", "linksResgate"])) return "resgate";
+  if (possuiValor(item, ["cupom", "codigoCupom", "codigosCupom", "cupons", "instrucaoCupom", "cupomTexto"])) return "cupom";
+  if (item.origem === "radar" || item.radar === true || objeto(item.metadata).radarMirror) return "radar";
+  if (marketplaceItem(item) === "desconhecido") return "desconhecido";
+  return "comum";
+}
+
+function ttlEsteiraMs(item = {}) {
+  return TTL_ESTEIRA_MS[tipoOperacionalFila(item)] || TTL_ESTEIRA_MS.desconhecido;
+}
+
+function incrementar(mapa = {}, chave = "") {
+  const k = String(chave || "desconhecido");
+  mapa[k] = (mapa[k] || 0) + 1;
+}
+
+function percentil(valores = [], p = 0.95) {
+  if (!valores.length) return null;
+  const ordenados = [...valores].sort((a, b) => a - b);
+  const indice = Math.min(ordenados.length - 1, Math.max(0, Math.ceil(ordenados.length * p) - 1));
+  return ordenados[indice];
+}
+
+function media(valores = []) {
+  if (!valores.length) return null;
+  return Math.round(valores.reduce((total, valor) => total + valor, 0) / valores.length);
+}
+
+function mediana(valores = []) {
+  if (!valores.length) return null;
+  const ordenados = [...valores].sort((a, b) => a - b);
+  const meio = Math.floor(ordenados.length / 2);
+  if (ordenados.length % 2) return ordenados[meio];
+  return Math.round((ordenados[meio - 1] + ordenados[meio]) / 2);
+}
+
+function faixaIdade(idadeMs = 0) {
+  const min = idadeMs / 60000;
+  if (min <= 5) return "itensAte5Min";
+  if (min <= 10) return "itens5a10Min";
+  if (min <= 15) return "itens10a15Min";
+  if (min <= 30) return "itens15a30Min";
+  if (min <= 60) return "itens30a60Min";
+  if (min <= 120) return "itens1a2h";
+  return "itensAcima2h";
+}
+
+function criarFaixasVazias() {
+  return {
+    itensAte5Min: 0,
+    itens5a10Min: 0,
+    itens10a15Min: 0,
+    itens15a30Min: 0,
+    itens30a60Min: 0,
+    itens1a2h: 0,
+    itensAcima2h: 0
+  };
+}
+
+function classificarItemEsteiraShadow(item = {}, { agoraMs = Date.now(), janelaAbertaAgora = false } = {}) {
+  const bucket = classificarStatusFila(item);
+  if (bucket === BUCKET_STATUS.STATUS_DESCONHECIDO) return "aguardandoAuditoria";
+  if (!itemVivoFila(item)) return "foraPressaoViva";
+
+  const timestamp = timestampFila(item);
+  if (timestamp.ms === null) return "aguardandoAuditoria";
+
+  const idadeMs = Math.max(0, agoraMs - timestamp.ms);
+  const ttlMs = ttlEsteiraMs(item);
+  if (idadeMs >= ttlMs) return "vencidosOperacionalmente";
+  if (!janelaAbertaAgora && idadeMs >= Math.min(30 * 60 * 1000, ttlMs * 0.5)) return "candidatosExpiracao";
+  if (idadeMs >= ttlMs * 0.7) return "candidatosExpiracao";
+  return "aindaVivos";
+}
+
 function resumoFilaWorkspace(clienteId = "", opcoes = {}) {
   const lerFila = opcoes.readClienteJson || readClienteJson;
   const agora = Number(opcoes.agoraMs || Date.now());
+  const janelaAbertaAgora = opcoes.janelaAbertaAgora === true;
   const fila = lista(lerFila(clienteId, "fila.json", []));
   const contagem = {
-    pendentesVivos: 0,
-    emTentativaEnvio: 0,
-    errosTemporariosRecuperaveis: 0,
-    enviados: 0,
-    errosFinais: 0,
-    cancelados: 0,
-    expirados: 0,
-    historico: 0
+    pendente_vivo: 0,
+    em_tentativa: 0,
+    erro_temporario_recuperavel: 0,
+    enviado_historico: 0,
+    erro_final: 0,
+    cancelado: 0,
+    expirado: 0,
+    status_desconhecido: 0
   };
-  let maisAntigo = null;
+  const porStatus = {};
+  const porMarketplace = {};
+  const porDestino = {};
+  const porTipoOperacional = {};
+  const camposTimestampEncontrados = {};
+  const idades = [];
+  const faixas = criarFaixasVazias();
+  let itensSemTimestamp = 0;
+  let aindaVivos = 0;
+  let candidatosExpiracao = 0;
+  let vencidosOperacionalmente = 0;
+  let aguardandoAuditoria = 0;
 
   for (const item of fila) {
-    const classe = classificarStatusFila(item);
-    contagem[classe] = (contagem[classe] || 0) + 1;
+    const statusReal = statusFila(item) || "sem_status";
+    const bucket = classificarStatusFila(item);
+    contagem[bucket] = (contagem[bucket] || 0) + 1;
+    incrementar(porStatus, statusReal);
+
     if (!itemVivoFila(item)) continue;
-    const ts = timestampFila(item);
-    if (ts === null) continue;
-    if (maisAntigo === null || ts < maisAntigo) maisAntigo = ts;
+
+    incrementar(porMarketplace, marketplaceItem(item));
+    incrementar(porDestino, destinoItem(item));
+    incrementar(porTipoOperacional, tipoOperacionalFila(item));
+
+    const timestamp = timestampFila(item);
+    if (timestamp.ms === null) {
+      itensSemTimestamp += 1;
+    } else {
+      camposTimestampEncontrados[timestamp.campo] = (camposTimestampEncontrados[timestamp.campo] || 0) + 1;
+      const idadeMs = Math.max(0, agora - timestamp.ms);
+      idades.push(idadeMs);
+      faixas[faixaIdade(idadeMs)] += 1;
+    }
+
+    const classificacao = classificarItemEsteiraShadow(item, { agoraMs: agora, janelaAbertaAgora });
+    if (classificacao === "aindaVivos") aindaVivos += 1;
+    if (classificacao === "candidatosExpiracao") candidatosExpiracao += 1;
+    if (classificacao === "vencidosOperacionalmente") vencidosOperacionalmente += 1;
+    if (classificacao === "aguardandoAuditoria") aguardandoAuditoria += 1;
   }
 
-  const pressaoEsteiraViva = contagem.pendentesVivos + contagem.emTentativaEnvio + contagem.errosTemporariosRecuperaveis;
-  const totalEnviadosHistorico = contagem.enviados + contagem.historico;
+  const pressaoEsteiraViva = contagem.pendente_vivo + contagem.em_tentativa + contagem.erro_temporario_recuperavel;
+  const totalEnviadosHistorico = contagem.enviado_historico;
 
   return {
     itens: fila,
     quantidadeFilaAtual: pressaoEsteiraViva,
     pressaoEsteiraViva,
-    pendentesVivos: contagem.pendentesVivos,
-    emTentativaEnvio: contagem.emTentativaEnvio,
-    errosTemporariosRecuperaveis: contagem.errosTemporariosRecuperaveis,
-    enviados: contagem.enviados,
-    errosFinais: contagem.errosFinais,
-    cancelados: contagem.cancelados,
-    expirados: contagem.expirados,
-    historico: contagem.historico,
+    pressaoVivaConfirmada: pressaoEsteiraViva,
+    pendente_vivo: contagem.pendente_vivo,
+    em_tentativa: contagem.em_tentativa,
+    erro_temporario_recuperavel: contagem.erro_temporario_recuperavel,
+    enviado_historico: contagem.enviado_historico,
+    erro_final: contagem.erro_final,
+    cancelado: contagem.cancelado,
+    expirado: contagem.expirado,
+    status_desconhecido: contagem.status_desconhecido,
+    pendentesVivos: contagem.pendente_vivo,
+    emTentativaEnvio: contagem.em_tentativa,
+    errosTemporariosRecuperaveis: contagem.erro_temporario_recuperavel,
+    enviados: contagem.enviado_historico,
+    errosFinais: contagem.erro_final,
+    cancelados: contagem.cancelado,
+    expirados: contagem.expirado,
+    historico: 0,
     totalEnviadosHistorico,
-    idadeItemMaisAntigoFila: maisAntigo === null ? null : Math.max(0, agora - maisAntigo),
-    idadeMaisAntigaViva: maisAntigo === null ? null : Math.max(0, agora - maisAntigo)
+    idadeMinimaVivaMs: idades.length ? Math.min(...idades) : null,
+    idadeMediaVivaMs: media(idades),
+    idadeMedianaVivaMs: mediana(idades),
+    idadeP95VivaMs: percentil(idades, 0.95),
+    idadeMaximaVivaMs: idades.length ? Math.max(...idades) : null,
+    idadeItemMaisAntigoFila: idades.length ? Math.max(...idades) : null,
+    idadeMaisAntigaViva: idades.length ? Math.max(...idades) : null,
+    itensSemTimestamp,
+    ...faixas,
+    porStatus,
+    porMarketplace,
+    porDestino,
+    porTipoOperacional,
+    camposTimestampEncontrados,
+    aindaVivos,
+    candidatosExpiracao,
+    vencidosOperacionalmente,
+    aguardandoAuditoria
   };
 }
 
@@ -300,6 +498,13 @@ function integracaoAptaDestino(destino = {}) {
   return destinoPossuiIntegracaoBasica(destino);
 }
 
+function slotsCobertura(coberturaMinutos = 0, intervaloMinutos = 1) {
+  const cobertura = Number(coberturaMinutos);
+  const intervalo = Number(intervaloMinutos);
+  if (!Number.isFinite(cobertura) || !Number.isFinite(intervalo) || cobertura <= 0 || intervalo <= 0) return 0;
+  return Math.max(0, Math.floor(cobertura / intervalo));
+}
+
 function capacidadeDestinoShadow(destino = {}, indice = 0, filaItens = []) {
   const id = destinoId(destino, indice);
   const ativo = destino?.ativo !== false;
@@ -314,9 +519,9 @@ function capacidadeDestinoShadow(destino = {}, indice = 0, filaItens = []) {
   const intervaloEfetivo = turboAplicavel ? intervaloTurbo : intervaloNormal;
   const filaVivaDestino = lista(filaItens).filter(item => itemVivoFila(item) && itemDestinadoAoDestino(item, destino, indice)).length;
 
-  const capacidade5 = destinoApto ? 5 / intervaloEfetivo : 0;
-  const capacidade10 = destinoApto ? 10 / intervaloEfetivo : 0;
-  const capacidade15 = destinoApto ? 15 / intervaloEfetivo : 0;
+  const slots5Min = destinoApto ? slotsCobertura(5, intervaloEfetivo) : 0;
+  const slots10Min = destinoApto ? slotsCobertura(10, intervaloEfetivo) : 0;
+  const slots15Min = destinoApto ? slotsCobertura(15, intervaloEfetivo) : 0;
 
   return {
     destinoId: id,
@@ -332,9 +537,12 @@ function capacidadeDestinoShadow(destino = {}, indice = 0, filaItens = []) {
     turboAplicavel,
     intervaloEfetivo: arredondar(intervaloEfetivo, 2),
     filaVivaDestino,
-    capacidade5Min: arredondar(capacidade5, 2),
-    capacidade10Min: arredondar(capacidade10, 2),
-    capacidade15Min: arredondar(capacidade15, 2),
+    slots5Min,
+    slots10Min,
+    slots15Min,
+    capacidade5Min: slots5Min,
+    capacidade10Min: slots10Min,
+    capacidade15Min: slots15Min,
     aptoAgora: destinoApto
   };
 }
@@ -361,9 +569,9 @@ function avaliarDestinosWorkspace(destinos = [], janelaMinutos = 15, filaItens =
   const integracoesAptas = capacidadePorDestino.filter(item => item.integracaoApta).length;
   const destinosAptos = capacidadePorDestino.filter(item => item.aptoAgora).length;
   const destinosFechados = capacidadePorDestino.length - destinosAptos;
-  const filaAlvo5Min = arredondar(capacidadePorDestino.reduce((total, item) => total + item.capacidade5Min, 0), 2);
-  const filaAlvo10Min = arredondar(capacidadePorDestino.reduce((total, item) => total + item.capacidade10Min, 0), 2);
-  const filaAlvo15Min = arredondar(capacidadePorDestino.reduce((total, item) => total + item.capacidade15Min, 0), 2);
+  const slots5Min = capacidadePorDestino.reduce((total, item) => total + item.slots5Min, 0);
+  const slots10Min = capacidadePorDestino.reduce((total, item) => total + item.slots10Min, 0);
+  const slots15Min = capacidadePorDestino.reduce((total, item) => total + item.slots15Min, 0);
 
   return {
     destinosAtivos,
@@ -373,10 +581,14 @@ function avaliarDestinosWorkspace(destinos = [], janelaMinutos = 15, filaItens =
     janelaAbertaAgora: destinosAptos > 0,
     automacaoAtiva: destinosAtivos > 0 && integracoesAptas > 0,
     capacidadePorDestino,
-    filaAlvo5Min,
-    filaAlvo10Min,
-    filaAlvo15Min,
-    capacidadeTeorica: filaAlvo15Min,
+    slots5Min,
+    slots10Min,
+    slots15Min,
+    filaAlvo5Min: slots5Min,
+    filaAlvo10Min: slots10Min,
+    filaAlvo15Min: slots15Min,
+    filaAlvo: slots10Min,
+    capacidadeTeorica: slots15Min,
     intervaloNormal: capacidadePorDestino.find(item => item.aptoAgora)?.intervaloNormal || null,
     intervaloTurbo: capacidadePorDestino.find(item => item.turboAplicavel)?.intervaloTurbo || INTERVALO_TURBO_PADRAO_MINUTOS,
     turboAplicavel: capacidadePorDestino.some(item => item.turboAplicavel)
@@ -403,7 +615,7 @@ function montarGateWorkspace({ clienteId = "", usuario = {}, destinos = [], fila
   const entrandoMaisQueSaindo = saldoFluxo > 0;
   const pressaoEsteiraViva = numero(fila.pressaoEsteiraViva);
   const filaAlvoWorkspace = destinosResumo.filaAlvo15Min;
-  const capacidadeAbsorcaoAgora = Math.max(0, arredondar(filaAlvoWorkspace - pressaoEsteiraViva, 2));
+  const capacidadeAbsorcaoAgora = Math.max(0, filaAlvoWorkspace - pressaoEsteiraViva);
   const capacidadeUtilizada = filaAlvoWorkspace > 0
     ? arredondar(pressaoEsteiraViva / filaAlvoWorkspace, 2)
     : null;
@@ -412,7 +624,7 @@ function montarGateWorkspace({ clienteId = "", usuario = {}, destinos = [], fila
     ? arredondar(pressaoEsteiraViva / velocidadeExecutor, 2)
     : null;
   const quantidadeQueAceitariaAgora = destinosResumo.janelaAbertaAgora
-    ? Math.max(0, Math.floor(capacidadeAbsorcaoAgora))
+    ? Math.max(0, capacidadeAbsorcaoAgora)
     : 0;
   const quantidadeQueRecusariaAgora = quantidadeQueAceitariaAgora > 0 ? 0 : 1;
   const classificacao = classificarEstadoEsteira({
@@ -430,6 +642,16 @@ function montarGateWorkspace({ clienteId = "", usuario = {}, destinos = [], fila
     motivo: classificacao.motivo,
     totalEnviadosHistorico: numero(fila.totalEnviadosHistorico),
     pressaoEsteiraViva,
+    pressaoVivaConfirmada: numero(fila.pressaoVivaConfirmada, pressaoEsteiraViva),
+    statusDesconhecido: numero(fila.status_desconhecido),
+    itensSemTimestamp: numero(fila.itensSemTimestamp),
+    pendente_vivo: numero(fila.pendente_vivo),
+    em_tentativa: numero(fila.em_tentativa),
+    erro_temporario_recuperavel: numero(fila.erro_temporario_recuperavel),
+    enviado_historico: numero(fila.enviado_historico),
+    erro_final: numero(fila.erro_final),
+    cancelado: numero(fila.cancelado),
+    expirado: numero(fila.expirado),
     pendentesVivos: numero(fila.pendentesVivos),
     emTentativaEnvio: numero(fila.emTentativaEnvio),
     errosTemporariosRecuperaveis: numero(fila.errosTemporariosRecuperaveis),
@@ -438,9 +660,32 @@ function montarGateWorkspace({ clienteId = "", usuario = {}, destinos = [], fila
     cancelados: numero(fila.cancelados),
     expirados: numero(fila.expirados),
     historico: numero(fila.historico),
-    idadeMaisAntigaViva: fila.idadeMaisAntigaViva,
-    idadeItemMaisAntigoFila: fila.idadeMaisAntigaViva,
-    idadeMaisAntiga: fila.idadeMaisAntigaViva,
+    idadeMinimaVivaMs: fila.idadeMinimaVivaMs ?? null,
+    idadeMediaVivaMs: fila.idadeMediaVivaMs ?? null,
+    idadeMedianaVivaMs: fila.idadeMedianaVivaMs ?? null,
+    idadeP95VivaMs: fila.idadeP95VivaMs ?? null,
+    idadeMaximaVivaMs: fila.idadeMaximaVivaMs ?? null,
+    idadeMaisAntigaViva: fila.idadeMaximaVivaMs ?? null,
+    idadeItemMaisAntigoFila: fila.idadeMaximaVivaMs ?? null,
+    idadeMaisAntiga: fila.idadeMaximaVivaMs ?? null,
+    faixasIdade: {
+      itensAte5Min: numero(fila.itensAte5Min),
+      itens5a10Min: numero(fila.itens5a10Min),
+      itens10a15Min: numero(fila.itens10a15Min),
+      itens15a30Min: numero(fila.itens15a30Min),
+      itens30a60Min: numero(fila.itens30a60Min),
+      itens1a2h: numero(fila.itens1a2h),
+      itensAcima2h: numero(fila.itensAcima2h)
+    },
+    porStatus: objeto(fila.porStatus),
+    porMarketplace: objeto(fila.porMarketplace),
+    porDestino: objeto(fila.porDestino),
+    porTipoOperacional: objeto(fila.porTipoOperacional),
+    camposTimestampEncontrados: objeto(fila.camposTimestampEncontrados),
+    aindaVivos: numero(fila.aindaVivos),
+    candidatosExpiracao: numero(fila.candidatosExpiracao),
+    vencidosOperacionalmente: numero(fila.vencidosOperacionalmente),
+    aguardandoAuditoria: numero(fila.aguardandoAuditoria),
     janelaAbertaAgora: destinosResumo.janelaAbertaAgora,
     automacaoAtiva: destinosResumo.automacaoAtiva,
     integracoesAptas: destinosResumo.integracoesAptas,
@@ -461,10 +706,15 @@ function montarGateWorkspace({ clienteId = "", usuario = {}, destinos = [], fila
     saida15Min,
     saldoFluxo,
     entrandoMaisQueSaindo,
+    slots5Min: destinosResumo.slots5Min,
+    slots10Min: destinosResumo.slots10Min,
+    slots15Min: destinosResumo.slots15Min,
     filaAlvo5Min: destinosResumo.filaAlvo5Min,
     filaAlvo10Min: destinosResumo.filaAlvo10Min,
     filaAlvo15Min: destinosResumo.filaAlvo15Min,
+    filaAlvo: destinosResumo.filaAlvo,
     capacidadeAbsorcaoAgora,
+    capacidadeAbsorcaoShadow: capacidadeAbsorcaoAgora,
     capacidadeTeorica: destinosResumo.capacidadeTeorica,
     capacidadeUtilizada,
     tempoEstimadoEsvaziarEsteira,
@@ -478,13 +728,33 @@ function resumirGate(workspaces = []) {
   let aceitariamAgora = 0;
   let recusariamAgora = 0;
   let pressaoEsteiraViva = 0;
+  let statusDesconhecido = 0;
+  let itensSemTimestamp = 0;
+  let candidatosExpiracao = 0;
+  let vencidosOperacionalmente = 0;
+  let aguardandoAuditoria = 0;
   for (const item of lista(workspaces)) {
     porEstado[item.estado] = (porEstado[item.estado] || 0) + 1;
     aceitariamAgora += numero(item.quantidadeQueAceitariaAgora);
     recusariamAgora += numero(item.quantidadeQueRecusariaAgora);
     pressaoEsteiraViva += numero(item.pressaoEsteiraViva);
+    statusDesconhecido += numero(item.statusDesconhecido);
+    itensSemTimestamp += numero(item.itensSemTimestamp);
+    candidatosExpiracao += numero(item.candidatosExpiracao);
+    vencidosOperacionalmente += numero(item.vencidosOperacionalmente);
+    aguardandoAuditoria += numero(item.aguardandoAuditoria);
   }
-  return { porEstado, aceitariamAgora, recusariamAgora, pressaoEsteiraViva };
+  return {
+    porEstado,
+    aceitariamAgora,
+    recusariamAgora,
+    pressaoEsteiraViva,
+    statusDesconhecido,
+    itensSemTimestamp,
+    candidatosExpiracao,
+    vencidosOperacionalmente,
+    aguardandoAuditoria
+  };
 }
 
 async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
@@ -517,11 +787,16 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
     for (const clienteId of lista(clientesAtivos)) {
       const id = String(clienteId || "").trim();
       if (!id) continue;
+      const destinos = destinosDoCliente(destinosPorCliente, id);
+      const destinosPreview = avaliarDestinosWorkspace(destinos, janelaMinutos, []);
       workspaces.push(montarGateWorkspace({
         clienteId: id,
         usuario: usuarioPorId(usuarios, id) || {},
-        destinos: destinosDoCliente(destinosPorCliente, id),
-        fila: resumoFilaWorkspace(id, opcoes),
+        destinos,
+        fila: resumoFilaWorkspace(id, {
+          ...opcoes,
+          janelaAbertaAgora: destinosPreview.janelaAbertaAgora
+        }),
         eventos: eventosPorWorkspace.get(id) || {},
         janelaMinutos
       }));
@@ -552,9 +827,16 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
 }
 
 module.exports = {
+  BUCKET_STATUS,
+  CAMPOS_TIMESTAMP_FILA,
+  TTL_ESTEIRA_MS,
   classificarStatusFila,
   itemVivoFila,
+  timestampFila,
+  tipoOperacionalFila,
+  classificarItemEsteiraShadow,
   resumoFilaWorkspace,
+  slotsCobertura,
   capacidadeDestinoShadow,
   avaliarDestinosWorkspace,
   classificarEstadoEsteira,

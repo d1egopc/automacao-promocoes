@@ -140,10 +140,20 @@ function logarGateAbsorcaoShadow(rodadaId, gateAbsorcao = {}) {
       workspaces: gateAbsorcao.workspaces,
       duracaoMs: gateAbsorcao.duracaoMs
     });
+    logOfc("[OFC-GATE-ESTEIRA-VIVA-SHADOW]", {
+      rodadaId,
+      modo: gateAbsorcao.modo,
+      aplicouMudancas: gateAbsorcao.aplicouMudancas,
+      janelaMinutos: gateAbsorcao.janelaMinutos,
+      totalWorkspaces: gateAbsorcao.totalWorkspaces,
+      resumo: gateAbsorcao.resumo,
+      workspaces: gateAbsorcao.workspaces,
+      duracaoMs: gateAbsorcao.duracaoMs
+    });
     return;
   }
 
-  logOfc("[OFC-GATE-ABSORCAO-ERRO]", {
+  const erroPayload = {
     rodadaId,
     modo: gateAbsorcao.modo || "shadow",
     aplicouMudancas: false,
@@ -151,7 +161,9 @@ function logarGateAbsorcaoShadow(rodadaId, gateAbsorcao = {}) {
     motivo: gateAbsorcao.motivo || "erro_gate_absorcao_shadow",
     erro: String(gateAbsorcao.erro || "erro_desconhecido").slice(0, 180),
     duracaoMs: gateAbsorcao.duracaoMs
-  });
+  };
+  logOfc("[OFC-GATE-ABSORCAO-ERRO]", erroPayload);
+  logOfc("[OFC-GATE-ESTEIRA-VIVA-ERRO]", erroPayload);
 }
 
 async function executarObservabilidadeOfc(opcoes = {}) {
