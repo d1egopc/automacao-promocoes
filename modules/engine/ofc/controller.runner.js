@@ -130,7 +130,7 @@ function logarFluxoComercialShadow(rodadaId, fluxoComercial = {}) {
 
 function logarGateAbsorcaoShadow(rodadaId, gateAbsorcao = {}) {
   if (gateAbsorcao.ok) {
-    logOfc("[OFC-GATE-ABSORCAO-SHADOW]", {
+    logOfc("[OFC-GATE-ABSORCAO-DINAMICO-SHADOW]", {
       rodadaId,
       modo: gateAbsorcao.modo,
       aplicouMudancas: gateAbsorcao.aplicouMudancas,
