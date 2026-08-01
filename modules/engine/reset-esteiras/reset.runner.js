@@ -17,6 +17,10 @@ const {
   resumoLeveItem
 } = require("./criterios.service");
 
+const MB = 1024 * 1024;
+const MARGEM_APP_PADRAO_BYTES = 30 * MB;
+const MARGEM_MULTIPLICADOR_SNAPSHOT = 1.5;
+
 function dataDir(opcoes = {}) {
   return opcoes.dataDir || process.env.DATA_DIR || "/data";
 }
@@ -155,6 +159,111 @@ function estatisticasRegistros(registros = []) {
   };
 }
 
+function tamanhoBytes(valor = {}) {
+  return Buffer.byteLength(JSON.stringify(valor || {}), "utf8");
+}
+
+function espacoLivreDataDir(opcoes = {}) {
+  if (Number.isFinite(Number(opcoes.espacoLivreBytes))) return Number(opcoes.espacoLivreBytes);
+  try {
+    const stats = fs.statfsSync(dataDir(opcoes));
+    return Number(stats.bavail || 0) * Number(stats.bsize || 0);
+  } catch (_) {
+    return null;
+  }
+}
+
+function estatisticasPreflightWorkspace(workspace = {}) {
+  const grupos = workspace.grupos || {};
+  const todos = Object.values(grupos).flat();
+  const porMotivo = {};
+  const porBucket = {};
+  const porStatus = {};
+
+  for (const registro of todos) {
+    incrementar(porMotivo, registro.motivo || "sem_motivo");
+    incrementar(porBucket, registro.bucket || "sem_bucket");
+    incrementar(porStatus, registro.statusAnterior || "sem_status");
+  }
+
+  return {
+    enviadosHistorico: (grupos[GRUPOS_ESTEIRA.PRESERVAR_HISTORICO] || []).length,
+    preservarAtivo: (grupos[GRUPOS_ESTEIRA.PRESERVAR_ATIVO] || []).length,
+    elegiveisExpiracao: (grupos[GRUPOS_ESTEIRA.EXPIRAR] || []).length,
+    aguardandoAuditoria: (grupos[GRUPOS_ESTEIRA.AUDITAR] || []).length,
+    processandoProtegido: (todos || []).filter(item => item.bucket === "em_tentativa").length,
+    semTimestamp: (todos || []).filter(item => item.motivo === "sem_timestamp").length,
+    canceladosRetidosExpirados: (todos || []).filter(item => ["cancelado", "expirado"].includes(item.bucket)).length,
+    porMotivo,
+    porBucket,
+    porStatus
+  };
+}
+
+function calcularEstimativaPreflight({ workspace, manifest, loteTamanho, opcoes = {} } = {}) {
+  const caminhos = caminhosOperacao("preflight-estimativa", opcoes);
+  const snapshotSeguro = workspaceSnapshotSeguro(workspace);
+  const elegiveis = workspace.grupos[GRUPOS_ESTEIRA.EXPIRAR] || [];
+  let lotesBytes = 0;
+  let maiorArquivoBytes = 0;
+  let quantidadeLotes = 0;
+
+  for (let i = 0; i < elegiveis.length; i += loteTamanho) {
+    const lote = {
+      workspaceId: workspace.workspaceId,
+      lote: quantidadeLotes + 1,
+      grupo: GRUPOS_ESTEIRA.EXPIRAR,
+      total: elegiveis.slice(i, i + loteTamanho).length,
+      registros: elegiveis.slice(i, i + loteTamanho)
+    };
+    const bytes = tamanhoBytes(lote);
+    lotesBytes += bytes;
+    maiorArquivoBytes = Math.max(maiorArquivoBytes, bytes);
+    quantidadeLotes += 1;
+  }
+
+  const snapshotBytes = tamanhoBytes(snapshotSeguro);
+  const manifestBytes = tamanhoBytes(manifest);
+  const hashesBytes = tamanhoBytes({
+    [workspace.workspaceId]: {
+      expirar: hashConjunto(elegiveis),
+      auditar: hashConjunto(workspace.grupos[GRUPOS_ESTEIRA.AUDITAR] || []),
+      preservarAtivo: hashConjunto(workspace.grupos[GRUPOS_ESTEIRA.PRESERVAR_ATIVO] || [])
+    }
+  });
+  const rollbackBytes = tamanhoBytes({
+    operationId: "preflight",
+    aviso: "rollback usa arquivos em execute/*.json gerados somente pelo execute confirmado"
+  });
+  const persistenteEstimadoBytes = manifestBytes + hashesBytes + snapshotBytes + lotesBytes + rollbackBytes;
+  maiorArquivoBytes = Math.max(maiorArquivoBytes, snapshotBytes, manifestBytes, hashesBytes, rollbackBytes);
+  const temporariosEscritaAtomicaBytes = maiorArquivoBytes;
+  const margemAppBytes = Number.isFinite(Number(opcoes.margemAppBytes)) ? Number(opcoes.margemAppBytes) : MARGEM_APP_PADRAO_BYTES;
+  const espacoMinimoNecessarioBytes = Math.ceil((persistenteEstimadoBytes + temporariosEscritaAtomicaBytes) * MARGEM_MULTIPLICADOR_SNAPSHOT + margemAppBytes);
+  const tamanhoBrutoElegiveisBytes = elegiveis.reduce((total, registro) => total + tamanhoBytes(registro.item || {}), 0);
+
+  return {
+    quantidadeLotes,
+    manifestBytes,
+    hashesBytes,
+    snapshotBytes,
+    lotesBytes,
+    rollbackBytes,
+    payloadElegivelBytes: tamanhoBrutoElegiveisBytes,
+    persistenteEstimadoBytes,
+    temporariosEscritaAtomicaBytes,
+    margemAppBytes,
+    multiplicadorConservador: MARGEM_MULTIPLICADOR_SNAPSHOT,
+    espacoMinimoNecessarioBytes,
+    caminhosNaoCriados: {
+      base: caminhos.base,
+      snapshot: caminhos.snapshot,
+      lotes: caminhos.lotes,
+      rollback: caminhos.rollback
+    }
+  };
+}
+
 function prepararDirs(caminhos) {
   ensureDir(caminhos.base);
   ensureDir(caminhos.snapshot);
@@ -195,9 +304,9 @@ function criarRegistroSnapshot({ workspaceId, arquivoOrigem, indiceOriginal, ite
   };
 }
 
-function analisarWorkspace({ workspaceId, operationId, cutoffMs, agoraMs, loteTamanho, opcoes }) {
+function analisarWorkspace({ workspaceId, operationId, cutoffMs, agoraMs, loteTamanho, opcoes, itensPreCarregados = null }) {
   const arquivoOrigem = filaPath(workspaceId, opcoes);
-  const fila = readJson(arquivoOrigem, []);
+  const fila = Array.isArray(itensPreCarregados) ? itensPreCarregados : readJson(arquivoOrigem, []);
   const itens = Array.isArray(fila) ? fila : [];
   const contagemIdentidades = {};
   for (const item of itens) {
@@ -379,6 +488,130 @@ async function executarDryRunResetEsteiras(opcoes = {}) {
   return manifest;
 }
 
+async function executarPreflightResetEsteiras(opcoes = {}) {
+  const workspaceId = String(opcoes.workspaceId || "").trim();
+  if (!workspaceId) {
+    return {
+      ok: false,
+      modo: "preflight",
+      aplicouMudancasOperacionais: false,
+      preflightAprovado: false,
+      motivo: "workspace_nao_informado"
+    };
+  }
+
+  let workspaceIdSeguro;
+  try {
+    workspaceIdSeguro = workspaceSeguro(workspaceId);
+  } catch (_) {
+    return {
+      ok: false,
+      modo: "preflight",
+      aplicouMudancasOperacionais: false,
+      preflightAprovado: false,
+      motivo: "workspace_id_inseguro"
+    };
+  }
+
+  const arquivoOrigem = filaPath(workspaceIdSeguro, opcoes);
+  if (!fs.existsSync(arquivoOrigem)) {
+    return {
+      ok: false,
+      modo: "preflight",
+      aplicouMudancasOperacionais: false,
+      preflightAprovado: false,
+      motivo: "workspace_nao_encontrado",
+      workspaceId: workspaceIdSeguro
+    };
+  }
+
+  let filaBytes = 0;
+  try {
+    filaBytes = fs.statSync(arquivoOrigem).size;
+  } catch (_) {
+    filaBytes = null;
+  }
+
+  const loteTamanho = limitarLote(opcoes.loteTamanho || opcoes.batchSize || DEFAULT_LOTE_TAMANHO);
+  const operationStartedAt = opcoes.operationStartedAt ? new Date(opcoes.operationStartedAt) : new Date();
+  const cutoffCongelado = opcoes.cutoffCongelado ? new Date(opcoes.cutoffCongelado) : operationStartedAt;
+  const fila = readJson(arquivoOrigem, null);
+  if (!Array.isArray(fila)) {
+    return {
+      ok: false,
+      modo: "preflight",
+      aplicouMudancasOperacionais: false,
+      preflightAprovado: false,
+      motivo: "fila_invalida",
+      workspaceId: workspaceIdSeguro,
+      filaJsonBytes: filaBytes
+    };
+  }
+
+  const workspace = analisarWorkspace({
+    workspaceId: workspaceIdSeguro,
+    operationId: "preflight",
+    cutoffMs: cutoffCongelado.getTime(),
+    agoraMs: operationStartedAt.getTime(),
+    loteTamanho,
+    opcoes,
+    itensPreCarregados: fila
+  });
+  const manifest = montarManifest({
+    operationId: "preflight",
+    operationStartedAt: operationStartedAt.toISOString(),
+    cutoffCongelado: cutoffCongelado.toISOString(),
+    loteTamanho,
+    workspaces: [workspace]
+  });
+  const estimativa = calcularEstimativaPreflight({ workspace, manifest, loteTamanho, opcoes });
+  const espacoLivreBytes = espacoLivreDataDir(opcoes);
+  const espacoSeguro = espacoLivreBytes !== null && espacoLivreBytes >= estimativa.espacoMinimoNecessarioBytes;
+  const estatisticas = estatisticasPreflightWorkspace(workspace);
+
+  return {
+    ok: true,
+    modo: "preflight",
+    aplicouMudancasOperacionais: false,
+    preflightAprovado: espacoSeguro,
+    motivo: espacoLivreBytes === null ? "estimativa_indisponivel" : (espacoSeguro ? "espaco_suficiente" : "espaco_insuficiente"),
+    workspaceId: workspaceIdSeguro,
+    operationIdPersistido: false,
+    snapshotCriado: false,
+    lotesCriados: false,
+    rollbackCriado: false,
+    filaAlterada: false,
+    arquivoOrigem,
+    filaJsonBytes: filaBytes,
+    totalItens: workspace.totalFila,
+    loteTamanho,
+    cutoffCongelado: cutoffCongelado.toISOString(),
+    estatisticas,
+    grupos: {
+      preservarHistorico: workspace.grupos[GRUPOS_ESTEIRA.PRESERVAR_HISTORICO].length,
+      preservarAtivo: workspace.grupos[GRUPOS_ESTEIRA.PRESERVAR_ATIVO].length,
+      expirar: workspace.grupos[GRUPOS_ESTEIRA.EXPIRAR].length,
+      auditar: workspace.grupos[GRUPOS_ESTEIRA.AUDITAR].length
+    },
+    hashes: {
+      expirar: hashConjunto(workspace.grupos[GRUPOS_ESTEIRA.EXPIRAR]),
+      auditar: hashConjunto(workspace.grupos[GRUPOS_ESTEIRA.AUDITAR]),
+      preservarAtivo: hashConjunto(workspace.grupos[GRUPOS_ESTEIRA.PRESERVAR_ATIVO])
+    },
+    estimativa,
+    espaco: {
+      livreBytes: espacoLivreBytes,
+      minimoNecessarioBytes: estimativa.espacoMinimoNecessarioBytes,
+      margemLivreAposEstimativaBytes: espacoLivreBytes === null ? null : espacoLivreBytes - estimativa.espacoMinimoNecessarioBytes
+    },
+    amostra: {
+      expirar: amostra(workspace.grupos[GRUPOS_ESTEIRA.EXPIRAR]),
+      auditar: amostra(workspace.grupos[GRUPOS_ESTEIRA.AUDITAR]),
+      preservarAtivo: amostra(workspace.grupos[GRUPOS_ESTEIRA.PRESERVAR_ATIVO])
+    }
+  };
+}
+
 function carregarManifest(operationId, opcoes = {}) {
   const caminhos = caminhosOperacao(operationId, opcoes);
   const manifest = readJson(caminhos.manifest, null);
@@ -553,6 +786,7 @@ async function executarRollbackResetEsteiras(opcoes = {}) {
 
 async function executarResetEsteirasCli(opcoes = {}) {
   const mode = String(opcoes.mode || opcoes.modo || "").toLowerCase();
+  if (mode === "preflight") return executarPreflightResetEsteiras(opcoes);
   if (mode === "dry-run") return executarDryRunResetEsteiras(opcoes);
   if (mode === "execute") return executarResetEsteiras(opcoes);
   if (mode === "rollback") return executarRollbackResetEsteiras(opcoes);
@@ -565,6 +799,7 @@ module.exports = {
   listarWorkspaces,
   writeJsonAtomic,
   executarDryRunResetEsteiras,
+  executarPreflightResetEsteiras,
   executarResetEsteiras,
   executarRollbackResetEsteiras,
   executarResetEsteirasCli

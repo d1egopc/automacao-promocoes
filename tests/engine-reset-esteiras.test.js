@@ -9,6 +9,7 @@ const {
   identidadeItem,
   caminhosOperacao,
   executarDryRunResetEsteiras,
+  executarPreflightResetEsteiras,
   executarResetEsteiras,
   executarRollbackResetEsteiras,
   writeJsonAtomic
@@ -213,6 +214,64 @@ function ids(fila) {
     const resultado = await executarDryRunResetEsteiras({ dataDir: dataDir6, operationId: "op-col", operationStartedAt: "2026-08-01T00:00:00.000Z" });
     assert.strictEqual(resultado.totais.auditar, 2, "colisao de identidade composta deve ir para auditoria");
     assert.strictEqual(resultado.totais.expirar, 0, "identidade ambigua nao pode expirar automaticamente");
+  }
+
+  {
+    limpar();
+    const dataDir7 = path.join(tmpRoot, "caso-preflight");
+    escreverFila(dataDir7, "ws_alvo", [
+      item("pf-exp", { dataEntradaFila: "2026-07-31T20:00:00.000Z" }),
+      item("pf-processando", { status: "processando", dataEntradaFila: "2026-07-31T20:00:00.000Z" }),
+      item("pf-sem-data", { dataEntradaFila: "" }),
+      item("pf-enviado", { status: "enviado", dataEntradaFila: "2026-07-31T20:00:00.000Z" }),
+      item("pf-retida", { status: "retida", dataEntradaFila: "2026-07-31T20:00:00.000Z" }),
+      item("pf-expirada", { status: "expirado", dataEntradaFila: "2026-07-31T20:00:00.000Z" }),
+      item("pf-recente", { dataEntradaFila: "2026-07-31T23:55:00.000Z" })
+    ]);
+    escreverFila(dataDir7, "ws_outro", [
+      item("outro-nao-ler", { dataEntradaFila: "2026-07-31T20:00:00.000Z" })
+    ]);
+
+    const alvoFile = filaFile(dataDir7, "ws_alvo");
+    const outroFile = filaFile(dataDir7, "ws_outro");
+    const antesAlvo = fs.readFileSync(alvoFile, "utf8");
+    const antesOutro = fs.readFileSync(outroFile, "utf8");
+    const readFileSyncOriginal = fs.readFileSync;
+    const leiturasOutro = [];
+    fs.readFileSync = function readFileSyncMonitorado(file, ...args) {
+      if (path.resolve(String(file)) === path.resolve(outroFile)) leiturasOutro.push(file);
+      return readFileSyncOriginal.call(fs, file, ...args);
+    };
+
+    let preflight;
+    try {
+      preflight = await executarPreflightResetEsteiras({
+        dataDir: dataDir7,
+        workspaceId: "ws_alvo",
+        operationStartedAt: "2026-08-01T00:00:00.000Z",
+        loteTamanho: 100,
+        espacoLivreBytes: 1024,
+        margemAppBytes: 10 * 1024
+      });
+    } finally {
+      fs.readFileSync = readFileSyncOriginal;
+    }
+
+    assert.strictEqual(preflight.modo, "preflight", "modo preflight deve ser retornado");
+    assert.strictEqual(preflight.aplicouMudancasOperacionais, false, "preflight nao aplica mudancas");
+    assert.strictEqual(preflight.preflightAprovado, false, "espaco insuficiente deve reprovar preflight");
+    assert.strictEqual(preflight.motivo, "espaco_insuficiente", "motivo deve ser espaco_insuficiente");
+    assert.strictEqual(preflight.workspaceId, "ws_alvo", "preflight deve analisar apenas workspace alvo");
+    assert.strictEqual(preflight.grupos.expirar, 1, "pendente vencido deve ser elegivel");
+    assert.strictEqual(preflight.estatisticas.processandoProtegido, 1, "processando deve ser protegido");
+    assert.strictEqual(preflight.estatisticas.semTimestamp, 1, "sem timestamp deve ser protegido para auditoria");
+    assert.strictEqual(preflight.estatisticas.canceladosRetidosExpirados, 2, "retidos/expirados devem ficar fora da expiracao");
+    assert(preflight.estimativa.payloadElegivelBytes > 0, "preflight deve estimar payload elegivel");
+    assert(preflight.estimativa.espacoMinimoNecessarioBytes > preflight.estimativa.persistenteEstimadoBytes, "estimativa deve incluir margem conservadora");
+    assert.strictEqual(fs.readFileSync(alvoFile, "utf8"), antesAlvo, "preflight nao altera fila alvo");
+    assert.strictEqual(fs.readFileSync(outroFile, "utf8"), antesOutro, "preflight nao altera outro workspace");
+    assert.strictEqual(leiturasOutro.length, 0, "preflight filtrado nao deve ler fila de outro workspace");
+    assert(!fs.existsSync(path.join(dataDir7, "reset-esteiras")), "preflight nao deve criar snapshot, lotes ou rollback");
   }
 
   {
