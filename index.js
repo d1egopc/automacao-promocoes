@@ -4480,6 +4480,141 @@ function destinoSessaoOkDebug(clienteId = "admin", destino = {}) {
   return false;
 }
 
+const COOLDOWN_WORKSPACE_SESSAO_INDISPONIVEL_MS = 5 * 60 * 1000;
+const LOG_WORKSPACE_SESSAO_INDISPONIVEL_MS = 60 * 1000;
+const cooldownSessaoIndisponivelPorWorkspace = new Map();
+const ultimoLogSessaoIndisponivelPorWorkspace = new Map();
+
+function sessaoWhatsappAptaEnvio(idSessao = "") {
+  const id = String(idSessao || "").trim();
+  if (!id) return false;
+  const sock = sessoes[id];
+  const status = statusSessao[id];
+  return Boolean(sock && typeof sock.sendMessage === "function" && (!status || status === "open" || status === "aberto"));
+}
+
+function sessaoTelegramAptaEnvio(clienteId = "admin", destino = {}) {
+  return destinoSessaoOkDebug(clienteId, destino);
+}
+
+function resolverSessaoWhatsappDisponivelCliente(clienteId = "admin", sessaoPreferida = "") {
+  const cliente = String(clienteId || "admin").trim() || "admin";
+  const candidatos = [];
+  const preferida = normalizarSessaoId(cliente, sessaoPreferida || "sessao1");
+  if (preferida) candidatos.push(preferida);
+
+  for (const id of Object.keys(destinosPorSessao || {})) {
+    if (String(id).startsWith(cliente + "_") && destinosPorSessao[id]?.length) candidatos.push(id);
+  }
+
+  for (const id of Object.keys(sessoes || {})) {
+    if (String(id).startsWith(cliente + "_")) candidatos.push(id);
+  }
+
+  const unicos = [...new Set(candidatos.filter(Boolean))];
+  return unicos.find(id => sessaoWhatsappAptaEnvio(id)) || "";
+}
+
+function workspaceEmCooldownSessaoIndisponivel(clienteId = "admin") {
+  const chave = String(clienteId || "admin");
+  const registro = cooldownSessaoIndisponivelPorWorkspace.get(chave);
+  if (!registro) return null;
+  if (Date.now() >= registro.proximaVerificacaoMs) {
+    cooldownSessaoIndisponivelPorWorkspace.delete(chave);
+    return null;
+  }
+  return registro;
+}
+
+function registrarCooldownSessaoIndisponivel(clienteId = "admin", dados = {}) {
+  const chave = String(clienteId || "admin");
+  const agoraMs = Date.now();
+  const proximaVerificacaoMs = agoraMs + COOLDOWN_WORKSPACE_SESSAO_INDISPONIVEL_MS;
+  const registro = {
+    motivo: dados.motivo || "sessao_whatsapp_indisponivel",
+    sessaoId: dados.sessaoId || "",
+    quantidadeFila: Number(dados.quantidadeFila || 0),
+    criadoEmMs: agoraMs,
+    proximaVerificacaoMs
+  };
+  cooldownSessaoIndisponivelPorWorkspace.set(chave, registro);
+
+  const ultimoLog = Number(ultimoLogSessaoIndisponivelPorWorkspace.get(chave) || 0);
+  if (agoraMs - ultimoLog >= LOG_WORKSPACE_SESSAO_INDISPONIVEL_MS) {
+    ultimoLogSessaoIndisponivelPorWorkspace.set(chave, agoraMs);
+    console.log("[EXECUTOR-WORKSPACE-PAUSADO-SESSAO-INDISPONIVEL]", JSON.stringify({
+      workspaceId: chave,
+      sessaoId: registro.sessaoId,
+      quantidadeFila: registro.quantidadeFila,
+      cooldownMs: COOLDOWN_WORKSPACE_SESSAO_INDISPONIVEL_MS,
+      proximaVerificacaoEm: new Date(proximaVerificacaoMs).toISOString(),
+      salvouFila: false,
+      motivo: registro.motivo
+    }));
+  }
+
+  return registro;
+}
+
+function liberarCooldownSessaoIndisponivel(clienteId = "admin", motivo = "sessao_retomada") {
+  const chave = String(clienteId || "admin");
+  const existia = cooldownSessaoIndisponivelPorWorkspace.delete(chave);
+  if (existia) {
+    console.log("[EXECUTOR-WORKSPACE-RETOMADO]", JSON.stringify({
+      workspaceId: chave,
+      motivo,
+      timestamp: new Date().toISOString()
+    }));
+  }
+}
+
+function diagnosticarDisponibilidadeEnvioWorkspace(clienteId = "admin", opcoes = {}) {
+  const configCliente = opcoes.configCliente || configsPorCliente?.[clienteId] || config;
+  const oferta = opcoes.oferta || null;
+  const destinosCompativeis = Array.isArray(opcoes.destinosCompativeis) ? opcoes.destinosCompativeis : [];
+  const destinosBase = destinosCompativeis.length
+    ? destinosCompativeis.map(item => item.destino || item).filter(Boolean)
+    : obterDestinosInteligentesCliente(clienteId, configCliente).filter(destino => destino?.ativo !== false);
+
+  const destinosWhatsapp = destinosBase.filter(destino => String(destino?.tipo || "").toLowerCase() === "whatsapp");
+  const destinosTelegram = destinosBase.filter(destino => String(destino?.tipo || "").toLowerCase() === "telegram");
+  const destinosOutros = destinosBase.filter(destino => {
+    const tipo = String(destino?.tipo || "").toLowerCase();
+    return tipo && tipo !== "whatsapp" && tipo !== "telegram";
+  });
+
+  const sessaoPreferida = oferta?.sessaoId || oferta?.idSessao || "sessao1";
+  const sessaoWhatsappDisponivel = resolverSessaoWhatsappDisponivelCliente(clienteId, sessaoPreferida);
+  const telegramDisponivel = destinosTelegram.some(destino => sessaoTelegramAptaEnvio(clienteId, destino));
+  const possuiCanalApto = Boolean(sessaoWhatsappDisponivel || telegramDisponivel || destinosOutros.length);
+
+  if (possuiCanalApto) {
+    return {
+      ok: true,
+      motivo: "",
+      sessaoId: sessaoWhatsappDisponivel,
+      destinosTotal: destinosBase.length,
+      whatsappTotal: destinosWhatsapp.length,
+      telegramTotal: destinosTelegram.length
+    };
+  }
+
+  const motivo = destinosWhatsapp.length && !sessaoWhatsappDisponivel
+    ? "sessao_whatsapp_indisponivel"
+    : destinosTelegram.length && !telegramDisponivel
+      ? "telegram_indisponivel"
+      : "sem_integracao_funcional";
+
+  return {
+    ok: false,
+    motivo,
+    sessaoId: normalizarSessaoId(clienteId, sessaoPreferida || "sessao1"),
+    destinosTotal: destinosBase.length,
+    whatsappTotal: destinosWhatsapp.length,
+    telegramTotal: destinosTelegram.length
+  };
+}
+
 function logEnvioDestinoDebug(dados = {}) {
   const destino = dados.destino || {};
   const oferta = dados.oferta || {};
@@ -5452,8 +5587,50 @@ async function processarFila(clienteIdAlvo = null) {
   const finalizarPerf = iniciarPerfBackground(`processar_fila:${clienteFila}`);
   let okPerf = true;
   let oferta = null;
+  let filaAlterada = false;
+  const marcarFilaAlterada = () => {
+    filaAlterada = true;
+  };
+  const salvarFilaSeAlterada = (cliente = clienteFila) => {
+    if (!filaAlterada) return false;
+    const salvou = salvarFila(cliente);
+    filaAlterada = false;
+    return salvou;
+  };
 
   try {
+    const cooldownSessao = workspaceEmCooldownSessaoIndisponivel(clienteFila);
+    if (cooldownSessao) {
+      resumoFila.motivoPulo = cooldownSessao.motivo || "sessao_whatsapp_indisponivel_cooldown";
+      coberturaRadar.registrar("executor_bloqueado", {
+        clienteId: clienteFila,
+        decisao: "bloqueado",
+        motivo: resumoFila.motivoPulo
+      });
+      return;
+    }
+
+    const configClienteInicial = configsPorCliente?.[clienteFila] || config;
+    const disponibilidadeInicial = diagnosticarDisponibilidadeEnvioWorkspace(clienteFila, {
+      configCliente: configClienteInicial
+    });
+    if (!disponibilidadeInicial.ok) {
+      resumoFila.motivoPulo = disponibilidadeInicial.motivo;
+      registrarCooldownSessaoIndisponivel(clienteFila, {
+        motivo: disponibilidadeInicial.motivo,
+        sessaoId: disponibilidadeInicial.sessaoId,
+        quantidadeFila: 0
+      });
+      coberturaRadar.registrar("executor_bloqueado", {
+        clienteId: clienteFila,
+        decisao: "bloqueado",
+        motivo: disponibilidadeInicial.motivo
+      });
+      return;
+    }
+
+    liberarCooldownSessaoIndisponivel(clienteFila, "sessao_disponivel");
+
     sanearExpiradosFila(clienteFila);
     sanearDuplicatasPendentesFilaCliente(clienteFila, "processar_fila");
 
@@ -5511,7 +5688,8 @@ if (!usuarioAtivoOperacional(clienteId)) {
 
 if (oferta.sessaoId === "sessao1") {
   oferta.sessaoId = normalizarSessaoId(clienteId, "sessao1");
-  salvarFila(clienteId);
+  marcarFilaAlterada();
+  salvarFilaSeAlterada(clienteId);
 }
 
 const configCliente =
@@ -5737,7 +5915,8 @@ for (const itemRejeitado of analiseDestinosFila.rejeitados) {
 if (!destinosCompativeis.length) {
   resumoFila.motivoPulo = analiseDestinosFila.motivoRetencao || "sem_destino_compativel";
   marcarOfertaRetida(oferta, analiseDestinosFila.motivoRetencao);
-  salvarFila(clienteId);
+  marcarFilaAlterada();
+  salvarFilaSeAlterada(clienteId);
   registrarCoberturaExecutor("fila_item_retido", oferta, clienteId, {}, {
     decisao: "retido",
     motivo: "item_retido",
@@ -5772,6 +5951,29 @@ if (!destinosCompativeis.length) {
   return;
 }
 
+const disponibilidadeAntesReserva = diagnosticarDisponibilidadeEnvioWorkspace(clienteId, {
+  configCliente,
+  oferta,
+  destinosCompativeis
+});
+if (!disponibilidadeAntesReserva.ok) {
+  resumoFila.motivoPulo = disponibilidadeAntesReserva.motivo;
+  registrarCooldownSessaoIndisponivel(clienteId, {
+    motivo: disponibilidadeAntesReserva.motivo,
+    sessaoId: disponibilidadeAntesReserva.sessaoId,
+    quantidadeFila: diagnosticoOfertaSelecionada?.totalCliente || diagnosticoOfertaSelecionada?.pendentesTotal || 0
+  });
+  registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
+    decisao: "bloqueado",
+    motivo: motivoCoberturaDestino(disponibilidadeAntesReserva.motivo || "sessao_indisponivel"),
+    destinoEncontrado: destinosCompativeis.length > 0,
+    filaRecebeu: true,
+    statusFilaAntes: oferta.status || "pendente"
+  });
+  return;
+}
+liberarCooldownSessaoIndisponivel(clienteId, "sessao_disponivel");
+
 const destinosOrdenados = destinosCompativeis
   .map(item => {
     const intervalo = intervaloDestinoInfo(clienteId, item.destino, configCliente, oferta);
@@ -5801,7 +6003,7 @@ if (!repeticaoExecutor.ok) {
     motivo: repeticaoExecutor.motivo,
     erro: repeticaoExecutor.erro || ""
   }));
-  salvarFila(clienteId);
+  salvarFilaSeAlterada(clienteId);
   return;
 }
 
@@ -5811,6 +6013,7 @@ if (repeticaoExecutor.bloqueada) {
   oferta.motivo = "repetida_no_executor_2h";
   oferta.motivoRetencao = "repetida_no_executor_2h";
   oferta.retidaEm = new Date().toISOString();
+  marcarFilaAlterada();
   resumoFila.motivoPulo = "repetida_no_executor_2h";
   console.log("[ANTI-REPETICAO-EXECUTOR-2H]", JSON.stringify({
     clienteId,
@@ -5846,7 +6049,7 @@ if (repeticaoExecutor.bloqueada) {
     filaRecebeu: true,
     statusFilaDepois: oferta.status || "retida"
   });
-  salvarFila(clienteId);
+  salvarFilaSeAlterada(clienteId);
   return;
 }
 
@@ -5876,6 +6079,7 @@ if (duplicidadeProcessamento.bloquear) {
       duplicidadeProcessamento.ofertaAnterior?.engineOfertaId || "",
     statusDetalhe: "Retida: duplicata ativa na janela de 2 horas"
   });
+  marcarFilaAlterada();
   resumoFila.motivoPulo = duplicidadeProcessamento.motivo;
   console.log("[FILA-DUPLICATA-PENDENTE-RETIDA]", JSON.stringify({
     clienteId,
@@ -5900,7 +6104,7 @@ if (duplicidadeProcessamento.bloquear) {
     filaRecebeu: true,
     statusFilaDepois: oferta.status || "retida"
   });
-  salvarFila(clienteId);
+  salvarFilaSeAlterada(clienteId);
   return;
 }
 
@@ -5926,6 +6130,7 @@ if (!reservaProcessamento.ok) {
 }
 
 oferta = reservaProcessamento.oferta;
+marcarFilaAlterada();
 registrarCoberturaExecutor("fila_item_pendente", oferta, clienteId, {}, {
   decisao: "processando",
   motivo: "item_reservado",
@@ -5940,7 +6145,7 @@ console.log("[FILA-PROCESSANDO-RESERVADA]", JSON.stringify({
   statusNovo: reservaProcessamento.statusNovo,
   processandoEm: reservaProcessamento.processandoEm
 }));
-salvarFila(clienteId);
+salvarFilaSeAlterada(clienteId);
 
 for (const item of destinosOrdenados) {
   const destino = item.destino;
@@ -6251,6 +6456,7 @@ if (!enviouParaAlgumDestino && decisaoSemEnvio.statusFinal === "pendente") {
   oferta.statusDetalhe = `Aguardando envio: ${decisaoSemEnvio.motivoSemEnvio}`;
   oferta.erro = "";
   oferta.erroEm = "";
+  marcarFilaAlterada();
   const menorEsperaIntervalo = destinosOrdenados
     .filter(item => !item.intervalo.liberado)
     .map(item => item.intervalo.restanteMs)
@@ -6259,7 +6465,7 @@ if (!enviouParaAlgumDestino && decisaoSemEnvio.statusFinal === "pendente") {
     oferta,
     Math.max(30 * 1000, Math.min(menorEsperaIntervalo || 5 * 60 * 1000, 15 * 60 * 1000))
   );
-  salvarFila(clienteId);
+  salvarFilaSeAlterada(clienteId);
   registrarCoberturaExecutor("fila_item_pendente", oferta, clienteId, {}, {
     decisao: "pendente",
     motivo: motivoCoberturaDestino(decisaoSemEnvio.motivoSemEnvio),
@@ -6304,6 +6510,7 @@ if (!enviouParaAlgumDestino) {
   oferta.erro = "Nenhum destino confirmou envio";
   oferta.erroEm = new Date().toISOString();
   oferta.processandoEm = "";
+  marcarFilaAlterada();
   void registrarExecutorErroFinal({
     clienteId,
     oferta,
@@ -6330,7 +6537,7 @@ if (!enviouParaAlgumDestino) {
     dentroJanela: dentroJanelaExecutor,
     statusFinal: "erro"
   });
-  salvarFila(clienteId);
+  salvarFilaSeAlterada(clienteId);
   return;
 }
 
@@ -6363,6 +6570,7 @@ if (!finalizacaoEnvio.ok || !finalizacaoEnvio.oferta) {
 }
 
 oferta = finalizacaoEnvio.oferta;
+marcarFilaAlterada();
 void registrarExecutorEnviado({
   clienteId,
   oferta,
@@ -6388,7 +6596,7 @@ logExecutorDestinoDiagnostico({
   statusFinal: "enviado"
 });
 
-salvarFila(clienteId);
+salvarFilaSeAlterada(clienteId);
 
 console.log("[ENVIO] Enviado com controle de tempo");
 
@@ -6408,7 +6616,8 @@ console.log("[ENVIO] Enviado com controle de tempo");
 
     if (erroFila.ok) {
       oferta = erroFila.oferta;
-      salvarFila(clienteErro);
+      marcarFilaAlterada();
+      salvarFilaSeAlterada(clienteErro);
       registrarCoberturaExecutor("executor_erro", oferta, clienteErro, {}, {
         decisao: "erro",
         motivo: "erro",
@@ -23591,6 +23800,30 @@ function avaliarPuloRapidoClienteFila(usuario = {}) {
     return { motivo: "sem_creditos", pendentes: 0 };
   }
 
+  const cooldownSessao = workspaceEmCooldownSessaoIndisponivel(clienteId);
+  if (cooldownSessao) {
+    return {
+      motivo: cooldownSessao.motivo || "sessao_whatsapp_indisponivel_cooldown",
+      pendentes: 0
+    };
+  }
+
+  const destinosRapidos = obterDestinosInteligentesCliente(clienteId, configCliente);
+  const temDestinoAtivoRapido = destinosRapidos.some(destino => destino?.ativo !== false);
+  if (!temDestinoAtivoRapido) {
+    return { motivo: "sem_destino_ativo", pendentes: 0 };
+  }
+
+  const disponibilidadeEnvio = diagnosticarDisponibilidadeEnvioWorkspace(clienteId, { configCliente });
+  if (!disponibilidadeEnvio.ok) {
+    registrarCooldownSessaoIndisponivel(clienteId, {
+      motivo: disponibilidadeEnvio.motivo,
+      sessaoId: disponibilidadeEnvio.sessaoId,
+      quantidadeFila: 0
+    });
+    return { motivo: disponibilidadeEnvio.motivo, pendentes: 0 };
+  }
+
   const agora = Date.now();
   const pendentes = fila.filter(item => {
     if (String(item?.clienteId || "admin") !== clienteId) return false;
@@ -23601,12 +23834,6 @@ function avaliarPuloRapidoClienteFila(usuario = {}) {
 
   if (!pendentes) {
     return { motivo: "sem_pendentes", pendentes };
-  }
-
-  const destinos = obterDestinosInteligentesCliente(clienteId, configCliente);
-  const temDestinoAtivo = destinos.some(destino => destino?.ativo !== false);
-  if (!temDestinoAtivo) {
-    return { motivo: "sem_destino_ativo", pendentes };
   }
 
   return { motivo: "", pendentes };
