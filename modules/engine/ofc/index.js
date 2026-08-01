@@ -34,6 +34,7 @@ const {
 const {
   TIPOS_EVENTO_COMERCIAL,
   normalizarEventoComercial,
+  prepararSchemaEventosComerciaisSeguro,
   registrarEventoComercialSeguro
 } = require("./commercial-events.service");
 const {
@@ -62,6 +63,7 @@ module.exports = {
   criarFluxoComercialShadowOfc,
   TIPOS_EVENTO_COMERCIAL,
   normalizarEventoComercial,
+  prepararSchemaEventosComerciaisSeguro,
   registrarEventoComercialSeguro,
   consultarJobsEmCursoSuspeitos
 };

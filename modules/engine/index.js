@@ -7,6 +7,10 @@ const {
 } = require("./inbox.service");
 
 const {
+  prepararSchemaEventosComerciaisSeguro
+} = require("./ofc/commercial-events.service");
+
+const {
   criarJobsParaClientes,
   ignorarJobsAdminNaoOperacional,
   limparJobsAntigosEngine
@@ -14,8 +18,15 @@ const {
 
 async function initEngineDatabase() {
   const resultado = await initEngineDatabaseBase();
+  const schemaEventosComerciais = await prepararSchemaEventosComerciaisSeguro();
   if (resultado?.ok) await ignorarJobsAdminNaoOperacional();
-  return resultado;
+  return {
+    ...resultado,
+    observabilidadeComercial: {
+      ok: Boolean(schemaEventosComerciais?.ok),
+      failSafe: schemaEventosComerciais?.failSafe || false
+    }
+  };
 }
 
 const {

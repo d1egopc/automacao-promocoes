@@ -151,7 +151,6 @@ ALTER TABLE engine_processamentos ADD COLUMN IF NOT EXISTS detalhes JSONB DEFAUL
 
 CREATE TABLE IF NOT EXISTS engine_eventos_comerciais (
   id BIGSERIAL PRIMARY KEY,
-  uuid UUID DEFAULT gen_random_uuid() UNIQUE,
   tipo_evento TEXT NOT NULL,
   cliente_id TEXT,
   workspace_id TEXT,
@@ -168,7 +167,6 @@ CREATE TABLE IF NOT EXISTS engine_eventos_comerciais (
   criado_em TIMESTAMPTZ DEFAULT NOW()
 );
 
-ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS uuid UUID DEFAULT gen_random_uuid();
 ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS workspace_id TEXT;
 ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS job_id BIGINT;
 ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS fila_item_id TEXT;
@@ -264,8 +262,6 @@ CREATE INDEX IF NOT EXISTS idx_engine_processamentos_status
 CREATE INDEX IF NOT EXISTS idx_engine_processamentos_criado_em
   ON engine_processamentos (criado_em);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_engine_eventos_comerciais_uuid
-  ON engine_eventos_comerciais (uuid);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_engine_eventos_comerciais_chave
   ON engine_eventos_comerciais (chave_idempotencia);
 CREATE INDEX IF NOT EXISTS idx_engine_eventos_comerciais_tipo_ocorrido

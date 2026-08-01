@@ -16,6 +16,10 @@ const {
 const {
   calcularCapacidadeComercialTeorica
 } = require("../modules/engine/ofc/commercial-capacity.service");
+const {
+  SQL_SCHEMA_EVENTOS_COMERCIAIS,
+  prepararSchemaEventosComerciaisSeguro
+} = require("../modules/engine/ofc/commercial-events.repository");
 
 const metadata = metadataSanitizada({
   status: "enviado",
@@ -77,6 +81,35 @@ assert.strictEqual(
   });
   assert.strictEqual(falha.ok, false);
   assert.strictEqual(falha.motivo, "db_falhou");
+
+  const sqlExecutado = [];
+  const schemaOk = await prepararSchemaEventosComerciaisSeguro({
+    query: async sql => {
+      sqlExecutado.push(sql);
+      return { ok: true, resultado: { rows: [], rowCount: 0 } };
+    }
+  });
+  assert.strictEqual(schemaOk.ok, true);
+  assert.strictEqual(schemaOk.tabelaDisponivel, true);
+  assert.strictEqual(schemaOk.indiceIdempotenciaDisponivel, true);
+  assert(sqlExecutado.some(sql => /CREATE TABLE IF NOT EXISTS engine_eventos_comerciais/i.test(sql)));
+  assert(sqlExecutado.some(sql => /idx_engine_eventos_comerciais_chave/i.test(sql)));
+  assert.strictEqual(sqlExecutado.some(sql => /gen_random_uuid|pgcrypto|\buuid\b/i.test(sql)), false);
+
+  const schemaSegundoBoot = await prepararSchemaEventosComerciaisSeguro({
+    query: async sql => {
+      sqlExecutado.push(sql);
+      return { ok: true, resultado: { rows: [], rowCount: 0 } };
+    }
+  });
+  assert.strictEqual(schemaSegundoBoot.ok, true);
+
+  const schemaErro = await prepararSchemaEventosComerciaisSeguro({
+    query: async () => ({ ok: false, motivo: "ddl_falhou", erro: "permissao" })
+  });
+  assert.strictEqual(schemaErro.ok, false);
+  assert.strictEqual(schemaErro.failSafe, true);
+  assert.strictEqual(schemaErro.motivo, "ddl_falhou");
 
   const fluxo = calcularFluxoComercialShadow({
     dados: {
@@ -182,6 +215,7 @@ assert.strictEqual(
   const schema = fs.readFileSync(path.join(__dirname, "..", "modules", "engine", "schema.sql"), "utf8");
   assert(schema.includes("CREATE TABLE IF NOT EXISTS engine_eventos_comerciais"));
   assert(schema.includes("idx_engine_eventos_comerciais_chave"));
+  assert(!schema.includes("idx_engine_eventos_comerciais_uuid"));
 
   const repo = fs.readFileSync(path.join(__dirname, "..", "modules", "engine", "ofc", "commercial-flow.repository.js"), "utf8");
   assert(repo.includes("engine_eventos_brutos e"));

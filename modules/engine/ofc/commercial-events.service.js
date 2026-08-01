@@ -1,4 +1,7 @@
-const { inserirEventoComercial } = require("./commercial-events.repository");
+const {
+  inserirEventoComercial,
+  prepararSchemaEventosComerciaisSeguro
+} = require("./commercial-events.repository");
 
 const TIPOS_EVENTO_COMERCIAL = Object.freeze({
   OFERTA_UNIVERSAL_CRIADA: "oferta_universal_criada",
@@ -275,6 +278,7 @@ module.exports = {
   metadataSanitizada,
   montarChaveIdempotencia,
   normalizarEventoComercial,
+  prepararSchemaEventosComerciaisSeguro,
   registrarEventoComercialSeguro,
   registrarOfertaUniversalCriada,
   registrarFilaClienteAdicionada,
