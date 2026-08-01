@@ -110,6 +110,20 @@ async function decisao(entrada = {}, opcoes = {}) {
   assert.strictEqual(sessaoInaptaComPressaoAlta.motivo, "sessao_ou_integracao_inapta");
   assert.strictEqual(sessaoInaptaComPressaoAlta.quantidadeAceitaAgora, 0);
 
+  const sessaoRuntimeInaptaComPressaoAlta = await decisao({}, {
+    readClienteJson: () => [item("p1"), item("p2"), item("p3")],
+    diagnosticarDisponibilidadeEnvioWorkspace: () => ({
+      ok: false,
+      motivo: "sessao_whatsapp_indisponivel",
+      sessaoId: "user_9hqs434h_OP GERAL"
+    })
+  });
+  assert.strictEqual(sessaoRuntimeInaptaComPressaoAlta.permitir, false);
+  assert.strictEqual(sessaoRuntimeInaptaComPressaoAlta.estadoDaEsteira, "FECHADA");
+  assert.strictEqual(sessaoRuntimeInaptaComPressaoAlta.motivo, "sessao_ou_integracao_inapta");
+  assert.strictEqual(sessaoRuntimeInaptaComPressaoAlta.quantidadeAceitaAgora, 0);
+  assert.strictEqual(sessaoRuntimeInaptaComPressaoAlta.pressaoEsteiraViva, 3);
+
   const limitado = await decisao({ quantidadeSolicitada: 2 }, {
     readClienteJson: () => [item("p1")]
   });

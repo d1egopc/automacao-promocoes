@@ -141,6 +141,31 @@ function motivoFechadoLegado(destinosResumo = {}) {
   return "capacidade_zero";
 }
 
+function motivoIntegracaoRuntime(motivo = "") {
+  const m = normalizar(motivo);
+  if (/sessao|telegram|integracao|canal/.test(m)) return "sessao_ou_integracao_inapta";
+  return "sessao_ou_integracao_inapta";
+}
+
+function diagnosticarIndisponibilidadeRuntime(entrada = {}, opcoes = {}) {
+  if (typeof opcoes.diagnosticarDisponibilidadeEnvioWorkspace !== "function") return null;
+  const resultado = opcoes.diagnosticarDisponibilidadeEnvioWorkspace(entrada.workspaceId || "", {
+    destinosCompativeis: entrada.destinosCompativeis || [],
+    oferta: {
+      id: entrada.ofertaId,
+      marketplace: entrada.marketplace,
+      sessaoId: entrada.sessaoId || "",
+      idSessao: entrada.idSessao || ""
+    }
+  });
+  if (!resultado || resultado.ok !== false) return null;
+  return {
+    motivo: motivoIntegracaoRuntime(resultado.motivo),
+    motivoOriginal: resultado.motivo || "",
+    sessaoId: resultado.sessaoId || ""
+  };
+}
+
 function calcularFilaAlvo(destinosResumo = {}, turbo = false) {
   return turbo
     ? numero(destinosResumo.filaAlvo5Min)
@@ -265,12 +290,22 @@ async function decidirAbsorcaoWorkspace(entrada = {}, opcoes = {}) {
     const destinosResumo = avaliarDestinosWorkspace(destinos, 15, fila.itens || []);
     const filaAlvo = calcularFilaAlvo(destinosResumo, turbo);
     const pressaoEsteiraViva = numero(fila.pressaoEsteiraViva);
-    const decisao = classificarDecisao({
+    const indisponibilidadeRuntime = diagnosticarIndisponibilidadeRuntime(entrada, opcoes);
+    const decisaoBase = classificarDecisao({
       destinosResumo,
       pressaoEsteiraViva,
       filaAlvo,
       quantidadeSolicitada
     });
+    const decisao = indisponibilidadeRuntime
+      ? {
+          permitir: false,
+          estadoDaEsteira: "FECHADA",
+          motivo: indisponibilidadeRuntime.motivo,
+          capacidadeAtual: Math.max(0, filaAlvo - pressaoEsteiraViva),
+          quantidadeAceitaAgora: 0
+        }
+      : decisaoBase;
 
     const resposta = {
       modo: MODO_ATIVO_PILOTO,
@@ -292,6 +327,8 @@ async function decidirAbsorcaoWorkspace(entrada = {}, opcoes = {}) {
       destinosAptos: numero(destinosResumo.destinosAptos),
       integracoesAptas: numero(destinosResumo.integracoesAptas),
       janelaAbertaAgora: destinosResumo.janelaAbertaAgora === true,
+      motivoRuntimeOriginal: indisponibilidadeRuntime?.motivoOriginal || "",
+      sessaoRuntimeId: indisponibilidadeRuntime?.sessaoId || "",
       quantidadeSolicitada,
       duracaoMs: Date.now() - inicio
     };

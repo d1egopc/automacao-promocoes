@@ -8866,7 +8866,10 @@ app.post("/engine/distribuir-ofertas", async (req, res) => {
         readClienteJson,
         writeClienteJson,
         getClientePath,
-        adicionarOfertaNaFilaGlobal: adicionarOfertaNaFilaGlobalEngine
+        adicionarOfertaNaFilaGlobal: adicionarOfertaNaFilaGlobalEngine,
+        gateAtivo: {
+          diagnosticarDisponibilidadeEnvioWorkspace
+        }
       }
     });
 
@@ -23239,7 +23242,10 @@ initEngineDatabase()
         readClienteJson,
         writeClienteJson,
         getClientePath,
-        adicionarOfertaNaFilaGlobal: adicionarOfertaNaFilaGlobalEngine
+        adicionarOfertaNaFilaGlobal: adicionarOfertaNaFilaGlobalEngine,
+        gateAtivo: {
+          diagnosticarDisponibilidadeEnvioWorkspace
+        }
       })
     });
   })
