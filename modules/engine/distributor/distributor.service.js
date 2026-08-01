@@ -511,6 +511,40 @@ async function marcarOfertaStatus(ofertaId, status, motivo = "", contextoLog = {
   return resultado;
 }
 
+async function restaurarOfertaStatusSeDistribuindo(ofertaId, statusAnterior, motivo = "", contextoLog = {}) {
+  const statusSeguro = String(statusAnterior || "").trim();
+  if (!["importada", "oferta_criada"].includes(statusSeguro)) {
+    return { ok: true, ignorado: true, motivo: "status_anterior_nao_restauravel" };
+  }
+
+  const resultado = await queryDistribuidor({
+    etapa: "restaurar_status_pos_gate",
+    ofertaId,
+    clienteId: contextoLog.clienteId || "",
+    queryResumo: "UPDATE engine_ofertas SET status anterior WHERE status = distribuindo",
+    sql: `UPDATE engine_ofertas
+        SET status = $2, motivo_status = NULL, atualizada_em = NOW()
+      WHERE id = $1 AND status = 'distribuindo'
+      RETURNING id, status, motivo_status`,
+    params: [ofertaId, statusSeguro]
+  });
+
+  if (!resultado.ok) return resultado;
+  if (resultado.resultado.rowCount === 0) {
+    console.log("[OFC-GATE-ATIVO-RESTAURACAO-CONFLITO]", JSON.stringify({
+      ofertaId: ofertaId || null,
+      jobId: contextoLog.jobId || null,
+      workspaceId: contextoLog.clienteId || "",
+      statusAnterior: statusSeguro,
+      motivo: motivo || "",
+      preservouEstadoMaisNovo: true
+    }));
+    return { ok: true, ignorado: true, motivo: "status_alterado_por_concorrencia" };
+  }
+
+  return resultado;
+}
+
 async function registrarEtapaDistribuicao(jobId, etapa, status, motivo = "", detalhes = {}) {
   if (!jobId) {
     logQueryErroDistribuidor({
@@ -575,7 +609,7 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
     };
   }
 
-  return {
+  const retorno = {
     ok: true,
     destinosCompativeis: destinos.compativeis.length,
     destinosTotal: destinos.destinos.length,
@@ -584,6 +618,13 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
       tipoMidia: item.destino?.tipoMidia || ""
     }))
   };
+
+  Object.defineProperty(retorno, "__destinosCompativeisRaw", {
+    value: destinos.compativeis.map(item => item.destino).filter(Boolean),
+    enumerable: false
+  });
+
+  return retorno;
 }
 
 async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
@@ -782,6 +823,7 @@ module.exports = {
   buscarOfertasDistribuiveis,
   tentarMarcarDistribuindo,
   marcarOfertaStatus,
+  restaurarOfertaStatusSeDistribuindo,
   registrarEtapaDistribuicao,
   validarOfertaParaDistribuicao,
   adicionarOfertaNaFilaCliente,

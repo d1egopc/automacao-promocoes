@@ -3,6 +3,7 @@ const {
   buscarOfertasDistribuiveis,
   tentarMarcarDistribuindo,
   marcarOfertaStatus,
+  restaurarOfertaStatusSeDistribuindo,
   registrarEtapaDistribuicao,
   validarOfertaParaDistribuicao,
   adicionarOfertaNaFilaCliente
@@ -20,6 +21,9 @@ const {
   registrarDistribuicaoFinal,
   registrarFilaClienteAdicionada
 } = require("../ofc/commercial-events.service");
+const {
+  decidirAbsorcaoWorkspace
+} = require("../ofc/active-gate.service");
 
 function motivoAdicionar(resumo, motivo = "erro_distribuicao") {
   const chave = motivo || "erro_distribuicao";
@@ -28,6 +32,84 @@ function motivoAdicionar(resumo, motivo = "erro_distribuicao") {
 
 function metadataObjeto(valor = {}) {
   return valor && typeof valor === "object" ? valor : {};
+}
+
+function tipoOperacionalOferta(oferta = {}) {
+  const metadata = metadataObjeto(oferta.metadata);
+  const jobMetadata = metadataObjeto(oferta.job_metadata);
+  return String(
+    oferta.tipoOperacional ||
+    oferta.tipo_operacional ||
+    metadata.tipoOperacional ||
+    metadata.tipo_operacional ||
+    jobMetadata.tipoOperacional ||
+    jobMetadata.tipo_operacional ||
+    ""
+  ).trim();
+}
+
+function cupomTurboOferta(oferta = {}) {
+  const metadata = metadataObjeto(oferta.metadata);
+  const jobMetadata = metadataObjeto(oferta.job_metadata);
+  return oferta.cupomTurbo === true ||
+    oferta.cupom_turbo === true ||
+    metadata.cupomTurbo === true ||
+    metadata.cupom_turbo === true ||
+    jobMetadata.cupomTurbo === true ||
+    jobMetadata.cupom_turbo === true ||
+    tipoOperacionalOferta(oferta).toLowerCase() === "cupom_turbo";
+}
+
+function registrarGateResumo(resumo = null, decisao = {}) {
+  if (!resumo || !decisao?.ativo) return;
+  if (!resumo.gateAtivo) {
+    resumo.gateAtivo = {
+      avaliadas: 0,
+      permitidas: 0,
+      bloqueadas: 0,
+      fallback: 0,
+      porMotivo: {},
+      capacidadeUsada: 0,
+      filaAntes: null,
+      filaDepois: null,
+      idadeMaximaEsteiraMs: null
+    };
+  }
+  resumo.gateAtivo.avaliadas += 1;
+  if (decisao.permitir) resumo.gateAtivo.permitidas += 1;
+  else resumo.gateAtivo.bloqueadas += 1;
+  if (decisao.fallbackAplicado) resumo.gateAtivo.fallback += 1;
+  const motivo = decisao.motivo || "sem_motivo";
+  resumo.gateAtivo.porMotivo[motivo] = (resumo.gateAtivo.porMotivo[motivo] || 0) + 1;
+  resumo.gateAtivo.capacidadeUsada += Number(decisao.permitir ? 1 : 0);
+  if (resumo.gateAtivo.filaAntes === null) resumo.gateAtivo.filaAntes = decisao.pressaoEsteiraViva ?? null;
+  resumo.gateAtivo.filaDepois = decisao.permitir
+    ? Number(decisao.pressaoEsteiraViva || 0) + 1
+    : decisao.pressaoEsteiraViva ?? null;
+  if (decisao.idadeMaximaEsteiraMs !== undefined && decisao.idadeMaximaEsteiraMs !== null) {
+    resumo.gateAtivo.idadeMaximaEsteiraMs = Math.max(
+      Number(resumo.gateAtivo.idadeMaximaEsteiraMs || 0),
+      Number(decisao.idadeMaximaEsteiraMs || 0)
+    );
+  }
+}
+
+async function restaurarStatusComercialAposGate(oferta = {}, motivo = "") {
+  const statusAnterior = String(oferta.status || "").trim();
+  if (!["importada", "oferta_criada"].includes(statusAnterior)) {
+    return { ok: true, ignorado: true, motivo: "status_anterior_nao_restauravel" };
+  }
+  if (typeof restaurarOfertaStatusSeDistribuindo === "function") {
+    return restaurarOfertaStatusSeDistribuindo(oferta.id, statusAnterior, motivo, {
+      jobId: oferta.job_id,
+      clienteId: oferta.cliente_id
+    });
+  }
+  return marcarOfertaStatus(oferta.id, statusAnterior, "", {
+    jobId: oferta.job_id,
+    clienteId: oferta.cliente_id,
+    motivoGate: motivo
+  });
 }
 
 function contextoCoberturaDistributor(oferta = {}, extras = {}) {
@@ -129,6 +211,62 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
       motivo: validacao.motivo || "validacao_distribuicao_rejeitada"
     });
     return reterOferta(oferta, validacao.motivo, validacao.detalhes || {}, resumo);
+  }
+
+  const decidirGate = contexto?.deps?.decidirAbsorcaoWorkspace || decidirAbsorcaoWorkspace;
+  const gate = await decidirGate({
+    workspaceId: oferta.cliente_id || "",
+    ofertaId: oferta.id,
+    marketplace: oferta.marketplace || "",
+    tipoOperacional: tipoOperacionalOferta(oferta),
+    destinosCompativeis: validacao.__destinosCompativeisRaw || [],
+    cupomTurbo: cupomTurboOferta(oferta),
+    quantidadeSolicitada: 1
+  }, contexto?.deps?.gateAtivo || {});
+  registrarGateResumo(resumo, gate);
+
+  if (gate?.ativo) {
+    await registrarEtapaDistribuicao(oferta.job_id, "gate_absorcao", gate.permitir ? "ok" : "bloqueada", gate.motivo || "", {
+      ofertaId: oferta.id,
+      clienteId: oferta.cliente_id,
+      modo: gate.modo,
+      estadoDaEsteira: gate.estadoDaEsteira,
+      permitir: gate.permitir === true,
+      quantidadeAceitaAgora: gate.quantidadeAceitaAgora || 0,
+      pressaoEsteiraViva: gate.pressaoEsteiraViva,
+      filaAlvo: gate.filaAlvo,
+      capacidadeAtual: gate.capacidadeAtual,
+      fallbackAplicado: gate.fallbackAplicado === true
+    });
+
+    if (!gate.permitir) {
+      await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "bloqueada", "gate_bloqueado_piloto", {
+        ofertaId: oferta.id,
+        clienteId: oferta.cliente_id,
+        resultadoDistribuicao: "gate_bloqueado_piloto",
+        motivo: gate.motivo || "gate_absorcao_bloqueado",
+        estadoDaEsteira: gate.estadoDaEsteira,
+        filaRecebeu: false,
+        escopo: "workspace"
+      });
+      await restaurarStatusComercialAposGate(oferta, gate.motivo || "gate_absorcao_bloqueado");
+      if (resumo) motivoAdicionar(resumo, gate.motivo || "gate_absorcao_bloqueado");
+      coberturaRadar.registrar("engine_distributor_gate_bloqueado", {
+        ...contextoCoberturaDistributor(oferta, {
+          destinoEncontrado: true,
+          filaRecebeu: false
+        }),
+        decisao: "bloqueado",
+        motivo: gate.motivo || "gate_absorcao_bloqueado",
+        filaRecebeu: false
+      });
+      return {
+        ok: false,
+        gateBloqueado: true,
+        motivo: gate.motivo || "gate_absorcao_bloqueado",
+        estadoDaEsteira: gate.estadoDaEsteira
+      };
+    }
   }
 
   const fila = await adicionarOfertaNaFilaCliente(oferta, contexto);
@@ -268,6 +406,20 @@ async function distribuirOfertasEngine({ limite = 10, marketplace = "", clienteI
   }
 
   logEngineDistribuidorFim(resumo);
+  if (resumo.gateAtivo) {
+    console.log("[OFC-GATE-ATIVO-RESUMO]", JSON.stringify({
+      modo: "ativo_piloto",
+      avaliadas: resumo.gateAtivo.avaliadas,
+      permitidas: resumo.gateAtivo.permitidas,
+      bloqueadas: resumo.gateAtivo.bloqueadas,
+      fallback: resumo.gateAtivo.fallback,
+      porMotivo: resumo.gateAtivo.porMotivo,
+      capacidadeUsada: resumo.gateAtivo.capacidadeUsada,
+      filaAntes: resumo.gateAtivo.filaAntes,
+      filaDepois: resumo.gateAtivo.filaDepois,
+      idadeMaximaEsteiraMs: resumo.gateAtivo.idadeMaximaEsteiraMs
+    }));
+  }
   return resumo;
 }
 
