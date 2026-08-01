@@ -105,19 +105,30 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
     ),
     queryEngine(
       `SELECT COUNT(*)::int AS total,
-              COALESCE(AVG(EXTRACT(EPOCH FROM (COALESCE(o.criada_em, j.atualizado_em) - j.criado_em)) * 1000), 0)::bigint AS media_ms
+              COALESCE(AVG(EXTRACT(EPOCH FROM (COALESCE(o.criada_em, j.atualizado_em) - e.capturado_em)) * 1000), 0)::bigint AS media_ms
          FROM engine_jobs_cliente j
+         JOIN engine_eventos_brutos e ON e.id = j.evento_id
          LEFT JOIN engine_ofertas o ON o.id = j.oferta_id
         WHERE j.oferta_id IS NOT NULL
           AND j.criado_em >= NOW() - ($1::int * INTERVAL '1 minute')
-          AND COALESCE(o.criada_em, j.atualizado_em) >= j.criado_em
+          AND e.capturado_em IS NOT NULL
+          AND COALESCE(o.criada_em, j.atualizado_em) >= e.capturado_em
           AND (
-            j.metadata ? 'radarMirror'
+            LOWER(COALESCE(e.origem, '')) LIKE '%radar%'
+            OR LOWER(COALESCE(e.fonte, '')) LIKE '%radar%'
+            OR LOWER(COALESCE(e.origem_tipo, '')) IN ('whatsapp', 'telegram')
+            OR e.metadata ? 'radarMirror'
+            OR e.metadata ? 'espelhoComercial'
+            OR j.metadata ? 'radarMirror'
             OR j.metadata ? 'espelhoComercial'
             OR (j.metadata->'metadataEvento') ? 'radarMirror'
             OR (j.metadata->'metadataEvento') ? 'espelhoComercial'
             OR LOWER(COALESCE(j.metadata->>'origem', '')) LIKE '%radar%'
             OR LOWER(COALESCE(j.metadata->>'fonte', '')) LIKE '%radar%'
+            OR LOWER(COALESCE(o.origem, '')) LIKE '%radar%'
+            OR o.metadata ? 'radarMirror'
+            OR o.metadata ? 'espelhoComercial'
+            OR LOWER(COALESCE(o.metadata->>'fonteComercial', '')) LIKE '%radar%'
           )`,
       [Math.max(janela, 30)]
     ),

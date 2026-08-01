@@ -149,6 +149,35 @@ CREATE TABLE IF NOT EXISTS engine_processamentos (
 ALTER TABLE engine_processamentos ADD COLUMN IF NOT EXISTS uuid UUID DEFAULT gen_random_uuid();
 ALTER TABLE engine_processamentos ADD COLUMN IF NOT EXISTS detalhes JSONB DEFAULT '{}'::jsonb;
 
+CREATE TABLE IF NOT EXISTS engine_eventos_comerciais (
+  id BIGSERIAL PRIMARY KEY,
+  uuid UUID DEFAULT gen_random_uuid() UNIQUE,
+  tipo_evento TEXT NOT NULL,
+  cliente_id TEXT,
+  workspace_id TEXT,
+  oferta_id BIGINT,
+  job_id BIGINT,
+  fila_item_id TEXT,
+  destino_id TEXT,
+  canal TEXT,
+  marketplace TEXT,
+  ocorrido_em TIMESTAMPTZ DEFAULT NOW(),
+  origem_pipeline TEXT,
+  chave_idempotencia TEXT NOT NULL,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  criado_em TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS uuid UUID DEFAULT gen_random_uuid();
+ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS workspace_id TEXT;
+ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS job_id BIGINT;
+ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS fila_item_id TEXT;
+ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS destino_id TEXT;
+ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS canal TEXT;
+ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS origem_pipeline TEXT;
+ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS chave_idempotencia TEXT;
+ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_engine_eventos_brutos_uuid
   ON engine_eventos_brutos (uuid);
 CREATE INDEX IF NOT EXISTS idx_engine_eventos_brutos_capturado_em
@@ -234,6 +263,21 @@ CREATE INDEX IF NOT EXISTS idx_engine_processamentos_status
   ON engine_processamentos (status);
 CREATE INDEX IF NOT EXISTS idx_engine_processamentos_criado_em
   ON engine_processamentos (criado_em);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_engine_eventos_comerciais_uuid
+  ON engine_eventos_comerciais (uuid);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_engine_eventos_comerciais_chave
+  ON engine_eventos_comerciais (chave_idempotencia);
+CREATE INDEX IF NOT EXISTS idx_engine_eventos_comerciais_tipo_ocorrido
+  ON engine_eventos_comerciais (tipo_evento, ocorrido_em);
+CREATE INDEX IF NOT EXISTS idx_engine_eventos_comerciais_cliente_ocorrido
+  ON engine_eventos_comerciais (cliente_id, ocorrido_em);
+CREATE INDEX IF NOT EXISTS idx_engine_eventos_comerciais_marketplace
+  ON engine_eventos_comerciais (marketplace);
+CREATE INDEX IF NOT EXISTS idx_engine_eventos_comerciais_oferta
+  ON engine_eventos_comerciais (oferta_id);
+CREATE INDEX IF NOT EXISTS idx_engine_eventos_comerciais_job
+  ON engine_eventos_comerciais (job_id);
 
 DO $$
 BEGIN

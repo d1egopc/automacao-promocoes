@@ -222,6 +222,10 @@ const {
   decidirStatusExecutorSemEnvio
 } = require("./modules/executor/destino-diagnostico");
 const {
+  registrarExecutorEnviado,
+  registrarExecutorErroFinal
+} = require("./modules/engine/ofc/commercial-events.service");
+const {
   dominioRedirectPermitido,
   resolverRedirectUniversal
 } = require("./modules/radar/redirect/redirect-resolver");
@@ -6298,6 +6302,13 @@ if (!enviouParaAlgumDestino) {
   oferta.erro = "Nenhum destino confirmou envio";
   oferta.erroEm = new Date().toISOString();
   oferta.processandoEm = "";
+  void registrarExecutorErroFinal({
+    clienteId,
+    oferta,
+    motivo: decisaoSemEnvio.motivoSemEnvio || "nenhum_destino_confirmou_envio",
+    destinosTentados: destinosTentadosDebug,
+    destinosElegiveis: destinosCompativeis.length
+  });
   registrarCoberturaExecutor("executor_erro", oferta, clienteId, {}, {
     decisao: "erro",
     motivo: motivoCoberturaDestino(decisaoSemEnvio.motivoSemEnvio || "nenhum_destino_confirmou_envio"),
@@ -6350,6 +6361,11 @@ if (!finalizacaoEnvio.ok || !finalizacaoEnvio.oferta) {
 }
 
 oferta = finalizacaoEnvio.oferta;
+void registrarExecutorEnviado({
+  clienteId,
+  oferta,
+  destinosEnviados: destinosEnviadosCount
+});
 registrarCoberturaExecutor("executor_enviado", oferta, clienteId, {}, {
   decisao: "enviado",
   motivo: "envio_confirmado",

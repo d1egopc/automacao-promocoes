@@ -16,6 +16,10 @@ const {
   logEngineDistribuidorFim
 } = require("../logger");
 const coberturaRadar = require("../../radar/cobertura-v1");
+const {
+  registrarDistribuicaoFinal,
+  registrarFilaClienteAdicionada
+} = require("../ofc/commercial-events.service");
 
 function motivoAdicionar(resumo, motivo = "erro_distribuicao") {
   const chave = motivo || "erro_distribuicao";
@@ -157,10 +161,18 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     return erroOferta(oferta, fila.motivo || "erro_fila", {}, resumo);
   }
 
+  void registrarFilaClienteAdicionada({
+    oferta,
+    itemFila: fila.itemFila
+  });
   await marcarOfertaStatus(oferta.id, "fila", "adicionada_fila", { jobId: oferta.job_id, clienteId: oferta.cliente_id });
   await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "ok", "adicionada_fila", {
     ofertaId: oferta.id,
     itemFilaId: fila.itemFila?.id || null
+  });
+  void registrarDistribuicaoFinal({
+    oferta,
+    itemFila: fila.itemFila
   });
 
   const destinosImagemAuditoria = Array.isArray(validacao.destinosCompativeisDetalhes) ? validacao.destinosCompativeisDetalhes : [];

@@ -44,6 +44,9 @@ const {
 } = require("../oferta-universal.contract");
 const fidelidadeObs = require("../../fidelidade/observabilidade-v1");
 const coberturaRadar = require("../../radar/cobertura-v1");
+const {
+  registrarOfertaUniversalCriada
+} = require("../ofc/commercial-events.service");
 
 let engineOfertasMetadataDisponivel = null;
 
@@ -1469,6 +1472,13 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     } : null,
     status: statusPersistencia,
     atualizada: Boolean(job.oferta_id)
+  });
+  void registrarOfertaUniversalCriada({
+    job,
+    ofertaId,
+    oferta,
+    status: statusPersistencia,
+    motivo: motivoPersistencia || "oferta_criada"
   });
   return {
     ok: true,

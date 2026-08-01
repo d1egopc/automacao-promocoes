@@ -2,6 +2,7 @@ const { coletarMetricasOfc } = require("./metrics.service");
 const { criarPlanoShadowOfc } = require("./planner.service");
 const { criarFilaAtivaShadowOfc } = require("./active-queue.service");
 const { criarFluxoVivoShadowOfc } = require("./live-flow.service");
+const { criarFluxoComercialShadowOfc } = require("./commercial-flow.service");
 
 function logOfc(tag, payload = {}) {
   try {
@@ -78,6 +79,51 @@ function logarFluxoVivoShadow(rodadaId, fluxoVivo = {}) {
     motivo: fluxoVivo.motivo || "erro_fluxo_vivo_shadow",
     erro: String(fluxoVivo.erro || "erro_desconhecido").slice(0, 180),
     duracaoMs: fluxoVivo.duracaoMs
+  });
+}
+
+function logarFluxoComercialShadow(rodadaId, fluxoComercial = {}) {
+  if (fluxoComercial.ok) {
+    logOfc("[OFC-FLUXO-COMERCIAL-SHADOW]", {
+      rodadaId,
+      modo: fluxoComercial.modo,
+      aplicouMudancas: fluxoComercial.aplicouMudancas,
+      janelaMinutos: fluxoComercial.janelaMinutos,
+      ofertasCriadasPorMinuto: fluxoComercial.ofertasCriadasPorMinuto,
+      ofertasDistribuidasPorMinuto: fluxoComercial.ofertasDistribuidasPorMinuto,
+      itensAdicionadosFilaPorMinuto: fluxoComercial.itensAdicionadosFilaPorMinuto,
+      enviosConfirmadosPorMinuto: fluxoComercial.enviosConfirmadosPorMinuto,
+      enviosErroFinalPorMinuto: fluxoComercial.enviosErroFinalPorMinuto,
+      consumoComercialPorMinuto: fluxoComercial.consumoComercialPorMinuto,
+      demandaDistribuidaPorMinuto: fluxoComercial.demandaDistribuidaPorMinuto,
+      workspacesAptosAgora: fluxoComercial.workspacesAptosAgora,
+      destinosAptosAgora: fluxoComercial.destinosAptosAgora,
+      capacidadeComercialTeoricaPorMinuto: fluxoComercial.capacidadeComercialTeoricaPorMinuto,
+      capacidadeComercialDisponivel: fluxoComercial.capacidadeComercialDisponivel,
+      capacidadeComercialMotivoIndisponibilidade: fluxoComercial.capacidadeComercialMotivoIndisponibilidade,
+      radarOfertaAmostraTotal: fluxoComercial.radarOfertaAmostraTotal,
+      radarOfertaSemVinculoTotal: fluxoComercial.radarOfertaSemVinculoTotal,
+      tempoMedioRadarOfertaMs: fluxoComercial.tempoMedioRadarOfertaMs,
+      medianaRadarOfertaMs: fluxoComercial.medianaRadarOfertaMs,
+      p95RadarOfertaMs: fluxoComercial.p95RadarOfertaMs,
+      radarOfertaDisponivel: fluxoComercial.radarOfertaDisponivel,
+      radarOfertaMotivoIndisponibilidade: fluxoComercial.radarOfertaMotivoIndisponibilidade,
+      fontes: fluxoComercial.fontes,
+      totais: fluxoComercial.totais,
+      segmentacao: fluxoComercial.segmentacao,
+      duracaoMs: fluxoComercial.duracaoMs
+    });
+    return;
+  }
+
+  logOfc("[OFC-FLUXO-COMERCIAL-ERRO]", {
+    rodadaId,
+    modo: fluxoComercial.modo || "shadow",
+    aplicouMudancas: false,
+    failSafe: true,
+    motivo: fluxoComercial.motivo || "erro_fluxo_comercial_shadow",
+    erro: String(fluxoComercial.erro || "erro_desconhecido").slice(0, 180),
+    duracaoMs: fluxoComercial.duracaoMs
   });
 }
 
@@ -172,6 +218,12 @@ async function executarObservabilidadeOfc(opcoes = {}) {
     }, opcoes.fluxoVivo || {});
     logarFluxoVivoShadow(rodadaId, fluxoVivo);
 
+    const fluxoComercial = await criarFluxoComercialShadowOfc({
+      janelaMinutos: opcoes.janelaConsumoMinutos || 15,
+      ...(opcoes.fluxoComercial || {})
+    });
+    logarFluxoComercialShadow(rodadaId, fluxoComercial);
+
     return {
       ok: true,
       modo: "shadow",
@@ -180,7 +232,8 @@ async function executarObservabilidadeOfc(opcoes = {}) {
       metricas,
       plano,
       filaAtiva,
-      fluxoVivo
+      fluxoVivo,
+      fluxoComercial
     };
   } catch (e) {
     logOfc("[OFC-ERRO]", {

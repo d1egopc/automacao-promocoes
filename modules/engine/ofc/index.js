@@ -27,6 +27,18 @@ const {
   calcularFluxoVivoShadow,
   criarFluxoVivoShadowOfc
 } = require("./live-flow.service");
+const {
+  calcularFluxoComercialShadow,
+  criarFluxoComercialShadowOfc
+} = require("./commercial-flow.service");
+const {
+  TIPOS_EVENTO_COMERCIAL,
+  normalizarEventoComercial,
+  registrarEventoComercialSeguro
+} = require("./commercial-events.service");
+const {
+  consultarJobsEmCursoSuspeitos
+} = require("./stuck-jobs.repository");
 
 module.exports = {
   executarObservabilidadeOfc,
@@ -45,5 +57,11 @@ module.exports = {
   calcularSaudeOperacional,
   criarPlanoOperacionalV2Shadow,
   calcularFluxoVivoShadow,
-  criarFluxoVivoShadowOfc
+  criarFluxoVivoShadowOfc,
+  calcularFluxoComercialShadow,
+  criarFluxoComercialShadowOfc,
+  TIPOS_EVENTO_COMERCIAL,
+  normalizarEventoComercial,
+  registrarEventoComercialSeguro,
+  consultarJobsEmCursoSuspeitos
 };
