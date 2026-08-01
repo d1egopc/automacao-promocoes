@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 
 const fs = require("fs");
 const path = require("path");
@@ -280,12 +280,29 @@ function montarManifest({ operationId, operationStartedAt, cutoffCongelado, lote
   };
 }
 
+function registroSemPayload(registro = {}) {
+  const { item: _item, ...restante } = registro;
+  return restante;
+}
+
+function workspaceSnapshotSeguro(workspace = {}) {
+  return {
+    workspaceId: workspace.workspaceId,
+    arquivoOrigem: workspace.arquivoOrigem,
+    totalFila: workspace.totalFila,
+    grupos: Object.fromEntries(Object.entries(workspace.grupos || {}).map(([grupo, registros]) => [
+      grupo,
+      (Array.isArray(registros) ? registros : []).map(registroSemPayload)
+    ]))
+  };
+}
+
 function materializarSnapshot({ caminhos, workspaces }) {
   const hashes = {};
   let lotesTotal = 0;
   for (const workspace of workspaces) {
     const snapshotFile = path.join(caminhos.snapshot, `${workspace.workspaceId}.json`);
-    writeJsonAtomic(snapshotFile, workspace, {});
+    writeJsonAtomic(snapshotFile, workspaceSnapshotSeguro(workspace), {});
     hashes[workspace.workspaceId] = {
       expirar: hashConjunto(workspace.grupos[GRUPOS_ESTEIRA.EXPIRAR]),
       auditar: hashConjunto(workspace.grupos[GRUPOS_ESTEIRA.AUDITAR]),

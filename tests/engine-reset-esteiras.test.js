@@ -88,6 +88,11 @@ function ids(fila) {
   const snapshot = JSON.parse(fs.readFileSync(path.join(dataDir, "reset-esteiras", "op-dry", "snapshot", "ws1.json"), "utf8"));
   assert(snapshot.grupos[GRUPOS_ESTEIRA.EXPIRAR].every(registro => registro.indiceOriginal >= 0), "indice original fica apenas como auditoria");
   assert(snapshot.grupos[GRUPOS_ESTEIRA.EXPIRAR].every(registro => registro.identidade.chave), "snapshot deve guardar identidade exata");
+  assert(snapshot.grupos[GRUPOS_ESTEIRA.EXPIRAR].every(registro => !Object.prototype.hasOwnProperty.call(registro, "item")), "snapshot nao deve gravar payload completo dos itens");
+  assert(snapshot.grupos[GRUPOS_ESTEIRA.PRESERVAR_HISTORICO].every(registro => !Object.prototype.hasOwnProperty.call(registro, "item")), "snapshot nao deve duplicar historico completo");
+
+  const loteDryRun = JSON.parse(fs.readFileSync(path.join(dataDir, "reset-esteiras", "op-dry", "lotes", "ws1-1.json"), "utf8"));
+  assert(loteDryRun.registros.every(registro => registro.item && typeof registro.item === "object"), "lote deve manter item para execute e rollback");
 
   assert.notStrictEqual(
     identidadeItem(filaOriginal[5]).chave,
