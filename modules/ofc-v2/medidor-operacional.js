@@ -29,15 +29,29 @@ function nullQuandoSemAmostra(valor, amostra) {
   return numero(amostra) > 0 ? valor : null;
 }
 
+function destinoOperacionalUTO(destino = {}) {
+  if (!destino || typeof destino !== "object") return false;
+  if (destino.ativo === false) return false;
+  if (destino.operacional === false) return false;
+  if (destino.apto === false || destino.aptoAgora === false || destino.destinoApto === false) return false;
+  if (destino.sessaoDisponivel === false || destino.integracaoApta === false) return false;
+  if (destino.permitir === false || destino.permitido === false || destino.bloqueado === true) return false;
+  return true;
+}
+
 function calcularUTOOferta({ destinosCompativeis = [], execucoesPrevistas = null } = {}) {
-  const destinos = lista(destinosCompativeis).filter(destino => destino && destino.ativo !== false);
+  const destinosOperacionais = lista(destinosCompativeis).filter(destinoOperacionalUTO);
   const custo = execucoesPrevistas !== null && execucoesPrevistas !== undefined
     ? Math.max(0, Math.floor(numero(execucoesPrevistas)))
-    : Math.max(1, destinos.length || 1);
+    : destinosOperacionais.length;
+  const motivo = custo > 0
+    ? "execucao_operacional_prevista"
+    : "sem_execucao_operacional_prevista";
   return {
     custoUTO: custo,
     criterio: "quantidade_de_execucoes_previstas",
-    destinosConsiderados: destinos.length,
+    destinosConsiderados: destinosOperacionais.length,
+    motivo,
     aplicouMudancas: false
   };
 }
@@ -94,5 +108,6 @@ function medirWorkspaceOperacional({
 
 module.exports = {
   calcularUTOOferta,
+  destinoOperacionalUTO,
   medirWorkspaceOperacional
 };

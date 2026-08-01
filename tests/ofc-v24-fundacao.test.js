@@ -64,7 +64,41 @@ const uto = calcularUTOOferta({
   ]
 });
 assert.strictEqual(uto.custoUTO, 2);
+assert.strictEqual(uto.destinosConsiderados, 2);
+assert.strictEqual(uto.motivo, "execucao_operacional_prevista");
 assert.strictEqual(uto.aplicouMudancas, false);
+
+const utoUmDestino = calcularUTOOferta({
+  destinosCompativeis: [{ id: "whatsapp", ativo: true }]
+});
+assert.strictEqual(utoUmDestino.custoUTO, 1);
+assert.strictEqual(utoUmDestino.destinosConsiderados, 1);
+assert.strictEqual(utoUmDestino.aplicouMudancas, false);
+
+const utoSemDestino = calcularUTOOferta({ destinosCompativeis: [] });
+assert.strictEqual(utoSemDestino.custoUTO, 0);
+assert.strictEqual(utoSemDestino.destinosConsiderados, 0);
+assert.strictEqual(utoSemDestino.motivo, "sem_execucao_operacional_prevista");
+assert.strictEqual(utoSemDestino.aplicouMudancas, false);
+
+const utoDestinosInativos = calcularUTOOferta({
+  destinosCompativeis: [
+    { id: "whatsapp", ativo: false },
+    { id: "telegram", ativo: false }
+  ]
+});
+assert.strictEqual(utoDestinosInativos.custoUTO, 0);
+assert.strictEqual(utoDestinosInativos.destinosConsiderados, 0);
+assert.strictEqual(utoDestinosInativos.motivo, "sem_execucao_operacional_prevista");
+assert.strictEqual(utoDestinosInativos.aplicouMudancas, false);
+
+const utoSessaoIndisponivel = calcularUTOOferta({
+  destinosCompativeis: [{ id: "whatsapp", ativo: true, sessaoDisponivel: false }]
+});
+assert.strictEqual(utoSessaoIndisponivel.custoUTO, 0);
+assert.strictEqual(utoSessaoIndisponivel.destinosConsiderados, 0);
+assert.strictEqual(utoSessaoIndisponivel.motivo, "sem_execucao_operacional_prevista");
+assert.strictEqual(utoSessaoIndisponivel.aplicouMudancas, false);
 
 const metricas = medirWorkspaceOperacional({
   workspaceId: "user_teste",
