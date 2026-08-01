@@ -86,19 +86,56 @@ function destinoPossuiIntegracaoInapta(capacidade = []) {
   );
 }
 
+function destinoPossuiJanelaAberta(capacidade = []) {
+  return lista(capacidade).some(destino =>
+    destino.destinoHabilitado === true &&
+    destino.integracaoApta === true &&
+    destino.janelaAbertaAgora === true
+  );
+}
+
 function destinoPossuiLimiteZerado(capacidade = []) {
   return lista(capacidade).some(destino =>
     destino.destinoHabilitado === true &&
     destino.integracaoApta === true &&
+    destino.janelaAbertaAgora === true &&
     destino.limiteDiarioRestante === 0
   );
 }
 
 function motivoFechado(destinosResumo = {}) {
   const capacidade = lista(destinosResumo.capacidadePorDestino);
-  if (destinosResumo.automacaoAtiva !== true) return "automacao_desligada";
-  if (destinoPossuiIntegracaoInapta(capacidade)) return "integracao_inapta";
+  const destinosAtivos = numero(destinosResumo.destinosAtivos);
+  const integracoesAptas = numero(destinosResumo.integracoesAptas);
+  const destinosAptos = numero(destinosResumo.destinosAptos);
+
+  if (destinosAtivos <= 0) return "automacao_desligada";
+  if (integracoesAptas > 0 && !destinoPossuiJanelaAberta(capacidade)) return "janela_fechada";
+  if (destinoPossuiIntegracaoInapta(capacidade) || integracoesAptas <= 0) return "sessao_ou_integracao_inapta";
+  if (destinosAptos <= 0 && !destinoPossuiLimiteZerado(capacidade)) return "sem_destino_apto";
   if (destinoPossuiLimiteZerado(capacidade)) return "limite_diario_esgotado";
+  return "capacidade_disponivel";
+}
+
+function workspaceFechadoPorMotivoPrimario(motivo = "") {
+  return [
+    "automacao_desligada",
+    "janela_fechada",
+    "sessao_ou_integracao_inapta",
+    "sem_destino_apto",
+    "limite_diario_esgotado"
+  ].includes(motivo);
+}
+
+function motivoCapacidadeDisponivel(estadoDaEsteira = "") {
+  if (estadoDaEsteira === "LIMITADA") return "capacidade_disponivel";
+  if (estadoDaEsteira === "ESTAVEL") return "capacidade_disponivel";
+  if (estadoDaEsteira === "LIVRE") return "capacidade_disponivel";
+  return "capacidade_disponivel";
+}
+
+function motivoFechadoLegado(destinosResumo = {}) {
+  if (destinosResumo.automacaoAtiva !== true) return "automacao_desligada";
   if (destinosResumo.janelaAbertaAgora !== true) return "janela_fechada";
   if (numero(destinosResumo.destinosAptos) <= 0) return "sem_destino_apto";
   return "capacidade_zero";
@@ -111,13 +148,13 @@ function calcularFilaAlvo(destinosResumo = {}, turbo = false) {
 }
 
 function classificarDecisao({ destinosResumo = {}, pressaoEsteiraViva = 0, filaAlvo = 0, quantidadeSolicitada = 1 } = {}) {
-  const destinosAptos = numero(destinosResumo.destinosAptos);
   const capacidadeAtual = Math.max(0, filaAlvo - numero(pressaoEsteiraViva));
-  if (destinosResumo.automacaoAtiva !== true || destinosResumo.janelaAbertaAgora !== true || destinosAptos <= 0 || filaAlvo <= 0) {
+  const motivoPrimario = motivoFechado(destinosResumo);
+  if (workspaceFechadoPorMotivoPrimario(motivoPrimario) || filaAlvo <= 0) {
     return {
       permitir: false,
       estadoDaEsteira: "FECHADA",
-      motivo: motivoFechado(destinosResumo),
+      motivo: workspaceFechadoPorMotivoPrimario(motivoPrimario) ? motivoPrimario : motivoFechadoLegado(destinosResumo),
       capacidadeAtual,
       quantidadeAceitaAgora: 0
     };
@@ -147,7 +184,7 @@ function classificarDecisao({ destinosResumo = {}, pressaoEsteiraViva = 0, filaA
     return {
       permitir: true,
       estadoDaEsteira: "LIMITADA",
-      motivo: "capacidade_limitada",
+      motivo: motivoCapacidadeDisponivel("LIMITADA"),
       capacidadeAtual,
       quantidadeAceitaAgora
     };
@@ -157,7 +194,7 @@ function classificarDecisao({ destinosResumo = {}, pressaoEsteiraViva = 0, filaA
     return {
       permitir: true,
       estadoDaEsteira: "ESTAVEL",
-      motivo: "esteira_com_capacidade",
+      motivo: motivoCapacidadeDisponivel("ESTAVEL"),
       capacidadeAtual,
       quantidadeAceitaAgora
     };
@@ -166,7 +203,7 @@ function classificarDecisao({ destinosResumo = {}, pressaoEsteiraViva = 0, filaA
   return {
     permitir: true,
     estadoDaEsteira: "LIVRE",
-    motivo: "capacidade_livre_para_agua_nova",
+    motivo: motivoCapacidadeDisponivel("LIVRE"),
     capacidadeAtual,
     quantidadeAceitaAgora
   };

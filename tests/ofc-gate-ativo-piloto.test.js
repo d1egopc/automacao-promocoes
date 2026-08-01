@@ -81,6 +81,7 @@ async function decisao(entrada = {}, opcoes = {}) {
   assert.strictEqual(livre.modo, "ativo_piloto");
   assert.strictEqual(livre.permitir, true);
   assert.strictEqual(livre.estadoDaEsteira, "LIVRE");
+  assert.strictEqual(livre.motivo, "capacidade_disponivel");
   assert.strictEqual(livre.filaAlvo, 2);
   assert.strictEqual(livre.capacidadeAtual, 2);
   assert.strictEqual(livre.quantidadeAceitaAgora, 1);
@@ -99,18 +100,32 @@ async function decisao(entrada = {}, opcoes = {}) {
   assert.strictEqual(saturado.motivo, "esteira_saturada");
   assert.strictEqual(saturado.quantidadeAceitaAgora, 0);
 
+  const sessaoInaptaComPressaoAlta = await decisao({
+    destinosCompativeis: [destino({ statusSessao: "desconectada" })]
+  }, {
+    readClienteJson: () => [item("p1"), item("p2"), item("p3")]
+  });
+  assert.strictEqual(sessaoInaptaComPressaoAlta.permitir, false);
+  assert.strictEqual(sessaoInaptaComPressaoAlta.estadoDaEsteira, "FECHADA");
+  assert.strictEqual(sessaoInaptaComPressaoAlta.motivo, "sessao_ou_integracao_inapta");
+  assert.strictEqual(sessaoInaptaComPressaoAlta.quantidadeAceitaAgora, 0);
+
   const limitado = await decisao({ quantidadeSolicitada: 2 }, {
     readClienteJson: () => [item("p1")]
   });
   assert.strictEqual(limitado.permitir, true);
   assert.strictEqual(limitado.estadoDaEsteira, "LIMITADA");
+  assert.strictEqual(limitado.motivo, "capacidade_disponivel");
   assert.strictEqual(limitado.quantidadeAceitaAgora, 1);
 
   const fechado = await decisao({
     destinosCompativeis: [destino({ horarioInicio: "00:00", horarioFim: "00:01" })]
+  }, {
+    readClienteJson: () => [item("p1"), item("p2")]
   });
   assert.strictEqual(fechado.permitir, false);
   assert.strictEqual(fechado.estadoDaEsteira, "FECHADA");
+  assert.strictEqual(fechado.motivo, "janela_fechada");
   assert.strictEqual(fechado.quantidadeAceitaAgora, 0);
 
   const integracaoInapta = await decisao({
@@ -118,7 +133,7 @@ async function decisao(entrada = {}, opcoes = {}) {
   });
   assert.strictEqual(integracaoInapta.permitir, false);
   assert.strictEqual(integracaoInapta.estadoDaEsteira, "FECHADA");
-  assert.strictEqual(integracaoInapta.motivo, "automacao_desligada");
+  assert.strictEqual(integracaoInapta.motivo, "sessao_ou_integracao_inapta");
 
   const turbo = await decisao({
     cupomTurbo: true,
@@ -280,7 +295,7 @@ async function decisao(entrada = {}, opcoes = {}) {
         permitir: true,
         quantidadeAceitaAgora: 1,
         estadoDaEsteira: "LIVRE",
-        motivo: "capacidade_livre_para_agua_nova",
+        motivo: "capacidade_disponivel",
         capacidadeAtual: 2,
         pressaoEsteiraViva: 0,
         filaAlvo: 2,
