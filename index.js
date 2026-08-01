@@ -158,6 +158,7 @@ const criarRotasMensageiro = require("./modules/mensageiro/routes");
 const socialModule = require("./modules/social");
 const criarRotasSocial = require("./modules/social/routes");
 const criarRotasTemplatesClientes = require("./modules/templates-clientes/routes");
+const criarRotasStorageManager = require("./modules/storage-manager/storage.routes");
 const {
   resolveWorkspaceId,
   isAdminMaster: usuarioEhAdminMaster
@@ -17004,6 +17005,12 @@ app.use("/social", criarRotasSocial({
 app.use("/templates-ofertas", criarRotasTemplatesClientes({
   getClienteId,
   usuarioTemRecurso
+}));
+
+// =============== ROTA ADMIN DO STORAGE MANAGER =================
+// Read-only: nao executa limpeza, reset, compactacao, movimentacao ou escrita em /data.
+app.use("/admin/storage", criarRotasStorageManager({
+  isAdminMaster: (req) => req.usuario?.papel === "admin_master"
 }));
 
 
