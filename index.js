@@ -159,6 +159,7 @@ const socialModule = require("./modules/social");
 const criarRotasSocial = require("./modules/social/routes");
 const criarRotasTemplatesClientes = require("./modules/templates-clientes/routes");
 const criarRotasStorageManager = require("./modules/storage-manager/storage.routes");
+const criarRotasResetEsteirasPreflight = require("./modules/engine/reset-esteiras/preflight.routes");
 const {
   resolveWorkspaceId,
   isAdminMaster: usuarioEhAdminMaster
@@ -17010,6 +17011,12 @@ app.use("/templates-ofertas", criarRotasTemplatesClientes({
 // =============== ROTA ADMIN DO STORAGE MANAGER =================
 // Read-only: nao executa limpeza, reset, compactacao, movimentacao ou escrita em /data.
 app.use("/admin/storage", criarRotasStorageManager({
+  isAdminMaster: (req) => req.usuario?.papel === "admin_master"
+}));
+
+// =============== ROTA ADMIN TEMPORARIA DO RESET DAS ESTEIRAS =================
+// TEMPORARIA / READ-ONLY / SEM ESCRITA / SEM RESET.
+app.use("/admin/reset-esteiras", criarRotasResetEsteirasPreflight({
   isAdminMaster: (req) => req.usuario?.papel === "admin_master"
 }));
 

@@ -281,9 +281,21 @@ function ids(fila) {
       path.join(raiz, "modules", "engine", "index.js"),
       path.join(raiz, "modules", "engine", "ofc", "controller.runner.js")
     ];
+    const padroesProibidosBoot = [
+      "scripts/engine-reset-esteiras",
+      "engine-reset-esteiras.js",
+      "executarDryRunResetEsteiras",
+      "executarResetEsteirasConfirmado",
+      "executarRollbackResetEsteiras",
+      "--mode=dry-run",
+      "--mode=execute",
+      "--mode=rollback"
+    ];
     for (const file of bootFiles) {
       const fonte = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
-      assert(!fonte.includes("reset-esteiras"), `${file} nao deve acoplar o script ao boot`);
+      for (const padrao of padroesProibidosBoot) {
+        assert(!fonte.includes(padrao), `${file} nao deve acoplar execucao de reset ao boot`);
+      }
     }
   }
 
