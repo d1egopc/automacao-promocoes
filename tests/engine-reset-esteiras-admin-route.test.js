@@ -24,6 +24,11 @@ function escreverFila(dataDir, workspaceId, fila) {
   fs.writeFileSync(file, JSON.stringify(fila, null, 2));
 }
 
+function escreverUsuarios(dataDir, usuarios) {
+  mkdirp(dataDir);
+  fs.writeFileSync(path.join(dataDir, "usuarios.json"), JSON.stringify(usuarios, null, 2));
+}
+
 function lerFila(dataDir, workspaceId = WORKSPACE) {
   return JSON.parse(fs.readFileSync(filaFile(dataDir, workspaceId), "utf8"));
 }
@@ -82,6 +87,7 @@ function criarApp(dataDir, deps = {}) {
     executarDryRun: deps.executarDryRun,
     executarExecute: deps.executarExecute,
     executarRollback: deps.executarRollback,
+    operationIdAutorizado: deps.operationIdAutorizado ?? "*",
     isAdminMaster: (req) => req.usuario?.papel === "admin_master"
   }));
   return app;
@@ -125,6 +131,10 @@ async function get(server, pathUrl, papel) {
     ]);
     escreverFila(dataDir, "user_outro", [
       item("outro", { dataEntradaFila: "2026-07-31T20:00:00.000Z" })
+    ]);
+    escreverUsuarios(dataDir, [
+      { id: "admin", nome: "Diego", email: "admin@optimus.local", papel: "admin_master" },
+      { id: WORKSPACE, nome: "Roger Oficial", email: "rogeroficial@optimus.com", papel: "cliente" }
     ]);
 
     const server = await ouvir(criarApp(dataDir));
@@ -191,6 +201,30 @@ async function get(server, pathUrl, papel) {
       assert.strictEqual(operacao.body.executePermitido, true);
       assert.strictEqual(operacao.body.snapshotDisponivel, true);
       assert(!JSON.stringify(operacao.body).includes("Oferta sigilosa"), "consulta nao pode vazar payload");
+
+      const reconciliar = await post(server, "/admin/reset-esteiras/reconciliar", "admin_master", {
+        workspaceId: WORKSPACE,
+        operationId,
+        confirmacao: "RECONCILIAR_RESET_USER_9HQS434H"
+      });
+      assert.strictEqual(reconciliar.status, 200);
+      assert.strictEqual(reconciliar.body.totalElegivelCongelado, 2);
+      assert.strictEqual(reconciliar.body.totalAtualmenteCompativel, 2);
+      assert.strictEqual(reconciliar.body.executeSeguroPorCriterio, true);
+      assert.strictEqual(reconciliar.body.aplicouMudancasOperacionais, false);
+      assert(!JSON.stringify(reconciliar.body).includes("Oferta sigilosa"), "reconciliacao nao pode vazar payload");
+
+      const validar = await get(server, `/admin/reset-esteiras/operacoes/${operationId}/validar`, "admin_master");
+      assert.strictEqual(validar.status, 200);
+      assert.strictEqual(validar.body.workspaceId, WORKSPACE);
+      assert.strictEqual(validar.body.identidadeWorkspace.email, "rogeroficial@optimus.com");
+      assert.strictEqual(validar.body.hashesValidos, true);
+      assert.strictEqual(validar.body.lotesTotais, validar.body.lotesIntegros);
+      assert.strictEqual(validar.body.outroWorkspacePresente, false);
+      assert.strictEqual(validar.body.payloadRollbackSuficiente, true);
+      assert.strictEqual(validar.body.segredosIndevidos, false);
+      assert.strictEqual(validar.body.metodoEscrita, "writeJsonAtomic_reset_sem_bak");
+      assert.strictEqual(validar.body.bakBytes, 0);
 
       const executeSemDry = await post(server, "/admin/reset-esteiras/execute", "admin_master", {
         workspaceId: WORKSPACE,
@@ -260,6 +294,48 @@ async function get(server, pathUrl, papel) {
     const outro = snapshotArquivos(path.join(dataDir, "clientes", "user_outro"));
     assert.strictEqual(outro.length, 1, "outro workspace permanece isolado");
     assert(outro[0].txt.includes("outro"), "outro workspace nao foi tocado");
+
+    {
+      const dataDirFixo = path.join(tmpRoot, "fixo");
+      const operationIdFixo = "esteiras-reset-20260801202852-cd00691c";
+      escreverFila(dataDirFixo, WORKSPACE, [
+        item("fix-exp", { dataEntradaFila: "2026-07-31T20:00:00.000Z" })
+      ]);
+      escreverUsuarios(dataDirFixo, [
+        { id: WORKSPACE, nome: "Roger Oficial", email: "rogeroficial@optimus.com", papel: "cliente" }
+      ]);
+      await require("../modules/engine/reset-esteiras").executarDryRunResetEsteiras({
+        dataDir: dataDirFixo,
+        operationId: operationIdFixo,
+        operationStartedAt: "2026-08-01T00:00:00.000Z",
+        workspaceId: WORKSPACE
+      });
+      const serverFixo = await ouvir(criarApp(dataDirFixo, { operationIdAutorizado: operationIdFixo }));
+      try {
+        const opDiferente = await get(serverFixo, "/admin/reset-esteiras/operacoes/op-nao-autorizada/validar", "admin_master");
+        assert.strictEqual(opDiferente.status, 403, "operationId diferente deve ser bloqueada");
+
+        const recFixo = await post(serverFixo, "/admin/reset-esteiras/reconciliar", "admin_master", {
+          workspaceId: WORKSPACE,
+          operationId: operationIdFixo,
+          confirmacao: "RECONCILIAR_RESET_USER_9HQS434H"
+        });
+        assert.strictEqual(recFixo.status, 200, "reconciliacao fixa deve funcionar");
+
+        escreverUsuarios(dataDirFixo, [
+          { id: WORKSPACE, nome: "Intruso", email: "outro@optimus.com", papel: "cliente" }
+        ]);
+        const execBloqueado = await post(serverFixo, "/admin/reset-esteiras/execute", "admin_master", {
+          workspaceId: WORKSPACE,
+          operationId: operationIdFixo,
+          confirmOperationId: operationIdFixo,
+          confirmacao: "EXECUTAR_RESET_USER_9HQS434H"
+        });
+        assert.strictEqual(execBloqueado.status, 403, "workspace fora dos emails operacionais deve bloquear execute");
+      } finally {
+        await new Promise(resolve => serverFixo.close(resolve));
+      }
+    }
 
     const timeoutServer = await ouvir(criarApp(dataDir, {
       timeoutMs: 20,
