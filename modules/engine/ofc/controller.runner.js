@@ -3,6 +3,7 @@ const { criarPlanoShadowOfc } = require("./planner.service");
 const { criarFilaAtivaShadowOfc } = require("./active-queue.service");
 const { criarFluxoVivoShadowOfc } = require("./live-flow.service");
 const { criarFluxoComercialShadowOfc } = require("./commercial-flow.service");
+const { criarGateAbsorcaoShadowOfc } = require("./absorption-gate.service");
 
 function logOfc(tag, payload = {}) {
   try {
@@ -127,6 +128,32 @@ function logarFluxoComercialShadow(rodadaId, fluxoComercial = {}) {
   });
 }
 
+function logarGateAbsorcaoShadow(rodadaId, gateAbsorcao = {}) {
+  if (gateAbsorcao.ok) {
+    logOfc("[OFC-GATE-ABSORCAO-SHADOW]", {
+      rodadaId,
+      modo: gateAbsorcao.modo,
+      aplicouMudancas: gateAbsorcao.aplicouMudancas,
+      janelaMinutos: gateAbsorcao.janelaMinutos,
+      totalWorkspaces: gateAbsorcao.totalWorkspaces,
+      resumo: gateAbsorcao.resumo,
+      workspaces: gateAbsorcao.workspaces,
+      duracaoMs: gateAbsorcao.duracaoMs
+    });
+    return;
+  }
+
+  logOfc("[OFC-GATE-ABSORCAO-ERRO]", {
+    rodadaId,
+    modo: gateAbsorcao.modo || "shadow",
+    aplicouMudancas: false,
+    failSafe: true,
+    motivo: gateAbsorcao.motivo || "erro_gate_absorcao_shadow",
+    erro: String(gateAbsorcao.erro || "erro_desconhecido").slice(0, 180),
+    duracaoMs: gateAbsorcao.duracaoMs
+  });
+}
+
 async function executarObservabilidadeOfc(opcoes = {}) {
   const inicio = Date.now();
   const rodadaId = opcoes.rodadaId || "";
@@ -224,6 +251,12 @@ async function executarObservabilidadeOfc(opcoes = {}) {
     });
     logarFluxoComercialShadow(rodadaId, fluxoComercial);
 
+    const gateAbsorcao = await criarGateAbsorcaoShadowOfc({
+      janelaMinutos: opcoes.janelaConsumoMinutos || 15,
+      ...(opcoes.gateAbsorcao || {})
+    });
+    logarGateAbsorcaoShadow(rodadaId, gateAbsorcao);
+
     return {
       ok: true,
       modo: "shadow",
@@ -233,7 +266,8 @@ async function executarObservabilidadeOfc(opcoes = {}) {
       plano,
       filaAtiva,
       fluxoVivo,
-      fluxoComercial
+      fluxoComercial,
+      gateAbsorcao
     };
   } catch (e) {
     logOfc("[OFC-ERRO]", {

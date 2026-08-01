@@ -32,6 +32,11 @@ const {
   criarFluxoComercialShadowOfc
 } = require("./commercial-flow.service");
 const {
+  criarGateAbsorcaoShadowOfc,
+  montarGateWorkspace,
+  classificarEstadoEsteira
+} = require("./absorption-gate.service");
+const {
   TIPOS_EVENTO_COMERCIAL,
   normalizarEventoComercial,
   prepararSchemaEventosComerciaisSeguro,
@@ -61,6 +66,9 @@ module.exports = {
   criarFluxoVivoShadowOfc,
   calcularFluxoComercialShadow,
   criarFluxoComercialShadowOfc,
+  criarGateAbsorcaoShadowOfc,
+  montarGateWorkspace,
+  classificarEstadoEsteira,
   TIPOS_EVENTO_COMERCIAL,
   normalizarEventoComercial,
   prepararSchemaEventosComerciaisSeguro,
