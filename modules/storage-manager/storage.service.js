@@ -216,8 +216,33 @@ function gerarDiagnosticoStorage(opcoes = {}) {
   };
 }
 
+async function diagnosticarDiretorios(opcoes = {}) {
+  return repository.auditarDiretoriosPrimeiroNivel(opcoes);
+}
+
+async function diagnosticarWorkspaces(opcoes = {}) {
+  return repository.auditarWorkspaces(opcoes);
+}
+
+async function diagnosticarWorkspace(workspaceId, opcoes = {}) {
+  return repository.auditarWorkspaceIndividual(workspaceId, opcoes);
+}
+
+async function diagnosticarFilas(opcoes = {}) {
+  return repository.auditarFilasIncremental(opcoes);
+}
+
+async function diagnosticarCategoria(categoria, opcoes = {}) {
+  return repository.auditarCategoriaIncremental(categoria, opcoes);
+}
+
 module.exports = {
   gerarDiagnosticoStorage,
+  diagnosticarDiretorios,
+  diagnosticarWorkspaces,
+  diagnosticarWorkspace,
+  diagnosticarFilas,
+  diagnosticarCategoria,
   classificarCategoria,
   calcularStorageHealth,
   estimarPotencialRecuperavel

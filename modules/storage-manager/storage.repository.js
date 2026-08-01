@@ -19,6 +19,23 @@ const SET_HISTORICO = new Set(STATUS_FILA.HISTORICO);
 const SET_FINAL = new Set(STATUS_FILA.FINAL);
 const SET_ATIVO = new Set(STATUS_FILA.ATIVO);
 const SET_PROCESSANDO = new Set(STATUS_FILA.PROCESSANDO);
+const DEFAULT_INCREMENTAL_TIMEOUT_MS = 8000;
+const MAX_INCREMENTAL_TIMEOUT_MS = 30000;
+const DEFAULT_LIMIT = 10;
+const MAX_LIMIT = 50;
+const DEFAULT_TOP_FILES = 10;
+const MAX_TOP_FILES = 20;
+const DEFAULT_MAX_FILES = 2000;
+const MAX_MAX_FILES = 10000;
+const CATEGORIAS_INCREMENTAIS = new Set([
+  "sessoes",
+  "resets",
+  "temporarios",
+  "backups",
+  "logs",
+  "midias",
+  "caches"
+]);
 
 function bytesLegiveis(bytes = 0) {
   const unidades = ["B", "KB", "MB", "GB"];
@@ -29,6 +46,98 @@ function bytesLegiveis(bytes = 0) {
     idx += 1;
   }
   return `${valor.toFixed(idx === 0 ? 0 : 2)} ${unidades[idx]}`;
+}
+
+function limitarNumero(valor, padrao, min, max) {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero)) return padrao;
+  return Math.max(min, Math.min(max, Math.floor(numero)));
+}
+
+function yieldEventLoop() {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
+function criarOpcoesIncrementais(opcoes = {}) {
+  const timeoutMs = limitarNumero(opcoes.timeoutMs, DEFAULT_INCREMENTAL_TIMEOUT_MS, 1000, MAX_INCREMENTAL_TIMEOUT_MS);
+  return {
+    dataDir: path.resolve(opcoes.dataDir || DEFAULT_DATA_DIR),
+    limit: limitarNumero(opcoes.limit, DEFAULT_LIMIT, 1, MAX_LIMIT),
+    topFiles: limitarNumero(opcoes.topFiles, DEFAULT_TOP_FILES, 1, MAX_TOP_FILES),
+    offset: limitarNumero(opcoes.offset, 0, 0, Number.MAX_SAFE_INTEGER),
+    timeoutMs,
+    deadlineMs: opcoes.deadlineMs || Date.now() + timeoutMs,
+    maxFiles: limitarNumero(opcoes.maxFiles, DEFAULT_MAX_FILES, 1, MAX_MAX_FILES),
+    recentMinutes: limitarNumero(opcoes.recentMinutes, 30, 1, 1440)
+  };
+}
+
+function encodeCursor(offset) {
+  if (!Number.isFinite(Number(offset))) return null;
+  return Buffer.from(JSON.stringify({ offset: Number(offset) }), "utf8").toString("base64url");
+}
+
+function decodeCursor(cursor) {
+  if (!cursor) return 0;
+  try {
+    const payload = JSON.parse(Buffer.from(String(cursor), "base64url").toString("utf8"));
+    if (!Number.isFinite(Number(payload.offset)) || Number(payload.offset) < 0) {
+      throw new Error("offset_invalido");
+    }
+    return limitarNumero(payload.offset, 0, 0, Number.MAX_SAFE_INTEGER);
+  } catch {
+    const erro = new Error("cursor_storage_invalido");
+    erro.codigo = "cursor_storage_invalido";
+    erro.statusCode = 400;
+    throw erro;
+  }
+}
+
+function erroSanitizado(dataDir, caminho, erro) {
+  return {
+    caminho: sanitizarCaminho(dataDir, caminho),
+    erro: erro?.code || erro?.message || "erro_desconhecido"
+  };
+}
+
+function criarRespostaIncremental(inicioMs, opcoes, dados) {
+  return {
+    ok: true,
+    modo: "somente_leitura",
+    aplicouMudancas: false,
+    parcial: Boolean(dados.parcial || dados.timeoutAtingido || dados.limiteArquivosAtingido),
+    totalConhecido: dados.totalConhecido ?? null,
+    processados: dados.processados || 0,
+    nextCursor: dados.nextCursor || null,
+    duracaoMs: Date.now() - inicioMs,
+    timeoutMs: opcoes.timeoutMs,
+    timeoutAtingido: Boolean(dados.timeoutAtingido),
+    limiteArquivosAtingido: Boolean(dados.limiteArquivosAtingido),
+    errosSanitizados: dados.errosSanitizados || [],
+    ...dados.payload
+  };
+}
+
+function deadlineAtingido(opcoes) {
+  return Boolean(opcoes.deadlineMs && Date.now() > opcoes.deadlineMs);
+}
+
+async function listarDiretorioSeguro(dataDir, dir) {
+  try {
+    const entradas = await fs.promises.readdir(dir, { withFileTypes: true });
+    entradas.sort((a, b) => a.name.localeCompare(b.name));
+    return { entradas, erro: null };
+  } catch (erro) {
+    return { entradas: [], erro: erroSanitizado(dataDir, dir, erro) };
+  }
+}
+
+async function statSeguro(dataDir, caminho) {
+  try {
+    return { stats: await fs.promises.lstat(caminho), erro: null };
+  } catch (erro) {
+    return { stats: null, erro: erroSanitizado(dataDir, caminho, erro) };
+  }
 }
 
 function incrementar(mapa, chave, bytes = 0, quantidade = 1) {
@@ -384,11 +493,477 @@ function resumirFilas(opcoes = {}) {
   return { clientesDirExiste: true, recentMinutes: recenteMs / 60000, totais, workspaces, erros };
 }
 
+async function resumirDiretorioLimitado(dataDir, dir, opcoes) {
+  const pilha = [dir];
+  const resumo = {
+    tamanhoBytes: 0,
+    arquivos: 0,
+    diretorios: 0,
+    ultimaModificacaoMs: 0,
+    maioresArquivos: [],
+    errosSanitizados: [],
+    processados: 0,
+    timeoutAtingido: false,
+    limiteArquivosAtingido: false
+  };
+
+  while (pilha.length) {
+    if (deadlineAtingido(opcoes)) {
+      resumo.timeoutAtingido = true;
+      break;
+    }
+    if (resumo.processados >= opcoes.maxFiles) {
+      resumo.limiteArquivosAtingido = true;
+      break;
+    }
+
+    const atual = pilha.pop();
+    const { stats, erro } = await statSeguro(dataDir, atual);
+    if (erro) {
+      resumo.errosSanitizados.push(erro);
+      continue;
+    }
+    if (!stats || stats.isSymbolicLink()) continue;
+
+    resumo.processados += 1;
+    resumo.ultimaModificacaoMs = Math.max(resumo.ultimaModificacaoMs, stats.mtimeMs || 0);
+
+    if (stats.isDirectory()) {
+      resumo.diretorios += 1;
+      const listado = await listarDiretorioSeguro(dataDir, atual);
+      if (listado.erro) {
+        resumo.errosSanitizados.push(listado.erro);
+      } else {
+        for (const entrada of listado.entradas) pilha.push(path.join(atual, entrada.name));
+      }
+    } else if (stats.isFile()) {
+      resumo.arquivos += 1;
+      resumo.tamanhoBytes += stats.size;
+      resumo.maioresArquivos.push({
+        caminho: atual,
+        tamanhoBytes: stats.size,
+        modificadoEm: stats.mtimeMs,
+        categoria: categoriaArquivo(dataDir, atual, stats),
+        extensao: path.extname(atual).toLowerCase() || "[sem_extensao]"
+      });
+      resumo.maioresArquivos.sort((a, b) => b.tamanhoBytes - a.tamanhoBytes);
+      if (resumo.maioresArquivos.length > opcoes.topFiles) resumo.maioresArquivos.length = opcoes.topFiles;
+    }
+
+    if (resumo.processados % 100 === 0) await yieldEventLoop();
+  }
+
+  return {
+    tamanhoBytes: resumo.tamanhoBytes,
+    tamanho: bytesLegiveis(resumo.tamanhoBytes),
+    arquivos: resumo.arquivos,
+    diretorios: resumo.diretorios,
+    ultimaModificacaoEm: resumo.ultimaModificacaoMs ? new Date(resumo.ultimaModificacaoMs).toISOString() : null,
+    maioresArquivos: resumo.maioresArquivos.map(arquivo => criarResumoArquivo(dataDir, arquivo)),
+    errosSanitizados: resumo.errosSanitizados,
+    processados: resumo.processados,
+    parcial: resumo.timeoutAtingido || resumo.limiteArquivosAtingido,
+    timeoutAtingido: resumo.timeoutAtingido,
+    limiteArquivosAtingido: resumo.limiteArquivosAtingido
+  };
+}
+
+async function auditarDiretoriosPrimeiroNivel(opcoesEntrada = {}) {
+  const inicioMs = Date.now();
+  const opcoes = criarOpcoesIncrementais({ ...opcoesEntrada, offset: decodeCursor(opcoesEntrada.cursor) });
+  const dataDir = opcoes.dataDir;
+  const errosSanitizados = [];
+  const { entradas, erro } = await listarDiretorioSeguro(dataDir, dataDir);
+  if (erro) errosSanitizados.push(erro);
+
+  const diretorios = entradas
+    .filter(entrada => entrada.isDirectory())
+    .map(entrada => entrada.name)
+    .sort((a, b) => a.localeCompare(b));
+  const selecionados = diretorios.slice(opcoes.offset, opcoes.offset + opcoes.limit);
+  const itens = [];
+  let processados = 0;
+  let timeoutAtingido = false;
+  let limiteArquivosAtingido = false;
+
+  for (const nome of selecionados) {
+    if (deadlineAtingido(opcoes)) {
+      timeoutAtingido = true;
+      break;
+    }
+    const dir = path.join(dataDir, nome);
+    const resumo = await resumirDiretorioLimitado(dataDir, dir, opcoes);
+    processados += 1;
+    timeoutAtingido = timeoutAtingido || resumo.timeoutAtingido;
+    limiteArquivosAtingido = limiteArquivosAtingido || resumo.limiteArquivosAtingido;
+    errosSanitizados.push(...resumo.errosSanitizados);
+    itens.push({
+      nome: sanitizarSegmento(nome),
+      caminho: sanitizarCaminho(dataDir, dir),
+      tamanhoBytes: resumo.tamanhoBytes,
+      tamanho: resumo.tamanho,
+      arquivos: resumo.arquivos,
+      diretorios: resumo.diretorios,
+      ultimaModificacaoEm: resumo.ultimaModificacaoEm,
+      parcial: resumo.parcial
+    });
+    await yieldEventLoop();
+  }
+
+  const proximoOffset = opcoes.offset + processados;
+  return criarRespostaIncremental(inicioMs, opcoes, {
+    totalConhecido: diretorios.length,
+    processados,
+    nextCursor: proximoOffset < diretorios.length ? encodeCursor(proximoOffset) : null,
+    timeoutAtingido,
+    limiteArquivosAtingido,
+    errosSanitizados,
+    payload: { diretorios: itens }
+  });
+}
+
+async function listarWorkspaceIds(dataDir) {
+  const clientesDir = path.join(dataDir, "clientes");
+  const listado = await listarDiretorioSeguro(dataDir, clientesDir);
+  return listado.entradas
+    .filter(entrada => entrada.isDirectory())
+    .map(entrada => entrada.name)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function validarWorkspaceId(workspaceId) {
+  const id = String(workspaceId || "").trim();
+  if (!/^[A-Za-z0-9_-]{1,80}$/.test(id)) {
+    const erro = new Error("workspace_id_invalido");
+    erro.codigo = "workspace_id_invalido";
+    erro.statusCode = 400;
+    throw erro;
+  }
+  return id;
+}
+
+async function auditarWorkspaces(opcoesEntrada = {}) {
+  const inicioMs = Date.now();
+  const opcoes = criarOpcoesIncrementais({ ...opcoesEntrada, offset: decodeCursor(opcoesEntrada.cursor) });
+  const dataDir = opcoes.dataDir;
+  const workspaceIds = await listarWorkspaceIds(dataDir);
+  const selecionados = workspaceIds.slice(opcoes.offset, opcoes.offset + opcoes.limit);
+  const itens = [];
+  const errosSanitizados = [];
+  let processados = 0;
+  let timeoutAtingido = false;
+  let limiteArquivosAtingido = false;
+
+  for (const workspaceId of selecionados) {
+    if (deadlineAtingido(opcoes)) {
+      timeoutAtingido = true;
+      break;
+    }
+    const workspaceDir = path.join(dataDir, "clientes", workspaceId);
+    const filaPath = path.join(workspaceDir, "fila.json");
+    const resumo = await resumirDiretorioLimitado(dataDir, workspaceDir, opcoes);
+    const filaStat = await statSeguro(dataDir, filaPath);
+    processados += 1;
+    timeoutAtingido = timeoutAtingido || resumo.timeoutAtingido;
+    limiteArquivosAtingido = limiteArquivosAtingido || resumo.limiteArquivosAtingido;
+    errosSanitizados.push(...resumo.errosSanitizados);
+    if (filaStat.erro && filaStat.erro.erro !== "ENOENT") errosSanitizados.push(filaStat.erro);
+    itens.push({
+      workspaceId,
+      tamanhoBytes: resumo.tamanhoBytes,
+      tamanho: resumo.tamanho,
+      tamanhoFilaBytes: filaStat.stats?.isFile() ? filaStat.stats.size : 0,
+      tamanhoFila: bytesLegiveis(filaStat.stats?.isFile() ? filaStat.stats.size : 0),
+      arquivos: resumo.arquivos,
+      diretorios: resumo.diretorios,
+      ultimaModificacaoEm: resumo.ultimaModificacaoEm,
+      parcial: resumo.parcial
+    });
+    await yieldEventLoop();
+  }
+
+  const proximoOffset = opcoes.offset + processados;
+  return criarRespostaIncremental(inicioMs, opcoes, {
+    totalConhecido: workspaceIds.length,
+    processados,
+    nextCursor: proximoOffset < workspaceIds.length ? encodeCursor(proximoOffset) : null,
+    timeoutAtingido,
+    limiteArquivosAtingido,
+    errosSanitizados,
+    payload: { workspaces: itens }
+  });
+}
+
+function criarResumoFilaVazio(workspaceId, stats = null) {
+  return {
+    workspaceId,
+    totalItens: 0,
+    tamanhoFilaBytes: stats?.size || 0,
+    tamanhoFila: bytesLegiveis(stats?.size || 0),
+    enviadosHistorico: 0,
+    pendentesRecentes: 0,
+    pendentesVencidos: 0,
+    finais: 0,
+    processando: 0,
+    semTimestamp: 0,
+    statusDesconhecido: 0,
+    statusReais: {},
+    marketplaces: {},
+    destinos: {},
+    timestampCampos: {},
+    idadesMs: []
+  };
+}
+
+function finalizarResumoFila(ws) {
+  const idades = [...ws.idadesMs].sort((a, b) => a - b);
+  const percentil = (p) => {
+    if (!idades.length) return null;
+    const idx = Math.min(idades.length - 1, Math.max(0, Math.ceil((p / 100) * idades.length) - 1));
+    return idades[idx];
+  };
+  const media = idades.length ? Math.round(idades.reduce((soma, valor) => soma + valor, 0) / idades.length) : null;
+  delete ws.idadesMs;
+  return {
+    ...ws,
+    idadeMinimaMs: idades[0] ?? null,
+    idadeMediaMs: media,
+    idadeMedianaMs: percentil(50),
+    idadeP95Ms: percentil(95),
+    idadeMaximaMs: idades[idades.length - 1] ?? null,
+    espacoEstimadoResetEsteirasBytes: ws.pendentesVencidos ? Math.round((ws.tamanhoFilaBytes / Math.max(1, ws.totalItens)) * ws.pendentesVencidos) : 0,
+    espacoEstimadoHistoricoLeveBytes: ws.enviadosHistorico ? Math.round((ws.tamanhoFilaBytes / Math.max(1, ws.totalItens)) * ws.enviadosHistorico * 0.7) : 0
+  };
+}
+
+async function resumirFilaWorkspace(dataDir, workspaceId, opcoes) {
+  const filaPath = path.join(dataDir, "clientes", workspaceId, "fila.json");
+  const { stats, erro } = await statSeguro(dataDir, filaPath);
+  if (erro || !stats?.isFile()) {
+    return { erro: erro || { caminho: sanitizarCaminho(dataDir, filaPath), erro: "fila_json_ausente" }, resumo: null };
+  }
+
+  let fila;
+  try {
+    const texto = await fs.promises.readFile(filaPath, "utf8");
+    fila = JSON.parse(texto);
+  } catch (erroLeitura) {
+    return { erro: erroSanitizado(dataDir, filaPath, erroLeitura), resumo: null };
+  }
+  if (!Array.isArray(fila)) {
+    return { erro: { caminho: sanitizarCaminho(dataDir, filaPath), erro: "fila_json_invalido" }, resumo: null };
+  }
+
+  const agoraMs = Date.now();
+  const recenteMs = opcoes.recentMinutes * 60 * 1000;
+  const ws = criarResumoFilaVazio(workspaceId, stats);
+  ws.totalItens = fila.length;
+
+  let indiceItem = 0;
+  for (const item of fila) {
+    indiceItem += 1;
+    if (deadlineAtingido(opcoes)) {
+      ws.timeoutAtingido = true;
+      break;
+    }
+    const classificacao = classificarItemFila(item, agoraMs, recenteMs);
+    ws[classificacao.grupo] += 1;
+    ws.statusReais[classificacao.status] = (ws.statusReais[classificacao.status] || 0) + 1;
+    const marketplace = item?.marketplace || item?.origemMarketplace || item?.metadata?.produto?.marketplace || "[ausente]";
+    const destino = item?.destino || item?.canal || item?.tipoDestino || item?.metadata?.destino || "[ausente]";
+    ws.marketplaces[marketplace] = (ws.marketplaces[marketplace] || 0) + 1;
+    ws.destinos[destino] = (ws.destinos[destino] || 0) + 1;
+    const campo = classificacao.timestampCampo || "[sem_timestamp]";
+    ws.timestampCampos[campo] = (ws.timestampCampos[campo] || 0) + 1;
+    if (Number.isFinite(classificacao.idadeMs)) ws.idadesMs.push(classificacao.idadeMs);
+    if (indiceItem % 500 === 0) await yieldEventLoop();
+  }
+
+  return { erro: null, resumo: finalizarResumoFila(ws) };
+}
+
+async function auditarWorkspaceIndividual(workspaceIdEntrada, opcoesEntrada = {}) {
+  const inicioMs = Date.now();
+  const opcoes = criarOpcoesIncrementais(opcoesEntrada);
+  const dataDir = opcoes.dataDir;
+  const workspaceId = validarWorkspaceId(workspaceIdEntrada);
+  const ids = await listarWorkspaceIds(dataDir);
+  if (!ids.includes(workspaceId)) {
+    const erro = new Error("workspace_nao_encontrado");
+    erro.codigo = "workspace_nao_encontrado";
+    erro.statusCode = 404;
+    throw erro;
+  }
+
+  const workspaceDir = path.join(dataDir, "clientes", workspaceId);
+  const resumoDir = await resumirDiretorioLimitado(dataDir, workspaceDir, opcoes);
+  const fila = await resumirFilaWorkspace(dataDir, workspaceId, opcoes);
+  const errosSanitizados = [...resumoDir.errosSanitizados];
+  if (fila.erro) errosSanitizados.push(fila.erro);
+
+  return criarRespostaIncremental(inicioMs, opcoes, {
+    totalConhecido: 1,
+    processados: 1,
+    timeoutAtingido: resumoDir.timeoutAtingido || Boolean(fila.resumo?.timeoutAtingido),
+    limiteArquivosAtingido: resumoDir.limiteArquivosAtingido,
+    errosSanitizados,
+    payload: {
+      workspace: {
+        workspaceId,
+        caminho: `/data/clientes/${workspaceId}`,
+        tamanhoBytes: resumoDir.tamanhoBytes,
+        tamanho: resumoDir.tamanho,
+        arquivos: resumoDir.arquivos,
+        diretorios: resumoDir.diretorios,
+        ultimaModificacaoEm: resumoDir.ultimaModificacaoEm,
+        maioresArquivos: resumoDir.maioresArquivos,
+        fila: fila.resumo,
+        potencialRecuperavel: fila.resumo ? {
+          resetEsteirasBytes: fila.resumo.espacoEstimadoResetEsteirasBytes,
+          resetEsteiras: bytesLegiveis(fila.resumo.espacoEstimadoResetEsteirasBytes),
+          historicoLeveBytes: fila.resumo.espacoEstimadoHistoricoLeveBytes,
+          historicoLeve: bytesLegiveis(fila.resumo.espacoEstimadoHistoricoLeveBytes)
+        } : null
+      }
+    }
+  });
+}
+
+async function auditarFilasIncremental(opcoesEntrada = {}) {
+  const inicioMs = Date.now();
+  const opcoes = criarOpcoesIncrementais({ ...opcoesEntrada, offset: decodeCursor(opcoesEntrada.cursor), maxFiles: 100 });
+  const dataDir = opcoes.dataDir;
+  const workspaceIds = await listarWorkspaceIds(dataDir);
+  const selecionados = workspaceIds.slice(opcoes.offset, opcoes.offset + opcoes.limit);
+  const filas = [];
+  const errosSanitizados = [];
+  let processados = 0;
+  let timeoutAtingido = false;
+
+  for (const workspaceId of selecionados) {
+    if (deadlineAtingido(opcoes)) {
+      timeoutAtingido = true;
+      break;
+    }
+    const resultado = await resumirFilaWorkspace(dataDir, workspaceId, opcoes);
+    processados += 1;
+    if (resultado.erro) errosSanitizados.push(resultado.erro);
+    if (resultado.resumo) {
+      timeoutAtingido = timeoutAtingido || Boolean(resultado.resumo.timeoutAtingido);
+      filas.push(resultado.resumo);
+    }
+    await yieldEventLoop();
+  }
+
+  const proximoOffset = opcoes.offset + processados;
+  return criarRespostaIncremental(inicioMs, opcoes, {
+    totalConhecido: workspaceIds.length,
+    processados,
+    nextCursor: proximoOffset < workspaceIds.length ? encodeCursor(proximoOffset) : null,
+    timeoutAtingido,
+    errosSanitizados,
+    payload: { filas }
+  });
+}
+
+function categoriaIncrementalParaInterna(categoria) {
+  const valor = String(categoria || "").toLowerCase().trim();
+  if (!CATEGORIAS_INCREMENTAIS.has(valor)) {
+    const erro = new Error("categoria_storage_invalida");
+    erro.codigo = "categoria_storage_invalida";
+    erro.statusCode = 400;
+    throw erro;
+  }
+  const mapa = {
+    sessoes: CATEGORIAS_STORAGE.SESSOES,
+    resets: CATEGORIAS_STORAGE.SNAPSHOTS,
+    temporarios: CATEGORIAS_STORAGE.TEMPORARIOS,
+    backups: CATEGORIAS_STORAGE.BACKUPS,
+    logs: CATEGORIAS_STORAGE.LOGS,
+    midias: CATEGORIAS_STORAGE.MIDIAS,
+    caches: CATEGORIAS_STORAGE.CACHES
+  };
+  return mapa[valor];
+}
+
+async function auditarCategoriaIncremental(categoriaEntrada, opcoesEntrada = {}) {
+  const inicioMs = Date.now();
+  const categoriaInterna = categoriaIncrementalParaInterna(categoriaEntrada);
+  const opcoes = criarOpcoesIncrementais({ ...opcoesEntrada, offset: decodeCursor(opcoesEntrada.cursor) });
+  const dataDir = opcoes.dataDir;
+  const pilha = [dataDir];
+  const errosSanitizados = [];
+  const encontrados = [];
+  let visitados = 0;
+  let timeoutAtingido = false;
+  let limiteArquivosAtingido = false;
+
+  while (pilha.length && encontrados.length < opcoes.offset + opcoes.limit) {
+    if (deadlineAtingido(opcoes)) {
+      timeoutAtingido = true;
+      break;
+    }
+    if (visitados >= opcoes.maxFiles) {
+      limiteArquivosAtingido = true;
+      break;
+    }
+    const atual = pilha.pop();
+    const { stats, erro } = await statSeguro(dataDir, atual);
+    if (erro) {
+      errosSanitizados.push(erro);
+      continue;
+    }
+    if (!stats || stats.isSymbolicLink()) continue;
+    visitados += 1;
+    if (stats.isDirectory()) {
+      const listado = await listarDiretorioSeguro(dataDir, atual);
+      if (listado.erro) errosSanitizados.push(listado.erro);
+      else for (const entrada of listado.entradas.reverse()) pilha.push(path.join(atual, entrada.name));
+    } else if (stats.isFile() && categoriaArquivo(dataDir, atual, stats) === categoriaInterna) {
+      encontrados.push(criarResumoArquivo(dataDir, {
+        caminho: atual,
+        tamanhoBytes: stats.size,
+        modificadoEm: stats.mtimeMs,
+        categoria: categoriaInterna,
+        extensao: path.extname(atual).toLowerCase() || "[sem_extensao]"
+      }));
+    }
+    if (visitados % 100 === 0) await yieldEventLoop();
+  }
+
+  const itens = encontrados.slice(opcoes.offset, opcoes.offset + opcoes.limit);
+  const proximoOffset = encontrados.length > opcoes.offset + itens.length || pilha.length
+    ? opcoes.offset + itens.length
+    : null;
+  const tamanhoBytes = itens.reduce((soma, item) => soma + item.tamanhoBytes, 0);
+  return criarRespostaIncremental(inicioMs, opcoes, {
+    totalConhecido: null,
+    processados: visitados,
+    nextCursor: proximoOffset === null ? null : encodeCursor(proximoOffset),
+    timeoutAtingido,
+    limiteArquivosAtingido,
+    errosSanitizados,
+    payload: {
+      categoria: String(categoriaEntrada || "").toLowerCase().trim(),
+      tamanhoPaginaBytes: tamanhoBytes,
+      tamanhoPagina: bytesLegiveis(tamanhoBytes),
+      arquivos: itens
+    }
+  });
+}
+
 module.exports = {
   DEFAULT_DATA_DIR,
   bytesLegiveis,
   sanitizarCaminho,
   obterEspacoVolume,
   inventariarVolume,
-  resumirFilas
+  resumirFilas,
+  encodeCursor,
+  decodeCursor,
+  auditarDiretoriosPrimeiroNivel,
+  auditarWorkspaces,
+  auditarWorkspaceIndividual,
+  auditarFilasIncremental,
+  auditarCategoriaIncremental
 };

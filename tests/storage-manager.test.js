@@ -168,12 +168,16 @@ async function request(server, metodo, caminho, papel, body) {
       const audit = await request(server, "POST", "/admin/storage/auditar?dataDir=C:/Windows&top=9999", "admin_master", { dataDir: "C:/Windows", top: 9999 });
       assert.strictEqual(audit.status, 200);
       assert.strictEqual(audit.body.ok, true);
-      assert.strictEqual(audit.body.dataDir, "/data", "rota nao deve aceitar caminho arbitrario do usuario");
-      assert(audit.body.filas.workspaces.user_a, "auditoria deve usar somente dataDir injetado/oficial");
-      assert(!JSON.stringify(audit.body).includes("Produto secreto"), "rota nao deve retornar payload de oferta");
+      assert.strictEqual(audit.body.auditoriaMonoliticaDesativada, true, "rota monolitica deve apenas orientar uso incremental");
 
-      criarRotasStorageManager._setAuditoriaEmExecucaoParaTeste(true);
-      const conflito = await request(server, "POST", "/admin/storage/auditar", "admin_master", null);
+      const filasIncremental = await request(server, "GET", "/admin/storage/filas?dataDir=C:/Windows&limit=1", "admin_master", null);
+      assert.strictEqual(filasIncremental.status, 200);
+      assert.strictEqual(filasIncremental.body.ok, true);
+      assert(filasIncremental.body.filas.some(fila => fila.workspaceId === "user_a"), "rota incremental deve usar somente dataDir injetado/oficial");
+      assert(!JSON.stringify(filasIncremental.body).includes("Produto secreto"), "rota incremental nao deve retornar payload de oferta");
+
+      criarRotasStorageManager._setEscopoEmExecucaoParaTeste("filas", true);
+      const conflito = await request(server, "GET", "/admin/storage/filas", "admin_master", null);
       assert.strictEqual(conflito.status, 409, "segunda auditoria simultanea deve receber 409");
       assert.strictEqual(conflito.body.erro, "auditoria_storage_em_execucao");
       criarRotasStorageManager._resetEstadoParaTeste();

@@ -5,9 +5,12 @@ const storageService = require("./storage.service");
 const { POLITICAS_RETENCAO_PADRAO } = require("./storage.types");
 const repository = require("./storage.repository");
 
-const DEFAULT_TIMEOUT_MS = 30000;
-const MAX_TIMEOUT_MS = 120000;
+const DEFAULT_TIMEOUT_MS = 8000;
+const MAX_TIMEOUT_MS = 30000;
+const DEFAULT_LIMIT = 10;
+const MAX_LIMIT = 50;
 let auditoriaEmExecucao = false;
+const escoposEmExecucao = new Set();
 let ultimaAuditoria = null;
 
 function statusErro(erro) {
@@ -25,6 +28,10 @@ function limitarNumero(valor, padrao, min, max) {
   const numero = Number(valor);
   if (!Number.isFinite(numero)) return padrao;
   return Math.max(min, Math.min(max, Math.floor(numero)));
+}
+
+function limitarTexto(valor, padrao = "") {
+  return String(valor || padrao || "").trim();
 }
 
 function resumirUltimaAuditoria(auditoria) {
@@ -57,9 +64,50 @@ function criarRotasStorageManager(deps = {}) {
     return {
       dataDir,
       top: limitarNumero(req.query?.top ?? req.body?.top, 50, 1, 100),
+      topFiles: limitarNumero(req.query?.topFiles ?? req.body?.topFiles, 10, 1, 20),
+      limit: limitarNumero(req.query?.limit ?? req.body?.limit, DEFAULT_LIMIT, 1, MAX_LIMIT),
+      cursor: limitarTexto(req.query?.cursor ?? req.body?.cursor),
+      maxFiles: limitarNumero(req.query?.maxFiles ?? req.body?.maxFiles, 2000, 1, 10000),
       recentMinutes: limitarNumero(req.query?.recentMinutes ?? req.body?.recentMinutes, 30, 1, 1440),
       timeoutMs: limitarNumero(req.query?.timeoutMs ?? req.body?.timeoutMs, timeoutPadraoMs, 1000, MAX_TIMEOUT_MS)
     };
+  }
+
+  async function executarEscopo(req, res, escopo, fn) {
+    if (!exigirAdminMaster(req, res)) return;
+    if (escoposEmExecucao.has(escopo)) {
+      return res.status(409).json({
+        ok: false,
+        erro: "auditoria_storage_em_execucao",
+        escopo
+      });
+    }
+
+    escoposEmExecucao.add(escopo);
+    auditoriaEmExecucao = escoposEmExecucao.size > 0;
+    try {
+      const resultado = await fn();
+      ultimaAuditoria = {
+        geradoEm: new Date().toISOString(),
+        escopo,
+        duracaoMs: resultado?.duracaoMs,
+        timeoutMs: resultado?.timeoutMs,
+        parcial: resultado?.parcial,
+        timeoutAtingido: resultado?.timeoutAtingido
+      };
+      return res.json(resultado);
+    } catch (erro) {
+      ultimaAuditoria = {
+        ok: false,
+        geradoEm: new Date().toISOString(),
+        escopo,
+        erro: erro.codigo || erro.message || "storage_manager_erro"
+      };
+      return res.status(statusErro(erro)).json(payloadErro(erro));
+    } finally {
+      escoposEmExecucao.delete(escopo);
+      auditoriaEmExecucao = escoposEmExecucao.size > 0;
+    }
   }
 
   router.get("/health", (req, res) => {
@@ -82,28 +130,43 @@ function criarRotasStorageManager(deps = {}) {
 
   router.post("/auditar", (req, res) => {
     if (!exigirAdminMaster(req, res)) return;
-    if (auditoriaEmExecucao) {
-      return res.status(409).json({
-        ok: false,
-        erro: "auditoria_storage_em_execucao"
-      });
-    }
+    return res.json({
+      ok: true,
+      modo: "somente_leitura",
+      aplicouMudancas: false,
+      auditoriaMonoliticaDesativada: true,
+      motivo: "auditoria_incremental_obrigatoria",
+      rotasIncrementais: [
+        "GET /admin/storage/health",
+        "GET /admin/storage/diretorios",
+        "GET /admin/storage/workspaces",
+        "GET /admin/storage/workspaces/:workspaceId",
+        "GET /admin/storage/filas",
+        "GET /admin/storage/categoria/:categoria"
+      ]
+    });
+  });
 
-    auditoriaEmExecucao = true;
-    try {
-      const diagnostico = storageService.gerarDiagnosticoStorage(opcoesConsulta(req));
-      ultimaAuditoria = diagnostico;
-      return res.json(diagnostico);
-    } catch (erro) {
-      ultimaAuditoria = {
-        ok: false,
-        geradoEm: new Date().toISOString(),
-        erro: erro.codigo || erro.message || "storage_manager_erro"
-      };
-      return res.status(statusErro(erro)).json(payloadErro(erro));
-    } finally {
-      auditoriaEmExecucao = false;
-    }
+  router.get("/diretorios", (req, res) => {
+    return executarEscopo(req, res, "diretorios", () => storageService.diagnosticarDiretorios(opcoesConsulta(req)));
+  });
+
+  router.get("/workspaces", (req, res) => {
+    return executarEscopo(req, res, "workspaces", () => storageService.diagnosticarWorkspaces(opcoesConsulta(req)));
+  });
+
+  router.get("/workspaces/:workspaceId", (req, res) => {
+    const workspaceId = String(req.params.workspaceId || "");
+    return executarEscopo(req, res, `workspace:${workspaceId}`, () => storageService.diagnosticarWorkspace(workspaceId, opcoesConsulta(req)));
+  });
+
+  router.get("/filas", (req, res) => {
+    return executarEscopo(req, res, "filas", () => storageService.diagnosticarFilas(opcoesConsulta(req)));
+  });
+
+  router.get("/categoria/:categoria", (req, res) => {
+    const categoria = String(req.params.categoria || "");
+    return executarEscopo(req, res, `categoria:${categoria}`, () => storageService.diagnosticarCategoria(categoria, opcoesConsulta(req)));
   });
 
   router.get("/politicas-retencao", (req, res) => {
@@ -127,8 +190,14 @@ criarRotasStorageManager._estadoParaTeste = () => ({ auditoriaEmExecucao, ultima
 criarRotasStorageManager._setAuditoriaEmExecucaoParaTeste = (valor) => {
   auditoriaEmExecucao = Boolean(valor);
 };
+criarRotasStorageManager._setEscopoEmExecucaoParaTeste = (escopo, valor) => {
+  if (valor) escoposEmExecucao.add(escopo);
+  else escoposEmExecucao.delete(escopo);
+  auditoriaEmExecucao = escoposEmExecucao.size > 0;
+};
 criarRotasStorageManager._resetEstadoParaTeste = () => {
   auditoriaEmExecucao = false;
+  escoposEmExecucao.clear();
   ultimaAuditoria = null;
 };
 
