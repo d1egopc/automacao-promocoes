@@ -42,6 +42,7 @@ const {
   congelarOfertaUniversal,
   resumoOfertaUniversalLog
 } = require("../oferta-universal.contract");
+const { normalizarDadosComerciais } = require("../../ofc-v2/normalizador-comercial");
 const fidelidadeObs = require("../../fidelidade/observabilidade-v1");
 const coberturaRadar = require("../../radar/cobertura-v1");
 const {
@@ -532,6 +533,42 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}) {
 
 function objetoSeguro(valor = {}) {
   return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
+}
+
+function normalizarDadosComerciaisV24Seguro({ oferta = {}, ofertaEntrada = {}, job = {}, evento = {} } = {}) {
+  try {
+    return {
+      ok: true,
+      contrato: normalizarDadosComerciais({
+        marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",
+        precoAtual: oferta.preco ?? ofertaEntrada.precoAtual ?? ofertaEntrada.preco,
+        precoAnterior: oferta.precoOriginal ?? ofertaEntrada.precoOriginal ?? ofertaEntrada.precoAntigo,
+        descontoPercentual: ofertaEntrada.descontoPercentual || ofertaEntrada.percentual || "",
+        valorCupom: ofertaEntrada.valorCupom || ofertaEntrada.cupomValor || "",
+        precoComCupom: ofertaEntrada.precoComCupom || ofertaEntrada.precoCupom || "",
+        parcelamento: ofertaEntrada.parcelamento || "",
+        moeda: oferta.moeda || ofertaEntrada.moeda || "BRL",
+        origem: `engine_importer:${oferta.marketplace || job.marketplace || job.marketplace_detectado || "desconhecido"}`,
+        textoOriginal: evento.texto_original || evento.textoOriginal || ""
+      })
+    };
+  } catch (erro) {
+    console.log("[OFC-V2.4-COMERCIAL-ERRO]", JSON.stringify({
+      workspaceId: job.cliente_id || job.clienteId || "",
+      marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",
+      ofertaId: job.oferta_id || null,
+      jobId: job.id || null,
+      motivo: "normalizador_comercial_exception",
+      erro: String(erro?.message || "erro_desconhecido").slice(0, 180),
+      aplicouMudancasOperacionais: false
+    }));
+    return {
+      ok: false,
+      contrato: null,
+      motivo: "normalizador_comercial_exception",
+      erro: String(erro?.message || "erro_desconhecido").slice(0, 180)
+    };
+  }
 }
 
 function normalizarMarketplaceMemoria(valor = "") {
@@ -1188,6 +1225,37 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   const motivoPersistencia = retidaV2
     ? (inteligenciaV2.motivoDecisao || inteligenciaV2.motivo || "retida_v2")
     : null;
+  const resultadoComercialV24 = normalizarDadosComerciaisV24Seguro({ oferta, ofertaEntrada, job, evento });
+  const comercialNormalizadoV24 = resultadoComercialV24.contrato;
+  metadataFinal = {
+    ...metadataFinal,
+    ofcV24: {
+      ...(objetoSeguro(metadataFinal.ofcV24)),
+      comercialNormalizado: comercialNormalizadoV24,
+      erroComercialNormalizado: resultadoComercialV24.ok ? null : {
+        motivo: resultadoComercialV24.motivo,
+        erro: resultadoComercialV24.erro
+      },
+      aplicouMudancasOperacionais: false,
+      fonte: "normalizador_comercial_shadow"
+    }
+  };
+  if (comercialNormalizadoV24) {
+    console.log(comercialNormalizadoV24.precoConfiavel ? "[OFC-V2.4-COMERCIAL-NORMALIZADO]" : "[OFC-V2.4-COMERCIAL-INVALIDO]", JSON.stringify({
+      workspaceId: job.cliente_id || job.clienteId || "",
+      marketplace: comercialNormalizadoV24.marketplace,
+      ofertaId: job.oferta_id || null,
+      jobId: job.id || null,
+      precoAtual: comercialNormalizadoV24.precoAtual,
+      precoAnterior: comercialNormalizadoV24.precoAnterior,
+      descontoPercentual: comercialNormalizadoV24.descontoPercentual,
+      precoComCupom: comercialNormalizadoV24.precoComCupom,
+      precoOrigem: comercialNormalizadoV24.precoOrigem,
+      precoConfiavel: comercialNormalizadoV24.precoConfiavel,
+      motivo: comercialNormalizadoV24.avisoPreco || "",
+      calculadoEm: comercialNormalizadoV24.calculadoEm
+    }));
+  }
   const ofertaUniversalInicial = montarOfertaUniversalEngine({
     oferta,
     ofertaEntrada,

@@ -4,6 +4,7 @@ const { criarFilaAtivaShadowOfc } = require("./active-queue.service");
 const { criarFluxoVivoShadowOfc } = require("./live-flow.service");
 const { criarFluxoComercialShadowOfc } = require("./commercial-flow.service");
 const { criarGateAbsorcaoShadowOfc } = require("./absorption-gate.service");
+const { criarAuditoriaOfcV24Shadow } = require("../../ofc-v2/auditoria-ofc");
 
 function logOfc(tag, payload = {}) {
   try {
@@ -166,6 +167,43 @@ function logarGateAbsorcaoShadow(rodadaId, gateAbsorcao = {}) {
   logOfc("[OFC-GATE-ESTEIRA-VIVA-ERRO]", erroPayload);
 }
 
+function logarAuditoriaV24Shadow(rodadaId, auditoriaV24 = {}) {
+  if (auditoriaV24.ok) {
+    logOfc("[OFC-V2.4-AUDITORIA-FILA-FIXA]", {
+      rodadaId,
+      modo: auditoriaV24.modo,
+      aplicouMudancas: auditoriaV24.aplicouMudancas,
+      regras: auditoriaV24.auditoriaFilaFixa,
+      duracaoMs: auditoriaV24.duracaoMs
+    });
+    logOfc("[OFC-V2.4-METRICA-WORKSPACE]", {
+      rodadaId,
+      modo: auditoriaV24.modo,
+      aplicouMudancas: auditoriaV24.aplicouMudancas,
+      workspaces: auditoriaV24.metricasWorkspace,
+      duracaoMs: auditoriaV24.duracaoMs
+    });
+    logOfc("[OFC-V2.4-UTO-CALCULADA]", {
+      rodadaId,
+      modo: auditoriaV24.modo,
+      aplicouMudancas: auditoriaV24.aplicouMudancas,
+      uto: auditoriaV24.uto,
+      duracaoMs: auditoriaV24.duracaoMs
+    });
+    return;
+  }
+
+  logOfc("[OFC-V2.4-AUDITORIA-ERRO]", {
+    rodadaId,
+    modo: auditoriaV24.modo || "shadow",
+    aplicouMudancas: false,
+    failSafe: true,
+    motivo: auditoriaV24.motivo || "erro_auditoria_v24_shadow",
+    erro: String(auditoriaV24.erro || "erro_desconhecido").slice(0, 180),
+    duracaoMs: auditoriaV24.duracaoMs
+  });
+}
+
 async function executarObservabilidadeOfc(opcoes = {}) {
   const inicio = Date.now();
   const rodadaId = opcoes.rodadaId || "";
@@ -269,6 +307,11 @@ async function executarObservabilidadeOfc(opcoes = {}) {
     });
     logarGateAbsorcaoShadow(rodadaId, gateAbsorcao);
 
+    const auditoriaV24 = criarAuditoriaOfcV24Shadow({
+      gateAbsorcao
+    });
+    logarAuditoriaV24Shadow(rodadaId, auditoriaV24);
+
     return {
       ok: true,
       modo: "shadow",
@@ -279,7 +322,8 @@ async function executarObservabilidadeOfc(opcoes = {}) {
       filaAtiva,
       fluxoVivo,
       fluxoComercial,
-      gateAbsorcao
+      gateAbsorcao,
+      auditoriaV24
     };
   } catch (e) {
     logOfc("[OFC-ERRO]", {
