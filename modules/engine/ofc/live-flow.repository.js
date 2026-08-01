@@ -2,6 +2,7 @@ const { queryEngine } = require("../database");
 
 const STATUS_VIVOS_FLUXO = ["pendente", "pronto_para_importar", "processando", "importando"];
 const STATUS_CIRCULAVEIS_FLUXO = ["pendente", "pronto_para_importar"];
+const STATUS_EM_CURSO_PROTEGIDOS_FLUXO = ["processando", "importando"];
 
 function limitarInteiro(valor, padrao, minimo, maximo) {
   const numero = Number(valor);
@@ -17,7 +18,7 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
   const janela = limitarInteiro(janelaMinutos, 15, 1, 120);
   const limite = limitarInteiro(limiteAmostra, 2000, 1, 5000);
 
-  const [vivos, circulaveis, chegada, consumo, expiracao, primeiraTentativa, radarOferta, amostra] = await Promise.all([
+  const [vivos, circulaveis, emCursoProtegidos, saudeEmCurso, chegada, consumo, expiracao, primeiraTentativa, radarOferta, amostra, primeiraTentativaReset] = await Promise.all([
     queryEngine(
       `SELECT COUNT(*)::int AS total,
               MIN(criado_em) AS mais_antigo_em,
@@ -35,6 +36,27 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
          FROM engine_jobs_cliente
         WHERE status = ANY($1::text[])`,
       [STATUS_CIRCULAVEIS_FLUXO]
+    ),
+    queryEngine(
+      `SELECT COUNT(*)::int AS total,
+              MIN(criado_em) AS mais_antigo_em,
+              MAX(criado_em) AS mais_novo_em,
+              COALESCE(AVG(EXTRACT(EPOCH FROM (NOW() - criado_em)) * 1000), 0)::bigint AS idade_media_ms
+         FROM engine_jobs_cliente
+        WHERE status = ANY($1::text[])`,
+      [STATUS_EM_CURSO_PROTEGIDOS_FLUXO]
+    ),
+    queryEngine(
+      `SELECT status,
+              COUNT(*)::int AS total,
+              COALESCE(MAX(EXTRACT(EPOCH FROM (NOW() - criado_em)) * 1000), 0)::bigint AS idade_maxima_ms,
+              COUNT(*) FILTER (
+                WHERE criado_em <= NOW() - INTERVAL '30 minutes'
+              )::int AS suspeitos_lock
+         FROM engine_jobs_cliente
+        WHERE status = ANY($1::text[])
+        GROUP BY status`,
+      [STATUS_EM_CURSO_PROTEGIDOS_FLUXO]
     ),
     queryEngine(
       `SELECT COUNT(*)::int AS total,
@@ -69,7 +91,13 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
           GROUP BY job_id
        )
        SELECT COUNT(*)::int AS total,
-              COALESCE(AVG(EXTRACT(EPOCH FROM (p.primeira_tentativa_em - j.criado_em)) * 1000), 0)::bigint AS media_ms
+              COALESCE(AVG(EXTRACT(EPOCH FROM (p.primeira_tentativa_em - j.criado_em)) * 1000), 0)::bigint AS media_ms,
+              COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (
+                ORDER BY EXTRACT(EPOCH FROM (p.primeira_tentativa_em - j.criado_em)) * 1000
+              ), 0)::bigint AS mediana_ms,
+              COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (
+                ORDER BY EXTRACT(EPOCH FROM (p.primeira_tentativa_em - j.criado_em)) * 1000
+              ), 0)::bigint AS p95_ms
          FROM primeira p
          JOIN engine_jobs_cliente j ON j.id = p.job_id
         WHERE p.primeira_tentativa_em >= j.criado_em`,
@@ -106,10 +134,32 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
         ORDER BY criado_em ASC, id ASC
         LIMIT $2`,
       [STATUS_CIRCULAVEIS_FLUXO, limite]
+    ),
+    queryEngine(
+      `WITH reset AS (
+         SELECT MAX(cutoff_congelado) AS cutoff_congelado
+           FROM engine_reset_operacional_operacoes
+          WHERE status = 'execute_concluido'
+       ),
+       primeira AS (
+         SELECT job_id, MIN(criado_em) AS primeira_tentativa_em
+           FROM engine_processamentos
+          WHERE criado_em >= NOW() - ($1::int * INTERVAL '1 minute')
+          GROUP BY job_id
+       )
+       SELECT COUNT(*) FILTER (WHERE j.criado_em < r.cutoff_congelado)::int AS total_antes_reset,
+              COUNT(*) FILTER (WHERE j.criado_em >= r.cutoff_congelado)::int AS total_depois_reset,
+              MAX(r.cutoff_congelado) AS cutoff_reset_referencia
+         FROM primeira p
+         JOIN engine_jobs_cliente j ON j.id = p.job_id
+         CROSS JOIN reset r
+        WHERE p.primeira_tentativa_em >= j.criado_em
+          AND r.cutoff_congelado IS NOT NULL`,
+      [janela]
     )
   ]);
 
-  const consultas = [vivos, circulaveis, chegada, consumo, expiracao, primeiraTentativa, radarOferta, amostra];
+  const consultas = [vivos, circulaveis, emCursoProtegidos, saudeEmCurso, chegada, consumo, expiracao, primeiraTentativa, radarOferta, amostra];
   const falha = consultas.find(item => !item.ok);
 
   return {
@@ -118,10 +168,25 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
     limiteAmostra: limite,
     vivos: linhaUnica(vivos, { total: 0 }),
     circulaveis: linhaUnica(circulaveis, { total: 0 }),
+    emCursoProtegidos: linhaUnica(emCursoProtegidos, { total: 0 }),
+    saudeEmCurso: saudeEmCurso.ok ? saudeEmCurso.resultado?.rows || [] : [],
     chegada: linhaUnica(chegada, { total: 0 }),
     consumo: linhaUnica(consumo, { total: 0 }),
     expiracao: linhaUnica(expiracao, { total: 0 }),
-    primeiraTentativa: linhaUnica(primeiraTentativa, { total: 0, media_ms: 0 }),
+    primeiraTentativa: {
+      ...linhaUnica(primeiraTentativa, { total: 0, media_ms: 0, mediana_ms: 0, p95_ms: 0 }),
+      ...(
+        primeiraTentativaReset.ok
+          ? linhaUnica(primeiraTentativaReset, {})
+          : {
+              total_antes_reset: null,
+              total_depois_reset: null,
+              cutoff_reset_referencia: null,
+              reset_disponivel: false,
+              motivo_reset_indisponivel: "tabela_reset_indisponivel"
+            }
+      )
+    },
     radarOferta: linhaUnica(radarOferta, { total: 0, media_ms: 0 }),
     amostraCirculavel: amostra.ok ? amostra.resultado?.rows || [] : [],
     erro: falha?.erro || "",
@@ -132,5 +197,6 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
 module.exports = {
   STATUS_VIVOS_FLUXO,
   STATUS_CIRCULAVEIS_FLUXO,
+  STATUS_EM_CURSO_PROTEGIDOS_FLUXO,
   consultarFluxoVivoOfc
 };
