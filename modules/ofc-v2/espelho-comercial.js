@@ -359,6 +359,368 @@ function extrairBeneficioTexto(textoOriginal = "", oferta = {}, ofertaEntrada = 
   return primeiroTexto(ofertaEntrada.beneficioExtra, ofertaEntrada.beneficioTexto, oferta.beneficioExtra, oferta.beneficioTexto);
 }
 
+const ORDEM_BLOCOS_COMERCIAIS_V26 = Object.freeze({
+  titulo: 10,
+  subtitulo_comercial: 15,
+  marketplace: 20,
+  categoria: 30,
+  vendedor: 35,
+  origem_brasil: 38,
+  observacao_comercial: 40,
+  especificacao_util: 45,
+  preco_referencia: 50,
+  preco_oferta: 60,
+  preco_pix: 65,
+  preco_final_condicionado: 70,
+  parcelamento: 80,
+  valor_parcela: 82,
+  quantidade_parcelas: 84,
+  economia: 90,
+  desconto_percentual: 95,
+  faixa_preco: 100,
+  preco_variacao: 105,
+  moeda: 110,
+  requisito_preco: 115,
+  cupom_codigo: 120,
+  cupons_alternativos: 122,
+  cupom_percentual: 124,
+  cupom_valor: 126,
+  cupom_teto: 128,
+  cupom_minimo_compra: 130,
+  cupom_sem_codigo: 132,
+  instrucao_cupom: 135,
+  cashback: 140,
+  moedas: 145,
+  frete: 150,
+  prime_programa: 155,
+  garantia: 160,
+  pre_venda: 165,
+  prazo_envio: 170,
+  beneficio_app: 175,
+  beneficio: 180,
+  avaliacao_nota: 190,
+  avaliacao_quantidade: 195,
+  vendas: 200,
+  selo_mais_vendido: 205,
+  link_produto_original: 210,
+  link_expandido: 212,
+  link_afiliado: 215,
+  link_resgate: 220,
+  link_app: 225,
+  link_pc: 230,
+  link_moedas: 235,
+  links_produto_alternativos: 240,
+  link_auxiliar: 245,
+  link_fonte_ignorado: 250,
+  aviso: 260,
+  rodape: 270,
+  texto_personalizado: 280
+});
+
+const TIPOS_BLOCOS_COMERCIAIS_V26 = Object.freeze(Object.keys(ORDEM_BLOCOS_COMERCIAIS_V26));
+
+function valorBlocoComparacao(valor) {
+  if (valor == null) return "";
+  if (typeof valor === "object") {
+    try {
+      return JSON.stringify(valor);
+    } catch (_) {
+      return "";
+    }
+  }
+  return texto(valor);
+}
+
+function valorEstruturadoUtil(valor) {
+  if (valor === null || valor === undefined || valor === "") return false;
+  if (Array.isArray(valor)) return valor.length > 0;
+  if (typeof valor === "object") {
+    return Object.values(valor).some(item => valorEstruturadoUtil(item));
+  }
+  return true;
+}
+
+function dedupeKeyBloco(tipo = "", textoOriginal = "", valorEstruturado = null, origem = "") {
+  return [
+    texto(tipo),
+    normalizarComparacao(textoOriginal || valorBlocoComparacao(valorEstruturado)).replace(/\s+/g, " ").trim(),
+    normalizarComparacao(origem).replace(/\s+/g, "_")
+  ].filter(Boolean).join(":").slice(0, 240);
+}
+
+function criarBlocoComercial({
+  tipo = "",
+  textoOriginal = null,
+  valorEstruturado = null,
+  moeda = null,
+  origem = "",
+  confianca = "media",
+  essencial = false,
+  requisitos = [],
+  visibilidadePadrao = "opcional",
+  avisos = [],
+  metadata = {}
+} = {}) {
+  const tipoNormalizado = texto(tipo);
+  if (!TIPOS_BLOCOS_COMERCIAIS_V26.includes(tipoNormalizado)) return null;
+  const textoPreservado = texto(textoOriginal);
+  const temValor = valorEstruturadoUtil(valorEstruturado);
+  if (!textoPreservado && !temValor) return null;
+  const ordemSugerida = ORDEM_BLOCOS_COMERCIAIS_V26[tipoNormalizado];
+  const origemBloco = texto(origem) || "documento_comercial_canonico";
+  const chave = dedupeKeyBloco(tipoNormalizado, textoPreservado, valorEstruturado, origemBloco);
+  if (!chave) return null;
+  return {
+    id: "",
+    tipo: tipoNormalizado,
+    textoOriginal: textoPreservado || null,
+    valorEstruturado: temValor ? valorEstruturado : null,
+    moeda: moeda || null,
+    origem: origemBloco,
+    confianca: texto(confianca) || "media",
+    essencial: essencial === true,
+    requisitos: [...new Set(lista(requisitos).map(texto).filter(Boolean))],
+    ordemSugerida,
+    visibilidadePadrao: essencial === true ? "obrigatorio" : (texto(visibilidadePadrao) || "opcional"),
+    dedupeKey: chave,
+    avisos: [...new Set(lista(avisos).map(texto).filter(Boolean))],
+    metadata: objeto(metadata)
+  };
+}
+
+function adicionarBlocoComercial(blocos = [], entrada = {}) {
+  const bloco = criarBlocoComercial(entrada);
+  if (!bloco) return false;
+  if (blocos.some(item => item.dedupeKey === bloco.dedupeKey)) return false;
+  blocos.push(bloco);
+  return true;
+}
+
+function finalizarBlocosComerciais(blocos = []) {
+  return blocos
+    .sort((a, b) => a.ordemSugerida - b.ordemSugerida || a.tipo.localeCompare(b.tipo) || a.dedupeKey.localeCompare(b.dedupeKey))
+    .map((bloco, indice) => ({ ...bloco, id: `b${String(indice + 1).padStart(3, "0")}_${bloco.tipo}` }));
+}
+
+function cupomNecessarioParaPreco(doc = {}) {
+  const fonte = normalizarComparacao([
+    doc.precoPorTexto,
+    doc.precoPixTexto,
+    doc.instrucaoTexto,
+    doc.beneficioTexto,
+    ...(Array.isArray(doc.condicoesComerciais) ? doc.condicoesComerciais : [])
+  ].filter(Boolean).join(" "));
+  return /\b(?:cupom|codigo|cod|voucher)\b/.test(fonte);
+}
+
+function pixNecessarioParaPreco(doc = {}) {
+  return /\bpix\b/i.test(texto(`${doc.precoPorTexto || ""} ${doc.precoPixTexto || ""}`));
+}
+
+function moedaDoTextoPreco(valor = "", fallback = "") {
+  const fonte = texto(valor);
+  if (/US\$|USD|U\$|\$/i.test(fonte) && !/R\$/i.test(fonte)) return "USD";
+  if (/EUR|€/.test(fonte)) return "EUR";
+  if (/R\$/i.test(fonte)) return "BRL";
+  return texto(fallback) || null;
+}
+
+function extrairParcelamentoEstruturado(valor = "") {
+  const fonte = texto(valor);
+  const match = fonte.match(/(\d+)\s*x(?:\s*de)?\s*((?:R\$|US\$|USD|U\$|\$)?\s*[\d.]+(?:[,.]\d{1,2})?)/i);
+  if (!match) return null;
+  return {
+    quantidade: Number(match[1]),
+    valorParcela: numeroMonetario(match[2]),
+    semJuros: /\bsem\s+juros\b/i.test(fonte)
+  };
+}
+
+function textoPossuiNotaReal(valor = "") {
+  const fonte = texto(valor);
+  const numero = Number(fonte.replace(",", "."));
+  return Number.isFinite(numero) && numero >= 1 && numero <= 5;
+}
+
+function primeiroNumeroTexto(valor = "") {
+  const match = texto(valor).match(/\d+[\d.]*/);
+  return match ? Number(match[0].replace(/\./g, "")) : null;
+}
+
+function contextoUrlNoTexto(textoOriginal = "", url = "") {
+  const alvo = texto(url);
+  if (!alvo) return "";
+  return urlsDoTexto(textoOriginal).find(item => item.url === alvo)?.linha || "";
+}
+
+function classificarTipoLinkBloco(item = {}, textoOriginal = "", marketplace = "") {
+  const url = texto(item.url);
+  const tipo = texto(item.tipo);
+  const contexto = normalizarComparacao(contextoUrlNoTexto(textoOriginal, url));
+  const mp = normalizarComparacao(marketplace);
+  if (/chat\.whatsapp|whatsapp\.com|t\.me|telegram|grupo|canal/i.test(url)) return "link_fonte_ignorado";
+  if (/youtube\.com|youtu\.be|instagram\.com|facebook\.com|x\.com|twitter\.com/i.test(url)) return "link_auxiliar";
+  if (mp === "amazon" && tipo === "resgate") return "link_produto_original";
+  if (tipo === "resgate") return "link_resgate";
+  if (tipo === "app") return "link_app";
+  if (tipo === "pc") return "link_pc";
+  if (tipo === "moedas" || /\bmoeda|moedas|coins?\b/.test(contexto)) return "link_moedas";
+  if (tipo === "produto" && mp === "aliexpress" && /\bapp\b/.test(contexto)) return "link_app";
+  if (tipo === "produto" && mp === "aliexpress" && /\bpc|site\b/.test(contexto)) return "link_pc";
+  return "link_produto_original";
+}
+
+function adicionarBlocosDeLinks(blocos = [], doc = {}, contexto = {}) {
+  const links = (Array.isArray(doc.linksComerciais) ? doc.linksComerciais : [])
+    .filter(item => !textoComercialEquivalente(item?.url || "", doc.linkAfiliado || ""));
+  const produtos = links.filter(item => classificarTipoLinkBloco(item, contexto.textoOriginal, doc.marketplace) === "link_produto_original");
+  const produtosAmbiguos = produtos.length > 1;
+
+  if (doc.linkAfiliado) {
+    adicionarBlocoComercial(blocos, {
+      tipo: "link_afiliado",
+      textoOriginal: doc.linkAfiliado,
+      valorEstruturado: { url: doc.linkAfiliado },
+      origem: "documento.linkAfiliado",
+      confianca: "alta",
+      essencial: true,
+      visibilidadePadrao: "obrigatorio"
+    });
+  }
+
+  for (const item of links) {
+    let tipoBloco = classificarTipoLinkBloco(item, contexto.textoOriginal, doc.marketplace);
+    const avisos = [];
+    if (tipoBloco === "link_produto_original" && produtosAmbiguos) {
+      tipoBloco = "links_produto_alternativos";
+      avisos.push("links_produto_ambiguos");
+    }
+    adicionarBlocoComercial(blocos, {
+      tipo: tipoBloco,
+      textoOriginal: item.url,
+      valorEstruturado: { url: item.url, papelOriginal: item.tipo || "" },
+      origem: "documento.linksComerciais",
+      confianca: tipoBloco === "link_fonte_ignorado" ? "alta" : "media",
+      essencial: ["link_resgate"].includes(tipoBloco) ? linkResgateEssencial(doc, {}) : false,
+      visibilidadePadrao: tipoBloco === "link_fonte_ignorado" ? "oculto" : "padrao",
+      avisos
+    });
+  }
+}
+
+function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
+  const blocos = [];
+  const moedaPadrao = texto(contexto.comercialNormalizado?.moeda || contexto.oferta?.moeda || contexto.ofertaEntrada?.moeda || "");
+  const cupomEssencial = cupomNecessarioParaPreco(doc);
+  const requisitosPreco = [];
+  if (pixNecessarioParaPreco(doc)) requisitosPreco.push("pagamento_pix");
+  if (cupomEssencial) requisitosPreco.push("cupom");
+
+  adicionarBlocoComercial(blocos, { tipo: "titulo", textoOriginal: doc.tituloOriginal, origem: "documento.tituloOriginal", confianca: doc.tituloOriginal ? "alta" : "baixa", essencial: true, visibilidadePadrao: "obrigatorio" });
+  adicionarBlocoComercial(blocos, { tipo: "marketplace", textoOriginal: doc.marketplace, origem: "documento.marketplace", confianca: "alta" });
+  adicionarBlocoComercial(blocos, { tipo: "categoria", textoOriginal: primeiroTexto(contexto.ofertaEntrada?.categoria, contexto.oferta?.categoria, contexto.comercialNormalizado?.categoria), origem: "campos_estruturados.categoria", confianca: "media" });
+  adicionarBlocoComercial(blocos, { tipo: "vendedor", textoOriginal: primeiroTexto(contexto.ofertaEntrada?.vendedor, contexto.ofertaEntrada?.seller, contexto.oferta?.vendedor, contexto.oferta?.seller), origem: "campos_estruturados.vendedor", confianca: "media" });
+
+  if (/\b(?:direto\s+do\s+brasil|produto\s+no\s+brasil|estoque\s+no\s+brasil)\b/i.test(contexto.textoOriginal || "")) {
+    adicionarBlocoComercial(blocos, { tipo: "origem_brasil", textoOriginal: "Direto do Brasil", origem: "texto_comercial_original", confianca: "media" });
+  }
+
+  adicionarBlocoComercial(blocos, { tipo: "preco_referencia", textoOriginal: doc.precoDeTexto, valorEstruturado: { valor: numeroMonetario(doc.precoDeTexto) }, moeda: moedaDoTextoPreco(doc.precoDeTexto, moedaPadrao), origem: "documento.precoDeTexto", confianca: "alta" });
+  adicionarBlocoComercial(blocos, { tipo: "preco_oferta", textoOriginal: doc.precoPorTexto, valorEstruturado: { valor: numeroMonetario(doc.precoPorTexto) }, moeda: moedaDoTextoPreco(doc.precoPorTexto, moedaPadrao), origem: "documento.precoPorTexto", confianca: "alta", essencial: true, requisitos: requisitosPreco, visibilidadePadrao: "obrigatorio" });
+  adicionarBlocoComercial(blocos, { tipo: "preco_pix", textoOriginal: doc.precoPixTexto, valorEstruturado: { valor: numeroMonetario(doc.precoPixTexto) }, moeda: moedaDoTextoPreco(doc.precoPixTexto, moedaPadrao), origem: "documento.precoPixTexto", confianca: "alta", essencial: true, requisitos: ["pagamento_pix"], visibilidadePadrao: "obrigatorio" });
+
+  const precoFinal = primeiroTexto(contexto.precosTexto?.precoFinalTexto, contexto.espelhoComercial?.precoFinalTexto);
+  if (precoFinal && !textoComercialEquivalente(precoFinal, doc.precoPorTexto)) {
+    adicionarBlocoComercial(blocos, { tipo: "preco_final_condicionado", textoOriginal: precoFinal, valorEstruturado: { valor: numeroMonetario(precoFinal) }, moeda: moedaDoTextoPreco(precoFinal, moedaPadrao), origem: "precosTexto.precoFinalTexto", confianca: "alta", essencial: true, requisitos: requisitosPreco, visibilidadePadrao: "obrigatorio" });
+  }
+
+  const parcelamentoEstruturado = extrairParcelamentoEstruturado(doc.parcelamentoTexto);
+  adicionarBlocoComercial(blocos, { tipo: "parcelamento", textoOriginal: doc.parcelamentoTexto, valorEstruturado: parcelamentoEstruturado, moeda: moedaDoTextoPreco(doc.parcelamentoTexto, moedaPadrao), origem: "documento.parcelamentoTexto", confianca: "media" });
+  if (parcelamentoEstruturado?.valorParcela != null) adicionarBlocoComercial(blocos, { tipo: "valor_parcela", textoOriginal: doc.parcelamentoTexto, valorEstruturado: { valor: parcelamentoEstruturado.valorParcela }, moeda: moedaDoTextoPreco(doc.parcelamentoTexto, moedaPadrao), origem: "documento.parcelamentoTexto", confianca: "media" });
+  if (parcelamentoEstruturado?.quantidade != null) adicionarBlocoComercial(blocos, { tipo: "quantidade_parcelas", textoOriginal: `${parcelamentoEstruturado.quantidade}x`, valorEstruturado: { quantidade: parcelamentoEstruturado.quantidade }, origem: "documento.parcelamentoTexto", confianca: "media" });
+
+  adicionarBlocoComercial(blocos, { tipo: "economia", textoOriginal: primeiroTexto(contexto.ofertaEntrada?.economia, contexto.oferta?.economia, contexto.comercialNormalizado?.economia), origem: "campos_estruturados.economia", confianca: "media" });
+  adicionarBlocoComercial(blocos, { tipo: "desconto_percentual", textoOriginal: primeiroTexto(contexto.ofertaEntrada?.descontoPercentual, contexto.ofertaEntrada?.desconto, contexto.oferta?.descontoPercentual, contexto.oferta?.desconto, contexto.comercialNormalizado?.descontoPercentual), origem: "campos_estruturados.desconto", confianca: "media" });
+  adicionarBlocoComercial(blocos, { tipo: "moeda", textoOriginal: moedaDoTextoPreco(`${doc.precoPorTexto || ""} ${doc.precoPixTexto || ""}`, moedaPadrao), origem: "documento.precos", confianca: "media" });
+  for (const requisito of requisitosPreco) adicionarBlocoComercial(blocos, { tipo: "requisito_preco", textoOriginal: requisito, origem: "documento.requisitos_preco", confianca: "alta", essencial: true, visibilidadePadrao: "obrigatorio" });
+
+  const cupons = dedupCupons(separarCupons(doc.cupomTexto));
+  cupons.forEach((cupom, indice) => {
+    adicionarBlocoComercial(blocos, {
+      tipo: indice === 0 ? "cupom_codigo" : "cupons_alternativos",
+      textoOriginal: cupom,
+      valorEstruturado: { codigo: cupom },
+      origem: "documento.cupomTexto",
+      confianca: lista(doc.confianca?.motivos).includes("cupom_explicito") ? "alta" : "media",
+      essencial: cupomEssencial,
+      requisitos: cupomEssencial ? ["preco_condicionado"] : [],
+      visibilidadePadrao: cupomEssencial ? "obrigatorio" : "padrao"
+    });
+  });
+
+  adicionarBlocoComercial(blocos, { tipo: "cupom_valor", textoOriginal: primeiroTexto(contexto.ofertaEntrada?.valorCupom, contexto.ofertaEntrada?.cupomValor, contexto.oferta?.valorCupom, contexto.oferta?.cupomValor), origem: "campos_estruturados.cupom_valor", confianca: "media" });
+  adicionarBlocoComercial(blocos, { tipo: "cupom_percentual", textoOriginal: primeiroTexto(contexto.ofertaEntrada?.percentualCupom, contexto.ofertaEntrada?.cupomPercentual, contexto.oferta?.percentualCupom, contexto.oferta?.cupomPercentual), origem: "campos_estruturados.cupom_percentual", confianca: "media" });
+  if (!cupons.length && /\b(?:resgate|ative|aplique|selecione).{0,40}\b(?:cupom|voucher)\b/i.test(`${doc.instrucaoTexto || ""} ${doc.beneficioTexto || ""} ${doc.resgateTexto || ""}`)) {
+    adicionarBlocoComercial(blocos, { tipo: "cupom_sem_codigo", textoOriginal: primeiroTexto(doc.instrucaoTexto, doc.beneficioTexto, doc.resgateTexto), origem: "documento.instrucao_cupom", confianca: "media", essencial: cupomNecessarioParaPreco(doc), requisitos: ["resgate_no_anuncio"] });
+  }
+  adicionarBlocoComercial(blocos, { tipo: "instrucao_cupom", textoOriginal: doc.instrucaoTexto, origem: "documento.instrucaoTexto", confianca: "alta", essencial: cupomNecessarioParaPreco(doc), requisitos: cupomEssencial ? ["cupom"] : [] });
+
+  adicionarBlocoComercial(blocos, { tipo: "cashback", textoOriginal: doc.cashbackTexto, origem: "documento.cashbackTexto", confianca: "media" });
+  if (/\bmoeda|moedas|coins?\b/i.test(`${contexto.textoOriginal || ""} ${doc.beneficioTexto || ""}`)) adicionarBlocoComercial(blocos, { tipo: "moedas", textoOriginal: primeiroTexto(doc.beneficioTexto, "Moedas"), origem: "texto_comercial_original", confianca: "media" });
+  adicionarBlocoComercial(blocos, { tipo: "frete", textoOriginal: doc.freteTexto, origem: "documento.freteTexto", confianca: "media" });
+  if (/\bprime\b/i.test(`${contexto.textoOriginal || ""} ${doc.beneficioTexto || ""}`)) adicionarBlocoComercial(blocos, { tipo: "prime_programa", textoOriginal: primeiroTexto(doc.beneficioTexto, "Prime"), origem: "texto_comercial_original", confianca: "media" });
+  if (/\bgarantia\b/i.test(`${contexto.textoOriginal || ""} ${doc.beneficioTexto || ""}`)) adicionarBlocoComercial(blocos, { tipo: "garantia", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bgarantia\b/) || doc.beneficioTexto, origem: "texto_comercial_original", confianca: "media" });
+  if (/\bpre\s*venda|pré\s*venda\b/i.test(contexto.textoOriginal || "")) adicionarBlocoComercial(blocos, { tipo: "pre_venda", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bpre\s*venda|pre venda\b/) || "Pré-venda", origem: "texto_comercial_original", confianca: "media" });
+  if (/\bprazo|envio\b/i.test(contexto.textoOriginal || "")) adicionarBlocoComercial(blocos, { tipo: "prazo_envio", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bprazo|envio\b/), origem: "texto_comercial_original", confianca: "media" });
+  if (/\bapp\b/i.test(`${contexto.textoOriginal || ""} ${doc.beneficioTexto || ""}`)) adicionarBlocoComercial(blocos, { tipo: "beneficio_app", textoOriginal: doc.beneficioTexto || primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bapp\b/), origem: "texto_comercial_original", confianca: "media" });
+  adicionarBlocoComercial(blocos, { tipo: "beneficio", textoOriginal: doc.beneficioTexto, origem: "documento.beneficioTexto", confianca: "media" });
+
+  const avaliacao = primeiroTexto(contexto.ofertaEntrada?.avaliacao, contexto.ofertaEntrada?.rating, contexto.ofertaEntrada?.nota, contexto.oferta?.avaliacao, contexto.oferta?.rating, contexto.oferta?.nota, contexto.comercialNormalizado?.avaliacao?.texto);
+  if (textoPossuiNotaReal(avaliacao)) adicionarBlocoComercial(blocos, { tipo: "avaliacao_nota", textoOriginal: avaliacao, valorEstruturado: { nota: Number(avaliacao.replace(",", ".")) }, origem: "campos_estruturados.avaliacao", confianca: "media" });
+  const avaliacoesQtd = primeiroTexto(contexto.ofertaEntrada?.quantidadeAvaliacoes, contexto.ofertaEntrada?.avaliacoes, contexto.oferta?.quantidadeAvaliacoes, contexto.oferta?.avaliacoes);
+  adicionarBlocoComercial(blocos, { tipo: "avaliacao_quantidade", textoOriginal: avaliacoesQtd, valorEstruturado: { quantidade: primeiroNumeroTexto(avaliacoesQtd) }, origem: "campos_estruturados.avaliacoes", confianca: "media" });
+  const vendas = primeiroTexto(contexto.ofertaEntrada?.vendas, contexto.ofertaEntrada?.quantidadeVendida, contexto.oferta?.vendas, contexto.oferta?.quantidadeVendida);
+  adicionarBlocoComercial(blocos, { tipo: "vendas", textoOriginal: vendas, valorEstruturado: { quantidade: primeiroNumeroTexto(vendas) }, origem: "campos_estruturados.vendas", confianca: "media" });
+  if (/\bmais\s+vendido|best\s*seller\b/i.test(contexto.textoOriginal || "")) adicionarBlocoComercial(blocos, { tipo: "selo_mais_vendido", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bmais\s+vendido|best seller\b/) || "Mais vendido", origem: "texto_comercial_original", confianca: "media" });
+
+  adicionarBlocosDeLinks(blocos, doc, contexto);
+  for (const aviso of lista(doc.avisos)) adicionarBlocoComercial(blocos, { tipo: "aviso", textoOriginal: aviso, origem: "documento.avisos", confianca: "media" });
+
+  return finalizarBlocosComerciais(blocos);
+}
+
+function resumoBlocosComerciaisV26(documento = {}) {
+  const blocos = Array.isArray(documento.blocos) ? documento.blocos : [];
+  const tiposPresentes = [...new Set(blocos.map(bloco => bloco.tipo).filter(Boolean))];
+  return {
+    totalBlocos: blocos.length,
+    tiposPresentes,
+    totalEssenciais: blocos.filter(bloco => bloco.essencial === true).length,
+    totalOpcionais: blocos.filter(bloco => bloco.essencial !== true).length,
+    totalLinks: blocos.filter(bloco => /^link/.test(bloco.tipo)).length,
+    avisos: [...new Set([
+      ...lista(documento.avisos),
+      ...blocos.flatMap(bloco => lista(bloco.avisos))
+    ].map(texto).filter(Boolean))].slice(0, 12)
+  };
+}
+
+function logBlocosComerciaisV26(tag = "", documento = {}, contexto = {}) {
+  try {
+    const resumo = resumoBlocosComerciaisV26(documento);
+    console.log(tag, JSON.stringify({
+      workspaceId: contexto.workspaceId || "",
+      jobId: contexto.jobId || null,
+      ofertaId: contexto.ofertaId || null,
+      marketplace: contexto.marketplace || documento.marketplace || "",
+      ...resumo,
+      aplicouMudancasOperacionais: false
+    }));
+  } catch (_) {
+    // Observabilidade Shadow nunca pode interferir no pipeline.
+  }
+}
+
 function extrairDocumentoComercialCanonico({
   textoOriginal = "",
   tituloOriginal = "",
@@ -401,7 +763,7 @@ function extrairDocumentoComercialCanonico({
   const instrucaoTexto = texto(instrucaoComercial);
   const cupomTexto = texto(cupom.cupomCodigo || cupom.cupomTexto || ofertaEntrada.cupom || oferta.cupom);
 
-  return {
+  const documento = {
     tituloOriginal: tituloOriginal || null,
     descricaoOriginal: textoOriginal || null,
     precoDeTexto: precoDeTexto || null,
@@ -428,6 +790,25 @@ function extrairDocumentoComercialCanonico({
     avisos: [...new Set((avisos || []).filter(Boolean))],
     condicoesComerciais: [...new Set((condicoesComerciais || []).map(texto).filter(Boolean))]
   };
+
+  try {
+    documento.blocos = construirBlocosComerciaisCanonicosV26(documento, {
+      textoOriginal,
+      oferta,
+      ofertaEntrada,
+      comercialNormalizado,
+      precosTexto
+    });
+  } catch (erro) {
+    documento.blocos = [];
+    documento.erroBlocosComerciais = {
+      motivo: "biblioteca_blocos_exception",
+      erro: String(erro?.message || "erro_desconhecido").slice(0, 180),
+      aplicouMudancasOperacionais: false
+    };
+  }
+
+  return documento;
 }
 
 function adicionarUnico(listaSaida, valor) {
@@ -913,6 +1294,19 @@ function construirEspelhoComercialV24(entrada = {}) {
     avisos: espelhoComercial.avisos,
     motivosConfianca
   });
+  const contextoLogBlocos = {
+    workspaceId: job.cliente_id || job.workspaceId || oferta.workspaceId || ofertaEntrada.workspaceId || "",
+    jobId: job.id || job.jobId || null,
+    ofertaId: oferta.id || oferta.ofertaId || ofertaEntrada.ofertaId || null,
+    marketplace
+  };
+  if (documentoComercialCanonico.erroBlocosComerciais) {
+    logBlocosComerciaisV26("[OFC-V2.6-BLOCOS-ERRO]", documentoComercialCanonico, contextoLogBlocos);
+  } else if (lista(documentoComercialCanonico.avisos).length || !lista(documentoComercialCanonico.blocos).length) {
+    logBlocosComerciaisV26("[OFC-V2.6-BLOCOS-INCOMPLETOS]", documentoComercialCanonico, contextoLogBlocos);
+  } else {
+    logBlocosComerciaisV26("[OFC-V2.6-BLOCOS-CRIADOS]", documentoComercialCanonico, contextoLogBlocos);
+  }
   espelhoComercial.documentoComercialCanonico = documentoComercialCanonico;
   const templateEspelhoShadow = montarTemplateEspelhoShadow(espelhoComercial, documentoComercialCanonico);
 

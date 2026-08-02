@@ -530,4 +530,245 @@ assert.deepStrictEqual(
   ["resgate", "produto", "produto"]
 );
 
+function blocosV26(resultado) {
+  return resultado.documentoComercialCanonico.blocos || [];
+}
+
+function tiposV26(resultado) {
+  return blocosV26(resultado).map(bloco => bloco.tipo);
+}
+
+function blocosTipo(resultado, tipo) {
+  return blocosV26(resultado).filter(bloco => bloco.tipo === tipo);
+}
+
+function blocoTipo(resultado, tipo) {
+  return blocosTipo(resultado, tipo)[0] || null;
+}
+
+function assertBloco(resultado, tipo, mensagem = tipo) {
+  assert.ok(blocoTipo(resultado, tipo), `bloco V2.6 ausente: ${mensagem}`);
+}
+
+function assertSemDuplicidadeDedupe(resultado) {
+  const chaves = blocosV26(resultado).map(bloco => bloco.dedupeKey);
+  assert.strictEqual(new Set(chaves).size, chaves.length, "dedupeKey V2.6 sem duplicidade");
+}
+
+function assertBlocosObrigatorios(resultado) {
+  for (const bloco of blocosV26(resultado)) {
+    assert.ok(bloco.id, "bloco tem id");
+    assert.ok(bloco.tipo, "bloco tem tipo");
+    assert.ok(bloco.origem, "bloco tem origem");
+    assert.ok(bloco.confianca, "bloco tem confianca");
+    assert.ok(Number.isFinite(bloco.ordemSugerida), "bloco tem ordem");
+    assert.ok(bloco.dedupeKey, "bloco tem dedupeKey");
+    assert.strictEqual(typeof bloco.essencial, "boolean", "bloco tem essencial booleano");
+  }
+}
+
+for (const fixture of [
+  mlCompleto,
+  mlTechnosCupomSemPix,
+  mlPixProprio,
+  mlSimples,
+  shopeeResgate,
+  shopeeSomenteProduto,
+  shopeeResgateDoisProdutos,
+  aliexpressMoedaEstrangeira,
+  aliexpressAppPc,
+  kabumSimples,
+  semCupom,
+  cashback,
+  parcelamento,
+  amazonRtxRecorte,
+  mlCompactado,
+  shopeeDoisLinks
+]) {
+  assert.ok(Array.isArray(fixture.documentoComercialCanonico.blocos), "Documento Canonico possui blocos V2.6");
+  assertBlocosObrigatorios(fixture);
+  assertSemDuplicidadeDedupe(fixture);
+  assert.strictEqual(fixture.documentoComercialCanonico.precoPorTexto ?? null, fixture.documentoComercialCanonico.precoPorTexto, "campos planos preservados");
+}
+
+assertBloco(mlCompleto, "titulo");
+assertBloco(mlCompleto, "preco_referencia");
+assertBloco(mlCompleto, "preco_oferta");
+assertBloco(mlCompleto, "cupom_codigo");
+assertBloco(mlCompleto, "instrucao_cupom");
+assertBloco(mlCompleto, "link_afiliado");
+assert.strictEqual(blocoTipo(mlCompleto, "preco_oferta").textoOriginal, "R$ 73,79 via Pix");
+assert.strictEqual(blocoTipo(mlCompleto, "cupom_codigo").essencial, true, "cupom com instrucao/preco condicionado fica essencial");
+assert.ok(blocoTipo(mlCompleto, "preco_oferta").requisitos.includes("pagamento_pix"));
+assert.ok(blocoTipo(mlCompleto, "preco_oferta").requisitos.includes("cupom"));
+
+const mlPixVendedorFreteGrupo = criarEspelho({
+  textoOriginal: [
+    "Tenis Mercado Livre",
+    "Por: R$ 199,90 no Pix",
+    "Vendedor: Loja Oficial",
+    "Frete gratis",
+    "Grupo: https://chat.whatsapp.com/fonte",
+    "Link: https://meli.la/tenis"
+  ].join("\n"),
+  oferta: { marketplace: "mercadolivre", preco: 199.9, linkAfiliado: "https://meli.afiliado/tenis" },
+  ofertaEntrada: { vendedor: "Loja Oficial" }
+});
+assertBloco(mlPixVendedorFreteGrupo, "vendedor");
+assertBloco(mlPixVendedorFreteGrupo, "frete");
+assertBloco(mlPixVendedorFreteGrupo, "link_fonte_ignorado");
+assert.strictEqual(blocoTipo(mlPixVendedorFreteGrupo, "link_fonte_ignorado").visibilidadePadrao, "oculto");
+assert.strictEqual(mlPixVendedorFreteGrupo.documentoComercialCanonico.precoPorTexto, "R$ 199,90 no Pix");
+
+const mlAvaliacaoCupomInstrucao = criarEspelho({
+  textoOriginal: [
+    "Produto bem avaliado",
+    "Por: R$ 122,82",
+    "Cupom: MODALIVRE",
+    "Aplique o cupom MODALIVRE no carrinho.",
+    "https://meli.la/avaliado"
+  ].join("\n"),
+  oferta: { marketplace: "mercadolivre", preco: 122.82, linkAfiliado: "https://meli.afiliado/avaliado", rating: "4.8", quantidadeAvaliacoes: "90 avaliacoes" }
+});
+assertBloco(mlAvaliacaoCupomInstrucao, "avaliacao_nota");
+assertBloco(mlAvaliacaoCupomInstrucao, "avaliacao_quantidade");
+assert.strictEqual(blocoTipo(mlAvaliacaoCupomInstrucao, "avaliacao_nota").valorEstruturado.nota, 4.8);
+assert.strictEqual(blocoTipo(mlAvaliacaoCupomInstrucao, "cupom_codigo").essencial, true);
+
+assertBloco(shopeeSomenteProduto, "link_produto_original");
+assert.ok(!tiposV26(shopeeSomenteProduto).includes("link_resgate"), "Shopee apenas produto nao cria resgate");
+assert.strictEqual(blocoTipo(shopeeSomenteProduto, "link_produto_original").textoOriginal, "https://s.shopee.com.br/produto-unico?lp=aff");
+
+assertBloco(shopeeResgate, "link_resgate");
+assertBloco(shopeeResgate, "link_produto_original");
+assert.strictEqual(blocoTipo(shopeeResgate, "link_resgate").essencial, true, "resgate com contexto comercial e essencial");
+
+assert.strictEqual(blocosTipo(shopeeResgateDoisProdutos, "links_produto_alternativos").length, 2);
+assert.ok(blocosTipo(shopeeResgateDoisProdutos, "links_produto_alternativos").every(bloco => bloco.avisos.includes("links_produto_ambiguos")));
+assert.ok(shopeeResgateDoisProdutos.documentoComercialCanonico.avisos.includes("links_produto_ambiguos"));
+
+const aliexpressMoedasAppPc = criarEspelho({
+  textoOriginal: [
+    "Mini Projetor AliExpress",
+    "Por R$ 180",
+    "Use moedas no app para desconto",
+    "APP: https://a.aliexpress.com/_appMoedas",
+    "PC: https://a.aliexpress.com/_pcMoedas",
+    "Moedas: https://a.aliexpress.com/_coins"
+  ].join("\n"),
+  oferta: { marketplace: "aliexpress", preco: 180 },
+  comercialNormalizado: { marketplace: "aliexpress", precoAtual: 180, precoConfiavel: true }
+});
+assertBloco(aliexpressMoedasAppPc, "moedas");
+assertBloco(aliexpressMoedasAppPc, "link_app");
+assertBloco(aliexpressMoedasAppPc, "link_pc");
+assertBloco(aliexpressMoedasAppPc, "link_moedas");
+assert.ok(!tiposV26(aliexpressMoedasAppPc).includes("link_resgate"), "AliExpress APP/PC/moedas nao viram resgate");
+
+const aliexpressAppDuplicadoPc = criarEspelho({
+  textoOriginal: [
+    "AliExpress duplicado",
+    "Por R$ 90",
+    "APP: https://a.aliexpress.com/_dup",
+    "APP: https://a.aliexpress.com/_dup",
+    "PC: https://a.aliexpress.com/_pc"
+  ].join("\n"),
+  oferta: { marketplace: "aliexpress", preco: 90 },
+  comercialNormalizado: { marketplace: "aliexpress", precoAtual: 90, precoConfiavel: true }
+});
+assert.strictEqual(blocosTipo(aliexpressAppDuplicadoPc, "link_app").length, 1, "APP duplicado deduplicado");
+assert.strictEqual(blocosTipo(aliexpressAppDuplicadoPc, "link_pc").length, 1);
+
+const amazonCupomSemCodigo = criarEspelho({
+  textoOriginal: [
+    "Produto Amazon com cupom na pagina",
+    "Por R$ 159,90",
+    "Resgate cupom no anuncio",
+    "https://amzn.to/cupom-pagina"
+  ].join("\n"),
+  oferta: { marketplace: "amazon", preco: 159.9, linkAfiliado: "https://amzn.to/afiliado-cupom-pagina" },
+  comercialNormalizado: { marketplace: "amazon", precoAtual: 159.9, precoConfiavel: true }
+});
+assertBloco(amazonCupomSemCodigo, "cupom_sem_codigo");
+assertBloco(amazonCupomSemCodigo, "instrucao_cupom");
+assert.ok(!tiposV26(amazonCupomSemCodigo).includes("cupom_codigo"), "cupom sem codigo nao inventa codigo");
+assert.ok(!tiposV26(amazonCupomSemCodigo).includes("link_resgate"), "instrucao Amazon de resgate no anuncio nao vira link de resgate");
+assert.ok(!tiposV26(amazonCupomSemCodigo).includes("links_produto_alternativos"), "link afiliado nao vira alternativa duplicada de produto");
+
+const amazonParcelado = criarEspelho({
+  textoOriginal: "Produto Amazon parcelado\nPor R$ 699,00\n10x de R$ 69,90 sem juros\nhttps://amzn.to/parcelado",
+  oferta: { marketplace: "amazon", preco: 699, linkAfiliado: "https://amzn.to/afiliado-parcelado" },
+  comercialNormalizado: { marketplace: "amazon", precoAtual: 699, precoConfiavel: true }
+});
+assertBloco(amazonParcelado, "parcelamento");
+assertBloco(amazonParcelado, "valor_parcela");
+assertBloco(amazonParcelado, "quantidade_parcelas");
+assert.strictEqual(blocoTipo(amazonParcelado, "valor_parcela").valorEstruturado.valor, 69.9);
+
+const amazonDePorPixAvaliacao = criarEspelho({
+  textoOriginal: [
+    "Oferta Amazon avaliada",
+    "De: R$ 499,90",
+    "Por: R$ 399,90 no Pix",
+    "4.7",
+    "https://amzn.to/avaliada"
+  ].join("\n"),
+  oferta: { marketplace: "amazon", preco: 399.9, linkAfiliado: "https://amzn.to/afiliado-avaliada", rating: "4.7" },
+  comercialNormalizado: { marketplace: "amazon", precoAtual: 399.9, precoConfiavel: true }
+});
+assertBloco(amazonDePorPixAvaliacao, "preco_referencia");
+assertBloco(amazonDePorPixAvaliacao, "preco_oferta");
+assertBloco(amazonDePorPixAvaliacao, "avaliacao_nota");
+assert.strictEqual(blocoTipo(amazonDePorPixAvaliacao, "preco_oferta").textoOriginal, "R$ 399,90 no Pix");
+
+const kabumGarantiaFrete = criarEspelho({
+  textoOriginal: [
+    "Fonte KaBuM 850W",
+    "Valor: R$ 415,00",
+    "Cupom: JULHOFORTE15",
+    "Garantia de 10 anos",
+    "Frete varia por Estado",
+    "https://www.kabum.com.br/produto/514896"
+  ].join("\n"),
+  oferta: { marketplace: "kabum", preco: 415, linkAfiliado: "https://awin1.com/afiliado-kabum" },
+  comercialNormalizado: { marketplace: "kabum", precoAtual: 415, precoConfiavel: true }
+});
+assertBloco(kabumGarantiaFrete, "cupom_codigo");
+assertBloco(kabumGarantiaFrete, "garantia");
+assertBloco(kabumGarantiaFrete, "frete");
+
+const kabumAwinYoutube = criarEspelho({
+  textoOriginal: [
+    "Teclado KaBuM",
+    "Valor: R$ 199,00",
+    "Link: https://www.awin1.com/cread.php?ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F123",
+    "Review: https://youtu.be/review-produto"
+  ].join("\n"),
+  oferta: { marketplace: "kabum", preco: 199, linkAfiliado: "https://awin1.com/deeplink-produto" },
+  comercialNormalizado: { marketplace: "kabum", precoAtual: 199, precoConfiavel: true }
+});
+assertBloco(kabumAwinYoutube, "link_afiliado");
+assertBloco(kabumAwinYoutube, "link_auxiliar");
+assert.notStrictEqual(blocoTipo(kabumAwinYoutube, "link_auxiliar").textoOriginal, blocoTipo(kabumAwinYoutube, "link_afiliado").textoOriginal);
+
+assertBloco(semCupom, "preco_oferta");
+assertBloco(semCupom, "link_afiliado");
+assert.ok(!tiposV26(semCupom).includes("cupom_codigo"), "oferta simples nao inventa cupom");
+
+assertBloco(cashback, "cashback");
+assert.strictEqual(cashback.espelhoComercial.precoFinalValor, null);
+assert.ok(!JSON.stringify(blocoTipo(cashback, "cashback")).includes("R$ 90"), "cashback nao reduz preco no bloco");
+
+assertBloco(aliexpressMoedaEstrangeira, "moeda");
+assert.strictEqual(blocoTipo(aliexpressMoedaEstrangeira, "moeda").textoOriginal, "USD");
+assert.strictEqual(blocoTipo(aliexpressMoedaEstrangeira, "preco_oferta").moeda, "USD");
+assert.ok(!JSON.stringify(blocosV26(aliexpressMoedaEstrangeira)).includes("R$ 19,99"), "moeda estrangeira nao e convertida nos blocos");
+
+const resumoV26 = mlCompleto.documentoComercialCanonico.blocos.reduce((acc, bloco) => {
+  acc[bloco.tipo] = (acc[bloco.tipo] || 0) + 1;
+  return acc;
+}, {});
+assert.ok(resumoV26.preco_oferta >= 1);
+assert.ok(!JSON.stringify(resumoEspelhoComercialLog(mlCompleto, { workspaceId: "user_teste" })).includes("https://"), "log legado continua sanitizado");
+
 console.log("ofc-v24-espelho-comercial.test.js ok");
