@@ -43,6 +43,10 @@ const {
   resumoOfertaUniversalLog
 } = require("../oferta-universal.contract");
 const { normalizarDadosComerciais } = require("../../ofc-v2/normalizador-comercial");
+const {
+  construirEspelhoComercialV24FailOpen,
+  resumoEspelhoComercialLog
+} = require("../../ofc-v2/espelho-comercial");
 const fidelidadeObs = require("../../fidelidade/observabilidade-v1");
 const coberturaRadar = require("../../radar/cobertura-v1");
 const {
@@ -568,6 +572,53 @@ function normalizarDadosComerciaisV24Seguro({ oferta = {}, ofertaEntrada = {}, j
       motivo: "normalizador_comercial_exception",
       erro: String(erro?.message || "erro_desconhecido").slice(0, 180)
     };
+  }
+}
+
+function construirEspelhoComercialV24Seguro({ oferta = {}, ofertaEntrada = {}, job = {}, evento = {}, link = {}, metadata = {}, comercialNormalizado = null } = {}) {
+  const resultado = construirEspelhoComercialV24FailOpen({ oferta, ofertaEntrada, job, evento, link, metadata, comercialNormalizado });
+  if (!resultado.ok) {
+    console.log("[OFC-V2.4-ESPELHO-COMERCIAL-ERRO]", JSON.stringify({
+      workspaceId: job.cliente_id || job.clienteId || "",
+      marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",
+      ofertaId: job.oferta_id || null,
+      jobId: job.id || null,
+      motivo: resultado.motivo || "espelho_comercial_exception",
+      erro: String(resultado.erro || "erro_desconhecido").slice(0, 180),
+      aplicouMudancasOperacionais: false
+    }));
+  }
+  return resultado;
+}
+
+function emitirLogsEspelhoComercialV24(resultado = {}, contexto = {}) {
+  if (!resultado.ok || !resultado.espelhoComercial) return;
+  const resumo = resumoEspelhoComercialLog(resultado, contexto);
+  console.log(resumo.confiavel ? "[OFC-V2.4-ESPELHO-COMERCIAL-CRIADO]" : "[OFC-V2.4-ESPELHO-COMERCIAL-INCOMPLETO]", JSON.stringify(resumo));
+  if (resultado.imagemComercial) {
+    console.log("[OFC-V2.4-IMAGEM-COMERCIAL-SELECIONADA]", JSON.stringify({
+      workspaceId: resumo.workspaceId,
+      marketplace: resumo.marketplace,
+      ofertaId: resumo.ofertaId,
+      jobId: resumo.jobId,
+      imagemOrigem: resultado.imagemComercial.origemSelecionada || "",
+      imagemLimpa: resultado.imagemComercial.imagemLimpa === true,
+      imagemOficial: resultado.imagemComercial.imagemOficial === true,
+      possuiMarcaFonte: resultado.imagemComercial.possuiMarcaFonte === true,
+      motivoSelecao: resultado.imagemComercial.motivoSelecao || "",
+      aplicouMudancasOperacionais: false
+    }));
+  }
+  if (resultado.templateEspelhoShadow) {
+    console.log("[OFC-V2.4-TEMPLATE-ESPELHO-SHADOW]", JSON.stringify({
+      workspaceId: resumo.workspaceId,
+      marketplace: resumo.marketplace,
+      ofertaId: resumo.ofertaId,
+      jobId: resumo.jobId,
+      ok: resultado.templateEspelhoShadow.ok === true,
+      linhas: resultado.templateEspelhoShadow.linhas || 0,
+      aplicouMudancasOperacionais: false
+    }));
   }
 }
 
@@ -1227,6 +1278,15 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     : null;
   const resultadoComercialV24 = normalizarDadosComerciaisV24Seguro({ oferta, ofertaEntrada, job, evento });
   const comercialNormalizadoV24 = resultadoComercialV24.contrato;
+  const resultadoEspelhoComercialV24 = construirEspelhoComercialV24Seguro({
+    oferta,
+    ofertaEntrada,
+    job,
+    evento,
+    link,
+    metadata: metadataFinal,
+    comercialNormalizado: comercialNormalizadoV24
+  });
   metadataFinal = {
     ...metadataFinal,
     ofcV24: {
@@ -1236,10 +1296,23 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
         motivo: resultadoComercialV24.motivo,
         erro: resultadoComercialV24.erro
       },
+      espelhoComercial: resultadoEspelhoComercialV24.espelhoComercial,
+      imagemComercial: resultadoEspelhoComercialV24.imagemComercial,
+      templateEspelhoShadow: resultadoEspelhoComercialV24.templateEspelhoShadow,
+      erroEspelhoComercial: resultadoEspelhoComercialV24.ok ? null : {
+        motivo: resultadoEspelhoComercialV24.motivo,
+        erro: resultadoEspelhoComercialV24.erro
+      },
       aplicouMudancasOperacionais: false,
       fonte: "normalizador_comercial_shadow"
     }
   };
+  emitirLogsEspelhoComercialV24(resultadoEspelhoComercialV24, {
+    workspaceId: job.cliente_id || job.clienteId || "",
+    marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",
+    ofertaId: job.oferta_id || null,
+    jobId: job.id || null
+  });
   if (comercialNormalizadoV24) {
     console.log(comercialNormalizadoV24.precoConfiavel ? "[OFC-V2.4-COMERCIAL-NORMALIZADO]" : "[OFC-V2.4-COMERCIAL-INVALIDO]", JSON.stringify({
       workspaceId: job.cliente_id || job.clienteId || "",

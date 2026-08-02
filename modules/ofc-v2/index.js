@@ -15,6 +15,12 @@ const {
   auditarLogicaFixaOfc,
   criarAuditoriaOfcV24Shadow
 } = require("./auditoria-ofc");
+const {
+  construirEspelhoComercialV24,
+  construirEspelhoComercialV24FailOpen,
+  resumoEspelhoComercialLog,
+  selecionarImagemComercial
+} = require("./espelho-comercial");
 
 module.exports = {
   MOEDA_PADRAO,
@@ -25,5 +31,9 @@ module.exports = {
   calcularUTOOferta,
   medirWorkspaceOperacional,
   auditarLogicaFixaOfc,
-  criarAuditoriaOfcV24Shadow
+  criarAuditoriaOfcV24Shadow,
+  construirEspelhoComercialV24,
+  construirEspelhoComercialV24FailOpen,
+  resumoEspelhoComercialLog,
+  selecionarImagemComercial
 };
