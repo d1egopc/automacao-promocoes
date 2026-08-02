@@ -121,24 +121,59 @@ function logAwinAdapter(evento, payload = {}) {
   console.log(evento, JSON.stringify(payload));
 }
 
+function logAwinV272(tag = "", payload = {}) {
+  try {
+    console.log(tag, JSON.stringify({
+      workspaceId: payload.clienteId || payload.workspaceId || "",
+      eventoId: payload.eventoId || null,
+      jobId: payload.jobId || null,
+      ofertaId: payload.ofertaId || null,
+      marketplace: payload.marketplace || "kabum",
+      adapter: "awin.adapter",
+      contrato: "kabum-awin",
+      totalLinksEntrada: payload.totalLinksEntrada || 0,
+      papeisDetectados: Array.isArray(payload.papeisDetectados) ? payload.papeisDetectados.slice(0, 12) : [],
+      totalLinksSeguros: payload.totalLinksSeguros || 0,
+      houveConversao: payload.houveConversao === true,
+      statusEtapa: payload.statusEtapa || "",
+      motivo: payload.motivo || "",
+      aplicouMudancasOperacionais: false
+    }));
+  } catch (_) {
+    // Observabilidade V2.7.2 nunca interfere no importador.
+  }
+}
+
 async function importarAwinEngine({ job = {}, evento = {}, links = [], deps = {} } = {}) {
   const clienteId = texto(job.cliente_id || job.clienteId || "");
   const linkEscolhido = escolherLinkAwinKabum(links, evento);
   const urlOriginalEngine = linkEscolhido.urlProduto || linkEscolhido.url;
   const urlCapturadaEngine = linkEscolhido.url;
+  const linksClassificados = resumoLinksClassificados(links, evento, "kabum");
+  const papeisDetectados = [...new Set(linksClassificados.map(item => item.papelLink).filter(Boolean))];
+  const destinoExtraido = Boolean(linkEscolhido.urlProduto && linkEscolhido.urlProduto !== linkEscolhido.url);
 
   if (!clienteId) {
     return { ok: false, marketplace: "awin", motivo: "cliente_invalido" };
   }
 
   if (!urlOriginalEngine) {
+    logAwinV272("[OFC-V2.7.2-CTA-SEGURO-INDISPONIVEL]", {
+      jobId: job.id,
+      eventoId: job.evento_id,
+      clienteId,
+      totalLinksEntrada: linksClassificados.length,
+      papeisDetectados,
+      statusEtapa: "adapter_link_produto_indisponivel",
+      motivo: linkEscolhido.papelLinkMotivo || "link_produto_kabum_nao_confirmado"
+    });
     return {
       ok: false,
       marketplace: "awin",
       motivo: linkEscolhido.papelLinkMotivo || "link_produto_kabum_nao_confirmado",
       metadata: {
         adapter: "awin_kabum",
-        linksClassificados: resumoLinksClassificados(links, evento, "kabum")
+        linksClassificados
       }
     };
   }
@@ -160,7 +195,28 @@ async function importarAwinEngine({ job = {}, evento = {}, links = [], deps = {}
   const integracao = integracaoAwin || integracaoKabum;
 
   if (!integracao) {
+    logAwinV272("[OFC-V2.7.2-CTA-SEGURO-INDISPONIVEL]", {
+      jobId: job.id,
+      eventoId: job.evento_id,
+      clienteId,
+      totalLinksEntrada: linksClassificados.length,
+      papeisDetectados,
+      statusEtapa: "integracao_indisponivel",
+      motivo: "integracao_ausente"
+    });
     return { ok: false, marketplace: "awin", motivo: "integracao_ausente", linkOriginal: urlOriginalEngine };
+  }
+
+  if (destinoExtraido) {
+    logAwinV272("[OFC-V2.7.2-AWIN-DESTINO-EXTRAIDO]", {
+      jobId: job.id,
+      eventoId: job.evento_id,
+      clienteId,
+      totalLinksEntrada: linksClassificados.length,
+      papeisDetectados,
+      statusEtapa: "destino_kabum_extraido",
+      motivo: "ued_kabum_extraido"
+    });
   }
 
   logAwinAdapter("[ENGINE-AWIN-KABUM-IMPORTADOR-CHAMADA]", {
@@ -247,8 +303,31 @@ async function importarAwinEngine({ job = {}, evento = {}, links = [], deps = {}
   }
 
   if (!linkAfiliado) {
+    logAwinV272("[OFC-V2.7.2-CTA-SEGURO-INDISPONIVEL]", {
+      jobId: job.id,
+      eventoId: job.evento_id,
+      clienteId,
+      marketplace,
+      totalLinksEntrada: linksClassificados.length,
+      papeisDetectados,
+      statusEtapa: "cta_seguro_indisponivel",
+      motivo: "link_afiliado_vazio"
+    });
     return { ok: false, marketplace, motivo: "link_afiliado_vazio", linkOriginal: urlOriginalEngine };
   }
+
+  logAwinV272("[OFC-V2.7.2-AWIN-RECONVERTIDO]", {
+    jobId: job.id,
+    eventoId: job.evento_id,
+    clienteId,
+    marketplace,
+    totalLinksEntrada: linksClassificados.length,
+    papeisDetectados,
+    totalLinksSeguros: 1,
+    houveConversao: true,
+    statusEtapa: "cta_workspace_reconvertido",
+    motivo: integracaoAwin ? "awin_workspace_reconvertido" : "kabum_workspace_reconvertido"
+  });
 
   const cupomTipo = primeiroValor(produto.tipoCupom, produto.cupomTipo);
   const beneficioComercial = extrairBeneficioComercial(produto);
@@ -295,7 +374,7 @@ async function importarAwinEngine({ job = {}, evento = {}, links = [], deps = {}
       campoLinkEscolhido: linkEscolhido.campo || "",
       papelLinkEscolhido: linkEscolhido.papelLink || "",
       papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
-      linksClassificados: resumoLinksClassificados(links, evento, marketplace),
+      linksClassificados,
       integracaoUsada: integracaoAwin ? "awin" : "kabum",
       camposProduto: Object.keys(produto || {}),
       produto

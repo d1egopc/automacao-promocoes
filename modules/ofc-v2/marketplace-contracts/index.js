@@ -47,7 +47,7 @@ function contextoLink(link = {}) {
 }
 
 function contextoExplicitoProduto(link = {}) {
-  return /\b(?:link\s+(?:do\s+)?produto|produto|confira\s+aqui|compre|comprar|oferta)\b/.test(contextoLink(link));
+  return /\b(?:link\s+(?:do\s+)?produto|link|produto|confira\s+aqui|compre|comprar|oferta)\b/.test(contextoLink(link));
 }
 
 function contextoExplicitoResgate(link = {}) {
@@ -57,15 +57,15 @@ function contextoExplicitoResgate(link = {}) {
 }
 
 function contextoApp(link = {}) {
-  return /\bapp\b/.test(contextoLink(link));
+  return texto(link.tipo) === "link_app" || /\bapp\b/.test(contextoLink(link));
 }
 
 function contextoPc(link = {}) {
-  return /\b(?:pc|site|desktop)\b/.test(contextoLink(link));
+  return texto(link.tipo) === "link_pc" || /\b(?:pc|site|desktop)\b/.test(contextoLink(link));
 }
 
 function contextoMoedas(link = {}) {
-  return /\b(?:moeda|moedas|coins?)\b/.test(contextoLink(link));
+  return texto(link.tipo) === "link_moedas" || /\b(?:moeda|moedas|coins?)\b/.test(contextoLink(link));
 }
 
 function urlMercadoLivre(url = "") {
@@ -80,7 +80,9 @@ function urlFonteOuSocial(url = "") {
 
 function urlAliExpress(url = "") {
   const host = dominioUrl(url);
-  return /(^|\.)aliexpress\.com$/i.test(host) || host === "s.click.aliexpress.com";
+  return /(^|\.)aliexpress\.com$/i.test(host)
+    || host === "s.click.aliexpress.com"
+    || host === "a.aliexpress.com";
 }
 
 function urlPossuiAfiliacaoExterna(url = "") {
@@ -124,7 +126,7 @@ function linkBase(link = {}, papel = "link_produto", extras = {}) {
   return {
     papel,
     urlOriginal: url,
-    urlAfiliada: texto(extras.urlAfiliada || ""),
+    urlAfiliada: texto(extras.urlAfiliada || link.urlAfiliada || link.linkAfiliado || ""),
     renderizavel: extras.renderizavel !== false,
     origem: texto(link.origem || link.contexto || "captura"),
     confianca: texto(extras.confianca || link.confianca || "media"),
@@ -265,16 +267,20 @@ function contratoAliExpress(entrada) {
   for (const link of lista(entrada.links)) {
     if (!texto(link.url)) continue;
     let papel = "link_produto";
-    if (contextoMoedas(link) || texto(link.tipo) === "moedas") papel = "link_moedas";
-    else if (contextoApp(link) || texto(link.tipo) === "app") papel = "link_app";
-    else if (contextoPc(link) || texto(link.tipo) === "pc") papel = "link_pc";
+    if (contextoMoedas(link) || ["moedas", "link_moedas"].includes(texto(link.tipo))) papel = "link_moedas";
+    else if (contextoApp(link) || ["app", "link_app"].includes(texto(link.tipo))) papel = "link_app";
+    else if (contextoPc(link) || ["pc", "link_pc"].includes(texto(link.tipo))) papel = "link_pc";
     else if (texto(link.tipo) === "resgate") papel = "link_produto";
 
-    if (papel === "link_produto") produtos.push(link);
+    if (papel === "link_produto") {
+      produtos.push(link);
+      continue;
+    }
     if (["link_app", "link_pc", "link_moedas"].includes(papel)) {
       const seguro = linkAlternativoSeguroAliExpress(link, entrada);
       if (!seguro) saida.avisos.push("link_aliexpress_sem_conversao_segura");
       adicionarLink(saida, linkBase(link, papel, {
+        urlAfiliada: texto(link.urlAfiliada || link.linkAfiliado || ""),
         renderizavel: seguro,
         confianca: seguro ? "alta" : "baixa",
         avisos: seguro ? [] : ["link_sem_conversao_workspace"],
@@ -283,7 +289,25 @@ function contratoAliExpress(entrada) {
     }
   }
 
-  saida.linkProdutoOriginal = produtos[0]?.url || "";
+  const produtosUnicos = [];
+  const vistosProduto = new Set();
+  for (const link of produtos) {
+    const chave = dedupeUrl(link.url);
+    if (!chave || vistosProduto.has(chave)) {
+      if (chave) saida.dedupes.push("link_produto_aliexpress");
+      continue;
+    }
+    vistosProduto.add(chave);
+    produtosUnicos.push(link);
+  }
+
+  if (produtosUnicos.length > 1) {
+    saida.houveAmbiguidade = true;
+    saida.produtosAmbiguos = true;
+    saida.avisos.push("links_produto_ambiguos");
+  }
+
+  saida.linkProdutoOriginal = produtosUnicos[0]?.url || "";
   if (!saida.linkProdutoOriginal && texto(entrada.linkAfiliado)) saida.linkProdutoOriginal = texto(entrada.linkAfiliado);
   if (texto(entrada.linkAfiliado)) saida.houveConversaoAfiliada = true;
   if (!saida.links.length && lista(entrada.links).some(link => urlAliExpress(link.url))) saida.avisos.push("links_aliexpress_sem_papel_explicito");

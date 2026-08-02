@@ -1,5 +1,9 @@
 const PAPEL_LINK = Object.freeze({
   PRODUTO: "produto",
+  LINK_APP: "link_app",
+  LINK_PC: "link_pc",
+  LINK_MOEDAS: "link_moedas",
+  LINK_AUXILIAR: "link_auxiliar",
   CUPOM: "cupom",
   CAMPANHA: "campanha",
   MOEDAS: "moedas",
@@ -89,7 +93,7 @@ function extrairUrlKabumDeAwin(url = "") {
       const valor = parsed.searchParams.get(chave);
       if (!valor) continue;
       const decodificado = decodificarUrlAte3x(valor);
-      if (/kabum\.com\.br/i.test(decodificado)) return decodificado;
+      if (urlKabumProdutoPermitido(decodificado)) return decodificado;
     }
   } catch {}
 
@@ -105,8 +109,16 @@ function classificarPorContexto(marketplace = "", contexto = {}) {
     return { papelLink: PAPEL_LINK.PRODUTO, motivo: "contexto_link_produto_shopee" };
   }
 
-  if (mp === "aliexpress" && /\b(?:app|pc|site|link)\s*:?\s*$/.test(antes)) {
-    return { papelLink: PAPEL_LINK.PRODUTO, motivo: "contexto_app_pc_aliexpress" };
+  if (mp === "aliexpress") {
+    if (/\b(?:link\s+com\s+)?(?:moeda|moedas|coins?)\s*:?\s*$/.test(antes) || /\blink\s+com\s+moedas?\b/.test(antes)) {
+      return { papelLink: PAPEL_LINK.LINK_MOEDAS, motivo: "contexto_link_moedas_aliexpress" };
+    }
+    if (/\b(?:link\s+)?app\s*:?\s*$/.test(antes) || /\b(?:no|pelo)\s+app\s*:?\s*$/.test(antes)) {
+      return { papelLink: PAPEL_LINK.LINK_APP, motivo: "contexto_link_app_aliexpress" };
+    }
+    if (/\b(?:link\s+)?(?:pc|site|desktop)\s*:?\s*$/.test(antes) || /\b(?:no|pelo)\s+pc\s*:?\s*$/.test(antes)) {
+      return { papelLink: PAPEL_LINK.LINK_PC, motivo: "contexto_link_pc_aliexpress" };
+    }
   }
 
   if (/\b(moedas?|coins?)\b/.test(antes)) return { papelLink: PAPEL_LINK.MOEDAS, motivo: "contexto_moedas" };
@@ -160,6 +172,15 @@ function classificarAliExpress(candidato = {}, evento = {}) {
   const url = urlEstrutural(candidato);
   const contexto = contextoDoLink(evento, candidato);
 
+  const porContexto = classificarPorContexto("aliexpress", contexto);
+  if (porContexto && [
+    PAPEL_LINK.LINK_APP,
+    PAPEL_LINK.LINK_PC,
+    PAPEL_LINK.LINK_MOEDAS
+  ].includes(porContexto.papelLink)) {
+    return { ...porContexto, confianca: "alta" };
+  }
+
   if (/\/item\/\d+\.html|\/i\/\d+\.html|product_id=\d+/i.test(url)) {
     return { papelLink: PAPEL_LINK.PRODUTO, motivo: "aliexpress_id_produto_url", confianca: "alta" };
   }
@@ -184,7 +205,6 @@ function classificarAliExpress(candidato = {}, evento = {}) {
     return { papelLink: PAPEL_LINK.CAMPANHA, motivo: "aliexpress_url_campanha", confianca: "media" };
   }
 
-  const porContexto = classificarPorContexto("aliexpress", contexto);
   if (porContexto) return { ...porContexto, confianca: "media" };
 
   return { papelLink: PAPEL_LINK.DESCONHECIDO, motivo: "aliexpress_sem_papel_confirmado", confianca: "baixa" };
@@ -232,13 +252,18 @@ function classificarLinkEngine({ marketplace = "", evento = {}, link = {}, url =
 }
 
 function candidatoEhProduto(candidato = {}) {
-  return candidato.papelLink === PAPEL_LINK.PRODUTO;
+  return [
+    PAPEL_LINK.PRODUTO,
+    PAPEL_LINK.LINK_APP,
+    PAPEL_LINK.LINK_PC
+  ].includes(candidato.papelLink);
 }
 
 function candidatoBloqueadoParaProduto(candidato = {}) {
   return [
     PAPEL_LINK.CUPOM,
     PAPEL_LINK.CAMPANHA,
+    PAPEL_LINK.LINK_MOEDAS,
     PAPEL_LINK.MOEDAS,
     PAPEL_LINK.LOJA,
     PAPEL_LINK.CATEGORIA

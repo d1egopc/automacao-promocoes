@@ -125,23 +125,57 @@ function logAliExpressAdapter(evento, payload = {}) {
   console.log(evento, JSON.stringify(payload));
 }
 
+function logAliExpressTravessiaV272(payload = {}) {
+  try {
+    console.log("[OFC-V2.7.2-ALIEXPRESS-TRAVESSIA]", JSON.stringify({
+      workspaceId: payload.clienteId || payload.workspaceId || "",
+      eventoId: payload.eventoId || null,
+      jobId: payload.jobId || null,
+      ofertaId: payload.ofertaId || null,
+      marketplace: "aliexpress",
+      adapter: "aliexpress.adapter",
+      contrato: "aliexpress",
+      totalLinksEntrada: payload.totalLinksEntrada || 0,
+      papeisDetectados: Array.isArray(payload.papeisDetectados) ? payload.papeisDetectados.slice(0, 12) : [],
+      totalLinksSeguros: payload.totalLinksSeguros || 0,
+      houveConversao: payload.houveConversao === true,
+      statusEtapa: payload.statusEtapa || "",
+      motivo: payload.motivo || "",
+      aplicouMudancasOperacionais: false
+    }));
+  } catch (_) {
+    // Observabilidade V2.7.2 nunca interfere no importador.
+  }
+}
+
 async function importarAliExpressEngine({ job = {}, evento = {}, links = [], deps = {} } = {}) {
   const clienteId = texto(job.cliente_id || job.clienteId || "");
   const linkEscolhido = escolherLinkAliExpress(links, evento);
   const urlOriginalEngine = linkEscolhido.url;
+  const linksClassificados = resumoLinksClassificados(links, evento, "aliexpress");
+  const papeisDetectados = [...new Set(linksClassificados.map(item => item.papelLink).filter(Boolean))];
 
   if (!clienteId) {
     return { ok: false, marketplace: "aliexpress", motivo: "cliente_invalido" };
   }
 
   if (!urlOriginalEngine) {
+    logAliExpressTravessiaV272({
+      jobId: job.id,
+      eventoId: job.evento_id,
+      clienteId,
+      totalLinksEntrada: linksClassificados.length,
+      papeisDetectados,
+      statusEtapa: "adapter_link_produto_indisponivel",
+      motivo: linkEscolhido.papelLinkMotivo || "link_produto_aliexpress_nao_confirmado"
+    });
     return {
       ok: false,
       marketplace: "aliexpress",
       motivo: linkEscolhido.papelLinkMotivo || "link_produto_aliexpress_nao_confirmado",
       metadata: {
         adapter: "aliexpress",
-        linksClassificados: resumoLinksClassificados(links, evento, "aliexpress")
+        linksClassificados
       }
     };
   }
@@ -152,6 +186,15 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
 
   const integracao = deps.getIntegracaoCliente(clienteId, "aliexpress");
   if (!integracao) {
+    logAliExpressTravessiaV272({
+      jobId: job.id,
+      eventoId: job.evento_id,
+      clienteId,
+      totalLinksEntrada: linksClassificados.length,
+      papeisDetectados,
+      statusEtapa: "integracao_indisponivel",
+      motivo: "integracao_ausente"
+    });
     return { ok: false, marketplace: "aliexpress", motivo: "integracao_ausente", linkOriginal: urlOriginalEngine };
   }
 
@@ -248,12 +291,42 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
   }
 
   if (precoNumerico === null) {
+    logAliExpressTravessiaV272({
+      jobId: job.id,
+      eventoId: job.evento_id,
+      clienteId,
+      totalLinksEntrada: linksClassificados.length,
+      papeisDetectados,
+      statusEtapa: "adapter_retorno_invalido",
+      motivo: "preco_indisponivel"
+    });
     return { ok: false, marketplace: "aliexpress", motivo: "preco_indisponivel", linkOriginal: urlOriginalEngine };
   }
 
   if (!linkAfiliado) {
+    logAliExpressTravessiaV272({
+      jobId: job.id,
+      eventoId: job.evento_id,
+      clienteId,
+      totalLinksEntrada: linksClassificados.length,
+      papeisDetectados,
+      statusEtapa: "cta_seguro_indisponivel",
+      motivo: "link_afiliado_vazio"
+    });
     return { ok: false, marketplace: "aliexpress", motivo: "link_afiliado_vazio", linkOriginal: urlOriginalEngine };
   }
+
+  logAliExpressTravessiaV272({
+    jobId: job.id,
+    eventoId: job.evento_id,
+    clienteId,
+    totalLinksEntrada: linksClassificados.length,
+    papeisDetectados,
+    totalLinksSeguros: 1,
+    houveConversao: true,
+    statusEtapa: "adapter_convertido",
+    motivo: linkEscolhido.papelLink ? `link_${linkEscolhido.papelLink}_convertido` : "cta_workspace_convertido"
+  });
 
   return {
     ok: true,
@@ -293,7 +366,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       campoLinkEscolhido: linkEscolhido.campo || "",
       papelLinkEscolhido: linkEscolhido.papelLink || "",
       papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
-      linksClassificados: resumoLinksClassificados(links, evento, "aliexpress"),
+      linksClassificados,
       textoRadarTemCupom: Boolean(cupomTexto),
       camposProduto: Object.keys(produto || {}),
       produto

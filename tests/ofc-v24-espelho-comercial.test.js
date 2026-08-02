@@ -4,6 +4,7 @@ const assert = require("assert");
 const {
   construirEspelhoComercialV24,
   construirEspelhoComercialV24FailOpen,
+  montarTemplateEspelhoPorBlocosV26,
   montarTemplateEspelhoShadow,
   resumoEspelhoComercialLog,
   selecionarImagemComercial
@@ -1002,6 +1003,132 @@ const kabumAwinTerceiroSemConversao = criarEspelho({
 assert.strictEqual(blocosTipo(kabumAwinTerceiroSemConversao, "link_afiliado").length, 0);
 assert.strictEqual(blocosTipo(kabumAwinTerceiroSemConversao, "link_produto_original").length, 0);
 assert.ok(!kabumAwinTerceiroSemConversao.templateEspelhoShadow.mensagem.includes("awin1.com/cread.php"));
+
+const aliexpressAppPcMoedasConvertidos = criarEspelho({
+  textoOriginal: [
+    "SSD AliExpress",
+    "Por US$ 19.99",
+    "Cupom: ALI5",
+    "Link com moedas: https://a.aliexpress.com/_moedasSeguro",
+    "APP: https://a.aliexpress.com/_appSeguro",
+    "PC: https://a.aliexpress.com/_pcSeguro"
+  ].join("\n"),
+  oferta: {
+    marketplace: "aliexpress",
+    preco: 19.99,
+    moeda: "USD",
+    linksProduto: [
+      { tipo: "link_moedas", url: "https://a.aliexpress.com/_moedasSeguro", urlAfiliada: "https://ali.workspace/moedas", convertidoWorkspace: true },
+      { tipo: "link_app", url: "https://a.aliexpress.com/_appSeguro", urlAfiliada: "https://ali.workspace/app", convertidoWorkspace: true },
+      { tipo: "link_pc", url: "https://a.aliexpress.com/_pcSeguro", urlAfiliada: "https://ali.workspace/pc", convertidoWorkspace: true }
+    ]
+  },
+  comercialNormalizado: { marketplace: "aliexpress", precoAtual: 19.99, moeda: "USD", precoConfiavel: false }
+});
+assertBloco(aliexpressAppPcMoedasConvertidos, "link_moedas");
+assertBloco(aliexpressAppPcMoedasConvertidos, "link_app");
+assertBloco(aliexpressAppPcMoedasConvertidos, "link_pc");
+const templateAliConvertidosV26 = montarTemplateEspelhoPorBlocosV26(
+  aliexpressAppPcMoedasConvertidos.espelhoComercial,
+  aliexpressAppPcMoedasConvertidos.documentoComercialCanonico
+);
+assert.ok(templateAliConvertidosV26.mensagem.includes("Link com moedas:\nhttps://ali.workspace/moedas"));
+assert.ok(templateAliConvertidosV26.mensagem.includes("APP:\nhttps://ali.workspace/app"));
+assert.ok(templateAliConvertidosV26.mensagem.includes("PC:\nhttps://ali.workspace/pc"));
+assert.ok(!templateAliConvertidosV26.mensagem.includes("https://a.aliexpress.com/_appSeguro"));
+
+const aliexpressAppRepetidoPcMoedasExternos = criarEspelho({
+  textoOriginal: [
+    "AliExpress externo",
+    "Por R$ 90",
+    "APP: https://a.aliexpress.com/_dupExterno",
+    "APP: https://a.aliexpress.com/_dupExterno",
+    "NO PC: https://s.click.aliexpress.com/e/_pcExterno",
+    "Link com moedas: https://a.aliexpress.com/_coinsExterno"
+  ].join("\n"),
+  oferta: { marketplace: "aliexpress", preco: 90, linkAfiliado: "https://ali.workspace/cta-unico" },
+  comercialNormalizado: { marketplace: "aliexpress", precoAtual: 90, precoConfiavel: true }
+});
+assert.strictEqual(aliexpressAppRepetidoPcMoedasExternos.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "app").length, 1);
+assert.strictEqual(aliexpressAppRepetidoPcMoedasExternos.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "pc").length, 1);
+assert.strictEqual(aliexpressAppRepetidoPcMoedasExternos.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "moedas").length, 1);
+assert.ok(aliexpressAppRepetidoPcMoedasExternos.documentoComercialCanonico.linksComerciais.every(item => item.renderizavel === false));
+assertBloco(aliexpressAppRepetidoPcMoedasExternos, "link_afiliado");
+assert.ok(!aliexpressAppRepetidoPcMoedasExternos.templateEspelhoShadow.mensagem.includes("s.click.aliexpress.com/e/_pcExterno"));
+assert.ok(!tiposV26(aliexpressAppRepetidoPcMoedasExternos).includes("link_resgate"));
+
+const aliexpressDoisProdutosDistintos = criarEspelho({
+  textoOriginal: [
+    "AliExpress misturado",
+    "Por R$ 120",
+    "Link produto: https://www.aliexpress.com/item/1005001111111111.html",
+    "Link produto: https://www.aliexpress.com/item/1005002222222222.html"
+  ].join("\n"),
+  oferta: { marketplace: "aliexpress", preco: 120, linkAfiliado: "https://ali.workspace/produto" },
+  comercialNormalizado: { marketplace: "aliexpress", precoAtual: 120, precoConfiavel: true }
+});
+assert.ok(aliexpressDoisProdutosDistintos.documentoComercialCanonico.avisos.includes("links_produto_ambiguos"));
+
+const aliexpressVariacoesPreco = criarEspelho({
+  textoOriginal: [
+    "SSD AliExpress com variacoes",
+    "250 GB por R$ 89,90",
+    "500 GB por R$ 139,90",
+    "Cupom: ALI5",
+    "Link: https://www.aliexpress.com/item/1005003333333333.html"
+  ].join("\n"),
+  oferta: { marketplace: "aliexpress", preco: 89.9, linkAfiliado: "https://ali.workspace/variacao" },
+  comercialNormalizado: { marketplace: "aliexpress", precoAtual: 89.9, precoConfiavel: true }
+});
+assertBloco(aliexpressVariacoesPreco, "link_afiliado");
+assert.ok(!aliexpressVariacoesPreco.documentoComercialCanonico.precoPorTexto || !aliexpressVariacoesPreco.documentoComercialCanonico.precoPorTexto.includes("139,90"), "variacoes nao escolhem segundo preco silenciosamente");
+
+const aliexpressSemImagemCirculavel = criarEspelho({
+  textoOriginal: "Produto AliExpress sem imagem\nPor R$ 55,00\nLink: https://www.aliexpress.com/item/1005004444444444.html",
+  oferta: { marketplace: "aliexpress", preco: 55, imagem: "", linkAfiliado: "https://ali.workspace/sem-imagem" },
+  comercialNormalizado: { marketplace: "aliexpress", precoAtual: 55, precoConfiavel: true }
+});
+assertBloco(aliexpressSemImagemCirculavel, "link_afiliado");
+assert.ok(!aliexpressSemImagemCirculavel.documentoComercialCanonico.avisos.includes("imagem_ausente"));
+
+const kabumAwinTerceiroComUedReconvertido = criarEspelho({
+  textoOriginal: [
+    "Fonte KaBuM AWIN",
+    "Valor: R$ 415,00",
+    "Link: https://www.awin1.com/cread.php?awinaffid=999&clickref=terceiro&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F514896%2Ffonte",
+    "Garantia de 10 anos",
+    "Frete varia por estado"
+  ].join("\n"),
+  oferta: { marketplace: "kabum", preco: 415, linkAfiliado: "https://awin.workspace/deeplink-514896" },
+  comercialNormalizado: { marketplace: "kabum", precoAtual: 415, precoConfiavel: true }
+});
+assertBloco(kabumAwinTerceiroComUedReconvertido, "link_afiliado");
+assertBloco(kabumAwinTerceiroComUedReconvertido, "garantia");
+assertBloco(kabumAwinTerceiroComUedReconvertido, "frete");
+assert.ok(kabumAwinTerceiroComUedReconvertido.templateEspelhoShadow.mensagem.includes("https://awin.workspace/deeplink-514896"));
+assert.ok(!kabumAwinTerceiroComUedReconvertido.templateEspelhoShadow.mensagem.includes("awinaffid=999"));
+
+const kabumPreVendaPrazo = criarEspelho({
+  textoOriginal: [
+    "Console KaBuM",
+    "Valor: R$ 2.999,00",
+    "Pre-venda",
+    "Envio a partir de 15/08",
+    "https://www.kabum.com.br/produto/777777/console"
+  ].join("\n"),
+  oferta: { marketplace: "kabum", preco: 2999, linkAfiliado: "https://awin.workspace/console" },
+  comercialNormalizado: { marketplace: "kabum", precoAtual: 2999, precoConfiavel: true }
+});
+assertBloco(kabumPreVendaPrazo, "pre_venda");
+assertBloco(kabumPreVendaPrazo, "prazo_envio");
+
+const kabumDiretoConvertido = criarEspelho({
+  textoOriginal: "Mouse KaBuM\nValor: R$ 99,00\nhttps://www.kabum.com.br/produto/888888/mouse",
+  oferta: { marketplace: "kabum", preco: 99, linkAfiliado: "https://awin.workspace/mouse" },
+  comercialNormalizado: { marketplace: "kabum", precoAtual: 99, precoConfiavel: true }
+});
+assertBloco(kabumDiretoConvertido, "link_afiliado");
+assert.ok(!kabumDiretoConvertido.templateEspelhoShadow.mensagem.includes("www.kabum.com.br/produto/888888"));
 
 const contratoDesconhecidoSemCtaSeguro = criarEspelho({
   textoOriginal: [

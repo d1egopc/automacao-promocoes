@@ -279,7 +279,7 @@ async function testarClassificacaoAliExpressPreservaProduto() {
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(urlImportada, produto);
   assert.strictEqual(resultado.metadata.papelLinkEscolhido, "produto");
-  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "moedas");
+  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "link_moedas");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
 }
 
@@ -323,9 +323,9 @@ async function testarAliExpressAppPcPreservaAmbosComoComerciais() {
 
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(urlImportada, app);
-  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "produto");
-  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLinkMotivo, "contexto_app_pc_aliexpress");
-  assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
+  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "link_app");
+  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLinkMotivo, "contexto_link_app_aliexpress");
+  assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "link_pc");
 }
 
 async function testarValidacaoKabumComIntegracaoAwinGenerica() {
