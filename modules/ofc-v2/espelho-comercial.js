@@ -101,7 +101,13 @@ function extrairTituloOriginal(textoOriginal = "", oferta = {}, ofertaEntrada = 
   const tituloEstruturado = primeiroTexto(ofertaEntrada.tituloOriginal, ofertaEntrada.titulo, oferta.titulo, oferta.nome);
   const linhas = linhasTexto(textoOriginal);
   const linhaTitulo = linhas.find(linha => !linhaPareceComercial(linha) && limparTitulo(linha).length >= 4);
-  return primeiroTexto(limparTitulo(linhaTitulo), tituloEstruturado);
+  const linhaTituloPreservada = linhas.find(linha => {
+    if (/https?:\/\//i.test(linha)) return false;
+    const n = normalizarComparacao(linha);
+    if (/^(de|por|valor|cupom|use|utilize|aplique|resgate|frete)\b/.test(n)) return false;
+    return limparTitulo(linha).length >= 4;
+  });
+  return primeiroTexto(limparTitulo(linhaTitulo), limparTitulo(linhaTituloPreservada), tituloEstruturado);
 }
 
 function extrairPrecosTexto(textoOriginal = "") {
@@ -218,6 +224,95 @@ function extrairFormaPagamento(textoOriginal = "", oferta = {}, ofertaEntrada = 
   const fonte = `${textoOriginal}\n${estruturada}`;
   if (/\b(?:via|no|na|por)\s+pix\b|\bpix\b/i.test(fonte)) return "Pix";
   return "";
+}
+
+function removerPrefixoComercial(linha = "", padrao = /^$/) {
+  return texto(linha).replace(padrao, "").replace(/^[\s:|\-]+/, "").trim();
+}
+
+function primeiraLinhaOriginal(textoOriginal = "", predicado = () => false) {
+  return linhasTexto(textoOriginal).find(predicado) || "";
+}
+
+function primeiraLinhaPorNormalizacao(textoOriginal = "", padrao) {
+  return primeiraLinhaOriginal(textoOriginal, linha => padrao.test(normalizarComparacao(linha)));
+}
+
+function extrairTextoLinhaPreco(linha = "", tipo = "") {
+  const valor = texto(linha);
+  if (!valor) return "";
+  if (tipo === "de") return removerPrefixoComercial(valor, /^\s*(?:[^\n\w]{0,4}\s*)?de\s*:?\s*/i);
+  if (tipo === "por") return removerPrefixoComercial(valor, /^\s*(?:[^\n\w]{0,4}\s*)?por\s*:?\s*/i);
+  if (tipo === "valor") return removerPrefixoComercial(valor, /^\s*(?:[^\n\w]{0,4}\s*)?valor\s*:?\s*/i);
+  return valor;
+}
+
+function extrairDocumentoComercialCanonico({
+  textoOriginal = "",
+  tituloOriginal = "",
+  precosTexto = {},
+  cupom = {},
+  instrucaoComercial = "",
+  formaPagamentoTexto = "",
+  condicoesComerciais = [],
+  links = {},
+  linkAfiliado = "",
+  marketplace = "",
+  imagemComercial = {},
+  oferta = {},
+  ofertaEntrada = {},
+  comercialNormalizado = {},
+  avisos = [],
+  motivosConfianca = []
+} = {}) {
+  const linhaDe = primeiraLinhaPorNormalizacao(textoOriginal, /^\s*(?:de)\b/);
+  const linhaPor = primeiraLinhaPorNormalizacao(textoOriginal, /^\s*(?:por)\b/);
+  const linhaValor = primeiraLinhaPorNormalizacao(textoOriginal, /^\s*(?:valor)\b/);
+  const linhaPix = primeiraLinhaPorNormalizacao(textoOriginal, /\bpix\b/);
+  const linhaParcelamento = primeiraLinhaPorNormalizacao(textoOriginal, /\b(?:parcel|\d+\s*x\s*de|ate\s+\d+x|em\s+\d+x|vezes)\b/);
+  const linhaCashback = primeiraLinhaOriginal(textoOriginal, linha => /\bcashback\b/i.test(linha) && (/(?:R\$|US\$|USD|U\$|\$|\d)/i.test(linha) || /^\s*cashback\b/i.test(linha)));
+  const linhaFrete = primeiraLinhaPorNormalizacao(textoOriginal, /\bfrete\b/);
+  const linhaResgate = primeiraLinhaPorNormalizacao(textoOriginal, /\bresgate\b/);
+  const linhaBeneficio = primeiraLinhaPorNormalizacao(textoOriginal, /\b(?:beneficio|app|prime|voucher|moeda|moedas|direto do brasil|pre venda|pré venda)\b/);
+
+  const precoDeTexto = extrairTextoLinhaPreco(linhaDe, "de") || precosTexto.precoDeTexto || "";
+  const precoPorTexto = extrairTextoLinhaPreco(linhaPor, "por") || extrairTextoLinhaPreco(linhaValor, "valor") || precosTexto.precoPorTexto || "";
+  const precoPixTexto = /\bpix\b/i.test(linhaPor || linhaValor || linhaPix)
+    ? (extrairTextoLinhaPreco(linhaPor, "por") || extrairTextoLinhaPreco(linhaValor, "valor") || texto(linhaPix))
+    : primeiroTexto(ofertaEntrada.precoPix, ofertaEntrada.condicaoPix, oferta.precoPix, oferta.condicaoPix, formaPagamentoTexto === "Pix" ? precoPorTexto : "");
+  const parcelamentoTexto = texto(linhaParcelamento) || primeiroTexto(ofertaEntrada.parcelamento, oferta.parcelamento, comercialNormalizado.parcelamento?.texto);
+  const cashbackTexto = texto(linhaCashback) || primeiroTexto(ofertaEntrada.cashback, oferta.cashback);
+  const freteTexto = texto(linhaFrete) || primeiroTexto(ofertaEntrada.frete, oferta.frete, oferta.freteGratis === true ? "Frete gratis" : "");
+  const beneficioTexto = texto(linhaBeneficio) || primeiroTexto(ofertaEntrada.beneficioExtra, ofertaEntrada.beneficioTexto, oferta.beneficioExtra, oferta.beneficioTexto);
+  const instrucaoTexto = texto(instrucaoComercial);
+  const cupomTexto = texto(cupom.cupomCodigo || cupom.cupomTexto || ofertaEntrada.cupom || oferta.cupom);
+
+  return {
+    tituloOriginal: tituloOriginal || null,
+    descricaoOriginal: textoOriginal || null,
+    precoDeTexto: precoDeTexto || null,
+    precoPorTexto: precoPorTexto || null,
+    precoPixTexto: precoPixTexto || null,
+    parcelamentoTexto: parcelamentoTexto || null,
+    cupomTexto: cupomTexto || null,
+    beneficioTexto: beneficioTexto || null,
+    instrucaoTexto: instrucaoTexto || null,
+    cashbackTexto: cashbackTexto || null,
+    freteTexto: freteTexto || null,
+    resgateTexto: texto(linhaResgate) || null,
+    linkProdutoOriginal: links.linkProdutoOriginal || null,
+    linkResgateOriginal: links.linkResgateOriginal || null,
+    linkAfiliado: linkAfiliado || null,
+    imagemComercial: imagemComercial && Object.keys(imagemComercial).length ? { ...imagemComercial } : null,
+    marketplace: marketplace || null,
+    origemDocumento: textoOriginal ? "texto_comercial_original" : "campos_estruturados_parciais",
+    confianca: {
+      confiavel: motivosConfianca.includes("preco_explicito_na_captura") || Boolean(cupomTexto && (precoPorTexto || precoPixTexto)),
+      motivos: [...new Set(motivosConfianca.filter(Boolean))]
+    },
+    avisos: [...new Set((avisos || []).filter(Boolean))],
+    condicoesComerciais: [...new Set((condicoesComerciais || []).map(texto).filter(Boolean))]
+  };
 }
 
 function adicionarUnico(listaSaida, valor) {
@@ -363,27 +458,37 @@ function selecionarImagemComercial({ oferta = {}, ofertaEntrada = {}, metadata =
   };
 }
 
-function montarTemplateEspelhoShadow(espelho = {}) {
+function montarTemplateEspelhoShadow(espelho = {}, documento = null) {
+  const doc = objeto(documento || espelho.documentoComercialCanonico);
   const linhas = [];
   const adicionar = (...partes) => {
     const bloco = partes.map(texto).filter(Boolean);
     if (bloco.length) linhas.push(bloco.join("\n"));
   };
-  const precoPor = espelho.precoFinalTexto || espelho.precoPorTexto;
-  const forma = espelho.formaPagamentoTexto ? ` ${espelho.formaPagamentoTexto.toLowerCase() === "pix" ? "no Pix" : espelho.formaPagamentoTexto}` : "";
-  const parcelamento = espelho.condicoesComerciais.find(item => /x\s*de|parcel/i.test(item)) || "";
-  const beneficio = espelho.condicoesComerciais.find(item => /cashback|frete/i.test(item)) || "";
-  adicionar(espelho.tituloNormalizado || espelho.tituloOriginal || "Oferta");
+
+  const precoPor = primeiroTexto(doc.precoPixTexto, doc.precoPorTexto, espelho.precoFinalTexto, espelho.precoPorTexto);
+  const parcelamento = primeiroTexto(doc.parcelamentoTexto, lista(espelho.condicoesComerciais).find(item => /x\s*de|parcel/i.test(item)) || "");
+  const cashback = primeiroTexto(doc.cashbackTexto, lista(espelho.condicoesComerciais).find(item => /cashback/i.test(item)) || "");
+  const frete = primeiroTexto(doc.freteTexto, lista(espelho.condicoesComerciais).find(item => /frete/i.test(item)) || "");
+  const beneficio = primeiroTexto(doc.beneficioTexto, lista(espelho.condicoesComerciais).find(item => !/cashback|frete|x\s*de|parcel/i.test(item)) || "");
+  const cupom = primeiroTexto(doc.cupomTexto, espelho.cupomCodigo);
+  const linkResgate = primeiroTexto(doc.linkResgateOriginal, espelho.linkResgateOriginal);
+  const linkProduto = primeiroTexto(doc.linkAfiliado, espelho.linkAfiliado, doc.linkProdutoOriginal, espelho.linkProdutoOriginal);
+
+  adicionar(doc.tituloOriginal || espelho.tituloNormalizado || espelho.tituloOriginal || "Oferta");
   adicionar(
-    espelho.precoDeTexto ? `De: ${espelho.precoDeTexto}` : "",
-    precoPor ? `Por: ${precoPor}${forma}` : "",
+    doc.precoDeTexto ? `De: ${doc.precoDeTexto}` : (espelho.precoDeTexto ? `De: ${espelho.precoDeTexto}` : ""),
+    precoPor ? `Por: ${precoPor}` : "",
     parcelamento
   );
   adicionar(beneficio ? `Beneficio: ${beneficio}` : "");
-  adicionar(espelho.cupomCodigo ? `Cupom: ${espelho.cupomCodigo}` : "");
-  adicionar(espelho.linkResgateOriginal ? `Resgate os cupons: ${espelho.linkResgateOriginal}` : "");
-  adicionar(espelho.linkAfiliado || espelho.linkProdutoOriginal ? `Confira aqui: ${espelho.linkAfiliado || espelho.linkProdutoOriginal}` : "");
-  adicionar(espelho.instrucaoComercial || "");
+  adicionar(cashback ? `Cashback: ${cashback}` : "");
+  adicionar(frete ? `Frete: ${frete}` : "");
+  adicionar(cupom ? `Cupom: ${cupom}` : "");
+  adicionar(linkResgate ? `Resgate os cupons:\n${linkResgate}` : "");
+  adicionar(linkProduto ? `Confira aqui:\n${linkProduto}` : "");
+  adicionar(doc.instrucaoTexto || espelho.instrucaoComercial || "");
+
   const mensagem = linhas.join("\n\n");
   return {
     ok: Boolean(mensagem),
@@ -471,13 +576,33 @@ function construirEspelhoComercialV24(entrada = {}) {
   };
 
   const imagemComercial = selecionarImagemComercial({ oferta, ofertaEntrada, metadata, link });
-  const templateEspelhoShadow = montarTemplateEspelhoShadow(espelhoComercial);
+  const documentoComercialCanonico = extrairDocumentoComercialCanonico({
+    textoOriginal,
+    tituloOriginal,
+    precosTexto,
+    cupom,
+    instrucaoComercial,
+    formaPagamentoTexto,
+    condicoesComerciais,
+    links,
+    linkAfiliado,
+    marketplace,
+    imagemComercial,
+    oferta,
+    ofertaEntrada,
+    comercialNormalizado,
+    avisos: espelhoComercial.avisos,
+    motivosConfianca
+  });
+  espelhoComercial.documentoComercialCanonico = documentoComercialCanonico;
+  const templateEspelhoShadow = montarTemplateEspelhoShadow(espelhoComercial, documentoComercialCanonico);
 
   return {
     ok: true,
     modo: "shadow",
     aplicouMudancas: false,
     espelhoComercial,
+    documentoComercialCanonico,
     imagemComercial,
     templateEspelhoShadow
   };
@@ -492,6 +617,7 @@ function construirEspelhoComercialV24FailOpen(entrada = {}) {
       modo: "shadow",
       aplicouMudancas: false,
       espelhoComercial: null,
+      documentoComercialCanonico: null,
       imagemComercial: null,
       templateEspelhoShadow: null,
       motivo: "espelho_comercial_exception",

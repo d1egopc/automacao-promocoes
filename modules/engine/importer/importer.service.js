@@ -1297,6 +1297,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
         erro: resultadoComercialV24.erro
       },
       espelhoComercial: resultadoEspelhoComercialV24.espelhoComercial,
+      documentoComercialCanonico: resultadoEspelhoComercialV24.documentoComercialCanonico,
       imagemComercial: resultadoEspelhoComercialV24.imagemComercial,
       templateEspelhoShadow: resultadoEspelhoComercialV24.templateEspelhoShadow,
       erroEspelhoComercial: resultadoEspelhoComercialV24.ok ? null : {

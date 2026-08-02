@@ -55,7 +55,16 @@ assert.strictEqual(mlCompleto.espelhoComercial.formaPagamentoTexto, "Pix");
 assert.strictEqual(mlCompleto.espelhoComercial.cupomCodigo, "FASHIONML");
 assert.match(mlCompleto.espelhoComercial.instrucaoComercial, /FASHIONML \+ Pix/);
 assert.strictEqual(mlCompleto.espelhoComercial.linkProdutoOriginal, "https://meli.la/1fS6gji");
-assert.ok(mlCompleto.templateEspelhoShadow.mensagem.includes("R$ 73,79"));
+assert.strictEqual(mlCompleto.documentoComercialCanonico.precoDeTexto, "R$ 299,99");
+assert.strictEqual(mlCompleto.documentoComercialCanonico.precoPorTexto, "R$ 73,79 via Pix");
+assert.strictEqual(mlCompleto.documentoComercialCanonico.precoPixTexto, "R$ 73,79 via Pix");
+assert.strictEqual(mlCompleto.documentoComercialCanonico.cupomTexto, "FASHIONML");
+assert.strictEqual(mlCompleto.documentoComercialCanonico.instrucaoTexto, "Aplique o cupom FASHIONML + Pix para chegar neste valor.");
+assert.strictEqual(mlCompleto.documentoComercialCanonico.linkProdutoOriginal, "https://meli.la/1fS6gji");
+assert.strictEqual(mlCompleto.documentoComercialCanonico.linkAfiliado, "https://afiliado.test/produto");
+assert.strictEqual(mlCompleto.documentoComercialCanonico.origemDocumento, "texto_comercial_original");
+assert.ok(mlCompleto.templateEspelhoShadow.mensagem.includes("Por: R$ 73,79 via Pix"));
+assert.ok(mlCompleto.templateEspelhoShadow.mensagem.includes("Confira aqui:\nhttps://afiliado.test/produto"));
 assert.ok(!mlCompleto.templateEspelhoShadow.mensagem.includes("120,50"), "preco da pagina nao substitui captura");
 
 const mlSimples = criarEspelho({
@@ -81,6 +90,8 @@ assert.strictEqual(shopeeResgate.espelhoComercial.cupomCodigo, null);
 assert.strictEqual(shopeeResgate.espelhoComercial.instrucaoComercial, "Resgate todos os cupons desta pagina");
 assert.strictEqual(shopeeResgate.espelhoComercial.linkResgateOriginal, "https://s.shopee.com.br/resgate-cupom");
 assert.strictEqual(shopeeResgate.espelhoComercial.linkProdutoOriginal, "https://s.shopee.com.br/produto-real");
+assert.strictEqual(shopeeResgate.documentoComercialCanonico.linkResgateOriginal, "https://s.shopee.com.br/resgate-cupom");
+assert.strictEqual(shopeeResgate.documentoComercialCanonico.linkProdutoOriginal, "https://s.shopee.com.br/produto-real");
 
 const shopeeVoucherMoedas = criarEspelho({
   textoOriginal: "Produto Shopee\nR$ 70 usando moedas + cupom\nVoucher disponivel no app\nhttps://s.shopee.com.br/produto",
@@ -105,6 +116,7 @@ const aliexpressMoedaEstrangeira = criarEspelho({
 });
 assert.strictEqual(aliexpressMoedaEstrangeira.espelhoComercial.cupomCodigo, "ALI5");
 assert.ok(aliexpressMoedaEstrangeira.espelhoComercial.avisos.includes("moeda_nao_convertida"));
+assert.strictEqual(aliexpressMoedaEstrangeira.documentoComercialCanonico.precoPorTexto, "US$ 19.99");
 assert.ok(aliexpressMoedaEstrangeira.templateEspelhoShadow.mensagem.includes("US$ 19.99"), "moeda estrangeira permanece no texto Shadow");
 assert.ok(!aliexpressMoedaEstrangeira.templateEspelhoShadow.mensagem.includes("R$ 19,99"), "moeda estrangeira nao vira BRL");
 
@@ -115,6 +127,7 @@ const kabumSimples = criarEspelho({
 assert.strictEqual(kabumSimples.espelhoComercial.precoPorValor, 415);
 assert.strictEqual(kabumSimples.espelhoComercial.cupomCodigo, "JULHOFORTE15");
 assert.ok(kabumSimples.espelhoComercial.condicoesComerciais.some(item => /frete/i.test(item)));
+assert.strictEqual(kabumSimples.documentoComercialCanonico.freteTexto, "Frete varia por Estado");
 
 const semCupom = criarEspelho({
   textoOriginal: "Oferta minima\nPor R$ 79,90\nhttps://produto.test/1",
@@ -130,7 +143,7 @@ const cashback = criarEspelho({
 assert.strictEqual(cashback.espelhoComercial.precoPorValor, 100);
 assert.strictEqual(cashback.espelhoComercial.precoFinalValor, null, "cashback nao reduz preco pago nem cria preco final");
 assert.ok(cashback.espelhoComercial.condicoesComerciais.some(item => /cashback/i.test(item)));
-assert.ok(cashback.templateEspelhoShadow.mensagem.includes("Beneficio: R$ 10 de cashback"));
+assert.ok(cashback.templateEspelhoShadow.mensagem.includes("Cashback: R$ 10 de cashback"));
 assert.ok(!cashback.templateEspelhoShadow.mensagem.includes("R$ 90"), "cashback nao e abatido do preco pago");
 
 const parcelamento = criarEspelho({
