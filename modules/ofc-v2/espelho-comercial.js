@@ -123,9 +123,9 @@ function extrairPrecosTexto(textoOriginal = "") {
 
   const precoDeTexto = dePor?.[1] || linhaDe?.[1] || "";
   const precoPorTexto = dePor?.[2] || linhaPor?.[1] || linhaValor?.[1] || linhaPrecoDireta?.[1] || "";
-  const sufixoPor = texto(dePor?.[3] || linhaPor?.[2] || linhaValor?.[2] || linhaPrecoDireta?.[2] || "");
+  const sufixoPor = recortarSufixoPreco(dePor?.[3] || linhaPor?.[2] || linhaValor?.[2] || linhaPrecoDireta?.[2] || "");
   const precoFinalTexto = final?.[1] || "";
-  const sufixoFinal = texto(final?.[2] || "");
+  const sufixoFinal = recortarSufixoPreco(final?.[2] || "");
 
   return {
     precoDeTexto: textoMoeda(precoDeTexto),
@@ -137,6 +137,37 @@ function extrairPrecosTexto(textoOriginal = "") {
     sufixoPor,
     sufixoFinal
   };
+}
+
+function removerUrls(textoEntrada = "") {
+  return texto(textoEntrada).replace(/https?:\/\/\S+/gi, "").trim();
+}
+
+function recortarAntesDeDelimitadorComercial(valor = "") {
+  const fonte = removerUrls(valor).replace(/\s+/g, " ").trim();
+  if (!fonte) return "";
+  const padroes = [
+    /\b(?:cupom|c[oó]digo|cod\.?|use|utilize|aplique|resgate|link|confira|frete|cashback|voucher|moeda|moedas|benef[ií]cio)\b/i,
+    /\b(?:parcelamento|parcele|em\s+at[eé]\s+\d+\s*x|\d+\s*x\s+de\s+R\$)\b/i,
+    /\b(?:app|pc)\s*:/i,
+    /\b(?:https?)\b/i
+  ];
+  let corte = fonte.length;
+  for (const padrao of padroes) {
+    const match = fonte.match(padrao);
+    if (match && match.index > 0) corte = Math.min(corte, match.index);
+  }
+  return fonte.slice(0, corte).replace(/[|,;:/\-\s]+$/g, "").trim();
+}
+
+function recortarSufixoPreco(valor = "") {
+  const fonte = recortarAntesDeDelimitadorComercial(valor);
+  if (!fonte) return "";
+  const pix = fonte.match(/\b(?:no|na|via|por)\s+pix\b/i);
+  if (pix) return texto(pix[0]).replace(/\bpix\b/i, "Pix");
+  const outrosMeios = fonte.match(/\b(?:no|na|via|por)\s+(?:boleto|cart[aã]o)\b/i);
+  if (outrosMeios) return texto(outrosMeios[0]);
+  return "";
 }
 
 const CUPONS_BLOQUEADOS = new Set([
@@ -213,7 +244,7 @@ function extrairInstrucaoComercial(textoOriginal = "", cupomCodigo = "", oferta 
     if (/https?:\/\//i.test(item)) return false;
     const n = normalizarComparacao(item);
     if (!/(aplique|resgate|use|utilize|selecione|ative|pegue|copie|garanta)/.test(n)) return false;
-    if (!/(cupom|cupons|voucher|moeda|moedas|pix|app|carrinho|desconto|valor)/.test(n)) return false;
+    if (!/(cupom|cupons|voucher|moeda|moedas|pix|app|carrinho|desconto|valor|anuncio)/.test(n)) return false;
     return true;
   });
   const instrucao = primeiroTexto(estruturada, linha);
@@ -247,18 +278,41 @@ function extrairTextoLinhaPreco(linha = "", tipo = "") {
     const match = semPrefixo.match(/(?:R\$|US\$|USD|U\$|\$)?\s*[\d.]+(?:[,.][\d]{1,2})?/i);
     return match ? textoMoeda(match[0]) : semPrefixo;
   }
-  if (tipo === "por") return removerPrefixoComercial(valor, /^\s*(?:[^\n\w]{0,4}\s*)?por\s*:?\s*/i);
-  if (tipo === "valor") return removerPrefixoComercial(valor, /^\s*(?:[^\n\w]{0,4}\s*)?valor\s*:?\s*/i);
+  if (tipo === "por") return extrairPrecoComercialLimpo(removerPrefixoComercial(valor, /^\s*(?:[^\n\w]{0,4}\s*)?por\s*:?\s*/i));
+  if (tipo === "valor") return extrairPrecoComercialLimpo(removerPrefixoComercial(valor, /^\s*(?:[^\n\w]{0,4}\s*)?valor\s*:?\s*/i));
   return valor;
+}
+
+function extrairPrecoComercialLimpo(valor = "") {
+  const fonte = recortarAntesDeDelimitadorComercial(valor);
+  const match = fonte.match(/(?:R\$|US\$|USD|U\$|\$)?\s*[\d.]+(?:[,.][\d]{1,2})?/i);
+  if (!match) return "";
+  const sufixo = recortarSufixoPreco(fonte.slice((match.index || 0) + match[0].length));
+  return [textoMoeda(match[0]), sufixo].map(texto).filter(Boolean).join(" ");
 }
 
 function extrairParcelamentoTextoLinha(linha = "") {
   const valor = texto(linha);
   if (!valor) return "";
   const comValor = valor.match(/(?:R\$|US\$|USD|U\$|\$)?\s*[\d.]+(?:[,.][\d]{1,2})?\s*(?:em\s*)?(?:ate\s*)?\d+\s*x[^\n]*/i);
-  if (comValor) return texto(comValor[0]);
+  if (comValor) return recortarAntesDeDelimitadorComercial(comValor[0]);
   const semValor = valor.match(/(?:em\s*)?(?:ate\s*)?\d+\s*x[^\n]*/i);
-  return semValor ? texto(semValor[0]) : valor;
+  return semValor ? recortarAntesDeDelimitadorComercial(semValor[0]) : recortarAntesDeDelimitadorComercial(valor);
+}
+
+function extrairBeneficioTexto(textoOriginal = "", oferta = {}, ofertaEntrada = {}) {
+  const linhas = linhasTexto(textoOriginal);
+  const linhaOff = linhas.find(linha => /\boff\b/i.test(linha) && /\b(?:cupom|pagina|p[aá]gina|desconto|beneficio|benef[ií]cio)\b/i.test(linha));
+  if (linhaOff) {
+    const match = linhaOff.match(/(?:R\$|US\$|USD|U\$|\$)?\s*[\d.]+(?:[,.][\d]{1,2})?\s*off\b[^|\n]*(?:cupom|p[aá]gina|desconto|benef[ií]cio)?[^|\n]*/i);
+    if (match) {
+      return removerUrls(match[0])
+        .replace(/\b(?:link|confira|resgate|frete|cashback|parcelamento)\b.*$/i, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+  }
+  return primeiroTexto(ofertaEntrada.beneficioExtra, ofertaEntrada.beneficioTexto, oferta.beneficioExtra, oferta.beneficioTexto);
 }
 
 function extrairDocumentoComercialCanonico({
@@ -291,7 +345,7 @@ function extrairDocumentoComercialCanonico({
 
   const precoDeTexto = extrairTextoLinhaPreco(linhaDe, "de") || precosTexto.precoDeTexto || "";
   const precoPorTexto = extrairTextoLinhaPreco(linhaPor, "por") || extrairTextoLinhaPreco(linhaValor, "valor") || precosTexto.precoPorTexto || "";
-  const precoPixTexto = /\bpix\b/i.test(linhaPor || linhaValor)
+  const precoPixTextoBruto = /\bpix\b/i.test(linhaPor || linhaValor)
     ? (extrairTextoLinhaPreco(linhaPor, "por") || extrairTextoLinhaPreco(linhaValor, "valor") || texto(linhaPix))
     : primeiroTexto(
       ofertaEntrada.precoPix,
@@ -301,6 +355,7 @@ function extrairDocumentoComercialCanonico({
       /\bpix\b/i.test(precoPorTexto) ? precoPorTexto : "",
       formaPagamentoTexto === "Pix" ? precoPorTexto : ""
     );
+  const precoPixTexto = textoComercialEquivalente(precoPixTextoBruto, precoPorTexto) ? "" : precoPixTextoBruto;
   const parcelamentoTexto = primeiroTexto(
     ofertaEntrada.parcelamento,
     oferta.parcelamento,
@@ -309,7 +364,7 @@ function extrairDocumentoComercialCanonico({
   );
   const cashbackTexto = texto(linhaCashback) || primeiroTexto(ofertaEntrada.cashback, oferta.cashback);
   const freteTexto = texto(linhaFrete) || primeiroTexto(ofertaEntrada.frete, oferta.frete, oferta.freteGratis === true ? "Frete gratis" : "");
-  const beneficioTexto = texto(linhaBeneficio) || primeiroTexto(ofertaEntrada.beneficioExtra, ofertaEntrada.beneficioTexto, oferta.beneficioExtra, oferta.beneficioTexto);
+  const beneficioTexto = extrairBeneficioTexto(textoOriginal, oferta, ofertaEntrada) || texto(linhaBeneficio);
   const instrucaoTexto = texto(instrucaoComercial);
   const cupomTexto = texto(cupom.cupomCodigo || cupom.cupomTexto || ofertaEntrada.cupom || oferta.cupom);
 
@@ -367,9 +422,13 @@ function extrairCondicoes({ textoOriginal = "", oferta = {}, ofertaEntrada = {},
 function urlsDoTexto(textoOriginal = "") {
   const urls = [];
   const linhas = linhasTexto(textoOriginal);
-  for (const linha of linhas) {
+  for (let indice = 0; indice < linhas.length; indice += 1) {
+    const linha = linhas[indice];
+    const linhaSemUrl = linha.replace(/https?:\/\/[^\s)]+/gi, "").trim();
+    const contextoAnterior = indice > 0 && !linhaSemUrl && !/https?:\/\//i.test(linhas[indice - 1]) ? linhas[indice - 1] : "";
+    const contexto = `${contextoAnterior} ${linha}`.trim();
     const matches = linha.match(/https?:\/\/[^\s)]+/gi) || [];
-    for (const url of matches) urls.push({ url: texto(url), linha });
+    for (const url of matches) urls.push({ url: texto(url), linha: contexto || linha });
   }
   return urls;
 }
@@ -392,9 +451,13 @@ function extrairLinksComerciais({ textoOriginal = "", oferta = {}, ofertaEntrada
   const links = [];
   for (const item of urlsDoTexto(textoOriginal)) {
     const n = normalizarComparacao(item.linha);
-    const tipo = /(resgate|cupom|voucher)/.test(n)
-      ? "resgate"
-      : (/\bapp\b/.test(n) ? "app" : (/\bpc\b|\bsite\b/.test(n) ? "pc" : "produto"));
+    const tipo = /\bapp\b/.test(n)
+      ? "app"
+      : (/\bpc\b|\bsite\b/.test(n)
+        ? "pc"
+        : (/\b(?:link|confira|produto)\b/.test(n)
+          ? "produto"
+          : (/(resgate|cupom|voucher)/.test(n) ? "resgate" : "produto")));
     adicionarLinkUnico(links, item.url, tipo);
   }
   for (const item of lista(ofertaEntrada.linksProduto)) adicionarLinkUnico(links, valorUrl(item), "produto");
@@ -402,10 +465,12 @@ function extrairLinksComerciais({ textoOriginal = "", oferta = {}, ofertaEntrada
   for (const item of lista(oferta.linksProduto)) adicionarLinkUnico(links, valorUrl(item), "produto");
   for (const item of lista(oferta.linksResgate)) adicionarLinkUnico(links, valorUrl(item), "resgate");
   adicionarLinkUnico(links, oferta.linkOriginal || link.url_original || ofertaEntrada.linkOriginal, "produto");
-  adicionarLinkUnico(links, oferta.linkAfiliado || ofertaEntrada.linkAfiliado, "produto");
+  if (!links.some(item => item.tipo === "produto")) adicionarLinkUnico(links, oferta.linkAfiliado || ofertaEntrada.linkAfiliado, "produto");
+  const produtos = links.filter(item => item.tipo === "produto");
   return {
-    linkProdutoOriginal: links.find(item => item.tipo === "produto")?.url || "",
+    linkProdutoOriginal: produtos.length === 1 ? produtos[0].url : "",
     linkResgateOriginal: links.find(item => item.tipo === "resgate")?.url || "",
+    produtosAmbiguos: produtos.length > 1,
     links
   };
 }
@@ -767,6 +832,7 @@ function construirEspelhoComercialV24(entrada = {}) {
   if (!textoOriginal) avisos.push("texto_original_indisponivel");
   if (!precoPorTexto && !precoFinalTexto) avisos.push("preco_comercial_indisponivel");
   if (!links.linkProdutoOriginal && !linkAfiliado) avisos.push("link_produto_indisponivel");
+  if (links.produtosAmbiguos) avisos.push("links_produto_ambiguos");
   if (comercialNormalizado.avisoPreco) avisos.push(comercialNormalizado.avisoPreco);
 
   const espelhoComercial = {

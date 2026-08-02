@@ -58,7 +58,7 @@ assert.match(mlCompleto.espelhoComercial.instrucaoComercial, /FASHIONML \+ Pix/)
 assert.strictEqual(mlCompleto.espelhoComercial.linkProdutoOriginal, "https://meli.la/1fS6gji");
 assert.strictEqual(mlCompleto.documentoComercialCanonico.precoDeTexto, "R$ 299,99");
 assert.strictEqual(mlCompleto.documentoComercialCanonico.precoPorTexto, "R$ 73,79 via Pix");
-assert.strictEqual(mlCompleto.documentoComercialCanonico.precoPixTexto, "R$ 73,79 via Pix");
+assert.strictEqual(mlCompleto.documentoComercialCanonico.precoPixTexto, null);
 assert.strictEqual(mlCompleto.documentoComercialCanonico.cupomTexto, "FASHIONML");
 assert.strictEqual(mlCompleto.documentoComercialCanonico.instrucaoTexto, "Aplique o cupom FASHIONML + Pix para chegar neste valor.");
 assert.strictEqual(mlCompleto.documentoComercialCanonico.linkProdutoOriginal, "https://meli.la/1fS6gji");
@@ -66,6 +66,7 @@ assert.strictEqual(mlCompleto.documentoComercialCanonico.linkAfiliado, "https://
 assert.strictEqual(mlCompleto.documentoComercialCanonico.origemDocumento, "texto_comercial_original");
 assert.ok(mlCompleto.templateEspelhoShadow.mensagem.includes("🛍️ Mercado Livre"));
 assert.ok(mlCompleto.templateEspelhoShadow.mensagem.includes("Por: R$ 73,79 via Pix"));
+assert.ok(!mlCompleto.templateEspelhoShadow.mensagem.includes("Pix:"), "Pix embutido no Por nao duplica bloco Pix");
 assert.ok(mlCompleto.templateEspelhoShadow.mensagem.includes("🔗 Confira aqui:\nhttps://afiliado.test/produto"));
 assert.ok(!mlCompleto.templateEspelhoShadow.mensagem.includes("120,50"), "preco da pagina nao substitui captura");
 
@@ -325,7 +326,8 @@ const ofertaCompletaAdaptativa = montarTemplateEspelhoShadow(
   }
 );
 assert.ok(ofertaCompletaAdaptativa.mensagem.includes("De: R$ 499"));
-assert.ok(ofertaCompletaAdaptativa.mensagem.includes("Por: R$ 205,00 no Pix ou R$ 215,83 em ate 6x"));
+assert.ok(ofertaCompletaAdaptativa.mensagem.includes("Por: R$ 205,00 no Pix"));
+assert.ok(ofertaCompletaAdaptativa.mensagem.includes("R$ 215,83 em ate 6x"));
 assert.ok(ofertaCompletaAdaptativa.mensagem.includes("Cupom: FASHION ou MODACOMVC"));
 assert.ok(ofertaCompletaAdaptativa.mensagem.includes("Confira aqui:"));
 assert.ok(ofertaCompletaAdaptativa.mensagem.endsWith("Rodape completo"));
@@ -401,5 +403,79 @@ assert.strictEqual(resumo.temPix, true);
 assert.strictEqual(resumo.temCupom, true);
 assert.strictEqual(resumo.aplicouMudancasOperacionais, false);
 assert.ok(!JSON.stringify(resumo).includes("Aplique o cupom"), "log resumido nao expoe texto completo");
+
+const amazonRtxRecorte = criarEspelho({
+  textoOriginal: [
+    "Placa de Video RTX 5060 Ti Gaming OC, 16GB, GDDR7, 128-bit",
+    "Boost Clock, 3 x DisplayPort, 1 x HDMI",
+    "R$ 2499 no PIX com cupom: EBACUPOM R$ 20 OFF no cupom/pagina",
+    "10x de R$ 317,70 sem juros",
+    "Resgate no anuncio",
+    "Link: https://amzn.to/rtx5060ti"
+  ].join("\n"),
+  oferta: { marketplace: "amazon", preco: 3170, linkAfiliado: "https://amzn.to/afiliado-rtx" },
+  ofertaEntrada: { cupom: "EBACUPOM" },
+  comercialNormalizado: { marketplace: "amazon", precoAtual: 2499, precoConfiavel: true }
+});
+assert.strictEqual(amazonRtxRecorte.documentoComercialCanonico.precoPorTexto, "R$ 2.499,00 no Pix");
+assert.strictEqual(amazonRtxRecorte.documentoComercialCanonico.precoPixTexto, null);
+assert.strictEqual(amazonRtxRecorte.documentoComercialCanonico.parcelamentoTexto, "10x de R$ 317,70 sem juros");
+assert.strictEqual(amazonRtxRecorte.documentoComercialCanonico.cupomTexto, "EBACUPOM");
+assert.strictEqual(amazonRtxRecorte.documentoComercialCanonico.beneficioTexto, "R$ 20 OFF no cupom/pagina");
+assert.strictEqual(amazonRtxRecorte.documentoComercialCanonico.instrucaoTexto, "Resgate no anuncio");
+assert.strictEqual(amazonRtxRecorte.documentoComercialCanonico.linkProdutoOriginal, "https://amzn.to/rtx5060ti");
+assert.ok(!/https?:\/\//i.test(amazonRtxRecorte.documentoComercialCanonico.precoPorTexto), "preco nao contem URL");
+assert.ok(!/\b(?:cupom|link|displayport|hdmi)\b/i.test(amazonRtxRecorte.documentoComercialCanonico.precoPorTexto), "preco nao engole cupom, link ou especificacao");
+assert.ok(!amazonRtxRecorte.templateEspelhoShadow.mensagem.includes("Pix:"), "Amazon Pix nao duplica no template");
+
+const mlCompactado = criarEspelho({
+  textoOriginal: "Kit Compacto De: R$ 78 por R$ 40 no Pix Cupom: OFFCASA Link: https://meli.la/compacto",
+  oferta: { marketplace: "mercadolivre", preco: 122.82, linkAfiliado: "https://meli.afiliado/compacto" },
+  ofertaEntrada: { cupom: "OFFCASA" }
+});
+assert.strictEqual(mlCompactado.documentoComercialCanonico.precoDeTexto, "R$ 78,00");
+assert.strictEqual(mlCompactado.documentoComercialCanonico.precoPorTexto, "R$ 40,00 no Pix");
+assert.strictEqual(mlCompactado.documentoComercialCanonico.precoPixTexto, null);
+assert.strictEqual(mlCompactado.documentoComercialCanonico.cupomTexto, "OFFCASA");
+assert.strictEqual(mlCompactado.documentoComercialCanonico.linkProdutoOriginal, "https://meli.la/compacto");
+assert.ok(!/\bCupom\b|https?:\/\//i.test(mlCompactado.documentoComercialCanonico.precoPorTexto));
+
+const shopeeDoisLinks = criarEspelho({
+  textoOriginal: [
+    "Resgate:",
+    "https://s.shopee.com.br/cupom-real",
+    "Link do produto:",
+    "https://s.shopee.com.br/produto-real?lp=aff"
+  ].join("\n"),
+  oferta: { marketplace: "shopee", linkAfiliado: "https://shopee.afiliado/produto-real" },
+  comercialNormalizado: { marketplace: "shopee", precoConfiavel: false }
+});
+assert.strictEqual(shopeeDoisLinks.documentoComercialCanonico.linkResgateOriginal, "https://s.shopee.com.br/cupom-real");
+assert.strictEqual(shopeeDoisLinks.documentoComercialCanonico.linkProdutoOriginal, "https://s.shopee.com.br/produto-real?lp=aff");
+const shopeeDoisLinksTemplate = montarTemplateEspelhoShadow(shopeeDoisLinks.espelhoComercial, shopeeDoisLinks.documentoComercialCanonico, {
+  template: { blocos: [{ tipo: "link_resgate", ativo: true, ordem: 10 }, { tipo: "link", ativo: true, ordem: 20 }] }
+});
+assert.ok(shopeeDoisLinksTemplate.mensagem.includes("Resgate:\nhttps://s.shopee.com.br/cupom-real"));
+assert.ok(shopeeDoisLinksTemplate.mensagem.includes("Confira aqui:\nhttps://shopee.afiliado/produto-real"));
+
+const shopeeResgateDoisProdutos = criarEspelho({
+  textoOriginal: [
+    "Resgate:",
+    "https://s.shopee.com.br/cupom-real",
+    "Link produto A:",
+    "https://s.shopee.com.br/produto-a",
+    "Link produto B:",
+    "https://s.shopee.com.br/produto-b"
+  ].join("\n"),
+  oferta: { marketplace: "shopee", linkAfiliado: "" },
+  comercialNormalizado: { marketplace: "shopee", precoConfiavel: false }
+});
+assert.strictEqual(shopeeResgateDoisProdutos.documentoComercialCanonico.linkResgateOriginal, "https://s.shopee.com.br/cupom-real");
+assert.strictEqual(shopeeResgateDoisProdutos.documentoComercialCanonico.linkProdutoOriginal, null);
+assert.ok(shopeeResgateDoisProdutos.documentoComercialCanonico.avisos.includes("links_produto_ambiguos"));
+assert.deepStrictEqual(
+  shopeeResgateDoisProdutos.documentoComercialCanonico.linksComerciais.map(item => item.tipo),
+  ["resgate", "produto", "produto"]
+);
 
 console.log("ofc-v24-espelho-comercial.test.js ok");
