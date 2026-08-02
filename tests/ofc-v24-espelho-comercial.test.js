@@ -70,6 +70,44 @@ assert.ok(!mlCompleto.templateEspelhoShadow.mensagem.includes("Pix:"), "Pix embu
 assert.ok(mlCompleto.templateEspelhoShadow.mensagem.includes("🔗 Confira aqui:\nhttps://afiliado.test/produto"));
 assert.ok(!mlCompleto.templateEspelhoShadow.mensagem.includes("120,50"), "preco da pagina nao substitui captura");
 
+const mlTechnosCupomSemPix = criarEspelho({
+  textoOriginal: [
+    "Relogio Technos Masculino",
+    "Por: R$ 399,83",
+    "Use o cupom TECHNOS10",
+    "Confira aqui: https://meli.la/technos"
+  ].join("\n"),
+  oferta: { marketplace: "mercadolivre", preco: 599.9, linkAfiliado: "https://meli.afiliado/technos" },
+  ofertaEntrada: { cupom: "TECHNOS10", condicaoPix: "Use o cupom TECHNOS10" },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 399.83, precoConfiavel: true }
+});
+assert.strictEqual(mlTechnosCupomSemPix.documentoComercialCanonico.precoPorTexto, "R$ 399,83");
+assert.strictEqual(mlTechnosCupomSemPix.documentoComercialCanonico.precoDeTexto, null);
+assert.strictEqual(mlTechnosCupomSemPix.documentoComercialCanonico.precoPixTexto, null);
+assert.strictEqual(mlTechnosCupomSemPix.espelhoComercial.formaPagamentoTexto, null);
+assert.strictEqual(mlTechnosCupomSemPix.documentoComercialCanonico.cupomTexto, "TECHNOS10");
+assert.strictEqual(mlTechnosCupomSemPix.documentoComercialCanonico.linkProdutoOriginal, "https://meli.la/technos");
+assert.ok(!/\b(?:cupom|use|https?:\/\/|technos masculino)\b/i.test(mlTechnosCupomSemPix.documentoComercialCanonico.precoPorTexto));
+
+const mlPixProprio = criarEspelho({
+  textoOriginal: [
+    "Produto Mercado Livre",
+    "De: R$ 129,99",
+    "Por: R$ 64,44",
+    "Pix: R$ 61,22",
+    "Cupom: PIPOCA",
+    "https://meli.la/pipoca"
+  ].join("\n"),
+  oferta: { marketplace: "mercadolivre", preco: 64.44, linkAfiliado: "https://meli.afiliado/pipoca" },
+  ofertaEntrada: { cupom: "PIPOCA" },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 64.44, precoConfiavel: true }
+});
+assert.strictEqual(mlPixProprio.documentoComercialCanonico.precoDeTexto, "R$ 129,99");
+assert.strictEqual(mlPixProprio.documentoComercialCanonico.precoPorTexto, "R$ 64,44");
+assert.strictEqual(mlPixProprio.documentoComercialCanonico.precoPixTexto, "R$ 61,22");
+assert.strictEqual(mlPixProprio.documentoComercialCanonico.cupomTexto, "PIPOCA");
+assert.ok(!/\bCupom\b|https?:\/\//i.test(mlPixProprio.documentoComercialCanonico.precoPixTexto));
+
 const templateAdaptativoCupomDesligado = montarTemplateEspelhoShadow(
   mlCompleto.espelhoComercial,
   mlCompleto.documentoComercialCanonico,
@@ -192,6 +230,20 @@ const shopeeResgateObrigatorio = montarTemplateEspelhoShadow(
 );
 assert.ok(shopeeResgateObrigatorio.mensagem.includes("🎟️ Resgate:\nhttps://s.shopee.com.br/resgate-cupom"), "resgate essencial permanece mesmo com toggle desligado");
 assert.ok(shopeeResgateObrigatorio.mensagem.includes("🔗 Confira aqui:\nhttps://shopee.afiliado/produto"), "link afiliado segue separado do resgate");
+
+const shopeeSomenteProduto = criarEspelho({
+  textoOriginal: [
+    "Produto Shopee simples",
+    "Por R$ 49,90",
+    "Link produto:",
+    "https://s.shopee.com.br/produto-unico?lp=aff"
+  ].join("\n"),
+  oferta: { marketplace: "shopee", linkAfiliado: "https://shopee.afiliado/produto-unico" },
+  comercialNormalizado: { marketplace: "shopee", precoAtual: 49.9, precoConfiavel: true }
+});
+assert.strictEqual(shopeeSomenteProduto.documentoComercialCanonico.linkResgateOriginal, null);
+assert.strictEqual(shopeeSomenteProduto.documentoComercialCanonico.linkProdutoOriginal, "https://s.shopee.com.br/produto-unico?lp=aff");
+assert.strictEqual(shopeeSomenteProduto.documentoComercialCanonico.precoPorTexto, "R$ 49,90");
 
 const shopeeVoucherMoedas = criarEspelho({
   textoOriginal: "Produto Shopee\nR$ 70 usando moedas + cupom\nVoucher disponivel no app\nhttps://s.shopee.com.br/produto",

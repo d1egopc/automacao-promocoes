@@ -170,6 +170,49 @@ function recortarSufixoPreco(valor = "") {
   return "";
 }
 
+function contemPrecoMonetario(valor = "") {
+  return /(?:R\$|US\$|USD|U\$|\$)\s*[\d.]+(?:[,.][\d]{1,2})?/i.test(texto(valor));
+}
+
+function parecePrecoPixProprio(valor = "") {
+  const fonte = recortarAntesDeDelimitadorComercial(valor);
+  if (!fonte || !contemPrecoMonetario(fonte) || !/\bpix\b/i.test(fonte)) return false;
+  return /\b(?:pix|preco\s+pix|preco\s+no\s+pix|preco\s+via\s+pix|valor\s+pix|valor\s+no\s+pix)\b/i.test(normalizarComparacao(fonte))
+    || /(?:R\$|US\$|USD|U\$|\$)\s*[\d.]+(?:[,.][\d]{1,2})?\s*(?:no|na|via|por)\s+pix\b/i.test(fonte);
+}
+
+function extrairPrecoPixProprio(valor = "") {
+  if (!parecePrecoPixProprio(valor)) return "";
+  const semPrefixo = removerPrefixoComercial(
+    valor,
+    /^\s*(?:[^\n\w]{0,4}\s*)?(?:pre(?:co|c\u00e7o)\s*(?:no|via)?\s*pix|valor\s*(?:no|via)?\s*pix|pix)\s*:?\s*/i
+  );
+  return extrairPrecoComercialLimpo(semPrefixo);
+}
+
+function extrairPrecoPixDocumento({ textoOriginal = "", linhaPor = "", linhaValor = "", precoPorTexto = "", oferta = {}, ofertaEntrada = {} } = {}) {
+  const linhas = linhasTexto(textoOriginal);
+  const linhaPixPropria = linhas.find(linha => {
+    if (!parecePrecoPixProprio(linha)) return false;
+    if (linha === linhaPor || linha === linhaValor) return false;
+    const n = normalizarComparacao(linha);
+    return /^(?:pix|preco\s+pix|preco\s+no\s+pix|preco\s+via\s+pix|valor\s+pix|valor\s+no\s+pix)\b/.test(n)
+      || /\b(?:pix|preco\s+pix|preco\s+no\s+pix|preco\s+via\s+pix|valor\s+pix|valor\s+no\s+pix)\s*:/.test(n);
+  });
+  const candidatos = [
+    linhaPixPropria,
+    ofertaEntrada.precoPix,
+    oferta.precoPix,
+    ofertaEntrada.condicaoPix,
+    oferta.condicaoPix
+  ];
+  for (const candidato of candidatos) {
+    const precoPix = extrairPrecoPixProprio(candidato);
+    if (precoPix && !textoComercialEquivalente(precoPix, precoPorTexto)) return precoPix;
+  }
+  return "";
+}
+
 const CUPONS_BLOQUEADOS = new Set([
   "CUPOM", "CUPONS", "CODIGO", "COD", "DESCONTO", "PROMO", "PROMOCAO",
   "TODOS", "DESTA", "PAGINA", "RESGATE", "ANUNCIO", "HTTP", "HTTPS",
@@ -254,7 +297,8 @@ function extrairInstrucaoComercial(textoOriginal = "", cupomCodigo = "", oferta 
 function extrairFormaPagamento(textoOriginal = "", oferta = {}, ofertaEntrada = {}) {
   const estruturada = primeiroTexto(ofertaEntrada.condicaoPix, ofertaEntrada.precoPix, oferta.condicaoPix, oferta.precoPix);
   const fonte = `${textoOriginal}\n${estruturada}`;
-  if (/\b(?:via|no|na|por)\s+pix\b|\bpix\b/i.test(fonte)) return "Pix";
+  if (/(?:R\$|US\$|USD|U\$|\$)\s*[\d.]+(?:[,.][\d]{1,2})?\s*(?:no|na|via|por)\s+pix\b/i.test(fonte)) return "Pix";
+  if (/\b(?:pre(?:co|c\u00e7o)|valor)\s*(?:no|via)?\s*pix\b\s*:?\s*(?:R\$|US\$|USD|U\$|\$)\s*[\d.]+(?:[,.][\d]{1,2})?/i.test(fonte)) return "Pix";
   return "";
 }
 
@@ -336,7 +380,6 @@ function extrairDocumentoComercialCanonico({
   const linhaDe = primeiraLinhaPorNormalizacao(textoOriginal, /^\s*(?:de)\b/);
   const linhaPor = primeiraLinhaPorNormalizacao(textoOriginal, /^\s*(?:por)\b/);
   const linhaValor = primeiraLinhaPorNormalizacao(textoOriginal, /^\s*(?:valor)\b/);
-  const linhaPix = primeiraLinhaPorNormalizacao(textoOriginal, /\bpix\b/);
   const linhaParcelamento = primeiraLinhaPorNormalizacao(textoOriginal, /\b(?:parcel|\d+\s*x\s*de|ate\s+\d+x|em\s+\d+x|vezes)\b/);
   const linhaCashback = primeiraLinhaOriginal(textoOriginal, linha => /\bcashback\b/i.test(linha) && (/(?:R\$|US\$|USD|U\$|\$|\d)/i.test(linha) || /^\s*cashback\b/i.test(linha)));
   const linhaFrete = primeiraLinhaPorNormalizacao(textoOriginal, /\bfrete\b/);
@@ -345,17 +388,7 @@ function extrairDocumentoComercialCanonico({
 
   const precoDeTexto = extrairTextoLinhaPreco(linhaDe, "de") || precosTexto.precoDeTexto || "";
   const precoPorTexto = extrairTextoLinhaPreco(linhaPor, "por") || extrairTextoLinhaPreco(linhaValor, "valor") || precosTexto.precoPorTexto || "";
-  const precoPixTextoBruto = /\bpix\b/i.test(linhaPor || linhaValor)
-    ? (extrairTextoLinhaPreco(linhaPor, "por") || extrairTextoLinhaPreco(linhaValor, "valor") || texto(linhaPix))
-    : primeiroTexto(
-      ofertaEntrada.precoPix,
-      ofertaEntrada.condicaoPix,
-      oferta.precoPix,
-      oferta.condicaoPix,
-      /\bpix\b/i.test(precoPorTexto) ? precoPorTexto : "",
-      formaPagamentoTexto === "Pix" ? precoPorTexto : ""
-    );
-  const precoPixTexto = textoComercialEquivalente(precoPixTextoBruto, precoPorTexto) ? "" : precoPixTextoBruto;
+  const precoPixTexto = extrairPrecoPixDocumento({ textoOriginal, linhaPor, linhaValor, precoPorTexto, oferta, ofertaEntrada });
   const parcelamentoTexto = primeiroTexto(
     ofertaEntrada.parcelamento,
     oferta.parcelamento,
