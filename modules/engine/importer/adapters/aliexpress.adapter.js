@@ -67,6 +67,23 @@ function textoOriginalEvento(evento = {}) {
   return texto(evento.texto_original || evento.textoOriginal || evento.texto || "");
 }
 
+function extrairPrecoTextoRadarAliExpress(textoRadar = "") {
+  const linhas = String(textoRadar || "")
+    .split(/\r?\n/)
+    .map(linha => linha.trim())
+    .filter(Boolean);
+
+  for (const linha of linhas) {
+    const normalizada = linha.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    if (!/r\$\s*\d/i.test(linha)) continue;
+    if (/\b(cupom|off|desconto|cashback|frete|limite|voucher|coupon)\b/i.test(normalizada)) continue;
+    const match = linha.match(/R\$\s*\d{1,3}(?:[\.\s]?\d{3})*(?:,\d{2})?|R\$\s*\d+(?:,\d{2})?/i);
+    if (match) return match[0].replace(/\s+/g, " ").trim();
+  }
+
+  return "";
+}
+
 function normalizarCupomAliExpress(cupom = "") {
   const codigo = texto(cupom)
     .toUpperCase()
@@ -260,7 +277,9 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     };
   }
 
-  const precoAtual = primeiroValor(produto.precoAtual, produto.preco);
+  const precoRadarSeguro = extrairPrecoTextoRadarAliExpress(textoOriginalEvento(evento));
+  const precoAtual = primeiroValor(produto.precoAtual, produto.preco, precoRadarSeguro);
+  const precoOrigem = valorPresente(produto.precoAtual) || valorPresente(produto.preco) ? primeiroValor(produto.precoOrigem, "adapter") : (precoRadarSeguro ? "texto_radar" : "");
   const precoOriginal = primeiroValor(produto.precoOriginal, produto.precoAntigo);
   const precoNumerico = numeroPreco(precoAtual);
   const economiaCalculada = calcularEconomia(precoAtual, precoOriginal);
@@ -278,6 +297,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     titulo: produto.titulo || produto.nome || "",
     precoAtual,
     precoOriginal,
+    precoOrigem,
     cupom,
     beneficioComercial,
     linkAfiliado,
@@ -352,7 +372,8 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     beneficioTexto: beneficioComercial,
     beneficioExtra: beneficioComercial,
     valorEfetivo: primeiroValor(produto.valorEfetivo, produto.precoFinalConfirmado),
-    valorEfetivoOrigem: primeiroValor(produto.valorEfetivoOrigem, produto.precoFinalConfirmadoOrigem),
+    valorEfetivoOrigem: primeiroValor(produto.valorEfetivoOrigem, produto.precoFinalConfirmadoOrigem, precoOrigem),
+    precoOrigem,
     cashback: produto.cashback || "",
     freteGratis: produto.freteGratis === true,
     origem: "engine_importer_aliexpress",
@@ -368,6 +389,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
       linksClassificados,
       textoRadarTemCupom: Boolean(cupomTexto),
+      precoRadarUsado: precoOrigem === "texto_radar",
       camposProduto: Object.keys(produto || {}),
       produto
     }

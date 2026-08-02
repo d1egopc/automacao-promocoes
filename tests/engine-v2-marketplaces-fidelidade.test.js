@@ -118,6 +118,54 @@ async function testarShopeeResgateProdutoComParametroLpAff() {
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
 }
 
+async function testarShopeeResgateProdutoSemRotuloExplicito() {
+  limparModulo("../modules/engine/importer/adapters/shopee.adapter");
+  const { importarShopeeEngine } = require("../modules/engine/importer/adapters/shopee.adapter");
+  const resgate = "https://s.shopee.com.br/9zwbROf8sg";
+  const produto = "https://s.shopee.com.br/4qE8r7jK78";
+  let urlImportada = "";
+
+  const resultado = await importarShopeeEngine({
+    job: { id: 116, evento_id: 216, cliente_id: "workspace_teste" },
+    evento: {
+      texto_original: [
+        "Memoria Servidor 32GB LEIA A DESCRICAO",
+        "R$ 192 - 32GB 8500-1066MHZ",
+        "Resgatem o cupom de R$ 25 OFF",
+        resgate,
+        "",
+        "??",
+        produto,
+        produto
+      ].join("\n"),
+      links_extraidos: [resgate, produto]
+    },
+    links: [linkRow(1, resgate), linkRow(2, produto)],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
+      importarShopee: async (url) => {
+        urlImportada = url;
+        return {
+          titulo: "Memoria Servidor 32GB",
+          precoAtual: "192.00",
+          imagem: "https://img.test/memoria.jpg",
+          linkAfiliado: "https://shopee.test/memoria-afiliado",
+          linkExpandido: "https://shopee.com.br/product/333/444",
+          shopId: "333",
+          itemId: "444",
+          categoria: "informatica"
+        };
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(urlImportada, produto);
+  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "cupom");
+  assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
+  assert.strictEqual(resultado.metadata.linksClassificados[1].papelLinkMotivo, "contexto_produto_apos_resgate_shopee");
+}
+
 async function testarShopeeShortlinkGenericoChegaAoImportador() {
   limparModulo("../modules/engine/importer/adapters/shopee.adapter");
   const { importarShopeeEngine } = require("../modules/engine/importer/adapters/shopee.adapter");
@@ -328,6 +376,81 @@ async function testarAliExpressAppPcPreservaAmbosComoComerciais() {
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "link_pc");
 }
 
+async function testarAliExpressUsaPrecoRadarQuandoApiNaoRetornaPreco() {
+  limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
+  const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
+  const app = "https://a.aliexpress.com/_c3WQGDsT";
+  const pc = "https://a.aliexpress.com/_c3yGqeR9";
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 117, evento_id: 217, cliente_id: "workspace_teste" },
+    evento: {
+      texto_original: [
+        "Processador Ryzen 3 2200G PRO CPU R3 DDR4 AM4",
+        "?? R$ 156",
+        "Cupom: IFPRW9YO ou BRAE1 + 55 moedas no APP",
+        app,
+        "NO PC",
+        pc
+      ].join("\n"),
+      links_extraidos: [app, pc]
+    },
+    links: [
+      { ...linkRow(1, app), marketplace_detectado: "aliexpress" },
+      { ...linkRow(2, pc), marketplace_detectado: "aliexpress" }
+    ],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "track" } }),
+      importarAliExpress: async () => ({
+        titulo: "Processador Ryzen 3 2200G PRO CPU R3 DDR4 AM4",
+        precoAtual: "",
+        imagem: "https://img.test/ryzen.jpg",
+        linkAfiliado: "https://ali.test/ryzen-afiliado",
+        linkExpandido: "https://www.aliexpress.com/item/1005003333333333.html",
+        categoria: "informatica"
+      })
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.precoAtual, 156);
+  assert.strictEqual(resultado.precoOrigem, "texto_radar");
+  assert.strictEqual(resultado.metadata.precoRadarUsado, true);
+}
+
+async function testarAliExpressNaoUsaCupomComoPrecoRadar() {
+  limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
+  const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
+  const app = "https://a.aliexpress.com/_c3WQGDsT";
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 118, evento_id: 218, cliente_id: "workspace_teste" },
+    evento: {
+      texto_original: [
+        "Produto AliExpress sem preco",
+        "Cupom R$ 25 OFF: ALI25",
+        `APP: ${app}`
+      ].join("\n"),
+      links_extraidos: [app]
+    },
+    links: [{ ...linkRow(1, app), marketplace_detectado: "aliexpress" }],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "track" } }),
+      importarAliExpress: async () => ({
+        titulo: "Produto AliExpress sem preco",
+        precoAtual: "",
+        imagem: "https://img.test/sem-preco.jpg",
+        linkAfiliado: "https://ali.test/sem-preco",
+        linkExpandido: "https://www.aliexpress.com/item/1005003333333334.html",
+        categoria: "informatica"
+      })
+    }
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "preco_indisponivel");
+}
+
 async function testarValidacaoKabumComIntegracaoAwinGenerica() {
   mockModulo("../modules/engine/processor.service", {
     marcarJobStatus: async () => ({ ok: true }),
@@ -371,11 +494,14 @@ function testarOrquestradorIncluiMarketplacesOficiais() {
 (async () => {
   await testarClassificacaoShopeePreservaProduto();
   await testarShopeeResgateProdutoComParametroLpAff();
+  await testarShopeeResgateProdutoSemRotuloExplicito();
   await testarShopeeShortlinkGenericoChegaAoImportador();
   await testarShopeeCupomSozinhoNaoChamaImportador();
   await testarShopeeTentaProximoCandidatoQuandoPrimeiroNaoConfirmaProduto();
   await testarClassificacaoAliExpressPreservaProduto();
   await testarAliExpressAppPcPreservaAmbosComoComerciais();
+  await testarAliExpressUsaPrecoRadarQuandoApiNaoRetornaPreco();
+  await testarAliExpressNaoUsaCupomComoPrecoRadar();
   await testarValidacaoKabumComIntegracaoAwinGenerica();
   testarOrquestradorIncluiMarketplacesOficiais();
   console.log("engine-v2-marketplaces-fidelidade.test.js OK");

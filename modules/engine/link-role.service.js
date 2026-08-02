@@ -138,6 +138,34 @@ function classificarPorContexto(marketplace = "", contexto = {}) {
   return null;
 }
 
+function shopeeLinkPosteriorAoResgate(evento = {}, candidato = {}, contexto = {}) {
+  const fonte = textoEvento(evento);
+  if (!fonte) return false;
+
+  let idx = -1;
+  for (const url of urlsCandidato(candidato)) {
+    idx = fonte.indexOf(url);
+    if (idx >= 0) break;
+  }
+  if (idx <= 0) return false;
+
+  const antesCompleto = fonte.slice(0, idx);
+  const antesNormalizado = semAcentos(antesCompleto);
+  if (!/\b(resgate|cupom|cupons|voucher|coupon|codigo)\b/.test(antesNormalizado)) return false;
+
+  const urlsAntes = [...antesCompleto.matchAll(/https?:\/\/\S+/gi)];
+  if (!urlsAntes.length) return false;
+
+  const ultimoUrl = urlsAntes[urlsAntes.length - 1];
+  const intervalo = semAcentos(antesCompleto.slice(ultimoUrl.index + ultimoUrl[0].length));
+  if (/\b(resgate|cupom|cupons|voucher|coupon|codigo)\b/.test(intervalo)) return false;
+
+  const trechoProximo = semAcentos(contexto.depois || "");
+  if (/\b(resgate|cupom|cupons|voucher|coupon|codigo)\b/.test(trechoProximo)) return false;
+
+  return true;
+}
+
 function classificarShopee(candidato = {}, evento = {}) {
   const url = urlEstrutural(candidato);
   const contexto = contextoDoLink(evento, candidato);
@@ -160,6 +188,10 @@ function classificarShopee(candidato = {}, evento = {}) {
 
   if (/category|cat\.|search/i.test(url)) {
     return { papelLink: PAPEL_LINK.CATEGORIA, motivo: "shopee_url_categoria", confianca: "alta" };
+  }
+
+  if (shopeeLinkPosteriorAoResgate(evento, candidato, contexto)) {
+    return { papelLink: PAPEL_LINK.PRODUTO, motivo: "contexto_produto_apos_resgate_shopee", confianca: "baixa" };
   }
 
   const porContexto = classificarPorContexto("shopee", contexto);

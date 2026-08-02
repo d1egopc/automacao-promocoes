@@ -207,6 +207,52 @@ function mockModulo(relativo, exports) {
 
   {
     limparModulo("../modules/engine/inbox.service");
+    const hashesInseridos = [];
+    mockModulo("../modules/engine/database", {
+      queryEngine: async (sql, params = []) => {
+        if (/SELECT id\s+FROM engine_eventos_brutos/i.test(sql)) {
+          return { ok: true, resultado: { rows: [] }, metricas: {} };
+        }
+        if (/INSERT INTO engine_eventos_brutos/i.test(sql)) {
+          hashesInseridos.push(params[9]);
+          return { ok: true, resultado: { rows: [{ id: 500 + hashesInseridos.length }] }, metricas: {} };
+        }
+        if (/INSERT INTO engine_links/i.test(sql)) {
+          return { ok: true, resultado: { rows: [] }, metricas: {} };
+        }
+        return { ok: true, resultado: { rows: [] }, metricas: {} };
+      }
+    });
+    mockModulo("../modules/engine/jobs.service", {
+      criarJobsParaClientes: async () => ({ ok: true, criados: 1, existentes: 0 })
+    });
+    const inbox = require("../modules/engine/inbox.service");
+    const payload = {
+      origem: "radar",
+      origemTipo: "whatsapp",
+      grupoId: "grupo@g.us",
+      textoOriginal: "Oferta republicada https://www.awin1.com/cread.php?ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F536014",
+      linksExtraidos: ["https://www.awin1.com/cread.php?ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F536014"],
+      metadata: { coberturaTraceId: "cov_republicacao" }
+    };
+
+    const primeira = await inbox.registrarEventoBruto({
+      ...payload,
+      capturadoEm: new Date("2026-08-02T14:00:00.000Z")
+    }, { clientes: ["cliente_1"] });
+    const segunda = await inbox.registrarEventoBruto({
+      ...payload,
+      capturadoEm: new Date("2026-08-02T14:10:00.000Z")
+    }, { clientes: ["cliente_1"] });
+
+    assert.strictEqual(primeira.duplicado, false);
+    assert.strictEqual(segunda.duplicado, false);
+    assert.strictEqual(hashesInseridos.length, 2);
+    assert.notStrictEqual(hashesInseridos[0], hashesInseridos[1], "republicacao fora da janela nao deve colidir para sempre no hash_evento");
+  }
+
+  {
+    limparModulo("../modules/engine/inbox.service");
     const linkAmazonDivulgador = "https://amzn.divulgador.link/gUXR2tSr";
     let marketplaceEvento = "";
     let entradaJobs = null;

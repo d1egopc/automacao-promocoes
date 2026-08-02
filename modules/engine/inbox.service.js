@@ -58,10 +58,16 @@ function dominioUrl(url = "") {
 }
 
 function gerarHashEvento(evento = {}) {
+  const capturadoEmMs = new Date(evento.capturadoEm || Date.now()).getTime();
+  const janelaCincoMinutosMs = 5 * 60 * 1000;
+  const bucketCaptura = Number.isFinite(capturadoEmMs)
+    ? Math.floor(capturadoEmMs / janelaCincoMinutosMs)
+    : Math.floor(Date.now() / janelaCincoMinutosMs);
   const base = JSON.stringify({
     grupoId: evento.grupoId || "",
     textoOriginal: evento.textoOriginal || "",
-    linksExtraidos: evento.linksExtraidos || []
+    linksExtraidos: evento.linksExtraidos || [],
+    bucketCaptura
   });
 
   return crypto.createHash("sha256").update(base).digest("hex");
