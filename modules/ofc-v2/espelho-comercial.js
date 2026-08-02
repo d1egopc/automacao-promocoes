@@ -88,9 +88,40 @@ function limparTitulo(linha = "") {
   return texto(linha)
     .replace(/^[\s\-*>#.:;!]+/, "")
     .replace(/^(?:an[uú]ncio|#\s*an[uú]ncio)\b\s*:?\s*/i, "")
+    .replace(/^[()\[\]{}\s\-*>#.:;!]+/, "")
     .replace(/^[^\p{L}\p{N}]+/u, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function textoTecnicoOuVazio(valor = "") {
+  const bruto = texto(valor);
+  if (!bruto) return true;
+  const n = normalizarComparacao(bruto).replace(/[\s|;:,._\-()\[\]{}]+/g, "");
+  if (!n) return true;
+  if (["vazio", "null", "undefined", "nan", "infinity", "semvalor", "semconteudo", "objectobject"].includes(n)) return true;
+  if (/^\[?objectobject\]?$/i.test(bruto.trim())) return true;
+  if (/^[|;:,._\-()\[\]{}]+$/.test(bruto.trim())) return true;
+  return false;
+}
+
+function limparTextoComercial(valor = "") {
+  const limpo = texto(valor)
+    .replace(/\u0000/g, "")
+    .replace(/[|;:_\-\s]+$/g, "")
+    .replace(/^\s*[|;:]+\s*$/g, "")
+    .trim();
+  return textoTecnicoOuVazio(limpo) ? "" : limpo;
+}
+
+function tituloComercialValido(valor = "") {
+  const limpo = limparTitulo(valor);
+  if (textoTecnicoOuVazio(limpo)) return false;
+  const n = normalizarComparacao(limpo).replace(/[^a-z0-9]+/g, " ").trim();
+  if (!n) return false;
+  if (["anuncio", "mercado livre", "mercadolivre", "amazon", "shopee", "aliexpress", "kabum", "awin"].includes(n)) return false;
+  if (!/[\p{L}\p{N}]/u.test(limpo)) return false;
+  return true;
 }
 
 function linhaPareceComercial(linha = "") {
@@ -101,14 +132,14 @@ function linhaPareceComercial(linha = "") {
 function extrairTituloOriginal(textoOriginal = "", oferta = {}, ofertaEntrada = {}) {
   const tituloEstruturado = primeiroTexto(ofertaEntrada.tituloOriginal, ofertaEntrada.titulo, oferta.titulo, oferta.nome);
   const linhas = linhasTexto(textoOriginal);
-  const linhaTitulo = linhas.find(linha => !linhaPareceComercial(linha) && limparTitulo(linha).length >= 4);
+  const linhaTitulo = linhas.find(linha => !linhaPareceComercial(linha) && tituloComercialValido(linha));
   const linhaTituloPreservada = linhas.find(linha => {
     if (/https?:\/\//i.test(linha)) return false;
     const n = normalizarComparacao(linha);
     if (/^(de|por|valor|cupom|use|utilize|aplique|resgate|frete)\b/.test(n)) return false;
-    return limparTitulo(linha).length >= 4;
+    return tituloComercialValido(linha);
   });
-  return primeiroTexto(limparTitulo(linhaTitulo), limparTitulo(linhaTituloPreservada), tituloEstruturado);
+  return primeiroTexto(limparTitulo(linhaTitulo), limparTitulo(linhaTituloPreservada), tituloComercialValido(tituloEstruturado) ? limparTitulo(tituloEstruturado) : "");
 }
 
 function extrairPrecosTexto(textoOriginal = "") {
@@ -220,7 +251,9 @@ const CUPONS_BLOQUEADOS = new Set([
 ]);
 
 function cupomPlausivel(valor = "") {
-  const chave = chaveCupom(valor);
+  const bruto = texto(valor);
+  const chave = chaveCupom(bruto);
+  if (!/[A-Z0-9]/.test(bruto)) return false;
   if (!chave || chave.length < 3 || chave.length > 32) return false;
   if (CUPONS_BLOQUEADOS.has(chave)) return false;
   if (!/[A-Z]/.test(chave)) return false;
@@ -272,12 +305,58 @@ function instrucaoRedundante(instrucao = "", cupomCodigo = "") {
   if (!normalizada) return true;
   if (!cupom) return false;
   return [
+    cupom,
     `cupom ${cupom}`,
     `codigo ${cupom}`,
     `cod ${cupom}`,
     `use o cupom ${cupom}`,
     `utilize o cupom ${cupom}`
   ].includes(normalizada);
+}
+
+function instrucaoCupomComResgateSemOperacao(instrucao = "", doc = {}) {
+  const n = normalizarComparacao(instrucao);
+  if (!/\bresgat/.test(n)) return false;
+  if (!marketplaceMercadoLivre(doc.marketplace) && /\b(?:anuncio|pagina|produto)\b/.test(n)) return false;
+  return !linkResgateEssencial(doc, {});
+}
+
+function instrucaoCupomConfiavel(instrucao = "", cupons = [], doc = {}) {
+  const valor = limparTextoComercial(instrucao);
+  if (!valor || /https?:\/\//i.test(valor)) return "";
+  if (cupons.some(cupom => instrucaoRedundante(valor, cupom))) return "";
+  if (instrucaoCupomComResgateSemOperacao(valor, doc)) return "";
+  return valor;
+}
+
+function montarInstrucaoCupomCanonica(doc = {}, cupons = []) {
+  const explicita = instrucaoCupomConfiavel(doc.instrucaoTexto, cupons, doc);
+  if (explicita) return explicita;
+  if (!cupons.length) return "";
+  if (cupons.length > 1) return "Aplique um dos cupons informados para obter o desconto.";
+  const codigo = cupons[0];
+  const precisaCupom = cupomNecessarioParaPreco(doc);
+  const precisaPix = pixNecessarioParaPreco(doc);
+  if (precisaCupom && precisaPix) return `Aplique o cupom ${codigo} + Pix para chegar neste valor.`;
+  if (precisaCupom) return `Aplique o cupom ${codigo} para chegar neste valor.`;
+  return `Aplique o cupom ${codigo} para obter o desconto.`;
+}
+
+function beneficioEspeculativoOuTecnico(valor = "") {
+  const fonte = limparTextoComercial(valor);
+  if (!fonte) return true;
+  const n = normalizarComparacao(fonte);
+  if (/\bpode\s+haver\b|\bpode\s+existir\b|\bconfira\s+(?:no\s+)?(?:carrinho|app)\b|\btalvez\b/.test(n)) return true;
+  if (/\bcupom\s+disponivel\b/.test(n) && !/(?:R\$|US\$|USD|U\$|\$|\d+\s*%|\boff\b)/i.test(fonte)) return true;
+  if (/\bdesconto\s+no\s+pix\b/i.test(fonte) && !/(?:preco|valor)\b/i.test(n)) return true;
+  return false;
+}
+
+function beneficioDuplicaInstrucaoCupom(valor = "", instrucao = "") {
+  if (!valor || !instrucao) return false;
+  const n = normalizarComparacao(valor);
+  if (!/(?:aplique|use|utilize|resgate|ative).{0,40}(?:cupom|voucher)/.test(n)) return false;
+  return textoComercialEquivalente(valor, instrucao) || normalizarComparacao(instrucao).includes(n) || n.includes(normalizarComparacao(instrucao));
 }
 
 function extrairInstrucaoComercial(textoOriginal = "", cupomCodigo = "", oferta = {}, ofertaEntrada = {}) {
@@ -463,9 +542,10 @@ function criarBlocoComercial({
 } = {}) {
   const tipoNormalizado = texto(tipo);
   if (!TIPOS_BLOCOS_COMERCIAIS_V26.includes(tipoNormalizado)) return null;
-  const textoPreservado = texto(textoOriginal);
+  const textoPreservado = limparTextoComercial(textoOriginal);
   const temValor = valorEstruturadoUtil(valorEstruturado);
   if (!textoPreservado && !temValor) return null;
+  if (textoOriginal && !textoPreservado && !temValor) return null;
   const ordemSugerida = ORDEM_BLOCOS_COMERCIAIS_V26[tipoNormalizado];
   const origemBloco = texto(origem) || "documento_comercial_canonico";
   const chave = dedupeKeyBloco(tipoNormalizado, textoPreservado, valorEstruturado, origemBloco);
@@ -553,15 +633,43 @@ function contextoUrlNoTexto(textoOriginal = "", url = "") {
   return urlsDoTexto(textoOriginal).find(item => item.url === alvo)?.linha || "";
 }
 
+function marketplaceMercadoLivre(valor = "") {
+  const mp = normalizarComparacao(valor).replace(/[^a-z0-9]+/g, "");
+  return mp === "mercadolivre" || mp === "ml";
+}
+
+function urlPareceProdutoMercadoLivre(url = "") {
+  const fonte = texto(url).toLowerCase();
+  return /meli\.la\//.test(fonte)
+    || /mercadolivre\.com(?:\.br)?\/(?:sec|p|produto|ofertas|anuncios|mlb-|MLB)/i.test(fonte)
+    || /mercadolivre\.com(?:\.br)?\/[^\s?#]+/i.test(fonte);
+}
+
+function contextoIndicaResgateIndependente(contexto = "") {
+  const n = normalizarComparacao(contexto);
+  return /\b(?:resgate|resgatar|voucher|cupom|cupons|campanha|landing|pagina\s+de\s+cupons)\b/.test(n)
+    && !/\b(?:link\s+(?:do\s+)?produto|produto|confira\s+aqui|compre|comprar)\b/.test(n);
+}
+
+function linkResgateValidoPorMarketplace(url = "", contexto = "", marketplace = "") {
+  if (!texto(url)) return false;
+  if (marketplaceMercadoLivre(marketplace)) {
+    if (urlPareceProdutoMercadoLivre(url)) return false;
+    return contextoIndicaResgateIndependente(contexto);
+  }
+  return true;
+}
+
 function classificarTipoLinkBloco(item = {}, textoOriginal = "", marketplace = "") {
   const url = texto(item.url);
   const tipo = texto(item.tipo);
-  const contexto = normalizarComparacao(contextoUrlNoTexto(textoOriginal, url));
+  const contexto = normalizarComparacao(primeiroTexto(item.contexto, contextoUrlNoTexto(textoOriginal, url)));
   const mp = normalizarComparacao(marketplace);
   if (/chat\.whatsapp|whatsapp\.com|t\.me|telegram|grupo|canal/i.test(url)) return "link_fonte_ignorado";
   if (/youtube\.com|youtu\.be|instagram\.com|facebook\.com|x\.com|twitter\.com/i.test(url)) return "link_auxiliar";
   if (mp === "amazon" && tipo === "resgate") return "link_produto_original";
-  if (tipo === "resgate") return "link_resgate";
+  if (tipo === "resgate") return linkResgateValidoPorMarketplace(url, contexto, marketplace) ? "link_resgate" : "link_produto_original";
+  if ((tipo === "app" || tipo === "pc") && mp !== "aliexpress") return "link_produto_original";
   if (tipo === "app") return "link_app";
   if (tipo === "pc") return "link_pc";
   if (tipo === "moedas" || /\bmoeda|moedas|coins?\b/.test(contexto)) return "link_moedas";
@@ -645,6 +753,7 @@ function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
   for (const requisito of requisitosPreco) adicionarBlocoComercial(blocos, { tipo: "requisito_preco", textoOriginal: requisito, origem: "documento.requisitos_preco", confianca: "alta", essencial: true, visibilidadePadrao: "obrigatorio" });
 
   const cupons = dedupCupons(separarCupons(doc.cupomTexto));
+  const instrucaoCupomCanonica = montarInstrucaoCupomCanonica(doc, cupons);
   cupons.forEach((cupom, indice) => {
     adicionarBlocoComercial(blocos, {
       tipo: indice === 0 ? "cupom_codigo" : "cupons_alternativos",
@@ -660,10 +769,14 @@ function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
 
   adicionarBlocoComercial(blocos, { tipo: "cupom_valor", textoOriginal: primeiroTexto(contexto.ofertaEntrada?.valorCupom, contexto.ofertaEntrada?.cupomValor, contexto.oferta?.valorCupom, contexto.oferta?.cupomValor), origem: "campos_estruturados.cupom_valor", confianca: "media" });
   adicionarBlocoComercial(blocos, { tipo: "cupom_percentual", textoOriginal: primeiroTexto(contexto.ofertaEntrada?.percentualCupom, contexto.ofertaEntrada?.cupomPercentual, contexto.oferta?.percentualCupom, contexto.oferta?.cupomPercentual), origem: "campos_estruturados.cupom_percentual", confianca: "media" });
-  if (!cupons.length && /\b(?:resgate|ative|aplique|selecione).{0,40}\b(?:cupom|voucher)\b/i.test(`${doc.instrucaoTexto || ""} ${doc.beneficioTexto || ""} ${doc.resgateTexto || ""}`)) {
+  const fonteCupomSemCodigo = `${doc.instrucaoTexto || ""} ${doc.beneficioTexto || ""} ${doc.resgateTexto || ""}`;
+  const cupomSemCodigoNoAnuncio = !marketplaceMercadoLivre(doc.marketplace)
+    && /\b(?:resgate|ative|aplique|selecione).{0,40}\b(?:cupom|voucher)\b/i.test(fonteCupomSemCodigo)
+    && /\b(?:anuncio|pagina|p[aá]gina|produto)\b/i.test(fonteCupomSemCodigo);
+  if (!cupons.length && (linkResgateEssencial(doc, {}) || cupomSemCodigoNoAnuncio)) {
     adicionarBlocoComercial(blocos, { tipo: "cupom_sem_codigo", textoOriginal: primeiroTexto(doc.instrucaoTexto, doc.beneficioTexto, doc.resgateTexto), origem: "documento.instrucao_cupom", confianca: "media", essencial: cupomNecessarioParaPreco(doc), requisitos: ["resgate_no_anuncio"] });
   }
-  adicionarBlocoComercial(blocos, { tipo: "instrucao_cupom", textoOriginal: doc.instrucaoTexto, origem: "documento.instrucaoTexto", confianca: "alta", essencial: cupomNecessarioParaPreco(doc), requisitos: cupomEssencial ? ["cupom"] : [] });
+  adicionarBlocoComercial(blocos, { tipo: "instrucao_cupom", textoOriginal: instrucaoCupomCanonica, origem: doc.instrucaoTexto ? "documento.instrucaoTexto" : "documento.instrucao_cupom_segura", confianca: doc.instrucaoTexto ? "alta" : "media", essencial: cupomNecessarioParaPreco(doc), requisitos: cupomEssencial ? ["cupom"] : [] });
 
   adicionarBlocoComercial(blocos, { tipo: "cashback", textoOriginal: doc.cashbackTexto, origem: "documento.cashbackTexto", confianca: "media" });
   if (/\bmoeda|moedas|coins?\b/i.test(`${contexto.textoOriginal || ""} ${doc.beneficioTexto || ""}`)) adicionarBlocoComercial(blocos, { tipo: "moedas", textoOriginal: primeiroTexto(doc.beneficioTexto, "Moedas"), origem: "texto_comercial_original", confianca: "media" });
@@ -672,8 +785,10 @@ function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
   if (/\bgarantia\b/i.test(`${contexto.textoOriginal || ""} ${doc.beneficioTexto || ""}`)) adicionarBlocoComercial(blocos, { tipo: "garantia", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bgarantia\b/) || doc.beneficioTexto, origem: "texto_comercial_original", confianca: "media" });
   if (/\bpre\s*venda|pré\s*venda\b/i.test(contexto.textoOriginal || "")) adicionarBlocoComercial(blocos, { tipo: "pre_venda", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bpre\s*venda|pre venda\b/) || "Pré-venda", origem: "texto_comercial_original", confianca: "media" });
   if (/\bprazo|envio\b/i.test(contexto.textoOriginal || "")) adicionarBlocoComercial(blocos, { tipo: "prazo_envio", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bprazo|envio\b/), origem: "texto_comercial_original", confianca: "media" });
-  if (/\bapp\b/i.test(`${contexto.textoOriginal || ""} ${doc.beneficioTexto || ""}`)) adicionarBlocoComercial(blocos, { tipo: "beneficio_app", textoOriginal: doc.beneficioTexto || primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bapp\b/), origem: "texto_comercial_original", confianca: "media" });
-  adicionarBlocoComercial(blocos, { tipo: "beneficio", textoOriginal: doc.beneficioTexto, origem: "documento.beneficioTexto", confianca: "media" });
+  const beneficioRenderizavel = beneficioEspeculativoOuTecnico(doc.beneficioTexto) || beneficioDuplicaInstrucaoCupom(doc.beneficioTexto, instrucaoCupomCanonica) ? "" : doc.beneficioTexto;
+  const beneficioApp = doc.beneficioTexto || primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bapp\b/);
+  if (/\bapp\b/i.test(`${contexto.textoOriginal || ""} ${doc.beneficioTexto || ""}`) && !beneficioEspeculativoOuTecnico(beneficioApp)) adicionarBlocoComercial(blocos, { tipo: "beneficio_app", textoOriginal: beneficioApp, origem: "texto_comercial_original", confianca: "media" });
+  adicionarBlocoComercial(blocos, { tipo: "beneficio", textoOriginal: beneficioRenderizavel, origem: "documento.beneficioTexto", confianca: "media" });
 
   const avaliacao = primeiroTexto(contexto.ofertaEntrada?.avaliacao, contexto.ofertaEntrada?.rating, contexto.ofertaEntrada?.nota, contexto.oferta?.avaliacao, contexto.oferta?.rating, contexto.oferta?.nota, contexto.comercialNormalizado?.avaliacao?.texto);
   if (textoPossuiNotaReal(avaliacao)) adicionarBlocoComercial(blocos, { tipo: "avaliacao_nota", textoOriginal: avaliacao, valorEstruturado: { nota: Number(avaliacao.replace(",", ".")) }, origem: "campos_estruturados.avaliacao", confianca: "media" });
@@ -853,18 +968,18 @@ function valorUrl(item = {}) {
   return primeiroTexto(item.afiliado, item.linkAfiliado, item.resolvido, item.url_expandida, item.urlNormalizada, item.original, item.url_original, item.link, item.url);
 }
 
-function adicionarLinkUnico(saida, url, tipo = "produto") {
+function adicionarLinkUnico(saida, url, tipo = "produto", contexto = "") {
   const valor = texto(url);
   if (!valor) return;
   const chave = valor.replace(/#.*$/, "");
   if (saida.some(item => item.url.replace(/#.*$/, "") === chave)) return;
-  saida.push({ url: valor, tipo });
+  saida.push({ url: valor, tipo, contexto: texto(contexto) });
 }
 
 function extrairLinksComerciais({ textoOriginal = "", oferta = {}, ofertaEntrada = {}, link = {} } = {}) {
   const links = [];
   for (const item of urlsDoTexto(textoOriginal)) {
-    const n = normalizarComparacao(item.linha);
+    const n = normalizarComparacao(item.linha.replace(/https?:\/\/\S+/gi, ""));
     const tipo = /\bapp\b/.test(n)
       ? "app"
       : (/\bpc\b|\bsite\b/.test(n)
@@ -872,7 +987,7 @@ function extrairLinksComerciais({ textoOriginal = "", oferta = {}, ofertaEntrada
         : (/\b(?:link|confira|produto)\b/.test(n)
           ? "produto"
           : (/(resgate|cupom|voucher)/.test(n) ? "resgate" : "produto")));
-    adicionarLinkUnico(links, item.url, tipo);
+    adicionarLinkUnico(links, item.url, tipo, item.linha);
   }
   for (const item of lista(ofertaEntrada.linksProduto)) adicionarLinkUnico(links, valorUrl(item), "produto");
   for (const item of lista(ofertaEntrada.linksResgate)) adicionarLinkUnico(links, valorUrl(item), "resgate");
@@ -880,10 +995,12 @@ function extrairLinksComerciais({ textoOriginal = "", oferta = {}, ofertaEntrada
   for (const item of lista(oferta.linksResgate)) adicionarLinkUnico(links, valorUrl(item), "resgate");
   adicionarLinkUnico(links, oferta.linkOriginal || link.url_original || ofertaEntrada.linkOriginal, "produto");
   if (!links.some(item => item.tipo === "produto")) adicionarLinkUnico(links, oferta.linkAfiliado || ofertaEntrada.linkAfiliado, "produto");
-  const produtos = links.filter(item => item.tipo === "produto");
+  const marketplace = primeiroTexto(oferta.marketplace, ofertaEntrada.marketplace, link.marketplace);
+  const produtos = links.filter(item => classificarTipoLinkBloco(item, textoOriginal, marketplace) === "link_produto_original");
+  const resgate = links.find(item => classificarTipoLinkBloco(item, textoOriginal, marketplace) === "link_resgate");
   return {
     linkProdutoOriginal: produtos.length === 1 ? produtos[0].url : "",
-    linkResgateOriginal: links.find(item => item.tipo === "resgate")?.url || "",
+    linkResgateOriginal: resgate?.url || "",
     produtosAmbiguos: produtos.length > 1,
     links
   };
@@ -998,14 +1115,16 @@ function cupomCanonicoConfiavel(doc = {}, espelho = {}) {
 function linkResgateEssencial(doc = {}, espelho = {}) {
   const link = primeiroTexto(doc.linkResgateOriginal, espelho.linkResgateOriginal);
   if (!link) return false;
-  const contexto = normalizarComparacao([
+  const contextoOriginal = [
     doc.resgateTexto,
     doc.instrucaoTexto,
     doc.beneficioTexto,
     espelho.instrucaoComercial,
     ...lista(doc.condicoesComerciais),
     ...lista(espelho.condicoesComerciais)
-  ].filter(Boolean).join(" "));
+  ].filter(Boolean).join(" ");
+  if (!linkResgateValidoPorMarketplace(link, contextoOriginal, doc.marketplace || espelho.marketplace)) return false;
+  const contexto = normalizarComparacao(contextoOriginal);
   return /\b(?:resgate|cupom|cupons|voucher|beneficio|beneficio|moeda|moedas)\b/.test(contexto);
 }
 
@@ -1062,7 +1181,10 @@ function normalizarBlocosTemplateEspelho(template = {}, doc = {}, espelho = {}) 
 }
 
 function normalizarLinhaTemplate(valor = "") {
-  return texto(valor).replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  const normalizada = texto(valor).replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (!normalizada) return "";
+  const linhas = normalizada.split("\n").map(linha => texto(linha)).filter(linha => !textoTecnicoOuVazio(linha));
+  return linhas.join("\n").trim();
 }
 
 function adicionarBlocoUnico(saida = [], tipo = "", linha = "") {
@@ -1122,7 +1244,8 @@ function textoComercialEquivalente(a = "", b = "") {
 
 function resolverBlocoTemplateEspelho(tipo = "", doc = {}, espelho = {}, contexto = {}) {
   const marketplace = valorDocumentoOuEspelho(doc, espelho, "marketplace", "marketplace");
-  const linkResgate = valorDocumentoOuEspelho(doc, espelho, "linkResgateOriginal", "linkResgateOriginal");
+  const linkResgateCandidato = valorDocumentoOuEspelho(doc, espelho, "linkResgateOriginal", "linkResgateOriginal");
+  const linkResgate = linkResgateEssencial(doc, espelho) ? linkResgateCandidato : "";
   const linkProduto = primeiroTexto(doc.linkAfiliado, espelho.linkAfiliado, doc.linkProdutoOriginal, espelho.linkProdutoOriginal);
   const precoDe = valorDocumentoOuEspelho(doc, espelho, "precoDeTexto", "precoDeTexto");
   const precoPor = primeiroTexto(doc.precoPorTexto, doc.precoPixTexto, espelho.precoFinalTexto, espelho.precoPorTexto);
@@ -1147,9 +1270,11 @@ function resolverBlocoTemplateEspelho(tipo = "", doc = {}, espelho = {}, context
   if (tipo === "economia") return economia ? `Economia: ${economia}` : "";
   if (tipo === "cupom") return cupom ? `🎟️ Cupom: ${cupom}` : "";
   if (tipo === "beneficio") {
+    if (beneficioEspeculativoOuTecnico(beneficio)) return "";
     if (textoComercialEquivalente(beneficio, frete) || textoComercialEquivalente(beneficio, cashback)) return "";
     if (!contexto.temBlocoCashback && /\bcashback\b/i.test(beneficio)) return "";
     if (!contexto.temBlocoFrete && /\bfrete\b/i.test(beneficio)) return "";
+    if (beneficioDuplicaInstrucaoCupom(beneficio, instrucao)) return "";
     return beneficio ? `🎁 Benefício: ${beneficio}` : "";
   }
   if (tipo === "cashback") return cashback ? `💰 Cashback: ${cashback}` : "";
@@ -1248,7 +1373,7 @@ function normalizarBlocosCanonicosV26(documento = {}) {
     .map((bloco, indice) => ({
       ...bloco,
       tipo: texto(bloco.tipo),
-      textoOriginal: texto(bloco.textoOriginal),
+      textoOriginal: limparTextoComercial(bloco.textoOriginal),
       dedupeKey: texto(bloco.dedupeKey),
       ordemSugerida: Number.isFinite(Number(bloco.ordemSugerida)) ? Number(bloco.ordemSugerida) : indice + 1000,
       essencial: bloco.essencial === true,
@@ -1279,10 +1404,10 @@ function toggleAtivoParaBlocoV26(bloco = {}, template = {}) {
 }
 
 function textoBlocoCanonicoV26(bloco = {}) {
-  const direto = texto(bloco.textoOriginal);
+  const direto = limparTextoComercial(bloco.textoOriginal);
   if (direto) return direto;
   const valor = objeto(bloco.valorEstruturado);
-  return primeiroTexto(valor.texto, valor.url, valor.codigo, valor.valor);
+  return limparTextoComercial(primeiroTexto(valor.texto, valor.url, valor.codigo, valor.valor));
 }
 
 function avaliacaoQuantidadeVisualV26(valor = "") {
@@ -1328,9 +1453,11 @@ function renderizarBlocoCanonicoV26(bloco = {}, contexto = {}) {
   if (bloco.tipo === "prazo_envio") return `📦 ${valor}`;
   if (bloco.tipo === "beneficio_app") return `📱 ${valor}`;
   if (bloco.tipo === "beneficio") {
+    if (beneficioEspeculativoOuTecnico(valor)) return "";
     if (textoComercialEquivalente(valor, contexto.freteTexto) || textoComercialEquivalente(valor, contexto.cashbackTexto)) return "";
     if (/\bcashback\b/i.test(valor) && contexto.temCashback) return "";
     if (/\bfrete\b/i.test(valor) && contexto.temFrete) return "";
+    if (beneficioDuplicaInstrucaoCupom(valor, contexto.instrucaoCupomTexto)) return "";
     return `🎁 ${valor}`;
   }
   if (bloco.tipo === "avaliacao_nota") return avaliacaoVisual(valor);
@@ -1379,7 +1506,8 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
     freteTexto: blocosOrdenados.find(bloco => bloco.tipo === "frete")?.textoOriginal || "",
     cashbackTexto: blocosOrdenados.find(bloco => bloco.tipo === "cashback")?.textoOriginal || "",
     temFrete: blocosOrdenados.some(bloco => bloco.tipo === "frete"),
-    temCashback: blocosOrdenados.some(bloco => bloco.tipo === "cashback")
+    temCashback: blocosOrdenados.some(bloco => bloco.tipo === "cashback"),
+    instrucaoCupomTexto: blocosOrdenados.find(bloco => bloco.tipo === "instrucao_cupom")?.textoOriginal || ""
   };
 
   for (const bloco of blocosOrdenados) {

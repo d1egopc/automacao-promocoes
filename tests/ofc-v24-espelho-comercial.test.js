@@ -764,6 +764,187 @@ assert.strictEqual(blocoTipo(aliexpressMoedaEstrangeira, "moeda").textoOriginal,
 assert.strictEqual(blocoTipo(aliexpressMoedaEstrangeira, "preco_oferta").moeda, "USD");
 assert.ok(!JSON.stringify(blocosV26(aliexpressMoedaEstrangeira)).includes("R$ 19,99"), "moeda estrangeira nao e convertida nos blocos");
 
+
+const mlPlacaMaePolimento = criarEspelho({
+  textoOriginal: [
+    "Placa-mae Mercado Livre B550",
+    "Por: R$ 406,00 no Pix",
+    "Cupom: NAPAGINADOPRODUTO",
+    "Pode haver beneficio pelo app",
+    "Frete gratis",
+    "NAPAGINADOPRODUTO",
+    "Link: https://meli.la/placa-mae"
+  ].join("\n"),
+  oferta: { marketplace: "mercadolivre", preco: 406, linkAfiliado: "https://meli.afiliado/placa-mae" },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 406, precoConfiavel: true }
+});
+assert.ok(!tiposV26(mlPlacaMaePolimento).includes("link_resgate"), "ML nao cria resgate falso para link meli.la");
+assert.ok(!tiposV26(mlPlacaMaePolimento).includes("beneficio_app"), "beneficio especulativo pelo app nao renderiza por padrao");
+assert.ok(!tiposV26(mlPlacaMaePolimento).includes("beneficio"), "beneficio especulativo nao aparece como beneficio generico");
+assert.strictEqual(mlPlacaMaePolimento.documentoComercialCanonico.precoPorTexto, "R$ 406,00 no Pix");
+assert.strictEqual(mlPlacaMaePolimento.documentoComercialCanonico.precoPixTexto, null);
+assert.ok(!mlPlacaMaePolimento.templateEspelhoShadow.mensagem.includes("Pix:"), "Pix dentro do Por nao duplica");
+assert.ok(!mlPlacaMaePolimento.templateEspelhoShadow.mensagem.includes("Pode haver beneficio"));
+assert.ok(!mlPlacaMaePolimento.templateEspelhoShadow.mensagem.includes("vazio"));
+
+const mlOculosSemResgate = criarEspelho({
+  textoOriginal: [
+    "Oculos de sol Mercado Livre",
+    "De: R$ 199,90 | Por: R$ 79,90",
+    "Resgate o cupom OCULOS10",
+    "https://mercadolivre.com/sec/2xProduto"
+  ].join("\n"),
+  oferta: { marketplace: "mercadolivre", preco: 79.9, linkAfiliado: "https://meli.afiliado/oculos" },
+  ofertaEntrada: { cupom: "OCULOS10" },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 79.9, precoConfiavel: true }
+});
+assert.strictEqual(mlOculosSemResgate.documentoComercialCanonico.linkResgateOriginal, null);
+assert.ok(!tiposV26(mlOculosSemResgate).includes("link_resgate"), "mercadolivre.com/sec e resgate textual nao viram resgate separado");
+assert.strictEqual(blocosTipo(mlOculosSemResgate, "instrucao_cupom").length, 1, "instrucao de cupom renderiza uma unica vez");
+
+const mlPotesInstrucaoUnica = criarEspelho({
+  textoOriginal: [
+    "Kit potes hermeticos",
+    "Por: R$ 122,82",
+    "Cupom: POTES10",
+    "Use o cupom POTES10",
+    "Use o cupom POTES10",
+    "https://meli.la/potes"
+  ].join("\n"),
+  oferta: { marketplace: "mercadolivre", preco: 122.82, linkAfiliado: "https://meli.afiliado/potes" },
+  ofertaEntrada: { cupom: "POTES10" },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 122.82, precoConfiavel: true }
+});
+assert.strictEqual(blocosTipo(mlPotesInstrucaoUnica, "instrucao_cupom").length, 1);
+assert.strictEqual(blocoTipo(mlPotesInstrucaoUnica, "instrucao_cupom").textoOriginal, "Aplique o cupom POTES10 para obter o desconto.");
+assert.ok(!tiposV26(mlPotesInstrucaoUnica).includes("link_resgate"));
+
+const mlRoupaDoisCupons = criarEspelho({
+  textoOriginal: [
+    "Jaqueta masculina Mercado Livre",
+    "De: R$ 299,99 por R$ 73,79 no Pix",
+    "Cupom: FASHIONML ou MODACOMVC",
+    "Resgate o cupom na pagina",
+    "https://meli.la/roupa"
+  ].join("\n"),
+  oferta: { marketplace: "mercadolivre", preco: 73.79, linkAfiliado: "https://meli.afiliado/roupa" },
+  ofertaEntrada: { cupom: "FASHIONML ou MODACOMVC" },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 73.79, precoConfiavel: true }
+});
+assert.ok(tiposV26(mlRoupaDoisCupons).includes("cupons_alternativos"));
+assert.strictEqual(blocoTipo(mlRoupaDoisCupons, "instrucao_cupom").textoOriginal, "Aplique um dos cupons informados para obter o desconto.");
+assert.ok(!tiposV26(mlRoupaDoisCupons).includes("link_resgate"));
+
+const amazonCadeiraVazio = criarEspelho({
+  textoOriginal: [
+    "Cadeira ergonomica Amazon",
+    "Por: R$ 799,90",
+    "Beneficio: vazio",
+    "vazio",
+    "https://amzn.to/cadeira"
+  ].join("\n"),
+  oferta: { marketplace: "amazon", preco: 799.9, linkAfiliado: "https://amzn.to/afiliado-cadeira", beneficioTexto: "vazio" },
+  comercialNormalizado: { marketplace: "amazon", precoAtual: 799.9, precoConfiavel: true }
+});
+assert.ok(!JSON.stringify(amazonCadeiraVazio.documentoComercialCanonico.blocos).includes("vazio"));
+assert.ok(!amazonCadeiraVazio.templateEspelhoShadow.mensagem.includes("vazio"));
+
+const mlCupomPixMisclassificado = criarEspelho({
+  textoOriginal: [
+    "Produto ML com cupom",
+    "Por: R$ 399,83",
+    "Use o cupom TECHNOS10",
+    "https://meli.la/technos-cupom"
+  ].join("\n"),
+  oferta: { marketplace: "mercadolivre", preco: 399.83, linkAfiliado: "https://meli.afiliado/technos-cupom" },
+  ofertaEntrada: { cupom: "TECHNOS10", condicaoPix: "Use o cupom TECHNOS10" },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 399.83, precoConfiavel: true }
+});
+assert.strictEqual(mlCupomPixMisclassificado.documentoComercialCanonico.precoPixTexto, null, "Use o cupom nao e preco Pix");
+assert.strictEqual(mlCupomPixMisclassificado.espelhoComercial.formaPagamentoTexto, null);
+
+const amazonPixTituloInvalido = criarEspelho({
+  textoOriginal: [
+    "anuncio)",
+    "Por: R$ 2.499 no Pix",
+    "vazio",
+    "https://amzn.to/placa-video"
+  ].join("\n"),
+  oferta: { titulo: "Placa de Video RTX 5060 Ti", marketplace: "amazon", preco: 2499, linkAfiliado: "https://amzn.to/afiliado-placa-video" },
+  comercialNormalizado: { marketplace: "amazon", precoAtual: 2499, precoConfiavel: true }
+});
+assert.strictEqual(amazonPixTituloInvalido.documentoComercialCanonico.tituloOriginal, "Placa de Video RTX 5060 Ti");
+assert.ok(!amazonPixTituloInvalido.templateEspelhoShadow.mensagem.includes("anuncio)"));
+assert.ok(!amazonPixTituloInvalido.templateEspelhoShadow.mensagem.includes("vazio"));
+assert.ok(!amazonPixTituloInvalido.templateEspelhoShadow.mensagem.includes("Pix:"));
+
+const mlCupomCodigoCru = criarEspelho({
+  textoOriginal: [
+    "Produto com codigo cru",
+    "Por: R$ 88,00",
+    "Cupom: ECONOMIA10",
+    "ECONOMIA10",
+    "https://meli.la/codigo-cru"
+  ].join("\n"),
+  oferta: { marketplace: "mercadolivre", preco: 88, linkAfiliado: "https://meli.afiliado/codigo-cru" },
+  ofertaEntrada: { cupom: "ECONOMIA10", instrucaoCupom: "ECONOMIA10" },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 88, precoConfiavel: true }
+});
+assert.strictEqual(blocoTipo(mlCupomCodigoCru, "instrucao_cupom").textoOriginal, "Aplique o cupom ECONOMIA10 para obter o desconto.");
+assert.strictEqual(blocosTipo(mlCupomCodigoCru, "cupom_codigo").length, 1);
+
+const mlBeneficioAppEspeculativo = criarEspelho({
+  textoOriginal: [
+    "Produto app Mercado Livre",
+    "Por: R$ 55,10",
+    "Pode haver beneficio pelo app",
+    "Confira no carrinho/app",
+    "https://meli.la/app-beneficio"
+  ].join("\n"),
+  oferta: { marketplace: "mercadolivre", preco: 55.1, linkAfiliado: "https://meli.afiliado/app-beneficio" },
+  ofertaEntrada: { beneficioTexto: "Pode haver beneficio pelo app" },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 55.1, precoConfiavel: true }
+});
+assert.ok(!tiposV26(mlBeneficioAppEspeculativo).includes("beneficio"));
+assert.ok(!tiposV26(mlBeneficioAppEspeculativo).includes("beneficio_app"));
+assert.ok(!mlBeneficioAppEspeculativo.templateEspelhoShadow.mensagem.includes("Pode haver"));
+assert.ok(!tiposV26(mlBeneficioAppEspeculativo).includes("link_app"), "slug app em URL de produto ML nao vira link APP");
+
+const shopeePolimentoResgateProduto = criarEspelho({
+  textoOriginal: [
+    "Kit beleza Shopee",
+    "Por R$ 39,90",
+    "Resgate todos os cupons:",
+    "https://s.shopee.com.br/4LEepvkqdN",
+    "Link produto:",
+    "https://s.shopee.com.br/2qPrA9vtrB?lp=aff"
+  ].join("\n"),
+  oferta: { marketplace: "shopee", preco: 39.9, linkAfiliado: "https://shopee.afiliado/kit-beleza" },
+  comercialNormalizado: { marketplace: "shopee", precoAtual: 39.9, precoConfiavel: true }
+});
+assert.strictEqual(shopeePolimentoResgateProduto.documentoComercialCanonico.linkResgateOriginal, "https://s.shopee.com.br/4LEepvkqdN");
+assert.strictEqual(shopeePolimentoResgateProduto.documentoComercialCanonico.linkProdutoOriginal, "https://s.shopee.com.br/2qPrA9vtrB?lp=aff");
+assert.ok(shopeePolimentoResgateProduto.templateEspelhoShadow.mensagem.includes("Resgate:\nhttps://s.shopee.com.br/4LEepvkqdN"));
+assert.ok(shopeePolimentoResgateProduto.templateEspelhoShadow.mensagem.includes("Confira aqui:\nhttps://shopee.afiliado/kit-beleza"));
+
+const aliexpressPolimentoAppPcMoedas = criarEspelho({
+  textoOriginal: [
+    "Fone AliExpress",
+    "Por US$ 9.99",
+    "Moedas disponiveis no app",
+    "APP: https://a.aliexpress.com/_appPolido",
+    "PC: https://a.aliexpress.com/_pcPolido",
+    "Moedas: https://a.aliexpress.com/_coinPolido"
+  ].join("\n"),
+  oferta: { marketplace: "aliexpress", preco: 9.99, moeda: "USD" },
+  comercialNormalizado: { marketplace: "aliexpress", precoAtual: 9.99, moeda: "USD", precoConfiavel: false }
+});
+assert.strictEqual(blocosTipo(aliexpressPolimentoAppPcMoedas, "link_app").length, 1);
+assert.strictEqual(blocosTipo(aliexpressPolimentoAppPcMoedas, "link_pc").length, 1);
+assert.strictEqual(blocosTipo(aliexpressPolimentoAppPcMoedas, "link_moedas").length, 1);
+assert.ok(!tiposV26(aliexpressPolimentoAppPcMoedas).includes("link_resgate"));
+assert.ok(aliexpressPolimentoAppPcMoedas.templateEspelhoShadow.mensagem.includes("APP:\nhttps://a.aliexpress.com/_appPolido"));
+assert.ok(aliexpressPolimentoAppPcMoedas.templateEspelhoShadow.mensagem.includes("PC:\nhttps://a.aliexpress.com/_pcPolido"));
 const resumoV26 = mlCompleto.documentoComercialCanonico.blocos.reduce((acc, bloco) => {
   acc[bloco.tipo] = (acc[bloco.tipo] || 0) + 1;
   return acc;
