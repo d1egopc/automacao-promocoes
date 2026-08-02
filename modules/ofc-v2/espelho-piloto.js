@@ -2,7 +2,10 @@
 
 const { buscarTemplate } = require("../templates-clientes/service");
 const { TEMPLATE_PADRAO_ID, normalizarTemplateIdDestino } = require("../templates-clientes/resolver");
-const { montarTemplateEspelhoShadow } = require("./espelho-comercial");
+const {
+  montarTemplateEspelhoPorBlocosV26,
+  montarTemplateEspelhoShadow
+} = require("./espelho-comercial");
 
 const WORKSPACE_D1EGOPC_OFICIAL = "user_40qdblgt";
 
@@ -109,6 +112,15 @@ function resumoBase({ workspaceId = "", oferta = {}, config = {} } = {}) {
   };
 }
 
+function resumoBlocosCanonicosV26(template = null) {
+  const blocos = Array.isArray(template?.blocosRenderizados) ? template.blocosRenderizados : [];
+  return {
+    totalBlocos: Array.isArray(template?.blocosOriginais) ? template.blocosOriginais.length : null,
+    tiposRenderizados: blocos.slice(0, 20),
+    totalEssenciais: Number.isFinite(Number(template?.totalEssenciais)) ? Number(template.totalEssenciais) : null
+  };
+}
+
 function selecionarTemplateEspelhoPiloto({
   workspaceId = "",
   oferta = {},
@@ -150,6 +162,51 @@ function selecionarTemplateEspelhoPiloto({
     const documento = obterDocumentoCanonico(oferta);
     const temDocumento = Boolean(documento && Object.keys(documento).length);
     const templateCliente = resolverTemplateToggles({ workspaceId: config.workspaceId, destino, template });
+    let templatePorBlocos = null;
+    if (temDocumento && Array.isArray(documento.blocos)) {
+      try {
+        templatePorBlocos = montarTemplateEspelhoPorBlocosV26(espelho, documento, {
+          template: templateCliente,
+          canal
+        });
+      } catch (erroBlocos) {
+        logSeguro("[OFC-V2.6-COMPOSITOR-BLOCOS-ERRO]", {
+          ...base,
+          totalBlocos: Array.isArray(documento.blocos) ? documento.blocos.length : 0,
+          fallback: "template_espelho_plano",
+          motivo: "erro_compositor_blocos",
+          erro: sanitizarErro(erroBlocos),
+          aplicouMudancasOperacionais: false
+        });
+      }
+    }
+    if (templatePorBlocos?.ok === true && mensagemValida(templatePorBlocos.mensagem)) {
+      logSeguro("[OFC-V2.6-COMPOSITOR-BLOCOS-SELECIONADO]", {
+        ...base,
+        ...resumoBlocosCanonicosV26(templatePorBlocos),
+        fallback: false,
+        motivo: templatePorBlocos.motivo || "documento_canonico_blocos_v26_valido",
+        aplicouMudancasOperacionais: true
+      });
+      return {
+        usarEspelho: true,
+        ativo: true,
+        mensagem: templatePorBlocos.mensagem,
+        motivo: templatePorBlocos.motivo || "documento_canonico_blocos_v26_valido",
+        aplicouMudancasOperacionais: false
+      };
+    }
+    if (Array.isArray(documento.blocos) && documento.blocos.length) {
+      logSeguro("[OFC-V2.6-COMPOSITOR-BLOCOS-FALLBACK]", {
+        ...base,
+        totalBlocos: documento.blocos.length,
+        tiposRenderizados: [],
+        totalEssenciais: documento.blocos.filter(bloco => bloco?.essencial === true).length,
+        fallback: "template_espelho_plano",
+        motivo: templatePorBlocos?.motivo || "compositor_blocos_indisponivel",
+        aplicouMudancasOperacionais: false
+      });
+    }
     const templateAdaptativo = temDocumento
       ? montarTemplateEspelhoShadow(espelho, documento, {
         template: templateCliente,

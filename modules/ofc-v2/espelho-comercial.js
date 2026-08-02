@@ -1167,6 +1167,250 @@ function resolverBlocoTemplateEspelho(tipo = "", doc = {}, espelho = {}, context
   return "";
 }
 
+const TIPOS_BLOCOS_RENDERIZAVEIS_V26 = Object.freeze(new Set([
+  "titulo",
+  "marketplace",
+  "categoria",
+  "origem_brasil",
+  "vendedor",
+  "preco_referencia",
+  "preco_oferta",
+  "preco_pix",
+  "preco_final_condicionado",
+  "parcelamento",
+  "cupom_codigo",
+  "cupons_alternativos",
+  "cupom_sem_codigo",
+  "instrucao_cupom",
+  "cashback",
+  "moedas",
+  "frete",
+  "prime_programa",
+  "garantia",
+  "pre_venda",
+  "prazo_envio",
+  "beneficio_app",
+  "beneficio",
+  "avaliacao_nota",
+  "avaliacao_quantidade",
+  "vendas",
+  "selo_mais_vendido",
+  "link_afiliado",
+  "link_resgate",
+  "link_app",
+  "link_pc",
+  "link_moedas",
+  "link_auxiliar",
+  "aviso",
+  "rodape",
+  "texto_personalizado"
+]));
+
+const TOGGLES_EQUIVALENTES_BLOCOS_V26 = Object.freeze({
+  titulo: "titulo",
+  marketplace: "marketplace",
+  categoria: "categoria",
+  vendedor: "vendedor",
+  preco_referencia: "preco_de",
+  preco_oferta: "preco_por",
+  preco_pix: "preco_pix",
+  preco_final_condicionado: "preco_por",
+  parcelamento: "parcelamento",
+  cupom_codigo: "cupom",
+  cupons_alternativos: "cupom",
+  cupom_sem_codigo: "cupom",
+  instrucao_cupom: "frase_cupom",
+  cashback: "cashback",
+  frete: "frete",
+  beneficio: "beneficio",
+  beneficio_app: "beneficio",
+  avaliacao_nota: "avaliacao",
+  avaliacao_quantidade: "quantidade_avaliacoes",
+  vendas: "vendas",
+  link_afiliado: "link",
+  link_resgate: "link_resgate",
+  aviso: "aviso",
+  rodape: "rodape",
+  texto_personalizado: "texto_personalizado"
+});
+
+const TIPOS_LINKS_ESSENCIAIS_V26 = Object.freeze(new Set([
+  "link_afiliado",
+  "link_resgate",
+  "link_app",
+  "link_pc",
+  "link_moedas"
+]));
+
+function normalizarBlocosCanonicosV26(documento = {}) {
+  return lista(documento.blocos)
+    .filter(bloco => bloco && typeof bloco === "object")
+    .map((bloco, indice) => ({
+      ...bloco,
+      tipo: texto(bloco.tipo),
+      textoOriginal: texto(bloco.textoOriginal),
+      dedupeKey: texto(bloco.dedupeKey),
+      ordemSugerida: Number.isFinite(Number(bloco.ordemSugerida)) ? Number(bloco.ordemSugerida) : indice + 1000,
+      essencial: bloco.essencial === true,
+      visibilidadePadrao: texto(bloco.visibilidadePadrao) || "opcional"
+    }))
+    .filter(bloco => Boolean(bloco.tipo && (bloco.textoOriginal || valorEstruturadoUtil(bloco.valorEstruturado))));
+}
+
+function blocosCanonicosSuficientesV26(blocos = [], documento = {}) {
+  if (!blocos.length) return { ok: false, motivo: "blocos_ausentes" };
+  const avisos = lista(documento.avisos).map(texto);
+  if (avisos.includes("links_produto_ambiguos")) return { ok: false, motivo: "links_produto_ambiguos" };
+  if (!blocos.some(bloco => bloco.tipo === "link_afiliado")) return { ok: false, motivo: "link_afiliado_ausente" };
+  if (!blocos.some(bloco => bloco.tipo === "titulo")) return { ok: false, motivo: "titulo_ausente" };
+  return { ok: true, motivo: "blocos_suficientes" };
+}
+
+function toggleAtivoParaBlocoV26(bloco = {}, template = {}) {
+  if (bloco.essencial || bloco.visibilidadePadrao === "obrigatorio" || TIPOS_LINKS_ESSENCIAIS_V26.has(bloco.tipo)) return true;
+  if (bloco.tipo === "link_auxiliar") {
+    return lista(template.blocos).some(item => item?.tipo === "link_auxiliar" && item.ativo !== false);
+  }
+  const toggle = TOGGLES_EQUIVALENTES_BLOCOS_V26[bloco.tipo];
+  if (!toggle) return bloco.visibilidadePadrao !== "oculto";
+  const blocoTemplate = lista(template.blocos).find(item => item?.tipo === toggle);
+  if (!blocoTemplate) return bloco.visibilidadePadrao !== "oculto";
+  return blocoTemplate.ativo !== false;
+}
+
+function textoBlocoCanonicoV26(bloco = {}) {
+  const direto = texto(bloco.textoOriginal);
+  if (direto) return direto;
+  const valor = objeto(bloco.valorEstruturado);
+  return primeiroTexto(valor.texto, valor.url, valor.codigo, valor.valor);
+}
+
+function avaliacaoQuantidadeVisualV26(valor = "") {
+  const bruto = texto(valor);
+  if (!bruto) return "";
+  if (/\b\d+[\d.,]*\s+avalia/i.test(bruto)) return `⭐ ${bruto}`;
+  const numero = primeiroNumeroTexto(bruto);
+  if (numero !== null && /\b(?:avaliacao|avaliações|avaliacoes|review|reviews)\b/i.test(normalizarComparacao(bruto))) {
+    return `⭐ ${bruto}`;
+  }
+  return "";
+}
+
+function renderizarBlocoCanonicoV26(bloco = {}, contexto = {}) {
+  const valor = textoBlocoCanonicoV26(bloco);
+  if (!valor) return "";
+  if (bloco.tipo === "titulo") return `🔥 ${valor}`;
+  if (bloco.tipo === "marketplace") return `🛍️ ${marketplaceVisual(valor)}`;
+  if (bloco.tipo === "categoria") return `📂 ${valor}`;
+  if (bloco.tipo === "origem_brasil") return `🇧🇷 ${valor}`;
+  if (bloco.tipo === "vendedor") return `🔐 Vendido por: ${valor}`;
+  if (bloco.tipo === "preco_referencia") return `❌ De: ${valor}`;
+  if (bloco.tipo === "preco_oferta") return `✅ Por: ${valor}`;
+  if (bloco.tipo === "preco_pix") {
+    if (textoComercialEquivalente(valor, contexto.precoOfertaTexto)) return "";
+    return `⚡ Pix: ${valor}`;
+  }
+  if (bloco.tipo === "preco_final_condicionado") {
+    if (textoComercialEquivalente(valor, contexto.precoOfertaTexto)) return "";
+    return `✅ Por: ${valor}`;
+  }
+  if (bloco.tipo === "parcelamento") return `💳 ${valor}`;
+  if (bloco.tipo === "cupom_codigo") return `🎟️ Cupom: ${valor}`;
+  if (bloco.tipo === "cupons_alternativos") return `🎟️ Cupons: ${valor}`;
+  if (bloco.tipo === "cupom_sem_codigo") return `🎟️ ${valor}`;
+  if (bloco.tipo === "instrucao_cupom") return `⚡ ${valor}`;
+  if (bloco.tipo === "cashback") return `💰 Cashback: ${valor}`;
+  if (bloco.tipo === "moedas") return `🪙 ${valor}`;
+  if (bloco.tipo === "frete") return `🚚 ${valor}`;
+  if (bloco.tipo === "prime_programa") return `⭐ ${valor}`;
+  if (bloco.tipo === "garantia") return `🛡️ ${valor}`;
+  if (bloco.tipo === "pre_venda") return `⚠️ Pré-venda: ${valor}`;
+  if (bloco.tipo === "prazo_envio") return `📦 ${valor}`;
+  if (bloco.tipo === "beneficio_app") return `📱 ${valor}`;
+  if (bloco.tipo === "beneficio") {
+    if (textoComercialEquivalente(valor, contexto.freteTexto) || textoComercialEquivalente(valor, contexto.cashbackTexto)) return "";
+    if (/\bcashback\b/i.test(valor) && contexto.temCashback) return "";
+    if (/\bfrete\b/i.test(valor) && contexto.temFrete) return "";
+    return `🎁 ${valor}`;
+  }
+  if (bloco.tipo === "avaliacao_nota") return avaliacaoVisual(valor);
+  if (bloco.tipo === "avaliacao_quantidade") return avaliacaoQuantidadeVisualV26(valor);
+  if (bloco.tipo === "vendas") return `📈 ${valor}`;
+  if (bloco.tipo === "selo_mais_vendido") return `🏆 ${valor}`;
+  if (bloco.tipo === "link_resgate") return `🎟️ Resgate:\n${valor}`;
+  if (bloco.tipo === "link_app") return `📱 APP:\n${valor}`;
+  if (bloco.tipo === "link_pc") return `🖥️ PC:\n${valor}`;
+  if (bloco.tipo === "link_moedas") return `🥇 Link com moedas:\n${valor}`;
+  if (bloco.tipo === "link_auxiliar") return `🔎 Link auxiliar:\n${valor}`;
+  if (bloco.tipo === "link_afiliado") return `🔗 Confira aqui:\n${valor}`;
+  if (bloco.tipo === "aviso") return valor;
+  if (bloco.tipo === "rodape") return valor;
+  if (bloco.tipo === "texto_personalizado") return valor;
+  return "";
+}
+
+function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoes = {}) {
+  const doc = objeto(documento || espelho.documentoComercialCanonico);
+  const blocos = normalizarBlocosCanonicosV26(doc);
+  const suficiencia = blocosCanonicosSuficientesV26(blocos, doc);
+  if (!suficiencia.ok) {
+    return {
+      ok: false,
+      modo: "shadow",
+      renderer: "ofc_v26_blocos",
+      aplicouMudancas: false,
+      mensagem: "",
+      linhas: 0,
+      blocosOriginais: blocos.map(bloco => bloco.tipo),
+      totalEssenciais: blocos.filter(bloco => bloco.essencial === true).length,
+      blocosRenderizados: [],
+      blocosIgnorados: blocos.map(bloco => bloco.tipo),
+      avisos: [suficiencia.motivo],
+      motivo: suficiencia.motivo
+    };
+  }
+
+  const template = objeto(opcoes.template);
+  const blocosOrdenados = [...blocos].sort((a, b) => a.ordemSugerida - b.ordemSugerida || a.tipo.localeCompare(b.tipo) || a.dedupeKey.localeCompare(b.dedupeKey));
+  const linhas = [];
+  const vistos = new Set();
+  const contexto = {
+    precoOfertaTexto: blocosOrdenados.find(bloco => bloco.tipo === "preco_oferta")?.textoOriginal || "",
+    freteTexto: blocosOrdenados.find(bloco => bloco.tipo === "frete")?.textoOriginal || "",
+    cashbackTexto: blocosOrdenados.find(bloco => bloco.tipo === "cashback")?.textoOriginal || "",
+    temFrete: blocosOrdenados.some(bloco => bloco.tipo === "frete"),
+    temCashback: blocosOrdenados.some(bloco => bloco.tipo === "cashback")
+  };
+
+  for (const bloco of blocosOrdenados) {
+    if (!TIPOS_BLOCOS_RENDERIZAVEIS_V26.has(bloco.tipo)) continue;
+    const chaveDedupe = bloco.dedupeKey || dedupeKeyBloco(bloco.tipo, bloco.textoOriginal, bloco.valorEstruturado, bloco.origem);
+    if (chaveDedupe && vistos.has(chaveDedupe)) continue;
+    if (!toggleAtivoParaBlocoV26(bloco, template)) continue;
+    const linha = renderizarBlocoCanonicoV26(bloco, contexto);
+    const adicionado = adicionarBlocoUnico(linhas, bloco.tipo, linha);
+    if (adicionado && chaveDedupe) vistos.add(chaveDedupe);
+  }
+
+  const mensagem = linhas.map(item => item.linha).join("\n\n");
+  return {
+    ok: Boolean(mensagem),
+    modo: "shadow",
+    renderer: "ofc_v26_blocos",
+    aplicouMudancas: false,
+    mensagem,
+    linhas: linhas.length,
+    blocosOriginais: blocosOrdenados.map(bloco => bloco.tipo),
+    totalEssenciais: blocosOrdenados.filter(bloco => bloco.essencial === true).length,
+    blocosRenderizados: linhas.map(item => item.tipo),
+    blocosIgnorados: blocosOrdenados
+      .map(bloco => bloco.tipo)
+      .filter(tipo => !linhas.some(item => item.tipo === tipo)),
+    avisos: mensagem ? [] : ["compositor_blocos_sem_conteudo"],
+    motivo: mensagem ? "documento_canonico_blocos_v26_valido" : "compositor_blocos_sem_conteudo"
+  };
+}
+
 function montarTemplateEspelhoShadow(espelho = {}, documento = null, opcoes = {}) {
   const doc = objeto(documento || espelho.documentoComercialCanonico);
   const blocos = normalizarBlocosTemplateEspelho(objeto(opcoes.template), doc, espelho);
@@ -1365,6 +1609,7 @@ function resumoEspelhoComercialLog(resultado = {}, contexto = {}) {
 module.exports = {
   construirEspelhoComercialV24,
   construirEspelhoComercialV24FailOpen,
+  montarTemplateEspelhoPorBlocosV26,
   montarTemplateEspelhoShadow,
   resumoEspelhoComercialLog,
   selecionarImagemComercial
