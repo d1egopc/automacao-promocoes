@@ -18,11 +18,6 @@ function decidirOfertaUniversal({ validacao, score, memoria, destino, beneficios
     return { ok: false, status: "retida", motivo: destino.motivo || "sem_destino_compativel" };
   }
 
-  const valorScore = Number(score?.score || 0);
-  if (valorScore < 20 && !beneficios?.temBeneficio) {
-    return { ok: false, status: "retida", motivo: "score_baixo_sem_beneficio" };
-  }
-
   return { ok: true, status: "aprovada", motivo: "inteligencia_universal_aprovada" };
 }
 

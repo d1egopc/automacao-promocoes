@@ -470,7 +470,7 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
     sql: `SELECT o.id, o.uuid, o.evento_id, o.link_id, o.marketplace, o.titulo,
             o.preco, o.preco_original, o.cupom, o.tipo_cupom, o.beneficio_extra,
             o.imagem, o.link_original, o.link_expandido,
-            o.link_afiliado, o.categoria, o.score, o.status, o.motivo_status,
+            o.link_afiliado, o.categoria, o.score, o.prioridade, o.status, o.motivo_status,
             ${campoMetadata},
             o.criada_em, o.atualizada_em, j.id AS job_id, j.cliente_id,
             j.metadata AS job_metadata, e.metadata AS evento_metadata
@@ -478,7 +478,9 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
        JOIN engine_jobs_cliente j ON j.oferta_id = o.id
        LEFT JOIN engine_eventos_brutos e ON e.id = o.evento_id
       WHERE ${filtros.join(" AND ")}
-      ORDER BY o.atualizada_em ASC NULLS FIRST, o.id ASC
+      ORDER BY COALESCE(o.prioridade, o.score, 0) DESC,
+             o.atualizada_em ASC NULLS FIRST,
+             o.id ASC
       LIMIT $${params.length}`,
     params
   });
