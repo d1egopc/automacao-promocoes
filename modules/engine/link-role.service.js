@@ -101,6 +101,14 @@ function classificarPorContexto(marketplace = "", contexto = {}) {
   const trecho = semAcentos(contexto.trecho || "");
   const mp = minusculo(marketplace);
 
+  if (mp === "shopee" && /\b(link\s+(?:do\s+)?produto|produto|confira|comprar|oferta aqui)\s*:?\s*$/.test(antes)) {
+    return { papelLink: PAPEL_LINK.PRODUTO, motivo: "contexto_link_produto_shopee" };
+  }
+
+  if (mp === "aliexpress" && /\b(?:app|pc|site|link)\s*:?\s*$/.test(antes)) {
+    return { papelLink: PAPEL_LINK.PRODUTO, motivo: "contexto_app_pc_aliexpress" };
+  }
+
   if (/\b(moedas?|coins?)\b/.test(antes)) return { papelLink: PAPEL_LINK.MOEDAS, motivo: "contexto_moedas" };
   if (/\b(resgate|cupom|cupons|voucher|coupon|codigo)\b/.test(antes)) return { papelLink: PAPEL_LINK.CUPOM, motivo: "contexto_cupom" };
   if (/\b(loja oficial|loja|store)\b/.test(antes)) return { papelLink: PAPEL_LINK.LOJA, motivo: "contexto_loja" };

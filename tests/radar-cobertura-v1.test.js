@@ -165,17 +165,29 @@ function mockModulo(relativo, exports) {
       criarJobsParaClientes: async () => ({ ok: true, criados: 1, existentes: 0 })
     });
     const inbox = require("../modules/engine/inbox.service");
+    const textoComercial = [
+      "Oferta Poco \uD83D\uDD25 com acento: promoção",
+      "Resgate: https://s.shopee.com.br/4LEepvkqdN",
+      "Link produto: https://s.shopee.com.br/2qPrA9vtrB?lp=aff"
+    ].join("\n");
     const retorno = await inbox.registrarEventoBruto({
       origem: "radar",
       origemTipo: "whatsapp",
       sessaoId: "admin_Zoio Claro",
       grupoId: "120363420033826376@g.us",
       grupoNome: "Lobao das Promocoes #92",
-      textoOriginal: "Oferta ML real https://meli.la/2g5ULLB",
-      linksExtraidos: ["https://meli.la/2g5ULLB"],
+      textoOriginal: `${textoComercial}\u0000`,
+      linksExtraidos: [
+        "https://s.shopee.com.br/4LEepvkqdN",
+        "https://s.shopee.com.br/2qPrA9vtrB?lp=aff"
+      ],
       metadata: {
         coberturaTraceId: "cov_payload_real",
-        linksOriginaisCapturados: ["https://meli.la/2g5ULLB"],
+        observacao: `${textoComercial}\u0000`,
+        linksOriginaisCapturados: [
+          "https://s.shopee.com.br/4LEepvkqdN",
+          "https://s.shopee.com.br/2qPrA9vtrB?lp=aff"
+        ],
         redirectsRadar: [],
         identidadesCanonicas: []
       }
@@ -183,6 +195,14 @@ function mockModulo(relativo, exports) {
 
     assert.strictEqual(retorno.ok, true);
     assert(jsonbRecebidos.length >= 3);
+    assert(!jsonbRecebidos.some(item => String(item).includes("\\u0000")), "jsonb nao deve carregar NUL escapado rejeitado pelo Postgres");
+    const serializado = jsonbRecebidos.join("\n");
+    assert(serializado.includes("🔥"), "sanitize nao deve remover emoji");
+    assert(serializado.includes("promoção"), "sanitize nao deve remover acentos");
+    assert(serializado.includes("?lp=aff"), "sanitize nao deve remover parametros de URL");
+    assert(serializado.includes("\\n"), "sanitize nao deve remover quebras de linha serializadas");
+    assert(serializado.includes("https://s.shopee.com.br/4LEepvkqdN"), "sanitize nao deve remover link de resgate");
+    assert(serializado.includes("https://s.shopee.com.br/2qPrA9vtrB?lp=aff"), "sanitize nao deve remover link de produto");
   }
 
   {

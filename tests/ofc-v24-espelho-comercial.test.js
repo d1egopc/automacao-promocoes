@@ -64,8 +64,9 @@ assert.strictEqual(mlCompleto.documentoComercialCanonico.instrucaoTexto, "Apliqu
 assert.strictEqual(mlCompleto.documentoComercialCanonico.linkProdutoOriginal, "https://meli.la/1fS6gji");
 assert.strictEqual(mlCompleto.documentoComercialCanonico.linkAfiliado, "https://afiliado.test/produto");
 assert.strictEqual(mlCompleto.documentoComercialCanonico.origemDocumento, "texto_comercial_original");
+assert.ok(mlCompleto.templateEspelhoShadow.mensagem.includes("🛍️ Mercado Livre"));
 assert.ok(mlCompleto.templateEspelhoShadow.mensagem.includes("Por: R$ 73,79 via Pix"));
-assert.ok(mlCompleto.templateEspelhoShadow.mensagem.includes("Confira aqui:\nhttps://afiliado.test/produto"));
+assert.ok(mlCompleto.templateEspelhoShadow.mensagem.includes("🔗 Confira aqui:\nhttps://afiliado.test/produto"));
 assert.ok(!mlCompleto.templateEspelhoShadow.mensagem.includes("120,50"), "preco da pagina nao substitui captura");
 
 const templateAdaptativoCupomDesligado = montarTemplateEspelhoShadow(
@@ -188,8 +189,8 @@ const shopeeResgateObrigatorio = montarTemplateEspelhoShadow(
     }
   }
 );
-assert.ok(shopeeResgateObrigatorio.mensagem.includes("Resgate os cupons:\nhttps://s.shopee.com.br/resgate-cupom"), "resgate essencial permanece mesmo com toggle desligado");
-assert.ok(shopeeResgateObrigatorio.mensagem.includes("Confira aqui:\nhttps://shopee.afiliado/produto"), "link afiliado segue separado do resgate");
+assert.ok(shopeeResgateObrigatorio.mensagem.includes("🎟️ Resgate:\nhttps://s.shopee.com.br/resgate-cupom"), "resgate essencial permanece mesmo com toggle desligado");
+assert.ok(shopeeResgateObrigatorio.mensagem.includes("🔗 Confira aqui:\nhttps://shopee.afiliado/produto"), "link afiliado segue separado do resgate");
 
 const shopeeVoucherMoedas = criarEspelho({
   textoOriginal: "Produto Shopee\nR$ 70 usando moedas + cupom\nVoucher disponivel no app\nhttps://s.shopee.com.br/produto",
@@ -217,6 +218,23 @@ assert.ok(aliexpressMoedaEstrangeira.espelhoComercial.avisos.includes("moeda_nao
 assert.strictEqual(aliexpressMoedaEstrangeira.documentoComercialCanonico.precoPorTexto, "US$ 19.99");
 assert.ok(aliexpressMoedaEstrangeira.templateEspelhoShadow.mensagem.includes("US$ 19.99"), "moeda estrangeira permanece no texto Shadow");
 assert.ok(!aliexpressMoedaEstrangeira.templateEspelhoShadow.mensagem.includes("R$ 19,99"), "moeda estrangeira nao vira BRL");
+
+const aliexpressAppPc = criarEspelho({
+  textoOriginal: [
+    "Mini PC PUSKILL",
+    "Por R$ 227",
+    "APP: https://a.aliexpress.com/_c37JTNLV",
+    "PC: https://a.aliexpress.com/_c4b9dLcf"
+  ].join("\n"),
+  oferta: { marketplace: "aliexpress", preco: 227, linkAfiliado: "" },
+  comercialNormalizado: { marketplace: "aliexpress", precoAtual: 227, precoConfiavel: true }
+});
+assert.deepStrictEqual(
+  aliexpressAppPc.documentoComercialCanonico.linksComerciais.map(item => item.tipo),
+  ["app", "pc"]
+);
+assert.ok(aliexpressAppPc.templateEspelhoShadow.mensagem.includes("📱 APP:\nhttps://a.aliexpress.com/_c37JTNLV"));
+assert.ok(aliexpressAppPc.templateEspelhoShadow.mensagem.includes("🖥️ PC:\nhttps://a.aliexpress.com/_c4b9dLcf"));
 
 const kabumSimples = criarEspelho({
   textoOriginal: "Fonte XPG Core Reactor\nValor: R$ 415,00\nCupom: JULHOFORTE15\nFrete varia por Estado\nhttps://awin1.com/cread.php",
@@ -259,7 +277,7 @@ const cashback = criarEspelho({
 assert.strictEqual(cashback.espelhoComercial.precoPorValor, 100);
 assert.strictEqual(cashback.espelhoComercial.precoFinalValor, null, "cashback nao reduz preco pago nem cria preco final");
 assert.ok(cashback.espelhoComercial.condicoesComerciais.some(item => /cashback/i.test(item)));
-assert.ok(cashback.templateEspelhoShadow.mensagem.includes("Cashback: R$ 10 de cashback"));
+assert.ok(cashback.templateEspelhoShadow.mensagem.includes("💰 Cashback: R$ 10 de cashback"));
 assert.ok(!cashback.templateEspelhoShadow.mensagem.includes("R$ 90"), "cashback nao e abatido do preco pago");
 const cashbackDesligado = montarTemplateEspelhoShadow(
   cashback.espelhoComercial,
@@ -278,6 +296,7 @@ const cashbackDesligado = montarTemplateEspelhoShadow(
 );
 assert.ok(!cashbackDesligado.mensagem.includes("Cashback:"), "cashback desligado nao renderiza bloco dedicado");
 assert.ok(!cashbackDesligado.mensagem.includes("Beneficio: R$ 10 de cashback"), "cashback desligado nao reaparece como beneficio");
+assert.ok(!cashbackDesligado.mensagem.includes("Benefício: R$ 10 de cashback"), "cashback desligado nao reaparece como beneficio visual");
 
 const parcelamento = criarEspelho({
   textoOriginal: "Produto parcelado\nDe R$ 499 por R$ 205 no Pix ou R$ 215,83 em ate 6x\nCupom: FASHION ou MODACOMVC\nhttps://meli.la/produto",
@@ -310,6 +329,56 @@ assert.ok(ofertaCompletaAdaptativa.mensagem.includes("Por: R$ 205,00 no Pix ou R
 assert.ok(ofertaCompletaAdaptativa.mensagem.includes("Cupom: FASHION ou MODACOMVC"));
 assert.ok(ofertaCompletaAdaptativa.mensagem.includes("Confira aqui:"));
 assert.ok(ofertaCompletaAdaptativa.mensagem.endsWith("Rodape completo"));
+
+const avaliacaoComNotaReal = montarTemplateEspelhoShadow(
+  {},
+  { tituloOriginal: "Produto avaliado", precoPorTexto: "R$ 10,00", linkAfiliado: "https://afiliado.test/avaliado" },
+  {
+    contexto: { avaliacao: "4.8" },
+    template: { blocos: [{ tipo: "avaliacao", ativo: true, ordem: 10 }] }
+  }
+);
+assert.ok(avaliacaoComNotaReal.mensagem.includes("4.8"), "nota real pode ser apresentada");
+
+const avaliacaoComQuantidade = montarTemplateEspelhoShadow(
+  {},
+  { tituloOriginal: "Produto com quantidade", precoPorTexto: "R$ 10,00", linkAfiliado: "https://afiliado.test/quantidade" },
+  {
+    contexto: { avaliacao: "90 avaliações" },
+    template: { blocos: [{ tipo: "avaliacao", ativo: true, ordem: 10 }] }
+  }
+);
+assert.ok(avaliacaoComQuantidade.mensagem.includes("90 avaliações"), "quantidade de avaliacoes pode aparecer como quantidade");
+
+const avaliacaoScoreInterno = montarTemplateEspelhoShadow(
+  {},
+  { tituloOriginal: "Produto com score", precoPorTexto: "R$ 10,00", linkAfiliado: "https://afiliado.test/score" },
+  {
+    contexto: { score: 90 },
+    template: {
+      blocos: [
+        { tipo: "titulo", ativo: true, ordem: 10 },
+        { tipo: "avaliacao", ativo: true, ordem: 20 }
+      ]
+    }
+  }
+);
+assert.ok(!avaliacaoScoreInterno.mensagem.includes("90"), "score interno nao vira avaliacao");
+
+const avaliacaoSemSemantica = montarTemplateEspelhoShadow(
+  {},
+  { tituloOriginal: "Produto sem avaliacao", precoPorTexto: "R$ 10,00", linkAfiliado: "https://afiliado.test/semantica" },
+  {
+    contexto: { avaliacao: "Avaliação: 90" },
+    template: {
+      blocos: [
+        { tipo: "titulo", ativo: true, ordem: 10 },
+        { tipo: "avaliacao", ativo: true, ordem: 20 }
+      ]
+    }
+  }
+);
+assert.ok(!avaliacaoSemSemantica.mensagem.includes("Avaliação: 90"), "numero sem semantica de nota real fica oculto");
 
 const imagem = selecionarImagemComercial({
   oferta: { imagem: "https://cdn.marketplace.test/produto-limpo.jpg", imagemOrigem: "canonical.product.image" },

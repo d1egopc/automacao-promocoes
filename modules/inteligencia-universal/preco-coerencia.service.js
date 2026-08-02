@@ -66,6 +66,54 @@ function extrairComparacaoRadarLocal(ofertaEntrada = {}) {
   return candidatos.find(item => item && typeof item === "object") || null;
 }
 
+function extrairRadarMirror(ofertaEntrada = {}) {
+  const metadata = ofertaEntrada?.metadata && typeof ofertaEntrada.metadata === "object"
+    ? ofertaEntrada.metadata
+    : {};
+  return metadata.radarMirror ||
+    metadata.radarEspelhoComercial ||
+    ofertaEntrada.radarMirror ||
+    ofertaEntrada.radarEspelhoComercial ||
+    null;
+}
+
+function radarMirrorPrecoExplicitoConfiavel(ofertaEntrada = {}) {
+  const mirror = extrairRadarMirror(ofertaEntrada);
+  if (!mirror || typeof mirror !== "object") return { confiavel: false, preco: null };
+
+  const comercialPreco = mirror?.comercial?.precoAtual || {};
+  const preco = extrairNumero(
+    mirror?.preco?.atualCapturado,
+    comercialPreco.valor
+  );
+  if (preco === null || preco <= 0) return { confiavel: false, preco: null };
+
+  const fonte = [
+    mirror?.preco?.origem,
+    mirror?.preco?.confianca,
+    mirror?.preco?.tipoCapturado,
+    mirror?.preco?.evidenciaCapturada,
+    mirror?.preco?.marcadorComercial,
+    comercialPreco.tipo,
+    comercialPreco.tipoCandidato,
+    comercialPreco.evidencia,
+    comercialPreco.nivelEvidencia,
+    ...(Array.isArray(comercialPreco.motivos) ? comercialPreco.motivos : [])
+  ].map(texto).join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+  const temConfianca = /\b(alta|media|texto_radar|preco_explicito|preco_atual)\b/.test(fonte);
+  const temMarcadorComercial = /\b(por|valor|preco|pix|com cupom|fica por|sai por)\b/.test(fonte);
+  const pareceCampoBloqueado = /(parcel|parcela|frete|vendid|quantidade|avaliac|unidade|unitario|cada|off|percentual|porcentagem|faixa|intervalo|ambigu|valor_cupom|cashback)/.test(fonte) ||
+    /\bcupom\s+de\b/.test(fonte) ||
+    /%/.test(fonte);
+
+  return {
+    confiavel: Boolean(temConfianca && temMarcadorComercial && !pareceCampoBloqueado),
+    preco,
+    motivo: pareceCampoBloqueado ? "radar_mirror_preco_tipo_bloqueado" : "radar_mirror_preco_explicito"
+  };
+}
+
 function divergenciaOrdemGrandeza(a, b) {
   if (a === null || b === null || a <= 0 || b <= 0) return false;
   const maior = Math.max(a, b);
@@ -78,6 +126,7 @@ function validarCoerenciaPreco(oferta = {}, contexto = {}) {
   const precoAtual = extrairNumero(oferta.precoAtual, oferta.preco, oferta.valor);
   const precoOriginal = extrairNumero(oferta.precoOriginal, oferta.precoAntigo, oferta.precoDe);
   const comparacaoLocal = extrairComparacaoRadarLocal(ofertaEntrada);
+  const precoRadarMirror = radarMirrorPrecoExplicitoConfiavel(ofertaEntrada);
   const precoLocal = extrairNumero(comparacaoLocal?.precoAtualLocal);
   const precoImportadorComparacao = extrairNumero(comparacaoLocal?.precoAtualImportador);
   const cupomConfirmado = cupomMonetarioConfirmado(oferta, ofertaEntrada);
@@ -91,6 +140,17 @@ function validarCoerenciaPreco(oferta = {}, contexto = {}) {
   };
 
   if (precoAtual === null) {
+    if (precoRadarMirror.confiavel) {
+      evidencias.precoRadarMirror = precoRadarMirror.preco;
+      return {
+        ok: true,
+        bloquear: false,
+        classificacao: CLASSIFICACOES_PRECO.CONFIAVEL,
+        motivo: "preco_radar_mirror_confiavel",
+        motivos: [],
+        evidencias
+      };
+    }
     return {
       ok: false,
       bloquear: true,

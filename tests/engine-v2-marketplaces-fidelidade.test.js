@@ -73,6 +73,51 @@ async function testarClassificacaoShopeePreservaProduto() {
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
 }
 
+async function testarShopeeResgateProdutoComParametroLpAff() {
+  limparModulo("../modules/engine/importer/adapters/shopee.adapter");
+  const { importarShopeeEngine } = require("../modules/engine/importer/adapters/shopee.adapter");
+  const resgate = "https://s.shopee.com.br/4LEepvkqdN";
+  const produto = "https://s.shopee.com.br/2qPrA9vtrB?lp=aff";
+  let urlImportada = "";
+
+  const resultado = await importarShopeeEngine({
+    job: { id: 114, evento_id: 214, cliente_id: "workspace_teste" },
+    evento: {
+      texto_original: [
+        "Resgate todos os cupons desta pagina:",
+        resgate,
+        "Smartphone Poco",
+        "Por R$ 725",
+        "Link produto:",
+        produto
+      ].join("\n"),
+      links_extraidos: [resgate, produto]
+    },
+    links: [linkRow(1, resgate), linkRow(2, produto)],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
+      importarShopee: async (url) => {
+        urlImportada = url;
+        return {
+          titulo: "Smartphone Poco",
+          precoAtual: "725.00",
+          imagem: "https://img.test/poco.jpg",
+          linkAfiliado: "https://shopee.test/poco-afiliado",
+          linkExpandido: "https://shopee.com.br/product/111/222",
+          shopId: "111",
+          itemId: "222",
+          categoria: "celulares"
+        };
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(urlImportada, produto);
+  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "cupom");
+  assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
+}
+
 async function testarShopeeShortlinkGenericoChegaAoImportador() {
   limparModulo("../modules/engine/importer/adapters/shopee.adapter");
   const { importarShopeeEngine } = require("../modules/engine/importer/adapters/shopee.adapter");
@@ -189,6 +234,8 @@ async function testarShopeeTentaProximoCandidatoQuandoPrimeiroNaoConfirmaProduto
   assert.deepStrictEqual(chamadas, [primeiro, segundo]);
   assert.strictEqual(resultado.metadata.linkOriginalEngine, segundo);
   assert.strictEqual(resultado.metadata.produtoId, "987/654");
+  assert.strictEqual(resultado.metadata.ambiguidadeLinksProduto, true);
+  assert.strictEqual(resultado.metadata.totalCandidatosProduto, 2);
 }
 
 async function testarClassificacaoAliExpressPreservaProduto() {
@@ -236,6 +283,51 @@ async function testarClassificacaoAliExpressPreservaProduto() {
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
 }
 
+async function testarAliExpressAppPcPreservaAmbosComoComerciais() {
+  limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
+  const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
+  const app = "https://a.aliexpress.com/_c37JTNLV";
+  const pc = "https://a.aliexpress.com/_c4b9dLcf";
+  let urlImportada = "";
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 115, evento_id: 215, cliente_id: "workspace_teste" },
+    evento: {
+      texto_original: [
+        "Mini PC PUSKILL",
+        "Por R$ 227",
+        `APP: ${app}`,
+        `PC: ${pc}`
+      ].join("\n"),
+      links_extraidos: [app, pc]
+    },
+    links: [
+      { ...linkRow(1, app), marketplace_detectado: "aliexpress" },
+      { ...linkRow(2, pc), marketplace_detectado: "aliexpress" }
+    ],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "track" } }),
+      importarAliExpress: async (url) => {
+        urlImportada = url;
+        return {
+          titulo: "Mini PC PUSKILL",
+          precoAtual: "227.00",
+          imagem: "https://img.test/puskill.jpg",
+          linkAfiliado: "https://ali.test/puskill-afiliado",
+          linkExpandido: "https://www.aliexpress.com/item/1005002222222222.html",
+          categoria: "informatica"
+        };
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(urlImportada, app);
+  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "produto");
+  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLinkMotivo, "contexto_app_pc_aliexpress");
+  assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
+}
+
 async function testarValidacaoKabumComIntegracaoAwinGenerica() {
   mockModulo("../modules/engine/processor.service", {
     marcarJobStatus: async () => ({ ok: true }),
@@ -278,10 +370,12 @@ function testarOrquestradorIncluiMarketplacesOficiais() {
 
 (async () => {
   await testarClassificacaoShopeePreservaProduto();
+  await testarShopeeResgateProdutoComParametroLpAff();
   await testarShopeeShortlinkGenericoChegaAoImportador();
   await testarShopeeCupomSozinhoNaoChamaImportador();
   await testarShopeeTentaProximoCandidatoQuandoPrimeiroNaoConfirmaProduto();
   await testarClassificacaoAliExpressPreservaProduto();
+  await testarAliExpressAppPcPreservaAmbosComoComerciais();
   await testarValidacaoKabumComIntegracaoAwinGenerica();
   testarOrquestradorIncluiMarketplacesOficiais();
   console.log("engine-v2-marketplaces-fidelidade.test.js OK");

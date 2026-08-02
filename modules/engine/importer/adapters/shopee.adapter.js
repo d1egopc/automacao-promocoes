@@ -504,6 +504,16 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     candidatos: resumoCandidatosShopee(analiseLinksShopee.classificados)
   }));
 
+  if (candidatosShopee.length > 1) {
+    console.log("[SHOPEE-PRODUTOS-AMBIGUOS]", JSON.stringify({
+      jobId: job.id,
+      eventoId: job.evento_id,
+      clienteId,
+      totalCandidatosProduto: candidatosShopee.length,
+      candidatos: resumoCandidatosShopee(candidatosShopee)
+    }));
+  }
+
   if (!candidatosShopee.length) {
     const linkEscolhido = escolherLinkShopee(links, evento);
     return {
@@ -819,6 +829,8 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
       campoLinkEscolhido: linkEscolhido.campo || "",
       papelLinkEscolhido: linkEscolhido.papelLink || "",
       papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
+      ambiguidadeLinksProduto: candidatosShopee.length > 1,
+      totalCandidatosProduto: candidatosShopee.length,
       linksClassificados: resumoLinksClassificados(links, evento, "shopee"),
       candidatosShopee: resumoCandidatosShopee(analiseLinksShopee.classificados),
       linksAuxiliaresShopee: resumoCandidatosShopee(linksAuxiliaresShopee),

@@ -72,9 +72,26 @@ function marketplacePrincipal(links = []) {
 }
 
 function jsonbParam(valor, fallback) {
-  const base = valor === undefined ? fallback : valor;
+  const base = sanitizarJsonbValor(valor === undefined ? fallback : valor);
   const serializado = JSON.stringify(base);
   return serializado === undefined ? JSON.stringify(fallback) : serializado;
+}
+
+function sanitizarJsonbValor(valor) {
+  if (typeof valor === "string") {
+    return valor.replace(/\u0000/g, "");
+  }
+  if (Array.isArray(valor)) {
+    return valor.map(sanitizarJsonbValor);
+  }
+  if (valor && typeof valor === "object") {
+    const saida = {};
+    for (const [chave, item] of Object.entries(valor)) {
+      saida[chave] = sanitizarJsonbValor(item);
+    }
+    return saida;
+  }
+  return valor;
 }
 
 async function existeEventoDuplicado(evento = {}, contextoPerf = {}) {
