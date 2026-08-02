@@ -4,6 +4,7 @@ const assert = require("assert");
 const {
   construirEspelhoComercialV24,
   construirEspelhoComercialV24FailOpen,
+  montarTemplateEspelhoShadow,
   resumoEspelhoComercialLog,
   selecionarImagemComercial
 } = require("../modules/ofc-v2/espelho-comercial");
@@ -67,6 +68,87 @@ assert.ok(mlCompleto.templateEspelhoShadow.mensagem.includes("Por: R$ 73,79 via 
 assert.ok(mlCompleto.templateEspelhoShadow.mensagem.includes("Confira aqui:\nhttps://afiliado.test/produto"));
 assert.ok(!mlCompleto.templateEspelhoShadow.mensagem.includes("120,50"), "preco da pagina nao substitui captura");
 
+const templateAdaptativoCupomDesligado = montarTemplateEspelhoShadow(
+  mlCompleto.espelhoComercial,
+  mlCompleto.documentoComercialCanonico,
+  {
+    template: {
+      blocos: [
+        { tipo: "titulo", ativo: true, ordem: 10 },
+        { tipo: "preco_de", ativo: true, ordem: 20 },
+        { tipo: "preco_por", ativo: true, ordem: 30 },
+        { tipo: "cupom", ativo: false, ordem: 40 },
+        { tipo: "frase_cupom", ativo: false, ordem: 50 },
+        { tipo: "link", ativo: true, ordem: 60 }
+      ]
+    }
+  }
+);
+assert.strictEqual(templateAdaptativoCupomDesligado.ok, true);
+assert.ok(templateAdaptativoCupomDesligado.mensagem.includes("De: R$ 299,99"));
+assert.ok(templateAdaptativoCupomDesligado.mensagem.includes("Por: R$ 73,79 via Pix"));
+assert.ok(templateAdaptativoCupomDesligado.mensagem.includes("via Pix"), "toggle Pix ausente/desligado nao remove condicao Pix do preco canonico");
+assert.ok(templateAdaptativoCupomDesligado.mensagem.includes("Cupom: FASHIONML"), "cupom confiavel permanece obrigatorio mesmo com toggle desligado");
+assert.ok(!templateAdaptativoCupomDesligado.mensagem.includes("Aplique o cupom"), "toggle desligado oculta apenas instrucao existente");
+assert.ok(!/\b(?:undefined|null|NaN|Infinity)\b/.test(templateAdaptativoCupomDesligado.mensagem));
+
+const templateDecorativosDesligados = montarTemplateEspelhoShadow(
+  mlCompleto.espelhoComercial,
+  mlCompleto.documentoComercialCanonico,
+  {
+    contexto: { marketplace: "mercadolivre", categoria: "Moda", economia: "R$ 226,20" },
+    template: {
+      blocos: [
+        { tipo: "titulo", ativo: true, ordem: 10 },
+        { tipo: "marketplace", ativo: false, ordem: 20 },
+        { tipo: "categoria", ativo: false, ordem: 30 },
+        { tipo: "preco_de", ativo: false, ordem: 40 },
+        { tipo: "preco_por", ativo: true, ordem: 50 },
+        { tipo: "economia", ativo: false, ordem: 60 },
+        { tipo: "cupom", ativo: true, ordem: 70 },
+        { tipo: "link", ativo: true, ordem: 80 }
+      ],
+      rodape: { ativo: false, texto: "Rodape Optimus" }
+    }
+  }
+);
+assert.ok(!templateDecorativosDesligados.mensagem.includes("Marketplace:"), "marketplace desligado desaparece");
+assert.ok(!templateDecorativosDesligados.mensagem.includes("Categoria:"), "categoria desligada desaparece");
+assert.ok(!templateDecorativosDesligados.mensagem.includes("De: R$ 299,99"), "preco De desligado desaparece");
+assert.ok(!templateDecorativosDesligados.mensagem.includes("Economia:"), "economia desligada desaparece");
+assert.ok(!templateDecorativosDesligados.mensagem.includes("Rodape Optimus"), "rodape desligado desaparece");
+
+const templateRodapeLigado = montarTemplateEspelhoShadow(
+  mlCompleto.espelhoComercial,
+  mlCompleto.documentoComercialCanonico,
+  {
+    template: {
+      blocos: [
+        { tipo: "titulo", ativo: true, ordem: 10 },
+        { tipo: "preco_por", ativo: true, ordem: 20 },
+        { tipo: "link", ativo: true, ordem: 30 }
+      ],
+      rodape: { ativo: true, texto: "Rodape Optimus" }
+    }
+  }
+);
+assert.ok(templateRodapeLigado.mensagem.endsWith("Rodape Optimus"), "rodape ligado aparece");
+
+const templateAdaptativoCupomAmbiguo = montarTemplateEspelhoShadow(
+  { cupomCodigo: "TALVEZ10", motivosConfianca: [] },
+  { tituloOriginal: "Oferta ambigua", precoPorTexto: "R$ 50,00", cupomTexto: "TALVEZ10", confianca: { motivos: [] } },
+  {
+    template: {
+      blocos: [
+        { tipo: "titulo", ativo: true, ordem: 10 },
+        { tipo: "preco_por", ativo: true, ordem: 20 },
+        { tipo: "cupom", ativo: false, ordem: 30 }
+      ]
+    }
+  }
+);
+assert.ok(!templateAdaptativoCupomAmbiguo.mensagem.includes("Cupom: TALVEZ10"), "cupom ambiguo nao e promovido a obrigatorio sem evidencia");
+
 const mlSimples = criarEspelho({
   textoOriginal: "Monitor Gamer Asrock\nPor R$ 594 com cupom JULHO15\nhttps://meli.la/produto",
   oferta: { preco: 700 },
@@ -92,6 +174,22 @@ assert.strictEqual(shopeeResgate.espelhoComercial.linkResgateOriginal, "https://
 assert.strictEqual(shopeeResgate.espelhoComercial.linkProdutoOriginal, "https://s.shopee.com.br/produto-real");
 assert.strictEqual(shopeeResgate.documentoComercialCanonico.linkResgateOriginal, "https://s.shopee.com.br/resgate-cupom");
 assert.strictEqual(shopeeResgate.documentoComercialCanonico.linkProdutoOriginal, "https://s.shopee.com.br/produto-real");
+const shopeeResgateObrigatorio = montarTemplateEspelhoShadow(
+  shopeeResgate.espelhoComercial,
+  shopeeResgate.documentoComercialCanonico,
+  {
+    template: {
+      blocos: [
+        { tipo: "titulo", ativo: true, ordem: 10 },
+        { tipo: "preco_por", ativo: true, ordem: 20 },
+        { tipo: "link_resgate", ativo: false, ordem: 30 },
+        { tipo: "link", ativo: true, ordem: 40 }
+      ]
+    }
+  }
+);
+assert.ok(shopeeResgateObrigatorio.mensagem.includes("Resgate os cupons:\nhttps://s.shopee.com.br/resgate-cupom"), "resgate essencial permanece mesmo com toggle desligado");
+assert.ok(shopeeResgateObrigatorio.mensagem.includes("Confira aqui:\nhttps://shopee.afiliado/produto"), "link afiliado segue separado do resgate");
 
 const shopeeVoucherMoedas = criarEspelho({
   textoOriginal: "Produto Shopee\nR$ 70 usando moedas + cupom\nVoucher disponivel no app\nhttps://s.shopee.com.br/produto",
@@ -128,6 +226,23 @@ assert.strictEqual(kabumSimples.espelhoComercial.precoPorValor, 415);
 assert.strictEqual(kabumSimples.espelhoComercial.cupomCodigo, "JULHOFORTE15");
 assert.ok(kabumSimples.espelhoComercial.condicoesComerciais.some(item => /frete/i.test(item)));
 assert.strictEqual(kabumSimples.documentoComercialCanonico.freteTexto, "Frete varia por Estado");
+const kabumFreteDesligado = montarTemplateEspelhoShadow(
+  kabumSimples.espelhoComercial,
+  kabumSimples.documentoComercialCanonico,
+  {
+    template: {
+      blocos: [
+        { tipo: "titulo", ativo: true, ordem: 10 },
+        { tipo: "preco_por", ativo: true, ordem: 20 },
+        { tipo: "frete", ativo: false, ordem: 30 },
+        { tipo: "beneficio", ativo: true, ordem: 40 },
+        { tipo: "cupom", ativo: true, ordem: 50 },
+        { tipo: "link", ativo: true, ordem: 60 }
+      ]
+    }
+  }
+);
+assert.ok(!kabumFreteDesligado.mensagem.includes("Frete varia por Estado"), "frete desligado nao reaparece em outro bloco");
 
 const semCupom = criarEspelho({
   textoOriginal: "Oferta minima\nPor R$ 79,90\nhttps://produto.test/1",
@@ -135,6 +250,7 @@ const semCupom = criarEspelho({
 });
 assert.strictEqual(semCupom.espelhoComercial.cupomCodigo, null);
 assert.ok(!semCupom.templateEspelhoShadow.mensagem.includes("Cupom:"));
+assert.ok(!semCupom.templateEspelhoShadow.mensagem.includes("Aplique o cupom"));
 
 const cashback = criarEspelho({
   textoOriginal: "Produto com cashback\nPor R$ 100,00\nR$ 10 de cashback\nhttps://produto.test/2",
@@ -145,6 +261,23 @@ assert.strictEqual(cashback.espelhoComercial.precoFinalValor, null, "cashback na
 assert.ok(cashback.espelhoComercial.condicoesComerciais.some(item => /cashback/i.test(item)));
 assert.ok(cashback.templateEspelhoShadow.mensagem.includes("Cashback: R$ 10 de cashback"));
 assert.ok(!cashback.templateEspelhoShadow.mensagem.includes("R$ 90"), "cashback nao e abatido do preco pago");
+const cashbackDesligado = montarTemplateEspelhoShadow(
+  cashback.espelhoComercial,
+  cashback.documentoComercialCanonico,
+  {
+    template: {
+      blocos: [
+        { tipo: "titulo", ativo: true, ordem: 10 },
+        { tipo: "preco_por", ativo: true, ordem: 20 },
+        { tipo: "beneficio", ativo: true, ordem: 30 },
+        { tipo: "cashback", ativo: false, ordem: 40 },
+        { tipo: "link", ativo: true, ordem: 50 }
+      ]
+    }
+  }
+);
+assert.ok(!cashbackDesligado.mensagem.includes("Cashback:"), "cashback desligado nao renderiza bloco dedicado");
+assert.ok(!cashbackDesligado.mensagem.includes("Beneficio: R$ 10 de cashback"), "cashback desligado nao reaparece como beneficio");
 
 const parcelamento = criarEspelho({
   textoOriginal: "Produto parcelado\nDe R$ 499 por R$ 205 no Pix ou R$ 215,83 em ate 6x\nCupom: FASHION ou MODACOMVC\nhttps://meli.la/produto",
@@ -155,6 +288,28 @@ assert.strictEqual(parcelamento.espelhoComercial.precoDeValor, 499);
 assert.strictEqual(parcelamento.espelhoComercial.precoPorValor, 205);
 assert.strictEqual(parcelamento.espelhoComercial.cupomCodigo, "FASHION ou MODACOMVC");
 assert.ok(parcelamento.espelhoComercial.condicoesComerciais.some(item => /6x/.test(item)));
+const ofertaCompletaAdaptativa = montarTemplateEspelhoShadow(
+  parcelamento.espelhoComercial,
+  parcelamento.documentoComercialCanonico,
+  {
+    template: {
+      blocos: [
+        { tipo: "titulo", ativo: true, ordem: 10 },
+        { tipo: "preco_de", ativo: true, ordem: 20 },
+        { tipo: "preco_por", ativo: true, ordem: 30 },
+        { tipo: "parcelamento", ativo: true, ordem: 40 },
+        { tipo: "cupom", ativo: true, ordem: 50 },
+        { tipo: "link", ativo: true, ordem: 60 }
+      ],
+      rodape: { ativo: true, texto: "Rodape completo" }
+    }
+  }
+);
+assert.ok(ofertaCompletaAdaptativa.mensagem.includes("De: R$ 499"));
+assert.ok(ofertaCompletaAdaptativa.mensagem.includes("Por: R$ 205,00 no Pix ou R$ 215,83 em ate 6x"));
+assert.ok(ofertaCompletaAdaptativa.mensagem.includes("Cupom: FASHION ou MODACOMVC"));
+assert.ok(ofertaCompletaAdaptativa.mensagem.includes("Confira aqui:"));
+assert.ok(ofertaCompletaAdaptativa.mensagem.endsWith("Rodape completo"));
 
 const imagem = selecionarImagemComercial({
   oferta: { imagem: "https://cdn.marketplace.test/produto-limpo.jpg", imagemOrigem: "canonical.product.image" },

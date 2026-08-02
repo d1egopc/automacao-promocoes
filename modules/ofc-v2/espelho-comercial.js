@@ -128,8 +128,8 @@ function extrairPrecosTexto(textoOriginal = "") {
 
   return {
     precoDeTexto: textoMoeda(precoDeTexto),
-    precoPorTexto: textoMoeda(precoPorTexto),
-    precoFinalTexto: textoMoeda(precoFinalTexto),
+    precoPorTexto: [textoMoeda(precoPorTexto), sufixoPor].map(texto).filter(Boolean).join(" "),
+    precoFinalTexto: [textoMoeda(precoFinalTexto), sufixoFinal].map(texto).filter(Boolean).join(" "),
     precoDeValor: numeroMonetario(precoDeTexto),
     precoPorValor: numeroMonetario(precoPorTexto),
     precoFinalValor: numeroMonetario(precoFinalTexto),
@@ -241,10 +241,23 @@ function primeiraLinhaPorNormalizacao(textoOriginal = "", padrao) {
 function extrairTextoLinhaPreco(linha = "", tipo = "") {
   const valor = texto(linha);
   if (!valor) return "";
-  if (tipo === "de") return removerPrefixoComercial(valor, /^\s*(?:[^\n\w]{0,4}\s*)?de\s*:?\s*/i);
+  if (tipo === "de") {
+    const semPrefixo = removerPrefixoComercial(valor, /^\s*(?:[^\n\w]{0,4}\s*)?de\s*:?\s*/i);
+    const match = semPrefixo.match(/(?:R\$|US\$|USD|U\$|\$)?\s*[\d.]+(?:[,.][\d]{1,2})?/i);
+    return match ? textoMoeda(match[0]) : semPrefixo;
+  }
   if (tipo === "por") return removerPrefixoComercial(valor, /^\s*(?:[^\n\w]{0,4}\s*)?por\s*:?\s*/i);
   if (tipo === "valor") return removerPrefixoComercial(valor, /^\s*(?:[^\n\w]{0,4}\s*)?valor\s*:?\s*/i);
   return valor;
+}
+
+function extrairParcelamentoTextoLinha(linha = "") {
+  const valor = texto(linha);
+  if (!valor) return "";
+  const comValor = valor.match(/(?:R\$|US\$|USD|U\$|\$)?\s*[\d.]+(?:[,.][\d]{1,2})?\s*(?:em\s*)?(?:ate\s*)?\d+\s*x[^\n]*/i);
+  if (comValor) return texto(comValor[0]);
+  const semValor = valor.match(/(?:em\s*)?(?:ate\s*)?\d+\s*x[^\n]*/i);
+  return semValor ? texto(semValor[0]) : valor;
 }
 
 function extrairDocumentoComercialCanonico({
@@ -277,10 +290,22 @@ function extrairDocumentoComercialCanonico({
 
   const precoDeTexto = extrairTextoLinhaPreco(linhaDe, "de") || precosTexto.precoDeTexto || "";
   const precoPorTexto = extrairTextoLinhaPreco(linhaPor, "por") || extrairTextoLinhaPreco(linhaValor, "valor") || precosTexto.precoPorTexto || "";
-  const precoPixTexto = /\bpix\b/i.test(linhaPor || linhaValor || linhaPix)
+  const precoPixTexto = /\bpix\b/i.test(linhaPor || linhaValor)
     ? (extrairTextoLinhaPreco(linhaPor, "por") || extrairTextoLinhaPreco(linhaValor, "valor") || texto(linhaPix))
-    : primeiroTexto(ofertaEntrada.precoPix, ofertaEntrada.condicaoPix, oferta.precoPix, oferta.condicaoPix, formaPagamentoTexto === "Pix" ? precoPorTexto : "");
-  const parcelamentoTexto = texto(linhaParcelamento) || primeiroTexto(ofertaEntrada.parcelamento, oferta.parcelamento, comercialNormalizado.parcelamento?.texto);
+    : primeiroTexto(
+      ofertaEntrada.precoPix,
+      ofertaEntrada.condicaoPix,
+      oferta.precoPix,
+      oferta.condicaoPix,
+      /\bpix\b/i.test(precoPorTexto) ? precoPorTexto : "",
+      formaPagamentoTexto === "Pix" ? precoPorTexto : ""
+    );
+  const parcelamentoTexto = primeiroTexto(
+    ofertaEntrada.parcelamento,
+    oferta.parcelamento,
+    comercialNormalizado.parcelamento?.texto,
+    extrairParcelamentoTextoLinha(linhaParcelamento)
+  );
   const cashbackTexto = texto(linhaCashback) || primeiroTexto(ofertaEntrada.cashback, oferta.cashback);
   const freteTexto = texto(linhaFrete) || primeiroTexto(ofertaEntrada.frete, oferta.frete, oferta.freteGratis === true ? "Frete gratis" : "");
   const beneficioTexto = texto(linhaBeneficio) || primeiroTexto(ofertaEntrada.beneficioExtra, ofertaEntrada.beneficioTexto, oferta.beneficioExtra, oferta.beneficioTexto);
@@ -458,44 +483,185 @@ function selecionarImagemComercial({ oferta = {}, ofertaEntrada = {}, metadata =
   };
 }
 
-function montarTemplateEspelhoShadow(espelho = {}, documento = null) {
-  const doc = objeto(documento || espelho.documentoComercialCanonico);
-  const linhas = [];
-  const adicionar = (...partes) => {
-    const bloco = partes.map(texto).filter(Boolean);
-    if (bloco.length) linhas.push(bloco.join("\n"));
-  };
+const BLOCOS_TEMPLATE_ESPELHO_PADRAO = Object.freeze([
+  { tipo: "titulo", ordem: 10, ativo: true },
+  { tipo: "marketplace", ordem: 20, ativo: true },
+  { tipo: "categoria", ordem: 30, ativo: true },
+  { tipo: "preco_de", ordem: 40, ativo: true },
+  { tipo: "preco_por", ordem: 50, ativo: true },
+  { tipo: "preco_pix", ordem: 55, ativo: true },
+  { tipo: "parcelamento", ordem: 60, ativo: true },
+  { tipo: "economia", ordem: 70, ativo: false },
+  { tipo: "cupom", ordem: 80, ativo: true },
+  { tipo: "beneficio", ordem: 90, ativo: true },
+  { tipo: "cashback", ordem: 95, ativo: true },
+  { tipo: "frete", ordem: 100, ativo: true },
+  { tipo: "avaliacao", ordem: 110, ativo: true },
+  { tipo: "frase_cupom", ordem: 120, ativo: true },
+  { tipo: "link_resgate", ordem: 130, ativo: true },
+  { tipo: "link", ordem: 140, ativo: true }
+]);
 
-  const precoPor = primeiroTexto(doc.precoPixTexto, doc.precoPorTexto, espelho.precoFinalTexto, espelho.precoPorTexto);
-  const parcelamento = primeiroTexto(doc.parcelamentoTexto, lista(espelho.condicoesComerciais).find(item => /x\s*de|parcel/i.test(item)) || "");
-  const cashback = primeiroTexto(doc.cashbackTexto, lista(espelho.condicoesComerciais).find(item => /cashback/i.test(item)) || "");
-  const frete = primeiroTexto(doc.freteTexto, lista(espelho.condicoesComerciais).find(item => /frete/i.test(item)) || "");
-  const beneficio = primeiroTexto(doc.beneficioTexto, lista(espelho.condicoesComerciais).find(item => !/cashback|frete|x\s*de|parcel/i.test(item)) || "");
+function cupomCanonicoConfiavel(doc = {}, espelho = {}) {
   const cupom = primeiroTexto(doc.cupomTexto, espelho.cupomCodigo);
-  const linkResgate = primeiroTexto(doc.linkResgateOriginal, espelho.linkResgateOriginal);
+  if (!cupom) return false;
+  const motivos = [
+    ...lista(doc.confianca?.motivos),
+    ...lista(espelho.motivosConfianca)
+  ].map(texto);
+  return motivos.includes("cupom_explicito") || doc.confianca?.cupomConfiavel === true || espelho.cupomConfiavel === true;
+}
+
+function linkResgateEssencial(doc = {}, espelho = {}) {
+  const link = primeiroTexto(doc.linkResgateOriginal, espelho.linkResgateOriginal);
+  if (!link) return false;
+  const contexto = normalizarComparacao([
+    doc.resgateTexto,
+    doc.instrucaoTexto,
+    doc.beneficioTexto,
+    espelho.instrucaoComercial,
+    ...lista(doc.condicoesComerciais),
+    ...lista(espelho.condicoesComerciais)
+  ].filter(Boolean).join(" "));
+  return /\b(?:resgate|cupom|cupons|voucher|beneficio|beneficio|moeda|moedas)\b/.test(contexto);
+}
+
+function normalizarBlocosTemplateEspelho(template = {}, doc = {}, espelho = {}) {
+  const blocosOriginais = Array.isArray(template.blocos) && template.blocos.length
+    ? template.blocos
+    : BLOCOS_TEMPLATE_ESPELHO_PADRAO;
+  const blocos = blocosOriginais
+    .filter(bloco => bloco && bloco.ativo !== false)
+    .map((bloco, indice) => ({
+      tipo: texto(bloco.tipo),
+      ordem: Number.isFinite(Number(bloco.ordem)) ? Number(bloco.ordem) : indice + 1,
+      compatibilidadePassiva: bloco.compatibilidadePassiva === true
+    }))
+    .filter(bloco => Boolean(bloco.tipo));
+
+  const possuiCupom = blocos.some(bloco => bloco.tipo === "cupom");
+  const cupomObrigatorio = cupomCanonicoConfiavel(doc, espelho);
+  if (cupomObrigatorio && !possuiCupom) {
+    const blocoCupomOriginal = blocosOriginais.find(bloco => bloco?.tipo === "cupom");
+    blocos.push({
+      tipo: "cupom",
+      ordem: Number.isFinite(Number(blocoCupomOriginal?.ordem)) ? Number(blocoCupomOriginal.ordem) : 80,
+      obrigatorio: true
+    });
+  }
+
+  const possuiResgateObrigatorio = blocos.some(bloco => bloco.tipo === "link_resgate");
+  const resgateObrigatorio = linkResgateEssencial(doc, espelho);
+  if (resgateObrigatorio && !possuiResgateObrigatorio) {
+    const blocoResgateOriginal = blocosOriginais.find(bloco => bloco?.tipo === "link_resgate");
+    const blocoLink = blocosOriginais.find(bloco => bloco?.tipo === "link");
+    blocos.push({
+      tipo: "link_resgate",
+      ordem: Number.isFinite(Number(blocoResgateOriginal?.ordem))
+        ? Number(blocoResgateOriginal.ordem)
+        : ((Number.isFinite(Number(blocoLink?.ordem)) ? Number(blocoLink.ordem) : 140) - 0.1),
+      obrigatorio: true
+    });
+  }
+
+  const possuiLink = blocos.some(bloco => bloco.tipo === "link");
+  const possuiResgate = blocos.some(bloco => bloco.tipo === "link_resgate");
+  if (possuiLink && !possuiResgate && Array.isArray(template.blocos) && template.blocos.length) {
+    const ordemLink = blocos.find(bloco => bloco.tipo === "link")?.ordem || 140;
+    blocos.push({
+      tipo: "link_resgate",
+      ordem: ordemLink - 0.1,
+      compatibilidadePassiva: true
+    });
+  }
+
+  return blocos.sort((a, b) => a.ordem - b.ordem || a.tipo.localeCompare(b.tipo));
+}
+
+function normalizarLinhaTemplate(valor = "") {
+  return texto(valor).replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function adicionarBlocoUnico(saida = [], tipo = "", linha = "") {
+  const textoLinha = normalizarLinhaTemplate(linha);
+  if (!textoLinha) return false;
+  const chave = normalizarComparacao(textoLinha);
+  if (saida.some(item => normalizarComparacao(item.linha) === chave)) return false;
+  saida.push({ tipo, linha: textoLinha });
+  return true;
+}
+
+function valorDocumentoOuEspelho(doc = {}, espelho = {}, campoDoc = "", ...camposEspelho) {
+  const valorDoc = primeiroTexto(doc[campoDoc]);
+  if (valorDoc) return valorDoc;
+  return primeiroTexto(...camposEspelho.map(campo => espelho[campo]));
+}
+
+function resolverBlocoTemplateEspelho(tipo = "", doc = {}, espelho = {}, contexto = {}) {
+  const marketplace = valorDocumentoOuEspelho(doc, espelho, "marketplace", "marketplace");
+  const linkResgate = valorDocumentoOuEspelho(doc, espelho, "linkResgateOriginal", "linkResgateOriginal");
   const linkProduto = primeiroTexto(doc.linkAfiliado, espelho.linkAfiliado, doc.linkProdutoOriginal, espelho.linkProdutoOriginal);
+  const precoDe = valorDocumentoOuEspelho(doc, espelho, "precoDeTexto", "precoDeTexto");
+  const precoPor = primeiroTexto(doc.precoPorTexto, doc.precoPixTexto, espelho.precoFinalTexto, espelho.precoPorTexto);
+  const precoPix = doc.precoPixTexto && doc.precoPixTexto !== doc.precoPorTexto ? doc.precoPixTexto : "";
+  const parcelamento = valorDocumentoOuEspelho(doc, espelho, "parcelamentoTexto");
+  const cupom = valorDocumentoOuEspelho(doc, espelho, "cupomTexto", "cupomCodigo");
+  const beneficio = valorDocumentoOuEspelho(doc, espelho, "beneficioTexto");
+  const cashback = valorDocumentoOuEspelho(doc, espelho, "cashbackTexto");
+  const frete = valorDocumentoOuEspelho(doc, espelho, "freteTexto");
+  const instrucao = valorDocumentoOuEspelho(doc, espelho, "instrucaoTexto", "instrucaoComercial");
+  const avaliacao = primeiroTexto(contexto.avaliacao, contexto.score);
+  const categoria = primeiroTexto(contexto.categoria);
+  const economia = primeiroTexto(contexto.economia);
 
-  adicionar(doc.tituloOriginal || espelho.tituloNormalizado || espelho.tituloOriginal || "Oferta");
-  adicionar(
-    doc.precoDeTexto ? `De: ${doc.precoDeTexto}` : (espelho.precoDeTexto ? `De: ${espelho.precoDeTexto}` : ""),
-    precoPor ? `Por: ${precoPor}` : "",
-    parcelamento
-  );
-  adicionar(beneficio ? `Beneficio: ${beneficio}` : "");
-  adicionar(cashback ? `Cashback: ${cashback}` : "");
-  adicionar(frete ? `Frete: ${frete}` : "");
-  adicionar(cupom ? `Cupom: ${cupom}` : "");
-  adicionar(linkResgate ? `Resgate os cupons:\n${linkResgate}` : "");
-  adicionar(linkProduto ? `Confira aqui:\n${linkProduto}` : "");
-  adicionar(doc.instrucaoTexto || espelho.instrucaoComercial || "");
+  if (tipo === "titulo") return primeiroTexto(doc.tituloOriginal, espelho.tituloNormalizado, espelho.tituloOriginal);
+  if (tipo === "marketplace") return marketplace ? `Marketplace: ${marketplace}` : "";
+  if (tipo === "categoria") return categoria ? `Categoria: ${categoria}` : "";
+  if (tipo === "preco_de") return precoDe ? `De: ${precoDe}` : "";
+  if (tipo === "preco_por") return precoPor ? `Por: ${precoPor}` : "";
+  if (tipo === "preco_pix") return precoPix ? `Pix: ${precoPix}` : "";
+  if (tipo === "parcelamento") return parcelamento || "";
+  if (tipo === "economia") return economia ? `Economia: ${economia}` : "";
+  if (tipo === "cupom") return cupom ? `Cupom: ${cupom}` : "";
+  if (tipo === "beneficio") return beneficio ? `Beneficio: ${beneficio}` : "";
+  if (tipo === "cashback") return cashback ? `Cashback: ${cashback}` : "";
+  if (tipo === "frete") return frete ? `Frete: ${frete}` : "";
+  if (tipo === "avaliacao") return avaliacao ? `Avaliacao: ${avaliacao}` : "";
+  if (tipo === "frase_cupom") return instrucao || "";
+  if (tipo === "link_resgate") return linkResgate ? `Resgate os cupons:\n${linkResgate}` : "";
+  if (tipo === "link") return linkProduto ? `Confira aqui:\n${linkProduto}` : "";
+  if (tipo === "aviso_preco") return primeiroTexto(contexto.avisoPreco);
+  if (tipo === "aviso_alteracao") return primeiroTexto(contexto.avisoAlteracao, contexto.aviso);
+  return "";
+}
 
-  const mensagem = linhas.join("\n\n");
+function montarTemplateEspelhoShadow(espelho = {}, documento = null, opcoes = {}) {
+  const doc = objeto(documento || espelho.documentoComercialCanonico);
+  const blocos = normalizarBlocosTemplateEspelho(objeto(opcoes.template), doc, espelho);
+  const linhas = [];
+  const contextoBlocos = {
+    ...objeto(opcoes.contexto),
+    temBlocoCashback: blocos.some(bloco => bloco.tipo === "cashback")
+  };
+  for (const bloco of blocos) {
+    const linha = resolverBlocoTemplateEspelho(bloco.tipo, doc, espelho, contextoBlocos);
+    adicionarBlocoUnico(linhas, bloco.tipo, linha);
+  }
+
+  const rodape = objeto(opcoes.template).rodape;
+  if (rodape?.ativo === true) adicionarBlocoUnico(linhas, "rodape", rodape.texto);
+
+  const mensagem = linhas.map(item => item.linha).join("\n\n");
   return {
     ok: Boolean(mensagem),
     modo: "shadow",
     aplicouMudancas: false,
     mensagem,
     linhas: linhas.length,
+    blocosRenderizados: linhas.map(item => item.tipo),
+    blocosIgnorados: blocos
+      .map(bloco => bloco.tipo)
+      .filter(tipo => !linhas.some(item => item.tipo === tipo)),
     avisos: mensagem ? [] : ["template_espelho_sem_conteudo"]
   };
 }
@@ -652,6 +818,7 @@ function resumoEspelhoComercialLog(resultado = {}, contexto = {}) {
 module.exports = {
   construirEspelhoComercialV24,
   construirEspelhoComercialV24FailOpen,
+  montarTemplateEspelhoShadow,
   resumoEspelhoComercialLog,
   selecionarImagemComercial
 };

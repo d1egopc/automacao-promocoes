@@ -26,21 +26,24 @@ function capturarLogs(fn) {
   }
 }
 
-function metadataEspelho({ mensagem, imagemComercial = {}, espelhoExtra = {} } = {}) {
+function metadataEspelho({ mensagem, imagemComercial = {}, espelhoExtra = {}, documentoComercialCanonico = null } = {}) {
+  const espelhoComercial = {
+    marketplace: "mercadolivre",
+    precoPorTexto: "R$ 73,79",
+    precoDeTexto: "R$ 299,99",
+    formaPagamentoTexto: "Pix",
+    cupomCodigo: "FASHIONML",
+    instrucaoComercial: "Aplique o cupom FASHIONML + Pix para chegar neste valor.",
+    linkProdutoOriginal: "https://meli.la/produto",
+    linkResgateOriginal: null,
+    linkAfiliado: "https://afiliado.test/produto",
+    ...espelhoExtra
+  };
+  if (documentoComercialCanonico) espelhoComercial.documentoComercialCanonico = documentoComercialCanonico;
   return {
     ofcV24: {
-      espelhoComercial: {
-        marketplace: "mercadolivre",
-        precoPorTexto: "R$ 73,79",
-        precoDeTexto: "R$ 299,99",
-        formaPagamentoTexto: "Pix",
-        cupomCodigo: "FASHIONML",
-        instrucaoComercial: "Aplique o cupom FASHIONML + Pix para chegar neste valor.",
-        linkProdutoOriginal: "https://meli.la/produto",
-        linkResgateOriginal: null,
-        linkAfiliado: "https://afiliado.test/produto",
-        ...espelhoExtra
-      },
+      espelhoComercial,
+      documentoComercialCanonico,
       templateEspelhoShadow: {
         ok: true,
         modo: "shadow",
@@ -159,6 +162,51 @@ assert.strictEqual(obterConfiguracaoEspelhoPiloto(WORKSPACE_WOLF).ativo, false);
   assert(mensagem.includes("Por: R$ 79,90"));
   assert(!mensagem.includes("De:"));
   assert(!mensagem.includes("Cupom:"));
+}
+
+{
+  const documento = {
+    tituloOriginal: "Oferta adaptativa D1",
+    precoDeTexto: "R$ 299,99",
+    precoPorTexto: "R$ 73,79 via Pix",
+    cupomTexto: "FASHIONML",
+    instrucaoTexto: "Aplique o cupom FASHIONML + Pix para chegar neste valor.",
+    linkAfiliado: "https://afiliado.test/produto",
+    marketplace: "mercadolivre",
+    confianca: { motivos: ["cupom_explicito"] }
+  };
+  const ofertaAdaptativa = ofertaBase(WORKSPACE_D1, metadataEspelho({
+    mensagem: "mensagem antiga nao deve ser prioridade",
+    documentoComercialCanonico: documento
+  }));
+  const destino = {
+    template: {
+      blocos: [
+        { tipo: "titulo", ativo: true, ordem: 10 },
+        { tipo: "marketplace", ativo: false, ordem: 20 },
+        { tipo: "preco_de", ativo: true, ordem: 30 },
+        { tipo: "preco_por", ativo: true, ordem: 40 },
+        { tipo: "cupom", ativo: false, ordem: 50 },
+        { tipo: "frase_cupom", ativo: true, ordem: 60 },
+        { tipo: "link", ativo: true, ordem: 70 }
+      ]
+    }
+  };
+  const { retorno } = capturarLogs(() => selecionarTemplateEspelhoPiloto({
+    workspaceId: WORKSPACE_D1,
+    oferta: ofertaAdaptativa,
+    destino,
+    mensagemAtual: "mensagem atual"
+  }));
+  assert.strictEqual(retorno.usarEspelho, true);
+  assert.strictEqual(retorno.motivo, "documento_canonico_adaptativo_valido");
+  assert.ok(retorno.mensagem.includes("Oferta adaptativa D1"));
+  assert.ok(retorno.mensagem.includes("De: R$ 299,99"));
+  assert.ok(retorno.mensagem.includes("Por: R$ 73,79 via Pix"));
+  assert.ok(retorno.mensagem.includes("Aplique o cupom FASHIONML + Pix"));
+  assert.ok(retorno.mensagem.includes("Cupom: FASHIONML"), "cupom confiavel e obrigatorio mesmo com toggle desligado");
+  assert.ok(!retorno.mensagem.includes("Marketplace:"), "toggle de marketplace desligado e respeitado");
+  assert.ok(!retorno.mensagem.includes("mensagem antiga"), "documento canonico tem prioridade sobre template antigo");
 }
 
 {

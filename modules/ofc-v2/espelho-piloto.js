@@ -1,5 +1,9 @@
 ﻿"use strict";
 
+const { buscarTemplate } = require("../templates-clientes/service");
+const { TEMPLATE_PADRAO_ID, normalizarTemplateIdDestino } = require("../templates-clientes/resolver");
+const { montarTemplateEspelhoShadow } = require("./espelho-comercial");
+
 const WORKSPACE_D1EGOPC_OFICIAL = "user_40qdblgt";
 
 const CONFIGURACAO_ESPELHO_PILOTO = Object.freeze({
@@ -63,9 +67,30 @@ function obterEspelho(oferta = {}) {
   return objeto(ofcV24.espelhoComercial || oferta.espelhoComercialV24);
 }
 
+function obterDocumentoCanonico(oferta = {}) {
+  const ofcV24 = metadataOfcV24(oferta);
+  const espelho = obterEspelho(oferta);
+  return objeto(ofcV24.documentoComercialCanonico || espelho.documentoComercialCanonico || oferta.documentoComercialCanonicoV24);
+}
+
 function obterImagemComercial(oferta = {}) {
   const ofcV24 = metadataOfcV24(oferta);
   return objeto(ofcV24.imagemComercial || oferta.imagemComercialV24);
+}
+
+function resolverTemplateToggles({ workspaceId = "", destino = {}, template = null } = {}) {
+  const direto = objeto(template || destino.template || destino.templateMensagem || destino.templateOferta);
+  if (Array.isArray(direto.blocos)) return direto;
+  if (Array.isArray(destino.blocos)) return { blocos: destino.blocos, rodape: destino.rodape };
+
+  const templateId = normalizarTemplateIdDestino(destino);
+  if (!templateId || templateId === TEMPLATE_PADRAO_ID) return {};
+
+  try {
+    return buscarTemplate(workspaceId, templateId);
+  } catch (_) {
+    return {};
+  }
 }
 
 function resumoBase({ workspaceId = "", oferta = {}, config = {} } = {}) {
@@ -84,7 +109,14 @@ function resumoBase({ workspaceId = "", oferta = {}, config = {} } = {}) {
   };
 }
 
-function selecionarTemplateEspelhoPiloto({ workspaceId = "", oferta = {}, mensagemAtual = "" } = {}) {
+function selecionarTemplateEspelhoPiloto({
+  workspaceId = "",
+  oferta = {},
+  mensagemAtual = "",
+  destino = {},
+  template = null,
+  canal = "whatsapp"
+} = {}) {
   const config = obterConfiguracaoEspelhoPiloto(workspaceId || oferta.clienteId || oferta.cliente_id);
   if (!config.ativo) {
     return {
@@ -113,38 +145,58 @@ function selecionarTemplateEspelhoPiloto({ workspaceId = "", oferta = {}, mensag
       pilotoAtivo: true
     });
 
-    const template = obterTemplateEspelho(oferta);
+    const templateAtual = obterTemplateEspelho(oferta);
     const espelho = obterEspelho(oferta);
-    const mensagem = texto(template.mensagem);
-    const valido = template.ok === true && mensagemValida(mensagem) && Boolean(espelho && Object.keys(espelho).length);
+    const documento = obterDocumentoCanonico(oferta);
+    const temDocumento = Boolean(documento && Object.keys(documento).length);
+    const templateCliente = resolverTemplateToggles({ workspaceId: config.workspaceId, destino, template });
+    const templateAdaptativo = temDocumento
+      ? montarTemplateEspelhoShadow(espelho, documento, {
+        template: templateCliente,
+        canal,
+        contexto: {
+          categoria: oferta.categoria,
+          score: oferta.score || oferta.avaliacao,
+          economia: oferta.economia,
+          avisoPreco: oferta.avisoPreco,
+          avisoAlteracao: oferta.avisoAlteracao,
+          aviso: oferta.aviso
+        }
+      })
+      : null;
+    const mensagem = texto(templateAdaptativo?.mensagem || templateAtual.mensagem);
+    const valido = (templateAdaptativo?.ok === true || templateAtual.ok === true) &&
+      mensagemValida(mensagem) &&
+      Boolean(espelho && Object.keys(espelho).length);
 
     if (!valido) {
       logSeguro("[OFC-V2.4-TEMPLATE-ATUAL-FALLBACK]", {
         ...base,
-        motivo: template.ok === false ? "template_espelho_invalido" : "template_espelho_indisponivel",
+        motivo: templateAdaptativo?.ok === false || templateAtual.ok === false ? "template_espelho_invalido" : "template_espelho_indisponivel",
         tamanhoTemplateEspelho: mensagem.length
       });
       return {
         usarEspelho: false,
         ativo: true,
         mensagem: mensagemAtual,
-        motivo: template.ok === false ? "template_espelho_invalido" : "template_espelho_indisponivel",
+        motivo: templateAdaptativo?.ok === false || templateAtual.ok === false ? "template_espelho_invalido" : "template_espelho_indisponivel",
         aplicouMudancasOperacionais: false
       };
     }
 
     logSeguro("[OFC-V2.4-TEMPLATE-ESPELHO-SELECIONADO]", {
       ...base,
-      motivo: "espelho_comercial_valido",
+      motivo: temDocumento ? "documento_canonico_adaptativo_valido" : "espelho_comercial_valido",
       tamanhoMensagem: mensagem.length,
-      linhas: template.linhas || null
+      linhas: templateAdaptativo?.linhas || templateAtual.linhas || null,
+      blocosRenderizados: Array.isArray(templateAdaptativo?.blocosRenderizados) ? templateAdaptativo.blocosRenderizados : undefined
     });
 
     return {
       usarEspelho: true,
       ativo: true,
       mensagem,
-      motivo: "espelho_comercial_valido",
+      motivo: temDocumento ? "documento_canonico_adaptativo_valido" : "espelho_comercial_valido",
       aplicouMudancasOperacionais: false
     };
   } catch (erro) {

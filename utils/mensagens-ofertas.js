@@ -295,7 +295,9 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
 
   const espelhoPiloto = selecionarTemplateEspelhoPiloto({
     workspaceId: clienteId,
-    oferta: ofertaOficial
+    oferta: ofertaOficial,
+    destino,
+    canal: opcoes.canal || destino.canal || destino.tipo
   });
   if (espelhoPiloto.usarEspelho && espelhoPiloto.mensagem) {
     return registrarTemplate("ofc_v24_espelho_piloto", espelhoPiloto.mensagem);
