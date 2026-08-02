@@ -1,6 +1,7 @@
 "use strict";
 
 const { analisarValorMonetario, formatarMoedaBR } = require("../../utils/moeda");
+const { aplicarContratoMarketplace, MATRIZ_CAPACIDADES } = require("./marketplace-contracts");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -345,6 +346,10 @@ function montarInstrucaoCupomCanonica(doc = {}, cupons = []) {
 function beneficioEspeculativoOuTecnico(valor = "") {
   const fonte = limparTextoComercial(valor);
   if (!fonte) return true;
+  if (/https?:\/\//i.test(fonte)) {
+    const semUrl = normalizarComparacao(removerUrls(fonte)).replace(/[:|_\-]+/g, " ").trim();
+    if (/^(?:app|pc|site|desktop|link|produto|confira|moeda|moedas|coins?|resgate|cupom)\b/.test(semUrl)) return true;
+  }
   const n = normalizarComparacao(fonte);
   if (/\bpode\s+haver\b|\bpode\s+existir\b|\bconfira\s+(?:no\s+)?(?:carrinho|app)\b|\btalvez\b/.test(n)) return true;
   if (/\bcupom\s+disponivel\b/.test(n) && !/(?:R\$|US\$|USD|U\$|\$|\d+\s*%|\boff\b)/i.test(fonte)) return true;
@@ -662,6 +667,13 @@ function linkResgateValidoPorMarketplace(url = "", contexto = "", marketplace = 
 
 function classificarTipoLinkBloco(item = {}, textoOriginal = "", marketplace = "") {
   const url = texto(item.url);
+  const papelContrato = texto(item.papel);
+  if (papelContrato === "link_resgate") return "link_resgate";
+  if (papelContrato === "link_app") return "link_app";
+  if (papelContrato === "link_pc") return "link_pc";
+  if (papelContrato === "link_moedas") return "link_moedas";
+  if (papelContrato === "link_auxiliar") return "link_auxiliar";
+  if (papelContrato === "link_produto") return "link_produto_original";
   const tipo = texto(item.tipo);
   const contexto = normalizarComparacao(primeiroTexto(item.contexto, contextoUrlNoTexto(textoOriginal, url)));
   const mp = normalizarComparacao(marketplace);
@@ -680,6 +692,7 @@ function classificarTipoLinkBloco(item = {}, textoOriginal = "", marketplace = "
 
 function adicionarBlocosDeLinks(blocos = [], doc = {}, contexto = {}) {
   const links = (Array.isArray(doc.linksComerciais) ? doc.linksComerciais : [])
+    .filter(item => item?.renderizavel !== false)
     .filter(item => !textoComercialEquivalente(item?.url || "", doc.linkAfiliado || ""));
   const produtos = links.filter(item => classificarTipoLinkBloco(item, contexto.textoOriginal, doc.marketplace) === "link_produto_original");
   const produtosAmbiguos = produtos.length > 1;
@@ -836,6 +849,42 @@ function logBlocosComerciaisV26(tag = "", documento = {}, contexto = {}) {
   }
 }
 
+function logContratoMarketplaceV27(tag = "", contrato = {}, contexto = {}) {
+  try {
+    console.log(tag, JSON.stringify({
+      workspaceId: contexto.workspaceId || "",
+      jobId: contexto.jobId || null,
+      ofertaId: contexto.ofertaId || null,
+      marketplace: contexto.marketplace || contrato.marketplace || "",
+      contrato: contrato.contrato || "",
+      papeisDetectados: lista(contrato.papeisDetectados).slice(0, 12),
+      papeisRenderizaveis: lista(contrato.papeisRenderizaveis).slice(0, 12),
+      totalLinksEntrada: contrato.totalLinksEntrada || 0,
+      totalLinksSaida: contrato.totalLinksSaida || 0,
+      linksDescartados: contrato.linksDescartados || 0,
+      houveConversaoAfiliada: contrato.houveConversaoAfiliada === true,
+      houveAmbiguidade: contrato.houveAmbiguidade === true,
+      motivo: contexto.motivo || "",
+      aplicouMudancasOperacionais: false
+    }));
+  } catch (_) {
+    // Observabilidade V2.7 nunca pode interferir no pipeline.
+  }
+}
+
+function linksContratoParaDocumento(contrato = {}) {
+  return lista(contrato.links)
+    .map(link => ({
+      tipo: texto(link.papel || "").replace(/^link_/, ""),
+      papel: texto(link.papel || ""),
+      url: texto(link.urlAfiliada || link.urlOriginal),
+      renderizavel: link.renderizavel !== false,
+      confianca: texto(link.confianca || "media"),
+      dedupeKey: texto(link.dedupeKey || "")
+    }))
+    .filter(item => item.url);
+}
+
 function extrairDocumentoComercialCanonico({
   textoOriginal = "",
   tituloOriginal = "",
@@ -852,7 +901,8 @@ function extrairDocumentoComercialCanonico({
   ofertaEntrada = {},
   comercialNormalizado = {},
   avisos = [],
-  motivosConfianca = []
+  motivosConfianca = [],
+  contratoMarketplace = null
 } = {}) {
   const linhaDe = primeiraLinhaPorNormalizacao(textoOriginal, /^\s*(?:de)\b/);
   const linhaPor = primeiraLinhaPorNormalizacao(textoOriginal, /^\s*(?:por)\b/);
@@ -894,7 +944,14 @@ function extrairDocumentoComercialCanonico({
     linkProdutoOriginal: links.linkProdutoOriginal || null,
     linkResgateOriginal: links.linkResgateOriginal || null,
     linkAfiliado: linkAfiliado || null,
-    linksComerciais: Array.isArray(links.links) ? links.links.map(item => ({ tipo: item.tipo, url: item.url })).filter(item => item.url) : [],
+    linksComerciais: Array.isArray(links.links) ? links.links.map(item => ({
+      tipo: item.tipo,
+      papel: item.papel,
+      url: item.url,
+      renderizavel: item.renderizavel !== false,
+      confianca: item.confianca,
+      dedupeKey: item.dedupeKey
+    })).filter(item => item.url) : [],
     imagemComercial: imagemComercial && Object.keys(imagemComercial).length ? { ...imagemComercial } : null,
     marketplace: marketplace || null,
     origemDocumento: textoOriginal ? "texto_comercial_original" : "campos_estruturados_parciais",
@@ -903,7 +960,14 @@ function extrairDocumentoComercialCanonico({
       motivos: [...new Set(motivosConfianca.filter(Boolean))]
     },
     avisos: [...new Set((avisos || []).filter(Boolean))],
-    condicoesComerciais: [...new Set((condicoesComerciais || []).map(texto).filter(Boolean))]
+    condicoesComerciais: [...new Set((condicoesComerciais || []).map(texto).filter(Boolean))],
+    contratoMarketplace: contratoMarketplace ? {
+      contrato: contratoMarketplace.contrato || "",
+      papeisRenderizaveis: lista(contratoMarketplace.papeisRenderizaveis),
+      houveAmbiguidade: contratoMarketplace.houveAmbiguidade === true,
+      linksDescartados: contratoMarketplace.linksDescartados || 0,
+      modoFielSeguro: contratoMarketplace.modoFielSeguro === true
+    } : null
   };
 
   try {
@@ -1215,8 +1279,9 @@ function marketplaceVisual(valor = "") {
 
 function linhasLinksAliExpress(doc = {}) {
   const links = Array.isArray(doc.linksComerciais) ? doc.linksComerciais : [];
-  const app = links.find(item => item.tipo === "app")?.url || "";
-  const pc = links.find(item => item.tipo === "pc")?.url || "";
+  const renderizaveis = links.filter(item => item.renderizavel !== false);
+  const app = renderizaveis.find(item => item.tipo === "app")?.url || "";
+  const pc = renderizaveis.find(item => item.tipo === "pc")?.url || "";
   return [
     app ? `📱 APP:\n${app}` : "",
     pc ? `🖥️ PC:\n${pc}` : ""
@@ -1242,11 +1307,19 @@ function textoComercialEquivalente(a = "", b = "") {
   return Boolean(ca && cb && ca === cb);
 }
 
+function contratoPermiteLinkProdutoOriginal(doc = {}) {
+  const contrato = doc.contratoMarketplace;
+  if (!contrato) return true;
+  const papeis = lista(contrato.papeisRenderizaveis).map(texto);
+  return papeis.includes("link_produto") || papeis.includes("link_produto_original");
+}
+
 function resolverBlocoTemplateEspelho(tipo = "", doc = {}, espelho = {}, contexto = {}) {
   const marketplace = valorDocumentoOuEspelho(doc, espelho, "marketplace", "marketplace");
   const linkResgateCandidato = valorDocumentoOuEspelho(doc, espelho, "linkResgateOriginal", "linkResgateOriginal");
   const linkResgate = linkResgateEssencial(doc, espelho) ? linkResgateCandidato : "";
-  const linkProduto = primeiroTexto(doc.linkAfiliado, espelho.linkAfiliado, doc.linkProdutoOriginal, espelho.linkProdutoOriginal);
+  const linkProdutoOriginalSeguro = contratoPermiteLinkProdutoOriginal(doc) ? primeiroTexto(doc.linkProdutoOriginal, espelho.linkProdutoOriginal) : "";
+  const linkProduto = primeiroTexto(doc.linkAfiliado, espelho.linkAfiliado, linkProdutoOriginalSeguro);
   const precoDe = valorDocumentoOuEspelho(doc, espelho, "precoDeTexto", "precoDeTexto");
   const precoPor = primeiroTexto(doc.precoPorTexto, doc.precoPixTexto, espelho.precoFinalTexto, espelho.precoPorTexto);
   const precoPix = doc.precoPixTexto && doc.precoPixTexto !== doc.precoPorTexto ? doc.precoPixTexto : "";
@@ -1386,7 +1459,10 @@ function blocosCanonicosSuficientesV26(blocos = [], documento = {}) {
   if (!blocos.length) return { ok: false, motivo: "blocos_ausentes" };
   const avisos = lista(documento.avisos).map(texto);
   if (avisos.includes("links_produto_ambiguos")) return { ok: false, motivo: "links_produto_ambiguos" };
-  if (!blocos.some(bloco => bloco.tipo === "link_afiliado")) return { ok: false, motivo: "link_afiliado_ausente" };
+  const marketplace = normalizarComparacao(documento.marketplace);
+  const temCtaSeguro = blocos.some(bloco => bloco.tipo === "link_afiliado")
+    || (marketplace === "aliexpress" && blocos.some(bloco => ["link_app", "link_pc", "link_moedas"].includes(bloco.tipo)));
+  if (!temCtaSeguro) return { ok: false, motivo: "link_afiliado_ausente" };
   if (!blocos.some(bloco => bloco.tipo === "titulo")) return { ok: false, motivo: "titulo_ausente" };
   return { ok: true, motivo: "blocos_suficientes" };
 }
@@ -1587,7 +1663,7 @@ function construirEspelhoComercialV24(entrada = {}) {
   const instrucaoComercial = extrairInstrucaoComercial(textoOriginal, cupom.cupomCodigo, oferta, ofertaEntrada);
   const formaPagamentoTexto = extrairFormaPagamento(textoOriginal, oferta, ofertaEntrada);
   const condicoesComerciais = extrairCondicoes({ textoOriginal, oferta, ofertaEntrada, comercialNormalizado });
-  const links = extrairLinksComerciais({ textoOriginal, oferta, ofertaEntrada, link });
+  const linksBrutos = extrairLinksComerciais({ textoOriginal, oferta, ofertaEntrada, link });
 
   const podeComplementarPrecoDe = !textoOriginal || precosTexto.precoDeValor !== null;
   const precoDeValor = precosTexto.precoDeValor ?? (podeComplementarPrecoDe
@@ -1603,8 +1679,56 @@ function construirEspelhoComercialV24(entrada = {}) {
 
   const precoDeTexto = precosTexto.precoDeTexto || (precoDeValor !== null ? textoMoeda(precoDeValor) : "");
   const precoPorTexto = precosTexto.precoPorTexto || (precoPorValor !== null ? textoMoeda(precoPorValor) : "");
-  const linkAfiliado = primeiroTexto(oferta.linkAfiliado, ofertaEntrada.linkAfiliado, oferta.linkFinal, link.link_afiliado);
+  const linkAfiliado = primeiroTexto(oferta.linkAfiliado, ofertaEntrada.linkAfiliado, oferta.linkFinal);
   const marketplace = primeiroTexto(oferta.marketplace, ofertaEntrada.marketplace, job.marketplace, job.marketplace_detectado, comercialNormalizado.marketplace);
+  const contextoContratoV27 = {
+    workspaceId: job.cliente_id || job.workspaceId || oferta.workspaceId || ofertaEntrada.workspaceId || "",
+    jobId: job.id || job.jobId || oferta.jobId || ofertaEntrada.jobId || null,
+    ofertaId: oferta.id || oferta.ofertaId || ofertaEntrada.ofertaId || null,
+    marketplace
+  };
+  let contratoMarketplace;
+  try {
+    contratoMarketplace = aplicarContratoMarketplace({
+      marketplace,
+      links: linksBrutos.links,
+      linkAfiliado,
+      textoOriginal,
+      oferta,
+      ofertaEntrada,
+      workspaceId: contextoContratoV27.workspaceId,
+      ofertaId: contextoContratoV27.ofertaId
+    });
+  } catch (_) {
+    contratoMarketplace = {
+      marketplace: marketplace || "desconhecido",
+      contrato: "fallback-fiel-seguro",
+      links: [],
+      avisos: ["contrato_marketplace_indisponivel"],
+      dedupes: [],
+      descartes: [],
+      linksDescartados: 0,
+      totalLinksEntrada: lista(linksBrutos.links).length,
+      totalLinksSaida: 0,
+      papeisDetectados: [],
+      papeisRenderizaveis: linkAfiliado ? ["link_afiliado"] : [],
+      houveConversaoAfiliada: Boolean(linkAfiliado),
+      houveAmbiguidade: false,
+      modoFielSeguro: true,
+      aplicouMudancasOperacionais: false
+    };
+    logContratoMarketplaceV27("[OFC-V2.7-CONTRATO-ERRO]", contratoMarketplace, {
+      ...contextoContratoV27,
+      motivo: "contrato_exception_fail_open"
+    });
+  }
+  const links = {
+    ...linksBrutos,
+    linkProdutoOriginal: contratoMarketplace.linkProdutoOriginal || linksBrutos.linkProdutoOriginal || "",
+    linkResgateOriginal: contratoMarketplace.linkResgateOriginal || "",
+    produtosAmbiguos: contratoMarketplace.produtosAmbiguos === true,
+    links: linksContratoParaDocumento(contratoMarketplace)
+  };
 
   const motivosConfianca = [];
   if (textoOriginal) motivosConfianca.push("texto_comercial_capturado");
@@ -1619,6 +1743,7 @@ function construirEspelhoComercialV24(entrada = {}) {
   if (!precoPorTexto && !precoFinalTexto) avisos.push("preco_comercial_indisponivel");
   if (!links.linkProdutoOriginal && !linkAfiliado) avisos.push("link_produto_indisponivel");
   if (links.produtosAmbiguos) avisos.push("links_produto_ambiguos");
+  for (const aviso of lista(contratoMarketplace.avisos)) avisos.push(aviso);
   if (comercialNormalizado.avisoPreco) avisos.push(comercialNormalizado.avisoPreco);
 
   const espelhoComercial = {
@@ -1664,14 +1789,34 @@ function construirEspelhoComercialV24(entrada = {}) {
     ofertaEntrada,
     comercialNormalizado,
     avisos: espelhoComercial.avisos,
-    motivosConfianca
+    motivosConfianca,
+    contratoMarketplace
   });
   const contextoLogBlocos = {
-    workspaceId: job.cliente_id || job.workspaceId || oferta.workspaceId || ofertaEntrada.workspaceId || "",
-    jobId: job.id || job.jobId || null,
-    ofertaId: oferta.id || oferta.ofertaId || ofertaEntrada.ofertaId || null,
-    marketplace
+    ...contextoContratoV27
   };
+  logContratoMarketplaceV27("[OFC-V2.7-CONTRATO-MARKETPLACE-APLICADO]", contratoMarketplace, {
+    ...contextoLogBlocos,
+    motivo: contratoMarketplace.modoFielSeguro ? "modo_fiel_seguro" : "contrato_aplicado"
+  });
+  if (contratoMarketplace.linksDescartados > 0) {
+    logContratoMarketplaceV27("[OFC-V2.7-LINK-PROIBIDO-DESCARTADO]", contratoMarketplace, {
+      ...contextoLogBlocos,
+      motivo: "links_proibidos_ou_inseguros_descartados"
+    });
+  }
+  if (lista(contratoMarketplace.dedupes).length) {
+    logContratoMarketplaceV27("[OFC-V2.7-LINK-DEDUPE]", contratoMarketplace, {
+      ...contextoLogBlocos,
+      motivo: "links_equivalentes_deduplicados"
+    });
+  }
+  if (contratoMarketplace.houveAmbiguidade === true || contratoMarketplace.modoFielSeguro === true) {
+    logContratoMarketplaceV27("[OFC-V2.7-FALLBACK-FIEL-SEGURO]", contratoMarketplace, {
+      ...contextoLogBlocos,
+      motivo: contratoMarketplace.houveAmbiguidade ? "ambiguidade_sem_escolha_silenciosa" : "contrato_fiel_seguro"
+    });
+  }
   if (documentoComercialCanonico.erroBlocosComerciais) {
     logBlocosComerciaisV26("[OFC-V2.6-BLOCOS-ERRO]", documentoComercialCanonico, contextoLogBlocos);
   } else if (lista(documentoComercialCanonico.avisos).length || !lista(documentoComercialCanonico.blocos).length) {
@@ -1737,6 +1882,7 @@ function resumoEspelhoComercialLog(resultado = {}, contexto = {}) {
 module.exports = {
   construirEspelhoComercialV24,
   construirEspelhoComercialV24FailOpen,
+  MATRIZ_CAPACIDADES,
   montarTemplateEspelhoPorBlocosV26,
   montarTemplateEspelhoShadow,
   resumoEspelhoComercialLog,

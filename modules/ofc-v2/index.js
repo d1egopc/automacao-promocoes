@@ -18,6 +18,7 @@ const {
 const {
   construirEspelhoComercialV24,
   construirEspelhoComercialV24FailOpen,
+  MATRIZ_CAPACIDADES,
   resumoEspelhoComercialLog,
   selecionarImagemComercial
 } = require("./espelho-comercial");
@@ -41,6 +42,7 @@ module.exports = {
   criarAuditoriaOfcV24Shadow,
   construirEspelhoComercialV24,
   construirEspelhoComercialV24FailOpen,
+  MATRIZ_CAPACIDADES,
   resumoEspelhoComercialLog,
   selecionarImagemComercial,
   WORKSPACE_D1EGOPC_OFICIAL,

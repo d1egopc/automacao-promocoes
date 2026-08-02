@@ -286,8 +286,28 @@ assert.deepStrictEqual(
   aliexpressAppPc.documentoComercialCanonico.linksComerciais.map(item => item.tipo),
   ["app", "pc"]
 );
-assert.ok(aliexpressAppPc.templateEspelhoShadow.mensagem.includes("📱 APP:\nhttps://a.aliexpress.com/_c37JTNLV"));
-assert.ok(aliexpressAppPc.templateEspelhoShadow.mensagem.includes("🖥️ PC:\nhttps://a.aliexpress.com/_c4b9dLcf"));
+assert.deepStrictEqual(
+  aliexpressAppPc.documentoComercialCanonico.linksComerciais.map(item => item.renderizavel),
+  [false, false],
+  "APP/PC capturados de fonte externa sem conversao nao sao CTAs seguros"
+);
+assert.ok(!aliexpressAppPc.templateEspelhoShadow.mensagem.includes("https://a.aliexpress.com/_c37JTNLV"));
+assert.ok(!aliexpressAppPc.templateEspelhoShadow.mensagem.includes("https://a.aliexpress.com/_c4b9dLcf"));
+
+const aliexpressAppPcOficialNeutro = criarEspelho({
+  textoOriginal: [
+    "Mini PC PUSKILL",
+    "Por R$ 227",
+    "APP oficial neutro: https://a.aliexpress.com/_appOficial",
+    "PC oficial neutro: https://a.aliexpress.com/_pcOficial"
+  ].join("\n"),
+  oferta: { marketplace: "aliexpress", preco: 227, linkAfiliado: "" },
+  comercialNormalizado: { marketplace: "aliexpress", precoAtual: 227, precoConfiavel: true }
+});
+assertBloco(aliexpressAppPcOficialNeutro, "link_app");
+assertBloco(aliexpressAppPcOficialNeutro, "link_pc");
+assert.ok(aliexpressAppPcOficialNeutro.templateEspelhoShadow.mensagem.includes("APP:\nhttps://a.aliexpress.com/_appOficial"));
+assert.ok(aliexpressAppPcOficialNeutro.templateEspelhoShadow.mensagem.includes("PC:\nhttps://a.aliexpress.com/_pcOficial"));
 
 const kabumSimples = criarEspelho({
   textoOriginal: "Fonte XPG Core Reactor\nValor: R$ 415,00\nCupom: JULHOFORTE15\nFrete varia por Estado\nhttps://awin1.com/cread.php",
@@ -523,11 +543,16 @@ const shopeeResgateDoisProdutos = criarEspelho({
   comercialNormalizado: { marketplace: "shopee", precoConfiavel: false }
 });
 assert.strictEqual(shopeeResgateDoisProdutos.documentoComercialCanonico.linkResgateOriginal, "https://s.shopee.com.br/cupom-real");
-assert.strictEqual(shopeeResgateDoisProdutos.documentoComercialCanonico.linkProdutoOriginal, null);
+assert.strictEqual(shopeeResgateDoisProdutos.documentoComercialCanonico.linkProdutoOriginal, "https://s.shopee.com.br/produto-a");
 assert.ok(shopeeResgateDoisProdutos.documentoComercialCanonico.avisos.includes("links_produto_ambiguos"));
 assert.deepStrictEqual(
   shopeeResgateDoisProdutos.documentoComercialCanonico.linksComerciais.map(item => item.tipo),
   ["resgate", "produto", "produto"]
+);
+assert.deepStrictEqual(
+  shopeeResgateDoisProdutos.documentoComercialCanonico.linksComerciais.map(item => item.renderizavel),
+  [true, false, false],
+  "produtos ambiguos ficam preservados para auditoria, mas nao renderizaveis"
 );
 
 function blocosV26(resultado) {
@@ -616,8 +641,7 @@ const mlPixVendedorFreteGrupo = criarEspelho({
 });
 assertBloco(mlPixVendedorFreteGrupo, "vendedor");
 assertBloco(mlPixVendedorFreteGrupo, "frete");
-assertBloco(mlPixVendedorFreteGrupo, "link_fonte_ignorado");
-assert.strictEqual(blocoTipo(mlPixVendedorFreteGrupo, "link_fonte_ignorado").visibilidadePadrao, "oculto");
+assert.strictEqual(blocoTipo(mlPixVendedorFreteGrupo, "link_fonte_ignorado"), null, "link de fonte/grupo nao entra no Documento Canonico V2.7");
 assert.strictEqual(mlPixVendedorFreteGrupo.documentoComercialCanonico.precoPorTexto, "R$ 199,90 no Pix");
 
 const mlAvaliacaoCupomInstrucao = criarEspelho({
@@ -635,16 +659,16 @@ assertBloco(mlAvaliacaoCupomInstrucao, "avaliacao_quantidade");
 assert.strictEqual(blocoTipo(mlAvaliacaoCupomInstrucao, "avaliacao_nota").valorEstruturado.nota, 4.8);
 assert.strictEqual(blocoTipo(mlAvaliacaoCupomInstrucao, "cupom_codigo").essencial, true);
 
-assertBloco(shopeeSomenteProduto, "link_produto_original");
+assertBloco(shopeeSomenteProduto, "link_afiliado");
 assert.ok(!tiposV26(shopeeSomenteProduto).includes("link_resgate"), "Shopee apenas produto nao cria resgate");
-assert.strictEqual(blocoTipo(shopeeSomenteProduto, "link_produto_original").textoOriginal, "https://s.shopee.com.br/produto-unico?lp=aff");
+assert.strictEqual(shopeeSomenteProduto.documentoComercialCanonico.linkProdutoOriginal, "https://s.shopee.com.br/produto-unico?lp=aff");
 
 assertBloco(shopeeResgate, "link_resgate");
-assertBloco(shopeeResgate, "link_produto_original");
+assertBloco(shopeeResgate, "link_afiliado");
 assert.strictEqual(blocoTipo(shopeeResgate, "link_resgate").essencial, true, "resgate com contexto comercial e essencial");
 
-assert.strictEqual(blocosTipo(shopeeResgateDoisProdutos, "links_produto_alternativos").length, 2);
-assert.ok(blocosTipo(shopeeResgateDoisProdutos, "links_produto_alternativos").every(bloco => bloco.avisos.includes("links_produto_ambiguos")));
+assert.strictEqual(blocosTipo(shopeeResgateDoisProdutos, "links_produto_alternativos").length, 0, "produtos ambiguos nao viram blocos renderizaveis");
+assert.strictEqual(shopeeResgateDoisProdutos.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "produto").length, 2);
 assert.ok(shopeeResgateDoisProdutos.documentoComercialCanonico.avisos.includes("links_produto_ambiguos"));
 
 const aliexpressMoedasAppPc = criarEspelho({
@@ -660,9 +684,10 @@ const aliexpressMoedasAppPc = criarEspelho({
   comercialNormalizado: { marketplace: "aliexpress", precoAtual: 180, precoConfiavel: true }
 });
 assertBloco(aliexpressMoedasAppPc, "moedas");
-assertBloco(aliexpressMoedasAppPc, "link_app");
-assertBloco(aliexpressMoedasAppPc, "link_pc");
-assertBloco(aliexpressMoedasAppPc, "link_moedas");
+assert.strictEqual(blocosTipo(aliexpressMoedasAppPc, "link_app").length, 0);
+assert.strictEqual(blocosTipo(aliexpressMoedasAppPc, "link_pc").length, 0);
+assert.strictEqual(blocosTipo(aliexpressMoedasAppPc, "link_moedas").length, 0);
+assert.ok(aliexpressMoedasAppPc.documentoComercialCanonico.linksComerciais.every(item => item.renderizavel === false));
 assert.ok(!tiposV26(aliexpressMoedasAppPc).includes("link_resgate"), "AliExpress APP/PC/moedas nao viram resgate");
 
 const aliexpressAppDuplicadoPc = criarEspelho({
@@ -676,8 +701,10 @@ const aliexpressAppDuplicadoPc = criarEspelho({
   oferta: { marketplace: "aliexpress", preco: 90 },
   comercialNormalizado: { marketplace: "aliexpress", precoAtual: 90, precoConfiavel: true }
 });
-assert.strictEqual(blocosTipo(aliexpressAppDuplicadoPc, "link_app").length, 1, "APP duplicado deduplicado");
-assert.strictEqual(blocosTipo(aliexpressAppDuplicadoPc, "link_pc").length, 1);
+assert.strictEqual(aliexpressAppDuplicadoPc.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "app").length, 1, "APP duplicado deduplicado");
+assert.strictEqual(aliexpressAppDuplicadoPc.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "pc").length, 1);
+assert.strictEqual(blocosTipo(aliexpressAppDuplicadoPc, "link_app").length, 0);
+assert.strictEqual(blocosTipo(aliexpressAppDuplicadoPc, "link_pc").length, 0);
 
 const amazonCupomSemCodigo = criarEspelho({
   textoOriginal: [
@@ -748,8 +775,7 @@ const kabumAwinYoutube = criarEspelho({
   comercialNormalizado: { marketplace: "kabum", precoAtual: 199, precoConfiavel: true }
 });
 assertBloco(kabumAwinYoutube, "link_afiliado");
-assertBloco(kabumAwinYoutube, "link_auxiliar");
-assert.notStrictEqual(blocoTipo(kabumAwinYoutube, "link_auxiliar").textoOriginal, blocoTipo(kabumAwinYoutube, "link_afiliado").textoOriginal);
+assert.strictEqual(blocoTipo(kabumAwinYoutube, "link_auxiliar"), null, "link auxiliar nao compete com o CTA AWIN/Kabum");
 
 assertBloco(semCupom, "preco_oferta");
 assertBloco(semCupom, "link_afiliado");
@@ -939,12 +965,56 @@ const aliexpressPolimentoAppPcMoedas = criarEspelho({
   oferta: { marketplace: "aliexpress", preco: 9.99, moeda: "USD" },
   comercialNormalizado: { marketplace: "aliexpress", precoAtual: 9.99, moeda: "USD", precoConfiavel: false }
 });
-assert.strictEqual(blocosTipo(aliexpressPolimentoAppPcMoedas, "link_app").length, 1);
-assert.strictEqual(blocosTipo(aliexpressPolimentoAppPcMoedas, "link_pc").length, 1);
-assert.strictEqual(blocosTipo(aliexpressPolimentoAppPcMoedas, "link_moedas").length, 1);
+assert.strictEqual(blocosTipo(aliexpressPolimentoAppPcMoedas, "link_app").length, 0);
+assert.strictEqual(blocosTipo(aliexpressPolimentoAppPcMoedas, "link_pc").length, 0);
+assert.strictEqual(blocosTipo(aliexpressPolimentoAppPcMoedas, "link_moedas").length, 0);
 assert.ok(!tiposV26(aliexpressPolimentoAppPcMoedas).includes("link_resgate"));
-assert.ok(aliexpressPolimentoAppPcMoedas.templateEspelhoShadow.mensagem.includes("APP:\nhttps://a.aliexpress.com/_appPolido"));
-assert.ok(aliexpressPolimentoAppPcMoedas.templateEspelhoShadow.mensagem.includes("PC:\nhttps://a.aliexpress.com/_pcPolido"));
+assert.ok(!aliexpressPolimentoAppPcMoedas.templateEspelhoShadow.mensagem.includes("https://a.aliexpress.com/_appPolido"));
+assert.ok(!aliexpressPolimentoAppPcMoedas.templateEspelhoShadow.mensagem.includes("https://a.aliexpress.com/_pcPolido"));
+
+const mlConcorrenteAfiliadoD1 = criarEspelho({
+  textoOriginal: [
+    "Oferta ML com fontes concorrentes",
+    "Por R$ 88,00",
+    "Resgate: https://mercadolivre.com.br/sec/cupons",
+    "Link: https://meli.la/produto-original",
+    "Fonte: https://chat.whatsapp.com/grupo"
+  ].join("\n"),
+  oferta: { marketplace: "mercadolivre", preco: 88, linkAfiliado: "https://meli.afiliado/d1-oficial" },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 88, precoConfiavel: true }
+});
+assert.strictEqual(blocosTipo(mlConcorrenteAfiliadoD1, "link_afiliado").length, 1);
+assert.strictEqual(blocosTipo(mlConcorrenteAfiliadoD1, "link_resgate").length, 0);
+assert.strictEqual(blocosTipo(mlConcorrenteAfiliadoD1, "link_produto_original").length, 0);
+assert.ok(mlConcorrenteAfiliadoD1.templateEspelhoShadow.mensagem.includes("https://meli.afiliado/d1-oficial"));
+assert.ok(!mlConcorrenteAfiliadoD1.templateEspelhoShadow.mensagem.includes("mercadolivre.com.br/sec"));
+assert.ok(!mlConcorrenteAfiliadoD1.templateEspelhoShadow.mensagem.includes("chat.whatsapp.com"));
+
+const kabumAwinTerceiroSemConversao = criarEspelho({
+  textoOriginal: [
+    "Teclado KaBuM sem conversao",
+    "Valor: R$ 199,00",
+    "Link: https://awin1.com/cread.php?clickref=terceiro"
+  ].join("\n"),
+  oferta: { marketplace: "kabum", preco: 199, linkAfiliado: "" },
+  comercialNormalizado: { marketplace: "kabum", precoAtual: 199, precoConfiavel: true }
+});
+assert.strictEqual(blocosTipo(kabumAwinTerceiroSemConversao, "link_afiliado").length, 0);
+assert.strictEqual(blocosTipo(kabumAwinTerceiroSemConversao, "link_produto_original").length, 0);
+assert.ok(!kabumAwinTerceiroSemConversao.templateEspelhoShadow.mensagem.includes("awin1.com/cread.php"));
+
+const contratoDesconhecidoSemCtaSeguro = criarEspelho({
+  textoOriginal: [
+    "Marketplace novo",
+    "Por R$ 50,00",
+    "Link: https://marketplace-terceiro.example/produto"
+  ].join("\n"),
+  oferta: { marketplace: "marketplace_novo", preco: 50, linkAfiliado: "" },
+  comercialNormalizado: { marketplace: "marketplace_novo", precoAtual: 50, precoConfiavel: true }
+});
+assert.strictEqual(contratoDesconhecidoSemCtaSeguro.documentoComercialCanonico.contratoMarketplace.modoFielSeguro, true);
+assert.strictEqual(blocosTipo(contratoDesconhecidoSemCtaSeguro, "link_afiliado").length, 0);
+assert.ok(!contratoDesconhecidoSemCtaSeguro.templateEspelhoShadow.mensagem.includes("marketplace-terceiro.example"));
 const resumoV26 = mlCompleto.documentoComercialCanonico.blocos.reduce((acc, bloco) => {
   acc[bloco.tipo] = (acc[bloco.tipo] || 0) + 1;
   return acc;
