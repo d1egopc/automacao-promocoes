@@ -1142,6 +1142,142 @@ const contratoDesconhecidoSemCtaSeguro = criarEspelho({
 assert.strictEqual(contratoDesconhecidoSemCtaSeguro.documentoComercialCanonico.contratoMarketplace.modoFielSeguro, true);
 assert.strictEqual(blocosTipo(contratoDesconhecidoSemCtaSeguro, "link_afiliado").length, 0);
 assert.ok(!contratoDesconhecidoSemCtaSeguro.templateEspelhoShadow.mensagem.includes("marketplace-terceiro.example"));
+
+const mlHaizPrecoEstruturado = criarEspelho({
+  textoOriginal: [
+    "Monitor Gamer Haiz 25'' Ips Fhd 144hz 0.5ms Hdmi Dp Vesa Preto 127/220v",
+    "Cupom: CORREAQUIHJ",
+    "Aplique o cupom CORREAQUIHJ para obter o desconto.",
+    "Link do produto: https://produto.mercadolivre.com.br/MLB-1825349418-monitor-gamer-brazil-pc-g-m24wkn-238-curvo-full-hd-_JM"
+  ].join("\n"),
+  oferta: {
+    marketplace: "mercadolivre",
+    preco: 497,
+    precoAtual: "497.00",
+    cupom: "CORREAQUIHJ",
+    linkAfiliado: "https://meli.la/3252Ddb",
+    categoria: "Perifericos"
+  },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 497, precoConfiavel: true }
+});
+assert.strictEqual(mlHaizPrecoEstruturado.documentoComercialCanonico.precoPorTexto, "R$ 497,00");
+assertBloco(mlHaizPrecoEstruturado, "preco_oferta");
+assert.ok(mlHaizPrecoEstruturado.templateEspelhoShadow.mensagem.includes("Por: R$ 497,00"));
+
+const mlOrganizadorPrecoEstruturado = criarEspelho({
+  textoOriginal: [
+    "Organizador De Fios E Cabos Baixo Mesa Oculto - 0,5 Mt C/nfe Preto",
+    "Cupom: PIPOCA",
+    "Link do produto: https://produto.mercadolivre.com.br/MLB-111111111-organizador-de-fios"
+  ].join("\n"),
+  oferta: {
+    marketplace: "mercadolivre",
+    preco: "51.00",
+    precoAtual: "51.00",
+    cupom: "PIPOCA",
+    beneficioTexto: "Aplique o cupom PIPOCA antes de finalizar.",
+    linkAfiliado: "https://meli.la/1C6faZN",
+    categoria: "Casa, Moveis e Decoracao"
+  },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 51, precoConfiavel: true }
+});
+assert.strictEqual(mlOrganizadorPrecoEstruturado.documentoComercialCanonico.precoPorTexto, "R$ 51,00");
+assertBloco(mlOrganizadorPrecoEstruturado, "preco_oferta");
+assert.strictEqual(blocosTipo(mlOrganizadorPrecoEstruturado, "beneficio").length, 0);
+assert.ok(mlOrganizadorPrecoEstruturado.templateEspelhoShadow.mensagem.includes("Por: R$ 51,00"));
+assert.strictEqual((mlOrganizadorPrecoEstruturado.templateEspelhoShadow.mensagem.match(/Aplique o cupom PIPOCA/g) || []).length, 1);
+assert.ok(!mlOrganizadorPrecoEstruturado.templateEspelhoShadow.mensagem.includes("🎁"));
+
+const mlCuecasCupomBeneficioDuplicado = criarEspelho({
+  textoOriginal: [
+    "Kit 10 Cuecas Polo Wear",
+    "Cupom: FASHIONML",
+    "Link do produto: https://produto.mercadolivre.com.br/MLB-222222222-kit-cuecas"
+  ].join("\n"),
+  oferta: {
+    marketplace: "mercadolivre",
+    preco: 73.79,
+    precoAtual: 73.79,
+    cupom: "FASHIONML",
+    beneficioTexto: "Aplique o cupom FASHIONML antes de finalizar.",
+    linkAfiliado: "https://meli.la/fashionml"
+  },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 73.79, precoConfiavel: true }
+});
+assert.strictEqual((mlCuecasCupomBeneficioDuplicado.templateEspelhoShadow.mensagem.match(/Aplique o cupom FASHIONML/g) || []).length, 1);
+assert.strictEqual(blocosTipo(mlCuecasCupomBeneficioDuplicado, "beneficio").length, 0);
+
+const mlCupomCashbackReal = criarEspelho({
+  textoOriginal: [
+    "Produto com Cashback",
+    "Cupom: CASH20",
+    "Link do produto: https://produto.mercadolivre.com.br/MLB-333333333-produto-cashback"
+  ].join("\n"),
+  oferta: {
+    marketplace: "mercadolivre",
+    preco: 120,
+    precoAtual: 120,
+    cupom: "CASH20",
+    cashback: "Cashback de R$ 20.",
+    linkAfiliado: "https://meli.la/cash20"
+  },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 120, precoConfiavel: true }
+});
+assertBloco(mlCupomCashbackReal, "instrucao_cupom");
+assertBloco(mlCupomCashbackReal, "cashback");
+assert.ok(mlCupomCashbackReal.templateEspelhoShadow.mensagem.includes("Cashback"));
+
+const mlCupomFreteReal = criarEspelho({
+  textoOriginal: [
+    "Produto com Frete",
+    "Cupom: FRETE10",
+    "Link do produto: https://produto.mercadolivre.com.br/MLB-444444444-produto-frete"
+  ].join("\n"),
+  oferta: {
+    marketplace: "mercadolivre",
+    preco: 89.9,
+    precoAtual: 89.9,
+    cupom: "FRETE10",
+    frete: "Frete gratis",
+    linkAfiliado: "https://meli.la/frete10"
+  },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 89.9, precoConfiavel: true }
+});
+assertBloco(mlCupomFreteReal, "instrucao_cupom");
+assertBloco(mlCupomFreteReal, "frete");
+assert.ok(mlCupomFreteReal.templateEspelhoShadow.mensagem.includes("Frete"));
+
+const mlCupomBeneficioDiferente = criarEspelho({
+  textoOriginal: [
+    "Produto com Brinde",
+    "Cupom: BRINDE10",
+    "Link do produto: https://produto.mercadolivre.com.br/MLB-555555555-produto-brinde"
+  ].join("\n"),
+  oferta: {
+    marketplace: "mercadolivre",
+    preco: 199,
+    precoAtual: 199,
+    cupom: "BRINDE10",
+    beneficioTexto: "Brinde exclusivo na compra.",
+    linkAfiliado: "https://meli.la/brinde10"
+  },
+  comercialNormalizado: { marketplace: "mercadolivre", precoAtual: 199, precoConfiavel: true }
+});
+assertBloco(mlCupomBeneficioDiferente, "instrucao_cupom");
+assertBloco(mlCupomBeneficioDiferente, "beneficio");
+assert.ok(mlCupomBeneficioDiferente.templateEspelhoShadow.mensagem.includes("Brinde exclusivo"));
+
+for (const resultado of [
+  mlHaizPrecoEstruturado,
+  mlOrganizadorPrecoEstruturado,
+  mlCuecasCupomBeneficioDuplicado,
+  mlCupomCashbackReal,
+  mlCupomFreteReal,
+  mlCupomBeneficioDiferente
+]) {
+  assert.ok(!/(?:null|undefined|NaN)/i.test(resultado.templateEspelhoShadow.mensagem));
+}
+
 const resumoV26 = mlCompleto.documentoComercialCanonico.blocos.reduce((acc, bloco) => {
   acc[bloco.tipo] = (acc[bloco.tipo] || 0) + 1;
   return acc;

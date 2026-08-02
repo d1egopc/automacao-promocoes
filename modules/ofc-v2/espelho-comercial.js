@@ -245,6 +245,11 @@ function extrairPrecoPixDocumento({ textoOriginal = "", linhaPor = "", linhaValo
   return "";
 }
 
+function textoPrecoEstruturado(valor) {
+  const numero = numeroMonetario(valor);
+  return numero !== null ? textoMoeda(numero) : "";
+}
+
 const CUPONS_BLOQUEADOS = new Set([
   "CUPOM", "CUPONS", "CODIGO", "COD", "DESCONTO", "PROMO", "PROMOCAO",
   "TODOS", "DESTA", "PAGINA", "RESGATE", "ANUNCIO", "HTTP", "HTTPS",
@@ -357,11 +362,28 @@ function beneficioEspeculativoOuTecnico(valor = "") {
   return false;
 }
 
+function chaveSemanticaAcaoCupom(valor = "") {
+  const fonte = limparTextoComercial(removerUrls(valor));
+  if (!fonte) return "";
+  const n = normalizarComparacao(fonte);
+  if (!/(?:aplique|use|utilize|resgate|ative).{0,60}(?:cupom|voucher)|(?:cupom|voucher).{0,60}(?:aplique|use|utilize|resgate|ative)/.test(n)) return "";
+  if (/\b(?:cashback|frete|brinde|garantia|prime|moeda|moedas|coins?)\b/.test(n)) return "";
+  if (!/\b(?:desconto|off|valor|preco|preco final|chegar|finalizar|carrinho)\b/.test(n)) return "";
+  const cupons = extrairCupomTexto(fonte).cupons.map(chaveCupom).filter(Boolean);
+  if (!cupons.length) return "";
+  return `cupom:${[...new Set(cupons)].sort().join("+")}:acao_aplicar:finalidade_desconto_preco`;
+}
+
 function beneficioDuplicaInstrucaoCupom(valor = "", instrucao = "") {
   if (!valor || !instrucao) return false;
+  const chaveValor = chaveSemanticaAcaoCupom(valor);
+  const chaveInstrucao = chaveSemanticaAcaoCupom(instrucao);
+  if (chaveValor && chaveInstrucao) return chaveValor === chaveInstrucao;
   const n = normalizarComparacao(valor);
   if (!/(?:aplique|use|utilize|resgate|ative).{0,40}(?:cupom|voucher)/.test(n)) return false;
-  return textoComercialEquivalente(valor, instrucao) || normalizarComparacao(instrucao).includes(n) || n.includes(normalizarComparacao(instrucao));
+  const instrucaoNormalizada = normalizarComparacao(instrucao);
+  if (textoComercialEquivalente(valor, instrucao) || instrucaoNormalizada.includes(n) || n.includes(instrucaoNormalizada)) return true;
+  return false;
 }
 
 function extrairInstrucaoComercial(textoOriginal = "", cupomCodigo = "", oferta = {}, ofertaEntrada = {}) {
@@ -914,7 +936,14 @@ function extrairDocumentoComercialCanonico({
   const linhaBeneficio = primeiraLinhaPorNormalizacao(textoOriginal, /\b(?:beneficio|app|prime|voucher|moeda|moedas|direto do brasil|pre venda|pré venda)\b/);
 
   const precoDeTexto = extrairTextoLinhaPreco(linhaDe, "de") || precosTexto.precoDeTexto || "";
-  const precoPorTexto = extrairTextoLinhaPreco(linhaPor, "por") || extrairTextoLinhaPreco(linhaValor, "valor") || precosTexto.precoPorTexto || "";
+  const precoPorEstruturado = textoPrecoEstruturado(primeiroValor(
+    ofertaEntrada.precoAtual,
+    ofertaEntrada.preco,
+    oferta.precoAtual,
+    oferta.preco,
+    comercialNormalizado.precoAtual
+  ));
+  const precoPorTexto = extrairTextoLinhaPreco(linhaPor, "por") || extrairTextoLinhaPreco(linhaValor, "valor") || precosTexto.precoPorTexto || precoPorEstruturado || "";
   const precoPixTexto = extrairPrecoPixDocumento({ textoOriginal, linhaPor, linhaValor, precoPorTexto, oferta, ofertaEntrada });
   const parcelamentoTexto = primeiroTexto(
     ofertaEntrada.parcelamento,
@@ -1365,7 +1394,7 @@ function resolverBlocoTemplateEspelho(tipo = "", doc = {}, espelho = {}, context
   const beneficio = valorDocumentoOuEspelho(doc, espelho, "beneficioTexto");
   const cashback = valorDocumentoOuEspelho(doc, espelho, "cashbackTexto");
   const frete = valorDocumentoOuEspelho(doc, espelho, "freteTexto");
-  const instrucao = valorDocumentoOuEspelho(doc, espelho, "instrucaoTexto", "instrucaoComercial");
+  const instrucao = primeiroTexto(valorDocumentoOuEspelho(doc, espelho, "instrucaoTexto", "instrucaoComercial"), contexto.instrucaoCupomTexto);
   const avaliacao = primeiroTexto(contexto.avaliacao, contexto.score);
   const categoria = primeiroTexto(contexto.categoria);
   const economia = primeiroTexto(contexto.economia);
@@ -1659,7 +1688,8 @@ function montarTemplateEspelhoShadow(espelho = {}, documento = null, opcoes = {}
   const contextoBlocos = {
     ...objeto(opcoes.contexto),
     temBlocoCashback: blocos.some(bloco => bloco.tipo === "cashback"),
-    temBlocoFrete: blocos.some(bloco => bloco.tipo === "frete")
+    temBlocoFrete: blocos.some(bloco => bloco.tipo === "frete"),
+    instrucaoCupomTexto: lista(doc.blocos).find(bloco => bloco?.tipo === "instrucao_cupom")?.textoOriginal || ""
   };
   for (const bloco of blocos) {
     const linha = resolverBlocoTemplateEspelho(bloco.tipo, doc, espelho, contextoBlocos);
