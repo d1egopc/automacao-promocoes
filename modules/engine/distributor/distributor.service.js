@@ -9,6 +9,7 @@ const {
 const filaOfertas = require("../../../utils/fila-ofertas");
 const destinosUtils = require("../../../utils/destinos");
 const { resolverImagemUniversal } = require("../../imagens/resolver-imagem-universal");
+const { selecionarImagemEspelhoPiloto } = require("../../ofc-v2/espelho-piloto");
 const fidelidadeObs = require("../../fidelidade/observabilidade-v1");
 const coberturaRadar = require("../../radar/cobertura-v1");
 const {
@@ -383,6 +384,12 @@ function montarItemFilaEngine(oferta = {}) {
   const beneficioExtra = normalizarTexto(oferta.beneficio_extra || oferta.beneficioExtra || "");
   const avisoCupom = normalizarTexto(oferta.aviso_cupom || oferta.avisoCupom || "");
   const imagemResolvida = resolverImagemFilaEngine(oferta);
+  const imagemPiloto = selecionarImagemEspelhoPiloto({
+    workspaceId: oferta.cliente_id,
+    oferta,
+    imagemAtual: imagemResolvida.imagem
+  });
+  const imagemFinal = imagemPiloto.usarImagemEspelho ? imagemPiloto.imagem : imagemResolvida.imagem;
   const camposComerciaisRadar = copiarCamposComerciaisRadarFila(oferta);
 
   return {
@@ -398,10 +405,15 @@ function montarItemFilaEngine(oferta = {}) {
     precoAtual: oferta.preco,
     precoOriginal: oferta.preco_original,
     ...camposComerciaisRadar,
-    imagem: imagemResolvida.imagem,
-    imagemUrl: imagemResolvida.imagem,
-    imagemOrigem: imagemResolvida.origem,
-    imagemFallbackUsado: imagemResolvida.fallbackUsado,
+    imagem: imagemFinal,
+    imagemUrl: imagemFinal,
+    imagemOrigem: imagemPiloto.usarImagemEspelho ? (imagemPiloto.origem || "ofc_v2_4_espelho_comercial") : imagemResolvida.origem,
+    imagemFallbackUsado: imagemPiloto.usarImagemEspelho ? false : imagemResolvida.fallbackUsado,
+    imagemEspelhoPiloto: {
+      ativo: imagemPiloto.motivo !== "workspace_fora_do_piloto",
+      aplicada: imagemPiloto.usarImagemEspelho === true,
+      motivo: imagemPiloto.motivo || ""
+    },
     imagemAusenteMotivo: imagemResolvida.ausenciaMotivo,
     imagemStatus: imagemResolvida.imagemStatus,
     imagemConfianca: imagemResolvida.imagemConfianca,

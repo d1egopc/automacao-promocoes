@@ -21,6 +21,13 @@ const {
   resumoEspelhoComercialLog,
   selecionarImagemComercial
 } = require("./espelho-comercial");
+const {
+  WORKSPACE_D1EGOPC_OFICIAL,
+  CONFIGURACAO_ESPELHO_PILOTO,
+  obterConfiguracaoEspelhoPiloto,
+  selecionarTemplateEspelhoPiloto,
+  selecionarImagemEspelhoPiloto
+} = require("./espelho-piloto");
 
 module.exports = {
   MOEDA_PADRAO,
@@ -35,5 +42,10 @@ module.exports = {
   construirEspelhoComercialV24,
   construirEspelhoComercialV24FailOpen,
   resumoEspelhoComercialLog,
-  selecionarImagemComercial
+  selecionarImagemComercial,
+  WORKSPACE_D1EGOPC_OFICIAL,
+  CONFIGURACAO_ESPELHO_PILOTO,
+  obterConfiguracaoEspelhoPiloto,
+  selecionarTemplateEspelhoPiloto,
+  selecionarImagemEspelhoPiloto
 };

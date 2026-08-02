@@ -15,6 +15,7 @@ const { gerarTemplateUniversal } = require("../modules/template-universal");
 const { resolverTemplateMensagem } = require("../modules/templates-clientes/resolver");
 const { prepararDadosOficiaisTemplate } = require("../modules/templates-clientes/dados-oficiais");
 const fidelidadeObs = require("../modules/fidelidade/observabilidade-v1");
+const { selecionarTemplateEspelhoPiloto } = require("../modules/ofc-v2/espelho-piloto");
 
 function normalizarTextoLocal(valor = "") {
   return String(valor || "").trim();
@@ -291,6 +292,15 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
     oferta: ofertaOficial,
     templateTipo: "resolver_mensagem_oferta"
   });
+
+  const espelhoPiloto = selecionarTemplateEspelhoPiloto({
+    workspaceId: clienteId,
+    oferta: ofertaOficial
+  });
+  if (espelhoPiloto.usarEspelho && espelhoPiloto.mensagem) {
+    return registrarTemplate("ofc_v24_espelho_piloto", espelhoPiloto.mensagem);
+  }
+
   const dadosOficiaisUniversal = montarEntradaTemplateUniversalOficial(ofertaOficial);
 
   try {
