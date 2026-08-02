@@ -89,7 +89,8 @@ function mensagemMlCompleta() {
     "De: R$ 299,99\nPor: R$ 73,79 no Pix",
     "Cupom: FASHIONML",
     "Confira aqui: https://afiliado.test/produto",
-    "Aplique o cupom FASHIONML + Pix para chegar neste valor."
+    "Aplique o cupom FASHIONML + Pix para chegar neste valor.",
+    "⚠️ Oferta sujeita à alteração de preço."
   ].join("\n\n");
 }
 
@@ -271,6 +272,56 @@ assert.strictEqual(obterConfiguracaoEspelhoPiloto(WORKSPACE_WOLF).ativo, false);
   assert(!/\b(?:undefined|null|NaN|Infinity)\b/.test(retorno.mensagem));
   assert(logs.some(linha => linha.includes("[OFC-V2.6-COMPOSITOR-BLOCOS-SELECIONADO]")));
   assert(!logs.join("\n").includes("FASHIONML"), "log v2.6 nao deve expor cupom/texto");
+  assert(!retorno.mensagem.includes("Oferta sujeita"), "template personalizado sem toggle de aviso nao renderiza aviso visual obrigatorio do padrao");
+}
+
+{
+  const documento = documentoComBlocos([
+    blocoCanonico("titulo", "Oferta automatica com aviso visual", { ordemSugerida: 10, essencial: true }),
+    blocoCanonico("preco_oferta", "R$ 99,90", { ordemSugerida: 50, essencial: true }),
+    blocoCanonico("link_afiliado", "https://afiliado.test/aviso-visual", { ordemSugerida: 140, essencial: true })
+  ]);
+  const ofertaBlocos = ofertaBase(WORKSPACE_D1, metadataEspelho({
+    mensagem: "mensagem plana antiga",
+    documentoComercialCanonico: documento
+  }));
+  const { retorno } = capturarLogs(() => selecionarTemplateEspelhoPiloto({
+    workspaceId: WORKSPACE_D1,
+    oferta: ofertaBlocos,
+    mensagemAtual: "mensagem atual"
+  }));
+  assert.strictEqual(retorno.usarEspelho, true);
+  assert(retorno.mensagem.endsWith("⚠️ Oferta sujeita à alteração de preço."), "Template Automatico Optimus sempre renderiza aviso visual no final");
+  assert.strictEqual((retorno.mensagem.match(/Oferta sujeita/g) || []).length, 1, "aviso visual nao duplica");
+  assert.strictEqual(documento.avisos.length, 0, "aviso visual nao pertence ao Documento Canonico");
+}
+
+{
+  const documento = documentoComBlocos([
+    blocoCanonico("titulo", "Oferta personalizada com aviso opcional", { ordemSugerida: 10, essencial: true }),
+    blocoCanonico("preco_oferta", "R$ 109,90", { ordemSugerida: 50, essencial: true }),
+    blocoCanonico("link_afiliado", "https://afiliado.test/aviso-personalizado", { ordemSugerida: 140, essencial: true })
+  ]);
+  const ofertaBlocos = ofertaBase(WORKSPACE_D1, metadataEspelho({
+    mensagem: "mensagem plana antiga",
+    documentoComercialCanonico: documento
+  }));
+  const destinoAvisoDesligado = { template: { blocos: [{ tipo: "aviso_alteracao", ativo: false, ordem: 200 }] } };
+  const destinoAvisoLigado = { template: { blocos: [{ tipo: "aviso_alteracao", ativo: true, ordem: 200 }] } };
+  const { retorno: desligado } = capturarLogs(() => selecionarTemplateEspelhoPiloto({
+    workspaceId: WORKSPACE_D1,
+    oferta: ofertaBlocos,
+    destino: destinoAvisoDesligado,
+    mensagemAtual: "mensagem atual"
+  }));
+  const { retorno: ligado } = capturarLogs(() => selecionarTemplateEspelhoPiloto({
+    workspaceId: WORKSPACE_D1,
+    oferta: ofertaBlocos,
+    destino: destinoAvisoLigado,
+    mensagemAtual: "mensagem atual"
+  }));
+  assert(!desligado.mensagem.includes("Oferta sujeita"), "Template Personalizado respeita toggle desligado do aviso");
+  assert(ligado.mensagem.endsWith("⚠️ Oferta sujeita à alteração de preço."), "Template Personalizado respeita toggle ligado do aviso");
 }
 
 {

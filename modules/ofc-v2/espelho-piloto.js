@@ -8,6 +8,7 @@ const {
 } = require("./espelho-comercial");
 
 const WORKSPACE_D1EGOPC_OFICIAL = "user_40qdblgt";
+const AVISO_VISUAL_TEMPLATE_OPTIMUS = "⚠️ Oferta sujeita à alteração de preço.";
 
 const CONFIGURACAO_ESPELHO_PILOTO = Object.freeze({
   [WORKSPACE_D1EGOPC_OFICIAL]: Object.freeze({
@@ -58,6 +59,20 @@ function mensagemValida(mensagem = "") {
   if (/\b(?:undefined|null|NaN|Infinity)\b/i.test(msg)) return false;
   if (/\n{3,}/.test(msg)) return false;
   return true;
+}
+
+function avisoVisualTemplateOptimusAtivo(template = {}) {
+  const blocos = Array.isArray(template.blocos) ? template.blocos : [];
+  if (!blocos.length) return true;
+  const blocoAviso = blocos.find(bloco => ["aviso_alteracao", "aviso"].includes(texto(bloco?.tipo)));
+  return blocoAviso ? blocoAviso.ativo !== false : false;
+}
+
+function mensagemComAvisoVisualTemplateOptimus(mensagem = "", template = {}) {
+  const msg = texto(mensagem);
+  if (!msg || !avisoVisualTemplateOptimusAtivo(template)) return msg;
+  if (msg.includes(AVISO_VISUAL_TEMPLATE_OPTIMUS) || /Oferta sujeita/i.test(msg)) return msg;
+  return [msg, AVISO_VISUAL_TEMPLATE_OPTIMUS].join("\n\n");
 }
 
 function obterTemplateEspelho(oferta = {}) {
@@ -191,7 +206,7 @@ function selecionarTemplateEspelhoPiloto({
       return {
         usarEspelho: true,
         ativo: true,
-        mensagem: templatePorBlocos.mensagem,
+        mensagem: mensagemComAvisoVisualTemplateOptimus(templatePorBlocos.mensagem, templateCliente),
         motivo: templatePorBlocos.motivo || "documento_canonico_blocos_v26_valido",
         aplicouMudancasOperacionais: false
       };
@@ -221,7 +236,10 @@ function selecionarTemplateEspelhoPiloto({
         }
       })
       : null;
-    const mensagem = texto(templateAdaptativo?.mensagem || templateAtual.mensagem);
+    const mensagem = mensagemComAvisoVisualTemplateOptimus(
+      texto(templateAdaptativo?.mensagem || templateAtual.mensagem),
+      templateCliente
+    );
     const valido = (templateAdaptativo?.ok === true || templateAtual.ok === true) &&
       mensagemValida(mensagem) &&
       Boolean(espelho && Object.keys(espelho).length);
@@ -329,4 +347,3 @@ module.exports = {
   selecionarTemplateEspelhoPiloto,
   selecionarImagemEspelhoPiloto
 };
-
