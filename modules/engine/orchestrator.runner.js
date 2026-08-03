@@ -2,6 +2,10 @@ let engineOrquestradorRodando = false;
 let engineOrquestradorIntervalo = null;
 
 const { executarObservabilidadeOfc } = require("./ofc");
+const {
+  autoCleanShadowAtivo,
+  executarAutoCleanShadowSeguro
+} = require("./auto-clean/auto-clean.service");
 
 const LIMITES_PADRAO = {
   processar: 30,
@@ -258,6 +262,12 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       rodadaId,
       janelaConsumoMinutos: 15
     });
+
+    if (autoCleanShadowAtivo()) {
+      resumo.etapas.autoCleanShadow = await executarEtapaRastreada("auto_clean_shadow", executarAutoCleanShadowSeguro, {
+        loteLimite: 100
+      }, { rodadaId });
+    }
 
     let inicioFornecedorMs = Date.now();
     const clientesValidosProcessar = chamarFornecedor(getClientesValidos, []);
