@@ -24,6 +24,9 @@ const {
 const {
   decidirAbsorcaoWorkspace
 } = require("../ofc/active-gate.service");
+const {
+  avaliarFluxoWorkspaceShadow
+} = require("../flow-manager/flow-manager.service");
 
 function motivoAdicionar(resumo, motivo = "erro_distribuicao") {
   const chave = motivo || "erro_distribuicao";
@@ -150,6 +153,26 @@ function logDistributorVivo(resumo = {}) {
   } catch (_) {}
 }
 
+async function registrarFlowManagerShadow(oferta = {}, validacao = {}, contexto = {}) {
+  try {
+    const avaliarFlow = contexto?.deps?.avaliarFluxoWorkspaceShadow || avaliarFluxoWorkspaceShadow;
+    await avaliarFlow({
+      workspaceId: oferta.cliente_id || "",
+      ofertaId: oferta.id,
+      marketplace: oferta.marketplace || "",
+      tipoOperacional: tipoOperacionalOferta(oferta),
+      cupomTurbo: cupomTurboOferta(oferta),
+      prioridade: oferta.prioridade ?? oferta.score ?? 0,
+      oferta,
+      destinosCompativeis: validacao.__destinosCompativeisRaw || []
+    }, {
+      ...(contexto?.deps?.flowManager || {}),
+      validarCreditos: contexto.validarCreditos,
+      diagnosticarDisponibilidadeEnvioWorkspace: contexto?.deps?.diagnosticarDisponibilidadeEnvioWorkspace
+    });
+  } catch (_) {}
+}
+
 async function restaurarStatusComercialAposGate(oferta = {}, motivo = "") {
   const statusAnterior = String(oferta.status || "").trim();
   if (!["importada", "oferta_criada"].includes(statusAnterior)) {
@@ -268,6 +291,8 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     });
     return reterOferta(oferta, validacao.motivo, validacao.detalhes || {}, resumo);
   }
+
+  await registrarFlowManagerShadow(oferta, validacao, contexto);
 
   const decidirGate = contexto?.deps?.decidirAbsorcaoWorkspace || decidirAbsorcaoWorkspace;
   const gate = await decidirGate({
