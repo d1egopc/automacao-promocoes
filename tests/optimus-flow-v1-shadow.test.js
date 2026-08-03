@@ -4,11 +4,13 @@ const assert = require("assert");
 const {
   TTL_NORMAL_MS,
   TTL_TURBO_MS,
-  avaliarFluxoWorkspaceShadow
+  avaliarFluxoWorkspaceShadow,
+  flowManagerAtivoWorkspace
 } = require("../modules/engine/flow-manager/flow-manager.service");
 
 const D1 = "user_40qdblgt";
 const ROGER = "user_9hqs434h";
+const WOLF = "user_n0o5p99m";
 
 function destino(extra = {}) {
   return {
@@ -393,6 +395,402 @@ async function testarFlowShadowNaoAlteraDistributorAtual() {
   assert.strictEqual(resultado.adicionadasFila, 1);
 }
 
+async function testarFlowAtivoRemoveDividaSemAdicionarFila() {
+  limparModulo("../modules/engine/distributor/distributor.runner");
+  let adicionouFila = false;
+  const statusMarcados = [];
+  const etapas = [];
+
+  mockModulo("../modules/engine/distributor/distributor.service", {
+    limitarDistribuicao: valor => Number(valor || 1),
+    buscarOfertasDistribuiveis: async () => ({
+      ok: true,
+      ofertas: [{
+        id: 10,
+        job_id: 20,
+        cliente_id: D1,
+        marketplace: "mercadolivre",
+        categoria: "Gamer e Hardware",
+        status: "importada",
+        metadata: {}
+      }]
+    }),
+    tentarMarcarDistribuindo: async () => ({ ok: true }),
+    marcarOfertaStatus: async (id, status, motivo) => {
+      statusMarcados.push({ id, status, motivo });
+      return { ok: true };
+    },
+    restaurarOfertaStatusSeDistribuindo: async () => ({ ok: true }),
+    registrarEtapaDistribuicao: async (jobId, etapa, status, motivo, detalhes) => {
+      etapas.push({ jobId, etapa, status, motivo, detalhes });
+      return { ok: true };
+    },
+    validarOfertaParaDistribuicao: async () => {
+      const retorno = {
+        ok: true,
+        destinosCompativeis: 1,
+        destinosCompativeisDetalhes: [{ destino: "OP GERAL", tipoMidia: "imagem" }]
+      };
+      Object.defineProperty(retorno, "__destinosCompativeisRaw", {
+        value: [destinoRapido()],
+        enumerable: false
+      });
+      return retorno;
+    },
+    adicionarOfertaNaFilaCliente: async () => {
+      adicionouFila = true;
+      return { ok: true, itemFila: { id: "fila_10", status: "pendente" } };
+    }
+  });
+  mockModulo("../modules/engine/ofc/commercial-events.service", {
+    registrarDistribuicaoFinal: async () => ({ ok: true }),
+    registrarFilaClienteAdicionada: async () => ({ ok: true })
+  });
+  mockModulo("../modules/engine/ofc/active-gate.service", {
+    decidirAbsorcaoWorkspace: async () => ({ ativo: false, permitir: true, quantidadeAceitaAgora: 1 })
+  });
+
+  const runner = require("../modules/engine/distributor/distributor.runner");
+  const resultado = await runner.distribuirOfertasEngine({
+    limite: 1,
+    deps: {
+      flowManager: { ativo: true },
+      avaliarFluxoWorkspaceShadow: async () => ({
+        workspaceId: D1,
+        ofertaId: 10,
+        marketplace: "mercadolivre",
+        aceitarAgora: false,
+        motivo: "esteira_saturada",
+        nivelAlvo: 3,
+        bufferAtual: 3,
+        vagasDisponiveis: 0,
+        tipoFluxo: "oferta_comum",
+        ttlMs: TTL_NORMAL_MS,
+        aplicouMudancas: false
+      })
+    }
+  });
+
+  assert.strictEqual(adicionouFila, false);
+  assert.strictEqual(resultado.adicionadasFila, 0);
+  assert.strictEqual(resultado.distributorVivo.candidatosPulados, 1);
+  assert(statusMarcados.some(item => item.status === "flow_nao_aceita" && item.motivo === "flow_esteira_saturada"));
+  assert(etapas.some(item => item.etapa === "flow_manager" && item.status === "nao_aceita"));
+  assert(etapas.some(item => item.etapa === "distribuicao_final" && item.detalhes?.resultadoDistribuicao === "flow_nao_aceita"));
+}
+
+async function testarFlowAtivoFailOpenContinuaPipeline() {
+  limparModulo("../modules/engine/distributor/distributor.runner");
+  let adicionouFila = false;
+  const logs = [];
+  const logOriginal = console.log;
+
+  mockModulo("../modules/engine/distributor/distributor.service", {
+    limitarDistribuicao: valor => Number(valor || 1),
+    buscarOfertasDistribuiveis: async () => ({
+      ok: true,
+      ofertas: [{
+        id: 30,
+        job_id: 40,
+        cliente_id: D1,
+        marketplace: "mercadolivre",
+        categoria: "Gamer e Hardware",
+        status: "importada",
+        metadata: {}
+      }]
+    }),
+    tentarMarcarDistribuindo: async () => ({ ok: true }),
+    marcarOfertaStatus: async () => ({ ok: true }),
+    restaurarOfertaStatusSeDistribuindo: async () => ({ ok: true }),
+    registrarEtapaDistribuicao: async () => ({ ok: true }),
+    validarOfertaParaDistribuicao: async () => ({
+      ok: true,
+      destinosCompativeis: 1,
+      destinosCompativeisDetalhes: [{ destino: "OP GERAL", tipoMidia: "imagem" }]
+    }),
+    adicionarOfertaNaFilaCliente: async () => {
+      adicionouFila = true;
+      return { ok: true, itemFila: { id: "fila_30", status: "pendente" } };
+    }
+  });
+  mockModulo("../modules/engine/ofc/commercial-events.service", {
+    registrarDistribuicaoFinal: async () => ({ ok: true }),
+    registrarFilaClienteAdicionada: async () => ({ ok: true })
+  });
+  mockModulo("../modules/engine/ofc/active-gate.service", {
+    decidirAbsorcaoWorkspace: async () => ({ ativo: false, permitir: true, quantidadeAceitaAgora: 1 })
+  });
+
+  const runner = require("../modules/engine/distributor/distributor.runner");
+  console.log = (...args) => {
+    logs.push(args.map(arg => String(arg)).join(" "));
+    logOriginal(...args);
+  };
+  let resultado;
+  try {
+    resultado = await runner.distribuirOfertasEngine({
+      limite: 1,
+      deps: {
+        flowManager: { ativo: true },
+        avaliarFluxoWorkspaceShadow: async () => {
+          throw new Error("falha_flow_controlada");
+        }
+      }
+    });
+  } finally {
+    console.log = logOriginal;
+  }
+
+  assert.strictEqual(adicionouFila, true);
+  assert.strictEqual(resultado.adicionadasFila, 1);
+  assert(logs.some(linha => linha.includes("[OPTIMUS-FLOW-V1-ERRO]")), "falha do Flow deve ser logada de forma sanitizada");
+  assert(!logs.join("\n").includes("falha_flow_controlada"), "mensagem interna do erro nao deve vazar no log");
+}
+
+async function testarFlagsFlowAtivoSeguras() {
+  const envAtivoAnterior = process.env.OPTIMUS_FLOW_V1_ATIVO;
+  const envWorkspacesAnterior = process.env.OPTIMUS_FLOW_V1_ATIVO_WORKSPACES;
+  try {
+    delete process.env.OPTIMUS_FLOW_V1_ATIVO;
+    delete process.env.OPTIMUS_FLOW_V1_ATIVO_WORKSPACES;
+    assert.strictEqual(flowManagerAtivoWorkspace(D1), false);
+    assert.strictEqual(flowManagerAtivoWorkspace(""), false);
+    assert.strictEqual(flowManagerAtivoWorkspace(D1, { workspacesAtivos: ` ${D1}, ; ${WOLF} ` }), true);
+    assert.strictEqual(flowManagerAtivoWorkspace(WOLF, { workspacesAtivos: ` ${D1}, ; ${WOLF} ` }), true);
+    assert.strictEqual(flowManagerAtivoWorkspace(ROGER, { workspacesAtivos: ` ${D1}, ; ${WOLF} ` }), false);
+    assert.strictEqual(flowManagerAtivoWorkspace(D1, { ativo: false, workspacesAtivos: D1 }), false);
+    process.env.OPTIMUS_FLOW_V1_ATIVO_WORKSPACES = ` ${D1},${WOLF} `;
+    assert.strictEqual(flowManagerAtivoWorkspace(D1), true);
+    assert.strictEqual(flowManagerAtivoWorkspace(WOLF), true);
+    assert.strictEqual(flowManagerAtivoWorkspace(ROGER), false);
+    process.env.OPTIMUS_FLOW_V1_ATIVO = "1";
+    assert.strictEqual(flowManagerAtivoWorkspace(ROGER), true);
+  } finally {
+    if (envAtivoAnterior === undefined) delete process.env.OPTIMUS_FLOW_V1_ATIVO;
+    else process.env.OPTIMUS_FLOW_V1_ATIVO = envAtivoAnterior;
+    if (envWorkspacesAnterior === undefined) delete process.env.OPTIMUS_FLOW_V1_ATIVO_WORKSPACES;
+    else process.env.OPTIMUS_FLOW_V1_ATIVO_WORKSPACES = envWorkspacesAnterior;
+  }
+}
+
+function prepararRunnerComEstado(ofertasIniciais = [], opcoes = {}) {
+  limparModulo("../modules/engine/distributor/distributor.runner");
+  const ofertas = ofertasIniciais.map(item => ({ ...item }));
+  const adicionados = [];
+  const statusMarcados = [];
+  const etapas = [];
+  const consultas = [];
+
+  mockModulo("../modules/engine/distributor/distributor.service", {
+    limitarDistribuicao: valor => Number(valor || 1),
+    buscarOfertasDistribuiveis: async ({ limite = 10, excluirOfertaIds = [] } = {}) => {
+      consultas.push({ limite, excluirOfertaIds: [...(excluirOfertaIds || [])] });
+      const excluidos = new Set((excluirOfertaIds || []).map(String));
+      return {
+        ok: true,
+        ofertas: ofertas
+          .filter(item => ["importada", "oferta_criada"].includes(item.status))
+          .filter(item => !excluidos.has(String(item.id)))
+          .slice(0, limite)
+      };
+    },
+    tentarMarcarDistribuindo: async id => {
+      const oferta = ofertas.find(item => item.id === id);
+      if (!oferta || !["importada", "oferta_criada"].includes(oferta.status)) {
+        return { ok: true, ignorado: true };
+      }
+      oferta.status = "distribuindo";
+      return { ok: true };
+    },
+    marcarOfertaStatus: async (id, status, motivo) => {
+      const oferta = ofertas.find(item => item.id === id);
+      if (oferta) oferta.status = status;
+      statusMarcados.push({ id, status, motivo });
+      return { ok: true };
+    },
+    restaurarOfertaStatusSeDistribuindo: async (id, statusAnterior, motivo) => {
+      const oferta = ofertas.find(item => item.id === id);
+      if (oferta && oferta.status === "distribuindo") oferta.status = statusAnterior;
+      statusMarcados.push({ id, status: statusAnterior, motivo });
+      return { ok: true };
+    },
+    registrarEtapaDistribuicao: async (jobId, etapa, status, motivo, detalhes) => {
+      etapas.push({ jobId, etapa, status, motivo, detalhes });
+      return { ok: true };
+    },
+    validarOfertaParaDistribuicao: async () => {
+      const retorno = {
+        ok: true,
+        destinosCompativeis: 1,
+        destinosCompativeisDetalhes: [{ destino: "OP GERAL", tipoMidia: "imagem" }]
+      };
+      Object.defineProperty(retorno, "__destinosCompativeisRaw", {
+        value: [destinoRapido()],
+        enumerable: false
+      });
+      return retorno;
+    },
+    adicionarOfertaNaFilaCliente: async oferta => {
+      adicionados.push(oferta.cliente_id);
+      return { ok: true, itemFila: { id: `fila_${oferta.id}`, status: "pendente" } };
+    }
+  });
+  mockModulo("../modules/engine/ofc/commercial-events.service", {
+    registrarDistribuicaoFinal: async () => ({ ok: true }),
+    registrarFilaClienteAdicionada: async () => ({ ok: true })
+  });
+  mockModulo("../modules/engine/ofc/active-gate.service", {
+    decidirAbsorcaoWorkspace: async () => ({ ativo: false, permitir: true, quantidadeAceitaAgora: 1 })
+  });
+
+  const runner = require("../modules/engine/distributor/distributor.runner");
+  return { runner, ofertas, adicionados, statusMarcados, etapas, consultas, opcoes };
+}
+
+function ofertaDistribuivel(id, workspaceId, extra = {}) {
+  return {
+    id,
+    job_id: 1000 + id,
+    cliente_id: workspaceId,
+    marketplace: "mercadolivre",
+    categoria: "Gamer e Hardware",
+    status: "importada",
+    metadata: {},
+    ...extra
+  };
+}
+
+async function testarPilotoD1NaoAfetaWolfRogerERecusaNaoGeraFila() {
+  const ctx = prepararRunnerComEstado([
+    ofertaDistribuivel(101, D1),
+    ofertaDistribuivel(102, WOLF),
+    ofertaDistribuivel(103, ROGER)
+  ]);
+
+  const resultado = await ctx.runner.distribuirOfertasEngine({
+    limite: 3,
+    deps: {
+      flowManager: { workspacesAtivos: D1 },
+      avaliarFluxoWorkspaceShadow: async entradaFlow => ({
+        workspaceId: entradaFlow.workspaceId,
+        ofertaId: entradaFlow.ofertaId,
+        marketplace: entradaFlow.marketplace,
+        aceitarAgora: entradaFlow.workspaceId !== D1,
+        motivo: entradaFlow.workspaceId === D1 ? "esteira_saturada" : "capacidade_disponivel",
+        nivelAlvo: 3,
+        bufferAtual: entradaFlow.workspaceId === D1 ? 3 : 0,
+        vagasDisponiveis: entradaFlow.workspaceId === D1 ? 0 : 3,
+        tipoFluxo: "oferta_comum",
+        ttlMs: TTL_NORMAL_MS,
+        aplicouMudancas: false
+      })
+    }
+  });
+
+  assert.strictEqual(resultado.adicionadasFila, 2);
+  assert.deepStrictEqual(ctx.adicionados.sort(), [WOLF, ROGER].sort());
+  assert(ctx.statusMarcados.some(item => item.id === 101 && item.status === "flow_nao_aceita"));
+  assert(ctx.statusMarcados.some(item => item.id === 102 && item.status === "fila"));
+  assert(ctx.statusMarcados.some(item => item.id === 103 && item.status === "fila"));
+  assert(!ctx.adicionados.includes(D1), "recusa do D1 nao deve gerar fila");
+}
+
+async function testarFlowNaoAceitaNaoReapareceEmRodadaFutura() {
+  const ctx = prepararRunnerComEstado([
+    ofertaDistribuivel(201, D1)
+  ]);
+  const deps = {
+    flowManager: { ativo: true },
+    avaliarFluxoWorkspaceShadow: async entradaFlow => ({
+      workspaceId: entradaFlow.workspaceId,
+      ofertaId: entradaFlow.ofertaId,
+      marketplace: entradaFlow.marketplace,
+      aceitarAgora: false,
+      motivo: "esteira_saturada",
+      nivelAlvo: 3,
+      bufferAtual: 3,
+      vagasDisponiveis: 0,
+      tipoFluxo: "oferta_comum",
+      ttlMs: TTL_NORMAL_MS,
+      aplicouMudancas: false
+    })
+  };
+
+  const primeira = await ctx.runner.distribuirOfertasEngine({ limite: 1, deps });
+  const segunda = await ctx.runner.distribuirOfertasEngine({ limite: 1, deps });
+
+  assert.strictEqual(primeira.processadas, 1);
+  assert.strictEqual(segunda.processadas, 0);
+  assert.strictEqual(ctx.ofertas[0].status, "flow_nao_aceita");
+  assert.strictEqual(ctx.statusMarcados.filter(item => item.status === "flow_nao_aceita").length, 1);
+}
+
+async function testarMelhoriaComercialPosteriorPodeCriarNovoEvento() {
+  const ctx = prepararRunnerComEstado([
+    ofertaDistribuivel(301, D1),
+    ofertaDistribuivel(302, D1, { titulo: "Oferta melhorada", preco: 90, cupom: "NOVO" })
+  ]);
+  let chamadas = 0;
+
+  const resultado = await ctx.runner.distribuirOfertasEngine({
+    limite: 2,
+    deps: {
+      flowManager: { ativo: true },
+      avaliarFluxoWorkspaceShadow: async entradaFlow => {
+        chamadas += 1;
+        return {
+          workspaceId: entradaFlow.workspaceId,
+          ofertaId: entradaFlow.ofertaId,
+          marketplace: entradaFlow.marketplace,
+          aceitarAgora: entradaFlow.ofertaId === 302,
+          motivo: entradaFlow.ofertaId === 302 ? "capacidade_disponivel" : "esteira_saturada",
+          nivelAlvo: 3,
+          bufferAtual: entradaFlow.ofertaId === 302 ? 2 : 3,
+          vagasDisponiveis: entradaFlow.ofertaId === 302 ? 1 : 0,
+          tipoFluxo: "oferta_comum",
+          ttlMs: TTL_NORMAL_MS,
+          aplicouMudancas: false
+        };
+      }
+    }
+  });
+
+  assert.strictEqual(chamadas, 2);
+  assert.strictEqual(resultado.adicionadasFila, 1);
+  assert(ctx.statusMarcados.some(item => item.id === 301 && item.status === "flow_nao_aceita"));
+  assert(ctx.statusMarcados.some(item => item.id === 302 && item.status === "fila"));
+}
+
+async function testarAceiteGeraFilaUmaUnicaVez() {
+  const ctx = prepararRunnerComEstado([
+    ofertaDistribuivel(401, D1)
+  ]);
+  const deps = {
+    flowManager: { ativo: true },
+    avaliarFluxoWorkspaceShadow: async entradaFlow => ({
+      workspaceId: entradaFlow.workspaceId,
+      ofertaId: entradaFlow.ofertaId,
+      marketplace: entradaFlow.marketplace,
+      aceitarAgora: true,
+      motivo: "capacidade_disponivel",
+      nivelAlvo: 3,
+      bufferAtual: 0,
+      vagasDisponiveis: 3,
+      tipoFluxo: "oferta_comum",
+      ttlMs: TTL_NORMAL_MS,
+      aplicouMudancas: false
+    })
+  };
+
+  const primeira = await ctx.runner.distribuirOfertasEngine({ limite: 1, deps });
+  const segunda = await ctx.runner.distribuirOfertasEngine({ limite: 1, deps });
+
+  assert.strictEqual(primeira.adicionadasFila, 1);
+  assert.strictEqual(segunda.adicionadasFila, 0);
+  assert.strictEqual(ctx.adicionados.length, 1);
+  assert.strictEqual(ctx.ofertas[0].status, "fila");
+}
+
 (async () => {
   await testarWorkspaceFechadaRecusa();
   await testarWorkspaceSemSessaoRecusa();
@@ -410,6 +808,13 @@ async function testarFlowShadowNaoAlteraDistributorAtual() {
   await testarCupomSemSinalTurboPermaneceOfertaComum();
   await testarRogerBloqueadoNaoInterfereNoD1();
   await testarFlowShadowNaoAlteraDistributorAtual();
+  await testarFlowAtivoRemoveDividaSemAdicionarFila();
+  await testarFlowAtivoFailOpenContinuaPipeline();
+  await testarFlagsFlowAtivoSeguras();
+  await testarPilotoD1NaoAfetaWolfRogerERecusaNaoGeraFila();
+  await testarFlowNaoAceitaNaoReapareceEmRodadaFutura();
+  await testarMelhoriaComercialPosteriorPodeCriarNovoEvento();
+  await testarAceiteGeraFilaUmaUnicaVez();
   console.log("optimus-flow-v1-shadow.test.js OK");
 })().catch(erro => {
   console.error(erro);

@@ -25,7 +25,8 @@ const {
   decidirAbsorcaoWorkspace
 } = require("../ofc/active-gate.service");
 const {
-  avaliarFluxoWorkspaceShadow
+  avaliarFluxoWorkspaceShadow,
+  flowManagerAtivoWorkspace
 } = require("../flow-manager/flow-manager.service");
 
 function motivoAdicionar(resumo, motivo = "erro_distribuicao") {
@@ -156,7 +157,7 @@ function logDistributorVivo(resumo = {}) {
 async function registrarFlowManagerShadow(oferta = {}, validacao = {}, contexto = {}) {
   try {
     const avaliarFlow = contexto?.deps?.avaliarFluxoWorkspaceShadow || avaliarFluxoWorkspaceShadow;
-    await avaliarFlow({
+    return await avaliarFlow({
       workspaceId: oferta.cliente_id || "",
       ofertaId: oferta.id,
       marketplace: oferta.marketplace || "",
@@ -170,7 +171,102 @@ async function registrarFlowManagerShadow(oferta = {}, validacao = {}, contexto 
       validarCreditos: contexto.validarCreditos,
       diagnosticarDisponibilidadeEnvioWorkspace: contexto?.deps?.diagnosticarDisponibilidadeEnvioWorkspace
     });
+  } catch (erro) {
+    logFlowAtivo("[OPTIMUS-FLOW-V1-ERRO]", {
+      workspaceId: oferta.cliente_id || "",
+      ofertaId: oferta.id,
+      marketplace: oferta.marketplace || "",
+      aceitarAgora: true,
+      motivo: "flow_shadow_indisponivel",
+      aplicouMudancas: false,
+      erroTipo: erro?.name || "erro"
+    });
+    return {
+      aceitarAgora: true,
+      motivo: "flow_shadow_indisponivel",
+      aplicouMudancas: false,
+      fallbackAplicado: true
+    };
+  }
+}
+
+function flowManagerAtivoParaOferta(oferta = {}, contexto = {}) {
+  try {
+    const resolverAtivo = contexto?.deps?.flowManagerAtivoWorkspace || flowManagerAtivoWorkspace;
+    return resolverAtivo(oferta.cliente_id || "", contexto?.deps?.flowManager || {});
+  } catch (_) {
+    return false;
+  }
+}
+
+function logFlowAtivo(tag = "", payload = {}) {
+  try {
+    console.log(tag, JSON.stringify({
+      workspaceId: payload.workspaceId || "",
+      ofertaId: payload.ofertaId || null,
+      marketplace: payload.marketplace || "",
+      aceitarAgora: payload.aceitarAgora === true,
+      motivo: payload.motivo || "",
+      nivelAlvo: payload.nivelAlvo ?? null,
+      bufferAtual: payload.bufferAtual ?? null,
+      vagasDisponiveis: payload.vagasDisponiveis ?? null,
+      tipoFluxo: payload.tipoFluxo || "",
+      ttlMs: payload.ttlMs ?? null,
+      erroTipo: payload.erroTipo || "",
+      aplicouMudancas: payload.aplicouMudancas === true
+    }));
   } catch (_) {}
+}
+
+async function finalizarFlowNaoAceita(oferta = {}, decisao = {}, resumo = null, origem = "flow_manager") {
+  const motivo = decisao.motivo || "flow_sem_capacidade";
+  const motivoStatus = `flow_${motivo}`;
+
+  await registrarEtapaDistribuicao(oferta.job_id, "flow_manager", "nao_aceita", motivo, {
+    ofertaId: oferta.id,
+    clienteId: oferta.cliente_id,
+    marketplace: oferta.marketplace,
+    aceitarAgora: false,
+    nivelAlvo: decisao.nivelAlvo,
+    bufferAtual: decisao.bufferAtual,
+    vagasDisponiveis: decisao.vagasDisponiveis,
+    tipoFluxo: decisao.tipoFluxo,
+    ttlMs: decisao.ttlMs,
+    origem
+  });
+  await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "nao_aceita", "flow_nao_aceita", {
+    ofertaId: oferta.id,
+    clienteId: oferta.cliente_id,
+    resultadoDistribuicao: "flow_nao_aceita",
+    motivo,
+    filaRecebeu: false,
+    escopo: "workspace"
+  });
+  await marcarOfertaStatus(oferta.id, "flow_nao_aceita", motivoStatus, {
+    jobId: oferta.job_id,
+    clienteId: oferta.cliente_id,
+    origem
+  });
+
+  logFlowAtivo("[OPTIMUS-FLOW-V1-ATIVO-NAO-ACEITA]", {
+    workspaceId: oferta.cliente_id || "",
+    ofertaId: oferta.id,
+    marketplace: oferta.marketplace || "",
+    ...decisao,
+    aceitarAgora: false,
+    aplicouMudancas: true
+  });
+
+  if (resumo) {
+    motivoAdicionar(resumo, motivoStatus);
+  }
+
+  return {
+    ok: false,
+    flowBloqueado: true,
+    motivo,
+    status: "flow_nao_aceita"
+  };
 }
 
 async function restaurarStatusComercialAposGate(oferta = {}, motivo = "") {
@@ -292,7 +388,12 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     return reterOferta(oferta, validacao.motivo, validacao.detalhes || {}, resumo);
   }
 
-  await registrarFlowManagerShadow(oferta, validacao, contexto);
+  const flow = await registrarFlowManagerShadow(oferta, validacao, contexto);
+  const flowAtivo = flowManagerAtivoParaOferta(oferta, contexto);
+
+  if (flowAtivo && flow?.aceitarAgora === false) {
+    return finalizarFlowNaoAceita(oferta, flow, resumo);
+  }
 
   const decidirGate = contexto?.deps?.decidirAbsorcaoWorkspace || decidirAbsorcaoWorkspace;
   const gate = await decidirGate({
@@ -321,6 +422,18 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     });
 
     if (!gate.permitir) {
+      if (flowAtivo) {
+        return finalizarFlowNaoAceita(oferta, {
+          ...(flow || {}),
+          aceitarAgora: false,
+          motivo: gate.motivo || "gate_absorcao_bloqueado",
+          nivelAlvo: gate.filaAlvo ?? flow?.nivelAlvo,
+          bufferAtual: gate.pressaoEsteiraViva ?? flow?.bufferAtual,
+          vagasDisponiveis: gate.capacidadeAtual ?? flow?.vagasDisponiveis,
+          tipoFluxo: flow?.tipoFluxo || tipoOperacionalOferta(oferta),
+          ttlMs: flow?.ttlMs
+        }, resumo, "gate");
+      }
       await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "bloqueada", "gate_bloqueado_piloto", {
         ofertaId: oferta.id,
         clienteId: oferta.cliente_id,
