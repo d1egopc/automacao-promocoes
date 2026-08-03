@@ -94,6 +94,62 @@ function registrarGateResumo(resumo = null, decisao = {}) {
   }
 }
 
+function incrementarContador(mapa = {}, chave = "") {
+  const id = String(chave || "desconhecido").trim() || "desconhecido";
+  mapa[id] = (mapa[id] || 0) + 1;
+}
+
+function criarResumoDistributorVivo(capacidadeAlvo = 0) {
+  return {
+    candidatosConsultados: 0,
+    candidatosGateBloqueados: 0,
+    workspacesBloqueados: {},
+    candidatosPulados: 0,
+    distribuicoesUteis: 0,
+    capacidadeAlvo,
+    motivoEncerramento: "",
+    workspacesAtendidos: {}
+  };
+}
+
+function registrarResultadoDistributorVivo(resumo = null, oferta = {}, resultado = {}) {
+  if (!resumo?.distributorVivo) return;
+  const vivo = resumo.distributorVivo;
+  vivo.candidatosConsultados += 1;
+
+  if (resultado?.gateBloqueado) {
+    vivo.candidatosGateBloqueados += 1;
+    incrementarContador(vivo.workspacesBloqueados, oferta.cliente_id);
+    return;
+  }
+
+  if (resultado?.ok) {
+    vivo.distribuicoesUteis += 1;
+    incrementarContador(vivo.workspacesAtendidos, oferta.cliente_id);
+    return;
+  }
+
+  vivo.candidatosPulados += 1;
+}
+
+function logDistributorVivo(resumo = {}) {
+  const vivo = resumo.distributorVivo;
+  if (!vivo) return;
+
+  try {
+    console.log("[OFC-V2.8-DISTRIBUTOR-VIVO]", JSON.stringify({
+      candidatosConsultados: vivo.candidatosConsultados,
+      candidatosGateBloqueados: vivo.candidatosGateBloqueados,
+      workspacesBloqueados: vivo.workspacesBloqueados,
+      candidatosPulados: vivo.candidatosPulados,
+      distribuicoesUteis: vivo.distribuicoesUteis,
+      capacidadeAlvo: vivo.capacidadeAlvo,
+      motivoEncerramento: vivo.motivoEncerramento || "indefinido",
+      workspacesAtendidos: vivo.workspacesAtendidos
+    }));
+  } catch (_) {}
+}
+
 async function restaurarStatusComercialAposGate(oferta = {}, motivo = "") {
   const statusAnterior = String(oferta.status || "").trim();
   if (!["importada", "oferta_criada"].includes(statusAnterior)) {
@@ -363,7 +419,8 @@ async function distribuirOfertasEngine({ limite = 10, marketplace = "", clienteI
     adicionadasFila: 0,
     retidas: 0,
     erros: 0,
-    motivos: {}
+    motivos: {},
+    distributorVivo: criarResumoDistributorVivo(limiteFinal)
   };
 
   const contextoFinal = {
@@ -373,39 +430,77 @@ async function distribuirOfertasEngine({ limite = 10, marketplace = "", clienteI
 
   logEngineDistribuidorInicio({ limite: limiteFinal, marketplace: marketplace || "", clienteId: clienteId || "" });
 
-  const busca = await buscarOfertasDistribuiveis({ limite: limiteFinal, marketplace, clienteId });
-  if (!busca.ok) {
-    logEngineDistribuidorErro({ etapa: "buscar_ofertas", motivo: busca.motivo || "buscar_ofertas_falhou", erro: busca.erro || "" });
-    return {
-      ...resumo,
-      ok: false,
-      motivo: busca.motivo || "buscar_ofertas_falhou",
-      erro: busca.erro || ""
-    };
-  }
+  const idsProcessados = new Set();
+  const maxCandidatos = Math.max(
+    limiteFinal,
+    Math.min(Number(contexto.maxCandidatosDistributor || deps.maxCandidatosDistributor || limiteFinal * 10), 200)
+  );
 
-  for (const oferta of busca.ofertas) {
-    resumo.processadas += 1;
+  while (resumo.adicionadasFila < limiteFinal && idsProcessados.size < maxCandidatos) {
+    const limiteBusca = Math.max(1, Math.min(limiteFinal, maxCandidatos - idsProcessados.size));
+    const busca = await buscarOfertasDistribuiveis({
+      limite: limiteBusca,
+      marketplace,
+      clienteId,
+      excluirOfertaIds: [...idsProcessados]
+    });
 
-    try {
-      const resultado = await distribuirOfertaEngine(oferta, contextoFinal, resumo);
-      if (resultado.ignorado) resumo.processadas -= 1;
-    } catch (e) {
-      resumo.erros += 1;
-      motivoAdicionar(resumo, "erro_distribuicao");
-      logEngineDistribuidorErro({ ofertaId: oferta.id, jobId: oferta.job_id, etapa: "distribuir_oferta", motivo: "erro_distribuicao", erro: e.message });
-      coberturaRadar.registrar("engine_distributor_erro", {
-        ...contextoCoberturaDistributor(oferta),
-        decisao: "erro",
-        motivo: "erro_distribuicao",
-        erro: e.message,
-        filaRecebeu: false
-      });
-      await erroOferta(oferta, "erro_distribuicao", { erro: e.message });
+    if (!busca.ok) {
+      logEngineDistribuidorErro({ etapa: "buscar_ofertas", motivo: busca.motivo || "buscar_ofertas_falhou", erro: busca.erro || "" });
+      return {
+        ...resumo,
+        ok: false,
+        motivo: busca.motivo || "buscar_ofertas_falhou",
+        erro: busca.erro || ""
+      };
+    }
+
+    const ofertasNovas = (busca.ofertas || []).filter(oferta => {
+      const id = String(oferta.id || "");
+      return id && !idsProcessados.has(id);
+    });
+
+    if (!ofertasNovas.length) {
+      resumo.distributorVivo.motivoEncerramento = "candidatos_esgotados";
+      break;
+    }
+
+    for (const oferta of ofertasNovas) {
+      const ofertaId = String(oferta.id || "");
+      if (ofertaId) idsProcessados.add(ofertaId);
+      resumo.processadas += 1;
+
+      try {
+        const resultado = await distribuirOfertaEngine(oferta, contextoFinal, resumo);
+        if (resultado.ignorado) resumo.processadas -= 1;
+        registrarResultadoDistributorVivo(resumo, oferta, resultado);
+      } catch (e) {
+        resumo.erros += 1;
+        motivoAdicionar(resumo, "erro_distribuicao");
+        logEngineDistribuidorErro({ ofertaId: oferta.id, jobId: oferta.job_id, etapa: "distribuir_oferta", motivo: "erro_distribuicao", erro: e.message });
+        coberturaRadar.registrar("engine_distributor_erro", {
+          ...contextoCoberturaDistributor(oferta),
+          decisao: "erro",
+          motivo: "erro_distribuicao",
+          erro: e.message,
+          filaRecebeu: false
+        });
+        await erroOferta(oferta, "erro_distribuicao", { erro: e.message });
+        registrarResultadoDistributorVivo(resumo, oferta, { ok: false, motivo: "erro_distribuicao" });
+      }
+
+      if (resumo.adicionadasFila >= limiteFinal || idsProcessados.size >= maxCandidatos) break;
     }
   }
 
+  if (!resumo.distributorVivo.motivoEncerramento) {
+    resumo.distributorVivo.motivoEncerramento = resumo.adicionadasFila >= limiteFinal
+      ? "capacidade_util_atendida"
+      : "limite_seguro_de_candidatos";
+  }
+
   logEngineDistribuidorFim(resumo);
+  logDistributorVivo(resumo);
   if (resumo.gateAtivo) {
     console.log("[OFC-GATE-ATIVO-RESUMO]", JSON.stringify({
       modo: "ativo_piloto",

@@ -88,6 +88,86 @@ function normalizarMarketplace(valor = "") {
   return normalizarTexto(valor).toLowerCase();
 }
 
+function marketplaceEquivalentesDistribuidor(marketplace = "") {
+  const mp = normalizarMarketplace(marketplace);
+  const equivalentes = new Set([mp]);
+
+  if (["awin", "kabum", "kabum-awin", "kabum/awin", "kabum awin"].includes(mp)) {
+    ["awin", "kabum", "kabum-awin", "feed_awin", "feedAwin", "feedawin", "feedkabum", "feed_kabum"].forEach(chave => {
+      equivalentes.add(normalizarMarketplace(chave));
+    });
+  }
+
+  return [...equivalentes].filter(Boolean);
+}
+
+function destinoComMarketplacesEquivalentes(destino = {}, marketplace = "") {
+  const lista = Array.isArray(destino?.marketplaces) ? destino.marketplaces : [];
+  if (!lista.length) return destino;
+
+  const equivalentes = marketplaceEquivalentesDistribuidor(marketplace);
+  const normalizados = lista.map(normalizarMarketplace).filter(Boolean);
+  const temAlias = equivalentes.some(chave => normalizados.includes(chave));
+  if (!temAlias) return destino;
+
+  return {
+    ...destino,
+    marketplaces: [...new Set([...lista, ...equivalentes])]
+  };
+}
+
+function categoriaEhRotuloMarketplace(categoria = "", marketplace = "") {
+  const cat = normalizarChave(categoria).replace(/\s+/g, "");
+  const mp = normalizarMarketplace(marketplace).replace(/[^a-z0-9]/g, "");
+  if (!cat) return false;
+  if (cat === mp) return true;
+  return ["aliexpress", "ali", "awin", "kabum", "kabumawin", "feedawin", "feedkabum"].includes(cat);
+}
+
+function categoriaInferidaPorTitulo(titulo = "") {
+  const texto = normalizarChave(titulo);
+  if (!texto) return "";
+
+  if (/\b(?:teclado|mouse|headset|fone|monitor|placa|processador|ryzen|intel|rtx|rx\s?\d|gtx|ssd|memoria|ddr|gpu|cpu|notebook|gamer|wi\s?fi|wifi|b550|x99|ajazz|hyperx|netac|veineda|msi)\b/.test(texto)) {
+    return "Gamer e Hardware";
+  }
+
+  if (/\b(?:camera|seguranca|webcam|roteador|smartwatch|fone bluetooth|carregador|baseus)\b/.test(texto)) {
+    return "Eletronicos";
+  }
+
+  if (/\b(?:organizador|mesa|cadeira|cozinha|banheiro|casa|decoracao|prateleira)\b/.test(texto)) {
+    return "Casa, Moveis e Decoracao";
+  }
+
+  if (/\b(?:camiseta|cueca|tenis|chinelo|calca|vestido|bolsa|moda)\b/.test(texto)) {
+    return "Roupas e Moda Masculina";
+  }
+
+  return "";
+}
+
+function categoriasCandidatasOferta(oferta = {}) {
+  const marketplace = normalizarMarketplace(oferta.marketplace);
+  const categoriaOriginal = normalizarTexto(oferta.categoria || oferta.categoriaProduto || "");
+  const categoriaNormalizada = normalizarChave(categoriaOriginal);
+  const marketplaceEspecial = ["aliexpress", "awin", "kabum", "kabum-awin"].includes(marketplace);
+  const categoriaLiteral = categoriaEhRotuloMarketplace(categoriaOriginal, marketplace);
+  const deveReclassificar = categoriaLiteral || (marketplaceEspecial && categoriaNormalizada === "diversos");
+  const candidatos = [];
+  const adicionar = categoria => {
+    const valor = normalizarTexto(categoria);
+    if (valor && !candidatos.some(item => normalizarChave(item) === normalizarChave(valor))) candidatos.push(valor);
+  };
+
+  if (deveReclassificar) adicionar(categoriaInferidaPorTitulo(oferta.titulo || oferta.nome || ""));
+  if (categoriaOriginal && !categoriaLiteral) adicionar(categoriaOriginal);
+  if (marketplaceEspecial && categoriaLiteral) adicionar("Diversos");
+  if (!candidatos.length && categoriaOriginal) adicionar(categoriaOriginal);
+
+  return candidatos;
+}
+
 function limitarDistribuicao(valor = 10) {
   return limitarJobs(valor || 10);
 }
@@ -172,18 +252,33 @@ function analisarDestinosOferta(clienteId = "admin", oferta = {}, contexto = {})
   const destinos = obterDestinosCliente(clienteId, contexto);
   const compativeis = [];
   const rejeitados = [];
+  const categorias = categoriasCandidatasOferta(oferta);
 
   for (const destino of destinos) {
-    const analise = destinosUtils.analisarDestinoOferta(destino, {
-      marketplace: oferta.marketplace,
-      categoria: oferta.categoria,
-      categoriaProduto: oferta.categoria,
-      titulo: oferta.titulo,
-      termo: oferta.titulo
-    });
+    const destinoNormalizado = destinoComMarketplacesEquivalentes(destino, oferta.marketplace);
+    let analiseAceita = null;
+    let analiseRetida = null;
 
-    if (analise.aceita) compativeis.push({ destino, analise });
-    else rejeitados.push({ destino, analise });
+    for (const categoria of categorias.length ? categorias : [oferta.categoria || oferta.categoriaProduto || ""]) {
+      const analise = destinosUtils.analisarDestinoOferta(destinoNormalizado, {
+        marketplace: oferta.marketplace,
+        categoria,
+        categoriaProduto: categoria,
+        titulo: oferta.titulo,
+        termo: oferta.titulo
+      });
+      const analiseComCategoria = { ...analise, categoriaUsada: categoria };
+
+      if (analise.aceita) {
+        analiseAceita = analiseComCategoria;
+        break;
+      }
+
+      analiseRetida = analiseRetida || analiseComCategoria;
+    }
+
+    if (analiseAceita) compativeis.push({ destino, analise: analiseAceita });
+    else rejeitados.push({ destino, analise: analiseRetida || { aceita: false, motivo: "categoria", categoriaUsada: oferta.categoria || "" } });
   }
 
   return { destinos, compativeis, rejeitados };
@@ -445,9 +540,12 @@ function montarItemFilaEngine(oferta = {}) {
   };
 }
 
-async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clienteId = "" } = {}) {
+async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clienteId = "", excluirOfertaIds = [] } = {}) {
   const params = [];
   const filtros = ["o.status IN ('importada', 'oferta_criada')"];
+  const idsExcluidos = Array.isArray(excluirOfertaIds)
+    ? [...new Set(excluirOfertaIds.map(id => Number(id)).filter(id => Number.isSafeInteger(id) && id > 0))]
+    : [];
 
   if (marketplace) {
     params.push(normalizarMarketplace(marketplace));
@@ -457,6 +555,11 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
   if (clienteId) {
     params.push(String(clienteId).trim());
     filtros.push(`j.cliente_id = $${params.length}`);
+  }
+
+  if (idsExcluidos.length) {
+    params.push(idsExcluidos);
+    filtros.push(`NOT (o.id = ANY($${params.length}::bigint[]))`);
   }
 
   params.push(limitarDistribuicao(limite));
@@ -843,5 +946,7 @@ module.exports = {
   adicionarOfertaNaFilaCliente,
   montarItemFilaEngine,
   resolverImagemFilaEngine,
-  ofertaJaExisteNaFila
+  ofertaJaExisteNaFila,
+  categoriasCandidatasOferta,
+  marketplaceEquivalentesDistribuidor
 };
