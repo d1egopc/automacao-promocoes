@@ -60,7 +60,15 @@ function contextoDoLink(evento = {}, candidato = {}) {
     const antes = fonte.slice(Math.max(0, idx - 120), idx).toLowerCase();
     const depois = fonte.slice(idx + url.length, Math.min(fonte.length, idx + url.length + 40)).toLowerCase();
     const partesAntes = antes.split(/(?:\r?\n|https?:\/\/\S+)/i);
-    const antesProximo = partesAntes[partesAntes.length - 1] || antes;
+    let antesProximo = partesAntes[partesAntes.length - 1] || antes;
+    if (!/[a-z0-9]/i.test(antesProximo)) {
+      for (let i = partesAntes.length - 2; i >= 0; i -= 1) {
+        if (/[a-z0-9]/i.test(partesAntes[i] || "")) {
+          antesProximo = `${partesAntes[i]} ${antesProximo}`.trim();
+          break;
+        }
+      }
+    }
     return { antes, antesProximo, depois, trecho: `${antesProximo} ${depois}` };
   }
 
@@ -84,6 +92,16 @@ function decodificarUrlAte3x(valor = "") {
     }
   }
   return atual;
+}
+
+function urlKabumProdutoPermitido(url = "") {
+  try {
+    const parsed = new URL(texto(url));
+    const host = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+    return host === "kabum.com.br" && /^\/produto\/\d+(?:\/|$)/i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
 }
 
 function extrairUrlKabumDeAwin(url = "") {
@@ -110,14 +128,14 @@ function classificarPorContexto(marketplace = "", contexto = {}) {
   }
 
   if (mp === "aliexpress") {
-    if (/\b(?:link\s+com\s+)?(?:moeda|moedas|coins?)\s*:?\s*$/.test(antes) || /\blink\s+com\s+moedas?\b/.test(antes)) {
-      return { papelLink: PAPEL_LINK.LINK_MOEDAS, motivo: "contexto_link_moedas_aliexpress" };
-    }
     if (/\b(?:link\s+)?app\s*:?\s*$/.test(antes) || /\b(?:no|pelo)\s+app\s*:?\s*$/.test(antes)) {
       return { papelLink: PAPEL_LINK.LINK_APP, motivo: "contexto_link_app_aliexpress" };
     }
-    if (/\b(?:link\s+)?(?:pc|site|desktop)\s*:?\s*$/.test(antes) || /\b(?:no|pelo)\s+pc\s*:?\s*$/.test(antes)) {
+    if (/\b(?:link\s+(?:para\s+)?)?(?:pc|site|desktop)\s*:?\s*$/.test(antes) || /\b(?:no|pelo)\s+pc\s*:?\s*$/.test(antes)) {
       return { papelLink: PAPEL_LINK.LINK_PC, motivo: "contexto_link_pc_aliexpress" };
+    }
+    if (/\b(?:link\s+com\s+)?(?:moeda|moedas|coins?)\s*:?\s*$/.test(antes) || /\blink\s+com\s+moedas?\b/.test(antes)) {
+      return { papelLink: PAPEL_LINK.LINK_MOEDAS, motivo: "contexto_link_moedas_aliexpress" };
     }
   }
 
@@ -127,7 +145,7 @@ function classificarPorContexto(marketplace = "", contexto = {}) {
   if (/\b(categoria|category|busca|search)\b/.test(antes)) return { papelLink: PAPEL_LINK.CATEGORIA, motivo: "contexto_categoria" };
   if (/\b(campanha|promocao|promocional|pagina|page)\b/.test(antes)) return { papelLink: PAPEL_LINK.CAMPANHA, motivo: "contexto_campanha" };
 
-  if (mp === "aliexpress" && /\blink\s*:?\s*$/.test(antes)) {
+  if (mp === "aliexpress" && /\b(?:link|confira\s+aqui)\s*:?\s*$/.test(antes)) {
     return { papelLink: PAPEL_LINK.PRODUTO, motivo: "contexto_link_produto_aliexpress" };
   }
 
@@ -267,6 +285,13 @@ function classificarLinkEngine({ marketplace = "", evento = {}, link = {}, url =
   const candidato = { url, campo, link };
   const mp = minusculo(marketplace || link.marketplace_detectado || "");
   const metadata = metadataLink(link);
+  if (mp === "awin" || mp === "kabum") {
+    const urlCandidato = urlEstrutural(candidato);
+    const urlKabum = extrairUrlKabumDeAwin(urlCandidato) || extrairUrlKabumDeAwin(metadata.urlProduto || "") || urlCandidato;
+    if (/kabum\.com\.br\/produto\/\d+/i.test(urlKabum)) {
+      return { papelLink: PAPEL_LINK.PRODUTO, motivo: "kabum_id_produto_url", confianca: "alta", urlProduto: urlKabum };
+    }
+  }
   if (metadata.papelLink) {
     return {
       papelLink: metadata.papelLink,

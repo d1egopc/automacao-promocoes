@@ -286,6 +286,47 @@ async function testarShopeeTentaProximoCandidatoQuandoPrimeiroNaoConfirmaProduto
   assert.strictEqual(resultado.metadata.totalCandidatosProduto, 2);
 }
 
+async function testarShopeePreservaPrecoRadarQuandoApiIncompativel() {
+  limparModulo("../modules/engine/importer/adapters/shopee.adapter");
+  const { importarShopeeEngine } = require("../modules/engine/importer/adapters/shopee.adapter");
+  const resgate = "https://s.shopee.com.br/8AUdMMNQf9";
+  const produto = "https://s.shopee.com.br/6AjsAU1PXA";
+
+  const resultado = await importarShopeeEngine({
+    job: { id: 119, evento_id: 219, cliente_id: "workspace_teste" },
+    evento: {
+      texto_original: [
+        "Wi-Fi Placa Mae Msi B550m Pro-vdh Wifi Ddr4 Socket Am4 Cor Preto",
+        "R$ 611",
+        `Resgate o cupom R$ 50 OFF: ${resgate}`,
+        "Link do produto:",
+        produto
+      ].join("\n"),
+      links_extraidos: [resgate, produto]
+    },
+    links: [linkRow(1, resgate), linkRow(2, produto)],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
+      importarShopee: async () => ({
+        titulo: "Wi-Fi Placa Mae Msi B550m Pro-vdh Wifi Ddr4 Socket Am4 Cor Preto",
+        precoAtual: "7,19",
+        imagem: "https://img.test/placa.jpg",
+        linkAfiliado: "https://shopee.test/placa-afiliada",
+        linkExpandido: "https://shopee.com.br/product/123/789",
+        shopId: "123",
+        itemId: "789",
+        categoria: "Gamer e Hardware"
+      })
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.preco, 611);
+  assert.strictEqual(resultado.metadata.precoRadarUsado, true);
+  assert.strictEqual(resultado.metadata.papelLinkEscolhido, "produto");
+  assert.strictEqual(resultado.metadata.linksAuxiliaresShopee.length, 1);
+}
+
 async function testarClassificacaoAliExpressPreservaProduto() {
   const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
   const moedas = "https://a.aliexpress.com/_c2zipJlH";
@@ -451,6 +492,97 @@ async function testarAliExpressNaoUsaCupomComoPrecoRadar() {
   assert.strictEqual(resultado.motivo, "preco_indisponivel");
 }
 
+async function testarAliExpressReconheceRotuloNaLinhaAnterior() {
+  limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
+  const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
+  const moedas = "https://a.aliexpress.com/_c2z4gv3d";
+  const pc = "https://a.aliexpress.com/_c4SNvGyb";
+  let urlImportada = "";
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 120, evento_id: 220, cliente_id: "workspace_teste" },
+    evento: {
+      texto_original: [
+        "Netac 512gb ssd sata3 2.5 BLACK",
+        "512GB por R$ 354,74 (67 moedas)",
+        "Link com moedas:",
+        moedas,
+        "Link para PC:",
+        pc
+      ].join("\n"),
+      links_extraidos: [moedas, pc]
+    },
+    links: [
+      { ...linkRow(1, moedas), marketplace_detectado: "aliexpress" },
+      { ...linkRow(2, pc), marketplace_detectado: "aliexpress" }
+    ],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "track" } }),
+      importarAliExpress: async (url) => {
+        urlImportada = url;
+        return {
+          titulo: "Netac 512gb ssd sata3 2.5 BLACK",
+          precoAtual: "",
+          imagem: "https://img.test/netac.jpg",
+          linkAfiliado: "https://ali.test/netac-afiliado",
+          linkExpandido: "https://www.aliexpress.com/item/1005005555555555.html",
+          categoria: "AliExpress"
+        };
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(urlImportada, pc);
+  assert.strictEqual(resultado.precoAtual, 354.74);
+  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "link_moedas");
+  assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "link_pc");
+  assert.strictEqual(resultado.metadata.precoRadarUsado, true);
+}
+
+function testarAwinMetadataCupomNaoBloqueiaUedKabum() {
+  const { escolherProdutoPrincipal } = require("../modules/engine/link-role.service");
+  const awin = "https://www.awin1.com/cread.php?awinmid=17729&awinaffid=terceiro&clickref=fonte&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F536014";
+  const escolhido = escolherProdutoPrincipal([
+    {
+      url: awin,
+      campo: "url_original",
+      link: {
+        url_original: awin,
+        metadata: {
+          papelLink: "cupom",
+          papelLinkMotivo: "contexto_cupom",
+          urlProduto: awin
+        }
+      }
+    }
+  ], "awin", {
+    texto_original: [
+      "Headset Gamer Sem Fio HyperX Cloud III",
+      "Cupom: HYPERX12",
+      "Link do produto:",
+      awin
+    ].join("\n")
+  });
+
+  assert.strictEqual(escolhido.papelLink, "produto");
+  assert.strictEqual(escolhido.papelLinkMotivo, "kabum_id_produto_url");
+  assert.ok(escolhido.urlProduto.includes("kabum.com.br/produto/536014"));
+}
+
+function testarCategoriaMarketplaceGenericaClassificaPorTitulo() {
+  const { normalizarOfertaImportada } = require("../modules/engine/importer/importer.service");
+  const oferta = normalizarOfertaImportada({
+    marketplace: "aliexpress",
+    titulo: "RX 5500 8GB Veineda Pcie 4.0",
+    preco: 748,
+    categoria: "AliExpress"
+  }, { marketplace: "aliexpress" });
+
+  assert.notStrictEqual(oferta.categoria, "AliExpress");
+  assert.ok(oferta.categoria);
+}
+
 async function testarValidacaoKabumComIntegracaoAwinGenerica() {
   mockModulo("../modules/engine/processor.service", {
     marcarJobStatus: async () => ({ ok: true }),
@@ -498,10 +630,14 @@ function testarOrquestradorIncluiMarketplacesOficiais() {
   await testarShopeeShortlinkGenericoChegaAoImportador();
   await testarShopeeCupomSozinhoNaoChamaImportador();
   await testarShopeeTentaProximoCandidatoQuandoPrimeiroNaoConfirmaProduto();
+  await testarShopeePreservaPrecoRadarQuandoApiIncompativel();
   await testarClassificacaoAliExpressPreservaProduto();
   await testarAliExpressAppPcPreservaAmbosComoComerciais();
   await testarAliExpressUsaPrecoRadarQuandoApiNaoRetornaPreco();
   await testarAliExpressNaoUsaCupomComoPrecoRadar();
+  await testarAliExpressReconheceRotuloNaLinhaAnterior();
+  testarAwinMetadataCupomNaoBloqueiaUedKabum();
+  testarCategoriaMarketplaceGenericaClassificaPorTitulo();
   await testarValidacaoKabumComIntegracaoAwinGenerica();
   testarOrquestradorIncluiMarketplacesOficiais();
   console.log("engine-v2-marketplaces-fidelidade.test.js OK");

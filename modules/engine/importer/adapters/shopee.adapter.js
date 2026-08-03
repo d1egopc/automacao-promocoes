@@ -83,6 +83,39 @@ function detectarSuspeitaFator100(precoTextoRadar = "", precoAdapter = null) {
   return Math.abs((precoFinal / precoRadar) - 100) < 0.01;
 }
 
+function extrairPrecoTextoRadarShopee(textoRadar = "") {
+  const linhas = String(textoRadar || "").split(/\r?\n/);
+  for (const linha of linhas) {
+    const textoLinha = texto(linha);
+    if (!textoLinha || !/R\$\s*\d/i.test(textoLinha)) continue;
+    if (/\b(cupom|resgate|voucher|cashback|frete|moedas?|off|desconto|limite|economia)\b/i.test(textoLinha)) continue;
+    const match = textoLinha.match(/R\$\s*\d{1,5}(?:\.\d{3})*(?:,\d{1,2})?|R\$\s*\d{1,5}(?:\.\d{1,2})?/i);
+    const preco = numeroPrecoShopeeAdapter(match?.[0] || "");
+    if (preco !== null) return { texto: match[0], valor: preco };
+  }
+
+  return { texto: "", valor: null };
+}
+
+function escolherPrecoShopeeComRadarSeguro(precoAdapter = null, textoRadar = "") {
+  const precoRadar = extrairPrecoTextoRadarShopee(textoRadar);
+  const precoApi = numeroPrecoShopeeAdapter(precoAdapter);
+  if (precoRadar.valor === null) {
+    return { preco: precoApi, origem: "adapter", precoRadarTexto: "", usouRadar: false };
+  }
+  if (precoApi === null) {
+    return { preco: precoRadar.valor, origem: "texto_radar", precoRadarTexto: precoRadar.texto, usouRadar: true };
+  }
+
+  const menor = Math.min(precoApi, precoRadar.valor);
+  const maior = Math.max(precoApi, precoRadar.valor);
+  if (menor > 0 && maior / menor >= 3) {
+    return { preco: precoRadar.valor, origem: "texto_radar_incompativel_api", precoRadarTexto: precoRadar.texto, usouRadar: true };
+  }
+
+  return { preco: precoApi, origem: "adapter", precoRadarTexto: precoRadar.texto, usouRadar: false };
+}
+
 function logPrecoAuditoriaShopee(dados = {}) {
   console.log("[SHOPEE-PRECO-AUDITORIA]", JSON.stringify({
     etapa: dados.etapa || "adapter",
@@ -654,7 +687,16 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     itemId: produto.itemId || idsDetectados.itemId
   };
   const tituloValido = tituloShopeeValido(produto.titulo || produto.nome || "");
-  const precoNumerico = numeroPrecoShopeeAdapter(produto.precoAtual || produto.preco || produto.precoMin || "");
+  const precoEscolhido = escolherPrecoShopeeComRadarSeguro(produto.precoAtual || produto.preco || produto.precoMin || "", textoOriginalRadar);
+  const precoNumerico = precoEscolhido.preco;
+  if (precoEscolhido.usouRadar) {
+    produto = {
+      ...produto,
+      preco: precoNumerico,
+      precoAtual: precoNumerico,
+      precoOrigem: precoEscolhido.origem
+    };
+  }
   const precoAuditoria = produto.precoAuditoria && typeof produto.precoAuditoria === "object"
     ? produto.precoAuditoria
     : {};
@@ -671,6 +713,9 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     titulo: produto.titulo || produto.nome || "",
     ...precoAuditoria,
     precoAdapter: precoNumerico,
+    precoTextoRadar: precoAuditoria.precoTextoRadar || precoEscolhido.precoRadarTexto,
+    origemPreco: precoEscolhido.origem || precoAuditoria.origemPreco || precoAuditoria.precoOrigem || "",
+    motivoEscolhaPreco: precoEscolhido.usouRadar ? "texto_radar_explicitamente_mais_confiavel" : precoAuditoria.motivoEscolhaPreco,
     suspeitaFator100
   });
 
@@ -780,6 +825,8 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     precoMin: produto.precoMin || "",
     precoMax: produto.precoMax || "",
     precoOrigem: produto.precoOrigem || precoAuditoria.precoOrigem || precoAuditoria.origemPreco || "",
+    precoRadarUsado: precoEscolhido.usouRadar === true,
+    precoRadarTexto: precoEscolhido.precoRadarTexto || "",
     precoAmbiguo: produto.precoAmbiguo === true || precoAuditoria.precoAmbiguo === true,
     faixaPreco: produto.faixaPreco || precoAuditoria.faixaPreco || "",
     variacaoComprovada: produto.variacaoComprovada === true || precoAuditoria.variacaoComprovada === true,
@@ -824,6 +871,9 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
       precoAuditoria: {
         ...precoAuditoria,
         precoAdapter: precoNumerico,
+        precoTextoRadar: precoAuditoria.precoTextoRadar || precoEscolhido.precoRadarTexto,
+        origemPreco: precoEscolhido.origem || precoAuditoria.origemPreco || precoAuditoria.precoOrigem || "",
+        motivoEscolhaPreco: precoEscolhido.usouRadar ? "texto_radar_explicitamente_mais_confiavel" : precoAuditoria.motivoEscolhaPreco,
         suspeitaFator100
       },
       campoLinkEscolhido: linkEscolhido.campo || "",
@@ -834,6 +884,8 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
       linksClassificados: resumoLinksClassificados(links, evento, "shopee"),
       candidatosShopee: resumoCandidatosShopee(analiseLinksShopee.classificados),
       linksAuxiliaresShopee: resumoCandidatosShopee(linksAuxiliaresShopee),
+      precoRadarUsado: precoEscolhido.usouRadar === true,
+      precoRadarTexto: precoEscolhido.precoRadarTexto || "",
       textoRadarTemCupom: Boolean(extrairCupomTextoRadarShopee(textoOriginalRadar).cupom),
       camposProduto: Object.keys(produto || {}),
       produto,

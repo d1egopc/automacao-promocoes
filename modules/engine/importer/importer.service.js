@@ -83,7 +83,15 @@ function categoriaGenericaEngine(categoria = "") {
     .replace(/[^a-z0-9]+/g, "")
     .trim();
 
-  return !texto || texto === "mercadolivre" || texto === "ml" || texto === "marketplace" || texto === "generica" || texto === "geral";
+  return !texto
+    || texto === "mercadolivre"
+    || texto === "ml"
+    || texto === "marketplace"
+    || texto === "generica"
+    || texto === "geral"
+    || texto === "aliexpress"
+    || texto === "awin"
+    || texto === "kabum";
 }
 
 function resolverCategoriaEngine(resultado = {}, job = {}) {
