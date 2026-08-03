@@ -572,15 +572,58 @@ function testarAwinMetadataCupomNaoBloqueiaUedKabum() {
 
 function testarCategoriaMarketplaceGenericaClassificaPorTitulo() {
   const { normalizarOfertaImportada } = require("../modules/engine/importer/importer.service");
-  const oferta = normalizarOfertaImportada({
-    marketplace: "aliexpress",
-    titulo: "RX 5500 8GB Veineda Pcie 4.0",
-    preco: 748,
-    categoria: "AliExpress"
-  }, { marketplace: "aliexpress" });
+  const casos = [
+    ["Teclado Mecânico Ajazz X Nacodex NK61 Switch Red", "Periféricos"],
+    ["Netac 512gb ssd sata3 2.5 BLACK", "Gamer e Hardware"],
+    ["Processador Ryzen 3 2200G PRO CPU R3 DDR4 AM4", "Gamer e Hardware"],
+    ["RX 5500 8GB Veineda Pcie 4.0", "Gamer e Hardware"],
+    ["HEADSET SEM FIO ACINACI BL100", "Periféricos"]
+  ];
 
-  assert.notStrictEqual(oferta.categoria, "AliExpress");
-  assert.ok(oferta.categoria);
+  for (const [titulo, categoriaEsperada] of casos) {
+    const oferta = normalizarOfertaImportada({
+      marketplace: "aliexpress",
+      titulo,
+      preco: 748,
+      categoria: "AliExpress"
+    }, { marketplace: "aliexpress" });
+
+    assert.strictEqual(oferta.categoria, categoriaEsperada, `${titulo} deve virar categoria comercial final`);
+  }
+}
+
+function testarCategoriaAliExpressReclassificaAposTituloRadarFinal() {
+  const { reclassificarCategoriaFinalEngine } = require("../modules/engine/importer/importer.service");
+  const metadataInicial = {
+    inteligenciaUniversalV2: {
+      categoria: "Diversos",
+      comparativo: { categoriaAntes: "Diversos", categoriaDepois: "Diversos" }
+    }
+  };
+
+  const resultado = reclassificarCategoriaFinalEngine({
+    marketplace: "aliexpress",
+    titulo: "Air Cooler Para Xeon Wovibo aRGB",
+    categoria: "Diversos"
+  }, metadataInicial, { marketplace: "aliexpress" });
+
+  assert.strictEqual(resultado.reclassificada, true);
+  assert.strictEqual(resultado.oferta.categoria, "Gamer e Hardware");
+  assert.strictEqual(resultado.metadataFinal.inteligenciaUniversalV2.categoria, "Gamer e Hardware");
+  assert.strictEqual(resultado.metadataFinal.inteligenciaUniversalV2.comparativo.categoriaDepois, "Gamer e Hardware");
+}
+
+function testarCategoriaAliExpressGenericaSemTituloConfiavelNaoInventa() {
+  const { reclassificarCategoriaFinalEngine } = require("../modules/engine/importer/importer.service");
+  const resultado = reclassificarCategoriaFinalEngine({
+    marketplace: "aliexpress",
+    titulo: "Produto AliExpress",
+    categoria: "Diversos"
+  }, {}, { marketplace: "aliexpress" });
+
+  assert.strictEqual(resultado.reclassificada, false);
+  assert.strictEqual(resultado.oferta.categoria, "Diversos");
+  assert.strictEqual(resultado.motivo, "titulo_generico_indisponivel");
 }
 
 async function testarValidacaoKabumComIntegracaoAwinGenerica() {
@@ -638,6 +681,8 @@ function testarOrquestradorIncluiMarketplacesOficiais() {
   await testarAliExpressReconheceRotuloNaLinhaAnterior();
   testarAwinMetadataCupomNaoBloqueiaUedKabum();
   testarCategoriaMarketplaceGenericaClassificaPorTitulo();
+  testarCategoriaAliExpressReclassificaAposTituloRadarFinal();
+  testarCategoriaAliExpressGenericaSemTituloConfiavelNaoInventa();
   await testarValidacaoKabumComIntegracaoAwinGenerica();
   testarOrquestradorIncluiMarketplacesOficiais();
   console.log("engine-v2-marketplaces-fidelidade.test.js OK");

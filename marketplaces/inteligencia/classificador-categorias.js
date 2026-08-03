@@ -186,15 +186,15 @@ const REGRAS = [
     prioridade: 100,
     fortes: [
       "placa de video", "placa grafica", "rtx", "gtx", "radeon", "geforce",
-      "rx 580", "rx 6600", "rx 7600", "rx 7700", "rx 7800", "rx 7900",
-      "ssd nvme", "nvme", "m 2", "memoria ram", "ddr4", "ddr5",
+      "rx 5500", "rx 580", "rx 6600", "rx 7600", "rx 7700", "rx 7800", "rx 7900",
+      "ssd", "ssd sata", "ssd sata3", "ssd nvme", "nvme", "m 2", "memoria ram", "ddr4", "ddr5",
       "placa mae", "processador", "ryzen", "intel core", "water cooler",
       "air cooler", "fonte atx", "fonte gamer", "gabinete gamer", "cadeira gamer", "kit xeon"
     ],
     palavras: [
-      "b450", "b550", "b650", "a520", "a620", "x570", "x670", "h610",
+      "b450", "b550", "b650", "a520", "a620", "x99", "x570", "x670", "h610",
       "b760", "z790", "80 plus", "pfc ativo", "cooler master", "corsair",
-      "kingston fury", "xpg", "crucial", "wd black", "pasta termica",
+      "kingston fury", "xpg", "crucial", "wd black", "netac", "pasta termica",
       "controladora argb", "hub fan", "kit fan"
     ]
   }),
@@ -225,7 +225,7 @@ const REGRAS = [
     palavras: [
       "suporte notebook", "base notebook", "cooler notebook", "base para notebook", "mesa digitalizadora",
       "xp pen", "dock station", "adaptador usb", "leitor de cartao",
-      "teclado mecanico", "mouse sem fio", "webcam full hd", "hd externo",
+      "teclado mecanico", "mouse sem fio", "webcam full hd", "acinaci", "hd externo",
       "ssd externo", "placa captura", "stream deck", "switch hdmi",
       "cabo hdmi", "displayport", "repetidor wifi", "adaptador wifi",
       "logitech", "redragon", "hyperx", "razer", "pendrive usb", "pen drive usb", "memoria usb", "armazenamento usb", "sandisk ultra"

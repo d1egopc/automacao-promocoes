@@ -89,6 +89,7 @@ function categoriaGenericaEngine(categoria = "") {
     || texto === "marketplace"
     || texto === "generica"
     || texto === "geral"
+    || texto === "diversos"
     || texto === "aliexpress"
     || texto === "awin"
     || texto === "kabum";
@@ -104,6 +105,84 @@ function resolverCategoriaEngine(resultado = {}, job = {}) {
     nome: titulo,
     marketplace: resultado.marketplace || job.marketplace || job.marketplace_detectado || ""
   }, titulo);
+}
+
+function tituloGenericoMarketplaceEngine(titulo = "", marketplace = "") {
+  const chaveTitulo = normalizarTexto(titulo)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+  const chaveMarketplace = normalizarTexto(marketplace)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+
+  if (!chaveTitulo) return true;
+  if (chaveMarketplace === "aliexpress") {
+    return ["produtoaliexpress", "ofertaaliexpress", "aliexpress"].includes(chaveTitulo);
+  }
+  return false;
+}
+
+function reclassificarCategoriaFinalEngine(oferta = {}, metadataFinal = {}, job = {}) {
+  const marketplace = normalizarTexto(oferta.marketplace || job.marketplace || job.marketplace_detectado || "");
+  const marketplaceChave = marketplace
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+
+  if (marketplaceChave !== "aliexpress") {
+    return { oferta, metadataFinal, reclassificada: false, motivo: "marketplace_nao_alvo" };
+  }
+
+  const categoriaAnterior = normalizarTexto(oferta.categoria || "");
+  if (!categoriaGenericaEngine(categoriaAnterior)) {
+    return { oferta, metadataFinal, reclassificada: false, motivo: "categoria_especifica_preservada" };
+  }
+
+  const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
+  if (tituloGenericoMarketplaceEngine(titulo, marketplaceChave)) {
+    return { oferta, metadataFinal, reclassificada: false, motivo: "titulo_generico_indisponivel" };
+  }
+
+  const categoriaFinal = classificarCategoriaOferta({
+    titulo,
+    nome: titulo,
+    marketplace,
+    categoria: ""
+  }, titulo);
+
+  if (!categoriaFinal || categoriaGenericaEngine(categoriaFinal)) {
+    return { oferta, metadataFinal, reclassificada: false, motivo: "classificador_sem_categoria_confiavel" };
+  }
+
+  const inteligencia = objetoSeguro(metadataFinal.inteligenciaUniversalV2);
+  const comparativo = objetoSeguro(inteligencia.comparativo);
+
+  return {
+    oferta: { ...oferta, categoria: categoriaFinal },
+    metadataFinal: {
+      ...metadataFinal,
+      inteligenciaUniversalV2: {
+        ...inteligencia,
+        categoria: categoriaFinal,
+        comparativo: {
+          ...comparativo,
+          categoriaDepois: categoriaFinal
+        }
+      }
+    },
+    reclassificada: true,
+    motivo: "titulo_final_radar",
+    categoriaAnterior,
+    categoriaFinal
+  };
 }
 function normalizarTitulo(titulo = "") {
   return normalizarTexto(titulo)
@@ -1278,6 +1357,9 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     }
     emitirLogRadarPrecoSuspeito(resultadoPrecedenciaComercial, "engine_ofertas");
   }
+  const categoriaFinalResolvida = reclassificarCategoriaFinalEngine(oferta, metadataFinal, job);
+  oferta = categoriaFinalResolvida.oferta || oferta;
+  metadataFinal = categoriaFinalResolvida.metadataFinal || metadataFinal;
   const inteligenciaV2 = objetoSeguro(metadataFinal.inteligenciaUniversalV2);
   const retidaV2 = inteligenciaV2.status === "retida" || sombraV2.ok === false;
   const statusPersistencia = retidaV2 ? "retida_v2" : "importada";
@@ -1689,5 +1771,7 @@ module.exports = {
   marcarJobOfertaCriada,
   marcarJobRetidaV2,
   marcarJobErroImportacao,
-  normalizarOfertaImportada
+  normalizarOfertaImportada,
+  resolverCategoriaEngine,
+  reclassificarCategoriaFinalEngine
 };
