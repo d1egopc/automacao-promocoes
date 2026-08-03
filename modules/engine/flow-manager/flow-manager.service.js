@@ -11,6 +11,58 @@ const COBERTURA_TURBO_MINUTOS = 5;
 const TTL_NORMAL_MS = 30 * 60 * 1000;
 const TTL_TURBO_MS = 10 * 60 * 1000;
 
+const STATUS_BUFFER_VIVO = new Set([
+  "pendente",
+  "novo",
+  "aguardando",
+  "aguardando_envio",
+  "pronto",
+  "pronta",
+  "programado",
+  "programada",
+  "enviando",
+  "em_envio",
+  "processando_envio",
+  "tentando_envio",
+  "tentativa_envio",
+  "processando",
+  "em_processamento",
+  "erro_temporario",
+  "erro_retry",
+  "retry",
+  "aguardando_retry",
+  "falha_temporaria",
+  "reprocessar"
+]);
+
+const CAMPOS_TIMESTAMP_BUFFER = [
+  "criadoEm",
+  "criado_em",
+  "adicionadoEm",
+  "adicionado_em",
+  "dataEntradaFila",
+  "dataEntrada",
+  "entradaFilaEm",
+  "dataFila",
+  "dataCriacao",
+  "createdAt",
+  "timestamp",
+  "incluidoEm",
+  "inseridoEm",
+  "recebidoEm",
+  "importadoEm"
+];
+
+const CAMPOS_DESTINO_BUFFER = [
+  "destinoId",
+  "destino_id",
+  "destino",
+  "chatId",
+  "grupoId",
+  "jid",
+  "canalId"
+];
+
 function lista(valor) {
   return Array.isArray(valor) ? valor : [];
 }
@@ -30,6 +82,37 @@ function numero(valor, padrao = 0) {
 
 function limitarNaoNegativo(valor = 0) {
   return Math.max(0, numero(valor));
+}
+
+function statusBufferItem(item = {}) {
+  return texto(item.status ?? item.situacao).toLowerCase();
+}
+
+function timestampBufferItem(item = {}) {
+  for (const campo of CAMPOS_TIMESTAMP_BUFFER) {
+    const ms = Date.parse(item?.[campo] || "");
+    if (Number.isFinite(ms)) return { ms, campo };
+  }
+  return { ms: null, campo: "" };
+}
+
+function idDestino(destino = {}, indice = 0) {
+  return texto(destino.id || destino.destinoId || destino.jid || destino.chatId || destino.nome || `destino_${indice + 1}`);
+}
+
+function idsDestinosAptos(destinosResumo = {}) {
+  return lista(destinosResumo.capacidadePorDestino)
+    .filter(item => item.aptoAgora)
+    .map((item, indice) => idDestino(item.destino || item, indice))
+    .filter(Boolean);
+}
+
+function itemCompativelComDestinos(item = {}, destinosAptos = []) {
+  const candidatos = CAMPOS_DESTINO_BUFFER
+    .map(campo => texto(item?.[campo]))
+    .filter(Boolean);
+  if (!candidatos.length) return true;
+  return candidatos.some(valor => destinosAptos.includes(valor));
 }
 
 function dataOfertaMs(oferta = {}, agoraMs = Date.now()) {
@@ -89,6 +172,70 @@ function prioridadeFluxoOferta(entrada = {}, tipoFluxo = "") {
   );
   if (tipoFluxo === "cupom_turbo") return Math.max(110, base);
   return Math.max(0, Math.min(100, Math.round(base)));
+}
+
+function calcularBufferAtualShadow(filaItens = [], destinosResumo = {}, opcoes = {}) {
+  const agoraMs = Number(opcoes.agoraMs || Date.now());
+  const destinosAptos = idsDestinosAptos(destinosResumo);
+  const itensContados = [];
+  const itensIgnorados = [];
+
+  for (const item of lista(filaItens)) {
+    const status = statusBufferItem(item);
+    const id = item.id || item.filaItemId || item.ofertaId || item.oferta_id || null;
+    if (!STATUS_BUFFER_VIVO.has(status)) {
+      itensIgnorados.push({ id, status, motivo: "status_fora_pressao_viva" });
+      continue;
+    }
+
+    if (!itemCompativelComDestinos(item, destinosAptos)) {
+      itensIgnorados.push({ id, status, motivo: "destino_incompativel" });
+      continue;
+    }
+
+    const timestamp = timestampBufferItem(item);
+    if (timestamp.ms === null) {
+      itensIgnorados.push({ id, status, motivo: "sem_timestamp" });
+      continue;
+    }
+
+    const tipoFluxo = tipoFluxoOferta({
+      tipoFluxo: item.tipoFluxo,
+      tipoOperacional: item.tipoOperacional || item.tipo_operacional || item.modoEnvio || item.modo,
+      cupomTurbo: item.cupomTurbo === true || item.turbo === true,
+      oferta: item
+    });
+    const ttlMs = ttlFluxoMs(tipoFluxo);
+    const idadeMs = Math.max(0, agoraMs - timestamp.ms);
+    if (idadeMs >= ttlMs) {
+      itensIgnorados.push({ id, status, idadeMs, ttlMs, motivo: "fora_ttl_shadow" });
+      continue;
+    }
+
+    itensContados.push({
+      id,
+      status,
+      idadeMs,
+      ttlMs,
+      destino: CAMPOS_DESTINO_BUFFER.map(campo => texto(item?.[campo])).find(Boolean) || "sem_destino_explicito",
+      motivo: "item_vivo_dentro_ttl_shadow"
+    });
+  }
+
+  return {
+    bufferAtual: itensContados.length,
+    itensContados,
+    itensIgnorados
+  };
+}
+
+function contarItensIgnoradosBuffer(itensIgnorados = []) {
+  const contagem = {};
+  for (const item of lista(itensIgnorados)) {
+    const motivo = texto(item.motivo) || "desconhecido";
+    contagem[motivo] = (contagem[motivo] || 0) + 1;
+  }
+  return contagem;
 }
 
 function motivoSemCapacidade(destinosResumo = {}, creditoOk = true, runtime = null, nivelAlvo = 0) {
@@ -160,6 +307,9 @@ function logFlowShadow(decisao = {}) {
       bufferAtual: decisao.bufferAtual ?? null,
       vagasDisponiveis: decisao.vagasDisponiveis ?? null,
       destinosAptos: decisao.destinosAptos ?? null,
+      itensBufferContados: decisao.itensBufferContados ?? null,
+      itensBufferIgnorados: decisao.itensBufferIgnorados ?? null,
+      motivosItensIgnorados: objeto(decisao.motivosItensIgnorados),
       ttlMs: decisao.ttlMs ?? null,
       idadeOfertaMs: decisao.idadeOfertaMs ?? null,
       prioridadeFluxo: decisao.prioridadeFluxo ?? null,
@@ -197,7 +347,8 @@ async function avaliarFluxoWorkspaceShadow(entrada = {}, opcoes = {}) {
     const nivelAlvo = destinosResumo.janelaAbertaAgora === true && !runtime && credito.ok
       ? nivelCalculado
       : 0;
-    const bufferAtual = limitarNaoNegativo(fila.pressaoEsteiraViva);
+    const bufferShadow = calcularBufferAtualShadow(fila.itens || [], destinosResumo, { agoraMs });
+    const bufferAtual = limitarNaoNegativo(bufferShadow.bufferAtual);
     const vagasDisponiveis = Math.max(0, nivelAlvo - bufferAtual);
     const aceitarAgora = nivelAlvo > 0 && vagasDisponiveis > 0;
     const motivo = aceitarAgora
@@ -221,6 +372,10 @@ async function avaliarFluxoWorkspaceShadow(entrada = {}, opcoes = {}) {
       prioridadeFluxo,
       tipoFluxo,
       idadeOfertaMs,
+      itensBufferShadow: bufferShadow.itensContados,
+      itensBufferContados: bufferShadow.itensContados.length,
+      itensBufferIgnorados: bufferShadow.itensIgnorados.length,
+      motivosItensIgnorados: contarItensIgnoradosBuffer(bufferShadow.itensIgnorados),
       aplicouMudancas: false
     };
     logFlowShadow(decisao);
@@ -257,6 +412,8 @@ module.exports = {
   TTL_NORMAL_MS,
   TTL_TURBO_MS,
   avaliarFluxoWorkspaceShadow,
+  calcularBufferAtualShadow,
+  contarItensIgnoradosBuffer,
   coberturaFluxoMinutos,
   ttlFluxoMs,
   nivelAlvoPorCobertura,

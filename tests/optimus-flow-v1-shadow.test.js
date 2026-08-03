@@ -24,6 +24,13 @@ function destino(extra = {}) {
   };
 }
 
+function destinoRapido(extra = {}) {
+  return destino({
+    intervaloMinutos: 3,
+    ...extra
+  });
+}
+
 function itemFila(extra = {}) {
   return {
     id: extra.id || `fila_${Math.random()}`,
@@ -114,6 +121,142 @@ async function testarWorkspaceSaturadaRecusa() {
   assert.strictEqual(decisao.motivo, "esteira_saturada");
 }
 
+async function testarReposicaoVivaPorEnvio() {
+  const destinosCompativeis = [destinoRapido()];
+  const filaCheia = {
+    [D1]: [
+      itemFila({ id: "slot_1" }),
+      itemFila({ id: "slot_2" }),
+      itemFila({ id: "slot_3" })
+    ]
+  };
+  const cheia = await avaliarFluxoWorkspaceShadow(entrada(D1, { destinosCompativeis }), opcoes(filaCheia));
+  assert.strictEqual(cheia.nivelAlvo, 3);
+  assert.strictEqual(cheia.bufferAtual, 3);
+  assert.strictEqual(cheia.aceitarAgora, false);
+
+  const filaComEnvio = {
+    [D1]: [
+      itemFila({ id: "slot_1", status: "enviado" }),
+      itemFila({ id: "slot_2" }),
+      itemFila({ id: "slot_3" })
+    ]
+  };
+  const depoisEnvio = await avaliarFluxoWorkspaceShadow(entrada(D1, { destinosCompativeis }), opcoes(filaComEnvio));
+  assert.strictEqual(depoisEnvio.bufferAtual, 2);
+  assert.strictEqual(depoisEnvio.vagasDisponiveis, 1);
+  assert.strictEqual(depoisEnvio.aceitarAgora, true);
+
+  const filaCompletaNovamente = {
+    [D1]: [
+      itemFila({ id: "slot_1", status: "enviado" }),
+      itemFila({ id: "slot_2" }),
+      itemFila({ id: "slot_3" }),
+      itemFila({ id: "slot_4" })
+    ]
+  };
+  const completa = await avaliarFluxoWorkspaceShadow(entrada(D1, { destinosCompativeis }), opcoes(filaCompletaNovamente));
+  assert.strictEqual(completa.bufferAtual, 3);
+  assert.strictEqual(completa.aceitarAgora, false);
+}
+
+async function testarItemExpiradoLiberaVagaShadow() {
+  const destinosCompativeis = [destinoRapido()];
+  const filas = {
+    [D1]: [
+      itemFila({ id: "vivo", dataEntradaFila: "2026-08-03T10:00:00.000Z" }),
+      itemFila({ id: "expirado_shadow", dataEntradaFila: "2026-08-03T09:00:00.000Z" })
+    ]
+  };
+  const decisao = await avaliarFluxoWorkspaceShadow(entrada(D1, { destinosCompativeis }), opcoes(filas));
+  assert.strictEqual(decisao.nivelAlvo, 3);
+  assert.strictEqual(decisao.bufferAtual, 1);
+  assert.deepStrictEqual(decisao.itensBufferShadow.map(item => item.id), ["vivo"]);
+  assert.strictEqual(decisao.aceitarAgora, true);
+}
+
+async function testarBufferContaSomenteItensVivosCompativeis() {
+  const destinosCompativeis = [destinoRapido({ id: "op_geral" })];
+  const filas = {
+    [D1]: [
+      itemFila({ id: "vivo_compativel", destinoId: "op_geral" }),
+      itemFila({ id: "enviado_fora", status: "enviado", destinoId: "op_geral" }),
+      itemFila({ id: "erro_final_fora", status: "erro_final", destinoId: "op_geral" }),
+      itemFila({ id: "retida_fora", status: "retida", destinoId: "op_geral" }),
+      itemFila({ id: "expirada_fora", status: "expirada", destinoId: "op_geral" }),
+      itemFila({ id: "destino_incompativel", destinoId: "outro_destino" }),
+      itemFila({ id: "sem_timestamp_fora", destinoId: "op_geral", dataEntradaFila: null, criadoEm: null })
+    ]
+  };
+  const decisao = await avaliarFluxoWorkspaceShadow(entrada(D1, { destinosCompativeis }), opcoes(filas));
+  assert.strictEqual(decisao.bufferAtual, 1);
+  assert.deepStrictEqual(decisao.itensBufferShadow.map(item => item.id), ["vivo_compativel"]);
+}
+
+async function testarDestinoFechadoEReabertoRecalculaNivel() {
+  const fechado = await avaliarFluxoWorkspaceShadow(
+    entrada(D1, { destinosCompativeis: [destinoRapido({ horarioInicio: "25:00", horarioFim: "25:01" })] }),
+    opcoes()
+  );
+  assert.strictEqual(fechado.nivelAlvo, 0);
+  assert.strictEqual(fechado.aceitarAgora, false);
+
+  const reaberto = await avaliarFluxoWorkspaceShadow(
+    entrada(D1, { destinosCompativeis: [destinoRapido()] }),
+    opcoes()
+  );
+  assert.strictEqual(reaberto.nivelAlvo, 3);
+  assert.strictEqual(reaberto.aceitarAgora, true);
+}
+
+async function testarTurboConsumidoLiberaVaga() {
+  const destinosCompativeis = [destinoRapido({ cupomTurbo: true, intervaloTurboMinutos: 2.5 })];
+  const filaTurboCheia = {
+    [D1]: [
+      itemFila({ id: "turbo_1", cupomTurbo: true }),
+      itemFila({ id: "turbo_2", cupomTurbo: true })
+    ]
+  };
+  const turboCheia = await avaliarFluxoWorkspaceShadow(
+    entrada(D1, { destinosCompativeis, cupomTurbo: true, tipoOperacional: "cupom_turbo" }),
+    opcoes(filaTurboCheia)
+  );
+  assert.strictEqual(turboCheia.tipoFluxo, "cupom_turbo");
+  assert.strictEqual(turboCheia.nivelAlvo, 2);
+  assert.strictEqual(turboCheia.bufferAtual, 2);
+  assert.strictEqual(turboCheia.aceitarAgora, false);
+
+  const filaTurboConsumida = {
+    [D1]: [
+      itemFila({ id: "turbo_1", cupomTurbo: true, status: "enviado" }),
+      itemFila({ id: "turbo_2", cupomTurbo: true })
+    ]
+  };
+  const depoisConsumo = await avaliarFluxoWorkspaceShadow(
+    entrada(D1, { destinosCompativeis, cupomTurbo: true, tipoOperacional: "cupom_turbo" }),
+    opcoes(filaTurboConsumida)
+  );
+  assert.strictEqual(depoisConsumo.bufferAtual, 1);
+  assert.strictEqual(depoisConsumo.vagasDisponiveis, 1);
+  assert.strictEqual(depoisConsumo.aceitarAgora, true);
+}
+
+async function testarOfertaRecusadaNaoViraDividaFutura() {
+  const fechada = await avaliarFluxoWorkspaceShadow(
+    entrada(D1, { ofertaId: "recusada", destinosCompativeis: [destinoRapido({ horarioInicio: "25:00", horarioFim: "25:01" })] }),
+    opcoes()
+  );
+  assert.strictEqual(fechada.aceitarAgora, false);
+  assert.strictEqual(fechada.bufferAtual, 0);
+
+  const reavaliadaComDestinoAberto = await avaliarFluxoWorkspaceShadow(
+    entrada(D1, { ofertaId: "nova", destinosCompativeis: [destinoRapido()] }),
+    opcoes()
+  );
+  assert.strictEqual(reavaliadaComDestinoAberto.bufferAtual, 0);
+  assert.strictEqual(reavaliadaComDestinoAberto.aceitarAgora, true);
+}
+
 async function testarWorkspaceAptaComVagaAceita() {
   const decisao = await avaliarFluxoWorkspaceShadow(entrada(D1, { score: 0, prioridade: 0 }), opcoes());
   assert.strictEqual(decisao.aceitarAgora, true);
@@ -144,6 +287,21 @@ async function testarTurboPrioridadeETtl() {
   assert(turbo.prioridadeFluxo > normal.prioridadeFluxo);
   assert.strictEqual(normal.ttlMs, TTL_NORMAL_MS);
   assert.strictEqual(turbo.ttlMs, TTL_TURBO_MS);
+}
+
+async function testarCupomSemSinalTurboPermaneceOfertaComum() {
+  const casos = [
+    entrada(D1, { marketplace: "mercadolivre" }),
+    entrada(D1, { marketplace: "shopee" }),
+    entrada(D1, { marketplace: "aliexpress" }),
+    entrada(D1, { marketplace: "awin" })
+  ];
+  for (const caso of casos) {
+    caso.oferta.cupom = "CUPOM_SANITIZADO";
+    const decisao = await avaliarFluxoWorkspaceShadow(caso, opcoes());
+    assert.strictEqual(decisao.tipoFluxo, "oferta_comum");
+    assert.strictEqual(decisao.ttlMs, TTL_NORMAL_MS);
+  }
 }
 
 async function testarRogerBloqueadoNaoInterfereNoD1() {
@@ -240,9 +398,16 @@ async function testarFlowShadowNaoAlteraDistributorAtual() {
   await testarWorkspaceSemSessaoRecusa();
   await testarWorkspaceSemCreditoRecusa();
   await testarWorkspaceSaturadaRecusa();
+  await testarReposicaoVivaPorEnvio();
+  await testarItemExpiradoLiberaVagaShadow();
+  await testarBufferContaSomenteItensVivosCompativeis();
+  await testarDestinoFechadoEReabertoRecalculaNivel();
+  await testarTurboConsumidoLiberaVaga();
+  await testarOfertaRecusadaNaoViraDividaFutura();
   await testarWorkspaceAptaComVagaAceita();
   await testarDestinoConsumiuUmaVagaAindaAceitaOfertaFresca();
   await testarTurboPrioridadeETtl();
+  await testarCupomSemSinalTurboPermaneceOfertaComum();
   await testarRogerBloqueadoNaoInterfereNoD1();
   await testarFlowShadowNaoAlteraDistributorAtual();
   console.log("optimus-flow-v1-shadow.test.js OK");
