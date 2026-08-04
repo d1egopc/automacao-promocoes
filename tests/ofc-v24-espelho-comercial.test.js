@@ -1267,13 +1267,50 @@ assertBloco(mlCupomBeneficioDiferente, "instrucao_cupom");
 assertBloco(mlCupomBeneficioDiferente, "beneficio");
 assert.ok(mlCupomBeneficioDiferente.templateEspelhoShadow.mensagem.includes("Brinde exclusivo"));
 
+const aliexpressHigieneTecnicaAppPc = criarEspelho({
+  textoOriginal: [
+    "Headset AliExpress",
+    "Por R$ 112,00",
+    "Link APP: https://a.aliexpress.com/_appSemConversao",
+    "Link PC: https://a.aliexpress.com/_pcConvertido"
+  ].join("\n"),
+  oferta: {
+    marketplace: "aliexpress",
+    preco: 112,
+    beneficioTexto: "Erro ao consultar API AliExpress",
+    avisoCupom: "link_aliexpress_sem_conversao_segura",
+    linksProduto: [
+      {
+        tipo: "link_app",
+        url: "https://a.aliexpress.com/_appSemConversao",
+        renderizavel: false,
+        motivo: "link_aliexpress_sem_conversao_segura"
+      },
+      {
+        tipo: "link_pc",
+        url: "https://a.aliexpress.com/_pcConvertido",
+        urlAfiliada: "https://s.click.aliexpress.com/e/_pcD1Seguro",
+        convertidoWorkspace: true,
+        renderizavel: true
+      }
+    ]
+  },
+  comercialNormalizado: { marketplace: "aliexpress", precoAtual: 112, precoConfiavel: true }
+});
+const mensagemHigieneTecnica = aliexpressHigieneTecnicaAppPc.templateEspelhoShadow.mensagem;
+assert.ok(mensagemHigieneTecnica.includes("PC:\nhttps://s.click.aliexpress.com/e/_pcD1Seguro"));
+assert.ok(!mensagemHigieneTecnica.includes("APP:\nhttps://a.aliexpress.com/_appSemConversao"));
+assert.ok(!/Erro ao consultar API AliExpress|link_aliexpress_sem_conversao_segura|sem_conversao_segura/.test(mensagemHigieneTecnica));
+assert.strictEqual(blocosTipo(aliexpressHigieneTecnicaAppPc, "beneficio").length, 0);
+
 for (const resultado of [
   mlHaizPrecoEstruturado,
   mlOrganizadorPrecoEstruturado,
   mlCuecasCupomBeneficioDuplicado,
   mlCupomCashbackReal,
   mlCupomFreteReal,
-  mlCupomBeneficioDiferente
+  mlCupomBeneficioDiferente,
+  aliexpressHigieneTecnicaAppPc
 ]) {
   assert.ok(!/(?:null|undefined|NaN)/i.test(resultado.templateEspelhoShadow.mensagem));
 }

@@ -377,7 +377,7 @@ async function testarAliExpressAppPcPreservaAmbosComoComerciais() {
   const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
   const app = "https://a.aliexpress.com/_c37JTNLV";
   const pc = "https://a.aliexpress.com/_c4b9dLcf";
-  let urlImportada = "";
+  const urlsImportadas = [];
 
   const resultado = await importarAliExpressEngine({
     job: { id: 115, evento_id: 215, cliente_id: "workspace_teste" },
@@ -397,12 +397,12 @@ async function testarAliExpressAppPcPreservaAmbosComoComerciais() {
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "track" } }),
       importarAliExpress: async (url) => {
-        urlImportada = url;
+        urlsImportadas.push(url);
         return {
           titulo: "Mini PC PUSKILL",
           precoAtual: "227.00",
           imagem: "https://img.test/puskill.jpg",
-          linkAfiliado: "https://ali.test/puskill-afiliado",
+          linkAfiliado: url === pc ? "https://s.click.aliexpress.com/e/_pcPuskillD1" : "https://s.click.aliexpress.com/e/_appPuskillD1",
           linkExpandido: "https://www.aliexpress.com/item/1005002222222222.html",
           categoria: "informatica"
         };
@@ -411,10 +411,12 @@ async function testarAliExpressAppPcPreservaAmbosComoComerciais() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.strictEqual(urlImportada, app);
+  assert.deepStrictEqual(urlsImportadas, [app, pc]);
   assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "link_app");
   assert.strictEqual(resultado.metadata.linksClassificados[0].papelLinkMotivo, "contexto_link_app_aliexpress");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "link_pc");
+  assert.strictEqual(resultado.metadata.linksClassificados[0].urlAfiliada, "https://s.click.aliexpress.com/e/_appPuskillD1");
+  assert.strictEqual(resultado.metadata.linksClassificados[1].urlAfiliada, "https://s.click.aliexpress.com/e/_pcPuskillD1");
 }
 
 async function testarAliExpressUsaPrecoRadarQuandoApiNaoRetornaPreco() {
@@ -546,7 +548,7 @@ async function testarAliExpressBinnuneUsaPrecoRadarEstruturadoEDescartaAuxiliar(
   const auxiliar = "https://cutt.ly/headset-binnune";
   const app = "https://a.aliexpress.com/_c3MLcDkb";
   const pc = "https://a.aliexpress.com/_c3j35EmF";
-  let urlImportada = "";
+  const urlsImportadas = [];
 
   const resultado = await importarAliExpressEngine({
     job: { id: 121, evento_id: 221, cliente_id: "workspace_teste" },
@@ -574,12 +576,12 @@ async function testarAliExpressBinnuneUsaPrecoRadarEstruturadoEDescartaAuxiliar(
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "track" } }),
       importarAliExpress: async (url) => {
-        urlImportada = url;
+        urlsImportadas.push(url);
         return {
           titulo: "HEADSET SEM FIO ACINACI BL100",
           precoAtual: "",
           imagem: "https://img.test/binnune.jpg",
-          linkAfiliado: "https://ali.test/binnune-afiliado",
+          linkAfiliado: url === pc ? "https://s.click.aliexpress.com/e/_pcBinnuneD1" : "https://s.click.aliexpress.com/e/_appBinnuneD1",
           linkExpandido: "https://www.aliexpress.com/item/1005006666666666.html",
           categoria: "AliExpress"
         };
@@ -590,10 +592,16 @@ async function testarAliExpressBinnuneUsaPrecoRadarEstruturadoEDescartaAuxiliar(
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(resultado.precoAtual, 112);
   assert.strictEqual(resultado.precoOrigem, "texto_radar");
-  assert.strictEqual(urlImportada, app);
+  assert.deepStrictEqual(urlsImportadas, [app, pc]);
   const papeis = resultado.metadata.linksClassificados.map(item => item.papelLink);
   assert.ok(papeis.includes("link_app"));
   assert.ok(papeis.includes("link_pc"));
+  const linkApp = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_app");
+  const linkPc = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
+  assert.strictEqual(linkApp.renderizavel, true);
+  assert.strictEqual(linkPc.renderizavel, true);
+  assert.strictEqual(linkApp.urlAfiliada, "https://s.click.aliexpress.com/e/_appBinnuneD1");
+  assert.strictEqual(linkPc.urlAfiliada, "https://s.click.aliexpress.com/e/_pcBinnuneD1");
   assert.strictEqual(
     resultado.metadata.linksClassificados.find(item => item.urlOriginal === auxiliar)?.papelLink,
     "desconhecido"

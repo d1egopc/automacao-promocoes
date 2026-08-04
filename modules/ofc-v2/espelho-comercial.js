@@ -103,6 +103,14 @@ function textoTecnicoOuVazio(valor = "") {
   if (["vazio", "null", "undefined", "nan", "infinity", "semvalor", "semconteudo", "objectobject"].includes(n)) return true;
   if (/^\[?objectobject\]?$/i.test(bruto.trim())) return true;
   if (/^[|;:,._\-()\[\]{}]+$/.test(bruto.trim())) return true;
+  const comparavel = normalizarComparacao(bruto);
+  if (/\berro\s+ao\s+consultar\s+api\b|\bapi\s+aliexpress\b.*\berro\b/.test(comparavel)) return true;
+  if (/\b(?:link|cta)_[a-z0-9_]*(?:sem|indisponivel|invalido|erro|falha)[a-z0-9_]*\b/.test(comparavel)) return true;
+  if (/\b(?:sem_conversao_segura|link_aliexpress_sem_conversao_segura|link_sem_conversao_workspace|falha_tecnica_conversao_link)\b/.test(comparavel)) return true;
+  if (/^[a-z0-9]+(?:_[a-z0-9]+){1,}$/i.test(bruto.trim())
+    && /(?:erro|falha|debug|invalido|indisponivel|conversao|workspace|aliexpress|adapter|importador|renderer|internal|interno)/i.test(bruto)) {
+    return true;
+  }
   return false;
 }
 
