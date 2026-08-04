@@ -776,6 +776,9 @@ let statusSessao = {};
 let destinosPorSessao = {};
 let gruposPorSessao = {};
 let reconectando = {};
+let inicializandoWhatsApp = {};
+let tentativasReconexaoWhatsApp = {};
+let ultimoMotivoDisconnectWhatsApp = {};
 let integracoesPorCliente = {};
 let sessoesMeta = {};
 
@@ -6663,6 +6666,13 @@ const {
   fetchLatestBaileysVersion,
   DisconnectReason
 } = require("@whiskeysockets/baileys");
+const {
+  ESTADOS_WHATSAPP,
+  auditarAuthSessao,
+  classificarDisconnect,
+  deveExibirQr,
+  calcularBackoffMs
+} = require("./modules/whatsapp/session-reconnect.service");
 
 registrarMiddlewaresOperacionais(app, {
   express,
@@ -17444,13 +17454,16 @@ app.post("/desconectar/:id", async (req, res) => {
     }
 
     delete sessoes[id];
+    delete inicializandoWhatsApp[id];
+    delete tentativasReconexaoWhatsApp[id];
+    ultimoMotivoDisconnectWhatsApp[id] = ESTADOS_WHATSAPP.LOGGED_OUT;
 
     if (typeof qrCodes !== "undefined") {
       delete qrCodes[id];
     }
 
     if (typeof statusSessao !== "undefined") {
-      delete statusSessao[id];
+      statusSessao[id] = ESTADOS_WHATSAPP.LOGGED_OUT;
     }
 
     res.json({
@@ -17491,13 +17504,16 @@ app.post("/limpar-sessao/:id", async (req, res) => {
     }
 
     delete sessoes[id];
+    delete inicializandoWhatsApp[id];
+    delete tentativasReconexaoWhatsApp[id];
+    ultimoMotivoDisconnectWhatsApp[id] = ESTADOS_WHATSAPP.APAGADA;
 
     if (typeof qrCodes !== "undefined") {
       delete qrCodes[id];
     }
 
     if (typeof statusSessao !== "undefined") {
-      delete statusSessao[id];
+      statusSessao[id] = ESTADOS_WHATSAPP.APAGADA;
     }
 
     if (typeof destinosPorSessao !== "undefined") {
@@ -21863,6 +21879,9 @@ for (const sid of idsPossiveis) {
   delete destinosPorSessao[sid];
   delete gruposPorSessao[sid];
   delete reconectando[sid];
+  delete inicializandoWhatsApp[sid];
+  delete tentativasReconexaoWhatsApp[sid];
+  delete ultimoMotivoDisconnectWhatsApp[sid];
   delete sessoesMeta[sid];
 
   fs.rmSync("/data/auth_" + sid, {
@@ -21946,12 +21965,16 @@ app.post("/reset/:id", async (req, res) => {
       delete sessoes[id];
     }
 
+    delete inicializandoWhatsApp[id];
+    delete tentativasReconexaoWhatsApp[id];
+    ultimoMotivoDisconnectWhatsApp[id] = ESTADOS_WHATSAPP.APAGADA;
+
     if (typeof qrCodes !== "undefined") {
       delete qrCodes[id];
     }
 
     if (typeof statusSessao !== "undefined") {
-      delete statusSessao[id];
+      statusSessao[id] = ESTADOS_WHATSAPP.APAGADA;
     }
 
     if (typeof destinosPorSessao !== "undefined") {
@@ -22838,6 +22861,51 @@ function registrarLastDisconnectWhatsApp(id, lastDisconnect) {
   }
 }
 
+function auditarAuthSessaoWhatsApp(id) {
+  return auditarAuthSessao({
+    dataDir: "/data",
+    sessaoId: id,
+    statusAtual: statusSessao[id],
+    meta: sessoesMeta?.[id] || {}
+  });
+}
+
+function logarAuthSessaoWhatsApp(id, etapa, auth = {}) {
+  try {
+    console.log("[WHATSAPP-AUTH-AUDIT]", JSON.stringify({
+      sessaoId: id,
+      etapa,
+      statusAtual: statusSessao[id] || "",
+      metaStatus: sessoesMeta?.[id]?.status || "",
+      authDirExiste: auth.authDirExiste === true,
+      credsExiste: auth.credsExiste === true,
+      credsJsonValido: auth.credsJsonValido === true,
+      meIdExiste: auth.meIdExiste === true,
+      jaEsteveOpen: auth.jaEsteveOpen === true,
+      estadoTerminal: auth.estadoTerminal === true,
+      authValidaParaReconectar: auth.authValidaParaReconectar === true,
+      erroAuth: auth.erro ? "presente" : ""
+    }));
+  } catch (e) {
+    console.log("[WHATSAPP-AUTH-AUDIT-ERRO]", e.message);
+  }
+}
+
+function marcarSessaoWhatsAppMetaStatus(id, status) {
+  if (!id) return;
+  sessoesMeta[id] = sessoesMeta[id] || {
+    id,
+    nome: id,
+    tipo: "whatsapp",
+    criadoEm: new Date().toISOString()
+  };
+  sessoesMeta[id].status = status;
+  if (status === ESTADOS_WHATSAPP.LOGGED_OUT) {
+    sessoesMeta[id].loggedOutEm = new Date().toISOString();
+  }
+  salvarSessoesMeta();
+}
+
 async function iniciarWhatsApp(id, force = false) {
   console.log("[WHATSAPP] Iniciando sesso:", id, "force:", force);
 
@@ -22863,6 +22931,11 @@ async function iniciarWhatsApp(id, force = false) {
     return sessoes[id] || null;
   }
 
+  if (!force && inicializandoWhatsApp[id]) {
+    console.log("[WHATSAPP] Inicializacao ja em andamento, no vou recriar:", id);
+    return sessoes[id] || null;
+  }
+
   if (force && sessoes[id]) {
     try {
       console.log("[WHATSAPP] Forando reincio da sesso:", id);
@@ -22878,21 +22951,37 @@ async function iniciarWhatsApp(id, force = false) {
   statusSessao[id] = "connecting";
   reconectando[id] = false;
 
-  const { state, saveCreds } = await useMultiFileAuthState("/data/auth_" + id);
-  const { version } = await fetchLatestBaileysVersion();
+  inicializandoWhatsApp[id] = true;
+  const authAntesSocket = auditarAuthSessaoWhatsApp(id);
+  logarAuthSessaoWhatsApp(id, "antes_socket", authAntesSocket);
 
-  const sock = makeWASocket({
-    version,
-    auth: state,
-    printQRInTerminal: false,
-    syncFullHistory: false,
-    markOnlineOnConnect: false,
-    browser: ["Chrome", "Desktop", "1.0.0"]
-  });
+  let sock;
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState("/data/auth_" + id);
+    const { version } = await fetchLatestBaileysVersion();
 
-  sessoes[id] = sock;
+    sock = makeWASocket({
+      version,
+      auth: state,
+      printQRInTerminal: false,
+      syncFullHistory: false,
+      markOnlineOnConnect: false,
+      browser: ["Chrome", "Desktop", "1.0.0"]
+    });
 
-  sock.ev.on("creds.update", saveCreds);
+    sessoes[id] = sock;
+    sock.ev.on("creds.update", saveCreds);
+  } catch (e) {
+    inicializandoWhatsApp[id] = false;
+    statusSessao[id] = ESTADOS_WHATSAPP.ERRO_AUTH;
+    console.log("[WHATSAPP-AUTH-ERRO]", JSON.stringify({
+      sessaoId: id,
+      erro: e.message || "erro_ao_iniciar_socket"
+    }));
+    throw e;
+  }
+
+  inicializandoWhatsApp[id] = false;
 
 console.log("[INFO] Cliente mensageiro resolvido:", {
   sessao: id,
@@ -23031,17 +23120,45 @@ sock.ev.on("group-participants.update", async (evento) => {
     const { connection, qr, lastDisconnect } = update;
 
     if (qr) {
+      const authNoQr = auditarAuthSessaoWhatsApp(id);
+      const decisaoQr = deveExibirQr({
+        auth: authNoQr,
+        statusAtual: statusSessao[id],
+        meta: sessoesMeta?.[id] || {},
+        ultimoMotivo: ultimoMotivoDisconnectWhatsApp[id] || ""
+      });
+
+      console.log("[WHATSAPP-QR-DECISAO]", JSON.stringify({
+        sessaoId: id,
+        exibirQr: decisaoQr.exibir === true,
+        motivo: decisaoQr.motivo,
+        authDirExiste: authNoQr.authDirExiste === true,
+        credsExiste: authNoQr.credsExiste === true,
+        credsJsonValido: authNoQr.credsJsonValido === true,
+        meIdExiste: authNoQr.meIdExiste === true,
+        jaEsteveOpen: authNoQr.jaEsteveOpen === true,
+        ultimoMotivo: ultimoMotivoDisconnectWhatsApp[id] || ""
+      }));
+
+      if (!decisaoQr.exibir) {
+        qrCodes[id] = null;
+        statusSessao[id] = ESTADOS_WHATSAPP.RECONNECTING;
+        return;
+      }
+
       console.log("[WHATSAPP]📲 QR RECEBIDO:", id);
       qrCodes[id] = await qrcode.toDataURL(qr);
-      statusSessao[id] = "qr";
+      statusSessao[id] = ESTADOS_WHATSAPP.PRECISA_QR;
     }
 
     if (connection === "open") {
       console.log("[WHATSAPP] WHATSAPP CONECTADO:", id);
 
-      statusSessao[id] = "open";
+      statusSessao[id] = ESTADOS_WHATSAPP.OPEN;
       qrCodes[id] = null;
       reconectando[id] = false;
+      tentativasReconexaoWhatsApp[id] = 0;
+      ultimoMotivoDisconnectWhatsApp[id] = "";
 
 sessoesMeta[id] = sessoesMeta[id] || {
   id,
@@ -23075,24 +23192,48 @@ salvarSessoesMeta();
 
     if (connection === "close") {
       const motivo = lastDisconnect?.error?.output?.statusCode;
+      const disconnectReason = resolverDisconnectReasonWhatsApp(motivo);
+      const motivoClassificado = classificarDisconnect({
+        statusCode: motivo,
+        errorMessage: lastDisconnect?.error?.message || "",
+        disconnectReason
+      });
+      ultimoMotivoDisconnectWhatsApp[id] = motivoClassificado;
+      const authNoClose = auditarAuthSessaoWhatsApp(id);
 
       console.log("[WHATSAPP] WHATSAPP DESCONECTADO:", id);
       console.log("[INFO] Motivo:", motivo);
       registrarLastDisconnectWhatsApp(id, lastDisconnect);
+      logarAuthSessaoWhatsApp(id, "connection_close", authNoClose);
 
     qrCodes[id] = null;
     delete sessoes[id];
 
       if (motivo === DisconnectReason.loggedOut) {
-        statusSessao[id] = "loggedOut";
+        statusSessao[id] = ESTADOS_WHATSAPP.LOGGED_OUT;
+        marcarSessaoWhatsAppMetaStatus(id, ESTADOS_WHATSAPP.LOGGED_OUT);
         reconectando[id] = false;
         return;
       }
 
-      statusSessao[id] = "reconnecting";
+      statusSessao[id] = authNoClose.authValidaParaReconectar
+        ? ESTADOS_WHATSAPP.BACKOFF
+        : ESTADOS_WHATSAPP.PRECISA_QR;
+
+      console.log("[WHATSAPP-RECONNECT-DECISAO]", JSON.stringify({
+        sessaoId: id,
+        motivo: motivoClassificado,
+        statusCode: motivo ?? null,
+        authValidaParaReconectar: authNoClose.authValidaParaReconectar === true,
+        estadoOperacional: statusSessao[id]
+      }));
 
       if (!reconectando[id]) {
         reconectando[id] = true;
+        tentativasReconexaoWhatsApp[id] = (tentativasReconexaoWhatsApp[id] || 0) + 1;
+        const backoffMs = authNoClose.authValidaParaReconectar
+          ? calcularBackoffMs(tentativasReconexaoWhatsApp[id])
+          : 0;
 
         setTimeout(() => {
           if (!usuarioAtivoOperacional(clienteIdMensageiro)) {
@@ -23101,12 +23242,22 @@ salvarSessoesMeta();
             statusSessao[id] = "inativo";
             return;
           }
+
+          const authAntesReconectar = auditarAuthSessaoWhatsApp(id);
+          if (!authAntesReconectar.authValidaParaReconectar) {
+            logarAuthSessaoWhatsApp(id, "reconnect_bloqueado_sem_auth_valida", authAntesReconectar);
+            reconectando[id] = false;
+            statusSessao[id] = ESTADOS_WHATSAPP.PRECISA_QR;
+            return;
+          }
+
+          statusSessao[id] = ESTADOS_WHATSAPP.RECONNECTING;
           iniciarWhatsApp(id).catch((e) => {
             console.error("[ERRO] ERRO AO RECONECTAR:", e);
-            statusSessao[id] = "offline";
+            statusSessao[id] = ESTADOS_WHATSAPP.OFFLINE;
             reconectando[id] = false;
           });
-        }, 5000);
+        }, backoffMs);
       }
     }
   });
