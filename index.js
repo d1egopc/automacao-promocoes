@@ -1984,16 +1984,46 @@ function executarMutacaoFilaCliente(clienteId = "admin", fluxo = "fila", mutacao
   }
 }
 
+const ultimoErroSalvarFilaPorCliente = new Map();
+
+function classificarErroFila(mensagem = "") {
+  const texto = String(mensagem || "").toLowerCase();
+  if (/enospc|no space left on device|sem espaco/.test(texto)) return "sem_espaco_fila";
+  if (/converting circular structure|circular|json/.test(texto)) return "serializacao_fila_invalida";
+  if (/caminho_fila_inseguro/.test(texto)) return "caminho_fila_inseguro";
+  if (/storage_fila_nao_injetado/.test(texto)) return "storage_fila_nao_injetado";
+  return "erro_fila";
+}
+
+function erroSalvarFilaCliente(clienteId = "admin") {
+  const chave = String(clienteId || "admin");
+  const mensagem = ultimoErroSalvarFilaPorCliente.get(chave) || "";
+  return {
+    motivo: classificarErroFila(mensagem),
+    erro: mensagem
+  };
+}
+
 function salvarFila(clienteId = "admin") {
   return executarMutacaoFilaCliente(clienteId, "salvarFila", () => {
   aplicarDiversidadeFila(clienteId);
+  ultimoErroSalvarFilaPorCliente.delete(String(clienteId || "admin"));
+
+  const loggerFila = {
+    log: (...args) => console.log(...args),
+    error: (...args) => {
+      const mensagem = args.map(arg => String(arg || "")).join(" ").trim();
+      ultimoErroSalvarFilaPorCliente.set(String(clienteId || "admin"), mensagem);
+      console.error(...args);
+    }
+  };
 
   return filaOfertas.salvarFila({
     fila,
     clienteId,
     getFilaFile,
     writeClienteJson,
-    logger: console
+    logger: loggerFila
   });
   });
 }
@@ -2122,15 +2152,32 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
       return { ok: false, duplicada: true, motivo: "duplicidade_fila" };
     }
 
-    filaOfertas.adicionarOfertaFila(fila, itemFinal, {
+    const adicionou = filaOfertas.adicionarOfertaFila(fila, itemFinal, {
       clienteId: cliente,
       origem: itemFinal.origem || "engine",
       logger: console
     });
+
+    if (!adicionou) {
+      const motivo = itemFinal.antiRepeticao2h?.motivo || "fila_porta_bloqueada";
+      console.log("[ENGINE-DISTRIBUIDOR-FILA-RECUSADA]", {
+        clienteId: cliente,
+        engineOfertaId: itemFinal.engineOfertaId || null,
+        motivo
+      });
+      return { ok: false, motivo, itemFila: itemFinal };
+    }
+
     const salvou = salvarFila(cliente);
 
     if (!salvou) {
-      return { ok: false, motivo: "erro_fila" };
+      const erroFila = erroSalvarFilaCliente(cliente);
+      console.log("[ENGINE-DISTRIBUIDOR-FILA-ERRO]", {
+        clienteId: cliente,
+        engineOfertaId: itemFinal.engineOfertaId || null,
+        motivo: erroFila.motivo
+      });
+      return { ok: false, motivo: erroFila.motivo, erro: erroFila.erro };
     }
 
     console.log("[ENGINE-DISTRIBUIDOR-FILA-MEMORIA]", {
@@ -2147,7 +2194,7 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
       clienteId,
       erro: e.message
     });
-    return { ok: false, motivo: "erro_fila", erro: e.message };
+    return { ok: false, motivo: classificarErroFila(e.message), erro: e.message };
   }
 }
 function garantirIdsFila() {

@@ -759,6 +759,124 @@ function testarPonteIntegridadeKabumAwinMantemSomenteCtaD1Renderizavel() {
   assert.strictEqual(itemFila.linksComerciais[0].urlAfiliada, awinD1);
 }
 
+async function testarEntradaFilaKabumAwinPreservaMotivoReal() {
+  mockModulo("../utils/usuarios-atividade", {
+    usuarioAtivo: () => true,
+    logUsuarioInativoIgnorado: () => false
+  });
+  limparModulo("../modules/engine/distributor/distributor.service");
+  const { adicionarOfertaNaFilaCliente } = require("../modules/engine/distributor/distributor.service");
+  const awinD1 = "https://www.awin1.com/cread.php?awinmid=17729&awinaffid=2649374&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F1053828";
+
+  function ofertaKabum(id, titulo, preco) {
+    return {
+      id,
+      job_id: id + 100000,
+      uuid: `oferta-kabum-${id}`,
+      cliente_id: "user_40qdblgt",
+      marketplace: "awin",
+      titulo,
+      preco,
+      preco_atual: preco,
+      categoria: "Gamer e Hardware",
+      link_afiliado: awinD1,
+      link_original: "https://www.awin1.com/cread.php?awinmid=17729&awinaffid=1062989&clickref=fonte&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F1053828",
+      metadata: {
+        integridadeComercial: {
+          precoValidado: { valor: preco, origem: "texto_radar", confiavel: true },
+          linksComerciais: [
+            {
+              papel: "produto",
+              urlAfiliada: awinD1,
+              renderizavel: true,
+              seguro: true,
+              origem: "adapter.awin"
+            }
+          ],
+          aplicouMudancasOperacionais: false
+        }
+      }
+    };
+  }
+
+  const adicionados = [];
+  const depsOk = {
+    adicionarOfertaNaFilaGlobal: (clienteId, itemFila) => {
+      adicionados.push({ clienteId, itemFila });
+      return { ok: true, itemFila };
+    }
+  };
+
+  const aorus = await adicionarOfertaNaFilaCliente(
+    ofertaKabum(69136, "Notebook Gamer AORUS 17X AXF", 18999),
+    { deps: depsOk }
+  );
+  const gigabyte = await adicionarOfertaNaFilaCliente(
+    ofertaKabum(69135, "Notebook Gamer Gigabyte Gaming A16", 6429),
+    { deps: depsOk }
+  );
+
+  assert.strictEqual(aorus.ok, true);
+  assert.strictEqual(gigabyte.ok, true);
+  assert.strictEqual(adicionados.length, 2);
+  assert.strictEqual(adicionados[0].itemFila.marketplace, "awin");
+  assert.strictEqual(adicionados[0].itemFila.linkAfiliado, awinD1);
+  assert.ok(!adicionados[0].itemFila.linkAfiliado.includes("awinaffid=1062989"));
+
+  const duplicada = await adicionarOfertaNaFilaCliente(
+    ofertaKabum(69136, "Notebook Gamer AORUS 17X AXF", 18999),
+    { deps: { adicionarOfertaNaFilaGlobal: () => ({ ok: false, duplicada: true, motivo: "duplicidade_fila" }) } }
+  );
+  assert.strictEqual(duplicada.ok, false);
+  assert.strictEqual(duplicada.motivo, "duplicidade_fila");
+
+  const semEspaco = await adicionarOfertaNaFilaCliente(
+    ofertaKabum(69135, "Notebook Gamer Gigabyte Gaming A16", 6429),
+    { deps: { adicionarOfertaNaFilaGlobal: () => ({ ok: false, motivo: "sem_espaco_fila", erro: "ENOSPC: no space left on device, write" }) } }
+  );
+  assert.strictEqual(semEspaco.ok, false);
+  assert.strictEqual(semEspaco.motivo, "sem_espaco_fila");
+  assert.ok(semEspaco.erro.includes("ENOSPC"));
+}
+
+function testarEntradaFilaMarketplacesOficiaisContinuaPropagando() {
+  mockModulo("../utils/usuarios-atividade", {
+    usuarioAtivo: () => true,
+    logUsuarioInativoIgnorado: () => false
+  });
+  limparModulo("../modules/engine/distributor/distributor.service");
+  const { adicionarOfertaNaFilaCliente } = require("../modules/engine/distributor/distributor.service");
+  const marketplaces = ["mercadolivre", "amazon", "shopee", "aliexpress"];
+
+  return Promise.all(marketplaces.map(async (marketplace, idx) => {
+    const resultado = await adicionarOfertaNaFilaCliente({
+      id: 80000 + idx,
+      uuid: `oferta-${marketplace}`,
+      cliente_id: "user_40qdblgt",
+      marketplace,
+      titulo: `Oferta ${marketplace}`,
+      preco: 100 + idx,
+      categoria: "Gamer e Hardware",
+      link_afiliado: `https://example.test/${marketplace}`,
+      link_original: `https://origem.test/${marketplace}`
+    }, {
+      deps: {
+        adicionarOfertaNaFilaGlobal: (_clienteId, itemFila) => ({ ok: true, itemFila })
+      }
+    });
+
+    assert.strictEqual(resultado.ok, true, `${marketplace} deve continuar entrando na fila`);
+    assert.strictEqual(resultado.itemFila.marketplace, marketplace);
+  }));
+}
+
+function testarIndexPreservaMotivoEspecificoDaFila() {
+  const fonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
+  assert.ok(fonte.includes("sem_espaco_fila"));
+  assert.ok(fonte.includes("no space left on device"));
+  assert.ok(fonte.includes("[ENGINE-DISTRIBUIDOR-FILA-ERRO]"));
+  assert.ok(fonte.includes("erroSalvarFilaCliente(cliente)"));
+}
 function testarAwinMetadataCupomNaoBloqueiaUedKabum() {
   const { escolherProdutoPrincipal } = require("../modules/engine/link-role.service");
   const awin = "https://www.awin1.com/cread.php?awinmid=17729&awinaffid=terceiro&clickref=fonte&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F536014";
@@ -901,6 +1019,9 @@ function testarOrquestradorIncluiMarketplacesOficiais() {
   await testarAliExpressBinnuneUsaPrecoRadarEstruturadoEDescartaAuxiliar();
   testarPonteIntegridadePreservaPrecoEAppPcAteFila();
   testarPonteIntegridadeKabumAwinMantemSomenteCtaD1Renderizavel();
+  await testarEntradaFilaKabumAwinPreservaMotivoReal();
+  await testarEntradaFilaMarketplacesOficiaisContinuaPropagando();
+  testarIndexPreservaMotivoEspecificoDaFila();
   testarAwinMetadataCupomNaoBloqueiaUedKabum();
   testarCategoriaMarketplaceGenericaClassificaPorTitulo();
   testarCategoriaAliExpressReclassificaAposTituloRadarFinal();
