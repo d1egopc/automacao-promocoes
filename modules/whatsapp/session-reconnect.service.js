@@ -29,35 +29,111 @@ function authDirSessao(dataDir = "/data", sessaoId = "") {
   return path.join(dataDir || "/data", `auth_${String(sessaoId || "").trim()}`);
 }
 
-function lerCreds(authDir = "", fsImpl = fs) {
-  const arquivoCreds = path.join(authDir, "creds.json");
+function arquivoCredsSessao(authDir = "") {
+  return path.join(authDir, "creds.json");
+}
 
+function arquivoBackupCredsSessao(authDir = "") {
+  return path.join(authDir, "creds.json.bak");
+}
+
+function validarEstruturaCreds(creds) {
+  const ok = Boolean(
+    creds &&
+    typeof creds === "object" &&
+    creds.noiseKey &&
+    creds.signedIdentityKey &&
+    creds.signedPreKey &&
+    creds.registrationId !== undefined &&
+    creds.advSecretKey
+  );
+  const meId = creds?.me?.id || creds?.me?.jid || "";
+
+  return {
+    ok,
+    meIdExiste: Boolean(meId)
+  };
+}
+
+function lerCredsArquivo(arquivoCreds = "", fsImpl = fs) {
   try {
-    if (!fsImpl.existsSync(authDir)) {
-      return { authDirExiste: false, credsExiste: false, credsJsonValido: false, meIdExiste: false };
-    }
-
     if (!fsImpl.existsSync(arquivoCreds)) {
-      return { authDirExiste: true, credsExiste: false, credsJsonValido: false, meIdExiste: false };
+      return { existe: false, jsonValido: false, estruturaValida: false, meIdExiste: false };
     }
 
     const raw = fsImpl.readFileSync(arquivoCreds, "utf8");
     const creds = JSON.parse(raw);
-    const meId = creds?.me?.id || creds?.me?.jid || "";
+    const estrutura = validarEstruturaCreds(creds);
+
+    return {
+      existe: true,
+      jsonValido: true,
+      estruturaValida: estrutura.ok,
+      meIdExiste: estrutura.meIdExiste,
+      creds,
+      raw
+    };
+  } catch (e) {
+    return {
+      existe: fsImpl.existsSync?.(arquivoCreds) === true,
+      jsonValido: false,
+      estruturaValida: false,
+      meIdExiste: false,
+      erro: e.message || "credencial_invalida"
+    };
+  }
+}
+
+function lerCreds(authDir = "", fsImpl = fs) {
+  const arquivoCreds = arquivoCredsSessao(authDir);
+  const arquivoBackup = arquivoBackupCredsSessao(authDir);
+
+  try {
+    if (!fsImpl.existsSync(authDir)) {
+      return {
+        authDirExiste: false,
+        credsExiste: false,
+        credsJsonValido: false,
+        credsEstruturaValida: false,
+        meIdExiste: false,
+        backupExiste: false,
+        backupJsonValido: false,
+        backupEstruturaValida: false,
+        backupMeIdExiste: false
+      };
+    }
+
+    const principal = lerCredsArquivo(arquivoCreds, fsImpl);
+    const backup = lerCredsArquivo(arquivoBackup, fsImpl);
 
     return {
       authDirExiste: true,
-      credsExiste: true,
-      credsJsonValido: true,
-      meIdExiste: Boolean(meId),
-      creds
+      credsExiste: principal.existe,
+      credsJsonValido: principal.jsonValido,
+      credsEstruturaValida: principal.estruturaValida,
+      meIdExiste: principal.meIdExiste,
+      creds: principal.creds,
+      raw: principal.raw,
+      backupExiste: backup.existe,
+      backupJsonValido: backup.jsonValido,
+      backupEstruturaValida: backup.estruturaValida,
+      backupMeIdExiste: backup.meIdExiste,
+      backupCreds: backup.creds,
+      backupRaw: backup.raw,
+      erro: principal.erro || "",
+      erroBackup: backup.erro || ""
     };
   } catch (e) {
     return {
       authDirExiste: fsImpl.existsSync?.(authDir) === true,
       credsExiste: fsImpl.existsSync?.(arquivoCreds) === true,
       credsJsonValido: false,
+      credsEstruturaValida: false,
       meIdExiste: false,
+      backupExiste: fsImpl.existsSync?.(arquivoBackup) === true,
+      backupJsonValido: false,
+      backupEstruturaValida: false,
+      backupMeIdExiste: false,
       erro: e.message || "credencial_invalida"
     };
   }
@@ -75,24 +151,127 @@ function auditarAuthSessao({ dataDir = "/data", sessaoId = "", statusAtual = "",
   );
   const estadoTerminal = ESTADOS_TERMINAIS_SEM_RESSUSCITAR.has(String(statusAtual || "")) ||
     ESTADOS_TERMINAIS_SEM_RESSUSCITAR.has(String(meta?.status || ""));
+  const principalValida = leitura.credsExiste && leitura.credsJsonValido && leitura.credsEstruturaValida;
+  const backupValido = leitura.backupExiste && leitura.backupJsonValido && leitura.backupEstruturaValida;
+  const meIdDisponivel = leitura.meIdExiste || leitura.backupMeIdExiste;
   const authValidaParaReconectar =
     leitura.authDirExiste &&
-    leitura.credsExiste &&
-    leitura.credsJsonValido &&
+    (principalValida || backupValido) &&
     !estadoTerminal &&
-    (leitura.meIdExiste || jaEsteveOpen);
+    (meIdDisponivel || jaEsteveOpen);
 
   return {
     authDir,
     authDirExiste: leitura.authDirExiste,
     credsExiste: leitura.credsExiste,
     credsJsonValido: leitura.credsJsonValido,
+    credsEstruturaValida: leitura.credsEstruturaValida,
     meIdExiste: leitura.meIdExiste,
+    backupExiste: leitura.backupExiste,
+    backupJsonValido: leitura.backupJsonValido,
+    backupEstruturaValida: leitura.backupEstruturaValida,
+    backupMeIdExiste: leitura.backupMeIdExiste,
+    backupDisponivelParaRestaurar: Boolean(!principalValida && backupValido),
     jaEsteveOpen,
     estadoTerminal,
     authValidaParaReconectar,
     erro: leitura.erro || ""
   };
+}
+
+function escreverArquivoAtomicoSync(destino = "", conteudo = "", fsImpl = fs) {
+  const dir = path.dirname(destino);
+  const tmp = path.join(dir, `.${path.basename(destino)}.${process.pid}.${Date.now()}.tmp`);
+  let fd = null;
+
+  try {
+    if (!fsImpl.existsSync(dir)) fsImpl.mkdirSync(dir, { recursive: true });
+    fd = fsImpl.openSync(tmp, "w");
+    fsImpl.writeFileSync(fd, conteudo, "utf8");
+    if (typeof fsImpl.fsyncSync === "function") fsImpl.fsyncSync(fd);
+    fsImpl.closeSync(fd);
+    fd = null;
+    fsImpl.renameSync(tmp, destino);
+    return { ok: true };
+  } catch (e) {
+    if (fd !== null) {
+      try { fsImpl.closeSync(fd); } catch (_) {}
+    }
+    try { if (fsImpl.existsSync(tmp)) fsImpl.unlinkSync(tmp); } catch (_) {}
+    return { ok: false, motivo: "falha_escrita_atomica", erro: e.message || "erro" };
+  }
+}
+
+function salvarBackupCredsValido({ dataDir = "/data", sessaoId = "", fsImpl = fs } = {}) {
+  const authDir = authDirSessao(dataDir, sessaoId);
+  const leitura = lerCreds(authDir, fsImpl);
+  const principalValida = leitura.credsExiste && leitura.credsJsonValido && leitura.credsEstruturaValida;
+
+  if (!principalValida) {
+    return {
+      ok: false,
+      motivo: "creds_principal_invalida",
+      credsPrincipalValida: false,
+      backupExiste: leitura.backupExiste === true,
+      backupValido: leitura.backupJsonValido === true && leitura.backupEstruturaValida === true
+    };
+  }
+
+  const destino = arquivoBackupCredsSessao(authDir);
+  const escrita = escreverArquivoAtomicoSync(destino, leitura.raw, fsImpl);
+  return {
+    ok: escrita.ok === true,
+    motivo: escrita.ok ? "backup_atualizado" : escrita.motivo,
+    credsPrincipalValida: true,
+    backupExiste: true,
+    backupValido: escrita.ok === true
+  };
+}
+
+function recuperarCredsNoBoot({ dataDir = "/data", sessaoId = "", statusAtual = "", meta = {}, fsImpl = fs } = {}) {
+  const auth = auditarAuthSessao({ dataDir, sessaoId, statusAtual, meta, fsImpl });
+  const base = {
+    sessaoId,
+    credsPrincipalValida: auth.credsJsonValido === true && auth.credsEstruturaValida === true,
+    backupExiste: auth.backupExiste === true,
+    backupValido: auth.backupJsonValido === true && auth.backupEstruturaValida === true,
+    backupRestaurado: false
+  };
+
+  if (auth.estadoTerminal) {
+    return { ...base, ok: false, decisao: "precisa_qr", motivo: "estado_terminal_nao_restaurar", auth };
+  }
+
+  if (base.credsPrincipalValida) {
+    return { ...base, ok: true, decisao: "iniciar", motivo: "creds_principal_valida", auth };
+  }
+
+  if ((!auth.credsExiste || !auth.credsJsonValido || !auth.credsEstruturaValida) && auth.backupDisponivelParaRestaurar) {
+    const authDir = authDirSessao(dataDir, sessaoId);
+    const backupRaw = lerCreds(authDir, fsImpl).backupRaw;
+    const restauracao = escreverArquivoAtomicoSync(arquivoCredsSessao(authDir), backupRaw, fsImpl);
+    if (!restauracao.ok) {
+      return { ...base, ok: false, decisao: "erro_auth", motivo: "falha_restaurar_backup", auth };
+    }
+
+    const restaurado = auditarAuthSessao({ dataDir, sessaoId, statusAtual, meta, fsImpl });
+    const restauradoValido = restaurado.credsJsonValido === true && restaurado.credsEstruturaValida === true;
+    return {
+      ...base,
+      credsPrincipalValida: restauradoValido,
+      backupRestaurado: restauradoValido,
+      ok: restauradoValido,
+      decisao: restauradoValido ? "iniciar" : "erro_auth",
+      motivo: restauradoValido ? "backup_restaurado" : "backup_restaurado_invalido",
+      auth: restaurado
+    };
+  }
+
+  if (!auth.authDirExiste || !auth.credsExiste) {
+    return { ...base, ok: false, decisao: "precisa_qr", motivo: "credencial_ausente", auth };
+  }
+
+  return { ...base, ok: false, decisao: "erro_auth", motivo: "sem_backup_valido", auth };
 }
 
 function classificarDisconnect({ statusCode, errorMessage = "", disconnectReason = "" } = {}) {
@@ -144,8 +323,11 @@ function calcularBackoffMs(tentativas = 0) {
 module.exports = {
   ESTADOS_WHATSAPP,
   authDirSessao,
+  lerCreds,
   auditarAuthSessao,
   classificarDisconnect,
   deveExibirQr,
-  calcularBackoffMs
+  calcularBackoffMs,
+  salvarBackupCredsValido,
+  recuperarCredsNoBoot
 };

@@ -6718,7 +6718,9 @@ const {
   auditarAuthSessao,
   classificarDisconnect,
   deveExibirQr,
-  calcularBackoffMs
+  calcularBackoffMs,
+  salvarBackupCredsValido,
+  recuperarCredsNoBoot
 } = require("./modules/whatsapp/session-reconnect.service");
 
 registrarMiddlewaresOperacionais(app, {
@@ -22927,7 +22929,11 @@ function logarAuthSessaoWhatsApp(id, etapa, auth = {}) {
       authDirExiste: auth.authDirExiste === true,
       credsExiste: auth.credsExiste === true,
       credsJsonValido: auth.credsJsonValido === true,
+      credsEstruturaValida: auth.credsEstruturaValida === true,
       meIdExiste: auth.meIdExiste === true,
+      backupExiste: auth.backupExiste === true,
+      backupValido: auth.backupJsonValido === true && auth.backupEstruturaValida === true,
+      backupRestauravel: auth.backupDisponivelParaRestaurar === true,
       jaEsteveOpen: auth.jaEsteveOpen === true,
       estadoTerminal: auth.estadoTerminal === true,
       authValidaParaReconectar: auth.authValidaParaReconectar === true,
@@ -22999,6 +23005,31 @@ async function iniciarWhatsApp(id, force = false) {
   reconectando[id] = false;
 
   inicializandoWhatsApp[id] = true;
+  const recuperacaoBoot = recuperarCredsNoBoot({
+    dataDir: "/data",
+    sessaoId: id,
+    statusAtual: statusSessao[id],
+    meta: sessoesMeta?.[id] || {}
+  });
+
+  console.log("[WHATSAPP-AUTH-BOOT-DECISAO]", JSON.stringify({
+    sessaoId: id,
+    credsPrincipalValida: recuperacaoBoot.credsPrincipalValida === true,
+    backupExiste: recuperacaoBoot.backupExiste === true,
+    backupValido: recuperacaoBoot.backupValido === true,
+    backupRestaurado: recuperacaoBoot.backupRestaurado === true,
+    decisao: recuperacaoBoot.decisao,
+    motivo: recuperacaoBoot.motivo
+  }));
+
+  if (recuperacaoBoot.decisao === "erro_auth") {
+    inicializandoWhatsApp[id] = false;
+    statusSessao[id] = ESTADOS_WHATSAPP.ERRO_AUTH;
+    reconectando[id] = false;
+    logarAuthSessaoWhatsApp(id, "boot_erro_auth", recuperacaoBoot.auth || {});
+    return null;
+  }
+
   const authAntesSocket = auditarAuthSessaoWhatsApp(id);
   logarAuthSessaoWhatsApp(id, "antes_socket", authAntesSocket);
 
@@ -23017,7 +23048,30 @@ async function iniciarWhatsApp(id, force = false) {
     });
 
     sessoes[id] = sock;
-    sock.ev.on("creds.update", saveCreds);
+    sock.ev.on("creds.update", async () => {
+      try {
+        await saveCreds();
+        const backup = salvarBackupCredsValido({
+          dataDir: "/data",
+          sessaoId: id
+        });
+        if (!backup.ok) {
+          console.log("[WHATSAPP-AUTH-BACKUP-DECISAO]", JSON.stringify({
+            sessaoId: id,
+            backupAtualizado: false,
+            motivo: backup.motivo || "backup_nao_atualizado",
+            credsPrincipalValida: backup.credsPrincipalValida === true,
+            backupExiste: backup.backupExiste === true,
+            backupValido: backup.backupValido === true
+          }));
+        }
+      } catch (e) {
+        console.log("[WHATSAPP-AUTH-SAVE-ERRO]", JSON.stringify({
+          sessaoId: id,
+          erro: e.message || "erro_save_creds"
+        }));
+      }
+    });
   } catch (e) {
     inicializandoWhatsApp[id] = false;
     statusSessao[id] = ESTADOS_WHATSAPP.ERRO_AUTH;
@@ -23531,16 +23585,21 @@ sessoesParaReconectar = sessoesParaReconectar
   .filter(id => !id.includes("_user_"))
   .filter(id => !/^user_[^_]+_user_/.test(id));
 
-const sessoesFantasma = sessoesParaReconectar.filter(id => !sessaoPersistidaValida(id));
-
-if (sessoesFantasma.length) {
-  console.log("[INFO] Sesses fantasmas removidas da reconexo:", sessoesFantasma);
-}
-
-sessoesParaReconectar = sessoesParaReconectar.filter(sessaoPersistidaValida);
-
-config.sessoesWhatsapp = sessoesParaReconectar;
-salvarConfig();
+sessoesParaReconectar = sessoesParaReconectar.filter(id => {
+  const authBoot = auditarAuthSessaoWhatsApp(id);
+  const possuiMeta = sessaoPersistidaValida(id);
+  const iniciar = possuiMeta || authBoot.authDirExiste === true || authBoot.credsExiste === true || authBoot.backupExiste === true;
+  console.log("[WHATSAPP-BOOT-SESSAO]", JSON.stringify({
+    sessaoId: id,
+    metaExiste: possuiMeta === true,
+    authDirExiste: authBoot.authDirExiste === true,
+    credsExiste: authBoot.credsExiste === true,
+    backupExiste: authBoot.backupExiste === true,
+    decisao: iniciar ? "iniciar" : "pular",
+    motivo: iniciar ? "sessao_persistida_ou_auth_existente" : "sem_meta_e_sem_auth"
+  }));
+  return iniciar;
+});
 
     sessoesParaReconectar.forEach((id, index) => {
       setTimeout(() => {
