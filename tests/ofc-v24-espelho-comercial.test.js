@@ -1315,6 +1315,53 @@ for (const resultado of [
   assert.ok(!/(?:null|undefined|NaN)/i.test(resultado.templateEspelhoShadow.mensagem));
 }
 
+const aliexpressCuponsMoedasAppPcConvertidos = criarEspelho({
+  textoOriginal: [
+    "SSD Netac 512gb sata3",
+    "512GB por R$ 354,74 (68 moedas)",
+    "Cupom: BRAE2 ou IFP6FAD6 ou IFPVOILF",
+    "Link APP: https://a.aliexpress.com/_appNetac",
+    "Link PC: https://a.aliexpress.com/_pcNetac"
+  ].join("\n"),
+  oferta: {
+    marketplace: "aliexpress",
+    preco: 354.74,
+    linksComerciais: [
+      {
+        papel: "link_app",
+        urlOriginal: "https://a.aliexpress.com/_appNetac",
+        urlAfiliada: "https://s.click.aliexpress.com/e/_appNetacD1",
+        renderizavel: true,
+        convertidoWorkspace: true,
+        seguro: true
+      },
+      {
+        papel: "link_pc",
+        urlOriginal: "https://a.aliexpress.com/_pcNetac",
+        urlAfiliada: "https://s.click.aliexpress.com/e/_pcNetacD1",
+        renderizavel: true,
+        convertidoWorkspace: true,
+        seguro: true
+      }
+    ]
+  },
+  comercialNormalizado: { marketplace: "aliexpress", precoAtual: 354.74, precoConfiavel: true }
+});
+const templateAliCuponsMoedas = montarTemplateEspelhoPorBlocosV26(
+  aliexpressCuponsMoedasAppPcConvertidos.espelhoComercial,
+  aliexpressCuponsMoedasAppPcConvertidos.documentoComercialCanonico
+);
+assert.ok(templateAliCuponsMoedas.mensagem.includes("Cupons: BRAE2 • IFP6FAD6 • IFPVOILF"));
+assert.ok(templateAliCuponsMoedas.mensagem.includes("APP: +68 moedas"));
+assert.ok(templateAliCuponsMoedas.mensagem.includes("APP:\nhttps://s.click.aliexpress.com/e/_appNetacD1"));
+assert.ok(templateAliCuponsMoedas.mensagem.includes("PC:\nhttps://s.click.aliexpress.com/e/_pcNetacD1"));
+assert.ok(!templateAliCuponsMoedas.mensagem.includes("https://a.aliexpress.com/_appNetac"));
+assert.ok(!templateAliCuponsMoedas.mensagem.includes("https://a.aliexpress.com/_pcNetac"));
+assert.ok(!/Erro ao consultar API AliExpress|link_aliexpress_sem_conversao_segura|falha_tecnica_conversao_link/.test(templateAliCuponsMoedas.mensagem));
+assert.deepStrictEqual(
+  aliexpressCuponsMoedasAppPcConvertidos.documentoComercialCanonico.linksComerciais.map(item => item.tipo),
+  ["app", "pc"]
+);
 const resumoV26 = mlCompleto.documentoComercialCanonico.blocos.reduce((acc, bloco) => {
   acc[bloco.tipo] = (acc[bloco.tipo] || 0) + 1;
   return acc;

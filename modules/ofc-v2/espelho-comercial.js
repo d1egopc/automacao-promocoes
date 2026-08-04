@@ -473,6 +473,14 @@ function extrairBeneficioTexto(textoOriginal = "", oferta = {}, ofertaEntrada = 
   return primeiroTexto(ofertaEntrada.beneficioExtra, ofertaEntrada.beneficioTexto, oferta.beneficioExtra, oferta.beneficioTexto);
 }
 
+function extrairMoedasTextoComercial(textoOriginal = "", beneficioTexto = "") {
+  const fonte = limparTextoComercial(`${textoOriginal || ""}\n${beneficioTexto || ""}`);
+  if (!/\b(?:moeda|moedas|coins?)\b/i.test(fonte)) return "";
+  const match = fonte.match(/(?:\+\s*)?(\d{1,6})\s*(?:moeda|moedas|coins?)\b/i);
+  if (match) return `+${match[1]} moedas`;
+  return "Moedas";
+}
+
 const ORDEM_BLOCOS_COMERCIAIS_V26 = Object.freeze({
   titulo: 10,
   subtitulo_comercial: 15,
@@ -822,7 +830,8 @@ function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
   adicionarBlocoComercial(blocos, { tipo: "instrucao_cupom", textoOriginal: instrucaoCupomCanonica, origem: doc.instrucaoTexto ? "documento.instrucaoTexto" : "documento.instrucao_cupom_segura", confianca: doc.instrucaoTexto ? "alta" : "media", essencial: cupomNecessarioParaPreco(doc), requisitos: cupomEssencial ? ["cupom"] : [] });
 
   adicionarBlocoComercial(blocos, { tipo: "cashback", textoOriginal: doc.cashbackTexto, origem: "documento.cashbackTexto", confianca: "media" });
-  if (/\bmoeda|moedas|coins?\b/i.test(`${contexto.textoOriginal || ""} ${doc.beneficioTexto || ""}`)) adicionarBlocoComercial(blocos, { tipo: "moedas", textoOriginal: primeiroTexto(doc.beneficioTexto, "Moedas"), origem: "texto_comercial_original", confianca: "media" });
+  const moedasTexto = extrairMoedasTextoComercial(contexto.textoOriginal || "", doc.beneficioTexto || "");
+  if (moedasTexto) adicionarBlocoComercial(blocos, { tipo: "moedas", textoOriginal: moedasTexto, origem: "texto_comercial_original", confianca: "media" });
   adicionarBlocoComercial(blocos, { tipo: "frete", textoOriginal: doc.freteTexto, origem: "documento.freteTexto", confianca: "media" });
   if (/\bprime\b/i.test(`${contexto.textoOriginal || ""} ${doc.beneficioTexto || ""}`)) adicionarBlocoComercial(blocos, { tipo: "prime_programa", textoOriginal: primeiroTexto(doc.beneficioTexto, "Prime"), origem: "texto_comercial_original", confianca: "media" });
   if (/\bgarantia\b/i.test(`${contexto.textoOriginal || ""} ${doc.beneficioTexto || ""}`)) adicionarBlocoComercial(blocos, { tipo: "garantia", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bgarantia\b/) || doc.beneficioTexto, origem: "texto_comercial_original", confianca: "media" });
@@ -1066,7 +1075,7 @@ function urlsDoTexto(textoOriginal = "") {
 function valorUrl(item = {}) {
   if (typeof item === "string") return texto(item);
   if (!item || typeof item !== "object") return "";
-  return primeiroTexto(item.afiliado, item.linkAfiliado, item.resolvido, item.url_expandida, item.urlNormalizada, item.original, item.url_original, item.link, item.url);
+  return primeiroTexto(item.urlOriginal, item.url, item.original, item.url_original, item.link, item.href, item.urlExpandida, item.url_expandida, item.urlNormalizada, item.resolvido);
 }
 
 function adicionarLinkUnico(saida, url, tipo = "produto", contexto = "", extras = {}) {
@@ -1080,6 +1089,8 @@ function adicionarLinkUnico(saida, url, tipo = "produto", contexto = "", extras 
     existente.afiliadoConvertido = existente.afiliadoConvertido === true || extras.afiliadoConvertido === true;
     existente.workspaceConvertido = existente.workspaceConvertido === true || extras.workspaceConvertido === true;
     existente.linkAfiliadoWorkspace = existente.linkAfiliadoWorkspace === true || extras.linkAfiliadoWorkspace === true;
+    existente.renderizavel = existente.renderizavel === true || extras.renderizavel === true;
+    existente.seguro = existente.seguro === true || extras.seguro === true;
     existente.origem = texto(existente.origem || extras.origem || "");
     existente.confianca = texto(existente.confianca || extras.confianca || "");
     return;
@@ -1093,6 +1104,8 @@ function adicionarLinkUnico(saida, url, tipo = "produto", contexto = "", extras 
     afiliadoConvertido: extras.afiliadoConvertido === true,
     workspaceConvertido: extras.workspaceConvertido === true,
     linkAfiliadoWorkspace: extras.linkAfiliadoWorkspace === true,
+    renderizavel: extras.renderizavel === true,
+    seguro: extras.seguro === true,
     origem: texto(extras.origem || ""),
     confianca: texto(extras.confianca || "")
   });
@@ -1117,16 +1130,31 @@ function adicionarLinkComercialEstruturado(saida, item = {}, tipoPadrao = "produ
     afiliadoConvertido: item.afiliadoConvertido === true,
     workspaceConvertido: item.workspaceConvertido === true,
     linkAfiliadoWorkspace: item.linkAfiliadoWorkspace === true,
+    renderizavel: item.renderizavel === true,
+    seguro: item.seguro === true,
     origem: item.origem,
     confianca: item.confianca
   });
 }
 
+function linksComerciaisIntegridade({ oferta = {}, ofertaEntrada = {}, metadata = {} } = {}) {
+  return [
+    ...lista(ofertaEntrada.linksComerciais),
+    ...lista(oferta.linksComerciais),
+    ...lista(metadata.linksComerciais),
+    ...lista(objeto(metadata.integridadeComercial).linksComerciais),
+    ...lista(objeto(metadata.ofcV24).linksComerciais),
+    ...lista(objeto(objeto(metadata.ofcV24).integridadeComercial).linksComerciais)
+  ];
+}
+
 function extrairLinksComerciais({ textoOriginal = "", oferta = {}, ofertaEntrada = {}, link = {} } = {}) {
   const links = [];
+  const metadata = objeto(oferta.metadata || ofertaEntrada.metadata || {});
   for (const item of urlsDoTexto(textoOriginal)) {
     adicionarLinkUnico(links, item.url, tipoLinkTextoComercial(item.linha), item.linha);
   }
+  for (const item of linksComerciaisIntegridade({ oferta, ofertaEntrada, metadata })) adicionarLinkComercialEstruturado(links, item, item?.papel || item?.tipo || "produto");
   for (const item of lista(ofertaEntrada.linksProduto)) adicionarLinkComercialEstruturado(links, item, "produto");
   for (const item of lista(ofertaEntrada.linksResgate)) adicionarLinkComercialEstruturado(links, item, "resgate");
   for (const item of lista(oferta.linksProduto)) adicionarLinkComercialEstruturado(links, item, "produto");
@@ -1590,12 +1618,16 @@ function renderizarBlocoCanonicoV26(bloco = {}, contexto = {}) {
     return `✅ Por: ${valor}`;
   }
   if (bloco.tipo === "parcelamento") return `💳 ${valor}`;
-  if (bloco.tipo === "cupom_codigo") return `🎟️ Cupom: ${valor}`;
-  if (bloco.tipo === "cupons_alternativos") return `🎟️ Cupons: ${valor}`;
+  if (bloco.tipo === "cupom_codigo") {
+    const cupons = lista(contexto.cuponsTexto);
+    if (cupons.length > 1) return `🎟️ Cupons: ${cupons.join(" \u2022 ")}`;
+    return `🎟️ Cupom: ${valor}`;
+  }
+  if (bloco.tipo === "cupons_alternativos") return lista(contexto.cuponsTexto).length > 1 ? "" : `🎟️ Cupons: ${valor}`;
   if (bloco.tipo === "cupom_sem_codigo") return `🎟️ ${valor}`;
   if (bloco.tipo === "instrucao_cupom") return `⚡ ${valor}`;
   if (bloco.tipo === "cashback") return `💰 Cashback: ${valor}`;
-  if (bloco.tipo === "moedas") return `🪙 ${valor}`;
+  if (bloco.tipo === "moedas") return contexto.moedasNoApp ? `🪙 APP: ${valor}` : `🪙 ${valor}`;
   if (bloco.tipo === "frete") return `🚚 ${valor}`;
   if (bloco.tipo === "prime_programa") return `⭐ ${valor}`;
   if (bloco.tipo === "garantia") return `🛡️ ${valor}`;
@@ -1657,7 +1689,12 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
     cashbackTexto: blocosOrdenados.find(bloco => bloco.tipo === "cashback")?.textoOriginal || "",
     temFrete: blocosOrdenados.some(bloco => bloco.tipo === "frete"),
     temCashback: blocosOrdenados.some(bloco => bloco.tipo === "cashback"),
-    instrucaoCupomTexto: blocosOrdenados.find(bloco => bloco.tipo === "instrucao_cupom")?.textoOriginal || ""
+    instrucaoCupomTexto: blocosOrdenados.find(bloco => bloco.tipo === "instrucao_cupom")?.textoOriginal || "",
+    cuponsTexto: blocosOrdenados
+      .filter(bloco => ["cupom_codigo", "cupons_alternativos"].includes(bloco.tipo))
+      .map(bloco => textoBlocoCanonicoV26(bloco))
+      .filter(Boolean),
+    moedasNoApp: /\bapp\b/i.test(`${doc.descricaoOriginal || ""} ${blocosOrdenados.find(bloco => bloco.tipo === "moedas")?.textoOriginal || ""}`)
   };
 
   for (const bloco of blocosOrdenados) {
