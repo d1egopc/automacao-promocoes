@@ -470,6 +470,60 @@ async function testarAliExpressAppPcRenderizaAppSomenteComValidacaoEspecifica() 
   assert.strictEqual(linkPc.renderizavel, true);
   assert.strictEqual(linkPc.urlAfiliada, "https://s.click.aliexpress.com/e/_pcWifiD1");
 }
+async function testarAliExpressAppAfiliadoDivergenteNaoRenderiza() {
+  limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
+  const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
+  const app = "https://a.aliexpress.com/_appOutroProduto";
+  const pc = "https://a.aliexpress.com/_pcProdutoCorreto";
+  const urlsImportadas = [];
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 122, evento_id: 222, cliente_id: "workspace_teste" },
+    evento: {
+      texto_original: [
+        "WiFi 6E AX210 PCI Express + Bluetooth 5.3",
+        "Valor: R$ 293 + 66 moedas",
+        `App: ${app}`,
+        `PC: ${pc}`
+      ].join("\n"),
+      links_extraidos: [app, pc]
+    },
+    links: [
+      { ...linkRow(1, app), marketplace_detectado: "aliexpress" },
+      { ...linkRow(2, pc), marketplace_detectado: "aliexpress" }
+    ],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "track" } }),
+      importarAliExpress: async (url, opcoes = {}) => {
+        urlsImportadas.push(url);
+        return {
+          titulo: "WiFi 6E AX210 PCI Express + Bluetooth 5.3",
+          precoAtual: "293.00",
+          imagem: url === pc ? "https://img.test/wifi-pc.jpg" : "https://img.test/wifi-app.jpg",
+          linkAfiliado: url === pc ? "https://s.click.aliexpress.com/e/_pcWifiD1" : "https://s.click.aliexpress.com/e/_appOutroD1",
+          linkExpandido: url === pc
+            ? "https://www.aliexpress.com/item/1005007777777777.html"
+            : "https://www.aliexpress.com/item/1005009999999999.html",
+          categoria: "AliExpress",
+          conversaoAppValidada: opcoes?.contextoEngine?.papelLink === "link_app"
+        };
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(urlsImportadas, [pc, app]);
+  assert.strictEqual(resultado.imagem, "https://img.test/wifi-pc.jpg");
+  const linkApp = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_app");
+  const linkPc = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
+  assert.strictEqual(linkPc.renderizavel, true);
+  assert.strictEqual(linkPc.conversaoWorkspace.produtoCanonico, "1005007777777777");
+  assert.strictEqual(linkApp.renderizavel, false);
+  assert.strictEqual(linkApp.urlAfiliada, "");
+  assert.strictEqual(linkApp.conversaoWorkspace.motivo, "produto_canonico_divergente");
+  assert.strictEqual(linkApp.conversaoWorkspace.produtoCanonicoPrincipal, "1005007777777777");
+  assert.strictEqual(linkApp.conversaoWorkspace.produtoCanonico, "1005009999999999");
+}
 async function testarAliExpressUsaPrecoRadarQuandoApiNaoRetornaPreco() {
   limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
   const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
@@ -948,6 +1002,16 @@ function testarCategoriaAliExpressReclassificaAposTituloRadarFinal() {
   assert.strictEqual(resultado.oferta.categoria, "Gamer e Hardware");
   assert.strictEqual(resultado.metadataFinal.inteligenciaUniversalV2.categoria, "Gamer e Hardware");
   assert.strictEqual(resultado.metadataFinal.inteligenciaUniversalV2.comparativo.categoriaDepois, "Gamer e Hardware");
+
+  const wifi = reclassificarCategoriaFinalEngine({
+    marketplace: "aliexpress",
+    titulo: "WiFi 6E AX210 PCI Express Bluetooth 5.3",
+    categoria: "AliExpress"
+  }, {}, { marketplace: "aliexpress" });
+
+  assert.strictEqual(wifi.reclassificada, true);
+  assert.notStrictEqual(wifi.oferta.categoria, "AliExpress");
+  assert.ok(!["AliExpress", "Diversos", ""].includes(wifi.oferta.categoria));
 }
 
 function testarCategoriaAliExpressGenericaSemTituloConfiavelNaoInventa() {

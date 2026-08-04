@@ -258,6 +258,108 @@ function urlAliExpressConvertidaSegura(urlConvertida = "", urlOriginal = "") {
   }
 }
 
+function extrairIdProdutoAliExpressValor(valor = "") {
+  const bruto = texto(valor);
+  if (!bruto) return "";
+
+  const direto = bruto.match(/\b(\d{12,20})\b/);
+  if (!/^https?:\/\//i.test(bruto)) return direto?.[1] || "";
+
+  try {
+    const url = new URL(bruto);
+    const caminho = `${url.pathname || ""}${url.search || ""}`;
+    const itemPath = caminho.match(/\/item\/(\d{12,20})(?:\.html)?/i);
+    if (itemPath) return itemPath[1];
+    for (const chave of ["productId", "product_id", "itemId", "item_id", "id"]) {
+      const id = url.searchParams.get(chave);
+      if (/^\d{12,20}$/.test(id || "")) return id;
+    }
+    return direto?.[1] || "";
+  } catch (_) {
+    return direto?.[1] || "";
+  }
+}
+
+function resolverProdutoCanonicoAliExpress(produto = {}, urlFallback = "") {
+  const candidatos = [
+    produto?.produtoId,
+    produto?.productId,
+    produto?.idProduto,
+    produto?.itemId,
+    produto?.item_id,
+    produto?.product_id,
+    produto?.metadata?.produtoId,
+    produto?.metadata?.productId,
+    produto?.metadata?.itemId,
+    produto?.linkExpandido,
+    produto?.linkOriginal,
+    produto?.urlProduto,
+    produto?.urlCanonical,
+    produto?.canonicalUrl,
+    urlFallback
+  ];
+
+  for (const candidato of candidatos) {
+    const id = extrairIdProdutoAliExpressValor(candidato);
+    if (id) {
+      return {
+        produtoId: id,
+        origem: candidato === urlFallback ? "url_original" : "produto_api"
+      };
+    }
+  }
+
+  return { produtoId: "", origem: "indisponivel" };
+}
+
+function validarProdutoCanonicoAliExpress({ papelLink = "", principal = {}, convertido = {}, urlOriginal = "" } = {}) {
+  const papel = texto(papelLink);
+  const produtoPrincipal = resolverProdutoCanonicoAliExpress(principal.produto || principal, principal.urlOriginal || "");
+  const produtoConvertido = resolverProdutoCanonicoAliExpress(convertido.produto || convertido, urlOriginal);
+
+  if (papel === "link_app") {
+    if (!produtoPrincipal.produtoId) {
+      return {
+        ok: false,
+        motivo: "produto_canonico_pc_indisponivel",
+        produtoCanonico: produtoConvertido.produtoId,
+        produtoCanonicoPrincipal: ""
+      };
+    }
+    if (!produtoConvertido.produtoId) {
+      return {
+        ok: false,
+        motivo: "produto_canonico_app_indisponivel",
+        produtoCanonico: "",
+        produtoCanonicoPrincipal: produtoPrincipal.produtoId
+      };
+    }
+    if (produtoPrincipal.produtoId !== produtoConvertido.produtoId) {
+      return {
+        ok: false,
+        motivo: "produto_canonico_divergente",
+        produtoCanonico: produtoConvertido.produtoId,
+        produtoCanonicoPrincipal: produtoPrincipal.produtoId
+      };
+    }
+  }
+
+  if (papel === "link_pc" && produtoPrincipal.produtoId && produtoConvertido.produtoId && produtoPrincipal.produtoId !== produtoConvertido.produtoId) {
+    return {
+      ok: false,
+      motivo: "produto_canonico_divergente",
+      produtoCanonico: produtoConvertido.produtoId,
+      produtoCanonicoPrincipal: produtoPrincipal.produtoId
+    };
+  }
+
+  return {
+    ok: true,
+    motivo: "produto_canonico_confirmado",
+    produtoCanonico: produtoConvertido.produtoId || produtoPrincipal.produtoId || "",
+    produtoCanonicoPrincipal: produtoPrincipal.produtoId || ""
+  };
+}
 function valorBooleanoProfundo(objeto = {}, chaves = []) {
   const pilha = [objeto];
   const visitados = new Set();
@@ -297,16 +399,28 @@ function conversaoAppAliExpressComprovada(produtoConvertido = {}) {
   ]);
 }
 
-function avaliarConversaoAliExpressPorPapel({ papelLink = "", urlAfiliada = "", urlOriginal = "", produtoConvertido = {} } = {}) {
+function avaliarConversaoAliExpressPorPapel({ papelLink = "", urlAfiliada = "", urlOriginal = "", produtoConvertido = {}, produtoPrincipal = {}, urlPrincipal = "" } = {}) {
+  const produtoCanonico = validarProdutoCanonicoAliExpress({
+    papelLink,
+    principal: { produto: produtoPrincipal, urlOriginal: urlPrincipal },
+    convertido: produtoConvertido,
+    urlOriginal
+  });
+
   if (!urlAliExpressConvertidaSegura(urlAfiliada, urlOriginal)) {
-    return { renderizavel: false, motivo: "link_aliexpress_sem_conversao_segura", appValidado: false };
+    return { ...produtoCanonico, renderizavel: false, motivo: "link_aliexpress_sem_conversao_segura", appValidado: false };
+  }
+
+  if (!produtoCanonico.ok) {
+    return { ...produtoCanonico, renderizavel: false, motivo: produtoCanonico.motivo, appValidado: false };
   }
 
   if (papelLink === "link_app" && !conversaoAppAliExpressComprovada(produtoConvertido)) {
-    return { renderizavel: false, motivo: "link_app_sem_validacao_destino_produto", appValidado: false };
+    return { ...produtoCanonico, renderizavel: false, motivo: "link_app_sem_validacao_destino_produto", appValidado: false };
   }
 
   return {
+    ...produtoCanonico,
     renderizavel: true,
     motivo: papelLink === "link_app" ? "cta_app_workspace_convertido" : "cta_workspace_convertido",
     appValidado: papelLink === "link_app"
@@ -338,20 +452,24 @@ async function converterLinksAlternativosAliExpress({
   async function converter(url = "", papelLink = "") {
     const alvo = texto(url);
     const papel = texto(papelLink);
-    if (!alvo) return { urlAfiliada: "", renderizavel: false, motivo: "link_vazio", appValidado: false };
+    if (!alvo) return { urlAfiliada: "", renderizavel: false, motivo: "link_vazio", appValidado: false, produtoCanonico: "", produtoCanonicoPrincipal: "" };
 
     if (texto(urlPrincipal) && alvo === texto(urlPrincipal) && texto(linkAfiliadoPrincipal)) {
       const avaliacaoPrincipal = avaliarConversaoAliExpressPorPapel({
         papelLink: papel,
         urlAfiliada: linkAfiliadoPrincipal,
         urlOriginal: alvo,
-        produtoConvertido: produtoPrincipal
+        produtoConvertido: produtoPrincipal,
+        produtoPrincipal,
+        urlPrincipal: alvo
       });
       return {
         urlAfiliada: avaliacaoPrincipal.renderizavel ? linkAfiliadoPrincipal : "",
         renderizavel: avaliacaoPrincipal.renderizavel,
         motivo: avaliacaoPrincipal.motivo,
-        appValidado: avaliacaoPrincipal.appValidado
+        appValidado: avaliacaoPrincipal.appValidado,
+        produtoCanonico: avaliacaoPrincipal.produtoCanonico || "",
+        produtoCanonicoPrincipal: avaliacaoPrincipal.produtoCanonicoPrincipal || ""
       };
     }
 
@@ -377,18 +495,22 @@ async function converterLinksAlternativosAliExpress({
         papelLink: papel,
         urlAfiliada,
         urlOriginal: alvo,
-        produtoConvertido
+        produtoConvertido,
+        produtoPrincipal,
+        urlPrincipal
       });
       const resultado = {
         urlAfiliada: avaliacao.renderizavel ? urlAfiliada : "",
         renderizavel: avaliacao.renderizavel,
         motivo: avaliacao.motivo,
-        appValidado: avaliacao.appValidado
+        appValidado: avaliacao.appValidado,
+        produtoCanonico: avaliacao.produtoCanonico || "",
+        produtoCanonicoPrincipal: avaliacao.produtoCanonicoPrincipal || ""
       };
       convertidos.set(chaveCache, resultado);
       return resultado;
     } catch (_) {
-      const resultado = { urlAfiliada: "", renderizavel: false, motivo: "falha_tecnica_conversao_link", appValidado: false };
+      const resultado = { urlAfiliada: "", renderizavel: false, motivo: "falha_tecnica_conversao_link", appValidado: false, produtoCanonico: "", produtoCanonicoPrincipal: "" };
       convertidos.set(chaveCache, resultado);
       return resultado;
     }
@@ -417,6 +539,8 @@ async function converterLinksAlternativosAliExpress({
         renderizavel: conversao.renderizavel,
         motivo: conversao.motivo,
         appValidado: conversao.appValidado === true,
+        produtoCanonico: conversao.produtoCanonico || "",
+        produtoCanonicoPrincipal: conversao.produtoCanonicoPrincipal || "",
         aplicouMudancasOperacionais: false
       }
     });
@@ -662,7 +786,8 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       textoRadarTemCupom: Boolean(cupomTexto),
       precoRadarUsado: precoOrigem === "texto_radar",
       camposProduto: Object.keys(produto || {}),
-      produto
+      produto,
+      produtoCanonico: resolverProdutoCanonicoAliExpress(produto, urlOriginalEngine)
     }
   };
 }
