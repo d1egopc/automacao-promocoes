@@ -411,14 +411,65 @@ async function testarAliExpressAppPcPreservaAmbosComoComerciais() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.deepStrictEqual(urlsImportadas, [app, pc]);
+  assert.deepStrictEqual(urlsImportadas, [pc, app]);
   assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "link_app");
   assert.strictEqual(resultado.metadata.linksClassificados[0].papelLinkMotivo, "contexto_link_app_aliexpress");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "link_pc");
-  assert.strictEqual(resultado.metadata.linksClassificados[0].urlAfiliada, "https://s.click.aliexpress.com/e/_appPuskillD1");
+  assert.strictEqual(resultado.metadata.linksClassificados[0].renderizavel, false);
+  assert.strictEqual(resultado.metadata.linksClassificados[0].urlAfiliada, "");
+  assert.strictEqual(resultado.metadata.linksClassificados[0].conversaoWorkspace.motivo, "link_app_sem_validacao_destino_produto");
   assert.strictEqual(resultado.metadata.linksClassificados[1].urlAfiliada, "https://s.click.aliexpress.com/e/_pcPuskillD1");
 }
 
+async function testarAliExpressAppPcRenderizaAppSomenteComValidacaoEspecifica() {
+  limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
+  const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
+  const app = "https://a.aliexpress.com/_appValidado";
+  const pc = "https://a.aliexpress.com/_pcValidado";
+  const urlsImportadas = [];
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 116, evento_id: 216, cliente_id: "workspace_teste" },
+    evento: {
+      texto_original: [
+        "WiFi 6E AX210 PCI Express + Bluetooth 5.3",
+        "Valor: R$ 293 + 66 moedas",
+        `App: ${app}`,
+        `PC: ${pc}`
+      ].join("\n"),
+      links_extraidos: [app, pc]
+    },
+    links: [
+      { ...linkRow(1, app), marketplace_detectado: "aliexpress" },
+      { ...linkRow(2, pc), marketplace_detectado: "aliexpress" }
+    ],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "track" } }),
+      importarAliExpress: async (url, opcoes = {}) => {
+        urlsImportadas.push(url);
+        return {
+          titulo: "WiFi 6E AX210 PCI Express + Bluetooth 5.3",
+          precoAtual: "293.00",
+          imagem: "https://img.test/wifi.jpg",
+          linkAfiliado: url === pc ? "https://s.click.aliexpress.com/e/_pcWifiD1" : "https://s.click.aliexpress.com/e/_appWifiD1",
+          linkExpandido: "https://www.aliexpress.com/item/1005007777777777.html",
+          categoria: "AliExpress",
+          conversaoAppValidada: opcoes?.contextoEngine?.papelLink === "link_app"
+        };
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(urlsImportadas, [pc, app]);
+  const linkApp = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_app");
+  const linkPc = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
+  assert.strictEqual(linkApp.renderizavel, true);
+  assert.strictEqual(linkApp.conversaoWorkspace.motivo, "cta_app_workspace_convertido");
+  assert.strictEqual(linkApp.urlAfiliada, "https://s.click.aliexpress.com/e/_appWifiD1");
+  assert.strictEqual(linkPc.renderizavel, true);
+  assert.strictEqual(linkPc.urlAfiliada, "https://s.click.aliexpress.com/e/_pcWifiD1");
+}
 async function testarAliExpressUsaPrecoRadarQuandoApiNaoRetornaPreco() {
   limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
   const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
@@ -592,15 +643,16 @@ async function testarAliExpressBinnuneUsaPrecoRadarEstruturadoEDescartaAuxiliar(
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(resultado.precoAtual, 112);
   assert.strictEqual(resultado.precoOrigem, "texto_radar");
-  assert.deepStrictEqual(urlsImportadas, [app, pc]);
+  assert.deepStrictEqual(urlsImportadas, [pc, app]);
   const papeis = resultado.metadata.linksClassificados.map(item => item.papelLink);
   assert.ok(papeis.includes("link_app"));
   assert.ok(papeis.includes("link_pc"));
   const linkApp = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_app");
   const linkPc = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
-  assert.strictEqual(linkApp.renderizavel, true);
+  assert.strictEqual(linkApp.renderizavel, false);
+  assert.strictEqual(linkApp.urlAfiliada, "");
+  assert.strictEqual(linkApp.conversaoWorkspace.motivo, "link_app_sem_validacao_destino_produto");
   assert.strictEqual(linkPc.renderizavel, true);
-  assert.strictEqual(linkApp.urlAfiliada, "https://s.click.aliexpress.com/e/_appBinnuneD1");
   assert.strictEqual(linkPc.urlAfiliada, "https://s.click.aliexpress.com/e/_pcBinnuneD1");
   assert.strictEqual(
     resultado.metadata.linksClassificados.find(item => item.urlOriginal === auxiliar)?.papelLink,

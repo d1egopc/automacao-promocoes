@@ -2,6 +2,7 @@ const { normalizarNumeroMoeda } = require("../../../../utils/moeda");
 const { importarAliExpress } = require("../../../../marketplaces/aliexpress/importar");
 const {
   escolherProdutoPrincipal,
+  classificarCandidatosLinks,
   resumoLinksClassificados
 } = require("../../link-role.service");
 
@@ -22,6 +23,13 @@ function primeiroValor(...valores) {
 
 function numeroPreco(valor = "") {
   return normalizarNumeroMoeda(valor);
+}
+
+function prioridadeCampoLinkAliExpress(candidato = {}) {
+  if (candidato.campo === "url_expandida") return 3;
+  if (candidato.campo === "url_normalizada") return 2;
+  if (candidato.campo === "url_original") return 1;
+  return 0;
 }
 
 function escolherLinkAliExpress(links = [], evento = {}) {
@@ -47,6 +55,13 @@ function escolherLinkAliExpress(links = [], evento = {}) {
     .filter(candidato => /aliexpress\./i.test(candidato.url));
 
   if (!validos.length) return { url: "", link: null, campo: "" };
+
+  const classificados = classificarCandidatosLinks(validos, "aliexpress", evento);
+  const linkPc = classificados
+    .filter(candidato => candidato.papelLink === "link_pc" && texto(candidato.url))
+    .sort((a, b) => prioridadeCampoLinkAliExpress(b) - prioridadeCampoLinkAliExpress(a))[0];
+  if (linkPc) return linkPc;
+
   return escolherProdutoPrincipal(validos, "aliexpress", evento);
 }
 
@@ -243,6 +258,61 @@ function urlAliExpressConvertidaSegura(urlConvertida = "", urlOriginal = "") {
   }
 }
 
+function valorBooleanoProfundo(objeto = {}, chaves = []) {
+  const pilha = [objeto];
+  const visitados = new Set();
+  while (pilha.length) {
+    const atual = pilha.pop();
+    if (!atual || typeof atual !== "object" || visitados.has(atual)) continue;
+    visitados.add(atual);
+    for (const chave of chaves) {
+      if (atual[chave] === true) return true;
+    }
+    for (const valor of Object.values(atual)) {
+      if (valor && typeof valor === "object") pilha.push(valor);
+    }
+  }
+  return false;
+}
+
+function conversaoAppAliExpressComprovada(produtoConvertido = {}) {
+  const marcador = texto(primeiroValor(
+    produtoConvertido?.tipoLinkAfiliado,
+    produtoConvertido?.tipoLink,
+    produtoConvertido?.papelLink,
+    produtoConvertido?.conversaoPapel,
+    produtoConvertido?.metadata?.tipoLinkAfiliado,
+    produtoConvertido?.metadata?.papelLink,
+    produtoConvertido?.metadata?.conversaoPapel
+  )).toLowerCase();
+
+  if (["app", "link_app", "deep_link_app", "app_produto", "aliexpress_app"].includes(marcador)) return true;
+
+  return valorBooleanoProfundo(produtoConvertido, [
+    "linkAppSeguro",
+    "destinoAppValidado",
+    "conversaoAppValidada",
+    "appProdutoValidado",
+    "deepLinkAppValidado"
+  ]);
+}
+
+function avaliarConversaoAliExpressPorPapel({ papelLink = "", urlAfiliada = "", urlOriginal = "", produtoConvertido = {} } = {}) {
+  if (!urlAliExpressConvertidaSegura(urlAfiliada, urlOriginal)) {
+    return { renderizavel: false, motivo: "link_aliexpress_sem_conversao_segura", appValidado: false };
+  }
+
+  if (papelLink === "link_app" && !conversaoAppAliExpressComprovada(produtoConvertido)) {
+    return { renderizavel: false, motivo: "link_app_sem_validacao_destino_produto", appValidado: false };
+  }
+
+  return {
+    renderizavel: true,
+    motivo: papelLink === "link_app" ? "cta_app_workspace_convertido" : "cta_workspace_convertido",
+    appValidado: papelLink === "link_app"
+  };
+}
+
 function urlLinkClassificado(link = {}) {
   return primeiroValor(link.urlOriginal, link.urlExpandida, link.urlNormalizada, link.url);
 }
@@ -260,17 +330,33 @@ async function converterLinksAlternativosAliExpress({
   evento = {},
   job = {},
   urlPrincipal = "",
-  linkAfiliadoPrincipal = ""
+  linkAfiliadoPrincipal = "",
+  produtoPrincipal = {}
 } = {}) {
   const convertidos = new Map();
 
-  async function converter(url = "") {
+  async function converter(url = "", papelLink = "") {
     const alvo = texto(url);
-    if (!alvo) return { urlAfiliada: "", renderizavel: false, motivo: "link_vazio" };
-    if (texto(urlPrincipal) && alvo === texto(urlPrincipal) && urlAliExpressConvertidaSegura(linkAfiliadoPrincipal, alvo)) {
-      return { urlAfiliada: linkAfiliadoPrincipal, renderizavel: true, motivo: "cta_workspace_convertido" };
+    const papel = texto(papelLink);
+    if (!alvo) return { urlAfiliada: "", renderizavel: false, motivo: "link_vazio", appValidado: false };
+
+    if (texto(urlPrincipal) && alvo === texto(urlPrincipal) && texto(linkAfiliadoPrincipal)) {
+      const avaliacaoPrincipal = avaliarConversaoAliExpressPorPapel({
+        papelLink: papel,
+        urlAfiliada: linkAfiliadoPrincipal,
+        urlOriginal: alvo,
+        produtoConvertido: produtoPrincipal
+      });
+      return {
+        urlAfiliada: avaliacaoPrincipal.renderizavel ? linkAfiliadoPrincipal : "",
+        renderizavel: avaliacaoPrincipal.renderizavel,
+        motivo: avaliacaoPrincipal.motivo,
+        appValidado: avaliacaoPrincipal.appValidado
+      };
     }
-    if (convertidos.has(alvo)) return convertidos.get(alvo);
+
+    const chaveCache = `${papel}:${alvo}`;
+    if (convertidos.has(chaveCache)) return convertidos.get(chaveCache);
 
     try {
       const produtoConvertido = await importarLegado(alvo, {
@@ -282,21 +368,28 @@ async function converterLinksAlternativosAliExpress({
           jobId: job.id,
           eventoId: job.evento_id,
           clienteId,
-          conversaoLinkAlternativo: true
+          conversaoLinkAlternativo: true,
+          papelLink: papel
         }
       });
       const urlAfiliada = primeiroValor(produtoConvertido?.linkAfiliado, produtoConvertido?.linkFinal, produtoConvertido?.link);
-      const renderizavel = urlAliExpressConvertidaSegura(urlAfiliada, alvo);
+      const avaliacao = avaliarConversaoAliExpressPorPapel({
+        papelLink: papel,
+        urlAfiliada,
+        urlOriginal: alvo,
+        produtoConvertido
+      });
       const resultado = {
-        urlAfiliada: renderizavel ? urlAfiliada : "",
-        renderizavel,
-        motivo: renderizavel ? "cta_workspace_convertido" : "link_aliexpress_sem_conversao_segura"
+        urlAfiliada: avaliacao.renderizavel ? urlAfiliada : "",
+        renderizavel: avaliacao.renderizavel,
+        motivo: avaliacao.motivo,
+        appValidado: avaliacao.appValidado
       };
-      convertidos.set(alvo, resultado);
+      convertidos.set(chaveCache, resultado);
       return resultado;
     } catch (_) {
-      const resultado = { urlAfiliada: "", renderizavel: false, motivo: "falha_tecnica_conversao_link" };
-      convertidos.set(alvo, resultado);
+      const resultado = { urlAfiliada: "", renderizavel: false, motivo: "falha_tecnica_conversao_link", appValidado: false };
+      convertidos.set(chaveCache, resultado);
       return resultado;
     }
   }
@@ -312,7 +405,7 @@ async function converterLinksAlternativosAliExpress({
       continue;
     }
     vistosPapelUrl.add(chave);
-    const conversao = await converter(urlOriginal);
+    const conversao = await converter(urlOriginal, papelLink);
     saida.push({
       ...link,
       urlAfiliada: conversao.urlAfiliada,
@@ -323,13 +416,13 @@ async function converterLinksAlternativosAliExpress({
         papel: papelLink,
         renderizavel: conversao.renderizavel,
         motivo: conversao.motivo,
+        appValidado: conversao.appValidado === true,
         aplicouMudancasOperacionais: false
       }
     });
   }
   return saida;
 }
-
 async function importarAliExpressEngine({ job = {}, evento = {}, links = [], deps = {} } = {}) {
   const clienteId = texto(job.cliente_id || job.clienteId || "");
   const linkEscolhido = escolherLinkAliExpress(links, evento);
@@ -522,7 +615,8 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     evento,
     job,
     urlPrincipal: urlOriginalEngine,
-    linkAfiliadoPrincipal: linkAfiliado
+    linkAfiliadoPrincipal: linkAfiliado,
+    produtoPrincipal: produto
   });
 
   return {

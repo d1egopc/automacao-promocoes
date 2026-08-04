@@ -703,6 +703,23 @@ function linkResgateValidoPorMarketplace(url = "", contexto = "", marketplace = 
   return true;
 }
 
+function categoriaDocumentoGenerica(categoria = "") {
+  const chave = normalizarComparacao(categoria).replace(/[^a-z0-9]+/g, "");
+  return !chave || ["aliexpress", "diversos", "marketplace", "generica", "geral"].includes(chave);
+}
+
+function categoriaDocumentoFinal(contexto = {}) {
+  const candidatos = [
+    contexto.oferta?.categoria,
+    contexto.comercialNormalizado?.categoria,
+    contexto.ofertaEntrada?.categoria
+  ];
+  for (const categoria of candidatos) {
+    const valor = texto(categoria);
+    if (valor && !categoriaDocumentoGenerica(valor)) return valor;
+  }
+  return texto(candidatos.find(Boolean) || "");
+}
 function classificarTipoLinkBloco(item = {}, textoOriginal = "", marketplace = "") {
   const url = texto(item.url);
   const papelContrato = texto(item.papel);
@@ -729,13 +746,17 @@ function classificarTipoLinkBloco(item = {}, textoOriginal = "", marketplace = "
 }
 
 function adicionarBlocosDeLinks(blocos = [], doc = {}, contexto = {}) {
-  const links = (Array.isArray(doc.linksComerciais) ? doc.linksComerciais : [])
-    .filter(item => item?.renderizavel !== false)
-    .filter(item => !textoComercialEquivalente(item?.url || "", doc.linkAfiliado || ""));
+  const linksRenderizaveis = (Array.isArray(doc.linksComerciais) ? doc.linksComerciais : [])
+    .filter(item => item?.renderizavel !== false);
+  const linkAfiliadoRepresentadoPorPapel = normalizarComparacao(doc.marketplace) === "aliexpress"
+    && linksRenderizaveis.some(item => ["link_app", "link_pc", "link_moedas"].includes(classificarTipoLinkBloco(item, contexto.textoOriginal, doc.marketplace))
+      && textoComercialEquivalente(item?.url || "", doc.linkAfiliado || ""));
+  const links = linksRenderizaveis
+    .filter(item => linkAfiliadoRepresentadoPorPapel || !textoComercialEquivalente(item?.url || "", doc.linkAfiliado || ""));
   const produtos = links.filter(item => classificarTipoLinkBloco(item, contexto.textoOriginal, doc.marketplace) === "link_produto_original");
   const produtosAmbiguos = produtos.length > 1;
 
-  if (doc.linkAfiliado) {
+  if (doc.linkAfiliado && !linkAfiliadoRepresentadoPorPapel) {
     adicionarBlocoComercial(blocos, {
       tipo: "link_afiliado",
       textoOriginal: doc.linkAfiliado,
@@ -777,7 +798,7 @@ function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
 
   adicionarBlocoComercial(blocos, { tipo: "titulo", textoOriginal: doc.tituloOriginal, origem: "documento.tituloOriginal", confianca: doc.tituloOriginal ? "alta" : "baixa", essencial: true, visibilidadePadrao: "obrigatorio" });
   adicionarBlocoComercial(blocos, { tipo: "marketplace", textoOriginal: doc.marketplace, origem: "documento.marketplace", confianca: "alta" });
-  adicionarBlocoComercial(blocos, { tipo: "categoria", textoOriginal: primeiroTexto(contexto.ofertaEntrada?.categoria, contexto.oferta?.categoria, contexto.comercialNormalizado?.categoria), origem: "campos_estruturados.categoria", confianca: "media" });
+  adicionarBlocoComercial(blocos, { tipo: "categoria", textoOriginal: categoriaDocumentoFinal(contexto), origem: "campos_estruturados.categoria", confianca: "media" });
   adicionarBlocoComercial(blocos, { tipo: "vendedor", textoOriginal: primeiroTexto(contexto.ofertaEntrada?.vendedor, contexto.ofertaEntrada?.seller, contexto.oferta?.vendedor, contexto.oferta?.seller), origem: "campos_estruturados.vendedor", confianca: "media" });
 
   if (/\b(?:direto\s+do\s+brasil|produto\s+no\s+brasil|estoque\s+no\s+brasil)\b/i.test(contexto.textoOriginal || "")) {

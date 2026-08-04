@@ -1299,6 +1299,7 @@ const aliexpressHigieneTecnicaAppPc = criarEspelho({
 });
 const mensagemHigieneTecnica = aliexpressHigieneTecnicaAppPc.templateEspelhoShadow.mensagem;
 assert.ok(mensagemHigieneTecnica.includes("PC:\nhttps://s.click.aliexpress.com/e/_pcD1Seguro"));
+assert.ok(!mensagemHigieneTecnica.includes("Confira aqui:\nhttps://s.click.aliexpress.com/e/_pcD1Seguro"));
 assert.ok(!mensagemHigieneTecnica.includes("APP:\nhttps://a.aliexpress.com/_appSemConversao"));
 assert.ok(!/Erro ao consultar API AliExpress|link_aliexpress_sem_conversao_segura|sem_conversao_segura/.test(mensagemHigieneTecnica));
 assert.strictEqual(blocosTipo(aliexpressHigieneTecnicaAppPc, "beneficio").length, 0);
@@ -1315,6 +1316,36 @@ for (const resultado of [
   assert.ok(!/(?:null|undefined|NaN)/i.test(resultado.templateEspelhoShadow.mensagem));
 }
 
+const aliexpressCategoriaFinalSemGenerica = criarEspelho({
+  textoOriginal: [
+    "WiFi 6E AX210 PCI Express + Bluetooth 5.3",
+    "Valor: R$ 293",
+    "PC: https://a.aliexpress.com/_pcWifi"
+  ].join("\n"),
+  oferta: {
+    marketplace: "aliexpress",
+    categoria: "Eletrônicos",
+    preco: 293,
+    linksComerciais: [
+      {
+        papel: "link_pc",
+        urlOriginal: "https://a.aliexpress.com/_pcWifi",
+        urlAfiliada: "https://s.click.aliexpress.com/e/_pcWifiD1",
+        renderizavel: true,
+        convertidoWorkspace: true,
+        seguro: true
+      }
+    ]
+  },
+  ofertaEntrada: { categoria: "AliExpress" },
+  comercialNormalizado: { marketplace: "aliexpress", precoAtual: 293, precoConfiavel: true, categoria: "AliExpress" }
+});
+const mensagemCategoriaFinal = aliexpressCategoriaFinalSemGenerica.templateEspelhoShadow.mensagem;
+const blocoCategoriaFinal = blocosTipo(aliexpressCategoriaFinalSemGenerica, "categoria")[0];
+assert.strictEqual(blocoCategoriaFinal?.textoOriginal, "Eletrônicos");
+assert.notStrictEqual(blocoCategoriaFinal?.textoOriginal, "AliExpress");
+assert.ok(mensagemCategoriaFinal.includes("PC:\nhttps://s.click.aliexpress.com/e/_pcWifiD1"));
+assert.ok(!mensagemCategoriaFinal.includes("Confira aqui:\nhttps://s.click.aliexpress.com/e/_pcWifiD1"));
 const aliexpressCuponsMoedasAppPcConvertidos = criarEspelho({
   textoOriginal: [
     "SSD Netac 512gb sata3",
