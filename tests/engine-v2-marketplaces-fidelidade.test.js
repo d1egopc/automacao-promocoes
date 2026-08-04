@@ -540,6 +540,165 @@ async function testarAliExpressReconheceRotuloNaLinhaAnterior() {
   assert.strictEqual(resultado.metadata.precoRadarUsado, true);
 }
 
+async function testarAliExpressBinnuneUsaPrecoRadarEstruturadoEDescartaAuxiliar() {
+  limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
+  const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
+  const auxiliar = "https://cutt.ly/headset-binnune";
+  const app = "https://a.aliexpress.com/_c3MLcDkb";
+  const pc = "https://a.aliexpress.com/_c3j35EmF";
+  let urlImportada = "";
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 121, evento_id: 221, cliente_id: "workspace_teste" },
+    evento: {
+      texto_original: [
+        "HEADSET SEM FIO ACINACI BL100",
+        "Cupom: IFPHHBVW ou BRAE1",
+        `Confira mais: ${auxiliar}`,
+        `Link APP: ${app}`,
+        `Link PC: ${pc}`
+      ].join("\n"),
+      links_extraidos: [auxiliar, app, pc],
+      metadata: {
+        radarMirror: {
+          preco: { atualCapturado: 112 },
+          texto: { original: "HEADSET SEM FIO ACINACI BL100" }
+        }
+      }
+    },
+    links: [
+      { ...linkRow(1, auxiliar), marketplace_detectado: "desconhecido" },
+      { ...linkRow(2, app), marketplace_detectado: "aliexpress" },
+      { ...linkRow(3, pc), marketplace_detectado: "aliexpress" }
+    ],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "track" } }),
+      importarAliExpress: async (url) => {
+        urlImportada = url;
+        return {
+          titulo: "HEADSET SEM FIO ACINACI BL100",
+          precoAtual: "",
+          imagem: "https://img.test/binnune.jpg",
+          linkAfiliado: "https://ali.test/binnune-afiliado",
+          linkExpandido: "https://www.aliexpress.com/item/1005006666666666.html",
+          categoria: "AliExpress"
+        };
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.precoAtual, 112);
+  assert.strictEqual(resultado.precoOrigem, "texto_radar");
+  assert.strictEqual(urlImportada, app);
+  const papeis = resultado.metadata.linksClassificados.map(item => item.papelLink);
+  assert.ok(papeis.includes("link_app"));
+  assert.ok(papeis.includes("link_pc"));
+  assert.strictEqual(
+    resultado.metadata.linksClassificados.find(item => item.urlOriginal === auxiliar)?.papelLink,
+    "desconhecido"
+  );
+}
+
+function testarPonteIntegridadePreservaPrecoEAppPcAteFila() {
+  const { aplicarPonteIntegridadeComercial } = require("../modules/engine/importer/importer.service");
+  const { montarItemFilaEngine } = require("../modules/engine/distributor/distributor.service");
+  const app = "https://a.aliexpress.com/_c3flfysB";
+  const pc = "https://a.aliexpress.com/_c3U2QzT1";
+  const ctaD1 = "https://ali.test/ssd-cusu-d1";
+
+  const ponte = aplicarPonteIntegridadeComercial({
+    oferta: {
+      marketplace: "aliexpress",
+      titulo: "SSD CUSU 1TB",
+      preco: null,
+      linkAfiliado: ctaD1
+    },
+    ofertaEntrada: {
+      metadata: {
+        linksClassificados: [
+          { urlOriginal: app, papelLink: "link_app", papelLinkMotivo: "contexto_link_app_aliexpress" },
+          { urlOriginal: pc, papelLink: "link_pc", papelLinkMotivo: "contexto_link_pc_aliexpress" }
+        ]
+      }
+    },
+    metadata: {},
+    comercialNormalizado: {
+      precoAtual: 347,
+      precoOrigem: "texto_radar",
+      precoConfiavel: true
+    }
+  });
+
+  assert.strictEqual(ponte.oferta.preco, 347);
+  assert.strictEqual(ponte.metadata.integridadeComercial.precoValidado.valor, 347);
+  assert.deepStrictEqual(
+    ponte.metadata.linksComerciais.map(item => item.papel),
+    ["link_app", "link_pc"]
+  );
+
+  const itemFila = montarItemFilaEngine({
+    id: 66385,
+    uuid: "oferta-ssd-cusu",
+    cliente_id: "user_40qdblgt",
+    marketplace: "aliexpress",
+    titulo: "SSD CUSU 1TB",
+    preco: ponte.oferta.preco,
+    link_afiliado: ctaD1,
+    link_original: app,
+    metadata: ponte.metadata
+  });
+
+  assert.strictEqual(itemFila.preco, 347);
+  assert.strictEqual(itemFila.precoAtual, 347);
+  assert.deepStrictEqual(
+    itemFila.linksComerciais.map(item => item.papel),
+    ["link_app", "link_pc"]
+  );
+}
+
+function testarPonteIntegridadeKabumAwinMantemSomenteCtaD1Renderizavel() {
+  const { montarItemFilaEngine } = require("../modules/engine/distributor/distributor.service");
+  const awinTerceiro = "https://www.awin1.com/cread.php?awinmid=17729&awinaffid=1062989&clickref=marcosmx&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F1053828";
+  const awinD1 = "https://www.awin1.com/cread.php?awinmid=17729&awinaffid=2649374&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F1053828";
+
+  const itemFila = montarItemFilaEngine({
+    id: 66416,
+    uuid: "oferta-ryzen-kabum",
+    cliente_id: "user_40qdblgt",
+    marketplace: "awin",
+    titulo: "Ryzen 7 KaBuM",
+    preco: 2340,
+    cupom: "GOATS",
+    link_afiliado: awinD1,
+    link_original: awinTerceiro,
+    metadata: {
+      integridadeComercial: {
+        versao: "v1",
+        precoValidado: { valor: 2340, origem: "texto_radar", confiavel: true },
+        linksComerciais: [
+          {
+            papel: "produto",
+            urlOriginal: awinTerceiro,
+            urlAfiliada: awinD1,
+            renderizavel: true,
+            seguro: true,
+            origem: "adapter.awin"
+          }
+        ],
+        aplicouMudancasOperacionais: false
+      }
+    }
+  });
+
+  assert.strictEqual(itemFila.linkAfiliado, awinD1);
+  assert.ok(!itemFila.linkAfiliado.includes("awinaffid=1062989"));
+  assert.ok(!itemFila.linkAfiliado.includes("clickref=marcosmx"));
+  assert.strictEqual(itemFila.linksComerciais.length, 1);
+  assert.strictEqual(itemFila.linksComerciais[0].renderizavel, true);
+  assert.strictEqual(itemFila.linksComerciais[0].urlAfiliada, awinD1);
+}
+
 function testarAwinMetadataCupomNaoBloqueiaUedKabum() {
   const { escolherProdutoPrincipal } = require("../modules/engine/link-role.service");
   const awin = "https://www.awin1.com/cread.php?awinmid=17729&awinaffid=terceiro&clickref=fonte&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F536014";
@@ -679,6 +838,9 @@ function testarOrquestradorIncluiMarketplacesOficiais() {
   await testarAliExpressUsaPrecoRadarQuandoApiNaoRetornaPreco();
   await testarAliExpressNaoUsaCupomComoPrecoRadar();
   await testarAliExpressReconheceRotuloNaLinhaAnterior();
+  await testarAliExpressBinnuneUsaPrecoRadarEstruturadoEDescartaAuxiliar();
+  testarPonteIntegridadePreservaPrecoEAppPcAteFila();
+  testarPonteIntegridadeKabumAwinMantemSomenteCtaD1Renderizavel();
   testarAwinMetadataCupomNaoBloqueiaUedKabum();
   testarCategoriaMarketplaceGenericaClassificaPorTitulo();
   testarCategoriaAliExpressReclassificaAposTituloRadarFinal();

@@ -467,6 +467,25 @@ function copiarCamposComerciaisRadarFila(oferta = {}) {
       : (valor && typeof valor === "object" ? { ...valor } : valor);
   }
 
+  const integridadeComercial = oferta.metadata?.integridadeComercial || oferta.metadata?.ofcV24?.integridadeComercial || null;
+  if (integridadeComercial && typeof integridadeComercial === "object" && !Array.isArray(integridadeComercial)) {
+    campos.integridadeComercial = {
+      ...integridadeComercial,
+      linksComerciais: Array.isArray(integridadeComercial.linksComerciais)
+        ? integridadeComercial.linksComerciais.map(item => item && typeof item === "object" ? { ...item } : item)
+        : []
+    };
+
+    if (!campos.linksComerciais && Array.isArray(integridadeComercial.linksComerciais)) {
+      campos.linksComerciais = integridadeComercial.linksComerciais
+        .map(item => item && typeof item === "object" ? { ...item } : item);
+    }
+
+    if (!campos.precoValidado && integridadeComercial.precoValidado) {
+      campos.precoValidado = { ...integridadeComercial.precoValidado };
+    }
+  }
+
   return campos;
 }
 

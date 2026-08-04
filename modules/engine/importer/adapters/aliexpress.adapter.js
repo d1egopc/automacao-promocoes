@@ -67,6 +67,62 @@ function textoOriginalEvento(evento = {}) {
   return texto(evento.texto_original || evento.textoOriginal || evento.texto || "");
 }
 
+function objetosPrecoRadarEvento(evento = {}) {
+  const candidatos = [
+    evento,
+    evento.metadata,
+    evento.radarMirror,
+    evento.metadata?.radarMirror,
+    evento.metadata?.radarEspelhoComercial,
+    evento.metadata?.ofcV24?.comercialNormalizado,
+    evento.metadata?.ofcV24?.documentoComercialCanonico
+  ];
+
+  return candidatos.filter(item => item && typeof item === "object" && !Array.isArray(item));
+}
+
+function campoValorPrecoRadar(campo) {
+  if (campo && typeof campo === "object" && !Array.isArray(campo)) {
+    return primeiroValor(campo.valor, campo.atualCapturado, campo.precoAtual, campo.texto, campo.raw);
+  }
+  return campo;
+}
+
+function extrairPrecoEstruturadoRadarAliExpress(evento = {}) {
+  const chavesDiretas = [
+    "precoAtual",
+    "preco",
+    "precoOferta",
+    "precoPor",
+    "valorEfetivo"
+  ];
+
+  for (const origem of objetosPrecoRadarEvento(evento)) {
+    for (const chave of chavesDiretas) {
+      const valor = campoValorPrecoRadar(origem[chave]);
+      if (numeroPreco(valor) !== null) return valor;
+    }
+
+    const preco = origem.preco && typeof origem.preco === "object" ? origem.preco : null;
+    if (preco) {
+      for (const chave of ["atualCapturado", "atual", "precoAtual", "valor"]) {
+        const valor = campoValorPrecoRadar(preco[chave]);
+        if (numeroPreco(valor) !== null) return valor;
+      }
+    }
+
+    const comercial = origem.comercial && typeof origem.comercial === "object" ? origem.comercial : null;
+    if (comercial) {
+      for (const chave of chavesDiretas) {
+        const valor = campoValorPrecoRadar(comercial[chave]);
+        if (numeroPreco(valor) !== null) return valor;
+      }
+    }
+  }
+
+  return "";
+}
+
 function extrairPrecoTextoRadarAliExpress(textoRadar = "") {
   const linhas = String(textoRadar || "")
     .split(/\r?\n/)
@@ -82,6 +138,13 @@ function extrairPrecoTextoRadarAliExpress(textoRadar = "") {
   }
 
   return "";
+}
+
+function extrairPrecoRadarSeguroAliExpress(evento = {}) {
+  return primeiroValor(
+    extrairPrecoTextoRadarAliExpress(textoOriginalEvento(evento)),
+    extrairPrecoEstruturadoRadarAliExpress(evento)
+  );
 }
 
 function normalizarCupomAliExpress(cupom = "") {
@@ -277,7 +340,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     };
   }
 
-  const precoRadarSeguro = extrairPrecoTextoRadarAliExpress(textoOriginalEvento(evento));
+  const precoRadarSeguro = extrairPrecoRadarSeguroAliExpress(evento);
   const precoAtual = primeiroValor(produto.precoAtual, produto.preco, precoRadarSeguro);
   const precoOrigem = valorPresente(produto.precoAtual) || valorPresente(produto.preco) ? primeiroValor(produto.precoOrigem, "adapter") : (precoRadarSeguro ? "texto_radar" : "");
   const precoOriginal = primeiroValor(produto.precoOriginal, produto.precoAntigo);

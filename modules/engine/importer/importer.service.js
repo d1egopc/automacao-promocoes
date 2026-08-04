@@ -678,6 +678,106 @@ function construirEspelhoComercialV24Seguro({ oferta = {}, ofertaEntrada = {}, j
   return resultado;
 }
 
+function papelComercialIntegridade(papel = "") {
+  const chave = normalizarTexto(papel)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .trim();
+
+  if (["link_app", "app"].includes(chave)) return "link_app";
+  if (["link_pc", "pc", "site", "desktop"].includes(chave)) return "link_pc";
+  if (["link_moedas", "moedas", "coins"].includes(chave)) return "link_moedas";
+  if (["produto", "link_produto", "cta", "link"].includes(chave)) return "produto";
+  if (["resgate", "link_resgate"].includes(chave)) return "link_resgate";
+  if (["cupom", "voucher"].includes(chave)) return "cupom";
+  return chave || "desconhecido";
+}
+
+function coletarLinksIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, metadata = {} } = {}) {
+  const classificados = Array.isArray(ofertaEntrada?.metadata?.linksClassificados)
+    ? ofertaEntrada.metadata.linksClassificados
+    : [];
+  const existentes = Array.isArray(metadata.linksComerciais)
+    ? metadata.linksComerciais
+    : [];
+  const links = [];
+  const vistos = new Set();
+  const ctaAfiliado = normalizarTexto(oferta.linkAfiliado || "");
+
+  function adicionar(item = {}, origem = "") {
+    const papel = papelComercialIntegridade(item.papel || item.papelLink || item.tipo || item.role || "");
+    const urlOriginal = normalizarTexto(item.urlOriginal || item.url || item.original || item.href || "");
+    const urlExpandida = normalizarTexto(item.urlExpandida || item.expandida || "");
+    const urlAfiliada = normalizarTexto(item.urlAfiliada || item.afiliado || item.linkAfiliado || "");
+    const urlRenderizavel = normalizarTexto(urlAfiliada || item.renderizarUrl || "");
+    const urlBase = urlOriginal || urlExpandida || urlRenderizavel;
+    const chave = `${papel}:${urlBase}`;
+
+    if (!papel || papel === "desconhecido" || !urlBase || vistos.has(chave)) return;
+    vistos.add(chave);
+
+    const convertidoWorkspace = item.convertidoWorkspace === true
+      || item.workspaceConvertido === true
+      || item.linkAfiliadoWorkspace === true
+      || Boolean(urlAfiliada && urlAfiliada === ctaAfiliado)
+      || Boolean(urlRenderizavel && urlRenderizavel === ctaAfiliado);
+    const renderizavel = item.renderizavel === true || convertidoWorkspace;
+
+    links.push({
+      papel,
+      tipo: papel,
+      urlOriginal,
+      urlExpandida,
+      urlAfiliada: renderizavel ? (urlAfiliada || urlRenderizavel || ctaAfiliado) : "",
+      renderizavel,
+      seguro: renderizavel,
+      origem: origem || item.origem || "integridade_comercial",
+      motivo: normalizarTexto(item.papelLinkMotivo || item.motivo || (renderizavel ? "cta_workspace_convertido" : "preservado_nao_renderizavel"))
+    });
+  }
+
+  for (const item of existentes) adicionar(item, "metadata.linksComerciais");
+  for (const item of classificados) adicionar(item, "adapter.linksClassificados");
+
+  return links;
+}
+
+function aplicarPonteIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, metadata = {}, comercialNormalizado = null } = {}) {
+  const precoAtual = normalizarNumero(comercialNormalizado?.precoAtual);
+  const precoExistente = normalizarNumero(oferta.preco);
+  const precoConfiavel = comercialNormalizado?.precoConfiavel === true && precoAtual !== null;
+  const origemPreco = normalizarTexto(
+    comercialNormalizado?.precoOrigem
+    || ofertaEntrada.precoOrigem
+    || ofertaEntrada.origemPreco
+    || ofertaEntrada.metadata?.precoOrigem
+    || ""
+  );
+  const linksComerciais = coletarLinksIntegridadeComercial({ oferta, ofertaEntrada, metadata });
+  const integridadeComercial = {
+    versao: "v1",
+    precoValidado: precoConfiavel ? {
+      valor: precoAtual,
+      origem: origemPreco || "comercial_normalizado",
+      confiavel: true
+    } : null,
+    linksComerciais,
+    aplicouMudancasOperacionais: false
+  };
+  const ofertaCorrigida = precoExistente === null && precoConfiavel
+    ? { ...oferta, preco: precoAtual }
+    : oferta;
+  const metadataCorrigido = {
+    ...metadata,
+    integridadeComercial,
+    ...(linksComerciais.length ? { linksComerciais } : {})
+  };
+
+  return { oferta: ofertaCorrigida, metadata: metadataCorrigido, integridadeComercial };
+}
+
 function emitirLogsEspelhoComercialV24(resultado = {}, contexto = {}) {
   if (!resultado.ok || !resultado.espelhoComercial) return;
   const resumo = resumoEspelhoComercialLog(resultado, contexto);
@@ -1368,6 +1468,14 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     : null;
   const resultadoComercialV24 = normalizarDadosComerciaisV24Seguro({ oferta, ofertaEntrada, job, evento });
   const comercialNormalizadoV24 = resultadoComercialV24.contrato;
+  const ponteIntegridadeComercial = aplicarPonteIntegridadeComercial({
+    oferta,
+    ofertaEntrada,
+    metadata: metadataFinal,
+    comercialNormalizado: comercialNormalizadoV24
+  });
+  oferta = ponteIntegridadeComercial.oferta || oferta;
+  metadataFinal = ponteIntegridadeComercial.metadata || metadataFinal;
   const resultadoEspelhoComercialV24 = construirEspelhoComercialV24Seguro({
     oferta,
     ofertaEntrada,
@@ -1386,6 +1494,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
         motivo: resultadoComercialV24.motivo,
         erro: resultadoComercialV24.erro
       },
+      integridadeComercial: ponteIntegridadeComercial.integridadeComercial,
       espelhoComercial: resultadoEspelhoComercialV24.espelhoComercial,
       documentoComercialCanonico: resultadoEspelhoComercialV24.documentoComercialCanonico,
       erroBlocosComerciais: resultadoEspelhoComercialV24.documentoComercialCanonico?.erroBlocosComerciais || null,
@@ -1773,5 +1882,6 @@ module.exports = {
   marcarJobErroImportacao,
   normalizarOfertaImportada,
   resolverCategoriaEngine,
-  reclassificarCategoriaFinalEngine
+  reclassificarCategoriaFinalEngine,
+  aplicarPonteIntegridadeComercial
 };
