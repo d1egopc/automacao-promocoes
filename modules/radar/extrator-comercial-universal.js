@@ -137,7 +137,7 @@ function classificarLinksComerciais(textoFonte = "", linksEntrada = []) {
     origem: item.origem,
     evidencias: item.evidencias
   }));
-  const produto = resultado.produto[0] || resultado.afiliado[0] || null;
+  const produto = resultado.produto[0] || resultado.pc?.[0] || resultado.afiliado[0] || null;
   const resgate = resultado.resgate[0] || null;
   const encurtadores = (resultado.classificados || [])
     .filter(item => Array.isArray(item.evidencias) && item.evidencias.includes("dominio_encurtador"))
@@ -148,6 +148,9 @@ function classificarLinksComerciais(textoFonte = "", linksEntrada = []) {
     produto,
     resgate,
     cupom: resgate,
+    app: resultado.app || [],
+    pc: resultado.pc || [],
+    moedas: resultado.moedas || [],
     landing: resultado.landing || [],
     encurtadores: linksUnicos([...(resultado.encurtador || []), ...encurtadores]),
     redirecionadores: resultado.afiliado || [],

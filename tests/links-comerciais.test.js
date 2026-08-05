@@ -10,6 +10,7 @@ const {
   resolverBlocoComercialCanonico
 } = require("../modules/radar/bloco-comercial-canonico");
 const {
+  aplicarAfiliadoLinkComercialRadar,
   montarOfertaRadarEspelhoComercial
 } = require("../modules/radar/espelho-comercial");
 
@@ -19,6 +20,10 @@ function tiposPorUrl(resultado = {}) {
     mapa[item.url] = item.tipo;
   }
   return mapa;
+}
+
+function classificadosPorTipo(resultado = {}, tipo = "") {
+  return (resultado.classificados || []).filter(item => item.tipo === tipo).map(item => item.url);
 }
 
 {
@@ -167,6 +172,137 @@ function tiposPorUrl(resultado = {}) {
   });
 
   assert.strictEqual(resultado.tipo, "produto");
+}
+
+{
+  const app = "https://a.aliexpress.com/_appExplicito";
+  const pc = "https://a.aliexpress.com/_pcExplicito";
+  const resultado = classificarLinksComerciais({
+    marketplace: "aliexpress",
+    texto: [
+      "SSD AliExpress",
+      `APP: ${app}`,
+      `PC: ${pc}`
+    ].join("\n")
+  });
+
+  assert.deepStrictEqual(resultado.app, [app], "APP explicito deve preservar papel APP");
+  assert.deepStrictEqual(resultado.pc, [pc], "PC explicito deve preservar papel PC");
+}
+
+{
+  const app = "https://a.aliexpress.com/_semRotuloApp";
+  const pc = "https://a.aliexpress.com/_semRotuloPc";
+  const resultado = classificarLinksComerciais({
+    marketplace: "aliexpress",
+    texto: [
+      "SSD AliExpress",
+      app,
+      "NO PC",
+      pc
+    ].join("\n")
+  });
+
+  assert.deepStrictEqual(resultado.app, [app], "link antes do marcador NO PC deve ser candidato APP");
+  assert.deepStrictEqual(resultado.pc, [pc], "link depois do marcador NO PC deve ser PC");
+}
+
+{
+  const produtoA = "https://www.aliexpress.com/item/1005001111111111.html";
+  const produtoB = "https://www.aliexpress.com/item/1005001111111111.html?sku_id=1";
+  const resultado = classificarLinksComerciais({
+    marketplace: "aliexpress",
+    texto: [
+      "SSD AliExpress",
+      produtoA,
+      produtoB
+    ].join("\n")
+  });
+
+  assert.strictEqual(resultado.app.length, 0, "sem rotulo nao pode assumir primeiro link como APP");
+  assert.ok(classificadosPorTipo(resultado, "produto").length >= 1, "formato sem rotulo permanece produto ate resolucao/comparacao");
+}
+
+{
+  const app = "https://a.aliexpress.com/_appRepetido";
+  const pc = "https://a.aliexpress.com/_pcUnico";
+  const resultado = classificarLinksComerciais({
+    marketplace: "aliexpress",
+    texto: [
+      "AliExpress",
+      `APP: ${app}`,
+      `APP: ${app}`,
+      `PC: ${pc}`
+    ].join("\n")
+  });
+
+  assert.deepStrictEqual(resultado.app, [app], "APP repetido deve deduplicar sem perder o papel");
+  assert.deepStrictEqual(resultado.pc, [pc], "PC unico deve permanecer PC");
+}
+
+{
+  const produto = "https://www.aliexpress.com/item/1005002222222222.html";
+  const resgate = "https://campaign.aliexpress.com/wow/gcp/coupon-page";
+  const resultado = classificarLinksComerciais({
+    marketplace: "aliexpress",
+    texto: [
+      "Produto + cupom AliExpress",
+      `Produto: ${produto}`,
+      `Pegue antes: ${resgate}`
+    ].join("\n")
+  });
+
+  assert.deepStrictEqual(resultado.produto, [produto], "link do item deve permanecer produto");
+  assert.deepStrictEqual(resultado.resgate, [resgate], "pagina de cupons deve permanecer resgate mesmo sem palavra literal resgate");
+}
+
+{
+  const ofertaBase = {
+    linksComerciais: [
+      { tipo: "app", original: "https://a.aliexpress.com/_appConverter", resolvido: "https://a.aliexpress.com/_appConverter" },
+      { tipo: "pc", original: "https://a.aliexpress.com/_pcConverter", resolvido: "https://a.aliexpress.com/_pcConverter" },
+      { tipo: "resgate", original: "https://campaign.aliexpress.com/wow/gcp/coupon-page", resolvido: "https://campaign.aliexpress.com/wow/gcp/coupon-page" }
+    ]
+  };
+  const comApp = aplicarAfiliadoLinkComercialRadar(ofertaBase, {
+    original: "https://a.aliexpress.com/_appConverter",
+    resolvido: "https://a.aliexpress.com/_appConverter",
+    afiliado: "https://s.click.aliexpress.com/e/_appWorkspace"
+  });
+  const comAppPc = aplicarAfiliadoLinkComercialRadar(comApp, {
+    original: "https://a.aliexpress.com/_pcConverter",
+    resolvido: "https://a.aliexpress.com/_pcConverter",
+    afiliado: "https://s.click.aliexpress.com/e/_pcWorkspace"
+  });
+  const appConvertido = comAppPc.linksComerciais.find(item => item.tipo === "app");
+  const pcConvertido = comAppPc.linksComerciais.find(item => item.tipo === "pc");
+  const resgate = comAppPc.linksComerciais.find(item => item.tipo === "resgate");
+
+  assert.strictEqual(appConvertido.urlAfiliada, "https://s.click.aliexpress.com/e/_appWorkspace");
+  assert.strictEqual(pcConvertido.urlAfiliada, "https://s.click.aliexpress.com/e/_pcWorkspace");
+  assert.strictEqual(appConvertido.renderizavel, true);
+  assert.strictEqual(pcConvertido.renderizavel, true);
+  assert.ok(!resgate.urlAfiliada, "Produto/APP/PC nao podem substituir Resgate");
+}
+
+{
+  const ofertaBase = {
+    linksComerciais: [
+      { tipo: "app", original: "https://a.aliexpress.com/_appNaoConvertido", resolvido: "https://a.aliexpress.com/_appNaoConvertido" },
+      { tipo: "pc", original: "https://a.aliexpress.com/_pcConvertido", resolvido: "https://a.aliexpress.com/_pcConvertido" }
+    ]
+  };
+  const convertido = aplicarAfiliadoLinkComercialRadar(ofertaBase, {
+    original: "https://a.aliexpress.com/_pcConvertido",
+    resolvido: "https://a.aliexpress.com/_pcConvertido",
+    afiliado: "https://s.click.aliexpress.com/e/_pcWorkspace"
+  });
+  const app = convertido.linksComerciais.find(item => item.tipo === "app");
+  const pc = convertido.linksComerciais.find(item => item.tipo === "pc");
+
+  assert.strictEqual(app.renderizavel, undefined, "APP nao convertivel nao deve renderizar por carona");
+  assert.strictEqual(pc.urlAfiliada, "https://s.click.aliexpress.com/e/_pcWorkspace");
+  assert.strictEqual(pc.renderizavel, true, "somente PC convertivel deve renderizar como PC");
 }
 
 {

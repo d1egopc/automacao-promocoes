@@ -112,6 +112,9 @@ function classificarLinksBloco(linhas = [], radarMirror = {}) {
     classificados: {
       produto: resultado.produto,
       resgate: resultado.resgate,
+      app: resultado.app || [],
+      pc: resultado.pc || [],
+      moedas: resultado.moedas || [],
       afiliado: resultado.afiliado,
       imagem: resultado.imagem,
       outros: [
@@ -278,7 +281,7 @@ function resumirBlocoComercialCanonico(linhas = [], indice = 0, radarMirror = {}
   const precoAtual = precos.atual?.valor ?? null;
   const possuiProduto = Boolean(titulo.linha);
   const possuiPreco = precoAtual !== null && precoAtual !== undefined;
-  const possuiLinkProduto = links.classificados.produto.length > 0 || links.classificados.afiliado.length > 0;
+  const possuiLinkProduto = links.classificados.produto.length > 0 || links.classificados.pc.length > 0 || links.classificados.afiliado.length > 0;
 
   return {
     indice,

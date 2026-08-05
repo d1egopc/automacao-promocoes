@@ -11905,10 +11905,53 @@ function imagemOfertaRadar(oferta = {}) {
   }).imagem || "").trim();
 }
 
+const TIPOS_LINK_COMERCIAL_CONVERSIVEIS_RADAR = new Set([
+  "produto",
+  "resgate",
+  "cupom",
+  "landing",
+  "app",
+  "pc",
+  "moedas"
+]);
+
+function idsProdutosAliExpressPorPapelRadar(links = []) {
+  const ids = {};
+  for (const item of Array.isArray(links) ? links : []) {
+    const tipo = textoRadarId(item?.tipo || "");
+    const linkBase = textoRadarId(item?.resolvido || item?.original || "");
+    const productId = extrairProductIdAliExpressManual(linkBase);
+    if (!tipo || !productId) continue;
+    ids[tipo] = ids[tipo] || new Set();
+    ids[tipo].add(productId);
+  }
+  return ids;
+}
+
+function linkAliExpressMantemProdutoCanonicoRadar(item = {}, idsPorPapel = {}) {
+  const tipo = textoRadarId(item.tipo || "");
+  if (!["app", "pc"].includes(tipo)) return { ok: true };
+  const idAtual = extrairProductIdAliExpressManual(item.resolvido || item.original || "");
+  if (!idAtual) return { ok: true, motivo: "sem_product_id_direto" };
+
+  const idsCanonicos = [
+    ...(idsPorPapel.produto || []),
+    ...(idsPorPapel.pc || []),
+    ...(idsPorPapel.app || [])
+  ].filter(Boolean);
+  const distintos = [...new Set(idsCanonicos)];
+  if (distintos.length <= 1 || distintos.includes(idAtual)) return { ok: true };
+
+  return { ok: false, motivo: "aliexpress_app_pc_produto_divergente", productId: idAtual };
+}
+
 async function converterLinksComerciaisRadarCliente(oferta = {}, clienteId = "admin", marketplace = "", linkPrincipal = "", linkAfiliadoPrincipal = "") {
   let proxima = aplicarContratoComercialRadar(oferta);
   const links = Array.isArray(proxima.linksComerciais) ? proxima.linksComerciais : [];
   if (!links.length) return proxima;
+  const idsAliExpress = normalizarMarketplaceRadar(marketplace) === "aliexpress"
+    ? idsProdutosAliExpressPorPapelRadar(links)
+    : {};
 
   for (const item of links) {
     const tipo = textoRadarId(item.tipo || "produto");
@@ -11928,7 +11971,18 @@ async function converterLinksComerciaisRadarCliente(oferta = {}, clienteId = "ad
       continue;
     }
 
-    if (!["produto", "resgate", "cupom", "landing"].includes(tipo)) continue;
+    if (!TIPOS_LINK_COMERCIAL_CONVERSIVEIS_RADAR.has(tipo)) continue;
+
+    const integridadeAliExpress = linkAliExpressMantemProdutoCanonicoRadar(item, idsAliExpress);
+    if (!integridadeAliExpress.ok) {
+      console.log("[RADAR-LINK-COMERCIAL-CONVERSAO-BLOQUEADA]", JSON.stringify({
+        clienteId,
+        marketplace,
+        tipo,
+        motivo: integridadeAliExpress.motivo
+      }));
+      continue;
+    }
 
     try {
       const afiliado = await gerarLinkAfiliadoCliente(clienteId, marketplace, linkBase, proxima);

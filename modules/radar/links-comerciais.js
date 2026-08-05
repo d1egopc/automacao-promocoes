@@ -112,10 +112,72 @@ function linkPareceProdutoPorDominio(url = "") {
   );
 }
 
+function marketplaceAliExpress(marketplace = "", url = "") {
+  const mp = normalizarTextoComparacao(marketplace).replace(/[^a-z0-9]+/g, "");
+  const valor = texto(url).toLowerCase();
+  return mp === "aliexpress" || /(^|\/\/|\.)(?:a|s\.click|pt|www)?\.?aliexpress\./i.test(valor);
+}
+
+function linhaSemLinks(linha = "") {
+  return normalizarTextoComparacao(texto(linha).replace(REGEX_LINK_COMERCIAL, " "));
+}
+
+function marcadorAppAliExpress(linha = "") {
+  const chave = linhaSemLinks(linha);
+  return /\b(?:app|aplicativo|celular|mobile)\b/.test(chave);
+}
+
+function marcadorPcAliExpress(linha = "") {
+  const chave = linhaSemLinks(linha);
+  return /\b(?:pc|no\s+pc|pelo\s+pc|computador|desktop|site)\b/.test(chave);
+}
+
+function marcadorMoedasAliExpress(linha = "") {
+  const chave = linhaSemLinks(linha);
+  return /\b(?:moeda|moedas|coins?)\b/.test(chave);
+}
+
+function classificarPapelAliExpress({ link = "", linhaAtual = "", linhaAnterior = "", linhaPosterior = "", marketplace = "" } = {}) {
+  if (!marketplaceAliExpress(marketplace, link)) return null;
+
+  if (marcadorMoedasAliExpress(linhaAtual)) {
+    return { tipo: "moedas", origem: "aliexpress_contexto_moedas", evidencia: "contexto_moedas" };
+  }
+
+  if (marcadorAppAliExpress(linhaAtual)) {
+    return { tipo: "app", origem: "aliexpress_contexto_app", evidencia: "contexto_app" };
+  }
+
+  if (marcadorPcAliExpress(linhaAtual)) {
+    return { tipo: "pc", origem: "aliexpress_contexto_pc", evidencia: "contexto_pc" };
+  }
+
+  if (marcadorMoedasAliExpress(linhaAnterior)) {
+    return { tipo: "moedas", origem: "aliexpress_contexto_moedas", evidencia: "contexto_moedas" };
+  }
+
+  if (marcadorAppAliExpress(linhaAnterior)) {
+    return { tipo: "app", origem: "aliexpress_contexto_app", evidencia: "contexto_app" };
+  }
+
+  if (marcadorPcAliExpress(linhaAnterior)) {
+    return { tipo: "pc", origem: "aliexpress_contexto_pc", evidencia: "contexto_pc" };
+  }
+
+  if (!marcadorAppAliExpress(linhaAtual) && !marcadorPcAliExpress(linhaAtual) && marcadorPcAliExpress(linhaPosterior)) {
+    return { tipo: "app", origem: "aliexpress_posicao_antes_pc", evidencia: "posicao_antes_pc" };
+  }
+
+  return null;
+}
+
 function normalizarTipoSugerido(tipo = "") {
   const chave = normalizarTextoComparacao(tipo);
   if (["produto", "product"].includes(chave)) return "produto";
   if (["resgate", "cupom", "coupon"].includes(chave)) return "resgate";
+  if (["app", "aplicativo", "celular", "mobile", "link_app"].includes(chave)) return "app";
+  if (["pc", "site", "desktop", "computador", "link_pc"].includes(chave)) return "pc";
+  if (["moedas", "moeda", "coins", "coin", "link_moedas"].includes(chave)) return "moedas";
   if (["imagem", "image"].includes(chave)) return "imagem";
   if (["afiliado", "affiliate"].includes(chave)) return "afiliado";
   if (["landing", "campanha"].includes(chave)) return "landing";
@@ -154,39 +216,54 @@ function classificarLinkComercial({
     confianca = "alta";
     origem = "contexto_resgate";
     evidencias.push("contexto_resgate");
-  } else if (contextoInequivocoProduto(chaveContexto)) {
-    tipo = "produto";
-    confianca = "alta";
-    origem = "contexto_produto";
-    evidencias.push("contexto_produto");
   } else if (linkParecePaginaCupons(link)) {
     tipo = "resgate";
     confianca = "media";
     origem = "padrao_pagina_cupons";
     evidencias.push("padrao_pagina_cupons");
-  } else if (linkPareceProdutoPorDominio(link)) {
-    tipo = linkPareceAfiliado(link) ? "afiliado" : "produto";
-    confianca = "media";
-    origem = linkPareceAfiliado(link) ? "dominio_afiliado_produto" : "dominio_produto";
-    evidencias.push(origem);
-    if (linkPareceEncurtadorComercial(link)) evidencias.push("dominio_encurtador");
-  } else if (linkPareceAfiliado(link)) {
-    tipo = "afiliado";
-    confianca = "media";
-    origem = "dominio_afiliado";
-    evidencias.push(origem);
-    if (linkPareceEncurtadorComercial(link)) evidencias.push("dominio_encurtador");
-  } else if (linkPareceEncurtadorComercial(link)) {
-    tipo = "encurtador";
-    confianca = "baixa";
-    origem = "dominio_encurtador";
-    evidencias.push(origem);
-  } else if (linkPareceLandingComercial(link)) {
-    tipo = "landing";
-    confianca = "baixa";
-    origem = "padrao_landing";
-    evidencias.push(origem);
-  } else if (sugestao) {
+  } else if (contextoInequivocoProduto(chaveContexto)) {
+    tipo = "produto";
+    confianca = "alta";
+    origem = "contexto_produto";
+    evidencias.push("contexto_produto");
+  } else {
+    const papelAliExpress = classificarPapelAliExpress({ link, linhaAtual, linhaAnterior, linhaPosterior, marketplace });
+    if (papelAliExpress) {
+      tipo = papelAliExpress.tipo;
+      confianca = "alta";
+      origem = papelAliExpress.origem;
+      evidencias.push(papelAliExpress.evidencia);
+    } else if (linkPareceProdutoPorDominio(link)) {
+      tipo = linkPareceAfiliado(link) ? "afiliado" : "produto";
+      confianca = "media";
+      origem = linkPareceAfiliado(link) ? "dominio_afiliado_produto" : "dominio_produto";
+      evidencias.push(origem);
+      if (linkPareceEncurtadorComercial(link)) evidencias.push("dominio_encurtador");
+    } else if (linkPareceAfiliado(link)) {
+      tipo = "afiliado";
+      confianca = "media";
+      origem = "dominio_afiliado";
+      evidencias.push(origem);
+      if (linkPareceEncurtadorComercial(link)) evidencias.push("dominio_encurtador");
+    } else if (linkPareceEncurtadorComercial(link)) {
+      tipo = "encurtador";
+      confianca = "baixa";
+      origem = "dominio_encurtador";
+      evidencias.push(origem);
+    } else if (linkPareceLandingComercial(link)) {
+      tipo = "landing";
+      confianca = "baixa";
+      origem = "padrao_landing";
+      evidencias.push(origem);
+    } else if (sugestao) {
+      tipo = sugestao;
+      confianca = "baixa";
+      origem = "tipo_sugerido";
+      evidencias.push("tipo_sugerido");
+    }
+  }
+
+  if (tipo === "outros" && sugestao) {
     tipo = sugestao;
     confianca = "baixa";
     origem = "tipo_sugerido";
@@ -262,6 +339,9 @@ function classificarLinksComerciais({
   const grupos = {
     produto: [],
     resgate: [],
+    app: [],
+    pc: [],
+    moedas: [],
     afiliado: [],
     landing: [],
     encurtador: [],
@@ -297,11 +377,14 @@ function classificarLinksComerciais({
     }
   });
 
-  const produtoOriginal = grupos.produto[0] || grupos.afiliado[0] || "";
+  const produtoOriginal = grupos.produto[0] || grupos.pc[0] || grupos.afiliado[0] || "";
   const resgateCupom = grupos.resgate[0] || "";
   const encontrados = linksUnicos([
     ...grupos.produto,
     ...grupos.resgate,
+    ...grupos.app,
+    ...grupos.pc,
+    ...grupos.moedas,
     ...grupos.afiliado,
     ...grupos.landing,
     ...grupos.encurtador,

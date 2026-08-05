@@ -304,6 +304,15 @@ function montarLinksComerciaisEspelho(radarMirror = {}, resolucao = {}, tecnicaI
     marketplace: mp
   });
 
+  for (const link of Array.isArray(blocoCanonico?.links?.app) ? blocoCanonico.links.app : []) {
+    adicionarLinkComercial(links, { tipo: "app", original: link, marketplace: mp });
+  }
+  for (const link of Array.isArray(blocoCanonico?.links?.pc) ? blocoCanonico.links.pc : []) {
+    adicionarLinkComercial(links, { tipo: "pc", original: link, marketplace: mp });
+  }
+  for (const link of Array.isArray(blocoCanonico?.links?.moedas) ? blocoCanonico.links.moedas : []) {
+    adicionarLinkComercial(links, { tipo: "moedas", original: link, marketplace: mp });
+  }
   for (const link of Array.isArray(blocoCanonico?.links?.afiliado) ? blocoCanonico.links.afiliado : []) {
     adicionarLinkComercial(links, { tipo: "afiliado", original: link, marketplace: mp });
   }
@@ -469,6 +478,7 @@ function aplicarAfiliadoLinkComercialRadar(oferta = {}, { original = "", resolvi
   const alvoResolvido = texto(resolvido || original);
   const linkAfiliado = texto(afiliado);
   if (!linkAfiliado || !Array.isArray(oferta.linksComerciais)) return oferta;
+  const convertido = status === "convertido";
 
   const linksComerciais = oferta.linksComerciais.map(item => {
     const linkOriginal = texto(item.original);
@@ -477,7 +487,19 @@ function aplicarAfiliadoLinkComercialRadar(oferta = {}, { original = "", resolvi
       link === alvoOriginal || link === alvoResolvido
     );
     return mesmoLink
-      ? { ...item, afiliado: linkAfiliado, status }
+      ? {
+        ...item,
+        afiliado: linkAfiliado,
+        linkAfiliado,
+        urlAfiliada: linkAfiliado,
+        status,
+        convertidoWorkspace: item.convertidoWorkspace === true || convertido,
+        afiliadoConvertido: item.afiliadoConvertido === true || convertido,
+        workspaceConvertido: item.workspaceConvertido === true || convertido,
+        linkAfiliadoWorkspace: item.linkAfiliadoWorkspace === true || convertido,
+        renderizavel: item.renderizavel === true || convertido,
+        seguro: item.seguro === true || convertido
+      }
       : { ...item };
   });
 
