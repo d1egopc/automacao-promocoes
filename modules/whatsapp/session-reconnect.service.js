@@ -25,6 +25,14 @@ const ESTADOS_TERMINAIS_SEM_RESSUSCITAR = new Set([
   "excluída"
 ]);
 
+const CAMPOS_STATUS_SESSAO_DESATIVADA = new Set([
+  "desativada",
+  "desativado",
+  "disabled",
+  "inativa",
+  "inativo"
+]);
+
 function authDirSessao(dataDir = "/data", sessaoId = "") {
   return path.join(dataDir || "/data", `auth_${String(sessaoId || "").trim()}`);
 }
@@ -320,6 +328,100 @@ function calcularBackoffMs(tentativas = 0) {
   return Math.min(60_000, 5_000 * Math.max(1, 2 ** Math.min(n, 4)));
 }
 
+function textoSessao(valor = "") {
+  return String(valor || "").trim();
+}
+
+function normalizarTipoSessao(meta = {}) {
+  return textoSessao(meta.tipo || meta.canal || meta.provider || "whatsapp").toLowerCase();
+}
+
+function idSessaoPersistida(chave = "", meta = {}) {
+  return textoSessao(
+    meta.id ||
+    meta.sessaoId ||
+    meta.sessionId ||
+    meta.identificadorTecnico ||
+    chave
+  );
+}
+
+function sessaoMarcadaDesativada(meta = {}) {
+  if (!meta || typeof meta !== "object") return false;
+  if (meta.ativo === false || meta.desativada === true || meta.desativado === true || meta.disabled === true) return true;
+  return CAMPOS_STATUS_SESSAO_DESATIVADA.has(textoSessao(meta.status).toLowerCase());
+}
+
+function montarCandidatosSessoesPersistidas({ sessoesMeta = {}, configSessoesWhatsapp = [] } = {}) {
+  const mapa = new Map();
+
+  for (const [chave, meta] of Object.entries(sessoesMeta || {})) {
+    if (!meta || typeof meta !== "object" || Array.isArray(meta)) continue;
+    const id = idSessaoPersistida(chave, meta);
+    if (!id || normalizarTipoSessao(meta) !== "whatsapp") continue;
+    mapa.set(id, { ...meta, id });
+  }
+
+  for (const idBruto of Array.isArray(configSessoesWhatsapp) ? configSessoesWhatsapp : []) {
+    const id = textoSessao(idBruto);
+    if (!id || mapa.has(id)) continue;
+    const meta = sessoesMeta?.[id] && typeof sessoesMeta[id] === "object"
+      ? sessoesMeta[id]
+      : { id, tipo: "whatsapp" };
+    if (normalizarTipoSessao(meta) !== "whatsapp") continue;
+    mapa.set(id, { ...meta, id });
+  }
+
+  return [...mapa.values()];
+}
+
+function decidirReconexaoBootSessao({ sessaoId = "", meta = {}, statusAtual = "", auth = {} } = {}) {
+  const id = textoSessao(sessaoId);
+
+  if (!id) return { elegivel: false, decisao: "pular", motivo: "sessao_sem_id" };
+  if (sessaoMarcadaDesativada(meta)) return { elegivel: false, decisao: "pular", motivo: "sessao_desativada" };
+
+  const estadoTerminal = auth.estadoTerminal === true ||
+    ESTADOS_TERMINAIS_SEM_RESSUSCITAR.has(textoSessao(statusAtual)) ||
+    ESTADOS_TERMINAIS_SEM_RESSUSCITAR.has(textoSessao(meta?.status));
+
+  if (estadoTerminal) {
+    return { elegivel: false, decisao: "pular", motivo: "estado_terminal_nao_restaurar" };
+  }
+
+  if (auth.authValidaParaReconectar === true) {
+    return { elegivel: true, decisao: "iniciar", motivo: "auth_valida_para_reconectar" };
+  }
+
+  if (auth.authDirExiste || auth.credsExiste || auth.backupExiste) {
+    return { elegivel: false, decisao: "erro_auth", motivo: "auth_ou_backup_invalido" };
+  }
+
+  return { elegivel: false, decisao: "pular", motivo: "sem_auth_persistida" };
+}
+
+function enumerarSessoesReconexaoBoot({
+  sessoesMeta = {},
+  configSessoesWhatsapp = [],
+  statusSessao = {},
+  auditarAuth = () => ({})
+} = {}) {
+  return montarCandidatosSessoesPersistidas({ sessoesMeta, configSessoesWhatsapp })
+    .map(meta => {
+      const sessaoId = idSessaoPersistida(meta.id, meta);
+      const statusAtual = statusSessao?.[sessaoId] || "";
+      const auth = auditarAuth({ sessaoId, meta, statusAtual }) || {};
+      const politica = decidirReconexaoBootSessao({ sessaoId, meta, statusAtual, auth });
+
+      return {
+        sessaoId,
+        meta,
+        auth,
+        ...politica
+      };
+    });
+}
+
 module.exports = {
   ESTADOS_WHATSAPP,
   authDirSessao,
@@ -329,5 +431,9 @@ module.exports = {
   deveExibirQr,
   calcularBackoffMs,
   salvarBackupCredsValido,
-  recuperarCredsNoBoot
+  recuperarCredsNoBoot,
+  sessaoMarcadaDesativada,
+  montarCandidatosSessoesPersistidas,
+  decidirReconexaoBootSessao,
+  enumerarSessoesReconexaoBoot
 };

@@ -6720,7 +6720,8 @@ const {
   deveExibirQr,
   calcularBackoffMs,
   salvarBackupCredsValido,
-  recuperarCredsNoBoot
+  recuperarCredsNoBoot,
+  enumerarSessoesReconexaoBoot
 } = require("./modules/whatsapp/session-reconnect.service");
 
 registrarMiddlewaresOperacionais(app, {
@@ -22160,7 +22161,7 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
     usadas: sessoesCliente.length + 1
   });
 
-  iniciarWhatsApp(sessaoId, false);
+  reconectarSessaoWhatsAppSeguro(sessaoId, { origem: "manual_conectar" });
 
   return res.json({
     ok: true,
@@ -22959,6 +22960,19 @@ function marcarSessaoWhatsAppMetaStatus(id, status) {
   salvarSessoesMeta();
 }
 
+function reconectarSessaoWhatsAppSeguro(id, opcoes = {}) {
+  const sessaoId = String(id || "").trim();
+  if (!sessaoId) return Promise.resolve(null);
+
+  console.log("[WHATSAPP-RECONNECT-SEGURO]", JSON.stringify({
+    sessaoId,
+    origem: opcoes.origem || "indefinida",
+    force: opcoes.force === true
+  }));
+
+  return iniciarWhatsApp(sessaoId, opcoes.force === true);
+}
+
 async function iniciarWhatsApp(id, force = false) {
   console.log("[WHATSAPP] Iniciando sesso:", id, "force:", force);
 
@@ -23353,7 +23367,7 @@ salvarSessoesMeta();
           }
 
           statusSessao[id] = ESTADOS_WHATSAPP.RECONNECTING;
-          iniciarWhatsApp(id).catch((e) => {
+          reconectarSessaoWhatsAppSeguro(id, { origem: "connection_close_backoff" }).catch((e) => {
             console.error("[ERRO] ERRO AO RECONECTAR:", e);
             statusSessao[id] = ESTADOS_WHATSAPP.OFFLINE;
             reconectando[id] = false;
@@ -23576,35 +23590,38 @@ setInterval(() => {
   setTimeout(() => {
     console.log("[WHATSAPP] Reconectando sesses WhatsApp automaticamente...");
 
-let sessoesParaReconectar = [
-  ...new Set(config?.sessoesWhatsapp || [])
-];
-
-sessoesParaReconectar = sessoesParaReconectar
-  .filter(id => id && id.includes("_"))
-  .filter(id => !id.includes("_user_"))
-  .filter(id => !/^user_[^_]+_user_/.test(id));
-
-sessoesParaReconectar = sessoesParaReconectar.filter(id => {
-  const authBoot = auditarAuthSessaoWhatsApp(id);
-  const possuiMeta = sessaoPersistidaValida(id);
-  const iniciar = possuiMeta || authBoot.authDirExiste === true || authBoot.credsExiste === true || authBoot.backupExiste === true;
-  console.log("[WHATSAPP-BOOT-SESSAO]", JSON.stringify({
-    sessaoId: id,
-    metaExiste: possuiMeta === true,
-    authDirExiste: authBoot.authDirExiste === true,
-    credsExiste: authBoot.credsExiste === true,
-    backupExiste: authBoot.backupExiste === true,
-    decisao: iniciar ? "iniciar" : "pular",
-    motivo: iniciar ? "sessao_persistida_ou_auth_existente" : "sem_meta_e_sem_auth"
-  }));
-  return iniciar;
+const decisoesReconexaoBoot = enumerarSessoesReconexaoBoot({
+  sessoesMeta,
+  configSessoesWhatsapp: config?.sessoesWhatsapp || [],
+  statusSessao,
+  auditarAuth: ({ sessaoId }) => auditarAuthSessaoWhatsApp(sessaoId)
 });
+
+const sessoesParaReconectar = decisoesReconexaoBoot
+  .filter(decisao => {
+    const id = decisao.sessaoId;
+    const authBoot = decisao.auth || {};
+    const possuiMeta = sessaoPersistidaValida(id);
+    console.log("[WHATSAPP-BOOT-SESSAO]", JSON.stringify({
+      sessaoId: id,
+      metaExiste: possuiMeta === true,
+      authDirExiste: authBoot.authDirExiste === true,
+      credsExiste: authBoot.credsExiste === true,
+      backupExiste: authBoot.backupExiste === true,
+      decisao: decisao.decisao,
+      motivo: decisao.motivo
+    }));
+    if (decisao.decisao === ESTADOS_WHATSAPP.ERRO_AUTH || decisao.decisao === "erro_auth") {
+      statusSessao[id] = ESTADOS_WHATSAPP.ERRO_AUTH;
+    }
+    return decisao.elegivel === true;
+  })
+  .map(decisao => decisao.sessaoId);
 
     sessoesParaReconectar.forEach((id, index) => {
       setTimeout(() => {
         console.log("[WHATSAPP] Reconectando sesso:", id);
-        iniciarWhatsApp(id);
+        reconectarSessaoWhatsAppSeguro(id, { origem: "boot_automatico" });
       }, 3000 + index * 4000);
     });
 

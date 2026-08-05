@@ -13,7 +13,8 @@ const {
   deveExibirQr,
   calcularBackoffMs,
   salvarBackupCredsValido,
-  recuperarCredsNoBoot
+  recuperarCredsNoBoot,
+  enumerarSessoesReconexaoBoot
 } = require("../modules/whatsapp/session-reconnect.service");
 
 const raiz = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-whatsapp-auth-"));
@@ -63,6 +64,60 @@ function decidirQr(sessaoId, extras = {}) {
       ultimoMotivo: extras.ultimoMotivo || ""
     })
   };
+}
+
+function authBootValida() {
+  return {
+    authDirExiste: true,
+    credsExiste: true,
+    credsJsonValido: true,
+    credsEstruturaValida: true,
+    meIdExiste: true,
+    backupExiste: false,
+    authValidaParaReconectar: true,
+    estadoTerminal: false
+  };
+}
+
+function authBootInvalida() {
+  return {
+    authDirExiste: true,
+    credsExiste: true,
+    credsJsonValido: false,
+    credsEstruturaValida: false,
+    backupExiste: true,
+    backupJsonValido: false,
+    backupEstruturaValida: false,
+    authValidaParaReconectar: false,
+    estadoTerminal: false
+  };
+}
+
+function idsElegiveisBoot(opcoes) {
+  return enumerarSessoesReconexaoBoot(opcoes)
+    .filter(decisao => decisao.elegivel)
+    .map(decisao => decisao.sessaoId)
+    .sort();
+}
+
+function simularBootReconexao(decisoes = []) {
+  const status = {};
+  const chamadas = [];
+  const tentativasAtivas = new Set();
+
+  for (const decisao of decisoes) {
+    const id = decisao.sessaoId;
+    if (decisao.decisao === "erro_auth") {
+      status[id] = ESTADOS_WHATSAPP.ERRO_AUTH;
+      continue;
+    }
+    if (!decisao.elegivel) continue;
+    if (tentativasAtivas.has(id)) continue;
+    tentativasAtivas.add(id);
+    chamadas.push(id);
+  }
+
+  return { status, chamadas };
 }
 
 try {
@@ -196,6 +251,92 @@ try {
   assert.ok(calcularBackoffMs(0) >= 5000, "backoff inicial deve existir");
   assert.ok(calcularBackoffMs(5) <= 60000, "backoff deve ter teto");
 
+  const authPorSessao = {
+    user_a_sessao1: authBootValida(),
+    workspace_b_Principal: authBootValida(),
+    "user_demo_Vivo evio": authBootValida(),
+    cliente_futuro_sessao5: authBootValida(),
+    workspace_c_auth_invalida: authBootInvalida(),
+    workspace_c_valida: authBootValida(),
+    sessao_logged_out_boot: { ...authBootValida(), estadoTerminal: true },
+    sessao_resetada_boot: { ...authBootValida(), estadoTerminal: true },
+    sessao_desativada_boot: authBootValida()
+  };
+
+  const sessoesMetaBoot = {
+    user_a_sessao1: { id: "user_a_sessao1", tipo: "whatsapp", workspaceId: "user_a", status: "open" },
+    workspace_b_Principal: { id: "workspace_b_Principal", tipo: "whatsapp", workspaceId: "workspace_b", status: "open" },
+    "user_demo_Vivo evio": { id: "user_demo_Vivo evio", tipo: "whatsapp", workspaceId: "user_demo", status: "open" },
+    cliente_futuro_sessao5: { id: "cliente_futuro_sessao5", tipo: "whatsapp", workspaceId: "cliente_futuro", status: "open" },
+    workspace_c_auth_invalida: { id: "workspace_c_auth_invalida", tipo: "whatsapp", workspaceId: "workspace_c", status: "open" },
+    sessao_logged_out_boot: { id: "sessao_logged_out_boot", tipo: "whatsapp", status: ESTADOS_WHATSAPP.LOGGED_OUT },
+    sessao_resetada_boot: { id: "sessao_resetada_boot", tipo: "whatsapp", status: "resetada" },
+    sessao_desativada_boot: { id: "sessao_desativada_boot", tipo: "whatsapp", ativo: false, status: "open" }
+  };
+
+  const elegiveisBoot = idsElegiveisBoot({
+    sessoesMeta: sessoesMetaBoot,
+    configSessoesWhatsapp: ["workspace_c_valida"],
+    auditarAuth: ({ sessaoId }) => authPorSessao[sessaoId] || authBootInvalida()
+  });
+
+  assert.deepStrictEqual(
+    elegiveisBoot,
+    [
+      "cliente_futuro_sessao5",
+      "user_demo_Vivo evio",
+      "user_a_sessao1",
+      "workspace_b_Principal",
+      "workspace_c_valida"
+    ].sort(),
+    "boot deve enumerar todas as sessoes elegiveis persistidas, atuais e futuras"
+  );
+  assert.ok(!elegiveisBoot.includes("workspace_c_auth_invalida"), "auth invalida nao pode bloquear nem entrar junto das validas");
+  assert.ok(!elegiveisBoot.includes("sessao_logged_out_boot"), "loggedOut nao pode ressuscitar no boot");
+  assert.ok(!elegiveisBoot.includes("sessao_resetada_boot"), "reset explicito nao pode ressuscitar no boot");
+  assert.ok(!elegiveisBoot.includes("sessao_desativada_boot"), "sessao desativada nao pode reconectar no boot");
+
+  const authRegressao = {
+    workspace_a_whatsapp_1: authBootValida(),
+    workspace_b_whatsapp_1: authBootValida(),
+    workspace_c_whatsapp_1: authBootValida(),
+    workspace_d_whatsapp_1: authBootValida(),
+    workspace_e_logged_out: { ...authBootValida(), estadoTerminal: true },
+    workspace_f_auth_invalida: authBootInvalida()
+  };
+  const decisoesRegressao = enumerarSessoesReconexaoBoot({
+    sessoesMeta: {
+      workspace_a_whatsapp_1: { id: "workspace_a_whatsapp_1", tipo: "whatsapp", status: "open" },
+      workspace_b_whatsapp_1: { id: "workspace_b_whatsapp_1", tipo: "whatsapp", status: "open" },
+      workspace_c_whatsapp_1: { id: "workspace_c_whatsapp_1", tipo: "whatsapp", status: "open" },
+      workspace_d_whatsapp_1: { id: "workspace_d_whatsapp_1", tipo: "whatsapp", status: "open" },
+      workspace_e_logged_out: { id: "workspace_e_logged_out", tipo: "whatsapp", status: ESTADOS_WHATSAPP.LOGGED_OUT },
+      workspace_f_auth_invalida: { id: "workspace_f_auth_invalida", tipo: "whatsapp", status: "open" }
+    },
+    configSessoesWhatsapp: [
+      "workspace_a_whatsapp_1",
+      "workspace_b_whatsapp_1",
+      "workspace_c_whatsapp_1",
+      "workspace_d_whatsapp_1"
+    ],
+    auditarAuth: ({ sessaoId }) => authRegressao[sessaoId] || authBootInvalida()
+  });
+  const regressaoBoot = simularBootReconexao(decisoesRegressao);
+  assert.deepStrictEqual(
+    regressaoBoot.chamadas.sort(),
+    [
+      "workspace_a_whatsapp_1",
+      "workspace_b_whatsapp_1",
+      "workspace_c_whatsapp_1",
+      "workspace_d_whatsapp_1"
+    ].sort(),
+    "boot deve reconectar automaticamente as 4 sessoes validas"
+  );
+  assert.strictEqual(new Set(regressaoBoot.chamadas).size, regressaoBoot.chamadas.length, "nenhuma sessao pode iniciar duas vezes");
+  assert.ok(!regressaoBoot.chamadas.includes("workspace_e_logged_out"), "loggedOut nao pode iniciar");
+  assert.ok(!regressaoBoot.chamadas.includes("workspace_f_auth_invalida"), "auth invalida nao deve abrir socket");
+  assert.strictEqual(regressaoBoot.status.workspace_f_auth_invalida, ESTADOS_WHATSAPP.ERRO_AUTH, "auth invalida deve virar erro_auth");
+
   const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
   assert.ok(indexFonte.includes("inicializandoWhatsApp[id]"), "deve haver trava de inicializacao por sessao");
   assert.ok(indexFonte.includes("Inicializacao ja em andamento"), "segunda inicializacao simultanea nao deve criar outro socket");
@@ -205,6 +346,11 @@ try {
   assert.ok(indexFonte.includes("salvarBackupCredsValido"), "saveCreds deve preservar backup valido");
   assert.ok(indexFonte.includes("WHATSAPP-AUTH-BOOT-DECISAO"), "decisao de boot deve ser observavel");
   assert.ok(indexFonte.includes("WHATSAPP-QR-DECISAO"), "decisao de QR deve ser observavel");
+  assert.ok(indexFonte.includes("enumerarSessoesReconexaoBoot"), "boot deve usar enumeracao universal persistida");
+  assert.ok(indexFonte.includes("reconectarSessaoWhatsAppSeguro(sessaoId, { origem: \"manual_conectar\" })"), "manual deve chamar funcao central segura");
+  assert.ok(indexFonte.includes("reconectarSessaoWhatsAppSeguro(id, { origem: \"boot_automatico\" })"), "boot deve chamar a mesma funcao central segura");
+  assert.ok(indexFonte.includes("reconectarSessaoWhatsAppSeguro(id, { origem: \"connection_close_backoff\" })"), "queda transitoria deve chamar a mesma funcao central segura");
+  assert.ok(!indexFonte.includes("id.includes(\"_user_\")"), "reconexao universal nao pode filtrar sessao por padrao de id");
   assert.ok(!indexFonte.includes("authDir: authNoQr.authDir"), "logs nao devem expor caminho completo de auth");
   assert.ok(!indexFonte.includes("backupRaw"), "logs nao devem expor conteudo de backup");
 
