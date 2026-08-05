@@ -200,7 +200,14 @@ function extrairCupomTextoAliExpress(textoRadar = "") {
   return normalizarCupomAliExpress(match?.[1] || "");
 }
 
+function extrairMoedasTextoAliExpress(textoRadar = "") {
+  const fonte = String(textoRadar || "");
+  const match = fonte.match(/(?:\+\s*)?(\d{1,6})\s*(?:moeda|moedas|coins?)\b/i);
+  return match ? `+${match[1]} moedas` : "";
+}
+
 function extrairBeneficioTextoAliExpress(produto = {}, evento = {}) {
+  const moedasTexto = extrairMoedasTextoAliExpress(textoOriginalEvento(evento));
   return primeiroValor(
     produto.beneficioComercial,
     produto.beneficioTexto,
@@ -211,8 +218,35 @@ function extrairBeneficioTextoAliExpress(produto = {}, evento = {}) {
     produto.descontoPix,
     produto.descontoApp,
     produto.freteGratis === true ? "Frete gratis" : "",
-    /moedas/i.test(textoOriginalEvento(evento)) ? "Confira desconto com moedas na pagina." : "",
+    moedasTexto,
+    /moedas/i.test(textoOriginalEvento(evento)) ? "Moedas no app" : "",
     /cashback/i.test(textoOriginalEvento(evento)) ? "Cashback informado na mensagem." : ""
+  );
+}
+
+function imagemAliExpressOficialProduto(produto = {}) {
+  return primeiroValor(
+    produto.imagem,
+    produto.imagemUrl,
+    produto.image,
+    produto.imageUrl,
+    produto.image_url,
+    produto.thumbnail,
+    produto.thumbnailUrl,
+    produto.picture,
+    produto.pictureUrl,
+    produto.productImage,
+    produto.productImageUrl,
+    produto.productMainImage,
+    produto.product_main_image,
+    produto.itemImage,
+    produto.itemImageUrl,
+    produto.item?.image,
+    produto.item?.imageUrl,
+    produto.product?.image,
+    produto.product?.imageUrl,
+    Array.isArray(produto.images) ? produto.images[0] : "",
+    Array.isArray(produto.imagens) ? produto.imagens[0] : ""
   );
 }
 
@@ -669,7 +703,9 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
   const cupom = primeiroValor(produto.cupom, cupomTexto);
   const cupomTipo = primeiroValor(produto.tipoCupom, produto.cupomTipo, cupom ? "texto_radar" : "");
   const beneficioComercial = extrairBeneficioTextoAliExpress(produto, evento);
+  const moedasTexto = extrairMoedasTextoAliExpress(textoOriginalEvento(evento));
   const linkAfiliado = primeiroValor(produto.linkAfiliado, produto.linkFinal, produto.link);
+  const imagemOficial = imagemAliExpressOficialProduto(produto);
 
   logAliExpressAdapter("[ENGINE-ALIEXPRESS-IMPORTADOR-RETORNO]", {
     jobId: job.id,
@@ -683,7 +719,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     cupom,
     beneficioComercial,
     linkAfiliado,
-    imagem: produto.imagem || "",
+    imagem: imagemOficial || "",
     categoria: produto.categoria || produto.categoriaProduto || "",
     camposRetorno: Object.keys(produto || {})
   });
@@ -754,7 +790,8 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     economia: primeiroValor(produto.economia, economiaCalculada.economia),
     percentual: primeiroValor(produto.percentual, produto.descontoPercentual, economiaCalculada.percentual),
     descontoPercentual: primeiroValor(produto.descontoPercentual, produto.percentual, economiaCalculada.percentual),
-    imagem: produto.imagem || "",
+    imagem: imagemOficial || "",
+    imagemOrigem: imagemOficial ? "aliexpress_produto_canonico_pc" : "",
     linkOriginal: produto.linkOriginal || urlOriginalEngine,
     linkExpandido: primeiroValor(produto.linkExpandido, produto.linkOriginal, urlOriginalEngine),
     linkAfiliado,
@@ -766,6 +803,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     beneficioComercial,
     beneficioTexto: beneficioComercial,
     beneficioExtra: beneficioComercial,
+    moedasTexto,
     valorEfetivo: primeiroValor(produto.valorEfetivo, produto.precoFinalConfirmado),
     valorEfetivoOrigem: primeiroValor(produto.valorEfetivoOrigem, produto.precoFinalConfirmadoOrigem, precoOrigem),
     precoOrigem,
@@ -784,6 +822,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
       linksClassificados: linksClassificadosComConversao,
       textoRadarTemCupom: Boolean(cupomTexto),
+      moedasTexto,
       precoRadarUsado: precoOrigem === "texto_radar",
       camposProduto: Object.keys(produto || {}),
       produto,

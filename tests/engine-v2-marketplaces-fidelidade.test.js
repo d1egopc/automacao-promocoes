@@ -697,6 +697,7 @@ async function testarAliExpressBinnuneUsaPrecoRadarEstruturadoEDescartaAuxiliar(
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(resultado.precoAtual, 112);
   assert.strictEqual(resultado.precoOrigem, "texto_radar");
+  assert.strictEqual(resultado.imagem, "https://img.test/binnune.jpg");
   assert.deepStrictEqual(urlsImportadas, [pc, app]);
   const papeis = resultado.metadata.linksClassificados.map(item => item.papelLink);
   assert.ok(papeis.includes("link_app"));
@@ -712,6 +713,101 @@ async function testarAliExpressBinnuneUsaPrecoRadarEstruturadoEDescartaAuxiliar(
     resultado.metadata.linksClassificados.find(item => item.urlOriginal === auxiliar)?.papelLink,
     "desconhecido"
   );
+}
+
+async function testarAliExpressEnriquecimentoImagemMoedasEAppFailClosed() {
+  limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
+  const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
+  const { montarItemFilaEngine } = require("../modules/engine/distributor/distributor.service");
+  const app = "https://a.aliexpress.com/_appBaseus";
+  const pc = "https://a.aliexpress.com/_pcBaseus";
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 122, evento_id: 222, cliente_id: "user_40qdblgt" },
+    evento: {
+      texto_original: [
+        "Headset Sem Fio Baseus GH02 - Preto",
+        "Valor: R$ 247 + 68 moedas",
+        "Cupom: OCUPOMDALOJA",
+        `App: ${app}`,
+        `PC: ${pc}`
+      ].join("\n"),
+      links_extraidos: [app, pc]
+    },
+    links: [
+      { ...linkRow(1, app), marketplace_detectado: "aliexpress" },
+      { ...linkRow(2, pc), marketplace_detectado: "aliexpress" }
+    ],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "track" } }),
+      importarAliExpress: async (url) => ({
+        titulo: "Headset Sem Fio Baseus GH02 - Preto",
+        precoAtual: "",
+        imageUrl: "https://ae01.alicdn.com/kf/baseus-gh02.jpg",
+        linkAfiliado: url === pc ? "https://s.click.aliexpress.com/e/_pcBaseusD1" : "https://s.click.aliexpress.com/e/_appBaseusD1",
+        linkExpandido: "https://www.aliexpress.com/item/1005008888888888.html",
+        categoria: "Perifericos",
+        conversaoAppValidada: false
+      })
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.precoAtual, 247);
+  assert.strictEqual(resultado.imagem, "https://ae01.alicdn.com/kf/baseus-gh02.jpg");
+  assert.strictEqual(resultado.imagemOrigem, "aliexpress_produto_canonico_pc");
+  assert.strictEqual(resultado.moedasTexto, "+68 moedas");
+  assert.strictEqual(resultado.beneficioTexto, "+68 moedas");
+  assert.strictEqual(resultado.cupom, "OCUPOMDALOJA");
+  const linkApp = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_app");
+  const linkPc = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
+  assert.strictEqual(linkApp.renderizavel, false);
+  assert.strictEqual(linkApp.urlAfiliada, "");
+  assert.strictEqual(linkPc.renderizavel, true);
+
+  const itemFila = montarItemFilaEngine({
+    ...resultado,
+    id: 122,
+    cliente_id: "user_40qdblgt"
+  });
+  assert.strictEqual(itemFila.imagem, "https://ae01.alicdn.com/kf/baseus-gh02.jpg");
+  assert.strictEqual(itemFila.beneficioTexto, "+68 moedas");
+}
+
+async function testarAliExpressSemImagemContinuaTextual() {
+  limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
+  const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
+  const pc = "https://a.aliexpress.com/_pcSemImagem";
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 123, evento_id: 223, cliente_id: "user_40qdblgt" },
+    evento: {
+      texto_original: [
+        "Webcam EMEET S600",
+        "Valor: R$ 347 + 120 moedas",
+        "Cupom: BRAE2",
+        `PC: ${pc}`
+      ].join("\n"),
+      links_extraidos: [pc]
+    },
+    links: [{ ...linkRow(1, pc), marketplace_detectado: "aliexpress" }],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "track" } }),
+      importarAliExpress: async () => ({
+        titulo: "Webcam EMEET S600",
+        precoAtual: "",
+        linkAfiliado: "https://s.click.aliexpress.com/e/_pcWebcamD1",
+        linkExpandido: "https://www.aliexpress.com/item/1005009999000000.html",
+        categoria: "Perifericos"
+      })
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.imagem, "");
+  assert.strictEqual(resultado.moedasTexto, "+120 moedas");
+  assert.strictEqual(resultado.beneficioTexto, "+120 moedas");
+  assert.strictEqual(resultado.linkAfiliado, "https://s.click.aliexpress.com/e/_pcWebcamD1");
 }
 
 function testarPonteIntegridadePreservaPrecoEAppPcAteFila() {
@@ -1081,6 +1177,8 @@ function testarOrquestradorIncluiMarketplacesOficiais() {
   await testarAliExpressNaoUsaCupomComoPrecoRadar();
   await testarAliExpressReconheceRotuloNaLinhaAnterior();
   await testarAliExpressBinnuneUsaPrecoRadarEstruturadoEDescartaAuxiliar();
+  await testarAliExpressEnriquecimentoImagemMoedasEAppFailClosed();
+  await testarAliExpressSemImagemContinuaTextual();
   testarPonteIntegridadePreservaPrecoEAppPcAteFila();
   testarPonteIntegridadeKabumAwinMantemSomenteCtaD1Renderizavel();
   await testarEntradaFilaKabumAwinPreservaMotivoReal();
