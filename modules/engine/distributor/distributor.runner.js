@@ -463,7 +463,10 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     }
   }
 
-  const fila = await adicionarOfertaNaFilaCliente(oferta, contexto);
+  const contextoFila = flowAtivo && flow?.aceitarAgora === true
+    ? { ...contexto, flowManagerDecisao: flow }
+    : contexto;
+  const fila = await adicionarOfertaNaFilaCliente(oferta, contextoFila);
   await registrarEtapaDistribuicao(oferta.job_id, "adicionar_fila", fila.ok ? "ok" : "retida", fila.ok ? "adicionada_fila" : fila.motivo, {
     clienteId: oferta.cliente_id,
     itemId: fila.itemFila?.id || null

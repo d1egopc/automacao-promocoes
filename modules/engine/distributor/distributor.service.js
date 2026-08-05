@@ -16,6 +16,9 @@ const {
   usuarioAtivo,
   logUsuarioInativoIgnorado
 } = require("../../../utils/usuarios-atividade");
+const {
+  carimbarExpiracaoOperacionalFila
+} = require("../flow-manager/flow-manager.service");
 
 let engineOfertasMetadataDisponivel = null;
 
@@ -811,6 +814,9 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
         coberturaTraceId: coberturaTraceIdPrincipal
       }
     };
+  }
+  if (contexto.flowManagerDecisao?.aceitarAgora === true) {
+    carimbarExpiracaoOperacionalFila(itemFila, contexto.flowManagerDecisao);
   }
   fidelidadeObs.registrarSnapshot("distributor_entrada", {
     ...contextoFidelidadeDistributor,

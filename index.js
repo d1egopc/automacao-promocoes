@@ -32,6 +32,9 @@ const {
 const {
   iniciarOrquestradorEngine
 } = require("./modules/engine/orchestrator.runner");
+const {
+  sanearExpiracaoOperacionalFilaItem
+} = require("./modules/engine/flow-manager/flow-manager.service");
 
 const {
   farejarMercadoLivre: farejarMercadoLivreModulo,
@@ -1243,9 +1246,10 @@ function ofertaExpiradaParaEnvio(oferta = {}, agora = Date.now()) {
 }
 
 function marcarOfertaExpirada(oferta = {}) {
-  oferta.status = "expirado";
-  oferta.statusDetalhe = "Oferta/cupom expirado antes do envio";
+  oferta.status = "expirada_operacional";
+  oferta.statusDetalhe = "Expirada pelo TTL operacional do Flow D1 antes do envio";
   oferta.expiradaEm = new Date().toISOString();
+  oferta.motivoExpiracao = "ttl_operacional_flow_d1";
 
   console.log("⏰ OFERTA EXPIRADA:", {
     titulo: oferta.titulo || oferta.nome || "",
@@ -1260,10 +1264,16 @@ function sanearExpiradosFila(clienteId = "admin") {
   for (const oferta of fila) {
     if (String(oferta?.clienteId || "admin") !== cliente) continue;
     if (oferta.status !== "pendente") continue;
-    if (!ofertaExpiradaParaEnvio(oferta)) continue;
+    const saneamento = sanearExpiracaoOperacionalFilaItem(oferta);
+    if (saneamento.alterou) alterou = true;
+    if (!saneamento.expirou) continue;
 
-    marcarOfertaExpirada(oferta);
-    alterou = true;
+    console.log("[FILA-EXPIRADA-OPERACIONAL]", {
+      titulo: oferta.titulo || oferta.nome || "",
+      expiraEm: oferta.expiraEm || "",
+      ttlMs: saneamento.ttlMs || null,
+      tipoFluxo: saneamento.tipoFluxo || ""
+    });
   }
 
   if (alterou) {
@@ -1877,6 +1887,7 @@ function diagnosticarFilaCliente(clienteIdAlvo = null) {
 
 function selecionarProximaOfertaFila(clienteIdAlvo = null) {
   const clienteLog = String(clienteIdAlvo || "admin");
+  sanearExpiradosFila(clienteLog);
   const diagnostico = diagnosticarFilaCliente(clienteLog);
 
   diagnosticosFilaPorCliente.set(clienteLog, diagnostico);

@@ -185,6 +185,139 @@ function ttlFluxoMs(tipoFluxo = "") {
   return tipoFluxo === "cupom_turbo" ? TTL_TURBO_MS : TTL_NORMAL_MS;
 }
 
+function isoValido(valor = "") {
+  if (!valor) return "";
+  const ms = Date.parse(valor);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : "";
+}
+
+function metadataOperacionalFlow(item = {}) {
+  return objeto(item.metadata?.flowOperacional || item.flowOperacional);
+}
+
+function origemPoliticaExpiracao(valor = "") {
+  return texto(valor) || "flow_manager_d1";
+}
+
+function calcularExpiracaoOperacionalFila(item = {}, opcoes = {}) {
+  const agoraMs = Number(opcoes.agoraMs || Date.now());
+  const metadataFlow = metadataOperacionalFlow(item);
+  const tipoFluxo = tipoFluxoOferta({
+    tipoFluxo: opcoes.tipoFluxo || item.tipoFluxo || metadataFlow.tipoFluxo,
+    tipoOperacional: item.tipoOperacional || item.tipo_operacional || item.modoEnvio || item.modo,
+    cupomTurbo: item.cupomTurbo === true || item.turbo === true || metadataFlow.tipoFluxo === "cupom_turbo",
+    oferta: item
+  });
+  const ttlMs = Number(opcoes.ttlMs || item.ttlMs || metadataFlow.ttlMs || ttlFluxoMs(tipoFluxo));
+  const timestamp = timestampBufferItem(item);
+  const origemMs = Number.isFinite(Number(opcoes.origemMs))
+    ? Number(opcoes.origemMs)
+    : timestamp.ms;
+  const expiraPersistido = isoValido(item.expiraEm || metadataFlow.expiraEm || "");
+  const expiraEm = expiraPersistido || (Number.isFinite(origemMs) ? new Date(origemMs + ttlMs).toISOString() : "");
+  const expiraEmMs = expiraEm ? Date.parse(expiraEm) : NaN;
+
+  return {
+    tipoFluxo,
+    ttlMs,
+    origemMs,
+    origemCampo: timestamp.campo,
+    expiraEm,
+    expiraEmMs,
+    vencido: Number.isFinite(expiraEmMs) && expiraEmMs < agoraMs,
+    politica: origemPoliticaExpiracao(opcoes.politica)
+  };
+}
+
+function carimbarExpiracaoOperacionalFila(item = {}, decisao = {}, opcoes = {}) {
+  if (!item || typeof item !== "object") return item;
+
+  const expiraDecisao = isoValido(decisao.expiraEm || "");
+  const tipoFluxo = texto(decisao.tipoFluxo) || tipoFluxoOferta({
+    tipoFluxo: item.tipoFluxo,
+    tipoOperacional: item.tipoOperacional || item.tipo_operacional || item.modoEnvio || item.modo,
+    cupomTurbo: item.cupomTurbo === true || item.turbo === true,
+    oferta: item
+  });
+  const ttlMs = Number(decisao.ttlMs || ttlFluxoMs(tipoFluxo));
+  const calculada = calcularExpiracaoOperacionalFila(item, {
+    ...opcoes,
+    tipoFluxo,
+    ttlMs
+  });
+  const expiraEm = expiraDecisao || calculada.expiraEm;
+
+  if (!expiraEm) return item;
+
+  item.expiraEm = expiraEm;
+  item.ttlMs = ttlMs;
+  item.tipoFluxo = tipoFluxo;
+  item.metadata = {
+    ...(item.metadata && typeof item.metadata === "object" ? item.metadata : {}),
+    flowOperacional: {
+      ...(item.metadata?.flowOperacional && typeof item.metadata.flowOperacional === "object" ? item.metadata.flowOperacional : {}),
+      ttlMs,
+      tipoFluxo,
+      expiraEm,
+      politica: origemPoliticaExpiracao(opcoes.politica),
+      origem: "flow_manager"
+    }
+  };
+
+  return item;
+}
+
+function sanearExpiracaoOperacionalFilaItem(item = {}, opcoes = {}) {
+  if (!item || typeof item !== "object") {
+    return { alterou: false, expirou: false, motivo: "item_invalido" };
+  }
+
+  const status = texto(item.status).toLowerCase();
+  if (status && status !== "pendente") {
+    return { alterou: false, expirou: false, motivo: "status_fora_pendente" };
+  }
+
+  const politica = calcularExpiracaoOperacionalFila(item, opcoes);
+  let alterou = false;
+
+  if (!item.expiraEm && politica.expiraEm) {
+    item.expiraEm = politica.expiraEm;
+    item.ttlMs = politica.ttlMs;
+    item.tipoFluxo = politica.tipoFluxo;
+    alterou = true;
+  }
+
+  if (!politica.expiraEm) {
+    return { alterou, expirou: false, motivo: "sem_timestamp_operacional", ...politica };
+  }
+
+  const metadataAnterior = JSON.stringify(item.metadata?.flowOperacional || {});
+  item.metadata = {
+    ...(item.metadata && typeof item.metadata === "object" ? item.metadata : {}),
+    flowOperacional: {
+      ...(item.metadata?.flowOperacional && typeof item.metadata.flowOperacional === "object" ? item.metadata.flowOperacional : {}),
+      ttlMs: politica.ttlMs,
+      tipoFluxo: politica.tipoFluxo,
+      expiraEm: politica.expiraEm,
+      politica: politica.politica,
+      origem: item.expiraEm ? "executor_saneamento" : "flow_manager"
+    }
+  };
+  if (JSON.stringify(item.metadata.flowOperacional || {}) !== metadataAnterior) alterou = true;
+
+  if (!politica.vencido) {
+    return { alterou, expirou: false, motivo: "vivo_operacional", ...politica };
+  }
+
+  item.status = "expirada_operacional";
+  item.statusDetalhe = "Expirada pelo TTL operacional do Flow D1 antes do envio";
+  item.expiradaEm = new Date(Number(opcoes.agoraMs || Date.now())).toISOString();
+  item.motivoExpiracao = "ttl_operacional_flow_d1";
+  alterou = true;
+
+  return { alterou, expirou: true, motivo: "ttl_operacional_vencido", ...politica };
+}
+
 function coberturaFluxoMinutos(tipoFluxo = "") {
   return tipoFluxo === "cupom_turbo" ? COBERTURA_TURBO_MINUTOS : COBERTURA_NORMAL_MINUTOS;
 }
@@ -443,9 +576,12 @@ module.exports = {
   TTL_TURBO_MS,
   avaliarFluxoWorkspaceShadow,
   calcularBufferAtualShadow,
+  calcularExpiracaoOperacionalFila,
+  carimbarExpiracaoOperacionalFila,
   contarItensIgnoradosBuffer,
   coberturaFluxoMinutos,
   flowManagerAtivoWorkspace,
+  sanearExpiracaoOperacionalFilaItem,
   ttlFluxoMs,
   nivelAlvoPorCobertura,
   prioridadeFluxoOferta
