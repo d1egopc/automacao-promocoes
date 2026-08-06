@@ -35,6 +35,8 @@ const ALIASES_CATEGORIA_DESTINO = {
 };
 
 const ALIASES_MARKETPLACE_DESTINO = {
+  awin: ["awin", "kabum"],
+  kabum: ["kabum", "awin"],
   awinkabum: ["awin", "kabum"],
   kabumawin: ["kabum", "awin"],
   feedawin: ["awin", "kabum"],

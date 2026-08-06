@@ -34,6 +34,24 @@ function destinoAwinKabum(extra = {}) {
   };
 }
 
+function destinoMarketplace(marketplaces, extra = {}) {
+  return destinoAwinKabum({
+    marketplaces: Array.isArray(marketplaces) ? marketplaces : [marketplaces],
+    ...extra
+  });
+}
+
+function assertDestinoCompativel(marketplaceOferta, marketplacesDestino, mensagem) {
+  const analise = destinos.analisarDestinoOferta(
+    destinoMarketplace(marketplacesDestino),
+    oferta({ marketplace: marketplaceOferta })
+  );
+
+  assert.strictEqual(analise.aceitaMarketplace, true, mensagem);
+  assert.strictEqual(analise.aceitaCategoria, true, mensagem);
+  assert.strictEqual(analise.aceita, true, mensagem);
+}
+
 function contexto(destino) {
   return {
     clientesValidos: [clienteId],
@@ -74,6 +92,34 @@ function oferta(base = {}) {
     assert.strictEqual(analiseLiteral.aceitaCategoria, true, "Gamer e Hardware deve casar literalmente apos normalizacao");
     assert.strictEqual(analiseLiteral.aceita, true);
 
+    assert.deepStrictEqual(destinos.expandirMarketplacesDestino(["awin"]), ["awin", "kabum"]);
+    assert.deepStrictEqual(destinos.expandirMarketplacesDestino(["kabum"]), ["kabum", "awin"]);
+    assert.deepStrictEqual(destinos.expandirMarketplacesDestino(["AWIN / KaBuM"]), ["awinkabum", "awin", "kabum"]);
+    assert.deepStrictEqual(destinos.expandirMarketplacesDestino(["feed_awin"]), ["feedawin", "awin", "kabum"]);
+    assert.deepStrictEqual(destinos.expandirMarketplacesDestino(["feed_kabum"]), ["feedkabum", "kabum", "awin"]);
+
+    assertDestinoCompativel("kabum", ["awin"], "oferta kabum + destino awin deve ser compativel");
+    assertDestinoCompativel("awin", ["kabum"], "oferta awin + destino kabum deve ser compativel");
+    assertDestinoCompativel("kabum", ["AWIN / KaBuM"], "oferta kabum + destino AWIN/KaBuM deve ser compativel");
+    assertDestinoCompativel("awin", ["AWIN / KaBuM"], "oferta awin + destino AWIN/KaBuM deve ser compativel");
+    assertDestinoCompativel("feed_awin", ["kabum"], "feed_awin + destino kabum deve ser compativel");
+    assertDestinoCompativel("feed_kabum", ["awin"], "feed_kabum + destino awin deve ser compativel");
+
+    const destinoRealWorkspace = destinoMarketplace(["mercadolivre", "aliexpress", "awin", "amazon", "shopee"], {
+      id: "6cf3af18-536e-4d83-a2b5-2367fbf38daf",
+      nome: "OP GERAL"
+    });
+    const placaMsi = destinos.analisarDestinoOferta(destinoRealWorkspace, oferta({
+      id: "engine_74455_1785983469820",
+      marketplace: "kabum",
+      titulo: "Placa Mae MSI Pro B650M-P",
+      categoria: "Gamer e Hardware"
+    }));
+    assert.strictEqual(placaMsi.aceitaMarketplace, true, "destino real com awin deve aceitar oferta kabum");
+    assert.deepStrictEqual(placaMsi.marketplacesOferta, ["kabum", "awin"]);
+    assert.deepStrictEqual(placaMsi.marketplacesDestino, ["mercadolivre", "aliexpress", "awin", "kabum", "amazon", "shopee"]);
+    assert.strictEqual(placaMsi.aceita, true);
+
     const kabum = await validarOfertaParaDistribuicao(oferta(), contexto(destinoAwinKabum()));
     assert.strictEqual(kabum.ok, true, "KaBuM + destino AWIN/KaBuM deve ser compativel");
 
@@ -94,6 +140,13 @@ function oferta(base = {}) {
     );
     assert.strictEqual(marketplaceNaoPermitido.ok, false);
     assert.strictEqual(marketplaceNaoPermitido.motivo, "marketplace_bloqueado", "marketplace realmente nao permitido continua retido");
+
+    const destinoInativo = destinos.analisarDestinoOferta(
+      destinoMarketplace(["awin"], { ativo: false }),
+      oferta({ marketplace: "kabum" })
+    );
+    assert.strictEqual(destinoInativo.aceita, false);
+    assert.strictEqual(destinoInativo.motivo, "destino_inativo");
 
     const categoriaNaoPermitida = await validarOfertaParaDistribuicao(
       oferta({ categoria: "Perfumaria, Farmacia e Beleza" }),
