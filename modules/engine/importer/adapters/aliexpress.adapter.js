@@ -177,6 +177,10 @@ function normalizarCupomAliExpress(cupom = "") {
     "CODIGO",
     "PROMOCAO",
     "DESCONTO",
+    "PRODUTO",
+    "OFERTA",
+    "PRECO",
+    "VALOR",
     "MOEDAS",
     "MOEDA",
     "APP",
@@ -369,7 +373,7 @@ function validarProdutoCanonicoAliExpress({ papelLink = "", principal = {}, conv
   const produtoPrincipal = resolverProdutoCanonicoAliExpress(principal.produto || principal, principal.urlOriginal || "");
   const produtoConvertido = resolverProdutoCanonicoAliExpress(convertido.produto || convertido, urlOriginal);
 
-  if (papel === "link_app") {
+  if (papel === "link_app" || papel === "link_moedas") {
     if (!produtoPrincipal.produtoId) {
       return {
         ok: false,
@@ -380,8 +384,8 @@ function validarProdutoCanonicoAliExpress({ papelLink = "", principal = {}, conv
     }
     if (!produtoConvertido.produtoId) {
       return {
-        ok: false,
-        motivo: "produto_canonico_app_indisponivel",
+        ok: true,
+        motivo: "landing_app_moedas_sem_product_id_convertida",
         produtoCanonico: "",
         produtoCanonicoPrincipal: produtoPrincipal.produtoId
       };
@@ -467,18 +471,28 @@ function avaliarConversaoAliExpressPorPapel({ papelLink = "", urlAfiliada = "", 
     return { ...produtoCanonico, renderizavel: false, motivo: produtoCanonico.motivo, appValidado: false };
   }
 
-  if (papelLink === "link_app") {
+  if (papelLink === "link_app" || papelLink === "link_moedas") {
     if (!texto(urlAfiliadaPrincipal)) {
-      return { ...produtoCanonico, renderizavel: false, motivo: "link_app_sem_cta_pc_canonico", appValidado: false };
+      return {
+        ...produtoCanonico,
+        renderizavel: false,
+        motivo: papelLink === "link_moedas" ? "link_moedas_sem_cta_pc_canonico" : "link_app_sem_cta_pc_canonico",
+        appValidado: false
+      };
     }
     if (urlsAliExpressAfiliadasIguais(urlAfiliada, urlAfiliadaPrincipal)) {
-      return { ...produtoCanonico, renderizavel: false, motivo: "link_app_url_afiliada_igual_pc", appValidado: false };
+      return {
+        ...produtoCanonico,
+        renderizavel: false,
+        motivo: papelLink === "link_moedas" ? "link_moedas_url_afiliada_igual_pc" : "link_app_url_afiliada_igual_pc",
+        appValidado: false
+      };
     }
     if (!conversaoAppAliExpressComprovada(produtoConvertido)) {
       return {
         ...produtoCanonico,
         renderizavel: true,
-        motivo: "cta_app_workspace_convertido_produto_canonico",
+        motivo: papelLink === "link_moedas" ? "cta_moedas_workspace_convertido" : "cta_app_workspace_convertido_produto_canonico",
         appValidado: true
       };
     }
@@ -487,8 +501,8 @@ function avaliarConversaoAliExpressPorPapel({ papelLink = "", urlAfiliada = "", 
   return {
     ...produtoCanonico,
     renderizavel: true,
-    motivo: papelLink === "link_app" ? "cta_app_workspace_convertido" : "cta_workspace_convertido",
-    appValidado: papelLink === "link_app"
+    motivo: papelLink === "link_app" ? "cta_app_workspace_convertido" : (papelLink === "link_moedas" ? "cta_moedas_workspace_convertido" : "cta_workspace_convertido"),
+    appValidado: papelLink === "link_app" || papelLink === "link_moedas"
   };
 }
 
@@ -497,7 +511,7 @@ function urlLinkClassificado(link = {}) {
 }
 
 function papelAlternativoAliExpress(papel = "") {
-  return ["link_app", "link_pc"].includes(texto(papel));
+  return ["link_app", "link_pc", "link_moedas"].includes(texto(papel));
 }
 
 async function converterLinksAlternativosAliExpress({
@@ -727,11 +741,14 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
   }
 
   const precoRadarSeguro = extrairPrecoRadarSeguroAliExpress(evento);
-  const precoAtual = primeiroValor(produto.precoAtual, produto.preco, precoRadarSeguro);
-  const precoOrigem = valorPresente(produto.precoAtual) || valorPresente(produto.preco) ? primeiroValor(produto.precoOrigem, "adapter") : (precoRadarSeguro ? "texto_radar" : "");
+  const precoApi = primeiroValor(produto.precoAtual, produto.preco);
+  const precoAtual = numeroPreco(precoRadarSeguro) !== null ? precoRadarSeguro : precoApi;
+  const precoOrigem = numeroPreco(precoRadarSeguro) !== null ? "texto_radar" : (valorPresente(precoApi) ? primeiroValor(produto.precoOrigem, "adapter") : "");
   const precoOriginal = primeiroValor(produto.precoOriginal, produto.precoAntigo);
   const precoNumerico = numeroPreco(precoAtual);
-  const economiaCalculada = calcularEconomia(precoAtual, precoOriginal);
+  const precoApiNumerico = numeroPreco(precoApi);
+  const radarDefiniuPreco = numeroPreco(precoRadarSeguro) !== null;
+  const economiaCalculada = radarDefiniuPreco ? { economia: "", percentual: "" } : calcularEconomia(precoAtual, precoOriginal);
   const cupomTexto = extrairCupomTextoAliExpress(textoOriginalEvento(evento));
   const cupom = primeiroValor(produto.cupom, cupomTexto);
   const cupomTipo = primeiroValor(produto.tipoCupom, produto.cupomTipo, cupom ? "texto_radar" : "");
@@ -747,6 +764,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     ok: true,
     titulo: produto.titulo || produto.nome || "",
     precoAtual,
+    precoApi,
     precoOriginal,
     precoOrigem,
     cupom,
@@ -818,6 +836,9 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     titulo: produto.titulo || produto.nome || "",
     preco: precoNumerico,
     precoAtual: precoNumerico,
+    precoValidado: precoNumerico,
+    precoApiReferencia: precoApiNumerico,
+    precoReferenciaApi: precoApiNumerico,
     precoOriginal,
     precoAntigo: precoOriginal,
     economia: primeiroValor(produto.economia, economiaCalculada.economia),
@@ -857,6 +878,17 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       textoRadarTemCupom: Boolean(cupomTexto),
       moedasTexto,
       precoRadarUsado: precoOrigem === "texto_radar",
+      precoValidado: precoNumerico,
+      precoOrigem,
+      precoApiReferencia: precoApiNumerico,
+      precoReferenciaApi: precoApiNumerico,
+      precoAuditoria: {
+        precoRadar: numeroPreco(precoRadarSeguro),
+        precoApi: precoApiNumerico,
+        precoEscolhido: precoNumerico,
+        origemPreco: precoOrigem,
+        motivoEscolhaPreco: radarDefiniuPreco ? "preco_radar_explicito_confiavel" : "preco_api_sem_preco_radar"
+      },
       camposProduto: Object.keys(produto || {}),
       produto,
       produtoCanonico: resolverProdutoCanonicoAliExpress(produto, urlOriginalEngine)

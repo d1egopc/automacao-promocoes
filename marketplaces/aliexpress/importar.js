@@ -449,7 +449,6 @@ function produtoAliExpressTemCamposEssenciais(produto = {}) {
   return Boolean(
     primeiroCampoAliExpress(produto, ["product_title", "title", "productTitle", "product_subject"]) &&
     primeiroCampoAliExpress(produto, ["target_sale_price", "sale_price", "target_app_sale_price", "app_sale_price", "target_min_sale_price", "min_sale_price"]) &&
-    primeiroCampoAliExpress(produto, ["product_main_image_url", "product_small_image_urls", "product_small_image_urls.string", "image_url"]) &&
     primeiroCampoAliExpress(produto, ["promotion_link", "promotion_link_short", "product_detail_url", "product_url", "target_sale_url"])
   );
 }
@@ -536,6 +535,8 @@ function montarProdutoAliExpressManual(produto = {}, urlEntrada = "", avisoCupom
   return {
     marketplace: "aliexpress",
     titulo: htmlDecode(titulo),
+    produtoId: primeiroCampoAliExpress(produto, ["product_id", "productId", "item_id", "itemId"]) || extrairProductIdAliExpressManual(urlEntrada),
+    productId: primeiroCampoAliExpress(produto, ["product_id", "productId", "item_id", "itemId"]) || extrairProductIdAliExpressManual(urlEntrada),
     precoAntigo,
     precoAtual,
     cupom: "",
@@ -646,6 +647,10 @@ async function importarAliExpress(urlEntrada, config = {}) {
   const secret = credenciais.secret || credenciais.appSecret || "";
   const trackingId = credenciais.trackingId || "";
   const clienteId = config?.clienteId || config?.cliente || "";
+  const contextoEngine = config?.contextoEngine && typeof config.contextoEngine === "object" ? config.contextoEngine : {};
+  const papelLinkAlternativo = String(contextoEngine.papelLink || "").trim();
+  const conversaoLinkAlternativo = contextoEngine.conversaoLinkAlternativo === true
+    && ["link_app", "link_moedas"].includes(papelLinkAlternativo);
   const expansaoShortlink = await expandirShortlinkAliExpressSeguro(urlOriginal);
   const urlCanonicaProduto = expansaoShortlink.ok ? expansaoShortlink.url : urlOriginal;
   const productId = extrairProductIdAliExpressManual(urlCanonicaProduto);
@@ -670,6 +675,48 @@ async function importarAliExpress(urlEntrada, config = {}) {
   });
 
   if (!productId) {
+    if (conversaoLinkAlternativo && urlAliExpressSegura(urlCanonicaProduto, { permitirShortlink: true })) {
+      if (!appKey || !secret || !trackingId) {
+        return produtoAliExpressGenerico(urlOriginal, "Erro ao consultar API AliExpress", {
+          motivo: "credenciais_incompletas"
+        });
+      }
+
+      const gerarLinkCurto = typeof config.gerarLinkCurtoAliExpress === "function"
+        ? config.gerarLinkCurtoAliExpress
+        : gerarLinkCurtoAliExpressApi;
+      const aplicarLinkOptimus = typeof config.gerarLinkOptimus === "function"
+        ? config.gerarLinkOptimus
+        : (link) => link;
+      const linkAliCurto = await gerarLinkCurto(urlCanonicaProduto, credenciais);
+      const linkFinal = aplicarLinkOptimus(linkAliCurto || urlCanonicaProduto, "aliexpress", { clienteId });
+
+      return {
+        marketplace: "aliexpress",
+        titulo: "Produto AliExpress",
+        precoAntigo: "",
+        precoAtual: "",
+        cupom: "",
+        linkOriginal: urlCanonicaProduto,
+        linkAfiliado: linkFinal || linkAliCurto || "",
+        imagem: "",
+        categoria: "AliExpress",
+        avisoCupom,
+        aviso: "Landing AliExpress convertida sem productId direto.",
+        tipoLinkAfiliado: papelLinkAlternativo,
+        papelLink: papelLinkAlternativo,
+        conversaoPapel: papelLinkAlternativo,
+        landingMoedasAliExpress: papelLinkAlternativo === "link_moedas",
+        metadata: {
+          papelLink: papelLinkAlternativo,
+          conversaoPapel: papelLinkAlternativo,
+          conversaoLinkAlternativo: true,
+          productId: "",
+          motivo: "landing_sem_product_id_convertida"
+        }
+      };
+    }
+
     return produtoAliExpressGenerico(urlOriginal, "Erro ao consultar API AliExpress", {
       motivo: expansaoShortlink.motivo && expansaoShortlink.motivo !== "nao_shortlink_aliexpress"
         ? expansaoShortlink.motivo

@@ -331,7 +331,7 @@ async function testarClassificacaoAliExpressPreservaProduto() {
   const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
   const moedas = "https://a.aliexpress.com/_c2zipJlH";
   const produto = "https://a.aliexpress.com/_c35XhGGR";
-  let urlImportada = "";
+  const urlsImportadas = [];
 
   const resultado = await importarAliExpressEngine({
     job: { id: 102, evento_id: 202, cliente_id: "workspace_teste" },
@@ -351,7 +351,7 @@ async function testarClassificacaoAliExpressPreservaProduto() {
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "track" } }),
       importarAliExpress: async (url) => {
-        urlImportada = url;
+        urlsImportadas.push(url);
         return {
           titulo: "Processador AMD Ryzen 7 5700x",
           precoAtual: "995.00",
@@ -366,7 +366,9 @@ async function testarClassificacaoAliExpressPreservaProduto() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.strictEqual(urlImportada, produto);
+  assert.strictEqual(resultado.metadata.linkOriginalEngine, produto);
+  assert.strictEqual(urlsImportadas[0], produto);
+  assert.ok(urlsImportadas.includes(moedas), "link_moedas tambem deve passar por conversao controlada");
   assert.strictEqual(resultado.metadata.papelLinkEscolhido, "produto");
   assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "link_moedas");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
@@ -656,7 +658,7 @@ async function testarAliExpressReconheceRotuloNaLinhaAnterior() {
   const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
   const moedas = "https://a.aliexpress.com/_c2z4gv3d";
   const pc = "https://a.aliexpress.com/_c4SNvGyb";
-  let urlImportada = "";
+  const urlsImportadas = [];
 
   const resultado = await importarAliExpressEngine({
     job: { id: 120, evento_id: 220, cliente_id: "workspace_teste" },
@@ -678,7 +680,7 @@ async function testarAliExpressReconheceRotuloNaLinhaAnterior() {
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "track" } }),
       importarAliExpress: async (url) => {
-        urlImportada = url;
+        urlsImportadas.push(url);
         return {
           titulo: "Netac 512gb ssd sata3 2.5 BLACK",
           precoAtual: "",
@@ -692,7 +694,8 @@ async function testarAliExpressReconheceRotuloNaLinhaAnterior() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.strictEqual(urlImportada, pc);
+  assert.strictEqual(urlsImportadas[0], pc);
+  assert.ok(urlsImportadas.includes(moedas), "link_moedas tambem deve passar por conversao controlada");
   assert.strictEqual(resultado.precoAtual, 354.74);
   assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "link_moedas");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "link_pc");

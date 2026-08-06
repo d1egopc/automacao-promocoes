@@ -282,6 +282,50 @@ async function testarProductSmallImageUrlsComoSecundaria() {
   assert.strictEqual(chamadas[0].params.product_ids, id);
 }
 
+async function testarProdutoSemImagemContinuaValido() {
+  const id = "1005011559438111";
+  resetar([
+    respostaDetalhe(produtoAli(id, {
+      product_main_image_url: "",
+      product_small_image_urls: "",
+      image_url: ""
+    })),
+    respostaLink("https://s.click.aliexpress.com/e/_SHORTTXT")
+  ]);
+
+  const produto = await importarAliExpress(`https://www.aliexpress.com/item/${id}.html`, config());
+
+  assert.strictEqual(produto.titulo, `Produto Ali ${id}`);
+  assert.strictEqual(produto.precoAtual, "123,45");
+  assert.strictEqual(produto.imagem, "");
+  assert.strictEqual(produto.aviso, "Dados parciais retornados pela API AliExpress.");
+  assert.strictEqual(chamadas.length, 2, "produto sem imagem nao deve cair para query/fallback generico");
+  assert.strictEqual(chamadas[1].method, "aliexpress.affiliate.link.generate");
+}
+
+async function testarLandingMoedasSemProductIdConverteComoAlternativo() {
+  const landing = "https://sale.aliexpress.com/coins-land.htm";
+  resetar([
+    respostaRedirectFinal(landing),
+    respostaLink("https://s.click.aliexpress.com/e/_COINSLANDING")
+  ]);
+
+  const produto = await importarAliExpress("https://a.aliexpress.com/_coinsLanding", config({
+    gerarLinkOptimus: link => link,
+    contextoEngine: {
+      conversaoLinkAlternativo: true,
+      papelLink: "link_moedas"
+    }
+  }));
+
+  assert.strictEqual(produto.linkOriginal, landing);
+  assert.strictEqual(produto.linkAfiliado, "https://s.click.aliexpress.com/e/_COINSLANDING");
+  assert.strictEqual(produto.papelLink, "link_moedas");
+  assert.strictEqual(produto.metadata.conversaoLinkAlternativo, true);
+  assert.strictEqual(chamadas[1].method, "aliexpress.affiliate.link.generate");
+  assert.strictEqual(chamadas[1].params.source_values, landing);
+}
+
 async function testarRedirectExternoInseguroRejeitado() {
   resetar([
     respostaRedirectLocation("https://example.com/item/1005011559438577.html")
@@ -435,6 +479,8 @@ async function testarClienteSemIntegracaoNaoContaminaOutroCliente() {
   await testarQueryRejeitaProdutoDiferente();
   await testarShortlinkExpandeExtraiProductIdEImagemChegaOfertaUniversal();
   await testarProductSmallImageUrlsComoSecundaria();
+  await testarProdutoSemImagemContinuaValido();
+  await testarLandingMoedasSemProductIdConverteComoAlternativo();
   await testarRedirectExternoInseguroRejeitado();
   await testarTimeoutMantemOfertaTextual();
   await testarExpansaoRejeitaHostPrivado();
