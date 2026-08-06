@@ -292,6 +292,14 @@ async function testarLimpezaEmergencialFilaBak() {
       assert(filasIncremental.body.filas.some(fila => fila.workspaceId === "user_a"), "rota incremental deve usar somente dataDir injetado/oficial");
       assert(!JSON.stringify(filasIncremental.body).includes("Produto secreto"), "rota incremental nao deve retornar payload de oferta");
 
+      const compactacaoDryRun = await request(server, "GET", "/admin/storage/filas/compactacao?workspaceId=user_a&dataDir=C:/Windows", "admin_master", null);
+      assert.strictEqual(compactacaoDryRun.status, 200);
+      assert.strictEqual(compactacaoDryRun.body.ok, true);
+      assert.strictEqual(compactacaoDryRun.body.modo, "dry_run");
+      assert.strictEqual(compactacaoDryRun.body.aplicouMudancas, false);
+      assert.strictEqual(compactacaoDryRun.body.politicaCentral, "fila_historico_policy_v1");
+      assert.strictEqual(compactacaoDryRun.body.workspaces[0].workspaceId, "user_a");
+
       criarRotasStorageManager._setEscopoEmExecucaoParaTeste("filas", true);
       const conflito = await request(server, "GET", "/admin/storage/filas", "admin_master", null);
       assert.strictEqual(conflito.status, 409, "segunda auditoria simultanea deve receber 409");

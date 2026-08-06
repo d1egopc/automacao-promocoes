@@ -232,6 +232,10 @@ async function diagnosticarFilas(opcoes = {}) {
   return repository.auditarFilasIncremental(opcoes);
 }
 
+async function diagnosticarCompactacaoFilas(opcoes = {}) {
+  return repository.auditarCompactacaoFilas(opcoes);
+}
+
 async function diagnosticarCategoria(categoria, opcoes = {}) {
   return repository.auditarCategoriaIncremental(categoria, opcoes);
 }
@@ -246,6 +250,7 @@ module.exports = {
   diagnosticarWorkspaces,
   diagnosticarWorkspace,
   diagnosticarFilas,
+  diagnosticarCompactacaoFilas,
   diagnosticarCategoria,
   executarLimpezaEmergencialFilaBak,
   classificarCategoria,

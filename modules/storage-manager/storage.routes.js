@@ -144,6 +144,7 @@ function criarRotasStorageManager(deps = {}) {
         "GET /admin/storage/workspaces",
         "GET /admin/storage/workspaces/:workspaceId",
         "GET /admin/storage/filas",
+        "GET /admin/storage/filas/compactacao",
         "GET /admin/storage/categoria/:categoria"
       ],
       rotaExecucaoControlada: "POST /admin/storage/limpeza-emergencial/fila-bak"
@@ -165,6 +166,14 @@ function criarRotasStorageManager(deps = {}) {
 
   router.get("/filas", (req, res) => {
     return executarEscopo(req, res, "filas", () => storageService.diagnosticarFilas(opcoesConsulta(req)));
+  });
+
+  router.get("/filas/compactacao", (req, res) => {
+    const workspaceId = limitarTexto(req.query?.workspaceId ?? req.body?.workspaceId);
+    return executarEscopo(req, res, `filas:compactacao:${workspaceId || "pagina"}`, () => storageService.diagnosticarCompactacaoFilas({
+      ...opcoesConsulta(req),
+      workspaceId
+    }));
   });
 
   router.get("/categoria/:categoria", (req, res) => {

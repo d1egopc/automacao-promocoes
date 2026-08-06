@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const filaHistoricoPolicy = require("../../utils/fila-historico-policy");
 const {
   CATEGORIAS_STORAGE,
   STATUS_FILA
@@ -1157,6 +1158,147 @@ async function auditarFilasIncremental(opcoesEntrada = {}) {
   });
 }
 
+async function auditarCompactacaoFilaWorkspace(dataDir, workspaceIdEntrada, opcoesEntrada = {}) {
+  const workspaceId = validarWorkspaceId(workspaceIdEntrada);
+  const filaPath = path.join(dataDir, "clientes", workspaceId, "fila.json");
+  const { stats, erro } = await statSeguro(dataDir, filaPath);
+  if (erro || !stats?.isFile()) {
+    return {
+      workspaceId,
+      ok: false,
+      erro: erro?.erro || "fila_json_ausente",
+      aplicouMudancas: false
+    };
+  }
+
+  let textoFila = "";
+  let fila = null;
+  try {
+    textoFila = await fs.promises.readFile(filaPath, "utf8");
+    fila = JSON.parse(textoFila);
+  } catch (erroLeitura) {
+    return {
+      workspaceId,
+      ok: false,
+      erro: erroLeitura.code || "fila_json_invalido",
+      aplicouMudancas: false
+    };
+  }
+
+  if (!Array.isArray(fila)) {
+    return { workspaceId, ok: false, erro: "fila_json_invalido", aplicouMudancas: false };
+  }
+
+  const agoraMs = Number(opcoesEntrada.agoraMs || Date.now());
+  const analise = filaHistoricoPolicy.analisarFilaHistorico(fila, { agoraMs });
+  const espaco = obterEspacoVolume(dataDir);
+  const margemTemporarioBytes = Number(stats.size || 0) + Math.max(4096, Math.ceil(Number(stats.size || 0) * 0.05));
+  const margemSuficienteParaExecucaoReal = espaco.ok === true && Number(espaco.livreBytes || 0) > margemTemporarioBytes;
+  const amostras = analise.itens
+    .filter(item => item.acao !== "preservar_integral")
+    .slice(0, 10)
+    .map((item, indice) => ({
+      indice,
+      acao: item.acao,
+      status: item.status,
+      motivo: item.motivo,
+      idadeMs: item.idadeMs,
+      tamanhoOriginalBytes: item.tamanhoOriginalBytes,
+      tamanhoEstimadoBytes: item.tamanhoEstimadoBytes,
+      bytesRecuperaveis: item.bytesRecuperaveis
+    }));
+
+  return {
+    workspaceId,
+    ok: true,
+    modo: "dry_run",
+    aplicouMudancas: false,
+    politicaCentral: "fila_historico_policy_v1",
+    caminho: `/data/clientes/${workspaceId}/fila.json`,
+    hashFila: hashArquivoSeguro(filaPath),
+    totalItens: fila.length,
+    tamanhoFilaBytes: Number(stats.size || 0),
+    tamanhoFila: bytesLegiveis(stats.size || 0),
+    tamanhoJsonEstimadoAntesBytes: analise.resumo.tamanhoJsonEstimadoAntesBytes,
+    tamanhoJsonEstimadoDepoisBytes: analise.resumo.tamanhoJsonEstimadoDepoisBytes,
+    tamanhoJsonEstimadoDepois: bytesLegiveis(analise.resumo.tamanhoJsonEstimadoDepoisBytes),
+    bytesRecuperaveis: analise.resumo.bytesRecuperaveisJson,
+    espacoRecuperavel: bytesLegiveis(analise.resumo.bytesRecuperaveisJson),
+    integrais: analise.resumo.integrais,
+    compactaveis: analise.resumo.compactaveis,
+    removiveis: analise.resumo.removiveis,
+    protegidos: analise.resumo.protegidos,
+    totalApos: analise.resumo.totalApos,
+    motivos: analise.resumo.motivos,
+    espacoAtual: espaco,
+    margemTemporarioBytes,
+    margemTemporario: bytesLegiveis(margemTemporarioBytes),
+    margemSuficienteParaExecucaoReal,
+    motivoExecucaoReal: margemSuficienteParaExecucaoReal ? "margem_temporario_ok" : "sem_margem_para_tmp_atomico",
+    amostras,
+    seguranca: {
+      dryRun: true,
+      naoGravou: true,
+      naoRemoveu: true,
+      naoCompactou: true,
+      processouUmWorkspace: true,
+      preservaFilaViva: true,
+      usaPoliticaCentral: true,
+      exigeEscritaAtomicaNaExecucaoReal: true
+    }
+  };
+}
+
+async function auditarCompactacaoFilas(opcoesEntrada = {}) {
+  const inicioMs = Date.now();
+  const opcoes = criarOpcoesIncrementais({ ...opcoesEntrada, offset: decodeCursor(opcoesEntrada.cursor), limit: 1 });
+  const dataDir = opcoes.dataDir;
+  const workspaceIdFiltro = String(opcoesEntrada.workspaceId || "").trim();
+  const workspaceIds = workspaceIdFiltro ? [validarWorkspaceId(workspaceIdFiltro)] : await listarWorkspaceIds(dataDir);
+  const selecionados = workspaceIds.slice(opcoes.offset, opcoes.offset + 1);
+  const workspaces = [];
+  const errosSanitizados = [];
+  let processados = 0;
+
+  for (const workspaceId of selecionados) {
+    const resultado = await auditarCompactacaoFilaWorkspace(dataDir, workspaceId, opcoesEntrada);
+    processados += 1;
+    if (resultado.ok === false) errosSanitizados.push({ workspaceId, erro: resultado.erro || "erro_compactacao_dry_run" });
+    workspaces.push(resultado);
+    await yieldEventLoop();
+  }
+
+  const totais = workspaces.reduce((acc, item) => {
+    if (item.ok === false) return acc;
+    acc.totalItens += Number(item.totalItens || 0);
+    acc.integrais += Number(item.integrais || 0);
+    acc.compactaveis += Number(item.compactaveis || 0);
+    acc.removiveis += Number(item.removiveis || 0);
+    acc.protegidos += Number(item.protegidos || 0);
+    acc.bytesRecuperaveis += Number(item.bytesRecuperaveis || 0);
+    acc.tamanhoFilaBytes += Number(item.tamanhoFilaBytes || 0);
+    return acc;
+  }, { totalItens: 0, integrais: 0, compactaveis: 0, removiveis: 0, protegidos: 0, bytesRecuperaveis: 0, tamanhoFilaBytes: 0 });
+  totais.espacoRecuperavel = bytesLegiveis(totais.bytesRecuperaveis);
+  totais.tamanhoFilas = bytesLegiveis(totais.tamanhoFilaBytes);
+
+  const proximoOffset = workspaceIdFiltro ? null : opcoes.offset + processados;
+  return criarRespostaIncremental(inicioMs, opcoes, {
+    totalConhecido: workspaceIds.length,
+    processados,
+    nextCursor: !workspaceIdFiltro && proximoOffset < workspaceIds.length ? encodeCursor(proximoOffset) : null,
+    timeoutAtingido: false,
+    errosSanitizados,
+    payload: {
+      modo: "dry_run",
+      aplicouMudancas: false,
+      politicaCentral: "fila_historico_policy_v1",
+      totais,
+      workspaces
+    }
+  });
+}
+
 function categoriaIncrementalParaInterna(categoria) {
   const valor = String(categoria || "").toLowerCase().trim();
   if (!CATEGORIAS_INCREMENTAIS.has(valor)) {
@@ -1258,5 +1400,7 @@ module.exports = {
   auditarWorkspaces,
   auditarWorkspaceIndividual,
   auditarFilasIncremental,
+  auditarCompactacaoFilas,
+  auditarCompactacaoFilaWorkspace,
   auditarCategoriaIncremental
 };

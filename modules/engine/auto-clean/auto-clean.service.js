@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const { queryEngine } = require("../database");
+const filaHistoricoPolicy = require("../../../utils/fila-historico-policy");
 
 const ENV_SHADOW = "OPTIMUS_AUTO_CLEAN_SHADOW";
 const ENV_EXECUTE = "OPTIMUS_AUTO_CLEAN_EXECUTE";
@@ -23,37 +24,10 @@ const TTL_PADRAO = Object.freeze({
   snapshotsMs: 30 * 24 * 60 * 60 * 1000
 });
 
-const STATUS_FILA_VIVO = new Set([
-  "pendente",
-  "aguardando",
-  "pronta",
-  "pronto",
-  "processando",
-  "enviando",
-  "em_tentativa",
-  "tentando",
-  "erro_temporario",
-  "erro_retry",
-  "retry"
-]);
-
-const STATUS_FILA_PROCESSANDO = new Set(["processando", "enviando", "em_tentativa", "tentando"]);
-const STATUS_FILA_ENVIADO = new Set(["enviado", "historico", "publicado", "sucesso"]);
-const STATUS_FILA_TERMINAL = new Set([
-  "retida",
-  "retido",
-  "cancelada",
-  "cancelado",
-  "erro",
-  "erro_final",
-  "erro_permanente",
-  "falha_final",
-  "expirada",
-  "expirado",
-  "expirada_operacional",
-  "expirado_operacional",
-  "flow_nao_aceita"
-]);
+const STATUS_FILA_VIVO = filaHistoricoPolicy.STATUS_VIVO;
+const STATUS_FILA_PROCESSANDO = filaHistoricoPolicy.STATUS_PROCESSANDO;
+const STATUS_FILA_ENVIADO = filaHistoricoPolicy.STATUS_ENVIADO;
+const STATUS_FILA_TERMINAL = filaHistoricoPolicy.STATUS_FINAL;
 
 const STATUS_OFERTA_ATIVO = new Set(["importada", "oferta_criada", "distribuindo", "fila"]);
 const STATUS_JOB_ATIVO = new Set(["pendente", "diagnosticado", "pronto", "processando", "importando", "distribuindo"]);
@@ -240,7 +214,13 @@ function sanitizarLogPayload(payload = {}) {
     "totalOrigens",
     "totalElegiveis",
     "totalProtegidos",
-    "erroTipo"
+    "erroTipo",
+    "compactaveis",
+    "removiveis",
+    "integrais",
+    "bytesRecuperaveisCompactacao",
+    "bytesRecuperaveisCompactacaoLegivel",
+    "politicaCentral"
   ];
   const saida = {};
   for (const chave of permitido) {
@@ -346,7 +326,17 @@ function auditarFilaJson(opcoes = {}) {
   const limite = politica.loteLimite;
   const clientesDir = path.join(dataDir, "clientes");
   const registros = [];
-  const resumoExtra = { filasInvalidas: 0, totalItens: 0, vivos: 0, terminais: 0, bytesTotais: 0 };
+  const resumoExtra = {
+    filasInvalidas: 0,
+    totalItens: 0,
+    vivos: 0,
+    terminais: 0,
+    bytesTotais: 0,
+    compactaveis: 0,
+    removiveis: 0,
+    integrais: 0,
+    bytesRecuperaveisCompactacao: 0
+  };
 
   if (!fsImpl.existsSync(clientesDir)) return criarResumoOrigem("fila_json", "fila_json", registros, limite);
 
@@ -368,24 +358,42 @@ function auditarFilaJson(opcoes = {}) {
       continue;
     }
     resumoExtra.totalItens += fila.length;
+    const analiseHistoricoFila = filaHistoricoPolicy.analisarFilaHistorico(fila, { agoraMs });
+    resumoExtra.compactaveis += analiseHistoricoFila.resumo.compactaveis;
+    resumoExtra.removiveis += analiseHistoricoFila.resumo.removiveis;
+    resumoExtra.integrais += analiseHistoricoFila.resumo.integrais;
+    resumoExtra.bytesRecuperaveisCompactacao += analiseHistoricoFila.resumo.bytesRecuperaveisJson;
+
     for (const item of fila) {
       if (registros.length >= limite) break;
       const status = normalizarStatus(item?.status || item?.estado || "pendente");
-      if (STATUS_FILA_VIVO.has(status)) resumoExtra.vivos += 1;
-      else if (STATUS_FILA_TERMINAL.has(status) || STATUS_FILA_ENVIADO.has(status)) resumoExtra.terminais += 1;
-      const ts = extrairTimestampFila(item || {});
+      const decisao = filaHistoricoPolicy.analisarItemHistoricoFila(item || {}, { agoraMs });
+      if (decisao.protegido) resumoExtra.vivos += 1;
+      else resumoExtra.terminais += 1;
       const bytesItem = Buffer.byteLength(JSON.stringify(item || {}));
-      registros.push(avaliarRegistroAutoClean({
+      registros.push({
         origem: "fila_json",
         tipoRegistro: "fila_json",
         status,
-        referenciaTemporal: ts.ms ? new Date(ts.ms).toISOString() : null,
-        bytesEstimados: bytesItem
-      }, { politica, agoraMs }));
+        idadeMs: decisao.idadeMs,
+        ttlMs: decisao.acao === "compactar" ? filaHistoricoPolicy.HISTORICO_DETALHADO_MS : decisao.acao === "remover" ? filaHistoricoPolicy.HISTORICO_COMPACTO_MS : null,
+        elegivel: decisao.acao === "compactar" || decisao.acao === "remover",
+        motivo: decisao.motivo,
+        acaoCompactacao: decisao.acao,
+        bytesEstimados: bytesItem,
+        bytesRecuperaveis: decisao.bytesRecuperaveis || 0,
+        aplicouMudancas: false
+      });
     }
   }
 
-  return { ...criarResumoOrigem("fila_json", "fila_json", registros, limite), ...resumoExtra };
+  const resumo = criarResumoOrigem("fila_json", "fila_json", registros, limite);
+  return {
+    ...resumo,
+    ...resumoExtra,
+    politicaCentral: "fila_historico_policy_v1",
+    bytesRecuperaveisCompactacaoLegivel: bytesLegiveis(resumoExtra.bytesRecuperaveisCompactacao)
+  };
 }
 
 function memoriaComercialStatus(opcoes = {}) {
