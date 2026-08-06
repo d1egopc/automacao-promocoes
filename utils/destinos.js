@@ -34,6 +34,13 @@ const ALIASES_CATEGORIA_DESTINO = {
   diversos: "diversos"
 };
 
+const ALIASES_MARKETPLACE_DESTINO = {
+  awinkabum: ["awin", "kabum"],
+  kabumawin: ["kabum", "awin"],
+  feedawin: ["awin", "kabum"],
+  feedkabum: ["kabum", "awin"]
+};
+
 function normalizarDestino(valor = "") {
   return String(valor || "")
     .toLowerCase()
@@ -47,6 +54,29 @@ function normalizarDestino(valor = "") {
 function normalizarCategoriaDestino(valor = "") {
   const slug = normalizarDestino(valor);
   return ALIASES_CATEGORIA_DESTINO[slug] || slug;
+}
+
+function primeiraListaDestino(...listas) {
+  for (const lista of listas) {
+    if (Array.isArray(lista) && lista.length) return lista;
+  }
+  return [];
+}
+
+function expandirMarketplacesDestino(valores = []) {
+  const lista = Array.isArray(valores) ? valores : [valores];
+  const expandidos = new Set();
+
+  for (const valor of lista) {
+    const slug = normalizarDestino(valor);
+    if (!slug) continue;
+    expandidos.add(slug);
+    for (const alias of ALIASES_MARKETPLACE_DESTINO[slug] || []) {
+      expandidos.add(alias);
+    }
+  }
+
+  return [...expandidos].filter(Boolean);
 }
 
 function destinoAceitaOferta(destino, oferta, opcoes = {}) {
@@ -71,9 +101,9 @@ function analisarDestinoOferta(destino, oferta, opcoes = {}) {
 
   const logger = opcoes.logger || console;
 
-  const marketplaceOferta = normalizarDestino(
-    oferta.marketplace || oferta.mercado || oferta.loja || ""
-  );
+  const marketplaceOfertaBruto = oferta.marketplace || oferta.mercado || oferta.loja || "";
+  const marketplaceOferta = normalizarDestino(marketplaceOfertaBruto);
+  const marketplacesOferta = expandirMarketplacesDestino([marketplaceOfertaBruto]);
 
   const categoriaClassificada =
     oferta.categoria ||
@@ -82,14 +112,12 @@ function analisarDestinoOferta(destino, oferta, opcoes = {}) {
 
   const categoriaOferta = normalizarCategoriaDestino(categoriaClassificada);
 
-  const marketplacesDestino = (destino.marketplaces || [])
-    .map(normalizarDestino)
-    .filter(Boolean);
+  const marketplacesDestino = expandirMarketplacesDestino(
+    primeiraListaDestino(destino.marketplaces, destino.marketplacesPermitidos)
+  );
 
   const categoriasDestino = (
-    destino.categorias ||
-    destino.categoriasPermitidas ||
-    []
+    primeiraListaDestino(destino.categorias, destino.categoriasPermitidas)
   )
     .map(normalizarCategoriaDestino)
     .filter(Boolean);
@@ -99,7 +127,7 @@ function analisarDestinoOferta(destino, oferta, opcoes = {}) {
     marketplacesDestino.includes("geral") ||
     marketplacesDestino.includes("todos") ||
     marketplacesDestino.includes("todas") ||
-    marketplacesDestino.includes(marketplaceOferta);
+    marketplacesOferta.some(marketplace => marketplacesDestino.includes(marketplace));
 
   const aceitaCategoria =
     !categoriasDestino.length ||
@@ -132,6 +160,8 @@ function analisarDestinoOferta(destino, oferta, opcoes = {}) {
     aceita: aceitaMarketplace && aceitaCategoria,
     motivo,
     marketplaceOferta,
+    marketplacesOferta,
+    marketplacesDestino,
     categoriaOferta,
     aceitaMarketplace,
     aceitaCategoria
@@ -190,9 +220,7 @@ function categoriaPermitidaNoDestino(oferta, destino) {
   );
 
   const categoriasDestino = (
-    destino.categorias ||
-    destino.categoriasPermitidas ||
-    []
+    primeiraListaDestino(destino.categorias, destino.categoriasPermitidas)
   )
     .map(normalizarCategoriaDestino)
     .filter(Boolean);
@@ -209,6 +237,7 @@ function categoriaPermitidaNoDestino(oferta, destino) {
 module.exports = {
   normalizarDestino,
   normalizarCategoriaDestino,
+  expandirMarketplacesDestino,
   categoriaPermitidaNoDestino,
   analisarDestinoOferta,
   destinoAceitaOferta,
