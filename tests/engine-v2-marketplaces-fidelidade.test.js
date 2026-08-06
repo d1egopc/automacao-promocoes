@@ -386,13 +386,15 @@ async function testarAliExpressAppPcPreservaAmbosComoComerciais() {
         "Mini PC PUSKILL",
         "Por R$ 227",
         `APP: ${app}`,
+        app,
         `PC: ${pc}`
       ].join("\n"),
-      links_extraidos: [app, pc]
+      links_extraidos: [app, app, pc]
     },
     links: [
       { ...linkRow(1, app), marketplace_detectado: "aliexpress" },
-      { ...linkRow(2, pc), marketplace_detectado: "aliexpress" }
+      { ...linkRow(2, app), marketplace_detectado: "aliexpress" },
+      { ...linkRow(3, pc), marketplace_detectado: "aliexpress" }
     ],
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "track" } }),
@@ -412,16 +414,20 @@ async function testarAliExpressAppPcPreservaAmbosComoComerciais() {
 
   assert.strictEqual(resultado.ok, true);
   assert.deepStrictEqual(urlsImportadas, [pc, app]);
-  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "link_app");
-  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLinkMotivo, "contexto_link_app_aliexpress");
-  assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "link_pc");
-  assert.strictEqual(resultado.metadata.linksClassificados[0].renderizavel, false);
-  assert.strictEqual(resultado.metadata.linksClassificados[0].urlAfiliada, "");
-  assert.strictEqual(resultado.metadata.linksClassificados[0].conversaoWorkspace.motivo, "link_app_sem_validacao_destino_produto");
-  assert.strictEqual(resultado.metadata.linksClassificados[1].urlAfiliada, "https://s.click.aliexpress.com/e/_pcPuskillD1");
+  const apps = resultado.metadata.linksClassificados.filter(item => item.papelLink === "link_app");
+  const appRenderizavel = apps.filter(item => item.renderizavel === true);
+  const pcRenderizavel = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
+  assert.strictEqual(apps.length, 2);
+  assert.strictEqual(appRenderizavel.length, 1);
+  assert.strictEqual(appRenderizavel[0].papelLinkMotivo, "contexto_link_app_aliexpress");
+  assert.strictEqual(appRenderizavel[0].urlAfiliada, "https://s.click.aliexpress.com/e/_appPuskillD1");
+  assert.strictEqual(appRenderizavel[0].conversaoWorkspace.motivo, "cta_app_workspace_convertido_produto_canonico");
+  assert.strictEqual(appRenderizavel[0].conversaoWorkspace.produtoCanonico, "1005002222222222");
+  assert.strictEqual(appRenderizavel[0].conversaoWorkspace.produtoCanonicoPrincipal, "1005002222222222");
+  assert.strictEqual(pcRenderizavel.urlAfiliada, "https://s.click.aliexpress.com/e/_pcPuskillD1");
 }
 
-async function testarAliExpressAppPcRenderizaAppSomenteComValidacaoEspecifica() {
+async function testarAliExpressAppPcRenderizaAppComProvaObjetiva() {
   limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
   const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
   const app = "https://a.aliexpress.com/_appValidado";
@@ -454,7 +460,7 @@ async function testarAliExpressAppPcRenderizaAppSomenteComValidacaoEspecifica() 
           linkAfiliado: url === pc ? "https://s.click.aliexpress.com/e/_pcWifiD1" : "https://s.click.aliexpress.com/e/_appWifiD1",
           linkExpandido: "https://www.aliexpress.com/item/1005007777777777.html",
           categoria: "AliExpress",
-          conversaoAppValidada: opcoes?.contextoEngine?.papelLink === "link_app"
+          contextoRecebido: opcoes?.contextoEngine?.papelLink || ""
         };
       }
     }
@@ -465,10 +471,56 @@ async function testarAliExpressAppPcRenderizaAppSomenteComValidacaoEspecifica() 
   const linkApp = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_app");
   const linkPc = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
   assert.strictEqual(linkApp.renderizavel, true);
-  assert.strictEqual(linkApp.conversaoWorkspace.motivo, "cta_app_workspace_convertido");
+  assert.strictEqual(linkApp.conversaoWorkspace.motivo, "cta_app_workspace_convertido_produto_canonico");
   assert.strictEqual(linkApp.urlAfiliada, "https://s.click.aliexpress.com/e/_appWifiD1");
+  assert.strictEqual(linkApp.conversaoWorkspace.produtoCanonico, "1005007777777777");
+  assert.strictEqual(linkApp.conversaoWorkspace.produtoCanonicoPrincipal, "1005007777777777");
   assert.strictEqual(linkPc.renderizavel, true);
   assert.strictEqual(linkPc.urlAfiliada, "https://s.click.aliexpress.com/e/_pcWifiD1");
+}
+
+async function testarAliExpressAppNaoReutilizaUrlAfiliadaPc() {
+  limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
+  const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
+  const app = "https://a.aliexpress.com/_appMesmoCtaPc";
+  const pc = "https://a.aliexpress.com/_pcMesmoCta";
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 124, evento_id: 224, cliente_id: "workspace_teste" },
+    evento: {
+      texto_original: [
+        "Produto AliExpress Mesmo CTA",
+        "Valor: R$ 199",
+        `App: ${app}`,
+        `PC: ${pc}`
+      ].join("\n"),
+      links_extraidos: [app, pc]
+    },
+    links: [
+      { ...linkRow(1, app), marketplace_detectado: "aliexpress" },
+      { ...linkRow(2, pc), marketplace_detectado: "aliexpress" }
+    ],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "track" } }),
+      importarAliExpress: async () => ({
+        titulo: "Produto AliExpress Mesmo CTA",
+        precoAtual: "199.00",
+        imagem: "https://img.test/mesmo-cta.jpg",
+        linkAfiliado: "https://s.click.aliexpress.com/e/_mesmoCtaD1",
+        linkExpandido: "https://www.aliexpress.com/item/1005001234567890.html",
+        categoria: "AliExpress"
+      })
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  const linkApp = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_app");
+  const linkPc = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
+  assert.strictEqual(linkPc.renderizavel, true);
+  assert.strictEqual(linkPc.urlAfiliada, "https://s.click.aliexpress.com/e/_mesmoCtaD1");
+  assert.strictEqual(linkApp.renderizavel, false);
+  assert.strictEqual(linkApp.urlAfiliada, "");
+  assert.strictEqual(linkApp.conversaoWorkspace.motivo, "link_app_url_afiliada_igual_pc");
 }
 async function testarAliExpressAppAfiliadoDivergenteNaoRenderiza() {
   limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
@@ -704,9 +756,9 @@ async function testarAliExpressBinnuneUsaPrecoRadarEstruturadoEDescartaAuxiliar(
   assert.ok(papeis.includes("link_pc"));
   const linkApp = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_app");
   const linkPc = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
-  assert.strictEqual(linkApp.renderizavel, false);
-  assert.strictEqual(linkApp.urlAfiliada, "");
-  assert.strictEqual(linkApp.conversaoWorkspace.motivo, "link_app_sem_validacao_destino_produto");
+  assert.strictEqual(linkApp.renderizavel, true);
+  assert.strictEqual(linkApp.urlAfiliada, "https://s.click.aliexpress.com/e/_appBinnuneD1");
+  assert.strictEqual(linkApp.conversaoWorkspace.motivo, "cta_app_workspace_convertido_produto_canonico");
   assert.strictEqual(linkPc.renderizavel, true);
   assert.strictEqual(linkPc.urlAfiliada, "https://s.click.aliexpress.com/e/_pcBinnuneD1");
   assert.strictEqual(
@@ -715,7 +767,7 @@ async function testarAliExpressBinnuneUsaPrecoRadarEstruturadoEDescartaAuxiliar(
   );
 }
 
-async function testarAliExpressEnriquecimentoImagemMoedasEAppFailClosed() {
+async function testarAliExpressEnriquecimentoImagemMoedasEAppProvaObjetiva() {
   limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
   const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
   const { montarItemFilaEngine } = require("../modules/engine/distributor/distributor.service");
@@ -761,8 +813,9 @@ async function testarAliExpressEnriquecimentoImagemMoedasEAppFailClosed() {
   assert.strictEqual(resultado.cupom, "OCUPOMDALOJA");
   const linkApp = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_app");
   const linkPc = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
-  assert.strictEqual(linkApp.renderizavel, false);
-  assert.strictEqual(linkApp.urlAfiliada, "");
+  assert.strictEqual(linkApp.renderizavel, true);
+  assert.strictEqual(linkApp.urlAfiliada, "https://s.click.aliexpress.com/e/_appBaseusD1");
+  assert.strictEqual(linkApp.conversaoWorkspace.motivo, "cta_app_workspace_convertido_produto_canonico");
   assert.strictEqual(linkPc.renderizavel, true);
 
   const itemFila = montarItemFilaEngine({
@@ -1173,11 +1226,14 @@ function testarOrquestradorIncluiMarketplacesOficiais() {
   await testarShopeePreservaPrecoRadarQuandoApiIncompativel();
   await testarClassificacaoAliExpressPreservaProduto();
   await testarAliExpressAppPcPreservaAmbosComoComerciais();
+  await testarAliExpressAppPcRenderizaAppComProvaObjetiva();
+  await testarAliExpressAppNaoReutilizaUrlAfiliadaPc();
+  await testarAliExpressAppAfiliadoDivergenteNaoRenderiza();
   await testarAliExpressUsaPrecoRadarQuandoApiNaoRetornaPreco();
   await testarAliExpressNaoUsaCupomComoPrecoRadar();
   await testarAliExpressReconheceRotuloNaLinhaAnterior();
   await testarAliExpressBinnuneUsaPrecoRadarEstruturadoEDescartaAuxiliar();
-  await testarAliExpressEnriquecimentoImagemMoedasEAppFailClosed();
+  await testarAliExpressEnriquecimentoImagemMoedasEAppProvaObjetiva();
   await testarAliExpressSemImagemContinuaTextual();
   testarPonteIntegridadePreservaPrecoEAppPcAteFila();
   testarPonteIntegridadeKabumAwinMantemSomenteCtaD1Renderizavel();

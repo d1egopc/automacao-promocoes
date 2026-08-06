@@ -292,6 +292,24 @@ function urlAliExpressConvertidaSegura(urlConvertida = "", urlOriginal = "") {
   }
 }
 
+function chaveUrlAliExpressAfiliada(url = "") {
+  const valor = texto(url);
+  if (!valor) return "";
+  try {
+    const parsed = new URL(valor);
+    parsed.hash = "";
+    return `${parsed.hostname.replace(/^www\./i, "").toLowerCase()}${parsed.pathname}`.replace(/\/+$/, "");
+  } catch (_) {
+    return valor.replace(/#.*$/, "").replace(/\/+$/, "");
+  }
+}
+
+function urlsAliExpressAfiliadasIguais(a = "", b = "") {
+  const chaveA = chaveUrlAliExpressAfiliada(a);
+  const chaveB = chaveUrlAliExpressAfiliada(b);
+  return Boolean(chaveA && chaveB && chaveA === chaveB);
+}
+
 function extrairIdProdutoAliExpressValor(valor = "") {
   const bruto = texto(valor);
   if (!bruto) return "";
@@ -433,7 +451,7 @@ function conversaoAppAliExpressComprovada(produtoConvertido = {}) {
   ]);
 }
 
-function avaliarConversaoAliExpressPorPapel({ papelLink = "", urlAfiliada = "", urlOriginal = "", produtoConvertido = {}, produtoPrincipal = {}, urlPrincipal = "" } = {}) {
+function avaliarConversaoAliExpressPorPapel({ papelLink = "", urlAfiliada = "", urlOriginal = "", produtoConvertido = {}, produtoPrincipal = {}, urlPrincipal = "", urlAfiliadaPrincipal = "" } = {}) {
   const produtoCanonico = validarProdutoCanonicoAliExpress({
     papelLink,
     principal: { produto: produtoPrincipal, urlOriginal: urlPrincipal },
@@ -449,8 +467,21 @@ function avaliarConversaoAliExpressPorPapel({ papelLink = "", urlAfiliada = "", 
     return { ...produtoCanonico, renderizavel: false, motivo: produtoCanonico.motivo, appValidado: false };
   }
 
-  if (papelLink === "link_app" && !conversaoAppAliExpressComprovada(produtoConvertido)) {
-    return { ...produtoCanonico, renderizavel: false, motivo: "link_app_sem_validacao_destino_produto", appValidado: false };
+  if (papelLink === "link_app") {
+    if (!texto(urlAfiliadaPrincipal)) {
+      return { ...produtoCanonico, renderizavel: false, motivo: "link_app_sem_cta_pc_canonico", appValidado: false };
+    }
+    if (urlsAliExpressAfiliadasIguais(urlAfiliada, urlAfiliadaPrincipal)) {
+      return { ...produtoCanonico, renderizavel: false, motivo: "link_app_url_afiliada_igual_pc", appValidado: false };
+    }
+    if (!conversaoAppAliExpressComprovada(produtoConvertido)) {
+      return {
+        ...produtoCanonico,
+        renderizavel: true,
+        motivo: "cta_app_workspace_convertido_produto_canonico",
+        appValidado: true
+      };
+    }
   }
 
   return {
@@ -495,7 +526,8 @@ async function converterLinksAlternativosAliExpress({
         urlOriginal: alvo,
         produtoConvertido: produtoPrincipal,
         produtoPrincipal,
-        urlPrincipal: alvo
+        urlPrincipal: alvo,
+        urlAfiliadaPrincipal: linkAfiliadoPrincipal
       });
       return {
         urlAfiliada: avaliacaoPrincipal.renderizavel ? linkAfiliadoPrincipal : "",
@@ -531,7 +563,8 @@ async function converterLinksAlternativosAliExpress({
         urlOriginal: alvo,
         produtoConvertido,
         produtoPrincipal,
-        urlPrincipal
+        urlPrincipal,
+        urlAfiliadaPrincipal: linkAfiliadoPrincipal
       });
       const resultado = {
         urlAfiliada: avaliacao.renderizavel ? urlAfiliada : "",

@@ -60,13 +60,24 @@ function partesCupom(valor = "") {
   const entrada = texto(valor);
   if (!entrada) return [];
   return entrada
-    .split(/\s+(?:ou|e)\s+|[,;/|]+/i)
+    .split(/\s+(?:ou|e)\s+|\s*\+\s*|[,;/|]+/i)
     .map(texto)
     .filter(Boolean);
 }
 
+function tokenMoedasComoCupom(valor = "") {
+  const chave = chaveCupom(valor);
+  if (!chave) return false;
+  return chave === "moeda" ||
+    chave === "moedas" ||
+    chave === "coin" ||
+    chave === "coins" ||
+    /^\d{1,6}(?:moeda|moedas|coin|coins)(?:no)?(?:app|aplicativo)?$/.test(chave);
+}
+
 function cupomBloqueado(valor = "") {
   const chave = chaveCupom(valor);
+  if (tokenMoedasComoCupom(valor)) return true;
   return !chave || [
     "resgate",
     "produto",
@@ -99,6 +110,10 @@ function cupomBloqueado(valor = "") {
     "com",
     "br",
     "combr",
+    "moeda",
+    "moedas",
+    "coin",
+    "coins",
     "undefined",
     "null",
     "nan"
@@ -184,6 +199,34 @@ function normalizarInstrucaoApresentacao(instrucao = "", cupons = []) {
   return valor;
 }
 
+function marketplaceAliExpress(...valores) {
+  return valores.some(valor => normalizarComparacao(valor).replace(/\s+/g, "") === "aliexpress");
+}
+
+function extrairMoedasApresentacao(...fontes) {
+  for (const fonte of fontes) {
+    const valor = texto(fonte);
+    if (!valor || !/\b(?:moeda|moedas|coins?)\b/i.test(valor)) continue;
+    const match = valor.match(/(?:\+\s*)?(\d{1,6})\s*(?:moeda|moedas|coins?)\b/i);
+    if (match) return `${match[1]} moedas no APP`;
+    return "Moedas no APP";
+  }
+  return "";
+}
+
+function listaTextoComercialUnica(...fontes) {
+  const resultado = [];
+  const vistos = new Set();
+  for (const fonte of fontes.flat()) {
+    const item = texto(fonte);
+    const chave = normalizarComparacao(item);
+    if (!item || vistos.has(chave)) continue;
+    vistos.add(chave);
+    resultado.push(item);
+  }
+  return resultado;
+}
+
 function separarLinksApresentacao(dados = {}) {
   const linksProduto = listaLinksUnicos(dados.linksProduto, "produto");
   const linksResgate = listaLinksUnicos(dados.linksResgate, "resgate");
@@ -223,6 +266,7 @@ function separarLinksApresentacao(dados = {}) {
 }
 
 function normalizarApresentacaoComercial(dados = {}, origem = {}) {
+  const aliExpress = marketplaceAliExpress(dados.marketplace, origem.marketplace);
   const cupons = normalizarCuponsApresentacao(
     origem.cupons,
     origem.codigosCupom,
@@ -236,10 +280,25 @@ function normalizarApresentacaoComercial(dados = {}, origem = {}) {
     dados.cupomCodigo
   );
   const cupom = cupons.join(" ou ");
-  const instrucaoCupom = normalizarInstrucaoApresentacao(
+  const instrucaoCupomBase = normalizarInstrucaoApresentacao(
     dados.instrucaoCupom || origem.instrucaoCupom || "",
     cupons
   );
+  const instrucaoCupom = aliExpress && cupons.length
+    ? "Aplique um dos cupons acima para obter este preço."
+    : instrucaoCupomBase;
+  const moedasAliExpress = aliExpress
+    ? extrairMoedasApresentacao(
+      dados.moedasTexto,
+      origem.moedasTexto,
+      dados.beneficioTexto,
+      origem.beneficioTexto,
+      dados.beneficioExtra,
+      origem.beneficioExtra,
+      dados.avisoCupom,
+      origem.avisoCupom
+    )
+    : "";
   const links = separarLinksApresentacao({ ...origem, ...dados });
   const linkPrincipal = links.linkProduto || texto(dados.linkAfiliado || dados.linkFinal || dados.link || origem.linkAfiliado || origem.linkFinal || origem.link || "");
 
@@ -252,6 +311,7 @@ function normalizarApresentacaoComercial(dados = {}, origem = {}) {
     cupons,
     codigosCupom: [...cupons],
     instrucaoCupom,
+    condicoes: listaTextoComercialUnica(dados.condicoes, origem.condicoes, moedasAliExpress),
     linksComerciais: links.linksComerciais,
     linksProduto: links.linksProduto,
     linksResgate: links.linksResgate,

@@ -261,8 +261,15 @@ function textoPrecoEstruturado(valor) {
 const CUPONS_BLOQUEADOS = new Set([
   "CUPOM", "CUPONS", "CODIGO", "COD", "DESCONTO", "PROMO", "PROMOCAO",
   "TODOS", "DESTA", "PAGINA", "RESGATE", "ANUNCIO", "HTTP", "HTTPS",
-  "WWW", "COM", "BR", "COMBR", "SHOPEE", "MERCADOLIVRE", "MERCADO", "LIVRE"
+  "WWW", "COM", "BR", "COMBR", "MOEDA", "MOEDAS", "COIN", "COINS",
+  "SHOPEE", "MERCADOLIVRE", "MERCADO", "LIVRE"
 ]);
+
+function tokenMoedasComoCupom(valor = "") {
+  const chave = chaveCupom(valor);
+  if (!chave) return false;
+  return /^\d{1,6}(?:MOEDA|MOEDAS|COIN|COINS)(?:NO)?(?:APP|APLICATIVO)?$/.test(chave);
+}
 
 function cupomPlausivel(valor = "") {
   const bruto = texto(valor);
@@ -270,6 +277,7 @@ function cupomPlausivel(valor = "") {
   if (!/[A-Z0-9]/.test(bruto)) return false;
   if (!chave || chave.length < 3 || chave.length > 32) return false;
   if (CUPONS_BLOQUEADOS.has(chave)) return false;
+  if (tokenMoedasComoCupom(bruto)) return false;
   if (!/[A-Z]/.test(chave)) return false;
   if (/^\d+$/.test(chave)) return false;
   return true;
@@ -277,7 +285,7 @@ function cupomPlausivel(valor = "") {
 
 function separarCupons(valor = "") {
   return texto(valor)
-    .split(/\s+(?:ou|e)\s+|[,;/|]+/i)
+    .split(/\s+(?:ou|e)\s+|\s*\+\s*|[,;/|]+/i)
     .map(item => item.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9_-]+$/g, "").trim())
     .filter(cupomPlausivel);
 }
@@ -344,6 +352,9 @@ function instrucaoCupomConfiavel(instrucao = "", cupons = [], doc = {}) {
 }
 
 function montarInstrucaoCupomCanonica(doc = {}, cupons = []) {
+  if (normalizarComparacao(doc.marketplace).replace(/[^a-z0-9]+/g, "") === "aliexpress") {
+    if (cupons.length) return "Aplique um dos cupons acima para obter este preço.";
+  }
   const explicita = instrucaoCupomConfiavel(doc.instrucaoTexto, cupons, doc);
   if (explicita) return explicita;
   if (!cupons.length) return "";

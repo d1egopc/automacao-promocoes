@@ -52,6 +52,47 @@ assert.deepStrictEqual(doisCupons.codigosCupom, ["MODALIVRE", "AMOCUPOM"]);
 assert.strictEqual(ocorrencias(mensagemDoisCupons, "Cupom: *MODALIVRE ou AMOCUPOM*"), 1);
 assert.ok(!mensagemDoisCupons.includes("MODALIVRE ou MODALIVRE"));
 
+const aliCupomSemMoedas = prepararDadosOficiaisTemplate(ofertaBase({
+  marketplace: "aliexpress",
+  cupom: "IFPC5HAQ",
+  codigosCupom: ["IFPC5HAQ"],
+  imagem: "https://img.example/aliexpress.jpg",
+  linkAfiliado: "https://s.click.aliexpress.com/e/_pcSeguro"
+}), { modo: "universal" });
+const msgAliCupomSemMoedas = gerarTemplateUniversal(aliCupomSemMoedas);
+assert.deepStrictEqual(aliCupomSemMoedas.codigosCupom, ["IFPC5HAQ"], "AliExpress preserva cupom sem moedas");
+assert.strictEqual(aliCupomSemMoedas.imagem, "https://img.example/aliexpress.jpg", "AliExpress preserva imagem na composicao");
+assert.ok(msgAliCupomSemMoedas.includes("Cupom: *IFPC5HAQ*"), "AliExpress renderiza cupom sem moedas");
+assert.ok(msgAliCupomSemMoedas.includes("Aplique um dos cupons acima"), "AliExpress usa CTA comercial generico");
+assert.ok(!msgAliCupomSemMoedas.includes("Aplique o cupom IFPC5HAQ"), "AliExpress nao usa cupom como frase");
+
+const aliCuponsMoedas = prepararDadosOficiaisTemplate(ofertaBase({
+  marketplace: "aliexpress",
+  cupom: "IFPC5HAQ ou IFPRWL57 ou 732MOEDAS",
+  codigosCupom: ["IFPC5HAQ", "IFPRWL57", "732MOEDAS"],
+  moedasTexto: "+732 moedas",
+  linkAfiliado: "https://s.click.aliexpress.com/e/_pcSeguro"
+}), { modo: "universal" });
+const msgAliCuponsMoedas = gerarTemplateUniversal(aliCuponsMoedas);
+assert.deepStrictEqual(aliCuponsMoedas.codigosCupom, ["IFPC5HAQ", "IFPRWL57"], "AliExpress nao transforma moedas em cupom");
+assert.ok(aliCuponsMoedas.condicoes.includes("732 moedas no APP"), "AliExpress apresenta moedas como condicao comercial");
+assert.ok(msgAliCuponsMoedas.includes("Cupom: *IFPC5HAQ ou IFPRWL57*"), "AliExpress renderiza varios cupons sem moedas");
+assert.ok(msgAliCuponsMoedas.includes("732 moedas no APP"), "AliExpress renderiza moedas separadas dos cupons");
+assert.ok(!msgAliCuponsMoedas.includes("732MOEDAS"), "AliExpress nao renderiza moedas como codigo");
+assert.ok(!msgAliCuponsMoedas.includes("IFPC5HAQ ou IFPRWL57 ou 732"), "AliExpress nao concatena moedas com ou");
+
+const aliSomenteMoedas = gerarTemplateUniversal(prepararDadosOficiaisTemplate(ofertaBase({
+  marketplace: "aliexpress",
+  cupom: "",
+  codigosCupom: [],
+  cupons: [],
+  moedasTexto: "+732 moedas",
+  linkAfiliado: "https://s.click.aliexpress.com/e/_pcSeguro"
+}), { modo: "universal" }));
+assert.ok(aliSomenteMoedas.includes("732 moedas no APP"), "AliExpress somente moedas continua renderizando beneficio");
+assert.ok(!aliSomenteMoedas.includes("Cupom:"), "AliExpress somente moedas nao cria cupom");
+assert.ok(!aliSomenteMoedas.includes("Aplique um dos cupons"), "AliExpress somente moedas nao cria CTA de cupom");
+
 const instrucaoResgate = prepararDadosOficiaisTemplate(ofertaBase({
   cupom: "",
   codigoCupom: "",

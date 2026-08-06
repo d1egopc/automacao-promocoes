@@ -1384,6 +1384,8 @@ const templateAliCuponsMoedas = montarTemplateEspelhoPorBlocosV26(
 );
 assert.ok(templateAliCuponsMoedas.mensagem.includes("Cupons: BRAE2 • IFP6FAD6 • IFPVOILF"));
 assert.ok(templateAliCuponsMoedas.mensagem.includes("APP: +68 moedas"));
+assert.ok(templateAliCuponsMoedas.mensagem.includes("Aplique um dos cupons acima"), "AliExpress nao usa primeiro cupom como CTA");
+assert.ok(!templateAliCuponsMoedas.mensagem.includes("Aplique o cupom BRAE2"), "AliExpress nao renderiza cupom literal como frase");
 assert.ok(templateAliCuponsMoedas.mensagem.includes("APP:\nhttps://s.click.aliexpress.com/e/_appNetacD1"));
 assert.ok(templateAliCuponsMoedas.mensagem.includes("PC:\nhttps://s.click.aliexpress.com/e/_pcNetacD1"));
 assert.ok(!templateAliCuponsMoedas.mensagem.includes("https://a.aliexpress.com/_appNetac"));
@@ -1393,6 +1395,41 @@ assert.deepStrictEqual(
   aliexpressCuponsMoedasAppPcConvertidos.documentoComercialCanonico.linksComerciais.map(item => item.tipo),
   ["app", "pc"]
 );
+const aliexpressCuponsMoedasSemContaminarCupom = criarEspelho({
+  textoOriginal: [
+    "Fone AliExpress",
+    "Por: R$ 89,90",
+    "Cupom: IFPC5HAQ ou IFPRWL57 ou 732MOEDAS",
+    "732 moedas no APP",
+    "Link PC: https://a.aliexpress.com/_pcFone"
+  ].join("\n"),
+  oferta: {
+    marketplace: "aliexpress",
+    preco: 89.9,
+    linksComerciais: [
+      {
+        papel: "link_pc",
+        urlOriginal: "https://a.aliexpress.com/_pcFone",
+        urlAfiliada: "https://s.click.aliexpress.com/e/_pcFoneD1",
+        renderizavel: true,
+        convertidoWorkspace: true,
+        seguro: true
+      }
+    ]
+  },
+  comercialNormalizado: { marketplace: "aliexpress", precoAtual: 89.9, precoConfiavel: true }
+});
+const templateAliSomentePc = montarTemplateEspelhoPorBlocosV26(
+  aliexpressCuponsMoedasSemContaminarCupom.espelhoComercial,
+  aliexpressCuponsMoedasSemContaminarCupom.documentoComercialCanonico
+);
+assert.ok(templateAliSomentePc.mensagem.includes("Cupons: IFPC5HAQ"), "AliExpress varios cupons renderiza bloco de cupons");
+assert.ok(templateAliSomentePc.mensagem.includes("IFPRWL57"), "AliExpress preserva segundo cupom");
+assert.ok(templateAliSomentePc.mensagem.includes("APP: +732 moedas"), "AliExpress moedas segue como beneficio separado");
+assert.ok(templateAliSomentePc.mensagem.includes("Aplique um dos cupons acima"), "AliExpress cupom contaminado ainda usa CTA seguro");
+assert.ok(templateAliSomentePc.mensagem.includes("PC:\nhttps://s.click.aliexpress.com/e/_pcFoneD1"), "AliExpress somente PC renderiza link convertido");
+assert.ok(!templateAliSomentePc.mensagem.includes("732MOEDAS"), "AliExpress nao renderiza moedas como cupom");
+assert.ok(!templateAliSomentePc.mensagem.includes("https://a.aliexpress.com/_pcFone"), "AliExpress nao renderiza link original inseguro");
 const resumoV26 = mlCompleto.documentoComercialCanonico.blocos.reduce((acc, bloco) => {
   acc[bloco.tipo] = (acc[bloco.tipo] || 0) + 1;
   return acc;
