@@ -283,6 +283,136 @@ function extrairProductIdAliExpressManual(urlEntrada = "") {
   }
 }
 
+const ALIEXPRESS_SHORTLINK_HOSTS = new Set(["a.aliexpress.com"]);
+const ALIEXPRESS_HOSTS_OFICIAIS = new Set(["aliexpress.com", "a.aliexpress.com", "s.click.aliexpress.com"]);
+const ALIEXPRESS_REDIRECT_TIMEOUT_MS = 5000;
+const ALIEXPRESS_REDIRECT_MAX = 5;
+
+function hostPrivadoOuInseguro(hostname = "") {
+  const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
+  if (!host) return true;
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true;
+
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const partes = ipv4.slice(1).map(Number);
+    if (partes.some(parte => Number.isNaN(parte) || parte < 0 || parte > 255)) return true;
+    const [a, b] = partes;
+    if (a === 10 || a === 127 || a === 0) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a >= 224) return true;
+  }
+
+  if (host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:")) {
+    return true;
+  }
+
+  return false;
+}
+
+function hostAliExpressOficial(hostname = "") {
+  const host = String(hostname || "").toLowerCase().replace(/^www\./, "");
+  return ALIEXPRESS_HOSTS_OFICIAIS.has(host) || host.endsWith(".aliexpress.com");
+}
+
+function urlAliExpressSegura(urlEntrada = "", { permitirShortlink = true } = {}) {
+  try {
+    const url = new URL(String(urlEntrada || ""));
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (!["http:", "https:"].includes(url.protocol)) return false;
+    if (url.protocol !== "https:") return false;
+    if (hostPrivadoOuInseguro(host)) return false;
+    if (!hostAliExpressOficial(host)) return false;
+    if (!permitirShortlink && ALIEXPRESS_SHORTLINK_HOSTS.has(host)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function ehShortlinkAliExpress(urlEntrada = "") {
+  try {
+    const url = new URL(String(urlEntrada || ""));
+    return ALIEXPRESS_SHORTLINK_HOSTS.has(url.hostname.toLowerCase().replace(/^www\./, ""));
+  } catch {
+    return false;
+  }
+}
+
+function resolverLocationRedirect(baseUrl = "", location = "") {
+  const destino = String(location || "").trim();
+  if (!destino) return "";
+  try {
+    return new URL(destino, baseUrl).toString();
+  } catch {
+    return "";
+  }
+}
+
+async function expandirShortlinkAliExpressSeguro(urlEntrada = "", opcoes = {}) {
+  const urlInicial = String(urlEntrada || "").trim();
+  const timeoutMs = Number(opcoes.timeoutMs || ALIEXPRESS_REDIRECT_TIMEOUT_MS);
+  const maxRedirects = Number(opcoes.maxRedirects || ALIEXPRESS_REDIRECT_MAX);
+  const fetchFn = typeof opcoes.fetch === "function" ? opcoes.fetch : fetch;
+
+  if (!ehShortlinkAliExpress(urlInicial)) {
+    return { ok: false, url: urlInicial, motivo: "nao_shortlink_aliexpress" };
+  }
+  if (!urlAliExpressSegura(urlInicial)) {
+    return { ok: false, url: urlInicial, motivo: "shortlink_inseguro" };
+  }
+
+  let atual = urlInicial;
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = controller
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+
+  try {
+    for (let i = 0; i < maxRedirects; i += 1) {
+      const response = await fetchFn(atual, {
+        method: "GET",
+        redirect: "manual",
+        signal: controller?.signal,
+        headers: {
+          "user-agent": "OptimusPromo/1.0 AliExpressCanonicalResolver"
+        }
+      });
+
+      const location = typeof response.headers?.get === "function" ? response.headers.get("location") : "";
+      const status = Number(response.status || 0);
+
+      if (status >= 300 && status < 400 && location) {
+        const proxima = resolverLocationRedirect(atual, location);
+        if (!proxima) return { ok: false, url: atual, motivo: "redirect_location_invalido" };
+        if (!urlAliExpressSegura(proxima, { permitirShortlink: true })) {
+          return { ok: false, url: atual, motivo: "redirect_destino_inseguro" };
+        }
+        atual = proxima;
+        continue;
+      }
+
+      const final = response.url || atual;
+      if (!urlAliExpressSegura(final, { permitirShortlink: false })) {
+        return { ok: false, url: atual, motivo: "destino_final_inseguro" };
+      }
+      return { ok: true, url: final, motivo: "shortlink_expandido" };
+    }
+
+    return { ok: false, url: atual, motivo: "limite_redirects" };
+  } catch (erro) {
+    return {
+      ok: false,
+      url: atual,
+      motivo: erro?.name === "AbortError" ? "timeout_expansao_shortlink" : "erro_expansao_shortlink"
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function listaAliExpress(valor) {
   if (Array.isArray(valor)) return valor;
   if (!valor) return [];
@@ -516,11 +646,13 @@ async function importarAliExpress(urlEntrada, config = {}) {
   const secret = credenciais.secret || credenciais.appSecret || "";
   const trackingId = credenciais.trackingId || "";
   const clienteId = config?.clienteId || config?.cliente || "";
-  const productId = extrairProductIdAliExpressManual(urlOriginal);
+  const expansaoShortlink = await expandirShortlinkAliExpressSeguro(urlOriginal);
+  const urlCanonicaProduto = expansaoShortlink.ok ? expansaoShortlink.url : urlOriginal;
+  const productId = extrairProductIdAliExpressManual(urlCanonicaProduto);
   const ehBrasil =
-    urlOriginal.includes("ship_from%22%3A%22BR") ||
-    urlOriginal.includes('"ship_from":"BR"') ||
-    urlOriginal.includes("%22ship_from%22%3A%22BR%22");
+    urlCanonicaProduto.includes("ship_from%22%3A%22BR") ||
+    urlCanonicaProduto.includes('"ship_from":"BR"') ||
+    urlCanonicaProduto.includes("%22ship_from%22%3A%22BR%22");
   const avisoCupom = ehBrasil
     ? "Produto no Brasil. Confira cupom ou desconto com moedas na pagina."
     : "Compra internacional. Pode haver imposto/taxa. Confira cupom ou desconto com moedas na pagina.";
@@ -532,12 +664,16 @@ async function importarAliExpress(urlEntrada, config = {}) {
   console.log("[ALIEXPRESS-PRODUCT-ID]", {
     clienteId,
     productId: productId || "",
-    encontrado: Boolean(productId)
+    encontrado: Boolean(productId),
+    shortlinkExpandido: expansaoShortlink.ok === true,
+    expansaoMotivo: expansaoShortlink.motivo || ""
   });
 
   if (!productId) {
     return produtoAliExpressGenerico(urlOriginal, "Erro ao consultar API AliExpress", {
-      motivo: "product_id_ausente"
+      motivo: expansaoShortlink.motivo && expansaoShortlink.motivo !== "nao_shortlink_aliexpress"
+        ? expansaoShortlink.motivo
+        : "product_id_ausente"
     });
   }
 
@@ -617,11 +753,12 @@ async function importarAliExpress(urlEntrada, config = {}) {
     linkOptimusAplicado: Boolean(linkFinal && linkFinal !== (linkAliCurto || linkAfiliadoBase))
   });
 
-  return montarProdutoAliExpressManual(produto, urlOriginal, avisoCupom, linkFinal || linkAliCurto || linkAfiliadoBase);
+  return montarProdutoAliExpressManual(produto, urlCanonicaProduto, avisoCupom, linkFinal || linkAliCurto || linkAfiliadoBase);
 }
 
 module.exports = {
   importarAliExpress,
   extrairProductIdAliExpressManual,
+  expandirShortlinkAliExpressSeguro,
   selecionarProdutoAliExpressPorId
 };

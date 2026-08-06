@@ -19,18 +19,27 @@ global.fetch = async function fetchMock(url, opcoes = {}) {
   if (!proxima) {
     throw new Error(`Resposta mock ausente para ${method}`);
   }
+  if (proxima.throw) {
+    throw proxima.throw;
+  }
 
   return {
     ok: proxima.ok !== false,
     status: proxima.status || 200,
+    url: proxima.url || url,
+    headers: {
+      get: (nome) => String(nome || "").toLowerCase() === "location" ? (proxima.location || "") : ""
+    },
     json: async () => proxima.data
   };
 };
 
 const {
   importarAliExpress,
-  extrairProductIdAliExpressManual
+  extrairProductIdAliExpressManual,
+  expandirShortlinkAliExpressSeguro
 } = require("../marketplaces/aliexpress/importar");
+const { montarOfertaUniversalEngine } = require("../modules/engine/oferta-universal.contract");
 const {
   importarProdutoManual
 } = require("../marketplaces/manual/importar-produto");
@@ -98,6 +107,22 @@ function respostaLink(link) {
         }
       }
     }
+  };
+}
+
+function respostaRedirectFinal(urlFinal) {
+  return {
+    status: 200,
+    url: urlFinal,
+    data: {}
+  };
+}
+
+function respostaRedirectLocation(location) {
+  return {
+    status: 302,
+    location,
+    data: {}
   };
 }
 
@@ -182,6 +207,122 @@ async function testarQueryRejeitaProdutoDiferente() {
   assert.strictEqual(produto.precoAtual, "");
   assert.strictEqual(produto.imagem, "");
   assert.strictEqual(chamadas.length, 2);
+}
+
+async function testarShortlinkExpandeExtraiProductIdEImagemChegaOfertaUniversal() {
+  const id = "1005011559438577";
+  const urlCanonica = `https://star.aliexpress.com/share/share.htm?productId=${id}`;
+  resetar([
+    respostaRedirectFinal(urlCanonica),
+    respostaDetalhe(produtoAli(id, {
+      product_main_image_url: "//ae01.alicdn.com/canonica.jpg",
+      product_small_image_urls: {
+        string: [
+          "//ae01.alicdn.com/canonica.jpg",
+          "//ae01.alicdn.com/secundaria.jpg"
+        ]
+      },
+      product_title: "Controle 8BitDo Ultimate 2",
+      target_sale_price: "299.90"
+    })),
+    respostaLink("https://s.click.aliexpress.com/e/_SHORTIMG")
+  ]);
+
+  const produto = await importarAliExpress("https://a.aliexpress.com/_c3yudse3", config());
+  const ofertaUniversal = montarOfertaUniversalEngine({
+    oferta: {
+      id: 1,
+      marketplace: "aliexpress",
+      titulo: produto.titulo,
+      preco: 299.9,
+      imagem: produto.imagem,
+      imagemOrigem: "aliexpress_produto_canonico_pc",
+      linkOriginal: produto.linkOriginal,
+      linkAfiliado: produto.linkAfiliado
+    },
+    job: {
+      id: 2,
+      evento_id: 3,
+      cliente_id: "cliente_ali",
+      marketplace: "aliexpress"
+    },
+    metadata: {
+      adapter: "aliexpress",
+      produto
+    }
+  });
+
+  assert.strictEqual(produto.linkOriginal, urlCanonica);
+  assert.strictEqual(produto.imagem, "https://ae01.alicdn.com/canonica.jpg");
+  assert.strictEqual(ofertaUniversal.midia.imagemPrincipal, "https://ae01.alicdn.com/canonica.jpg");
+  assert.strictEqual(chamadas[0].method, null);
+  assert.strictEqual(chamadas[0].url, "https://a.aliexpress.com/_c3yudse3");
+  assert.strictEqual(chamadas[1].method, "aliexpress.affiliate.productdetail.get");
+  assert.strictEqual(chamadas[1].params.product_ids, id);
+}
+
+async function testarProductSmallImageUrlsComoSecundaria() {
+  const id = "1005011559438000";
+  resetar([
+    respostaDetalhe(produtoAli(id, {
+      product_main_image_url: "",
+      product_small_image_urls: {
+        string: [
+          "//ae01.alicdn.com/secundaria-principal.jpg",
+          "//ae01.alicdn.com/secundaria-dois.jpg"
+        ]
+      }
+    })),
+    respostaLink("https://s.click.aliexpress.com/e/_SHORTSEC")
+  ]);
+
+  const produto = await importarAliExpress(`https://www.aliexpress.com/item/${id}.html`, config());
+
+  assert.strictEqual(produto.imagem, "https://ae01.alicdn.com/secundaria-principal.jpg");
+  assert.strictEqual(chamadas[0].params.product_ids, id);
+}
+
+async function testarRedirectExternoInseguroRejeitado() {
+  resetar([
+    respostaRedirectLocation("https://example.com/item/1005011559438577.html")
+  ]);
+
+  const produto = await importarAliExpress("https://a.aliexpress.com/_externo", config());
+
+  assert.strictEqual(produto.titulo, "Produto AliExpress");
+  assert.strictEqual(produto.imagem, "");
+  assert.strictEqual(produto.motivoErroAliExpress, "redirect_destino_inseguro");
+  assert.strictEqual(chamadas.length, 1);
+}
+
+async function testarTimeoutMantemOfertaTextual() {
+  const erro = new Error("tempo esgotado");
+  erro.name = "AbortError";
+  resetar([
+    { throw: erro }
+  ]);
+
+  const produto = await importarAliExpress("https://a.aliexpress.com/_timeout", config());
+
+  assert.strictEqual(produto.titulo, "Produto AliExpress");
+  assert.strictEqual(produto.imagem, "");
+  assert.strictEqual(produto.motivoErroAliExpress, "timeout_expansao_shortlink");
+  assert.strictEqual(chamadas.length, 1);
+}
+
+async function testarExpansaoRejeitaHostPrivado() {
+  const resultado = await expandirShortlinkAliExpressSeguro("https://a.aliexpress.com/_privado", {
+    fetch: async () => ({
+      status: 302,
+      url: "https://a.aliexpress.com/_privado",
+      headers: {
+        get: () => "http://127.0.0.1/item/1005011559438577.html"
+      }
+    })
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "redirect_destino_inseguro");
 }
 
 function testarExtracaoId() {
@@ -292,6 +433,11 @@ async function testarClienteSemIntegracaoNaoContaminaOutroCliente() {
   await testarDetalheFuncionando();
   await testarFallbackQueryComMesmoProductId();
   await testarQueryRejeitaProdutoDiferente();
+  await testarShortlinkExpandeExtraiProductIdEImagemChegaOfertaUniversal();
+  await testarProductSmallImageUrlsComoSecundaria();
+  await testarRedirectExternoInseguroRejeitado();
+  await testarTimeoutMantemOfertaTextual();
+  await testarExpansaoRejeitaHostPrivado();
   testarExtracaoId();
   await testarRadarUsaImportadorModularComCredenciaisDoCliente();
   await testarClienteSemIntegracaoNaoContaminaOutroCliente();
