@@ -201,30 +201,114 @@ function renderizarAliExpress({
   return { espelho, resultado, mensagem: resultado.mensagem };
 }
 
+function renderizarAmazon({
+  textoOriginal = "",
+  titulo = "Produto Amazon",
+  preco = 100,
+  categoria = "Eletronicos",
+  linkAfiliado = "https://amzn.to/oferta-amazon",
+  oferta = {},
+  ofertaEntrada = {},
+  template = {}
+} = {}) {
+  const espelho = criarEspelho({
+    textoOriginal,
+    oferta: {
+      titulo,
+      marketplace: "amazon",
+      categoria,
+      preco,
+      linkAfiliado,
+      ...oferta
+    },
+    ofertaEntrada,
+    comercialNormalizado: { marketplace: "amazon", precoAtual: preco, categoria, precoConfiavel: true }
+  });
+  const resultado = montarTemplateEspelhoPorBlocosV26(
+    espelho.espelhoComercial,
+    espelho.documentoComercialCanonico,
+    { template }
+  );
+  return { espelho, resultado, mensagem: resultado.mensagem };
+}
+
 assertPoliticaOficial();
 
 const recorder = criarSnapshotRecorder();
 
-const amazonMensagem = mensagemPadrao({
-  titulo: "Echo Dot 5a geracao",
-  marketplace: "amazon",
-  categoria: "Eletronicos",
-  precoAtual: 279,
-  precoOriginal: 299,
-  precoPix: "R$ 2,00 No Pix",
-  cupom: "HEYCUPOMRESGATE",
-  beneficioTexto: "R$20 OFF",
-  linkAfiliado: "https://amzn.to/echo-afiliado"
+const amazonCaso1 = renderizarAmazon({
+  textoOriginal: [
+    "Amazon / Amazon",
+    "Por: R$ 739,99 No Pix",
+    "Pix: R$ 2,00 No Pix",
+    "10x de R$ 94,17 sem juros",
+    "Cupons: HEYCUPOM ou HEYCUPOMRESGATE",
+    "Resgate no anuncio",
+    "R$20 OFF no cupom/pagina"
+  ].join("\n"),
+  titulo: "Amazon / Amazon",
+  preco: 739.99,
+  linkAfiliado: "https://amzn.to/amazon-caso1"
 });
-recorder.check("amazon_template_padrao", "preserva titulo, preco e link capturados", emOrdem(amazonMensagem, [
-  "Echo Dot 5a geracao",
-  "Por:",
-  "HEYCUPOMRESGATE",
-  "https://amzn.to/echo-afiliado"
+const amazonMensagem = amazonCaso1.mensagem;
+recorder.check("amazon_template_padrao", "preserva ordem oficial Amazon no OFC", emOrdem(amazonMensagem, [
+  "Amazon / Amazon",
+  "Amazon",
+  "Eletronicos",
+  "Por: R$ 739,99 No Pix",
+  "10x de R$ 94,17 sem juros",
+  "Cupom: HEYCUPOM",
+  "resgate no anuncio",
+  "R$20 OFF no cupom/pagina",
+  "https://amzn.to/amazon-caso1",
+  "Oferta sujeita"
 ]), amazonMensagem);
-recorder.check("amazon_template_padrao", "nao renderiza preco Pix ambiguo R$ 2,00 como preco", !contem(amazonMensagem, "R$ 2,00 No Pix"), amazonMensagem);
-recorder.check("amazon_template_padrao", "nao inventa frase generica para HEYCUPOMRESGATE", !contem(amazonMensagem, "Aplique o cupom HEYCUPOMRESGATE"), amazonMensagem);
-recorder.check("amazon_template_padrao", "preserva beneficio capturado R$20 OFF sem duplicar resgate", contem(amazonMensagem, "R$20 OFF"), amazonMensagem);
+recorder.check("amazon_template_padrao", "falso Pix R$2,00 nao renderiza e preco no Pix nao duplica bloco Pix", !contem(amazonMensagem, "Pix: R$ 2,00") && ocorrencias(amazonMensagem, "No Pix") === 1, amazonMensagem);
+recorder.check("amazon_template_padrao", "HEYCUPOMRESGATE nao vira codigo publico e HEYCUPOM permanece codigo", contem(amazonMensagem, "Cupom: HEYCUPOM") && !contem(amazonMensagem, "Cupons: HEYCUPOM ou HEYCUPOMRESGATE"), amazonMensagem);
+recorder.check("amazon_template_padrao", "resgate aparece uma vez e beneficio real permanece separado", ocorrencias(amazonMensagem, "resgate no anuncio") === 1 && contem(amazonMensagem, "R$20 OFF no cupom/pagina"), amazonMensagem);
+recorder.check("amazon_template_padrao", "aviso editorial aparece uma vez e marcado no documento", ocorrencias(amazonMensagem, "Oferta sujeita") === 1 && amazonCaso1.espelho.documentoComercialCanonico.blocos.some(bloco => bloco.tipo === "aviso" && bloco.origem === "editorial_sistema"), JSON.stringify(amazonCaso1.espelho.documentoComercialCanonico.blocos));
+
+const amazonCaso2 = renderizarAmazon({
+  textoOriginal: [
+    "Monitor Gamer Philips",
+    "Por: R$ 539,00",
+    "12x de R$ 58,36 sem juros",
+    "Resgate o cupom no anuncio",
+    "R$20 OFF no cupom/pagina"
+  ].join("\n"),
+  titulo: "Monitor Gamer Philips",
+  preco: 539,
+  linkAfiliado: "https://amzn.to/monitor-philips"
+});
+recorder.check("amazon_resgate_sem_codigo", "somente resgate nao cria bloco Cupom e nao duplica frase", !contem(amazonCaso2.mensagem, "Cupom:") && ocorrencias(amazonCaso2.mensagem, "Resgate o cupom no anuncio") === 1, amazonCaso2.mensagem);
+recorder.check("amazon_resgate_sem_codigo", "parcelamento e beneficio real permanecem separados", contem(amazonCaso2.mensagem, "12x de R$ 58,36 sem juros") && contem(amazonCaso2.mensagem, "R$20 OFF no cupom/pagina"), amazonCaso2.mensagem);
+
+const amazonCaso3 = renderizarAmazon({
+  textoOriginal: [
+    "Produto Amazon coerente",
+    "Por: R$ 199,00",
+    "Cupom: HEYCUPOM",
+    "Use cupom: HEYCUPOM ou resgate no anuncio",
+    "R$20 OFF no cupom/pagina"
+  ].join("\n"),
+  titulo: "Produto Amazon coerente",
+  preco: 199,
+  linkAfiliado: "https://amzn.to/produto-coerente"
+});
+recorder.check("amazon_cupom_resgate_coerente", "preserva combinacao capturada de cupom real e resgate", contem(amazonCaso3.mensagem, "Cupom: HEYCUPOM") && contem(amazonCaso3.mensagem, "Use cupom: HEYCUPOM ou resgate no anuncio") && contem(amazonCaso3.mensagem, "R$20 OFF no cupom/pagina"), amazonCaso3.mensagem);
+
+const amazonFretePrime = renderizarAmazon({
+  textoOriginal: [
+    "Produto Amazon Prime",
+    "Por: R$ 89,90",
+    "Frete gratis",
+    "Prime"
+  ].join("\n"),
+  titulo: "Produto Amazon Prime",
+  preco: 89.9,
+  linkAfiliado: "https://amzn.to/prime-frete"
+});
+recorder.check("amazon_frete_prime", "frete e Prime capturados permanecem", contem(amazonFretePrime.mensagem, "Frete gratis") && contem(amazonFretePrime.mensagem, "Prime") && contem(amazonFretePrime.mensagem, "https://amzn.to/prime-frete"), amazonFretePrime.mensagem);
 
 const mlMensagem = mensagemPadrao({
   titulo: "Kit Mercado Livre com multiplos cupons",
@@ -540,7 +624,6 @@ for (const item of resumo) {
 
 const falhas = recorder.falhas();
 const falhasEsperadasFase2 = new Map([
-  ["amazon_template_padrao", "Amazon ainda inventa frase generica e oculta beneficio capturado"],
   ["mercadolivre_template_padrao", "Mercado Livre ainda substitui multiplos codigos por frase generica"],
   ["kabum_awin_template_padrao", "KaBuM/AWIN ainda nao preserva frete textual no template padrao"],
   ["template_personalizado_protegidos", "Renderer legado de template personalizado ainda permite ocultar protegidos"],
@@ -561,5 +644,5 @@ if (falhasInesperadas.length || falhasEsperadasAusentes.length) {
   for (const [nome, motivo] of falhasEsperadasFase2) {
     console.log(`[SNAPSHOT-COMERCIAL-F1] DIVERGENCIA-ESPERADA ${nome}: ${motivo}`);
   }
-  console.log("[SNAPSHOT-COMERCIAL-F1] AliExpress homologado; divergencias fora de AliExpress preservadas como esperadas");
+  console.log("[SNAPSHOT-COMERCIAL-F1] Amazon e AliExpress homologados; divergencias restantes preservadas como esperadas");
 }

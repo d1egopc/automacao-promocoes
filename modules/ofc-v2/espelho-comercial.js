@@ -32,6 +32,10 @@ function marketplaceAliExpress(valor = "") {
   return normalizarComparacao(valor).replace(/[^a-z0-9]+/g, "") === "aliexpress";
 }
 
+function marketplaceAmazon(valor = "") {
+  return normalizarComparacao(valor).replace(/[^a-z0-9]+/g, "") === "amazon";
+}
+
 function chaveCupom(valor = "") {
   return normalizarComparacao(valor).replace(/[^a-z0-9_-]+/g, "").toUpperCase();
 }
@@ -240,7 +244,8 @@ function extrairPrecoPixProprio(valor = "") {
   return extrairPrecoComercialLimpo(semPrefixo);
 }
 
-function extrairPrecoPixDocumento({ textoOriginal = "", linhaPor = "", linhaValor = "", precoPorTexto = "", oferta = {}, ofertaEntrada = {} } = {}) {
+function extrairPrecoPixDocumento({ textoOriginal = "", linhaPor = "", linhaValor = "", precoPorTexto = "", oferta = {}, ofertaEntrada = {}, marketplace = "" } = {}) {
+  if (marketplaceAmazon(marketplace) && /\bpix\b/i.test(precoPorTexto)) return "";
   const linhas = linhasTexto(textoOriginal);
   const linhaPixPropria = linhas.find(linha => {
     if (!parecePrecoPixProprio(linha)) return false;
@@ -258,6 +263,11 @@ function extrairPrecoPixDocumento({ textoOriginal = "", linhaPor = "", linhaValo
   ];
   for (const candidato of candidatos) {
     const precoPix = extrairPrecoPixProprio(candidato);
+    if (marketplaceAmazon(marketplace)) {
+      const valorPix = numeroMonetario(precoPix);
+      const valorOferta = numeroMonetario(precoPorTexto);
+      if (valorPix !== null && valorOferta !== null && valorPix < valorOferta * 0.5) continue;
+    }
     if (precoPix && !textoComercialEquivalente(precoPix, precoPorTexto)) return precoPix;
   }
   return "";
@@ -281,6 +291,12 @@ function tokenMoedasComoCupom(valor = "") {
   return /^\d{1,6}(?:MOEDA|MOEDAS|COIN|COINS)(?:NO)?(?:APP|APLICATIVO)?$/.test(chave);
 }
 
+function tokenResgateComoCupom(valor = "") {
+  const chave = chaveCupom(valor);
+  if (!chave) return false;
+  return chave === "HEYCUPOMRESGATE" || /CUPOMRESGATE$/.test(chave);
+}
+
 function cupomPlausivel(valor = "") {
   const bruto = texto(valor);
   const chave = chaveCupom(bruto);
@@ -288,6 +304,7 @@ function cupomPlausivel(valor = "") {
   if (!chave || chave.length < 3 || chave.length > 32) return false;
   if (CUPONS_BLOQUEADOS.has(chave)) return false;
   if (tokenMoedasComoCupom(bruto)) return false;
+  if (tokenResgateComoCupom(bruto)) return false;
   if (!/[A-Z]/.test(chave)) return false;
   if (/^\d+$/.test(chave)) return false;
   return true;
@@ -316,6 +333,8 @@ function extrairCupomTexto(textoOriginal = "", oferta = {}, ofertaEntrada = {}) 
   const candidatos = [];
   const linhas = linhasTexto(textoOriginal);
   for (const linha of linhas) {
+    const marcadorPlural = linha.match(/\bcupons\b\s*:?\s*([A-Z0-9][A-Z0-9_-]*(?:\s*(?:ou|e|[,;/|])\s*[A-Z0-9][A-Z0-9_-]*)*)/i);
+    if (marcadorPlural) candidatos.push(...separarCupons(marcadorPlural[1]));
     const marcador = linha.match(/\b(?:cupom|c[oÃƒÂ³]digo|cod\.?|use\s+o\s+cupom|utilize\s+o\s+cupom)\b\s*:?\s*([A-Z0-9][A-Z0-9_-]*(?:\s*(?:ou|e|[,;/|])\s*[A-Z0-9][A-Z0-9_-]*)*)/i);
     if (!marcador) continue;
     candidatos.push(...separarCupons(marcador[1]));
@@ -362,8 +381,24 @@ function instrucaoCupomConfiavel(instrucao = "", cupons = [], doc = {}) {
   return valor;
 }
 
+function montarInstrucaoAmazonCanonica(instrucao = "", cupons = []) {
+  const valor = limparTextoComercial(instrucao);
+  if (!valor) return "";
+  if (!cupons.length) return valor;
+  const n = normalizarComparacao(valor);
+  const cupom = texto(cupons[0]);
+  if (cupons.length === 1 && /\bresgat/.test(n) && /\b(?:anuncio|pagina)\b/.test(n) && !n.includes(normalizarComparacao(cupom))) {
+    return `Use o cupom ${cupom} ou ${valor.charAt(0).toLowerCase()}${valor.slice(1)}.`;
+  }
+  return valor;
+}
+
 function montarInstrucaoCupomCanonica(doc = {}, cupons = []) {
   const explicita = instrucaoCupomConfiavel(doc.instrucaoTexto, cupons, doc);
+  if (marketplaceAmazon(doc.marketplace)) {
+    const amazon = montarInstrucaoAmazonCanonica(explicita, cupons);
+    if (amazon) return amazon;
+  }
   if (explicita) return explicita;
   if (marketplaceAliExpress(doc.marketplace)) {
     if (cupons.length) return "Aplique um dos cupons acima para obter este preço.";
@@ -422,6 +457,7 @@ function extrairInstrucaoComercial(textoOriginal = "", cupomCodigo = "", oferta 
   const linha = linhas.find(item => {
     if (/https?:\/\//i.test(item)) return false;
     const n = normalizarComparacao(item);
+    if (/^(?:cupom|cupons|codigo|cod)\b/.test(n)) return false;
     if (!/(aplique|resgate|use|utilize|selecione|ative|pegue|copie|garanta)/.test(n)) return false;
     if (!/(cupom|cupons|voucher|moeda|moedas|pix|app|carrinho|desconto|valor|anuncio)/.test(n)) return false;
     return true;
@@ -482,6 +518,8 @@ function extrairParcelamentoTextoLinha(linha = "") {
 
 function extrairBeneficioTexto(textoOriginal = "", oferta = {}, ofertaEntrada = {}) {
   const linhas = linhasTexto(textoOriginal);
+  const linhaOffReal = linhas.find(linha => /\boff\b/i.test(linha) && /(?:R\$|US\$|USD|U\$|\$|\d+\s*%)/i.test(linha) && /\b(?:cupom|pagina|desconto|beneficio)\b/i.test(normalizarComparacao(linha)));
+  if (linhaOffReal) return removerUrls(linhaOffReal).replace(/\s+/g, " ").trim();
   const linhaOff = linhas.find(linha => /\boff\b/i.test(linha) && /\b(?:cupom|pagina|p[aá]gina|desconto|beneficio|benef[ií]cio)\b/i.test(linha));
   if (linhaOff) {
     const match = linhaOff.match(/(?:R\$|US\$|USD|U\$|\$)?\s*[\d.]+(?:[,.][\d]{1,2})?\s*off\b[^|\n]*(?:cupom|p[aá]gina|desconto|benef[ií]cio)?[^|\n]*/i);
@@ -867,7 +905,7 @@ function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
   const cupomSemCodigoNoAnuncio = !marketplaceMercadoLivre(doc.marketplace)
     && /\b(?:resgate|ative|aplique|selecione).{0,40}\b(?:cupom|voucher)\b/i.test(fonteCupomSemCodigo)
     && /\b(?:anuncio|pagina|p[aá]gina|produto)\b/i.test(fonteCupomSemCodigo);
-  if (!cupons.length && (linkResgateEssencial(doc, {}) || cupomSemCodigoNoAnuncio)) {
+  if (!cupons.length && !marketplaceAmazon(doc.marketplace) && (linkResgateEssencial(doc, {}) || cupomSemCodigoNoAnuncio)) {
     adicionarBlocoComercial(blocos, { tipo: "cupom_sem_codigo", textoOriginal: primeiroTexto(doc.instrucaoTexto, doc.beneficioTexto, doc.resgateTexto), origem: "documento.instrucao_cupom", confianca: "media", essencial: cupomNecessarioParaPreco(doc), requisitos: ["resgate_no_anuncio"] });
   }
   adicionarBlocoComercial(blocos, { tipo: "instrucao_cupom", textoOriginal: instrucaoCupomCanonica, origem: doc.instrucaoTexto ? "documento.instrucaoTexto" : "documento.instrucao_cupom_segura", confianca: doc.instrucaoTexto ? "alta" : "media", essencial: cupomNecessarioParaPreco(doc), requisitos: cupomEssencial ? ["cupom"] : [] });
@@ -896,7 +934,7 @@ function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
   if (/\bmais\s+vendido|best\s*seller\b/i.test(contexto.textoOriginal || "")) adicionarBlocoComercial(blocos, { tipo: "selo_mais_vendido", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bmais\s+vendido|best seller\b/) || "Mais vendido", origem: "texto_comercial_original", confianca: "media" });
 
   adicionarBlocosDeLinks(blocos, doc, contexto);
-  if (marketplaceAliExpress(doc.marketplace) && !lista(doc.avisos).some(avisoEditorialAliExpressEquivalente)) {
+  if ((marketplaceAliExpress(doc.marketplace) || marketplaceAmazon(doc.marketplace)) && !lista(doc.avisos).some(avisoEditorialAliExpressEquivalente)) {
     adicionarBlocoComercial(blocos, {
       tipo: "aviso",
       textoOriginal: AVISO_EDITORIAL_ALIEXPRESS,
@@ -1022,7 +1060,7 @@ function extrairDocumentoComercialCanonico({
     comercialNormalizado.precoAtual
   ));
   const precoPorTexto = extrairTextoLinhaPreco(linhaPor, "por") || extrairTextoLinhaPreco(linhaValor, "valor") || precosTexto.precoPorTexto || precoPorEstruturado || "";
-  const precoPixTexto = extrairPrecoPixDocumento({ textoOriginal, linhaPor, linhaValor, precoPorTexto, oferta, ofertaEntrada });
+  const precoPixTexto = extrairPrecoPixDocumento({ textoOriginal, linhaPor, linhaValor, precoPorTexto, oferta, ofertaEntrada, marketplace });
   const parcelamentoTexto = primeiroTexto(
     ofertaEntrada.parcelamento,
     oferta.parcelamento,
