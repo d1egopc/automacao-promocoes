@@ -211,6 +211,297 @@ function obterEspacoVolume(dataDir = DEFAULT_DATA_DIR) {
   }
 }
 
+function criarErroStorage(codigo, statusCode = 400) {
+  const erro = new Error(codigo);
+  erro.codigo = codigo;
+  erro.statusCode = statusCode;
+  return erro;
+}
+
+function resolverArquivoFilaBak(dataDir, caminhoEntrada = "") {
+  const base = path.resolve(dataDir || DEFAULT_DATA_DIR);
+  const bruto = String(caminhoEntrada || "").trim();
+  if (!bruto) throw criarErroStorage("arquivo_obrigatorio");
+
+  const semData = bruto.replace(/^\/data[\\/]/i, "");
+  const absoluto = path.resolve(base, semData);
+  const rel = path.relative(base, absoluto).replace(/\\/g, "/");
+
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw criarErroStorage("arquivo_fora_data");
+  }
+  if (!/^clientes\/[A-Za-z0-9_-]+\/fila\.json\.bak$/.test(rel)) {
+    throw criarErroStorage("arquivo_nao_autorizado");
+  }
+  if (SENSIVEL_RE.test(rel.replace(/^clientes\/[^/]+\//, ""))) {
+    throw criarErroStorage("arquivo_sensivel_bloqueado");
+  }
+
+  return {
+    absoluto,
+    principal: absoluto.replace(/\.bak$/i, ""),
+    rel,
+    caminho: `/data/${rel.split("/").map(sanitizarSegmento).join("/")}`
+  };
+}
+
+function lerJsonArquivoValido(caminho) {
+  try {
+    JSON.parse(fs.readFileSync(caminho, "utf8"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function arquivoEstavel(caminho, fsImpl = fs, delayMs = 50) {
+  const antes = fsImpl.statSync(caminho);
+  await new Promise(resolve => setTimeout(resolve, delayMs));
+  const depois = fsImpl.statSync(caminho);
+  return Number(antes.size || 0) === Number(depois.size || 0) &&
+    Number(antes.mtimeMs || 0) === Number(depois.mtimeMs || 0);
+}
+
+async function validarFilaBakParaRemocao(dataDir, caminhoEntrada, opcoes = {}) {
+  const fsImpl = opcoes.fs || fs;
+  const arquivo = resolverArquivoFilaBak(dataDir, caminhoEntrada);
+  const resultado = {
+    arquivo: arquivo.caminho,
+    caminho: arquivo.caminho,
+    tipo: "fila_json_bak",
+    elegivel: false,
+    motivo: "",
+    tamanhoBytes: 0,
+    tamanho: bytesLegiveis(0),
+    principal: sanitizarCaminho(path.resolve(dataDir || DEFAULT_DATA_DIR), arquivo.principal),
+    principalExiste: false,
+    principalValido: false,
+    backupMaisAntigoOuIgual: false,
+    arquivoEstavel: false
+  };
+
+  let backupStat;
+  let principalStat;
+  try {
+    backupStat = fsImpl.lstatSync(arquivo.absoluto);
+  } catch {
+    return { ...resultado, motivo: "backup_ausente" };
+  }
+
+  if (!backupStat.isFile() || backupStat.isSymbolicLink()) {
+    return { ...resultado, motivo: "backup_nao_e_arquivo_regular" };
+  }
+
+  resultado.tamanhoBytes = Number(backupStat.size || 0);
+  resultado.tamanho = bytesLegiveis(resultado.tamanhoBytes);
+  resultado.modificadoEm = backupStat.mtimeMs ? new Date(backupStat.mtimeMs).toISOString() : null;
+
+  try {
+    principalStat = fsImpl.lstatSync(arquivo.principal);
+  } catch {
+    return { ...resultado, motivo: "principal_ausente" };
+  }
+
+  resultado.principalExiste = true;
+  if (!principalStat.isFile() || principalStat.isSymbolicLink()) {
+    return { ...resultado, motivo: "principal_nao_e_arquivo_regular" };
+  }
+
+  resultado.principalValido = lerJsonArquivoValido(arquivo.principal);
+  if (!resultado.principalValido) {
+    return { ...resultado, motivo: "principal_json_invalido" };
+  }
+
+  resultado.backupMaisAntigoOuIgual = Number(backupStat.mtimeMs || 0) <= Number(principalStat.mtimeMs || 0);
+  if (!resultado.backupMaisAntigoOuIgual) {
+    return { ...resultado, motivo: "backup_mais_novo_que_principal" };
+  }
+
+  try {
+    resultado.arquivoEstavel = await arquivoEstavel(arquivo.absoluto, fsImpl, opcoes.estabilidadeDelayMs || 50);
+  } catch {
+    return { ...resultado, motivo: "backup_indisponivel_na_revalidacao" };
+  }
+
+  if (!resultado.arquivoEstavel) {
+    return { ...resultado, motivo: "backup_em_uso_ou_em_escrita" };
+  }
+
+  return { ...resultado, elegivel: true, motivo: "backup_validado_para_remocao", _absoluto: arquivo.absoluto, _principal: arquivo.principal };
+}
+
+async function executarLimpezaFilaBakControlada(opcoes = {}) {
+  const dataDir = path.resolve(opcoes.dataDir || DEFAULT_DATA_DIR);
+  const arquivosEntrada = Array.isArray(opcoes.arquivos) ? opcoes.arquivos : [];
+  const fsImpl = opcoes.fs || fs;
+  const limite = Math.max(1, Math.min(100, Number(opcoes.limite || arquivosEntrada.length || 1)));
+  const arquivos = arquivosEntrada.slice(0, limite);
+  const dryRun = Boolean(opcoes.dryRun);
+  const logger = opcoes.logger || null;
+  const inicio = Date.now();
+  const removidos = [];
+  const simulados = [];
+  const protegidos = [];
+  const erros = [];
+  const logsOperacionais = [];
+  let bytesLiberados = 0;
+  let bytesLiberaveisDryRun = 0;
+  let espacoAtual = obterEspacoVolume(dataDir);
+
+  function registrarLog(evento) {
+    const log = {
+      ts: new Date().toISOString(),
+      escopo: "limpeza_fila_json_bak",
+      dryRun,
+      ...evento
+    };
+    logsOperacionais.push(log);
+    if (logger && typeof logger.info === "function") {
+      logger.info("[storage-cleanup]", log);
+    }
+  }
+
+  registrarLog({
+    evento: "inicio",
+    totalSolicitado: arquivosEntrada.length,
+    totalProcessado: arquivos.length
+  });
+
+  for (let indice = 0; indice < arquivos.length; indice += 1) {
+    const entrada = arquivos[indice];
+    let validacao;
+    try {
+      validacao = await validarFilaBakParaRemocao(dataDir, entrada, { fs: fsImpl, estabilidadeDelayMs: opcoes.estabilidadeDelayMs });
+      if (!validacao.elegivel) {
+        const protegido = {
+          arquivo: validacao.arquivo,
+          tipo: "fila_json_bak",
+          tamanhoBytes: validacao.tamanhoBytes,
+          tamanho: validacao.tamanho,
+          motivo: validacao.motivo,
+          removido: false,
+          espacoDepois: espacoAtual
+        };
+        protegidos.push(protegido);
+        registrarLog({
+          evento: "protegido",
+          indice,
+          arquivo: protegido.arquivo,
+          tamanhoBytes: protegido.tamanhoBytes,
+          motivo: protegido.motivo
+        });
+        continue;
+      }
+
+      if (dryRun) {
+        const simulado = {
+          arquivo: validacao.arquivo,
+          tipo: "fila_json_bak",
+          tamanhoBytes: validacao.tamanhoBytes,
+          tamanho: validacao.tamanho,
+          removido: false,
+          dryRun: true,
+          motivo: "dry_run_backup_validado",
+          principalIntegroDepois: true,
+          espacoDepois: espacoAtual
+        };
+        simulados.push(simulado);
+        bytesLiberaveisDryRun += Number(validacao.tamanhoBytes || 0);
+        registrarLog({
+          evento: "dry_run_validado",
+          indice,
+          arquivo: simulado.arquivo,
+          tamanhoBytes: simulado.tamanhoBytes,
+          motivo: simulado.motivo
+        });
+        continue;
+      }
+
+      fsImpl.unlinkSync(validacao._absoluto);
+      const principalIntegroDepois = lerJsonArquivoValido(validacao._principal);
+      espacoAtual = obterEspacoVolume(dataDir);
+      const item = {
+        arquivo: validacao.arquivo,
+        tipo: "fila_json_bak",
+        tamanhoBytes: validacao.tamanhoBytes,
+        tamanho: validacao.tamanho,
+        removido: true,
+        motivo: "removido_backup_validado",
+        principalIntegroDepois,
+        espacoDepois: espacoAtual
+      };
+      if (!principalIntegroDepois) {
+        item.alerta = "principal_invalido_apos_remocao";
+      }
+      removidos.push(item);
+      bytesLiberados += Number(validacao.tamanhoBytes || 0);
+      registrarLog({
+        evento: "removido",
+        indice,
+        arquivo: item.arquivo,
+        tamanhoBytes: item.tamanhoBytes,
+        principalIntegroDepois
+      });
+    } catch (erro) {
+      const itemErro = {
+        indice,
+        arquivo: "[entrada_rejeitada]",
+        tipo: "fila_json_bak",
+        removido: false,
+        motivo: erro.codigo || erro.message || "erro_remocao",
+        espacoDepois: espacoAtual
+      };
+      erros.push(itemErro);
+      registrarLog({
+        evento: "erro",
+        indice,
+        arquivo: itemErro.arquivo,
+        motivo: itemErro.motivo
+      });
+    }
+  }
+
+  registrarLog({
+    evento: "fim",
+    removidos: removidos.length,
+    simulados: simulados.length,
+    protegidos: protegidos.length,
+    erros: erros.length,
+    bytesLiberados,
+    bytesLiberaveisDryRun
+  });
+
+  return {
+    ok: true,
+    modo: dryRun ? "dry_run_controlado" : "execute_controlado",
+    dryRun,
+    aplicouMudancas: !dryRun && removidos.length > 0,
+    duracaoMs: Date.now() - inicio,
+    totalSolicitado: arquivosEntrada.length,
+    totalProcessado: arquivos.length,
+    removidos,
+    simulados,
+    protegidos,
+    erros,
+    logsOperacionais,
+    bytesLiberados,
+    espacoLiberado: bytesLegiveis(bytesLiberados),
+    bytesLiberaveisDryRun,
+    espacoLiberavelDryRun: bytesLegiveis(bytesLiberaveisDryRun),
+    espacoFinal: espacoAtual,
+    seguranca: {
+      somenteFilaJsonBak: true,
+      naoRemoveFilaPrincipal: true,
+      naoTocaAuthSessao: true,
+      naoTocaConfigCredencialDestinoIntegracao: true,
+      naoTocaSocialMidia: true,
+      naoTocaResetEsteiras: true,
+      revalidouAntesDeCadaRemocao: true,
+      removeuUmArquivoPorVez: true
+    }
+  };
+}
+
 function criarResumoArquivo(dataDir, arquivo) {
   return {
     caminho: sanitizarCaminho(dataDir, arquivo.caminho),
@@ -957,6 +1248,8 @@ module.exports = {
   bytesLegiveis,
   sanitizarCaminho,
   obterEspacoVolume,
+  validarFilaBakParaRemocao,
+  executarLimpezaFilaBakControlada,
   inventariarVolume,
   resumirFilas,
   encodeCursor,

@@ -9,6 +9,7 @@ const DEFAULT_TIMEOUT_MS = 8000;
 const MAX_TIMEOUT_MS = 30000;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
+const CONFIRMACAO_LIMPEZA_FILA_BAK = "REMOVER_FILA_JSON_BAK_VALIDADO";
 let auditoriaEmExecucao = false;
 const escoposEmExecucao = new Set();
 let ultimaAuditoria = null;
@@ -52,6 +53,7 @@ function criarRotasStorageManager(deps = {}) {
     ? deps.isAdminMaster
     : (req) => req.usuario?.papel === "admin_master";
   const dataDir = deps.dataDir || process.env.DATA_DIR || "/data";
+  const logger = deps.logger || console;
   const timeoutPadraoMs = limitarNumero(deps.timeoutMs || process.env.OSM_AUDITORIA_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, 1000, MAX_TIMEOUT_MS);
 
   function exigirAdminMaster(req, res) {
@@ -143,7 +145,8 @@ function criarRotasStorageManager(deps = {}) {
         "GET /admin/storage/workspaces/:workspaceId",
         "GET /admin/storage/filas",
         "GET /admin/storage/categoria/:categoria"
-      ]
+      ],
+      rotaExecucaoControlada: "POST /admin/storage/limpeza-emergencial/fila-bak"
     });
   });
 
@@ -167,6 +170,32 @@ function criarRotasStorageManager(deps = {}) {
   router.get("/categoria/:categoria", (req, res) => {
     const categoria = String(req.params.categoria || "");
     return executarEscopo(req, res, `categoria:${categoria}`, () => storageService.diagnosticarCategoria(categoria, opcoesConsulta(req)));
+  });
+
+  router.post("/limpeza-emergencial/fila-bak", (req, res) => {
+    if (!exigirAdminMaster(req, res)) return;
+
+    const confirmacao = String(req.body?.confirmacao || "").trim();
+    if (confirmacao !== CONFIRMACAO_LIMPEZA_FILA_BAK) {
+      return res.status(400).json({
+        ok: false,
+        erro: "confirmacao_limpeza_invalida",
+        confirmacaoEsperada: CONFIRMACAO_LIMPEZA_FILA_BAK
+      });
+    }
+
+    const arquivos = Array.isArray(req.body?.arquivos) ? req.body.arquivos : [];
+    if (!arquivos.length) {
+      return res.status(400).json({ ok: false, erro: "arquivos_obrigatorios" });
+    }
+
+    return executarEscopo(req, res, "limpeza:fila-bak", () => storageService.executarLimpezaEmergencialFilaBak({
+      dataDir,
+      arquivos,
+      limite: arquivos.length,
+      dryRun: Boolean(req.body?.dryRun),
+      logger
+    }));
   });
 
   router.get("/politicas-retencao", (req, res) => {

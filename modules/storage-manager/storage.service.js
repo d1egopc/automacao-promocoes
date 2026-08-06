@@ -236,6 +236,10 @@ async function diagnosticarCategoria(categoria, opcoes = {}) {
   return repository.auditarCategoriaIncremental(categoria, opcoes);
 }
 
+async function executarLimpezaEmergencialFilaBak(opcoes = {}) {
+  return repository.executarLimpezaFilaBakControlada(opcoes);
+}
+
 module.exports = {
   gerarDiagnosticoStorage,
   diagnosticarDiretorios,
@@ -243,6 +247,7 @@ module.exports = {
   diagnosticarWorkspace,
   diagnosticarFilas,
   diagnosticarCategoria,
+  executarLimpezaEmergencialFilaBak,
   classificarCategoria,
   calcularStorageHealth,
   estimarPotencialRecuperavel

@@ -11,6 +11,7 @@ const criarRotasStorageManager = require("../modules/storage-manager/storage.rou
 const { CLASSIFICACAO_STORAGE } = require("../modules/storage-manager/storage.types");
 
 const tmpRoot = path.join(os.tmpdir(), `osm-test-${Date.now()}`);
+const CONFIRMACAO_LIMPEZA_FILA_BAK = "REMOVER_FILA_JSON_BAK_VALIDADO";
 
 function mkdirp(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -87,9 +88,53 @@ function criarAppRotas(dataDir) {
   app.use("/admin/storage", criarRotasStorageManager({
     dataDir,
     timeoutMs: 10000,
+    logger: { info() {} },
     isAdminMaster: (req) => req.usuario?.papel === "admin_master"
   }));
   return app;
+}
+
+function tocarArquivo(file, iso) {
+  const data = new Date(iso);
+  fs.utimesSync(file, data, data);
+}
+
+function criarDataDirLimpeza() {
+  const dataDir = path.join(tmpRoot, "data-limpeza");
+
+  const principalValido = path.join(dataDir, "clientes", "user_clean", "fila.json");
+  const backupValido = `${principalValido}.bak`;
+  json(principalValido, [{ id: "vivo", status: "pendente" }]);
+  write(backupValido, JSON.stringify([{ id: "antigo", status: "enviado" }]));
+  tocarArquivo(backupValido, "2026-08-01T00:00:00.000Z");
+  tocarArquivo(principalValido, "2026-08-02T00:00:00.000Z");
+
+  const principalBackupNovo = path.join(dataDir, "clientes", "user_newer", "fila.json");
+  const backupNovo = `${principalBackupNovo}.bak`;
+  json(principalBackupNovo, [{ id: "vivo", status: "pendente" }]);
+  write(backupNovo, JSON.stringify([{ id: "rollback_mais_novo" }]));
+  tocarArquivo(principalBackupNovo, "2026-08-01T00:00:00.000Z");
+  tocarArquivo(backupNovo, "2026-08-02T00:00:00.000Z");
+
+  const principalInvalido = path.join(dataDir, "clientes", "user_invalid", "fila.json");
+  const backupPrincipalInvalido = `${principalInvalido}.bak`;
+  write(principalInvalido, "{ json invalido");
+  write(backupPrincipalInvalido, JSON.stringify([{ id: "backup" }]));
+  tocarArquivo(backupPrincipalInvalido, "2026-08-01T00:00:00.000Z");
+  tocarArquivo(principalInvalido, "2026-08-02T00:00:00.000Z");
+
+  write(path.join(dataDir, "baileys-auth", "sessao", "creds.json"), "auth-protegida");
+  write(path.join(dataDir, "social-midia", "arquivo.tmp"), "midia-protegida");
+
+  return {
+    dataDir,
+    principalValido,
+    backupValido,
+    principalBackupNovo,
+    backupNovo,
+    principalInvalido,
+    backupPrincipalInvalido
+  };
 }
 
 function ouvir(app) {
@@ -109,6 +154,77 @@ async function request(server, metodo, caminho, papel, body) {
     body: body ? JSON.stringify(body) : undefined
   });
   return { status: res.status, body: await res.json() };
+}
+
+async function testarLimpezaEmergencialFilaBak() {
+  const limpeza = criarDataDirLimpeza();
+  const conteudoPrincipalAntes = fs.readFileSync(limpeza.principalValido, "utf8");
+  criarRotasStorageManager._resetEstadoParaTeste();
+  const server = await ouvir(criarAppRotas(limpeza.dataDir));
+  try {
+    const comum = await request(server, "POST", "/admin/storage/limpeza-emergencial/fila-bak", "cliente", {
+      confirmacao: CONFIRMACAO_LIMPEZA_FILA_BAK,
+      arquivos: ["/data/clientes/user_clean/fila.json.bak"]
+    });
+    assert.strictEqual(comum.status, 403, "limpeza deve ser restrita a admin_master");
+    assert(fs.existsSync(limpeza.backupValido), "usuario comum nao pode remover backup");
+
+    const semConfirmacao = await request(server, "POST", "/admin/storage/limpeza-emergencial/fila-bak", "admin_master", {
+      arquivos: ["/data/clientes/user_clean/fila.json.bak"]
+    });
+    assert.strictEqual(semConfirmacao.status, 400, "limpeza exige confirmacao explicita");
+    assert(fs.existsSync(limpeza.backupValido), "sem confirmacao nao pode remover backup");
+
+    const dryRun = await request(server, "POST", "/admin/storage/limpeza-emergencial/fila-bak", "admin_master", {
+      confirmacao: CONFIRMACAO_LIMPEZA_FILA_BAK,
+      dryRun: true,
+      arquivos: ["/data/clientes/user_clean/fila.json.bak"]
+    });
+    assert.strictEqual(dryRun.status, 200);
+    assert.strictEqual(dryRun.body.dryRun, true);
+    assert.strictEqual(dryRun.body.aplicouMudancas, false);
+    assert.strictEqual(dryRun.body.simulados.length, 1, "dryRun deve validar sem remover");
+    assert.strictEqual(dryRun.body.removidos.length, 0);
+    assert(dryRun.body.bytesLiberaveisDryRun > 0, "dryRun deve reportar bytes liberaveis");
+    assert(dryRun.body.logsOperacionais.some(log => log.evento === "dry_run_validado"), "dryRun deve registrar log operacional");
+    assert(fs.existsSync(limpeza.backupValido), "dryRun nao pode remover backup");
+
+    const resposta = await request(server, "POST", "/admin/storage/limpeza-emergencial/fila-bak", "admin_master", {
+      confirmacao: CONFIRMACAO_LIMPEZA_FILA_BAK,
+      arquivos: [
+        "/data/clientes/user_clean/fila.json.bak",
+        "/data/clientes/user_clean/fila.json.bak",
+        "/data/clientes/user_newer/fila.json.bak",
+        "/data/clientes/user_invalid/fila.json.bak",
+        "/data/clientes/user_clean/fila.json",
+        "/data/social-midia/fila.json.bak"
+      ]
+    });
+
+    assert.strictEqual(resposta.status, 200);
+    assert.strictEqual(resposta.body.ok, true);
+    assert.strictEqual(resposta.body.modo, "execute_controlado");
+    assert.strictEqual(resposta.body.dryRun, false);
+    assert.strictEqual(resposta.body.removidos.length, 1, "apenas o backup validado deve ser removido");
+    assert.strictEqual(resposta.body.removidos[0].arquivo, "/data/clientes/user_clean/fila.json.bak");
+    assert.strictEqual(resposta.body.removidos[0].principalIntegroDepois, true);
+    assert.strictEqual(fs.existsSync(limpeza.backupValido), false, "backup validado deve ser removido uma unica vez");
+    assert.strictEqual(fs.existsSync(limpeza.principalValido), true, "fila principal nao pode ser removida");
+    assert.strictEqual(fs.readFileSync(limpeza.principalValido, "utf8"), conteudoPrincipalAntes, "fila principal nao pode ser alterada");
+    assert(fs.existsSync(limpeza.backupNovo), "backup mais novo que principal deve ser protegido");
+    assert(fs.existsSync(limpeza.backupPrincipalInvalido), "backup com principal invalido deve ser protegido");
+    assert(resposta.body.protegidos.some(item => item.motivo === "backup_ausente"), "duplicidade deve ser pulada apos primeira remocao");
+    assert(resposta.body.protegidos.some(item => item.motivo === "backup_mais_novo_que_principal"), "backup recente deve ser pulado");
+    assert(resposta.body.protegidos.some(item => item.motivo === "principal_json_invalido"), "principal invalido deve proteger backup");
+    assert(resposta.body.erros.some(item => item.motivo === "arquivo_nao_autorizado"), "caminhos fora de fila.json.bak devem ser rejeitados");
+    assert.strictEqual(fs.existsSync(path.join(limpeza.dataDir, "baileys-auth", "sessao", "creds.json")), true, "auth nao pode ser tocada");
+    assert.strictEqual(fs.existsSync(path.join(limpeza.dataDir, "social-midia", "arquivo.tmp")), true, "social-midia nao pode ser tocada");
+    assert.strictEqual(resposta.body.seguranca.naoRemoveFilaPrincipal, true);
+    assert.strictEqual(resposta.body.seguranca.naoTocaAuthSessao, true);
+    assert(resposta.body.logsOperacionais.some(log => log.evento === "removido"), "execucao deve registrar log operacional de remocao");
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
 }
 
 (async () => {
@@ -186,6 +302,8 @@ async function request(server, metodo, caminho, papel, body) {
     }
 
     assert.deepStrictEqual(snapshotArquivos(dataDir), antes, "rotas OSM nao podem escrever em disco");
+
+    await testarLimpezaEmergencialFilaBak();
 
     console.log("storage-manager.test.js OK");
   } finally {
