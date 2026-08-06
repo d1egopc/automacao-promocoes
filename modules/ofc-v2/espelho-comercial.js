@@ -2,6 +2,12 @@
 
 const { analisarValorMonetario, formatarMoedaBR } = require("../../utils/moeda");
 const { aplicarContratoMarketplace, MATRIZ_CAPACIDADES } = require("./marketplace-contracts");
+const {
+  ORIGENS_VALOR_COMERCIAL,
+  classificarBlocoComercial
+} = require("../templates-clientes/politica-blocos-comerciais");
+
+const AVISO_EDITORIAL_ALIEXPRESS = "⚠️ Oferta sujeita à alteração de preço.";
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -20,6 +26,10 @@ function normalizarComparacao(valor = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+}
+
+function marketplaceAliExpress(valor = "") {
+  return normalizarComparacao(valor).replace(/[^a-z0-9]+/g, "") === "aliexpress";
 }
 
 function chaveCupom(valor = "") {
@@ -339,6 +349,7 @@ function instrucaoRedundante(instrucao = "", cupomCodigo = "") {
 function instrucaoCupomComResgateSemOperacao(instrucao = "", doc = {}) {
   const n = normalizarComparacao(instrucao);
   if (!/\bresgat/.test(n)) return false;
+  if (marketplaceAliExpress(doc.marketplace) && /\b(?:app|moeda|moedas|loja|siga)\b/.test(n)) return false;
   if (!marketplaceMercadoLivre(doc.marketplace) && /\b(?:anuncio|pagina|produto)\b/.test(n)) return false;
   return !linkResgateEssencial(doc, {});
 }
@@ -352,11 +363,11 @@ function instrucaoCupomConfiavel(instrucao = "", cupons = [], doc = {}) {
 }
 
 function montarInstrucaoCupomCanonica(doc = {}, cupons = []) {
-  if (normalizarComparacao(doc.marketplace).replace(/[^a-z0-9]+/g, "") === "aliexpress") {
-    if (cupons.length) return "Aplique um dos cupons acima para obter este preço.";
-  }
   const explicita = instrucaoCupomConfiavel(doc.instrucaoTexto, cupons, doc);
   if (explicita) return explicita;
+  if (marketplaceAliExpress(doc.marketplace)) {
+    if (cupons.length) return "Aplique um dos cupons acima para obter este preço.";
+  }
   if (!cupons.length) return "";
   if (cupons.length > 1) return "Aplique um dos cupons informados para obter o desconto.";
   const codigo = cupons[0];
@@ -869,9 +880,11 @@ function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
   if (/\bgarantia\b/i.test(`${contexto.textoOriginal || ""} ${doc.beneficioTexto || ""}`)) adicionarBlocoComercial(blocos, { tipo: "garantia", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bgarantia\b/) || doc.beneficioTexto, origem: "texto_comercial_original", confianca: "media" });
   if (/\bpre[\s-]*venda|pré[\s-]*venda\b/i.test(contexto.textoOriginal || "")) adicionarBlocoComercial(blocos, { tipo: "pre_venda", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bpre[\s-]*venda|pre venda\b/) || "Pré-venda", origem: "texto_comercial_original", confianca: "media" });
   if (/\bprazo|envio\b/i.test(contexto.textoOriginal || "")) adicionarBlocoComercial(blocos, { tipo: "prazo_envio", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bprazo|envio\b/), origem: "texto_comercial_original", confianca: "media" });
-  const beneficioRenderizavel = beneficioEspeculativoOuTecnico(doc.beneficioTexto) || beneficioDuplicaInstrucaoCupom(doc.beneficioTexto, instrucaoCupomCanonica) ? "" : doc.beneficioTexto;
+  const beneficioDuplicaCondicaoAli = marketplaceAliExpress(doc.marketplace) && condicaoAliExpressEquivalente(doc.beneficioTexto, instrucaoCupomCanonica);
+  const beneficioRenderizavel = beneficioEspeculativoOuTecnico(doc.beneficioTexto) || beneficioDuplicaInstrucaoCupom(doc.beneficioTexto, instrucaoCupomCanonica) || beneficioDuplicaCondicaoAli ? "" : doc.beneficioTexto;
   const beneficioApp = doc.beneficioTexto || primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bapp\b/);
-  if (/\bapp\b/i.test(`${contexto.textoOriginal || ""} ${doc.beneficioTexto || ""}`) && !beneficioEspeculativoOuTecnico(beneficioApp)) adicionarBlocoComercial(blocos, { tipo: "beneficio_app", textoOriginal: beneficioApp, origem: "texto_comercial_original", confianca: "media" });
+  const beneficioAppDuplicaCondicaoAli = marketplaceAliExpress(doc.marketplace) && condicaoAliExpressEquivalente(beneficioApp, instrucaoCupomCanonica);
+  if (/\bapp\b/i.test(`${contexto.textoOriginal || ""} ${doc.beneficioTexto || ""}`) && !beneficioEspeculativoOuTecnico(beneficioApp) && !beneficioAppDuplicaCondicaoAli) adicionarBlocoComercial(blocos, { tipo: "beneficio_app", textoOriginal: beneficioApp, origem: "texto_comercial_original", confianca: "media" });
   adicionarBlocoComercial(blocos, { tipo: "beneficio", textoOriginal: beneficioRenderizavel, origem: "documento.beneficioTexto", confianca: "media" });
 
   const avaliacao = primeiroTexto(contexto.ofertaEntrada?.avaliacao, contexto.ofertaEntrada?.rating, contexto.ofertaEntrada?.nota, contexto.oferta?.avaliacao, contexto.oferta?.rating, contexto.oferta?.nota, contexto.comercialNormalizado?.avaliacao?.texto);
@@ -883,6 +896,16 @@ function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
   if (/\bmais\s+vendido|best\s*seller\b/i.test(contexto.textoOriginal || "")) adicionarBlocoComercial(blocos, { tipo: "selo_mais_vendido", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bmais\s+vendido|best seller\b/) || "Mais vendido", origem: "texto_comercial_original", confianca: "media" });
 
   adicionarBlocosDeLinks(blocos, doc, contexto);
+  if (marketplaceAliExpress(doc.marketplace) && !lista(doc.avisos).some(avisoEditorialAliExpressEquivalente)) {
+    adicionarBlocoComercial(blocos, {
+      tipo: "aviso",
+      textoOriginal: AVISO_EDITORIAL_ALIEXPRESS,
+      origem: ORIGENS_VALOR_COMERCIAL.EDITORIAL_SISTEMA,
+      confianca: "alta",
+      visibilidadePadrao: "padrao",
+      valorEstruturado: { origem: ORIGENS_VALOR_COMERCIAL.EDITORIAL_SISTEMA }
+    });
+  }
   for (const aviso of lista(doc.avisos)) adicionarBlocoComercial(blocos, { tipo: "aviso", textoOriginal: aviso, origem: "documento.avisos", confianca: "media" });
 
   return finalizarBlocosComerciais(blocos);
@@ -1426,21 +1449,11 @@ function linhasLinksAliExpress(doc = {}) {
   const links = Array.isArray(doc.linksComerciais) ? doc.linksComerciais : [];
   const renderizaveis = links.filter(item => item.renderizavel !== false);
   const urlLink = (item = {}) => texto(item.urlAfiliada || item.url);
-  const chaveLink = (url = "") => {
-    const valor = texto(url);
-    try {
-      const parsed = new URL(valor);
-      parsed.hash = "";
-      return `${parsed.hostname.replace(/^www\./i, "").toLowerCase()}${parsed.pathname}`.replace(/\/+$/, "");
-    } catch (_) {
-      return valor.replace(/#.*$/, "").replace(/\/+$/, "");
-    }
-  };
   const appItem = renderizaveis.find(item => ["app", "moedas"].includes(item.tipo));
   const pcItem = renderizaveis.find(item => item.tipo === "pc");
   const app = urlLink(appItem);
   const pc = urlLink(pcItem);
-  const appDistintoPc = app && (!pc || chaveLink(app) !== chaveLink(pc));
+  const appDistintoPc = app && (!pc || chaveUrlFinalAliExpress(app) !== chaveUrlFinalAliExpress(pc));
   return [
     appDistintoPc ? `📱 APP / Moedas:\n${app}` : "",
     pc ? `🖥️ PC:\n${pc}` : ""
@@ -1464,6 +1477,34 @@ function textoComercialEquivalente(a = "", b = "") {
   const ca = normalizarComparacao(a).replace(/[^a-z0-9]+/g, "");
   const cb = normalizarComparacao(b).replace(/[^a-z0-9]+/g, "");
   return Boolean(ca && cb && ca === cb);
+}
+
+function condicaoAliExpressEquivalente(a = "", b = "") {
+  const ca = normalizarComparacao(removerUrls(a)).replace(/\b\d{1,6}\s*(?:moeda|moedas|coins?)\b/g, "moedas").replace(/[^a-z0-9]+/g, "");
+  const cb = normalizarComparacao(removerUrls(b)).replace(/\b\d{1,6}\s*(?:moeda|moedas|coins?)\b/g, "moedas").replace(/[^a-z0-9]+/g, "");
+  return Boolean(ca && cb && (ca === cb || ca.includes(cb) || cb.includes(ca)));
+}
+
+function textoMencionaMoedas(valor = "") {
+  return /\b(?:moeda|moedas|coins?)\b/i.test(valor);
+}
+
+function avisoEditorialAliExpressEquivalente(valor = "") {
+  const n = normalizarComparacao(valor);
+  return /\boferta\b/.test(n) && /\bsujeita\b/.test(n) && /\balteracao\b/.test(n) && /\bpreco\b/.test(n);
+}
+
+function chaveUrlFinalAliExpress(url = "") {
+  const valor = texto(url);
+  if (!valor) return "";
+  try {
+    const parsed = new URL(valor);
+    parsed.hash = "";
+    const pathname = parsed.pathname.replace(/\/+$/, "");
+    return `${parsed.protocol}//${parsed.hostname.replace(/^www\./i, "").toLowerCase()}${pathname}${parsed.search}`;
+  } catch (_) {
+    return valor.replace(/#.*$/, "").replace(/\/+$/, "");
+  }
 }
 
 function contratoPermiteLinkProdutoOriginal(doc = {}) {
@@ -1627,7 +1668,15 @@ function blocosCanonicosSuficientesV26(blocos = [], documento = {}) {
 }
 
 function toggleAtivoParaBlocoV26(bloco = {}, template = {}) {
-  if (bloco.essencial || bloco.visibilidadePadrao === "obrigatorio" || TIPOS_LINKS_ESSENCIAIS_V26.has(bloco.tipo)) return true;
+  const comercialmenteNecessario = bloco.essencial ||
+    bloco.visibilidadePadrao === "obrigatorio" ||
+    TIPOS_LINKS_ESSENCIAIS_V26.has(bloco.tipo);
+  const politica = classificarBlocoComercial(bloco.tipo, {
+    essencial: bloco.essencial,
+    comercialmenteNecessario,
+    necessario: comercialmenteNecessario
+  });
+  if (politica.protegido) return true;
   if (bloco.tipo === "link_auxiliar") {
     return lista(template.blocos).some(item => item?.tipo === "link_auxiliar" && item.ativo !== false);
   }
@@ -1687,7 +1736,7 @@ function renderizarBlocoCanonicoV26(bloco = {}, contexto = {}) {
   if (bloco.tipo === "instrucao_cupom") return `⚡ ${valor}`;
   if (bloco.tipo === "cashback") return `💰 Cashback: ${valor}`;
   if (bloco.tipo === "moedas") {
-    if (contexto.marketplaceAliExpress && lista(contexto.cuponsTexto).length) return "";
+    if (contexto.marketplaceAliExpress && (lista(contexto.cuponsTexto).length || textoMencionaMoedas(contexto.instrucaoCupomTexto))) return "";
     return contexto.moedasNoApp ? `🪙 APP: ${valor}` : `🪙 ${valor}`;
   }
   if (bloco.tipo === "frete") return `🚚 ${valor}`;
@@ -1709,9 +1758,9 @@ function renderizarBlocoCanonicoV26(bloco = {}, contexto = {}) {
   if (bloco.tipo === "vendas") return `📈 ${valor}`;
   if (bloco.tipo === "selo_mais_vendido") return `🏆 ${valor}`;
   if (bloco.tipo === "link_resgate") return `🎟️ Resgate:\n${valor}`;
-  if (bloco.tipo === "link_app") return `📱 APP / Moedas:\n${valor}`;
+  if (bloco.tipo === "link_app") return `${contexto.linksMoveisAliDistintos ? "📱 APP" : "📱 APP / Moedas"}:\n${valor}`;
   if (bloco.tipo === "link_pc") return `🖥️ PC:\n${valor}`;
-  if (bloco.tipo === "link_moedas") return `📱 APP / Moedas:\n${valor}`;
+  if (bloco.tipo === "link_moedas") return `${contexto.linksMoveisAliDistintos ? "🪙 Moedas" : "📱 APP / Moedas"}:\n${valor}`;
   if (bloco.tipo === "link_auxiliar") return `🔎 Link auxiliar:\n${valor}`;
   if (bloco.tipo === "link_afiliado") return `🔗 Confira aqui:\n${valor}`;
   if (bloco.tipo === "aviso") return valor;
@@ -1746,40 +1795,37 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
   const linhas = [];
   const vistos = new Set();
   const linksAliRenderizados = new Set();
-  const chaveLinkAli = (url = "") => {
-    const valor = texto(url);
-    try {
-      const parsed = new URL(valor);
-      parsed.hash = "";
-      return `${parsed.hostname.replace(/^www\./i, "").toLowerCase()}${parsed.pathname}`.replace(/\/+$/, "");
-    } catch (_) {
-      return valor.replace(/#.*$/, "").replace(/\/+$/, "");
-    }
-  };
   const linksPcAli = new Set(blocosOrdenados
     .filter(bloco => bloco.tipo === "link_pc")
-    .map(bloco => chaveLinkAli(textoBlocoCanonicoV26(bloco)))
+    .map(bloco => chaveUrlFinalAliExpress(textoBlocoCanonicoV26(bloco)))
     .filter(Boolean));
+  const instrucaoCupomTexto = blocosOrdenados.find(bloco => bloco.tipo === "instrucao_cupom")?.textoOriginal || "";
+  const moedasTextoBruto = blocosOrdenados.find(bloco => bloco.tipo === "moedas")?.textoOriginal || "";
+  const linksMoveisAli = blocosOrdenados
+    .filter(bloco => ["link_app", "link_moedas"].includes(bloco.tipo))
+    .map(bloco => chaveUrlFinalAliExpress(textoBlocoCanonicoV26(bloco)))
+    .filter(Boolean);
   const contexto = {
-    marketplaceAliExpress: normalizarComparacao(doc.marketplace) === "aliexpress",
+    marketplaceAliExpress: marketplaceAliExpress(doc.marketplace),
     precoOfertaTexto: blocosOrdenados.find(bloco => bloco.tipo === "preco_oferta")?.textoOriginal || "",
     freteTexto: blocosOrdenados.find(bloco => bloco.tipo === "frete")?.textoOriginal || "",
     cashbackTexto: blocosOrdenados.find(bloco => bloco.tipo === "cashback")?.textoOriginal || "",
     temFrete: blocosOrdenados.some(bloco => bloco.tipo === "frete"),
     temCashback: blocosOrdenados.some(bloco => bloco.tipo === "cashback"),
-    instrucaoCupomTexto: blocosOrdenados.find(bloco => bloco.tipo === "instrucao_cupom")?.textoOriginal || "",
+    instrucaoCupomTexto,
     cuponsTexto: blocosOrdenados
       .filter(bloco => ["cupom_codigo", "cupons_alternativos"].includes(bloco.tipo))
       .map(bloco => textoBlocoCanonicoV26(bloco))
       .filter(Boolean),
-    moedasTexto: blocosOrdenados.find(bloco => bloco.tipo === "moedas")?.textoOriginal || "",
-    moedasNoApp: /\bapp\b/i.test(`${doc.descricaoOriginal || ""} ${blocosOrdenados.find(bloco => bloco.tipo === "moedas")?.textoOriginal || ""}`)
+    moedasTexto: textoMencionaMoedas(instrucaoCupomTexto) ? "" : moedasTextoBruto,
+    moedasNoApp: /\bapp\b/i.test(`${doc.descricaoOriginal || ""} ${moedasTextoBruto}`),
+    linksMoveisAliDistintos: new Set(linksMoveisAli).size > 1
   };
 
   for (const bloco of blocosOrdenados) {
     if (!TIPOS_BLOCOS_RENDERIZAVEIS_V26.has(bloco.tipo)) continue;
     if (contexto.marketplaceAliExpress && ["link_app", "link_moedas", "link_pc"].includes(bloco.tipo)) {
-      const chaveLink = chaveLinkAli(textoBlocoCanonicoV26(bloco));
+      const chaveLink = chaveUrlFinalAliExpress(textoBlocoCanonicoV26(bloco));
       if (!chaveLink) continue;
       if (bloco.tipo !== "link_pc" && linksPcAli.has(chaveLink)) continue;
       if (linksAliRenderizados.has(chaveLink)) continue;
