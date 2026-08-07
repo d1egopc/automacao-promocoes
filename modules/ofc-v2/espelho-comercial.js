@@ -411,7 +411,7 @@ function montarInstrucaoCupomCanonica(doc = {}, cupons = []) {
   if (marketplaceAliExpress(doc.marketplace)) {
     if (cupons.length) return "Aplique um dos cupons acima para obter este preço.";
   }
-  if (marketplaceMercadoLivre(doc.marketplace) || marketplaceKabumAwin(doc.marketplace)) return "";
+  if (marketplaceMercadoLivre(doc.marketplace) || marketplaceKabumAwin(doc.marketplace) || marketplaceShopee(doc.marketplace)) return "";
   if (!cupons.length) return "";
   if (cupons.length > 1) return "Aplique um dos cupons informados para obter o desconto.";
   const codigo = cupons[0];
@@ -750,13 +750,17 @@ function marketplaceMercadoLivre(valor = "") {
   return mp === "mercadolivre" || mp === "ml";
 }
 
+function marketplaceShopee(valor = "") {
+  return normalizarComparacao(valor).replace(/[^a-z0-9]+/g, "") === "shopee";
+}
+
 function marketplaceKabumAwin(valor = "") {
   const mp = normalizarComparacao(valor).replace(/[^a-z0-9]+/g, "");
   return mp === "kabum" || mp === "awin" || mp === "feedkabum" || mp === "feedawin";
 }
 
 function precoDeInconsistenteParaRenderizacao(precoDeTexto = "", precoPorTexto = "", marketplace = "") {
-  if (!marketplaceMercadoLivre(marketplace) && !marketplaceKabumAwin(marketplace)) return false;
+  if (!marketplaceMercadoLivre(marketplace) && !marketplaceKabumAwin(marketplace) && !marketplaceShopee(marketplace)) return false;
   const precoDe = numeroMonetario(precoDeTexto);
   const precoPor = numeroMonetario(precoPorTexto);
   return precoDe !== null && precoPor !== null && precoDe <= precoPor;
@@ -955,7 +959,7 @@ function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
   if (/\bmais\s+vendido|best\s*seller\b/i.test(contexto.textoOriginal || "")) adicionarBlocoComercial(blocos, { tipo: "selo_mais_vendido", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bmais\s+vendido|best seller\b/) || "Mais vendido", origem: "texto_comercial_original", confianca: "media" });
 
   adicionarBlocosDeLinks(blocos, doc, contexto);
-  if ((marketplaceAliExpress(doc.marketplace) || marketplaceAmazon(doc.marketplace) || marketplaceMercadoLivre(doc.marketplace) || marketplaceKabumAwin(doc.marketplace)) && !lista(doc.avisos).some(avisoEditorialAliExpressEquivalente)) {
+  if ((marketplaceAliExpress(doc.marketplace) || marketplaceAmazon(doc.marketplace) || marketplaceMercadoLivre(doc.marketplace) || marketplaceKabumAwin(doc.marketplace) || marketplaceShopee(doc.marketplace)) && !lista(doc.avisos).some(avisoEditorialAliExpressEquivalente)) {
     adicionarBlocoComercial(blocos, {
       tipo: "aviso",
       textoOriginal: AVISO_EDITORIAL_ALIEXPRESS,
@@ -1739,6 +1743,7 @@ function blocosCanonicosSuficientesV26(blocos = [], documento = {}) {
   if (avisos.includes("links_produto_ambiguos")) return { ok: false, motivo: "links_produto_ambiguos" };
   const marketplace = normalizarComparacao(documento.marketplace);
   const temCtaSeguro = blocos.some(bloco => bloco.tipo === "link_afiliado")
+    || (marketplace === "shopee" && blocos.some(bloco => bloco.tipo === "link_resgate"))
     || (marketplace === "aliexpress" && blocos.some(bloco => ["link_app", "link_pc", "link_moedas"].includes(bloco.tipo)));
   if (!temCtaSeguro) return { ok: false, motivo: "link_afiliado_ausente" };
   if (!blocos.some(bloco => bloco.tipo === "titulo")) return { ok: false, motivo: "titulo_ausente" };
@@ -1770,6 +1775,14 @@ function textoBlocoCanonicoV26(bloco = {}) {
   if (direto) return direto;
   const valor = objeto(bloco.valorEstruturado);
   return limparTextoComercial(primeiroTexto(valor.texto, valor.url, valor.codigo, valor.valor));
+}
+
+function ordemRenderizacaoBlocoCanonicoV26(bloco = {}, documento = {}) {
+  const ordem = Number.isFinite(Number(bloco.ordemSugerida)) ? Number(bloco.ordemSugerida) : 1000;
+  if (marketplaceShopee(documento.marketplace) && bloco.tipo === "link_resgate") {
+    return ORDEM_BLOCOS_COMERCIAIS_V26.link_afiliado - 0.5;
+  }
+  return ordem;
 }
 
 function avaliacaoQuantidadeVisualV26(valor = "") {
@@ -1870,7 +1883,7 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
   }
 
   const template = objeto(opcoes.template);
-  const blocosOrdenados = [...blocos].sort((a, b) => a.ordemSugerida - b.ordemSugerida || a.tipo.localeCompare(b.tipo) || a.dedupeKey.localeCompare(b.dedupeKey));
+  const blocosOrdenados = [...blocos].sort((a, b) => ordemRenderizacaoBlocoCanonicoV26(a, doc) - ordemRenderizacaoBlocoCanonicoV26(b, doc) || a.tipo.localeCompare(b.tipo) || a.dedupeKey.localeCompare(b.dedupeKey));
   const linhas = [];
   const vistos = new Set();
   const linksAliRenderizados = new Set();

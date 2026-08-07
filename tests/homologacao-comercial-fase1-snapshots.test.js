@@ -295,6 +295,39 @@ function renderizarKabumAwin({
   return { espelho, resultado, mensagem: resultado.mensagem };
 }
 
+function renderizarShopee({
+  textoOriginal = "",
+  titulo = "Produto Shopee",
+  preco = 100,
+  categoria = "Casa, Moveis e Decoracao",
+  linkAfiliado = "https://s.shopee.com.br/produto-afiliado",
+  linksComerciais = [],
+  oferta = {},
+  ofertaEntrada = {},
+  template = {}
+} = {}) {
+  const espelho = criarEspelho({
+    textoOriginal,
+    oferta: {
+      titulo,
+      marketplace: "shopee",
+      categoria,
+      preco,
+      linkAfiliado,
+      linksComerciais,
+      ...oferta
+    },
+    ofertaEntrada,
+    comercialNormalizado: { marketplace: "shopee", precoAtual: preco, categoria, precoConfiavel: true }
+  });
+  const resultado = montarTemplateEspelhoPorBlocosV26(
+    espelho.espelhoComercial,
+    espelho.documentoComercialCanonico,
+    { template }
+  );
+  return { espelho, resultado, mensagem: resultado.mensagem };
+}
+
 assertPoliticaOficial();
 
 const recorder = criarSnapshotRecorder();
@@ -454,27 +487,91 @@ const mlMultiplosCupons = renderizarMercadoLivre({
 recorder.check("mercadolivre_multiplos_cupons", "preserva codigos reais sem frase generica inventada", contem(mlMultiplosCupons.mensagem, "Cupons: CUPOM10 • MODASEMPRE") && !contem(mlMultiplosCupons.mensagem, "Aplique um dos cupons"), mlMultiplosCupons.mensagem);
 recorder.check("mercadolivre_multiplos_cupons", "link afiliado e aviso editorial permanecem unicos", ocorrencias(mlMultiplosCupons.mensagem, "https://meli.la/oferta-multicupom") === 1 && ocorrencias(mlMultiplosCupons.mensagem, "Oferta sujeita") === 1, mlMultiplosCupons.mensagem);
 
-const shopeeMensagem = mensagemPadrao({
-  titulo: "Fone Bluetooth Shopee",
-  marketplace: "shopee",
-  categoria: "Audio",
-  precoAtual: 89.9,
+const shopeeReferencia = renderizarShopee({
+  textoOriginal: [
+    "AJUDA MUITO NA ORGANIZACAO",
+    "De: R$ 238,00",
+    "Por: R$ 102,46",
+    "Cupom: 5Q0QOV4DWS",
+    "Aplique o cupom 5Q0QOV4DWS para chegar neste valor.",
+    "Frete gratis"
+  ].join("\n"),
+  titulo: "AJUDA MUITO NA ORGANIZACAO",
+  preco: 102.46,
+  categoria: "Casa, Moveis e Decoracao",
+  linkAfiliado: "https://s.shopee.com.br/80BZBdiWLV",
   linksComerciais: [
-    { tipo: "resgate", afiliado: "https://s.shopee.com.br/resgate-afiliado", original: "https://s.shopee.com.br/resgate-original" },
-    { tipo: "produto", afiliado: "https://s.shopee.com.br/produto-afiliado", original: "https://s.shopee.com.br/produto-original" }
-  ],
-  linkAfiliado: "https://s.shopee.com.br/produto-afiliado"
+    { papel: "link_resgate", url: "https://s.shopee.com.br/5q0qoV4Dws", renderizavel: true, seguro: true }
+  ]
 });
-recorder.check("shopee_links_distintos", "produto e resgate ficam separados", emOrdem(shopeeMensagem, [
+const shopeeMensagem = shopeeReferencia.mensagem;
+recorder.check("shopee_resgate_produto_ofc", "preserva ordem oficial Shopee com resgate antes do produto", emOrdem(shopeeMensagem, [
+  "AJUDA MUITO NA ORGANIZACAO",
+  "Shopee",
+  "Casa, Moveis e Decoracao",
+  "De: R$ 238,00",
+  "Por: R$ 102,46",
+  "Cupom: 5Q0QOV4DWS",
+  "Aplique o cupom 5Q0QOV4DWS para chegar neste valor.",
+  "Frete gratis",
   "Resgate",
-  "https://s.shopee.com.br/resgate-afiliado",
+  "https://s.shopee.com.br/5q0qoV4Dws",
   "Confira aqui",
-  "https://s.shopee.com.br/produto-afiliado"
+  "https://s.shopee.com.br/80BZBdiWLV",
+  "Oferta sujeita"
 ]), shopeeMensagem);
-recorder.check("shopee_links_distintos", "nao duplica URLs de produto e resgate", urlsDistintas(shopeeMensagem, [
-  "https://s.shopee.com.br/resgate-afiliado",
-  "https://s.shopee.com.br/produto-afiliado"
+recorder.check("shopee_resgate_produto_ofc", "links distintos nao sao deduplicados", urlsDistintas(shopeeMensagem, [
+  "https://s.shopee.com.br/5q0qoV4Dws",
+  "https://s.shopee.com.br/80BZBdiWLV"
 ]), shopeeMensagem);
+recorder.check("shopee_resgate_produto_ofc", "instrucao capturada e aviso editorial aparecem uma vez", ocorrencias(shopeeMensagem, "Aplique o cupom 5Q0QOV4DWS") === 1 && ocorrencias(shopeeMensagem, "Oferta sujeita") === 1, shopeeMensagem);
+recorder.check("shopee_resgate_produto_ofc", "beneficio real nao duplica cupom ou resgate", ocorrencias(shopeeMensagem, "Frete gratis") === 1 && ocorrencias(shopeeMensagem, "Resgate") === 1, shopeeMensagem);
+
+const shopeeSomenteProduto = renderizarShopee({
+  textoOriginal: "Produto Shopee sem resgate\nPor: R$ 89,90",
+  titulo: "Produto Shopee sem resgate",
+  preco: 89.9,
+  categoria: "Audio",
+  linkAfiliado: "https://s.shopee.com.br/produto-sem-resgate"
+});
+recorder.check("shopee_somente_produto", "produto sem resgate continua renderizando sem placeholder", contem(shopeeSomenteProduto.mensagem, "https://s.shopee.com.br/produto-sem-resgate") && !contem(shopeeSomenteProduto.mensagem, "Resgate:"), shopeeSomenteProduto.mensagem);
+
+const shopeeSomenteResgate = renderizarShopee({
+  textoOriginal: "Cupom Shopee sem produto\nCupom: SORESGATE\nAplique o cupom SORESGATE para chegar neste valor.",
+  titulo: "Cupom Shopee sem produto",
+  preco: 50,
+  linkAfiliado: "",
+  linksComerciais: [
+    { papel: "link_resgate", url: "https://s.shopee.com.br/resgate-sem-produto", renderizavel: true, seguro: true }
+  ]
+});
+recorder.check("shopee_somente_resgate", "resgate sem produto nao cria CTA falso", contem(shopeeSomenteResgate.mensagem, "https://s.shopee.com.br/resgate-sem-produto") && !contem(shopeeSomenteResgate.mensagem, "Confira aqui"), shopeeSomenteResgate.mensagem);
+
+const shopeeDeEstruturado = renderizarShopee({
+  textoOriginal: "Produto Shopee preco de estruturado\nPor: R$ 59,90",
+  titulo: "Produto Shopee preco de estruturado",
+  preco: 59.9,
+  oferta: { precoOriginal: 99.9 },
+  linkAfiliado: "https://s.shopee.com.br/preco-de-estruturado"
+});
+recorder.check("shopee_preco_de_estruturado", "De explicito de campo estruturado confiavel renderiza sem calculo", contem(shopeeDeEstruturado.mensagem, "De: R$ 99,90") && contem(shopeeDeEstruturado.mensagem, "Por: R$ 59,90"), shopeeDeEstruturado.mensagem);
+
+const shopeeDeInvalido = renderizarShopee({
+  textoOriginal: "Produto Shopee sem desconto real\nDe: R$ 80,00\nPor: R$ 102,46",
+  titulo: "Produto Shopee sem desconto real",
+  preco: 102.46,
+  linkAfiliado: "https://s.shopee.com.br/de-invalido"
+});
+recorder.check("shopee_preco_de_invalido", "De menor ou igual a Por nao renderiza desconto falso", !contem(shopeeDeInvalido.mensagem, "De: R$ 80,00") && contem(shopeeDeInvalido.mensagem, "Por: R$ 102,46"), shopeeDeInvalido.mensagem);
+recorder.check("shopee_preco_de_invalido", "inconsistencia fica em auditoria interna", shopeeDeInvalido.espelho.documentoComercialCanonico.auditoriaComercial?.avisosInternos?.includes("preco_de_menor_ou_igual_preco_por_omitido"), JSON.stringify(shopeeDeInvalido.espelho.documentoComercialCanonico.auditoriaComercial));
+
+const shopeeMultiplosCupons = renderizarShopee({
+  textoOriginal: "Produto Shopee multicupom\nPor: R$ 77,70\nCupons: SHOPEE10 ou CASA20",
+  titulo: "Produto Shopee multicupom",
+  preco: 77.7,
+  linkAfiliado: "https://s.shopee.com.br/multicupom"
+});
+recorder.check("shopee_multiplos_cupons", "cupons reais permanecem sem frase generica inventada", ["SHOPEE10", "CASA20"].every(cupom => contem(shopeeMultiplosCupons.mensagem, cupom)) && !contem(shopeeMultiplosCupons.mensagem, "Aplique um dos cupons"), shopeeMultiplosCupons.mensagem);
 
 const aliEspelho = criarEspelho({
   textoOriginal: [
@@ -835,5 +932,5 @@ if (falhasInesperadas.length || falhasEsperadasAusentes.length) {
   for (const [nome, motivo] of falhasEsperadasFase2) {
     console.log(`[SNAPSHOT-COMERCIAL-F1] DIVERGENCIA-ESPERADA ${nome}: ${motivo}`);
   }
-  console.log("[SNAPSHOT-COMERCIAL-F1] Amazon, AliExpress, Mercado Livre e KaBuM/AWIN homologados; divergencias restantes preservadas como esperadas");
+  console.log("[SNAPSHOT-COMERCIAL-F1] Amazon, AliExpress, Mercado Livre, KaBuM/AWIN e Shopee homologados; divergencias restantes preservadas como esperadas");
 }
