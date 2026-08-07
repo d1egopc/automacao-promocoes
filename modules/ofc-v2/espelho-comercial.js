@@ -773,6 +773,32 @@ function urlPareceProdutoMercadoLivre(url = "") {
     || /mercadolivre\.com(?:\.br)?\/[^\s?#]+/i.test(fonte);
 }
 
+function marketplaceAliExpressValor(valor = "") {
+  const mp = normalizarComparacao(valor).replace(/[^a-z0-9]+/g, "");
+  return mp === "aliexpress" || mp === "ali";
+}
+
+function contextoIndicaAppAliExpress(valor = "") {
+  const n = normalizarComparacao(valor);
+  return /\b(?:app|aplicativo|celular|mobile|moeda|moedas|coins?)\b/.test(n);
+}
+
+function contextoIndicaPcAliExpress(valor = "") {
+  const n = normalizarComparacao(valor);
+  return /\b(?:pc|computador|desktop|site|produto|confira\s+aqui|clique\s+aqui|pelo\s+pc)\b/.test(n);
+}
+
+function tipoLinkNormalizado(tipo = "produto", contexto = "") {
+  const tipoBruto = texto(tipo).replace(/^link_/, "");
+  const n = normalizarComparacao(`${tipoBruto} ${contexto}`);
+  if (/\b(?:moeda|moedas|coins?)\b/.test(n)) return "moedas";
+  if (/\b(?:app|aplicativo|celular|mobile)\b/.test(n)) return "app";
+  if (/\b(?:pc|computador|desktop|pelo\s+pc|link\s+pc|link\s+para\s+pc)\b/.test(n)) return "pc";
+  if (/\b(?:resgate|resgatar|voucher)\b/.test(n) && !/\b(?:produto|confira|comprar|clique)\b/.test(n)) return "resgate";
+  if (/\b(?:produto|confira|clique|link|comprar)\b/.test(n)) return "produto";
+  return tipoBruto || "produto";
+}
+
 function contextoIndicaResgateIndependente(contexto = "") {
   const n = normalizarComparacao(contexto);
   return /\b(?:resgate|resgatar|voucher|cupom|cupons|campanha|landing|pagina\s+de\s+cupons)\b/.test(n)
@@ -814,8 +840,8 @@ function classificarTipoLinkBloco(item = {}, textoOriginal = "", marketplace = "
   if (papelContrato === "link_moedas") return "link_moedas";
   if (papelContrato === "link_auxiliar") return "link_auxiliar";
   if (papelContrato === "link_produto") return "link_produto_original";
-  const tipo = texto(item.tipo);
   const contexto = normalizarComparacao(primeiroTexto(item.contexto, contextoUrlNoTexto(textoOriginal, url)));
+  const tipo = tipoLinkNormalizado(item.tipo, contexto);
   const mp = normalizarComparacao(marketplace);
   if (/chat\.whatsapp|whatsapp\.com|t\.me|telegram|grupo|canal/i.test(url)) return "link_fonte_ignorado";
   if (/youtube\.com|youtu\.be|instagram\.com|facebook\.com|x\.com|twitter\.com/i.test(url)) return "link_auxiliar";
@@ -825,8 +851,8 @@ function classificarTipoLinkBloco(item = {}, textoOriginal = "", marketplace = "
   if (tipo === "app") return "link_app";
   if (tipo === "pc") return "link_pc";
   if (tipo === "moedas" || /\bmoeda|moedas|coins?\b/.test(contexto)) return "link_moedas";
-  if (tipo === "produto" && mp === "aliexpress" && /\bapp\b/.test(contexto)) return "link_app";
-  if (tipo === "produto" && mp === "aliexpress" && /\bpc|site\b/.test(contexto)) return "link_pc";
+  if (tipo === "produto" && mp === "aliexpress" && contextoIndicaAppAliExpress(contexto)) return "link_app";
+  if (tipo === "produto" && mp === "aliexpress" && contextoIndicaPcAliExpress(contexto)) return "link_pc";
   return "link_produto_original";
 }
 
@@ -1224,11 +1250,12 @@ function valorUrl(item = {}) {
 function adicionarLinkUnico(saida, url, tipo = "produto", contexto = "", extras = {}) {
   const valor = texto(url);
   if (!valor) return;
+  const tipoNormalizado = tipoLinkNormalizado(tipo, contexto);
   const chave = valor.replace(/#.*$/, "");
   const existente = saida.find(item => item.url.replace(/#.*$/, "") === chave);
   if (existente) {
-    const tipoNovo = texto(tipo);
-    const tipoAtual = texto(existente.tipo);
+    const tipoNovo = tipoNormalizado;
+    const tipoAtual = tipoLinkNormalizado(existente.tipo, existente.contexto);
     if (["app", "pc", "moedas", "resgate"].includes(tipoNovo) && !["app", "pc", "moedas", "resgate"].includes(tipoAtual)) {
       existente.tipo = tipoNovo;
     }
@@ -1245,7 +1272,7 @@ function adicionarLinkUnico(saida, url, tipo = "produto", contexto = "", extras 
   }
   saida.push({
     url: valor,
-    tipo,
+    tipo: tipoNormalizado,
     contexto: texto(contexto),
     urlAfiliada: texto(extras.urlAfiliada || extras.linkAfiliado || ""),
     convertidoWorkspace: extras.convertidoWorkspace === true,
@@ -1262,8 +1289,8 @@ function adicionarLinkUnico(saida, url, tipo = "produto", contexto = "", extras 
 function tipoLinkTextoComercial(linha = "") {
   const n = normalizarComparacao(linha.replace(/https?:\/\/\S+/gi, ""));
   if (/\b(?:link\s+com\s+)?(?:moeda|moedas|coins?)\b/.test(n)) return "moedas";
-  if (/\b(?:link\s+)?app\b|\b(?:no|pelo)\s+app\b/.test(n)) return "app";
-  if (/\b(?:link\s+)?(?:pc|site|desktop)\b|\b(?:no|pelo)\s+pc\b/.test(n)) return "pc";
+  if (/\b(?:link\s+)?(?:app|aplicativo|celular|mobile)\b|\b(?:no|pelo)\s+(?:app|aplicativo|celular|mobile)\b/.test(n)) return "app";
+  if (/\b(?:link\s+(?:para\s+)?)?(?:pc|computador|desktop|site)\b|\b(?:no|pelo)\s+(?:pc|computador|desktop)\b/.test(n)) return "pc";
   if (/(resgate|cupom|voucher)/.test(n) && !/\b(?:link\s+(?:do\s+)?produto|produto|confira|comprar)\b/.test(n)) return "resgate";
   if (/\b(?:link|confira|produto|comprar)\b/.test(n)) return "produto";
   return "produto";
@@ -1271,8 +1298,9 @@ function tipoLinkTextoComercial(linha = "") {
 
 function adicionarLinkComercialEstruturado(saida, item = {}, tipoPadrao = "produto") {
   const url = valorUrl(item);
-  const tipo = texto(item.tipo || item.papel || tipoPadrao).replace(/^link_/, "");
-  adicionarLinkUnico(saida, url, tipo, item.contexto || item.label || item.origem || "", {
+  const contexto = item.contexto || item.label || item.origem || "";
+  const tipo = tipoLinkNormalizado(item.tipo || item.papel || tipoPadrao, contexto);
+  adicionarLinkUnico(saida, url, tipo, contexto, {
     urlAfiliada: item.urlAfiliada || item.linkAfiliado || item.afiliado,
     convertidoWorkspace: item.convertidoWorkspace === true,
     afiliadoConvertido: item.afiliadoConvertido === true,
@@ -1283,6 +1311,56 @@ function adicionarLinkComercialEstruturado(saida, item = {}, tipoPadrao = "produ
     origem: item.origem,
     confianca: item.confianca
   });
+}
+
+function tipoAliExpressPorContexto(item = {}) {
+  const tipoAtual = texto(item.tipo).replace(/^link_/, "");
+  if (["app", "moedas", "pc", "resgate"].includes(tipoAtual)) return tipoAtual;
+  const contexto = texto(item.contexto);
+  if (contextoIndicaAppAliExpress(contexto)) return /\b(?:moeda|moedas|coins?)\b/.test(normalizarComparacao(contexto)) ? "moedas" : "app";
+  if (contextoIndicaPcAliExpress(contexto)) return "pc";
+  return tipoAtual || "produto";
+}
+
+function normalizarPapeisLinksAliExpress(links = [], marketplace = "") {
+  if (!marketplaceAliExpressValor(marketplace)) return links;
+  for (const item of links) item.tipo = tipoAliExpressPorContexto(item);
+
+  const candidatos = links.filter(item => {
+    const tipo = texto(item.tipo);
+    return texto(item.url) && !["link_auxiliar", "link_fonte_ignorado"].includes(tipo);
+  });
+  const chaveFinal = item => chaveUrlFinalAliExpress(item.urlAfiliada || item.url);
+  const tipoMovel = item => ["app", "moedas"].includes(texto(item.tipo));
+  const tipoDesktop = item => texto(item.tipo) === "pc";
+  const escolherPrimeiroProdutoDistinto = (items, usados = new Set()) => items.find(item => {
+    const chave = chaveFinal(item);
+    return chave && !usados.has(chave) && !tipoMovel(item) && !tipoDesktop(item) && texto(item.tipo) !== "resgate";
+  });
+
+  const movel = candidatos.find(tipoMovel);
+  const pc = candidatos.find(tipoDesktop);
+  if (!movel && !pc) {
+    const app = escolherPrimeiroProdutoDistinto(candidatos);
+    if (app) {
+      app.tipo = "app";
+      const desktop = escolherPrimeiroProdutoDistinto(candidatos, new Set([chaveFinal(app)]));
+      if (desktop) desktop.tipo = "pc";
+    }
+    return links;
+  }
+  if (pc && !movel) {
+    const indicePc = candidatos.indexOf(pc);
+    const app = escolherPrimeiroProdutoDistinto(candidatos.slice(0, indicePc));
+    if (app) app.tipo = "app";
+    return links;
+  }
+  if (movel && !pc) {
+    const indiceMovel = candidatos.indexOf(movel);
+    const desktop = escolherPrimeiroProdutoDistinto(candidatos.slice(indiceMovel + 1), new Set([chaveFinal(movel)]));
+    if (desktop) desktop.tipo = "pc";
+  }
+  return links;
 }
 
 function linksComerciaisIntegridade({ oferta = {}, ofertaEntrada = {}, metadata = {} } = {}) {
@@ -1310,6 +1388,7 @@ function extrairLinksComerciais({ textoOriginal = "", oferta = {}, ofertaEntrada
   adicionarLinkUnico(links, oferta.linkOriginal || link.url_original || ofertaEntrada.linkOriginal, "produto");
   if (!links.some(item => item.tipo === "produto")) adicionarLinkUnico(links, oferta.linkAfiliado || ofertaEntrada.linkAfiliado, "produto");
   const marketplace = primeiroTexto(oferta.marketplace, ofertaEntrada.marketplace, link.marketplace);
+  normalizarPapeisLinksAliExpress(links, marketplace);
   const produtos = links.filter(item => classificarTipoLinkBloco(item, textoOriginal, marketplace) === "link_produto_original");
   const resgate = links.find(item => classificarTipoLinkBloco(item, textoOriginal, marketplace) === "link_resgate");
   return {
@@ -1781,6 +1860,9 @@ function ordemRenderizacaoBlocoCanonicoV26(bloco = {}, documento = {}) {
   const ordem = Number.isFinite(Number(bloco.ordemSugerida)) ? Number(bloco.ordemSugerida) : 1000;
   if (marketplaceShopee(documento.marketplace) && bloco.tipo === "link_resgate") {
     return ORDEM_BLOCOS_COMERCIAIS_V26.link_afiliado - 0.5;
+  }
+  if (marketplaceAliExpressValor(documento.marketplace) && bloco.tipo === "link_moedas") {
+    return ORDEM_BLOCOS_COMERCIAIS_V26.link_app + 0.25;
   }
   return ordem;
 }

@@ -172,6 +172,18 @@ function linksAliExpress({ app = "", moedas = "", pc = "" } = {}) {
   ].filter(Boolean);
 }
 
+function linksAliExpressContextuais(items = []) {
+  return items.map((item, indice) => ({
+    tipo: item.tipo || "produto",
+    contexto: item.contexto || "",
+    urlOriginal: item.urlOriginal || `https://a.aliexpress.com/_contextoOriginal${indice}`,
+    urlAfiliada: item.urlAfiliada || `https://s.click.aliexpress.com/e/_contextoAfiliado${indice}`,
+    renderizavel: true,
+    seguro: true,
+    convertidoWorkspace: true
+  }));
+}
+
 function renderizarAliExpress({
   textoOriginal = "",
   titulo = "SSD AliExpress 512GB",
@@ -635,6 +647,124 @@ recorder.check("aliexpress_app_moedas_pc", "moeda aparece uma vez e nao entra em
 recorder.check("aliexpress_app_moedas_pc", "preve aviso editorial separado dos dados comerciais", contem(aliMensagem, "Oferta sujeita") && ocorrencias(aliMensagem, "Oferta sujeita") === 1, aliMensagem);
 recorder.check("aliexpress_app_moedas_pc", "marca aviso como editorial_sistema no documento", aliEspelho.documentoComercialCanonico.blocos.some(bloco => bloco.tipo === "aviso" && bloco.origem === "editorial_sistema" && contem(bloco.textoOriginal, "Oferta sujeita")), JSON.stringify(aliEspelho.documentoComercialCanonico.blocos));
 
+const aliAppPcExplicitosContexto = renderizarAliExpress({
+  textoOriginal: [
+    "Produto AliExpress APP PC explicitos",
+    "Por R$ 83,00",
+    "Link APP:",
+    "Link PC:"
+  ].join("\n"),
+  titulo: "Produto AliExpress APP PC explicitos",
+  preco: 83,
+  linksComerciais: linksAliExpressContextuais([
+    { contexto: "Link APP", urlAfiliada: "https://s.click.aliexpress.com/e/_appExplicito" },
+    { contexto: "Link PC", urlAfiliada: "https://s.click.aliexpress.com/e/_pcExplicito" }
+  ])
+});
+recorder.check("aliexpress_contexto_app_pc_explicitos", "marcadores APP e PC sao respeitados e renderizados na ordem oficial", emOrdem(aliAppPcExplicitosContexto.mensagem, [
+  "APP / Moedas",
+  "https://s.click.aliexpress.com/e/_appExplicito",
+  "PC",
+  "https://s.click.aliexpress.com/e/_pcExplicito"
+]), aliAppPcExplicitosContexto.mensagem);
+
+const aliMoedasPcContexto = renderizarAliExpress({
+  textoOriginal: [
+    "Produto AliExpress moedas PC",
+    "Por R$ 72,00",
+    "Link com moedas:",
+    "Link para PC:"
+  ].join("\n"),
+  titulo: "Produto AliExpress moedas PC",
+  preco: 72,
+  linksComerciais: linksAliExpressContextuais([
+    { contexto: "Link com moedas", urlAfiliada: "https://s.click.aliexpress.com/e/_moedasContexto" },
+    { contexto: "Link para PC", urlAfiliada: "https://s.click.aliexpress.com/e/_pcMoedasContexto" }
+  ])
+});
+recorder.check("aliexpress_contexto_moedas_pc", "link com moedas vira CTA APP/moedas e PC permanece separado", emOrdem(aliMoedasPcContexto.mensagem, [
+  "APP / Moedas",
+  "https://s.click.aliexpress.com/e/_moedasContexto",
+  "PC",
+  "https://s.click.aliexpress.com/e/_pcMoedasContexto"
+]), aliMoedasPcContexto.mensagem);
+
+const aliPrimeiroAppSegundoPc = renderizarAliExpress({
+  textoOriginal: [
+    "Produto AliExpress sem rotulos",
+    "Por R$ 68,00",
+    "⬇️",
+    "⬇️"
+  ].join("\n"),
+  titulo: "Produto AliExpress sem rotulos",
+  preco: 68,
+  linksComerciais: linksAliExpressContextuais([
+    { contexto: "⬇️", urlAfiliada: "https://s.click.aliexpress.com/e/_primeiroSemRotulo" },
+    { contexto: "⬇️", urlAfiliada: "https://s.click.aliexpress.com/e/_segundoSemRotulo" }
+  ])
+});
+recorder.check("aliexpress_primeiro_app_segundo_pc", "sem rotulos usa primeiro link como APP e segundo distinto como PC", emOrdem(aliPrimeiroAppSegundoPc.mensagem, [
+  "APP / Moedas",
+  "https://s.click.aliexpress.com/e/_primeiroSemRotulo",
+  "PC",
+  "https://s.click.aliexpress.com/e/_segundoSemRotulo"
+]), aliPrimeiroAppSegundoPc.mensagem);
+
+const aliLinkRepetidoPc = renderizarAliExpress({
+  textoOriginal: [
+    "Produto AliExpress link repetido",
+    "Por R$ 69,00",
+    "⬇️",
+    "⬇️",
+    "⬇️ Pelo PC"
+  ].join("\n"),
+  titulo: "Produto AliExpress link repetido",
+  preco: 69,
+  linksComerciais: linksAliExpressContextuais([
+    {
+      contexto: "⬇️",
+      urlOriginal: "https://a.aliexpress.com/_repetido",
+      urlAfiliada: "https://s.click.aliexpress.com/e/_repetidoApp"
+    },
+    {
+      contexto: "⬇️",
+      urlOriginal: "https://a.aliexpress.com/_repetido",
+      urlAfiliada: "https://s.click.aliexpress.com/e/_repetidoApp"
+    },
+    {
+      contexto: "Pelo PC",
+      urlOriginal: "https://a.aliexpress.com/_repetidoPc",
+      urlAfiliada: "https://s.click.aliexpress.com/e/_repetidoPc"
+    }
+  ])
+});
+recorder.check("aliexpress_link_repetido_pc", "link repetido nao duplica APP e PC continua renderizado", ocorrencias(aliLinkRepetidoPc.mensagem, "https://s.click.aliexpress.com/e/_repetidoApp") === 1 && emOrdem(aliLinkRepetidoPc.mensagem, [
+  "APP / Moedas",
+  "https://s.click.aliexpress.com/e/_repetidoApp",
+  "PC",
+  "https://s.click.aliexpress.com/e/_repetidoPc"
+]), aliLinkRepetidoPc.mensagem);
+
+const aliSomenteAppContexto = renderizarAliExpress({
+  textoOriginal: "Produto AliExpress mobile\nPor R$ 74,00\nAplicativo:",
+  titulo: "Produto AliExpress mobile",
+  preco: 74,
+  linksComerciais: linksAliExpressContextuais([
+    { contexto: "Aplicativo mobile", urlAfiliada: "https://s.click.aliexpress.com/e/_somenteAppContexto" }
+  ])
+});
+recorder.check("aliexpress_somente_app_contexto", "apenas APP renderiza sem criar PC falso", contem(aliSomenteAppContexto.mensagem, "APP / Moedas") && contem(aliSomenteAppContexto.mensagem, "https://s.click.aliexpress.com/e/_somenteAppContexto") && !contem(aliSomenteAppContexto.mensagem, "PC:"), aliSomenteAppContexto.mensagem);
+
+const aliSomentePcContexto = renderizarAliExpress({
+  textoOriginal: "Produto AliExpress desktop\nPor R$ 79,00\nPelo PC:",
+  titulo: "Produto AliExpress desktop",
+  preco: 79,
+  linksComerciais: linksAliExpressContextuais([
+    { contexto: "Pelo PC", urlAfiliada: "https://s.click.aliexpress.com/e/_somentePcContexto" }
+  ])
+});
+recorder.check("aliexpress_somente_pc_contexto", "apenas PC renderiza sem criar APP falso", contem(aliSomentePcContexto.mensagem, "PC") && contem(aliSomentePcContexto.mensagem, "https://s.click.aliexpress.com/e/_somentePcContexto") && !contem(aliSomentePcContexto.mensagem, "APP / Moedas"), aliSomentePcContexto.mensagem);
+
 const aliComImagem = renderizarAliExpress({
   textoOriginal: [
     "Tablet AliExpress",
@@ -705,6 +835,38 @@ recorder.check("aliexpress_urls_finais_distintas", "APP e PC com query final dis
   "https://s.click.aliexpress.com/e/_produto?src=app",
   "https://s.click.aliexpress.com/e/_produto?src=pc"
 ]), aliUrlsDistintasQuery.mensagem);
+
+const aliMesmoProdutoAppPc = renderizarAliExpress({
+  textoOriginal: [
+    "Produto AliExpress mesmo produto",
+    "Por R$ 88,00",
+    "Celular:",
+    "Produto:"
+  ].join("\n"),
+  titulo: "Produto AliExpress mesmo produto",
+  preco: 88,
+  linksComerciais: linksAliExpressContextuais([
+    {
+      contexto: "Celular",
+      urlOriginal: "https://a.aliexpress.com/_mesmoProdutoApp",
+      urlAfiliada: "https://s.click.aliexpress.com/e/_mesmoProduto?src=app"
+    },
+    {
+      contexto: "Produto",
+      urlOriginal: "https://www.aliexpress.com/item/100500999.html",
+      urlAfiliada: "https://s.click.aliexpress.com/e/_mesmoProduto?src=pc"
+    }
+  ])
+});
+recorder.check("aliexpress_mesmo_produto_app_pc", "APP e PC do mesmo produto continuam como CTAs separados quando URLs finais diferem", urlsDistintas(aliMesmoProdutoAppPc.mensagem, [
+  "https://s.click.aliexpress.com/e/_mesmoProduto?src=app",
+  "https://s.click.aliexpress.com/e/_mesmoProduto?src=pc"
+]) && emOrdem(aliMesmoProdutoAppPc.mensagem, [
+  "APP / Moedas",
+  "https://s.click.aliexpress.com/e/_mesmoProduto?src=app",
+  "PC",
+  "https://s.click.aliexpress.com/e/_mesmoProduto?src=pc"
+]), aliMesmoProdutoAppPc.mensagem);
 
 const aliAppMoedasDistintos = renderizarAliExpress({
   textoOriginal: "Produto AliExpress APP e moedas distintos\nPor R$ 93,00\n+ 300 moedas no APP",
