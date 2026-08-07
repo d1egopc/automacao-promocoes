@@ -263,6 +263,38 @@ function renderizarMercadoLivre({
   return { espelho, resultado, mensagem: resultado.mensagem };
 }
 
+function renderizarKabumAwin({
+  textoOriginal = "",
+  titulo = "Produto KaBuM",
+  preco = 100,
+  categoria = "Gamer e Hardware",
+  marketplace = "kabum",
+  linkAfiliado = "https://www.awin1.com/cread.php?awinmid=17729&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F123",
+  oferta = {},
+  ofertaEntrada = {},
+  template = {}
+} = {}) {
+  const espelho = criarEspelho({
+    textoOriginal,
+    oferta: {
+      titulo,
+      marketplace,
+      categoria,
+      preco,
+      linkAfiliado,
+      ...oferta
+    },
+    ofertaEntrada,
+    comercialNormalizado: { marketplace, precoAtual: preco, categoria, precoConfiavel: true }
+  });
+  const resultado = montarTemplateEspelhoPorBlocosV26(
+    espelho.espelhoComercial,
+    espelho.documentoComercialCanonico,
+    { template }
+  );
+  return { espelho, resultado, mensagem: resultado.mensagem };
+}
+
 assertPoliticaOficial();
 
 const recorder = criarSnapshotRecorder();
@@ -657,17 +689,79 @@ const aliTemplateProtegido = renderizarAliExpress({
 });
 recorder.check("aliexpress_template_protegido", "template personalizado nao esconde links protegidos AliExpress", contem(aliTemplateProtegido.mensagem, "R$ 105,00") && contem(aliTemplateProtegido.mensagem, "https://s.click.aliexpress.com/e/_templateApp") && contem(aliTemplateProtegido.mensagem, "https://s.click.aliexpress.com/e/_templatePc"), aliTemplateProtegido.mensagem);
 
-const kabumMensagem = mensagemPadrao({
-  titulo: "Placa Mae MSI Pro B650M-P",
-  marketplace: "kabum",
+const kabumReferencia = renderizarKabumAwin({
+  textoOriginal: [
+    "Mousepad Gamer Rise Mode RGB",
+    "De: R$ 149,90",
+    "Por: R$ 117,64",
+    "3x de R$ 39,21 sem juros",
+    "Cupom: MOUSEPAD9X3",
+    "Aplique o cupom MOUSEPAD9X3 para obter o desconto.",
+    "Frete varia por estado"
+  ].join("\n"),
+  titulo: "Mousepad Gamer Rise Mode RGB",
+  preco: 117.64,
   categoria: "Gamer e Hardware",
-  precoAtual: 899.9,
-  frete: "Frete varia por estado",
   linkAfiliado: "https://www.awin1.com/cread.php?awinmid=17729&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F123"
 });
-recorder.check("kabum_awin_template_padrao", "preserva contrato comercial e link afiliado AWIN", contem(kabumMensagem, "Placa Mae MSI Pro B650M-P") && contem(kabumMensagem, "https://www.awin1.com/cread.php"), kabumMensagem);
-recorder.check("kabum_awin_template_padrao", "nao renderiza URL original de terceiro", !contem(kabumMensagem, "clickref=terceiro"), kabumMensagem);
-recorder.check("kabum_awin_template_padrao", "frete capturado permanece textual", contem(kabumMensagem, "Frete varia por estado"), kabumMensagem);
+const kabumMensagem = kabumReferencia.mensagem;
+recorder.check("kabum_awin_ofc", "preserva ordem comercial KaBuM/AWIN no OFC", emOrdem(kabumMensagem, [
+  "Mousepad Gamer Rise Mode RGB",
+  "KaBuM",
+  "Gamer e Hardware",
+  "De: R$ 149,90",
+  "Por: R$ 117,64",
+  "3x de R$ 39,21 sem juros",
+  "Cupom: MOUSEPAD9X3",
+  "Aplique o cupom MOUSEPAD9X3 para obter o desconto.",
+  "Frete varia por estado",
+  "Confira aqui",
+  "https://www.awin1.com/cread.php",
+  "Oferta sujeita"
+]), kabumMensagem);
+recorder.check("kabum_awin_ofc", "link AWIN afiliado preservado sem trocar por original KaBuM", contem(kabumMensagem, "https://www.awin1.com/cread.php") && !contem(kabumMensagem, "clickref=terceiro"), kabumMensagem);
+recorder.check("kabum_awin_ofc", "frete capturado aparece uma vez e nao duplica como beneficio", ocorrencias(kabumMensagem, "Frete varia por estado") === 1, kabumMensagem);
+recorder.check("kabum_awin_ofc", "instrucao capturada e aviso editorial aparecem uma vez", ocorrencias(kabumMensagem, "Aplique o cupom MOUSEPAD9X3") === 1 && ocorrencias(kabumMensagem, "Oferta sujeita") === 1, kabumMensagem);
+
+const kabumDeEstruturado = renderizarKabumAwin({
+  textoOriginal: "Produto KaBuM preco de estruturado\nPor: R$ 199,90",
+  titulo: "Produto KaBuM preco de estruturado",
+  preco: 199.9,
+  oferta: { precoOriginal: 249.9 },
+  linkAfiliado: "https://www.awin1.com/cread.php?awinmid=17729&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F654"
+});
+recorder.check("kabum_awin_preco_de_estruturado", "De explicito de campo estruturado confiavel renderiza sem calculo", contem(kabumDeEstruturado.mensagem, "De: R$ 249,90") && contem(kabumDeEstruturado.mensagem, "Por: R$ 199,90"), kabumDeEstruturado.mensagem);
+
+const kabumDeInvalido = renderizarKabumAwin({
+  textoOriginal: "Produto KaBuM sem desconto real\nDe: R$ 700,00\nPor: R$ 810,00",
+  titulo: "Produto KaBuM sem desconto real",
+  preco: 810,
+  linkAfiliado: "https://www.awin1.com/cread.php?awinmid=17729&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F456"
+});
+recorder.check("kabum_awin_preco_de_invalido", "De menor ou igual a Por nao renderiza desconto falso", !contem(kabumDeInvalido.mensagem, "De: R$ 700,00") && contem(kabumDeInvalido.mensagem, "Por: R$ 810,00"), kabumDeInvalido.mensagem);
+recorder.check("kabum_awin_preco_de_invalido", "inconsistencia fica em auditoria interna", kabumDeInvalido.espelho.documentoComercialCanonico.auditoriaComercial?.avisosInternos?.includes("preco_de_menor_ou_igual_preco_por_omitido"), JSON.stringify(kabumDeInvalido.espelho.documentoComercialCanonico.auditoriaComercial));
+
+const kabumSemFreteInstrucao = renderizarKabumAwin({
+  textoOriginal: [
+    "Produto KaBuM sem entrega informada",
+    "Por: R$ 299,90",
+    "Cupom: KABUM10"
+  ].join("\n"),
+  titulo: "Produto KaBuM sem entrega informada",
+  preco: 299.9,
+  linkAfiliado: "https://www.awin1.com/cread.php?awinmid=17729&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F789"
+});
+recorder.check("kabum_awin_sem_frete_instrucao", "frete ausente nao e inventado", !kabumSemFreteInstrucao.mensagem.includes("🚚") && !contem(kabumSemFreteInstrucao.mensagem, "Frete gratis"), kabumSemFreteInstrucao.mensagem);
+recorder.check("kabum_awin_sem_frete_instrucao", "cupom real permanece sem frase automatica inventada", contem(kabumSemFreteInstrucao.mensagem, "Cupom: KABUM10") && !contem(kabumSemFreteInstrucao.mensagem, "Aplique o cupom KABUM10"), kabumSemFreteInstrucao.mensagem);
+
+const awinComoMarketplace = renderizarKabumAwin({
+  textoOriginal: "Placa Mae MSI Pro B650M-P\nPor: R$ 899,90\nFrete varia por estado",
+  titulo: "Placa Mae MSI Pro B650M-P",
+  preco: 899.9,
+  marketplace: "awin",
+  linkAfiliado: "https://www.awin1.com/cread.php?awinmid=17729&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F321"
+});
+recorder.check("kabum_awin_marketplace_publico", "marketplace AWIN/KABUM aparece publicamente como KaBuM", contem(awinComoMarketplace.mensagem, "KaBuM") && !contem(awinComoMarketplace.mensagem, "KaBuM / AWIN"), awinComoMarketplace.mensagem);
 
 const customProtegidosOff = renderizarTemplatePersonalizado({
   oferta: {
@@ -723,7 +817,6 @@ for (const item of resumo) {
 
 const falhas = recorder.falhas();
 const falhasEsperadasFase2 = new Map([
-  ["kabum_awin_template_padrao", "KaBuM/AWIN ainda nao preserva frete textual no template padrao"],
   ["template_personalizado_protegidos", "Renderer legado de template personalizado ainda permite ocultar protegidos"],
   ["template_padrao_sem_titulo", "Template padrao legado ainda cria titulo fallback Oferta"]
 ]);
@@ -742,5 +835,5 @@ if (falhasInesperadas.length || falhasEsperadasAusentes.length) {
   for (const [nome, motivo] of falhasEsperadasFase2) {
     console.log(`[SNAPSHOT-COMERCIAL-F1] DIVERGENCIA-ESPERADA ${nome}: ${motivo}`);
   }
-  console.log("[SNAPSHOT-COMERCIAL-F1] Amazon, AliExpress e Mercado Livre homologados; divergencias restantes preservadas como esperadas");
+  console.log("[SNAPSHOT-COMERCIAL-F1] Amazon, AliExpress, Mercado Livre e KaBuM/AWIN homologados; divergencias restantes preservadas como esperadas");
 }

@@ -411,7 +411,7 @@ function montarInstrucaoCupomCanonica(doc = {}, cupons = []) {
   if (marketplaceAliExpress(doc.marketplace)) {
     if (cupons.length) return "Aplique um dos cupons acima para obter este preço.";
   }
-  if (marketplaceMercadoLivre(doc.marketplace)) return "";
+  if (marketplaceMercadoLivre(doc.marketplace) || marketplaceKabumAwin(doc.marketplace)) return "";
   if (!cupons.length) return "";
   if (cupons.length > 1) return "Aplique um dos cupons informados para obter o desconto.";
   const codigo = cupons[0];
@@ -750,8 +750,13 @@ function marketplaceMercadoLivre(valor = "") {
   return mp === "mercadolivre" || mp === "ml";
 }
 
-function precoDeInconsistenteMercadoLivre(precoDeTexto = "", precoPorTexto = "", marketplace = "") {
-  if (!marketplaceMercadoLivre(marketplace)) return false;
+function marketplaceKabumAwin(valor = "") {
+  const mp = normalizarComparacao(valor).replace(/[^a-z0-9]+/g, "");
+  return mp === "kabum" || mp === "awin" || mp === "feedkabum" || mp === "feedawin";
+}
+
+function precoDeInconsistenteParaRenderizacao(precoDeTexto = "", precoPorTexto = "", marketplace = "") {
+  if (!marketplaceMercadoLivre(marketplace) && !marketplaceKabumAwin(marketplace)) return false;
   const precoDe = numeroMonetario(precoDeTexto);
   const precoPor = numeroMonetario(precoPorTexto);
   return precoDe !== null && precoPor !== null && precoDe <= precoPor;
@@ -950,7 +955,7 @@ function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
   if (/\bmais\s+vendido|best\s*seller\b/i.test(contexto.textoOriginal || "")) adicionarBlocoComercial(blocos, { tipo: "selo_mais_vendido", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bmais\s+vendido|best seller\b/) || "Mais vendido", origem: "texto_comercial_original", confianca: "media" });
 
   adicionarBlocosDeLinks(blocos, doc, contexto);
-  if ((marketplaceAliExpress(doc.marketplace) || marketplaceAmazon(doc.marketplace) || marketplaceMercadoLivre(doc.marketplace)) && !lista(doc.avisos).some(avisoEditorialAliExpressEquivalente)) {
+  if ((marketplaceAliExpress(doc.marketplace) || marketplaceAmazon(doc.marketplace) || marketplaceMercadoLivre(doc.marketplace) || marketplaceKabumAwin(doc.marketplace)) && !lista(doc.avisos).some(avisoEditorialAliExpressEquivalente)) {
     adicionarBlocoComercial(blocos, {
       tipo: "aviso",
       textoOriginal: AVISO_EDITORIAL_ALIEXPRESS,
@@ -1067,7 +1072,18 @@ function extrairDocumentoComercialCanonico({
   const linhaResgate = primeiraLinhaPorNormalizacao(textoOriginal, /\bresgate\b/);
   const linhaBeneficio = primeiraLinhaPorNormalizacao(textoOriginal, /\b(?:beneficio|app|prime|voucher|moeda|moedas|direto do brasil|pre venda|pré venda)\b/);
 
-  let precoDeTexto = extrairTextoLinhaPreco(linhaDe, "de") || precosTexto.precoDeTexto || "";
+  const precoDeEstruturado = textoPrecoEstruturado(primeiroValor(
+    ofertaEntrada.precoOriginal,
+    ofertaEntrada.precoDe,
+    ofertaEntrada.precoAntigo,
+    oferta.precoOriginal,
+    oferta.precoDe,
+    oferta.precoAntigo,
+    comercialNormalizado.precoOriginal,
+    comercialNormalizado.precoDe,
+    comercialNormalizado.precoAntigo
+  ));
+  let precoDeTexto = extrairTextoLinhaPreco(linhaDe, "de") || precosTexto.precoDeTexto || precoDeEstruturado || "";
   const precoPorEstruturado = textoPrecoEstruturado(primeiroValor(
     ofertaEntrada.precoAtual,
     ofertaEntrada.preco,
@@ -1078,7 +1094,7 @@ function extrairDocumentoComercialCanonico({
   const precoPorTexto = extrairTextoLinhaPreco(linhaPor, "por") || extrairTextoLinhaPreco(linhaValor, "valor") || precosTexto.precoPorTexto || precoPorEstruturado || "";
   const precoPixTexto = extrairPrecoPixDocumento({ textoOriginal, linhaPor, linhaValor, precoPorTexto, oferta, ofertaEntrada, marketplace });
   const avisosInternos = [];
-  if (precoDeInconsistenteMercadoLivre(precoDeTexto, precoPorTexto, marketplace)) {
+  if (precoDeInconsistenteParaRenderizacao(precoDeTexto, precoPorTexto, marketplace)) {
     avisosInternos.push("preco_de_menor_ou_igual_preco_por_omitido");
     precoDeTexto = "";
   }
@@ -1503,7 +1519,7 @@ function marketplaceVisual(valor = "") {
   if (normalizado === "aliexpress") return "AliExpress";
   if (normalizado === "amazon") return "Amazon";
   if (normalizado === "kabum") return "KaBuM";
-  if (normalizado === "awin") return "KaBuM / AWIN";
+  if (normalizado === "awin" || normalizado === "feedawin" || normalizado === "feedkabum") return "KaBuM";
   return texto(valor);
 }
 
