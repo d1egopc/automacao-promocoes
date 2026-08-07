@@ -77,6 +77,14 @@ function instrucaoCupomOferta(oferta = {}) {
 }
 
 function templateIncompativelComOfertaFiel(template = {}, oferta = {}) {
+  const blocosAtivos = blocosAtivosTemplate(template);
+  const possuiCupomConfirmado = cuponsOferta(oferta).length > 0 &&
+    (oferta.cupomConfirmado === true || Boolean(instrucaoCupomOferta(oferta)));
+
+  if (possuiCupomConfirmado && !blocosAtivos.has("cupom")) {
+    return "template_sem_cupom_obrigatorio";
+  }
+
   return "";
 }
 

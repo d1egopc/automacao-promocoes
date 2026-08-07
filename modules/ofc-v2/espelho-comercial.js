@@ -1859,7 +1859,7 @@ function textoBlocoCanonicoV26(bloco = {}) {
 function ordemRenderizacaoBlocoCanonicoV26(bloco = {}, documento = {}) {
   const ordem = Number.isFinite(Number(bloco.ordemSugerida)) ? Number(bloco.ordemSugerida) : 1000;
   if (marketplaceShopee(documento.marketplace) && bloco.tipo === "link_resgate") {
-    return ORDEM_BLOCOS_COMERCIAIS_V26.link_afiliado - 0.5;
+    return Math.min(ordem, ORDEM_BLOCOS_COMERCIAIS_V26.link_afiliado - 0.5);
   }
   if (marketplaceAliExpressValor(documento.marketplace) && bloco.tipo === "link_moedas") {
     return ORDEM_BLOCOS_COMERCIAIS_V26.link_app + 0.25;

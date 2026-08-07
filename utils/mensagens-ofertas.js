@@ -21,6 +21,58 @@ function normalizarTextoLocal(valor = "") {
   return String(valor || "").trim();
 }
 
+function textoMensagemExistenteLocal(valor = "") {
+  if (valor === null || valor === undefined) return "";
+  if (typeof valor === "object" || typeof valor === "function") return "";
+  const texto = String(valor).trim();
+  if (!texto || ["undefined", "null", "nan"].includes(texto.toLowerCase())) return "";
+  return texto;
+}
+
+function resolverMensagemExistente(oferta = {}, opcoes = {}, ofertaOficial = {}) {
+  const metadata = oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
+  const metadataOficial = ofertaOficial.metadata && typeof ofertaOficial.metadata === "object" ? ofertaOficial.metadata : {};
+  const radarMirror = metadata.radarMirror && typeof metadata.radarMirror === "object" ? metadata.radarMirror : {};
+  const radarMirrorOficial = metadataOficial.radarMirror && typeof metadataOficial.radarMirror === "object" ? metadataOficial.radarMirror : {};
+  const candidatos = [
+    opcoes.mensagemAtual,
+    opcoes.mensagemExistente,
+    opcoes.mensagemOriginal,
+    opcoes.textoOriginal,
+    oferta.mensagemRenderizada,
+    oferta.mensagemFinal,
+    oferta.mensagem,
+    oferta.legenda,
+    oferta.texto,
+    oferta.textoOriginal,
+    oferta.mensagemOriginalRadar,
+    oferta.textoComercialOriginal,
+    metadata.mensagemOriginalRadar,
+    metadata.textoOriginal,
+    radarMirror.texto?.original,
+    radarMirror.evento?.texto_original,
+    ofertaOficial.mensagemRenderizada,
+    ofertaOficial.mensagemFinal,
+    ofertaOficial.mensagem,
+    ofertaOficial.legenda,
+    ofertaOficial.texto,
+    ofertaOficial.textoOriginal,
+    ofertaOficial.mensagemOriginalRadar,
+    ofertaOficial.textoComercialOriginal,
+    metadataOficial.mensagemOriginalRadar,
+    metadataOficial.textoOriginal,
+    radarMirrorOficial.texto?.original,
+    radarMirrorOficial.evento?.texto_original
+  ];
+
+  for (const candidato of candidatos) {
+    const mensagem = textoMensagemExistenteLocal(candidato);
+    if (mensagem) return mensagem;
+  }
+
+  return "Oferta recebida. Renderizacao oficial indisponivel no momento.";
+}
+
 function normalizarComparacaoLocal(valor = "") {
   return normalizarTextoLocal(valor)
     .normalize("NFD")
@@ -43,7 +95,7 @@ function normalizarEngineV2Modo() {
 }
 
 function templateUniversalOficialAtivo() {
-  return normalizarEngineV2Modo() === "full";
+  return true;
 }
 
 function scoreUniversal(valor) {
@@ -276,6 +328,7 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
   const renderersFinaisValidos = new Set([
     "ofc_v25_documento_canonico",
     "ofc_v25_espelho",
+    "renderer_oficial",
     "template_personalizado",
     "template_universal",
     "template_legado",
@@ -297,6 +350,7 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
       ofc_v24_espelho_piloto: ofcV24.documentoComercialCanonico ? "ofc_v25_documento_canonico" : "ofc_v25_espelho",
       personalizado_resolver: "template_personalizado",
       universal_oficial: "template_universal",
+      mensagem_existente_sem_reconstrucao: "renderer_oficial",
       personalizado_legado: "template_legado",
       fallback_amazon: "fallback_marketplace",
       fallback_shopee: "fallback_marketplace",
@@ -304,6 +358,7 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
       fallback_padrao: "fallback_generico"
     }[templateTipo] || "fallback_generico"));
     const fallbackUtilizado = decisao.fallbackUtilizado === true ||
+      rendererEscolhido === "renderer_oficial" ||
       rendererEscolhido === "template_legado" ||
       rendererEscolhido === "fallback_marketplace" ||
       rendererEscolhido === "fallback_generico";
@@ -368,9 +423,12 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
     templateTipo: "resolver_mensagem_oferta"
   });
 
+  const mensagemExistente = resolverMensagemExistente(oferta, opcoes, ofertaOficial);
+
   espelhoPilotoResultado = selecionarTemplateEspelhoPiloto({
     workspaceId: clienteId,
     oferta: ofertaOficial,
+    mensagemAtual: mensagemExistente,
     destino,
     canal: opcoes.canal || destino.canal || destino.tipo
   });
@@ -416,62 +474,9 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
     motivo: motivoRendererOficial("renderer_oficial")
   });
 
-  if (deveUsarTemplatePersonalizado({ ...opcoes, oferta: ofertaOficial })) {
-    const mensagemPersonalizada = montarMensagemTemplatePersonalizado(
-      ofertaOficial,
-      opcoes.destino
-    );
-
-    if (mensagemPersonalizada) return registrarTemplate("personalizado_legado", mensagemPersonalizada, {
-      rendererEscolhido: "template_legado",
-      motivo: "fallback_personalizado",
-      fallbackUtilizado: true,
-      rendererOrigem: "template_personalizado"
-    });
-  }
-
-  const marketplace = String(ofertaOficial.marketplace || "").toLowerCase();
-
-  if (marketplace === "amazon") {
-    const mensagemAmazon = formatarOfertaUniversal({
-      ...ofertaOficial,
-      precoOriginal: ofertaOficial.precoOriginal ?? ofertaOficial.precoAntigo,
-      beneficioTexto: ofertaOficial.beneficioTexto || ofertaOficial.beneficioExtra || ofertaOficial.avisoCupom || ""
-    }) || montarLegendaOferta(ofertaOficial);
-    return registrarTemplate("fallback_amazon", mensagemAmazon, {
-      rendererEscolhido: "fallback_marketplace",
-      motivo: "fallback_marketplace",
-      fallbackUtilizado: true,
-      rendererOrigem: "template_universal"
-    });
-  }
-
-  if (marketplace === "shopee") {
-    return registrarTemplate("fallback_shopee", montarLegendaShopee(ofertaOficial), {
-      rendererEscolhido: "fallback_marketplace",
-      motivo: "fallback_marketplace",
-      fallbackUtilizado: true,
-      rendererOrigem: "template_universal"
-    });
-  }
-
-  if (marketplace === "mercadolivre" || marketplace === "mercado_livre") {
-    const mensagemMl = formatarOfertaUniversal({
-      ...ofertaOficial,
-      precoOriginal: ofertaOficial.precoOriginal ?? ofertaOficial.precoAntigo,
-      beneficioTexto: ofertaOficial.beneficioTexto || ofertaOficial.beneficioExtra || ofertaOficial.avisoCupom || ""
-    }) || montarLegendaOferta(ofertaOficial);
-    return registrarTemplate("fallback_mercadolivre", mensagemMl, {
-      rendererEscolhido: "fallback_marketplace",
-      motivo: "fallback_marketplace",
-      fallbackUtilizado: true,
-      rendererOrigem: "template_universal"
-    });
-  }
-
-  return registrarTemplate("fallback_padrao", montarLegendaOferta(ofertaOficial) || ofertaOficial.mensagem || ofertaOficial.texto || "", {
-    rendererEscolhido: "fallback_generico",
-    motivo: "fallback_generico",
+  return registrarTemplate("mensagem_existente_sem_reconstrucao", mensagemExistente, {
+    rendererEscolhido: "renderer_oficial",
+    motivo: "mensagem_existente_sem_reconstrucao",
     fallbackUtilizado: true,
     rendererOrigem: "template_universal"
   });
