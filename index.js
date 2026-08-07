@@ -26,6 +26,7 @@ const {
   validarJobsDiagnosticadosEngine,
   importarJobsProntosEngine,
   limparJobsAntigosEngine,
+  executarRetencaoJobsPostgres,
   distribuirOfertasEngine
 } = require("./modules/engine");
 
@@ -8881,6 +8882,35 @@ app.post("/engine/limpar-jobs-antigos", async (req, res) => {
       afetados: 0,
       porStatus: {},
       porCliente: {}
+    });
+  }
+});
+
+app.post("/admin/postgres/jobs-retencao", async (req, res) => {
+  if (!exigirAdminMasterEngine(req, res)) return;
+
+  try {
+    const resultado = await executarRetencaoJobsPostgres({
+      dryRun: req.body?.dryRun !== false,
+      confirmacao: req.body?.confirmacao || "",
+      loteLimite: req.body?.loteLimite,
+      emergenciaVolumeCheio: req.body?.emergenciaVolumeCheio === true,
+      horasMinimas: 12
+    });
+
+    return res.status(resultado.ok ? 200 : 400).json(resultado);
+  } catch (e) {
+    console.log("[POSTGRES-JOBS-RETENCAO-ERRO]", {
+      rota: "/admin/postgres/jobs-retencao",
+      motivo: "retencao_jobs_postgres_falhou",
+      erro: String(e.message || "erro_desconhecido").slice(0, 180)
+    });
+
+    return res.status(500).json({
+      ok: false,
+      motivo: "banco_indisponivel",
+      erro: String(e.message || "erro_desconhecido").slice(0, 180),
+      aplicouMudancas: false
     });
   }
 });
