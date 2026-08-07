@@ -1055,12 +1055,129 @@ recorder.check("template_personalizado_protegidos", "toggle nao esconde titulo/p
 ].every(trecho => contem(customProtegidosOff.mensagem, trecho)), customProtegidosOff.mensagem);
 recorder.check("template_personalizado_protegidos", "toggle pode esconder apenas opcionais visuais", !contem(customProtegidosOff.mensagem, "Rodape desligado"), customProtegidosOff.mensagem);
 
+const customOpcionalOff = renderizarTemplatePersonalizado({
+  oferta: {
+    titulo: "Oferta Opcional",
+    marketplace: "amazon",
+    categoria: "Casa",
+    precoAtual: 49.9,
+    descricao: "Descricao extra opcional",
+    linkAfiliado: "https://amzn.to/opcional"
+  },
+  template: {
+    id: "tpl_snapshot_opcional_off",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "titulo", ativo: true, ordem: 10 },
+      { tipo: "marketplace", ativo: false, ordem: 20 },
+      { tipo: "categoria", ativo: false, ordem: 30 },
+      { tipo: "descricao_adicional", ativo: false, ordem: 40 },
+      { tipo: "preco_por", ativo: true, ordem: 50 },
+      { tipo: "link", ativo: true, ordem: 60 }
+    ]
+  },
+  canal: "whatsapp"
+});
+recorder.check("template_personalizado_opcional_off", "toggle esconde bloco opcional visual", !contem(customOpcionalOff.mensagem, "Amazon") && !contem(customOpcionalOff.mensagem, "Casa") && !contem(customOpcionalOff.mensagem, "Descricao extra opcional"), customOpcionalOff.mensagem);
+
+const fraseCupomRedundanteOff = renderizarTemplatePersonalizado({
+  oferta: {
+    titulo: "Oferta Cupom Redundante",
+    precoAtual: 117.2,
+    cupom: "OFICIALMODA",
+    linkAfiliado: "https://meli.la/redundante"
+  },
+  template: {
+    id: "tpl_snapshot_frase_redundante_off",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "titulo", ativo: true, ordem: 10 },
+      { tipo: "preco_por", ativo: true, ordem: 20 },
+      { tipo: "cupom", ativo: true, ordem: 30 },
+      { tipo: "frase_cupom", ativo: false, ordem: 40 },
+      { tipo: "link", ativo: true, ordem: 50 }
+    ]
+  },
+  canal: "whatsapp"
+});
+recorder.check("template_personalizado_frase_cupom_redundante", "frase explicativa redundante pode ser escondida", contem(fraseCupomRedundanteOff.mensagem, "OFICIALMODA") && !contem(fraseCupomRedundanteOff.mensagem, "Aplique o cupom"), fraseCupomRedundanteOff.mensagem);
+
+const condicaoEssencialOff = renderizarTemplatePersonalizado({
+  oferta: {
+    titulo: "Oferta Condicao Essencial",
+    marketplace: "aliexpress",
+    precoAtual: 83,
+    cupom: "BRAE1",
+    instrucaoCupom: "Resgate cupom da loja + 821 moedas no APP",
+    linksComerciais: [
+      { tipo: "app", afiliado: "https://s.click.aliexpress.com/e/_condicaoApp" },
+      { tipo: "pc", afiliado: "https://s.click.aliexpress.com/e/_condicaoPc" }
+    ]
+  },
+  template: {
+    id: "tpl_snapshot_condicao_essencial_off",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "titulo", ativo: false, ordem: 10 },
+      { tipo: "preco_por", ativo: false, ordem: 20 },
+      { tipo: "cupom", ativo: false, ordem: 30 },
+      { tipo: "frase_cupom", ativo: false, ordem: 40 },
+      { tipo: "link_app", ativo: false, ordem: 90 },
+      { tipo: "link_pc", ativo: false, ordem: 80 }
+    ]
+  },
+  canal: "whatsapp"
+});
+recorder.check("template_personalizado_condicao_essencial", "condicao essencial nao pode ser escondida", contem(condicaoEssencialOff.mensagem, "Resgate cupom da loja + 821 moedas no APP"), condicaoEssencialOff.mensagem);
+recorder.check("template_personalizado_app_pc_protegidos", "APP/PC protegidos preservam ordem comercial", emOrdem(condicaoEssencialOff.mensagem, [
+  "APP / Moedas",
+  "https://s.click.aliexpress.com/e/_condicaoApp",
+  "PC",
+  "https://s.click.aliexpress.com/e/_condicaoPc"
+]), condicaoEssencialOff.mensagem);
+
+const linksShopeeProtegidos = renderizarTemplatePersonalizado({
+  oferta: {
+    titulo: "Oferta Shopee Protegida",
+    marketplace: "shopee",
+    precoAtual: 102.46,
+    linkAfiliado: "https://s.shopee.com.br/produto-final",
+    linksResgate: [{ tipo: "resgate", afiliado: "https://s.shopee.com.br/resgate-final" }]
+  },
+  template: {
+    id: "tpl_snapshot_links_shopee_off",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "link", ativo: false, ordem: 10 },
+      { tipo: "link_resgate", ativo: false, ordem: 90 },
+      { tipo: "titulo", ativo: false, ordem: 100 },
+      { tipo: "preco_por", ativo: false, ordem: 110 }
+    ]
+  },
+  canal: "whatsapp"
+});
+recorder.check("template_personalizado_resgate_produto_protegidos", "resgate/produto protegidos preservam ordem comercial", emOrdem(linksShopeeProtegidos.mensagem, [
+  "Resgate",
+  "https://s.shopee.com.br/resgate-final",
+  "Confira aqui",
+  "https://s.shopee.com.br/produto-final"
+]), linksShopeeProtegidos.mensagem);
+
+const parcelamentoSemOuOu = mensagemPadrao({
+  titulo: "Oferta Parcelamento",
+  marketplace: "amazon",
+  precoAtual: 49.9,
+  parcelamento: "Ou 3x de R$16,63 sem juros",
+  linkAfiliado: "https://amzn.to/parcelamento"
+});
+recorder.check("template_padrao_sem_ou_ou", "Template Universal nao duplica prefixo Ou no parcelamento", !/Ou\s+\*?Ou\b/i.test(parcelamentoSemOuOu), parcelamentoSemOuOu);
+
 const semTituloMensagem = mensagemPadrao({
   marketplace: "amazon",
   precoAtual: 49.9,
   linkAfiliado: "https://amzn.to/sem-titulo"
 });
-recorder.check("template_padrao_sem_titulo", "Template Universal nao cria titulo Oferta", !contem(semTituloMensagem, "Oferta"), semTituloMensagem);
+recorder.check("template_padrao_sem_titulo", "Template Universal nao cria titulo Oferta", !contem(semTituloMensagem, "🔥 *Oferta*"), semTituloMensagem);
 
 const resumo = recorder.resumo();
 for (const item of resumo) {
@@ -1075,24 +1192,9 @@ for (const item of resumo) {
 }
 
 const falhas = recorder.falhas();
-const falhasEsperadasFase2 = new Map([
-  ["template_personalizado_protegidos", "Renderer legado de template personalizado ainda permite ocultar protegidos"],
-  ["template_padrao_sem_titulo", "Template padrao legado ainda cria titulo fallback Oferta"]
-]);
-const falhasInesperadas = falhas.filter(item => !falhasEsperadasFase2.has(item.nome));
-const falhasEsperadasAusentes = [...falhasEsperadasFase2.keys()].filter(nome => !falhas.some(item => item.nome === nome));
-
-if (falhasInesperadas.length || falhasEsperadasAusentes.length) {
-  if (falhasInesperadas.length) {
-    console.error(`[SNAPSHOT-COMERCIAL-F1] ${falhasInesperadas.length} snapshot(s) com divergencia inesperada`);
-  }
-  if (falhasEsperadasAusentes.length) {
-    console.error(`[SNAPSHOT-COMERCIAL-F1] divergencia(s) esperada(s) mudaram sem homologacao: ${falhasEsperadasAusentes.join(", ")}`);
-  }
+if (falhas.length) {
+  console.error(`[SNAPSHOT-COMERCIAL-F1] ${falhas.length} snapshot(s) com divergencia`);
   process.exitCode = 1;
 } else {
-  for (const [nome, motivo] of falhasEsperadasFase2) {
-    console.log(`[SNAPSHOT-COMERCIAL-F1] DIVERGENCIA-ESPERADA ${nome}: ${motivo}`);
-  }
-  console.log("[SNAPSHOT-COMERCIAL-F1] Amazon, AliExpress, Mercado Livre, KaBuM/AWIN e Shopee homologados; divergencias restantes preservadas como esperadas");
+  console.log("[SNAPSHOT-COMERCIAL-F1] Amazon, AliExpress, Mercado Livre, KaBuM/AWIN, Shopee e templates homologados");
 }

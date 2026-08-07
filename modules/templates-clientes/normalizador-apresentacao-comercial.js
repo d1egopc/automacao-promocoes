@@ -284,9 +284,7 @@ function normalizarApresentacaoComercial(dados = {}, origem = {}) {
     dados.instrucaoCupom || origem.instrucaoCupom || "",
     cupons
   );
-  const instrucaoCupom = aliExpress && cupons.length
-    ? "Aplique um dos cupons acima para obter este preço."
-    : instrucaoCupomBase;
+  const instrucaoCupom = instrucaoCupomBase;
   const moedasAliExpress = aliExpress
     ? extrairMoedasApresentacao(
       dados.moedasTexto,

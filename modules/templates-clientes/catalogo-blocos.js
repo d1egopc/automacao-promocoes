@@ -1,3 +1,5 @@
+const { classificarBlocoComercial, togglePodeOcultarBloco } = require("./politica-blocos-comerciais");
+
 const CANAIS_PERMITIDOS = ["whatsapp", "telegram", "social"];
 
 function bloco({
@@ -10,9 +12,11 @@ function bloco({
   emojiPadrao = "",
   regraVazio = "ocultar_sem_dados",
   dependencias = [],
+  configuravel = true,
   aceitaVazio = false,
   canais = CANAIS_PERMITIDOS
 }) {
+  const politica = classificarBlocoComercial(tipo);
   return {
     tipo,
     nome: nomeVisual,
@@ -26,6 +30,10 @@ function bloco({
     emojiPadrao,
     regraVazio,
     dependencias,
+    configuravel: configuravel && togglePodeOcultarBloco(tipo),
+    toggleOficial: configuravel && togglePodeOcultarBloco(tipo),
+    classeComercial: politica.classe,
+    protegido: politica.protegido,
     canais,
     canaisCompativeis: canais
   };
@@ -38,6 +46,7 @@ const CATALOGO_BLOCOS = Object.freeze({
     descricaoVisual: "Nome principal da oferta.",
     campoOrigem: "titulo|nome",
     ordemPadrao: 10,
+    configuravel: false,
     emojiPadrao: "🔥"
   }),
   marketplace: bloco({
@@ -70,6 +79,7 @@ const CATALOGO_BLOCOS = Object.freeze({
     descricaoVisual: "Preco atual, preco por ou valor efetivo ja preparado.",
     campoOrigem: "valorEfetivo|precoAtual|precoPor|preco",
     ordemPadrao: 50,
+    configuravel: false,
     emojiPadrao: "✅"
   }),
   desconto_percentual: bloco({
@@ -183,7 +193,35 @@ const CATALOGO_BLOCOS = Object.freeze({
     descricaoVisual: "Link de resgate de cupons quando existir na oferta.",
     campoOrigem: "linkResgate|linksResgate",
     ordemPadrao: 170,
+    configuravel: false,
     emojiPadrao: "\uD83C\uDF9F\uFE0F"
+  }),
+  link_app: bloco({
+    tipo: "link_app",
+    nomeVisual: "Link APP",
+    descricaoVisual: "CTA de APP afiliado seguro quando existir na oferta.",
+    campoOrigem: "linkApp|linksComerciais.link_app",
+    ordemPadrao: 180,
+    configuravel: false,
+    emojiPadrao: "ðŸ“±"
+  }),
+  link_moedas: bloco({
+    tipo: "link_moedas",
+    nomeVisual: "Link moedas",
+    descricaoVisual: "CTA de moedas afiliado seguro quando existir na oferta.",
+    campoOrigem: "linkMoedas|linksComerciais.link_moedas",
+    ordemPadrao: 180,
+    configuravel: false,
+    emojiPadrao: "ðŸª™"
+  }),
+  link_pc: bloco({
+    tipo: "link_pc",
+    nomeVisual: "Link PC",
+    descricaoVisual: "CTA de PC afiliado seguro quando existir na oferta.",
+    campoOrigem: "linkPc|linksComerciais.link_pc",
+    ordemPadrao: 180,
+    configuravel: false,
+    emojiPadrao: "ðŸ–¥ï¸"
   }),
   link: bloco({
     tipo: "link",
@@ -191,6 +229,7 @@ const CATALOGO_BLOCOS = Object.freeze({
     descricaoVisual: "Link afiliado, final ou URL da oferta.",
     campoOrigem: "linkAfiliado|linkFinal|link|url",
     ordemPadrao: 180,
+    configuravel: false,
     emojiPadrao: ""
   }),
   aviso_preco: bloco({
@@ -225,6 +264,10 @@ function serializarCatalogo(item) {
     emojiPadrao: item.emojiPadrao,
     regraVazio: item.regraVazio,
     dependencias: [...item.dependencias],
+    configuravel: item.configuravel,
+    toggleOficial: item.toggleOficial,
+    classeComercial: item.classeComercial,
+    protegido: item.protegido,
     canais: [...item.canais],
     canaisCompativeis: [...item.canaisCompativeis]
   };

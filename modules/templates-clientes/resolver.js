@@ -77,33 +77,6 @@ function instrucaoCupomOferta(oferta = {}) {
 }
 
 function templateIncompativelComOfertaFiel(template = {}, oferta = {}) {
-  const blocos = blocosAtivosTemplate(template);
-  const cupons = cuponsOferta(oferta);
-  const instrucaoCupom = instrucaoCupomOferta(oferta);
-  const condicao = normalizarComparacao([
-    instrucaoCupom,
-    oferta.condicaoPix,
-    oferta.precoPix,
-    oferta.textoComercialOriginal,
-    oferta.metadata?.radarMirror?.preco?.condicaoTexto,
-    oferta.metadata?.radarMirror?.texto?.original
-  ].filter(Boolean).join(" "));
-  const precoAtual = numero(oferta.precoAtual ?? oferta.precoPor ?? oferta.preco);
-  const precoOriginal = numero(oferta.precoOriginal ?? oferta.precoAnterior ?? oferta.precoAntigo ?? oferta.precoDe);
-
-  if (precoOriginal != null && precoAtual != null && precoOriginal > precoAtual && !blocos.has("preco_de")) {
-    return "template_sem_preco_de_obrigatorio";
-  }
-
-  const dependeCupom = cupons.length > 0 && (
-    oferta.cupomConfirmado === true ||
-    condicao.includes("cupom") ||
-    condicao.includes("aplique") ||
-    condicao.includes("use ")
-  );
-
-  if (dependeCupom && !blocos.has("cupom")) return "template_sem_cupom_obrigatorio";
-  if (dependeCupom && instrucaoCupom && !blocos.has("frase_cupom")) return "template_sem_frase_cupom_obrigatoria";
   return "";
 }
 

@@ -121,6 +121,9 @@ for (const tipo of [
   "economia",
   "cta",
   "link_resgate",
+  "link_app",
+  "link_moedas",
+  "link_pc",
   "link",
   "categoria",
   "marketplace",
@@ -217,8 +220,8 @@ const fraseCupomFallbackV11 = renderizarTemplatePersonalizado({
 });
 assert.strictEqual(
   fraseCupomFallbackV11.mensagem,
-  "⚡ Aplique o cupom PROMO10 para obter o desconto.",
-  "frase de cupom usa fallback legado quando ha cupom sem instrucao"
+  "",
+  "frase de cupom nao inventa instrucao quando ha cupom sem instrucao capturada"
 );
 
 const precoMercadoLivreRealV11 = renderizarTemplatePersonalizado({
@@ -431,7 +434,7 @@ const blocoDesabilitadoV11 = renderizarTemplatePersonalizado({
   },
   canal: "whatsapp"
 });
-assert.ok(!blocoDesabilitadoV11.mensagem.includes("Kit 4 Caixas"), "bloco desabilitado some do preview");
+assert.ok(blocoDesabilitadoV11.mensagem.includes("Kit 4 Caixas"), "titulo essencial nao some com toggle desligado");
 
 const previewPadrao = previewTemplate("cliente_a", { canal: "whatsapp", templateId: "padrao_optimus" });
 assert.strictEqual(previewPadrao.ok, true, "preview padrao funciona");

@@ -3,6 +3,7 @@ const {
   prepararDadosOficiaisTemplate,
   diagnosticoDadosOficiaisTemplate
 } = require("./dados-oficiais");
+const { classificarBlocoComercial } = require("./politica-blocos-comerciais");
 const fidelidadeObs = require("../fidelidade/observabilidade-v1");
 
 function textoUtil(valor) {
@@ -211,11 +212,148 @@ function montarFraseCupom(oferta = {}) {
   const instrucao = primeiroTexto(oferta.instrucaoCupom, oferta.condicaoCupom, oferta.condicaoComercial, avisoCupom);
   if (instrucao && instrucao !== cupom) return `⚡ ${instrucao}`;
 
-  return `⚡ Aplique o cupom ${cupom} para obter o desconto.`;
+  return "";
 }
 
 function textoIndicaPix(valor = "") {
   return normalizarComparacao(valor).includes("pix");
+}
+
+function instrucaoCupomEssencial(oferta = {}) {
+  const cupom = valorCupomTemplate(oferta);
+  const instrucao = primeiroTexto(oferta.instrucaoCupom, oferta.condicaoCupom, oferta.condicaoComercial, oferta.avisoCupom);
+  if (!instrucao || instrucao === cupom || avisoCupomGenericoTemplate(instrucao)) return false;
+  const n = normalizarComparacao(instrucao);
+  if (cupom && !n.includes(normalizarComparacao(cupom)) && !/\b(?:cupom|voucher|resgate|moeda|moedas|pix|app|loja)\b/.test(n)) return false;
+  return /\b(?:cupom|voucher|resgate|moeda|moedas|pix|app|loja|siga)\b/.test(n);
+}
+
+function cupomEssencial(oferta = {}) {
+  if (!valorCupomTemplate(oferta)) return false;
+  const fonte = normalizarComparacao([
+    oferta.instrucaoCupom,
+    oferta.condicaoCupom,
+    oferta.condicaoComercial,
+    oferta.avisoCupom,
+    oferta.condicaoPix,
+    oferta.precoPix,
+    oferta.valorEfetivoOrigem
+  ].filter(Boolean).join(" "));
+  return oferta.cupomConfirmado === true ||
+    instrucaoCupomEssencial(oferta) ||
+    /\b(?:cupom|voucher|aplique|use|utilize|resgate)\b/.test(fonte);
+}
+
+function precoPixEssencial(oferta = {}) {
+  const precoPix = primeiroTexto(oferta.precoPix, oferta.condicaoPix);
+  if (!precoPix || !textoIndicaPix(precoPix)) return false;
+  const precoPor = formatarMoeda(valorPrecoPor(oferta));
+  return !precoPor || normalizarComparacao(precoPix) !== normalizarComparacao(precoPor);
+}
+
+function linkComercialPorTipo(oferta = {}, tipos = []) {
+  const tiposNormalizados = new Set(tipos.map(tipo => normalizarComparacao(tipo).replace(/^link_/, "")));
+  const candidatos = [
+    ...(Array.isArray(oferta.linksComerciais) ? oferta.linksComerciais : []),
+    ...(Array.isArray(oferta.linksProduto) ? oferta.linksProduto : []),
+    ...(Array.isArray(oferta.linksResgate) ? oferta.linksResgate : [])
+  ];
+  for (const item of candidatos) {
+    if (!item || typeof item !== "object") continue;
+    const tipo = normalizarComparacao(item.tipo || item.papel || "").replace(/^link_/, "");
+    if (!tiposNormalizados.has(tipo)) continue;
+    const url = primeiroTexto(item.urlAfiliada, item.afiliado, item.linkAfiliado, item.resolvido, item.url, item.original, item.link);
+    if (url) return url;
+  }
+  return "";
+}
+
+function dadosBlocoTemplate(tipo = "", oferta = {}) {
+  if (tipo === "titulo") return primeiroTexto(oferta.titulo, oferta.nome);
+  if (tipo === "preco_por") return formatarMoeda(valorPrecoPor(oferta));
+  if (tipo === "preco_pix") return primeiroTexto(oferta.precoPix, oferta.condicaoPix);
+  if (tipo === "cupom") return valorCupomTemplate(oferta);
+  if (tipo === "frase_cupom") return primeiroTexto(oferta.instrucaoCupom, oferta.condicaoCupom, oferta.condicaoComercial, oferta.avisoCupom);
+  if (tipo === "link") return primeiroTexto(oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link, oferta.url);
+  if (tipo === "link_resgate") return primeiroTexto(oferta.linkResgate, linkComercialPorTipo(oferta, ["resgate"]));
+  if (tipo === "link_app") return primeiroTexto(oferta.linkApp, linkComercialPorTipo(oferta, ["app"]));
+  if (tipo === "link_moedas") return primeiroTexto(oferta.linkMoedas, linkComercialPorTipo(oferta, ["moedas"]));
+  if (tipo === "link_pc") return primeiroTexto(oferta.linkPc, linkComercialPorTipo(oferta, ["pc"]));
+  return "__opcional__";
+}
+
+function blocoComercialmenteNecessario(tipo = "", oferta = {}) {
+  if (tipo === "cupom") return cupomEssencial(oferta);
+  if (tipo === "frase_cupom") return instrucaoCupomEssencial(oferta);
+  if (tipo === "preco_pix") return precoPixEssencial(oferta);
+  if (["link_resgate", "link_app", "link_moedas", "link_pc"].includes(tipo)) return Boolean(dadosBlocoTemplate(tipo, oferta));
+  return Boolean(dadosBlocoTemplate(tipo, oferta));
+}
+
+function blocoProtegidoNoTemplate(tipo = "", oferta = {}) {
+  const necessario = blocoComercialmenteNecessario(tipo, oferta);
+  return classificarBlocoComercial(tipo, {
+    essencial: necessario,
+    comercialmenteNecessario: necessario,
+    necessario
+  }).protegido && necessario;
+}
+
+function ordemProtegidaTemplate(tipo = "", ordemOriginal = 0) {
+  const ordens = {
+    link_app: ordemOriginal,
+    link_moedas: ordemOriginal,
+    link_pc: ordemOriginal
+  };
+  return Number.isFinite(Number(ordens[tipo])) ? ordens[tipo] : ordemOriginal;
+}
+
+function aplicarOrdemLinksProtegidosTemplate(blocos = []) {
+  const linkProduto = blocos.find(bloco => bloco.tipo === "link");
+  const linkResgate = blocos.find(bloco => bloco.tipo === "link_resgate");
+  if (linkProduto && linkResgate) linkResgate.ordem = Number(linkProduto.ordem || 0) - 0.1;
+
+  const linksAli = ["link_app", "link_moedas", "link_pc"]
+    .map(tipo => blocos.find(bloco => bloco.tipo === tipo))
+    .filter(Boolean);
+  if (linksAli.length) {
+    const base = Math.min(...linksAli.map(bloco => Number(bloco.ordem || 0)));
+    const ordemAli = { link_app: base, link_moedas: base + 0.1, link_pc: base + 0.2 };
+    for (const bloco of linksAli) bloco.ordem = ordemAli[bloco.tipo];
+  }
+  return blocos;
+}
+
+function normalizarBlocosProtegidosTemplate(blocos = [], oferta = {}) {
+  const origem = Array.isArray(blocos) ? blocos : [];
+  const saida = origem
+    .filter(bloco => bloco && (bloco.ativo !== false || blocoProtegidoNoTemplate(bloco.tipo, oferta)))
+    .map((bloco, indice) => ({
+      ...bloco,
+      ordem: ordemProtegidaTemplate(
+        textoUtil(bloco.tipo),
+        Number.isFinite(Number(bloco.ordem)) ? Number(bloco.ordem) : (indice + 1) * 10
+      )
+    }));
+  const existentes = new Set(saida.map(bloco => textoUtil(bloco.tipo)));
+  const essenciaisPadrao = [
+    ["titulo", 10],
+    ["preco_por", 50],
+    ["preco_pix", 55],
+    ["cupom", 80],
+    ["frase_cupom", 90],
+    ["link_resgate", 170],
+    ["link_app", 171],
+    ["link_moedas", 172],
+    ["link_pc", 173],
+    ["link", 180]
+  ];
+  for (const [tipo, ordem] of essenciaisPadrao) {
+    if (existentes.has(tipo) || !blocoProtegidoNoTemplate(tipo, oferta)) continue;
+    saida.push({ tipo, ativo: true, ordem, obrigatorio: true, compatibilidadePassiva: true });
+    existentes.add(tipo);
+  }
+  return aplicarOrdemLinksProtegidosTemplate(saida);
 }
 
 function aplicarCondicaoPixPreco(preco = "", oferta = {}) {
@@ -305,8 +443,20 @@ function resolverLinha(bloco, oferta = {}) {
     return cta ? `🔗 ${cta}` : "";
   }
   if (tipo === "link_resgate") {
-    const link = primeiroTexto(oferta.linkResgate);
+    const link = primeiroTexto(oferta.linkResgate, linkComercialPorTipo(oferta, ["resgate"]));
     return link ? `\uD83C\uDF9F\uFE0F Resgate os cupons:\n${link}` : "";
+  }
+  if (tipo === "link_app") {
+    const link = primeiroTexto(oferta.linkApp, linkComercialPorTipo(oferta, ["app"]));
+    return link ? `📱 APP / Moedas:\n${link}` : "";
+  }
+  if (tipo === "link_moedas") {
+    const link = primeiroTexto(oferta.linkMoedas, linkComercialPorTipo(oferta, ["moedas"]));
+    return link ? `📱 APP / Moedas:\n${link}` : "";
+  }
+  if (tipo === "link_pc") {
+    const link = primeiroTexto(oferta.linkPc, linkComercialPorTipo(oferta, ["pc"]));
+    return link ? `🖥️ PC:\n${link}` : "";
   }
   if (tipo === "link") {
     const link = primeiroTexto(oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link, oferta.url);
@@ -332,6 +482,7 @@ function grupoBlocoTemplate(tipo = "") {
   if (["avaliacao", "quantidade_avaliacoes", "vendas", "frete"].includes(tipo)) return "prova";
   if (tipo === "cta") return "cta";
   if (tipo === "link_resgate") return "link_resgate";
+  if (["link_app", "link_moedas", "link_pc"].includes(tipo)) return "link";
   if (tipo === "link") return "link";
   if (tipo === "frase_cupom") return "frase_cupom";
   if (["aviso_preco", "aviso_alteracao"].includes(tipo)) return "avisos";
@@ -397,9 +548,10 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
     console.log("[TEMPLATE-DADOS-OFICIAIS]", JSON.stringify(diagnosticoDadosOficiaisTemplate(ofertaOficial)));
   }
 
-  const possuiBlocoLinkResgate = blocos.some(bloco => bloco?.tipo === "link_resgate");
-  const existeLinkResgate = textoUtil(ofertaOficial.linkResgate);
-  const blocosComCompatibilidade = [...blocos];
+  const blocosProtegidos = normalizarBlocosProtegidosTemplate(blocos, ofertaOficial);
+  const possuiBlocoLinkResgate = blocosProtegidos.some(bloco => bloco?.tipo === "link_resgate");
+  const existeLinkResgate = textoUtil(dadosBlocoTemplate("link_resgate", ofertaOficial));
+  const blocosComCompatibilidade = [...blocosProtegidos];
   if (!possuiBlocoLinkResgate && existeLinkResgate) {
     const indiceLink = blocosComCompatibilidade.findIndex(bloco => bloco?.tipo === "link" && bloco.ativo !== false);
     if (indiceLink >= 0) {
@@ -414,7 +566,7 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
   }
 
   const ativosOrdenados = blocosComCompatibilidade
-    .filter(bloco => bloco && bloco.ativo !== false)
+    .filter(bloco => bloco && (bloco.ativo !== false || blocoProtegidoNoTemplate(bloco.tipo, ofertaOficial)))
     .sort((a, b) => Number(a.ordem || 0) - Number(b.ordem || 0) || String(a.tipo).localeCompare(String(b.tipo)));
 
   const linhas = [];

@@ -462,15 +462,15 @@ function gerarTemplateUniversal(oferta = {}) {
     .filter(Boolean)
     .slice(0, 3);
 
-  adicionarBloco(blocos, [`🔥 *${campos.titulo || "Oferta"}*`]);
+  adicionarBloco(blocos, [campos.titulo ? `🔥 *${campos.titulo}*` : ""]);
   adicionarBloco(blocos, [
     campos.marketplace ? `🛍️ ${marketplaceBonito(campos.marketplace)}` : "",
     categoriaConfiavel(campos) ? `📂 ${campos.categoria}` : ""
   ]);
   adicionarBloco(blocos, [
     precoOriginal ? `❌ De: *${precoOriginal}*` : "",
-    `✅ Por: *${precoAtualComCondicao}*`,
-    campos.parcelamento ? `💳 Ou *${campos.parcelamento}*` : "",
+    precoAtualComCondicao ? `✅ Por: *${precoAtualComCondicao}*` : "",
+    campos.parcelamento ? `💳 ${campos.parcelamento}` : "",
     economia ? `💸 Economia: *${economia}${descontoPercentual != null && descontoPercentual > 0 ? ` (${descontoPercentual.toFixed(0)}%)` : ""}*` : ""
   ]);
   adicionarBloco(blocos, detalhesComerciais);
@@ -478,9 +478,7 @@ function gerarTemplateUniversal(oferta = {}) {
     campos.cupom ? `🎟️ Cupom: *${campos.cupom}*` : "",
     campos.instrucaoCupom && campos.instrucaoCupom !== campos.cupomTexto
       ? `⚡ ${campos.instrucaoCupom}`
-      : campos.cupom
-        ? `⚡ Aplique o cupom ${campos.cupom} para obter o desconto.`
-        : ""
+      : ""
   ]);
   adicionarBloco(blocos, [
     avaliacao ? "✰ Avaliação" : "",

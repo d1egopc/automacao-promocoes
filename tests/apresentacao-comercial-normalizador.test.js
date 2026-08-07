@@ -63,7 +63,7 @@ const msgAliCupomSemMoedas = gerarTemplateUniversal(aliCupomSemMoedas);
 assert.deepStrictEqual(aliCupomSemMoedas.codigosCupom, ["IFPC5HAQ"], "AliExpress preserva cupom sem moedas");
 assert.strictEqual(aliCupomSemMoedas.imagem, "https://img.example/aliexpress.jpg", "AliExpress preserva imagem na composicao");
 assert.ok(msgAliCupomSemMoedas.includes("Cupom: *IFPC5HAQ*"), "AliExpress renderiza cupom sem moedas");
-assert.ok(msgAliCupomSemMoedas.includes("Aplique um dos cupons acima"), "AliExpress usa CTA comercial generico");
+assert.ok(!msgAliCupomSemMoedas.includes("Aplique um dos cupons acima"), "AliExpress nao inventa CTA comercial generico");
 assert.ok(!msgAliCupomSemMoedas.includes("Aplique o cupom IFPC5HAQ"), "AliExpress nao usa cupom como frase");
 
 const aliCuponsMoedas = prepararDadosOficiaisTemplate(ofertaBase({
@@ -154,7 +154,7 @@ const templateLinks = {
   ]
 };
 const semResgate = renderizarTemplatePersonalizado({ oferta: ofertaComResgate, template: templateLinks, canal: "whatsapp" });
-assert.ok(!semResgate.mensagem.includes(resgate), "toggle link_resgate desligado oculta resgate");
+assert.ok(semResgate.mensagem.includes(resgate), "toggle link_resgate desligado nao oculta resgate essencial");
 assert.ok(semResgate.mensagem.includes(produto), "toggle link ativo preserva produto");
 
 const somenteResgate = renderizarTemplatePersonalizado({
@@ -169,7 +169,7 @@ const somenteResgate = renderizarTemplatePersonalizado({
   canal: "whatsapp"
 });
 assert.ok(somenteResgate.mensagem.includes(resgate), "toggle link_resgate ativo preserva resgate");
-assert.ok(!somenteResgate.mensagem.includes(produto), "toggle link desligado oculta produto");
+assert.ok(somenteResgate.mensagem.includes(produto), "toggle link desligado nao oculta produto essencial");
 
 const somenteResgateComCtaPadrao = renderizarTemplatePersonalizado({
   oferta: ofertaComResgate,
@@ -185,8 +185,8 @@ const somenteResgateComCtaPadrao = renderizarTemplatePersonalizado({
   canal: "whatsapp"
 });
 assert.ok(somenteResgateComCtaPadrao.mensagem.includes(resgate), "link desligado com resgate ligado preserva resgate");
-assert.ok(!somenteResgateComCtaPadrao.mensagem.includes(produto), "link desligado com resgate ligado nao exibe produto");
-assert.ok(!somenteResgateComCtaPadrao.mensagem.includes("Confira aqui"), "cta padrao nao aparece sem link de produto");
+assert.ok(somenteResgateComCtaPadrao.mensagem.includes(produto), "link desligado com resgate ligado preserva produto essencial");
+assert.ok(somenteResgateComCtaPadrao.mensagem.includes("Confira aqui"), "cta padrao aparece com link de produto essencial");
 
 const templateAntigoSemResgate = renderizarTemplatePersonalizado({
   oferta: ofertaComResgate,
@@ -292,7 +292,10 @@ const cupomSemInstrucao = renderizarTemplatePersonalizado({
   },
   canal: "whatsapp"
 });
-assert.strictEqual(cupomSemInstrucao.mensagem, "⚡ Aplique o cupom SEMINFO10 para obter o desconto.", "cupom sem instrucao recebe frase padrao");
+assert.ok(cupomSemInstrucao.mensagem.includes("Produto Teste"), "template com frase_cupom preserva titulo essencial");
+assert.ok(cupomSemInstrucao.mensagem.includes("Por: R$"), "template com frase_cupom preserva preco essencial");
+assert.ok(cupomSemInstrucao.mensagem.includes("https://produto.example/oferta"), "template com frase_cupom preserva link essencial");
+assert.ok(!cupomSemInstrucao.mensagem.includes("Aplique o cupom SEMINFO10"), "cupom sem instrucao nao recebe frase inventada");
 
 const semCupomSemFrase = renderizarTemplatePersonalizado({
   oferta: ofertaBase({ cupom: "", codigosCupom: [], cupons: [], instrucaoCupom: "" }),
@@ -303,7 +306,8 @@ const semCupomSemFrase = renderizarTemplatePersonalizado({
   },
   canal: "whatsapp"
 });
-assert.strictEqual(semCupomSemFrase.mensagem, "", "oferta sem cupom nao recebe frase padrao");
+assert.ok(semCupomSemFrase.mensagem.includes("Produto Teste"), "oferta sem cupom preserva titulo essencial");
+assert.ok(!semCupomSemFrase.mensagem.includes("Aplique o cupom"), "oferta sem cupom nao recebe frase padrao");
 
 const comMetadataTecnica = gerarTemplateUniversal(prepararDadosOficiaisTemplate(ofertaBase({
   grupoNome: "Grupo Secreto",
