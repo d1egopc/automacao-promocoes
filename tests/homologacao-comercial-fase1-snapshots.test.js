@@ -232,6 +232,37 @@ function renderizarAmazon({
   return { espelho, resultado, mensagem: resultado.mensagem };
 }
 
+function renderizarMercadoLivre({
+  textoOriginal = "",
+  titulo = "Produto Mercado Livre",
+  preco = 100,
+  categoria = "Moda",
+  linkAfiliado = "https://meli.la/oferta-ml",
+  oferta = {},
+  ofertaEntrada = {},
+  template = {}
+} = {}) {
+  const espelho = criarEspelho({
+    textoOriginal,
+    oferta: {
+      titulo,
+      marketplace: "mercadolivre",
+      categoria,
+      preco,
+      linkAfiliado,
+      ...oferta
+    },
+    ofertaEntrada,
+    comercialNormalizado: { marketplace: "mercadolivre", precoAtual: preco, categoria, precoConfiavel: true }
+  });
+  const resultado = montarTemplateEspelhoPorBlocosV26(
+    espelho.espelhoComercial,
+    espelho.documentoComercialCanonico,
+    { template }
+  );
+  return { espelho, resultado, mensagem: resultado.mensagem };
+}
+
 assertPoliticaOficial();
 
 const recorder = criarSnapshotRecorder();
@@ -310,18 +341,86 @@ const amazonFretePrime = renderizarAmazon({
 });
 recorder.check("amazon_frete_prime", "frete e Prime capturados permanecem", contem(amazonFretePrime.mensagem, "Frete gratis") && contem(amazonFretePrime.mensagem, "Prime") && contem(amazonFretePrime.mensagem, "https://amzn.to/prime-frete"), amazonFretePrime.mensagem);
 
-const mlMensagem = mensagemPadrao({
-  titulo: "Kit Mercado Livre com multiplos cupons",
-  marketplace: "mercadolivre",
+const mlCasoPix10 = renderizarMercadoLivre({
+  textoOriginal: [
+    "AQUELE BASICO QUE NAO TEM COMO ERRAR",
+    "Mercado Livre",
+    "Tenis e Chinelos",
+    "De: R$ 239,99",
+    "Por: R$ 117,20 no Pix",
+    "Pix: R$ 10,00 no Pix",
+    "Cupom: OFICIALMODA",
+    "Aplique o cupom OFICIALMODA + Pix para chegar neste valor."
+  ].join("\n"),
+  titulo: "AQUELE BASICO QUE NAO TEM COMO ERRAR",
+  preco: 117.2,
+  categoria: "Tenis e Chinelos",
+  linkAfiliado: "https://meli.la/oficialmoda-tenis"
+});
+const mlPix10Mensagem = mlCasoPix10.mensagem;
+recorder.check("mercadolivre_preco_pix_cupom", "preserva ordem oficial Mercado Livre no OFC", emOrdem(mlPix10Mensagem, [
+  "AQUELE BASICO QUE NAO TEM COMO ERRAR",
+  "Mercado Livre",
+  "Tenis e Chinelos",
+  "De: R$ 239,99",
+  "Por: R$ 117,20 no Pix",
+  "Cupom: OFICIALMODA",
+  "Aplique o cupom OFICIALMODA + Pix para chegar neste valor.",
+  "Confira aqui",
+  "https://meli.la/oficialmoda-tenis",
+  "Oferta sujeita"
+]), mlPix10Mensagem);
+recorder.check("mercadolivre_preco_pix_cupom", "Por no Pix nao duplica bloco Pix de economia", !contem(mlPix10Mensagem, "Pix: R$ 10,00 no Pix") && ocorrencias(mlPix10Mensagem, "Pix") === 2, mlPix10Mensagem);
+recorder.check("mercadolivre_preco_pix_cupom", "instrucao capturada aparece uma vez e aviso editorial unico", ocorrencias(mlPix10Mensagem, "Aplique o cupom OFICIALMODA + Pix") === 1 && ocorrencias(mlPix10Mensagem, "Oferta sujeita") === 1, mlPix10Mensagem);
+
+const mlCasoPix3 = renderizarMercadoLivre({
+  textoOriginal: [
+    "Kit com 3 Calca Sarja Alfaiataria Slim",
+    "De: R$ 249,00",
+    "Por: R$ 126,00 no Pix",
+    "Pix: R$ 3,00 no Pix",
+    "Cupom: OFICIALMODA",
+    "Aplique o cupom OFICIALMODA + Pix para chegar neste valor."
+  ].join("\n"),
+  titulo: "Kit com 3 Calca Sarja Alfaiataria Slim",
+  preco: 126,
   categoria: "Moda",
-  precoAtual: 198.8,
-  cupons: ["MODASEMPRE", "ML15", "APP10"],
-  beneficioTexto: "Aplique os cupons exibidos antes de finalizar.",
+  linkAfiliado: "https://meli.la/oficialmoda-calca"
+});
+recorder.check("mercadolivre_pix_economia_bloqueado", "R$3 de economia nao vira preco Pix separado", contem(mlCasoPix3.mensagem, "Por: R$ 126,00 no Pix") && !contem(mlCasoPix3.mensagem, "Pix: R$ 3,00 no Pix"), mlCasoPix3.mensagem);
+
+const mlDeValido = renderizarMercadoLivre({
+  textoOriginal: "Produto ML desconto real\nDe: R$ 700,00\nPor: R$ 599,00",
+  titulo: "Produto ML desconto real",
+  preco: 599,
+  categoria: "Eletronicos",
+  linkAfiliado: "https://meli.la/de-valido"
+});
+recorder.check("mercadolivre_preco_de_valido", "De maior que Por permanece", contem(mlDeValido.mensagem, "De: R$ 700,00") && contem(mlDeValido.mensagem, "Por: R$ 599,00"), mlDeValido.mensagem);
+
+const mlDeInvalido = renderizarMercadoLivre({
+  textoOriginal: "Produto ML sem desconto real\nDe: R$ 700,00\nPor: R$ 810,00",
+  titulo: "Produto ML sem desconto real",
+  preco: 810,
+  categoria: "Eletronicos",
+  linkAfiliado: "https://meli.la/de-invalido"
+});
+recorder.check("mercadolivre_preco_de_invalido", "De menor ou igual a Por nao renderiza desconto falso", !contem(mlDeInvalido.mensagem, "De: R$ 700,00") && contem(mlDeInvalido.mensagem, "Por: R$ 810,00"), mlDeInvalido.mensagem);
+recorder.check("mercadolivre_preco_de_invalido", "inconsistencia fica em auditoria interna", mlDeInvalido.espelho.documentoComercialCanonico.auditoriaComercial?.avisosInternos?.includes("preco_de_menor_ou_igual_preco_por_omitido"), JSON.stringify(mlDeInvalido.espelho.documentoComercialCanonico.auditoriaComercial));
+
+const mlMultiplosCupons = renderizarMercadoLivre({
+  textoOriginal: [
+    "Kit Mercado Livre com multiplos cupons",
+    "Por: R$ 198,80",
+    "Cupons: CUPOM10 ou MODASEMPRE"
+  ].join("\n"),
+  titulo: "Kit Mercado Livre com multiplos cupons",
+  preco: 198.8,
+  categoria: "Moda",
   linkAfiliado: "https://meli.la/oferta-multicupom"
 });
-recorder.check("mercadolivre_template_padrao", "preserva todos os codigos reais", ["MODASEMPRE", "ML15", "APP10"].every(cupom => contem(mlMensagem, cupom)), mlMensagem);
-recorder.check("mercadolivre_template_padrao", "nao substitui varios codigos por frase generica", !contem(mlMensagem, "Aplique o cupom MODASEMPRE ou ML15 ou APP10"), mlMensagem);
-recorder.check("mercadolivre_template_padrao", "beneficio nao duplica instrucao de cupom", ocorrencias(mlMensagem, "Aplique") <= 1, mlMensagem);
+recorder.check("mercadolivre_multiplos_cupons", "preserva codigos reais sem frase generica inventada", contem(mlMultiplosCupons.mensagem, "Cupons: CUPOM10 • MODASEMPRE") && !contem(mlMultiplosCupons.mensagem, "Aplique um dos cupons"), mlMultiplosCupons.mensagem);
+recorder.check("mercadolivre_multiplos_cupons", "link afiliado e aviso editorial permanecem unicos", ocorrencias(mlMultiplosCupons.mensagem, "https://meli.la/oferta-multicupom") === 1 && ocorrencias(mlMultiplosCupons.mensagem, "Oferta sujeita") === 1, mlMultiplosCupons.mensagem);
 
 const shopeeMensagem = mensagemPadrao({
   titulo: "Fone Bluetooth Shopee",
@@ -624,7 +723,6 @@ for (const item of resumo) {
 
 const falhas = recorder.falhas();
 const falhasEsperadasFase2 = new Map([
-  ["mercadolivre_template_padrao", "Mercado Livre ainda substitui multiplos codigos por frase generica"],
   ["kabum_awin_template_padrao", "KaBuM/AWIN ainda nao preserva frete textual no template padrao"],
   ["template_personalizado_protegidos", "Renderer legado de template personalizado ainda permite ocultar protegidos"],
   ["template_padrao_sem_titulo", "Template padrao legado ainda cria titulo fallback Oferta"]
@@ -644,5 +742,5 @@ if (falhasInesperadas.length || falhasEsperadasAusentes.length) {
   for (const [nome, motivo] of falhasEsperadasFase2) {
     console.log(`[SNAPSHOT-COMERCIAL-F1] DIVERGENCIA-ESPERADA ${nome}: ${motivo}`);
   }
-  console.log("[SNAPSHOT-COMERCIAL-F1] Amazon e AliExpress homologados; divergencias restantes preservadas como esperadas");
+  console.log("[SNAPSHOT-COMERCIAL-F1] Amazon, AliExpress e Mercado Livre homologados; divergencias restantes preservadas como esperadas");
 }

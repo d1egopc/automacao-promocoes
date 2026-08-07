@@ -246,6 +246,7 @@ function extrairPrecoPixProprio(valor = "") {
 
 function extrairPrecoPixDocumento({ textoOriginal = "", linhaPor = "", linhaValor = "", precoPorTexto = "", oferta = {}, ofertaEntrada = {}, marketplace = "" } = {}) {
   if (marketplaceAmazon(marketplace) && /\bpix\b/i.test(precoPorTexto)) return "";
+  if (marketplaceMercadoLivre(marketplace) && /\bpix\b/i.test(precoPorTexto)) return "";
   const linhas = linhasTexto(textoOriginal);
   const linhaPixPropria = linhas.find(linha => {
     if (!parecePrecoPixProprio(linha)) return false;
@@ -266,6 +267,13 @@ function extrairPrecoPixDocumento({ textoOriginal = "", linhaPor = "", linhaValo
     if (marketplaceAmazon(marketplace)) {
       const valorPix = numeroMonetario(precoPix);
       const valorOferta = numeroMonetario(precoPorTexto);
+      if (valorPix !== null && valorOferta !== null && valorPix < valorOferta * 0.5) continue;
+    }
+    if (marketplaceMercadoLivre(marketplace)) {
+      const valorPix = numeroMonetario(precoPix);
+      const valorOferta = numeroMonetario(precoPorTexto);
+      const normalizado = normalizarComparacao(candidato);
+      if (/\b(?:economia|desconto|cashback|beneficio|off)\b/.test(normalizado)) continue;
       if (valorPix !== null && valorOferta !== null && valorPix < valorOferta * 0.5) continue;
     }
     if (precoPix && !textoComercialEquivalente(precoPix, precoPorTexto)) return precoPix;
@@ -403,6 +411,7 @@ function montarInstrucaoCupomCanonica(doc = {}, cupons = []) {
   if (marketplaceAliExpress(doc.marketplace)) {
     if (cupons.length) return "Aplique um dos cupons acima para obter este preço.";
   }
+  if (marketplaceMercadoLivre(doc.marketplace)) return "";
   if (!cupons.length) return "";
   if (cupons.length > 1) return "Aplique um dos cupons informados para obter o desconto.";
   const codigo = cupons[0];
@@ -741,6 +750,13 @@ function marketplaceMercadoLivre(valor = "") {
   return mp === "mercadolivre" || mp === "ml";
 }
 
+function precoDeInconsistenteMercadoLivre(precoDeTexto = "", precoPorTexto = "", marketplace = "") {
+  if (!marketplaceMercadoLivre(marketplace)) return false;
+  const precoDe = numeroMonetario(precoDeTexto);
+  const precoPor = numeroMonetario(precoPorTexto);
+  return precoDe !== null && precoPor !== null && precoDe <= precoPor;
+}
+
 function urlPareceProdutoMercadoLivre(url = "") {
   const fonte = texto(url).toLowerCase();
   return /meli\.la\//.test(fonte)
@@ -934,7 +950,7 @@ function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
   if (/\bmais\s+vendido|best\s*seller\b/i.test(contexto.textoOriginal || "")) adicionarBlocoComercial(blocos, { tipo: "selo_mais_vendido", textoOriginal: primeiraLinhaPorNormalizacao(contexto.textoOriginal, /\bmais\s+vendido|best seller\b/) || "Mais vendido", origem: "texto_comercial_original", confianca: "media" });
 
   adicionarBlocosDeLinks(blocos, doc, contexto);
-  if ((marketplaceAliExpress(doc.marketplace) || marketplaceAmazon(doc.marketplace)) && !lista(doc.avisos).some(avisoEditorialAliExpressEquivalente)) {
+  if ((marketplaceAliExpress(doc.marketplace) || marketplaceAmazon(doc.marketplace) || marketplaceMercadoLivre(doc.marketplace)) && !lista(doc.avisos).some(avisoEditorialAliExpressEquivalente)) {
     adicionarBlocoComercial(blocos, {
       tipo: "aviso",
       textoOriginal: AVISO_EDITORIAL_ALIEXPRESS,
@@ -1051,7 +1067,7 @@ function extrairDocumentoComercialCanonico({
   const linhaResgate = primeiraLinhaPorNormalizacao(textoOriginal, /\bresgate\b/);
   const linhaBeneficio = primeiraLinhaPorNormalizacao(textoOriginal, /\b(?:beneficio|app|prime|voucher|moeda|moedas|direto do brasil|pre venda|pré venda)\b/);
 
-  const precoDeTexto = extrairTextoLinhaPreco(linhaDe, "de") || precosTexto.precoDeTexto || "";
+  let precoDeTexto = extrairTextoLinhaPreco(linhaDe, "de") || precosTexto.precoDeTexto || "";
   const precoPorEstruturado = textoPrecoEstruturado(primeiroValor(
     ofertaEntrada.precoAtual,
     ofertaEntrada.preco,
@@ -1061,6 +1077,11 @@ function extrairDocumentoComercialCanonico({
   ));
   const precoPorTexto = extrairTextoLinhaPreco(linhaPor, "por") || extrairTextoLinhaPreco(linhaValor, "valor") || precosTexto.precoPorTexto || precoPorEstruturado || "";
   const precoPixTexto = extrairPrecoPixDocumento({ textoOriginal, linhaPor, linhaValor, precoPorTexto, oferta, ofertaEntrada, marketplace });
+  const avisosInternos = [];
+  if (precoDeInconsistenteMercadoLivre(precoDeTexto, precoPorTexto, marketplace)) {
+    avisosInternos.push("preco_de_menor_ou_igual_preco_por_omitido");
+    precoDeTexto = "";
+  }
   const parcelamentoTexto = primeiroTexto(
     ofertaEntrada.parcelamento,
     oferta.parcelamento,
@@ -1105,6 +1126,9 @@ function extrairDocumentoComercialCanonico({
       motivos: [...new Set(motivosConfianca.filter(Boolean))]
     },
     avisos: [...new Set((avisos || []).filter(Boolean))],
+    auditoriaComercial: {
+      avisosInternos
+    },
     condicoesComerciais: [...new Set((condicoesComerciais || []).map(texto).filter(Boolean))],
     contratoMarketplace: contratoMarketplace ? {
       contrato: contratoMarketplace.contrato || "",
@@ -1765,7 +1789,8 @@ function renderizarBlocoCanonicoV26(bloco = {}, contexto = {}) {
   if (bloco.tipo === "cupom_codigo") {
     const cupons = lista(contexto.cuponsTexto);
     const moedas = contexto.marketplaceAliExpress && contexto.moedasTexto ? ` + 🪙 ${contexto.moedasTexto.replace(/^\+\s*/, "")} no APP` : "";
-    if (cupons.length > 1) return `🎟️ Cupons: ${cupons.join(" ou ")}${moedas}`;
+    const separador = contexto.marketplaceMercadoLivre ? " • " : " ou ";
+    if (cupons.length > 1) return `🎟️ Cupons: ${cupons.join(separador)}${moedas}`;
     if (moedas) return `🎟️ Cupom: ${valor}${moedas}`;
     return `🎟️ Cupom: ${valor}`;
   }
@@ -1845,6 +1870,7 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
     .filter(Boolean);
   const contexto = {
     marketplaceAliExpress: marketplaceAliExpress(doc.marketplace),
+    marketplaceMercadoLivre: marketplaceMercadoLivre(doc.marketplace),
     precoOfertaTexto: blocosOrdenados.find(bloco => bloco.tipo === "preco_oferta")?.textoOriginal || "",
     freteTexto: blocosOrdenados.find(bloco => bloco.tipo === "frete")?.textoOriginal || "",
     cashbackTexto: blocosOrdenados.find(bloco => bloco.tipo === "cashback")?.textoOriginal || "",
