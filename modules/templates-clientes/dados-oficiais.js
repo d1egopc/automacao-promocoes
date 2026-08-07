@@ -84,6 +84,37 @@ function valorEfetivoConfirmado(campos = {}) {
   return valorEfetivo;
 }
 
+function precoDeOficial(oferta = {}, v2 = {}) {
+  const candidatos = [
+    oferta.preco_de,
+    oferta.precoDe,
+    oferta.precoOriginal,
+    oferta.precoAntigo,
+    oferta.preco_original,
+    v2.preco_de,
+    v2.precoDe,
+    v2.precoOriginal,
+    v2.precoAntigo,
+    v2.templateInput?.preco_de,
+    v2.templateInput?.precoDe,
+    v2.templateInput?.precoOriginal,
+    v2.templateInput?.precoAntigo,
+    oferta.ofertaUniversal?.preco_de,
+    oferta.ofertaUniversal?.precoDe,
+    oferta.ofertaUniversal?.precoOriginal,
+    oferta.ofertaUniversal?.precoAntigo,
+    oferta.ofertaUniversal?.comercial?.precoAnterior,
+    oferta.comercial?.precoAnterior
+  ];
+
+  for (const candidato of candidatos) {
+    const numero = normalizarNumero(candidato);
+    if (numero != null && numero > 0) return candidato;
+  }
+
+  return undefined;
+}
+
 function cupomBloqueado(valor = "") {
   const normalizado = normalizarComparacao(valor).replace(/[^a-z0-9]/g, "");
   return [
@@ -183,6 +214,7 @@ function ofertaRadarEspelhoComercial(oferta = {}) {
 
 function prepararDadosUniversaisTemplate(oferta = {}) {
   const v2 = oferta.inteligenciaUniversalV2 || {};
+  const precoOriginal = precoDeOficial(oferta, v2);
   const cupons = cuponsOficiais(oferta);
   const radarEspelho = ofertaRadarEspelhoComercial(oferta);
   const cupom = radarEspelho && cupons.length
@@ -193,7 +225,7 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
     titulo: oferta.titulo || oferta.nome || "",
     marketplace: oferta.marketplace || "",
     precoAtual: oferta.precoAtual ?? oferta.preco,
-    precoOriginal: oferta.precoOriginal ?? oferta.precoAntigo,
+    precoOriginal,
     economia: oferta.economia ?? oferta.economiaValor ?? oferta.valorEconomia,
     descontoPercentual: oferta.descontoPercentual ?? oferta.desconto,
     categoria: v2.categoria || oferta.categoria || "",

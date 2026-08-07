@@ -156,6 +156,108 @@ const msgValidoPersonalizado = textoMoeda(renderizarTemplatePersonalizado({
 assertInclui(msgValidoPersonalizado, "De: R$ 109,08", "personalizado preserva De valido");
 assertInclui(msgValidoPersonalizado, "Por: R$ 88,41", "personalizado preserva Por valido");
 
+function mensagemPadraoUniversal(oferta) {
+  return textoMoeda(gerarTemplateUniversal(prepararDadosOficiaisTemplate(oferta, { modo: "universal" })));
+}
+
+function assertPrecoDeUniversal({ nome, oferta, de, por }) {
+  const mensagem = mensagemPadraoUniversal(oferta);
+  assertInclui(mensagem, `De: *${de}*`, `${nome}: Template Padrao mostra De explicito valido`);
+  assertInclui(mensagem, `Por: *${por}*`, `${nome}: Template Padrao preserva Por oficial`);
+}
+
+const ofertasPrecoDeUniversal = [
+  {
+    nome: "Amazon preco_de",
+    oferta: ofertaBase({ marketplace: "amazon", precoAtual: 100, preco: 100, preco_de: 150 }),
+    de: "R$ 150,00",
+    por: "R$ 100,00"
+  },
+  {
+    nome: "Mercado Livre precoOriginal",
+    oferta: ofertaBase({ marketplace: "mercadolivre", precoAtual: 210, preco: 210, precoOriginal: 260 }),
+    de: "R$ 260,00",
+    por: "R$ 210,00"
+  },
+  {
+    nome: "Shopee precoAntigo",
+    oferta: ofertaBase({ marketplace: "shopee", precoAtual: 79.9, preco: 79.9, precoAntigo: 119.9 }),
+    de: "R$ 119,90",
+    por: "R$ 79,90"
+  },
+  {
+    nome: "AliExpress precoDe",
+    oferta: ofertaBase({ marketplace: "aliexpress", precoAtual: 55.5, preco: 55.5, precoDe: 88.8 }),
+    de: "R$ 88,80",
+    por: "R$ 55,50"
+  },
+  {
+    nome: "KaBuM Oferta Universal",
+    oferta: ofertaBase({
+      marketplace: "kabum",
+      precoAtual: 899.9,
+      preco: 899.9,
+      ofertaUniversal: { comercial: { precoAnterior: 1099.9 } }
+    }),
+    de: "R$ 1.099,90",
+    por: "R$ 899,90"
+  },
+  {
+    nome: "AWIN templateInput",
+    oferta: ofertaBase({
+      marketplace: "awin",
+      precoAtual: 249.9,
+      preco: 249.9,
+      inteligenciaUniversalV2: { templateInput: { precoOriginal: 349.9 } }
+    }),
+    de: "R$ 349,90",
+    por: "R$ 249,90"
+  }
+];
+
+for (const caso of ofertasPrecoDeUniversal) {
+  assertPrecoDeUniversal(caso);
+}
+
+const semPrecoDeUniversal = mensagemPadraoUniversal(ofertaBase({
+  marketplace: "shopee",
+  precoAtual: 100,
+  preco: 100,
+  economia: 50,
+  descontoPercentual: 33
+}));
+assertInclui(semPrecoDeUniversal, "Por: *R$ 100,00*", "Template Padrao sem De preserva Por");
+assertNaoInclui(semPrecoDeUniversal, "De:", "Template Padrao sem De nao inventa preco anterior");
+
+for (const ofertaInvalida of [
+  ofertaBase({ marketplace: "amazon", precoAtual: 100, preco: 100, preco_de: "valor indisponivel" }),
+  ofertaBase({ marketplace: "mercadolivre", precoAtual: 100, preco: 100, precoOriginal: 100 }),
+  ofertaBase({ marketplace: "aliexpress", precoAtual: 100, preco: 100, precoDe: 80 })
+]) {
+  const mensagem = mensagemPadraoUniversal(ofertaInvalida);
+  assertInclui(mensagem, "Por: *R$ 100,00*", "Template Padrao com De invalido preserva Por");
+  assertNaoInclui(mensagem, "De:", "Template Padrao omite De invalido ou menor/igual ao Por");
+}
+
+const templateSemPrecoDe = {
+  id: "tpl_sem_preco_de",
+  canais: ["whatsapp"],
+  blocos: [
+    { tipo: "preco_de", ativo: false, ordem: 10 },
+    { tipo: "preco_por", ativo: true, ordem: 20 }
+  ]
+};
+for (const caso of ofertasPrecoDeUniversal) {
+  const render = renderizarTemplatePersonalizado({
+    oferta: caso.oferta,
+    template: templateSemPrecoDe,
+    canal: "whatsapp"
+  });
+  assert.strictEqual(render.ok, true, `${caso.nome}: personalizado renderiza com De oculto`);
+  assertInclui(render.mensagem, `Por: ${caso.por}`, `${caso.nome}: personalizado preserva Por com De oculto`);
+  assertNaoInclui(render.mensagem, "De:", `${caso.nome}: personalizado respeita toggle de preco_de`);
+}
+
 const dadosPersonalizados = prepararDadosOficiaisTemplate(amazonCooktop, { modo: "personalizado" });
 assert.strictEqual(dadosPersonalizados.precoExibido, 983.29, "precoExibido usa preco atual oficial");
 assert.strictEqual(dadosPersonalizados.fontePrecoExibido, "preco_atual", "fonte do preco exibido permanece oficial");
