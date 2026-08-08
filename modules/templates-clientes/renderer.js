@@ -96,18 +96,58 @@ function valorEconomia(oferta = {}) {
   return numeroUtil(oferta.economia ?? oferta.valorEconomia ?? oferta.economiaValor);
 }
 
+function chavePapelSemantico(valor = "") {
+  return normalizarComparacao(valor).replace(/[^a-z0-9]+/g, "");
+}
+
+function textoEquivaleCampoIdentidade(valor = "", oferta = {}) {
+  const chave = chavePapelSemantico(valor);
+  if (!chave) return false;
+  const referencias = [
+    oferta.titulo,
+    oferta.nome,
+    oferta.descricao,
+    oferta.descricaoAdicional,
+    oferta.textoResumo,
+    oferta.mensagemResumo,
+    oferta.marketplace,
+    oferta.loja,
+    oferta.categoria
+  ];
+  return referencias.some(referencia => {
+    const ref = chavePapelSemantico(referencia);
+    return Boolean(ref && (chave === ref || (ref.length >= 24 && chave.includes(ref))));
+  });
+}
+
+function beneficioTemPapelComercial(valor = "") {
+  const normalizado = normalizarComparacao(valor);
+  if (!normalizado) return false;
+  return /\b(?:cupom|pix|frete|cashback|desconto|parcel|app|aplicativo|resgate|voucher|moeda|moedas|prime|garantia|brinde|off|gratis|relampago|leve|pague)\b/.test(normalizado) ||
+    /\b\d+\s*%/.test(normalizado);
+}
+
+function beneficioValidoPorPapel(valor = "", oferta = {}) {
+  const beneficio = textoUtil(valor);
+  if (!beneficio) return false;
+  if (textoEquivaleCampoIdentidade(beneficio, oferta)) return false;
+  return beneficioTemPapelComercial(beneficio);
+}
+
 function valorBeneficio(oferta = {}) {
+  const candidatos = [];
   if (Array.isArray(oferta.beneficios)) {
-    const primeiro = oferta.beneficios.map(textoUtil).find(Boolean);
-    if (primeiro) return primeiro;
+    candidatos.push(...oferta.beneficios);
   }
 
-  return primeiroTexto(
+  candidatos.push(
     oferta.beneficioTexto,
     oferta.beneficioExtra,
     oferta.avisoCupom,
     oferta.beneficioDetectado
   );
+
+  return candidatos.map(textoUtil).find(item => beneficioValidoPorPapel(item, oferta)) || "";
 }
 
 function valorFrete(oferta = {}) {
@@ -125,8 +165,12 @@ function formatarAvaliacaoReal(valor = "") {
   if (!avaliacao) return "";
   if (/⭐|★|☆/.test(avaliacao)) return estrelasPreenchidas(avaliacao) >= 2 ? avaliacao : "";
 
+  const possuiPapelAvaliacao = /^\s*[0-5](?:[,.]\d+)?\s*$/.test(avaliacao) ||
+    /(?:\/\s*5\b|\bestrelas?\b|\bnota\b|\bavalia[cç][aã]o\b|\breviews?\b|\brating\b)/i.test(avaliacao);
+  if (!possuiPapelAvaliacao) return "";
+
   const match = avaliacao.replace(",", ".").match(/\b([0-5](?:\.\d+)?)\b(?:\s*\/\s*5)?/);
-  if (!match) return avaliacao;
+  if (!match) return "";
 
   const numero = Number(match[1]);
   if (!Number.isFinite(numero) || numero <= 0 || numero > 5) return "";

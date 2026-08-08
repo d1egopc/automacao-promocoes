@@ -1207,6 +1207,50 @@ const mlCuecasCupomBeneficioDuplicado = criarEspelho({
 assert.strictEqual((mlCuecasCupomBeneficioDuplicado.templateEspelhoShadow.mensagem.match(/Aplique o cupom FASHIONML/g) || []).length, 1);
 assert.strictEqual(blocosTipo(mlCuecasCupomBeneficioDuplicado, "beneficio").length, 0);
 
+const tituloSmartTvShopee = "Smart Tv Hq Qled 50 Polegadas";
+const smartTvShopeeCloneSemantico = criarEspelho({
+  textoOriginal: [
+    tituloSmartTvShopee,
+    "Por: R$ 1.442,00",
+    "Cupom: F3L1Z200",
+    "Frete gratis",
+    "https://s.shopee.com.br/smart-tv"
+  ].join("\n"),
+  oferta: {
+    titulo: tituloSmartTvShopee,
+    marketplace: "shopee",
+    categoria: "Audio TV",
+    preco: 1442,
+    precoAtual: 1442,
+    cupom: "F3L1Z200",
+    freteGratis: true,
+    beneficioTexto: tituloSmartTvShopee,
+    avaliacao: tituloSmartTvShopee,
+    linkAfiliado: "https://shopee.afiliado/smart-tv"
+  },
+  ofertaEntrada: {
+    beneficioTexto: tituloSmartTvShopee,
+    beneficios: [tituloSmartTvShopee],
+    avaliacao: tituloSmartTvShopee
+  },
+  comercialNormalizado: { marketplace: "shopee", precoAtual: 1442, precoConfiavel: true }
+});
+const mensagemSmartTv = smartTvShopeeCloneSemantico.templateEspelhoShadow.mensagem;
+assert.strictEqual(smartTvShopeeCloneSemantico.documentoComercialCanonico.beneficioTexto, null);
+assert.strictEqual(blocosTipo(smartTvShopeeCloneSemantico, "beneficio").length, 0);
+assert.strictEqual(blocosTipo(smartTvShopeeCloneSemantico, "avaliacao_nota").length, 0);
+assert.strictEqual(blocosTipo(smartTvShopeeCloneSemantico, "avaliacao_quantidade").length, 0);
+assert.ok(mensagemSmartTv.includes(tituloSmartTvShopee));
+assert.strictEqual(mensagemSmartTv.split(tituloSmartTvShopee).length - 1, 1, "titulo nao vaza como beneficio/prova social");
+assert.ok(mensagemSmartTv.includes("Shopee"));
+assert.strictEqual(blocoTipo(smartTvShopeeCloneSemantico, "categoria").textoOriginal, "Audio TV");
+assert.ok(mensagemSmartTv.includes("Por: R$ 1.442,00"));
+assert.ok(mensagemSmartTv.includes("Cupom: F3L1Z200"));
+assert.ok(/Frete gratis/i.test(mensagemSmartTv));
+assert.ok(mensagemSmartTv.includes("Confira aqui:"));
+assert.ok(!mensagemSmartTv.includes(`⭐ ${tituloSmartTvShopee}`));
+assert.ok(!mensagemSmartTv.includes(`🎁 ${tituloSmartTvShopee}`));
+
 const mlCupomCashbackReal = criarEspelho({
   textoOriginal: [
     "Produto com Cashback",
@@ -1308,6 +1352,7 @@ for (const resultado of [
   mlHaizPrecoEstruturado,
   mlOrganizadorPrecoEstruturado,
   mlCuecasCupomBeneficioDuplicado,
+  smartTvShopeeCloneSemantico,
   mlCupomCashbackReal,
   mlCupomFreteReal,
   mlCupomBeneficioDiferente,

@@ -123,6 +123,50 @@ const renderAvaliacaoReal = renderizarTemplatePersonalizado({
 assert.ok(renderAvaliacaoReal.mensagem.includes("Avalia"), "avaliacao real continua aparecendo");
 assert.ok(renderAvaliacaoReal.mensagem.includes("⭐⭐⭐⭐⭐"), "rating real vira estrelas");
 
+const tituloSmartTvShopee = "Smart Tv Hq Qled 50 Polegadas";
+const renderSmartTvShopeeSemPapelDuplicado = renderizarTemplatePersonalizado({
+  oferta: {
+    titulo: tituloSmartTvShopee,
+    marketplace: "Shopee",
+    categoria: "Audio TV",
+    precoAtual: 1442,
+    cupom: "F3L1Z200",
+    freteGratis: true,
+    beneficios: [tituloSmartTvShopee],
+    beneficioTexto: tituloSmartTvShopee,
+    avaliacao: tituloSmartTvShopee,
+    linkAfiliado: "https://shopee.afiliado/smart-tv"
+  },
+  template: {
+    id: "tpl_smart_tv_sem_papel_duplicado",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "titulo", ativo: true, ordem: 10 },
+      { tipo: "marketplace", ativo: true, ordem: 20 },
+      { tipo: "categoria", ativo: true, ordem: 30 },
+      { tipo: "preco_por", ativo: true, ordem: 40 },
+      { tipo: "cupom", ativo: true, ordem: 50 },
+      { tipo: "beneficio", ativo: true, ordem: 60 },
+      { tipo: "avaliacao", ativo: true, ordem: 70 },
+      { tipo: "frete", ativo: true, ordem: 80 },
+      { tipo: "link", ativo: true, ordem: 90 }
+    ]
+  },
+  canal: "whatsapp"
+});
+assert.strictEqual(renderSmartTvShopeeSemPapelDuplicado.mensagem.split(tituloSmartTvShopee).length - 1, 1, "titulo nao vira beneficio ou prova social");
+assertContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Shopee");
+assertContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Audio TV");
+assertContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Por:");
+assertContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "R$ 1.442,00");
+assertContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Cupom: F3L1Z200");
+assertContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Frete gratis");
+assertContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Confira aqui:");
+assertNaoContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, `⭐ ${tituloSmartTvShopee}`);
+assertNaoContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, `🎁 ${tituloSmartTvShopee}`);
+assertNaoContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Avalia");
+assertNaoContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Benef");
+
 const mensagemResolverOficial = comModoEngine("full", () => montarMensagemOferta(ofertaRadarComCupomObrigatorio, {
   clienteId,
   destino: { tipo: "whatsapp" }

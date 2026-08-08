@@ -195,7 +195,7 @@ function tentarTemplateUniversalOficial(oferta = {}, opcoes = {}) {
       precoAntigo: entradaUniversal.precoOriginal ?? "",
       economia: entradaUniversal.economia ?? "",
       cupom: entradaUniversal.cupom || "",
-      avaliacao: entradaUniversal.score ?? "",
+      avaliacao: entradaUniversal.avaliacao ?? "",
       origem: opcoes.origem || oferta.origem || "",
       templateVersao: "v2-universal-oficial",
       tamanhoTexto: texto.length,

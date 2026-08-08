@@ -1321,7 +1321,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     cupom: oferta.cupom,
     produzidoPor: "normalizarOfertaImportada"
   });
-  const sombraV2 = await aplicarSombraInteligenciaUniversalV2(oferta, ofertaEntrada, job);
+  let sombraV2 = await aplicarSombraInteligenciaUniversalV2(oferta, ofertaEntrada, job);
   oferta = sombraV2.oferta || oferta;
   let imagemResolucaoEngine = resolverImagemEngineFallback({ oferta, ofertaEntrada, evento, job, link });
 
@@ -1460,6 +1460,14 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   const categoriaFinalResolvida = reclassificarCategoriaFinalEngine(oferta, metadataFinal, job);
   oferta = categoriaFinalResolvida.oferta || oferta;
   metadataFinal = categoriaFinalResolvida.metadataFinal || metadataFinal;
+  if (radarMirrorComparado) {
+    sombraV2 = await aplicarSombraInteligenciaUniversalV2(oferta, ofertaEntrada, job);
+    oferta = sombraV2.oferta || oferta;
+    metadataFinal = {
+      ...metadataFinal,
+      ...objetoSeguro(sombraV2.metadata || {})
+    };
+  }
   const inteligenciaV2 = objetoSeguro(metadataFinal.inteligenciaUniversalV2);
   const retidaV2 = inteligenciaV2.status === "retida" || sombraV2.ok === false;
   const statusPersistencia = retidaV2 ? "retida_v2" : "importada";

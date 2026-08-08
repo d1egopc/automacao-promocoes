@@ -7,7 +7,9 @@ const {
   deveLogarPrecoSuspeito,
   emitirLogRadarPrecoSuspeito
 } = require("../modules/radar/comercial-precedencia");
+const { avaliarOfertaUniversal } = require("../modules/inteligencia-universal");
 const { montarItemFilaEngine } = require("../modules/engine/distributor/distributor.service");
+const { normalizarNumeroMoeda } = require("../utils/moeda");
 
 function campo(valor, confianca = "alta", evidencia = "Por R$ 99,90", extras = {}) {
   return { valor, confianca, evidencia, ...extras };
@@ -162,15 +164,16 @@ function testarMediaComMarcador() {
   assert.strictEqual(r.oferta.preco, 77.7);
 }
 
-function testarMediaSemMarcadorNaoAplica() {
+function testarMediaSemMarcadorAplicaCloneRadar() {
   const m = mirrorSemPreco();
   m.preco.atualCapturado = 77.7;
   m.preco.confianca = "media";
   m.preco.condicionado = false;
   m.comercial.precoAtual = campo(77.7, "media", "77,70", { tipo: "inferido_unico" });
   const r = resolver(oferta({ preco: 90, precoAtual: 90 }), m);
-  assert.strictEqual(r.resolucao.origemPreco, "ausente");
-  assert.strictEqual(r.oferta.preco, 90);
+  assert.strictEqual(r.resolucao.origemPreco, "radar");
+  assert.strictEqual(r.resolucao.motivoPreco, "radar_media_preco_explicito");
+  assert.strictEqual(r.oferta.preco, 77.7);
 }
 
 function testarParcelaNaoViraTotal() {
@@ -340,6 +343,124 @@ function testarAmazonCloneComercialUniversal() {
   assert.strictEqual(r.metadata.precedenciaComercial.camposProtegidos.cupom, true);
 }
 
+function testarMagnitudeMonetariaBrasileiraNaoDeslocaCasas() {
+  const casos = [
+    ["17,50", 17.5],
+    ["17,5", 17.5],
+    ["17", 17],
+    ["1750", 1750],
+    ["1.750", 1750],
+    ["1.750,50", 1750.5],
+    ["140", 140],
+    ["140,90", 140.9],
+    ["R$49", 49],
+    ["R$ 49", 49],
+    ["R$140", 140],
+    ["R$1.399,90", 1399.9],
+    ["R$ 1.210,00", 1210]
+  ];
+
+  for (const [entrada, esperado] of casos) {
+    assert.strictEqual(normalizarNumeroMoeda(entrada), esperado, `magnitude ${entrada}`);
+  }
+}
+
+function testarCasosReaisMediaSemMarcadorPreservamValorRadar() {
+  const casos = [
+    ["R$ 153", 153],
+    ["R$ 46,55", 46.55],
+    ["R$ 140", 140],
+    ["R$ 1.210,00", 1210]
+  ];
+
+  for (const [token, esperado] of casos) {
+    const m = mirrorSemPreco();
+    m.preco.atualCapturado = token;
+    m.preco.confianca = "media";
+    m.preco.evidenciaCapturada = token;
+    m.preco.marcadorComercial = null;
+    m.comercial.precoAtual = campo(token, "media", token, {
+      tipo: "preco_atual",
+      tipoCandidato: "preco_atual",
+      possuiCifrao: true,
+      nivelEvidencia: "media",
+      motivos: ["valor_monetario_com_cifrao"]
+    });
+    const r = resolver(oferta({ preco: 0.45, precoAtual: 0.45 }), m);
+    assert.strictEqual(r.resolucao.origemPreco, "radar", token);
+    assert.strictEqual(r.oferta.preco, esperado, token);
+    assert.strictEqual(r.metadata.precedenciaComercial.precoPublicacao, esperado, token);
+    assert.strictEqual(r.metadata.precoReferenciaApi, 0.45, token);
+  }
+}
+
+function testarPrecoCupomPixParcelamentoPreservadosDoRadar() {
+  const m = mirrorSemPreco();
+  m.preco.atualCapturado = "R$ 140";
+  m.preco.confianca = "media";
+  m.preco.evidenciaCapturada = "R$ 140 PIX";
+  m.preco.marcadorComercial = null;
+  m.comercial.precoAtual = campo("R$ 140", "media", "R$ 140 PIX", {
+    tipo: "preco_atual",
+    tipoCandidato: "preco_atual",
+    possuiCifrao: true,
+    nivelEvidencia: "media"
+  });
+  m.comercial.precoPix = campo(140, "alta", "R$ 140 PIX");
+  m.comercial.parcelamento = { quantidade: 10, valorParcela: 14, semJuros: true, confianca: "alta", evidencia: "10x de R$ 14 sem juros" };
+  m.cupom = { codigoCapturado: "PIX140", textoCapturado: "Cupom PIX140", condicaoCapturada: "Use PIX140", confianca: "alta" };
+  m.comercial.cupom = { codigo: "PIX140", texto: "Cupom PIX140", instrucao: "Use PIX140", confianca: "alta", provavel: false };
+
+  const r = resolver(oferta({ preco: 1.4, precoAtual: 1.4, cupom: "", parcelamento: "12x" }), m);
+  assert.strictEqual(r.oferta.preco, 140);
+  assert.strictEqual(r.oferta.precoPix, "R$ 140 PIX");
+  assert.strictEqual(r.oferta.parcelamento, "10x de R$ 14 sem juros");
+  assert.strictEqual(r.oferta.cupom, "PIX140");
+  assert.strictEqual(r.metadata.precoReferenciaApi, 1.4);
+  assert.strictEqual(r.metadata.parcelamentoReferenciaApi, "12x");
+}
+
+function testarAusenciaRealDePrecoNaoInventaValor() {
+  const r = resolver(oferta({ preco: "", precoAtual: "", valor: "" }), mirrorSemPreco({ comercial: { cupom: {} } }));
+  assert.strictEqual(r.resolucao.origemPreco, "ausente");
+  assert.strictEqual(r.resolucao.precoPublicacao, null);
+  assert.strictEqual(r.oferta.preco, "");
+}
+
+function testarInteligenciaUniversalComPrecoCanonicoNaoMantemPrecoInvalido() {
+  const m = mirrorSemPreco();
+  m.preco.atualCapturado = "R$ 153";
+  m.preco.confianca = "media";
+  m.preco.evidenciaCapturada = "R$ 153";
+  m.comercial.precoAtual = campo("R$ 153", "media", "R$ 153", {
+    tipo: "preco_atual",
+    tipoCandidato: "preco_atual",
+    possuiCifrao: true,
+    nivelEvidencia: "media"
+  });
+  const r = resolver(oferta({ preco: "", precoAtual: "", linkAfiliado: "https://go.optimus/r/abc123" }), m);
+  const resultado = avaliarOfertaUniversal({
+    clienteId: "user_teste",
+    titulo: r.oferta.titulo,
+    marketplace: r.oferta.marketplace,
+    precoAtual: r.oferta.preco,
+    preco: r.oferta.preco,
+    cupom: r.oferta.cupom,
+    linkAfiliado: r.oferta.linkAfiliado,
+    origem: "engine_importer"
+  }, {
+    clienteId: "user_teste",
+    origem: "engine_importer",
+    exigirLinkAfiliado: true,
+    memoriaAnteriores: [],
+    memoriaDisponivel: true
+  });
+  const validacao = (resultado.logs || []).find(log => log.etapa === "validacao");
+  assert.strictEqual(validacao.status, "ok");
+  assert.deepStrictEqual(validacao.erros, []);
+  assert.notStrictEqual(resultado.valorEfetivoOrigem, "preco_invalido");
+}
+
 function testarPreservacaoAteFila() {
   const r = resolver(oferta({ preco: 199.9, precoAtual: 199.9 }), mirror());
   const item = montarItemFilaEngine({
@@ -409,8 +530,8 @@ function testarDivergenciaExtremaImportadorGeraAlerta() {
   m.preco.marcadorComercial = null;
   m.comercial.precoAtual = campo(50, "media", "50", { tipo: "inferido_unico", tipoCandidato: "desconhecido", nivelEvidencia: "media" });
   const r = resolver(oferta({ marketplace: "amazon", preco: 419.06, precoAtual: 419.06 }), m);
-  assert.strictEqual(r.resolucao.origemPreco, "ausente");
-  assert.strictEqual(r.resolucao.statusComparacaoPreco, "radar_media_sem_marcador");
+  assert.strictEqual(r.resolucao.origemPreco, "radar");
+  assert.strictEqual(r.oferta.preco, 50);
   assert.ok(r.resolucao.divergenciaPercentual >= 80);
   assert.strictEqual(deveLogarPrecoSuspeito(r), true);
 }
@@ -569,7 +690,7 @@ const testes = [
   testarPrecoAltaDivergente,
   testarSemPrecoRadarUsaImportador,
   testarMediaComMarcador,
-  testarMediaSemMarcadorNaoAplica,
+  testarMediaSemMarcadorAplicaCloneRadar,
   testarParcelaNaoViraTotal,
   testarPercentualNaoViraPreco,
   testarCupomRadarClaro,
@@ -585,6 +706,11 @@ const testes = [
   testarImportadorAbsurdoCorrigidoPorRadar,
   testarPrecoRadarInvalidoNaoAplica,
   testarAmazonCloneComercialUniversal,
+  testarMagnitudeMonetariaBrasileiraNaoDeslocaCasas,
+  testarCasosReaisMediaSemMarcadorPreservamValorRadar,
+  testarPrecoCupomPixParcelamentoPreservadosDoRadar,
+  testarAusenciaRealDePrecoNaoInventaValor,
+  testarInteligenciaUniversalComPrecoCanonicoNaoMantemPrecoInvalido,
   testarPreservacaoAteFila,
   testarResumoLogSanitizado,
   testarDivergenciaExtremaImportadorGeraAlerta,

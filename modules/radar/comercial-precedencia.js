@@ -175,8 +175,12 @@ function resolverPreco({ ofertaImportador = {}, radarMirror = {}, cupomRadarConf
         motivo = "radar_evidencia_fraca";
       }
     } else if (radar.confianca === "media") {
-      statusComparacaoPreco = "radar_media_sem_marcador";
-      motivo = "radar_media_sem_marcador";
+      origemPreco = "radar";
+      precoPublicacao = precoRadar;
+      statusComparacaoPreco = divergenciaPercentual !== null && divergenciaPercentual >= 0.01 ? "divergente" : "coerente";
+      motivo = divergenciaExtrema
+        ? (cupomRadarConfirmado ? "divergencia_extrema_com_cupom_confirmado" : "divergencia_extrema_radar_fiel")
+        : "radar_media_preco_explicito";
     } else {
       statusComparacaoPreco = "radar_baixa_confianca";
       motivo = "radar_baixa_confianca";

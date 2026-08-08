@@ -1160,7 +1160,16 @@ function extrairDocumentoComercialCanonico({
   );
   const cashbackTexto = texto(linhaCashback) || primeiroTexto(oferta.cashback, ofertaEntrada.cashback);
   const freteTexto = texto(linhaFrete) || primeiroTexto(oferta.frete, ofertaEntrada.frete, oferta.freteGratis === true ? "Frete gratis" : "");
-  const beneficioTexto = extrairBeneficioTexto(textoOriginal, oferta, ofertaEntrada) || texto(linhaBeneficio);
+  const beneficioTextoBruto = extrairBeneficioTexto(textoOriginal, oferta, ofertaEntrada) || texto(linhaBeneficio);
+  const beneficioTexto = beneficioIncompativelComPapel(beneficioTextoBruto, {
+    tituloOriginal,
+    tituloNormalizado: limparTitulo(tituloOriginal),
+    nome: primeiroTexto(oferta.nome, ofertaEntrada.nome),
+    descricaoOriginal: textoOriginal,
+    descricao: primeiroTexto(oferta.descricao, ofertaEntrada.descricao),
+    categoria: primeiroTexto(oferta.categoria, ofertaEntrada.categoria),
+    marketplace
+  }) ? "" : beneficioTextoBruto;
   const instrucaoTexto = texto(instrucaoComercial);
   const cupomTexto = texto(cupom.cupomCodigo || cupom.cupomTexto || oferta.cupom || ofertaEntrada.cupom);
 
@@ -1675,6 +1684,42 @@ function textoComercialEquivalente(a = "", b = "") {
   return Boolean(ca && cb && ca === cb);
 }
 
+function chavePapelSemantico(valor = "") {
+  return normalizarComparacao(removerUrls(valor)).replace(/[^a-z0-9]+/g, "");
+}
+
+function textoEquivaleIdentidadeProduto(valor = "", ...referencias) {
+  const chave = chavePapelSemantico(valor);
+  if (!chave) return false;
+  return referencias.some(referencia => {
+    const ref = chavePapelSemantico(referencia);
+    return Boolean(ref && (chave === ref || (ref.length >= 24 && chave.includes(ref))));
+  });
+}
+
+function beneficioTemPapelComercial(valor = "") {
+  const normalizado = normalizarComparacao(valor);
+  if (!normalizado) return false;
+  return /\b(?:cupom|pix|frete|cashback|desconto|beneficio|off|app|prime|voucher|moeda|moedas|resgate|brinde|garantia|gratis|relampago|leve|pague)\b/.test(normalizado) ||
+    /\b\d+\s*%/.test(normalizado);
+}
+
+function beneficioIncompativelComPapel(valor = "", contexto = {}) {
+  const beneficio = texto(valor);
+  if (!beneficio) return true;
+  if (!beneficioTemPapelComercial(beneficio)) return true;
+  return textoEquivaleIdentidadeProduto(
+    beneficio,
+    contexto.tituloOriginal,
+    contexto.tituloNormalizado,
+    contexto.nome,
+    contexto.descricaoOriginal,
+    contexto.descricao,
+    contexto.categoria,
+    contexto.marketplace
+  );
+}
+
 function condicaoAliExpressEquivalente(a = "", b = "") {
   const ca = normalizarComparacao(removerUrls(a)).replace(/\b\d{1,6}\s*(?:moeda|moedas|coins?)\b/g, "moedas").replace(/[^a-z0-9]+/g, "");
   const cb = normalizarComparacao(removerUrls(b)).replace(/\b\d{1,6}\s*(?:moeda|moedas|coins?)\b/g, "moedas").replace(/[^a-z0-9]+/g, "");
@@ -1725,7 +1770,7 @@ function resolverBlocoTemplateEspelho(tipo = "", doc = {}, espelho = {}, context
   const cashback = valorDocumentoOuEspelho(doc, espelho, "cashbackTexto");
   const frete = valorDocumentoOuEspelho(doc, espelho, "freteTexto");
   const instrucao = primeiroTexto(valorDocumentoOuEspelho(doc, espelho, "instrucaoTexto", "instrucaoComercial"), contexto.instrucaoCupomTexto);
-  const avaliacao = primeiroTexto(contexto.avaliacao, contexto.score);
+  const avaliacao = primeiroTexto(contexto.avaliacao);
   const categoria = primeiroTexto(contexto.categoria);
   const economia = primeiroTexto(contexto.economia);
 
@@ -1740,6 +1785,14 @@ function resolverBlocoTemplateEspelho(tipo = "", doc = {}, espelho = {}, context
   if (tipo === "cupom") return cupom ? `🎟️ Cupom: ${cupom}` : "";
   if (tipo === "beneficio") {
     if (beneficioEspeculativoOuTecnico(beneficio)) return "";
+    if (beneficioIncompativelComPapel(beneficio, {
+      tituloOriginal: doc.tituloOriginal,
+      tituloNormalizado: espelho.tituloNormalizado,
+      nome: espelho.tituloOriginal,
+      descricaoOriginal: doc.descricaoOriginal,
+      categoria,
+      marketplace
+    })) return "";
     if (textoComercialEquivalente(beneficio, frete) || textoComercialEquivalente(beneficio, cashback)) return "";
     if (!contexto.temBlocoCashback && /\bcashback\b/i.test(beneficio)) return "";
     if (!contexto.temBlocoFrete && /\bfrete\b/i.test(beneficio)) return "";
@@ -1956,6 +2009,7 @@ function renderizarBlocoCanonicoV26(bloco = {}, contexto = {}) {
   if (bloco.tipo === "beneficio_app") return `📱 ${valor}`;
   if (bloco.tipo === "beneficio") {
     if (beneficioEspeculativoOuTecnico(valor)) return "";
+    if (beneficioIncompativelComPapel(valor, contexto)) return "";
     if (textoComercialEquivalente(valor, contexto.freteTexto) || textoComercialEquivalente(valor, contexto.cashbackTexto)) return "";
     if (/\bcashback\b/i.test(valor) && contexto.temCashback) return "";
     if (/\bfrete\b/i.test(valor) && contexto.temFrete) return "";
@@ -2017,6 +2071,11 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
   const contexto = {
     marketplaceAliExpress: marketplaceAliExpress(doc.marketplace),
     marketplaceMercadoLivre: marketplaceMercadoLivre(doc.marketplace),
+    tituloOriginal: doc.tituloOriginal || "",
+    tituloNormalizado: "",
+    descricaoOriginal: doc.descricaoOriginal || "",
+    categoria: blocosOrdenados.find(bloco => bloco.tipo === "categoria")?.textoOriginal || "",
+    marketplace: doc.marketplace || "",
     precoOfertaTexto: blocosOrdenados.find(bloco => bloco.tipo === "preco_oferta")?.textoOriginal || "",
     freteTexto: blocosOrdenados.find(bloco => bloco.tipo === "frete")?.textoOriginal || "",
     cashbackTexto: blocosOrdenados.find(bloco => bloco.tipo === "cashback")?.textoOriginal || "",
