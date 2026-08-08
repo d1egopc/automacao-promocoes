@@ -170,6 +170,41 @@ async function testarWorkspaceSaturadoNaoRecebe() {
   assert.strictEqual(resultado.distributorVivo.candidatosGateBloqueados, 1);
 }
 
+async function testarBacklogBloqueadoNaoCausaStarvationGlobal() {
+  const candidatos = [];
+  for (let i = 1; i <= 24; i += 1) {
+    candidatos.push(oferta(i, ROGER, { marketplace: "mercadolivre", prioridade: 100 - i }));
+  }
+  candidatos.push(oferta(101, D1, { marketplace: "shopee", prioridade: 80 }));
+  candidatos.push(oferta(102, "workspace_4", { marketplace: "amazon", prioridade: 79 }));
+
+  const { runner, adicionados } = prepararRunner(candidatos);
+
+  const resultado = await runner.distribuirOfertasEngine({
+    limite: 2,
+    deps: {
+      decidirAbsorcaoWorkspace: async ({ workspaceId }) => {
+        if (workspaceId === ROGER) {
+          return {
+            ativo: true,
+            permitir: false,
+            motivo: "sessao_ou_integracao_inapta",
+            estadoDaEsteira: "FECHADA",
+            quantidadeAceitaAgora: 0
+          };
+        }
+        return { ativo: false, permitir: true, quantidadeAceitaAgora: 1, motivo: "gate_desabilitado" };
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.adicionadasFila, 2);
+  assert.deepStrictEqual(adicionados.sort(), [D1, "workspace_4"].sort());
+  assert(resultado.distributorVivo.candidatosGateBloqueados >= 1, "deve registrar candidatos bloqueados");
+  assert.strictEqual(resultado.distributorVivo.motivoEncerramento, "capacidade_util_atendida");
+  assert(resultado.distributorVivo.limiteOperacionalCandidatos >= 100, "deve haver limite operacional seguro maior que a capacidade util");
+}
+
 async function testarValidacoesDeDestino() {
   mockModulo("../utils/usuarios-atividade", {
     usuarioAtivo: () => true,
@@ -270,12 +305,17 @@ async function testarQueryExcluiIdsComPlaceholders() {
   assert(consultaPrincipal.sql.includes("j.cliente_id = $2"));
   assert(consultaPrincipal.sql.includes("NOT (o.id = ANY($3::bigint[]))"));
   assert(consultaPrincipal.sql.includes("LIMIT $4"));
+  assert(consultaPrincipal.sql.includes("ordem_workspace_marketplace"));
+  assert(consultaPrincipal.sql.includes("ordem_marketplace"));
+  assert(/PARTITION BY LOWER\(COALESCE\(o\.marketplace, ''\)\), j\.cliente_id/i.test(consultaPrincipal.sql));
+  assert(/ORDER BY ordem_workspace_marketplace ASC/i.test(consultaPrincipal.sql));
   assert.deepStrictEqual(consultaPrincipal.params, ["aliexpress", D1, [1, 2], 7]);
 }
 (async () => {
   await testarRogerBloqueadoNaoConsomeD1();
   await testarTodosBloqueadosSemLoopInfinito();
   await testarWorkspaceSaturadoNaoRecebe();
+  await testarBacklogBloqueadoNaoCausaStarvationGlobal();
   await testarValidacoesDeDestino();
   await testarQueryExcluiIdsComPlaceholders();
   console.log("distributor-vivo-sem-starvation.test.js OK");

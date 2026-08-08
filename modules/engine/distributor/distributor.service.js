@@ -592,21 +592,45 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
   const resultado = await queryDistribuidor({
     etapa: "buscar_ofertas_distribuiveis",
     queryResumo: "SELECT engine_ofertas JOIN engine_jobs_cliente",
-    sql: `SELECT o.id, o.uuid, o.evento_id, o.link_id, o.marketplace, o.titulo,
-            o.preco, o.preco_original, o.cupom, o.tipo_cupom, o.beneficio_extra,
-            o.imagem, o.link_original, o.link_expandido,
-            o.link_afiliado, o.categoria, o.score, o.prioridade, o.status, o.motivo_status,
-            ${campoMetadata},
-            o.criada_em, o.atualizada_em, j.id AS job_id, j.cliente_id,
-            j.metadata AS job_metadata, e.metadata AS evento_metadata
-       FROM engine_ofertas o
-       JOIN engine_jobs_cliente j ON j.oferta_id = o.id
-       LEFT JOIN engine_eventos_brutos e ON e.id = o.evento_id
-      WHERE ${filtros.join(" AND ")}
-      ORDER BY COALESCE(o.prioridade, o.score, 0) DESC,
-             o.atualizada_em ASC NULLS FIRST,
-             o.id ASC
-      LIMIT $${params.length}`,
+    sql: `WITH candidatos_distribuiveis AS (
+      SELECT o.id, o.uuid, o.evento_id, o.link_id, o.marketplace, o.titulo,
+             o.preco, o.preco_original, o.cupom, o.tipo_cupom, o.beneficio_extra,
+             o.imagem, o.link_original, o.link_expandido,
+             o.link_afiliado, o.categoria, o.score, o.prioridade, o.status, o.motivo_status,
+             ${campoMetadata},
+             o.criada_em, o.atualizada_em, j.id AS job_id, j.cliente_id,
+             j.metadata AS job_metadata, e.metadata AS evento_metadata,
+             ROW_NUMBER() OVER (
+               PARTITION BY LOWER(COALESCE(o.marketplace, '')), j.cliente_id
+               ORDER BY COALESCE(o.prioridade, o.score, 0) DESC,
+                        o.atualizada_em ASC NULLS FIRST,
+                        o.id ASC
+             ) AS ordem_workspace_marketplace,
+             ROW_NUMBER() OVER (
+               PARTITION BY LOWER(COALESCE(o.marketplace, ''))
+               ORDER BY COALESCE(o.prioridade, o.score, 0) DESC,
+                        o.atualizada_em ASC NULLS FIRST,
+                        o.id ASC
+             ) AS ordem_marketplace
+        FROM engine_ofertas o
+        JOIN engine_jobs_cliente j ON j.oferta_id = o.id
+        LEFT JOIN engine_eventos_brutos e ON e.id = o.evento_id
+       WHERE ${filtros.join(" AND ")}
+    )
+    SELECT id, uuid, evento_id, link_id, marketplace, titulo,
+           preco, preco_original, cupom, tipo_cupom, beneficio_extra,
+           imagem, link_original, link_expandido,
+           link_afiliado, categoria, score, prioridade, status, motivo_status,
+           metadata,
+           criada_em, atualizada_em, job_id, cliente_id,
+           job_metadata, evento_metadata
+      FROM candidatos_distribuiveis
+     ORDER BY ordem_workspace_marketplace ASC,
+              ordem_marketplace ASC,
+              COALESCE(prioridade, score, 0) DESC,
+              atualizada_em ASC NULLS FIRST,
+              id ASC
+     LIMIT $${params.length}`,
     params
   });
 

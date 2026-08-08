@@ -39,6 +39,10 @@ const { buscarOfertasDistribuiveis } = require("../modules/engine/distributor/di
   const consultaOfertas = consultas.find(item => /FROM engine_ofertas o/i.test(item.sql));
   assert(consultaOfertas, "deve consultar engine_ofertas");
   assert(/o\.prioridade/i.test(consultaOfertas.sql), "prioridade deve ser selecionada");
+  assert(/ROW_NUMBER\(\) OVER/i.test(consultaOfertas.sql), "query deve aplicar fairness por janela");
+  assert(/PARTITION BY LOWER\(COALESCE\(o\.marketplace, ''\)\), j\.cliente_id/i.test(consultaOfertas.sql), "workspace nao pode monopolizar o topo do Distributor");
+  assert(/PARTITION BY LOWER\(COALESCE\(o\.marketplace, ''\)\)/i.test(consultaOfertas.sql), "marketplace nao pode monopolizar a selecao global");
+  assert(/ORDER BY ordem_workspace_marketplace ASC/i.test(consultaOfertas.sql), "fairness por workspace deve preceder prioridade global bruta");
   assert(/COALESCE\(o\.prioridade,\s*o\.score,\s*0\)\s+DESC/i.test(consultaOfertas.sql), "prioridade deve ser a decisao operacional final e score apenas fallback");
   assert(!/GREATEST/i.test(consultaOfertas.sql), "score alto nao pode anular prioridade deliberadamente reduzida");
   assert(/o\.atualizada_em\s+ASC\s+NULLS\s+FIRST/i.test(consultaOfertas.sql), "antiguidade deve permanecer como desempate");

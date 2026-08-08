@@ -106,6 +106,7 @@ function incrementarContador(mapa = {}, chave = "") {
 function criarResumoDistributorVivo(capacidadeAlvo = 0) {
   return {
     candidatosConsultados: 0,
+    limiteOperacionalCandidatos: 0,
     candidatosGateBloqueados: 0,
     workspacesBloqueados: {},
     candidatosPulados: 0,
@@ -143,6 +144,7 @@ function logDistributorVivo(resumo = {}) {
   try {
     console.log("[OFC-V2.8-DISTRIBUTOR-VIVO]", JSON.stringify({
       candidatosConsultados: vivo.candidatosConsultados,
+      limiteOperacionalCandidatos: vivo.limiteOperacionalCandidatos || 0,
       candidatosGateBloqueados: vivo.candidatosGateBloqueados,
       workspacesBloqueados: vivo.workspacesBloqueados,
       candidatosPulados: vivo.candidatosPulados,
@@ -574,8 +576,9 @@ async function distribuirOfertasEngine({ limite = 10, marketplace = "", clienteI
   const idsProcessados = new Set();
   const maxCandidatos = Math.max(
     limiteFinal,
-    Math.min(Number(contexto.maxCandidatosDistributor || deps.maxCandidatosDistributor || limiteFinal * 10), 200)
+    Math.min(Number(contexto.maxCandidatosDistributor || deps.maxCandidatosDistributor || limiteFinal * 50), 500)
   );
+  resumo.distributorVivo.limiteOperacionalCandidatos = maxCandidatos;
 
   while (resumo.adicionadasFila < limiteFinal && idsProcessados.size < maxCandidatos) {
     const limiteBusca = Math.max(1, Math.min(limiteFinal, maxCandidatos - idsProcessados.size));
