@@ -146,7 +146,7 @@ function testarSemPrecoRadarUsaImportador() {
   const r = resolver(oferta({ preco: 88.8, precoAtual: 88.8 }), m);
   assert.strictEqual(r.resolucao.origemPreco, "ausente");
   assert.strictEqual(r.resolucao.precoPublicacao, null);
-  assert.strictEqual(r.oferta.preco, undefined);
+  assert.strictEqual(r.oferta.preco, 88.8);
 }
 
 function testarMediaComMarcador() {
@@ -170,7 +170,7 @@ function testarMediaSemMarcadorNaoAplica() {
   m.comercial.precoAtual = campo(77.7, "media", "77,70", { tipo: "inferido_unico" });
   const r = resolver(oferta({ preco: 90, precoAtual: 90 }), m);
   assert.strictEqual(r.resolucao.origemPreco, "ausente");
-  assert.strictEqual(r.oferta.preco, undefined);
+  assert.strictEqual(r.oferta.preco, 90);
 }
 
 function testarParcelaNaoViraTotal() {
@@ -180,7 +180,7 @@ function testarParcelaNaoViraTotal() {
   const r = resolver(oferta({ preco: 199.9, precoAtual: 199.9 }), m);
   assert.strictEqual(r.resolucao.origemPreco, "ausente");
   assert.strictEqual(r.resolucao.condicoesComerciais.parcelamento.quantidade, 10);
-  assert.strictEqual(r.oferta.preco, undefined);
+  assert.strictEqual(r.oferta.preco, 199.9);
 }
 
 function testarPercentualNaoViraPreco() {
@@ -204,7 +204,7 @@ function testarCupomImportadorFallback() {
   const r = resolver(oferta({ cupom: "IMP10" }), m);
   assert.strictEqual(r.resolucao.origemCupom, "ausente");
   assert.strictEqual(r.resolucao.cupomPublicacao, null);
-  assert.strictEqual(r.oferta.cupom, undefined);
+  assert.strictEqual(r.oferta.cupom, "IMP10");
 }
 
 function testarCupomProvavelNaoAplica() {
@@ -231,7 +231,7 @@ function testarAmazonPix() {
   const m = mirrorSemPreco(); m.comercial.precoPix = campo(299.9, "alta", "No Pix R$ 299,90");
   const r = resolver(oferta({ marketplace: "amazon", preco: 329.9, precoAtual: 329.9 }), m);
   assert.strictEqual(r.resolucao.origemPreco, "ausente");
-  assert.strictEqual(r.oferta.preco, undefined);
+  assert.strictEqual(r.oferta.preco, 329.9);
   assert.strictEqual(r.resolucao.condicoesComerciais.pix.valor, 299.9);
 }
 
@@ -291,7 +291,53 @@ function testarPrecoRadarInvalidoNaoAplica() {
   const r = resolver(oferta({ preco: 55.5, precoAtual: 55.5 }), m);
   assert.strictEqual(r.resolucao.origemPreco, "ausente");
   assert.strictEqual(r.resolucao.statusComparacaoPreco, "radar_invalido");
-  assert.strictEqual(r.oferta.preco, undefined);
+  assert.strictEqual(r.oferta.preco, 55.5);
+}
+
+function testarAmazonCloneComercialUniversal() {
+  const m = removerCupomRadar(aplicarPrecoRadar(mirror(), 2249, "alta", "Por R$ 2.249"));
+  m.origem = { clienteId: "workspace_amazon", tipo: "telegram" };
+  m.preco.anteriorCapturado = null;
+  m.cupom = {
+    codigoCapturado: "TUDOAMAZON",
+    textoCapturado: "Cupom TUDOAMAZON",
+    condicaoCapturada: "Use o cupom TUDOAMAZON",
+    confianca: "alta"
+  };
+  m.comercial.cupom = {
+    codigo: "TUDOAMAZON",
+    texto: "Cupom TUDOAMAZON",
+    instrucao: "Use o cupom TUDOAMAZON",
+    confianca: "alta",
+    provavel: false
+  };
+  m.comercial.parcelamento = {
+    quantidade: 10,
+    valorParcela: 224.9,
+    semJuros: true,
+    confianca: "alta",
+    evidencia: "10x de R$ 224,90 sem juros"
+  };
+
+  const r = resolver(oferta({
+    marketplace: "amazon",
+    preco: 2680,
+    precoAtual: 2680,
+    cupom: "",
+    parcelamento: "12x de R$ 223,33",
+    metadata: { produto: { preco: 2680, parcelamento: "12x de R$ 223,33" } }
+  }), m);
+
+  assert.strictEqual(r.oferta.preco, 2249);
+  assert.strictEqual(r.oferta.precoAtual, 2249);
+  assert.strictEqual(r.oferta.cupom, "TUDOAMAZON");
+  assert.strictEqual(r.oferta.parcelamento, "10x de R$ 224,90 sem juros");
+  assert.strictEqual(r.metadata.precoReferenciaApi, 2680);
+  assert.strictEqual(r.metadata.parcelamentoReferenciaApi, "12x de R$ 223,33");
+  assert.strictEqual(r.metadata.precedenciaComercial.politicaAutoridade, "radar_comercial_explicito_maior_que_api");
+  assert.strictEqual(r.metadata.precedenciaComercial.camposProtegidos.preco, true);
+  assert.strictEqual(r.metadata.precedenciaComercial.camposProtegidos.parcelamento, true);
+  assert.strictEqual(r.metadata.precedenciaComercial.camposProtegidos.cupom, true);
 }
 
 function testarPreservacaoAteFila() {
@@ -538,6 +584,7 @@ const testes = [
   testarRadarMirrorAplicaPreco,
   testarImportadorAbsurdoCorrigidoPorRadar,
   testarPrecoRadarInvalidoNaoAplica,
+  testarAmazonCloneComercialUniversal,
   testarPreservacaoAteFila,
   testarResumoLogSanitizado,
   testarDivergenciaExtremaImportadorGeraAlerta,

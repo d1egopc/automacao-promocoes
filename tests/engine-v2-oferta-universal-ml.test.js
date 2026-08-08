@@ -138,6 +138,201 @@ function ofertaMlAdapter(extras = {}) {
     assert(validarContratoOfertaUniversal(semPreco).motivos.includes("preco_ausente"));
   }
 
+  {
+    const { montarOfertaUniversalEngine } = require("../modules/engine/oferta-universal.contract");
+    const ofertaUniversal = montarOfertaUniversalEngine({
+      job: { id: 12, evento_id: 22, cliente_id: "workspace_ml", marketplace: "amazon" },
+      oferta: {
+        marketplace: "amazon",
+        titulo: "RTX 5060",
+        preco: 2249,
+        precoOriginal: null,
+        parcelamento: "10x de R$ 224,90 sem juros",
+        cupom: "TUDOAMAZON",
+        linkAfiliado: "https://amzn.to/rtx5060"
+      },
+      ofertaEntrada: {
+        preco: 2680,
+        parcelamento: "12x de R$ 223,33"
+      },
+      metadata: {
+        precedenciaComercial: {
+          politicaAutoridade: "radar_comercial_explicito_maior_que_api",
+          camposProtegidos: { preco: true, parcelamento: true, cupom: true }
+        }
+      },
+      status: "importada"
+    });
+
+    assert.strictEqual(ofertaUniversal.comercial.precoAtual, 2249);
+    assert.strictEqual(ofertaUniversal.comercial.parcelamento, "10x de R$ 224,90 sem juros");
+    assert.strictEqual(ofertaUniversal.comercial.cupom, "TUDOAMAZON");
+  }
+
+  {
+    const { resolverPrecedenciaComercialRadar } = require("../modules/radar/comercial-precedencia");
+    const { montarOfertaUniversalEngine } = require("../modules/engine/oferta-universal.contract");
+    const { construirEspelhoComercialV24 } = require("../modules/ofc-v2/espelho-comercial");
+    const { renderizarTemplatePersonalizado } = require("../modules/templates-clientes/renderer");
+
+    const metadataComSombraDivergente = {
+      inteligenciaUniversalV2: {
+        templateInput: {
+          precoAtual: 2680,
+          cupom: "PAGINAAPI",
+          parcelamento: "12x de R$ 223,33",
+          beneficios: ["Beneficio vindo da API"]
+        },
+        comparativo: {
+          precoDepois: 2680,
+          cupomDepois: "PAGINAAPI"
+        },
+        valorEfetivo: 2680,
+        valorEfetivoOrigem: "api"
+      }
+    };
+    const ofertaImportador = {
+      marketplace: "amazon",
+      titulo: "RTX 5060",
+      preco: 2680,
+      precoAtual: 2680,
+      cupom: "PAGINAAPI",
+      parcelamento: "12x de R$ 223,33",
+      linkOriginal: "https://www.amazon.com.br/dp/B0TESTE",
+      linkAfiliado: "https://amzn.to/rtx5060",
+      metadata: metadataComSombraDivergente
+    };
+    const radarMirror = {
+      versao: 1,
+      origem: { clienteId: "workspace_amazon", tipo: "telegram" },
+      texto: {
+        original: [
+          "RTX 5060",
+          "Por R$ 2.249",
+          "10x de R$ 224,90 sem juros",
+          "Cupom TUDOAMAZON",
+          "Aplique o cupom TUDOAMAZON antes de finalizar.",
+          "Frete gratis",
+          "https://www.amazon.com.br/dp/B0TESTE"
+        ].join("\n")
+      },
+      preco: {
+        atualCapturado: 2249,
+        anteriorCapturado: null,
+        confianca: "alta",
+        condicionado: false,
+        condicaoTexto: null,
+        tipoCapturado: "final",
+        evidenciaCapturada: "Por R$ 2.249",
+        marcadorComercial: "por"
+      },
+      cupom: {
+        codigoCapturado: "TUDOAMAZON",
+        textoCapturado: "Cupom TUDOAMAZON",
+        condicaoCapturada: "Aplique o cupom TUDOAMAZON antes de finalizar.",
+        confianca: "alta"
+      },
+      links: {
+        encontrados: ["https://www.amazon.com.br/dp/B0TESTE"],
+        produtoOriginal: "https://www.amazon.com.br/dp/B0TESTE",
+        resgateCupom: null,
+        adicionais: [],
+        quantidadeEncontrada: 1
+      },
+      comercial: {
+        precoAtual: { valor: 2249, confianca: "alta", evidencia: "Por R$ 2.249", tipo: "final" },
+        precoAntigo: { valor: null, confianca: "ausente", evidencia: null },
+        precoPix: { valor: null, confianca: "ausente", evidencia: null },
+        precoBoleto: { valor: null, confianca: "ausente", evidencia: null },
+        precoCartao: { valor: null, confianca: "ausente", evidencia: null },
+        parcelamento: { quantidade: 10, valorParcela: 224.9, semJuros: true, confianca: "alta", evidencia: "10x de R$ 224,90 sem juros" },
+        descontoPercentual: { valor: null, confianca: "ausente", evidencia: null },
+        cupom: {
+          codigo: "TUDOAMAZON",
+          texto: "Cupom TUDOAMAZON",
+          instrucao: "Aplique o cupom TUDOAMAZON antes de finalizar.",
+          confianca: "alta",
+          provavel: false
+        },
+        cashback: { valor: null, confianca: "ausente", evidencia: null },
+        freteGratis: { valor: true, confianca: "alta", evidencia: "Frete gratis" },
+        moedasShopee: { valor: null, confianca: "ausente", evidencia: null },
+        links: {
+          produto: "https://www.amazon.com.br/dp/B0TESTE",
+          classificados: [{ link: "https://www.amazon.com.br/dp/B0TESTE", tipo: "produto" }]
+        }
+      }
+    };
+
+    const precedencia = resolverPrecedenciaComercialRadar({
+      ofertaImportador,
+      radarMirror,
+      metadata: metadataComSombraDivergente,
+      clienteId: "workspace_amazon",
+      marketplace: "amazon"
+    });
+    const ofertaResolvida = precedencia.oferta;
+    const metadataResolvida = precedencia.metadata;
+    const ofertaUniversal = montarOfertaUniversalEngine({
+      job: { id: 13, evento_id: 23, cliente_id: "workspace_amazon", marketplace: "amazon" },
+      evento: { texto_original: radarMirror.texto.original },
+      oferta: ofertaResolvida,
+      ofertaEntrada: ofertaImportador,
+      metadata: metadataResolvida,
+      status: "importada"
+    });
+    const { retorno: ofc } = await capturarLogs(() => construirEspelhoComercialV24({
+      job: { id: 13, evento_id: 23, cliente_id: "workspace_amazon", marketplace: "amazon" },
+      evento: { texto_original: radarMirror.texto.original },
+      oferta: ofertaResolvida,
+      ofertaEntrada: ofertaImportador,
+      metadata: metadataResolvida
+    }));
+    const template = renderizarTemplatePersonalizado({
+      oferta: {
+        ...ofertaResolvida,
+        metadata: metadataResolvida
+      },
+      template: {
+        id: "tpl_clone_comercial",
+        canais: ["whatsapp"],
+        blocos: [
+          { tipo: "preco_por", ativo: true, ordem: 10 },
+          { tipo: "parcelamento", ativo: true, ordem: 20 },
+          { tipo: "cupom", ativo: true, ordem: 30 },
+          { tipo: "frase_cupom", ativo: true, ordem: 40 },
+          { tipo: "frete", ativo: true, ordem: 50 }
+        ]
+      },
+      canal: "whatsapp"
+    });
+
+    assert.strictEqual(ofertaResolvida.preco, 2249);
+    assert.strictEqual(ofertaResolvida.parcelamento, "10x de R$ 224,90 sem juros");
+    assert.strictEqual(ofertaResolvida.cupom, "TUDOAMAZON");
+    assert.strictEqual(ofertaResolvida.freteGratis, true);
+    assert.strictEqual(metadataResolvida.precoReferenciaApi, 2680);
+    assert.strictEqual(metadataResolvida.parcelamentoReferenciaApi, "12x de R$ 223,33");
+    assert.strictEqual(ofertaUniversal.comercial.precoAtual, 2249);
+    assert.strictEqual(ofertaUniversal.comercial.parcelamento, "10x de R$ 224,90 sem juros");
+    assert.strictEqual(ofertaUniversal.comercial.cupom, "TUDOAMAZON");
+    assert.strictEqual(ofc.documentoComercialCanonico.precoPorTexto, "R$ 2.249,00");
+    assert.strictEqual(ofc.documentoComercialCanonico.parcelamentoTexto, "10x de R$ 224,90 sem juros");
+    assert.strictEqual(ofc.documentoComercialCanonico.cupomTexto, "TUDOAMAZON");
+    assert.ok(ofc.templateEspelhoShadow.mensagem.includes("R$ 2.249"));
+    assert.ok(ofc.templateEspelhoShadow.mensagem.includes("10x de R$ 224,90 sem juros"));
+    assert.ok(ofc.templateEspelhoShadow.mensagem.includes("TUDOAMAZON"));
+    assert.ok(template.mensagem.includes("2.249,00"));
+    assert.ok(template.mensagem.includes("10x de R$ 224,90 sem juros"));
+    assert.ok(template.mensagem.includes("TUDOAMAZON"));
+    for (const mensagem of [ofc.templateEspelhoShadow.mensagem, template.mensagem]) {
+      assert.ok(!mensagem.includes("2.680"));
+      assert.ok(!mensagem.includes("12x de R$ 223,33"));
+      assert.ok(!mensagem.includes("PAGINAAPI"));
+      assert.ok(!mensagem.includes("Beneficio vindo da API"));
+    }
+  }
+
   let metadataInserida = null;
   let metadataPersistida = null;
 

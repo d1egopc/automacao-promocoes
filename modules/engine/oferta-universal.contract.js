@@ -123,8 +123,8 @@ function montarOfertaUniversalEngine({
       precoAnterior,
       descontoPercentual,
       moeda: texto(oferta.moeda || "BRL") || "BRL",
-      parcelamento: texto(ofertaEntrada.parcelamento || templateInput.parcelamento) || null,
-      frete: texto(ofertaEntrada.frete || ofertaEntrada.freteValor || produtoMetadata.frete || produtoMetadata.freteValor) || null,
+      parcelamento: texto(oferta.parcelamento || templateInput.parcelamento || ofertaEntrada.parcelamento) || null,
+      frete: texto(oferta.frete || oferta.freteTexto || ofertaEntrada.frete || ofertaEntrada.freteValor || produtoMetadata.frete || produtoMetadata.freteValor) || null,
       cupom: texto(oferta.cupom) || null,
       beneficios
     },

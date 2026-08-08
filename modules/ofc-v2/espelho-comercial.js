@@ -339,6 +339,7 @@ function dedupCupons(cupons = []) {
 
 function extrairCupomTexto(textoOriginal = "", oferta = {}, ofertaEntrada = {}) {
   const candidatos = [];
+  const cupomProtegidoRadar = oferta?.metadata?.precedenciaComercial?.camposProtegidos?.cupom === true;
   const linhas = linhasTexto(textoOriginal);
   for (const linha of linhas) {
     const marcadorPlural = linha.match(/\bcupons\b\s*:?\s*([A-Z0-9][A-Z0-9_-]*(?:\s*(?:ou|e|[,;/|])\s*[A-Z0-9][A-Z0-9_-]*)*)/i);
@@ -347,8 +348,10 @@ function extrairCupomTexto(textoOriginal = "", oferta = {}, ofertaEntrada = {}) 
     if (!marcador) continue;
     candidatos.push(...separarCupons(marcador[1]));
   }
-  candidatos.push(...separarCupons(ofertaEntrada.cupom || ofertaEntrada.cupomCodigo || ofertaEntrada.codigoCupom || ""));
   candidatos.push(...separarCupons(oferta.cupom || oferta.cupomCodigo || oferta.codigoCupom || ""));
+  if (!cupomProtegidoRadar) {
+    candidatos.push(...separarCupons(ofertaEntrada.cupom || ofertaEntrada.cupomCodigo || ofertaEntrada.codigoCupom || ""));
+  }
   const cupons = dedupCupons(candidatos);
   const linhaCupom = linhas.find(linha => /\bcupom\b/i.test(linha) && cupons.some(cupom => normalizarComparacao(linha).includes(normalizarComparacao(cupom))));
   return {
@@ -385,7 +388,7 @@ function instrucaoCupomConfiavel(instrucao = "", cupons = [], doc = {}) {
   const valor = limparTextoComercial(instrucao);
   if (!valor || /https?:\/\//i.test(valor)) return "";
   if (cupons.some(cupom => instrucaoRedundante(valor, cupom))) return "";
-  if (instrucaoCupomComResgateSemOperacao(valor, doc)) return "";
+  if (!cupons.length && instrucaoCupomComResgateSemOperacao(valor, doc)) return "";
   return valor;
 }
 
@@ -402,14 +405,30 @@ function montarInstrucaoAmazonCanonica(instrucao = "", cupons = []) {
 }
 
 function montarInstrucaoCupomCanonica(doc = {}, cupons = []) {
-  const explicita = instrucaoCupomConfiavel(doc.instrucaoTexto, cupons, doc);
+  const beneficioComoInstrucao = chaveSemanticaAcaoCupom(doc.beneficioTexto) ? doc.beneficioTexto : "";
+  const explicita = instrucaoCupomConfiavel(primeiroTexto(doc.instrucaoTexto, beneficioComoInstrucao), cupons, doc);
   if (marketplaceAmazon(doc.marketplace)) {
     const amazon = montarInstrucaoAmazonCanonica(explicita, cupons);
     if (amazon) return amazon;
   }
-  if (explicita) return explicita;
+  if (explicita) {
+    const explicitaNormalizada = normalizarComparacao(explicita);
+    const citaCupom = cupons.some(cupom => explicitaNormalizada.includes(normalizarComparacao(cupom)));
+    if (cupons.length > 1 && !citaCupom) return "Aplique um dos cupons informados para obter o desconto.";
+    return explicita;
+  }
   if (marketplaceAliExpress(doc.marketplace)) {
     if (cupons.length) return "Aplique um dos cupons acima para obter este preço.";
+  }
+  if (doc.instrucaoTexto && cupons.length) {
+    if (cupons.length > 1) return "Aplique um dos cupons informados para obter o desconto.";
+    return `Aplique o cupom ${cupons[0]} para obter o desconto.`;
+  }
+  if ((marketplaceMercadoLivre(doc.marketplace) || marketplaceKabumAwin(doc.marketplace) || marketplaceShopee(doc.marketplace))
+    && cupons.length
+    && (doc.cashbackTexto || doc.freteTexto || doc.beneficioTexto)) {
+    if (cupons.length > 1) return "Aplique um dos cupons informados para ativar a condição.";
+    return `Aplique o cupom ${cupons[0]} para ativar a condição.`;
   }
   if (marketplaceMercadoLivre(doc.marketplace) || marketplaceKabumAwin(doc.marketplace) || marketplaceShopee(doc.marketplace)) return "";
   if (!cupons.length) return "";
@@ -472,7 +491,8 @@ function extrairInstrucaoComercial(textoOriginal = "", cupomCodigo = "", oferta 
     return true;
   });
   const instrucao = primeiroTexto(estruturada, linha);
-  return instrucaoRedundante(instrucao, cupomCodigo) ? "" : instrucao;
+  if (instrucaoRedundante(instrucao, cupomCodigo)) return linha || estruturada || "";
+  return instrucao;
 }
 
 function extrairFormaPagamento(textoOriginal = "", oferta = {}, ofertaEntrada = {}) {
@@ -528,7 +548,10 @@ function extrairParcelamentoTextoLinha(linha = "") {
 function extrairBeneficioTexto(textoOriginal = "", oferta = {}, ofertaEntrada = {}) {
   const linhas = linhasTexto(textoOriginal);
   const linhaOffReal = linhas.find(linha => /\boff\b/i.test(linha) && /(?:R\$|US\$|USD|U\$|\$|\d+\s*%)/i.test(linha) && /\b(?:cupom|pagina|desconto|beneficio)\b/i.test(normalizarComparacao(linha)));
-  if (linhaOffReal) return removerUrls(linhaOffReal).replace(/\s+/g, " ").trim();
+  if (linhaOffReal) {
+    const match = linhaOffReal.match(/(?:R\$|US\$|USD|U\$|\$)?\s*[\d.]+(?:[,.][\d]{1,2})?\s*off\b[^|\n]*(?:cupom|p[aÃ¡]gina|desconto|benef[iÃ­]cio)?[^|\n]*/i);
+    return removerUrls(match ? match[0] : linhaOffReal).replace(/\s+/g, " ").trim();
+  }
   const linhaOff = linhas.find(linha => /\boff\b/i.test(linha) && /\b(?:cupom|pagina|p[aá]gina|desconto|beneficio|benef[ií]cio)\b/i.test(linha));
   if (linhaOff) {
     const match = linhaOff.match(/(?:R\$|US\$|USD|U\$|\$)?\s*[\d.]+(?:[,.][\d]{1,2})?\s*off\b[^|\n]*(?:cupom|p[aá]gina|desconto|benef[ií]cio)?[^|\n]*/i);
@@ -956,7 +979,7 @@ function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
   const cupomSemCodigoNoAnuncio = !marketplaceMercadoLivre(doc.marketplace)
     && /\b(?:resgate|ative|aplique|selecione).{0,40}\b(?:cupom|voucher)\b/i.test(fonteCupomSemCodigo)
     && /\b(?:anuncio|pagina|p[aá]gina|produto)\b/i.test(fonteCupomSemCodigo);
-  if (!cupons.length && !marketplaceAmazon(doc.marketplace) && (linkResgateEssencial(doc, {}) || cupomSemCodigoNoAnuncio)) {
+  if (!cupons.length && (linkResgateEssencial(doc, {}) || cupomSemCodigoNoAnuncio)) {
     adicionarBlocoComercial(blocos, { tipo: "cupom_sem_codigo", textoOriginal: primeiroTexto(doc.instrucaoTexto, doc.beneficioTexto, doc.resgateTexto), origem: "documento.instrucao_cupom", confianca: "media", essencial: cupomNecessarioParaPreco(doc), requisitos: ["resgate_no_anuncio"] });
   }
   adicionarBlocoComercial(blocos, { tipo: "instrucao_cupom", textoOriginal: instrucaoCupomCanonica, origem: doc.instrucaoTexto ? "documento.instrucaoTexto" : "documento.instrucao_cupom_segura", confianca: doc.instrucaoTexto ? "alta" : "media", essencial: cupomNecessarioParaPreco(doc), requisitos: cupomEssencial ? ["cupom"] : [] });
@@ -1065,8 +1088,8 @@ function linksContratoParaDocumento(contrato = {}) {
       return {
         tipo: papel.replace(/^link_/, ""),
         papel,
-        url: exigeAfiliadaAliExpress ? urlAfiliada : texto(urlAfiliada || link.urlOriginal),
-        renderizavel: link.renderizavel !== false && (!exigeAfiliadaAliExpress || Boolean(urlAfiliada)),
+        url: texto(urlAfiliada || link.urlOriginal),
+        renderizavel: link.renderizavel !== false,
         confianca: texto(link.confianca || "media"),
         dedupeKey: texto(link.dedupeKey || "")
       };
@@ -1102,23 +1125,24 @@ function extrairDocumentoComercialCanonico({
   const linhaResgate = primeiraLinhaPorNormalizacao(textoOriginal, /\bresgate\b/);
   const linhaBeneficio = primeiraLinhaPorNormalizacao(textoOriginal, /\b(?:beneficio|app|prime|voucher|moeda|moedas|direto do brasil|pre venda|pré venda)\b/);
 
-  const precoDeEstruturado = textoPrecoEstruturado(primeiroValor(
-    ofertaEntrada.precoOriginal,
-    ofertaEntrada.precoDe,
-    ofertaEntrada.precoAntigo,
+  const podeUsarPrecoDeEstruturado = !textoOriginal || Boolean(linhaDe) || precosTexto.precoDeValor !== null;
+  const precoDeEstruturado = podeUsarPrecoDeEstruturado ? textoPrecoEstruturado(primeiroValor(
     oferta.precoOriginal,
     oferta.precoDe,
     oferta.precoAntigo,
+    ofertaEntrada.precoOriginal,
+    ofertaEntrada.precoDe,
+    ofertaEntrada.precoAntigo,
     comercialNormalizado.precoOriginal,
     comercialNormalizado.precoDe,
     comercialNormalizado.precoAntigo
-  ));
+  )) : "";
   let precoDeTexto = extrairTextoLinhaPreco(linhaDe, "de") || precosTexto.precoDeTexto || precoDeEstruturado || "";
   const precoPorEstruturado = textoPrecoEstruturado(primeiroValor(
-    ofertaEntrada.precoAtual,
-    ofertaEntrada.preco,
     oferta.precoAtual,
     oferta.preco,
+    ofertaEntrada.precoAtual,
+    ofertaEntrada.preco,
     comercialNormalizado.precoAtual
   ));
   const precoPorTexto = extrairTextoLinhaPreco(linhaPor, "por") || extrairTextoLinhaPreco(linhaValor, "valor") || precosTexto.precoPorTexto || precoPorEstruturado || "";
@@ -1129,16 +1153,16 @@ function extrairDocumentoComercialCanonico({
     precoDeTexto = "";
   }
   const parcelamentoTexto = primeiroTexto(
-    ofertaEntrada.parcelamento,
     oferta.parcelamento,
+    ofertaEntrada.parcelamento,
     comercialNormalizado.parcelamento?.texto,
     extrairParcelamentoTextoLinha(linhaParcelamento)
   );
-  const cashbackTexto = texto(linhaCashback) || primeiroTexto(ofertaEntrada.cashback, oferta.cashback);
-  const freteTexto = texto(linhaFrete) || primeiroTexto(ofertaEntrada.frete, oferta.frete, oferta.freteGratis === true ? "Frete gratis" : "");
+  const cashbackTexto = texto(linhaCashback) || primeiroTexto(oferta.cashback, ofertaEntrada.cashback);
+  const freteTexto = texto(linhaFrete) || primeiroTexto(oferta.frete, ofertaEntrada.frete, oferta.freteGratis === true ? "Frete gratis" : "");
   const beneficioTexto = extrairBeneficioTexto(textoOriginal, oferta, ofertaEntrada) || texto(linhaBeneficio);
   const instrucaoTexto = texto(instrucaoComercial);
-  const cupomTexto = texto(cupom.cupomCodigo || cupom.cupomTexto || ofertaEntrada.cupom || oferta.cupom);
+  const cupomTexto = texto(cupom.cupomCodigo || cupom.cupomTexto || oferta.cupom || ofertaEntrada.cupom);
 
   const documento = {
     tituloOriginal: tituloOriginal || null,
@@ -1317,9 +1341,14 @@ function tipoAliExpressPorContexto(item = {}) {
   const tipoAtual = texto(item.tipo).replace(/^link_/, "");
   if (["app", "moedas", "pc", "resgate"].includes(tipoAtual)) return tipoAtual;
   const contexto = texto(item.contexto);
+  if (contextoProdutoExplicitoAliExpress(item)) return "produto";
   if (contextoIndicaAppAliExpress(contexto)) return /\b(?:moeda|moedas|coins?)\b/.test(normalizarComparacao(contexto)) ? "moedas" : "app";
   if (contextoIndicaPcAliExpress(contexto)) return "pc";
   return tipoAtual || "produto";
+}
+
+function contextoProdutoExplicitoAliExpress(item = {}) {
+  return /\blink\s+(?:do\s+)?produto\b|\bproduto\b/i.test(texto(item.contexto));
 }
 
 function normalizarPapeisLinksAliExpress(links = [], marketplace = "") {
@@ -1335,7 +1364,12 @@ function normalizarPapeisLinksAliExpress(links = [], marketplace = "") {
   const tipoDesktop = item => texto(item.tipo) === "pc";
   const escolherPrimeiroProdutoDistinto = (items, usados = new Set()) => items.find(item => {
     const chave = chaveFinal(item);
-    return chave && !usados.has(chave) && !tipoMovel(item) && !tipoDesktop(item) && texto(item.tipo) !== "resgate";
+    return chave
+      && !usados.has(chave)
+      && !tipoMovel(item)
+      && !tipoDesktop(item)
+      && texto(item.tipo) !== "resgate"
+      && !contextoProdutoExplicitoAliExpress(item);
   });
 
   const movel = candidatos.find(tipoMovel);
@@ -1615,8 +1649,9 @@ function linhasLinksAliExpress(doc = {}) {
   const app = urlLink(appItem);
   const pc = urlLink(pcItem);
   const appDistintoPc = app && (!pc || chaveUrlFinalAliExpress(app) !== chaveUrlFinalAliExpress(pc));
+  const rotuloApp = appItem?.tipo === "moedas" ? "📱 APP / Moedas" : "📱 APP";
   return [
-    appDistintoPc ? `📱 APP / Moedas:\n${app}` : "",
+    appDistintoPc ? `${rotuloApp}:\n${app}` : "",
     pc ? `🖥️ PC:\n${pc}` : ""
   ].filter(Boolean).join("\n\n");
 }
@@ -1900,7 +1935,7 @@ function renderizarBlocoCanonicoV26(bloco = {}, contexto = {}) {
   if (bloco.tipo === "cupom_codigo") {
     const cupons = lista(contexto.cuponsTexto);
     const moedas = contexto.marketplaceAliExpress && contexto.moedasTexto ? ` + 🪙 ${contexto.moedasTexto.replace(/^\+\s*/, "")} no APP` : "";
-    const separador = contexto.marketplaceMercadoLivre ? " • " : " ou ";
+    const separador = contexto.marketplaceMercadoLivre || contexto.marketplaceAliExpress ? " • " : " ou ";
     if (cupons.length > 1) return `🎟️ Cupons: ${cupons.join(separador)}${moedas}`;
     if (moedas) return `🎟️ Cupom: ${valor}${moedas}`;
     return `🎟️ Cupom: ${valor}`;
@@ -1910,7 +1945,7 @@ function renderizarBlocoCanonicoV26(bloco = {}, contexto = {}) {
   if (bloco.tipo === "instrucao_cupom") return `⚡ ${valor}`;
   if (bloco.tipo === "cashback") return `💰 Cashback: ${valor}`;
   if (bloco.tipo === "moedas") {
-    if (contexto.marketplaceAliExpress && (lista(contexto.cuponsTexto).length || textoMencionaMoedas(contexto.instrucaoCupomTexto))) return "";
+    if (contexto.marketplaceAliExpress && textoMencionaMoedas(contexto.instrucaoCupomTexto)) return "";
     return contexto.moedasNoApp ? `🪙 APP: ${valor}` : `🪙 ${valor}`;
   }
   if (bloco.tipo === "frete") return `🚚 ${valor}`;
@@ -1934,7 +1969,7 @@ function renderizarBlocoCanonicoV26(bloco = {}, contexto = {}) {
   if (bloco.tipo === "link_resgate") return `🎟️ Resgate:\n${valor}`;
   if (bloco.tipo === "link_app") return `${contexto.linksMoveisAliDistintos ? "📱 APP" : "📱 APP / Moedas"}:\n${valor}`;
   if (bloco.tipo === "link_pc") return `🖥️ PC:\n${valor}`;
-  if (bloco.tipo === "link_moedas") return `${contexto.linksMoveisAliDistintos ? "🪙 Moedas" : "📱 APP / Moedas"}:\n${valor}`;
+  if (bloco.tipo === "link_moedas") return `${contexto.linksMoveisAliDistintos ? "Link com moedas" : "📱 APP / Moedas"}:\n${valor}`;
   if (bloco.tipo === "link_auxiliar") return `🔎 Link auxiliar:\n${valor}`;
   if (bloco.tipo === "link_afiliado") return `🔗 Confira aqui:\n${valor}`;
   if (bloco.tipo === "aviso") return valor;
@@ -1994,7 +2029,7 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
       .filter(Boolean),
     moedasTexto: textoMencionaMoedas(instrucaoCupomTexto) ? "" : moedasTextoBruto,
     moedasNoApp: /\bapp\b/i.test(`${doc.descricaoOriginal || ""} ${moedasTextoBruto}`),
-    linksMoveisAliDistintos: new Set(linksMoveisAli).size > 1
+    linksMoveisAliDistintos: linksPcAli.size > 0 || new Set(linksMoveisAli).size > 1
   };
 
   for (const bloco of blocosOrdenados) {
@@ -2086,9 +2121,9 @@ function construirEspelhoComercialV24(entrada = {}) {
 
   const podeComplementarPrecoDe = !textoOriginal || precosTexto.precoDeValor !== null;
   const precoDeValor = precosTexto.precoDeValor ?? (podeComplementarPrecoDe
-    ? primeiroValor(ofertaEntrada.precoOriginal, ofertaEntrada.precoAntigo, oferta.precoOriginal, comercialNormalizado.precoAnterior)
+    ? primeiroValor(oferta.precoOriginal, oferta.precoAntigo, ofertaEntrada.precoOriginal, ofertaEntrada.precoAntigo, comercialNormalizado.precoAnterior)
     : null);
-  const precoPorValor = precosTexto.precoPorValor ?? primeiroValor(ofertaEntrada.precoAtual, ofertaEntrada.preco, oferta.preco, comercialNormalizado.precoAtual);
+  const precoPorValor = precosTexto.precoPorValor ?? primeiroValor(oferta.precoAtual, oferta.preco, ofertaEntrada.precoAtual, ofertaEntrada.preco, comercialNormalizado.precoAtual);
   let precoFinalValor = precosTexto.precoFinalValor ?? primeiroValor(ofertaEntrada.precoComCupom, ofertaEntrada.precoCupom, comercialNormalizado.precoComCupom);
   let precoFinalTexto = precosTexto.precoFinalTexto || (precoFinalValor !== null ? textoMoeda(precoFinalValor) : "");
   if (precoFinalValor === null && precoPorValor !== null && (formaPagamentoTexto || cupom.cupomCodigo || instrucaoComercial)) {
