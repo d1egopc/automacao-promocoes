@@ -2562,7 +2562,9 @@ for (const item of destinosOrdenados) {
   const mensagem = montarMensagemOferta(oferta, {
     destino,
     plano,
-    clienteId
+    clienteId,
+    arquiteturaComercial: configCliente?.arquiteturaComercial,
+    rioOficialAtivo: configCliente?.arquiteturaComercial?.rioOficial !== false
   });
 
   const enviado = await enviarParaDestinoInteligente(
@@ -12089,5 +12091,3 @@ await farejador(clienteId, {
 // ============================= TESTE MANUAL =========================
 
 // ================= PROCESSADOR DA FILA =================
-
-

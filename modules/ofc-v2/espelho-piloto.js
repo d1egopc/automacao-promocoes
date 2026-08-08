@@ -9,6 +9,7 @@ const {
 
 const WORKSPACE_D1EGOPC_OFICIAL = "user_40qdblgt";
 const AVISO_VISUAL_TEMPLATE_OPTIMUS = "⚠️ Oferta sujeita à alteração de preço.";
+const MODO_RIO_OFICIAL = "rio_oficial";
 
 const CONFIGURACAO_ESPELHO_PILOTO = Object.freeze({
   [WORKSPACE_D1EGOPC_OFICIAL]: Object.freeze({
@@ -32,13 +33,28 @@ function metadataOfcV24(oferta = {}) {
   return objeto(metadata.ofcV24 || oferta.ofcV24);
 }
 
-function obterConfiguracaoEspelhoPiloto(workspaceId = "") {
+function rioOficialAtivo(opcoes = {}) {
+  return opcoes.rioOficialAtivo !== false && opcoes.rioOficial !== false;
+}
+
+function obterConfiguracaoEspelhoPiloto(workspaceId = "", opcoes = {}) {
   const chave = texto(workspaceId);
   const config = CONFIGURACAO_ESPELHO_PILOTO[chave];
   if (!config?.ativo) {
+    if (chave && rioOficialAtivo(opcoes)) {
+      return {
+        ativo: true,
+        workspaceId: chave,
+        nome: "RIO OFICIAL",
+        modo: MODO_RIO_OFICIAL,
+        rioOficial: true,
+        escopo: "contrato_workspace"
+      };
+    }
+
     return { ativo: false, workspaceId: chave, motivo: "workspace_fora_do_piloto" };
   }
-  return { ...config };
+  return { ...config, rioOficial: true, escopo: "piloto_produtivo" };
 }
 
 function sanitizarErro(erro) {
@@ -142,9 +158,12 @@ function selecionarTemplateEspelhoPiloto({
   mensagemAtual = "",
   destino = {},
   template = null,
-  canal = "whatsapp"
+  canal = "whatsapp",
+  rioOficialAtivo = true
 } = {}) {
-  const config = obterConfiguracaoEspelhoPiloto(workspaceId || oferta.clienteId || oferta.cliente_id);
+  const config = obterConfiguracaoEspelhoPiloto(workspaceId || oferta.clienteId || oferta.cliente_id, {
+    rioOficialAtivo
+  });
   if (!config.ativo) {
     return {
       usarEspelho: false,
@@ -169,6 +188,8 @@ function selecionarTemplateEspelhoPiloto({
     logSeguro("[OFC-V2.4-ESPELHO-PILOTO-ATIVO]", {
       ...base,
       modo: config.modo,
+      escopo: config.escopo || "",
+      rioOficial: config.rioOficial === true,
       pilotoAtivo: true
     });
 
@@ -291,8 +312,10 @@ function selecionarTemplateEspelhoPiloto({
   }
 }
 
-function selecionarImagemEspelhoPiloto({ workspaceId = "", oferta = {}, imagemAtual = "" } = {}) {
-  const config = obterConfiguracaoEspelhoPiloto(workspaceId || oferta.clienteId || oferta.cliente_id);
+function selecionarImagemEspelhoPiloto({ workspaceId = "", oferta = {}, imagemAtual = "", rioOficialAtivo = true } = {}) {
+  const config = obterConfiguracaoEspelhoPiloto(workspaceId || oferta.clienteId || oferta.cliente_id, {
+    rioOficialAtivo
+  });
   if (!config.ativo) {
     return {
       usarImagemEspelho: false,
@@ -342,6 +365,7 @@ function selecionarImagemEspelhoPiloto({ workspaceId = "", oferta = {}, imagemAt
 
 module.exports = {
   WORKSPACE_D1EGOPC_OFICIAL,
+  MODO_RIO_OFICIAL,
   CONFIGURACAO_ESPELHO_PILOTO,
   obterConfiguracaoEspelhoPiloto,
   selecionarTemplateEspelhoPiloto,

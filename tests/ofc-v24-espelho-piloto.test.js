@@ -127,8 +127,13 @@ function documentoComBlocos(blocos, extra = {}) {
 const configD1 = obterConfiguracaoEspelhoPiloto(WORKSPACE_D1);
 assert.strictEqual(configD1.ativo, true);
 assert.strictEqual(configD1.workspaceId, WORKSPACE_D1EGOPC_OFICIAL);
-assert.strictEqual(obterConfiguracaoEspelhoPiloto(WORKSPACE_ROGER).ativo, false);
-assert.strictEqual(obterConfiguracaoEspelhoPiloto(WORKSPACE_WOLF).ativo, false);
+assert.strictEqual(obterConfiguracaoEspelhoPiloto(WORKSPACE_ROGER).ativo, true);
+assert.strictEqual(obterConfiguracaoEspelhoPiloto(WORKSPACE_WOLF).ativo, true);
+assert.strictEqual(obterConfiguracaoEspelhoPiloto("admin").ativo, true);
+const configRioNovo = obterConfiguracaoEspelhoPiloto(WORKSPACE_ROGER, { rioOficialAtivo: true });
+assert.strictEqual(configRioNovo.ativo, true);
+assert.strictEqual(configRioNovo.workspaceId, WORKSPACE_ROGER);
+assert.strictEqual(configRioNovo.modo, "rio_oficial");
 
 {
   const { retorno, logs } = capturarLogs(() => selecionarTemplateEspelhoPiloto({
@@ -158,10 +163,50 @@ assert.strictEqual(obterConfiguracaoEspelhoPiloto(WORKSPACE_WOLF).ativo, false);
 {
   const roger = selecionarTemplateEspelhoPiloto({ workspaceId: WORKSPACE_ROGER, oferta: ofertaBase(WORKSPACE_ROGER), mensagemAtual: "atual" });
   const wolf = selecionarTemplateEspelhoPiloto({ workspaceId: WORKSPACE_WOLF, oferta: ofertaBase(WORKSPACE_WOLF), mensagemAtual: "atual" });
-  assert.strictEqual(roger.usarEspelho, false);
-  assert.strictEqual(wolf.usarEspelho, false);
-  assert.strictEqual(roger.motivo, "workspace_fora_do_piloto");
-  assert.strictEqual(wolf.motivo, "workspace_fora_do_piloto");
+  assert.strictEqual(roger.usarEspelho, true);
+  assert.strictEqual(wolf.usarEspelho, true);
+  assert.strictEqual(roger.mensagem, mensagemMlCompleta());
+  assert.strictEqual(wolf.mensagem, mensagemMlCompleta());
+}
+
+{
+  const novoUsuarioRio = selecionarTemplateEspelhoPiloto({
+    workspaceId: WORKSPACE_ROGER,
+    oferta: ofertaBase(WORKSPACE_ROGER),
+    mensagemAtual: "atual",
+    rioOficialAtivo: true
+  });
+  assert.strictEqual(novoUsuarioRio.usarEspelho, true);
+  assert.strictEqual(novoUsuarioRio.mensagem, mensagemMlCompleta());
+}
+
+{
+  const { retorno: mensagem, logs } = capturarLogs(() => montarMensagemOferta(ofertaBase(WORKSPACE_WOLF), { clienteId: WORKSPACE_WOLF }));
+  assert.strictEqual(mensagem, mensagemMlCompleta());
+  assert(logs.some(linha => linha.includes('"rendererEscolhido":"ofc_v25_espelho"')));
+}
+
+{
+  const { retorno: mensagem, logs } = capturarLogs(() => montarMensagemOferta(ofertaBase(WORKSPACE_ROGER), {
+    clienteId: WORKSPACE_ROGER,
+    arquiteturaComercial: {
+      rioOficial: true,
+      ofertaUniversal: true,
+      ofc: true,
+      contratoComercialOficial: true,
+      rendererOficial: true,
+      templatesLegados: false,
+      renderizadoresLegados: false
+    }
+  }));
+  assert.strictEqual(mensagem, mensagemMlCompleta());
+  assert(logs.some(linha => linha.includes('"rendererEscolhido":"ofc_v25_espelho"')));
+}
+
+{
+  const { retorno: mensagem, logs } = capturarLogs(() => montarMensagemOferta(ofertaBase("admin"), { clienteId: "admin" }));
+  assert.strictEqual(mensagem, mensagemMlCompleta());
+  assert(logs.some(linha => linha.includes('"rendererEscolhido":"ofc_v25_espelho"')));
 }
 
 {
@@ -555,8 +600,10 @@ assert.strictEqual(obterConfiguracaoEspelhoPiloto(WORKSPACE_WOLF).ativo, false);
 {
   const d1 = selecionarImagemEspelhoPiloto({ workspaceId: WORKSPACE_D1, oferta: ofertaBase(), imagemAtual: "https://atual.test/img.jpg" });
   const roger = selecionarImagemEspelhoPiloto({ workspaceId: WORKSPACE_ROGER, oferta: ofertaBase(WORKSPACE_ROGER), imagemAtual: "https://atual.test/img.jpg" });
+  const rogerRio = selecionarImagemEspelhoPiloto({ workspaceId: WORKSPACE_ROGER, oferta: ofertaBase(WORKSPACE_ROGER), imagemAtual: "https://atual.test/img.jpg", rioOficialAtivo: true });
   assert.strictEqual(d1.usarImagemEspelho, true);
-  assert.strictEqual(roger.usarImagemEspelho, false);
+  assert.strictEqual(roger.usarImagemEspelho, true);
+  assert.strictEqual(rogerRio.usarImagemEspelho, true);
 }
 
 console.log("ofc-v24-espelho-piloto.test.js OK");

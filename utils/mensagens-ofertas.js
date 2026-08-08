@@ -6,11 +6,8 @@ const {
   montarLinhaParcelamento,
   montarLinhaDesconto,
   removerLinhasVazias,
-  montarLinkCompra,
-  deveUsarTemplatePersonalizado,
-  montarMensagemTemplatePersonalizado
+  montarLinkCompra
 } = require("./templates");
-const { formatarOfertaUniversal } = require("../templates/oferta-template");
 const { gerarTemplateUniversal } = require("../modules/template-universal");
 const { resolverTemplateMensagem } = require("../modules/templates-clientes/resolver");
 const { prepararDadosOficiaisTemplate } = require("../modules/templates-clientes/dados-oficiais");
@@ -89,13 +86,23 @@ function instrucaoCupomRedundanteLocal(instrucao = "", cupom = "") {
   return Boolean(textoInstrucao && textoCupom && textoInstrucao === textoCupom);
 }
 
-function normalizarEngineV2Modo() {
-  const modo = normalizarTextoLocal(process.env.ENGINE_V2_MODO || "full").toLowerCase();
-  return modo === "shadow" ? "shadow" : "full";
-}
-
 function templateUniversalOficialAtivo() {
   return true;
+}
+
+function rioOficialAtivo(oferta = {}, opcoes = {}) {
+  const arquitetura = opcoes.arquiteturaComercial && typeof opcoes.arquiteturaComercial === "object"
+    ? opcoes.arquiteturaComercial
+    : {};
+  const metadata = oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
+  const arquiteturaOferta = metadata.arquiteturaComercial && typeof metadata.arquiteturaComercial === "object"
+    ? metadata.arquiteturaComercial
+    : {};
+
+  return opcoes.rioOficialAtivo !== false &&
+    arquitetura.rioOficial !== false &&
+    arquiteturaOferta.rioOficial !== false &&
+    oferta.rioOficial !== false;
 }
 
 function scoreUniversal(valor) {
@@ -430,7 +437,8 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
     oferta: ofertaOficial,
     mensagemAtual: mensagemExistente,
     destino,
-    canal: opcoes.canal || destino.canal || destino.tipo
+    canal: opcoes.canal || destino.canal || destino.tipo,
+    rioOficialAtivo: rioOficialAtivo(ofertaOficial, opcoes)
   });
   if (espelhoPilotoResultado.usarEspelho && espelhoPilotoResultado.mensagem) {
     return registrarTemplate("ofc_v24_espelho_piloto", espelhoPilotoResultado.mensagem, {

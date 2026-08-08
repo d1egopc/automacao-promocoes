@@ -2392,6 +2392,41 @@ function salvarConfigsClientes() {
   salvarMapaClientesJson("config.json", configsPorCliente);
 }
 
+function arquiteturaComercialRioOficialPadrao() {
+  return {
+    rioOficial: true,
+    ofertaUniversal: true,
+    ofc: true,
+    contratoComercialOficial: true,
+    rendererOficial: true,
+    templatesLegados: false,
+    renderizadoresLegados: false,
+    versao: "rio-v2-oficial"
+  };
+}
+
+function aplicarArquiteturaComercialRioOficial(configCliente = {}) {
+  const atual = configCliente && typeof configCliente === "object" ? configCliente : {};
+  const arquiteturaAtual = atual.arquiteturaComercial && typeof atual.arquiteturaComercial === "object"
+    ? atual.arquiteturaComercial
+    : {};
+
+  return {
+    ...atual,
+    arquiteturaComercial: {
+      ...arquiteturaComercialRioOficialPadrao(),
+      ...arquiteturaAtual,
+      rioOficial: true,
+      ofertaUniversal: true,
+      ofc: true,
+      contratoComercialOficial: true,
+      rendererOficial: true,
+      templatesLegados: false,
+      renderizadoresLegados: false
+    }
+  };
+}
+
 function salvarDestinosClientes() {
   writeGlobalJson("destinos_clientes.json", destinosPorCliente);
   salvarMapaClientesJson("destinos.json", destinosPorCliente);
@@ -6423,7 +6458,9 @@ for (const item of destinosOrdenados) {
   const mensagem = montarMensagemOferta(ofertaParaMensagem, {
     destino,
     plano,
-    clienteId
+    clienteId,
+    arquiteturaComercial: configCliente?.arquiteturaComercial,
+    rioOficialAtivo: configCliente?.arquiteturaComercial?.rioOficial !== false
   });
 
   const enviado = await enviarParaDestinoInteligente(
@@ -8189,8 +8226,10 @@ app.post("/admin/usuarios", (req, res) => {
   };
 
   usuarios.push(novoUsuario);
+  configsPorCliente[novoUsuario.id] = aplicarArquiteturaComercialRioOficial(configsPorCliente[novoUsuario.id]);
 
   salvarUsuarios();
+  salvarConfigsClientes();
 
   return res.json({
     ok: true,
@@ -9263,7 +9302,9 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
     const mensagem = montarMensagemOferta(ofertaParaMensagem, {
       destino,
       plano,
-      clienteId
+      clienteId,
+      arquiteturaComercial: configCliente?.arquiteturaComercial,
+      rioOficialAtivo: configCliente?.arquiteturaComercial?.rioOficial !== false
     });
 
     const resultadoEnvio = await enviarParaDestinoInteligente(
