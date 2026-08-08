@@ -13,6 +13,11 @@ const {
   avaliarRegistroAutoClean,
   executarAutoCleanShadow,
   executarAutoCleanShadowSeguro,
+  executarAutoCleanExecute,
+  executarJobsPostgresAutoClean,
+  executarFilaJsonAutoClean,
+  executarArquivosAutoClean,
+  MATRIZ_STATUS_AUTO_CLEAN,
   auditarFilaJson,
   inventariarArquivosPorCategoria,
   memoriaComercialStatus
@@ -50,6 +55,46 @@ function capturarLogger() {
     logs,
     logger: {
       log: (...args) => logs.push(args.join(" "))
+    }
+  };
+}
+
+function criarPoolJobsAutoClean(batches = []) {
+  const chamadas = [];
+  let indiceBatch = 0;
+  const client = {
+    async query(sql, params = []) {
+      chamadas.push({ sql, params });
+      if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rows: [] };
+      if (/pg_try_advisory_xact_lock/i.test(sql)) return { rows: [{ locked: true }] };
+      if (/WITH candidatos/i.test(sql)) {
+        const batch = batches[indiceBatch] || {};
+        indiceBatch += 1;
+        return {
+          rows: [{
+            jobs_removidos: batch.jobs || 0,
+            processamentos_removidos: batch.processamentos || 0,
+            eventos_comerciais_removidos: batch.eventos || 0,
+            bytes_jobs: batch.bytesJobs || 0,
+            bytes_processamentos: batch.bytesProcessamentos || 0,
+            bytes_eventos_comerciais: batch.bytesEventos || 0
+          }]
+        };
+      }
+      throw new Error(`query inesperada: ${sql}`);
+    },
+    release() {
+      chamadas.push({ sql: "RELEASE", params: [] });
+    }
+  };
+
+  return {
+    chamadas,
+    pool: {
+      async connect() {
+        chamadas.push({ sql: "CONNECT", params: [] });
+        return client;
+      }
     }
   };
 }
@@ -141,6 +186,39 @@ async function testarTtlEStatus() {
   }, { politica, agoraMs: AGORA });
   assert.strictEqual(jobSemTimestamp.elegivel, false);
   assert.strictEqual(jobSemTimestamp.motivo, "timestamp_indisponivel");
+
+  for (const status of ["oferta_criada", "integracao_ausente", "retida_v2", "erro_importacao"]) {
+    const recente = avaliarRegistroAutoClean({
+      origem: "engine_jobs_cliente",
+      tipoRegistro: "engine_jobs_cliente",
+      status,
+      referenciaTemporal: isoAtras(23 * 60 * 60 * 1000)
+    }, { politica, agoraMs: AGORA });
+    assert.strictEqual(recente.elegivel, false, `${status} recente fica dentro do TTL curto`);
+
+    const antigo = avaliarRegistroAutoClean({
+      origem: "engine_jobs_cliente",
+      tipoRegistro: "engine_jobs_cliente",
+      status,
+      referenciaTemporal: isoAtras(25 * 60 * 60 * 1000)
+    }, { politica, agoraMs: AGORA });
+    assert.strictEqual(antigo.elegivel, true, `${status} antigo nao pode virar poca operacional`);
+  }
+}
+
+async function testarMatrizStatusOficial() {
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.oferta_criada.vivo, true);
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.importando.vivo, true);
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.processando.vivo, true);
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.oferta_criada.vivoAteHoras, 24);
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.oferta_criada.removivelAposHoras, 24);
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.integracao_ausente.removivelAposHoras, 24);
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.retida_v2.removivelAposHoras, 24);
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.erro_importacao.removivelAposHoras, 24);
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.integracao_ausente.ttlCompactoDias, 7);
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.expirada_operacional.terminal, true);
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.expirada_operacional.removivelAposHoras, 12);
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.expirada_operacional.historicoLeveSeparado, true);
 }
 
 async function testarDependenciasProtegidas() {
@@ -272,6 +350,140 @@ async function testarPostgresShadowEDependencias() {
   assert.ok(!logs.join("\n").includes("preco"));
 }
 
+async function testarExecutePostgresControlado() {
+  const { pool, chamadas } = criarPoolJobsAutoClean([
+    { jobs: 2, processamentos: 5, eventos: 1, bytesJobs: 100, bytesProcessamentos: 250, bytesEventos: 50 },
+    { jobs: 2, processamentos: 4, eventos: 0, bytesJobs: 100, bytesProcessamentos: 200, bytesEventos: 0 },
+    { jobs: 2, processamentos: 3, eventos: 0, bytesJobs: 100, bytesProcessamentos: 150, bytesEventos: 0 },
+    { jobs: 2, processamentos: 2, eventos: 0, bytesJobs: 100, bytesProcessamentos: 100, bytesEventos: 0 }
+  ]);
+
+  const resumo = await executarJobsPostgresAutoClean({
+    pool,
+    loteLimite: 2,
+    lotesDbPorCiclo: 3,
+    horasMinimas: 12
+  });
+
+  assert.strictEqual(resumo.ok, true);
+  assert.strictEqual(resumo.lotes, 3, "execute limita lotes por ciclo");
+  assert.strictEqual(resumo.jobsRemovidos, 6);
+  assert.strictEqual(resumo.processamentosRemovidos, 12);
+  assert.strictEqual(resumo.eventosComerciaisRemovidos, 1);
+  assert.strictEqual(resumo.aplicouMudancas, true);
+  assert.strictEqual(resumo.vacuumExecutado, false);
+
+  const deleteSql = chamadas.find(chamada => /WITH candidatos/i.test(chamada.sql));
+  assert.ok(deleteSql, "batch de delete deve ser executado");
+  assert.ok(
+    deleteSql.sql.indexOf("eventos_removidos") < deleteSql.sql.indexOf("processamentos_removidos") &&
+    deleteSql.sql.indexOf("processamentos_removidos") < deleteSql.sql.indexOf("jobs_removidos"),
+    "dependencias saem antes do job principal"
+  );
+  assert.strictEqual(deleteSql.params[1], 12);
+  assert.strictEqual(deleteSql.params[2], 2);
+  assert.ok(deleteSql.params[0].includes("expirada_operacional"));
+  assert.ok(deleteSql.params[0].includes("oferta_criada"));
+  assert.ok(deleteSql.params[0].includes("integracao_ausente"));
+  assert.ok(deleteSql.params[0].includes("retida_v2"));
+  assert.ok(deleteSql.params[0].includes("erro_importacao"));
+  assert.ok(!deleteSql.params[0].includes("importando"));
+  assert.ok(!deleteSql.params[0].includes("processando"));
+  assert.ok(deleteSql.sql.includes("WHEN status = 'oferta_criada' THEN 24"));
+  assert.ok(deleteSql.sql.includes("WHEN status = 'expirada_operacional' THEN 12"));
+}
+
+async function testarExecutePostgresFailOpen() {
+  const resumo = await executarJobsPostgresAutoClean({
+    getEnginePool: () => ({
+      async connect() {
+        throw Object.assign(new Error("conexao falhou"), { code: "ECONNRESET" });
+      }
+    })
+  });
+
+  assert.strictEqual(resumo.ok, false);
+  assert.strictEqual(resumo.failOpen, true);
+  assert.strictEqual(resumo.aplicouMudancas, false);
+}
+
+async function testarExecuteFilaJsonSeguro() {
+  const dir = tempDir();
+  const workspace = "user_fila_execute";
+  const filaPath = path.join(dir, "clientes", workspace, "fila.json");
+  escreverJson(filaPath, [
+    { id: "vivo", status: "pendente", criadoEm: isoAtras(10 * 24 * 60 * 60 * 1000), payloadBruto: { deveFicar: true } },
+    { id: "recente", status: "enviado", enviadoEm: isoAtras(6 * 60 * 60 * 1000), payloadBruto: { deveFicar: true } },
+    { id: "compactar", ofertaId: "oferta_compactar", status: "enviado", enviadoEm: isoAtras(3 * 24 * 60 * 60 * 1000), preco: 99.9, thumbnail: "https://img.test/t.jpg", payloadBruto: { html: "pesado" }, mensagemRenderizada: "texto enorme" },
+    { id: "remover", status: "enviado", enviadoEm: isoAtras(8 * 24 * 60 * 60 * 1000), payloadBruto: { html: "antigo" } }
+  ]);
+
+  const resumo = executarFilaJsonAutoClean({
+    dataDir: dir,
+    agoraMs: AGORA,
+    workspaces: [workspace],
+    workspacesFilaPorCiclo: 1
+  });
+
+  assert.strictEqual(resumo.aplicouMudancas, true);
+  assert.strictEqual(resumo.filasRegravadas, 1);
+  assert.strictEqual(resumo.compactados, 1);
+  assert.strictEqual(resumo.removidos, 1);
+
+  const fila = JSON.parse(fs.readFileSync(filaPath, "utf8"));
+  assert.ok(fila.some(item => item.id === "vivo" && item.payloadBruto));
+  assert.ok(fila.some(item => item.id === "recente" && item.payloadBruto));
+  const compacto = fila.find(item => item.id === "compactar");
+  assert.strictEqual(compacto.compacto, true);
+  assert.strictEqual(compacto.preco, 99.9);
+  assert.strictEqual(compacto.thumbnail, "https://img.test/t.jpg");
+  assert.ok(!JSON.stringify(compacto).includes("payloadBruto"));
+  assert.ok(!JSON.stringify(compacto).includes("mensagemRenderizada"));
+  assert.ok(!fila.some(item => item.id === "remover"));
+}
+
+async function testarExecuteArquivosProtegePermanentes() {
+  const dir = tempDir();
+  const logAntigo = path.join(dir, "logs", "app.log");
+  const cacheAntigo = path.join(dir, "cache", "thumb.tmp");
+  const authAntigo = path.join(dir, "auth", "sessao", "creds.json");
+  const configAntiga = path.join(dir, "clientes", "user_config", "config.json");
+  tocarArquivo(logAntigo, "log antigo", AGORA - 2 * 24 * 60 * 60 * 1000);
+  tocarArquivo(cacheAntigo, "cache antigo", AGORA - 2 * 24 * 60 * 60 * 1000);
+  tocarArquivo(authAntigo, "segredo", AGORA - 30 * 24 * 60 * 60 * 1000);
+  tocarArquivo(configAntiga, "{}", AGORA - 30 * 24 * 60 * 60 * 1000);
+
+  const resumo = executarArquivosAutoClean({ dataDir: dir, agoraMs: AGORA, loteLimite: 10 });
+  assert.strictEqual(resumo.arquivosRemovidos, 2);
+  assert.strictEqual(fs.existsSync(logAntigo), false);
+  assert.strictEqual(fs.existsSync(cacheAntigo), false);
+  assert.strictEqual(fs.existsSync(authAntigo), true);
+  assert.strictEqual(fs.existsSync(configAntiga), true);
+}
+
+async function testarExecuteUniversalPorFlag() {
+  const { pool } = criarPoolJobsAutoClean([
+    { jobs: 1, processamentos: 2, eventos: 0, bytesJobs: 100, bytesProcessamentos: 100 }
+  ]);
+  const { logger, logs } = capturarLogger();
+  const resumo = await executarAutoCleanShadowSeguro({
+    execute: true,
+    incluirArquivos: false,
+    incluirPostgres: true,
+    pool,
+    queryEngine: async () => ({ ok: true, resultado: { rows: [] } }),
+    loteLimite: 1,
+    lotesDbPorCiclo: 1,
+    logger
+  });
+
+  assert.strictEqual(resumo.ok, true);
+  assert.strictEqual(resumo.aplicouMudancas, true);
+  assert.strictEqual(resumo.execute.jobsRemovidos, 1);
+  assert.ok(logs.some(linha => linha.includes("[OPTIMUS-AUTO-CLEAN-V1-EXECUTE]")));
+  assert.ok(!logs.join("\n").includes("payload"));
+}
+
 async function testarFailOpenEFlags() {
   const shadowAnterior = process.env.OPTIMUS_AUTO_CLEAN_SHADOW;
   const executeAnterior = process.env.OPTIMUS_AUTO_CLEAN_EXECUTE;
@@ -316,11 +528,17 @@ async function testarFailOpenEFlags() {
 
 (async () => {
   await testarTtlEStatus();
+  await testarMatrizStatusOficial();
   await testarDependenciasProtegidas();
   await testarFilaJsonShadow();
   await testarArquivosProtegidosEShadow();
   await testarMemoriaComercialIntacta();
   await testarPostgresShadowEDependencias();
+  await testarExecutePostgresControlado();
+  await testarExecutePostgresFailOpen();
+  await testarExecuteFilaJsonSeguro();
+  await testarExecuteArquivosProtegePermanentes();
+  await testarExecuteUniversalPorFlag();
   await testarFailOpenEFlags();
   console.log("optimus-auto-clean-v1-shadow.test.js OK");
 })().catch(erro => {

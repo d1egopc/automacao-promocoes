@@ -2,13 +2,16 @@
 
 const fs = require("fs");
 const path = require("path");
-const { queryEngine } = require("../database");
+const { queryEngine, getEnginePool } = require("../database");
 const filaHistoricoPolicy = require("../../../utils/fila-historico-policy");
 
 const ENV_SHADOW = "OPTIMUS_AUTO_CLEAN_SHADOW";
 const ENV_EXECUTE = "OPTIMUS_AUTO_CLEAN_EXECUTE";
 const DEFAULT_DATA_DIR = process.env.DATA_DIR || "/data";
 const LOTE_LIMITE_PADRAO = 100;
+const LOTES_DB_POR_CICLO_PADRAO = 3;
+const WORKSPACES_FILA_POR_CICLO_PADRAO = 5;
+const AUTO_CLEAN_JOBS_LOCK_ID = 902260734;
 
 const TTL_PADRAO = Object.freeze({
   flowNaoAceitaMs: 24 * 60 * 60 * 1000,
@@ -41,8 +44,7 @@ const STATUS_JOB_ATIVO = new Set([
   "retry",
   "agendado",
   "claimed",
-  "bloqueado",
-  "oferta_criada"
+  "bloqueado"
 ]);
 const STATUS_JOB_CONCLUIDO = new Set([
   "concluido",
@@ -70,9 +72,123 @@ const STATUS_JOB_CONCLUIDO = new Set([
   "duplicado_final",
   "duplicada_final"
 ]);
+const STATUS_JOB_CONCLUIDO_LISTA = Array.from(STATUS_JOB_CONCLUIDO);
 const STATUS_JOB_ATIVO_SQL = Array.from(STATUS_JOB_ATIVO)
   .map(status => `'${status.replace(/'/g, "''")}'`)
   .join(",");
+
+const MATRIZ_STATUS_AUTO_CLEAN = Object.freeze({
+  oferta_criada: Object.freeze({
+    vivo: true,
+    vivoAteHoras: 24,
+    terminal: true,
+    reprocessavel: true,
+    reprocessavelAteHoras: 24,
+    ttlIntegralHoras: 24,
+    ttlCompactoDias: 7,
+    removivelAposHoras: 24,
+    dependenciasTecnicas: ["engine_processamentos", "engine_eventos_comerciais"],
+    historicoLeveSeparado: true,
+    decisao: "remover_job_stale_e_dependencias_tecnicas"
+  }),
+  integracao_ausente: Object.freeze({
+    vivo: false,
+    vivoAteHoras: 0,
+    terminal: true,
+    reprocessavel: true,
+    reprocessavelAteHoras: 24,
+    ttlIntegralHoras: 24,
+    ttlCompactoDias: 7,
+    removivelAposHoras: 24,
+    dependenciasTecnicas: ["engine_processamentos", "engine_eventos_comerciais"],
+    historicoLeveSeparado: true,
+    decisao: "remover_job_sem_integracao_e_dependencias_tecnicas"
+  }),
+  retida_v2: Object.freeze({
+    vivo: false,
+    vivoAteHoras: 0,
+    terminal: true,
+    reprocessavel: true,
+    reprocessavelAteHoras: 24,
+    ttlIntegralHoras: 24,
+    ttlCompactoDias: 7,
+    removivelAposHoras: 24,
+    dependenciasTecnicas: ["engine_processamentos", "engine_eventos_comerciais"],
+    historicoLeveSeparado: true,
+    decisao: "remover_job_retido_e_dependencias_tecnicas"
+  }),
+  erro_importacao: Object.freeze({
+    vivo: false,
+    vivoAteHoras: 0,
+    terminal: true,
+    reprocessavel: true,
+    reprocessavelAteHoras: 24,
+    ttlIntegralHoras: 24,
+    ttlCompactoDias: 7,
+    removivelAposHoras: 24,
+    dependenciasTecnicas: ["engine_processamentos", "engine_eventos_comerciais"],
+    historicoLeveSeparado: true,
+    decisao: "remover_job_com_erro_e_dependencias_tecnicas"
+  }),
+  importando: Object.freeze({
+    vivo: true,
+    vivoAteHoras: null,
+    terminal: false,
+    reprocessavel: true,
+    reprocessavelAteHoras: null,
+    ttlIntegralHoras: null,
+    ttlCompactoDias: null,
+    removivelAposHoras: null,
+    dependenciasTecnicas: [],
+    decisao: "preservar_ativo"
+  }),
+  processando: Object.freeze({
+    vivo: true,
+    vivoAteHoras: null,
+    terminal: false,
+    reprocessavel: true,
+    reprocessavelAteHoras: null,
+    ttlIntegralHoras: null,
+    ttlCompactoDias: null,
+    removivelAposHoras: null,
+    dependenciasTecnicas: [],
+    decisao: "preservar_ativo"
+  }),
+  expirada_operacional: Object.freeze({
+    vivo: false,
+    vivoAteHoras: 0,
+    terminal: true,
+    reprocessavel: false,
+    reprocessavelAteHoras: 0,
+    ttlIntegralHoras: 12,
+    ttlCompactoDias: 7,
+    removivelAposHoras: 12,
+    dependenciasTecnicas: ["engine_processamentos", "engine_eventos_comerciais"],
+    historicoLeveSeparado: true,
+    decisao: "remover_job_e_dependencias_tecnicas"
+  })
+});
+
+function ttlHorasStatusJob(status = "") {
+  const normalizado = normalizarStatus(status);
+  const matriz = MATRIZ_STATUS_AUTO_CLEAN[normalizado];
+  if (Number.isFinite(Number(matriz?.removivelAposHoras))) return Number(matriz.removivelAposHoras);
+  if (STATUS_JOB_CONCLUIDO.has(normalizado)) return 12;
+  return null;
+}
+
+const STATUS_JOB_REMOVIVEL_AUTO_CLEAN = [
+  ...new Set([
+    ...STATUS_JOB_CONCLUIDO_LISTA,
+    ...Object.entries(MATRIZ_STATUS_AUTO_CLEAN)
+      .filter(([, config]) => Number.isFinite(Number(config.removivelAposHoras)))
+      .map(([status]) => status)
+  ])
+].filter(status => !STATUS_JOB_ATIVO.has(status));
+
+const TTL_JOB_CASE_SQL = STATUS_JOB_REMOVIVEL_AUTO_CLEAN
+  .map(status => `WHEN status = '${status.replace(/'/g, "''")}' THEN ${ttlHorasStatusJob(status)}`)
+  .join(" ");
 
 const EXT_LOG = new Set([".log", ".out", ".err"]);
 const EXT_TEMP = new Set([".tmp", ".temp", ".old", ".swp"]);
@@ -112,6 +228,8 @@ function criarPoliticaRetencao(opcoes = {}) {
   return {
     ttl,
     loteLimite: limitarInteiro(opcoes.loteLimite, LOTE_LIMITE_PADRAO, 1, LOTE_LIMITE_PADRAO),
+    lotesDbPorCiclo: limitarInteiro(opcoes.lotesDbPorCiclo, LOTES_DB_POR_CICLO_PADRAO, 1, 10),
+    workspacesFilaPorCiclo: limitarInteiro(opcoes.workspacesFilaPorCiclo, WORKSPACES_FILA_POR_CICLO_PADRAO, 1, 50),
     dataDir: opcoes.dataDir || DEFAULT_DATA_DIR
   };
 }
@@ -165,6 +283,7 @@ function ttlPorRegistro(registro = {}, politica = criarPoliticaRetencao()) {
   if (tipo === "fila_json" && STATUS_FILA_TERMINAL.has(status)) return ttl.filaTerminalMs;
   if (tipo === "engine_ofertas" && status === "flow_nao_aceita") return ttl.flowNaoAceitaMs;
   if (tipo === "engine_ofertas" && ["retida", "retida_v2", "erro_final", "erro", "expirada", "enviado"].includes(status)) return ttl.filaTerminalMs;
+  if (tipo === "engine_jobs_cliente" && MATRIZ_STATUS_AUTO_CLEAN[status]?.removivelAposHoras) return Number(MATRIZ_STATUS_AUTO_CLEAN[status].removivelAposHoras) * 60 * 60 * 1000;
   if (tipo === "engine_jobs_cliente" && STATUS_JOB_CONCLUIDO.has(status)) return ttl.jobsConcluidosMs;
   if (tipo === "engine_eventos_brutos" || tipo === "engine_links") return ttl.eventosBrutosMs;
   if (tipo === "engine_processamentos") return ttl.processamentosMs;
@@ -264,7 +383,23 @@ function sanitizarLogPayload(payload = {}) {
     "integrais",
     "bytesRecuperaveisCompactacao",
     "bytesRecuperaveisCompactacaoLegivel",
-    "politicaCentral"
+    "politicaCentral",
+    "lotes",
+    "limiteLotesPorCiclo",
+    "jobsRemovidos",
+    "processamentosRemovidos",
+    "eventosComerciaisRemovidos",
+    "arquivosRemovidos",
+    "filasRegravadas",
+    "workspacesProcessados",
+    "bytesLiberados",
+    "bytesLiberadosLegivel",
+    "espacoLogicoLiberadoBytes",
+    "espacoLogicoLiberado",
+    "compactados",
+    "removidos",
+    "erros",
+    "failOpen"
   ];
   const saida = {};
   for (const chave of permitido) {
@@ -553,6 +688,362 @@ async function inventariarPostgres(opcoes = {}) {
   return origens;
 }
 
+async function executarBatchJobsPostgresAutoClean(client, { loteLimite, horasMinimas }) {
+  const resultado = await client.query(
+    `WITH candidatos AS (
+       SELECT id
+         FROM engine_jobs_cliente
+        WHERE status = ANY($1::text[])
+          AND criado_em IS NOT NULL
+          AND criado_em < NOW() - (GREATEST($2::int, CASE ${TTL_JOB_CASE_SQL} ELSE 12 END)::int * INTERVAL '1 hour')
+        ORDER BY criado_em ASC, id ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT $3
+     ), eventos_removidos AS (
+       DELETE FROM engine_eventos_comerciais e
+        USING candidatos c
+        WHERE e.job_id = c.id
+        RETURNING e.id, pg_column_size(e.*)::bigint AS bytes
+     ), processamentos_removidos AS (
+       DELETE FROM engine_processamentos p
+        USING candidatos c
+        WHERE p.job_id = c.id
+        RETURNING p.id, pg_column_size(p.*)::bigint AS bytes
+     ), jobs_removidos AS (
+       DELETE FROM engine_jobs_cliente j
+        USING candidatos c
+        WHERE j.id = c.id
+        RETURNING j.id, j.status, j.cliente_id, pg_column_size(j.*)::bigint AS bytes
+     )
+     SELECT
+       (SELECT COUNT(*)::int FROM jobs_removidos) AS jobs_removidos,
+       (SELECT COUNT(*)::int FROM processamentos_removidos) AS processamentos_removidos,
+       (SELECT COUNT(*)::int FROM eventos_removidos) AS eventos_comerciais_removidos,
+       COALESCE((SELECT SUM(bytes) FROM jobs_removidos), 0)::bigint AS bytes_jobs,
+       COALESCE((SELECT SUM(bytes) FROM processamentos_removidos), 0)::bigint AS bytes_processamentos,
+       COALESCE((SELECT SUM(bytes) FROM eventos_removidos), 0)::bigint AS bytes_eventos_comerciais`,
+    [STATUS_JOB_REMOVIVEL_AUTO_CLEAN, horasMinimas, loteLimite]
+  );
+
+  return resultado.rows[0] || {};
+}
+
+async function executarJobsPostgresAutoClean(opcoes = {}) {
+  const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
+  const loteLimite = politica.loteLimite;
+  const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
+  const horasMinimas = Math.max(12, limitarInteiro(opcoes.horasMinimas, 12, 12, 168));
+  const pool = opcoes.pool || (typeof opcoes.getEnginePool === "function" ? opcoes.getEnginePool() : getEnginePool());
+  const resumo = {
+    origem: "postgres_jobs",
+    tipoRegistro: "engine_jobs_cliente",
+    modo: "execute",
+    lotes: 0,
+    limiteLotesPorCiclo,
+    loteLimite,
+    jobsRemovidos: 0,
+    processamentosRemovidos: 0,
+    eventosComerciaisRemovidos: 0,
+    espacoLogicoLiberadoBytes: 0,
+    aplicouMudancas: false,
+    vacuumExecutado: false
+  };
+
+  if (!pool) {
+    return { ...resumo, ok: false, failOpen: true, motivo: "banco_indisponivel" };
+  }
+
+  try {
+    for (let lote = 0; lote < limiteLotesPorCiclo; lote += 1) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const lock = await client.query("SELECT pg_try_advisory_xact_lock($1) AS locked", [AUTO_CLEAN_JOBS_LOCK_ID]);
+        if (lock.rows[0]?.locked !== true) {
+          await client.query("ROLLBACK");
+          return { ...resumo, ok: false, failOpen: true, motivo: "auto_clean_jobs_lock_ocupado" };
+        }
+
+        const batch = await executarBatchJobsPostgresAutoClean(client, { loteLimite, horasMinimas });
+        await client.query("COMMIT");
+
+        const jobsRemovidos = Number(batch.jobs_removidos || 0);
+        if (!jobsRemovidos) break;
+
+        resumo.lotes += 1;
+        resumo.jobsRemovidos += jobsRemovidos;
+        resumo.processamentosRemovidos += Number(batch.processamentos_removidos || 0);
+        resumo.eventosComerciaisRemovidos += Number(batch.eventos_comerciais_removidos || 0);
+        resumo.espacoLogicoLiberadoBytes +=
+          Number(batch.bytes_jobs || 0) +
+          Number(batch.bytes_processamentos || 0) +
+          Number(batch.bytes_eventos_comerciais || 0);
+      } catch (erro) {
+        try { await client.query("ROLLBACK"); } catch (_) {}
+        throw erro;
+      } finally {
+        client.release();
+      }
+    }
+
+    resumo.ok = true;
+    resumo.aplicouMudancas = resumo.jobsRemovidos > 0;
+    resumo.espacoLogicoLiberado = bytesLegiveis(resumo.espacoLogicoLiberadoBytes);
+    return resumo;
+  } catch (erro) {
+    return {
+      ...resumo,
+      ok: false,
+      failOpen: true,
+      motivo: "auto_clean_jobs_execute_falhou",
+      erroTipo: erro?.code || erro?.name || "erro",
+      aplicouMudancas: resumo.jobsRemovidos > 0,
+      espacoLogicoLiberado: bytesLegiveis(resumo.espacoLogicoLiberadoBytes)
+    };
+  }
+}
+
+function listarWorkspacesFila(dataDir, fsImpl = fs) {
+  const clientesDir = path.join(dataDir, "clientes");
+  try {
+    if (!fsImpl.existsSync(clientesDir)) return [];
+    return fsImpl.readdirSync(clientesDir)
+      .filter(workspaceId => workspaceId && !SENSIVEL_RE.test(workspaceId))
+      .filter(workspaceId => {
+        try {
+          return fsImpl.statSync(path.join(clientesDir, workspaceId)).isDirectory();
+        } catch {
+          return false;
+        }
+      })
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+function escreverJsonAtomico(fsImpl, arquivo, dados) {
+  const dir = path.dirname(arquivo);
+  const tmp = path.join(dir, `.${path.basename(arquivo)}.autoclean-${process.pid}-${Date.now()}.tmp`);
+  fsImpl.writeFileSync(tmp, JSON.stringify(dados, null, 2));
+  fsImpl.renameSync(tmp, arquivo);
+}
+
+function executarCompactacaoFilaWorkspace(opcoes = {}) {
+  const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
+  const dataDir = path.resolve(politica.dataDir || DEFAULT_DATA_DIR);
+  const fsImpl = opcoes.fs || fs;
+  const agoraMs = Number(opcoes.agoraMs || Date.now());
+  const workspaceId = String(opcoes.workspaceId || "").trim();
+  const filaPath = path.join(dataDir, "clientes", workspaceId, "fila.json");
+
+  if (!workspaceId || SENSIVEL_RE.test(workspaceId)) {
+    return { ok: false, aplicouMudancas: false, motivo: "workspace_inseguro" };
+  }
+
+  let fila;
+  let antesBytes = 0;
+  try {
+    if (!fsImpl.existsSync(filaPath)) return { ok: true, aplicouMudancas: false, motivo: "fila_ausente" };
+    const texto = fsImpl.readFileSync(filaPath, "utf8");
+    antesBytes = Buffer.byteLength(texto || "", "utf8");
+    fila = JSON.parse(texto);
+  } catch {
+    return { ok: false, aplicouMudancas: false, motivo: "fila_json_invalida" };
+  }
+
+  if (!Array.isArray(fila)) return { ok: false, aplicouMudancas: false, motivo: "fila_json_invalida" };
+
+  const analise = filaHistoricoPolicy.analisarFilaHistorico(fila, { agoraMs });
+  if (!analise.resumo.compactaveis && !analise.resumo.removiveis) {
+    return {
+      ok: true,
+      aplicouMudancas: false,
+      motivo: "sem_itens_elegiveis",
+      integrais: analise.resumo.integrais,
+      protegidos: analise.resumo.protegidos
+    };
+  }
+
+  try {
+    escreverJsonAtomico(fsImpl, filaPath, analise.transformada);
+  } catch (erro) {
+    return {
+      ok: false,
+      failOpen: true,
+      aplicouMudancas: false,
+      motivo: "fila_json_gravacao_falhou",
+      erroTipo: erro?.code || erro?.name || "erro"
+    };
+  }
+
+  const depoisBytes = Buffer.byteLength(JSON.stringify(analise.transformada, null, 2), "utf8");
+  return {
+    ok: true,
+    aplicouMudancas: true,
+    compactados: analise.resumo.compactaveis,
+    removidos: analise.resumo.removiveis,
+    protegidos: analise.resumo.protegidos,
+    integrais: analise.resumo.integrais,
+    bytesLiberados: Math.max(0, antesBytes - depoisBytes),
+    bytesLiberadosLegivel: bytesLegiveis(Math.max(0, antesBytes - depoisBytes))
+  };
+}
+
+function executarFilaJsonAutoClean(opcoes = {}) {
+  const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
+  const dataDir = path.resolve(politica.dataDir || DEFAULT_DATA_DIR);
+  const fsImpl = opcoes.fs || fs;
+  const workspaces = Array.isArray(opcoes.workspaces)
+    ? opcoes.workspaces
+    : listarWorkspacesFila(dataDir, fsImpl);
+  const selecionados = workspaces.slice(0, politica.workspacesFilaPorCiclo);
+  const resumo = {
+    origem: "fila_json",
+    tipoRegistro: "fila_json",
+    modo: "execute",
+    workspacesProcessados: 0,
+    filasRegravadas: 0,
+    compactados: 0,
+    removidos: 0,
+    protegidos: 0,
+    bytesLiberados: 0,
+    erros: 0,
+    aplicouMudancas: false
+  };
+
+  for (const workspaceId of selecionados) {
+    const resultado = executarCompactacaoFilaWorkspace({ ...opcoes, politica, dataDir, fs: fsImpl, workspaceId });
+    resumo.workspacesProcessados += 1;
+    if (resultado.ok === false) {
+      resumo.erros += 1;
+      continue;
+    }
+    resumo.protegidos += Number(resultado.protegidos || 0);
+    if (resultado.aplicouMudancas) {
+      resumo.filasRegravadas += 1;
+      resumo.compactados += Number(resultado.compactados || 0);
+      resumo.removidos += Number(resultado.removidos || 0);
+      resumo.bytesLiberados += Number(resultado.bytesLiberados || 0);
+    }
+  }
+
+  resumo.aplicouMudancas = resumo.filasRegravadas > 0;
+  resumo.bytesLiberadosLegivel = bytesLegiveis(resumo.bytesLiberados);
+  return resumo;
+}
+
+function coletarArquivosElegiveisAutoClean(opcoes = {}) {
+  const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
+  const dataDir = path.resolve(politica.dataDir || DEFAULT_DATA_DIR);
+  const fsImpl = opcoes.fs || fs;
+  const agoraMs = Number(opcoes.agoraMs || Date.now());
+  const limite = politica.loteLimite;
+  const elegiveis = [];
+
+  if (!fsImpl.existsSync(dataDir)) return elegiveis;
+  const pilha = [dataDir];
+  while (pilha.length && elegiveis.length < limite) {
+    const atual = pilha.pop();
+    let stats;
+    try { stats = fsImpl.lstatSync(atual); } catch { continue; }
+    if (stats.isSymbolicLink && stats.isSymbolicLink()) continue;
+    if (stats.isDirectory && stats.isDirectory()) {
+      const relDir = path.relative(dataDir, atual).replace(/\\/g, "/");
+      if (isSessaoOuConfig(relDir)) continue;
+      let filhos = [];
+      try { filhos = fsImpl.readdirSync(atual).map(nome => path.join(atual, nome)); } catch { filhos = []; }
+      for (const filho of filhos) pilha.push(filho);
+      continue;
+    }
+    if (!stats.isFile || !stats.isFile()) continue;
+
+    const categoria = categoriaArquivoAutoClean(dataDir, atual, stats);
+    if (categoria === "protegido_sensivel" || categoria === "fila_json_arquivo" || categoria === "arquivos_auditoria" || categoria === "outros") continue;
+    const tipoRegistro = categoria === "logs_persistidos" ? "logs_persistidos" : categoria;
+    const decisao = avaliarRegistroAutoClean({
+      origem: categoria,
+      tipoRegistro: categoria === "midias_reconstruiveis" || categoria === "backups_operacionais" ? "temporarios" : tipoRegistro,
+      status: "arquivo",
+      referenciaTemporal: new Date(stats.mtimeMs || stats.ctimeMs || agoraMs).toISOString(),
+      bytesEstimados: Number(stats.size || 0),
+      rollbackAtivo: categoria === "snapshots_reset" && (agoraMs - Number(stats.mtimeMs || agoraMs)) < politica.ttl.snapshotsMs
+    }, { politica, agoraMs });
+    if (decisao.elegivel) elegiveis.push({ caminho: atual, categoria, bytes: Number(stats.size || 0) });
+  }
+
+  return elegiveis;
+}
+
+function executarArquivosAutoClean(opcoes = {}) {
+  const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
+  const fsImpl = opcoes.fs || fs;
+  const arquivos = coletarArquivosElegiveisAutoClean({ ...opcoes, politica });
+  const resumo = {
+    origem: "arquivos_operacionais",
+    tipoRegistro: "arquivos",
+    modo: "execute",
+    quantidade: arquivos.length,
+    arquivosRemovidos: 0,
+    bytesLiberados: 0,
+    erros: 0,
+    loteLimite: politica.loteLimite,
+    aplicouMudancas: false
+  };
+
+  for (const arquivo of arquivos) {
+    try {
+      fsImpl.unlinkSync(arquivo.caminho);
+      resumo.arquivosRemovidos += 1;
+      resumo.bytesLiberados += Number(arquivo.bytes || 0);
+    } catch {
+      resumo.erros += 1;
+    }
+  }
+
+  resumo.aplicouMudancas = resumo.arquivosRemovidos > 0;
+  resumo.bytesLiberadosLegivel = bytesLegiveis(resumo.bytesLiberados);
+  return resumo;
+}
+
+async function executarAutoCleanExecute(opcoes = {}) {
+  const inicio = Date.now();
+  const politica = criarPoliticaRetencao(opcoes);
+  const etapas = [];
+
+  if (opcoes.incluirPostgres !== false) {
+    etapas.push(await executarJobsPostgresAutoClean({ ...opcoes, politica }));
+  }
+  if (opcoes.incluirArquivos !== false) {
+    etapas.push(executarFilaJsonAutoClean({ ...opcoes, politica }));
+    etapas.push(executarArquivosAutoClean({ ...opcoes, politica }));
+  }
+
+  const resumo = {
+    origem: "auto_clean",
+    tipoRegistro: "execute_resumo",
+    modo: "execute",
+    totalOrigens: etapas.length,
+    aplicouMudancas: etapas.some(etapa => etapa.aplicouMudancas === true),
+    jobsRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.jobsRemovidos || 0), 0),
+    processamentosRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.processamentosRemovidos || 0), 0),
+    eventosComerciaisRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.eventosComerciaisRemovidos || 0), 0),
+    arquivosRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.arquivosRemovidos || 0), 0),
+    filasRegravadas: etapas.reduce((soma, etapa) => soma + Number(etapa.filasRegravadas || 0), 0),
+    compactados: etapas.reduce((soma, etapa) => soma + Number(etapa.compactados || 0), 0),
+    removidos: etapas.reduce((soma, etapa) => soma + Number(etapa.removidos || 0), 0),
+    erros: etapas.reduce((soma, etapa) => soma + Number(etapa.erros || 0) + (etapa.ok === false ? 1 : 0), 0),
+    bytesLiberados: etapas.reduce((soma, etapa) => soma + Number(etapa.bytesLiberados || etapa.espacoLogicoLiberadoBytes || 0), 0),
+    duracaoMs: Date.now() - inicio,
+    loteLimite: politica.loteLimite,
+    limiteLotesPorCiclo: politica.lotesDbPorCiclo,
+    etapas
+  };
+  resumo.bytesLiberadosLegivel = bytesLegiveis(resumo.bytesLiberados);
+  resumo.failOpen = resumo.erros > 0;
+  return resumo;
+}
+
 async function executarAutoCleanShadow(opcoes = {}) {
   const inicio = Date.now();
   const politica = criarPoliticaRetencao(opcoes);
@@ -560,15 +1051,6 @@ async function executarAutoCleanShadow(opcoes = {}) {
   const origens = [];
   const executarDb = opcoes.incluirPostgres !== false;
   const executarArquivos = opcoes.incluirArquivos !== false;
-
-  if (autoCleanExecuteAtivo(opcoes)) {
-    logAutoClean("[OPTIMUS-AUTO-CLEAN-V1-ERRO]", {
-      origem: "auto_clean",
-      tipoRegistro: "execute",
-      motivo: "execute_nao_implementado_nesta_fase",
-      aplicouMudancas: false
-    }, logger);
-  }
 
   if (executarDb) origens.push(...await inventariarPostgres({ ...opcoes, politica }));
   if (executarArquivos) {
@@ -578,6 +1060,26 @@ async function executarAutoCleanShadow(opcoes = {}) {
   }
 
   for (const origem of origens) logAutoClean("[OPTIMUS-AUTO-CLEAN-V1-SHADOW]", origem, logger);
+
+  let execute = null;
+  if (autoCleanExecuteAtivo(opcoes)) {
+    try {
+      execute = await executarAutoCleanExecute({ ...opcoes, politica });
+      for (const etapa of execute.etapas || []) logAutoClean("[OPTIMUS-AUTO-CLEAN-V1-EXECUTE]", etapa, logger);
+      logAutoClean("[OPTIMUS-AUTO-CLEAN-V1-EXECUTE-RESUMO]", execute, logger);
+    } catch (erro) {
+      execute = {
+        origem: "auto_clean",
+        tipoRegistro: "execute_erro",
+        ok: false,
+        failOpen: true,
+        motivo: "auto_clean_execute_indisponivel",
+        erroTipo: erro?.code || erro?.name || "erro",
+        aplicouMudancas: false
+      };
+      logAutoClean("[OPTIMUS-AUTO-CLEAN-V1-ERRO]", execute, logger);
+    }
+  }
 
   const resumo = {
     origem: "auto_clean",
@@ -589,8 +1091,9 @@ async function executarAutoCleanShadow(opcoes = {}) {
     bytesEstimados: origens.reduce((soma, item) => soma + Number(item.bytesEstimados || 0), 0),
     duracaoMs: Date.now() - inicio,
     loteLimite: politica.loteLimite,
-    aplicouMudancas: false,
-    origens
+    aplicouMudancas: execute?.aplicouMudancas === true,
+    origens,
+    execute
   };
   logAutoClean("[OPTIMUS-AUTO-CLEAN-V1-RESUMO]", resumo, logger);
   return resumo;
@@ -602,7 +1105,7 @@ async function executarAutoCleanShadowSeguro(opcoes = {}) {
   }
   try {
     const resumo = await executarAutoCleanShadow(opcoes);
-    return { ok: true, ...resumo, aplicouMudancas: false };
+    return { ok: true, ...resumo, aplicouMudancas: resumo.aplicouMudancas === true };
   } catch (erro) {
     logAutoClean("[OPTIMUS-AUTO-CLEAN-V1-ERRO]", {
       origem: "auto_clean",
@@ -619,6 +1122,7 @@ module.exports = {
   ENV_SHADOW,
   ENV_EXECUTE,
   TTL_PADRAO,
+  MATRIZ_STATUS_AUTO_CLEAN,
   flagLigada,
   flagDesligada,
   autoCleanShadowAtivo,
@@ -627,6 +1131,12 @@ module.exports = {
   avaliarRegistroAutoClean,
   executarAutoCleanShadow,
   executarAutoCleanShadowSeguro,
+  executarAutoCleanExecute,
+  executarJobsPostgresAutoClean,
+  executarFilaJsonAutoClean,
+  executarArquivosAutoClean,
+  executarCompactacaoFilaWorkspace,
+  coletarArquivosElegiveisAutoClean,
   auditarFilaJson,
   inventariarArquivosPorCategoria,
   memoriaComercialStatus,
