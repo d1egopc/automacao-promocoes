@@ -99,6 +99,48 @@ async function testarTtlEStatus() {
     referenciaTemporal: isoAtras(26 * 60 * 60 * 1000)
   }, { politica, agoraMs: AGORA });
   assert.strictEqual(enviadoAntigo.elegivel, true);
+
+  const jobFinal11h = avaliarRegistroAutoClean({
+    origem: "engine_jobs_cliente",
+    tipoRegistro: "engine_jobs_cliente",
+    status: "concluido",
+    referenciaTemporal: isoAtras(11 * 60 * 60 * 1000)
+  }, { politica, agoraMs: AGORA });
+  assert.strictEqual(jobFinal11h.elegivel, false, "job final com menos de 12h permanece completo");
+
+  const jobFinal13h = avaliarRegistroAutoClean({
+    origem: "engine_jobs_cliente",
+    tipoRegistro: "engine_jobs_cliente",
+    status: "concluido",
+    referenciaTemporal: isoAtras(13 * 60 * 60 * 1000)
+  }, { politica, agoraMs: AGORA });
+  assert.strictEqual(jobFinal13h.elegivel, true, "job final com mais de 12h entra no plano seguro");
+
+  const jobRetryAntigo = avaliarRegistroAutoClean({
+    origem: "engine_jobs_cliente",
+    tipoRegistro: "engine_jobs_cliente",
+    status: "retry",
+    referenciaTemporal: isoAtras(10 * 24 * 60 * 60 * 1000)
+  }, { politica, agoraMs: AGORA });
+  assert.strictEqual(jobRetryAntigo.elegivel, false);
+  assert.strictEqual(jobRetryAntigo.motivo, "job_ativo");
+
+  const jobStatusDesconhecido = avaliarRegistroAutoClean({
+    origem: "engine_jobs_cliente",
+    tipoRegistro: "engine_jobs_cliente",
+    status: "erro",
+    referenciaTemporal: isoAtras(30 * 24 * 60 * 60 * 1000)
+  }, { politica, agoraMs: AGORA });
+  assert.strictEqual(jobStatusDesconhecido.elegivel, false);
+  assert.strictEqual(jobStatusDesconhecido.motivo, "sem_politica_ttl");
+
+  const jobSemTimestamp = avaliarRegistroAutoClean({
+    origem: "engine_jobs_cliente",
+    tipoRegistro: "engine_jobs_cliente",
+    status: "concluido"
+  }, { politica, agoraMs: AGORA });
+  assert.strictEqual(jobSemTimestamp.elegivel, false);
+  assert.strictEqual(jobSemTimestamp.motivo, "timestamp_indisponivel");
 }
 
 async function testarDependenciasProtegidas() {
@@ -236,10 +278,21 @@ async function testarFailOpenEFlags() {
   try {
     delete process.env.OPTIMUS_AUTO_CLEAN_SHADOW;
     delete process.env.OPTIMUS_AUTO_CLEAN_EXECUTE;
-    assert.strictEqual(autoCleanShadowAtivo(), false);
+    assert.strictEqual(autoCleanShadowAtivo(), true, "Auto-Clean shadow/auditoria e default universal");
     assert.strictEqual(autoCleanExecuteAtivo(), false);
+    process.env.OPTIMUS_AUTO_CLEAN_SHADOW = "0";
+    assert.strictEqual(autoCleanShadowAtivo(), false, "rollback administrativo explicito desativa auditoria");
     process.env.OPTIMUS_AUTO_CLEAN_SHADOW = "1";
     assert.strictEqual(autoCleanShadowAtivo(), true);
+
+    const universal = await executarAutoCleanShadowSeguro({
+      incluirArquivos: false,
+      queryEngine: async () => ({ ok: true, resultado: { rows: [] } }),
+      logger: capturarLogger().logger
+    });
+    assert.strictEqual(universal.ok, true);
+    assert.strictEqual(universal.pulado, undefined);
+    assert.strictEqual(universal.aplicouMudancas, false);
 
     const { logger, logs } = capturarLogger();
     const retorno = await executarAutoCleanShadowSeguro({

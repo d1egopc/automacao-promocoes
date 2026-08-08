@@ -13,14 +13,13 @@ const LOTE_LIMITE_PADRAO = 100;
 const TTL_PADRAO = Object.freeze({
   flowNaoAceitaMs: 24 * 60 * 60 * 1000,
   filaEnviadaMs: 24 * 60 * 60 * 1000,
-  filaTerminalMs: 72 * 60 * 60 * 1000,
-  jobsConcluidosMs: 7 * 24 * 60 * 60 * 1000,
-  jobsErroMs: 30 * 24 * 60 * 60 * 1000,
-  eventosBrutosMs: 15 * 24 * 60 * 60 * 1000,
-  processamentosMs: 7 * 24 * 60 * 60 * 1000,
-  eventosComerciaisMs: 30 * 24 * 60 * 60 * 1000,
-  logsMs: 15 * 24 * 60 * 60 * 1000,
-  temporariosCacheMs: 72 * 60 * 60 * 1000,
+  filaTerminalMs: 7 * 24 * 60 * 60 * 1000,
+  jobsConcluidosMs: 12 * 60 * 60 * 1000,
+  eventosBrutosMs: 24 * 60 * 60 * 1000,
+  processamentosMs: 24 * 60 * 60 * 1000,
+  eventosComerciaisMs: 7 * 24 * 60 * 60 * 1000,
+  logsMs: 24 * 60 * 60 * 1000,
+  temporariosCacheMs: 24 * 60 * 60 * 1000,
   snapshotsMs: 30 * 24 * 60 * 60 * 1000
 });
 
@@ -30,9 +29,50 @@ const STATUS_FILA_ENVIADO = filaHistoricoPolicy.STATUS_ENVIADO;
 const STATUS_FILA_TERMINAL = filaHistoricoPolicy.STATUS_FINAL;
 
 const STATUS_OFERTA_ATIVO = new Set(["importada", "oferta_criada", "distribuindo", "fila"]);
-const STATUS_JOB_ATIVO = new Set(["pendente", "diagnosticado", "pronto", "processando", "importando", "distribuindo"]);
-const STATUS_JOB_ERRO = new Set(["erro", "falha", "erro_final", "erro_permanente"]);
-const STATUS_JOB_CONCLUIDO = new Set(["concluido", "concluida", "importado", "distribuido", "ignorado", "retido", "finalizado"]);
+const STATUS_JOB_ATIVO = new Set([
+  "pendente",
+  "diagnosticado",
+  "pronto",
+  "pronto_para_importar",
+  "processando",
+  "importando",
+  "distribuindo",
+  "executando",
+  "retry",
+  "agendado",
+  "claimed",
+  "bloqueado",
+  "oferta_criada"
+]);
+const STATUS_JOB_CONCLUIDO = new Set([
+  "concluido",
+  "concluida",
+  "finalizado",
+  "finalizada",
+  "importado",
+  "importada",
+  "distribuido",
+  "distribuida",
+  "enviado",
+  "enviada",
+  "erro_final",
+  "erro_permanente",
+  "falha_final",
+  "cancelado",
+  "cancelada",
+  "expirado",
+  "expirada",
+  "expirada_operacional",
+  "descartado",
+  "descartada",
+  "duplicado",
+  "duplicada",
+  "duplicado_final",
+  "duplicada_final"
+]);
+const STATUS_JOB_ATIVO_SQL = Array.from(STATUS_JOB_ATIVO)
+  .map(status => `'${status.replace(/'/g, "''")}'`)
+  .join(",");
 
 const EXT_LOG = new Set([".log", ".out", ".err"]);
 const EXT_TEMP = new Set([".tmp", ".temp", ".old", ".swp"]);
@@ -44,10 +84,15 @@ function flagLigada(valor) {
   return ["1", "true", "sim", "yes", "on"].includes(String(valor || "").trim().toLowerCase());
 }
 
+function flagDesligada(valor) {
+  return ["0", "false", "nao", "não", "no", "off", "desligado", "disabled"].includes(String(valor || "").trim().toLowerCase());
+}
+
 function autoCleanShadowAtivo(opcoes = {}) {
   if (opcoes.shadow === true) return true;
   if (opcoes.shadow === false) return false;
-  return flagLigada(process.env[ENV_SHADOW]);
+  if (flagDesligada(process.env[ENV_SHADOW])) return false;
+  return true;
 }
 
 function autoCleanExecuteAtivo(opcoes = {}) {
@@ -120,7 +165,6 @@ function ttlPorRegistro(registro = {}, politica = criarPoliticaRetencao()) {
   if (tipo === "fila_json" && STATUS_FILA_TERMINAL.has(status)) return ttl.filaTerminalMs;
   if (tipo === "engine_ofertas" && status === "flow_nao_aceita") return ttl.flowNaoAceitaMs;
   if (tipo === "engine_ofertas" && ["retida", "retida_v2", "erro_final", "erro", "expirada", "enviado"].includes(status)) return ttl.filaTerminalMs;
-  if (tipo === "engine_jobs_cliente" && STATUS_JOB_ERRO.has(status)) return ttl.jobsErroMs;
   if (tipo === "engine_jobs_cliente" && STATUS_JOB_CONCLUIDO.has(status)) return ttl.jobsConcluidosMs;
   if (tipo === "engine_eventos_brutos" || tipo === "engine_links") return ttl.eventosBrutosMs;
   if (tipo === "engine_processamentos") return ttl.processamentosMs;
@@ -155,11 +199,11 @@ function avaliarRegistroAutoClean(registro = {}, opcoes = {}) {
     return { ...registro, status, idadeMs, ttlMs, elegivel: false, motivo: "job_ativo", aplicouMudancas: false };
   }
 
-  if (!Number.isFinite(Number(ttlMs))) {
+  if (!Number.isFinite(ttlMs)) {
     return { ...registro, status, idadeMs, ttlMs: null, elegivel: false, motivo: "sem_politica_ttl", aplicouMudancas: false };
   }
 
-  if (!Number.isFinite(Number(idadeMs))) {
+  if (!Number.isFinite(idadeMs)) {
     return { ...registro, status, idadeMs: null, ttlMs, elegivel: false, motivo: "timestamp_indisponivel", aplicouMudancas: false };
   }
 
@@ -461,17 +505,18 @@ async function inventariarPostgres(opcoes = {}) {
   origens.push(await consultarOrigemDb("engine_jobs_cliente", `
     SELECT j.id, j.status, j.atualizado_em AS referencia_temporal, pg_column_size(j.*)::bigint AS bytes_estimados,
            false AS tem_referencia_fila_viva,
-           j.status IN ('pendente','diagnosticado','pronto','processando','importando','distribuindo') AS tem_job_ativo,
+           j.status IN (${STATUS_JOB_ATIVO_SQL}) AS tem_job_ativo,
            false AS tem_oferta_ativa
       FROM engine_jobs_cliente j
-     WHERE j.status NOT IN ('pendente','diagnosticado','pronto','processando','importando','distribuindo')
+     WHERE COALESCE(NULLIF(TRIM(j.status), ''), '') <> ''
+       AND j.status NOT IN (${STATUS_JOB_ATIVO_SQL})
        AND j.atualizado_em < $1::timestamptz
      ORDER BY j.atualizado_em ASC
      LIMIT $2`, [cutoff(ttl.jobsConcluidosMs), limite], opcoes));
 
   origens.push(await consultarOrigemDb("engine_eventos_brutos", `
     SELECT e.id, 'evento_bruto' AS status, e.criado_em AS referencia_temporal, pg_column_size(e.*)::bigint AS bytes_estimados,
-           EXISTS (SELECT 1 FROM engine_jobs_cliente j WHERE j.evento_id = e.id AND j.status IN ('pendente','diagnosticado','pronto','processando','importando','distribuindo')) AS tem_job_ativo,
+           EXISTS (SELECT 1 FROM engine_jobs_cliente j WHERE j.evento_id = e.id AND j.status IN (${STATUS_JOB_ATIVO_SQL})) AS tem_job_ativo,
            EXISTS (SELECT 1 FROM engine_ofertas o WHERE o.evento_id = e.id AND o.status IN ('importada','oferta_criada','distribuindo','fila')) AS tem_oferta_ativa,
            false AS tem_referencia_fila_viva
       FROM engine_eventos_brutos e
@@ -481,7 +526,7 @@ async function inventariarPostgres(opcoes = {}) {
 
   origens.push(await consultarOrigemDb("engine_links", `
     SELECT l.id, 'link' AS status, l.criado_em AS referencia_temporal, pg_column_size(l.*)::bigint AS bytes_estimados,
-           EXISTS (SELECT 1 FROM engine_jobs_cliente j WHERE j.evento_id = l.evento_id AND j.status IN ('pendente','diagnosticado','pronto','processando','importando','distribuindo')) AS tem_job_ativo,
+           EXISTS (SELECT 1 FROM engine_jobs_cliente j WHERE j.evento_id = l.evento_id AND j.status IN (${STATUS_JOB_ATIVO_SQL})) AS tem_job_ativo,
            EXISTS (SELECT 1 FROM engine_ofertas o WHERE o.link_id = l.id AND o.status IN ('importada','oferta_criada','distribuindo','fila')) AS tem_oferta_ativa,
            false AS tem_referencia_fila_viva
       FROM engine_links l
@@ -575,6 +620,7 @@ module.exports = {
   ENV_EXECUTE,
   TTL_PADRAO,
   flagLigada,
+  flagDesligada,
   autoCleanShadowAtivo,
   autoCleanExecuteAtivo,
   criarPoliticaRetencao,
