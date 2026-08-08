@@ -13,7 +13,8 @@ const {
 const {
   criarJobsParaClientes,
   ignorarJobsAdminNaoOperacional,
-  limparJobsAntigosEngine
+  limparJobsAntigosEngine,
+  executarRetencaoJobsPostgres
 } = require("./jobs.service");
 
 async function initEngineDatabase() {
@@ -62,6 +63,7 @@ module.exports = {
   criarJobsParaClientes,
   ignorarJobsAdminNaoOperacional,
   limparJobsAntigosEngine,
+  executarRetencaoJobsPostgres,
   consultarEventosEngine,
   consultarJobsEngine,
   consultarOfertasEngine,
