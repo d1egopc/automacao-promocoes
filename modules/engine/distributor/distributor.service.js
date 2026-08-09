@@ -282,6 +282,14 @@ function analisarDestinosOferta(clienteId = "admin", oferta = {}, contexto = {})
 
     if (analiseAceita) compativeis.push({ destino, analise: analiseAceita });
     else rejeitados.push({ destino, analise: analiseRetida || { aceita: false, motivo: "categoria", categoriaUsada: oferta.categoria || "" } });
+
+    logDiagnosticoDestinoDistribuidor({
+      clienteId,
+      oferta,
+      destino,
+      analise: analiseAceita || analiseRetida || {},
+      aceita: Boolean(analiseAceita)
+    });
   }
 
   return { destinos, compativeis, rejeitados };
@@ -300,10 +308,74 @@ function categoriasDestinoRetencao(destinos = []) {
 
   return [...categorias];
 }
+
+function listaSeguraDestino(lista = []) {
+  return (Array.isArray(lista) ? lista : [])
+    .map(item => normalizarTexto(item))
+    .filter(Boolean)
+    .slice(0, 25);
+}
+
+function listaDestinoDiagnostico(...listas) {
+  for (const lista of listas) {
+    if (Array.isArray(lista) && lista.length) return lista;
+  }
+  return [];
+}
+
+function detalhesDestinoAnalise(item = {}) {
+  const destino = item.destino || {};
+  const analise = item.analise || {};
+  const categoriasPermitidas = listaSeguraDestino(listaDestinoDiagnostico(destino.categorias, destino.categoriasPermitidas));
+  const marketplacesPermitidos = listaSeguraDestino(listaDestinoDiagnostico(destino.marketplaces, destino.marketplacesPermitidos));
+  const ativo = destino?.ativo !== false;
+  const aceitaMarketplace = analise.aceitaMarketplace === true;
+  const aceitaCategoria = analise.aceitaCategoria === true;
+
+  return {
+    destinoId: normalizarTexto(destino.id || destino.destinoId || ""),
+    destinoNome: normalizarTexto(destino.nome || destino.name || ""),
+    ativo,
+    marketplaceCompativel: aceitaMarketplace,
+    marketplacesPermitidos,
+    categoriaOferta: normalizarTexto(analise.categoriaUsada || analise.categoriaOferta || ""),
+    categoriasPermitidas,
+    aceitaCategoria,
+    aceito: analise.aceita === true,
+    motivoFinal: analise.aceita === true
+      ? "destino_compativel"
+      : (analise.motivo === "categoria" ? "categoria_incompativel" : (analise.motivo || "sem_motivo"))
+  };
+}
+
+function logDiagnosticoDestinoDistribuidor({ clienteId = "", oferta = {}, destino = {}, analise = {}, aceita = false } = {}) {
+  try {
+    const diagnostico = detalhesDestinoAnalise({
+      destino,
+      analise: {
+        ...analise,
+        aceita
+      }
+    });
+
+    console.log("[ENGINE-DISTRIBUIDOR-DESTINO-DIAGNOSTICO]", JSON.stringify({
+      clienteId,
+      ofertaId: oferta.id || null,
+      jobId: oferta.job_id || null,
+      marketplace: normalizarMarketplace(oferta.marketplace),
+      ...diagnostico
+    }));
+  } catch (_) {}
+}
+
 function motivoDestinoRetido(analise = {}) {
   if (!analise.destinos.length) return "sem_destino";
-  if (analise.rejeitados.length && analise.rejeitados.every(item => item.analise?.motivo === "marketplace")) return "marketplace_bloqueado";
-  if (analise.rejeitados.length && analise.rejeitados.every(item => item.analise?.motivo === "categoria")) return "categoria_bloqueada";
+  const rejeitados = Array.isArray(analise.rejeitados) ? analise.rejeitados : [];
+  const ativos = rejeitados.filter(item => item.destino?.ativo !== false);
+  const ativosOuTodos = ativos.length ? ativos : rejeitados;
+  if (ativosOuTodos.length && ativosOuTodos.every(item => item.analise?.motivo === "marketplace")) return "marketplace_bloqueado";
+  if (ativosOuTodos.some(item => item.analise?.motivo === "categoria" && item.analise?.aceitaMarketplace === true)) return "categoria_incompativel";
+  if (ativosOuTodos.length && ativosOuTodos.every(item => item.analise?.motivo === "categoria")) return "categoria_incompativel";
   return "sem_destino";
 }
 
@@ -774,12 +846,16 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
 
   const destinos = analisarDestinosOferta(clienteId, oferta, contexto);
   if (!destinos.compativeis.length) {
+    const destinosDiagnostico = destinos.rejeitados.map(detalhesDestinoAnalise);
     return {
       ok: false,
       motivo: motivoDestinoRetido(destinos),
       detalhes: {
         destinosTotal: destinos.destinos.length,
-        rejeitados: destinos.rejeitados.map(item => item.analise?.motivo || "")
+        rejeitados: destinos.rejeitados.map(item => item.analise?.motivo || ""),
+        destinosDiagnostico,
+        categoriaOferta: destinosDiagnostico.map(item => item.categoriaOferta).find(Boolean) || normalizarTexto(oferta.categoria || ""),
+        categoriasDestino: destinosDiagnostico.flatMap(item => item.categoriasPermitidas || []).filter(Boolean)
       }
     };
   }

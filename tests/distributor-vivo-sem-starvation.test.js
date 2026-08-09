@@ -236,7 +236,7 @@ async function testarValidacoesDeDestino() {
     titulo: "Vestido feminino verao floral"
   }, contexto);
   assert.strictEqual(aliProibida.ok, false, "categoria realmente fora do destino continua bloqueada");
-  assert.strictEqual(aliProibida.motivo, "categoria_bloqueada");
+  assert.strictEqual(aliProibida.motivo, "categoria_incompativel");
 
   const kabumSeguro = await service.validarOfertaParaDistribuicao({
     cliente_id: D1,

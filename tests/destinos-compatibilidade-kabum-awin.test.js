@@ -153,7 +153,7 @@ function oferta(base = {}) {
       contexto(destinoAwinKabum())
     );
     assert.strictEqual(categoriaNaoPermitida.ok, false);
-    assert.strictEqual(categoriaNaoPermitida.motivo, "categoria_bloqueada", "categoria realmente nao permitida continua retida");
+    assert.strictEqual(categoriaNaoPermitida.motivo, "categoria_incompativel", "categoria realmente nao permitida continua retida");
 
     const ofertaAmazonSemTitulo = montarOfertaUniversalEngine({
       oferta: {

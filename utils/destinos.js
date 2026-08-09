@@ -43,6 +43,29 @@ const ALIASES_MARKETPLACE_DESTINO = {
   feedkabum: ["kabum", "awin"]
 };
 
+const ROTULOS_DESTINO_GERAL = new Set([
+  "geral",
+  "todos",
+  "todas",
+  "qualquer",
+  "qualquercategoria",
+  "qualquercategorias",
+  "todacategoria",
+  "todascategorias",
+  "todosascategorias",
+  "todasascategorias",
+  "geraltodascategorias",
+  "geraltodosascategorias",
+  "semfiltro",
+  "semfiltros",
+  "semrestricao",
+  "semrestricoes",
+  "semrestricaocategoria",
+  "semrestricoesdecategoria",
+  "all",
+  "allcategories"
+]);
+
 function normalizarDestino(valor = "") {
   return String(valor || "")
     .toLowerCase()
@@ -63,6 +86,15 @@ function primeiraListaDestino(...listas) {
     if (Array.isArray(lista) && lista.length) return lista;
   }
   return [];
+}
+
+function categoriaDestinoEhGeral(valor = "") {
+  return ROTULOS_DESTINO_GERAL.has(normalizarCategoriaDestino(valor));
+}
+
+function listaCategoriasDestinoEhGeral(categoriasDestino = []) {
+  if (!Array.isArray(categoriasDestino) || !categoriasDestino.length) return true;
+  return categoriasDestino.some(categoriaDestinoEhGeral);
 }
 
 function expandirMarketplacesDestino(valores = []) {
@@ -132,10 +164,7 @@ function analisarDestinoOferta(destino, oferta, opcoes = {}) {
     marketplacesOferta.some(marketplace => marketplacesDestino.includes(marketplace));
 
   const aceitaCategoria =
-    !categoriasDestino.length ||
-    categoriasDestino.includes("geral") ||
-    categoriasDestino.includes("todos") ||
-    categoriasDestino.includes("todas") ||
+    listaCategoriasDestinoEhGeral(categoriasDestino) ||
     categoriasDestino.some(cat =>
       cat === categoriaOferta ||
       cat.includes(categoriaOferta) ||
@@ -227,11 +256,9 @@ function categoriaPermitidaNoDestino(oferta, destino) {
     .map(normalizarCategoriaDestino)
     .filter(Boolean);
 
-  if (!categoriasDestino.length) return true;
+  if (listaCategoriasDestinoEhGeral(categoriasDestino)) return true;
 
   return (
-    categoriasDestino.includes("geral") ||
-    categoriasDestino.includes("todas") ||
     categoriasDestino.includes(categoriaOferta)
   );
 }
@@ -239,6 +266,8 @@ function categoriaPermitidaNoDestino(oferta, destino) {
 module.exports = {
   normalizarDestino,
   normalizarCategoriaDestino,
+  categoriaDestinoEhGeral,
+  listaCategoriasDestinoEhGeral,
   expandirMarketplacesDestino,
   categoriaPermitidaNoDestino,
   analisarDestinoOferta,
