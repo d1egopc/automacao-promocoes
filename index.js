@@ -5728,6 +5728,8 @@ async function processarFila(clienteIdAlvo = null) {
 
     liberarCooldownSessaoIndisponivel(clienteFila, "sessao_disponivel");
 
+    // Fonte oficial da fila: /data/clientes/<clienteId>/fila.json; `fila` e cache do executor.
+    carregarFila(clienteFila);
     sanearExpiradosFila(clienteFila);
     sanearDuplicatasPendentesFilaCliente(clienteFila, "processar_fila");
 
