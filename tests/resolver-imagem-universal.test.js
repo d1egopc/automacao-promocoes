@@ -8,8 +8,12 @@ process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-resolver-i
 const {
   resolverImagemUniversal,
   imagemUrlValidaUniversal,
+  imagemUrlEfemeraUniversal,
   coletarCandidatosImagemUniversal
 } = require("../modules/imagens/resolver-imagem-universal");
+const {
+  materializarImagemRadarMirrorSeNecessario
+} = require("../modules/engine/importer/importer.service");
 const { resolverImagemFilaEngine } = require("../modules/engine/distributor/distributor.service");
 const { adicionarOfertaFila } = require("../utils/fila-ofertas");
 const { writeClienteJson } = require("../utils/storage");
@@ -19,17 +23,176 @@ function url(nome) {
   return `https://cdn.exemplo.com/produtos/${nome}.jpg`;
 }
 
+function mmg(nome = "img") {
+  return `https://mmg.whatsapp.net/o1/v/t24/f2/m239/${nome}?ccb=9-4&oh=assinatura&oe=6AA02255&_nc_sid=e6ed6c&mms3=true`;
+}
+
+function pngMinimo() {
+  return Buffer.from(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6360000002000100ffff03000006000557bfab6d0000000049454e44ae426082",
+    "hex"
+  );
+}
+
 function semDatas(resultado) {
   const clone = { ...resultado };
   delete clone.imagemResolvidaEm;
   return clone;
 }
 
+(async () => {
+
 {
   const importerService = fs.readFileSync(path.join(__dirname, "../modules/engine/importer/importer.service.js"), "utf8");
   assert(!importerService.includes('motivo: "nao_necessario"'));
   assert(importerService.includes('imagemResolucaoEngine.motivo === "nenhuma_fonte_de_imagem"'));
   assert(importerService.includes('"sem_candidato"'));
+  assert(importerService.includes("materializarImagemRadarMirrorSeNecessario"));
+  const indexFonte = fs.readFileSync(path.join(__dirname, "../index.js"), "utf8");
+  assert(indexFonte.includes("EXECUTOR-IMAGEM-NAO-ENVIAVEL"));
+  assert(indexFonte.includes("avaliarImagemEnviavelExecutor"));
+}
+
+{
+  assert.strictEqual(imagemUrlEfemeraUniversal(mmg("efemera")), true);
+  assert.strictEqual(imagemUrlEfemeraUniversal(url("duravel")), false);
+}
+
+{
+  const saida = resolverImagemUniversal({
+    imagem: url("ml-oficial"),
+    metadata: {
+      radarMirror: {
+        midia: {
+          imagemOriginal: mmg("sem-materializacao"),
+          imagemOrigem: "mensagem",
+        },
+      },
+    },
+  });
+  assert.strictEqual(saida.imagem, url("ml-oficial"));
+  assert.strictEqual(saida.imagemOrigem, "imagem");
+  assert(saida.imagemTentativas.some((tentativa) =>
+    tentativa.origem === "radar_mirror/mensagem.midia.imagemOriginal" &&
+    tentativa.status === "rejeitada" &&
+    tentativa.motivo === "imagem_efemera_nao_materializada"
+  ));
+}
+
+{
+  const saida = resolverImagemUniversal({
+    metadata: {
+      radarMirror: {
+        midia: {
+          imagemMaterializada: url("radar-materializada"),
+          imagemOriginal: mmg("original-efemera"),
+          imagemOrigem: "mensagem",
+        },
+      },
+    },
+  });
+  assert.strictEqual(saida.imagem, url("radar-materializada"));
+  assert.strictEqual(saida.imagemOrigem, "radar_mirror/mensagem.midia.imagemMaterializada");
+  assert.strictEqual(saida.imagemStatus, "radar_mirror_materializada");
+  assert.strictEqual(saida.imagemDuravel, true);
+  assert.strictEqual(saida.imagemEnviavel, true);
+}
+
+{
+  const saida = resolverImagemUniversal({
+    metadata: {
+      radarMirror: {
+        midia: {
+          imagemOriginal: mmg("sem-api"),
+          imagemOrigem: "mensagem",
+        },
+      },
+    },
+  });
+  assert.strictEqual(saida.imagem, "");
+  assert.strictEqual(saida.imagemStatus, "nao_resolvida");
+  assert.strictEqual(saida.imagemUrlPresente, true);
+  assert.strictEqual(saida.imagemEnviavel, false);
+}
+
+{
+  const oferta = {
+    clienteId: "cliente_img",
+    titulo: "Oferta ML",
+    metadata: {
+      radarMirror: {
+        midia: {
+          imagemOriginal: mmg("materializar-ok"),
+          imagemOrigem: "mensagem",
+        },
+      },
+    },
+  };
+  const resultado = await materializarImagemRadarMirrorSeNecessario(oferta, {
+    job: { id: "job_img", cliente_id: "cliente_img" },
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: (nome) => nome === "content-length" ? String(pngMinimo().length) : "application/octet-stream" },
+      arrayBuffer: async () => pngMinimo(),
+    }),
+    storage: {
+      salvar({ buffer, mimeType }) {
+        assert(Buffer.isBuffer(buffer));
+        assert.strictEqual(mimeType, "image/png");
+        return { url: url("materializada-storage"), mimeType, bytes: buffer.length };
+      },
+    },
+  });
+  assert.strictEqual(resultado.status, "materializada");
+  const resolvida = resolverImagemUniversal(resultado.oferta);
+  assert.strictEqual(resolvida.imagem, url("materializada-storage"));
+  assert.strictEqual(resolvida.imagemEnviavel, true);
+}
+
+{
+  const oferta = {
+    imagem: url("ml-api-oficial"),
+    metadata: {
+      radarMirror: {
+        midia: {
+          imagemOriginal: mmg("materializar-falha"),
+          imagemOrigem: "mensagem",
+        },
+      },
+    },
+  };
+  const resultado = await materializarImagemRadarMirrorSeNecessario(oferta, {
+    job: { id: "job_fail", cliente_id: "cliente_img" },
+    fetchImpl: async () => ({ ok: false, status: 403, headers: { get: () => "" } }),
+    storage: {
+      salvar() {
+        throw new Error("nao_deveria_salvar");
+      },
+    },
+  });
+  assert.strictEqual(resultado.status, "falha");
+  const resolvida = resolverImagemUniversal(resultado.oferta);
+  assert.strictEqual(resolvida.imagem, url("ml-api-oficial"));
+  assert.strictEqual(resolvida.imagemOrigem, "imagem");
+}
+
+{
+  const resultado = await materializarImagemRadarMirrorSeNecessario({
+    metadata: {
+      radarMirror: {
+        midia: {
+          imagemOriginal: mmg("avatar-grupo"),
+          imagemOrigem: "avatar_grupo",
+        },
+      },
+    },
+  }, {
+    fetchImpl: async () => {
+      throw new Error("nao_deveria_baixar_avatar");
+    },
+  });
+  assert.strictEqual(resultado.status, "sem_imagem_radar");
 }
 
 {
@@ -292,6 +455,8 @@ function semDatas(resultado) {
   assert.strictEqual(saida.imagem, url("fila-principal"));
   assert.strictEqual(saida.origem, "engine_ofertas.imagem");
   assert.strictEqual(saida.fallbackUsado, false);
+  assert.strictEqual(saida.imagemUrlPresente, true);
+  assert.strictEqual(saida.imagemEnviavel, true);
 }
 
 {
@@ -299,6 +464,25 @@ function semDatas(resultado) {
   assert.strictEqual(saida.imagem, url("fila-fallback"));
   assert.strictEqual(saida.origem, "metadata.produto.images");
   assert.strictEqual(saida.fallbackUsado, true);
+}
+
+{
+  const saida = resolverImagemFilaEngine({
+    metadata: {
+      radarMirror: {
+        midia: {
+          imagemOriginal: mmg("fila-efemera"),
+          imagemOrigem: "mensagem",
+        },
+      },
+    },
+  });
+  assert.strictEqual(saida.imagem, "");
+  assert.strictEqual(saida.imagemStatus, "nao_resolvida");
+  assert.strictEqual(saida.imagemUrlPresente, true);
+  assert.strictEqual(saida.imagemRecuperavel, false);
+  assert.strictEqual(saida.imagemDuravel, false);
+  assert.strictEqual(saida.imagemEnviavel, false);
 }
 
 {
@@ -369,3 +553,7 @@ function semDatas(resultado) {
 }
 
 console.log("resolver-imagem-universal.test.js OK");
+})().catch((erro) => {
+  console.error(erro);
+  process.exit(1);
+});

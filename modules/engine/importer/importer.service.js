@@ -19,7 +19,12 @@ const {
   avaliarOfertaUniversal,
   detectarIdentidadeProdutoUniversal
 } = require("../../inteligencia-universal");
-const { resolverImagemUniversal } = require("../../imagens/resolver-imagem-universal");
+const {
+  resolverImagemUniversal,
+  imagemUrlEfemeraUniversal,
+  imagemUrlValidaUniversal
+} = require("../../imagens/resolver-imagem-universal");
+const socialMediaStorage = require("../../social/social-media-storage");
 const {
   compararRadarMirrorComImportador,
   mergeRadarMirrorMetadata,
@@ -624,6 +629,207 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}) {
 
 function objetoSeguro(valor = {}) {
   return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
+}
+
+function encontrarRadarMirrorMensagem(oferta = {}, contexto = {}) {
+  const fontes = [
+    oferta?.metadata?.radarMirror,
+    oferta?.radarMirror,
+    contexto?.ofertaEntrada?.metadata?.radarMirror,
+    contexto?.evento?.metadata?.radarMirror,
+    contexto?.job?.metadata?.radarMirror,
+    contexto?.job?.metadata?.metadataEvento?.radarMirror
+  ];
+
+  for (const radarMirror of fontes) {
+    if (!radarMirror || typeof radarMirror !== "object") continue;
+    const midia = objetoSeguro(radarMirror.midia);
+    const origemMidia = normalizarTexto(midia.imagemOrigem || radarMirror.imagemOrigem || "").toLowerCase();
+    const imagemOriginal = normalizarTexto(
+      midia.imagemOriginal ||
+      radarMirror.imagemOriginal ||
+      midia.imagem ||
+      radarMirror.imagem ||
+      midia.imagemUrl ||
+      radarMirror.imagemUrl ||
+      ""
+    );
+    if (origemMidia === "mensagem" && imagemOriginal) {
+      return { radarMirror, midia, imagemOriginal };
+    }
+  }
+
+  return { radarMirror: null, midia: {}, imagemOriginal: "" };
+}
+
+function nomeLogicoImagemRadar(job = {}, oferta = {}) {
+  const jobId = normalizarTexto(job.id || job.jobId || "");
+  const titulo = normalizarTexto(oferta.titulo || oferta.nome || "oferta")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 24) || "oferta";
+  return `radar_${jobId || "sem_job"}_${titulo}`;
+}
+
+async function baixarBufferImagem(url = "", opcoes = {}) {
+  const fetchImpl = opcoes.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== "function") {
+    return { ok: false, motivo: "fetch_indisponivel" };
+  }
+
+  const controller = new AbortController();
+  const timeoutMs = Number(opcoes.timeoutMs || process.env.OPTIMUS_IMAGEM_MATERIALIZACAO_TIMEOUT_MS || 8000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resposta = await fetchImpl(url, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "OptimusImageMaterializer/1.0"
+      }
+    });
+    const statusHttp = resposta.status || 0;
+    if (!resposta.ok) return { ok: false, motivo: `http_${statusHttp}`, statusHttp };
+
+    const tamanhoDeclarado = Number(resposta.headers?.get?.("content-length") || 0);
+    const limiteBytes = 8 * 1024 * 1024;
+    if (Number.isFinite(tamanhoDeclarado) && tamanhoDeclarado > limiteBytes) {
+      return { ok: false, motivo: "imagem_tamanho_excedido", statusHttp, bytes: tamanhoDeclarado };
+    }
+
+    const arrayBuffer = await resposta.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    if (!buffer.length) return { ok: false, motivo: "imagem_vazia", statusHttp };
+    if (buffer.length > limiteBytes) return { ok: false, motivo: "imagem_tamanho_excedido", statusHttp, bytes: buffer.length };
+
+    const mimeReal = socialMediaStorage.detectarMime(buffer);
+    if (!mimeReal || !mimeReal.startsWith("image/")) {
+      return { ok: false, motivo: "mime_nao_imagem", statusHttp, bytes: buffer.length };
+    }
+
+    return { ok: true, buffer, mimeType: mimeReal, statusHttp, bytes: buffer.length };
+  } catch (erro) {
+    return { ok: false, motivo: erro?.name === "AbortError" ? "timeout_materializacao" : `falha_download:${erro.message}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function aplicarRadarMirrorMaterializado(oferta = {}, radarMirror = {}, materializada = {}) {
+  const metadata = objetoSeguro(oferta.metadata);
+  const radarAtual = objetoSeguro(metadata.radarMirror || radarMirror);
+  const midiaAtual = objetoSeguro(radarAtual.midia);
+  const radarMirrorAtualizado = {
+    ...radarAtual,
+    midia: {
+      ...midiaAtual,
+      imagemOrigem: midiaAtual.imagemOrigem || "mensagem",
+      imagemMaterializada: materializada.url,
+      imagemDuravel: materializada.url,
+      imagemEnviavel: materializada.url,
+      imagemStatus: "imagem_enviavel",
+      imagemMaterializadaEm: new Date().toISOString(),
+      imagemMaterializacaoOrigem: "radar_mirror/mensagem"
+    }
+  };
+
+  return {
+    ...oferta,
+    metadata: {
+      ...metadata,
+      radarMirror: radarMirrorAtualizado,
+      imagemMaterializacao: {
+        status: "materializada",
+        origem: "radar_mirror/mensagem",
+        urlOriginal: materializada.urlOriginal,
+        urlDuravel: materializada.url,
+        mimeType: materializada.mimeType,
+        bytes: materializada.bytes,
+        storage: "social_media_storage",
+        materializadaEm: new Date().toISOString()
+      }
+    }
+  };
+}
+
+async function materializarImagemRadarMirrorSeNecessario(ofertaEntrada = {}, contexto = {}) {
+  const oferta = ofertaEntrada && typeof ofertaEntrada === "object" ? ofertaEntrada : {};
+  const { radarMirror, imagemOriginal } = encontrarRadarMirrorMensagem(oferta, contexto);
+  if (!radarMirror || !imagemOriginal) return { oferta, status: "sem_imagem_radar", motivo: "radar_sem_imagem" };
+
+  const validacao = imagemUrlValidaUniversal(imagemOriginal);
+  if (!validacao.ok) return { oferta, status: "nao_materializada", motivo: validacao.motivo || "url_invalida" };
+  if (!imagemUrlEfemeraUniversal(validacao.url)) {
+    return { oferta, status: "nao_necessaria", motivo: "imagem_radar_nao_efemera", url: validacao.url };
+  }
+
+  const download = await baixarBufferImagem(validacao.url, contexto);
+  if (!download.ok) {
+    return {
+      oferta: {
+        ...oferta,
+        metadata: {
+          ...objetoSeguro(oferta.metadata),
+          imagemMaterializacao: {
+            status: "falha",
+            origem: "radar_mirror/mensagem",
+            urlOriginal: validacao.url,
+            motivo: download.motivo || "materializacao_falhou",
+            statusHttp: download.statusHttp ?? null,
+            storage: "social_media_storage"
+          }
+        }
+      },
+      status: "falha",
+      motivo: download.motivo || "materializacao_falhou",
+      urlOriginal: validacao.url
+    };
+  }
+
+  try {
+    const storage = contexto.storage || socialMediaStorage;
+    const salva = storage.salvar({
+      clienteId: contexto.job?.cliente_id || contexto.job?.clienteId || oferta.clienteId || "admin",
+      buffer: download.buffer,
+      mimeType: download.mimeType,
+      nomeLogico: nomeLogicoImagemRadar(contexto.job, oferta)
+    });
+    return {
+      oferta: aplicarRadarMirrorMaterializado(oferta, radarMirror, {
+        urlOriginal: validacao.url,
+        url: salva.url,
+        mimeType: salva.mimeType,
+        bytes: salva.bytes
+      }),
+      status: "materializada",
+      urlOriginal: validacao.url,
+      urlDuravel: salva.url,
+      mimeType: salva.mimeType,
+      bytes: salva.bytes
+    };
+  } catch (erro) {
+    return {
+      oferta: {
+        ...oferta,
+        metadata: {
+          ...objetoSeguro(oferta.metadata),
+          imagemMaterializacao: {
+            status: "falha",
+            origem: "radar_mirror/mensagem",
+            urlOriginal: validacao.url,
+            motivo: erro.message || "storage_falhou",
+            storage: "social_media_storage"
+          }
+        }
+      },
+      status: "falha",
+      motivo: erro.message || "storage_falhou",
+      urlOriginal: validacao.url
+    };
+  }
 }
 
 function normalizarDadosComerciaisV24Seguro({ oferta = {}, ofertaEntrada = {}, job = {}, evento = {} } = {}) {
@@ -1263,6 +1469,34 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       }
     };
   }
+  const materializacaoRadarMirror = await materializarImagemRadarMirrorSeNecessario(oferta, {
+    origem: "engine_importer",
+    ofertaEntrada,
+    evento,
+    job,
+    link
+  });
+  oferta = materializacaoRadarMirror.oferta || oferta;
+  if (materializacaoRadarMirror.status && materializacaoRadarMirror.status !== "sem_imagem_radar") {
+    console.log("[IMAGEM-RADAR-MIRROR-MATERIALIZACAO]", JSON.stringify({
+      jobId: job.id || null,
+      eventoId: job.evento_id || null,
+      clienteId: job.cliente_id || job.clienteId || "",
+      marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",
+      status: materializacaoRadarMirror.status,
+      motivo: materializacaoRadarMirror.motivo || "",
+      origem: "radar_mirror/mensagem",
+      urlOriginalHost: (() => {
+        try { return new URL(materializacaoRadarMirror.urlOriginal || "").hostname; } catch (_) { return ""; }
+      })(),
+      urlDuravelHost: (() => {
+        try { return new URL(materializacaoRadarMirror.urlDuravel || "").hostname; } catch (_) { return ""; }
+      })(),
+      mimeType: materializacaoRadarMirror.mimeType || "",
+      bytes: materializacaoRadarMirror.bytes || 0
+    }));
+  }
+
   oferta = resolverImagemUniversal(oferta, {
     origem: "engine_importer",
     ofertaEntrada,
@@ -1418,6 +1652,11 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     imagemOrigem: imagemOrigemFinal,
     imagemFallbackUsado,
     imagemAusenteMotivo,
+    imagemStatus: oferta.imagemStatus || (oferta.imagem ? "imagem_enviavel" : "nao_resolvida"),
+    imagemUrlPresente: oferta.imagemUrlPresente === true || Boolean(oferta.imagem),
+    imagemRecuperavel: oferta.imagemRecuperavel === true,
+    imagemDuravel: oferta.imagemDuravel === true,
+    imagemEnviavel: oferta.imagemEnviavel === true,
     imagemAuditoria: {
       temImagemImporter,
       temImagemEngine: Boolean(oferta.imagem),
@@ -1426,6 +1665,12 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       fallbackUsado: imagemFallbackUsado,
       ausenciaMotivo: imagemAusenteMotivo,
       motivoSemImagem: imagemAusenteMotivo,
+      status: oferta.imagemStatus || (oferta.imagem ? "imagem_enviavel" : "nao_resolvida"),
+      urlPresente: oferta.imagemUrlPresente === true || Boolean(oferta.imagem),
+      recuperavel: oferta.imagemRecuperavel === true,
+      duravel: oferta.imagemDuravel === true,
+      enviavel: oferta.imagemEnviavel === true,
+      materializacao: materializacaoRadarMirror.status || "",
       temImagemHistorica: Boolean(imagemAnterior.imagem),
       linkResolvidoImagem: imagemCanonica.linkResolvido || oferta.linkExpandido || "",
       statusHttpImagem: imagemCanonica.statusHttp ?? oferta.statusHttp ?? ofertaEntrada.statusHttp ?? null
@@ -1894,5 +2139,6 @@ module.exports = {
   normalizarOfertaImportada,
   resolverCategoriaEngine,
   reclassificarCategoriaFinalEngine,
+  materializarImagemRadarMirrorSeNecessario,
   aplicarPonteIntegridadeComercial
 };

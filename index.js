@@ -7,7 +7,8 @@ const zlib = require("zlib");
 const { normalizarPrecoTextoBR } = require("./utils/moeda");
 const {
   preservarCandidatosImagemUniversal,
-  resolverImagemUniversal
+  resolverImagemUniversal,
+  imagemUrlEfemeraUniversal
 } = require("./modules/imagens/resolver-imagem-universal");
 const {
   normalizarCuponsSemanticos
@@ -5090,6 +5091,8 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       return { enviado: false, tentouEnvio: false, motivo: "sem_creditos" };
     }
 
+    const imagemEnvioExecutor = avaliarImagemEnviavelExecutor(oferta, destino);
+
     console.log("[EXECUTOR-IMAGEM-AUDITORIA]", {
 
 
@@ -5120,7 +5123,9 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       imagemPreview: String(oferta.imagem || "").slice(0, 140),
 
 
-      vaiEnviarImagem: destino.tipoMidia !== "texto" && Boolean(oferta.imagem)
+      vaiEnviarImagem: imagemEnvioExecutor.ok,
+      imagemEnviavel: imagemEnvioExecutor.ok,
+      motivoImagem: imagemEnvioExecutor.motivo || ""
 
 
     });
@@ -5141,19 +5146,50 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       tipoMidia: destino.tipoMidia || "",
       oferta,
       imagem: oferta.imagem || "",
-      tentativaImagem: destino.tipoMidia !== "texto" && Boolean(oferta.imagem),
-      caiuParaTexto: destino.tipoMidia === "texto" || !oferta.imagem,
-      motivoTecnico: !oferta.imagem ? "imagem_ausente" : (destino.tipoMidia === "texto" ? "destino_tipo_midia_texto" : "")
+      tentativaImagem: imagemEnvioExecutor.ok,
+      caiuParaTexto: !imagemEnvioExecutor.ok,
+      motivoTecnico: imagemEnvioExecutor.ok ? "" : imagemEnvioExecutor.motivo
     });
-    if (destino.tipoMidia === "texto" || !oferta.imagem) {
+    let fallbackTextoPorImagem = !imagemEnvioExecutor.ok && imagemEnvioExecutor.tinhaImagem;
+    let erroImagemEnvio = "";
+    if (!imagemEnvioExecutor.ok) {
+      if (imagemEnvioExecutor.tinhaImagem) {
+        console.log("[EXECUTOR-IMAGEM-NAO-ENVIAVEL]", JSON.stringify({
+          clienteId,
+          destino: destino.nome || destino.id || "",
+          ofertaId: oferta.id || "",
+          engineOfertaId: oferta.engineOfertaId || "",
+          marketplace: oferta.marketplace || "",
+          motivo: imagemEnvioExecutor.motivo || "imagem_nao_enviavel",
+          imagemStatus: oferta.imagemStatus || "",
+          imagemOrigem: oferta.imagemOrigem || ""
+        }));
+      }
       await sock.sendMessage(grupo, { text: mensagem });
     } else {
-      await sock.sendMessage(grupo, {
-        image: {
-          url: corrigirImagemUrl(oferta.imagem) || oferta.imagem
-        },
-        caption: mensagem
-      });
+      try {
+        await sock.sendMessage(grupo, {
+          image: {
+            url: imagemEnvioExecutor.url
+          },
+          caption: mensagem
+        });
+      } catch (erroImagem) {
+        fallbackTextoPorImagem = true;
+        erroImagemEnvio = erroImagem.message || "falha_envio_imagem";
+        console.log("[EXECUTOR-IMAGEM-NAO-ENVIAVEL]", JSON.stringify({
+          clienteId,
+          destino: destino.nome || destino.id || "",
+          ofertaId: oferta.id || "",
+          engineOfertaId: oferta.engineOfertaId || "",
+          marketplace: oferta.marketplace || "",
+          motivo: "falha_sendMessage_imagem",
+          erro: erroImagemEnvio,
+          imagemStatus: oferta.imagemStatus || "",
+          imagemOrigem: oferta.imagemOrigem || ""
+        }));
+        await sock.sendMessage(grupo, { text: mensagem });
+      }
     }
 
     confirmouEnvio = true;
@@ -5173,9 +5209,11 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       tipoMidia: destino.tipoMidia || "",
       oferta,
       imagem: oferta.imagem || "",
-      tentativaImagem: destino.tipoMidia !== "texto" && Boolean(oferta.imagem),
-      caiuParaTexto: destino.tipoMidia === "texto" || !oferta.imagem,
-      resultado: "enviado"
+      tentativaImagem: imagemEnvioExecutor.ok,
+      caiuParaTexto: fallbackTextoPorImagem || !imagemEnvioExecutor.ok,
+      motivoTecnico: fallbackTextoPorImagem ? (erroImagemEnvio || imagemEnvioExecutor.motivo || "imagem_nao_enviavel") : "",
+      erro: erroImagemEnvio,
+      resultado: fallbackTextoPorImagem ? "texto_enviado_imagem_nao_enviavel" : "enviado"
     });
     debitarCreditos(clienteId, 1);
 
@@ -5355,6 +5393,8 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           resultado: "tentando"
         });
 
+        const imagemEnvioExecutor = avaliarImagemEnviavelExecutor(oferta, destino);
+
         console.log("[EXECUTOR-IMAGEM-AUDITORIA]", {
 
 
@@ -5385,7 +5425,9 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           imagemPreview: String(oferta.imagem || "").slice(0, 140),
 
 
-          vaiEnviarImagem: destino.tipoMidia !== "texto" && Boolean(oferta.imagem)
+          vaiEnviarImagem: imagemEnvioExecutor.ok,
+          imagemEnviavel: imagemEnvioExecutor.ok,
+          motivoImagem: imagemEnvioExecutor.motivo || ""
 
 
         });
@@ -5407,11 +5449,25 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           tipoMidia: destino.tipoMidia || "",
           oferta,
           imagem: oferta.imagem || "",
-          tentativaImagem: destino.tipoMidia !== "texto" && Boolean(oferta.imagem),
-          caiuParaTexto: destino.tipoMidia === "texto" || !oferta.imagem,
-          motivoTecnico: !oferta.imagem ? "imagem_ausente" : (destino.tipoMidia === "texto" ? "destino_tipo_midia_texto" : "")
+          tentativaImagem: imagemEnvioExecutor.ok,
+          caiuParaTexto: !imagemEnvioExecutor.ok,
+          motivoTecnico: imagemEnvioExecutor.ok ? "" : imagemEnvioExecutor.motivo
         });
-        if (destino.tipoMidia === "texto" || !oferta.imagem) {
+        let fallbackTextoPorImagem = !imagemEnvioExecutor.ok && imagemEnvioExecutor.tinhaImagem;
+        let erroImagemEnvio = "";
+        if (!imagemEnvioExecutor.ok) {
+          if (imagemEnvioExecutor.tinhaImagem) {
+            console.log("[EXECUTOR-IMAGEM-NAO-ENVIAVEL]", JSON.stringify({
+              clienteId,
+              destino: destino.nome || destino.id || "",
+              ofertaId: oferta.id || "",
+              engineOfertaId: oferta.engineOfertaId || "",
+              marketplace: oferta.marketplace || "",
+              motivo: imagemEnvioExecutor.motivo || "imagem_nao_enviavel",
+              imagemStatus: oferta.imagemStatus || "",
+              imagemOrigem: oferta.imagemOrigem || ""
+            }));
+          }
           await axios.post(
             `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
             {
@@ -5420,14 +5476,37 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
             }
           );
         } else {
-          await axios.post(
-            `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
-            {
-              chat_id: tel.chatId,
-              photo: corrigirImagemUrl(oferta.imagem) || oferta.imagem,
-              caption: mensagem
-            }
-          );
+          try {
+            await axios.post(
+              `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
+              {
+                chat_id: tel.chatId,
+                photo: imagemEnvioExecutor.url,
+                caption: mensagem
+              }
+            );
+          } catch (erroImagem) {
+            fallbackTextoPorImagem = true;
+            erroImagemEnvio = erroImagem.message || "falha_envio_imagem";
+            console.log("[EXECUTOR-IMAGEM-NAO-ENVIAVEL]", JSON.stringify({
+              clienteId,
+              destino: destino.nome || destino.id || "",
+              ofertaId: oferta.id || "",
+              engineOfertaId: oferta.engineOfertaId || "",
+              marketplace: oferta.marketplace || "",
+              motivo: "falha_sendPhoto_imagem",
+              erro: erroImagemEnvio,
+              imagemStatus: oferta.imagemStatus || "",
+              imagemOrigem: oferta.imagemOrigem || ""
+            }));
+            await axios.post(
+              `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
+              {
+                chat_id: tel.chatId,
+                text: mensagem
+              }
+            );
+          }
         }
 
         debitarCreditos(clienteId, 1);
@@ -5450,9 +5529,11 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           tipoMidia: destino.tipoMidia || "",
           oferta,
           imagem: oferta.imagem || "",
-          tentativaImagem: destino.tipoMidia !== "texto" && Boolean(oferta.imagem),
-          caiuParaTexto: destino.tipoMidia === "texto" || !oferta.imagem,
-          resultado: "enviado"
+          tentativaImagem: imagemEnvioExecutor.ok,
+          caiuParaTexto: fallbackTextoPorImagem || !imagemEnvioExecutor.ok,
+          motivoTecnico: fallbackTextoPorImagem ? (erroImagemEnvio || imagemEnvioExecutor.motivo || "imagem_nao_enviavel") : "",
+          erro: erroImagemEnvio,
+          resultado: fallbackTextoPorImagem ? "texto_enviado_imagem_nao_enviavel" : "enviado"
         });
 
         logOptimus("TELEGRAM", "Mensagem enviada", {
@@ -19708,6 +19789,21 @@ function corrigirImagemUrl(imagem) {
 
   return imagemFinal;
 }
+
+function avaliarImagemEnviavelExecutor(oferta = {}, destino = {}) {
+  const imagem = corrigirImagemUrl(oferta.imagem) || oferta.imagem || "";
+  if (String(destino.tipoMidia || "").toLowerCase() === "texto") {
+    return { ok: false, url: "", motivo: "destino_tipo_midia_texto", tinhaImagem: Boolean(imagem) };
+  }
+  if (!imagem) return { ok: false, url: "", motivo: "imagem_ausente", tinhaImagem: false };
+  if (imagemUrlEfemeraUniversal(imagem)) {
+    return { ok: false, url: imagem, motivo: "imagem_nao_enviavel_url_efemera", tinhaImagem: true };
+  }
+  if (oferta.imagemEnviavel === false || oferta.imagemStatus === "imagem_nao_enviavel") {
+    return { ok: false, url: imagem, motivo: "imagem_nao_enviavel", tinhaImagem: true };
+  }
+  return { ok: true, url: imagem, motivo: "", tinhaImagem: true };
+}
 async function buscarCsrfTokenMercadoLivre(cookies, contexto = {}) {
   try {
     if (!cookies) return "";
@@ -22955,13 +23051,25 @@ async function enviarTelegram(oferta, mensagem) {
         continue;
       }
 
-      if (oferta.imagem) {
+      const imagemEnvioExecutor = avaliarImagemEnviavelExecutor(oferta, destino);
+      if (imagemEnvioExecutor.ok) {
         await axios.post(`https://api.telegram.org/bot${token}/sendPhoto`, {
           chat_id: chatId,
-          photo: corrigirImagemUrl(oferta.imagem) || oferta.imagem,
+          photo: imagemEnvioExecutor.url,
           caption: mensagem
         });
       } else {
+        if (imagemEnvioExecutor.tinhaImagem) {
+          console.log("[EXECUTOR-IMAGEM-NAO-ENVIAVEL]", JSON.stringify({
+            destino: destino.nome || destino.id || "",
+            ofertaId: oferta.id || "",
+            engineOfertaId: oferta.engineOfertaId || "",
+            marketplace: oferta.marketplace || "",
+            motivo: imagemEnvioExecutor.motivo || "imagem_nao_enviavel",
+            imagemStatus: oferta.imagemStatus || "",
+            imagemOrigem: oferta.imagemOrigem || ""
+          }));
+        }
         await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
           chat_id: chatId,
           text: mensagem

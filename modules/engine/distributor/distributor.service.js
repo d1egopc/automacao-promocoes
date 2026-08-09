@@ -378,6 +378,10 @@ function resolverImagemFilaEngine(oferta = {}) {
       ausenciaMotivo: "nenhuma_fonte_de_imagem",
       imagemStatus: resolvida.imagemStatus || "nao_resolvida",
       imagemConfianca: resolvida.imagemConfianca || 0,
+      imagemUrlPresente: resolvida.imagemUrlPresente === true,
+      imagemRecuperavel: resolvida.imagemRecuperavel === true,
+      imagemDuravel: resolvida.imagemDuravel === true,
+      imagemEnviavel: resolvida.imagemEnviavel === true,
       imagemTentativas: resolvida.imagemTentativas || [],
     };
   }
@@ -391,6 +395,10 @@ function resolverImagemFilaEngine(oferta = {}) {
     ausenciaMotivo: "",
     imagemStatus: resolvida.imagemStatus,
     imagemConfianca: resolvida.imagemConfianca,
+    imagemUrlPresente: resolvida.imagemUrlPresente === true,
+    imagemRecuperavel: resolvida.imagemRecuperavel === true,
+    imagemDuravel: resolvida.imagemDuravel === true,
+    imagemEnviavel: resolvida.imagemEnviavel === true,
     imagemResolvidaEm: resolvida.imagemResolvidaEm,
     imagemTentativas: resolvida.imagemTentativas || [],
   };
@@ -534,6 +542,10 @@ function montarItemFilaEngine(oferta = {}) {
     imagemAusenteMotivo: imagemResolvida.ausenciaMotivo,
     imagemStatus: imagemResolvida.imagemStatus,
     imagemConfianca: imagemResolvida.imagemConfianca,
+    imagemUrlPresente: imagemResolvida.imagemUrlPresente,
+    imagemRecuperavel: imagemResolvida.imagemRecuperavel,
+    imagemDuravel: imagemResolvida.imagemDuravel,
+    imagemEnviavel: imagemResolvida.imagemEnviavel,
     imagemResolvidaEm: imagemResolvida.imagemResolvidaEm,
     imagemTentativas: imagemResolvida.imagemTentativas,
     linkOriginal,

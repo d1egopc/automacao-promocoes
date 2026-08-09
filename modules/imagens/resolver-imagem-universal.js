@@ -113,6 +113,29 @@ function imagemUrlValidaUniversal(valor) {
   return { ok: true, url: urlNormalizada };
 }
 
+function imagemUrlEfemeraUniversal(valor) {
+  const urlNormalizada = decodificarEntidadesBasicas(valor);
+  if (!urlNormalizada || !/^https?:\/\//i.test(urlNormalizada)) return false;
+  try {
+    const parsed = new URL(urlNormalizada);
+    const host = String(parsed.hostname || "").toLowerCase();
+    if (host === "mmg.whatsapp.net") return true;
+    if (host.endsWith(".whatsapp.net") && /\/o\d+\/v\//i.test(parsed.pathname)) return true;
+  } catch (_) {
+    return false;
+  }
+  return false;
+}
+
+function statusImagemEnviavel(camada) {
+  if (camada === "radar_mirror_duravel") return "radar_mirror_materializada";
+  return statusParaCamada(camada);
+}
+
+function camadaEhDuravel(camada) {
+  return camada === "radar_mirror_duravel";
+}
+
 function registrarTentativa(tentativas, origem, status, motivo, confianca) {
   if (!origem || tentativas.length >= MAX_TENTATIVAS) return;
   if (tentativas.some((tentativa) => tentativa.origem === origem && tentativa.status === status)) return;
@@ -269,6 +292,12 @@ function coletarRadarMirror(valor, origem, estado) {
 
   const origemOficial = `${origem}/mensagem`;
 
+  coletarDeValor(midia.imagemMaterializada, `${origemOficial}.midia.imagemMaterializada`, "radar_mirror_duravel", 120, estado);
+  coletarDeValor(valor.imagemMaterializada, `${origemOficial}.imagemMaterializada`, "radar_mirror_duravel", 120, estado);
+  coletarDeValor(midia.imagemDuravel, `${origemOficial}.midia.imagemDuravel`, "radar_mirror_duravel", 120, estado);
+  coletarDeValor(valor.imagemDuravel, `${origemOficial}.imagemDuravel`, "radar_mirror_duravel", 120, estado);
+  coletarDeValor(midia.imagemEnviavel, `${origemOficial}.midia.imagemEnviavel`, "radar_mirror_duravel", 120, estado);
+  coletarDeValor(valor.imagemEnviavel, `${origemOficial}.imagemEnviavel`, "radar_mirror_duravel", 120, estado);
   coletarDeValor(midia.imagemOriginal, `${origemOficial}.midia.imagemOriginal`, "radar_mirror", 110, estado);
   coletarDeValor(valor.imagemOriginal, `${origemOficial}.imagemOriginal`, "radar_mirror", 110, estado);
   coletarDeValor(midia.imagem, `${origemOficial}.midia.imagem`, "radar_mirror", 110, estado);
@@ -391,6 +420,7 @@ function preservarCandidatosImagemUniversal(ofertaEntrada = {}, contexto = {}) {
 
 function statusParaCamada(camada) {
   if (camada === "oficial") return "preservada";
+  if (camada === "radar_mirror_duravel") return "radar_mirror_materializada";
   if (camada === "radar_mirror") return "radar_mirror_preservada";
   if (camada === "payload") return "resolvida_payload_bruto";
   return "resolvida_alias";
@@ -400,7 +430,7 @@ function resolverImagemUniversal(ofertaEntrada = {}, contexto = {}) {
   const ofertaOriginal = ofertaEntrada && typeof ofertaEntrada === "object" ? ofertaEntrada : {};
   const oferta = { ...ofertaOriginal };
 
-  if (oferta.imagemStatus && imagemUrlValidaUniversal(oferta.imagemUrl).ok) {
+  if (oferta.imagemStatus && imagemUrlValidaUniversal(oferta.imagemUrl).ok && !imagemUrlEfemeraUniversal(oferta.imagemUrl)) {
     const validacao = imagemUrlValidaUniversal(oferta.imagemUrl);
     return {
       ...preservarCandidatosImagemUniversal(oferta, contexto),
@@ -410,6 +440,10 @@ function resolverImagemUniversal(ofertaEntrada = {}, contexto = {}) {
       imagemConfianca: typeof oferta.imagemConfianca === "number" ? oferta.imagemConfianca : 100,
       imagemResolvidaEm: oferta.imagemResolvidaEm || new Date().toISOString(),
       imagemTentativas: Array.isArray(oferta.imagemTentativas) ? oferta.imagemTentativas.slice(0, MAX_TENTATIVAS) : [],
+      imagemUrlPresente: true,
+      imagemRecuperavel: oferta.imagemRecuperavel !== false,
+      imagemDuravel: oferta.imagemDuravel !== false,
+      imagemEnviavel: oferta.imagemEnviavel !== false,
     };
   }
 
@@ -429,16 +463,25 @@ function resolverImagemUniversal(ofertaEntrada = {}, contexto = {}) {
       continue;
     }
 
+    if (imagemUrlEfemeraUniversal(validacao.url) && !camadaEhDuravel(item.camada)) {
+      registrarTentativa(tentativas, item.origem, "rejeitada", "imagem_efemera_nao_materializada", item.confianca);
+      continue;
+    }
+
     registrarTentativa(tentativas, item.origem, "selecionada", "", item.confianca);
     return {
       ...ofertaComCandidatos,
       imagem: validacao.url,
       imagemUrl: validacao.url,
-      imagemStatus: statusParaCamada(item.camada),
+      imagemStatus: statusImagemEnviavel(item.camada),
       imagemOrigem: item.origem,
       imagemConfianca: item.confianca,
       imagemResolvidaEm: new Date().toISOString(),
       imagemTentativas: tentativas,
+      imagemUrlPresente: true,
+      imagemRecuperavel: true,
+      imagemDuravel: !imagemUrlEfemeraUniversal(validacao.url),
+      imagemEnviavel: true,
     };
   }
 
@@ -451,6 +494,10 @@ function resolverImagemUniversal(ofertaEntrada = {}, contexto = {}) {
     imagemConfianca: 0,
     imagemResolvidaEm: oferta.imagemResolvidaEm || new Date().toISOString(),
     imagemTentativas: tentativas,
+    imagemUrlPresente: candidatos.some((item) => imagemUrlValidaUniversal(item.valor).ok),
+    imagemRecuperavel: false,
+    imagemDuravel: false,
+    imagemEnviavel: false,
   };
 }
 
@@ -458,6 +505,7 @@ module.exports = {
   MAX_CANDIDATOS_IMAGEM,
   resolverImagemUniversal,
   imagemUrlValidaUniversal,
+  imagemUrlEfemeraUniversal,
   coletarCandidatosImagemUniversal,
   preservarCandidatosImagemUniversal,
 };
