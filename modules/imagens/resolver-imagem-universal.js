@@ -260,6 +260,22 @@ function coletarDoContextoConhecido(valor, origem, estado, profundidade = 0) {
   }
 }
 
+function coletarRadarMirror(valor, origem, estado) {
+  if (!valor || typeof valor !== "object" || limiteCandidatosAtingido(estado)) return;
+
+  const midia = valor.midia && typeof valor.midia === "object" ? valor.midia : {};
+  const origemMidia = String(midia.imagemOrigem || valor.imagemOrigem || "").toLowerCase();
+  if (origemMidia !== "mensagem") return;
+
+  const origemOficial = `${origem}/mensagem`;
+
+  coletarDeValor(midia.imagemOriginal, `${origemOficial}.midia.imagemOriginal`, "radar_mirror", 110, estado);
+  coletarDeValor(valor.imagemOriginal, `${origemOficial}.imagemOriginal`, "radar_mirror", 110, estado);
+  coletarDeValor(midia.imagem, `${origemOficial}.midia.imagem`, "radar_mirror", 110, estado);
+  coletarDeValor(valor.imagem, `${origemOficial}.imagem`, "radar_mirror", 110, estado);
+  coletarDeValor(midia.imagemUrl, `${origemOficial}.midia.imagemUrl`, "radar_mirror", 110, estado);
+  coletarDeValor(valor.imagemUrl, `${origemOficial}.imagemUrl`, "radar_mirror", 110, estado);
+}
 
 function coletarCandidatos(oferta, contexto = {}) {
   const estado = {
@@ -267,6 +283,24 @@ function coletarCandidatos(oferta, contexto = {}) {
     visitados: new WeakSet(),
     urls: new Set(),
   };
+
+  const metadataOferta = oferta && typeof oferta.metadata === "object" ? oferta.metadata : {};
+  const metadataEntrada = contexto.ofertaEntrada && typeof contexto.ofertaEntrada.metadata === "object"
+    ? contexto.ofertaEntrada.metadata
+    : {};
+  const metadataEvento = contexto.evento && typeof contexto.evento.metadata === "object"
+    ? contexto.evento.metadata
+    : {};
+  const metadataJob = contexto.job && typeof contexto.job.metadata === "object"
+    ? contexto.job.metadata
+    : {};
+
+  coletarRadarMirror(oferta.radarMirror, "radar_mirror", estado);
+  coletarRadarMirror(metadataOferta.radarMirror, "radar_mirror", estado);
+  coletarRadarMirror(metadataEntrada.radarMirror, "contexto.ofertaEntrada.metadata.radarMirror", estado);
+  coletarRadarMirror(metadataEvento.radarMirror, "contexto.evento.metadata.radarMirror", estado);
+  coletarRadarMirror(metadataJob.radarMirror, "contexto.job.metadata.radarMirror", estado);
+  coletarRadarMirror(metadataJob.metadataEvento?.radarMirror, "contexto.job.metadata.metadataEvento.radarMirror", estado);
 
   if (Object.prototype.hasOwnProperty.call(oferta, "imagemUrl")) {
     coletarDeValor(oferta.imagemUrl, "imagemUrl", "oficial", 100, estado);
@@ -357,6 +391,7 @@ function preservarCandidatosImagemUniversal(ofertaEntrada = {}, contexto = {}) {
 
 function statusParaCamada(camada) {
   if (camada === "oficial") return "preservada";
+  if (camada === "radar_mirror") return "radar_mirror_preservada";
   if (camada === "payload") return "resolvida_payload_bruto";
   return "resolvida_alias";
 }

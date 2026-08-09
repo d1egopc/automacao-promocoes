@@ -1336,7 +1336,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     origem: "",
     linkResolvido: oferta.linkExpandido || oferta.linkOriginal || "",
     statusHttp: oferta.statusHttp ?? ofertaEntrada.statusHttp ?? null,
-    motivo: "nao_necessario"
+    motivo: ""
   };
 
   if (!oferta.imagem && imagemAnterior.imagem) {
@@ -1367,9 +1367,12 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   }
 
   const identidadeImagem = detectarIdentidadeProdutoUniversal(oferta);
+  const motivoFallbackImagem = imagemResolucaoEngine.motivo === "nenhuma_fonte_de_imagem"
+    ? "sem_candidato"
+    : imagemResolucaoEngine.motivo;
   const motivoSemImagem = oferta.imagem
     ? ""
-    : (imagemCanonica.motivo || imagemAnterior.motivo || "imagem_nao_encontrada");
+    : (imagemCanonica.motivo || imagemAnterior.motivo || motivoFallbackImagem || "sem_candidato");
   const imagemOrigemFinal = oferta.imagemOrigem || campoImagemImporter || "nenhuma";
   const imagemFallbackUsado = Boolean(oferta.imagem && (imagemResolucaoEngine.fallbackUsado === true || !temImagemImporter));
   const imagemAusenteMotivo = oferta.imagem ? "" : motivoSemImagem;

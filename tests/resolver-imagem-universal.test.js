@@ -26,6 +26,13 @@ function semDatas(resultado) {
 }
 
 {
+  const importerService = fs.readFileSync(path.join(__dirname, "../modules/engine/importer/importer.service.js"), "utf8");
+  assert(!importerService.includes('motivo: "nao_necessario"'));
+  assert(importerService.includes('imagemResolucaoEngine.motivo === "nenhuma_fonte_de_imagem"'));
+  assert(importerService.includes('"sem_candidato"'));
+}
+
+{
   const entrada = { titulo: "Produto", imagemUrl: url("principal"), imageUrl: url("alias") };
   const copia = JSON.parse(JSON.stringify(entrada));
   const saida = resolverImagemUniversal(entrada);
@@ -78,6 +85,128 @@ function semDatas(resultado) {
   assert.strictEqual(saida.imagemStatus, "resolvida_payload_bruto");
   assert.strictEqual(saida.imagemOrigem, "metadata.produto.imageUrl");
   assert.strictEqual(saida.imagemConfianca, 70);
+}
+
+{
+  const saida = resolverImagemUniversal({
+    metadata: {
+      radarMirror: {
+        midia: {
+          imagemOriginal: url("radar-mirror-mensagem"),
+          imagemOrigem: "mensagem",
+        },
+      },
+    },
+  });
+  assert.strictEqual(saida.imagem, url("radar-mirror-mensagem"));
+  assert.strictEqual(saida.imagemStatus, "radar_mirror_preservada");
+  assert.strictEqual(saida.imagemOrigem, "radar_mirror/mensagem.midia.imagemOriginal");
+  assert.strictEqual(saida.imagemConfianca, 110);
+}
+
+{
+  const saida = resolverImagemUniversal({
+    imagem: url("api-diferente"),
+    metadata: {
+      radarMirror: {
+        midia: {
+          imagemOriginal: url("radar-preferida"),
+          imagemOrigem: "mensagem",
+        },
+      },
+    },
+  });
+  assert.strictEqual(saida.imagem, url("radar-preferida"));
+  assert.strictEqual(saida.imagemOrigem, "radar_mirror/mensagem.midia.imagemOriginal");
+  assert(saida.imagemTentativas.some((tentativa) => tentativa.origem === "radar_mirror/mensagem.midia.imagemOriginal" && tentativa.status === "selecionada"));
+}
+
+{
+  const saida = resolverImagemUniversal({
+    marketplace: "amazon",
+    imagem: url("amazon-api"),
+    metadata: {
+      radarMirror: {
+        midia: {
+          imagemOrigem: "ausente",
+        },
+      },
+    },
+  });
+  assert.strictEqual(saida.imagem, url("amazon-api"));
+  assert.strictEqual(saida.imagemOrigem, "imagem");
+}
+
+{
+  const saidaComApi = resolverImagemUniversal({
+    marketplace: "mercadolivre",
+    imagem: url("api-produto"),
+    metadata: {
+      radarMirror: {
+        midia: {
+          imagemOriginal: url("avatar-grupo"),
+          imagemOrigem: "grupo",
+        },
+      },
+    },
+  });
+  assert.strictEqual(saidaComApi.imagem, url("api-produto"));
+  assert.strictEqual(saidaComApi.imagemOrigem, "imagem");
+  assert(!saidaComApi.imagemTentativas.some((tentativa) => tentativa.origem.includes("avatar-grupo")));
+
+  const saidaSemFonteLegitima = resolverImagemUniversal({
+    marketplace: "mercadolivre",
+    metadata: {
+      radarMirror: {
+        midia: {
+          imagemOriginal: url("avatar-grupo-sem-api"),
+          imagemOrigem: "avatar_grupo",
+        },
+      },
+    },
+  });
+  assert.strictEqual(saidaSemFonteLegitima.imagem, "");
+  assert.strictEqual(saidaSemFonteLegitima.imagemStatus, "nao_resolvida");
+  assert.strictEqual(saidaSemFonteLegitima.imagemOrigem, "nenhuma");
+}
+
+{
+  const saidaShopee = resolverImagemUniversal({
+    marketplace: "shopee",
+    imageUrl: url("shopee-api"),
+  });
+  assert.strictEqual(saidaShopee.imagem, url("shopee-api"));
+  assert.strictEqual(saidaShopee.imagemOrigem, "imageUrl");
+
+  const saidaAmazon = resolverImagemUniversal({
+    marketplace: "amazon",
+    metadata: { produto: { imageUrl: url("amazon-metadata") } },
+  });
+  assert.strictEqual(saidaAmazon.imagem, url("amazon-metadata"));
+  assert.strictEqual(saidaAmazon.imagemOrigem, "metadata.produto.imageUrl");
+}
+
+{
+  const saida = resolverImagemUniversal({
+    marketplace: "aliexpress",
+    linkApp: "https://a.aliexpress.com/_c33QRa2n",
+    linkPc: "https://a.aliexpress.com/_c3OvfRej",
+    linkAfiliado: "https://s.click.aliexpress.com/e/_c4N0M3JN",
+    imagem: url("ali-api"),
+    metadata: {
+      radarMirror: {
+        midia: {
+          imagemOriginal: url("ali-radar-mensagem"),
+          imagemOrigem: "mensagem",
+        },
+      },
+    },
+  });
+  assert.strictEqual(saida.imagem, url("ali-radar-mensagem"));
+  assert.strictEqual(saida.imagemOrigem, "radar_mirror/mensagem.midia.imagemOriginal");
+  assert.strictEqual(saida.linkApp, "https://a.aliexpress.com/_c33QRa2n");
+  assert.strictEqual(saida.linkPc, "https://a.aliexpress.com/_c3OvfRej");
+  assert.strictEqual(saida.linkAfiliado, "https://s.click.aliexpress.com/e/_c4N0M3JN");
 }
 
 {
