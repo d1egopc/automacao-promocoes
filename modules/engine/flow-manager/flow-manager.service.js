@@ -38,16 +38,32 @@ const STATUS_BUFFER_VIVO = new Set([
 ]);
 
 const CAMPOS_TIMESTAMP_BUFFER = [
-  "criadoEm",
-  "criado_em",
-  "adicionadoEm",
-  "adicionado_em",
   "dataEntradaFila",
+  "adicionadoEm",
+  "createdAt",
+  "adicionado_em",
   "dataEntrada",
   "entradaFilaEm",
   "dataFila",
   "dataCriacao",
+  "timestamp",
+  "incluidoEm",
+  "inseridoEm",
+  "recebidoEm",
+  "importadoEm",
+  "criado_em",
+  "criadoEm"
+];
+
+const CAMPOS_TIMESTAMP_ISO_CONFIAVEL = [
+  "dataEntradaFila",
+  "adicionadoEm",
   "createdAt",
+  "adicionado_em",
+  "dataEntrada",
+  "entradaFilaEm",
+  "dataFila",
+  "dataCriacao",
   "timestamp",
   "incluidoEm",
   "inseridoEm",
@@ -118,9 +134,23 @@ function statusBufferItem(item = {}) {
   return texto(item.status ?? item.situacao).toLowerCase();
 }
 
+function parseTimestampBuffer(valor = "") {
+  const bruto = String(valor || "").trim();
+  if (!bruto) return NaN;
+  return Date.parse(bruto);
+}
+
 function timestampBufferItem(item = {}) {
   for (const campo of CAMPOS_TIMESTAMP_BUFFER) {
-    const ms = Date.parse(item?.[campo] || "");
+    const ms = parseTimestampBuffer(item?.[campo] || "");
+    if (Number.isFinite(ms)) return { ms, campo };
+  }
+  return { ms: null, campo: "" };
+}
+
+function timestampIsoConfiavelItem(item = {}) {
+  for (const campo of CAMPOS_TIMESTAMP_ISO_CONFIAVEL) {
+    const ms = parseTimestampBuffer(item?.[campo] || "");
     if (Number.isFinite(ms)) return { ms, campo };
   }
   return { ms: null, campo: "" };
@@ -199,6 +229,19 @@ function origemPoliticaExpiracao(valor = "") {
   return texto(valor) || "flow_manager_d1";
 }
 
+function expiraEmProtegidoPorEntrada(expiraEm = "", item = {}, ttlMs = TTL_NORMAL_MS) {
+  const expiraIso = isoValido(expiraEm);
+  if (!expiraIso) return "";
+
+  const entrada = timestampIsoConfiavelItem(item);
+  const expiraMs = Date.parse(expiraIso);
+  if (!Number.isFinite(entrada.ms) || !Number.isFinite(expiraMs) || expiraMs >= entrada.ms) {
+    return expiraIso;
+  }
+
+  return new Date(entrada.ms + ttlMs).toISOString();
+}
+
 function calcularExpiracaoOperacionalFila(item = {}, opcoes = {}) {
   const agoraMs = Number(opcoes.agoraMs || Date.now());
   const metadataFlow = metadataOperacionalFlow(item);
@@ -210,18 +253,34 @@ function calcularExpiracaoOperacionalFila(item = {}, opcoes = {}) {
   });
   const ttlMs = Number(opcoes.ttlMs || item.ttlMs || metadataFlow.ttlMs || ttlFluxoMs(tipoFluxo));
   const timestamp = timestampBufferItem(item);
+  const entradaConfiavel = timestampIsoConfiavelItem(item);
   const origemMs = Number.isFinite(Number(opcoes.origemMs))
     ? Number(opcoes.origemMs)
     : timestamp.ms;
+  const origemFinalMs = Number.isFinite(origemMs) ? origemMs : null;
+  const entradaMs = entradaConfiavel.ms;
   const expiraPersistido = isoValido(item.expiraEm || metadataFlow.expiraEm || "");
-  const expiraEm = expiraPersistido || (Number.isFinite(origemMs) ? new Date(origemMs + ttlMs).toISOString() : "");
+  const expiraPersistidoMs = expiraPersistido ? Date.parse(expiraPersistido) : NaN;
+  const expiraPersistidoAntesEntrada = Number.isFinite(expiraPersistidoMs) &&
+    Number.isFinite(entradaMs) &&
+    expiraPersistidoMs < entradaMs;
+  const origemCorrigidaMs = expiraPersistidoAntesEntrada && Number.isFinite(entradaMs)
+    ? entradaMs
+    : origemFinalMs;
+  const expiraEmCalculado = expiraPersistido && !expiraPersistidoAntesEntrada
+    ? expiraPersistido
+    : (Number.isFinite(origemCorrigidaMs) ? new Date(origemCorrigidaMs + ttlMs).toISOString() : "");
+  const expiraEm = expiraEmProtegidoPorEntrada(expiraEmCalculado, item, ttlMs);
   const expiraEmMs = expiraEm ? Date.parse(expiraEm) : NaN;
 
   return {
     tipoFluxo,
     ttlMs,
-    origemMs,
+    origemMs: origemCorrigidaMs,
     origemCampo: timestamp.campo,
+    entradaConfiavelMs: entradaMs,
+    entradaConfiavelCampo: entradaConfiavel.campo,
+    expiraPersistidoCorrigido: expiraPersistidoAntesEntrada,
     expiraEm,
     expiraEmMs,
     vencido: Number.isFinite(expiraEmMs) && expiraEmMs < agoraMs,
@@ -245,7 +304,7 @@ function carimbarExpiracaoOperacionalFila(item = {}, decisao = {}, opcoes = {}) 
     tipoFluxo,
     ttlMs
   });
-  const expiraEm = expiraDecisao || calculada.expiraEm;
+  const expiraEm = expiraEmProtegidoPorEntrada(expiraDecisao || calculada.expiraEm, item, ttlMs);
 
   if (!expiraEm) return item;
 
@@ -280,11 +339,19 @@ function sanearExpiracaoOperacionalFilaItem(item = {}, opcoes = {}) {
   const politica = calcularExpiracaoOperacionalFila(item, opcoes);
   let alterou = false;
 
-  if (!item.expiraEm && politica.expiraEm) {
-    item.expiraEm = politica.expiraEm;
-    item.ttlMs = politica.ttlMs;
-    item.tipoFluxo = politica.tipoFluxo;
-    alterou = true;
+  if (politica.expiraEm) {
+    if (item.expiraEm !== politica.expiraEm) {
+      item.expiraEm = politica.expiraEm;
+      alterou = true;
+    }
+    if (item.ttlMs !== politica.ttlMs) {
+      item.ttlMs = politica.ttlMs;
+      alterou = true;
+    }
+    if (item.tipoFluxo !== politica.tipoFluxo) {
+      item.tipoFluxo = politica.tipoFluxo;
+      alterou = true;
+    }
   }
 
   if (!politica.expiraEm) {

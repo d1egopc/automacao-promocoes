@@ -5,6 +5,7 @@ const assert = require("assert");
 const {
   TTL_NORMAL_MS,
   TTL_TURBO_MS,
+  calcularExpiracaoOperacionalFila,
   carimbarExpiracaoOperacionalFila,
   sanearExpiracaoOperacionalFilaItem
 } = require("../modules/engine/flow-manager/flow-manager.service");
@@ -86,10 +87,10 @@ async function testarItemNovoRecebeExpiraEmNaEntradaOficial() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.strictEqual(capturado.expiraEm, expiraEm);
+  assert(Date.parse(capturado.expiraEm) >= Date.parse(capturado.dataEntradaFila));
   assert.strictEqual(capturado.ttlMs, TTL_NORMAL_MS);
   assert.strictEqual(capturado.tipoFluxo, "oferta_comum");
-  assert.strictEqual(capturado.metadata.flowOperacional.expiraEm, expiraEm);
+  assert.strictEqual(capturado.metadata.flowOperacional.expiraEm, capturado.expiraEm);
 }
 
 function testarTurboVenceNoTtlTurbo() {
@@ -157,6 +158,103 @@ function testarExecutorEscolheOfertaFrescaAposSaneamento() {
   assert.deepStrictEqual(selecionavel.map(item => item.id), ["fresca"]);
 }
 
+function testarWolffUsaDataEntradaFilaIsoAntesDeCriadoEmVisual() {
+  const item = itemFila({
+    id: "wolff_recente",
+    criadoEm: "08/08/2026, 15:01:14",
+    dataEntradaFila: "2026-08-08T18:01:14.537Z",
+    expiraEm: ""
+  });
+  const resultado = sanearExpiracaoOperacionalFilaItem(item, {
+    agoraMs: Date.parse("2026-08-08T18:01:21.010Z")
+  });
+
+  assert.strictEqual(resultado.expirou, false);
+  assert.strictEqual(resultado.origemCampo, "dataEntradaFila");
+  assert.strictEqual(item.status, "pendente");
+  assert.strictEqual(item.expiraEm, "2026-08-08T18:31:14.537Z");
+  assert(Date.parse(item.expiraEm) > Date.parse(item.dataEntradaFila));
+}
+
+function testarTimezoneBrtVisualNaoMudaMagnitudeTemporalDaEntradaIso() {
+  const item = itemFila({
+    criadoEm: "08/08/2026, 15:01:14",
+    dataEntradaFila: "2026-08-08T18:01:14.000Z",
+    expiraEm: ""
+  });
+  const politica = calcularExpiracaoOperacionalFila(item, {
+    agoraMs: Date.parse("2026-08-08T18:10:00.000Z")
+  });
+
+  assert.strictEqual(politica.origemCampo, "dataEntradaFila");
+  assert.strictEqual(politica.origemMs, Date.parse("2026-08-08T18:01:14.000Z"));
+  assert.strictEqual(politica.expiraEm, "2026-08-08T18:31:14.000Z");
+  assert.strictEqual(politica.vencido, false);
+}
+
+function testarExpiraEmAnteriorAEntradaEhRecalculado() {
+  const item = itemFila({
+    criadoEm: "08/08/2026, 15:01:14",
+    dataEntradaFila: "2026-08-08T18:01:14.537Z",
+    expiraEm: "2026-08-08T15:31:14.000Z"
+  });
+  const resultado = sanearExpiracaoOperacionalFilaItem(item, {
+    agoraMs: Date.parse("2026-08-08T18:01:21.010Z")
+  });
+
+  assert.strictEqual(resultado.expirou, false);
+  assert.strictEqual(resultado.expiraPersistidoCorrigido, true);
+  assert.strictEqual(item.status, "pendente");
+  assert.strictEqual(item.expiraEm, "2026-08-08T18:31:14.537Z");
+}
+
+function testarItemRealmenteAntigoContinuaExpirando() {
+  const item = itemFila({
+    criadoEm: "08/08/2026, 08:00:00",
+    dataEntradaFila: "2026-08-08T11:00:00.000Z",
+    expiraEm: ""
+  });
+  const resultado = sanearExpiracaoOperacionalFilaItem(item, {
+    agoraMs: Date.parse("2026-08-08T11:31:00.000Z")
+  });
+
+  assert.strictEqual(resultado.expirou, true);
+  assert.strictEqual(item.status, "expirada_operacional");
+  assert.strictEqual(item.expiraEm, "2026-08-08T11:30:00.000Z");
+}
+
+function testarCarimboNaoAceitaExpiraEmAntesDaEntradaFila() {
+  const item = itemFila({
+    criadoEm: "08/08/2026, 15:01:14",
+    dataEntradaFila: "2026-08-08T18:01:14.537Z"
+  });
+  carimbarExpiracaoOperacionalFila(item, {
+    aceitarAgora: true,
+    tipoFluxo: "oferta_comum",
+    ttlMs: TTL_NORMAL_MS,
+    expiraEm: "2026-08-08T15:31:14.000Z"
+  });
+
+  assert.strictEqual(item.expiraEm, "2026-08-08T18:31:14.537Z");
+  assert(Date.parse(item.expiraEm) > Date.parse(item.dataEntradaFila));
+}
+
+function testarControleD1IsoCoerentePermaneceElegivel() {
+  const item = itemFila({
+    clienteId: "user_40qdblgt",
+    criadoEm: "08/08/2026, 08:55:34",
+    dataEntradaFila: "2026-08-08T11:55:34.755Z",
+    expiraEm: "2026-08-08T12:25:34.755Z"
+  });
+  const resultado = sanearExpiracaoOperacionalFilaItem(item, {
+    agoraMs: Date.parse("2026-08-08T12:00:00.000Z")
+  });
+
+  assert.strictEqual(resultado.expirou, false);
+  assert.strictEqual(item.status, "pendente");
+  assert.strictEqual(item.expiraEm, "2026-08-08T12:25:34.755Z");
+}
+
 function testarCarimboPreservaPoliticaDoFlow() {
   const item = itemFila({ dataEntradaFila: "2026-08-05T12:00:00.000Z" });
   carimbarExpiracaoOperacionalFila(item, {
@@ -179,6 +277,12 @@ function testarCarimboPreservaPoliticaDoFlow() {
   testarVivoContinuaElegivelERecebeExpiraEmLegado();
   testarWorkspaceNaoAfetaOutroEHistoricoPermanece();
   testarExecutorEscolheOfertaFrescaAposSaneamento();
+  testarWolffUsaDataEntradaFilaIsoAntesDeCriadoEmVisual();
+  testarTimezoneBrtVisualNaoMudaMagnitudeTemporalDaEntradaIso();
+  testarExpiraEmAnteriorAEntradaEhRecalculado();
+  testarItemRealmenteAntigoContinuaExpirando();
+  testarCarimboNaoAceitaExpiraEmAntesDaEntradaFila();
+  testarControleD1IsoCoerentePermaneceElegivel();
   testarCarimboPreservaPoliticaDoFlow();
   console.log("optimus-flow-d1-expiracao-operacional.test.js OK");
 })().catch(erro => {
