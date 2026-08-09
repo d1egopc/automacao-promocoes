@@ -123,14 +123,18 @@ function urlKabumAwin(url = "") {
 
 function linkBase(link = {}, papel = "link_produto", extras = {}) {
   const url = texto(link.url || link.urlOriginal || "");
+  const ordemCaptura = Number(extras.ordemCaptura || link.ordemCaptura || link.ordem || link.linha || 0) || 0;
+  const chaveOrdem = ordemCaptura > 0 ? `${ordemCaptura}:` : "";
   return {
     papel,
+    ordemCaptura,
     urlOriginal: url,
     urlAfiliada: texto(extras.urlAfiliada || link.urlAfiliada || link.linkAfiliado || ""),
+    urlOptimus: texto(extras.urlOptimus || link.urlOptimus || ""),
     renderizavel: extras.renderizavel !== false,
     origem: texto(link.origem || link.contexto || "captura"),
     confianca: texto(extras.confianca || link.confianca || "media"),
-    dedupeKey: texto(extras.dedupeKey || `${papel}:${dedupeUrl(url)}`),
+    dedupeKey: texto(extras.dedupeKey || `${papel}:${chaveOrdem}${dedupeUrl(url)}`),
     avisos: [...new Set(lista(extras.avisos).map(texto).filter(Boolean))]
   };
 }
@@ -218,26 +222,26 @@ function contratoShopee(entrada) {
 
   const produtosUnicos = [];
   const vistosProduto = new Set();
-  for (const link of produtos) {
+  for (const [indice, link] of produtos.entries()) {
     const chave = dedupeUrl(link.url);
     if (vistosProduto.has(chave)) {
       saida.dedupes.push("link_produto_shopee");
       continue;
     }
     vistosProduto.add(chave);
-    produtosUnicos.push(link);
+    produtosUnicos.push({ ...link, ordemCaptura: Number(link.ordemCaptura || link.linha || indice + 1) || (indice + 1) });
   }
 
   const resgatesUnicos = [];
   const vistosResgate = new Set();
-  for (const link of resgates) {
+  for (const [indice, link] of resgates.entries()) {
     const chave = dedupeUrl(link.url);
     if (vistosResgate.has(chave)) {
       saida.dedupes.push("link_resgate_shopee");
       continue;
     }
     vistosResgate.add(chave);
-    resgatesUnicos.push(link);
+    resgatesUnicos.push({ ...link, ordemCaptura: Number(link.ordemCaptura || link.linha || indice + 1) || (indice + 1) });
   }
 
   saida.linkProdutoOriginal = produtosUnicos[0]?.url || "";
@@ -252,7 +256,7 @@ function contratoShopee(entrada) {
       adicionarLink(saida, linkBase(link, "link_produto", {
         renderizavel: false,
         avisos: ["produto_ambiguo_nao_renderizavel"],
-        dedupeKey: `link_produto_ambiguo:${dedupeUrl(link.url)}`
+        dedupeKey: `link_produto_ambiguo:${link.ordemCaptura || ""}:${dedupeUrl(link.url)}`
       }));
     }
   }
@@ -264,7 +268,8 @@ function contratoAliExpress(entrada) {
   const saida = saidaBase("aliexpress", "aliexpress");
   const produtos = [];
 
-  for (const link of lista(entrada.links)) {
+  for (const [indice, linkBruto] of lista(entrada.links).entries()) {
+    const link = { ...linkBruto, ordemCaptura: Number(linkBruto.ordemCaptura || linkBruto.linha || indice + 1) || (indice + 1) };
     if (!texto(link.url)) continue;
     let papel = "link_produto";
     if (contextoMoedas(link) || ["moedas", "link_moedas"].includes(texto(link.tipo))) papel = "link_moedas";
@@ -284,7 +289,7 @@ function contratoAliExpress(entrada) {
         renderizavel: seguro,
         confianca: seguro ? "alta" : "baixa",
         avisos: seguro ? [] : ["link_sem_conversao_workspace"],
-        dedupeKey: `${papel}:${dedupeUrl(link.url)}`
+        dedupeKey: `${papel}:${link.ordemCaptura}:${dedupeUrl(link.url)}`
       }));
     }
   }

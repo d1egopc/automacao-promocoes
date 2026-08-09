@@ -3059,8 +3059,92 @@ function copiarOfertaComLinkResolvido(oferta = {}, linkResolvido = "", linkOrigi
   return linksPuros.copiarOfertaComLinkResolvido(oferta, linkResolvido, linkOriginal);
 }
 
+function urlItemLinkComercial(item = {}) {
+  if (!item || typeof item !== "object") return "";
+  return String(
+    item.urlAfiliada ||
+    item.afiliado ||
+    item.linkAfiliado ||
+    item.resolvido ||
+    item.url ||
+    item.original ||
+    item.link ||
+    ""
+  ).trim();
+}
+
+function listarLinksComerciaisOferta(oferta = {}) {
+  const listas = ["linksComerciais", "linksProduto", "linksResgate"];
+  const links = [];
+  for (const campo of listas) {
+    const valores = Array.isArray(oferta[campo]) ? oferta[campo] : [];
+    valores.forEach((item, indice) => {
+      const url = urlItemLinkComercial(item);
+      if (!url) return;
+      links.push({
+        campo,
+        indice,
+        item,
+        url,
+        papel: String(item?.papel || item?.tipo || campo || "").trim(),
+        ordemCaptura: Number(item?.ordemCaptura || item?.ordem || indice + 1) || (indice + 1)
+      });
+    });
+  }
+  return links;
+}
+
+function aplicarLinkOptimusEmListaComercial({ oferta = {}, campo = "", marketplace = "", clienteId = "", configGlobal = config } = {}) {
+  const valores = Array.isArray(oferta[campo]) ? oferta[campo] : null;
+  if (!valores) return { valores: null, alterou: false, codigos: [] };
+
+  let alterou = false;
+  const codigos = [];
+  const proximos = valores.map((item, indice) => {
+    if (!item || typeof item !== "object" || item.renderizavel === false) return item;
+    const linkOriginal = urlItemLinkComercial(item);
+    if (!linkOriginal) return item;
+    const resultado = criarLinkOptimus(linkOriginal, marketplace, { clienteId, configGlobal });
+    if (!resultado.ok || !resultado.url) return item;
+    alterou = true;
+    if (resultado.codigo) codigos.push(resultado.codigo);
+    const ordemCaptura = Number(item.ordemCaptura || item.ordem || indice + 1) || (indice + 1);
+    return {
+      ...item,
+      ordemCaptura,
+      urlOriginalAfiliadaAntesLinkOptimus: linkOriginal,
+      urlOptimus: resultado.url,
+      urlAfiliada: resultado.url,
+      afiliado: resultado.url,
+      resolvido: resultado.url,
+      url: resultado.url,
+      linkOptimusAplicado: true
+    };
+  });
+
+  return { valores: proximos, alterou, codigos };
+}
+
+function aplicarLinkOptimusLinksComerciais({ oferta = {}, marketplace = "", clienteId = "", configGlobal = config } = {}) {
+  let alterou = false;
+  const codigos = [];
+  const proxima = { ...oferta };
+
+  for (const campo of ["linksComerciais", "linksProduto", "linksResgate"]) {
+    const resultado = aplicarLinkOptimusEmListaComercial({ oferta: proxima, campo, marketplace, clienteId, configGlobal });
+    if (!resultado.valores) continue;
+    proxima[campo] = resultado.valores;
+    alterou = alterou || resultado.alterou;
+    codigos.push(...resultado.codigos);
+  }
+
+  return { oferta: proxima, alterou, codigos };
+}
+
 function resolverLinkOfertaPorDestino({ oferta = {}, destino = {}, clienteId = "admin", plano = null, recursos = null, configGlobal = config } = {}) {
   const linkOriginal = extrairLinkAfiliadoOferta(oferta);
+  const linksComerciaisOriginais = listarLinksComerciaisOferta(oferta);
+  const possuiLinksComerciais = linksComerciaisOriginais.length > 0;
   const marketplace = String(oferta.marketplace || oferta.mercado || "").toLowerCase();
   const destinoId = destinoIdIntervalo(destino);
   const recursosPlano = recursos || plano?.recursos || {};
@@ -3073,7 +3157,7 @@ function resolverLinkOfertaPorDestino({ oferta = {}, destino = {}, clienteId = "
     return { oferta, linkOriginal, linkFinal: linkOriginal, aplicado: false, motivo: "modo_original" };
   }
 
-  if (!linkOriginal) {
+  if (!linkOriginal && !possuiLinksComerciais) {
     logLinkOptimus("[LINK-OPTIMUS-FALLBACK]", { ...baseLog, motivo: "link_original_ausente" });
     return { oferta, linkOriginal, linkFinal: linkOriginal, aplicado: false, motivo: "link_original_ausente" };
   }
@@ -3094,22 +3178,34 @@ function resolverLinkOfertaPorDestino({ oferta = {}, destino = {}, clienteId = "
   }
 
   try {
-    const resultado = criarLinkOptimus(linkOriginal, marketplace, { clienteId, configGlobal });
-    if (!resultado.ok || !resultado.url) {
+    const resultado = linkOriginal
+      ? criarLinkOptimus(linkOriginal, marketplace, { clienteId, configGlobal })
+      : { ok: true, url: "", codigo: "" };
+    if (!resultado.ok || (linkOriginal && !resultado.url)) {
       logLinkOptimus("[LINK-OPTIMUS-FALLBACK]", { ...baseLog, motivo: resultado.motivo || "geracao_indisponivel" });
       return { oferta, linkOriginal, linkFinal: linkOriginal, aplicado: false, motivo: resultado.motivo || "geracao_indisponivel" };
     }
 
-    const ofertaResolvida = copiarOfertaComLinkResolvido(oferta, resultado.url, linkOriginal);
+    const ofertaResolvida = linkOriginal
+      ? copiarOfertaComLinkResolvido(oferta, resultado.url, linkOriginal)
+      : { ...oferta };
+    const linksResolvidos = aplicarLinkOptimusLinksComerciais({ oferta: ofertaResolvida, marketplace, clienteId, configGlobal });
+    if (!linkOriginal && !linksResolvidos.alterou) {
+      logLinkOptimus("[LINK-OPTIMUS-FALLBACK]", { ...baseLog, motivo: "links_comerciais_indisponiveis" });
+      return { oferta, linkOriginal, linkFinal: linkOriginal, aplicado: false, motivo: "links_comerciais_indisponiveis" };
+    }
+    const primeiroLinkResolvido = linkOriginal
+      ? resultado.url
+      : listarLinksComerciaisOferta(linksResolvidos.oferta).map(item => item.url).find(Boolean) || "";
     logLinkOptimus(resultado.reutilizado ? "[LINK-OPTIMUS-REUTILIZADO]" : "[LINK-OPTIMUS-APLICADO]", {
       ...baseLog,
       motivo: resultado.reutilizado ? "redirect_existente" : "redirect_criado",
       codigo: resultado.codigo
     });
     return {
-      oferta: ofertaResolvida,
+      oferta: linksResolvidos.oferta,
       linkOriginal,
-      linkFinal: resultado.url,
+      linkFinal: primeiroLinkResolvido,
       codigo: resultado.codigo,
       aplicado: true,
       reutilizado: resultado.reutilizado === true,

@@ -22,7 +22,7 @@ function chaveUrl(valor = "") {
 function valorLink(item = {}) {
   if (typeof item === "string") return texto(item);
   if (!item || typeof item !== "object") return "";
-  return texto(item.afiliado || item.resolvido || item.original || item.link || item.url || "");
+  return texto(item.urlOptimus || item.urlAfiliada || item.afiliado || item.resolvido || item.original || item.link || item.url || "");
 }
 
 function itemLink(item = {}, tipoPadrao = "produto") {
@@ -35,23 +35,26 @@ function itemLink(item = {}, tipoPadrao = "produto") {
   if (!url) return null;
   return {
     ...item,
-    tipo: texto(item.tipo || tipoPadrao),
-    original: texto(item.original || item.link || item.url || url),
-    resolvido: texto(item.resolvido || ""),
-    afiliado: texto(item.afiliado || "")
+    tipo: texto(item.tipo || item.papel || tipoPadrao),
+    original: texto(item.original || item.urlOriginal || item.link || item.url || url),
+    resolvido: texto(item.resolvido || item.urlOptimus || ""),
+    afiliado: texto(item.afiliado || item.urlAfiliada || "")
   };
 }
 
 function listaLinksUnicos(valores = [], tipoPadrao = "produto") {
   const resultado = [];
   const vistos = new Set();
-  for (const valor of Array.isArray(valores) ? valores : []) {
+  for (const [indice, valor] of (Array.isArray(valores) ? valores : []).entries()) {
     const item = itemLink(valor, tipoPadrao);
+    if (!item) continue;
     const url = valorLink(item);
-    const chave = chaveUrl(url);
+    const tipo = normalizarComparacao(item.tipo || item.papel || tipoPadrao);
+    const ordem = Number(item.ordemCaptura || item.ordem || indice + 1) || (indice + 1);
+    const chave = `${tipo}:${ordem}:${chaveUrl(url)}`;
     if (!item || !chave || vistos.has(chave)) continue;
     vistos.add(chave);
-    resultado.push(item);
+    resultado.push({ ...item, ordemCaptura: ordem });
   }
   return resultado;
 }
@@ -250,8 +253,7 @@ function separarLinksApresentacao(dados = {}) {
   }
 
   const produtoUnico = listaLinksUnicos(linksProduto, "produto");
-  const resgateUnico = listaLinksUnicos(linksResgate, "resgate")
-    .filter(item => !produtoUnico.some(produto => chaveUrl(valorLink(produto)) === chaveUrl(valorLink(item))));
+  const resgateUnico = listaLinksUnicos(linksResgate, "resgate");
 
   const linkProduto = valorLink(produtoUnico[0]);
   const linkResgate = valorLink(resgateUnico[0]);

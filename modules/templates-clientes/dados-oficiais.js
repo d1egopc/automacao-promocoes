@@ -42,7 +42,6 @@ function scoreUniversal(valor) {
 }
 
 function beneficiosUniversais(oferta = {}, v2 = {}) {
-  const logs = Array.isArray(v2.logs) ? v2.logs : [];
   const beneficios = [];
 
   if (Array.isArray(oferta.beneficios)) beneficios.push(...oferta.beneficios);
@@ -59,12 +58,6 @@ function beneficiosUniversais(oferta = {}, v2 = {}) {
   if (Array.isArray(oferta.cores) && oferta.cores.length) beneficios.push(`Cores: ${oferta.cores.join(", ")}`);
   if (oferta.voltagem) beneficios.push(`Voltagem: ${oferta.voltagem}`);
   if (oferta.cashback) beneficios.push(oferta.cashback);
-
-  logs.forEach(item => {
-    if (typeof item === "string") beneficios.push(item);
-    else if (item?.mensagem) beneficios.push(item.mensagem);
-    else if (item?.motivo) beneficios.push(item.motivo);
-  });
 
   return [...new Set(beneficios.map(texto).filter(Boolean))].slice(0, 5);
 }
@@ -176,12 +169,15 @@ function listaObjetosUnica(valores = []) {
   const resultado = [];
   const vistos = new Set();
 
-  for (const valor of Array.isArray(valores) ? valores : []) {
+  for (const [indice, valor] of (Array.isArray(valores) ? valores : []).entries()) {
     if (!valor || typeof valor !== "object") continue;
-    const chave = texto(valor.original || valor.resolvido || valor.afiliado || valor.link || valor.url || "");
+    const url = texto(valor.original || valor.resolvido || valor.afiliado || valor.urlAfiliada || valor.urlOptimus || valor.link || valor.url || "");
+    const papel = texto(valor.papel || valor.tipo || valor.role || "");
+    const ordem = Number(valor.ordemCaptura || valor.ordem || indice + 1) || (indice + 1);
+    const chave = [papel, ordem, url].filter(Boolean).join(":");
     if (!chave || vistos.has(chave)) continue;
     vistos.add(chave);
-    resultado.push({ ...valor });
+    resultado.push({ ...valor, ordemCaptura: ordem });
   }
 
   return resultado;

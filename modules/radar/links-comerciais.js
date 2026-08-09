@@ -348,7 +348,7 @@ function classificarLinksComerciais({
     imagem: [],
     outros: []
   };
-  const vistos = new Set();
+  let ordemCaptura = 0;
 
   linhasBase.forEach((linhaAtual, indice) => {
     for (const url of extrairLinksTextoComercial(linhaAtual)) {
@@ -364,11 +364,10 @@ function classificarLinksComerciais({
         marketplace,
         tipoSugerido: primeiraSugestao(sugestoes, url)
       });
-      const chave = `${classificado.url}|${classificado.tipo}`;
-      if (vistos.has(chave)) continue;
-      vistos.add(chave);
+      ordemCaptura += 1;
       const item = {
         ...classificado,
+        ordemCaptura,
         linha: indice
       };
       classificados.push(item);

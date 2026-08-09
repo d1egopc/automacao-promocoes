@@ -62,6 +62,10 @@ vm.runInContext([
   extrairFuncao("gerarLinkOptimus"),
   extrairFuncao("logLinkOptimus"),
   extrairFuncao("copiarOfertaComLinkResolvido"),
+  extrairFuncao("urlItemLinkComercial"),
+  extrairFuncao("listarLinksComerciaisOferta"),
+  extrairFuncao("aplicarLinkOptimusEmListaComercial"),
+  extrairFuncao("aplicarLinkOptimusLinksComerciais"),
   extrairFuncao("resolverLinkOfertaPorDestino")
 ].join("\n"), sandbox);
 
@@ -152,6 +156,33 @@ const destinoOriginal = resolverLinkTeste({ oferta: ofertaLinkBase, destino: { i
 const destinoOptimus = resolverLinkTeste({ oferta: ofertaLinkBase, destino: { id: "b", modoLink: "optimus" }, recursos: { linkOptimus: true } });
 assert.strictEqual(destinoOriginal.linkFinal, ofertaLinkBase.linkAfiliado, "destino original preserva link original");
 assert.notStrictEqual(destinoOptimus.linkFinal, ofertaLinkBase.linkAfiliado, "destino optimus usa Link Optimus");
+
+resetarLinkOptimus();
+const ofertaLinksPapeis = {
+  marketplace: "shopee",
+  linkAfiliado: "https://shopee.test/produto-afiliado",
+  linksComerciais: [
+    { papel: "produto", tipo: "produto", ordemCaptura: 1, urlAfiliada: "https://shopee.test/produto-afiliado", renderizavel: true },
+    { papel: "resgate", tipo: "resgate", ordemCaptura: 2, urlAfiliada: "https://shopee.test/resgate-afiliado", renderizavel: true }
+  ]
+};
+const resolucaoLinksPapeis = resolverLinkTeste({ oferta: ofertaLinksPapeis, destino: { id: "links", modoLink: "optimus" }, recursos: { linkOptimus: true } });
+assert.strictEqual(resolucaoLinksPapeis.oferta.linksComerciais.length, 2, "Link Optimus nao pode colapsar produto + resgate");
+assert.deepStrictEqual(resolucaoLinksPapeis.oferta.linksComerciais.map(item => item.papel), ["produto", "resgate"]);
+assert.ok(resolucaoLinksPapeis.oferta.linksComerciais.every(item => item.urlOptimus.startsWith("https://go.optimuspromo.com.br/r/")), "cada papel deve receber Link Optimus proprio");
+
+resetarLinkOptimus();
+const ofertaAliLinks = {
+  marketplace: "aliexpress",
+  linksComerciais: [
+    { papel: "link_app", tipo: "app", ordemCaptura: 1, urlAfiliada: "https://s.click.aliexpress.com/e/_app", renderizavel: true },
+    { papel: "link_pc", tipo: "pc", ordemCaptura: 2, urlAfiliada: "https://s.click.aliexpress.com/e/_app", renderizavel: true }
+  ]
+};
+const resolucaoAliLinks = resolverLinkTeste({ oferta: ofertaAliLinks, destino: { id: "ali", modoLink: "optimus" }, recursos: { linkOptimus: true } });
+assert.strictEqual(resolucaoAliLinks.oferta.linksComerciais.length, 2, "APP e PC com mesma URL afiliada preservam dois papeis");
+assert.deepStrictEqual(resolucaoAliLinks.oferta.linksComerciais.map(item => item.papel), ["link_app", "link_pc"]);
+assert.ok(resolucaoAliLinks.linkFinal.startsWith("https://go.optimuspromo.com.br/r/"), "linkFinal deve manter compatibilidade quando so ha links estruturados");
 
 assert.strictEqual(calcularIntervalo({ intervaloMinutos: 5, prioridadeCupomAtiva: false }, {}, { cupomReal: true }), 5);
 assert.strictEqual(calcularIntervalo({ intervaloMinutos: 7, prioridadeCupomAtiva: false }, {}, { cupomReal: true }), 7);

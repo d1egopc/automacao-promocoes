@@ -104,16 +104,21 @@ function linksComerciaisUnicos(links = []) {
   const resultado = [];
   const vistos = new Set();
 
-  for (const link of Array.isArray(links) ? links : []) {
+  for (const [indice, link] of (Array.isArray(links) ? links : []).entries()) {
     if (!link || typeof link !== "object") continue;
+    const tipo = normalizarTexto(link.tipo || link.papel || "produto");
+    const ordemCaptura = Number(link.ordemCaptura || link.ordem || indice + 1) || (indice + 1);
     const afiliado = normalizarTexto(link.afiliado);
     const resolvido = normalizarTexto(link.resolvido);
     const original = normalizarTexto(link.original);
     const url = afiliado || resolvido || original;
-    if (!url || vistos.has(url)) continue;
-    vistos.add(url);
+    const chave = `${tipo}:${ordemCaptura}:${url}`;
+    if (!url || vistos.has(chave)) continue;
+    vistos.add(chave);
     resultado.push({
-      tipo: normalizarTexto(link.tipo || "produto"),
+      tipo,
+      papel: normalizarTexto(link.papel || tipo),
+      ordemCaptura,
       original,
       resolvido,
       afiliado,

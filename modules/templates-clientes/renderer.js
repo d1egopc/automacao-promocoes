@@ -302,14 +302,24 @@ function linkComercialPorTipo(oferta = {}, tipos = []) {
     ...(Array.isArray(oferta.linksProduto) ? oferta.linksProduto : []),
     ...(Array.isArray(oferta.linksResgate) ? oferta.linksResgate : [])
   ];
+  const links = [];
+  const vistos = new Set();
   for (const item of candidatos) {
     if (!item || typeof item !== "object") continue;
     const tipo = normalizarComparacao(item.tipo || item.papel || "").replace(/^link_/, "");
     if (!tiposNormalizados.has(tipo)) continue;
-    const url = primeiroTexto(item.urlAfiliada, item.afiliado, item.linkAfiliado, item.resolvido, item.url, item.original, item.link);
-    if (url) return url;
+    const url = primeiroTexto(item.urlOptimus, item.urlAfiliada, item.afiliado, item.linkAfiliado, item.resolvido, item.url, item.original, item.link);
+    const ordem = Number(item.ordemCaptura || item.ordem || links.length + 1) || (links.length + 1);
+    const chave = `${tipo}:${ordem}:${url}`;
+    if (url && !vistos.has(chave)) {
+      vistos.add(chave);
+      links.push({ url, ordem });
+    }
   }
-  return "";
+  return links
+    .sort((a, b) => a.ordem - b.ordem)
+    .map(item => item.url)
+    .join("\n");
 }
 
 function dadosBlocoTemplate(tipo = "", oferta = {}) {

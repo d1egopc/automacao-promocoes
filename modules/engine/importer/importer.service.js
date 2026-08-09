@@ -34,7 +34,8 @@ const {
   resolverPrecedenciaComercialRadar,
   resumirPrecedenciaComercialLog,
   deveLogarDivergenciaComercial,
-  emitirLogRadarPrecoSuspeito
+  emitirLogRadarPrecoSuspeito,
+  tituloComercialUniversalValido
 } = require("../../radar/comercial-precedencia");
 const { validarCoerenciaPreco } = require("../../inteligencia-universal/preco-coerencia.service");
 const {
@@ -113,7 +114,9 @@ function resolverCategoriaEngine(resultado = {}, job = {}) {
 }
 
 function tituloGenericoMarketplaceEngine(titulo = "", marketplace = "") {
-  const chaveTitulo = normalizarTexto(titulo)
+  const tituloLimpo = normalizarTexto(titulo);
+  if (!tituloComercialUniversalValido(tituloLimpo, { marketplace })) return true;
+  const chaveTitulo = tituloLimpo
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
@@ -126,7 +129,6 @@ function tituloGenericoMarketplaceEngine(titulo = "", marketplace = "") {
     .replace(/[^a-z0-9]+/g, "")
     .trim();
 
-  if (!chaveTitulo) return true;
   if (chaveMarketplace === "aliexpress") {
     return ["produtoaliexpress", "ofertaaliexpress", "aliexpress"].includes(chaveTitulo);
   }
@@ -437,12 +439,15 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
     ? resultado.metadata.produto
     : {};
   const imagemResolvida = resolverImagemImportada(resultado, produtoMetadata);
+  const tituloImportado = normalizarTexto(resultado.titulo || resultado.nome || "");
+  const marketplaceTitulo = normalizarTexto(resultado.marketplace || job.marketplace || job.marketplace_detectado);
+  const tituloSeguro = tituloComercialUniversalValido(tituloImportado, { marketplace: marketplaceTitulo }) ? tituloImportado : "";
 
   return {
     ok: resultado.ok !== false,
-    marketplace: normalizarTexto(resultado.marketplace || job.marketplace || job.marketplace_detectado),
-    titulo: normalizarTexto(resultado.titulo || resultado.nome || ""),
-    tituloNormalizado: normalizarTitulo(resultado.titulo || resultado.nome || ""),
+    marketplace: marketplaceTitulo,
+    titulo: tituloSeguro,
+    tituloNormalizado: normalizarTitulo(tituloSeguro),
     preco: normalizarNumero(resultado.preco || resultado.precoAtual || produtoMetadata.precoAtual || produtoMetadata.preco),
     precoOriginal: normalizarNumero(resultado.precoOriginal || resultado.precoAntigo || produtoMetadata.precoOriginal || produtoMetadata.precoAntigo),
     imagem: imagemResolvida.imagem,
@@ -1016,20 +1021,20 @@ function coletarLinksIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, met
     ? metadata.linksComerciais
     : [];
   const links = [];
-  const vistos = new Set();
+  let ordemAutomatica = 0;
   const ctaAfiliado = normalizarTexto(oferta.linkAfiliado || "");
 
   function adicionar(item = {}, origem = "") {
+    ordemAutomatica += 1;
     const papel = papelComercialIntegridade(item.papel || item.papelLink || item.tipo || item.role || "");
     const urlOriginal = normalizarTexto(item.urlOriginal || item.url || item.original || item.href || "");
     const urlExpandida = normalizarTexto(item.urlExpandida || item.expandida || "");
     const urlAfiliada = normalizarTexto(item.urlAfiliada || item.afiliado || item.linkAfiliado || "");
     const urlRenderizavel = normalizarTexto(urlAfiliada || item.renderizarUrl || "");
     const urlBase = urlOriginal || urlExpandida || urlRenderizavel;
-    const chave = `${papel}:${urlBase}`;
+    const ordemCaptura = Number(item.ordemCaptura || item.ordem || item.indiceCaptura || ordemAutomatica) || ordemAutomatica;
 
-    if (!papel || papel === "desconhecido" || !urlBase || vistos.has(chave)) return;
-    vistos.add(chave);
+    if (!papel || papel === "desconhecido" || !urlBase) return;
 
     const convertidoWorkspace = item.convertidoWorkspace === true
       || item.workspaceConvertido === true
@@ -1044,6 +1049,8 @@ function coletarLinksIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, met
       urlOriginal,
       urlExpandida,
       urlAfiliada: renderizavel ? (urlAfiliada || urlRenderizavel || ctaAfiliado) : "",
+      urlOptimus: normalizarTexto(item.urlOptimus || ""),
+      ordemCaptura,
       renderizavel,
       seguro: renderizavel,
       origem: origem || item.origem || "integridade_comercial",

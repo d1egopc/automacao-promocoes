@@ -18,6 +18,56 @@ function textoOuNull(valor) {
   return limpo ? limpo : null;
 }
 
+function normalizarPapelComercial(valor = "") {
+  return texto(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function tituloComercialUniversalValido(titulo = "", contexto = {}) {
+  const limpo = texto(titulo);
+  if (!limpo) return false;
+  if (/^\d{1,3}\s*%$/.test(limpo)) return false;
+  const n = normalizarPapelComercial(limpo);
+  if (!n) return false;
+  const compacto = n.replace(/\s+/g, "");
+  const marketplace = normalizarPapelComercial(
+    typeof contexto === "string" ? contexto : (contexto.marketplace || "")
+  );
+  const cuponsContexto = new Set((Array.isArray(contexto?.cupons) ? contexto.cupons : [contexto?.cupom])
+    .map(normalizarPapelComercial)
+    .map(valor => valor.replace(/\s+/g, ""))
+    .filter(Boolean));
+  const marketplaceCompacto = marketplace.replace(/\s+/g, "");
+  const marketplaces = new Set([
+    "amazon",
+    "mercado livre",
+    "mercadolivre",
+    "shopee",
+    "aliexpress",
+    "ali express",
+    "kabum",
+    "awin"
+  ]);
+  const marketplaceDuplicado = n.split(/\s+/).length === 2
+    && n.split(/\s+/)[0] === n.split(/\s+/)[1]
+    && marketplaces.has(n.split(/\s+/)[0]);
+
+  if (marketplaces.has(n) || (marketplaceCompacto && compacto === marketplaceCompacto)) return false;
+  if (cuponsContexto.has(compacto)) return false;
+  if (marketplaceDuplicado) return false;
+  if (/^(?:amazon|mercado\s*livre|mercadolivre|shopee|ali\s*express|aliexpress)\s+(?:amazon|mercado\s*livre|mercadolivre|shopee|ali\s*express|aliexpress)$/.test(n)) return false;
+  if (/^\d{1,3}$/.test(n) && /%/.test(limpo)) return false;
+  if (/^(?:cupom|codigo|cod|voucher|resgate|frete|gratis|cashback|score|prioridade|motivo|erro|falha|debug|log|interno)\b/.test(n)) return false;
+  if (/^(?:por|de|pix|parcel|avaliacao|beneficio|oferta|desconto)\b/.test(n) && !/\b(?:kit|smart|tenis|produto|tv|fone|monitor|notebook|perfume|whey)\b/.test(n)) return false;
+  if (/^[A-Z0-9_-]{4,24}$/.test(limpo) && /[A-Z]/.test(limpo) && /\d/.test(limpo)) return false;
+  if (!/[\p{L}\p{N}]/u.test(limpo)) return false;
+  return true;
+}
+
 function primeiroValorDefinido(...valores) {
   for (const valor of valores) {
     if (valor !== null && valor !== undefined && valor !== "") return valor;
@@ -564,6 +614,12 @@ function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror 
     ))
     : null;
 
+  const tituloRadarBruto = textoOuNull(mirror?.produto?.tituloCapturado || "");
+  const marketplaceResolucao = texto(marketplace || ofertaImportador.marketplace || mirror?.comparacaoImportador?.marketplace || "");
+  const tituloRadar = tituloComercialUniversalValido(tituloRadarBruto || "", { marketplace: marketplaceResolucao, cupons: cupom.cuponsRadar })
+    ? tituloRadarBruto
+    : null;
+
   const resolucao = {
     versao: VERSAO_PRECEDENCIA_COMERCIAL,
     modo: "radar_mirror_fiel",
@@ -571,8 +627,9 @@ function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror 
     ativa,
     fonteComercial: "radar_mirror",
     clienteId: texto(clienteId || mirror?.origem?.clienteId || ""),
-    marketplace: texto(marketplace || ofertaImportador.marketplace || mirror?.comparacaoImportador?.marketplace || ""),
-    tituloRadar: textoOuNull(mirror?.produto?.tituloCapturado || ""),
+    marketplace: marketplaceResolucao,
+    tituloRadar,
+    tituloRadarRejeitado: tituloRadar ? null : tituloRadarBruto,
     precoPublicacao: preco.precoPublicacao,
     origemPreco: preco.origemPreco,
     precoRadar: preco.precoRadar,
@@ -711,5 +768,6 @@ module.exports = {
   deveLogarPrecoSuspeito,
   emitirLogRadarPrecoSuspeito,
   resolverPreco,
-  resolverCupom
+  resolverCupom,
+  tituloComercialUniversalValido
 };

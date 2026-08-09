@@ -2,6 +2,7 @@
 
 const { analisarValorMonetario, formatarMoedaBR } = require("../../utils/moeda");
 const { aplicarContratoMarketplace, MATRIZ_CAPACIDADES } = require("./marketplace-contracts");
+const { tituloComercialUniversalValido } = require("../radar/comercial-precedencia");
 const {
   ORIGENS_VALOR_COMERCIAL,
   classificarBlocoComercial
@@ -140,6 +141,7 @@ function limparTextoComercial(valor = "") {
 function tituloComercialValido(valor = "") {
   const limpo = limparTitulo(valor);
   if (textoTecnicoOuVazio(limpo)) return false;
+  if (!tituloComercialUniversalValido(limpo)) return false;
   const n = normalizarComparacao(limpo).replace(/[^a-z0-9]+/g, " ").trim();
   if (!n) return false;
   if (["anuncio", "mercado livre", "mercadolivre", "amazon", "shopee", "aliexpress", "kabum", "awin"].includes(n)) return false;
@@ -912,12 +914,26 @@ function adicionarBlocosDeLinks(blocos = [], doc = {}, contexto = {}) {
     adicionarBlocoComercial(blocos, {
       tipo: tipoBloco,
       textoOriginal: item.url,
-      valorEstruturado: { url: item.url, papelOriginal: item.tipo || "" },
-      origem: "documento.linksComerciais",
+      valorEstruturado: {
+        url: item.url,
+        urlOriginal: item.urlOriginal || "",
+        urlAfiliada: item.urlAfiliada || "",
+        urlOptimus: item.urlOptimus || "",
+        papelOriginal: item.papel || item.tipo || "",
+        ordemCaptura: item.ordemCaptura || null
+      },
+      origem: `documento.linksComerciais.${item.ordemCaptura || item.dedupeKey || "sem_ordem"}`,
       confianca: tipoBloco === "link_fonte_ignorado" ? "alta" : "media",
       essencial: ["link_resgate"].includes(tipoBloco) ? linkResgateEssencial(doc, {}) : false,
       visibilidadePadrao: tipoBloco === "link_fonte_ignorado" ? "oculto" : "padrao",
-      avisos
+      avisos,
+      metadata: {
+        papel: item.papel || item.tipo || "",
+        ordemCaptura: item.ordemCaptura || null,
+        urlOriginal: item.urlOriginal || "",
+        urlAfiliada: item.urlAfiliada || "",
+        urlOptimus: item.urlOptimus || ""
+      }
     });
   }
 }
@@ -1080,18 +1096,23 @@ function logContratoMarketplaceV27(tag = "", contrato = {}, contexto = {}) {
 
 function linksContratoParaDocumento(contrato = {}) {
   return lista(contrato.links)
-    .map(link => {
+    .map((link, indice) => {
       const papel = texto(link.papel || "");
-      const exigeAfiliadaAliExpress = normalizarComparacao(contrato.marketplace) === "aliexpress"
-        && ["link_app", "link_pc", "link_moedas"].includes(papel);
       const urlAfiliada = texto(link.urlAfiliada || "");
+      const ordemCaptura = Number(link.ordemCaptura || indice + 1) || (indice + 1);
+      const urlOriginal = texto(link.urlOriginal || "");
+      const urlOptimus = texto(link.urlOptimus || "");
       return {
         tipo: papel.replace(/^link_/, ""),
         papel,
-        url: texto(urlAfiliada || link.urlOriginal),
+        ordemCaptura,
+        urlOriginal,
+        urlAfiliada,
+        urlOptimus,
+        url: texto(urlOptimus || urlAfiliada || urlOriginal),
         renderizavel: link.renderizavel !== false,
         confianca: texto(link.confianca || "media"),
-        dedupeKey: texto(link.dedupeKey || "")
+        dedupeKey: texto(link.dedupeKey || `${papel}:${ordemCaptura}:${urlOriginal || urlAfiliada || urlOptimus}`)
       };
     })
     .filter(item => item.url);
@@ -2058,16 +2079,13 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
   const linhas = [];
   const vistos = new Set();
   const linksAliRenderizados = new Set();
-  const linksPcAli = new Set(blocosOrdenados
-    .filter(bloco => bloco.tipo === "link_pc")
-    .map(bloco => chaveUrlFinalAliExpress(textoBlocoCanonicoV26(bloco)))
-    .filter(Boolean));
   const instrucaoCupomTexto = blocosOrdenados.find(bloco => bloco.tipo === "instrucao_cupom")?.textoOriginal || "";
   const moedasTextoBruto = blocosOrdenados.find(bloco => bloco.tipo === "moedas")?.textoOriginal || "";
   const linksMoveisAli = blocosOrdenados
     .filter(bloco => ["link_app", "link_moedas"].includes(bloco.tipo))
     .map(bloco => chaveUrlFinalAliExpress(textoBlocoCanonicoV26(bloco)))
     .filter(Boolean);
+  const possuiLinkPcAli = blocosOrdenados.some(bloco => bloco.tipo === "link_pc");
   const contexto = {
     marketplaceAliExpress: marketplaceAliExpress(doc.marketplace),
     marketplaceMercadoLivre: marketplaceMercadoLivre(doc.marketplace),
@@ -2088,7 +2106,7 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
       .filter(Boolean),
     moedasTexto: textoMencionaMoedas(instrucaoCupomTexto) ? "" : moedasTextoBruto,
     moedasNoApp: /\bapp\b/i.test(`${doc.descricaoOriginal || ""} ${moedasTextoBruto}`),
-    linksMoveisAliDistintos: linksPcAli.size > 0 || new Set(linksMoveisAli).size > 1
+    linksMoveisAliDistintos: possuiLinkPcAli || new Set(linksMoveisAli).size > 1
   };
 
   for (const bloco of blocosOrdenados) {
@@ -2096,9 +2114,9 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
     if (contexto.marketplaceAliExpress && ["link_app", "link_moedas", "link_pc"].includes(bloco.tipo)) {
       const chaveLink = chaveUrlFinalAliExpress(textoBlocoCanonicoV26(bloco));
       if (!chaveLink) continue;
-      if (bloco.tipo !== "link_pc" && linksPcAli.has(chaveLink)) continue;
-      if (linksAliRenderizados.has(chaveLink)) continue;
-      linksAliRenderizados.add(chaveLink);
+      const chavePapel = `${bloco.tipo}:${bloco.metadata?.ordemCaptura || bloco.valorEstruturado?.ordemCaptura || bloco.dedupeKey || chaveLink}`;
+      if (linksAliRenderizados.has(chavePapel)) continue;
+      linksAliRenderizados.add(chavePapel);
     }
     const chaveDedupe = bloco.dedupeKey || dedupeKeyBloco(bloco.tipo, bloco.textoOriginal, bloco.valorEstruturado, bloco.origem);
     if (chaveDedupe && vistos.has(chaveDedupe)) continue;
