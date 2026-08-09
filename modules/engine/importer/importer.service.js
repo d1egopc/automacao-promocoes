@@ -542,6 +542,81 @@ function extrairImagemHtmlMercadoLivre(html = "") {
   return { imagem: "", origem: "nenhuma" };
 }
 
+function extrairImagemOficialMercadoLivreApi(dados = {}) {
+  const candidatos = [];
+  const adicionar = (origem, valor) => {
+    const imagem = normalizarImagemMercadoLivre(valor);
+    if (!imagem || candidatos.some(item => item.imagem === imagem)) return;
+    candidatos.push({ imagem, origem });
+  };
+
+  const pictures = Array.isArray(dados.pictures) ? dados.pictures : [];
+  pictures.forEach((picture, indice) => {
+    if (!picture || typeof picture !== "object") return;
+    adicionar(`api_mercadolibre.items.pictures[${indice}].secure_url`, picture.secure_url);
+    adicionar(`api_mercadolibre.items.pictures[${indice}].url`, picture.url);
+  });
+
+  adicionar("api_mercadolibre.items.secure_thumbnail", dados.secure_thumbnail);
+  adicionar("api_mercadolibre.items.thumbnail", dados.thumbnail);
+  adicionar("api_mercadolibre.items.thumbnailUrl", dados.thumbnailUrl || dados.thumbnail_url);
+  adicionar("api_mercadolibre.items.picture_url", dados.picture_url);
+
+  return candidatos[0] || { imagem: "", origem: "nenhuma" };
+}
+
+async function buscarImagemOficialMercadoLivrePorMlb(mlb = "", opcoes = {}) {
+  const id = normalizarTexto(mlb).replace(/[^0-9]/g, "");
+  if (!id) {
+    return { imagem: "", origem: "", statusHttp: null, motivo: "mlb_api_ausente" };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Number(opcoes.timeoutMs || 6500));
+  const urlApi = `https://api.mercadolibre.com/items/MLB${id}`;
+
+  try {
+    const response = await fetch(urlApi, {
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "OptimusPromo/1.0 (+https://go.optimuspromo.com.br)",
+        "Accept": "application/json"
+      }
+    });
+
+    if (response.status >= 400) {
+      return {
+        imagem: "",
+        origem: "",
+        linkResolvido: urlApi,
+        statusHttp: response.status,
+        motivo: `api_oficial_mlb_http_${response.status}`
+      };
+    }
+
+    const dados = await response.json();
+    const imagemApi = extrairImagemOficialMercadoLivreApi(dados);
+    return {
+      imagem: imagemApi.imagem,
+      origem: imagemApi.imagem ? imagemApi.origem : "",
+      linkResolvido: urlApi,
+      statusHttp: response.status,
+      motivo: imagemApi.imagem ? "api_oficial_mlb_imagem_recuperada" : "api_oficial_mlb_sem_imagem"
+    };
+  } catch (erro) {
+    return {
+      imagem: "",
+      origem: "",
+      linkResolvido: urlApi,
+      statusHttp: null,
+      motivo: erro?.name === "AbortError" ? "timeout_api_oficial_mlb" : `falha_api_oficial_mlb:${erro.message}`
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function extrairCanonicalImagemMercadoLivre(html = "") {
   return htmlDecode(
     String(html || "").match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)?.[1] ||
@@ -607,6 +682,27 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}) {
       ? "imagem_canonica_recuperada"
       : (statusHttp >= 400 ? `http_${statusHttp}` : (bloqueado ? "html_bloqueado" : "html_sem_imagem_valida"));
 
+    if (!imagemExtraida.imagem) {
+      const imagemApi = await buscarImagemOficialMercadoLivrePorMlb(mlb);
+      if (imagemApi.imagem) {
+        return {
+          imagem: imagemApi.imagem,
+          origem: imagemApi.origem,
+          linkResolvido: imagemApi.linkResolvido || linkResolvido,
+          statusHttp: imagemApi.statusHttp ?? statusHttp,
+          motivo: imagemApi.motivo
+        };
+      }
+
+      return {
+        imagem: "",
+        origem: "",
+        linkResolvido: imagemApi.linkResolvido || linkResolvido,
+        statusHttp: imagemApi.statusHttp ?? statusHttp,
+        motivo: imagemApi.motivo || motivo
+      };
+    }
+
     return {
       imagem: imagemExtraida.imagem,
       origem: imagemExtraida.imagem ? `canonical.${imagemExtraida.origem}` : "",
@@ -615,12 +711,23 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}) {
       motivo
     };
   } catch (erro) {
+    const imagemApi = await buscarImagemOficialMercadoLivrePorMlb(mlb);
+    if (imagemApi.imagem) {
+      return {
+        imagem: imagemApi.imagem,
+        origem: imagemApi.origem,
+        linkResolvido: imagemApi.linkResolvido || urlInicial,
+        statusHttp: imagemApi.statusHttp ?? null,
+        motivo: imagemApi.motivo
+      };
+    }
+
     return {
       imagem: "",
       origem: "",
-      linkResolvido: urlInicial,
-      statusHttp: null,
-      motivo: erro?.name === "AbortError" ? "timeout_url_canonica" : `falha_url_canonica:${erro.message}`
+      linkResolvido: imagemApi.linkResolvido || urlInicial,
+      statusHttp: imagemApi.statusHttp ?? null,
+      motivo: imagemApi.motivo || (erro?.name === "AbortError" ? "timeout_url_canonica" : `falha_url_canonica:${erro.message}`)
     };
   } finally {
     clearTimeout(timer);
@@ -2139,6 +2246,9 @@ module.exports = {
   normalizarOfertaImportada,
   resolverCategoriaEngine,
   reclassificarCategoriaFinalEngine,
+  buscarImagemCanonicaMercadoLivre,
+  buscarImagemOficialMercadoLivrePorMlb,
+  extrairImagemOficialMercadoLivreApi,
   materializarImagemRadarMirrorSeNecessario,
   aplicarPonteIntegridadeComercial
 };
