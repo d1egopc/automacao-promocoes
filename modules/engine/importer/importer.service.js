@@ -511,6 +511,13 @@ function extrairMlbImagem(url = "") {
   return normalizarTexto(url).match(/\bMLB-?(\d{6,})\b/i)?.[1] || "";
 }
 
+function normalizarMlbImagem(valor = "") {
+  const id = normalizarTexto(valor).match(/\bMLB-?(\d{6,})\b/i)?.[1] ||
+    normalizarTexto(valor).match(/\b(\d{6,})\b/)?.[1] ||
+    "";
+  return id ? `MLB${id}` : "";
+}
+
 function normalizarImagemMercadoLivre(valor = "") {
   const bruto = normalizarValorImagem(valor);
   if (!bruto) return "";
@@ -634,23 +641,131 @@ function extrairCanonicalImagemMercadoLivre(html = "") {
   ).trim();
 }
 
+function extrairUrlProdutoImagemMercadoLivre(html = "", mlbEsperado = "") {
+  const candidatos = [
+    extrairCanonicalImagemMercadoLivre(html),
+    ...String(html || "").matchAll(/"permalink"\s*:\s*"([^"]*MLB[^"]*)"/gi),
+    ...String(html || "").matchAll(/"canonicalUrl"\s*:\s*"([^"]*MLB[^"]*)"/gi),
+    ...String(html || "").matchAll(/"url"\s*:\s*"([^"]*MLB[^"]*)"/gi),
+    ...String(html || "").matchAll(/href=["']([^"']*(?:produto\.mercadolivre\.com\.br\/MLB|mercadolivre\.com\.br\/p\/MLB)[^"']*)["']/gi)
+  ].map(item => Array.isArray(item) ? item[1] : item);
+
+  for (const candidato of candidatos) {
+    const url = htmlDecode(String(candidato || ""))
+      .replace(/\\u002f/gi, "/")
+      .replace(/\\\//g, "/")
+      .replace(/&amp;/gi, "&")
+      .trim();
+    if (urlCanonicaImagemMercadoLivreSegura(url, mlbEsperado)) return url;
+  }
+
+  return "";
+}
+
 function urlCanonicaImagemMercadoLivreSegura(url = "", mlbEsperado = "") {
   try {
     const parsed = new URL(normalizarTexto(url));
+    const path = parsed.pathname || "";
     return parsed.protocol === "https:" &&
       parsed.hostname.toLowerCase().endsWith("mercadolivre.com.br") &&
+      (/\/MLB-?\d+/i.test(path) || /\/p\/MLB/i.test(path) || /\/permalink\/MLB/i.test(path)) &&
       extrairMlbImagem(parsed.toString()) === mlbEsperado;
   } catch {
     return false;
   }
 }
 
+function urlGenericaMlbMercadoLivre(url = "") {
+  try {
+    const parsed = new URL(normalizarTexto(url));
+    return parsed.hostname.toLowerCase() === "produto.mercadolivre.com.br" &&
+      /^\/MLB-?\d+\/?$/i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function adicionarUrlImagemMercadoLivre(candidatos, url = "", mlb = "", origem = "") {
+  const valor = normalizarTexto(url);
+  if (!valor) return;
+  try {
+    const parsed = new URL(valor);
+    const host = parsed.hostname.toLowerCase();
+    const urlFinal = parsed.toString();
+    const meliLa = host === "meli.la" || host.endsWith(".meli.la");
+    const produtoMl = host.endsWith("mercadolivre.com.br") && extrairMlbImagem(urlFinal) === mlb;
+    if (!meliLa && !produtoMl) return;
+    if (candidatos.some(item => item.url === urlFinal)) return;
+    candidatos.push({
+      url: urlFinal,
+      origem,
+      meliLa,
+      generica: produtoMl && urlGenericaMlbMercadoLivre(urlFinal)
+    });
+  } catch {}
+}
+
+function coletarValoresTecnicosImagemMercadoLivre(oferta = {}) {
+  const metadata = objetoSeguro(oferta.metadata);
+  const produto = objetoSeguro(metadata.produto);
+  const resolucaoRadar = objetoSeguro(metadata.resolucaoRadar);
+  const imagemAuditoria = objetoSeguro(metadata.imagemAuditoria);
+  const adapter = objetoSeguro(metadata.adapter);
+
+  return {
+    preferenciais: [
+      oferta.linkResolvidoImagem,
+      metadata.linkResolvidoImagem,
+      imagemAuditoria.linkResolvidoImagem,
+      oferta.urlFinal,
+      metadata.urlFinalImportador,
+      produto.urlFinal,
+      produto.permalink,
+      produto.canonical,
+      produto.canonicalUrl,
+      produto.linkResolvidoImagem,
+      adapter.urlFinal,
+      adapter.permalink,
+      resolucaoRadar.linkResolvido,
+      resolucaoRadar.urlResolvida,
+      resolucaoRadar.urlExpandida
+    ],
+    base: [
+      oferta.linkExpandido,
+      metadata.linkExpandidoEngine,
+      resolucaoRadar.linkOriginalLimpo,
+      oferta.linkOriginal,
+      metadata.linkOriginalEngine
+    ]
+  };
+}
+
+function montarCandidatosUrlImagemMercadoLivre(oferta = {}, mlb = "") {
+  const candidatos = [];
+  const valores = coletarValoresTecnicosImagemMercadoLivre(oferta);
+  for (const url of valores.preferenciais) adicionarUrlImagemMercadoLivre(candidatos, url, mlb, "tecnica_preferencial");
+  for (const url of valores.base) adicionarUrlImagemMercadoLivre(candidatos, url, mlb, "tecnica_base");
+  if (mlb) adicionarUrlImagemMercadoLivre(candidatos, `https://produto.mercadolivre.com.br/MLB${mlb}`, mlb, "mlb_generico");
+
+  return candidatos.sort((a, b) => {
+    const peso = item => item.generica ? 10 : 0;
+    return peso(a) - peso(b);
+  });
+}
+
 async function buscarImagemCanonicaMercadoLivre(oferta = {}) {
-  const urls = [oferta.linkExpandido, oferta.linkOriginal]
-    .map(normalizarTexto)
-    .filter(Boolean);
-  const urlInicial = urls.find(url => extrairMlbImagem(url) && /mercadolivre\.com\.br/i.test(url));
-  const mlb = extrairMlbImagem(urlInicial);
+  const valoresTecnicos = coletarValoresTecnicosImagemMercadoLivre(oferta);
+  const textoIdentidade = [
+    oferta.produtoIdDetectado,
+    oferta.produtoId,
+    oferta.itemId,
+    ...valoresTecnicos.preferenciais,
+    ...valoresTecnicos.base
+  ].join(" ");
+  const mlbNormalizado = normalizarMlbImagem(textoIdentidade);
+  const mlb = extrairMlbImagem(mlbNormalizado);
+  const candidatosUrl = montarCandidatosUrlImagemMercadoLivre(oferta, mlb);
+  const urlInicial = candidatosUrl[0]?.url || "";
 
   if (!urlInicial || !mlb) {
     return { imagem: "", origem: "", linkResolvido: urlInicial || "", statusHttp: null, motivo: "url_canonica_mlb_ausente" };
@@ -669,54 +784,63 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}) {
   };
 
   try {
-    let response = await fetch(urlInicial, options);
-    let html = await response.text();
-    let linkResolvido = response.url || urlInicial;
-    let statusHttp = response.status;
-    let bloqueado = /captcha|account-verification|access denied|robot check|verifique[^<]{0,80}rob/i.test(html);
-    let imagemExtraida = statusHttp < 400 && !bloqueado ? extrairImagemHtmlMercadoLivre(html) : { imagem: "", origem: "nenhuma" };
-    const canonical = extrairCanonicalImagemMercadoLivre(html);
+    let linkResolvido = urlInicial;
+    let statusHttp = null;
+    let motivoHtml = "";
 
-    if (!imagemExtraida.imagem && urlCanonicaImagemMercadoLivreSegura(canonical, mlb) && canonical !== linkResolvido) {
-      response = await fetch(canonical, options);
-      html = await response.text();
-      linkResolvido = response.url || canonical;
+    for (let indice = 0; indice < candidatosUrl.length; indice += 1) {
+      const candidato = candidatosUrl[indice];
+      let response = await fetch(candidato.url, options);
+      let html = await response.text();
+      linkResolvido = response.url || candidato.url;
       statusHttp = response.status;
-      bloqueado = /captcha|account-verification|access denied|robot check|verifique[^<]{0,80}rob/i.test(html);
-      imagemExtraida = statusHttp < 400 && !bloqueado ? extrairImagemHtmlMercadoLivre(html) : { imagem: "", origem: "nenhuma" };
-    }
+      let bloqueado = /captcha|account-verification|access denied|robot check|verifique[^<]{0,80}rob/i.test(html);
+      let linkResolvidoSeguro = urlCanonicaImagemMercadoLivreSegura(linkResolvido, mlb);
+      let podeUsarHtmlAtual = !candidato.meliLa || linkResolvidoSeguro;
+      let imagemExtraida = statusHttp < 400 && !bloqueado && podeUsarHtmlAtual ? extrairImagemHtmlMercadoLivre(html) : { imagem: "", origem: "nenhuma" };
+      const canonical = extrairUrlProdutoImagemMercadoLivre(html, mlb);
 
-    const motivo = imagemExtraida.imagem
-      ? "imagem_canonica_recuperada"
-      : (statusHttp >= 400 ? `http_${statusHttp}` : (bloqueado ? "html_bloqueado" : "html_sem_imagem_valida"));
+      if (!imagemExtraida.imagem && urlCanonicaImagemMercadoLivreSegura(canonical, mlb) && canonical !== linkResolvido) {
+        response = await fetch(canonical, options);
+        html = await response.text();
+        linkResolvido = response.url || canonical;
+        statusHttp = response.status;
+        bloqueado = /captcha|account-verification|access denied|robot check|verifique[^<]{0,80}rob/i.test(html);
+        linkResolvidoSeguro = urlCanonicaImagemMercadoLivreSegura(linkResolvido, mlb);
+        podeUsarHtmlAtual = linkResolvidoSeguro || urlCanonicaImagemMercadoLivreSegura(canonical, mlb);
+        imagemExtraida = statusHttp < 400 && !bloqueado && podeUsarHtmlAtual ? extrairImagemHtmlMercadoLivre(html) : { imagem: "", origem: "nenhuma" };
+      }
 
-    if (!imagemExtraida.imagem) {
-      const imagemApi = await buscarImagemOficialMercadoLivrePorMlb(mlb);
-      if (imagemApi.imagem) {
+      if (imagemExtraida.imagem) {
         return {
-          imagem: imagemApi.imagem,
-          origem: imagemApi.origem,
-          linkResolvido: imagemApi.linkResolvido || linkResolvido,
-          statusHttp: imagemApi.statusHttp ?? statusHttp,
-          motivo: imagemApi.motivo
+          imagem: imagemExtraida.imagem,
+          origem: `canonical.${imagemExtraida.origem}`,
+          linkResolvido,
+          statusHttp,
+          motivo: "imagem_canonica_recuperada"
         };
       }
 
+      motivoHtml = statusHttp >= 400 ? `http_${statusHttp}` : (bloqueado ? "html_bloqueado" : "html_sem_imagem_valida");
+    }
+
+    const imagemApi = await buscarImagemOficialMercadoLivrePorMlb(mlb);
+    if (imagemApi.imagem) {
       return {
-        imagem: "",
-        origem: "",
+        imagem: imagemApi.imagem,
+        origem: imagemApi.origem,
         linkResolvido: imagemApi.linkResolvido || linkResolvido,
         statusHttp: imagemApi.statusHttp ?? statusHttp,
-        motivo: imagemApi.motivo || motivo
+        motivo: imagemApi.motivo
       };
     }
 
     return {
-      imagem: imagemExtraida.imagem,
-      origem: imagemExtraida.imagem ? `canonical.${imagemExtraida.origem}` : "",
-      linkResolvido,
-      statusHttp,
-      motivo
+      imagem: "",
+      origem: "",
+      linkResolvido: imagemApi.linkResolvido || linkResolvido,
+      statusHttp: imagemApi.statusHttp ?? statusHttp,
+      motivo: imagemApi.motivo || motivoHtml
     };
   } catch (erro) {
     const imagemApi = await buscarImagemOficialMercadoLivrePorMlb(mlb);
