@@ -37,6 +37,9 @@ function criarEspelho({ textoOriginal = "", oferta = {}, ofertaEntrada = {}, lin
   });
 }
 
+const estrelas = (n) => "\u2B50".repeat(n);
+const possuiLinha = (mensagem, linha) => String(mensagem || "").split(/\r?\n/).some(item => item.trim() === linha);
+
 const mlCompleto = criarEspelho({
   textoOriginal: [
     "Bolsa Esportiva adidas Preto",
@@ -70,6 +73,46 @@ assert.ok(mlCompleto.templateEspelhoShadow.mensagem.includes("Por: R$ 73,79 via 
 assert.ok(!mlCompleto.templateEspelhoShadow.mensagem.includes("Pix:"), "Pix embutido no Por nao duplica bloco Pix");
 assert.ok(mlCompleto.templateEspelhoShadow.mensagem.includes("🔗 Confira aqui:\nhttps://afiliado.test/produto"));
 assert.ok(!mlCompleto.templateEspelhoShadow.mensagem.includes("120,50"), "preco da pagina nao substitui captura");
+
+const templateRealComClassificacao = montarTemplateEspelhoPorBlocosV26(
+  mlCompleto.espelhoComercial,
+  mlCompleto.documentoComercialCanonico
+);
+assert.strictEqual(templateRealComClassificacao.ok, true);
+assert.ok(possuiLinha(templateRealComClassificacao.mensagem, estrelas(4)), "fluxo real OFC renderiza classificacao visual");
+assert.ok(!templateRealComClassificacao.mensagem.includes("Oportunidade Optimus"), "classificacao visual nao renderiza texto operacional");
+assert.ok(templateRealComClassificacao.mensagem.includes(`Mercado Livre\n${estrelas(4)}`), "cabecalho fica compacto no OFC real");
+assert.ok(templateRealComClassificacao.mensagem.includes("De: R$ 299,99\n✅ Por: R$ 73,79 via Pix"), "precos ficam no mesmo bloco visual");
+assert.ok(templateRealComClassificacao.mensagem.includes("Cupom: FASHIONML\n⚡ Aplique o cupom FASHIONML + Pix"), "condicoes ficam no mesmo bloco visual");
+
+const classificacoesOfc = [
+  {
+    nome: "oferta comum",
+    textoOriginal: "Oferta comum\nPor: R$ 100,00\nhttps://meli.la/comum",
+    esperado: 2
+  },
+  {
+    nome: "oferta boa",
+    textoOriginal: "Oferta boa\nDe: R$ 125,00\nPor: R$ 100,00\nhttps://meli.la/boa",
+    esperado: 3
+  },
+  {
+    nome: "oferta otima",
+    textoOriginal: "Oferta otima\nDe: R$ 200,00\nPor: R$ 100,00\nhttps://meli.la/otima",
+    esperado: 4
+  },
+  {
+    nome: "oferta excelente",
+    textoOriginal: "Oferta excelente\nDe: R$ 200,00\nPor: R$ 100,00\nCupom: PROMO10\nFrete gratis\nhttps://meli.la/excelente",
+    esperado: 5
+  }
+];
+for (const caso of classificacoesOfc) {
+  const espelho = criarEspelho({ textoOriginal: caso.textoOriginal, oferta: { linkAfiliado: `https://afiliado.test/${caso.nome.replace(/\s+/g, "-")}` } });
+  const template = montarTemplateEspelhoPorBlocosV26(espelho.espelhoComercial, espelho.documentoComercialCanonico);
+  assert.strictEqual(template.ok, true, caso.nome);
+  assert.ok(possuiLinha(template.mensagem, estrelas(caso.esperado)), `${caso.nome} renderiza ${caso.esperado} estrelas no OFC real`);
+}
 
 const mlTechnosCupomSemPix = criarEspelho({
   textoOriginal: [

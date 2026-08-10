@@ -14,6 +14,9 @@ const {
   resolverPrecedenciaPrecoPix,
   textoPixValido
 } = require("../radar/preco-pix-precedencia");
+const {
+  classificacaoVisualOferta
+} = require("../templates-clientes/classificacao-visual-oferta");
 
 const AVISO_EDITORIAL_ALIEXPRESS = "⚠️ Oferta sujeita à alteração de preço.";
 
@@ -1679,7 +1682,48 @@ function adicionarBlocoUnico(saida = [], tipo = "", linha = "") {
   if (!textoLinha) return false;
   const chave = normalizarComparacao(textoLinha);
   if (saida.some(item => normalizarComparacao(item.linha) === chave)) return false;
-  saida.push({ tipo, linha: textoLinha });
+  saida.push({ tipo, linha: textoLinha, grupo: grupoVisualBlocoV26(tipo) });
+  return true;
+}
+
+function grupoVisualBlocoV26(tipo = "") {
+  if (["titulo", "marketplace", "categoria", "classificacao_visual", "avaliacao_nota", "avaliacao_quantidade"].includes(tipo)) return "cabecalho";
+  if (["preco_referencia", "preco_oferta", "preco_pix", "preco_final_condicionado", "desconto_percentual", "economia", "parcelamento"].includes(tipo)) return "precos";
+  if (["cupom_codigo", "cupons_alternativos", "cupom_sem_codigo", "instrucao_cupom", "beneficio", "beneficio_app", "cashback", "moedas", "frete", "prime_programa", "garantia", "pre_venda", "prazo_envio", "vendas", "selo_mais_vendido"].includes(tipo)) return "condicoes";
+  if (["link_resgate", "link_app", "link_moedas", "link_pc", "link_auxiliar", "link_afiliado"].includes(tipo)) return tipo;
+  if (["aviso", "rodape", "texto_personalizado"].includes(tipo)) return tipo;
+  return tipo || "outros";
+}
+
+function montarMensagemCompactaV26(linhas = []) {
+  const grupos = [];
+  for (const item of linhas) {
+    const grupo = item.grupo || grupoVisualBlocoV26(item.tipo);
+    const ultimo = grupos[grupos.length - 1];
+    if (ultimo && ultimo.grupo === grupo) {
+      ultimo.linhas.push(item.linha);
+    } else {
+      grupos.push({ grupo, linhas: [item.linha] });
+    }
+  }
+  return grupos
+    .map(grupo => grupo.linhas.join("\n"))
+    .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function inserirClassificacaoVisualV26(linhas = [], classificacaoVisual = "") {
+  const linha = normalizarLinhaTemplate(classificacaoVisual);
+  if (!linha || linhas.some(item => item.tipo === "classificacao_visual")) return false;
+  const indiceCabecalho = linhas
+    .map((item, indice) => ({ item, indice }))
+    .filter(({ item }) => ["titulo", "marketplace", "categoria"].includes(item.tipo))
+    .map(({ indice }) => indice)
+    .pop();
+  const item = { tipo: "classificacao_visual", linha, grupo: grupoVisualBlocoV26("classificacao_visual") };
+  if (indiceCabecalho == null) linhas.unshift(item);
+  else linhas.splice(indiceCabecalho + 1, 0, item);
   return true;
 }
 
@@ -2084,6 +2128,42 @@ function renderizarBlocoCanonicoV26(bloco = {}, contexto = {}) {
   return "";
 }
 
+function valorBlocoCanonicoV26(blocos = [], tipo = "") {
+  const bloco = blocos.find(item => item.tipo === tipo);
+  return bloco ? textoBlocoCanonicoV26(bloco) : "";
+}
+
+function listaValoresBlocosCanonicosV26(blocos = [], tipo = "") {
+  return blocos
+    .filter(item => item.tipo === tipo)
+    .map(textoBlocoCanonicoV26)
+    .filter(Boolean);
+}
+
+function classificacaoVisualAtivaV26(template = {}) {
+  const blocos = Array.isArray(template.blocos) ? template.blocos : [];
+  const bloco = blocos.find(item => ["oportunidade", "classificacao_visual", "oportunidade_visual"].includes(texto(item?.tipo)));
+  return bloco ? bloco.ativo !== false : true;
+}
+
+function fatosClassificacaoVisualV26(doc = {}, espelho = {}, blocos = []) {
+  return {
+    titulo: primeiroTexto(doc.tituloOriginal, espelho.tituloOriginal, espelho.tituloNormalizado),
+    marketplace: primeiroTexto(doc.marketplace, espelho.marketplace),
+    categoria: primeiroTexto(valorBlocoCanonicoV26(blocos, "categoria"), doc.categoria, espelho.categoria),
+    precoOriginal: primeiroTexto(valorBlocoCanonicoV26(blocos, "preco_referencia"), doc.precoDeTexto, espelho.precoDeTexto),
+    precoAtual: primeiroTexto(valorBlocoCanonicoV26(blocos, "preco_oferta"), doc.precoPorTexto, espelho.precoFinalTexto, espelho.precoPorTexto),
+    precoPix: primeiroTexto(valorBlocoCanonicoV26(blocos, "preco_pix"), doc.precoPixTexto),
+    parcelamento: primeiroTexto(valorBlocoCanonicoV26(blocos, "parcelamento"), doc.parcelamentoTexto),
+    cupom: primeiroTexto(valorBlocoCanonicoV26(blocos, "cupom_codigo"), doc.cupomTexto, espelho.cupomCodigo),
+    cashback: primeiroTexto(valorBlocoCanonicoV26(blocos, "cashback"), doc.cashbackTexto),
+    frete: primeiroTexto(valorBlocoCanonicoV26(blocos, "frete"), doc.freteTexto),
+    beneficioTexto: primeiroTexto(valorBlocoCanonicoV26(blocos, "beneficio"), doc.beneficioTexto),
+    beneficios: listaValoresBlocosCanonicosV26(blocos, "beneficio"),
+    linksComerciais: lista(doc.linksComerciais)
+  };
+}
+
 function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoes = {}) {
   const doc = objeto(documento || espelho.documentoComercialCanonico);
   const blocos = normalizarBlocosCanonicosV26(doc);
@@ -2110,6 +2190,9 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
   const linhas = [];
   const vistos = new Set();
   const linksAliRenderizados = new Set();
+  const classificacaoVisual = classificacaoVisualAtivaV26(template)
+    ? classificacaoVisualOferta(fatosClassificacaoVisualV26(doc, espelho, blocosOrdenados))
+    : "";
   const instrucaoCupomTexto = blocosOrdenados.find(bloco => bloco.tipo === "instrucao_cupom")?.textoOriginal || "";
   const moedasTextoBruto = blocosOrdenados.find(bloco => bloco.tipo === "moedas")?.textoOriginal || "";
   const linksMoveisAli = blocosOrdenados
@@ -2156,8 +2239,9 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
     const adicionado = adicionarBlocoUnico(linhas, bloco.tipo, linha);
     if (adicionado && chaveDedupe) vistos.add(chaveDedupe);
   }
+  inserirClassificacaoVisualV26(linhas, classificacaoVisual);
 
-  const mensagem = linhas.map(item => item.linha).join("\n\n");
+  const mensagem = montarMensagemCompactaV26(linhas);
   return {
     ok: Boolean(mensagem),
     modo: "shadow",
