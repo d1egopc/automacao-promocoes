@@ -24,6 +24,9 @@ const {
   imagemUrlEfemeraUniversal,
   imagemUrlValidaUniversal
 } = require("../../imagens/resolver-imagem-universal");
+const {
+  resolverImagemCanonicaFinalEvento
+} = require("../../imagens/cache-canonico-evento");
 const socialMediaStorage = require("../../social/social-media-storage");
 const {
   compararRadarMirrorComImportador,
@@ -970,6 +973,58 @@ function aplicarFalhaCanonicaEventoOferta(oferta = {}, imagemCanonica = {}) {
   };
 }
 
+function aplicarImagemCanonicaFinalOferta(oferta = {}, imagemCanonica = {}) {
+  const metadata = objetoSeguro(oferta.metadata);
+  const temImagem = Boolean(imagemCanonica?.imagemCanonicaDuravel || imagemCanonica?.imagem);
+  const imagem = imagemCanonica.imagemCanonicaDuravel || imagemCanonica.imagem || "";
+  const imagemCacheCanonico = {
+    ...objetoSeguro(metadata.imagemCacheCanonico),
+    chave: imagemCanonica.chave || metadata.imagemCacheCanonico?.chave || "",
+    produtoId: imagemCanonica.produtoId || metadata.imagemCacheCanonico?.produtoId || "",
+    status: imagemCanonica.imagemStatus || (temImagem ? "imagem_canonica_final" : "nao_resolvida"),
+    motivo: imagemCanonica.motivo || (temImagem ? "" : "nenhuma_fonte_de_imagem"),
+    origem: imagemCanonica.imagemOrigem || metadata.imagemCacheCanonico?.origem || "",
+    imagemCanonicaDuravel: imagem,
+    imagemEnviavel: temImagem,
+    preliminar: false,
+    enriquecimentoPendente: false,
+    imagemCanonicaFinal: true,
+    materializacoes: Number(imagemCanonica.materializacoes || metadata.imagemCacheCanonico?.materializacoes || 0),
+    cacheHit: imagemCanonica.cacheHit === true,
+    resolvidaEm: imagemCanonica.resolvidaEm || new Date().toISOString(),
+    ...(imagemCanonica.radarMirrorMaterializacao ? {
+      radarMirrorMaterializacao: imagemCanonica.radarMirrorMaterializacao
+    } : {})
+  };
+
+  return {
+    ...oferta,
+    ...(temImagem ? {
+      imagem,
+      imagemUrl: imagem,
+      imagemOrigem: imagemCanonica.imagemOrigem || oferta.imagemOrigem || "imagem_canonica_final",
+      imagemStatus: imagemCanonica.imagemStatus || "imagem_canonica_final",
+      imagemRecuperavel: true,
+      imagemDuravel: true,
+      imagemEnviavel: true
+    } : {
+      imagemStatus: imagemCanonica.imagemStatus || oferta.imagemStatus || "nao_resolvida",
+      imagemEnviavel: false
+    }),
+    metadata: {
+      ...metadata,
+      imagemCanonicaFinal: true,
+      imagemCanonicaDuravel: imagem,
+      imagemOrigem: temImagem ? (imagemCanonica.imagemOrigem || oferta.imagemOrigem || "imagem_canonica_final") : (oferta.imagemOrigem || "nenhuma"),
+      imagemStatus: temImagem ? (imagemCanonica.imagemStatus || "imagem_canonica_final") : "nao_resolvida",
+      imagemRecuperavel: temImagem,
+      imagemDuravel: temImagem,
+      imagemEnviavel: temImagem,
+      imagemCacheCanonico
+    }
+  };
+}
+
 async function materializarImagemRadarMirrorSeNecessario(ofertaEntrada = {}, contexto = {}) {
   const oferta = ofertaEntrada && typeof ofertaEntrada === "object" ? ofertaEntrada : {};
   const imagemCanonicaEvento = encontrarImagemCanonicaEvento(oferta, contexto);
@@ -1825,6 +1880,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     if (imagemCanonica.imagem) {
       oferta.imagem = imagemCanonica.imagem;
       oferta.imagemOrigem = imagemCanonica.origem;
+      oferta.linkResolvidoImagem = imagemCanonica.linkResolvido || "";
       imagemResolucaoEngine = {
         imagem: imagemCanonica.imagem,
         origem: imagemCanonica.origem,
@@ -1835,13 +1891,37 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     }
   }
 
+  const imagemCanonicaFinal = await resolverImagemCanonicaFinalEvento({
+    eventoId: job.evento_id,
+    marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",
+    linksExtraidos: evento.links_extraidos || [],
+    metadataEvento: {
+      ...objetoSeguro(job.metadata?.metadataEvento),
+      ...objetoSeguro(evento.metadata)
+    },
+    ofertaEntrada,
+    ofertaEnriquecida: oferta,
+    job,
+    link
+  });
+  oferta = aplicarImagemCanonicaFinalOferta(oferta, imagemCanonicaFinal);
+  if (imagemCanonicaFinal.imagemCanonicaDuravel) {
+    imagemResolucaoEngine = {
+      imagem: imagemCanonicaFinal.imagemCanonicaDuravel,
+      origem: imagemCanonicaFinal.imagemOrigem || "imagem_canonica_final",
+      tipo: "imagem_canonica_final",
+      fallbackUsado: !temImagemImporter,
+      motivo: imagemCanonicaFinal.motivo || ""
+    };
+  }
+
   const identidadeImagem = detectarIdentidadeProdutoUniversal(oferta);
   const motivoFallbackImagem = imagemResolucaoEngine.motivo === "nenhuma_fonte_de_imagem"
     ? "sem_candidato"
     : imagemResolucaoEngine.motivo;
   const motivoSemImagem = oferta.imagem
     ? ""
-    : (imagemCanonica.motivo || imagemAnterior.motivo || motivoFallbackImagem || "sem_candidato");
+    : (imagemCanonicaFinal.motivo || imagemCanonica.motivo || imagemAnterior.motivo || motivoFallbackImagem || "nenhuma_fonte_de_imagem");
   const imagemOrigemFinal = oferta.imagemOrigem || campoImagemImporter || "nenhuma";
   const imagemFallbackUsado = Boolean(oferta.imagem && (imagemResolucaoEngine.fallbackUsado === true || !temImagemImporter));
   const imagemAusenteMotivo = oferta.imagem ? "" : motivoSemImagem;
@@ -1862,8 +1942,8 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       titulo: oferta.titulo || "",
       produtoIdDetectado: identidadeImagem.produtoIdDetectado || "",
       linkOriginal: oferta.linkOriginal || link?.url_original || "",
-      linkResolvido: imagemCanonica.linkResolvido || oferta.linkExpandido || link?.url_expandida || "",
-      statusHttp: imagemCanonica.statusHttp ?? oferta.statusHttp ?? ofertaEntrada.statusHttp ?? null,
+      linkResolvido: imagemCanonicaFinal.linkResolvido || imagemCanonica.linkResolvido || oferta.linkExpandido || link?.url_expandida || "",
+      statusHttp: imagemCanonicaFinal.statusHttp ?? imagemCanonica.statusHttp ?? oferta.statusHttp ?? ofertaEntrada.statusHttp ?? null,
       temImagemParser: temImagemImporter,
       temImagemHistorica: Boolean(imagemAnterior.imagem),
       imagemFinal: oferta.imagem || "",
@@ -1907,8 +1987,8 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       enviavel: oferta.imagemEnviavel === true,
       materializacao: materializacaoRadarMirror.status || "",
       temImagemHistorica: Boolean(imagemAnterior.imagem),
-      linkResolvidoImagem: imagemCanonica.linkResolvido || oferta.linkExpandido || "",
-      statusHttpImagem: imagemCanonica.statusHttp ?? oferta.statusHttp ?? ofertaEntrada.statusHttp ?? null
+      linkResolvidoImagem: imagemCanonicaFinal.linkResolvido || imagemCanonica.linkResolvido || oferta.linkExpandido || "",
+      statusHttpImagem: imagemCanonicaFinal.statusHttp ?? imagemCanonica.statusHttp ?? oferta.statusHttp ?? ofertaEntrada.statusHttp ?? null
     }
   }, radarMirrorComparado);
   if (radarMirrorComparado) {

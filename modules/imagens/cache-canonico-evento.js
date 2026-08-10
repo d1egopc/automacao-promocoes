@@ -16,6 +16,10 @@ function objetoSeguro(valor = {}) {
   return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
 }
 
+function listaSegura(valor) {
+  return Array.isArray(valor) ? valor : [];
+}
+
 function normalizarMarketplace(valor = "") {
   const marketplace = texto(valor).toLowerCase().replace(/[\s_-]+/g, "");
   if (marketplace === "ml" || marketplace.includes("mercadolivre")) return "mercadolivre";
@@ -180,6 +184,26 @@ function resultadoImagemCanonica({ chave, eventoId, marketplace, produtoId, imag
     resolvidaEm: new Date().toISOString(),
     ...extra
   };
+}
+
+function resultadoImagemPreliminar({ chave, eventoId, marketplace, produtoId, status = "nao_resolvida_ainda", motivo = "enriquecimento_oficial_pendente", materializacoes = 0, radarMirrorMaterializacao = null } = {}) {
+  return resultadoImagemCanonica({
+    chave,
+    eventoId,
+    marketplace,
+    produtoId,
+    status,
+    motivo,
+    extra: {
+      preliminar: true,
+      enriquecimentoPendente: true,
+      imagemCanonicaFinal: false,
+      materializacoes,
+      ...(radarMirrorMaterializacao ? {
+        radarMirrorMaterializacao
+      } : {})
+    }
+  });
 }
 
 async function resolverPorRadarMirror({ chave, eventoId, marketplace, produtoId, metadataEvento, deps = {} } = {}) {
@@ -363,6 +387,21 @@ async function resolverImagemCanonicaEvento(entrada = {}, deps = {}) {
     return { ...resultado, cacheHit: false };
   }
 
+  if (deps.preliminar === true) {
+    const preliminar = resultadoImagemPreliminar({
+      chave,
+      eventoId,
+      marketplace,
+      produtoId,
+      status: radarMirrorMaterializacao ? "radar_falhou_enriquecimento_pendente" : "nao_resolvida_ainda",
+      motivo: radarMirrorMaterializacao ? "fonte_radar_imagem_falhou" : "enriquecimento_oficial_pendente",
+      materializacoes,
+      radarMirrorMaterializacao
+    });
+    cacheImagemCanonicaEvento.set(chave, preliminar);
+    return { ...preliminar, cacheHit: false };
+  }
+
   if (marketplace === "mercadolivre" && /^MLB\d+$/.test(texto(produtoId).toUpperCase())) {
     const historico = await buscarHistoricoMesmoMlb(produtoId, deps);
     const historicoResolvido = resolverImagemUniversal({ imagem: historico.imagem || "" });
@@ -424,6 +463,209 @@ async function resolverImagemCanonicaEvento(entrada = {}, deps = {}) {
   return { ...semImagem, cacheHit: false };
 }
 
+function mesclarProdutoMetadata(metadataEvento = {}, ofertaEnriquecida = {}) {
+  const metadataOferta = objetoSeguro(ofertaEnriquecida.metadata);
+  const produtoEvento = objetoSeguro(metadataEvento.produto);
+  const produtoOferta = objetoSeguro(metadataOferta.produto);
+  return {
+    ...produtoEvento,
+    ...produtoOferta,
+    produtoIdDetectado: texto(
+      ofertaEnriquecida.produtoIdDetectado ||
+      ofertaEnriquecida.produtoId ||
+      ofertaEnriquecida.itemId ||
+      produtoOferta.produtoIdDetectado ||
+      produtoOferta.produtoId ||
+      produtoOferta.itemId ||
+      produtoEvento.produtoIdDetectado ||
+      produtoEvento.produtoId ||
+      produtoEvento.itemId
+    ),
+    mlb: texto(
+      ofertaEnriquecida.mlb ||
+      produtoOferta.mlb ||
+      produtoEvento.mlb ||
+      ofertaEnriquecida.produtoIdDetectado ||
+      ofertaEnriquecida.itemId
+    ),
+    imagemCandidatos: [
+      ...listaSegura(produtoOferta.imagemCandidatos),
+      ...listaSegura(ofertaEnriquecida.imagemCandidatos),
+      ...listaSegura(produtoEvento.imagemCandidatos)
+    ],
+    images: [
+      ...listaSegura(produtoOferta.images),
+      ...listaSegura(ofertaEnriquecida.images),
+      ...listaSegura(produtoEvento.images)
+    ],
+    pictures: [
+      ...listaSegura(produtoOferta.pictures),
+      ...listaSegura(ofertaEnriquecida.pictures),
+      ...listaSegura(produtoEvento.pictures)
+    ],
+    secure_thumbnail: texto(ofertaEnriquecida.secure_thumbnail || produtoOferta.secure_thumbnail || produtoEvento.secure_thumbnail),
+    thumbnail: texto(ofertaEnriquecida.thumbnail || produtoOferta.thumbnail || produtoEvento.thumbnail),
+    thumbnailUrl: texto(ofertaEnriquecida.thumbnailUrl || produtoOferta.thumbnailUrl || produtoEvento.thumbnailUrl),
+    picture_url: texto(ofertaEnriquecida.picture_url || produtoOferta.picture_url || produtoEvento.picture_url)
+  };
+}
+
+function montarOfertaImagemFinal(metadataEvento = {}, ofertaEnriquecida = {}) {
+  const metadataOferta = objetoSeguro(ofertaEnriquecida.metadata);
+  const produto = mesclarProdutoMetadata(metadataEvento, ofertaEnriquecida);
+  return {
+    ...objetoSeguro(metadataEvento),
+    ...ofertaEnriquecida,
+    metadata: {
+      ...metadataEvento,
+      ...metadataOferta,
+      produto
+    }
+  };
+}
+
+function resultadoFinalDeImagemResolvida({ chave, eventoId, marketplace, produtoId, resolvida = {}, origemFallback = "", statusFallback = "imagem_canonica_final", extra = {} } = {}) {
+  return resultadoImagemCanonica({
+    chave,
+    eventoId,
+    marketplace,
+    produtoId,
+    imagem: resolvida.imagem || resolvida.imagemUrl || "",
+    origem: resolvida.imagemOrigem || origemFallback || "imagem_canonica_final",
+    status: resolvida.imagemStatus || statusFallback,
+    extra: {
+      imagemCanonicaFinal: true,
+      enriquecimentoPendente: false,
+      imagemTentativas: resolvida.imagemTentativas || [],
+      ...extra
+    }
+  });
+}
+
+async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
+  const eventoId = entrada.eventoId;
+  const marketplace = normalizarMarketplace(entrada.marketplace || entrada.marketplaceDetectado || entrada.ofertaEnriquecida?.marketplace || "");
+  const metadataEvento = objetoSeguro(entrada.metadataEvento);
+  const ofertaEnriquecida = objetoSeguro(entrada.ofertaEnriquecida);
+  const produtoMetadata = mesclarProdutoMetadata(metadataEvento, ofertaEnriquecida);
+  const produtoId = detectarProdutoIdCanonico({
+    marketplace,
+    linksExtraidos: [
+      ...listaSegura(entrada.linksExtraidos),
+      ofertaEnriquecida.linkExpandido,
+      ofertaEnriquecida.linkOriginal,
+      ofertaEnriquecida.linkAfiliado,
+      ofertaEnriquecida.urlFinal,
+      ofertaEnriquecida.linkResolvidoImagem
+    ].filter(Boolean),
+    metadataEvento: {
+      ...metadataEvento,
+      produto: produtoMetadata,
+      produtoIdDetectado: produtoMetadata.produtoIdDetectado || produtoMetadata.produtoId || produtoMetadata.mlb || ""
+    }
+  });
+  const chave = chaveImagemCanonicaEvento({ eventoId, marketplace, produtoId });
+  const cacheAtual = {
+    ...objetoSeguro(objetoSeguro(ofertaEnriquecida.metadata).imagemCacheCanonico),
+    ...objetoSeguro(cacheImagemCanonicaEvento.get(chave))
+  };
+  if (cacheAtual.imagemCanonicaDuravel && cacheAtual.imagemCanonicaFinal === true) {
+    return { ...cacheAtual, cacheHit: true };
+  }
+
+  const ofertaImagem = montarOfertaImagemFinal(metadataEvento, ofertaEnriquecida);
+  const resolvida = resolverImagemUniversal(ofertaImagem, {
+    evento: { metadata: metadataEvento },
+    job: { metadata: { metadataEvento } },
+    ofertaEntrada: entrada.ofertaEntrada,
+    link: entrada.link
+  });
+  if (resolvida.imagem) {
+    const resultado = resultadoFinalDeImagemResolvida({
+      chave,
+      eventoId,
+      marketplace,
+      produtoId,
+      resolvida,
+      extra: {
+        materializacoes: Number(cacheAtual.materializacoes || 0),
+        ...(cacheAtual.radarMirrorMaterializacao ? { radarMirrorMaterializacao: cacheAtual.radarMirrorMaterializacao } : {}),
+        linkResolvido: ofertaEnriquecida.linkResolvidoImagem || ofertaEnriquecida.linkExpandido || ofertaEnriquecida.urlFinal || ""
+      }
+    });
+    cacheImagemCanonicaEvento.set(chave, resultado);
+    return { ...resultado, cacheHit: false };
+  }
+
+  let ultimoMotivo = "nenhuma_fonte_de_imagem";
+  if (marketplace === "mercadolivre" && /^MLB\d+$/.test(texto(produtoId).toUpperCase())) {
+    const historico = await buscarHistoricoMesmoMlb(produtoId, deps);
+    const historicoResolvido = resolverImagemUniversal({ imagem: historico.imagem || "" });
+    if (historicoResolvido.imagem) {
+      const resultado = resultadoImagemCanonica({
+        chave,
+        eventoId,
+        marketplace,
+        produtoId,
+        imagem: historicoResolvido.imagem,
+        origem: historico.origem || "historico_mesmo_mlb",
+        status: "historico_mesmo_mlb",
+        extra: {
+          imagemCanonicaFinal: true,
+          enriquecimentoPendente: false,
+          materializacoes: Number(cacheAtual.materializacoes || 0),
+          ...(cacheAtual.radarMirrorMaterializacao ? { radarMirrorMaterializacao: cacheAtual.radarMirrorMaterializacao } : {})
+        }
+      });
+      cacheImagemCanonicaEvento.set(chave, resultado);
+      return { ...resultado, cacheHit: false };
+    }
+    ultimoMotivo = historico.motivo || ultimoMotivo;
+
+    const oficial = await buscarImagemOficialMl(produtoId, deps);
+    const oficialResolvida = resolverImagemUniversal({ imagem: oficial.imagem || "" });
+    if (oficialResolvida.imagem) {
+      const resultado = resultadoImagemCanonica({
+        chave,
+        eventoId,
+        marketplace,
+        produtoId,
+        imagem: oficialResolvida.imagem,
+        origem: oficial.origem || "api_oficial_mlb",
+        status: "api_oficial_mlb",
+        extra: {
+          imagemCanonicaFinal: true,
+          enriquecimentoPendente: false,
+          materializacoes: Number(cacheAtual.materializacoes || 0),
+          ...(cacheAtual.radarMirrorMaterializacao ? { radarMirrorMaterializacao: cacheAtual.radarMirrorMaterializacao } : {}),
+          linkResolvido: oficial.linkResolvido || "",
+          statusHttp: oficial.statusHttp ?? null
+        }
+      });
+      cacheImagemCanonicaEvento.set(chave, resultado);
+      return { ...resultado, cacheHit: false };
+    }
+    ultimoMotivo = oficial.motivo || ultimoMotivo;
+  }
+
+  const semImagemFinal = resultadoImagemCanonica({
+    chave,
+    eventoId,
+    marketplace,
+    produtoId,
+    status: "nao_resolvida",
+    motivo: ultimoMotivo || "nenhuma_fonte_de_imagem",
+    extra: {
+      imagemCanonicaFinal: true,
+      enriquecimentoPendente: false,
+      materializacoes: Number(cacheAtual.materializacoes || 0),
+      ...(cacheAtual.radarMirrorMaterializacao ? { radarMirrorMaterializacao: cacheAtual.radarMirrorMaterializacao } : {})
+    }
+  });
+  cacheImagemCanonicaEvento.set(chave, semImagemFinal);
+  return { ...semImagemFinal, cacheHit: false };
+}
+
 function aplicarImagemCanonicaMetadata(metadata = {}, imagemCanonica = {}) {
   const base = objetoSeguro(metadata);
   if (!imagemCanonica?.imagemCanonicaDuravel) {
@@ -432,12 +674,23 @@ function aplicarImagemCanonicaMetadata(metadata = {}, imagemCanonica = {}) {
       && radarMirrorMaterializacao.origem === "radar_mirror/mensagem";
     return {
       ...base,
+      imagem: "",
+      imagemUrl: "",
+      imagemCanonicaDuravel: "",
+      imagemOrigem: imagemCanonica.imagemOrigem || "nenhuma",
+      imagemStatus: imagemCanonica.imagemStatus || "nao_resolvida_ainda",
+      imagemRecuperavel: false,
+      imagemDuravel: false,
+      imagemEnviavel: false,
       imagemCacheCanonico: {
         chave: imagemCanonica.chave || "",
         produtoId: imagemCanonica.produtoId || "",
         status: imagemCanonica.imagemStatus || "nao_resolvida",
         motivo: imagemCanonica.motivo || "sem_candidato",
         imagemEnviavel: false,
+        preliminar: imagemCanonica.preliminar === true,
+        enriquecimentoPendente: imagemCanonica.enriquecimentoPendente === true,
+        imagemCanonicaFinal: imagemCanonica.imagemCanonicaFinal === true,
         materializacoes: Number(imagemCanonica.materializacoes || 0),
         ...(falhaRadarMirror ? {
           radarMirrorMaterializacao,
@@ -481,6 +734,9 @@ function aplicarImagemCanonicaMetadata(metadata = {}, imagemCanonica = {}) {
       origem: imagemCanonica.imagemOrigem,
       imagemCanonicaDuravel: imagemCanonica.imagemCanonicaDuravel,
       imagemEnviavel: true,
+      preliminar: imagemCanonica.preliminar === true,
+      enriquecimentoPendente: imagemCanonica.enriquecimentoPendente === true,
+      imagemCanonicaFinal: imagemCanonica.imagemCanonicaFinal === true,
       materializacoes: Number(imagemCanonica.materializacoes || 0),
       ...(imagemCanonica.radarMirrorMaterializacao ? {
         radarMirrorMaterializacao: imagemCanonica.radarMirrorMaterializacao
@@ -497,6 +753,7 @@ function _limparCacheImagemCanonicaEvento() {
 
 module.exports = {
   resolverImagemCanonicaEvento,
+  resolverImagemCanonicaFinalEvento,
   aplicarImagemCanonicaMetadata,
   chaveImagemCanonicaEvento,
   detectarProdutoIdCanonico,

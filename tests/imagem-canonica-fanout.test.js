@@ -188,6 +188,10 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     for (const metadata of metadatas) {
       assert.strictEqual(metadata.imagemEnviavel, false);
       assert.strictEqual(metadata.imagemCanonicaDuravel, "");
+      assert.strictEqual(metadata.imagemStatus, "radar_falhou_enriquecimento_pendente");
+      assert.strictEqual(metadata.imagemCacheCanonico.motivo, "fonte_radar_imagem_falhou");
+      assert.strictEqual(metadata.imagemCacheCanonico.enriquecimentoPendente, true);
+      assert.strictEqual(metadata.imagemCacheCanonico.imagemCanonicaFinal, false);
       assert.strictEqual(metadata.imagemCacheCanonico.materializacoes, 1);
       assert.strictEqual(metadata.imagemCacheCanonico.bloquearRematerializacaoRadar, true);
       assert.strictEqual(metadata.imagemCacheCanonico.radarMirrorMaterializacao.status, "falha");
@@ -378,10 +382,11 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
   {
     const {
       resolverImagemCanonicaEvento,
+      resolverImagemCanonicaFinalEvento,
       _limparCacheImagemCanonicaEvento
     } = require("../modules/imagens/cache-canonico-evento");
     _limparCacheImagemCanonicaEvento();
-    const resultado = await resolverImagemCanonicaEvento({
+    const preliminar = await resolverImagemCanonicaEvento({
       eventoId: 9400,
       marketplace: "mercadolivre",
       linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-1111111111-sem-imagem"],
@@ -389,14 +394,40 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
         radarMirror: { midia: { imagemOrigem: "mensagem", imagemOriginal: mmg("sem-fonte") } }
       }
     }, {
+      preliminar: true,
       fetchImpl: async () => ({ ok: false, status: 404 }),
       buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" }),
       buscarImagemOficialMl: async () => ({ imagem: "", motivo: "api_oficial_mlb_sem_imagem" })
     });
 
+    assert.strictEqual(preliminar.ok, false);
+    assert.strictEqual(preliminar.imagemCanonicaDuravel, "");
+    assert.strictEqual(preliminar.imagemEnviavel, false);
+    assert.strictEqual(preliminar.imagemStatus, "radar_falhou_enriquecimento_pendente");
+    assert.strictEqual(preliminar.motivo, "fonte_radar_imagem_falhou");
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9400,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-1111111111-sem-imagem"],
+      metadataEvento: {
+        radarMirror: { midia: { imagemOrigem: "mensagem", imagemOriginal: mmg("sem-fonte") } }
+      },
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        titulo: "SEM IMAGEM FINAL",
+        produtoIdDetectado: "MLB1111111111",
+        linkOriginal: "https://produto.mercadolivre.com.br/MLB-1111111111-sem-imagem"
+      }
+    }, {
+      buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" }),
+      buscarImagemOficialMl: async () => ({ imagem: "", motivo: "api_oficial_mlb_sem_imagem" })
+    });
+
     assert.strictEqual(resultado.ok, false);
-    assert.strictEqual(resultado.imagemCanonicaDuravel, "");
-    assert.strictEqual(resultado.imagemEnviavel, false);
+    assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
+    assert.strictEqual(resultado.imagemCanonicaFinal, true);
+    assert.strictEqual(resultado.enriquecimentoPendente, false);
     assert.strictEqual(resultado.motivo, "api_oficial_mlb_sem_imagem");
   }
 
@@ -466,6 +497,123 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
   }
 
   {
+    const {
+      resolverImagemCanonicaEvento,
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const fetchCount = { count: 0 };
+    const base = {
+      eventoId: 9650,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://meli.la/2hPouUu"],
+      metadataEvento: {
+        radarMirror: { midia: { imagemOrigem: "mensagem", imagemOriginal: mmg("tv-quarto") } },
+        textoOriginal: "TV PARA VOCÊ COLOCAR NO QUARTO\nDe: 2399\nPor: 1340\nCupom: VIPNOML"
+      }
+    };
+    const preliminar = await resolverImagemCanonicaEvento(base, {
+      preliminar: true,
+      fetchImpl: fetchImagemInvalida(fetchCount),
+      storage: storageSemImagem()
+    });
+    assert.strictEqual(preliminar.imagemStatus, "radar_falhou_enriquecimento_pendente");
+    assert.strictEqual(fetchCount.count, 1);
+
+    const linksAfiliados = [
+      "https://meli.la/workspace-a",
+      "https://meli.la/workspace-b",
+      "https://meli.la/workspace-c"
+    ];
+    const resultados = [];
+    for (const linkAfiliado of linksAfiliados) {
+      resultados.push(await resolverImagemCanonicaFinalEvento({
+        ...base,
+        ofertaEnriquecida: {
+          marketplace: "mercadolivre",
+          titulo: "TV PARA VOCÊ COLOCAR NO QUARTO",
+          preco: 1340,
+          precoOriginal: 2399,
+          cupom: "VIPNOML",
+          produtoIdDetectado: "MLB2222222222",
+          linkOriginal: "https://meli.la/2hPouUu",
+          linkExpandido: "https://produto.mercadolivre.com.br/MLB-2222222222-tv-para-quarto-_JM",
+          linkAfiliado,
+          jsonLd: { image: url("tv-quarto-jsonld") },
+          metadata: {
+            produto: {
+              imagemCandidatos: [url("tv-quarto-jsonld")],
+              pictures: [{ secure_url: url("tv-quarto-picture") }]
+            }
+          }
+        }
+      }, {
+        buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); },
+        buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); }
+      }));
+    }
+
+    assert.deepStrictEqual(resultados.map(item => item.imagemCanonicaDuravel), [
+      url("tv-quarto-jsonld"),
+      url("tv-quarto-jsonld"),
+      url("tv-quarto-jsonld")
+    ]);
+    assert(resultados.slice(1).every(item => item.cacheHit === true));
+    assert.strictEqual(resultados[0].imagemOrigem, "jsonLd.image");
+    assert.strictEqual(resultados[0].imagemCanonicaFinal, true);
+    assert.strictEqual(resultados[0].enriquecimentoPendente, false);
+    assert.deepStrictEqual(linksAfiliados, [
+      "https://meli.la/workspace-a",
+      "https://meli.la/workspace-b",
+      "https://meli.la/workspace-c"
+    ]);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const fixtures = [
+      ["CHEIROSÃO DE 212", "MLB3333333333", "https://meli.la/1y2uJcP", url("cheirosao-jsonld")],
+      ["ESSE COMPRESSOR FAZ TUDO E MAIS UM POUCO", "MLB4444444444", "https://meli.la/2WEQqho", url("compressor-og")],
+      ["MUITOS KITS JOICO", "MLB5181827144", "https://meli.la/2Z29syn", url("joico-picture")],
+      ["NOTEBOOK EM PROMO", "MLB5356528958", "https://meli.la/1Q4WTgR", url("notebook-thumbnail")],
+      ["Adidas Adizero", "MLB3999119695", "https://produto.mercadolivre.com.br/MLB-3999119695-adidas-_JM", url("adidas-jsonld")],
+      ["Shorts Esportivo", "MLB5159817994", "https://produto.mercadolivre.com.br/MLB-5159817994-shorts-_JM", url("shorts-jsonld")],
+      ["Pote Marmita", "MLB5974804996", "https://produto.mercadolivre.com.br/MLB-5974804996-pote-_JM", url("pote-jsonld")],
+      ["SENTE A PRESSÃO", "MLB5555555555", "https://meli.la/sente-a-pressao", url("pressao-jsonld")]
+    ];
+
+    for (const [titulo, mlb, linkOriginal, imagem] of fixtures) {
+      const resultado = await resolverImagemCanonicaFinalEvento({
+        eventoId: `fixture-${mlb}`,
+        marketplace: "mercadolivre",
+        linksExtraidos: [linkOriginal],
+        metadataEvento: {},
+        ofertaEnriquecida: {
+          marketplace: "mercadolivre",
+          titulo,
+          produtoIdDetectado: mlb,
+          linkOriginal,
+          linkExpandido: linkOriginal.includes("produto.mercadolivre.com.br")
+            ? linkOriginal
+            : `https://produto.mercadolivre.com.br/${mlb}-${titulo.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-_JM`,
+          metadata: {
+            produto: {
+              imagemCandidatos: [imagem]
+            }
+          }
+        }
+      });
+      assert.strictEqual(resultado.imagemCanonicaDuravel, imagem, titulo);
+      assert.strictEqual(resultado.imagemCanonicaFinal, true, titulo);
+    }
+  }
+
+  {
     const { retorno, metadatas } = await fanoutComImagemCanonica({
       metadataEvento: {
         radarMirror: {
@@ -483,7 +631,9 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
 
     assert.strictEqual(retorno.criados, 3);
     assert.strictEqual(metadatas[0].imagemEnviavel, false);
-    assert.strictEqual(metadatas[0].imagemCacheCanonico.motivo, "cache_canonico_imagem_falhou");
+    assert.strictEqual(metadatas[0].imagemCacheCanonico.status, "radar_falhou_enriquecimento_pendente");
+    assert.strictEqual(metadatas[0].imagemCacheCanonico.motivo, "fonte_radar_imagem_falhou");
+    assert.strictEqual(metadatas[0].imagemCacheCanonico.enriquecimentoPendente, true);
   }
 
   {

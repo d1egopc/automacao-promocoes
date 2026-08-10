@@ -188,7 +188,10 @@ async function resolverImagemCanonicaEventoSeguro({ eventoId, marketplace, links
       marketplace,
       linksExtraidos,
       metadataEvento
-    }, deps.imagemCanonica || {});
+    }, {
+      ...(deps.imagemCanonica || {}),
+      preliminar: true
+    });
   } catch (erro) {
     console.log("[ENGINE-IMAGEM-CACHE-CANONICO-ERRO]", JSON.stringify({
       eventoId: eventoId || null,

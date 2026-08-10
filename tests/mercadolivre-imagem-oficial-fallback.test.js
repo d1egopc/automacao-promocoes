@@ -123,6 +123,30 @@ async function comFetchMock(respostas, fn) {
   }
 
   {
+    const urlRica = "https://produto.mercadolivre.com.br/MLB-7777777777-sente-a-presso-_JM";
+    const imagemRica = "https://http2.mlstatic.com/D_NQ_NP_SENTE-PRESSAO-MLB.webp";
+    const { retorno, chamadas } = await comFetchMock([
+      respostaHtml(200, `<html><head><link rel="canonical" href="${urlRica}"></head><body></body></html>`),
+      {
+        status: 200,
+        url: urlRica,
+        text: async () => `<script type="application/ld+json">{"@type":"Product","image":"${imagemRica}"}</script>`
+      }
+    ], () => buscarImagemCanonicaMercadoLivre({
+      marketplace: "mercadolivre",
+      linkOriginal: "https://produto.mercadolivre.com.br/MLB7777777777",
+      preco: 145,
+      cupom: "VIPNOML"
+    }));
+
+    assert.strictEqual(chamadas.length, 2);
+    assert.strictEqual(chamadas[1].url, urlRica);
+    assert.strictEqual(retorno.imagem, imagemRica);
+    assert.strictEqual(retorno.origem, "canonical.jsonLd.image");
+    assert.strictEqual(retorno.linkResolvido, urlRica);
+  }
+
+  {
     const { retorno } = await comFetchMock([
       respostaJson(200, {
         id: "MLB3284064025",
