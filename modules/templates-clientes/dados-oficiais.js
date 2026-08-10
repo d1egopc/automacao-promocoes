@@ -58,14 +58,34 @@ function coletarPixRadarMirror(...fontes) {
   for (const fonte of fontes) {
     if (!fonte || typeof fonte !== "object") continue;
     const pix = fonte.comercial?.precoPix || fonte.precoPix || fonte.pix || {};
-    candidatos.push(
+    for (const valor of [
       pix.evidencia,
       pix.texto,
       pix.valorFormatado,
       pix.valor != null ? pix.evidencia || pix.valor : ""
-    );
+    ]) {
+      if (!valor) continue;
+      candidatos.push({
+        valor,
+        evidencia: pix.evidencia || pix.texto || "",
+        campo: "radar_mirror.precoPix",
+        origem: "radar_mirror",
+        papel: "preco_pix",
+        papelPixConfiavel: true
+      });
+    }
   }
-  return candidatos.filter(Boolean);
+  return candidatos;
+}
+
+function candidatoPixPublicavel(valor, campo = "", origem = "") {
+  return {
+    valor,
+    campo,
+    origem,
+    papel: "preco_pix",
+    papelPixConfiavel: /\bpix\b/i.test(texto(valor))
+  };
 }
 
 function camposPixPublicaveis(oferta = {}, v2 = {}) {
@@ -81,11 +101,14 @@ function camposPixPublicaveis(oferta = {}, v2 = {}) {
     ]
     : coletarPixRadarMirror(oferta.radarMirror, metadata.radarMirror, metadata.radarEspelhoComercial?.radarMirror);
   const api = [
-    v2.condicaoPix,
-    v2.precoPix,
-    oferta.precoPixReferenciaApi,
-    oferta.metadata?.precoPixReferenciaApi,
-    ...(!radarPixProtegido ? [oferta.condicaoPix, oferta.precoPix] : [])
+    candidatoPixPublicavel(v2.condicaoPix, "inteligenciaUniversalV2.condicaoPix", "inteligencia_universal"),
+    candidatoPixPublicavel(v2.precoPix, "inteligenciaUniversalV2.precoPix", "inteligencia_universal"),
+    candidatoPixPublicavel(oferta.precoPixReferenciaApi, "oferta.precoPixReferenciaApi", "api_referencia"),
+    candidatoPixPublicavel(oferta.metadata?.precoPixReferenciaApi, "metadata.precoPixReferenciaApi", "api_referencia"),
+    ...(!radarPixProtegido ? [
+      candidatoPixPublicavel(oferta.condicaoPix, "oferta.condicaoPix", "oferta"),
+      candidatoPixPublicavel(oferta.precoPix, "oferta.precoPix", "oferta")
+    ] : [])
   ];
   const resolucao = resolverPrecedenciaPrecoPix({ radar, api });
   const pix = resolucao.precoPix;

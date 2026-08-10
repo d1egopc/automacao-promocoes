@@ -15,6 +15,9 @@ const {
 const {
   construirEspelhoComercialV24
 } = require("../modules/ofc-v2/espelho-comercial");
+const {
+  resolverPrecedenciaPrecoPix
+} = require("../modules/radar/preco-pix-precedencia");
 
 assert.deepStrictEqual(
   normalizarCuponsSemanticos("Resgate o cupom R$100 OFF: https://s.shopee.com.br/6AjYyovVdx"),
@@ -200,6 +203,122 @@ assert.strictEqual(doisValoresSemPix.documentoComercialCanonico.precoDeTexto, "R
 assert.strictEqual(doisValoresSemPix.documentoComercialCanonico.precoPorTexto, "R$ 132,00", "frase sem Pix preserva Por");
 assert.strictEqual(doisValoresSemPix.documentoComercialCanonico.precoPixTexto, null, "dois valores sem papel Pix nao inventam precoPix");
 
+const mlOudSemPixComCandidatoContaminado = construirEspelhoComercialV24({
+  textoOriginal: [
+    "INSPIRADO NO OUD FOR GREATNESS",
+    "De R$ 319 por R$ 131",
+    "Cupom: CUPONEIRASITE",
+    "https://meli.la/26iwXqB"
+  ].join("\n"),
+  oferta: {
+    titulo: "INSPIRADO NO OUD FOR GREATNESS",
+    marketplace: "Mercado Livre",
+    precoAtual: 131,
+    precoOriginal: 319,
+    precoPix: "R$ 319",
+    linkAfiliado: "https://meli.la/26iwXqB"
+  },
+  ofertaEntrada: {
+    marketplace: "Mercado Livre",
+    precoPix: "R$ 319",
+    cupom: "CUPONEIRASITE"
+  }
+});
+
+assert.strictEqual(mlOudSemPixComCandidatoContaminado.documentoComercialCanonico.precoDeTexto, "R$ 319,00", "OUD preserva De");
+assert.strictEqual(mlOudSemPixComCandidatoContaminado.documentoComercialCanonico.precoPorTexto, "R$ 131,00", "OUD preserva Por");
+assert.strictEqual(mlOudSemPixComCandidatoContaminado.documentoComercialCanonico.precoPixTexto, null, "precoDe em candidato nu nao vira Pix");
+assert.ok(!/Pix:\s*R\$\s*319/i.test(mlOudSemPixComCandidatoContaminado.templateEspelhoShadow.mensagem), "OUD nao renderiza precoDe como Pix");
+
+const mlAmigoSemPixComCandidatoContaminado = construirEspelhoComercialV24({
+  textoOriginal: [
+    "MUITO CONFORTO PRO SEU GRANDE AMIGO",
+    "De R$ 288 por R$ 101",
+    "Cupom: SEMPREMODA",
+    "https://meli.la/2kNfdz9"
+  ].join("\n"),
+  oferta: {
+    titulo: "MUITO CONFORTO PRO SEU GRANDE AMIGO",
+    marketplace: "Mercado Livre",
+    precoAtual: 101,
+    precoOriginal: 288,
+    precoPix: "R$ 288",
+    linkAfiliado: "https://meli.la/2kNfdz9"
+  },
+  ofertaEntrada: {
+    marketplace: "Mercado Livre",
+    precoPix: "R$ 288",
+    cupom: "SEMPREMODA"
+  }
+});
+
+assert.strictEqual(mlAmigoSemPixComCandidatoContaminado.documentoComercialCanonico.precoDeTexto, "R$ 288,00", "AMIGO preserva De");
+assert.strictEqual(mlAmigoSemPixComCandidatoContaminado.documentoComercialCanonico.precoPorTexto, "R$ 101,00", "AMIGO preserva Por");
+assert.strictEqual(mlAmigoSemPixComCandidatoContaminado.documentoComercialCanonico.precoPixTexto, null, "precoDe 288 em candidato nu nao vira Pix");
+assert.ok(!/Pix:\s*R\$\s*288/i.test(mlAmigoSemPixComCandidatoContaminado.templateEspelhoShadow.mensagem), "AMIGO nao renderiza precoDe como Pix");
+
+const apiPixOficialSemRadar = resolverPrecedenciaPrecoPix({
+  radar: [],
+  api: [{ valor: "R$ 220", origem: "api_oficial", papel: "preco_pix", papelPixConfiavel: true }]
+});
+
+assert.strictEqual(apiPixOficialSemRadar.precoPix, "R$ 220", "API oficial inequivoca pode enriquecer Pix sem Radar");
+
+const apiPixNuSemProveniencia = resolverPrecedenciaPrecoPix({
+  radar: [],
+  api: [{ valor: "R$ 319", origem: "api_importador", papel: "preco_pix" }]
+});
+
+assert.strictEqual(apiPixNuSemProveniencia.precoPix, "", "valor monetario nu sem evidencia Pix nao vira Pix");
+
+const shopeeOffSemCodigo = construirEspelhoComercialV24({
+  textoOriginal: [
+    "Monitor LG Gamer 24 100Hz IPS 5ms Full HD - 24MS500-B",
+    "Por R$ 455",
+    "Resgate o cupom R$ 50 OFF: https://s.shopee.com.br/8AUdMMNQf9",
+    "https://s.shopee.com.br/2qTfCve7iP"
+  ].join("\n"),
+  oferta: {
+    titulo: "Monitor LG Gamer 24 100Hz IPS 5ms Full HD - 24MS500-B",
+    marketplace: "Shopee",
+    precoAtual: 455,
+    linkAfiliado: "https://s.shopee.com.br/2qTfCve7iP",
+    linksComerciais: [
+      { tipo: "resgate", papel: "link_resgate", ordemCaptura: 1, urlAfiliada: "https://s.shopee.com.br/8AUdMMNQf9" },
+      { tipo: "produto", papel: "link_produto", ordemCaptura: 2, urlAfiliada: "https://s.shopee.com.br/2qTfCve7iP" }
+    ]
+  },
+  ofertaEntrada: { marketplace: "Shopee" }
+});
+
+assert.strictEqual(shopeeOffSemCodigo.documentoComercialCanonico.cupomTexto, null, "R$50 OFF sem codigo nao cria cupomCodigo");
+assert.strictEqual(shopeeOffSemCodigo.documentoComercialCanonico.beneficioTexto, "R$ 50 OFF:", "R$50 OFF permanece como beneficio comercial");
+assert.strictEqual((shopeeOffSemCodigo.templateEspelhoShadow.mensagem.match(/R\$\s*50\s*OFF/gi) || []).length, 1, "R$50 OFF renderiza uma unica vez");
+assert.ok(shopeeOffSemCodigo.templateEspelhoShadow.mensagem.includes("Resgate:"), "link Resgate permanece renderizado");
+assert.ok(shopeeOffSemCodigo.templateEspelhoShadow.mensagem.includes("Confira aqui:"), "link Produto permanece renderizado");
+assert.ok(shopeeOffSemCodigo.templateEspelhoShadow.mensagem.includes("https://s.shopee.com.br/8AUdMMNQf9"), "URL Resgate preservada");
+assert.ok(shopeeOffSemCodigo.templateEspelhoShadow.mensagem.includes("https://s.shopee.com.br/2qTfCve7iP"), "URL Produto preservada");
+
+const shopeeCupomRealBeneficioDiferente = construirEspelhoComercialV24({
+  textoOriginal: [
+    "Oferta Shopee valida",
+    "Por R$ 199",
+    "Cupom: PROMO10",
+    "Beneficio: Brinde exclusivo",
+    "https://s.shopee.com.br/produto-real"
+  ].join("\n"),
+  oferta: {
+    titulo: "Oferta Shopee valida",
+    marketplace: "Shopee",
+    precoAtual: 199,
+    linkAfiliado: "https://s.shopee.com.br/produto-real"
+  },
+  ofertaEntrada: { marketplace: "Shopee", cupom: "PROMO10" }
+});
+
+assert.ok(/Cupom:\s*PROMO10/i.test(shopeeCupomRealBeneficioDiferente.templateEspelhoShadow.mensagem), "cupom textual real continua renderizado");
+assert.ok(/Brinde exclusivo/i.test(shopeeCupomRealBeneficioDiferente.templateEspelhoShadow.mensagem), "beneficio diferente pode coexistir com cupom real");
+
 const templateAmazon = gerarTemplateUniversal({
   titulo: "Chuveiro Fame",
   marketplace: "Amazon",
@@ -318,5 +437,51 @@ const ali = gerarTemplateUniversal({
 
 assert.ok(ali.includes("*APP:*\nhttps://ali/app"), "AliExpress APP preservado");
 assert.ok(ali.includes("*PC:*\nhttps://ali/pc"), "AliExpress PC preservado");
+
+const shopeeProdutoResgateTemplate = gerarTemplateUniversal({
+  titulo: "Shopee Produto Resgate",
+  marketplace: "Shopee",
+  precoAtual: 455,
+  linkAfiliado: "https://s.shopee.com.br/produto",
+  linksComerciais: [
+    { tipo: "resgate", papel: "link_resgate", ordemCaptura: 1, urlAfiliada: "https://s.shopee.com.br/resgate" },
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 2, urlAfiliada: "https://s.shopee.com.br/produto" }
+  ]
+});
+
+assert.ok(shopeeProdutoResgateTemplate.indexOf("*Resgate:*") < shopeeProdutoResgateTemplate.indexOf("*Confira aqui:*"), "Shopee Resgate vem antes de Produto");
+assert.ok(shopeeProdutoResgateTemplate.includes("https://s.shopee.com.br/resgate"), "Shopee Resgate preservado no template");
+assert.ok(shopeeProdutoResgateTemplate.includes("https://s.shopee.com.br/produto"), "Shopee Produto preservado no template");
+
+const aliAppMoedasPc = gerarTemplateUniversal({
+  titulo: "Ali APP Moedas PC",
+  marketplace: "AliExpress",
+  precoAtual: 97,
+  linkAfiliado: "https://ali/produto",
+  linksComerciais: [
+    { tipo: "app", papel: "link_app", ordemCaptura: 1, urlAfiliada: "https://ali/app" },
+    { tipo: "moedas", papel: "link_moedas", ordemCaptura: 2, urlAfiliada: "https://ali/moedas" },
+    { tipo: "pc", papel: "link_pc", ordemCaptura: 3, urlAfiliada: "https://ali/pc" }
+  ]
+});
+
+assert.ok(aliAppMoedasPc.indexOf("*APP:*") < aliAppMoedasPc.indexOf("*Moedas:*"), "AliExpress APP vem antes de Moedas");
+assert.ok(aliAppMoedasPc.indexOf("*Moedas:*") < aliAppMoedasPc.indexOf("*PC:*"), "AliExpress Moedas vem antes de PC");
+assert.ok(aliAppMoedasPc.includes("https://ali/moedas"), "AliExpress Moedas preservado");
+
+const aliMultiplosMesmoPapel = gerarTemplateUniversal({
+  titulo: "Ali multiplos APP",
+  marketplace: "AliExpress",
+  precoAtual: 97,
+  linkAfiliado: "https://ali/produto",
+  linksComerciais: [
+    { tipo: "app", papel: "link_app", ordemCaptura: 1, urlAfiliada: "https://ali/app-1" },
+    { tipo: "app", papel: "link_app", ordemCaptura: 2, urlAfiliada: "https://ali/app-2" },
+    { tipo: "pc", papel: "link_pc", ordemCaptura: 3, urlAfiliada: "https://ali/pc" }
+  ]
+});
+
+assert.ok(aliMultiplosMesmoPapel.indexOf("https://ali/app-1") < aliMultiplosMesmoPapel.indexOf("https://ali/app-2"), "multiplos links do mesmo papel preservam ordem");
+assert.ok(aliMultiplosMesmoPapel.includes("https://ali/pc"), "PC permanece com multiplos APP");
 
 console.log("fidelidade-semantica-cupom-beneficio-pix.test.js OK");

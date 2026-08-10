@@ -295,14 +295,33 @@ function extrairPrecoPixDocumento({ textoOriginal = "", linhaPor = "", linhaValo
     linhaPixRadar,
     /\bpix\b/i.test(precoPorTexto) ? precoPorTexto : ""
   ];
+  const candidatoApiPix = (valor, campo = "") => ({
+    valor,
+    campo,
+    origem: "api_importador",
+    papel: "preco_pix",
+    papelPixConfiavel: /\bpix\b/i.test(texto(valor))
+  });
   const api = [
-    ofertaEntrada.precoPix,
-    oferta.precoPix,
-    ofertaEntrada.condicaoPix,
-    oferta.condicaoPix
+    candidatoApiPix(ofertaEntrada.precoPix, "ofertaEntrada.precoPix"),
+    candidatoApiPix(oferta.precoPix, "oferta.precoPix"),
+    candidatoApiPix(ofertaEntrada.condicaoPix, "ofertaEntrada.condicaoPix"),
+    candidatoApiPix(oferta.condicaoPix, "oferta.condicaoPix")
   ];
-  const radarNormalizado = radar.map(candidato => extrairPrecoPixProprio(candidato) || textoPixValido(candidato)).filter(Boolean);
-  const apiNormalizado = api.map(candidato => extrairPrecoPixProprio(candidato) || textoPixValido(candidato)).filter(Boolean);
+  const radarNormalizado = radar.map(candidato => {
+    const normalizado = extrairPrecoPixProprio(candidato) || textoPixValido(candidato);
+    return normalizado ? {
+      valor: normalizado,
+      evidencia: candidato,
+      origem: "radar_texto_original",
+      papel: "preco_pix",
+      papelPixConfiavel: true
+    } : null;
+  }).filter(Boolean);
+  const apiNormalizado = api.map(candidato => {
+    const normalizado = extrairPrecoPixProprio(candidato.valor) || textoPixValido(candidato.valor);
+    return normalizado ? { ...candidato, valor: normalizado } : candidato;
+  }).filter(candidato => texto(candidato.valor));
   const resolucao = resolverPrecedenciaPrecoPix({ radar: radarNormalizado, api: apiNormalizado });
   const precoPix = resolucao.precoPix;
   if (precoPix) {
@@ -1031,12 +1050,16 @@ function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
 
   adicionarBlocoComercial(blocos, { tipo: "cupom_valor", textoOriginal: primeiroTexto(contexto.ofertaEntrada?.valorCupom, contexto.ofertaEntrada?.cupomValor, contexto.oferta?.valorCupom, contexto.oferta?.cupomValor), origem: "campos_estruturados.cupom_valor", confianca: "media" });
   adicionarBlocoComercial(blocos, { tipo: "cupom_percentual", textoOriginal: primeiroTexto(contexto.ofertaEntrada?.percentualCupom, contexto.ofertaEntrada?.cupomPercentual, contexto.oferta?.percentualCupom, contexto.oferta?.cupomPercentual), origem: "campos_estruturados.cupom_percentual", confianca: "media" });
+  const textoCupomSemCodigo = primeiroTexto(doc.instrucaoTexto, doc.beneficioTexto, doc.resgateTexto);
   const fonteCupomSemCodigo = `${doc.instrucaoTexto || ""} ${doc.beneficioTexto || ""} ${doc.resgateTexto || ""}`;
+  const cupomSemCodigoDuplicaBeneficio = Boolean(!cupons.length &&
+    assinaturaDescontoSemCodigo(textoCupomSemCodigo) &&
+    assinaturaDescontoSemCodigo(textoCupomSemCodigo) === assinaturaDescontoSemCodigo(doc.beneficioTexto));
   const cupomSemCodigoNoAnuncio = !marketplaceMercadoLivre(doc.marketplace)
     && /\b(?:resgate|ative|aplique|selecione).{0,40}\b(?:cupom|voucher)\b/i.test(fonteCupomSemCodigo)
     && /\b(?:anuncio|pagina|p[aá]gina|produto)\b/i.test(fonteCupomSemCodigo);
-  if (!cupons.length && (linkResgateEssencial(doc, {}) || cupomSemCodigoNoAnuncio)) {
-    adicionarBlocoComercial(blocos, { tipo: "cupom_sem_codigo", textoOriginal: primeiroTexto(doc.instrucaoTexto, doc.beneficioTexto, doc.resgateTexto), origem: "documento.instrucao_cupom", confianca: "media", essencial: cupomNecessarioParaPreco(doc), requisitos: ["resgate_no_anuncio"] });
+  if (!cupons.length && !cupomSemCodigoDuplicaBeneficio && (linkResgateEssencial(doc, {}) || cupomSemCodigoNoAnuncio)) {
+    adicionarBlocoComercial(blocos, { tipo: "cupom_sem_codigo", textoOriginal: textoCupomSemCodigo, origem: "documento.instrucao_cupom", confianca: "media", essencial: cupomNecessarioParaPreco(doc), requisitos: ["resgate_no_anuncio"] });
   }
   adicionarBlocoComercial(blocos, { tipo: "instrucao_cupom", textoOriginal: instrucaoCupomCanonica, origem: doc.instrucaoTexto ? "documento.instrucaoTexto" : "documento.instrucao_cupom_segura", confianca: doc.instrucaoTexto ? "alta" : "media", essencial: cupomNecessarioParaPreco(doc), requisitos: cupomEssencial ? ["cupom"] : [] });
 

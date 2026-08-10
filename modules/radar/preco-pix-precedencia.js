@@ -48,11 +48,41 @@ function textoPixValido(valor = "") {
   return original;
 }
 
+function valorCandidatoPix(candidato) {
+  return typeof candidato === "object" && candidato !== null
+    ? texto(candidato.valor ?? candidato.texto ?? candidato.evidencia ?? candidato.precoPix ?? candidato.condicaoPix)
+    : texto(candidato);
+}
+
+function contextoCandidatoPix(candidato) {
+  if (!candidato || typeof candidato !== "object") return valorCandidatoPix(candidato);
+  return [
+    candidato.valor,
+    candidato.texto,
+    candidato.evidencia,
+    candidato.condicaoPix,
+    candidato.papel,
+    candidato.tipo,
+    candidato.campo,
+    candidato.origem,
+    candidato.fonte,
+    candidato.autoridade,
+    candidato.motivo
+  ].map(texto).filter(Boolean).join(" ");
+}
+
+function candidatoPixInequivoco(candidato) {
+  if (!candidato || typeof candidato !== "object") {
+    return /\bpix\b/i.test(valorCandidatoPix(candidato));
+  }
+  if (candidato.papelPixConfiavel === true || candidato.fontePixOficial === true) return true;
+  return /\bpix\b/i.test(contextoCandidatoPix(candidato));
+}
+
 function primeiroPixValido(candidatos = []) {
   for (const candidato of Array.isArray(candidatos) ? candidatos : [candidatos]) {
-    const valor = typeof candidato === "object" && candidato !== null
-      ? texto(candidato.valor ?? candidato.texto ?? candidato.evidencia ?? candidato.precoPix ?? candidato.condicaoPix)
-      : texto(candidato);
+    if (!candidatoPixInequivoco(candidato)) continue;
+    const valor = valorCandidatoPix(candidato);
     const pix = textoPixValido(valor);
     if (pix) return pix;
   }
