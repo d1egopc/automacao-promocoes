@@ -248,8 +248,27 @@ function parecePrecoPixProprio(valor = "") {
     || /(?:R\$|US\$|USD|U\$|\$)\s*[\d.]+(?:[,.][\d]{1,2})?\s*(?:no|na|via|por)\s+pix\b/i.test(fonte);
 }
 
+function extrairPrecoPixPorSemantico(valor = "") {
+  const fonte = recortarAntesDeDelimitadorComercial(valor);
+  if (!fonte || !/\bpix\b/i.test(fonte)) return "";
+  const padraoMoeda = "((?:R\\$|US\\$|USD|U\\$|\\$)?\\s*[\\d.]+(?:[,.][\\d]{1,2})?)";
+  const dePorPix = fonte.match(new RegExp(`\\bde\\s*:?\\s*${padraoMoeda}\\s*(?:\\||-|\\/|,|\\s)+por\\s*:?\\s*${padraoMoeda}([^\\n]*)`, "i"));
+  if (dePorPix && /\bpix\b/i.test(dePorPix[3] || "")) {
+    const sufixo = recortarSufixoPreco(dePorPix[3] || "no Pix") || "no Pix";
+    return [textoMoeda(dePorPix[2]), sufixo].map(texto).filter(Boolean).join(" ");
+  }
+  const porPix = fonte.match(new RegExp(`\\bpor\\s*:?\\s*${padraoMoeda}([^\\n]*\\bpix\\b[^\\n]*)`, "i"));
+  if (porPix) {
+    const sufixo = recortarSufixoPreco(porPix[2] || "no Pix") || "no Pix";
+    return [textoMoeda(porPix[1]), sufixo].map(texto).filter(Boolean).join(" ");
+  }
+  return "";
+}
+
 function extrairPrecoPixProprio(valor = "") {
   if (!parecePrecoPixProprio(valor)) return "";
+  const precoPixSemantico = extrairPrecoPixPorSemantico(valor);
+  if (precoPixSemantico) return precoPixSemantico;
   const semPrefixo = removerPrefixoComercial(
     valor,
     /^\s*(?:[^\n\w]{0,4}\s*)?(?:pre(?:co|c\u00e7o)\s*(?:no|via)?\s*pix|valor\s*(?:no|via)?\s*pix|pix)\s*:?\s*/i

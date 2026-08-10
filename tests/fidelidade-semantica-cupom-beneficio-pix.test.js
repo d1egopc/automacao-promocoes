@@ -107,6 +107,99 @@ const amazonSemRadarPix = construirEspelhoComercialV24({
 
 assert.ok(/220/.test(amazonSemRadarPix.documentoComercialCanonico.precoPixTexto || ""), "API Pix confiavel sem Radar Pix enriquece o canonico");
 
+const kitBlackToolPix = construirEspelhoComercialV24({
+  textoOriginal: [
+    "KIT DA BLACK TOOL TA DADO",
+    "De R$ 289 por R$ 132 no Pix",
+    "Cupom: QUEROCUPOM",
+    "https://meli.la/blacktool"
+  ].join("\n"),
+  oferta: {
+    titulo: "KIT DA BLACK TOOL TA DADO",
+    marketplace: "Mercado Livre",
+    precoAtual: 132,
+    linkAfiliado: "https://meli.la/blacktool"
+  },
+  ofertaEntrada: { marketplace: "Mercado Livre", cupom: "QUEROCUPOM" }
+});
+
+assert.strictEqual(kitBlackToolPix.documentoComercialCanonico.precoDeTexto, "R$ 289,00", "De X por Y no Pix preserva preco De");
+assert.strictEqual(kitBlackToolPix.documentoComercialCanonico.precoPorTexto, "R$ 132,00 no Pix", "De X por Y no Pix preserva preco Por");
+assert.strictEqual(kitBlackToolPix.documentoComercialCanonico.precoPixTexto, "R$ 132,00 no Pix", "Pix textual fica associado ao Por, nao ao De");
+
+const invictusPix = construirEspelhoComercialV24({
+  textoOriginal: [
+    "PERFUMAO INVICTUS POR METADE DO PRECO",
+    "De R$ 849,00 por R$ 407,00 no PIX",
+    "https://meli.la/invictus"
+  ].join("\n"),
+  oferta: {
+    titulo: "PERFUMAO INVICTUS POR METADE DO PRECO",
+    marketplace: "Mercado Livre",
+    precoAtual: 407,
+    linkAfiliado: "https://meli.la/invictus"
+  },
+  ofertaEntrada: { marketplace: "Mercado Livre" }
+});
+
+assert.strictEqual(invictusPix.documentoComercialCanonico.precoPixTexto, "R$ 407,00 no Pix", "De 849 por 407 no PIX extrai Pix 407");
+
+const heringPix = construirEspelhoComercialV24({
+  textoOriginal: [
+    "BASICAS DA HERING E MUITO CUSTO BENEFICIO",
+    "De R$ 159 por R$ 65 a vista no Pix",
+    "Cupom: SEMPREMODA",
+    "https://meli.la/hering"
+  ].join("\n"),
+  oferta: {
+    titulo: "BASICAS DA HERING E MUITO CUSTO BENEFICIO",
+    marketplace: "Mercado Livre",
+    precoAtual: 65,
+    linkAfiliado: "https://meli.la/hering"
+  },
+  ofertaEntrada: { marketplace: "Mercado Livre", cupom: "SEMPREMODA" }
+});
+
+assert.strictEqual(heringPix.documentoComercialCanonico.precoDeTexto, "R$ 159,00", "Hering preserva preco De");
+assert.strictEqual(heringPix.documentoComercialCanonico.precoPorTexto, "R$ 65,00 no Pix", "Hering preserva Por ligado ao Pix");
+assert.strictEqual(heringPix.documentoComercialCanonico.precoPixTexto, "R$ 65,00 no Pix", "Hering nao usa precoDe como Pix");
+
+const porPixDireto = construirEspelhoComercialV24({
+  textoOriginal: [
+    "Oferta direta no Pix",
+    "Por R$ 65 no Pix",
+    "https://meli.la/pixdireto"
+  ].join("\n"),
+  oferta: {
+    titulo: "Oferta direta no Pix",
+    marketplace: "Mercado Livre",
+    precoAtual: 65,
+    linkAfiliado: "https://meli.la/pixdireto"
+  },
+  ofertaEntrada: { marketplace: "Mercado Livre" }
+});
+
+assert.strictEqual(porPixDireto.documentoComercialCanonico.precoPixTexto, "R$ 65,00 no Pix", "Por Y no Pix extrai Pix Y");
+
+const doisValoresSemPix = construirEspelhoComercialV24({
+  textoOriginal: [
+    "Oferta sem Pix",
+    "De R$ 289 por R$ 132",
+    "https://meli.la/sempix"
+  ].join("\n"),
+  oferta: {
+    titulo: "Oferta sem Pix",
+    marketplace: "Mercado Livre",
+    precoAtual: 132,
+    linkAfiliado: "https://meli.la/sempix"
+  },
+  ofertaEntrada: { marketplace: "Mercado Livre" }
+});
+
+assert.strictEqual(doisValoresSemPix.documentoComercialCanonico.precoDeTexto, "R$ 289,00", "frase sem Pix preserva De");
+assert.strictEqual(doisValoresSemPix.documentoComercialCanonico.precoPorTexto, "R$ 132,00", "frase sem Pix preserva Por");
+assert.strictEqual(doisValoresSemPix.documentoComercialCanonico.precoPixTexto, null, "dois valores sem papel Pix nao inventam precoPix");
+
 const templateAmazon = gerarTemplateUniversal({
   titulo: "Chuveiro Fame",
   marketplace: "Amazon",
