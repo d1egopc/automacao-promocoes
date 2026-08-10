@@ -249,10 +249,13 @@ function isUrlProdutoMercadoLivre(url = "") {
     const parsed = new URL(String(url || "").trim());
     const host = parsed.hostname.toLowerCase();
     const path = parsed.pathname || "";
+    const pathLower = path.toLowerCase();
 
     if (!host.endsWith("mercadolivre.com.br")) return false;
+    if (pathLower.startsWith("/social/")) return false;
     if (host.includes("produto.mercadolivre.com.br") && /\/MLB-?\d+/i.test(path)) return true;
     if (/\/p\/MLB/i.test(path)) return true;
+    if (/\/up\/MLBU\d+/i.test(path)) return true;
     if (/\/permalink\/MLB/i.test(path)) return true;
     if (/MLB-?\d+/i.test(path) && !path.toLowerCase().startsWith("/social/")) return true;
 
@@ -260,6 +263,23 @@ function isUrlProdutoMercadoLivre(url = "") {
   } catch {
     return false;
   }
+}
+
+function isUrlProdutoMercadoLivreGenerica(url = "") {
+  try {
+    const parsed = new URL(String(url || "").trim());
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname || "";
+    return host.includes("produto.mercadolivre.com.br") && /^\/MLB\d+$/i.test(path);
+  } catch {
+    return false;
+  }
+}
+
+function pesoUrlProdutoMercadoLivre(url = "") {
+  if (!isUrlProdutoMercadoLivre(url)) return 100;
+  if (isUrlProdutoMercadoLivreGenerica(url)) return 10;
+  return 0;
 }
 
 function dominioUrl(url = "") {
@@ -315,7 +335,8 @@ function escolherProdutoResolvido(resolucao = {}, urlOriginal = "") {
 
   return candidatos
     .map(url => String(url || "").trim())
-    .find(isUrlProdutoMercadoLivre) || "";
+    .filter(isUrlProdutoMercadoLivre)
+    .sort((a, b) => pesoUrlProdutoMercadoLivre(a) - pesoUrlProdutoMercadoLivre(b))[0] || "";
 }
 
 async function resolverUrlProdutoMercadoLivreEngine(urlOriginalEngine = "", deps = {}, contexto = {}) {
@@ -667,7 +688,6 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
 module.exports = {
   importarMercadoLivreEngine
 };
-
 
 
 

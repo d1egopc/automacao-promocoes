@@ -5773,6 +5773,15 @@ function limparUrlProdutoRadar(url = "", marketplace = "") {
     }
 
     if (mp === "mercadolivre") {
+      if (/\/up\/MLBU\d+/i.test(parsed.pathname)) {
+        const filtroItemId = parsed.searchParams.get("pdp_filters") || "";
+        parsed.search = "";
+        if (/item_id\s*:\s*MLB\d+/i.test(filtroItemId)) {
+          parsed.searchParams.set("pdp_filters", filtroItemId);
+        }
+        return parsed.toString();
+      }
+
       parsed.search = "";
       return parsed.toString();
     }
@@ -5798,6 +5807,23 @@ function limparUrlProdutoRadar(url = "", marketplace = "") {
   }
 }
 
+function normalizarMlbRadar(valor = "") {
+  const match = String(valor || "").match(/\b(MLB-?\d{6,})\b/i);
+  return match?.[1]?.replace("-", "").toUpperCase() || "";
+}
+
+function extrairMlbsRadar(texto = "") {
+  return [...String(texto || "").matchAll(/\b(MLB-?\d{6,})\b/gi)]
+    .map(match => normalizarMlbRadar(match[1]))
+    .filter(Boolean);
+}
+
+function extrairValorJsonStringRadar(bloco = "", campo = "") {
+  const escaped = String(campo || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = String(bloco || "").match(new RegExp(`"${escaped}"\\s*:\\s*"([^"]*)"`, "i"));
+  return match?.[1] || "";
+}
+
 function isUrlIntermediariaMercadoLivreRadar(url = "") {
   try {
     const parsed = new URL(url);
@@ -5807,6 +5833,8 @@ function isUrlIntermediariaMercadoLivreRadar(url = "") {
     if (!host.includes("mercadolivre.com")) return false;
     if (host.includes("produto.mercadolivre.com.br") && /\/mlb-?\d+/i.test(parsed.pathname)) return false;
     if (/\/p\/mlb/i.test(pathUrl)) return false;
+    if (/\/up\/mlbu\d+/i.test(pathUrl)) return false;
+    if (/\/permalink\/mlb/i.test(pathUrl)) return false;
 
     return (
       pathUrl.startsWith("/social/") ||
@@ -5822,12 +5850,20 @@ function isUrlIntermediariaMercadoLivreRadar(url = "") {
   }
 }
 
-function normalizarUrlExtraidaMercadoLivreRadar(link = "") {
-  const texto = String(link || "")
-    .replace(/\\u002F/g, "/")
+function decodificarUrlExtraidaMercadoLivreRadar(link = "") {
+  return String(link || "")
+    .replace(/\\u002[fF]/g, "/")
+    .replace(/\\u003[aA]/g, ":")
+    .replace(/\\u003[fF]/g, "?")
+    .replace(/\\u0026/g, "&")
+    .replace(/\\u003[dD]/g, "=")
     .replace(/\\\//g, "/")
     .replace(/&amp;/g, "&")
     .trim();
+}
+
+function normalizarUrlExtraidaMercadoLivreRadar(link = "") {
+  const texto = decodificarUrlExtraidaMercadoLivreRadar(link);
 
   if (!texto) return "";
   if (texto.startsWith("//")) return `https:${texto}`;
@@ -5836,9 +5872,119 @@ function normalizarUrlExtraidaMercadoLivreRadar(link = "") {
   return texto;
 }
 
+function isDominioOficialMercadoLivreRadar(url = "") {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === "meli.la" || host === "mercadolivre.com.br" || host.endsWith(".mercadolivre.com.br");
+  } catch {
+    return false;
+  }
+}
+
+function isUrlProdutoMercadoLivreOficialRadar(url = "") {
+  try {
+    const parsed = new URL(String(url || "").trim());
+    const host = parsed.hostname.toLowerCase();
+    const pathUrl = parsed.pathname.toLowerCase();
+
+    if (!isDominioOficialMercadoLivreRadar(parsed.toString())) return false;
+    if (pathUrl.startsWith("/social/")) return false;
+    if (host.includes("produto.mercadolivre.com.br") && /\/mlb-?\d+/i.test(parsed.pathname)) return true;
+    if (/\/p\/mlb\d+/i.test(pathUrl)) return true;
+    if (/\/up\/mlbu\d+/i.test(pathUrl)) return true;
+    if (/\/permalink\/mlb/i.test(pathUrl)) return true;
+    if (/\/mlb-\d+-.+_jm$/i.test(pathUrl)) return true;
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function combinarUrlParamsMercadoLivreRadar(url = "", urlParams = "") {
+  const base = normalizarUrlExtraidaMercadoLivreRadar(url);
+  const params = decodificarUrlExtraidaMercadoLivreRadar(urlParams);
+  if (!base || !params) return base;
+
+  try {
+    const parsed = new URL(base);
+    if (!parsed.search && params.startsWith("?")) {
+      parsed.search = params;
+      return parsed.toString();
+    }
+  } catch {}
+
+  return base;
+}
+
+function urlMercadoLivreCompativelComIdentidadesRadar(url = "", identidades = []) {
+  if (!isUrlProdutoMercadoLivreOficialRadar(url)) return false;
+
+  const esperadas = identidades.map(normalizarMlbRadar).filter(Boolean);
+  if (!esperadas.length) return true;
+
+  const encontradas = extrairMlbsRadar(url);
+  if (!encontradas.length) return true;
+
+  return encontradas.some(id => esperadas.includes(id));
+}
+
+function extrairCandidatosPolycardsMercadoLivreRadar(html = "") {
+  const texto = String(html || "");
+  const candidatos = [];
+  const blocosMetadata = texto.matchAll(/"metadata"\s*:\s*\{([\s\S]*?)\}\s*,\s*"pictures"\s*:/gi);
+
+  for (const match of blocosMetadata) {
+    const bloco = match[1] || "";
+    const identidades = [
+      extrairValorJsonStringRadar(bloco, "id"),
+      extrairValorJsonStringRadar(bloco, "wid"),
+      extrairValorJsonStringRadar(bloco, "product_id"),
+      ...extrairMlbsRadar(extrairValorJsonStringRadar(bloco, "url_params"))
+    ].filter(Boolean);
+    const urlParams = extrairValorJsonStringRadar(bloco, "url_params");
+
+    for (const campo of ["url", "permalink", "canonical", "canonicalUrl"]) {
+      const valor = extrairValorJsonStringRadar(bloco, campo);
+      if (!valor) continue;
+
+      const candidata = combinarUrlParamsMercadoLivreRadar(valor, urlParams);
+      if (urlMercadoLivreCompativelComIdentidadesRadar(candidata, identidades)) {
+        candidatos.push(candidata);
+      }
+    }
+  }
+
+  return candidatos;
+}
+
+function extrairIdentidadesProdutoMercadoLivreHtmlRadar(html = "") {
+  const texto = String(html || "");
+  return [
+    ...texto.matchAll(/"metadata"\s*:\s*\{[\s\S]*?"id"\s*:\s*"(MLB-?\d{6,})"/gi),
+    ...texto.matchAll(/"metadata"\s*:\s*\{[\s\S]*?"wid"\s*:\s*"(MLB-?\d{6,})"/gi),
+    ...texto.matchAll(/"metadata"\s*:\s*\{[\s\S]*?"product_id"\s*:\s*"(MLB-?\d{6,})"/gi),
+    ...texto.matchAll(/[?&]pdp_filters=item_id%3A(MLB-?\d{6,})/gi),
+    ...texto.matchAll(/[?&]pdp_filters=item_id:(MLB-?\d{6,})/gi)
+  ]
+    .map(match => normalizarMlbRadar(match[1]))
+    .filter(Boolean)
+    .filter((id, index, todos) => todos.indexOf(id) === index);
+}
+
+function extrairItemIdPrioritarioMercadoLivreRadar(html = "") {
+  const texto = String(html || "");
+  const idsMetadata = extrairIdentidadesProdutoMercadoLivreHtmlRadar(html)
+    .filter(id => /^MLB\d{9,}$/i.test(id));
+
+  return idsMetadata[0] || normalizarMlbRadar(texto);
+}
+
 function extrairProdutoMercadoLivreDeHtmlRadar(html = "") {
   const texto = String(html || "");
+  const identidadesHtml = extrairIdentidadesProdutoMercadoLivreHtmlRadar(texto);
   const candidatos = [
+    ...extrairCandidatosPolycardsMercadoLivreRadar(texto),
     ...texto.matchAll(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/gi),
     ...texto.matchAll(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/gi),
     ...texto.matchAll(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:url["']/gi),
@@ -5847,21 +5993,21 @@ function extrairProdutoMercadoLivreDeHtmlRadar(html = "") {
     ...texto.matchAll(/"canonicalUrl"\s*:\s*"([^"]*MLB[^"]*)"/gi),
     ...texto.matchAll(/href=["']([^"']*(?:produto\.mercadolivre\.com\.br\/MLB|mercadolivre\.com\.br\/p\/MLB)[^"']*)["']/gi)
   ]
-    .map(match => normalizarUrlExtraidaMercadoLivreRadar(match[1]))
+    .map(match => normalizarUrlExtraidaMercadoLivreRadar(Array.isArray(match) ? match[1] : match))
     .filter(Boolean);
 
-  const itemId =
-    texto.match(/\b(MLB-?\d{6,})\b/i)?.[1]?.replace("-", "").toUpperCase() ||
-    "";
+  const itemId = extrairItemIdPrioritarioMercadoLivreRadar(texto);
 
   if (itemId) {
     candidatos.push(`https://produto.mercadolivre.com.br/${itemId}`);
   }
 
   for (const candidato of candidatos) {
-    const limpo = limparUrlProdutoRadar(candidato, "mercadolivre");
+    const normalizado = normalizarUrlExtraidaMercadoLivreRadar(candidato);
+    const limpo = limparUrlProdutoRadar(normalizado, "mercadolivre");
     if (!limpo || isUrlIntermediariaMercadoLivreRadar(limpo)) continue;
-    if (/produto\.mercadolivre\.com\.br\/MLB-?\d+/i.test(limpo) || /mercadolivre\.com\.br\/p\/MLB/i.test(limpo)) {
+    if (identidadesHtml.length && !urlMercadoLivreCompativelComIdentidadesRadar(limpo, identidadesHtml)) continue;
+    if (isUrlProdutoMercadoLivreOficialRadar(limpo)) {
       return limpo;
     }
   }
