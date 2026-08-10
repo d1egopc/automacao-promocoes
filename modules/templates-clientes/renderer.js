@@ -5,6 +5,12 @@ const {
 } = require("./dados-oficiais");
 const { classificarBlocoComercial } = require("./politica-blocos-comerciais");
 const fidelidadeObs = require("../fidelidade/observabilidade-v1");
+const {
+  normalizarCuponsSemanticos
+} = require("../radar/cupom-semantico");
+const {
+  textoPixValido
+} = require("../radar/preco-pix-precedencia");
 
 const AVISO_FINAL_PADRAO = "Oferta sujeita à alteração de preço.";
 const TIPOS_AVISO_FINAL = new Set(["aviso_final", "aviso_preco", "aviso_alteracao"]);
@@ -38,12 +44,12 @@ function listaTexto(...valores) {
 }
 
 function valorCupomTemplate(oferta = {}) {
-  const cupons = listaTexto(
+  const cupons = normalizarCuponsSemanticos(listaTexto(
     Array.isArray(oferta.cupons) ? oferta.cupons : [],
     Array.isArray(oferta.codigosCupom) ? oferta.codigosCupom : []
-  );
+  ));
   if (cupons.length) return cupons.join(" ou ");
-  return textoUtil(oferta.cupom);
+  return normalizarCuponsSemanticos(oferta.cupom)[0] || "";
 }
 
 function numeroUtil(valor) {
@@ -75,6 +81,13 @@ function formatarMoeda(valor) {
   const numero = numeroUtil(valor);
   if (!numero) return "";
   return numero.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function numeroMonetarioEmTexto(valor) {
+  const direto = numeroUtil(valor);
+  if (direto != null) return direto;
+  const match = textoUtil(valor).match(/(?:R\$\s*)?\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|(?:R\$\s*)?\d+(?:[,.]\d{1,2})?/);
+  return match ? numeroUtil(match[0]) : null;
 }
 
 function numeroInteiro(valor) {
@@ -137,6 +150,43 @@ function beneficioValidoPorPapel(valor = "", oferta = {}) {
   return beneficioTemPapelComercial(beneficio);
 }
 
+function assinaturaFatoComercial(valor = "") {
+  const semUrl = textoUtil(valor).replace(/https?:\/\/\S+|www\.\S+/gi, " ");
+  const n = normalizarComparacao(semUrl)
+    .replace(/\b(?:cupom|codigo|cod|voucher|use|utilize|aplique|resgate|ative|no|na|em|anuncio|pagina|link|abaixo|antes|finalizar|compra)\b/g, " ")
+    .replace(/[^a-z0-9%$]+/g, " ")
+    .trim();
+  const percentual = n.match(/\b(\d{1,3})\s*%\s*(?:off|desconto)?\b/);
+  if (percentual) return `percentual:${percentual[1]}`;
+  const monetarioOff = semUrl.match(/R\$\s*(\d{1,5}(?:[,.]\d{1,2})?)\s*OFF\b/i);
+  if (monetarioOff) return `valor_off:${monetarioOff[1].replace(",", ".")}`;
+  const cupom = normalizarCuponsSemanticos(valor);
+  if (cupom.length) return `cupom:${cupom.join("+")}`;
+  return n.replace(/\s+/g, "");
+}
+
+function beneficioDuplicaOutroPapel(valor = "", oferta = {}) {
+  const chave = assinaturaFatoComercial(valor);
+  if (!chave) return false;
+  const referencias = [
+    oferta.cupom,
+    oferta.codigoCupom,
+    oferta.cupomCodigo,
+    ...(Array.isArray(oferta.cupons) ? oferta.cupons : []),
+    ...(Array.isArray(oferta.codigosCupom) ? oferta.codigosCupom : []),
+    oferta.instrucaoCupom,
+    oferta.condicaoCupom,
+    oferta.condicaoComercial,
+    oferta.avaliacao,
+    oferta.rating,
+    oferta.nota
+  ];
+  return referencias.some(referencia => {
+    const ref = assinaturaFatoComercial(referencia);
+    return Boolean(ref && ref === chave);
+  });
+}
+
 function valorBeneficio(oferta = {}) {
   const candidatos = [];
   if (Array.isArray(oferta.beneficios)) {
@@ -150,7 +200,10 @@ function valorBeneficio(oferta = {}) {
     oferta.beneficioDetectado
   );
 
-  return candidatos.map(textoUtil).find(item => beneficioValidoPorPapel(item, oferta)) || "";
+  return candidatos.map(textoUtil).find(item =>
+    beneficioValidoPorPapel(item, oferta) &&
+    !beneficioDuplicaOutroPapel(item, oferta)
+  ) || "";
 }
 
 function valorFrete(oferta = {}) {
@@ -278,6 +331,10 @@ function textoIndicaPix(valor = "") {
   return normalizarComparacao(valor).includes("pix");
 }
 
+function precoPixRenderizavel(oferta = {}) {
+  return textoPixValido(oferta.precoPix);
+}
+
 function instrucaoCupomEssencial(oferta = {}) {
   const cupom = valorCupomTemplate(oferta);
   const instrucao = primeiroTexto(oferta.instrucaoCupom, oferta.condicaoCupom, oferta.condicaoComercial, oferta.avisoCupom);
@@ -304,7 +361,7 @@ function cupomEssencial(oferta = {}) {
 }
 
 function precoPixEssencial(oferta = {}) {
-  const precoPix = primeiroTexto(oferta.precoPix, oferta.condicaoPix);
+  const precoPix = precoPixRenderizavel(oferta);
   if (!precoPix || !textoIndicaPix(precoPix)) return false;
   const precoPor = formatarMoeda(valorPrecoPor(oferta));
   return !precoPor || normalizarComparacao(precoPix) !== normalizarComparacao(precoPor);
@@ -340,7 +397,7 @@ function linkComercialPorTipo(oferta = {}, tipos = []) {
 function dadosBlocoTemplate(tipo = "", oferta = {}) {
   if (tipo === "titulo") return primeiroTexto(oferta.titulo, oferta.nome);
   if (tipo === "preco_por") return formatarMoeda(valorPrecoPor(oferta));
-  if (tipo === "preco_pix") return primeiroTexto(oferta.precoPix, oferta.condicaoPix);
+  if (tipo === "preco_pix") return precoPixRenderizavel(oferta);
   if (tipo === "cupom") return valorCupomTemplate(oferta);
   if (tipo === "frase_cupom") return primeiroTexto(oferta.instrucaoCupom, oferta.condicaoCupom, oferta.condicaoComercial, oferta.avisoCupom);
   if (tipo === "link") return primeiroTexto(oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link, oferta.url);
@@ -429,7 +486,13 @@ function aplicarCondicaoPixPreco(preco = "", oferta = {}) {
   const textoPreco = textoUtil(preco);
   if (!textoPreco) return "";
   if (textoIndicaPix(textoPreco)) return textoPreco;
-  if (textoUtil(oferta.precoPix) || textoUtil(oferta.condicaoPix)) return textoPreco;
+  if (precoPixRenderizavel(oferta)) return textoPreco;
+  const condicaoPixOferta = primeiroTexto(oferta.condicaoPix, oferta.precoPix);
+  const valorPix = numeroMonetarioEmTexto(condicaoPixOferta);
+  const valorPreco = numeroMonetarioEmTexto(textoPreco);
+  if (textoIndicaPix(condicaoPixOferta) && valorPix != null && valorPreco != null && valorPix === valorPreco) {
+    return `${textoPreco} no Pix`;
+  }
 
   const condicaoPix = primeiroTexto(oferta.descontoPix);
   if (!textoIndicaPix(condicaoPix)) return textoPreco;
@@ -470,7 +533,7 @@ function resolverLinha(bloco, oferta = {}) {
     return desconto ? `📉 ${desconto} OFF` : "";
   }
   if (tipo === "preco_pix") {
-    const pix = primeiroTexto(oferta.precoPix, oferta.condicaoPix);
+    const pix = precoPixRenderizavel(oferta);
     return pix ? `⚡ Pix: ${pix}` : "";
   }
   if (tipo === "economia") {

@@ -59,7 +59,7 @@ assert.match(mlCompleto.espelhoComercial.instrucaoComercial, /FASHIONML \+ Pix/)
 assert.strictEqual(mlCompleto.espelhoComercial.linkProdutoOriginal, "https://meli.la/1fS6gji");
 assert.strictEqual(mlCompleto.documentoComercialCanonico.precoDeTexto, "R$ 299,99");
 assert.strictEqual(mlCompleto.documentoComercialCanonico.precoPorTexto, "R$ 73,79 via Pix");
-assert.strictEqual(mlCompleto.documentoComercialCanonico.precoPixTexto, null);
+assert.strictEqual(mlCompleto.documentoComercialCanonico.precoPixTexto, "R$ 73,79 via Pix");
 assert.strictEqual(mlCompleto.documentoComercialCanonico.cupomTexto, "FASHIONML");
 assert.strictEqual(mlCompleto.documentoComercialCanonico.instrucaoTexto, "Aplique o cupom FASHIONML + Pix para chegar neste valor.");
 assert.strictEqual(mlCompleto.documentoComercialCanonico.linkProdutoOriginal, "https://meli.la/1fS6gji");
@@ -491,7 +491,7 @@ const amazonRtxRecorte = criarEspelho({
   comercialNormalizado: { marketplace: "amazon", precoAtual: 2499, precoConfiavel: true }
 });
 assert.strictEqual(amazonRtxRecorte.documentoComercialCanonico.precoPorTexto, "R$ 2.499,00 no Pix");
-assert.strictEqual(amazonRtxRecorte.documentoComercialCanonico.precoPixTexto, null);
+assert.strictEqual(amazonRtxRecorte.documentoComercialCanonico.precoPixTexto, "R$ 2.499,00 no Pix");
 assert.strictEqual(amazonRtxRecorte.documentoComercialCanonico.parcelamentoTexto, "10x de R$ 317,70 sem juros");
 assert.strictEqual(amazonRtxRecorte.documentoComercialCanonico.cupomTexto, "EBACUPOM");
 assert.strictEqual(amazonRtxRecorte.documentoComercialCanonico.beneficioTexto, "R$ 20 OFF no cupom/pagina");
@@ -508,7 +508,7 @@ const mlCompactado = criarEspelho({
 });
 assert.strictEqual(mlCompactado.documentoComercialCanonico.precoDeTexto, "R$ 78,00");
 assert.strictEqual(mlCompactado.documentoComercialCanonico.precoPorTexto, "R$ 40,00 no Pix");
-assert.strictEqual(mlCompactado.documentoComercialCanonico.precoPixTexto, null);
+assert.strictEqual(mlCompactado.documentoComercialCanonico.precoPixTexto, "R$ 40,00 no Pix");
 assert.strictEqual(mlCompactado.documentoComercialCanonico.cupomTexto, "OFFCASA");
 assert.strictEqual(mlCompactado.documentoComercialCanonico.linkProdutoOriginal, "https://meli.la/compacto");
 assert.ok(!/\bCupom\b|https?:\/\//i.test(mlCompactado.documentoComercialCanonico.precoPorTexto));
@@ -809,7 +809,7 @@ assert.ok(!tiposV26(mlPlacaMaePolimento).includes("link_resgate"), "ML nao cria 
 assert.ok(!tiposV26(mlPlacaMaePolimento).includes("beneficio_app"), "beneficio especulativo pelo app nao renderiza por padrao");
 assert.ok(!tiposV26(mlPlacaMaePolimento).includes("beneficio"), "beneficio especulativo nao aparece como beneficio generico");
 assert.strictEqual(mlPlacaMaePolimento.documentoComercialCanonico.precoPorTexto, "R$ 406,00 no Pix");
-assert.strictEqual(mlPlacaMaePolimento.documentoComercialCanonico.precoPixTexto, null);
+assert.strictEqual(mlPlacaMaePolimento.documentoComercialCanonico.precoPixTexto, "R$ 406,00 no Pix");
 assert.ok(!mlPlacaMaePolimento.templateEspelhoShadow.mensagem.includes("Pix:"), "Pix dentro do Por nao duplica");
 assert.ok(!mlPlacaMaePolimento.templateEspelhoShadow.mensagem.includes("Pode haver beneficio"));
 assert.ok(!mlPlacaMaePolimento.templateEspelhoShadow.mensagem.includes("vazio"));

@@ -1,6 +1,9 @@
 const {
   normalizarApresentacaoComercial
 } = require("../templates-clientes/normalizador-apresentacao-comercial");
+const {
+  textoPixValido
+} = require("../radar/preco-pix-precedencia");
 
 function normalizarTexto(valor) {
   if (valor == null) return "";
@@ -42,6 +45,13 @@ function formatarMoeda(valor) {
     style: "currency",
     currency: "BRL"
   }).replace(/\u00A0/g, " ");
+}
+
+function numeroMonetarioEmTexto(valor) {
+  const direto = normalizarNumero(valor);
+  if (direto != null) return direto;
+  const match = normalizarTexto(valor).match(/(?:R\$\s*)?\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|(?:R\$\s*)?\d+(?:[,.]\d{1,2})?/);
+  return match ? normalizarNumero(match[0]) : null;
 }
 
 function normalizarComparacao(valor = "") {
@@ -280,7 +290,7 @@ function selecionarCamposUniversais(oferta = {}) {
     cupom,
     cupomTexto: normalizarTexto(ofertaApresentacao.cupomTexto || cupom),
     instrucaoCupom: normalizarTexto(ofertaApresentacao.instrucaoCupom),
-    precoPix: normalizarTexto(ofertaApresentacao.precoPix || ofertaApresentacao.condicaoPix),
+    precoPix: normalizarTexto(ofertaApresentacao.precoPix),
     condicaoPix: normalizarTexto(ofertaApresentacao.condicaoPix || ofertaApresentacao.precoPix),
     precoUnitario: normalizarTexto(ofertaApresentacao.precoUnitario || ofertaApresentacao.unitarioCapturado),
     parcelamento: normalizarTexto(ofertaApresentacao.parcelamento),
@@ -320,9 +330,15 @@ function textoIndicaPix(valor = "") {
   return normalizarComparacao(valor).includes("pix");
 }
 
+function precoPixRenderizavel(valor = "", campos = {}, opcoes = {}) {
+  const textoPix = normalizarTexto(valor);
+  if (!textoPix) return "";
+  return textoPixValido(textoPix);
+}
+
 function textoPrecoAtualComCondicao(precoAtual = "", campos = {}) {
   if (!precoAtual) return precoAtual;
-  const condicaoPix = campos.condicaoPix || campos.precoPix || "";
+  const condicaoPix = precoPixRenderizavel(campos.condicaoPix || campos.precoPix || "", campos, { permitirMesmoPreco: true });
   if (campos.precoPix && normalizarComparacao(campos.precoPix) !== normalizarComparacao(precoAtual)) return precoAtual;
   if (textoIndicaPix(condicaoPix)) return `${precoAtual} no Pix`;
   return precoAtual;
@@ -363,6 +379,33 @@ function beneficioDiferenteDoCupom(beneficio = "", cupom = "") {
   return !codigo || !texto.includes(codigo);
 }
 
+function assinaturaFatoComercial(valor = "") {
+  const semUrl = normalizarTexto(valor).replace(/https?:\/\/\S+|www\.\S+/gi, " ");
+  const n = normalizarComparacao(semUrl)
+    .replace(/\b(?:cupom|codigo|cod|voucher|use|utilize|aplique|resgate|ative|no|na|em|anuncio|pagina|link|abaixo|antes|finalizar|compra)\b/g, " ")
+    .replace(/[^a-z0-9%$]+/g, " ")
+    .trim();
+  const percentual = n.match(/\b(\d{1,3})\s*%\s*(?:off|desconto)?\b/);
+  if (percentual) return `percentual:${percentual[1]}`;
+  const monetarioOff = semUrl.match(/R\$\s*(\d{1,5}(?:[,.]\d{1,2})?)\s*OFF\b/i);
+  if (monetarioOff) return `valor_off:${monetarioOff[1].replace(",", ".")}`;
+  return n.replace(/\s+/g, "");
+}
+
+function beneficioDuplicaOutroPapel(beneficio = "", campos = {}) {
+  const chave = assinaturaFatoComercial(beneficio);
+  if (!chave) return false;
+  return [
+    campos.cupom,
+    campos.cupomTexto,
+    campos.instrucaoCupom,
+    campos.avaliacao
+  ].some(valor => {
+    const ref = assinaturaFatoComercial(valor);
+    return Boolean(ref && ref === chave);
+  });
+}
+
 function extrairValoresMonetarios(texto = "") {
   const matches = String(texto || "").match(/(?:R\$\s*)?\d{1,3}(?:\.\d{3})*,\d{2}|(?:R\$\s*)?\d+(?:\.\d{2})|R\$\s*\d+/g) || [];
   return matches
@@ -374,6 +417,7 @@ function beneficioComercialValidoParaTemplate(beneficio = "", campos = {}) {
   const texto = normalizarTexto(beneficio);
   if (!texto || !beneficioComercialSeguro(texto)) return false;
   if (!beneficioDiferenteDoCupom(texto, campos.cupom)) return false;
+  if (beneficioDuplicaOutroPapel(texto, campos)) return false;
 
   const normalizado = normalizarComparacao(texto);
   const precoAtual = normalizarNumero(campos.precoAtual);
@@ -569,6 +613,7 @@ function montarTemplateUniversalOficial({
 
 function gerarTemplateUniversal(oferta = {}) {
   const campos = selecionarCamposUniversais(oferta);
+  campos.precoPix = precoPixRenderizavel(campos.precoPix, campos);
   const blocos = [];
   const precoAtualExibido = campos.precoAtual;
   const precoAtualNumero = normalizarNumero(precoAtualExibido);

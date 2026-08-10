@@ -90,6 +90,32 @@ function pareceFrasePercentualSemCodigo(valor = "") {
   ) && /\b(?:cupom|desconto)\s+de\b/i.test(original);
 }
 
+function pareceBeneficioSemCodigo(valor = "") {
+  const original = texto(valor);
+  if (!original) return false;
+  const temValorDesconto = /\b\d{1,3}\s*%\s*(?:off|desconto)?\b/i.test(original) ||
+    /(?:R\$\s*)?\d{1,5}(?:[,.]\d{1,2})?\s*OFF\b/i.test(original);
+  if (!temValorDesconto) return false;
+  return /\b(?:cupom|desconto|off|an[uú]ncio|pagina|p[aá]gina|resgate)\b/i.test(original);
+}
+
+function pareceCodigoDerivadoDeDesconto(codigo = "") {
+  const chave = semAcentosUpper(codigo).replace(/[^A-Z0-9]/g, "");
+  return /^\d{1,3}OFF$/.test(chave) || /^R?\d{1,5}OFF$/.test(chave);
+}
+
+function pareceSlugCurtoDeUrl(valor = "") {
+  const original = texto(valor);
+  const limpo = semAcentosUpper(original).replace(/[^A-Z0-9]/g, "");
+  if (!limpo) return false;
+  if (!/^[0-9][A-Z0-9]{7,13}$/.test(limpo)) return false;
+  return /[A-Z]/.test(limpo) && /\d/.test(limpo);
+}
+
+function removerUrls(valor = "") {
+  return texto(valor).replace(/https?:\/\/\S+|www\.\S+/gi, " ");
+}
+
 function pareceTrechoConcatenadoDeFrase(codigo = "") {
   return /(?:^|_)O?CUPOM(?:DE|AQUI|$)/i.test(codigo) ||
     /(?:TODOS.*CUPONS?.*(?:PAGINA|ANUNCIO)|CUPONS?DESTA|DAPAGINA|DESTAPAGINA|DISPONIVEL|ANUNCIO|MENSAGEM|DETECTADO|HTTPS?)/i.test(codigo);
@@ -100,6 +126,8 @@ function normalizarCodigoCupomSemantico(candidato = "") {
   if (!original) return "";
   if (pareceUrlOuParametro(original)) return "";
   if (pareceFrasePercentualSemCodigo(original)) return "";
+  if (pareceBeneficioSemCodigo(original)) return "";
+  if (pareceSlugCurtoDeUrl(original)) return "";
 
   const limpo = limparMarcadorCupom(original)
     .replace(/[^A-Z0-9_-]/g, "")
@@ -107,6 +135,8 @@ function normalizarCodigoCupomSemantico(candidato = "") {
 
   if (!limpo || limpo.length < 4 || limpo.length > 30) return "";
   if (!/^[A-Z0-9][A-Z0-9_-]{3,29}$/.test(limpo)) return "";
+  if (pareceCodigoDerivadoDeDesconto(limpo)) return "";
+  if (pareceSlugCurtoDeUrl(limpo)) return "";
   if (/^CUPOM[_-]?$/i.test(limpo)) return "";
   if (PALAVRAS_BLOQUEADAS.has(limpo)) return "";
   if (pareceTrechoConcatenadoDeFrase(limpo)) return "";
@@ -141,7 +171,8 @@ function extrairCodigosCupomSemanticos(textoFonte = "") {
   ];
 
   for (let indice = 0; indice < linhas.length; indice++) {
-    const linha = linhas[indice];
+    const linhaOriginal = linhas[indice];
+    const linha = removerUrls(linhaOriginal);
     if (/^\s*(?:cupom|cupons|codigo|codigos|c[o\u00f3]digo|c[o\u00f3]digos|coupon|promocode|voucher)\s*:?\s*$/i.test(linha)) {
       for (const parte of separarPossiveisCodigos(linhas[indice + 1] || "")) {
         adicionarCodigo(resultado, vistos, parte);
@@ -153,7 +184,7 @@ function extrairCodigosCupomSemanticos(textoFonte = "") {
       let match;
       while ((match = padrao.exec(linha))) {
         const trecho = texto(match[1] || "");
-        if (!trecho || pareceFrasePercentualSemCodigo(trecho) || pareceFrasePercentualSemCodigo(linha)) continue;
+        if (!trecho || pareceFrasePercentualSemCodigo(trecho) || pareceFrasePercentualSemCodigo(linha) || pareceBeneficioSemCodigo(trecho) || pareceBeneficioSemCodigo(linhaOriginal)) continue;
         for (const parte of separarPossiveisCodigos(trecho)) {
           adicionarCodigo(resultado, vistos, parte);
         }
@@ -186,6 +217,8 @@ function normalizarCuponsSemanticos(valores = []) {
 
     if (
       pareceFrasePercentualSemCodigo(original) ||
+      pareceBeneficioSemCodigo(original) ||
+      pareceSlugCurtoDeUrl(original) ||
       /\r?\n/.test(original) ||
       /https?:\/\/|www\./i.test(original) ||
       /\b(?:resgate|aplique|aplicar|use|utilize).*\bcupons?.*(?:pagina|anuncio|disponivel|%)/i.test(original)
@@ -204,5 +237,6 @@ function normalizarCuponsSemanticos(valores = []) {
 module.exports = {
   extrairCodigosCupomSemanticos,
   normalizarCodigoCupomSemantico,
-  normalizarCuponsSemanticos
+  normalizarCuponsSemanticos,
+  pareceBeneficioSemCodigo
 };

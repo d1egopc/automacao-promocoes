@@ -2,6 +2,10 @@ function texto(valor = "") {
   return String(valor ?? "").trim();
 }
 
+const {
+  normalizarCuponsSemanticos
+} = require("../radar/cupom-semantico");
+
 function normalizarComparacao(valor = "") {
   return texto(valor)
     .normalize("NFD")
@@ -143,7 +147,7 @@ function normalizarCuponsApresentacao(...fontes) {
   for (const fonte of fontes) {
     const valores = Array.isArray(fonte) ? fonte : [fonte];
     for (const valor of valores) {
-      for (const parte of partesCupom(valor)) {
+      for (const parte of normalizarCuponsSemanticos(valor)) {
         const cupom = texto(parte);
         const chave = chaveCupom(cupom);
         if (cupomBloqueado(cupom)) continue;

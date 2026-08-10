@@ -11,6 +11,9 @@ const {
   escolherProdutoPrincipal,
   resumoLinksClassificados
 } = require("../../link-role.service");
+const {
+  normalizarCodigoCupomSemantico
+} = require("../../../radar/cupom-semantico");
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -297,9 +300,12 @@ function extrairBeneficioTextoShopee(textoRadar = "") {
 
 function extrairCupomTextoRadarShopee(textoRadar = "") {
   const fonte = String(textoRadar || "");
+  const fonteSemUrls = fonte.replace(/https?:\/\/\S+|www\.\S+/gi, " ");
   const match = fonte.match(/(?:cupom|use o cupom|aplique o cupom|(?:codigo|c.digo))\s*:?[\s\n]*([A-Z0-9_-]{5,40})/i);
-  const cupom = pareceCupomRealShopee(match?.[1] || "")
-    ? String(match[1]).toUpperCase().replace(/[^A-Z0-9_-]/g, "").trim()
+  const matchSemUrl = fonteSemUrls.match(/(?:cupom|use o cupom|aplique o cupom|(?:codigo|c.digo))\s*:?[\s\n]*([A-Z0-9_-]{5,40})/i);
+  const cupomCandidato = matchSemUrl?.[1] || match?.[1] || "";
+  const cupom = pareceCupomRealShopee(cupomCandidato)
+    ? normalizarCodigoCupomSemantico(cupomCandidato)
     : "";
 
   if (cupom) {
@@ -318,7 +324,7 @@ function extrairCupomTextoRadarShopee(textoRadar = "") {
       cupom: "",
       tipoCupom: "beneficio_texto_radar",
       cupomTipo: "beneficio_texto_radar",
-      avisoCupom: beneficio,
+      avisoCupom: /resgate\s+o\s+cupom/i.test(fonte) ? "Resgate o cupom no link abaixo." : beneficio,
       beneficioExtra: beneficio
     };
   }

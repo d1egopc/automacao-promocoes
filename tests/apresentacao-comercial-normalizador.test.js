@@ -124,7 +124,7 @@ const ofertaComResgate = ofertaBase({
   linksResgate: [{ tipo: "resgate", original: resgate }]
 });
 const mensagemComResgate = gerarTemplateUniversal(prepararDadosOficiaisTemplate(ofertaComResgate, { modo: "universal" }));
-assert.ok(mensagemComResgate.includes("Resgate os cupons:"), "renderiza bloco de resgate");
+assert.ok(mensagemComResgate.includes("Resgate:"), "renderiza bloco de resgate");
 assert.ok(mensagemComResgate.indexOf(resgate) < mensagemComResgate.indexOf(produto), "resgate vem antes do produto");
 
 const personalizadoComDoisLinks = renderizarTemplatePersonalizado({
@@ -140,7 +140,7 @@ const personalizadoComDoisLinks = renderizarTemplatePersonalizado({
   },
   canal: "whatsapp"
 });
-assert.ok(personalizadoComDoisLinks.mensagem.includes(`Resgate os cupons:\n${resgate}`), "personalizado renderiza resgate em bloco proprio");
+assert.ok(personalizadoComDoisLinks.mensagem.includes(`Resgate:\n${resgate}`), "personalizado renderiza resgate em bloco proprio");
 assert.ok(personalizadoComDoisLinks.mensagem.includes(`Confira aqui:\n${produto}`), "personalizado renderiza produto em bloco proprio");
 assert.ok(personalizadoComDoisLinks.mensagem.indexOf(resgate) < personalizadoComDoisLinks.mensagem.indexOf(produto), "personalizado coloca resgate antes do produto");
 assert.ok(!personalizadoComDoisLinks.mensagem.includes(`Confira aqui:\n🎟️ Resgate os cupons`), "personalizado nao mistura resgate dentro do link");

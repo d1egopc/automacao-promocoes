@@ -7,6 +7,13 @@ const {
   ORIGENS_VALOR_COMERCIAL,
   classificarBlocoComercial
 } = require("../templates-clientes/politica-blocos-comerciais");
+const {
+  normalizarCuponsSemanticos
+} = require("../radar/cupom-semantico");
+const {
+  resolverPrecedenciaPrecoPix,
+  textoPixValido
+} = require("../radar/preco-pix-precedencia");
 
 const AVISO_EDITORIAL_ALIEXPRESS = "⚠️ Oferta sujeita à alteração de preço.";
 
@@ -82,10 +89,11 @@ function linhasTexto(fonte = "") {
     .filter(Boolean);
 }
 
-function extrairTextoOriginal({ oferta = {}, ofertaEntrada = {}, evento = {}, metadata = {} } = {}) {
+function extrairTextoOriginal({ textoOriginal = "", oferta = {}, ofertaEntrada = {}, evento = {}, metadata = {} } = {}) {
   const radar = objeto(metadata.radarMirror || metadata.radarEspelhoComercial || ofertaEntrada.radarMirror || ofertaEntrada.radarEspelhoComercial);
   const textoRadar = objeto(radar.texto || {}).original || radar.textoOriginal || radar.textoComercialOriginal || radar.documentoComercialCanonico;
   return primeiroTexto(
+    textoOriginal,
     evento.texto_original,
     evento.textoOriginal,
     ofertaEntrada.textoComercialOriginal,
@@ -247,8 +255,6 @@ function extrairPrecoPixProprio(valor = "") {
 }
 
 function extrairPrecoPixDocumento({ textoOriginal = "", linhaPor = "", linhaValor = "", precoPorTexto = "", oferta = {}, ofertaEntrada = {}, marketplace = "" } = {}) {
-  if (marketplaceAmazon(marketplace) && /\bpix\b/i.test(precoPorTexto)) return "";
-  if (marketplaceMercadoLivre(marketplace) && /\bpix\b/i.test(precoPorTexto)) return "";
   const linhas = linhasTexto(textoOriginal);
   const linhaPixPropria = linhas.find(linha => {
     if (!parecePrecoPixProprio(linha)) return false;
@@ -257,30 +263,30 @@ function extrairPrecoPixDocumento({ textoOriginal = "", linhaPor = "", linhaValo
     return /^(?:pix|preco\s+pix|preco\s+no\s+pix|preco\s+via\s+pix|valor\s+pix|valor\s+no\s+pix)\b/.test(n)
       || /\b(?:pix|preco\s+pix|preco\s+no\s+pix|preco\s+via\s+pix|valor\s+pix|valor\s+no\s+pix)\s*:/.test(n);
   });
-  const candidatos = [
+  const linhaPixRadar = linhas.find(linha => {
+    if (!parecePrecoPixProprio(linha)) return false;
+    if (/\b(?:cupom|cashback|desconto|beneficio|off)\b/i.test(linha)) return false;
+    return true;
+  });
+  const radar = [
     linhaPixPropria,
+    linhaPixRadar,
+    /\bpix\b/i.test(precoPorTexto) ? precoPorTexto : ""
+  ];
+  const api = [
     ofertaEntrada.precoPix,
     oferta.precoPix,
     ofertaEntrada.condicaoPix,
     oferta.condicaoPix
   ];
-  for (const candidato of candidatos) {
-    const precoPix = extrairPrecoPixProprio(candidato);
-    if (marketplaceAmazon(marketplace)) {
-      const valorPix = numeroMonetario(precoPix);
-      const valorOferta = numeroMonetario(precoPorTexto);
-      if (valorPix !== null && valorOferta !== null && valorPix < valorOferta * 0.5) continue;
-    }
-    if (marketplaceMercadoLivre(marketplace)) {
-      const valorPix = numeroMonetario(precoPix);
-      const valorOferta = numeroMonetario(precoPorTexto);
-      const normalizado = normalizarComparacao(candidato);
-      if (/\b(?:economia|desconto|cashback|beneficio|off)\b/.test(normalizado)) continue;
-      if (valorPix !== null && valorOferta !== null && valorPix < valorOferta * 0.5) continue;
-    }
-    if (precoPix && !textoComercialEquivalente(precoPix, precoPorTexto)) return precoPix;
+  const radarNormalizado = radar.map(candidato => extrairPrecoPixProprio(candidato) || textoPixValido(candidato)).filter(Boolean);
+  const apiNormalizado = api.map(candidato => extrairPrecoPixProprio(candidato) || textoPixValido(candidato)).filter(Boolean);
+  const resolucao = resolverPrecedenciaPrecoPix({ radar: radarNormalizado, api: apiNormalizado });
+  const precoPix = resolucao.precoPix;
+  if (precoPix) {
+    return { precoPix, auditoria: resolucao.auditoria, origem: resolucao.origem };
   }
-  return "";
+  return { precoPix: "", auditoria: resolucao.auditoria, origem: resolucao.origem };
 }
 
 function textoPrecoEstruturado(valor) {
@@ -321,10 +327,7 @@ function cupomPlausivel(valor = "") {
 }
 
 function separarCupons(valor = "") {
-  return texto(valor)
-    .split(/\s+(?:ou|e)\s+|\s*\+\s*|[,;/|]+/i)
-    .map(item => item.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9_-]+$/g, "").trim())
-    .filter(cupomPlausivel);
+  return normalizarCuponsSemanticos(valor);
 }
 
 function dedupCupons(cupons = []) {
@@ -471,6 +474,9 @@ function chaveSemanticaAcaoCupom(valor = "") {
 
 function beneficioDuplicaInstrucaoCupom(valor = "", instrucao = "") {
   if (!valor || !instrucao) return false;
+  const descontoValor = assinaturaDescontoSemCodigo(valor);
+  const descontoInstrucao = assinaturaDescontoSemCodigo(instrucao);
+  if (descontoValor && descontoInstrucao) return descontoValor === descontoInstrucao;
   const chaveValor = chaveSemanticaAcaoCupom(valor);
   const chaveInstrucao = chaveSemanticaAcaoCupom(instrucao);
   if (chaveValor && chaveInstrucao) return chaveValor === chaveInstrucao;
@@ -479,6 +485,18 @@ function beneficioDuplicaInstrucaoCupom(valor = "", instrucao = "") {
   const instrucaoNormalizada = normalizarComparacao(instrucao);
   if (textoComercialEquivalente(valor, instrucao) || instrucaoNormalizada.includes(n) || n.includes(instrucaoNormalizada)) return true;
   return false;
+}
+
+function assinaturaDescontoSemCodigo(valor = "") {
+  const fonte = limparTextoComercial(removerUrls(valor));
+  if (!fonte) return "";
+  const percentual = fonte.match(/\b(\d{1,3})\s*%\s*(?:OFF|desconto)?\b/i);
+  if (percentual && /\b(?:cupom|desconto|off|an[uú]ncio|pagina|p[aá]gina|resgate)\b/i.test(fonte)) {
+    return `percentual:${percentual[1]}`;
+  }
+  const monetario = fonte.match(/R\$\s*(\d{1,5}(?:[,.]\d{1,2})?)\s*OFF\b/i);
+  if (monetario) return `valor_off:${monetario[1].replace(",", ".")}`;
+  return "";
 }
 
 function extrairInstrucaoComercial(textoOriginal = "", cupomCodigo = "", oferta = {}, ofertaEntrada = {}) {
@@ -1167,7 +1185,8 @@ function extrairDocumentoComercialCanonico({
     comercialNormalizado.precoAtual
   ));
   const precoPorTexto = extrairTextoLinhaPreco(linhaPor, "por") || extrairTextoLinhaPreco(linhaValor, "valor") || precosTexto.precoPorTexto || precoPorEstruturado || "";
-  const precoPixTexto = extrairPrecoPixDocumento({ textoOriginal, linhaPor, linhaValor, precoPorTexto, oferta, ofertaEntrada, marketplace });
+  const resolucaoPrecoPixDocumento = extrairPrecoPixDocumento({ textoOriginal, linhaPor, linhaValor, precoPorTexto, oferta, ofertaEntrada, marketplace });
+  const precoPixTexto = resolucaoPrecoPixDocumento.precoPix || "";
   const avisosInternos = [];
   if (precoDeInconsistenteParaRenderizacao(precoDeTexto, precoPorTexto, marketplace)) {
     avisosInternos.push("preco_de_menor_ou_igual_preco_por_omitido");
@@ -1192,7 +1211,16 @@ function extrairDocumentoComercialCanonico({
     marketplace
   }) ? "" : beneficioTextoBruto;
   const instrucaoTexto = texto(instrucaoComercial);
-  const cupomTexto = texto(cupom.cupomCodigo || cupom.cupomTexto || oferta.cupom || ofertaEntrada.cupom);
+  const cupomTexto = normalizarCuponsSemanticos([
+    cupom.cupomCodigo,
+    cupom.cupomTexto,
+    oferta.cupom,
+    oferta.cupomCodigo,
+    oferta.codigoCupom,
+    ofertaEntrada.cupom,
+    ofertaEntrada.cupomCodigo,
+    ofertaEntrada.codigoCupom
+  ]).join(" ou ");
 
   const documento = {
     tituloOriginal: tituloOriginal || null,
@@ -1227,7 +1255,9 @@ function extrairDocumentoComercialCanonico({
     },
     avisos: [...new Set((avisos || []).filter(Boolean))],
     auditoriaComercial: {
-      avisosInternos
+      avisosInternos,
+      precoPix: resolucaoPrecoPixDocumento.auditoria || {},
+      origemPrecoPix: resolucaoPrecoPixDocumento.origem || "ausente"
     },
     condicoesComerciais: [...new Set((condicoesComerciais || []).map(texto).filter(Boolean))],
     contratoMarketplace: contratoMarketplace ? {
@@ -1689,6 +1719,7 @@ function linhasLinksAliExpress(doc = {}) {
 function avaliacaoVisual(valor = "") {
   const bruto = texto(valor);
   if (!bruto) return "";
+  if (/\b(?:cupom|voucher|off|desconto|resgate)\b/i.test(bruto)) return "";
   const numero = Number(String(bruto).replace(",", "."));
   if (Number.isFinite(numero)) {
     if (numero >= 1 && numero <= 5) return `⭐ ${bruto}`;
@@ -2186,7 +2217,7 @@ function construirEspelhoComercialV24(entrada = {}) {
   const link = objeto(entrada.link);
   const metadata = objeto(entrada.metadata);
   const comercialNormalizado = objeto(entrada.comercialNormalizado);
-  const textoOriginalCompleto = extrairTextoOriginal({ oferta, ofertaEntrada, evento, metadata });
+  const textoOriginalCompleto = extrairTextoOriginal({ textoOriginal: entrada.textoOriginal, oferta, ofertaEntrada, evento, metadata });
   const textoOriginal = textoLimitado(textoOriginalCompleto, 3000);
   const tituloOriginal = extrairTituloOriginal(textoOriginal, oferta, ofertaEntrada);
   const precosTexto = extrairPrecosTexto(textoOriginal);

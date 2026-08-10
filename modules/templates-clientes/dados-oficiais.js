@@ -1,6 +1,14 @@
 const {
   normalizarApresentacaoComercial
 } = require("./normalizador-apresentacao-comercial");
+const {
+  normalizarCuponsSemanticos
+} = require("../radar/cupom-semantico");
+const {
+  chaveValorPix,
+  numeroMonetarioEmTexto,
+  resolverPrecedenciaPrecoPix
+} = require("../radar/preco-pix-precedencia");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -32,6 +40,64 @@ function normalizarNumero(valor) {
       : entrada;
   const numero = Number(normalizado);
   return Number.isFinite(numero) ? numero : null;
+}
+
+function precoAtualReferencia(oferta = {}, v2 = {}) {
+  return numeroMonetarioEmTexto(
+    oferta.precoAtual ??
+    oferta.precoPor ??
+    oferta.preco ??
+    v2.precoAtual ??
+    v2.precoPor ??
+    v2.preco
+  );
+}
+
+function coletarPixRadarMirror(...fontes) {
+  const candidatos = [];
+  for (const fonte of fontes) {
+    if (!fonte || typeof fonte !== "object") continue;
+    const pix = fonte.comercial?.precoPix || fonte.precoPix || fonte.pix || {};
+    candidatos.push(
+      pix.evidencia,
+      pix.texto,
+      pix.valorFormatado,
+      pix.valor != null ? pix.evidencia || pix.valor : ""
+    );
+  }
+  return candidatos.filter(Boolean);
+}
+
+function camposPixPublicaveis(oferta = {}, v2 = {}) {
+  const metadata = oferta.metadata || {};
+  const precedencia = metadata.precedenciaComercial || {};
+  const radarPixProtegido = precedencia.camposProtegidos?.precoPix === true ||
+    (ofertaRadarEspelhoComercial(oferta) && ["alta", "media"].includes(normalizarComparacao(oferta.confiancaComercial?.precoPix || "")));
+  const radar = radarPixProtegido
+    ? [
+      oferta.condicaoPix,
+      oferta.precoPix,
+      ...coletarPixRadarMirror(oferta.radarMirror, metadata.radarMirror, metadata.radarEspelhoComercial?.radarMirror)
+    ]
+    : coletarPixRadarMirror(oferta.radarMirror, metadata.radarMirror, metadata.radarEspelhoComercial?.radarMirror);
+  const api = [
+    v2.condicaoPix,
+    v2.precoPix,
+    oferta.precoPixReferenciaApi,
+    oferta.metadata?.precoPixReferenciaApi,
+    ...(!radarPixProtegido ? [oferta.condicaoPix, oferta.precoPix] : [])
+  ];
+  const resolucao = resolverPrecedenciaPrecoPix({ radar, api });
+  const pix = resolucao.precoPix;
+  if (!pix) return { precoPix: "", condicaoPix: "", precoPixOrigem: resolucao.origem, precoPixAuditoria: resolucao.auditoria };
+  const precoAtual = precoAtualReferencia(oferta, v2);
+  const mesmoPreco = precoAtual != null && chaveValorPix(pix) === precoAtual.toFixed(2);
+  return {
+    precoPix: mesmoPreco ? "" : pix,
+    condicaoPix: pix,
+    precoPixOrigem: resolucao.origem,
+    precoPixAuditoria: resolucao.auditoria
+  };
 }
 
 function scoreUniversal(valor) {
@@ -142,11 +208,11 @@ function cupomOficial(oferta = {}, v2 = {}) {
   ];
 
   for (const candidato of candidatosOficiais) {
-    const cupom = texto(candidato);
+    const cupom = normalizarCuponsSemanticos(candidato)[0] || "";
     if (cupom && !cupomBloqueado(cupom)) return cupom;
   }
 
-  const cupom = texto(oferta.cupom);
+  const cupom = normalizarCuponsSemanticos(oferta.cupom)[0] || "";
   if (!cupom || cupomBloqueado(cupom)) return "";
 
   return cupom;
@@ -183,17 +249,17 @@ function listaObjetosUnica(valores = []) {
 }
 
 function cuponsOficiais(oferta = {}) {
-  const multiplos = listaTextoUnica([
+  const multiplos = listaTextoUnica(normalizarCuponsSemanticos([
     ...(Array.isArray(oferta.cupons) ? oferta.cupons : []),
     ...(Array.isArray(oferta.codigosCupom) ? oferta.codigosCupom : [])
-  ]);
+  ]));
   if (multiplos.length) return multiplos;
 
-  return listaTextoUnica([
+  return listaTextoUnica(normalizarCuponsSemanticos([
     oferta.cupom || "",
     oferta.codigoCupom || "",
     oferta.cupomCodigo || ""
-  ]);
+  ]));
 }
 
 function ofertaRadarEspelhoComercial(oferta = {}) {
@@ -209,6 +275,7 @@ function ofertaRadarEspelhoComercial(oferta = {}) {
 
 function prepararDadosUniversaisTemplate(oferta = {}) {
   const v2 = oferta.inteligenciaUniversalV2 || {};
+  const pix = camposPixPublicaveis(oferta, v2);
   const precoOriginal = precoDeOficial(oferta, v2);
   const cupons = cuponsOficiais(oferta);
   const radarEspelho = ofertaRadarEspelhoComercial(oferta);
@@ -227,8 +294,8 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
     cupom,
     cupomTipo: oferta.cupomTipo || oferta.tipoCupom || "",
     instrucaoCupom: oferta.instrucaoCupom || oferta.condicaoCupom || oferta.condicaoComercial || "",
-    precoPix: oferta.precoPix || v2.precoPix || "",
-    condicaoPix: oferta.condicaoPix || oferta.precoPix || v2.precoPix || "",
+    precoPix: pix.precoPix,
+    condicaoPix: pix.condicaoPix,
     precoUnitario: oferta.precoUnitario || oferta.unitarioCapturado || "",
     quantidade: oferta.quantidade || "",
     parcelamento: oferta.parcelamento || "",
@@ -272,8 +339,8 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
     beneficioExtra: oferta.beneficioExtra || "",
     condicoes: listaTextoUnica(oferta.condicoes),
     observacoes: listaTextoUnica(oferta.observacoes),
-    precoPix: oferta.precoPix || v2.precoPix || "",
-    condicaoPix: oferta.condicaoPix || oferta.precoPix || v2.precoPix || "",
+    precoPix: pix.precoPix,
+    condicaoPix: pix.condicaoPix,
     precoUnitario: oferta.precoUnitario || oferta.unitarioCapturado || "",
     quantidade: oferta.quantidade || "",
     parcelamento: oferta.parcelamento || "",
@@ -301,6 +368,7 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
 
 function prepararDadosPersonalizadosTemplate(oferta = {}) {
   const v2 = oferta.inteligenciaUniversalV2 || {};
+  const pix = camposPixPublicaveis(oferta, v2);
   const dados = {
     ...prepararDadosUniversaisTemplate(oferta),
     precoAtual: oferta.precoAtual ?? oferta.precoPor ?? oferta.preco,
@@ -349,8 +417,8 @@ function prepararDadosPersonalizadosTemplate(oferta = {}) {
     avisoFinal: oferta.avisoFinal || oferta.avisoAlteracao || oferta.aviso || "",
     aviso: oferta.aviso || "",
     descontoPix: oferta.descontoPix || v2.descontoPix || "",
-    precoPix: oferta.precoPix || v2.precoPix || "",
-    condicaoPix: oferta.condicaoPix || oferta.precoPix || v2.precoPix || "",
+    precoPix: pix.precoPix,
+    condicaoPix: pix.condicaoPix,
     condicoes: listaTextoUnica(oferta.condicoes),
     observacoes: listaTextoUnica(oferta.observacoes),
     cashback: oferta.cashback || "",
