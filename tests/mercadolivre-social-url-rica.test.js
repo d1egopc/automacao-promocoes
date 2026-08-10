@@ -9,22 +9,46 @@ function carregarHelpersRadarMl() {
   const arquivo = path.join(__dirname, "..", "marketplaces", "inteligencia", "index.js");
   const codigo = fs.readFileSync(arquivo, "utf8");
   const inicio = codigo.indexOf("function limparUrlProdutoRadar");
-  const fim = codigo.indexOf("async function extrairProdutoMercadoLivreIntermediarioRadar");
+  const fim = codigo.indexOf("function importacaoRadarIncompleta");
   assert.ok(inicio >= 0 && fim > inicio, "bloco de helpers ML nao encontrado");
   const blocoHelpers = codigo.slice(inicio, fim);
+  const chamadasAxios = [];
   const contexto = {
     URL,
-    module: { exports: {} }
+    console: { log() {} },
+    axios: {
+      get: async (url, opcoes = {}) => {
+        chamadasAxios.push({ url, opcoes });
+        return {
+          data: contexto.__htmlResposta || "",
+          status: 200
+        };
+      }
+    },
+    module: { exports: {} },
+    __chamadasAxios: chamadasAxios,
+    __htmlResposta: ""
   };
   const fonte = `
     function normalizarMarketplaceRadar(valor) { return String(valor || "").toLowerCase(); }
     function detectarMarketplaceRadarLink() { return "mercadolivre"; }
+    function gerarHeadersStealth() {
+      return {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/136.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Sec-Fetch-Mode": "navigate"
+      };
+    }
     ${blocoHelpers}
     module.exports = {
       decodificarUrlExtraidaMercadoLivreRadar,
       normalizarUrlExtraidaMercadoLivreRadar,
       extrairCandidatosPolycardsMercadoLivreRadar,
-      extrairProdutoMercadoLivreDeHtmlRadar
+      extrairProdutoMercadoLivreDeHtmlRadar,
+      extrairProdutoMercadoLivreIntermediarioRadar,
+      chamadasAxios: __chamadasAxios,
+      setHtmlResposta(html) { __htmlResposta = html; }
     };
   `;
 
@@ -102,6 +126,41 @@ function htmlSocialPolycard({ id, productId = "", url, urlParams = "", extra = "
         productId: "MLB49249508",
         url: String.raw`www.mercadolivre.com.br\u002Fwater-cooler-gl240-lite-aura-argb-preto-gamdias\u002Fp\u002FMLB49249508`,
         esperado: "https://www.mercadolivre.com.br/water-cooler-gl240-lite-aura-argb-preto-gamdias/p/MLB49249508"
+      },
+      {
+        nome: "Roteador Huawei",
+        id: "MLB6429022258",
+        productId: "MLB20704214",
+        url: String.raw`www.mercadolivre.com.br\u002Froteador-huawei-wifi-ax2s-5-ghz-wi-fi-6-harmonyos-mesh-easymeshvisualizacao-de-diagnosticos-do-wi-fi-controle-parental-branco\u002Fp\u002FMLB20704214`,
+        esperado: "https://www.mercadolivre.com.br/roteador-huawei-wifi-ax2s-5-ghz-wi-fi-6-harmonyos-mesh-easymeshvisualizacao-de-diagnosticos-do-wi-fi-controle-parental-branco/p/MLB20704214"
+      },
+      {
+        nome: "Ryzen 5 5500",
+        id: "MLB5876843252",
+        productId: "MLB19444510",
+        url: String.raw`www.mercadolivre.com.br\u002Fprocessador-amd-ryzen-5-5500-36ghz-42ghz-max-turbo-cache-16mb-am4\u002Fp\u002FMLB19444510`,
+        esperado: "https://www.mercadolivre.com.br/processador-amd-ryzen-5-5500-36ghz-42ghz-max-turbo-cache-16mb-am4/p/MLB19444510"
+      },
+      {
+        nome: "Refil Natura",
+        id: "MLB7238741418",
+        productId: "MLB36447978",
+        url: String.raw`www.mercadolivre.com.br\u002Frefil-essencial-classico-natura-deo-parfum-feminino-100ml-volume-da-unidade-100-ml\u002Fp\u002FMLB36447978`,
+        esperado: "https://www.mercadolivre.com.br/refil-essencial-classico-natura-deo-parfum-feminino-100ml-volume-da-unidade-100-ml/p/MLB36447978"
+      },
+      {
+        nome: "Philco Ciclone",
+        id: "MLB3993701927",
+        productId: "MLB27821035",
+        url: String.raw`www.mercadolivre.com.br\u002Fphilco-ciclone-pas1600p-15l-preto-1450w-110\u002Fp\u002FMLB27821035`,
+        esperado: "https://www.mercadolivre.com.br/philco-ciclone-pas1600p-15l-preto-1450w-110/p/MLB27821035"
+      },
+      {
+        nome: "Pneus Firestone",
+        id: "MLB5041005214",
+        productId: "MLB27918094",
+        url: String.raw`www.mercadolivre.com.br\u002Fkit-2-pneus-17565r14-firestone-f-600-82t-aro-14\u002Fp\u002FMLB27918094`,
+        esperado: "https://www.mercadolivre.com.br/kit-2-pneus-17565r14-firestone-f-600-82t-aro-14/p/MLB27918094"
       }
     ];
 
@@ -113,12 +172,49 @@ function htmlSocialPolycard({ id, productId = "", url, urlParams = "", extra = "
 
   {
     const html = htmlSocialPolycard({
+      id: "MLB6429022258",
+      productId: "MLB20704214",
+      url: String.raw`www.mercadolivre.com.br\u002Froteador-huawei-wifi-ax2s-5-ghz-wi-fi-6-harmonyos-mesh-easymeshvisualizacao-de-diagnosticos-do-wi-fi-controle-parental-branco\u002Fp\u002FMLB20704214`
+    });
+    helpers.setHtmlResposta(html);
+
+    const resultado = await helpers.extrairProdutoMercadoLivreIntermediarioRadar("https://www.mercadolivre.com.br/social/peperaiopeperaio");
+    const chamada = helpers.chamadasAxios.at(-1);
+
+    assert.strictEqual(
+      resultado,
+      "https://www.mercadolivre.com.br/roteador-huawei-wifi-ax2s-5-ghz-wi-fi-6-harmonyos-mesh-easymeshvisualizacao-de-diagnosticos-do-wi-fi-controle-parental-branco/p/MLB20704214"
+    );
+    assert.ok(chamada.opcoes.headers["User-Agent"].includes("Chrome/136.0"), "fetch social usa header de navegador");
+    assert.ok(chamada.opcoes.headers["Accept-Language"].includes("pt-BR"), "fetch social envia Accept-Language de navegador");
+    assert.notStrictEqual(chamada.opcoes.headers["User-Agent"], "Mozilla/5.0 (compatible; OptimusRadar/1.0)");
+  }
+
+  {
+    helpers.setHtmlResposta(`<html><body>sem polycards nem item seguro</body></html>`);
+    const resultado = await helpers.extrairProdutoMercadoLivreIntermediarioRadar("https://www.mercadolivre.com.br/social/sem-produto");
+    assert.strictEqual(resultado, "");
+  }
+
+  {
+    const html = htmlSocialPolycard({
       id: "MLB5181827144",
       productId: "MLB19540092",
       url: String.raw`www.mercadolivre.com.br\u002Fproduto-errado\u002Fp\u002FMLB999999999`
     });
     const resultado = helpers.extrairProdutoMercadoLivreDeHtmlRadar(html);
     assert.notStrictEqual(resultado, "https://www.mercadolivre.com.br/produto-errado/p/MLB999999999");
+    assert.strictEqual(resultado, "https://produto.mercadolivre.com.br/MLB5181827144");
+  }
+
+  {
+    const html = htmlSocialPolycard({
+      id: "MLB5181827144",
+      productId: "MLB19540092",
+      url: "https://evil.example/produto/p/MLB19540092"
+    });
+    const resultado = helpers.extrairProdutoMercadoLivreDeHtmlRadar(html);
+    assert.notStrictEqual(resultado, "https://evil.example/produto/p/MLB19540092");
     assert.strictEqual(resultado, "https://produto.mercadolivre.com.br/MLB5181827144");
   }
 
