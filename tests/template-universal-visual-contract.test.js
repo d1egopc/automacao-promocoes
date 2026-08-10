@@ -3,6 +3,9 @@ const assert = require("assert");
 const { gerarTemplateUniversal } = require("../modules/template-universal");
 const { renderizarTemplatePersonalizado } = require("../modules/templates-clientes/renderer");
 
+const estrelas = (n) => "\u2B50".repeat(n);
+const possuiLinha = (texto, linha) => String(texto).split(/\r?\n/).some(item => item.trim() === linha);
+
 function indice(texto, trecho) {
   const pos = texto.indexOf(trecho);
   assert.ok(pos >= 0, `mensagem deve conter: ${trecho}`);
@@ -29,11 +32,11 @@ const ofertaBase = {
   avisoFinal: "Aviso customizado final.",
   linkAfiliado: "https://ali.workspace/produto",
   linksComerciais: [
-    { tipo: "app", papel: "link_app", ordemCaptura: 1, urlAfiliada: "https://go.optimus/same" },
-    { tipo: "app", papel: "link_app", ordemCaptura: 2, urlAfiliada: "https://go.optimus/app-extra" },
-    { tipo: "pc", papel: "link_pc", ordemCaptura: 3, urlAfiliada: "https://go.optimus/same" },
-    { tipo: "resgate", papel: "link_resgate", ordemCaptura: 4, urlAfiliada: "https://go.optimus/resgate" },
-    { tipo: "produto", papel: "link_produto", ordemCaptura: 5, urlAfiliada: "https://go.optimus/produto" }
+    { tipo: "app", papel: "link_app", ordemCaptura: 1, urlAfiliada: "https://go.optimus/same", urlOptimus: "https://go.optimus/same" },
+    { tipo: "app", papel: "link_app", ordemCaptura: 2, urlAfiliada: "https://go.optimus/app-extra", urlOptimus: "https://go.optimus/app-extra" },
+    { tipo: "pc", papel: "link_pc", ordemCaptura: 3, urlAfiliada: "https://go.optimus/same", urlOptimus: "https://go.optimus/same" },
+    { tipo: "resgate", papel: "link_resgate", ordemCaptura: 4, urlAfiliada: "https://go.optimus/resgate", urlOptimus: "https://go.optimus/resgate" },
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 5, urlAfiliada: "https://go.optimus/produto", urlOptimus: "https://go.optimus/produto" }
   ]
 };
 
@@ -41,7 +44,8 @@ const padrao = gerarTemplateUniversal(ofertaBase);
 assert.ok(padrao.includes("🔥 *Produto Clone Visual*"));
 assert.ok(padrao.includes("🛍️ AliExpress"));
 assert.ok(padrao.includes("📂 Diversos"));
-assert.ok(padrao.includes("Oportunidade Optimus"));
+assert.ok(possuiLinha(padrao, estrelas(5)));
+assert.ok(!padrao.includes("Oportunidade Optimus"));
 assert.ok(padrao.includes("❌ De: *R$ 210,00*"));
 assert.ok(padrao.includes("✅ Por: *R$ 140,00*"));
 assert.ok(padrao.includes("📉 33% OFF"));
@@ -78,7 +82,7 @@ assert.ok(!semAvaliacaoReal.includes("⭐ 100"), "score interno nao vira avaliac
 const personalizado = renderizarTemplatePersonalizado({
   oferta: {
     ...ofertaBase,
-    oportunidadeVisual: "⭐⭐⭐⭐ Oportunidade Optimus",
+    oportunidadeVisual: `${estrelas(4)} Texto legado ignorado`,
     linksComerciais: [
       { tipo: "app", papel: "link_app", ordemCaptura: 1, urlAfiliada: "https://afiliado/app", urlOptimus: "https://go.optimus/app" },
       { tipo: "pc", papel: "link_pc", ordemCaptura: 2, urlAfiliada: "https://afiliado/pc", urlOptimus: "https://go.optimus/pc" },
@@ -111,12 +115,57 @@ const personalizado = renderizarTemplatePersonalizado({
 });
 
 assert.strictEqual(personalizado.ok, true);
-assert.ok(personalizado.mensagem.includes("⭐⭐⭐⭐ Oportunidade Optimus"));
+assert.ok(possuiLinha(personalizado.mensagem, estrelas(5)));
+assert.ok(!personalizado.mensagem.includes("Oportunidade Optimus"));
 assert.ok(personalizado.mensagem.includes("📱 APP:\nhttps://go.optimus/app"));
 assert.ok(personalizado.mensagem.includes("🖥️ PC:\nhttps://go.optimus/pc"));
 assert.ok(personalizado.mensagem.includes("🎟️ Resgate:\nhttps://go.optimus/resgate"));
 assert.ok(personalizado.mensagem.includes("🔗 Confira aqui:\nhttps://go.optimus/produto"));
 assert.strictEqual((personalizado.mensagem.match(/Aviso customizado final/g) || []).length, 1, "personalizado tambem tem aviso unico");
 assert.ok(personalizado.mensagem.endsWith("Rodape livre"), "rodape permanece texto livre separado");
+
+const personalizadoSemClassificacao = renderizarTemplatePersonalizado({
+  oferta: ofertaBase,
+  template: {
+    id: "tpl_sem_estrelas",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "oportunidade", ativo: false, ordem: 10 },
+      { tipo: "titulo", ativo: true, ordem: 20 },
+      { tipo: "preco_por", ativo: true, ordem: 30 },
+      { tipo: "link", ativo: true, ordem: 40 }
+    ]
+  },
+  canal: "whatsapp"
+});
+assert.strictEqual(personalizadoSemClassificacao.ok, true);
+assert.ok(!personalizadoSemClassificacao.mensagem.includes(estrelas(2)), "ocultar classificacao remove somente estrelas");
+assert.ok(personalizadoSemClassificacao.mensagem.includes("Produto Clone Visual"));
+assert.ok(personalizadoSemClassificacao.mensagem.includes("https://go.optimus/produto"));
+
+const linksDesligadosContinuamCanonicos = renderizarTemplatePersonalizado({
+  oferta: ofertaBase,
+  template: {
+    id: "tpl_links_desligados_legado",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "titulo", ativo: true, ordem: 10 },
+      { tipo: "preco_por", ativo: true, ordem: 20 },
+      { tipo: "link_resgate", ativo: false, ordem: 30 },
+      { tipo: "link_app", ativo: false, ordem: 40 },
+      { tipo: "link_pc", ativo: false, ordem: 50 },
+      { tipo: "link", ativo: true, ordem: 60 }
+    ]
+  },
+  canal: "whatsapp"
+});
+assert.ok(linksDesligadosContinuamCanonicos.mensagem.includes("🎟️ Resgate:\nhttps://go.optimus/resgate"));
+assert.ok(linksDesligadosContinuamCanonicos.mensagem.includes("📱 APP:\nhttps://go.optimus/same"));
+assert.ok(linksDesligadosContinuamCanonicos.mensagem.includes("🖥️ PC:\nhttps://go.optimus/same"));
+
+assert.ok(possuiLinha(gerarTemplateUniversal({ titulo: "Oferta normal", precoAtual: 100, linkAfiliado: "https://x.test" }), estrelas(2)));
+assert.ok(possuiLinha(gerarTemplateUniversal({ titulo: "Oferta boa", precoOriginal: 125, precoAtual: 100, linkAfiliado: "https://x.test" }), estrelas(3)));
+assert.ok(possuiLinha(gerarTemplateUniversal({ titulo: "Oferta otima", precoOriginal: 200, precoAtual: 100, linkAfiliado: "https://x.test" }), estrelas(4)));
+assert.ok(possuiLinha(gerarTemplateUniversal({ titulo: "Oferta excelente", precoOriginal: 200, precoAtual: 100, cupom: "PROMO10", freteGratis: true, linkAfiliado: "https://x.test" }), estrelas(5)));
 
 console.log("template-universal-visual-contract.test.js OK");

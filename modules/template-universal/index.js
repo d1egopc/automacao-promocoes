@@ -4,6 +4,9 @@ const {
 const {
   textoPixValido
 } = require("../radar/preco-pix-precedencia");
+const {
+  classificacaoVisualOferta
+} = require("../templates-clientes/classificacao-visual-oferta");
 
 function normalizarTexto(valor) {
   if (valor == null) return "";
@@ -236,24 +239,7 @@ function formatarAvaliacaoReal(valor = "", quantidade = "") {
 }
 
 function oportunidadeVisualTemplate(campos = {}) {
-  if (!normalizarTexto(campos.titulo) && !normalizarTexto(campos.linkAfiliado)) return "";
-
-  let estrelas = 2;
-  if (campos.cupom) estrelas += 1;
-  if (descontoReal(campos.precoOriginal, campos.precoAtual, campos.descontoPercentual) != null) estrelas += 1;
-  if (
-    campos.precoPix ||
-    campos.parcelamento ||
-    campos.frete ||
-    campos.freteGratis === true ||
-    campos.cashback ||
-    campos.beneficios.length
-  ) {
-    estrelas += 1;
-  }
-
-  estrelas = Math.max(2, Math.min(5, estrelas));
-  return `${"⭐".repeat(estrelas)} Oportunidade Optimus`;
+  return classificacaoVisualOferta(campos);
 }
 
 function avisoFinalTemplate(oferta = {}) {

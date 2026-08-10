@@ -143,8 +143,8 @@ const CATALOGO_BLOCOS = Object.freeze({
   }),
   oportunidade: bloco({
     tipo: "oportunidade",
-    nomeVisual: "Oportunidade Optimus",
-    descricaoVisual: "Selo visual ja preparado para apresentacao, sem efeito operacional.",
+    nomeVisual: "Classificacao da oferta",
+    descricaoVisual: "Classificacao visual da oferta, sem efeito operacional.",
     campoOrigem: "oportunidadeVisual",
     ordemPadrao: 30,
     ativoPorPadrao: true,

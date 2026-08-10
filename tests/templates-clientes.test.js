@@ -20,6 +20,8 @@ const { lerStorageTemplates } = require("../modules/templates-clientes/storage")
 const { gerarTemplateUniversal, apresentarScore } = require("../modules/template-universal");
 const { prepararDadosOficiaisTemplate } = require("../modules/templates-clientes/dados-oficiais");
 
+const estrelas = (n) => "\u2B50".repeat(n);
+
 function assertThrowsCodigo(fn, codigo) {
   assert.throws(fn, erro => erro && (erro.codigo === codigo || erro.message === codigo));
 }
@@ -179,7 +181,7 @@ for (const trecho of [
   "⚡ Pix: R$ 47,90 no Pix",
   "📉 38% OFF",
   "🎟️ Cupom: PROMO10",
-  "⭐⭐⭐⭐ Oportunidade Optimus",
+  estrelas(5),
   "💳 Ou 3x de R$ 16,63 sem juros",
   "🚚 Frete gratis",
   "✰ Avaliação\n⭐⭐⭐⭐⭐",

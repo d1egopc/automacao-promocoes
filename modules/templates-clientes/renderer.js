@@ -11,6 +11,9 @@ const {
 const {
   textoPixValido
 } = require("../radar/preco-pix-precedencia");
+const {
+  classificacaoVisualOferta
+} = require("./classificacao-visual-oferta");
 
 const AVISO_FINAL_PADRAO = "Oferta sujeita à alteração de preço.";
 const TIPOS_AVISO_FINAL = new Set(["aviso_final", "aviso_preco", "aviso_alteracao"]);
@@ -556,8 +559,7 @@ function resolverLinha(bloco, oferta = {}) {
     return cashback ? `💰 ${cashback}` : "";
   }
   if (tipo === "oportunidade") {
-    const oportunidade = textoUtil(oferta.oportunidadeVisual);
-    return oportunidade ? oportunidade : "";
+    return classificacaoVisualOferta(oferta);
   }
   if (tipo === "descricao_adicional") {
     const descricao = primeiroTexto(oferta.descricaoAdicional, oferta.descricao, oferta.textoResumo, oferta.mensagemResumo);

@@ -32,7 +32,7 @@ const OFERTA_PREVIEW_OFICIAL = Object.freeze({
   avaliacao: "4,8/5",
   quantidadeAvaliacoes: 1240,
   vendas: 5200,
-  oportunidadeVisual: "⭐⭐⭐⭐ Oportunidade Optimus",
+  oportunidadeVisual: "⭐⭐⭐⭐",
   score: 92,
   avisoFinal: "Oferta sujeita a alteracao de preco.",
   avisoPreco: "",
