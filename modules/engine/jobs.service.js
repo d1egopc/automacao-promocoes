@@ -12,6 +12,10 @@ const coberturaRadar = require("../radar/cobertura-v1");
 const {
   avaliarWorkspaceParaEngine
 } = require("../workspace");
+const {
+  resolverImagemCanonicaEvento,
+  aplicarImagemCanonicaMetadata
+} = require("../imagens/cache-canonico-evento");
 
 const CONFIRMACAO_RETENCAO_JOBS_POSTGRES = "LIMPAR_JOBS_POSTGRES_FINALIZADOS_12H";
 const RETENCAO_JOBS_LOCK_ID = 902260733;
@@ -173,7 +177,34 @@ async function ignorarJobsAdminNaoOperacional() {
   };
 }
 
-async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [], marketplaceDetectado = "", linksExtraidos = [], metadataEvento = {} } = {}) {
+async function resolverImagemCanonicaEventoSeguro({ eventoId, marketplace, linksExtraidos, metadataEvento, clientesIds = [], deps = {} } = {}) {
+  if (!clientesIds.length) {
+    return { imagemStatus: "nao_resolvida", motivo: "sem_clientes_operacionais", imagemEnviavel: false };
+  }
+
+  try {
+    return await resolverImagemCanonicaEvento({
+      eventoId,
+      marketplace,
+      linksExtraidos,
+      metadataEvento
+    }, deps.imagemCanonica || {});
+  } catch (erro) {
+    console.log("[ENGINE-IMAGEM-CACHE-CANONICO-ERRO]", JSON.stringify({
+      eventoId: eventoId || null,
+      marketplace: marketplace || "",
+      motivo: "cache_canonico_imagem_falhou",
+      erro: String(erro?.message || "erro_desconhecido").slice(0, 180)
+    }));
+    return {
+      imagemStatus: "nao_resolvida",
+      motivo: "cache_canonico_imagem_falhou",
+      imagemEnviavel: false
+    };
+  }
+}
+
+async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [], marketplaceDetectado = "", linksExtraidos = [], metadataEvento = {}, deps = {} } = {}) {
   const contextoCobertura = {
     coberturaTraceId: metadataEvento?.coberturaTraceId || "",
     fidelidadeTraceId: metadataEvento?.fidelidadeTraceId || "",
@@ -201,13 +232,28 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
   const avaliacaoClientes = avaliarClientesParaJobs(clientes);
   const clientesIds = avaliacaoClientes.clientesIds;
   const marketplace = normalizarTexto(marketplaceDetectado || marketplacePrincipal(linksExtraidos));
+  const imagemCanonicaEvento = await resolverImagemCanonicaEventoSeguro({
+    eventoId,
+    marketplace,
+    linksExtraidos,
+    metadataEvento,
+    clientesIds,
+    deps
+  });
+  const metadataEventoCanonico = aplicarImagemCanonicaMetadata(metadataEvento, imagemCanonicaEvento);
   const metadataJob = {
     fase: "1.1",
-    ...(coberturaRadar.flagAtiva() && metadataEvento?.coberturaTraceId ? { coberturaTraceId: metadataEvento.coberturaTraceId } : {}),
-    ...(coberturaRadar.flagAtiva() && metadataEvento?.fidelidadeTraceId ? { fidelidadeTraceId: metadataEvento.fidelidadeTraceId } : {}),
-    imagemRadar: metadataEvento?.imagem || metadataEvento?.image || metadataEvento?.thumbnail || metadataEvento?.imagemUrl || "",
-    imagemEventoOriginal: metadataEvento?.imagemOriginal || metadataEvento?.imagemRadar || metadataEvento?.foto || metadataEvento?.midia || "",
-    metadataEvento
+    ...(coberturaRadar.flagAtiva() && metadataEventoCanonico?.coberturaTraceId ? { coberturaTraceId: metadataEventoCanonico.coberturaTraceId } : {}),
+    ...(coberturaRadar.flagAtiva() && metadataEventoCanonico?.fidelidadeTraceId ? { fidelidadeTraceId: metadataEventoCanonico.fidelidadeTraceId } : {}),
+    imagemRadar: metadataEventoCanonico?.imagem || metadataEventoCanonico?.image || metadataEventoCanonico?.thumbnail || metadataEventoCanonico?.imagemUrl || "",
+    imagemEventoOriginal: metadataEventoCanonico?.imagemOriginal || metadataEventoCanonico?.imagemRadar || metadataEventoCanonico?.foto || metadataEventoCanonico?.midia || "",
+    imagemCanonicaDuravel: metadataEventoCanonico?.imagemCanonicaDuravel || "",
+    imagemUrl: metadataEventoCanonico?.imagemUrl || "",
+    imagemOrigem: metadataEventoCanonico?.imagemOrigem || "",
+    imagemStatus: metadataEventoCanonico?.imagemStatus || "",
+    imagemEnviavel: metadataEventoCanonico?.imagemEnviavel === true,
+    imagemCacheCanonico: metadataEventoCanonico?.imagemCacheCanonico || null,
+    metadataEvento: metadataEventoCanonico
   };
   let criados = 0;
   let existentes = 0;

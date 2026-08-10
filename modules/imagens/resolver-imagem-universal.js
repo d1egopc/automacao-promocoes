@@ -15,6 +15,10 @@ const ALIASES_DIRETOS = [
   "twitterImage",
   "imagemRadar",
   "urlImagem",
+  "imagemCanonicaDuravel",
+  "imagemDuravel",
+  "imagemEnviavel",
+  "imagemMaterializada",
 ];
 
 const ALIASES_THUMBNAIL = [

@@ -1,0 +1,356 @@
+const assert = require("assert");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+
+process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-img-canonica-"));
+
+const { writeGlobalJson } = require("../utils/storage");
+
+writeGlobalJson("usuarios.json", [
+  { id: "d1_teste", nome: "D1", ativo: true, plano: "pro" },
+  { id: "roger_teste", nome: "Roger", ativo: true, plano: "pro" },
+  { id: "wolff_teste", nome: "Wolff", ativo: true, plano: "pro" }
+]);
+writeGlobalJson("planos.json", {
+  pro: {
+    nome: "pro",
+    ativo: true,
+    marketplaces: ["mercadolivre", "shopee", "amazon", "aliexpress"],
+    recursos: { automacao: true }
+  }
+});
+
+function limparModulo(relativo) {
+  const resolvido = require.resolve(relativo);
+  delete require.cache[resolvido];
+  return resolvido;
+}
+
+function mockModulo(relativo, exports) {
+  const resolvido = limparModulo(relativo);
+  require.cache[resolvido] = {
+    id: resolvido,
+    filename: resolvido,
+    loaded: true,
+    exports
+  };
+}
+
+function url(nome) {
+  return `https://cdn.exemplo.com/produtos/${nome}.jpg`;
+}
+
+function mmg(nome = "img") {
+  return `https://mmg.whatsapp.net/o1/v/t24/f2/m239/${nome}?ccb=9-4&oh=assinatura&oe=6AA02255`;
+}
+
+function pngMinimo() {
+  return Buffer.from(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6360000002000100ffff03000006000557bfab6d0000000049454e44ae426082",
+    "hex"
+  );
+}
+
+function fetchImagemOk(contador) {
+  return async () => {
+    contador.count += 1;
+    return {
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => pngMinimo()
+    };
+  };
+}
+
+function storageDuravel(contador, nome = "radar-materializada") {
+  return {
+    detectarMime(buffer) {
+      assert(Buffer.isBuffer(buffer));
+      return "image/png";
+    },
+    salvar({ buffer, mimeType }) {
+      contador.count += 1;
+      assert(Buffer.isBuffer(buffer));
+      assert.strictEqual(mimeType, "image/png");
+      return { ok: true, url: url(nome), mimeType, bytes: buffer.length };
+    }
+  };
+}
+
+async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, links = ["https://produto.mercadolivre.com.br/MLB-4987473341-produto"] } = {}) {
+  limparModulo("../modules/imagens/cache-canonico-evento");
+  limparModulo("../modules/engine/jobs.service");
+  const metadatas = [];
+
+  mockModulo("../modules/engine/database", {
+    queryEngine: async (sql, params = []) => {
+      if (/WITH jobs_admin/i.test(sql)) {
+        return { ok: true, resultado: { rows: [{ jobs_ignorados: 0, ofertas_retidas: 0 }] } };
+      }
+      if (/INSERT INTO engine_jobs_cliente/i.test(sql)) {
+        metadatas.push(JSON.parse(params[4]));
+        return { ok: true, resultado: { rows: [{ id: 1000 + metadatas.length }] } };
+      }
+      return { ok: true, resultado: { rows: [] } };
+    }
+  });
+
+  const jobs = require("../modules/engine/jobs.service");
+  const retorno = await jobs.criarJobsParaClientes({
+    eventoId: 9100,
+    marketplaceDetectado: "mercadolivre",
+    linksExtraidos: links,
+    clientes: ["d1_teste", "roger_teste", "wolff_teste"],
+    metadataEvento,
+    deps: { imagemCanonica: depsImagemCanonica }
+  });
+
+  return { retorno, metadatas };
+}
+
+(async () => {
+  {
+    const fetchCount = { count: 0 };
+    const saveCount = { count: 0 };
+    const { retorno, metadatas } = await fanoutComImagemCanonica({
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "mensagem",
+            imagemOriginal: mmg("fanout-valida")
+          }
+        }
+      },
+      depsImagemCanonica: {
+        fetchImpl: fetchImagemOk(fetchCount),
+        storage: storageDuravel(saveCount)
+      }
+    });
+
+    assert.strictEqual(retorno.criados, 3);
+    assert.strictEqual(fetchCount.count, 1);
+    assert.strictEqual(saveCount.count, 1);
+    assert.strictEqual(metadatas.length, 3);
+    for (const metadata of metadatas) {
+      assert.strictEqual(metadata.imagemCanonicaDuravel, url("radar-materializada"));
+      assert.strictEqual(metadata.imagemEnviavel, true);
+      assert.strictEqual(metadata.metadataEvento.imagemCanonicaDuravel, url("radar-materializada"));
+      assert.strictEqual(metadata.metadataEvento.radarMirror.midia.imagemMaterializada, url("radar-materializada"));
+      assert.strictEqual(metadata.imagemCacheCanonico.materializacoes, 1);
+    }
+  }
+
+  {
+    const {
+      resolverImagemCanonicaEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const resultado = await resolverImagemCanonicaEvento({
+      eventoId: 9200,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-3696123026-la-roche"],
+      metadataEvento: {
+        radarMirror: { midia: { imagemOrigem: "mensagem", imagemOriginal: mmg("expirada") } },
+        jsonLd: { image: url("jsonld-ml") }
+      }
+    }, {
+      fetchImpl: async () => ({ ok: false, status: 403 }),
+      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); },
+      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, url("jsonld-ml"));
+    assert.strictEqual(resultado.imagemOrigem, "jsonLd.image");
+    assert.strictEqual(resultado.materializacoes, 1);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const resultado = await resolverImagemCanonicaEvento({
+      eventoId: 9300,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-3284064025-vodka"],
+      metadataEvento: {
+        radarMirror: { midia: { imagemOrigem: "mensagem", imagemOriginal: mmg("expirada") } }
+      }
+    }, {
+      fetchImpl: async () => ({ ok: false, status: 410 }),
+      buscarImagemHistorica: async () => ({ imagem: url("historico-mlb"), origem: "engine_ofertas.imagem:123" }),
+      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, url("historico-mlb"));
+    assert.strictEqual(resultado.imagemOrigem, "engine_ofertas.imagem:123");
+    assert.strictEqual(resultado.imagemStatus, "historico_mesmo_mlb");
+  }
+
+  {
+    const {
+      resolverImagemCanonicaEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const resultado = await resolverImagemCanonicaEvento({
+      eventoId: 9350,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-4987473341-produto-novo"],
+      metadataEvento: {
+        radarMirror: { midia: { imagemOrigem: "mensagem", imagemOriginal: mmg("expirada-oficial") } }
+      }
+    }, {
+      fetchImpl: async () => ({ ok: false, status: 410 }),
+      buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" }),
+      buscarImagemOficialMl: async () => ({ imagem: url("api-oficial-mlb"), origem: "api_mercadolibre.items.pictures[0].secure_url" })
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, url("api-oficial-mlb"));
+    assert.strictEqual(resultado.imagemOrigem, "api_mercadolibre.items.pictures[0].secure_url");
+    assert.strictEqual(resultado.imagemStatus, "api_oficial_mlb");
+  }
+
+  {
+    const {
+      resolverImagemCanonicaEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const resultado = await resolverImagemCanonicaEvento({
+      eventoId: 9400,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-1111111111-sem-imagem"],
+      metadataEvento: {
+        radarMirror: { midia: { imagemOrigem: "mensagem", imagemOriginal: mmg("sem-fonte") } }
+      }
+    }, {
+      fetchImpl: async () => ({ ok: false, status: 404 }),
+      buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" }),
+      buscarImagemOficialMl: async () => ({ imagem: "", motivo: "api_oficial_mlb_sem_imagem" })
+    });
+
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.imagemCanonicaDuravel, "");
+    assert.strictEqual(resultado.imagemEnviavel, false);
+    assert.strictEqual(resultado.motivo, "api_oficial_mlb_sem_imagem");
+  }
+
+  {
+    const {
+      resolverImagemCanonicaEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const fetchCount = { count: 0 };
+    const storage = {
+      detectarMime: () => "image/png",
+      salvar: ({ buffer, mimeType }) => ({
+        ok: true,
+        url: url(`produto-${fetchCount.count}`),
+        mimeType,
+        bytes: buffer.length
+      })
+    };
+    const deps = { fetchImpl: fetchImagemOk(fetchCount), storage };
+    const primeiro = await resolverImagemCanonicaEvento({
+      eventoId: 9500,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-2222222222-a"],
+      metadataEvento: { radarMirror: { midia: { imagemOrigem: "mensagem", imagemOriginal: mmg("a") } } }
+    }, deps);
+    const segundo = await resolverImagemCanonicaEvento({
+      eventoId: 9500,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-3333333333-b"],
+      metadataEvento: { radarMirror: { midia: { imagemOrigem: "mensagem", imagemOriginal: mmg("b") } } }
+    }, deps);
+
+    assert.notStrictEqual(primeiro.chave, segundo.chave);
+    assert.notStrictEqual(primeiro.imagemCanonicaDuravel, segundo.imagemCanonicaDuravel);
+    assert.strictEqual(fetchCount.count, 2);
+  }
+
+  {
+    const {
+      aplicarImagemCanonicaMetadata
+    } = require("../modules/imagens/cache-canonico-evento");
+    const metadata = {
+      precoDe: "R$ 289",
+      precoPor: "R$ 132",
+      precoPix: "R$ 132",
+      cupom: "QUEROCUPOM",
+      linksComerciais: [
+        { papel: "produto", urlAfiliada: "https://meli.la/workspace-a" },
+        { papel: "resgate", urlAfiliada: "https://meli.la/cupom-a" }
+      ]
+    };
+    const saida = aplicarImagemCanonicaMetadata(metadata, {
+      chave: "9600:mercadolivre:MLB4444444444",
+      produtoId: "MLB4444444444",
+      imagemCanonicaDuravel: url("sem-mexer-comercial"),
+      imagemOrigem: "api_oficial_mlb",
+      imagemStatus: "api_oficial_mlb",
+      imagemEnviavel: true
+    });
+
+    assert.strictEqual(saida.precoDe, metadata.precoDe);
+    assert.strictEqual(saida.precoPor, metadata.precoPor);
+    assert.strictEqual(saida.precoPix, metadata.precoPix);
+    assert.strictEqual(saida.cupom, metadata.cupom);
+    assert.deepStrictEqual(saida.linksComerciais, metadata.linksComerciais);
+  }
+
+  {
+    const { retorno, metadatas } = await fanoutComImagemCanonica({
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "mensagem",
+            imagemOriginal: mmg("fail-open")
+          }
+        }
+      },
+      depsImagemCanonica: {
+        fetchImpl: async () => ({ ok: false, status: 410 }),
+        buscarImagemHistorica: async () => { throw new Error("historico_indisponivel"); }
+      }
+    });
+
+    assert.strictEqual(retorno.criados, 3);
+    assert.strictEqual(metadatas[0].imagemEnviavel, false);
+    assert.strictEqual(metadatas[0].imagemCacheCanonico.motivo, "cache_canonico_imagem_falhou");
+  }
+
+  {
+    const { montarItemFilaEngine } = require("../modules/engine/distributor/distributor.service");
+    const itemFila = montarItemFilaEngine({
+      id: 9700,
+      job_id: 9701,
+      cliente_id: "d1_teste",
+      marketplace: "mercadolivre",
+      titulo: "Oferta com cache canonico",
+      preco: 99,
+      link_afiliado: "https://meli.la/workspace-d1",
+      metadata: {
+        imagemCanonicaDuravel: url("fila-cache-canonico"),
+        imagemOrigem: "imagem_canonica_evento",
+        imagemStatus: "api_oficial_mlb",
+        imagemEnviavel: true
+      }
+    });
+
+    assert.strictEqual(itemFila.imagem, url("fila-cache-canonico"));
+    assert.strictEqual(itemFila.imagemUrl, url("fila-cache-canonico"));
+    assert.strictEqual(itemFila.imagemEnviavel, true);
+    assert.strictEqual(itemFila.linkAfiliado, "https://meli.la/workspace-d1");
+  }
+
+  console.log("imagem-canonica-fanout.test.js OK");
+})().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

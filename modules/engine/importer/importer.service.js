@@ -867,8 +867,85 @@ function aplicarRadarMirrorMaterializado(oferta = {}, radarMirror = {}, material
   };
 }
 
+function encontrarImagemCanonicaEvento(oferta = {}, contexto = {}) {
+  const fontes = [
+    objetoSeguro(oferta.metadata),
+    objetoSeguro(contexto?.ofertaEntrada?.metadata),
+    objetoSeguro(contexto?.evento?.metadata),
+    objetoSeguro(contexto?.job?.metadata),
+    objetoSeguro(contexto?.job?.metadata?.metadataEvento)
+  ];
+
+  for (const fonte of fontes) {
+    const cache = objetoSeguro(fonte.imagemCacheCanonico);
+    const imagem = normalizarTexto(
+      fonte.imagemCanonicaDuravel ||
+      cache.imagemCanonicaDuravel ||
+      fonte.imagemUrl ||
+      fonte.imagem
+    );
+    if (!imagem) continue;
+    const validacao = imagemUrlValidaUniversal(imagem);
+    if (!validacao.ok || imagemUrlEfemeraUniversal(validacao.url)) continue;
+    if (fonte.imagemEnviavel === false || cache.imagemEnviavel === false) continue;
+    return {
+      imagem: validacao.url,
+      origem: normalizarTexto(fonte.imagemOrigem || cache.origem || "imagem_canonica_evento"),
+      status: normalizarTexto(fonte.imagemStatus || cache.status || "imagem_canonica_evento"),
+      cache
+    };
+  }
+
+  return { imagem: "", origem: "", status: "", cache: {} };
+}
+
+function aplicarImagemCanonicaEventoOferta(oferta = {}, imagemCanonica = {}) {
+  if (!imagemCanonica?.imagem) return oferta;
+  const metadata = objetoSeguro(oferta.metadata);
+  const deveAplicarComoPrincipal = !oferta.imagem || /^radar_mirror/.test(imagemCanonica.origem || "");
+
+  return {
+    ...oferta,
+    ...(deveAplicarComoPrincipal ? {
+      imagem: imagemCanonica.imagem,
+      imagemUrl: imagemCanonica.imagem,
+      imagemOrigem: imagemCanonica.origem || "imagem_canonica_evento",
+      imagemStatus: imagemCanonica.status || "imagem_canonica_evento",
+      imagemRecuperavel: true,
+      imagemDuravel: true,
+      imagemEnviavel: true
+    } : {}),
+    metadata: {
+      ...metadata,
+      imagemCanonicaDuravel: imagemCanonica.imagem,
+      imagemOrigem: imagemCanonica.origem || "imagem_canonica_evento",
+      imagemStatus: imagemCanonica.status || "imagem_canonica_evento",
+      imagemRecuperavel: true,
+      imagemDuravel: true,
+      imagemEnviavel: true,
+      imagemCacheCanonico: {
+        ...objetoSeguro(imagemCanonica.cache),
+        imagemCanonicaDuravel: imagemCanonica.imagem,
+        origem: imagemCanonica.origem || "imagem_canonica_evento",
+        status: imagemCanonica.status || "imagem_canonica_evento",
+        imagemEnviavel: true
+      }
+    }
+  };
+}
+
 async function materializarImagemRadarMirrorSeNecessario(ofertaEntrada = {}, contexto = {}) {
   const oferta = ofertaEntrada && typeof ofertaEntrada === "object" ? ofertaEntrada : {};
+  const imagemCanonicaEvento = encontrarImagemCanonicaEvento(oferta, contexto);
+  if (imagemCanonicaEvento.imagem) {
+    return {
+      oferta: aplicarImagemCanonicaEventoOferta(oferta, imagemCanonicaEvento),
+      status: "cache_canonico_evento",
+      motivo: "imagem_canonica_pre_fanout",
+      urlDuravel: imagemCanonicaEvento.imagem
+    };
+  }
+
   const { radarMirror, imagemOriginal } = encontrarRadarMirrorMensagem(oferta, contexto);
   if (!radarMirror || !imagemOriginal) return { oferta, status: "sem_imagem_radar", motivo: "radar_sem_imagem" };
 
