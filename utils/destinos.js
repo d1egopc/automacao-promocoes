@@ -43,6 +43,8 @@ const ALIASES_MARKETPLACE_DESTINO = {
   feedkabum: ["kabum", "awin"]
 };
 
+let categoriasOficiaisDestinoCache = null;
+
 const ROTULOS_DESTINO_GERAL = new Set([
   "geral",
   "todos",
@@ -65,6 +67,24 @@ const ROTULOS_DESTINO_GERAL = new Set([
   "all",
   "allcategories"
 ]);
+
+const CAMPOS_FLAG_TODAS_CATEGORIAS = [
+  "todasCategorias",
+  "categoriasTodas",
+  "aceitarTodasCategorias",
+  "aceitaTodasCategorias",
+  "todasAsCategorias",
+  "allCategories"
+];
+
+const CAMPOS_MODO_CATEGORIA = [
+  "modoCategoria",
+  "modoCategorias",
+  "categoriaModo",
+  "categoriasModo",
+  "tipoCategoria",
+  "tipoCategorias"
+];
 
 function normalizarDestino(valor = "") {
   return String(valor || "")
@@ -93,8 +113,68 @@ function categoriaDestinoEhGeral(valor = "") {
 }
 
 function listaCategoriasDestinoEhGeral(categoriasDestino = []) {
-  if (!Array.isArray(categoriasDestino) || !categoriasDestino.length) return true;
+  if (!Array.isArray(categoriasDestino) || !categoriasDestino.length) return false;
   return categoriasDestino.some(categoriaDestinoEhGeral);
+}
+
+function categoriasOficiaisDestinoNormalizadas() {
+  if (categoriasOficiaisDestinoCache) return categoriasOficiaisDestinoCache;
+
+  try {
+    const { CATEGORIAS_DESTINOS } = require("../marketplaces/inteligencia/categorias-destinos");
+    categoriasOficiaisDestinoCache = Object.values(CATEGORIAS_DESTINOS || {})
+      .map(item => normalizarCategoriaDestino(item?.nome || ""))
+      .filter(Boolean);
+  } catch (_) {
+    categoriasOficiaisDestinoCache = [];
+  }
+
+  return categoriasOficiaisDestinoCache;
+}
+
+function listaCategoriasEhSnapshotCompleto(categorias = []) {
+  const oficiais = categoriasOficiaisDestinoNormalizadas();
+  if (!oficiais.length || !Array.isArray(categorias) || !categorias.length) return false;
+
+  const recebidas = new Set(categorias.map(normalizarCategoriaDestino).filter(Boolean));
+  if (!recebidas.size) return false;
+
+  return oficiais.every(categoria => recebidas.has(categoria));
+}
+
+function destinoTemFlagTodasCategorias(destino = {}) {
+  if (!destino || typeof destino !== "object" || Array.isArray(destino)) return false;
+  if (CAMPOS_FLAG_TODAS_CATEGORIAS.some(campo => destino[campo] === true)) return true;
+  return CAMPOS_MODO_CATEGORIA.some(campo => categoriaDestinoEhGeral(destino[campo]));
+}
+
+function destinoAceitaTodasCategorias(destino = {}) {
+  if (!destino || typeof destino !== "object" || Array.isArray(destino)) return false;
+  if (destinoTemFlagTodasCategorias(destino)) return true;
+
+  const categorias = primeiraListaDestino(destino.categorias, destino.categoriasPermitidas);
+  return listaCategoriasDestinoEhGeral(categorias) || listaCategoriasEhSnapshotCompleto(categorias);
+}
+
+function normalizarDestinoContratoCategorias(destino = {}) {
+  if (!destino || typeof destino !== "object" || Array.isArray(destino)) return destino;
+
+  const todasCategorias = destinoAceitaTodasCategorias(destino);
+  const normalizado = {
+    ...destino,
+    todasCategorias
+  };
+
+  if (!todasCategorias) return normalizado;
+
+  normalizado.modoCategoria = "todas";
+  if (Array.isArray(destino.categorias)) normalizado.categorias = ["geral"];
+  if (Array.isArray(destino.categoriasPermitidas)) normalizado.categoriasPermitidas = ["geral"];
+  if (!Array.isArray(destino.categorias) && !Array.isArray(destino.categoriasPermitidas)) {
+    normalizado.categorias = ["geral"];
+  }
+
+  return normalizado;
 }
 
 function expandirMarketplacesDestino(valores = []) {
@@ -164,7 +244,7 @@ function analisarDestinoOferta(destino, oferta, opcoes = {}) {
     marketplacesOferta.some(marketplace => marketplacesDestino.includes(marketplace));
 
   const aceitaCategoria =
-    listaCategoriasDestinoEhGeral(categoriasDestino) ||
+    destinoAceitaTodasCategorias(destino) ||
     categoriasDestino.some(cat =>
       cat === categoriaOferta ||
       cat.includes(categoriaOferta) ||
@@ -256,7 +336,7 @@ function categoriaPermitidaNoDestino(oferta, destino) {
     .map(normalizarCategoriaDestino)
     .filter(Boolean);
 
-  if (listaCategoriasDestinoEhGeral(categoriasDestino)) return true;
+  if (destinoAceitaTodasCategorias(destino)) return true;
 
   return (
     categoriasDestino.includes(categoriaOferta)
@@ -268,6 +348,10 @@ module.exports = {
   normalizarCategoriaDestino,
   categoriaDestinoEhGeral,
   listaCategoriasDestinoEhGeral,
+  categoriasOficiaisDestinoNormalizadas,
+  listaCategoriasEhSnapshotCompleto,
+  destinoAceitaTodasCategorias,
+  normalizarDestinoContratoCategorias,
   expandirMarketplacesDestino,
   categoriaPermitidaNoDestino,
   analisarDestinoOferta,

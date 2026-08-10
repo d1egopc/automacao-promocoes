@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 const linksPuros = require("../modules/links");
+const destinosUtils = require("../utils/destinos");
 
 const indexPath = path.join(__dirname, "..", "index.js");
 const fonte = fs.readFileSync(indexPath, "utf8");
@@ -36,6 +37,7 @@ const sandbox = {
   cupomFastLaneTipo: oferta => oferta.cupomReal ? "real_detectado" : (oferta.cupomProvavel ? "provavel" : ""),
   URL,
   linksPuros,
+  destinosUtils,
   process: { env: {} },
   console: {
     ...console,

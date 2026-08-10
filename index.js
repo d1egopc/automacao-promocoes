@@ -2445,12 +2445,12 @@ function normalizarModoLinkDestino(valor = "") {
 
 function normalizarDestinoContrato(destino = {}) {
   if (!destino || typeof destino !== "object" || Array.isArray(destino)) return destino;
-  return {
+  return destinosUtils.normalizarDestinoContratoCategorias({
     ...destino,
     templateId: normalizarTemplateIdDestinoContrato(destino.templateId),
     prioridadeCupomAtiva: destino.prioridadeCupomAtiva === true,
     modoLink: normalizarModoLinkDestino(destino.modoLink)
-  };
+  });
 }
 
 function normalizarDestinosContrato(valor) {

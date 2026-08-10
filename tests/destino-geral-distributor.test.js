@@ -23,7 +23,7 @@ function destino(extra = {}) {
     ativo: extra.ativo !== false,
     tipo: "whatsapp",
     marketplaces: extra.marketplaces || ["mercadolivre"],
-    categorias: extra.categorias || ["Todas as categorias"],
+    categorias: Object.prototype.hasOwnProperty.call(extra, "categorias") ? extra.categorias : ["Todas as categorias"],
     ...extra
   };
 }
@@ -64,19 +64,19 @@ function contexto(destinosWorkspace) {
     assert.strictEqual(destinos.categoriaDestinoEhGeral("todos"), true);
     assert.strictEqual(destinos.categoriaDestinoEhGeral("todas"), true);
     assert.strictEqual(destinos.categoriaDestinoEhGeral("Todas as categorias"), true);
-    assert.strictEqual(destinos.listaCategoriasDestinoEhGeral([]), true);
+    assert.strictEqual(destinos.listaCategoriasDestinoEhGeral([]), false, "lista vazia sem flag nao representa todas as categorias");
 
     const geralDiversos = await distributor.validarOfertaParaDistribuicao(
       oferta({ categoria: "Diversos" }),
-      contexto(destino({ categorias: ["Todas as categorias"] }))
+      contexto(destino({ todasCategorias: true, categorias: ["geral"] }))
     );
-    assert.strictEqual(geralDiversos.ok, true, "destino geral deve aceitar Diversos");
+    assert.strictEqual(geralDiversos.ok, true, "todasCategorias=true deve aceitar Diversos");
 
-    const geralCategoriaConhecida = await distributor.validarOfertaParaDistribuicao(
-      oferta({ categoria: "Gamer e Hardware" }),
-      contexto(destino({ categorias: ["geral"] }))
+    const geralCategoriaFutura = await distributor.validarOfertaParaDistribuicao(
+      oferta({ categoria: "Categoria Futura Ainda Nao Cadastrada" }),
+      contexto(destino({ todasCategorias: true, categorias: ["geral"] }))
     );
-    assert.strictEqual(geralCategoriaConhecida.ok, true, "destino geral deve aceitar categoria conhecida");
+    assert.strictEqual(geralCategoriaFutura.ok, true, "todasCategorias=true deve aceitar categoria futura desconhecida");
 
     const restritoDiversos = await distributor.validarOfertaParaDistribuicao(
       oferta({ categoria: "Diversos" }),
@@ -87,21 +87,71 @@ function contexto(destinosWorkspace) {
     assert.strictEqual(restritoDiversos.detalhes.destinosDiagnostico[0].categoriaOferta, "Diversos");
     assert.deepStrictEqual(restritoDiversos.detalhes.destinosDiagnostico[0].categoriasPermitidas, ["Gamer e Hardware"]);
 
+    const restritoCategoriaFutura = await distributor.validarOfertaParaDistribuicao(
+      oferta({ categoria: "Categoria Futura Ainda Nao Cadastrada" }),
+      contexto(destino({ categorias: ["Gamer e Hardware"] }))
+    );
+    assert.strictEqual(restritoCategoriaFutura.ok, false, "restrito continua restrito apos nova categoria");
+    assert.strictEqual(restritoCategoriaFutura.motivo, "categoria_incompativel");
+
     const inativoMaisRestrito = await distributor.validarOfertaParaDistribuicao(
       oferta({ categoria: "Diversos" }),
       contexto([
-        destino({ id: "destino_inativo", ativo: false, categorias: ["Todas as categorias"] }),
+        destino({ id: "destino_inativo", ativo: false, todasCategorias: true, categorias: ["geral"] }),
         destino({ id: "destino_restrito", categorias: ["Gamer e Hardware"] })
       ])
     );
     assert.strictEqual(inativoMaisRestrito.ok, false);
     assert.strictEqual(inativoMaisRestrito.motivo, "categoria_incompativel", "destino inativo nao deve mascarar rejeicao ativa por categoria");
 
+    const categoriasOficiais = destinos.categoriasOficiaisDestinoNormalizadas();
+    assert(categoriasOficiais.length > 5, "lista oficial de categorias selecionaveis deve estar disponivel");
+    assert.strictEqual(destinos.listaCategoriasEhSnapshotCompleto(categoriasOficiais), true);
+
+    const snapshotCompleto = destinos.normalizarDestinoContratoCategorias(destino({
+      categorias: categoriasOficiais
+    }));
+    assert.strictEqual(snapshotCompleto.todasCategorias, true, "lista completa atual normaliza para wildcard");
+    assert.deepStrictEqual(snapshotCompleto.categorias, ["geral"], "snapshot completo nao deve persistir lista enumerada");
+
+    const snapshotParcial = destinos.normalizarDestinoContratoCategorias(destino({
+      categorias: ["Gamer e Hardware", "Ferramentas"]
+    }));
+    assert.strictEqual(snapshotParcial.todasCategorias, false, "lista parcial nao normaliza para geral");
+    assert.deepStrictEqual(snapshotParcial.categorias, ["Gamer e Hardware", "Ferramentas"]);
+
+    const marcadorTodas = destinos.normalizarDestinoContratoCategorias(destino({
+      categorias: ["Todas as categorias"]
+    }));
+    assert.strictEqual(marcadorTodas.todasCategorias, true, "marcador explicito normaliza para wildcard");
+    assert.deepStrictEqual(marcadorTodas.categorias, ["geral"]);
+
     const workspaceNova = await distributor.validarOfertaParaDistribuicao(
       oferta({ cliente_id: WORKSPACE_NOVA, categoria: "Diversos" }),
-      contexto(destino({ categorias: [] }))
+      contexto(destino({ clienteId: WORKSPACE_NOVA, todasCategorias: true, categorias: ["geral"] }))
     );
     assert.strictEqual(workspaceNova.ok, true, "workspace nova com destino geral recebe oferta Diversos");
+
+    const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
+    assert(indexFonte.includes("destinosUtils.normalizarDestinoContratoCategorias"), "endpoint de destinos deve persistir wildcard/flag, nao snapshot enumerado");
+
+    const outroWorkspaceRestrito = await distributor.validarOfertaParaDistribuicao(
+      oferta({ cliente_id: "workspace_existente", categoria: "Diversos" }),
+      {
+        clientesValidos: [WORKSPACE_NOVA, "workspace_existente"],
+        marketplacesAtivosPorCliente: {
+          [WORKSPACE_NOVA]: { mercadolivre: true },
+          workspace_existente: { mercadolivre: true }
+        },
+        destinosPorCliente: {
+          [WORKSPACE_NOVA]: [destino({ todasCategorias: true, categorias: ["geral"] })],
+          workspace_existente: [destino({ categorias: ["Gamer e Hardware"] })]
+        },
+        validarCreditos: () => ({ ok: true })
+      }
+    );
+    assert.strictEqual(outroWorkspaceRestrito.ok, false, "workspace restrita nao herda wildcard de outra workspace");
+    assert.strictEqual(outroWorkspaceRestrito.motivo, "categoria_incompativel");
 
     const adicionados = [];
     const fila = await distributor.adicionarOfertaNaFilaCliente(oferta({
