@@ -267,6 +267,15 @@ function separarLinksApresentacao(dados = {}) {
   };
 }
 
+function primeiroLinkApresentacaoPorTipo(links = [], tipos = []) {
+  const tiposNormalizados = new Set(tipos.map(tipo => normalizarComparacao(tipo).replace(/^link\s+/, "")));
+  for (const item of Array.isArray(links) ? links : []) {
+    const tipo = normalizarComparacao(item?.tipo || item?.papel || "").replace(/^link\s+/, "");
+    if (tiposNormalizados.has(tipo)) return valorLink(item);
+  }
+  return "";
+}
+
 function normalizarApresentacaoComercial(dados = {}, origem = {}) {
   const aliExpress = marketplaceAliExpress(dados.marketplace, origem.marketplace);
   const cupons = normalizarCuponsApresentacao(
@@ -301,6 +310,9 @@ function normalizarApresentacaoComercial(dados = {}, origem = {}) {
     : "";
   const links = separarLinksApresentacao({ ...origem, ...dados });
   const linkPrincipal = links.linkProduto || texto(dados.linkAfiliado || dados.linkFinal || dados.link || origem.linkAfiliado || origem.linkFinal || origem.link || "");
+  const linkApp = texto(dados.linkApp || origem.linkApp || primeiroLinkApresentacaoPorTipo(links.linksComerciais, ["app"]));
+  const linkPc = texto(dados.linkPc || origem.linkPc || primeiroLinkApresentacaoPorTipo(links.linksComerciais, ["pc"]));
+  const linkMoedas = texto(dados.linkMoedas || origem.linkMoedas || primeiroLinkApresentacaoPorTipo(links.linksComerciais, ["moedas"]));
 
   return {
     ...dados,
@@ -317,6 +329,9 @@ function normalizarApresentacaoComercial(dados = {}, origem = {}) {
     linksResgate: links.linksResgate,
     linkProduto: links.linkProduto || linkPrincipal,
     linkResgate: links.linkResgate,
+    linkApp,
+    linkPc,
+    linkMoedas,
     linkAfiliado: linkPrincipal,
     linkFinal: dados.linkFinal || linkPrincipal,
     link: dados.link || linkPrincipal

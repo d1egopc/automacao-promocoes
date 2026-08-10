@@ -168,7 +168,6 @@ function categoriaConfiavel(campos = {}) {
   const categoriaNormalizada = normalizarComparacao(categoria);
   const marketplaceNormalizado = normalizarComparacao(campos.marketplace);
   const categoriasFracas = [
-    "diversos",
     "shopee",
     "mercado livre",
     "mercadolivre",
@@ -189,11 +188,6 @@ function categoriaConfiavel(campos = {}) {
   const confiancaCategoria = normalizarNumero(campos.categoriaConfianca ?? campos.confiancaCategoria);
   if (confiancaCategoria != null && confiancaCategoria < 0.5) return false;
 
-  const score = normalizarNumero(campos.score);
-  const prioridade = normalizarNumero(campos.prioridade);
-  if (score != null && score < 45) return false;
-  if (prioridade != null && prioridade < 45) return false;
-
   return true;
 }
 
@@ -208,6 +202,59 @@ function apresentarScore(score) {
   if (valor <= 64) return "⭐⭐⭐☆☆";
   if (valor <= 84) return "⭐⭐⭐⭐☆";
   return "⭐⭐⭐⭐⭐";
+}
+
+function formatarAvaliacaoReal(valor = "", quantidade = "") {
+  const avaliacao = normalizarTexto(valor);
+  if (!avaliacao) return "";
+
+  const match = avaliacao.replace(",", ".").match(/\b([0-5](?:\.\d+)?)\b(?:\s*\/\s*5)?/);
+  if (!match) return "";
+
+  const numero = Number(match[1]);
+  if (!Number.isFinite(numero) || numero <= 0 || numero > 5) return "";
+
+  const nota = numero.toLocaleString("pt-BR", {
+    minimumFractionDigits: numero % 1 === 0 ? 0 : 1,
+    maximumFractionDigits: 1
+  });
+  const quantidadeNumero = normalizarNumero(quantidade);
+  const qtd = quantidadeNumero != null
+    ? Math.round(quantidadeNumero).toLocaleString("pt-BR")
+    : normalizarTexto(quantidade);
+  return `⭐ ${nota}${qtd ? ` • ${qtd}` : ""}`;
+}
+
+function oportunidadeVisualTemplate(campos = {}) {
+  if (!normalizarTexto(campos.titulo) && !normalizarTexto(campos.linkAfiliado)) return "";
+
+  let estrelas = 2;
+  if (campos.cupom) estrelas += 1;
+  if (descontoReal(campos.precoOriginal, campos.precoAtual, campos.descontoPercentual) != null) estrelas += 1;
+  if (
+    campos.precoPix ||
+    campos.parcelamento ||
+    campos.frete ||
+    campos.freteGratis === true ||
+    campos.cashback ||
+    campos.beneficios.length
+  ) {
+    estrelas += 1;
+  }
+
+  estrelas = Math.max(2, Math.min(5, estrelas));
+  return `${"⭐".repeat(estrelas)} Oportunidade Optimus`;
+}
+
+function avisoFinalTemplate(oferta = {}) {
+  return normalizarTexto(
+    oferta.avisoFinal ||
+    oferta.avisoAlteracao ||
+    oferta.avisoPreco ||
+    oferta.avisoVariacaoPreco ||
+    oferta.aviso ||
+    "Oferta sujeita à alteração de preço."
+  );
 }
 
 function selecionarCamposUniversais(oferta = {}) {
@@ -256,10 +303,15 @@ function selecionarCamposUniversais(oferta = {}) {
     linksResgate: linksComerciaisUnicos(ofertaApresentacao.linksResgate),
     linkProduto: normalizarTexto(ofertaApresentacao.linkProduto),
     linkResgate: normalizarTexto(ofertaApresentacao.linkResgate),
+    linkApp: normalizarTexto(ofertaApresentacao.linkApp),
+    linkPc: normalizarTexto(ofertaApresentacao.linkPc),
+    linkMoedas: normalizarTexto(ofertaApresentacao.linkMoedas),
     avaliacao: normalizarTexto(ofertaApresentacao.avaliacao || ofertaApresentacao.rating || ofertaApresentacao.nota),
+    quantidadeAvaliacoes: normalizarTexto(ofertaApresentacao.quantidadeAvaliacoes || ofertaApresentacao.totalAvaliacoes || ofertaApresentacao.avaliacoes || ofertaApresentacao.reviews),
     beneficios: normalizarBeneficios(ofertaApresentacao.beneficios),
     score: ofertaApresentacao.score,
     prioridade: ofertaApresentacao.prioridade,
+    avisoFinal: avisoFinalTemplate(ofertaApresentacao),
     linkAfiliado: normalizarTexto(ofertaApresentacao.linkProduto || ofertaApresentacao.linkAfiliado)
   };
 }
@@ -271,6 +323,7 @@ function textoIndicaPix(valor = "") {
 function textoPrecoAtualComCondicao(precoAtual = "", campos = {}) {
   if (!precoAtual) return precoAtual;
   const condicaoPix = campos.condicaoPix || campos.precoPix || "";
+  if (campos.precoPix && normalizarComparacao(campos.precoPix) !== normalizarComparacao(precoAtual)) return precoAtual;
   if (textoIndicaPix(condicaoPix)) return `${precoAtual} no Pix`;
   return precoAtual;
 }
@@ -416,6 +469,104 @@ function adicionarBloco(blocos, linhas = []) {
   if (bloco.length) blocos.push(bloco);
 }
 
+function papelLinkTemplate(item = {}) {
+  const papel = normalizarComparacao(item.papel || item.tipo || "produto").replace(/^link_/, "");
+  if (["resgate", "cupom"].includes(papel)) return "resgate";
+  if (["app", "aplicativo"].includes(papel)) return "app";
+  if (["pc", "desktop"].includes(papel)) return "pc";
+  if (["moeda", "moedas", "coins"].includes(papel)) return "moedas";
+  if (["produto", "afiliado", "linkproduto"].includes(papel)) return "produto";
+  return papel || "produto";
+}
+
+function urlLinkTemplate(item = {}) {
+  if (typeof item === "string") return normalizarTexto(item);
+  return normalizarTexto(item.urlOptimus || item.urlAfiliada || item.afiliado || item.linkAfiliado || item.resolvido || item.original || item.link || item.url);
+}
+
+function linksPorPapelTemplate(campos = {}, papel = "") {
+  const candidatos = [
+    ...(Array.isArray(campos.linksComerciais) ? campos.linksComerciais : []),
+    ...(Array.isArray(campos.linksProduto) ? campos.linksProduto : []),
+    ...(Array.isArray(campos.linksResgate) ? campos.linksResgate : [])
+  ];
+  const links = [];
+  const vistos = new Set();
+
+  for (const [indice, item] of candidatos.entries()) {
+    if (!item || typeof item !== "object") continue;
+    if (papelLinkTemplate(item) !== papel) continue;
+    const url = urlLinkTemplate(item);
+    const ordem = Number(item.ordemCaptura || item.ordem || indice + 1) || (indice + 1);
+    const chave = `${papel}:${ordem}:${url}`;
+    if (!url || vistos.has(chave)) continue;
+    vistos.add(chave);
+    links.push({ url, ordem });
+  }
+
+  return links.sort((a, b) => a.ordem - b.ordem).map(item => item.url);
+}
+
+function linksComFallbackTemplate(campos = {}, papel = "", fallback = "") {
+  const links = linksPorPapelTemplate(campos, papel);
+  const valorFallback = normalizarTexto(fallback);
+  return links.length ? links : (valorFallback ? [valorFallback] : []);
+}
+
+function adicionarBlocoLinks(blocos, titulo = "", links = []) {
+  const urls = (Array.isArray(links) ? links : []).map(normalizarTexto).filter(Boolean);
+  if (!urls.length) return;
+  adicionarBloco(blocos, [titulo, ...urls]);
+}
+
+function montarTemplateUniversalOficial({
+  campos,
+  blocos,
+  precoOriginal,
+  precoAtualComCondicao,
+  descontoCalculado,
+  descontoPercentual,
+  economia,
+  avaliacao,
+  oportunidadeVisual,
+  detalhesComerciais,
+  beneficioComercial,
+  linksResgate,
+  linksApp,
+  linksMoedas,
+  linksPc,
+  linksProduto
+}) {
+  adicionarBloco(blocos, [campos.titulo ? `🔥 *${campos.titulo}*` : ""]);
+  adicionarBloco(blocos, [
+    campos.marketplace ? `🛍️ ${marketplaceBonito(campos.marketplace)}` : "",
+    categoriaConfiavel(campos) ? `📂 ${campos.categoria}` : "",
+    oportunidadeVisual,
+    avaliacao
+  ]);
+  adicionarBloco(blocos, [
+    precoOriginal ? `❌ De: *${precoOriginal}*` : "",
+    precoAtualComCondicao ? `✅ Por: *${precoAtualComCondicao}*` : "",
+    descontoCalculado != null && descontoCalculado > 0 ? `📉 ${descontoCalculado.toFixed(0)}% OFF` : "",
+    campos.precoPix ? `⚡ Pix: *${campos.precoPix}*` : "",
+    campos.parcelamento ? `💳 ${campos.parcelamento}` : "",
+    economia ? `💸 Economia: *${economia}${descontoPercentual != null && descontoPercentual > 0 ? ` (${descontoPercentual.toFixed(0)}%)` : ""}*` : ""
+  ]);
+  adicionarBloco(blocos, [
+    campos.cupom ? `🎟️ Cupom: *${campos.cupom}*` : "",
+    campos.instrucaoCupom && campos.instrucaoCupom !== campos.cupomTexto ? `⚡ ${campos.instrucaoCupom}` : "",
+    beneficioComercial ? `🎁 ${beneficioComercial}` : "",
+    ...detalhesComerciais
+  ]);
+  adicionarBlocoLinks(blocos, "🎟️ *Resgate:*", linksResgate);
+  adicionarBlocoLinks(blocos, "📱 *APP:*", linksApp);
+  adicionarBlocoLinks(blocos, "🪙 *Moedas:*", linksMoedas);
+  adicionarBlocoLinks(blocos, "🖥️ *PC:*", linksPc);
+  adicionarBlocoLinks(blocos, "🔗 *Confira aqui:*", linksProduto);
+  adicionarBloco(blocos, [campos.avisoFinal ? `⚠️ ${campos.avisoFinal}` : ""]);
+  return blocos.map(bloco => bloco.join("\n")).join("\n\n");
+}
+
 function gerarTemplateUniversal(oferta = {}) {
   const campos = selecionarCamposUniversais(oferta);
   const blocos = [];
@@ -431,10 +582,12 @@ function gerarTemplateUniversal(oferta = {}) {
       : "";
   const economiaNumero = normalizarNumero(campos.economia);
   const descontoPercentual = normalizarNumero(campos.descontoPercentual);
+  const descontoCalculado = descontoReal(campos.precoOriginal, campos.precoAtual, campos.descontoPercentual);
   const economia = economiaNumero != null && economiaNumero > 0
     ? formatarMoeda(economiaNumero)
     : "";
-  const avaliacao = normalizarTexto(campos.avaliacao);
+  const avaliacao = formatarAvaliacaoReal(campos.avaliacao, campos.quantidadeAvaliacoes);
+  const oportunidadeVisual = oportunidadeVisualTemplate(campos);
   let beneficioComercial = campos.beneficios.find(beneficio =>
     beneficioComercialValidoParaTemplate(beneficio, campos)
   );
@@ -466,44 +619,31 @@ function gerarTemplateUniversal(oferta = {}) {
     })
     .filter(Boolean)
     .slice(0, 3);
+  const linksResgate = linksComFallbackTemplate(campos, "resgate", campos.linkResgate);
+  const linksApp = linksComFallbackTemplate(campos, "app", campos.linkApp);
+  const linksMoedas = linksComFallbackTemplate(campos, "moedas", campos.linkMoedas);
+  const linksPc = linksComFallbackTemplate(campos, "pc", campos.linkPc);
+  const linksProduto = linksComFallbackTemplate(campos, "produto", campos.linkAfiliado);
 
-  adicionarBloco(blocos, [campos.titulo ? `🔥 *${campos.titulo}*` : ""]);
-  adicionarBloco(blocos, [
-    campos.marketplace ? `🛍️ ${marketplaceBonito(campos.marketplace)}` : "",
-    categoriaConfiavel(campos) ? `📂 ${campos.categoria}` : ""
-  ]);
-  adicionarBloco(blocos, [
-    precoOriginal ? `❌ De: *${precoOriginal}*` : "",
-    precoAtualComCondicao ? `✅ Por: *${precoAtualComCondicao}*` : "",
-    campos.parcelamento ? `💳 ${campos.parcelamento}` : "",
-    economia ? `💸 Economia: *${economia}${descontoPercentual != null && descontoPercentual > 0 ? ` (${descontoPercentual.toFixed(0)}%)` : ""}*` : ""
-  ]);
-  adicionarBloco(blocos, detalhesComerciais);
-  adicionarBloco(blocos, [
-    campos.cupom ? `🎟️ Cupom: *${campos.cupom}*` : "",
-    campos.instrucaoCupom && campos.instrucaoCupom !== campos.cupomTexto
-      ? `⚡ ${campos.instrucaoCupom}`
-      : ""
-  ]);
-  adicionarBloco(blocos, [
-    avaliacao ? "✰ Avaliação" : "",
-    avaliacao
-  ]);
-  adicionarBloco(blocos, [
-    linkResgate ? "\uD83C\uDF9F\uFE0F *Resgate os cupons:*" : "",
-    linkResgate
-  ]);
-  adicionarBloco(blocos, [
-    campos.linkAfiliado ? "\uD83D\uDD17 *Confira aqui:*" : "",
-    campos.linkAfiliado
-  ]);
-  adicionarBloco(blocos, linksAdicionais);
-  adicionarBloco(blocos, [
-    beneficioComercial ? `⚡ ${beneficioComercial}` : "",
-    "⚠️ Oferta sujeita à alteração de preço."
-  ]);
+  return montarTemplateUniversalOficial({
+    campos,
+    blocos,
+    precoOriginal,
+    precoAtualComCondicao,
+    descontoCalculado,
+    descontoPercentual,
+    economia,
+    avaliacao,
+    oportunidadeVisual,
+    detalhesComerciais,
+    beneficioComercial,
+    linksResgate,
+    linksApp,
+    linksMoedas,
+    linksPc,
+    linksProduto
+  });
 
-  return blocos.map(bloco => bloco.join("\n")).join("\n\n");
 }
 module.exports = {
   gerarTemplateUniversal,

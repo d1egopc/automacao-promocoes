@@ -68,7 +68,9 @@ const ALIASES_BLOCOS = Object.freeze({
   quantidade_avaliacoes: "quantidade_avaliacoes",
   avaliacao_quantidade: "quantidade_avaliacoes",
   vendas: "vendas",
+  oportunidade: "oportunidade",
   aviso: "aviso_editorial",
+  aviso_final: "aviso_editorial",
   aviso_preco: "aviso_editorial",
   aviso_alteracao: "aviso_editorial",
   rodape: "rodape",
@@ -158,6 +160,7 @@ const POLITICA_BASE = Object.freeze({
   avaliacao: { classe: CLASSES_BLOCOS_COMERCIAIS.OPCIONAL_VISUAL },
   quantidade_avaliacoes: { classe: CLASSES_BLOCOS_COMERCIAIS.OPCIONAL_VISUAL },
   vendas: { classe: CLASSES_BLOCOS_COMERCIAIS.OPCIONAL_VISUAL },
+  oportunidade: { classe: CLASSES_BLOCOS_COMERCIAIS.OPCIONAL_VISUAL },
   aviso_editorial: {
     classe: CLASSES_BLOCOS_COMERCIAIS.OPCIONAL_VISUAL,
     origemPermitida: [ORIGENS_VALOR_COMERCIAL.EDITORIAL_SISTEMA, ORIGENS_VALOR_COMERCIAL.CAPTURADO]

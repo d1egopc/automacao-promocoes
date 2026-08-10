@@ -48,7 +48,6 @@ function beneficiosUniversais(oferta = {}, v2 = {}) {
   if (Array.isArray(v2.beneficios)) beneficios.push(...v2.beneficios);
   if (oferta.beneficioTexto) beneficios.push(oferta.beneficioTexto);
   if (oferta.avisoCupom) beneficios.push(oferta.avisoCupom);
-  if (oferta.aviso) beneficios.push(oferta.aviso);
   if (oferta.ofertaRelampago === true) beneficios.push("Oferta Relampago");
   if (oferta.validade) beneficios.push(oferta.validade);
   if (Array.isArray(oferta.condicoes)) beneficios.push(...oferta.condicoes);
@@ -247,11 +246,17 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
     ofertaRelampago: oferta.ofertaRelampago === true,
     validade: oferta.validade || "",
     beneficios: beneficiosUniversais(oferta, v2),
+    oportunidadeVisual: oferta.oportunidadeVisual || v2.oportunidadeVisual || "",
+    avaliacao: oferta.avaliacao || oferta.rating || oferta.nota || "",
+    rating: oferta.rating,
+    nota: oferta.nota,
+    quantidadeAvaliacoes: oferta.quantidadeAvaliacoes ?? oferta.totalAvaliacoes ?? oferta.avaliacoes ?? oferta.reviews ?? oferta.reviewCount,
     valorEfetivo: v2.valorEfetivo ?? oferta.valorEfetivo,
     valorEfetivoOrigem: v2.valorEfetivoOrigem || oferta.valorEfetivoOrigem || "",
     prioridade: v2.prioridade ?? oferta.prioridadeEnvio ?? oferta.prioridadeFila ?? oferta.prioridade,
     score: scoreUniversal(v2.score),
     linkAfiliado: oferta.linkAfiliado || oferta.linkFinal || oferta.link || "",
+    avisoFinal: oferta.avisoFinal || oferta.avisoAlteracao || oferta.aviso || "",
     imagem: oferta.imagem || ""
   };
 
@@ -334,12 +339,14 @@ function prepararDadosPersonalizadosTemplate(oferta = {}) {
     nota: oferta.nota,
     quantidadeAvaliacoes: oferta.quantidadeAvaliacoes ?? oferta.totalAvaliacoes ?? oferta.avaliacoes ?? oferta.reviews ?? oferta.reviewCount,
     vendas: oferta.vendas ?? oferta.sales ?? oferta.vendasShopee ?? oferta.totalVendas,
+    oportunidadeVisual: oferta.oportunidadeVisual || v2.oportunidadeVisual || "",
     ctaPublico: oferta.ctaPublico || oferta.cta || "Confira aqui:",
     cta: oferta.cta || "",
     avisoPreco: oferta.avisoPreco || oferta.avisoPagamento || oferta.avisoVariacaoPreco || "",
     avisoPagamento: oferta.avisoPagamento || "",
     avisoVariacaoPreco: oferta.avisoVariacaoPreco || "",
     avisoAlteracao: oferta.avisoAlteracao || oferta.aviso || "",
+    avisoFinal: oferta.avisoFinal || oferta.avisoAlteracao || oferta.aviso || "",
     aviso: oferta.aviso || "",
     descontoPix: oferta.descontoPix || v2.descontoPix || "",
     precoPix: oferta.precoPix || v2.precoPix || "",

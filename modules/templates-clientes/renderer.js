@@ -6,6 +6,9 @@ const {
 const { classificarBlocoComercial } = require("./politica-blocos-comerciais");
 const fidelidadeObs = require("../fidelidade/observabilidade-v1");
 
+const AVISO_FINAL_PADRAO = "Oferta sujeita à alteração de preço.";
+const TIPOS_AVISO_FINAL = new Set(["aviso_final", "aviso_preco", "aviso_alteracao"]);
+
 function textoUtil(valor) {
   if (valor === undefined || valor === null) return "";
   const texto = String(valor).trim();
@@ -180,6 +183,18 @@ function formatarAvaliacaoReal(valor = "") {
 
 function valorAvaliacao(oferta = {}) {
   return formatarAvaliacaoReal(primeiroTexto(oferta.avaliacao, oferta.rating, oferta.nota));
+}
+
+function valorAvisoFinal(oferta = {}) {
+  return primeiroTexto(
+    oferta.avisoFinal,
+    oferta.avisoAlteracao,
+    oferta.avisoPreco,
+    oferta.avisoPagamento,
+    oferta.avisoVariacaoPreco,
+    oferta.aviso,
+    AVISO_FINAL_PADRAO
+  );
 }
 
 function valorQuantidadeAvaliacoes(oferta = {}) {
@@ -414,8 +429,9 @@ function aplicarCondicaoPixPreco(preco = "", oferta = {}) {
   const textoPreco = textoUtil(preco);
   if (!textoPreco) return "";
   if (textoIndicaPix(textoPreco)) return textoPreco;
+  if (textoUtil(oferta.precoPix) || textoUtil(oferta.condicaoPix)) return textoPreco;
 
-  const condicaoPix = primeiroTexto(oferta.condicaoPix, oferta.precoPix, oferta.descontoPix);
+  const condicaoPix = primeiroTexto(oferta.descontoPix);
   if (!textoIndicaPix(condicaoPix)) return textoPreco;
 
   return `${textoPreco} no Pix`;
@@ -453,6 +469,10 @@ function resolverLinha(bloco, oferta = {}) {
     const desconto = formatarPercentual(oferta.descontoPercentual ?? oferta.desconto);
     return desconto ? `📉 ${desconto} OFF` : "";
   }
+  if (tipo === "preco_pix") {
+    const pix = primeiroTexto(oferta.precoPix, oferta.condicaoPix);
+    return pix ? `⚡ Pix: ${pix}` : "";
+  }
   if (tipo === "economia") {
     const economia = formatarMoeda(valorEconomia(oferta));
     return economia ? `💸 Economia: ${economia}` : "";
@@ -467,6 +487,14 @@ function resolverLinha(bloco, oferta = {}) {
   if (tipo === "beneficio") {
     const beneficio = valorBeneficio(oferta);
     return beneficio ? `⚡ ${beneficio}` : "";
+  }
+  if (tipo === "cashback") {
+    const cashback = textoUtil(oferta.cashback);
+    return cashback ? `💰 ${cashback}` : "";
+  }
+  if (tipo === "oportunidade") {
+    const oportunidade = textoUtil(oferta.oportunidadeVisual);
+    return oportunidade ? oportunidade : "";
   }
   if (tipo === "descricao_adicional") {
     const descricao = primeiroTexto(oferta.descricaoAdicional, oferta.descricao, oferta.textoResumo, oferta.mensagemResumo);
@@ -498,11 +526,19 @@ function resolverLinha(bloco, oferta = {}) {
   }
   if (tipo === "link_resgate") {
     const link = primeiroTexto(oferta.linkResgate, linkComercialPorTipo(oferta, ["resgate"]));
-    return link ? `\uD83C\uDF9F\uFE0F Resgate os cupons:\n${link}` : "";
+    return link ? `🎟️ Resgate:\n${link}` : "";
+  }
+  if (tipo === "link_app") {
+    const link = primeiroTexto(oferta.linkApp, linkComercialPorTipo(oferta, ["app"]));
+    return link ? `📱 APP:\n${link}` : "";
   }
   if (tipo === "link_app") {
     const link = primeiroTexto(oferta.linkApp, linkComercialPorTipo(oferta, ["app"]));
     return link ? `📱 APP / Moedas:\n${link}` : "";
+  }
+  if (tipo === "link_moedas") {
+    const link = primeiroTexto(oferta.linkMoedas, linkComercialPorTipo(oferta, ["moedas"]));
+    return link ? `🪙 Moedas:\n${link}` : "";
   }
   if (tipo === "link_moedas") {
     const link = primeiroTexto(oferta.linkMoedas, linkComercialPorTipo(oferta, ["moedas"]));
@@ -512,9 +548,17 @@ function resolverLinha(bloco, oferta = {}) {
     const link = primeiroTexto(oferta.linkPc, linkComercialPorTipo(oferta, ["pc"]));
     return link ? `🖥️ PC:\n${link}` : "";
   }
+  if (tipo === "link_pc") {
+    const link = primeiroTexto(oferta.linkPc, linkComercialPorTipo(oferta, ["pc"]));
+    return link ? `🖥️ PC:\n${link}` : "";
+  }
   if (tipo === "link") {
     const link = primeiroTexto(oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link, oferta.url);
     return link ? `🔗 Confira aqui:\n${link}` : "";
+  }
+  if (TIPOS_AVISO_FINAL.has(tipo)) {
+    const aviso = valorAvisoFinal(oferta);
+    return aviso ? `⚠️ ${aviso}` : "";
   }
   if (tipo === "aviso_preco") {
     const aviso = primeiroTexto(oferta.avisoPreco, oferta.avisoPagamento, oferta.avisoVariacaoPreco);
@@ -530,16 +574,16 @@ function resolverLinha(bloco, oferta = {}) {
 
 function grupoBlocoTemplate(tipo = "") {
   if (tipo === "titulo") return "identificacao";
-  if (["marketplace", "categoria"].includes(tipo)) return "origem";
-  if (["preco_de", "preco_por", "desconto_percentual", "economia"].includes(tipo)) return "precos";
-  if (["cupom", "beneficio", "descricao_adicional", "parcelamento"].includes(tipo)) return "beneficios";
+  if (["marketplace", "categoria", "oportunidade"].includes(tipo)) return "origem";
+  if (["preco_de", "preco_por", "preco_pix", "desconto_percentual", "economia", "parcelamento"].includes(tipo)) return "precos";
+  if (["cupom", "beneficio", "cashback", "descricao_adicional"].includes(tipo)) return "beneficios";
   if (["avaliacao", "quantidade_avaliacoes", "vendas", "frete"].includes(tipo)) return "prova";
   if (tipo === "cta") return "cta";
   if (tipo === "link_resgate") return "link_resgate";
   if (["link_app", "link_moedas", "link_pc"].includes(tipo)) return "link";
   if (tipo === "link") return "link";
   if (tipo === "frase_cupom") return "frase_cupom";
-  if (["aviso_preco", "aviso_alteracao"].includes(tipo)) return "avisos";
+  if (TIPOS_AVISO_FINAL.has(tipo)) return "avisos";
   if (tipo === "rodape") return "rodape";
   return "outros";
 }
@@ -626,6 +670,7 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
   const linhas = [];
   const blocosRenderizados = [];
   const blocosIgnorados = [];
+  let avisoFinalRenderizado = false;
 
   for (const bloco of ativosOrdenados) {
     const catalogo = getBlocoCatalogo(bloco.tipo);
@@ -648,6 +693,10 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
       blocosIgnorados.push({ tipo: bloco.tipo, motivo: "cta_coberta_pelo_bloco_link" });
       continue;
     }
+    if (TIPOS_AVISO_FINAL.has(bloco.tipo) && avisoFinalRenderizado) {
+      blocosIgnorados.push({ tipo: bloco.tipo, motivo: "aviso_final_ja_renderizado" });
+      continue;
+    }
     const linha = resolverLinha(bloco, ofertaOficial);
     if (!textoUtil(linha)) {
       blocosIgnorados.push({ tipo: bloco.tipo, motivo: "sem_dados" });
@@ -655,6 +704,7 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
     }
     linhas.push({ tipo: bloco.tipo, linha });
     blocosRenderizados.push(bloco.tipo);
+    if (TIPOS_AVISO_FINAL.has(bloco.tipo)) avisoFinalRenderizado = true;
   }
 
   if (template.rodape?.ativo) {

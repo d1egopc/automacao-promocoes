@@ -82,6 +82,14 @@ const CATALOGO_BLOCOS = Object.freeze({
     configuravel: false,
     emojiPadrao: "✅"
   }),
+  preco_pix: bloco({
+    tipo: "preco_pix",
+    nomeVisual: "Preco Pix",
+    descricaoVisual: "Preco Pix ja existente no documento comercial.",
+    campoOrigem: "precoPix|condicaoPix",
+    ordemPadrao: 70,
+    emojiPadrao: "⚡"
+  }),
   desconto_percentual: bloco({
     tipo: "desconto_percentual",
     nomeVisual: "Desconto percentual",
@@ -125,6 +133,23 @@ const CATALOGO_BLOCOS = Object.freeze({
     ordemPadrao: 100,
     emojiPadrao: "⚡"
   }),
+  cashback: bloco({
+    tipo: "cashback",
+    nomeVisual: "Cashback",
+    descricaoVisual: "Cashback ja existente no documento comercial.",
+    campoOrigem: "cashback",
+    ordemPadrao: 110,
+    emojiPadrao: "💰"
+  }),
+  oportunidade: bloco({
+    tipo: "oportunidade",
+    nomeVisual: "Oportunidade Optimus",
+    descricaoVisual: "Selo visual ja preparado para apresentacao, sem efeito operacional.",
+    campoOrigem: "oportunidadeVisual",
+    ordemPadrao: 30,
+    ativoPorPadrao: true,
+    emojiPadrao: "⭐"
+  }),
   descricao_adicional: bloco({
     tipo: "descricao_adicional",
     nomeVisual: "Descricao adicional",
@@ -153,8 +178,8 @@ const CATALOGO_BLOCOS = Object.freeze({
   avaliacao: bloco({
     tipo: "avaliacao",
     nomeVisual: "Avaliação",
-    descricaoVisual: "Avaliação calculada a partir do score oficial da oferta.",
-    campoOrigem: "score|inteligenciaUniversalV2.score",
+    descricaoVisual: "Avaliacao real quando retornada pelo marketplace ou fonte oficial.",
+    campoOrigem: "avaliacao|rating|nota",
     ordemPadrao: 90,
     ativoPorPadrao: true,
     emojiPadrao: "✰"
@@ -222,6 +247,14 @@ const CATALOGO_BLOCOS = Object.freeze({
     ordemPadrao: 180,
     configuravel: false,
     emojiPadrao: "ðŸ–¥ï¸"
+  }),
+  aviso_final: bloco({
+    tipo: "aviso_final",
+    nomeVisual: "Aviso final",
+    descricaoVisual: "Aviso unico apresentado ao final da oferta.",
+    campoOrigem: "avisoFinal|avisoAlteracao|aviso",
+    ordemPadrao: 190,
+    emojiPadrao: "⚠️"
   }),
   link: bloco({
     tipo: "link",
