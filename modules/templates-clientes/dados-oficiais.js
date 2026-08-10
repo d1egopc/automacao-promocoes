@@ -9,6 +9,9 @@ const {
   numeroMonetarioEmTexto,
   resolverPrecedenciaPrecoPix
 } = require("../radar/preco-pix-precedencia");
+const {
+  resolverContratoComercialFinal
+} = require("./contrato-comercial-final");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -347,12 +350,14 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
     score: scoreUniversal(v2.score),
     linkAfiliado: oferta.linkAfiliado || oferta.linkFinal || oferta.link || "",
     avisoFinal: oferta.avisoFinal || oferta.avisoAlteracao || oferta.aviso || "",
-    imagem: oferta.imagem || ""
+    imagem: oferta.imagem || "",
+    textoComercialOriginal: oferta.textoComercialOriginal || oferta.textoOriginal || "",
+    textoComercialCanonico: oferta.textoComercialCanonico || oferta.documentoComercialCanonico || ""
   };
 
-  if (!radarEspelho) return normalizarApresentacaoComercial(dados, oferta);
+  if (!radarEspelho) return resolverContratoComercialFinal(normalizarApresentacaoComercial(dados, oferta));
 
-  return normalizarApresentacaoComercial({
+  return resolverContratoComercialFinal(normalizarApresentacaoComercial({
     ...dados,
     cupomTexto: oferta.cupomTexto || cupom,
     codigoCupom: cupom,
@@ -379,14 +384,14 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
     ofertaRelampago: oferta.ofertaRelampago === true,
     validade: oferta.validade || "",
     textoComercialCanonico: oferta.textoComercialCanonico || oferta.documentoComercialCanonico || "",
-    textoComercialOriginal: oferta.textoComercialOriginal || "",
+    textoComercialOriginal: oferta.textoComercialOriginal || oferta.textoOriginal || "",
     linksComerciais: listaObjetosUnica(oferta.linksComerciais),
     linksProduto: listaObjetosUnica(oferta.linksProduto),
     linksResgate: listaObjetosUnica(oferta.linksResgate),
     avaliacao: oferta.avaliacao || oferta.rating || oferta.nota || "",
     rating: oferta.rating,
     nota: oferta.nota
-  }, oferta);
+  }, oferta));
 }
 
 function prepararDadosPersonalizadosTemplate(oferta = {}) {
@@ -452,7 +457,7 @@ function prepararDadosPersonalizadosTemplate(oferta = {}) {
     ofertaRelampago: oferta.ofertaRelampago === true,
     validade: oferta.validade || "",
     textoComercialCanonico: oferta.textoComercialCanonico || oferta.documentoComercialCanonico || "",
-    textoComercialOriginal: oferta.textoComercialOriginal || "",
+    textoComercialOriginal: oferta.textoComercialOriginal || oferta.textoOriginal || "",
     linksComerciais: listaObjetosUnica(oferta.linksComerciais),
     linksProduto: listaObjetosUnica(oferta.linksProduto),
     linksResgate: listaObjetosUnica(oferta.linksResgate),
@@ -461,7 +466,7 @@ function prepararDadosPersonalizadosTemplate(oferta = {}) {
 
   dados.precoExibido = dados.precoAtual;
   dados.fontePrecoExibido = "preco_atual";
-  return normalizarApresentacaoComercial(dados, oferta);
+  return resolverContratoComercialFinal(normalizarApresentacaoComercial(dados, oferta));
 }
 
 function prepararDadosOficiaisTemplate(oferta = {}, opcoes = {}) {

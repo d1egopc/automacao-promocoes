@@ -47,6 +47,7 @@ function listaTexto(...valores) {
 }
 
 function valorCupomTemplate(oferta = {}) {
+  if (oferta.contratoComercialFinal?.cupomCodigo !== undefined) return textoUtil(oferta.contratoComercialFinal.cupomCodigo);
   const cupons = normalizarCuponsSemanticos(listaTexto(
     Array.isArray(oferta.cupons) ? oferta.cupons : [],
     Array.isArray(oferta.codigosCupom) ? oferta.codigosCupom : []
@@ -191,6 +192,7 @@ function beneficioDuplicaOutroPapel(valor = "", oferta = {}) {
 }
 
 function valorBeneficio(oferta = {}) {
+  if (oferta.contratoComercialFinal?.beneficio !== undefined) return textoUtil(oferta.contratoComercialFinal.beneficio);
   const candidatos = [];
   if (Array.isArray(oferta.beneficios)) {
     candidatos.push(...oferta.beneficios);
@@ -321,6 +323,10 @@ function nomeBeneficioFraseCupom(oferta = {}) {
 }
 
 function montarFraseCupom(oferta = {}) {
+  if (oferta.contratoComercialFinal?.instrucaoComercial !== undefined) {
+    const instrucaoFinal = textoUtil(oferta.contratoComercialFinal.instrucaoComercial);
+    return instrucaoFinal ? `âš¡ ${instrucaoFinal}` : "";
+  }
   const cupom = valorCupomTemplate(oferta);
   if (!cupom) return "";
   const avisoCupom = avisoCupomGenericoTemplate(oferta.avisoCupom) ? "" : oferta.avisoCupom;
@@ -335,6 +341,8 @@ function textoIndicaPix(valor = "") {
 }
 
 function precoPixRenderizavel(oferta = {}) {
+  if (oferta.contratoComercialFinal?.precoPixTexto !== undefined) return textoPixValido(oferta.contratoComercialFinal.precoPixTexto);
+  if (oferta.precoPixDistinto != null && oferta.precoPix) return textoPixValido(oferta.precoPix);
   return textoPixValido(oferta.precoPix);
 }
 
@@ -364,6 +372,7 @@ function cupomEssencial(oferta = {}) {
 }
 
 function precoPixEssencial(oferta = {}) {
+  if (oferta.contratoComercialFinal?.precoPixDistinto === null) return false;
   const precoPix = precoPixRenderizavel(oferta);
   if (!precoPix || !textoIndicaPix(precoPix)) return false;
   const precoPor = formatarMoeda(valorPrecoPor(oferta));
@@ -403,7 +412,7 @@ function dadosBlocoTemplate(tipo = "", oferta = {}) {
   if (tipo === "preco_pix") return precoPixRenderizavel(oferta);
   if (tipo === "cupom") return valorCupomTemplate(oferta);
   if (tipo === "frase_cupom") return primeiroTexto(oferta.instrucaoCupom, oferta.condicaoCupom, oferta.condicaoComercial, oferta.avisoCupom);
-  if (tipo === "link") return primeiroTexto(oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link, oferta.url);
+  if (tipo === "link") return primeiroTexto(linkComercialPorTipo(oferta, ["produto"]), oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link, oferta.url);
   if (tipo === "link_resgate") return primeiroTexto(oferta.linkResgate, linkComercialPorTipo(oferta, ["resgate"]));
   if (tipo === "link_app") return primeiroTexto(oferta.linkApp, linkComercialPorTipo(oferta, ["app"]));
   if (tipo === "link_moedas") return primeiroTexto(oferta.linkMoedas, linkComercialPorTipo(oferta, ["moedas"]));
@@ -489,6 +498,9 @@ function aplicarCondicaoPixPreco(preco = "", oferta = {}) {
   const textoPreco = textoUtil(preco);
   if (!textoPreco) return "";
   if (textoIndicaPix(textoPreco)) return textoPreco;
+  if (normalizarComparacao(oferta.condicaoPrecoPor || oferta.contratoComercialFinal?.condicaoPrecoPor) === "pix") {
+    return `${textoPreco} no Pix`;
+  }
   if (precoPixRenderizavel(oferta)) return textoPreco;
   const condicaoPixOferta = primeiroTexto(oferta.condicaoPix, oferta.precoPix);
   const valorPix = numeroMonetarioEmTexto(condicaoPixOferta);
@@ -618,7 +630,7 @@ function resolverLinha(bloco, oferta = {}) {
     return link ? `🖥️ PC:\n${link}` : "";
   }
   if (tipo === "link") {
-    const link = primeiroTexto(oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link, oferta.url);
+    const link = primeiroTexto(linkComercialPorTipo(oferta, ["produto"]), oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link, oferta.url);
     return link ? `🔗 Confira aqui:\n${link}` : "";
   }
   if (TIPOS_AVISO_FINAL.has(tipo)) {

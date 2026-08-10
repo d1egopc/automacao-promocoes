@@ -7,6 +7,9 @@ const {
 const {
   classificacaoVisualOferta
 } = require("../templates-clientes/classificacao-visual-oferta");
+const {
+  resolverContratoComercialFinal
+} = require("../templates-clientes/contrato-comercial-final");
 
 function normalizarTexto(valor) {
   if (valor == null) return "";
@@ -254,14 +257,17 @@ function avisoFinalTemplate(oferta = {}) {
 }
 
 function selecionarCamposUniversais(oferta = {}) {
-  const ofertaApresentacao = normalizarApresentacaoComercial(oferta);
-  const cupom = normalizarTexto(ofertaApresentacao.cupom);
+  const ofertaApresentacao = resolverContratoComercialFinal(normalizarApresentacaoComercial(oferta));
+  const contratoFinal = ofertaApresentacao.contratoComercialFinal || {};
+  const cupom = normalizarTexto(contratoFinal.cupomCodigo || ofertaApresentacao.cupom);
 
   return {
     titulo: normalizarTexto(ofertaApresentacao.titulo),
     marketplace: normalizarTexto(ofertaApresentacao.marketplace),
-    precoAtual: ofertaApresentacao.precoAtual,
-    precoOriginal: ofertaApresentacao.precoOriginal,
+    precoAtual: contratoFinal.precoPor ?? ofertaApresentacao.precoAtual,
+    precoOriginal: contratoFinal.precoDe ?? ofertaApresentacao.precoOriginal,
+    condicaoPrecoPor: normalizarTexto(contratoFinal.condicaoPrecoPor || ofertaApresentacao.condicaoPrecoPor),
+    precoPixDistinto: contratoFinal.precoPixDistinto ?? ofertaApresentacao.precoPixDistinto ?? null,
     valorEfetivo: ofertaApresentacao.valorEfetivo,
     valorEfetivoOrigem: normalizarTexto(ofertaApresentacao.valorEfetivoOrigem),
     valorEfetivoDetalhes: ofertaApresentacao.valorEfetivoDetalhes || {},
@@ -275,9 +281,10 @@ function selecionarCamposUniversais(oferta = {}) {
     baixaConfiancaCategoria: ofertaApresentacao.baixaConfiancaCategoria,
     cupom,
     cupomTexto: normalizarTexto(ofertaApresentacao.cupomTexto || cupom),
-    instrucaoCupom: normalizarTexto(ofertaApresentacao.instrucaoCupom),
-    precoPix: normalizarTexto(ofertaApresentacao.precoPix),
-    condicaoPix: normalizarTexto(ofertaApresentacao.condicaoPix || ofertaApresentacao.precoPix),
+    instrucaoCupom: normalizarTexto(contratoFinal.instrucaoComercial || ofertaApresentacao.instrucaoCupom),
+    instrucaoComercial: normalizarTexto(contratoFinal.instrucaoComercial || ofertaApresentacao.instrucaoComercial),
+    precoPix: normalizarTexto(contratoFinal.precoPixTexto || ofertaApresentacao.precoPix),
+    condicaoPix: normalizarTexto(ofertaApresentacao.condicaoPix),
     precoUnitario: normalizarTexto(ofertaApresentacao.precoUnitario || ofertaApresentacao.unitarioCapturado),
     parcelamento: normalizarTexto(ofertaApresentacao.parcelamento),
     quantidade: normalizarTexto(ofertaApresentacao.quantidade),
@@ -295,8 +302,11 @@ function selecionarCamposUniversais(oferta = {}) {
     ofertaRelampago: ofertaApresentacao.ofertaRelampago === true,
     validade: normalizarTexto(ofertaApresentacao.validade),
     linksComerciais: linksComerciaisUnicos(ofertaApresentacao.linksComerciais),
-    linksProduto: linksComerciaisUnicos(ofertaApresentacao.linksProduto),
-    linksResgate: linksComerciaisUnicos(ofertaApresentacao.linksResgate),
+    linksProduto: linksComerciaisUnicos(contratoFinal.linksProduto || ofertaApresentacao.linksProduto),
+    linksResgate: linksComerciaisUnicos(contratoFinal.linksResgate || ofertaApresentacao.linksResgate),
+    linksApp: linksComerciaisUnicos(contratoFinal.linksApp || []),
+    linksPc: linksComerciaisUnicos(contratoFinal.linksPc || []),
+    linksMoedas: linksComerciaisUnicos(contratoFinal.linksMoedas || []),
     linkProduto: normalizarTexto(ofertaApresentacao.linkProduto),
     linkResgate: normalizarTexto(ofertaApresentacao.linkResgate),
     linkApp: normalizarTexto(ofertaApresentacao.linkApp),
@@ -304,7 +314,8 @@ function selecionarCamposUniversais(oferta = {}) {
     linkMoedas: normalizarTexto(ofertaApresentacao.linkMoedas),
     avaliacao: normalizarTexto(ofertaApresentacao.avaliacao || ofertaApresentacao.rating || ofertaApresentacao.nota),
     quantidadeAvaliacoes: normalizarTexto(ofertaApresentacao.quantidadeAvaliacoes || ofertaApresentacao.totalAvaliacoes || ofertaApresentacao.avaliacoes || ofertaApresentacao.reviews),
-    beneficios: normalizarBeneficios(ofertaApresentacao.beneficios),
+    beneficio: normalizarTexto(contratoFinal.beneficio || ofertaApresentacao.beneficio),
+    beneficios: normalizarBeneficios(contratoFinal.beneficio ? [contratoFinal.beneficio] : ofertaApresentacao.beneficios),
     score: ofertaApresentacao.score,
     prioridade: ofertaApresentacao.prioridade,
     avisoFinal: avisoFinalTemplate(ofertaApresentacao),
@@ -324,6 +335,7 @@ function precoPixRenderizavel(valor = "", campos = {}, opcoes = {}) {
 
 function textoPrecoAtualComCondicao(precoAtual = "", campos = {}) {
   if (!precoAtual) return precoAtual;
+  if (normalizarComparacao(campos.condicaoPrecoPor) === "pix" && !textoIndicaPix(precoAtual)) return `${precoAtual} no Pix`;
   const condicaoPix = precoPixRenderizavel(campos.condicaoPix || campos.precoPix || "", campos, { permitirMesmoPreco: true });
   if (campos.precoPix && normalizarComparacao(campos.precoPix) !== normalizarComparacao(precoAtual)) return precoAtual;
   if (textoIndicaPix(condicaoPix)) return `${precoAtual} no Pix`;
@@ -457,16 +469,6 @@ function nomeBeneficioInstrucao(campos = {}, beneficioComercial = "") {
 }
 
 function montarInstrucaoPrecoFinal(campos = {}, beneficioComercial = "", precoFinal = "") {
-  const beneficio = nomeBeneficioInstrucao(campos, beneficioComercial);
-
-  if (campos.cupom && precoFinal && beneficio && beneficio !== "cupom") {
-    return `Aplique o cupom ${campos.cupom} + ${beneficio} para pagar ${precoFinal}.`;
-  }
-
-  if (!campos.cupom && precoFinal && beneficio && beneficio !== "cupom") {
-    return `Use ${beneficio} para pagar ${precoFinal}.`;
-  }
-
   return "";
 }
 
@@ -476,22 +478,7 @@ function beneficioSugereCupomGenerico(beneficio = "") {
 }
 
 function montarInstrucaoComercial(campos = {}, beneficioComercial = "", precoFinal = "") {
-  const instrucaoPrecoFinal = precoFinal
-    ? montarInstrucaoPrecoFinal(campos, beneficioComercial, precoFinal)
-    : "";
-
-  if (instrucaoPrecoFinal) return instrucaoPrecoFinal;
-
-  if (campos.cupom) {
-    return `Aplique o cupom ${campos.cupom} para obter o desconto.`;
-  }
-
-  if (!precoFinal && beneficioSugereCupomGenerico(beneficioComercial)) {
-    const marketplace = marketplaceBonito(campos.marketplace);
-    return `Pode haver benefício disponível na página/app${marketplace ? ` do ${marketplace}` : ""}. Confira antes de finalizar.`;
-  }
-
-  return beneficioComercial;
+  return normalizarTexto(campos.instrucaoComercial || campos.instrucaoCupom);
 }
 
 function adicionarBloco(blocos, linhas = []) {
@@ -599,7 +586,7 @@ function montarTemplateUniversalOficial({
 
 function gerarTemplateUniversal(oferta = {}) {
   const campos = selecionarCamposUniversais(oferta);
-  campos.precoPix = precoPixRenderizavel(campos.precoPix, campos);
+  campos.precoPix = campos.precoPixDistinto != null ? precoPixRenderizavel(campos.precoPix, campos) : "";
   const blocos = [];
   const precoAtualExibido = campos.precoAtual;
   const precoAtualNumero = normalizarNumero(precoAtualExibido);
@@ -619,7 +606,7 @@ function gerarTemplateUniversal(oferta = {}) {
     : "";
   const avaliacao = formatarAvaliacaoReal(campos.avaliacao, campos.quantidadeAvaliacoes);
   const oportunidadeVisual = oportunidadeVisualTemplate(campos);
-  let beneficioComercial = campos.beneficios.find(beneficio =>
+  let beneficioComercial = campos.beneficio || campos.beneficios.find(beneficio =>
     beneficioComercialValidoParaTemplate(beneficio, campos)
   );
   const detalhesComerciais = [
@@ -651,9 +638,15 @@ function gerarTemplateUniversal(oferta = {}) {
     .filter(Boolean)
     .slice(0, 3);
   const linksResgate = linksComFallbackTemplate(campos, "resgate", campos.linkResgate);
-  const linksApp = linksComFallbackTemplate(campos, "app", campos.linkApp);
-  const linksMoedas = linksComFallbackTemplate(campos, "moedas", campos.linkMoedas);
-  const linksPc = linksComFallbackTemplate(campos, "pc", campos.linkPc);
+  const linksApp = campos.linksApp.length
+    ? linksPorPapelTemplate({ linksComerciais: campos.linksApp }, "app")
+    : linksComFallbackTemplate(campos, "app", campos.linkApp);
+  const linksMoedas = campos.linksMoedas.length
+    ? linksPorPapelTemplate({ linksComerciais: campos.linksMoedas }, "moedas")
+    : linksComFallbackTemplate(campos, "moedas", campos.linkMoedas);
+  const linksPc = campos.linksPc.length
+    ? linksPorPapelTemplate({ linksComerciais: campos.linksPc }, "pc")
+    : linksComFallbackTemplate(campos, "pc", campos.linkPc);
   const linksProduto = linksComFallbackTemplate(campos, "produto", campos.linkAfiliado);
 
   return montarTemplateUniversalOficial({
