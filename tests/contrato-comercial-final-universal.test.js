@@ -376,4 +376,100 @@ for (const marketplace of ["Mercado Livre", "Shopee", "Amazon", "AliExpress", "K
   assert.strictEqual(contarOcorrencias(msgLinksMarketplace, `https://go.optimus/${marketplace}/x`), 2, `${marketplace}: clones de link produto permanecem`);
 }
 
+const permalinkTecnicoMl = "https://www.mercadolivre.com.br/produto-tecnico-gigante/p/MLB123456789";
+const msgNikeFiel = gerarTemplateUniversal({
+  titulo: "ML Nike",
+  marketplace: "Mercado Livre",
+  textoOriginal: "Nike\nDe R$ 699 por R$ 299\nhttps://grupo.origem/nike",
+  precoOriginal: 699,
+  precoAtual: 299,
+  precoPix: "Desconto no Pix R$ 299",
+  descontoPix: "Desconto no Pix R$ 299",
+  linkAfiliado: "https://afiliado.origem/nike",
+  linkProduto: permalinkTecnicoMl,
+  linksComerciais: [
+    {
+      tipo: "produto",
+      papel: "link_produto",
+      ordemCaptura: 1,
+      original: "https://grupo.origem/nike",
+      resolvido: permalinkTecnicoMl,
+      urlAfiliada: "https://go.optimus/d1/nike"
+    }
+  ]
+});
+assertNaoContem(msgNikeFiel, "Pix:", "ML Nike nao cria Desconto no Pix externo");
+assertNaoContem(msgNikeFiel, permalinkTecnicoMl, "permalink tecnico ML nao renderiza");
+assertNaoContem(msgNikeFiel, "https://grupo.origem/nike", "link original do grupo nao renderiza quando convertido");
+assertNaoContem(msgNikeFiel, "https://afiliado.origem/nike", "afiliado de origem nao aparece junto da conversao workspace");
+assert.strictEqual(contarOcorrencias(msgNikeFiel, "https://go.optimus/d1/nike"), 1, "um link Radar vira um link convertido");
+
+const msgCalcaMl = gerarTemplateUniversal({
+  titulo: "ML Calca Jeans",
+  marketplace: "Mercado Livre",
+  precoAtual: 89,
+  linkProduto: "https://produto.mercadolivre.com.br/MLB-tecnico",
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://meli.la/calca", urlAfiliada: "https://go.optimus/d1/calca" }
+  ]
+});
+assert.strictEqual(contarOcorrencias(msgCalcaMl, "https://go.optimus/d1/calca"), 1);
+assertNaoContem(msgCalcaMl, "produto.mercadolivre.com.br/MLB-tecnico");
+
+const msgSegurancaMl = renderizarTemplatePersonalizado({
+  oferta: {
+    titulo: "ML Seguranca",
+    marketplace: "Mercado Livre",
+    precoAtual: 519,
+    descontoPix: "Desconto no Pix R$ 519",
+    linkAfiliado: "https://afiliado.origem/seguranca",
+    linksComerciais: [
+      { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://meli.la/seg", urlAfiliada: "https://go.optimus/d1/seguranca" }
+    ]
+  },
+  template: {
+    id: "ml_seguranca_fiel",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "preco_por", ativo: true, ordem: 10 },
+      { tipo: "preco_pix", ativo: true, ordem: 20 },
+      { tipo: "link", ativo: true, ordem: 30 }
+    ]
+  },
+  canal: "whatsapp"
+});
+assert.strictEqual(msgSegurancaMl.ok, true);
+assertNaoContem(msgSegurancaMl.mensagem, "Pix:");
+assertNaoContem(msgSegurancaMl.mensagem, "https://afiliado.origem/seguranca");
+assert.strictEqual(contarOcorrencias(msgSegurancaMl.mensagem, "https://go.optimus/d1/seguranca"), 1);
+
+const msgPlacaMae = gerarTemplateUniversal({
+  titulo: "ML Placa-mae A520m",
+  marketplace: "Mercado Livre",
+  precoAtual: 389,
+  precoPix: "Pix: si A520m DDR4 HDMI",
+  beneficioTexto: "Frete gratis",
+  beneficios: ["Frete gratis"],
+  freteGratis: true,
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, urlAfiliada: "https://go.optimus/placa" }
+  ]
+});
+assertNaoContem(msgPlacaMae, "Pix: si A520m");
+assert.strictEqual(contarOcorrencias(msgPlacaMae, "Frete gratis"), 1, "frete nao duplica como beneficio + frete");
+
+const msgKabumMonitor = gerarTemplateUniversal({
+  titulo: "KaBuM Monitor",
+  marketplace: "KaBuM",
+  precoAtual: 699,
+  parcelamento: "10x de R$ 69,90",
+  freteGratis: true,
+  condicoes: ["10x de R$ 69,90", "Frete gratis"],
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, urlAfiliada: "https://go.optimus/kabum-monitor" }
+  ]
+});
+assert.strictEqual(contarOcorrencias(msgKabumMonitor, "10x de R$ 69,90"), 1, "parcelamento nao duplica por condicoes");
+assert.strictEqual(contarOcorrencias(msgKabumMonitor, "Frete gratis"), 1, "frete nao duplica por condicoes");
+
 console.log("contrato-comercial-final-universal.test.js OK");

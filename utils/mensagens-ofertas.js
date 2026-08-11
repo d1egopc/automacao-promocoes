@@ -198,9 +198,10 @@ function linksOfcV24ParaApresentacao(oferta = {}) {
   const ofcV24 = metadataOfcV24Local(oferta);
   const espelho = objetoLocal(ofcV24.espelhoComercial || oferta.espelhoComercialV24);
   const documento = documentoOfcV24Local(oferta);
+  const temOcorrenciasRadar = Array.isArray(oferta.linksComerciais) && oferta.linksComerciais.length > 0;
+  if (temOcorrenciasRadar) return [];
   const candidatos = [
     linkOfcV24Local("produto", primeiroValorLocal(documento.linkAfiliado, espelho.linkAfiliado), 1, "ofc_v24.linkAfiliado"),
-    linkOfcV24Local("produto", primeiroValorLocal(documento.linkProdutoOriginal, espelho.linkProdutoOriginal), 2, "ofc_v24.linkProdutoOriginal"),
     linkOfcV24Local("resgate", primeiroValorLocal(documento.linkResgateOriginal, espelho.linkResgateOriginal, urlBlocoOfcV24Local(documento, "link_resgate")), 3, "ofc_v24.linkResgate"),
     linkOfcV24Local("app", urlBlocoOfcV24Local(documento, "link_app"), 4, "ofc_v24.linkApp"),
     linkOfcV24Local("moedas", urlBlocoOfcV24Local(documento, "link_moedas"), 5, "ofc_v24.linkMoedas"),

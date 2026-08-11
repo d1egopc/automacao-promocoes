@@ -420,9 +420,10 @@ async function testarAliExpressAppPcPreservaAmbosComoComerciais() {
   const appRenderizavel = apps.filter(item => item.renderizavel === true);
   const pcRenderizavel = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
   assert.strictEqual(apps.length, 2);
-  assert.strictEqual(appRenderizavel.length, 1);
+  assert.strictEqual(appRenderizavel.length, 2);
   assert.strictEqual(appRenderizavel[0].papelLinkMotivo, "contexto_link_app_aliexpress");
   assert.strictEqual(appRenderizavel[0].urlAfiliada, "https://s.click.aliexpress.com/e/_appPuskillD1");
+  assert.strictEqual(appRenderizavel[1].urlAfiliada, "https://s.click.aliexpress.com/e/_appPuskillD1");
   assert.strictEqual(appRenderizavel[0].conversaoWorkspace.motivo, "cta_app_workspace_convertido_produto_canonico");
   assert.strictEqual(appRenderizavel[0].conversaoWorkspace.produtoCanonico, "1005002222222222");
   assert.strictEqual(appRenderizavel[0].conversaoWorkspace.produtoCanonicoPrincipal, "1005002222222222");

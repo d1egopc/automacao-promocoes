@@ -588,7 +588,7 @@ const shopeeResgateDoisProdutos = criarEspelho({
 });
 assert.strictEqual(shopeeResgateDoisProdutos.documentoComercialCanonico.linkResgateOriginal, "https://s.shopee.com.br/cupom-real");
 assert.strictEqual(shopeeResgateDoisProdutos.documentoComercialCanonico.linkProdutoOriginal, "https://s.shopee.com.br/produto-a");
-assert.ok(shopeeResgateDoisProdutos.documentoComercialCanonico.avisos.includes("links_produto_ambiguos"));
+assert.ok(!shopeeResgateDoisProdutos.documentoComercialCanonico.avisos.includes("links_produto_ambiguos"));
 assert.deepStrictEqual(
   shopeeResgateDoisProdutos.documentoComercialCanonico.linksComerciais.map(item => item.tipo),
   ["resgate", "produto", "produto"]
@@ -596,7 +596,7 @@ assert.deepStrictEqual(
 assert.deepStrictEqual(
   shopeeResgateDoisProdutos.documentoComercialCanonico.linksComerciais.map(item => item.renderizavel),
   [true, false, false],
-  "produtos ambiguos ficam preservados para auditoria, mas nao renderizaveis"
+  "produtos capturados ficam preservados, mas sem conversao workspace nao vazam URL original"
 );
 
 function blocosV26(resultado) {
@@ -711,9 +711,9 @@ assertBloco(shopeeResgate, "link_resgate");
 assertBloco(shopeeResgate, "link_afiliado");
 assert.strictEqual(blocoTipo(shopeeResgate, "link_resgate").essencial, true, "resgate com contexto comercial e essencial");
 
-assert.strictEqual(blocosTipo(shopeeResgateDoisProdutos, "links_produto_alternativos").length, 0, "produtos ambiguos nao viram blocos renderizaveis");
+assert.strictEqual(blocosTipo(shopeeResgateDoisProdutos, "links_produto_alternativos").length, 0, "produtos capturados sem conversao workspace nao vazam URL original");
 assert.strictEqual(shopeeResgateDoisProdutos.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "produto").length, 2);
-assert.ok(shopeeResgateDoisProdutos.documentoComercialCanonico.avisos.includes("links_produto_ambiguos"));
+assert.ok(!shopeeResgateDoisProdutos.documentoComercialCanonico.avisos.includes("links_produto_ambiguos"));
 
 const aliexpressMoedasAppPc = criarEspelho({
   textoOriginal: [
@@ -731,7 +731,9 @@ assertBloco(aliexpressMoedasAppPc, "moedas");
 assert.strictEqual(blocosTipo(aliexpressMoedasAppPc, "link_app").length, 0);
 assert.strictEqual(blocosTipo(aliexpressMoedasAppPc, "link_pc").length, 0);
 assert.strictEqual(blocosTipo(aliexpressMoedasAppPc, "link_moedas").length, 0);
-assert.ok(aliexpressMoedasAppPc.documentoComercialCanonico.linksComerciais.every(item => item.renderizavel === false));
+assert.ok(aliexpressMoedasAppPc.documentoComercialCanonico.linksComerciais
+  .filter(item => ["app", "pc", "moedas"].includes(item.tipo))
+  .every(item => item.renderizavel === false));
 assert.ok(!tiposV26(aliexpressMoedasAppPc).includes("link_resgate"), "AliExpress APP/PC/moedas nao viram resgate");
 
 const aliexpressAppDuplicadoPc = criarEspelho({
@@ -745,7 +747,7 @@ const aliexpressAppDuplicadoPc = criarEspelho({
   oferta: { marketplace: "aliexpress", preco: 90 },
   comercialNormalizado: { marketplace: "aliexpress", precoAtual: 90, precoConfiavel: true }
 });
-assert.strictEqual(aliexpressAppDuplicadoPc.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "app").length, 1, "APP duplicado deduplicado");
+assert.strictEqual(aliexpressAppDuplicadoPc.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "app").length, 2, "APP duplicado preservado");
 assert.strictEqual(aliexpressAppDuplicadoPc.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "pc").length, 1);
 assert.strictEqual(blocosTipo(aliexpressAppDuplicadoPc, "link_app").length, 0);
 assert.strictEqual(blocosTipo(aliexpressAppDuplicadoPc, "link_pc").length, 0);
@@ -1092,7 +1094,7 @@ const aliexpressAppRepetidoPcMoedasExternos = criarEspelho({
   oferta: { marketplace: "aliexpress", preco: 90, linkAfiliado: "https://ali.workspace/cta-unico" },
   comercialNormalizado: { marketplace: "aliexpress", precoAtual: 90, precoConfiavel: true }
 });
-assert.strictEqual(aliexpressAppRepetidoPcMoedasExternos.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "app").length, 1);
+assert.strictEqual(aliexpressAppRepetidoPcMoedasExternos.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "app").length, 2);
 assert.strictEqual(aliexpressAppRepetidoPcMoedasExternos.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "pc").length, 1);
 assert.strictEqual(aliexpressAppRepetidoPcMoedasExternos.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "moedas").length, 1);
 assert.ok(aliexpressAppRepetidoPcMoedasExternos.documentoComercialCanonico.linksComerciais.every(item => item.renderizavel === false));
@@ -1110,7 +1112,9 @@ const aliexpressDoisProdutosDistintos = criarEspelho({
   oferta: { marketplace: "aliexpress", preco: 120, linkAfiliado: "https://ali.workspace/produto" },
   comercialNormalizado: { marketplace: "aliexpress", precoAtual: 120, precoConfiavel: true }
 });
-assert.ok(aliexpressDoisProdutosDistintos.documentoComercialCanonico.avisos.includes("links_produto_ambiguos"));
+assert.ok(!aliexpressDoisProdutosDistintos.documentoComercialCanonico.avisos.includes("links_produto_ambiguos"));
+assert.strictEqual(aliexpressDoisProdutosDistintos.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "produto").length, 2);
+assert.ok(aliexpressDoisProdutosDistintos.documentoComercialCanonico.linksComerciais.every(item => item.renderizavel === false));
 
 const aliexpressVariacoesPreco = criarEspelho({
   textoOriginal: [

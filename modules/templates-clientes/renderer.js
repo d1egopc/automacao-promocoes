@@ -393,7 +393,7 @@ function linkComercialPorTipo(oferta = {}, tipos = []) {
     if (!item || typeof item !== "object") continue;
     const tipo = normalizarComparacao(item.tipo || item.papel || "").replace(/^link_/, "");
     if (!tiposNormalizados.has(tipo)) continue;
-    const url = primeiroTexto(item.urlOptimus, item.urlAfiliada, item.afiliado, item.linkAfiliado, item.resolvido, item.url, item.original, item.link);
+    const url = urlRenderizavelLinkTemplate(item);
     const ordem = Number(item.ordemCaptura || item.ordem || links.length + 1) || (links.length + 1);
     if (url) links.push({ url, ordem });
   }
@@ -403,13 +403,39 @@ function linkComercialPorTipo(oferta = {}, tipos = []) {
     .join("\n");
 }
 
+function urlRenderizavelLinkTemplate(item = {}) {
+  if (typeof item === "string") return textoUtil(item);
+  if (!item || typeof item !== "object") return "";
+  const convertido = primeiroTexto(
+    item.urlOptimus,
+    item.urlAfiliadaWorkspace,
+    item.urlAfiliada,
+    item.afiliado,
+    item.linkAfiliado
+  );
+  if (convertido) return convertido;
+  const origem = normalizarComparacao([
+    item.origem,
+    item.proveniencia,
+    item.fonte,
+    item.campo,
+    item.tipoOrigem
+  ].filter(Boolean).join(" "));
+  if (/\b(?:imagem|canonical|permalink|url\s+rica|url\s+tecnica|link\s+resolvido\s+imagem|importer|adapter|metadata|api|html)\b/.test(origem)) return "";
+  return primeiroTexto(item.resolvido, item.url, item.original, item.link);
+}
+
+function temOcorrenciasComerciais(oferta = {}) {
+  return Array.isArray(oferta.linksComerciais) && oferta.linksComerciais.length > 0;
+}
+
 function dadosBlocoTemplate(tipo = "", oferta = {}) {
   if (tipo === "titulo") return primeiroTexto(oferta.titulo, oferta.nome);
   if (tipo === "preco_por") return formatarMoeda(valorPrecoPor(oferta));
   if (tipo === "preco_pix") return precoPixRenderizavel(oferta);
   if (tipo === "cupom") return valorCupomTemplate(oferta);
   if (tipo === "frase_cupom") return primeiroTexto(oferta.instrucaoCupom, oferta.condicaoCupom, oferta.condicaoComercial, oferta.avisoCupom);
-  if (tipo === "link") return primeiroTexto(linkComercialPorTipo(oferta, ["produto"]), oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link, oferta.url);
+  if (tipo === "link") return primeiroTexto(linkComercialPorTipo(oferta, ["produto"]), temOcorrenciasComerciais(oferta) ? "" : primeiroTexto(oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link));
   if (tipo === "link_resgate") return primeiroTexto(linkComercialPorTipo(oferta, ["resgate"]), oferta.linkResgate);
   if (tipo === "link_app") return primeiroTexto(linkComercialPorTipo(oferta, ["app"]), oferta.linkApp);
   if (tipo === "link_moedas") return primeiroTexto(linkComercialPorTipo(oferta, ["moedas"]), oferta.linkMoedas);
@@ -506,10 +532,7 @@ function aplicarCondicaoPixPreco(preco = "", oferta = {}) {
     return `${textoPreco} no Pix`;
   }
 
-  const condicaoPix = primeiroTexto(oferta.descontoPix);
-  if (!textoIndicaPix(condicaoPix)) return textoPreco;
-
-  return `${textoPreco} no Pix`;
+  return textoPreco;
 }
 
 function resolverLinha(bloco, oferta = {}) {
@@ -627,7 +650,7 @@ function resolverLinha(bloco, oferta = {}) {
     return link ? `🖥️ PC:\n${link}` : "";
   }
   if (tipo === "link") {
-    const link = primeiroTexto(linkComercialPorTipo(oferta, ["produto"]), oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link, oferta.url);
+    const link = primeiroTexto(linkComercialPorTipo(oferta, ["produto"]), temOcorrenciasComerciais(oferta) ? "" : primeiroTexto(oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link));
     return link ? `🔗 Confira aqui:\n${link}` : "";
   }
   if (TIPOS_AVISO_FINAL.has(tipo)) {

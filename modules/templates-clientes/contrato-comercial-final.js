@@ -90,6 +90,16 @@ function mesmoNumero(a, b) {
   return na != null && nb != null && Math.abs(na - nb) < 0.005;
 }
 
+function textoPrecoPixConfiavel(valor = "") {
+  const fonte = texto(valor);
+  if (!textoPixValido(fonte) || !/\bpix\b/i.test(fonte)) return "";
+  const padraoValor = "(?:(?:R\\$\\s*)?\\d{1,3}(?:\\.\\d{3})*(?:,\\d{1,2})?|(?:R\\$\\s*)?\\d+(?:[,.]\\d{1,2})?)";
+  const valorAntesPix = new RegExp(`${padraoValor}\\s*(?:no|na|via|por)?\\s*pix\\b`, "i");
+  const pixAntesValor = new RegExp(`\\bpix\\b\\s*:?(?:\\s*(?:no|na|via|por))?\\s*${padraoValor}`, "i");
+  if (!valorAntesPix.test(fonte) && !pixAntesValor.test(fonte)) return "";
+  return textoPixValido(fonte);
+}
+
 function resolverPrecoPixFinal(oferta = {}, precoPor = null, textoOriginal = "", precoDe = null) {
   const dePorPix = extrairDePorPix(textoOriginal);
   const candidatos = [
@@ -97,15 +107,24 @@ function resolverPrecoPixFinal(oferta = {}, precoPor = null, textoOriginal = "",
     oferta.precoPix,
     oferta.condicaoPix
   ].map(texto).filter(Boolean);
-  const candidato = candidatos.find(valor => textoPixValido(valor) && /\bpix\b/i.test(valor)) || "";
+  const condicaoPixSemValor = texto(oferta.condicaoPix || oferta.condicaoPrecoPor);
+  const candidato = candidatos.find(valor => textoPrecoPixConfiavel(valor)) || "";
   const valorPix = numeroMonetarioEmTexto(candidato);
 
   if (dePorPix?.condicaoPrecoPor === "pix") {
     return { condicaoPrecoPor: "pix", precoPixDistinto: null, precoPixTexto: "", origem: "radar_de_por_pix" };
   }
 
+  if ((!candidato || valorPix == null) && /\bpix\b/i.test(condicaoPixSemValor) && numeroMonetarioEmTexto(condicaoPixSemValor) == null && !/desconto/i.test(condicaoPixSemValor)) {
+    return { condicaoPrecoPor: "pix", precoPixDistinto: null, precoPixTexto: "", origem: "condicao_pix_preco_por" };
+  }
+
   if (!candidato || valorPix == null) {
     return { condicaoPrecoPor: "", precoPixDistinto: null, precoPixTexto: "", origem: "sem_pix_comprovado" };
+  }
+
+  if (/desconto\s+no\s+pix/i.test(candidato) && !/\bpix\b/i.test(textoOriginal)) {
+    return { condicaoPrecoPor: "", precoPixDistinto: null, precoPixTexto: "", origem: "pix_rejeitado_sem_radar" };
   }
 
   if (precoDe != null && mesmoNumero(valorPix, precoDe)) {
@@ -218,6 +237,7 @@ function beneficioFinal(oferta = {}, cupom = "", instrucao = "") {
     const beneficio = beneficioSeguro(candidato, cupom, instrucao);
     const chave = assinaturaFato(beneficio);
     if (!beneficio || vistos.has(chave)) continue;
+    if (chave && chave === assinaturaFato(oferta.frete || oferta.freteTexto || (oferta.freteGratis === true ? "Frete gratis" : ""))) continue;
     vistos.add(chave);
     return beneficio;
   }
@@ -229,6 +249,7 @@ function instrucaoExplicitaConfiavel(instrucao = "", cupom = "") {
   if (!valor || /https?:\/\//i.test(valor)) return "";
   const n = normalizarComparacao(valor);
   if (/\bcaes\s+e\s+gatos\b/.test(n)) return "";
+  if (/\b(?:programe|poupe|recorrencia|recorrente|assinatura)\b/.test(n)) return valor;
   if (!/\b(?:cupom|voucher|resgate|aplique|use|utilize|ative|moeda|moedas|app|loja|carrinho|pix|desconto)\b/.test(n)) return "";
   if (!cupom && /\b(?:aplique|use|utilize)\b/.test(n) && !/\b(?:cupom|voucher|moeda|moedas|app|pix)\b/.test(n)) return "";
   return valor;
@@ -258,7 +279,7 @@ function linksPorPapel(links = [], papel = "") {
     if (!item || typeof item !== "object") continue;
     const tipo = papelLinkFinal(item);
     if (tipo !== alvo) continue;
-    const url = texto(item.urlOptimus || item.urlAfiliada || item.afiliado || item.linkAfiliado || item.resolvido || item.original || item.url || item.link);
+    const url = urlRenderizavelLinkFinal(item);
     const ordem = Number(item.ordemCaptura || item.ordem || indice + 1) || (indice + 1);
     if (!url) continue;
     resultado.push({
@@ -287,7 +308,34 @@ function todosLinks(oferta = {}) {
 
 function primeiroUrl(links = []) {
   const item = links.find(Boolean);
-  return texto(item?.urlOptimus || item?.urlAfiliada || item?.afiliado || item?.linkAfiliado || item?.resolvido || item?.original || item?.url || item?.link);
+  return urlRenderizavelLinkFinal(item);
+}
+
+function urlTecnicaNaoRenderizavelFinal(item = {}) {
+  const origem = normalizarComparacao([
+    item?.origem,
+    item?.proveniencia,
+    item?.fonte,
+    item?.campo,
+    item?.tipoOrigem
+  ].filter(Boolean).join(" "));
+  return /\b(?:imagem|canonical|permalink|url\s+rica|url\s+tecnica|link\s+resolvido\s+imagem|importer|adapter|metadata|api|html)\b/.test(origem);
+}
+
+function urlRenderizavelLinkFinal(item = {}) {
+  if (typeof item === "string") return texto(item);
+  if (!item || typeof item !== "object") return "";
+  const convertido = texto(
+    item.urlOptimus ||
+    item.urlAfiliadaWorkspace ||
+    item.urlAfiliada ||
+    item.afiliado ||
+    item.linkAfiliado ||
+    ""
+  );
+  if (convertido) return convertido;
+  if (urlTecnicaNaoRenderizavelFinal(item)) return "";
+  return texto(item.resolvido || item.original || item.url || item.link || "");
 }
 
 function resolverContratoComercialFinal(oferta = {}) {
@@ -338,7 +386,7 @@ function resolverContratoComercialFinal(oferta = {}) {
     condicaoPrecoPor: contrato.condicaoPrecoPor,
     precoPixDistinto: contrato.precoPixDistinto,
     precoPix: contrato.precoPixTexto,
-    condicaoPix: "",
+    condicaoPix: contrato.condicaoPrecoPor === "pix" ? "no Pix" : "",
     cupom: contrato.cupomCodigo,
     cupomCodigo: contrato.cupomCodigo,
     codigoCupom: contrato.cupomCodigo,

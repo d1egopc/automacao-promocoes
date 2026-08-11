@@ -1497,16 +1497,19 @@ function linksComerciaisIntegridade({ oferta = {}, ofertaEntrada = {}, metadata 
 function extrairLinksComerciais({ textoOriginal = "", oferta = {}, ofertaEntrada = {}, link = {} } = {}) {
   const links = [];
   const metadata = objeto(oferta.metadata || ofertaEntrada.metadata || {});
-  for (const item of urlsDoTexto(textoOriginal)) {
-    adicionarLinkUnico(links, item.url, tipoLinkTextoComercial(item.linha), item.linha);
+  const linksEstruturados = linksComerciaisIntegridade({ oferta, ofertaEntrada, metadata });
+  if (!linksEstruturados.length) {
+    for (const item of urlsDoTexto(textoOriginal)) {
+      adicionarLinkUnico(links, item.url, tipoLinkTextoComercial(item.linha), item.linha);
+    }
   }
-  for (const item of linksComerciaisIntegridade({ oferta, ofertaEntrada, metadata })) adicionarLinkComercialEstruturado(links, item, item?.papel || item?.tipo || "produto");
+  for (const item of linksEstruturados) adicionarLinkComercialEstruturado(links, item, item?.papel || item?.tipo || "produto");
   for (const item of lista(ofertaEntrada.linksProduto)) adicionarLinkComercialEstruturado(links, item, "produto");
   for (const item of lista(ofertaEntrada.linksResgate)) adicionarLinkComercialEstruturado(links, item, "resgate");
   for (const item of lista(oferta.linksProduto)) adicionarLinkComercialEstruturado(links, item, "produto");
   for (const item of lista(oferta.linksResgate)) adicionarLinkComercialEstruturado(links, item, "resgate");
   adicionarLinkUnico(links, oferta.linkOriginal || link.url_original || ofertaEntrada.linkOriginal, "produto");
-  if (!links.some(item => item.tipo === "produto")) adicionarLinkUnico(links, oferta.linkAfiliado || ofertaEntrada.linkAfiliado, "produto");
+  if (!links.length) adicionarLinkUnico(links, oferta.linkAfiliado || ofertaEntrada.linkAfiliado, "produto");
   const marketplace = primeiroTexto(oferta.marketplace, ofertaEntrada.marketplace, link.marketplace);
   normalizarPapeisLinksAliExpress(links, marketplace);
   const produtos = links.filter(item => classificarTipoLinkBloco(item, textoOriginal, marketplace) === "link_produto_original");

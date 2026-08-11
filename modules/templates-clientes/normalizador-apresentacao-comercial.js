@@ -23,10 +23,43 @@ function chaveUrl(valor = "") {
   return texto(valor).replace(/#.*$/, "").trim();
 }
 
+function urlTecnicaNaoRenderizavel(item = {}) {
+  const origem = normalizarComparacao([
+    item.origem,
+    item.proveniencia,
+    item.fonte,
+    item.campo,
+    item.tipoOrigem
+  ].filter(Boolean).join(" "));
+  return /\b(?:imagem|canonical|permalink|url\s+rica|url\s+tecnica|link\s+resolvido\s+imagem|importer|adapter|metadata|api|html)\b/.test(origem);
+}
+
+function urlConvertidaLink(item = {}) {
+  return texto(
+    item.urlOptimus ||
+    item.urlAfiliadaWorkspace ||
+    item.urlAfiliada ||
+    item.afiliado ||
+    item.linkAfiliado ||
+    ""
+  );
+}
+
+function urlComercialBrutaLink(item = {}) {
+  if (urlTecnicaNaoRenderizavel(item)) return "";
+  return texto(item.resolvido || item.original || item.link || item.url || "");
+}
+
+function urlRenderizavelLink(item = {}) {
+  if (typeof item === "string") return texto(item);
+  if (!item || typeof item !== "object") return "";
+  return urlConvertidaLink(item) || urlComercialBrutaLink(item);
+}
+
 function valorLink(item = {}) {
   if (typeof item === "string") return texto(item);
   if (!item || typeof item !== "object") return "";
-  return texto(item.urlOptimus || item.urlAfiliada || item.afiliado || item.resolvido || item.original || item.link || item.url || "");
+  return urlRenderizavelLink(item);
 }
 
 function itemLink(item = {}, tipoPadrao = "produto") {
@@ -42,7 +75,8 @@ function itemLink(item = {}, tipoPadrao = "produto") {
     tipo: texto(item.tipo || item.papel || tipoPadrao),
     original: texto(item.original || item.urlOriginal || item.link || item.url || url),
     resolvido: texto(item.resolvido || item.urlOptimus || ""),
-    afiliado: texto(item.afiliado || item.urlAfiliada || "")
+    afiliado: texto(item.afiliado || item.urlAfiliada || ""),
+    urlRenderizavel: url
   };
 }
 
@@ -250,7 +284,7 @@ function separarLinksApresentacao(dados = {}) {
     }
   }
 
-  const linkTopo = texto(dados.linkAfiliado || dados.linkFinal || dados.link || dados.url || "");
+  const linkTopo = texto(dados.linkAfiliado || dados.linkFinal || dados.link || "");
   if (linkTopo && !linksComerciais.length && !linksProduto.length && !linksResgate.length) {
     linksProduto.push({ tipo: "produto", original: linkTopo, resolvido: "", afiliado: linkTopo });
   }

@@ -1688,10 +1688,12 @@ function coletarLinksIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, met
     const papel = papelComercialIntegridade(item.papel || item.papelLink || item.tipo || item.role || "");
     const urlOriginal = normalizarTexto(item.urlOriginal || item.url || item.original || item.href || "");
     const urlExpandida = normalizarTexto(item.urlExpandida || item.expandida || "");
-    const urlAfiliada = normalizarTexto(item.urlAfiliada || item.afiliado || item.linkAfiliado || "");
+    const urlAfiliadaWorkspace = normalizarTexto(item.urlAfiliadaWorkspace || item.urlAfiliada || item.afiliado || item.linkAfiliado || "");
+    const urlAfiliada = urlAfiliadaWorkspace;
     const urlRenderizavel = normalizarTexto(urlAfiliada || item.renderizarUrl || "");
     const urlBase = urlOriginal || urlExpandida || urlRenderizavel;
     const ordemCaptura = Number(item.ordemCaptura || item.ordem || item.indiceCaptura || ordemAutomatica) || ordemAutomatica;
+    const ocorrenciaId = normalizarTexto(item.ocorrenciaId || item.idOcorrencia || "");
 
     if (!papel || papel === "desconhecido" || !urlBase) return;
 
@@ -1708,12 +1710,16 @@ function coletarLinksIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, met
       urlOriginal,
       urlExpandida,
       urlAfiliada: renderizavel ? (urlAfiliada || urlRenderizavel || ctaAfiliado) : "",
+      urlAfiliadaWorkspace: renderizavel ? (urlAfiliadaWorkspace || urlRenderizavel || ctaAfiliado) : "",
       urlOptimus: normalizarTexto(item.urlOptimus || ""),
       ordemCaptura,
+      ocorrenciaId,
       renderizavel,
       seguro: renderizavel,
       origem: origem || item.origem || "integridade_comercial",
-      motivo: normalizarTexto(item.papelLinkMotivo || item.motivo || (renderizavel ? "cta_workspace_convertido" : "preservado_nao_renderizavel"))
+      conversaoStatus: normalizarTexto(item.conversaoStatus || (renderizavel ? "convertida" : "falhou")),
+      motivoConversao: normalizarTexto(item.motivoConversao || item.conversaoWorkspace?.motivo || ""),
+      motivo: normalizarTexto(item.papelLinkMotivo || item.motivo || item.motivoConversao || item.conversaoWorkspace?.motivo || (renderizavel ? "cta_workspace_convertido" : "preservado_nao_renderizavel"))
     });
   }
 

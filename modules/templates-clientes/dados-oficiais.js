@@ -115,7 +115,13 @@ function camposPixPublicaveis(oferta = {}, v2 = {}) {
   ];
   const resolucao = resolverPrecedenciaPrecoPix({ radar, api });
   const pix = resolucao.precoPix;
-  if (!pix) return { precoPix: "", condicaoPix: "", precoPixOrigem: resolucao.origem, precoPixAuditoria: resolucao.auditoria };
+  if (!pix) {
+    const condicaoSemValor = texto(oferta.condicaoPix || oferta.condicaoPrecoPor || v2.condicaoPix || "");
+    if (/\bpix\b/i.test(condicaoSemValor) && numeroMonetarioEmTexto(condicaoSemValor) == null && !/desconto/i.test(condicaoSemValor)) {
+      return { precoPix: "", condicaoPix: condicaoSemValor, precoPixOrigem: "condicao_preco_por", precoPixAuditoria: resolucao.auditoria };
+    }
+    return { precoPix: "", condicaoPix: "", precoPixOrigem: resolucao.origem, precoPixAuditoria: resolucao.auditoria };
+  }
   const precoAtual = precoAtualReferencia(oferta, v2);
   const mesmoPreco = precoAtual != null && chaveValorPix(pix) === precoAtual.toFixed(2);
   return {
@@ -442,7 +448,7 @@ function prepararDadosPersonalizadosTemplate(oferta = {}) {
     avisoAlteracao: oferta.avisoAlteracao || oferta.aviso || "",
     avisoFinal: oferta.avisoFinal || oferta.avisoAlteracao || oferta.aviso || "",
     aviso: oferta.aviso || "",
-    descontoPix: oferta.descontoPix || v2.descontoPix || "",
+    descontoPix: "",
     precoPix: pix.precoPix,
     condicaoPix: pix.condicaoPix,
     condicoes: listaTextoUnica(oferta.condicoes),

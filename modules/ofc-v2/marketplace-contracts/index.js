@@ -125,15 +125,20 @@ function linkBase(link = {}, papel = "link_produto", extras = {}) {
   const url = texto(link.url || link.urlOriginal || "");
   const ordemCaptura = Number(extras.ordemCaptura || link.ordemCaptura || link.ordem || link.linha || 0) || 0;
   const chaveOrdem = ordemCaptura > 0 ? `${ordemCaptura}:` : "";
+  const urlAfiliada = texto(extras.urlAfiliada || link.urlAfiliadaWorkspace || link.urlAfiliada || link.linkAfiliado || "");
   return {
     papel,
     ordemCaptura,
+    ocorrenciaId: texto(extras.ocorrenciaId || link.ocorrenciaId || link.idOcorrencia || ""),
     urlOriginal: url,
-    urlAfiliada: texto(extras.urlAfiliada || link.urlAfiliada || link.linkAfiliado || ""),
+    urlAfiliada,
+    urlAfiliadaWorkspace: texto(extras.urlAfiliadaWorkspace || link.urlAfiliadaWorkspace || urlAfiliada),
     urlOptimus: texto(extras.urlOptimus || link.urlOptimus || ""),
     renderizavel: extras.renderizavel !== false,
     origem: texto(link.origem || link.contexto || "captura"),
     confianca: texto(extras.confianca || link.confianca || "media"),
+    conversaoStatus: texto(extras.conversaoStatus || link.conversaoStatus || (extras.renderizavel === false ? "falhou" : "")),
+    motivoConversao: texto(extras.motivoConversao || link.motivoConversao || link.conversaoWorkspace?.motivo || ""),
     dedupeKey: texto(extras.dedupeKey || `${papel}:${chaveOrdem}${dedupeUrl(url)}`),
     avisos: [...new Set(lista(extras.avisos).map(texto).filter(Boolean))]
   };
@@ -168,31 +173,73 @@ function adicionarLink(saida, link) {
   return true;
 }
 
+function urlPrincipalEntrada(entrada = {}) {
+  return texto(
+    entrada.linkOriginal
+    || entrada.oferta?.linkOriginal
+    || entrada.oferta?.link_original
+    || entrada.ofertaEntrada?.linkOriginal
+    || entrada.ofertaEntrada?.link_original
+    || entrada.ofertaEntrada?.metadata?.linkOriginalEngine
+    || ""
+  );
+}
+
+function afiliadoGlobalCorrelacionado(link = {}, entrada = {}) {
+  const urlOriginal = texto(link.url || link.urlOriginal || "");
+  const urlPrincipal = urlPrincipalEntrada(entrada);
+  if (!texto(entrada.linkAfiliado) || !urlOriginal) return false;
+  if (!urlPrincipal) {
+    const urlsUnicas = [...new Set(lista(entrada.links).map(item => dedupeUrl(texto(item?.url || item?.urlOriginal || ""))).filter(Boolean))];
+    return urlsUnicas.length <= 1;
+  }
+  return dedupeUrl(urlOriginal) === dedupeUrl(urlPrincipal);
+}
+
+function urlAfiliadaOcorrencia(link = {}, entrada = {}, opcoes = {}) {
+  const direta = texto(link.urlOptimus || link.urlAfiliadaWorkspace || link.urlAfiliada || link.linkAfiliado || link.afiliado || "");
+  if (direta) return direta;
+  if (opcoes.exigirCorrelacaoAfiliadoGlobal && !afiliadoGlobalCorrelacionado(link, entrada)) return "";
+  return texto(entrada.linkAfiliado || "");
+}
+
+function linkProdutoConvertidoPorOcorrencia(link = {}, entrada = {}, extras = {}) {
+  const urlAfiliada = urlAfiliadaOcorrencia(link, entrada, { exigirCorrelacaoAfiliadoGlobal: true });
+  return linkBase(link, "link_produto", {
+    ...extras,
+    urlAfiliada,
+    renderizavel: Boolean(urlAfiliada),
+    confianca: urlAfiliada ? texto(extras.confianca || "alta") : "baixa",
+    conversaoStatus: urlAfiliada ? texto(extras.conversaoStatus || link.conversaoStatus || "convertida") : texto(extras.conversaoStatus || link.conversaoStatus || "falhou"),
+    motivoConversao: texto(extras.motivoConversao || link.motivoConversao || link.conversaoWorkspace?.motivo || (urlAfiliada ? "cta_workspace_convertido" : "produto_sem_conversao_workspace")),
+    avisos: urlAfiliada ? lista(extras.avisos) : [...lista(extras.avisos), "link_sem_conversao_workspace"]
+  });
+}
+
 function contratoMercadoLivre(entrada) {
   const saida = saidaBase("mercadolivre", "mercadolivre");
   const produtos = lista(entrada.links).filter(link => texto(link.url)
     && !contextoExplicitoResgate(link)
     && (urlMercadoLivre(link.url) || texto(link.tipo) === "produto"));
   const afiliado = texto(entrada.linkAfiliado);
-  const deveRegistrarDedupeProduto = produtos.length > 1;
   saida.linkProdutoOriginal = produtos[0]?.url || "";
   if (afiliado) saida.houveConversaoAfiliada = true;
 
   for (const link of lista(entrada.links)) {
     if (!texto(link.url)) continue;
     if (contextoExplicitoResgate(link) || texto(link.tipo) === "resgate") {
-      saida.descartes.push({ papel: "link_resgate", motivo: "papel_proibido_mercadolivre" });
+      adicionarLink(saida, linkBase(link, "link_resgate", { urlAfiliada: urlAfiliadaOcorrencia(link, entrada) || texto(link.url) }));
       continue;
     }
     if (urlFonteOuSocial(link.url)) {
-      saida.descartes.push({ papel: "link_auxiliar", motivo: "link_fonte_proibido_mercadolivre" });
+      adicionarLink(saida, linkProdutoConvertidoPorOcorrencia(link, entrada));
       continue;
     }
     if (urlMercadoLivre(link.url) || texto(link.tipo) === "produto") {
-      if (deveRegistrarDedupeProduto) saida.dedupes.push("representacao_produto_ml");
+      adicionarLink(saida, linkProdutoConvertidoPorOcorrencia(link, entrada));
       continue;
     }
-    saida.descartes.push({ papel: "link_desconhecido", motivo: "link_nao_permitido_mercadolivre" });
+    adicionarLink(saida, linkProdutoConvertidoPorOcorrencia(link, entrada));
   }
   return saida;
 }
@@ -230,17 +277,8 @@ function contratoShopee(entrada) {
   saida.linkResgateOriginal = resgatesOcorrencias[0]?.url || "";
   for (const link of resgatesOcorrencias) adicionarLink(saida, linkBase(link, "link_resgate"));
 
-  if (produtosOcorrencias.length > 1) {
-    saida.houveAmbiguidade = true;
-    saida.produtosAmbiguos = true;
-    saida.avisos.push("links_produto_ambiguos");
-    for (const link of produtosOcorrencias) {
-      adicionarLink(saida, linkBase(link, "link_produto", {
-        renderizavel: false,
-        avisos: ["produto_ambiguo_nao_renderizavel"],
-        dedupeKey: `link_produto_ambiguo:${link.ordemCaptura || ""}:${dedupeUrl(link.url)}`
-      }));
-    }
+  for (const link of produtosOcorrencias) {
+    adicionarLink(saida, linkProdutoConvertidoPorOcorrencia(link, entrada));
   }
   if (texto(entrada.linkAfiliado)) saida.houveConversaoAfiliada = true;
   return saida;
@@ -271,6 +309,8 @@ function contratoAliExpress(entrada) {
         renderizavel: seguro,
         confianca: seguro ? "alta" : "baixa",
         avisos: seguro ? [] : ["link_sem_conversao_workspace"],
+        conversaoStatus: seguro ? (texto(link.conversaoStatus) || "convertida") : (texto(link.conversaoStatus) || "falhou"),
+        motivoConversao: texto(link.motivoConversao || link.conversaoWorkspace?.motivo || (seguro ? "cta_workspace_convertido" : "link_sem_conversao_workspace")),
         dedupeKey: `${papel}:${link.ordemCaptura}:${dedupeUrl(link.url)}`
       }));
     }
@@ -278,13 +318,12 @@ function contratoAliExpress(entrada) {
 
   const produtosOcorrencias = produtos.filter(link => texto(link.url));
 
-  if (produtosOcorrencias.length > 1) {
-    saida.houveAmbiguidade = true;
-    saida.produtosAmbiguos = true;
-    saida.avisos.push("links_produto_ambiguos");
-  }
-
   saida.linkProdutoOriginal = produtosOcorrencias[0]?.url || "";
+  for (const link of produtosOcorrencias) {
+    adicionarLink(saida, linkProdutoConvertidoPorOcorrencia(link, entrada, {
+      motivoConversao: texto(link.motivoConversao || link.conversaoWorkspace?.motivo || "cta_produto_workspace_convertido")
+    }));
+  }
   if (!saida.linkProdutoOriginal && texto(entrada.linkAfiliado)) saida.linkProdutoOriginal = texto(entrada.linkAfiliado);
   if (texto(entrada.linkAfiliado)) saida.houveConversaoAfiliada = true;
   if (!saida.links.length && lista(entrada.links).some(link => urlAliExpress(link.url))) saida.avisos.push("links_aliexpress_sem_papel_explicito");
@@ -302,15 +341,16 @@ function contratoAmazon(entrada) {
       saida.descartes.push({ papel: "link_programa_prime", motivo: "prime_sem_conversao_segura" });
       continue;
     }
-    if (texto(link.tipo) === "resgate" || contextoExplicitoResgate(link)) {
-      saida.descartes.push({ papel: "link_resgate", motivo: "resgate_nao_e_cta_amazon" });
+    if (texto(link.tipo) === "resgate" || texto(link.tipo) === "link_resgate") {
+      adicionarLink(saida, linkBase(link, "link_resgate", { urlAfiliada: urlAfiliadaOcorrencia(link, entrada) || texto(link.url) }));
       continue;
     }
     if (urlAmazon(link.url) || texto(link.tipo) === "produto") produtos.push(link);
-    else saida.descartes.push({ papel: "link_auxiliar", motivo: "link_nao_permitido_amazon" });
+    else adicionarLink(saida, linkProdutoConvertidoPorOcorrencia(link, entrada));
   }
 
   saida.linkProdutoOriginal = produtos[0]?.url || "";
+  for (const link of produtos) adicionarLink(saida, linkProdutoConvertidoPorOcorrencia(link, entrada));
   if (texto(entrada.linkAfiliado)) saida.houveConversaoAfiliada = true;
   return saida;
 }
@@ -330,6 +370,7 @@ function contratoKabumAwin(entrada) {
 
   if (texto(entrada.linkAfiliado)) {
     saida.linkProdutoOriginal = produtos[0]?.url || "";
+    for (const link of produtos) adicionarLink(saida, linkProdutoConvertidoPorOcorrencia(link, entrada));
   } else if (produtos.length) {
     saida.descartes.push({ papel: "link_produto", motivo: "kabum_awin_sem_conversao_workspace" });
   }
@@ -369,9 +410,9 @@ function aplicarContratoMarketplace(entrada = {}) {
   return {
     ...saida,
     totalLinksEntrada: payload.links.length,
-    totalLinksSaida: saida.links.filter(link => link.renderizavel !== false).length + (texto(entrada.linkAfiliado) ? 1 : 0),
+    totalLinksSaida: saida.links.filter(link => link.renderizavel !== false).length || (!saida.links.length && texto(entrada.linkAfiliado) ? 1 : 0),
     papeisDetectados: [...new Set([...payload.links.map(link => texto(link.tipo || "produto")).filter(Boolean), ...saida.links.map(link => link.papel)])],
-    papeisRenderizaveis: [...new Set([...(texto(entrada.linkAfiliado) ? ["link_afiliado"] : []), ...saida.links.filter(link => link.renderizavel !== false).map(link => link.papel)])],
+    papeisRenderizaveis: [...new Set([...(saida.links.length ? [] : (texto(entrada.linkAfiliado) ? ["link_afiliado"] : [])), ...saida.links.filter(link => link.renderizavel !== false).map(link => link.papel)])],
     linksDescartados: saida.descartes.length,
     aplicouMudancasOperacionais: false
   };

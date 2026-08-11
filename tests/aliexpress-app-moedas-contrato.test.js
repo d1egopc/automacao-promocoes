@@ -172,10 +172,197 @@ function testarMesmoLinkAppPcNaoDuplica() {
   assert.ok(render.mensagem.includes("PC:"), "PC canonico deve permanecer");
 }
 
+async function testarProdutoDuplicadoReutilizaConversaoEPreservaOcorrencias() {
+  const produto = "https://www.aliexpress.com/item/1005001111111111.html";
+  const afiliado = "https://s.click.aliexpress.com/e/_PRODUTOD1";
+  const chamadas = [];
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 30, evento_id: 40, cliente_id: "cliente_ali", marketplace: "aliexpress" },
+    evento: {
+      texto_original: [
+        "Produto AliExpress duplicado",
+        "Por R$ 99",
+        `Produto: ${produto}`,
+        `Produto: ${produto}`
+      ].join("\n")
+    },
+    links: [
+      { url_original: produto, metadata: { papelLink: "produto", papelLinkMotivo: "produto_1" } },
+      { url_original: produto, metadata: { papelLink: "produto", papelLinkMotivo: "produto_2" } }
+    ],
+    deps: {
+      getIntegracaoCliente: () => integracao(),
+      importarAliExpress: async (url) => {
+        chamadas.push(url);
+        return {
+          marketplace: "aliexpress",
+          titulo: "Produto AliExpress duplicado",
+          productId: "1005001111111111",
+          precoAtual: "99.00",
+          linkOriginal: url,
+          linkAfiliado: afiliado,
+          imagem: "https://ae01.alicdn.com/produto.jpg"
+        };
+      }
+    }
+  });
+
+  const produtos = resultado.metadata.linksClassificados.filter(item => item.papelLink === "produto");
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(chamadas, [produto], "duplicado reutiliza a conversao tecnica do produto principal");
+  assert.strictEqual(produtos.length, 2);
+  assert.ok(produtos.every(item => item.renderizavel === true));
+  assert.deepStrictEqual(produtos.map(item => item.urlAfiliada), [afiliado, afiliado]);
+  assert.deepStrictEqual(produtos.map(item => item.conversaoStatus), ["convertida", "convertida"]);
+}
+
+async function testarAppDuplicadoReutilizaConversaoEPreservaOcorrencias() {
+  const app = "https://a.aliexpress.com/_appDuplicado";
+  const pc = "https://a.aliexpress.com/_pcCanonicoDuplicado";
+  const appAfiliado = "https://s.click.aliexpress.com/e/_APPDUPD1";
+  const pcAfiliado = "https://s.click.aliexpress.com/e/_PCDUPD1";
+  const chamadas = [];
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 31, evento_id: 41, cliente_id: "cliente_ali", marketplace: "aliexpress" },
+    evento: {
+      texto_original: [
+        "Produto AliExpress APP duplicado",
+        "Por R$ 120",
+        `APP: ${app}`,
+        `APP: ${app}`,
+        `PC: ${pc}`
+      ].join("\n")
+    },
+    links: [
+      { url_original: app, metadata: { papelLink: "link_app", papelLinkMotivo: "app_1" } },
+      { url_original: app, metadata: { papelLink: "link_app", papelLinkMotivo: "app_2" } },
+      { url_original: pc, metadata: { papelLink: "link_pc", papelLinkMotivo: "pc" } }
+    ],
+    deps: {
+      getIntegracaoCliente: () => integracao(),
+      importarAliExpress: async (url, config = {}) => {
+        chamadas.push(url);
+        return {
+          marketplace: "aliexpress",
+          titulo: "Produto AliExpress APP duplicado",
+          productId: "1005002222222222",
+          precoAtual: "120.00",
+          linkOriginal: url,
+          linkExpandido: "https://www.aliexpress.com/item/1005002222222222.html",
+          linkAfiliado: url === pc ? pcAfiliado : appAfiliado,
+          papelLink: config.contextoEngine?.papelLink || "",
+          metadata: { papelLink: config.contextoEngine?.papelLink || "" }
+        };
+      }
+    }
+  });
+
+  const apps = resultado.metadata.linksClassificados.filter(item => item.papelLink === "link_app");
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(chamadas, [pc, app], "APP duplicado chama a conversao alternativa uma vez e replica o resultado");
+  assert.strictEqual(apps.length, 2);
+  assert.deepStrictEqual(apps.map(item => item.urlAfiliada), [appAfiliado, appAfiliado]);
+  assert.ok(apps.every(item => item.renderizavel === true));
+}
+
+async function testarProdutosDistintosNaoUsamAfiliadoGlobal() {
+  const produtoA = "https://www.aliexpress.com/item/1005003333333333.html";
+  const produtoB = "https://www.aliexpress.com/item/1005004444444444.html";
+  const afiliadoA = "https://s.click.aliexpress.com/e/_PRODUTOA";
+  const afiliadoB = "https://s.click.aliexpress.com/e/_PRODUTOB";
+  const chamadas = [];
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 32, evento_id: 42, cliente_id: "cliente_ali", marketplace: "aliexpress" },
+    evento: {
+      texto_original: [
+        "Dois produtos AliExpress",
+        "Por R$ 88",
+        `Produto: ${produtoA}`,
+        `Produto: ${produtoB}`
+      ].join("\n")
+    },
+    links: [
+      { url_original: produtoA, metadata: { papelLink: "produto", papelLinkMotivo: "produto_a" } },
+      { url_original: produtoB, metadata: { papelLink: "produto", papelLinkMotivo: "produto_b" } }
+    ],
+    deps: {
+      getIntegracaoCliente: () => integracao(),
+      importarAliExpress: async (url) => {
+        chamadas.push(url);
+        return {
+          marketplace: "aliexpress",
+          titulo: "Dois produtos AliExpress",
+          productId: url === produtoA ? "1005003333333333" : "1005004444444444",
+          precoAtual: "88.00",
+          linkOriginal: url,
+          linkAfiliado: url === produtoA ? afiliadoA : afiliadoB
+        };
+      }
+    }
+  });
+
+  const produtos = resultado.metadata.linksClassificados.filter(item => item.papelLink === "produto");
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(chamadas, [produtoA, produtoB], "produto distinto exige conversao propria");
+  assert.deepStrictEqual(produtos.map(item => item.urlAfiliada), [afiliadoA, afiliadoB]);
+}
+
+async function testarFalhaConversaoMantemOcorrenciaAuditavel() {
+  const produtoA = "https://www.aliexpress.com/item/1005005555555555.html";
+  const produtoB = "https://www.aliexpress.com/item/1005006666666666.html";
+  const afiliadoA = "https://s.click.aliexpress.com/e/_PRODUTOOK";
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 33, evento_id: 43, cliente_id: "cliente_ali", marketplace: "aliexpress" },
+    evento: {
+      texto_original: [
+        "Produto AliExpress com falha de conversao",
+        "Por R$ 77",
+        `Produto: ${produtoA}`,
+        `Produto: ${produtoB}`
+      ].join("\n")
+    },
+    links: [
+      { url_original: produtoA, metadata: { papelLink: "produto", papelLinkMotivo: "produto_ok" } },
+      { url_original: produtoB, metadata: { papelLink: "produto", papelLinkMotivo: "produto_falha" } }
+    ],
+    deps: {
+      getIntegracaoCliente: () => integracao(),
+      importarAliExpress: async (url) => {
+        if (url === produtoB) throw new Error("falha simulada");
+        return {
+          marketplace: "aliexpress",
+          titulo: "Produto AliExpress com falha de conversao",
+          productId: "1005005555555555",
+          precoAtual: "77.00",
+          linkOriginal: url,
+          linkAfiliado: afiliadoA
+        };
+      }
+    }
+  });
+
+  const produtos = resultado.metadata.linksClassificados.filter(item => item.papelLink === "produto");
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(produtos.length, 2);
+  assert.strictEqual(produtos[0].renderizavel, true);
+  assert.strictEqual(produtos[1].renderizavel, false);
+  assert.strictEqual(produtos[1].urlAfiliada, "");
+  assert.strictEqual(produtos[1].conversaoStatus, "falhou");
+  assert.strictEqual(produtos[1].motivoConversao, "falha_tecnica_conversao_link");
+}
+
 (async () => {
   await testarPrecoRadarVenceApiELinkMoedasConverte();
   testarEspelhoUsaAfiliadaENaoOriginal();
   testarMesmoLinkAppPcNaoDuplica();
+  await testarProdutoDuplicadoReutilizaConversaoEPreservaOcorrencias();
+  await testarAppDuplicadoReutilizaConversaoEPreservaOcorrencias();
+  await testarProdutosDistintosNaoUsamAfiliadoGlobal();
+  await testarFalhaConversaoMantemOcorrenciaAuditavel();
   console.log("aliexpress-app-moedas-contrato.test.js OK");
 })().catch((erro) => {
   console.error(erro);

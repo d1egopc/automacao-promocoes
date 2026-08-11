@@ -281,7 +281,7 @@ function selecionarCamposUniversais(oferta = {}) {
     cupomTexto: normalizarTexto(ofertaApresentacao.cupomTexto || cupom),
     instrucaoCupom: normalizarTexto(contratoFinal.instrucaoComercial || ofertaApresentacao.instrucaoCupom),
     instrucaoComercial: normalizarTexto(contratoFinal.instrucaoComercial || ofertaApresentacao.instrucaoComercial),
-    precoPix: normalizarTexto(contratoFinal.precoPixTexto || ofertaApresentacao.precoPix),
+    precoPix: normalizarTexto(contratoFinal.precoPixTexto || ""),
     condicaoPix: normalizarTexto(ofertaApresentacao.condicaoPix),
     precoUnitario: normalizarTexto(ofertaApresentacao.precoUnitario || ofertaApresentacao.unitarioCapturado),
     parcelamento: normalizarTexto(ofertaApresentacao.parcelamento),
@@ -496,7 +496,24 @@ function papelLinkTemplate(item = {}) {
 
 function urlLinkTemplate(item = {}) {
   if (typeof item === "string") return normalizarTexto(item);
-  return normalizarTexto(item.urlOptimus || item.urlAfiliada || item.afiliado || item.linkAfiliado || item.resolvido || item.original || item.link || item.url);
+  const convertido = normalizarTexto(
+    item.urlOptimus ||
+    item.urlAfiliadaWorkspace ||
+    item.urlAfiliada ||
+    item.afiliado ||
+    item.linkAfiliado ||
+    ""
+  );
+  if (convertido) return convertido;
+  const origem = normalizarComparacao([
+    item.origem,
+    item.proveniencia,
+    item.fonte,
+    item.campo,
+    item.tipoOrigem
+  ].filter(Boolean).join(" "));
+  if (/\b(?:imagem|canonical|permalink|url\s+rica|url\s+tecnica|link\s+resolvido\s+imagem|importer|adapter|metadata|api|html)\b/.test(origem)) return "";
+  return normalizarTexto(item.resolvido || item.original || item.link || item.url);
 }
 
 function linksPorPapelTemplate(campos = {}, papel = "") {
@@ -531,6 +548,37 @@ function adicionarBlocoLinks(blocos, titulo = "", links = []) {
   const urls = (Array.isArray(links) ? links : []).map(normalizarTexto).filter(Boolean);
   if (!urls.length) return;
   adicionarBloco(blocos, [titulo, ...urls]);
+}
+
+function listaComercialSemRepetir(valores = []) {
+  const resultado = [];
+  const vistos = new Set();
+  for (const valor of valores) {
+    const item = normalizarTexto(valor);
+    const chave = normalizarComparacao(item);
+    if (!item || vistos.has(chave)) continue;
+    vistos.add(chave);
+    resultado.push(item);
+  }
+  return resultado;
+}
+
+function mesmoFatoComercial(a = "", b = "") {
+  const ca = normalizarComparacao(a);
+  const cb = normalizarComparacao(b);
+  return Boolean(ca && cb && ca === cb);
+}
+
+function detalhesNaoDuplicados(campos = {}, valores = []) {
+  const protegidos = [
+    campos.parcelamento,
+    campos.frete,
+    campos.freteGratis ? "Frete gratis" : "",
+    campos.beneficio
+  ].map(normalizarTexto).filter(Boolean);
+  return (Array.isArray(valores) ? valores : []).filter(valor =>
+    !protegidos.some(protegido => mesmoFatoComercial(valor, protegido))
+  );
 }
 
 function montarTemplateUniversalOficial({
@@ -606,19 +654,21 @@ function gerarTemplateUniversal(oferta = {}) {
   let beneficioComercial = campos.beneficio || campos.beneficios.find(beneficio =>
     beneficioComercialValidoParaTemplate(beneficio, campos)
   );
-  const detalhesComerciais = [
+  const condicoesDetalhe = detalhesNaoDuplicados(campos, campos.condicoes);
+  const observacoesDetalhe = detalhesNaoDuplicados(campos, campos.observacoes);
+  const detalhesComerciais = listaComercialSemRepetir([
     campos.precoUnitario ? `ℹ️ Preço unitário: *${campos.precoUnitario}*` : "",
     campos.cashback ? `💰 ${campos.cashback}` : "",
     campos.freteGratis ? "🚚 Frete gratis" : (campos.frete ? `🚚 ${campos.frete}` : ""),
     campos.ofertaRelampago ? "⚡ Oferta Relampago" : "",
     campos.validade ? `⏳ ${campos.validade}` : "",
-    ...campos.condicoes,
-    ...campos.observacoes,
+    ...condicoesDetalhe,
+    ...observacoesDetalhe,
     ...(campos.tamanhos.length ? [`⚠️ Tamanhos: ${campos.tamanhos.join(", ")}`] : []),
     ...(campos.cores.length ? [`🎨 Cores: ${campos.cores.join(", ")}`] : []),
     ...(campos.variantes.length ? campos.variantes : []),
     campos.voltagem ? `🔌 ${campos.voltagem}` : ""
-  ].map(normalizarTexto).filter(Boolean).slice(0, 8);
+  ].map(normalizarTexto).filter(Boolean)).slice(0, 8);
   const linkPrincipal = normalizarTexto(campos.linkAfiliado);
   const linkResgate = normalizarTexto(campos.linkResgate);
   const linksAdicionais = campos.linksComerciais
@@ -644,7 +694,7 @@ function gerarTemplateUniversal(oferta = {}) {
   const linksPc = campos.linksPc.length
     ? linksPorPapelTemplate({ linksComerciais: campos.linksPc }, "pc")
     : linksComFallbackTemplate(campos, "pc", campos.linkPc);
-  const linksProduto = linksComFallbackTemplate(campos, "produto", campos.linkAfiliado);
+  const linksProduto = linksComFallbackTemplate(campos, "produto", campos.linksComerciais.length ? "" : campos.linkAfiliado);
 
   return montarTemplateUniversalOficial({
     campos,
