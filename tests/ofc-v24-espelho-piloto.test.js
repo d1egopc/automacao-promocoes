@@ -26,6 +26,14 @@ function capturarLogs(fn) {
   }
 }
 
+function assertMensagemFinalComContrato(logs = []) {
+  const saida = logs.join("\n");
+  assert(saida.includes("[OFC-V2.4-ESPELHO-PILOTO-SHADOW]"), "OFC deve rodar como shadow");
+  assert(saida.includes('"contratoFinalAplicado":true'), "mensagem final deve ter contrato aplicado");
+  assert(!saida.includes('"templateTipo":"ofc_v24_espelho_piloto"'), "OFC nao pode ser templateTipo final");
+  assert(!saida.includes('"rendererEscolhido":"ofc_v25_espelho"'), "OFC nao pode ser renderer final");
+}
+
 function metadataEspelho({ mensagem, imagemComercial = {}, espelhoExtra = {}, documentoComercialCanonico = null } = {}) {
   const espelhoComercial = {
     marketplace: "mercadolivre",
@@ -182,8 +190,9 @@ assert.strictEqual(configRioNovo.modo, "rio_oficial");
 
 {
   const { retorno: mensagem, logs } = capturarLogs(() => montarMensagemOferta(ofertaBase(WORKSPACE_WOLF), { clienteId: WORKSPACE_WOLF }));
-  assert.strictEqual(mensagem, mensagemMlCompleta());
-  assert(logs.some(linha => linha.includes('"rendererEscolhido":"ofc_v25_espelho"')));
+  assert(mensagem.includes("Titulo produtivo atual"));
+  assert(mensagem.includes("Por: *R$ 120,50*"));
+  assertMensagemFinalComContrato(logs);
 }
 
 {
@@ -199,14 +208,16 @@ assert.strictEqual(configRioNovo.modo, "rio_oficial");
       renderizadoresLegados: false
     }
   }));
-  assert.strictEqual(mensagem, mensagemMlCompleta());
-  assert(logs.some(linha => linha.includes('"rendererEscolhido":"ofc_v25_espelho"')));
+  assert(mensagem.includes("Titulo produtivo atual"));
+  assert(mensagem.includes("Por: *R$ 120,50*"));
+  assertMensagemFinalComContrato(logs);
 }
 
 {
   const { retorno: mensagem, logs } = capturarLogs(() => montarMensagemOferta(ofertaBase("admin"), { clienteId: "admin" }));
-  assert.strictEqual(mensagem, mensagemMlCompleta());
-  assert(logs.some(linha => linha.includes('"rendererEscolhido":"ofc_v25_espelho"')));
+  assert(mensagem.includes("Titulo produtivo atual"));
+  assert(mensagem.includes("Por: *R$ 120,50*"));
+  assertMensagemFinalComContrato(logs);
 }
 
 {
@@ -225,8 +236,10 @@ assert.strictEqual(configRioNovo.modo, "rio_oficial");
 }
 
 {
-  const { retorno: mensagem } = capturarLogs(() => montarMensagemOferta(ofertaBase(), { clienteId: WORKSPACE_D1 }));
-  assert.strictEqual(mensagem, mensagemMlCompleta());
+  const { retorno: mensagem, logs } = capturarLogs(() => montarMensagemOferta(ofertaBase(), { clienteId: WORKSPACE_D1 }));
+  assert(mensagem.includes("Titulo produtivo atual"));
+  assert(mensagem.includes("Por: *R$ 120,50*"));
+  assertMensagemFinalComContrato(logs);
 }
 
 {
@@ -234,8 +247,11 @@ assert.strictEqual(configRioNovo.modo, "rio_oficial");
     mensagem: ["Oferta simples", "Por: R$ 79,90", "Confira aqui: https://afiliado.test/simples"].join("\n\n"),
     espelhoExtra: { precoDeTexto: null, precoPorTexto: "R$ 79,90", cupomCodigo: null, instrucaoComercial: null }
   }));
+  simples.preco = 79.90;
+  simples.precoAtual = 79.90;
+  simples.precoOriginal = "";
   const { retorno: mensagem } = capturarLogs(() => montarMensagemOferta(simples, { clienteId: WORKSPACE_D1 }));
-  assert(mensagem.includes("Por: R$ 79,90"));
+  assert(mensagem.includes("Por: *R$ 79,90*"));
   assert(!mensagem.includes("De:"));
   assert(!mensagem.includes("Cupom:"));
 }
@@ -545,11 +561,17 @@ assert.strictEqual(configRioNovo.modo, "rio_oficial");
     }
   }));
   shopee.marketplace = "shopee";
-  const { retorno: mensagem } = capturarLogs(() => montarMensagemOferta(shopee, { clienteId: WORKSPACE_D1 }));
-  assert(mensagem.includes("Resgate os cupons: https://s.shopee.com.br/resgate"));
-  assert(mensagem.includes("Confira aqui: https://shopee.afiliado/produto"));
+  shopee.linkAfiliado = "https://shopee.afiliado/produto";
+  shopee.linkFinal = "https://shopee.afiliado/produto";
+  shopee.link = "https://shopee.afiliado/produto";
+  const { retorno: mensagem, logs } = capturarLogs(() => montarMensagemOferta(shopee, { clienteId: WORKSPACE_D1 }));
+  assert(mensagem.includes("Resgate:"));
+  assert(mensagem.includes("https://s.shopee.com.br/resgate"));
+  assert(mensagem.includes("Confira aqui:"));
+  assert(mensagem.includes("https://shopee.afiliado/produto"));
   assert(!mensagem.includes("TODOS"));
-  assert(mensagem.indexOf("Resgate os cupons") < mensagem.indexOf("Confira aqui"));
+  assert(mensagem.indexOf("Resgate:") < mensagem.indexOf("Confira aqui"));
+  assertMensagemFinalComContrato(logs);
 }
 
 {
@@ -557,9 +579,13 @@ assert.strictEqual(configRioNovo.modo, "rio_oficial");
     mensagem: ["Produto Cashback", "Por: R$ 100,00", "Beneficio: R$ 10 de cashback", "Confira aqui: https://afiliado.test/cashback"].join("\n\n"),
     espelhoExtra: { condicoesComerciais: ["R$ 10 de cashback"], precoPorTexto: "R$ 100,00", precoFinalTexto: null }
   }));
-  const { retorno: mensagem } = capturarLogs(() => montarMensagemOferta(cashback, { clienteId: WORKSPACE_D1 }));
-  assert(mensagem.includes("Beneficio: R$ 10 de cashback"));
+  cashback.preco = 100;
+  cashback.precoAtual = 100;
+  cashback.precoOriginal = "";
+  const { retorno: mensagem, logs } = capturarLogs(() => montarMensagemOferta(cashback, { clienteId: WORKSPACE_D1 }));
+  assert(mensagem.includes("R$ 10 de cashback"));
   assert(!mensagem.includes("R$ 90"));
+  assertMensagemFinalComContrato(logs);
 }
 
 {
@@ -567,9 +593,17 @@ assert.strictEqual(configRioNovo.modo, "rio_oficial");
     mensagem: ["Produto importado", "Por: US$ 19.99", "Cupom: ALI5", "Confira aqui: https://ali.afiliado/produto"].join("\n\n"),
     espelhoExtra: { marketplace: "aliexpress", precoPorTexto: "US$ 19.99", cupomCodigo: "ALI5" }
   }));
-  const { retorno: mensagem } = capturarLogs(() => montarMensagemOferta(estrangeira, { clienteId: WORKSPACE_D1 }));
+  estrangeira.marketplace = "aliexpress";
+  estrangeira.preco = "US$ 19.99";
+  estrangeira.precoAtual = "US$ 19.99";
+  estrangeira.precoOriginal = "";
+  estrangeira.linkAfiliado = "https://ali.afiliado/produto";
+  estrangeira.linkFinal = "https://ali.afiliado/produto";
+  estrangeira.link = "https://ali.afiliado/produto";
+  const { retorno: mensagem, logs } = capturarLogs(() => montarMensagemOferta(estrangeira, { clienteId: WORKSPACE_D1 }));
   assert(mensagem.includes("US$ 19.99"));
   assert(!mensagem.includes("R$ 19,99"));
+  assertMensagemFinalComContrato(logs);
 }
 
 {

@@ -291,6 +291,7 @@ function resolverContratoComercialFinal(oferta = {}) {
   const linksMoedas = linksPorPapel(links, "moedas");
   const contrato = {
     versao: "contrato_comercial_final_v1",
+    resolvido: true,
     precoDe,
     precoPor,
     condicaoPrecoPor: pix.condicaoPrecoPor,
@@ -310,6 +311,8 @@ function resolverContratoComercialFinal(oferta = {}) {
   return {
     ...oferta,
     contratoComercialFinal: contrato,
+    contratoComercialFinalResolvido: true,
+    contratoFinalAplicado: true,
     precoDe: precoDe ?? oferta.precoDe,
     precoOriginal: precoDe ?? oferta.precoOriginal,
     precoAntigo: precoDe ?? oferta.precoAntigo,

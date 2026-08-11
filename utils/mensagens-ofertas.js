@@ -132,6 +132,157 @@ function beneficiosUniversais(oferta = {}, v2 = {}) {
   return [...new Set(beneficios.map(normalizarTextoLocal).filter(Boolean))].slice(0, 5);
 }
 
+function objetoLocal(valor = {}) {
+  return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
+}
+
+function primeiroValorLocal(...valores) {
+  for (const valor of valores) {
+    if (valor === null || valor === undefined) continue;
+    if (typeof valor === "string" && !valor.trim()) continue;
+    return valor;
+  }
+  return "";
+}
+
+function metadataOfcV24Local(oferta = {}) {
+  const metadata = objetoLocal(oferta.metadata);
+  return objetoLocal(metadata.ofcV24 || oferta.ofcV24);
+}
+
+function documentoOfcV24Local(oferta = {}) {
+  const ofcV24 = metadataOfcV24Local(oferta);
+  const espelho = objetoLocal(ofcV24.espelhoComercial || oferta.espelhoComercialV24);
+  return objetoLocal(
+    ofcV24.documentoComercialCanonico ||
+    espelho.documentoComercialCanonico ||
+    oferta.documentoComercialCanonicoV24
+  );
+}
+
+function blocosOfcV24Local(documento = {}) {
+  return Array.isArray(documento.blocos) ? documento.blocos : [];
+}
+
+function blocoOfcV24Local(documento = {}, ...tipos) {
+  const alvos = new Set(tipos.map(normalizarTextoLocal));
+  return blocosOfcV24Local(documento).find(bloco => alvos.has(normalizarTextoLocal(bloco?.tipo))) || {};
+}
+
+function textoBlocoOfcV24Local(documento = {}, ...tipos) {
+  const bloco = blocoOfcV24Local(documento, ...tipos);
+  return normalizarTextoLocal(bloco.textoOriginal || bloco.valor || "");
+}
+
+function urlBlocoOfcV24Local(documento = {}, ...tipos) {
+  const bloco = blocoOfcV24Local(documento, ...tipos);
+  return normalizarTextoLocal(bloco.valorEstruturado?.url || bloco.url || bloco.textoOriginal || "");
+}
+
+function linkOfcV24Local(tipo = "produto", url = "", ordemCaptura = 1, origem = "ofc_v24") {
+  const valor = normalizarTextoLocal(url);
+  if (!valor) return null;
+  return {
+    tipo,
+    papel: `link_${tipo}`,
+    ordemCaptura,
+    original: valor,
+    resolvido: "",
+    afiliado: valor,
+    urlOptimus: valor,
+    origem
+  };
+}
+
+function linksOfcV24ParaApresentacao(oferta = {}) {
+  const ofcV24 = metadataOfcV24Local(oferta);
+  const espelho = objetoLocal(ofcV24.espelhoComercial || oferta.espelhoComercialV24);
+  const documento = documentoOfcV24Local(oferta);
+  const candidatos = [
+    linkOfcV24Local("produto", primeiroValorLocal(documento.linkAfiliado, espelho.linkAfiliado), 1, "ofc_v24.linkAfiliado"),
+    linkOfcV24Local("produto", primeiroValorLocal(documento.linkProdutoOriginal, espelho.linkProdutoOriginal), 2, "ofc_v24.linkProdutoOriginal"),
+    linkOfcV24Local("resgate", primeiroValorLocal(documento.linkResgateOriginal, espelho.linkResgateOriginal, urlBlocoOfcV24Local(documento, "link_resgate")), 3, "ofc_v24.linkResgate"),
+    linkOfcV24Local("app", urlBlocoOfcV24Local(documento, "link_app"), 4, "ofc_v24.linkApp"),
+    linkOfcV24Local("moedas", urlBlocoOfcV24Local(documento, "link_moedas"), 5, "ofc_v24.linkMoedas"),
+    linkOfcV24Local("pc", urlBlocoOfcV24Local(documento, "link_pc"), 6, "ofc_v24.linkPc")
+  ].filter(Boolean);
+
+  return candidatos;
+}
+
+function aplicarFatosOfcV24ComoEntrada(oferta = {}) {
+  const ofcV24 = metadataOfcV24Local(oferta);
+  const espelho = objetoLocal(ofcV24.espelhoComercial || oferta.espelhoComercialV24);
+  const documento = documentoOfcV24Local(oferta);
+  const temOfc = Boolean(Object.keys(ofcV24).length || Object.keys(espelho).length || Object.keys(documento).length);
+  if (!temOfc) return oferta;
+
+  const linksOFC = linksOfcV24ParaApresentacao(oferta);
+  const condicoesOfc = Array.isArray(espelho.condicoesComerciais)
+    ? espelho.condicoesComerciais.map(normalizarTextoLocal).filter(Boolean)
+    : [];
+  const linksComerciais = [
+    ...(Array.isArray(oferta.linksComerciais) ? oferta.linksComerciais : []),
+    ...linksOFC
+  ];
+  const linksProduto = [
+    ...(Array.isArray(oferta.linksProduto) ? oferta.linksProduto : []),
+    ...linksOFC.filter(item => item.tipo === "produto")
+  ];
+  const linksResgate = [
+    ...(Array.isArray(oferta.linksResgate) ? oferta.linksResgate : []),
+    ...linksOFC.filter(item => item.tipo === "resgate")
+  ];
+
+  return {
+    ...oferta,
+    titulo: primeiroValorLocal(oferta.titulo, oferta.nome, documento.tituloOriginal, textoBlocoOfcV24Local(documento, "titulo")),
+    nome: primeiroValorLocal(oferta.nome, oferta.titulo, documento.tituloOriginal, textoBlocoOfcV24Local(documento, "titulo")),
+    marketplace: primeiroValorLocal(oferta.marketplace, documento.marketplace, espelho.marketplace, textoBlocoOfcV24Local(documento, "marketplace")),
+    categoria: primeiroValorLocal(oferta.categoria, documento.categoria, espelho.categoria, textoBlocoOfcV24Local(documento, "categoria")),
+    precoOriginal: primeiroValorLocal(oferta.precoOriginal, oferta.precoAntigo, oferta.precoDe, documento.precoDeTexto, espelho.precoDeTexto, textoBlocoOfcV24Local(documento, "preco_referencia")),
+    precoAntigo: primeiroValorLocal(oferta.precoAntigo, oferta.precoOriginal, oferta.precoDe, documento.precoDeTexto, espelho.precoDeTexto, textoBlocoOfcV24Local(documento, "preco_referencia")),
+    precoDe: primeiroValorLocal(oferta.precoDe, oferta.precoOriginal, oferta.precoAntigo, documento.precoDeTexto, espelho.precoDeTexto, textoBlocoOfcV24Local(documento, "preco_referencia")),
+    precoAtual: primeiroValorLocal(oferta.precoAtual, oferta.precoPor, oferta.preco, documento.precoPorTexto, espelho.precoPorTexto, espelho.precoFinalTexto, textoBlocoOfcV24Local(documento, "preco_oferta")),
+    precoPor: primeiroValorLocal(oferta.precoPor, oferta.precoAtual, oferta.preco, documento.precoPorTexto, espelho.precoPorTexto, espelho.precoFinalTexto, textoBlocoOfcV24Local(documento, "preco_oferta")),
+    preco: primeiroValorLocal(oferta.preco, oferta.precoAtual, oferta.precoPor, documento.precoPorTexto, espelho.precoPorTexto, espelho.precoFinalTexto, textoBlocoOfcV24Local(documento, "preco_oferta")),
+    precoPix: primeiroValorLocal(oferta.precoPix, documento.precoPixTexto, espelho.precoPixTexto, textoBlocoOfcV24Local(documento, "preco_pix")),
+    condicaoPix: primeiroValorLocal(oferta.condicaoPix, documento.precoPixTexto, espelho.formaPagamentoTexto, textoBlocoOfcV24Local(documento, "preco_pix")),
+    cupom: primeiroValorLocal(oferta.cupom, documento.cupomTexto, espelho.cupomCodigo, textoBlocoOfcV24Local(documento, "cupom_codigo")),
+    cupomCodigo: primeiroValorLocal(oferta.cupomCodigo, oferta.codigoCupom, documento.cupomTexto, espelho.cupomCodigo, textoBlocoOfcV24Local(documento, "cupom_codigo")),
+    codigoCupom: primeiroValorLocal(oferta.codigoCupom, oferta.cupomCodigo, documento.cupomTexto, espelho.cupomCodigo, textoBlocoOfcV24Local(documento, "cupom_codigo")),
+    instrucaoCupom: primeiroValorLocal(oferta.instrucaoCupom, oferta.instrucaoComercial, documento.instrucaoTexto, espelho.instrucaoComercial, textoBlocoOfcV24Local(documento, "instrucao_cupom")),
+    instrucaoComercial: primeiroValorLocal(oferta.instrucaoComercial, oferta.instrucaoCupom, documento.instrucaoTexto, espelho.instrucaoComercial, textoBlocoOfcV24Local(documento, "instrucao_cupom")),
+    beneficioTexto: primeiroValorLocal(oferta.beneficioTexto, oferta.beneficio, documento.beneficioTexto, textoBlocoOfcV24Local(documento, "beneficio"), condicoesOfc[0]),
+    beneficioExtra: primeiroValorLocal(oferta.beneficioExtra, documento.beneficioTexto, textoBlocoOfcV24Local(documento, "beneficio"), condicoesOfc[0]),
+    beneficios: Array.isArray(oferta.beneficios) && oferta.beneficios.length ? oferta.beneficios : condicoesOfc,
+    condicoes: [
+      ...(Array.isArray(oferta.condicoes) ? oferta.condicoes : []),
+      ...condicoesOfc
+    ],
+    parcelamento: primeiroValorLocal(oferta.parcelamento, documento.parcelamentoTexto, espelho.parcelamentoTexto, textoBlocoOfcV24Local(documento, "parcelamento")),
+    frete: primeiroValorLocal(oferta.frete, oferta.freteTexto, documento.freteTexto, textoBlocoOfcV24Local(documento, "frete")),
+    cashback: primeiroValorLocal(oferta.cashback, documento.cashbackTexto, textoBlocoOfcV24Local(documento, "cashback")),
+    avaliacao: primeiroValorLocal(oferta.avaliacao, oferta.rating, oferta.nota, textoBlocoOfcV24Local(documento, "avaliacao_nota")),
+    linkAfiliado: primeiroValorLocal(oferta.linkAfiliado, oferta.linkFinal, oferta.link, documento.linkAfiliado, espelho.linkAfiliado),
+    linkFinal: primeiroValorLocal(oferta.linkFinal, oferta.linkAfiliado, oferta.link, documento.linkAfiliado, espelho.linkAfiliado),
+    link: primeiroValorLocal(oferta.link, oferta.linkAfiliado, oferta.linkFinal, documento.linkAfiliado, espelho.linkAfiliado),
+    linkProduto: primeiroValorLocal(oferta.linkProduto, documento.linkAfiliado, espelho.linkAfiliado, documento.linkProdutoOriginal, espelho.linkProdutoOriginal),
+    linkResgate: primeiroValorLocal(oferta.linkResgate, documento.linkResgateOriginal, espelho.linkResgateOriginal, urlBlocoOfcV24Local(documento, "link_resgate")),
+    linkApp: primeiroValorLocal(oferta.linkApp, urlBlocoOfcV24Local(documento, "link_app")),
+    linkPc: primeiroValorLocal(oferta.linkPc, urlBlocoOfcV24Local(documento, "link_pc")),
+    linkMoedas: primeiroValorLocal(oferta.linkMoedas, urlBlocoOfcV24Local(documento, "link_moedas")),
+    linksComerciais,
+    linksProduto,
+    linksResgate,
+    origemApresentacao: primeiroValorLocal(oferta.origemApresentacao, "ofc_v24_espelho_piloto"),
+    metadata: {
+      ...objetoLocal(oferta.metadata),
+      ofcV24
+    }
+  };
+}
+
 function montarEntradaTemplateUniversalOficial(oferta = {}) {
   return prepararDadosOficiaisTemplate(oferta, { modo: "universal" });
 }
@@ -322,10 +473,11 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
   const destino = opcoes.destino || {};
   let resolucaoTemplate = null;
   let espelhoPilotoResultado = null;
-  const ofertaOficial = montarOfertaRenderizacaoOficial({
+  const ofertaEntradaComFatosOfc = aplicarFatosOfcV24ComoEntrada({
     ...oferta,
     clienteId
   });
+  const ofertaOficial = montarOfertaRenderizacaoOficial(ofertaEntradaComFatosOfc);
   const fidelidadeTraceIdPrincipal = fidelidadeObs.flagAtiva()
     ? fidelidadeObs.resolverFidelidadeTraceId(oferta, oferta.metadata, ofertaOficial, ofertaOficial.metadata)
     : "";
@@ -379,6 +531,10 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
       temDocumentoCanonico: Boolean(ofcV24.documentoComercialCanonico),
       temEspelho: Boolean(ofcV24.espelhoComercial),
       temTemplateEspelho: Boolean(ofcV24.templateEspelhoShadow || ofcV24.templateEspelho),
+      contratoFinalAplicado: ofertaOficial.contratoFinalAplicado === true ||
+        ofertaOficial.contratoComercialFinalResolvido === true ||
+        ofertaOficial.contratoComercialFinal?.resolvido === true,
+      origemApresentacao: valorLogCurto(ofertaOficial.origemApresentacao || ""),
       templatePersonalizado: rendererEscolhido === "template_personalizado" || rendererEscolhido === "template_legado",
       templateUniversal: rendererEscolhido === "template_universal",
       fallbackUtilizado,
@@ -441,10 +597,35 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
     rioOficialAtivo: rioOficialAtivo(ofertaOficial, opcoes)
   });
   if (espelhoPilotoResultado.usarEspelho && espelhoPilotoResultado.mensagem) {
-    return registrarTemplate("ofc_v24_espelho_piloto", espelhoPilotoResultado.mensagem, {
-      rendererEscolhido: espelhoPilotoResultado.motivo === "documento_canonico_adaptativo_valido" ? "ofc_v25_documento_canonico" : "ofc_v25_espelho",
-      motivo: espelhoPilotoResultado.motivo || "documento_canonico"
-    });
+    ofertaOficial.origemApresentacao = ofertaOficial.origemApresentacao || "ofc_v24_espelho_piloto";
+    ofertaOficial.mensagemOfcV24ShadowDisponivel = true;
+    ofertaOficial.metadata = {
+      ...objetoLocal(ofertaOficial.metadata),
+      ofcV24: {
+        ...objetoLocal(objetoLocal(ofertaOficial.metadata).ofcV24),
+        apresentacaoShadow: {
+          disponivel: true,
+          autoridadeFinal: false,
+          motivo: espelhoPilotoResultado.motivo || "documento_canonico",
+          tamanhoMensagem: String(espelhoPilotoResultado.mensagem || "").length
+        }
+      }
+    };
+    try {
+      console.log("[OFC-V2.4-ESPELHO-PILOTO-SHADOW]", JSON.stringify({
+        workspaceId: valorLogCurto(clienteId),
+        ofertaId: valorLogCurto(ofertaOficial.engineOfertaId || ofertaOficial.id || ofertaOficial.ofertaId || ""),
+        marketplace: valorLogCurto(ofertaOficial.marketplace || ""),
+        origemApresentacao: "ofc_v24_espelho_piloto",
+        autoridadeFinal: false,
+        contratoFinalAplicado: ofertaOficial.contratoFinalAplicado === true ||
+          ofertaOficial.contratoComercialFinalResolvido === true ||
+          ofertaOficial.contratoComercialFinal?.resolvido === true,
+        motivo: valorLogCurto(espelhoPilotoResultado.motivo || "documento_canonico")
+      }));
+    } catch (_) {
+      // Observabilidade shadow nao pode interferir no envio.
+    }
   }
 
   const dadosOficiaisUniversal = montarEntradaTemplateUniversalOficial(ofertaOficial);
