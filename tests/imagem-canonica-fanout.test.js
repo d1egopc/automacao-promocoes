@@ -576,6 +576,57 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
       _limparCacheImagemCanonicaEvento
     } = require("../modules/imagens/cache-canonico-evento");
     _limparCacheImagemCanonicaEvento();
+    const imagemPolycard = "https://http2.mlstatic.com/D_Q_NP_766763-MLB102163177100_122025-V.webp";
+    const linksAfiliados = [
+      "https://meli.la/polycard-a",
+      "https://meli.la/polycard-b",
+      "https://meli.la/polycard-c"
+    ];
+    const resultados = [];
+    for (const linkAfiliado of linksAfiliados) {
+      resultados.push(await resolverImagemCanonicaFinalEvento({
+        eventoId: 9560,
+        marketplace: "mercadolivre",
+        linksExtraidos: ["https://meli.la/2nKnMEm"],
+        metadataEvento: {},
+        ofertaEnriquecida: {
+          marketplace: "mercadolivre",
+          titulo: "Kit Growth Whey Protein Basic Chocolate 1kg Creatina",
+          produtoIdDetectado: "MLB4387463577",
+          linkOriginal: "https://meli.la/2nKnMEm",
+          linkExpandido: "https://produto.mercadolivre.com.br/MLB4387463577",
+          linkAfiliado,
+          imagem: imagemPolycard,
+          imagemUrl: imagemPolycard,
+          imagemOrigem: "polycard.picture_template",
+          imagemStatus: "imagem_canonica_evento"
+        }
+      }, {
+        buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); },
+        buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); }
+      }));
+    }
+
+    assert.deepStrictEqual(resultados.map(item => item.imagemCanonicaDuravel), [
+      imagemPolycard,
+      imagemPolycard,
+      imagemPolycard
+    ]);
+    assert.strictEqual(resultados[0].imagemOrigem, "polycard.picture_template");
+    assert(resultados.slice(1).every(item => item.cacheHit === true));
+    assert.deepStrictEqual(linksAfiliados, [
+      "https://meli.la/polycard-a",
+      "https://meli.la/polycard-b",
+      "https://meli.la/polycard-c"
+    ]);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
     const fixtures = [
       ["CHEIROSÃO DE 212", "MLB3333333333", "https://meli.la/1y2uJcP", url("cheirosao-jsonld")],
       ["ESSE COMPRESSOR FAZ TUDO E MAIS UM POUCO", "MLB4444444444", "https://meli.la/2WEQqho", url("compressor-og")],

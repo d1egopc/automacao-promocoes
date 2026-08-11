@@ -535,6 +535,287 @@ function normalizarImagemMercadoLivre(valor = "") {
   }
 }
 
+function decodificarPayloadMercadoLivre(valor = "") {
+  return htmlDecode(String(valor || ""))
+    .replace(/\\u002F/gi, "/")
+    .replace(/\\\//g, "/")
+    .replace(/\\u003A/gi, ":")
+    .replace(/\\u003F/gi, "?")
+    .replace(/\\u0026/gi, "&")
+    .replace(/\\u003D/gi, "=")
+    .replace(/&amp;/gi, "&");
+}
+
+function extrairJsonObjetoBalanceado(texto = "", indiceAbertura = -1) {
+  if (indiceAbertura < 0 || texto[indiceAbertura] !== "{") return null;
+  let profundidade = 0;
+  let emString = false;
+  let escape = false;
+  for (let i = indiceAbertura; i < texto.length; i += 1) {
+    const char = texto[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (char === "\\") {
+      escape = true;
+      continue;
+    }
+    if (char === "\"") {
+      emString = !emString;
+      continue;
+    }
+    if (emString) continue;
+    if (char === "{") profundidade += 1;
+    if (char === "}") {
+      profundidade -= 1;
+      if (profundidade === 0) {
+        const bruto = texto.slice(indiceAbertura, i + 1);
+        try {
+          return { objeto: JSON.parse(bruto), fim: i + 1 };
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function extrairValorJsonStringImagemMl(bloco = "", campo = "") {
+  return decodificarPayloadMercadoLivre(
+    String(bloco || "").match(new RegExp(`"${campo}"\\s*:\\s*"([^"]*)"`, "i"))?.[1] || ""
+  );
+}
+
+function extrairContextoPictureTemplateMl(texto = "", indiceCard = 0) {
+  const antes = texto.slice(Math.max(0, indiceCard - 50000), indiceCard);
+  const matches = [...antes.matchAll(/"picture_template"\s*:\s*"([^"]+)"/gi)];
+  const template = decodificarPayloadMercadoLivre(matches.at(-1)?.[1] || "");
+  const contextoInicio = antes.lastIndexOf("\"polycard_context\"");
+  const blocoContexto = contextoInicio >= 0 ? antes.slice(contextoInicio) : antes;
+  return {
+    picture_template: template,
+    picture_size_default: extrairValorJsonStringImagemMl(blocoContexto, "picture_size_default") || "V",
+    picture_square_default: extrairValorJsonStringImagemMl(blocoContexto, "picture_square_default") || "Q"
+  };
+}
+
+function normalizarTemplateImagemPolycardMl(template = "") {
+  const valor = decodificarPayloadMercadoLivre(template).trim();
+  if (!valor) return "";
+  try {
+    const exemplo = valor
+      .replace(/\{square\}/g, "Q")
+      .replace(/\{2x\}/g, "")
+      .replace(/\{id\}/g, "000000-MLB000000000_000000")
+      .replace(/\{size\}/g, "V")
+      .replace(/\{sanitized_title\}/g, "");
+    const parsed = new URL(exemplo);
+    const host = parsed.hostname.toLowerCase();
+    if (parsed.protocol !== "https:" || !(host === "mlstatic.com" || host.endsWith(".mlstatic.com"))) return "";
+    if (!/\{id\}/.test(valor)) return "";
+    return valor;
+  } catch {
+    return "";
+  }
+}
+
+function normalizarPictureIdPolycardMl(pictureId = "") {
+  const valor = normalizarTexto(pictureId);
+  if (!valor || /[<>{}\\/\s]/.test(valor)) return "";
+  return /^[A-Z0-9_-]+-[A-Z]{3}\d+_\d{6}$/i.test(valor) ? valor : "";
+}
+
+function montarUrlImagemPolycardMl({ template = "", pictureId = "", square = "", size = "" } = {}) {
+  const templateSeguro = normalizarTemplateImagemPolycardMl(template);
+  const idSeguro = normalizarPictureIdPolycardMl(pictureId);
+  if (!templateSeguro || !idSeguro) return "";
+  const squareSeguro = normalizarTexto(square || "Q").replace(/[^A-Z0-9]/gi, "") || "Q";
+  const sizeSeguro = normalizarTexto(size || "V").replace(/[^A-Z0-9]/gi, "") || "V";
+  const montada = templateSeguro
+    .replace(/\{square\}/g, squareSeguro)
+    .replace(/\{2x\}/g, "")
+    .replace(/\{id\}/g, idSeguro)
+    .replace(/\{size\}/g, sizeSeguro)
+    .replace(/\{sanitized_title\}/g, "");
+  const imagem = normalizarImagemMercadoLivre(montada);
+  if (!imagem || !imagem.includes(idSeguro)) return "";
+  return imagem;
+}
+
+function tokensProdutoImagemMl(valor = "") {
+  const stop = new Set([
+    "para", "com", "por", "de", "da", "do", "das", "dos", "uma", "uns", "nas", "nos",
+    "cupom", "promocao", "promo", "preco", "esgotando", "isso", "copo", "agua", "olha",
+    "mercado", "livre", "original", "oferta", "imperdivel", "kit"
+  ]);
+  return normalizarTexto(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(token => token.length >= 4 && !stop.has(token))
+    .filter((token, index, todos) => todos.indexOf(token) === index);
+}
+
+function textoIdentidadeComercialImagemMl(oferta = {}) {
+  const metadata = objetoSeguro(oferta.metadata);
+  const radarMirror = objetoSeguro(metadata.radarMirror);
+  return [
+    oferta.titulo,
+    oferta.nome,
+    oferta.textoOriginal,
+    oferta.textoComercialOriginal,
+    metadata.textoOriginal,
+    metadata.textoComercialOriginal,
+    radarMirror.textoOriginal,
+    radarMirror.textoComercial,
+    radarMirror.mensagemOriginal
+  ].filter(Boolean).join(" ");
+}
+
+function cardPolycardConflitaComOfertaMl(card = {}, oferta = {}) {
+  const textoOferta = textoIdentidadeComercialImagemMl(oferta);
+  const tituloCard = normalizarTexto(card.title || card.titulo || "");
+  if (!textoOferta || !tituloCard) return false;
+  const tokensOferta = tokensProdutoImagemMl(textoOferta);
+  const tokensCard = tokensProdutoImagemMl(tituloCard);
+  if (tokensOferta.length < 2 || tokensCard.length < 2) return false;
+  return !tokensCard.some(token => tokensOferta.includes(token));
+}
+
+function extrairImagemPolycardMercadoLivreHtml(html = "", mlbEsperado = "", oferta = {}) {
+  const mlb = normalizarMlbImagem(mlbEsperado);
+  if (!mlb) return { imagem: "", origem: "", motivo: "mlb_polycard_ausente" };
+  const texto = decodificarPayloadMercadoLivre(html);
+  const regexMetadata = /"metadata"\s*:\s*\{/gi;
+  let match;
+  let ultimoMotivo = "polycard_sem_card_compativel";
+  let encontrouCardEsperado = false;
+  while ((match = regexMetadata.exec(texto)) !== null) {
+    const inicioMetadata = texto.indexOf("{", match.index);
+    const metadata = extrairJsonObjetoBalanceado(texto, inicioMetadata);
+    if (!metadata?.objeto) continue;
+    const idCard = normalizarMlbImagem(metadata.objeto.id || "");
+    if (idCard !== mlb) {
+      if (!encontrouCardEsperado) ultimoMotivo = "polycard_mlb_divergente";
+      continue;
+    }
+    encontrouCardEsperado = true;
+
+    const contexto = extrairContextoPictureTemplateMl(texto, match.index);
+    const picturesIndex = texto.indexOf("\"pictures\"", metadata.fim);
+    if (picturesIndex < 0) {
+      ultimoMotivo = "polycard_sem_pictures";
+      continue;
+    }
+    const inicioPictures = texto.indexOf("{", picturesIndex);
+    const pictures = extrairJsonObjetoBalanceado(texto, inicioPictures);
+    if (!pictures?.objeto) {
+      ultimoMotivo = "polycard_pictures_malformado";
+      continue;
+    }
+
+    const picture = Array.isArray(pictures.objeto.pictures) ? pictures.objeto.pictures[0] : null;
+    const pictureId = normalizarPictureIdPolycardMl(picture?.id || "");
+    if (!pictureId) {
+      ultimoMotivo = "polycard_picture_id_ausente";
+      continue;
+    }
+
+    const card = {
+      metadata: metadata.objeto,
+      title: String(texto.slice(metadata.fim, Math.min(texto.length, metadata.fim + 2200))
+        .match(/"title"\s*:\s*\{\s*"text"\s*:\s*"([^"]+)"/i)?.[1] || "")
+    };
+    if (cardPolycardConflitaComOfertaMl(card, oferta)) {
+      return {
+        imagem: "",
+        origem: "",
+        motivo: "polycard_conflito_identidade",
+        conflitoIdentidade: true,
+        metadataId: idCard,
+        pictureId,
+        tituloPolycard: card.title
+      };
+    }
+
+    const imagem = montarUrlImagemPolycardMl({
+      template: contexto.picture_template,
+      pictureId,
+      square: pictures.objeto.square || contexto.picture_square_default,
+      size: contexto.picture_size_default
+    });
+    if (!imagem) {
+      ultimoMotivo = "polycard_template_invalido";
+      continue;
+    }
+
+    return {
+      imagem,
+      origem: "polycard.picture_template",
+      motivo: "polycard_picture_id_imagem_recuperada",
+      metadataId: idCard,
+      productId: metadata.objeto.product_id || "",
+      userProductId: metadata.objeto.user_product_id || "",
+      pictureId,
+      linkResolvido: metadata.objeto.url || "",
+      tituloPolycard: card.title
+    };
+  }
+  return { imagem: "", origem: "", motivo: ultimoMotivo };
+}
+
+async function validarImagemPolycardMercadoLivre(candidato = {}, opcoes = {}) {
+  const imagem = normalizarImagemMercadoLivre(candidato.imagem || "");
+  if (!imagem) return { ...candidato, imagem: "", motivo: candidato.motivo || "polycard_imagem_invalida" };
+  const fetchImpl = opcoes.fetchImpl || fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Number(opcoes.timeoutMs || 4500));
+  try {
+    const response = await fetchImpl(imagem, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
+        "Accept": "image/webp,image/*,*/*",
+        "Range": "bytes=0-2047"
+      }
+    });
+    const contentType = String(response.headers?.get?.("content-type") || response.headers?.["content-type"] || "");
+    if (typeof response.arrayBuffer === "function") {
+      await response.arrayBuffer().catch(() => null);
+    }
+    if (response.status >= 200 && response.status < 400 && /^image\//i.test(contentType)) {
+      return {
+        ...candidato,
+        imagem,
+        statusHttp: response.status,
+        contentType,
+        motivo: candidato.motivo || "polycard_picture_id_imagem_recuperada"
+      };
+    }
+    return {
+      ...candidato,
+      imagem: "",
+      statusHttp: response.status,
+      contentType,
+      motivo: /^image\//i.test(contentType) ? `polycard_http_${response.status}` : "polycard_http_nao_imagem"
+    };
+  } catch (erro) {
+    return {
+      ...candidato,
+      imagem: "",
+      statusHttp: null,
+      motivo: erro?.name === "AbortError" ? "timeout_polycard_picture" : `falha_polycard_picture:${erro.message}`
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function extrairImagemHtmlMercadoLivre(html = "") {
   const jsonLd = extrairJsonLd(html);
   const candidatos = [
@@ -795,6 +1076,25 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}) {
       linkResolvido = response.url || candidato.url;
       statusHttp = response.status;
       let bloqueado = /captcha|account-verification|access denied|robot check|verifique[^<]{0,80}rob/i.test(html);
+      const imagemPolycard = extrairImagemPolycardMercadoLivreHtml(html, mlb, oferta);
+      if (imagemPolycard.imagem) {
+        const imagemPolycardValidada = await validarImagemPolycardMercadoLivre(imagemPolycard);
+        if (imagemPolycardValidada.imagem) {
+          return {
+            imagem: imagemPolycardValidada.imagem,
+            origem: imagemPolycardValidada.origem,
+            linkResolvido: imagemPolycardValidada.linkResolvido || linkResolvido,
+            statusHttp: imagemPolycardValidada.statusHttp ?? statusHttp,
+            motivo: imagemPolycardValidada.motivo,
+            pictureId: imagemPolycardValidada.pictureId || "",
+            productId: imagemPolycardValidada.productId || "",
+            userProductId: imagemPolycardValidada.userProductId || ""
+          };
+        }
+        motivoHtml = imagemPolycardValidada.motivo || motivoHtml;
+      } else if (imagemPolycard.conflitoIdentidade) {
+        motivoHtml = imagemPolycard.motivo || "polycard_conflito_identidade";
+      }
       let linkResolvidoSeguro = urlCanonicaImagemMercadoLivreSegura(linkResolvido, mlb);
       let podeUsarHtmlAtual = !candidato.meliLa || linkResolvidoSeguro;
       let imagemExtraida = statusHttp < 400 && !bloqueado && podeUsarHtmlAtual ? extrairImagemHtmlMercadoLivre(html) : { imagem: "", origem: "nenhuma" };
@@ -2581,6 +2881,9 @@ module.exports = {
   buscarImagemCanonicaMercadoLivre,
   buscarImagemOficialMercadoLivrePorMlb,
   extrairImagemOficialMercadoLivreApi,
+  extrairImagemPolycardMercadoLivreHtml,
+  montarUrlImagemPolycardMl,
+  validarImagemPolycardMercadoLivre,
   materializarImagemRadarMirrorSeNecessario,
   aplicarPonteIntegridadeComercial
 };
