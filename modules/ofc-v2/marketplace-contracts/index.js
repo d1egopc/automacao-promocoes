@@ -164,10 +164,6 @@ function saidaBase(marketplace, contrato) {
 
 function adicionarLink(saida, link) {
   if (!link.urlOriginal && !link.urlAfiliada) return false;
-  if (saida.links.some(item => item.dedupeKey === link.dedupeKey)) {
-    saida.dedupes.push(link.papel);
-    return false;
-  }
   saida.links.push(link);
   return true;
 }
@@ -220,39 +216,25 @@ function contratoShopee(entrada) {
     produtos.push(link);
   }
 
-  const produtosUnicos = [];
-  const vistosProduto = new Set();
-  for (const [indice, link] of produtos.entries()) {
-    const chave = dedupeUrl(link.url);
-    if (vistosProduto.has(chave)) {
-      saida.dedupes.push("link_produto_shopee");
-      continue;
-    }
-    vistosProduto.add(chave);
-    produtosUnicos.push({ ...link, ordemCaptura: Number(link.ordemCaptura || link.linha || indice + 1) || (indice + 1) });
-  }
+  const produtosOcorrencias = produtos.map((link, indice) => ({
+    ...link,
+    ordemCaptura: Number(link.ordemCaptura || link.linha || indice + 1) || (indice + 1)
+  }));
 
-  const resgatesUnicos = [];
-  const vistosResgate = new Set();
-  for (const [indice, link] of resgates.entries()) {
-    const chave = dedupeUrl(link.url);
-    if (vistosResgate.has(chave)) {
-      saida.dedupes.push("link_resgate_shopee");
-      continue;
-    }
-    vistosResgate.add(chave);
-    resgatesUnicos.push({ ...link, ordemCaptura: Number(link.ordemCaptura || link.linha || indice + 1) || (indice + 1) });
-  }
+  const resgatesOcorrencias = resgates.map((link, indice) => ({
+    ...link,
+    ordemCaptura: Number(link.ordemCaptura || link.linha || indice + 1) || (indice + 1)
+  }));
 
-  saida.linkProdutoOriginal = produtosUnicos[0]?.url || "";
-  saida.linkResgateOriginal = resgatesUnicos[0]?.url || "";
-  if (saida.linkResgateOriginal) adicionarLink(saida, linkBase(resgatesUnicos[0], "link_resgate"));
+  saida.linkProdutoOriginal = produtosOcorrencias[0]?.url || "";
+  saida.linkResgateOriginal = resgatesOcorrencias[0]?.url || "";
+  for (const link of resgatesOcorrencias) adicionarLink(saida, linkBase(link, "link_resgate"));
 
-  if (produtosUnicos.length > 1) {
+  if (produtosOcorrencias.length > 1) {
     saida.houveAmbiguidade = true;
     saida.produtosAmbiguos = true;
     saida.avisos.push("links_produto_ambiguos");
-    for (const link of produtosUnicos) {
+    for (const link of produtosOcorrencias) {
       adicionarLink(saida, linkBase(link, "link_produto", {
         renderizavel: false,
         avisos: ["produto_ambiguo_nao_renderizavel"],
@@ -294,25 +276,15 @@ function contratoAliExpress(entrada) {
     }
   }
 
-  const produtosUnicos = [];
-  const vistosProduto = new Set();
-  for (const link of produtos) {
-    const chave = dedupeUrl(link.url);
-    if (!chave || vistosProduto.has(chave)) {
-      if (chave) saida.dedupes.push("link_produto_aliexpress");
-      continue;
-    }
-    vistosProduto.add(chave);
-    produtosUnicos.push(link);
-  }
+  const produtosOcorrencias = produtos.filter(link => texto(link.url));
 
-  if (produtosUnicos.length > 1) {
+  if (produtosOcorrencias.length > 1) {
     saida.houveAmbiguidade = true;
     saida.produtosAmbiguos = true;
     saida.avisos.push("links_produto_ambiguos");
   }
 
-  saida.linkProdutoOriginal = produtosUnicos[0]?.url || "";
+  saida.linkProdutoOriginal = produtosOcorrencias[0]?.url || "";
   if (!saida.linkProdutoOriginal && texto(entrada.linkAfiliado)) saida.linkProdutoOriginal = texto(entrada.linkAfiliado);
   if (texto(entrada.linkAfiliado)) saida.houveConversaoAfiliada = true;
   if (!saida.links.length && lista(entrada.links).some(link => urlAliExpress(link.url))) saida.avisos.push("links_aliexpress_sem_papel_explicito");

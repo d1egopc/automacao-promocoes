@@ -1,4 +1,4 @@
-const assert = require("assert");
+﻿const assert = require("assert");
 
 const { gerarTemplateUniversal } = require("../modules/template-universal");
 const { renderizarTemplatePersonalizado } = require("../modules/templates-clientes/renderer");
@@ -59,7 +59,7 @@ assert.ok(padrao.includes("⭐ 4,8 • 1.234"));
 assert.ok(padrao.includes("📱 *APP:*\nhttps://go.optimus/same\nhttps://go.optimus/app-extra"));
 assert.ok(padrao.includes("🖥️ *PC:*\nhttps://go.optimus/same"));
 assert.ok(padrao.includes("🎟️ *Resgate:*\nhttps://go.optimus/resgate"));
-assert.ok(padrao.includes("🔗 *Confira aqui:*\nhttps://ali.workspace/produto\nhttps://go.optimus/produto"));
+assert.ok(padrao.includes("🔗 *Confira aqui:*\nhttps://go.optimus/produto"));
 assert.strictEqual((padrao.match(/Oferta sujeita/g) || []).length, 0, "aviso custom substitui padrao");
 assert.strictEqual((padrao.match(/Aviso customizado final/g) || []).length, 1, "apenas um aviso final");
 assert.ok(!padrao.includes("APP / Moedas"), "APP e Moedas nao compartilham papel visual");
@@ -77,7 +77,7 @@ const semAvaliacaoReal = gerarTemplateUniversal({
   score: 100,
   linkAfiliado: "https://amzn.to/oferta"
 });
-assert.ok(!semAvaliacaoReal.includes("⭐ 100"), "score interno nao vira avaliacao visual");
+assert.ok(!semAvaliacaoReal.includes("â­ 100"), "score interno nao vira avaliacao visual");
 
 const personalizado = renderizarTemplatePersonalizado({
   oferta: {

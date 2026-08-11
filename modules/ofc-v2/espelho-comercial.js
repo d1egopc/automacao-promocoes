@@ -1373,32 +1373,13 @@ function urlsDoTexto(textoOriginal = "") {
 function valorUrl(item = {}) {
   if (typeof item === "string") return texto(item);
   if (!item || typeof item !== "object") return "";
-  return primeiroTexto(item.urlOriginal, item.url, item.original, item.url_original, item.link, item.href, item.urlExpandida, item.url_expandida, item.urlNormalizada, item.resolvido);
+  return primeiroTexto(item.urlAfiliada, item.urlOptimus, item.afiliado, item.linkAfiliado, item.resolvido, item.urlOriginal, item.url, item.original, item.url_original, item.link, item.href, item.urlExpandida, item.url_expandida, item.urlNormalizada);
 }
 
 function adicionarLinkUnico(saida, url, tipo = "produto", contexto = "", extras = {}) {
   const valor = texto(url);
   if (!valor) return;
   const tipoNormalizado = tipoLinkNormalizado(tipo, contexto);
-  const chave = valor.replace(/#.*$/, "");
-  const existente = saida.find(item => item.url.replace(/#.*$/, "") === chave);
-  if (existente) {
-    const tipoNovo = tipoNormalizado;
-    const tipoAtual = tipoLinkNormalizado(existente.tipo, existente.contexto);
-    if (["app", "pc", "moedas", "resgate"].includes(tipoNovo) && !["app", "pc", "moedas", "resgate"].includes(tipoAtual)) {
-      existente.tipo = tipoNovo;
-    }
-    existente.urlAfiliada = texto(existente.urlAfiliada || extras.urlAfiliada || extras.linkAfiliado || "");
-    existente.convertidoWorkspace = existente.convertidoWorkspace === true || extras.convertidoWorkspace === true;
-    existente.afiliadoConvertido = existente.afiliadoConvertido === true || extras.afiliadoConvertido === true;
-    existente.workspaceConvertido = existente.workspaceConvertido === true || extras.workspaceConvertido === true;
-    existente.linkAfiliadoWorkspace = existente.linkAfiliadoWorkspace === true || extras.linkAfiliadoWorkspace === true;
-    existente.renderizavel = existente.renderizavel === true || extras.renderizavel === true;
-    existente.seguro = existente.seguro === true || extras.seguro === true;
-    existente.origem = texto(existente.origem || extras.origem || "");
-    existente.confianca = texto(existente.confianca || extras.confianca || "");
-    return;
-  }
   saida.push({
     url: valor,
     tipo: tipoNormalizado,
@@ -1722,6 +1703,10 @@ function normalizarLinhaTemplate(valor = "") {
 function adicionarBlocoUnico(saida = [], tipo = "", linha = "") {
   const textoLinha = normalizarLinhaTemplate(linha);
   if (!textoLinha) return false;
+  if (/^link_/.test(texto(tipo))) {
+    saida.push({ tipo, linha: textoLinha, grupo: grupoVisualBlocoV26(tipo) });
+    return true;
+  }
   const chave = normalizarComparacao(textoLinha);
   if (saida.some(item => normalizarComparacao(item.linha) === chave)) return false;
   saida.push({ tipo, linha: textoLinha, grupo: grupoVisualBlocoV26(tipo) });
@@ -1790,16 +1775,14 @@ function linhasLinksAliExpress(doc = {}) {
   const links = Array.isArray(doc.linksComerciais) ? doc.linksComerciais : [];
   const renderizaveis = links.filter(item => item.renderizavel !== false);
   const urlLink = (item = {}) => texto(item.urlAfiliada || item.url);
-  const appItem = renderizaveis.find(item => ["app", "moedas"].includes(item.tipo));
-  const pcItem = renderizaveis.find(item => item.tipo === "pc");
-  const app = urlLink(appItem);
-  const pc = urlLink(pcItem);
-  const appDistintoPc = app && (!pc || chaveUrlFinalAliExpress(app) !== chaveUrlFinalAliExpress(pc));
-  const rotuloApp = appItem?.tipo === "moedas" ? "📱 APP / Moedas" : "📱 APP";
-  return [
-    appDistintoPc ? `${rotuloApp}:\n${app}` : "",
-    pc ? `🖥️ PC:\n${pc}` : ""
-  ].filter(Boolean).join("\n\n");
+  return renderizaveis.map(item => {
+    const url = urlLink(item);
+    if (!url) return "";
+    if (item.tipo === "moedas") return `📱 APP / Moedas:\n${url}`;
+    if (item.tipo === "app") return `📱 APP:\n${url}`;
+    if (item.tipo === "pc") return `🖥️ PC:\n${url}`;
+    return `🔗 Confira aqui:\n${url}`;
+  }).filter(Boolean).join("\n\n");
 }
 
 function avaliacaoVisual(valor = "") {
@@ -2231,7 +2214,6 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
   const blocosOrdenados = [...blocos].sort((a, b) => ordemRenderizacaoBlocoCanonicoV26(a, doc) - ordemRenderizacaoBlocoCanonicoV26(b, doc) || a.tipo.localeCompare(b.tipo) || a.dedupeKey.localeCompare(b.dedupeKey));
   const linhas = [];
   const vistos = new Set();
-  const linksAliRenderizados = new Set();
   const classificacaoVisual = classificacaoVisualAtivaV26(template)
     ? classificacaoVisualOferta(fatosClassificacaoVisualV26(doc, espelho, blocosOrdenados))
     : "";
@@ -2270,16 +2252,13 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
     if (contexto.marketplaceAliExpress && ["link_app", "link_moedas", "link_pc"].includes(bloco.tipo)) {
       const chaveLink = chaveUrlFinalAliExpress(textoBlocoCanonicoV26(bloco));
       if (!chaveLink) continue;
-      const chavePapel = `${bloco.tipo}:${bloco.metadata?.ordemCaptura || bloco.valorEstruturado?.ordemCaptura || bloco.dedupeKey || chaveLink}`;
-      if (linksAliRenderizados.has(chavePapel)) continue;
-      linksAliRenderizados.add(chavePapel);
     }
     const chaveDedupe = bloco.dedupeKey || dedupeKeyBloco(bloco.tipo, bloco.textoOriginal, bloco.valorEstruturado, bloco.origem);
-    if (chaveDedupe && vistos.has(chaveDedupe)) continue;
+    if (!/^link_/.test(texto(bloco.tipo)) && chaveDedupe && vistos.has(chaveDedupe)) continue;
     if (!toggleAtivoParaBlocoV26(bloco, template)) continue;
     const linha = renderizarBlocoCanonicoV26(bloco, contexto);
     const adicionado = adicionarBlocoUnico(linhas, bloco.tipo, linha);
-    if (adicionado && chaveDedupe) vistos.add(chaveDedupe);
+    if (adicionado && !/^link_/.test(texto(bloco.tipo)) && chaveDedupe) vistos.add(chaveDedupe);
   }
   inserirClassificacaoVisualV26(linhas, classificacaoVisual);
 

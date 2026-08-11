@@ -118,7 +118,6 @@ function listaTextoUnica(valores = []) {
 
 function linksComerciaisUnicos(links = []) {
   const resultado = [];
-  const vistos = new Set();
 
   for (const [indice, link] of (Array.isArray(links) ? links : []).entries()) {
     if (!link || typeof link !== "object") continue;
@@ -128,13 +127,12 @@ function linksComerciaisUnicos(links = []) {
     const resolvido = normalizarTexto(link.resolvido);
     const original = normalizarTexto(link.original);
     const url = afiliado || resolvido || original;
-    const chave = `${tipo}:${ordemCaptura}:${url}`;
-    if (!url || vistos.has(chave)) continue;
-    vistos.add(chave);
+    if (!url) continue;
     resultado.push({
       tipo,
       papel: normalizarTexto(link.papel || tipo),
       ordemCaptura,
+      ocorrenciaId: normalizarTexto(link.ocorrenciaId || link.idOcorrencia || `link:${tipo}:${ordemCaptura}:${indice + 1}`),
       original,
       resolvido,
       afiliado,
@@ -502,22 +500,21 @@ function urlLinkTemplate(item = {}) {
 }
 
 function linksPorPapelTemplate(campos = {}, papel = "") {
-  const candidatos = [
-    ...(Array.isArray(campos.linksComerciais) ? campos.linksComerciais : []),
-    ...(Array.isArray(campos.linksProduto) ? campos.linksProduto : []),
-    ...(Array.isArray(campos.linksResgate) ? campos.linksResgate : [])
-  ];
+  const linksComerciais = Array.isArray(campos.linksComerciais) ? campos.linksComerciais : [];
+  const candidatos = linksComerciais.length
+    ? linksComerciais
+    : [
+      ...(Array.isArray(campos.linksProduto) ? campos.linksProduto : []),
+      ...(Array.isArray(campos.linksResgate) ? campos.linksResgate : [])
+    ];
   const links = [];
-  const vistos = new Set();
 
   for (const [indice, item] of candidatos.entries()) {
     if (!item || typeof item !== "object") continue;
     if (papelLinkTemplate(item) !== papel) continue;
     const url = urlLinkTemplate(item);
     const ordem = Number(item.ordemCaptura || item.ordem || indice + 1) || (indice + 1);
-    const chave = `${papel}:${ordem}:${url}`;
-    if (!url || vistos.has(chave)) continue;
-    vistos.add(chave);
+    if (!url) continue;
     links.push({ url, ordem });
   }
 

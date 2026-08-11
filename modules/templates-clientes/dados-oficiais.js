@@ -258,17 +258,15 @@ function listaTextoUnica(valores = []) {
 
 function listaObjetosUnica(valores = []) {
   const resultado = [];
-  const vistos = new Set();
 
   for (const [indice, valor] of (Array.isArray(valores) ? valores : []).entries()) {
     if (!valor || typeof valor !== "object") continue;
-    const url = texto(valor.original || valor.resolvido || valor.afiliado || valor.urlAfiliada || valor.urlOptimus || valor.link || valor.url || "");
-    const papel = texto(valor.papel || valor.tipo || valor.role || "");
     const ordem = Number(valor.ordemCaptura || valor.ordem || indice + 1) || (indice + 1);
-    const chave = [papel, ordem, url].filter(Boolean).join(":");
-    if (!chave || vistos.has(chave)) continue;
-    vistos.add(chave);
-    resultado.push({ ...valor, ordemCaptura: ordem });
+    resultado.push({
+      ...valor,
+      ordemCaptura: ordem,
+      ocorrenciaId: texto(valor.ocorrenciaId || valor.idOcorrencia || `link:${ordem}:${indice + 1}`)
+    });
   }
 
   return resultado;

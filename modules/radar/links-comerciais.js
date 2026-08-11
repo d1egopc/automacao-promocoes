@@ -20,11 +20,9 @@ function normalizarUrlComercial(url = "") {
 
 function linksUnicos(links = []) {
   const resultado = [];
-  const vistos = new Set();
   for (const link of Array.isArray(links) ? links : []) {
     const valor = normalizarUrlComercial(link);
-    if (!valor || vistos.has(valor)) continue;
-    vistos.add(valor);
+    if (!valor) continue;
     resultado.push(valor);
   }
   return resultado;
@@ -37,7 +35,7 @@ function extrairLinksTextoComercial(valor = "") {
   REGEX_LINK_COMERCIAL.lastIndex = 0;
   while ((match = REGEX_LINK_COMERCIAL.exec(fonte))) {
     const link = normalizarUrlComercial(match[0]);
-    if (link && !links.includes(link)) links.push(link);
+    if (link) links.push(link);
   }
   return links;
 }

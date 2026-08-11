@@ -59,24 +59,23 @@ function logLinkReconhecidoRadar(link = "") {
 function extrairLinksRadar(texto = "") {
   const fonte = limparUnicodeInvisivelRadar(texto);
   const encontrados = fonte.match(/(?:https?:\/\/|www\.)[^\s<>"']+/gi) || [];
-  const unicos = new Set();
+  const links = [];
 
   for (const link of encontrados) {
     const limpo = normalizarLinkExtraidoRadar(link);
     if (!limpo) continue;
 
-    if (unicos.has(limpo)) {
-      logRadarSeguro("[RADAR-LINK-REPETIDO-IGNORADO]", {
+    if (links.includes(limpo)) {
+      logRadarSeguro("[RADAR-LINK-REPETIDO-PRESERVADO]", {
         host: dominioLinkRadar(limpo)
       });
-      continue;
     }
 
     logLinkReconhecidoRadar(limpo);
-    unicos.add(limpo);
+    links.push(limpo);
   }
 
-  return [...unicos];
+  return links;
 }
 
 function normalizarTextoCupomRadar(texto = "") {

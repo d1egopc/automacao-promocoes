@@ -381,24 +381,21 @@ function precoPixEssencial(oferta = {}) {
 
 function linkComercialPorTipo(oferta = {}, tipos = []) {
   const tiposNormalizados = new Set(tipos.map(tipo => normalizarComparacao(tipo).replace(/^link_/, "")));
-  const candidatos = [
-    ...(Array.isArray(oferta.linksComerciais) ? oferta.linksComerciais : []),
-    ...(Array.isArray(oferta.linksProduto) ? oferta.linksProduto : []),
-    ...(Array.isArray(oferta.linksResgate) ? oferta.linksResgate : [])
-  ];
+  const linksComerciais = Array.isArray(oferta.linksComerciais) ? oferta.linksComerciais : [];
+  const candidatos = linksComerciais.length
+    ? linksComerciais
+    : [
+      ...(Array.isArray(oferta.linksProduto) ? oferta.linksProduto : []),
+      ...(Array.isArray(oferta.linksResgate) ? oferta.linksResgate : [])
+    ];
   const links = [];
-  const vistos = new Set();
   for (const item of candidatos) {
     if (!item || typeof item !== "object") continue;
     const tipo = normalizarComparacao(item.tipo || item.papel || "").replace(/^link_/, "");
     if (!tiposNormalizados.has(tipo)) continue;
     const url = primeiroTexto(item.urlOptimus, item.urlAfiliada, item.afiliado, item.linkAfiliado, item.resolvido, item.url, item.original, item.link);
     const ordem = Number(item.ordemCaptura || item.ordem || links.length + 1) || (links.length + 1);
-    const chave = `${tipo}:${ordem}:${url}`;
-    if (url && !vistos.has(chave)) {
-      vistos.add(chave);
-      links.push({ url, ordem });
-    }
+    if (url) links.push({ url, ordem });
   }
   return links
     .sort((a, b) => a.ordem - b.ordem)
@@ -413,10 +410,10 @@ function dadosBlocoTemplate(tipo = "", oferta = {}) {
   if (tipo === "cupom") return valorCupomTemplate(oferta);
   if (tipo === "frase_cupom") return primeiroTexto(oferta.instrucaoCupom, oferta.condicaoCupom, oferta.condicaoComercial, oferta.avisoCupom);
   if (tipo === "link") return primeiroTexto(linkComercialPorTipo(oferta, ["produto"]), oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link, oferta.url);
-  if (tipo === "link_resgate") return primeiroTexto(oferta.linkResgate, linkComercialPorTipo(oferta, ["resgate"]));
-  if (tipo === "link_app") return primeiroTexto(oferta.linkApp, linkComercialPorTipo(oferta, ["app"]));
-  if (tipo === "link_moedas") return primeiroTexto(oferta.linkMoedas, linkComercialPorTipo(oferta, ["moedas"]));
-  if (tipo === "link_pc") return primeiroTexto(oferta.linkPc, linkComercialPorTipo(oferta, ["pc"]));
+  if (tipo === "link_resgate") return primeiroTexto(linkComercialPorTipo(oferta, ["resgate"]), oferta.linkResgate);
+  if (tipo === "link_app") return primeiroTexto(linkComercialPorTipo(oferta, ["app"]), oferta.linkApp);
+  if (tipo === "link_moedas") return primeiroTexto(linkComercialPorTipo(oferta, ["moedas"]), oferta.linkMoedas);
+  if (tipo === "link_pc") return primeiroTexto(linkComercialPorTipo(oferta, ["pc"]), oferta.linkPc);
   return "__opcional__";
 }
 
@@ -602,31 +599,31 @@ function resolverLinha(bloco, oferta = {}) {
     return cta ? `🔗 ${cta}` : "";
   }
   if (tipo === "link_resgate") {
-    const link = primeiroTexto(oferta.linkResgate, linkComercialPorTipo(oferta, ["resgate"]));
+    const link = primeiroTexto(linkComercialPorTipo(oferta, ["resgate"]), oferta.linkResgate);
     return link ? `🎟️ Resgate:\n${link}` : "";
   }
   if (tipo === "link_app") {
-    const link = primeiroTexto(oferta.linkApp, linkComercialPorTipo(oferta, ["app"]));
+    const link = primeiroTexto(linkComercialPorTipo(oferta, ["app"]), oferta.linkApp);
     return link ? `📱 APP:\n${link}` : "";
   }
   if (tipo === "link_app") {
-    const link = primeiroTexto(oferta.linkApp, linkComercialPorTipo(oferta, ["app"]));
+    const link = primeiroTexto(linkComercialPorTipo(oferta, ["app"]), oferta.linkApp);
     return link ? `📱 APP / Moedas:\n${link}` : "";
   }
   if (tipo === "link_moedas") {
-    const link = primeiroTexto(oferta.linkMoedas, linkComercialPorTipo(oferta, ["moedas"]));
+    const link = primeiroTexto(linkComercialPorTipo(oferta, ["moedas"]), oferta.linkMoedas);
     return link ? `🪙 Moedas:\n${link}` : "";
   }
   if (tipo === "link_moedas") {
-    const link = primeiroTexto(oferta.linkMoedas, linkComercialPorTipo(oferta, ["moedas"]));
+    const link = primeiroTexto(linkComercialPorTipo(oferta, ["moedas"]), oferta.linkMoedas);
     return link ? `📱 APP / Moedas:\n${link}` : "";
   }
   if (tipo === "link_pc") {
-    const link = primeiroTexto(oferta.linkPc, linkComercialPorTipo(oferta, ["pc"]));
+    const link = primeiroTexto(linkComercialPorTipo(oferta, ["pc"]), oferta.linkPc);
     return link ? `🖥️ PC:\n${link}` : "";
   }
   if (tipo === "link_pc") {
-    const link = primeiroTexto(oferta.linkPc, linkComercialPorTipo(oferta, ["pc"]));
+    const link = primeiroTexto(linkComercialPorTipo(oferta, ["pc"]), oferta.linkPc);
     return link ? `🖥️ PC:\n${link}` : "";
   }
   if (tipo === "link") {

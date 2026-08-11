@@ -46,19 +46,17 @@ function itemLink(item = {}, tipoPadrao = "produto") {
   };
 }
 
-function listaLinksUnicos(valores = [], tipoPadrao = "produto") {
+function listaLinksOcorrencias(valores = [], tipoPadrao = "produto") {
   const resultado = [];
-  const vistos = new Set();
   for (const [indice, valor] of (Array.isArray(valores) ? valores : []).entries()) {
     const item = itemLink(valor, tipoPadrao);
     if (!item) continue;
-    const url = valorLink(item);
-    const tipo = normalizarComparacao(item.tipo || item.papel || tipoPadrao);
     const ordem = Number(item.ordemCaptura || item.ordem || indice + 1) || (indice + 1);
-    const chave = `${tipo}:${ordem}:${chaveUrl(url)}`;
-    if (!item || !chave || vistos.has(chave)) continue;
-    vistos.add(chave);
-    resultado.push({ ...item, ordemCaptura: ordem });
+    resultado.push({
+      ...item,
+      ordemCaptura: ordem,
+      ocorrenciaId: texto(item.ocorrenciaId || item.idOcorrencia || `link:${tipoPadrao}:${ordem}:${indice + 1}`)
+    });
   }
   return resultado;
 }
@@ -235,9 +233,10 @@ function listaTextoComercialUnica(...fontes) {
 }
 
 function separarLinksApresentacao(dados = {}) {
-  const linksProduto = listaLinksUnicos(dados.linksProduto, "produto");
-  const linksResgate = listaLinksUnicos(dados.linksResgate, "resgate");
-  const linksComerciais = listaLinksUnicos(dados.linksComerciais, "produto");
+  const linksComerciais = listaLinksOcorrencias(dados.linksComerciais, "produto");
+  const temLinksComerciais = linksComerciais.length > 0;
+  const linksProduto = temLinksComerciais ? [] : listaLinksOcorrencias(dados.linksProduto, "produto");
+  const linksResgate = temLinksComerciais ? [] : listaLinksOcorrencias(dados.linksResgate, "resgate");
   const linksOutros = [];
 
   for (const item of linksComerciais) {
@@ -252,12 +251,12 @@ function separarLinksApresentacao(dados = {}) {
   }
 
   const linkTopo = texto(dados.linkAfiliado || dados.linkFinal || dados.link || dados.url || "");
-  if (linkTopo && !linksProduto.some(item => chaveUrl(valorLink(item)) === chaveUrl(linkTopo)) && !linksResgate.some(item => chaveUrl(valorLink(item)) === chaveUrl(linkTopo))) {
+  if (linkTopo && !linksComerciais.length && !linksProduto.length && !linksResgate.length) {
     linksProduto.push({ tipo: "produto", original: linkTopo, resolvido: "", afiliado: linkTopo });
   }
 
-  const produtoUnico = listaLinksUnicos(linksProduto, "produto");
-  const resgateUnico = listaLinksUnicos(linksResgate, "resgate");
+  const produtoUnico = listaLinksOcorrencias(linksProduto, "produto");
+  const resgateUnico = listaLinksOcorrencias(linksResgate, "resgate");
 
   const linkProduto = valorLink(produtoUnico[0]);
   const linkResgate = valorLink(resgateUnico[0]);
@@ -265,7 +264,7 @@ function separarLinksApresentacao(dados = {}) {
   return {
     linksProduto: produtoUnico,
     linksResgate: resgateUnico,
-    linksComerciais: listaLinksUnicos([...produtoUnico, ...resgateUnico, ...linksOutros], "produto"),
+    linksComerciais: temLinksComerciais ? linksComerciais : listaLinksOcorrencias([...produtoUnico, ...resgateUnico, ...linksOutros], "produto"),
     linkProduto,
     linkResgate
   };

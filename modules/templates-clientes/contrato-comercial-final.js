@@ -243,29 +243,45 @@ function instrucaoFinal(oferta = {}, cupom = "") {
   return "";
 }
 
+function papelLinkFinal(item = {}) {
+  const bruto = normalizarComparacao(item.papel || item.tipo || "").replace(/^link_/, "");
+  if (["cupom", "resgate"].includes(bruto)) return "resgate";
+  if (["afiliado", "linkproduto"].includes(bruto)) return "produto";
+  if (["moeda", "moedas", "coins"].includes(bruto)) return "moedas";
+  return bruto;
+}
+
 function linksPorPapel(links = [], papel = "") {
   const resultado = [];
-  const vistos = new Set();
   const alvo = normalizarComparacao(papel).replace(/^link_/, "");
   for (const [indice, item] of (Array.isArray(links) ? links : []).entries()) {
     if (!item || typeof item !== "object") continue;
-    const tipo = normalizarComparacao(item.papel || item.tipo || "").replace(/^link_/, "");
+    const tipo = papelLinkFinal(item);
     if (tipo !== alvo) continue;
     const url = texto(item.urlOptimus || item.urlAfiliada || item.afiliado || item.linkAfiliado || item.resolvido || item.original || item.url || item.link);
     const ordem = Number(item.ordemCaptura || item.ordem || indice + 1) || (indice + 1);
-    const chave = `${tipo}:${ordem}:${url}`;
-    if (!url || vistos.has(chave)) continue;
-    vistos.add(chave);
-    resultado.push({ ...item, tipo: alvo, papel: item.papel || `link_${alvo}`, ordemCaptura: ordem, urlOptimus: item.urlOptimus || url });
+    if (!url) continue;
+    resultado.push({
+      ...item,
+      tipo: alvo,
+      papel: item.papel || `link_${alvo}`,
+      ordemCaptura: ordem,
+      ocorrenciaId: texto(item.ocorrenciaId || item.idOcorrencia || `link:${tipo}:${ordem}:${indice + 1}`),
+      urlOptimus: item.urlOptimus || url
+    });
   }
   return resultado.sort((a, b) => Number(a.ordemCaptura || 0) - Number(b.ordemCaptura || 0));
 }
 
 function todosLinks(oferta = {}) {
+  const linksComerciais = Array.isArray(oferta.linksComerciais) ? oferta.linksComerciais : [];
+  if (linksComerciais.length) return linksComerciais;
   return [
-    ...(Array.isArray(oferta.linksComerciais) ? oferta.linksComerciais : []),
     ...(Array.isArray(oferta.linksProduto) ? oferta.linksProduto : []),
-    ...(Array.isArray(oferta.linksResgate) ? oferta.linksResgate : [])
+    ...(Array.isArray(oferta.linksResgate) ? oferta.linksResgate : []),
+    ...(Array.isArray(oferta.linksApp) ? oferta.linksApp : []),
+    ...(Array.isArray(oferta.linksPc) ? oferta.linksPc : []),
+    ...(Array.isArray(oferta.linksMoedas) ? oferta.linksMoedas : [])
   ];
 }
 

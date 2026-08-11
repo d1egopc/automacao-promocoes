@@ -136,7 +136,7 @@ function testarEspelhoUsaAfiliadaENaoOriginal() {
   const links = resultado.documentoComercialCanonico.linksComerciais;
   assert.ok(links.some(item => item.tipo === "moedas" && item.url === appAfiliado), "APP/moedas deve usar URL afiliada");
   assert.ok(links.some(item => item.tipo === "pc" && item.url === pcAfiliado), "PC deve usar URL afiliada");
-  assert.ok(!links.some(item => item.url === appOriginal || item.url === pcOriginal), "URL original capturada nao deve virar CTA");
+  assert.ok(!links.some(item => (item.url === appOriginal || item.url === pcOriginal) && item.renderizavel !== false), "URL original capturada nao deve virar CTA");
 
   const mensagem = resultado.templateEspelhoShadow.mensagem;
   assert.ok(mensagem.includes(appAfiliado), "renderer deve renderizar afiliada APP/moedas");
@@ -168,8 +168,8 @@ function testarMesmoLinkAppPcNaoDuplica() {
   const ocorrencias = render.mensagem.split(urlAfiliada).length - 1;
 
   assert.strictEqual(render.ok, true);
-  assert.strictEqual(ocorrencias, 1, "mesma URL APP/PC nao deve duplicar");
-  assert.ok(render.mensagem.includes("PC:"), "quando duplica, PC canonico deve permanecer");
+  assert.strictEqual(ocorrencias, 2, "mesma URL APP/PC preserva duas ocorrencias comerciais");
+  assert.ok(render.mensagem.includes("PC:"), "PC canonico deve permanecer");
 }
 
 (async () => {
