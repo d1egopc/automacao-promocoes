@@ -867,17 +867,32 @@ async function buscarImagemOficialMercadoLivrePorMlb(mlb = "", opcoes = {}) {
     return { imagem: "", origem: "", statusHttp: null, motivo: "mlb_api_ausente" };
   }
 
+  const accessToken = resolverAccessTokenMercadoLivreImagem(opcoes);
+  const urlApi = `https://api.mercadolibre.com/items/MLB${id}`;
+  if (!accessToken) {
+    return {
+      imagem: "",
+      origem: "",
+      linkResolvido: urlApi,
+      statusHttp: null,
+      motivo: "api_oficial_mlb_token_ausente",
+      apiConsultada: false,
+      autenticacao: "ausente"
+    };
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Number(opcoes.timeoutMs || 6500));
-  const urlApi = `https://api.mercadolibre.com/items/MLB${id}`;
+  const fetchImpl = opcoes.fetchImpl || globalThis.fetch;
 
   try {
-    const response = await fetch(urlApi, {
+    const response = await fetchImpl(urlApi, {
       redirect: "follow",
       signal: controller.signal,
       headers: {
         "User-Agent": "OptimusPromo/1.0 (+https://go.optimuspromo.com.br)",
-        "Accept": "application/json"
+        "Accept": "application/json",
+        "Authorization": `Bearer ${accessToken}`
       }
     });
 
@@ -887,7 +902,9 @@ async function buscarImagemOficialMercadoLivrePorMlb(mlb = "", opcoes = {}) {
         origem: "",
         linkResolvido: urlApi,
         statusHttp: response.status,
-        motivo: `api_oficial_mlb_http_${response.status}`
+        motivo: `api_oficial_mlb_http_${response.status}`,
+        apiConsultada: true,
+        autenticacao: "bearer"
       };
     }
 
@@ -898,7 +915,9 @@ async function buscarImagemOficialMercadoLivrePorMlb(mlb = "", opcoes = {}) {
       origem: imagemApi.imagem ? imagemApi.origem : "",
       linkResolvido: urlApi,
       statusHttp: response.status,
-      motivo: imagemApi.imagem ? "api_oficial_mlb_imagem_recuperada" : "api_oficial_mlb_sem_imagem"
+      motivo: imagemApi.imagem ? "api_oficial_mlb_imagem_recuperada" : "api_oficial_mlb_sem_imagem",
+      apiConsultada: true,
+      autenticacao: "bearer"
     };
   } catch (erro) {
     return {
@@ -906,11 +925,47 @@ async function buscarImagemOficialMercadoLivrePorMlb(mlb = "", opcoes = {}) {
       origem: "",
       linkResolvido: urlApi,
       statusHttp: null,
-      motivo: erro?.name === "AbortError" ? "timeout_api_oficial_mlb" : `falha_api_oficial_mlb:${erro.message}`
+      motivo: erro?.name === "AbortError" ? "timeout_api_oficial_mlb" : `falha_api_oficial_mlb:${erro.message}`,
+      apiConsultada: true,
+      autenticacao: "bearer"
     };
   } finally {
     clearTimeout(timer);
   }
+}
+
+function resolverAccessTokenMercadoLivreImagem(opcoes = {}) {
+  const direto = normalizarTexto(
+    opcoes.accessToken ||
+    opcoes.access_token ||
+    opcoes.bearerToken ||
+    opcoes.tokenMercadoLivre ||
+    ""
+  );
+  if (direto) return direto;
+
+  const credenciais = objetoSeguro(opcoes.credenciais);
+  const tokenCredenciais = normalizarTexto(
+    credenciais.accessToken ||
+    credenciais.access_token ||
+    credenciais.bearerToken ||
+    credenciais.oauthAccessToken ||
+    credenciais.oauth_access_token ||
+    credenciais.tokenMercadoLivre ||
+    ""
+  );
+  if (tokenCredenciais) return tokenCredenciais;
+
+  if (typeof opcoes.getIntegracaoCliente === "function") {
+    const clienteId = normalizarTexto(opcoes.clienteId || opcoes.job?.cliente_id || opcoes.job?.clienteId || "");
+    const integracao = opcoes.getIntegracaoCliente(clienteId || "admin", "mercadolivre");
+    return resolverAccessTokenMercadoLivreImagem({
+      credenciais: integracao?.credenciais || {},
+      accessToken: integracao?.accessToken || integracao?.access_token || ""
+    });
+  }
+
+  return "";
 }
 
 function extrairCanonicalImagemMercadoLivre(html = "") {
@@ -1034,7 +1089,7 @@ function montarCandidatosUrlImagemMercadoLivre(oferta = {}, mlb = "") {
   });
 }
 
-async function buscarImagemCanonicaMercadoLivre(oferta = {}) {
+async function buscarImagemCanonicaMercadoLivre(oferta = {}, opcoes = {}) {
   const valoresTecnicos = coletarValoresTecnicosImagemMercadoLivre(oferta);
   const textoIdentidade = [
     oferta.produtoIdDetectado,
@@ -1063,6 +1118,7 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}) {
       "Accept-Language": "pt-BR,pt;q=0.9"
     }
   };
+  const fetchImpl = opcoes.fetchImpl || globalThis.fetch;
 
   try {
     let linkResolvido = urlInicial;
@@ -1071,14 +1127,17 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}) {
 
     for (let indice = 0; indice < candidatosUrl.length; indice += 1) {
       const candidato = candidatosUrl[indice];
-      let response = await fetch(candidato.url, options);
+      let response = await fetchImpl(candidato.url, options);
       let html = await response.text();
       linkResolvido = response.url || candidato.url;
       statusHttp = response.status;
       let bloqueado = /captcha|account-verification|access denied|robot check|verifique[^<]{0,80}rob/i.test(html);
       const imagemPolycard = extrairImagemPolycardMercadoLivreHtml(html, mlb, oferta);
       if (imagemPolycard.imagem) {
-        const imagemPolycardValidada = await validarImagemPolycardMercadoLivre(imagemPolycard);
+        const imagemPolycardValidada = await validarImagemPolycardMercadoLivre(imagemPolycard, {
+          fetchImpl,
+          timeoutMs: opcoes.timeoutMsImagemPolycard
+        });
         if (imagemPolycardValidada.imagem) {
           return {
             imagem: imagemPolycardValidada.imagem,
@@ -1101,7 +1160,7 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}) {
       const canonical = extrairUrlProdutoImagemMercadoLivre(html, mlb);
 
       if (!imagemExtraida.imagem && urlCanonicaImagemMercadoLivreSegura(canonical, mlb) && canonical !== linkResolvido) {
-        response = await fetch(canonical, options);
+        response = await fetchImpl(canonical, options);
         html = await response.text();
         linkResolvido = response.url || canonical;
         statusHttp = response.status;
@@ -1124,7 +1183,7 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}) {
       motivoHtml = statusHttp >= 400 ? `http_${statusHttp}` : (bloqueado ? "html_bloqueado" : "html_sem_imagem_valida");
     }
 
-    const imagemApi = await buscarImagemOficialMercadoLivrePorMlb(mlb);
+    const imagemApi = await buscarImagemOficialMercadoLivrePorMlb(mlb, opcoes);
     if (imagemApi.imagem) {
       return {
         imagem: imagemApi.imagem,
@@ -1143,7 +1202,7 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}) {
       motivo: imagemApi.motivo || motivoHtml
     };
   } catch (erro) {
-    const imagemApi = await buscarImagemOficialMercadoLivrePorMlb(mlb);
+    const imagemApi = await buscarImagemOficialMercadoLivrePorMlb(mlb, opcoes);
     if (imagemApi.imagem) {
       return {
         imagem: imagemApi.imagem,
@@ -2300,7 +2359,11 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   }
 
   if (!oferta.imagem && normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre") {
-    imagemCanonica = await buscarImagemCanonicaMercadoLivre(oferta);
+    imagemCanonica = await buscarImagemCanonicaMercadoLivre(oferta, {
+      clienteId: job.cliente_id || job.clienteId || "",
+      job,
+      getIntegracaoCliente: deps.getIntegracaoCliente
+    });
     if (imagemCanonica.imagem) {
       oferta.imagem = imagemCanonica.imagem;
       oferta.imagemOrigem = imagemCanonica.origem;

@@ -304,6 +304,35 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
 
   {
     const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9250,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-3696123026-la-roche"],
+      metadataEvento: {
+        radarMirror: { midia: { imagemOrigem: "mensagem", imagemOriginal: mmg("expirada-adapter") } }
+      },
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB3696123026",
+        imagem: url("adapter-image"),
+        imagemOrigem: "adapter.imagem"
+      }
+    }, {
+      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); },
+      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, url("adapter-image"));
+    assert.strictEqual(resultado.imagemOrigem, "imagem");
+    assert.strictEqual(resultado.imagemCanonicaFinal, true);
+  }
+
+  {
+    const {
       resolverImagemCanonicaEvento,
       _limparCacheImagemCanonicaEvento
     } = require("../modules/imagens/cache-canonico-evento");
@@ -347,7 +376,7 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     }, {
       fetchImpl: async () => ({ ok: false, status: 410 }),
       buscarImagemHistorica: async () => ({ imagem: url("historico-mlb"), origem: "engine_ofertas.imagem:123" }),
-      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); }
+      buscarImagemOficialMl: async () => ({ imagem: "", motivo: "api_oficial_mlb_token_ausente", apiConsultada: false })
     });
 
     assert.strictEqual(resultado.imagemCanonicaDuravel, url("historico-mlb"));
@@ -370,7 +399,7 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
       }
     }, {
       fetchImpl: async () => ({ ok: false, status: 410 }),
-      buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" }),
+      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); },
       buscarImagemOficialMl: async () => ({ imagem: url("api-oficial-mlb"), origem: "api_mercadolibre.items.pictures[0].secure_url" })
     });
 
@@ -419,16 +448,16 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
         produtoIdDetectado: "MLB1111111111",
         linkOriginal: "https://produto.mercadolivre.com.br/MLB-1111111111-sem-imagem"
       }
-    }, {
-      buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" }),
-      buscarImagemOficialMl: async () => ({ imagem: "", motivo: "api_oficial_mlb_sem_imagem" })
-    });
+      }, {
+        buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" }),
+        buscarImagemOficialMl: async () => ({ imagem: "", motivo: "api_oficial_mlb_sem_imagem" })
+      });
 
     assert.strictEqual(resultado.ok, false);
     assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
     assert.strictEqual(resultado.imagemCanonicaFinal, true);
     assert.strictEqual(resultado.enriquecimentoPendente, false);
-    assert.strictEqual(resultado.motivo, "api_oficial_mlb_sem_imagem");
+    assert.strictEqual(resultado.motivo, "historico_mesmo_mlb_sem_imagem");
   }
 
   {

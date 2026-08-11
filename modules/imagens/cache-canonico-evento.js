@@ -345,7 +345,7 @@ async function buscarImagemOficialMl(produtoId = "", deps = {}) {
   const mlb = texto(produtoId).replace(/[^0-9]/g, "");
   if (!mlb) return { imagem: "", origem: "", motivo: "mlb_api_ausente" };
   const { buscarImagemOficialMercadoLivrePorMlb } = require("../engine/importer/importer.service");
-  return buscarImagemOficialMercadoLivrePorMlb(`MLB${mlb}`);
+  return buscarImagemOficialMercadoLivrePorMlb(`MLB${mlb}`, deps);
 }
 
 async function resolverImagemCanonicaEvento(entrada = {}, deps = {}) {
@@ -403,6 +403,31 @@ async function resolverImagemCanonicaEvento(entrada = {}, deps = {}) {
   }
 
   if (marketplace === "mercadolivre" && /^MLB\d+$/.test(texto(produtoId).toUpperCase())) {
+    const oficial = await buscarImagemOficialMl(produtoId, deps);
+    const oficialResolvida = resolverImagemUniversal({ imagem: oficial.imagem || "" });
+    if (oficialResolvida.imagem) {
+      const resultado = resultadoImagemCanonica({
+        chave,
+        eventoId,
+        marketplace,
+        produtoId,
+        imagem: oficialResolvida.imagem,
+        origem: oficial.origem || "api_oficial_mlb",
+        status: "api_oficial_mlb",
+        extra: {
+          materializacoes,
+          ...(radarMirrorMaterializacao ? { radarMirrorMaterializacao } : {}),
+          linkResolvido: oficial.linkResolvido || "",
+          statusHttp: oficial.statusHttp ?? null,
+          apiConsultada: oficial.apiConsultada === true,
+          autenticacao: oficial.autenticacao || ""
+        }
+      });
+      cacheImagemCanonicaEvento.set(chave, resultado);
+      return { ...resultado, cacheHit: false };
+    }
+    ultimoMotivo = oficial.motivo || ultimoMotivo;
+
     const historico = await buscarHistoricoMesmoMlb(produtoId, deps);
     const historicoResolvido = resolverImagemUniversal({ imagem: historico.imagem || "" });
     if (historicoResolvido.imagem) {
@@ -423,29 +448,6 @@ async function resolverImagemCanonicaEvento(entrada = {}, deps = {}) {
       return { ...resultado, cacheHit: false };
     }
     ultimoMotivo = historico.motivo || ultimoMotivo;
-
-    const oficial = await buscarImagemOficialMl(produtoId, deps);
-    const oficialResolvida = resolverImagemUniversal({ imagem: oficial.imagem || "" });
-    if (oficialResolvida.imagem) {
-      const resultado = resultadoImagemCanonica({
-        chave,
-        eventoId,
-        marketplace,
-        produtoId,
-        imagem: oficialResolvida.imagem,
-        origem: oficial.origem || "api_oficial_mlb",
-        status: "api_oficial_mlb",
-        extra: {
-          materializacoes,
-          ...(radarMirrorMaterializacao ? { radarMirrorMaterializacao } : {}),
-          linkResolvido: oficial.linkResolvido || "",
-          statusHttp: oficial.statusHttp ?? null
-        }
-      });
-      cacheImagemCanonicaEvento.set(chave, resultado);
-      return { ...resultado, cacheHit: false };
-    }
-    ultimoMotivo = oficial.motivo || ultimoMotivo;
   }
 
   const semImagem = resultadoImagemCanonica({
@@ -599,6 +601,33 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
 
   let ultimoMotivo = "nenhuma_fonte_de_imagem";
   if (marketplace === "mercadolivre" && /^MLB\d+$/.test(texto(produtoId).toUpperCase())) {
+    const oficial = await buscarImagemOficialMl(produtoId, deps);
+    const oficialResolvida = resolverImagemUniversal({ imagem: oficial.imagem || "" });
+    if (oficialResolvida.imagem) {
+      const resultado = resultadoImagemCanonica({
+        chave,
+        eventoId,
+        marketplace,
+        produtoId,
+        imagem: oficialResolvida.imagem,
+        origem: oficial.origem || "api_oficial_mlb",
+        status: "api_oficial_mlb",
+        extra: {
+          imagemCanonicaFinal: true,
+          enriquecimentoPendente: false,
+          materializacoes: Number(cacheAtual.materializacoes || 0),
+          ...(cacheAtual.radarMirrorMaterializacao ? { radarMirrorMaterializacao: cacheAtual.radarMirrorMaterializacao } : {}),
+          linkResolvido: oficial.linkResolvido || "",
+          statusHttp: oficial.statusHttp ?? null,
+          apiConsultada: oficial.apiConsultada === true,
+          autenticacao: oficial.autenticacao || ""
+        }
+      });
+      cacheImagemCanonicaEvento.set(chave, resultado);
+      return { ...resultado, cacheHit: false };
+    }
+    ultimoMotivo = oficial.motivo || ultimoMotivo;
+
     const historico = await buscarHistoricoMesmoMlb(produtoId, deps);
     const historicoResolvido = resolverImagemUniversal({ imagem: historico.imagem || "" });
     if (historicoResolvido.imagem) {
@@ -621,31 +650,6 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
       return { ...resultado, cacheHit: false };
     }
     ultimoMotivo = historico.motivo || ultimoMotivo;
-
-    const oficial = await buscarImagemOficialMl(produtoId, deps);
-    const oficialResolvida = resolverImagemUniversal({ imagem: oficial.imagem || "" });
-    if (oficialResolvida.imagem) {
-      const resultado = resultadoImagemCanonica({
-        chave,
-        eventoId,
-        marketplace,
-        produtoId,
-        imagem: oficialResolvida.imagem,
-        origem: oficial.origem || "api_oficial_mlb",
-        status: "api_oficial_mlb",
-        extra: {
-          imagemCanonicaFinal: true,
-          enriquecimentoPendente: false,
-          materializacoes: Number(cacheAtual.materializacoes || 0),
-          ...(cacheAtual.radarMirrorMaterializacao ? { radarMirrorMaterializacao: cacheAtual.radarMirrorMaterializacao } : {}),
-          linkResolvido: oficial.linkResolvido || "",
-          statusHttp: oficial.statusHttp ?? null
-        }
-      });
-      cacheImagemCanonicaEvento.set(chave, resultado);
-      return { ...resultado, cacheHit: false };
-    }
-    ultimoMotivo = oficial.motivo || ultimoMotivo;
   }
 
   const semImagemFinal = resultadoImagemCanonica({

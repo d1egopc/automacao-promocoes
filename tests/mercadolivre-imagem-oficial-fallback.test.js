@@ -212,8 +212,7 @@ async function comFetchMock(respostas, fn) {
     const { retorno, chamadas } = await comFetchMock([
       respostaHtml(200, html, "https://www.mercadolivre.com.br/social/diegopc2015"),
       respostaImagem(200, "text/html"),
-      respostaHtml(404, "<html>not found</html>", generica),
-      respostaJson(403, {})
+      respostaHtml(404, "<html>not found</html>", generica)
     ], () => buscarImagemCanonicaMercadoLivre({
       marketplace: "mercadolivre",
       produtoIdDetectado: "MLB6711833172",
@@ -222,9 +221,9 @@ async function comFetchMock(respostas, fn) {
       titulo: "Pasta de Amendoim Italiana Dr Peanut"
     }));
 
-    assert.strictEqual(chamadas.length, 4);
+    assert.strictEqual(chamadas.length, 3);
     assert.strictEqual(retorno.imagem, "");
-    assert.strictEqual(retorno.motivo, "api_oficial_mlb_http_403");
+    assert.strictEqual(retorno.motivo, "api_oficial_mlb_token_ausente");
   }
 
   {
@@ -295,8 +294,7 @@ async function comFetchMock(respostas, fn) {
       const generica = `https://produto.mercadolivre.com.br/MLB${id}`;
       const { retorno, chamadas } = await comFetchMock([
         respostaHtml(200, `<html><head><meta property="og:url" content="${social}"></head><body>${mlb}</body></html>`, social),
-        respostaHtml(404, "<html>not found</html>", generica),
-        respostaJson(403, {})
+        respostaHtml(404, "<html>not found</html>", generica)
       ], () => buscarImagemCanonicaMercadoLivre({
         marketplace: "mercadolivre",
         produtoIdDetectado: mlb,
@@ -305,13 +303,12 @@ async function comFetchMock(respostas, fn) {
         linkAfiliado: `${meliLa}/workspace`
       }));
 
-      assert.strictEqual(chamadas.length, 3, mlb);
+      assert.strictEqual(chamadas.length, 2, mlb);
       assert.strictEqual(chamadas[0].url, meliLa, mlb);
       assert.strictEqual(chamadas[1].url, generica, mlb);
-      assert.strictEqual(chamadas[2].url, `https://api.mercadolibre.com/items/${mlb}`, mlb);
       assert.strictEqual(chamadas.some(item => /MLB-\d+-/.test(item.url)), false, mlb);
       assert.strictEqual(retorno.imagem, "", mlb);
-      assert.strictEqual(retorno.motivo, "api_oficial_mlb_http_403", mlb);
+      assert.strictEqual(retorno.motivo, "api_oficial_mlb_token_ausente", mlb);
     }
   }
 
@@ -320,8 +317,7 @@ async function comFetchMock(respostas, fn) {
     const generica = "https://produto.mercadolivre.com.br/MLB6797156948";
     const { retorno, chamadas } = await comFetchMock([
       respostaHtml(200, `<script type="application/ld+json">{"@type":"Product","image":"${imagemOutroProduto}"}</script>`, "https://produto.mercadolivre.com.br/MLB-9999999999-produto-errado-_JM"),
-      respostaHtml(404, "<html>not found</html>", generica),
-      respostaJson(403, {})
+      respostaHtml(404, "<html>not found</html>", generica)
     ], () => buscarImagemCanonicaMercadoLivre({
       marketplace: "mercadolivre",
       produtoIdDetectado: "MLB6797156948",
@@ -329,9 +325,9 @@ async function comFetchMock(respostas, fn) {
       linkExpandido: generica
     }));
 
-    assert.strictEqual(chamadas.length, 3);
+    assert.strictEqual(chamadas.length, 2);
     assert.strictEqual(retorno.imagem, "");
-    assert.strictEqual(retorno.motivo, "api_oficial_mlb_http_403");
+    assert.strictEqual(retorno.motivo, "api_oficial_mlb_token_ausente");
   }
 
   {
@@ -368,10 +364,11 @@ async function comFetchMock(respostas, fn) {
           { secure_url: "https://http2.mlstatic.com/D_NQ_NP_API-LAROCHE-MLB.jpg" }
         ]
       })
-    ], () => buscarImagemCanonicaMercadoLivre(oferta));
+    ], () => buscarImagemCanonicaMercadoLivre(oferta, { accessToken: "token_ml_valido" }));
 
     assert.strictEqual(chamadas.length, 2);
     assert.strictEqual(chamadas[1].url, "https://api.mercadolibre.com/items/MLB3696123026");
+    assert.strictEqual(chamadas[1].opcoes.headers.Authorization, "Bearer token_ml_valido");
     assert.strictEqual(retorno.imagem, "https://http2.mlstatic.com/D_NQ_NP_API-LAROCHE-MLB.jpg");
     assert.strictEqual(retorno.origem, "api_mercadolibre.items.pictures[0].secure_url");
     assert.strictEqual(retorno.motivo, "api_oficial_mlb_imagem_recuperada");
@@ -391,7 +388,7 @@ async function comFetchMock(respostas, fn) {
       linkOriginal: "https://produto.mercadolivre.com.br/MLB3284064025",
       preco: 69,
       precoOriginal: 99
-    }));
+    }, { accessToken: "token_ml_valido" }));
 
     assert.strictEqual(retorno.imagem, "");
     assert.strictEqual(retorno.origem, "");
@@ -408,7 +405,7 @@ async function comFetchMock(respostas, fn) {
     ], () => buscarImagemCanonicaMercadoLivre({
       marketplace: "mercadolivre",
       linkOriginal: "https://produto.mercadolivre.com.br/MLB3284064025"
-    }));
+    }, { accessToken: "token_ml_valido" }));
 
     assert.strictEqual(retorno.imagem, "https://http2.mlstatic.com/D_NQ_NP_API-VODKA-MLB.jpg");
     assert.strictEqual(retorno.origem, "api_mercadolibre.items.pictures[0].url");
@@ -446,11 +443,20 @@ async function comFetchMock(respostas, fn) {
         secure_thumbnail: "https://http2.mlstatic.com/D_NQ_NP_SECURE-MLB.jpg",
         thumbnail: "https://http2.mlstatic.com/D_NQ_NP_THUMB-MLB.jpg"
       })
-    ], () => buscarImagemOficialMercadoLivrePorMlb("MLB3284064025"));
+    ], () => buscarImagemOficialMercadoLivrePorMlb("MLB3284064025", { accessToken: "token_ml_valido" }));
 
     assert.strictEqual(retorno.imagem, "https://http2.mlstatic.com/D_NQ_NP_SECURE-MLB.jpg");
     assert.strictEqual(retorno.origem, "api_mercadolibre.items.secure_thumbnail");
     assert.strictEqual(retorno.motivo, "api_oficial_mlb_imagem_recuperada");
+  }
+
+  {
+    const { retorno, chamadas } = await comFetchMock([], () => buscarImagemOficialMercadoLivrePorMlb("MLB3284064025"));
+
+    assert.strictEqual(chamadas.length, 0);
+    assert.strictEqual(retorno.imagem, "");
+    assert.strictEqual(retorno.apiConsultada, false);
+    assert.strictEqual(retorno.motivo, "api_oficial_mlb_token_ausente");
   }
 
   console.log("mercadolivre-imagem-oficial-fallback.test.js ok");
