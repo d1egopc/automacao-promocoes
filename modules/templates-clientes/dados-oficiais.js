@@ -91,9 +91,34 @@ function candidatoPixPublicavel(valor, campo = "", origem = "") {
   };
 }
 
+function textoOriginalComercialOferta(oferta = {}) {
+  const metadata = oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
+  const radarMirror = metadata.radarMirror && typeof metadata.radarMirror === "object" ? metadata.radarMirror : {};
+  return texto(
+    oferta.textoComercialOriginal ||
+    oferta.textoOriginal ||
+    metadata.textoComercialOriginal ||
+    metadata.textoOriginal ||
+    radarMirror.texto?.original ||
+    radarMirror.textoOriginal ||
+    metadata.radarEspelhoComercial?.radarMirror?.texto?.original ||
+    ""
+  );
+}
+
+function ofertaInformaPixRadar(oferta = {}) {
+  if (/\bpix\b/i.test(textoOriginalComercialOferta(oferta))) return true;
+  const metadata = oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
+  const precedencia = metadata.precedenciaComercial || {};
+  if (precedencia.camposProtegidos?.precoPix === true) return true;
+  return ofertaRadarEspelhoComercial(oferta) &&
+    ["alta", "media"].includes(normalizarComparacao(oferta.confiancaComercial?.precoPix || ""));
+}
+
 function camposPixPublicaveis(oferta = {}, v2 = {}) {
   const metadata = oferta.metadata || {};
   const precedencia = metadata.precedenciaComercial || {};
+  const radarInformaPix = ofertaInformaPixRadar(oferta);
   const radarPixProtegido = precedencia.camposProtegidos?.precoPix === true ||
     (ofertaRadarEspelhoComercial(oferta) && ["alta", "media"].includes(normalizarComparacao(oferta.confiancaComercial?.precoPix || "")));
   const radar = radarPixProtegido
@@ -103,7 +128,7 @@ function camposPixPublicaveis(oferta = {}, v2 = {}) {
       ...coletarPixRadarMirror(oferta.radarMirror, metadata.radarMirror, metadata.radarEspelhoComercial?.radarMirror)
     ]
     : coletarPixRadarMirror(oferta.radarMirror, metadata.radarMirror, metadata.radarEspelhoComercial?.radarMirror);
-  const api = [
+  const api = radarInformaPix ? [
     candidatoPixPublicavel(v2.condicaoPix, "inteligenciaUniversalV2.condicaoPix", "inteligencia_universal"),
     candidatoPixPublicavel(v2.precoPix, "inteligenciaUniversalV2.precoPix", "inteligencia_universal"),
     candidatoPixPublicavel(oferta.precoPixReferenciaApi, "oferta.precoPixReferenciaApi", "api_referencia"),
@@ -112,12 +137,12 @@ function camposPixPublicaveis(oferta = {}, v2 = {}) {
       candidatoPixPublicavel(oferta.condicaoPix, "oferta.condicaoPix", "oferta"),
       candidatoPixPublicavel(oferta.precoPix, "oferta.precoPix", "oferta")
     ] : [])
-  ];
+  ] : [];
   const resolucao = resolverPrecedenciaPrecoPix({ radar, api });
   const pix = resolucao.precoPix;
   if (!pix) {
     const condicaoSemValor = texto(oferta.condicaoPix || oferta.condicaoPrecoPor || v2.condicaoPix || "");
-    if (/\bpix\b/i.test(condicaoSemValor) && numeroMonetarioEmTexto(condicaoSemValor) == null && !/desconto/i.test(condicaoSemValor)) {
+    if (radarInformaPix && /\bpix\b/i.test(condicaoSemValor) && numeroMonetarioEmTexto(condicaoSemValor) == null && !/desconto/i.test(condicaoSemValor)) {
       return { precoPix: "", condicaoPix: condicaoSemValor, precoPixOrigem: "condicao_preco_por", precoPixAuditoria: resolucao.auditoria };
     }
     return { precoPix: "", condicaoPix: "", precoPixOrigem: resolucao.origem, precoPixAuditoria: resolucao.auditoria };

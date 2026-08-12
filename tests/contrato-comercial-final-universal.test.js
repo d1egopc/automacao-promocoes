@@ -57,6 +57,7 @@ assertNaoContem(msgA, "Pix:", "Caso A nao cria linha Pix separada");
 const msgB = gerarTemplateUniversal({
   titulo: "Caso B Pix distinto",
   marketplace: "Amazon",
+  textoOriginal: "Por R$ 159,00\nR$ 145,00 no Pix",
   precoAtual: 159,
   precoPix: "R$ 145,00 no Pix",
   linkAfiliado: "https://amzn.to/b"
@@ -403,6 +404,75 @@ assertNaoContem(msgNikeFiel, permalinkTecnicoMl, "permalink tecnico ML nao rende
 assertNaoContem(msgNikeFiel, "https://grupo.origem/nike", "link original do grupo nao renderiza quando convertido");
 assertNaoContem(msgNikeFiel, "https://afiliado.origem/nike", "afiliado de origem nao aparece junto da conversao workspace");
 assert.strictEqual(contarOcorrencias(msgNikeFiel, "https://go.optimus/d1/nike"), 1, "um link Radar vira um link convertido");
+
+const msgCkDoseDupla = gerarTemplateUniversal({
+  titulo: "ML CK EM DOSE DUPLA",
+  marketplace: "Mercado Livre",
+  textoOriginal: "CK em dose dupla\nDe R$ 271 por R$ 98 no Pix\nhttps://meli.la/ck",
+  precoOriginal: 271,
+  precoAtual: 98,
+  precoPix: "Desconto no Pix R$ 129",
+  descontoPix: "Desconto no Pix R$ 129",
+  beneficioPix: "pagamento_pix",
+  condicoes: ["pagamento_pix"],
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://meli.la/ck", urlAfiliada: "https://go.optimus/d1/ck" }
+  ]
+});
+assertContem(msgCkDoseDupla, "De: *R$ 271,00*");
+assertContem(msgCkDoseDupla, "Por: *R$ 98,00 no Pix*");
+assertNaoContem(msgCkDoseDupla, "Pix:", "CK De/Por no Pix nao cria linha Pix separada");
+assertNaoContem(msgCkDoseDupla, "Desconto no Pix R$ 129");
+assertNaoContem(msgCkDoseDupla, "pagamento_pix");
+
+const msgBichoSemPix = gerarTemplateUniversal({
+  titulo: "🔥 ML TA PARECENDO UM BICHO",
+  marketplace: "Mercado Livre",
+  textoOriginal: "TA PARECENDO UM BICHO\nDe R$ 600 por R$ 162\nhttps://meli.la/bicho",
+  precoOriginal: 600,
+  precoAtual: 162,
+  descontoPix: "Desconto no Pix R$ 600",
+  beneficioPix: "pagamento_pix",
+  condicoes: ["pagamento_pix", "voucher_ou_moedas"],
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://meli.la/bicho", urlAfiliada: "https://go.optimus/d1/bicho" }
+  ]
+});
+assertContem(msgBichoSemPix, "Por: *R$ 162,00*");
+assertNaoContem(msgBichoSemPix, "Pix");
+assertNaoContem(msgBichoSemPix, "pagamento_pix");
+assertNaoContem(msgBichoSemPix, "voucher_ou_moedas");
+assert.strictEqual(contarOcorrencias(msgBichoSemPix, "🔥"), 1, "titulo com emoji nao duplica prefixo");
+
+const msgKabumRyzen = gerarTemplateUniversal({
+  titulo: "KaBuM Ryzen 9 7900",
+  marketplace: "KaBuM",
+  textoOriginal: "KaBuM Ryzen 9 7900\nPor R$ 2.199\nOu 10x de R$ 219,90\nFrete gratis",
+  precoAtual: 2199,
+  parcelamento: "💳 Ou 10x de R$ 219,90",
+  frete: "frete",
+  freteGratis: true,
+  condicoes: ["frete", "voucher_ou_moedas"],
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://kabum.test/ryzen", urlAfiliada: "https://go.optimus/d1/ryzen" }
+  ]
+});
+assertContem(msgKabumRyzen, "💳 Ou 10x de R$ 219,90");
+assertNaoContem(msgKabumRyzen, "💳 💳");
+assertNaoContem(msgKabumRyzen, "voucher_ou_moedas");
+assertNaoContem(msgKabumRyzen, "\nfrete\n");
+assert.strictEqual(contarOcorrencias(msgKabumRyzen, "Frete gratis"), 1);
+
+const msgFraseReal = gerarTemplateUniversal({
+  titulo: "Frase comercial real",
+  marketplace: "Mercado Livre",
+  textoOriginal: "Cupom: PROMO10\nAplique o cupom de 10% no anuncio",
+  precoAtual: 100,
+  cupom: "PROMO10",
+  instrucaoCupom: "Aplique o cupom de 10% no anuncio",
+  linkAfiliado: "https://go.optimus/frase-real"
+});
+assertContem(msgFraseReal, "Aplique o cupom de 10% no anuncio");
 
 const msgCalcaMl = gerarTemplateUniversal({
   titulo: "ML Calca Jeans",

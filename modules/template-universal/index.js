@@ -67,9 +67,53 @@ function normalizarComparacao(valor = "") {
     .toLowerCase();
 }
 
+const METADADOS_TECNICOS_CRUS = new Set([
+  "pix",
+  "pagamento pix",
+  "pagamentopix",
+  "desconto pix",
+  "descontopix",
+  "beneficio pix",
+  "beneficiopix",
+  "frete",
+  "voucher ou moedas",
+  "voucheroumoedas",
+  "voucher moedas"
+]);
+
+function chaveTecnicaCrua(valor = "") {
+  return normalizarComparacao(valor).replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function metadadoTecnicoCru(valor = "") {
+  const chave = chaveTecnicaCrua(valor);
+  return Boolean(chave && METADADOS_TECNICOS_CRUS.has(chave));
+}
+
+function textoComercialRenderizavel(valor = "") {
+  const item = normalizarTexto(valor);
+  return item && !metadadoTecnicoCru(item) ? item : "";
+}
+
+function removerPrefixoVisual(valor = "", prefixo = "") {
+  let item = normalizarTexto(valor);
+  if (!item || !prefixo) return item;
+  while (item.startsWith(prefixo)) {
+    item = item.slice(prefixo.length).trimStart();
+  }
+  return item;
+}
+
+function linhaComPrefixo(prefixo = "", valor = "", opcoes = {}) {
+  const item = textoComercialRenderizavel(removerPrefixoVisual(valor, prefixo));
+  if (!item) return "";
+  return `${prefixo} ${opcoes.negrito ? `*${item}*` : item}`;
+}
+
 function beneficioComercialSeguro(valor = "") {
   const texto = normalizarTexto(valor);
   if (!texto) return false;
+  if (metadadoTecnicoCru(texto)) return false;
 
   const normalizado = normalizarComparacao(texto);
 
@@ -97,6 +141,7 @@ function normalizarBeneficios(beneficios) {
 
   return beneficios
     .map(normalizarTexto)
+    .filter(item => !metadadoTecnicoCru(item))
     .filter(beneficioComercialSeguro)
     .filter(Boolean)
     .slice(0, 3);
@@ -108,7 +153,7 @@ function listaTextoUnica(valores = []) {
 
   for (const valor of Array.isArray(valores) ? valores : []) {
     const item = normalizarTexto(valor);
-    if (!item || vistos.has(item)) continue;
+    if (!item || metadadoTecnicoCru(item) || vistos.has(item)) continue;
     vistos.add(item);
     resultado.push(item);
   }
@@ -279,8 +324,8 @@ function selecionarCamposUniversais(oferta = {}) {
     baixaConfiancaCategoria: ofertaApresentacao.baixaConfiancaCategoria,
     cupom,
     cupomTexto: normalizarTexto(ofertaApresentacao.cupomTexto || cupom),
-    instrucaoCupom: normalizarTexto(contratoFinal.instrucaoComercial || ofertaApresentacao.instrucaoCupom),
-    instrucaoComercial: normalizarTexto(contratoFinal.instrucaoComercial || ofertaApresentacao.instrucaoComercial),
+    instrucaoCupom: textoComercialRenderizavel(contratoFinal.instrucaoComercial !== undefined ? contratoFinal.instrucaoComercial : ofertaApresentacao.instrucaoCupom),
+    instrucaoComercial: textoComercialRenderizavel(contratoFinal.instrucaoComercial !== undefined ? contratoFinal.instrucaoComercial : ofertaApresentacao.instrucaoComercial),
     precoPix: normalizarTexto(contratoFinal.precoPixTexto || ""),
     condicaoPix: normalizarTexto(ofertaApresentacao.condicaoPix),
     precoUnitario: normalizarTexto(ofertaApresentacao.precoUnitario || ofertaApresentacao.unitarioCapturado),
@@ -312,7 +357,7 @@ function selecionarCamposUniversais(oferta = {}) {
     linkMoedas: normalizarTexto(ofertaApresentacao.linkMoedas),
     avaliacao: normalizarTexto(ofertaApresentacao.avaliacao || ofertaApresentacao.rating || ofertaApresentacao.nota),
     quantidadeAvaliacoes: normalizarTexto(ofertaApresentacao.quantidadeAvaliacoes || ofertaApresentacao.totalAvaliacoes || ofertaApresentacao.avaliacoes || ofertaApresentacao.reviews),
-    beneficio: normalizarTexto(contratoFinal.beneficio || ofertaApresentacao.beneficio),
+    beneficio: textoComercialRenderizavel(contratoFinal.beneficio !== undefined ? contratoFinal.beneficio : ofertaApresentacao.beneficio),
     beneficios: normalizarBeneficios(contratoFinal.beneficio ? [contratoFinal.beneficio] : ofertaApresentacao.beneficios),
     score: ofertaApresentacao.score,
     prioridade: ofertaApresentacao.prioridade,
@@ -412,6 +457,7 @@ function extrairValoresMonetarios(texto = "") {
 function beneficioComercialValidoParaTemplate(beneficio = "", campos = {}) {
   const texto = normalizarTexto(beneficio);
   if (!texto || !beneficioComercialSeguro(texto)) return false;
+  if (metadadoTecnicoCru(texto)) return false;
   if (!beneficioDiferenteDoCupom(texto, campos.cupom)) return false;
   if (beneficioDuplicaOutroPapel(texto, campos)) return false;
 
@@ -476,7 +522,7 @@ function beneficioSugereCupomGenerico(beneficio = "") {
 }
 
 function montarInstrucaoComercial(campos = {}, beneficioComercial = "", precoFinal = "") {
-  return normalizarTexto(campos.instrucaoComercial || campos.instrucaoCupom);
+  return textoComercialRenderizavel(campos.instrucaoComercial || campos.instrucaoCupom);
 }
 
 function adicionarBloco(blocos, linhas = []) {
@@ -599,7 +645,7 @@ function montarTemplateUniversalOficial({
   linksPc,
   linksProduto
 }) {
-  adicionarBloco(blocos, [campos.titulo ? `🔥 *${campos.titulo}*` : ""]);
+  adicionarBloco(blocos, [linhaComPrefixo("🔥", campos.titulo, { negrito: true })]);
   adicionarBloco(blocos, [
     campos.marketplace ? `🛍️ ${marketplaceBonito(campos.marketplace)}` : "",
     categoriaConfiavel(campos) ? `📂 ${campos.categoria}` : "",
@@ -611,13 +657,13 @@ function montarTemplateUniversalOficial({
     precoAtualComCondicao ? `✅ Por: *${precoAtualComCondicao}*` : "",
     descontoCalculado != null && descontoCalculado > 0 ? `📉 ${descontoCalculado.toFixed(0)}% OFF` : "",
     campos.precoPix ? `⚡ Pix: *${campos.precoPix}*` : "",
-    campos.parcelamento ? `💳 ${campos.parcelamento}` : "",
+    campos.parcelamento ? linhaComPrefixo("💳", campos.parcelamento) : "",
     economia ? `💸 Economia: *${economia}${descontoPercentual != null && descontoPercentual > 0 ? ` (${descontoPercentual.toFixed(0)}%)` : ""}*` : ""
   ]);
   adicionarBloco(blocos, [
     campos.cupom ? `🎟️ Cupom: *${campos.cupom}*` : "",
-    campos.instrucaoCupom && campos.instrucaoCupom !== campos.cupomTexto ? `⚡ ${campos.instrucaoCupom}` : "",
-    beneficioComercial ? `🎁 ${beneficioComercial}` : "",
+    campos.instrucaoCupom && campos.instrucaoCupom !== campos.cupomTexto ? linhaComPrefixo("⚡", campos.instrucaoCupom) : "",
+    beneficioComercial ? linhaComPrefixo("🎁", beneficioComercial) : "",
     ...detalhesComerciais
   ]);
   adicionarBlocoLinks(blocos, "🎟️ *Resgate:*", linksResgate);
@@ -658,17 +704,17 @@ function gerarTemplateUniversal(oferta = {}) {
   const observacoesDetalhe = detalhesNaoDuplicados(campos, campos.observacoes);
   const detalhesComerciais = listaComercialSemRepetir([
     campos.precoUnitario ? `ℹ️ Preço unitário: *${campos.precoUnitario}*` : "",
-    campos.cashback ? `💰 ${campos.cashback}` : "",
-    campos.freteGratis ? "🚚 Frete gratis" : (campos.frete ? `🚚 ${campos.frete}` : ""),
+    campos.cashback ? linhaComPrefixo("💰", campos.cashback) : "",
+    campos.freteGratis ? "🚚 Frete gratis" : (campos.frete ? linhaComPrefixo("🚚", campos.frete) : ""),
     campos.ofertaRelampago ? "⚡ Oferta Relampago" : "",
-    campos.validade ? `⏳ ${campos.validade}` : "",
+    campos.validade ? linhaComPrefixo("⏳", campos.validade) : "",
     ...condicoesDetalhe,
     ...observacoesDetalhe,
     ...(campos.tamanhos.length ? [`⚠️ Tamanhos: ${campos.tamanhos.join(", ")}`] : []),
     ...(campos.cores.length ? [`🎨 Cores: ${campos.cores.join(", ")}`] : []),
     ...(campos.variantes.length ? campos.variantes : []),
     campos.voltagem ? `🔌 ${campos.voltagem}` : ""
-  ].map(normalizarTexto).filter(Boolean)).slice(0, 8);
+  ].map(normalizarTexto).filter(item => item && !metadadoTecnicoCru(item))).slice(0, 8);
   const linkPrincipal = normalizarTexto(campos.linkAfiliado);
   const linkResgate = normalizarTexto(campos.linkResgate);
   const linksAdicionais = campos.linksComerciais

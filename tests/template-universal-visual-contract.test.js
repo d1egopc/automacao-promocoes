@@ -15,6 +15,7 @@ function indice(texto, trecho) {
 const ofertaBase = {
   titulo: "Produto Clone Visual",
   marketplace: "AliExpress",
+  textoOriginal: "Produto Clone Visual\nPor R$ 140,00\nR$ 137,00 no Pix",
   categoria: "Diversos",
   precoOriginal: 210,
   precoAtual: 140,

@@ -100,6 +100,21 @@ function textoPrecoPixConfiavel(valor = "") {
   return textoPixValido(fonte);
 }
 
+function pixExplicitamenteNoRadar(oferta = {}, textoOriginal = "") {
+  if (/\bpix\b/i.test(textoOriginal)) return true;
+  if (normalizarComparacao(oferta.precoPixOrigem) === "radar") return true;
+  const metadata = oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
+  if (metadata.precedenciaComercial?.camposProtegidos?.precoPix === true) return true;
+  const origemComercial = normalizarComparacao([
+    oferta.origem,
+    oferta.fonteComercial,
+    metadata.fonteComercial,
+    metadata.radarEspelhoComercial?.origem
+  ].filter(Boolean).join(" "));
+  const confiancaPix = normalizarComparacao(oferta.confiancaComercial?.precoPix || "");
+  return /\bradar\b/.test(origemComercial) && ["alta", "media"].includes(confiancaPix);
+}
+
 function resolverPrecoPixFinal(oferta = {}, precoPor = null, textoOriginal = "", precoDe = null) {
   const dePorPix = extrairDePorPix(textoOriginal);
   const candidatos = [
@@ -113,6 +128,10 @@ function resolverPrecoPixFinal(oferta = {}, precoPor = null, textoOriginal = "",
 
   if (dePorPix?.condicaoPrecoPor === "pix") {
     return { condicaoPrecoPor: "pix", precoPixDistinto: null, precoPixTexto: "", origem: "radar_de_por_pix" };
+  }
+
+  if (!pixExplicitamenteNoRadar(oferta, textoOriginal)) {
+    return { condicaoPrecoPor: "", precoPixDistinto: null, precoPixTexto: "", origem: "pix_rejeitado_sem_radar" };
   }
 
   if ((!candidato || valorPix == null) && /\bpix\b/i.test(condicaoPixSemValor) && numeroMonetarioEmTexto(condicaoPixSemValor) == null && !/desconto/i.test(condicaoPixSemValor)) {
@@ -215,6 +234,7 @@ function cupomFinal(oferta = {}, textoOriginal = "") {
 function beneficioSeguro(valor = "", cupom = "", instrucao = "") {
   const item = texto(valor);
   if (!item) return "";
+  if (metadadoTecnicoCru(item)) return "";
   const normalizado = normalizarComparacao(item);
   if (!/\b(?:off|desconto|frete|cashback|brinde|moeda|moedas|app|pix|prime|garantia|resgate|voucher)\b|\b\d+\s*%/.test(normalizado)) return "";
   const chave = assinaturaFato(item);
@@ -244,9 +264,26 @@ function beneficioFinal(oferta = {}, cupom = "", instrucao = "") {
   return "";
 }
 
+function metadadoTecnicoCru(valor = "") {
+  const chave = normalizarComparacao(valor).replace(/[^a-z0-9]+/g, " ").trim();
+  return new Set([
+    "pix",
+    "pagamento pix",
+    "desconto pix",
+    "beneficio pix",
+    "beneficiopix",
+    "pagamentopix",
+    "frete",
+    "voucher ou moedas",
+    "voucher moedas",
+    "voucheroumoedas"
+  ]).has(chave);
+}
+
 function instrucaoExplicitaConfiavel(instrucao = "", cupom = "") {
   const valor = texto(instrucao);
   if (!valor || /https?:\/\//i.test(valor)) return "";
+  if (metadadoTecnicoCru(valor)) return "";
   const n = normalizarComparacao(valor);
   if (/\bcaes\s+e\s+gatos\b/.test(n)) return "";
   if (/\b(?:programe|poupe|recorrencia|recorrente|assinatura)\b/.test(n)) return valor;

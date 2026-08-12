@@ -161,6 +161,7 @@ assert.ok(templatePadraoNovo.blocos.every(bloco => bloco.id === bloco.tipo), "id
 
 const blocosCompletosV11 = tiposCatalogoV11.map((tipo, indice) => ({ tipo, ativo: true, ordem: (indice + 1) * 10 }));
 const ofertaPreviewV11 = obterOfertaPreviewOficial();
+ofertaPreviewV11.textoOriginal = "Kit 4 Caixas Sabonetes Natura Tododia\nPor R$ 49,90\nR$ 47,90 no Pix";
 const renderCompletoV11 = renderizarTemplatePersonalizado({
   oferta: ofertaPreviewV11,
   template: {

@@ -322,6 +322,7 @@ assert.ok(/Brinde exclusivo/i.test(shopeeCupomRealBeneficioDiferente.templateEsp
 const templateAmazon = gerarTemplateUniversal({
   titulo: "Chuveiro Fame",
   marketplace: "Amazon",
+  textoOriginal: "Chuveiro Fame\nPor R$196 no Pix",
   categoria: "Casa",
   precoAtual: 196,
   precoPix: "",
@@ -348,7 +349,19 @@ const templateApiPix = gerarTemplateUniversal({
   linkAfiliado: "https://amzn.to/api-pix"
 });
 
-assert.ok(/Pix:\s*\*R\$\s*220 no Pix\*/i.test(templateApiPix), "Template Universal renderiza Pix canonico sem recalcular por precoPor");
+assert.ok(!/Pix:/i.test(templateApiPix), "Template Universal nao renderiza Pix de API sem evidencia Radar");
+
+const templatePixDistintoRadar = gerarTemplateUniversal({
+  titulo: "Oferta Radar Pix distinto",
+  marketplace: "Amazon",
+  textoOriginal: "Oferta Radar Pix distinto\nPor R$ 196\nR$ 180 no Pix",
+  categoria: "Casa",
+  precoAtual: 196,
+  precoPix: "R$ 180 no Pix",
+  linkAfiliado: "https://amzn.to/radar-pix"
+});
+
+assert.ok(/Pix:\s*\*R\$\s*180 no Pix\*/i.test(templatePixDistintoRadar), "Template Universal renderiza Pix distinto quando o Radar informou Pix");
 
 const personalizadoPixZero = renderizarTemplatePersonalizado({
   oferta: {
@@ -405,6 +418,7 @@ const personalizadoPixCanonico = renderizarTemplatePersonalizado({
   oferta: {
     titulo: "Oferta Pix canonico",
     marketplace: "Amazon",
+    textoOriginal: "Oferta Pix canonico\nPor R$ 196\nR$ 220 no Pix",
     precoAtual: 196,
     precoPix: "R$ 220 no Pix",
     linkAfiliado: "https://amzn.to/canonico"
