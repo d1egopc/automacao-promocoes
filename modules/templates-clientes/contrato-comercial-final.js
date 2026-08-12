@@ -84,6 +84,37 @@ function extrairDePorPix(textoOriginal = "") {
   return null;
 }
 
+function extrairPrecoRadarComercial(textoOriginal = "") {
+  const fonte = texto(textoOriginal);
+  if (!fonte) return {};
+  const padraoValor = "((?:R\\$\\s*)?\\d{1,3}(?:\\.\\d{3})*(?:,\\d{1,2})?|(?:R\\$\\s*)?\\d+(?:[,.]\\d{1,2})?)";
+  const dePor = fonte.match(new RegExp(`\\bde\\s*:?\\s*${padraoValor}\\s*(?:\\||-|\\/|,|\\s)+por\\s*:?\\s*${padraoValor}([^\\n]*)`, "i"));
+  if (dePor) {
+    return {
+      precoDe: numeroMonetarioEmTexto(dePor[1]),
+      precoPor: numeroMonetarioEmTexto(dePor[2]),
+      condicaoPrecoPor: /\bpix\b/i.test(dePor[3] || "") ? "pix" : ""
+    };
+  }
+  const por = fonte.match(new RegExp(`\\bpor\\s*:?\\s*${padraoValor}([^\\n]*)`, "i"));
+  if (por) {
+    return {
+      precoDe: null,
+      precoPor: numeroMonetarioEmTexto(por[1]),
+      condicaoPrecoPor: /\bpix\b/i.test(por[2] || "") ? "pix" : ""
+    };
+  }
+  const primeiroValor = fonte.match(new RegExp(`(?:^|\\n|\\s)${padraoValor}(?:\\s|$)`, "i"));
+  if (primeiroValor) {
+    return {
+      precoDe: null,
+      precoPor: numeroMonetarioEmTexto(primeiroValor[1]),
+      condicaoPrecoPor: /\bpix\b/i.test(fonte) ? "pix" : ""
+    };
+  }
+  return {};
+}
+
 function mesmoNumero(a, b) {
   const na = normalizarNumero(a);
   const nb = normalizarNumero(b);
@@ -196,6 +227,18 @@ function cupomEmFonteExplicita(cupom = "", fonte = "") {
 }
 
 function cupomTemProvenienciaExplicita(cupom = "", oferta = {}, textoOriginal = "") {
+  const fontesConfiaveis = [
+    textoOriginal,
+    oferta.textoComercialCanonico,
+    oferta.documentoComercialCanonico,
+    oferta.instrucaoCupom,
+    oferta.condicaoCupom,
+    oferta.condicaoComercial
+  ];
+  if (texto(textoOriginal)) {
+    return fontesConfiaveis.some(fonte => cupomEmFonteExplicita(cupom, fonte));
+  }
+
   const camposCodigo = [
     ...(Array.isArray(oferta.codigosCupom) ? oferta.codigosCupom : []),
     oferta.cupomCodigo,
@@ -205,14 +248,6 @@ function cupomTemProvenienciaExplicita(cupom = "", oferta = {}, textoOriginal = 
     return true;
   }
 
-  const fontesConfiaveis = [
-    textoOriginal,
-    oferta.textoComercialCanonico,
-    oferta.documentoComercialCanonico,
-    oferta.instrucaoCupom,
-    oferta.condicaoCupom,
-    oferta.condicaoComercial
-  ];
   return fontesConfiaveis.some(fonte => cupomEmFonteExplicita(cupom, fonte));
 }
 
@@ -245,6 +280,7 @@ function beneficioSeguro(valor = "", cupom = "", instrucao = "") {
 }
 
 function beneficioFinal(oferta = {}, cupom = "", instrucao = "") {
+  const textoOriginal = textoOriginalComercial(oferta);
   const candidatos = [
     ...(Array.isArray(oferta.beneficios) ? oferta.beneficios : []),
     oferta.beneficio,
@@ -257,11 +293,89 @@ function beneficioFinal(oferta = {}, cupom = "", instrucao = "") {
     const beneficio = beneficioSeguro(candidato, cupom, instrucao);
     const chave = assinaturaFato(beneficio);
     if (!beneficio || vistos.has(chave)) continue;
+    if (!fatoComercialEvidenteNoRadar(beneficio, textoOriginal)) continue;
     if (chave && chave === assinaturaFato(oferta.frete || oferta.freteTexto || (oferta.freteGratis === true ? "Frete gratis" : ""))) continue;
     vistos.add(chave);
     return beneficio;
   }
   return "";
+}
+
+function valoresMonetariosAssinatura(valor = "") {
+  return (texto(valor).match(/(?:R\$\s*)?\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|(?:R\$\s*)?\d+(?:[,.]\d{1,2})?/g) || [])
+    .map(numeroMonetarioEmTexto)
+    .filter(item => item != null)
+    .map(item => item.toFixed(2));
+}
+
+function fatoComercialEvidenteNoRadar(valor = "", textoOriginal = "") {
+  const item = texto(valor);
+  const fonte = texto(textoOriginal);
+  if (!item) return false;
+  if (!fonte) return true;
+  const itemNormalizado = normalizarComparacao(item);
+  const fonteNormalizada = normalizarComparacao(fonte);
+  if (itemNormalizado && fonteNormalizada.includes(itemNormalizado)) return true;
+  const assinatura = assinaturaFato(item);
+  if (assinatura && fonteNormalizada.includes(normalizarComparacao(item.replace(/[:*]/g, "")))) return true;
+  if (/frete\s+gr[aá]tis/i.test(item) && /frete\s+gr[aá]tis/i.test(fonte)) return true;
+  if (/\b(?:parcel|sem\s+juros|\d+\s*x|em\s+\d+\s*x)\b/i.test(item) && /\b(?:parcel|sem\s+juros|\d+\s*x|em\s+\d+\s*x)\b/i.test(fonte)) {
+    const valoresItem = valoresMonetariosAssinatura(item);
+    const valoresFonte = new Set(valoresMonetariosAssinatura(fonte));
+    return !valoresItem.length || valoresItem.some(valorMonetario => valoresFonte.has(valorMonetario));
+  }
+  if (/\b(?:off|desconto|cashback|brinde|moeda|moedas|app|voucher)\b|\b\d+\s*%/.test(itemNormalizado)) {
+    const valoresItem = valoresMonetariosAssinatura(item);
+    const valoresFonte = new Set(valoresMonetariosAssinatura(fonte));
+    if (valoresItem.length && valoresItem.some(valorMonetario => valoresFonte.has(valorMonetario))) return true;
+  }
+  return false;
+}
+
+function extrairParcelamentoRadar(textoOriginal = "") {
+  const fonte = texto(textoOriginal);
+  if (!fonte) return "";
+  const linhas = fonte.split(/\r?\n/).map(texto).filter(Boolean);
+  const linha = linhas.find(item => /\b(?:parcel|sem\s+juros|\d+\s*x|em\s+\d+\s*x)\b/i.test(item));
+  if (linha) return linha;
+  const match = fonte.match(/(?:ou\s*)?(?:R\$\s*)?\d{1,5}(?:[,.]\d{1,2})?\s+em\s+\d{1,2}x(?:\s+sem\s+juros)?|(?:ou\s*)?\d{1,2}x\s+de\s+(?:R\$\s*)?\d{1,5}(?:[,.]\d{1,2})?(?:\s+sem\s+juros)?/i);
+  return match ? texto(match[0]) : "";
+}
+
+function parcelamentoFinal(oferta = {}, textoOriginal = "") {
+  const candidato = texto(oferta.parcelamento);
+  if (candidato && fatoComercialEvidenteNoRadar(candidato, textoOriginal)) return candidato;
+  return extrairParcelamentoRadar(textoOriginal);
+}
+
+function extrairFreteRadar(textoOriginal = "") {
+  const fonte = texto(textoOriginal);
+  if (!fonte) return "";
+  if (/frete\s+gr[aá]tis/i.test(fonte)) return "Frete gratis";
+  const linha = fonte.split(/\r?\n/).map(texto).find(item => /\bfrete\b/i.test(item));
+  return linha || "";
+}
+
+function freteFinal(oferta = {}, textoOriginal = "") {
+  const candidato = texto(oferta.frete || oferta.freteTexto || (oferta.freteGratis === true ? "Frete gratis" : ""));
+  const freteRadar = extrairFreteRadar(textoOriginal);
+  if (freteRadar && (!candidato || metadadoTecnicoCru(candidato))) return freteRadar;
+  if (candidato && fatoComercialEvidenteNoRadar(candidato, textoOriginal)) return candidato;
+  return freteRadar;
+}
+
+function listaComercialEvidenteNoRadar(valores = [], textoOriginal = "") {
+  const resultado = [];
+  const vistos = new Set();
+  for (const valor of Array.isArray(valores) ? valores : []) {
+    const item = texto(valor);
+    if (!item || metadadoTecnicoCru(item) || !fatoComercialEvidenteNoRadar(item, textoOriginal)) continue;
+    const chave = normalizarComparacao(item);
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    resultado.push(item);
+  }
+  return resultado;
 }
 
 function metadadoTecnicoCru(valor = "") {
@@ -377,13 +491,18 @@ function urlRenderizavelLinkFinal(item = {}) {
 
 function resolverContratoComercialFinal(oferta = {}) {
   const textoOriginal = textoOriginalComercial(oferta);
-  const dePorPix = extrairDePorPix(textoOriginal);
-  const precoPor = dePorPix?.precoPor ?? normalizarNumero(oferta.precoPor ?? oferta.precoAtual ?? oferta.preco);
-  const precoDe = dePorPix?.precoDe ?? normalizarNumero(oferta.precoDe ?? oferta.precoOriginal ?? oferta.precoAntigo);
+  const precoRadar = extrairPrecoRadarComercial(textoOriginal);
+  const precoPor = precoRadar.precoPor ?? normalizarNumero(oferta.precoPor ?? oferta.precoAtual ?? oferta.preco);
+  const precoDe = precoRadar.precoDe ?? normalizarNumero(oferta.precoDe ?? oferta.precoOriginal ?? oferta.precoAntigo);
   const pix = resolverPrecoPixFinal(oferta, precoPor, textoOriginal, precoDe);
   const cupom = cupomFinal(oferta, textoOriginal);
   const instrucao = instrucaoFinal(oferta, cupom);
   const beneficio = beneficioFinal(oferta, cupom, instrucao);
+  const parcelamento = parcelamentoFinal(oferta, textoOriginal);
+  const frete = freteFinal(oferta, textoOriginal);
+  const freteGratis = /frete\s+gr[aá]tis/i.test(frete);
+  const condicoes = listaComercialEvidenteNoRadar(oferta.condicoes, textoOriginal);
+  const observacoes = listaComercialEvidenteNoRadar(oferta.observacoes, textoOriginal);
   const links = todosLinks(oferta);
   const linksProduto = linksPorPapel(links, "produto");
   const linksResgate = linksPorPapel(links, "resgate");
@@ -401,6 +520,9 @@ function resolverContratoComercialFinal(oferta = {}) {
     cupomCodigo: cupom,
     beneficio,
     instrucaoComercial: instrucao,
+    parcelamento,
+    frete,
+    freteGratis,
     linksProduto,
     linksResgate,
     linksApp,
@@ -434,6 +556,12 @@ function resolverContratoComercialFinal(oferta = {}) {
     beneficioTexto: beneficio,
     beneficioExtra: beneficio,
     beneficios: beneficio ? [beneficio] : [],
+    parcelamento,
+    frete,
+    freteTexto: frete,
+    freteGratis,
+    condicoes,
+    observacoes,
     linksProduto: contrato.linksProduto.length ? contrato.linksProduto : oferta.linksProduto,
     linksResgate: contrato.linksResgate.length ? contrato.linksResgate : oferta.linksResgate,
     linksComerciais: links.length ? links : oferta.linksComerciais,

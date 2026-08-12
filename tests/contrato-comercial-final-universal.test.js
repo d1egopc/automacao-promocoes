@@ -633,4 +633,142 @@ const msgKabumMonitor = gerarTemplateUniversal({
 assert.strictEqual(contarOcorrencias(msgKabumMonitor, "10x de R$ 69,90"), 1, "parcelamento nao duplica por condicoes");
 assert.strictEqual(contarOcorrencias(msgKabumMonitor, "Frete gratis"), 1, "frete nao duplica por condicoes");
 
+const msgRadarPrecoCupom = gerarTemplateUniversal({
+  titulo: "Radar R$171 cupom",
+  marketplace: "Mercado Livre",
+  textoOriginal: "Radar R$171 cupom\nR$ 171\nCupom: GANHEI10\nhttps://meli.la/171",
+  precoAtual: 999,
+  cupom: "GANHEI10",
+  beneficioTexto: "Desconto no app",
+  condicoes: ["pagamento_pix", "Pode haver beneficio pelo app"],
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://meli.la/171", urlAfiliada: "https://go.optimus/171" }
+  ]
+});
+assertContem(msgRadarPrecoCupom, "Por: *R$ 171,00*");
+assertContem(msgRadarPrecoCupom, "Cupom: *GANHEI10*");
+assertContem(msgRadarPrecoCupom, "Aplique o cupom GANHEI10 para obter o valor.");
+assertNaoContem(msgRadarPrecoCupom, "Desconto no app");
+assertNaoContem(msgRadarPrecoCupom, "pagamento_pix");
+assertNaoContem(msgRadarPrecoCupom, "Pode haver beneficio pelo app");
+
+const msgRadarParcelamentoFrete = gerarTemplateUniversal({
+  titulo: "Radar parcelamento frete",
+  marketplace: "KaBuM",
+  textoOriginal: "R$ 688 ou R$ 764 em 10x\nCupom: GANHEIMAIS\nFrete gratis\nhttps://kabum.test/oferta",
+  precoAtual: 1111,
+  parcelamento: "R$ 764 em 10x",
+  cupom: "GANHEIMAIS",
+  freteGratis: true,
+  frete: "Frete gratis",
+  condicoes: ["parcelamento externo 12x", "frete"],
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://kabum.test/oferta", urlAfiliada: "https://go.optimus/kabum-oferta" }
+  ]
+});
+assertContem(msgRadarParcelamentoFrete, "Por: *R$ 688,00*");
+assertContem(msgRadarParcelamentoFrete, "R$ 764 em 10x");
+assertContem(msgRadarParcelamentoFrete, "Cupom: *GANHEIMAIS*");
+assertContem(msgRadarParcelamentoFrete, "Frete gratis");
+assertNaoContem(msgRadarParcelamentoFrete, "12x");
+assert.strictEqual(contarOcorrencias(msgRadarParcelamentoFrete, "Frete gratis"), 1);
+
+const msgRadarPixCupom = gerarTemplateUniversal({
+  titulo: "Radar De Por Pix Cupom",
+  marketplace: "Mercado Livre",
+  textoOriginal: "De R$ 499,90 por R$ 202,44 no Pix\nCupom: GANHEI\nhttps://meli.la/pix-cupom",
+  precoOriginal: 999,
+  precoAtual: 888,
+  precoPix: "Desconto no Pix R$ 499,90",
+  cupom: "GANHEI",
+  beneficioPix: "pagamento_pix",
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://meli.la/pix-cupom", urlAfiliada: "https://go.optimus/pix-cupom" }
+  ]
+});
+assertContem(msgRadarPixCupom, "De: *R$ 499,90*");
+assertContem(msgRadarPixCupom, "Por: *R$ 202,44 no Pix*");
+assertContem(msgRadarPixCupom, "Cupom: *GANHEI*");
+assertNaoContem(msgRadarPixCupom, "Pix:");
+assertNaoContem(msgRadarPixCupom, "Desconto no Pix");
+assertNaoContem(msgRadarPixCupom, "pagamento_pix");
+
+const msgRadarPixSemCupom = gerarTemplateUniversal({
+  titulo: "Radar Pix Sem Cupom",
+  marketplace: "Mercado Livre",
+  textoOriginal: "De R$ 345,54 por R$ 311 no PIX\nhttps://meli.la/sem-cupom-pix",
+  precoOriginal: 345.54,
+  precoAtual: 311,
+  cupom: "NOVO",
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://meli.la/sem-cupom-pix", urlAfiliada: "https://go.optimus/sem-cupom-pix" }
+  ]
+});
+assertContem(msgRadarPixSemCupom, "De: *R$ 345,54*");
+assertContem(msgRadarPixSemCupom, "Por: *R$ 311,00 no Pix*");
+assertNaoContem(msgRadarPixSemCupom, "Cupom:");
+
+const msgSempreModa = gerarTemplateUniversal({
+  titulo: "Radar SEMPREMODA",
+  marketplace: "Mercado Livre",
+  textoOriginal: "De R$ 129 por R$ 55\nCupom: SEMPREMODA\nhttps://meli.la/sempremoda",
+  precoOriginal: 129,
+  precoAtual: 55,
+  cupom: "SEMPREMODA",
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://meli.la/sempremoda", urlAfiliada: "https://go.optimus/sempremoda" }
+  ]
+});
+assertContem(msgSempreModa, "De: *R$ 129,00*");
+assertContem(msgSempreModa, "Por: *R$ 55,00*");
+assertContem(msgSempreModa, "Cupom: *SEMPREMODA*");
+assertContem(msgSempreModa, "Aplique o cupom SEMPREMODA para obter o valor.");
+assertNaoContem(msgSempreModa, "Pix");
+
+const msgGanheiMais = gerarTemplateUniversal({
+  titulo: "Radar GANHEIMAIS",
+  marketplace: "Mercado Livre",
+  textoOriginal: "De R$ 899 por R$ 521\nCupom: GANHEIMAIS\nhttps://meli.la/ganheimais",
+  precoOriginal: 899,
+  precoAtual: 521,
+  cupom: "GANHEIMAIS",
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://meli.la/ganheimais", urlAfiliada: "https://go.optimus/ganheimais" }
+  ]
+});
+assertContem(msgGanheiMais, "De: *R$ 899,00*");
+assertContem(msgGanheiMais, "Por: *R$ 521,00*");
+assertContem(msgGanheiMais, "Cupom: *GANHEIMAIS*");
+assertContem(msgGanheiMais, "Aplique o cupom GANHEIMAIS para obter o valor.");
+
+const msgRadarVenceExterno = gerarTemplateUniversal({
+  titulo: "Radar vence externo",
+  marketplace: "Amazon",
+  textoOriginal: "Produto fiel\nDe R$ 300 por R$ 200\nCupom: RADAR10\nhttps://amzn.to/radar",
+  precoOriginal: 999,
+  precoAtual: 888,
+  precoPix: "R$ 777 no Pix",
+  condicaoPix: "R$ 777 no Pix",
+  parcelamento: "12x de R$ 99,90 sem juros",
+  frete: "Frete gratis",
+  freteGratis: true,
+  beneficioTexto: "Desconto no app",
+  beneficios: ["Desconto no Pix", "voucher_ou_moedas"],
+  condicoes: ["pagamento_pix", "Pode haver beneficio pelo app"],
+  cupom: "RADAR10",
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://amzn.to/radar", urlAfiliada: "https://go.optimus/radar" }
+  ]
+});
+assertContem(msgRadarVenceExterno, "De: *R$ 300,00*");
+assertContem(msgRadarVenceExterno, "Por: *R$ 200,00*");
+assertContem(msgRadarVenceExterno, "Cupom: *RADAR10*");
+assertNaoContem(msgRadarVenceExterno, "R$ 888");
+assertNaoContem(msgRadarVenceExterno, "Pix");
+assertNaoContem(msgRadarVenceExterno, "12x");
+assertNaoContem(msgRadarVenceExterno, "Frete gratis");
+assertNaoContem(msgRadarVenceExterno, "Desconto no app");
+assertNaoContem(msgRadarVenceExterno, "voucher_ou_moedas");
+assert.strictEqual(contarOcorrencias(msgRadarVenceExterno, "https://go.optimus/radar"), 1);
+
 console.log("contrato-comercial-final-universal.test.js OK");
