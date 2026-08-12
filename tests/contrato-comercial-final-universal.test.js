@@ -1,7 +1,10 @@
 const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
 
 const { gerarTemplateUniversal } = require("../modules/template-universal");
 const { renderizarTemplatePersonalizado } = require("../modules/templates-clientes/renderer");
+const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
 const {
   resolverContratoComercialFinal
 } = require("../modules/templates-clientes/contrato-comercial-final");
@@ -23,6 +26,30 @@ function assertNaoContem(texto, trecho, msg) {
 
 function contarOcorrencias(texto, trecho) {
   return normalizar(texto).split(trecho).length - 1;
+}
+
+function montarMensagemComTemplateUniversalFalhando() {
+  const pathMensagens = require.resolve("../utils/mensagens-ofertas");
+  const pathTemplateUniversal = require.resolve("../modules/template-universal");
+  const cacheMensagensOriginal = require.cache[pathMensagens];
+  const cacheTemplateOriginal = require.cache[pathTemplateUniversal];
+
+  delete require.cache[pathMensagens];
+  require.cache[pathTemplateUniversal] = {
+    id: pathTemplateUniversal,
+    filename: pathTemplateUniversal,
+    loaded: true,
+    exports: { gerarTemplateUniversal: () => "" }
+  };
+
+  const { montarMensagemOferta: montar } = require("../utils/mensagens-ofertas");
+
+  if (cacheTemplateOriginal) require.cache[pathTemplateUniversal] = cacheTemplateOriginal;
+  else delete require.cache[pathTemplateUniversal];
+  delete require.cache[pathMensagens];
+  if (cacheMensagensOriginal) require.cache[pathMensagens] = cacheMensagensOriginal;
+
+  return montar;
 }
 
 function linksFixture() {
@@ -834,5 +861,116 @@ assertNaoContem(msgRadarVenceExterno, "Frete gratis");
 assertNaoContem(msgRadarVenceExterno, "Desconto no app");
 assertNaoContem(msgRadarVenceExterno, "voucher_ou_moedas");
 assert.strictEqual(contarOcorrencias(msgRadarVenceExterno, "https://go.optimus/radar"), 1);
+
+const contratoCupomForteExterno = resolverContratoComercialFinal({
+  titulo: "Radar sem cupom",
+  marketplace: "Mercado Livre",
+  textoOriginal: "Radar sem cupom\nPor R$ 171\nhttps://meli.la/semcupom",
+  precoAtual: 171,
+  cupom: "PROMO10",
+  cupomCodigo: "PROMO10",
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://meli.la/semcupom", urlAfiliada: "https://go.optimus/semcupom" }
+  ]
+}).contratoComercialFinal;
+assert.strictEqual(contratoCupomForteExterno.cupomCodigo, "", "cupom forte externo sem prova Radar nao vira fato comercial");
+const msgCupomForteExterno = gerarTemplateUniversal({
+  titulo: "Radar sem cupom",
+  marketplace: "Mercado Livre",
+  textoOriginal: "Radar sem cupom\nPor R$ 171\nhttps://meli.la/semcupom",
+  precoAtual: 171,
+  cupom: "PROMO10",
+  cupomCodigo: "PROMO10",
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://meli.la/semcupom", urlAfiliada: "https://go.optimus/semcupom" }
+  ]
+});
+assertContem(msgCupomForteExterno, "Por: *R$ 171,00*");
+assertNaoContem(msgCupomForteExterno, "PROMO10");
+assertNaoContem(msgCupomForteExterno, "Cupom:");
+
+const msgOfcNaoPromoveComercial = montarMensagemOferta({
+  titulo: "Radar limpo com OFC contaminado",
+  marketplace: "mercadolivre",
+  textoOriginal: "Radar limpo\nPor R$ 171\nhttps://meli.la/radar-limpo",
+  precoAtual: 171,
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://meli.la/radar-limpo", urlAfiliadaWorkspace: "https://go.optimus/radar-limpo" }
+  ],
+  metadata: {
+    ofcV24: {
+      espelhoComercial: {
+        precoDeTexto: "R$ 999,00",
+        precoPorTexto: "R$ 888,00",
+        precoPixTexto: "R$ 777,00 no Pix",
+        cupomCodigo: "OFC10",
+        beneficioTexto: "Pode haver beneficio pelo app",
+        linkAfiliado: "https://meli.la/ofc-produto",
+        linkResgateOriginal: "https://meli.la/ofc-resgate",
+        parcelamentoTexto: "10x de R$ 88,80",
+        freteTexto: "Frete gratis"
+      },
+      documentoComercialCanonico: {
+        tituloOriginal: "Titulo tecnico OFC",
+        marketplace: "mercadolivre",
+        categoria: "Categoria tecnica",
+        precoDeTexto: "R$ 999,00",
+        precoPorTexto: "R$ 888,00",
+        precoPixTexto: "R$ 777,00 no Pix",
+        cupomTexto: "OFC10",
+        instrucaoTexto: "Aplique o cupom OFC10",
+        linkAfiliado: "https://meli.la/ofc-produto",
+        blocos: [
+          { tipo: "preco_referencia", textoOriginal: "R$ 999,00" },
+          { tipo: "preco_oferta", textoOriginal: "R$ 888,00" },
+          { tipo: "preco_pix", textoOriginal: "R$ 777,00 no Pix" },
+          { tipo: "cupom_codigo", textoOriginal: "OFC10" },
+          { tipo: "parcelamento", textoOriginal: "10x de R$ 88,80" },
+          { tipo: "frete", textoOriginal: "Frete gratis" },
+          { tipo: "link_resgate", textoOriginal: "https://meli.la/ofc-resgate", valorEstruturado: { url: "https://meli.la/ofc-resgate" } }
+        ]
+      }
+    }
+  }
+});
+assertContem(msgOfcNaoPromoveComercial, "Por: *R$ 171,00*");
+assertContem(msgOfcNaoPromoveComercial, "https://go.optimus/radar-limpo");
+assert.strictEqual(contarOcorrencias(msgOfcNaoPromoveComercial, "https://go.optimus/radar-limpo"), 1);
+assertNaoContem(msgOfcNaoPromoveComercial, "R$ 999");
+assertNaoContem(msgOfcNaoPromoveComercial, "R$ 888");
+assertNaoContem(msgOfcNaoPromoveComercial, "R$ 777");
+assertNaoContem(msgOfcNaoPromoveComercial, "OFC10");
+assertNaoContem(msgOfcNaoPromoveComercial, "10x de R$ 88,80");
+assertNaoContem(msgOfcNaoPromoveComercial, "Frete gratis");
+assertNaoContem(msgOfcNaoPromoveComercial, "https://meli.la/ofc-resgate");
+
+const montarMensagemFallbackFalhando = montarMensagemComTemplateUniversalFalhando();
+const msgFallbackSeguro = montarMensagemFallbackFalhando({
+  titulo: "Fallback seguro",
+  marketplace: "Amazon",
+  textoOriginal: "Radar\nPor R$ 171\nhttps://amzn.to/radar",
+  precoAtual: 171,
+  linkAfiliado: "https://go.optimus/radar",
+  mensagemFinal: "MENSAGEM LEGADA COM PROMO10 E PIX INVENTADO"
+}, {
+  destino: { templateId: "tpl_inexistente", canal: "whatsapp" },
+  plano: { recursos: { templatePersonalizado: true } }
+});
+assert.strictEqual(msgFallbackSeguro, "Oferta recebida. Renderizacao oficial indisponivel no momento.");
+assertNaoContem(msgFallbackSeguro, "MENSAGEM LEGADA");
+assertNaoContem(msgFallbackSeguro, "PROMO10");
+assertNaoContem(msgFallbackSeguro, "PIX INVENTADO");
+
+const kabumLegadoSource = fs.readFileSync(path.join(__dirname, "../marketplaces/kabum/index.js"), "utf8").replace(/\r\n/g, "\n");
+const indiceImportContratoKabum = kabumLegadoSource.indexOf('require("../../utils/mensagens-ofertas")');
+const indiceGuardaLegadoKabum = kabumLegadoSource.indexOf("if (false) {\nconst titulo = oferta.nome");
+const indiceMontagemManualKabum = kabumLegadoSource.indexOf("let mensagem =", indiceGuardaLegadoKabum);
+const indiceContratoKabum = kabumLegadoSource.indexOf("mensagem = montarMensagemOferta(oferta", indiceMontagemManualKabum);
+const indiceEnvioKabum = kabumLegadoSource.indexOf("await enviarParaDestinoInteligente", indiceContratoKabum);
+assert.ok(indiceImportContratoKabum >= 0, "legado KaBuM deve importar o montador oficial");
+assert.ok(indiceGuardaLegadoKabum >= 0, "montagem manual legada deve ficar fora da execucao operacional");
+assert.ok(indiceMontagemManualKabum >= 0, "teste deve localizar a montagem legada para provar neutralizacao");
+assert.ok(indiceContratoKabum > indiceMontagemManualKabum, "mensagem legada deve ser sobrescrita pelo contrato oficial");
+assert.ok(indiceEnvioKabum > indiceContratoKabum, "envio legado deve ocorrer somente depois do contrato oficial");
 
 console.log("contrato-comercial-final-universal.test.js OK");

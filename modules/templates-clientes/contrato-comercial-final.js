@@ -227,6 +227,18 @@ function cupomEmFonteExplicita(cupom = "", fonte = "") {
 }
 
 function cupomTemProvenienciaExplicita(cupom = "", oferta = {}, textoOriginal = "") {
+  const metadata = oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
+  const camposProtegidos = metadata.precedenciaComercial?.camposProtegidos || {};
+  const cupomProtegidoRadar = camposProtegidos.cupom === true ||
+    camposProtegidos.cupomCodigo === true ||
+    camposProtegidos.codigoCupom === true ||
+    /\bradar\b/i.test([
+      oferta.cupomOrigem,
+      oferta.origemCupom,
+      oferta.fonteCupom,
+      metadata.cupomOrigem,
+      metadata.fonteCupom
+    ].filter(Boolean).join(" "));
   const fontesConfiaveis = [
     textoOriginal,
     oferta.textoComercialCanonico,
@@ -236,7 +248,14 @@ function cupomTemProvenienciaExplicita(cupom = "", oferta = {}, textoOriginal = 
     oferta.condicaoComercial
   ];
   if (texto(textoOriginal)) {
-    return fontesConfiaveis.some(fonte => cupomEmFonteExplicita(cupom, fonte));
+    if (cupomEmFonteExplicita(cupom, textoOriginal)) return true;
+    if (!cupomProtegidoRadar) return false;
+    return normalizarCuponsSemanticos([
+      ...(Array.isArray(oferta.codigosCupom) ? oferta.codigosCupom : []),
+      oferta.cupomCodigo,
+      oferta.codigoCupom,
+      oferta.cupom
+    ]).some(item => normalizarComparacao(item) === normalizarComparacao(cupom));
   }
 
   const camposCodigo = [
@@ -261,7 +280,6 @@ function cupomFinal(oferta = {}, textoOriginal = "") {
   ];
   const candidatos = normalizarCuponsSemanticos(fontes);
   return candidatos.find(cupom =>
-    !cupomFracoBloqueado(cupom) ||
     cupomTemProvenienciaExplicita(cupom, oferta, textoOriginal)
   ) || "";
 }

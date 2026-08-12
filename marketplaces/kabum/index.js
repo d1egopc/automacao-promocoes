@@ -13,6 +13,9 @@ const {
   listClientes
 } = require("../../utils/storage");
 const filaOfertas = require("../../utils/fila-ofertas");
+const {
+  montarMensagemOferta
+} = require("../../utils/mensagens-ofertas");
 
 const {
   farejarMercadoLivre: farejarMercadoLivreModulo
@@ -1989,6 +1992,8 @@ console.log(
   return;
 }
 
+let mensagem = "";
+if (false) {
 const titulo = oferta.nome || oferta.titulo || "Oferta";
 
 const precoAtual = oferta.preco || oferta.precoAtual || "";
@@ -2086,6 +2091,14 @@ if (antigo > atual && atual > 0) {
 💥 Economia: R$ ${economia.replace(".", ",")}
 🔥 ${porcentagem}% OFF`;
 }
+
+}
+
+mensagem = montarMensagemOferta(oferta, {
+  clienteId,
+  arquiteturaComercial: configCliente?.arquiteturaComercial,
+  rioOficialAtivo: configCliente?.arquiteturaComercial?.rioOficial !== false
+});
 
 // ================= ENVIO DESTINOS INTELIGENTES =================
 

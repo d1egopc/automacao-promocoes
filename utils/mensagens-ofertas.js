@@ -218,64 +218,13 @@ function aplicarFatosOfcV24ComoEntrada(oferta = {}) {
   const temOfc = Boolean(Object.keys(ofcV24).length || Object.keys(espelho).length || Object.keys(documento).length);
   if (!temOfc) return oferta;
 
-  const linksOFC = linksOfcV24ParaApresentacao(oferta);
-  const condicoesOfc = Array.isArray(espelho.condicoesComerciais)
-    ? espelho.condicoesComerciais.map(normalizarTextoLocal).filter(Boolean)
-    : [];
-  const linksComerciais = [
-    ...(Array.isArray(oferta.linksComerciais) ? oferta.linksComerciais : []),
-    ...linksOFC
-  ];
-  const linksProduto = [
-    ...(Array.isArray(oferta.linksProduto) ? oferta.linksProduto : []),
-    ...linksOFC.filter(item => item.tipo === "produto")
-  ];
-  const linksResgate = [
-    ...(Array.isArray(oferta.linksResgate) ? oferta.linksResgate : []),
-    ...linksOFC.filter(item => item.tipo === "resgate")
-  ];
-
   return {
     ...oferta,
     titulo: primeiroValorLocal(oferta.titulo, oferta.nome, documento.tituloOriginal, textoBlocoOfcV24Local(documento, "titulo")),
     nome: primeiroValorLocal(oferta.nome, oferta.titulo, documento.tituloOriginal, textoBlocoOfcV24Local(documento, "titulo")),
     marketplace: primeiroValorLocal(oferta.marketplace, documento.marketplace, espelho.marketplace, textoBlocoOfcV24Local(documento, "marketplace")),
     categoria: primeiroValorLocal(oferta.categoria, documento.categoria, espelho.categoria, textoBlocoOfcV24Local(documento, "categoria")),
-    precoOriginal: primeiroValorLocal(oferta.precoOriginal, oferta.precoAntigo, oferta.precoDe, documento.precoDeTexto, espelho.precoDeTexto, textoBlocoOfcV24Local(documento, "preco_referencia")),
-    precoAntigo: primeiroValorLocal(oferta.precoAntigo, oferta.precoOriginal, oferta.precoDe, documento.precoDeTexto, espelho.precoDeTexto, textoBlocoOfcV24Local(documento, "preco_referencia")),
-    precoDe: primeiroValorLocal(oferta.precoDe, oferta.precoOriginal, oferta.precoAntigo, documento.precoDeTexto, espelho.precoDeTexto, textoBlocoOfcV24Local(documento, "preco_referencia")),
-    precoAtual: primeiroValorLocal(oferta.precoAtual, oferta.precoPor, oferta.preco, documento.precoPorTexto, espelho.precoPorTexto, espelho.precoFinalTexto, textoBlocoOfcV24Local(documento, "preco_oferta")),
-    precoPor: primeiroValorLocal(oferta.precoPor, oferta.precoAtual, oferta.preco, documento.precoPorTexto, espelho.precoPorTexto, espelho.precoFinalTexto, textoBlocoOfcV24Local(documento, "preco_oferta")),
-    preco: primeiroValorLocal(oferta.preco, oferta.precoAtual, oferta.precoPor, documento.precoPorTexto, espelho.precoPorTexto, espelho.precoFinalTexto, textoBlocoOfcV24Local(documento, "preco_oferta")),
-    precoPix: primeiroValorLocal(oferta.precoPix, documento.precoPixTexto, espelho.precoPixTexto, textoBlocoOfcV24Local(documento, "preco_pix")),
-    condicaoPix: primeiroValorLocal(oferta.condicaoPix, documento.precoPixTexto, espelho.formaPagamentoTexto, textoBlocoOfcV24Local(documento, "preco_pix")),
-    cupom: primeiroValorLocal(oferta.cupom, documento.cupomTexto, espelho.cupomCodigo, textoBlocoOfcV24Local(documento, "cupom_codigo")),
-    cupomCodigo: primeiroValorLocal(oferta.cupomCodigo, oferta.codigoCupom, documento.cupomTexto, espelho.cupomCodigo, textoBlocoOfcV24Local(documento, "cupom_codigo")),
-    codigoCupom: primeiroValorLocal(oferta.codigoCupom, oferta.cupomCodigo, documento.cupomTexto, espelho.cupomCodigo, textoBlocoOfcV24Local(documento, "cupom_codigo")),
-    instrucaoCupom: primeiroValorLocal(oferta.instrucaoCupom, oferta.instrucaoComercial, documento.instrucaoTexto, espelho.instrucaoComercial, textoBlocoOfcV24Local(documento, "instrucao_cupom")),
-    instrucaoComercial: primeiroValorLocal(oferta.instrucaoComercial, oferta.instrucaoCupom, documento.instrucaoTexto, espelho.instrucaoComercial, textoBlocoOfcV24Local(documento, "instrucao_cupom")),
-    beneficioTexto: primeiroValorLocal(oferta.beneficioTexto, oferta.beneficio, documento.beneficioTexto, textoBlocoOfcV24Local(documento, "beneficio"), condicoesOfc[0]),
-    beneficioExtra: primeiroValorLocal(oferta.beneficioExtra, documento.beneficioTexto, textoBlocoOfcV24Local(documento, "beneficio"), condicoesOfc[0]),
-    beneficios: Array.isArray(oferta.beneficios) && oferta.beneficios.length ? oferta.beneficios : condicoesOfc,
-    condicoes: [
-      ...(Array.isArray(oferta.condicoes) ? oferta.condicoes : []),
-      ...condicoesOfc
-    ],
-    parcelamento: primeiroValorLocal(oferta.parcelamento, documento.parcelamentoTexto, espelho.parcelamentoTexto, textoBlocoOfcV24Local(documento, "parcelamento")),
-    frete: primeiroValorLocal(oferta.frete, oferta.freteTexto, documento.freteTexto, textoBlocoOfcV24Local(documento, "frete")),
-    cashback: primeiroValorLocal(oferta.cashback, documento.cashbackTexto, textoBlocoOfcV24Local(documento, "cashback")),
     avaliacao: primeiroValorLocal(oferta.avaliacao, oferta.rating, oferta.nota, textoBlocoOfcV24Local(documento, "avaliacao_nota")),
-    linkAfiliado: primeiroValorLocal(oferta.linkAfiliado, oferta.linkFinal, oferta.link, documento.linkAfiliado, espelho.linkAfiliado),
-    linkFinal: primeiroValorLocal(oferta.linkFinal, oferta.linkAfiliado, oferta.link, documento.linkAfiliado, espelho.linkAfiliado),
-    link: primeiroValorLocal(oferta.link, oferta.linkAfiliado, oferta.linkFinal, documento.linkAfiliado, espelho.linkAfiliado),
-    linkProduto: primeiroValorLocal(oferta.linkProduto, documento.linkAfiliado, espelho.linkAfiliado, documento.linkProdutoOriginal, espelho.linkProdutoOriginal),
-    linkResgate: primeiroValorLocal(oferta.linkResgate, documento.linkResgateOriginal, espelho.linkResgateOriginal, urlBlocoOfcV24Local(documento, "link_resgate")),
-    linkApp: primeiroValorLocal(oferta.linkApp, urlBlocoOfcV24Local(documento, "link_app")),
-    linkPc: primeiroValorLocal(oferta.linkPc, urlBlocoOfcV24Local(documento, "link_pc")),
-    linkMoedas: primeiroValorLocal(oferta.linkMoedas, urlBlocoOfcV24Local(documento, "link_moedas")),
-    linksComerciais,
-    linksProduto,
-    linksResgate,
     origemApresentacao: primeiroValorLocal(oferta.origemApresentacao, "ofc_v24_espelho_piloto"),
     metadata: {
       ...objetoLocal(oferta.metadata),
@@ -664,9 +613,9 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
     motivo: motivoRendererOficial("renderer_oficial")
   });
 
-  return registrarTemplate("mensagem_existente_sem_reconstrucao", mensagemExistente, {
-    rendererEscolhido: "renderer_oficial",
-    motivo: "mensagem_existente_sem_reconstrucao",
+  return registrarTemplate("fallback_seguro_contrato", "Oferta recebida. Renderizacao oficial indisponivel no momento.", {
+    rendererEscolhido: "fallback_generico",
+    motivo: "fallback_seguro_sem_mensagem_legada",
     fallbackUtilizado: true,
     rendererOrigem: "template_universal"
   });
