@@ -784,6 +784,7 @@ let reconectando = {};
 let inicializandoWhatsApp = {};
 let tentativasReconexaoWhatsApp = {};
 let ultimoMotivoDisconnectWhatsApp = {};
+let geracoesSocketWhatsapp = {};
 let integracoesPorCliente = {};
 let sessoesMeta = {};
 
@@ -6951,6 +6952,11 @@ const {
   recuperarCredsNoBoot,
   enumerarSessoesReconexaoBoot
 } = require("./modules/whatsapp/session-reconnect.service");
+const {
+  marcarSocketAtual,
+  registrarListenerUnicoSocket,
+  socketEhAtual
+} = require("./modules/whatsapp/socket-listener-lifecycle.service");
 
 registrarMiddlewaresOperacionais(app, {
   express,
@@ -23390,6 +23396,7 @@ async function iniciarWhatsApp(id, force = false) {
   logarAuthSessaoWhatsApp(id, "antes_socket", authAntesSocket);
 
   let sock;
+  let socketGeracao = "";
   try {
     const { state, saveCreds } = await useMultiFileAuthState("/data/auth_" + id);
     const { version } = await fetchLatestBaileysVersion();
@@ -23403,7 +23410,15 @@ async function iniciarWhatsApp(id, force = false) {
       browser: ["Chrome", "Desktop", "1.0.0"]
     });
 
-    sessoes[id] = sock;
+    const registroSocket = marcarSocketAtual({
+      sessoes,
+      geracoes: geracoesSocketWhatsapp,
+      sessaoId: id,
+      sock,
+      logger: console,
+      motivo: force ? "reconnect_force" : "boot_reconnect"
+    });
+    socketGeracao = registroSocket.socketGeracao || sock.__optimusSocketGeracao || "";
     sock.ev.on("creds.update", async () => {
       try {
         await saveCreds();
@@ -23448,7 +23463,24 @@ console.log("[INFO] Cliente mensageiro resolvido:", {
 
 // =============== EVENTO MENSAGEIRO =================
 
-sock.ev.on("messages.upsert", async ({ messages = [] } = {}) => {
+registrarListenerUnicoSocket({
+  sock,
+  evento: "messages.upsert",
+  chave: "messages.upsert",
+  sessaoId: id,
+  socketGeracao,
+  motivoRegistro: force ? "reconnect" : "boot",
+  logger: console,
+  handler: async ({ messages = [] } = {}) => {
+  if (!socketEhAtual(sessoes, id, sock)) {
+    console.log("[WHATSAPP-LISTENER-UPSERT-IGNORADO]", JSON.stringify({
+      sessaoId: id,
+      socketGeracao,
+      motivo: "socket_obsoleto"
+    }));
+    return;
+  }
+
   const loteTraceIdCobertura = coberturaRadar.flagAtiva()
     ? `lote_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     : "";
@@ -23543,6 +23575,7 @@ sock.ev.on("messages.upsert", async ({ messages = [] } = {}) => {
     });
     console.log("[MENSAGEIRO-ERRO]⚠️ messages.upsert:", e.message);
   }
+  }
 });
 
 sock.ev.on("group-participants.update", async (evento) => {
@@ -23575,6 +23608,15 @@ sock.ev.on("group-participants.update", async (evento) => {
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, qr, lastDisconnect } = update;
+
+    if (!socketEhAtual(sessoes, id, sock)) {
+      console.log("[WHATSAPP-SOCKET-OBSOLETO-IGNORADO]", JSON.stringify({
+        sessaoId: id,
+        socketGeracao,
+        evento: connection || (qr ? "connection.qr" : "connection.update")
+      }));
+      return;
+    }
 
     if (qr) {
       const authNoQr = auditarAuthSessaoWhatsApp(id);
