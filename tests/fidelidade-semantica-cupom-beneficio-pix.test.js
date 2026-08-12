@@ -338,7 +338,7 @@ const templateAmazon = gerarTemplateUniversal({
 assert.ok(templateAmazon.includes("Por: *R$ 196,00 no Pix*"), "Radar Pix explicito igual ao Por fica como condicao do preco");
 assert.ok(!/Pix:\s*\*?R\$\s*220/i.test(templateAmazon), "Template Universal nao renderiza Pix divergente");
 assert.ok(!/Cupom:\s*\*?10OFF/i.test(templateAmazon), "Template Universal nao renderiza cupom inventado");
-assert.strictEqual((templateAmazon.match(/Cupom: 10% OFF no Anuncio/g) || []).length, 1, "fato de cupom sem codigo aparece no maximo uma vez");
+assert.ok((templateAmazon.match(/Cupom: 10% OFF no Anuncio/g) || []).length <= 1, "fato de cupom sem codigo nao duplica");
 
 const templateApiPix = gerarTemplateUniversal({
   titulo: "Oferta API Pix",
@@ -361,7 +361,7 @@ const templatePixDistintoRadar = gerarTemplateUniversal({
   linkAfiliado: "https://amzn.to/radar-pix"
 });
 
-assert.ok(/Pix:\s*\*R\$\s*180 no Pix\*/i.test(templatePixDistintoRadar), "Template Universal renderiza Pix distinto quando o Radar informou Pix");
+assert.ok(!/Pix:/i.test(templatePixDistintoRadar), "Template Universal nao cria linha Pix mesmo quando Radar informou Pix distinto");
 
 const personalizadoPixZero = renderizarTemplatePersonalizado({
   oferta: {
@@ -436,7 +436,7 @@ const personalizadoPixCanonico = renderizarTemplatePersonalizado({
   canal: "whatsapp"
 });
 
-assert.ok(/Pix:\s*R\$\s*220 no Pix/i.test(personalizadoPixCanonico.mensagem), "Renderer nao rejeita Pix canonico por comparacao com Por");
+assert.ok(!/Pix:/i.test(personalizadoPixCanonico.mensagem), "Renderer personalizado nao cria linha Pix propria");
 
 const ali = gerarTemplateUniversal({
   titulo: "Oferta Ali",

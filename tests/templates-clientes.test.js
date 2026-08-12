@@ -179,9 +179,9 @@ for (const trecho of [
   "📂 Beleza e cuidados pessoais",
   "❌ De:",
   "✅ Por:",
-  "⚡ Pix: R$ 47,90 no Pix",
   "📉 38% OFF",
   "🎟️ Cupom: PROMO10",
+  "⚡ Aplique o cupom PROMO10 para obter o valor.",
   estrelas(5),
   "💳 Ou 3x de R$ 16,63 sem juros",
   "🚚 Frete gratis",
@@ -199,6 +199,7 @@ for (const trecho of [
 ]) {
   assert.ok(renderCompletoV11.mensagem.includes(trecho), `preview inclui: ${trecho}`);
 }
+assert.ok(!renderCompletoV11.mensagem.includes("Pix:"), "preview personalizado nao renderiza linha Pix propria");
 assert.ok(!/[\u00c3\u00c5\u00a2\u00ef\u00bf\u00bd\uFFFD]/u.test(renderCompletoV11.mensagem), "preview personalizado nao contem mojibake");
 
 const semCupomV11 = renderizarTemplatePersonalizado({
@@ -228,8 +229,8 @@ const fraseCupomFallbackV11 = renderizarTemplatePersonalizado({
 });
 assert.strictEqual(
   fraseCupomFallbackV11.mensagem,
-  "",
-  "frase de cupom nao inventa instrucao quando ha cupom sem instrucao capturada"
+  "⚡ Aplique o cupom PROMO10 para obter o valor.",
+  "frase de cupom usa a instrucao deterministica permitida quando o bloco esta ativo"
 );
 
 const precoMercadoLivreRealV11 = renderizarTemplatePersonalizado({

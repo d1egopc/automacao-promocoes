@@ -63,7 +63,7 @@ const msgB = gerarTemplateUniversal({
   linkAfiliado: "https://amzn.to/b"
 });
 assertContem(msgB, "Por: *R$ 159,00*");
-assertContem(msgB, "Pix: *R$ 145,00 no Pix*");
+assertNaoContem(msgB, "Pix:", "Pix distinto nao cria linha propria");
 
 const msgC = gerarTemplateUniversal({
   titulo: "Caso C Sem Pix",
@@ -73,6 +73,52 @@ const msgC = gerarTemplateUniversal({
 });
 assertContem(msgC, "Por: *R$ 159,00*");
 assertNaoContem(msgC, "Pix:");
+
+const msgPorSemPix = gerarTemplateUniversal({
+  titulo: "Caso A Pedido Sem Condicao",
+  marketplace: "Mercado Livre",
+  textoOriginal: "Por R$ 55,90",
+  precoAtual: 55.9,
+  linkAfiliado: "https://meli.la/sem-pix"
+});
+assertContem(msgPorSemPix, "Por: *R$ 55,90*");
+assertNaoContem(msgPorSemPix, "Pix");
+
+const msgPorNoPix = gerarTemplateUniversal({
+  titulo: "Caso B Pedido Por no Pix",
+  marketplace: "Mercado Livre",
+  textoOriginal: "Por R$ 55,90 no Pix",
+  precoAtual: 55.9,
+  condicaoPix: "R$ 55,90 no Pix",
+  linkAfiliado: "https://meli.la/por-pix"
+});
+assertContem(msgPorNoPix, "Por: *R$ 55,90 no Pix*");
+assertNaoContem(msgPorNoPix, "Pix:");
+
+const msgDePorNoPix = gerarTemplateUniversal({
+  titulo: "Caso C Pedido De Por Pix",
+  marketplace: "Mercado Livre",
+  textoOriginal: "De R$ 129 por R$ 55 no Pix",
+  precoOriginal: 129,
+  precoAtual: 55,
+  precoPix: "R$ 129",
+  linkAfiliado: "https://meli.la/de-por-pix"
+});
+assertContem(msgDePorNoPix, "De: *R$ 129,00*");
+assertContem(msgDePorNoPix, "Por: *R$ 55,00 no Pix*");
+assertNaoContem(msgDePorNoPix, "Pix:");
+
+const msgPixApiIgnorado = gerarTemplateUniversal({
+  titulo: "Caso D Externo",
+  marketplace: "Mercado Livre",
+  textoOriginal: "Por R$ 55,90",
+  precoOriginal: 129,
+  precoAtual: 55.9,
+  precoPix: "R$ 129 no Pix",
+  linkAfiliado: "https://meli.la/api-pix"
+});
+assertContem(msgPixApiIgnorado, "Por: *R$ 55,90*");
+assertNaoContem(msgPixApiIgnorado, "Pix");
 
 const msgD = gerarTemplateUniversal({
   titulo: "Caso D Pix nu contaminado",
@@ -153,7 +199,7 @@ const msgSemInstrucaoUniversal = gerarTemplateUniversal({
   linkAfiliado: "https://amzn.to/sempremoda"
 });
 assertContem(msgSemInstrucaoUniversal, "Cupom: *SEMPREMODA*");
-assertNaoContem(msgSemInstrucaoUniversal, "Aplique o cupom SEMPREMODA");
+assertContem(msgSemInstrucaoUniversal, "Aplique o cupom SEMPREMODA para obter o valor.");
 
 const msgSemInstrucaoPersonalizado = renderizarTemplatePersonalizado({
   oferta: {
@@ -176,7 +222,38 @@ const msgSemInstrucaoPersonalizado = renderizarTemplatePersonalizado({
   canal: "whatsapp"
 });
 assertContem(msgSemInstrucaoPersonalizado.mensagem, "Cupom: SEMPREMODA");
-assertNaoContem(msgSemInstrucaoPersonalizado.mensagem, "Aplique o cupom SEMPREMODA");
+assertContem(msgSemInstrucaoPersonalizado.mensagem, "Aplique o cupom SEMPREMODA para obter o valor.");
+
+const msgCupomOcultoPersonalizado = renderizarTemplatePersonalizado({
+  oferta: {
+    titulo: "Cupom real personalizado oculto",
+    marketplace: "Amazon",
+    precoAtual: 100,
+    cupom: "SEMPREMODA",
+    textoOriginal: "Cupom: SEMPREMODA",
+    linkAfiliado: "https://amzn.to/sempremoda"
+  },
+  template: {
+    id: "instrucao_oculta",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "cupom", ativo: true, ordem: 10 },
+      { tipo: "frase_cupom", ativo: false, ordem: 20 },
+      { tipo: "link", ativo: true, ordem: 30 }
+    ]
+  },
+  canal: "whatsapp"
+});
+assertContem(msgCupomOcultoPersonalizado.mensagem, "Cupom: SEMPREMODA");
+assertNaoContem(msgCupomOcultoPersonalizado.mensagem, "Aplique o cupom SEMPREMODA");
+
+const msgSemCupomSemFrase = gerarTemplateUniversal({
+  titulo: "Caso F Sem Cupom",
+  marketplace: "Amazon",
+  precoAtual: 55.9,
+  linkAfiliado: "https://amzn.to/sem-cupom"
+});
+assertNaoContem(msgSemCupomSemFrase, "Aplique o cupom");
 
 const msgH = gerarTemplateUniversal({
   titulo: "Caso H Shopee links",
@@ -307,10 +384,23 @@ assert.strictEqual(contarOcorrencias(msgOcorrencias, "https://go.optimus/produto
 assert.strictEqual(contarOcorrencias(msgOcorrencias, "https://go.optimus/app"), 2);
 assert.strictEqual(contarOcorrencias(msgOcorrencias, "https://go.optimus/moedas"), 1);
 assert.strictEqual(contarOcorrencias(msgOcorrencias, "https://go.optimus/pc"), 1);
+assert.strictEqual(linksOcorrenciasDuplicadas.length, 8, "renderizacao nao altera quantidade de ocorrencias de link de entrada");
 assert.ok(
   msgOcorrencias.indexOf("https://go.optimus/resgate-a") < msgOcorrencias.indexOf("https://go.optimus/produto-b"),
   "ordem semantica de Resgate antes de Produto permanece"
 );
+
+const ofertaComImagemIntocada = {
+  titulo: "Imagem intocada",
+  marketplace: "Mercado Livre",
+  precoAtual: 55.9,
+  imagem: "https://img.test/produto.webp",
+  imagemCanonicaFinal: true,
+  linkAfiliado: "https://go.optimus/imagem"
+};
+gerarTemplateUniversal(ofertaComImagemIntocada);
+assert.strictEqual(ofertaComImagemIntocada.imagem, "https://img.test/produto.webp");
+assert.strictEqual(ofertaComImagemIntocada.imagemCanonicaFinal, true);
 
 const personalizadoOcorrencias = renderizarTemplatePersonalizado({
   oferta: {
@@ -472,7 +562,8 @@ const msgFraseReal = gerarTemplateUniversal({
   instrucaoCupom: "Aplique o cupom de 10% no anuncio",
   linkAfiliado: "https://go.optimus/frase-real"
 });
-assertContem(msgFraseReal, "Aplique o cupom de 10% no anuncio");
+assertContem(msgFraseReal, "Aplique o cupom PROMO10 para obter o valor.");
+assertNaoContem(msgFraseReal, "Aplique o cupom de 10% no anuncio");
 
 const msgCalcaMl = gerarTemplateUniversal({
   titulo: "ML Calca Jeans",

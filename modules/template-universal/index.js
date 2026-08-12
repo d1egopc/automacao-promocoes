@@ -376,6 +376,11 @@ function precoPixRenderizavel(valor = "", campos = {}, opcoes = {}) {
   return textoPixValido(textoPix);
 }
 
+function instrucaoCupomDeterministica(cupom = "") {
+  const codigo = textoComercialRenderizavel(cupom);
+  return codigo ? `Aplique o cupom ${codigo} para obter o valor.` : "";
+}
+
 function textoPrecoAtualComCondicao(precoAtual = "", campos = {}) {
   if (!precoAtual) return precoAtual;
   if (normalizarComparacao(campos.condicaoPrecoPor) === "pix" && !textoIndicaPix(precoAtual)) return `${precoAtual} no Pix`;
@@ -656,13 +661,12 @@ function montarTemplateUniversalOficial({
     precoOriginal ? `❌ De: *${precoOriginal}*` : "",
     precoAtualComCondicao ? `✅ Por: *${precoAtualComCondicao}*` : "",
     descontoCalculado != null && descontoCalculado > 0 ? `📉 ${descontoCalculado.toFixed(0)}% OFF` : "",
-    campos.precoPix ? `⚡ Pix: *${campos.precoPix}*` : "",
     campos.parcelamento ? linhaComPrefixo("💳", campos.parcelamento) : "",
     economia ? `💸 Economia: *${economia}${descontoPercentual != null && descontoPercentual > 0 ? ` (${descontoPercentual.toFixed(0)}%)` : ""}*` : ""
   ]);
   adicionarBloco(blocos, [
     campos.cupom ? `🎟️ Cupom: *${campos.cupom}*` : "",
-    campos.instrucaoCupom && campos.instrucaoCupom !== campos.cupomTexto ? linhaComPrefixo("⚡", campos.instrucaoCupom) : "",
+    campos.cupom ? linhaComPrefixo("⚡", instrucaoCupomDeterministica(campos.cupom)) : "",
     beneficioComercial ? linhaComPrefixo("🎁", beneficioComercial) : "",
     ...detalhesComerciais
   ]);
@@ -677,7 +681,7 @@ function montarTemplateUniversalOficial({
 
 function gerarTemplateUniversal(oferta = {}) {
   const campos = selecionarCamposUniversais(oferta);
-  campos.precoPix = campos.precoPixDistinto != null ? precoPixRenderizavel(campos.precoPix, campos) : "";
+  campos.precoPix = "";
   const blocos = [];
   const precoAtualExibido = campos.precoAtual;
   const precoAtualNumero = normalizarNumero(precoAtualExibido);
