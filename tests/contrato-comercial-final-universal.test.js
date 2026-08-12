@@ -725,6 +725,70 @@ assertContem(msgSempreModa, "Cupom: *SEMPREMODA*");
 assertContem(msgSempreModa, "Aplique o cupom SEMPREMODA para obter o valor.");
 assertNaoContem(msgSempreModa, "Pix");
 
+const casoLupoPosDeploy = {
+  titulo: "LUPO PRA VC PUXAR FERRO",
+  marketplace: "Mercado Livre",
+  textoOriginal: "LUPO PRA VC PUXAR FERRO\nDe R$ 88 por R$ 55\nCupom: SEMPREMODA\nhttps://meli.la/13Njt6R",
+  textoComercialCanonico: "Pode haver cupom disponivel. Confira no carrinho/app do Mercado Livre.",
+  precoOriginal: 88,
+  precoAtual: 55,
+  precoPix: "Desconto no Pix R$ 24",
+  descontoPix: "Desconto no Pix R$ 24",
+  cupom: "SEMPREMODA",
+  avisoCupom: "Pode haver cupom disponivel. Confira no carrinho/app do Mercado Livre.",
+  beneficioTexto: "Pode haver beneficio pelo app do Mercado Livre",
+  beneficioExtra: "Desconto no Pix R$ 24",
+  beneficios: [
+    "Pode haver cupom disponivel. Confira no carrinho/app do Mercado Livre.",
+    "Pode haver beneficio pelo app do Mercado Livre",
+    "Desconto no Pix R$ 24"
+  ],
+  condicoes: ["pagamento_pix", "Pode haver beneficio pelo app"],
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://meli.la/13Njt6R", urlAfiliada: "https://go.optimus/lupo" }
+  ]
+};
+const contratoLupo = resolverContratoComercialFinal(casoLupoPosDeploy).contratoComercialFinal;
+assert.strictEqual(contratoLupo.beneficio, "", "inferencia de cupom/app/pix nao entra no contrato final");
+assert.strictEqual(contratoLupo.precoPixTexto, "", "Desconto no Pix externo nao entra no contrato final");
+const msgLupoPosDeploy = gerarTemplateUniversal(casoLupoPosDeploy);
+assertContem(msgLupoPosDeploy, "De: *R$ 88,00*");
+assertContem(msgLupoPosDeploy, "Por: *R$ 55,00*");
+assertContem(msgLupoPosDeploy, "Cupom: *SEMPREMODA*");
+assertContem(msgLupoPosDeploy, "Aplique o cupom SEMPREMODA para obter o valor.");
+assert.strictEqual(contarOcorrencias(msgLupoPosDeploy, "Aplique o cupom SEMPREMODA para obter o valor."), 1);
+assertNaoContem(msgLupoPosDeploy, "Pode haver cupom");
+assertNaoContem(msgLupoPosDeploy, "Confira no carrinho/app");
+assertNaoContem(msgLupoPosDeploy, "Pode haver beneficio");
+assertNaoContem(msgLupoPosDeploy, "Desconto no Pix");
+assertNaoContem(msgLupoPosDeploy, "Pix:");
+
+const personalizadoLupoPosDeploy = renderizarTemplatePersonalizado({
+  oferta: casoLupoPosDeploy,
+  template: {
+    id: "lupo_sem_inferencia",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "preco_de", ativo: true, ordem: 10 },
+      { tipo: "preco_por", ativo: true, ordem: 20 },
+      { tipo: "cupom", ativo: true, ordem: 30 },
+      { tipo: "frase_cupom", ativo: true, ordem: 40 },
+      { tipo: "beneficio", ativo: true, ordem: 50 },
+      { tipo: "link", ativo: true, ordem: 60 }
+    ]
+  },
+  canal: "whatsapp"
+});
+assert.strictEqual(personalizadoLupoPosDeploy.ok, true);
+assertContem(personalizadoLupoPosDeploy.mensagem, "De: R$ 88,00");
+assertContem(personalizadoLupoPosDeploy.mensagem, "Por: R$ 55,00");
+assertContem(personalizadoLupoPosDeploy.mensagem, "Cupom: SEMPREMODA");
+assertContem(personalizadoLupoPosDeploy.mensagem, "Aplique o cupom SEMPREMODA para obter o valor.");
+assertNaoContem(personalizadoLupoPosDeploy.mensagem, "Pode haver cupom");
+assertNaoContem(personalizadoLupoPosDeploy.mensagem, "Confira no carrinho/app");
+assertNaoContem(personalizadoLupoPosDeploy.mensagem, "Pode haver beneficio");
+assertNaoContem(personalizadoLupoPosDeploy.mensagem, "Desconto no Pix");
+
 const msgGanheiMais = gerarTemplateUniversal({
   titulo: "Radar GANHEIMAIS",
   marketplace: "Mercado Livre",

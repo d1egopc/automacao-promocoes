@@ -105,10 +105,10 @@ async function testarAmazonProdutoAssinatura() {
 async function testarKabumAwinDeeplinksDistintos() {
   const destinoA = "https://www.kabum.com.br/produto/111/produto-a";
   const destinoB = "https://www.kabum.com.br/produto/222/produto-b";
-  const awinA = `https://www.awin1.com/cread.php?ued=${encodeURIComponent(destinoA)}`;
-  const awinB = `https://www.awin1.com/cread.php?ued=${encodeURIComponent(destinoB)}`;
-  const afiliadoA = `https://www.awin1.com/cread.php?awinmid=123&ued=${encodeURIComponent(destinoA)}`;
-  const afiliadoB = `https://www.awin1.com/cread.php?awinmid=123&ued=${encodeURIComponent(destinoB)}`;
+  const awinA = `https://www.awin1.com/cread.php?awinmid=17729&awinaffid=1062989&clickref=origem-a&ued=${encodeURIComponent(destinoA)}`;
+  const awinB = `https://www.awin1.com/cread.php?awinmid=17729&awinaffid=1062989&clickref=origem-b&ued=${encodeURIComponent(destinoB)}`;
+  const afiliadoA = awinA.replace("awinaffid=1062989", "awinaffid=123");
+  const afiliadoB = awinB.replace("awinaffid=1062989", "awinaffid=123");
   const deeplinks = [];
 
   const resultado = await importarAwinEngine({
@@ -137,11 +137,90 @@ async function testarKabumAwinDeeplinksDistintos() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.deepStrictEqual(deeplinks, [{ url: destinoB, clienteId: "Roger" }]);
-  assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.urlOriginal), [destinoA, destinoB]);
+  assert.deepStrictEqual(deeplinks, []);
+  assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.urlOriginal), [awinA, awinB]);
   assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.urlAfiliadaWorkspace), [afiliadoA, afiliadoB]);
-  assert(resultado.metadata.linksComerciais[0].urlAfiliadaWorkspace.includes(encodeURIComponent(destinoA)));
-  assert(resultado.metadata.linksComerciais[1].urlAfiliadaWorkspace.includes(encodeURIComponent(destinoB)));
+  assert.strictEqual(new URL(resultado.metadata.linksComerciais[0].urlAfiliadaWorkspace).searchParams.get("ued"), destinoA);
+  assert.strictEqual(new URL(resultado.metadata.linksComerciais[1].urlAfiliadaWorkspace).searchParams.get("ued"), destinoB);
+  assert(!resultado.metadata.linksComerciais.some(item => item.urlAfiliadaWorkspace.includes("awinaffid=1062989")));
+}
+
+async function testarKabumAwinUmLinkNaoDuplicaEPreservaUed() {
+  const destino = "https://www.kabum.com.br/produto/590436/processador-amd-ryzen-9-7900";
+  const awinOriginal = `https://www.awin1.com/cread.php?awinmid=17729&awinaffid=1062989&p=foo&ued=${encodeURIComponent(destino)}`;
+  const afiliadoEsperado = awinOriginal.replace("awinaffid=1062989", "awinaffid=2649374");
+  const deeplinks = [];
+
+  const resultado = await importarAwinEngine({
+    job: { id: 33, evento_id: 34, cliente_id: "D1" },
+    evento: { texto_original: `KaBuM Ryzen\n${awinOriginal}`, marketplace: "kabum" },
+    links: [ocorrencia(awinOriginal, 1)],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { publisherId: "2649374" } }),
+      importarProdutoKabumViaAwin: async (url) => {
+        assert.strictEqual(url, destino);
+        return {
+          titulo: "Ryzen 9 7900",
+          precoAtual: "2299",
+          imagem: "https://img.test/ryzen.jpg",
+          linkAfiliado: "https://www.awin1.com/cread.php?awinaffid=2649374&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2Foutro",
+          linkFinal: "https://www.awin1.com/cread.php?awinaffid=2649374&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2Foutro",
+          link: "https://www.awin1.com/cread.php?awinaffid=2649374&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2Foutro",
+          categoria: "Hardware"
+        };
+      },
+      gerarDeepLinkAwin: async (url, clienteId) => {
+        deeplinks.push({ url, clienteId });
+        return "";
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(deeplinks, []);
+  assert.strictEqual(resultado.metadata.linksComerciais.length, 1);
+  assert.strictEqual(resultado.metadata.linksComerciais[0].urlOriginal, awinOriginal);
+  assert.strictEqual(resultado.metadata.linksComerciais[0].urlAfiliadaWorkspace, afiliadoEsperado);
+  assert.strictEqual(new URL(resultado.metadata.linksComerciais[0].urlAfiliadaWorkspace).searchParams.get("ued"), destino);
+}
+
+async function testarKabumAwinDuplicadoPreservaDuasOcorrencias() {
+  const destino = "https://www.kabum.com.br/produto/333/produto-clone";
+  const awinOriginal = `https://www.awin1.com/cread.php?awinmid=17729&awinaffid=1062989&ued=${encodeURIComponent(destino)}`;
+  const afiliadoEsperado = awinOriginal.replace("awinaffid=1062989", "awinaffid=2649374");
+  const deeplinks = [];
+
+  const resultado = await importarAwinEngine({
+    job: { id: 35, evento_id: 36, cliente_id: "D1" },
+    evento: { texto_original: `KaBuM clone\n${awinOriginal}\n${awinOriginal}`, marketplace: "kabum" },
+    links: [ocorrencia(awinOriginal, 1), ocorrencia(awinOriginal, 2)],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { publisherId: "2649374" } }),
+      importarProdutoKabumViaAwin: async (url) => {
+        assert.strictEqual(url, destino);
+        return {
+          titulo: "Produto Kabum Clone",
+          precoAtual: "999",
+          imagem: "https://img.test/kabum-clone.jpg",
+          linkAfiliado: afiliadoEsperado,
+          linkFinal: afiliadoEsperado,
+          link: afiliadoEsperado,
+          categoria: "Hardware"
+        };
+      },
+      gerarDeepLinkAwin: async (url, clienteId) => {
+        deeplinks.push({ url, clienteId });
+        return "";
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(deeplinks, []);
+  assert.strictEqual(resultado.metadata.linksComerciais.length, 2);
+  assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.urlOriginal), [awinOriginal, awinOriginal]);
+  assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.urlAfiliadaWorkspace), [afiliadoEsperado, afiliadoEsperado]);
+  assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.ordemCaptura), [1, 2]);
 }
 
 async function testarAliExpressAppPcProduto() {
@@ -263,6 +342,8 @@ async function main() {
   await testarMercadoLivreAB();
   await testarAmazonProdutoAssinatura();
   await testarKabumAwinDeeplinksDistintos();
+  await testarKabumAwinUmLinkNaoDuplicaEPreservaUed();
+  await testarKabumAwinDuplicadoPreservaDuasOcorrencias();
   await testarAliExpressAppPcProduto();
   await testarDuplicadoReusaConversaoMasPreservaOcorrencia();
   await testarFalhaNaoVazaOriginal();

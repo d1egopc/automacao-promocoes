@@ -151,8 +151,20 @@ function beneficioValidoPorPapel(valor = "", oferta = {}) {
   const beneficio = textoUtil(valor);
   if (!beneficio) return false;
   if (metadadoTecnicoCru(beneficio)) return false;
+  if (inferenciaComercialProibida(beneficio)) return false;
   if (textoEquivaleCampoIdentidade(beneficio, oferta)) return false;
   return beneficioTemPapelComercial(beneficio);
+}
+
+function inferenciaComercialProibida(valor = "") {
+  const normalizado = normalizarComparacao(valor);
+  if (!normalizado) return false;
+  if (/\bpode\s+haver\b.*\b(?:cupom|beneficio|app|carrinho)\b/.test(normalizado)) return true;
+  if (/\b(?:cupom|beneficio)\s+provavel\b/.test(normalizado)) return true;
+  if (/\bconfira\b.*\b(?:carrinho|app|aplicativo)\b/.test(normalizado)) return true;
+  if (/\bdesconto\s+(?:no|via)?\s*pix\b/.test(normalizado)) return true;
+  if (/\bpagamento\s*pix\b|\bpagamentopix\b|\bbeneficio\s*pix\b|\bbeneficiopix\b/.test(normalizado)) return true;
+  return false;
 }
 
 function assinaturaFatoComercial(valor = "") {

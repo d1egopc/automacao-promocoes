@@ -52,6 +52,66 @@ function extrairUrlKabumDeAwin(url = "") {
   return "";
 }
 
+function urlCapturadaOcorrenciaAwin(link = {}) {
+  return texto(
+    link.urlOriginal ||
+    link.url_original ||
+    link.urlExpandida ||
+    link.url_expandida ||
+    link.url ||
+    ""
+  );
+}
+
+function publisherIdAwin(integracao = {}) {
+  const credenciais = integracao && typeof integracao.credenciais === "object"
+    ? integracao.credenciais
+    : {};
+  return texto(
+    credenciais.publisherId ||
+    credenciais.publisher_id ||
+    credenciais.awinaffid ||
+    credenciais.awinAffId ||
+    integracao.publisherId ||
+    integracao.publisher_id ||
+    ""
+  );
+}
+
+function awinComUedValido(url = "") {
+  if (!/awin1?\.com|awin\.com/i.test(texto(url))) return false;
+  return Boolean(extrairUrlKabumDeAwin(url));
+}
+
+function substituirAwinaffidPreservandoDeeplink(url = "", publisherId = "") {
+  const original = texto(url);
+  const novoPublisher = texto(publisherId);
+  if (!original || !novoPublisher || !awinComUedValido(original)) {
+    return { ok: false, url: "", motivo: "awin_original_sem_ued_ou_publisher" };
+  }
+
+  const destinoAntes = extrairUrlKabumDeAwin(original);
+  let convertido = original;
+  if (/[?&]awinaffid=/i.test(convertido)) {
+    convertido = convertido.replace(/([?&]awinaffid=)[^&#]*/i, `$1${encodeURIComponent(novoPublisher)}`);
+  } else {
+    const separador = convertido.includes("?") ? "&" : "?";
+    convertido = `${convertido}${separador}awinaffid=${encodeURIComponent(novoPublisher)}`;
+  }
+
+  const destinoDepois = extrairUrlKabumDeAwin(convertido);
+  if (!destinoAntes || destinoAntes !== destinoDepois) {
+    return { ok: false, url: "", motivo: "awin_ued_alterado_na_preservacao" };
+  }
+
+  return {
+    ok: true,
+    url: convertido,
+    motivo: "awin_original_preservado_trocou_awinaffid",
+    destino: destinoAntes
+  };
+}
+
 function escolherLinkAwinKabum(links = [], evento = {}) {
   const candidatos = [];
 
@@ -82,11 +142,14 @@ function escolherLinkAwinKabum(links = [], evento = {}) {
   return escolherProdutoPrincipal(validos, "kabum", evento);
 }
 
-async function converterOcorrenciasAwinKabum({ linksClassificados = [], clienteId = "", deps = {}, linkAfiliadoPrincipal = "", urlOriginalEngine = "" } = {}) {
+async function converterOcorrenciasAwinKabum({ linksClassificados = [], clienteId = "", deps = {}, integracao = null, linkAfiliadoPrincipal = "", urlOriginalEngine = "" } = {}) {
   const cache = new Map();
   const saida = [];
+  const publisherId = publisherIdAwin(integracao || {});
   for (const [indice, link] of (Array.isArray(linksClassificados) ? linksClassificados : []).entries()) {
-    const urlOriginal = texto(link.urlProduto || link.urlOriginal || link.urlExpandida);
+    const urlOriginal = urlCapturadaOcorrenciaAwin(link) || texto(link.urlProduto || "");
+    const urlDestinoFuncional = extrairUrlKabumDeAwin(urlOriginal) || texto(link.urlProduto || urlOriginal);
+    const urlParaConverter = awinComUedValido(urlOriginal) ? urlOriginal : urlDestinoFuncional;
     if (!urlOriginal || !/kabum\.com\.br|awin1?\.com|awin\.com/i.test(urlOriginal)) {
       saida.push(link);
       continue;
@@ -95,12 +158,21 @@ async function converterOcorrenciasAwinKabum({ linksClassificados = [], clienteI
     const chave = `awin:${clienteId}:${papel}:${urlOriginal.toLowerCase()}`;
     let conversao = cache.get(chave);
     if (!conversao) {
-      if (texto(urlOriginalEngine) && texto(urlOriginal).replace(/\/+$/g, "").toLowerCase() === texto(urlOriginalEngine).replace(/\/+$/g, "").toLowerCase() && linkAfiliadoPrincipal) {
+      const awinPreservado = substituirAwinaffidPreservandoDeeplink(urlOriginal, publisherId);
+      if (awinPreservado.ok) {
+        conversao = {
+          urlAfiliada: awinPreservado.url,
+          renderizavel: true,
+          status: "convertida",
+          motivo: awinPreservado.motivo,
+          destinoFuncional: awinPreservado.destino
+        };
+      } else if (texto(urlOriginalEngine) && texto(urlDestinoFuncional).replace(/\/+$/g, "").toLowerCase() === texto(urlOriginalEngine).replace(/\/+$/g, "").toLowerCase() && linkAfiliadoPrincipal) {
         conversao = { urlAfiliada: linkAfiliadoPrincipal, renderizavel: true, status: "convertida", motivo: "deeplink_principal_workspace_convertido" };
       } else {
         try {
           const urlAfiliada = typeof deps.gerarDeepLinkAwin === "function"
-            ? await deps.gerarDeepLinkAwin(urlOriginal, clienteId)
+            ? await deps.gerarDeepLinkAwin(urlParaConverter, clienteId)
             : "";
           conversao = {
             urlAfiliada: texto(urlAfiliada),
@@ -119,6 +191,8 @@ async function converterOcorrenciasAwinKabum({ linksClassificados = [], clienteI
       url: urlOriginal,
       urlOriginal,
       url_original: urlOriginal,
+      urlProduto: urlDestinoFuncional,
+      urlDestinoFuncional,
       papelLink: papel,
       papel,
       tipo: papel,
@@ -387,6 +461,7 @@ async function importarAwinEngine({ job = {}, evento = {}, links = [], deps = {}
     linksClassificados,
     clienteId,
     deps,
+    integracao,
     linkAfiliadoPrincipal: linkAfiliado,
     urlOriginalEngine
   });

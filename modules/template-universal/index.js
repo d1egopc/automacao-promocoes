@@ -92,7 +92,7 @@ function metadadoTecnicoCru(valor = "") {
 
 function textoComercialRenderizavel(valor = "") {
   const item = normalizarTexto(valor);
-  return item && !metadadoTecnicoCru(item) ? item : "";
+  return item && !metadadoTecnicoCru(item) && !inferenciaComercialProibida(item) ? item : "";
 }
 
 function removerPrefixoVisual(valor = "", prefixo = "") {
@@ -114,6 +114,7 @@ function beneficioComercialSeguro(valor = "") {
   const texto = normalizarTexto(valor);
   if (!texto) return false;
   if (metadadoTecnicoCru(texto)) return false;
+  if (inferenciaComercialProibida(texto)) return false;
 
   const normalizado = normalizarComparacao(texto);
 
@@ -296,6 +297,17 @@ function formatarAvaliacaoReal(valor = "", quantidade = "") {
 
 function oportunidadeVisualTemplate(campos = {}) {
   return classificacaoVisualOferta(campos);
+}
+
+function inferenciaComercialProibida(valor = "") {
+  const normalizado = normalizarComparacao(valor);
+  if (!normalizado) return false;
+  if (/\bpode\s+haver\b.*\b(?:cupom|beneficio|app|carrinho)\b/.test(normalizado)) return true;
+  if (/\b(?:cupom|beneficio)\s+provavel\b/.test(normalizado)) return true;
+  if (/\bconfira\b.*\b(?:carrinho|app|aplicativo)\b/.test(normalizado)) return true;
+  if (/\bdesconto\s+(?:no|via)?\s*pix\b/.test(normalizado)) return true;
+  if (/\bpagamento\s*pix\b|\bpagamentopix\b|\bbeneficio\s*pix\b|\bbeneficiopix\b/.test(normalizado)) return true;
+  return false;
 }
 
 function avisoFinalTemplate(oferta = {}) {

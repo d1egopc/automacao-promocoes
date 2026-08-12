@@ -181,7 +181,18 @@ function beneficiosUniversais(oferta = {}, v2 = {}) {
   if (oferta.voltagem) beneficios.push(`Voltagem: ${oferta.voltagem}`);
   if (oferta.cashback) beneficios.push(oferta.cashback);
 
-  return [...new Set(beneficios.map(texto).filter(Boolean))].slice(0, 5);
+  return [...new Set(beneficios.map(texto).filter(item => item && !inferenciaComercialProibida(item)))].slice(0, 5);
+}
+
+function inferenciaComercialProibida(valor = "") {
+  const normalizado = normalizarComparacao(valor);
+  if (!normalizado) return false;
+  if (/\bpode\s+haver\b.*\b(?:cupom|beneficio|app|carrinho)\b/.test(normalizado)) return true;
+  if (/\b(?:cupom|beneficio)\s+provavel\b/.test(normalizado)) return true;
+  if (/\bconfira\b.*\b(?:carrinho|app|aplicativo)\b/.test(normalizado)) return true;
+  if (/\bdesconto\s+(?:no|via)?\s*pix\b/.test(normalizado)) return true;
+  if (/\bpagamento\s*pix\b|\bpagamentopix\b|\bbeneficio\s*pix\b|\bbeneficiopix\b/.test(normalizado)) return true;
+  return false;
 }
 
 function origemValorEfetivoComercial(origem = "") {

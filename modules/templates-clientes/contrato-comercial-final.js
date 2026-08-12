@@ -50,13 +50,13 @@ function textoOriginalComercial(oferta = {}) {
   const radarMirror = metadata.radarMirror && typeof metadata.radarMirror === "object" ? metadata.radarMirror : {};
   return texto(
     oferta.textoComercialOriginal ||
-    oferta.textoComercialCanonico ||
-    oferta.documentoComercialCanonico ||
     oferta.textoOriginal ||
     metadata.textoComercialOriginal ||
-    metadata.documentoComercialCanonico ||
     radarMirror.texto?.original ||
     radarMirror.textoOriginal ||
+    oferta.textoComercialCanonico ||
+    oferta.documentoComercialCanonico ||
+    metadata.documentoComercialCanonico ||
     ""
   );
 }
@@ -270,6 +270,7 @@ function beneficioSeguro(valor = "", cupom = "", instrucao = "") {
   const item = texto(valor);
   if (!item) return "";
   if (metadadoTecnicoCru(item)) return "";
+  if (inferenciaComercialProibida(item)) return "";
   const normalizado = normalizarComparacao(item);
   if (!/\b(?:off|desconto|frete|cashback|brinde|moeda|moedas|app|pix|prime|garantia|resgate|voucher)\b|\b\d+\s*%/.test(normalizado)) return "";
   const chave = assinaturaFato(item);
@@ -369,7 +370,7 @@ function listaComercialEvidenteNoRadar(valores = [], textoOriginal = "") {
   const vistos = new Set();
   for (const valor of Array.isArray(valores) ? valores : []) {
     const item = texto(valor);
-    if (!item || metadadoTecnicoCru(item) || !fatoComercialEvidenteNoRadar(item, textoOriginal)) continue;
+    if (!item || metadadoTecnicoCru(item) || inferenciaComercialProibida(item) || !fatoComercialEvidenteNoRadar(item, textoOriginal)) continue;
     const chave = normalizarComparacao(item);
     if (vistos.has(chave)) continue;
     vistos.add(chave);
@@ -394,10 +395,22 @@ function metadadoTecnicoCru(valor = "") {
   ]).has(chave);
 }
 
+function inferenciaComercialProibida(valor = "") {
+  const normalizado = normalizarComparacao(valor);
+  if (!normalizado) return false;
+  if (/\bpode\s+haver\b.*\b(?:cupom|beneficio|beneficio|app|carrinho)\b/.test(normalizado)) return true;
+  if (/\b(?:cupom|beneficio|beneficio)\s+provavel\b/.test(normalizado)) return true;
+  if (/\bconfira\b.*\b(?:carrinho|app|aplicativo)\b/.test(normalizado)) return true;
+  if (/\bdesconto\s+(?:no|via)?\s*pix\b/.test(normalizado)) return true;
+  if (/\bpagamento\s*pix\b|\bpagamentopix\b|\bbeneficio\s*pix\b|\bbeneficiopix\b/.test(normalizado)) return true;
+  return false;
+}
+
 function instrucaoExplicitaConfiavel(instrucao = "", cupom = "") {
   const valor = texto(instrucao);
   if (!valor || /https?:\/\//i.test(valor)) return "";
   if (metadadoTecnicoCru(valor)) return "";
+  if (inferenciaComercialProibida(valor)) return "";
   const n = normalizarComparacao(valor);
   if (/\bcaes\s+e\s+gatos\b/.test(n)) return "";
   if (/\b(?:programe|poupe|recorrencia|recorrente|assinatura)\b/.test(n)) return valor;
