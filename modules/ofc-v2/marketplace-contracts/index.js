@@ -200,6 +200,7 @@ function urlAfiliadaOcorrencia(link = {}, entrada = {}, opcoes = {}) {
   const direta = texto(link.urlOptimus || link.urlAfiliadaWorkspace || link.urlAfiliada || link.linkAfiliado || link.afiliado || "");
   if (direta) return direta;
   if (opcoes.exigirCorrelacaoAfiliadoGlobal && !afiliadoGlobalCorrelacionado(link, entrada)) return "";
+  if (!opcoes.exigirCorrelacaoAfiliadoGlobal) return "";
   return texto(entrada.linkAfiliado || "");
 }
 
@@ -228,7 +229,14 @@ function contratoMercadoLivre(entrada) {
   for (const link of lista(entrada.links)) {
     if (!texto(link.url)) continue;
     if (contextoExplicitoResgate(link) || texto(link.tipo) === "resgate") {
-      adicionarLink(saida, linkBase(link, "link_resgate", { urlAfiliada: urlAfiliadaOcorrencia(link, entrada) || texto(link.url) }));
+      const urlAfiliada = urlAfiliadaOcorrencia(link, entrada, { exigirCorrelacaoAfiliadoGlobal: true });
+      adicionarLink(saida, linkBase(link, "link_resgate", {
+        urlAfiliada,
+        renderizavel: Boolean(urlAfiliada),
+        conversaoStatus: urlAfiliada ? "convertida" : "falhou",
+        motivoConversao: urlAfiliada ? "resgate_workspace_convertido" : "resgate_sem_conversao_workspace",
+        avisos: urlAfiliada ? [] : ["link_sem_conversao_workspace"]
+      }));
       continue;
     }
     if (urlFonteOuSocial(link.url)) {
@@ -342,7 +350,14 @@ function contratoAmazon(entrada) {
       continue;
     }
     if (texto(link.tipo) === "resgate" || texto(link.tipo) === "link_resgate") {
-      adicionarLink(saida, linkBase(link, "link_resgate", { urlAfiliada: urlAfiliadaOcorrencia(link, entrada) || texto(link.url) }));
+      const urlAfiliada = urlAfiliadaOcorrencia(link, entrada, { exigirCorrelacaoAfiliadoGlobal: true });
+      adicionarLink(saida, linkBase(link, "link_resgate", {
+        urlAfiliada,
+        renderizavel: Boolean(urlAfiliada),
+        conversaoStatus: urlAfiliada ? "convertida" : "falhou",
+        motivoConversao: urlAfiliada ? "resgate_workspace_convertido" : "resgate_sem_conversao_workspace",
+        avisos: urlAfiliada ? [] : ["link_sem_conversao_workspace"]
+      }));
       continue;
     }
     if (urlAmazon(link.url) || texto(link.tipo) === "produto") produtos.push(link);

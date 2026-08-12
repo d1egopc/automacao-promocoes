@@ -486,7 +486,7 @@ function urlRenderizavelLinkFinal(item = {}) {
   );
   if (convertido) return convertido;
   if (urlTecnicaNaoRenderizavelFinal(item)) return "";
-  return texto(item.resolvido || item.original || item.url || item.link || "");
+  return "";
 }
 
 function resolverContratoComercialFinal(oferta = {}) {

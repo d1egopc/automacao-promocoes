@@ -1672,6 +1672,44 @@ function papelComercialIntegridade(papel = "") {
   return chave || "desconhecido";
 }
 
+function chaveUrlComercialIntegridade(url = "") {
+  const valor = normalizarTexto(url);
+  if (!valor) return "";
+  try {
+    const parsed = new URL(valor);
+    parsed.hash = "";
+    return `${parsed.hostname.replace(/^www\./i, "").toLowerCase()}${parsed.pathname}`.replace(/\/+$/, "");
+  } catch (_) {
+    return valor.replace(/#.*$/, "").replace(/\/+$/, "");
+  }
+}
+
+function afiliadoGlobalCorrespondeOcorrenciaIntegridade(item = {}, oferta = {}, ofertaEntrada = {}, urlOriginal = "", urlExpandida = "") {
+  const ctaAfiliado = normalizarTexto(oferta.linkAfiliado || "");
+  if (!ctaAfiliado) return false;
+  const principal = normalizarTexto(
+    oferta.linkOriginal ||
+    oferta.urlOriginal ||
+    ofertaEntrada.linkOriginal ||
+    ofertaEntrada.link_original ||
+    ofertaEntrada?.metadata?.linkOriginalEngine ||
+    ""
+  );
+  if (!principal) return false;
+  const chavePrincipal = chaveUrlComercialIntegridade(principal);
+  const candidatos = [
+    urlOriginal,
+    urlExpandida,
+    item.url,
+    item.original,
+    item.href,
+    item.resolvido,
+    item.urlNormalizada,
+    item.url_normalizada
+  ].map(chaveUrlComercialIntegridade).filter(Boolean);
+  return candidatos.some(chave => chave === chavePrincipal);
+}
+
 function coletarLinksIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, metadata = {} } = {}) {
   const classificados = Array.isArray(ofertaEntrada?.metadata?.linksClassificados)
     ? ofertaEntrada.metadata.linksClassificados
@@ -1697,20 +1735,25 @@ function coletarLinksIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, met
 
     if (!papel || papel === "desconhecido" || !urlBase) return;
 
+    const afiliadoGlobalSeguro = afiliadoGlobalCorrespondeOcorrenciaIntegridade(item, oferta, ofertaEntrada, urlOriginal, urlExpandida);
     const convertidoWorkspace = item.convertidoWorkspace === true
       || item.workspaceConvertido === true
       || item.linkAfiliadoWorkspace === true
       || Boolean(urlAfiliada && urlAfiliada === ctaAfiliado)
-      || Boolean(urlRenderizavel && urlRenderizavel === ctaAfiliado);
+      || Boolean(urlRenderizavel && urlRenderizavel === ctaAfiliado)
+      || afiliadoGlobalSeguro;
     const renderizavel = item.renderizavel === true || convertidoWorkspace;
+    const urlAfiliadaFinal = renderizavel
+      ? (urlAfiliada || urlRenderizavel || (afiliadoGlobalSeguro ? ctaAfiliado : ""))
+      : "";
 
     links.push({
       papel,
       tipo: papel,
       urlOriginal,
       urlExpandida,
-      urlAfiliada: renderizavel ? (urlAfiliada || urlRenderizavel || ctaAfiliado) : "",
-      urlAfiliadaWorkspace: renderizavel ? (urlAfiliadaWorkspace || urlRenderizavel || ctaAfiliado) : "",
+      urlAfiliada: urlAfiliadaFinal,
+      urlAfiliadaWorkspace: urlAfiliadaFinal,
       urlOptimus: normalizarTexto(item.urlOptimus || ""),
       ordemCaptura,
       ocorrenciaId,

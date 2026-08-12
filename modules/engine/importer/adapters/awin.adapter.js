@@ -82,6 +82,58 @@ function escolherLinkAwinKabum(links = [], evento = {}) {
   return escolherProdutoPrincipal(validos, "kabum", evento);
 }
 
+async function converterOcorrenciasAwinKabum({ linksClassificados = [], clienteId = "", deps = {}, linkAfiliadoPrincipal = "", urlOriginalEngine = "" } = {}) {
+  const cache = new Map();
+  const saida = [];
+  for (const [indice, link] of (Array.isArray(linksClassificados) ? linksClassificados : []).entries()) {
+    const urlOriginal = texto(link.urlProduto || link.urlOriginal || link.urlExpandida);
+    if (!urlOriginal || !/kabum\.com\.br|awin1?\.com|awin\.com/i.test(urlOriginal)) {
+      saida.push(link);
+      continue;
+    }
+    const papel = texto(link.papelLink || "produto");
+    const chave = `awin:${clienteId}:${papel}:${urlOriginal.toLowerCase()}`;
+    let conversao = cache.get(chave);
+    if (!conversao) {
+      if (texto(urlOriginalEngine) && texto(urlOriginal).replace(/\/+$/g, "").toLowerCase() === texto(urlOriginalEngine).replace(/\/+$/g, "").toLowerCase() && linkAfiliadoPrincipal) {
+        conversao = { urlAfiliada: linkAfiliadoPrincipal, renderizavel: true, status: "convertida", motivo: "deeplink_principal_workspace_convertido" };
+      } else {
+        try {
+          const urlAfiliada = typeof deps.gerarDeepLinkAwin === "function"
+            ? await deps.gerarDeepLinkAwin(urlOriginal, clienteId)
+            : "";
+          conversao = {
+            urlAfiliada: texto(urlAfiliada),
+            renderizavel: Boolean(urlAfiliada),
+            status: urlAfiliada ? "convertida" : "falhou",
+            motivo: urlAfiliada ? "awin_workspace_convertido_por_ocorrencia" : "awin_sem_conversao_workspace"
+          };
+        } catch (_) {
+          conversao = { urlAfiliada: "", renderizavel: false, status: "falhou", motivo: "falha_tecnica_conversao_awin" };
+        }
+      }
+      cache.set(chave, conversao);
+    }
+    saida.push({
+      ...link,
+      url: urlOriginal,
+      urlOriginal,
+      url_original: urlOriginal,
+      papelLink: papel,
+      papel,
+      tipo: papel,
+      ordemCaptura: Number(link.ordemCaptura || link.ordem || indice + 1) || (indice + 1),
+      urlAfiliada: conversao.urlAfiliada,
+      urlAfiliadaWorkspace: conversao.urlAfiliada,
+      renderizavel: conversao.renderizavel,
+      convertidoWorkspace: conversao.renderizavel,
+      conversaoStatus: conversao.status,
+      motivoConversao: conversao.motivo
+    });
+  }
+  return saida;
+}
+
 function normalizarMarketplaceAwinKabum(produto = {}, url = "") {
   const marketplace = texto(produto.marketplace || produto.mercado || "").toLowerCase();
   if (marketplace.includes("kabum") || /kabum\.com\.br/i.test(url)) return "kabum";
@@ -331,6 +383,13 @@ async function importarAwinEngine({ job = {}, evento = {}, links = [], deps = {}
 
   const cupomTipo = primeiroValor(produto.tipoCupom, produto.cupomTipo);
   const beneficioComercial = extrairBeneficioComercial(produto);
+  const linksClassificadosComConversao = await converterOcorrenciasAwinKabum({
+    linksClassificados,
+    clienteId,
+    deps,
+    linkAfiliadoPrincipal: linkAfiliado,
+    urlOriginalEngine
+  });
 
   return {
     ok: true,
@@ -374,7 +433,8 @@ async function importarAwinEngine({ job = {}, evento = {}, links = [], deps = {}
       campoLinkEscolhido: linkEscolhido.campo || "",
       papelLinkEscolhido: linkEscolhido.papelLink || "",
       papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
-      linksClassificados,
+      linksClassificados: linksClassificadosComConversao,
+      linksComerciais: linksClassificadosComConversao,
       integracaoUsada: integracaoAwin ? "awin" : "kabum",
       camposProduto: Object.keys(produto || {}),
       produto

@@ -1,6 +1,7 @@
 const { classificarCategoriaOferta } = require("../../../../marketplaces/inteligencia/classificador-categorias");
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
 const { queryEngine } = require("../../database");
+const { resumoLinksClassificados } = require("../../link-role.service");
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -38,6 +39,68 @@ function escolherLinkAmazon(links = [], evento = {}) {
       url: texto(candidato.url)
     }))
     .find(candidato => /amazon\.|amzn\.to/i.test(candidato.url)) || { url: "", link: null, campo: "" };
+}
+
+function urlOcorrenciaAmazon(link = {}) {
+  return texto(link.url_original || link.urlOriginal || link.url_normalizada || link.urlNormalizada || link.url_expandida || link.urlExpandida || link.url);
+}
+
+function mesmoLinkAmazon(a = "", b = "") {
+  return Boolean(texto(a) && texto(b) && texto(a).replace(/\/+$/g, "").toLowerCase() === texto(b).replace(/\/+$/g, "").toLowerCase());
+}
+
+async function converterOcorrenciasAmazon({ links = [], evento = {}, clienteId = "", integracao = {}, deps = {}, urlOriginalEngine = "", linkAfiliadoPrincipal = "" } = {}) {
+  const cache = new Map();
+  const textoOriginalRadar = textoOriginalEvento(evento);
+  const saida = [];
+
+  for (const [indice, link] of (Array.isArray(links) ? links : []).entries()) {
+    const urlOriginal = urlOcorrenciaAmazon(link);
+    if (!urlOriginal || !/amazon\.|amzn\.to/i.test(urlOriginal)) {
+      saida.push(link);
+      continue;
+    }
+    const papel = texto(link.papelLink || link.papel || link.tipo || "produto");
+    const chave = `amazon:${clienteId}:${papel}:${urlOriginal.toLowerCase()}`;
+    let conversao = cache.get(chave);
+    if (!conversao) {
+      if (mesmoLinkAmazon(urlOriginal, urlOriginalEngine) && linkAfiliadoPrincipal) {
+        conversao = { urlAfiliada: linkAfiliadoPrincipal, renderizavel: true, status: "convertida", motivo: "produto_principal_workspace_convertido" };
+      } else {
+        try {
+          const produtoConvertido = await deps.importarAmazon(urlOriginal, {
+            ...integracao,
+            textoOriginal: textoOriginalRadar,
+            contextoRadar: { textoOriginal: textoOriginalRadar, grupoId: evento.grupo_id || "", grupoNome: evento.grupo_nome || "", origem: evento.origem || "engine" },
+            contextoEngine: { eventoId: evento.id || evento.evento_id || "", clienteId, conversaoLinkAlternativo: true, papelLink: papel }
+          });
+          const urlAfiliada = texto(produtoConvertido?.linkAfiliado || produtoConvertido?.linkFinal || produtoConvertido?.link);
+          conversao = { urlAfiliada, renderizavel: Boolean(urlAfiliada), status: urlAfiliada ? "convertida" : "falhou", motivo: urlAfiliada ? "amazon_workspace_convertido_por_ocorrencia" : "amazon_sem_conversao_workspace" };
+        } catch (_) {
+          conversao = { urlAfiliada: "", renderizavel: false, status: "falhou", motivo: "falha_tecnica_conversao_amazon" };
+        }
+      }
+      cache.set(chave, conversao);
+    }
+    saida.push({
+      ...link,
+      url: urlOriginal,
+      urlOriginal,
+      url_original: urlOriginal,
+      papelLink: papel,
+      papel: link.papel || papel,
+      tipo: link.tipo || papel,
+      ordemCaptura: Number(link.ordemCaptura || link.ordem || indice + 1) || (indice + 1),
+      urlAfiliada: conversao.urlAfiliada,
+      urlAfiliadaWorkspace: conversao.urlAfiliada,
+      renderizavel: conversao.renderizavel,
+      convertidoWorkspace: conversao.renderizavel,
+      conversaoStatus: conversao.status,
+      motivoConversao: conversao.motivo
+    });
+  }
+
+  return saida;
 }
 
 function categoriaGenericaAmazon(categoria = "") {
@@ -364,6 +427,15 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
   }
 
   const cupomTipo = produto.tipoCupom || produto.cupomTipo || "";
+  const linksConvertidosAmazon = await converterOcorrenciasAmazon({
+    links,
+    evento,
+    clienteId,
+    integracao,
+    deps,
+    urlOriginalEngine,
+    linkAfiliadoPrincipal: linkAfiliado
+  });
   const beneficioExtra = produto.beneficioExtra || produto.beneficioTexto || produto.avisoCupom || "";
   const ofertaAdapter = {
     ok: true,
@@ -400,6 +472,8 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
       jobId: job.id,
       eventoId: job.evento_id,
       linkOriginalEngine: urlOriginalEngine,
+      linksClassificados: resumoLinksClassificados(linksConvertidosAmazon, evento, "amazon"),
+      linksComerciais: linksConvertidosAmazon,
       textoRadarTemCupom: Boolean(extrairCupomTextoRadarAmazon(textoOriginalEvento(evento)).cupom),
       camposProduto: Object.keys(produto || {}),
       produto,
@@ -421,8 +495,6 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
 module.exports = {
   importarAmazonEngine
 };
-
-
 
 
 

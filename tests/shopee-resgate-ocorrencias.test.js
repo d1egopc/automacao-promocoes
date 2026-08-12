@@ -4,7 +4,8 @@ const { importarShopeeEngine } = require("../modules/engine/importer/adapters/sh
 async function testarResgateProdutoProduto() {
   const resgate = "https://s.shopee.com.br/50UODeJEET";
   const produto = "https://s.shopee.com.br/6L3ZsZbcnU";
-  const afiliado = "https://s.shopee.com.br/1qbAWUnlri";
+  const afiliadoResgate = "https://s.shopee.com.br/resgateD1";
+  const afiliadoProduto = "https://s.shopee.com.br/1qbAWUnlri";
   const texto = [
     "Kit Ferramentas",
     "R$ 55,90",
@@ -27,7 +28,22 @@ async function testarResgateProdutoProduto() {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
       importarShopee: async (url) => {
         chamadas.push(url);
-        assert.strictEqual(url, produto, "Resgate nao deve ser enviado ao importador de Produto");
+        if (url === resgate) {
+          return {
+            ok: true,
+            titulo: "Resgate cupom Shopee",
+            precoAtual: "55,90",
+            preco: "55,90",
+            imagem: "https://img.test/resgate.jpg",
+            linkAfiliado: afiliadoResgate,
+            linkFinal: afiliadoResgate,
+            link: afiliadoResgate,
+            linkOriginal: resgate,
+            linkExpandido: resgate,
+            categoria: "Cupom"
+          };
+        }
+        assert.strictEqual(url, produto);
         return {
           ok: true,
           titulo: "Kit Jogo Ferramenta Chave Magnetica Precisao 24 Pecas",
@@ -35,9 +51,9 @@ async function testarResgateProdutoProduto() {
           preco: "55,90",
           imagem: "https://img.test/shopee.jpg",
           imagemOrigem: "fixture",
-          linkAfiliado: afiliado,
-          linkFinal: afiliado,
-          link: afiliado,
+          linkAfiliado: afiliadoProduto,
+          linkFinal: afiliadoProduto,
+          link: afiliadoProduto,
           linkOriginal: produto,
           linkExpandido: produto,
           shopId: "123",
@@ -49,15 +65,17 @@ async function testarResgateProdutoProduto() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.strictEqual(chamadas.length, 1, "duplicado pode reutilizar conversao tecnica");
+  assert.deepStrictEqual(chamadas, [produto, resgate], "produto principal e resgate recebem conversao propria; produto duplicado reutiliza cache");
   assert.deepStrictEqual(resultado.linksComerciais.map(item => item.tipo), ["resgate", "produto", "produto"]);
   assert.deepStrictEqual(resultado.linksComerciais.map(item => item.ordemCaptura), [1, 2, 3]);
   assert.strictEqual(resultado.linksComerciais[0].urlOriginal, resgate);
   assert.strictEqual(resultado.linksComerciais[0].renderizavel, true);
-  assert.strictEqual(resultado.linksComerciais[1].urlAfiliadaWorkspace, afiliado);
-  assert.strictEqual(resultado.linksComerciais[2].urlAfiliadaWorkspace, afiliado);
+  assert.strictEqual(resultado.linksComerciais[0].urlAfiliadaWorkspace, afiliadoResgate);
+  assert.strictEqual(resultado.linksComerciais[1].urlAfiliadaWorkspace, afiliadoProduto);
+  assert.strictEqual(resultado.linksComerciais[2].urlAfiliadaWorkspace, afiliadoProduto);
   assert.deepStrictEqual(resultado.linksResgate.map(item => item.urlOriginal), [resgate]);
   assert.deepStrictEqual(resultado.linksProduto.map(item => item.urlOriginal), [produto, produto]);
+  assert.deepStrictEqual(resultado.linksResgate.map(item => item.urlAfiliadaWorkspace), [afiliadoResgate]);
   assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.tipo), ["resgate", "produto", "produto"]);
 }
 

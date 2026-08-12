@@ -1,6 +1,7 @@
 const { queryEngine } = require("../../database");
 const { classificarCategoriaOferta } = require("../../../../marketplaces/inteligencia/classificador-categorias");
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
+const { resumoLinksClassificados } = require("../../link-role.service");
 
 function resumoTemplateInputAuditoria(templateInput = {}) {
   return {
@@ -229,6 +230,83 @@ function escolherLinkMercadoLivreDetalhado(links = [], evento = {}) {
       url: String(candidato.url || "").trim()
     }))
     .find(candidato => /mercadolivre\.com|meli\.la/i.test(candidato.url)) || { url: "", link: null, campo: "" };
+}
+
+function urlOcorrenciaMercadoLivre(link = {}) {
+  return String(link.url_original || link.urlOriginal || link.url_normalizada || link.urlNormalizada || link.url_expandida || link.urlExpandida || link.url || "").trim();
+}
+
+function mesmoLinkMercadoLivre(a = "", b = "") {
+  return Boolean(String(a || "").trim() && String(b || "").trim() && String(a).replace(/\/+$/g, "").toLowerCase() === String(b).replace(/\/+$/g, "").toLowerCase());
+}
+
+async function converterOcorrenciasMercadoLivre({
+  links = [],
+  evento = {},
+  clienteId = "",
+  integracao = {},
+  deps = {},
+  urlOriginalEngine = "",
+  urlImportador = "",
+  linkExpandidoEngine = "",
+  linkAfiliadoPrincipal = ""
+} = {}) {
+  const cache = new Map();
+  const saida = [];
+
+  for (const [indice, link] of (Array.isArray(links) ? links : []).entries()) {
+    const urlOriginal = urlOcorrenciaMercadoLivre(link);
+    if (!urlOriginal || !/mercadolivre\.com|meli\.la/i.test(urlOriginal)) {
+      saida.push(link);
+      continue;
+    }
+    const chave = `mercadolivre:${clienteId}:produto:${urlOriginal.toLowerCase()}`;
+    let conversao = cache.get(chave);
+    if (!conversao) {
+      if ([urlOriginalEngine, urlImportador, linkExpandidoEngine].some(url => mesmoLinkMercadoLivre(urlOriginal, url)) && linkAfiliadoPrincipal) {
+        conversao = { urlAfiliada: linkAfiliadoPrincipal, renderizavel: true, status: "convertida", motivo: "produto_principal_workspace_convertido" };
+      } else {
+        try {
+          const resolucao = await resolverUrlProdutoMercadoLivreEngine(urlOriginal, deps, {
+            jobId: "",
+            eventoId: evento.id || evento.evento_id || "",
+            clienteId
+          });
+          const urlParaConverter = resolucao.ok ? resolucao.urlProduto : urlOriginal;
+          const urlAfiliada = typeof deps.gerarLinkAfiliadoMercadoLivre === "function"
+            ? await deps.gerarLinkAfiliadoMercadoLivre(urlParaConverter, integracao, { clienteId })
+            : "";
+          conversao = {
+            urlAfiliada: String(urlAfiliada || "").trim(),
+            renderizavel: Boolean(urlAfiliada),
+            status: urlAfiliada ? "convertida" : "falhou",
+            motivo: urlAfiliada ? "produto_workspace_convertido_por_ocorrencia" : "produto_sem_conversao_workspace"
+          };
+        } catch (_) {
+          conversao = { urlAfiliada: "", renderizavel: false, status: "falhou", motivo: "falha_tecnica_conversao_produto" };
+        }
+      }
+      cache.set(chave, conversao);
+    }
+    saida.push({
+      ...link,
+      urlOriginal,
+      url_original: urlOriginal,
+      url: urlOriginal,
+      papelLink: link.papelLink || "produto",
+      papel: link.papel || "produto",
+      tipo: link.tipo || "produto",
+      ordemCaptura: Number(link.ordemCaptura || link.ordem || indice + 1) || (indice + 1),
+      urlAfiliada: conversao.urlAfiliada,
+      urlAfiliadaWorkspace: conversao.urlAfiliada,
+      renderizavel: conversao.renderizavel,
+      convertidoWorkspace: conversao.renderizavel,
+      conversaoStatus: conversao.status,
+      motivoConversao: conversao.motivo
+    });
+  }
+
+  return saida;
 }
 
 function isMeliLa(url = "") {
@@ -587,6 +665,17 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
   const avisoCupom = produto.avisoCupom || "";
   const cupomTipo = produto.tipoCupom || produto.cupomTipo || "";
   const imagensMercadoLivre = metadadosImagemMercadoLivre(produto);
+  const linksConvertidosMercadoLivre = await converterOcorrenciasMercadoLivre({
+    links,
+    evento,
+    clienteId,
+    integracao,
+    deps,
+    urlOriginalEngine,
+    urlImportador,
+    linkExpandidoEngine,
+    linkAfiliadoPrincipal: linkAfiliado
+  });
 
   const ofertaAdapter = {
     ok: true,
@@ -676,6 +765,8 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
       expandiuMeliLa,
       resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
       camposProduto: Object.keys(produto || {}),
+      linksClassificados: resumoLinksClassificados(linksConvertidosMercadoLivre, evento, "mercadolivre"),
+      linksComerciais: linksConvertidosMercadoLivre,
       produto: {
         ...produto,
         ...imagensMercadoLivre,
@@ -688,7 +779,5 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
 module.exports = {
   importarMercadoLivreEngine
 };
-
-
 
 

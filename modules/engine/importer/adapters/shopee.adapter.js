@@ -412,6 +412,119 @@ function mesmoLinkShopee(a = "", b = "") {
   return Boolean(chaveA && chaveB && chaveA === chaveB);
 }
 
+function chaveConversaoOcorrenciaShopee(clienteId = "", papel = "", url = "") {
+  return `shopee:${texto(clienteId)}:${texto(papel)}:${texto(url).toLowerCase()}`;
+}
+
+function resultadoConversaoLinkShopee({ link = {}, urlAfiliada = "", renderizavel = false, motivo = "", status = "" } = {}) {
+  return {
+    ...link,
+    urlAfiliada: urlAfiliada || "",
+    urlAfiliadaWorkspace: urlAfiliada || "",
+    linkAfiliado: urlAfiliada || "",
+    afiliado: urlAfiliada || "",
+    renderizavel: renderizavel === true,
+    seguro: renderizavel === true,
+    convertidoWorkspace: renderizavel === true,
+    conversaoStatus: status || (renderizavel ? "convertida" : "falhou"),
+    motivoConversao: motivo || (renderizavel ? "conversao_ocorrencia_shopee" : "conversao_ocorrencia_shopee_falhou")
+  };
+}
+
+async function converterOcorrenciasShopee({
+  links = [],
+  evento = {},
+  clienteId = "",
+  integracao = {},
+  deps = {},
+  produtoPrincipal = {},
+  linkAfiliadoPrincipal = "",
+  urlOriginalEngine = "",
+  cacheImportacoesShopee = new Map()
+} = {}) {
+  const cacheConversoes = new Map();
+  const textoOriginalRadar = textoOriginalEvento(evento);
+  const saida = [];
+
+  for (const [indice, link] of (Array.isArray(links) ? links : []).entries()) {
+    const urlOriginal = urlPrincipalOcorrenciaShopee(link);
+    const classificado = candidatoOcorrenciaShopee(link, evento, indice);
+    const papel = classificado.papel || papelComercialShopee(link.papel || link.papelLink || link.tipo || "");
+    if (!urlOriginal || !["produto", "resgate"].includes(papel)) {
+      saida.push(link);
+      continue;
+    }
+
+    const chave = chaveConversaoOcorrenciaShopee(clienteId, papel, urlOriginal);
+    let conversao = cacheConversoes.get(chave);
+    if (!conversao) {
+      if (papel === "produto" && (
+        mesmoLinkShopee(urlOriginal, urlOriginalEngine) ||
+        urlsOcorrenciaShopee(link).some(url => mesmoLinkShopee(url, urlOriginalEngine))
+      ) && linkAfiliadoPrincipal) {
+        conversao = {
+          urlAfiliada: linkAfiliadoPrincipal,
+          renderizavel: true,
+          motivo: "produto_principal_workspace_convertido",
+          status: "convertida"
+        };
+      } else {
+        try {
+          let produtoConvertido = cacheImportacoesShopee.get(urlOriginal);
+          if (!produtoConvertido) {
+            produtoConvertido = await deps.importarShopee(urlOriginal, {
+              ...integracao,
+              textoOriginal: textoOriginalRadar,
+              contextoRadar: {
+                textoOriginal: textoOriginalRadar,
+                grupoId: evento.grupo_id || "",
+                grupoNome: evento.grupo_nome || "",
+                origem: evento.origem || "engine"
+              },
+              contextoEngine: {
+                eventoId: evento.id || evento.evento_id || "",
+                clienteId,
+                conversaoLinkAlternativo: true,
+                papelLink: papel
+              }
+            });
+            cacheImportacoesShopee.set(urlOriginal, produtoConvertido);
+          }
+          const urlAfiliada = texto(produtoConvertido?.linkAfiliado || produtoConvertido?.linkFinal || produtoConvertido?.link || produtoConvertido?.offerLink || "");
+          conversao = {
+            urlAfiliada,
+            renderizavel: Boolean(urlAfiliada),
+            motivo: urlAfiliada ? `${papel}_workspace_convertido_por_ocorrencia` : `${papel}_sem_conversao_workspace`,
+            status: urlAfiliada ? "convertida" : "falhou"
+          };
+        } catch (e) {
+          conversao = {
+            urlAfiliada: "",
+            renderizavel: false,
+            motivo: `falha_tecnica_conversao_${papel}`,
+            status: "falhou"
+          };
+        }
+      }
+      cacheConversoes.set(chave, conversao);
+    }
+
+    saida.push(resultadoConversaoLinkShopee({
+      link: {
+        ...link,
+        url: urlOriginal,
+        urlOriginal,
+        url_original: urlOriginal,
+        papelLink: papel === "resgate" ? PAPEL_LINK.CUPOM : PAPEL_LINK.PRODUTO,
+        papelLinkMotivo: link.papelLinkMotivo || classificado.motivo
+      },
+      ...conversao
+    }));
+  }
+
+  return saida;
+}
+
 function candidatoOcorrenciaShopee(link = {}, evento = {}, indice = 0) {
   const url = urlPrincipalOcorrenciaShopee(link);
   const papelExistente = papelComercialShopee(link.papel || link.papelLink || link.tipo || link.role || "");
@@ -909,8 +1022,19 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
 
   const cupomTipo = produto.tipoCupom || produto.cupomTipo || "";
   const beneficioExtra = produto.beneficioExtra || produto.beneficioTexto || produto.avisoCupom || produto.avisoVariacaoPreco || "";
-  const linksComerciaisShopee = montarLinksComerciaisShopee({
+  const linksConvertidosShopee = await converterOcorrenciasShopee({
     links,
+    evento,
+    clienteId,
+    integracao,
+    deps,
+    produtoPrincipal: produto,
+    linkAfiliadoPrincipal: linkAfiliado,
+    urlOriginalEngine,
+    cacheImportacoesShopee
+  });
+  const linksComerciaisShopee = montarLinksComerciaisShopee({
+    links: linksConvertidosShopee,
     evento,
     analiseLinksShopee,
     linkEscolhido,
@@ -1005,7 +1129,7 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
       papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
       ambiguidadeLinksProduto: candidatosShopee.length > 1,
       totalCandidatosProduto: candidatosShopee.length,
-      linksClassificados: resumoLinksClassificados(links, evento, "shopee"),
+      linksClassificados: resumoLinksClassificados(linksConvertidosShopee, evento, "shopee"),
       candidatosShopee: resumoCandidatosShopee(analiseLinksShopee.classificados),
       linksAuxiliaresShopee: resumoCandidatosShopee(linksAuxiliaresShopee),
       linksComerciais: linksComerciaisShopee,

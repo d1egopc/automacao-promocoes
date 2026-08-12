@@ -186,4 +186,93 @@ const renderLinksAli = renderizarTemplatePersonalizado({
 assert.ok(renderLinksAli.mensagem.includes("https://go.optimus/r/app"));
 assert.ok(renderLinksAli.mensagem.includes("https://go.optimus/r/pc"));
 
+function linksRenderizaveis(contrato) {
+  return contrato.links.filter(link => link.renderizavel !== false);
+}
+
+function testarAfiliadoGlobalNaoTrocaDestino(marketplace, urlA, urlB, afiliadoA) {
+  const contrato = aplicarContratoMarketplace({
+    marketplace,
+    linkOriginal: urlA,
+    linkAfiliado: afiliadoA,
+    links: [
+      { url: urlA, tipo: "produto", ordemCaptura: 1 },
+      { url: urlB, tipo: "produto", ordemCaptura: 2 }
+    ]
+  });
+  assert.strictEqual(contrato.links.length, 2, `${marketplace}: duas ocorrencias devem continuar auditaveis`);
+  assert.strictEqual(contrato.links[0].urlAfiliada, afiliadoA, `${marketplace}: A deve receber afiliado A'`);
+  assert.strictEqual(contrato.links[0].renderizavel, true, `${marketplace}: A deve renderizar`);
+  assert.strictEqual(contrato.links[1].urlAfiliada, "", `${marketplace}: B nao pode receber afiliado A'`);
+  assert.strictEqual(contrato.links[1].renderizavel, false, `${marketplace}: B sem conversao propria nao renderiza original`);
+  assert.strictEqual(linksRenderizaveis(contrato).length, 1, `${marketplace}: somente ocorrencia convertida renderiza`);
+}
+
+testarAfiliadoGlobalNaoTrocaDestino(
+  "mercadolivre",
+  "https://meli.la/produto-a",
+  "https://meli.la/produto-b",
+  "https://go.optimus/ml/produto-a"
+);
+
+testarAfiliadoGlobalNaoTrocaDestino(
+  "amazon",
+  "https://amzn.to/produto-a",
+  "https://amzn.to/produto-b",
+  "https://go.optimus/amazon/produto-a"
+);
+
+testarAfiliadoGlobalNaoTrocaDestino(
+  "kabum-awin",
+  "https://www.kabum.com.br/produto/100/produto-a",
+  "https://www.kabum.com.br/produto/200/produto-b",
+  "https://go.optimus/kabum/produto-a"
+);
+
+const contratoShopeeResgateProdutoProduto = aplicarContratoMarketplace({
+  marketplace: "shopee",
+  links: [
+    { url: "https://s.shopee.com.br/resgate-a", tipo: "resgate", contexto: "Resgate o cupom", ordemCaptura: 1, urlAfiliada: "https://go.optimus/shopee/resgate-a", convertidoWorkspace: true },
+    { url: "https://s.shopee.com.br/produto-b", tipo: "produto", contexto: "Produto", ordemCaptura: 2, urlAfiliada: "https://go.optimus/shopee/produto-b", convertidoWorkspace: true },
+    { url: "https://s.shopee.com.br/produto-b", tipo: "produto", contexto: "Produto", ordemCaptura: 3, urlAfiliada: "https://go.optimus/shopee/produto-b", convertidoWorkspace: true }
+  ]
+});
+assert.deepStrictEqual(
+  linksRenderizaveis(contratoShopeeResgateProdutoProduto).map(link => link.urlAfiliada),
+  [
+    "https://go.optimus/shopee/resgate-a",
+    "https://go.optimus/shopee/produto-b",
+    "https://go.optimus/shopee/produto-b"
+  ],
+  "Shopee deve preservar Resgate + Produto + Produto sem trocar destino"
+);
+
+const contratoAliProdutoDistintos = aplicarContratoMarketplace({
+  marketplace: "aliexpress",
+  linkOriginal: "https://a.aliexpress.com/_produtoA",
+  linkAfiliado: "https://s.click.aliexpress.com/e/_produtoA",
+  links: [
+    { url: "https://a.aliexpress.com/_produtoA", tipo: "produto", ordemCaptura: 1 },
+    { url: "https://a.aliexpress.com/_produtoB", tipo: "produto", ordemCaptura: 2 }
+  ]
+});
+assert.strictEqual(contratoAliProdutoDistintos.links[0].urlAfiliada, "https://s.click.aliexpress.com/e/_produtoA");
+assert.strictEqual(contratoAliProdutoDistintos.links[1].urlAfiliada, "", "AliExpress Produto B nao pode receber conversao do Produto A");
+assert.strictEqual(contratoAliProdutoDistintos.links[1].renderizavel, false);
+
+const renderNaoVazaOriginal = renderizarTemplatePersonalizado({
+  canal: "whatsapp",
+  template,
+  oferta: {
+    titulo: "Produto sem conversao",
+    marketplace: "mercadolivre",
+    preco: 99,
+    linksComerciais: [
+      { tipo: "produto", papel: "link_produto", ordemCaptura: 1, original: "https://meli.la/original-terceiro", renderizavel: false, conversaoStatus: "falhou" }
+    ]
+  }
+});
+assert.strictEqual(renderNaoVazaOriginal.ok, true);
+assert.ok(!renderNaoVazaOriginal.mensagem.includes("https://meli.la/original-terceiro"), "renderer nao deve vazar URL original sem conversao workspace");
+
 console.log("contrato-comercial-papeis: ok");

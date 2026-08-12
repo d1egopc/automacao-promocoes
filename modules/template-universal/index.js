@@ -168,10 +168,17 @@ function linksComerciaisUnicos(links = []) {
     if (!link || typeof link !== "object") continue;
     const tipo = normalizarTexto(link.tipo || link.papel || "produto");
     const ordemCaptura = Number(link.ordemCaptura || link.ordem || indice + 1) || (indice + 1);
-    const afiliado = normalizarTexto(link.afiliado);
+    const afiliado = normalizarTexto(
+      link.urlOptimus ||
+      link.urlAfiliadaWorkspace ||
+      link.urlAfiliada ||
+      link.afiliado ||
+      link.linkAfiliado ||
+      ""
+    );
     const resolvido = normalizarTexto(link.resolvido);
     const original = normalizarTexto(link.original);
-    const url = afiliado || resolvido || original;
+    const url = afiliado;
     if (!url) continue;
     resultado.push({
       tipo,
@@ -181,6 +188,9 @@ function linksComerciaisUnicos(links = []) {
       original,
       resolvido,
       afiliado,
+      urlAfiliada: afiliado,
+      urlAfiliadaWorkspace: afiliado,
+      urlOptimus: normalizarTexto(link.urlOptimus || afiliado),
       status: normalizarTexto(link.status || "")
     });
   }
@@ -564,7 +574,7 @@ function urlLinkTemplate(item = {}) {
     item.tipoOrigem
   ].filter(Boolean).join(" "));
   if (/\b(?:imagem|canonical|permalink|url\s+rica|url\s+tecnica|link\s+resolvido\s+imagem|importer|adapter|metadata|api|html)\b/.test(origem)) return "";
-  return normalizarTexto(item.resolvido || item.original || item.link || item.url);
+  return "";
 }
 
 function linksPorPapelTemplate(campos = {}, papel = "") {

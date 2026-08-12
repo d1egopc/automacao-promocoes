@@ -33,7 +33,7 @@ async function testarClassificacaoShopeePreservaProduto() {
   const { importarShopeeEngine } = require("../modules/engine/importer/adapters/shopee.adapter");
   const cupom = "https://s.shopee.com.br/4fut1OkrEh";
   const produto = "https://s.shopee.com.br/8AUlBpU61C";
-  let urlImportada = "";
+  const chamadasImportador = [];
 
   const resultado = await importarShopeeEngine({
     job: { id: 101, evento_id: 201, cliente_id: "workspace_teste" },
@@ -50,7 +50,7 @@ async function testarClassificacaoShopeePreservaProduto() {
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
       importarShopee: async (url) => {
-        urlImportada = url;
+        chamadasImportador.push(url);
         return {
           titulo: "Water Cooler Aigo Darkflash DC360 Radiant",
           precoAtual: "229.00",
@@ -67,7 +67,7 @@ async function testarClassificacaoShopeePreservaProduto() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.strictEqual(urlImportada, produto);
+  assert.deepStrictEqual(chamadasImportador, [produto, cupom]);
   assert.strictEqual(resultado.metadata.papelLinkEscolhido, "produto");
   assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "cupom");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
@@ -78,7 +78,7 @@ async function testarShopeeResgateProdutoComParametroLpAff() {
   const { importarShopeeEngine } = require("../modules/engine/importer/adapters/shopee.adapter");
   const resgate = "https://s.shopee.com.br/4LEepvkqdN";
   const produto = "https://s.shopee.com.br/2qPrA9vtrB?lp=aff";
-  let urlImportada = "";
+  const chamadasImportador = [];
 
   const resultado = await importarShopeeEngine({
     job: { id: 114, evento_id: 214, cliente_id: "workspace_teste" },
@@ -97,7 +97,7 @@ async function testarShopeeResgateProdutoComParametroLpAff() {
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
       importarShopee: async (url) => {
-        urlImportada = url;
+        chamadasImportador.push(url);
         return {
           titulo: "Smartphone Poco",
           precoAtual: "725.00",
@@ -113,7 +113,7 @@ async function testarShopeeResgateProdutoComParametroLpAff() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.strictEqual(urlImportada, produto);
+  assert.deepStrictEqual(chamadasImportador, [produto, resgate]);
   assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "cupom");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
 }
@@ -123,7 +123,7 @@ async function testarShopeeResgateProdutoSemRotuloExplicito() {
   const { importarShopeeEngine } = require("../modules/engine/importer/adapters/shopee.adapter");
   const resgate = "https://s.shopee.com.br/9zwbROf8sg";
   const produto = "https://s.shopee.com.br/4qE8r7jK78";
-  let urlImportada = "";
+  const chamadasImportador = [];
 
   const resultado = await importarShopeeEngine({
     job: { id: 116, evento_id: 216, cliente_id: "workspace_teste" },
@@ -144,7 +144,7 @@ async function testarShopeeResgateProdutoSemRotuloExplicito() {
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
       importarShopee: async (url) => {
-        urlImportada = url;
+        chamadasImportador.push(url);
         return {
           titulo: "Memoria Servidor 32GB",
           precoAtual: "192.00",
@@ -160,7 +160,7 @@ async function testarShopeeResgateProdutoSemRotuloExplicito() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.strictEqual(urlImportada, produto);
+  assert.deepStrictEqual(chamadasImportador, [produto, resgate]);
   assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "cupom");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLinkMotivo, "contexto_produto_apos_resgate_shopee");

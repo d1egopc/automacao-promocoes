@@ -446,7 +446,7 @@ function urlRenderizavelLinkTemplate(item = {}) {
     item.tipoOrigem
   ].filter(Boolean).join(" "));
   if (/\b(?:imagem|canonical|permalink|url\s+rica|url\s+tecnica|link\s+resolvido\s+imagem|importer|adapter|metadata|api|html)\b/.test(origem)) return "";
-  return primeiroTexto(item.resolvido, item.url, item.original, item.link);
+  return "";
 }
 
 function temOcorrenciasComerciais(oferta = {}) {
