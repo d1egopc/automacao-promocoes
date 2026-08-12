@@ -236,7 +236,7 @@ function classificadosPorTipo(resultado = {}, tipo = "") {
     ].join("\n")
   });
 
-  assert.deepStrictEqual(resultado.app, [app], "APP repetido deve deduplicar sem perder o papel");
+  assert.deepStrictEqual(resultado.app, [app, app], "APP repetido deve preservar ocorrencias comerciais");
   assert.deepStrictEqual(resultado.pc, [pc], "PC unico deve permanecer PC");
 }
 
@@ -377,4 +377,42 @@ function classificadosPorTipo(resultado = {}, tipo = "") {
   assert.strictEqual(oferta.oferta.linksResgate[0].original, resgate);
 }
 
+{
+  const resgate = "https://s.shopee.com.br/50UODeJEET";
+  const produto = "https://s.shopee.com.br/6L3ZsZbcnU";
+  const resultado = classificarLinksComerciais({
+    marketplace: "shopee",
+    texto: [
+      "Kit Ferramentas",
+      "Resgatem o cupom de 30% OFF",
+      resgate,
+      produto,
+      produto
+    ].join("\n")
+  });
+
+  assert.deepStrictEqual(resultado.classificados.map(item => item.tipo), ["resgate", "produto", "produto"]);
+  assert.deepStrictEqual(resultado.resgate, [resgate]);
+  assert.deepStrictEqual(resultado.produto, [produto, produto]);
+  assert.ok(resultado.classificados.every(item => item.ocorrenciaId && item.link === item.url));
+}
+
+{
+  const resgate = "https://s.shopee.com.br/50UODeJEET";
+  for (const frase of ["Resgate o cupom", "Resgata o cupom", "Pegue o cupom", "Colete o cupom"]) {
+    const resultado = classificarLinkComercial({
+      url: resgate,
+      linhaAtual: resgate,
+      linhaAnterior: frase,
+      marketplace: "shopee"
+    });
+    assert.strictEqual(resultado.tipo, "resgate", `${frase} deve ganhar do fallback por dominio`);
+  }
+}
+
+{
+  const produto = "https://s.shopee.com.br/produtoSemContexto";
+  const resultado = classificarLinkComercial({ url: produto, marketplace: "shopee" });
+  assert.strictEqual(resultado.tipo, "produto");
+}
 console.log("links-comerciais.test.js OK");

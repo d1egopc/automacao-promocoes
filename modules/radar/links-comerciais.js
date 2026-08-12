@@ -62,7 +62,7 @@ function contextoTextual({ linhaAtual = "", linhaAnterior = "", linhaPosterior =
 }
 
 function contextoInequivocoResgate(chave = "") {
-  return /\b(?:resgate|resgatar|voucher|pegue\s+o\s+cupom|pegar\s+cupom|ative\s+o\s+cupom|ativar\s+cupom|colete\s+o\s+cupom|coletar\s+cupom|clique\s+para\s+obter\s+o\s+cupom|pagina\s+de\s+cupons|cupons?\s+aqui|link\s+do\s+cupom)\b/.test(chave);
+  return /\b(?:voucher|resgat(?:e|em|a|ar)(?:\s+(?:o|a|os|as|seu|sua|seus|suas))?\s+cupo(?:m|ns)|peg(?:ue|ar)(?:\s+(?:o|a|os|as|seu|sua|seus|suas))?\s+cupo(?:m|ns)|colet(?:e|ar)(?:\s+(?:o|a|os|as|seu|sua|seus|suas))?\s+cupo(?:m|ns)|ativ(?:e|ar)(?:\s+(?:o|a|os|as|seu|sua|seus|suas))?\s+cupo(?:m|ns)|clique\s+para\s+obter\s+(?:o\s+)?cupom|pagina\s+de\s+cupons|cupons?\s+aqui|link\s+do\s+cupom|cupom\s+(?:disponivel|liberado|resgatavel))\b/.test(chave);
 }
 
 function contextoInequivocoProduto(chave = "") {
@@ -350,7 +350,8 @@ function classificarLinksComerciais({
 
   linhasBase.forEach((linhaAtual, indice) => {
     for (const url of extrairLinksTextoComercial(linhaAtual)) {
-      const contextoAnteriorExtra = contextoInequivocoResgate(normalizarTextoComparacao(linhasBase[indice - 2] || ""))
+      const linhaAnteriorTemLink = extrairLinksTextoComercial(linhasBase[indice - 1] || "").length > 0;
+      const contextoAnteriorExtra = !linhaAnteriorTemLink && contextoInequivocoResgate(normalizarTextoComparacao(linhasBase[indice - 2] || ""))
         ? linhasBase[indice - 2]
         : "";
       const classificado = classificarLinkComercial({
@@ -365,12 +366,14 @@ function classificarLinksComerciais({
       ordemCaptura += 1;
       const item = {
         ...classificado,
+        link: classificado.url,
+        ocorrenciaId: `radar:${classificado.tipo}:${ordemCaptura}`,
         ordemCaptura,
         linha: indice
       };
       classificados.push(item);
       const destino = grupos[item.tipo] ? item.tipo : "outros";
-      if (!grupos[destino].includes(item.url)) grupos[destino].push(item.url);
+      grupos[destino].push(item.url);
     }
   });
 

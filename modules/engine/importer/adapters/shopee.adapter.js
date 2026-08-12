@@ -380,6 +380,113 @@ function aplicarFallbackTextoRadar(produto = {}, evento = {}) {
   };
 }
 
+function urlsOcorrenciaShopee(link = {}) {
+  const metadata = link && typeof link.metadata === "object" && !Array.isArray(link.metadata) ? link.metadata : {};
+  return [
+    link.url_original,
+    link.urlOriginal,
+    link.url,
+    link.url_normalizada,
+    link.urlNormalizada,
+    link.url_expandida,
+    link.urlExpandida,
+    metadata.linkOriginalCapturado,
+    metadata.linkResolvido
+  ].map(texto).filter(Boolean);
+}
+
+function urlPrincipalOcorrenciaShopee(link = {}) {
+  return urlsOcorrenciaShopee(link)[0] || "";
+}
+
+function papelComercialShopee(papel = "") {
+  const chave = texto(papel).toLowerCase();
+  if ([PAPEL_LINK.CUPOM, "cupom", "resgate", "link_resgate", "voucher"].includes(chave)) return "resgate";
+  if ([PAPEL_LINK.PRODUTO, "produto", "link_produto", "product"].includes(chave)) return "produto";
+  return "";
+}
+
+function mesmoLinkShopee(a = "", b = "") {
+  const chaveA = texto(a).replace(/\/+$/g, "").toLowerCase();
+  const chaveB = texto(b).replace(/\/+$/g, "").toLowerCase();
+  return Boolean(chaveA && chaveB && chaveA === chaveB);
+}
+
+function candidatoOcorrenciaShopee(link = {}, evento = {}, indice = 0) {
+  const url = urlPrincipalOcorrenciaShopee(link);
+  const papelExistente = papelComercialShopee(link.papel || link.papelLink || link.tipo || link.role || "");
+  if (papelExistente) return { url, papel: papelExistente, motivo: link.papelLinkMotivo || link.motivo || "papel_preexistente" };
+
+  const classificado = classificarCandidatosLinks([{ url, link, campo: "ocorrencia_radar" }], "shopee", evento)[0] || {};
+  return {
+    url,
+    papel: papelComercialShopee(classificado.papelLink),
+    motivo: classificado.papelLinkMotivo || classificado.motivo || "classificacao_shopee"
+  };
+}
+
+function montarLinksComerciaisShopee({ links = [], evento = {}, analiseLinksShopee = {}, linkEscolhido = null, linkAfiliado = "", urlOriginalEngine = "" } = {}) {
+  const ocorrencias = [];
+  const vistos = new Set();
+  const linksEntrada = Array.isArray(links) ? links : [];
+
+  function adicionar(link = {}, indice = 0, origem = "radar.links") {
+    const urlOriginal = urlPrincipalOcorrenciaShopee(link) || texto(link.url || "");
+    if (!urlOriginal) return;
+    const classificado = candidatoOcorrenciaShopee({ ...link, url: urlOriginal }, evento, indice);
+    const papel = classificado.papel;
+    if (!['produto', 'resgate'].includes(papel)) return;
+
+    const ordemCaptura = Number(link.ordemCaptura || link.ordem || link.indiceCaptura || indice + 1) || (indice + 1);
+    const ocorrenciaId = texto(link.ocorrenciaId || link.idOcorrencia || `shopee:${papel}:${ordemCaptura}:${indice + 1}`);
+    const chave = `${ocorrenciaId}|${papel}|${ordemCaptura}|${urlOriginal}`;
+    if (vistos.has(chave)) return;
+    vistos.add(chave);
+
+    const urls = urlsOcorrenciaShopee({ ...link, url: urlOriginal });
+    const produtoEscolhido = papel === 'produto' && (
+      mesmoLinkShopee(urlOriginal, urlOriginalEngine) ||
+      mesmoLinkShopee(urlOriginal, linkEscolhido?.url || "") ||
+      urls.some(url => mesmoLinkShopee(url, urlOriginalEngine) || mesmoLinkShopee(url, linkEscolhido?.url || ""))
+    );
+    const urlAfiliadaWorkspace = texto(link.urlOptimus || link.urlAfiliadaWorkspace || link.urlAfiliada || link.afiliado || link.linkAfiliado || (produtoEscolhido ? linkAfiliado : ""));
+    const renderizavel = papel === 'resgate' || Boolean(urlAfiliadaWorkspace);
+
+    ocorrencias.push({
+      papel: papel === 'resgate' ? 'link_resgate' : 'link_produto',
+      tipo: papel,
+      url: urlOriginal,
+      original: urlOriginal,
+      resolvido: texto(link.url_expandida || link.urlExpandida || link.url_normalizada || link.urlNormalizada || urlOriginal),
+      urlOriginal,
+      urlExpandida: texto(link.url_expandida || link.urlExpandida || ""),
+      urlAfiliada: urlAfiliadaWorkspace,
+      urlAfiliadaWorkspace,
+      urlOptimus: texto(link.urlOptimus || ""),
+      ordemCaptura,
+      ocorrenciaId,
+      renderizavel,
+      seguro: renderizavel,
+      origem,
+      proveniencia: origem,
+      conversaoStatus: urlAfiliadaWorkspace ? 'convertida' : (papel === 'resgate' ? 'preservada_sem_conversao_workspace' : 'falhou'),
+      motivoConversao: urlAfiliadaWorkspace ? 'cta_workspace_convertido' : (papel === 'resgate' ? 'resgate_shopee_preservado' : 'produto_sem_conversao_workspace'),
+      motivo: classificado.motivo
+    });
+  }
+
+  linksEntrada.forEach((link, indice) => adicionar(link, indice, "radar.links"));
+
+  if (!ocorrencias.some(item => item.tipo === 'resgate')) {
+    const auxiliares = Array.isArray(analiseLinksShopee.auxiliares) ? analiseLinksShopee.auxiliares : [];
+    auxiliares.forEach((candidato, indice) => {
+      if (candidato.papelLink !== PAPEL_LINK.CUPOM) return;
+      adicionar({ ...(candidato.link || {}), url: candidato.url, papelLink: candidato.papelLink, papelLinkMotivo: candidato.papelLinkMotivo }, linksEntrada.length + indice, "adapter.linksAuxiliaresShopee");
+    });
+  }
+
+  return ocorrencias.sort((a, b) => Number(a.ordemCaptura || 0) - Number(b.ordemCaptura || 0));
+}
 function aplicarContextoLinksShopee(produto = {}, auxiliares = []) {
   const linksCupom = auxiliares
     .filter(item => item.papelLink === PAPEL_LINK.CUPOM)
@@ -802,6 +909,14 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
 
   const cupomTipo = produto.tipoCupom || produto.cupomTipo || "";
   const beneficioExtra = produto.beneficioExtra || produto.beneficioTexto || produto.avisoCupom || produto.avisoVariacaoPreco || "";
+  const linksComerciaisShopee = montarLinksComerciaisShopee({
+    links,
+    evento,
+    analiseLinksShopee,
+    linkEscolhido,
+    linkAfiliado,
+    urlOriginalEngine
+  });
   const ofertaAdapter = {
     ok: true,
     marketplace: "shopee",
@@ -839,7 +954,10 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     score: produto.score || null,
     shopId: idsProduto.shopId,
     itemId: idsProduto.itemId,
-    produtoIdDetectado: idsProduto.shopId && idsProduto.itemId ? `${idsProduto.shopId}/${idsProduto.itemId}` : ""
+    produtoIdDetectado: idsProduto.shopId && idsProduto.itemId ? `${idsProduto.shopId}/${idsProduto.itemId}` : "",
+    linksComerciais: linksComerciaisShopee,
+    linksProduto: linksComerciaisShopee.filter(item => item.tipo === "produto"),
+    linksResgate: linksComerciaisShopee.filter(item => item.tipo === "resgate")
   };
 
   const auditoriaV2 = auditarV2Shopee({ job, produto, ofertaAdapter });
@@ -890,6 +1008,7 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
       linksClassificados: resumoLinksClassificados(links, evento, "shopee"),
       candidatosShopee: resumoCandidatosShopee(analiseLinksShopee.classificados),
       linksAuxiliaresShopee: resumoCandidatosShopee(linksAuxiliaresShopee),
+      linksComerciais: linksComerciaisShopee,
       precoRadarUsado: precoEscolhido.usouRadar === true,
       precoRadarTexto: precoEscolhido.precoRadarTexto || "",
       textoRadarTemCupom: Boolean(extrairCupomTextoRadarShopee(textoOriginalRadar).cupom),
