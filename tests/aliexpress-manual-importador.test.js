@@ -323,7 +323,35 @@ async function testarLandingMoedasSemProductIdConverteComoAlternativo() {
   assert.strictEqual(produto.papelLink, "link_moedas");
   assert.strictEqual(produto.metadata.conversaoLinkAlternativo, true);
   assert.strictEqual(chamadas[1].method, "aliexpress.affiliate.link.generate");
-  assert.strictEqual(chamadas[1].params.source_values, landing);
+  assert.strictEqual(chamadas[1].params.source_values, "https://a.aliexpress.com/_coinsLanding");
+}
+
+async function testarConversaoOcorrenciaUsaUrlOriginalComoSourceValues() {
+  const id = "1005011981610735";
+  const shortlinkOriginal = "https://a.aliexpress.com/_c4a74LPv";
+  const urlExpandida = `https://www.aliexpress.com/item/${id}.html?via=pc`;
+  resetar([
+    respostaRedirectFinal(urlExpandida),
+    respostaDetalhe(produtoAli(id, {
+      promotion_link_short: "https://s.click.aliexpress.com/e/_PROMOAPI",
+      product_detail_url: urlExpandida
+    })),
+    respostaLink("https://s.click.aliexpress.com/e/_PCWORKSPACE")
+  ]);
+
+  const produto = await importarAliExpress(shortlinkOriginal, config({
+    gerarLinkOptimus: link => link,
+    contextoEngine: {
+      conversaoLinkAlternativo: true,
+      papelLink: "link_pc"
+    }
+  }));
+
+  assert.strictEqual(produto.linkAfiliado, "https://s.click.aliexpress.com/e/_PCWORKSPACE");
+  assert.strictEqual(produto.metadata.sourceValuesUsado, shortlinkOriginal);
+  assert.strictEqual(produto.metadata.linkAfiliadoBaseProduto, "https://s.click.aliexpress.com/e/_PROMOAPI");
+  assert.strictEqual(chamadas[2].method, "aliexpress.affiliate.link.generate");
+  assert.strictEqual(chamadas[2].params.source_values, shortlinkOriginal);
 }
 
 async function testarRedirectExternoInseguroRejeitado() {
@@ -481,6 +509,7 @@ async function testarClienteSemIntegracaoNaoContaminaOutroCliente() {
   await testarProductSmallImageUrlsComoSecundaria();
   await testarProdutoSemImagemContinuaValido();
   await testarLandingMoedasSemProductIdConverteComoAlternativo();
+  await testarConversaoOcorrenciaUsaUrlOriginalComoSourceValues();
   await testarRedirectExternoInseguroRejeitado();
   await testarTimeoutMantemOfertaTextual();
   await testarExpansaoRejeitaHostPrivado();

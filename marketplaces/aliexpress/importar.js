@@ -649,7 +649,8 @@ async function importarAliExpress(urlEntrada, config = {}) {
   const clienteId = config?.clienteId || config?.cliente || "";
   const contextoEngine = config?.contextoEngine && typeof config.contextoEngine === "object" ? config.contextoEngine : {};
   const papelLinkAlternativo = String(contextoEngine.papelLink || "").trim();
-  const conversaoLinkAlternativo = contextoEngine.conversaoLinkAlternativo === true
+  const conversaoOcorrenciaRadar = contextoEngine.conversaoLinkAlternativo === true;
+  const conversaoLinkAlternativo = conversaoOcorrenciaRadar
     && ["link_app", "link_moedas"].includes(papelLinkAlternativo);
   const expansaoShortlink = await expandirShortlinkAliExpressSeguro(urlOriginal);
   const urlCanonicaProduto = expansaoShortlink.ok ? expansaoShortlink.url : urlOriginal;
@@ -688,8 +689,9 @@ async function importarAliExpress(urlEntrada, config = {}) {
       const aplicarLinkOptimus = typeof config.gerarLinkOptimus === "function"
         ? config.gerarLinkOptimus
         : (link) => link;
-      const linkAliCurto = await gerarLinkCurto(urlCanonicaProduto, credenciais);
-      const linkFinal = aplicarLinkOptimus(linkAliCurto || urlCanonicaProduto, "aliexpress", { clienteId });
+      const sourceValuesAfiliado = urlOriginal;
+      const linkAliCurto = await gerarLinkCurto(sourceValuesAfiliado, credenciais);
+      const linkFinal = aplicarLinkOptimus(linkAliCurto || sourceValuesAfiliado, "aliexpress", { clienteId });
 
       return {
         marketplace: "aliexpress",
@@ -712,6 +714,8 @@ async function importarAliExpress(urlEntrada, config = {}) {
           conversaoPapel: papelLinkAlternativo,
           conversaoLinkAlternativo: true,
           productId: "",
+          sourceValuesUsado: sourceValuesAfiliado,
+          urlCanonicaProduto,
           motivo: "landing_sem_product_id_convertida"
         }
       };
@@ -784,23 +788,35 @@ async function importarAliExpress(urlEntrada, config = {}) {
     "target_sale_url"
   ]) || urlOriginal;
   const linkAfiliadoBase = limparLinkAfiliadoAliExpress(linkOriginalAfiliado);
+  const sourceValuesAfiliado = conversaoOcorrenciaRadar ? urlOriginal : linkAfiliadoBase;
   const gerarLinkCurto = typeof config.gerarLinkCurtoAliExpress === "function"
     ? config.gerarLinkCurtoAliExpress
     : gerarLinkCurtoAliExpressApi;
   const aplicarLinkOptimus = typeof config.gerarLinkOptimus === "function"
     ? config.gerarLinkOptimus
     : (link) => link;
-  const linkAliCurto = await gerarLinkCurto(linkAfiliadoBase, credenciais);
-  const linkFinal = aplicarLinkOptimus(linkAliCurto || linkAfiliadoBase, "aliexpress", { clienteId });
+  const linkAliCurto = await gerarLinkCurto(sourceValuesAfiliado, credenciais);
+  const linkFinal = aplicarLinkOptimus(linkAliCurto || sourceValuesAfiliado, "aliexpress", { clienteId });
 
   console.log("[ALIEXPRESS-DEEPLINK]", {
     productId,
     origemProduto,
+    papelLink: papelLinkAlternativo || "",
+    sourceValuesUsado: sourceValuesAfiliado,
     deeplinkGerado: Boolean(linkAliCurto && linkAliCurto !== linkAfiliadoBase),
-    linkOptimusAplicado: Boolean(linkFinal && linkFinal !== (linkAliCurto || linkAfiliadoBase))
+    linkOptimusAplicado: Boolean(linkFinal && linkFinal !== (linkAliCurto || sourceValuesAfiliado))
   });
 
-  return montarProdutoAliExpressManual(produto, urlCanonicaProduto, avisoCupom, linkFinal || linkAliCurto || linkAfiliadoBase);
+  const produtoFinal = montarProdutoAliExpressManual(produto, urlCanonicaProduto, avisoCupom, linkFinal || linkAliCurto || sourceValuesAfiliado);
+  produtoFinal.metadata = {
+    ...(produtoFinal.metadata || {}),
+    papelLink: papelLinkAlternativo || produtoFinal.metadata?.papelLink || "",
+    conversaoPapel: papelLinkAlternativo || produtoFinal.metadata?.conversaoPapel || "",
+    conversaoLinkAlternativo: conversaoOcorrenciaRadar || produtoFinal.metadata?.conversaoLinkAlternativo === true,
+    sourceValuesUsado: sourceValuesAfiliado,
+    linkAfiliadoBaseProduto: linkAfiliadoBase
+  };
+  return produtoFinal;
 }
 
 module.exports = {

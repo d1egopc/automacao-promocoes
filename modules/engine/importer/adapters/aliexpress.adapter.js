@@ -400,15 +400,6 @@ function validarProdutoCanonicoAliExpress({ papelLink = "", principal = {}, conv
     }
   }
 
-  if (papel === "link_pc" && produtoPrincipal.produtoId && produtoConvertido.produtoId && produtoPrincipal.produtoId !== produtoConvertido.produtoId) {
-    return {
-      ok: false,
-      motivo: "produto_canonico_divergente",
-      produtoCanonico: produtoConvertido.produtoId,
-      produtoCanonicoPrincipal: produtoPrincipal.produtoId
-    };
-  }
-
   return {
     ok: true,
     motivo: "produto_canonico_confirmado",
@@ -563,6 +554,7 @@ async function converterLinksAlternativosAliExpress({
         renderizavel: avaliacaoPrincipal.renderizavel,
         motivo: avaliacaoPrincipal.motivo,
         appValidado: avaliacaoPrincipal.appValidado,
+        sourceValuesUsado: primeiroValor(produtoPrincipal?.metadata?.sourceValuesUsado, alvo),
         produtoCanonico: avaliacaoPrincipal.produtoCanonico || "",
         produtoCanonicoPrincipal: avaliacaoPrincipal.produtoCanonicoPrincipal || ""
       };
@@ -600,6 +592,7 @@ async function converterLinksAlternativosAliExpress({
         renderizavel: avaliacao.renderizavel,
         motivo: avaliacao.motivo,
         appValidado: avaliacao.appValidado,
+        sourceValuesUsado: primeiroValor(produtoConvertido?.metadata?.sourceValuesUsado, alvo),
         produtoCanonico: avaliacao.produtoCanonico || "",
         produtoCanonicoPrincipal: avaliacao.produtoCanonicoPrincipal || ""
       };
@@ -647,8 +640,14 @@ async function converterLinksAlternativosAliExpress({
       convertidoWorkspace: conversao.renderizavel,
       conversaoStatus: conversao.renderizavel ? "convertida" : "falhou",
       motivoConversao: conversao.motivo,
+      sourceValuesUsado: conversao.sourceValuesUsado || urlOriginal,
       conversaoWorkspace: {
         papel: papelLink,
+        ocorrenciaId,
+        urlOriginal,
+        sourceValuesUsado: conversao.sourceValuesUsado || urlOriginal,
+        urlAfiliadaWorkspace: conversao.urlAfiliada || "",
+        conversaoStatus: conversao.renderizavel ? "convertida" : "falhou",
         renderizavel: conversao.renderizavel,
         motivo: conversao.motivo,
         appValidado: conversao.appValidado === true,
@@ -656,6 +655,19 @@ async function converterLinksAlternativosAliExpress({
         produtoCanonicoPrincipal: conversao.produtoCanonicoPrincipal || "",
         aplicouMudancasOperacionais: false
       }
+    });
+    logAliExpressAdapter("[ALIEXPRESS-CONVERSAO-OCORRENCIA]", {
+      jobId: job.id,
+      eventoId: job.evento_id,
+      clienteId,
+      ocorrenciaId,
+      papel: papelLink,
+      urlOriginal,
+      sourceValuesUsado: conversao.sourceValuesUsado || urlOriginal,
+      urlAfiliadaWorkspace: conversao.urlAfiliada || "",
+      conversaoStatus: conversao.renderizavel ? "convertida" : "falhou",
+      renderizavel: conversao.renderizavel === true,
+      motivo: conversao.motivo || ""
     });
   }
   return saida;
@@ -742,7 +754,9 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       contextoEngine: {
         jobId: job.id,
         eventoId: job.evento_id,
-        clienteId
+        clienteId,
+        conversaoLinkAlternativo: true,
+        papelLink: linkEscolhido.papelLink || "link_produto"
       }
     });
   } catch (e) {

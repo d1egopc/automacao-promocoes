@@ -274,6 +274,82 @@ async function testarAliExpressAppPcProduto() {
   assert(links.every(item => item.renderizavel === true));
 }
 
+async function testarAliExpressQuatroOcorrenciasPreservamUrlOriginal() {
+  const appPlaca = "https://a.aliexpress.com/_c36HiNIf";
+  const pcPlaca = "https://a.aliexpress.com/_c4a74LPv";
+  const produtoTpm = "https://a.aliexpress.com/_o2eK9w6";
+  const pcTpm = "https://a.aliexpress.com/_okv7jOs";
+  const afiliados = {
+    [appPlaca]: "https://s.click.aliexpress.com/e/_APPPLACA",
+    [pcPlaca]: "https://s.click.aliexpress.com/e/_PCPLACA",
+    [produtoTpm]: "https://s.click.aliexpress.com/e/_PRODTPM",
+    [pcTpm]: "https://s.click.aliexpress.com/e/_PCTPM"
+  };
+  const productIds = {
+    [appPlaca]: "1005011981610735",
+    [pcPlaca]: "1005011981610735",
+    [produtoTpm]: "1005007777777777",
+    [pcTpm]: "1005007777777777"
+  };
+  const chamadas = [];
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 61, evento_id: 62, cliente_id: "D1" },
+    evento: {
+      texto_original: [
+        "AliExpress placa mae + TPM",
+        `APP placa-mae: ${appPlaca}`,
+        `PC placa-mae: ${pcPlaca}`,
+        `Produto complementar TPM: ${produtoTpm}`,
+        `PC TPM: ${pcTpm}`
+      ].join("\n"),
+      marketplace: "aliexpress"
+    },
+    links: [
+      { url_original: appPlaca, ordemCaptura: 1, metadata: { papelLink: "link_app", papelLinkMotivo: "app_explicito" } },
+      { url_original: pcPlaca, ordemCaptura: 2, metadata: { papelLink: "link_pc", papelLinkMotivo: "pc_explicito" } },
+      { url_original: produtoTpm, ordemCaptura: 3, metadata: { papelLink: "produto", papelLinkMotivo: "produto_explicito" } },
+      { url_original: pcTpm, ordemCaptura: 4, metadata: { papelLink: "link_pc", papelLinkMotivo: "pc_explicito" } }
+    ],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "d1" } }),
+      importarAliExpress: async (url, config = {}) => {
+        chamadas.push({ url, papel: config.contextoEngine?.papelLink || "" });
+        return {
+          marketplace: "aliexpress",
+          titulo: url === produtoTpm || url === pcTpm ? "Modulo TPM AliExpress" : "Placa mae AliExpress",
+          productId: productIds[url],
+          precoAtual: "261.00",
+          linkOriginal: url,
+          linkAfiliado: afiliados[url],
+          linkFinal: afiliados[url],
+          metadata: {
+            papelLink: config.contextoEngine?.papelLink || "",
+            conversaoPapel: config.contextoEngine?.papelLink || "",
+            conversaoLinkAlternativo: config.contextoEngine?.conversaoLinkAlternativo === true,
+            sourceValuesUsado: url
+          }
+        };
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(chamadas.map(item => item.url), [pcPlaca, appPlaca, produtoTpm, pcTpm]);
+
+  const links = resultado.metadata.linksClassificados;
+  assert.strictEqual(links.length, 4);
+  assert.deepStrictEqual(links.map(item => item.urlOriginal), [appPlaca, pcPlaca, produtoTpm, pcTpm]);
+  assert.deepStrictEqual(links.map(item => item.urlAfiliadaWorkspace), [
+    afiliados[appPlaca],
+    afiliados[pcPlaca],
+    afiliados[produtoTpm],
+    afiliados[pcTpm]
+  ]);
+  assert.deepStrictEqual(links.map(item => item.sourceValuesUsado), [appPlaca, pcPlaca, produtoTpm, pcTpm]);
+  assert(links.every(item => item.renderizavel === true));
+}
+
 async function testarDuplicadoReusaConversaoMasPreservaOcorrencia() {
   const produto = "https://www.amazon.com.br/dp/B0CLONE";
   const afiliado = "https://amzn.to/clone-d1";
@@ -345,6 +421,7 @@ async function main() {
   await testarKabumAwinUmLinkNaoDuplicaEPreservaUed();
   await testarKabumAwinDuplicadoPreservaDuasOcorrencias();
   await testarAliExpressAppPcProduto();
+  await testarAliExpressQuatroOcorrenciasPreservamUrlOriginal();
   await testarDuplicadoReusaConversaoMasPreservaOcorrencia();
   await testarFalhaNaoVazaOriginal();
   console.log("link-conversao-ocorrencia-marketplaces.test.js OK");
