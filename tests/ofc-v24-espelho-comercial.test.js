@@ -39,6 +39,7 @@ function criarEspelho({ textoOriginal = "", oferta = {}, ofertaEntrada = {}, lin
 
 const estrelas = (n) => "\u2B50".repeat(n);
 const possuiLinha = (mensagem, linha) => String(mensagem || "").split(/\r?\n/).some(item => item.trim() === linha);
+const contarOcorrenciasTexto = (mensagem, trecho) => String(mensagem || "").split(trecho).length - 1;
 
 const mlCompleto = criarEspelho({
   textoOriginal: [
@@ -598,6 +599,98 @@ assert.deepStrictEqual(
   [true, false, false],
   "produtos capturados ficam preservados, mas sem conversao workspace nao vazam URL original"
 );
+
+const shopeeIphoneResgateProduto = criarEspelho({
+  textoOriginal: [
+    "Apple iPhone 17 / 17 PRO / 17 PRO MAX",
+    "Por R$ 5.319",
+    "Resgate o cupom de R$90 OFF"
+  ].join("\n"),
+  oferta: {
+    marketplace: "shopee",
+    linkAfiliado: "https://s.shopee.com.br/link-principal-nao-usar",
+    linksComerciais: [
+      { tipo: "resgate", papel: "link_resgate", ordemCaptura: 1, urlOriginal: "https://s.shopee.com.br/resgate-iphone", urlAfiliada: "https://s.shopee.com.br/resgate-iphone-af", renderizavel: true, contexto: "Resgate cupom" },
+      { tipo: "produto", papel: "link_produto", ordemCaptura: 2, urlOriginal: "https://s.shopee.com.br/produto-iphone", urlAfiliada: "https://s.shopee.com.br/produto-iphone-af", renderizavel: true, contexto: "Produto" }
+    ]
+  },
+  comercialNormalizado: { marketplace: "shopee", precoAtual: 5319, precoConfiavel: true }
+});
+const templateIphoneResgateProduto = montarTemplateEspelhoPorBlocosV26(
+  shopeeIphoneResgateProduto.espelhoComercial,
+  shopeeIphoneResgateProduto.documentoComercialCanonico
+);
+assert.ok(templateIphoneResgateProduto.mensagem.includes("Resgate:\nhttps://s.shopee.com.br/resgate-iphone-af"), "OFC V2.6 renderiza Resgate convertido");
+assert.ok(templateIphoneResgateProduto.mensagem.includes("Confira aqui:\nhttps://s.shopee.com.br/produto-iphone-af"), "OFC V2.6 renderiza Produto convertido por ocorrencia");
+assert.ok(templateIphoneResgateProduto.mensagem.indexOf("Resgate:") < templateIphoneResgateProduto.mensagem.indexOf("Confira aqui:"), "Resgate fica antes do Produto no OFC V2.6");
+assert.ok(!templateIphoneResgateProduto.mensagem.includes("link-principal-nao-usar"), "linkAfiliadoPrincipal nao cria CTA substituto quando existe produto por ocorrencia");
+assert.deepStrictEqual(
+  templateIphoneResgateProduto.blocosRenderizados.filter(tipo => /^link/.test(tipo)),
+  ["link_resgate", "link_produto_original"],
+  "Resgate + Produto geram exatamente dois blocos de link"
+);
+
+const shopeeSomenteResgateV26 = criarEspelho({
+  textoOriginal: "Resgate o cupom de R$90 OFF",
+  oferta: {
+    marketplace: "shopee",
+    linkAfiliado: "",
+    linksComerciais: [
+      { tipo: "resgate", papel: "link_resgate", ordemCaptura: 1, urlOriginal: "https://s.shopee.com.br/resgate-solo", urlAfiliada: "https://s.shopee.com.br/resgate-solo-af", renderizavel: true, contexto: "Resgate cupom" }
+    ]
+  },
+  comercialNormalizado: { marketplace: "shopee", precoConfiavel: false }
+});
+const templateSomenteResgateV26 = montarTemplateEspelhoPorBlocosV26(
+  shopeeSomenteResgateV26.espelhoComercial,
+  shopeeSomenteResgateV26.documentoComercialCanonico
+);
+assert.ok(templateSomenteResgateV26.mensagem.includes("Resgate:\nhttps://s.shopee.com.br/resgate-solo-af"), "Resgate sozinho renderiza Resgate");
+assert.ok(!templateSomenteResgateV26.mensagem.includes("Confira aqui:"), "Resgate sozinho nao inventa Produto");
+
+const shopeeSomenteProdutoV26 = criarEspelho({
+  textoOriginal: "Produto Shopee simples Por R$ 49,90",
+  oferta: {
+    marketplace: "shopee",
+    linkAfiliado: "https://s.shopee.com.br/link-principal-nao-usar-produto",
+    linksComerciais: [
+      { tipo: "produto", papel: "link_produto", ordemCaptura: 1, urlOriginal: "https://s.shopee.com.br/produto-solo", urlAfiliada: "https://s.shopee.com.br/produto-solo-af", renderizavel: true, contexto: "Produto" }
+    ]
+  },
+  comercialNormalizado: { marketplace: "shopee", precoAtual: 49.9, precoConfiavel: true }
+});
+const templateSomenteProdutoV26 = montarTemplateEspelhoPorBlocosV26(
+  shopeeSomenteProdutoV26.espelhoComercial,
+  shopeeSomenteProdutoV26.documentoComercialCanonico
+);
+assert.ok(templateSomenteProdutoV26.mensagem.includes("Confira aqui:\nhttps://s.shopee.com.br/produto-solo-af"), "Produto sozinho renderiza Produto");
+assert.ok(!templateSomenteProdutoV26.mensagem.includes("Resgate:"), "Produto sozinho nao cria Resgate");
+assert.ok(!templateSomenteProdutoV26.mensagem.includes("link-principal-nao-usar-produto"), "Produto por ocorrencia nao duplica com linkAfiliadoPrincipal");
+
+const shopeeResgateTresProdutosV26 = criarEspelho({
+  textoOriginal: "Resgate o cupom antes de comprar",
+  oferta: {
+    marketplace: "shopee",
+    linkAfiliado: "https://s.shopee.com.br/link-principal-nao-usar-multiplos",
+    linksComerciais: [
+      { tipo: "resgate", papel: "link_resgate", ordemCaptura: 1, urlOriginal: "https://s.shopee.com.br/resgate-n", urlAfiliada: "https://s.shopee.com.br/resgate-n-af", renderizavel: true, contexto: "Resgate cupom" },
+      { tipo: "produto", papel: "link_produto", ordemCaptura: 2, urlOriginal: "https://s.shopee.com.br/produto-n-1", urlAfiliada: "https://s.shopee.com.br/produto-n-1-af", renderizavel: true, contexto: "Produto 1" },
+      { tipo: "produto", papel: "link_produto", ordemCaptura: 3, urlOriginal: "https://s.shopee.com.br/produto-n-2", urlAfiliada: "https://s.shopee.com.br/produto-n-2-af", renderizavel: true, contexto: "Produto 2" },
+      { tipo: "produto", papel: "link_produto", ordemCaptura: 4, urlOriginal: "https://s.shopee.com.br/produto-n-3", urlAfiliada: "https://s.shopee.com.br/produto-n-3-af", renderizavel: true, contexto: "Produto 3" }
+    ]
+  },
+  comercialNormalizado: { marketplace: "shopee", precoConfiavel: false }
+});
+const templateResgateTresProdutosV26 = montarTemplateEspelhoPorBlocosV26(
+  shopeeResgateTresProdutosV26.espelhoComercial,
+  shopeeResgateTresProdutosV26.documentoComercialCanonico
+);
+assert.ok(templateResgateTresProdutosV26.mensagem.includes("Resgate:\nhttps://s.shopee.com.br/resgate-n-af"), "Resgate + N Produtos preserva Resgate");
+for (const sufixo of ["1", "2", "3"]) {
+  assert.ok(templateResgateTresProdutosV26.mensagem.includes(`https://s.shopee.com.br/produto-n-${sufixo}-af`), `Produto ${sufixo} preservado`);
+}
+assert.strictEqual(contarOcorrenciasTexto(templateResgateTresProdutosV26.mensagem, "Confira aqui:"), 3, "Resgate + 3 Produtos renderiza exatamente 3 CTAs de produto");
+assert.ok(!templateResgateTresProdutosV26.mensagem.includes("link-principal-nao-usar-multiplos"), "N Produtos nao usam linkAfiliadoPrincipal");
 
 function blocosV26(resultado) {
   return resultado.documentoComercialCanonico.blocos || [];

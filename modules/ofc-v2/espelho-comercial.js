@@ -949,9 +949,10 @@ function adicionarBlocosDeLinks(blocos = [], doc = {}, contexto = {}) {
   const links = linksRenderizaveis
     .filter(item => linkAfiliadoRepresentadoPorPapel || !textoComercialEquivalente(item?.url || "", doc.linkAfiliado || ""));
   const produtos = links.filter(item => classificarTipoLinkBloco(item, contexto.textoOriginal, doc.marketplace) === "link_produto_original");
-  const produtosAmbiguos = produtos.length > 1;
+  const produtosAmbiguos = false;
+  const produtoPorOcorrenciaRepresentaCta = normalizarComparacao(doc.marketplace) === "shopee" && produtos.length > 0;
 
-  if (doc.linkAfiliado && !linkAfiliadoRepresentadoPorPapel) {
+  if (doc.linkAfiliado && !linkAfiliadoRepresentadoPorPapel && !produtoPorOcorrenciaRepresentaCta) {
     adicionarBlocoComercial(blocos, {
       tipo: "link_afiliado",
       textoOriginal: doc.linkAfiliado,
@@ -1720,6 +1721,7 @@ function grupoVisualBlocoV26(tipo = "") {
   if (["titulo", "marketplace", "categoria", "classificacao_visual", "avaliacao_nota", "avaliacao_quantidade"].includes(tipo)) return "cabecalho";
   if (["preco_referencia", "preco_oferta", "preco_pix", "preco_final_condicionado", "desconto_percentual", "economia", "parcelamento"].includes(tipo)) return "precos";
   if (["cupom_codigo", "cupons_alternativos", "cupom_sem_codigo", "instrucao_cupom", "beneficio", "beneficio_app", "cashback", "moedas", "frete", "prime_programa", "garantia", "pre_venda", "prazo_envio", "vendas", "selo_mais_vendido"].includes(tipo)) return "condicoes";
+  if (tipo === "link_produto_original") return "link_afiliado";
   if (["link_resgate", "link_app", "link_moedas", "link_pc", "link_auxiliar", "link_afiliado"].includes(tipo)) return tipo;
   if (["aviso", "rodape", "texto_personalizado"].includes(tipo)) return tipo;
   return tipo || "outros";
@@ -1966,6 +1968,7 @@ const TIPOS_BLOCOS_RENDERIZAVEIS_V26 = Object.freeze(new Set([
   "avaliacao_quantidade",
   "vendas",
   "selo_mais_vendido",
+  "link_produto_original",
   "link_afiliado",
   "link_resgate",
   "link_app",
@@ -1998,6 +2001,7 @@ const TOGGLES_EQUIVALENTES_BLOCOS_V26 = Object.freeze({
   avaliacao_nota: "avaliacao",
   avaliacao_quantidade: "quantidade_avaliacoes",
   vendas: "vendas",
+  link_produto_original: "link",
   link_afiliado: "link",
   link_resgate: "link_resgate",
   aviso: "aviso",
@@ -2007,6 +2011,7 @@ const TOGGLES_EQUIVALENTES_BLOCOS_V26 = Object.freeze({
 
 const TIPOS_LINKS_ESSENCIAIS_V26 = Object.freeze(new Set([
   "link_afiliado",
+  "link_produto_original",
   "link_resgate",
   "link_app",
   "link_pc",
@@ -2033,7 +2038,7 @@ function blocosCanonicosSuficientesV26(blocos = [], documento = {}) {
   const avisos = lista(documento.avisos).map(texto);
   if (avisos.includes("links_produto_ambiguos")) return { ok: false, motivo: "links_produto_ambiguos" };
   const marketplace = normalizarComparacao(documento.marketplace);
-  const temCtaSeguro = blocos.some(bloco => bloco.tipo === "link_afiliado")
+  const temCtaSeguro = blocos.some(bloco => ["link_afiliado", "link_produto_original"].includes(bloco.tipo))
     || (marketplace === "shopee" && blocos.some(bloco => bloco.tipo === "link_resgate"))
     || (marketplace === "aliexpress" && blocos.some(bloco => ["link_app", "link_pc", "link_moedas"].includes(bloco.tipo)));
   if (!temCtaSeguro) return { ok: false, motivo: "link_afiliado_ausente" };
@@ -2071,7 +2076,7 @@ function textoBlocoCanonicoV26(bloco = {}) {
 function ordemRenderizacaoBlocoCanonicoV26(bloco = {}, documento = {}) {
   const ordem = Number.isFinite(Number(bloco.ordemSugerida)) ? Number(bloco.ordemSugerida) : 1000;
   if (marketplaceShopee(documento.marketplace) && bloco.tipo === "link_resgate") {
-    return Math.min(ordem, ORDEM_BLOCOS_COMERCIAIS_V26.link_afiliado - 0.5);
+    return Math.min(ordem, ORDEM_BLOCOS_COMERCIAIS_V26.link_produto_original - 0.5);
   }
   if (marketplaceAliExpressValor(documento.marketplace) && bloco.tipo === "link_moedas") {
     return ORDEM_BLOCOS_COMERCIAIS_V26.link_app + 0.25;
@@ -2145,6 +2150,7 @@ function renderizarBlocoCanonicoV26(bloco = {}, contexto = {}) {
   if (bloco.tipo === "vendas") return `📈 ${valor}`;
   if (bloco.tipo === "selo_mais_vendido") return `🏆 ${valor}`;
   if (bloco.tipo === "link_resgate") return `🎟️ Resgate:\n${valor}`;
+  if (bloco.tipo === "link_produto_original") return `🔗 Confira aqui:\n${valor}`;
   if (bloco.tipo === "link_app") return `${contexto.linksMoveisAliDistintos ? "📱 APP" : "📱 APP / Moedas"}:\n${valor}`;
   if (bloco.tipo === "link_pc") return `🖥️ PC:\n${valor}`;
   if (bloco.tipo === "link_moedas") return `${contexto.linksMoveisAliDistintos ? "Link com moedas" : "📱 APP / Moedas"}:\n${valor}`;
