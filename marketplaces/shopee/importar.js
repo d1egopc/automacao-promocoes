@@ -88,6 +88,85 @@ function resolverPrecoPixComprovadoShopee(precoNormal = "", precoPix = "") {
   };
 }
 
+function normalizarSubIdsShopee(subIds = []) {
+  const lista = Array.isArray(subIds) ? subIds : [subIds];
+  return lista
+    .map(valor => String(valor || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 80))
+    .filter(Boolean)
+    .slice(0, 5);
+}
+
+async function gerarShortLinkShopee(originUrl, integracao = {}, subIds = [], deps = {}) {
+  const url = String(originUrl || "").trim();
+  if (!urlShopeeValida(url)) {
+    return { ok: false, shortLink: "", motivo: "origin_url_shopee_invalida", originUrl: url };
+  }
+
+  const credenciais = integracao.credenciais || integracao || {};
+  const appId = credenciais.appId || credenciais.app_id || "";
+  const secret = credenciais.secret || credenciais.appSecret || credenciais.app_secret || "";
+  if (!appId || !secret) {
+    return { ok: false, shortLink: "", motivo: "credenciais_shopee_ausentes", originUrl: url };
+  }
+
+  const fetchImpl = deps.fetch || global.fetch;
+  if (typeof fetchImpl !== "function") {
+    return { ok: false, shortLink: "", motivo: "fetch_indisponivel_generate_shortlink", originUrl: url };
+  }
+
+  const input = { originUrl: url };
+  const subIdsNormalizados = normalizarSubIdsShopee(subIds);
+  if (subIdsNormalizados.length) input.subIds = subIdsNormalizados;
+
+  const bodyPayload = {
+    query: `mutation generateShortLink($input: ShortLinkInput!) {
+  generateShortLink(input: $input) {
+    shortLink
+  }
+}`,
+    variables: { input }
+  };
+  const timestamp = Math.floor(Date.now() / 1000);
+  const payload = JSON.stringify(bodyPayload);
+  const sign = crypto
+    .createHash("sha256")
+    .update(`${appId}${timestamp}${payload}${secret}`, "utf8")
+    .digest("hex");
+
+  try {
+    const response = await fetchImpl("https://open-api.affiliate.shopee.com.br/graphql", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${sign}`
+      },
+      body: payload
+    });
+    const data = await response.json();
+    const shortLink = String(data?.data?.generateShortLink?.shortLink || "").trim();
+    if (!response.ok || Array.isArray(data?.errors) || !shortLink) {
+      return {
+        ok: false,
+        shortLink: "",
+        motivo: "generate_shortlink_shopee_falhou",
+        originUrl: url,
+        statusHttp: response.status,
+        errors: data?.errors || []
+      };
+    }
+
+    return { ok: true, shortLink, originUrl: url, subIds: subIdsNormalizados };
+  } catch (erro) {
+    return {
+      ok: false,
+      shortLink: "",
+      motivo: "generate_shortlink_shopee_erro_tecnico",
+      originUrl: url,
+      erro: erro?.message || String(erro)
+    };
+  }
+}
+
 function criarImportarShopee(deps = {}) {
   const {
     limparPreco,
@@ -521,6 +600,32 @@ return async function importarShopee(url, config) {
 
   const ids = extrairIdsShopee(url);
   const keyword = gerarKeywordShopee(url);
+  const papelLinkEngine = String(config?.contextoEngine?.papelLink || config?.papelLink || "").trim().toLowerCase();
+  const rotaLandingShopee = (() => {
+    try {
+      const parsed = new URL(url);
+      const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+      return host === "shopee.com.br" && parsed.pathname.replace(/\/+$/g, "").toLowerCase().startsWith("/m/");
+    } catch (e) {
+      return false;
+    }
+  })();
+
+  if (!ids.itemId && (rotaLandingShopee || ["cupom", "resgate", "link_resgate", "voucher"].includes(papelLinkEngine))) {
+    return {
+      ok: false,
+      marketplace: "shopee",
+      motivo: "resgate_shopee_sem_conversao_landing",
+      linkOriginal: urlOriginalShopee,
+      linkExpandido: url,
+      linkAfiliado: "",
+      titulo: "",
+      precoAtual: "",
+      imagem: "",
+      conversaoStatus: "falhou",
+      renderizavel: false
+    };
+  }
 
   let produto = null;
 
@@ -1041,6 +1146,7 @@ logPrecoOrigemShopee({
 
 module.exports = {
   criarImportarShopee,
+  gerarShortLinkShopee,
   normalizarPrecoApiShopee,
   analisarFaixaPrecoShopee,
   resolverPrecoPixComprovadoShopee

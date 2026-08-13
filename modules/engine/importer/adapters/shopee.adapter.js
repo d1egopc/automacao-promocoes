@@ -1,10 +1,14 @@
 const { classificarCategoriaOferta } = require("../../../../marketplaces/inteligencia/classificador-categorias");
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
+const { normalizarNumeroMoeda } = require("../../../../utils/moeda");
 const { queryEngine } = require("../../database");
 const {
   extrairIdsShopee,
   tituloShopeeValido
 } = require("../../../../marketplaces/shopee/normalizacao");
+const {
+  gerarShortLinkShopee
+} = require("../../../../marketplaces/shopee/importar");
 const {
   PAPEL_LINK,
   classificarCandidatosLinks,
@@ -20,13 +24,9 @@ function texto(valor = "") {
 }
 
 function numeroPrecoShopeeAdapter(valor = "") {
-  const bruto = texto(valor).replace(/R\$/gi, "").replace(/\s+/g, "");
-  if (!bruto || /\s+a\s/i.test(texto(valor))) return null;
-  let normalizado = bruto.replace(/[^\d.,]/g, "");
-  if (normalizado.includes(",") && normalizado.includes(".")) normalizado = normalizado.replace(/\./g, "").replace(",", ".");
-  else if (normalizado.includes(",")) normalizado = normalizado.replace(",", ".");
-  const numero = Number(normalizado);
-  return Number.isFinite(numero) && numero > 0 ? numero : null;
+  const bruto = texto(valor);
+  if (!bruto || /\s+a\s/i.test(bruto)) return null;
+  return normalizarNumeroMoeda(bruto);
 }
 
 async function buscarImagemHistoricaShopee(shopId = "", itemId = "") {
@@ -106,17 +106,12 @@ function escolherPrecoShopeeComRadarSeguro(precoAdapter = null, textoRadar = "")
   if (precoRadar.valor === null) {
     return { preco: precoApi, origem: "adapter", precoRadarTexto: "", usouRadar: false };
   }
-  if (precoApi === null) {
-    return { preco: precoRadar.valor, origem: "texto_radar", precoRadarTexto: precoRadar.texto, usouRadar: true };
-  }
-
-  const menor = Math.min(precoApi, precoRadar.valor);
-  const maior = Math.max(precoApi, precoRadar.valor);
-  if (menor > 0 && maior / menor >= 3) {
-    return { preco: precoRadar.valor, origem: "texto_radar_incompativel_api", precoRadarTexto: precoRadar.texto, usouRadar: true };
-  }
-
-  return { preco: precoApi, origem: "adapter", precoRadarTexto: precoRadar.texto, usouRadar: false };
+  return {
+    preco: precoRadar.valor,
+    origem: precoApi === null ? "texto_radar" : "texto_radar_soberano",
+    precoRadarTexto: precoRadar.texto,
+    usouRadar: true
+  };
 }
 
 function logPrecoAuditoriaShopee(dados = {}) {
@@ -416,9 +411,203 @@ function chaveConversaoOcorrenciaShopee(clienteId = "", papel = "", url = "") {
   return `shopee:${texto(clienteId)}:${texto(papel)}:${texto(url).toLowerCase()}`;
 }
 
-function resultadoConversaoLinkShopee({ link = {}, urlAfiliada = "", renderizavel = false, motivo = "", status = "" } = {}) {
+function caminhoUrlShopee(url = "") {
+  const valor = texto(url);
+  if (!valor) return "";
+  try {
+    const parsed = new URL(valor);
+    const host = parsed.hostname.toLowerCase();
+    if (host === "s.shopee.com.br") return "";
+    if (!/(^|\.)shopee\.com\.br$/.test(host)) return "";
+    return parsed.pathname.replace(/\/+$/g, "") || "/";
+  } catch (e) {
+    return "";
+  }
+}
+
+function destinoFuncionalShopee(link = {}, urlOriginal = "") {
+  const urls = Array.from(new Set([...urlsOcorrenciaShopee(link), urlOriginal].map(texto).filter(Boolean)));
+  for (const url of urls) {
+    const ids = extrairIdsShopee(url);
+    if (ids.shopId && ids.itemId) {
+      return { tipo: "produto", shopId: ids.shopId, itemId: ids.itemId, rota: "", url };
+    }
+  }
+
+  for (const url of urls) {
+    const rota = caminhoUrlShopee(url);
+    if (rota) return { tipo: "landing", shopId: "", itemId: "", rota, url };
+  }
+
+  return { tipo: "desconhecido", shopId: "", itemId: "", rota: "", url: urls[0] || "" };
+}
+
+function destinoProdutoConvertidoShopee(produto = {}, urlAfiliada = "") {
+  const urls = [
+    produto.linkExpandido,
+    produto.linkOriginal,
+    produto.productLink,
+    produto.linkFinal,
+    produto.link,
+    urlAfiliada
+  ].map(texto).filter(Boolean);
+  for (const url of urls) {
+    const ids = extrairIdsShopee(url);
+    if (ids.shopId && ids.itemId) return { tipo: "produto", shopId: ids.shopId, itemId: ids.itemId, url };
+  }
+  if (produto.shopId && produto.itemId) {
+    return { tipo: "produto", shopId: texto(produto.shopId), itemId: texto(produto.itemId), url: urls[0] || "" };
+  }
+  return { tipo: "desconhecido", shopId: "", itemId: "", url: urls[0] || "" };
+}
+
+function destinoFuncionalUrlShopee(url = "") {
+  const ids = extrairIdsShopee(url);
+  if (ids.shopId && ids.itemId) {
+    return { tipo: "produto", shopId: ids.shopId, itemId: ids.itemId, rota: "", url: texto(url) };
+  }
+  const rota = caminhoUrlShopee(url);
+  if (rota) return { tipo: "landing", shopId: "", itemId: "", rota, url: texto(url) };
+  return { tipo: "desconhecido", shopId: "", itemId: "", rota: "", url: texto(url) };
+}
+
+function destinosFuncionaisEquivalentesShopee(original = {}, final = {}) {
+  if (!original || !final || original.tipo !== final.tipo) return false;
+  if (original.tipo === "produto") {
+    return Boolean(
+      original.shopId &&
+      original.itemId &&
+      String(original.shopId) === String(final.shopId) &&
+      String(original.itemId) === String(final.itemId)
+    );
+  }
+  if (original.tipo === "landing") {
+    return Boolean(original.rota && final.rota && original.rota === final.rota);
+  }
+  return false;
+}
+
+function produtoConvertidoPreservaDestinoShopee(link = {}, urlOriginal = "", produto = {}, urlAfiliada = "") {
+  const original = destinoFuncionalShopee(link, urlOriginal);
+  if (original.tipo !== "produto") return { ok: true, original, final: destinoProdutoConvertidoShopee(produto, urlAfiliada) };
+  const final = destinoProdutoConvertidoShopee(produto, urlAfiliada);
+  if (!final.shopId || !final.itemId) return { ok: false, original, final };
+  return {
+    ok: String(original.shopId) === String(final.shopId) && String(original.itemId) === String(final.itemId),
+    original,
+    final
+  };
+}
+
+function valorSubIdShopee(valor = "") {
+  return texto(valor).replace(/[^a-zA-Z0-9]/g, "").slice(0, 80);
+}
+
+function subIdsConversaoShopee({ clienteId = "", evento = {}, link = {}, papel = "", indice = 0 } = {}) {
+  return [
+    `ws${valorSubIdShopee(clienteId)}`,
+    `ev${valorSubIdShopee(evento.id || evento.evento_id || "")}`,
+    valorSubIdShopee(papel),
+    `ord${valorSubIdShopee(link.ordemCaptura || link.ordem_captura || indice + 1)}`
+  ].filter(item => item && !/^(ws|ev|ord)$/.test(item));
+}
+
+async function expandirShortlinkAfiliadoShopee(url = "", deps = {}) {
+  if (!texto(url)) return "";
+  if (typeof deps.expandirShortlinkShopee === "function") {
+    const resultado = await deps.expandirShortlinkShopee(url);
+    return texto(typeof resultado === "string" ? resultado : resultado?.urlExpandida || resultado?.urlFinal || resultado?.url);
+  }
+
+  const fetchImpl = deps.fetch || global.fetch;
+  if (typeof fetchImpl !== "function") return "";
+
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 6000) : null;
+  try {
+    const response = await fetchImpl(url, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller?.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+      }
+    });
+    return texto(response.url || url);
+  } catch (e) {
+    return "";
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function converterLandingShopeePorOcorrencia({ link = {}, urlOriginal = "", clienteId = "", evento = {}, integracao = {}, deps = {}, indice = 0 } = {}) {
+  let destinoOriginal = destinoFuncionalShopee(link, urlOriginal);
+  if (destinoOriginal.tipo === "desconhecido" && urlOriginal) {
+    const urlExpandidaOriginal = await expandirShortlinkAfiliadoShopee(urlOriginal, deps);
+    if (urlExpandidaOriginal) {
+      destinoOriginal = destinoFuncionalShopee({
+        ...link,
+        url_expandida: urlExpandidaOriginal,
+        urlExpandida: urlExpandidaOriginal
+      }, urlOriginal);
+    }
+  }
+  if (destinoOriginal.tipo !== "landing" || !destinoOriginal.url) {
+    return {
+      urlAfiliada: "",
+      renderizavel: false,
+      motivo: "resgate_shopee_sem_conversao_landing",
+      status: "falhou",
+      destinoFuncionalOriginal: destinoOriginal,
+      destinoFuncionalFinal: { tipo: "indisponivel", rota: "", url: "" },
+      urlUsadaNaConversao: destinoOriginal.url || urlOriginal
+    };
+  }
+
+  const subIds = subIdsConversaoShopee({ clienteId, evento, link, papel: "resgate", indice });
+  const gerarShortLink = typeof deps.gerarShortLinkShopee === "function"
+    ? deps.gerarShortLinkShopee
+    : gerarShortLinkShopee;
+  const resultado = await gerarShortLink(destinoOriginal.url, integracao, subIds, { fetch: deps.fetch });
+  const shortLink = texto(resultado?.shortLink || resultado?.url || "");
+
+  if (!resultado?.ok || !shortLink) {
+    return {
+      urlAfiliada: "",
+      renderizavel: false,
+      motivo: "resgate_shopee_sem_conversao_landing",
+      status: "falhou",
+      destinoFuncionalOriginal: destinoOriginal,
+      destinoFuncionalFinal: { tipo: "indisponivel", rota: "", url: "" },
+      urlUsadaNaConversao: destinoOriginal.url,
+      detalheConversao: resultado?.motivo || "generate_shortlink_indisponivel"
+    };
+  }
+
+  const urlFinalExpandida = await expandirShortlinkAfiliadoShopee(shortLink, deps);
+  const destinoFinal = destinoFuncionalUrlShopee(urlFinalExpandida || shortLink);
+  const equivalente = destinosFuncionaisEquivalentesShopee(destinoOriginal, destinoFinal);
+
+  return {
+    urlAfiliada: equivalente ? shortLink : "",
+    renderizavel: equivalente,
+    motivo: equivalente ? "resgate_workspace_convertido_generate_shortlink" : "resgate_shopee_sem_conversao_landing",
+    status: equivalente ? "convertida" : "falhou",
+    destinoFuncionalOriginal: destinoOriginal,
+    destinoFuncionalFinal: destinoFinal,
+    urlUsadaNaConversao: destinoOriginal.url,
+    urlFinalExpandida,
+    subIdsShopee: subIds
+  };
+}
+
+function resultadoConversaoLinkShopee({ link = {}, urlAfiliada = "", renderizavel = false, motivo = "", status = "", ...extras } = {}) {
   return {
     ...link,
+    ...extras,
     urlAfiliada: urlAfiliada || "",
     urlAfiliadaWorkspace: urlAfiliada || "",
     linkAfiliado: urlAfiliada || "",
@@ -458,7 +647,9 @@ async function converterOcorrenciasShopee({
     const chave = chaveConversaoOcorrenciaShopee(clienteId, papel, urlOriginal);
     let conversao = cacheConversoes.get(chave);
     if (!conversao) {
-      if (papel === "produto" && (
+      if (papel === "resgate") {
+        conversao = await converterLandingShopeePorOcorrencia({ link, urlOriginal, clienteId, evento, integracao, deps, indice });
+      } else if (papel === "produto" && (
         mesmoLinkShopee(urlOriginal, urlOriginalEngine) ||
         urlsOcorrenciaShopee(link).some(url => mesmoLinkShopee(url, urlOriginalEngine))
       ) && linkAfiliadoPrincipal) {
@@ -491,11 +682,14 @@ async function converterOcorrenciasShopee({
             cacheImportacoesShopee.set(urlOriginal, produtoConvertido);
           }
           const urlAfiliada = texto(produtoConvertido?.linkAfiliado || produtoConvertido?.linkFinal || produtoConvertido?.link || produtoConvertido?.offerLink || "");
+          const fidelidade = produtoConvertidoPreservaDestinoShopee(link, urlOriginal, produtoConvertido, urlAfiliada);
           conversao = {
-            urlAfiliada,
-            renderizavel: Boolean(urlAfiliada),
-            motivo: urlAfiliada ? `${papel}_workspace_convertido_por_ocorrencia` : `${papel}_sem_conversao_workspace`,
-            status: urlAfiliada ? "convertida" : "falhou"
+            urlAfiliada: fidelidade.ok ? urlAfiliada : "",
+            renderizavel: Boolean(urlAfiliada) && fidelidade.ok,
+            motivo: !fidelidade.ok ? "produto_shopee_destino_divergente" : (urlAfiliada ? `${papel}_workspace_convertido_por_ocorrencia` : `${papel}_sem_conversao_workspace`),
+            status: Boolean(urlAfiliada) && fidelidade.ok ? "convertida" : "falhou",
+            destinoFuncionalOriginal: fidelidade.original,
+            destinoFuncionalFinal: fidelidade.final
           };
         } catch (e) {
           conversao = {
@@ -562,8 +756,10 @@ function montarLinksComerciaisShopee({ links = [], evento = {}, analiseLinksShop
       mesmoLinkShopee(urlOriginal, linkEscolhido?.url || "") ||
       urls.some(url => mesmoLinkShopee(url, urlOriginalEngine) || mesmoLinkShopee(url, linkEscolhido?.url || ""))
     );
-    const urlAfiliadaWorkspace = texto(link.urlOptimus || link.urlAfiliadaWorkspace || link.urlAfiliada || link.afiliado || link.linkAfiliado || (produtoEscolhido ? linkAfiliado : ""));
-    const renderizavel = papel === 'resgate' || Boolean(urlAfiliadaWorkspace);
+    const conversaoStatusEntrada = texto(link.conversaoStatus || "");
+    const falhaConversao = conversaoStatusEntrada === "falhou" || link.renderizavel === false;
+    const urlAfiliadaWorkspace = falhaConversao ? "" : texto(link.urlOptimus || link.urlAfiliadaWorkspace || link.urlAfiliada || link.afiliado || link.linkAfiliado || (produtoEscolhido ? linkAfiliado : ""));
+    const renderizavel = !falhaConversao && Boolean(urlAfiliadaWorkspace);
 
     ocorrencias.push({
       papel: papel === 'resgate' ? 'link_resgate' : 'link_produto',
@@ -582,8 +778,11 @@ function montarLinksComerciaisShopee({ links = [], evento = {}, analiseLinksShop
       seguro: renderizavel,
       origem,
       proveniencia: origem,
-      conversaoStatus: urlAfiliadaWorkspace ? 'convertida' : (papel === 'resgate' ? 'preservada_sem_conversao_workspace' : 'falhou'),
-      motivoConversao: urlAfiliadaWorkspace ? 'cta_workspace_convertido' : (papel === 'resgate' ? 'resgate_shopee_preservado' : 'produto_sem_conversao_workspace'),
+      tipoOrigem: falhaConversao ? texto(link.tipoOrigem || "adapter.shopee.conversao_falha") : texto(link.tipoOrigem || ""),
+      conversaoStatus: conversaoStatusEntrada || (urlAfiliadaWorkspace ? 'convertida' : 'falhou'),
+      motivoConversao: texto(link.motivoConversao || "") || (urlAfiliadaWorkspace ? 'cta_workspace_convertido' : (papel === 'resgate' ? 'resgate_shopee_sem_conversao_landing' : 'produto_sem_conversao_workspace')),
+      destinoFuncionalOriginal: link.destinoFuncionalOriginal || destinoFuncionalShopee(link, urlOriginal),
+      destinoFuncionalFinal: link.destinoFuncionalFinal || (urlAfiliadaWorkspace ? destinoProdutoConvertidoShopee(link, urlAfiliadaWorkspace) : { tipo: "indisponivel", rota: "", url: "" }),
       motivo: classificado.motivo
     });
   }

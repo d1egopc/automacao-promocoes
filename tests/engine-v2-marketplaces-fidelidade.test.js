@@ -67,7 +67,7 @@ async function testarClassificacaoShopeePreservaProduto() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.deepStrictEqual(chamadasImportador, [produto, cupom]);
+  assert.deepStrictEqual(chamadasImportador, [produto]);
   assert.strictEqual(resultado.metadata.papelLinkEscolhido, "produto");
   assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "cupom");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
@@ -96,6 +96,8 @@ async function testarShopeeResgateProdutoComParametroLpAff() {
     links: [linkRow(1, resgate), linkRow(2, produto)],
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
+      expandirShortlinkShopee: async () => "",
+      gerarShortLinkShopee: async () => ({ ok: false, motivo: "fixture_sem_generate_shortlink" }),
       importarShopee: async (url) => {
         chamadasImportador.push(url);
         return {
@@ -113,7 +115,7 @@ async function testarShopeeResgateProdutoComParametroLpAff() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.deepStrictEqual(chamadasImportador, [produto, resgate]);
+  assert.deepStrictEqual(chamadasImportador, [produto]);
   assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "cupom");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
 }
@@ -143,6 +145,8 @@ async function testarShopeeResgateProdutoSemRotuloExplicito() {
     links: [linkRow(1, resgate), linkRow(2, produto)],
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
+      expandirShortlinkShopee: async () => "",
+      gerarShortLinkShopee: async () => ({ ok: false, motivo: "fixture_sem_generate_shortlink" }),
       importarShopee: async (url) => {
         chamadasImportador.push(url);
         return {
@@ -160,7 +164,7 @@ async function testarShopeeResgateProdutoSemRotuloExplicito() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.deepStrictEqual(chamadasImportador, [produto, resgate]);
+  assert.deepStrictEqual(chamadasImportador, [produto]);
   assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "cupom");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLinkMotivo, "contexto_produto_apos_resgate_shopee");
@@ -307,6 +311,8 @@ async function testarShopeePreservaPrecoRadarQuandoApiIncompativel() {
     links: [linkRow(1, resgate), linkRow(2, produto)],
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
+      expandirShortlinkShopee: async () => "",
+      gerarShortLinkShopee: async () => ({ ok: false, motivo: "fixture_sem_generate_shortlink" }),
       importarShopee: async () => ({
         titulo: "Wi-Fi Placa Mae Msi B550m Pro-vdh Wifi Ddr4 Socket Am4 Cor Preto",
         precoAtual: "7,19",
