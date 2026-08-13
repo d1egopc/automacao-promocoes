@@ -6,8 +6,12 @@ const {
   restaurarOfertaStatusSeDistribuindo,
   registrarEtapaDistribuicao,
   validarOfertaParaDistribuicao,
-  adicionarOfertaNaFilaCliente
+  adicionarOfertaNaFilaCliente,
+  motivoDistribuicaoDefinitivo: motivoDistribuicaoDefinitivoService
 } = require("./distributor.service");
+const {
+  motivoDistribuicaoDefinitivo: motivoDistribuicaoDefinitivoHelper
+} = require("./motivos-definitivos");
 const {
   logEngineDistribuidorInicio,
   logEngineDistribuidorOferta,
@@ -28,6 +32,10 @@ const {
   avaliarFluxoWorkspaceShadow,
   flowManagerAtivoWorkspace
 } = require("../flow-manager/flow-manager.service");
+
+const motivoDistribuicaoDefinitivo = typeof motivoDistribuicaoDefinitivoService === "function"
+  ? motivoDistribuicaoDefinitivoService
+  : motivoDistribuicaoDefinitivoHelper;
 
 function motivoAdicionar(resumo, motivo = "erro_distribuicao") {
   const chave = motivo || "erro_distribuicao";
@@ -222,6 +230,26 @@ function logFlowAtivo(tag = "", payload = {}) {
 
 async function finalizarFlowNaoAceita(oferta = {}, decisao = {}, resumo = null, origem = "flow_manager") {
   const motivo = decisao.motivo || "flow_sem_capacidade";
+  const classificacao = motivoDistribuicaoDefinitivo(motivo, {
+    origem,
+    clienteId: oferta.cliente_id || "",
+    marketplace: oferta.marketplace || "",
+    destinosCompativeis: decisao.destinosCompativeis,
+    temIntegracao: decisao.temIntegracao,
+    temCaminhoOperacional: decisao.temCaminhoOperacional
+  });
+  if (classificacao.definitivo) {
+    return reterOferta(oferta, motivo, {
+      origem,
+      resultadoDistribuicao: "definitivo_nao_aceito",
+      definitivoOperacional: true,
+      classificacaoOperacional: classificacao.tipo,
+      statusOperacional: classificacao.statusOperacional,
+      filaRecebeu: false,
+      escopo: "workspace"
+    }, resumo);
+  }
+
   const motivoStatus = `flow_${motivo}`;
 
   await registrarEtapaDistribuicao(oferta.job_id, "flow_manager", "nao_aceita", motivo, {
@@ -316,16 +344,29 @@ function contextoCoberturaDistributor(oferta = {}, extras = {}) {
 }
 
 async function reterOferta(oferta, motivo, detalhes = {}, resumo = null) {
-  await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "retida", motivo, detalhes);
+  const classificacao = motivoDistribuicaoDefinitivo(motivo, {
+    ...detalhes,
+    clienteId: oferta.cliente_id || "",
+    marketplace: oferta.marketplace || ""
+  });
+  const detalhesFinais = {
+    ...detalhes,
+    definitivoOperacional: detalhes.definitivoOperacional === true || classificacao.definitivo === true,
+    classificacaoOperacional: detalhes.classificacaoOperacional || classificacao.tipo,
+    statusOperacional: detalhes.statusOperacional || classificacao.statusOperacional,
+    filaRecebeu: detalhes.filaRecebeu === true
+  };
+
+  await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "retida", motivo, detalhesFinais);
   await marcarOfertaStatus(oferta.id, "retida", motivo, { jobId: oferta.job_id, clienteId: oferta.cliente_id });
-  logEngineDistribuidorRetida({ ofertaId: oferta.id, jobId: oferta.job_id, clienteId: oferta.cliente_id, categoriaOferta: detalhes.categoriaOferta || oferta.categoria || "", categoriasDestino: detalhes.categoriasDestino || [], motivo });
+  logEngineDistribuidorRetida({ ofertaId: oferta.id, jobId: oferta.job_id, clienteId: oferta.cliente_id, categoriaOferta: detalhesFinais.categoriaOferta || oferta.categoria || "", categoriasDestino: detalhesFinais.categoriasDestino || [], motivo });
 
   if (resumo) {
     resumo.retidas += 1;
     motivoAdicionar(resumo, motivo);
   }
 
-  return { ok: false, retida: true, motivo };
+  return { ok: false, retida: true, motivo, definitivoOperacional: detalhesFinais.definitivoOperacional };
 }
 
 async function erroOferta(oferta, motivo, detalhes = {}, resumo = null) {
@@ -394,7 +435,10 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
   const flowAtivo = flowManagerAtivoParaOferta(oferta, contexto);
 
   if (flowAtivo && flow?.aceitarAgora === false) {
-    return finalizarFlowNaoAceita(oferta, flow, resumo);
+    return finalizarFlowNaoAceita(oferta, {
+      ...flow,
+      destinosCompativeis: validacao.destinosCompativeis
+    }, resumo);
   }
 
   const decidirGate = contexto?.deps?.decidirAbsorcaoWorkspace || decidirAbsorcaoWorkspace;
@@ -424,6 +468,39 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     });
 
     if (!gate.permitir) {
+      const classificacaoGate = motivoDistribuicaoDefinitivo(gate.motivo || "gate_absorcao_bloqueado", {
+        origem: "gate",
+        clienteId: oferta.cliente_id || "",
+        marketplace: oferta.marketplace || "",
+        destinosCompativeis: validacao.destinosCompativeis,
+        estadoDaEsteira: gate.estadoDaEsteira,
+        capacidadeAtual: gate.capacidadeAtual,
+        pressaoEsteiraViva: gate.pressaoEsteiraViva,
+        filaAlvo: gate.filaAlvo
+      });
+      if (classificacaoGate.definitivo) {
+        coberturaRadar.registrar("engine_distributor_retida", {
+          ...contextoCoberturaDistributor(oferta, {
+            destinoEncontrado: true,
+            filaRecebeu: false
+          }),
+          decisao: "retido",
+          motivo: gate.motivo || "gate_absorcao_bloqueado"
+        });
+        return reterOferta(oferta, gate.motivo || "gate_absorcao_bloqueado", {
+          ofertaId: oferta.id,
+          clienteId: oferta.cliente_id,
+          resultadoDistribuicao: "gate_definitivo_terminal",
+          motivo: gate.motivo || "gate_absorcao_bloqueado",
+          estadoDaEsteira: gate.estadoDaEsteira,
+          filaRecebeu: false,
+          escopo: "workspace",
+          definitivoOperacional: true,
+          classificacaoOperacional: classificacaoGate.tipo,
+          statusOperacional: classificacaoGate.statusOperacional
+        }, resumo);
+      }
+
       if (flowAtivo) {
         return finalizarFlowNaoAceita(oferta, {
           ...(flow || {}),
@@ -433,7 +510,8 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
           bufferAtual: gate.pressaoEsteiraViva ?? flow?.bufferAtual,
           vagasDisponiveis: gate.capacidadeAtual ?? flow?.vagasDisponiveis,
           tipoFluxo: flow?.tipoFluxo || tipoOperacionalOferta(oferta),
-          ttlMs: flow?.ttlMs
+          ttlMs: flow?.ttlMs,
+          destinosCompativeis: validacao.destinosCompativeis
         }, resumo, "gate");
       }
       await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "bloqueada", "gate_bloqueado_piloto", {

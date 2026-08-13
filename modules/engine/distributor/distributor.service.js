@@ -19,6 +19,9 @@ const {
 const {
   carimbarExpiracaoOperacionalFila
 } = require("../flow-manager/flow-manager.service");
+const {
+  motivoDistribuicaoDefinitivo
+} = require("./motivos-definitivos");
 
 let engineOfertasMetadataDisponivel = null;
 
@@ -822,42 +825,58 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
   const clienteId = normalizarTexto(oferta.cliente_id);
   const marketplace = normalizarMarketplace(oferta.marketplace);
 
+  const rejeitar = (motivo, detalhes = {}) => {
+    const classificacao = motivoDistribuicaoDefinitivo(motivo, {
+      ...detalhes,
+      clienteId,
+      marketplace
+    });
+    return {
+      ok: false,
+      motivo,
+      detalhes: {
+        ...detalhes,
+        definitivoOperacional: classificacao.definitivo === true,
+        classificacaoOperacional: classificacao.tipo,
+        statusOperacional: classificacao.statusOperacional
+      }
+    };
+  };
+
   if (!usuarioAtivo(clienteId)) {
     logUsuarioInativoIgnorado({ clienteId, fluxo: "engine_distributor_validacao" });
-    return { ok: false, motivo: "usuario_inativo" };
+    return rejeitar("usuario_inativo");
   }
 
   if (!clienteValidoEngine(clienteId, contexto.clientesValidos || [])) {
-    return { ok: false, motivo: "cliente_invalido" };
+    return rejeitar("cliente_invalido");
   }
 
   if (!marketplaceAtivoClienteEngine(clienteId, marketplace, contexto.marketplacesAtivosPorCliente || {})) {
-    return { ok: false, motivo: "marketplace_bloqueado" };
+    return rejeitar("marketplace_bloqueado");
   }
 
   if (!normalizarTexto(oferta.categoria)) {
-    return { ok: false, motivo: "categoria_bloqueada" };
+    return rejeitar("categoria_bloqueada");
   }
 
   if (typeof contexto.validarCreditos === "function") {
     const creditos = await contexto.validarCreditos(clienteId, oferta);
-    if (creditos?.ok === false) return { ok: false, motivo: creditos.motivo || "creditos_insuficientes" };
+    if (creditos?.ok === false) return rejeitar(creditos.motivo || "creditos_insuficientes", { creditos });
   }
 
   const destinos = analisarDestinosOferta(clienteId, oferta, contexto);
   if (!destinos.compativeis.length) {
     const destinosDiagnostico = destinos.rejeitados.map(detalhesDestinoAnalise);
-    return {
-      ok: false,
-      motivo: motivoDestinoRetido(destinos),
-      detalhes: {
+    const motivo = motivoDestinoRetido(destinos);
+    return rejeitar(motivo, {
         destinosTotal: destinos.destinos.length,
+        destinosCompativeis: 0,
         rejeitados: destinos.rejeitados.map(item => item.analise?.motivo || ""),
         destinosDiagnostico,
         categoriaOferta: destinosDiagnostico.map(item => item.categoriaOferta).find(Boolean) || normalizarTexto(oferta.categoria || ""),
         categoriasDestino: destinosDiagnostico.flatMap(item => item.categoriasPermitidas || []).filter(Boolean)
-      }
-    };
+    });
   }
 
   const retorno = {
@@ -1085,5 +1104,6 @@ module.exports = {
   resolverImagemFilaEngine,
   ofertaJaExisteNaFila,
   categoriasCandidatasOferta,
-  marketplaceEquivalentesDistribuidor
+  marketplaceEquivalentesDistribuidor,
+  motivoDistribuicaoDefinitivo
 };

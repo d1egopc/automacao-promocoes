@@ -37,6 +37,9 @@ const {
 const {
   sanearExpiracaoOperacionalFilaItem
 } = require("./modules/engine/flow-manager/flow-manager.service");
+const {
+  motivoDistribuicaoDefinitivo
+} = require("./modules/engine/distributor/motivos-definitivos");
 
 const {
   farejarMercadoLivre: farejarMercadoLivreModulo,
@@ -4510,10 +4513,17 @@ function motivoRetencaoSemDestino(analises = []) {
   return "retida_sem_destino_compativel";
 }
 
-function marcarOfertaRetida(oferta = {}, motivoRetencao = "retida_sem_destino_compativel") {
+function marcarOfertaRetida(oferta = {}, motivoRetencao = "retida_sem_destino_compativel", contextoRetencao = {}) {
+  const classificacao = motivoDistribuicaoDefinitivo(motivoRetencao, contextoRetencao);
   oferta.status = "retida";
   oferta.statusDetalhe = "Retida por falta de destino compatível.";
   oferta.motivoRetencao = motivoRetencao;
+  oferta.definitivoOperacional = classificacao.definitivo === true;
+  oferta.classificacaoOperacional = classificacao.tipo;
+  oferta.statusOperacional = classificacao.statusOperacional;
+  if (classificacao.definitivo) {
+    oferta.retidaTerminal = true;
+  }
   oferta.retidaEm = new Date().toISOString();
   oferta.erro = "";
   oferta.erroEm = "";
@@ -6191,7 +6201,13 @@ for (const itemRejeitado of analiseDestinosFila.rejeitados) {
 
 if (!destinosCompativeis.length) {
   resumoFila.motivoPulo = analiseDestinosFila.motivoRetencao || "sem_destino_compativel";
-  marcarOfertaRetida(oferta, analiseDestinosFila.motivoRetencao);
+  marcarOfertaRetida(oferta, analiseDestinosFila.motivoRetencao, {
+    clienteId,
+    marketplace: oferta.marketplace || oferta.mercado || "",
+    destinosCompativeis: 0,
+    destinosTotal: analiseDestinosFila.destinosInteligentes?.length || 0,
+    rejeitados: analiseDestinosFila.rejeitados?.map(item => item?.analise?.motivo || "").filter(Boolean) || []
+  });
   marcarFilaAlterada();
   salvarFilaSeAlterada(clienteId);
   registrarCoberturaExecutor("fila_item_retido", oferta, clienteId, {}, {
