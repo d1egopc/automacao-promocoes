@@ -1874,6 +1874,37 @@ function chaveUrlFinalAliExpress(url = "") {
   }
 }
 
+function chaveIdentidadeOcorrenciaLinkV26(bloco = {}) {
+  const metadata = objeto(bloco.metadata);
+  const valor = objeto(bloco.valorEstruturado);
+  const candidatos = [
+    metadata.ocorrenciaId,
+    metadata.ocorrencia_id,
+    valor.ocorrenciaId,
+    valor.ocorrencia_id,
+    metadata.ordemCaptura != null ? `ordem:${metadata.ordemCaptura}` : "",
+    valor.ordemCaptura != null ? `ordem:${valor.ordemCaptura}` : "",
+    metadata.ordem != null ? `ordem:${metadata.ordem}` : "",
+    valor.ordem != null ? `ordem:${valor.ordem}` : ""
+  ];
+  return primeiroTexto(...candidatos);
+}
+
+function chaveDedupeVisualLinkV26(bloco = {}, contexto = {}) {
+  const tipo = texto(bloco.tipo);
+  if (!/^link_/.test(tipo)) return "";
+  if (!contexto.marketplaceAliExpress) return "";
+  const identidade = chaveIdentidadeOcorrenciaLinkV26(bloco);
+  const chaveDedupe = texto(bloco.dedupeKey);
+  const urlFuncional = chaveUrlFinalAliExpress(textoBlocoCanonicoV26(bloco));
+  if (identidade) {
+    return ["link", tipo, "ocorrencia", identidade, chaveDedupe || urlFuncional].filter(Boolean).join(":").slice(0, 300);
+  }
+  if (chaveDedupe) return ["link", tipo, "dedupe", chaveDedupe].join(":").slice(0, 300);
+  if (urlFuncional) return ["link", tipo, "url", urlFuncional].join(":").slice(0, 300);
+  return "";
+}
+
 function contratoPermiteLinkProdutoOriginal(doc = {}) {
   const contrato = doc.contratoMarketplace;
   if (!contrato) return true;
@@ -2265,9 +2296,12 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
     const chaveDedupe = bloco.dedupeKey || dedupeKeyBloco(bloco.tipo, bloco.textoOriginal, bloco.valorEstruturado, bloco.origem);
     if (!/^link_/.test(texto(bloco.tipo)) && chaveDedupe && vistos.has(chaveDedupe)) continue;
     if (!toggleAtivoParaBlocoV26(bloco, template)) continue;
+    const chaveDedupeLink = chaveDedupeVisualLinkV26(bloco, contexto);
+    if (chaveDedupeLink && vistos.has(chaveDedupeLink)) continue;
     const linha = renderizarBlocoCanonicoV26(bloco, contexto);
     const adicionado = adicionarBlocoUnico(linhas, bloco.tipo, linha);
     if (adicionado && !/^link_/.test(texto(bloco.tipo)) && chaveDedupe) vistos.add(chaveDedupe);
+    if (adicionado && chaveDedupeLink) vistos.add(chaveDedupeLink);
   }
   inserirClassificacaoVisualV26(linhas, classificacaoVisual);
 

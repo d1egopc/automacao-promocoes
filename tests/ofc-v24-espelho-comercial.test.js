@@ -41,6 +41,38 @@ const estrelas = (n) => "\u2B50".repeat(n);
 const possuiLinha = (mensagem, linha) => String(mensagem || "").split(/\r?\n/).some(item => item.trim() === linha);
 const contarOcorrenciasTexto = (mensagem, trecho) => String(mensagem || "").split(trecho).length - 1;
 
+function blocoCanonicoV26(tipo, textoOriginal, extras = {}) {
+  return {
+    tipo,
+    textoOriginal,
+    valorEstruturado: extras.valorEstruturado || (String(textoOriginal || "").startsWith("http") ? { url: textoOriginal } : null),
+    origem: extras.origem || "fixture",
+    confianca: extras.confianca || "alta",
+    essencial: extras.essencial === true,
+    requisitos: extras.requisitos || [],
+    ordemSugerida: extras.ordemSugerida || 100,
+    visibilidadePadrao: extras.visibilidadePadrao || (extras.essencial ? "obrigatorio" : "padrao"),
+    dedupeKey: extras.dedupeKey || `${tipo}:${String(textoOriginal || "").toLowerCase()}`,
+    avisos: extras.avisos || [],
+    metadata: extras.metadata || {}
+  };
+}
+
+function documentoAliExpressV26(blocos = []) {
+  return {
+    tituloOriginal: "Oferta AliExpress V2.6",
+    marketplace: "aliexpress",
+    precoPorTexto: "US$ 19.99",
+    linkAfiliado: "",
+    blocos: [
+      blocoCanonicoV26("titulo", "Oferta AliExpress V2.6", { ordemSugerida: 10, essencial: true }),
+      blocoCanonicoV26("marketplace", "aliexpress", { ordemSugerida: 20 }),
+      blocoCanonicoV26("preco_oferta", "US$ 19.99", { ordemSugerida: 50, essencial: true }),
+      ...blocos
+    ]
+  };
+}
+
 const mlCompleto = criarEspelho({
   textoOriginal: [
     "Bolsa Esportiva adidas Preto",
@@ -691,6 +723,97 @@ for (const sufixo of ["1", "2", "3"]) {
 }
 assert.strictEqual(contarOcorrenciasTexto(templateResgateTresProdutosV26.mensagem, "Confira aqui:"), 3, "Resgate + 3 Produtos renderiza exatamente 3 CTAs de produto");
 assert.ok(!templateResgateTresProdutosV26.mensagem.includes("link-principal-nao-usar-multiplos"), "N Produtos nao usam linkAfiliadoPrincipal");
+
+const templateAliAppDuplicadoTecnicoV26 = montarTemplateEspelhoPorBlocosV26({}, documentoAliExpressV26([
+  blocoCanonicoV26("link_app", "https://s.click.aliexpress.com/app-x", {
+    ordemSugerida: 110,
+    essencial: true,
+    dedupeKey: "link_app:ali-app-x"
+  }),
+  blocoCanonicoV26("link_app", "https://s.click.aliexpress.com/app-x", {
+    ordemSugerida: 111,
+    essencial: true,
+    dedupeKey: "link_app:ali-app-x"
+  }),
+  blocoCanonicoV26("link_pc", "https://s.click.aliexpress.com/pc-x", {
+    ordemSugerida: 120,
+    essencial: true,
+    dedupeKey: "link_pc:ali-pc-x"
+  })
+]));
+assert.strictEqual(contarOcorrenciasTexto(templateAliAppDuplicadoTecnicoV26.mensagem, "APP:"), 1, "AliExpress link_app tecnico duplicado renderiza um APP");
+assert.strictEqual(contarOcorrenciasTexto(templateAliAppDuplicadoTecnicoV26.mensagem, "https://s.click.aliexpress.com/app-x"), 1, "AliExpress link_app tecnico duplicado nao repete URL");
+assert.ok(templateAliAppDuplicadoTecnicoV26.mensagem.includes("PC:\nhttps://s.click.aliexpress.com/pc-x"), "AliExpress PC permanece ao deduplicar APP tecnico");
+
+const templateAliAppMesmoUrlOcorrenciasDistintasV26 = montarTemplateEspelhoPorBlocosV26({}, documentoAliExpressV26([
+  blocoCanonicoV26("link_app", "https://s.click.aliexpress.com/app-igual", {
+    ordemSugerida: 110,
+    essencial: true,
+    dedupeKey: "link_app:ali-app-igual",
+    valorEstruturado: { url: "https://s.click.aliexpress.com/app-igual", ordemCaptura: 1 },
+    metadata: { ordemCaptura: 1 }
+  }),
+  blocoCanonicoV26("link_app", "https://s.click.aliexpress.com/app-igual", {
+    ordemSugerida: 111,
+    essencial: true,
+    dedupeKey: "link_app:ali-app-igual",
+    valorEstruturado: { url: "https://s.click.aliexpress.com/app-igual", ordemCaptura: 2 },
+    metadata: { ordemCaptura: 2 }
+  }),
+  blocoCanonicoV26("link_pc", "https://s.click.aliexpress.com/pc-apoio", {
+    ordemSugerida: 120,
+    essencial: true,
+    dedupeKey: "link_pc:ali-pc-apoio"
+  })
+]));
+assert.strictEqual(contarOcorrenciasTexto(templateAliAppMesmoUrlOcorrenciasDistintasV26.mensagem, "APP:"), 2, "AliExpress duas ocorrencias Radar iguais preservam dois APP");
+assert.strictEqual(contarOcorrenciasTexto(templateAliAppMesmoUrlOcorrenciasDistintasV26.mensagem, "https://s.click.aliexpress.com/app-igual"), 2, "AliExpress URL igual com ocorrencias distintas nao e deduplicada");
+
+const templateAliAppsDiferentesV26 = montarTemplateEspelhoPorBlocosV26({}, documentoAliExpressV26([
+  blocoCanonicoV26("link_app", "https://s.click.aliexpress.com/app-x", {
+    ordemSugerida: 110,
+    essencial: true,
+    dedupeKey: "link_app:ali-app-x"
+  }),
+  blocoCanonicoV26("link_app", "https://s.click.aliexpress.com/app-y", {
+    ordemSugerida: 111,
+    essencial: true,
+    dedupeKey: "link_app:ali-app-y"
+  }),
+  blocoCanonicoV26("link_pc", "https://s.click.aliexpress.com/pc-apoio", {
+    ordemSugerida: 120,
+    essencial: true,
+    dedupeKey: "link_pc:ali-pc-apoio"
+  })
+]));
+assert.strictEqual(contarOcorrenciasTexto(templateAliAppsDiferentesV26.mensagem, "APP:"), 2, "AliExpress APP X + APP Y preserva dois APP");
+
+const templateAliAppPcProdutoV26 = montarTemplateEspelhoPorBlocosV26({}, documentoAliExpressV26([
+  blocoCanonicoV26("link_app", "https://s.click.aliexpress.com/app-prod", {
+    ordemSugerida: 110,
+    essencial: true,
+    dedupeKey: "link_app:ali-app-prod",
+    metadata: { productId: "100500" }
+  }),
+  blocoCanonicoV26("link_pc", "https://s.click.aliexpress.com/pc-prod", {
+    ordemSugerida: 120,
+    essencial: true,
+    dedupeKey: "link_pc:ali-pc-prod",
+    metadata: { productId: "100500" }
+  }),
+  blocoCanonicoV26("link_produto_original", "https://s.click.aliexpress.com/produto-extra", {
+    ordemSugerida: 130,
+    essencial: true,
+    dedupeKey: "link_produto:ali-prod-extra",
+    metadata: { productId: "100500" }
+  })
+]));
+assert.strictEqual(contarOcorrenciasTexto(templateAliAppPcProdutoV26.mensagem, "APP:"), 1, "AliExpress APP permanece");
+assert.strictEqual(contarOcorrenciasTexto(templateAliAppPcProdutoV26.mensagem, "PC:"), 1, "AliExpress PC permanece");
+assert.strictEqual(contarOcorrenciasTexto(templateAliAppPcProdutoV26.mensagem, "Confira aqui:"), 1, "AliExpress Produto permanece como CTA separado");
+assert.ok(templateAliAppPcProdutoV26.mensagem.includes("https://s.click.aliexpress.com/app-prod"));
+assert.ok(templateAliAppPcProdutoV26.mensagem.includes("https://s.click.aliexpress.com/pc-prod"));
+assert.ok(templateAliAppPcProdutoV26.mensagem.includes("https://s.click.aliexpress.com/produto-extra"));
 
 function blocosV26(resultado) {
   return resultado.documentoComercialCanonico.blocos || [];
