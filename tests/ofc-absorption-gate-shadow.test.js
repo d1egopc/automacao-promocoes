@@ -10,6 +10,7 @@ const {
   classificarEstadoEsteira,
   classificarStatusFila,
   classificarItemEsteiraShadow,
+  itemPressionaCapacidade,
   resumoFilaWorkspace,
   capacidadeDestinoShadow,
   timestampFila,
@@ -41,8 +42,13 @@ const destinoTurbo = {
 
 const filaComHistorico = [
   { id: "p1", status: "pendente", marketplace: "mercadolivre", destinoId: "destino_a", criadoEm: new Date(agora - 20 * 60 * 1000).toISOString(), cupom: "MODA10" },
-  { id: "p2", status: "enviando", marketplace: "amazon", destinoId: "destino_a", dataEntradaFila: new Date(agora - 70 * 60 * 1000).toISOString() },
-  { id: "p3", status: "erro_temporario", marketplace: "shopee", destinoId: "destino_b", adicionado_em: new Date(agora - 3 * 60 * 60 * 1000).toISOString() },
+  { id: "p2", status: "enviando", marketplace: "amazon", destinoId: "destino_a", dataEntradaFila: new Date(agora - 20 * 60 * 1000).toISOString() },
+  { id: "p3", status: "erro_temporario", marketplace: "shopee", destinoId: "destino_b", adicionado_em: new Date(agora - 5 * 60 * 1000).toISOString() },
+  { id: "velho", status: "pendente", marketplace: "mercadolivre", destinoId: "destino_a", criadoEm: new Date(agora - 35 * 60 * 1000).toISOString() },
+  { id: "turbo_velho", status: "pendente", marketplace: "mercadolivre", destinoId: "destino_a", criadoEm: new Date(agora - 11 * 60 * 1000).toISOString(), cupomTurbo: true },
+  { id: "cooldown_curto", status: "pendente", marketplace: "mercadolivre", destinoId: "destino_a", criadoEm: new Date(agora - 5 * 60 * 1000).toISOString(), proximaTentativaEnvioEm: new Date(agora + 5 * 60 * 1000).toISOString() },
+  { id: "cooldown_longo", status: "pendente", marketplace: "mercadolivre", destinoId: "destino_a", criadoEm: new Date(agora - 5 * 60 * 1000).toISOString(), proximaTentativaEnvioEm: new Date(agora + 40 * 60 * 1000).toISOString() },
+  { id: "inelegivel", status: "pendente", marketplace: "mercadolivre", destinoId: "destino_a", criadoEm: new Date(agora - 5 * 60 * 1000).toISOString(), motivo: "categoria_incompativel" },
   { id: "sem_timestamp", status: "pendente", marketplace: "amazon" },
   { id: "desconhecido", status: "misterioso", marketplace: "amazon", criadoEm: new Date(agora - 5 * 60 * 1000).toISOString() },
   ...Array.from({ length: 500 }, (_, i) => ({ id: `h${i}`, status: "enviado", criadoEm: new Date(agora - 60 * 60 * 1000).toISOString() })),
@@ -66,20 +72,34 @@ assert.strictEqual(timestampFila({ adicionado_em: "2026-07-31T21:00:00.000Z" }).
 assert.strictEqual(timestampFila({}).ms, null);
 
 assert.strictEqual(classificarItemEsteiraShadow(filaComHistorico[0], { agoraMs: agora, janelaAbertaAgora: true }), "aindaVivos");
-assert.strictEqual(classificarItemEsteiraShadow(filaComHistorico[2], { agoraMs: agora, janelaAbertaAgora: true }), "vencidosOperacionalmente");
-assert.strictEqual(classificarItemEsteiraShadow(filaComHistorico[3], { agoraMs: agora, janelaAbertaAgora: true }), "aguardandoAuditoria");
-assert.strictEqual(classificarItemEsteiraShadow(filaComHistorico[4], { agoraMs: agora, janelaAbertaAgora: true }), "aguardandoAuditoria");
+assert.strictEqual(classificarItemEsteiraShadow(filaComHistorico[3], { agoraMs: agora, janelaAbertaAgora: true }), "vencidosOperacionalmente");
+assert.strictEqual(classificarItemEsteiraShadow(filaComHistorico[8], { agoraMs: agora, janelaAbertaAgora: true }), "aguardandoAuditoria");
+assert.strictEqual(classificarItemEsteiraShadow(filaComHistorico[9], { agoraMs: agora, janelaAbertaAgora: true }), "aguardandoAuditoria");
 assert.strictEqual(classificarItemEsteiraShadow(filaComHistorico[1], { agoraMs: agora, janelaAbertaAgora: false }), "candidatosExpiracao");
+assert.strictEqual(itemPressionaCapacidade(filaComHistorico[0], agora).pressiona, true);
+assert.strictEqual(itemPressionaCapacidade(filaComHistorico[3], agora).motivo, "ttl_operacional_vencido");
+assert.strictEqual(itemPressionaCapacidade(filaComHistorico[4], agora).motivo, "ttl_operacional_vencido");
+assert.strictEqual(itemPressionaCapacidade(filaComHistorico[5], agora).motivo, "cooldown_curto_vivo");
+assert.strictEqual(itemPressionaCapacidade(filaComHistorico[6], agora).motivo, "cooldown_ultrapassa_ttl_operacional");
+assert.strictEqual(itemPressionaCapacidade(filaComHistorico[7], agora).motivo, "categoria_incompativel");
 
 const resumoFila = resumoFilaWorkspace("user_pressao", {
   agoraMs: agora,
   janelaAbertaAgora: true,
   readClienteJson: () => filaComHistorico
 });
-assert.strictEqual(resumoFila.pendentesVivos, 2);
+assert.strictEqual(resumoFila.pendentesVivos, 7);
 assert.strictEqual(resumoFila.emTentativaEnvio, 1);
 assert.strictEqual(resumoFila.errosTemporariosRecuperaveis, 1);
 assert.strictEqual(resumoFila.pressaoEsteiraViva, 4);
+assert.strictEqual(resumoFila.pressaoPendenteVivo, 2);
+assert.strictEqual(resumoFila.pressaoEmTentativa, 1);
+assert.strictEqual(resumoFila.pressaoErroTemporarioRecuperavel, 1);
+assert.strictEqual(resumoFila.itensPressaoVivaTotal, 4);
+assert.strictEqual(resumoFila.motivosForaPressaoViva.ttl_operacional_vencido, 2);
+assert.strictEqual(resumoFila.motivosForaPressaoViva.cooldown_ultrapassa_ttl_operacional, 1);
+assert.strictEqual(resumoFila.motivosForaPressaoViva.categoria_incompativel, 1);
+assert.strictEqual(resumoFila.motivosForaPressaoViva.sem_timestamp_operacional, 1);
 assert.strictEqual(resumoFila.status_desconhecido, 1);
 assert.strictEqual(resumoFila.enviados, 500);
 assert.strictEqual(resumoFila.totalEnviadosHistorico, 500);
@@ -87,21 +107,20 @@ assert.strictEqual(resumoFila.errosFinais, 1);
 assert.strictEqual(resumoFila.cancelados, 1);
 assert.strictEqual(resumoFila.expirados, 1);
 assert.strictEqual(resumoFila.itensSemTimestamp, 1);
-assert.strictEqual(resumoFila.idadeMinimaVivaMs, 20 * 60 * 1000);
-assert.strictEqual(resumoFila.idadeMedianaVivaMs, 70 * 60 * 1000);
-assert.strictEqual(resumoFila.idadeP95VivaMs, 3 * 60 * 60 * 1000);
-assert.strictEqual(resumoFila.idadeMaximaVivaMs, 3 * 60 * 60 * 1000);
-assert.strictEqual(resumoFila.itens15a30Min, 1);
-assert.strictEqual(resumoFila.itens1a2h, 1);
-assert.strictEqual(resumoFila.itensAcima2h, 1);
+assert.strictEqual(resumoFila.idadeMinimaVivaMs, 5 * 60 * 1000);
+assert.strictEqual(resumoFila.idadeMaximaVivaMs, 35 * 60 * 1000);
+assert.strictEqual(resumoFila.itensAte5Min, 4);
+assert.strictEqual(resumoFila.itens10a15Min, 1);
+assert.strictEqual(resumoFila.itens15a30Min, 2);
+assert.strictEqual(resumoFila.itens30a60Min, 1);
 assert.strictEqual(resumoFila.porMarketplace.amazon, 2);
-assert.strictEqual(resumoFila.porDestino.destino_a, 2);
+assert.strictEqual(resumoFila.porDestino.destino_a, 7);
 assert.strictEqual(resumoFila.porTipoOperacional.cupom, 1);
-assert.strictEqual(resumoFila.camposTimestampEncontrados.criadoEm, 1);
+assert.strictEqual(resumoFila.camposTimestampEncontrados.criadoEm, 6);
 assert.strictEqual(resumoFila.camposTimestampEncontrados.dataEntradaFila, 1);
 assert.strictEqual(resumoFila.camposTimestampEncontrados.adicionado_em, 1);
-assert.strictEqual(resumoFila.aindaVivos, 2);
-assert.strictEqual(resumoFila.vencidosOperacionalmente, 1);
+assert.strictEqual(resumoFila.aindaVivos, 6);
+assert.strictEqual(resumoFila.vencidosOperacionalmente, 2);
 assert.strictEqual(resumoFila.aguardandoAuditoria, 1);
 
 const resumoFechado = resumoFilaWorkspace("user_fechado", {
@@ -109,8 +128,8 @@ const resumoFechado = resumoFilaWorkspace("user_fechado", {
   janelaAbertaAgora: false,
   readClienteJson: () => filaComHistorico
 });
-assert.strictEqual(resumoFechado.candidatosExpiracao, 1);
-assert.strictEqual(resumoFechado.vencidosOperacionalmente, 1);
+assert.strictEqual(resumoFechado.candidatosExpiracao, 2);
+assert.strictEqual(resumoFechado.vencidosOperacionalmente, 2);
 assert.strictEqual(resumoFechado.aguardandoAuditoria, 1);
 
 assert.strictEqual(slotsCobertura(5, 3.5), 1);
@@ -136,7 +155,7 @@ assert.strictEqual(capacidadeTurbo.slots5Min, 2);
 assert.strictEqual(capacidadeTurbo.slots10Min, 4);
 assert.strictEqual(capacidadeTurbo.slots15Min, 6);
 
-const capacidadeFechada = capacidadeDestinoShadow({ ...destinoApto, horarioInicio: "23:58", horarioFim: "23:59" }, 0, []);
+const capacidadeFechada = capacidadeDestinoShadow({ ...destinoApto, horarioInicio: "00:00", horarioFim: "00:01" }, 0, []);
 assert.strictEqual(capacidadeFechada.aptoAgora, false);
 assert.strictEqual(capacidadeFechada.capacidade15Min, 0);
 
@@ -187,13 +206,13 @@ assert.strictEqual(gateSaturado.entrada15Min, 5);
 assert.strictEqual(gateSaturado.saida15Min, 0);
 assert.strictEqual(gateSaturado.entrandoMaisQueSaindo, true);
 assert.strictEqual(gateSaturado.tempoEstimadoEsvaziarEsteira, null);
-assert.strictEqual(gateSaturado.faixasIdade.itensAcima2h, 1);
-assert.strictEqual(gateSaturado.vencidosOperacionalmente, 1);
+assert.strictEqual(gateSaturado.faixasIdade.itensAcima2h, 0);
+assert.strictEqual(gateSaturado.vencidosOperacionalmente, 2);
 
 const gateFechado = montarGateWorkspace({
   clienteId: "user_fechado",
   usuario: { id: "user_fechado" },
-  destinos: [{ ...destinoApto, horarioInicio: "23:58", horarioFim: "23:59" }],
+  destinos: [{ ...destinoApto, horarioInicio: "00:00", horarioFim: "00:01" }],
   fila: resumoFilaWorkspace("user_fechado", { readClienteJson: () => filaComHistorico, agoraMs: agora, janelaAbertaAgora: false }),
   eventos: {},
   janelaMinutos: 15
@@ -201,9 +220,45 @@ const gateFechado = montarGateWorkspace({
 assert.strictEqual(gateFechado.estado, "FECHADA");
 assert.strictEqual(gateFechado.capacidadeAbsorcaoAgora, 0);
 assert.strictEqual(gateFechado.filaAlvo15Min, 0);
-assert.strictEqual(gateFechado.candidatosExpiracao, 1);
-assert.strictEqual(gateFechado.vencidosOperacionalmente, 1);
+assert.strictEqual(gateFechado.candidatosExpiracao, 2);
+assert.strictEqual(gateFechado.vencidosOperacionalmente, 2);
 assert.strictEqual(gateFechado.aguardandoAuditoria, 1);
+
+const filaRogerVelha = [
+  { id: "r1", status: "pendente", marketplace: "mercadolivre", criadoEm: new Date(agora - 31 * 60 * 1000).toISOString() },
+  { id: "r2", status: "pendente", marketplace: "amazon", criadoEm: new Date(agora - 40 * 60 * 1000).toISOString() },
+  { id: "r3", status: "erro_temporario", marketplace: "shopee", criadoEm: new Date(agora - 45 * 60 * 1000).toISOString() }
+];
+const gateRogerLiberado = montarGateWorkspace({
+  clienteId: "user_9hqs434h",
+  usuario: { id: "user_9hqs434h" },
+  destinos: [destinoApto],
+  fila: resumoFilaWorkspace("user_9hqs434h", { readClienteJson: () => filaRogerVelha, agoraMs: agora, janelaAbertaAgora: true }),
+  eventos: {},
+  janelaMinutos: 15
+});
+assert.strictEqual(gateRogerLiberado.filaAlvo15Min, 3);
+assert.strictEqual(gateRogerLiberado.pressaoEsteiraViva, 0);
+assert.strictEqual(gateRogerLiberado.capacidadeAbsorcaoAgora, 3);
+assert.strictEqual(gateRogerLiberado.estado, "LIVRE");
+
+const filaRogerParcial = [
+  { id: "r1", status: "pendente", marketplace: "mercadolivre", criadoEm: new Date(agora - 5 * 60 * 1000).toISOString() },
+  { id: "r2", status: "pendente", marketplace: "amazon", criadoEm: new Date(agora - 10 * 60 * 1000).toISOString() },
+  { id: "r3", status: "pendente", marketplace: "shopee", criadoEm: new Date(agora - 31 * 60 * 1000).toISOString() }
+];
+const gateRogerUmaVaga = montarGateWorkspace({
+  clienteId: "user_9hqs434h",
+  usuario: { id: "user_9hqs434h" },
+  destinos: [destinoApto],
+  fila: resumoFilaWorkspace("user_9hqs434h", { readClienteJson: () => filaRogerParcial, agoraMs: agora, janelaAbertaAgora: true }),
+  eventos: {},
+  janelaMinutos: 15
+});
+assert.strictEqual(gateRogerUmaVaga.filaAlvo15Min, 3);
+assert.strictEqual(gateRogerUmaVaga.pressaoEsteiraViva, 2);
+assert.strictEqual(gateRogerUmaVaga.capacidadeAbsorcaoAgora, 1);
+assert.strictEqual(gateRogerUmaVaga.estado, "ESTAVEL");
 
 const classificadoFechado = classificarEstadoEsteira({
   automacaoAtiva: false,
@@ -227,7 +282,7 @@ assert.strictEqual(classificadoFechado.estado, "FECHADA");
     destinosPorCliente: {
       user_livre: [destinoApto, destinoTurbo],
       user_saturado: [destinoApto],
-      user_fechado: [{ ...destinoApto, horarioInicio: "23:58", horarioFim: "23:59" }]
+      user_fechado: [{ ...destinoApto, horarioInicio: "00:00", horarioFim: "00:01" }]
     },
     agoraMs: agora,
     readClienteJson: (clienteId, arquivo, fallback) => {

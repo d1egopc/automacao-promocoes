@@ -109,12 +109,12 @@ const CAMPOS_TIMESTAMP_FILA = [
 ];
 
 const TTL_ESTEIRA_MS = {
-  cupom_turbo: 30 * 60 * 1000,
+  cupom_turbo: 10 * 60 * 1000,
   resgate: 30 * 60 * 1000,
-  cupom: 60 * 60 * 1000,
-  radar: 2 * 60 * 60 * 1000,
-  comum: 2 * 60 * 60 * 1000,
-  desconhecido: 60 * 60 * 1000
+  cupom: 30 * 60 * 1000,
+  radar: 30 * 60 * 1000,
+  comum: 30 * 60 * 1000,
+  desconhecido: 30 * 60 * 1000
 };
 
 const INTERVALO_TURBO_PADRAO_MINUTOS = 2.5;
@@ -274,6 +274,96 @@ function ttlEsteiraMs(item = {}) {
   return TTL_ESTEIRA_MS[tipoOperacionalFila(item)] || TTL_ESTEIRA_MS.desconhecido;
 }
 
+function proximaTentativaFilaMs(item = {}) {
+  const candidatos = [
+    item.proximaTentativaEnvioEm,
+    item.proxima_tentativa,
+    item.proximaTentativa,
+    item.tentarNovamenteEm,
+    item.retryEm,
+    item.cooldownAte
+  ];
+
+  for (const candidato of candidatos) {
+    const ms = new Date(candidato || "").getTime();
+    if (Number.isFinite(ms)) return ms;
+  }
+
+  return null;
+}
+
+function motivoInelegivelDefinitivo(item = {}) {
+  const textoMotivos = [
+    item.motivo,
+    item.motivoFinal,
+    item.motivo_final,
+    item.motivoRetencao,
+    item.motivo_status,
+    item.statusDetalhe,
+    item.status_detalhe,
+    item.erroFinal,
+    item.erro_final
+  ].map(normalizarTexto).filter(Boolean).join(" ");
+
+  if (!textoMotivos) return "";
+
+  if (/categoria.*incompativel|categoria_nao_marcada|categoria.*nao.*marcad/.test(textoMotivos)) return "categoria_incompativel";
+  if (/marketplace.*desabilitad|marketplace_nao_marcado|marketplace.*nao.*marcad/.test(textoMotivos)) return "marketplace_desabilitado";
+  if (/sem_destino|destino.*incompativel|nenhum_destino|sem_clientes_operacionais/.test(textoMotivos)) return "sem_destino_compativel";
+  if (/integracao_ausente|integracao.*ausent|credencial.*ausent|sessao.*inapta/.test(textoMotivos)) return "integracao_ausente";
+  if (/erro_final|falha_final|rejeitad.*definitiv|bloqueio_definitiv/.test(textoMotivos)) return "erro_final";
+
+  return "";
+}
+
+function itemPressionaCapacidade(item = {}, agora = Date.now(), contexto = {}) {
+  const bucket = classificarStatusFila(item);
+  if (!itemVivoFila(item)) {
+    return { pressiona: false, bucket, motivo: "status_fora_pressao_viva" };
+  }
+
+  const motivoDefinitivo = motivoInelegivelDefinitivo(item);
+  if (motivoDefinitivo) {
+    return { pressiona: false, bucket, motivo: motivoDefinitivo };
+  }
+
+  const timestamp = timestampFila(item);
+  if (timestamp.ms === null) {
+    return { pressiona: false, bucket, motivo: "sem_timestamp_operacional" };
+  }
+
+  const agoraMs = Number(agora || contexto.agoraMs || Date.now());
+  const ttlMs = ttlEsteiraMs(item);
+  const idadeMs = Math.max(0, agoraMs - timestamp.ms);
+  if (idadeMs >= ttlMs) {
+    return { pressiona: false, bucket, motivo: "ttl_operacional_vencido", idadeMs, ttlMs, timestampCampo: timestamp.campo };
+  }
+
+  const proximaMs = proximaTentativaFilaMs(item);
+  const expiraMs = timestamp.ms + ttlMs;
+  if (proximaMs !== null && proximaMs > expiraMs) {
+    return {
+      pressiona: false,
+      bucket,
+      motivo: "cooldown_ultrapassa_ttl_operacional",
+      idadeMs,
+      ttlMs,
+      proximaTentativaMs: proximaMs,
+      timestampCampo: timestamp.campo
+    };
+  }
+
+  return {
+    pressiona: true,
+    bucket,
+    motivo: proximaMs !== null && proximaMs > agoraMs ? "cooldown_curto_vivo" : "item_fresco_vivo",
+    idadeMs,
+    ttlMs,
+    proximaTentativaMs: proximaMs,
+    timestampCampo: timestamp.campo
+  };
+}
+
 function incrementar(mapa = {}, chave = "") {
   const k = String(chave || "desconhecido");
   mapa[k] = (mapa[k] || 0) + 1;
@@ -360,6 +450,13 @@ function resumoFilaWorkspace(clienteId = "", opcoes = {}) {
   const camposTimestampEncontrados = {};
   const idades = [];
   const faixas = criarFaixasVazias();
+  const pressaoContagem = {
+    pendente_vivo: 0,
+    em_tentativa: 0,
+    erro_temporario_recuperavel: 0
+  };
+  const motivosForaPressaoViva = {};
+  const itensPressaoViva = [];
   let itensSemTimestamp = 0;
   let aindaVivos = 0;
   let candidatosExpiracao = 0;
@@ -393,9 +490,25 @@ function resumoFilaWorkspace(clienteId = "", opcoes = {}) {
     if (classificacao === "candidatosExpiracao") candidatosExpiracao += 1;
     if (classificacao === "vencidosOperacionalmente") vencidosOperacionalmente += 1;
     if (classificacao === "aguardandoAuditoria") aguardandoAuditoria += 1;
+
+    const pressao = itemPressionaCapacidade(item, agora, { janelaAbertaAgora });
+    if (pressao.pressiona) {
+      pressaoContagem[bucket] = (pressaoContagem[bucket] || 0) + 1;
+      itensPressaoViva.push({
+        id: item.id || item.filaItemId || item.ofertaId || item.engineOfertaId || null,
+        status: statusReal,
+        bucket,
+        idadeMs: pressao.idadeMs,
+        ttlMs: pressao.ttlMs,
+        motivo: pressao.motivo,
+        proximaTentativaMs: pressao.proximaTentativaMs ?? null
+      });
+    } else {
+      incrementar(motivosForaPressaoViva, pressao.motivo || "fora_pressao_viva");
+    }
   }
 
-  const pressaoEsteiraViva = contagem.pendente_vivo + contagem.em_tentativa + contagem.erro_temporario_recuperavel;
+  const pressaoEsteiraViva = pressaoContagem.pendente_vivo + pressaoContagem.em_tentativa + pressaoContagem.erro_temporario_recuperavel;
   const totalEnviadosHistorico = contagem.enviado_historico;
 
   return {
@@ -403,6 +516,12 @@ function resumoFilaWorkspace(clienteId = "", opcoes = {}) {
     quantidadeFilaAtual: pressaoEsteiraViva,
     pressaoEsteiraViva,
     pressaoVivaConfirmada: pressaoEsteiraViva,
+    pressaoPendenteVivo: pressaoContagem.pendente_vivo,
+    pressaoEmTentativa: pressaoContagem.em_tentativa,
+    pressaoErroTemporarioRecuperavel: pressaoContagem.erro_temporario_recuperavel,
+    itensPressaoViva,
+    itensPressaoVivaTotal: itensPressaoViva.length,
+    motivosForaPressaoViva,
     pendente_vivo: contagem.pendente_vivo,
     em_tentativa: contagem.em_tentativa,
     erro_temporario_recuperavel: contagem.erro_temporario_recuperavel,
@@ -832,6 +951,7 @@ module.exports = {
   TTL_ESTEIRA_MS,
   classificarStatusFila,
   itemVivoFila,
+  itemPressionaCapacidade,
   timestampFila,
   tipoOperacionalFila,
   classificarItemEsteiraShadow,

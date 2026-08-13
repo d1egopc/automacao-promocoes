@@ -100,6 +100,31 @@ async function decisao(entrada = {}, opcoes = {}) {
   assert.strictEqual(saturado.motivo, "esteira_saturada");
   assert.strictEqual(saturado.quantidadeAceitaAgora, 0);
 
+  const rogerVelhoNaoSatura = await decisao({}, {
+    readClienteJson: () => [
+      item("velho_1", { dataEntradaFila: new Date(Date.now() - 31 * 60 * 1000).toISOString() }),
+      item("velho_2", { dataEntradaFila: new Date(Date.now() - 40 * 60 * 1000).toISOString() }),
+      item("velho_3", { status: "erro_temporario", dataEntradaFila: new Date(Date.now() - 45 * 60 * 1000).toISOString() })
+    ]
+  });
+  assert.strictEqual(rogerVelhoNaoSatura.pressaoEsteiraViva, 0);
+  assert.strictEqual(rogerVelhoNaoSatura.capacidadeAtual, 2);
+  assert.strictEqual(rogerVelhoNaoSatura.permitir, true);
+
+  const rogerParcialUmaVaga = await decisao({
+    destinosCompativeis: [destino({ intervaloMinutos: 3 })]
+  }, {
+    readClienteJson: () => [
+      item("fresco_1"),
+      item("fresco_2"),
+      item("velho_1", { dataEntradaFila: new Date(Date.now() - 31 * 60 * 1000).toISOString() })
+    ]
+  });
+  assert.strictEqual(rogerParcialUmaVaga.filaAlvo, 3);
+  assert.strictEqual(rogerParcialUmaVaga.pressaoEsteiraViva, 2);
+  assert.strictEqual(rogerParcialUmaVaga.capacidadeAtual, 1);
+  assert.strictEqual(rogerParcialUmaVaga.permitir, true);
+
   const sessaoInaptaComPressaoAlta = await decisao({
     destinosCompativeis: [destino({ statusSessao: "desconectada" })]
   }, {
