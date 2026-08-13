@@ -6,6 +6,10 @@ const {
 const {
   textoPixValido
 } = require("../radar/preco-pix-precedencia");
+const {
+  resolverPrecoSemantico,
+  TIPOS_CANDIDATO
+} = require("../radar/preco-semantico");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -37,6 +41,46 @@ function numeroMonetarioEmTexto(valor = "") {
   if (direto != null) return direto;
   const match = texto(valor).match(/(?:R\$\s*)?\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|(?:R\$\s*)?\d+(?:[,.]\d{1,2})?/);
   return match ? normalizarNumero(match[0]) : null;
+}
+
+function primeiroPrecoAtualSemantico(textoOriginal = "") {
+  const semantico = resolverPrecoSemantico(textoOriginal);
+  const preco = semantico?.precoAtual;
+  if (preco?.valor == null) return null;
+  return {
+    valor: preco.valor,
+    evidencia: texto(preco.evidencia),
+    condicaoPrecoPor: /\bpix\b/i.test(texto(preco.evidencia)) ? "pix" : ""
+  };
+}
+
+function candidatoPermitePrecoContrato(candidato = {}) {
+  if (!candidato) return false;
+  return [
+    TIPOS_CANDIDATO.PRECO_ATUAL,
+    TIPOS_CANDIDATO.PRECO_PIX,
+    TIPOS_CANDIDATO.PRECO_ANTIGO
+  ].includes(candidato.tipoCandidato);
+}
+
+function primeiroValorMonetarioSeguroContrato(textoOriginal = "") {
+  const fonte = texto(textoOriginal);
+  const semantico = resolverPrecoSemantico(fonte);
+  const padrao = /(?:R\$\s*)?\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|(?:R\$\s*)?\d+(?:[,.]\d{1,2})?/gi;
+  for (const match of fonte.matchAll(padrao)) {
+    const inicio = match.index || 0;
+    const valor = numeroMonetarioEmTexto(match[0]);
+    const candidato = (semantico.candidatos || []).find(item =>
+      item.indiceInicio === inicio && Math.abs(Number(item.valor) - Number(valor)) < 0.005
+    );
+    if (valor != null && candidatoPermitePrecoContrato(candidato)) {
+      return {
+        valor,
+        condicaoPrecoPor: /\bpix\b/i.test(texto(candidato?.trechoOrigem || "")) ? "pix" : ""
+      };
+    }
+  }
+  return null;
 }
 
 function formatarMoeda(valor) {
@@ -104,12 +148,12 @@ function extrairPrecoRadarComercial(textoOriginal = "") {
       condicaoPrecoPor: /\bpix\b/i.test(por[2] || "") ? "pix" : ""
     };
   }
-  const primeiroValor = fonte.match(new RegExp(`(?:^|\\n|\\s)${padraoValor}(?:\\s|$)`, "i"));
+  const primeiroValor = primeiroPrecoAtualSemantico(fonte) || primeiroValorMonetarioSeguroContrato(fonte);
   if (primeiroValor) {
     return {
       precoDe: null,
-      precoPor: numeroMonetarioEmTexto(primeiroValor[1]),
-      condicaoPrecoPor: /\bpix\b/i.test(fonte) ? "pix" : ""
+      precoPor: primeiroValor.valor,
+      condicaoPrecoPor: primeiroValor.condicaoPrecoPor
     };
   }
   return {};

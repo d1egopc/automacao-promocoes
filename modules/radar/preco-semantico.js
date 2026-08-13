@@ -17,6 +17,7 @@ const TIPOS_CANDIDATO = {
   PRECO_UNITARIO: "preco_unitario",
   PARCELA: "parcela",
   VALOR_CUPOM: "valor_cupom",
+  VALOR_MINIMO_COMPRA: "valor_minimo_compra",
   ECONOMIA: "economia",
   FRETE: "frete",
   CASHBACK: "cashback",
@@ -117,6 +118,34 @@ function marcadorPosterior(contextoPosterior = "") {
   return "";
 }
 
+function contextoBeneficioNaoPreco(base = {}) {
+  const anterior = semAcentos(base.anterior || "");
+  const posterior = semAcentos(base.posterior || "");
+
+  if (/^\s*(?:off|de\s+off|desconto|de\s+desconto)\b/.test(posterior)) {
+    return {
+      tipo: TIPOS_CANDIDATO.VALOR_CUPOM,
+      motivo: "valor_monetario_associado_a_off_desconto"
+    };
+  }
+
+  if (/(?:cupom|voucher|resgate|beneficio|beneficio|desconto|economize|economia)\s*(?:de|no valor de|:)?\s*$/i.test(anterior)) {
+    return {
+      tipo: /economiz|economia/.test(anterior) ? TIPOS_CANDIDATO.ECONOMIA : TIPOS_CANDIDATO.VALOR_CUPOM,
+      motivo: "valor_monetario_associado_a_beneficio"
+    };
+  }
+
+  if (/(?:compras?|pedido|carrinho).{0,60}(?:a partir de|acima de|minim[oa]s? de|minimo de|minima de|no minimo)\s*(?:r\$\s*)?$/i.test(anterior)) {
+    return {
+      tipo: TIPOS_CANDIDATO.VALOR_MINIMO_COMPRA,
+      motivo: "valor_monetario_associado_a_minimo_compra"
+    };
+  }
+
+  return null;
+}
+
 function possuiCifraoNoTexto(textoOriginal = "") {
   return /R\$/i.test(textoOriginal);
 }
@@ -154,6 +183,11 @@ function classificarTipo(base = {}) {
   if (posterior === "medida") {
     motivos.push("candidato_classificado_como_quantidade");
     return { tipo: TIPOS_CANDIDATO.QUANTIDADE, motivos };
+  }
+  const beneficioNaoPreco = contextoBeneficioNaoPreco(base);
+  if (beneficioNaoPreco) {
+    motivos.push(beneficioNaoPreco.motivo);
+    return { tipo: beneficioNaoPreco.tipo, motivos };
   }
   if (["preco_final", "com_cupom", "por", "total"].includes(anterior)) {
     motivos.push("preco_radar_marcador_explicito");
@@ -222,7 +256,7 @@ function classificarTipo(base = {}) {
 function nivelEvidencia(base = {}, totalMonetarios = 0) {
   const motivos = [...(base.motivos || [])];
   const tipo = base.tipoCandidato;
-  if ([TIPOS_CANDIDATO.PERCENTUAL, TIPOS_CANDIDATO.QUANTIDADE, TIPOS_CANDIDATO.IDENTIFICADOR, TIPOS_CANDIDATO.PRECO_UNITARIO, TIPOS_CANDIDATO.PARCELA, TIPOS_CANDIDATO.VALOR_CUPOM, TIPOS_CANDIDATO.ECONOMIA, TIPOS_CANDIDATO.FRETE, TIPOS_CANDIDATO.CASHBACK].includes(tipo)) {
+  if ([TIPOS_CANDIDATO.PERCENTUAL, TIPOS_CANDIDATO.QUANTIDADE, TIPOS_CANDIDATO.IDENTIFICADOR, TIPOS_CANDIDATO.PRECO_UNITARIO, TIPOS_CANDIDATO.PARCELA, TIPOS_CANDIDATO.VALOR_CUPOM, TIPOS_CANDIDATO.VALOR_MINIMO_COMPRA, TIPOS_CANDIDATO.ECONOMIA, TIPOS_CANDIDATO.FRETE, TIPOS_CANDIDATO.CASHBACK].includes(tipo)) {
     return { nivel: CONFIANCA.BAIXA, motivos };
   }
   if ([TIPOS_CANDIDATO.PRECO_ATUAL, TIPOS_CANDIDATO.PRECO_PIX, TIPOS_CANDIDATO.PRECO_ANTIGO].includes(tipo)) {
@@ -266,6 +300,9 @@ function coletarCandidatosPreco(textoFonte = "") {
       trechoOrigem: evidencia(ctx.trecho),
       indiceInicio,
       indiceFim,
+      anterior: ctx.anterior,
+      posterior: ctx.posterior,
+      linha: ctx.linha,
       marcadorAnterior: marcadorAnterior(ctx.anterior),
       marcadorPosterior: marcadorPosterior(ctx.posterior),
       possuiCifrao: possuiCifraoNoTexto(textoOriginal),
@@ -282,7 +319,7 @@ function coletarCandidatosPreco(textoFonte = "") {
 
   const totalMonetarios = candidatos.filter(item => (
     item.possuiCifrao || pareceDecimalMonetario(item.textoOriginal)
-  ) && ![TIPOS_CANDIDATO.PERCENTUAL, TIPOS_CANDIDATO.QUANTIDADE, TIPOS_CANDIDATO.IDENTIFICADOR, TIPOS_CANDIDATO.PRECO_UNITARIO].includes(item.tipoCandidato)).length;
+  ) && ![TIPOS_CANDIDATO.PERCENTUAL, TIPOS_CANDIDATO.QUANTIDADE, TIPOS_CANDIDATO.IDENTIFICADOR, TIPOS_CANDIDATO.PRECO_UNITARIO, TIPOS_CANDIDATO.VALOR_CUPOM, TIPOS_CANDIDATO.VALOR_MINIMO_COMPRA, TIPOS_CANDIDATO.ECONOMIA].includes(item.tipoCandidato)).length;
 
   return candidatos.map(item => {
     const evidenciaFinal = nivelEvidencia(item, totalMonetarios);

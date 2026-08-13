@@ -4,6 +4,7 @@ const { extrairComercialUniversal } = require("../modules/radar/extrator-comerci
 const { resolverPrecoSemantico, TIPOS_CANDIDATO } = require("../modules/radar/preco-semantico");
 const { criarRadarMirror } = require("../modules/radar/radar-mirror");
 const { resolverPrecedenciaComercialRadar } = require("../modules/radar/comercial-precedencia");
+const { gerarTemplateUniversal } = require("../modules/template-universal");
 
 function extrair(texto, extras = {}) {
   return extrairComercialUniversal({ textoOriginal: texto, links: extras.links || [], marketplaceDetectado: extras.marketplaceDetectado || "" });
@@ -117,6 +118,34 @@ function testarPrecoUnicoComCifrao() {
   assert.strictEqual(r.precoAtual.confianca, "media");
 }
 
+function testarBeneficioOffNaoViraPreco() {
+  const r = extrair("R$200 OFF em compras a partir de R$1.500", { marketplaceDetectado: "shopee" });
+  assert.strictEqual(r.precoAtual.valor, null, "beneficio OFF nao vira preco atual");
+  assertValor(r.valorCupom, 200, "beneficio OFF preservado como valor de cupom");
+  assertTipo("R$200 OFF em compras a partir de R$1.500", 200, TIPOS_CANDIDATO.VALOR_CUPOM, "R$200 OFF classificado como beneficio");
+  assertTipo("R$200 OFF em compras a partir de R$1.500", 1500, TIPOS_CANDIDATO.VALOR_MINIMO_COMPRA, "minimo de compra nao vira preco de");
+}
+
+function testarComprasMinimasNaoViraPreco() {
+  const r = extrair("R$100 OFF em compras minimas de R$599", { marketplaceDetectado: "shopee" });
+  assert.strictEqual(r.precoAtual.valor, null, "beneficio com compra minima nao vira preco");
+  assertValor(r.valorCupom, 100, "valor do cupom preservado");
+  assertTipo("R$100 OFF em compras minimas de R$599", 599, TIPOS_CANDIDATO.VALOR_MINIMO_COMPRA, "compra minima nao vira preco");
+}
+
+function testarValorOffSimplesNaoViraPreco() {
+  const r = extrair("cupom de R$90 OFF", { marketplaceDetectado: "shopee" });
+  assert.strictEqual(r.precoAtual.valor, null, "R$90 OFF nao vira preco");
+  assertValor(r.valorCupom, 90, "R$90 OFF preservado como valor de cupom");
+}
+
+function testarPrecoExplicitoMaisBeneficio() {
+  const r = extrair("Por R$1.967 + R$200 OFF em compras a partir de R$1.500", { marketplaceDetectado: "shopee" });
+  assertValor(r.precoAtual, 1967, "preco explicito preservado");
+  assertValor(r.valorCupom, 200, "beneficio nao contamina preco");
+  assertTipo("Por R$1.967 + R$200 OFF em compras a partir de R$1.500", 200, TIPOS_CANDIDATO.VALOR_CUPOM, "beneficio separado do preco");
+}
+
 function testarVariosSemMarcador() {
   const r = extrair("Produto 1331 503 1949");
   assert.strictEqual(r.precoAtual.valor, null);
@@ -207,6 +236,29 @@ function testarMetadataPrecedencia() {
   assert.strictEqual(resultado.metadata.precedenciaComercial.tipoCandidatoEscolhido, "preco_atual");
 }
 
+function testarBeneficioOffNaoSobrescrevePrecoImportador() {
+  const textoOriginal = "R$200 OFF em compras a partir de R$1.500";
+  const comercial = extrair(textoOriginal, { marketplaceDetectado: "shopee" });
+  const mirror = criarRadarMirror({ textoOriginal, links: [], extracaoRadarLocal: { precoAtual: comercial.precoAtual, comercial }, marketplace: "shopee" });
+  const resultado = resolverPrecedenciaComercialRadar({
+    ofertaImportador: { preco: 1967, precoAtual: 1967, marketplace: "shopee", metadata: {} },
+    radarMirror: mirror,
+    metadata: {}
+  });
+  assert.strictEqual(resultado.resolucao.origemPreco, "ausente");
+  assert.strictEqual(resultado.resolucao.precoPublicacao, null);
+  assert.strictEqual(resultado.oferta.preco, 1967);
+  const template = gerarTemplateUniversal({
+    ...resultado.oferta,
+    titulo: "Oferta Shopee com beneficio",
+    marketplace: "Shopee",
+    beneficioTexto: "R$200 OFF",
+    linkAfiliado: "https://s.shopee.com.br/produto"
+  });
+  assert.ok(!template.includes("Por: *R$ 200,00*"), "template final nao publica beneficio como preco");
+  assert.ok(template.includes("Por: *R$ 1.967,00*"), "template final preserva fallback tecnico legitimo");
+}
+
 const testes = [
   testarPorComCifrao,
   testarAgoraSemCifrao,
@@ -223,6 +275,10 @@ const testes = [
   testarDePor,
   testarBasePix,
   testarPrecoUnicoComCifrao,
+  testarBeneficioOffNaoViraPreco,
+  testarComprasMinimasNaoViraPreco,
+  testarValorOffSimplesNaoViraPreco,
+  testarPrecoExplicitoMaisBeneficio,
   testarVariosSemMarcador,
   testarFreteSeparado,
   testarCashbackSeparado,
@@ -237,7 +293,8 @@ const testes = [
   testar1331MonetarioValido,
   testarManualSemRadar,
   testarRadarMirrorFielPadrao,
-  testarMetadataPrecedencia
+  testarMetadataPrecedencia,
+  testarBeneficioOffNaoSobrescrevePrecoImportador
 ];
 
 for (const teste of testes) teste();
