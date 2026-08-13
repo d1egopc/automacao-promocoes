@@ -1,4 +1,5 @@
 const { queryEngine } = require("./database");
+const { STATUS_JOBS_ATIVOS_COM_LEASE } = require("./jobs.service");
 const {
   logEngineProcessadorEtapa,
   logEngineProcessadorErro
@@ -28,6 +29,11 @@ async function buscarJobsPendentes(limite = 20) {
 async function marcarJobStatus(jobId, status, motivo = "", extras = {}) {
   const campos = ["status = $2", "motivo_final = $3", "atualizado_em = NOW()"];
   const params = [jobId, status, motivo || null];
+  const statusEsperado = Array.isArray(extras.statusEsperado)
+    ? extras.statusEsperado.map(item => String(item || "").trim()).filter(Boolean)
+    : String(extras.statusEsperado || "").trim()
+      ? [String(extras.statusEsperado).trim()]
+      : [];
 
   if (Object.prototype.hasOwnProperty.call(extras, "marketplace")) {
     params.push(extras.marketplace || null);
@@ -49,16 +55,44 @@ async function marcarJobStatus(jobId, status, motivo = "", extras = {}) {
     campos.push(`score = $${params.length}`);
   }
 
+  const filtros = ["id = $1"];
+  if (statusEsperado.length) {
+    params.push(statusEsperado);
+    filtros.push(`status = ANY($${params.length}::text[])`);
+  }
+
   const resultado = await queryEngine(
     `UPDATE engine_jobs_cliente
         SET ${campos.join(", ")}
-      WHERE id = $1
+      WHERE ${filtros.join(" AND ")}
       RETURNING id, status`,
     params
   );
 
   if (!resultado.ok) {
     logEngineProcessadorErro({ jobId, etapa: "marcar_status", status, motivo: resultado.motivo || "update_falhou", erro: resultado.erro || "" });
+  }
+
+  if (resultado.ok && statusEsperado.length && resultado.resultado.rowCount === 0) {
+    logEngineProcessadorErro({ jobId, etapa: "marcar_status", status, motivo: "status_origem_incompativel", erro: "" });
+    return { ...resultado, ok: false, ignorado: true, motivo: "status_origem_incompativel" };
+  }
+
+  return resultado;
+}
+
+async function renovarHeartbeatJobAtivo(jobId) {
+  const resultado = await queryEngine(
+    `UPDATE engine_jobs_cliente
+        SET atualizado_em = NOW()
+      WHERE id = $1
+        AND status = ANY($2::text[])
+      RETURNING id, status`,
+    [jobId, STATUS_JOBS_ATIVOS_COM_LEASE]
+  );
+
+  if (!resultado.ok) {
+    logEngineProcessadorErro({ jobId, etapa: "heartbeat_job_ativo", motivo: resultado.motivo || "heartbeat_falhou", erro: resultado.erro || "" });
   }
 
   return resultado;
@@ -89,6 +123,8 @@ async function registrarProcessamento(jobId, etapa, status, motivo = "", detalhe
 
   if (!resultado.ok) {
     logEngineProcessadorErro({ jobId, etapa, motivo: resultado.motivo || "processamento_insert_falhou", erro: resultado.erro || "" });
+  } else {
+    await renovarHeartbeatJobAtivo(jobId);
   }
 
   return resultado;
@@ -128,6 +164,7 @@ module.exports = {
   limitarJobs,
   buscarJobsPendentes,
   marcarJobStatus,
+  renovarHeartbeatJobAtivo,
   tentarMarcarProcessando,
   registrarProcessamento,
   carregarEventoBruto,

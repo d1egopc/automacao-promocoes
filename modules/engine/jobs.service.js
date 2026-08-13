@@ -19,6 +19,12 @@ const {
 
 const CONFIRMACAO_RETENCAO_JOBS_POSTGRES = "LIMPAR_JOBS_POSTGRES_FINALIZADOS_12H";
 const RETENCAO_JOBS_LOCK_ID = 902260733;
+const LEASE_JOBS_ATIVOS_PADRAO_MINUTOS = 30;
+const LEASE_JOBS_ATIVOS_ENV = "OPTIMUS_JOB_LEASE_MINUTOS";
+const STATUS_JOBS_ATIVOS_COM_LEASE = Object.freeze([
+  "processando",
+  "importando"
+]);
 const STATUS_JOBS_ATIVOS_RETENCAO = Object.freeze([
   "pendente",
   "diagnosticado",
@@ -406,6 +412,12 @@ function horasRetencao(valor, padrao) {
   return Math.max(1, Math.floor(numero));
 }
 
+function minutosLeaseJobsAtivos(valor = process.env[LEASE_JOBS_ATIVOS_ENV]) {
+  const numero = Number(valor || LEASE_JOBS_ATIVOS_PADRAO_MINUTOS);
+  if (!Number.isFinite(numero) || numero <= 0) return LEASE_JOBS_ATIVOS_PADRAO_MINUTOS;
+  return Math.max(5, Math.min(180, Math.floor(numero)));
+}
+
 function statusNormalizadoRetencao(status = "") {
   return normalizarTexto(status).toLowerCase();
 }
@@ -416,6 +428,19 @@ function classificarStatusRetencaoJobsPostgres(status = "") {
   if (STATUS_JOBS_ATIVOS_RETENCAO.includes(normalizado)) return "protegido_ativo";
   if (STATUS_JOBS_FINAIS_RETENCAO.includes(normalizado)) return "final_elegivel_por_idade";
   return "protegido_status_desconhecido";
+}
+
+function jobAtivoDentroLease(registro = {}, opcoes = {}) {
+  const status = statusNormalizadoRetencao(registro.status);
+  if (!STATUS_JOBS_ATIVOS_COM_LEASE.includes(status)) return true;
+
+  const agoraMs = Number(opcoes.agoraMs || Date.now());
+  const leaseMs = minutosLeaseJobsAtivos(opcoes.leaseMinutos) * 60 * 1000;
+  const referencia = registro.atualizado_em || registro.atualizadoEm || registro.criado_em || registro.criadoEm;
+  const referenciaMs = referencia ? new Date(referencia).getTime() : null;
+
+  if (!Number.isFinite(referenciaMs)) return false;
+  return Math.max(0, agoraMs - referenciaMs) < leaseMs;
 }
 
 function extrairPrimeiraLinha(resultado = {}) {
@@ -683,6 +708,97 @@ async function executarBatchRetencaoJobsPostgres(client, { loteLimite, horasMini
   return resultado.rows[0] || {};
 }
 
+async function expirarJobsAtivosPorLease(opcoes = {}) {
+  const leaseMinutos = minutosLeaseJobsAtivos(opcoes.leaseMinutos);
+  const loteLimite = limitarLoteRetencao(opcoes.loteLimite, false);
+  const deps = opcoes.deps || {};
+
+  const resultado = await queryRetencao(
+    `WITH candidatos AS (
+       SELECT id, status, cliente_id, criado_em, COALESCE(atualizado_em, criado_em) AS lease_referencia_em
+         FROM engine_jobs_cliente
+        WHERE status = ANY($1::text[])
+          AND COALESCE(atualizado_em, criado_em) IS NOT NULL
+          AND COALESCE(atualizado_em, criado_em) < NOW() - ($2::int * INTERVAL '1 minute')
+        ORDER BY COALESCE(atualizado_em, criado_em) ASC, id ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT $3
+     ), atualizados AS (
+       UPDATE engine_jobs_cliente j
+          SET status = 'expirada_operacional',
+              motivo_final = 'lease_expirado_operacional',
+              atualizado_em = NOW(),
+              metadata = COALESCE(j.metadata, '{}'::jsonb) || jsonb_build_object(
+                'leaseExpiradoOperacional',
+                jsonb_build_object(
+                  'statusAnterior', c.status,
+                  'leaseMinutos', $2::int,
+                  'leaseReferenciaEm', c.lease_referencia_em,
+                  'expiradoEm', NOW()
+                )
+              )
+         FROM candidatos c
+        WHERE j.id = c.id
+        RETURNING j.id, j.cliente_id, c.status AS status_anterior, c.lease_referencia_em
+     ), processamento AS (
+       INSERT INTO engine_processamentos (job_id, etapa, status, motivo, detalhes)
+       SELECT id,
+              'lease_jobs_ativos',
+              'ok',
+              'lease_expirado_operacional',
+              jsonb_build_object(
+                'statusAnterior', status_anterior,
+                'leaseMinutos', $2::int,
+                'leaseReferenciaEm', lease_referencia_em
+              )
+         FROM atualizados
+       RETURNING id
+     ), por_cliente AS (
+       SELECT COALESCE(cliente_id, 'sem_cliente') AS cliente_id, COUNT(*)::int AS total
+         FROM atualizados
+        GROUP BY COALESCE(cliente_id, 'sem_cliente')
+     )
+     SELECT COUNT(*)::int AS jobs_expirados,
+            COUNT(*) FILTER (WHERE status_anterior = 'processando')::int AS processando_expirados,
+            COUNT(*) FILTER (WHERE status_anterior = 'importando')::int AS importando_expirados,
+            MIN(id)::bigint AS id_min,
+            MAX(id)::bigint AS id_max,
+            MIN(lease_referencia_em) AS lease_referencia_min,
+            COALESCE((SELECT jsonb_object_agg(cliente_id, total) FROM por_cliente), '{}'::jsonb) AS por_cliente
+       FROM atualizados`,
+    [STATUS_JOBS_ATIVOS_COM_LEASE, leaseMinutos, loteLimite],
+    deps
+  );
+
+  if (!resultado.ok) {
+    return {
+      ok: false,
+      motivo: motivoErroRetencaoPostgres(resultado, "lease_jobs_ativos_falhou"),
+      erro: resultado.erro || "",
+      aplicouMudancas: false,
+      jobsExpirados: 0,
+      leaseMinutos
+    };
+  }
+
+  const row = resultado.resultado.rows?.[0] || {};
+  const jobsExpirados = Number(row.jobs_expirados || 0);
+  return {
+    ok: true,
+    aplicouMudancas: jobsExpirados > 0,
+    jobsExpirados,
+    processandoExpirados: Number(row.processando_expirados || 0),
+    importandoExpirados: Number(row.importando_expirados || 0),
+    idMin: row.id_min || null,
+    idMax: row.id_max || null,
+    leaseReferenciaMin: row.lease_referencia_min || null,
+    porCliente: row.por_cliente || {},
+    leaseMinutos,
+    novoStatus: "expirada_operacional",
+    motivoFinal: "lease_expirado_operacional"
+  };
+}
+
 async function executarRetencaoJobsPostgres(opcoes = {}) {
   const dryRun = opcoes.dryRun !== false;
   const emergenciaVolumeCheio = opcoes.emergenciaVolumeCheio === true;
@@ -850,10 +966,16 @@ module.exports = {
   criarJobsParaClientes,
   ignorarJobsAdminNaoOperacional,
   limparJobsAntigosEngine,
+  expirarJobsAtivosPorLease,
   executarPreflightRetencaoJobsPostgres,
   executarRetencaoJobsPostgres,
   classificarStatusRetencaoJobsPostgres,
+  jobAtivoDentroLease,
+  minutosLeaseJobsAtivos,
   CONFIRMACAO_RETENCAO_JOBS_POSTGRES,
+  LEASE_JOBS_ATIVOS_PADRAO_MINUTOS,
+  LEASE_JOBS_ATIVOS_ENV,
+  STATUS_JOBS_ATIVOS_COM_LEASE,
   STATUS_JOBS_ATIVOS_RETENCAO,
   STATUS_JOBS_FINAIS_RETENCAO
 };

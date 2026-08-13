@@ -3,6 +3,12 @@
 const fs = require("fs");
 const path = require("path");
 const { queryEngine, getEnginePool } = require("../database");
+const {
+  expirarJobsAtivosPorLease,
+  minutosLeaseJobsAtivos,
+  STATUS_JOBS_ATIVOS_COM_LEASE,
+  LEASE_JOBS_ATIVOS_PADRAO_MINUTOS
+} = require("../jobs.service");
 const filaHistoricoPolicy = require("../../../utils/fila-historico-policy");
 
 const ENV_SHADOW = "OPTIMUS_AUTO_CLEAN_SHADOW";
@@ -18,6 +24,7 @@ const TTL_PADRAO = Object.freeze({
   filaEnviadaMs: 24 * 60 * 60 * 1000,
   filaTerminalMs: 7 * 24 * 60 * 60 * 1000,
   jobsConcluidosMs: 12 * 60 * 60 * 1000,
+  jobsAtivosLeaseMs: LEASE_JOBS_ATIVOS_PADRAO_MINUTOS * 60 * 1000,
   eventosBrutosMs: 24 * 60 * 60 * 1000,
   processamentosMs: 24 * 60 * 60 * 1000,
   eventosComerciaisMs: 7 * 24 * 60 * 60 * 1000,
@@ -132,27 +139,29 @@ const MATRIZ_STATUS_AUTO_CLEAN = Object.freeze({
   }),
   importando: Object.freeze({
     vivo: true,
-    vivoAteHoras: null,
+    vivoAteHoras: LEASE_JOBS_ATIVOS_PADRAO_MINUTOS / 60,
+    vivoAteMinutos: LEASE_JOBS_ATIVOS_PADRAO_MINUTOS,
     terminal: false,
     reprocessavel: true,
-    reprocessavelAteHoras: null,
+    reprocessavelAteHoras: LEASE_JOBS_ATIVOS_PADRAO_MINUTOS / 60,
     ttlIntegralHoras: null,
     ttlCompactoDias: null,
     removivelAposHoras: null,
     dependenciasTecnicas: [],
-    decisao: "preservar_ativo"
+    decisao: "preservar_ativo_fresco_expirar_por_lease"
   }),
   processando: Object.freeze({
     vivo: true,
-    vivoAteHoras: null,
+    vivoAteHoras: LEASE_JOBS_ATIVOS_PADRAO_MINUTOS / 60,
+    vivoAteMinutos: LEASE_JOBS_ATIVOS_PADRAO_MINUTOS,
     terminal: false,
     reprocessavel: true,
-    reprocessavelAteHoras: null,
+    reprocessavelAteHoras: LEASE_JOBS_ATIVOS_PADRAO_MINUTOS / 60,
     ttlIntegralHoras: null,
     ttlCompactoDias: null,
     removivelAposHoras: null,
     dependenciasTecnicas: [],
-    decisao: "preservar_ativo"
+    decisao: "preservar_ativo_fresco_expirar_por_lease"
   }),
   expirada_operacional: Object.freeze({
     vivo: false,
@@ -225,6 +234,9 @@ function limitarInteiro(valor, padrao, min, max) {
 
 function criarPoliticaRetencao(opcoes = {}) {
   const ttl = { ...TTL_PADRAO, ...(opcoes.ttl || {}) };
+  if (opcoes.leaseMinutos !== undefined) {
+    ttl.jobsAtivosLeaseMs = minutosLeaseJobsAtivos(opcoes.leaseMinutos) * 60 * 1000;
+  }
   return {
     ttl,
     loteLimite: limitarInteiro(opcoes.loteLimite, LOTE_LIMITE_PADRAO, 1, LOTE_LIMITE_PADRAO),
@@ -278,6 +290,9 @@ function ttlPorRegistro(registro = {}, politica = criarPoliticaRetencao()) {
   const tipo = String(registro.tipoRegistro || registro.origem || "").trim();
   const ttl = politica.ttl;
 
+  if (tipo === "engine_jobs_cliente" && STATUS_JOBS_ATIVOS_COM_LEASE.includes(status)) {
+    return Number(ttl.jobsAtivosLeaseMs || minutosLeaseJobsAtivos() * 60 * 1000);
+  }
   if (tipo === "fila_json" && status === "flow_nao_aceita") return ttl.flowNaoAceitaMs;
   if (tipo === "fila_json" && STATUS_FILA_ENVIADO.has(status)) return ttl.filaEnviadaMs;
   if (tipo === "fila_json" && STATUS_FILA_TERMINAL.has(status)) return ttl.filaTerminalMs;
@@ -312,6 +327,16 @@ function avaliarRegistroAutoClean(registro = {}, opcoes = {}) {
 
   if (registro.tipoRegistro === "engine_ofertas" && STATUS_OFERTA_ATIVO.has(status)) {
     return { ...registro, status, idadeMs, ttlMs, elegivel: false, motivo: "oferta_ativa", aplicouMudancas: false };
+  }
+
+  if (registro.tipoRegistro === "engine_jobs_cliente" && STATUS_JOBS_ATIVOS_COM_LEASE.includes(status)) {
+    if (!Number.isFinite(idadeMs)) {
+      return { ...registro, status, idadeMs: null, ttlMs, elegivel: false, motivo: "timestamp_indisponivel", aplicouMudancas: false };
+    }
+    if (Number.isFinite(ttlMs) && idadeMs >= ttlMs) {
+      return { ...registro, status, idadeMs, ttlMs, elegivel: false, motivo: "lease_expirado_operacional", aplicouMudancas: false };
+    }
+    return { ...registro, status, idadeMs, ttlMs, elegivel: false, motivo: "job_ativo_fresco", aplicouMudancas: false };
   }
 
   if (registro.tipoRegistro === "engine_jobs_cliente" && STATUS_JOB_ATIVO.has(status)) {
@@ -744,6 +769,10 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
     jobsRemovidos: 0,
     processamentosRemovidos: 0,
     eventosComerciaisRemovidos: 0,
+    jobsExpiradosLease: 0,
+    processandoExpiradosLease: 0,
+    importandoExpiradosLease: 0,
+    leaseMinutos: minutosLeaseJobsAtivos(opcoes.leaseMinutos),
     espacoLogicoLiberadoBytes: 0,
     aplicouMudancas: false,
     vacuumExecutado: false
@@ -754,6 +783,19 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
   }
 
   try {
+    const lease = await expirarJobsAtivosPorLease({
+      ...opcoes,
+      leaseMinutos: resumo.leaseMinutos,
+      loteLimite,
+      deps: { queryEngine: opcoes.queryEngine || queryEngine }
+    });
+    if (lease.ok === false) {
+      return { ...resumo, ok: false, failOpen: true, motivo: lease.motivo || "lease_jobs_ativos_falhou" };
+    }
+    resumo.jobsExpiradosLease = Number(lease.jobsExpirados || 0);
+    resumo.processandoExpiradosLease = Number(lease.processandoExpirados || 0);
+    resumo.importandoExpiradosLease = Number(lease.importandoExpirados || 0);
+
     for (let lote = 0; lote < limiteLotesPorCiclo; lote += 1) {
       const client = await pool.connect();
       try {
@@ -787,7 +829,7 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
     }
 
     resumo.ok = true;
-    resumo.aplicouMudancas = resumo.jobsRemovidos > 0;
+    resumo.aplicouMudancas = resumo.jobsRemovidos > 0 || resumo.jobsExpiradosLease > 0;
     resumo.espacoLogicoLiberado = bytesLegiveis(resumo.espacoLogicoLiberadoBytes);
     return resumo;
   } catch (erro) {
@@ -1026,6 +1068,9 @@ async function executarAutoCleanExecute(opcoes = {}) {
     totalOrigens: etapas.length,
     aplicouMudancas: etapas.some(etapa => etapa.aplicouMudancas === true),
     jobsRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.jobsRemovidos || 0), 0),
+    jobsExpiradosLease: etapas.reduce((soma, etapa) => soma + Number(etapa.jobsExpiradosLease || 0), 0),
+    processandoExpiradosLease: etapas.reduce((soma, etapa) => soma + Number(etapa.processandoExpiradosLease || 0), 0),
+    importandoExpiradosLease: etapas.reduce((soma, etapa) => soma + Number(etapa.importandoExpiradosLease || 0), 0),
     processamentosRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.processamentosRemovidos || 0), 0),
     eventosComerciaisRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.eventosComerciaisRemovidos || 0), 0),
     arquivosRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.arquivosRemovidos || 0), 0),

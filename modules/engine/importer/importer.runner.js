@@ -280,7 +280,14 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
     return { ok: true, retidaV2: true, ofertaId: gravacao.ofertaId, motivo: motivoV2 };
   }
 
-  await marcarJobOfertaCriada(job.id, gravacao.ofertaId);
+  const jobOfertaCriada = await marcarJobOfertaCriada(job.id, gravacao.ofertaId);
+  if (!jobOfertaCriada.ok) {
+    return finalizarErro(job, "falha_marcar_oferta_criada", {
+      ofertaId: gravacao.ofertaId,
+      erro: jobOfertaCriada.erro || "",
+      motivo: jobOfertaCriada.motivo || "job_nao_importando"
+    }, resumo);
+  }
   await registrarEtapaImportacao(job.id, "importacao_finalizada", "ok", "oferta_criada", {
     ofertaId: gravacao.ofertaId,
     marketplace

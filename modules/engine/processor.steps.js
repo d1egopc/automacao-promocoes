@@ -75,7 +75,7 @@ function detectarMarketplaceJob(job = {}, evento = {}, links = []) {
 
 async function finalizarErro(job, motivo, detalhes = {}, etapa = "diagnostico_final") {
   await registrarProcessamento(job.id, "diagnostico_final", "erro", motivo, detalhes);
-  await marcarJobStatus(job.id, "erro", motivo);
+  await marcarJobStatus(job.id, "erro", motivo, { statusEsperado: "processando" });
   return {
     ok: false,
     status: "erro",
@@ -152,6 +152,7 @@ async function processarJobEngine(job = {}, contexto = {}) {
   });
 
   await marcarJobStatus(job.id, "diagnosticado", "job_diagnosticado", {
+    statusEsperado: "processando",
     marketplace,
     marketplaceDetectado: marketplace
   });

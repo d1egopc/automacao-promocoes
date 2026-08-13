@@ -170,6 +170,24 @@ async function testarTtlEStatus() {
   assert.strictEqual(jobRetryAntigo.elegivel, false);
   assert.strictEqual(jobRetryAntigo.motivo, "job_ativo");
 
+  const jobProcessandoFresco = avaliarRegistroAutoClean({
+    origem: "engine_jobs_cliente",
+    tipoRegistro: "engine_jobs_cliente",
+    status: "processando",
+    referenciaTemporal: isoAtras(10 * 60 * 1000)
+  }, { politica, agoraMs: AGORA });
+  assert.strictEqual(jobProcessandoFresco.elegivel, false);
+  assert.strictEqual(jobProcessandoFresco.motivo, "job_ativo_fresco");
+
+  const jobImportandoAntigo = avaliarRegistroAutoClean({
+    origem: "engine_jobs_cliente",
+    tipoRegistro: "engine_jobs_cliente",
+    status: "importando",
+    referenciaTemporal: isoAtras(40 * 60 * 1000)
+  }, { politica, agoraMs: AGORA });
+  assert.strictEqual(jobImportandoAntigo.elegivel, false, "lease vencido nao entra em delete generico");
+  assert.strictEqual(jobImportandoAntigo.motivo, "lease_expirado_operacional");
+
   const jobStatusDesconhecido = avaliarRegistroAutoClean({
     origem: "engine_jobs_cliente",
     tipoRegistro: "engine_jobs_cliente",
@@ -210,6 +228,8 @@ async function testarMatrizStatusOficial() {
   assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.oferta_criada.vivo, true);
   assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.importando.vivo, true);
   assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.processando.vivo, true);
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.importando.vivoAteMinutos, 30);
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.processando.vivoAteMinutos, 30);
   assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.oferta_criada.vivoAteHoras, 24);
   assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.oferta_criada.removivelAposHoras, 24);
   assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.integracao_ausente.removivelAposHoras, 24);
@@ -360,6 +380,7 @@ async function testarExecutePostgresControlado() {
 
   const resumo = await executarJobsPostgresAutoClean({
     pool,
+    queryEngine: async () => ({ ok: true, resultado: { rows: [{ jobs_expirados: "0" }] } }),
     loteLimite: 2,
     lotesDbPorCiclo: 3,
     horasMinimas: 12
@@ -368,6 +389,7 @@ async function testarExecutePostgresControlado() {
   assert.strictEqual(resumo.ok, true);
   assert.strictEqual(resumo.lotes, 3, "execute limita lotes por ciclo");
   assert.strictEqual(resumo.jobsRemovidos, 6);
+  assert.strictEqual(resumo.jobsExpiradosLease, 0);
   assert.strictEqual(resumo.processamentosRemovidos, 12);
   assert.strictEqual(resumo.eventosComerciaisRemovidos, 1);
   assert.strictEqual(resumo.aplicouMudancas, true);
@@ -395,6 +417,7 @@ async function testarExecutePostgresControlado() {
 
 async function testarExecutePostgresFailOpen() {
   const resumo = await executarJobsPostgresAutoClean({
+    queryEngine: async () => ({ ok: true, resultado: { rows: [{ jobs_expirados: "0" }] } }),
     getEnginePool: () => ({
       async connect() {
         throw Object.assign(new Error("conexao falhou"), { code: "ECONNRESET" });

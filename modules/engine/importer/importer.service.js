@@ -2943,13 +2943,18 @@ async function marcarJobOfertaCriada(jobId, ofertaId) {
   const resultado = await queryEngine(
     `UPDATE engine_jobs_cliente
         SET status = 'oferta_criada', oferta_id = $2, motivo_final = 'oferta_criada', atualizado_em = NOW()
-      WHERE id = $1
+      WHERE id = $1 AND status = 'importando'
       RETURNING id, status, oferta_id`,
     [jobId, ofertaId]
   );
 
   if (!resultado.ok) {
     logEngineImporterErro({ jobId, etapa: "marcar_oferta_criada", motivo: resultado.motivo, erro: resultado.erro || "" });
+  }
+
+  if (resultado.ok && resultado.resultado.rowCount === 0) {
+    logEngineImporterErro({ jobId, etapa: "marcar_oferta_criada", motivo: "job_nao_importando", erro: "" });
+    return { ...resultado, ok: false, ignorado: true, motivo: "job_nao_importando" };
   }
 
   return resultado;
@@ -2959,7 +2964,7 @@ async function marcarJobRetidaV2(jobId, ofertaId, motivo = "retida_v2") {
   const resultado = await queryEngine(
     `UPDATE engine_jobs_cliente
         SET status = 'retida_v2', oferta_id = $2, motivo_final = $3, atualizado_em = NOW()
-      WHERE id = $1
+      WHERE id = $1 AND status = 'importando'
       RETURNING id, status, oferta_id, motivo_final`,
     [jobId, ofertaId, motivo || "retida_v2"]
   );
@@ -2968,12 +2973,17 @@ async function marcarJobRetidaV2(jobId, ofertaId, motivo = "retida_v2") {
     logEngineImporterErro({ jobId, etapa: "marcar_retida_v2", motivo: resultado.motivo, erro: resultado.erro || "" });
   }
 
+  if (resultado.ok && resultado.resultado.rowCount === 0) {
+    logEngineImporterErro({ jobId, etapa: "marcar_retida_v2", motivo: "job_nao_importando", erro: "" });
+    return { ...resultado, ok: false, ignorado: true, motivo: "job_nao_importando" };
+  }
+
   return resultado;
 }
 
 async function marcarJobErroImportacao(jobId, motivo = "erro_importacao", detalhes = {}) {
   await registrarEtapaImportacao(jobId, "importacao_finalizada", "erro", motivo, detalhes);
-  return marcarJobStatus(jobId, "erro_importacao", motivo);
+  return marcarJobStatus(jobId, "erro_importacao", motivo, { statusEsperado: ["importando", "pronto_para_importar"] });
 }
 
 module.exports = {

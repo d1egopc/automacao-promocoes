@@ -5,9 +5,13 @@ const fs = require("fs");
 const path = require("path");
 const {
   classificarStatusRetencaoJobsPostgres,
+  expirarJobsAtivosPorLease,
+  jobAtivoDentroLease,
+  minutosLeaseJobsAtivos,
   executarPreflightRetencaoJobsPostgres,
   executarRetencaoJobsPostgres,
   CONFIRMACAO_RETENCAO_JOBS_POSTGRES,
+  STATUS_JOBS_ATIVOS_COM_LEASE,
   STATUS_JOBS_ATIVOS_RETENCAO,
   STATUS_JOBS_FINAIS_RETENCAO
 } = require("../modules/engine/jobs.service");
@@ -23,6 +27,76 @@ async function testarClassificacaoConservadora() {
   assert.strictEqual(classificarStatusRetencaoJobsPostgres("duplicado_final"), "final_elegivel_por_idade");
   assert.strictEqual(classificarStatusRetencaoJobsPostgres("erro"), "protegido_status_desconhecido");
   assert.strictEqual(classificarStatusRetencaoJobsPostgres(""), "protegido_status_ausente");
+}
+
+async function testarLeaseJobsAtivosFrescoEAntigo() {
+  const agoraMs = Date.parse("2026-08-13T12:00:00.000Z");
+  assert.strictEqual(minutosLeaseJobsAtivos(), 30);
+  assert.strictEqual(jobAtivoDentroLease({
+    status: "processando",
+    atualizado_em: "2026-08-13T11:45:00.000Z"
+  }, { agoraMs, leaseMinutos: 30 }), true, "processando fresco permanece vivo");
+  assert.strictEqual(jobAtivoDentroLease({
+    status: "importando",
+    atualizado_em: "2026-08-13T11:45:00.000Z"
+  }, { agoraMs, leaseMinutos: 30 }), true, "importando fresco permanece vivo");
+  assert.strictEqual(jobAtivoDentroLease({
+    status: "processando",
+    atualizado_em: "2026-08-13T11:20:00.000Z"
+  }, { agoraMs, leaseMinutos: 30 }), false, "processando antigo vence lease");
+  assert.strictEqual(jobAtivoDentroLease({
+    status: "importando",
+    atualizado_em: "2026-08-13T11:20:00.000Z"
+  }, { agoraMs, leaseMinutos: 30 }), false, "importando antigo vence lease");
+  assert.strictEqual(jobAtivoDentroLease({
+    status: "pendente",
+    atualizado_em: "2026-08-13T00:00:00.000Z"
+  }, { agoraMs, leaseMinutos: 30 }), true, "Fase A nao altera outros status ativos");
+}
+
+async function testarExpiracaoLeaseSemDeleteNemFanout() {
+  const chamadas = [];
+  const queryEngine = async (sql, params) => {
+    chamadas.push({ sql, params });
+    assert.ok(/UPDATE engine_jobs_cliente/i.test(sql), "lease deve transicionar status do job");
+    assert.ok(/INSERT INTO engine_processamentos/i.test(sql), "lease deve registrar auditoria operacional");
+    assert.ok(!/\bDELETE\b/i.test(sql), "lease nao apaga job nem dependencias");
+    assert.ok(!/INSERT INTO engine_jobs_cliente/i.test(sql), "lease nao cria job nem duplica fan-out");
+    assert.strictEqual(params[0], STATUS_JOBS_ATIVOS_COM_LEASE);
+    assert.strictEqual(params[1], 30);
+    return {
+      ok: true,
+      resultado: {
+        rows: [{
+          jobs_expirados: "2",
+          processando_expirados: "1",
+          importando_expirados: "1",
+          id_min: "10",
+          id_max: "20",
+          lease_referencia_min: "2026-08-13T10:00:00.000Z",
+          por_cliente: { user_a: 1, user_b: 1 }
+        }]
+      }
+    };
+  };
+
+  const resultado = await expirarJobsAtivosPorLease({
+    leaseMinutos: 30,
+    loteLimite: 50,
+    deps: { queryEngine }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.aplicouMudancas, true);
+  assert.strictEqual(resultado.jobsExpirados, 2);
+  assert.strictEqual(resultado.processandoExpirados, 1);
+  assert.strictEqual(resultado.importandoExpirados, 1);
+  assert.strictEqual(resultado.novoStatus, "expirada_operacional");
+  assert.strictEqual(resultado.motivoFinal, "lease_expirado_operacional");
+  assert.deepStrictEqual(resultado.porCliente, { user_a: 1, user_b: 1 });
+  assert.ok(chamadas[0].sql.includes("FOR UPDATE SKIP LOCKED"), "restart/deploy nao deve disputar o mesmo job em paralelo");
+  assert.ok(chamadas[0].sql.includes("COALESCE(atualizado_em, criado_em)"), "lease sobrevive restart usando timestamp persistido");
+  assert.ok(chamadas[0].sql.includes("cliente_id"), "auditoria por workspace deve ser preservada");
 }
 
 async function testarPreflightDryRun() {
@@ -135,6 +209,8 @@ function testarRotaAdminPublicadaNoCodigo() {
 
 (async () => {
   await testarClassificacaoConservadora();
+  await testarLeaseJobsAtivosFrescoEAntigo();
+  await testarExpiracaoLeaseSemDeleteNemFanout();
   await testarPreflightDryRun();
   await testarConfirmacaoObrigatoria();
   testarRotaAdminPublicadaNoCodigo();

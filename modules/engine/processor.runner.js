@@ -115,7 +115,7 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [],
       });
       logEngineProcessadorErro({ jobId: job.id, etapa: "processar_job", motivo: "erro_inesperado", erro: e.message });
       await registrarProcessamento(job.id, "diagnostico_final", "erro", "erro_inesperado", { erro: e.message });
-      await marcarJobStatus(job.id, "erro", "erro_inesperado");
+      await marcarJobStatus(job.id, "erro", "erro_inesperado", { statusEsperado: "processando" });
     }
   }
 

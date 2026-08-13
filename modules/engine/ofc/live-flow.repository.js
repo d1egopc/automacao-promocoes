@@ -1,4 +1,5 @@
 const { queryEngine } = require("../database");
+const { minutosLeaseJobsAtivos } = require("../jobs.service");
 
 const STATUS_VIVOS_FLUXO = ["pendente", "pronto_para_importar", "processando", "importando"];
 const STATUS_CIRCULAVEIS_FLUXO = ["pendente", "pronto_para_importar"];
@@ -17,6 +18,15 @@ function linhaUnica(resultado, fallback = {}) {
 async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 } = {}) {
   const janela = limitarInteiro(janelaMinutos, 15, 1, 120);
   const limite = limitarInteiro(limiteAmostra, 2000, 1, 5000);
+  const leaseMinutos = minutosLeaseJobsAtivos();
+  const condicaoVivoSql = `
+           (
+             status = ANY($1::text[])
+             AND (
+               status <> ALL($2::text[])
+               OR COALESCE(atualizado_em, criado_em) >= NOW() - ($3::int * INTERVAL '1 minute')
+             )
+           )`;
 
   const [vivos, circulaveis, emCursoProtegidos, saudeEmCurso, chegada, consumo, expiracao, primeiraTentativa, radarOferta, amostra, primeiraTentativaReset] = await Promise.all([
     queryEngine(
@@ -25,8 +35,8 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
               MAX(criado_em) AS mais_novo_em,
               COALESCE(AVG(EXTRACT(EPOCH FROM (NOW() - criado_em)) * 1000), 0)::bigint AS idade_media_ms
          FROM engine_jobs_cliente
-        WHERE status = ANY($1::text[])`,
-      [STATUS_VIVOS_FLUXO]
+        WHERE ${condicaoVivoSql}`,
+      [STATUS_VIVOS_FLUXO, STATUS_EM_CURSO_PROTEGIDOS_FLUXO, leaseMinutos]
     ),
     queryEngine(
       `SELECT COUNT(*)::int AS total,
@@ -43,20 +53,21 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
               MAX(criado_em) AS mais_novo_em,
               COALESCE(AVG(EXTRACT(EPOCH FROM (NOW() - criado_em)) * 1000), 0)::bigint AS idade_media_ms
          FROM engine_jobs_cliente
-        WHERE status = ANY($1::text[])`,
-      [STATUS_EM_CURSO_PROTEGIDOS_FLUXO]
+        WHERE status = ANY($1::text[])
+          AND COALESCE(atualizado_em, criado_em) >= NOW() - ($2::int * INTERVAL '1 minute')`,
+      [STATUS_EM_CURSO_PROTEGIDOS_FLUXO, leaseMinutos]
     ),
     queryEngine(
       `SELECT status,
               COUNT(*)::int AS total,
               COALESCE(MAX(EXTRACT(EPOCH FROM (NOW() - criado_em)) * 1000), 0)::bigint AS idade_maxima_ms,
-              COUNT(*) FILTER (
-                WHERE criado_em <= NOW() - INTERVAL '30 minutes'
-              )::int AS suspeitos_lock
-         FROM engine_jobs_cliente
-        WHERE status = ANY($1::text[])
-        GROUP BY status`,
-      [STATUS_EM_CURSO_PROTEGIDOS_FLUXO]
+               COUNT(*) FILTER (
+                 WHERE COALESCE(atualizado_em, criado_em) <= NOW() - ($2::int * INTERVAL '1 minute')
+               )::int AS suspeitos_lock
+          FROM engine_jobs_cliente
+         WHERE status = ANY($1::text[])
+         GROUP BY status`,
+      [STATUS_EM_CURSO_PROTEGIDOS_FLUXO, leaseMinutos]
     ),
     queryEngine(
       `SELECT COUNT(*)::int AS total,
@@ -177,6 +188,7 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
     ok: !falha,
     janelaMinutos: janela,
     limiteAmostra: limite,
+    leaseJobsAtivosMinutos: leaseMinutos,
     vivos: linhaUnica(vivos, { total: 0 }),
     circulaveis: linhaUnica(circulaveis, { total: 0 }),
     emCursoProtegidos: linhaUnica(emCursoProtegidos, { total: 0 }),
