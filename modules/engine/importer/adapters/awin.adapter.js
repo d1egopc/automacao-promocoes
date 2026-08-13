@@ -56,8 +56,11 @@ function urlCapturadaOcorrenciaAwin(link = {}) {
   return texto(
     link.urlOriginal ||
     link.url_original ||
+    link.original ||
+    link.href ||
     link.urlExpandida ||
     link.url_expandida ||
+    link.resolvido ||
     link.url ||
     ""
   );
@@ -81,6 +84,53 @@ function publisherIdAwin(integracao = {}) {
 function awinComUedValido(url = "") {
   if (!/awin1?\.com|awin\.com/i.test(texto(url))) return false;
   return Boolean(extrairUrlKabumDeAwin(url));
+}
+
+function normalizarDestinoKabumComparacao(url = "") {
+  const destino = texto(url);
+  if (!destino) return "";
+  try {
+    const parsed = new URL(destino);
+    parsed.protocol = "https:";
+    parsed.hostname = parsed.hostname.toLowerCase().replace(/^kabum\.com\.br$/i, "www.kabum.com.br");
+    parsed.hash = "";
+    parsed.pathname = parsed.pathname.replace(/\/+$/g, "");
+    return parsed.toString().replace(/\/+$/g, "").toLowerCase();
+  } catch {
+    return destino.replace(/\/+$/g, "").toLowerCase();
+  }
+}
+
+function destinosKabumEquivalentes(a = "", b = "") {
+  const destinoA = normalizarDestinoKabumComparacao(a);
+  const destinoB = normalizarDestinoKabumComparacao(b);
+  return Boolean(destinoA && destinoB && destinoA === destinoB);
+}
+
+function diagnosticarDestinoAwin(urlAfiliada = "", destinoEsperado = "") {
+  const destinoFinal = extrairUrlKabumDeAwin(urlAfiliada);
+  if (!destinoFinal) {
+    return { temUed: false, destinoFinal: "", bateDestino: false };
+  }
+  return {
+    temUed: true,
+    destinoFinal,
+    bateDestino: destinosKabumEquivalentes(destinoFinal, destinoEsperado)
+  };
+}
+
+function conversaoAwinRenderizavel(urlAfiliada = "", destinoEsperado = "") {
+  const afiliada = texto(urlAfiliada);
+  if (!afiliada) return { ok: false, motivo: "awin_sem_conversao_workspace", destinoFinal: "" };
+  const diagnostico = diagnosticarDestinoAwin(afiliada, destinoEsperado);
+  if (diagnostico.temUed && !diagnostico.bateDestino) {
+    return {
+      ok: false,
+      motivo: "awin_ued_final_divergente",
+      destinoFinal: diagnostico.destinoFinal
+    };
+  }
+  return { ok: true, motivo: "", destinoFinal: diagnostico.destinoFinal };
 }
 
 function substituirAwinaffidPreservandoDeeplink(url = "", publisherId = "") {
@@ -142,7 +192,7 @@ function escolherLinkAwinKabum(links = [], evento = {}) {
   return escolherProdutoPrincipal(validos, "kabum", evento);
 }
 
-async function converterOcorrenciasAwinKabum({ linksClassificados = [], clienteId = "", deps = {}, integracao = null, linkAfiliadoPrincipal = "", urlOriginalEngine = "" } = {}) {
+async function converterOcorrenciasAwinKabum({ linksClassificados = [], clienteId = "", deps = {}, integracao = null, linkAfiliadoPrincipal = "", urlOriginalEngine = "", job = {}, evento = {} } = {}) {
   const cache = new Map();
   const saida = [];
   const publisherId = publisherIdAwin(integracao || {});
@@ -150,6 +200,7 @@ async function converterOcorrenciasAwinKabum({ linksClassificados = [], clienteI
     const urlOriginal = urlCapturadaOcorrenciaAwin(link) || texto(link.urlProduto || "");
     const urlDestinoFuncional = extrairUrlKabumDeAwin(urlOriginal) || texto(link.urlProduto || urlOriginal);
     const urlParaConverter = awinComUedValido(urlOriginal) ? urlOriginal : urlDestinoFuncional;
+    const uedOriginal = extrairUrlKabumDeAwin(urlOriginal);
     if (!urlOriginal || !/kabum\.com\.br|awin1?\.com|awin\.com/i.test(urlOriginal)) {
       saida.push(link);
       continue;
@@ -167,18 +218,33 @@ async function converterOcorrenciasAwinKabum({ linksClassificados = [], clienteI
           motivo: awinPreservado.motivo,
           destinoFuncional: awinPreservado.destino
         };
-      } else if (texto(urlOriginalEngine) && texto(urlDestinoFuncional).replace(/\/+$/g, "").toLowerCase() === texto(urlOriginalEngine).replace(/\/+$/g, "").toLowerCase() && linkAfiliadoPrincipal) {
-        conversao = { urlAfiliada: linkAfiliadoPrincipal, renderizavel: true, status: "convertida", motivo: "deeplink_principal_workspace_convertido" };
+      } else if (texto(urlOriginalEngine) && destinosKabumEquivalentes(urlDestinoFuncional, urlOriginalEngine) && linkAfiliadoPrincipal) {
+        const diagnosticoPrincipal = conversaoAwinRenderizavel(linkAfiliadoPrincipal, urlDestinoFuncional);
+        conversao = diagnosticoPrincipal.ok
+          ? {
+            urlAfiliada: linkAfiliadoPrincipal,
+            renderizavel: true,
+            status: "convertida",
+            motivo: "deeplink_principal_workspace_convertido",
+            destinoFuncional: diagnosticoPrincipal.destinoFinal || urlDestinoFuncional
+          }
+          : null;
       } else {
+        conversao = null;
+      }
+
+      if (!conversao) {
         try {
           const urlAfiliada = typeof deps.gerarDeepLinkAwin === "function"
             ? await deps.gerarDeepLinkAwin(urlParaConverter, clienteId)
             : "";
+          const diagnosticoGerado = conversaoAwinRenderizavel(urlAfiliada, urlDestinoFuncional);
           conversao = {
-            urlAfiliada: texto(urlAfiliada),
-            renderizavel: Boolean(urlAfiliada),
-            status: urlAfiliada ? "convertida" : "falhou",
-            motivo: urlAfiliada ? "awin_workspace_convertido_por_ocorrencia" : "awin_sem_conversao_workspace"
+            urlAfiliada: diagnosticoGerado.ok ? texto(urlAfiliada) : "",
+            renderizavel: diagnosticoGerado.ok,
+            status: diagnosticoGerado.ok ? "convertida" : "falhou",
+            motivo: diagnosticoGerado.motivo || "awin_workspace_convertido_por_ocorrencia",
+            destinoFuncional: diagnosticoGerado.destinoFinal || urlDestinoFuncional
           };
         } catch (_) {
           conversao = { urlAfiliada: "", renderizavel: false, status: "falhou", motivo: "falha_tecnica_conversao_awin" };
@@ -186,7 +252,10 @@ async function converterOcorrenciasAwinKabum({ linksClassificados = [], clienteI
       }
       cache.set(chave, conversao);
     }
-    saida.push({
+    const ordemCaptura = Number(link.ordemCaptura || link.ordem || indice + 1) || (indice + 1);
+    const ocorrenciaId = texto(link.ocorrenciaId || link.idOcorrencia || link.id || `awin:${papel}:${ordemCaptura}`);
+    const uedFinalDecodificado = extrairUrlKabumDeAwin(conversao.urlAfiliada);
+    const convertido = {
       ...link,
       url: urlOriginal,
       urlOriginal,
@@ -196,14 +265,35 @@ async function converterOcorrenciasAwinKabum({ linksClassificados = [], clienteI
       papelLink: papel,
       papel,
       tipo: papel,
-      ordemCaptura: Number(link.ordemCaptura || link.ordem || indice + 1) || (indice + 1),
+      ordemCaptura,
+      ocorrenciaId,
       urlAfiliada: conversao.urlAfiliada,
       urlAfiliadaWorkspace: conversao.urlAfiliada,
       renderizavel: conversao.renderizavel,
       convertidoWorkspace: conversao.renderizavel,
       conversaoStatus: conversao.status,
-      motivoConversao: conversao.motivo
+      motivoConversao: conversao.motivo,
+      urlUsadaNaConversao: urlParaConverter,
+      uedOriginal,
+      uedFinalDecodificado
+    };
+    logAwinAdapter("[KABUM-AWIN-CONVERSAO-OCORRENCIA]", {
+      jobId: job.id || null,
+      eventoId: job.evento_id || evento.id || null,
+      clienteId,
+      ocorrenciaId,
+      ordemCaptura,
+      papel,
+      urlOriginal,
+      uedOriginal,
+      urlUsadaNaConversao: urlParaConverter,
+      urlAfiliadaWorkspace: conversao.urlAfiliada,
+      uedFinalDecodificado,
+      conversaoStatus: conversao.status,
+      renderizavel: conversao.renderizavel,
+      motivo: conversao.motivo
     });
+    saida.push(convertido);
   }
   return saida;
 }
@@ -463,7 +553,9 @@ async function importarAwinEngine({ job = {}, evento = {}, links = [], deps = {}
     deps,
     integracao,
     linkAfiliadoPrincipal: linkAfiliado,
-    urlOriginalEngine
+    urlOriginalEngine,
+    job,
+    evento
   });
 
   return {

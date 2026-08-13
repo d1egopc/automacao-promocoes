@@ -223,6 +223,200 @@ async function testarKabumAwinDuplicadoPreservaDuasOcorrencias() {
   assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.ordemCaptura), [1, 2]);
 }
 
+async function testarKabumAwinLinksDiferentesMesmoProdutoPreservamOcorrencias() {
+  const destino = "https://www.kabum.com.br/produto/444/produto-mesmo";
+  const awinA = `https://www.awin1.com/cread.php?awinmid=17729&awinaffid=1062989&clickref=a&ued=${encodeURIComponent(destino)}`;
+  const awinB = `https://www.awin1.com/cread.php?awinmid=17729&awinaffid=1062989&clickref=b&ued=${encodeURIComponent(destino)}`;
+  const afiliadoA = awinA.replace("awinaffid=1062989", "awinaffid=2649374");
+  const afiliadoB = awinB.replace("awinaffid=1062989", "awinaffid=2649374");
+
+  const resultado = await importarAwinEngine({
+    job: { id: 36, evento_id: 37, cliente_id: "D1" },
+    evento: { texto_original: `KaBuM mesmo produto\n${awinA}\n${awinB}`, marketplace: "kabum" },
+    links: [ocorrencia(awinA, 1), ocorrencia(awinB, 2)],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { publisherId: "2649374" } }),
+      importarProdutoKabumViaAwin: async (url) => {
+        assert.strictEqual(url, destino);
+        return {
+          titulo: "Produto Kabum Mesmo",
+          precoAtual: "999",
+          imagem: "https://img.test/kabum-mesmo.jpg",
+          linkAfiliado: afiliadoA,
+          linkFinal: afiliadoA,
+          link: afiliadoA,
+          categoria: "Hardware"
+        };
+      },
+      gerarDeepLinkAwin: async () => ""
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.urlOriginal), [awinA, awinB]);
+  assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.urlAfiliadaWorkspace), [afiliadoA, afiliadoB]);
+  assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.ordemCaptura), [1, 2]);
+}
+
+async function testarKabumDiretoCincoProdutosPreservaDestinoEOrdem() {
+  const destinos = [101, 202, 303, 404, 505]
+    .map(id => `https://www.kabum.com.br/produto/${id}/produto-${id}`);
+  const afiliados = destinos.map((destino, indice) =>
+    `https://www.awin1.com/cread.php?awinmid=17729&awinaffid=777&clickref=produto-${indice + 1}&ued=${encodeURIComponent(destino)}`
+  );
+  const chamadas = [];
+
+  const resultado = await importarAwinEngine({
+    job: { id: 37, evento_id: 38, cliente_id: "D1" },
+    evento: { texto_original: `KaBuM lote\n${destinos.join("\n")}`, marketplace: "kabum" },
+    links: destinos.map((url, indice) => ocorrencia(url, indice + 1)),
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { publisherId: "777" } }),
+      importarProdutoKabumViaAwin: async (url) => {
+        assert.strictEqual(url, destinos[0]);
+        return {
+          titulo: "Produto Kabum A",
+          precoAtual: "999",
+          imagem: "https://img.test/kabum-a.jpg",
+          linkAfiliado: afiliados[0],
+          linkFinal: afiliados[0],
+          link: afiliados[0],
+          categoria: "Hardware"
+        };
+      },
+      gerarDeepLinkAwin: async (url, clienteId) => {
+        chamadas.push({ url, clienteId });
+        const indice = destinos.indexOf(url);
+        return indice >= 0 ? afiliados[indice] : "";
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(chamadas, destinos.slice(1).map(url => ({ url, clienteId: "D1" })));
+  assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.urlOriginal), destinos);
+  assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.urlAfiliadaWorkspace), afiliados);
+  assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.ordemCaptura), [1, 2, 3, 4, 5]);
+  assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => new URL(item.urlAfiliadaWorkspace).searchParams.get("ued")), destinos);
+}
+
+async function testarKabumDiretoNaoReusaPrincipalComUedDivergente() {
+  const destino = "https://www.kabum.com.br/produto/606/produto-certo";
+  const destinoErrado = "https://www.kabum.com.br/produto/999/produto-errado";
+  const afiliadoErrado = `https://www.awin1.com/cread.php?awinmid=17729&awinaffid=777&ued=${encodeURIComponent(destinoErrado)}`;
+  const afiliadoCerto = `https://www.awin1.com/cread.php?awinmid=17729&awinaffid=777&ued=${encodeURIComponent(destino)}`;
+  const chamadas = [];
+
+  const resultado = await importarAwinEngine({
+    job: { id: 39, evento_id: 40, cliente_id: "D1" },
+    evento: { texto_original: `KaBuM direto\n${destino}`, marketplace: "kabum" },
+    links: [ocorrencia(destino, 1)],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { publisherId: "777" } }),
+      importarProdutoKabumViaAwin: async (url) => {
+        assert.strictEqual(url, destino);
+        return {
+          titulo: "Produto Kabum certo",
+          precoAtual: "799",
+          imagem: "https://img.test/kabum-certo.jpg",
+          linkAfiliado: afiliadoErrado,
+          linkFinal: afiliadoErrado,
+          link: afiliadoErrado,
+          categoria: "Hardware"
+        };
+      },
+      gerarDeepLinkAwin: async (url, clienteId) => {
+        chamadas.push({ url, clienteId });
+        return afiliadoCerto;
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(chamadas, [{ url: destino, clienteId: "D1" }]);
+  assert.strictEqual(resultado.metadata.linksComerciais.length, 1);
+  assert.strictEqual(resultado.metadata.linksComerciais[0].urlAfiliadaWorkspace, afiliadoCerto);
+  assert.strictEqual(resultado.metadata.linksComerciais[0].uedFinalDecodificado, destino);
+  assert.strictEqual(resultado.metadata.linksComerciais[0].motivoConversao, "awin_workspace_convertido_por_ocorrencia");
+}
+
+async function testarKabumFalhaOcorrenciaNaoVazaPrincipalNemOriginal() {
+  const destinoA = "https://www.kabum.com.br/produto/707/produto-ok";
+  const destinoB = "https://www.kabum.com.br/produto/808/produto-falha";
+  const afiliadoA = `https://www.awin1.com/cread.php?awinmid=17729&awinaffid=777&ued=${encodeURIComponent(destinoA)}`;
+  const chamadas = [];
+
+  const resultado = await importarAwinEngine({
+    job: { id: 41, evento_id: 42, cliente_id: "D1" },
+    evento: { texto_original: `KaBuM falha parcial\n${destinoA}\n${destinoB}`, marketplace: "kabum" },
+    links: [ocorrencia(destinoA, 1), ocorrencia(destinoB, 2)],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { publisherId: "777" } }),
+      importarProdutoKabumViaAwin: async (url) => {
+        assert.strictEqual(url, destinoA);
+        return {
+          titulo: "Produto Kabum OK",
+          precoAtual: "499",
+          imagem: "https://img.test/kabum-ok.jpg",
+          linkAfiliado: afiliadoA,
+          linkFinal: afiliadoA,
+          link: afiliadoA,
+          categoria: "Hardware"
+        };
+      },
+      gerarDeepLinkAwin: async (url, clienteId) => {
+        chamadas.push({ url, clienteId });
+        return "";
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.deepStrictEqual(chamadas, [{ url: destinoB, clienteId: "D1" }]);
+  assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.urlAfiliadaWorkspace), [afiliadoA, ""]);
+  assert.strictEqual(resultado.metadata.linksComerciais[1].renderizavel, false);
+  assert.strictEqual(resultado.metadata.linksComerciais[1].conversaoStatus, "falhou");
+  assert(!resultado.metadata.linksComerciais[1].urlAfiliadaWorkspace.includes(destinoB));
+}
+
+async function testarKabumAwinIsolaPublisherPorWorkspace() {
+  const destino = "https://www.kabum.com.br/produto/909/produto-workspace";
+  const awinOriginal = `https://www.awin1.com/cread.php?awinmid=17729&awinaffid=1062989&ued=${encodeURIComponent(destino)}`;
+
+  async function importar(clienteId, publisherId) {
+    return importarAwinEngine({
+      job: { id: publisherId, evento_id: 43, cliente_id: clienteId },
+      evento: { texto_original: `KaBuM workspace\n${awinOriginal}`, marketplace: "kabum" },
+      links: [ocorrencia(awinOriginal, 1)],
+      deps: {
+        getIntegracaoCliente: (alvo) => {
+          assert.strictEqual(alvo, clienteId);
+          return { credenciais: { publisherId } };
+        },
+        importarProdutoKabumViaAwin: async (url) => ({
+          titulo: `Produto ${clienteId}`,
+          precoAtual: "399",
+          imagem: "https://img.test/kabum-workspace.jpg",
+          linkAfiliado: awinOriginal.replace("awinaffid=1062989", `awinaffid=${publisherId}`),
+          linkFinal: awinOriginal.replace("awinaffid=1062989", `awinaffid=${publisherId}`),
+          link: awinOriginal.replace("awinaffid=1062989", `awinaffid=${publisherId}`),
+          linkOriginal: url,
+          categoria: "Hardware"
+        }),
+        gerarDeepLinkAwin: async () => ""
+      }
+    });
+  }
+
+  const d1 = await importar("D1", "111");
+  const wolf = await importar("Wolf", "222");
+
+  assert.strictEqual(d1.ok, true);
+  assert.strictEqual(wolf.ok, true);
+  assert.strictEqual(new URL(d1.metadata.linksComerciais[0].urlAfiliadaWorkspace).searchParams.get("awinaffid"), "111");
+  assert.strictEqual(new URL(wolf.metadata.linksComerciais[0].urlAfiliadaWorkspace).searchParams.get("awinaffid"), "222");
+}
+
 async function testarAliExpressAppPcProduto() {
   const app = "https://a.aliexpress.com/_appD1";
   const pc = "https://www.aliexpress.com/item/1005001234567890.html?via=pc";
@@ -420,6 +614,11 @@ async function main() {
   await testarKabumAwinDeeplinksDistintos();
   await testarKabumAwinUmLinkNaoDuplicaEPreservaUed();
   await testarKabumAwinDuplicadoPreservaDuasOcorrencias();
+  await testarKabumAwinLinksDiferentesMesmoProdutoPreservamOcorrencias();
+  await testarKabumDiretoCincoProdutosPreservaDestinoEOrdem();
+  await testarKabumDiretoNaoReusaPrincipalComUedDivergente();
+  await testarKabumFalhaOcorrenciaNaoVazaPrincipalNemOriginal();
+  await testarKabumAwinIsolaPublisherPorWorkspace();
   await testarAliExpressAppPcProduto();
   await testarAliExpressQuatroOcorrenciasPreservamUrlOriginal();
   await testarDuplicadoReusaConversaoMasPreservaOcorrencia();
