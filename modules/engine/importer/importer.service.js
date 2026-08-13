@@ -61,6 +61,7 @@ const coberturaRadar = require("../../radar/cobertura-v1");
 const {
   registrarOfertaUniversalCriada
 } = require("../ofc/commercial-events.service");
+const { classificarLinkEngine } = require("../link-role.service");
 
 let engineOfertasMetadataDisponivel = null;
 
@@ -1672,6 +1673,15 @@ function papelComercialIntegridade(papel = "") {
   return chave || "desconhecido";
 }
 
+function tipoComercialIntegridade(papel = "") {
+  const normalizado = papelComercialIntegridade(papel);
+  if (normalizado === "link_resgate" || normalizado === "cupom") return "resgate";
+  if (normalizado === "link_app") return "app";
+  if (normalizado === "link_pc") return "pc";
+  if (normalizado === "link_moedas") return "moedas";
+  return normalizado;
+}
+
 function chaveUrlComercialIntegridade(url = "") {
   const valor = normalizarTexto(url);
   if (!valor) return "";
@@ -1682,6 +1692,250 @@ function chaveUrlComercialIntegridade(url = "") {
   } catch (_) {
     return valor.replace(/#.*$/, "").replace(/\/+$/, "");
   }
+}
+
+function chaveUrlExataComercialIntegridade(url = "") {
+  const valor = normalizarTexto(url);
+  if (!valor) return "";
+  try {
+    const parsed = new URL(valor);
+    parsed.hash = "";
+    return parsed.toString().replace(/\/+$/, "").toLowerCase();
+  } catch (_) {
+    return valor.replace(/#.*$/, "").replace(/\/+$/, "").toLowerCase();
+  }
+}
+
+function chavesUrlOcorrenciaComercial(item = {}) {
+  const metadata = objetoSeguro(item.metadata);
+  return [
+    item.urlOriginal,
+    item.url_original,
+    item.url,
+    item.original,
+    item.href,
+    item.resolvido,
+    item.urlExpandida,
+    item.url_expandida,
+    item.urlNormalizada,
+    item.url_normalizada,
+    item.urlProduto,
+    item.urlDestinoFuncional,
+    item.urlUsadaNaConversao,
+    item.sourceValuesUsado,
+    item.conversaoWorkspace?.urlOriginal,
+    item.conversaoWorkspace?.sourceValuesUsado,
+    metadata.linkOriginalCapturado,
+    metadata.linkResolvido,
+    metadata.urlProduto
+  ].map(url => ({
+    exata: chaveUrlExataComercialIntegridade(url),
+    funcional: chaveUrlComercialIntegridade(url)
+  })).filter(chave => chave.exata || chave.funcional);
+}
+
+function papeisComerciaisCompativeis(a = "", b = "") {
+  const papelA = papelComercialIntegridade(a);
+  const papelB = papelComercialIntegridade(b);
+  if (!papelA || !papelB || papelA === "desconhecido" || papelB === "desconhecido") return false;
+  if (papelA === papelB) return true;
+  const resgate = new Set(["cupom", "link_resgate", "resgate"]);
+  if (resgate.has(papelA) && resgate.has(papelB)) return true;
+  return false;
+}
+
+function normalizarRotaFuncional(valor = "") {
+  const texto = normalizarTexto(valor);
+  if (!texto) return "";
+  try {
+    return new URL(texto).pathname.replace(/\/+$/, "").toLowerCase();
+  } catch (_) {
+    return texto.replace(/\/+$/, "").toLowerCase();
+  }
+}
+
+function papelPadraoMarketplaceRadar(url = "", marketplace = "") {
+  const valor = normalizarTexto(url);
+  const mp = normalizarTexto(marketplace)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (!valor) return "";
+  if (/mercadolivre\.com|meli\.la/i.test(valor) && /mercadolivre|mercado_livre|ml/.test(mp)) return "produto";
+  if (/amazon\.com|amzn\.to/i.test(valor) && /amazon/.test(mp)) return "produto";
+  if (/kabum\.com\.br|awin1?\.com|awin\.com/i.test(valor) && /kabum|awin/.test(mp)) return "produto";
+  return "";
+}
+
+function destinoFuncionalDivergenteComercial(item = {}) {
+  const destinoOriginal = objetoSeguro(item.destinoFuncionalOriginal);
+  const destinoFinal = objetoSeguro(item.destinoFuncionalFinal);
+  const tipoOriginal = normalizarTexto(destinoOriginal.tipo || "");
+  const tipoFinal = normalizarTexto(destinoFinal.tipo || "");
+  const tiposIgnorados = new Set(["", "desconhecido", "indisponivel"]);
+
+  if (!tiposIgnorados.has(tipoOriginal) && !tiposIgnorados.has(tipoFinal) && tipoOriginal !== tipoFinal) {
+    return true;
+  }
+
+  const shopOriginal = normalizarTexto(destinoOriginal.shopId || "");
+  const itemOriginal = normalizarTexto(destinoOriginal.itemId || "");
+  const shopFinal = normalizarTexto(destinoFinal.shopId || "");
+  const itemFinal = normalizarTexto(destinoFinal.itemId || "");
+  if (shopOriginal && itemOriginal && shopFinal && itemFinal) {
+    return shopOriginal !== shopFinal || itemOriginal !== itemFinal;
+  }
+
+  const rotaOriginal = normalizarRotaFuncional(destinoOriginal.rota || destinoOriginal.url || "");
+  const rotaFinal = normalizarRotaFuncional(destinoFinal.rota || destinoFinal.url || "");
+  if (rotaOriginal && rotaFinal && rotaOriginal !== rotaFinal) return true;
+
+  const destinoEsperado = chaveUrlComercialIntegridade(item.urlDestinoFuncional || item.uedOriginal || "");
+  const destinoAfiliado = chaveUrlComercialIntegridade(item.uedFinalDecodificado || item.destinoFuncional || "");
+  if (destinoEsperado && destinoAfiliado && destinoEsperado !== destinoAfiliado) return true;
+
+  return false;
+}
+
+function montarOcorrenciaRadarComercial(item = {}, indice = 0, marketplace = "", evento = {}) {
+  const url = normalizarTexto(
+    item.urlOriginal ||
+    item.url_original ||
+    item.url ||
+    item.original ||
+    item.href ||
+    item.urlExpandida ||
+    item.url_expandida ||
+    ""
+  );
+  if (!url) return null;
+
+  const classificacao = classificarLinkEngine({
+    marketplace,
+    evento,
+    link: item,
+    url
+  });
+  const papelClassificado = papelComercialIntegridade(item.papel || item.papelLink || item.tipo || classificacao.papelLink || "");
+  const papel = papelClassificado && papelClassificado !== "desconhecido"
+    ? papelClassificado
+    : papelComercialIntegridade(papelPadraoMarketplaceRadar(url, marketplace));
+  if (!papel || papel === "desconhecido") return null;
+
+  const ordemCaptura = Number(item.ordemCaptura || item.ordem || item.indiceCaptura || indice + 1) || (indice + 1);
+  return {
+    papel,
+    urlOriginal: url,
+    ordemCaptura,
+    ocorrenciaId: normalizarTexto(item.ocorrenciaId || item.idOcorrencia || item.id || `radar:${papel}:${ordemCaptura}`),
+    chaves: chavesUrlOcorrenciaComercial({
+      ...item,
+      urlOriginal: url,
+      url
+    })
+  };
+}
+
+function ocorrenciasRadarComerciais({ evento = {}, metadata = {}, ofertaEntrada = {}, marketplace = "" } = {}) {
+  const ocorrencias = [];
+  const vistos = new Set();
+  const mp = normalizarTexto(marketplace || ofertaEntrada.marketplace || metadata.marketplace || "");
+
+  function adicionar(item = {}, indice = 0) {
+    const ocorrencia = montarOcorrenciaRadarComercial(item, indice, mp, evento);
+    if (!ocorrencia) return;
+    const chave = `${ocorrencia.ocorrenciaId}|${ocorrencia.papel}|${ocorrencia.ordemCaptura}|${ocorrencia.urlOriginal}`;
+    if (vistos.has(chave)) return;
+    vistos.add(chave);
+    ocorrencias.push(ocorrencia);
+  }
+
+  const linksEvento = Array.isArray(evento.links_extraidos) ? evento.links_extraidos : [];
+  linksEvento.forEach((url, indice) => adicionar({ urlOriginal: url, url, ordemCaptura: indice + 1 }, indice));
+
+  const radarMirrorLinks = [
+    ...(Array.isArray(metadata?.radarMirror?.links?.encontrados) ? metadata.radarMirror.links.encontrados : []),
+    ...(Array.isArray(metadata?.radarMirror?.comercial?.links?.classificados) ? metadata.radarMirror.comercial.links.classificados : [])
+  ];
+  radarMirrorLinks.forEach((item, indice) => adicionar(item, ocorrencias.length + indice));
+
+  if (!ocorrencias.length && Array.isArray(ofertaEntrada?.metadata?.linksClassificados)) {
+    ofertaEntrada.metadata.linksClassificados.forEach((item, indice) => adicionar(item, indice));
+  }
+
+  return ocorrencias.sort((a, b) => Number(a.ordemCaptura || 0) - Number(b.ordemCaptura || 0));
+}
+
+function itemCorrespondeOcorrenciaRadar(item = {}, ocorrencia = {}) {
+  if (!papeisComerciaisCompativeis(item.papel || item.papelLink || item.tipo || "", ocorrencia.papel)) return false;
+  const chavesItem = chavesUrlOcorrenciaComercial(item);
+  if (!chavesItem.length || !Array.isArray(ocorrencia.chaves) || !ocorrencia.chaves.length) return false;
+
+  return chavesItem.some(itemChave => ocorrencia.chaves.some(radarChave => (
+    (itemChave.exata && radarChave.exata && itemChave.exata === radarChave.exata) ||
+    (itemChave.funcional && radarChave.funcional && itemChave.funcional === radarChave.funcional)
+  )));
+}
+
+function aplicarGuardaOcorrenciasRadar(links = [], ocorrenciasRadar = []) {
+  if (!Array.isArray(links) || !links.length || !Array.isArray(ocorrenciasRadar) || !ocorrenciasRadar.length) {
+    return {
+      linksComerciais: Array.isArray(links) ? links : [],
+      descartados: [],
+      ocorrenciasRadar: Array.isArray(ocorrenciasRadar) ? ocorrenciasRadar : [],
+      aplicada: false
+    };
+  }
+
+  const usados = new Set();
+  const linksComerciais = [];
+  const descartados = [];
+
+  for (const item of links) {
+    const indiceRadar = ocorrenciasRadar.findIndex((ocorrencia, indice) => !usados.has(indice) && itemCorrespondeOcorrenciaRadar(item, ocorrencia));
+    if (indiceRadar < 0) {
+      descartados.push({
+        ...item,
+        renderizavel: false,
+        seguro: false,
+        urlAfiliada: "",
+        urlAfiliadaWorkspace: "",
+        urlOptimus: "",
+        conversaoStatus: "falhou",
+        motivoConversao: "ocorrencia_nao_capturada_radar",
+        motivo: "ocorrencia_nao_capturada_radar"
+      });
+      continue;
+    }
+
+    usados.add(indiceRadar);
+    const radar = ocorrenciasRadar[indiceRadar];
+    const divergente = destinoFuncionalDivergenteComercial(item);
+    linksComerciais.push({
+      ...item,
+      papel: item.papel || item.tipo || radar.papel,
+      tipo: tipoComercialIntegridade(item.tipo || item.papel || radar.papel),
+      ordemCaptura: radar.ordemCaptura,
+      ocorrenciaId: item.ocorrenciaId || radar.ocorrenciaId,
+      radarOcorrenciaId: radar.ocorrenciaId,
+      urlOriginalRadar: radar.urlOriginal,
+      renderizavel: divergente ? false : item.renderizavel === true,
+      seguro: divergente ? false : item.seguro === true,
+      urlAfiliada: divergente ? "" : item.urlAfiliada,
+      urlAfiliadaWorkspace: divergente ? "" : item.urlAfiliadaWorkspace,
+      urlOptimus: divergente ? "" : item.urlOptimus,
+      conversaoStatus: divergente ? "falhou" : item.conversaoStatus,
+      motivoConversao: divergente ? "destino_funcional_divergente_radar" : item.motivoConversao,
+      motivo: divergente ? "destino_funcional_divergente_radar" : item.motivo
+    });
+  }
+
+  return {
+    linksComerciais,
+    descartados,
+    ocorrenciasRadar,
+    aplicada: true
+  };
 }
 
 function afiliadoGlobalCorrespondeOcorrenciaIntegridade(item = {}, oferta = {}, ofertaEntrada = {}, urlOriginal = "", urlExpandida = "") {
@@ -1749,7 +2003,7 @@ function coletarLinksIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, met
 
     links.push({
       papel,
-      tipo: papel,
+      tipo: tipoComercialIntegridade(papel),
       urlOriginal,
       urlExpandida,
       urlAfiliada: urlAfiliadaFinal,
@@ -1762,7 +2016,14 @@ function coletarLinksIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, met
       origem: origem || item.origem || "integridade_comercial",
       conversaoStatus: normalizarTexto(item.conversaoStatus || (renderizavel ? "convertida" : "falhou")),
       motivoConversao: normalizarTexto(item.motivoConversao || item.conversaoWorkspace?.motivo || ""),
-      motivo: normalizarTexto(item.papelLinkMotivo || item.motivo || item.motivoConversao || item.conversaoWorkspace?.motivo || (renderizavel ? "cta_workspace_convertido" : "preservado_nao_renderizavel"))
+      motivo: normalizarTexto(item.papelLinkMotivo || item.motivo || item.motivoConversao || item.conversaoWorkspace?.motivo || (renderizavel ? "cta_workspace_convertido" : "preservado_nao_renderizavel")),
+      destinoFuncionalOriginal: item.destinoFuncionalOriginal || null,
+      destinoFuncionalFinal: item.destinoFuncionalFinal || null,
+      urlDestinoFuncional: normalizarTexto(item.urlDestinoFuncional || ""),
+      uedOriginal: normalizarTexto(item.uedOriginal || ""),
+      uedFinalDecodificado: normalizarTexto(item.uedFinalDecodificado || ""),
+      urlUsadaNaConversao: normalizarTexto(item.urlUsadaNaConversao || ""),
+      sourceValuesUsado: normalizarTexto(item.sourceValuesUsado || "")
     });
   }
 
@@ -1772,7 +2033,102 @@ function coletarLinksIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, met
   return links;
 }
 
-function aplicarPonteIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, metadata = {}, comercialNormalizado = null } = {}) {
+function campoRadarConfiavel(campo = {}) {
+  if (!campo || typeof campo !== "object") return false;
+  const confianca = normalizarTexto(campo.confianca || campo.confidence || "").toLowerCase();
+  const valor = campo.valor ?? campo.texto ?? campo.evidencia ?? "";
+  return ["alta", "media", "high", "medium"].includes(confianca) && valor !== null && valor !== undefined && valor !== "";
+}
+
+function textoEventoComercial(evento = {}, metadata = {}) {
+  return normalizarTexto(
+    evento.texto_original ||
+    evento.textoOriginal ||
+    evento.texto ||
+    metadata.textoOriginal ||
+    metadata.textoComercialOriginal ||
+    ""
+  );
+}
+
+function evidenciaComercialRadar({ evento = {}, metadata = {}, radarMirror = null } = {}) {
+  const mirror = radarMirror || metadata?.radarMirror || {};
+  const comercial = objetoSeguro(mirror.comercial);
+  const cupom = objetoSeguro(comercial.cupom || mirror.cupom);
+  const textoOriginal = textoEventoComercial(evento, metadata);
+  const textoNormalizado = textoOriginal
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  return {
+    preco: campoRadarConfiavel(comercial.precoAtual || mirror.preco?.atualCapturado),
+    precoDe: campoRadarConfiavel(comercial.precoAnterior || comercial.precoAntigo || mirror.preco?.anteriorCapturado),
+    pix: campoRadarConfiavel(comercial.precoPix) || /\bpix\b/.test(textoNormalizado),
+    cupom: campoRadarConfiavel(cupom) || /\b(?:cupom|voucher|codigo|resgate)\b/.test(textoNormalizado),
+    beneficio: Boolean(
+      campoRadarConfiavel(comercial.beneficio) ||
+      campoRadarConfiavel(comercial.descontoPercentual) ||
+      campoRadarConfiavel(comercial.moedasShopee) ||
+      /\b(?:off|desconto|cupom|voucher|codigo|moeda|moedas|cashback|leve|ganhe|resgate)\b/.test(textoNormalizado)
+    )
+  };
+}
+
+function origemRadarComercial({ evento = {}, metadata = {}, radarMirror = null } = {}) {
+  const mirror = radarMirror || metadata?.radarMirror || null;
+  if (mirror && typeof mirror === "object" && Object.keys(mirror).length > 0) return true;
+  if (textoEventoComercial(evento, metadata)) return true;
+  if (Array.isArray(evento?.links_extraidos) && evento.links_extraidos.length > 0) return true;
+  if (Array.isArray(metadata?.radarMirror?.links?.encontrados) && metadata.radarMirror.links.encontrados.length > 0) return true;
+  if (Array.isArray(metadata?.radarMirror?.comercial?.links?.classificados) && metadata.radarMirror.comercial.links.classificados.length > 0) return true;
+  return false;
+}
+
+function aplicarProtecaoCamposComerciaisRadar({ oferta = {}, metadata = {}, comercialNormalizado = null, evento = {}, radarMirror = null } = {}) {
+  const evidencia = evidenciaComercialRadar({ evento, metadata, radarMirror });
+  const proxima = { ...oferta };
+  const origemRadar = origemRadarComercial({ evento, metadata, radarMirror });
+  if (!origemRadar) {
+    return { oferta: proxima, evidencia, aplicada: false };
+  }
+  const precoAtual = normalizarNumero(comercialNormalizado?.precoAtual);
+  const precoConfiavelRadar = comercialNormalizado?.precoConfiavel === true
+    && precoAtual !== null
+    && /radar|texto_radar/i.test(normalizarTexto(comercialNormalizado?.precoOrigem || proxima.origemPreco || ""));
+
+  if (precoConfiavelRadar) {
+    proxima.preco = precoAtual;
+    proxima.precoAtual = precoAtual;
+    proxima.precoPor = precoAtual;
+    proxima.precoPublicacao = precoAtual;
+    proxima.origemPreco = "radar";
+  }
+
+  if (!evidencia.pix) {
+    delete proxima.precoPix;
+    delete proxima.condicaoPix;
+    delete proxima.descontoPix;
+  }
+
+  if (!evidencia.cupom) {
+    for (const campo of ["cupom", "codigoCupom", "codigo_cupom", "cupomTexto", "cupomCodigo"]) {
+      delete proxima[campo];
+    }
+    proxima.cupomConfirmado = false;
+    proxima.possivelCupom = false;
+  }
+
+  if (!evidencia.beneficio) {
+    for (const campo of ["beneficioTexto", "beneficioExtra", "descricaoBeneficio", "avisoCupom"]) {
+      delete proxima[campo];
+    }
+  }
+
+  return { oferta: proxima, evidencia, aplicada: true };
+}
+
+function aplicarPonteIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, metadata = {}, comercialNormalizado = null, evento = {}, radarMirror = null } = {}) {
   const precoAtual = normalizarNumero(comercialNormalizado?.precoAtual);
   const precoExistente = normalizarNumero(oferta.preco);
   const precoConfiavel = comercialNormalizado?.precoConfiavel === true && precoAtual !== null;
@@ -1783,7 +2139,23 @@ function aplicarPonteIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, met
     || ofertaEntrada.metadata?.precoOrigem
     || ""
   );
-  const linksComerciais = coletarLinksIntegridadeComercial({ oferta, ofertaEntrada, metadata });
+  const protecaoRadar = aplicarProtecaoCamposComerciaisRadar({
+    oferta,
+    metadata,
+    comercialNormalizado,
+    evento,
+    radarMirror
+  });
+  const ofertaProtegida = protecaoRadar.oferta || oferta;
+  const linksColetados = coletarLinksIntegridadeComercial({ oferta: ofertaProtegida, ofertaEntrada, metadata });
+  const ocorrenciasRadar = ocorrenciasRadarComerciais({
+    evento,
+    metadata,
+    ofertaEntrada,
+    marketplace: ofertaProtegida.marketplace || oferta.marketplace || ofertaEntrada.marketplace || ""
+  });
+  const guardaRadar = aplicarGuardaOcorrenciasRadar(linksColetados, ocorrenciasRadar);
+  const linksComerciais = guardaRadar.linksComerciais;
   const integridadeComercial = {
     versao: "v1",
     precoValidado: precoConfiavel ? {
@@ -1792,15 +2164,25 @@ function aplicarPonteIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, met
       confiavel: true
     } : null,
     linksComerciais,
+    guardaRadar: {
+      aplicada: guardaRadar.aplicada,
+      totalOcorrenciasRadar: ocorrenciasRadar.length,
+      totalLinksEntrada: linksColetados.length,
+      totalLinksRenderizaveis: linksComerciais.filter(item => item.renderizavel === true).length,
+      totalDescartados: guardaRadar.descartados.length,
+      evidenciasProtegidas: protecaoRadar.evidencia,
+      protecaoCamposRadar: protecaoRadar.aplicada === true
+    },
+    linksDescartadosRadar: guardaRadar.descartados,
     aplicouMudancasOperacionais: false
   };
   const ofertaCorrigida = precoExistente === null && precoConfiavel
-    ? { ...oferta, preco: precoAtual }
-    : oferta;
+    ? { ...ofertaProtegida, preco: precoAtual }
+    : ofertaProtegida;
   const metadataCorrigido = {
     ...metadata,
     integridadeComercial,
-    ...(linksComerciais.length ? { linksComerciais } : {})
+    ...(guardaRadar.aplicada ? { linksComerciais } : (linksComerciais.length ? { linksComerciais } : {}))
   };
 
   return { oferta: ofertaCorrigida, metadata: metadataCorrigido, integridadeComercial };
@@ -2579,7 +2961,9 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     oferta,
     ofertaEntrada,
     metadata: metadataFinal,
-    comercialNormalizado: comercialNormalizadoV24
+    comercialNormalizado: comercialNormalizadoV24,
+    evento,
+    radarMirror: radarMirrorComparado
   });
   oferta = ponteIntegridadeComercial.oferta || oferta;
   metadataFinal = ponteIntegridadeComercial.metadata || metadataFinal;
@@ -3007,5 +3391,7 @@ module.exports = {
   montarUrlImagemPolycardMl,
   validarImagemPolycardMercadoLivre,
   materializarImagemRadarMirrorSeNecessario,
-  aplicarPonteIntegridadeComercial
+  aplicarPonteIntegridadeComercial,
+  ocorrenciasRadarComerciais,
+  aplicarGuardaOcorrenciasRadar
 };
