@@ -6989,7 +6989,7 @@ registrarMiddlewaresOperacionais(app, {
 
 // ============== POST FILA ENVIO =================
 
-app.post("/fila", (req, res) => {
+app.post("/fila", auth, (req, res) => {
   try {
     const body = req.body || {};
     const clienteId = getClienteId(req);
@@ -7173,7 +7173,7 @@ function decorarItemFilaParaResposta(item = {}) {
   };
 }
 
-app.get("/fila", (req, res) => {
+app.get("/fila", auth, (req, res) => {
   const clienteId = getClienteId(req);
 
   sanearExpiradosFila(clienteId);
@@ -7830,7 +7830,7 @@ app.post("/automacao/toggle", (req, res) => {
 });
 
 
-app.delete("/fila/item/:id", (req, res) => {
+app.delete("/fila/item/:id", auth, (req, res) => {
   const clienteId = getClienteId(req);
   const id = req.params.id;
 
@@ -7855,7 +7855,7 @@ app.delete("/fila/item/:id", (req, res) => {
   });
 });
 
-app.delete("/fila/limpar", (req, res) => {
+app.delete("/fila/limpar", auth, (req, res) => {
   const clienteId = getClienteId(req);
   const status = req.query.status;
 
@@ -7884,7 +7884,7 @@ app.delete("/fila/limpar", (req, res) => {
   });
 });
 
-app.delete("/fila/:index", (req, res) => {
+app.delete("/fila/:index", auth, (req, res) => {
   const index = Number(req.params.index);
   const clienteId = getClienteId(req);
 
@@ -7916,7 +7916,7 @@ app.delete("/fila/:index", (req, res) => {
   });
 });
 
-app.post("/fila/:id/reprocessar", (req, res) => {
+app.post("/fila/:id/reprocessar", auth, (req, res) => {
   const id = String(req.params.id || "").trim();
   const clienteId = getClienteId(req);
 
@@ -7956,7 +7956,7 @@ app.post("/fila/:id/reprocessar", (req, res) => {
 
 // ============== POST FILA INDEX ===========================
 
-app.post("/fila/item/:id/enviar-agora", async (req, res) => {
+app.post("/fila/item/:id/enviar-agora", auth, async (req, res) => {
   const id = String(req.params.id || "").trim();
   const clienteId = getClienteId(req);
   const oferta = fila.find(item =>
@@ -7975,7 +7975,7 @@ app.post("/fila/item/:id/enviar-agora", async (req, res) => {
   return res.status(resultado.statusHttp || 200).json(resultado);
 });
 
-app.post("/fila/:index/enviar-agora", async (req, res) => {
+app.post("/fila/:index/enviar-agora", auth, async (req, res) => {
   const index = Number(req.params.index);
 const clienteIdReq = getClienteId(req);
 
