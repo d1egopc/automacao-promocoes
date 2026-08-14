@@ -41,6 +41,9 @@ const {
 const {
   criarGerarDeepLinkAwin
 } = require("../modules/marketplaces/conversores/awin.converter");
+const {
+  criarImportarShopee
+} = require("../marketplaces/shopee/importar");
 
 const fetchOriginal = global.fetch;
 
@@ -183,6 +186,86 @@ async function testeShopee() {
     credenciais: { appId: "app", secret: "secret" }
   });
   assert.strictEqual(invalida.saude.status, "invalida");
+}
+
+async function testeShopeeSensorPassivoFalhaQualificada() {
+  const depsBase = {
+    limparPreco: (valor = "") => String(valor || "").replace(/^R\$\s*/i, "").trim(),
+    htmlDecode: (valor = "") => String(valor || ""),
+    extrairMeta: () => "",
+    corrigirImagemUrl: (valor = "") => String(valor || "")
+  };
+  const config = {
+    credenciais: { appId: "app", secret: "secret" },
+    contextoEngine: { clienteId: "workspace_shopee_sensor" },
+    textoOriginal: ""
+  };
+  const url = "https://shopee.com.br/product/123/456";
+
+  let alerta = null;
+  global.fetch = async (fetchUrl) => {
+    if (String(fetchUrl).includes("open-api.affiliate.shopee.com.br")) {
+      return resposta({
+        ok: false,
+        status: 403,
+        json: { errors: [{ message: "invalid signature", code: "AUTH_INVALID" }] }
+      });
+    }
+    return resposta({ status: 200, text: "<html></html>" });
+  };
+  await criarImportarShopee({
+    ...depsBase,
+    registrarAlertaIntegracao: (...args) => {
+      alerta = args;
+    }
+  })(url, config);
+  assert.ok(alerta, "Shopee deve registrar alerta passivo em erro auth qualificado");
+  assert.strictEqual(alerta[0], "workspace_shopee_sensor");
+  assert.strictEqual(alerta[1], "shopee");
+  assert.strictEqual(alerta[2].tipo, "credencial_invalida");
+  assert.ok(alerta[2].detalhes.credencialFingerprint);
+
+  let alertaTransitorio = null;
+  global.fetch = async (fetchUrl) => {
+    if (String(fetchUrl).includes("open-api.affiliate.shopee.com.br")) {
+      return resposta({
+        ok: false,
+        status: 429,
+        json: { errors: [{ message: "rate limit" }] }
+      });
+    }
+    return resposta({ status: 200, text: "<html></html>" });
+  };
+  await criarImportarShopee({
+    ...depsBase,
+    registrarAlertaIntegracao: (...args) => {
+      alertaTransitorio = args;
+    }
+  })(url, config);
+  assert.strictEqual(alertaTransitorio, null, "Shopee 429/transitorio nao deve registrar invalida");
+
+  const importarSemSensor = criarImportarShopee(depsBase);
+  const importarSensorThrow = criarImportarShopee({
+    ...depsBase,
+    registrarAlertaIntegracao: () => {
+      throw new Error("sensor");
+    }
+  });
+  const respostaAuthInvalida = async (fetchUrl) => {
+    if (String(fetchUrl).includes("open-api.affiliate.shopee.com.br")) {
+      return resposta({
+        ok: false,
+        status: 403,
+        json: { errors: [{ message: "invalid signature", code: "AUTH_INVALID" }] }
+      });
+    }
+    return resposta({ status: 200, text: "<html></html>" });
+  };
+  global.fetch = respostaAuthInvalida;
+  const semSensor = await importarSemSensor(url, config);
+  global.fetch = respostaAuthInvalida;
+  const sensorThrow = await importarSensorThrow(url, config);
+  assert.deepStrictEqual(sensorThrow, semSensor, "Falha do sensor Shopee nao pode alterar retorno comercial");
 }
 
 async function testeAliExpress() {
@@ -909,6 +992,7 @@ async function main() {
     await testeMercadoLivre();
     await testeAmazon();
     await testeShopee();
+    await testeShopeeSensorPassivoFalhaQualificada();
     await testeAliExpress();
     await testeAwinKabum();
     testeSensorPassivo();

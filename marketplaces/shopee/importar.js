@@ -176,7 +176,8 @@ function criarImportarShopee(deps = {}) {
     htmlDecode,
     extrairMeta,
     corrigirImagemUrl,
-    registrarSucessoIntegracao
+    registrarSucessoIntegracao,
+    registrarAlertaIntegracao
   } = deps;
 
 return async function importarShopee(url, config) {
@@ -197,6 +198,42 @@ return async function importarShopee(url, config) {
           ...detalhes
         });
       }
+    } catch {
+      // Saude das integracoes nunca interfere na importacao comercial.
+    }
+  }
+
+  function erroAuthShopeeQualificado(data = {}, statusHttp = 0) {
+    const erros = Array.isArray(data?.errors) ? data.errors : [];
+    const textoErros = erros
+      .map(erro => `${erro?.message || ""} ${erro?.code || ""} ${erro?.extensions?.code || ""}`)
+      .join(" ")
+      .toLowerCase();
+    const status = Number(statusHttp || 0);
+    if ([429, 500, 502, 503, 504].includes(status)) return false;
+    if (/timeout|rate.?limit|temporar|unavailable|5\d\d|429/i.test(textoErros)) return false;
+    if ([401, 403, 419].includes(status) && /auth|credential|app.?id|secret|signature|permission|invalid|unauthorized|forbidden/i.test(textoErros)) {
+      return true;
+    }
+    return /auth|credential|app.?id|secret|signature|permission|invalid.?signature|invalid.?credential|unauthorized/i.test(textoErros);
+  }
+
+  function registrarAlertaShopeeFailOpen(data = {}, statusHttp = 0) {
+    try {
+      if (!clienteIdSaude || typeof registrarAlertaIntegracao !== "function") return;
+      if (!erroAuthShopeeQualificado(data, statusHttp)) return;
+      const erro = Array.isArray(data?.errors) ? data.errors[0] || {} : {};
+      registrarAlertaIntegracao(clienteIdSaude, "shopee", {
+        tipo: "credencial_invalida",
+        status: "atencao",
+        mensagem: "Credenciais Shopee invalidas ou sem permissao.",
+        detalhes: {
+          httpStatus: statusHttp,
+          motivo: "open_api_auth",
+          codigoApi: String(erro?.code || erro?.extensions?.code || ""),
+          credencialFingerprint: credencialFingerprintIntegracao("shopee", config)
+        }
+      });
     } catch {
       // Saude das integracoes nunca interfere na importacao comercial.
     }
@@ -569,6 +606,8 @@ return async function importarShopee(url, config) {
     );
 
     const data = await response.json();
+
+    registrarAlertaShopeeFailOpen(data, response.status);
 
     console.log("[SHOPEE] SHOPEE RESPONSE:", JSON.stringify(data));
 

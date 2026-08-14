@@ -3247,7 +3247,8 @@ const importarShopee = criarImportarShopee({
   htmlDecode,
   extrairMeta,
   corrigirImagemUrl,
-  registrarSucessoIntegracao: (...args) => registrarSucessoIntegracao(...args)
+  registrarSucessoIntegracao: (...args) => registrarSucessoIntegracao(...args),
+  registrarAlertaIntegracao: (...args) => registrarAlertaIntegracao(...args)
 });
 
 // ================= FILTROS OFERTA JA EXISTE =================
