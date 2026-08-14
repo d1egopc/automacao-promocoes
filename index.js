@@ -18037,7 +18037,11 @@ const MENSAGEM_ALERTA_AMAZON = MENSAGEM_FALHA_CONVERSAO_AMAZON;
 const {
   listarAlertasIntegracoes,
   registrarAlertaIntegracao,
-  limparAlertaIntegracao
+  limparAlertaIntegracao,
+  listarSaudeIntegracoes,
+  obterSaudeIntegracao,
+  registrarResultadoSaudeIntegracao,
+  registrarSucessoIntegracao
 } = alertasIntegracoes;
 
 function extrairTagMercadoLivreIntegracao(config = {}) {
@@ -18967,6 +18971,7 @@ app.get("/integracoes/alertas", (req, res) => {
   const payload = perf.etapaSync("payload", () => ({
     ok: true,
     status,
+    saude: listarSaudeIntegracoes(clienteId),
     alertas
   }));
 
@@ -19016,6 +19021,7 @@ app.get("/integracoes", (req, res) => {
           : "incompleto",
         camposConfigurados,
         credenciais: credenciaisResposta,
+        saude: obterSaudeIntegracao(clienteId, marketplace),
         atualizadoEm: config?.atualizadoEm || null
       };
     }
@@ -19152,6 +19158,7 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
         status: resultadoTeste.status,
         mensagem: resultadoTeste.mensagem
       });
+      let saudeAtual = null;
 
       if (resultadoTeste.ok) {
         limparAlertaIntegracao(clienteId, marketplace);
@@ -19181,8 +19188,16 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
         }));
       }
 
+      saudeAtual = registrarResultadoSaudeIntegracao(
+        clienteId,
+        marketplace,
+        resultadoTeste,
+        "manual"
+      );
+
       const resultado = {
         ...resultadoTeste,
+        saude: saudeAtual || resultadoTeste.saude || null,
         message: resultadoTeste.mensagem,
         ultimoTesteEm: configAtualizada?.ultimoTesteEm || resultadoTeste.testadoEm,
         ultimoStatus: resultadoTeste.status,
@@ -19207,7 +19222,14 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
         status: "erro_interno",
         mensagem: "Erro interno ao testar integracao.",
         message: "Erro interno ao testar integracao.",
-        detalhes: { erro: e.message },
+        detalhes: {},
+        saude: {
+          marketplace: normalizarMarketplaceIntegracao(req.params.marketplace || ""),
+          status: "desconhecida",
+          codigo: "erro_interno",
+          mensagem: "Saude da integracao desconhecida",
+          origem: "manual"
+        },
         testadoEm: new Date().toISOString()
       });
     }
@@ -19387,6 +19409,7 @@ const conversoresAfiliados = criarConversores({
   registrarAlertaMercadoLivre,
   registrarAlertaAmazon,
   limparAlertaIntegracao,
+  registrarSucessoIntegracao,
   timestampGMT8,
   assinar,
   logDebug
@@ -22126,7 +22149,10 @@ app.post("/importar-produto", async (req, res) => {
           }
         }
 
-        limparAlertaIntegracao(clienteId, marketplaceResultado);
+        registrarSucessoIntegracao(clienteId, marketplaceResultado, {
+          codigo: "sucesso_pipeline",
+          origem: "importacao_manual"
+        });
       } else if (avisoResultado.includes("erro ao consultar")) {
         if (marketplaceResultado === "mercadolivre") {
           registrarAlertaMercadoLivre(clienteId, "importacao_falhou", {

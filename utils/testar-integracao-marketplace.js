@@ -1,4 +1,12 @@
 const crypto = require("crypto");
+const {
+  classificarCodigoSaude,
+  detalhesSanitizados
+} = require("./alertas-integracoes");
+const {
+  normalizarCredenciaisAwin,
+  obterProgramaAwin
+} = require("./integracoes");
 
 const MENSAGENS = {
   ok: "Integração válida.",
@@ -12,6 +20,12 @@ const MENSAGENS = {
   teste_nao_implementado: "Teste real ainda não implementado para este marketplace.",
   marketplace_nao_suportado: "Marketplace não suportado para teste de integração."
 };
+
+MENSAGENS.teste_paapi_nao_disponivel = "Teste real PA-API ainda nao disponivel.";
+MENSAGENS.teste_magalu_nao_disponivel = "Teste real Magalu ainda nao disponivel.";
+MENSAGENS.programa_invalido = "Programa de afiliado invalido ou indisponivel.";
+
+const TIMEOUT_TESTE_MS = Number(process.env.OPTIMUS_INTEGRACOES_TEST_TIMEOUT_MS || 12000);
 
 function normalizarMarketplace(marketplace = "") {
   const valor = String(marketplace || "")
@@ -34,6 +48,8 @@ function normalizarMarketplace(marketplace = "") {
     feedawin: "awin",
     kabum: "kabum",
     feedkabum: "kabum",
+    magalu: "magalu",
+    magazineluiza: "magalu",
     ali: "aliexpress",
     aliexpress: "aliexpress",
     aliexpressbr: "aliexpress"
@@ -44,15 +60,68 @@ function normalizarMarketplace(marketplace = "") {
 
 function resultado(marketplace, status, detalhes = {}, ok = false, mensagem = "") {
   const codigo = String(status || "falha_teste");
+  const detalhesSeguros = detalhesSanitizados(detalhes || {});
+  const statusSaude = classificarCodigoSaude(codigo, detalhesSeguros);
+  const mp = normalizarMarketplace(marketplace);
+  const integracaoId = String(detalhes?.integracaoId || "").trim().toLowerCase();
   return {
     ok: ok === true,
-    marketplace: normalizarMarketplace(marketplace),
+    marketplace: mp,
+    ...(integracaoId ? { integracaoId } : {}),
     status: codigo,
     codigo,
     mensagem: mensagem || MENSAGENS[codigo] || MENSAGENS.falha_teste,
-    detalhes: detalhes || {},
+    detalhes: detalhesSeguros,
+    saude: {
+      marketplace: mp,
+      status: statusSaude,
+      codigo,
+      ...(integracaoId ? { integracaoId } : {}),
+      mensagem: statusSaude === "saudavel"
+        ? "Integracao funcionando"
+        : statusSaude === "invalida"
+          ? "Integracao invalida ou expirada"
+          : "Saude da integracao desconhecida",
+      origem: "manual"
+    },
     testadoEm: new Date().toISOString()
   };
+}
+
+async function fetchComTimeout(url, opcoes = {}, timeoutMs = TIMEOUT_TESTE_MS) {
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = controller
+    ? setTimeout(() => controller.abort(), Math.max(1000, timeoutMs))
+    : null;
+
+  try {
+    return await fetch(url, {
+      ...opcoes,
+      ...(controller ? { signal: controller.signal } : {})
+    });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function erroTransitorio(e = {}) {
+  return e?.name === "AbortError" ? "timeout" : "erro_rede";
+}
+
+function timestampGMT8() {
+  const d = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+
+function assinarAliExpress(params, secret) {
+  const keys = Object.keys(params).sort();
+  let base = secret;
+  for (const key of keys) {
+    if (key !== "sign") base += key + params[key];
+  }
+  base += secret;
+  return crypto.createHash("md5").update(base, "utf8").digest("hex").toUpperCase();
 }
 
 function credenciais(config = {}) {
@@ -133,7 +202,7 @@ async function testarMercadoLivre(config = {}) {
   if (!cookies) return resultado("mercadolivre", "cookie_ausente", { faltandoCookies: true }, false);
 
   try {
-    const response = await fetch("https://www.mercadolivre.com.br/afiliados/linkbuilder", {
+    const response = await fetchComTimeout("https://www.mercadolivre.com.br/afiliados/linkbuilder", {
       method: "GET",
       headers: {
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -151,8 +220,12 @@ async function testarMercadoLivre(config = {}) {
       return resultado("mercadolivre", "bloqueio_ml", { httpStatus: response.status, urlFinal }, false);
     }
 
-    if ([401, 403, 419].includes(Number(response.status)) || !response.ok) {
+    if ([401, 403, 419].includes(Number(response.status))) {
       return resultado("mercadolivre", "cookie_expirado", { httpStatus: response.status, urlFinal }, false);
+    }
+
+    if ([429, 500, 502, 503, 504].includes(Number(response.status)) || !response.ok) {
+      return resultado("mercadolivre", "falha_teste", { httpStatus: response.status, urlFinal }, false);
     }
 
     const csrf = extrairCsrfMercadoLivre(html);
@@ -164,7 +237,7 @@ async function testarMercadoLivre(config = {}) {
       }, false);
     }
 
-    const conversao = await fetch("https://www.mercadolivre.com.br/affiliate-program/api/v2/stripe/user/links", {
+    const conversao = await fetchComTimeout("https://www.mercadolivre.com.br/affiliate-program/api/v2/stripe/user/links", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -194,7 +267,7 @@ async function testarMercadoLivre(config = {}) {
 
     return resultado("mercadolivre", "ok", { linkAfiliado }, true);
   } catch (e) {
-    return resultado("mercadolivre", "falha_teste", { erro: e.message }, false);
+    return resultado("mercadolivre", "falha_teste", { motivo: erroTransitorio(e) }, false);
   }
 }
 
@@ -218,7 +291,7 @@ async function testarAmazon(config = {}) {
       }, false);
     }
 
-    return resultado("amazon", "teste_nao_implementado", { modo }, false);
+    return resultado("amazon", "teste_paapi_nao_disponivel", { modo }, false);
   }
 
   if (!cookies) return resultado("amazon", "cookie_ausente", { faltandoCookies: true, modo }, false);
@@ -228,7 +301,7 @@ async function testarAmazon(config = {}) {
     url.searchParams.set("tag", tagId);
     const linkAfiliado = url.toString();
 
-    const response = await fetch(linkAfiliado, {
+    const response = await fetchComTimeout(linkAfiliado, {
       method: "GET",
       headers: {
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -243,13 +316,21 @@ async function testarAmazon(config = {}) {
     const lower = `${urlFinal}\n${html}`.toLowerCase();
 
     if (
-      [401, 403, 419, 429, 503].includes(Number(response.status)) ||
+      [401, 403, 419].includes(Number(response.status)) ||
+      /\/ap\/signin|sign-in|signin|login/i.test(urlFinal) ||
+      lower.includes("iniciar sess")
+    ) {
+      return resultado("amazon", "cookie_expirado", { modo, httpStatus: response.status, urlFinal }, false);
+    }
+
+    if (
+      [429, 500, 502, 503, 504].includes(Number(response.status)) ||
       lower.includes("captcha") ||
       lower.includes("robot check") ||
       lower.includes("automated access") ||
       lower.includes("digite os caracteres")
     ) {
-      return resultado("amazon", "cookie_expirado", { modo, httpStatus: response.status, urlFinal }, false);
+      return resultado("amazon", "falha_teste", { modo, httpStatus: response.status, motivo: "bloqueio_transitorio" }, false);
     }
 
     if (!response.ok) {
@@ -262,7 +343,7 @@ async function testarAmazon(config = {}) {
 
     return resultado("amazon", "ok", { modo, linkAfiliado, httpStatus: response.status }, true);
   } catch (e) {
-    return resultado("amazon", "falha_teste", { modo, erro: e.message }, false);
+    return resultado("amazon", "falha_teste", { modo, motivo: erroTransitorio(e) }, false);
   }
 }
 
@@ -304,7 +385,7 @@ async function testarShopee(config = {}) {
       .update(`${c.appId}${timestamp}${payload}${c.secret}`, "utf8")
       .digest("hex");
 
-    const response = await fetch("https://open-api.affiliate.shopee.com.br/graphql", {
+    const response = await fetchComTimeout("https://open-api.affiliate.shopee.com.br/graphql", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -316,10 +397,14 @@ async function testarShopee(config = {}) {
     const data = await response.json().catch(() => null);
     const erros = Array.isArray(data?.errors) ? data.errors : [];
 
+    if ([429, 500, 502, 503, 504].includes(Number(response.status))) {
+      return resultado("shopee", "falha_teste", { httpStatus: response.status }, false);
+    }
+
     if ([401, 403].includes(Number(response.status)) || erros.length) {
       return resultado("shopee", "credencial_invalida", {
         httpStatus: response.status,
-        erros
+        totalErros: erros.length
       }, false);
     }
 
@@ -342,19 +427,27 @@ async function testarShopee(config = {}) {
       linkAfiliado: primeiroLink
     }, true);
   } catch (e) {
-    return resultado("shopee", "falha_teste", { erro: e.message }, false);
+    return resultado("shopee", "falha_teste", { motivo: erroTransitorio(e) }, false);
   }
 }
 
 function credenciaisAwin(config = {}) {
-  const c = credenciais(config);
-  return {
-    publisherId: valorTexto(c, ["publisherId", "publisher_id", "publisher"]),
-    apiToken: valorTexto(c, ["apiToken", "api_token", "token"])
-  };
+  return normalizarCredenciaisAwin(credenciais(config));
+}
+
+function integracaoIdAwin(programa = {}) {
+  const advertiserId = String(programa?.advertiserId || programa?.id || "").trim();
+  return advertiserId ? `advertiser:${advertiserId}` : "";
+}
+
+function programaEstaJoined(programas = [], advertiserId = "") {
+  return programas.some(item =>
+    String(item?.id || item?.advertiserId || item?.advertiser_id || "") === String(advertiserId)
+  );
 }
 
 async function testarAwin(config = {}, marketplace = "awin") {
+  const credenciaisOriginais = credenciais(config);
   const c = credenciaisAwin(config);
   if (!c.publisherId || !c.apiToken) {
     return resultado(marketplace, "credencial_ausente", {
@@ -367,7 +460,7 @@ async function testarAwin(config = {}, marketplace = "awin") {
     const url = new URL(`https://api.awin.com/publishers/${encodeURIComponent(c.publisherId)}/programmes`);
     url.searchParams.set("relationship", "joined");
 
-    const response = await fetch(url, {
+    const response = await fetchComTimeout(url, {
       method: "GET",
       headers: {
         Accept: "application/json",
@@ -380,20 +473,100 @@ async function testarAwin(config = {}, marketplace = "awin") {
       return resultado(marketplace, "credencial_invalida", { httpStatus: response.status }, false);
     }
 
-    if (!response.ok) {
-      return resultado(marketplace, "falha_teste", { httpStatus: response.status, resposta: data }, false);
+    if ([429, 500, 502, 503, 504].includes(Number(response.status))) {
+      return resultado(marketplace, "falha_teste", { httpStatus: response.status }, false);
     }
 
-    return resultado(marketplace, "ok", {
+    if (!response.ok) {
+      return resultado(marketplace, "falha_teste", { httpStatus: response.status }, false);
+    }
+
+    if (marketplace === "kabum") {
+      const programa = obterProgramaAwin(c, "kabum");
+      const advertiserId = programa?.advertiserId || "";
+      const programas = Array.isArray(data) ? data : [];
+      const integracaoId = integracaoIdAwin(programa);
+
+      if (!advertiserId) {
+        return resultado("kabum", "programa_invalido", { motivo: "kabum_sem_advertiser_id" }, false);
+      }
+
+      const programaJoined = programaEstaJoined(programas, advertiserId);
+      if (programas.length && !programaJoined) {
+        return resultado("kabum", "programa_invalido", { advertiserId, integracaoId }, false);
+      }
+
+      const linkbuilder = await fetchComTimeout(
+        `https://api.awin.com/publishers/${encodeURIComponent(c.publisherId)}/linkbuilder/generate`,
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${c.apiToken}`
+          },
+          body: JSON.stringify({
+            advertiserId: Number(advertiserId),
+            destinationUrl: "https://www.kabum.com.br/"
+          })
+        }
+      );
+      const linkData = await linkbuilder.json().catch(() => null);
+      const link = valorTexto(linkData || {}, ["shortUrl", "url", "link", "trackingLink", "clickUrl"]);
+
+      if ([401, 403].includes(Number(linkbuilder.status))) {
+        return resultado("kabum", "credencial_invalida", { httpStatus: linkbuilder.status }, false);
+      }
+      if ([429, 500, 502, 503, 504].includes(Number(linkbuilder.status))) {
+        return resultado("kabum", "falha_teste", { httpStatus: linkbuilder.status }, false);
+      }
+      if (!linkbuilder.ok || !/^https?:\/\//i.test(link)) {
+        return resultado("kabum", "programa_invalido", { httpStatus: linkbuilder.status, advertiserId, integracaoId }, false);
+      }
+
+      return resultado("kabum", "ok", {
+        httpStatus: linkbuilder.status,
+        totalProgramas: programas.length,
+        advertiserId,
+        integracaoId
+      }, true);
+    }
+
+    const programas = Array.isArray(data) ? data : [];
+    const possuiProgramaDeclarado = Array.isArray(credenciaisOriginais.programas) ||
+      Boolean(credenciaisOriginais.advertiserId || credenciaisOriginais.loja);
+    const filhos = possuiProgramaDeclarado && Array.isArray(c.programas)
+      ? c.programas
+        .filter(programa => programa?.ativo !== false && integracaoIdAwin(programa))
+        .map(programa => {
+          const advertiserId = String(programa.advertiserId || "").trim();
+          const joined = programaEstaJoined(programas, advertiserId);
+          const statusFilho = programas.length && !joined ? "programa_invalido" : "ok";
+          return {
+            marketplace: "awin",
+            integracaoId: integracaoIdAwin(programa),
+            status: statusFilho,
+            codigo: statusFilho,
+            mensagem: statusFilho === "ok" ? MENSAGENS.ok : MENSAGENS.programa_invalido,
+            detalhes: { advertiserId, programa: programa.nome || "" }
+          };
+        })
+      : [];
+    const algumInvalido = filhos.some(item => item.status === "programa_invalido");
+
+    const agregado = resultado(marketplace, algumInvalido ? "programa_invalido" : "ok", {
       httpStatus: response.status,
-      totalProgramas: Array.isArray(data) ? data.length : 0
-    }, true);
+      totalProgramas: programas.length,
+      ...(filhos[0]?.integracaoId ? { integracaoId: filhos[0].integracaoId } : {})
+    }, !algumInvalido, algumInvalido ? MENSAGENS.programa_invalido : "");
+    agregado.saudeFilhas = filhos;
+    return agregado;
   } catch (e) {
-    return resultado(marketplace, "falha_teste", { erro: e.message }, false);
+    return resultado(marketplace, "falha_teste", { motivo: erroTransitorio(e) }, false);
   }
 }
 
-function testarAliExpress(config = {}) {
+async function testarAliExpress(config = {}) {
   const c = credenciais(config);
   const appKey = valorTexto(c, ["appKey", "app_key"]);
   const secret = valorTexto(c, ["secret", "appSecret", "app_secret"]);
@@ -407,9 +580,62 @@ function testarAliExpress(config = {}) {
     }, false);
   }
 
-  return resultado("aliexpress", "teste_nao_implementado", {
-    camposPresentes: ["appKey", "secret", "trackingId"]
-  }, false);
+  try {
+    const params = {
+      method: "aliexpress.affiliate.link.generate",
+      app_key: appKey,
+      timestamp: timestampGMT8(),
+      sign_method: "md5",
+      format: "json",
+      v: "2.0",
+      promotion_link_type: "0",
+      source_values: valorTexto(c, ["urlTeste", "linkTeste"]) || "https://www.aliexpress.com/item/1005006871288989.html",
+      tracking_id: trackingId
+    };
+    params.sign = assinarAliExpress(params, secret);
+
+    const response = await fetchComTimeout("https://api-sg.aliexpress.com/sync", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=utf-8"
+      },
+      body: new URLSearchParams(params)
+    });
+    const data = await response.json().catch(() => null);
+    const erro = data?.error_response ||
+      data?.aliexpress_affiliate_link_generate_response?.resp_result?.error_response ||
+      null;
+    const codigoApi = erro?.code || data?.code || "";
+    const mensagemApi = String(erro?.msg || erro?.sub_msg || data?.msg || "").toLowerCase();
+
+    if ([401, 403].includes(Number(response.status)) || /invalid|secret|signature|app.?key|permission|auth/i.test(`${codigoApi} ${mensagemApi}`)) {
+      return resultado("aliexpress", "credencial_invalida", {
+        httpStatus: response.status,
+        codigoApi: String(codigoApi || "")
+      }, false);
+    }
+
+    if ([429, 500, 502, 503, 504].includes(Number(response.status)) || !response.ok || erro) {
+      return resultado("aliexpress", "falha_teste", {
+        httpStatus: response.status,
+        codigoApi: String(codigoApi || "")
+      }, false);
+    }
+
+    const link =
+      data?.aliexpress_affiliate_link_generate_response?.resp_result?.result?.promotion_links?.promotion_link?.[0]?.promotion_link ||
+      data?.resp_result?.result?.promotion_links?.promotion_link?.[0]?.promotion_link ||
+      data?.result?.promotion_links?.promotion_link?.[0]?.promotion_link ||
+      "";
+
+    if (!/^https?:\/\//i.test(String(link || ""))) {
+      return resultado("aliexpress", "falha_teste", { motivo: "promotion_link_nao_retornado" }, false);
+    }
+
+    return resultado("aliexpress", "ok", { httpStatus: response.status }, true);
+  } catch (e) {
+    return resultado("aliexpress", "falha_teste", { motivo: erroTransitorio(e) }, false);
+  }
 }
 
 async function testarIntegracaoMarketplace(clienteId = "admin", marketplace = "", integracao = {}) {
@@ -426,6 +652,7 @@ async function testarIntegracaoMarketplace(clienteId = "admin", marketplace = ""
   if (mp === "awin") return testarAwin(config, "awin");
   if (mp === "kabum") return testarAwin(config, "kabum");
   if (mp === "aliexpress") return testarAliExpress(config);
+  if (mp === "magalu") return resultado("magalu", "teste_magalu_nao_disponivel", {}, false);
 
   return resultado(mp, "marketplace_nao_suportado", { clienteId }, false);
 }

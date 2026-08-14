@@ -172,7 +172,8 @@ function criarConversores(deps = {}) {
     tipoUrlMercadoLivreAfiliado: deps.tipoUrlMercadoLivreAfiliado,
     logMlAfiliadoFalhaDetalhe: deps.logMlAfiliadoFalhaDetalhe,
     registrarAlertaMercadoLivre: deps.registrarAlertaMercadoLivre,
-    limparAlertaIntegracao: deps.limparAlertaIntegracao
+    limparAlertaIntegracao: deps.limparAlertaIntegracao,
+    registrarSucessoIntegracao: deps.registrarSucessoIntegracao
   });
   const gerarLinkAmazon = obterConversor("amazon").criarGerarLinkAmazon({
     registrarAlertaAmazon: deps.registrarAlertaAmazon,

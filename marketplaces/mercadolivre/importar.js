@@ -1,7 +1,7 @@
 const { normalizarNumeroMoeda } = require("../../utils/moeda");
 const {
   registrarAlertaIntegracao,
-  limparAlertaIntegracao
+  registrarSucessoIntegracao
 } = require("../../utils/alertas-integracoes");
 
 const {
@@ -892,9 +892,20 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       });
     }
 
-    limparAlertaIntegracao(clienteIdAlvo, "mercadolivre");
+    if (linkAfiliadoGerado) {
+      try {
+        if (typeof registrarSucessoIntegracao === "function") {
+          registrarSucessoIntegracao(clienteIdAlvo, "mercadolivre", {
+            codigo: "afiliado_ok",
+            origem: "importer_ml"
+          });
+        }
+      } catch {
+        // Sensor de saude e opcional: nunca altera o retorno comercial.
+      }
+    }
     perf.etapa("salvamento_retorno", {
-      limpouAlerta: true
+      limpouAlerta: !!linkAfiliadoGerado
     });
 
     perf.fim("ok", {

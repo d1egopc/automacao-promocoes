@@ -4,7 +4,8 @@ function criarGerarLinkMercadoLivre({
   tipoUrlMercadoLivreAfiliado,
   logMlAfiliadoFalhaDetalhe,
   registrarAlertaMercadoLivre,
-  limparAlertaIntegracao
+  limparAlertaIntegracao,
+  registrarSucessoIntegracao
 } = {}) {
   return async function gerarLinkAfiliadoMercadoLivre(url, config, contexto = {}) {
     const credenciais = config?.credenciais || {};
@@ -114,10 +115,6 @@ function criarGerarLinkMercadoLivre({
         return "";
       }
 
-      if (contexto.clienteId) {
-        limparAlertaIntegracao(contexto.clienteId, "mercadolivre");
-      }
-
       const linkAfiliado = data?.short_url || data?.shortUrl || data?.url || "";
       if (!linkAfiliado) {
         logMlAfiliadoFalhaDetalhe({
@@ -129,6 +126,17 @@ function criarGerarLinkMercadoLivre({
           temCookies: !!cookies,
           urlTipo
         });
+      } else if (contexto.clienteId) {
+        try {
+          if (typeof registrarSucessoIntegracao === "function") {
+            registrarSucessoIntegracao(contexto.clienteId, "mercadolivre", {
+              codigo: "afiliado_ok",
+              origem: "link_afiliado"
+            });
+          }
+        } catch {
+          // Sensor de saude e opcional: nunca altera o link afiliado gerado.
+        }
       }
 
       return linkAfiliado;
