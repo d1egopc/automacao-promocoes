@@ -1,13 +1,45 @@
 function criarGerarLinkAliExpress({
   fetch: fetchImpl = global.fetch,
   timestampGMT8,
-  assinar
+  assinar,
+  registrarSucessoIntegracao,
+  registrarAlertaIntegracao
 } = {}) {
-  return async function gerarLinkCurtoAliExpress(urlOriginal, credenciais = {}) {
+  function registrarSucessoFailOpen(clienteId = "", detalhes = {}) {
+    try {
+      if (clienteId && typeof registrarSucessoIntegracao === "function") {
+        registrarSucessoIntegracao(clienteId, "aliexpress", {
+          codigo: "afiliado_ok",
+          origem: "link_afiliado",
+          ...detalhes
+        });
+      }
+    } catch {
+      // Saude das integracoes nunca interfere na conversao comercial.
+    }
+  }
+
+  function registrarFalhaFailOpen(clienteId = "", codigo = "", detalhes = {}) {
+    try {
+      if (clienteId && typeof registrarAlertaIntegracao === "function") {
+        registrarAlertaIntegracao(clienteId, "aliexpress", {
+          tipo: codigo,
+          status: "atencao",
+          mensagem: "Falha qualificada na integracao AliExpress.",
+          detalhes
+        });
+      }
+    } catch {
+      // Saude das integracoes nunca interfere na conversao comercial.
+    }
+  }
+
+  return async function gerarLinkCurtoAliExpress(urlOriginal, credenciais = {}, contexto = {}) {
     try {
       const appKey = credenciais.appKey || "";
       const secret = credenciais.secret || "";
       const trackingId = credenciais.trackingId || "";
+      const clienteId = contexto.clienteId || "";
 
       if (!appKey || !secret || !trackingId || !urlOriginal) {
         return urlOriginal;
@@ -39,10 +71,28 @@ function criarGerarLinkAliExpress({
 
      console.log("[INFO] Ali link");
 
+      const erro = data?.error_response ||
+        data?.aliexpress_affiliate_link_generate_response?.resp_result?.error_response ||
+        null;
+      const codigoApi = erro?.code || data?.code || "";
+      const mensagemApi = String(erro?.msg || erro?.sub_msg || data?.msg || "").toLowerCase();
+
+      if ([401, 403].includes(Number(response.status)) ||
+        /invalid|secret|signature|app.?key|permission|auth/i.test(`${codigoApi} ${mensagemApi}`)) {
+        registrarFalhaFailOpen(clienteId, "credencial_invalida", {
+          httpStatus: response.status,
+          codigoApi: String(codigoApi || "")
+        });
+      }
+
       const linkGerado =
         data?.aliexpress_affiliate_link_generate_response?.resp_result?.result?.promotion_links?.promotion_link?.[0]?.promotion_link ||
         data?.resp_result?.result?.promotion_links?.promotion_link?.[0]?.promotion_link ||
         "";
+
+      if (/^https?:\/\//i.test(String(linkGerado || ""))) {
+        registrarSucessoFailOpen(clienteId);
+      }
 
       return linkGerado || urlOriginal;
 

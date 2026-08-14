@@ -121,7 +121,8 @@ function criarGerarLinkAfiliadoCliente({
       if (conversor.nome === "aliexpress") {
         const linkAli = await gerarLinkAliExpress(
           linkBase,
-          integracao?.credenciais || {}
+          integracao?.credenciais || {},
+          { clienteId }
         );
 
         return linkAli || "";
@@ -187,12 +188,16 @@ function criarConversores(deps = {}) {
   const gerarLinkCurtoAliExpress = obterConversor("aliexpress").criarGerarLinkAliExpress({
     fetch: deps.fetch,
     timestampGMT8: deps.timestampGMT8,
-    assinar: deps.assinar
+    assinar: deps.assinar,
+    registrarSucessoIntegracao: deps.registrarSucessoIntegracao,
+    registrarAlertaIntegracao: deps.registrarAlertaIntegracao
   });
   const gerarDeepLinkAwin = obterConversor("awin").criarGerarDeepLinkAwin({
     axios: deps.axios,
     getIntegracaoCliente: deps.getIntegracaoCliente,
-    obterProgramaAwin: deps.obterProgramaAwin
+    obterProgramaAwin: deps.obterProgramaAwin,
+    registrarSucessoIntegracao: deps.registrarSucessoIntegracao,
+    registrarAlertaIntegracao: deps.registrarAlertaIntegracao
   });
   const gerarLinkMagalu = obterConversor("magalu").gerarLinkMagalu;
   const gerarLinkAfiliadoCliente = criarGerarLinkAfiliadoCliente({

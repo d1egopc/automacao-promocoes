@@ -3237,14 +3237,17 @@ const importarAmazon = criarImportarAmazon({
   gerarLinkOptimus,
   extrairCuponsAmazonDoHtml,
   detectarAvisoCupomAmazon,
-  escolherCupomParaOfertaAmazon
+  escolherCupomParaOfertaAmazon,
+  registrarSucessoIntegracao,
+  registrarAlertaIntegracao
 });
 
 const importarShopee = criarImportarShopee({
   limparPreco,
   htmlDecode,
   extrairMeta,
-  corrigirImagemUrl
+  corrigirImagemUrl,
+  registrarSucessoIntegracao
 });
 
 // ================= FILTROS OFERTA JA EXISTE =================
@@ -19161,7 +19164,12 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
       let saudeAtual = null;
 
       if (resultadoTeste.ok) {
-        limparAlertaIntegracao(clienteId, marketplace);
+        const integracaoIdResultado = resultadoTeste.integracaoId || resultadoTeste.saude?.integracaoId || "";
+        limparAlertaIntegracao(
+          clienteId,
+          marketplace,
+          integracaoIdResultado ? { integracaoId: integracaoIdResultado, apenasAlerta: true } : {}
+        );
         console.log("[INTEGRACAO-TESTE-OK]", JSON.stringify({
           clienteId,
           marketplace,
@@ -19408,6 +19416,7 @@ const conversoresAfiliados = criarConversores({
   logMlAfiliadoFalhaDetalhe,
   registrarAlertaMercadoLivre,
   registrarAlertaAmazon,
+  registrarAlertaIntegracao,
   limparAlertaIntegracao,
   registrarSucessoIntegracao,
   timestampGMT8,

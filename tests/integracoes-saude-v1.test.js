@@ -16,6 +16,7 @@ const {
   registrarAlertaIntegracao,
   limparAlertaIntegracao,
   obterSaudeIntegracao,
+  registrarSaudeIntegracao,
   registrarResultadoSaudeIntegracao,
   registrarSucessoIntegracao,
   classificarCodigoSaude
@@ -24,8 +25,17 @@ const {
   criarGerarLinkAmazon
 } = require("../modules/marketplaces/conversores/amazon.converter");
 const {
+  criarImportarAmazon
+} = require("../marketplaces/amazon/importar");
+const {
   criarGerarLinkMercadoLivre
 } = require("../modules/marketplaces/conversores/mercadolivre.converter");
+const {
+  criarGerarLinkAliExpress
+} = require("../modules/marketplaces/conversores/aliexpress.converter");
+const {
+  criarGerarDeepLinkAwin
+} = require("../modules/marketplaces/conversores/awin.converter");
 
 const fetchOriginal = global.fetch;
 
@@ -78,6 +88,24 @@ async function testeMercadoLivre() {
     credenciais: { tag: "tag-ok", cookies: "cookie-secreto" }
   });
   assert.strictEqual(transitoria.saude.status, "desconhecida");
+
+  mockFetchSequencial([
+    resposta({ text: '<meta name="csrf-token" content="csrf-meta">' }),
+    resposta({ json: { short_url: "https://meli.la/meta" } })
+  ]);
+  const csrfMeta = await testarIntegracaoMarketplace("workspace_a", "mercadolivre", {
+    credenciais: { tag: "tag-ok", cookies: "cookie-secreto" }
+  });
+  assert.strictEqual(csrfMeta.saude.status, "saudavel");
+
+  mockFetchSequencial([
+    resposta({ text: "<html>linkbuilder sem csrf</html>" })
+  ]);
+  const semCsrf = await testarIntegracaoMarketplace("workspace_a", "mercadolivre", {
+    credenciais: { tag: "tag-ok", cookies: "cookie-secreto" }
+  });
+  assert.strictEqual(semCsrf.codigo, "falha_teste");
+  assert.strictEqual(semCsrf.saude.status, "desconhecida");
 }
 
 async function testeAmazon() {
@@ -107,6 +135,15 @@ async function testeAmazon() {
     credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
   });
   assert.strictEqual(captcha.saude.status, "desconhecida");
+
+  mockFetchSequencial([
+    resposta({ ok: false, status: 403, text: "captcha robot check suspicious traffic" })
+  ]);
+  const captcha403 = await testarIntegracaoMarketplace("workspace_a", "amazon", {
+    modo: "cookies",
+    credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
+  });
+  assert.strictEqual(captcha403.saude.status, "desconhecida");
 
   const paapi = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "api",
@@ -215,6 +252,7 @@ async function testeAwinKabum() {
     }
   });
   registrarResultadoSaudeIntegracao("workspace_a", "awin", awinParcial, "manual");
+  assert.strictEqual(obterSaudeIntegracao("workspace_a", "awin").status, "invalida");
   assert.strictEqual(obterSaudeIntegracao("workspace_a", "awin", "advertiser:111").status, "saudavel");
   assert.strictEqual(obterSaudeIntegracao("workspace_a", "awin", "advertiser:222").status, "invalida");
   assert.strictEqual(obterSaudeIntegracao("workspace_a", "awin", "advertiser:111").status, "saudavel");
@@ -252,6 +290,35 @@ function testeSensorPassivo() {
   saude = obterSaudeIntegracao("workspace_a", "mercadolivre");
   assert.notStrictEqual(saude.status, "invalida");
 
+  registrarSucessoIntegracao("workspace_janela", "mercadolivre", {
+    codigo: "afiliado_ok",
+    origem: "teste"
+  });
+  registrarAlertaIntegracao("workspace_janela", "mercadolivre", {
+    tipo: "cookie_expirado",
+    mensagem: "falha qualificada isolada",
+    detalhes: { httpStatus: 401 }
+  });
+  saude = obterSaudeIntegracao("workspace_janela", "mercadolivre");
+  assert.strictEqual(saude.status, "saudavel");
+
+  registrarSaudeIntegracao("workspace_janela", "mercadolivre", {
+    status: "saudavel",
+    codigo: "afiliado_ok",
+    mensagem: "Integracao funcionando",
+    origem: "teste",
+    ultimaProvaPositivaEm: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+    falhaQualificadaPendenteEm: new Date(Date.now() - 4 * 60 * 1000).toISOString(),
+    falhasQualificadas: 1
+  });
+  registrarAlertaIntegracao("workspace_janela", "mercadolivre", {
+    tipo: "cookie_expirado",
+    mensagem: "falha qualificada recorrente",
+    detalhes: { httpStatus: 401 }
+  });
+  saude = obterSaudeIntegracao("workspace_janela", "mercadolivre");
+  assert.strictEqual(saude.status, "invalida");
+
   registrarResultadoSaudeIntegracao("workspace_a", "shopee", {
     status: "credencial_invalida",
     codigo: "credencial_invalida"
@@ -267,6 +334,127 @@ function testeSensorPassivo() {
   assert.strictEqual(classificarCodigoSaude("bloqueio_ml", { httpStatus: 403, motivo: "captcha" }), "desconhecida");
   assert.strictEqual(classificarCodigoSaude("credencial_invalida", { httpStatus: 403 }), "invalida");
   assert.strictEqual(classificarCodigoSaude("falha_teste", { httpStatus: 429 }), "desconhecida");
+}
+
+async function testeSensoresPassivosConversores() {
+  const gerarAli = criarGerarLinkAliExpress({
+    fetch: async () => resposta({
+      json: {
+        aliexpress_affiliate_link_generate_response: {
+          resp_result: {
+            result: {
+              promotion_links: {
+                promotion_link: [{ promotion_link: "https://s.click.aliexpress.com/e/_ok" }]
+              }
+            }
+          }
+        }
+      }
+    }),
+    timestampGMT8: () => "2026-08-14 12:00:00",
+    assinar: () => "assinatura",
+    registrarSucessoIntegracao
+  });
+  const linkAli = await gerarAli(
+    "https://www.aliexpress.com/item/1005006871288989.html",
+    { appKey: "app", secret: "secret", trackingId: "track" },
+    { clienteId: "workspace_ali" }
+  );
+  assert.strictEqual(linkAli, "https://s.click.aliexpress.com/e/_ok");
+  assert.strictEqual(obterSaudeIntegracao("workspace_ali", "aliexpress").status, "saudavel");
+
+  const gerarAwin = criarGerarDeepLinkAwin({
+    axios: {
+      post: async () => ({ data: { shortUrl: "https://www.awin1.com/cread.php?awinmid=17729" } })
+    },
+    getIntegracaoCliente: () => ({
+      credenciais: {
+        publisherId: "123",
+        apiToken: "token-secreto",
+        programas: [{ nome: "kabum", advertiserId: "17729" }]
+      }
+    }),
+    obterProgramaAwin: () => ({ nome: "kabum", advertiserId: "17729" }),
+    registrarSucessoIntegracao
+  });
+  const linkAwin = await gerarAwin("https://www.kabum.com.br/produto/123/teste", "workspace_awin");
+  assert.strictEqual(linkAwin, "https://www.awin1.com/cread.php?awinmid=17729");
+  assert.strictEqual(obterSaudeIntegracao("workspace_awin", "kabum", "advertiser:17729").status, "saudavel");
+  assert.strictEqual(obterSaudeIntegracao("workspace_awin", "kabum"), null);
+}
+
+function testeKabumSemBaseDesconhecidaArtificial() {
+  const resultadoKabum = {
+    ok: true,
+    marketplace: "kabum",
+    integracaoId: "advertiser:17729",
+    status: "ok",
+    codigo: "ok",
+    saude: {
+      marketplace: "kabum",
+      integracaoId: "advertiser:17729",
+      status: "saudavel",
+      codigo: "ok"
+    }
+  };
+
+  limparAlertaIntegracao("workspace_kabum_manual", "kabum", {
+    integracaoId: resultadoKabum.integracaoId,
+    apenasAlerta: true
+  });
+  registrarResultadoSaudeIntegracao("workspace_kabum_manual", "kabum", resultadoKabum, "manual");
+
+  assert.strictEqual(obterSaudeIntegracao("workspace_kabum_manual", "kabum"), null);
+  assert.strictEqual(
+    obterSaudeIntegracao("workspace_kabum_manual", "kabum", "advertiser:17729").status,
+    "saudavel"
+  );
+
+  registrarResultadoSaudeIntegracao("workspace_kabum_multi", "kabum", {
+    ok: false,
+    marketplace: "kabum",
+    status: "programa_invalido",
+    codigo: "programa_invalido",
+    saudeFilhas: [
+      {
+        marketplace: "kabum",
+        integracaoId: "advertiser:111",
+        status: "ok",
+        codigo: "ok"
+      },
+      {
+        marketplace: "kabum",
+        integracaoId: "advertiser:222",
+        status: "programa_invalido",
+        codigo: "programa_invalido"
+      }
+    ]
+  }, "manual");
+  assert.strictEqual(obterSaudeIntegracao("workspace_kabum_multi", "kabum", "advertiser:111").status, "saudavel");
+  assert.strictEqual(obterSaudeIntegracao("workspace_kabum_multi", "kabum", "advertiser:222").status, "invalida");
+
+  registrarResultadoSaudeIntegracao("workspace_kabum_all_ok", "kabum", {
+    ok: true,
+    marketplace: "kabum",
+    status: "ok",
+    codigo: "ok",
+    saudeFilhas: [
+      {
+        marketplace: "kabum",
+        integracaoId: "advertiser:111",
+        status: "ok",
+        codigo: "ok"
+      },
+      {
+        marketplace: "kabum",
+        integracaoId: "advertiser:222",
+        status: "ok",
+        codigo: "ok"
+      }
+    ]
+  }, "manual");
+  assert.strictEqual(obterSaudeIntegracao("workspace_kabum_all_ok", "kabum", "advertiser:111").status, "saudavel");
+  assert.strictEqual(obterSaudeIntegracao("workspace_kabum_all_ok", "kabum", "advertiser:222").status, "saudavel");
 }
 
 function testeAmazonUrlNaoPintaVerde() {
@@ -286,6 +474,69 @@ function testeAmazonUrlNaoPintaVerde() {
   const saude = obterSaudeIntegracao("workspace_a", "amazon");
   assert.strictEqual(saude.status, "desconhecida");
   assert.notStrictEqual(saude.status, "saudavel");
+
+  const semSensor = criarGerarLinkAmazon({})("workspace_a", "https://www.amazon.com.br/dp/B07PGL2ZSL", {
+    credenciais: { trackingId: "tag-20" }
+  });
+  const sensorThrow = criarGerarLinkAmazon({
+    limparAlertaIntegracao: () => { throw new Error("sensor"); }
+  })("workspace_a", "https://www.amazon.com.br/dp/B07PGL2ZSL", {
+    credenciais: { trackingId: "tag-20" }
+  });
+
+  const writeFileSyncOriginal = fs.writeFileSync;
+  let storageThrow = "";
+  try {
+    fs.writeFileSync = () => { throw new Error("storage"); };
+    storageThrow = criarGerarLinkAmazon({
+      limparAlertaIntegracao
+    })("workspace_a", "https://www.amazon.com.br/dp/B07PGL2ZSL", {
+      credenciais: { trackingId: "tag-20" }
+    });
+  } finally {
+    fs.writeFileSync = writeFileSyncOriginal;
+  }
+
+  assert.strictEqual(semSensor, "https://www.amazon.com.br/dp/B07PGL2ZSL?tag=tag-20");
+  assert.strictEqual(sensorThrow, "https://www.amazon.com.br/dp/B07PGL2ZSL?tag=tag-20");
+  assert.strictEqual(storageThrow, "https://www.amazon.com.br/dp/B07PGL2ZSL?tag=tag-20");
+}
+
+async function testeAmazonImporterCaptcha403NaoVermelho() {
+  let alertaChamado = false;
+  const importarAmazon = criarImportarAmazon({
+    extrairJsonLd: () => null,
+    extrairMeta: () => "",
+    htmlDecode: (valor) => valor,
+    limparPreco: (valor) => valor,
+    corrigirImagemUrl: (valor) => valor,
+    limparLinkAmazon: (valor) => valor,
+    gerarLinkOptimus: (valor) => valor,
+    extrairCuponsAmazonDoHtml: () => [],
+    detectarAvisoCupomAmazon: () => "",
+    escolherCupomParaOfertaAmazon: () => null,
+    registrarSucessoIntegracao: () => {
+      throw new Error("nao_deveria_registrar_sucesso");
+    },
+    registrarAlertaIntegracao: () => {
+      alertaChamado = true;
+    }
+  });
+  mockFetchSequencial([
+    resposta({
+      ok: false,
+      status: 403,
+      url: "https://www.amazon.com.br/errors/validateCaptcha",
+      text: "<html>captcha robot check suspicious traffic</html>"
+    })
+  ]);
+
+  await importarAmazon("https://www.amazon.com.br/dp/B07PGL2ZSL", {
+    credenciais: { cookies: "cookie-secreto" },
+    contextoEngine: { clienteId: "workspace_a" }
+  });
+
+  assert.strictEqual(alertaChamado, false);
 }
 
 async function testeMercadoLivreFailOpenSensor() {
@@ -335,7 +586,10 @@ async function main() {
     await testeAliExpress();
     await testeAwinKabum();
     testeSensorPassivo();
+    await testeSensoresPassivosConversores();
+    testeKabumSemBaseDesconhecidaArtificial();
     testeAmazonUrlNaoPintaVerde();
+    await testeAmazonImporterCaptcha403NaoVermelho();
     await testeMercadoLivreFailOpenSensor();
     console.log("integracoes-saude-v1: ok");
   } finally {

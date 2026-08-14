@@ -167,9 +167,11 @@ function tagAmazon(config = {}) {
 function extrairCsrfMercadoLivre(html = "") {
   const texto = String(html || "");
   const patterns = [
+    /x-csrf-token["']?\s*[:=]\s*["']([^"']+)["']/i,
     /name=["']_csrf["'][^>]*value=["']([^"']+)["']/i,
     /value=["']([^"']+)["'][^>]*name=["']_csrf["']/i,
     /csrfToken["']?\s*[:=]\s*["']([^"']+)["']/i,
+    /csrf-token["']?\s*content=["']([^"']+)["']/i,
     /_csrf["']?\s*[:=]\s*["']([^"']+)["']/i
   ];
 
@@ -189,6 +191,17 @@ function textoBloqueioMl(texto = "") {
     lower.includes("captcha") ||
     lower.includes("verificacao") ||
     lower.includes("verificacion")
+  );
+}
+
+function textoLoginMl(texto = "") {
+  const lower = String(texto || "").toLowerCase();
+  return (
+    lower.includes("/login") ||
+    lower.includes("login") ||
+    lower.includes("iniciar sess") ||
+    lower.includes("entrar na sua conta") ||
+    lower.includes("account-verification")
   );
 }
 
@@ -220,7 +233,8 @@ async function testarMercadoLivre(config = {}) {
       return resultado("mercadolivre", "bloqueio_ml", { httpStatus: response.status, urlFinal }, false);
     }
 
-    if ([401, 403, 419].includes(Number(response.status))) {
+    if ([401, 419].includes(Number(response.status)) ||
+      (Number(response.status) === 403 && textoLoginMl(diagnostico))) {
       return resultado("mercadolivre", "cookie_expirado", { httpStatus: response.status, urlFinal }, false);
     }
 
@@ -230,7 +244,7 @@ async function testarMercadoLivre(config = {}) {
 
     const csrf = extrairCsrfMercadoLivre(html);
     if (!csrf) {
-      return resultado("mercadolivre", "cookie_expirado", {
+      return resultado("mercadolivre", "falha_teste", {
         motivo: "csrf_nao_encontrado",
         httpStatus: response.status,
         urlFinal
@@ -254,7 +268,7 @@ async function testarMercadoLivre(config = {}) {
     const data = await conversao.json().catch(() => null);
     const linkAfiliado = valorTexto(data || {}, ["short_url", "shortUrl", "url"]);
 
-    if ([401, 403, 419].includes(Number(conversao.status))) {
+    if ([401, 419].includes(Number(conversao.status))) {
       return resultado("mercadolivre", "cookie_expirado", { httpStatus: conversao.status }, false);
     }
 
@@ -316,14 +330,6 @@ async function testarAmazon(config = {}) {
     const lower = `${urlFinal}\n${html}`.toLowerCase();
 
     if (
-      [401, 403, 419].includes(Number(response.status)) ||
-      /\/ap\/signin|sign-in|signin|login/i.test(urlFinal) ||
-      lower.includes("iniciar sess")
-    ) {
-      return resultado("amazon", "cookie_expirado", { modo, httpStatus: response.status, urlFinal }, false);
-    }
-
-    if (
       [429, 500, 502, 503, 504].includes(Number(response.status)) ||
       lower.includes("captcha") ||
       lower.includes("robot check") ||
@@ -331,6 +337,20 @@ async function testarAmazon(config = {}) {
       lower.includes("digite os caracteres")
     ) {
       return resultado("amazon", "falha_teste", { modo, httpStatus: response.status, motivo: "bloqueio_transitorio" }, false);
+    }
+
+    const statusHttp = Number(response.status);
+    const loginInequivoco = /\/ap\/signin|sign-in|signin|login/i.test(urlFinal) ||
+      lower.includes("iniciar sess");
+    const authInequivoca = loginInequivoco ||
+      [401, 419].includes(statusHttp) ||
+      (statusHttp === 403 &&
+        /cookie expirad|sess[aã]o expirada|credencial|invalid credentials|unauthorized|forbidden|fa[cç]a login|entre na sua conta/i.test(lower));
+
+    if (
+      authInequivoca
+    ) {
+      return resultado("amazon", "cookie_expirado", { modo, httpStatus: response.status, urlFinal }, false);
     }
 
     if (!response.ok) {
@@ -557,7 +577,7 @@ async function testarAwin(config = {}, marketplace = "awin") {
     const agregado = resultado(marketplace, algumInvalido ? "programa_invalido" : "ok", {
       httpStatus: response.status,
       totalProgramas: programas.length,
-      ...(filhos[0]?.integracaoId ? { integracaoId: filhos[0].integracaoId } : {})
+      ...(filhos.length === 1 && filhos[0]?.integracaoId ? { integracaoId: filhos[0].integracaoId } : {})
     }, !algumInvalido, algumInvalido ? MENSAGENS.programa_invalido : "");
     agregado.saudeFilhas = filhos;
     return agregado;

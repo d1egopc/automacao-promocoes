@@ -5,6 +5,7 @@ const {
 
 const ARQUIVO = "alertas-integracoes.json";
 const ARQUIVO_SAUDE = "saude-integracoes.json";
+const JANELA_CONFIRMACAO_FALHA_MS = 3 * 60 * 1000;
 
 function normalizarMarketplace(marketplace = "") {
   return String(marketplace || "").trim().toLowerCase();
@@ -22,6 +23,11 @@ function chaveSaude(marketplace = "", integracaoId = "") {
 
 function agoraIso() {
   return new Date().toISOString();
+}
+
+function timestampMs(valor = "") {
+  const ms = Date.parse(valor || "");
+  return Number.isFinite(ms) ? ms : 0;
 }
 
 function logSaudeFailOpen(etapa = "", erro = {}) {
@@ -151,14 +157,20 @@ function registrarSaudeIntegracao(clienteId = "admin", marketplace = "", estado 
     codigo: String(estado.codigo || anterior.codigo || status),
     mensagem: String(estado.mensagem || mensagemSaude(status, estado.codigo || anterior.codigo || "")),
     ultimaProvaPositivaEm: status === "saudavel"
-      ? agora
+      ? (estado.ultimaProvaPositivaEm || (estado.preservarProvaPositiva ? (anterior.ultimaProvaPositivaEm || null) : agora))
       : (estado.ultimaProvaPositivaEm || anterior.ultimaProvaPositivaEm || null),
     ultimaFalhaQualificadaEm: status === "invalida"
       ? agora
       : (estado.ultimaFalhaQualificadaEm || anterior.ultimaFalhaQualificadaEm || null),
     origem: String(estado.origem || anterior.origem || "sensor"),
     atualizadoEm: agora,
-    detalhes: detalhesSanitizados(estado.detalhes || {})
+    detalhes: detalhesSanitizados(estado.detalhes || {}),
+    falhaQualificadaPendenteEm: estado.falhaQualificadaPendenteEm === null
+      ? null
+      : (estado.falhaQualificadaPendenteEm || anterior.falhaQualificadaPendenteEm || null),
+    falhasQualificadas: Number.isFinite(Number(estado.falhasQualificadas))
+      ? Number(estado.falhasQualificadas)
+      : Number(anterior.falhasQualificadas || 0)
   };
 
   const novaLista = lista.filter(item => chaveSaude(item.marketplace, item.integracaoId) !== chave);
@@ -171,6 +183,47 @@ function saudeAPartirResultado(marketplace = "", resultado = {}, origem = "manua
   const detalhes = detalhesSanitizados(resultado.detalhes || {});
   const statusBase = classificarCodigoSaude(codigo, detalhes);
   const transitorio = statusBase === "desconhecida";
+  const agora = agoraIso();
+
+  if (statusBase === "saudavel") {
+    return {
+      marketplace: normalizarMarketplace(marketplace || resultado.marketplace || ""),
+      status: "saudavel",
+      codigo,
+      mensagem: resultado.mensagem || mensagemSaude("saudavel", codigo),
+      origem,
+      detalhes,
+      falhaQualificadaPendenteEm: null,
+      falhasQualificadas: 0
+    };
+  }
+
+  if (statusBase === "invalida" && anterior?.status === "saudavel") {
+    const primeiraFalha = anterior.falhaQualificadaPendenteEm || agora;
+    const falhas = Number(anterior.falhasQualificadas || 0) + 1;
+    const inicioFalha = timestampMs(primeiraFalha);
+    const sucessoAposFalha = timestampMs(anterior.ultimaProvaPositivaEm) > inicioFalha;
+    const janelaConfirmada = !sucessoAposFalha &&
+      falhas > 1 &&
+      inicioFalha > 0 &&
+      Date.now() - inicioFalha >= JANELA_CONFIRMACAO_FALHA_MS;
+
+    if (!janelaConfirmada) {
+      return {
+        marketplace: normalizarMarketplace(marketplace || resultado.marketplace || ""),
+        status: "saudavel",
+        codigo: anterior.codigo || "sucesso_pipeline",
+        mensagem: anterior.mensagem || mensagemSaude("saudavel", anterior.codigo || "sucesso_pipeline"),
+        origem: anterior.origem || origem,
+        detalhes,
+        preservarProvaPositiva: true,
+        falhaQualificadaPendenteEm: sucessoAposFalha ? agora : primeiraFalha,
+        falhasQualificadas: sucessoAposFalha ? 1 : falhas,
+        ultimaFalhaQualificadaEm: agora
+      };
+    }
+  }
+
   const status = transitorio && anterior?.status ? anterior.status : statusBase;
   const codigoFinal = transitorio && anterior?.status ? (anterior.codigo || codigo) : codigo;
 
@@ -180,7 +233,10 @@ function saudeAPartirResultado(marketplace = "", resultado = {}, origem = "manua
     codigo: codigoFinal,
     mensagem: resultado.mensagem || mensagemSaude(status, codigoFinal),
     origem,
-    detalhes
+    detalhes,
+    preservarProvaPositiva: transitorio && anterior?.status === "saudavel",
+    falhaQualificadaPendenteEm: status === "invalida" ? null : undefined,
+    falhasQualificadas: status === "invalida" ? 0 : undefined
   };
 }
 
@@ -218,7 +274,7 @@ function registrarSucessoIntegracao(
   return executarSaudeFailOpen("registrar_sucesso", () => {
     const mp = normalizarMarketplace(marketplace);
     const integracaoId = normalizarIntegracaoId(detalhes?.integracaoId || "");
-    limparAlertaIntegracao(clienteId, mp);
+    limparAlertaIntegracao(clienteId, mp, integracaoId ? { integracaoId, apenasAlerta: true } : {});
     registrarSaudeIntegracao(clienteId, mp, {
       status: "saudavel",
       codigo: detalhes?.codigo || "sucesso_pipeline",
@@ -243,13 +299,16 @@ function registrarAlertaIntegracao(
   return executarSaudeFailOpen("registrar_alerta", () => {
     const alertas = listarAlertasIntegracoes(clienteId);
     const mp = normalizarMarketplace(marketplace);
+    const integracaoId = normalizarIntegracaoId(alerta.integracaoId || alerta.detalhes?.integracaoId || "");
 
     const novaLista = alertas.filter(
-      item => normalizarMarketplace(item.marketplace) !== mp
+      item => normalizarMarketplace(item.marketplace) !== mp ||
+        normalizarIntegracaoId(item.integracaoId || "") !== integracaoId
     );
 
     novaLista.push({
       marketplace: mp,
+      ...(integracaoId ? { integracaoId } : {}),
       tipo: alerta.tipo || "desconhecido",
       status: alerta.status || "atencao",
       mensagem: alerta.mensagem || "",
@@ -262,7 +321,8 @@ function registrarAlertaIntegracao(
       status: alerta.tipo || alerta.status || "desconhecido",
       codigo: alerta.tipo || alerta.status || "desconhecido",
       mensagem: alerta.mensagem || "",
-      detalhes: alerta.detalhes || {}
+      detalhes: alerta.detalhes || {},
+      ...(integracaoId ? { integracaoId } : {})
     }, "sensor");
 
     return novaLista;
@@ -271,22 +331,33 @@ function registrarAlertaIntegracao(
 
 function limparAlertaIntegracao(
   clienteId = "admin",
-  marketplace = ""
+  marketplace = "",
+  opcoes = {}
 ) {
   return executarSaudeFailOpen("limpar_alerta", () => {
     const alertas = listarAlertasIntegracoes(clienteId);
     const mp = normalizarMarketplace(marketplace);
+    const integracaoId = normalizarIntegracaoId(opcoes.integracaoId || "");
 
     const novaLista = alertas.filter(
-      item => normalizarMarketplace(item.marketplace) !== mp
+      item => normalizarMarketplace(item.marketplace) !== mp ||
+        (integracaoId && normalizarIntegracaoId(item.integracaoId || "") !== integracaoId)
     );
 
     writeClienteJson(clienteId, ARQUIVO, novaLista);
+    if (opcoes.apenasAlerta) return novaLista;
+
+    const anterior = obterSaudeIntegracao(clienteId, mp, integracaoId);
+    if (anterior?.status === "saudavel" && anterior.ultimaProvaPositivaEm) {
+      return novaLista;
+    }
+
     registrarSaudeIntegracao(clienteId, mp, {
       status: "desconhecida",
       codigo: "alerta_limpo_sem_prova",
       mensagem: "Saude da integracao desconhecida",
-      origem: "sensor"
+      origem: "sensor",
+      ...(integracaoId ? { integracaoId } : {})
     });
 
     return novaLista;

@@ -21,14 +21,22 @@ function criarGerarLinkAmazon({
       return "";
     }
 
+    let linkComercial = "";
     try {
       const u = new URL(linkBase);
       u.searchParams.set("tag", trackingId);
-      limparAlertaIntegracao(clienteId, "amazon");
-      return u.toString();
+      linkComercial = u.toString();
     } catch {
       return "";
     }
+
+    try {
+      limparAlertaIntegracao?.(clienteId, "amazon");
+    } catch {
+      // Saude das integracoes nunca interfere no link comercial.
+    }
+
+    return linkComercial;
   };
 }
 

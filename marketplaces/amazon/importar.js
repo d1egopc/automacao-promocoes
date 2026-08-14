@@ -10,7 +10,9 @@ function criarImportarAmazon(deps = {}) {
     gerarLinkOptimus,
     extrairCuponsAmazonDoHtml,
     detectarAvisoCupomAmazon,
-    escolherCupomParaOfertaAmazon
+    escolherCupomParaOfertaAmazon,
+    registrarSucessoIntegracao,
+    registrarAlertaIntegracao
   } = deps;
 
   return async function importarAmazon(url, config = {}) {
@@ -35,12 +37,40 @@ function criarImportarAmazon(deps = {}) {
     const html = await response.text();
     const jsonLd = extrairJsonLd(html);
     const contextoEngine = config.contextoEngine || {};
+    const clienteIdSaude = contextoEngine.clienteId || config.clienteId || "";
     const temCaptchaAuditoria = /captcha|captchacharacters|validateCaptcha/i.test(html);
     const temRobotCheckAuditoria = /robot check|automated access|api-services-support@amazon|sorry[^<]{0,80}robot/i.test(html);
     const temProductTitleAuditoria = /id=["']productTitle["']/i.test(html);
     const temOgTitleAuditoria = Boolean(extrairMeta(html, "og:title"));
     const temOgImageAuditoria = Boolean(extrairMeta(html, "og:image"));
     const temDynamicImageAuditoria = /data-a-dynamic-image=["'][^"']+["']/i.test(html);
+
+    try {
+      const urlFinal = response.url || url;
+      const loginInequivoco = /\/ap\/signin|sign-in|signin|login/i.test(String(urlFinal || "")) ||
+        /iniciar sess/i.test(html);
+      const statusHttp = Number(response.status);
+      const falhaAuthInequivoca = loginInequivoco ||
+        (!temCaptchaAuditoria && !temRobotCheckAuditoria && [401, 419].includes(statusHttp)) ||
+        (!temCaptchaAuditoria && !temRobotCheckAuditoria && statusHttp === 403 &&
+          /cookie expirad|sess[aã]o expirada|credencial|invalid credentials|unauthorized|forbidden|fa[cç]a login|entre na sua conta/i.test(html));
+      if (clienteIdSaude && cookies && response.ok && !temCaptchaAuditoria && !temRobotCheckAuditoria &&
+        (temProductTitleAuditoria || Boolean(jsonLd) || temOgTitleAuditoria)) {
+        registrarSucessoIntegracao?.(clienteIdSaude, "amazon", {
+          codigo: "cookie_valido",
+          origem: "importer_amazon"
+        });
+      } else if (clienteIdSaude && cookies && falhaAuthInequivoca) {
+        registrarAlertaIntegracao?.(clienteIdSaude, "amazon", {
+          tipo: "cookie_expirado",
+          status: "atencao",
+          mensagem: "Cookies Amazon expirados ou invalidos.",
+          detalhes: { httpStatus: response.status, motivo: loginInequivoco ? "login" : "http_auth" }
+        });
+      }
+    } catch {
+      // Saude das integracoes nunca interfere na importacao comercial.
+    }
 
     function limparHtml(texto) {
       if (!texto) return "";
@@ -535,7 +565,5 @@ const linkFinal = usarLinksOptimus
 module.exports = {
   criarImportarAmazon
 };
-
-
 
 

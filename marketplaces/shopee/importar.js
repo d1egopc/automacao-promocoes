@@ -172,7 +172,8 @@ function criarImportarShopee(deps = {}) {
     limparPreco,
     htmlDecode,
     extrairMeta,
-    corrigirImagemUrl
+    corrigirImagemUrl,
+    registrarSucessoIntegracao
   } = deps;
 
 return async function importarShopee(url, config) {
@@ -181,6 +182,21 @@ return async function importarShopee(url, config) {
   }
 
   const { appId, secret } = config.credenciais || {};
+  const clienteIdSaude = config?.contextoEngine?.clienteId || config?.clienteId || "";
+
+  function registrarSucessoShopeeFailOpen(detalhes = {}) {
+    try {
+      if (clienteIdSaude && typeof registrarSucessoIntegracao === "function") {
+        registrarSucessoIntegracao(clienteIdSaude, "shopee", {
+          codigo: "api_valida",
+          origem: "importer_shopee",
+          ...detalhes
+        });
+      }
+    } catch {
+      // Saude das integracoes nunca interfere na importacao comercial.
+    }
+  }
 
   function linkCurtoShopee(link = "") {
     try {
@@ -1103,6 +1119,13 @@ logPrecoOrigemShopee({
     origemImagem: origemImagemApi,
     imagemPreview: String(corrigirImagemUrl(imagem) || imagem || "").slice(0, 140)
   }));
+
+  if (produto?.offerLink || produto?.productLink) {
+    registrarSucessoShopeeFailOpen({
+      itemId: String(ids.itemId || produto?.itemId || ""),
+      shopId: String(ids.shopId || produto?.shopId || "")
+    });
+  }
 
   return {
     marketplace: "shopee",
