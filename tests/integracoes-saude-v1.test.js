@@ -187,9 +187,14 @@ async function testeShopee() {
 
 async function testeAliExpress() {
   const configAli = {
-    credenciais: { appKey: "app", secret: "secret", trackingId: "track" }
+    credenciais: {
+      appKey: "app",
+      secret: "secret",
+      trackingId: "track",
+      urlTeste: "https://www.aliexpress.com/item/1005009999999999.html"
+    }
   };
-  mockFetchSequencial([
+  const chamadasOk = mockFetchSequencial([
     resposta({
       json: {
         aliexpress_affiliate_link_generate_response: {
@@ -207,6 +212,10 @@ async function testeAliExpress() {
   const ok = await testarIntegracaoMarketplace("workspace_a", "aliexpress", configAli);
   assert.strictEqual(ok.saude.status, "saudavel");
   assert.strictEqual(ok.detalhes.promocaoGerada, true);
+  assert.strictEqual(
+    new URLSearchParams(String(chamadasOk[0].opcoes.body)).get("source_values"),
+    "https://www.aliexpress.com/item/1005009999999999.html"
+  );
   const fingerprintAli = credencialFingerprintIntegracao("aliexpress", configAli);
   registrarResultadoSaudeIntegracao("workspace_aliexpress_teste", "aliexpress", {
     ...ok,
@@ -227,6 +236,53 @@ async function testeAliExpress() {
   ]);
   const invalida = await testarIntegracaoMarketplace("workspace_a", "aliexpress", configAli);
   assert.strictEqual(invalida.saude.status, "invalida");
+
+  const chamadasUrlInvalida = mockFetchSequencial([]);
+  const inconclusiva = await testarIntegracaoMarketplace("workspace_a", "aliexpress", {
+    credenciais: {
+      appKey: "app",
+      secret: "secret",
+      trackingId: "track",
+      urlTeste: "https://www.aliexpress.com/"
+    },
+    queryEngine: async () => ({ ok: true, resultado: { rows: [] } })
+  });
+  assert.strictEqual(inconclusiva.saude.status, "desconhecida");
+  assert.strictEqual(inconclusiva.status, "falha_teste");
+  assert.strictEqual(inconclusiva.detalhes.motivo, "url_prova_aliexpress_indisponivel");
+  assert.strictEqual(chamadasUrlInvalida.length, 0);
+
+  const chamadasRecente = mockFetchSequencial([
+    resposta({
+      json: {
+        aliexpress_affiliate_link_generate_response: {
+          resp_result: {
+            result: {
+              promotion_links: {
+                promotion_link: [{ promotion_link: "https://s.click.aliexpress.com/e/_recente" }]
+              }
+            }
+          }
+        }
+      }
+    })
+  ]);
+  const recente = await testarIntegracaoMarketplace("workspace_a", "aliexpress", {
+    credenciais: { appKey: "app", secret: "secret", trackingId: "track" },
+    queryEngine: async () => ({
+      ok: true,
+      resultado: {
+        rows: [
+          { url_original: "https://a.aliexpress.com/_c3yGqeR9" }
+        ]
+      }
+    })
+  });
+  assert.strictEqual(recente.saude.status, "saudavel");
+  assert.strictEqual(
+    new URLSearchParams(String(chamadasRecente[0].opcoes.body)).get("source_values"),
+    "https://a.aliexpress.com/_c3yGqeR9"
+  );
 }
 
 async function testeAwinKabum() {

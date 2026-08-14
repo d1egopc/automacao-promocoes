@@ -26,7 +26,8 @@ MENSAGENS.teste_magalu_nao_disponivel = "Teste real Magalu ainda nao disponivel.
 MENSAGENS.programa_invalido = "Programa de afiliado invalido ou indisponivel.";
 
 const TIMEOUT_TESTE_MS = Number(process.env.OPTIMUS_INTEGRACOES_TEST_TIMEOUT_MS || 12000);
-const ALIEXPRESS_HEALTHCHECK_URL_FALLBACK = "https://www.aliexpress.com/item/1005006871288989.html";
+const ALIEXPRESS_ITEM_URL_RE = /^https?:\/\/(?:[\w-]+\.)?aliexpress\.[\w.]+\/item\/\d+\.html/i;
+const ALIEXPRESS_SHORT_URL_RE = /^https?:\/\/a\.aliexpress\.com\/_[a-z0-9]+/i;
 
 function normalizarMarketplace(marketplace = "") {
   const valor = String(marketplace || "")
@@ -109,7 +110,50 @@ function erroTransitorio(e = {}) {
   return e?.name === "AbortError" ? "timeout" : "erro_rede";
 }
 
-function origemUrlTesteAliExpress(config = {}) {
+function urlAliExpressValida(url = "") {
+  const valor = String(url || "").trim();
+  return ALIEXPRESS_ITEM_URL_RE.test(valor) || ALIEXPRESS_SHORT_URL_RE.test(valor);
+}
+
+async function obterUrlAliExpressRecenteObservada(opcoes = {}) {
+  const query = opcoes.queryEngine || (() => {
+    try {
+      return require("../modules/engine/database").queryEngine;
+    } catch {
+      return null;
+    }
+  })();
+
+  if (typeof query !== "function") return null;
+
+  const sql = `
+    SELECT url_original, url_expandida, url_normalizada
+      FROM engine_links
+     WHERE criado_em >= NOW() - INTERVAL '7 days'
+       AND (
+         LOWER(COALESCE(url_original, '')) LIKE '%aliexpress.%/item/%'
+         OR LOWER(COALESCE(url_expandida, '')) LIKE '%aliexpress.%/item/%'
+         OR LOWER(COALESCE(url_normalizada, '')) LIKE '%aliexpress.%/item/%'
+         OR LOWER(COALESCE(url_original, '')) LIKE 'https://a.aliexpress.com/_%'
+         OR LOWER(COALESCE(url_expandida, '')) LIKE 'https://a.aliexpress.com/_%'
+         OR LOWER(COALESCE(url_normalizada, '')) LIKE 'https://a.aliexpress.com/_%'
+       )
+     ORDER BY criado_em DESC, id DESC
+     LIMIT 20`;
+
+  const resultado = await query(sql);
+  if (!resultado?.ok) return null;
+
+  for (const row of resultado.resultado?.rows || []) {
+    const candidatos = [row.url_original, row.url_expandida, row.url_normalizada];
+    const url = candidatos.find(urlAliExpressValida);
+    if (url) return String(url).trim();
+  }
+
+  return null;
+}
+
+async function origemUrlTesteAliExpress(config = {}) {
   const c = credenciais(config);
   const configurada = valorTexto(c, [
     "urlTeste",
@@ -119,12 +163,18 @@ function origemUrlTesteAliExpress(config = {}) {
     "produtoTesteUrl",
     "sourceValueTeste"
   ]);
-  if (configurada) return { url: configurada, origem: "configuracao" };
+  if (configurada && urlAliExpressValida(configurada)) return { url: configurada, origem: "configuracao" };
 
   const env = String(process.env.ALIEXPRESS_HEALTHCHECK_URL || process.env.ALIEXPRESS_URL_TESTE || "").trim();
-  if (env) return { url: env, origem: "env" };
+  if (env && urlAliExpressValida(env)) return { url: env, origem: "env" };
 
-  return { url: ALIEXPRESS_HEALTHCHECK_URL_FALLBACK, origem: "fallback_homologado" };
+  const recente = await obterUrlAliExpressRecenteObservada(config);
+  if (recente) return { url: recente, origem: "engine_links_recente" };
+
+  return {
+    url: "",
+    origem: configurada ? "configuracao_invalida" : env ? "env_invalida" : "sem_url_real_observada"
+  };
 }
 
 function diagnosticoUrlAliExpress(url = "") {
@@ -725,7 +775,14 @@ async function testarAliExpress(config = {}) {
   }
 
   try {
-    const urlProva = origemUrlTesteAliExpress(config);
+    const urlProva = await origemUrlTesteAliExpress(config);
+    if (!urlProva.url) {
+      return resultado("aliexpress", "falha_teste", {
+        motivo: "url_prova_aliexpress_indisponivel",
+        provaOrigem: urlProva.origem
+      }, false);
+    }
+
     const diagnosticoUrl = diagnosticoUrlAliExpress(urlProva.url);
     const params = {
       method: "aliexpress.affiliate.link.generate",
@@ -785,6 +842,7 @@ async function testarAliExpress(config = {}) {
     if (!/^https?:\/\//i.test(String(link || ""))) {
       return resultado("aliexpress", "falha_teste", {
         motivo: "promotion_link_nao_retornado",
+        codigoApi: String(codigoApi || ""),
         provaOrigem: urlProva.origem,
         provaHost: diagnosticoUrl.host,
         provaPath: diagnosticoUrl.path
