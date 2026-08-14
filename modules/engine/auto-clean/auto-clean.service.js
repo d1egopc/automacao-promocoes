@@ -18,11 +18,13 @@ const LOTE_LIMITE_PADRAO = 100;
 const LOTES_DB_POR_CICLO_PADRAO = 3;
 const WORKSPACES_FILA_POR_CICLO_PADRAO = 5;
 const AUTO_CLEAN_JOBS_LOCK_ID = 902260734;
+const AUTO_CLEAN_OFERTAS_LOCK_ID = 902260735;
 
 const TTL_PADRAO = Object.freeze({
   flowNaoAceitaMs: 24 * 60 * 60 * 1000,
   filaEnviadaMs: 24 * 60 * 60 * 1000,
   filaTerminalMs: 7 * 24 * 60 * 60 * 1000,
+  ofertasOperacionaisMs: 12 * 60 * 60 * 1000,
   jobsConcluidosMs: 12 * 60 * 60 * 1000,
   jobsAtivosLeaseMs: LEASE_JOBS_ATIVOS_PADRAO_MINUTOS * 60 * 1000,
   eventosBrutosMs: 24 * 60 * 60 * 1000,
@@ -39,6 +41,40 @@ const STATUS_FILA_ENVIADO = filaHistoricoPolicy.STATUS_ENVIADO;
 const STATUS_FILA_TERMINAL = filaHistoricoPolicy.STATUS_FINAL;
 
 const STATUS_OFERTA_ATIVO = new Set(["importada", "oferta_criada", "distribuindo", "fila"]);
+const STATUS_OFERTA_TERMINAL_AUTO_CLEAN = new Set([
+  "flow_nao_aceita",
+  "retida_v2",
+  "erro",
+  "erro_final",
+  "erro_distribuicao",
+  "expirada",
+  "expirado",
+  "expirada_operacional",
+  "expirado_operacional",
+  "enviado",
+  "enviada",
+  "integracao_ausente",
+  "marketplace_bloqueado",
+  "marketplace_desabilitado",
+  "categoria_incompativel",
+  "sem_destino",
+  "sem_destino_compativel",
+  "automacao_desligada",
+  "definitivo_operacional"
+]);
+const MOTIVOS_OFERTA_RETIDA_TERMINAL_AUTO_CLEAN = new Set([
+  "retida_terminal",
+  "definitivo_operacional",
+  "marketplace_bloqueado",
+  "marketplace_desabilitado",
+  "categoria_incompativel",
+  "sem_destino",
+  "sem_destino_compativel",
+  "automacao_desligada",
+  "integracao_ausente",
+  "erro_final",
+  "expirada_operacional"
+]);
 const STATUS_JOB_ATIVO = new Set([
   "pendente",
   "diagnosticado",
@@ -83,6 +119,26 @@ const STATUS_JOB_CONCLUIDO_LISTA = Array.from(STATUS_JOB_CONCLUIDO);
 const STATUS_JOB_ATIVO_SQL = Array.from(STATUS_JOB_ATIVO)
   .map(status => `'${status.replace(/'/g, "''")}'`)
   .join(",");
+const STATUS_OFERTA_TERMINAL_SQL = Array.from(STATUS_OFERTA_TERMINAL_AUTO_CLEAN)
+  .map(status => `'${status.replace(/'/g, "''")}'`)
+  .join(",");
+const MOTIVOS_OFERTA_RETIDA_TERMINAL_SQL = Array.from(MOTIVOS_OFERTA_RETIDA_TERMINAL_AUTO_CLEAN)
+  .map(motivo => `'${motivo.replace(/'/g, "''")}'`)
+  .join(",");
+const CONDICAO_OFERTA_TERMINAL_SQL = `
+       (
+         o.status IN (${STATUS_OFERTA_TERMINAL_SQL})
+         OR (
+           o.status IN ('retida','retido')
+           AND (
+             COALESCE(o.metadata->>'retidaTerminal', 'false') = 'true'
+             OR COALESCE(o.metadata->>'definitivoOperacional', 'false') = 'true'
+             OR COALESCE(o.metadata->'integridadeComercial'->>'retidaTerminal', 'false') = 'true'
+             OR COALESCE(o.metadata->'integridadeComercial'->>'definitivoOperacional', 'false') = 'true'
+             OR LOWER(COALESCE(o.motivo_status, '')) IN (${MOTIVOS_OFERTA_RETIDA_TERMINAL_SQL})
+           )
+         )
+       )`;
 
 const MATRIZ_STATUS_AUTO_CLEAN = Object.freeze({
   oferta_criada: Object.freeze({
@@ -296,8 +352,7 @@ function ttlPorRegistro(registro = {}, politica = criarPoliticaRetencao()) {
   if (tipo === "fila_json" && status === "flow_nao_aceita") return ttl.flowNaoAceitaMs;
   if (tipo === "fila_json" && STATUS_FILA_ENVIADO.has(status)) return ttl.filaEnviadaMs;
   if (tipo === "fila_json" && STATUS_FILA_TERMINAL.has(status)) return ttl.filaTerminalMs;
-  if (tipo === "engine_ofertas" && status === "flow_nao_aceita") return ttl.flowNaoAceitaMs;
-  if (tipo === "engine_ofertas" && ["retida", "retida_v2", "erro_final", "erro", "expirada", "enviado"].includes(status)) return ttl.filaTerminalMs;
+  if (tipo === "engine_ofertas" && (STATUS_OFERTA_TERMINAL_AUTO_CLEAN.has(status) || registro.ofertaTerminalConfirmada === true)) return ttl.ofertasOperacionaisMs;
   if (tipo === "engine_jobs_cliente" && MATRIZ_STATUS_AUTO_CLEAN[status]?.removivelAposHoras) return Number(MATRIZ_STATUS_AUTO_CLEAN[status].removivelAposHoras) * 60 * 60 * 1000;
   if (tipo === "engine_jobs_cliente" && STATUS_JOB_CONCLUIDO.has(status)) return ttl.jobsConcluidosMs;
   if (tipo === "engine_eventos_brutos" || tipo === "engine_links") return ttl.eventosBrutosMs;
@@ -639,7 +694,8 @@ async function consultarOrigemDb(nome, sql, params, opcoes) {
       bytesEstimados: Number(row.bytes_estimados || 0),
       temReferenciaFilaViva: row.tem_referencia_fila_viva === true,
       temJobAtivo: row.tem_job_ativo === true,
-      temOfertaAtiva: row.tem_oferta_ativa === true
+      temOfertaAtiva: row.tem_oferta_ativa === true,
+      ofertaTerminalConfirmada: row.oferta_terminal_confirmada === true
     }, opcoes));
   }
   return criarResumoOrigem(nome, nome, registros, limite);
@@ -654,13 +710,21 @@ async function inventariarPostgres(opcoes = {}) {
 
   const origens = [];
   origens.push(await consultarOrigemDb("engine_ofertas", `
-    SELECT o.id, o.status, o.atualizada_em AS referencia_temporal, pg_column_size(o.*)::bigint AS bytes_estimados,
-           false AS tem_referencia_fila_viva, false AS tem_job_ativo, false AS tem_oferta_ativa
+    SELECT o.id, o.status, COALESCE(o.atualizada_em, o.criada_em) AS referencia_temporal, pg_column_size(o.*)::bigint AS bytes_estimados,
+           false AS tem_referencia_fila_viva,
+           EXISTS (
+             SELECT 1
+               FROM engine_jobs_cliente j
+              WHERE (j.oferta_id = o.id OR j.evento_id = o.evento_id)
+                AND j.status IN (${STATUS_JOB_ATIVO_SQL})
+           ) AS tem_job_ativo,
+           false AS tem_oferta_ativa,
+           ${CONDICAO_OFERTA_TERMINAL_SQL} AS oferta_terminal_confirmada
       FROM engine_ofertas o
-     WHERE o.status IN ('flow_nao_aceita','retida','retida_v2','erro','erro_final','expirada','enviado')
-       AND o.atualizada_em < $1::timestamptz
-     ORDER BY o.atualizada_em ASC
-     LIMIT $2`, [cutoff(Math.min(ttl.flowNaoAceitaMs, ttl.filaTerminalMs)), limite], opcoes));
+     WHERE ${CONDICAO_OFERTA_TERMINAL_SQL}
+       AND COALESCE(o.atualizada_em, o.criada_em) < $1::timestamptz
+     ORDER BY COALESCE(o.atualizada_em, o.criada_em) ASC
+     LIMIT $2`, [cutoff(ttl.ofertasOperacionaisMs), limite], opcoes));
 
   origens.push(await consultarOrigemDb("engine_jobs_cliente", `
     SELECT j.id, j.status, j.atualizado_em AS referencia_temporal, pg_column_size(j.*)::bigint AS bytes_estimados,
@@ -840,6 +904,116 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
       motivo: "auto_clean_jobs_execute_falhou",
       erroTipo: erro?.code || erro?.name || "erro",
       aplicouMudancas: resumo.jobsRemovidos > 0,
+      espacoLogicoLiberado: bytesLegiveis(resumo.espacoLogicoLiberadoBytes)
+    };
+  }
+}
+
+async function executarBatchOfertasPostgresAutoClean(client, { loteLimite, horasMinimas }) {
+  const resultado = await client.query(
+    `WITH candidatos AS (
+       SELECT o.id
+         FROM engine_ofertas o
+        WHERE ${CONDICAO_OFERTA_TERMINAL_SQL}
+          AND COALESCE(o.atualizada_em, o.criada_em) IS NOT NULL
+          AND COALESCE(o.atualizada_em, o.criada_em) < NOW() - ($1::int * INTERVAL '1 hour')
+          AND NOT EXISTS (
+            SELECT 1
+              FROM engine_jobs_cliente j
+             WHERE (j.oferta_id = o.id OR j.evento_id = o.evento_id)
+               AND j.status = ANY($2::text[])
+          )
+        ORDER BY COALESCE(o.atualizada_em, o.criada_em) ASC, o.id ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT $3
+     ), ofertas_removidas AS (
+       DELETE FROM engine_ofertas o
+        USING candidatos c
+        WHERE o.id = c.id
+          AND ${CONDICAO_OFERTA_TERMINAL_SQL}
+          AND COALESCE(o.atualizada_em, o.criada_em) IS NOT NULL
+          AND COALESCE(o.atualizada_em, o.criada_em) < NOW() - ($1::int * INTERVAL '1 hour')
+          AND NOT EXISTS (
+            SELECT 1
+              FROM engine_jobs_cliente j
+             WHERE (j.oferta_id = o.id OR j.evento_id = o.evento_id)
+               AND j.status = ANY($2::text[])
+          )
+        RETURNING o.id, o.status, pg_column_size(o.*)::bigint AS bytes
+     )
+     SELECT
+       (SELECT COUNT(*)::int FROM ofertas_removidas) AS ofertas_removidas,
+       COALESCE((SELECT SUM(bytes) FROM ofertas_removidas), 0)::bigint AS bytes_ofertas`,
+    [horasMinimas, Array.from(STATUS_JOB_ATIVO), loteLimite]
+  );
+
+  return resultado.rows[0] || {};
+}
+
+async function executarOfertasPostgresAutoClean(opcoes = {}) {
+  const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
+  const loteLimite = politica.loteLimite;
+  const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
+  const horasMinimas = Math.max(12, limitarInteiro(opcoes.horasMinimasOfertas, 12, 12, 168));
+  const pool = opcoes.pool || (typeof opcoes.getEnginePool === "function" ? opcoes.getEnginePool() : getEnginePool());
+  const resumo = {
+    origem: "postgres_ofertas",
+    tipoRegistro: "engine_ofertas",
+    modo: "execute",
+    lotes: 0,
+    limiteLotesPorCiclo,
+    loteLimite,
+    horasMinimas,
+    ofertasRemovidas: 0,
+    espacoLogicoLiberadoBytes: 0,
+    aplicouMudancas: false,
+    vacuumExecutado: false
+  };
+
+  if (!pool) {
+    return { ...resumo, ok: false, failOpen: true, motivo: "banco_indisponivel" };
+  }
+
+  try {
+    for (let lote = 0; lote < limiteLotesPorCiclo; lote += 1) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const lock = await client.query("SELECT pg_try_advisory_xact_lock($1) AS locked", [AUTO_CLEAN_OFERTAS_LOCK_ID]);
+        if (lock.rows[0]?.locked !== true) {
+          await client.query("ROLLBACK");
+          return { ...resumo, ok: false, failOpen: true, motivo: "auto_clean_ofertas_lock_ocupado" };
+        }
+
+        const batch = await executarBatchOfertasPostgresAutoClean(client, { loteLimite, horasMinimas });
+        await client.query("COMMIT");
+
+        const ofertasRemovidas = Number(batch.ofertas_removidas || 0);
+        if (!ofertasRemovidas) break;
+
+        resumo.lotes += 1;
+        resumo.ofertasRemovidas += ofertasRemovidas;
+        resumo.espacoLogicoLiberadoBytes += Number(batch.bytes_ofertas || 0);
+      } catch (erro) {
+        try { await client.query("ROLLBACK"); } catch (_) {}
+        throw erro;
+      } finally {
+        client.release();
+      }
+    }
+
+    resumo.ok = true;
+    resumo.aplicouMudancas = resumo.ofertasRemovidas > 0;
+    resumo.espacoLogicoLiberado = bytesLegiveis(resumo.espacoLogicoLiberadoBytes);
+    return resumo;
+  } catch (erro) {
+    return {
+      ...resumo,
+      ok: false,
+      failOpen: true,
+      motivo: "auto_clean_ofertas_execute_falhou",
+      erroTipo: erro?.code || erro?.name || "erro",
+      aplicouMudancas: resumo.ofertasRemovidas > 0,
       espacoLogicoLiberado: bytesLegiveis(resumo.espacoLogicoLiberadoBytes)
     };
   }
@@ -1055,6 +1229,7 @@ async function executarAutoCleanExecute(opcoes = {}) {
 
   if (opcoes.incluirPostgres !== false) {
     etapas.push(await executarJobsPostgresAutoClean({ ...opcoes, politica }));
+    etapas.push(await executarOfertasPostgresAutoClean({ ...opcoes, politica }));
   }
   if (opcoes.incluirArquivos !== false) {
     etapas.push(executarFilaJsonAutoClean({ ...opcoes, politica }));
@@ -1068,6 +1243,7 @@ async function executarAutoCleanExecute(opcoes = {}) {
     totalOrigens: etapas.length,
     aplicouMudancas: etapas.some(etapa => etapa.aplicouMudancas === true),
     jobsRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.jobsRemovidos || 0), 0),
+    ofertasRemovidas: etapas.reduce((soma, etapa) => soma + Number(etapa.ofertasRemovidas || 0), 0),
     jobsExpiradosLease: etapas.reduce((soma, etapa) => soma + Number(etapa.jobsExpiradosLease || 0), 0),
     processandoExpiradosLease: etapas.reduce((soma, etapa) => soma + Number(etapa.processandoExpiradosLease || 0), 0),
     importandoExpiradosLease: etapas.reduce((soma, etapa) => soma + Number(etapa.importandoExpiradosLease || 0), 0),
@@ -1178,6 +1354,7 @@ module.exports = {
   executarAutoCleanShadowSeguro,
   executarAutoCleanExecute,
   executarJobsPostgresAutoClean,
+  executarOfertasPostgresAutoClean,
   executarFilaJsonAutoClean,
   executarArquivosAutoClean,
   executarCompactacaoFilaWorkspace,
