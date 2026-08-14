@@ -3238,8 +3238,8 @@ const importarAmazon = criarImportarAmazon({
   extrairCuponsAmazonDoHtml,
   detectarAvisoCupomAmazon,
   escolherCupomParaOfertaAmazon,
-  registrarSucessoIntegracao,
-  registrarAlertaIntegracao
+  registrarSucessoIntegracao: (...args) => registrarSucessoIntegracao(...args),
+  registrarAlertaIntegracao: (...args) => registrarAlertaIntegracao(...args)
 });
 
 const importarShopee = criarImportarShopee({
@@ -3247,7 +3247,7 @@ const importarShopee = criarImportarShopee({
   htmlDecode,
   extrairMeta,
   corrigirImagemUrl,
-  registrarSucessoIntegracao
+  registrarSucessoIntegracao: (...args) => registrarSucessoIntegracao(...args)
 });
 
 // ================= FILTROS OFERTA JA EXISTE =================
