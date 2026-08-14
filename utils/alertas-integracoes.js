@@ -292,6 +292,60 @@ function listarSaudeIntegracoesAtuais(clienteId = "admin", integracoesCliente = 
     });
 }
 
+function agregarSaudesGranularesParaCard(marketplace = "", saudes = []) {
+  const mp = normalizarMarketplace(marketplace);
+  const itens = (Array.isArray(saudes) ? saudes : [])
+    .filter(item => normalizarMarketplace(item?.marketplace) === mp);
+  const granulares = itens.filter(item => normalizarIntegracaoId(item?.integracaoId || ""));
+  const base = itens.find(item => !normalizarIntegracaoId(item?.integracaoId || ""));
+  const alvos = granulares.length ? granulares : (base ? [base] : []);
+
+  if (!alvos.length) return null;
+
+  const invalida = alvos.find(item => item?.status === "invalida");
+  if (invalida) {
+    return {
+      ...invalida,
+      marketplace: mp,
+      integracaoId: "",
+      codigo: invalida.codigo || "programa_invalido"
+    };
+  }
+
+  if (alvos.every(item => item?.status === "saudavel")) {
+    const saudavel = alvos[0] || {};
+    return {
+      ...saudavel,
+      marketplace: mp,
+      integracaoId: "",
+      status: "saudavel",
+      codigo: saudavel.codigo || "ok"
+    };
+  }
+
+  const desconhecida = alvos.find(item => item?.status === "desconhecida") || alvos[0] || {};
+  return {
+    ...desconhecida,
+    marketplace: mp,
+    integracaoId: "",
+    status: "desconhecida",
+    codigo: desconhecida.codigo || "credencial_atual_sem_prova"
+  };
+}
+
+function obterSaudeIntegracaoCardAtual(clienteId = "admin", marketplace = "", config = {}, integracoesCliente = null) {
+  const mp = normalizarMarketplace(marketplace);
+  if (mp === "awin" || mp === "kabum") {
+    const baseIntegracoes = integracoesCliente || {
+      [mp]: config,
+      ...(mp === "kabum" ? { awin: config } : {})
+    };
+    const agregada = agregarSaudesGranularesParaCard(mp, listarSaudeIntegracoesAtuais(clienteId, baseIntegracoes));
+    if (agregada) return agregada;
+  }
+  return obterSaudeIntegracaoAtual(clienteId, mp, config);
+}
+
 function salvarSaudeIntegracoes(clienteId = "admin", lista = []) {
   writeClienteJson(clienteId, ARQUIVO_SAUDE, Array.isArray(lista) ? lista : []);
   return lista;
@@ -580,6 +634,7 @@ module.exports = {
   listarSaudeIntegracoes,
   obterSaudeIntegracao,
   obterSaudeIntegracaoAtual,
+  obterSaudeIntegracaoCardAtual,
   listarSaudeIntegracoesAtuais,
   registrarSaudeIntegracao,
   registrarResultadoSaudeIntegracao,

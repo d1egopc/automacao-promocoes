@@ -18044,6 +18044,7 @@ const {
   listarSaudeIntegracoes,
   obterSaudeIntegracao,
   obterSaudeIntegracaoAtual,
+  obterSaudeIntegracaoCardAtual,
   listarSaudeIntegracoesAtuais,
   registrarResultadoSaudeIntegracao,
   registrarSucessoIntegracao,
@@ -19028,7 +19029,12 @@ app.get("/integracoes", (req, res) => {
           : "incompleto",
         camposConfigurados,
         credenciais: credenciaisResposta,
-        saude: obterSaudeIntegracaoAtual(clienteId, marketplace, config),
+        saude: obterSaudeIntegracaoCardAtual(
+          clienteId,
+          marketplace,
+          config,
+          integracoesPorCliente?.[clienteId] || {}
+        ),
         atualizadoEm: config?.atualizadoEm || null
       };
     }

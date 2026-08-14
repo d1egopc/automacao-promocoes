@@ -26,6 +26,7 @@ MENSAGENS.teste_magalu_nao_disponivel = "Teste real Magalu ainda nao disponivel.
 MENSAGENS.programa_invalido = "Programa de afiliado invalido ou indisponivel.";
 
 const TIMEOUT_TESTE_MS = Number(process.env.OPTIMUS_INTEGRACOES_TEST_TIMEOUT_MS || 12000);
+const ALIEXPRESS_HEALTHCHECK_URL_FALLBACK = "https://www.aliexpress.com/item/1005006871288989.html";
 
 function normalizarMarketplace(marketplace = "") {
   const valor = String(marketplace || "")
@@ -106,6 +107,39 @@ async function fetchComTimeout(url, opcoes = {}, timeoutMs = TIMEOUT_TESTE_MS) {
 
 function erroTransitorio(e = {}) {
   return e?.name === "AbortError" ? "timeout" : "erro_rede";
+}
+
+function origemUrlTesteAliExpress(config = {}) {
+  const c = credenciais(config);
+  const configurada = valorTexto(c, [
+    "urlTeste",
+    "linkTeste",
+    "healthCheckUrl",
+    "urlProdutoTeste",
+    "produtoTesteUrl",
+    "sourceValueTeste"
+  ]);
+  if (configurada) return { url: configurada, origem: "configuracao" };
+
+  const env = String(process.env.ALIEXPRESS_HEALTHCHECK_URL || process.env.ALIEXPRESS_URL_TESTE || "").trim();
+  if (env) return { url: env, origem: "env" };
+
+  return { url: ALIEXPRESS_HEALTHCHECK_URL_FALLBACK, origem: "fallback_homologado" };
+}
+
+function diagnosticoUrlAliExpress(url = "") {
+  try {
+    const parsed = new URL(String(url || ""));
+    return {
+      host: parsed.hostname,
+      path: parsed.pathname
+    };
+  } catch {
+    return {
+      host: "url_invalida",
+      path: ""
+    };
+  }
 }
 
 function timestampGMT8() {
@@ -691,6 +725,8 @@ async function testarAliExpress(config = {}) {
   }
 
   try {
+    const urlProva = origemUrlTesteAliExpress(config);
+    const diagnosticoUrl = diagnosticoUrlAliExpress(urlProva.url);
     const params = {
       method: "aliexpress.affiliate.link.generate",
       app_key: appKey,
@@ -699,7 +735,7 @@ async function testarAliExpress(config = {}) {
       format: "json",
       v: "2.0",
       promotion_link_type: "0",
-      source_values: valorTexto(c, ["urlTeste", "linkTeste"]) || "https://www.aliexpress.com/item/1005006871288989.html",
+      source_values: urlProva.url,
       tracking_id: trackingId
     };
     params.sign = assinarAliExpress(params, secret);
@@ -721,14 +757,22 @@ async function testarAliExpress(config = {}) {
     if ([401, 403].includes(Number(response.status)) || /invalid|secret|signature|app.?key|permission|auth/i.test(`${codigoApi} ${mensagemApi}`)) {
       return resultado("aliexpress", "credencial_invalida", {
         httpStatus: response.status,
-        codigoApi: String(codigoApi || "")
+        codigoApi: String(codigoApi || ""),
+        motivo: "credencial_invalida",
+        provaOrigem: urlProva.origem,
+        provaHost: diagnosticoUrl.host,
+        provaPath: diagnosticoUrl.path
       }, false);
     }
 
     if ([429, 500, 502, 503, 504].includes(Number(response.status)) || !response.ok || erro) {
       return resultado("aliexpress", "falha_teste", {
         httpStatus: response.status,
-        codigoApi: String(codigoApi || "")
+        codigoApi: String(codigoApi || ""),
+        motivo: erro ? "api_retornou_erro" : "erro_transitorio_api",
+        provaOrigem: urlProva.origem,
+        provaHost: diagnosticoUrl.host,
+        provaPath: diagnosticoUrl.path
       }, false);
     }
 
@@ -739,10 +783,21 @@ async function testarAliExpress(config = {}) {
       "";
 
     if (!/^https?:\/\//i.test(String(link || ""))) {
-      return resultado("aliexpress", "falha_teste", { motivo: "promotion_link_nao_retornado" }, false);
+      return resultado("aliexpress", "falha_teste", {
+        motivo: "promotion_link_nao_retornado",
+        provaOrigem: urlProva.origem,
+        provaHost: diagnosticoUrl.host,
+        provaPath: diagnosticoUrl.path
+      }, false);
     }
 
-    return resultado("aliexpress", "ok", { httpStatus: response.status }, true);
+    return resultado("aliexpress", "ok", {
+      httpStatus: response.status,
+      provaOrigem: urlProva.origem,
+      provaHost: diagnosticoUrl.host,
+      provaPath: diagnosticoUrl.path,
+      promocaoGerada: true
+    }, true);
   } catch (e) {
     return resultado("aliexpress", "falha_teste", { motivo: erroTransitorio(e) }, false);
   }
