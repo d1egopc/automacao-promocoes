@@ -20,6 +20,7 @@ const WORKSPACES_FILA_POR_CICLO_PADRAO = 5;
 const AUTO_CLEAN_JOBS_LOCK_ID = 902260734;
 const AUTO_CLEAN_OFERTAS_LOCK_ID = 902260735;
 const AUTO_CLEAN_LINKS_LOCK_ID = 902260736;
+const AUTO_CLEAN_EVENTOS_BRUTOS_LOCK_ID = 902260737;
 
 const TTL_PADRAO = Object.freeze({
   flowNaoAceitaMs: 24 * 60 * 60 * 1000,
@@ -28,7 +29,7 @@ const TTL_PADRAO = Object.freeze({
   ofertasOperacionaisMs: 12 * 60 * 60 * 1000,
   jobsConcluidosMs: 12 * 60 * 60 * 1000,
   jobsAtivosLeaseMs: LEASE_JOBS_ATIVOS_PADRAO_MINUTOS * 60 * 1000,
-  eventosBrutosMs: 24 * 60 * 60 * 1000,
+  eventosBrutosMs: 12 * 60 * 60 * 1000,
   linksOperacionaisMs: 12 * 60 * 60 * 1000,
   processamentosMs: 24 * 60 * 60 * 1000,
   eventosComerciaisMs: 7 * 24 * 60 * 60 * 1000,
@@ -147,6 +148,12 @@ const CONDICAO_OFERTA_BLOQUEIA_LINK_SQL = cutoffSql => `
          OR COALESCE(o.atualizada_em, o.criada_em) >= ${cutoffSql}
          OR NOT (${CONDICAO_OFERTA_TERMINAL_SQL})
        )`;
+const CONDICAO_EVENTO_BRUTO_REMOVIVEL_SQL = cutoffSql => `
+       e.criado_em IS NOT NULL
+       AND e.criado_em < ${cutoffSql}
+       AND NOT EXISTS (SELECT 1 FROM engine_jobs_cliente j WHERE j.evento_id = e.id)
+       AND NOT EXISTS (SELECT 1 FROM engine_ofertas o WHERE o.evento_id = e.id)
+       AND NOT EXISTS (SELECT 1 FROM engine_links l WHERE l.evento_id = e.id)`;
 
 const MATRIZ_STATUS_AUTO_CLEAN = Object.freeze({
   oferta_criada: Object.freeze({
@@ -476,6 +483,9 @@ function sanitizarLogPayload(payload = {}) {
     "lotes",
     "limiteLotesPorCiclo",
     "jobsRemovidos",
+    "ofertasRemovidas",
+    "linksRemovidos",
+    "eventosBrutosRemovidos",
     "processamentosRemovidos",
     "eventosComerciaisRemovidos",
     "arquivosRemovidos",
@@ -749,11 +759,11 @@ async function inventariarPostgres(opcoes = {}) {
 
   origens.push(await consultarOrigemDb("engine_eventos_brutos", `
     SELECT e.id, 'evento_bruto' AS status, e.criado_em AS referencia_temporal, pg_column_size(e.*)::bigint AS bytes_estimados,
-           EXISTS (SELECT 1 FROM engine_jobs_cliente j WHERE j.evento_id = e.id AND j.status IN (${STATUS_JOB_ATIVO_SQL})) AS tem_job_ativo,
-           EXISTS (SELECT 1 FROM engine_ofertas o WHERE o.evento_id = e.id AND o.status IN ('importada','oferta_criada','distribuindo','fila')) AS tem_oferta_ativa,
+           false AS tem_job_ativo,
+           false AS tem_oferta_ativa,
            false AS tem_referencia_fila_viva
       FROM engine_eventos_brutos e
-     WHERE e.criado_em < $1::timestamptz
+     WHERE ${CONDICAO_EVENTO_BRUTO_REMOVIVEL_SQL("$1::timestamptz")}
      ORDER BY e.criado_em ASC
      LIMIT $2`, [cutoff(ttl.eventosBrutosMs), limite], opcoes));
 
@@ -1155,6 +1165,102 @@ async function executarLinksPostgresAutoClean(opcoes = {}) {
   }
 }
 
+async function executarBatchEventosBrutosPostgresAutoClean(client, { loteLimite, horasMinimas }) {
+  const cutoffSql = "NOW() - ($1::int * INTERVAL '1 hour')";
+  const condicaoEventoRemovivelSql = CONDICAO_EVENTO_BRUTO_REMOVIVEL_SQL(cutoffSql);
+  const resultado = await client.query(
+    `WITH candidatos AS (
+       SELECT e.id
+         FROM engine_eventos_brutos e
+        WHERE ${condicaoEventoRemovivelSql}
+        ORDER BY e.criado_em ASC, e.id ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT $2
+     ), eventos_brutos_removidos AS (
+       DELETE FROM engine_eventos_brutos e
+        USING candidatos c
+        WHERE e.id = c.id
+          AND ${condicaoEventoRemovivelSql}
+        RETURNING e.id, pg_column_size(e.*)::bigint AS bytes
+     )
+     SELECT
+       (SELECT COUNT(*)::int FROM eventos_brutos_removidos) AS eventos_brutos_removidos,
+       COALESCE((SELECT SUM(bytes) FROM eventos_brutos_removidos), 0)::bigint AS bytes_eventos_brutos`,
+    [horasMinimas, loteLimite]
+  );
+
+  return resultado.rows[0] || {};
+}
+
+async function executarEventosBrutosPostgresAutoClean(opcoes = {}) {
+  const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
+  const loteLimite = politica.loteLimite;
+  const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
+  const horasMinimas = Math.max(12, limitarInteiro(opcoes.horasMinimasEventosBrutos, 12, 12, 168));
+  const pool = opcoes.pool || (typeof opcoes.getEnginePool === "function" ? opcoes.getEnginePool() : getEnginePool());
+  const resumo = {
+    origem: "postgres_eventos_brutos",
+    tipoRegistro: "engine_eventos_brutos",
+    modo: "execute",
+    lotes: 0,
+    limiteLotesPorCiclo,
+    loteLimite,
+    horasMinimas,
+    eventosBrutosRemovidos: 0,
+    espacoLogicoLiberadoBytes: 0,
+    aplicouMudancas: false,
+    vacuumExecutado: false
+  };
+
+  if (!pool) {
+    return { ...resumo, ok: false, failOpen: true, motivo: "banco_indisponivel" };
+  }
+
+  try {
+    for (let lote = 0; lote < limiteLotesPorCiclo; lote += 1) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const lock = await client.query("SELECT pg_try_advisory_xact_lock($1) AS locked", [AUTO_CLEAN_EVENTOS_BRUTOS_LOCK_ID]);
+        if (lock.rows[0]?.locked !== true) {
+          await client.query("ROLLBACK");
+          return { ...resumo, ok: false, failOpen: true, motivo: "auto_clean_eventos_brutos_lock_ocupado" };
+        }
+
+        const batch = await executarBatchEventosBrutosPostgresAutoClean(client, { loteLimite, horasMinimas });
+        await client.query("COMMIT");
+
+        const eventosBrutosRemovidos = Number(batch.eventos_brutos_removidos || 0);
+        if (!eventosBrutosRemovidos) break;
+
+        resumo.lotes += 1;
+        resumo.eventosBrutosRemovidos += eventosBrutosRemovidos;
+        resumo.espacoLogicoLiberadoBytes += Number(batch.bytes_eventos_brutos || 0);
+      } catch (erro) {
+        try { await client.query("ROLLBACK"); } catch (_) {}
+        throw erro;
+      } finally {
+        client.release();
+      }
+    }
+
+    resumo.ok = true;
+    resumo.aplicouMudancas = resumo.eventosBrutosRemovidos > 0;
+    resumo.espacoLogicoLiberado = bytesLegiveis(resumo.espacoLogicoLiberadoBytes);
+    return resumo;
+  } catch (erro) {
+    return {
+      ...resumo,
+      ok: false,
+      failOpen: true,
+      motivo: "auto_clean_eventos_brutos_execute_falhou",
+      erroTipo: erro?.code || erro?.name || "erro",
+      aplicouMudancas: resumo.eventosBrutosRemovidos > 0,
+      espacoLogicoLiberado: bytesLegiveis(resumo.espacoLogicoLiberadoBytes)
+    };
+  }
+}
+
 function listarWorkspacesFila(dataDir, fsImpl = fs) {
   const clientesDir = path.join(dataDir, "clientes");
   try {
@@ -1367,6 +1473,7 @@ async function executarAutoCleanExecute(opcoes = {}) {
     etapas.push(await executarJobsPostgresAutoClean({ ...opcoes, politica }));
     etapas.push(await executarOfertasPostgresAutoClean({ ...opcoes, politica }));
     etapas.push(await executarLinksPostgresAutoClean({ ...opcoes, politica }));
+    etapas.push(await executarEventosBrutosPostgresAutoClean({ ...opcoes, politica }));
   }
   if (opcoes.incluirArquivos !== false) {
     etapas.push(executarFilaJsonAutoClean({ ...opcoes, politica }));
@@ -1382,6 +1489,7 @@ async function executarAutoCleanExecute(opcoes = {}) {
     jobsRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.jobsRemovidos || 0), 0),
     ofertasRemovidas: etapas.reduce((soma, etapa) => soma + Number(etapa.ofertasRemovidas || 0), 0),
     linksRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.linksRemovidos || 0), 0),
+    eventosBrutosRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.eventosBrutosRemovidos || 0), 0),
     jobsExpiradosLease: etapas.reduce((soma, etapa) => soma + Number(etapa.jobsExpiradosLease || 0), 0),
     processandoExpiradosLease: etapas.reduce((soma, etapa) => soma + Number(etapa.processandoExpiradosLease || 0), 0),
     importandoExpiradosLease: etapas.reduce((soma, etapa) => soma + Number(etapa.importandoExpiradosLease || 0), 0),
@@ -1494,6 +1602,7 @@ module.exports = {
   executarJobsPostgresAutoClean,
   executarOfertasPostgresAutoClean,
   executarLinksPostgresAutoClean,
+  executarEventosBrutosPostgresAutoClean,
   executarFilaJsonAutoClean,
   executarArquivosAutoClean,
   executarCompactacaoFilaWorkspace,

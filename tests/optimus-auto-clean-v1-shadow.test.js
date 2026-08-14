@@ -17,6 +17,7 @@ const {
   executarJobsPostgresAutoClean,
   executarOfertasPostgresAutoClean,
   executarLinksPostgresAutoClean,
+  executarEventosBrutosPostgresAutoClean,
   executarFilaJsonAutoClean,
   executarArquivosAutoClean,
   MATRIZ_STATUS_AUTO_CLEAN,
@@ -70,6 +71,16 @@ function criarPoolJobsAutoClean(batches = []) {
       if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rows: [] };
       if (/pg_try_advisory_xact_lock/i.test(sql)) return { rows: [{ locked: true }] };
       if (/WITH candidatos/i.test(sql)) {
+        if (/eventos_brutos_removidos/i.test(sql)) {
+          const batch = batches[indiceBatch] || {};
+          indiceBatch += 1;
+          return {
+            rows: [{
+              eventos_brutos_removidos: batch.eventosBrutos || 0,
+              bytes_eventos_brutos: batch.bytesEventosBrutos || 0
+            }]
+          };
+        }
         if (/links_removidos/i.test(sql)) {
           const batch = batches[indiceBatch] || {};
           indiceBatch += 1;
@@ -245,6 +256,22 @@ async function testarTtlEStatus() {
   assert.strictEqual(jobSemTimestamp.elegivel, false);
   assert.strictEqual(jobSemTimestamp.motivo, "timestamp_indisponivel");
 
+  const eventoRecente = avaliarRegistroAutoClean({
+    origem: "engine_eventos_brutos",
+    tipoRegistro: "engine_eventos_brutos",
+    status: "evento_bruto",
+    referenciaTemporal: isoAtras(11 * 60 * 60 * 1000)
+  }, { politica, agoraMs: AGORA });
+  assert.strictEqual(eventoRecente.elegivel, false, "evento bruto <12h continua protegido");
+
+  const eventoAntigo = avaliarRegistroAutoClean({
+    origem: "engine_eventos_brutos",
+    tipoRegistro: "engine_eventos_brutos",
+    status: "evento_bruto",
+    referenciaTemporal: isoAtras(13 * 60 * 60 * 1000)
+  }, { politica, agoraMs: AGORA });
+  assert.strictEqual(eventoAntigo.elegivel, true, "evento bruto >12h sem filhos pode ser removivel");
+
   for (const status of ["oferta_criada", "integracao_ausente", "retida_v2", "erro_importacao"]) {
     const recente = avaliarRegistroAutoClean({
       origem: "engine_jobs_cliente",
@@ -400,7 +427,10 @@ async function testarPostgresShadowEDependencias() {
   const queryMock = async (sql, params) => {
     chamadas.push({ sql, params });
     if (/FROM engine_eventos_brutos/i.test(sql)) {
-      return { ok: true, resultado: { rows: [{ id: 1, status: "evento_bruto", referencia_temporal: isoAtras(20 * 24 * 60 * 60 * 1000), bytes_estimados: 200, tem_job_ativo: true }] } };
+      assert.ok(sql.includes("NOT EXISTS (SELECT 1 FROM engine_jobs_cliente j WHERE j.evento_id = e.id)"), "shadow D3 protege qualquer job filho");
+      assert.ok(sql.includes("NOT EXISTS (SELECT 1 FROM engine_ofertas o WHERE o.evento_id = e.id)"), "shadow D3 protege qualquer oferta filha");
+      assert.ok(sql.includes("NOT EXISTS (SELECT 1 FROM engine_links l WHERE l.evento_id = e.id)"), "shadow D3 protege qualquer link filho");
+      return { ok: true, resultado: { rows: [{ id: 1, status: "evento_bruto", referencia_temporal: isoAtras(13 * 60 * 60 * 1000), bytes_estimados: 200 }] } };
     }
     if (/FROM engine_links/i.test(sql)) {
       assert.ok(sql.includes("o.link_id = l.id"), "shadow D2 protege oferta por link_id");
@@ -427,8 +457,7 @@ async function testarPostgresShadowEDependencias() {
   const origemEventos = resumo.origens.find(item => item.origem === "engine_eventos_brutos");
   const origemLinks = resumo.origens.find(item => item.origem === "engine_links");
   const origemOfertas = resumo.origens.find(item => item.origem === "engine_ofertas");
-  assert.strictEqual(origemEventos.protegidos, 1);
-  assert.strictEqual(origemEventos.motivos.job_ativo, 1);
+  assert.strictEqual(origemEventos.elegiveis, 1);
   assert.strictEqual(origemLinks.protegidos, 1);
   assert.strictEqual(origemLinks.motivos.oferta_ativa, 1);
   assert.strictEqual(origemOfertas.elegiveis, 1);
@@ -635,6 +664,99 @@ async function testarCorridaLinksPostgresD2Revalidada() {
   assert.ok(chamadas.some(chamada => /links_removidos/i.test(chamada.sql)));
 }
 
+async function testarExecuteEventosBrutosPostgresD3() {
+  const { pool, chamadas } = criarPoolJobsAutoClean([
+    { eventosBrutos: 2, bytesEventosBrutos: 400 },
+    { eventosBrutos: 1, bytesEventosBrutos: 200 },
+    { eventosBrutos: 0, bytesEventosBrutos: 0 }
+  ]);
+
+  const resumo = await executarEventosBrutosPostgresAutoClean({
+    pool,
+    loteLimite: 2,
+    lotesDbPorCiclo: 3,
+    horasMinimasEventosBrutos: 12
+  });
+
+  assert.strictEqual(resumo.ok, true);
+  assert.strictEqual(resumo.lotes, 2);
+  assert.strictEqual(resumo.eventosBrutosRemovidos, 3, "fixture D3 remove 3 eventos brutos sem filhos");
+  assert.strictEqual(resumo.aplicouMudancas, true);
+  assert.strictEqual(resumo.vacuumExecutado, false);
+
+  const deleteSql = chamadas.find(chamada => /eventos_brutos_removidos/i.test(chamada.sql));
+  assert.ok(deleteSql, "batch D3 de engine_eventos_brutos deve ser executado");
+  assert.ok(deleteSql.sql.includes("DELETE FROM engine_eventos_brutos"), "D3 remove somente engine_eventos_brutos");
+  assert.ok(!deleteSql.sql.includes("DELETE FROM engine_jobs_cliente"), "D3 nao remove jobs explicitamente");
+  assert.ok(!deleteSql.sql.includes("DELETE FROM engine_ofertas"), "D3 nao remove ofertas explicitamente");
+  assert.ok(!deleteSql.sql.includes("DELETE FROM engine_links"), "D3 nao remove links explicitamente");
+  assert.ok(deleteSql.sql.includes("ORDER BY e.criado_em ASC, e.id ASC"), "D3 usa ordem deterministica");
+  assert.ok(deleteSql.sql.includes("FOR UPDATE SKIP LOCKED"), "D3 usa skip locked");
+
+  const deleteFinalSql = deleteSql.sql.slice(deleteSql.sql.indexOf("DELETE FROM engine_eventos_brutos"));
+  assert.ok(deleteFinalSql.includes("e.criado_em < NOW() - ($1::int * INTERVAL '1 hour')"), "DELETE final revalida idade >12h");
+  assert.ok(deleteFinalSql.includes("NOT EXISTS (SELECT 1 FROM engine_jobs_cliente j WHERE j.evento_id = e.id)"), "DELETE final protege qualquer job filho");
+  assert.ok(deleteFinalSql.includes("NOT EXISTS (SELECT 1 FROM engine_ofertas o WHERE o.evento_id = e.id)"), "DELETE final protege qualquer oferta filha");
+  assert.ok(deleteFinalSql.includes("NOT EXISTS (SELECT 1 FROM engine_links l WHERE l.evento_id = e.id)"), "DELETE final protege qualquer link filho");
+  assert.ok((deleteSql.sql.match(/NOT EXISTS/g) || []).length >= 6, "CTE e DELETE final precisam revalidar filhos");
+  assert.strictEqual(deleteSql.params[0], 12);
+  assert.strictEqual(deleteSql.params[1], 2);
+}
+
+async function testarCorridaEventosBrutosPostgresD3Revalidada() {
+  const chamadas = [];
+  const client = {
+    async query(sql, params = []) {
+      chamadas.push({ sql, params });
+      if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rows: [] };
+      if (/pg_try_advisory_xact_lock/i.test(sql)) return { rows: [{ locked: true }] };
+      if (/eventos_brutos_removidos/i.test(sql)) {
+        const deleteFinalSql = sql.slice(sql.indexOf("DELETE FROM engine_eventos_brutos"));
+        assert.ok(deleteFinalSql.includes("NOT EXISTS (SELECT 1 FROM engine_jobs_cliente j WHERE j.evento_id = e.id)"), "corrida: job filho bloqueia delete");
+        assert.ok(deleteFinalSql.includes("NOT EXISTS (SELECT 1 FROM engine_ofertas o WHERE o.evento_id = e.id)"), "corrida: oferta filha bloqueia delete");
+        assert.ok(deleteFinalSql.includes("NOT EXISTS (SELECT 1 FROM engine_links l WHERE l.evento_id = e.id)"), "corrida: link filho bloqueia delete");
+        return { rows: [{ eventos_brutos_removidos: 0, bytes_eventos_brutos: 0 }] };
+      }
+      throw new Error(`query inesperada: ${sql}`);
+    },
+    release() {}
+  };
+
+  const resumo = await executarEventosBrutosPostgresAutoClean({
+    pool: { async connect() { return client; } },
+    loteLimite: 10,
+    lotesDbPorCiclo: 1,
+    horasMinimasEventosBrutos: 12
+  });
+
+  assert.strictEqual(resumo.ok, true);
+  assert.strictEqual(resumo.eventosBrutosRemovidos, 0, "evento selecionado deve permanecer quando filho aparece antes do DELETE");
+  assert.ok(chamadas.some(chamada => /eventos_brutos_removidos/i.test(chamada.sql)));
+}
+
+async function testarOrdemExecuteD1D2D3() {
+  const { pool, chamadas } = criarPoolJobsAutoClean([
+    { jobs: 0 },
+    { ofertas: 0 },
+    { links: 0 },
+    { eventosBrutos: 0 }
+  ]);
+
+  const resumo = await executarAutoCleanExecute({
+    incluirArquivos: false,
+    pool,
+    queryEngine: async () => ({ ok: true, resultado: { rows: [{ jobs_expirados: "0" }] } }),
+    loteLimite: 1,
+    lotesDbPorCiclo: 1
+  });
+
+  assert.strictEqual(resumo.ok === false, false);
+  const sqls = chamadas.map(chamada => chamada.sql).join("\n");
+  assert.ok(sqls.indexOf("DELETE FROM engine_ofertas") < sqls.indexOf("DELETE FROM engine_links"), "D1 deve rodar antes de D2");
+  assert.ok(sqls.indexOf("DELETE FROM engine_links") < sqls.indexOf("DELETE FROM engine_eventos_brutos"), "D2 deve rodar antes de D3");
+  assert.ok(resumo.etapas.some(etapa => etapa.origem === "postgres_eventos_brutos"), "execute inclui etapa D3");
+}
+
 async function testarExecutePostgresFailOpen() {
   const resumo = await executarJobsPostgresAutoClean({
     queryEngine: async () => ({ ok: true, resultado: { rows: [{ jobs_expirados: "0" }] } }),
@@ -782,6 +904,9 @@ async function testarFailOpenEFlags() {
   await testarCorridaOfertasPostgresD1Revalidada();
   await testarExecuteLinksPostgresD2();
   await testarCorridaLinksPostgresD2Revalidada();
+  await testarExecuteEventosBrutosPostgresD3();
+  await testarCorridaEventosBrutosPostgresD3Revalidada();
+  await testarOrdemExecuteD1D2D3();
   await testarExecutePostgresFailOpen();
   await testarExecuteFilaJsonSeguro();
   await testarExecuteArquivosProtegePermanentes();
