@@ -15,6 +15,9 @@ const {
 } = require("./modules/radar/cupom-semantico");
 const fidelidadeObs = require("./modules/fidelidade/observabilidade-v1");
 const coberturaRadar = require("./modules/radar/cobertura-v1");
+const {
+  criarRotasTelemetria
+} = require("./modules/telemetria/telemetria.routes");
 
 const {
   initEngineDatabase,
@@ -8915,6 +8918,11 @@ function auth(req, res, next) {
 
 carregarConfig();
 
+
+app.use("/telemetria", criarRotasTelemetria({
+  authNormal: auth,
+  isAdminMaster: (req) => req.usuario?.papel === "admin_master"
+}));
 
 app.use(auth);
 app.get("/admin/config/links-optimus", responderAdminConfigLinksOptimus);
