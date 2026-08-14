@@ -22,6 +22,7 @@ const {
   classificarCodigoSaude,
   credencialFingerprintIntegracao,
   obterSaudeIntegracaoAtual,
+  listarSaudeIntegracoesAtuais,
   reiniciarSaudeIntegracaoSeCredencialMudou
 } = require("../utils/alertas-integracoes");
 const {
@@ -184,6 +185,9 @@ async function testeShopee() {
 }
 
 async function testeAliExpress() {
+  const configAli = {
+    credenciais: { appKey: "app", secret: "secret", trackingId: "track" }
+  };
   mockFetchSequencial([
     resposta({
       json: {
@@ -199,17 +203,23 @@ async function testeAliExpress() {
       }
     })
   ]);
-  const ok = await testarIntegracaoMarketplace("workspace_a", "aliexpress", {
-    credenciais: { appKey: "app", secret: "secret", trackingId: "track" }
-  });
+  const ok = await testarIntegracaoMarketplace("workspace_a", "aliexpress", configAli);
   assert.strictEqual(ok.saude.status, "saudavel");
+  const fingerprintAli = credencialFingerprintIntegracao("aliexpress", configAli);
+  registrarResultadoSaudeIntegracao("workspace_aliexpress_teste", "aliexpress", {
+    ...ok,
+    credencialFingerprint: fingerprintAli,
+    saude: { ...ok.saude, credencialFingerprint: fingerprintAli }
+  }, "manual");
+  assert.strictEqual(
+    obterSaudeIntegracaoAtual("workspace_aliexpress_teste", "aliexpress", configAli).status,
+    "saudavel"
+  );
 
   mockFetchSequencial([
     resposta({ json: { error_response: { code: "15", msg: "invalid signature" } } })
   ]);
-  const invalida = await testarIntegracaoMarketplace("workspace_a", "aliexpress", {
-    credenciais: { appKey: "app", secret: "secret", trackingId: "track" }
-  });
+  const invalida = await testarIntegracaoMarketplace("workspace_a", "aliexpress", configAli);
   assert.strictEqual(invalida.saude.status, "invalida");
 }
 
@@ -241,25 +251,80 @@ async function testeAwinKabum() {
   assert.strictEqual(invalida.saude.status, "invalida");
   registrarResultadoSaudeIntegracao("workspace_a", "kabum", invalida, "manual");
 
+  const configAwinUnico = {
+    credenciais: {
+      publisherId: "123",
+      apiToken: "token-secreto",
+      programas: [{ nome: "kabum", advertiserId: "17729" }]
+    }
+  };
   mockFetchSequencial([
-    resposta({ json: [{ id: 111, name: "Loja A" }] })
+    resposta({ json: [{ id: 17729, name: "KaBuM" }] }),
+    resposta({ json: { shortUrl: "https://www.awin1.com/cread.php?awinmid=17729" } })
+  ]);
+  const awinUnico = await testarIntegracaoMarketplace("workspace_awin_unico", "awin", configAwinUnico);
+  assert.strictEqual(awinUnico.saude.status, "saudavel");
+  assert.strictEqual(awinUnico.saude.integracaoId, "advertiser:17729");
+  const fingerprintAwinUnico = credencialFingerprintIntegracao("awin", configAwinUnico, {
+    integracaoId: "advertiser:17729"
+  });
+  registrarResultadoSaudeIntegracao("workspace_awin_unico", "awin", {
+    ...awinUnico,
+    credencialFingerprint: fingerprintAwinUnico,
+    saude: { ...awinUnico.saude, credencialFingerprint: fingerprintAwinUnico },
+    saudeFilhas: (awinUnico.saudeFilhas || []).map(filha => ({
+      ...filha,
+      credencialFingerprint: fingerprintAwinUnico
+    }))
+  }, "manual");
+  assert.strictEqual(
+    obterSaudeIntegracaoAtual("workspace_awin_unico", "awin", configAwinUnico, "advertiser:17729").status,
+    "saudavel"
+  );
+  assert.strictEqual(
+    listarSaudeIntegracoesAtuais("workspace_awin_unico", { awin: configAwinUnico })
+      .some(item => item.marketplace === "awin" && !item.integracaoId && item.status === "desconhecida"),
+    false
+  );
+
+  mockFetchSequencial([
+    resposta({ json: [{ id: 17729, name: "KaBuM" }] }),
+    resposta({ json: { shortUrl: "https://www.awin1.com/cread.php?awinmid=17729" } })
   ]);
   const awinParcial = await testarIntegracaoMarketplace("workspace_a", "awin", {
     credenciais: {
       publisherId: "123",
       apiToken: "token-secreto",
       programas: [
-        { nome: "loja_a", advertiserId: "111" },
+        { nome: "kabum", advertiserId: "17729" },
         { nome: "loja_b", advertiserId: "222" }
       ]
     }
   });
   registrarResultadoSaudeIntegracao("workspace_a", "awin", awinParcial, "manual");
   assert.strictEqual(obterSaudeIntegracao("workspace_a", "awin").status, "invalida");
-  assert.strictEqual(obterSaudeIntegracao("workspace_a", "awin", "advertiser:111").status, "saudavel");
+  assert.strictEqual(obterSaudeIntegracao("workspace_a", "awin", "advertiser:17729").status, "saudavel");
   assert.strictEqual(obterSaudeIntegracao("workspace_a", "awin", "advertiser:222").status, "invalida");
-  assert.strictEqual(obterSaudeIntegracao("workspace_a", "awin", "advertiser:111").status, "saudavel");
+  assert.strictEqual(obterSaudeIntegracao("workspace_a", "awin", "advertiser:17729").status, "saudavel");
   assert.strictEqual(obterSaudeIntegracao("workspace_a", "kabum", "advertiser:17729").status, "invalida");
+
+  mockFetchSequencial([
+    resposta({ json: [{ id: 111, name: "Loja A" }, { id: 222, name: "Loja B" }] }),
+    resposta({ json: { shortUrl: "https://www.awin1.com/cread.php?awinmid=111" } }),
+    resposta({ json: { shortUrl: "https://www.awin1.com/cread.php?awinmid=222" } })
+  ]);
+  const awinTodosOk = await testarIntegracaoMarketplace("workspace_awin_all_ok", "awin", {
+    credenciais: {
+      publisherId: "123",
+      apiToken: "token-secreto",
+      programas: [
+        { nome: "kabum", advertiserId: "111", urlTeste: "https://www.kabum.com.br/" },
+        { nome: "kabum", advertiserId: "222", urlTeste: "https://www.kabum.com.br/" }
+      ]
+    }
+  });
+  assert.strictEqual(awinTodosOk.saude.status, "saudavel");
+  assert.strictEqual(awinTodosOk.saudeFilhas.every(item => item.status === "ok"), true);
 }
 
 function testeSensorPassivo() {

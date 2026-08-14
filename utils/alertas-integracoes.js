@@ -271,11 +271,25 @@ function obterSaudeIntegracaoAtual(clienteId = "admin", marketplace = "", config
 }
 
 function listarSaudeIntegracoesAtuais(clienteId = "admin", integracoesCliente = {}) {
-  return listarSaudeIntegracoes(clienteId).map(item => {
-    const mp = normalizarMarketplace(item.marketplace);
-    const config = integracoesCliente?.[mp] || (mp === "kabum" ? integracoesCliente?.awin : null) || {};
-    return obterSaudeIntegracaoAtual(clienteId, mp, config, item.integracaoId || "");
-  });
+  const lista = listarSaudeIntegracoes(clienteId);
+  const marketplacesComGranularidade = new Set(
+    lista
+      .filter(item => normalizarIntegracaoId(item.integracaoId || ""))
+      .map(item => normalizarMarketplace(item.marketplace))
+      .filter(mp => mp === "awin" || mp === "kabum")
+  );
+
+  return lista
+    .filter(item => {
+      const mp = normalizarMarketplace(item.marketplace);
+      const integracaoId = normalizarIntegracaoId(item.integracaoId || "");
+      return !((mp === "awin" || mp === "kabum") && !integracaoId && marketplacesComGranularidade.has(mp));
+    })
+    .map(item => {
+      const mp = normalizarMarketplace(item.marketplace);
+      const config = integracoesCliente?.[mp] || (mp === "kabum" ? integracoesCliente?.awin : null) || {};
+      return obterSaudeIntegracaoAtual(clienteId, mp, config, item.integracaoId || "");
+    });
 }
 
 function salvarSaudeIntegracoes(clienteId = "admin", lista = []) {
@@ -521,7 +535,7 @@ function limparAlertaIntegracao(
 function reiniciarSaudeIntegracaoSeCredencialMudou(clienteId = "admin", marketplace = "", config = {}) {
   return executarSaudeFailOpen("reiniciar_saude_credencial", () => {
     const mp = normalizarMarketplace(marketplace);
-    const alvos = [{ marketplace: mp, integracaoId: "" }];
+    const alvos = [];
     if (mp === "awin" || mp === "kabum") {
       const cred = normalizarCredenciaisAwin(config?.credenciais || config || {});
       for (const programa of cred.programas || []) {
@@ -532,6 +546,7 @@ function reiniciarSaudeIntegracaoSeCredencialMudou(clienteId = "admin", marketpl
         });
       }
     }
+    if (!alvos.length) alvos.push({ marketplace: mp, integracaoId: "" });
 
     for (const alvo of alvos) {
       const fingerprintAtual = credencialFingerprintIntegracao(alvo.marketplace, config, {

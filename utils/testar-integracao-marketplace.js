@@ -466,6 +466,107 @@ function programaEstaJoined(programas = [], advertiserId = "") {
   );
 }
 
+function destinoTesteAwin(programa = {}) {
+  const informado = valorTexto(programa, ["urlTeste", "linkTeste", "destinationUrl", "url"]);
+  if (informado) return informado;
+  const advertiserId = String(programa?.advertiserId || programa?.id || "").trim();
+  const nome = String(programa?.nome || programa?.name || programa?.loja || "").toLowerCase();
+  if (advertiserId === "17729" || nome.includes("kabum") || nome.includes("ka bum")) {
+    return "https://www.kabum.com.br/";
+  }
+  return "";
+}
+
+function extrairLinkAwin(data = {}) {
+  return valorTexto(data || {}, ["shortUrl", "url", "link", "trackingLink", "clickUrl"]);
+}
+
+async function testarDeeplinkAwin(c = {}, programa = {}, marketplace = "awin") {
+  const advertiserId = String(programa?.advertiserId || programa?.id || "").trim();
+  const integracaoId = integracaoIdAwin(programa);
+  const destinationUrl = destinoTesteAwin(programa);
+
+  if (!advertiserId || !integracaoId) {
+    return {
+      marketplace,
+      integracaoId,
+      status: "programa_invalido",
+      codigo: "programa_invalido",
+      mensagem: MENSAGENS.programa_invalido,
+      detalhes: { motivo: "advertiser_id_ausente" }
+    };
+  }
+
+  if (!/^https?:\/\//i.test(destinationUrl)) {
+    return {
+      marketplace,
+      integracaoId,
+      status: "falha_teste",
+      codigo: "falha_teste",
+      mensagem: MENSAGENS.falha_teste,
+      detalhes: { advertiserId, motivo: "destino_teste_awin_indisponivel" }
+    };
+  }
+
+  const linkbuilder = await fetchComTimeout(
+    `https://api.awin.com/publishers/${encodeURIComponent(c.publisherId)}/linkbuilder/generate`,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${c.apiToken}`
+      },
+      body: JSON.stringify({
+        advertiserId: Number(advertiserId),
+        destinationUrl
+      })
+    }
+  );
+  const linkData = await linkbuilder.json().catch(() => null);
+  const link = extrairLinkAwin(linkData);
+
+  if ([401, 403].includes(Number(linkbuilder.status))) {
+    return {
+      marketplace,
+      integracaoId,
+      status: "credencial_invalida",
+      codigo: "credencial_invalida",
+      mensagem: MENSAGENS.credencial_invalida,
+      detalhes: { httpStatus: linkbuilder.status, advertiserId }
+    };
+  }
+  if ([429, 500, 502, 503, 504].includes(Number(linkbuilder.status))) {
+    return {
+      marketplace,
+      integracaoId,
+      status: "falha_teste",
+      codigo: "falha_teste",
+      mensagem: MENSAGENS.falha_teste,
+      detalhes: { httpStatus: linkbuilder.status, advertiserId }
+    };
+  }
+  if (!linkbuilder.ok || !/^https?:\/\//i.test(link)) {
+    return {
+      marketplace,
+      integracaoId,
+      status: "programa_invalido",
+      codigo: "programa_invalido",
+      mensagem: MENSAGENS.programa_invalido,
+      detalhes: { httpStatus: linkbuilder.status, advertiserId }
+    };
+  }
+
+  return {
+    marketplace,
+    integracaoId,
+    status: "ok",
+    codigo: "ok",
+    mensagem: MENSAGENS.ok,
+    detalhes: { httpStatus: linkbuilder.status, advertiserId, destinationUrl }
+  };
+}
+
 async function testarAwin(config = {}, marketplace = "awin") {
   const credenciaisOriginais = credenciais(config);
   const c = credenciaisAwin(config);
@@ -516,36 +617,13 @@ async function testarAwin(config = {}, marketplace = "awin") {
         return resultado("kabum", "programa_invalido", { advertiserId, integracaoId }, false);
       }
 
-      const linkbuilder = await fetchComTimeout(
-        `https://api.awin.com/publishers/${encodeURIComponent(c.publisherId)}/linkbuilder/generate`,
-        {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${c.apiToken}`
-          },
-          body: JSON.stringify({
-            advertiserId: Number(advertiserId),
-            destinationUrl: "https://www.kabum.com.br/"
-          })
-        }
-      );
-      const linkData = await linkbuilder.json().catch(() => null);
-      const link = valorTexto(linkData || {}, ["shortUrl", "url", "link", "trackingLink", "clickUrl"]);
-
-      if ([401, 403].includes(Number(linkbuilder.status))) {
-        return resultado("kabum", "credencial_invalida", { httpStatus: linkbuilder.status }, false);
-      }
-      if ([429, 500, 502, 503, 504].includes(Number(linkbuilder.status))) {
-        return resultado("kabum", "falha_teste", { httpStatus: linkbuilder.status }, false);
-      }
-      if (!linkbuilder.ok || !/^https?:\/\//i.test(link)) {
-        return resultado("kabum", "programa_invalido", { httpStatus: linkbuilder.status, advertiserId, integracaoId }, false);
+      const prova = await testarDeeplinkAwin(c, programa, "kabum");
+      if (prova.status !== "ok") {
+        return resultado("kabum", prova.codigo, { ...(prova.detalhes || {}), advertiserId, integracaoId }, false);
       }
 
       return resultado("kabum", "ok", {
-        httpStatus: linkbuilder.status,
+        httpStatus: prova.detalhes?.httpStatus,
         totalProgramas: programas.length,
         advertiserId,
         integracaoId
@@ -555,30 +633,42 @@ async function testarAwin(config = {}, marketplace = "awin") {
     const programas = Array.isArray(data) ? data : [];
     const possuiProgramaDeclarado = Array.isArray(credenciaisOriginais.programas) ||
       Boolean(credenciaisOriginais.advertiserId || credenciaisOriginais.loja);
-    const filhos = possuiProgramaDeclarado && Array.isArray(c.programas)
-      ? c.programas
-        .filter(programa => programa?.ativo !== false && integracaoIdAwin(programa))
-        .map(programa => {
-          const advertiserId = String(programa.advertiserId || "").trim();
-          const joined = programaEstaJoined(programas, advertiserId);
-          const statusFilho = programas.length && !joined ? "programa_invalido" : "ok";
-          return {
+    const filhos = [];
+    if (possuiProgramaDeclarado && Array.isArray(c.programas)) {
+      for (const programa of c.programas.filter(item => item?.ativo !== false && integracaoIdAwin(item))) {
+        const advertiserId = String(programa.advertiserId || "").trim();
+        const joined = programaEstaJoined(programas, advertiserId);
+        if (programas.length && !joined) {
+          filhos.push({
             marketplace: "awin",
             integracaoId: integracaoIdAwin(programa),
-            status: statusFilho,
-            codigo: statusFilho,
-            mensagem: statusFilho === "ok" ? MENSAGENS.ok : MENSAGENS.programa_invalido,
+            status: "programa_invalido",
+            codigo: "programa_invalido",
+            mensagem: MENSAGENS.programa_invalido,
             detalhes: { advertiserId, programa: programa.nome || "" }
-          };
-        })
-      : [];
-    const algumInvalido = filhos.some(item => item.status === "programa_invalido");
+          });
+          continue;
+        }
+        filhos.push(await testarDeeplinkAwin(c, programa, "awin"));
+      }
+    }
 
-    const agregado = resultado(marketplace, algumInvalido ? "programa_invalido" : "ok", {
+    if (possuiProgramaDeclarado && !filhos.length) {
+      return resultado(marketplace, "programa_invalido", {
+        httpStatus: response.status,
+        motivo: "programa_teste_nao_configurado"
+      }, false);
+    }
+
+    const algumInvalido = filhos.some(item => ["programa_invalido", "credencial_invalida"].includes(item.status));
+    const algumInconclusivo = filhos.some(item => item.status === "falha_teste");
+    const codigoAgregado = algumInvalido ? "programa_invalido" : (algumInconclusivo ? "falha_teste" : "ok");
+
+    const agregado = resultado(marketplace, codigoAgregado, {
       httpStatus: response.status,
       totalProgramas: programas.length,
       ...(filhos.length === 1 && filhos[0]?.integracaoId ? { integracaoId: filhos[0].integracaoId } : {})
-    }, !algumInvalido, algumInvalido ? MENSAGENS.programa_invalido : "");
+    }, codigoAgregado === "ok", algumInvalido ? MENSAGENS.programa_invalido : "");
     agregado.saudeFilhas = filhos;
     return agregado;
   } catch (e) {
