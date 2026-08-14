@@ -1,3 +1,7 @@
+const {
+  credencialFingerprintIntegracao
+} = require("../../../utils/alertas-integracoes");
+
 function criarGerarLinkAliExpress({
   fetch: fetchImpl = global.fetch,
   timestampGMT8,
@@ -81,7 +85,8 @@ function criarGerarLinkAliExpress({
         /invalid|secret|signature|app.?key|permission|auth/i.test(`${codigoApi} ${mensagemApi}`)) {
         registrarFalhaFailOpen(clienteId, "credencial_invalida", {
           httpStatus: response.status,
-          codigoApi: String(codigoApi || "")
+          codigoApi: String(codigoApi || ""),
+          credencialFingerprint: credencialFingerprintIntegracao("aliexpress", credenciais)
         });
       }
 
@@ -91,7 +96,9 @@ function criarGerarLinkAliExpress({
         "";
 
       if (/^https?:\/\//i.test(String(linkGerado || ""))) {
-        registrarSucessoFailOpen(clienteId);
+        registrarSucessoFailOpen(clienteId, {
+          credencialFingerprint: credencialFingerprintIntegracao("aliexpress", credenciais)
+        });
       }
 
       return linkGerado || urlOriginal;

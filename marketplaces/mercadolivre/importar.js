@@ -1,7 +1,8 @@
 const { normalizarNumeroMoeda } = require("../../utils/moeda");
 const {
   registrarAlertaIntegracao,
-  registrarSucessoIntegracao
+  registrarSucessoIntegracao,
+  credencialFingerprintIntegracao
 } = require("../../utils/alertas-integracoes");
 
 const {
@@ -710,7 +711,11 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
         mensagem: "Atualize os cookies do Mercado Livre para manter a captura de ofertas funcionando.",
         detalhes: {
           httpStatus: response.status,
-          urlFinal: response.url
+          urlFinal: response.url,
+          credencialFingerprint: credencialFingerprintIntegracao(
+            "mercadolivre",
+            getIntegracaoCliente(clienteIdAlvo, "mercadolivre")
+          )
         }
       });
 
@@ -799,9 +804,10 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       temImagem: !!imagem
     });
 
+    const integracaoMercadoLivreCliente = getIntegracaoCliente(clienteIdAlvo, "mercadolivre");
     const linkAfiliadoGerado = await gerarLinkAfiliadoMercadoLivre(
       url,
-      getIntegracaoCliente(clienteIdAlvo, "mercadolivre"),
+      integracaoMercadoLivreCliente,
       { clienteId: clienteIdAlvo }
     );
 
@@ -897,7 +903,8 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
         if (typeof registrarSucessoIntegracao === "function") {
           registrarSucessoIntegracao(clienteIdAlvo, "mercadolivre", {
             codigo: "afiliado_ok",
-            origem: "importer_ml"
+            origem: "importer_ml",
+            credencialFingerprint: credencialFingerprintIntegracao("mercadolivre", integracaoMercadoLivreCliente)
           });
         }
       } catch {

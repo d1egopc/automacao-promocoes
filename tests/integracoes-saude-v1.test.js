@@ -19,7 +19,10 @@ const {
   registrarSaudeIntegracao,
   registrarResultadoSaudeIntegracao,
   registrarSucessoIntegracao,
-  classificarCodigoSaude
+  classificarCodigoSaude,
+  credencialFingerprintIntegracao,
+  obterSaudeIntegracaoAtual,
+  reiniciarSaudeIntegracaoSeCredencialMudou
 } = require("../utils/alertas-integracoes");
 const {
   criarGerarLinkAmazon
@@ -502,6 +505,171 @@ function testeAmazonUrlNaoPintaVerde() {
   assert.strictEqual(storageThrow, "https://www.amazon.com.br/dp/B07PGL2ZSL?tag=tag-20");
 }
 
+function validarCicloCredencialAtual({
+  clienteId,
+  marketplace,
+  configA,
+  configB,
+  configC,
+  integracaoId = ""
+}) {
+  const fpA = credencialFingerprintIntegracao(marketplace, configA, { integracaoId });
+  const fpB = credencialFingerprintIntegracao(marketplace, configB, { integracaoId });
+  const fpC = credencialFingerprintIntegracao(marketplace, configC, { integracaoId });
+
+  assert.ok(fpA.startsWith("sha256:"), `${marketplace} deve gerar fingerprint`);
+  assert.notStrictEqual(fpA, fpB, `${marketplace} deve mudar fingerprint ao trocar credencial`);
+  assert.notStrictEqual(fpB, fpC, `${marketplace} deve mudar fingerprint ao restaurar credencial valida`);
+
+  registrarResultadoSaudeIntegracao(clienteId, marketplace, {
+    ok: true,
+    marketplace,
+    integracaoId,
+    status: "ok",
+    codigo: "ok",
+    credencialFingerprint: fpA
+  }, "manual");
+  assert.strictEqual(
+    obterSaudeIntegracaoAtual(clienteId, marketplace, configA, integracaoId).status,
+    "saudavel",
+    `${marketplace} A valida deve ficar verde`
+  );
+  registrarResultadoSaudeIntegracao(clienteId, marketplace, {
+    ok: false,
+    marketplace,
+    integracaoId,
+    status: "credencial_invalida",
+    codigo: "credencial_invalida",
+    credencialFingerprint: fpA
+  }, "manual");
+  assert.strictEqual(
+    obterSaudeIntegracaoAtual(clienteId, marketplace, configA, integracaoId).status,
+    "invalida",
+    `${marketplace} teste manual negativo da credencial atual deve ficar vermelho imediatamente`
+  );
+  registrarResultadoSaudeIntegracao(clienteId, marketplace, {
+    ok: true,
+    marketplace,
+    integracaoId,
+    status: "ok",
+    codigo: "ok",
+    credencialFingerprint: fpA
+  }, "manual");
+
+  reiniciarSaudeIntegracaoSeCredencialMudou(clienteId, marketplace, configB);
+  assert.strictEqual(
+    obterSaudeIntegracaoAtual(clienteId, marketplace, configB, integracaoId).status,
+    "desconhecida",
+    `${marketplace} salvar B deve voltar para nao testado`
+  );
+  assert.strictEqual(
+    obterSaudeIntegracaoAtual(clienteId, marketplace, configB, integracaoId).ultimaProvaPositivaEm,
+    null,
+    `${marketplace} B nao deve herdar prova positiva antiga`
+  );
+
+  registrarResultadoSaudeIntegracao(clienteId, marketplace, {
+    ok: false,
+    marketplace,
+    integracaoId,
+    status: "credencial_invalida",
+    codigo: "credencial_invalida",
+    credencialFingerprint: fpB
+  }, "manual");
+  assert.strictEqual(
+    obterSaudeIntegracaoAtual(clienteId, marketplace, configB, integracaoId).status,
+    "invalida",
+    `${marketplace} teste negativo de B deve ficar vermelho`
+  );
+
+  reiniciarSaudeIntegracaoSeCredencialMudou(clienteId, marketplace, configC);
+  assert.strictEqual(
+    obterSaudeIntegracaoAtual(clienteId, marketplace, configC, integracaoId).status,
+    "desconhecida",
+    `${marketplace} salvar C deve voltar para nao testado antes do teste`
+  );
+
+  registrarResultadoSaudeIntegracao(clienteId, marketplace, {
+    ok: true,
+    marketplace,
+    integracaoId,
+    status: "ok",
+    codigo: "ok",
+    credencialFingerprint: fpC
+  }, "manual");
+  const saudeC = obterSaudeIntegracaoAtual(clienteId, marketplace, configC, integracaoId);
+  assert.strictEqual(saudeC.status, "saudavel", `${marketplace} teste positivo de C deve ficar verde`);
+  assert.strictEqual(saudeC.credencialFingerprint, fpC, `${marketplace} verde deve pertencer ao fingerprint atual`);
+  assert.strictEqual(
+    obterSaudeIntegracao(clienteId, marketplace, integracaoId).credencialFingerprint,
+    fpC,
+    `${marketplace} reload deve preservar verde apenas com fingerprint atual persistido`
+  );
+}
+
+function testeCredencialAtualFingerprintUniversal() {
+  const fpNormalizado = credencialFingerprintIntegracao("mercadolivre", {
+    credenciais: { cookies: " cookie-a ", tag: " TAG-OK " }
+  });
+  assert.strictEqual(
+    fpNormalizado,
+    credencialFingerprintIntegracao("mercadolivre", {
+      credenciais: { cookies: "cookie-a", tagId: "tag-ok" }
+    }),
+    "espacos e alias de tag nao devem trocar fingerprint da mesma credencial"
+  );
+
+  validarCicloCredencialAtual({
+    clienteId: "workspace_fp_ml",
+    marketplace: "mercadolivre",
+    configA: { credenciais: { cookies: "cookie-a", tag: "tag-ok" } },
+    configB: { credenciais: { cookies: "cookie-lixo", tag: "tag-ok" } },
+    configC: { credenciais: { cookies: "cookie-c", tag: "tag-ok" } }
+  });
+
+  validarCicloCredencialAtual({
+    clienteId: "workspace_fp_amazon",
+    marketplace: "amazon",
+    configA: { modo: "cookies", credenciais: { cookies: "cookie-a", tag: "tag-20" } },
+    configB: { modo: "cookies", credenciais: { cookies: "cookie-lixo", tag: "tag-20" } },
+    configC: { modo: "cookies", credenciais: { cookies: "cookie-c", tag: "tag-20" } }
+  });
+
+  validarCicloCredencialAtual({
+    clienteId: "workspace_fp_shopee",
+    marketplace: "shopee",
+    configA: { credenciais: { appId: "app-a", secret: "secret-a" } },
+    configB: { credenciais: { appId: "app-a", secret: "secret-lixo" } },
+    configC: { credenciais: { appId: "app-c", secret: "secret-c" } }
+  });
+
+  validarCicloCredencialAtual({
+    clienteId: "workspace_fp_ali",
+    marketplace: "aliexpress",
+    configA: { credenciais: { appKey: "app-a", secret: "secret-a", trackingId: "track-a" } },
+    configB: { credenciais: { appKey: "app-a", secret: "secret-lixo", trackingId: "track-a" } },
+    configC: { credenciais: { appKey: "app-c", secret: "secret-c", trackingId: "track-c" } }
+  });
+
+  validarCicloCredencialAtual({
+    clienteId: "workspace_fp_awin",
+    marketplace: "awin",
+    integracaoId: "advertiser:111",
+    configA: { credenciais: { publisherId: "pub", apiToken: "token-a", programas: [{ nome: "loja_a", advertiserId: "111" }] } },
+    configB: { credenciais: { publisherId: "pub", apiToken: "token-lixo", programas: [{ nome: "loja_a", advertiserId: "111" }] } },
+    configC: { credenciais: { publisherId: "pub", apiToken: "token-c", programas: [{ nome: "loja_a", advertiserId: "111" }] } }
+  });
+
+  validarCicloCredencialAtual({
+    clienteId: "workspace_fp_kabum",
+    marketplace: "kabum",
+    integracaoId: "advertiser:17729",
+    configA: { credenciais: { publisherId: "pub", apiToken: "token-a", programas: [{ nome: "kabum", advertiserId: "17729" }] } },
+    configB: { credenciais: { publisherId: "pub", apiToken: "token-lixo", programas: [{ nome: "kabum", advertiserId: "17729" }] } },
+    configC: { credenciais: { publisherId: "pub", apiToken: "token-c", programas: [{ nome: "kabum", advertiserId: "17729" }] } }
+  });
+}
+
 async function testeAmazonImporterCaptcha403NaoVermelho() {
   let alertaChamado = false;
   const importarAmazon = criarImportarAmazon({
@@ -591,6 +759,7 @@ async function main() {
     testeAmazonUrlNaoPintaVerde();
     await testeAmazonImporterCaptcha403NaoVermelho();
     await testeMercadoLivreFailOpenSensor();
+    testeCredencialAtualFingerprintUniversal();
     console.log("integracoes-saude-v1: ok");
   } finally {
     global.fetch = fetchOriginal;

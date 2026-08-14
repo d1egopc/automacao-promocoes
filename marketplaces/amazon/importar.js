@@ -1,4 +1,7 @@
 const { normalizarNumeroMoeda } = require("../../utils/moeda");
+const {
+  credencialFingerprintIntegracao
+} = require("../../utils/alertas-integracoes");
 function criarImportarAmazon(deps = {}) {
   const {
     extrairJsonLd,
@@ -58,14 +61,19 @@ function criarImportarAmazon(deps = {}) {
         (temProductTitleAuditoria || Boolean(jsonLd) || temOgTitleAuditoria)) {
         registrarSucessoIntegracao?.(clienteIdSaude, "amazon", {
           codigo: "cookie_valido",
-          origem: "importer_amazon"
+          origem: "importer_amazon",
+          credencialFingerprint: credencialFingerprintIntegracao("amazon", config)
         });
       } else if (clienteIdSaude && cookies && falhaAuthInequivoca) {
         registrarAlertaIntegracao?.(clienteIdSaude, "amazon", {
           tipo: "cookie_expirado",
           status: "atencao",
           mensagem: "Cookies Amazon expirados ou invalidos.",
-          detalhes: { httpStatus: response.status, motivo: loginInequivoco ? "login" : "http_auth" }
+          detalhes: {
+            httpStatus: response.status,
+            motivo: loginInequivoco ? "login" : "http_auth",
+            credencialFingerprint: credencialFingerprintIntegracao("amazon", config)
+          }
         });
       }
     } catch {
@@ -565,5 +573,4 @@ const linkFinal = usarLinksOptimus
 module.exports = {
   criarImportarAmazon
 };
-
 

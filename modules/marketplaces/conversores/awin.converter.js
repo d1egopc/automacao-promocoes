@@ -1,3 +1,7 @@
+const {
+  credencialFingerprintIntegracao
+} = require("../../../utils/alertas-integracoes");
+
 function criarGerarDeepLinkAwin({
   axios,
   getIntegracaoCliente,
@@ -86,7 +90,8 @@ function criarGerarDeepLinkAwin({
         registrarFalhaFailOpen(clienteId, marketplaceSaude, "credencial_invalida", {
           httpStatus,
           integracaoId,
-          advertiserId
+          advertiserId,
+          credencialFingerprint: credencialFingerprintIntegracao(marketplaceSaude, credenciais, { integracaoId })
         });
       }
       throw e;
@@ -106,7 +111,8 @@ function criarGerarDeepLinkAwin({
     if (/^https?:\/\//i.test(String(link || ""))) {
       registrarSucessoFailOpen(clienteId, marketplaceSaude, {
         integracaoId,
-        advertiserId
+        advertiserId,
+        credencialFingerprint: credencialFingerprintIntegracao(marketplaceSaude, credenciais, { integracaoId })
       });
     }
 

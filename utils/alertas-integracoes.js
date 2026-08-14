@@ -2,6 +2,10 @@ const {
   readClienteJson,
   writeClienteJson
 } = require("./storage");
+const crypto = require("crypto");
+const {
+  normalizarCredenciaisAwin
+} = require("./integracoes");
 
 const ARQUIVO = "alertas-integracoes.json";
 const ARQUIVO_SAUDE = "saude-integracoes.json";
@@ -19,6 +23,110 @@ function chaveSaude(marketplace = "", integracaoId = "") {
   const mp = normalizarMarketplace(marketplace);
   const id = normalizarIntegracaoId(integracaoId);
   return id ? `${mp}:${id}` : mp;
+}
+
+function ordenarObjeto(valor) {
+  if (Array.isArray(valor)) return valor.map(ordenarObjeto);
+  if (!valor || typeof valor !== "object") return valor;
+  return Object.keys(valor).sort().reduce((acc, chave) => {
+    acc[chave] = ordenarObjeto(valor[chave]);
+    return acc;
+  }, {});
+}
+
+function valorTexto(obj = {}, campos = []) {
+  for (const campo of campos) {
+    const valor = obj?.[campo];
+    if (valor !== undefined && valor !== null && String(valor).trim()) {
+      return String(valor).trim();
+    }
+  }
+  return "";
+}
+
+function hashPayloadSeguro(payload = {}) {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(ordenarObjeto(payload)), "utf8")
+    .digest("hex");
+}
+
+function credencialFingerprintIntegracao(marketplace = "", config = {}, opcoes = {}) {
+  const mp = normalizarMarketplace(marketplace);
+  const cred = config?.credenciais || config || {};
+  let payload = null;
+
+  if (mp === "mercadolivre") {
+    payload = {
+      marketplace: mp,
+      cookies: valorTexto(cred, ["cookies", "cookie"]),
+      tag: valorTexto(cred, ["tag", "tagId", "tagID", "tag_id", "codigoAfiliado", "trackingId", "partnerTag", "affiliateTag"]).toLowerCase()
+    };
+  } else if (mp === "amazon") {
+    const modo = String(config?.modo || cred.modo || (cred.cookies ? "cookies" : "api")).trim().toLowerCase();
+    payload = modo === "api"
+      ? {
+        marketplace: mp,
+        modo,
+        appId: valorTexto(cred, ["appId", "app_id"]),
+        accessKey: valorTexto(cred, ["accessKey", "access_key"]),
+        secretKey: valorTexto(cred, ["secretKey", "secret_key"])
+      }
+      : {
+        marketplace: mp,
+        modo: "cookies",
+        cookies: valorTexto(cred, ["cookies", "cookie"]),
+        tag: valorTexto(cred, ["trackingId", "partnerTag", "tag", "tagId", "affiliateTag", "appId"]).toLowerCase()
+      };
+  } else if (mp === "shopee") {
+    payload = {
+      marketplace: mp,
+      appId: valorTexto(cred, ["appId", "app_id"]),
+      secret: valorTexto(cred, ["secret", "appSecret", "app_secret"])
+    };
+  } else if (mp === "aliexpress") {
+    payload = {
+      marketplace: mp,
+      appKey: valorTexto(cred, ["appKey", "app_key"]),
+      secret: valorTexto(cred, ["secret", "appSecret", "app_secret"]),
+      trackingId: valorTexto(cred, ["trackingId", "tracking_id"])
+    };
+  } else if (mp === "awin" || mp === "kabum") {
+    const normalizada = normalizarCredenciaisAwin(cred);
+    const integracaoId = normalizarIntegracaoId(opcoes.integracaoId || "");
+    const advertiserIdAlvo = integracaoId.startsWith("advertiser:") ? integracaoId.replace("advertiser:", "") : "";
+    const programas = normalizada.programas
+      .filter(programa => programa?.ativo !== false)
+      .filter(programa => !advertiserIdAlvo || String(programa.advertiserId || "") === advertiserIdAlvo)
+      .map(programa => ({
+        advertiserId: String(programa.advertiserId || "").trim(),
+        nome: String(programa.nome || "").trim().toLowerCase(),
+        ativo: programa.ativo !== false
+      }))
+      .sort((a, b) => a.advertiserId.localeCompare(b.advertiserId) || a.nome.localeCompare(b.nome));
+
+    payload = {
+      marketplace: mp,
+      integracaoId: integracaoId || "",
+      publisherId: normalizada.publisherId,
+      apiToken: normalizada.apiToken,
+      programas
+    };
+  } else if (mp === "magalu") {
+    payload = {
+      marketplace: mp,
+      promoterId: valorTexto(cred, ["promoterId", "promoter_id"])
+    };
+  }
+
+  if (!payload) return "";
+  const possuiValor = Object.entries(payload).some(([chave, valor]) => {
+    if (["marketplace", "modo", "integracaoId"].includes(chave)) return false;
+    if (Array.isArray(valor)) return valor.length > 0;
+    return String(valor || "").trim() !== "";
+  });
+  if (!possuiValor) return "";
+  return `sha256:${hashPayloadSeguro(payload)}`;
 }
 
 function agoraIso() {
@@ -132,6 +240,44 @@ function obterSaudeIntegracao(clienteId = "admin", marketplace = "", integracaoI
   return listarSaudeIntegracoes(clienteId).find(item => chaveSaude(item.marketplace, item.integracaoId) === chave) || null;
 }
 
+function estadoDesconhecidoCredencialAtual(marketplace = "", credencialFingerprint = "", integracaoId = "") {
+  const mp = normalizarMarketplace(marketplace);
+  return {
+    marketplace: mp,
+    ...(integracaoId ? { integracaoId: normalizarIntegracaoId(integracaoId) } : {}),
+    status: "desconhecida",
+    codigo: "credencial_atual_sem_prova",
+    mensagem: mensagemSaude("desconhecida", "credencial_atual_sem_prova"),
+    origem: "credencial_atual",
+    ultimaProvaPositivaEm: null,
+    ultimaFalhaQualificadaEm: null,
+    atualizadoEm: agoraIso(),
+    detalhes: {},
+    falhaQualificadaPendenteEm: null,
+    falhasQualificadas: 0,
+    ...(credencialFingerprint ? { credencialFingerprint } : {})
+  };
+}
+
+function obterSaudeIntegracaoAtual(clienteId = "admin", marketplace = "", config = {}, integracaoId = "") {
+  const mp = normalizarMarketplace(marketplace);
+  const id = normalizarIntegracaoId(integracaoId);
+  const fingerprintAtual = credencialFingerprintIntegracao(mp, config, { integracaoId: id });
+  const atual = obterSaudeIntegracao(clienteId, mp, id);
+
+  if (!fingerprintAtual) return atual;
+  if (atual?.credencialFingerprint && atual.credencialFingerprint === fingerprintAtual) return atual;
+  return estadoDesconhecidoCredencialAtual(mp, fingerprintAtual, id);
+}
+
+function listarSaudeIntegracoesAtuais(clienteId = "admin", integracoesCliente = {}) {
+  return listarSaudeIntegracoes(clienteId).map(item => {
+    const mp = normalizarMarketplace(item.marketplace);
+    const config = integracoesCliente?.[mp] || (mp === "kabum" ? integracoesCliente?.awin : null) || {};
+    return obterSaudeIntegracaoAtual(clienteId, mp, config, item.integracaoId || "");
+  });
+}
+
 function salvarSaudeIntegracoes(clienteId = "admin", lista = []) {
   writeClienteJson(clienteId, ARQUIVO_SAUDE, Array.isArray(lista) ? lista : []);
   return lista;
@@ -149,6 +295,9 @@ function registrarSaudeIntegracao(clienteId = "admin", marketplace = "", estado 
     ? String(estado.status)
     : "desconhecida";
   const agora = estado.timestamp || agoraIso();
+  const temProvaPositiva = Object.prototype.hasOwnProperty.call(estado, "ultimaProvaPositivaEm");
+  const temFalhaQualificada = Object.prototype.hasOwnProperty.call(estado, "ultimaFalhaQualificadaEm");
+  const credencialFingerprint = String(estado.credencialFingerprint || anterior.credencialFingerprint || "").trim();
 
   const proximo = {
     marketplace: mp,
@@ -158,10 +307,10 @@ function registrarSaudeIntegracao(clienteId = "admin", marketplace = "", estado 
     mensagem: String(estado.mensagem || mensagemSaude(status, estado.codigo || anterior.codigo || "")),
     ultimaProvaPositivaEm: status === "saudavel"
       ? (estado.ultimaProvaPositivaEm || (estado.preservarProvaPositiva ? (anterior.ultimaProvaPositivaEm || null) : agora))
-      : (estado.ultimaProvaPositivaEm || anterior.ultimaProvaPositivaEm || null),
+      : (temProvaPositiva ? estado.ultimaProvaPositivaEm : (anterior.ultimaProvaPositivaEm || null)),
     ultimaFalhaQualificadaEm: status === "invalida"
       ? agora
-      : (estado.ultimaFalhaQualificadaEm || anterior.ultimaFalhaQualificadaEm || null),
+      : (temFalhaQualificada ? estado.ultimaFalhaQualificadaEm : (anterior.ultimaFalhaQualificadaEm || null)),
     origem: String(estado.origem || anterior.origem || "sensor"),
     atualizadoEm: agora,
     detalhes: detalhesSanitizados(estado.detalhes || {}),
@@ -172,6 +321,7 @@ function registrarSaudeIntegracao(clienteId = "admin", marketplace = "", estado 
       ? Number(estado.falhasQualificadas)
       : Number(anterior.falhasQualificadas || 0)
   };
+  if (credencialFingerprint) proximo.credencialFingerprint = credencialFingerprint;
 
   const novaLista = lista.filter(item => chaveSaude(item.marketplace, item.integracaoId) !== chave);
   novaLista.push(proximo);
@@ -198,7 +348,7 @@ function saudeAPartirResultado(marketplace = "", resultado = {}, origem = "manua
     };
   }
 
-  if (statusBase === "invalida" && anterior?.status === "saudavel") {
+  if (statusBase === "invalida" && anterior?.status === "saudavel" && origem !== "manual") {
     const primeiraFalha = anterior.falhaQualificadaPendenteEm || agora;
     const falhas = Number(anterior.falhasQualificadas || 0) + 1;
     const inicioFalha = timestampMs(primeiraFalha);
@@ -247,6 +397,7 @@ function registrarResultadoSaudeIntegracao(clienteId = "admin", marketplace = ""
     const anterior = obterSaudeIntegracao(clienteId, mp, integracaoId);
     const estado = saudeAPartirResultado(mp, resultado, origem, anterior);
     if (integracaoId) estado.integracaoId = integracaoId;
+    if (resultado.credencialFingerprint) estado.credencialFingerprint = resultado.credencialFingerprint;
     registrarSaudeIntegracao(clienteId, mp, estado);
 
     if (Array.isArray(resultado.saudeFilhas)) {
@@ -257,6 +408,7 @@ function registrarResultadoSaudeIntegracao(clienteId = "admin", marketplace = ""
         const anteriorFilha = obterSaudeIntegracao(clienteId, marketplaceFilha, integracaoIdFilha);
         const estadoFilha = saudeAPartirResultado(marketplaceFilha, filha, origem, anteriorFilha);
         estadoFilha.integracaoId = integracaoIdFilha;
+        if (filha.credencialFingerprint) estadoFilha.credencialFingerprint = filha.credencialFingerprint;
         registrarSaudeIntegracao(clienteId, marketplaceFilha, estadoFilha);
       }
     }
@@ -281,6 +433,7 @@ function registrarSucessoIntegracao(
       mensagem: "Integracao funcionando",
       origem: String(detalhes?.origem || origem),
       integracaoId,
+      credencialFingerprint: detalhes?.credencialFingerprint || "",
       detalhes
     });
     return obterSaudeIntegracao(clienteId, mp, integracaoId);
@@ -322,6 +475,7 @@ function registrarAlertaIntegracao(
       codigo: alerta.tipo || alerta.status || "desconhecido",
       mensagem: alerta.mensagem || "",
       detalhes: alerta.detalhes || {},
+      credencialFingerprint: alerta.credencialFingerprint || alerta.detalhes?.credencialFingerprint || "",
       ...(integracaoId ? { integracaoId } : {})
     }, "sensor");
 
@@ -364,15 +518,59 @@ function limparAlertaIntegracao(
   }, []);
 }
 
+function reiniciarSaudeIntegracaoSeCredencialMudou(clienteId = "admin", marketplace = "", config = {}) {
+  return executarSaudeFailOpen("reiniciar_saude_credencial", () => {
+    const mp = normalizarMarketplace(marketplace);
+    const alvos = [{ marketplace: mp, integracaoId: "" }];
+    if (mp === "awin" || mp === "kabum") {
+      const cred = normalizarCredenciaisAwin(config?.credenciais || config || {});
+      for (const programa of cred.programas || []) {
+        if (programa?.ativo === false || !programa?.advertiserId) continue;
+        alvos.push({
+          marketplace: mp,
+          integracaoId: `advertiser:${String(programa.advertiserId).trim()}`
+        });
+      }
+    }
+
+    for (const alvo of alvos) {
+      const fingerprintAtual = credencialFingerprintIntegracao(alvo.marketplace, config, {
+        integracaoId: alvo.integracaoId
+      });
+      if (!fingerprintAtual) continue;
+      const anterior = obterSaudeIntegracao(clienteId, alvo.marketplace, alvo.integracaoId);
+      if (anterior?.credencialFingerprint === fingerprintAtual) continue;
+      registrarSaudeIntegracao(clienteId, alvo.marketplace, {
+        ...(alvo.integracaoId ? { integracaoId: alvo.integracaoId } : {}),
+        status: "desconhecida",
+        codigo: "credencial_alterada_sem_teste",
+        mensagem: "Saude da integracao desconhecida",
+        origem: "credencial_atual",
+        credencialFingerprint: fingerprintAtual,
+        ultimaProvaPositivaEm: null,
+        ultimaFalhaQualificadaEm: null,
+        falhaQualificadaPendenteEm: null,
+        falhasQualificadas: 0
+      });
+    }
+
+    return listarSaudeIntegracoes(clienteId);
+  }, null);
+}
+
 module.exports = {
   listarAlertasIntegracoes,
   registrarAlertaIntegracao,
   limparAlertaIntegracao,
   listarSaudeIntegracoes,
   obterSaudeIntegracao,
+  obterSaudeIntegracaoAtual,
+  listarSaudeIntegracoesAtuais,
   registrarSaudeIntegracao,
   registrarResultadoSaudeIntegracao,
   registrarSucessoIntegracao,
   classificarCodigoSaude,
-  detalhesSanitizados
+  detalhesSanitizados,
+  credencialFingerprintIntegracao,
+  reiniciarSaudeIntegracaoSeCredencialMudou
 };

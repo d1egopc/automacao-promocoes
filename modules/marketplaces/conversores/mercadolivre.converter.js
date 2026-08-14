@@ -1,3 +1,7 @@
+const {
+  credencialFingerprintIntegracao
+} = require("../../../utils/alertas-integracoes");
+
 function criarGerarLinkMercadoLivre({
   fetch: fetchImpl = global.fetch,
   buscarCsrfTokenMercadoLivre,
@@ -131,7 +135,8 @@ function criarGerarLinkMercadoLivre({
           if (typeof registrarSucessoIntegracao === "function") {
             registrarSucessoIntegracao(contexto.clienteId, "mercadolivre", {
               codigo: "afiliado_ok",
-              origem: "link_afiliado"
+              origem: "link_afiliado",
+              credencialFingerprint: credencialFingerprintIntegracao("mercadolivre", config)
             });
           }
         } catch {

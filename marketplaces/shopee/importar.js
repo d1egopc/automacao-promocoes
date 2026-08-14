@@ -7,6 +7,9 @@ const {
   tituloShopeeValido,
   urlShopeeValida
 } = require("./normalizacao");
+const {
+  credencialFingerprintIntegracao
+} = require("../../utils/alertas-integracoes");
 
 function normalizarPrecoApiShopee(valor) {
   if (valor === null || valor === undefined || String(valor).trim() === "") return null;
@@ -190,6 +193,7 @@ return async function importarShopee(url, config) {
         registrarSucessoIntegracao(clienteIdSaude, "shopee", {
           codigo: "api_valida",
           origem: "importer_shopee",
+          credencialFingerprint: credencialFingerprintIntegracao("shopee", config),
           ...detalhes
         });
       }

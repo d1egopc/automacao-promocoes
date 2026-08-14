@@ -18043,8 +18043,12 @@ const {
   limparAlertaIntegracao,
   listarSaudeIntegracoes,
   obterSaudeIntegracao,
+  obterSaudeIntegracaoAtual,
+  listarSaudeIntegracoesAtuais,
   registrarResultadoSaudeIntegracao,
-  registrarSucessoIntegracao
+  registrarSucessoIntegracao,
+  credencialFingerprintIntegracao,
+  reiniciarSaudeIntegracaoSeCredencialMudou
 } = alertasIntegracoes;
 
 function extrairTagMercadoLivreIntegracao(config = {}) {
@@ -18974,7 +18978,7 @@ app.get("/integracoes/alertas", (req, res) => {
   const payload = perf.etapaSync("payload", () => ({
     ok: true,
     status,
-    saude: listarSaudeIntegracoes(clienteId),
+    saude: listarSaudeIntegracoesAtuais(clienteId, integracoesPorCliente?.[clienteId] || {}),
     alertas
   }));
 
@@ -19024,7 +19028,7 @@ app.get("/integracoes", (req, res) => {
           : "incompleto",
         camposConfigurados,
         credenciais: credenciaisResposta,
-        saude: obterSaudeIntegracao(clienteId, marketplace),
+        saude: obterSaudeIntegracaoAtual(clienteId, marketplace, config),
         atualizadoEm: config?.atualizadoEm || null
       };
     }
@@ -19097,7 +19101,7 @@ if (!isAdminMaster(req)) {
 
 salvarIntegracoesPersistidas();
 
-limparAlertaIntegracaoSeValida(
+reiniciarSaudeIntegracaoSeCredencialMudou(
   clienteId,
   marketplace,
   integracoesPorCliente[clienteId][marketplace]
@@ -19157,14 +19161,39 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
       }));
 
       const resultadoTeste = await testarIntegracaoMarketplace(clienteId, marketplace, config || {});
+      const integracaoIdResultado = resultadoTeste.integracaoId || resultadoTeste.saude?.integracaoId || "";
+      const credencialFingerprint = credencialFingerprintIntegracao(marketplace, config || {}, {
+        integracaoId: integracaoIdResultado
+      });
+      const resultadoTesteAtual = {
+        ...resultadoTeste,
+        ...(credencialFingerprint ? { credencialFingerprint } : {}),
+        saude: resultadoTeste.saude
+          ? {
+            ...resultadoTeste.saude,
+            ...(credencialFingerprint ? { credencialFingerprint } : {})
+          }
+          : resultadoTeste.saude,
+        saudeFilhas: Array.isArray(resultadoTeste.saudeFilhas)
+          ? resultadoTeste.saudeFilhas.map(filha => {
+            const integracaoIdFilha = filha.integracaoId || "";
+            const fingerprintFilha = credencialFingerprintIntegracao(filha.marketplace || marketplace, config || {}, {
+              integracaoId: integracaoIdFilha
+            });
+            return {
+              ...filha,
+              ...(fingerprintFilha ? { credencialFingerprint: fingerprintFilha } : {})
+            };
+          })
+          : resultadoTeste.saudeFilhas
+      };
       const configAtualizada = salvarResultadoTesteIntegracao(clienteId, marketplace, {
-        status: resultadoTeste.status,
-        mensagem: resultadoTeste.mensagem
+        status: resultadoTesteAtual.status,
+        mensagem: resultadoTesteAtual.mensagem
       });
       let saudeAtual = null;
 
-      if (resultadoTeste.ok) {
-        const integracaoIdResultado = resultadoTeste.integracaoId || resultadoTeste.saude?.integracaoId || "";
+      if (resultadoTesteAtual.ok) {
         limparAlertaIntegracao(
           clienteId,
           marketplace,
@@ -19173,43 +19202,46 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
         console.log("[INTEGRACAO-TESTE-OK]", JSON.stringify({
           clienteId,
           marketplace,
-          status: resultadoTeste.status,
-          codigo: resultadoTeste.codigo
+          status: resultadoTesteAtual.status,
+          codigo: resultadoTesteAtual.codigo
         }));
       } else {
         registrarAlertaIntegracao(clienteId, marketplace, {
-          tipo: resultadoTeste.codigo || resultadoTeste.status,
+          tipo: resultadoTesteAtual.codigo || resultadoTesteAtual.status,
           status: "atencao",
-          mensagem: resultadoTeste.mensagem,
-          detalhes: resultadoTeste.detalhes || {}
+          mensagem: resultadoTesteAtual.mensagem,
+          detalhes: {
+            ...(resultadoTesteAtual.detalhes || {}),
+            ...(credencialFingerprint ? { credencialFingerprint } : {})
+          }
         });
 
-        const tagLog = resultadoTeste.status === "teste_nao_implementado"
+        const tagLog = resultadoTesteAtual.status === "teste_nao_implementado"
           ? "[INTEGRACAO-TESTE-NAO-IMPLEMENTADO]"
           : "[INTEGRACAO-TESTE-FALHA]";
 
         console.log(tagLog, JSON.stringify({
           clienteId,
           marketplace,
-          status: resultadoTeste.status,
-          codigo: resultadoTeste.codigo
+          status: resultadoTesteAtual.status,
+          codigo: resultadoTesteAtual.codigo
         }));
       }
 
       saudeAtual = registrarResultadoSaudeIntegracao(
         clienteId,
         marketplace,
-        resultadoTeste,
+        resultadoTesteAtual,
         "manual"
       );
 
       const resultado = {
-        ...resultadoTeste,
-        saude: saudeAtual || resultadoTeste.saude || null,
-        message: resultadoTeste.mensagem,
-        ultimoTesteEm: configAtualizada?.ultimoTesteEm || resultadoTeste.testadoEm,
-        ultimoStatus: resultadoTeste.status,
-        ultimaMensagem: resultadoTeste.mensagem
+        ...resultadoTesteAtual,
+        saude: saudeAtual || resultadoTesteAtual.saude || null,
+        message: resultadoTesteAtual.mensagem,
+        ultimoTesteEm: configAtualizada?.ultimoTesteEm || resultadoTesteAtual.testadoEm,
+        ultimoStatus: resultadoTesteAtual.status,
+        ultimaMensagem: resultadoTesteAtual.mensagem
       };
 
       const httpStatus = resultado.status === "credencial_ausente" ||
