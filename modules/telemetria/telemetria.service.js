@@ -2,15 +2,17 @@
 
 const crypto = require("crypto");
 const { queryEngine } = require("../engine/database");
-const { criarFluxoVivoShadowOfc } = require("../engine/ofc/live-flow.service");
-const { criarFluxoComercialShadowOfc } = require("../engine/ofc/commercial-flow.service");
 const { criarGateAbsorcaoShadowOfc } = require("../engine/ofc/absorption-gate.service");
+const { TTL_NORMAL_MS, TTL_TURBO_MS } = require("../engine/flow-manager/flow-manager.service");
+const { minutosLeaseJobsAtivos } = require("../engine/jobs.service");
 const { readGlobalJson, writeGlobalJson } = require("../../utils/storage");
 
 const AUDITORIAS_ARQUIVO = "telemetria-auditorias.json";
 const TTL_VALIDOS = new Set([15, 30, 60]);
 const LIMITE_MAXIMO_EVENTOS = 200;
 const LIMITE_PADRAO_EVENTOS = 50;
+const STATUS_JOBS_CIRCULAVEIS_TELEMETRIA = ["pendente", "pronto_para_importar"];
+const STATUS_JOBS_EM_CURSO_TELEMETRIA = ["processando", "importando"];
 const ROTAS_TOKEN_READ_ONLY = new Set([
   "/telemetria/saude",
   "/telemetria/eventos",
@@ -33,6 +35,22 @@ function inteiroLimitado(valor, padrao, minimo, maximo) {
   const n = Math.floor(Number(valor));
   if (!Number.isFinite(n)) return padrao;
   return Math.max(minimo, Math.min(maximo, n));
+}
+
+function minutosDeMs(valor, padrao) {
+  const n = Number(valor);
+  if (!Number.isFinite(n) || n <= 0) return padrao;
+  return Math.max(1, Math.ceil(n / 60_000));
+}
+
+function semanticaJobsVivosTelemetria() {
+  return {
+    statusCirculaveis: STATUS_JOBS_CIRCULAVEIS_TELEMETRIA,
+    statusEmCurso: STATUS_JOBS_EM_CURSO_TELEMETRIA,
+    ttlNormalMinutos: minutosDeMs(TTL_NORMAL_MS, 30),
+    ttlTurboMinutos: minutosDeMs(TTL_TURBO_MS, 10),
+    leaseMinutos: minutosLeaseJobsAtivos()
+  };
 }
 
 function texto(valor = "") {
@@ -356,23 +374,66 @@ async function consultarResumoRadarWorkspace(clienteId = "", janelaMinutos = 15)
   };
 }
 
-async function consultarPipelineWorkspace(clienteId = "", janelaMinutos = 15) {
-  const cliente = texto(clienteId);
-  if (!cliente) return null;
-
+async function consultarPipelineFrescoTelemetria({ clienteId = "", janelaMinutos = 15 } = {}) {
   const janela = inteiroLimitado(janelaMinutos, 15, 1, 120);
+  const cliente = texto(clienteId) || null;
+  const semantica = semanticaJobsVivosTelemetria();
   const resultado = await queryEngine(
-    `SELECT COUNT(*) FILTER (
-              WHERE status IN ('pendente', 'pronto_para_importar', 'processando', 'importando')
-            )::int AS jobs_vivos,
-            COUNT(*) FILTER (WHERE status IN ('pendente', 'pronto_para_importar'))::int AS circulaveis,
-            COUNT(*) FILTER (WHERE status = 'processando')::int AS processando,
-            COUNT(*) FILTER (WHERE status = 'importando')::int AS importando,
-            COUNT(*) FILTER (WHERE status IN ('processando', 'importando'))::int AS em_curso,
-            COUNT(*) FILTER (WHERE criado_em >= NOW() - ($2::int * INTERVAL '1 minute'))::int AS criados_janela
-       FROM engine_jobs_cliente
-      WHERE cliente_id = $1`,
-    [cliente, janela]
+    `/* telemetria_jobs_frescos */
+     WITH base_jobs_telemetria AS (
+       SELECT id,
+              cliente_id,
+              status,
+              criado_em,
+              COALESCE(atualizado_em, criado_em) AS referencia_em,
+              (
+                LOWER(COALESCE(metadata->>'tipoFluxo', '')) = 'cupom_turbo'
+                OR LOWER(COALESCE(metadata->>'tipoOperacional', '')) = 'cupom_turbo'
+                OR LOWER(COALESCE(metadata->'flow'->>'tipoFluxo', '')) = 'cupom_turbo'
+                OR LOWER(COALESCE(metadata->'metadataEvento'->>'tipoFluxo', '')) = 'cupom_turbo'
+                OR LOWER(COALESCE(metadata->>'cupomTurbo', '')) IN ('true', '1', 'sim')
+                OR LOWER(COALESCE(metadata->>'turbo', '')) IN ('true', '1', 'sim')
+              ) AS cupom_turbo
+         FROM engine_jobs_cliente
+        WHERE ($7::text IS NULL OR cliente_id = $7::text)
+     )
+     SELECT COUNT(*) FILTER (
+              WHERE status = ANY($1::text[])
+                AND referencia_em >= NOW() - ((CASE WHEN cupom_turbo THEN $4::int ELSE $3::int END) * INTERVAL '1 minute')
+            )::int AS circulaveis_frescos,
+            COUNT(*) FILTER (
+              WHERE status = ANY($2::text[])
+                AND referencia_em >= NOW() - ($5::int * INTERVAL '1 minute')
+            )::int AS em_curso_lease_valido,
+            COUNT(*) FILTER (
+              WHERE status = 'processando'
+                AND referencia_em >= NOW() - ($5::int * INTERVAL '1 minute')
+            )::int AS processando_lease_valido,
+            COUNT(*) FILTER (
+              WHERE status = 'importando'
+                AND referencia_em >= NOW() - ($5::int * INTERVAL '1 minute')
+            )::int AS importando_lease_valido,
+            COUNT(*) FILTER (WHERE status = ANY($1::text[]))::int AS backlog_circulavel,
+            COUNT(*) FILTER (WHERE status = ANY($2::text[]))::int AS em_curso_total,
+            COUNT(*) FILTER (
+              WHERE status = ANY($1::text[])
+                AND referencia_em < NOW() - ((CASE WHEN cupom_turbo THEN $4::int ELSE $3::int END) * INTERVAL '1 minute')
+            )::int AS circulaveis_velhos,
+            COUNT(*) FILTER (
+              WHERE status = ANY($2::text[])
+                AND referencia_em < NOW() - ($5::int * INTERVAL '1 minute')
+            )::int AS em_curso_lease_expirado,
+            COUNT(*) FILTER (WHERE criado_em >= NOW() - ($6::int * INTERVAL '1 minute'))::int AS criados_janela
+       FROM base_jobs_telemetria`,
+    [
+      semantica.statusCirculaveis,
+      semantica.statusEmCurso,
+      semantica.ttlNormalMinutos,
+      semantica.ttlTurboMinutos,
+      semantica.leaseMinutos,
+      janela,
+      cliente
+    ]
   );
 
   if (!resultado.ok) {
@@ -383,72 +444,180 @@ async function consultarPipelineWorkspace(clienteId = "", janelaMinutos = 15) {
   }
 
   const linha = linhaUnica(resultado, {});
+  const circulaveisFrescos = numero(linha.circulaveis_frescos);
+  const emCursoLeaseValido = numero(linha.em_curso_lease_valido);
+  const backlogCirculavel = numero(linha.backlog_circulavel);
+  const emCursoTotal = numero(linha.em_curso_total);
+  const latencias = await consultarLatenciasFrescasTelemetria({ clienteId: cliente, janelaMinutos: janela, semantica });
+
   return {
-    jobsVivos: numero(linha.jobs_vivos),
-    circulaveis: numero(linha.circulaveis),
-    processando: numero(linha.processando),
-    importando: numero(linha.importando),
-    emCursoProtegidos: numero(linha.em_curso),
+    jobsVivos: circulaveisFrescos + emCursoLeaseValido,
+    jobsVivosFrescos: circulaveisFrescos + emCursoLeaseValido,
+    backlogOperacional: backlogCirculavel + emCursoTotal,
+    circulaveis: circulaveisFrescos,
+    circulaveisFrescos,
+    circulaveisVelhos: numero(linha.circulaveis_velhos),
+    processando: numero(linha.processando_lease_valido),
+    importando: numero(linha.importando_lease_valido),
+    emCursoProtegidos: emCursoLeaseValido,
+    emCursoTotal,
+    emCursoLeaseExpirado: numero(linha.em_curso_lease_expirado),
     criadosNaJanela: numero(linha.criados_janela),
-    latencias: {
-      indisponivel: true,
-      motivo: "latencia_workspace_nao_materializada_na_v1"
-    }
+    latencias,
+    semantica
   };
+}
+
+async function consultarLatenciasFrescasTelemetria({ clienteId = "", janelaMinutos = 15, semantica = null } = {}) {
+  const janela = inteiroLimitado(janelaMinutos, 15, 1, 120);
+  const cliente = texto(clienteId) || null;
+  const regras = semantica || semanticaJobsVivosTelemetria();
+  const resultado = await queryEngine(
+    `/* telemetria_latencias_frescas */
+     WITH primeira_tentativa AS (
+       SELECT job_id,
+              MIN(criado_em) AS primeira_tentativa_em
+         FROM engine_processamentos
+        WHERE criado_em >= NOW() - ($1::int * INTERVAL '1 minute')
+          AND job_id IS NOT NULL
+        GROUP BY job_id
+     ),
+     base_latencias AS (
+       SELECT j.id,
+              j.cliente_id,
+              j.criado_em,
+              p.primeira_tentativa_em,
+              EXTRACT(EPOCH FROM (p.primeira_tentativa_em - j.criado_em)) * 1000 AS latencia_ms,
+              (
+                LOWER(COALESCE(j.metadata->>'tipoFluxo', '')) = 'cupom_turbo'
+                OR LOWER(COALESCE(j.metadata->>'tipoOperacional', '')) = 'cupom_turbo'
+                OR LOWER(COALESCE(j.metadata->'flow'->>'tipoFluxo', '')) = 'cupom_turbo'
+                OR LOWER(COALESCE(j.metadata->'metadataEvento'->>'tipoFluxo', '')) = 'cupom_turbo'
+                OR LOWER(COALESCE(j.metadata->>'cupomTurbo', '')) IN ('true', '1', 'sim')
+                OR LOWER(COALESCE(j.metadata->>'turbo', '')) IN ('true', '1', 'sim')
+              ) AS cupom_turbo
+         FROM primeira_tentativa p
+         JOIN engine_jobs_cliente j ON j.id = p.job_id
+        WHERE ($2::text IS NULL OR j.cliente_id = $2::text)
+          AND p.primeira_tentativa_em >= j.criado_em
+     ),
+     classificadas AS (
+       SELECT *,
+              criado_em >= NOW() - ((CASE WHEN cupom_turbo THEN $4::int ELSE $3::int END) * INTERVAL '1 minute') AS fresco
+         FROM base_latencias
+     )
+     SELECT (SELECT COUNT(*)::int FROM classificadas) AS total_candidatos,
+            (SELECT COUNT(*)::int FROM classificadas WHERE fresco) AS total_frescos,
+            (SELECT COUNT(*)::int FROM classificadas WHERE NOT fresco) AS total_contaminados,
+            (SELECT AVG(latencia_ms)::bigint FROM classificadas WHERE fresco) AS primeira_tentativa_media_ms,
+            (SELECT (PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY latencia_ms))::bigint FROM classificadas WHERE fresco) AS primeira_tentativa_mediana_ms,
+            (SELECT (PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latencia_ms))::bigint FROM classificadas WHERE fresco) AS primeira_tentativa_p95_ms`,
+    [janela, cliente, regras.ttlNormalMinutos, regras.ttlTurboMinutos]
+  );
+
+  if (!resultado.ok) {
+    return {
+      indisponivel: true,
+      motivo: resultado.motivo || "latencia_fresca_indisponivel"
+    };
+  }
+
+  const linha = linhaUnica(resultado, {});
+  const totalFrescos = numero(linha.total_frescos);
+  const totalContaminados = numero(linha.total_contaminados);
+  if (totalFrescos <= 0) {
+    return {
+      indisponivel: true,
+      motivo: "sem_populacao_fresca_confiavel",
+      amostras: 0
+    };
+  }
+  if (totalContaminados > 0) {
+    return {
+      indisponivel: true,
+      motivo: "populacao_contaminada_por_backlog",
+      amostrasFrescas: totalFrescos,
+      amostrasContaminadas: totalContaminados
+    };
+  }
+
+  return {
+    janelaOperacional: "fresca",
+    amostras: totalFrescos,
+    primeiraTentativaMediaMs: numero(linha.primeira_tentativa_media_ms, null),
+    primeiraTentativaMedianaMs: numero(linha.primeira_tentativa_mediana_ms, null),
+    primeiraTentativaP95Ms: numero(linha.primeira_tentativa_p95_ms, null)
+  };
+}
+
+async function consultarMarketplacesTelemetria({ clienteId = "", janelaMinutos = 15 } = {}) {
+  const janela = inteiroLimitado(janelaMinutos, 15, 1, 120);
+  const cliente = texto(clienteId) || null;
+  const resultado = await queryEngine(
+    `/* telemetria_marketplaces */
+     SELECT COALESCE(NULLIF(TRIM(marketplace), ''), 'indefinido') AS marketplace,
+            COUNT(*)::int AS eventos,
+            COUNT(*) FILTER (
+              WHERE tipo_evento IN ('oferta_universal_criada', 'oferta_criada', 'importer_oferta_universal')
+            )::int AS ofertas,
+            COUNT(*) FILTER (
+              WHERE tipo_evento IN ('executor_enviado', 'enviado', 'fila_executor_enviado')
+            )::int AS envios,
+            COUNT(*) FILTER (
+              WHERE tipo_evento ILIKE '%bloque%'
+                 OR tipo_evento ILIKE '%erro%'
+                 OR tipo_evento ILIKE '%retid%'
+                 OR tipo_evento ILIKE '%rejeit%'
+                 OR tipo_evento ILIKE '%nao_aceita%'
+                 OR metadata::text ILIKE '%bloque%'
+                 OR metadata::text ILIKE '%erro%'
+            )::int AS bloqueios
+       FROM engine_eventos_comerciais
+      WHERE ocorrido_em >= NOW() - ($1::int * INTERVAL '1 minute')
+        AND ($2::text IS NULL OR cliente_id = $2::text)
+      GROUP BY COALESCE(NULLIF(TRIM(marketplace), ''), 'indefinido')
+      ORDER BY eventos DESC, marketplace ASC
+      LIMIT 40`,
+    [janela, cliente]
+  );
+
+  if (!resultado.ok) {
+    return {
+      indisponivel: true,
+      motivo: resultado.motivo || "marketplaces_indisponiveis"
+    };
+  }
+
+  return linhas(resultado).map(item => ({
+    marketplace: item.marketplace,
+    eventos: numero(item.eventos),
+    ofertas: numero(item.ofertas),
+    envios: numero(item.envios),
+    bloqueios: numero(item.bloqueios)
+  }));
 }
 
 async function consultarSaudeTelemetria(opcoes = {}) {
   const janelaMinutos = inteiroLimitado(opcoes.janelaMinutos, 15, 1, 120);
   const escopo = opcoes.escopo || { tipo: "plataforma" };
-  const [radar, fluxoVivo, fluxoComercial, gate] = await Promise.all([
+  const clienteEscopo = escopo.tipo === "workspace" ? texto(escopo.clienteId) : "";
+  const [radar, gate, pipelineFresco, marketplaces] = await Promise.all([
     escopo.tipo === "workspace"
       ? consultarResumoRadarWorkspace(escopo.clienteId, janelaMinutos)
       : consultarResumoRadar(janelaMinutos),
-    criarFluxoVivoShadowOfc({}, { janelaMinutos }),
-    criarFluxoComercialShadowOfc({ janelaMinutos }),
-    criarGateAbsorcaoShadowOfc({ janelaMinutos })
+    criarGateAbsorcaoShadowOfc({ janelaMinutos }),
+    consultarPipelineFrescoTelemetria({ clienteId: clienteEscopo, janelaMinutos }),
+    consultarMarketplacesTelemetria({ clienteId: clienteEscopo, janelaMinutos })
   ]);
 
   const workspacesBrutos = Array.isArray(gate?.workspaces) ? gate.workspaces : [];
   const workspacesFiltrados = escopo.tipo === "workspace"
     ? workspacesBrutos.filter(item => String(item.workspaceId || "") === String(escopo.clienteId || ""))
     : workspacesBrutos;
-  const pipelineWorkspace = escopo.tipo === "workspace"
-    ? await consultarPipelineWorkspace(escopo.clienteId, janelaMinutos)
-    : null;
-  const marketplacesGlobais = Array.isArray(fluxoComercial?.segmentacao?.porMarketplace)
-    ? fluxoComercial.segmentacao.porMarketplace.map(item => ({
-        marketplace: item.marketplace,
-        etapa: item.tipo_evento,
-        total: numero(item.total)
-      }))
-    : [];
-  const marketplacesWorkspace = escopo.tipo === "workspace"
-    ? Object.entries(workspacesFiltrados.reduce((acc, workspace) => {
-        for (const [marketplace, total] of Object.entries(workspace.porMarketplace || {})) {
-          acc[marketplace] = (acc[marketplace] || 0) + numero(total);
-        }
-        return acc;
-      }, {})).map(([marketplace, total]) => ({ marketplace, total }))
-    : null;
-  const pipeline = escopo.tipo === "workspace"
-    ? (pipelineWorkspace || {
-        indisponivel: true,
-        motivo: "pipeline_workspace_indisponivel"
-      })
-    : {
-        jobsVivos: fluxoVivo.ok ? numero(fluxoVivo.totalJobsVivos) : null,
-        circulaveis: fluxoVivo.ok ? numero(fluxoVivo.totalCirculaveis) : null,
-        processando: fluxoVivo.ok ? numero(fluxoVivo.saudeJobsEmCurso?.processandoTotal) : null,
-        importando: fluxoVivo.ok ? numero(fluxoVivo.saudeJobsEmCurso?.importandoTotal) : null,
-        emCursoProtegidos: fluxoVivo.ok ? numero(fluxoVivo.totalEmCursoProtegidos) : null,
-        latencias: fluxoVivo.ok ? {
-          radarOfertaMediaMs: fluxoVivo.tempoMedioRadarOfertaMs,
-          primeiraTentativaMediaMs: fluxoVivo.tempoMedioAtePrimeiraTentativaMs,
-          primeiraTentativaMedianaMs: fluxoVivo.primeiraTentativa?.medianaMs ?? null,
-          primeiraTentativaP95Ms: fluxoVivo.primeiraTentativa?.p95Ms ?? null
-        } : { indisponivel: true, motivo: fluxoVivo.motivo || "fluxo_vivo_indisponivel" }
-      };
+  const pipeline = pipelineFresco || {
+    indisponivel: true,
+    motivo: "pipeline_fresco_indisponivel"
+  };
 
   return {
     ok: true,
@@ -475,11 +644,12 @@ async function consultarSaudeTelemetria(opcoes = {}) {
       },
       marketplaces: sanitizarValor(item.porMarketplace || {})
     })),
-    marketplaces: escopo.tipo === "workspace" ? marketplacesWorkspace : marketplacesGlobais,
+    marketplaces: Array.isArray(marketplaces) ? marketplaces : [],
     autoClean: {
       fonte: "logs/select_operacional",
       disponivel: false,
-      motivo: "auto_clean_nao_persiste_resumo_por_ciclo_na_v1"
+      motivo: "resumo_por_ciclo_indisponivel",
+      mensagem: "Resumo por ciclo indisponível na V1"
     },
     fontes: {
       radar: "engine_eventos_brutos",

@@ -22,6 +22,50 @@ require.cache[databasePath] = {
         throw new Error("SELECT segredo FROM /data/credenciais.env WHERE secret='abc'");
       }
       queriesDb.push({ sql, params });
+      if (sql.includes("telemetria_jobs_frescos")) {
+        return {
+          ok: true,
+          resultado: {
+            rows: [{
+              circulaveis_frescos: 2,
+              em_curso_lease_valido: 2,
+              processando_lease_valido: 1,
+              importando_lease_valido: 1,
+              backlog_circulavel: 900,
+              em_curso_total: 277,
+              circulaveis_velhos: 898,
+              em_curso_lease_expirado: 275,
+              criados_janela: 4
+            }]
+          }
+        };
+      }
+      if (sql.includes("telemetria_latencias_frescas")) {
+        return {
+          ok: true,
+          resultado: {
+            rows: [{
+              total_candidatos: 3,
+              total_frescos: 2,
+              total_contaminados: 1,
+              primeira_tentativa_media_ms: 1200,
+              primeira_tentativa_mediana_ms: 1000,
+              primeira_tentativa_p95_ms: 1800
+            }]
+          }
+        };
+      }
+      if (sql.includes("telemetria_marketplaces")) {
+        const workspace = params[1] === "user_a";
+        return {
+          ok: true,
+          resultado: {
+            rows: [workspace
+              ? { marketplace: "marketplace_dinamico", eventos: 7, ofertas: 2, envios: 1, bloqueios: 1 }
+              : { marketplace: "marketplace_global", eventos: 14, ofertas: 6, envios: 4, bloqueios: 2 }]
+          }
+        };
+      }
       if (/COUNT\(DISTINCT e\.id\)::int AS eventos_recentes/.test(sql)) {
         return {
           ok: true,
@@ -149,6 +193,27 @@ require.cache[gatePath] = {
         }
       ]
     })
+  }
+};
+
+const flowManagerPath = path.join(__dirname, "..", "modules", "engine", "flow-manager", "flow-manager.service.js");
+require.cache[flowManagerPath] = {
+  id: flowManagerPath,
+  filename: flowManagerPath,
+  loaded: true,
+  exports: {
+    TTL_NORMAL_MS: 30 * 60 * 1000,
+    TTL_TURBO_MS: 10 * 60 * 1000
+  }
+};
+
+const jobsServicePath = path.join(__dirname, "..", "modules", "engine", "jobs.service.js");
+require.cache[jobsServicePath] = {
+  id: jobsServicePath,
+  filename: jobsServicePath,
+  loaded: true,
+  exports: {
+    minutosLeaseJobsAtivos: () => 30
   }
 };
 
@@ -293,13 +358,38 @@ async function request(app, method, url, { token = "", body } = {}) {
   assert.strictEqual(saudeWorkspace.radar.eventosRecentes, 2);
   assert.notStrictEqual(saudeWorkspace.radar.eventosRecentes, 99);
   assert.deepStrictEqual(saudeWorkspace.workspaces.map(item => item.clienteId), ["user_a"]);
-  assert.deepStrictEqual(saudeWorkspace.marketplaces, [{ marketplace: "marketplace_dinamico", total: 1 }]);
+  assert.strictEqual(saudeWorkspace.pipeline.jobsVivos, 4);
+  assert.strictEqual(saudeWorkspace.pipeline.jobsVivosFrescos, 4);
+  assert.strictEqual(saudeWorkspace.pipeline.backlogOperacional, 1177);
+  assert.strictEqual(saudeWorkspace.pipeline.circulaveisVelhos, 898);
+  assert.strictEqual(saudeWorkspace.pipeline.emCursoLeaseExpirado, 275);
+  assert.strictEqual(saudeWorkspace.pipeline.semantica.ttlNormalMinutos, 30);
+  assert.strictEqual(saudeWorkspace.pipeline.semantica.ttlTurboMinutos, 10);
+  assert.strictEqual(saudeWorkspace.pipeline.semantica.leaseMinutos, 30);
+  assert.strictEqual(saudeWorkspace.pipeline.latencias.indisponivel, true);
+  assert.strictEqual(saudeWorkspace.pipeline.latencias.motivo, "populacao_contaminada_por_backlog");
+  assert.deepStrictEqual(saudeWorkspace.marketplaces, [{ marketplace: "marketplace_dinamico", eventos: 7, ofertas: 2, envios: 1, bloqueios: 1 }]);
+  assert.strictEqual(saudeWorkspace.autoClean.disponivel, false);
+  assert.strictEqual(saudeWorkspace.autoClean.motivo, "resumo_por_ciclo_indisponivel");
+  assert.strictEqual(JSON.stringify(saudeWorkspace.autoClean).includes("auto_clean_nao_persiste"), false);
 
   const saudePlataforma = await service.consultarSaudeTelemetria({
     janelaMinutos: 15,
     escopo: { tipo: "plataforma" }
   });
   assert.strictEqual(saudePlataforma.radar.eventosRecentes, 99);
+  assert.strictEqual(saudePlataforma.pipeline.jobsVivos, 4);
+  assert.deepStrictEqual(saudePlataforma.marketplaces, [{ marketplace: "marketplace_global", eventos: 14, ofertas: 6, envios: 4, bloqueios: 2 }]);
+  assert.strictEqual(saudePlataforma.marketplaces.filter(item => item.marketplace === "marketplace_global").length, 1);
+  const consultaJobs = queriesDb.find(item => item.sql.includes("telemetria_jobs_frescos"));
+  assert(consultaJobs, "saude deve consultar jobs frescos com semantica propria");
+  assert.deepStrictEqual(consultaJobs.params[0], ["pendente", "pronto_para_importar"]);
+  assert.deepStrictEqual(consultaJobs.params[1], ["processando", "importando"]);
+  assert.strictEqual(consultaJobs.params[2], 30);
+  assert.strictEqual(consultaJobs.params[3], 10);
+  assert.strictEqual(consultaJobs.params[4], 30);
+  assert(consultaJobs.sql.includes("circulaveis_velhos"), "pendente/pronto velhos devem ser separados do rio fresco");
+  assert(consultaJobs.sql.includes("em_curso_lease_expirado"), "lease expirado deve sair de jobs vivos");
 
   const app = express();
   app.use(express.json());
@@ -348,7 +438,10 @@ async function request(app, method, url, { token = "", body } = {}) {
   assert(fonteRotas.includes('router.post("/auditoria/revogar"'), "revogacao administrativa deve existir");
 
   const fonteService = fs.readFileSync(path.join(__dirname, "..", "modules", "telemetria", "telemetria.service.js"), "utf8");
-  assert(fonteService.includes("criarFluxoVivoShadowOfc"), "saude deve reaproveitar fluxo vivo existente");
+  assert(fonteService.includes("TTL_NORMAL_MS"), "saude deve usar TTL normal homologado");
+  assert(fonteService.includes("TTL_TURBO_MS"), "saude deve usar TTL turbo homologado");
+  assert(fonteService.includes("minutosLeaseJobsAtivos"), "saude deve usar lease homologado dos jobs ativos");
+  assert(fonteService.includes("telemetria_jobs_frescos"), "saude deve consultar rio fresco, nao backlog bruto");
   assert(fonteService.includes("criarGateAbsorcaoShadowOfc"), "saude deve reaproveitar gate existente");
   assert(fonteService.includes("engine_eventos_comerciais"), "eventos comerciais reais devem ser fonte");
   assert(!/D1|Wolf|Roger|Mercado Livre|Shopee|Amazon|AliExpress|AWIN/.test(fonteService), "telemetria nao deve hardcodar workspace/marketplace");
