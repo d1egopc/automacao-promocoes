@@ -21,6 +21,7 @@ const agora = "2026-08-15T10:00:00.000Z";
 const urlProduto = "https://www.magazineluiza.com.br/smart-tv-50/p/abc123/et/elit/";
 const urlRealA07 = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a07/p/240466500/te/ga07/";
 const urlA17Divergente = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a17/p/240575800/te/ga17/";
+const urlNightCaviar = "https://www.magazinevoce.com.br/d1egopc/night-caviar-100ml-paris-elysses/p/be172949ba/pf/ppfm/";
 const htmlCompleto = `
   <html>
     <head>
@@ -107,6 +108,25 @@ function deps(comPromoter = true, parserOptions = {}) {
 }
 
 {
+  const oferta = await importarProdutoMagaluManualV2(urlNightCaviar, deps(true, {
+    html: `
+      <link rel="canonical" href="${urlNightCaviar}">
+      <meta property="og:title" content="Night Caviar 100ml - Paris Elysses">
+      <meta property="og:image" content="https://a-static.mlcdn.com.br/night.jpg">
+      <meta property="product:price:amount" content="78.90">
+      <p>Preco anterior R$ 99,90</p>
+      <p>1x de R$ 78,90 sem juros</p>
+    `
+  }));
+
+  assert.strictEqual(oferta.titulo, "Night Caviar 100ml - Paris Elysses");
+  assert.strictEqual(oferta.precoAtual, "R$\u00a078,90");
+  assert.strictEqual(oferta.precoAnterior, "R$\u00a099,90");
+  assert.strictEqual(oferta.urlAfiliada, urlNightCaviar, "deep link /d1egopc deve ser aceito como loja do promoter");
+  assert.ok(oferta.fonteImportacao.camposConfiaveis.includes("urlAfiliada"));
+}
+
+{
   const oferta = await importarProdutoMagaluManualV2(urlRealA07, deps(true, {
     html: `
       <link rel="canonical" href="${urlA17Divergente}">
@@ -146,6 +166,19 @@ function deps(comPromoter = true, parserOptions = {}) {
   assert.strictEqual(oferta.imagem, "");
   assert.strictEqual(oferta.urlAfiliada, "", "CAPTCHA nao pode gerar afiliado de recomendacao");
   assert.ok(oferta.fonteImportacao.avisos.includes("magalu_captcha_detectado"));
+}
+
+{
+  const oferta = await importarProdutoMagaluManualV2(urlNightCaviar, deps(true, {
+    html: "<html><head><title>Magazine Luiza | Não é possível acessar a página</title></head><body>Não é possível acessar a página</body></html>"
+  }));
+
+  assert.strictEqual(oferta.titulo, "");
+  assert.strictEqual(oferta.precoAtual, "");
+  assert.strictEqual(oferta.imagem, "");
+  assert.strictEqual(oferta.urlAfiliada, "");
+  assert.ok(oferta.fonteImportacao.avisos.includes("magalu_pagina_indisponivel"));
+  assert.ok(oferta.fonteImportacao.avisos.includes("magalu_url_afiliada_vazia_sem_prova"));
 }
 
 {

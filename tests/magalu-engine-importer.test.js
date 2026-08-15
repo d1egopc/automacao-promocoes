@@ -14,10 +14,14 @@ const {
   montarOfertaUniversalEngine,
   validarContratoOfertaUniversal
 } = require("../modules/engine/oferta-universal.contract");
+const {
+  resolverImagemEngineFallback
+} = require("../modules/engine/importer/importer.service");
 
 const urlProduto = "https://www.magazineluiza.com.br/smart-tv-50/p/abc123/et/elit/";
 const urlRealA07 = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a07/p/240466500/te/ga07/";
 const urlA17Divergente = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a17/p/240575800/te/ga17/";
+const urlNightCaviar = "https://www.magazinevoce.com.br/d1egopc/night-caviar-100ml-paris-elysses/p/be172949ba/pf/ppfm/";
 const htmlProduto = `
   <html>
     <head>
@@ -146,6 +150,34 @@ async function testarUrlOriginalNaoViraAfiliada() {
   assert.strictEqual(resultado.metadata.provaAfiliado.comprovado, false);
 }
 
+async function testarDeepLinkSemPrefixoPromoter() {
+  const pacote = deps({
+    html: `
+      <link rel="canonical" href="${urlNightCaviar}">
+      <meta property="og:title" content="Night Caviar 100ml - Paris Elysses">
+      <meta property="og:image" content="https://a-static.mlcdn.com.br/night.jpg">
+      <meta property="product:price:amount" content="78.90">
+      <span>Preco anterior R$ 99,90</span>
+    `
+  });
+
+  const resultado = await importarProdutoMagaluEngine({
+    job: { id: 504, evento_id: 604, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento: {
+      texto_original: "Night Caviar 100ml - Paris Elysses\nPor R$ 78,90\nLink: " + urlNightCaviar,
+      links_extraidos: [urlNightCaviar]
+    },
+    links: [linkRow(4, urlNightCaviar)],
+    deps: pacote.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.titulo, "Night Caviar 100ml - Paris Elysses");
+  assert.strictEqual(resultado.produtoId, "be172949ba");
+  assert.strictEqual(resultado.linkAfiliado, urlNightCaviar, "deep link /d1egopc deve ser comprovado para o workspace");
+  assert.strictEqual(resultado.preco, 78.9);
+}
+
 async function testarIntegracaoAusenteBloqueiaImportacaoAutomatica() {
   const pacote = deps({ promoterId: "" });
   const resultado = await importarMagaluFixture({ depsExtras: pacote.deps });
@@ -185,12 +217,40 @@ async function testarEngineNaoTrocaProdutoPorCanonicaDivergente() {
     deps: pacote.deps
   });
 
-  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "titulo_indisponivel");
   assert.strictEqual(chamadasGerador.length, 1);
   assert.strictEqual(chamadasGerador[0].url, urlRealA07);
-  assert.ok(!resultado.linkAfiliado.includes("240575800"));
-  assert.strictEqual(resultado.produtoId, "240466500");
-  assert.ok(resultado.metadata.produto.avisos.includes("magalu_canonica_produto_divergente_ignorada"));
+  assert.ok(!JSON.stringify(resultado).includes("240575800"));
+}
+
+async function testarPaginaIndisponivelNaoGeraFatosEngine() {
+  const chamadasGerador = [];
+  const pacote = deps({
+    html: "<html><head><title>Magazine Luiza | Não é possível acessar a página</title></head><body>Não é possível acessar a página</body></html>",
+    gerarLinkAfiliadoMagaluSeguro: (url, promoterId) => {
+      chamadasGerador.push({ url, promoterId });
+      return {
+        urlAfiliada: url,
+        comprovado: true,
+        avisos: []
+      };
+    }
+  });
+
+  const resultado = await importarProdutoMagaluEngine({
+    job: { id: 505, evento_id: 605, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento: {
+      texto_original: "Night Caviar\nPor R$ 78,90\nLink: " + urlNightCaviar,
+      links_extraidos: [urlNightCaviar]
+    },
+    links: [linkRow(5, urlNightCaviar)],
+    deps: pacote.deps
+  });
+
+  assert.strictEqual(chamadasGerador.length, 0, "pagina indisponivel nao deve gerar afiliado");
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "titulo_indisponivel");
 }
 
 async function testarCaptchaNaoGeraAfiliadoEngine() {
@@ -249,6 +309,58 @@ async function testarOfertaUniversalValida() {
   assert.strictEqual(ofertaUniversal.afiliacao.urlAfiliada, resultado.linkAfiliado);
 }
 
+async function testarImagemRadarPreservadaQuandoResolverSemImagem() {
+  const imagemRadar = "https://cdn.optimus.test/radar-magalu.jpg";
+  const htmlSemImagem = `
+    <link rel="canonical" href="${urlProduto}">
+    <meta property="og:title" content="Smart TV Magalu 50">
+    <meta property="product:price:amount" content="1999.90">
+  `;
+  const pacote = deps({ html: htmlSemImagem });
+  const job = { id: 506, evento_id: 606, cliente_id: "workspace_magalu", marketplace: "magalu" };
+  const evento = {
+    id: 606,
+    texto_original: "Smart TV Magalu 50\nPor R$ 1.777,00\nLink do produto:\n" + urlProduto,
+    links_extraidos: [urlProduto],
+    metadata: { imagem: imagemRadar }
+  };
+  const link = linkRow(6, urlProduto);
+  const resultado = await importarProdutoMagaluEngine({
+    job,
+    evento,
+    links: [link],
+    deps: pacote.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.imagem, "", "resolver factual sem imagem deve continuar sem fallback Magalu especifico");
+
+  const resolucaoImagem = resolverImagemEngineFallback({
+    oferta: resultado,
+    ofertaEntrada: resultado,
+    evento,
+    job,
+    link
+  });
+  const ofertaComImagemRadar = {
+    ...resultado,
+    imagem: resolucaoImagem.imagem,
+    imagemOrigem: resolucaoImagem.origem
+  };
+  const ofertaUniversal = montarOfertaUniversalEngine({
+    oferta: ofertaComImagemRadar,
+    ofertaEntrada: resultado,
+    job,
+    evento,
+    link,
+    metadata: resultado.metadata
+  });
+
+  assert.strictEqual(resolucaoImagem.imagem, imagemRadar);
+  assert.strictEqual(resolucaoImagem.origem, "evento.metadata.imagem");
+  assert.strictEqual(ofertaUniversal.midia.imagemPrincipal, imagemRadar);
+}
+
 function testarClassificadorDeLinksMagalu() {
   const produto = escolherProdutoPrincipal([
     { url: "https://magazineluiza.onelink.me/589508454/herbiqvt", campo: "url_original", link: {} },
@@ -303,10 +415,13 @@ function testarRegistriesPipelineUnico() {
   await testarImportacaoCompletaPreservaPrecoRadar();
   await testarSemPrecoRadarUsaPagina();
   await testarUrlOriginalNaoViraAfiliada();
+  await testarDeepLinkSemPrefixoPromoter();
   await testarIntegracaoAusenteBloqueiaImportacaoAutomatica();
   await testarEngineNaoTrocaProdutoPorCanonicaDivergente();
+  await testarPaginaIndisponivelNaoGeraFatosEngine();
   await testarCaptchaNaoGeraAfiliadoEngine();
   await testarOfertaUniversalValida();
+  await testarImagemRadarPreservadaQuandoResolverSemImagem();
   testarClassificadorDeLinksMagalu();
   testarRegistriesPipelineUnico();
 

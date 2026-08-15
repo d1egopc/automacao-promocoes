@@ -11,11 +11,13 @@ const {
   montarUrlLojaProdutoMagalu,
   normalizarPromoterIdMagalu,
   normalizarSlugLojaMagalu,
+  slugsLojaMagalu,
   caminhoPareceProdutoMagalu
 } = require("../modules/marketplaces/magalu/magalu-affiliate-link");
 
 const urlProduto = "https://www.magazineluiza.com.br/smart-tv-50/p/abc123/et/elit/?utm_source=x";
 const urlLojaCorreta = "https://www.magazinevoce.com.br/magazined1egopc/smart-tv-50/p/abc123/et/elit/";
+const urlLojaSemPrefixo = "https://www.magazinevoce.com.br/d1egopc/night-caviar-100ml-paris-elysses/p/be172949ba/pf/ppfm/";
 const urlOutraLoja = "https://www.magazinevoce.com.br/magazineoutraloja/smart-tv-50/p/abc123/et/elit/";
 const oneLinkPortal = "https://magazineluiza.onelink.me/589508454/herbiqvt";
 
@@ -23,6 +25,8 @@ assert.strictEqual(normalizarPromoterIdMagalu(" d1egopc "), "d1egopc");
 assert.strictEqual(normalizarPromoterIdMagalu("https://www.magazinevoce.com.br/magazined1egopc/"), "magazined1egopc");
 assert.strictEqual(normalizarSlugLojaMagalu("d1egopc"), "magazined1egopc");
 assert.strictEqual(normalizarSlugLojaMagalu("magazined1egopc"), "magazined1egopc");
+assert.deepStrictEqual(slugsLojaMagalu("d1egopc").sort(), ["d1egopc", "magazined1egopc"].sort());
+assert.deepStrictEqual(slugsLojaMagalu("magazined1egopc").sort(), ["d1egopc", "magazined1egopc"].sort());
 
 const montado = montarUrlLojaProdutoMagalu(urlProduto, normalizarSlugLojaMagalu("d1egopc"));
 assert.strictEqual(
@@ -50,6 +54,12 @@ const lojaCorreta = gerarLinkAfiliadoMagaluSeguro(urlLojaCorreta, "d1egopc");
 assert.strictEqual(lojaCorreta.comprovado, true);
 assert.strictEqual(lojaCorreta.tipoLink, "magazinevoce_loja");
 assert.strictEqual(lojaCorreta.urlAfiliada, urlLojaCorreta);
+
+const lojaSemPrefixo = gerarLinkAfiliadoMagaluSeguro(urlLojaSemPrefixo, "d1egopc");
+assert.strictEqual(lojaSemPrefixo.comprovado, true, "deep link /d1egopc deve pertencer ao promoter configurado");
+assert.strictEqual(lojaSemPrefixo.tipoLink, "magazinevoce_loja");
+assert.strictEqual(lojaSemPrefixo.urlAfiliada, urlLojaSemPrefixo);
+assert.strictEqual(linkPertenceLojaMagalu(urlLojaSemPrefixo, "magazined1egopc"), true);
 
 const lojaDivergente = gerarLinkAfiliadoMagaluSeguro(urlOutraLoja, "d1egopc");
 assert.strictEqual(lojaDivergente.comprovado, false);

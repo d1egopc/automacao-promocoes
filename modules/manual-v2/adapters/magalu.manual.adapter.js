@@ -4,9 +4,11 @@ const {
   normalizarOfertaManualV2
 } = require("../manual-offers.contract");
 const {
-  consultarProdutoMagalu,
   produtoIdPorUrl
 } = require("../../marketplaces/magalu/magalu-parser");
+const {
+  resolverFatosMagalu
+} = require("../../marketplaces/magalu/magalu-factual-resolver");
 const {
   gerarLinkAfiliadoMagaluSeguro
 } = require("../../marketplaces/magalu/magalu-affiliate-link");
@@ -60,12 +62,18 @@ function urlAfiliavelMesmoProdutoMagalu(dados = {}, urlOriginal = "", avisos = [
   if (avisos.includes("magalu_captcha_detectado")) {
     return "";
   }
+  if (avisos.includes("magalu_pagina_indisponivel")) {
+    return "";
+  }
+  if (avisos.includes("magalu_link_loja_divergente")) {
+    return "";
+  }
 
   const produtoIdOriginal = produtoIdPorUrl(urlOriginal);
   const candidatas = [
+    urlOriginal,
     dados.urlCanonica,
     dados.urlOriginal,
-    urlOriginal
   ];
 
   for (const candidata of candidatas) {
@@ -97,9 +105,9 @@ async function importarProdutoMagaluManualV2(urlManual = "", opcoes = {}) {
   }
 
   const clienteId = texto(opcoes.clienteId) || "admin";
-  const parserMagalu = typeof opcoes.consultarProdutoMagalu === "function"
-    ? opcoes.consultarProdutoMagalu
-    : consultarProdutoMagalu;
+  const resolverMagalu = typeof opcoes.resolverFatosMagalu === "function"
+    ? opcoes.resolverFatosMagalu
+    : resolverFatosMagalu;
   const gerarLinkSeguro = typeof opcoes.gerarLinkAfiliadoMagaluSeguro === "function"
     ? opcoes.gerarLinkAfiliadoMagaluSeguro
     : gerarLinkAfiliadoMagaluSeguro;
@@ -108,9 +116,19 @@ async function importarProdutoMagaluManualV2(urlManual = "", opcoes = {}) {
     : null;
   const promoterId = texto(integracao?.credenciais?.promoterId || integracao?.promoterId);
 
-  const fatos = await parserMagalu(urlOriginal, opcoes.parserOptions || {});
-  const dados = fatos && typeof fatos === "object" ? fatos : {};
-  const avisos = listaUnicaTexto(dados.avisos || []);
+  if (!promoterId) {
+    // O resolver ainda pode obter fatos publicos sem afiliacao configurada.
+  }
+
+  const resolucao = await resolverMagalu(
+    { urlOriginal, promoterId },
+    {
+      consultarProdutoMagalu: opcoes.consultarProdutoMagalu,
+      parserOptions: opcoes.parserOptions || {}
+    }
+  );
+  const dados = resolucao?.fatos && typeof resolucao.fatos === "object" ? resolucao.fatos : {};
+  const avisos = listaUnicaTexto([...(resolucao?.avisos || []), ...(dados.avisos || [])]);
 
   if (!promoterId) {
     avisos.push("magalu_integracao_nao_configurada_url_afiliada_vazia");
@@ -151,6 +169,8 @@ async function importarProdutoMagaluManualV2(urlManual = "", opcoes = {}) {
         marketplaceDetectado: "magalu",
         adapter: ADAPTER_MAGALU_MANUAL_V2,
         parseOnly: true,
+        fonteUsada: resolucao?.fonteUsada || "",
+        tentativas: Array.isArray(resolucao?.tentativas) ? resolucao.tentativas : [],
         avisos
       }
     },

@@ -105,6 +105,21 @@ function contemCaptchaMagalu(html = "") {
     /data-testid=["']captcha/i.test(conteudo);
 }
 
+function contemPaginaIndisponivelMagalu(html = "") {
+  const conteudo = limparTextoMagalu(String(html || ""))
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const titulo = tituloPagina(html)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  return /magazine luiza\s*\|\s*nao e possivel acessar a pagina/i.test(titulo) ||
+    /\bnao e possivel acessar a pagina\b/i.test(conteudo) ||
+    /\bpagina indisponivel\b/i.test(conteudo);
+}
+
 function idProdutoJsonLd(produto = {}) {
   return limparTextoMagalu(produto?.sku || produto?.productID || produto?.mpn || "");
 }
@@ -155,6 +170,28 @@ function escolherUrlCanonicaSegura({ resultado, conteudo, urlOriginal = "", urlF
   if (urlProdutoMagaluValida(urlOriginalLimpa)) {
     resultado.urlCanonica = urlOriginalLimpa;
   }
+}
+
+function conteudoComProdutoDivergente({ conteudo = "", urlOriginal = "", urlFinal = "", produtoJsonLd = null } = {}) {
+  const produtoIdOriginal = produtoIdPorUrl(limparUrlMagalu(urlOriginal));
+  if (!produtoIdOriginal) return false;
+
+  const base = urlFinal || urlOriginal;
+  const candidatas = [
+    extrairLinkCanonical(conteudo, base),
+    limparUrlMagalu(extrairAtributoMeta(conteudo, ["og:url"]), base),
+    limparUrlMagalu(urlFinal || "")
+  ].filter(Boolean);
+
+  for (const candidata of candidatas) {
+    const produtoIdCandidato = produtoIdPorUrl(candidata);
+    if (produtoIdCandidato && produtoIdCandidato !== produtoIdOriginal) {
+      return true;
+    }
+  }
+
+  const idJsonLd = idProdutoJsonLd(produtoJsonLd);
+  return Boolean(idJsonLd && idJsonLd !== produtoIdOriginal);
 }
 
 function normalizarPrecoMagalu(valor) {
@@ -395,6 +432,17 @@ function parseMagaluProdutoHtml({ urlOriginal = "", html = "", urlFinal = "" } =
     return resultado;
   }
 
+  if (contemPaginaIndisponivelMagalu(conteudo)) {
+    adicionarAviso(resultado.avisos, "magalu_pagina_indisponivel");
+    if (produtoIdOriginal) {
+      resultado.produtoId = produtoIdOriginal;
+      resultado.codigo = produtoIdOriginal;
+      resultado.metadata.fontes.produtoId = "urlOriginal";
+    }
+    adicionarAviso(resultado.avisos, "magalu_produto_nao_comprovado");
+    return resultado;
+  }
+
   const produtoJsonLd = acharProdutoJsonLd(conteudo);
   const breadcrumbJsonLd = acharBreadcrumbJsonLd(conteudo);
   const fontes = resultado.metadata.fontes;
@@ -403,6 +451,15 @@ function parseMagaluProdutoHtml({ urlOriginal = "", html = "", urlFinal = "" } =
 
   if (produtoJsonLd && !produtoJsonLdSeguro) {
     adicionarAviso(resultado.avisos, "magalu_jsonld_produto_divergente_ignorado");
+  }
+  const conteudoDivergente = conteudoComProdutoDivergente({
+    conteudo,
+    urlOriginal,
+    urlFinal,
+    produtoJsonLd
+  });
+  if (conteudoDivergente) {
+    adicionarAviso(resultado.avisos, "magalu_conteudo_produto_divergente_ignorado");
   }
   const conteudoSeguro = produtoJsonLd && !produtoJsonLdSeguro
     ? removerScriptsJsonLd(conteudo)
@@ -418,55 +475,63 @@ function parseMagaluProdutoHtml({ urlOriginal = "", html = "", urlFinal = "" } =
   }
 
   const titulo =
-    limparTextoMagalu(produtoJsonLdSeguro?.name || "") ||
-    extrairAtributoMeta(conteudo, ["og:title", "twitter:title"]) ||
-    tituloPagina(conteudo).replace(/\s*\|\s*Magazine Luiza\s*$/i, "");
+    (conteudoDivergente ? "" : limparTextoMagalu(produtoJsonLdSeguro?.name || "")) ||
+    (conteudoDivergente ? "" : extrairAtributoMeta(conteudo, ["og:title", "twitter:title"])) ||
+    (conteudoDivergente ? "" : tituloPagina(conteudo).replace(/\s*\|\s*Magazine Luiza\s*$/i, ""));
   if (titulo && !tituloGenericoMagalu(titulo)) {
     resultado.titulo = titulo;
     fontes.titulo = produtoJsonLdSeguro?.name ? "jsonld.name" : "meta_ou_title";
   }
 
-  const imagem = limparUrlMagalu(imagemJsonLd(produtoJsonLdSeguro), urlFinal || urlOriginal) ||
-    limparUrlMagalu(extrairAtributoMeta(conteudo, ["og:image", "twitter:image"]), urlFinal || urlOriginal);
+  const imagem = conteudoDivergente ? "" : (
+    limparUrlMagalu(imagemJsonLd(produtoJsonLdSeguro), urlFinal || urlOriginal) ||
+    limparUrlMagalu(extrairAtributoMeta(conteudo, ["og:image", "twitter:image"]), urlFinal || urlOriginal)
+  );
   if (imagem) {
     resultado.imagem = imagem;
     fontes.imagem = imagemJsonLd(produtoJsonLdSeguro) ? "jsonld.image" : "meta.image";
   }
 
-  const precoAtual = extrairPrecoAtual(conteudoSeguro, produtoJsonLdSeguro);
+  const precoAtual = conteudoDivergente
+    ? { preco: "", fonte: "", bruto: "" }
+    : extrairPrecoAtual(conteudoSeguro, produtoJsonLdSeguro);
   if (precoAtual.preco) {
     resultado.precoAtual = precoAtual.preco;
     fontes.precoAtual = precoAtual.fonte;
     brutos.precoAtual = { campo: precoAtual.fonte, valor: String(precoAtual.bruto) };
   }
 
-  const precoAnterior = extrairPrecoAnterior(conteudoSeguro, resultado.precoAtual);
+  const precoAnterior = conteudoDivergente
+    ? { preco: "", fonte: "", bruto: "" }
+    : extrairPrecoAnterior(conteudoSeguro, resultado.precoAtual);
   if (precoAnterior.preco) {
     resultado.precoAnterior = precoAnterior.preco;
     fontes.precoAnterior = precoAnterior.fonte;
     brutos.precoAnterior = { campo: precoAnterior.fonte, valor: String(precoAnterior.bruto) };
   }
 
-  const categoria = categoriaBreadcrumb(breadcrumbJsonLd) ||
-    extrairAtributoMeta(conteudoSeguro, ["product:category", "category"]);
+  const categoria = conteudoDivergente ? "" : (
+    categoriaBreadcrumb(breadcrumbJsonLd) ||
+    extrairAtributoMeta(conteudoSeguro, ["product:category", "category"])
+  );
   if (categoria) {
     resultado.categoria = categoria;
     fontes.categoria = breadcrumbJsonLd ? "jsonld.breadcrumb" : "meta.category";
   }
 
-  const seller = extrairSeller(conteudoSeguro);
+  const seller = conteudoDivergente ? "" : extrairSeller(conteudoSeguro);
   if (seller) {
     resultado.seller = seller;
     fontes.seller = "html.seller";
   }
 
-  const parcelamento = extrairParcelamento(conteudoSeguro);
+  const parcelamento = conteudoDivergente ? "" : extrairParcelamento(conteudoSeguro);
   if (parcelamento) {
     resultado.parcelamento = parcelamento;
     fontes.parcelamento = "html.parcelamento";
   }
 
-  const cupom = extrairCupom(conteudoSeguro);
+  const cupom = conteudoDivergente ? "" : extrairCupom(conteudoSeguro);
   if (cupom) {
     resultado.cupom = cupom;
     fontes.cupom = "html.cupom";

@@ -59,6 +59,21 @@ function normalizarSlugLojaMagalu(promoterId = "") {
   return id.startsWith("magazine") ? id : `magazine${id}`;
 }
 
+function slugsLojaMagalu(promoterId = "") {
+  const id = normalizarPromoterIdMagalu(promoterId);
+  if (!id) return [];
+
+  const slugs = new Set([id]);
+  if (id.startsWith("magazine")) {
+    const semPrefixo = id.replace(/^magazine/, "");
+    if (semPrefixo) slugs.add(semPrefixo);
+  } else {
+    slugs.add(`magazine${id}`);
+  }
+
+  return [...slugs];
+}
+
 function primeiroSegmento(pathname = "") {
   return String(pathname || "")
     .split("/")
@@ -82,13 +97,13 @@ function montarUrlLojaProdutoMagalu(urlProduto, slugLoja = "") {
 
 function linkPertenceLojaMagalu(url = "", promoterId = "") {
   const parsed = parseUrl(url);
-  const slugEsperado = normalizarSlugLojaMagalu(promoterId);
+  const slugsEsperados = slugsLojaMagalu(promoterId);
 
-  if (!parsed || !slugEsperado || !HOST_MAGAZINE_VOCE.has(parsed.hostname.toLowerCase())) {
+  if (!parsed || !slugsEsperados.length || !HOST_MAGAZINE_VOCE.has(parsed.hostname.toLowerCase())) {
     return false;
   }
 
-  return primeiroSegmento(parsed.pathname).toLowerCase() === slugEsperado;
+  return slugsEsperados.includes(primeiroSegmento(parsed.pathname).toLowerCase());
 }
 
 function classificarLinkMagalu(url = "", promoterId = "") {
@@ -213,5 +228,6 @@ module.exports = {
   montarUrlLojaProdutoMagalu,
   normalizarPromoterIdMagalu,
   normalizarSlugLojaMagalu,
+  slugsLojaMagalu,
   caminhoPareceProdutoMagalu
 };

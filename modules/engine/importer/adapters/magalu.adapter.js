@@ -2,9 +2,11 @@
 
 const { normalizarNumeroMoeda } = require("../../../../utils/moeda");
 const {
-  consultarProdutoMagalu,
   produtoIdPorUrl
 } = require("../../../marketplaces/magalu/magalu-parser");
+const {
+  resolverFatosMagalu
+} = require("../../../marketplaces/magalu/magalu-factual-resolver");
 const {
   gerarLinkAfiliadoMagaluSeguro
 } = require("../../../marketplaces/magalu/magalu-affiliate-link");
@@ -158,12 +160,18 @@ function urlAfiliavelMesmoProdutoMagalu(produto = {}, urlOriginal = "", avisos =
   if (avisos.includes("magalu_captcha_detectado")) {
     return "";
   }
+  if (avisos.includes("magalu_pagina_indisponivel")) {
+    return "";
+  }
+  if (avisos.includes("magalu_link_loja_divergente")) {
+    return "";
+  }
 
   const produtoIdOriginal = produtoIdPorUrl(urlOriginal);
   const candidatas = [
+    urlOriginal,
     produto.urlCanonica,
     produto.urlOriginal,
-    urlOriginal
   ];
 
   for (const candidata of candidatas) {
@@ -224,9 +232,9 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     return { ok: false, marketplace: "magalu", motivo: "integracao_ausente", linkOriginal: urlOriginalEngine };
   }
 
-  const parserMagalu = typeof deps.consultarProdutoMagalu === "function"
-    ? deps.consultarProdutoMagalu
-    : consultarProdutoMagalu;
+  const resolverMagalu = typeof deps.resolverFatosMagalu === "function"
+    ? deps.resolverFatosMagalu
+    : resolverFatosMagalu;
   const gerarLinkSeguro = typeof deps.gerarLinkAfiliadoMagaluSeguro === "function"
     ? deps.gerarLinkAfiliadoMagaluSeguro
     : gerarLinkAfiliadoMagaluSeguro;
@@ -244,14 +252,31 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
 
   let produto;
   try {
-    produto = await parserMagalu(urlOriginalEngine, {
-      ...(deps.magaluParserOptions || {}),
-      contextoEngine: {
-        jobId: job.id,
-        eventoId: job.evento_id,
-        clienteId
+    const resolucao = await resolverMagalu(
+      { urlOriginal: urlOriginalEngine, promoterId },
+      {
+        consultarProdutoMagalu: deps.consultarProdutoMagalu,
+        parserOptions: {
+          ...(deps.magaluParserOptions || {}),
+          contextoEngine: {
+            jobId: job.id,
+            eventoId: job.evento_id,
+            clienteId
+          }
+        }
       }
-    });
+    );
+    produto = {
+      ...(resolucao?.fatos || {}),
+      metadata: {
+        ...(resolucao?.fatos?.metadata || {}),
+        factualResolver: {
+          fonteUsada: resolucao?.fonteUsada || "",
+          tentativas: Array.isArray(resolucao?.tentativas) ? resolucao.tentativas : []
+        }
+      },
+      avisos: [...new Set([...(resolucao?.avisos || []), ...(resolucao?.fatos?.avisos || [])])]
+    };
   } catch (e) {
     logMagaluAdapter("[ENGINE-MAGALU-IMPORTADOR-ERRO]", {
       jobId: job.id,

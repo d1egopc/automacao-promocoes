@@ -85,6 +85,7 @@ assert.deepStrictEqual(Object.keys(completo).filter(k => /afiliad|promoter/i.tes
 
 const urlRealA07 = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a07/p/240466500/te/ga07/";
 const urlA17Divergente = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a17/p/240575800/te/ga17/";
+const urlNightCaviar = "https://www.magazinevoce.com.br/d1egopc/night-caviar-100ml-paris-elysses/p/be172949ba/pf/ppfm/";
 
 const canonicalDivergente = parseMagaluProdutoHtml({
   urlOriginal: urlRealA07,
@@ -111,16 +112,22 @@ const ogUrlDivergente = parseMagaluProdutoHtml({
 });
 assert.strictEqual(ogUrlDivergente.urlCanonica, urlRealA07);
 assert.strictEqual(ogUrlDivergente.produtoId, "240466500");
+assert.strictEqual(ogUrlDivergente.titulo, "", "og:title de conteudo divergente nao deve contaminar produto original");
 assert.ok(ogUrlDivergente.avisos.includes("magalu_canonica_produto_divergente_ignorada"));
+assert.ok(ogUrlDivergente.avisos.includes("magalu_conteudo_produto_divergente_ignorado"));
 
 const responseUrlDivergente = parseMagaluProdutoHtml({
   urlOriginal: urlRealA07,
   urlFinal: urlA17Divergente,
-  html: '<meta property="og:title" content="Smartphone Samsung A07">'
+  html: '<meta property="og:title" content="Smartphone Samsung A07"><meta property="og:image" content="https://www.magazineluiza.com.br/a17.jpg"><meta property="product:price:amount" content="1299.90">'
 });
 assert.strictEqual(responseUrlDivergente.urlCanonica, urlRealA07);
 assert.strictEqual(responseUrlDivergente.produtoId, "240466500");
+assert.strictEqual(responseUrlDivergente.titulo, "");
+assert.strictEqual(responseUrlDivergente.imagem, "");
+assert.strictEqual(responseUrlDivergente.precoAtual, "");
 assert.ok(responseUrlDivergente.avisos.includes("magalu_canonica_produto_divergente_ignorada"));
+assert.ok(responseUrlDivergente.avisos.includes("magalu_conteudo_produto_divergente_ignorado"));
 
 const canonicalCorreta = parseMagaluProdutoHtml({
   urlOriginal: urlRealA07 + "?utm=abc",
@@ -129,6 +136,21 @@ const canonicalCorreta = parseMagaluProdutoHtml({
 assert.strictEqual(canonicalCorreta.urlCanonica, urlRealA07);
 assert.strictEqual(canonicalCorreta.produtoId, "240466500");
 assert.strictEqual(canonicalCorreta.titulo, "Smartphone Samsung A07");
+
+const mesmoProdutoSlugQuery = parseMagaluProdutoHtml({
+  urlOriginal: urlNightCaviar + "?utm_source=radar",
+  urlFinal: "https://www.magazinevoce.com.br/d1egopc/noite-caviar-paris/p/be172949ba/pf/ppfm/?seller_id=lider",
+  html: `
+    <link rel="canonical" href="https://www.magazinevoce.com.br/d1egopc/noite-caviar-paris/p/be172949ba/pf/ppfm/">
+    <meta property="og:title" content="Night Caviar 100ml - Paris Elysses">
+    <meta property="product:price:amount" content="78.90">
+  `
+});
+assert.strictEqual(mesmoProdutoSlugQuery.urlCanonica, "https://www.magazinevoce.com.br/d1egopc/noite-caviar-paris/p/be172949ba/pf/ppfm/");
+assert.strictEqual(mesmoProdutoSlugQuery.produtoId, "be172949ba");
+assert.strictEqual(mesmoProdutoSlugQuery.titulo, "Night Caviar 100ml - Paris Elysses");
+assert.strictEqual(moeda(mesmoProdutoSlugQuery.precoAtual), "R$ 78,90");
+assert.ok(!mesmoProdutoSlugQuery.avisos.includes("magalu_conteudo_produto_divergente_ignorado"));
 
 const captcha = parseMagaluProdutoHtml({
   urlOriginal: urlRealA07,
@@ -151,6 +173,44 @@ assert.strictEqual(captcha.categoria, "");
 assert.strictEqual(captcha.produtoId, "240466500");
 assert.ok(captcha.avisos.includes("magalu_captcha_detectado"));
 assert.ok(captcha.avisos.includes("magalu_canonica_produto_divergente_ignorada"));
+
+const paginaIndisponivel = parseMagaluProdutoHtml({
+  urlOriginal: urlNightCaviar,
+  html: `
+    <html>
+      <head><title>Magazine Luiza | Não é possível acessar a página</title></head>
+      <body>Não é possível acessar a página</body>
+    </html>
+  `
+});
+assert.strictEqual(paginaIndisponivel.titulo, "");
+assert.strictEqual(paginaIndisponivel.precoAtual, "");
+assert.strictEqual(paginaIndisponivel.precoAnterior, "");
+assert.strictEqual(paginaIndisponivel.imagem, "");
+assert.strictEqual(paginaIndisponivel.categoria, "");
+assert.strictEqual(paginaIndisponivel.produtoId, "be172949ba");
+assert.ok(paginaIndisponivel.avisos.includes("magalu_pagina_indisponivel"));
+assert.ok(paginaIndisponivel.avisos.includes("magalu_produto_nao_comprovado"));
+
+const htmlMetaDivergente = parseMagaluProdutoHtml({
+  urlOriginal: urlRealA07,
+  html: `
+    <meta property="og:url" content="${urlA17Divergente}">
+    <meta property="og:title" content="Samsung Galaxy A17">
+    <meta property="og:image" content="https://www.magazineluiza.com.br/a17.jpg">
+    <meta property="product:price:amount" content="1299.90">
+    <meta property="product:category" content="Celulares">
+    <span>Vendido e entregue por Loja A17</span>
+    <p>Cupom A17OFF</p>
+  `
+});
+assert.strictEqual(htmlMetaDivergente.titulo, "");
+assert.strictEqual(htmlMetaDivergente.imagem, "");
+assert.strictEqual(htmlMetaDivergente.precoAtual, "");
+assert.strictEqual(htmlMetaDivergente.categoria, "");
+assert.strictEqual(htmlMetaDivergente.seller, "");
+assert.strictEqual(htmlMetaDivergente.cupom, "");
+assert.ok(htmlMetaDivergente.avisos.includes("magalu_conteudo_produto_divergente_ignorado"));
 
 const semPrecoAnterior = parseMagaluProdutoHtml({
   urlOriginal: urlProduto,
@@ -232,6 +292,8 @@ assert.ok(semDados.avisos.includes("magalu_produto_nao_comprovado"));
 
 assert.strictEqual(normalizarPrecoMagalu("2.345,67"), "R$\u00a02.345,67");
 assert.strictEqual(produtoIdPorUrl(urlProduto), "abc123");
+assert.strictEqual(produtoIdPorUrl(urlRealA07), "240466500");
+assert.strictEqual(produtoIdPorUrl(urlNightCaviar), "be172949ba");
 assert.strictEqual(hostMagaluValido(urlProduto), true);
 assert.strictEqual(hostMagaluValido("https://example.com/produto/p/abc123/"), false);
 
