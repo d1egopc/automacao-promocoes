@@ -83,10 +83,11 @@ function normalizarListaTexto(valor) {
 function normalizarDestinoAgendadoManualV2(destino = {}) {
   const id = primeiroTexto(destino.id, destino.destinoId);
   if (!id) return null;
+  const tipo = texto(destino.tipo).toLowerCase();
   return {
     id,
     nome: primeiroTexto(destino.nome, destino.titulo, destino.label),
-    tipo: texto(destino.tipo).toLowerCase() === "telegram" ? "telegram" : "whatsapp",
+    tipo: tipo === "telegram" || tipo === "discord" ? tipo : "whatsapp",
     ativo: destino.ativo !== false,
     utilizavel: destino.utilizavel === true,
     motivoIndisponivel: primeiroTexto(destino.motivoIndisponivel, destino.motivo),

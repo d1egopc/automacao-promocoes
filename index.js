@@ -174,6 +174,13 @@ const criarRotasTemplatesClientes = require("./modules/templates-clientes/routes
 const criarRotasStorageManager = require("./modules/storage-manager/storage.routes");
 const criarRotasResetEsteirasPreflight = require("./modules/engine/reset-esteiras/preflight.routes");
 const criarRotasManualV2 = require("./modules/manual-v2/manual-offers.routes");
+const criarRotasDiscord = require("./modules/discord/discord.routes");
+const {
+  listarConexoesDiscord
+} = require("./modules/discord/discord-connections.storage");
+const {
+  validarDestinoDiscord
+} = require("./modules/discord/discord-channels");
 const {
   iniciarManualV2Scheduler
 } = require("./modules/manual-v2/manual-scheduler.runner");
@@ -2498,6 +2505,41 @@ function normalizarDestinosContrato(valor) {
   return valor;
 }
 
+function destinoEhDiscord(destino = {}) {
+  return String(destino?.tipo || "").trim().toLowerCase() === "discord";
+}
+
+async function normalizarDestinosContratoComDiscord(clienteId = "admin", destinos = [], req = null) {
+  const lista = normalizarDestinosContrato(destinos);
+  if (!Array.isArray(lista)) return lista;
+  if (!lista.some(destinoEhDiscord)) return lista;
+
+  if (!usuarioTemRecurso(req, "discord")) {
+    const erro = new Error("Recurso Discord indisponivel no plano");
+    erro.statusCode = 403;
+    throw erro;
+  }
+
+  const conexoes = listarConexoesDiscord(clienteId);
+  const normalizados = [];
+  for (const destino of lista) {
+    if (!destinoEhDiscord(destino)) {
+      normalizados.push(destino);
+      continue;
+    }
+
+    const validado = await validarDestinoDiscord({
+      clienteId,
+      destino,
+      conexoes,
+      httpClient: axios
+    });
+    normalizados.push(normalizarDestinoContrato(validado));
+  }
+
+  return normalizados;
+}
+
 function numeroIntervaloValido(valor) {
   const numero = Number(valor);
   return Number.isFinite(numero) && numero > 0 ? numero : null;
@@ -2706,6 +2748,7 @@ function criarPlanosPadrao() {
 
         whatsapp: true,
         telegram: false,
+        discord: false,
 
         multiSessao: false,
 
@@ -2743,6 +2786,7 @@ function criarPlanosPadrao() {
 
         whatsapp: true,
         telegram: true,
+        discord: false,
 
         multiSessao: true,
 
@@ -2783,6 +2827,7 @@ function criarPlanosPadrao() {
 
         whatsapp: true,
         telegram: true,
+        discord: false,
 
         multiSessao: true,
 
@@ -7636,11 +7681,19 @@ app.get("/destinos", (req, res) => {
   return res.json(destinos);
 });
 
-app.post("/destinos", (req, res) => {
+app.post("/destinos", async (req, res) => {
   const clienteId = exigirClienteAutenticado(req, res);
   if (!clienteId) return;
 
-  const destinos = normalizarDestinosContrato(req.body);
+  let destinos;
+  try {
+    destinos = await normalizarDestinosContratoComDiscord(clienteId, req.body, req);
+  } catch (erro) {
+    return res.status(erro.statusCode || 400).json({
+      ok: false,
+      erro: erro.message || "Destino Discord invalido"
+    });
+  }
 
   if (!Array.isArray(destinos)) {
     return res.status(400).json({
@@ -8196,6 +8249,7 @@ app.post("/admin/planos", (req, res) => {
       templatePersonalizado: booleanPlano("templatePersonalizado", recursosAnteriores.templatePersonalizado),
       whatsapp: booleanPlano("whatsapp", recursosAnteriores.whatsapp),
       telegram: booleanPlano("telegram", recursosAnteriores.telegram),
+      discord: booleanPlano("discord", recursosAnteriores.discord),
       automacao: booleanPlano("automacao", recursosAnteriores.automacao),
       social: booleanPlano("social", recursosAnteriores.social)
     },
@@ -8894,6 +8948,7 @@ function auth(req, res, next) {
     req.path === "/" ||
     req.path === "/login" ||
     (req.method === "GET" && req.path === "/branding") ||
+    (req.method === "GET" && req.path === "/discord/callback") ||
     (req.method === "GET" && req.path === "/social/meta/callback") ||
     (req.method === "GET" && req.path === "/social/instagram/callback") ||
     req.path === "/social/instagram/webhook" ||
@@ -17648,6 +17703,14 @@ app.use("/social", criarRotasSocial({
 app.use("/templates-ofertas", criarRotasTemplatesClientes({
   getClienteId,
   usuarioTemRecurso
+}));
+
+app.use("/discord", criarRotasDiscord({
+  getClienteId,
+  usuarioTemRecurso,
+  jwt,
+  jwtSecret: JWT_SECRET,
+  httpClient: axios
 }));
 
 // =============== ROTAS MANUAL V2 =================

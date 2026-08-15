@@ -42,10 +42,11 @@ function listaTexto(valor) {
 }
 
 function sanitizarDestinoEscolhido(destino = {}) {
+  const tipo = texto(destino.tipo).toLowerCase();
   return {
     id: texto(destino.id || destino.destinoId),
     nome: texto(destino.nome),
-    tipo: texto(destino.tipo).toLowerCase() === "telegram" ? "telegram" : "whatsapp",
+    tipo: tipo === "telegram" || tipo === "discord" ? tipo : "whatsapp",
     ativo: destino.ativo !== false,
     utilizavel: destino.utilizavel === true,
     motivoIndisponivel: texto(destino.motivoIndisponivel),
@@ -74,10 +75,11 @@ function sanitizarDestinosAgendados(destinos = []) {
 
 function sanitizarResultadoEnvio(resultado = {}) {
   const status = texto(resultado.status).toLowerCase() === "enviado" ? "enviado" : "erro";
+  const tipo = texto(resultado.tipo).toLowerCase();
   return {
     destinoId: texto(resultado.destinoId),
     nome: texto(resultado.nome),
-    tipo: texto(resultado.tipo).toLowerCase() === "telegram" ? "telegram" : "whatsapp",
+    tipo: tipo === "telegram" || tipo === "discord" ? tipo : "whatsapp",
     status,
     enviadoEm: texto(resultado.enviadoEm),
     erro: status === "erro" ? texto(resultado.erro).slice(0, 500) : ""

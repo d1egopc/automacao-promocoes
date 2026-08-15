@@ -7,7 +7,10 @@ function lista(valor) {
 }
 
 function tipoDestino(destino = {}) {
-  return texto(destino.tipo).toLowerCase() === "telegram" ? "telegram" : "whatsapp";
+  const tipo = texto(destino.tipo).toLowerCase();
+  if (tipo === "telegram") return "telegram";
+  if (tipo === "discord") return "discord";
+  return "whatsapp";
 }
 
 function destinoId(destino = {}) {
@@ -115,6 +118,9 @@ function destinoVisualSeguro(destino = {}) {
   if (tipo === "telegram") {
     return texto(destino.nome || destino.titulo || destino.label || destino.apelido || destino.username || "Canal Telegram");
   }
+  if (tipo === "discord") {
+    return texto(destino.channelName || destino.grupoNome || destino.nome || destino.titulo || destino.label || "Canal Discord");
+  }
   return grupoWhatsapp(destino);
 }
 
@@ -132,6 +138,11 @@ function motivoIndisponivel(destino = {}, contexto = {}) {
       return "Sessao WhatsApp desconectada";
     }
     return "";
+  }
+
+  if (tipo === "discord") {
+    if (!planoPermite(contexto.plano, "discord")) return "Canal indisponivel no plano atual";
+    return "Envio Discord ainda nao habilitado";
   }
 
   if (!planoPermite(contexto.plano, "telegram")) return "Canal indisponivel no plano atual";

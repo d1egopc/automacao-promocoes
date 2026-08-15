@@ -22,7 +22,10 @@ function destinoId(destino = {}) {
 }
 
 function tipoDestino(destino = {}) {
-  return texto(destino.tipo).toLowerCase() === "telegram" ? "telegram" : "whatsapp";
+  const tipo = texto(destino.tipo).toLowerCase();
+  if (tipo === "telegram") return "telegram";
+  if (tipo === "discord") return "discord";
+  return "whatsapp";
 }
 
 function nomeDestino(destino = {}) {
@@ -275,10 +278,13 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
 
     try {
       const mensagem = montarMensagemManualV2(oferta, destino, { ...deps, plano });
-      if (tipoDestino(destino) === "telegram") {
+      const tipo = tipoDestino(destino);
+      if (tipo === "telegram") {
         await enviarTelegramManual({ destino, mensagem, deps, clienteId: cliente });
-      } else {
+      } else if (tipo === "whatsapp") {
         await enviarWhatsappManual({ destino, oferta, mensagem, deps });
+      } else {
+        throw new Error("Canal Discord ainda nao disponivel");
       }
 
       const debitou = debitarCreditos(cliente, 1);

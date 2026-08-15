@@ -91,6 +91,7 @@ function templateIncompativelComOfertaFiel(template = {}, oferta = {}) {
 function normalizarCanal(canal = "", destino = {}) {
   const valor = texto(canal || destino.canal || destino.tipo || destino.plataforma || destino.provider).toLowerCase();
   if (valor.includes("telegram")) return "telegram";
+  if (valor.includes("discord")) return "discord";
   if (valor.includes("social") || valor.includes("instagram") || valor.includes("facebook")) return "social";
   return "whatsapp";
 }
