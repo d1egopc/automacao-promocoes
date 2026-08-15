@@ -8,6 +8,42 @@ const {
 
 const ADAPTER_ALIEXPRESS_MANUAL_V2 = "aliexpress.manual.adapter";
 
+const CAMPOS_PRECO_ATUAL_ALIEXPRESS = Object.freeze([
+  "target_sale_price",
+  "sale_price",
+  "target_app_sale_price",
+  "app_sale_price"
+]);
+
+const CAMPOS_PRECO_MIN_ALIEXPRESS = Object.freeze([
+  "target_min_sale_price",
+  "min_sale_price",
+  "target_sale_price_min",
+  "product_min_price",
+  "target_product_min_price"
+]);
+
+const CAMPOS_PRECO_MAX_ALIEXPRESS = Object.freeze([
+  "target_max_sale_price",
+  "max_sale_price",
+  "target_sale_price_max",
+  "product_max_price",
+  "target_product_max_price"
+]);
+
+const CAMPOS_PRECO_ANTERIOR_ALIEXPRESS = Object.freeze([
+  "target_original_price",
+  "original_price",
+  "product_original_price"
+]);
+
+const CAMPOS_PRECO_API_ALIEXPRESS = Object.freeze([
+  ...CAMPOS_PRECO_ATUAL_ALIEXPRESS,
+  ...CAMPOS_PRECO_MIN_ALIEXPRESS,
+  ...CAMPOS_PRECO_MAX_ALIEXPRESS,
+  ...CAMPOS_PRECO_ANTERIOR_ALIEXPRESS
+]);
+
 function texto(valor = "") {
   return String(valor ?? "").trim();
 }
@@ -26,6 +62,69 @@ function primeiroTexto(...valores) {
     if (atual) return atual;
   }
   return "";
+}
+
+function numeroPrecoBR(valor = "") {
+  const bruto = texto(valor);
+  if (!bruto) return null;
+  const normalizado = bruto
+    .replace(/R\$/gi, "")
+    .replace(/\s+/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+  const numero = Number(normalizado);
+  return Number.isFinite(numero) ? numero : null;
+}
+
+function valoresDiferentesPreco(a = "", b = "") {
+  const valorA = numeroPrecoBR(a);
+  const valorB = numeroPrecoBR(b);
+  return valorA !== null && valorB !== null && Math.abs(valorA - valorB) >= 0.01;
+}
+
+function lerCaminho(objeto = {}, caminho = "") {
+  if (!objeto || typeof objeto !== "object") return "";
+  return caminho.split(".").reduce((atual, parte) => {
+    if (atual === null || atual === undefined) return "";
+    return atual[parte];
+  }, objeto);
+}
+
+function valorCampoAliExpress(produto = {}, campo = "") {
+  const candidatos = [
+    produto,
+    produto.rawAliExpress,
+    produto.raw,
+    produto.dadosBrutos,
+    produto.metadata?.rawAliExpress,
+    produto.metadata?.dadosBrutos,
+    produto.metadata?.camposPrecoAliExpress
+  ];
+
+  for (const candidato of candidatos) {
+    const valor = lerCaminho(candidato, campo);
+    const atual = texto(valor);
+    if (atual) return atual;
+  }
+
+  return "";
+}
+
+function primeiroCampoPrecoAliExpress(produto = {}, campos = []) {
+  for (const campo of campos) {
+    const valor = valorCampoAliExpress(produto, campo);
+    if (valor) return { campo, valor };
+  }
+  return { campo: "", valor: "" };
+}
+
+function camposBrutosPrecoAliExpress(produto = {}) {
+  const bruto = {};
+  CAMPOS_PRECO_API_ALIEXPRESS.forEach((campo) => {
+    const valor = valorCampoAliExpress(produto, campo);
+    if (valor) bruto[campo] = valor;
+  });
+  return bruto;
 }
 
 function tituloGenericoAliExpress(titulo = "") {
@@ -107,7 +206,96 @@ function precoAnteriorManualAliExpress(produto = {}) {
   return primeiroTexto(produto.precoAntigo, produto.precoOriginal, produto.precoDe);
 }
 
-function urlAfiliadaGeradaAliExpress(produto = {}) {
+function precoManualAliExpress(produto = {}) {
+  const atual = primeiroCampoPrecoAliExpress(produto, CAMPOS_PRECO_ATUAL_ALIEXPRESS);
+  const minimo = primeiroCampoPrecoAliExpress(produto, CAMPOS_PRECO_MIN_ALIEXPRESS);
+  const maximo = primeiroCampoPrecoAliExpress(produto, CAMPOS_PRECO_MAX_ALIEXPRESS);
+  const anterior = primeiroCampoPrecoAliExpress(produto, CAMPOS_PRECO_ANTERIOR_ALIEXPRESS);
+  const temFaixa = minimo.valor && maximo.valor && valoresDiferentesPreco(minimo.valor, maximo.valor);
+  const somenteMinimo = minimo.valor && !maximo.valor && !atual.valor;
+  const precoAtualNormalizado = primeiroTexto(produto.precoAtual, produto.preco);
+  const precoAnteriorNormalizado = precoAnteriorManualAliExpress(produto);
+  const camposBrutos = camposBrutosPrecoAliExpress(produto);
+  const temProvenienciaBruta = Object.keys(camposBrutos).length > 0;
+
+  return {
+    precoAtual: temFaixa || somenteMinimo
+      ? ""
+      : primeiroTexto(atual.valor, precoAtualNormalizado),
+    precoAnterior: primeiroTexto(anterior.valor, precoAnteriorNormalizado),
+    precoMin: primeiroTexto(minimo.valor, produto.precoMin, produto.preco_min),
+    precoMax: primeiroTexto(maximo.valor, produto.precoMax, produto.preco_max),
+    temVariacaoPreco: Boolean(temFaixa || produto.temVariacaoPreco === true),
+    evidencia: {
+      origem: temProvenienciaBruta ? "resposta_importer" : "limitada_importer_normalizado",
+      camposBrutos,
+      usadoPara: {
+        precoAtual: atual.valor
+          ? atual.campo
+          : (precoAtualNormalizado && !somenteMinimo ? "precoAtual" : ""),
+        precoAnterior: anterior.valor
+          ? anterior.campo
+          : (precoAnteriorNormalizado ? "precoAntigo" : ""),
+        precoMin: minimo.valor ? minimo.campo : (primeiroTexto(produto.precoMin, produto.preco_min) ? "precoMin" : ""),
+        precoMax: maximo.valor ? maximo.campo : (primeiroTexto(produto.precoMax, produto.preco_max) ? "precoMax" : "")
+      },
+      temFaixaReal: Boolean(temFaixa),
+      somenteMinimoSemMaximo: Boolean(somenteMinimo),
+      observacao: temProvenienciaBruta
+        ? ""
+        : "Importer atual nao preservou campos brutos de preco; Manual V2 manteve somente valores normalizados."
+    }
+  };
+}
+
+function criarProvenienciaAfiliadaAliExpress() {
+  return {
+    sourceValues: "",
+    retornoGerador: "",
+    deeplinkGerado: false
+  };
+}
+
+function linkAfiliadoAliExpressValido(link = "") {
+  const candidato = texto(link);
+  if (!candidato) return false;
+
+  try {
+    const parsed = new URL(candidato);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    const path = parsed.pathname;
+    if (host === "s.click.aliexpress.com" && /^\/(e\/_|s\/)[a-z0-9]/i.test(path)) return true;
+    if (host.endsWith(".aliexpress.com") && /(^|[?&])(aff_fcid|aff_fsk|aff_platform|aff_trace_key|dp)=/i.test(parsed.search)) return true;
+  } catch {}
+
+  return false;
+}
+
+function envolverGeradorLinkCurtoAliExpress(gerador, proveniencia, clienteId = "") {
+  if (typeof gerador !== "function") return gerador;
+
+  return async function gerarLinkCurtoAliExpressManualV2(linkLongo, credenciais = {}, contexto = {}) {
+    const retorno = await gerador(linkLongo, credenciais, {
+      ...contexto,
+      clienteId: contexto?.clienteId || clienteId
+    });
+    proveniencia.sourceValues = texto(linkLongo);
+    proveniencia.retornoGerador = texto(retorno);
+    proveniencia.deeplinkGerado = Boolean(
+      proveniencia.retornoGerador &&
+      proveniencia.sourceValues &&
+      proveniencia.retornoGerador !== proveniencia.sourceValues &&
+      linkAfiliadoAliExpressValido(proveniencia.retornoGerador)
+    );
+    return retorno;
+  };
+}
+
+function urlOriginalAliExpress(produto = {}) {
+  return primeiroTexto(produto.linkOriginal, produto.urlOriginal, produto.url);
+}
+
+function urlAfiliadaGeradaAliExpress(produto = {}, contexto = {}) {
   const candidata = primeiroTexto(produto.urlAfiliada, produto.linkAfiliado, produto.linkFinal);
   if (!candidata) return "";
 
@@ -116,9 +304,15 @@ function urlAfiliadaGeradaAliExpress(produto = {}) {
     const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
     const path = parsed.pathname;
 
-    if (host === "s.click.aliexpress.com" && /^\/e\/_[a-z0-9]+/i.test(path)) return candidata;
+    if (linkAfiliadoAliExpressValido(candidata)) return candidata;
     if (produto.metadata?.linkAfiliadoGerado === true && host.endsWith(".aliexpress.com")) return candidata;
     if (produto.tipoLinkAfiliado === "promotion_link" && host.endsWith(".aliexpress.com")) return candidata;
+    if (
+      contexto.provenienciaAfiliada?.deeplinkGerado === true &&
+      candidata !== urlOriginalAliExpress(produto)
+    ) {
+      return candidata;
+    }
   } catch {}
 
   return "";
@@ -161,6 +355,8 @@ function camposConfiaveisAliExpress(oferta = {}) {
     ["titulo", oferta.titulo],
     ["precoAtual", oferta.precoAtual],
     ["precoAnterior", oferta.precoAnterior],
+    ["precoMin", oferta.precoMin],
+    ["precoMax", oferta.precoMax],
     ["imagem", oferta.imagem],
     ["categoria", oferta.categoria],
     ["cupom", oferta.cupom],
@@ -192,12 +388,18 @@ async function importarAliExpressManualV2(urlManual = "", opcoes = {}) {
       ? opcoes.getIntegracaoCliente(clienteId, "aliexpress")
       : null) ||
     {};
+  const credenciais = integracao?.credenciais || integracao || {};
+  const provenienciaAfiliada = criarProvenienciaAfiliadaAliExpress();
 
   const produto = await importarAliExpress(urlOriginal, {
     ...integracao,
     clienteId,
-    credenciais: integracao?.credenciais || integracao || {},
-    gerarLinkCurtoAliExpress: opcoes.gerarLinkCurtoAliExpress,
+    credenciais,
+    gerarLinkCurtoAliExpress: envolverGeradorLinkCurtoAliExpress(
+      opcoes.gerarLinkCurtoAliExpress,
+      provenienciaAfiliada,
+      clienteId
+    ),
     gerarLinkOptimus: opcoes.gerarLinkOptimus
   });
   const dados = produto && typeof produto === "object" ? produto : {};
@@ -205,8 +407,9 @@ async function importarAliExpressManualV2(urlManual = "", opcoes = {}) {
   const semProductId = !productId;
   const generico = retornoGenericoAliExpress(dados, urlOriginal);
   const usarDados = !semProductId && !generico;
-  const precoAnterior = usarDados ? precoAnteriorManualAliExpress(dados) : "";
-  const urlAfiliada = usarDados ? urlAfiliadaGeradaAliExpress(dados) : "";
+  const precos = usarDados ? precoManualAliExpress(dados) : precoManualAliExpress({});
+  const precoAnterior = usarDados ? precos.precoAnterior : "";
+  const urlAfiliada = usarDados ? urlAfiliadaGeradaAliExpress(dados, { provenienciaAfiliada }) : "";
   const avisos = avisosAliExpress(dados, {
     semProductId,
     generico,
@@ -222,8 +425,11 @@ async function importarAliExpressManualV2(urlManual = "", opcoes = {}) {
       titulo: usarDados && !tituloGenericoAliExpress(dados.titulo || dados.nome)
         ? primeiroTexto(dados.titulo, dados.nome)
         : "",
-      precoAtual: usarDados ? primeiroTexto(dados.precoAtual, dados.preco) : "",
+      precoAtual: usarDados ? precos.precoAtual : "",
       precoAnterior,
+      precoMin: usarDados ? precos.precoMin : "",
+      precoMax: usarDados ? precos.precoMax : "",
+      temVariacaoPreco: usarDados ? precos.temVariacaoPreco : false,
       imagem: usarDados ? primeiroTexto(dados.imagem, dados.imageUrl) : "",
       categoria: usarDados ? categoriaManualAliExpress(dados) : "",
       cupom: "",
@@ -251,6 +457,12 @@ async function importarAliExpressManualV2(urlManual = "", opcoes = {}) {
   }
 
   oferta.fonteImportacao.camposConfiaveis = camposConfiaveisAliExpress(oferta);
+  oferta.fonteImportacao.precoAliExpress = precos.evidencia;
+  oferta.fonteImportacao.linkAfiliadoAliExpress = {
+    deeplinkGerado: Boolean(provenienciaAfiliada.deeplinkGerado),
+    sourceValuesUsado: provenienciaAfiliada.sourceValues ? "informado_ao_gerador" : "",
+    retornoGerador: provenienciaAfiliada.retornoGerador ? "url_retornada" : ""
+  };
 
   return oferta;
 }
@@ -262,5 +474,6 @@ module.exports = {
   retornoGenericoAliExpress,
   precoAnteriorManualAliExpress,
   origemPrecoAnteriorComprovadaAliExpress,
-  urlAfiliadaGeradaAliExpress
+  urlAfiliadaGeradaAliExpress,
+  precoManualAliExpress
 };

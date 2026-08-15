@@ -40,11 +40,19 @@ function criarDeps(produto, chamadas = []) {
         url,
         clienteId: config?.clienteId || "",
         trackingId: config?.credenciais?.trackingId || "",
+        temGeradorAli: typeof config?.gerarLinkCurtoAliExpress === "function",
+        temGeradorOptimus: typeof config?.gerarLinkOptimus === "function",
         temContextoAutomatico: Boolean(config?.contextoEngine || config?.contextoRadar || config?.textoRadar)
       });
       return produto;
     }
   };
+}
+
+function criarDepsComImportador(importarAliExpress, chamadas = []) {
+  const deps = criarDeps({}, chamadas);
+  deps.importarAliExpress = importarAliExpress;
+  return deps;
 }
 
 (async function main() {
@@ -120,6 +128,8 @@ function criarDeps(produto, chamadas = []) {
       url: "https://www.aliexpress.com/item/1005001111111111.html",
       clienteId: "cliente_aliexpress",
       trackingId: "track_ali",
+      temGeradorAli: false,
+      temGeradorOptimus: false,
       temContextoAutomatico: false
     }
   ]);
@@ -209,6 +219,229 @@ function criarDeps(produto, chamadas = []) {
   assert.ok(oferta.fonteImportacao.camposAusentes.includes("titulo"));
   assert.ok(oferta.fonteImportacao.camposAusentes.includes("precoAtual"));
   assert.ok(oferta.fonteImportacao.camposAusentes.includes("urlAfiliada"));
+}
+
+{
+  const oferta = await importarAliExpressManualV2("https://www.aliexpress.com/item/1005005555555555.html", criarDeps({
+    marketplace: "aliexpress",
+    productId: "1005005555555555",
+    linkOriginal: "https://www.aliexpress.com/item/1005005555555555.html",
+    linkAfiliado: "https://s.click.aliexpress.com/e/_SHORT555",
+    titulo: "Produto com preco unico",
+    precoAtual: "399,68",
+    precoAntigo: "868,87",
+    target_sale_price: "399,68",
+    target_original_price: "868,87",
+    imagem: "https://ae01.alicdn.com/unico.jpg",
+    categoriaProduto: "Eletronicos"
+  }));
+
+  assert.strictEqual(oferta.precoAtual, "399,68");
+  assert.strictEqual(oferta.precoAnterior, "868,87");
+  assert.strictEqual(oferta.precoMin, "");
+  assert.strictEqual(oferta.precoMax, "");
+  assert.strictEqual(oferta.temVariacaoPreco, false);
+  assert.strictEqual(oferta.fonteImportacao.precoAliExpress.usadoPara.precoAtual, "target_sale_price");
+  assert.strictEqual(oferta.fonteImportacao.precoAliExpress.usadoPara.precoAnterior, "target_original_price");
+  assert.strictEqual(oferta.fonteImportacao.precoAliExpress.origem, "resposta_importer");
+  assert.deepStrictEqual(oferta.fonteImportacao.precoAliExpress.camposBrutos, {
+    target_sale_price: "399,68",
+    target_original_price: "868,87"
+  });
+}
+
+{
+  const oferta = await importarAliExpressManualV2("https://www.aliexpress.com/item/1005006666666666.html", criarDeps({
+    marketplace: "aliexpress",
+    productId: "1005006666666666",
+    linkOriginal: "https://www.aliexpress.com/item/1005006666666666.html",
+    linkAfiliado: "https://s.click.aliexpress.com/e/_SHORT666",
+    titulo: "Produto com faixa real",
+    precoAtual: "265,99",
+    precoAntigo: "868,87",
+    target_min_sale_price: "265,99",
+    target_max_sale_price: "604,52",
+    target_original_price: "868,87",
+    imagem: "https://ae01.alicdn.com/faixa.jpg",
+    categoriaProduto: "Eletronicos"
+  }));
+
+  assert.strictEqual(oferta.precoAtual, "");
+  assert.strictEqual(oferta.precoAnterior, "868,87");
+  assert.strictEqual(oferta.precoMin, "265,99");
+  assert.strictEqual(oferta.precoMax, "604,52");
+  assert.strictEqual(oferta.temVariacaoPreco, true);
+  assert.strictEqual(oferta.fonteImportacao.precoAliExpress.temFaixaReal, true);
+  assert.strictEqual(oferta.fonteImportacao.precoAliExpress.usadoPara.precoMin, "target_min_sale_price");
+  assert.strictEqual(oferta.fonteImportacao.precoAliExpress.usadoPara.precoMax, "target_max_sale_price");
+  assert.ok(oferta.fonteImportacao.camposConfiaveis.includes("precoMin"));
+  assert.ok(oferta.fonteImportacao.camposConfiaveis.includes("precoMax"));
+}
+
+{
+  const oferta = await importarAliExpressManualV2("https://www.aliexpress.com/item/1005007777777777.html", criarDeps({
+    marketplace: "aliexpress",
+    productId: "1005007777777777",
+    linkOriginal: "https://www.aliexpress.com/item/1005007777777777.html",
+    linkAfiliado: "https://s.click.aliexpress.com/e/_SHORT777",
+    titulo: "Produto com minimo sem maximo",
+    precoAtual: "265,99",
+    target_min_sale_price: "265,99",
+    imagem: "https://ae01.alicdn.com/minimo.jpg",
+    categoriaProduto: "Eletronicos"
+  }));
+
+  assert.strictEqual(oferta.precoAtual, "");
+  assert.strictEqual(oferta.precoMin, "265,99");
+  assert.strictEqual(oferta.precoMax, "");
+  assert.strictEqual(oferta.temVariacaoPreco, false);
+  assert.strictEqual(oferta.fonteImportacao.precoAliExpress.somenteMinimoSemMaximo, true);
+  assert.strictEqual(oferta.fonteImportacao.precoAliExpress.usadoPara.precoAtual, "");
+  assert.strictEqual(oferta.fonteImportacao.precoAliExpress.usadoPara.precoMin, "target_min_sale_price");
+}
+
+{
+  const oferta = await importarAliExpressManualV2("https://www.aliexpress.com/item/1005007878787878.html", criarDeps({
+    marketplace: "aliexpress",
+    productId: "1005007878787878",
+    linkOriginal: "https://www.aliexpress.com/item/1005007878787878.html",
+    linkAfiliado: "https://s.click.aliexpress.com/e/_SHORT878",
+    titulo: "Produto com faixa e preco atual bruto",
+    precoAtual: "399,68",
+    precoAntigo: "868,87",
+    target_sale_price: "399,68",
+    target_min_sale_price: "265,99",
+    target_max_sale_price: "604,52",
+    target_original_price: "868,87",
+    imagem: "https://ae01.alicdn.com/faixa-com-atual.jpg",
+    categoriaProduto: "Eletronicos"
+  }));
+
+  assert.strictEqual(oferta.precoAtual, "");
+  assert.strictEqual(oferta.precoMin, "265,99");
+  assert.strictEqual(oferta.precoMax, "604,52");
+  assert.strictEqual(oferta.temVariacaoPreco, true);
+  assert.strictEqual(oferta.fonteImportacao.precoAliExpress.usadoPara.precoAtual, "target_sale_price");
+  assert.strictEqual(oferta.fonteImportacao.precoAliExpress.temFaixaReal, true);
+}
+
+{
+  const oferta = await importarAliExpressManualV2("https://www.aliexpress.com/item/1005007979797979.html", criarDeps({
+    marketplace: "aliexpress",
+    productId: "1005007979797979",
+    linkOriginal: "https://www.aliexpress.com/item/1005007979797979.html",
+    linkAfiliado: "https://s.click.aliexpress.com/e/_SHORT979",
+    titulo: "Produto sem campos brutos",
+    precoAtual: "399,68",
+    precoAntigo: "868,87",
+    imagem: "https://ae01.alicdn.com/limitado.jpg",
+    categoriaProduto: "Eletronicos"
+  }));
+
+  assert.strictEqual(oferta.precoAtual, "399,68");
+  assert.strictEqual(oferta.precoAnterior, "868,87");
+  assert.deepStrictEqual(oferta.fonteImportacao.precoAliExpress.camposBrutos, {});
+  assert.strictEqual(oferta.fonteImportacao.precoAliExpress.origem, "limitada_importer_normalizado");
+  assert.ok(oferta.fonteImportacao.precoAliExpress.observacao.includes("Importer atual nao preservou"));
+}
+
+{
+  const chamadas = [];
+  const oferta = await importarAliExpressManualV2(
+    "https://www.aliexpress.com/item/1005008985393267.html",
+    {
+      ...criarDepsComImportador(async (url, config) => {
+        chamadas.push({
+          tipo: "importarAliExpressRuntime",
+          temGeradorAli: typeof config.gerarLinkCurtoAliExpress === "function",
+          temGeradorOptimus: typeof config.gerarLinkOptimus === "function"
+        });
+        const sourceValues = "https://s.click.aliexpress.com/s/pyFri10M6ltAv61YZY9TfrxiDaaFXRreuZWJMeLtD8jig1wPxn51K2eq59ds8iT5";
+        const linkAli = await config.gerarLinkCurtoAliExpress(sourceValues, config.credenciais);
+        const linkFinal = config.gerarLinkOptimus(linkAli, "aliexpress", { clienteId: config.clienteId });
+        return {
+          marketplace: "aliexpress",
+          productId: "1005008985393267",
+          linkOriginal: url,
+          linkAfiliado: linkFinal,
+          titulo: "Produto AliExpress Caso Real",
+          target_sale_price: "399,68",
+          target_original_price: "868,87",
+          imagem: "https://ae01.alicdn.com/caso-real.jpg",
+          categoriaProduto: "Eletronicos"
+        };
+      }, chamadas),
+      gerarLinkCurtoAliExpress: async () => "https://s.click.aliexpress.com/s/pyAfiliadoReal",
+      gerarLinkOptimus: (link) => `https://go.optimuspromo.com.br/r/aliexpress?url=${encodeURIComponent(link)}`
+    }
+  );
+
+  assert.strictEqual(
+    oferta.urlAfiliada,
+    "https://go.optimuspromo.com.br/r/aliexpress?url=https%3A%2F%2Fs.click.aliexpress.com%2Fs%2FpyAfiliadoReal"
+  );
+  assert.strictEqual(oferta.fonteImportacao.linkAfiliadoAliExpress.deeplinkGerado, true);
+  assert.strictEqual(oferta.fonteImportacao.linkAfiliadoAliExpress.sourceValuesUsado, "informado_ao_gerador");
+  assert.ok(oferta.fonteImportacao.camposConfiaveis.includes("urlAfiliada"));
+  assert.deepStrictEqual(chamadas, [
+    {
+      tipo: "getIntegracaoCliente",
+      clienteId: "cliente_aliexpress",
+      marketplace: "aliexpress"
+    },
+    {
+      tipo: "importarAliExpressRuntime",
+      temGeradorAli: true,
+      temGeradorOptimus: true
+    }
+  ]);
+}
+
+{
+  const oferta = await importarAliExpressManualV2(
+    "https://www.aliexpress.com/item/1005008985393268.html",
+    {
+      ...criarDepsComImportador(async (url, config) => {
+        const linkAli = await config.gerarLinkCurtoAliExpress(url, config.credenciais);
+        const linkFinal = config.gerarLinkOptimus(linkAli, "aliexpress", { clienteId: config.clienteId });
+        return {
+          marketplace: "aliexpress",
+          productId: "1005008985393268",
+          linkOriginal: url,
+          linkAfiliado: linkFinal,
+          titulo: "Produto com retorno nao afiliado",
+          target_sale_price: "99,90",
+          imagem: "https://ae01.alicdn.com/retorno-nao-afiliado.jpg",
+          categoriaProduto: "Eletronicos"
+        };
+      }),
+      gerarLinkCurtoAliExpress: async () => "https://example.com/link-diferente",
+      gerarLinkOptimus: (link) => `https://go.optimuspromo.com.br/r/aliexpress?url=${encodeURIComponent(link)}`
+    }
+  );
+
+  assert.strictEqual(oferta.urlAfiliada, "");
+  assert.strictEqual(oferta.fonteImportacao.linkAfiliadoAliExpress.deeplinkGerado, false);
+  assert.ok(oferta.fonteImportacao.avisos.includes("url_afiliada_ignorada_sem_shortlink_confirmado"));
+}
+
+{
+  const oferta = await importarAliExpressManualV2(
+    "https://www.aliexpress.com/item/1005008888888888.html",
+    criarDeps({
+      marketplace: "aliexpress",
+      productId: "1005008888888888",
+      linkOriginal: "https://www.aliexpress.com/item/1005008888888888.html",
+      linkAfiliado: "https://www.aliexpress.com/item/1005008888888888.html",
+      titulo: "Produto sem prova afiliada",
+      target_sale_price: "99,90",
+      imagem: "https://ae01.alicdn.com/sem-prova.jpg",
+      categoriaProduto: "Eletronicos"
+    })
+  );
+
+  assert.strictEqual(oferta.urlAfiliada, "");
+  assert.ok(oferta.fonteImportacao.avisos.includes("url_afiliada_ignorada_sem_shortlink_confirmado"));
 }
 
 {
