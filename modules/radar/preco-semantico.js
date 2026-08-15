@@ -27,7 +27,7 @@ const TIPOS_CANDIDATO = {
   DESCONHECIDO: "desconhecido"
 };
 
-const PADRAO_NUMERO = /(?:R\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d+(?:[,.]\d{2})?|\d+)/gi;
+const PADRAO_NUMERO = /(?:R\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d+(?:[,.]\d{1,2})?|\d+)/gi;
 const JANELA_CONTEXTO = 56;
 
 function texto(valor = "") {
@@ -170,6 +170,10 @@ function classificarTipo(base = {}) {
   }
   if (posterior === "avaliacoes") {
     motivos.push("candidato_classificado_como_quantidade");
+    return { tipo: TIPOS_CANDIDATO.QUANTIDADE, motivos };
+  }
+  if (base.valor <= 5 && /^\s*\(\d{2,6}\)/.test(base.posterior || "") && /(?:avaliacoes?|reviews?|estrelas?|\(\d{2,6}\))/i.test(contextoNormalizado)) {
+    motivos.push("candidato_classificado_como_avaliacao");
     return { tipo: TIPOS_CANDIDATO.QUANTIDADE, motivos };
   }
   if (posterior === "unidades" || anterior === "estoque") {

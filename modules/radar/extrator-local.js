@@ -22,7 +22,7 @@ const LIMITES_EXTRATOR_LOCAL = {
   EVIDENCIA_MAX: 80
 };
 
-const PADRAO_VALOR_BR = "\\d{1,3}(?:\\.\\d{3})*(?:,\\d{2})?|\\d+(?:,\\d{2})?";
+const PADRAO_VALOR_BR = "\\d{1,3}(?:\\.\\d{3})+(?:,\\d{2})?|\\d+(?:[,.]\\d{1,2})?";
 
 const GENERICOS_TITULO = [
   "corre",
@@ -36,6 +36,9 @@ const GENERICOS_TITULO = [
   "link",
   "cupom"
 ];
+
+const TERMOS_TITULO_PRODUTO = /\b(?:smart\s*tv|tv|televis[aã]o|monitor|smartphone|celular|iphone|notebook|tablet|secadora|lavadora|geladeira|fog[aã]o|micro-ondas|air\s*fryer|fone|headset|caixa\s+de\s+som|perfume|tenis|t[eê]nis|cadeira|mesa|sofa|sof[aá]|colch[aã]o|m[aá]quina|roupas?)\b/i;
+const UNIDADES_MODELO_TITULO = /\b(?:gb|tb|mb|kg|g|ml|l|polegadas?|pol|uhd|qled|oled|led|ram|hdmi|mp|w|v|bivolt)\b/i;
 
 function campo(valor = null, confianca = CONFIANCA.AUSENTE, evidencia = null, extras = {}) {
   return {
@@ -172,28 +175,64 @@ function extrairLinhasCandidatasTitulo(texto = "", links = []) {
   return normalizarTexto(texto)
     .split("\n")
     .map(linha => linha.trim())
+    .map(limparMarcadoresTitulo)
     .filter(Boolean)
     .filter(linha => !linksSet.has(linha))
     .filter(linha => !/(?:https?:\/\/|www\.)/i.test(linha))
-    .filter(linha => !/(?:^|\s)(?:r\$|\d+[,.]\d{2}|\d+\s*x\s*de|cupom|codigo|c[oó]digo|frete|economize|desconto|pix|cart[aã]o|boleto)(?:\s|:|$)/i.test(linha))
+    .filter(linha => !/^\s*[0-5](?:[,.]\d)?\s*\(\d{2,6}\)/.test(linha))
+    .filter(linha => !/(?:^|\s)(?:r\$|\d+[,.]\d{2}|\d+\s*x\s*de|cupom|codigo|c[oó]digo|frete|economize|desconto|pix|pre[cç]o|cart[aã]o|boleto)(?:\s|:|$)/i.test(linha))
     .filter(linha => !/^(?:use|aplique|resgate|compre|garanta|corre|aproveite)\b/i.test(linha))
     .filter(linha => !/^[@#]/.test(linha));
 }
 
+function limparMarcadoresTitulo(linha = "") {
+  return normalizarTexto(linha)
+    .replace(/^[^A-Za-z0-9À-ÿ"]+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function pontuarLinhaTituloProduto(linha = "") {
+  const limpa = limparMarcadoresTitulo(linha);
+  const normalizada = textoSemAcentos(limpa).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  if (!normalizada || GENERICOS_TITULO.includes(normalizada)) return -100;
+
+  const palavras = normalizada.split(/\s+/).filter(Boolean);
+  let pontos = 0;
+  const temTermoProduto = TERMOS_TITULO_PRODUTO.test(limpa);
+  const temUnidadeOuModelo = UNIDADES_MODELO_TITULO.test(limpa);
+
+  if (temTermoProduto) pontos += 8;
+  if (temUnidadeOuModelo) pontos += 4;
+  if (/\d/.test(limpa)) pontos += 3;
+  if (/[a-z]{1,}\d|\d[a-z]/i.test(limpa)) pontos += 2;
+  if (palavras.length >= 3) pontos += 2;
+  if (limpa.length >= 24) pontos += 1;
+  if (/^(?:oferta|promo[cç][aã]o|imperd[ií]vel|qualidade|cores?|pre[cç]o|barato|achadinho|corre)\b/i.test(limpa)) pontos -= 4;
+  if (limpa === limpa.toUpperCase() && !/\d/.test(limpa) && !temTermoProduto && !temUnidadeOuModelo) pontos -= 8;
+
+  return pontos;
+}
+
 function extrairTitulo(texto = "", links = []) {
   const linhas = extrairLinhasCandidatasTitulo(texto, links);
+  let melhor = null;
   for (const linha of linhas) {
     const normalizada = textoSemAcentos(linha).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
     if (!normalizada || GENERICOS_TITULO.includes(normalizada)) continue;
     if (normalizada.length < 8 || normalizada.split(/\s+/).length < 2) continue;
-    return campo(linha.slice(0, 180), CONFIANCA.MEDIA, linha.slice(0, 80));
+    const pontuacao = pontuarLinhaTituloProduto(linha);
+    if (!melhor || pontuacao > melhor.pontuacao) {
+      melhor = { linha, pontuacao };
+    }
   }
+  if (melhor) return campo(melhor.linha.slice(0, 180), CONFIANCA.MEDIA, melhor.linha.slice(0, 80));
   return campo(null);
 }
 
 function coletarValoresMoeda(texto = "") {
   const fonte = normalizarTexto(texto);
-  const regex = /(?:r\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})(?!\s*%)|(?:r\$\s*)(\d{1,3}(?:\.\d{3})+|\d{2,6})(?![\d.,%])/gi;
+  const regex = /(?:r\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})(?!\s*%)|(?:r\$\s*)(\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d+(?:[,.]\d{1,2})?|\d{2,6})(?![\d.,%])/gi;
   const valores = [];
   let limitado = false;
   let match;
@@ -222,7 +261,7 @@ function coletarValoresMoeda(texto = "") {
 }
 
 function extrairParcelamento(texto = "") {
-  const match = normalizarTexto(texto).match(/\b(\d{1,2})\s*x\s*(?:de\s*)?(?:r\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})/i);
+  const match = normalizarTexto(texto).match(/\b(\d{1,2})\s*x\s*(?:de\s*)?(?:r\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d+(?:[,.]\d{1,2})?)/i);
   if (!match) {
     return {
       quantidade: null,
@@ -251,7 +290,7 @@ function extrairPrecos(texto = "") {
     ambiguidades: []
   };
 
-  const dePor = fonte.match(new RegExp(`\\b(?:de|era)\\s*(?:r\\$\\s*)?(${valorBr})\\s*(?:por|agora)\\s*(?:r\\$\\s*)?(${valorBr})`, "i"));
+  const dePor = fonte.match(new RegExp(`\\b(?:de|era)\\s*:?\\s*(?:r\\$\\s*)?(${valorBr})\\s*(?:[|•\\-–—]\\s*)?(?:por|agora)\\s*:?\\s*(?:r\\$\\s*)?(${valorBr})`, "i"));
   if (dePor) {
     const anterior = normalizarPrecoBrasileiro(dePor[1]);
     const atual = normalizarPrecoBrasileiro(dePor[2]);

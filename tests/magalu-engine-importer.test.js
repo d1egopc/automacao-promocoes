@@ -22,6 +22,7 @@ const urlProduto = "https://www.magazineluiza.com.br/smart-tv-50/p/abc123/et/eli
 const urlRealA07 = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a07/p/240466500/te/ga07/";
 const urlA17Divergente = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a17/p/240575800/te/ga17/";
 const urlNightCaviar = "https://www.magazinevoce.com.br/d1egopc/night-caviar-100ml-paris-elysses/p/be172949ba/pf/ppfm/";
+const urlDivulgadorOferta = "https://www.magazineluiza.com.br/smart-tv-50-tcl-4k-uhd-qled-50p7k-google-tv-aipq-google-assistente-3-hdmi/divulgador/oferta/240144700/et/elit/?promoter_id=5438968&partner_id=3440";
 const htmlProduto = `
   <html>
     <head>
@@ -413,6 +414,31 @@ async function testarOfertaUniversalValida() {
   assert.strictEqual(ofertaUniversal.afiliacao.urlAfiliada, resultado.linkAfiliado);
 }
 
+async function testarDivulgadorOfertaNaoFalhaPorLinkProduto() {
+  const pacote = deps({
+    html: `
+      <link rel="canonical" href="${urlDivulgadorOferta}">
+      <script type="application/ld+json">
+        { "@type": "Product", "name": "Smart TV 50 TCL", "sku": "240144700", "offers": { "price": "2069.10" } }
+      </script>
+    `
+  });
+  const resultado = await importarProdutoMagaluEngine({
+    job: { id: 1501, evento_id: 1601, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento: {
+      texto_original: "Smart TV 50 TCL 4K UHD QLED 50P7K\nDE 2.811,00 | POR 2.069,10\n" + urlDivulgadorOferta,
+      links_extraidos: [urlDivulgadorOferta]
+    },
+    links: [linkRow(55, urlDivulgadorOferta)],
+    deps: pacote.deps
+  });
+
+  assert.notStrictEqual(resultado.motivo, "sem_link_produto_confirmado");
+  assert.strictEqual(resultado.marketplace, "magalu");
+  assert.strictEqual(resultado.motivo, "preco_indisponivel");
+  assert.strictEqual(resultado.linkOriginal, urlDivulgadorOferta);
+}
+
 async function testarImagemRadarPreservadaQuandoResolverSemImagem() {
   const imagemRadar = "https://cdn.optimus.test/radar-magalu.jpg";
   const htmlSemImagem = `
@@ -476,6 +502,16 @@ function testarClassificadorDeLinksMagalu() {
   assert.strictEqual(produto.url, urlProduto);
   assert.strictEqual(produto.papelLink, "produto");
 
+  const divulgadorOferta = escolherProdutoPrincipal([
+    { url: urlDivulgadorOferta, campo: "url_original", link: { marketplace_detectado: "magalu" } }
+  ], "magalu", {
+    texto_original: "Smart TV 50 TCL\nDE 2.811,00 | POR 2.069,10\n" + urlDivulgadorOferta
+  });
+
+  assert.strictEqual(divulgadorOferta.url, urlDivulgadorOferta);
+  assert.strictEqual(divulgadorOferta.papelLink, "produto");
+  assert.strictEqual(divulgadorOferta.papelLinkMotivo, "magalu_url_produto");
+
   const onelink = escolherProdutoPrincipal([
     { url: "https://magazineluiza.onelink.me/589508454/herbiqvt", campo: "url_original", link: {} }
   ], "magalu", {
@@ -529,6 +565,7 @@ function testarRegistriesPipelineUnico() {
   await testarRadarSemPrecoNaoContinuaPipeline();
   await testarDeepLinkOutraLojaNaoContinuaPipeline();
   await testarOfertaUniversalValida();
+  await testarDivulgadorOfertaNaoFalhaPorLinkProduto();
   await testarImagemRadarPreservadaQuandoResolverSemImagem();
   testarClassificadorDeLinksMagalu();
   testarRegistriesPipelineUnico();

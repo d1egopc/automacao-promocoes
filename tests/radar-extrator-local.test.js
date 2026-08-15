@@ -149,6 +149,39 @@ function testarNormalizacaoEValidade() {
   assert.ok(dePorInteiroMilhar.desconto.percentual > 0);
 }
 
+function testarMagaluM56TclDivulgador() {
+  const resultado = extrair(`CORES VIVAS QUE TRANSFORMAM SUA SALA
+
+Smart TV 50" TCL 4K UHD QLED 50P7K Google TV AiPQ Google Assistente 3 HDMI
+
+DE 2.811,00 | POR 2.069,10`, { marketplaceDetectado: "magalu" });
+
+  assert.strictEqual(resultado.titulo.valor, 'Smart TV 50" TCL 4K UHD QLED 50P7K Google TV AiPQ Google Assistente 3 HDMI');
+  assert.strictEqual(resultado.precoAnterior.valor, 2811);
+  assert.strictEqual(resultado.precoAtual.valor, 2069.10);
+  assert.strictEqual(resultado.precoAtual.tipo, "final");
+}
+
+function testarMagaluM56ElectroluxCupomParcelamento() {
+  const resultado = extrair(`QUALIDADE ELECTROLUX PRA DURAR ANOS NESSE PRECO TA VALENDO
+
+Secadora de Roupas de Piso e Parede Electrolux 11kg
+
+4.8 (1248)
+De: R$ 3.599
+Por: R$ 2329.1 no Pix a vista
+Ou 10x de R$ 232.91 sem juros
+
+Cupom: LU100`, { marketplaceDetectado: "magalu" });
+
+  assert.strictEqual(resultado.titulo.valor, "Secadora de Roupas de Piso e Parede Electrolux 11kg");
+  assert.strictEqual(resultado.precoAnterior.valor, 3599);
+  assert.strictEqual(resultado.precoAtual.valor, 2329.10);
+  assert.strictEqual(resultado.parcelamento.quantidade, 10);
+  assert.strictEqual(resultado.parcelamento.valorParcela, 232.91);
+  assert.strictEqual(resultado.cupom.codigo, "LU100");
+}
+
 function testarDescontoNaoCalculavelEComparacao() {
   const resultado = extrair("Produto Teste\nDe R$ 99,90 por R$ 129,90");
   assert.strictEqual(resultado.desconto.percentual, null);
@@ -185,6 +218,8 @@ testarCupons();
 testarFreteEconomiaAmbiguidade();
 testarLinksShortlinkImagemTitulo();
 testarNormalizacaoEValidade();
+testarMagaluM56TclDivulgador();
+testarMagaluM56ElectroluxCupomParcelamento();
 testarDescontoNaoCalculavelEComparacao();
 testarLimitesDefensivos();
 

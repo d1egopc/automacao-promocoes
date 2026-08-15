@@ -289,7 +289,7 @@ function classificarMagalu(candidato = {}, evento = {}) {
     return { papelLink: PAPEL_LINK.DESCONHECIDO, motivo: "magalu_onelink_sem_resolucao_produto", confianca: "baixa" };
   }
 
-  if (/(?:magazineluiza\.com\.br|magalu\.com|magazinevoce\.com\.br)\/.+(?:\/p\/[^/?#]+|\/produto\/\d+)/i.test(url)) {
+  if (/(?:magazineluiza\.com\.br|magalu\.com|magazinevoce\.com\.br)\/.+(?:\/p\/[^/?#]+|\/produto\/\d+|\/divulgador\/oferta\/[^/?#]+)/i.test(url)) {
     return { papelLink: PAPEL_LINK.PRODUTO, motivo: "magalu_url_produto", confianca: "alta" };
   }
 

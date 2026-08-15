@@ -75,7 +75,8 @@ function produtoIdPorUrl(url = "") {
     const pathname = new URL(url).pathname;
     const porP = pathname.match(/\/p\/([^/?#]+)/i)?.[1] || "";
     const porProduto = pathname.match(/\/produto\/(\d+)/i)?.[1] || "";
-    return limparTextoMagalu(decodeURIComponent(porP || porProduto || ""));
+    const porDivulgadorOferta = pathname.match(/\/divulgador\/oferta\/([^/?#]+)/i)?.[1] || "";
+    return limparTextoMagalu(decodeURIComponent(porP || porProduto || porDivulgadorOferta || ""));
   } catch (_) {
     return "";
   }

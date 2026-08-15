@@ -259,6 +259,31 @@ function testarBeneficioOffNaoSobrescrevePrecoImportador() {
   assert.ok(template.includes("Por: *R$ 1.967,00*"), "template final preserva fallback tecnico legitimo");
 }
 
+function testarMagaluM56DePorSemCifrao() {
+  const r = extrair("DE 2.811,00 | POR 2.069,10", { marketplaceDetectado: "magalu" });
+  assertValor(r.precoAntigo, 2811, "magalu de sem cifrao");
+  assertValor(r.precoAtual, 2069.10, "magalu por sem cifrao");
+  assertTipo("DE 2.811,00 | POR 2.069,10", 2811, TIPOS_CANDIDATO.PRECO_ANTIGO, "de sem cifrao classificado");
+  assertTipo("DE 2.811,00 | POR 2.069,10", 2069.10, TIPOS_CANDIDATO.PRECO_ATUAL, "por sem cifrao classificado");
+}
+
+function testarMagaluM56DecimalPontoCupomParcelaAvaliacao() {
+  const texto = `Secadora de Roupas de Piso e Parede Electrolux 11kg
+4.8 (1248)
+De: R$ 3.599
+Por: R$ 2329.1 no Pix a vista
+Ou 10x de R$ 232.91 sem juros
+Cupom: LU100`;
+  const r = extrair(texto, { marketplaceDetectado: "magalu" });
+  assertValor(r.precoAntigo, 3599, "magalu de milhar inteiro");
+  assertValor(r.precoAtual, 2329.10, "magalu por decimal ponto curto");
+  assertValor(r.precoParcelado, 232.91, "parcelamento com decimal ponto preservado");
+  assert.strictEqual(r.parcelamento.quantidade, 10);
+  assert.strictEqual(r.cupom.codigo, "LU100");
+  assertTipo(texto, 4.8, TIPOS_CANDIDATO.QUANTIDADE, "avaliacao decimal nao vira preco");
+  assertTipo(texto, 232.91, TIPOS_CANDIDATO.PARCELA, "parcela nao vira preco atual");
+}
+
 const testes = [
   testarPorComCifrao,
   testarAgoraSemCifrao,
@@ -294,7 +319,9 @@ const testes = [
   testarManualSemRadar,
   testarRadarMirrorFielPadrao,
   testarMetadataPrecedencia,
-  testarBeneficioOffNaoSobrescrevePrecoImportador
+  testarBeneficioOffNaoSobrescrevePrecoImportador,
+  testarMagaluM56DePorSemCifrao,
+  testarMagaluM56DecimalPontoCupomParcelaAvaliacao
 ];
 
 for (const teste of testes) teste();

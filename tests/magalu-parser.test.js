@@ -86,6 +86,7 @@ assert.deepStrictEqual(Object.keys(completo).filter(k => /afiliad|promoter/i.tes
 const urlRealA07 = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a07/p/240466500/te/ga07/";
 const urlA17Divergente = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a17/p/240575800/te/ga17/";
 const urlNightCaviar = "https://www.magazinevoce.com.br/d1egopc/night-caviar-100ml-paris-elysses/p/be172949ba/pf/ppfm/";
+const urlDivulgadorOferta = "https://www.magazineluiza.com.br/smart-tv-50-tcl-4k-uhd-qled-50p7k-google-tv-aipq-google-assistente-3-hdmi/divulgador/oferta/240144700/et/elit/?promoter_id=5438968&partner_id=3440";
 
 const canonicalDivergente = parseMagaluProdutoHtml({
   urlOriginal: urlRealA07,
@@ -294,6 +295,7 @@ assert.strictEqual(normalizarPrecoMagalu("2.345,67"), "R$\u00a02.345,67");
 assert.strictEqual(produtoIdPorUrl(urlProduto), "abc123");
 assert.strictEqual(produtoIdPorUrl(urlRealA07), "240466500");
 assert.strictEqual(produtoIdPorUrl(urlNightCaviar), "be172949ba");
+assert.strictEqual(produtoIdPorUrl(urlDivulgadorOferta), "240144700");
 assert.strictEqual(hostMagaluValido(urlProduto), true);
 assert.strictEqual(hostMagaluValido("https://example.com/produto/p/abc123/"), false);
 
