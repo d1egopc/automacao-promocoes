@@ -178,6 +178,12 @@ const {
   iniciarManualV2Scheduler
 } = require("./modules/manual-v2/manual-scheduler.runner");
 const {
+  iniciarManualV2Retention
+} = require("./modules/manual-v2/manual-retention.runner");
+const {
+  limparRetencaoManualV2Cliente
+} = require("./modules/manual-v2/manual-retention");
+const {
   enviarOfertaManualV2: enviarOfertaManualV2Dispatcher
 } = require("./modules/manual-v2/manual-dispatcher");
 const {
@@ -17712,6 +17718,22 @@ function iniciarManualV2SchedulerOperacional() {
   });
 }
 
+function iniciarManualV2RetentionOperacional() {
+  const resultado = iniciarManualV2Retention({
+    listClientes,
+    limparRetencaoManualV2Cliente,
+    retentionDays: process.env.MANUAL_V2_RETENTION_DAYS,
+    intervalMs: process.env.MANUAL_V2_RETENTION_INTERVAL_MS,
+    logger: console
+  });
+
+  console.log("[MANUAL-V2-RETENTION] inicializacao", {
+    iniciado: resultado.iniciado === true,
+    intervalMs: resultado.intervalMs,
+    motivo: resultado.motivo || ""
+  });
+}
+
 app.use("/manual-v2", criarRotasManualV2({
   getClienteId,
   destinosPorCliente,
@@ -24174,6 +24196,7 @@ console.log("[BOOT] Dados iniciais carregados:", {
 app.listen(PORT, () => {
   console.log("[API]🟢🧠 API ONLINE NA PORTA " + PORT);
   iniciarManualV2SchedulerOperacional();
+  iniciarManualV2RetentionOperacional();
 
 decairConfiancaCupons();
 
