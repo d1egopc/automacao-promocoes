@@ -284,6 +284,27 @@ Cupom: LU100`;
   assertTipo(texto, 232.91, TIPOS_CANDIDATO.PARCELA, "parcela nao vira preco atual");
 }
 
+function testarMagaluM561MarkdownDePor() {
+  const texto = `AQUECE O JANTAR NUM PISCAR DE OLHOS
+Micro-ondas Electrolux 23L Branco Efficient ME23B
+DE ~799,00~ | POR *498,75*`;
+  const r = extrair(texto, { marketplaceDetectado: "magalu" });
+  assertValor(r.precoAntigo, 799, "magalu de com markdown");
+  assertValor(r.precoAtual, 498.75, "magalu por com markdown");
+  assertTipo(texto, 799, TIPOS_CANDIDATO.PRECO_ANTIGO, "de markdown classificado");
+  assertTipo(texto, 498.75, TIPOS_CANDIDATO.PRECO_ATUAL, "por markdown classificado");
+}
+
+function testarMagaluM561CupomNaoContaminaPreco() {
+  const texto = `Notebook Acer Aspire Go 15 AG15-51P-35JZ Intel Core i3 8GB RAM 256GB SSD 15.3 Windows 11
+DE ~4.999,00~ | POR *3.214,05*
+Cupom: INFLU300`;
+  const r = extrair(texto, { marketplaceDetectado: "magalu" });
+  assertValor(r.precoAntigo, 4999, "magalu de com cupom");
+  assertValor(r.precoAtual, 3214.05, "magalu por com cupom");
+  assert.strictEqual(r.cupom.codigo, "INFLU300");
+}
+
 const testes = [
   testarPorComCifrao,
   testarAgoraSemCifrao,
@@ -321,7 +342,9 @@ const testes = [
   testarMetadataPrecedencia,
   testarBeneficioOffNaoSobrescrevePrecoImportador,
   testarMagaluM56DePorSemCifrao,
-  testarMagaluM56DecimalPontoCupomParcelaAvaliacao
+  testarMagaluM56DecimalPontoCupomParcelaAvaliacao,
+  testarMagaluM561MarkdownDePor,
+  testarMagaluM561CupomNaoContaminaPreco
 ];
 
 for (const teste of testes) teste();

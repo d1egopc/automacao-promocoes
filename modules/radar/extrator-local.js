@@ -23,6 +23,7 @@ const LIMITES_EXTRATOR_LOCAL = {
 };
 
 const PADRAO_VALOR_BR = "\\d{1,3}(?:\\.\\d{3})+(?:,\\d{2})?|\\d+(?:[,.]\\d{1,2})?";
+const FORMATACAO_COMERCIAL_SEGURA = /[*~_]/g;
 
 const GENERICOS_TITULO = [
   "corre",
@@ -64,6 +65,10 @@ function normalizarTexto(texto = "") {
     .replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, "")
     .replace(/\u00A0/g, " ")
     .replace(/\r/g, "\n");
+}
+
+function removerMarcadoresFormatacaoComercial(texto = "") {
+  return normalizarTexto(texto).replace(FORMATACAO_COMERCIAL_SEGURA, "");
 }
 
 function textoSemAcentos(texto = "") {
@@ -177,10 +182,11 @@ function extrairLinhasCandidatasTitulo(texto = "", links = []) {
     .map(linha => linha.trim())
     .map(limparMarcadoresTitulo)
     .filter(Boolean)
+    .filter(linha => pontuarLinhaTituloProduto(linha) >= 6 || !linhaComercialNaoTitulo(linha))
     .filter(linha => !linksSet.has(linha))
     .filter(linha => !/(?:https?:\/\/|www\.)/i.test(linha))
     .filter(linha => !/^\s*[0-5](?:[,.]\d)?\s*\(\d{2,6}\)/.test(linha))
-    .filter(linha => !/(?:^|\s)(?:r\$|\d+[,.]\d{2}|\d+\s*x\s*de|cupom|codigo|c[oó]digo|frete|economize|desconto|pix|pre[cç]o|cart[aã]o|boleto)(?:\s|:|$)/i.test(linha))
+    .filter(linha => pontuarLinhaTituloProduto(linha) >= 6 || !/(?:^|\s)(?:r\$|\d+[,.]\d{2}|\d+\s*x\s*de|cupom|codigo|c[oó]digo|frete|economize|desconto|pix|pre[cç]o|cart[aã]o|boleto)(?:\s|:|$)/i.test(linha))
     .filter(linha => !/^(?:use|aplique|resgate|compre|garanta|corre|aproveite)\b/i.test(linha))
     .filter(linha => !/^[@#]/.test(linha));
 }
@@ -190,6 +196,17 @@ function limparMarcadoresTitulo(linha = "") {
     .replace(/^[^A-Za-z0-9À-ÿ"]+/, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function linhaComercialNaoTitulo(linha = "") {
+  const limpa = removerMarcadoresFormatacaoComercial(linha).trim();
+  if (!limpa) return true;
+  if (/^\s*[0-5](?:[,.]\d)?\s*\(\d{2,6}\)/.test(limpa)) return true;
+  if (/^\s*(?:cupom|c[oó]digo|codigo)\s*:/i.test(limpa)) return true;
+  if (/^\s*(?:ou\s*)?\d{1,2}\s*x\s*(?:de\s*)?(?:r\$\s*)?\d/i.test(limpa)) return true;
+  if (new RegExp(`\\b(?:de|era)\\s*:?\\s*(?:r\\$\\s*)?${PADRAO_VALOR_BR}\\s*(?:[|•\\-–—]\\s*)?(?:por|agora)\\s*:?\\s*(?:r\\$\\s*)?${PADRAO_VALOR_BR}`, "i").test(limpa)) return true;
+  if (/^\s*(?:de|era|por|agora|pre[cç]o)\s*:?/i.test(limpa) && new RegExp(PADRAO_VALOR_BR).test(limpa)) return true;
+  return false;
 }
 
 function pontuarLinhaTituloProduto(linha = "") {
@@ -222,6 +239,7 @@ function extrairTitulo(texto = "", links = []) {
     if (!normalizada || GENERICOS_TITULO.includes(normalizada)) continue;
     if (normalizada.length < 8 || normalizada.split(/\s+/).length < 2) continue;
     const pontuacao = pontuarLinhaTituloProduto(linha);
+    if (pontuacao < 0) continue;
     if (!melhor || pontuacao > melhor.pontuacao) {
       melhor = { linha, pontuacao };
     }
@@ -231,7 +249,7 @@ function extrairTitulo(texto = "", links = []) {
 }
 
 function coletarValoresMoeda(texto = "") {
-  const fonte = normalizarTexto(texto);
+  const fonte = removerMarcadoresFormatacaoComercial(texto);
   const regex = /(?:r\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})(?!\s*%)|(?:r\$\s*)(\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d+(?:[,.]\d{1,2})?|\d{2,6})(?![\d.,%])/gi;
   const valores = [];
   let limitado = false;
@@ -261,7 +279,7 @@ function coletarValoresMoeda(texto = "") {
 }
 
 function extrairParcelamento(texto = "") {
-  const match = normalizarTexto(texto).match(/\b(\d{1,2})\s*x\s*(?:de\s*)?(?:r\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d+(?:[,.]\d{1,2})?)/i);
+  const match = removerMarcadoresFormatacaoComercial(texto).match(/\b(\d{1,2})\s*x\s*(?:de\s*)?(?:r\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d+(?:[,.]\d{1,2})?)/i);
   if (!match) {
     return {
       quantidade: null,
@@ -277,7 +295,7 @@ function extrairParcelamento(texto = "") {
 }
 
 function extrairPrecos(texto = "") {
-  const fonte = normalizarTexto(texto);
+  const fonte = removerMarcadoresFormatacaoComercial(texto);
   const valorBr = PADRAO_VALOR_BR;
   const resultado = {
     precoAtual: campo(null, CONFIANCA.AUSENTE, null, { tipo: "desconhecido" }),

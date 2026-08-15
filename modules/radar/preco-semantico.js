@@ -29,6 +29,7 @@ const TIPOS_CANDIDATO = {
 
 const PADRAO_NUMERO = /(?:R\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d+(?:[,.]\d{1,2})?|\d+)/gi;
 const JANELA_CONTEXTO = 56;
+const FORMATACAO_COMERCIAL_SEGURA = /[*~_]/g;
 
 function texto(valor = "") {
   return String(valor ?? "");
@@ -37,7 +38,8 @@ function texto(valor = "") {
 function textoLimpo(valor = "") {
   return texto(valor)
     .replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, "")
-    .replace(/\u00A0/g, " ");
+    .replace(/\u00A0/g, " ")
+    .replace(FORMATACAO_COMERCIAL_SEGURA, "");
 }
 
 function semAcentos(valor = "") {

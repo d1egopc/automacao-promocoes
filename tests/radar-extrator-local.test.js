@@ -182,6 +182,38 @@ Cupom: LU100`, { marketplaceDetectado: "magalu" });
   assert.strictEqual(resultado.cupom.codigo, "LU100");
 }
 
+function testarMagaluM561MicroondasMarkdown() {
+  const resultado = extrair(`AQUECE O JANTAR NUM PISCAR DE OLHOS
+
+Micro-ondas Electrolux 23L Branco Efficient ME23B
+
+DE ~799,00~ | POR *498,75*
+
+https://www.magazineluiza.com.br/micro-ondas-electrolux-23l-branco-efficient-me23b/divulgador/oferta/235613900/ed/mond/?promoter_id=5438968&partner_id=3440`, { marketplaceDetectado: "magalu" });
+
+  assert.strictEqual(resultado.titulo.valor, "Micro-ondas Electrolux 23L Branco Efficient ME23B");
+  assert.strictEqual(resultado.precoAnterior.valor, 799);
+  assert.strictEqual(resultado.precoAtual.valor, 498.75);
+  assert.strictEqual(resultado.precoAtual.tipo, "final");
+}
+
+function testarMagaluM561CupomTituloNaoPreco() {
+  const resultado = extrair(`OFERTA MAGALU
+
+Notebook Acer Aspire Go 15 AG15-51P-35JZ Intel Core i3 8GB RAM 256GB SSD 15.3 Windows 11
+
+DE ~4.999,00~ | POR *3.214,05*
+
+Cupom: INFLU300
+
+https://www.magazineluiza.com.br/notebook-acer-aspire-go-15-ag15-51p-35jz-intel-core-i3-8gb-ram-256gb-ssd-153-windows-11-nx-jgfal-005/divulgador/oferta/240429300/in/nota/?promoter_id=5438968&partner_id=3440`, { marketplaceDetectado: "magalu" });
+
+  assert.strictEqual(resultado.titulo.valor, "Notebook Acer Aspire Go 15 AG15-51P-35JZ Intel Core i3 8GB RAM 256GB SSD 15.3 Windows 11");
+  assert.strictEqual(resultado.precoAnterior.valor, 4999);
+  assert.strictEqual(resultado.precoAtual.valor, 3214.05);
+  assert.strictEqual(resultado.cupom.codigo, "INFLU300");
+}
+
 function testarDescontoNaoCalculavelEComparacao() {
   const resultado = extrair("Produto Teste\nDe R$ 99,90 por R$ 129,90");
   assert.strictEqual(resultado.desconto.percentual, null);
@@ -220,6 +252,8 @@ testarLinksShortlinkImagemTitulo();
 testarNormalizacaoEValidade();
 testarMagaluM56TclDivulgador();
 testarMagaluM56ElectroluxCupomParcelamento();
+testarMagaluM561MicroondasMarkdown();
+testarMagaluM561CupomTituloNaoPreco();
 testarDescontoNaoCalculavelEComparacao();
 testarLimitesDefensivos();
 
