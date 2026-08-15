@@ -28,6 +28,19 @@ function lista(valor) {
   return Array.isArray(valor) ? valor : [];
 }
 
+function isoInequivoco(valor = "") {
+  const textoData = texto(valor);
+  if (!textoData) return "";
+  const ms = Date.parse(textoData);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : "";
+}
+
+function listaTexto(valor) {
+  return lista(valor)
+    .map(texto)
+    .filter(Boolean);
+}
+
 function sanitizarDestinoEscolhido(destino = {}) {
   return {
     id: texto(destino.id || destino.destinoId),
@@ -38,6 +51,25 @@ function sanitizarDestinoEscolhido(destino = {}) {
     motivoIndisponivel: texto(destino.motivoIndisponivel),
     identificacaoVisual: texto(destino.identificacaoVisual)
   };
+}
+
+function sanitizarDestinoAgendado(destino = {}) {
+  const sanitizado = sanitizarDestinoEscolhido(destino);
+  return {
+    id: sanitizado.id,
+    nome: sanitizado.nome,
+    tipo: sanitizado.tipo,
+    ativo: sanitizado.ativo,
+    utilizavel: sanitizado.utilizavel,
+    motivoIndisponivel: sanitizado.motivoIndisponivel,
+    identificacaoVisual: sanitizado.identificacaoVisual
+  };
+}
+
+function sanitizarDestinosAgendados(destinos = []) {
+  return lista(destinos)
+    .map(sanitizarDestinoAgendado)
+    .filter((destino) => destino.id);
 }
 
 function sanitizarResultadoEnvio(resultado = {}) {
@@ -231,6 +263,161 @@ function atualizarMetadadosEnvioManualV2(clienteId = "admin", ofertaId = "", met
   return proximaOferta;
 }
 
+function atualizarMetadadosAgendamentoManualV2(clienteId = "admin", ofertaId = "", metadados = {}, deps = {}) {
+  return alterarOfertaManualV2(clienteId, ofertaId, (existente, agora) => {
+    const proximaOferta = {
+      ...existente,
+      status: normalizarStatusManualV2(metadados.status || existente.status),
+      agendamentoTentativas: Object.prototype.hasOwnProperty.call(metadados, "agendamentoTentativas")
+        ? inteiro(metadados.agendamentoTentativas)
+        : inteiro(existente.agendamentoTentativas)
+    };
+
+    for (const campo of [
+      "agendadoPara",
+      "agendamentoTimezone",
+      "agendamentoLocal",
+      "agendamentoCriadoEm",
+      "agendamentoAtualizadoEm",
+      "agendamentoCanceladoEm",
+      "agendamentoLockId",
+      "agendamentoLockEm",
+      "agendamentoErroResumo"
+    ]) {
+      if (Object.prototype.hasOwnProperty.call(metadados, campo)) {
+        const valor = texto(metadados[campo]);
+        proximaOferta[campo] = campo === "agendamentoErroResumo" ? valor.slice(0, 1000) : valor;
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(metadados, "destinosIds")) {
+      proximaOferta.destinosIds = listaTexto(metadados.destinosIds);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(metadados, "destinosAgendados")) {
+      proximaOferta.destinosAgendados = sanitizarDestinosAgendados(metadados.destinosAgendados);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(metadados, "limparLock") && metadados.limparLock) {
+      delete proximaOferta.agendamentoLockId;
+      delete proximaOferta.agendamentoLockEm;
+    }
+
+    proximaOferta.agendamentoAtualizadoEm = texto(proximaOferta.agendamentoAtualizadoEm) || agora;
+    return proximaOferta;
+  }, deps);
+}
+
+function alterarOfertaManualV2(clienteId = "admin", ofertaId = "", alterar, deps = {}) {
+  const storage = resolverDepsStorage(deps);
+  const id = storage.normalizarClienteId(clienteId || "admin");
+  const alvoId = texto(ofertaId);
+  if (!alvoId) return null;
+
+  const listaOfertas = lerListaCliente(id, deps);
+  const index = listaOfertas.findIndex((oferta) => String(oferta.id || "") === alvoId);
+  if (index < 0) return null;
+
+  const existente = listaOfertas[index];
+  const agora = storage.now();
+  const proximaOferta = alterar({ ...existente }, agora, id);
+  if (!proximaOferta) return null;
+
+  proximaOferta.id = existente.id;
+  proximaOferta.clienteId = id;
+  proximaOferta.criadoEm = existente.criadoEm;
+  proximaOferta.atualizadoEm = agora;
+
+  const proximaLista = [...listaOfertas];
+  proximaLista[index] = proximaOferta;
+  salvarListaCliente(id, proximaLista, deps);
+  return proximaOferta;
+}
+
+function bloquearAgendamentoSeStatusFinal(status = "") {
+  const atual = normalizarStatusManualV2(status);
+  if (atual === "enviando" || atual === "enviada") {
+    const erro = new Error("oferta_manual_v2_agendamento_status_bloqueado");
+    erro.codigo = "oferta_manual_v2_agendamento_status_bloqueado";
+    throw erro;
+  }
+}
+
+function limparLockAgendamento(oferta = {}) {
+  const proxima = { ...oferta };
+  delete proxima.agendamentoLockId;
+  delete proxima.agendamentoLockEm;
+  return proxima;
+}
+
+function dadosAgendamentoManualV2(dados = {}, agora = "") {
+  const agendadoPara = isoInequivoco(dados.agendadoPara);
+  if (!agendadoPara) {
+    const erro = new Error("manual_v2_agendamento_data_invalida");
+    erro.codigo = "manual_v2_agendamento_data_invalida";
+    throw erro;
+  }
+
+  return {
+    agendadoPara,
+    agendamentoTimezone: texto(dados.agendamentoTimezone || dados.timezone || "America/Sao_Paulo"),
+    agendamentoLocal: texto(dados.agendamentoLocal || dados.horarioLocal),
+    agendamentoAtualizadoEm: agora,
+    destinosIds: listaTexto(dados.destinosIds),
+    destinosAgendados: sanitizarDestinosAgendados(dados.destinosAgendados),
+    agendamentoErroResumo: ""
+  };
+}
+
+function marcarOfertaManualV2Agendada(clienteId = "admin", ofertaId = "", dados = {}, deps = {}) {
+  return alterarOfertaManualV2(clienteId, ofertaId, (existente, agora) => {
+    bloquearAgendamentoSeStatusFinal(existente.status);
+    const agendamento = dadosAgendamentoManualV2(dados, agora);
+    return {
+      ...limparLockAgendamento(existente),
+      ...agendamento,
+      status: "agendada",
+      agendamentoCriadoEm: texto(existente.agendamentoCriadoEm) || agora,
+      agendamentoCanceladoEm: "",
+      agendamentoTentativas: inteiro(existente.agendamentoTentativas)
+    };
+  }, deps);
+}
+
+function reprogramarOfertaManualV2Agendada(clienteId = "admin", ofertaId = "", dados = {}, deps = {}) {
+  return alterarOfertaManualV2(clienteId, ofertaId, (existente, agora) => {
+    bloquearAgendamentoSeStatusFinal(existente.status);
+    const agendamento = dadosAgendamentoManualV2(dados, agora);
+    return {
+      ...limparLockAgendamento(existente),
+      ...agendamento,
+      status: "agendada",
+      agendamentoCriadoEm: texto(existente.agendamentoCriadoEm) || agora,
+      agendamentoCanceladoEm: "",
+      agendamentoTentativas: inteiro(existente.agendamentoTentativas)
+    };
+  }, deps);
+}
+
+function cancelarAgendamentoOfertaManualV2(clienteId = "admin", ofertaId = "", deps = {}) {
+  return alterarOfertaManualV2(clienteId, ofertaId, (existente, agora) => {
+    bloquearAgendamentoSeStatusFinal(existente.status);
+    const proxima = limparLockAgendamento(existente);
+    return {
+      ...proxima,
+      status: STATUS_INICIAL_MANUAL_V2,
+      agendadoPara: "",
+      agendamentoTimezone: texto(proxima.agendamentoTimezone),
+      agendamentoLocal: "",
+      agendamentoAtualizadoEm: agora,
+      agendamentoCanceladoEm: agora,
+      destinosIds: [],
+      destinosAgendados: [],
+      agendamentoErroResumo: ""
+    };
+  }, deps);
+}
+
 module.exports = {
   ARQUIVO_OFERTAS_MANUAL_V2,
   listarOfertasManuaisV2,
@@ -238,5 +425,10 @@ module.exports = {
   criarOfertaManualV2,
   atualizarOfertaManualV2,
   excluirOfertaManualV2,
-  atualizarMetadadosEnvioManualV2
+  atualizarMetadadosEnvioManualV2,
+  atualizarMetadadosAgendamentoManualV2,
+  marcarOfertaManualV2Agendada,
+  reprogramarOfertaManualV2Agendada,
+  cancelarAgendamentoOfertaManualV2,
+  sanitizarDestinoAgendado
 };

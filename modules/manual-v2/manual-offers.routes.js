@@ -15,6 +15,7 @@ function texto(valor = "") {
 }
 
 function statusErro(e) {
+  if (e.codigo === "oferta_manual_v2_agendamento_status_bloqueado") return 409;
   return e.statusCode || e.status || 500;
 }
 
@@ -37,6 +38,93 @@ function listaTexto(valor) {
     .filter(Boolean);
 }
 
+function timezoneValido(timezone = "") {
+  const zona = texto(timezone) || "America/Sao_Paulo";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: zona }).format(new Date());
+    return zona;
+  } catch (_e) {
+    return "";
+  }
+}
+
+function partesTimezone(data, timezone) {
+  const partes = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).formatToParts(data);
+  const mapa = {};
+  for (const parte of partes) {
+    if (parte.type !== "literal") mapa[parte.type] = Number(parte.value);
+  }
+  return mapa;
+}
+
+function dataHoraLocalParaIso(dataHoraLocal = "", timezoneEntrada = "") {
+  const timezone = timezoneValido(timezoneEntrada) || "America/Sao_Paulo";
+  const match = texto(dataHoraLocal).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) {
+    const erro = new Error("manual_v2_agendamento_data_invalida");
+    erro.statusCode = 400;
+    erro.codigo = "manual_v2_agendamento_data_invalida";
+    throw erro;
+  }
+
+  const alvo = {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+    hour: Number(match[4]),
+    minute: Number(match[5]),
+    second: Number(match[6] || 0)
+  };
+  const utcAlvo = Date.UTC(alvo.year, alvo.month - 1, alvo.day, alvo.hour, alvo.minute, alvo.second);
+  if (!Number.isFinite(utcAlvo)) {
+    const erro = new Error("manual_v2_agendamento_data_invalida");
+    erro.statusCode = 400;
+    erro.codigo = "manual_v2_agendamento_data_invalida";
+    throw erro;
+  }
+
+  let tentativa = utcAlvo;
+  for (let i = 0; i < 3; i += 1) {
+    const partes = partesTimezone(new Date(tentativa), timezone);
+    const localComoUtc = Date.UTC(partes.year, partes.month - 1, partes.day, partes.hour, partes.minute, partes.second || 0);
+    const proxima = utcAlvo - (localComoUtc - utcAlvo);
+    if (Math.abs(proxima - tentativa) < 1000) {
+      tentativa = proxima;
+      break;
+    }
+    tentativa = proxima;
+  }
+
+  const conferida = partesTimezone(new Date(tentativa), timezone);
+  const confere = conferida.year === alvo.year &&
+    conferida.month === alvo.month &&
+    conferida.day === alvo.day &&
+    conferida.hour === alvo.hour &&
+    conferida.minute === alvo.minute;
+
+  if (!confere) {
+    const erro = new Error("manual_v2_agendamento_data_invalida");
+    erro.statusCode = 400;
+    erro.codigo = "manual_v2_agendamento_data_invalida";
+    throw erro;
+  }
+
+  return {
+    agendadoPara: new Date(tentativa).toISOString(),
+    agendamentoLocal: texto(dataHoraLocal),
+    agendamentoTimezone: timezone
+  };
+}
+
 function erroResumo(resultados = []) {
   return resultados
     .filter((item) => item?.status === "erro" && texto(item.erro))
@@ -44,6 +132,20 @@ function erroResumo(resultados = []) {
     .filter(Boolean)
     .join("; ")
     .slice(0, 1000);
+}
+
+function erroStatusAgendamentoBloqueado() {
+  const erro = new Error("oferta_manual_v2_agendamento_status_bloqueado");
+  erro.codigo = "oferta_manual_v2_agendamento_status_bloqueado";
+  erro.statusCode = 409;
+  return erro;
+}
+
+function bloquearAgendamentoPorStatus(oferta = {}) {
+  const status = texto(oferta.status).toLowerCase();
+  if (status === "enviando" || status === "enviada") {
+    throw erroStatusAgendamentoBloqueado();
+  }
 }
 
 function criarRotasManualV2(deps = {}) {
@@ -57,7 +159,10 @@ function criarRotasManualV2(deps = {}) {
     criarOfertaManualV2: deps.criarOfertaManualV2 || storagePadrao.criarOfertaManualV2,
     atualizarOfertaManualV2: deps.atualizarOfertaManualV2 || storagePadrao.atualizarOfertaManualV2,
     excluirOfertaManualV2: deps.excluirOfertaManualV2 || storagePadrao.excluirOfertaManualV2,
-    atualizarMetadadosEnvioManualV2: deps.atualizarMetadadosEnvioManualV2 || storagePadrao.atualizarMetadadosEnvioManualV2
+    atualizarMetadadosEnvioManualV2: deps.atualizarMetadadosEnvioManualV2 || storagePadrao.atualizarMetadadosEnvioManualV2,
+    marcarOfertaManualV2Agendada: deps.marcarOfertaManualV2Agendada || storagePadrao.marcarOfertaManualV2Agendada,
+    reprogramarOfertaManualV2Agendada: deps.reprogramarOfertaManualV2Agendada || storagePadrao.reprogramarOfertaManualV2Agendada,
+    cancelarAgendamentoOfertaManualV2: deps.cancelarAgendamentoOfertaManualV2 || storagePadrao.cancelarAgendamentoOfertaManualV2
   };
 
   function cliente(req) {
@@ -297,6 +402,132 @@ function criarRotasManualV2(deps = {}) {
         envioManual
       }, storageOptions);
       return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_envio_falhou"));
+    }
+  });
+
+  function destinosSelecionadosAgendamento(req, clienteId, destinosIds) {
+    const plano = typeof deps.getPlanoUsuario === "function"
+      ? deps.getPlanoUsuario(req)
+      : deps.plano || {};
+    const destinosSanitizados = listarDestinosManuaisV2(clienteId, {
+      destinosPorCliente: deps.destinosPorCliente || {},
+      configsPorCliente: deps.configsPorCliente || {},
+      sessoes: deps.sessoes || {},
+      statusSessao: deps.statusSessao || {},
+      plano
+    });
+    const mapa = new Map(destinosSanitizados.map((destino) => [destino.id, destino]));
+    const selecionados = destinosIds.map((id) => mapa.get(id)).filter(Boolean);
+    const todosUtilizaveis = selecionados.length === destinosIds.length &&
+      selecionados.every((destino) => destino.utilizavel === true);
+
+    if (!todosUtilizaveis) {
+      const erro = new Error("manual_v2_destino_indisponivel");
+      erro.statusCode = 400;
+      erro.codigo = "manual_v2_destino_indisponivel";
+      throw erro;
+    }
+
+    return selecionados;
+  }
+
+  function dadosAgendamento(req, clienteId) {
+    const destinosIds = listaTexto(req.body?.destinosIds);
+    if (!destinosIds.length) {
+      const erro = new Error("manual_v2_destinos_obrigatorios");
+      erro.statusCode = 400;
+      erro.codigo = "manual_v2_destinos_obrigatorios";
+      throw erro;
+    }
+
+    const tempo = dataHoraLocalParaIso(req.body?.dataHoraLocal, req.body?.timezone || "America/Sao_Paulo");
+    const agendadoMs = Date.parse(tempo.agendadoPara);
+    const agoraMs = Date.parse(agoraIso(deps));
+    if (!Number.isFinite(agendadoMs) || agendadoMs <= agoraMs) {
+      const erro = new Error("manual_v2_agendamento_no_passado");
+      erro.statusCode = 400;
+      erro.codigo = "manual_v2_agendamento_no_passado";
+      throw erro;
+    }
+
+    return {
+      ...tempo,
+      destinosIds,
+      destinosAgendados: destinosSelecionadosAgendamento(req, clienteId, destinosIds)
+    };
+  }
+
+  router.post("/ofertas/:id/agendar", (req, res) => {
+    try {
+      const clienteId = cliente(req);
+      const ofertaAtual = storage.buscarOfertaManualV2(clienteId, req.params.id, deps.storageOptions || {});
+      if (!ofertaAtual) {
+        return res.status(404).json({
+          ok: false,
+          erro: "oferta_manual_v2_nao_encontrada",
+          motivo: "oferta_manual_v2_nao_encontrada"
+        });
+      }
+
+      bloquearAgendamentoPorStatus(ofertaAtual);
+      const dados = dadosAgendamento(req, clienteId);
+      const oferta = storage.marcarOfertaManualV2Agendada(clienteId, req.params.id, dados, deps.storageOptions || {});
+
+      return res.status(201).json({
+        ok: true,
+        oferta
+      });
+    } catch (e) {
+      return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_agendamento_falhou"));
+    }
+  });
+
+  router.put("/ofertas/:id/agendamento", (req, res) => {
+    try {
+      const clienteId = cliente(req);
+      const ofertaAtual = storage.buscarOfertaManualV2(clienteId, req.params.id, deps.storageOptions || {});
+      if (!ofertaAtual) {
+        return res.status(404).json({
+          ok: false,
+          erro: "oferta_manual_v2_nao_encontrada",
+          motivo: "oferta_manual_v2_nao_encontrada"
+        });
+      }
+
+      bloquearAgendamentoPorStatus(ofertaAtual);
+      const dados = dadosAgendamento(req, clienteId);
+      const oferta = storage.reprogramarOfertaManualV2Agendada(clienteId, req.params.id, dados, deps.storageOptions || {});
+
+      return res.json({
+        ok: true,
+        oferta
+      });
+    } catch (e) {
+      return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_reprogramacao_falhou"));
+    }
+  });
+
+  router.post("/ofertas/:id/agendamento/cancelar", (req, res) => {
+    try {
+      const clienteId = cliente(req);
+      const ofertaAtual = storage.buscarOfertaManualV2(clienteId, req.params.id, deps.storageOptions || {});
+      if (!ofertaAtual) {
+        return res.status(404).json({
+          ok: false,
+          erro: "oferta_manual_v2_nao_encontrada",
+          motivo: "oferta_manual_v2_nao_encontrada"
+        });
+      }
+
+      bloquearAgendamentoPorStatus(ofertaAtual);
+      const oferta = storage.cancelarAgendamentoOfertaManualV2(clienteId, req.params.id, deps.storageOptions || {});
+
+      return res.json({
+        ok: true,
+        oferta
+      });
+    } catch (e) {
+      return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_cancelamento_agendamento_falhou"));
     }
   });
 

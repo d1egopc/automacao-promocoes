@@ -175,6 +175,12 @@ const criarRotasStorageManager = require("./modules/storage-manager/storage.rout
 const criarRotasResetEsteirasPreflight = require("./modules/engine/reset-esteiras/preflight.routes");
 const criarRotasManualV2 = require("./modules/manual-v2/manual-offers.routes");
 const {
+  iniciarManualV2Scheduler
+} = require("./modules/manual-v2/manual-scheduler.runner");
+const {
+  enviarOfertaManualV2: enviarOfertaManualV2Dispatcher
+} = require("./modules/manual-v2/manual-dispatcher");
+const {
   resolveWorkspaceId,
   isAdminMaster: usuarioEhAdminMaster
 } = require("./modules/workspace/identity");
@@ -17670,6 +17676,42 @@ function registrarAlertaIntegracaoManualV2(...args) {
   return registrarAlertaIntegracao(...args);
 }
 
+function resolverPlanoManualV2Scheduler(clienteId = "admin") {
+  const usuario = usuarios.find(u => String(u?.id || "") === String(clienteId || "")) || null;
+  if (!usuario) return null;
+
+  const nomePlano = String(usuario.plano || "").trim().toLowerCase();
+  return Object.values(planos || {}).find(p =>
+    String(p.nome || "").trim().toLowerCase() === nomePlano
+  ) || null;
+}
+
+function iniciarManualV2SchedulerOperacional() {
+  const resultado = iniciarManualV2Scheduler({
+    destinosPorCliente,
+    configsPorCliente,
+    sessoes,
+    statusSessao,
+    resolverPlanoManualV2: resolverPlanoManualV2Scheduler,
+    usuarioTemCreditos,
+    debitarCreditos,
+    montarMensagemOferta,
+    enviarWhatsApp: enviarWhatsAppCampanha,
+    enviarTelegram: enviarTelegramCampanha,
+    corrigirImagemUrl,
+    httpClient: axios,
+    enviarOfertaManualV2: enviarOfertaManualV2Dispatcher,
+    intervalMs: process.env.MANUAL_V2_SCHEDULER_INTERVAL_MS,
+    logger: console
+  });
+
+  console.log("[MANUAL-V2-SCHEDULER] inicializacao", {
+    iniciado: resultado.iniciado === true,
+    intervalMs: resultado.intervalMs,
+    motivo: resultado.motivo || ""
+  });
+}
+
 app.use("/manual-v2", criarRotasManualV2({
   getClienteId,
   destinosPorCliente,
@@ -24131,6 +24173,7 @@ console.log("[BOOT] Dados iniciais carregados:", {
 
 app.listen(PORT, () => {
   console.log("[API]🟢🧠 API ONLINE NA PORTA " + PORT);
+  iniciarManualV2SchedulerOperacional();
 
 decairConfiancaCupons();
 

@@ -77,6 +77,32 @@ function normalizarListaTexto(valor) {
     .filter(Boolean);
 }
 
+function normalizarDestinoAgendadoManualV2(destino = {}) {
+  const id = primeiroTexto(destino.id, destino.destinoId);
+  if (!id) return null;
+  return {
+    id,
+    nome: primeiroTexto(destino.nome, destino.titulo, destino.label),
+    tipo: texto(destino.tipo).toLowerCase() === "telegram" ? "telegram" : "whatsapp",
+    ativo: destino.ativo !== false,
+    utilizavel: destino.utilizavel === true,
+    motivoIndisponivel: primeiroTexto(destino.motivoIndisponivel, destino.motivo),
+    identificacaoVisual: primeiroTexto(destino.identificacaoVisual, destino.identificacao)
+  };
+}
+
+function normalizarDestinosAgendadosManualV2(valor) {
+  if (!Array.isArray(valor)) return [];
+  return valor
+    .map((destino) => destino && typeof destino === "object" ? normalizarDestinoAgendadoManualV2(destino) : null)
+    .filter(Boolean);
+}
+
+function inteiroNaoNegativo(valor = 0) {
+  const numero = Number(valor);
+  return Number.isFinite(numero) && numero >= 0 ? Math.floor(numero) : 0;
+}
+
 function numeroPrecoBR(valor = "") {
   const bruto = texto(valor);
   if (!bruto) return null;
@@ -163,7 +189,20 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     }),
 
     criadoEm: primeiroTexto(entrada.criadoEm, entrada.criado_em, agora),
-    atualizadoEm: primeiroTexto(entrada.atualizadoEm, entrada.atualizado_em, agora)
+    atualizadoEm: primeiroTexto(entrada.atualizadoEm, entrada.atualizado_em, agora),
+
+    agendadoPara: primeiroTexto(entrada.agendadoPara, entrada.agendado_para),
+    agendamentoTimezone: primeiroTexto(entrada.agendamentoTimezone, entrada.timezone),
+    agendamentoLocal: primeiroTexto(entrada.agendamentoLocal, entrada.horarioLocal),
+    agendamentoCriadoEm: primeiroTexto(entrada.agendamentoCriadoEm),
+    agendamentoAtualizadoEm: primeiroTexto(entrada.agendamentoAtualizadoEm),
+    agendamentoCanceladoEm: primeiroTexto(entrada.agendamentoCanceladoEm),
+    destinosIds: normalizarListaTexto(entrada.destinosIds),
+    destinosAgendados: normalizarDestinosAgendadosManualV2(entrada.destinosAgendados),
+    agendamentoLockId: primeiroTexto(entrada.agendamentoLockId),
+    agendamentoLockEm: primeiroTexto(entrada.agendamentoLockEm),
+    agendamentoTentativas: inteiroNaoNegativo(entrada.agendamentoTentativas),
+    agendamentoErroResumo: primeiroTexto(entrada.agendamentoErroResumo).slice(0, 1000)
   };
 
   if (oferta.temVariacaoPreco && !texto(entrada.precoAtual) && !texto(entrada.preco) && !texto(entrada.precoPor)) {
@@ -191,5 +230,7 @@ module.exports = {
   normalizarStatusManualV2,
   normalizarOfertaManualV2,
   camposAusentesEditaveis,
-  temFaixaRealPreco
+  temFaixaRealPreco,
+  normalizarDestinoAgendadoManualV2,
+  normalizarDestinosAgendadosManualV2
 };
