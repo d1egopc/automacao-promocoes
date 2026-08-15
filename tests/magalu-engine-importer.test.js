@@ -218,13 +218,12 @@ async function testarEngineNaoTrocaProdutoPorCanonicaDivergente() {
   });
 
   assert.strictEqual(resultado.ok, false);
-  assert.strictEqual(resultado.motivo, "titulo_indisponivel");
-  assert.strictEqual(chamadasGerador.length, 1);
-  assert.strictEqual(chamadasGerador[0].url, urlRealA07);
+  assert.strictEqual(resultado.motivo, "identidade_produto_insegura");
+  assert.strictEqual(chamadasGerador.length, 0);
   assert.ok(!JSON.stringify(resultado).includes("240575800"));
 }
 
-async function testarPaginaIndisponivelNaoGeraFatosEngine() {
+async function testarPaginaIndisponivelComRadarSuficienteContinuaPipeline() {
   const chamadasGerador = [];
   const pacote = deps({
     html: "<html><head><title>Magazine Luiza | Não é possível acessar a página</title></head><body>Não é possível acessar a página</body></html>",
@@ -248,19 +247,22 @@ async function testarPaginaIndisponivelNaoGeraFatosEngine() {
     deps: pacote.deps
   });
 
-  assert.strictEqual(chamadasGerador.length, 0, "pagina indisponivel nao deve gerar afiliado");
-  assert.strictEqual(resultado.ok, false);
-  assert.strictEqual(resultado.motivo, "titulo_indisponivel");
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.titulo, "Night Caviar");
+  assert.strictEqual(resultado.preco, 78.9);
+  assert.strictEqual(resultado.linkAfiliado, urlNightCaviar);
+  assert.strictEqual(resultado.metadata.fallbackRadar.usado, true);
+  assert.strictEqual(chamadasGerador.length, 1, "pagina indisponivel pode gerar afiliado pela URL original comprovada");
+  assert.strictEqual(chamadasGerador[0].url, urlNightCaviar);
 }
 
-async function testarCaptchaNaoGeraAfiliadoEngine() {
+async function testarCaptchaComRadarSuficienteContinuaPipeline() {
   const chamadasGerador = [];
   const pacote = deps({
     html: `
       <html>
         <head>
           <title>Captcha Magalu</title>
-          <link rel="canonical" href="${urlA17Divergente}">
         </head>
         <body>Complete o CAPTCHA</body>
       </html>
@@ -278,16 +280,118 @@ async function testarCaptchaNaoGeraAfiliadoEngine() {
   const resultado = await importarProdutoMagaluEngine({
     job: { id: 503, evento_id: 603, cliente_id: "workspace_magalu", marketplace: "magalu" },
     evento: {
-      texto_original: "Oferta Magalu\nPor R$ 777,00\nLink: " + urlRealA07,
+      texto_original: "Smartphone Samsung A07 128GB Preto\nPor R$ 777,00\nLink: " + urlRealA07,
       links_extraidos: [urlRealA07]
     },
     links: [linkRow(3, urlRealA07)],
     deps: pacote.deps
   });
 
-  assert.strictEqual(chamadasGerador.length, 0);
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.titulo, "Smartphone Samsung A07 128GB Preto");
+  assert.strictEqual(resultado.preco, 777);
+  assert.strictEqual(resultado.linkAfiliado, urlRealA07);
+  assert.strictEqual(resultado.metadata.fallbackRadar.usado, true);
+  assert.strictEqual(chamadasGerador.length, 1);
+  assert.strictEqual(chamadasGerador[0].url, urlRealA07);
+}
+
+async function testarResolverFalhaComRadarSuficienteContinuaPipeline() {
+  const pacote = deps({
+    gerarLinkAfiliadoMagaluSeguro: (url) => ({
+      urlAfiliada: url,
+      comprovado: true,
+      avisos: []
+    })
+  });
+
+  const resultado = await importarProdutoMagaluEngine({
+    job: { id: 507, evento_id: 607, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento: {
+      texto_original: "Night Caviar 100ml - Paris Elysses\nPor R$ 78,90\nLink: " + urlNightCaviar,
+      links_extraidos: [urlNightCaviar]
+    },
+    links: [linkRow(7, urlNightCaviar)],
+    deps: {
+      ...pacote.deps,
+      resolverFatosMagalu: async () => {
+        throw new Error("HTTP 403");
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.titulo, "Night Caviar 100ml - Paris Elysses");
+  assert.strictEqual(resultado.preco, 78.9);
+  assert.strictEqual(resultado.metadata.fallbackRadar.resolverFalhou, true);
+}
+
+async function testarRadarSemTituloNaoContinuaPipeline() {
+  const pacote = deps({
+    html: "<html><head><title>Captcha Magalu</title></head><body>Complete o CAPTCHA</body></html>",
+    gerarLinkAfiliadoMagaluSeguro: (url) => ({
+      urlAfiliada: url,
+      comprovado: true,
+      avisos: []
+    })
+  });
+
+  const resultado = await importarProdutoMagaluEngine({
+    job: { id: 508, evento_id: 608, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento: {
+      texto_original: "Por R$ 777,00\nLink: " + urlRealA07,
+      links_extraidos: [urlRealA07]
+    },
+    links: [linkRow(8, urlRealA07)],
+    deps: pacote.deps
+  });
+
   assert.strictEqual(resultado.ok, false);
   assert.strictEqual(resultado.motivo, "titulo_indisponivel");
+}
+
+async function testarRadarSemPrecoNaoContinuaPipeline() {
+  const pacote = deps({
+    html: "<html><head><title>Captcha Magalu</title></head><body>Complete o CAPTCHA</body></html>",
+    gerarLinkAfiliadoMagaluSeguro: (url) => ({
+      urlAfiliada: url,
+      comprovado: true,
+      avisos: []
+    })
+  });
+
+  const resultado = await importarProdutoMagaluEngine({
+    job: { id: 509, evento_id: 609, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento: {
+      texto_original: "Smartphone Samsung A07 128GB Preto\nLink: " + urlRealA07,
+      links_extraidos: [urlRealA07]
+    },
+    links: [linkRow(9, urlRealA07)],
+    deps: pacote.deps
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "preco_indisponivel");
+}
+
+async function testarDeepLinkOutraLojaNaoContinuaPipeline() {
+  const urlOutraLoja = "https://www.magazinevoce.com.br/outraloja/night-caviar-100ml-paris-elysses/p/be172949ba/pf/ppfm/";
+  const pacote = deps({
+    html: "<html><head><title>Captcha Magalu</title></head><body>Complete o CAPTCHA</body></html>"
+  });
+
+  const resultado = await importarProdutoMagaluEngine({
+    job: { id: 510, evento_id: 610, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento: {
+      texto_original: "Night Caviar 100ml - Paris Elysses\nPor R$ 78,90\nLink: " + urlOutraLoja,
+      links_extraidos: [urlOutraLoja]
+    },
+    links: [linkRow(10, urlOutraLoja)],
+    deps: pacote.deps
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "identidade_produto_insegura");
 }
 
 async function testarOfertaUniversalValida() {
@@ -418,8 +522,12 @@ function testarRegistriesPipelineUnico() {
   await testarDeepLinkSemPrefixoPromoter();
   await testarIntegracaoAusenteBloqueiaImportacaoAutomatica();
   await testarEngineNaoTrocaProdutoPorCanonicaDivergente();
-  await testarPaginaIndisponivelNaoGeraFatosEngine();
-  await testarCaptchaNaoGeraAfiliadoEngine();
+  await testarPaginaIndisponivelComRadarSuficienteContinuaPipeline();
+  await testarCaptchaComRadarSuficienteContinuaPipeline();
+  await testarResolverFalhaComRadarSuficienteContinuaPipeline();
+  await testarRadarSemTituloNaoContinuaPipeline();
+  await testarRadarSemPrecoNaoContinuaPipeline();
+  await testarDeepLinkOutraLojaNaoContinuaPipeline();
   await testarOfertaUniversalValida();
   await testarImagemRadarPreservadaQuandoResolverSemImagem();
   testarClassificadorDeLinksMagalu();
