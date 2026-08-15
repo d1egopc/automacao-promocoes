@@ -17632,8 +17632,56 @@ app.use("/templates-ofertas", criarRotasTemplatesClientes({
 
 // =============== ROTAS MANUAL V2 =================
 
+function importarAmazonManualV2ComWorkspace(...args) {
+  return importarAmazon(...args);
+}
+
+function importarShopeeManualV2ComWorkspace(...args) {
+  return importarShopee(...args);
+}
+
+function gerarLinkAfiliadoMercadoLivreManualV2(...args) {
+  return gerarLinkAfiliadoMercadoLivre(...args);
+}
+
+function gerarDeepLinkAwinManualV2(...args) {
+  return gerarDeepLinkAwin(...args);
+}
+
+function gerarLinkCurtoAliExpressManualV2(...args) {
+  return gerarLinkCurtoAliExpress(...args);
+}
+
+function gerarLinkOptimusManualV2(...args) {
+  return gerarLinkOptimus(...args);
+}
+
+function obterProgramaAwinManualV2(...args) {
+  return obterProgramaAwin(...args);
+}
+
+function registrarSucessoIntegracaoManualV2(...args) {
+  return registrarSucessoIntegracao(...args);
+}
+
+function registrarAlertaIntegracaoManualV2(...args) {
+  return registrarAlertaIntegracao(...args);
+}
+
 app.use("/manual-v2", criarRotasManualV2({
-  getClienteId
+  getClienteId,
+  importOptions: {
+    getIntegracaoCliente,
+    importarAmazon: importarAmazonManualV2ComWorkspace,
+    importarShopee: importarShopeeManualV2ComWorkspace,
+    gerarLinkAfiliadoMercadoLivre: gerarLinkAfiliadoMercadoLivreManualV2,
+    gerarDeepLinkAwin: gerarDeepLinkAwinManualV2,
+    gerarLinkCurtoAliExpress: gerarLinkCurtoAliExpressManualV2,
+    gerarLinkOptimus: gerarLinkOptimusManualV2,
+    obterProgramaAwin: obterProgramaAwinManualV2,
+    registrarSucessoIntegracao: registrarSucessoIntegracaoManualV2,
+    registrarAlertaIntegracao: registrarAlertaIntegracaoManualV2
+  }
 }));
 
 // =============== ROTA ADMIN DO STORAGE MANAGER =================
