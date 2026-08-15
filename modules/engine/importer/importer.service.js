@@ -2227,6 +2227,7 @@ function normalizarMarketplaceMemoria(valor = "") {
   if (marketplace.includes("aliexpress")) return "aliexpress";
   if (marketplace.includes("kabum")) return "kabum";
   if (marketplace.includes("awin")) return "awin";
+  if (marketplace.includes("magalu") || marketplace.includes("magazineluiza")) return "magalu";
   return marketplace;
 }
 

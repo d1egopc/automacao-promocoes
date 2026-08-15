@@ -42,7 +42,7 @@ function ofertaAdapter(marketplace, adapter, url, clienteId = "cliente_router") 
 }
 
 function criarAdapters(chamadas = []) {
-  const nomes = ["mercadolivre", "amazon", "shopee", "aliexpress", "kabum"];
+  const nomes = ["mercadolivre", "amazon", "shopee", "aliexpress", "kabum", "magalu"];
   const adapters = {};
 
   for (const nome of nomes) {
@@ -81,8 +81,11 @@ async function assertRoteiaSomente(url, esperado) {
   assert.strictEqual(detectarMarketplaceManualV2("https://shopee.com.br/product/111/222").marketplace, "shopee");
   assert.strictEqual(detectarMarketplaceManualV2("https://www.aliexpress.com/item/1005001234567890.html").marketplace, "aliexpress");
   assert.strictEqual(detectarMarketplaceManualV2("https://www.kabum.com.br/produto/944475/produto").marketplace, "kabum");
+  assert.strictEqual(detectarMarketplaceManualV2("https://www.magazineluiza.com.br/smart-tv/p/abc123/").marketplace, "magalu");
+  assert.strictEqual(detectarMarketplaceManualV2("https://www.magazinevoce.com.br/magazined1egopc/smart-tv/p/abc123/").marketplace, "magalu");
   assert.strictEqual(destinoKabumEmLinkAwin("https://www.awin1.com/cread.php?ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F944475%2Fproduto"), true);
   assert.strictEqual(detectarMarketplaceManualV2("https://www.awin1.com/cread.php?ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F944475%2Fproduto").marketplace, "kabum");
+  assert.strictEqual(detectarMarketplaceManualV2("https://magazineluiza.onelink.me/589508454/herbiqvt").motivo, "magalu_onelink_sem_resolucao_segura");
 }
 
 {
@@ -91,6 +94,7 @@ async function assertRoteiaSomente(url, esperado) {
   await assertRoteiaSomente("https://shopee.com.br/product/111/222", "shopee");
   await assertRoteiaSomente("https://www.aliexpress.com/item/1005001234567890.html", "aliexpress");
   await assertRoteiaSomente("https://www.kabum.com.br/produto/944475/produto", "kabum");
+  await assertRoteiaSomente("https://www.magazineluiza.com.br/smart-tv/p/abc123/", "magalu");
 }
 
 {

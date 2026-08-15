@@ -22,6 +22,7 @@ const idFactory = () => "manual_v2_teste";
   assert.strictEqual(STATUS_INICIAL_MANUAL_V2, "salva");
   assert.ok(MARKETPLACES_MANUAL_V2.includes("mercadolivre"));
   assert.ok(MARKETPLACES_MANUAL_V2.includes("kabum"));
+  assert.ok(MARKETPLACES_MANUAL_V2.includes("magalu"));
 }
 
 {
@@ -34,6 +35,7 @@ const idFactory = () => "manual_v2_teste";
   assert.strictEqual(normalizarMarketplaceManualV2("Mercado Livre"), "mercadolivre");
   assert.strictEqual(normalizarMarketplaceManualV2("AWIN / KaBuM"), "awin");
   assert.strictEqual(normalizarMarketplaceManualV2("KaBuM"), "kabum");
+  assert.strictEqual(normalizarMarketplaceManualV2("Magazine Luiza"), "magalu");
   assert.strictEqual(normalizarMarketplaceManualV2("algo novo"), "manual");
 }
 
@@ -128,6 +130,18 @@ const idFactory = () => "manual_v2_teste";
   assert.ok(oferta.fonteImportacao.camposAusentes.includes("precoAtual"));
   assert.ok(oferta.fonteImportacao.camposAusentes.includes("imagem"));
   assert.strictEqual(oferta.status, "salva");
+}
+
+{
+  const oferta = normalizarOfertaManualV2({
+    marketplace: "magalu",
+    urlOriginal: "https://www.magazineluiza.com.br/produto/p/abc123/",
+    titulo: "Produto Magalu",
+    seller: "Magalu"
+  }, { now: agora, idFactory });
+
+  assert.strictEqual(oferta.marketplace, "magalu");
+  assert.strictEqual(oferta.seller, "Magalu");
 }
 
 {

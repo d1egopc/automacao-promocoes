@@ -13,13 +13,17 @@ const {
 const {
   importarKabumAwinManualV2
 } = require("./adapters/kabum-awin.manual.adapter");
+const {
+  importarProdutoMagaluManualV2
+} = require("./adapters/magalu.manual.adapter");
 
 const ADAPTERS_MANUAL_V2 = Object.freeze({
   mercadolivre: importarMercadoLivreManualV2,
   amazon: importarAmazonManualV2,
   shopee: importarShopeeManualV2,
   aliexpress: importarAliExpressManualV2,
-  kabum: importarKabumAwinManualV2
+  kabum: importarKabumAwinManualV2,
+  magalu: importarProdutoMagaluManualV2
 });
 
 function texto(valor = "") {
@@ -125,6 +129,19 @@ function detectarMarketplaceManualV2(urlManual = "") {
 
   if (host === "kabum.com.br" || host.endsWith(".kabum.com.br")) {
     return { ok: true, marketplace: "kabum", url };
+  }
+
+  if (host === "magazineluiza.com.br" || host.endsWith(".magazineluiza.com.br") ||
+    host === "magazinevoce.com.br" || host.endsWith(".magazinevoce.com.br")) {
+    return { ok: true, marketplace: "magalu", url };
+  }
+
+  if (host === "magazineluiza.onelink.me") {
+    return erroImportacaoManualV2(
+      urlOriginal,
+      "magalu_onelink_sem_resolucao_segura",
+      "Link OneLink Magalu sem resolucao segura para produto."
+    );
   }
 
   if ((host === "awin1.com" || host.endsWith(".awin1.com") || host === "awin.com" || host.endsWith(".awin.com")) && destinoKabumEmLinkAwin(url)) {

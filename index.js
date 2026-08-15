@@ -261,6 +261,12 @@ const {
   detectarMarketplaceLink: detectarMarketplaceEngineLink
 } = require("./modules/engine/normalizers");
 const {
+  consultarProdutoMagalu
+} = require("./modules/marketplaces/magalu/magalu-parser");
+const {
+  gerarLinkAfiliadoMagaluSeguro
+} = require("./modules/marketplaces/magalu/magalu-affiliate-link");
+const {
   camposIdentidadeCanonicaOferta,
   compararIdentidadeCanonicaOfertas,
   origemDominioCanonicoOferta,
@@ -24110,7 +24116,9 @@ initEngineDatabase()
         gerarLinkAfiliadoMercadoLivre,
         resolverLinkOriginalRadar,
         importarProdutoKabumViaAwin,
-        gerarDeepLinkAwin
+        gerarDeepLinkAwin,
+        consultarProdutoMagalu,
+        gerarLinkAfiliadoMagaluSeguro
       }),
       getContextoDistribuidor: () => ({
         clientesValidos: listarClientesValidosEngineProcessor(),

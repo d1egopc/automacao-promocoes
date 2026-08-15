@@ -254,7 +254,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
   console.log("[ENGINE-ORQUESTRADOR-INICIO]", {
     rodadaId,
     limites: limitesRodada,
-    marketplaces: ["mercadolivre", "amazon", "shopee", "awin", "kabum"]
+    marketplaces: ["mercadolivre", "amazon", "shopee", "awin", "kabum", "magalu"]
   });
 
   try {
@@ -350,6 +350,12 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       deps: depsImportador
     }, { rodadaId });
 
+    resumo.etapas.importarMagalu = await executarEtapaRastreada("importar_magalu", importarJobsProntosEngine, {
+      limite: limitesRodada.importarMagalu || limitesRodada.importar,
+      marketplace: "magalu",
+      deps: depsImportador
+    }, { rodadaId });
+
     inicioFornecedorMs = Date.now();
     const contextoDistribuidor = chamarFornecedor(getContextoDistribuidor, {});
     const depsDistribuidor = chamarFornecedor(getDepsDistribuidor, {});
@@ -403,6 +409,13 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     resumo.etapas.distribuirKabum = await executarEtapaRastreada("distribuir_kabum", distribuirOfertasEngine, {
       limite: limitesRodada.distribuirKabum || limitesRodada.distribuir,
       marketplace: "kabum",
+      contexto: contextoDistribuidor,
+      deps: depsDistribuidor
+    }, { rodadaId });
+
+    resumo.etapas.distribuirMagalu = await executarEtapaRastreada("distribuir_magalu", distribuirOfertasEngine, {
+      limite: limitesRodada.distribuirMagalu || limitesRodada.distribuir,
+      marketplace: "magalu",
       contexto: contextoDistribuidor,
       deps: depsDistribuidor
     }, { rodadaId });

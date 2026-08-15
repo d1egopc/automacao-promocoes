@@ -22,6 +22,7 @@ const { importarAmazonEngine } = require("./adapters/amazon.adapter");
 const { importarShopeeEngine } = require("./adapters/shopee.adapter");
 const { importarAliExpressEngine } = require("./adapters/aliexpress.adapter");
 const { importarAwinEngine } = require("./adapters/awin.adapter");
+const { importarProdutoMagaluEngine } = require("./adapters/magalu.adapter");
 const { escolherProdutoPrincipal } = require("../link-role.service");
 const {
   usuarioAtivo,
@@ -35,7 +36,8 @@ const ADAPTERS = {
   shopee: importarShopeeEngine,
   aliexpress: importarAliExpressEngine,
   awin: importarAwinEngine,
-  kabum: importarAwinEngine
+  kabum: importarAwinEngine,
+  magalu: importarProdutoMagaluEngine
 };
 
 function marketplaceJob(job = {}) {

@@ -30,14 +30,14 @@ function detectarMarketplaceLink(url = "") {
     if (host.includes("aliexpress.")) return "aliexpress";
     if (host === "kabum.com.br" || host.endsWith(".kabum.com.br")) return "kabum";
     if (host === "awin1.com" || host.endsWith(".awin1.com") || host === "awin.com" || host.endsWith(".awin.com")) return "awin";
-    if (host === "magazineluiza.com" || host.endsWith(".magazineluiza.com") || host === "magalu.com" || host.endsWith(".magalu.com")) return "magalu";
+    if (host === "magazineluiza.com" || host.endsWith(".magazineluiza.com") || host === "magazineluiza.com.br" || host.endsWith(".magazineluiza.com.br") || host === "magazinevoce.com.br" || host.endsWith(".magazinevoce.com.br") || host === "magalu.com" || host.endsWith(".magalu.com") || host === "magazineluiza.onelink.me") return "magalu";
   } catch {}
 
   if (texto.includes("mercadolivre.com") || texto.includes("meli.la")) return "mercadolivre";
   if (texto.includes("shopee.")) return "shopee";
   if (texto.includes("amzn.divulgador.link")) return "amazon";
   if (texto.includes("amazon.") || texto.includes("amzn.to")) return "amazon";
-  if (texto.includes("magazineluiza.com") || texto.includes("magalu.")) return "magalu";
+  if (texto.includes("magazineluiza.com") || texto.includes("magazinevoce.com.br") || texto.includes("magazineluiza.onelink.me") || texto.includes("magalu.")) return "magalu";
   if (texto.includes("aliexpress.")) return "aliexpress";
   if (texto.includes("kabum.com.br")) return "kabum";
   if (texto.includes("awin1.com") || texto.includes("awin.com")) return "awin";

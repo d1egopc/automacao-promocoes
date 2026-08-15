@@ -1,0 +1,237 @@
+"use strict";
+
+const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
+
+const {
+  importarProdutoMagaluEngine
+} = require("../modules/engine/importer/adapters/magalu.adapter");
+const {
+  escolherProdutoPrincipal
+} = require("../modules/engine/link-role.service");
+const {
+  montarOfertaUniversalEngine,
+  validarContratoOfertaUniversal
+} = require("../modules/engine/oferta-universal.contract");
+
+const urlProduto = "https://www.magazineluiza.com.br/smart-tv-50/p/abc123/et/elit/";
+const htmlProduto = `
+  <html>
+    <head>
+      <link rel="canonical" href="${urlProduto}">
+      <script type="application/ld+json">
+        {
+          "@context": "https://schema.org",
+          "@type": "Product",
+          "name": "Smart TV Magalu 50",
+          "sku": "abc123",
+          "image": "https://a-static.mlcdn.com.br/tv.jpg",
+          "offers": { "price": "1999.90", "priceCurrency": "BRL" }
+        }
+      </script>
+      <script type="application/ld+json">
+        {
+          "@context": "https://schema.org",
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Home" },
+            { "@type": "ListItem", "position": 2, "name": "TV e Video" },
+            { "@type": "ListItem", "position": 3, "name": "Smart TV" }
+          ]
+        }
+      </script>
+    </head>
+    <body>
+      <span>Preco anterior R$ 2.499,90</span>
+      <p>em 10x de R$ 199,99 sem juros</p>
+      <p>vendido e entregue por <strong>Magalu</strong></p>
+      <p>Cupom MAGALU10</p>
+    </body>
+  </html>
+`;
+
+function linkRow(id, url) {
+  return {
+    id,
+    url_original: url,
+    url_normalizada: url,
+    url_expandida: "",
+    marketplace_detectado: "magalu",
+    metadata: {}
+  };
+}
+
+function deps({ html = htmlProduto, promoterId = "d1egopc", gerarLinkAfiliadoMagaluSeguro } = {}) {
+  const chamadas = [];
+  return {
+    chamadas,
+    deps: {
+      magaluParserOptions: { html },
+      getIntegracaoCliente(clienteId, marketplace) {
+        chamadas.push({ tipo: "getIntegracaoCliente", clienteId, marketplace });
+        return promoterId ? { credenciais: { promoterId } } : null;
+      },
+      ...(gerarLinkAfiliadoMagaluSeguro ? { gerarLinkAfiliadoMagaluSeguro } : {})
+    }
+  };
+}
+
+async function importarMagaluFixture({ evento = {}, depsExtras = {} } = {}) {
+  return importarProdutoMagaluEngine({
+    job: { id: 501, evento_id: 601, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento: {
+      texto_original: "Smart TV Magalu 50\nPor R$ 1.777,00\nLink do produto:\n" + urlProduto,
+      links_extraidos: [urlProduto],
+      ...evento
+    },
+    links: [linkRow(1, urlProduto)],
+    deps: depsExtras
+  });
+}
+
+async function testarImportacaoCompletaPreservaPrecoRadar() {
+  const pacote = deps();
+  const resultado = await importarMagaluFixture({ depsExtras: pacote.deps });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.marketplace, "magalu");
+  assert.strictEqual(resultado.titulo, "Smart TV Magalu 50");
+  assert.strictEqual(resultado.preco, 1777);
+  assert.strictEqual(resultado.precoAtual, 1777);
+  assert.strictEqual(resultado.precoPagina, 1999.9);
+  assert.strictEqual(resultado.precoOriginal, "R$\u00a02.499,90");
+  assert.strictEqual(resultado.imagem, "https://a-static.mlcdn.com.br/tv.jpg");
+  assert.strictEqual(resultado.categoria, "TV e Video");
+  assert.strictEqual(resultado.seller, "Magalu");
+  assert.strictEqual(resultado.parcelamento.includes("10x de R$ 199,99"), true);
+  assert.strictEqual(resultado.linkAfiliado, "https://www.magazinevoce.com.br/magazined1egopc/smart-tv-50/p/abc123/et/elit/");
+  assert.strictEqual(resultado.metadata.precoRadarUsado, true);
+  assert.strictEqual(resultado.metadata.precoAuditoria.motivoEscolhaPreco, "preco_radar_explicito_confiavel");
+  assert.deepStrictEqual(pacote.chamadas, [{ tipo: "getIntegracaoCliente", clienteId: "workspace_magalu", marketplace: "magalu" }]);
+  assert.ok(!Object.prototype.hasOwnProperty.call(resultado.metadata, "promoterId"), "metadata nao deve expor promoterId como campo");
+  assert.ok(!Object.prototype.hasOwnProperty.call(resultado.metadata.provaAfiliado, "promoterId"), "prova de afiliado nao deve expor promoterId como campo");
+}
+
+async function testarSemPrecoRadarUsaPagina() {
+  const pacote = deps();
+  const resultado = await importarMagaluFixture({
+    evento: { texto_original: "Smart TV Magalu 50\nLink: " + urlProduto },
+    depsExtras: pacote.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.preco, 1999.9);
+  assert.strictEqual(resultado.metadata.precoRadarUsado, false);
+  assert.strictEqual(resultado.metadata.precoAuditoria.origemPreco, "pagina_magalu");
+}
+
+async function testarUrlOriginalNaoViraAfiliada() {
+  const pacote = deps({
+    gerarLinkAfiliadoMagaluSeguro: () => ({
+      urlAfiliada: urlProduto,
+      tipoLink: "magazineluiza_original",
+      proveniencia: "host_produto_magalu_original",
+      comprovado: false,
+      avisos: ["magalu_url_original_nao_e_afiliada"]
+    })
+  });
+
+  const resultado = await importarMagaluFixture({ depsExtras: pacote.deps });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "link_afiliado_vazio");
+  assert.strictEqual(resultado.metadata.provaAfiliado.comprovado, false);
+}
+
+async function testarIntegracaoAusenteBloqueiaImportacaoAutomatica() {
+  const pacote = deps({ promoterId: "" });
+  const resultado = await importarMagaluFixture({ depsExtras: pacote.deps });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "integracao_ausente");
+}
+
+async function testarOfertaUniversalValida() {
+  const pacote = deps();
+  const resultado = await importarMagaluFixture({ depsExtras: pacote.deps });
+  const ofertaUniversal = montarOfertaUniversalEngine({
+    oferta: resultado,
+    ofertaEntrada: resultado,
+    job: { id: 501, evento_id: 601, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento: { id: 601, texto_original: "Smart TV Magalu 50\nPor R$ 1.777,00" },
+    link: linkRow(1, urlProduto),
+    metadata: resultado.metadata
+  });
+
+  assert.strictEqual(validarContratoOfertaUniversal(ofertaUniversal).ok, true);
+  assert.strictEqual(ofertaUniversal.marketplace, "magalu");
+  assert.strictEqual(ofertaUniversal.comercial.precoAtual, 1777);
+  assert.strictEqual(ofertaUniversal.produto.idExterno, "abc123");
+  assert.strictEqual(ofertaUniversal.afiliacao.urlAfiliada, resultado.linkAfiliado);
+}
+
+function testarClassificadorDeLinksMagalu() {
+  const produto = escolherProdutoPrincipal([
+    { url: "https://magazineluiza.onelink.me/589508454/herbiqvt", campo: "url_original", link: {} },
+    { url: urlProduto, campo: "url_original", link: {} }
+  ], "magalu", {
+    texto_original: "Link curto: https://magazineluiza.onelink.me/589508454/herbiqvt\nLink do produto:\n" + urlProduto
+  });
+
+  assert.strictEqual(produto.url, urlProduto);
+  assert.strictEqual(produto.papelLink, "produto");
+
+  const onelink = escolherProdutoPrincipal([
+    { url: "https://magazineluiza.onelink.me/589508454/herbiqvt", campo: "url_original", link: {} }
+  ], "magalu", {
+    texto_original: "Oferta Magalu https://magazineluiza.onelink.me/589508454/herbiqvt"
+  });
+
+  assert.strictEqual(onelink.url, "");
+  assert.strictEqual(onelink.papelLinkMotivo, "sem_link_produto_confirmado");
+}
+
+function testarRegistriesPipelineUnico() {
+  const runner = fs.readFileSync(path.join(__dirname, "..", "modules", "engine", "importer", "importer.runner.js"), "utf8");
+  const orchestrator = fs.readFileSync(path.join(__dirname, "..", "modules", "engine", "orchestrator.runner.js"), "utf8");
+  const adapter = fs.readFileSync(path.join(__dirname, "..", "modules", "engine", "importer", "adapters", "magalu.adapter.js"), "utf8");
+  const linkRole = fs.readFileSync(path.join(__dirname, "..", "modules", "engine", "link-role.service.js"), "utf8");
+
+  assert.ok(runner.includes("magalu: importarProdutoMagaluEngine"), "runner deve registrar adapter Magalu no registry oficial");
+  assert.ok(orchestrator.includes("importar_magalu"), "orchestrator deve importar Magalu pelo Engine");
+  assert.ok(orchestrator.includes("distribuir_magalu"), "orchestrator deve distribuir Magalu pelo Distributor existente");
+  assert.ok(linkRole.includes("classificarMagalu"), "link-role deve reconhecer produto Magalu no mecanismo central");
+
+  for (const proibido of [
+    "utils/fila-ofertas",
+    "importarMagalu",
+    "/importar-magalu-manual",
+    "farejarMagalu",
+    "adicionarOfertaNaFila",
+    "salvarFila",
+    "processarFila",
+    "prepararOfertaGlobal",
+    "manual-v2",
+    "manual-offers",
+    "/fila",
+    "/enviar-manual"
+  ]) {
+    assert.ok(!adapter.includes(proibido), `adapter Engine Magalu nao deve referenciar ${proibido}`);
+  }
+}
+
+(async function main() {
+  await testarImportacaoCompletaPreservaPrecoRadar();
+  await testarSemPrecoRadarUsaPagina();
+  await testarUrlOriginalNaoViraAfiliada();
+  await testarIntegracaoAusenteBloqueiaImportacaoAutomatica();
+  await testarOfertaUniversalValida();
+  testarClassificadorDeLinksMagalu();
+  testarRegistriesPipelineUnico();
+
+  console.log("magalu-engine-importer.test.js ok");
+})().catch((erro) => {
+  console.error(erro);
+  process.exit(1);
+});

@@ -1218,9 +1218,11 @@ function testarOrquestradorIncluiMarketplacesOficiais() {
   const fonte = fs.readFileSync(path.join(__dirname, "..", "modules", "engine", "orchestrator.runner.js"), "utf8");
   for (const etapa of [
     "importar_aliexpress",
+    "importar_magalu",
     "distribuir_aliexpress",
     "distribuir_awin",
-    "distribuir_kabum"
+    "distribuir_kabum",
+    "distribuir_magalu"
   ]) {
     assert(fonte.includes(etapa), `orquestrador deve executar ${etapa}`);
   }

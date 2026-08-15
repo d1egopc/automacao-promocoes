@@ -5,6 +5,7 @@ const MARKETPLACES_MANUAL_V2 = Object.freeze([
   "aliexpress",
   "awin",
   "kabum",
+  "magalu",
   "manual"
 ]);
 
@@ -30,6 +31,7 @@ const CAMPOS_EDITAVEIS_MANUAL_V2 = Object.freeze([
   "temVariacaoPreco",
   "imagem",
   "categoria",
+  "seller",
   "cupom",
   "parcelamento",
   "observacoes"
@@ -52,6 +54,7 @@ function normalizarMarketplaceManualV2(valor = "") {
   if (["aliexpress", "aliexp"].includes(normalizado)) return "aliexpress";
   if (["awin", "awinkabum"].includes(normalizado)) return "awin";
   if (["kabum", "kabumawin"].includes(normalizado)) return "kabum";
+  if (["magalu", "magazineluiza", "magazinevoce", "magazinevoce"].includes(normalizado)) return "magalu";
   if (normalizado === "manual") return "manual";
 
   return "manual";
@@ -176,6 +179,7 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
 
     imagem: primeiroTexto(entrada.imagem, entrada.image, entrada.imageUrl, entrada.foto, entrada.thumbnail),
     categoria: primeiroTexto(entrada.categoria, entrada.categoriaProduto),
+    seller: primeiroTexto(entrada.seller, entrada.vendedor, entrada.loja, entrada.store),
     cupom: primeiroTexto(entrada.cupom, entrada.codigoCupom),
     parcelamento: primeiroTexto(entrada.parcelamento, entrada.parcelas),
     observacoes: primeiroTexto(entrada.observacoes, entrada.observacao, entrada.aviso),

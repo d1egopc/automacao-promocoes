@@ -281,6 +281,36 @@ function classificarAwinKabum(candidato = {}, evento = {}) {
   return { papelLink: PAPEL_LINK.DESCONHECIDO, motivo: "awin_kabum_sem_produto_confirmado", confianca: "baixa", urlProduto: urlKabum };
 }
 
+function classificarMagalu(candidato = {}, evento = {}) {
+  const url = urlEstrutural(candidato);
+  const contexto = contextoDoLink(evento, candidato);
+
+  if (/magazineluiza\.onelink\.me/i.test(url)) {
+    return { papelLink: PAPEL_LINK.DESCONHECIDO, motivo: "magalu_onelink_sem_resolucao_produto", confianca: "baixa" };
+  }
+
+  if (/(?:magazineluiza\.com\.br|magalu\.com|magazinevoce\.com\.br)\/.+(?:\/p\/[^/?#]+|\/produto\/\d+)/i.test(url)) {
+    return { papelLink: PAPEL_LINK.PRODUTO, motivo: "magalu_url_produto", confianca: "alta" };
+  }
+
+  if (/magazinevoce\.com\.br\/magazine[^/?#]+\/?$/i.test(url)) {
+    return { papelLink: PAPEL_LINK.LOJA, motivo: "magalu_url_loja", confianca: "alta" };
+  }
+
+  if (/magazineluiza\.com\.br\/(?:busca|selecao|departamento|categoria)|magalu\.com\/(?:busca|selecao|departamento|categoria)/i.test(url)) {
+    return { papelLink: PAPEL_LINK.CATEGORIA, motivo: "magalu_url_categoria", confianca: "alta" };
+  }
+
+  if (/magazineluiza\.com\.br|magalu\.com|magazinevoce\.com\.br/i.test(url)) {
+    const porContexto = classificarPorContexto("magalu", contexto);
+    if (porContexto && porContexto.papelLink === PAPEL_LINK.PRODUTO) {
+      return { ...porContexto, motivo: "contexto_produto_magalu", confianca: "media" };
+    }
+  }
+
+  return { papelLink: PAPEL_LINK.DESCONHECIDO, motivo: "magalu_sem_produto_confirmado", confianca: "baixa" };
+}
+
 function classificarLinkEngine({ marketplace = "", evento = {}, link = {}, url = "", campo = "" } = {}) {
   const candidato = { url, campo, link };
   const mp = minusculo(marketplace || link.marketplace_detectado || "");
@@ -304,6 +334,7 @@ function classificarLinkEngine({ marketplace = "", evento = {}, link = {}, url =
   if (mp === "shopee") return classificarShopee(candidato, evento);
   if (mp === "aliexpress") return classificarAliExpress(candidato, evento);
   if (mp === "awin" || mp === "kabum") return classificarAwinKabum(candidato, evento);
+  if (mp === "magalu") return classificarMagalu(candidato, evento);
 
   return { papelLink: PAPEL_LINK.DESCONHECIDO, motivo: "marketplace_sem_classificador", confianca: "baixa" };
 }
@@ -333,7 +364,7 @@ function scoreCandidatoProduto(candidato = {}) {
   if (candidato.campo === "url_expandida") score += 60;
   if (candidato.campo === "url_normalizada") score += 40;
   if (candidato.campo === "url_original") score += 30;
-  if (/\/produto\/\d+|\/item\/\d+\.html|\/product\/\d+\/\d+|-i\.\d+\.\d+|\/opaanlp\/\d+\/\d+/i.test(candidato.url || "")) score += 100;
+  if (/\/produto\/\d+|\/p\/[^/?#]+|\/item\/\d+\.html|\/product\/\d+\/\d+|-i\.\d+\.\d+|\/opaanlp\/\d+\/\d+/i.test(candidato.url || "")) score += 100;
   if (candidato.papelLinkConfianca === "alta") score += 20;
   return score;
 }

@@ -21,7 +21,7 @@ const DATA_DIR_TESTE = process.env.DATA_DIR;
 
 function criarAdapters(chamadas = []) {
   const adapters = {};
-  for (const marketplace of ["mercadolivre", "amazon", "shopee", "aliexpress", "kabum"]) {
+  for (const marketplace of ["mercadolivre", "amazon", "shopee", "aliexpress", "kabum", "magalu"]) {
     adapters[marketplace] = async (url, opcoes = {}) => {
       chamadas.push({
         marketplace,
@@ -114,7 +114,8 @@ try {
       ["https://www.amazon.com.br/dp/B0ABCDEF12", "amazon"],
       ["https://shopee.com.br/product/111/222", "shopee"],
       ["https://www.aliexpress.com/item/1005001234567890.html", "aliexpress"],
-      ["https://www.kabum.com.br/produto/944475/produto", "kabum"]
+      ["https://www.kabum.com.br/produto/944475/produto", "kabum"],
+      ["https://www.magazineluiza.com.br/smart-tv/p/abc123/", "magalu"]
     ];
 
     for (const [url, marketplace] of casos) {
