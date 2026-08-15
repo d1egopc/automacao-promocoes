@@ -83,6 +83,75 @@ assert.strictEqual(completo.metadata.fontes.precoAtual, "jsonld.offers.price");
 assert.strictEqual(completo.metadata.fontes.precoAnterior, "html.preco_de");
 assert.deepStrictEqual(Object.keys(completo).filter(k => /afiliad|promoter/i.test(k)), []);
 
+const urlRealA07 = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a07/p/240466500/te/ga07/";
+const urlA17Divergente = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a17/p/240575800/te/ga17/";
+
+const canonicalDivergente = parseMagaluProdutoHtml({
+  urlOriginal: urlRealA07,
+  html: `
+    <link rel="canonical" href="${urlA17Divergente}">
+    <script type="application/ld+json">
+      { "@type": "Product", "name": "Samsung Galaxy A17", "sku": "240575800", "offers": { "price": "1299.90" } }
+    </script>
+  `
+});
+assert.strictEqual(canonicalDivergente.urlCanonica, urlRealA07);
+assert.strictEqual(canonicalDivergente.produtoId, "240466500");
+assert.strictEqual(canonicalDivergente.titulo, "");
+assert.strictEqual(canonicalDivergente.precoAtual, "");
+assert.ok(canonicalDivergente.avisos.includes("magalu_canonica_produto_divergente_ignorada"));
+assert.ok(canonicalDivergente.avisos.includes("magalu_jsonld_produto_divergente_ignorado"));
+
+const ogUrlDivergente = parseMagaluProdutoHtml({
+  urlOriginal: urlRealA07,
+  html: `
+    <meta property="og:url" content="${urlA17Divergente}">
+    <meta property="og:title" content="Smartphone Samsung A07">
+  `
+});
+assert.strictEqual(ogUrlDivergente.urlCanonica, urlRealA07);
+assert.strictEqual(ogUrlDivergente.produtoId, "240466500");
+assert.ok(ogUrlDivergente.avisos.includes("magalu_canonica_produto_divergente_ignorada"));
+
+const responseUrlDivergente = parseMagaluProdutoHtml({
+  urlOriginal: urlRealA07,
+  urlFinal: urlA17Divergente,
+  html: '<meta property="og:title" content="Smartphone Samsung A07">'
+});
+assert.strictEqual(responseUrlDivergente.urlCanonica, urlRealA07);
+assert.strictEqual(responseUrlDivergente.produtoId, "240466500");
+assert.ok(responseUrlDivergente.avisos.includes("magalu_canonica_produto_divergente_ignorada"));
+
+const canonicalCorreta = parseMagaluProdutoHtml({
+  urlOriginal: urlRealA07 + "?utm=abc",
+  html: `<link rel="canonical" href="${urlRealA07}"><meta property="og:title" content="Smartphone Samsung A07">`
+});
+assert.strictEqual(canonicalCorreta.urlCanonica, urlRealA07);
+assert.strictEqual(canonicalCorreta.produtoId, "240466500");
+assert.strictEqual(canonicalCorreta.titulo, "Smartphone Samsung A07");
+
+const captcha = parseMagaluProdutoHtml({
+  urlOriginal: urlRealA07,
+  urlFinal: "https://www.magazinevoce.com.br/az-request-verify?url=" + encodeURIComponent(urlRealA07),
+  html: `
+    <html>
+      <head>
+        <title>Captcha Magalu</title>
+        <link rel="canonical" href="${urlA17Divergente}">
+      </head>
+      <body>Complete o CAPTCHA para continuar</body>
+    </html>
+  `
+});
+assert.strictEqual(captcha.titulo, "");
+assert.strictEqual(captcha.precoAtual, "");
+assert.strictEqual(captcha.precoAnterior, "");
+assert.strictEqual(captcha.imagem, "");
+assert.strictEqual(captcha.categoria, "");
+assert.strictEqual(captcha.produtoId, "240466500");
+assert.ok(captcha.avisos.includes("magalu_captcha_detectado"));
+assert.ok(captcha.avisos.includes("magalu_canonica_produto_divergente_ignorada"));
+
 const semPrecoAnterior = parseMagaluProdutoHtml({
   urlOriginal: urlProduto,
   html: `

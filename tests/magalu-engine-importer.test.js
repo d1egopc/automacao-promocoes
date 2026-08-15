@@ -16,6 +16,8 @@ const {
 } = require("../modules/engine/oferta-universal.contract");
 
 const urlProduto = "https://www.magazineluiza.com.br/smart-tv-50/p/abc123/et/elit/";
+const urlRealA07 = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a07/p/240466500/te/ga07/";
+const urlA17Divergente = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a17/p/240575800/te/ga17/";
 const htmlProduto = `
   <html>
     <head>
@@ -152,6 +154,82 @@ async function testarIntegracaoAusenteBloqueiaImportacaoAutomatica() {
   assert.strictEqual(resultado.motivo, "integracao_ausente");
 }
 
+async function testarEngineNaoTrocaProdutoPorCanonicaDivergente() {
+  const chamadasGerador = [];
+  const htmlDivergente = `
+    <link rel="canonical" href="${urlA17Divergente}">
+    <meta property="og:title" content="Smartphone Samsung A07">
+    <meta property="product:price:amount" content="799.90">
+  `;
+  const pacote = deps({
+    html: htmlDivergente,
+    gerarLinkAfiliadoMagaluSeguro: (url, promoterId) => {
+      chamadasGerador.push({ url, promoterId });
+      return {
+        urlAfiliada: url,
+        tipoLink: "magazinevoce_loja",
+        proveniencia: "url_ja_pertence_a_loja_configurada",
+        comprovado: true,
+        avisos: []
+      };
+    }
+  });
+
+  const resultado = await importarProdutoMagaluEngine({
+    job: { id: 502, evento_id: 602, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento: {
+      texto_original: "Smartphone Samsung A07\nPor R$ 777,00\nLink: " + urlRealA07,
+      links_extraidos: [urlRealA07]
+    },
+    links: [linkRow(2, urlRealA07)],
+    deps: pacote.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(chamadasGerador.length, 1);
+  assert.strictEqual(chamadasGerador[0].url, urlRealA07);
+  assert.ok(!resultado.linkAfiliado.includes("240575800"));
+  assert.strictEqual(resultado.produtoId, "240466500");
+  assert.ok(resultado.metadata.produto.avisos.includes("magalu_canonica_produto_divergente_ignorada"));
+}
+
+async function testarCaptchaNaoGeraAfiliadoEngine() {
+  const chamadasGerador = [];
+  const pacote = deps({
+    html: `
+      <html>
+        <head>
+          <title>Captcha Magalu</title>
+          <link rel="canonical" href="${urlA17Divergente}">
+        </head>
+        <body>Complete o CAPTCHA</body>
+      </html>
+    `,
+    gerarLinkAfiliadoMagaluSeguro: (url, promoterId) => {
+      chamadasGerador.push({ url, promoterId });
+      return {
+        urlAfiliada: url,
+        comprovado: true,
+        avisos: []
+      };
+    }
+  });
+
+  const resultado = await importarProdutoMagaluEngine({
+    job: { id: 503, evento_id: 603, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento: {
+      texto_original: "Oferta Magalu\nPor R$ 777,00\nLink: " + urlRealA07,
+      links_extraidos: [urlRealA07]
+    },
+    links: [linkRow(3, urlRealA07)],
+    deps: pacote.deps
+  });
+
+  assert.strictEqual(chamadasGerador.length, 0);
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "titulo_indisponivel");
+}
+
 async function testarOfertaUniversalValida() {
   const pacote = deps();
   const resultado = await importarMagaluFixture({ depsExtras: pacote.deps });
@@ -226,6 +304,8 @@ function testarRegistriesPipelineUnico() {
   await testarSemPrecoRadarUsaPagina();
   await testarUrlOriginalNaoViraAfiliada();
   await testarIntegracaoAusenteBloqueiaImportacaoAutomatica();
+  await testarEngineNaoTrocaProdutoPorCanonicaDivergente();
+  await testarCaptchaNaoGeraAfiliadoEngine();
   await testarOfertaUniversalValida();
   testarClassificadorDeLinksMagalu();
   testarRegistriesPipelineUnico();

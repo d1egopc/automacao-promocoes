@@ -2,7 +2,8 @@
 
 const { normalizarNumeroMoeda } = require("../../../../utils/moeda");
 const {
-  consultarProdutoMagalu
+  consultarProdutoMagalu,
+  produtoIdPorUrl
 } = require("../../../marketplaces/magalu/magalu-parser");
 const {
   gerarLinkAfiliadoMagaluSeguro
@@ -149,6 +150,44 @@ function credencialPromoterIdMagalu(integracao = {}) {
   return texto(integracao?.credenciais?.promoterId || integracao?.promoterId);
 }
 
+function adicionarAvisoMagalu(avisos = [], aviso = "") {
+  if (aviso && !avisos.includes(aviso)) avisos.push(aviso);
+}
+
+function urlAfiliavelMesmoProdutoMagalu(produto = {}, urlOriginal = "", avisos = []) {
+  if (avisos.includes("magalu_captcha_detectado")) {
+    return "";
+  }
+
+  const produtoIdOriginal = produtoIdPorUrl(urlOriginal);
+  const candidatas = [
+    produto.urlCanonica,
+    produto.urlOriginal,
+    urlOriginal
+  ];
+
+  for (const candidata of candidatas) {
+    const url = primeiroValor(candidata);
+    if (!url) continue;
+
+    const produtoIdCandidato = produtoIdPorUrl(url);
+    if (produtoIdOriginal) {
+      if (produtoIdCandidato && produtoIdCandidato !== produtoIdOriginal) {
+        adicionarAvisoMagalu(avisos, "magalu_link_produto_divergente_ignorado");
+        continue;
+      }
+
+      if (!produtoIdCandidato) {
+        continue;
+      }
+    }
+
+    return url;
+  }
+
+  return "";
+}
+
 function logMagaluAdapter(evento, payload = {}) {
   console.log(evento, JSON.stringify(payload));
 }
@@ -240,8 +279,18 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     };
   }
 
-  const urlCanonica = primeiroValor(produto.urlCanonica, produto.urlOriginal, urlOriginalEngine);
-  const provaAfiliado = gerarLinkSeguro(urlCanonica, promoterId);
+  const avisosProduto = Array.isArray(produto.avisos) ? produto.avisos : [];
+  const urlAfiliavel = urlAfiliavelMesmoProdutoMagalu(produto, urlOriginalEngine, avisosProduto);
+  const urlCanonica = primeiroValor(urlAfiliavel, produto.urlOriginal, urlOriginalEngine);
+  const provaAfiliado = urlAfiliavel
+    ? gerarLinkSeguro(urlAfiliavel, promoterId)
+    : {
+        urlAfiliada: "",
+        tipoLink: "produto_sem_prova",
+        proveniencia: "",
+        comprovado: false,
+        avisos: ["magalu_link_produto_sem_prova"]
+      };
   const linkAfiliado = provaAfiliado?.comprovado === true ? texto(provaAfiliado.urlAfiliada) : "";
   const precoRadarSeguro = extrairPrecoRadarSeguroMagalu(evento);
   const precoPagina = primeiroValor(produto.precoAtual, produto.preco);

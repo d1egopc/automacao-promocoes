@@ -4,7 +4,8 @@ const {
   normalizarOfertaManualV2
 } = require("../manual-offers.contract");
 const {
-  consultarProdutoMagalu
+  consultarProdutoMagalu,
+  produtoIdPorUrl
 } = require("../../marketplaces/magalu/magalu-parser");
 const {
   gerarLinkAfiliadoMagaluSeguro
@@ -51,6 +52,44 @@ function observacoesMagalu(avisos = []) {
   return listaUnicaTexto(avisos).join(" | ");
 }
 
+function adicionarAvisoMagalu(avisos = [], aviso = "") {
+  if (aviso && !avisos.includes(aviso)) avisos.push(aviso);
+}
+
+function urlAfiliavelMesmoProdutoMagalu(dados = {}, urlOriginal = "", avisos = []) {
+  if (avisos.includes("magalu_captcha_detectado")) {
+    return "";
+  }
+
+  const produtoIdOriginal = produtoIdPorUrl(urlOriginal);
+  const candidatas = [
+    dados.urlCanonica,
+    dados.urlOriginal,
+    urlOriginal
+  ];
+
+  for (const candidata of candidatas) {
+    const url = primeiroTexto(candidata);
+    if (!url) continue;
+
+    const produtoIdCandidato = produtoIdPorUrl(url);
+    if (produtoIdOriginal) {
+      if (produtoIdCandidato && produtoIdCandidato !== produtoIdOriginal) {
+        adicionarAvisoMagalu(avisos, "magalu_link_produto_divergente_ignorado");
+        continue;
+      }
+
+      if (!produtoIdCandidato) {
+        continue;
+      }
+    }
+
+    return url;
+  }
+
+  return "";
+}
+
 async function importarProdutoMagaluManualV2(urlManual = "", opcoes = {}) {
   const urlOriginal = texto(urlManual);
   if (!urlOriginal) {
@@ -77,8 +116,9 @@ async function importarProdutoMagaluManualV2(urlManual = "", opcoes = {}) {
     avisos.push("magalu_integracao_nao_configurada_url_afiliada_vazia");
   }
 
-  const provaLink = promoterId
-    ? gerarLinkSeguro(primeiroTexto(dados.urlCanonica, dados.urlOriginal, urlOriginal), promoterId)
+  const urlAfiliavel = urlAfiliavelMesmoProdutoMagalu(dados, urlOriginal, avisos);
+  const provaLink = promoterId && urlAfiliavel
+    ? gerarLinkSeguro(urlAfiliavel, promoterId)
     : { urlAfiliada: "", comprovado: false, avisos: [] };
 
   if (provaLink?.avisos?.length) {

@@ -81,6 +81,82 @@ function produtoIdPorUrl(url = "") {
   }
 }
 
+function adicionarAviso(avisos = [], aviso = "") {
+  if (aviso && !avisos.includes(aviso)) avisos.push(aviso);
+}
+
+function urlProdutoMagaluValida(url = "") {
+  return hostMagaluValido(url) && Boolean(produtoIdPorUrl(url));
+}
+
+function tituloPagina(html = "") {
+  return limparTextoMagalu(String(html || "").match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "");
+}
+
+function contemCaptchaMagalu(html = "") {
+  const conteudo = String(html || "");
+  const titulo = tituloPagina(conteudo)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return /\baz-request-verify\b/i.test(conteudo) ||
+    /complete\s+o\s+captcha/i.test(conteudo) ||
+    /captcha\s+magalu/i.test(titulo) ||
+    /data-testid=["']captcha/i.test(conteudo);
+}
+
+function idProdutoJsonLd(produto = {}) {
+  return limparTextoMagalu(produto?.sku || produto?.productID || produto?.mpn || "");
+}
+
+function produtoJsonLdCompativel(produto = {}, produtoIdOriginal = "") {
+  const idJsonLd = idProdutoJsonLd(produto);
+  if (!produtoIdOriginal || !idJsonLd) return true;
+  return idJsonLd === produtoIdOriginal;
+}
+
+function removerScriptsJsonLd(html = "") {
+  return String(html || "").replace(/<script[^>]+type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi, "");
+}
+
+function escolherUrlCanonicaSegura({ resultado, conteudo, urlOriginal = "", urlFinal = "" } = {}) {
+  const base = urlFinal || urlOriginal;
+  const urlOriginalLimpa = limparUrlMagalu(urlOriginal);
+  const produtoIdOriginal = produtoIdPorUrl(urlOriginalLimpa);
+  const candidatas = [
+    extrairLinkCanonical(conteudo, base),
+    limparUrlMagalu(extrairAtributoMeta(conteudo, ["og:url"]), base),
+    limparUrlMagalu(urlFinal || ""),
+    urlOriginalLimpa
+  ].filter(Boolean);
+
+  for (const candidata of candidatas) {
+    if (!hostMagaluValido(candidata)) {
+      adicionarAviso(resultado.avisos, "magalu_canonica_fora_do_dominio_ignorada");
+      continue;
+    }
+
+    const produtoIdCandidato = produtoIdPorUrl(candidata);
+    if (produtoIdOriginal) {
+      if (produtoIdCandidato && produtoIdCandidato !== produtoIdOriginal) {
+        adicionarAviso(resultado.avisos, "magalu_canonica_produto_divergente_ignorada");
+        continue;
+      }
+
+      if (!produtoIdCandidato) {
+        continue;
+      }
+    }
+
+    resultado.urlCanonica = candidata;
+    return;
+  }
+
+  if (urlProdutoMagaluValida(urlOriginalLimpa)) {
+    resultado.urlCanonica = urlOriginalLimpa;
+  }
+}
+
 function normalizarPrecoMagalu(valor) {
   if (valor === undefined || valor === null) return "";
 
@@ -298,31 +374,43 @@ function extrairSeller(html = "") {
 function parseMagaluProdutoHtml({ urlOriginal = "", html = "", urlFinal = "" } = {}) {
   const resultado = resultadoVazio(urlOriginal);
   const conteudo = String(html || "");
+  const urlOriginalLimpa = limparUrlMagalu(urlOriginal);
+  const produtoIdOriginal = produtoIdPorUrl(urlOriginalLimpa);
 
   if (!conteudo.trim()) {
     resultado.avisos.push("magalu_html_ausente");
     return resultado;
   }
 
-  const urlCanonica =
-    extrairLinkCanonical(conteudo, urlFinal || urlOriginal) ||
-    limparUrlMagalu(extrairAtributoMeta(conteudo, ["og:url"]), urlFinal || urlOriginal) ||
-    limparUrlMagalu(urlFinal || urlOriginal);
+  escolherUrlCanonicaSegura({ resultado, conteudo, urlOriginal, urlFinal });
 
-  if (urlCanonica && hostMagaluValido(urlCanonica)) {
-    resultado.urlCanonica = urlCanonica;
-  } else if (urlCanonica) {
-    resultado.avisos.push("magalu_canonica_fora_do_dominio_ignorada");
+  if (contemCaptchaMagalu(conteudo)) {
+    adicionarAviso(resultado.avisos, "magalu_captcha_detectado");
+    if (produtoIdOriginal) {
+      resultado.produtoId = produtoIdOriginal;
+      resultado.codigo = produtoIdOriginal;
+      resultado.metadata.fontes.produtoId = "urlOriginal";
+    }
+    adicionarAviso(resultado.avisos, "magalu_produto_nao_comprovado");
+    return resultado;
   }
 
   const produtoJsonLd = acharProdutoJsonLd(conteudo);
   const breadcrumbJsonLd = acharBreadcrumbJsonLd(conteudo);
   const fontes = resultado.metadata.fontes;
   const brutos = resultado.metadata.camposBrutos;
+  const produtoJsonLdSeguro = produtoJsonLdCompativel(produtoJsonLd, produtoIdOriginal) ? produtoJsonLd : null;
+
+  if (produtoJsonLd && !produtoJsonLdSeguro) {
+    adicionarAviso(resultado.avisos, "magalu_jsonld_produto_divergente_ignorado");
+  }
+  const conteudoSeguro = produtoJsonLd && !produtoJsonLdSeguro
+    ? removerScriptsJsonLd(conteudo)
+    : conteudo;
 
   const produtoId =
     produtoIdPorUrl(resultado.urlCanonica) ||
-    limparTextoMagalu(produtoJsonLd?.sku || produtoJsonLd?.productID || produtoJsonLd?.mpn || "");
+    idProdutoJsonLd(produtoJsonLdSeguro);
   if (produtoId) {
     resultado.produtoId = produtoId;
     resultado.codigo = produtoId;
@@ -330,29 +418,29 @@ function parseMagaluProdutoHtml({ urlOriginal = "", html = "", urlFinal = "" } =
   }
 
   const titulo =
-    limparTextoMagalu(produtoJsonLd?.name || "") ||
+    limparTextoMagalu(produtoJsonLdSeguro?.name || "") ||
     extrairAtributoMeta(conteudo, ["og:title", "twitter:title"]) ||
-    limparTextoMagalu(conteudo.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "").replace(/\s*\|\s*Magazine Luiza\s*$/i, "");
+    tituloPagina(conteudo).replace(/\s*\|\s*Magazine Luiza\s*$/i, "");
   if (titulo && !tituloGenericoMagalu(titulo)) {
     resultado.titulo = titulo;
-    fontes.titulo = produtoJsonLd?.name ? "jsonld.name" : "meta_ou_title";
+    fontes.titulo = produtoJsonLdSeguro?.name ? "jsonld.name" : "meta_ou_title";
   }
 
-  const imagem = limparUrlMagalu(imagemJsonLd(produtoJsonLd), urlFinal || urlOriginal) ||
+  const imagem = limparUrlMagalu(imagemJsonLd(produtoJsonLdSeguro), urlFinal || urlOriginal) ||
     limparUrlMagalu(extrairAtributoMeta(conteudo, ["og:image", "twitter:image"]), urlFinal || urlOriginal);
   if (imagem) {
     resultado.imagem = imagem;
-    fontes.imagem = imagemJsonLd(produtoJsonLd) ? "jsonld.image" : "meta.image";
+    fontes.imagem = imagemJsonLd(produtoJsonLdSeguro) ? "jsonld.image" : "meta.image";
   }
 
-  const precoAtual = extrairPrecoAtual(conteudo, produtoJsonLd);
+  const precoAtual = extrairPrecoAtual(conteudoSeguro, produtoJsonLdSeguro);
   if (precoAtual.preco) {
     resultado.precoAtual = precoAtual.preco;
     fontes.precoAtual = precoAtual.fonte;
     brutos.precoAtual = { campo: precoAtual.fonte, valor: String(precoAtual.bruto) };
   }
 
-  const precoAnterior = extrairPrecoAnterior(conteudo, resultado.precoAtual);
+  const precoAnterior = extrairPrecoAnterior(conteudoSeguro, resultado.precoAtual);
   if (precoAnterior.preco) {
     resultado.precoAnterior = precoAnterior.preco;
     fontes.precoAnterior = precoAnterior.fonte;
@@ -360,25 +448,25 @@ function parseMagaluProdutoHtml({ urlOriginal = "", html = "", urlFinal = "" } =
   }
 
   const categoria = categoriaBreadcrumb(breadcrumbJsonLd) ||
-    extrairAtributoMeta(conteudo, ["product:category", "category"]);
+    extrairAtributoMeta(conteudoSeguro, ["product:category", "category"]);
   if (categoria) {
     resultado.categoria = categoria;
     fontes.categoria = breadcrumbJsonLd ? "jsonld.breadcrumb" : "meta.category";
   }
 
-  const seller = extrairSeller(conteudo);
+  const seller = extrairSeller(conteudoSeguro);
   if (seller) {
     resultado.seller = seller;
     fontes.seller = "html.seller";
   }
 
-  const parcelamento = extrairParcelamento(conteudo);
+  const parcelamento = extrairParcelamento(conteudoSeguro);
   if (parcelamento) {
     resultado.parcelamento = parcelamento;
     fontes.parcelamento = "html.parcelamento";
   }
 
-  const cupom = extrairCupom(conteudo);
+  const cupom = extrairCupom(conteudoSeguro);
   if (cupom) {
     resultado.cupom = cupom;
     fontes.cupom = "html.cupom";
