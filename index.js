@@ -171,6 +171,7 @@ const criarRotasSocial = require("./modules/social/routes");
 const criarRotasTemplatesClientes = require("./modules/templates-clientes/routes");
 const criarRotasStorageManager = require("./modules/storage-manager/storage.routes");
 const criarRotasResetEsteirasPreflight = require("./modules/engine/reset-esteiras/preflight.routes");
+const criarRotasManualV2 = require("./modules/manual-v2/manual-offers.routes");
 const {
   resolveWorkspaceId,
   isAdminMaster: usuarioEhAdminMaster
@@ -17627,6 +17628,12 @@ app.use("/social", criarRotasSocial({
 app.use("/templates-ofertas", criarRotasTemplatesClientes({
   getClienteId,
   usuarioTemRecurso
+}));
+
+// =============== ROTAS MANUAL V2 =================
+
+app.use("/manual-v2", criarRotasManualV2({
+  getClienteId
 }));
 
 // =============== ROTA ADMIN DO STORAGE MANAGER =================
