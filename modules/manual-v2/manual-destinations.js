@@ -41,6 +41,14 @@ function chatIdDestino(destino = {}) {
   );
 }
 
+function conexaoDiscord(destino = {}) {
+  return texto(destino.conexaoId || destino.sessao || destino.idConexao);
+}
+
+function canalDiscord(destino = {}) {
+  return texto(destino.channelId || destino.canalId || destino.grupo || destino.canal);
+}
+
 function chavesTelegram(destino = {}) {
   return [
     destino.id,
@@ -84,6 +92,13 @@ function listarTelegramsCliente(configsPorCliente = {}, clienteId = "admin") {
   return lista(destinos).map(normalizarTelegramInterno);
 }
 
+function listarDiscordConexoesCliente(deps = {}, clienteId = "admin") {
+  if (Array.isArray(deps.discordConexoes)) return deps.discordConexoes;
+  const origem = deps.discordConexoesPorCliente?.[clienteId];
+  if (Array.isArray(origem)) return origem;
+  return [];
+}
+
 function planoPermite(plano = {}, recurso = "") {
   if (!plano || typeof plano !== "object") return true;
   if (!plano.recursos || typeof plano.recursos !== "object") return true;
@@ -113,13 +128,40 @@ function resolverTelegramDestino(destino = {}, telegrams = []) {
   ) || null;
 }
 
-function destinoVisualSeguro(destino = {}) {
+function resolverDiscordConexao(destino = {}, contexto = {}) {
+  const id = conexaoDiscord(destino);
+  if (!id) return null;
+  return lista(contexto.discordConexoes).find((conexao) => texto(conexao.id) === id) || null;
+}
+
+function canaisDiscordDaConexao(conexaoId = "", contexto = {}) {
+  const mapa = contexto.discordCanaisPorConexao || {};
+  const canais = mapa[texto(conexaoId)];
+  return Array.isArray(canais) ? canais : null;
+}
+
+function resolverCanalDiscord(destino = {}, contexto = {}) {
+  const conexaoId = conexaoDiscord(destino);
+  const channelId = canalDiscord(destino);
+  if (!conexaoId || !channelId) return null;
+  const canais = canaisDiscordDaConexao(conexaoId, contexto);
+  if (!canais) return null;
+  return canais.find((canal) => texto(canal.id) === channelId) || null;
+}
+
+function destinoVisualSeguro(destino = {}, contexto = {}) {
   const tipo = tipoDestino(destino);
   if (tipo === "telegram") {
     return texto(destino.nome || destino.titulo || destino.label || destino.apelido || destino.username || "Canal Telegram");
   }
   if (tipo === "discord") {
-    return texto(destino.channelName || destino.grupoNome || destino.nome || destino.titulo || destino.label || "Canal Discord");
+    const conexao = resolverDiscordConexao(destino, contexto) || {};
+    const canalResolvido = resolverCanalDiscord(destino, contexto) || {};
+    const servidor = texto(destino.guildName || destino.servidorNome || destino.servidor || conexao.guildName);
+    const canal = texto(destino.channelName || destino.grupoNome || destino.canalNome || canalResolvido.nome);
+    if (servidor && canal) return `${servidor} #${canal}`;
+    if (canal) return `#${canal}`;
+    return texto(destino.nome || destino.titulo || destino.label || "Canal Discord");
   }
   return grupoWhatsapp(destino);
 }
@@ -142,7 +184,22 @@ function motivoIndisponivel(destino = {}, contexto = {}) {
 
   if (tipo === "discord") {
     if (!planoPermite(contexto.plano, "discord")) return "Canal indisponivel no plano atual";
-    return "Envio Discord ainda nao habilitado";
+    if (contexto.discordSenderDisponivel !== true) return "Envio Discord indisponivel";
+    const conexaoId = conexaoDiscord(destino);
+    const channelId = canalDiscord(destino);
+    if (!conexaoId) return "Servidor Discord nao definido";
+    if (!channelId) return "Canal Discord nao definido";
+    const conexao = resolverDiscordConexao(destino, contexto);
+    if (!conexao) return "Servidor Discord nao encontrado";
+    if (conexao.ativo === false) return "Servidor Discord desconectado";
+    const canais = canaisDiscordDaConexao(conexaoId, contexto);
+    if (!canais) return "Canal Discord nao validado";
+    const canal = resolverCanalDiscord(destino, contexto);
+    if (!canal) return "Canal Discord nao encontrado";
+    if (canal.utilizavel !== true) {
+      return texto(canal.motivoIndisponivel) || "Canal Discord indisponivel";
+    }
+    return "";
   }
 
   if (!planoPermite(contexto.plano, "telegram")) return "Canal indisponivel no plano atual";
@@ -164,7 +221,7 @@ function sanitizarDestinoManualV2(destino = {}, contexto = {}) {
     ativo: destino.ativo !== false,
     utilizavel: Boolean(id && !motivo),
     motivoIndisponivel: id ? motivo : "Destino sem identificador",
-    identificacaoVisual: destinoVisualSeguro(destino)
+    identificacaoVisual: destinoVisualSeguro(destino, contexto)
   };
 }
 
@@ -175,7 +232,10 @@ function listarDestinosManuaisV2(clienteId = "admin", deps = {}) {
     plano: deps.plano || {},
     sessoes: deps.sessoes || {},
     statusSessao: deps.statusSessao || {},
-    telegrams: listarTelegramsCliente(deps.configsPorCliente || {}, cliente)
+    telegrams: listarTelegramsCliente(deps.configsPorCliente || {}, cliente),
+    discordConexoes: listarDiscordConexoesCliente(deps, cliente),
+    discordCanaisPorConexao: deps.discordCanaisPorConexao || {},
+    discordSenderDisponivel: deps.discordSenderDisponivel === true || typeof deps.enviarDiscord === "function"
   };
 
   return destinos
@@ -183,7 +243,71 @@ function listarDestinosManuaisV2(clienteId = "admin", deps = {}) {
     .map((destino) => sanitizarDestinoManualV2(destino, contexto));
 }
 
+async function resolverContextoDiscordManualV2(clienteId = "admin", destinos = [], deps = {}) {
+  const cliente = texto(clienteId) || "admin";
+  const contexto = {
+    discordConexoes: listarDiscordConexoesCliente(deps, cliente),
+    discordCanaisPorConexao: { ...(deps.discordCanaisPorConexao || {}) },
+    discordSenderDisponivel: deps.discordSenderDisponivel === true || typeof deps.enviarDiscord === "function"
+  };
+
+  if (typeof deps.listarConexoesDiscord === "function") {
+    try {
+      const conexoes = deps.listarConexoesDiscord(cliente, deps.discordStorageOptions || {});
+      if (Array.isArray(conexoes)) contexto.discordConexoes = conexoes;
+    } catch (_e) {
+      contexto.discordConexoes = [];
+    }
+  }
+
+  if (typeof deps.listarCanaisDiscord !== "function") return contexto;
+
+  const conexoesPorId = new Map(lista(contexto.discordConexoes).map((conexao) => [texto(conexao.id), conexao]));
+  const idsConexao = new Set(
+    lista(destinos)
+      .filter((destino) => tipoDestino(destino) === "discord")
+      .map(conexaoDiscord)
+      .filter(Boolean)
+  );
+
+  for (const conexaoId of idsConexao) {
+    if (Object.prototype.hasOwnProperty.call(contexto.discordCanaisPorConexao, conexaoId)) continue;
+    const conexao = conexoesPorId.get(conexaoId);
+    if (!conexao || conexao.ativo === false || !texto(conexao.guildId)) {
+      contexto.discordCanaisPorConexao[conexaoId] = [];
+      continue;
+    }
+
+    try {
+      const canais = await deps.listarCanaisDiscord({
+        guildId: conexao.guildId,
+        env: deps.env || process.env,
+        httpClient: deps.httpClient
+      });
+      contexto.discordCanaisPorConexao[conexaoId] = Array.isArray(canais) ? canais : [];
+    } catch (_e) {
+      contexto.discordCanaisPorConexao[conexaoId] = [];
+    }
+  }
+
+  return contexto;
+}
+
+async function listarDestinosManuaisV2Async(clienteId = "admin", deps = {}) {
+  const cliente = texto(clienteId) || "admin";
+  const destinos = listarDestinosCliente(deps.destinosPorCliente || {}, cliente);
+  const discordContexto = await resolverContextoDiscordManualV2(cliente, destinos, deps);
+  return listarDestinosManuaisV2(cliente, {
+    ...deps,
+    discordConexoes: discordContexto.discordConexoes,
+    discordCanaisPorConexao: discordContexto.discordCanaisPorConexao,
+    discordSenderDisponivel: discordContexto.discordSenderDisponivel
+  });
+}
+
 module.exports = {
   listarDestinosManuaisV2,
+  listarDestinosManuaisV2Async,
+  resolverContextoDiscordManualV2,
   sanitizarDestinoManualV2
 };

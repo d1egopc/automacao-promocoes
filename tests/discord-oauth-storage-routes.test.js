@@ -274,6 +274,17 @@ try {
   assert.ok(!textoJson(bodyLiberado).includes(ENV.DISCORD_CLIENT_SECRET), "Rota conectar nao vaza client secret");
   assert.ok(!textoJson(bodyLiberado).includes(ENV.DISCORD_BOT_TOKEN), "Rota conectar nao vaza bot token");
 
+  const stateCallback = new URL(bodyLiberado.url).searchParams.get("state");
+  const callback = await fetch(`${base}/discord/callback?code=codigo_redirect&state=${encodeURIComponent(stateCallback)}`, {
+    redirect: "manual"
+  });
+  assert.strictEqual(callback.status, 302, "Callback OAuth deve redirecionar de volta para Conexoes");
+  assert.strictEqual(
+    callback.headers.get("location"),
+    criarRotasDiscord.DISCORD_CALLBACK_SUCESSO_URL,
+    "Callback deve retornar para /conexoes com feedback Discord"
+  );
+
   const conexoes = await fetch(`${base}/discord/conexoes`, { headers: { "x-cliente": "cliente_a" } });
   assert.strictEqual(conexoes.status, 200);
   const bodyConexoes = await conexoes.json();

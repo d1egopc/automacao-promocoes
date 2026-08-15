@@ -36,8 +36,22 @@ const destinoDiscordSemSender = sanitizarDestinoManualV2(
   { plano: { recursos: { discord: true, whatsapp: true, telegram: true } } }
 );
 assert.strictEqual(destinoDiscordSemSender.tipo, "discord", "Manual V2 deve preservar Discord mesmo com plano liberado");
-assert.strictEqual(destinoDiscordSemSender.utilizavel, false, "Discord ainda nao deve virar operacional neste patch");
-assert.strictEqual(destinoDiscordSemSender.motivoIndisponivel, "Envio Discord ainda nao habilitado");
+assert.strictEqual(destinoDiscordSemSender.utilizavel, false, "Discord sem sender real deve ficar indisponivel");
+assert.strictEqual(destinoDiscordSemSender.motivoIndisponivel, "Envio Discord indisponivel");
+
+const destinoDiscordOperacional = sanitizarDestinoManualV2(
+  { id: "dest_discord", nome: "Discord teste", tipo: "discord", ativo: true, conexaoId: "discord_a", channelId: "canal_a" },
+  {
+    plano: { recursos: { discord: true, whatsapp: true, telegram: true } },
+    discordSenderDisponivel: true,
+    discordConexoes: [{ id: "discord_a", guildName: "Servidor A", ativo: true }],
+    discordCanaisPorConexao: {
+      discord_a: [{ id: "canal_a", nome: "ofertas", utilizavel: true }]
+    }
+  }
+);
+assert.strictEqual(destinoDiscordOperacional.utilizavel, true, "D6 deve liberar Discord operacional somente com conexao/canal/sender");
+assert.strictEqual(destinoDiscordOperacional.identificacaoVisual, "Servidor A #ofertas");
 
 assert.strictEqual(
   sanitizarDestinoManualV2(
@@ -84,11 +98,14 @@ assert.ok(!/DISCORD_BOT_TOKEN|discord\.com\/api/i.test(indexFonte), "Index nao d
 
 for (const [arquivo, fonte] of [
   ["manual-destinations", ler("modules/manual-v2/manual-destinations.js")],
-  ["manual-dispatcher", ler("modules/manual-v2/manual-dispatcher.js")],
   ["templates-resolver", ler("modules/templates-clientes/resolver.js")]
 ]) {
-  assert.ok(!/processarFila|adicionarOfertaInicioFila|prepararOfertaGlobal|Distributor|Oferta Universal|fila\.json|enviarDiscord|manual-dispatcher|manual-scheduler/i.test(fonte), `${arquivo} nao deve tocar envio/rio automatico`);
+  assert.ok(!/processarFila|adicionarOfertaInicioFila|prepararOfertaGlobal|Distributor|Oferta Universal|fila\.json|manual-dispatcher|manual-scheduler/i.test(fonte), `${arquivo} nao deve tocar rio automatico`);
 }
+
+const manualDispatcher = ler("modules/manual-v2/manual-dispatcher.js");
+assert.ok(manualDispatcher.includes("enviarDiscord"), "D6 deve chamar sender Discord somente pelo dispatcher Manual V2");
+assert.ok(!/processarFila|adicionarOfertaInicioFila|prepararOfertaGlobal|Distributor|Radar|Engine|Oferta Universal|fila\.json|enviarParaDestinoInteligente|enviarCampanhaManual/i.test(manualDispatcher), "manual-dispatcher nao deve tocar rio automatico");
 
 const discordRoutes = ler("modules/discord/discord.routes.js");
 assert.ok(discordRoutes.includes("enviarDiscord"), "D5 deve permitir teste tecnico chamando somente o sender Discord");

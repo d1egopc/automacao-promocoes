@@ -2,7 +2,7 @@ const {
   buscarOfertaManualV2
 } = require("./manual-offers.storage");
 const {
-  listarDestinosManuaisV2
+  listarDestinosManuaisV2Async
 } = require("./manual-destinations");
 
 function texto(valor = "") {
@@ -47,6 +47,10 @@ function conexaoWhatsapp(destino = {}) {
 
 function grupoWhatsapp(destino = {}) {
   return texto(destino.grupo || destino.chatId || destino.canal || lista(destino.gruposWhatsapp)[0]);
+}
+
+function canalDiscord(destino = {}) {
+  return texto(destino.channelId || destino.canalId || destino.grupo || destino.canal);
 }
 
 function chavesTelegram(destino = {}) {
@@ -192,6 +196,25 @@ async function enviarTelegramManual({ destino, mensagem, deps, clienteId }) {
   });
 }
 
+async function enviarDiscordManual({ destino, oferta, mensagem, deps }) {
+  const channelId = canalDiscord(destino);
+  if (!channelId) throw new Error("Canal Discord nao definido");
+  if (typeof deps.enviarDiscord !== "function") throw new Error("Primitiva Discord indisponivel");
+
+  const resultado = await deps.enviarDiscord({
+    channelId,
+    mensagem,
+    imagemUrl: texto(oferta.imagem),
+    env: deps.env || process.env,
+    httpClient: deps.httpClient,
+    now: deps.now
+  });
+
+  if (!resultado?.ok) {
+    throw new Error(resultado?.erro || "discord_envio_falhou");
+  }
+}
+
 function criarRetornoBase(ok = false, ofertaId = "", erro = "") {
   return {
     ok,
@@ -222,12 +245,21 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
     ? deps.resolverPlanoManualV2(cliente)
     : deps.plano || {};
   const destinosOriginais = listarDestinosCliente(deps.destinosPorCliente || {}, cliente);
-  const destinosSanitizados = listarDestinosManuaisV2(cliente, {
+  const destinosSanitizados = await listarDestinosManuaisV2Async(cliente, {
     destinosPorCliente: deps.destinosPorCliente || {},
     configsPorCliente: deps.configsPorCliente || {},
     sessoes: deps.sessoes || {},
     statusSessao: deps.statusSessao || {},
-    plano
+    plano,
+    discordConexoes: deps.discordConexoes || [],
+    discordConexoesPorCliente: deps.discordConexoesPorCliente || {},
+    discordCanaisPorConexao: deps.discordCanaisPorConexao || {},
+    listarConexoesDiscord: deps.listarConexoesDiscord,
+    listarCanaisDiscord: deps.listarCanaisDiscord,
+    enviarDiscord: deps.enviarDiscord,
+    discordSenderDisponivel: deps.discordSenderDisponivel,
+    env: deps.env,
+    httpClient: deps.httpClient
   });
   const mapaOriginal = new Map(destinosOriginais.map((destino) => [destinoId(destino), destino]));
   const mapaSanitizado = new Map(destinosSanitizados.map((destino) => [destino.id, destino]));
@@ -283,8 +315,10 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
         await enviarTelegramManual({ destino, mensagem, deps, clienteId: cliente });
       } else if (tipo === "whatsapp") {
         await enviarWhatsappManual({ destino, oferta, mensagem, deps });
+      } else if (tipo === "discord") {
+        await enviarDiscordManual({ destino, oferta, mensagem, deps });
       } else {
-        throw new Error("Canal Discord ainda nao disponivel");
+        throw new Error("Canal indisponivel");
       }
 
       const debitou = debitarCreditos(cliente, 1);

@@ -4,7 +4,7 @@ const {
 } = require("./manual-import.adapters");
 const storagePadrao = require("./manual-offers.storage");
 const {
-  listarDestinosManuaisV2
+  listarDestinosManuaisV2Async
 } = require("./manual-destinations");
 const {
   enviarOfertaManualV2
@@ -169,19 +169,32 @@ function criarRotasManualV2(deps = {}) {
     return getClienteId(req) || "admin";
   }
 
-  router.get("/destinos", (req, res) => {
+  function depsDestinos(req, clienteId) {
+    const plano = typeof deps.getPlanoUsuario === "function"
+      ? deps.getPlanoUsuario(req)
+      : deps.plano || {};
+    return {
+      destinosPorCliente: deps.destinosPorCliente || {},
+      configsPorCliente: deps.configsPorCliente || {},
+      sessoes: deps.sessoes || {},
+      statusSessao: deps.statusSessao || {},
+      plano,
+      discordConexoes: deps.discordConexoes || [],
+      discordConexoesPorCliente: deps.discordConexoesPorCliente || {},
+      discordCanaisPorConexao: deps.discordCanaisPorConexao || {},
+      listarConexoesDiscord: deps.listarConexoesDiscord,
+      listarCanaisDiscord: deps.listarCanaisDiscord,
+      enviarDiscord: deps.enviarDiscord,
+      discordSenderDisponivel: deps.discordSenderDisponivel,
+      env: deps.env || process.env,
+      httpClient: deps.httpClient
+    };
+  }
+
+  router.get("/destinos", async (req, res) => {
     try {
       const clienteId = cliente(req);
-      const plano = typeof deps.getPlanoUsuario === "function"
-        ? deps.getPlanoUsuario(req)
-        : deps.plano || {};
-      const destinos = listarDestinosManuaisV2(clienteId, {
-        destinosPorCliente: deps.destinosPorCliente || {},
-        configsPorCliente: deps.configsPorCliente || {},
-        sessoes: deps.sessoes || {},
-        statusSessao: deps.statusSessao || {},
-        plano
-      });
+      const destinos = await listarDestinosManuaisV2Async(clienteId, depsDestinos(req, clienteId));
 
       return res.json({
         ok: true,
@@ -307,13 +320,7 @@ function criarRotasManualV2(deps = {}) {
       const plano = typeof deps.getPlanoUsuario === "function"
         ? deps.getPlanoUsuario(req)
         : deps.plano || {};
-      const destinosSanitizados = listarDestinosManuaisV2(clienteId, {
-        destinosPorCliente: deps.destinosPorCliente || {},
-        configsPorCliente: deps.configsPorCliente || {},
-        sessoes: deps.sessoes || {},
-        statusSessao: deps.statusSessao || {},
-        plano
-      });
+      const destinosSanitizados = await listarDestinosManuaisV2Async(clienteId, depsDestinos(req, clienteId));
       const destinosEscolhidos = destinosSanitizados.filter((destino) =>
         destinosIds.includes(destino.id)
       );
@@ -339,6 +346,11 @@ function criarRotasManualV2(deps = {}) {
         montarMensagemOferta: deps.montarMensagemOferta,
         enviarWhatsApp: deps.enviarWhatsApp,
         enviarTelegram: deps.enviarTelegram,
+        listarConexoesDiscord: deps.listarConexoesDiscord,
+        listarCanaisDiscord: deps.listarCanaisDiscord,
+        enviarDiscord: deps.enviarDiscord,
+        discordSenderDisponivel: deps.discordSenderDisponivel,
+        env: deps.env || process.env,
         corrigirImagemUrl: deps.corrigirImagemUrl,
         httpClient: deps.httpClient,
         now: deps.now
@@ -405,17 +417,8 @@ function criarRotasManualV2(deps = {}) {
     }
   });
 
-  function destinosSelecionadosAgendamento(req, clienteId, destinosIds) {
-    const plano = typeof deps.getPlanoUsuario === "function"
-      ? deps.getPlanoUsuario(req)
-      : deps.plano || {};
-    const destinosSanitizados = listarDestinosManuaisV2(clienteId, {
-      destinosPorCliente: deps.destinosPorCliente || {},
-      configsPorCliente: deps.configsPorCliente || {},
-      sessoes: deps.sessoes || {},
-      statusSessao: deps.statusSessao || {},
-      plano
-    });
+  async function destinosSelecionadosAgendamento(req, clienteId, destinosIds) {
+    const destinosSanitizados = await listarDestinosManuaisV2Async(clienteId, depsDestinos(req, clienteId));
     const mapa = new Map(destinosSanitizados.map((destino) => [destino.id, destino]));
     const selecionados = destinosIds.map((id) => mapa.get(id)).filter(Boolean);
     const todosUtilizaveis = selecionados.length === destinosIds.length &&
@@ -431,7 +434,7 @@ function criarRotasManualV2(deps = {}) {
     return selecionados;
   }
 
-  function dadosAgendamento(req, clienteId) {
+  async function dadosAgendamento(req, clienteId) {
     const destinosIds = listaTexto(req.body?.destinosIds);
     if (!destinosIds.length) {
       const erro = new Error("manual_v2_destinos_obrigatorios");
@@ -453,11 +456,11 @@ function criarRotasManualV2(deps = {}) {
     return {
       ...tempo,
       destinosIds,
-      destinosAgendados: destinosSelecionadosAgendamento(req, clienteId, destinosIds)
+      destinosAgendados: await destinosSelecionadosAgendamento(req, clienteId, destinosIds)
     };
   }
 
-  router.post("/ofertas/:id/agendar", (req, res) => {
+  router.post("/ofertas/:id/agendar", async (req, res) => {
     try {
       const clienteId = cliente(req);
       const ofertaAtual = storage.buscarOfertaManualV2(clienteId, req.params.id, deps.storageOptions || {});
@@ -470,7 +473,7 @@ function criarRotasManualV2(deps = {}) {
       }
 
       bloquearAgendamentoPorStatus(ofertaAtual);
-      const dados = dadosAgendamento(req, clienteId);
+      const dados = await dadosAgendamento(req, clienteId);
       const oferta = storage.marcarOfertaManualV2Agendada(clienteId, req.params.id, dados, deps.storageOptions || {});
 
       return res.status(201).json({
@@ -482,7 +485,7 @@ function criarRotasManualV2(deps = {}) {
     }
   });
 
-  router.put("/ofertas/:id/agendamento", (req, res) => {
+  router.put("/ofertas/:id/agendamento", async (req, res) => {
     try {
       const clienteId = cliente(req);
       const ofertaAtual = storage.buscarOfertaManualV2(clienteId, req.params.id, deps.storageOptions || {});
@@ -495,7 +498,7 @@ function criarRotasManualV2(deps = {}) {
       }
 
       bloquearAgendamentoPorStatus(ofertaAtual);
-      const dados = dadosAgendamento(req, clienteId);
+      const dados = await dadosAgendamento(req, clienteId);
       const oferta = storage.reprogramarOfertaManualV2Agendada(clienteId, req.params.id, dados, deps.storageOptions || {});
 
       return res.json({

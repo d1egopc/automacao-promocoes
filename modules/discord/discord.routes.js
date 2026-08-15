@@ -20,6 +20,7 @@ const {
 } = require("./discord-sender");
 
 const MENSAGEM_TESTE_DISCORD = "✅ Optimus Promo conectado ao Discord com sucesso.";
+const DISCORD_CALLBACK_SUCESSO_URL = "https://www.optimuspromo.com.br/conexoes?discord=conectado";
 
 function erroMensagem(erro, fallback = "Erro Discord") {
   return erro?.codigo || erro?.message || fallback;
@@ -57,7 +58,7 @@ function criarRotasDiscord(deps = {}) {
 
   router.get("/callback", async (req, res) => {
     try {
-      const conexao = await processarCallbackDiscord({
+      await processarCallbackDiscord({
         query: req.query || {},
         env,
         jwt,
@@ -67,8 +68,7 @@ function criarRotasDiscord(deps = {}) {
         salvarConexaoDiscord: (clienteId, dados) => salvarConexaoDiscord(clienteId, dados, storageDeps)
       });
 
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.status(200).send(`<!doctype html><html><body><p>Discord conectado: ${conexao.guildName || "servidor"}</p></body></html>`);
+      return res.redirect(302, DISCORD_CALLBACK_SUCESSO_URL);
     } catch (erro) {
       return res.status(400).json({ ok: false, erro: erroMensagem(erro, "Falha ao conectar Discord") });
     }
@@ -169,3 +169,4 @@ function criarRotasDiscord(deps = {}) {
 
 module.exports = criarRotasDiscord;
 module.exports.MENSAGEM_TESTE_DISCORD = MENSAGEM_TESTE_DISCORD;
+module.exports.DISCORD_CALLBACK_SUCESSO_URL = DISCORD_CALLBACK_SUCESSO_URL;

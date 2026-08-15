@@ -41,6 +41,17 @@ const destinosPorCliente = {
       ativo: true,
       conexaoId: "sessao_off",
       gruposWhatsapp: ["120363-off@g.us"]
+    },
+    {
+      id: "dc_ok",
+      nome: "Discord Ofertas",
+      tipo: "discord",
+      ativo: true,
+      conexaoId: "discord_a",
+      channelId: "canal_discord",
+      botToken: "BOT_DISCORD_NAO_SAIR",
+      token: "TOKEN_DISCORD_NAO_SAIR",
+      secret: "SECRET_DISCORD_NAO_SAIR"
     }
   ],
   cliente_b: [
@@ -66,6 +77,28 @@ const configsPorCliente = {
       }]
     }
   }
+};
+
+const discordConexoes = [
+  {
+    id: "discord_a",
+    tipo: "discord",
+    guildId: "guild_a",
+    guildName: "Servidor A",
+    ativo: true,
+    botToken: "BOT_DISCORD_NAO_SAIR"
+  }
+];
+
+const discordCanaisPorConexao = {
+  discord_a: [
+    {
+      id: "canal_discord",
+      nome: "ofertas",
+      tipo: "texto",
+      utilizavel: true
+    }
+  ]
 };
 
 function criarOferta(clienteId, id, extra = {}) {
@@ -100,10 +133,14 @@ function criarApp(onDispatcherCall) {
       sessao_b: "aberto",
       sessao_off: "closed"
     },
+    discordConexoes,
+    discordCanaisPorConexao,
+    enviarDiscord: async () => ({ ok: true }),
     getPlanoUsuario: () => ({
       recursos: {
         whatsapp: true,
-        telegram: true
+        telegram: true,
+        discord: true
       }
     }),
     enviarOfertaManualV2: async () => {
@@ -142,6 +179,11 @@ function assertSemSegredos(valor) {
     "TOKEN_FRONT",
     "BOT_FRONT",
     "CHAT_FRONT",
+    "BOT_DISCORD_NAO_SAIR",
+    "TOKEN_DISCORD_NAO_SAIR",
+    "SECRET_DISCORD_NAO_SAIR",
+    "guild_a",
+    "canal_discord",
     "SESSAO_FRONT",
     "ALVO_FRONT",
     "SEGREDO",
@@ -200,6 +242,29 @@ function assertSemSegredos(valor) {
       assert.strictEqual(resposta.status, 201);
       assert.strictEqual(resposta.body.oferta.agendamentoTimezone, "UTC");
       assert.strictEqual(resposta.body.oferta.agendadoPara, "2026-08-16T14:30:00.000Z");
+    }
+
+    {
+      const oferta = criarOferta("cliente_a", "oferta_discord");
+      const resposta = await request(server, "POST", `/manual-v2/ofertas/${oferta.id}/agendar`, "cliente_a", {
+        destinosIds: ["dc_ok"],
+        dataHoraLocal: "2026-08-16T14:30",
+        timezone: "America/Sao_Paulo"
+      });
+
+      assert.strictEqual(resposta.status, 201);
+      assert.strictEqual(resposta.body.oferta.status, "agendada");
+      assert.deepStrictEqual(resposta.body.oferta.destinosIds, ["dc_ok"]);
+      assert.deepStrictEqual(resposta.body.oferta.destinosAgendados, [{
+        id: "dc_ok",
+        nome: "Discord Ofertas",
+        tipo: "discord",
+        ativo: true,
+        utilizavel: true,
+        motivoIndisponivel: "",
+        identificacaoVisual: "Servidor A #ofertas"
+      }]);
+      assertSemSegredos(resposta.body);
     }
 
     {

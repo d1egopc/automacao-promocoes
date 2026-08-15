@@ -11,7 +11,8 @@ const criarRotasManualV2 = require("../modules/manual-v2/manual-offers.routes");
 const planoCompleto = {
   recursos: {
     whatsapp: true,
-    telegram: true
+    telegram: true,
+    discord: true
   }
 };
 
@@ -55,6 +56,32 @@ const destinosPorCliente = {
       ativo: false,
       conexaoId: "sessao_a",
       gruposWhatsapp: ["120363@g.us"]
+    },
+    {
+      id: "dc_ok",
+      nome: "Discord Ofertas",
+      tipo: "discord",
+      ativo: true,
+      conexaoId: "discord_a",
+      channelId: "canal_ok",
+      guildId: "guild_nao_sair",
+      token: "DISCORD_TOKEN_NAO_SAIR"
+    },
+    {
+      id: "dc_off",
+      nome: "Discord Desconectado",
+      tipo: "discord",
+      ativo: true,
+      conexaoId: "discord_off",
+      channelId: "canal_ok"
+    },
+    {
+      id: "dc_sem_send",
+      nome: "Discord Sem Permissao",
+      tipo: "discord",
+      ativo: true,
+      conexaoId: "discord_a",
+      channelId: "canal_sem_send"
     }
   ],
   cliente_b: [
@@ -115,9 +142,45 @@ const statusSessao = {
   sessao_b: "aberto"
 };
 
+const discordConexoes = [
+  {
+    id: "discord_a",
+    tipo: "discord",
+    guildId: "guild_a",
+    guildName: "Servidor A",
+    ativo: true,
+    botToken: "BOT_DISCORD_NAO_SAIR"
+  },
+  {
+    id: "discord_off",
+    tipo: "discord",
+    guildId: "guild_off",
+    guildName: "Servidor Off",
+    ativo: false
+  }
+];
+
+const discordCanaisPorConexao = {
+  discord_a: [
+    {
+      id: "canal_ok",
+      nome: "ofertas",
+      tipo: "texto",
+      utilizavel: true
+    },
+    {
+      id: "canal_sem_send",
+      nome: "sem-envio",
+      tipo: "texto",
+      utilizavel: false,
+      motivoIndisponivel: "Bot sem permissao para enviar mensagens"
+    }
+  ]
+};
+
 function assertSemSegredos(destinos) {
   const texto = JSON.stringify(destinos);
-  for (const termo of ["SEGREDO", "botToken", "token", "secret", "cookies", "segredoInterno", "chat_ok", "chat_sem_config", "chat_b"]) {
+  for (const termo of ["SEGREDO", "botToken", "token", "secret", "cookies", "segredoInterno", "chat_ok", "chat_sem_config", "chat_b", "DISCORD_TOKEN_NAO_SAIR", "BOT_DISCORD_NAO_SAIR", "guild_a", "guild_nao_sair", "canal_ok", "canal_sem_send"]) {
     assert.ok(!texto.includes(termo), `retorno sanitizado nao pode conter ${termo}`);
   }
 }
@@ -130,10 +193,13 @@ function assertSemSegredos(destinos) {
     configsPorCliente,
     sessoes,
     statusSessao,
-    plano: planoCompleto
+    plano: planoCompleto,
+    discordConexoes,
+    discordCanaisPorConexao,
+    enviarDiscord: async () => ({ ok: true })
   });
 
-  assert.strictEqual(destinos.length, 5);
+  assert.strictEqual(destinos.length, 8);
   assertSemSegredos(destinos);
 
   const waOk = destinos.find((item) => item.id === "wa_ok");
@@ -163,6 +229,25 @@ function assertSemSegredos(destinos) {
   assert.strictEqual(inativo.utilizavel, false);
   assert.strictEqual(inativo.motivoIndisponivel, "Destino inativo");
 
+  const dcOk = destinos.find((item) => item.id === "dc_ok");
+  assert.deepStrictEqual(dcOk, {
+    id: "dc_ok",
+    nome: "Discord Ofertas",
+    tipo: "discord",
+    ativo: true,
+    utilizavel: true,
+    motivoIndisponivel: "",
+    identificacaoVisual: "Servidor A #ofertas"
+  });
+
+  const dcOff = destinos.find((item) => item.id === "dc_off");
+  assert.strictEqual(dcOff.utilizavel, false);
+  assert.strictEqual(dcOff.motivoIndisponivel, "Servidor Discord desconectado");
+
+  const dcSemSend = destinos.find((item) => item.id === "dc_sem_send");
+  assert.strictEqual(dcSemSend.utilizavel, false);
+  assert.strictEqual(dcSemSend.motivoIndisponivel, "Bot sem permissao para enviar mensagens");
+
   assert.strictEqual(JSON.stringify(destinosPorCliente), antesDestinos, "Manual V2 nao pode mutar destinos");
   assert.strictEqual(JSON.stringify(configsPorCliente), antesConfigs, "Manual V2 nao pode mutar configs");
 }
@@ -176,15 +261,21 @@ function assertSemSegredos(destinos) {
     plano: {
       recursos: {
         whatsapp: false,
-        telegram: false
+        telegram: false,
+        discord: false
       }
-    }
+    },
+    discordConexoes,
+    discordCanaisPorConexao,
+    enviarDiscord: async () => ({ ok: true })
   });
 
   assert.strictEqual(destinos.find((item) => item.id === "wa_ok").utilizavel, false);
   assert.strictEqual(destinos.find((item) => item.id === "wa_ok").motivoIndisponivel, "Canal indisponivel no plano atual");
   assert.strictEqual(destinos.find((item) => item.id === "tg_ok").utilizavel, false);
   assert.strictEqual(destinos.find((item) => item.id === "tg_ok").motivoIndisponivel, "Canal indisponivel no plano atual");
+  assert.strictEqual(destinos.find((item) => item.id === "dc_ok").utilizavel, false);
+  assert.strictEqual(destinos.find((item) => item.id === "dc_ok").motivoIndisponivel, "Canal indisponivel no plano atual");
 }
 
 {
@@ -193,14 +284,20 @@ function assertSemSegredos(destinos) {
     configsPorCliente,
     sessoes,
     statusSessao,
-    plano: planoCompleto
+    plano: planoCompleto,
+    discordConexoes,
+    discordCanaisPorConexao,
+    enviarDiscord: async () => ({ ok: true })
   });
   const destinosB = listarDestinosManuaisV2("cliente_b", {
     destinosPorCliente,
     configsPorCliente,
     sessoes,
     statusSessao,
-    plano: planoCompleto
+    plano: planoCompleto,
+    discordConexoes,
+    discordCanaisPorConexao,
+    enviarDiscord: async () => ({ ok: true })
   });
 
   assert.ok(destinosA.every((item) => item.id !== "wa_b"));
@@ -217,9 +314,12 @@ function criarApp() {
     configsPorCliente,
     sessoes,
     statusSessao,
+    discordConexoes,
+    discordCanaisPorConexao,
+    enviarDiscord: async () => ({ ok: true }),
     getPlanoUsuario: (req) => {
       if (req.header("x-plano") === "sem-canais") {
-        return { recursos: { whatsapp: false, telegram: false } };
+        return { recursos: { whatsapp: false, telegram: false, discord: false } };
       }
       return planoCompleto;
     }
@@ -248,7 +348,7 @@ async function request(server, clienteId = "cliente_a", plano = "") {
     const respostaA = await request(server, "cliente_a");
     assert.strictEqual(respostaA.status, 200);
     assert.strictEqual(respostaA.body.ok, true);
-    assert.strictEqual(respostaA.body.destinos.length, 5);
+    assert.strictEqual(respostaA.body.destinos.length, 8);
     assertSemSegredos(respostaA.body.destinos);
 
     const respostaB = await request(server, "cliente_b");
@@ -257,6 +357,7 @@ async function request(server, clienteId = "cliente_a", plano = "") {
     const semCanais = await request(server, "cliente_a", "sem-canais");
     assert.strictEqual(semCanais.body.destinos.find((item) => item.id === "wa_ok").utilizavel, false);
     assert.strictEqual(semCanais.body.destinos.find((item) => item.id === "tg_ok").utilizavel, false);
+    assert.strictEqual(semCanais.body.destinos.find((item) => item.id === "dc_ok").utilizavel, false);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

@@ -179,8 +179,12 @@ const {
   listarConexoesDiscord
 } = require("./modules/discord/discord-connections.storage");
 const {
+  listarCanaisDiscord,
   validarDestinoDiscord
 } = require("./modules/discord/discord-channels");
+const {
+  enviarDiscord
+} = require("./modules/discord/discord-sender");
 const {
   iniciarManualV2Scheduler
 } = require("./modules/manual-v2/manual-scheduler.runner");
@@ -17773,6 +17777,10 @@ function iniciarManualV2SchedulerOperacional() {
     montarMensagemOferta,
     enviarWhatsApp: enviarWhatsAppCampanha,
     enviarTelegram: enviarTelegramCampanha,
+    listarConexoesDiscord,
+    listarCanaisDiscord,
+    enviarDiscord,
+    env: process.env,
     corrigirImagemUrl,
     httpClient: axios,
     enviarOfertaManualV2: enviarOfertaManualV2Dispatcher,
@@ -17815,6 +17823,10 @@ app.use("/manual-v2", criarRotasManualV2({
   montarMensagemOferta,
   enviarWhatsApp: enviarWhatsAppCampanha,
   enviarTelegram: enviarTelegramCampanha,
+  listarConexoesDiscord,
+  listarCanaisDiscord,
+  enviarDiscord,
+  env: process.env,
   corrigirImagemUrl,
   httpClient: axios,
   importOptions: {
