@@ -5,13 +5,68 @@ const {
 } = require("../../utils/storage");
 const {
   normalizarOfertaManualV2,
-  STATUS_INICIAL_MANUAL_V2
+  STATUS_INICIAL_MANUAL_V2,
+  normalizarStatusManualV2
 } = require("./manual-offers.contract");
 
 const ARQUIVO_OFERTAS_MANUAL_V2 = "manual_ofertas_v2.json";
 
 function agoraIso() {
   return new Date().toISOString();
+}
+
+function texto(valor = "") {
+  return String(valor ?? "").trim();
+}
+
+function inteiro(valor = 0) {
+  const numero = Number(valor);
+  return Number.isFinite(numero) && numero > 0 ? Math.floor(numero) : 0;
+}
+
+function lista(valor) {
+  return Array.isArray(valor) ? valor : [];
+}
+
+function sanitizarDestinoEscolhido(destino = {}) {
+  return {
+    id: texto(destino.id || destino.destinoId),
+    nome: texto(destino.nome),
+    tipo: texto(destino.tipo).toLowerCase() === "telegram" ? "telegram" : "whatsapp",
+    ativo: destino.ativo !== false,
+    utilizavel: destino.utilizavel === true,
+    motivoIndisponivel: texto(destino.motivoIndisponivel),
+    identificacaoVisual: texto(destino.identificacaoVisual)
+  };
+}
+
+function sanitizarResultadoEnvio(resultado = {}) {
+  const status = texto(resultado.status).toLowerCase() === "enviado" ? "enviado" : "erro";
+  return {
+    destinoId: texto(resultado.destinoId),
+    nome: texto(resultado.nome),
+    tipo: texto(resultado.tipo).toLowerCase() === "telegram" ? "telegram" : "whatsapp",
+    status,
+    enviadoEm: texto(resultado.enviadoEm),
+    erro: status === "erro" ? texto(resultado.erro).slice(0, 500) : ""
+  };
+}
+
+function sanitizarEnvioManual(envioManual = {}) {
+  return {
+    solicitadoEm: texto(envioManual.solicitadoEm),
+    concluidoEm: texto(envioManual.concluidoEm),
+    destinosEscolhidos: lista(envioManual.destinosEscolhidos)
+      .map(sanitizarDestinoEscolhido)
+      .filter((destino) => destino.id),
+    resultados: lista(envioManual.resultados)
+      .map(sanitizarResultadoEnvio)
+      .filter((resultado) => resultado.destinoId || resultado.erro),
+    enviados: inteiro(envioManual.enviados),
+    erros: inteiro(envioManual.erros),
+    creditosDebitados: inteiro(envioManual.creditosDebitados),
+    erroResumo: texto(envioManual.erroResumo).slice(0, 1000)
+  };
 }
 
 function resolverDepsStorage(deps = {}) {
@@ -138,11 +193,50 @@ function excluirOfertaManualV2(clienteId = "admin", ofertaId = "", deps = {}) {
   return true;
 }
 
+function atualizarMetadadosEnvioManualV2(clienteId = "admin", ofertaId = "", metadados = {}, deps = {}) {
+  const storage = resolverDepsStorage(deps);
+  const id = storage.normalizarClienteId(clienteId || "admin");
+  const alvoId = String(ofertaId || "").trim();
+  if (!alvoId) return null;
+
+  const listaOfertas = lerListaCliente(id, deps);
+  const index = listaOfertas.findIndex((oferta) => String(oferta.id || "") === alvoId);
+  if (index < 0) return null;
+
+  const existente = listaOfertas[index];
+  const agora = storage.now();
+  const proximaOferta = {
+    ...existente,
+    clienteId: id,
+    status: normalizarStatusManualV2(metadados.status || existente.status),
+    atualizadoEm: agora
+  };
+
+  if (Object.prototype.hasOwnProperty.call(metadados, "enviadoEm")) {
+    const enviadoEm = texto(metadados.enviadoEm);
+    if (enviadoEm) {
+      proximaOferta.enviadoEm = enviadoEm;
+    } else {
+      delete proximaOferta.enviadoEm;
+    }
+  }
+
+  if (metadados.envioManual && typeof metadados.envioManual === "object") {
+    proximaOferta.envioManual = sanitizarEnvioManual(metadados.envioManual);
+  }
+
+  const proximaLista = [...listaOfertas];
+  proximaLista[index] = proximaOferta;
+  salvarListaCliente(id, proximaLista, deps);
+  return proximaOferta;
+}
+
 module.exports = {
   ARQUIVO_OFERTAS_MANUAL_V2,
   listarOfertasManuaisV2,
   buscarOfertaManualV2,
   criarOfertaManualV2,
   atualizarOfertaManualV2,
-  excluirOfertaManualV2
+  excluirOfertaManualV2,
+  atualizarMetadadosEnvioManualV2
 };

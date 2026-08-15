@@ -3,6 +3,12 @@ const {
   importarUrlManualV2
 } = require("./manual-import.adapters");
 const storagePadrao = require("./manual-offers.storage");
+const {
+  listarDestinosManuaisV2
+} = require("./manual-destinations");
+const {
+  enviarOfertaManualV2
+} = require("./manual-dispatcher");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -20,20 +26,66 @@ function payloadErro(e, fallback = "manual_v2_erro") {
   };
 }
 
+function agoraIso(deps = {}) {
+  return typeof deps.now === "function" ? deps.now() : new Date().toISOString();
+}
+
+function listaTexto(valor) {
+  if (!Array.isArray(valor)) return [];
+  return valor
+    .map((item) => texto(item))
+    .filter(Boolean);
+}
+
+function erroResumo(resultados = []) {
+  return resultados
+    .filter((item) => item?.status === "erro" && texto(item.erro))
+    .map((item) => `${texto(item.nome || item.destinoId)}: ${texto(item.erro)}`)
+    .filter(Boolean)
+    .join("; ")
+    .slice(0, 1000);
+}
+
 function criarRotasManualV2(deps = {}) {
   const router = express.Router();
   const getClienteId = typeof deps.getClienteId === "function" ? deps.getClienteId : () => "admin";
   const importarManual = typeof deps.importarUrlManualV2 === "function" ? deps.importarUrlManualV2 : importarUrlManualV2;
+  const dispatcherManual = typeof deps.enviarOfertaManualV2 === "function" ? deps.enviarOfertaManualV2 : enviarOfertaManualV2;
   const storage = {
     listarOfertasManuaisV2: deps.listarOfertasManuaisV2 || storagePadrao.listarOfertasManuaisV2,
+    buscarOfertaManualV2: deps.buscarOfertaManualV2 || storagePadrao.buscarOfertaManualV2,
     criarOfertaManualV2: deps.criarOfertaManualV2 || storagePadrao.criarOfertaManualV2,
     atualizarOfertaManualV2: deps.atualizarOfertaManualV2 || storagePadrao.atualizarOfertaManualV2,
-    excluirOfertaManualV2: deps.excluirOfertaManualV2 || storagePadrao.excluirOfertaManualV2
+    excluirOfertaManualV2: deps.excluirOfertaManualV2 || storagePadrao.excluirOfertaManualV2,
+    atualizarMetadadosEnvioManualV2: deps.atualizarMetadadosEnvioManualV2 || storagePadrao.atualizarMetadadosEnvioManualV2
   };
 
   function cliente(req) {
     return getClienteId(req) || "admin";
   }
+
+  router.get("/destinos", (req, res) => {
+    try {
+      const clienteId = cliente(req);
+      const plano = typeof deps.getPlanoUsuario === "function"
+        ? deps.getPlanoUsuario(req)
+        : deps.plano || {};
+      const destinos = listarDestinosManuaisV2(clienteId, {
+        destinosPorCliente: deps.destinosPorCliente || {},
+        configsPorCliente: deps.configsPorCliente || {},
+        sessoes: deps.sessoes || {},
+        statusSessao: deps.statusSessao || {},
+        plano
+      });
+
+      return res.json({
+        ok: true,
+        destinos
+      });
+    } catch (e) {
+      return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_destinos_falhou"));
+    }
+  });
 
   router.post("/importar", async (req, res) => {
     try {
@@ -111,6 +163,140 @@ function criarRotasManualV2(deps = {}) {
       });
     } catch (e) {
       return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_atualizacao_falhou"));
+    }
+  });
+
+  router.post("/ofertas/:id/enviar-agora", async (req, res) => {
+    const clienteId = cliente(req);
+    const ofertaId = texto(req.params.id);
+    const destinosIds = listaTexto(req.body?.destinosIds);
+    const storageOptions = deps.storageOptions || {};
+
+    if (!destinosIds.length) {
+      return res.status(400).json({
+        ok: false,
+        erro: "manual_v2_destinos_obrigatorios",
+        motivo: "manual_v2_destinos_obrigatorios"
+      });
+    }
+
+    try {
+      const ofertaAtual = storage.buscarOfertaManualV2(clienteId, ofertaId, storageOptions);
+      if (!ofertaAtual) {
+        return res.status(404).json({
+          ok: false,
+          erro: "oferta_manual_v2_nao_encontrada",
+          motivo: "oferta_manual_v2_nao_encontrada"
+        });
+      }
+
+      if (ofertaAtual.status === "enviando") {
+        return res.status(409).json({
+          ok: false,
+          erro: "oferta_manual_v2_ja_enviando",
+          motivo: "oferta_manual_v2_ja_enviando"
+        });
+      }
+
+      const solicitadoEm = agoraIso(deps);
+      const plano = typeof deps.getPlanoUsuario === "function"
+        ? deps.getPlanoUsuario(req)
+        : deps.plano || {};
+      const destinosSanitizados = listarDestinosManuaisV2(clienteId, {
+        destinosPorCliente: deps.destinosPorCliente || {},
+        configsPorCliente: deps.configsPorCliente || {},
+        sessoes: deps.sessoes || {},
+        statusSessao: deps.statusSessao || {},
+        plano
+      });
+      const destinosEscolhidos = destinosSanitizados.filter((destino) =>
+        destinosIds.includes(destino.id)
+      );
+
+      storage.atualizarMetadadosEnvioManualV2(clienteId, ofertaId, {
+        status: "enviando"
+      }, storageOptions);
+
+      const resultado = await dispatcherManual({
+        clienteId,
+        ofertaId,
+        destinosIds
+      }, {
+        buscarOfertaManualV2: storage.buscarOfertaManualV2,
+        storageOptions,
+        destinosPorCliente: deps.destinosPorCliente || {},
+        configsPorCliente: deps.configsPorCliente || {},
+        sessoes: deps.sessoes || {},
+        statusSessao: deps.statusSessao || {},
+        plano,
+        usuarioTemCreditos: deps.usuarioTemCreditos,
+        debitarCreditos: deps.debitarCreditos,
+        montarMensagemOferta: deps.montarMensagemOferta,
+        enviarWhatsApp: deps.enviarWhatsApp,
+        enviarTelegram: deps.enviarTelegram,
+        corrigirImagemUrl: deps.corrigirImagemUrl,
+        httpClient: deps.httpClient,
+        now: deps.now
+      });
+
+      const concluidoEm = agoraIso(deps);
+      const algumSucesso = Number(resultado?.enviados || 0) > 0;
+      const resumoErro = erroResumo(resultado?.resultados || []);
+      const envioManual = {
+        solicitadoEm,
+        concluidoEm,
+        destinosEscolhidos,
+        resultados: resultado?.resultados || [],
+        enviados: Number(resultado?.enviados || 0),
+        erros: Number(resultado?.erros || 0),
+        creditosDebitados: Number(resultado?.creditosDebitados || 0),
+        erroResumo: resumoErro
+      };
+      const ofertaFinal = storage.atualizarMetadadosEnvioManualV2(clienteId, ofertaId, {
+        status: algumSucesso ? "enviada" : "erro",
+        enviadoEm: algumSucesso ? concluidoEm : "",
+        envioManual
+      }, storageOptions);
+      const envioPersistido = ofertaFinal?.envioManual || envioManual;
+
+      return res.status(algumSucesso ? 200 : 409).json({
+        ok: algumSucesso,
+        oferta: ofertaFinal,
+        envio: {
+          ok: algumSucesso,
+          ofertaId: resultado?.ofertaId || ofertaId,
+          enviados: envioPersistido.enviados,
+          erros: envioPersistido.erros,
+          creditosDebitados: envioPersistido.creditosDebitados,
+          resultados: envioPersistido.resultados,
+          erroResumo: envioPersistido.erroResumo
+        }
+      });
+    } catch (e) {
+      const concluidoEm = agoraIso(deps);
+      const envioManual = {
+        solicitadoEm: concluidoEm,
+        concluidoEm,
+        destinosEscolhidos: [],
+        resultados: [{
+          destinoId: "",
+          nome: "",
+          tipo: "",
+          status: "erro",
+          enviadoEm: "",
+          erro: e.message || "manual_v2_envio_falhou"
+        }],
+        enviados: 0,
+        erros: 1,
+        creditosDebitados: 0,
+        erroResumo: e.message || "manual_v2_envio_falhou"
+      };
+      storage.atualizarMetadadosEnvioManualV2(clienteId, ofertaId, {
+        status: "erro",
+        enviadoEm: "",
+        envioManual
+      }, storageOptions);
+      return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_envio_falhou"));
     }
   });
 

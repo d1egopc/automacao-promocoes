@@ -139,7 +139,9 @@ const {
 } = require("./marketplaces/inteligencia/categorias-destinos");
 
 const {
-  enviarCampanhaManual
+  enviarCampanhaManual,
+  enviarWhatsApp: enviarWhatsAppCampanha,
+  enviarTelegram: enviarTelegramCampanha
 } = require("./campanhas/enviarCampanha");
 
 const {
@@ -17670,6 +17672,18 @@ function registrarAlertaIntegracaoManualV2(...args) {
 
 app.use("/manual-v2", criarRotasManualV2({
   getClienteId,
+  destinosPorCliente,
+  configsPorCliente,
+  sessoes,
+  statusSessao,
+  getPlanoUsuario,
+  usuarioTemCreditos,
+  debitarCreditos,
+  montarMensagemOferta,
+  enviarWhatsApp: enviarWhatsAppCampanha,
+  enviarTelegram: enviarTelegramCampanha,
+  corrigirImagemUrl,
+  httpClient: axios,
   importOptions: {
     getIntegracaoCliente,
     importarAmazon: importarAmazonManualV2ComWorkspace,
