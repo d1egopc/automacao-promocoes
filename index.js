@@ -2516,6 +2516,85 @@ function destinoEhDiscord(destino = {}) {
   return String(destino?.tipo || "").trim().toLowerCase() === "discord";
 }
 
+function recursoDestinoPlano(destino = {}) {
+  const tipo = String(destino?.tipo || destino?.canal || "").trim().toLowerCase();
+  if (tipo === "telegram" || tipo === "discord") return tipo;
+  return "whatsapp";
+}
+
+function idDestinoPlano(destino = {}) {
+  return String(destino?.id || destino?.destinoId || destino?.nome || "").trim();
+}
+
+function criarErroRecursoPlano(recurso = "") {
+  const erro = new Error(`Recurso ${recurso} indisponivel no plano`);
+  erro.statusCode = 403;
+  erro.codigo = "recurso_nao_disponivel_no_plano";
+  erro.recurso = recurso;
+  return erro;
+}
+
+function criarErroLimitePlano(recurso = "", limite = 0, atual = 0) {
+  const erro = new Error(`Seu plano permite ate ${limite} destino(s).`);
+  erro.statusCode = 403;
+  erro.codigo = "limite_do_plano_atingido";
+  erro.recurso = recurso;
+  erro.limite = limite;
+  erro.atual = atual;
+  return erro;
+}
+
+function payloadErroPlano(erro = {}, fallback = "Operacao indisponivel no plano") {
+  const payload = {
+    ok: false,
+    erro: erro.message || fallback
+  };
+  if (erro.codigo) payload.codigo = erro.codigo;
+  if (erro.recurso) payload.recurso = erro.recurso;
+  if (Number.isFinite(Number(erro.limite))) payload.limite = Number(erro.limite);
+  if (Number.isFinite(Number(erro.atual))) payload.atual = Number(erro.atual);
+  return payload;
+}
+
+function obterLimiteDestinosReq(req) {
+  if (isAdminMaster(req)) return 999;
+  const usuario = getUsuarioAtual(req);
+  const plano = getPlanoUsuario(req);
+  const limite = Number(plano?.limites?.destinos ?? usuario?.limites?.destinos ?? 3);
+  return Number.isFinite(limite) && limite >= 0 ? limite : 3;
+}
+
+function validarRecursosDestinosPlano(req, destinos = [], destinosAtuais = []) {
+  if (isAdminMaster(req)) return;
+  const idsAtuais = new Set(
+    (Array.isArray(destinosAtuais) ? destinosAtuais : [])
+      .map(idDestinoPlano)
+      .filter(Boolean)
+  );
+
+  for (const destino of destinos) {
+    const recurso = recursoDestinoPlano(destino);
+    if (!["whatsapp", "telegram", "discord"].includes(recurso)) continue;
+    if (usuarioTemRecurso(req, recurso)) continue;
+
+    const id = idDestinoPlano(destino);
+    const existe = id && idsAtuais.has(id);
+    if (!existe || destino?.ativo !== false) {
+      throw criarErroRecursoPlano(recurso);
+    }
+  }
+}
+
+function validarLimiteDestinosPlano(req, destinos = [], destinosAtuais = []) {
+  if (isAdminMaster(req)) return;
+  const limite = obterLimiteDestinosReq(req);
+  const atual = Array.isArray(destinos) ? destinos.length : 0;
+  const atualAnterior = Array.isArray(destinosAtuais) ? destinosAtuais.length : 0;
+  if (atual > limite && atual > atualAnterior) {
+    throw criarErroLimitePlano("destinos", limite, atual);
+  }
+}
+
 function textoDiscordExecutor(valor = "") {
   return String(valor ?? "").trim();
 }
@@ -2561,9 +2640,7 @@ async function normalizarDestinosContratoComDiscord(clienteId = "admin", destino
   if (!lista.some(destinoEhDiscord)) return lista;
 
   if (!usuarioTemRecurso(req, "discord")) {
-    const erro = new Error("Recurso Discord indisponivel no plano");
-    erro.statusCode = 403;
-    throw erro;
+    throw criarErroRecursoPlano("discord");
   }
 
   const conexoes = listarConexoesDiscord(clienteId);
@@ -7589,6 +7666,10 @@ app.post("/telegram", (req, res) => {
   const clienteId = exigirClienteAutenticado(req, res);
   if (!clienteId) return;
 
+  if (!usuarioTemRecurso(req, "telegram")) {
+    return res.status(403).json(payloadErroPlano(criarErroRecursoPlano("telegram")));
+  }
+
   configsPorCliente[clienteId] =
     configsPorCliente[clienteId] || {};
 
@@ -7899,8 +7980,7 @@ app.post("/destinos", async (req, res) => {
     destinos = await normalizarDestinosContratoComDiscord(clienteId, req.body, req);
   } catch (erro) {
     return res.status(erro.statusCode || 400).json({
-      ok: false,
-      erro: erro.message || "Destino Discord invalido"
+      ...payloadErroPlano(erro, "Destino Discord invalido")
     });
   }
 
@@ -7909,6 +7989,14 @@ app.post("/destinos", async (req, res) => {
       ok: false,
       erro: "Formato inválido"
     });
+  }
+
+  const destinosAtuais = normalizarDestinosContrato(destinosPorCliente?.[clienteId] || []);
+  try {
+    validarRecursosDestinosPlano(req, destinos, destinosAtuais);
+    validarLimiteDestinosPlano(req, destinos, destinosAtuais);
+  } catch (erro) {
+    return res.status(erro.statusCode || 403).json(payloadErroPlano(erro));
   }
 
   destinosPorCliente[clienteId] = destinos;
@@ -22683,6 +22771,10 @@ app.post("/sessoes", (req, res) => {
 
   const clienteId = getClienteId(req);
 
+  if (!usuarioTemRecurso(req, "whatsapp")) {
+    return res.status(403).json(payloadErroPlano(criarErroRecursoPlano("whatsapp")));
+  }
+
   const planoUsuario = getPlanoUsuario(req);
 
   const limite = isAdminMaster(req)
@@ -22695,6 +22787,10 @@ app.post("/sessoes", (req, res) => {
   if (!isAdminMaster(req) && sessoesCliente.length >= limite) {
   return res.status(403).json({
     ok: false,
+    codigo: "limite_do_plano_atingido",
+    recurso: "sessoes",
+    limite,
+    atual: sessoesCliente.length,
     erro: `Seu plano permite apenas ${limite} sessão(ões).`
   });
 }
@@ -22964,6 +23060,10 @@ app.post("/conectar", async (req, res) => {
     return res.status(401).json({ erro: "Usuário não identificado" });
   }
 
+  if (!usuarioTemRecurso(req, "whatsapp")) {
+    return res.status(403).json(payloadErroPlano(criarErroRecursoPlano("whatsapp")));
+  }
+
   config.sessoesWhatsapp = config.sessoesWhatsapp || [];
 
  const limiteSessoes = isAdminMaster(req)
@@ -22977,8 +23077,11 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
 
     return res.status(403).json({
       ok: false,
+      codigo: "limite_do_plano_atingido",
+      recurso: "sessoes",
       erro: `Seu plano permite até ${limiteSessoes} sessão(ões) WhatsApp.`,
       limite: limiteSessoes,
+      atual: sessoesCliente.length,
       usadas: sessoesCliente.length
     });
   }

@@ -26,6 +26,15 @@ function erroMensagem(erro, fallback = "Erro Discord") {
   return erro?.codigo || erro?.message || fallback;
 }
 
+function erroRecursoDiscordPlano() {
+  return {
+    ok: false,
+    codigo: "recurso_nao_disponivel_no_plano",
+    recurso: "discord",
+    erro: "Recurso Discord indisponivel no plano"
+  };
+}
+
 function criarRotasDiscord(deps = {}) {
   const router = express.Router();
   const getClienteId = deps.getClienteId || ((req) => req.clienteId || "admin");
@@ -39,7 +48,7 @@ function criarRotasDiscord(deps = {}) {
   router.get("/conectar", (req, res) => {
     const clienteId = getClienteId(req);
     if (!usuarioTemRecurso(req, "discord")) {
-      return res.status(403).json({ ok: false, erro: "Recurso Discord indisponivel no plano" });
+      return res.status(403).json(erroRecursoDiscordPlano());
     }
 
     try {
@@ -83,7 +92,7 @@ function criarRotasDiscord(deps = {}) {
   router.get("/conexoes/:id/canais", async (req, res) => {
     const clienteId = getClienteId(req);
     if (!usuarioTemRecurso(req, "discord")) {
-      return res.status(403).json({ ok: false, erro: "Recurso Discord indisponivel no plano" });
+      return res.status(403).json(erroRecursoDiscordPlano());
     }
 
     const conexaoId = req.params.id;
@@ -107,7 +116,7 @@ function criarRotasDiscord(deps = {}) {
   router.post("/conexoes/:id/testar", async (req, res) => {
     const clienteId = getClienteId(req);
     if (!usuarioTemRecurso(req, "discord")) {
-      return res.status(403).json({ ok: false, erro: "Recurso Discord indisponivel no plano" });
+      return res.status(403).json(erroRecursoDiscordPlano());
     }
 
     const conexaoId = req.params.id;
