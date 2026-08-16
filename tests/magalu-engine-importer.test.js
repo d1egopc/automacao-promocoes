@@ -506,6 +506,48 @@ async function testarDivulgadorOfertaUsaPdpComprovadaParaAfiliado() {
   assert.ok(!resultado.linkAfiliado.includes("/divulgador/oferta/"));
 }
 
+async function testarEngineUsaPoliticaRapidaNoResolver() {
+  let parserOptionsRecebidas = null;
+  const pacote = deps();
+  const resultado = await importarProdutoMagaluEngine({
+    job: { id: 1600, evento_id: 1700, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento: {
+      texto_original: "Smart TV Magalu 50\nPor R$ 1.777,00\n" + urlProduto,
+      links_extraidos: [urlProduto]
+    },
+    links: [linkRow(57, urlProduto)],
+    deps: {
+      ...pacote.deps,
+      resolverFatosMagalu: async (_entrada, opcoes = {}) => {
+        parserOptionsRecebidas = opcoes.parserOptions || {};
+        return {
+          ok: true,
+          produtoId: "abc123",
+          fonteUsada: "pdp_www",
+          tentativas: [{ fonte: "pdp_www", statusFactual: "aceita", motivo: "aceito" }],
+          fatos: {
+            urlOriginal: urlProduto,
+            urlCanonica: urlProduto,
+            produtoId: "abc123",
+            codigo: "abc123",
+            titulo: "Smart TV Magalu 50",
+            precoAtual: "R$ 1.999,90",
+            imagem: "https://a-static.mlcdn.com.br/tv.jpg",
+            categoria: "TV e Video",
+            avisos: []
+          },
+          avisos: []
+        };
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(parserOptionsRecebidas.timeoutMs, 2500, "Engine deve usar timeout factual curto");
+  assert.strictEqual(parserOptionsRecebidas.retries, 0, "Engine nao deve herdar retries longos do Manual");
+  assert.strictEqual(parserOptionsRecebidas.retryDelayMs, 0);
+}
+
 async function testarLogRetornoNaoAnunciaOkAntesDosGuards() {
   const logs = [];
   const originalLog = console.log;
@@ -664,6 +706,7 @@ function testarRegistriesPipelineUnico() {
   await testarOfertaUniversalValida();
   await testarDivulgadorOfertaNaoFalhaPorLinkProduto();
   await testarDivulgadorOfertaUsaPdpComprovadaParaAfiliado();
+  await testarEngineUsaPoliticaRapidaNoResolver();
   await testarLogRetornoNaoAnunciaOkAntesDosGuards();
   await testarImagemRadarPreservadaQuandoResolverSemImagem();
   testarClassificadorDeLinksMagalu();

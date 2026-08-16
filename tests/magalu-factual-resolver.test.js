@@ -7,6 +7,8 @@ const path = require("path");
 const {
   resolverFatosMagalu,
   construirFontesMagalu,
+  limparCacheFactualMagalu,
+  resumoCacheFactualMagalu,
   sellerIdPorUrl
 } = require("../modules/marketplaces/magalu/magalu-factual-resolver");
 
@@ -300,6 +302,118 @@ function consultarPorMapa(mapa = {}, chamadas = []) {
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(resultado.fatos.imagem, "", "resolver nao constroi imagem por padrao de URL");
   assert.ok(!JSON.stringify(resultado).includes("html"));
+}
+
+{
+  limparCacheFactualMagalu();
+  let chamadasFetch = 0;
+  const primeiro = await resolverFatosMagalu({ urlOriginal: urlProdutoAd, promoterId: "d1egopc" }, {
+    parserOptions: {
+      fetchFn: async () => {
+        chamadasFetch += 1;
+        return {
+          ok: true,
+          status: 200,
+          url: urlProdutoAd,
+          text: async () => `
+            <link rel="canonical" href="${urlProdutoAd}">
+            <meta property="og:title" content="Produto Cache Magalu">
+            <meta property="product:price:amount" content="101.10">
+          `
+        };
+      },
+      retries: 0,
+      retryDelayMs: 0
+    },
+    now: () => "2026-08-16T10:00:00.000Z"
+  });
+  assert.strictEqual(primeiro.ok, true);
+  assert.strictEqual(chamadasFetch, 1);
+
+  const segundo = await resolverFatosMagalu({ urlOriginal: urlProdutoAd, promoterId: "d1egopc" }, {
+    parserOptions: {
+      fetchFn: async () => {
+        chamadasFetch += 1;
+        throw new Error("falha_transitoria_para_cache");
+      },
+      retries: 0,
+      retryDelayMs: 0
+    },
+    now: () => "2026-08-16T10:05:00.000Z"
+  });
+  assert.strictEqual(segundo.ok, true);
+  assert.strictEqual(segundo.cache.hit, true);
+  assert.strictEqual(segundo.cache.modo, "fallback_transitorio");
+  assert.strictEqual(segundo.fatos.titulo, "Produto Cache Magalu");
+  assert.ok(chamadasFetch > 1, "cache curto deve ser usado apenas depois de tentativa viva com falha transitoria comprovada");
+
+  const bloqueado403 = await resolverFatosMagalu({ urlOriginal: urlProdutoAd, promoterId: "d1egopc" }, {
+    parserOptions: {
+      fetchFn: async () => ({
+        ok: false,
+        status: 403,
+        url: urlProdutoAd,
+        text: async () => `
+          <link rel="canonical" href="${urlProdutoAd}">
+          <meta property="og:title" content="Produto Bloqueado">
+          <meta property="product:price:amount" content="101.10">
+        `
+      }),
+      retries: 0,
+      retryDelayMs: 0
+    },
+    now: () => "2026-08-16T10:06:00.000Z"
+  });
+  assert.strictEqual(bloqueado403.ok, false, "403 vivo nao pode virar sucesso por cache antigo");
+  assert.ok(bloqueado403.avisos.includes("magalu_http_403"));
+  assert.ok(!JSON.stringify(segundo).includes("d1egopc"), "cache nao deve expor promoterId");
+  limparCacheFactualMagalu();
+}
+
+{
+  limparCacheFactualMagalu();
+  for (let i = 0; i < 3; i += 1) {
+    const url = `https://www.magazineluiza.com.br/produto-cache-${i}/p/24046600${i}/xx/test/`;
+    const resultado = await resolverFatosMagalu({ urlOriginal: url, promoterId: "d1egopc" }, {
+      parserOptions: {
+        fetchFn: async () => ({
+          ok: true,
+          status: 200,
+          url,
+          text: async () => `<link rel="canonical" href="${url}"><meta property="og:title" content="Cache ${i}"><meta property="product:price:amount" content="10.10">`
+        }),
+        retries: 0,
+        retryDelayMs: 0
+      },
+      cacheMaxEntradas: 2,
+      now: () => "2026-08-16T11:00:00.000Z"
+    });
+    assert.strictEqual(resultado.ok, true);
+  }
+  assert.strictEqual(
+    resumoCacheFactualMagalu({ cacheMaxEntradas: 2, now: () => "2026-08-16T11:00:00.000Z" }).entradas,
+    2,
+    "cache deve respeitar limite maximo"
+  );
+
+  limparCacheFactualMagalu();
+  const urlExpirado = "https://www.magazineluiza.com.br/produto-cache-expira/p/240466099/xx/test/";
+  await resolverFatosMagalu({ urlOriginal: urlExpirado, promoterId: "d1egopc" }, {
+    parserOptions: {
+      fetchFn: async () => ({
+        ok: true,
+        status: 200,
+        url: urlExpirado,
+        text: async () => `<link rel="canonical" href="${urlExpirado}"><meta property="og:title" content="Cache Expira"><meta property="product:price:amount" content="10.10">`
+      }),
+      retries: 0,
+      retryDelayMs: 0
+    },
+    cacheTtlMs: 1,
+    now: () => "2026-08-16T11:10:00.000Z"
+  });
+  assert.strictEqual(resumoCacheFactualMagalu({ now: () => "2026-08-16T11:10:01.000Z" }).entradas, 0, "cache expirado deve ser varrido");
+  limparCacheFactualMagalu();
 }
 
 {

@@ -2,6 +2,11 @@ const express = require("express");
 const {
   importarUrlManualV2
 } = require("./manual-import.adapters");
+const {
+  iniciarImportacaoMagaluManualV2Async,
+  buscarImportacaoMagaluManualV2,
+  metricasImportacaoMagaluManualV2
+} = require("./magalu-factual-jobs.service");
 const storagePadrao = require("./manual-offers.storage");
 const {
   listarDestinosManuaisV2Async
@@ -152,6 +157,15 @@ function criarRotasManualV2(deps = {}) {
   const router = express.Router();
   const getClienteId = typeof deps.getClienteId === "function" ? deps.getClienteId : () => "admin";
   const importarManual = typeof deps.importarUrlManualV2 === "function" ? deps.importarUrlManualV2 : importarUrlManualV2;
+  const iniciarMagaluAsync = typeof deps.iniciarImportacaoMagaluManualV2Async === "function"
+    ? deps.iniciarImportacaoMagaluManualV2Async
+    : iniciarImportacaoMagaluManualV2Async;
+  const buscarMagaluAsync = typeof deps.buscarImportacaoMagaluManualV2 === "function"
+    ? deps.buscarImportacaoMagaluManualV2
+    : buscarImportacaoMagaluManualV2;
+  const metricasMagaluAsync = typeof deps.metricasImportacaoMagaluManualV2 === "function"
+    ? deps.metricasImportacaoMagaluManualV2
+    : metricasImportacaoMagaluManualV2;
   const dispatcherManual = typeof deps.enviarOfertaManualV2 === "function" ? deps.enviarOfertaManualV2 : enviarOfertaManualV2;
   const storage = {
     listarOfertasManuaisV2: deps.listarOfertasManuaisV2 || storagePadrao.listarOfertasManuaisV2,
@@ -220,6 +234,25 @@ function criarRotasManualV2(deps = {}) {
         });
       }
 
+      const asyncMagalu = iniciarMagaluAsync({
+        clienteId,
+        urlOriginal,
+        importOptions: deps.importOptions || {},
+        importarManual
+      }, {
+        now: deps.now,
+        idFactory: deps.magaluJobIdFactory
+      });
+
+      if (asyncMagalu?.assinc === true) {
+        return res.status(202).json({
+          ok: true,
+          assinc: true,
+          mensagem: "Resolucao factual Magalu iniciada.",
+          job: asyncMagalu.job
+        });
+      }
+
       const oferta = await importarManual(urlOriginal, {
         ...(deps.importOptions || {}),
         clienteId
@@ -240,6 +273,35 @@ function criarRotasManualV2(deps = {}) {
       });
     } catch (e) {
       return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_importacao_falhou"));
+    }
+  });
+
+  router.get("/importacoes/magalu/metricas", (req, res) => {
+    try {
+      return res.json({
+        ok: true,
+        marketplace: "magalu",
+        metricas: metricasMagaluAsync()
+      });
+    } catch (e) {
+      return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_magalu_metricas_falhou"));
+    }
+  });
+
+  router.get("/importacoes/magalu/:jobId", (req, res) => {
+    try {
+      const job = buscarMagaluAsync(req.params.jobId, cliente(req));
+      if (!job) {
+        return res.status(404).json({
+          ok: false,
+          erro: "manual_v2_magalu_job_nao_encontrado",
+          motivo: "manual_v2_magalu_job_nao_encontrado"
+        });
+      }
+
+      return res.json(job);
+    } catch (e) {
+      return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_magalu_status_falhou"));
     }
   });
 

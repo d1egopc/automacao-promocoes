@@ -11,6 +11,10 @@ const {
   slugsLojaMagalu
 } = require("./magalu-affiliate-link");
 
+const MAGALU_FACTUAL_CACHE_TTL_MS_PADRAO = 10 * 60 * 1000;
+const MAGALU_FACTUAL_CACHE_MAX_ENTRADAS_PADRAO = 200;
+const cacheFatosComprovados = new Map();
+
 function texto(valor = "") {
   return String(valor || "").trim();
 }
@@ -99,6 +103,144 @@ function caminhoFactualMagalu(urlOriginal = "") {
     search: pdpDivulgador ? "" : base.search,
     origem: pdpDivulgador ? "divulgador_oferta_para_pdp" : "url_original"
   };
+}
+
+function ttlCacheFactualMs(opcoes = {}) {
+  const numero = Number(opcoes.cacheTtlMs ?? process.env.MAGALU_FACTUAL_CACHE_TTL_MS);
+  if (!Number.isFinite(numero) || numero <= 0) return MAGALU_FACTUAL_CACHE_TTL_MS_PADRAO;
+  return Math.floor(numero);
+}
+
+function limiteCacheFactual(opcoes = {}) {
+  const numero = Number(opcoes.cacheMaxEntradas ?? process.env.MAGALU_FACTUAL_CACHE_MAX_ENTRADAS);
+  if (!Number.isFinite(numero) || numero <= 0) return MAGALU_FACTUAL_CACHE_MAX_ENTRADAS_PADRAO;
+  return Math.floor(numero);
+}
+
+function cacheFactualHabilitado(opcoes = {}) {
+  if (opcoes.cacheFactual === false) return false;
+  if (typeof opcoes.consultarProdutoMagalu === "function") return false;
+  if (opcoes.parserOptions && Object.prototype.hasOwnProperty.call(opcoes.parserOptions, "html")) return false;
+  return true;
+}
+
+function agoraMs(opcoes = {}) {
+  if (typeof opcoes.now === "function") {
+    const valor = opcoes.now();
+    const data = typeof valor === "number" ? valor : Date.parse(valor);
+    if (Number.isFinite(data)) return data;
+  }
+  return Date.now();
+}
+
+function clonar(valor) {
+  return JSON.parse(JSON.stringify(valor || null));
+}
+
+function removerCamposSensiveisCache(objeto) {
+  if (!objeto || typeof objeto !== "object") return objeto;
+  if (Array.isArray(objeto)) {
+    for (const item of objeto) removerCamposSensiveisCache(item);
+    return objeto;
+  }
+  for (const chave of Object.keys(objeto)) {
+    if (/^(linkAfiliado|urlAfiliada|promoterId|partnerId|token|secret|credenciais)$/i.test(chave)) {
+      delete objeto[chave];
+      continue;
+    }
+    removerCamposSensiveisCache(objeto[chave]);
+  }
+  return objeto;
+}
+
+function valorSeguroParaCache(valor = {}) {
+  return removerCamposSensiveisCache(clonar(valor));
+}
+
+function chaveCacheFactualMagalu({ urlOriginal = "", promoterId = "" } = {}) {
+  const produtoId = produtoIdPorUrl(urlOriginal);
+  if (!produtoId) return "";
+  const base = caminhoFactualMagalu(urlOriginal);
+  return [
+    normalizarPromoterIdMagalu(promoterId),
+    produtoId,
+    base.pathname,
+    base.search
+  ].map(texto).join("|");
+}
+
+function varrerCacheFactualMagalu(opcoes = {}) {
+  const agora = agoraMs(opcoes);
+  for (const [chave, item] of cacheFatosComprovados.entries()) {
+    if (!item || item.expiraEmMs <= agora) cacheFatosComprovados.delete(chave);
+  }
+
+  const limite = limiteCacheFactual(opcoes);
+  while (cacheFatosComprovados.size > limite) {
+    const primeira = cacheFatosComprovados.keys().next().value;
+    if (!primeira) break;
+    cacheFatosComprovados.delete(primeira);
+  }
+}
+
+function lerCacheFactualMagalu(chave = "", opcoes = {}) {
+  if (!chave) return null;
+  varrerCacheFactualMagalu(opcoes);
+  const item = cacheFatosComprovados.get(chave);
+  if (!item) return null;
+  if (item.expiraEmMs <= agoraMs(opcoes)) {
+    cacheFatosComprovados.delete(chave);
+    return null;
+  }
+  const retorno = clonar(item.valor);
+  retorno.cache = { hit: true };
+  retorno.fatos = retorno.fatos && typeof retorno.fatos === "object" ? retorno.fatos : {};
+  retorno.fatos.metadata = retorno.fatos.metadata && typeof retorno.fatos.metadata === "object"
+    ? retorno.fatos.metadata
+    : {};
+  retorno.fatos.metadata.factualCache = { hit: true };
+  return retorno;
+}
+
+function salvarCacheFactualMagalu(chave = "", valor = {}, opcoes = {}) {
+  if (!chave || !valor?.ok) return;
+  varrerCacheFactualMagalu(opcoes);
+  cacheFatosComprovados.set(chave, {
+    expiraEmMs: agoraMs(opcoes) + ttlCacheFactualMs(opcoes),
+    valor: valorSeguroParaCache(valor)
+  });
+  varrerCacheFactualMagalu(opcoes);
+}
+
+function limparCacheFactualMagalu() {
+  cacheFatosComprovados.clear();
+}
+
+function resumoCacheFactualMagalu(opcoes = {}) {
+  varrerCacheFactualMagalu(opcoes);
+  return {
+    entradas: cacheFatosComprovados.size,
+    limite: limiteCacheFactual(opcoes)
+  };
+}
+
+function cacheFallbackPermitido(avisos = []) {
+  const lista = listaUnica(avisos);
+  const bloqueado = [
+    "magalu_http_403",
+    "magalu_captcha_detectado",
+    "magalu_pagina_indisponivel",
+    "magalu_produto_divergente_ignorado",
+    "magalu_url_factual_produto_divergente",
+    "magalu_conteudo_produto_divergente_ignorado",
+    "magalu_jsonld_produto_divergente_ignorado"
+  ].some(aviso => lista.includes(aviso));
+  if (bloqueado) return false;
+  return lista.some(aviso =>
+    aviso === "magalu_timeout" ||
+    aviso === "magalu_fetch_falhou" ||
+    /^magalu_http_5\d\d$/.test(aviso)
+  );
 }
 
 function urlComHost(hostname = "", pathname = "", search = "") {
@@ -343,6 +485,8 @@ async function resolverFatosMagalu({ urlOriginal = "", promoterId = "" } = {}, o
     : consultarProdutoMagalu;
   const produtoIdOriginal = produtoIdPorUrl(urlOriginal);
   const sellerIdOriginal = sellerIdPorUrl(urlOriginal);
+  const usarCache = cacheFactualHabilitado(opcoes);
+  const chaveCache = usarCache ? chaveCacheFactualMagalu({ urlOriginal, promoterId }) : "";
   const tentativas = [];
   const avisos = [];
   if (lojaOriginalDivergente(urlOriginal, promoterId)) {
@@ -398,7 +542,7 @@ async function resolverFatosMagalu({ urlOriginal = "", promoterId = "" } = {}, o
     }
 
     tentativas.push(resumoTentativa(fonte.fonte, "aceita", avaliacao.motivo));
-    return {
+    const retorno = {
       ok: true,
       produtoId: produtoIdOriginal,
       sellerIdOriginal,
@@ -412,6 +556,17 @@ async function resolverFatosMagalu({ urlOriginal = "", promoterId = "" } = {}, o
       },
       avisos: listaUnica(avisos)
     };
+    if (usarCache) salvarCacheFactualMagalu(chaveCache, retorno, opcoes);
+    return retorno;
+  }
+
+  const avisosFinais = listaUnica([...avisos, "magalu_factual_resolver_sem_fonte_segura"]);
+  if (usarCache && cacheFallbackPermitido(avisosFinais)) {
+    const cacheFallback = lerCacheFactualMagalu(chaveCache, opcoes);
+    if (cacheFallback) {
+      cacheFallback.cache = { hit: true, modo: "fallback_transitorio" };
+      return cacheFallback;
+    }
   }
 
   return resultadoVazio({
@@ -419,12 +574,15 @@ async function resolverFatosMagalu({ urlOriginal = "", promoterId = "" } = {}, o
     produtoIdOriginal,
     sellerIdOriginal,
     tentativas,
-    avisos: listaUnica([...avisos, "magalu_factual_resolver_sem_fonte_segura"])
+    avisos: avisosFinais
   });
 }
 
 module.exports = {
   resolverFatosMagalu,
   construirFontesMagalu,
+  chaveCacheFactualMagalu,
+  limparCacheFactualMagalu,
+  resumoCacheFactualMagalu,
   sellerIdPorUrl
 };

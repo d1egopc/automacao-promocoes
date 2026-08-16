@@ -16,6 +16,9 @@ const {
 const {
   normalizarOfertaManualV2
 } = require("../modules/manual-v2/manual-offers.contract");
+const {
+  resetImportacoesMagaluManualV2
+} = require("../modules/manual-v2/magalu-factual-jobs.service");
 
 const DATA_DIR_TESTE = process.env.DATA_DIR;
 
@@ -87,11 +90,21 @@ async function request(server, metodo, caminho, clienteId, body) {
   return { status: res.status, body: await res.json() };
 }
 
+async function aguardarJobMagalu(server, jobId, clienteId) {
+  for (let i = 0; i < 20; i += 1) {
+    const resposta = await request(server, "GET", `/manual-v2/importacoes/magalu/${jobId}`, clienteId);
+    if (resposta.status === 200 && resposta.body.status !== "processando") return resposta;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  return request(server, "GET", `/manual-v2/importacoes/magalu/${jobId}`, clienteId);
+}
+
 function arquivoCliente(clienteId, nome) {
   return getClienteJsonPath(clienteId, nome);
 }
 
 (async function main() {
+resetImportacoesMagaluManualV2();
 const chamadasImportacao = [];
 const tempos = [
   "2026-08-14T15:01:00.000Z",
@@ -114,8 +127,7 @@ try {
       ["https://www.amazon.com.br/dp/B0ABCDEF12", "amazon"],
       ["https://shopee.com.br/product/111/222", "shopee"],
       ["https://www.aliexpress.com/item/1005001234567890.html", "aliexpress"],
-      ["https://www.kabum.com.br/produto/944475/produto", "kabum"],
-      ["https://www.magazineluiza.com.br/smart-tv/p/abc123/", "magalu"]
+      ["https://www.kabum.com.br/produto/944475/produto", "kabum"]
     ];
 
     for (const [url, marketplace] of casos) {
@@ -133,6 +145,37 @@ try {
     assert.strictEqual(listaA.status, 200);
     assert.deepStrictEqual(listaA.body.ofertas, [], "importacao parse-only nao salva oferta");
     assert.strictEqual(fs.existsSync(arquivoCliente("cliente_a", "manual_ofertas_v2.json")), false);
+  }
+
+  {
+    const antes = chamadasImportacao.length;
+    const resposta = await request(server, "POST", "/manual-v2/importar", "cliente_a", {
+      urlOriginal: "https://www.magazineluiza.com.br/smart-tv/p/abc123/"
+    });
+    assert.strictEqual(resposta.status, 202);
+    assert.strictEqual(resposta.body.ok, true);
+    assert.strictEqual(resposta.body.assinc, true);
+    assert.ok(resposta.body.job.jobId);
+    assert.strictEqual(resposta.body.job.status, "processando");
+    assert.strictEqual(resposta.body.job.interfaceResolucao.polling, true);
+    assert.strictEqual(resposta.body.job.interfaceResolucao.timeoutMs, 60000);
+
+    const status = await aguardarJobMagalu(server, resposta.body.job.jobId, "cliente_a");
+    assert.strictEqual(status.status, 200);
+    assert.strictEqual(status.body.status, "concluido");
+    assert.strictEqual(status.body.oferta.marketplace, "magalu");
+    assert.strictEqual(status.body.oferta.clienteId, "cliente_a");
+    assert.deepStrictEqual(chamadasImportacao.slice(antes).map(item => item.marketplace), ["magalu"]);
+
+    const outroCliente = await request(server, "GET", `/manual-v2/importacoes/magalu/${resposta.body.job.jobId}`, "cliente_b");
+    assert.strictEqual(outroCliente.status, 404, "status do job nao pode vazar para outro cliente");
+
+    const metricas = await request(server, "GET", "/manual-v2/importacoes/magalu/metricas", "cliente_a");
+    assert.strictEqual(metricas.status, 200);
+    assert.ok(metricas.body.metricas.total >= 1);
+
+    const listaA = await request(server, "GET", "/manual-v2/ofertas", "cliente_a");
+    assert.deepStrictEqual(listaA.body.ofertas, [], "job factual Magalu nao salva oferta automaticamente");
   }
 
   {

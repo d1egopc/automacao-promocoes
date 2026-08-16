@@ -316,6 +316,93 @@ assert.strictEqual(hostMagaluValido("https://example.com/produto/p/abc123/"), fa
   assert.strictEqual(chamadas.length, 1);
   assert.strictEqual(consultado.titulo, "Produto Via Fetch");
   assert.strictEqual(moeda(consultado.precoAtual), "R$ 88,80");
+  assert.strictEqual(consultado.metadata.httpFactual.totalTentativas, 1);
+  assert.strictEqual(chamadas[0].opcoes.headers["user-agent"], "teste");
+  assert.ok(chamadas[0].opcoes.signal, "fetch factual deve receber AbortController signal");
+
+  const timeoutDepoisOk = [];
+  const timeoutRecuperado = await consultarProdutoMagalu("https://www.magazineluiza.com.br/produto/p/retry123/", {
+    fetchFn: async () => {
+      timeoutDepoisOk.push(Date.now());
+      if (timeoutDepoisOk.length === 1) {
+        const erro = new Error("timeout");
+        erro.name = "AbortError";
+        throw erro;
+      }
+      return {
+        ok: true,
+        status: 200,
+        url: "https://www.magazineluiza.com.br/produto/p/retry123/",
+        text: async () => '<meta property="og:title" content="Produto Retry"><meta property="product:price:amount" content="77.70">'
+      };
+    },
+    retries: 1,
+    retryDelayMs: 0
+  });
+  assert.strictEqual(timeoutDepoisOk.length, 2, "timeout deve tentar novamente dentro do limite");
+  assert.strictEqual(timeoutRecuperado.titulo, "Produto Retry");
+  assert.strictEqual(timeoutRecuperado.metadata.httpFactual.totalTentativas, 2);
+  assert.strictEqual(timeoutRecuperado.metadata.httpFactual.tentativas[0].motivo, "magalu_timeout");
+
+  const chamadas500 = [];
+  const recuperado500 = await consultarProdutoMagalu("https://www.magazineluiza.com.br/produto/p/retry500/", {
+    fetchFn: async () => {
+      chamadas500.push(Date.now());
+      if (chamadas500.length === 1) {
+        return {
+          ok: false,
+          status: 503,
+          url: "https://www.magazineluiza.com.br/produto/p/retry500/",
+          text: async () => "<title>Erro temporario</title>"
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        url: "https://www.magazineluiza.com.br/produto/p/retry500/",
+        text: async () => '<meta property="og:title" content="Produto Retry 500"><meta property="product:price:amount" content="66.60">'
+      };
+    },
+    retries: 1,
+    retryDelayMs: 0
+  });
+  assert.strictEqual(chamadas500.length, 2, "5xx deve tentar novamente");
+  assert.strictEqual(recuperado500.titulo, "Produto Retry 500");
+
+  const chamadas403 = [];
+  const bloqueado403 = await consultarProdutoMagalu("https://www.magazineluiza.com.br/produto/p/http403/", {
+    fetchFn: async () => {
+      chamadas403.push(Date.now());
+      return {
+        ok: false,
+        status: 403,
+        url: "https://www.magazineluiza.com.br/produto/p/http403/",
+        text: async () => '<meta property="og:title" content="Produto 403"><meta property="product:price:amount" content="55.50">'
+      };
+    },
+    retries: 2,
+    retryDelayMs: 0
+  });
+  assert.strictEqual(chamadas403.length, 1, "403 nao pode fazer retry");
+  assert.ok(bloqueado403.avisos.includes("magalu_http_403"));
+  assert.strictEqual(bloqueado403.metadata.httpFactual.totalTentativas, 1);
+
+  const chamadasCaptcha = [];
+  const captcha = await consultarProdutoMagalu("https://www.magazineluiza.com.br/produto/p/captcha123/", {
+    fetchFn: async () => {
+      chamadasCaptcha.push(Date.now());
+      return {
+        ok: true,
+        status: 200,
+        url: "https://www.magazineluiza.com.br/az-request-verify",
+        text: async () => "<title>Captcha Magalu</title><body>Complete o CAPTCHA para continuar</body>"
+      };
+    },
+    retries: 2,
+    retryDelayMs: 0
+  });
+  assert.strictEqual(chamadasCaptcha.length, 1, "CAPTCHA nao pode fazer retry");
+  assert.ok(captcha.avisos.includes("magalu_captcha_detectado"));
 
   const invalido = await consultarProdutoMagalu("https://example.com/item");
   assert.ok(invalido.avisos.includes("magalu_url_invalida"));

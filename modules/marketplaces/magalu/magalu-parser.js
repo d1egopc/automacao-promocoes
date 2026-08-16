@@ -9,6 +9,10 @@ const HOSTS_MAGALU = [
   "www.magalu.com"
 ];
 
+const MAGALU_HTTP_TIMEOUT_MS_PADRAO = 4500;
+const MAGALU_HTTP_RETRIES_PADRAO = 2;
+const MAGALU_HTTP_RETRY_DELAY_MS_PADRAO = 250;
+
 function resultadoVazio(urlOriginal = "", avisos = []) {
   return {
     urlOriginal: String(urlOriginal || ""),
@@ -84,6 +88,58 @@ function produtoIdPorUrl(url = "") {
 
 function adicionarAviso(avisos = [], aviso = "") {
   if (aviso && !avisos.includes(aviso)) avisos.push(aviso);
+}
+
+function inteiroPositivo(valor, padrao) {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero) || numero < 0) return padrao;
+  return Math.floor(numero);
+}
+
+function aguardar(ms = 0) {
+  if (!ms) return Promise.resolve();
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function tentativaHttpResumo({ tentativa = 1, status = 0, duracaoMs = 0, motivo = "", retry = false } = {}) {
+  return {
+    tentativa,
+    status: Number(status || 0),
+    duracaoMs: Number(duracaoMs || 0),
+    motivo: String(motivo || "").trim(),
+    retry: retry === true
+  };
+}
+
+function anexarAuditoriaHttp(resultado = {}, auditoria = {}) {
+  resultado.metadata = resultado.metadata && typeof resultado.metadata === "object"
+    ? resultado.metadata
+    : {};
+  resultado.metadata.httpFactual = {
+    timeoutMs: auditoria.timeoutMs,
+    maxRetries: auditoria.maxRetries,
+    totalTentativas: auditoria.tentativas.length,
+    tentativas: auditoria.tentativas
+  };
+  return resultado;
+}
+
+function erroTimeoutFetch(erro) {
+  return erro?.name === "AbortError" || /abort|timeout/i.test(String(erro?.message || ""));
+}
+
+async function fetchMagaluComTimeout(fetchFn, url, { headers = {}, timeoutMs = MAGALU_HTTP_TIMEOUT_MS_PADRAO } = {}) {
+  if (typeof AbortController !== "function") {
+    return fetchFn(url, { headers });
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchFn(url, { headers, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function urlProdutoMagaluValida(url = "") {
@@ -567,21 +623,66 @@ async function consultarProdutoMagalu(urlOriginal = "", opcoes = {}) {
     return resultadoVazio(urlOriginal, ["magalu_fetch_indisponivel"]);
   }
 
-  try {
-    const resposta = await fetchFn(url, { headers });
-    const html = await resposta.text();
-    const resultado = parseMagaluProdutoHtml({
-      urlOriginal,
-      html,
-      urlFinal: resposta.url || url
-    });
-    if (resposta.ok === false) {
-      resultado.avisos.push(`magalu_http_${resposta.status || "erro"}`);
+  const timeoutMs = inteiroPositivo(opcoes.timeoutMs ?? opcoes.httpTimeoutMs ?? process.env.MAGALU_HTTP_TIMEOUT_MS, MAGALU_HTTP_TIMEOUT_MS_PADRAO);
+  const maxRetries = Math.min(
+    inteiroPositivo(opcoes.retries ?? opcoes.maxRetries ?? process.env.MAGALU_HTTP_RETRIES, MAGALU_HTTP_RETRIES_PADRAO),
+    5
+  );
+  const retryDelayMs = inteiroPositivo(opcoes.retryDelayMs ?? process.env.MAGALU_HTTP_RETRY_DELAY_MS, MAGALU_HTTP_RETRY_DELAY_MS_PADRAO);
+  const auditoria = { timeoutMs, maxRetries, tentativas: [] };
+
+  for (let tentativa = 1; tentativa <= maxRetries + 1; tentativa += 1) {
+    const inicio = Date.now();
+    try {
+      const resposta = await fetchMagaluComTimeout(fetchFn, url, { headers, timeoutMs });
+      const html = await resposta.text();
+      const status = Number(resposta.status || 0);
+      const duracaoMs = Date.now() - inicio;
+      const deveRetry = status >= 500 && tentativa <= maxRetries;
+      auditoria.tentativas.push(tentativaHttpResumo({
+        tentativa,
+        status,
+        duracaoMs,
+        motivo: status >= 500 ? `magalu_http_${status}` : "ok",
+        retry: deveRetry
+      }));
+
+      if (deveRetry) {
+        await aguardar(retryDelayMs * tentativa);
+        continue;
+      }
+
+      const resultado = parseMagaluProdutoHtml({
+        urlOriginal,
+        html,
+        urlFinal: resposta.url || url
+      });
+      if (resposta.ok === false) {
+        resultado.avisos.push(`magalu_http_${resposta.status || "erro"}`);
+      }
+      return anexarAuditoriaHttp(resultado, auditoria);
+    } catch (erro) {
+      const motivo = erroTimeoutFetch(erro) ? "magalu_timeout" : "magalu_fetch_falhou";
+      const duracaoMs = Date.now() - inicio;
+      const deveRetry = tentativa <= maxRetries;
+      auditoria.tentativas.push(tentativaHttpResumo({
+        tentativa,
+        status: 0,
+        duracaoMs,
+        motivo,
+        retry: deveRetry
+      }));
+
+      if (deveRetry) {
+        await aguardar(retryDelayMs * tentativa);
+        continue;
+      }
+
+      return anexarAuditoriaHttp(resultadoVazio(urlOriginal, [motivo]), auditoria);
     }
-    return resultado;
-  } catch (_) {
-    return resultadoVazio(urlOriginal, ["magalu_fetch_falhou"]);
   }
+
+  return anexarAuditoriaHttp(resultadoVazio(urlOriginal, ["magalu_fetch_falhou"]), auditoria);
 }
 
 module.exports = {

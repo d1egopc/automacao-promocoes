@@ -15,6 +15,12 @@ const {
   resumoLinksClassificados
 } = require("../../link-role.service");
 
+const POLITICA_MAGALU_ENGINE = Object.freeze({
+  timeoutMs: 2500,
+  retries: 0,
+  retryDelayMs: 0
+});
+
 function texto(valor = "") {
   return String(valor || "").trim();
 }
@@ -367,6 +373,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
       {
         consultarProdutoMagalu: deps.consultarProdutoMagalu,
         parserOptions: {
+          ...POLITICA_MAGALU_ENGINE,
           ...(deps.magaluParserOptions || {}),
           contextoEngine: {
             jobId: job.id,
