@@ -8,6 +8,31 @@ const raiz = path.resolve(__dirname, "..");
 const ler = (relativo) => fs.readFileSync(path.join(raiz, relativo), "utf8");
 const storage = require("../modules/ajuda-contextual/storage");
 
+const helpIds = [
+  "dashboard",
+  "campanhas",
+  "fila",
+  "automacao",
+  "destinos",
+  "templates",
+  "mensageiro",
+  "ofertas",
+  "social",
+  "integracoes.mercadolivre",
+  "integracoes.amazon",
+  "integracoes.shopee",
+  "integracoes.aliexpress",
+  "integracoes.awin",
+  "integracoes.magalu",
+  "conexoes.whatsapp",
+  "conexoes.telegram",
+  "conexoes.discord",
+];
+
+for (const helpId of helpIds) {
+  assert.ok(storage.HELP_IDS_PILOTO.includes(helpId), `Storage deve reconhecer helpId ${helpId}`);
+}
+
 const youtubeIds = [
   "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
   "https://youtu.be/dQw4w9WgXcQ",
@@ -72,6 +97,8 @@ const envelope = storage.normalizarEnvelope({
 const ativas = storage.ajudasAtivas(envelope);
 assert.ok(ativas.dashboard, "Ajuda ativa deve aparecer na leitura publica");
 assert.ok(!ativas["integracoes.mercadolivre"], "Ajuda inativa nao deve aparecer na leitura publica");
+assert.ok(envelope.ajudas.campanhas, "Novos helpIds devem aparecer na leitura admin");
+assert.strictEqual(envelope.ajudas.campanhas.ativo, false, "Novos helpIds vazios devem iniciar inativos");
 
 const routes = ler("modules/ajuda-contextual/routes.js");
 assert.ok(routes.includes('router.get("/ajuda-contextual"'), "GET publico autenticado deve existir");

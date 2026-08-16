@@ -4,8 +4,23 @@ const ARQUIVO_AJUDA_CONTEXTUAL = "ajuda-contextual.json";
 
 const HELP_IDS_PILOTO = [
   "dashboard",
+  "campanhas",
+  "fila",
+  "automacao",
+  "destinos",
+  "templates",
+  "mensageiro",
+  "ofertas",
+  "social",
   "integracoes.mercadolivre",
-  "conexoes.whatsapp"
+  "integracoes.amazon",
+  "integracoes.shopee",
+  "integracoes.aliexpress",
+  "integracoes.awin",
+  "integracoes.magalu",
+  "conexoes.whatsapp",
+  "conexoes.telegram",
+  "conexoes.discord"
 ];
 
 const SEED_AJUDAS = {
@@ -13,14 +28,29 @@ const SEED_AJUDAS = {
     titulo: "Dashboard",
     texto: "Bem-vindo ao painel principal do Optimus Promo. Aqui voce acompanha conexoes, destinos, fila, automacao, integracoes e atividades recentes em um so lugar."
   },
+  campanhas: { titulo: "Campanhas", texto: "" },
+  fila: { titulo: "Fila", texto: "" },
+  automacao: { titulo: "Automacao", texto: "" },
+  destinos: { titulo: "Destinos", texto: "" },
+  templates: { titulo: "Templates", texto: "" },
+  mensageiro: { titulo: "Mensageiro", texto: "" },
+  ofertas: { titulo: "Ofertas", texto: "" },
+  social: { titulo: "Social", texto: "" },
   "integracoes.mercadolivre": {
     titulo: "Mercado Livre",
     texto: "Conecte sua integracao do Mercado Livre para que o Optimus possa importar, identificar e preparar ofertas desse marketplace. No video voce vera onde localizar os dados necessarios e como configurar corretamente a integracao."
   },
+  "integracoes.amazon": { titulo: "Amazon", texto: "" },
+  "integracoes.shopee": { titulo: "Shopee", texto: "" },
+  "integracoes.aliexpress": { titulo: "AliExpress", texto: "" },
+  "integracoes.awin": { titulo: "AWIN / KaBuM", texto: "" },
+  "integracoes.magalu": { titulo: "Magazine Luiza / Magalu", texto: "" },
   "conexoes.whatsapp": {
     titulo: "WhatsApp",
     texto: "Conecte uma sessao do WhatsApp ao Optimus para enviar ofertas aos grupos configurados. No video voce vera como criar a sessao, ler o QR Code e confirmar que a conexao ficou ativa."
-  }
+  },
+  "conexoes.telegram": { titulo: "Telegram", texto: "" },
+  "conexoes.discord": { titulo: "Discord", texto: "" }
 };
 
 function texto(valor = "") {
@@ -120,6 +150,7 @@ function normalizarYoutubeUrl(valor = "") {
 
 function ajudaPadrao(id = "") {
   const seed = SEED_AJUDAS[id] || { titulo: id, texto: "" };
+  const ativoPadrao = Boolean(seed.texto);
   return {
     id,
     titulo: seed.titulo,
@@ -129,7 +160,7 @@ function ajudaPadrao(id = "") {
     youtubeEmbedUrl: "",
     linkUrl: "",
     linkLabel: "",
-    ativo: true,
+    ativo: ativoPadrao,
     atualizadoEm: ""
   };
 }
