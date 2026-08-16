@@ -193,6 +193,9 @@ function criarRotasManualV2(deps = {}) {
 
   router.get("/destinos", async (req, res) => {
     try {
+      res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+      res.set("Pragma", "no-cache");
+      res.set("Expires", "0");
       const clienteId = cliente(req);
       const destinos = await listarDestinosManuaisV2Async(clienteId, depsDestinos(req, clienteId));
 

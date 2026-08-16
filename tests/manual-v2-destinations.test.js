@@ -425,6 +425,78 @@ function assertSemSegredos(destinos) {
   assert.deepStrictEqual(destinos.map((item) => item.id), ["dc_repetido"]);
 }
 
+{
+  const destinos = listarDestinosManuaisV2("cliente_a", {
+    destinosPorCliente: {
+      cliente_a: [
+        {
+          id: "dc_ofertas_gerais",
+          nome: "Discord Ofertas Gerais",
+          tipo: "discord",
+          ativo: true,
+          conexaoId: "discord_a",
+          channelId: "canal_ofertas_gerais"
+        },
+        {
+          id: "dc_hardware_pc",
+          nome: "Discord Hardware",
+          tipo: "discord",
+          ativo: true,
+          conexaoId: "discord_a",
+          channelId: "canal_hardware_pc"
+        },
+        {
+          id: "wa_ok",
+          nome: "WA OK",
+          tipo: "whatsapp",
+          ativo: true,
+          conexaoId: "sessao_a",
+          gruposWhatsapp: ["120363@g.us"]
+        },
+        {
+          id: "tg_ok",
+          nome: "TG OK",
+          tipo: "telegram",
+          ativo: true,
+          telegramDestinos: ["chat_ok"]
+        }
+      ]
+    },
+    configsPorCliente,
+    sessoes,
+    statusSessao,
+    plano: planoCompleto,
+    discordConexoes,
+    discordCanaisPorConexao: {
+      discord_a: [
+        {
+          id: "canal_ofertas_gerais",
+          nome: "ofertas-gerais",
+          tipo: "texto",
+          utilizavel: true
+        },
+        {
+          id: "canal_hardware_pc",
+          nome: "hardware-e-pc",
+          tipo: "texto",
+          utilizavel: true
+        }
+      ]
+    },
+    enviarDiscord: async () => ({ ok: true })
+  });
+
+  const discord = destinos.filter((item) => item.tipo === "discord");
+  assert.deepStrictEqual(discord.map((item) => item.id), ["dc_ofertas_gerais", "dc_hardware_pc"]);
+  assert.deepStrictEqual(discord.map((item) => item.identificacaoVisual), [
+    "Servidor A #ofertas-gerais",
+    "Servidor A #hardware-e-pc"
+  ]);
+  assert.ok(!destinos.some((item) => /bate-papo/i.test(JSON.stringify(item))));
+  assert.strictEqual(destinos.find((item) => item.id === "wa_ok").utilizavel, true);
+  assert.strictEqual(destinos.find((item) => item.id === "tg_ok").utilizavel, true);
+}
+
 function criarApp() {
   const app = express();
   app.use(express.json());
@@ -459,7 +531,7 @@ async function request(server, clienteId = "cliente_a", plano = "") {
   const res = await fetch(`http://127.0.0.1:${server.address().port}/manual-v2/destinos`, {
     headers
   });
-  return { status: res.status, body: await res.json() };
+  return { status: res.status, cacheControl: res.headers.get("cache-control") || "", body: await res.json() };
 }
 
 (async function testarRota() {
@@ -467,6 +539,8 @@ async function request(server, clienteId = "cliente_a", plano = "") {
   try {
     const respostaA = await request(server, "cliente_a");
     assert.strictEqual(respostaA.status, 200);
+    assert.ok(respostaA.cacheControl.includes("no-store"));
+    assert.ok(respostaA.cacheControl.includes("no-cache"));
     assert.strictEqual(respostaA.body.ok, true);
     assert.strictEqual(respostaA.body.destinos.length, 8);
     assertSemSegredos(respostaA.body.destinos);
