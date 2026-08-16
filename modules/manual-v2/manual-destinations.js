@@ -78,11 +78,54 @@ function normalizarTelegramInterno(telegram = {}) {
   };
 }
 
+function destinoUnitarioReconhecivel(destino = {}) {
+  if (!destino || typeof destino !== "object" || Array.isArray(destino)) return false;
+  const id = destinoId(destino);
+  const tipo = texto(destino.tipo);
+  const nome = nomeDestino(destino);
+  const conexao = texto(destino.conexaoId || destino.sessao || destino.sessaoId || destino.idSessao || destino.idConexao);
+  const alvo = texto(
+    destino.channelId ||
+    destino.canalId ||
+    destino.chatId ||
+    destino.grupoId ||
+    destino.grupo ||
+    destino.canal ||
+    lista(destino.gruposWhatsapp)[0] ||
+    lista(destino.telegramDestinos)[0]
+  );
+
+  if (id && (tipo || nome || conexao || alvo)) return true;
+  if (tipo && (nome || conexao || alvo)) return true;
+  if (conexao && alvo) return true;
+  return false;
+}
+
 function listarDestinosCliente(destinosPorCliente = {}, clienteId = "admin") {
   const origem = destinosPorCliente?.[clienteId];
   if (Array.isArray(origem)) return origem;
   if (origem && typeof origem === "object") {
-    return Object.values(origem).flatMap((item) => Array.isArray(item) ? item : []);
+    const destinos = [];
+    const vistos = new Set();
+    const adicionar = (destino, chave = "") => {
+      if (!destinoUnitarioReconhecivel(destino)) return;
+      const dedupe = destinoId(destino) || texto(chave);
+      if (dedupe) {
+        if (vistos.has(dedupe)) return;
+        vistos.add(dedupe);
+      }
+      destinos.push(destino);
+    };
+
+    for (const [chave, item] of Object.entries(origem)) {
+      if (Array.isArray(item)) {
+        for (const destino of item) adicionar(destino, chave);
+      } else {
+        adicionar(item, chave);
+      }
+    }
+
+    return destinos;
   }
   return [];
 }

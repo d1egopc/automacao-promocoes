@@ -305,6 +305,126 @@ function assertSemSegredos(destinos) {
   assert.strictEqual(destinosB[0].utilizavel, true);
 }
 
+{
+  const destinoDiscordUnitario = {
+    id: "discord_destino_1",
+    nome: "Discord Unitario",
+    tipo: "discord",
+    conexaoId: "discord_a",
+    channelId: "canal_ok",
+    ativo: true,
+    token: "DISCORD_TOKEN_NAO_SAIR"
+  };
+  const destinos = listarDestinosManuaisV2("cliente_a", {
+    destinosPorCliente: {
+      cliente_a: {
+        discord_destino_1: destinoDiscordUnitario
+      }
+    },
+    configsPorCliente,
+    sessoes,
+    statusSessao,
+    plano: planoCompleto,
+    discordConexoes,
+    discordCanaisPorConexao,
+    enviarDiscord: async () => ({ ok: true })
+  });
+
+  assert.strictEqual(destinos.length, 1);
+  assertSemSegredos(destinos);
+  assert.deepStrictEqual(destinos[0], {
+    id: "discord_destino_1",
+    nome: "Discord Unitario",
+    tipo: "discord",
+    ativo: true,
+    utilizavel: true,
+    motivoIndisponivel: "",
+    identificacaoVisual: "Servidor A #ofertas"
+  });
+}
+
+{
+  const destinos = listarDestinosManuaisV2("cliente_a", {
+    destinosPorCliente: {
+      cliente_a: {
+        sessao_whatsapp: [
+          {
+            id: "wa_legado",
+            nome: "WA Legado",
+            tipo: "whatsapp",
+            ativo: true,
+            conexaoId: "sessao_a",
+            gruposWhatsapp: ["120363@g.us"]
+          }
+        ],
+        sessao_telegram: [
+          {
+            id: "tg_legado",
+            nome: "TG Legado",
+            tipo: "telegram",
+            ativo: true,
+            telegramDestinos: ["chat_ok"]
+          }
+        ],
+        sessao_discord: [
+          {
+            id: "dc_legado",
+            nome: "DC Legado",
+            tipo: "discord",
+            ativo: true,
+            conexaoId: "discord_a",
+            channelId: "canal_ok"
+          }
+        ]
+      }
+    },
+    configsPorCliente,
+    sessoes,
+    statusSessao,
+    plano: planoCompleto,
+    discordConexoes,
+    discordCanaisPorConexao,
+    enviarDiscord: async () => ({ ok: true })
+  });
+
+  assert.deepStrictEqual(destinos.map((item) => item.id), ["wa_legado", "tg_legado", "dc_legado"]);
+  assert.strictEqual(destinos.find((item) => item.id === "wa_legado").utilizavel, true);
+  assert.strictEqual(destinos.find((item) => item.id === "tg_legado").utilizavel, true);
+  assert.strictEqual(destinos.find((item) => item.id === "dc_legado").utilizavel, true);
+}
+
+{
+  const destino = {
+    id: "dc_repetido",
+    nome: "Discord Repetido",
+    tipo: "discord",
+    ativo: true,
+    conexaoId: "discord_a",
+    channelId: "canal_ok"
+  };
+  const destinos = listarDestinosManuaisV2("cliente_a", {
+    destinosPorCliente: {
+      cliente_a: {
+        primeira: [destino],
+        segunda: destino,
+        objeto_arbitrario: {
+          nome: "Nao deve virar destino",
+          recursos: { discord: true }
+        }
+      }
+    },
+    configsPorCliente,
+    sessoes,
+    statusSessao,
+    plano: planoCompleto,
+    discordConexoes,
+    discordCanaisPorConexao,
+    enviarDiscord: async () => ({ ok: true })
+  });
+
+  assert.deepStrictEqual(destinos.map((item) => item.id), ["dc_repetido"]);
+}
+
 function criarApp() {
   const app = express();
   app.use(express.json());
