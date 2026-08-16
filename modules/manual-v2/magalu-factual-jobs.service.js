@@ -142,6 +142,74 @@ function avisosOferta(oferta = {}) {
   return Array.isArray(oferta?.fonteImportacao?.avisos) ? oferta.fonteImportacao.avisos.map(texto).filter(Boolean) : [];
 }
 
+function camposAusentesOferta(oferta = {}) {
+  return Array.isArray(oferta?.fonteImportacao?.camposAusentes)
+    ? oferta.fonteImportacao.camposAusentes.map(texto).filter(Boolean)
+    : [];
+}
+
+function urlHttpValida(valor = "") {
+  try {
+    const url = new URL(texto(valor));
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch (_) {
+    return false;
+  }
+}
+
+function precoValido(valor = "") {
+  const bruto = texto(valor);
+  if (!bruto) return false;
+  const numero = Number(bruto
+    .replace(/R\$/gi, "")
+    .replace(/\s+/g, "")
+    .replace(/\./g, "")
+    .replace(",", "."));
+  return Number.isFinite(numero) && numero > 0;
+}
+
+function linkAfiliadoComprovado(oferta = {}) {
+  const urlAfiliada = texto(oferta?.urlAfiliada || oferta?.linkAfiliado || oferta?.linkFinal);
+  if (!urlHttpValida(urlAfiliada)) return false;
+
+  const urlOriginal = texto(oferta?.urlOriginal || oferta?.linkOriginal || oferta?.url);
+  if (urlOriginal && urlAfiliada === urlOriginal) return false;
+
+  const avisos = avisosOferta(oferta);
+  const camposAusentes = camposAusentesOferta(oferta);
+  return !avisos.includes("magalu_url_afiliada_vazia_sem_prova") &&
+    !camposAusentes.includes("urlAfiliada");
+}
+
+function ofertaTemEvidenciaComercialUtil(oferta = {}) {
+  if (!oferta || oferta.ok === false) return false;
+  return Boolean(
+    texto(oferta.titulo) ||
+    precoValido(oferta.precoAtual || oferta.preco || oferta.precoPor || oferta.valor || oferta.price) ||
+    urlHttpValida(oferta.imagem || oferta.image || oferta.imageUrl || oferta.foto || oferta.thumbnail) ||
+    linkAfiliadoComprovado(oferta)
+  );
+}
+
+function motivoFactualOferta(oferta = {}, fallback = "magalu_sem_dados_fatuais_uteis") {
+  const avisos = avisosOferta(oferta);
+  const prioridade = [
+    "magalu_http_403",
+    "magalu_captcha_detectado",
+    "magalu_timeout",
+    "magalu_fetch_falhou",
+    "magalu_pagina_indisponivel",
+    "magalu_url_factual_produto_divergente",
+    "magalu_produto_divergente_ignorado",
+    "magalu_conteudo_produto_divergente_ignorado",
+    "magalu_jsonld_produto_divergente_ignorado",
+    "magalu_factual_resolver_sem_fonte_segura"
+  ];
+  return prioridade.find(aviso => avisos.includes(aviso)) ||
+    texto(oferta?.erro || oferta?.motivo) ||
+    fallback;
+}
+
 function exigeBrowserFuturo(oferta = {}, erro = "") {
   const avisos = avisosOferta(oferta);
   return [
@@ -159,7 +227,7 @@ function registrarMetricas(job = {}) {
   job.metricaRegistrada = true;
   metricasRecentes.push({
     status: job.status,
-    sucessoHttp: job.status === "concluido" && Boolean(job.oferta?.fonteImportacao?.camposConfiaveis?.length),
+    sucessoHttp: job.status === "concluido" && ofertaTemEvidenciaComercialUtil(job.oferta),
     duracaoMs: Number(medidas.duracaoMs || 0),
     fontes: Number(medidas.fontes || 0),
     tentativas: Number(medidas.tentativas || 0),
@@ -232,11 +300,14 @@ async function executarImportacao(job, { importarManual, urlOriginal, importOpti
     });
     const resumo = fontesTentativas(oferta);
     const memoriaFim = memoriaMb();
-    const status = (!oferta || oferta.ok === false) ? "erro" : "concluido";
+    const status = ofertaTemEvidenciaComercialUtil(oferta) ? "concluido" : "erro";
+    const motivoErro = status === "erro"
+      ? (oferta?.ok === false ? (oferta?.erro || oferta?.motivo || "manual_v2_magalu_importacao_falhou") : motivoFactualOferta(oferta))
+      : "";
     return {
       status,
-      erro: status === "erro" ? (oferta?.erro || oferta?.motivo || "manual_v2_magalu_importacao_falhou") : "",
-      motivo: status === "erro" ? (oferta?.erro || oferta?.motivo || "manual_v2_magalu_importacao_falhou") : "",
+      erro: motivoErro,
+      motivo: motivoErro,
       oferta: status === "concluido" ? oferta : null,
       medidas: {
         duracaoMs: Date.now() - inicioMs,
@@ -245,7 +316,7 @@ async function executarImportacao(job, { importarManual, urlOriginal, importOpti
         memoriaDeltaMb: Number((memoriaFim - memoriaInicio).toFixed(2)),
         fontes: resumo.fontes.length,
         tentativas: resumo.tentativas,
-        exigiriaBrowser: exigeBrowserFuturo(oferta, "")
+        exigiriaBrowser: exigeBrowserFuturo(oferta, motivoErro)
       }
     };
   } catch (e) {

@@ -23,6 +23,45 @@ function isoApos(ms = 0) {
   return new Date(BASE_MS + ms).toISOString();
 }
 
+function ofertaMagalu(parcial = {}) {
+  const fonteImportacao = {
+    marketplaceDetectado: "magalu",
+    adapter: "magalu.manual.adapter",
+    parseOnly: true,
+    tentativas: [],
+    avisos: [],
+    camposConfiaveis: [],
+    camposAusentes: ["urlAfiliada"],
+    ...(parcial.fonteImportacao || {})
+  };
+  return {
+    marketplace: "magalu",
+    urlOriginal: urlMagalu,
+    urlAfiliada: "",
+    titulo: "",
+    precoAtual: "",
+    imagem: "",
+    ...parcial,
+    fonteImportacao
+  };
+}
+
+async function iniciarEConsultar({ id, clienteId = "cliente_a", importarManual, importOptions, deps = {} }) {
+  const inicio = iniciarImportacaoMagaluManualV2Async({
+    clienteId,
+    urlOriginal: urlMagalu,
+    importOptions,
+    importarManual
+  }, {
+    idFactory: () => id,
+    now: () => isoApos(0),
+    ...deps
+  });
+  assert.strictEqual(inicio.assinc, true);
+  await esperar(20);
+  return buscarImportacaoMagaluManualV2(inicio.job.jobId, clienteId);
+}
+
 (async function main() {
 resetImportacoesMagaluManualV2();
 const chamadas = [];
@@ -99,6 +138,103 @@ assert.strictEqual(metricas.total, 1);
 assert.strictEqual(metricas.concluidos, 1);
 assert.strictEqual(metricas.exigiriamBrowser, 0);
 assert.ok(metricas.tempoMedioMs >= 0);
+
+resetImportacoesMagaluManualV2();
+const vazio = await iniciarEConsultar({
+  id: "job_magalu_vazio",
+  importOptions,
+  importarManual: async () => ofertaMagalu({
+    fonteImportacao: {
+      camposConfiaveis: ["urlOriginal"]
+    }
+  })
+});
+assert.strictEqual(vazio.status, "erro", "oferta vazia nao deve virar concluido");
+assert.strictEqual(vazio.ok, false);
+assert.strictEqual(vazio.motivo, "magalu_sem_dados_fatuais_uteis");
+assert.strictEqual(vazio.oferta, null);
+assert.strictEqual(vazio.interfaceResolucao.polling, false);
+let metricasVazio = metricasImportacaoMagaluManualV2();
+assert.strictEqual(metricasVazio.erros, 1);
+assert.strictEqual(metricasVazio.concluidos, 0);
+assert.strictEqual(metricasVazio.taxaSucessoHttp, 0, "vazio nao conta como sucesso HTTP");
+const depoisErro = iniciarImportacaoMagaluManualV2Async({
+  clienteId: "cliente_a",
+  urlOriginal: urlMagalu,
+  importOptions,
+  importarManual: async () => ofertaMagalu({ titulo: "Smart TV Teste" })
+}, {
+  idFactory: () => "job_magalu_depois_erro",
+  now: () => isoApos(1000)
+});
+assert.strictEqual(depoisErro.job.jobId, "job_magalu_depois_erro", "erro deve liberar dedupe");
+await esperar(20);
+
+resetImportacoesMagaluManualV2();
+const somenteTitulo = await iniciarEConsultar({
+  id: "job_magalu_titulo",
+  importOptions,
+  importarManual: async () => ofertaMagalu({
+    titulo: "Smartphone Teste",
+    fonteImportacao: { camposConfiaveis: ["titulo"] }
+  })
+});
+assert.strictEqual(somenteTitulo.status, "concluido", "titulo valido e evidencia comercial util");
+
+resetImportacoesMagaluManualV2();
+const somentePreco = await iniciarEConsultar({
+  id: "job_magalu_preco",
+  importOptions,
+  importarManual: async () => ofertaMagalu({
+    precoAtual: "R$ 129,90",
+    fonteImportacao: { camposConfiaveis: ["precoAtual"] }
+  })
+});
+assert.strictEqual(somentePreco.status, "concluido", "preco valido e evidencia comercial util");
+
+resetImportacoesMagaluManualV2();
+const somenteLink = await iniciarEConsultar({
+  id: "job_magalu_link",
+  importOptions,
+  importarManual: async () => ofertaMagalu({
+    urlAfiliada: "https://www.magazinevoce.com.br/magazined1egopc/smart-tv-teste/p/abc123/et/elit/",
+    fonteImportacao: {
+      camposConfiaveis: ["urlAfiliada"],
+      camposAusentes: []
+    }
+  })
+});
+assert.strictEqual(somenteLink.status, "concluido", "link afiliado comprovado e evidencia comercial util");
+
+resetImportacoesMagaluManualV2();
+const erro403 = await iniciarEConsultar({
+  id: "job_magalu_403",
+  importOptions,
+  importarManual: async () => ofertaMagalu({
+    fonteImportacao: {
+      avisos: ["magalu_http_403"],
+      camposConfiaveis: ["urlOriginal"]
+    }
+  })
+});
+assert.strictEqual(erro403.status, "erro");
+assert.strictEqual(erro403.motivo, "magalu_http_403", "403 deve preservar motivo factual");
+assert.strictEqual(erro403.medidas.exigiriaBrowser, true);
+
+resetImportacoesMagaluManualV2();
+const erroCaptcha = await iniciarEConsultar({
+  id: "job_magalu_captcha",
+  importOptions,
+  importarManual: async () => ofertaMagalu({
+    fonteImportacao: {
+      avisos: ["magalu_captcha_detectado"],
+      camposConfiaveis: ["urlOriginal"]
+    }
+  })
+});
+assert.strictEqual(erroCaptcha.status, "erro");
+assert.strictEqual(erroCaptcha.motivo, "magalu_captcha_detectado", "CAPTCHA deve preservar motivo factual");
+assert.strictEqual(erroCaptcha.medidas.exigiriaBrowser, true);
 
 resetImportacoesMagaluManualV2();
 let chamadasTravadas = 0;
