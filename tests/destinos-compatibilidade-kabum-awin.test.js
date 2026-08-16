@@ -59,6 +59,7 @@ function contexto(destino) {
       [clienteId]: {
         kabum: true,
         awin: true,
+        magalu: true,
         mercadolivre: true,
         amazon: true,
         aliexpress: true
@@ -104,6 +105,15 @@ function oferta(base = {}) {
     assertDestinoCompativel("awin", ["AWIN / KaBuM"], "oferta awin + destino AWIN/KaBuM deve ser compativel");
     assertDestinoCompativel("feed_awin", ["kabum"], "feed_awin + destino kabum deve ser compativel");
     assertDestinoCompativel("feed_kabum", ["awin"], "feed_kabum + destino awin deve ser compativel");
+    assertDestinoCompativel("magalu", ["magalu"], "oferta Magalu + destino Magalu deve ser compativel");
+    assertDestinoCompativel("magalu", ["Magazine Luiza"], "rotulo Magazine Luiza deve normalizar para Magalu");
+
+    const destinoSemMagalu = destinos.analisarDestinoOferta(
+      destinoMarketplace(["amazon"]),
+      oferta({ marketplace: "magalu" })
+    );
+    assert.strictEqual(destinoSemMagalu.aceitaMarketplace, false, "destino sem Magalu nao deve aceitar oferta Magalu");
+    assert.strictEqual(destinoSemMagalu.aceita, false, "destino sem Magalu deve reter oferta Magalu");
 
     const destinoRealWorkspace = destinoMarketplace(["mercadolivre", "aliexpress", "awin", "amazon", "shopee"], {
       id: "6cf3af18-536e-4d83-a2b5-2367fbf38daf",
@@ -125,6 +135,12 @@ function oferta(base = {}) {
 
     const awin = await validarOfertaParaDistribuicao(oferta({ marketplace: "AWIN" }), contexto(destinoAwinKabum()));
     assert.strictEqual(awin.ok, true, "AWIN + destino AWIN/KaBuM deve ser compativel");
+
+    const magalu = await validarOfertaParaDistribuicao(
+      oferta({ marketplace: "magalu", titulo: "Smartphone OPPO A5", categoria: "Celulares e Smartphones" }),
+      contexto(destinoMarketplace(["magalu"], { categorias: ["Celulares e Smartphones"] }))
+    );
+    assert.strictEqual(magalu.ok, true, "Distributor deve reconhecer marketplace magalu contra destino Magalu");
 
     const estruturaPermitidos = await validarOfertaParaDistribuicao(oferta(), contexto(destinoAwinKabum({
       marketplaces: [],

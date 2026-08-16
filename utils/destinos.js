@@ -40,7 +40,10 @@ const ALIASES_MARKETPLACE_DESTINO = {
   awinkabum: ["awin", "kabum"],
   kabumawin: ["kabum", "awin"],
   feedawin: ["awin", "kabum"],
-  feedkabum: ["kabum", "awin"]
+  feedkabum: ["kabum", "awin"],
+  magalu: ["magalu"],
+  magazineluiza: ["magalu"],
+  magazinevoce: ["magalu"]
 };
 
 let categoriasOficiaisDestinoCache = null;
