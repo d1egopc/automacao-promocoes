@@ -76,6 +76,31 @@ function caminhoProdutoBase(urlOriginal = "") {
   return { pathname, search: parsed.search || "" };
 }
 
+function caminhoPdpPorDivulgadorOferta(pathname = "") {
+  const partes = String(pathname || "").split("/").filter(Boolean);
+  const indiceDivulgador = partes.findIndex(parte => parte.toLowerCase() === "divulgador");
+  if (indiceDivulgador < 0) return "";
+  if ((partes[indiceDivulgador + 1] || "").toLowerCase() !== "oferta") return "";
+
+  const produtoId = texto(partes[indiceDivulgador + 2] || "");
+  const categoria = texto(partes[indiceDivulgador + 3] || "");
+  const subcategoria = texto(partes[indiceDivulgador + 4] || "");
+  if (!produtoId || !categoria || !subcategoria) return "";
+
+  const slug = partes.slice(0, indiceDivulgador).join("/");
+  return `/${slug}/p/${produtoId}/${categoria}/${subcategoria}/`;
+}
+
+function caminhoFactualMagalu(urlOriginal = "") {
+  const base = caminhoProdutoBase(urlOriginal);
+  const pdpDivulgador = caminhoPdpPorDivulgadorOferta(base.pathname);
+  return {
+    pathname: pdpDivulgador || base.pathname,
+    search: pdpDivulgador ? "" : base.search,
+    origem: pdpDivulgador ? "divulgador_oferta_para_pdp" : "url_original"
+  };
+}
+
 function urlComHost(hostname = "", pathname = "", search = "") {
   if (!hostname || !pathname || !/\/p\/[^/]+/i.test(pathname)) return "";
   const destino = new URL(`https://${hostname}${pathname}`);
@@ -98,7 +123,7 @@ function construirFontesMagalu({ urlOriginal = "", promoterId = "" } = {}) {
   const candidatas = [];
   const vistos = new Set();
   const original = parseUrlSegura(urlOriginal);
-  const base = caminhoProdutoBase(urlOriginal);
+  const base = caminhoFactualMagalu(urlOriginal);
   const produtoIdOriginal = produtoIdPorUrl(urlOriginal);
   if (!produtoIdOriginal) return candidatas;
 
@@ -148,6 +173,7 @@ function lojaOriginalDivergente(urlOriginal = "", promoterId = "") {
 
 function temAvisoBloqueante(avisos = []) {
   return avisos.includes("magalu_captcha_detectado") ||
+    avisos.includes("magalu_http_403") ||
     avisos.includes("magalu_pagina_indisponivel") ||
     avisos.includes("magalu_conteudo_produto_divergente_ignorado") ||
     avisos.includes("magalu_jsonld_produto_divergente_ignorado");
@@ -211,12 +237,68 @@ function limparPrecosPorSellerDivergente(fatos = {}, avisos = []) {
   };
 }
 
+function urlsIdentidadeFactual(fatos = {}) {
+  return listaUnica([
+    fatos.urlCanonica,
+    fatos.urlFinal,
+    fatos.finalUrl,
+    fatos.response?.url,
+    fatos.resposta?.url
+  ]);
+}
+
+function avaliarIdentidadeFactual({ fatos = {}, fonte = {}, produtoIdOriginal = "" } = {}) {
+  const produtoIdCandidata = produtoIdPorUrl(fonte.url);
+  const produtoIdDeclarado = texto(fatos.produtoId || fatos.codigo);
+
+  if (produtoIdOriginal && produtoIdCandidata && produtoIdCandidata !== produtoIdOriginal) {
+    return {
+      ok: false,
+      motivo: "produto_divergente",
+      avisos: ["magalu_produto_divergente_ignorado", "magalu_candidata_produto_divergente"]
+    };
+  }
+
+  if (produtoIdOriginal && produtoIdDeclarado && produtoIdDeclarado !== produtoIdOriginal) {
+    return {
+      ok: false,
+      motivo: "produto_divergente",
+      avisos: ["magalu_produto_divergente_ignorado"]
+    };
+  }
+
+  for (const url of urlsIdentidadeFactual(fatos)) {
+    const produtoIdUrl = produtoIdPorUrl(url);
+    if (!produtoIdUrl) continue;
+    if (produtoIdOriginal && produtoIdUrl !== produtoIdOriginal) {
+      return {
+        ok: false,
+        motivo: "url_factual_produto_divergente",
+        avisos: ["magalu_produto_divergente_ignorado", "magalu_url_factual_produto_divergente"]
+      };
+    }
+    if (produtoIdCandidata && produtoIdUrl !== produtoIdCandidata) {
+      return {
+        ok: false,
+        motivo: "url_factual_produto_divergente",
+        avisos: ["magalu_produto_divergente_ignorado", "magalu_url_factual_produto_divergente"]
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    produtoIdFonte: produtoIdDeclarado || produtoIdPorUrl(fatos.urlCanonica) || produtoIdPorUrl(fatos.urlFinal) || produtoIdPorUrl(fatos.response?.url) || produtoIdCandidata || produtoIdOriginal
+  };
+}
+
 function avaliarFatos({ fatos = {}, fonte = {}, urlOriginal = "", produtoIdOriginal = "", sellerIdOriginal = "" } = {}) {
   const avisos = listaUnica(fatos.avisos || []);
-  const produtoIdFonte = texto(fatos.produtoId || fatos.codigo || produtoIdPorUrl(fatos.urlCanonica) || produtoIdPorUrl(fonte.url));
+  const identidade = avaliarIdentidadeFactual({ fatos, fonte, produtoIdOriginal });
+  const produtoIdFonte = texto(identidade.produtoIdFonte || "");
 
-  if (produtoIdOriginal && produtoIdFonte && produtoIdFonte !== produtoIdOriginal) {
-    return { aceito: false, motivo: "produto_divergente", avisos: ["magalu_produto_divergente_ignorado"] };
+  if (!identidade.ok) {
+    return { aceito: false, motivo: identidade.motivo, avisos: identidade.avisos };
   }
 
   if (temAvisoBloqueante(avisos)) {
@@ -324,6 +406,7 @@ async function resolverFatosMagalu({ urlOriginal = "", promoterId = "" } = {}, o
       tentativas,
       fatos: {
         ...avaliacao.fatos,
+        urlAfiliavelComprovada: fonte.url,
         urlOriginal,
         avisos: listaUnica([...(avaliacao.fatos.avisos || []), ...(avaliacao.avisos || [])])
       },

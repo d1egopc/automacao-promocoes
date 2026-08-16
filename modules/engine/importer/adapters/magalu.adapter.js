@@ -230,6 +230,14 @@ function avisosProdutoBloqueiamFallbackRadarMagalu(avisos = []) {
   return bloqueadores.some(aviso => avisos.includes(aviso));
 }
 
+function urlDivulgadorOfertaMagalu(url = "") {
+  try {
+    return /\/divulgador\/oferta\/[^/?#]+/i.test(new URL(url).pathname);
+  } catch (_) {
+    return false;
+  }
+}
+
 function urlAfiliavelMesmoProdutoMagalu(produto = {}, urlOriginal = "", avisos = []) {
   if (avisos.includes("magalu_captcha_detectado")) {
     return "";
@@ -242,11 +250,9 @@ function urlAfiliavelMesmoProdutoMagalu(produto = {}, urlOriginal = "", avisos =
   }
 
   const produtoIdOriginal = produtoIdPorUrl(urlOriginal);
-  const candidatas = [
-    urlOriginal,
-    produto.urlCanonica,
-    produto.urlOriginal,
-  ];
+  const candidatas = urlDivulgadorOfertaMagalu(urlOriginal)
+    ? [produto.urlAfiliavelComprovada, produto.urlCanonica, produto.urlOriginal, urlOriginal]
+    : [urlOriginal, produto.urlCanonica, produto.urlOriginal];
 
   for (const candidata of candidatas) {
     const url = primeiroValor(candidata);
@@ -429,11 +435,10 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
   const precoOriginal = primeiroValor(produto.precoAnterior, produto.precoOriginal, produto.precoAntigo);
   const economiaCalculada = radarDefiniuPreco ? { economia: "", percentual: "" } : calcularEconomia(precoAtual, precoOriginal);
 
-  logMagaluAdapter("[ENGINE-MAGALU-IMPORTADOR-RETORNO]", {
+  const payloadRetornoMagalu = {
     jobId: job.id,
     eventoId: job.evento_id,
     clienteId,
-    ok: true,
     titulo: tituloFinal,
     precoAtual,
     precoPagina,
@@ -443,7 +448,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     imagem: produto.imagem || "",
     categoria: produto.categoria || "",
     camposRetorno: Object.keys(produto || {})
-  });
+  };
 
   if (avisosProdutoBloqueiamFallbackRadarMagalu(avisosProduto)) {
     return {
@@ -485,6 +490,11 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
       }
     };
   }
+
+  logMagaluAdapter("[ENGINE-MAGALU-IMPORTADOR-RETORNO]", {
+    ...payloadRetornoMagalu,
+    ok: true
+  });
 
   return {
     ok: true,

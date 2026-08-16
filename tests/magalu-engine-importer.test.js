@@ -23,6 +23,7 @@ const urlRealA07 = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-s
 const urlA17Divergente = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a17/p/240575800/te/ga17/";
 const urlNightCaviar = "https://www.magazinevoce.com.br/d1egopc/night-caviar-100ml-paris-elysses/p/be172949ba/pf/ppfm/";
 const urlDivulgadorOferta = "https://www.magazineluiza.com.br/smart-tv-50-tcl-4k-uhd-qled-50p7k-google-tv-aipq-google-assistente-3-hdmi/divulgador/oferta/240144700/et/elit/?promoter_id=5438968&partner_id=3440";
+const urlDivulgadorOfertaPdp = "https://www.magazineluiza.com.br/smart-tv-50-tcl-4k-uhd-qled-50p7k-google-tv-aipq-google-assistente-3-hdmi/p/240144700/et/elit/";
 const htmlProduto = `
   <html>
     <head>
@@ -435,8 +436,104 @@ async function testarDivulgadorOfertaNaoFalhaPorLinkProduto() {
 
   assert.notStrictEqual(resultado.motivo, "sem_link_produto_confirmado");
   assert.strictEqual(resultado.marketplace, "magalu");
-  assert.strictEqual(resultado.motivo, "preco_indisponivel");
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.produtoId, "240144700");
+  assert.strictEqual(resultado.linkExpandido, urlDivulgadorOfertaPdp);
+  assert.ok(resultado.linkAfiliado.includes("/magazined1egopc/"));
+  assert.ok(!resultado.linkAfiliado.includes("/divulgador/oferta/"));
   assert.strictEqual(resultado.linkOriginal, urlDivulgadorOferta);
+}
+
+async function testarDivulgadorOfertaUsaPdpComprovadaParaAfiliado() {
+  const chamadasGerador = [];
+  const pacote = deps();
+  const resultado = await importarProdutoMagaluEngine({
+    job: { id: 1502, evento_id: 1602, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento: {
+      texto_original: "Smart TV 50 TCL 4K UHD QLED 50P7K\nPor R$ 2.069,10\n" + urlDivulgadorOferta,
+      links_extraidos: [urlDivulgadorOferta]
+    },
+    links: [linkRow(56, urlDivulgadorOferta)],
+    deps: {
+      ...pacote.deps,
+      resolverFatosMagalu: async ({ urlOriginal, promoterId }) => {
+        assert.strictEqual(urlOriginal, urlDivulgadorOferta);
+        assert.strictEqual(promoterId, "d1egopc");
+        return {
+          ok: true,
+          produtoId: "240144700",
+          fonteUsada: "pdp_www",
+          tentativas: [{ fonte: "pdp_www", statusFactual: "aceita", motivo: "aceito" }],
+          fatos: {
+            urlOriginal,
+            urlCanonica: urlDivulgadorOferta,
+            urlAfiliavelComprovada: urlDivulgadorOfertaPdp,
+            produtoId: "240144700",
+            codigo: "240144700",
+            titulo: "Smart TV 50 TCL 4K UHD QLED 50P7K",
+            precoAtual: "R$ 2.069,10",
+            precoAnterior: "",
+            imagem: "https://a-static.mlcdn.com.br/tv-50-tcl.jpg",
+            categoria: "TV e Video",
+            seller: "Magalu",
+            parcelamento: "",
+            cupom: "",
+            avisos: []
+          },
+          avisos: []
+        };
+      },
+      gerarLinkAfiliadoMagaluSeguro: (url, promoterId) => {
+        chamadasGerador.push({ url, promoterId });
+        return {
+          urlAfiliada: "https://www.magazinevoce.com.br/magazined1egopc/smart-tv-50-tcl-4k-uhd-qled-50p7k-google-tv-aipq-google-assistente-3-hdmi/p/240144700/et/elit/",
+          tipoLink: "magazinevoce_loja_produto",
+          proveniencia: "conversao_dominio_oficial_para_loja_configurada",
+          comprovado: true,
+          avisos: []
+        };
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(chamadasGerador.length, 1);
+  assert.strictEqual(chamadasGerador[0].url, urlDivulgadorOfertaPdp);
+  assert.strictEqual(chamadasGerador[0].promoterId, "d1egopc");
+  assert.strictEqual(resultado.produtoId, "240144700");
+  assert.strictEqual(resultado.linkExpandido, urlDivulgadorOfertaPdp);
+  assert.ok(resultado.linkAfiliado.includes("/magazined1egopc/"));
+  assert.ok(!resultado.linkAfiliado.includes("/divulgador/oferta/"));
+}
+
+async function testarLogRetornoNaoAnunciaOkAntesDosGuards() {
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (evento, payload) => {
+    logs.push({ evento, payload: payload ? JSON.parse(payload) : {} });
+  };
+
+  try {
+    const pacote = deps({
+      gerarLinkAfiliadoMagaluSeguro: () => ({
+        urlAfiliada: "",
+        tipoLink: "magazineluiza_original",
+        proveniencia: "host_produto_magalu_original",
+        comprovado: false,
+        avisos: ["magalu_url_original_nao_e_afiliada"]
+      })
+    });
+
+    const resultado = await importarMagaluFixture({ depsExtras: pacote.deps });
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.motivo, "link_afiliado_vazio");
+    assert.ok(!logs.some(log =>
+      log.evento === "[ENGINE-MAGALU-IMPORTADOR-RETORNO]" &&
+      log.payload.ok === true
+    ));
+  } finally {
+    console.log = originalLog;
+  }
 }
 
 async function testarImagemRadarPreservadaQuandoResolverSemImagem() {
@@ -566,6 +663,8 @@ function testarRegistriesPipelineUnico() {
   await testarDeepLinkOutraLojaNaoContinuaPipeline();
   await testarOfertaUniversalValida();
   await testarDivulgadorOfertaNaoFalhaPorLinkProduto();
+  await testarDivulgadorOfertaUsaPdpComprovadaParaAfiliado();
+  await testarLogRetornoNaoAnunciaOkAntesDosGuards();
   await testarImagemRadarPreservadaQuandoResolverSemImagem();
   testarClassificadorDeLinksMagalu();
   testarRegistriesPipelineUnico();
