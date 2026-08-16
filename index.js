@@ -175,6 +175,7 @@ const criarRotasStorageManager = require("./modules/storage-manager/storage.rout
 const criarRotasResetEsteirasPreflight = require("./modules/engine/reset-esteiras/preflight.routes");
 const criarRotasManualV2 = require("./modules/manual-v2/manual-offers.routes");
 const criarRotasDiscord = require("./modules/discord/discord.routes");
+const criarRotasAjudaContextual = require("./modules/ajuda-contextual/routes");
 const {
   listarConexoesDiscord
 } = require("./modules/discord/discord-connections.storage");
@@ -9302,6 +9303,11 @@ app.use("/telemetria", criarRotasTelemetria({
 }));
 
 app.use(auth);
+app.use(criarRotasAjudaContextual({
+  readGlobalJson,
+  writeGlobalJson,
+  isAdminMaster: (req) => req.usuario?.papel === "admin_master"
+}));
 app.get("/admin/config/links-optimus", responderAdminConfigLinksOptimus);
 app.put("/admin/config/links-optimus", salvarAdminConfigLinksOptimus);
 
