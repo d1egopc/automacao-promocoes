@@ -74,31 +74,60 @@ function sanitizarDestinosAgendados(destinos = []) {
 }
 
 function sanitizarResultadoEnvio(resultado = {}) {
-  const status = texto(resultado.status).toLowerCase() === "enviado" ? "enviado" : "erro";
   const tipo = texto(resultado.tipo).toLowerCase();
-  return {
+  const tipoSanitizado = tipo === "telegram" || tipo === "discord" ? tipo : "whatsapp";
+  const statusOriginal = texto(resultado.status).toLowerCase() === "enviado" ? "enviado" : "erro";
+  const messageId = texto(resultado.messageId).slice(0, 200);
+  const statusHttp = Number(resultado.statusHttp || 0) || 0;
+  const discordComSucessoForte = tipoSanitizado !== "discord" ||
+    statusOriginal !== "enviado" ||
+    (messageId && statusHttp >= 200 && statusHttp < 300);
+  const status = discordComSucessoForte ? statusOriginal : "erro";
+  const erroDiscord = statusOriginal === "enviado" && tipoSanitizado === "discord" && status === "erro"
+    ? (statusHttp > 0 && (statusHttp < 200 || statusHttp >= 300)
+      ? "discord_status_http_invalido"
+      : "discord_resposta_sem_message_id")
+    : "";
+  const sanitizado = {
     destinoId: texto(resultado.destinoId),
     nome: texto(resultado.nome),
-    tipo: tipo === "telegram" || tipo === "discord" ? tipo : "whatsapp",
+    tipo: tipoSanitizado,
     status,
     enviadoEm: texto(resultado.enviadoEm),
-    erro: status === "erro" ? texto(resultado.erro).slice(0, 500) : ""
+    erro: status === "erro" ? texto(resultado.erro || erroDiscord).slice(0, 500) : ""
   };
+
+  if (tipoSanitizado === "discord") {
+    if (messageId) sanitizado.messageId = messageId;
+    if (statusHttp > 0) sanitizado.statusHttp = statusHttp;
+    if (typeof resultado.imagemEnviada === "boolean") {
+      sanitizado.imagemEnviada = resultado.imagemEnviada;
+    }
+  }
+
+  return sanitizado;
 }
 
 function sanitizarEnvioManual(envioManual = {}) {
+  const resultados = lista(envioManual.resultados)
+    .map(sanitizarResultadoEnvio)
+    .filter((resultado) => resultado.destinoId || resultado.erro);
+  const enviadosSanitizados = resultados.filter((resultado) => resultado.status === "enviado").length;
+  const errosSanitizados = resultados.filter((resultado) => resultado.status === "erro").length;
+  const usarContagemSanitizada = resultados.length > 0;
+
   return {
     solicitadoEm: texto(envioManual.solicitadoEm),
     concluidoEm: texto(envioManual.concluidoEm),
     destinosEscolhidos: lista(envioManual.destinosEscolhidos)
       .map(sanitizarDestinoEscolhido)
       .filter((destino) => destino.id),
-    resultados: lista(envioManual.resultados)
-      .map(sanitizarResultadoEnvio)
-      .filter((resultado) => resultado.destinoId || resultado.erro),
-    enviados: inteiro(envioManual.enviados),
-    erros: inteiro(envioManual.erros),
-    creditosDebitados: inteiro(envioManual.creditosDebitados),
+    resultados,
+    enviados: usarContagemSanitizada ? enviadosSanitizados : inteiro(envioManual.enviados),
+    erros: usarContagemSanitizada ? errosSanitizados : inteiro(envioManual.erros),
+    creditosDebitados: usarContagemSanitizada
+      ? Math.min(inteiro(envioManual.creditosDebitados), enviadosSanitizados)
+      : inteiro(envioManual.creditosDebitados),
     erroResumo: texto(envioManual.erroResumo).slice(0, 1000)
   };
 }
@@ -257,6 +286,10 @@ function atualizarMetadadosEnvioManualV2(clienteId = "admin", ofertaId = "", met
 
   if (metadados.envioManual && typeof metadados.envioManual === "object") {
     proximaOferta.envioManual = sanitizarEnvioManual(metadados.envioManual);
+    if (proximaOferta.status === "enviada" && proximaOferta.envioManual.enviados < 1) {
+      proximaOferta.status = "erro";
+      delete proximaOferta.enviadoEm;
+    }
   }
 
   const proximaLista = [...listaOfertas];

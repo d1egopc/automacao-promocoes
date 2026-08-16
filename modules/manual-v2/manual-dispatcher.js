@@ -123,8 +123,16 @@ function resultadoErro({ destinoId = "", nome = "", tipo = "", erro = "", enviad
   };
 }
 
-function resultadoSucesso({ destinoId = "", nome = "", tipo = "", enviadoEm = "" } = {}) {
-  return {
+function resultadoSucesso({
+  destinoId = "",
+  nome = "",
+  tipo = "",
+  enviadoEm = "",
+  messageId = "",
+  statusHttp = null,
+  imagemEnviada
+} = {}) {
+  const resultado = {
     destinoId,
     nome,
     tipo,
@@ -132,6 +140,14 @@ function resultadoSucesso({ destinoId = "", nome = "", tipo = "", enviadoEm = ""
     enviadoEm,
     erro: ""
   };
+  const idMensagem = texto(messageId);
+  const status = Number(statusHttp || 0) || 0;
+  if (idMensagem) resultado.messageId = idMensagem;
+  if (status) resultado.statusHttp = status;
+  if (typeof imagemEnviada === "boolean") {
+    resultado.imagemEnviada = imagemEnviada;
+  }
+  return resultado;
 }
 
 function adaptarOfertaManualParaTemplate(oferta = {}) {
@@ -224,6 +240,21 @@ async function enviarDiscordManual({ destino, oferta, mensagem, deps }) {
   if (!resultado?.ok) {
     throw new Error(resultado?.erro || "discord_envio_falhou");
   }
+
+  const messageId = texto(resultado.messageId);
+  const statusHttp = Number(resultado.statusHttp || 0) || 0;
+  if (statusHttp < 200 || statusHttp >= 300) {
+    throw new Error("discord_status_http_invalido");
+  }
+  if (!messageId) {
+    throw new Error("discord_resposta_sem_message_id");
+  }
+
+  return {
+    messageId,
+    statusHttp,
+    imagemEnviada: Boolean(resultado.imagemEnviada)
+  };
 }
 
 function criarRetornoBase(ok = false, ofertaId = "", erro = "") {
@@ -322,12 +353,13 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
     try {
       const mensagem = montarMensagemManualV2(oferta, destino, { ...deps, plano });
       const tipo = tipoDestino(destino);
+      let detalhesEnvio = {};
       if (tipo === "telegram") {
         await enviarTelegramManual({ destino, mensagem, deps, clienteId: cliente });
       } else if (tipo === "whatsapp") {
         await enviarWhatsappManual({ destino, oferta, mensagem, deps });
       } else if (tipo === "discord") {
-        await enviarDiscordManual({ destino, oferta, mensagem, deps });
+        detalhesEnvio = await enviarDiscordManual({ destino, oferta, mensagem, deps });
       } else {
         throw new Error("Canal indisponivel");
       }
@@ -346,7 +378,8 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
       retorno.creditosDebitados += 1;
       retorno.resultados.push(resultadoSucesso({
         ...destinoBase,
-        enviadoEm: agoraIso(deps)
+        enviadoEm: agoraIso(deps),
+        ...detalhesEnvio
       }));
     } catch (e) {
       retorno.erros += 1;

@@ -306,6 +306,9 @@ function assertSemSegredos(retorno) {
     assert.strictEqual(chamadas.discord[0].imagemUrl, ofertaA.imagem);
     assert.strictEqual(chamadas.debitos.length, 1);
     assert.strictEqual(chamadas.templates[0].opcoes.canal, "discord");
+    assert.strictEqual(retorno.resultados[0].messageId, "discord_msg_1");
+    assert.strictEqual(retorno.resultados[0].statusHttp, 200);
+    assert.strictEqual(retorno.resultados[0].imagemEnviada, true);
     assertSemSegredos(retorno);
   }
 
@@ -418,6 +421,87 @@ function assertSemSegredos(retorno) {
     assert.strictEqual(chamadas.debitos.length, 0);
     assert.strictEqual(retorno.resultados[0].erro, "discord_sem_permissao");
     assertSemSegredos(retorno);
+  }
+
+  {
+    const { deps, chamadas } = baseDeps();
+    deps.enviarDiscord = async (payload) => {
+      chamadas.discord.push(payload);
+      return {
+        ok: true,
+        channelId: payload.channelId,
+        messageId: "",
+        enviadoEm: "2026-08-15T12:00:00.000Z",
+        imagemEnviada: true,
+        erro: "",
+        statusHttp: 200
+      };
+    };
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: "oferta_a",
+      destinosIds: ["dc_ok"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, false);
+    assert.strictEqual(retorno.enviados, 0);
+    assert.strictEqual(retorno.erros, 1);
+    assert.strictEqual(retorno.creditosDebitados, 0);
+    assert.strictEqual(chamadas.discord.length, 1);
+    assert.strictEqual(chamadas.debitos.length, 0);
+    assert.strictEqual(retorno.resultados[0].erro, "discord_resposta_sem_message_id");
+    assertSemSegredos(retorno);
+  }
+
+  {
+    const { deps, chamadas } = baseDeps();
+    deps.enviarDiscord = async (payload) => {
+      chamadas.discord.push(payload);
+      return {
+        ok: true,
+        channelId: payload.channelId,
+        messageId: "",
+        enviadoEm: "2026-08-15T12:00:00.000Z",
+        imagemEnviada: false,
+        erro: "",
+        statusHttp: 204
+      };
+    };
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: "oferta_a",
+      destinosIds: ["dc_ok"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, false);
+    assert.strictEqual(retorno.enviados, 0);
+    assert.strictEqual(retorno.creditosDebitados, 0);
+    assert.strictEqual(chamadas.debitos.length, 0);
+    assert.strictEqual(retorno.resultados[0].erro, "discord_resposta_sem_message_id");
+  }
+
+  {
+    const { deps, chamadas } = baseDeps();
+    deps.enviarDiscord = async (payload) => {
+      chamadas.discord.push(payload);
+      return {
+        ok: false,
+        channelId: payload.channelId,
+        erro: "discord_channel_resposta_divergente",
+        statusHttp: 200
+      };
+    };
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: "oferta_a",
+      destinosIds: ["dc_ok"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, false);
+    assert.strictEqual(retorno.enviados, 0);
+    assert.strictEqual(retorno.creditosDebitados, 0);
+    assert.strictEqual(chamadas.debitos.length, 0);
+    assert.strictEqual(retorno.resultados[0].erro, "discord_channel_resposta_divergente");
   }
 
   {

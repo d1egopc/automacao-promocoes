@@ -28,6 +28,14 @@ const destinosPorCliente = {
       tipo: "telegram",
       ativo: true,
       telegramDestinos: ["chat_ok"]
+    },
+    {
+      id: "dc_ok",
+      nome: "Discord Ofertas",
+      tipo: "discord",
+      ativo: true,
+      conexaoId: "discord_a",
+      channelId: "canal_discord"
     }
   ],
   cliente_b: [
@@ -74,9 +82,24 @@ function criarApp(dispatcher, storageOptions) {
     getPlanoUsuario: () => ({
       recursos: {
         whatsapp: true,
-        telegram: true
+        telegram: true,
+        discord: true
       }
     }),
+    discordConexoes: [{
+      id: "discord_a",
+      guildId: "guild_a",
+      guildName: "Servidor A",
+      ativo: true
+    }],
+    discordCanaisPorConexao: {
+      discord_a: [{
+        id: "canal_discord",
+        nome: "ofertas",
+        utilizavel: true
+      }]
+    },
+    discordSenderDisponivel: true,
     enviarOfertaManualV2: dispatcher
   }));
   return app;
@@ -107,7 +130,7 @@ function arquivoCliente(clienteId, arquivo) {
 
 function assertSemSegredos(valor) {
   const serializado = JSON.stringify(valor);
-  for (const termo of ["SEGREDO", "botToken", "token", "secret", "cookie", "chat_ok"]) {
+  for (const termo of ["SEGREDO", "botToken", "token", "secret", "cookie", "chat_ok", "Authorization", "headers", "payloadBruto", "responseCompleto"]) {
     assert.ok(!serializado.includes(termo), `resposta/storage nao pode expor ${termo}`);
   }
 }
@@ -183,6 +206,86 @@ function criarOferta(clienteId, id, extra = {}) {
             token: "NAO_SAIR"
           }
         ]
+      };
+    }
+    if (modo === "discord_sucesso") {
+      return {
+        ok: true,
+        ofertaId: entrada.ofertaId,
+        enviados: 1,
+        erros: 0,
+        creditosDebitados: 1,
+        resultados: [{
+          destinoId: "dc_ok",
+          nome: "Discord Ofertas",
+          tipo: "discord",
+          status: "enviado",
+          enviadoEm: "2026-08-15T12:40:00.000Z",
+          erro: "",
+          messageId: "discord_msg_123",
+          statusHttp: 200,
+          imagemEnviada: true,
+          headers: { Authorization: "Bot NAO_SAIR" },
+          payloadBruto: { token: "NAO_SAIR" }
+        }]
+      };
+    }
+    if (modo === "discord_sem_message_id") {
+      return {
+        ok: true,
+        ofertaId: entrada.ofertaId,
+        enviados: 1,
+        erros: 0,
+        creditosDebitados: 1,
+        resultados: [{
+          destinoId: "dc_ok",
+          nome: "Discord Ofertas",
+          tipo: "discord",
+          status: "enviado",
+          enviadoEm: "2026-08-15T12:41:00.000Z",
+          erro: "",
+          messageId: "",
+          statusHttp: 200,
+          imagemEnviada: true
+        }]
+      };
+    }
+    if (modo === "discord_204") {
+      return {
+        ok: true,
+        ofertaId: entrada.ofertaId,
+        enviados: 1,
+        erros: 0,
+        creditosDebitados: 1,
+        resultados: [{
+          destinoId: "dc_ok",
+          nome: "Discord Ofertas",
+          tipo: "discord",
+          status: "enviado",
+          enviadoEm: "2026-08-15T12:42:00.000Z",
+          erro: "",
+          messageId: "",
+          statusHttp: 204,
+          imagemEnviada: false
+        }]
+      };
+    }
+    if (modo === "discord_channel_divergente") {
+      return {
+        ok: false,
+        ofertaId: entrada.ofertaId,
+        enviados: 0,
+        erros: 1,
+        creditosDebitados: 0,
+        resultados: [{
+          destinoId: "dc_ok",
+          nome: "Discord Ofertas",
+          tipo: "discord",
+          status: "erro",
+          enviadoEm: "",
+          erro: "discord_channel_resposta_divergente",
+          statusHttp: 200
+        }]
       };
     }
     return {
@@ -264,6 +367,49 @@ function criarOferta(clienteId, id, extra = {}) {
       assert.deepStrictEqual(resposta.body.oferta.envioManual.resultados.map((item) => item.status), ["enviado", "erro"]);
       assertSemSegredos(resposta.body);
       assertSemSegredos(storage.buscarOfertaManualV2("cliente_a", oferta.id));
+    }
+
+    {
+      modo = "discord_sucesso";
+      const oferta = criarOferta("cliente_a", "oferta_discord_sucesso");
+      const resposta = await request(server, "POST", `/manual-v2/ofertas/${oferta.id}/enviar-agora`, "cliente_a", {
+        destinosIds: ["dc_ok"]
+      });
+
+      assert.strictEqual(resposta.status, 200);
+      assert.strictEqual(resposta.body.ok, true);
+      assert.strictEqual(resposta.body.oferta.status, "enviada");
+      assert.strictEqual(resposta.body.oferta.envioManual.enviados, 1);
+      assert.strictEqual(resposta.body.oferta.envioManual.creditosDebitados, 1);
+      assert.strictEqual(resposta.body.oferta.envioManual.resultados[0].messageId, "discord_msg_123");
+      assert.strictEqual(resposta.body.oferta.envioManual.resultados[0].statusHttp, 200);
+      assert.strictEqual(resposta.body.oferta.envioManual.resultados[0].imagemEnviada, true);
+      assertSemSegredos(resposta.body);
+    }
+
+    {
+      for (const [modoFalha, erroEsperado] of [
+        ["discord_sem_message_id", "discord_resposta_sem_message_id"],
+        ["discord_204", "discord_resposta_sem_message_id"],
+        ["discord_channel_divergente", "discord_channel_resposta_divergente"]
+      ]) {
+        modo = modoFalha;
+        const oferta = criarOferta("cliente_a", `oferta_${modoFalha}`);
+        const resposta = await request(server, "POST", `/manual-v2/ofertas/${oferta.id}/enviar-agora`, "cliente_a", {
+          destinosIds: ["dc_ok"]
+        });
+        const persistida = storage.buscarOfertaManualV2("cliente_a", oferta.id);
+
+        assert.strictEqual(resposta.body.oferta.status, "erro", `${modoFalha} nao pode ir para historico`);
+        assert.strictEqual(persistida.status, "erro");
+        assert.strictEqual(Boolean(persistida.enviadoEm), false);
+        assert.strictEqual(persistida.envioManual.enviados, 0);
+        assert.strictEqual(persistida.envioManual.creditosDebitados, 0);
+        assert.strictEqual(persistida.envioManual.resultados[0].status, "erro");
+        assert.strictEqual(persistida.envioManual.resultados[0].erro, erroEsperado);
+        assertSemSegredos(resposta.body);
+        assertSemSegredos(persistida);
+      }
     }
 
     {

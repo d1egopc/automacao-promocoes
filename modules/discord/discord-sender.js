@@ -200,6 +200,31 @@ function dataEnvio(now) {
   return new Date().toISOString();
 }
 
+function validarRespostaMensagemDiscord(resposta = {}, channelId = "") {
+  const status = Number(resposta?.status || 0) || 0;
+  if (status < 200 || status >= 300) {
+    return { ok: false, erro: "discord_status_http_invalido", statusHttp: status || null };
+  }
+
+  const data = resposta?.data || {};
+  const messageId = texto(data.id);
+  if (!messageId) {
+    return { ok: false, erro: "discord_resposta_sem_message_id", statusHttp: status };
+  }
+
+  const channelIdResposta = texto(data.channel_id || data.channelId);
+  if (channelIdResposta && channelIdResposta !== texto(channelId)) {
+    return { ok: false, erro: "discord_channel_resposta_divergente", statusHttp: status };
+  }
+
+  return {
+    ok: true,
+    data,
+    messageId,
+    statusHttp: status
+  };
+}
+
 async function enviarDiscord({ channelId = "", mensagem = "", imagemUrl = "", env = process.env, httpClient, now = () => new Date() } = {}) {
   const canal = texto(channelId);
   const conteudo = texto(mensagem);
@@ -244,15 +269,23 @@ async function enviarDiscord({ channelId = "", mensagem = "", imagemUrl = "", en
       body,
       { headers }
     );
-    const data = resposta?.data || {};
+    const validacao = validarRespostaMensagemDiscord(resposta, canal);
+    if (!validacao.ok) {
+      return respostaErro({
+        channelId: canal,
+        erro: validacao.erro,
+        status: validacao.statusHttp || null
+      });
+    }
+    const data = validacao.data || {};
     return {
       ok: true,
       channelId: canal,
-      messageId: texto(data.id),
+      messageId: validacao.messageId,
       enviadoEm: texto(data.timestamp) || dataEnvio(now),
       imagemEnviada,
       erro: "",
-      statusHttp: Number(resposta?.status || 200) || 200
+      statusHttp: validacao.statusHttp
     };
   } catch (erro) {
     const status = statusHttp(erro);

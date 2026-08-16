@@ -37,11 +37,13 @@ function criarHttp({ postStatus = 200, postData = {}, getData, getHeaders, postE
         if (postError) throw postError;
         return {
           status: postStatus,
-          data: {
-            id: "msg_123",
-            timestamp: "2026-08-15T12:00:00.000Z",
-            ...postData
-          }
+          data: postData === null
+            ? null
+            : {
+              id: "msg_123",
+              timestamp: "2026-08-15T12:00:00.000Z",
+              ...postData
+            }
         };
       }
     }
@@ -73,6 +75,71 @@ function textoJson(valor) {
     assert.strictEqual(http.chamadas.length, 1);
     assert.ok(http.chamadas[0].url.endsWith("/channels/canal_1/messages"));
     assert.deepStrictEqual(http.chamadas[0].body, { content: "Oferta renderizada pelo Optimus" });
+  }
+
+  {
+    const http = criarHttp({ postData: { id: "" } });
+    const resultado = await enviarDiscord({
+      channelId: "canal_1",
+      mensagem: "Oferta sem id",
+      env: ENV,
+      httpClient: http.client
+    });
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.erro, "discord_resposta_sem_message_id");
+    assert.strictEqual(resultado.statusHttp, 200);
+  }
+
+  {
+    const http = criarHttp({ postStatus: 204, postData: null });
+    const resultado = await enviarDiscord({
+      channelId: "canal_1",
+      mensagem: "Oferta sem corpo",
+      env: ENV,
+      httpClient: http.client
+    });
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.erro, "discord_resposta_sem_message_id");
+    assert.strictEqual(resultado.statusHttp, 204);
+  }
+
+  {
+    const http = criarHttp({ postStatus: 302 });
+    const resultado = await enviarDiscord({
+      channelId: "canal_1",
+      mensagem: "Redirect inesperado",
+      env: ENV,
+      httpClient: http.client
+    });
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.erro, "discord_status_http_invalido");
+    assert.strictEqual(resultado.statusHttp, 302);
+  }
+
+  {
+    const http = criarHttp({ postData: { channel_id: "canal_errado" } });
+    const resultado = await enviarDiscord({
+      channelId: "canal_1",
+      mensagem: "Canal divergente",
+      env: ENV,
+      httpClient: http.client
+    });
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.erro, "discord_channel_resposta_divergente");
+    assert.strictEqual(resultado.statusHttp, 200);
+  }
+
+  {
+    const http = criarHttp({ postData: { channel_id: "canal_1" } });
+    const resultado = await enviarDiscord({
+      channelId: "canal_1",
+      mensagem: "Canal confirmado",
+      env: ENV,
+      httpClient: http.client
+    });
+    assert.strictEqual(resultado.ok, true);
+    assert.strictEqual(resultado.messageId, "msg_123");
+    assert.strictEqual(resultado.statusHttp, 200);
   }
 
   {

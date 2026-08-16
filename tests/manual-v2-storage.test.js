@@ -15,7 +15,8 @@ const {
   buscarOfertaManualV2,
   criarOfertaManualV2,
   atualizarOfertaManualV2,
-  excluirOfertaManualV2
+  excluirOfertaManualV2,
+  atualizarMetadadosEnvioManualV2
 } = require("../modules/manual-v2/manual-offers.storage");
 
 let tick = 0;
@@ -30,6 +31,13 @@ function idFactory() {
 
 function arquivoCliente(clienteId, arquivo) {
   return getClienteJsonPath(clienteId, arquivo);
+}
+
+function assertSemSegredos(valor) {
+  const serializado = JSON.stringify(valor);
+  for (const termo of ["BOT_TOKEN", "Authorization", "headers", "payloadBruto", "responseCompleto"]) {
+    assert.ok(!serializado.includes(termo), `storage nao pode persistir ${termo}`);
+  }
 }
 
 {
@@ -128,6 +136,178 @@ function arquivoCliente(clienteId, arquivo) {
 
   const lista = listarOfertasManuaisV2("cliente_c");
   assert.deepStrictEqual(lista.map((oferta) => oferta.id), ["oferta_certa"]);
+}
+
+{
+  const oferta = criarOfertaManualV2("cliente_envio", {
+    id: "oferta_discord_sucesso",
+    marketplace: "amazon",
+    urlOriginal: "https://amazon.com.br/produto",
+    titulo: "Produto Discord"
+  }, { now, idFactory: () => "oferta_discord_sucesso" });
+
+  const atualizada = atualizarMetadadosEnvioManualV2("cliente_envio", oferta.id, {
+    status: "enviada",
+    enviadoEm: "2026-08-14T13:00:00.000Z",
+    envioManual: {
+      solicitadoEm: "2026-08-14T12:59:00.000Z",
+      concluidoEm: "2026-08-14T13:00:00.000Z",
+      destinosEscolhidos: [{
+        id: "discord_1",
+        nome: "Discord Ofertas",
+        tipo: "discord",
+        ativo: true,
+        utilizavel: true,
+        identificacaoVisual: "Servidor / #ofertas",
+        botToken: "BOT_TOKEN_NAO_SAIR"
+      }],
+      resultados: [{
+        destinoId: "discord_1",
+        nome: "Discord Ofertas",
+        tipo: "discord",
+        status: "enviado",
+        enviadoEm: "2026-08-14T13:00:00.000Z",
+        erro: "",
+        messageId: "msg_discord_123",
+        statusHttp: 200,
+        imagemEnviada: true,
+        headers: { Authorization: "Bot BOT_TOKEN_NAO_SAIR" },
+        payloadBruto: { token: "BOT_TOKEN_NAO_SAIR" },
+        responseCompleto: { id: "msg_discord_123" }
+      }],
+      enviados: 1,
+      erros: 0,
+      creditosDebitados: 1
+    }
+  }, { now });
+
+  assert.strictEqual(atualizada.status, "enviada");
+  assert.strictEqual(atualizada.envioManual.resultados[0].messageId, "msg_discord_123");
+  assert.strictEqual(atualizada.envioManual.resultados[0].statusHttp, 200);
+  assert.strictEqual(atualizada.envioManual.resultados[0].imagemEnviada, true);
+  assert.strictEqual(atualizada.envioManual.creditosDebitados, 1);
+  assertSemSegredos(atualizada);
+}
+
+{
+  const casos = [
+    {
+      id: "discord_sem_message_id",
+      resultado: {
+        destinoId: "discord_1",
+        nome: "Discord Ofertas",
+        tipo: "discord",
+        status: "enviado",
+        enviadoEm: "2026-08-14T13:10:00.000Z",
+        erro: "",
+        messageId: "",
+        statusHttp: 200,
+        imagemEnviada: true
+      },
+      erro: "discord_resposta_sem_message_id"
+    },
+    {
+      id: "discord_204",
+      resultado: {
+        destinoId: "discord_1",
+        nome: "Discord Ofertas",
+        tipo: "discord",
+        status: "enviado",
+        enviadoEm: "2026-08-14T13:10:00.000Z",
+        erro: "",
+        messageId: "",
+        statusHttp: 204,
+        imagemEnviada: false
+      },
+      erro: "discord_resposta_sem_message_id"
+    },
+    {
+      id: "discord_channel_divergente",
+      resultado: {
+        destinoId: "discord_1",
+        nome: "Discord Ofertas",
+        tipo: "discord",
+        status: "erro",
+        enviadoEm: "",
+        erro: "discord_channel_resposta_divergente",
+        statusHttp: 200
+      },
+      erro: "discord_channel_resposta_divergente"
+    }
+  ];
+
+  for (const caso of casos) {
+    const oferta = criarOfertaManualV2("cliente_envio", {
+      id: caso.id,
+      marketplace: "amazon",
+      urlOriginal: `https://amazon.com.br/${caso.id}`,
+      titulo: caso.id
+    }, { now, idFactory: () => caso.id });
+
+    const atualizada = atualizarMetadadosEnvioManualV2("cliente_envio", oferta.id, {
+      status: "enviada",
+      enviadoEm: "2026-08-14T13:10:00.000Z",
+      envioManual: {
+        resultados: [caso.resultado],
+        enviados: 1,
+        erros: 0,
+        creditosDebitados: 1
+      }
+    }, { now });
+
+    assert.strictEqual(atualizada.status, "erro", `${caso.id} nao pode ir para historico como enviada`);
+    assert.strictEqual(Boolean(atualizada.enviadoEm), false);
+    assert.strictEqual(atualizada.envioManual.resultados[0].status, "erro");
+    assert.strictEqual(atualizada.envioManual.resultados[0].erro, caso.erro);
+    assert.strictEqual(atualizada.envioManual.enviados, 0);
+    assert.strictEqual(atualizada.envioManual.erros, 1);
+    assert.strictEqual(atualizada.envioManual.creditosDebitados, 0);
+  }
+}
+
+{
+  const oferta = criarOfertaManualV2("cliente_envio", {
+    id: "oferta_wa_tg_intactos",
+    marketplace: "amazon",
+    urlOriginal: "https://amazon.com.br/wa-tg",
+    titulo: "WA TG"
+  }, { now, idFactory: () => "oferta_wa_tg_intactos" });
+
+  const atualizada = atualizarMetadadosEnvioManualV2("cliente_envio", oferta.id, {
+    status: "enviada",
+    enviadoEm: "2026-08-14T13:20:00.000Z",
+    envioManual: {
+      resultados: [
+        {
+          destinoId: "wa_1",
+          nome: "WA",
+          tipo: "whatsapp",
+          status: "enviado",
+          enviadoEm: "2026-08-14T13:20:00.000Z",
+          erro: "",
+          messageId: "nao_persistir_em_wa"
+        },
+        {
+          destinoId: "tg_1",
+          nome: "TG",
+          tipo: "telegram",
+          status: "enviado",
+          enviadoEm: "2026-08-14T13:20:01.000Z",
+          erro: "",
+          statusHttp: 200
+        }
+      ],
+      enviados: 2,
+      erros: 0,
+      creditosDebitados: 2
+    }
+  }, { now });
+
+  assert.strictEqual(atualizada.status, "enviada");
+  assert.strictEqual(atualizada.envioManual.enviados, 2);
+  assert.strictEqual(atualizada.envioManual.creditosDebitados, 2);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(atualizada.envioManual.resultados[0], "messageId"), false);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(atualizada.envioManual.resultados[1], "statusHttp"), false);
 }
 
 {
