@@ -186,6 +186,9 @@ const {
   enviarDiscord
 } = require("./modules/discord/discord-sender");
 const {
+  obterConfigDiscord
+} = require("./modules/discord/discord-oauth");
+const {
   iniciarManualV2Scheduler
 } = require("./modules/manual-v2/manual-scheduler.runner");
 const {
@@ -2511,6 +2514,45 @@ function normalizarDestinosContrato(valor) {
 
 function destinoEhDiscord(destino = {}) {
   return String(destino?.tipo || "").trim().toLowerCase() === "discord";
+}
+
+function textoDiscordExecutor(valor = "") {
+  return String(valor ?? "").trim();
+}
+
+function clienteTemRecursoDiscord(clienteId = "admin") {
+  const usuario = usuarios.find(u => String(u?.id || "") === String(clienteId || "")) || null;
+  if (!usuario) return clienteId === "admin";
+  if (usuarioEhAdminMaster(usuario)) return true;
+
+  const plano = getPlanoPorNome(usuario.plano) || {};
+  return plano?.recursos?.discord === true;
+}
+
+function destinoDiscordTemIdentidadeCanal(destino = {}) {
+  return Boolean(
+    textoDiscordExecutor(destino.conexaoId || destino.sessao || destino.idConexao) &&
+    textoDiscordExecutor(destino.channelId || destino.canalId || destino.grupo || destino.canal)
+  );
+}
+
+function diagnosticarDestinoDiscordAptoEnvio(clienteId = "admin", destino = {}) {
+  if (!destinoEhDiscord(destino)) return { ok: false, motivo: "nao_discord" };
+  if (!clienteTemRecursoDiscord(clienteId)) return { ok: false, motivo: "discord_plano_indisponivel" };
+  if (typeof enviarDiscord !== "function") return { ok: false, motivo: "discord_sender_indisponivel" };
+  if (!textoDiscordExecutor(obterConfigDiscord(process.env).botToken)) return { ok: false, motivo: "discord_config_indisponivel" };
+  if (!destinoDiscordTemIdentidadeCanal(destino)) return { ok: false, motivo: "discord_destino_incompleto" };
+
+  const conexaoId = textoDiscordExecutor(destino.conexaoId || destino.sessao || destino.idConexao);
+  try {
+    const conexao = listarConexoesDiscord(clienteId).find(item => textoDiscordExecutor(item?.id) === conexaoId);
+    if (!conexao) return { ok: false, motivo: "discord_conexao_nao_encontrada" };
+    if (conexao.ativo === false) return { ok: false, motivo: "discord_conexao_inativa" };
+    if (!textoDiscordExecutor(conexao.guildId)) return { ok: false, motivo: "discord_guild_id_ausente" };
+    return { ok: true, motivo: "" };
+  } catch (erro) {
+    return { ok: false, motivo: erro?.message || "discord_indisponivel" };
+  }
 }
 
 async function normalizarDestinosContratoComDiscord(clienteId = "admin", destinos = [], req = null) {
@@ -4860,15 +4902,17 @@ function diagnosticarDisponibilidadeEnvioWorkspace(clienteId = "admin", opcoes =
 
   const destinosWhatsapp = destinosBase.filter(destino => String(destino?.tipo || "").toLowerCase() === "whatsapp");
   const destinosTelegram = destinosBase.filter(destino => String(destino?.tipo || "").toLowerCase() === "telegram");
+  const destinosDiscord = destinosBase.filter(destinoEhDiscord);
   const destinosOutros = destinosBase.filter(destino => {
     const tipo = String(destino?.tipo || "").toLowerCase();
-    return tipo && tipo !== "whatsapp" && tipo !== "telegram";
+    return tipo && tipo !== "whatsapp" && tipo !== "telegram" && tipo !== "discord";
   });
 
   const sessaoPreferida = oferta?.sessaoId || oferta?.idSessao || "sessao1";
   const sessaoWhatsappDisponivel = resolverSessaoWhatsappDisponivelCliente(clienteId, sessaoPreferida);
   const telegramDisponivel = destinosTelegram.some(destino => sessaoTelegramAptaEnvio(clienteId, destino));
-  const possuiCanalApto = Boolean(sessaoWhatsappDisponivel || telegramDisponivel || destinosOutros.length);
+  const discordDisponivel = destinosDiscord.some(destino => diagnosticarDestinoDiscordAptoEnvio(clienteId, destino).ok);
+  const possuiCanalApto = Boolean(sessaoWhatsappDisponivel || telegramDisponivel || discordDisponivel || destinosOutros.length);
 
   if (possuiCanalApto) {
     return {
@@ -4877,7 +4921,8 @@ function diagnosticarDisponibilidadeEnvioWorkspace(clienteId = "admin", opcoes =
       sessaoId: sessaoWhatsappDisponivel,
       destinosTotal: destinosBase.length,
       whatsappTotal: destinosWhatsapp.length,
-      telegramTotal: destinosTelegram.length
+      telegramTotal: destinosTelegram.length,
+      discordTotal: destinosDiscord.length
     };
   }
 
@@ -4885,7 +4930,9 @@ function diagnosticarDisponibilidadeEnvioWorkspace(clienteId = "admin", opcoes =
     ? "sessao_whatsapp_indisponivel"
     : destinosTelegram.length && !telegramDisponivel
       ? "telegram_indisponivel"
-      : "sem_integracao_funcional";
+      : destinosDiscord.length && !discordDisponivel
+        ? "discord_indisponivel"
+        : "sem_integracao_funcional";
 
   return {
     ok: false,
@@ -5428,6 +5475,164 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
   return { enviado: true, tentouEnvio: true };
 }
 
+
+    // ================= ENVIO DISCORD =================
+
+    if (String(destino.tipo || "").toLowerCase() === "discord") {
+      if (!clienteTemRecursoDiscord(clienteId)) {
+        registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+          decisao: "bloqueado",
+          motivo: "discord_plano_indisponivel",
+          filaRecebeu: true
+        });
+        return { enviado: false, tentouEnvio: false, motivo: "discord_plano_indisponivel" };
+      }
+
+      if (!usuarioTemCreditos(clienteId, 1)) {
+        logOptimus("AVISO", "Sem creditos", { clienteId });
+        registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+          decisao: "bloqueado",
+          motivo: "sem_creditos",
+          filaRecebeu: true
+        });
+        return { enviado: false, tentouEnvio: false, motivo: "sem_creditos" };
+      }
+
+      let destinoDiscordValidado;
+      try {
+        destinoDiscordValidado = await validarDestinoDiscord({
+          clienteId,
+          destino,
+          conexoes: listarConexoesDiscord(clienteId),
+          env: process.env,
+          httpClient: axios
+        });
+      } catch (erroValidacaoDiscord) {
+        const motivoDiscord = erroValidacaoDiscord?.message || "discord_destino_indisponivel";
+        registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+          decisao: "bloqueado",
+          motivo: motivoDiscord,
+          filaRecebeu: true
+        });
+        return { enviado: false, tentouEnvio: false, motivo: motivoDiscord };
+      }
+
+      const imagemEnvioExecutor = avaliarImagemEnviavelExecutor(oferta, destinoDiscordValidado);
+      tentouEnvio = true;
+      registrarCoberturaExecutor("executor_inicio", oferta, clienteId, destinoDiscordValidado, {
+        decisao: "iniciado",
+        destinoId: destinoDiscordValidado.id || destinoDiscordValidado.destinoId || "",
+        channelId: destinoDiscordValidado.channelId || "",
+        tentativaEnvio: true,
+        filaRecebeu: true
+      });
+      fidelidadeObs.registrarExecutor("executor_entrada", {
+        ...contextoFidelidadeExecutor,
+        canal: "discord",
+        clienteId,
+        destino: destinoDiscordValidado.nome || destinoDiscordValidado.id || "",
+        tipoMidia: destinoDiscordValidado.tipoMidia || "",
+        oferta,
+        imagem: oferta.imagem || "",
+        tentativaImagem: imagemEnvioExecutor.ok,
+        caiuParaTexto: !imagemEnvioExecutor.ok,
+        motivoTecnico: imagemEnvioExecutor.ok ? "" : imagemEnvioExecutor.motivo
+      });
+
+      const resultadoDiscord = await enviarDiscord({
+        channelId: destinoDiscordValidado.channelId,
+        mensagem,
+        imagemUrl: imagemEnvioExecutor.ok ? imagemEnvioExecutor.url : "",
+        env: process.env,
+        httpClient: axios
+      });
+
+      if (!resultadoDiscord?.ok) {
+        const motivoDiscord = resultadoDiscord?.erro || "discord_nao_enviado";
+        registrarCoberturaExecutor("executor_erro", oferta, clienteId, destinoDiscordValidado, {
+          decisao: "erro",
+          motivo: motivoDiscord,
+          tentativaEnvio: true,
+          erroEnvio: motivoDiscord,
+          filaRecebeu: true
+        });
+        fidelidadeObs.registrarExecutor("executor_resultado", {
+          ...contextoFidelidadeExecutor,
+          canal: "discord",
+          clienteId,
+          destino: destinoDiscordValidado.nome || destinoDiscordValidado.id || "",
+          tipoMidia: destinoDiscordValidado.tipoMidia || "",
+          oferta,
+          imagem: oferta.imagem || "",
+          tentativaImagem: imagemEnvioExecutor.ok,
+          caiuParaTexto: !imagemEnvioExecutor.ok,
+          resultado: "erro",
+          motivoTecnico: motivoDiscord
+        });
+        return { enviado: false, tentouEnvio: true, motivo: motivoDiscord, erro: motivoDiscord };
+      }
+
+      debitarCreditos(clienteId, 1);
+      confirmouEnvio = true;
+      registrarCoberturaExecutor("executor_enviado", oferta, clienteId, destinoDiscordValidado, {
+        decisao: "enviado",
+        motivo: "envio_confirmado",
+        destinoId: destinoDiscordValidado.id || destinoDiscordValidado.destinoId || "",
+        channelId: destinoDiscordValidado.channelId || "",
+        tentativaEnvio: true,
+        enviadoEm: resultadoDiscord.enviadoEm || new Date().toISOString(),
+        filaRecebeu: true
+      });
+      fidelidadeObs.registrarExecutor("executor_resultado", {
+        ...contextoFidelidadeExecutor,
+        canal: "discord",
+        clienteId,
+        destino: destinoDiscordValidado.nome || destinoDiscordValidado.id || "",
+        tipoMidia: destinoDiscordValidado.tipoMidia || "",
+        oferta,
+        imagem: oferta.imagem || "",
+        tentativaImagem: imagemEnvioExecutor.ok,
+        caiuParaTexto: !imagemEnvioExecutor.ok,
+        resultado: "enviado",
+        messageId: resultadoDiscord.messageId || "",
+        statusHttp: resultadoDiscord.statusHttp || null,
+        imagemEnviada: resultadoDiscord.imagemEnviada === true
+      });
+
+      logOptimus("DISCORD", "Mensagem enviada", {
+        clienteId,
+        destino: destinoDiscordValidado.nome,
+        channelId: destinoDiscordValidado.channelId,
+        messageId: resultadoDiscord.messageId || ""
+      });
+
+      oferta.destinosEnviados = oferta.destinosEnviados || [];
+      oferta.destinosEnviados.push({
+        clienteId,
+        id: destinoDiscordValidado.id || "",
+        destinoId: destinoDiscordValidado.id || "",
+        conexaoId: destinoDiscordValidado.conexaoId || "",
+        nome: destinoDiscordValidado.nome || "Destino Discord",
+        tipo: "discord",
+        channelId: destinoDiscordValidado.channelId || "",
+        channelName: destinoDiscordValidado.channelName || destinoDiscordValidado.grupoNome || "",
+        messageId: resultadoDiscord.messageId || "",
+        statusHttp: resultadoDiscord.statusHttp || null,
+        imagemEnviada: resultadoDiscord.imagemEnviada === true,
+        creditos: 1,
+        dataEnvio: new Date().toLocaleString("pt-BR", {
+          timeZone: "America/Sao_Paulo"
+        })
+      });
+
+      return {
+        enviado: true,
+        tentouEnvio: true,
+        messageId: resultadoDiscord.messageId || "",
+        statusHttp: resultadoDiscord.statusHttp || null,
+        imagemEnviada: resultadoDiscord.imagemEnviada === true
+      };
+    }
 
     // ================= ENVIO TELEGRAM =================
 
