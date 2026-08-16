@@ -4,7 +4,8 @@ const path = require("path");
 
 const {
   enviarOfertaManualV2,
-  adaptarOfertaManualParaTemplate
+  adaptarOfertaManualParaTemplate,
+  imagemDiscordManual
 } = require("../modules/manual-v2/manual-dispatcher");
 
 const ofertaA = {
@@ -306,6 +307,49 @@ function assertSemSegredos(retorno) {
     assert.strictEqual(chamadas.debitos.length, 1);
     assert.strictEqual(chamadas.templates[0].opcoes.canal, "discord");
     assertSemSegredos(retorno);
+  }
+
+  {
+    assert.strictEqual(
+      imagemDiscordManual({
+        imagem: "https://m.media-amazon.com/externa.jpg",
+        imagemCanonicaDuravel: "https://cdn.optimus.test/canonica.jpg"
+      }),
+      "https://cdn.optimus.test/canonica.jpg",
+      "Discord deve preferir imagem canonica/duravel ja presente na Oferta Manual"
+    );
+    assert.strictEqual(
+      imagemDiscordManual({
+        imagem: "https://m.media-amazon.com/externa.jpg",
+        imagemDuravel: "https://cdn.optimus.test/duravel.jpg"
+      }),
+      "https://cdn.optimus.test/duravel.jpg"
+    );
+    assert.strictEqual(
+      imagemDiscordManual({ imagem: "https://m.media-amazon.com/externa.jpg" }),
+      "https://m.media-amazon.com/externa.jpg",
+      "Sem imagem canonica, usa a imagem externa para a allowlist do sender validar"
+    );
+  }
+
+  {
+    const { deps, chamadas } = baseDeps({
+      buscarOfertaManualV2: () => ({
+        ...ofertaA,
+        imagem: "https://m.media-amazon.com/externa.jpg",
+        imagemCanonicaDuravel: "https://cdn.optimus.test/canonica.jpg"
+      })
+    });
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: "oferta_a",
+      destinosIds: ["dc_ok"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, true);
+    assert.strictEqual(chamadas.discord[0].imagemUrl, "https://cdn.optimus.test/canonica.jpg");
+    assert.strictEqual(chamadas.debitos.length, 1);
+    assert.strictEqual(retorno.creditosDebitados, 1);
   }
 
   {

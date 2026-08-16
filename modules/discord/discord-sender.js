@@ -2,6 +2,16 @@ const { obterConfigDiscord, DISCORD_API_BASE } = require("./discord-oauth");
 
 const DISCORD_MESSAGE_LIMIT = 2000;
 const DISCORD_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+const DISCORD_IMAGE_MAX_REDIRECTS = 2;
+const DISCORD_IMAGE_HOSTS_COMPROVADOS = new Set([
+  "m.media-amazon.com",
+  "images-na.ssl-images-amazon.com",
+  "http2.mlstatic.com",
+  "cf.shopee.com.br",
+  "ae01.alicdn.com",
+  "images.kabum.com.br",
+  "a-static.mlcdn.com.br"
+]);
 const IMAGE_TYPES = new Map([
   ["image/jpeg", "jpg"],
   ["image/png", "png"],
@@ -17,6 +27,7 @@ function listaHosts(valor = "") {
   return texto(valor)
     .split(",")
     .map((item) => item.trim().toLowerCase())
+    .filter((item) => DISCORD_IMAGE_HOSTS_COMPROVADOS.has(item))
     .filter(Boolean);
 }
 
@@ -70,6 +81,47 @@ function validarUrlImagem(imagemUrl = "", hostsPermitidos = []) {
   }
 }
 
+function headerLocation(headers = {}) {
+  return texto(headers.location || headers.Location);
+}
+
+function statusRedirect(status) {
+  return status >= 300 && status < 400;
+}
+
+async function baixarUrlImagemValidada({ url = "", hostsPermitidos = [], httpClient } = {}) {
+  let atual = url;
+  for (let tentativa = 0; tentativa <= DISCORD_IMAGE_MAX_REDIRECTS; tentativa += 1) {
+    const resposta = await httpClient.get(atual, {
+      responseType: "arraybuffer",
+      maxContentLength: DISCORD_IMAGE_MAX_BYTES,
+      timeout: 15000,
+      maxRedirects: 0,
+      validateStatus: () => true
+    });
+    const status = Number(resposta?.status || 0) || 0;
+    if (!statusRedirect(status)) return resposta;
+
+    const location = headerLocation(resposta?.headers || {});
+    if (!location) {
+      return { ok: false, erro: "discord_imagem_redirect_invalido", statusHttp: status };
+    }
+
+    let proxima = "";
+    try {
+      proxima = validarUrlImagem(new URL(location, atual).toString(), hostsPermitidos);
+    } catch {
+      proxima = "";
+    }
+    if (!proxima) {
+      return { ok: false, erro: "discord_imagem_redirect_nao_permitido", statusHttp: status };
+    }
+    atual = proxima;
+  }
+
+  return { ok: false, erro: "discord_imagem_redirect_excessivo", statusHttp: 310 };
+}
+
 function contentType(headers = {}) {
   return texto(headers["content-type"] || headers["Content-Type"]).split(";")[0].toLowerCase();
 }
@@ -111,11 +163,12 @@ async function baixarImagemDiscord({ imagemUrl = "", env = process.env, httpClie
   }
 
   try {
-    const resposta = await httpClient.get(url, {
-      responseType: "arraybuffer",
-      maxContentLength: DISCORD_IMAGE_MAX_BYTES,
-      timeout: 15000
-    });
+    const resposta = await baixarUrlImagemValidada({ url, hostsPermitidos, httpClient });
+    if (resposta?.ok === false) return resposta;
+    const status = Number(resposta?.status || 0) || 0;
+    if (status < 200 || status >= 300) {
+      return { ok: false, erro: erroDiscordPorStatus(status), statusHttp: status };
+    }
     const tipo = contentType(resposta?.headers || {});
     if (!IMAGE_TYPES.has(tipo)) return { ok: false, erro: "discord_imagem_tipo_invalido" };
 

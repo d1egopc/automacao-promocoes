@@ -9,17 +9,23 @@ const {
 
 const ENV = {
   DISCORD_BOT_TOKEN: "bot_token_nao_vaza",
-  DISCORD_IMAGE_ALLOWED_HOSTS: "cdn.optimus.test"
+  DISCORD_IMAGE_ALLOWED_HOSTS: "m.media-amazon.com,images-na.ssl-images-amazon.com,http2.mlstatic.com,cf.shopee.com.br,ae01.alicdn.com,images.kabum.com.br,a-static.mlcdn.com.br"
 };
 
-function criarHttp({ postStatus = 200, postData = {}, getData, getHeaders, postError, getError } = {}) {
+function criarHttp({ postStatus = 200, postData = {}, getData, getHeaders, postError, getError, getResponses = [] } = {}) {
   const chamadas = [];
+  const respostas = getResponses.slice();
   return {
     chamadas,
     client: {
       async get(url, options) {
         chamadas.push({ metodo: "GET", url, options });
         if (getError) throw getError;
+        if (respostas.length) {
+          const proxima = respostas.shift();
+          if (proxima.error) throw proxima.error;
+          return proxima;
+        }
         return {
           status: 200,
           data: getData || Buffer.from("imagem"),
@@ -74,7 +80,7 @@ function textoJson(valor) {
     const resultado = await enviarDiscord({
       channelId: "canal_1",
       mensagem: "Oferta com imagem",
-      imagemUrl: "https://cdn.optimus.test/produto.png",
+      imagemUrl: "https://m.media-amazon.com/produto.png",
       env: ENV,
       httpClient: http.client
     });
@@ -97,11 +103,88 @@ function textoJson(valor) {
   }
 
   {
+    const hosts = [
+      "https://m.media-amazon.com/produto.jpg",
+      "https://images-na.ssl-images-amazon.com/produto.jpg",
+      "https://http2.mlstatic.com/produto.jpg",
+      "https://cf.shopee.com.br/produto.jpg",
+      "https://ae01.alicdn.com/produto.jpg",
+      "https://images.kabum.com.br/produto.jpg",
+      "https://a-static.mlcdn.com.br/produto.jpg"
+    ];
+    for (const imagemUrl of hosts) {
+      const http = criarHttp({ getHeaders: { "content-type": "image/jpeg", "content-length": "6" } });
+      const imagem = await baixarImagemDiscord({ imagemUrl, env: ENV, httpClient: http.client });
+      assert.strictEqual(imagem.ok, true, `Host comprovado deve ser permitido: ${imagemUrl}`);
+      assert.strictEqual(http.chamadas.length, 1);
+    }
+  }
+
+  {
+    const http = criarHttp();
+    const imagem = await baixarImagemDiscord({
+      imagemUrl: "http://m.media-amazon.com/produto.png",
+      env: ENV,
+      httpClient: http.client
+    });
+    assert.strictEqual(imagem.ok, false);
+    assert.strictEqual(imagem.erro, "discord_imagem_url_invalida");
+    assert.strictEqual(http.chamadas.length, 0, "HTTP nao deve ser baixado");
+  }
+
+  {
+    const http = criarHttp();
+    const imagem = await baixarImagemDiscord({
+      imagemUrl: "https://host-nao-comprovado.test/produto.png",
+      env: { DISCORD_IMAGE_ALLOWED_HOSTS: "host-nao-comprovado.test,*" },
+      httpClient: http.client
+    });
+    assert.strictEqual(imagem.ok, false);
+    assert.strictEqual(imagem.erro, "discord_imagem_host_nao_permitido");
+    assert.strictEqual(http.chamadas.length, 0, "Wildcard/host nao comprovado nao entram na allowlist efetiva");
+  }
+
+  {
+    const http = criarHttp({
+      getResponses: [
+        { status: 302, data: Buffer.alloc(0), headers: { location: "https://images-na.ssl-images-amazon.com/final.jpg" } },
+        { status: 200, data: Buffer.from("imagem"), headers: { "content-type": "image/jpeg", "content-length": "6" } }
+      ]
+    });
+    const imagem = await baixarImagemDiscord({
+      imagemUrl: "https://m.media-amazon.com/produto.jpg",
+      env: ENV,
+      httpClient: http.client
+    });
+    assert.strictEqual(imagem.ok, true, "Redirect para host permitido deve baixar imagem");
+    assert.deepStrictEqual(http.chamadas.map((c) => c.url), [
+      "https://m.media-amazon.com/produto.jpg",
+      "https://images-na.ssl-images-amazon.com/final.jpg"
+    ]);
+  }
+
+  {
+    const http = criarHttp({
+      getResponses: [
+        { status: 302, data: Buffer.alloc(0), headers: { location: "https://evil.example/final.jpg" } }
+      ]
+    });
+    const imagem = await baixarImagemDiscord({
+      imagemUrl: "https://m.media-amazon.com/produto.jpg",
+      env: ENV,
+      httpClient: http.client
+    });
+    assert.strictEqual(imagem.ok, false);
+    assert.strictEqual(imagem.erro, "discord_imagem_redirect_nao_permitido");
+    assert.strictEqual(http.chamadas.length, 1, "Redirect para host nao permitido nao deve ser seguido");
+  }
+
+  {
     const http = criarHttp({ getHeaders: { "content-type": "text/html", "content-length": "12" } });
     const resultado = await enviarDiscord({
       channelId: "canal_1",
       mensagem: "Oferta",
-      imagemUrl: "https://cdn.optimus.test/pagina.html",
+      imagemUrl: "https://m.media-amazon.com/pagina.html",
       env: ENV,
       httpClient: http.client
     });
@@ -115,7 +198,7 @@ function textoJson(valor) {
     const resultado = await enviarDiscord({
       channelId: "canal_1",
       mensagem: "Oferta",
-      imagemUrl: "https://cdn.optimus.test/grande.png",
+      imagemUrl: "https://m.media-amazon.com/grande.png",
       env: ENV,
       httpClient: http.client
     });
@@ -174,7 +257,7 @@ function textoJson(valor) {
     const resultado = await enviarDiscord({
       channelId: "canal_1",
       mensagem: "Oferta",
-      env: { DISCORD_IMAGE_ALLOWED_HOSTS: "cdn.optimus.test" },
+      env: { DISCORD_IMAGE_ALLOWED_HOSTS: "m.media-amazon.com" },
       httpClient: http.client
     });
     assert.strictEqual(resultado.ok, false);

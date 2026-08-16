@@ -53,6 +53,17 @@ function canalDiscord(destino = {}) {
   return texto(destino.channelId || destino.canalId || destino.grupo || destino.canal);
 }
 
+function imagemDiscordManual(oferta = {}) {
+  return texto(
+    oferta.imagemCanonicaDuravel ||
+    oferta.imagemDuravel ||
+    oferta.imagemEnviavel ||
+    oferta.imagemMaterializada ||
+    oferta.imagemUrl ||
+    oferta.imagem
+  );
+}
+
 function chavesTelegram(destino = {}) {
   return [
     destino.id,
@@ -204,7 +215,7 @@ async function enviarDiscordManual({ destino, oferta, mensagem, deps }) {
   const resultado = await deps.enviarDiscord({
     channelId,
     mensagem,
-    imagemUrl: texto(oferta.imagem),
+    imagemUrl: imagemDiscordManual(oferta),
     env: deps.env || process.env,
     httpClient: deps.httpClient,
     now: deps.now
@@ -352,5 +363,6 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
 
 module.exports = {
   adaptarOfertaManualParaTemplate,
+  imagemDiscordManual,
   enviarOfertaManualV2
 };
