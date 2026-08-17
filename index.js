@@ -176,6 +176,8 @@ const criarRotasResetEsteirasPreflight = require("./modules/engine/reset-esteira
 const criarRotasManualV2 = require("./modules/manual-v2/manual-offers.routes");
 const criarRotasDiscord = require("./modules/discord/discord.routes");
 const criarRotasAjudaContextual = require("./modules/ajuda-contextual/routes");
+const criarRotasVitrine = require("./modules/vitrine/routes");
+const { publicarOfertaConfirmadaVitrine } = require("./modules/vitrine/hook");
 const {
   listarConexoesDiscord
 } = require("./modules/discord/discord-connections.storage");
@@ -2881,6 +2883,7 @@ function criarPlanosPadrao() {
         cupomInteligente: false,
         campanhas: true,
         templatePersonalizado: false,
+        vitrine: false,
         social: false
       },
 
@@ -2920,6 +2923,7 @@ function criarPlanosPadrao() {
         campanhas: false,
         mensageiro: false,
         templatePersonalizado: false,
+        vitrine: false,
         social: false
       },
 
@@ -2961,6 +2965,7 @@ function criarPlanosPadrao() {
         adminAvancado: true,
         campanhas: true,
         templatePersonalizado: false,
+        vitrine: false,
         social: false
       },
 
@@ -2971,6 +2976,21 @@ function criarPlanosPadrao() {
   salvarPlanos();
 
   console.log("[OK]✅ Planos padro criados");
+}
+
+function normalizarRecursosPlanosRuntime() {
+  if (!planos || typeof planos !== "object") return;
+
+  for (const plano of Object.values(planos)) {
+    if (!plano || typeof plano !== "object") continue;
+    if (!plano.recursos || typeof plano.recursos !== "object") {
+      plano.recursos = {};
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(plano.recursos, "vitrine")) {
+      plano.recursos.vitrine = false;
+    }
+  }
 }
 
 // ================= FUNÇÃO CARREGA CONFIG =================
@@ -3045,6 +3065,7 @@ if (sessoesMeta && Object.keys(sessoesMeta).length) {
   socialModule.inicializarSocialModule({ logger: console });
 
    criarPlanosPadrao();
+   normalizarRecursosPlanosRuntime();
 
 
 if (!usuarios.length) {
@@ -7363,6 +7384,19 @@ if (!finalizacaoEnvio.ok || !finalizacaoEnvio.oferta) {
 
 oferta = finalizacaoEnvio.oferta;
 marcarFilaAlterada();
+void publicarOfertaConfirmadaVitrine({
+  clienteId,
+  oferta,
+  destinosEnviados: totalDestinosEnviadosFanout,
+  deps: {
+    readClienteJson,
+    writeClienteJson,
+    readGlobalJson,
+    writeGlobalJson,
+    clienteTemRecurso: clienteTemRecursoPlano,
+    logger: console
+  }
+});
 void registrarExecutorEnviado({
   clienteId,
   oferta,
@@ -8928,6 +8962,7 @@ app.post("/admin/planos", (req, res) => {
       telegram: booleanPlano("telegram", recursosAnteriores.telegram),
       discord: booleanPlano("discord", recursosAnteriores.discord),
       automacao: booleanPlano("automacao", recursosAnteriores.automacao),
+      vitrine: booleanPlano("vitrine", recursosAnteriores.vitrine),
       social: booleanPlano("social", recursosAnteriores.social)
     },
 
@@ -9466,6 +9501,23 @@ function usuarioTemRecurso(req, recurso) {
   return plano?.recursos?.[recurso] === true;
 }
 
+function clienteTemRecursoPlano(clienteId = "admin", recurso = "") {
+  const usuario = usuarios.find(u => String(u.id) === String(clienteId)) || null;
+
+  if (!usuario) return false;
+
+  if (usuarioEhAdminMaster(usuario)) {
+    return true;
+  }
+
+  const nomePlano = String(usuario.plano || "").trim().toLowerCase();
+  const plano = Object.values(planos || {}).find(p =>
+    String(p?.nome || "").trim().toLowerCase() === nomePlano
+  );
+
+  return plano?.recursos?.[recurso] === true;
+}
+
 function clienteTemRecursoMensageiro(clienteId = "admin") {
   const usuario = usuarios.find(u => u.id === clienteId) || null;
 
@@ -9680,12 +9732,25 @@ app.use("/telemetria", criarRotasTelemetria({
   authNormal: auth,
   isAdminMaster: (req) => req.usuario?.papel === "admin_master"
 }));
+app.use(criarRotasVitrine({
+  publico: true,
+  readClienteJson,
+  readGlobalJson
+}));
 
 app.use(auth);
 app.use(criarRotasAjudaContextual({
   readGlobalJson,
   writeGlobalJson,
   isAdminMaster: (req) => req.usuario?.papel === "admin_master"
+}));
+app.use(criarRotasVitrine({
+  readClienteJson,
+  writeClienteJson,
+  readGlobalJson,
+  writeGlobalJson,
+  getClienteId,
+  usuarioTemRecurso
 }));
 app.get("/admin/config/links-optimus", responderAdminConfigLinksOptimus);
 app.put("/admin/config/links-optimus", salvarAdminConfigLinksOptimus);
