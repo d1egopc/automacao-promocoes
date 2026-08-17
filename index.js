@@ -7417,6 +7417,8 @@ void publicarOfertaConfirmadaVitrine({
     readGlobalJson,
     writeGlobalJson,
     clienteTemRecurso: clienteTemRecursoPlano,
+    criarLinkOptimus,
+    gerarLinkOptimus,
     logger: console
   }
 });

@@ -79,6 +79,32 @@ function urlCandidata(link = {}) {
   );
 }
 
+function urlAfiliadaConvertidaCandidata(link = {}) {
+  if (!link || typeof link !== "object") return "";
+  const candidatos = [
+    link.urlOptimus,
+    link.redirectOptimus,
+    link.urlAfiliadaWorkspace,
+    link.urlAfiliada,
+    link.afiliado,
+    link.linkAfiliado,
+    link.url,
+    link.link
+  ];
+  for (const candidato of candidatos) {
+    const redirectExistente = urlRedirectOptimus(candidato);
+    if (redirectExistente) return redirectExistente;
+  }
+  return texto(
+    link.urlAfiliadaWorkspace ||
+    link.urlAfiliada ||
+    link.afiliado ||
+    link.linkAfiliado ||
+    link.resolvido ||
+    ""
+  );
+}
+
 function urlRedirectOptimus(valor = "") {
   try {
     const url = new URL(texto(valor));
@@ -96,6 +122,128 @@ function linkRenderizavel(link = {}) {
   if (link.renderizavel === false) return false;
   if (texto(link.conversaoStatus).toLowerCase() === "falhou") return false;
   return Boolean(urlRedirectOptimus(urlCandidata(link)));
+}
+
+function criarRedirectOptimusVitrine(urlDestino = "", marketplace = "", workspaceId = "", deps = {}, cache = new Map()) {
+  const destino = texto(urlDestino);
+  if (!destino) return "";
+  const redirectExistente = urlRedirectOptimus(destino);
+  if (redirectExistente) return redirectExistente;
+  if (cache.has(destino)) return cache.get(destino);
+  const criarLink = typeof deps.criarLinkOptimus === "function" ? deps.criarLinkOptimus : null;
+  const gerarLink = typeof deps.gerarLinkOptimus === "function" ? deps.gerarLinkOptimus : null;
+  if (!criarLink && !gerarLink) return "";
+
+  try {
+    const resultado = criarLink
+      ? criarLink(destino, marketplace, { clienteId: workspaceId })
+      : gerarLink(destino, marketplace, { clienteId: workspaceId });
+    const url = typeof resultado === "string"
+      ? resultado
+      : texto(resultado?.url);
+    const redirect = urlRedirectOptimus(url);
+    cache.set(destino, redirect);
+    return redirect;
+  } catch (erro) {
+    const logger = deps.logger || console;
+    if (typeof logger.warn === "function") {
+      logger.warn("[VITRINE-LINK-OPTIMUS-FALHA]", {
+        clienteId: workspaceId,
+        marketplace,
+        motivo: erro?.message || "erro_gerar_redirect"
+      });
+    }
+    cache.set(destino, "");
+    return "";
+  }
+}
+
+function fontesLinksComerciaisVitrine(oferta = {}) {
+  const contrato = oferta.contratoComercialFinal && typeof oferta.contratoComercialFinal === "object"
+    ? oferta.contratoComercialFinal
+    : {};
+  const integridade = oferta.metadata?.integridadeComercial && typeof oferta.metadata.integridadeComercial === "object"
+    ? oferta.metadata.integridadeComercial
+    : {};
+  return [
+    { campo: "linksApp", links: Array.isArray(contrato.linksApp) ? contrato.linksApp : [] },
+    { campo: "linksPc", links: Array.isArray(contrato.linksPc) ? contrato.linksPc : [] },
+    { campo: "linksProduto", links: Array.isArray(contrato.linksProduto) ? contrato.linksProduto : [] },
+    { campo: "linksResgate", links: Array.isArray(contrato.linksResgate) ? contrato.linksResgate : [] },
+    { campo: "linksComerciais", links: Array.isArray(integridade.linksComerciais) ? integridade.linksComerciais : [] },
+    { campo: "linksComerciais", links: Array.isArray(oferta.linksComerciais) ? oferta.linksComerciais : [] },
+    { campo: "linksApp", links: Array.isArray(oferta.linksApp) ? oferta.linksApp : [] },
+    { campo: "linksPc", links: Array.isArray(oferta.linksPc) ? oferta.linksPc : [] },
+    { campo: "linksProduto", links: Array.isArray(oferta.linksProduto) ? oferta.linksProduto : [] },
+    { campo: "linksResgate", links: Array.isArray(oferta.linksResgate) ? oferta.linksResgate : [] }
+  ];
+}
+
+function enriquecerOfertaComRedirectsVitrine(oferta = {}, workspaceId = "", deps = {}) {
+  if (!oferta || typeof oferta !== "object") return oferta;
+  const marketplace = texto(oferta.marketplace || oferta.mercado || "");
+  const cache = new Map();
+  const proxima = { ...oferta };
+  const linksPorCampo = {
+    linksComerciais: [],
+    linksApp: [],
+    linksPc: [],
+    linksProduto: [],
+    linksResgate: []
+  };
+  const vistos = new Set();
+
+  for (const fonte of fontesLinksComerciaisVitrine(oferta)) {
+    for (const [indice, link] of fonte.links.entries()) {
+      if (!link || typeof link !== "object" || link.renderizavel === false) continue;
+      const destino = urlAfiliadaConvertidaCandidata(link);
+      const redirect = criarRedirectOptimusVitrine(destino, marketplace, workspaceId, deps, cache);
+      if (!redirect) continue;
+      const papel = normalizarPapelLink(link);
+      const ordemCaptura = numero(link.ordemCaptura || link.ordem || indice + 1) || indice + 1;
+      const chave = `${fonte.campo}:${papel.papel}:${redirect}:${ordemCaptura}`;
+      if (vistos.has(chave)) continue;
+      vistos.add(chave);
+      linksPorCampo[fonte.campo].push({
+        ...link,
+        tipo: papel.tipo,
+        papel: papel.papel,
+        label: texto(link.label || link.titulo || papel.label),
+        ordemCaptura,
+        urlOptimus: redirect,
+        redirectOptimus: redirect,
+        urlAfiliadaOriginalAntesLinkOptimus: destino,
+        renderizavel: true,
+        conversaoStatus: texto(link.conversaoStatus || "convertida") || "convertida",
+        linkOptimusVitrineAplicado: true
+      });
+    }
+  }
+
+  for (const [campo, links] of Object.entries(linksPorCampo)) {
+    if (links.length) proxima[campo] = links;
+  }
+
+  if (!coletarLinksComerciaisFinais(proxima).length) {
+    const destinoPrincipal = texto(
+      oferta.urlOptimus ||
+      oferta.urlAfiliadaWorkspace ||
+      oferta.urlAfiliada ||
+      oferta.afiliado ||
+      oferta.linkAfiliado ||
+      oferta.linkFinal ||
+      oferta.linkProduto ||
+      oferta.link ||
+      ""
+    );
+    const redirectPrincipal = criarRedirectOptimusVitrine(destinoPrincipal, marketplace, workspaceId, deps, cache);
+    if (redirectPrincipal) {
+      proxima.urlOptimus = redirectPrincipal;
+      proxima.linkProduto = redirectPrincipal;
+    }
+  }
+
+  return proxima;
 }
 
 function coletarLinksComerciaisFinais(oferta = {}) {
@@ -227,7 +375,8 @@ function publicarOfertaConfirmadaVitrine({ clienteId = "", oferta = {}, destinos
     const vitrine = storage.lerVitrineWorkspace(workspaceId, deps);
     if (vitrine.config?.ativa !== true) return { ok: false, motivo: "vitrine_inativa" };
 
-    const ofertaVitrine = montarOfertaVitrine(oferta);
+    const ofertaComRedirects = enriquecerOfertaComRedirectsVitrine(oferta, workspaceId, deps);
+    const ofertaVitrine = montarOfertaVitrine(ofertaComRedirects);
     const resultado = storage.upsertOfertaVitrine(workspaceId, ofertaVitrine, deps);
     return {
       ok: resultado.ok === true,
@@ -242,6 +391,7 @@ function publicarOfertaConfirmadaVitrine({ clienteId = "", oferta = {}, destinos
 
 module.exports = {
   coletarLinksComerciaisFinais,
+  enriquecerOfertaComRedirectsVitrine,
   montarOfertaVitrine,
   publicarOfertaConfirmadaVitrine,
   coletarCuponsOferta,

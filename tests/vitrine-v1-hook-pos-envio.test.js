@@ -8,6 +8,7 @@ const storage = require("../modules/vitrine/storage");
 const { normalizarCuponsSemanticos } = require("../modules/radar/cupom-semantico");
 const {
   coletarLinksComerciaisFinais,
+  enriquecerOfertaComRedirectsVitrine,
   montarOfertaVitrine,
   publicarOfertaConfirmadaVitrine
 } = require("../modules/vitrine/hook");
@@ -19,7 +20,7 @@ function clone(valor) {
   return JSON.parse(JSON.stringify(valor));
 }
 
-function criarDeps({ recurso = true, falharWrite = false } = {}) {
+function criarDeps({ recurso = true, falharWrite = false, criarLinkOptimus = null, gerarLinkOptimus = null } = {}) {
   const globais = new Map();
   const clientes = new Map();
   const logs = [];
@@ -59,7 +60,41 @@ function criarDeps({ recurso = true, falharWrite = false } = {}) {
     }
   };
 
+  if (typeof criarLinkOptimus === "function") deps.criarLinkOptimus = criarLinkOptimus;
+  if (typeof gerarLinkOptimus === "function") deps.gerarLinkOptimus = gerarLinkOptimus;
+
   return deps;
+}
+
+function criarGeradorOptimusTeste() {
+  const registros = new Map();
+  const chamadas = [];
+
+  function slug(valor = "") {
+    return String(valor || "workspace")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "workspace";
+  }
+
+  return {
+    chamadas,
+    criarLinkOptimus(linkOriginal = "", marketplace = "", opcoes = {}) {
+      if (/^https:\/\/go\.optimuspromo\.com\.br\/r\//i.test(String(linkOriginal || ""))) {
+        throw new Error("redirect_optimus_nao_deve_ser_encapsulado");
+      }
+      const clienteId = String(opcoes.clienteId || "");
+      chamadas.push({ linkOriginal, marketplace, clienteId });
+      const chave = `${clienteId}:${linkOriginal}`;
+      if (!registros.has(chave)) {
+        registros.set(chave, `https://go.optimuspromo.com.br/r/${slug(clienteId)}-${registros.size + 1}`);
+      }
+      return {
+        ok: true,
+        url: registros.get(chave)
+      };
+    }
+  };
 }
 
 function ativarVitrine(deps, clienteId = "workspace-a", slug = "workspace-a") {
@@ -287,6 +322,153 @@ const ofertaUrlOriginal = montarOfertaVitrine(ofertaBase({
 }));
 assert.deepStrictEqual(ofertaUrlOriginal.linksComerciais, [], "URL original nao pode virar CTA publico");
 
+const geradorRedirectVitrine = criarGeradorOptimusTeste();
+const depsRedirectVitrine = criarDeps({ criarLinkOptimus: geradorRedirectVitrine.criarLinkOptimus });
+ativarVitrine(depsRedirectVitrine);
+const resultadoMlOff = publicar(depsRedirectVitrine, ofertaBase({
+  id: "ml-off",
+  ofertaId: "ml-off",
+  marketplace: "mercadolivre",
+  linkAfiliado: "https://meli.la/1HdSKPM",
+  linkFinal: "https://meli.la/1HdSKPM",
+  link: "https://meli.la/1HdSKPM",
+  linksComerciais: [
+    {
+      tipo: "produto",
+      papel: "link_produto",
+      ordemCaptura: 1,
+      urlAfiliadaWorkspace: "https://meli.la/1HdSKPM",
+      urlOptimus: "",
+      renderizavel: true,
+      conversaoStatus: "convertida"
+    }
+  ]
+}), 1);
+assert.strictEqual(resultadoMlOff.ok, true, "Destino Optimus Link OFF + Vitrine ativa deve publicar");
+let vitrineRedirect = storage.lerVitrineWorkspace("workspace-a", depsRedirectVitrine);
+assert.deepStrictEqual(vitrineRedirect.ofertas[0].linksComerciais.map(link => link.papel), ["link_produto"], "ML direto deve virar CTA principal");
+assert.ok(
+  /^https:\/\/go\.optimuspromo\.com\.br\/r\//.test(vitrineRedirect.ofertas[0].linksComerciais[0].url),
+  "Vitrine deve persistir redirect Optimus publico para ML com meli.la"
+);
+assert.deepStrictEqual(
+  geradorRedirectVitrine.chamadas[0],
+  { linkOriginal: "https://meli.la/1HdSKPM", marketplace: "mercadolivre", clienteId: "workspace-a" },
+  "Helper oficial deve receber a URL afiliada ja convertida e o workspace correto"
+);
+
+const chamadasAntesOptimusPronto = geradorRedirectVitrine.chamadas.length;
+const ofertaOptimusPronto = enriquecerOfertaComRedirectsVitrine(ofertaBase({
+  id: "redirect-pronto",
+  ofertaId: "redirect-pronto",
+  marketplace: "mercadolivre",
+  linksComerciais: [
+    {
+      tipo: "produto",
+      papel: "link_produto",
+      urlOptimus: "https://go.optimuspromo.com.br/r/ja-pronto",
+      renderizavel: true
+    }
+  ]
+}), "workspace-a", depsRedirectVitrine);
+assert.strictEqual(
+  ofertaOptimusPronto.linksComerciais[0].urlOptimus,
+  "https://go.optimuspromo.com.br/r/ja-pronto",
+  "Destino Optimus Link ON deve reutilizar urlOptimus existente"
+);
+assert.strictEqual(
+  geradorRedirectVitrine.chamadas.length,
+  chamadasAntesOptimusPronto,
+  "Redirect Optimus existente nao pode ser encapsulado novamente"
+);
+
+const mlScalar = montarOfertaVitrine(enriquecerOfertaComRedirectsVitrine(ofertaBase({
+  id: "ml-scalar",
+  ofertaId: "ml-scalar",
+  marketplace: "mercadolivre",
+  linksComerciais: [],
+  linkAfiliado: "https://meli.la/produto-scalar"
+}), "workspace-a", depsRedirectVitrine));
+assert.deepStrictEqual(mlScalar.linksComerciais.map(link => link.papel), ["link_produto"], "ML escalar com meli.la deve ganhar CTA principal");
+assert.ok(/^https:\/\/go\.optimuspromo\.com\.br\/r\//.test(mlScalar.linksComerciais[0].urlOptimus));
+
+const mlWorkspaceScalar = montarOfertaVitrine(enriquecerOfertaComRedirectsVitrine(ofertaBase({
+  id: "ml-workspace-scalar",
+  ofertaId: "ml-workspace-scalar",
+  marketplace: "mercadolivre",
+  linksComerciais: [],
+  urlAfiliadaWorkspace: "https://meli.la/workspace-scalar"
+}), "workspace-a", depsRedirectVitrine));
+assert.deepStrictEqual(mlWorkspaceScalar.linksComerciais.map(link => link.papel), ["link_produto"], "urlAfiliadaWorkspace escalar deve gerar CTA principal da Vitrine");
+assert.ok(/^https:\/\/go\.optimuspromo\.com\.br\/r\//.test(mlWorkspaceScalar.linksComerciais[0].urlOptimus));
+
+const aliRedirects = montarOfertaVitrine(enriquecerOfertaComRedirectsVitrine(ofertaBase({
+  id: "ali-app-pc-off",
+  ofertaId: "ali-app-pc-off",
+  marketplace: "aliexpress",
+  linksComerciais: [
+    { tipo: "app", papel: "link_app", ordemCaptura: 1, urlAfiliadaWorkspace: "https://s.click.aliexpress.com/e/app123", urlOptimus: "", renderizavel: true },
+    { tipo: "pc", papel: "link_pc", ordemCaptura: 2, urlAfiliadaWorkspace: "https://s.click.aliexpress.com/e/pc123", urlOptimus: "", renderizavel: true }
+  ]
+}), "workspace-a", depsRedirectVitrine));
+assert.deepStrictEqual(aliRedirects.linksComerciais.map(link => link.papel), ["link_app", "link_pc"], "AliExpress APP+PC devem gerar redirects separados");
+assert.ok(aliRedirects.linksComerciais.every(link => /^https:\/\/go\.optimuspromo\.com\.br\/r\//.test(link.urlOptimus)));
+assert.notStrictEqual(aliRedirects.linksComerciais[0].urlOptimus, aliRedirects.linksComerciais[1].urlOptimus, "APP e PC com URLs diferentes nao podem misturar CTAs");
+
+const shopeeRedirects = montarOfertaVitrine(enriquecerOfertaComRedirectsVitrine(ofertaBase({
+  id: "shopee-produto-resgate-off",
+  ofertaId: "shopee-produto-resgate-off",
+  marketplace: "shopee",
+  linksComerciais: [],
+  contratoComercialFinal: {
+    linksProduto: [
+      { tipo: "produto", papel: "link_produto", ordemCaptura: 2, urlAfiliadaWorkspace: "https://shopee.com.br/produto-afiliado", urlOptimus: "", renderizavel: true }
+    ],
+    linksResgate: [
+      { tipo: "resgate", papel: "link_resgate", ordemCaptura: 1, urlAfiliadaWorkspace: "https://shopee.com.br/resgate-afiliado", urlOptimus: "", renderizavel: true }
+    ]
+  }
+}), "workspace-a", depsRedirectVitrine));
+assert.deepStrictEqual(shopeeRedirects.linksComerciais.map(link => link.papel), ["link_resgate", "link_produto"], "Shopee Resgate+Produto devem gerar redirects preservando papeis");
+assert.ok(shopeeRedirects.linksComerciais.every(link => /^https:\/\/go\.optimuspromo\.com\.br\/r\//.test(link.urlOptimus)));
+
+const dedupeA1 = montarOfertaVitrine(enriquecerOfertaComRedirectsVitrine(ofertaBase({
+  id: "dedupe-a1",
+  ofertaId: "dedupe-a1",
+  marketplace: "amazon",
+  linksComerciais: [],
+  linkAfiliado: "https://amzn.to/dedupe"
+}), "workspace-a", depsRedirectVitrine)).linksComerciais[0].urlOptimus;
+const dedupeA2 = montarOfertaVitrine(enriquecerOfertaComRedirectsVitrine(ofertaBase({
+  id: "dedupe-a2",
+  ofertaId: "dedupe-a2",
+  marketplace: "amazon",
+  linksComerciais: [],
+  linkAfiliado: "https://amzn.to/dedupe"
+}), "workspace-a", depsRedirectVitrine)).linksComerciais[0].urlOptimus;
+const dedupeB = montarOfertaVitrine(enriquecerOfertaComRedirectsVitrine(ofertaBase({
+  id: "dedupe-b",
+  ofertaId: "dedupe-b",
+  clienteId: "workspace-b",
+  marketplace: "amazon",
+  linksComerciais: [],
+  linkAfiliado: "https://amzn.to/dedupe"
+}), "workspace-b", depsRedirectVitrine)).linksComerciais[0].urlOptimus;
+assert.strictEqual(dedupeA1, dedupeA2, "Dedupe deve reutilizar redirect por workspace+URL");
+assert.notStrictEqual(dedupeA1, dedupeB, "Workspace B nao pode reutilizar redirect do workspace A");
+
+const depsFanoutRedirect = criarDeps({ criarLinkOptimus: criarGeradorOptimusTeste().criarLinkOptimus });
+ativarVitrine(depsFanoutRedirect);
+publicar(depsFanoutRedirect, ofertaBase({
+  id: "fanout-redirect",
+  ofertaId: "fanout-redirect",
+  marketplace: "mercadolivre",
+  linksComerciais: [],
+  linkAfiliado: "https://meli.la/fanout"
+}), 3);
+vitrineRedirect = storage.lerVitrineWorkspace("workspace-a", depsFanoutRedirect);
+assert.strictEqual(vitrineRedirect.ofertas.length, 1, "FANOUT com redirect independente continua publicando um unico card");
+
 const ofertaIntegridade = montarOfertaVitrine(ofertaBase({
   id: "integridade",
   ofertaId: "integridade",
@@ -375,5 +557,7 @@ assert.ok(
     index.indexOf("void registrarExecutorEnviado"),
   "hook deve ficar no bloco pos-envio confirmado antes dos eventos auxiliares"
 );
+assert.ok(index.includes("criarLinkOptimus,"), "hook da Vitrine deve receber helper oficial de redirect Optimus");
+assert.ok(index.includes("gerarLinkOptimus,"), "hook da Vitrine deve receber fallback oficial de redirect Optimus");
 
 console.log("vitrine-v1-hook-pos-envio.test.js OK");
