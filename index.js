@@ -7675,8 +7675,17 @@ configCliente.automacaoAtiva = automacaoAnterior;
 
 function decorarItemFilaParaResposta(item = {}) {
   const ehRadar = item?.origem === "radar" || item?.radar === true || item?.radarNaFila === true;
+  const statusVisual = statusVisualFila(item);
+  const statusDetalheVisual = statusDetalheVisualFila(item, statusVisual);
 
-  if (!ehRadar) return item;
+  if (!ehRadar) {
+    return {
+      ...item,
+      statusVisual,
+      statusFinalVisual: statusVisual,
+      statusDetalheVisual
+    };
+  }
 
   const badgeOrigemAtual = item.badgeOrigem && typeof item.badgeOrigem === "object"
     ? item.badgeOrigem
@@ -7691,6 +7700,9 @@ function decorarItemFilaParaResposta(item = {}) {
     origemBadge: item.origemBadge || "Radar",
     origemIcone: item.origemIcone || "radar",
     exibirBadgeRadar: true,
+    statusVisual,
+    statusFinalVisual: statusVisual,
+    statusDetalheVisual,
     badgeOrigem: {
       id: "radar",
       label: "Radar",
@@ -7709,15 +7721,25 @@ const FILA_STATUS_AGUARDANDO_VISUAL = new Set([
   "fila"
 ]);
 const FILA_STATUS_ENVIADO_VISUAL = new Set(["enviado", "enviada", "sucesso", "historico"]);
+const FILA_STATUS_EXPIRADA_VISUAL = new Set([
+  "expirada",
+  "expirado",
+  "expirada_operacional",
+  "expirado_operacional"
+]);
 const FILA_STATUS_ERRO_VISUAL = new Set([
   "erro",
   "falha",
   "erro_final",
   "erro_permanente",
-  "falha_final",
+  "falha_final"
+]);
+const FILA_MOTIVOS_EXPIRADA_VISUAL = [
+  "flow_expirada_frescor_comercial",
+  "flow_expirada_frescor_comercial_pre_importer",
   "expirada_operacional",
   "expirado_operacional"
-]);
+];
 const FILA_MOTIVOS_AGUARDANDO_VISUAL = [
   "intervalo",
   "fora_horario",
@@ -7749,20 +7771,35 @@ function textoFiltroFila(valor = "") {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+function motivoHistoricoFila(item = {}) {
+  return textoFiltroFila([
+    item.motivoRetencao,
+    item.motivo,
+    item.motivoFinal,
+    item.statusDetalhe,
+    item.statusDetalheVisual,
+    item.erro
+  ].filter(Boolean).join(" "));
+}
+
+function itemExpiradoPorTempoHistoricoFila(item = {}) {
+  if (!item?.expiraEm) return false;
+  const ms = parseTimestampHistoricoFila(item.expiraEm);
+  return Number.isFinite(ms) && ms <= Date.now();
+}
+
 function textoBuscaFila(valor = "") {
   return textoFiltroFila(valor).replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function statusVisualFila(item = {}) {
   const status = textoFiltroFila(item.status || item.estado || "");
-  const motivo = textoFiltroFila([
-    item.motivoRetencao,
-    item.motivo,
-    item.statusDetalhe,
-    item.erro
-  ].filter(Boolean).join(" "));
+  const motivo = motivoHistoricoFila(item);
+  const expirouPorMotivo = FILA_MOTIVOS_EXPIRADA_VISUAL.some(itemMotivo => motivo.includes(itemMotivo));
+  const expirouPorTempo = itemExpiradoPorTempoHistoricoFila(item);
 
   if (FILA_STATUS_ENVIADO_VISUAL.has(status)) return "enviada";
+  if (FILA_STATUS_EXPIRADA_VISUAL.has(status) || expirouPorMotivo || expirouPorTempo) return "expirada";
   if (FILA_STATUS_ERRO_VISUAL.has(status)) return "erro";
   if (status === "retida" || status === "retido") {
     if (FILA_MOTIVOS_AGUARDANDO_VISUAL.some(itemMotivo => motivo.includes(itemMotivo))) return "aguardando";
@@ -7771,6 +7808,23 @@ function statusVisualFila(item = {}) {
   }
   if (FILA_STATUS_AGUARDANDO_VISUAL.has(status)) return "aguardando";
   return "aguardando";
+}
+
+function statusDetalheVisualFila(item = {}, statusVisual = statusVisualFila(item)) {
+  const detalhe = String(
+    item.statusDetalheVisual ||
+    item.statusDetalhe ||
+    item.motivoRetencao ||
+    item.motivoFinal ||
+    item.motivo ||
+    item.erro ||
+    ""
+  ).trim();
+  if (detalhe) return detalhe;
+  if (statusVisual === "expirada") return "Expirada por frescor comercial.";
+  if (statusVisual === "enviada") return "Envio confirmado.";
+  if (statusVisual === "erro") return "Falha final.";
+  return "Aguardando envio.";
 }
 
 function parseTimestampHistoricoFila(valor = "") {
@@ -7916,6 +7970,7 @@ function statusItemCombinaFiltroFila(item = {}, statusFiltro = "") {
   if (!filtro || filtro === "todos") return true;
   if (["aguardando", "pendentes"].includes(filtro)) return statusVisualFila(item) === "aguardando";
   if (["enviadas", "enviados"].includes(filtro)) return statusVisualFila(item) === "enviada";
+  if (["expirada", "expiradas", "expirados"].includes(filtro)) return statusVisualFila(item) === "expirada";
   if (["erros", "falhas", "atencao", "atenção"].includes(filtro)) return statusVisualFila(item) === "erro";
   return textoFiltroFila(item.status) === filtro;
 }
@@ -7924,11 +7979,13 @@ function calcularMetricasHistoricoFila(itens = []) {
   const processadas = itens.length;
   const enviadas = itens.filter(item => statusVisualFila(item) === "enviada").length;
   const erros = itens.filter(item => statusVisualFila(item) === "erro").length;
+  const expiradas = itens.filter(item => statusVisualFila(item) === "expirada").length;
   const taxaEnvio = processadas > 0 ? Math.round((enviadas / processadas) * 1000) / 10 : 0;
   return {
     processadas,
     enviadas,
     erros,
+    expiradas,
     taxaEnvio,
     formulaTaxaEnvio: "enviadas / processadas * 100; processadas conta ofertas/operacoes no recorte, sem multiplicar fanout"
   };
@@ -23914,6 +23971,7 @@ app.get("/fila/status", (req, res) => {
     enviados: metricas.enviadas,
     retidas: itensFiltrados.filter(o => String(o.status || "").toLowerCase() === "retida").length,
     erros: metricas.erros,
+    expiradas: metricas.expiradas,
     metricas,
     filtros: {
       status: textoFiltroFila(req.query.status),

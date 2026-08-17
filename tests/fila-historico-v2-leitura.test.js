@@ -32,6 +32,12 @@ contem("destinosEnviados.flatMap", "fanout persistido deve participar de canal/d
 contem("statusVisualFila(item)", "status visual deve ser camada separada do status interno");
 contem("FILA_MOTIVOS_AGUARDANDO_VISUAL", "intervalo/fora da janela/limite diario devem poder ficar em aguardando visual");
 contem("FILA_MOTIVOS_ERRO_VISUAL", "motivos de atencao devem poder entrar em erros visualmente");
+contem("FILA_MOTIVOS_EXPIRADA_VISUAL", "motivos terminais de frescor devem virar Expirada visual");
+contem('"flow_expirada_frescor_comercial"', "frescor comercial final deve ser tratado como Expirada");
+contem('"flow_expirada_frescor_comercial_pre_importer"', "frescor pre-importer deve ser tratado como Expirada");
+contem('return "expirada"', "Historico deve projetar expiradas fora de Aguardando");
+contem('["expirada", "expiradas", "expirados"]', "filtro de Expiradas deve existir no backend");
+contem("expiradas,", "metricas devem expor expiradas");
 
 assert.ok(
   !fonte.includes("HISTORICO_DETALHADO_MS = 12 * 60 * 60 * 1000"),
@@ -39,4 +45,3 @@ assert.ok(
 );
 
 console.log("fila-historico-v2-leitura.test.js OK");
-
