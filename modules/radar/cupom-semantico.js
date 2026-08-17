@@ -93,6 +93,7 @@ function pareceFrasePercentualSemCodigo(valor = "") {
 function pareceBeneficioSemCodigo(valor = "") {
   const original = texto(valor);
   if (!original) return false;
+  if (/^\s*(?:\+?\s*)?\d*\s*(?:moeda|moedas|coin|coins)\s*(?:no\s+)?(?:app|aplicativo)?\s*$/i.test(original)) return true;
   const temValorDesconto = /\b\d{1,3}\s*%\s*(?:off|desconto)?\b/i.test(original) ||
     /(?:R\$\s*)?\d{1,5}(?:[,.]\d{1,2})?\s*OFF\b/i.test(original);
   if (!temValorDesconto) return false;
@@ -106,6 +107,7 @@ function pareceCodigoDerivadoDeDesconto(codigo = "") {
 
 function pareceSlugCurtoDeUrl(valor = "") {
   const original = texto(valor);
+  if (!/(?:https?:\/\/|www\.|[/?#=&.])/.test(original)) return false;
   const limpo = semAcentosUpper(original).replace(/[^A-Z0-9]/g, "");
   if (!limpo) return false;
   if (!/^[0-9][A-Z0-9]{7,13}$/.test(limpo)) return false;
@@ -118,7 +120,15 @@ function removerUrls(valor = "") {
 
 function pareceTrechoConcatenadoDeFrase(codigo = "") {
   return /(?:^|_)O?CUPOM(?:DE|AQUI|$)/i.test(codigo) ||
-    /(?:TODOS.*CUPONS?.*(?:PAGINA|ANUNCIO)|CUPONS?DESTA|DAPAGINA|DESTAPAGINA|DISPONIVEL|ANUNCIO|MENSAGEM|DETECTADO|HTTPS?)/i.test(codigo);
+    /(?:TODOS.*CUPONS?.*(?:PAGINA|ANUNCIO)|CUPONS?DESTA|DAPAGINA|DESTAPAGINA|DISPONIVEL|ANUNCIO|MENSAGEM|DETECTADO|HTTPS?)/i.test(codigo) ||
+    /^(?:ABRA|ABRIR|ACESSE|CLIQUE|TOQUE|CONFIRA|VEJA|VAI)(?:O|A|OS|AS)?[A-Z0-9]*(?:PRODUTO|APARECER|PAGINA|ANUNCIO|APP|APLICATIVO|LINK|LOJA|SITE)/i.test(codigo);
+}
+
+function pareceInstrucaoImperativaSemMarcador(valor = "") {
+  const original = texto(valor);
+  if (!original) return false;
+  if (/\b(?:cupom|cupons|codigo|c[oó]digo|codigos|voucher|coupon|promocode)\b/i.test(original)) return false;
+  return /^\s*(?:abra|abrir|acesse|clique|toque|confira|veja|vai\s+aparecer|aparecer[aá]?)\b/i.test(original);
 }
 
 function normalizarCodigoCupomSemantico(candidato = "") {
@@ -127,6 +137,7 @@ function normalizarCodigoCupomSemantico(candidato = "") {
   if (pareceUrlOuParametro(original)) return "";
   if (pareceFrasePercentualSemCodigo(original)) return "";
   if (pareceBeneficioSemCodigo(original)) return "";
+  if (pareceInstrucaoImperativaSemMarcador(original)) return "";
   if (pareceSlugCurtoDeUrl(original)) return "";
 
   const limpo = limparMarcadorCupom(original)
@@ -218,6 +229,7 @@ function normalizarCuponsSemanticos(valores = []) {
     if (
       pareceFrasePercentualSemCodigo(original) ||
       pareceBeneficioSemCodigo(original) ||
+      pareceInstrucaoImperativaSemMarcador(original) ||
       pareceSlugCurtoDeUrl(original) ||
       /\r?\n/.test(original) ||
       /https?:\/\/|www\./i.test(original) ||

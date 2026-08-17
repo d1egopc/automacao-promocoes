@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 
 const storage = require("../modules/vitrine/storage");
+const { normalizarCuponsSemanticos } = require("../modules/radar/cupom-semantico");
 const {
   coletarLinksComerciaisFinais,
   montarOfertaVitrine,
@@ -152,6 +153,32 @@ assert.deepStrictEqual(
 );
 assert.deepStrictEqual(ofertaComSnapshotRico.beneficios, ["Moedas no APP"]);
 
+const ofertaComContratoFinalCupom = montarOfertaVitrine(ofertaBase({
+  id: "ali-cupom-final",
+  ofertaId: "ali-cupom-final",
+  cupom: "MOEDAS ou ABRAOPRODUTO ou VAIAPARECER",
+  cupons: ["MOEDAS"],
+  contratoComercialFinal: {
+    cupomCodigo: "ALONG95WK ou BRGM3",
+    codigosCupom: ["ALONG95WK", "BRGM3"]
+  }
+}));
+assert.deepStrictEqual(
+  ofertaComContratoFinalCupom.cupons,
+  ["ALONG95WK", "BRGM3"],
+  "Vitrine deve preferir cupons finais e ignorar instrucoes/beneficios crus quando ha contrato final"
+);
+assert.deepStrictEqual(
+  normalizarCuponsSemanticos(["MOEDAS", "ABRAOPRODUTO", "VAIAPARECER", "Abra o produto", "Vai aparecer"]),
+  [],
+  "Instrucoes e beneficios nao devem virar cupom"
+);
+assert.deepStrictEqual(
+  normalizarCuponsSemanticos(["ALONG95WK", "BRGM3", "IFPHZ5IU", "MEGABR03"]),
+  ["ALONG95WK", "BRGM3", "IFPHZ5IU", "MEGABR03"],
+  "Codigos reais continuam validos"
+);
+
 publicar(depsAtiva, ofertaBase({ enviadoEm: "2026-08-17T15:10:00.000Z" }), 3);
 vitrine = storage.lerVitrineWorkspace("workspace-a", depsAtiva);
 assert.strictEqual(vitrine.ofertas.length, 1, "Fanout WA/TG/Discord deve virar um unico card");
@@ -187,6 +214,22 @@ const linksShopee = coletarLinksComerciaisFinais({
 });
 assert.deepStrictEqual(linksShopee.map(link => link.papel), ["link_resgate", "link_produto"], "Shopee Produto+Resgate devem ser preservados");
 
+const linksShopeeSomenteProduto = coletarLinksComerciaisFinais({
+  marketplace: "shopee",
+  linksComerciais: [
+    { tipo: "produto", papel: "link_produto", urlOptimus: "https://go.optimuspromo.com.br/r/produto-only", renderizavel: true }
+  ]
+});
+assert.deepStrictEqual(linksShopeeSomenteProduto.map(link => link.papel), ["link_produto"], "Shopee somente produto deve mostrar so produto");
+
+const linksShopeeSomenteResgate = coletarLinksComerciaisFinais({
+  marketplace: "shopee",
+  linksComerciais: [
+    { tipo: "resgate", papel: "link_resgate", urlOptimus: "https://go.optimuspromo.com.br/r/resgate-only", renderizavel: true }
+  ]
+});
+assert.deepStrictEqual(linksShopeeSomenteResgate.map(link => link.papel), ["link_resgate"], "Shopee somente resgate comprovado deve mostrar so resgate");
+
 const linksAliConvergentes = coletarLinksComerciaisFinais({
   marketplace: "aliexpress",
   linksComerciais: [
@@ -200,6 +243,63 @@ assert.deepStrictEqual(
   ["link_app", "link_pc"],
   "APP repetido dedupa, mas APP/PC com mesma URL preservam papeis distintos"
 );
+
+const linksAliComFallbackConcorrente = coletarLinksComerciaisFinais({
+  marketplace: "aliexpress",
+  linkAfiliado: "https://go.optimuspromo.com.br/r/principal",
+  linksComerciais: [
+    { tipo: "app", papel: "link_app", ordemCaptura: 1, urlOptimus: "https://go.optimuspromo.com.br/r/app789", renderizavel: true },
+    { tipo: "pc", papel: "link_pc", ordemCaptura: 2, urlOptimus: "https://go.optimuspromo.com.br/r/pc789", renderizavel: true }
+  ]
+});
+assert.deepStrictEqual(
+  linksAliComFallbackConcorrente.map(link => link.papel),
+  ["link_app", "link_pc"],
+  "AliExpress APP+PC estruturados nao devem receber fallback escalar concorrente"
+);
+
+const ofertaFallbackEscalar = montarOfertaVitrine(ofertaBase({
+  id: "fallback-escalar",
+  ofertaId: "fallback-escalar",
+  marketplace: "amazon",
+  linksComerciais: [],
+  linkAfiliado: "https://go.optimuspromo.com.br/r/principal"
+}));
+assert.deepStrictEqual(ofertaFallbackEscalar.linksComerciais.map(link => link.papel), ["link_produto"], "CTA principal Optimus escalar deve virar CTA publico");
+assert.strictEqual(ofertaFallbackEscalar.linksComerciais[0].urlOptimus, "https://go.optimuspromo.com.br/r/principal");
+
+for (const marketplace of ["mercadolivre", "kabum", "amazon"]) {
+  const ofertaMarketplace = montarOfertaVitrine(ofertaBase({
+    id: `principal-${marketplace}`,
+    ofertaId: `principal-${marketplace}`,
+    marketplace,
+    linksComerciais: [],
+    linkAfiliado: `https://go.optimuspromo.com.br/r/${marketplace}`
+  }));
+  assert.deepStrictEqual(ofertaMarketplace.linksComerciais.map(link => link.papel), ["link_produto"], `${marketplace} deve publicar CTA principal`);
+}
+
+const ofertaUrlOriginal = montarOfertaVitrine(ofertaBase({
+  id: "url-original",
+  ofertaId: "url-original",
+  linksComerciais: [],
+  linkAfiliado: "https://www.amazon.com.br/produto-original"
+}));
+assert.deepStrictEqual(ofertaUrlOriginal.linksComerciais, [], "URL original nao pode virar CTA publico");
+
+const ofertaIntegridade = montarOfertaVitrine(ofertaBase({
+  id: "integridade",
+  ofertaId: "integridade",
+  linksComerciais: [],
+  metadata: {
+    integridadeComercial: {
+      linksComerciais: [
+        { tipo: "produto", papel: "link_produto", urlAfiliadaWorkspace: "https://go.optimuspromo.com.br/r/integridade", renderizavel: true }
+      ]
+    }
+  }
+}));
+assert.deepStrictEqual(ofertaIntegridade.linksComerciais.map(link => link.urlOptimus), ["https://go.optimuspromo.com.br/r/integridade"], "Vitrine deve considerar metadata.integridadeComercial.linksComerciais");
 
 const ofertaShopee = montarOfertaVitrine({
   ...ofertaBase({

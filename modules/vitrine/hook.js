@@ -2,6 +2,7 @@
 
 const storage = require("./storage");
 const { resolverImagemUniversal } = require("../imagens/resolver-imagem-universal");
+const { normalizarCuponsSemanticos } = require("../radar/cupom-semantico");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -23,45 +24,25 @@ function lista(valor) {
   return [valor];
 }
 
-function chaveTexto(valor = "") {
-  return texto(valor)
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase();
-}
-
 function coletarCuponsOferta(oferta = {}) {
-  const radarMirror = oferta.metadata?.radarMirror || {};
-  const candidatos = [
-    ...lista(oferta.cupons),
-    ...lista(oferta.cupom),
-    ...lista(oferta.cupomCodigo),
-    ...lista(oferta.codigoCupom),
-    ...lista(radarMirror.cupom?.codigosCapturados),
-    ...lista(radarMirror.cupom?.codigoCapturado),
-    ...lista(radarMirror.comercial?.cupom?.codigos),
-    ...lista(radarMirror.comercial?.cupom?.codigo)
+  const contrato = oferta.contratoComercialFinal && typeof oferta.contratoComercialFinal === "object"
+    ? oferta.contratoComercialFinal
+    : {};
+  const fontesFinais = [
+    ...lista(contrato.codigosCupom),
+    ...lista(contrato.cupomCodigo)
   ];
-  const vistos = new Set();
-  const cupons = [];
+  const candidatos = fontesFinais.some(item => texto(item))
+    ? fontesFinais
+    : [
+      ...lista(oferta.codigosCupom),
+      ...lista(oferta.cupons),
+      ...lista(oferta.cupomCodigo),
+      ...lista(oferta.codigoCupom),
+      ...lista(oferta.cupom)
+    ];
 
-  for (const candidato of candidatos) {
-    const partes = texto(candidato)
-      .split(/\s+(?:ou|OR)\s+|[,+/;|]/i)
-      .map((item) => texto(item).replace(/^cupom[:\s-]*/i, ""))
-      .filter(Boolean);
-
-    for (const parte of partes) {
-      const codigo = texto(parte).slice(0, 40);
-      const chave = chaveTexto(codigo);
-      if (!chave || ["SEM CUPOM", "CUPOM COPIADO", "COPIADO", "APPLIED"].includes(chave)) continue;
-      if (vistos.has(chave)) continue;
-      vistos.add(chave);
-      cupons.push(codigo);
-    }
-  }
-
-  return cupons.slice(0, 8);
+  return normalizarCuponsSemanticos(candidatos).slice(0, 8);
 }
 
 function imagemOfertaVitrine(oferta = {}) {
@@ -121,11 +102,15 @@ function coletarLinksComerciaisFinais(oferta = {}) {
   const contrato = oferta.contratoComercialFinal && typeof oferta.contratoComercialFinal === "object"
     ? oferta.contratoComercialFinal
     : {};
+  const integridade = oferta.metadata?.integridadeComercial && typeof oferta.metadata.integridadeComercial === "object"
+    ? oferta.metadata.integridadeComercial
+    : {};
   const candidatos = [
     ...(Array.isArray(contrato.linksApp) ? contrato.linksApp : []),
     ...(Array.isArray(contrato.linksPc) ? contrato.linksPc : []),
     ...(Array.isArray(contrato.linksProduto) ? contrato.linksProduto : []),
     ...(Array.isArray(contrato.linksResgate) ? contrato.linksResgate : []),
+    ...(Array.isArray(integridade.linksComerciais) ? integridade.linksComerciais : []),
     ...(Array.isArray(oferta.linksComerciais) ? oferta.linksComerciais : []),
     ...(Array.isArray(oferta.linksApp) ? oferta.linksApp : []),
     ...(Array.isArray(oferta.linksPc) ? oferta.linksPc : []),
@@ -154,6 +139,28 @@ function coletarLinksComerciaisFinais(oferta = {}) {
       renderizavel: true,
       conversaoStatus: texto(link.conversaoStatus || "convertida") || "convertida"
     });
+  }
+
+  if (!links.length) {
+    const urlFallback = urlRedirectOptimus(
+      oferta.urlOptimus ||
+      oferta.linkProduto ||
+      oferta.linkFinal ||
+      oferta.linkAfiliado ||
+      ""
+    );
+    if (urlFallback) {
+      links.push({
+        tipo: "produto",
+        papel: "link_produto",
+        label: "Produto",
+        ordemCaptura: 999,
+        ocorrenciaId: "",
+        urlOptimus: urlFallback,
+        renderizavel: true,
+        conversaoStatus: "convertida"
+      });
+    }
   }
 
   return links.sort((a, b) => a.ordemCaptura - b.ordemCaptura);

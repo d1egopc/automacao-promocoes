@@ -463,7 +463,7 @@ const shopeeProdutoResgateTemplate = gerarTemplateUniversal({
   ]
 });
 
-assert.ok(shopeeProdutoResgateTemplate.indexOf("*Resgate:*") < shopeeProdutoResgateTemplate.indexOf("*Confira aqui:*"), "Shopee Resgate vem antes de Produto");
+assert.ok(shopeeProdutoResgateTemplate.indexOf("*Resgatar cupom:*") < shopeeProdutoResgateTemplate.indexOf("*Produto:*"), "Shopee Resgate vem antes de Produto");
 assert.ok(shopeeProdutoResgateTemplate.includes("https://s.shopee.com.br/resgate"), "Shopee Resgate preservado no template");
 assert.ok(shopeeProdutoResgateTemplate.includes("https://s.shopee.com.br/produto"), "Shopee Produto preservado no template");
 
