@@ -4623,6 +4623,7 @@ if (
   oferta.status = oferta.status || "pendente";
   oferta.statusDetalhe = oferta.statusDetalhe || "Aguardando envio";
   oferta.destinosEnviados = oferta.destinosEnviados || [];
+  oferta.destinosEstado = Array.isArray(oferta.destinosEstado) ? oferta.destinosEstado : [];
   oferta.logsEnvio = oferta.logsEnvio || [];
   oferta.erro = oferta.erro || "";
   oferta.erroEm = oferta.erroEm || "";
@@ -4708,6 +4709,91 @@ function motivoRetencaoSemDestino(analises = []) {
   }
 
   return "retida_sem_destino_compativel";
+}
+
+function destinoFanoutId(destino = {}) {
+  const tipo = String(destino?.tipo || destino?.canal || "").trim().toLowerCase();
+  const id = String(
+    destino?.id ||
+    destino?.destinoId ||
+    destino?.conexaoId ||
+    destino?.chatId ||
+    destino?.channelId ||
+    destino?.webhookId ||
+    destino?.nome ||
+    ""
+  ).trim();
+
+  return `${tipo || "destino"}:${id || "sem_id"}`;
+}
+
+function destinoJaEnviadoFanout(oferta = {}, destino = {}) {
+  const chave = destinoFanoutId(destino);
+  const tipo = String(destino?.tipo || destino?.canal || "").trim().toLowerCase();
+  const id = String(destino?.id || destino?.destinoId || "").trim();
+
+  const estadoEnviado = Array.isArray(oferta.destinosEstado)
+    ? oferta.destinosEstado.some(item =>
+        item?.estado === "enviado" &&
+        String(item?.chave || "") === chave
+      )
+    : false;
+  if (estadoEnviado) return true;
+
+  return Array.isArray(oferta.destinosEnviados) && oferta.destinosEnviados.some(item => {
+    const tipoEnviado = String(item?.tipo || item?.canal || "").trim().toLowerCase();
+    const idEnviado = String(item?.id || item?.destinoId || "").trim();
+    return destinoFanoutId(item) === chave || (tipoEnviado === tipo && id && idEnviado === id);
+  });
+}
+
+function registrarDestinoEstadoFanout(oferta = {}, destino = {}, estado = "aguardando", dados = {}) {
+  oferta.destinosEstado = Array.isArray(oferta.destinosEstado) ? oferta.destinosEstado : [];
+  const chave = destinoFanoutId(destino);
+  const agoraIso = dados.data || new Date().toISOString();
+  const base = {
+    chave,
+    id: String(destino?.id || destino?.destinoId || ""),
+    destinoId: String(destino?.id || destino?.destinoId || ""),
+    nome: destinoNomeLog(destino),
+    tipo: String(destino?.tipo || destino?.canal || "").trim().toLowerCase(),
+    estado,
+    motivo: dados.motivo || "",
+    atualizadoEm: agoraIso
+  };
+  const index = oferta.destinosEstado.findIndex(item => String(item?.chave || "") === chave);
+  const anterior = index >= 0 ? oferta.destinosEstado[index] : {};
+  const proximo = {
+    ...anterior,
+    ...base,
+    proximoEnvioPermitidoEm: dados.proximoEnvioPermitidoEm || "",
+    enviadoEm: estado === "enviado" ? agoraIso : (anterior.enviadoEm || "")
+  };
+
+  if (index >= 0) {
+    oferta.destinosEstado[index] = proximo;
+  } else {
+    oferta.destinosEstado.push(proximo);
+  }
+
+  return proximo;
+}
+
+function resumoDestinosEstadoFanout(oferta = {}) {
+  const estados = Array.isArray(oferta.destinosEstado) ? oferta.destinosEstado : [];
+  const enviados = estados.filter(item => item?.estado === "enviado").length;
+  const aguardando = estados.filter(item => item?.estado === "aguardando").length;
+  const errosDefinitivos = estados.filter(item => item?.estado === "erro_definitivo").length;
+  const elegiveis = estados.filter(item => item?.estado !== "nao_compativel");
+
+  return {
+    estados,
+    enviados,
+    aguardando,
+    errosDefinitivos,
+    elegiveis: elegiveis.length,
+    todosElegiveisErroDefinitivo: elegiveis.length > 0 && elegiveis.every(item => item?.estado === "erro_definitivo")
+  };
 }
 
 function marcarOfertaRetida(oferta = {}, motivoRetencao = "retida_sem_destino_compativel", contextoRetencao = {}) {
@@ -6460,6 +6546,7 @@ const destinosCompativeis = analiseDestinosFila.compativeis;
 const destinosAtivosTotalDebug = analiseDestinosFila.destinosInteligentes.filter(destino => destino?.ativo !== false).length;
 let destinosTentadosDebug = 0;
 const fastLaneCupomTipo = cupomFastLaneTipo(oferta);
+oferta.destinosEstado = Array.isArray(oferta.destinosEstado) ? oferta.destinosEstado : [];
 
 for (const itemCompativel of destinosCompativeis) {
   registrarCoberturaExecutor("destino_candidato", oferta, clienteId, itemCompativel.destino, {
@@ -6496,6 +6583,10 @@ for (const itemRejeitado of analiseDestinosFila.rejeitados) {
   const analise = itemRejeitado.analise;
   const nomeDestino = destinoNomeLog(destino);
   const motivoDestinoRejeitado = motivoCoberturaDestino(analise.motivo || "nao_compativel");
+  registrarDestinoEstadoFanout(oferta, destino, "nao_compativel", {
+    motivo: motivoDestinoRejeitado
+  });
+  marcarFilaAlterada();
 
   registrarCoberturaExecutor("destino_rejeitado", oferta, clienteId, destino, {
     decisao: "rejeitado",
@@ -6623,6 +6714,7 @@ if (!disponibilidadeAntesReserva.ok) {
     filaRecebeu: true,
     statusFilaAntes: oferta.status || "pendente"
   });
+  salvarFilaSeAlterada(clienteId);
   return;
 }
 liberarCooldownSessaoIndisponivel(clienteId, "sessao_disponivel");
@@ -6805,6 +6897,19 @@ for (const item of destinosOrdenados) {
   const nomeDestino = destinoNomeLog(destino);
   const intervalo = item.intervalo;
 
+  if (destinoJaEnviadoFanout(oferta, destino)) {
+    registrarDestinoEstadoFanout(oferta, destino, "enviado", {
+      motivo: "ja_enviado"
+    });
+    marcarFilaAlterada();
+    continue;
+  }
+
+  registrarDestinoEstadoFanout(oferta, destino, "aguardando", {
+    motivo: "destino_compativel"
+  });
+  marcarFilaAlterada();
+
   if (String(destino.tipo || "").toLowerCase() === "telegram") {
     logFilaTelegramDebug({
       clienteId,
@@ -6824,6 +6929,10 @@ for (const item of destinosOrdenados) {
   if (!destinoDentroHorario(destino)) {
     pulouPorHorario = true;
     motivosSemEnvio.push("fora_horario");
+    registrarDestinoEstadoFanout(oferta, destino, "aguardando", {
+      motivo: "fora_horario"
+    });
+    marcarFilaAlterada();
     logEnvioDestinoDebug({
       clienteId,
       oferta,
@@ -6869,6 +6978,10 @@ for (const item of destinosOrdenados) {
   if (!limite.ok) {
     pulouPorLimiteDiario = true;
     motivosSemEnvio.push("limite_diario");
+    registrarDestinoEstadoFanout(oferta, destino, "aguardando", {
+      motivo: "limite_diario"
+    });
+    marcarFilaAlterada();
     logEnvioDestinoDebug({
       clienteId,
       oferta,
@@ -6914,6 +7027,11 @@ for (const item of destinosOrdenados) {
   if (!intervalo.liberado) {
     pulouPorIntervalo = true;
     motivosSemEnvio.push("intervalo");
+    registrarDestinoEstadoFanout(oferta, destino, "aguardando", {
+      motivo: "intervalo",
+      proximoEnvioPermitidoEm: intervalo.proximoEnvioPermitidoEm || ""
+    });
+    marcarFilaAlterada();
     logFilaIntervalo("[FILA-DESTINO-BLOQUEADO-INTERVALO]", payloadIntervaloDestino(clienteId, destino, oferta, intervalo));
     logEnvioDestinoDebug({
       clienteId,
@@ -7034,6 +7152,10 @@ for (const item of destinosOrdenados) {
   if (tentouEnvioReal) destinosTentadosDebug += 1;
   if (resultadoEnvio.enviado !== true) {
     motivosSemEnvio.push(resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado");
+    registrarDestinoEstadoFanout(oferta, destino, tentouEnvioReal ? "erro_definitivo" : "aguardando", {
+      motivo: resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado"
+    });
+    marcarFilaAlterada();
     registrarCoberturaExecutor(tentouEnvioReal ? "executor_erro" : "executor_ignorado", oferta, clienteId, destino, {
       decisao: tentouEnvioReal ? "erro" : "ignorado",
       motivo: motivoCoberturaDestino(resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado"),
@@ -7060,6 +7182,10 @@ for (const item of destinosOrdenados) {
   if (resultadoEnvio.enviado === true) {
     enviouParaAlgumDestino = true;
     destinosEnviadosCount += 1;
+    registrarDestinoEstadoFanout(oferta, destino, "enviado", {
+      motivo: "envio_confirmado"
+    });
+    marcarFilaAlterada();
     atualizarUltimoEnvioDestino(clienteId, destino, oferta, intervalo);
     logOptimus("DESTINO", "Enviado", {
       clienteId,
@@ -7103,27 +7229,38 @@ const decisaoSemEnvio = decidirStatusExecutorSemEnvio({
   motivosSemEnvio
 });
 const dentroJanelaExecutor = destinosCompativeis.some(item => destinoDentroHorario(item.destino));
+const resumoFanout = resumoDestinosEstadoFanout(oferta);
+const motivoAguardandoFanout =
+  resumoFanout.estados.find(item => item?.estado === "aguardando")?.motivo ||
+  decisaoSemEnvio.motivoSemEnvio ||
+  "aguardando_destino";
+const totalDestinosEnviadosFanout = Math.max(resumoFanout.enviados, destinosEnviadosCount);
 
-if (!enviouParaAlgumDestino && decisaoSemEnvio.statusFinal === "pendente") {
-  resumoFila.motivoPulo = decisaoSemEnvio.motivoSemEnvio || "aguardando_destino";
+if (resumoFanout.aguardando > 0 || (!enviouParaAlgumDestino && decisaoSemEnvio.statusFinal === "pendente")) {
+  resumoFila.motivoPulo = motivoAguardandoFanout;
   oferta.status = "pendente";
   oferta.processandoEm = "";
-  oferta.statusDetalhe = `Aguardando envio: ${decisaoSemEnvio.motivoSemEnvio}`;
+  oferta.statusDetalhe = `Aguardando envio: ${motivoAguardandoFanout}`;
   oferta.erro = "";
   oferta.erroEm = "";
   marcarFilaAlterada();
+  const menorEsperaFanout = resumoFanout.estados
+    .filter(item => item?.estado === "aguardando" && item?.proximoEnvioPermitidoEm)
+    .map(item => Date.parse(item.proximoEnvioPermitidoEm) - Date.now())
+    .filter(ms => Number.isFinite(ms) && ms > 0)
+    .sort((a, b) => a - b)[0];
   const menorEsperaIntervalo = destinosOrdenados
     .filter(item => !item.intervalo.liberado)
     .map(item => item.intervalo.restanteMs)
     .sort((a, b) => a - b)[0];
   proximaTentativaDestino(
     oferta,
-    Math.max(30 * 1000, Math.min(menorEsperaIntervalo || 5 * 60 * 1000, 15 * 60 * 1000))
+    Math.max(30 * 1000, Math.min(menorEsperaFanout || menorEsperaIntervalo || 5 * 60 * 1000, 15 * 60 * 1000))
   );
   salvarFilaSeAlterada(clienteId);
   registrarCoberturaExecutor("fila_item_pendente", oferta, clienteId, {}, {
     decisao: "pendente",
-    motivo: motivoCoberturaDestino(decisaoSemEnvio.motivoSemEnvio),
+    motivo: motivoCoberturaDestino(motivoAguardandoFanout),
     destinoEncontrado: destinosCompativeis.length > 0,
     filaRecebeu: true,
     statusFilaAntes: "processando",
@@ -7131,7 +7268,7 @@ if (!enviouParaAlgumDestino && decisaoSemEnvio.statusFinal === "pendente") {
   });
   registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
     decisao: "bloqueado",
-    motivo: motivoCoberturaDestino(decisaoSemEnvio.motivoSemEnvio),
+    motivo: motivoCoberturaDestino(motivoAguardandoFanout),
     destinoEncontrado: destinosCompativeis.length > 0,
     filaRecebeu: true,
     statusFilaDepois: oferta.status || "pendente"
@@ -7141,20 +7278,20 @@ if (!enviouParaAlgumDestino && decisaoSemEnvio.statusFinal === "pendente") {
     clienteId,
     destinosElegiveis: destinosCompativeis,
     destinosTentados: destinosTentadosDebug,
-    motivoSemEnvio: decisaoSemEnvio.motivoSemEnvio,
+    motivoSemEnvio: motivoAguardandoFanout,
     dentroJanela: dentroJanelaExecutor,
     statusFinal: "pendente"
   });
   logOptimus("DESTINO", "Oferta aguardando destino liberar envio", {
     titulo: oferta.titulo || oferta.nome || "",
     clienteId,
-    motivo: decisaoSemEnvio.motivoSemEnvio
+    motivo: motivoAguardandoFanout
   });
 
   return;
 }
 
-if (!enviouParaAlgumDestino) {
+if (!enviouParaAlgumDestino && totalDestinosEnviadosFanout === 0) {
   resumoFila.motivoPulo = decisaoSemEnvio.motivoSemEnvio || "nenhum_destino_confirmou_envio";
   logOptimus("ERRO", "Oferta nao enviada; marcando erro tecnico", {
     titulo: oferta.titulo || oferta.nome || ""
@@ -7203,7 +7340,7 @@ resumoFila.motivoPulo = "";
 const finalizacaoEnvio = filaOfertas.finalizarOfertaEnviadaFila(fila, oferta, {
   clienteId,
   enviadoEm: new Date().toISOString(),
-  statusDetalhe: `Enviada para ${destinosEnviadosCount} destino(s)`
+  statusDetalhe: `Enviada para ${totalDestinosEnviadosFanout} destino(s)`
 });
 
 if (!finalizacaoEnvio.ok || !finalizacaoEnvio.oferta) {
@@ -7229,7 +7366,7 @@ marcarFilaAlterada();
 void registrarExecutorEnviado({
   clienteId,
   oferta,
-  destinosEnviados: destinosEnviadosCount
+  destinosEnviados: totalDestinosEnviadosFanout
 });
 registrarCoberturaExecutor("executor_enviado", oferta, clienteId, {}, {
   decisao: "enviado",
