@@ -29,7 +29,7 @@ const SEED_AJUDAS = {
     texto: "Bem-vindo ao painel principal do Optimus Promo. Aqui voce acompanha conexoes, destinos, fila, automacao, integracoes e atividades recentes em um so lugar."
   },
   campanhas: { titulo: "Campanhas", texto: "" },
-  fila: { titulo: "Fila", texto: "" },
+  fila: { titulo: "Histórico de Envios", texto: "" },
   automacao: { titulo: "Automacao", texto: "" },
   destinos: { titulo: "Destinos", texto: "" },
   templates: { titulo: "Templates", texto: "" },
