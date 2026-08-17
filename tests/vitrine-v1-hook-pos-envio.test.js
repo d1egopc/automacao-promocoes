@@ -135,6 +135,23 @@ assert.deepStrictEqual(
   "AliExpress APP+PC devem ser preservados e link tecnico deve ficar fora"
 );
 
+const ofertaComSnapshotRico = montarOfertaVitrine(ofertaBase({
+  id: "oferta-rica",
+  ofertaId: "oferta-rica",
+  imagem: "",
+  imagemUrl: "https://cdn.example.com/imagem-url.jpg",
+  cupom: "PROMO10 ou APP20",
+  cupons: ["PROMO10", "FRETE15"],
+  beneficios: ["Moedas no APP"]
+}));
+assert.strictEqual(ofertaComSnapshotRico.imagem, "https://cdn.example.com/imagem-url.jpg", "Vitrine deve preservar imagem alternativa existente na oferta enviada");
+assert.deepStrictEqual(
+  ofertaComSnapshotRico.cupons,
+  ["PROMO10", "FRETE15", "APP20"],
+  "Vitrine deve separar e deduplicar multiplos cupons"
+);
+assert.deepStrictEqual(ofertaComSnapshotRico.beneficios, ["Moedas no APP"]);
+
 publicar(depsAtiva, ofertaBase({ enviadoEm: "2026-08-17T15:10:00.000Z" }), 3);
 vitrine = storage.lerVitrineWorkspace("workspace-a", depsAtiva);
 assert.strictEqual(vitrine.ofertas.length, 1, "Fanout WA/TG/Discord deve virar um unico card");

@@ -1,6 +1,7 @@
 "use strict";
 
 const storage = require("./storage");
+const { resolverImagemUniversal } = require("../imagens/resolver-imagem-universal");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -14,6 +15,62 @@ function mesmoWorkspace(clienteId = "", oferta = {}) {
 function numero(valor = 0) {
   const n = Number(valor);
   return Number.isFinite(n) ? n : 0;
+}
+
+function lista(valor) {
+  if (Array.isArray(valor)) return valor;
+  if (valor === null || valor === undefined || valor === "") return [];
+  return [valor];
+}
+
+function chaveTexto(valor = "") {
+  return texto(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+}
+
+function coletarCuponsOferta(oferta = {}) {
+  const radarMirror = oferta.metadata?.radarMirror || {};
+  const candidatos = [
+    ...lista(oferta.cupons),
+    ...lista(oferta.cupom),
+    ...lista(oferta.cupomCodigo),
+    ...lista(oferta.codigoCupom),
+    ...lista(radarMirror.cupom?.codigosCapturados),
+    ...lista(radarMirror.cupom?.codigoCapturado),
+    ...lista(radarMirror.comercial?.cupom?.codigos),
+    ...lista(radarMirror.comercial?.cupom?.codigo)
+  ];
+  const vistos = new Set();
+  const cupons = [];
+
+  for (const candidato of candidatos) {
+    const partes = texto(candidato)
+      .split(/\s+(?:ou|OR)\s+|[,+/;|]/i)
+      .map((item) => texto(item).replace(/^cupom[:\s-]*/i, ""))
+      .filter(Boolean);
+
+    for (const parte of partes) {
+      const codigo = texto(parte).slice(0, 40);
+      const chave = chaveTexto(codigo);
+      if (!chave || ["SEM CUPOM", "CUPOM COPIADO", "COPIADO", "APPLIED"].includes(chave)) continue;
+      if (vistos.has(chave)) continue;
+      vistos.add(chave);
+      cupons.push(codigo);
+    }
+  }
+
+  return cupons.slice(0, 8);
+}
+
+function imagemOfertaVitrine(oferta = {}) {
+  try {
+    const resolvida = resolverImagemUniversal(oferta, { origem: "vitrine_hook" });
+    return texto(resolvida.imagem || resolvida.imagemUrl || "");
+  } catch {
+    return texto(oferta.imagem || oferta.image || oferta.thumbnail || "");
+  }
 }
 
 function normalizarPapelLink(link = {}) {
@@ -104,18 +161,22 @@ function coletarLinksComerciaisFinais(oferta = {}) {
 
 function montarOfertaVitrine(oferta = {}) {
   const enviadoEm = texto(oferta.enviadoEm || oferta.dataEnvio || "") || new Date().toISOString();
+  const cupons = coletarCuponsOferta(oferta);
   return {
     idPublico: texto(oferta.ofertaId || oferta.engineOfertaId || oferta.id || oferta.linkAfiliado || oferta.titulo || ""),
     ofertaId: texto(oferta.ofertaId || oferta.engineOfertaId || oferta.id || ""),
     titulo: texto(oferta.titulo || oferta.nome || ""),
-    imagem: texto(oferta.imagem || oferta.image || oferta.thumbnail || ""),
+    imagem: imagemOfertaVitrine(oferta),
     marketplace: texto(oferta.marketplace || ""),
     categoria: texto(oferta.categoria || ""),
     preco: oferta.preco ?? oferta.precoAtual ?? "",
     precoAtual: oferta.precoAtual ?? oferta.preco ?? "",
     precoAnterior: oferta.precoAnterior ?? oferta.precoOriginal ?? oferta.precoDe ?? "",
     desconto: texto(oferta.desconto || oferta.percentualDesconto || ""),
-    cupom: texto(oferta.cupom || oferta.codigoCupom || ""),
+    cupom: cupons.length ? cupons.join(" ou ") : texto(oferta.cupom || oferta.codigoCupom || ""),
+    cupons,
+    beneficios: lista(oferta.beneficios || oferta.beneficioTexto || oferta.beneficio).map(texto).filter(Boolean).slice(0, 6),
+    moedas: oferta.moedas || oferta.moedasShopee || oferta.metadata?.radarMirror?.comercial?.condicoesComerciais?.moedas?.valor || "",
     enviadoEm,
     ultimoEnvioEm: enviadoEm,
     linksComerciais: coletarLinksComerciaisFinais(oferta)
@@ -176,5 +237,6 @@ module.exports = {
   coletarLinksComerciaisFinais,
   montarOfertaVitrine,
   publicarOfertaConfirmadaVitrine,
+  coletarCuponsOferta,
   urlRedirectOptimus
 };

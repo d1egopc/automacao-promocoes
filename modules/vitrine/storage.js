@@ -350,8 +350,26 @@ function sanitizarLinksComerciais(links = []) {
     .slice(0, 8);
 }
 
+function listaTextoPublica(valor = [], maxItens = 8, maxTexto = 80) {
+  const lista = Array.isArray(valor) ? valor : valor ? [valor] : [];
+  const vistos = new Set();
+  const saida = [];
+
+  for (const item of lista) {
+    const textoItem = limitar(item, maxTexto);
+    const chave = textoItem.toLowerCase();
+    if (!textoItem || vistos.has(chave)) continue;
+    vistos.add(chave);
+    saida.push(textoItem);
+    if (saida.length >= maxItens) break;
+  }
+
+  return saida;
+}
+
 function sanitizarOfertaPublica(oferta = {}) {
   const entrada = oferta && typeof oferta === "object" ? oferta : {};
+  const cupons = listaTextoPublica(entrada.cupons || entrada.cupom || entrada.codigoCupom || [], 8, 40);
   const saida = {
     id: limitar(entrada.idPublico || entrada.ofertaId || entrada.id || "", 80),
     titulo: limitar(entrada.titulo || entrada.nome || "", 180),
@@ -361,7 +379,10 @@ function sanitizarOfertaPublica(oferta = {}) {
     preco: limitar(entrada.preco ?? entrada.precoAtual ?? "", 40),
     precoAnterior: limitar(entrada.precoAnterior ?? entrada.precoDe ?? "", 40),
     desconto: limitar(entrada.desconto || entrada.percentualDesconto || "", 40),
-    cupom: limitar(entrada.cupom || entrada.codigoCupom || "", 80),
+    cupom: limitar(entrada.cupom || entrada.codigoCupom || cupons[0] || "", 120),
+    cupons,
+    beneficios: listaTextoPublica(entrada.beneficios || entrada.beneficioTexto || entrada.beneficio || [], 6, 120),
+    moedas: typeof entrada.moedas === "boolean" ? entrada.moedas : limitar(entrada.moedas || "", 80),
     enviadoEm: texto(entrada.ultimoEnvioEm || entrada.enviadoEm || ""),
     linksComerciais: sanitizarLinksComerciais(entrada.linksComerciais || [])
   };
