@@ -465,6 +465,10 @@ function temOcorrenciasComerciais(oferta = {}) {
   return Array.isArray(oferta.linksComerciais) && oferta.linksComerciais.length > 0;
 }
 
+function marketplaceShopeeTemplate(oferta = {}) {
+  return normalizarComparacao(primeiroTexto(oferta.marketplace, oferta.loja)).replace(/[^a-z0-9]+/g, "") === "shopee";
+}
+
 function dadosBlocoTemplate(tipo = "", oferta = {}) {
   if (tipo === "titulo") return primeiroTexto(oferta.titulo, oferta.nome);
   if (tipo === "preco_por") return formatarMoeda(valorPrecoPor(oferta));
@@ -659,7 +663,7 @@ function resolverLinha(bloco, oferta = {}) {
   }
   if (tipo === "link_resgate") {
     const link = primeiroTexto(linkComercialPorTipo(oferta, ["resgate"]), oferta.linkResgate);
-    return link ? `🎟️ Resgate:\n${link}` : "";
+    return link ? `${marketplaceShopeeTemplate(oferta) ? "🎟️ Resgatar cupom" : "🎟️ Resgate"}:\n${link}` : "";
   }
   if (tipo === "link_app") {
     const link = primeiroTexto(linkComercialPorTipo(oferta, ["app"]), oferta.linkApp);
@@ -687,7 +691,7 @@ function resolverLinha(bloco, oferta = {}) {
   }
   if (tipo === "link") {
     const link = primeiroTexto(linkComercialPorTipo(oferta, ["produto"]), temOcorrenciasComerciais(oferta) ? "" : primeiroTexto(oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link));
-    return link ? `🔗 Confira aqui:\n${link}` : "";
+    return link ? `${marketplaceShopeeTemplate(oferta) ? "🛒 Produto" : "🔗 Confira aqui"}:\n${link}` : "";
   }
   if (TIPOS_AVISO_FINAL.has(tipo)) {
     const aviso = valorAvisoFinal(oferta);

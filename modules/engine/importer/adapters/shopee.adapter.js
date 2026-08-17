@@ -789,6 +789,48 @@ function montarLinksComerciaisShopee({ links = [], evento = {}, analiseLinksShop
 
   linksEntrada.forEach((link, indice) => adicionar(link, indice, "radar.links"));
 
+  if (!ocorrencias.some(item => item.tipo === 'produto') && texto(linkAfiliado) && texto(urlOriginalEngine)) {
+    const classificadoPrincipal = candidatoOcorrenciaShopee({
+      ...(linkEscolhido?.link || {}),
+      url: urlOriginalEngine,
+      url_original: urlOriginalEngine,
+      papelLink: PAPEL_LINK.PRODUTO
+    }, evento, linksEntrada.length);
+
+    if (classificadoPrincipal.papel === 'produto') {
+      const ordemCaptura = Number(linkEscolhido?.link?.ordemCaptura || linkEscolhido?.ordemCaptura || linksEntrada.length + 1) || (linksEntrada.length + 1);
+      const ocorrenciaId = texto(linkEscolhido?.link?.ocorrenciaId || linkEscolhido?.ocorrenciaId || `shopee:produto:principal:${ordemCaptura}`);
+      const chave = `${ocorrenciaId}|produto|${ordemCaptura}|${urlOriginalEngine}`;
+      if (!vistos.has(chave)) {
+        vistos.add(chave);
+        ocorrencias.push({
+          papel: 'link_produto',
+          tipo: 'produto',
+          url: urlOriginalEngine,
+          original: urlOriginalEngine,
+          resolvido: texto(linkEscolhido?.link?.url_expandida || linkEscolhido?.link?.urlExpandida || urlOriginalEngine),
+          urlOriginal: urlOriginalEngine,
+          urlExpandida: texto(linkEscolhido?.link?.url_expandida || linkEscolhido?.link?.urlExpandida || ""),
+          urlAfiliada: linkAfiliado,
+          urlAfiliadaWorkspace: linkAfiliado,
+          urlOptimus: "",
+          ordemCaptura,
+          ocorrenciaId,
+          renderizavel: true,
+          seguro: true,
+          origem: "adapter.produtoPrincipalShopee",
+          proveniencia: "adapter.produtoPrincipalShopee",
+          tipoOrigem: "adapter.shopee.produto_principal_preservado",
+          conversaoStatus: "convertida",
+          motivoConversao: "produto_principal_preservado_contrato_oficial",
+          destinoFuncionalOriginal: destinoFuncionalShopee(linkEscolhido?.link || {}, urlOriginalEngine),
+          destinoFuncionalFinal: destinoProdutoConvertidoShopee(linkEscolhido?.link || {}, linkAfiliado),
+          motivo: classificadoPrincipal.motivo
+        });
+      }
+    }
+  }
+
   if (!ocorrencias.some(item => item.tipo === 'resgate')) {
     const auxiliares = Array.isArray(analiseLinksShopee.auxiliares) ? analiseLinksShopee.auxiliares : [];
     auxiliares.forEach((candidato, indice) => {

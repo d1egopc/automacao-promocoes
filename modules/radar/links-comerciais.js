@@ -135,11 +135,17 @@ function marcadorMoedasAliExpress(linha = "") {
   return /\b(?:moeda|moedas|coins?)\b/.test(chave);
 }
 
+function marketplaceShopee(marketplace = "", url = "") {
+  const mp = normalizarTextoComparacao(marketplace).replace(/[^a-z0-9]+/g, "");
+  const valor = texto(url).toLowerCase();
+  return mp === "shopee" || /(^|\/\/|\.)(?:s\.)?shopee\.com\.br/i.test(valor);
+}
+
 function classificarPapelAliExpress({ link = "", linhaAtual = "", linhaAnterior = "", linhaPosterior = "", marketplace = "" } = {}) {
   if (!marketplaceAliExpress(marketplace, link)) return null;
 
   if (marcadorMoedasAliExpress(linhaAtual)) {
-    return { tipo: "moedas", origem: "aliexpress_contexto_moedas", evidencia: "contexto_moedas" };
+    return { tipo: "app", origem: "aliexpress_contexto_app_moedas", evidencia: "contexto_app_moedas" };
   }
 
   if (marcadorAppAliExpress(linhaAtual)) {
@@ -151,7 +157,7 @@ function classificarPapelAliExpress({ link = "", linhaAtual = "", linhaAnterior 
   }
 
   if (marcadorMoedasAliExpress(linhaAnterior)) {
-    return { tipo: "moedas", origem: "aliexpress_contexto_moedas", evidencia: "contexto_moedas" };
+    return { tipo: "app", origem: "aliexpress_contexto_app_moedas", evidencia: "contexto_app_moedas" };
   }
 
   if (marcadorAppAliExpress(linhaAnterior)) {
@@ -166,6 +172,23 @@ function classificarPapelAliExpress({ link = "", linhaAtual = "", linhaAnterior 
     return { tipo: "app", origem: "aliexpress_posicao_antes_pc", evidencia: "posicao_antes_pc" };
   }
 
+  return null;
+}
+
+function classificarPapelShopee({ link = "", linhaAtual = "", linhaAnterior = "", contexto = "", marketplace = "" } = {}) {
+  if (!marketplaceShopee(marketplace, link)) return null;
+  const chave = contextoTextual({ linhaAtual, linhaAnterior, contexto });
+  const valor = texto(link).toLowerCase();
+
+  if (contextoInequivocoProduto(chave) && !contextoInequivocoResgate(chave)) {
+    return { tipo: "produto", origem: "shopee_contexto_produto", evidencia: "contexto_produto" };
+  }
+  if (contextoInequivocoResgate(chave) || linkParecePaginaCupons(link)) {
+    return { tipo: "resgate", origem: "shopee_contexto_resgate", evidencia: "contexto_resgate" };
+  }
+  if (/(?:shopee\.com\.br\/product\/\d+\/\d+|-i\.\d+\.\d+|\/opaanlp\/\d+\/\d+)/i.test(valor)) {
+    return { tipo: "produto", origem: "shopee_url_produto", evidencia: "url_produto" };
+  }
   return null;
 }
 
@@ -204,11 +227,24 @@ function classificarLinkComercial({
     return { url: "", tipo: "outros", confianca: "ausente", origem: "url_ausente", contexto: chaveContexto, evidencias: [] };
   }
 
+  const papelAliExpress = classificarPapelAliExpress({ link, linhaAtual, linhaAnterior, linhaPosterior, marketplace });
+  const papelShopee = classificarPapelShopee({ link, linhaAtual, linhaAnterior, contexto, marketplace });
+
   if (linkPareceImagemComercial(link)) {
     tipo = "imagem";
     confianca = "alta";
     origem = "padrao_imagem";
     evidencias.push("padrao_imagem");
+  } else if (papelAliExpress) {
+    tipo = papelAliExpress.tipo;
+    confianca = "alta";
+    origem = papelAliExpress.origem;
+    evidencias.push(papelAliExpress.evidencia);
+  } else if (papelShopee) {
+    tipo = papelShopee.tipo;
+    confianca = "alta";
+    origem = papelShopee.origem;
+    evidencias.push(papelShopee.evidencia);
   } else if (contextoInequivocoResgate(chaveContexto)) {
     tipo = "resgate";
     confianca = "alta";
@@ -225,13 +261,7 @@ function classificarLinkComercial({
     origem = "contexto_produto";
     evidencias.push("contexto_produto");
   } else {
-    const papelAliExpress = classificarPapelAliExpress({ link, linhaAtual, linhaAnterior, linhaPosterior, marketplace });
-    if (papelAliExpress) {
-      tipo = papelAliExpress.tipo;
-      confianca = "alta";
-      origem = papelAliExpress.origem;
-      evidencias.push(papelAliExpress.evidencia);
-    } else if (linkPareceProdutoPorDominio(link)) {
+    if (linkPareceProdutoPorDominio(link)) {
       tipo = linkPareceAfiliado(link) ? "afiliado" : "produto";
       confianca = "media";
       origem = linkPareceAfiliado(link) ? "dominio_afiliado_produto" : "dominio_produto";

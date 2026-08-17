@@ -62,6 +62,11 @@ function escolherLinkAliExpress(links = [], evento = {}) {
     .sort((a, b) => prioridadeCampoLinkAliExpress(b) - prioridadeCampoLinkAliExpress(a))[0];
   if (linkPc) return linkPc;
 
+  const linkProduto = classificados
+    .filter(candidato => ["produto", "link_produto"].includes(candidato.papelLink) && texto(candidato.url))
+    .sort((a, b) => prioridadeCampoLinkAliExpress(b) - prioridadeCampoLinkAliExpress(a))[0];
+  if (linkProduto) return linkProduto;
+
   return escolherProdutoPrincipal(validos, "aliexpress", evento);
 }
 
@@ -373,7 +378,7 @@ function validarProdutoCanonicoAliExpress({ papelLink = "", principal = {}, conv
   const produtoPrincipal = resolverProdutoCanonicoAliExpress(principal.produto || principal, principal.urlOriginal || "");
   const produtoConvertido = resolverProdutoCanonicoAliExpress(convertido.produto || convertido, urlOriginal);
 
-  if (papel === "link_app" || papel === "link_moedas") {
+  if (papel === "link_app" || papel === "link_pc" || papel === "link_moedas") {
     if (!produtoPrincipal.produtoId) {
       return {
         ok: false,
@@ -607,6 +612,7 @@ async function converterLinksAlternativosAliExpress({
 
   const saida = [];
   const conversoesPorPapelUrl = new Map();
+  const appsVistos = new Set();
   let indiceOcorrencia = 0;
   for (const link of linksClassificados) {
     indiceOcorrencia += 1;
@@ -625,6 +631,11 @@ async function converterLinksAlternativosAliExpress({
       continue;
     }
     const chaveCacheOcorrencia = `${papelLink}:${urlOriginal}`;
+    if (papelLink === "link_app") {
+      const chaveApp = chaveUrlAliExpressAfiliada(urlOriginal) || urlOriginal.toLowerCase();
+      if (appsVistos.has(chaveApp)) continue;
+      appsVistos.add(chaveApp);
+    }
     let conversao = conversoesPorPapelUrl.get(chaveCacheOcorrencia);
     if (!conversao) {
       conversao = await converter(urlOriginal, papelLink);

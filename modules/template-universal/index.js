@@ -67,6 +67,10 @@ function normalizarComparacao(valor = "") {
     .toLowerCase();
 }
 
+function marketplaceShopeeTemplate(marketplace = "") {
+  return normalizarComparacao(marketplace).replace(/[^a-z0-9]+/g, "") === "shopee";
+}
+
 const METADADOS_TECNICOS_CRUS = new Set([
   "pix",
   "pagamento pix",
@@ -692,11 +696,12 @@ function montarTemplateUniversalOficial({
     beneficioComercial ? linhaComPrefixo("🎁", beneficioComercial) : "",
     ...detalhesComerciais
   ]);
-  adicionarBlocoLinks(blocos, "🎟️ *Resgate:*", linksResgate);
+  const shopee = marketplaceShopeeTemplate(campos.marketplace);
+  adicionarBlocoLinks(blocos, shopee ? "🎟️ *Resgatar cupom:*" : "🎟️ *Resgate:*", linksResgate);
   adicionarBlocoLinks(blocos, "📱 *APP:*", linksApp);
   adicionarBlocoLinks(blocos, "🪙 *Moedas:*", linksMoedas);
   adicionarBlocoLinks(blocos, "🖥️ *PC:*", linksPc);
-  adicionarBlocoLinks(blocos, "🔗 *Confira aqui:*", linksProduto);
+  adicionarBlocoLinks(blocos, shopee ? "🛒 *Produto:*" : "🔗 *Confira aqui:*", linksProduto);
   adicionarBloco(blocos, [campos.avisoFinal ? `⚠️ ${campos.avisoFinal}` : ""]);
   return blocos.map(bloco => bloco.join("\n")).join("\n\n");
 }

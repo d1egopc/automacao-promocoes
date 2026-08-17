@@ -374,9 +374,9 @@ async function testarClassificacaoAliExpressPreservaProduto() {
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(resultado.metadata.linkOriginalEngine, produto);
   assert.strictEqual(urlsImportadas[0], produto);
-  assert.ok(urlsImportadas.includes(moedas), "link_moedas tambem deve passar por conversao controlada");
+  assert.ok(urlsImportadas.includes(moedas), "link_app/moedas tambem deve passar por conversao controlada");
   assert.strictEqual(resultado.metadata.papelLinkEscolhido, "produto");
-  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "link_moedas");
+  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "link_app");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
 }
 
@@ -425,11 +425,10 @@ async function testarAliExpressAppPcPreservaAmbosComoComerciais() {
   const apps = resultado.metadata.linksClassificados.filter(item => item.papelLink === "link_app");
   const appRenderizavel = apps.filter(item => item.renderizavel === true);
   const pcRenderizavel = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
-  assert.strictEqual(apps.length, 2);
-  assert.strictEqual(appRenderizavel.length, 2);
+  assert.strictEqual(apps.length, 1);
+  assert.strictEqual(appRenderizavel.length, 1);
   assert.strictEqual(appRenderizavel[0].papelLinkMotivo, "contexto_link_app_aliexpress");
   assert.strictEqual(appRenderizavel[0].urlAfiliada, "https://s.click.aliexpress.com/e/_appPuskillD1");
-  assert.strictEqual(appRenderizavel[1].urlAfiliada, "https://s.click.aliexpress.com/e/_appPuskillD1");
   assert.strictEqual(appRenderizavel[0].conversaoWorkspace.motivo, "cta_app_workspace_convertido_produto_canonico");
   assert.strictEqual(appRenderizavel[0].conversaoWorkspace.produtoCanonico, "1005002222222222");
   assert.strictEqual(appRenderizavel[0].conversaoWorkspace.produtoCanonicoPrincipal, "1005002222222222");
@@ -702,9 +701,9 @@ async function testarAliExpressReconheceRotuloNaLinhaAnterior() {
 
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(urlsImportadas[0], pc);
-  assert.ok(urlsImportadas.includes(moedas), "link_moedas tambem deve passar por conversao controlada");
+  assert.ok(urlsImportadas.includes(moedas), "link_app/moedas tambem deve passar por conversao controlada");
   assert.strictEqual(resultado.precoAtual, 354.74);
-  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "link_moedas");
+  assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "link_app");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "link_pc");
   assert.strictEqual(resultado.metadata.precoRadarUsado, true);
 }

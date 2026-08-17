@@ -135,7 +135,7 @@ function classificarPorContexto(marketplace = "", contexto = {}) {
       return { papelLink: PAPEL_LINK.LINK_PC, motivo: "contexto_link_pc_aliexpress" };
     }
     if (/\b(?:link\s+com\s+)?(?:moeda|moedas|coins?)\s*:?\s*$/.test(antes) || /\blink\s+com\s+moedas?\b/.test(antes)) {
-      return { papelLink: PAPEL_LINK.LINK_MOEDAS, motivo: "contexto_link_moedas_aliexpress" };
+      return { papelLink: PAPEL_LINK.LINK_APP, motivo: "contexto_link_app_moedas_aliexpress" };
     }
   }
 
@@ -154,6 +154,31 @@ function classificarPorContexto(marketplace = "", contexto = {}) {
   }
 
   return null;
+}
+
+function proximoMarcadorPcAliExpress(evento = {}, candidato = {}) {
+  const fonte = textoEvento(evento);
+  if (!fonte) return false;
+
+  let idx = -1;
+  let tamanhoUrl = 0;
+  for (const url of urlsCandidato(candidato)) {
+    idx = fonte.indexOf(url);
+    if (idx >= 0) {
+      tamanhoUrl = url.length;
+      break;
+    }
+  }
+  if (idx < 0) return false;
+
+  const depois = fonte.slice(idx + tamanhoUrl, Math.min(fonte.length, idx + tamanhoUrl + 120));
+  const linhas = depois
+    .split(/\r?\n/)
+    .map(linha => semAcentos(linha.replace(/https?:\/\/\S+/gi, " ")).trim())
+    .filter(Boolean);
+  const primeira = linhas[0] || "";
+  return /\b(?:no\s+pc|pelo\s+pc|link\s+(?:para\s+)?pc|pc|desktop|site)\b/.test(primeira) &&
+    !/\b(?:app|aplicativo|mobile|celular|produto|resgate|cupom|voucher)\b/.test(primeira.replace(/\bpc\b/g, ""));
 }
 
 function shopeeLinkPosteriorAoResgate(evento = {}, candidato = {}, contexto = {}) {
@@ -229,6 +254,10 @@ function classificarAliExpress(candidato = {}, evento = {}) {
     PAPEL_LINK.LINK_MOEDAS
   ].includes(porContexto.papelLink)) {
     return { ...porContexto, confianca: "alta" };
+  }
+
+  if (proximoMarcadorPcAliExpress(evento, candidato)) {
+    return { papelLink: PAPEL_LINK.LINK_APP, motivo: "aliexpress_link_antes_marcador_pc", confianca: "alta" };
   }
 
   if (/\/item\/\d+\.html|\/i\/\d+\.html|product_id=\d+/i.test(url)) {
@@ -323,8 +352,11 @@ function classificarLinkEngine({ marketplace = "", evento = {}, link = {}, url =
     }
   }
   if (metadata.papelLink) {
+    const papelMetadata = mp === "aliexpress" && metadata.papelLink === PAPEL_LINK.LINK_MOEDAS
+      ? PAPEL_LINK.LINK_APP
+      : metadata.papelLink;
     return {
-      papelLink: metadata.papelLink,
+      papelLink: papelMetadata,
       motivo: metadata.papelLinkMotivo || "metadata_papel_link",
       confianca: metadata.papelLinkConfianca || "media",
       urlProduto: metadata.urlProduto || ""

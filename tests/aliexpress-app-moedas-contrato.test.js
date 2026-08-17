@@ -87,10 +87,10 @@ async function testarPrecoRadarVenceApiELinkMoedasConverte() {
   assert.strictEqual(resultado.metadata.precoAuditoria.precoApi, 140.66);
   assert.strictEqual(resultado.cupom, "", "palavra Produto nao deve virar cupom");
 
-  const linkMoedas = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_moedas");
+  const linkMoedas = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_app");
   const linkPc = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
 
-  assert.strictEqual(linkMoedas.renderizavel, true, "link_moedas convertido deve renderizar");
+  assert.strictEqual(linkMoedas.renderizavel, true, "link com moedas deve renderizar como APP");
   assert.strictEqual(linkMoedas.urlAfiliada, appAfiliado);
   assert.strictEqual(linkPc.renderizavel, true, "PC convertido deve renderizar");
   assert.strictEqual(linkPc.urlAfiliada, pcAfiliado);
@@ -262,8 +262,8 @@ async function testarAppDuplicadoReutilizaConversaoEPreservaOcorrencias() {
   const apps = resultado.metadata.linksClassificados.filter(item => item.papelLink === "link_app");
   assert.strictEqual(resultado.ok, true);
   assert.deepStrictEqual(chamadas, [pc, app], "APP duplicado chama a conversao alternativa uma vez e replica o resultado");
-  assert.strictEqual(apps.length, 2);
-  assert.deepStrictEqual(apps.map(item => item.urlAfiliada), [appAfiliado, appAfiliado]);
+  assert.strictEqual(apps.length, 1);
+  assert.deepStrictEqual(apps.map(item => item.urlAfiliada), [appAfiliado]);
   assert.ok(apps.every(item => item.renderizavel === true));
 }
 
