@@ -1797,6 +1797,50 @@ function destinoFuncionalDivergenteComercial(item = {}) {
   return false;
 }
 
+function dominioShopeeComercial(valor = "") {
+  const texto = normalizarTexto(valor);
+  if (!texto) return false;
+  try {
+    const host = new URL(texto).hostname.replace(/^www\./i, "").toLowerCase();
+    return host === "s.shopee.com.br" || host === "shopee.com.br" || host.endsWith(".shopee.com.br");
+  } catch (_) {
+    return /(^|\/\/|\.)(s\.)?shopee\.com\.br\b/i.test(texto);
+  }
+}
+
+function produtoShopeeRadarPreservado(item = {}, ocorrencia = {}) {
+  const tipo = tipoComercialIntegridade(item.tipo || item.papel || item.papelLink || "");
+  if (tipo !== "produto") return false;
+  if (item.renderizavel !== true || !normalizarTexto(item.urlAfiliadaWorkspace || item.urlAfiliada || item.linkAfiliado || "")) return false;
+  if (!papeisComerciaisCompativeis(item.papel || item.papelLink || item.tipo || "", ocorrencia.papel)) return false;
+
+  const urlsOrigem = [
+    item.urlOriginal,
+    item.url,
+    item.original,
+    item.href,
+    item.urlExpandida,
+    item.resolvido,
+    ocorrencia.urlOriginal
+  ].filter(Boolean);
+  if (!urlsOrigem.length || !urlsOrigem.every(dominioShopeeComercial)) return false;
+
+  const motivo = normalizarTexto(item.motivoConversao || item.motivo || "");
+  if (/produto_shopee_destino_divergente|ocorrencia_nao_capturada_radar/i.test(motivo)) return false;
+
+  const destinoOriginal = objetoSeguro(item.destinoFuncionalOriginal);
+  const destinoFinal = objetoSeguro(item.destinoFuncionalFinal);
+  const shopOriginal = normalizarTexto(destinoOriginal.shopId || "");
+  const itemOriginal = normalizarTexto(destinoOriginal.itemId || "");
+  const shopFinal = normalizarTexto(destinoFinal.shopId || "");
+  const itemFinal = normalizarTexto(destinoFinal.itemId || "");
+  if (shopOriginal && itemOriginal && shopFinal && itemFinal) {
+    return shopOriginal === shopFinal && itemOriginal === itemFinal;
+  }
+
+  return itemCorrespondeOcorrenciaRadar(item, ocorrencia);
+}
+
 function montarOcorrenciaRadarComercial(item = {}, indice = 0, marketplace = "", evento = {}) {
   const url = normalizarTexto(
     item.urlOriginal ||
@@ -1910,7 +1954,7 @@ function aplicarGuardaOcorrenciasRadar(links = [], ocorrenciasRadar = []) {
 
     usados.add(indiceRadar);
     const radar = ocorrenciasRadar[indiceRadar];
-    const divergente = destinoFuncionalDivergenteComercial(item);
+    const divergente = destinoFuncionalDivergenteComercial(item) && !produtoShopeeRadarPreservado(item, radar);
     linksComerciais.push({
       ...item,
       papel: item.papel || item.tipo || radar.papel,

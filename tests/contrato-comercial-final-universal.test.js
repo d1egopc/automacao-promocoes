@@ -289,9 +289,9 @@ const msgH = gerarTemplateUniversal({
   linkAfiliado: "https://go.optimus/produto-principal",
   linksComerciais: linksFixture().slice(0, 3)
 });
-assertContem(msgH, "Resgate:");
+assertContem(msgH, "Resgatar cupom");
 assertContem(msgH, "https://go.optimus/resgate");
-assertContem(msgH, "Confira aqui:");
+assertContem(msgH, "Produto:");
 assertContem(msgH, "https://go.optimus/produto-1");
 assertContem(msgH, "https://go.optimus/produto-2");
 

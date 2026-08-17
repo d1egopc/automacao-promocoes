@@ -746,7 +746,8 @@ function montarLinksComerciaisShopee({ links = [], evento = {}, analiseLinksShop
 
     const ordemCaptura = Number(link.ordemCaptura || link.ordem || link.indiceCaptura || indice + 1) || (indice + 1);
     const ocorrenciaId = texto(link.ocorrenciaId || link.idOcorrencia || `shopee:${papel}:${ordemCaptura}:${indice + 1}`);
-    const chave = `${ocorrenciaId}|${papel}|${ordemCaptura}|${urlOriginal}`;
+    const chaveUrl = texto(urlOriginal).replace(/\/+$/g, "").toLowerCase();
+    const chave = `${papel}|${chaveUrl}`;
     if (vistos.has(chave)) return;
     vistos.add(chave);
 

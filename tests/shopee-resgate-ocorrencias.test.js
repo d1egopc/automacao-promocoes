@@ -1,6 +1,66 @@
 const assert = require("assert");
 const { importarShopeeEngine } = require("../modules/engine/importer/adapters/shopee.adapter");
+const { aplicarGuardaOcorrenciasRadar } = require("../modules/engine/importer/importer.service");
+const { gerarTemplateUniversal } = require("../modules/template-universal");
 const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
+
+function chaveRadar(url = "") {
+  const parsed = new URL(url);
+  parsed.hash = "";
+  return {
+    exata: parsed.toString().replace(/\/+$/, "").toLowerCase(),
+    funcional: `${parsed.hostname.replace(/^www\./i, "").toLowerCase()}${parsed.pathname}`.replace(/\/+$/, "")
+  };
+}
+
+function ocorrenciaRadar(papel, url, ordemCaptura = 1) {
+  return {
+    papel,
+    urlOriginal: url,
+    ordemCaptura,
+    ocorrenciaId: `radar:${papel}:${ordemCaptura}`,
+    chaves: [chaveRadar(url)]
+  };
+}
+
+function linkComercialShopee({ tipo, url, afiliado, urlOptimus = "", ordemCaptura = 1, motivoConversao = "", destinoOriginal = null, destinoFinal = null }) {
+  return {
+    tipo,
+    papel: tipo === "resgate" ? "link_resgate" : "produto",
+    url,
+    urlOriginal: url,
+    original: url,
+    resolvido: url,
+    urlAfiliada: afiliado,
+    urlAfiliadaWorkspace: afiliado,
+    urlOptimus,
+    renderizavel: true,
+    seguro: true,
+    conversaoStatus: "convertida",
+    motivoConversao: motivoConversao || (tipo === "resgate" ? "resgate_workspace_convertido_generate_shortlink" : "produto_workspace_convertido_por_ocorrencia"),
+    ordemCaptura,
+    ocorrenciaId: `radar:${tipo === "resgate" ? "link_resgate" : "produto"}:${ordemCaptura}`,
+    destinoFuncionalOriginal: destinoOriginal || { tipo: "desconhecido", shopId: "", itemId: "", rota: "", url },
+    destinoFuncionalFinal: destinoFinal || { tipo: "desconhecido", shopId: "", itemId: "", rota: "", url: afiliado },
+    urlDestinoFuncional: tipo === "produto" ? url : "",
+    uedOriginal: tipo === "produto" ? url : "",
+    uedFinalDecodificado: tipo === "produto" ? afiliado : ""
+  };
+}
+
+function assertTemplateProdutoResgate(oferta) {
+  const mensagem = gerarTemplateUniversal({
+    titulo: oferta.titulo || "Produto Shopee",
+    marketplace: "shopee",
+    categoria: "Gamer e Hardware",
+    preco: 1371,
+    linksComerciais: oferta.linksComerciais
+  });
+  assert.ok(mensagem.includes("🛒 *Produto:*"), "Template deve receber Produto renderizavel");
+  assert.ok(mensagem.includes("🎟️ *Resgatar cupom:*"), "Template deve receber Resgate renderizavel");
+  assert.ok(mensagem.includes("https://go.optimuspromo.com.br/r/produto"), "Produto deve usar redirect Optimus proprio");
+  assert.ok(mensagem.includes("https://go.optimuspromo.com.br/r/resgate"), "Resgate deve usar redirect Optimus proprio");
+}
 
 async function testarResgateProdutoProduto() {
   const resgate = "https://s.shopee.com.br/4Az3hSPAD1";
@@ -69,8 +129,8 @@ async function testarResgateProdutoProduto() {
   assert.deepStrictEqual(chamadas, [produto], "resgate landing nao deve passar pelo importador de produto; produto duplicado reutiliza cache");
   assert.strictEqual(shortlinksGerados.length, 1);
   assert.ok(shortlinksGerados[0].subIds.includes("wsclienteteste"), "subIds devem identificar o workspace sem dados sensiveis");
-  assert.deepStrictEqual(resultado.linksComerciais.map(item => item.tipo), ["resgate", "produto", "produto"]);
-  assert.deepStrictEqual(resultado.linksComerciais.map(item => item.ordemCaptura), [1, 2, 3]);
+  assert.deepStrictEqual(resultado.linksComerciais.map(item => item.tipo), ["resgate", "produto"]);
+  assert.deepStrictEqual(resultado.linksComerciais.map(item => item.ordemCaptura), [1, 2]);
   assert.strictEqual(resultado.linksComerciais[0].urlOriginal, resgate);
   assert.strictEqual(resultado.linksComerciais[0].renderizavel, true);
   assert.strictEqual(resultado.linksComerciais[0].urlAfiliadaWorkspace, afiliadoResgate);
@@ -79,11 +139,11 @@ async function testarResgateProdutoProduto() {
   assert.strictEqual(resultado.linksComerciais[0].destinoFuncionalOriginal.rota, "/m/cupom-de-desconto");
   assert.strictEqual(resultado.linksComerciais[0].destinoFuncionalFinal.rota, "/m/cupom-de-desconto");
   assert.strictEqual(resultado.linksComerciais[1].urlAfiliadaWorkspace, afiliadoProduto);
-  assert.strictEqual(resultado.linksComerciais[2].urlAfiliadaWorkspace, afiliadoProduto);
+  assert.strictEqual(resultado.linksComerciais[1].renderizavel, true);
   assert.deepStrictEqual(resultado.linksResgate.map(item => item.urlOriginal), [resgate]);
-  assert.deepStrictEqual(resultado.linksProduto.map(item => item.urlOriginal), [produto, produto]);
+  assert.deepStrictEqual(resultado.linksProduto.map(item => item.urlOriginal), [produto]);
   assert.deepStrictEqual(resultado.linksResgate.map(item => item.urlAfiliadaWorkspace), [afiliadoResgate]);
-  assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.tipo), ["resgate", "produto", "produto"]);
+  assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.tipo), ["resgate", "produto"]);
 }
 
 async function testarCincoProdutosDiferentesPreservamCincoSaidas() {
@@ -474,6 +534,137 @@ async function testarFormatosPrecoBrasileiroShopee() {
   }
 }
 
+function testarGuardaPreservaProdutoShopeeRadarComDestinoCurto() {
+  const casos = [
+    ["Liquidificador Mondial", "https://s.shopee.com.br/liquidificadorResgate", "https://s.shopee.com.br/liquidificadorProduto"],
+    ["Ryzen 9700X", "https://s.shopee.com.br/AUsjJOm9Kh", "https://s.shopee.com.br/8fRKHaNHYs"],
+    ["Principia", "https://s.shopee.com.br/principiaResgate", "https://s.shopee.com.br/principiaProduto"],
+    ["RTX 5060", "https://s.shopee.com.br/6VIWXL6ZNc", "https://s.shopee.com.br/8fRRSflAL0"],
+    ["Notebook Positivo", "https://s.shopee.com.br/1Lf1tzwwsd", "https://s.shopee.com.br/904T25GYyf"]
+  ];
+
+  for (const [titulo, resgate, produto] of casos) {
+    const links = [
+      linkComercialShopee({
+        tipo: "resgate",
+        url: resgate,
+        afiliado: "https://s.shopee.com.br/resgateAfiliado",
+        urlOptimus: "https://go.optimuspromo.com.br/r/resgate",
+        ordemCaptura: 1,
+        destinoOriginal: { tipo: "landing", shopId: "", itemId: "", rota: "/m/cupom-de-desconto", url: resgate },
+        destinoFinal: { tipo: "landing", shopId: "", itemId: "", rota: "/m/cupom-de-desconto", url: "https://s.shopee.com.br/resgateAfiliado" }
+      }),
+      linkComercialShopee({
+        tipo: "produto",
+        url: produto,
+        afiliado: "https://s.shopee.com.br/produtoAfiliado",
+        urlOptimus: "https://go.optimuspromo.com.br/r/produto",
+        ordemCaptura: 2
+      })
+    ];
+    const guarda = aplicarGuardaOcorrenciasRadar(links, [
+      ocorrenciaRadar("link_resgate", resgate, 1),
+      ocorrenciaRadar("produto", produto, 2)
+    ]);
+
+    assert.strictEqual(guarda.descartados.length, 0, `${titulo}: Produto capturado pelo Radar nao deve ser descartado`);
+    assert.deepStrictEqual(guarda.linksComerciais.map(item => item.tipo), ["resgate", "produto"], `${titulo}: Resgate + Produto devem atravessar o guard`);
+    assert.strictEqual(guarda.linksComerciais.find(item => item.tipo === "resgate").renderizavel, true, `${titulo}: Resgate deve continuar renderizavel`);
+    assert.strictEqual(guarda.linksComerciais.find(item => item.tipo === "produto").renderizavel, true, `${titulo}: Produto deve continuar renderizavel`);
+    assertTemplateProdutoResgate({ titulo, linksComerciais: guarda.linksComerciais });
+  }
+}
+
+function testarGuardaBloqueiaProdutoShopeeRealmenteDivergente() {
+  const produto = "https://s.shopee.com.br/produtoDivergente";
+  const guarda = aplicarGuardaOcorrenciasRadar([
+    linkComercialShopee({
+      tipo: "produto",
+      url: produto,
+      afiliado: "https://go.optimuspromo.com.br/r/produto-divergente",
+      ordemCaptura: 1,
+      destinoOriginal: { tipo: "produto", shopId: "111", itemId: "222", rota: "", url: "https://shopee.com.br/product/111/222" },
+      destinoFinal: { tipo: "produto", shopId: "999", itemId: "888", rota: "", url: "https://shopee.com.br/product/999/888" }
+    })
+  ], [ocorrenciaRadar("produto", produto, 1)]);
+
+  assert.strictEqual(guarda.linksComerciais[0].renderizavel, false);
+  assert.strictEqual(guarda.linksComerciais[0].urlAfiliadaWorkspace, "");
+  assert.strictEqual(guarda.linksComerciais[0].motivoConversao, "destino_funcional_divergente_radar");
+}
+
+function testarGuardaBloqueiaUrlNaoCapturadaEDominioExterno() {
+  const resgate = "https://s.shopee.com.br/resgateUnico";
+  const produto = "https://s.shopee.com.br/produtoNaoCapturado";
+  const naoCapturada = aplicarGuardaOcorrenciasRadar([
+    linkComercialShopee({
+      tipo: "resgate",
+      url: resgate,
+      afiliado: "https://go.optimuspromo.com.br/r/resgate",
+      urlOptimus: "https://go.optimuspromo.com.br/r/resgate",
+      ordemCaptura: 1
+    }),
+    linkComercialShopee({
+      tipo: "produto",
+      url: produto,
+      afiliado: "https://go.optimuspromo.com.br/r/produto",
+      urlOptimus: "https://go.optimuspromo.com.br/r/produto",
+      ordemCaptura: 2
+    })
+  ], [ocorrenciaRadar("link_resgate", resgate, 1)]);
+
+  assert.deepStrictEqual(naoCapturada.linksComerciais.map(item => item.tipo), ["resgate"]);
+  assert.strictEqual(naoCapturada.descartados[0].tipo, "produto");
+  assert.strictEqual(naoCapturada.descartados[0].motivoConversao, "ocorrencia_nao_capturada_radar");
+
+  const externo = "https://example.com/produto";
+  const dominioExterno = aplicarGuardaOcorrenciasRadar([
+    {
+      ...linkComercialShopee({
+        tipo: "produto",
+        url: externo,
+        afiliado: "https://go.optimuspromo.com.br/r/produto-externo",
+        ordemCaptura: 1
+      }),
+      urlDestinoFuncional: externo,
+      uedFinalDecodificado: "https://example.net/outro"
+    }
+  ], [ocorrenciaRadar("produto", externo, 1)]);
+
+  assert.strictEqual(dominioExterno.linksComerciais[0].renderizavel, false);
+  assert.strictEqual(dominioExterno.linksComerciais[0].motivoConversao, "destino_funcional_divergente_radar");
+}
+
+function testarGuardaSoResgateESoProduto() {
+  const resgate = "https://s.shopee.com.br/soResgate";
+  const somenteResgate = aplicarGuardaOcorrenciasRadar([
+    linkComercialShopee({
+      tipo: "resgate",
+      url: resgate,
+      afiliado: "https://go.optimuspromo.com.br/r/resgate",
+      urlOptimus: "https://go.optimuspromo.com.br/r/resgate",
+      ordemCaptura: 1,
+      destinoOriginal: { tipo: "landing", shopId: "", itemId: "", rota: "/m/cupom-de-desconto", url: resgate },
+      destinoFinal: { tipo: "landing", shopId: "", itemId: "", rota: "/m/cupom-de-desconto", url: "https://go.optimuspromo.com.br/r/resgate" }
+    })
+  ], [ocorrenciaRadar("link_resgate", resgate, 1)]);
+  assert.deepStrictEqual(somenteResgate.linksComerciais.map(item => item.tipo), ["resgate"]);
+  assert.strictEqual(somenteResgate.linksComerciais[0].renderizavel, true);
+
+  const produto = "https://s.shopee.com.br/soProduto";
+  const somenteProduto = aplicarGuardaOcorrenciasRadar([
+    linkComercialShopee({
+      tipo: "produto",
+      url: produto,
+      afiliado: "https://go.optimuspromo.com.br/r/produto",
+      urlOptimus: "https://go.optimuspromo.com.br/r/produto",
+      ordemCaptura: 1
+    })
+  ], [ocorrenciaRadar("produto", produto, 1)]);
+  assert.deepStrictEqual(somenteProduto.linksComerciais.map(item => item.tipo), ["produto"]);
+  assert.strictEqual(somenteProduto.linksComerciais[0].renderizavel, true);
+}
+
 Promise.resolve()
   .then(testarResgateProdutoProduto)
   .then(testarCincoProdutosDiferentesPreservamCincoSaidas)
@@ -484,6 +675,10 @@ Promise.resolve()
   .then(testarWorkspaceNaoReutilizaShortlinkDeOutro)
   .then(testarPrecoBrasileiroMilharXiaomi)
   .then(testarFormatosPrecoBrasileiroShopee)
+  .then(testarGuardaPreservaProdutoShopeeRadarComDestinoCurto)
+  .then(testarGuardaBloqueiaProdutoShopeeRealmenteDivergente)
+  .then(testarGuardaBloqueiaUrlNaoCapturadaEDominioExterno)
+  .then(testarGuardaSoResgateESoProduto)
   .then(() => console.log("shopee-resgate-ocorrencias.test.js OK"))
   .catch((erro) => {
     console.error(erro);
