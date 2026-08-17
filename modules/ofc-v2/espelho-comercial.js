@@ -1176,6 +1176,10 @@ function linksContratoParaDocumento(contrato = {}) {
         url: texto(urlOptimus || urlAfiliada || urlOriginal),
         renderizavel: link.renderizavel !== false,
         confianca: texto(link.confianca || "media"),
+        ocorrenciaId: texto(link.ocorrenciaId || ""),
+        radarOcorrenciaId: texto(link.radarOcorrenciaId || ""),
+        conversaoStatus: texto(link.conversaoStatus || ""),
+        motivoConversao: texto(link.motivoConversao || ""),
         dedupeKey: texto(link.dedupeKey || `${papel}:${ordemCaptura}:${urlOriginal || urlAfiliada || urlOptimus}`)
       };
     })
@@ -1287,9 +1291,17 @@ function extrairDocumentoComercialCanonico({
     linksComerciais: Array.isArray(links.links) ? links.links.map(item => ({
       tipo: item.tipo,
       papel: item.papel,
+      ordemCaptura: item.ordemCaptura,
+      urlOriginal: item.urlOriginal,
+      urlAfiliada: item.urlAfiliada,
+      urlOptimus: item.urlOptimus,
       url: item.url,
       renderizavel: item.renderizavel !== false,
       confianca: item.confianca,
+      ocorrenciaId: item.ocorrenciaId,
+      radarOcorrenciaId: item.radarOcorrenciaId,
+      conversaoStatus: item.conversaoStatus,
+      motivoConversao: item.motivoConversao,
       dedupeKey: item.dedupeKey
     })).filter(item => item.url) : [],
     imagemComercial: imagemComercial && Object.keys(imagemComercial).length ? { ...imagemComercial } : null,
@@ -1377,6 +1389,18 @@ function valorUrl(item = {}) {
   return primeiroTexto(item.urlAfiliada, item.urlOptimus, item.afiliado, item.linkAfiliado, item.resolvido, item.urlOriginal, item.url, item.original, item.url_original, item.link, item.href, item.urlExpandida, item.url_expandida, item.urlNormalizada);
 }
 
+function valorUrlOriginalLink(item = {}) {
+  if (typeof item === "string") return texto(item);
+  if (!item || typeof item !== "object") return "";
+  return primeiroTexto(item.urlOriginal, item.original, item.url_original, item.linkOriginal, item.url, item.link, item.href, item.urlExpandida, item.url_expandida, item.urlNormalizada);
+}
+
+function valorUrlAfiliadaLink(item = {}) {
+  if (typeof item === "string") return texto(item);
+  if (!item || typeof item !== "object") return "";
+  return primeiroTexto(item.urlOptimus, item.urlAfiliadaWorkspace, item.urlAfiliada, item.afiliado, item.linkAfiliado, item.resolvido);
+}
+
 function adicionarLinkUnico(saida, url, tipo = "produto", contexto = "", extras = {}) {
   const valor = texto(url);
   if (!valor) return;
@@ -1386,12 +1410,23 @@ function adicionarLinkUnico(saida, url, tipo = "produto", contexto = "", extras 
     tipo: tipoNormalizado,
     contexto: texto(contexto),
     urlAfiliada: texto(extras.urlAfiliada || extras.linkAfiliado || ""),
+    urlAfiliadaWorkspace: texto(extras.urlAfiliadaWorkspace || ""),
+    urlOptimus: texto(extras.urlOptimus || ""),
+    urlOriginal: texto(extras.urlOriginal || ""),
+    urlOriginalRadar: texto(extras.urlOriginalRadar || ""),
     convertidoWorkspace: extras.convertidoWorkspace === true,
     afiliadoConvertido: extras.afiliadoConvertido === true,
     workspaceConvertido: extras.workspaceConvertido === true,
     linkAfiliadoWorkspace: extras.linkAfiliadoWorkspace === true,
     renderizavel: extras.renderizavel === true,
     seguro: extras.seguro === true,
+    ocorrenciaId: texto(extras.ocorrenciaId || ""),
+    idOcorrencia: texto(extras.idOcorrencia || ""),
+    radarOcorrenciaId: texto(extras.radarOcorrenciaId || ""),
+    ordemCaptura: Number(extras.ordemCaptura || 0) || 0,
+    conversaoStatus: texto(extras.conversaoStatus || ""),
+    motivoConversao: texto(extras.motivoConversao || ""),
+    sourceValuesUsado: texto(extras.sourceValuesUsado || ""),
     origem: texto(extras.origem || ""),
     confianca: texto(extras.confianca || "")
   });
@@ -1408,17 +1443,30 @@ function tipoLinkTextoComercial(linha = "") {
 }
 
 function adicionarLinkComercialEstruturado(saida, item = {}, tipoPadrao = "produto") {
-  const url = valorUrl(item);
+  const urlOriginal = valorUrlOriginalLink(item);
+  const urlAfiliada = valorUrlAfiliadaLink(item);
+  const url = urlAfiliada || urlOriginal || valorUrl(item);
   const contexto = item.contexto || item.label || item.origem || "";
   const tipo = tipoLinkNormalizado(item.tipo || item.papel || tipoPadrao, contexto);
   adicionarLinkUnico(saida, url, tipo, contexto, {
-    urlAfiliada: item.urlAfiliada || item.linkAfiliado || item.afiliado,
+    urlAfiliada: item.urlAfiliada || item.urlAfiliadaWorkspace || item.linkAfiliado || item.afiliado,
+    urlAfiliadaWorkspace: item.urlAfiliadaWorkspace,
+    urlOptimus: item.urlOptimus,
+    urlOriginal,
+    urlOriginalRadar: item.urlOriginalRadar,
     convertidoWorkspace: item.convertidoWorkspace === true,
     afiliadoConvertido: item.afiliadoConvertido === true,
     workspaceConvertido: item.workspaceConvertido === true,
     linkAfiliadoWorkspace: item.linkAfiliadoWorkspace === true,
     renderizavel: item.renderizavel === true,
     seguro: item.seguro === true,
+    ocorrenciaId: item.ocorrenciaId,
+    idOcorrencia: item.idOcorrencia,
+    radarOcorrenciaId: item.radarOcorrenciaId,
+    ordemCaptura: item.ordemCaptura,
+    conversaoStatus: item.conversaoStatus,
+    motivoConversao: item.motivoConversao,
+    sourceValuesUsado: item.sourceValuesUsado,
     origem: item.origem,
     confianca: item.confianca
   });
@@ -1495,9 +1543,19 @@ function linksComerciaisIntegridade({ oferta = {}, ofertaEntrada = {}, metadata 
   ];
 }
 
+function linkAlternativoAliExpressRenderizavel(item = {}) {
+  const tipo = texto(item.tipo);
+  const status = normalizarComparacao(item.conversaoStatus);
+  return ["app", "pc"].includes(tipo)
+    && item.renderizavel === true
+    && status !== "falhou"
+    && Boolean(primeiroTexto(item.urlAfiliadaWorkspace, item.urlAfiliada, item.urlOptimus, item.url));
+}
+
 function extrairLinksComerciais({ textoOriginal = "", oferta = {}, ofertaEntrada = {}, link = {} } = {}) {
   const links = [];
   const metadata = objeto(oferta.metadata || ofertaEntrada.metadata || {});
+  const marketplace = primeiroTexto(oferta.marketplace, ofertaEntrada.marketplace, link.marketplace);
   const linksEstruturados = linksComerciaisIntegridade({ oferta, ofertaEntrada, metadata });
   if (!linksEstruturados.length) {
     for (const item of urlsDoTexto(textoOriginal)) {
@@ -1509,9 +1567,11 @@ function extrairLinksComerciais({ textoOriginal = "", oferta = {}, ofertaEntrada
   for (const item of lista(ofertaEntrada.linksResgate)) adicionarLinkComercialEstruturado(links, item, "resgate");
   for (const item of lista(oferta.linksProduto)) adicionarLinkComercialEstruturado(links, item, "produto");
   for (const item of lista(oferta.linksResgate)) adicionarLinkComercialEstruturado(links, item, "resgate");
-  adicionarLinkUnico(links, oferta.linkOriginal || link.url_original || ofertaEntrada.linkOriginal, "produto");
+  normalizarPapeisLinksAliExpress(links, marketplace);
+  if (!marketplaceAliExpressValor(marketplace) || !links.some(linkItem => linkAlternativoAliExpressRenderizavel(linkItem))) {
+    adicionarLinkUnico(links, oferta.linkOriginal || link.url_original || ofertaEntrada.linkOriginal, "produto");
+  }
   if (!links.length) adicionarLinkUnico(links, oferta.linkAfiliado || ofertaEntrada.linkAfiliado, "produto");
-  const marketplace = primeiroTexto(oferta.marketplace, ofertaEntrada.marketplace, link.marketplace);
   normalizarPapeisLinksAliExpress(links, marketplace);
   const produtos = links.filter(item => classificarTipoLinkBloco(item, textoOriginal, marketplace) === "link_produto_original");
   const resgate = links.find(item => classificarTipoLinkBloco(item, textoOriginal, marketplace) === "link_resgate");

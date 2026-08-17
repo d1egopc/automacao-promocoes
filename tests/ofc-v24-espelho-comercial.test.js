@@ -1611,6 +1611,76 @@ assert.ok(!mensagemHigieneTecnica.includes("APP:\nhttps://a.aliexpress.com/_appS
 assert.ok(!/Erro ao consultar API AliExpress|link_aliexpress_sem_conversao_segura|sem_conversao_segura/.test(mensagemHigieneTecnica));
 assert.strictEqual(blocosTipo(aliexpressHigieneTecnicaAppPc, "beneficio").length, 0);
 
+const textoAliexpressJob250176 = [
+  "Dock RGB para Controle de PS5, base de carregamento para os modelos do Playstation 5",
+  "R$ 94,60",
+  "Cupom: ISKANDAR1 ou BRGM1 ou IFPX0LJV + 596 moedas no APP",
+  "https://a.aliexpress.com/_c2yZWY7F",
+  "https://a.aliexpress.com/_c2yZWY7F",
+  "NO PC",
+  "https://a.aliexpress.com/_c34PCW45"
+].join("\n");
+const aliexpressOfcAppPcJob250176 = construirEspelhoComercialV24({
+  evento: { id: 170671, texto_original: textoAliexpressJob250176 },
+  job: { id: 250176, evento_id: 170671, cliente_id: "user_40qdblgt", marketplace_detectado: "aliexpress" },
+  oferta: {
+    titulo: "Dock RGB para Controle de PS5, base de carregamento para os modelos do Playstation 5",
+    marketplace: "aliexpress",
+    preco: 94.6,
+    linkOriginal: "https://a.aliexpress.com/_c34PCW45",
+    linkAfiliado: "https://s.click.aliexpress.com/e/_pcJob250176",
+    linksComerciais: [
+      {
+        tipo: "app",
+        papel: "link_app",
+        urlOriginal: "https://a.aliexpress.com/_c2yZWY7F",
+        urlAfiliada: "https://s.click.aliexpress.com/e/_appJob250176",
+        urlAfiliadaWorkspace: "https://s.click.aliexpress.com/e/_appJob250176",
+        renderizavel: true,
+        seguro: true,
+        conversaoStatus: "convertida",
+        motivoConversao: "cta_app_workspace_convertido",
+        ocorrenciaId: "ali:link_app:1",
+        radarOcorrenciaId: "radar:link_app:1",
+        ordemCaptura: 1,
+        origem: "adapter.linksClassificados"
+      },
+      {
+        tipo: "pc",
+        papel: "link_pc",
+        urlOriginal: "https://a.aliexpress.com/_c34PCW45",
+        urlAfiliada: "https://s.click.aliexpress.com/e/_pcJob250176",
+        urlAfiliadaWorkspace: "https://s.click.aliexpress.com/e/_pcJob250176",
+        renderizavel: true,
+        seguro: true,
+        conversaoStatus: "convertida",
+        motivoConversao: "cta_workspace_convertido",
+        ocorrenciaId: "ali:link_pc:2",
+        radarOcorrenciaId: "radar:link_pc:2",
+        ordemCaptura: 2,
+        origem: "adapter.linksClassificados"
+      }
+    ]
+  },
+  comercialNormalizado: { marketplace: "aliexpress", precoAtual: 94.6, precoConfiavel: true }
+});
+const contratoAliJob250176 = aliexpressOfcAppPcJob250176.documentoComercialCanonico.contratoMarketplace;
+assert.deepStrictEqual(contratoAliJob250176.papeisRenderizaveis, ["link_app", "link_pc"], "job 250176 preserva APP + PC apos OFC");
+assert.strictEqual(contratoAliJob250176.linksDescartados, 0);
+assert.strictEqual(aliexpressOfcAppPcJob250176.documentoComercialCanonico.linksComerciais.filter(item => item.renderizavel).length, 2);
+assert.deepStrictEqual(
+  aliexpressOfcAppPcJob250176.documentoComercialCanonico.linksComerciais.map(item => item.papel),
+  ["link_app", "link_pc"]
+);
+assert.strictEqual(blocosTipo(aliexpressOfcAppPcJob250176, "link_app").length, 1);
+assert.strictEqual(blocosTipo(aliexpressOfcAppPcJob250176, "link_pc").length, 1);
+assert.strictEqual(blocosTipo(aliexpressOfcAppPcJob250176, "link_produto_original").length, 0, "oferta.linkOriginal nao volta como produto concorrente");
+assert.ok(aliexpressOfcAppPcJob250176.templateEspelhoShadow.mensagem.includes("APP:\nhttps://s.click.aliexpress.com/e/_appJob250176"));
+assert.ok(aliexpressOfcAppPcJob250176.templateEspelhoShadow.mensagem.includes("PC:\nhttps://s.click.aliexpress.com/e/_pcJob250176"));
+assert.ok(!aliexpressOfcAppPcJob250176.templateEspelhoShadow.mensagem.includes("Confira aqui:\nhttps://s.click.aliexpress.com/e/_pcJob250176"));
+assert.ok(!aliexpressOfcAppPcJob250176.templateEspelhoShadow.mensagem.includes("https://a.aliexpress.com/_c2yZWY7F"));
+assert.ok(!aliexpressOfcAppPcJob250176.templateEspelhoShadow.mensagem.includes("https://a.aliexpress.com/_c34PCW45"));
+
 for (const resultado of [
   mlHaizPrecoEstruturado,
   mlOrganizadorPrecoEstruturado,

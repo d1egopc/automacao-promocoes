@@ -122,6 +122,67 @@ const contratoAliMesmoFinal = aplicarContratoMarketplace({
 });
 assert.deepStrictEqual(contratoAliMesmoFinal.links.map(link => link.papel), ["link_app", "link_pc"]);
 
+const contratoAliProvaImporterSemFlagLegada = aplicarContratoMarketplace({
+  marketplace: "aliexpress",
+  linkAfiliado: "https://s.click.aliexpress.com/e/_pcGlobal",
+  links: [
+    {
+      url: "https://s.click.aliexpress.com/e/_appWorkspace",
+      urlOriginal: "https://a.aliexpress.com/_c2yZWY7F",
+      tipo: "link_app",
+      papel: "link_app",
+      ordemCaptura: 1,
+      ocorrenciaId: "ali:link_app:1",
+      radarOcorrenciaId: "radar:link_app:1",
+      urlAfiliadaWorkspace: "https://s.click.aliexpress.com/e/_appWorkspace",
+      renderizavel: true,
+      seguro: true,
+      conversaoStatus: "convertida",
+      motivoConversao: "cta_app_workspace_convertido",
+      origem: "adapter.linksClassificados"
+    },
+    {
+      url: "https://s.click.aliexpress.com/e/_pcWorkspace",
+      urlOriginal: "https://a.aliexpress.com/_c34PCW45",
+      tipo: "link_pc",
+      papel: "link_pc",
+      ordemCaptura: 2,
+      ocorrenciaId: "ali:link_pc:2",
+      radarOcorrenciaId: "radar:link_pc:2",
+      urlAfiliadaWorkspace: "https://s.click.aliexpress.com/e/_pcWorkspace",
+      renderizavel: true,
+      seguro: true,
+      conversaoStatus: "convertida",
+      motivoConversao: "cta_workspace_convertido",
+      origem: "adapter.linksClassificados"
+    }
+  ]
+});
+assert.deepStrictEqual(
+  contratoAliProvaImporterSemFlagLegada.papeisRenderizaveis,
+  ["link_app", "link_pc"],
+  "AliExpress APP/PC convertidos pelo Importer nao dependem do linkAfiliado global"
+);
+assert.strictEqual(contratoAliProvaImporterSemFlagLegada.totalLinksSaida, 2);
+
+const contratoAliImporterFalhouContinuaBloqueado = aplicarContratoMarketplace({
+  marketplace: "aliexpress",
+  links: [
+    {
+      url: "https://s.click.aliexpress.com/e/_appFalho",
+      urlOriginal: "https://a.aliexpress.com/_appFalho",
+      tipo: "link_app",
+      ordemCaptura: 1,
+      ocorrenciaId: "ali:link_app:falho",
+      urlAfiliadaWorkspace: "https://s.click.aliexpress.com/e/_appFalho",
+      renderizavel: true,
+      conversaoStatus: "falhou",
+      origem: "adapter.linksClassificados"
+    }
+  ]
+});
+assert.strictEqual(linksRenderizaveis(contratoAliImporterFalhouContinuaBloqueado).length, 0);
+
 const repetidosAli = classificarLinksComerciais({
   marketplace: "aliexpress",
   texto: [

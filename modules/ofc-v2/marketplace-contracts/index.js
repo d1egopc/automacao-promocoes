@@ -106,7 +106,40 @@ function linkConvertidoParaWorkspace(link = {}, entrada = {}) {
     || link.linkAfiliadoWorkspace === true;
 }
 
-function linkAlternativoSeguroAliExpress(link = {}, entrada = {}) {
+function urlOriginalAliExpressComprovada(link = {}) {
+  return [
+    link.urlOriginal,
+    link.original,
+    link.url_original,
+    link.urlOriginalRadar,
+    link.sourceValuesUsado,
+    link.url
+  ].some(urlAliExpress);
+}
+
+function urlAfiliadaAliExpressComprovada(link = {}) {
+  const url = texto(link.urlOptimus || link.urlAfiliadaWorkspace || link.urlAfiliada || link.linkAfiliado || link.afiliado || "");
+  return url && urlAliExpress(url) ? url : "";
+}
+
+function ocorrenciaImporterComprovada(link = {}) {
+  return Boolean(texto(link.ocorrenciaId || link.idOcorrencia || link.radarOcorrenciaId))
+    || Number(link.ordemCaptura || link.ordem || 0) > 0
+    || /\b(?:importer|importador|adapter|linksclassificados|radar)\b/.test(normalizar(`${link.origem || ""} ${link.confianca || ""}`));
+}
+
+function linkAliExpressConvertidoPorImporter(link = {}, papel = "") {
+  const status = normalizar(link.conversaoStatus || "");
+  return ["link_app", "link_pc"].includes(papel)
+    && link.renderizavel === true
+    && status !== "falhou"
+    && Boolean(urlAfiliadaAliExpressComprovada(link))
+    && urlOriginalAliExpressComprovada(link)
+    && ocorrenciaImporterComprovada(link);
+}
+
+function linkAlternativoSeguroAliExpress(link = {}, entrada = {}, papel = "") {
+  if (linkAliExpressConvertidoPorImporter(link, papel)) return true;
   if (linkConvertidoParaWorkspace(link, entrada)) return true;
   return linkOficialOuNeutro(link) && !urlPossuiAfiliacaoExterna(link.url);
 }
@@ -130,6 +163,7 @@ function linkBase(link = {}, papel = "link_produto", extras = {}) {
     papel,
     ordemCaptura,
     ocorrenciaId: texto(extras.ocorrenciaId || link.ocorrenciaId || link.idOcorrencia || ""),
+    radarOcorrenciaId: texto(extras.radarOcorrenciaId || link.radarOcorrenciaId || ""),
     urlOriginal: url,
     urlAfiliada,
     urlAfiliadaWorkspace: texto(extras.urlAfiliadaWorkspace || link.urlAfiliadaWorkspace || urlAfiliada),
@@ -310,10 +344,15 @@ function contratoAliExpress(entrada) {
       continue;
     }
     if (["link_app", "link_pc", "link_moedas"].includes(papel)) {
-      const seguro = linkAlternativoSeguroAliExpress(link, entrada);
+      const seguro = linkAlternativoSeguroAliExpress(link, entrada, papel);
       if (!seguro) saida.avisos.push("link_aliexpress_sem_conversao_segura");
       adicionarLink(saida, linkBase(link, papel, {
-        urlAfiliada: texto(link.urlAfiliada || link.linkAfiliado || ""),
+        urlAfiliada: texto(link.urlOptimus || link.urlAfiliadaWorkspace || link.urlAfiliada || link.linkAfiliado || ""),
+        urlAfiliadaWorkspace: texto(link.urlAfiliadaWorkspace || ""),
+        urlOptimus: texto(link.urlOptimus || ""),
+        ocorrenciaId: texto(link.ocorrenciaId || link.idOcorrencia || ""),
+        radarOcorrenciaId: texto(link.radarOcorrenciaId || ""),
+        ordemCaptura: link.ordemCaptura,
         renderizavel: seguro,
         confianca: seguro ? "alta" : "baixa",
         avisos: seguro ? [] : ["link_sem_conversao_workspace"],
@@ -324,7 +363,8 @@ function contratoAliExpress(entrada) {
     }
   }
 
-  const produtosOcorrencias = produtos.filter(link => texto(link.url));
+  const temAppPcRenderizavel = saida.links.some(link => ["link_app", "link_pc"].includes(link.papel) && link.renderizavel !== false);
+  const produtosOcorrencias = produtos.filter(link => texto(link.url) && (!temAppPcRenderizavel || contextoExplicitoProduto(link)));
 
   saida.linkProdutoOriginal = produtosOcorrencias[0]?.url || "";
   for (const link of produtosOcorrencias) {
