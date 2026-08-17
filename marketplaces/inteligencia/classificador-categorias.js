@@ -86,9 +86,21 @@ function termosEncontrados(texto, palavras = []) {
 }
 
 function palavrasDosDestinos(nomeCategoria) {
+  const ignoradasPorCategoria = {
+    [CATEGORIA.pesca]: new Set([
+      "cooler",
+      "lanterna led",
+      "protetor solar",
+      "canivete",
+      "aventura"
+    ])
+  };
+  const ignoradas = ignoradasPorCategoria[nomeCategoria] || new Set();
+
   return Object.values(categoriasDestinos || {})
     .filter((item) => item?.nome === nomeCategoria)
-    .flatMap((item) => item.palavras || []);
+    .flatMap((item) => item.palavras || [])
+    .filter((palavra) => !ignoradas.has(normalizarTextoLocal(palavra)));
 }
 
 function regra(categoria, opcoes = {}) {
@@ -119,7 +131,9 @@ const REGRAS = [
       "pressao arterial", "monitor de pressao", "monitor pressao arterial",
       "aparelho de pressao", "soro fisiologico", "pasta de dente",
       "creme dental", "alicate de cuticula", "cortador de unha",
-      "irrigador oral", "nebulizador", "inalador", "seringa insulina", "escova progressiva", "renovador facial", "corretivo", "base maquiagem", "base corretivo", "base liquida", "base facial", "maquiagem", "luva nitrilica"
+      "irrigador oral", "nebulizador", "inalador", "seringa insulina", "escova progressiva", "renovador facial",
+      "limpador facial", "antioleosidade", "creamy", "corretivo", "base maquiagem", "base corretivo",
+      "base liquida", "base facial", "maquiagem", "luva nitrilica"
     ],
     palavras: [
       "chapinha", "secador cabelo", "secador de cabelo", "mascara capilar", "pomada", "arnica",
@@ -189,13 +203,16 @@ const REGRAS = [
       "rx 5500", "rx 580", "rx 6600", "rx 7600", "rx 7700", "rx 7800", "rx 7900",
       "ssd", "ssd sata", "ssd sata3", "ssd nvme", "nvme", "m 2", "memoria ram", "ddr4", "ddr5",
       "placa mae", "processador", "ryzen", "intel core", "water cooler",
-      "air cooler", "fonte atx", "fonte gamer", "gabinete gamer", "cadeira gamer", "kit xeon"
+      "air cooler", "cooler 360mm", "cooler 240mm", "cooler 120mm",
+      "cooler para processador", "ventoinha", "ventoinhas", "fan argb",
+      "fan rgb", "argb", "am4", "am5", "lga", "xeon",
+      "fonte atx", "fonte gamer", "gabinete gamer", "cadeira gamer", "kit xeon"
     ],
     palavras: [
       "b450", "b550", "b650", "a520", "a620", "x99", "x570", "x670", "h610",
       "b760", "z790", "80 plus", "pfc ativo", "cooler master", "corsair",
       "kingston fury", "xpg", "crucial", "wd black", "netac", "pasta termica",
-      "controladora argb", "hub fan", "kit fan"
+      "controladora argb", "hub fan", "kit fan", "jungle leopard"
     ]
   }),
 
@@ -220,7 +237,8 @@ const REGRAS = [
       "mouse", "teclado", "mousepad", "webcam", "headset", "micro sd",
       "microsd", "cartao de memoria", "pendrive", "hub usb", "monitor gamer",
       "monitor led", "monitor curvo", "monitor ultrawide",
-      "suporte para notebook", "base refrigerada", "pen drive", "sandisk", "usb", "armazenamento"
+      "suporte para notebook", "base refrigerada", "pen drive", "sandisk", "usb", "armazenamento",
+      "teclado gamer", "teclado magnetico", "mouse gamer", "mchose", "atk"
     ],
     palavras: [
       "suporte notebook", "base notebook", "cooler notebook", "base para notebook", "mesa digitalizadora",
@@ -239,7 +257,7 @@ const REGRAS = [
       "tv 55", "tv 65", "tv 70", "tv 75", "qled", "oled", "soundbar",
       "home theater", "caixa de som", "caixa bluetooth", "fone bluetooth",
       "fone de ouvido", "headphone", "headphone bluetooth", "earbuds", "tws", "jbl",
-      "party box"
+      "party box", "tv stick", "android tv stick", "streaming stick"
     ],
     palavras: [
       "roku tv", "google tv", "android tv", "aiwa", "edifier", "boombox",
@@ -253,7 +271,8 @@ const REGRAS = [
     prioridade: 82,
     fortes: [
       "playstation", "ps5", "ps4", "xbox", "nintendo switch", "console",
-      "game stick", "controle ps5", "controle xbox", "joystick"
+      "game stick", "controle ps5", "controle xbox", "controle sem fio",
+      "gamepad", "joystick", "gamesir", "8bitdo", "machenike"
     ],
     palavras: [
       "jogo ps5", "jogo xbox", "jogo nintendo", "fliperama", "controle gamer"
@@ -515,7 +534,7 @@ const REGRAS = [
       "fogareiro camping", "lanterna camping", "caixa termica"
     ],
     palavras: [
-      "alicate de pesca", "colchonete", "mochila camping", "cooler",
+      "alicate de pesca", "colchonete", "mochila camping",
       "termolar", "nautika", "coleman", "cadeira camping", "mesa camping"
     ]
   }),
@@ -682,4 +701,3 @@ module.exports = {
   classificarCategoriaOferta,
   normalizarTextoLocal
 };
-
