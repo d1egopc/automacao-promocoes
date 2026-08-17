@@ -179,6 +179,10 @@ const criarRotasAjudaContextual = require("./modules/ajuda-contextual/routes");
 const criarRotasVitrine = require("./modules/vitrine/routes");
 const { publicarOfertaConfirmadaVitrine } = require("./modules/vitrine/hook");
 const {
+  capturarOfertaComercialConfirmadaVitrine,
+  montarOfertaParaVitrinePosEnvio
+} = require("./utils/vitrine-handoff-pos-envio");
+const {
   listarConexoesDiscord
 } = require("./modules/discord/discord-connections.storage");
 const {
@@ -6913,6 +6917,8 @@ console.log("[FILA-PROCESSANDO-RESERVADA]", JSON.stringify({
 }));
 salvarFilaSeAlterada(clienteId);
 
+let ofertaComercialConfirmadaVitrine = null;
+
 for (const item of destinosOrdenados) {
   const destino = item.destino;
   const nomeDestino = destinoNomeLog(destino);
@@ -7203,6 +7209,18 @@ for (const item of destinosOrdenados) {
   if (resultadoEnvio.enviado === true) {
     enviouParaAlgumDestino = true;
     destinosEnviadosCount += 1;
+    ofertaComercialConfirmadaVitrine = capturarOfertaComercialConfirmadaVitrine(
+      ofertaComercialConfirmadaVitrine,
+      ofertaParaMensagem,
+      {
+        clienteId,
+        ofertaId: oferta.id || oferta.engineOfertaId || oferta.ofertaId || "",
+        marketplace: oferta.marketplace || oferta.mercado || "",
+        destinoId: destino.id || destino.destinoId || destino.chatId || "",
+        destinoTipo: destino.tipo || "",
+        logger: console
+      }
+    );
     registrarDestinoEstadoFanout(oferta, destino, "enviado", {
       motivo: "envio_confirmado"
     });
@@ -7384,9 +7402,14 @@ if (!finalizacaoEnvio.ok || !finalizacaoEnvio.oferta) {
 
 oferta = finalizacaoEnvio.oferta;
 marcarFilaAlterada();
+const ofertaParaVitrine = montarOfertaParaVitrinePosEnvio(
+  oferta,
+  ofertaComercialConfirmadaVitrine,
+  { destinosEnviados: totalDestinosEnviadosFanout }
+);
 void publicarOfertaConfirmadaVitrine({
   clienteId,
-  oferta,
+  oferta: ofertaParaVitrine,
   destinosEnviados: totalDestinosEnviadosFanout,
   deps: {
     readClienteJson,
