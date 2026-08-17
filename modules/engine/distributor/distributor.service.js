@@ -795,6 +795,65 @@ async function restaurarOfertaStatusSeDistribuindo(ofertaId, statusAnterior, mot
   return resultado;
 }
 
+async function restaurarOfertaParaReentradaFlow(ofertaId, statusAnterior, motivo = "", detalhes = {}, contextoLog = {}) {
+  const statusSeguro = String(statusAnterior || "").trim();
+  if (!["importada", "oferta_criada"].includes(statusSeguro)) {
+    return { ok: true, ignorado: true, motivo: "status_anterior_nao_restauravel" };
+  }
+
+  const motivoSeguro = String(motivo || "flow_reentrada_temporaria").trim();
+  const temMetadata = await engineOfertasTemMetadataDistribuidor();
+  const detalhesSeguros = detalhes && typeof detalhes === "object" ? detalhes : {};
+  const metadataFlow = {
+    natureza: "temporaria",
+    motivo: motivoSeguro,
+    proximaTentativaEm: detalhesSeguros.proximaTentativaEm || "",
+    origem: detalhesSeguros.origem || "flow_manager",
+    atualizadoEm: new Date().toISOString()
+  };
+
+  const sql = temMetadata
+    ? `UPDATE engine_ofertas
+        SET status = $2,
+            motivo_status = $3,
+            metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('flowReentrada', $4::jsonb),
+            atualizada_em = NOW()
+      WHERE id = $1 AND status = 'distribuindo'
+      RETURNING id, status, motivo_status, metadata`
+    : `UPDATE engine_ofertas
+        SET status = $2, motivo_status = $3, atualizada_em = NOW()
+      WHERE id = $1 AND status = 'distribuindo'
+      RETURNING id, status, motivo_status`;
+
+  const params = temMetadata
+    ? [ofertaId, statusSeguro, motivoSeguro, JSON.stringify(metadataFlow)]
+    : [ofertaId, statusSeguro, motivoSeguro];
+
+  const resultado = await queryDistribuidor({
+    etapa: "restaurar_status_flow_reentrada",
+    ofertaId,
+    clienteId: contextoLog.clienteId || "",
+    queryResumo: "UPDATE engine_ofertas SET status anterior + flow reentrada",
+    sql,
+    params
+  });
+
+  if (!resultado.ok) return resultado;
+  if (resultado.resultado.rowCount === 0) {
+    console.log("[OPTIMUS-FLOW-V1-REENTRADA-CONFLITO]", JSON.stringify({
+      ofertaId: ofertaId || null,
+      jobId: contextoLog.jobId || null,
+      workspaceId: contextoLog.clienteId || "",
+      statusAnterior: statusSeguro,
+      motivo: motivoSeguro,
+      preservouEstadoMaisNovo: true
+    }));
+    return { ok: true, ignorado: true, motivo: "status_alterado_por_concorrencia" };
+  }
+
+  return resultado;
+}
+
 async function registrarEtapaDistribuicao(jobId, etapa, status, motivo = "", detalhes = {}) {
   if (!jobId) {
     logQueryErroDistribuidor({
@@ -1097,6 +1156,7 @@ module.exports = {
   tentarMarcarDistribuindo,
   marcarOfertaStatus,
   restaurarOfertaStatusSeDistribuindo,
+  restaurarOfertaParaReentradaFlow,
   registrarEtapaDistribuicao,
   validarOfertaParaDistribuicao,
   adicionarOfertaNaFilaCliente,

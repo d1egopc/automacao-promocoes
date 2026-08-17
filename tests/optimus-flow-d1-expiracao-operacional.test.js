@@ -120,7 +120,7 @@ function testarLegadoSemExpiraEmSaneadoCorretamente() {
   });
   assert.strictEqual(resultado.expirou, true);
   assert.strictEqual(item.expiraEm, "2026-08-05T12:30:00.000Z");
-  assert.strictEqual(item.statusDetalhe, "Expirada pelo TTL operacional do Flow D1 antes do envio");
+  assert.strictEqual(item.statusDetalhe, "Expirada pelo TTL operacional do Flow antes do envio");
 }
 
 function testarVivoContinuaElegivelERecebeExpiraEmLegado() {
@@ -266,7 +266,7 @@ function testarCarimboPreservaPoliticaDoFlow() {
   assert.strictEqual(item.expiraEm, "2026-08-05T12:10:00.000Z");
   assert.strictEqual(item.ttlMs, TTL_TURBO_MS);
   assert.strictEqual(item.tipoFluxo, "cupom_turbo");
-  assert.strictEqual(item.metadata.flowOperacional.politica, "flow_manager_d1");
+  assert.strictEqual(item.metadata.flowOperacional.politica, "flow_manager");
 }
 
 (async () => {

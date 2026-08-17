@@ -48,10 +48,26 @@ function destino(extra = {}) {
     nome: extra.nome || "Destino",
     ativo: extra.ativo !== false,
     tipo: "telegram",
+    botToken: extra.botToken === undefined ? "bot" : extra.botToken,
+    chatId: extra.chatId === undefined ? "chat" : extra.chatId,
     marketplaces: extra.marketplaces || ["mercadolivre"],
     categorias: Object.prototype.hasOwnProperty.call(extra, "categorias") ? extra.categorias : ["Gamer e Hardware"],
     ...extra
   };
+}
+
+function validacaoOkComDestino(extra = {}) {
+  const retorno = {
+    ok: true,
+    destinosCompativeis: 1,
+    destinosCompativeisDetalhes: [],
+    ...extra
+  };
+  Object.defineProperty(retorno, "__destinosCompativeisRaw", {
+    value: [destino()],
+    enumerable: false
+  });
+  return retorno;
 }
 
 function oferta(extra = {}) {
@@ -158,6 +174,11 @@ async function executarRunnerComMock({ ofertas, validar, gate }) {
       statusMarcados.push({ id, status: statusAnterior, motivo: "" });
       return { ok: true };
     },
+    restaurarOfertaParaReentradaFlow: async (id, statusAnterior, motivo) => {
+      restauracoes.push({ id, statusAnterior, motivo, reentradaFlow: true });
+      statusMarcados.push({ id, status: statusAnterior, motivo });
+      return { ok: true };
+    },
     registrarEtapaDistribuicao: async (jobId, etapa, status, motivo, detalhes) => {
       etapas.push({ jobId, etapa, status, motivo, detalhes });
       return { ok: true };
@@ -181,7 +202,7 @@ async function executarRunnerComMock({ ofertas, validar, gate }) {
 async function validarRunnerNaoRestauraDefinitivo() {
   const definitivo = await executarRunnerComMock({
     ofertas: [oferta({ id: 10, job_id: 110, cliente_id: WORKSPACE_A })],
-    validar: async () => ({ ok: true, destinosCompativeis: 1, destinosCompativeisDetalhes: [] }),
+    validar: async () => validacaoOkComDestino(),
     gate: async () => ({
       ativo: true,
       permitir: false,
@@ -200,7 +221,7 @@ async function validarRunnerNaoRestauraDefinitivo() {
 
   const temporario = await executarRunnerComMock({
     ofertas: [oferta({ id: 11, job_id: 111, cliente_id: WORKSPACE_A })],
-    validar: async () => ({ ok: true, destinosCompativeis: 1, destinosCompativeisDetalhes: [] }),
+    validar: async () => validacaoOkComDestino(),
     gate: async () => ({
       ativo: true,
       permitir: false,
@@ -226,7 +247,7 @@ async function validarIsolamentoWorkspace() {
       if (ofertaAtual.cliente_id === WORKSPACE_A) {
         return { ok: false, motivo: "marketplace_bloqueado", detalhes: { definitivoOperacional: true } };
       }
-      return { ok: true, destinosCompativeis: 1, destinosCompativeisDetalhes: [] };
+      return validacaoOkComDestino();
     }
   });
 

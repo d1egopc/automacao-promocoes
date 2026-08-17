@@ -10,8 +10,6 @@ const COBERTURA_NORMAL_MINUTOS = 10;
 const COBERTURA_TURBO_MINUTOS = 5;
 const TTL_NORMAL_MS = 30 * 60 * 1000;
 const TTL_TURBO_MS = 10 * 60 * 1000;
-const ENV_FLOW_ATIVO = "OPTIMUS_FLOW_V1_ATIVO";
-const ENV_FLOW_ATIVO_WORKSPACES = "OPTIMUS_FLOW_V1_ATIVO_WORKSPACES";
 
 const STATUS_BUFFER_VIVO = new Set([
   "pendente",
@@ -93,32 +91,9 @@ function texto(valor = "") {
   return String(valor || "").trim();
 }
 
-function flagLigada(valor = "") {
-  return ["1", "true", "sim", "on", "yes"].includes(texto(valor).toLowerCase());
-}
-
-function listaWorkspacesAtivos(valor = "") {
-  return new Set(
-    texto(valor)
-      .split(/[,\s;]+/)
-      .map(item => texto(item))
-      .filter(Boolean)
-  );
-}
-
-function flowManagerAtivoWorkspace(workspaceId = "", opcoes = {}) {
+function flowManagerAtivoWorkspace(workspaceId = "") {
   const id = texto(workspaceId);
-  if (!id) return false;
-  if (opcoes.ativo === true || opcoes.flowAtivo === true) return true;
-  if (opcoes.ativo === false || opcoes.flowAtivo === false) return false;
-
-  const workspacesOpcao = opcoes.workspacesAtivos instanceof Set
-    ? opcoes.workspacesAtivos
-    : listaWorkspacesAtivos(opcoes.workspacesAtivos || "");
-  if (workspacesOpcao.has(id)) return true;
-
-  if (flagLigada(process.env[ENV_FLOW_ATIVO])) return true;
-  return listaWorkspacesAtivos(process.env[ENV_FLOW_ATIVO_WORKSPACES] || "").has(id);
+  return Boolean(id);
 }
 
 function numero(valor, padrao = 0) {
@@ -226,7 +201,7 @@ function metadataOperacionalFlow(item = {}) {
 }
 
 function origemPoliticaExpiracao(valor = "") {
-  return texto(valor) || "flow_manager_d1";
+  return texto(valor) || "flow_manager";
 }
 
 function expiraEmProtegidoPorEntrada(expiraEm = "", item = {}, ttlMs = TTL_NORMAL_MS) {
@@ -377,9 +352,9 @@ function sanearExpiracaoOperacionalFilaItem(item = {}, opcoes = {}) {
   }
 
   item.status = "expirada_operacional";
-  item.statusDetalhe = "Expirada pelo TTL operacional do Flow D1 antes do envio";
+  item.statusDetalhe = "Expirada pelo TTL operacional do Flow antes do envio";
   item.expiradaEm = new Date(Number(opcoes.agoraMs || Date.now())).toISOString();
-  item.motivoExpiracao = "ttl_operacional_flow_d1";
+  item.motivoExpiracao = "ttl_operacional_flow";
   alterou = true;
 
   return { alterou, expirou: true, motivo: "ttl_operacional_vencido", ...politica };

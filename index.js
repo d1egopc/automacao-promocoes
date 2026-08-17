@@ -1292,9 +1292,9 @@ function ofertaExpiradaParaEnvio(oferta = {}, agora = Date.now()) {
 
 function marcarOfertaExpirada(oferta = {}) {
   oferta.status = "expirada_operacional";
-  oferta.statusDetalhe = "Expirada pelo TTL operacional do Flow D1 antes do envio";
+  oferta.statusDetalhe = "Expirada pelo TTL operacional do Flow antes do envio";
   oferta.expiradaEm = new Date().toISOString();
-  oferta.motivoExpiracao = "ttl_operacional_flow_d1";
+  oferta.motivoExpiracao = "ttl_operacional_flow";
 
   console.log("⏰ OFERTA EXPIRADA:", {
     titulo: oferta.titulo || oferta.nome || "",

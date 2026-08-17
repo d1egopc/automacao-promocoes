@@ -11,6 +11,8 @@ const {
 const D1 = "user_40qdblgt";
 const ROGER = "user_9hqs434h";
 const WOLF = "user_n0o5p99m";
+const GENERICO = "workspace_generico_flow_v11";
+const NOVO = "workspace_novo_flow_v12";
 
 function destino(extra = {}) {
   return {
@@ -384,8 +386,13 @@ async function testarFlowShadowNaoAlteraDistributorAtual() {
     limite: 1,
     deps: {
       avaliarFluxoWorkspaceShadow: async () => ({
-        aceitarAgora: false,
-        motivo: "esteira_saturada",
+        aceitarAgora: true,
+        motivo: "capacidade_disponivel",
+        nivelAlvo: 2,
+        bufferAtual: 0,
+        vagasDisponiveis: 2,
+        tipoFluxo: "oferta_comum",
+        ttlMs: TTL_NORMAL_MS,
         aplicouMudancas: false
       })
     }
@@ -395,7 +402,7 @@ async function testarFlowShadowNaoAlteraDistributorAtual() {
   assert.strictEqual(resultado.adicionadasFila, 1);
 }
 
-async function testarFlowAtivoRemoveDividaSemAdicionarFila() {
+async function testarFlowAtivoTemporarioReentraSemAdicionarFila() {
   limparModulo("../modules/engine/distributor/distributor.runner");
   let adicionouFila = false;
   const statusMarcados = [];
@@ -421,6 +428,10 @@ async function testarFlowAtivoRemoveDividaSemAdicionarFila() {
       return { ok: true };
     },
     restaurarOfertaStatusSeDistribuindo: async () => ({ ok: true }),
+    restaurarOfertaParaReentradaFlow: async (id, status, motivo, detalhes) => {
+      statusMarcados.push({ id, status, motivo, detalhes, reentradaFlow: true });
+      return { ok: true };
+    },
     registrarEtapaDistribuicao: async (jobId, etapa, status, motivo, detalhes) => {
       etapas.push({ jobId, etapa, status, motivo, detalhes });
       return { ok: true };
@@ -474,9 +485,10 @@ async function testarFlowAtivoRemoveDividaSemAdicionarFila() {
   assert.strictEqual(adicionouFila, false);
   assert.strictEqual(resultado.adicionadasFila, 0);
   assert.strictEqual(resultado.distributorVivo.candidatosPulados, 1);
-  assert(statusMarcados.some(item => item.status === "flow_nao_aceita" && item.motivo === "flow_esteira_saturada"));
-  assert(etapas.some(item => item.etapa === "flow_manager" && item.status === "nao_aceita"));
-  assert(etapas.some(item => item.etapa === "distribuicao_final" && item.detalhes?.resultadoDistribuicao === "flow_nao_aceita"));
+  assert(statusMarcados.some(item => item.status === "importada" && item.motivo === "flow_aguardando_esteira_saturada"));
+  assert(statusMarcados.some(item => item.reentradaFlow === true && Date.parse(item.detalhes?.proximaTentativaEm)));
+  assert(etapas.some(item => item.etapa === "flow_manager" && item.status === "aguardando"));
+  assert(etapas.some(item => item.etapa === "distribuicao_final" && item.detalhes?.resultadoDistribuicao === "flow_reentrada_temporaria"));
 }
 
 async function testarFlowAtivoFailOpenContinuaPipeline() {
@@ -547,22 +559,23 @@ async function testarFlowAtivoFailOpenContinuaPipeline() {
   assert(!logs.join("\n").includes("falha_flow_controlada"), "mensagem interna do erro nao deve vazar no log");
 }
 
-async function testarFlagsFlowAtivoSeguras() {
+async function testarFlowAtivoUniversalIgnoraFlagsLegadas() {
   const envAtivoAnterior = process.env.OPTIMUS_FLOW_V1_ATIVO;
   const envWorkspacesAnterior = process.env.OPTIMUS_FLOW_V1_ATIVO_WORKSPACES;
   try {
     delete process.env.OPTIMUS_FLOW_V1_ATIVO;
     delete process.env.OPTIMUS_FLOW_V1_ATIVO_WORKSPACES;
-    assert.strictEqual(flowManagerAtivoWorkspace(D1), false);
+    assert.strictEqual(flowManagerAtivoWorkspace(D1), true);
+    assert.strictEqual(flowManagerAtivoWorkspace(WOLF), true);
+    assert.strictEqual(flowManagerAtivoWorkspace(ROGER), true);
+    assert.strictEqual(flowManagerAtivoWorkspace(GENERICO), true);
+    assert.strictEqual(flowManagerAtivoWorkspace(NOVO), true);
     assert.strictEqual(flowManagerAtivoWorkspace(""), false);
-    assert.strictEqual(flowManagerAtivoWorkspace(D1, { workspacesAtivos: ` ${D1}, ; ${WOLF} ` }), true);
-    assert.strictEqual(flowManagerAtivoWorkspace(WOLF, { workspacesAtivos: ` ${D1}, ; ${WOLF} ` }), true);
-    assert.strictEqual(flowManagerAtivoWorkspace(ROGER, { workspacesAtivos: ` ${D1}, ; ${WOLF} ` }), false);
-    assert.strictEqual(flowManagerAtivoWorkspace(D1, { ativo: false, workspacesAtivos: D1 }), false);
+    assert.strictEqual(flowManagerAtivoWorkspace(D1, { ativo: false, workspacesAtivos: "" }), true);
     process.env.OPTIMUS_FLOW_V1_ATIVO_WORKSPACES = ` ${D1},${WOLF} `;
     assert.strictEqual(flowManagerAtivoWorkspace(D1), true);
     assert.strictEqual(flowManagerAtivoWorkspace(WOLF), true);
-    assert.strictEqual(flowManagerAtivoWorkspace(ROGER), false);
+    assert.strictEqual(flowManagerAtivoWorkspace(ROGER), true);
     process.env.OPTIMUS_FLOW_V1_ATIVO = "1";
     assert.strictEqual(flowManagerAtivoWorkspace(ROGER), true);
   } finally {
@@ -614,6 +627,12 @@ function prepararRunnerComEstado(ofertasIniciais = [], opcoes = {}) {
       statusMarcados.push({ id, status: statusAnterior, motivo });
       return { ok: true };
     },
+    restaurarOfertaParaReentradaFlow: async (id, statusAnterior, motivo, detalhes) => {
+      const oferta = ofertas.find(item => item.id === id);
+      if (oferta && oferta.status === "distribuindo") oferta.status = statusAnterior;
+      statusMarcados.push({ id, status: statusAnterior, motivo, detalhes, reentradaFlow: true });
+      return { ok: true };
+    },
     registrarEtapaDistribuicao: async (jobId, etapa, status, motivo, detalhes) => {
       etapas.push({ jobId, etapa, status, motivo, detalhes });
       return { ok: true };
@@ -660,7 +679,7 @@ function ofertaDistribuivel(id, workspaceId, extra = {}) {
   };
 }
 
-async function testarPilotoD1NaoAfetaWolfRogerERecusaNaoGeraFila() {
+async function testarFlowUniversalD1WolfRogerSemListaManual() {
   const ctx = prepararRunnerComEstado([
     ofertaDistribuivel(101, D1),
     ofertaDistribuivel(102, WOLF),
@@ -670,7 +689,6 @@ async function testarPilotoD1NaoAfetaWolfRogerERecusaNaoGeraFila() {
   const resultado = await ctx.runner.distribuirOfertasEngine({
     limite: 3,
     deps: {
-      flowManager: { workspacesAtivos: D1 },
       avaliarFluxoWorkspaceShadow: async entradaFlow => ({
         workspaceId: entradaFlow.workspaceId,
         ofertaId: entradaFlow.ofertaId,
@@ -689,40 +707,71 @@ async function testarPilotoD1NaoAfetaWolfRogerERecusaNaoGeraFila() {
 
   assert.strictEqual(resultado.adicionadasFila, 2);
   assert.deepStrictEqual(ctx.adicionados.sort(), [WOLF, ROGER].sort());
-  assert(ctx.statusMarcados.some(item => item.id === 101 && item.status === "flow_nao_aceita"));
+  assert(ctx.statusMarcados.some(item => item.id === 101 && item.status === "importada" && item.motivo === "flow_aguardando_esteira_saturada"));
   assert(ctx.statusMarcados.some(item => item.id === 102 && item.status === "fila"));
   assert(ctx.statusMarcados.some(item => item.id === 103 && item.status === "fila"));
-  assert(!ctx.adicionados.includes(D1), "recusa do D1 nao deve gerar fila");
+  assert(!ctx.adicionados.includes(D1), "bloqueio temporario do D1 nao deve gerar fila");
 }
 
-async function testarFlowNaoAceitaNaoReapareceEmRodadaFutura() {
+async function testarFlowTemporarioReapareceEmRodadaFutura() {
   const ctx = prepararRunnerComEstado([
     ofertaDistribuivel(201, D1)
   ]);
+  let chamadas = 0;
   const deps = {
-    flowManager: { ativo: true },
-    avaliarFluxoWorkspaceShadow: async entradaFlow => ({
-      workspaceId: entradaFlow.workspaceId,
-      ofertaId: entradaFlow.ofertaId,
-      marketplace: entradaFlow.marketplace,
-      aceitarAgora: false,
-      motivo: "esteira_saturada",
-      nivelAlvo: 3,
-      bufferAtual: 3,
-      vagasDisponiveis: 0,
-      tipoFluxo: "oferta_comum",
-      ttlMs: TTL_NORMAL_MS,
-      aplicouMudancas: false
-    })
+    avaliarFluxoWorkspaceShadow: async entradaFlow => {
+      chamadas += 1;
+      return {
+        workspaceId: entradaFlow.workspaceId,
+        ofertaId: entradaFlow.ofertaId,
+        marketplace: entradaFlow.marketplace,
+        aceitarAgora: chamadas > 1,
+        motivo: chamadas > 1 ? "capacidade_disponivel" : "esteira_saturada",
+        nivelAlvo: 3,
+        bufferAtual: chamadas > 1 ? 2 : 3,
+        vagasDisponiveis: chamadas > 1 ? 1 : 0,
+        tipoFluxo: "oferta_comum",
+        ttlMs: TTL_NORMAL_MS,
+        aplicouMudancas: false
+      };
+    }
   };
 
   const primeira = await ctx.runner.distribuirOfertasEngine({ limite: 1, deps });
   const segunda = await ctx.runner.distribuirOfertasEngine({ limite: 1, deps });
 
   assert.strictEqual(primeira.processadas, 1);
-  assert.strictEqual(segunda.processadas, 0);
-  assert.strictEqual(ctx.ofertas[0].status, "flow_nao_aceita");
-  assert.strictEqual(ctx.statusMarcados.filter(item => item.status === "flow_nao_aceita").length, 1);
+  assert.strictEqual(segunda.adicionadasFila, 1);
+  assert.strictEqual(ctx.ofertas[0].status, "fila");
+  assert.strictEqual(ctx.statusMarcados.filter(item => item.motivo === "flow_aguardando_esteira_saturada").length, 1);
+}
+
+async function testarWorkspaceNovoRecebeFlowAutomaticamente() {
+  const ctx = prepararRunnerComEstado([
+    ofertaDistribuivel(501, NOVO)
+  ]);
+  const resultado = await ctx.runner.distribuirOfertasEngine({
+    limite: 1,
+    deps: {
+      avaliarFluxoWorkspaceShadow: async entradaFlow => ({
+        workspaceId: entradaFlow.workspaceId,
+        ofertaId: entradaFlow.ofertaId,
+        marketplace: entradaFlow.marketplace,
+        aceitarAgora: false,
+        motivo: "janela_fechada",
+        nivelAlvo: 0,
+        bufferAtual: 0,
+        vagasDisponiveis: 0,
+        tipoFluxo: "oferta_comum",
+        ttlMs: TTL_NORMAL_MS,
+        aplicouMudancas: false
+      })
+    }
+  });
+
+  assert.strictEqual(resultado.adicionadasFila, 0);
+  assert(ctx.statusMarcados.some(item => item.id === 501 && item.status === "importada" && item.motivo === "flow_aguardando_janela_fechada"));
+  assert(!ctx.adicionados.includes(NOVO), "workspace novo aguardando nao deve criar fila");
 }
 
 async function testarMelhoriaComercialPosteriorPodeCriarNovoEvento() {
@@ -757,8 +806,74 @@ async function testarMelhoriaComercialPosteriorPodeCriarNovoEvento() {
 
   assert.strictEqual(chamadas, 2);
   assert.strictEqual(resultado.adicionadasFila, 1);
-  assert(ctx.statusMarcados.some(item => item.id === 301 && item.status === "flow_nao_aceita"));
+  assert(ctx.statusMarcados.some(item => item.id === 301 && item.status === "importada" && item.motivo === "flow_aguardando_esteira_saturada"));
   assert(ctx.statusMarcados.some(item => item.id === 302 && item.status === "fila"));
+}
+
+async function testarWorkspaceGenericoCalculaCapacidadeSemIdD1() {
+  const destinosCompativeis = [
+    destino({ id: "wa_1", nome: "WA Geral", tipo: "whatsapp", intervaloMinutos: 10 }),
+    destino({ id: "tg_1", nome: "Telegram Geral", tipo: "telegram", intervaloMinutos: 5 }),
+    destino({ id: "dc_1", nome: "Discord Geral", tipo: "discord", intervaloMinutos: 5 })
+  ];
+
+  const pequeno = await avaliarFluxoWorkspaceShadow(
+    entrada(GENERICO, { destinosCompativeis: [destino({ id: "wa_pequeno", tipo: "whatsapp", intervaloMinutos: 10 })] }),
+    opcoes()
+  );
+  assert.strictEqual(pequeno.aceitarAgora, true);
+  assert.strictEqual(pequeno.nivelAlvo, 1);
+
+  const grande = await avaliarFluxoWorkspaceShadow(
+    entrada(GENERICO, { destinosCompativeis }),
+    opcoes()
+  );
+  assert.strictEqual(grande.aceitarAgora, true);
+  assert(grande.nivelAlvo >= 3, "workspace generico grande deve somar capacidade WA/TG/Discord");
+  assert.strictEqual(grande.tipoFluxo, "oferta_comum");
+
+  const turbo = await avaliarFluxoWorkspaceShadow(
+    entrada(GENERICO, { destinosCompativeis, cupomTurbo: true, tipoOperacional: "cupom_turbo" }),
+    opcoes()
+  );
+  assert.strictEqual(turbo.tipoFluxo, "cupom_turbo");
+  assert.strictEqual(turbo.ttlMs, TTL_TURBO_MS);
+  assert(turbo.nivelAlvo >= 1, "turbo deve usar cobertura curta sem depender da D1");
+}
+
+async function testarWorkspaceGenericoJanelaEBufferReentram() {
+  const fechado = await avaliarFluxoWorkspaceShadow(
+    entrada(GENERICO, { destinosCompativeis: [destino({ horarioInicio: "25:00", horarioFim: "25:01" })] }),
+    opcoes()
+  );
+  assert.strictEqual(fechado.aceitarAgora, false);
+  assert.strictEqual(fechado.motivo, "janela_fechada");
+
+  const reaberto = await avaliarFluxoWorkspaceShadow(
+    entrada(GENERICO, { destinosCompativeis: [destinoRapido()] }),
+    opcoes()
+  );
+  assert.strictEqual(reaberto.aceitarAgora, true);
+
+  const filas = {
+    [GENERICO]: [
+      itemFila({ id: "slot_1", clienteId: GENERICO }),
+      itemFila({ id: "slot_2", clienteId: GENERICO }),
+      itemFila({ id: "slot_3", clienteId: GENERICO })
+    ]
+  };
+  const cheio = await avaliarFluxoWorkspaceShadow(
+    entrada(GENERICO, { destinosCompativeis: [destinoRapido()] }),
+    opcoes(filas)
+  );
+  assert.strictEqual(cheio.aceitarAgora, false);
+  assert.strictEqual(cheio.motivo, "esteira_saturada");
+
+  const liberado = await avaliarFluxoWorkspaceShadow(
+    entrada(GENERICO, { destinosCompativeis: [destinoRapido()] }),
+    opcoes({ [GENERICO]: filas[GENERICO].slice(0, 2) })
+  );
+  assert.strictEqual(liberado.aceitarAgora, true);
 }
 
 async function testarAceiteGeraFilaUmaUnicaVez() {
@@ -808,12 +923,15 @@ async function testarAceiteGeraFilaUmaUnicaVez() {
   await testarCupomSemSinalTurboPermaneceOfertaComum();
   await testarRogerBloqueadoNaoInterfereNoD1();
   await testarFlowShadowNaoAlteraDistributorAtual();
-  await testarFlowAtivoRemoveDividaSemAdicionarFila();
+  await testarFlowAtivoTemporarioReentraSemAdicionarFila();
   await testarFlowAtivoFailOpenContinuaPipeline();
-  await testarFlagsFlowAtivoSeguras();
-  await testarPilotoD1NaoAfetaWolfRogerERecusaNaoGeraFila();
-  await testarFlowNaoAceitaNaoReapareceEmRodadaFutura();
+  await testarFlowAtivoUniversalIgnoraFlagsLegadas();
+  await testarFlowUniversalD1WolfRogerSemListaManual();
+  await testarFlowTemporarioReapareceEmRodadaFutura();
+  await testarWorkspaceNovoRecebeFlowAutomaticamente();
   await testarMelhoriaComercialPosteriorPodeCriarNovoEvento();
+  await testarWorkspaceGenericoCalculaCapacidadeSemIdD1();
+  await testarWorkspaceGenericoJanelaEBufferReentram();
   await testarAceiteGeraFilaUmaUnicaVez();
   console.log("optimus-flow-v1-shadow.test.js OK");
 })().catch(erro => {

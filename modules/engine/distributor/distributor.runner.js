@@ -4,6 +4,7 @@ const {
   tentarMarcarDistribuindo,
   marcarOfertaStatus,
   restaurarOfertaStatusSeDistribuindo,
+  restaurarOfertaParaReentradaFlow,
   registrarEtapaDistribuicao,
   validarOfertaParaDistribuicao,
   adicionarOfertaNaFilaCliente,
@@ -250,9 +251,33 @@ async function finalizarFlowNaoAceita(oferta = {}, decisao = {}, resumo = null, 
     }, resumo);
   }
 
-  const motivoStatus = `flow_${motivo}`;
+  return reprogramarFlowTemporario(oferta, decisao, resumo, origem, classificacao);
+}
 
-  await registrarEtapaDistribuicao(oferta.job_id, "flow_manager", "nao_aceita", motivo, {
+function proximaTentativaFlowTemporario(decisao = {}) {
+  const valor = decisao.proximaTentativaEm || decisao.proximaTentativa || decisao.proximaTentativaEnvioEm || "";
+  const msPersistido = Date.parse(valor);
+  if (Number.isFinite(msPersistido) && msPersistido > Date.now()) {
+    return new Date(msPersistido).toISOString();
+  }
+
+  const motivo = String(decisao.motivo || "").toLowerCase();
+  let atrasoMs = 5 * 60 * 1000;
+  if (/limite_diario/.test(motivo)) atrasoMs = 60 * 60 * 1000;
+  if (/janela|fora_horario/.test(motivo)) atrasoMs = 15 * 60 * 1000;
+  if (/intervalo|cooldown|proxima_tentativa/.test(motivo)) atrasoMs = 5 * 60 * 1000;
+  if (/esteira|capacidade|gate_absorcao/.test(motivo)) atrasoMs = 5 * 60 * 1000;
+  if (/sessao|integracao|canal|credito/.test(motivo)) atrasoMs = 10 * 60 * 1000;
+  return new Date(Date.now() + atrasoMs).toISOString();
+}
+
+async function reprogramarFlowTemporario(oferta = {}, decisao = {}, resumo = null, origem = "flow_manager", classificacao = {}) {
+  const motivo = decisao.motivo || "flow_sem_capacidade";
+  const motivoReentrada = `flow_aguardando_${motivo}`;
+  const proximaTentativaEm = proximaTentativaFlowTemporario(decisao);
+  const statusAnterior = String(oferta.__statusComercialAnterior || oferta.status || "").trim();
+
+  await registrarEtapaDistribuicao(oferta.job_id, "flow_manager", "aguardando", motivo, {
     ofertaId: oferta.id,
     clienteId: oferta.cliente_id,
     marketplace: oferta.marketplace,
@@ -262,23 +287,40 @@ async function finalizarFlowNaoAceita(oferta = {}, decisao = {}, resumo = null, 
     vagasDisponiveis: decisao.vagasDisponiveis,
     tipoFluxo: decisao.tipoFluxo,
     ttlMs: decisao.ttlMs,
+    natureza: "temporaria",
+    classificacaoOperacional: classificacao.tipo || "temporario",
+    proximaTentativaEm,
     origem
   });
-  await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "nao_aceita", "flow_nao_aceita", {
+  await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "aguardando", "flow_reentrada_temporaria", {
     ofertaId: oferta.id,
     clienteId: oferta.cliente_id,
-    resultadoDistribuicao: "flow_nao_aceita",
+    resultadoDistribuicao: "flow_reentrada_temporaria",
     motivo,
     filaRecebeu: false,
+    statusAnterior,
+    proximaTentativaEm,
+    origem,
     escopo: "workspace"
   });
-  await marcarOfertaStatus(oferta.id, "flow_nao_aceita", motivoStatus, {
-    jobId: oferta.job_id,
-    clienteId: oferta.cliente_id,
-    origem
-  });
+  if (typeof restaurarOfertaParaReentradaFlow === "function") {
+    await restaurarOfertaParaReentradaFlow(oferta.id, statusAnterior, motivoReentrada, {
+      motivo,
+      proximaTentativaEm,
+      origem
+    }, {
+      jobId: oferta.job_id,
+      clienteId: oferta.cliente_id
+    });
+  } else {
+    await marcarOfertaStatus(oferta.id, statusAnterior, motivoReentrada, {
+      jobId: oferta.job_id,
+      clienteId: oferta.cliente_id,
+      origem
+    });
+  }
 
-  logFlowAtivo("[OPTIMUS-FLOW-V1-ATIVO-NAO-ACEITA]", {
+  logFlowAtivo("[OPTIMUS-FLOW-V1-ATIVO-REENTRADA]", {
     workspaceId: oferta.cliente_id || "",
     ofertaId: oferta.id,
     marketplace: oferta.marketplace || "",
@@ -288,14 +330,17 @@ async function finalizarFlowNaoAceita(oferta = {}, decisao = {}, resumo = null, 
   });
 
   if (resumo) {
-    motivoAdicionar(resumo, motivoStatus);
+    motivoAdicionar(resumo, motivoReentrada);
   }
 
   return {
     ok: false,
     flowBloqueado: true,
+    reentradaFlow: true,
     motivo,
-    status: "flow_nao_aceita"
+    status: statusAnterior,
+    motivoStatus: motivoReentrada,
+    proximaTentativaEm
   };
 }
 
@@ -389,6 +434,8 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     decisao: "iniciado"
   });
 
+  const statusComercialAnterior = String(oferta.status || "").trim();
+  oferta.__statusComercialAnterior = statusComercialAnterior;
   const lock = await tentarMarcarDistribuindo(oferta.id, { jobId: oferta.job_id, clienteId: oferta.cliente_id });
   if (!lock.ok) {
     if (lock.ignorado) {

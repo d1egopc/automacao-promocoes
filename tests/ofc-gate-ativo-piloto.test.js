@@ -268,15 +268,27 @@ async function decisao(entrada = {}, opcoes = {}) {
       statusMarcados.push({ id, status: statusAnterior, motivo: "" });
       return { ok: true };
     },
+    restaurarOfertaParaReentradaFlow: async (id, statusAnterior, motivo) => {
+      restauracoesSeguras.push({ id, statusAnterior, motivo, reentradaFlow: true });
+      statusMarcados.push({ id, status: statusAnterior, motivo });
+      return { ok: true };
+    },
     registrarEtapaDistribuicao: async (jobId, etapa, status, motivo, detalhes) => {
       etapasRegistradas.push({ jobId, etapa, status, motivo, detalhes });
       return { ok: true };
     },
-    validarOfertaParaDistribuicao: async () => ({
-      ok: true,
-      destinosCompativeis: 1,
-      destinosCompativeisDetalhes: [{ destino: "Destino", tipoMidia: "imagem" }]
-    }),
+    validarOfertaParaDistribuicao: async () => {
+      const retorno = {
+        ok: true,
+        destinosCompativeis: 1,
+        destinosCompativeisDetalhes: [{ destino: "Destino", tipoMidia: "imagem" }]
+      };
+      Object.defineProperty(retorno, "__destinosCompativeisRaw", {
+        value: [destino()],
+        enumerable: false
+      });
+      return retorno;
+    },
     adicionarOfertaNaFilaCliente: async () => {
       adicionou += 1;
       return { ok: true, itemFila: { id: "fila_101", status: "pendente" } };
@@ -312,12 +324,13 @@ async function decisao(entrada = {}, opcoes = {}) {
   assert(!statusMarcados.some(item => item.status === "gate_bloqueado_piloto"));
   assert(etapasRegistradas.some(item =>
     item.etapa === "distribuicao_final" &&
-    item.status === "bloqueada" &&
-    item.detalhes?.resultadoDistribuicao === "gate_bloqueado_piloto" &&
+    item.status === "aguardando" &&
+    item.detalhes?.resultadoDistribuicao === "flow_reentrada_temporaria" &&
+    item.detalhes?.origem === "gate" &&
     item.detalhes?.clienteId === WORKSPACE_ROGER
   ));
   assert.strictEqual(bloqueado.adicionadasFila, 0);
-  assert.strictEqual(bloqueado.motivos.esteira_saturada, 1);
+  assert.strictEqual(bloqueado.motivos.flow_aguardando_esteira_saturada, 1);
 
   adicionou = 0;
   statusMarcados.length = 0;
@@ -371,15 +384,27 @@ async function decisao(entrada = {}, opcoes = {}) {
       statusesFanout.push({ id, status: statusAnterior, motivo: "" });
       return { ok: true };
     },
+    restaurarOfertaParaReentradaFlow: async (id, statusAnterior, motivo) => {
+      restauracoesFanout.push({ id, statusAnterior, motivo, reentradaFlow: true });
+      statusesFanout.push({ id, status: statusAnterior, motivo });
+      return { ok: true };
+    },
     registrarEtapaDistribuicao: async (jobId, etapa, status, motivo, detalhes) => {
       etapasFanout.push({ jobId, etapa, status, motivo, detalhes });
       return { ok: true };
     },
-    validarOfertaParaDistribuicao: async () => ({
-      ok: true,
-      destinosCompativeis: 1,
-      destinosCompativeisDetalhes: [{ destino: "Destino", tipoMidia: "imagem" }]
-    }),
+    validarOfertaParaDistribuicao: async () => {
+      const retorno = {
+        ok: true,
+        destinosCompativeis: 1,
+        destinosCompativeisDetalhes: [{ destino: "Destino", tipoMidia: "imagem" }]
+      };
+      Object.defineProperty(retorno, "__destinosCompativeisRaw", {
+        value: [destino()],
+        enumerable: false
+      });
+      return retorno;
+    },
     adicionarOfertaNaFilaCliente: async (oferta) => {
       adicionadosFanout.push(oferta.cliente_id);
       return { ok: true, itemFila: { id: `fila_${oferta.id}`, status: "pendente" } };
@@ -417,7 +442,11 @@ async function decisao(entrada = {}, opcoes = {}) {
   assert(statusesFanout.some(item => item.id === 202 && item.status === "fila"), "D1 deve seguir para fila");
   assert(statusesFanout.some(item => item.id === 203 && item.status === "fila"), "Wolf deve seguir para fila");
   assert(!statusesFanout.some(item => item.status === "gate_bloqueado_piloto"), "status global desconhecido nao deve ser usado");
-  assert(etapasFanout.some(item => item.detalhes?.resultadoDistribuicao === "gate_bloqueado_piloto" && item.detalhes?.clienteId === WORKSPACE_ROGER));
+  assert(etapasFanout.some(item =>
+    item.detalhes?.resultadoDistribuicao === "flow_reentrada_temporaria" &&
+    item.detalhes?.origem === "gate" &&
+    item.detalhes?.clienteId === WORKSPACE_ROGER
+  ));
 
   adicionadosFanout = [];
   const statusesFalha = [];
@@ -442,12 +471,24 @@ async function decisao(entrada = {}, opcoes = {}) {
       statusesFalha.push({ id, status: statusAnterior, motivo: "" });
       return { ok: true };
     },
+    restaurarOfertaParaReentradaFlow: async (id, statusAnterior, motivo) => {
+      restauracoesFalha.push({ id, statusAnterior, motivo, reentradaFlow: true });
+      statusesFalha.push({ id, status: statusAnterior, motivo });
+      return { ok: true };
+    },
     registrarEtapaDistribuicao: async () => ({ ok: true }),
-    validarOfertaParaDistribuicao: async () => ({
-      ok: true,
-      destinosCompativeis: 1,
-      destinosCompativeisDetalhes: [{ destino: "Destino", tipoMidia: "imagem" }]
-    }),
+    validarOfertaParaDistribuicao: async () => {
+      const retorno = {
+        ok: true,
+        destinosCompativeis: 1,
+        destinosCompativeisDetalhes: [{ destino: "Destino", tipoMidia: "imagem" }]
+      };
+      Object.defineProperty(retorno, "__destinosCompativeisRaw", {
+        value: [destino()],
+        enumerable: false
+      });
+      return retorno;
+    },
     adicionarOfertaNaFilaCliente: async (oferta) => {
       adicionadosFanout.push(oferta.cliente_id);
       return { ok: true, itemFila: { id: `fila_${oferta.id}`, status: "pendente" } };
