@@ -135,6 +135,28 @@ function marcadorMoedasAliExpress(linha = "") {
   return /\b(?:moeda|moedas|coins?)\b/.test(chave);
 }
 
+function linhaAliExpressEhSeparadorOuVazia(linha = "") {
+  return !linhaSemLinks(linha);
+}
+
+function linhaAliExpressEhRepeticaoUrl(linha = "", url = "") {
+  const links = extrairLinksTextoComercial(linha).map(normalizarUrlComercial);
+  if (!links.length) return false;
+  const alvo = normalizarUrlComercial(url);
+  return Boolean(alvo && links.every(link => link === alvo) && !linhaSemLinks(linha));
+}
+
+function proximaLinhaAliExpressIgnorandoRepeticao(linhas = [], indice = 0, url = "") {
+  const limite = Math.min(linhas.length, indice + 8);
+  for (let i = indice + 1; i < limite; i += 1) {
+    const linha = texto(linhas[i]);
+    if (linhaAliExpressEhSeparadorOuVazia(linha)) continue;
+    if (linhaAliExpressEhRepeticaoUrl(linha, url)) continue;
+    return linha;
+  }
+  return texto(linhas[indice + 1] || "");
+}
+
 function marketplaceShopee(marketplace = "", url = "") {
   const mp = normalizarTextoComparacao(marketplace).replace(/[^a-z0-9]+/g, "");
   const valor = texto(url).toLowerCase();
@@ -388,7 +410,9 @@ function classificarLinksComerciais({
         url,
         linhaAtual,
         linhaAnterior: linhasBase[indice - 1] || "",
-        linhaPosterior: linhasBase[indice + 1] || "",
+        linhaPosterior: marketplaceAliExpress(marketplace, url)
+          ? proximaLinhaAliExpressIgnorandoRepeticao(linhasBase, indice, url)
+          : (linhasBase[indice + 1] || ""),
         contexto: contextoAnteriorExtra,
         marketplace,
         tipoSugerido: primeiraSugestao(sugestoes, url)

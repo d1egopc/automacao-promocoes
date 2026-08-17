@@ -119,7 +119,7 @@ function extrairUrlKabumDeAwin(url = "") {
 }
 
 function classificarPorContexto(marketplace = "", contexto = {}) {
-  const antes = semAcentos(contexto.antesProximo || contexto.antes || "");
+  const antes = semAcentos(contexto.antesProximo || contexto.antes || "").replace(/[^a-z0-9\s:]+$/gi, "").trim();
   const trecho = semAcentos(contexto.trecho || "");
   const mp = minusculo(marketplace);
 
@@ -156,13 +156,42 @@ function classificarPorContexto(marketplace = "", contexto = {}) {
   return null;
 }
 
+function urlLinhaAliExpress(valor = "") {
+  return texto(valor).replace(/[),.;:!?]+$/g, "");
+}
+
+function linhaAliExpressEhRepeticaoUrlCandidata(linha = "", urls = []) {
+  const urlsLinha = [...texto(linha).matchAll(/https?:\/\/\S+/gi)].map(match => urlLinhaAliExpress(match[0]).toLowerCase());
+  if (!urlsLinha.length) return false;
+  const urlsCandidatas = new Set(urls.map(url => urlLinhaAliExpress(url).toLowerCase()).filter(Boolean));
+  if (!urlsCandidatas.size || !urlsLinha.every(url => urlsCandidatas.has(url))) return false;
+
+  const restante = semAcentos(texto(linha).replace(/https?:\/\/\S+/gi, " ")).replace(/[^a-z0-9]+/gi, "").trim();
+  return !restante;
+}
+
+function linhaAliExpressEhSeparador(linha = "") {
+  const semUrl = semAcentos(texto(linha).replace(/https?:\/\/\S+/gi, " ")).trim();
+  if (!semUrl) return true;
+  const apenasSeparador = semUrl.replace(/[\s\-_=+*~`.,;:!?()[\]{}<>|\\/]+/g, "").trim();
+  return !/[a-z0-9]/i.test(apenasSeparador);
+}
+
+function linhaAliExpressEhMarcadorPc(linha = "") {
+  const normalizada = semAcentos(texto(linha).replace(/https?:\/\/\S+/gi, " ")).trim();
+  if (!normalizada) return false;
+  return /\b(?:no\s+pc|pelo\s+pc|link\s+(?:para\s+)?pc|pc|desktop|site)\b/.test(normalizada) &&
+    !/\b(?:app|aplicativo|mobile|celular|produto|resgate|cupom|voucher)\b/.test(normalizada.replace(/\bpc\b/g, ""));
+}
+
 function proximoMarcadorPcAliExpress(evento = {}, candidato = {}) {
   const fonte = textoEvento(evento);
   if (!fonte) return false;
 
   let idx = -1;
   let tamanhoUrl = 0;
-  for (const url of urlsCandidato(candidato)) {
+  const urls = urlsCandidato(candidato);
+  for (const url of urls) {
     idx = fonte.indexOf(url);
     if (idx >= 0) {
       tamanhoUrl = url.length;
@@ -171,14 +200,17 @@ function proximoMarcadorPcAliExpress(evento = {}, candidato = {}) {
   }
   if (idx < 0) return false;
 
-  const depois = fonte.slice(idx + tamanhoUrl, Math.min(fonte.length, idx + tamanhoUrl + 120));
-  const linhas = depois
-    .split(/\r?\n/)
-    .map(linha => semAcentos(linha.replace(/https?:\/\/\S+/gi, " ")).trim())
-    .filter(Boolean);
-  const primeira = linhas[0] || "";
-  return /\b(?:no\s+pc|pelo\s+pc|link\s+(?:para\s+)?pc|pc|desktop|site)\b/.test(primeira) &&
-    !/\b(?:app|aplicativo|mobile|celular|produto|resgate|cupom|voucher)\b/.test(primeira.replace(/\bpc\b/g, ""));
+  const depois = fonte.slice(idx + tamanhoUrl, Math.min(fonte.length, idx + tamanhoUrl + 240));
+  const linhas = depois.split(/\r?\n/);
+
+  for (const linha of linhas) {
+    if (linhaAliExpressEhSeparador(linha)) continue;
+    if (linhaAliExpressEhRepeticaoUrlCandidata(linha, urls)) continue;
+    if (linhaAliExpressEhMarcadorPc(linha)) return true;
+    return false;
+  }
+
+  return false;
 }
 
 function shopeeLinkPosteriorAoResgate(evento = {}, candidato = {}, contexto = {}) {
@@ -441,9 +473,12 @@ function escolherProdutoPrincipal(candidatos = [], marketplace = "", evento = {}
 }
 
 function resumoLinksClassificados(links = [], evento = {}, marketplace = "") {
-  return (Array.isArray(links) ? links : []).map(link => {
+  const vistosAliExpress = new Set();
+  const resultado = [];
+
+  for (const link of (Array.isArray(links) ? links : [])) {
     const classificacao = classificarLinkEngine({ marketplace, evento, link });
-    return {
+    const item = {
       id: link.id || null,
       urlOriginal: link.url_original || "",
       urlExpandida: link.url_expandida || "",
@@ -453,7 +488,17 @@ function resumoLinksClassificados(links = [], evento = {}, marketplace = "") {
       papelLinkConfianca: classificacao.confianca,
       urlProduto: classificacao.urlProduto || ""
     };
-  });
+
+    if (semAcentos(marketplace).replace(/[^a-z0-9]+/g, "") === "aliexpress" && item.papelLink === PAPEL_LINK.LINK_APP) {
+      const chave = `${item.papelLink}:${texto(item.urlOriginal || item.urlExpandida).toLowerCase()}`;
+      if (vistosAliExpress.has(chave)) continue;
+      vistosAliExpress.add(chave);
+    }
+
+    resultado.push(item);
+  }
+
+  return resultado;
 }
 
 module.exports = {

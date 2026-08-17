@@ -538,10 +538,11 @@ async function testarAliExpressQuatroOcorrenciasPreservamUrlOriginal() {
     afiliados[appPlaca],
     afiliados[pcPlaca],
     afiliados[produtoTpm],
-    afiliados[pcTpm]
+    ""
   ]);
   assert.deepStrictEqual(links.map(item => item.sourceValuesUsado), [appPlaca, pcPlaca, produtoTpm, pcTpm]);
-  assert(links.every(item => item.renderizavel === true));
+  assert.deepStrictEqual(links.map(item => item.renderizavel), [true, true, true, false]);
+  assert.strictEqual(links[3].conversaoWorkspace.motivo, "produto_canonico_divergente");
 }
 
 async function testarDuplicadoReusaConversaoMasPreservaOcorrencia() {

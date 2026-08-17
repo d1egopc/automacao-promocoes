@@ -22,7 +22,7 @@ function papelPorUrl(resultado = {}, trecho = "") {
   return (resultado.metadata?.linksClassificados || []).find(item => String(item.urlOriginal || "").includes(trecho));
 }
 
-async function importarAliFixture({ titulo, texto, principal = "1005001111111111", secundario = "1005002222222222" }) {
+async function importarAliFixture({ titulo, texto, principal = "1005001111111111", secundario = "1005002222222222", afiliadaUnica = false }) {
   const chamadas = [];
   const resultado = await importarAliExpressEngine({
     job: { id: titulo.length, evento_id: titulo.length + 1000, cliente_id: "workspace_links_v2", marketplace: "aliexpress" },
@@ -44,7 +44,9 @@ async function importarAliFixture({ titulo, texto, principal = "1005001111111111
           precoOriginal: "199.90",
           linkOriginal: url,
           linkExpandido: `https://www.aliexpress.com/item/${id}.html`,
-          linkAfiliado: `https://s.click.aliexpress.com/e/_${titulo.replace(/[^a-z0-9]+/gi, "")}_${sufixo}`,
+          linkAfiliado: afiliadaUnica
+            ? `https://s.click.aliexpress.com/e/_${titulo.replace(/[^a-z0-9]+/gi, "")}_unico`
+            : `https://s.click.aliexpress.com/e/_${titulo.replace(/[^a-z0-9]+/gi, "")}_${sufixo}`,
           tipoLinkAfiliado: papel,
           papelLink: papel,
           imagem: "https://ae01.alicdn.com/produto.jpg",
@@ -95,12 +97,25 @@ async function testarAliExpress() {
     {
       titulo: "Jungle Leopard",
       texto: "Jungle Leopard\nLink APP\nhttps://a.aliexpress.com/_jungleApp\nLink PC\nhttps://a.aliexpress.com/_junglePc"
+    },
+    {
+      titulo: "8BitDo 40 aniversario",
+      texto: "8BitDo 40 aniversario\n998 moedas no APP\n⬇️\nhttps://a.aliexpress.com/_8bitdoApp\nhttps://a.aliexpress.com/_8bitdoApp\n\n⬇️ NO PC\nhttps://a.aliexpress.com/_8bitdoPc"
+    },
+    {
+      titulo: "8BitDo Ultimate 2",
+      texto: "8BitDo Ultimate 2\nLink com moedas:\nhttps://a.aliexpress.com/_ultimateApp\nLink para PC:\nhttps://a.aliexpress.com/_ultimatePc"
+    },
+    {
+      titulo: "AliExpress app solto",
+      texto: "AliExpress app solto\nhttps://a.aliexpress.com/_soltoApp\n\n⬇️ NO PC\nhttps://a.aliexpress.com/_soltoPc"
     }
   ];
 
   for (const fixture of fixtures) {
     const radar = classificarLinksComerciais({ texto: fixture.texto, marketplace: "aliexpress" });
-    assert.deepStrictEqual(radar.classificados.map(item => item.tipo), ["app", "pc"], `${fixture.titulo} deve preservar APP + PC no Radar`);
+    const papeisRadar = [...new Map(radar.classificados.map(item => [`${item.tipo}:${item.link}`, item.tipo])).values()];
+    assert.deepStrictEqual(papeisRadar, ["app", "pc"], `${fixture.titulo} deve preservar APP + PC no Radar`);
 
     const engine = resumoLinksClassificados(linksRows(fixture.texto, "ali"), { texto_original: fixture.texto, links_extraidos: urls(fixture.texto) }, "aliexpress");
     assert.deepStrictEqual(engine.map(item => item.papelLink), ["link_app", "link_pc"], `${fixture.titulo} deve preservar link_app + link_pc no Engine`);
@@ -112,6 +127,17 @@ async function testarAliExpress() {
     assert.ok(app?.renderizavel, `${fixture.titulo} APP deve renderizar`);
     assert.ok(pc?.renderizavel, `${fixture.titulo} PC deve renderizar`);
     assert.notStrictEqual(app.urlAfiliada, pc.urlAfiliada, `${fixture.titulo} APP e PC precisam de redirects distintos por papel`);
+
+    const mensagemAli = gerarTemplateUniversal({
+      ...resultado,
+      linksComerciais: resultado.metadata.linksClassificados.map(item => ({
+        tipo: item.papelLink === "link_pc" ? "pc" : (item.papelLink === "link_app" ? "app" : item.papelLink),
+        urlOptimus: item.papelLink === "link_pc" ? "https://go.optimuspromo.com.br/r/pc" : "https://go.optimuspromo.com.br/r/app",
+        renderizavel: item.renderizavel
+      }))
+    });
+    assert.ok(mensagemAli.includes("📱 *APP:*\nhttps://go.optimuspromo.com.br/r/app"), `${fixture.titulo} deve renderizar APP no Template`);
+    assert.ok(mensagemAli.includes("🖥️ *PC:*\nhttps://go.optimuspromo.com.br/r/pc"), `${fixture.titulo} deve renderizar PC no Template`);
   }
 
   const machinist = [
@@ -143,6 +169,31 @@ async function testarAliExpress() {
   const { resultado: resultadoMachenike } = await importarAliFixture({ titulo: "Machenike G3", texto: machenike });
   assert.strictEqual(resultadoMachenike.metadata.linksClassificados.filter(item => item.papelLink === "link_app").length, 1, "APP repetido deve deduplicar por URL");
   assert.strictEqual(resultadoMachenike.metadata.linksClassificados.filter(item => item.papelLink === "link_pc").length, 1, "PC deve permanecer como papel distinto");
+
+  const dareu = [
+    "Teclado Magnetico Com Fio DAREU 8Khz, Base De Aluminio",
+    "🏷CUPOM: BRGM2 + 1214 Moedas + Cupom Da Loja",
+    "🥇 Link com moedas:",
+    "🔗 https://a.aliexpress.com/_c4L7znyN",
+    "🖥 Link para PC:",
+    "🔗 https://a.aliexpress.com/_c4WWAmhb"
+  ].join("\n");
+  const { resultado: resultadoDareu } = await importarAliFixture({ titulo: "DAREU", texto: dareu, afiliadaUnica: true });
+  const dareuApp = resultadoDareu.metadata.linksClassificados.find(item => item.papelLink === "link_app");
+  const dareuPc = resultadoDareu.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
+  assert.strictEqual(dareuApp.renderizavel, true, "DAREU APP nao deve cair em link_app_url_afiliada_igual_pc quando a origem provou APP + PC");
+  assert.strictEqual(dareuPc.renderizavel, true, "DAREU PC deve permanecer renderizavel");
+  assert.strictEqual(dareuApp.urlAfiliada, dareuPc.urlAfiliada, "DAREU reproduz infraestrutura convergindo APP e PC para a mesma afiliada");
+  assert.strictEqual(dareuApp.conversaoWorkspace.motivo, "cta_app_workspace_convertido_mesma_url_pc_preservado_por_ocorrencia");
+
+  const somentePc = "Oferta somente PC\nNO PC\nhttps://a.aliexpress.com/_somentePc";
+  const { resultado: resultadoSomentePc } = await importarAliFixture({ titulo: "Somente PC", texto: somentePc });
+  assert.strictEqual(resultadoSomentePc.metadata.linksClassificados.some(item => item.papelLink === "link_app"), false, "somente PC nao pode inventar APP");
+  assert.strictEqual(resultadoSomentePc.metadata.linksClassificados.filter(item => item.papelLink === "link_pc").length, 1, "somente PC deve preservar apenas PC");
+
+  const botAuxiliar = "Bot de descontos AliExpress\nhttps://cutt.ly/botdescontos\nLink APP\nhttps://a.aliexpress.com/_botApp\nLink PC\nhttps://a.aliexpress.com/_botPc";
+  const { resultado: resultadoBot } = await importarAliFixture({ titulo: "Bot auxiliar", texto: botAuxiliar });
+  assert.strictEqual(resultadoBot.metadata.linksClassificados.some(item => String(item.urlOriginal || "").includes("cutt.ly") && ["produto", "link_app", "link_pc"].includes(item.papelLink)), false, "bot de descontos nao deve virar Produto/APP/PC");
 }
 
 async function importarShopeeFixture(titulo) {

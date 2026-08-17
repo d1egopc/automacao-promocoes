@@ -319,6 +319,31 @@ function urlsAliExpressAfiliadasIguais(a = "", b = "") {
   return Boolean(chaveA && chaveB && chaveA === chaveB);
 }
 
+function urlOriginalAliExpressSegura(url = "") {
+  const valor = texto(url);
+  if (!valor) return false;
+  try {
+    const host = new URL(valor).hostname.replace(/^www\./i, "").toLowerCase();
+    return host === "s.click.aliexpress.com"
+      || host === "a.aliexpress.com"
+      || host.endsWith(".aliexpress.com");
+  } catch (_) {
+    return false;
+  }
+}
+
+function preservarAliExpressAppComPcComprovado({ papelLink = "", urlAfiliada = "", urlOriginal = "", urlPrincipal = "", urlAfiliadaPrincipal = "", produtoCanonico = {} } = {}) {
+  const papel = texto(papelLink);
+  if (papel !== "link_app" && papel !== "link_moedas") return false;
+  if (!produtoCanonico?.ok) return false;
+  if (!texto(urlOriginal) || !texto(urlPrincipal)) return false;
+  if (urlsAliExpressAfiliadasIguais(urlOriginal, urlPrincipal)) return false;
+  if (!urlOriginalAliExpressSegura(urlOriginal) || !urlOriginalAliExpressSegura(urlPrincipal)) return false;
+  if (!urlAliExpressConvertidaSegura(urlAfiliada, urlOriginal)) return false;
+  if (!urlAliExpressConvertidaSegura(urlAfiliadaPrincipal, urlPrincipal)) return false;
+  return true;
+}
+
 function extrairIdProdutoAliExpressValor(valor = "") {
   const bruto = texto(valor);
   if (!bruto) return "";
@@ -492,6 +517,14 @@ function avaliarConversaoAliExpressPorPapel({ papelLink = "", urlAfiliada = "", 
       };
     }
     if (urlsAliExpressAfiliadasIguais(urlAfiliada, urlAfiliadaPrincipal)) {
+      if (preservarAliExpressAppComPcComprovado({ papelLink, urlAfiliada, urlOriginal, urlPrincipal, urlAfiliadaPrincipal, produtoCanonico })) {
+        return {
+          ...produtoCanonico,
+          renderizavel: true,
+          motivo: papelLink === "link_moedas" ? "cta_moedas_workspace_convertido_mesma_url_pc_preservado_por_ocorrencia" : "cta_app_workspace_convertido_mesma_url_pc_preservado_por_ocorrencia",
+          appValidado: true
+        };
+      }
       return {
         ...produtoCanonico,
         renderizavel: false,

@@ -526,9 +526,9 @@ async function testarAliExpressAppNaoReutilizaUrlAfiliadaPc() {
   const linkPc = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
   assert.strictEqual(linkPc.renderizavel, true);
   assert.strictEqual(linkPc.urlAfiliada, "https://s.click.aliexpress.com/e/_mesmoCtaD1");
-  assert.strictEqual(linkApp.renderizavel, false);
-  assert.strictEqual(linkApp.urlAfiliada, "");
-  assert.strictEqual(linkApp.conversaoWorkspace.motivo, "link_app_url_afiliada_igual_pc");
+  assert.strictEqual(linkApp.renderizavel, true);
+  assert.strictEqual(linkApp.urlAfiliada, "https://s.click.aliexpress.com/e/_mesmoCtaD1");
+  assert.strictEqual(linkApp.conversaoWorkspace.motivo, "cta_app_workspace_convertido_mesma_url_pc_preservado_por_ocorrencia");
 }
 async function testarAliExpressAppAfiliadoDivergenteNaoRenderiza() {
   limparModulo("../modules/engine/importer/adapters/aliexpress.adapter");
