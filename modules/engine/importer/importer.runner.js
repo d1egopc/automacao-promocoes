@@ -9,7 +9,15 @@ const {
   marcarJobRetidaV2,
   marcarJobErroImportacao
 } = require("./importer.service");
-const { limitarJobs } = require("../processor.service");
+const {
+  limitarJobs,
+  marcarJobStatus,
+  registrarProcessamento
+} = require("../processor.service");
+const {
+  expirarJobPreImporterSeNecessario,
+  resumirSelecaoFrescorPreImporter
+} = require("../frescor-pre-importer.service");
 const {
   logEngineImporterInicio,
   logEngineImporterJob,
@@ -313,7 +321,11 @@ async function importarJobsProntosEngine({ limite = 10, marketplace = "", deps =
     ofertaCriada: 0,
     retidasV2: 0,
     erros: 0,
-    motivos: {}
+    motivos: {},
+    frescosSelecionados: 0,
+    expiradosPreImporter: 0,
+    expiradosCandidatosPreImporter: 0,
+    idadeMediaJobsSelecionadosMs: 0
   };
 
   logEngineImporterInicio({ limite: limiteFinal, marketplace: marketplace || "" });
@@ -329,9 +341,25 @@ async function importarJobsProntosEngine({ limite = 10, marketplace = "", deps =
     };
   }
 
+  const metricasSelecao = resumirSelecaoFrescorPreImporter(jobs.jobs);
+  resumo.frescosSelecionados = metricasSelecao.frescosSelecionados;
+  resumo.expiradosCandidatosPreImporter = metricasSelecao.expiradosCandidatos;
+  resumo.idadeMediaJobsSelecionadosMs = metricasSelecao.idadeMediaJobsSelecionadosMs;
+
   for (const job of jobs.jobs) {
-    resumo.processados += 1;
     try {
+      const frescorPreImporter = await expirarJobPreImporterSeNecessario(job, {
+        registrarProcessamento,
+        marcarJobStatus,
+        statusEsperado: "pronto_para_importar"
+      });
+      if (frescorPreImporter.expirou) {
+        resumo.expiradosPreImporter += 1;
+        motivoAdicionar(resumo, frescorPreImporter.motivo);
+        continue;
+      }
+
+      resumo.processados += 1;
       const resultado = await importarJobPronto(job, { deps }, resumo);
       if (resultado.ignorado) resumo.processados -= 1;
     } catch (e) {

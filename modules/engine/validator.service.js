@@ -4,6 +4,9 @@ const {
   registrarProcessamento,
   limitarJobs
 } = require("./processor.service");
+const {
+  calcularCotasFrescorPreImporter
+} = require("./frescor-pre-importer.service");
 const { normalizarTexto } = require("./normalizers");
 
 function normalizarMarketplaceEngine(marketplace = "") {
@@ -127,14 +130,53 @@ function marketplaceAtivoClienteEngine(clienteId = "", marketplace = "", marketp
 }
 
 async function buscarJobsDiagnosticados(limite = 20) {
+  const cotas = calcularCotasFrescorPreImporter(limite);
   const resultado = await queryEngine(
-    `SELECT id, uuid, evento_id, oferta_id, cliente_id, marketplace_detectado,
-            marketplace, status, motivo_final, criado_em, atualizado_em
-       FROM engine_jobs_cliente
-      WHERE status = 'diagnosticado'
-      ORDER BY atualizado_em ASC NULLS FIRST, id ASC
-      LIMIT $1`,
-    [limitarJobs(limite)]
+    `WITH base AS (
+       SELECT j.id, j.uuid, j.evento_id, j.oferta_id, j.cliente_id, j.marketplace_detectado,
+              j.marketplace, j.status, j.motivo_final, j.metadata, j.prioridade,
+              j.criado_em, j.atualizado_em,
+              e.capturado_em AS evento_capturado_em,
+              e.criado_em AS evento_criado_em,
+              e.origem AS evento_origem,
+              e.origem_tipo AS evento_origem_tipo,
+              e.metadata AS evento_metadata,
+              COALESCE(e.capturado_em, j.criado_em) AS origem_comercial_pre_importer,
+              CASE
+                WHEN COALESCE(e.capturado_em, j.criado_em) < NOW() - INTERVAL '30 minutes' THEN 1
+                ELSE 0
+              END AS bucket_frescor_pre_importer
+         FROM engine_jobs_cliente j
+         LEFT JOIN engine_eventos_brutos e ON e.id = j.evento_id
+        WHERE j.status = 'diagnosticado'
+     ),
+     frescos AS (
+       SELECT *, 0 AS bucket_selecao_pre_importer
+         FROM base
+        WHERE bucket_frescor_pre_importer = 0
+        ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
+        LIMIT $1
+     ),
+     limpeza AS (
+       SELECT *, 1 AS bucket_selecao_pre_importer
+         FROM base
+        WHERE bucket_frescor_pre_importer = 1
+        ORDER BY origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
+        LIMIT $2
+     )
+     SELECT *
+       FROM (
+         SELECT * FROM frescos
+         UNION ALL
+         SELECT * FROM limpeza
+       ) selecionados
+      ORDER BY bucket_selecao_pre_importer ASC,
+               COALESCE(prioridade, 0) DESC,
+               origem_comercial_pre_importer ASC,
+               atualizado_em ASC NULLS FIRST,
+               id ASC
+      LIMIT $3`,
+    [cotas.frescos, cotas.limpeza, cotas.limite]
   );
 
   if (!resultado.ok) return { ok: false, jobs: [], motivo: resultado.motivo, erro: resultado.erro };

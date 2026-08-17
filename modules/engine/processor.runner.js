@@ -5,6 +5,10 @@ const {
   marcarJobStatus,
   registrarProcessamento
 } = require("./processor.service");
+const {
+  expirarJobPreImporterSeNecessario,
+  resumirSelecaoFrescorPreImporter
+} = require("./frescor-pre-importer.service");
 const { processarJobEngine } = require("./processor.steps");
 const {
   logEngineProcessadorInicio,
@@ -36,7 +40,11 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [],
     ok: true,
     processados: 0,
     diagnosticados: 0,
-    erros: 0
+    erros: 0,
+    frescosSelecionados: 0,
+    expiradosPreImporter: 0,
+    expiradosCandidatosPreImporter: 0,
+    idadeMediaJobsSelecionadosMs: 0
   };
 
   logEngineProcessadorInicio({ limite: limiteFinal });
@@ -65,6 +73,11 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [],
     limite: limiteFinal
   });
 
+  const metricasSelecao = resumirSelecaoFrescorPreImporter(pendentes.jobs);
+  resumo.frescosSelecionados = metricasSelecao.frescosSelecionados;
+  resumo.expiradosCandidatosPreImporter = metricasSelecao.expiradosCandidatos;
+  resumo.idadeMediaJobsSelecionadosMs = metricasSelecao.idadeMediaJobsSelecionadosMs;
+
   for (const job of pendentes.jobs) {
     console.log("[ENGINE-WORKER-JOB-PROCESSANDO]", {
       jobId: job.id,
@@ -74,6 +87,16 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [],
       status: job.status
     });
     logEngineProcessadorJob({ jobId: job.id, eventoId: job.evento_id, clienteId: job.cliente_id });
+
+    const frescorPreImporter = await expirarJobPreImporterSeNecessario(job, {
+      registrarProcessamento,
+      marcarJobStatus,
+      statusEsperado: "pendente"
+    });
+    if (frescorPreImporter.expirou) {
+      resumo.expiradosPreImporter += 1;
+      continue;
+    }
 
     const lock = await tentarMarcarProcessando(job.id);
     if (!lock.ok) {

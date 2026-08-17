@@ -8,6 +8,10 @@ const {
   registrarProcessamento
 } = require("./processor.service");
 const {
+  expirarJobPreImporterSeNecessario,
+  resumirSelecaoFrescorPreImporter
+} = require("./frescor-pre-importer.service");
+const {
   logEngineProcessadorInicio,
   logEngineProcessadorJob,
   logEngineProcessadorErro,
@@ -23,7 +27,11 @@ async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = 
     integracao_ausente: 0,
     cliente_invalido: 0,
     marketplace_bloqueado: 0,
-    erro_validacao: 0
+    erro_validacao: 0,
+    frescosSelecionados: 0,
+    expiradosPreImporter: 0,
+    expiradosCandidatosPreImporter: 0,
+    idadeMediaJobsSelecionadosMs: 0
   };
 
   logEngineProcessadorInicio({ modo: "validacao", limite: limiteFinal });
@@ -39,11 +47,26 @@ async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = 
     };
   }
 
+  const metricasSelecao = resumirSelecaoFrescorPreImporter(diagnosticados.jobs);
+  resumo.frescosSelecionados = metricasSelecao.frescosSelecionados;
+  resumo.expiradosCandidatosPreImporter = metricasSelecao.expiradosCandidatos;
+  resumo.idadeMediaJobsSelecionadosMs = metricasSelecao.idadeMediaJobsSelecionadosMs;
+
   for (const job of diagnosticados.jobs) {
-    resumo.processados += 1;
     logEngineProcessadorJob({ modo: "validacao", jobId: job.id, eventoId: job.evento_id, clienteId: job.cliente_id });
 
     try {
+      const frescorPreImporter = await expirarJobPreImporterSeNecessario(job, {
+        registrarProcessamento,
+        marcarJobStatus,
+        statusEsperado: "diagnosticado"
+      });
+      if (frescorPreImporter.expirou) {
+        resumo.expiradosPreImporter += 1;
+        continue;
+      }
+
+      resumo.processados += 1;
       const resultado = await validarJobDiagnosticadoEngine(job, {
         clientesValidos,
         integracoesPorCliente,
