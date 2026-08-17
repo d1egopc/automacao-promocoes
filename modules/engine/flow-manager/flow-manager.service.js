@@ -150,24 +150,55 @@ function itemCompativelComDestinos(item = {}, destinosAptos = []) {
   return candidatos.some(valor => destinosAptos.includes(valor));
 }
 
-function dataOfertaMs(oferta = {}, agoraMs = Date.now()) {
+function timestampValido(valor = "") {
+  if (!valor) return NaN;
+  const ms = Date.parse(valor);
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+function timestampComercialOferta(oferta = {}, agoraMs = Date.now()) {
+  const metadata = objeto(oferta.metadata);
+  const jobMetadata = objeto(oferta.job_metadata);
+  const eventoMetadata = objeto(oferta.evento_metadata);
+  const radarMirror = objeto(metadata.radarMirror || metadata.radarEspelhoComercial);
+  const ofertaUniversal = objeto(metadata.ofertaUniversal);
   const candidatos = [
-    oferta.criada_em,
-    oferta.criado_em,
-    oferta.criadoEm,
-    oferta.dataEntradaFila,
-    oferta.capturado_em,
-    oferta.capturadaEm,
-    oferta.atualizada_em
+    ["capturadaEm", oferta.capturadaEm],
+    ["capturadoEm", oferta.capturadoEm],
+    ["capturada_em", oferta.capturada_em],
+    ["capturado_em", oferta.capturado_em],
+    ["evento_capturado_em", oferta.evento_capturado_em],
+    ["metadata.capturadaEm", metadata.capturadaEm],
+    ["metadata.capturadoEm", metadata.capturadoEm],
+    ["metadata.capturada_em", metadata.capturada_em],
+    ["metadata.capturado_em", metadata.capturado_em],
+    ["metadata.radarMirror.capturadaEm", radarMirror.capturadaEm],
+    ["metadata.radarMirror.capturadoEm", radarMirror.capturadoEm],
+    ["metadata.ofertaUniversal.capturadaEm", ofertaUniversal.capturadaEm],
+    ["metadata.ofertaUniversal.capturadoEm", ofertaUniversal.capturadoEm],
+    ["evento_metadata.capturadaEm", eventoMetadata.capturadaEm],
+    ["evento_metadata.capturadoEm", eventoMetadata.capturadoEm],
+    ["evento_metadata.capturada_em", eventoMetadata.capturada_em],
+    ["evento_metadata.capturado_em", eventoMetadata.capturado_em],
+    ["criadoEm", oferta.criadoEm],
+    ["criado_em", oferta.criado_em],
+    ["criada_em", oferta.criada_em],
+    ["criadaEm", oferta.criadaEm],
+    ["metadata.criadoEm", metadata.criadoEm],
+    ["metadata.criado_em", metadata.criado_em],
+    ["metadata.criada_em", metadata.criada_em],
+    ["job_metadata.criadoEm", jobMetadata.criadoEm],
+    ["job_metadata.criado_em", jobMetadata.criado_em],
+    ["dataEntradaFila", oferta.dataEntradaFila],
+    ["atualizada_em", oferta.atualizada_em]
   ];
 
-  for (const candidato of candidatos) {
-    if (!candidato) continue;
-    const ms = Date.parse(candidato);
-    if (Number.isFinite(ms)) return ms;
+  for (const [campo, valor] of candidatos) {
+    const ms = timestampValido(valor);
+    if (Number.isFinite(ms)) return { ms, campo };
   }
 
-  return agoraMs;
+  return { ms: agoraMs, campo: "fallback_agora" };
 }
 
 function tipoFluxoOferta(entrada = {}) {
@@ -188,6 +219,32 @@ function tipoFluxoOferta(entrada = {}) {
 
 function ttlFluxoMs(tipoFluxo = "") {
   return tipoFluxo === "cupom_turbo" ? TTL_TURBO_MS : TTL_NORMAL_MS;
+}
+
+function avaliarFrescorComercialOferta(entrada = {}, opcoes = {}) {
+  const agoraEntradaMs = Number(opcoes.agoraMs);
+  const agoraMs = Number.isFinite(agoraEntradaMs) ? agoraEntradaMs : Date.now();
+  const oferta = objeto(entrada.oferta);
+  const tipoFluxo = tipoFluxoOferta({
+    ...entrada,
+    tipoFluxo: opcoes.tipoFluxo || entrada.tipoFluxo,
+    oferta
+  });
+  const ttlEntradaMs = Number(opcoes.ttlMs || entrada.ttlMs || ttlFluxoMs(tipoFluxo));
+  const ttlMs = Number.isFinite(ttlEntradaMs) ? ttlEntradaMs : ttlFluxoMs(tipoFluxo);
+  const origem = timestampComercialOferta(oferta, agoraMs);
+  const idadeComercialMs = Math.max(0, agoraMs - origem.ms);
+  const expiraEmComercial = new Date(origem.ms + ttlMs).toISOString();
+
+  return {
+    tipoFluxo,
+    ttlMs,
+    origemComercialMs: origem.ms,
+    origemComercialCampo: origem.campo,
+    idadeComercialMs,
+    expiraEmComercial,
+    expirada: idadeComercialMs >= ttlMs
+  };
 }
 
 function isoValido(valor = "") {
@@ -531,11 +588,39 @@ async function avaliarFluxoWorkspaceShadow(entrada = {}, opcoes = {}) {
   const ofertaId = entrada.ofertaId ?? oferta.id ?? null;
   const tipoFluxo = tipoFluxoOferta(entrada);
   const coberturaMinutos = coberturaFluxoMinutos(tipoFluxo);
-  const ttlMs = ttlFluxoMs(tipoFluxo);
-  const origemMs = dataOfertaMs(oferta, agoraMs);
-  const idadeOfertaMs = Math.max(0, agoraMs - origemMs);
-  const expiraEm = new Date(origemMs + ttlMs).toISOString();
+  const frescor = avaliarFrescorComercialOferta({ ...entrada, oferta, tipoFluxo }, { agoraMs });
+  const ttlMs = frescor.ttlMs;
+  const idadeOfertaMs = frescor.idadeComercialMs;
+  const expiraEm = frescor.expiraEmComercial;
   const prioridadeFluxo = prioridadeFluxoOferta(entrada, tipoFluxo);
+
+  if (frescor.expirada) {
+    const decisao = {
+      modo: "shadow",
+      workspaceId,
+      ofertaId,
+      marketplace,
+      aceitarAgora: false,
+      motivo: "flow_expirada_frescor_comercial",
+      quantidadeAceita: 0,
+      nivelAlvo: 0,
+      bufferAtual: null,
+      vagasDisponiveis: 0,
+      destinosAptos: null,
+      ttlMs,
+      expiraEm,
+      expiraEmComercial: expiraEm,
+      origemComercialCampo: frescor.origemComercialCampo,
+      origemComercialMs: frescor.origemComercialMs,
+      prioridadeFluxo,
+      tipoFluxo,
+      idadeOfertaMs,
+      idadeComercialMs: idadeOfertaMs,
+      aplicouMudancas: false
+    };
+    logFlowShadow(decisao);
+    return decisao;
+  }
 
   try {
     const destinos = lista(entrada.destinosCompativeis);
@@ -574,9 +659,13 @@ async function avaliarFluxoWorkspaceShadow(entrada = {}, opcoes = {}) {
       destinosAptos: limitarNaoNegativo(destinosResumo.destinosAptos),
       ttlMs,
       expiraEm,
+      expiraEmComercial: expiraEm,
+      origemComercialCampo: frescor.origemComercialCampo,
+      origemComercialMs: frescor.origemComercialMs,
       prioridadeFluxo,
       tipoFluxo,
       idadeOfertaMs,
+      idadeComercialMs: idadeOfertaMs,
       itensBufferShadow: bufferShadow.itensContados,
       itensBufferContados: bufferShadow.itensContados.length,
       itensBufferIgnorados: bufferShadow.itensIgnorados.length,
@@ -600,9 +689,13 @@ async function avaliarFluxoWorkspaceShadow(entrada = {}, opcoes = {}) {
       destinosAptos: null,
       ttlMs,
       expiraEm,
+      expiraEmComercial: expiraEm,
+      origemComercialCampo: frescor.origemComercialCampo,
+      origemComercialMs: frescor.origemComercialMs,
       prioridadeFluxo,
       tipoFluxo,
       idadeOfertaMs,
+      idadeComercialMs: idadeOfertaMs,
       erro: erro?.message || "",
       aplicouMudancas: false
     };
@@ -617,6 +710,7 @@ module.exports = {
   TTL_NORMAL_MS,
   TTL_TURBO_MS,
   avaliarFluxoWorkspaceShadow,
+  avaliarFrescorComercialOferta,
   calcularBufferAtualShadow,
   calcularExpiracaoOperacionalFila,
   carimbarExpiracaoOperacionalFila,

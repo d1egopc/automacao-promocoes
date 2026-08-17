@@ -685,7 +685,7 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
              o.imagem, o.link_original, o.link_expandido,
              o.link_afiliado, o.categoria, o.score, o.prioridade, o.status, o.motivo_status,
              ${campoMetadata},
-             o.criada_em, o.atualizada_em, j.id AS job_id, j.cliente_id,
+             o.criada_em, o.atualizada_em, e.capturado_em AS evento_capturado_em, j.id AS job_id, j.cliente_id,
              j.metadata AS job_metadata, e.metadata AS evento_metadata,
              ROW_NUMBER() OVER (
                PARTITION BY LOWER(COALESCE(o.marketplace, '')), j.cliente_id
@@ -709,7 +709,7 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
            imagem, link_original, link_expandido,
            link_afiliado, categoria, score, prioridade, status, motivo_status,
            metadata,
-           criada_em, atualizada_em, job_id, cliente_id,
+           criada_em, atualizada_em, evento_capturado_em, job_id, cliente_id,
            job_metadata, evento_metadata
       FROM candidatos_distribuiveis
      ORDER BY ordem_workspace_marketplace ASC,

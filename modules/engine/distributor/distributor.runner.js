@@ -31,6 +31,7 @@ const {
 } = require("../ofc/active-gate.service");
 const {
   avaliarFluxoWorkspaceShadow,
+  avaliarFrescorComercialOferta,
   flowManagerAtivoWorkspace
 } = require("../flow-manager/flow-manager.service");
 
@@ -252,6 +253,24 @@ async function finalizarFlowNaoAceita(oferta = {}, decisao = {}, resumo = null, 
   }
 
   return reprogramarFlowTemporario(oferta, decisao, resumo, origem, classificacao);
+}
+
+function avaliarFrescorComercialParaFila(oferta = {}, flow = {}, contexto = {}) {
+  const avaliarFrescor = contexto?.deps?.avaliarFrescorComercialOferta || avaliarFrescorComercialOferta;
+  return avaliarFrescor({
+    workspaceId: oferta.cliente_id || "",
+    ofertaId: oferta.id,
+    marketplace: oferta.marketplace || "",
+    tipoFluxo: flow.tipoFluxo || tipoOperacionalOferta(oferta),
+    tipoOperacional: tipoOperacionalOferta(oferta),
+    cupomTurbo: cupomTurboOferta(oferta),
+    ttlMs: flow.ttlMs,
+    oferta
+  }, {
+    ...(contexto?.deps?.flowManager || {}),
+    ttlMs: flow.ttlMs,
+    tipoFluxo: flow.tipoFluxo || tipoOperacionalOferta(oferta)
+  });
 }
 
 function proximaTentativaFlowTemporario(decisao = {}) {
@@ -486,6 +505,26 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
       ...flow,
       destinosCompativeis: validacao.destinosCompativeis
     }, resumo);
+  }
+
+  if (flowAtivo && flow?.aceitarAgora === true) {
+    const frescor = avaliarFrescorComercialParaFila(oferta, flow, contexto);
+    if (frescor?.expirada) {
+      return reterOferta(oferta, "flow_expirada_frescor_comercial", {
+        origem: "flow_manager",
+        resultadoDistribuicao: "expirada_frescor_comercial_pre_fila",
+        definitivoOperacional: true,
+        classificacaoOperacional: "definitivo",
+        statusOperacional: "terminal",
+        filaRecebeu: false,
+        escopo: "workspace",
+        tipoFluxo: frescor.tipoFluxo || flow.tipoFluxo || "",
+        ttlMs: frescor.ttlMs ?? flow.ttlMs ?? null,
+        idadeComercialMs: frescor.idadeComercialMs ?? null,
+        origemComercialCampo: frescor.origemComercialCampo || "",
+        expiraEmComercial: frescor.expiraEmComercial || flow.expiraEm || ""
+      }, resumo);
+    }
   }
 
   const decidirGate = contexto?.deps?.decidirAbsorcaoWorkspace || decidirAbsorcaoWorkspace;

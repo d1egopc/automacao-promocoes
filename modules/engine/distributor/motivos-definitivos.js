@@ -57,7 +57,9 @@ const MOTIVOS_DEFINITIVOS = new Set([
   "integracao_ausente",
   "erro_configuracao",
   "configuracao_invalida",
-  "adapter_nao_implementado"
+  "adapter_nao_implementado",
+  "expirada_frescor_comercial",
+  "flow_expirada_frescor_comercial"
 ]);
 
 function motivoNormalizado(motivo = "") {

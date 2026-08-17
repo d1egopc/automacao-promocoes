@@ -4,6 +4,7 @@ const assert = require("assert");
 const {
   TTL_NORMAL_MS,
   TTL_TURBO_MS,
+  avaliarFrescorComercialOferta,
   avaliarFluxoWorkspaceShadow,
   flowManagerAtivoWorkspace
 } = require("../modules/engine/flow-manager/flow-manager.service");
@@ -876,6 +877,205 @@ async function testarWorkspaceGenericoJanelaEBufferReentram() {
   assert.strictEqual(liberado.aceitarAgora, true);
 }
 
+async function testarFrescorComercialUsaCapturaAntesDaFila() {
+  const agoraMs = Date.parse("2026-08-03T10:00:00.000Z");
+  const frescor = avaliarFrescorComercialOferta({
+    tipoFluxo: "oferta_comum",
+    oferta: {
+      id: "captura_prioritaria",
+      capturadaEm: "2026-08-03T09:00:00.000Z",
+      criadoEm: "2026-08-03T09:55:00.000Z",
+      dataEntradaFila: "2026-08-03T09:59:00.000Z"
+    }
+  }, { agoraMs });
+
+  assert.strictEqual(frescor.origemComercialCampo, "capturadaEm");
+  assert.strictEqual(frescor.expirada, true);
+  assert.strictEqual(frescor.expiraEmComercial, "2026-08-03T09:30:00.000Z");
+
+  const frescorEventoBruto = avaliarFrescorComercialOferta({
+    tipoFluxo: "oferta_comum",
+    oferta: {
+      id: "captura_evento_bruto",
+      evento_capturado_em: "2026-08-03T09:10:00.000Z",
+      criada_em: "2026-08-03T09:55:00.000Z"
+    }
+  }, { agoraMs });
+
+  assert.strictEqual(frescorEventoBruto.origemComercialCampo, "evento_capturado_em");
+  assert.strictEqual(frescorEventoBruto.expiraEmComercial, "2026-08-03T09:40:00.000Z");
+}
+
+async function testarJanelaReabreDepoisDoTtlExpiraAntesDaFila() {
+  const decisao = await avaliarFluxoWorkspaceShadow(
+    {
+      ...entrada(GENERICO, { destinosCompativeis: [destinoRapido()] }),
+      oferta: {
+        ...entrada(GENERICO).oferta,
+        capturadaEm: "2026-08-03T05:00:00.000Z",
+        criadoEm: "2026-08-03T05:00:00.000Z"
+      }
+    },
+    opcoes({}, { agoraMs: Date.parse("2026-08-03T10:00:00.000Z") })
+  );
+
+  assert.strictEqual(decisao.aceitarAgora, false);
+  assert.strictEqual(decisao.motivo, "flow_expirada_frescor_comercial");
+  assert.strictEqual(decisao.expiraEmComercial, "2026-08-03T05:30:00.000Z");
+  assert(decisao.idadeComercialMs >= TTL_NORMAL_MS);
+}
+
+async function testarSaturacaoCurtaContinuaReentrante() {
+  const filas = {
+    [GENERICO]: [
+      itemFila({ id: "slot_1", clienteId: GENERICO }),
+      itemFila({ id: "slot_2", clienteId: GENERICO }),
+      itemFila({ id: "slot_3", clienteId: GENERICO })
+    ]
+  };
+  const decisao = await avaliarFluxoWorkspaceShadow(
+    {
+      ...entrada(GENERICO, { destinosCompativeis: [destinoRapido()] }),
+      oferta: {
+        ...entrada(GENERICO).oferta,
+        capturadaEm: "2026-08-03T10:00:00.000Z"
+      }
+    },
+    opcoes(filas, { agoraMs: Date.parse("2026-08-03T10:05:00.000Z") })
+  );
+
+  assert.strictEqual(decisao.aceitarAgora, false);
+  assert.strictEqual(decisao.motivo, "esteira_saturada");
+  assert(decisao.idadeComercialMs < TTL_NORMAL_MS);
+}
+
+async function testarSaturacaoLongaExpiraNaReentrada() {
+  const decisao = await avaliarFluxoWorkspaceShadow(
+    {
+      ...entrada(GENERICO, { destinosCompativeis: [destinoRapido()] }),
+      oferta: {
+        ...entrada(GENERICO).oferta,
+        capturadaEm: "2026-08-03T10:00:00.000Z"
+      }
+    },
+    opcoes({}, { agoraMs: Date.parse("2026-08-03T10:31:00.000Z") })
+  );
+
+  assert.strictEqual(decisao.aceitarAgora, false);
+  assert.strictEqual(decisao.motivo, "flow_expirada_frescor_comercial");
+}
+
+async function testarTurboAguardandoMaisQueTtlExpira() {
+  const decisao = await avaliarFluxoWorkspaceShadow(
+    {
+      ...entrada(GENERICO, { cupomTurbo: true, tipoOperacional: "cupom_turbo", destinosCompativeis: [destinoRapido()] }),
+      oferta: {
+        ...entrada(GENERICO).oferta,
+        cupomTurbo: true,
+        tipoOperacional: "cupom_turbo",
+        capturadaEm: "2026-08-03T10:00:00.000Z"
+      }
+    },
+    opcoes({}, { agoraMs: Date.parse("2026-08-03T10:11:00.000Z") })
+  );
+
+  assert.strictEqual(decisao.tipoFluxo, "cupom_turbo");
+  assert.strictEqual(decisao.ttlMs, TTL_TURBO_MS);
+  assert.strictEqual(decisao.aceitarAgora, false);
+  assert.strictEqual(decisao.motivo, "flow_expirada_frescor_comercial");
+}
+
+async function testarCapacidadeVoltaAntesDoTtlEntra() {
+  const decisao = await avaliarFluxoWorkspaceShadow(
+    {
+      ...entrada(GENERICO, { destinosCompativeis: [destinoRapido()] }),
+      oferta: {
+        ...entrada(GENERICO).oferta,
+        capturadaEm: "2026-08-03T10:00:00.000Z"
+      }
+    },
+    opcoes({}, { agoraMs: Date.parse("2026-08-03T10:20:00.000Z") })
+  );
+
+  assert.strictEqual(decisao.aceitarAgora, true);
+  assert.strictEqual(decisao.motivo, "capacidade_disponivel");
+  assert(decisao.idadeComercialMs < TTL_NORMAL_MS);
+}
+
+async function testarReentradaVelhaNaoCriaFilaNemCredito() {
+  const ctx = prepararRunnerComEstado([
+    ofertaDistribuivel(601, GENERICO, {
+      motivo_status: "flow_aguardando_janela_fechada",
+      capturadaEm: "2026-08-03T05:00:00.000Z",
+      criadoEm: "2026-08-03T05:00:00.000Z"
+    })
+  ]);
+  let adicionouFila = false;
+
+  const resultado = await ctx.runner.distribuirOfertasEngine({
+    limite: 1,
+    deps: {
+      flowManager: { agoraMs: Date.parse("2026-08-03T10:00:00.000Z") },
+      avaliarFluxoWorkspaceShadow: async entradaFlow => ({
+        workspaceId: entradaFlow.workspaceId,
+        ofertaId: entradaFlow.ofertaId,
+        marketplace: entradaFlow.marketplace,
+        aceitarAgora: true,
+        motivo: "capacidade_disponivel",
+        nivelAlvo: 3,
+        bufferAtual: 0,
+        vagasDisponiveis: 3,
+        tipoFluxo: "oferta_comum",
+        ttlMs: TTL_NORMAL_MS,
+        aplicouMudancas: false
+      }),
+      avaliarFrescorComercialOferta,
+      adicionarOfertaNaFilaCliente: async () => {
+        adicionouFila = true;
+        return { ok: true, itemFila: { id: "fila_601", status: "pendente" } };
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.adicionadasFila, 0);
+  assert.strictEqual(adicionouFila, false);
+  assert(ctx.statusMarcados.some(item => item.id === 601 && item.status === "retida" && item.motivo === "flow_expirada_frescor_comercial"));
+  assert(!ctx.adicionados.includes(GENERICO), "oportunidade expirada pre-fila nao deve gerar item de fila");
+  assert.strictEqual(ctx.ofertas[0].capturadaEm, "2026-08-03T05:00:00.000Z");
+}
+
+async function testarFlowExpiradoPeloAvaliadorRetemTerminal() {
+  const ctx = prepararRunnerComEstado([
+    ofertaDistribuivel(602, GENERICO, {
+      motivo_status: "flow_aguardando_janela_fechada",
+      capturadaEm: "2026-08-03T05:00:00.000Z"
+    })
+  ]);
+
+  const resultado = await ctx.runner.distribuirOfertasEngine({
+    limite: 1,
+    deps: {
+      avaliarFluxoWorkspaceShadow: async entradaFlow => ({
+        workspaceId: entradaFlow.workspaceId,
+        ofertaId: entradaFlow.ofertaId,
+        marketplace: entradaFlow.marketplace,
+        aceitarAgora: false,
+        motivo: "flow_expirada_frescor_comercial",
+        tipoFluxo: "oferta_comum",
+        ttlMs: TTL_NORMAL_MS,
+        expiraEmComercial: "2026-08-03T05:30:00.000Z",
+        idadeComercialMs: 5 * 60 * 60 * 1000,
+        aplicouMudancas: false
+      })
+    }
+  });
+
+  assert.strictEqual(resultado.retidas, 1);
+  assert(ctx.statusMarcados.some(item => item.id === 602 && item.status === "retida" && item.motivo === "flow_expirada_frescor_comercial"));
+  assert(!ctx.statusMarcados.some(item => item.id === 602 && String(item.motivo || "").startsWith("flow_aguardando_")));
+  assert(ctx.etapas.some(item => item.etapa === "distribuicao_final" && item.status === "retida" && item.motivo === "flow_expirada_frescor_comercial"));
+}
+
 async function testarAceiteGeraFilaUmaUnicaVez() {
   const ctx = prepararRunnerComEstado([
     ofertaDistribuivel(401, D1)
@@ -932,6 +1132,14 @@ async function testarAceiteGeraFilaUmaUnicaVez() {
   await testarMelhoriaComercialPosteriorPodeCriarNovoEvento();
   await testarWorkspaceGenericoCalculaCapacidadeSemIdD1();
   await testarWorkspaceGenericoJanelaEBufferReentram();
+  await testarFrescorComercialUsaCapturaAntesDaFila();
+  await testarJanelaReabreDepoisDoTtlExpiraAntesDaFila();
+  await testarSaturacaoCurtaContinuaReentrante();
+  await testarSaturacaoLongaExpiraNaReentrada();
+  await testarTurboAguardandoMaisQueTtlExpira();
+  await testarCapacidadeVoltaAntesDoTtlEntra();
+  await testarReentradaVelhaNaoCriaFilaNemCredito();
+  await testarFlowExpiradoPeloAvaliadorRetemTerminal();
   await testarAceiteGeraFilaUmaUnicaVez();
   console.log("optimus-flow-v1-shadow.test.js OK");
 })().catch(erro => {
