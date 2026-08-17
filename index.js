@@ -7530,6 +7530,272 @@ function decorarItemFilaParaResposta(item = {}) {
   };
 }
 
+const FILA_STATUS_AGUARDANDO_VISUAL = new Set([
+  "pendente",
+  "aguardando",
+  "processando",
+  "rascunho",
+  "fila"
+]);
+const FILA_STATUS_ENVIADO_VISUAL = new Set(["enviado", "enviada", "sucesso", "historico"]);
+const FILA_STATUS_ERRO_VISUAL = new Set([
+  "erro",
+  "falha",
+  "erro_final",
+  "erro_permanente",
+  "falha_final",
+  "expirada_operacional",
+  "expirado_operacional"
+]);
+const FILA_MOTIVOS_AGUARDANDO_VISUAL = [
+  "intervalo",
+  "fora_horario",
+  "fora_da_janela",
+  "limite_diario",
+  "proxima_tentativa",
+  "aguardando_destino"
+];
+const FILA_MOTIVOS_ERRO_VISUAL = [
+  "sessao",
+  "desconect",
+  "destino_indisponivel",
+  "imagem",
+  "sem_destino",
+  "destino_compativel",
+  "categoria",
+  "marketplace",
+  "repetida",
+  "duplicata",
+  "erro",
+  "falha"
+];
+
+function textoFiltroFila(valor = "") {
+  return String(valor || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function textoBuscaFila(valor = "") {
+  return textoFiltroFila(valor).replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function statusVisualFila(item = {}) {
+  const status = textoFiltroFila(item.status || item.estado || "");
+  const motivo = textoFiltroFila([
+    item.motivoRetencao,
+    item.motivo,
+    item.statusDetalhe,
+    item.erro
+  ].filter(Boolean).join(" "));
+
+  if (FILA_STATUS_ENVIADO_VISUAL.has(status)) return "enviada";
+  if (FILA_STATUS_ERRO_VISUAL.has(status)) return "erro";
+  if (status === "retida" || status === "retido") {
+    if (FILA_MOTIVOS_AGUARDANDO_VISUAL.some(itemMotivo => motivo.includes(itemMotivo))) return "aguardando";
+    if (FILA_MOTIVOS_ERRO_VISUAL.some(itemMotivo => motivo.includes(itemMotivo))) return "erro";
+    return "erro";
+  }
+  if (FILA_STATUS_AGUARDANDO_VISUAL.has(status)) return "aguardando";
+  return "aguardando";
+}
+
+function parseTimestampHistoricoFila(valor = "") {
+  if (!valor) return null;
+  if (typeof valor === "number" && Number.isFinite(valor)) return valor;
+  const texto = String(valor || "").trim();
+  const brasileiro = texto.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (brasileiro) {
+    const ms = Date.UTC(
+      Number(brasileiro[3]),
+      Number(brasileiro[2]) - 1,
+      Number(brasileiro[1]),
+      Number(brasileiro[4]) + 3,
+      Number(brasileiro[5]),
+      Number(brasileiro[6] || 0)
+    );
+    return Number.isFinite(ms) ? ms : null;
+  }
+  const ms = new Date(texto).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function timestampReferenciaHistoricoFila(item = {}) {
+  for (const campo of [
+    "enviadoEm",
+    "dataEnvio",
+    "erroEm",
+    "retidaEm",
+    "finalizadoEm",
+    "atualizadoEm",
+    "updatedAt",
+    "processandoEm",
+    "dataEntradaFila",
+    "criadoEm",
+    "createdAt"
+  ]) {
+    if (!item?.[campo]) continue;
+    const ms = parseTimestampHistoricoFila(item[campo]);
+    if (Number.isFinite(ms)) return ms;
+  }
+  return null;
+}
+
+function dataBrFila(ms) {
+  if (!Number.isFinite(ms)) return "";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date(ms));
+}
+
+function itemDentroPeriodoFila(item = {}, periodo = "") {
+  const filtro = textoFiltroFila(periodo);
+  if (!filtro) return true;
+  const ts = timestampReferenciaHistoricoFila(item);
+  if (!Number.isFinite(ts)) return false;
+  const agora = Date.now();
+  if (filtro === "hoje") return dataBrFila(ts) === dataBrFila(agora);
+  if (filtro === "7d" || filtro === "7dias" || filtro === "sete_dias") {
+    return agora - ts <= 7 * 24 * 60 * 60 * 1000;
+  }
+  return true;
+}
+
+function camposDestinoFila(item = {}) {
+  const destinosEnviados = Array.isArray(item.destinosEnviados) ? item.destinosEnviados : [];
+  const destinos = Array.isArray(item.destinos) ? item.destinos : [];
+  return [
+    item.destino,
+    item.destinoNome,
+    item.grupoDestino,
+    item.canal,
+    item.destinoCanal,
+    item.tipoCanal,
+    item.tipoMidia,
+    item.destino?.nome,
+    item.destino?.canal,
+    item.destino?.tipo,
+    item.destino?.tipoMidia,
+    ...destinosEnviados.flatMap(destino => [
+      destino?.nome,
+      destino?.tipo,
+      destino?.canal,
+      destino?.channelName,
+      destino?.grupo,
+      destino?.chatId,
+      destino?.channelId
+    ]),
+    ...destinos.flatMap(destino => [
+      typeof destino === "string" ? destino : "",
+      destino?.nome,
+      destino?.tipo,
+      destino?.canal,
+      destino?.channelName,
+      destino?.grupo,
+      destino?.chatId,
+      destino?.channelId
+    ])
+  ];
+}
+
+function canalItemFila(item = {}, canalFiltro = "") {
+  const filtro = textoFiltroFila(canalFiltro);
+  if (!filtro) return true;
+  return camposDestinoFila(item).some(canal => textoFiltroFila(canal).includes(filtro));
+}
+
+function destinoItemFila(item = {}, destinoFiltro = "") {
+  const filtro = textoBuscaFila(destinoFiltro);
+  if (!filtro) return true;
+  return camposDestinoFila(item).some(destino => textoBuscaFila(destino).includes(filtro));
+}
+
+function itemCombinaBuscaFila(item = {}, q = "") {
+  const filtro = textoBuscaFila(q);
+  if (!filtro) return true;
+  const alvo = textoBuscaFila([
+    item.titulo,
+    item.nome,
+    item.produto,
+    item.categoria,
+    item.marketplace
+  ].filter(Boolean).join(" "));
+  return alvo.includes(filtro);
+}
+
+function normalizarMarketplaceHistoricoFila(valor = "") {
+  const key = textoBuscaFila(valor).replace(/\s+/g, "");
+  if (!key) return "";
+  if (["mercadolivre", "mercadolivrebrasil", "mercadolivreoficial", "meli", "ml", "mlb"].includes(key)) return "mercadolivre";
+  if (["amazon", "amazonbr", "amzn"].includes(key)) return "amazon";
+  if (key === "shopee") return "shopee";
+  if (["aliexpress", "aliexpressbr", "aliexpressbrasil", "ali"].includes(key)) return "aliexpress";
+  if (["awin", "awin1", "kabum", "awinkabum"].includes(key)) return "awin";
+  if (["magalu", "magazineluiza", "magazinevoce"].includes(key)) return "magalu";
+  return key;
+}
+
+function statusItemCombinaFiltroFila(item = {}, statusFiltro = "") {
+  const filtro = textoFiltroFila(statusFiltro);
+  if (!filtro || filtro === "todos") return true;
+  if (["aguardando", "pendentes"].includes(filtro)) return statusVisualFila(item) === "aguardando";
+  if (["enviadas", "enviados"].includes(filtro)) return statusVisualFila(item) === "enviada";
+  if (["erros", "falhas", "atencao", "atenção"].includes(filtro)) return statusVisualFila(item) === "erro";
+  return textoFiltroFila(item.status) === filtro;
+}
+
+function calcularMetricasHistoricoFila(itens = []) {
+  const processadas = itens.length;
+  const enviadas = itens.filter(item => statusVisualFila(item) === "enviada").length;
+  const erros = itens.filter(item => statusVisualFila(item) === "erro").length;
+  const taxaEnvio = processadas > 0 ? Math.round((enviadas / processadas) * 1000) / 10 : 0;
+  return {
+    processadas,
+    enviadas,
+    erros,
+    taxaEnvio,
+    formulaTaxaEnvio: "enviadas / processadas * 100; processadas conta ofertas/operacoes no recorte, sem multiplicar fanout"
+  };
+}
+
+function filtrarItensHistoricoFila(itensCliente = [], query = {}) {
+  const statusFiltro = textoFiltroFila(query.status);
+  const marketplaceFiltro = textoFiltroFila(query.marketplace);
+  const categoriaFiltro = textoFiltroFila(query.categoria);
+  const canalFiltro = textoFiltroFila(query.canal);
+  const destinoFiltro = textoFiltroFila(query.destino);
+  const periodoFiltro = textoFiltroFila(query.periodo);
+  const qFiltro = String(query.q || "").trim();
+  const contemFiltroFila = (valor, filtro) =>
+    !filtro || textoFiltroFila(valor).includes(filtro);
+
+  return itensCliente.filter(item => {
+    if (!itemDentroPeriodoFila(item, periodoFiltro)) return false;
+    if (!itemCombinaBuscaFila(item, qFiltro)) return false;
+    if (!statusItemCombinaFiltroFila(item, statusFiltro)) return false;
+    if (
+      marketplaceFiltro &&
+      normalizarMarketplaceHistoricoFila(item.marketplace) !== normalizarMarketplaceHistoricoFila(marketplaceFiltro)
+    ) {
+      return false;
+    }
+    if (
+      categoriaFiltro &&
+      !contemFiltroFila(item.categoria || item.categoriaProduto, categoriaFiltro)
+    ) {
+      return false;
+    }
+    if (!canalItemFila(item, canalFiltro)) return false;
+    if (!destinoItemFila(item, destinoFiltro)) return false;
+    return true;
+  });
+}
+
 app.get("/fila", auth, (req, res) => {
   const clienteId = getClienteId(req);
 
@@ -7544,43 +7810,15 @@ app.get("/fila", auth, (req, res) => {
     retidasTotal: itensCliente.filter((o) => o.status === "retida").length,
     errosTotal: itensCliente.filter((o) => o.status === "erro").length
   };
-
-  const textoFiltroFila = valor => String(valor || "").trim().toLowerCase();
   const statusFiltro = textoFiltroFila(req.query.status);
   const marketplaceFiltro = textoFiltroFila(req.query.marketplace);
   const categoriaFiltro = textoFiltroFila(req.query.categoria);
   const canalFiltro = textoFiltroFila(req.query.canal);
-  const contemFiltroFila = (valor, filtro) =>
-    !filtro || textoFiltroFila(valor).includes(filtro);
-
-  const itensFiltrados = itensCliente.filter(item => {
-    if (statusFiltro && textoFiltroFila(item.status) !== statusFiltro) return false;
-    if (marketplaceFiltro && textoFiltroFila(item.marketplace) !== marketplaceFiltro) return false;
-    if (
-      categoriaFiltro &&
-      !contemFiltroFila(item.categoria || item.categoriaProduto, categoriaFiltro)
-    ) {
-      return false;
-    }
-
-    if (canalFiltro) {
-      const canais = [
-        item.canal,
-        item.destinoCanal,
-        item.tipoCanal,
-        item.tipoMidia,
-        item.destino?.canal,
-        item.destino?.tipo,
-        item.destino?.tipoMidia,
-        item.destinoTipo,
-        item.destinoNome
-      ];
-
-      if (!canais.some(canal => contemFiltroFila(canal, canalFiltro))) return false;
-    }
-
-    return true;
-  });
+  const destinoFiltro = textoFiltroFila(req.query.destino);
+  const periodoFiltro = textoFiltroFila(req.query.periodo);
+  const qFiltro = String(req.query.q || "").trim();
+  const itensFiltrados = filtrarItensHistoricoFila(itensCliente, req.query);
+  const metricas = calcularMetricasHistoricoFila(itensFiltrados);
 
   const limit = Math.max(1, Math.min(500, Math.floor(Number(req.query.limit) || 100)));
   const pageQuery = Math.floor(Number(req.query.page) || 0);
@@ -7604,11 +7842,15 @@ app.get("/fila", auth, (req, res) => {
     totalPages,
     hasMore: page < totalPages,
     resumo,
+    metricas,
     filtros: {
       status: statusFiltro,
       marketplace: marketplaceFiltro,
       categoria: categoriaFiltro,
-      canal: canalFiltro
+      canal: canalFiltro,
+      destino: destinoFiltro,
+      periodo: periodoFiltro,
+      q: qFiltro
     },
     pendentes: resumo.pendentesTotal,
     enviados: resumo.enviadasTotal,
@@ -23459,17 +23701,30 @@ app.get("/fila/status", (req, res) => {
     String(o.clienteId || "admin") === String(clienteId)
   ));
 
+  const itensFiltrados = perf.etapaSync("filtrar_recorte", () => filtrarItensHistoricoFila(itensCliente, req.query));
+  const metricas = perf.etapaSync("metricas", () => calcularMetricasHistoricoFila(itensFiltrados));
+
   const payload = perf.etapaSync("payload", () => ({
     ok: true,
     clienteId,
-    total: itensCliente.length,
-    pendentes: itensCliente.filter(o => o.status === "pendente").length,
-    enviados: itensCliente.filter(o => o.status === "enviado").length,
-    retidas: itensCliente.filter(o => o.status === "retida").length,
-    erros: itensCliente.filter(o => o.status === "erro").length
+    total: itensFiltrados.length,
+    pendentes: itensFiltrados.filter(o => statusVisualFila(o) === "aguardando").length,
+    enviados: metricas.enviadas,
+    retidas: itensFiltrados.filter(o => String(o.status || "").toLowerCase() === "retida").length,
+    erros: metricas.erros,
+    metricas,
+    filtros: {
+      status: textoFiltroFila(req.query.status),
+      marketplace: textoFiltroFila(req.query.marketplace),
+      categoria: textoFiltroFila(req.query.categoria),
+      canal: textoFiltroFila(req.query.canal),
+      destino: textoFiltroFila(req.query.destino),
+      periodo: textoFiltroFila(req.query.periodo),
+      q: String(req.query.q || "").trim()
+    }
   }));
 
-  perf.fim({ clienteId, statusCode: 200, total: itensCliente.length });
+  perf.fim({ clienteId, statusCode: 200, total: itensFiltrados.length });
   return res.json(payload);
 });
 
