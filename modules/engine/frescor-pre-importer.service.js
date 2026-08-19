@@ -4,6 +4,9 @@ const {
 
 const MOTIVO_FRESCOR_PRE_IMPORTER = "flow_expirada_frescor_comercial_pre_importer";
 const STATUS_FINAL_FRESCOR_PRE_IMPORTER = "expirada_operacional";
+const AGUA_NOVA_MINUTOS_PRE_IMPORTER = 5;
+const FRESCA_EM_RISCO_MINUTOS_PRE_IMPORTER = 20;
+const TTL_COMERCIAL_PADRAO_MINUTOS_PRE_IMPORTER = 30;
 
 function numeroSeguro(valor = 0) {
   const numero = Number(valor || 0);
@@ -41,13 +44,126 @@ function jobManualV2(job = {}) {
 
 function calcularCotasFrescorPreImporter(limite = 20) {
   const total = Math.max(1, Math.min(100, Math.floor(Number(limite || 20))));
+  const aguaNova = Math.max(1, Math.ceil(total * 0.7));
+  const frescaEmRisco = total >= 5 ? Math.max(1, Math.floor(total * 0.2)) : 0;
+  const frescaCirculavel = Math.max(0, total - aguaNova - frescaEmRisco);
   const limpeza = total >= 5 ? Math.max(1, Math.floor(total * 0.2)) : 0;
   return {
     limite: total,
-    frescos: Math.max(1, total - limpeza),
+    aguaNova,
+    frescaEmRisco,
+    frescaCirculavel,
+    frescos: total,
     limpeza,
+    totalSelecao: total + limpeza,
+    aguaNovaMinutos: AGUA_NOVA_MINUTOS_PRE_IMPORTER,
+    frescaEmRiscoMinutos: FRESCA_EM_RISCO_MINUTOS_PRE_IMPORTER,
+    ttlComercialPadraoMinutos: TTL_COMERCIAL_PADRAO_MINUTOS_PRE_IMPORTER,
     proporcaoLimpeza: limpeza > 0 ? limpeza / total : 0
   };
+}
+
+function origemComercialPreImporterMs(job = {}) {
+  const metadata = objeto(job.metadata);
+  const eventoMetadata = objeto(job.evento_metadata || metadata.metadataEvento);
+  const valor = job.evento_capturado_em ||
+    job.capturadaEm ||
+    job.capturadoEm ||
+    job.capturada_em ||
+    job.capturado_em ||
+    metadata.capturadaEm ||
+    metadata.capturadoEm ||
+    metadata.capturada_em ||
+    metadata.capturado_em ||
+    eventoMetadata.capturadaEm ||
+    eventoMetadata.capturadoEm ||
+    eventoMetadata.capturada_em ||
+    eventoMetadata.capturado_em ||
+    job.criado_em ||
+    job.evento_criado_em ||
+    "";
+  const ms = Date.parse(valor);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function classificarLaneVazaoPreImporter(job = {}, opcoes = {}) {
+  if (jobManualV2(job)) return "manual_v2";
+  const agoraMs = Number.isFinite(Number(opcoes.agoraMs)) ? Number(opcoes.agoraMs) : Date.now();
+  const origemMs = origemComercialPreImporterMs(job);
+  if (!origemMs) return "fresca_circulavel";
+  const idadeMinutos = Math.max(0, (agoraMs - origemMs) / 60000);
+  if (idadeMinutos >= TTL_COMERCIAL_PADRAO_MINUTOS_PRE_IMPORTER) return "expirada";
+  if (idadeMinutos <= AGUA_NOVA_MINUTOS_PRE_IMPORTER) return "agua_nova";
+  if (idadeMinutos >= FRESCA_EM_RISCO_MINUTOS_PRE_IMPORTER) return "fresca_em_risco";
+  return "fresca_circulavel";
+}
+
+function compararPrioridade(a = {}, b = {}) {
+  return numeroSeguro(b.prioridade) - numeroSeguro(a.prioridade);
+}
+
+function compararOrigemDesc(a = {}, b = {}) {
+  return origemComercialPreImporterMs(b) - origemComercialPreImporterMs(a) || numeroSeguro(a.id) - numeroSeguro(b.id);
+}
+
+function compararOrigemAsc(a = {}, b = {}) {
+  return origemComercialPreImporterMs(a) - origemComercialPreImporterMs(b) || numeroSeguro(a.id) - numeroSeguro(b.id);
+}
+
+function selecionarComFairnessWorkspace(jobs = [], limite = 1, comparador = compararOrigemDesc) {
+  const total = Math.max(0, Math.floor(Number(limite || 0)));
+  if (!total) return [];
+  const porWorkspace = new Map();
+  for (const job of Array.isArray(jobs) ? jobs : []) {
+    const workspace = texto(job.cliente_id || job.clienteId || "workspace_desconhecido") || "workspace_desconhecido";
+    if (!porWorkspace.has(workspace)) porWorkspace.set(workspace, []);
+    porWorkspace.get(workspace).push(job);
+  }
+
+  for (const lista of porWorkspace.values()) {
+    lista.sort((a, b) => compararPrioridade(a, b) || comparador(a, b));
+  }
+
+  const workspaces = [...porWorkspace.keys()].sort();
+  const selecionados = [];
+  let rank = 0;
+  while (selecionados.length < total) {
+    let adicionou = false;
+    for (const workspace of workspaces) {
+      const item = porWorkspace.get(workspace)?.[rank];
+      if (!item) continue;
+      selecionados.push(item);
+      adicionou = true;
+      if (selecionados.length >= total) break;
+    }
+    if (!adicionou) break;
+    rank += 1;
+  }
+  return selecionados;
+}
+
+function selecionarJobsVazaoPreImporterMemoria(jobs = [], limite = 20, opcoes = {}) {
+  const cotas = calcularCotasFrescorPreImporter(limite);
+  const lanes = {
+    agua_nova: [],
+    fresca_em_risco: [],
+    fresca_circulavel: [],
+    expirada: [],
+    manual_v2: []
+  };
+
+  for (const job of Array.isArray(jobs) ? jobs : []) {
+    const lane = classificarLaneVazaoPreImporter(job, opcoes);
+    if (!lanes[lane]) lanes[lane] = [];
+    lanes[lane].push(job);
+  }
+
+  return [
+    ...selecionarComFairnessWorkspace(lanes.agua_nova, cotas.aguaNova, compararOrigemDesc),
+    ...selecionarComFairnessWorkspace(lanes.fresca_em_risco, cotas.frescaEmRisco, compararOrigemAsc),
+    ...selecionarComFairnessWorkspace([...lanes.fresca_circulavel, ...lanes.manual_v2], cotas.frescaCirculavel, compararOrigemDesc),
+    ...selecionarComFairnessWorkspace(lanes.expirada, cotas.limpeza, compararOrigemAsc)
+  ];
 }
 
 function metadataComercial(job = {}) {
@@ -216,7 +332,12 @@ function resumirSelecaoFrescorPreImporter(jobs = [], opcoes = {}) {
 module.exports = {
   MOTIVO_FRESCOR_PRE_IMPORTER,
   STATUS_FINAL_FRESCOR_PRE_IMPORTER,
+  AGUA_NOVA_MINUTOS_PRE_IMPORTER,
+  FRESCA_EM_RISCO_MINUTOS_PRE_IMPORTER,
+  TTL_COMERCIAL_PADRAO_MINUTOS_PRE_IMPORTER,
   calcularCotasFrescorPreImporter,
+  classificarLaneVazaoPreImporter,
+  selecionarJobsVazaoPreImporterMemoria,
   avaliarFrescorPreImporter,
   expirarJobPreImporterSeNecessario,
   resumirSelecaoFrescorPreImporter,

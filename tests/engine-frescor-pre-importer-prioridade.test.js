@@ -3,6 +3,8 @@ const assert = require("assert");
 const {
   calcularCotasFrescorPreImporter,
   avaliarFrescorPreImporter,
+  classificarLaneVazaoPreImporter,
+  selecionarJobsVazaoPreImporterMemoria,
   expirarJobPreImporterSeNecessario,
   MOTIVO_FRESCOR_PRE_IMPORTER,
   STATUS_FINAL_FRESCOR_PRE_IMPORTER
@@ -30,43 +32,72 @@ function job(id, minutosAtras, extras = {}) {
 }
 
 function ordenarComoPreImporter(jobs, limite) {
-  const cotas = calcularCotasFrescorPreImporter(limite);
-  const avaliados = jobs.map(item => ({
-    job: item,
-    frescor: avaliarFrescorPreImporter(item, { agoraMs: AGORA })
-  }));
-
-  const frescos = avaliados
-    .filter(item => !item.frescor.expirada)
-    .sort((a, b) =>
-      Number(b.job.prioridade || 0) - Number(a.job.prioridade || 0) ||
-      Date.parse(a.job.evento_capturado_em || a.job.criado_em) - Date.parse(b.job.evento_capturado_em || b.job.criado_em) ||
-      a.job.id - b.job.id
-    )
-    .slice(0, cotas.frescos);
-
-  const limpeza = avaliados
-    .filter(item => item.frescor.expirada)
-    .sort((a, b) =>
-      Date.parse(a.job.evento_capturado_em || a.job.criado_em) - Date.parse(b.job.evento_capturado_em || b.job.criado_em) ||
-      a.job.id - b.job.id
-    )
-    .slice(0, cotas.limpeza);
-
-  return [...frescos, ...limpeza].map(item => item.job);
+  return selecionarJobsVazaoPreImporterMemoria(jobs, limite, { agoraMs: AGORA });
 }
 
 async function testarBacklogNaoMonopolizaAguaNova() {
-  const antigos = Array.from({ length: 300 }, (_, indice) => job(indice + 1, 120 + indice));
-  const novos = Array.from({ length: 20 }, (_, indice) => job(1000 + indice, 5 + indice, {
+  const antigosAindaValidos = Array.from({ length: 100 }, (_, indice) => job(indice + 1, 25 + (indice % 5)));
+  const expirados = Array.from({ length: 300 }, (_, indice) => job(500 + indice, 120 + indice));
+  const novos = Array.from({ length: 20 }, (_, indice) => job(1000 + indice, 1, {
     prioridade: indice === 0 ? 10 : 0
   }));
-  const selecionados = ordenarComoPreImporter([...antigos, ...novos], 30);
+  const selecionados = ordenarComoPreImporter([...antigosAindaValidos, ...expirados, ...novos], 30);
 
-  assert.strictEqual(selecionados.length, 26);
+  assert.strictEqual(selecionados.length, 32);
   assert.strictEqual(selecionados.filter(item => item.id >= 1000).length, 20, "todos os novos devem entrar no batch antes do backlog morto");
-  assert.strictEqual(selecionados.filter(item => item.id < 1000).length, 6, "20% do batch fica para limpeza de backlog");
+  assert.strictEqual(selecionados.filter(item => item.id < 500).length, 6, "fresca_em_risco deve ter cota propria sem monopolizar");
+  assert.strictEqual(selecionados.filter(item => item.id >= 500 && item.id < 1000).length, 6, "limpeza deve ser extra e barata");
   assert.strictEqual(selecionados[0].id, 1000, "prioridade/turbo deve vencer dentro dos frescos");
+}
+
+function testarLanesDeIdade() {
+  assert.strictEqual(classificarLaneVazaoPreImporter(job(901, 1), { agoraMs: AGORA }), "agua_nova");
+  assert.strictEqual(classificarLaneVazaoPreImporter(job(902, 12), { agoraMs: AGORA }), "fresca_circulavel");
+  assert.strictEqual(classificarLaneVazaoPreImporter(job(903, 25), { agoraMs: AGORA }), "fresca_em_risco");
+  assert.strictEqual(classificarLaneVazaoPreImporter(job(904, 31), { agoraMs: AGORA }), "expirada");
+}
+
+function testarFairnessMultiworkspace() {
+  const volumoso = Array.from({ length: 50 }, (_, indice) => job(2000 + indice, 1, { cliente_id: "workspace_a" }));
+  const pequenos = ["workspace_b", "workspace_c", "workspace_d", "workspace_e"]
+    .flatMap((clienteId, indiceCliente) =>
+      Array.from({ length: 2 }, (_, indice) => job(3000 + indiceCliente * 10 + indice, 1, { cliente_id: clienteId }))
+    );
+  const selecionados = ordenarComoPreImporter([...volumoso, ...pequenos], 30);
+  const porWorkspace = selecionados.reduce((acc, item) => {
+    acc[item.cliente_id] = (acc[item.cliente_id] || 0) + 1;
+    return acc;
+  }, {});
+
+  for (const clienteId of ["workspace_b", "workspace_c", "workspace_d", "workspace_e"]) {
+    assert(porWorkspace[clienteId] > 0, `${clienteId} nao pode sofrer starvation`);
+  }
+  assert(porWorkspace.workspace_a > 0, "workspace volumoso continua escoando sem monopolizar");
+}
+
+function testarFanoutMultiworkspaceVariosMarketplaces() {
+  const workspaces = ["workspace_a", "workspace_b", "workspace_c", "workspace_d", "workspace_e"];
+  const marketplaces = ["mercadolivre", "amazon", "shopee", "aliexpress"];
+  const jobs = [];
+  let id = 4000;
+  for (const marketplace of marketplaces) {
+    for (const cliente_id of workspaces) {
+      jobs.push(job(id++, 1, { cliente_id, marketplace }));
+    }
+  }
+
+  const selecionados = ordenarComoPreImporter(jobs, 30);
+  assert.strictEqual(selecionados.filter(item => item.id >= 4000).length, 20, "fanout recente multiworkspace deve entrar inteiro na rodada");
+  assert.strictEqual(new Set(selecionados.map(item => item.cliente_id)).size, 5, "rodada deve preservar os 5 workspaces");
+  assert.strictEqual(new Set(selecionados.map(item => item.marketplace)).size, 4, "rodada deve preservar varios marketplaces");
+}
+
+function testarCotasNaoCobramLimpezaDaLanePrincipal() {
+  const cotas = calcularCotasFrescorPreImporter(30);
+  assert.strictEqual(cotas.frescos, 30);
+  assert.strictEqual(cotas.aguaNova, 21);
+  assert.strictEqual(cotas.limpeza, 6);
+  assert.strictEqual(cotas.totalSelecao, 36);
 }
 
 async function testarExpiracaoAntesDoProcessorValidatorImporter() {
@@ -153,18 +184,41 @@ function testarSqlsPriorizamFrescosComCota() {
   ]) {
     const fonte = fs.readFileSync(arquivo, "utf8");
     assert(fonte.includes("bucket_frescor_pre_importer"), `${arquivo} deve separar fresco/backlog`);
+    assert(fonte.includes("lane_vazao_pre_importer"), `${arquivo} deve possuir lane agua_nova/fresca/expirada`);
+    assert(fonte.includes("ROW_NUMBER() OVER"), `${arquivo} deve usar ranking por workspace`);
+    assert(fonte.includes("PARTITION BY COALESCE(NULLIF(TRIM(cliente_id), '')"), `${arquivo} deve aplicar fairness por workspace`);
     assert(fonte.includes("UNION ALL"), `${arquivo} deve unir cota fresca e cota de limpeza`);
     assert(fonte.includes("origem_comercial_pre_importer"), `${arquivo} deve ordenar por origem comercial`);
   }
 }
 
+function testarVazaoPreFilaNaoAlteraCadenciaDeEnvio() {
+  const fs = require("fs");
+  const path = require("path");
+  const orchestratorPath = path.join(__dirname, "..", "modules", "engine", "orchestrator.runner.js");
+  const fonte = fs.readFileSync(orchestratorPath, "utf8");
+  const dimensionadorInicio = fonte.indexOf("function dimensionarLimitePreImporter");
+  const dimensionadorFim = fonte.indexOf("let proximoIdRodadaPerf");
+  const corpoDimensionador = fonte.slice(dimensionadorInicio, dimensionadorFim);
+
+  assert(corpoDimensionador.includes("totalClientes"), "dimensionamento pre-fila pode considerar fanout/workspaces");
+  assert(!/marketplace|categoria|destino|intervalo/i.test(corpoDimensionador), "dimensionamento pre-fila nao pode alterar cadencia por baixa diversidade");
+  assert(fonte.includes("const intervaloMs = Number(opcoes.intervaloMs || 120000);"), "cadencia do orquestrador deve seguir configuracao explicita");
+  assert(!fonte.includes("intervaloFinal = dimensionarLimitePreImporter"), "dimensionamento de batch nunca deve recalcular intervalo de envio");
+}
+
 (async () => {
   await testarBacklogNaoMonopolizaAguaNova();
+  testarLanesDeIdade();
+  testarFairnessMultiworkspace();
+  testarFanoutMultiworkspaceVariosMarketplaces();
+  testarCotasNaoCobramLimpezaDaLanePrincipal();
   await testarExpiracaoAntesDoProcessorValidatorImporter();
   testarTtlsComumTurboDentroEFora();
   await testarVelhoDiagnosticadoEProntoNaoImporta();
   testarManualV2Intacto();
   testarSqlsPriorizamFrescosComCota();
+  testarVazaoPreFilaNaoAlteraCadenciaDeEnvio();
   console.log("engine-frescor-pre-importer-prioridade.test.js OK");
 })().catch((erro) => {
   console.error(erro);

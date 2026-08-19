@@ -7,12 +7,26 @@ const {
   executarAutoCleanShadowSeguro
 } = require("./auto-clean/auto-clean.service");
 
+function limiteOperacionalSeguro(nomeEnv, padrao, maximo) {
+  const configurado = Number(process.env[nomeEnv] || padrao);
+  if (!Number.isFinite(configurado) || configurado <= 0) return padrao;
+  return Math.max(1, Math.min(Math.floor(configurado), maximo));
+}
+
 const LIMITES_PADRAO = {
-  processar: 30,
-  validar: 30,
-  importar: 10,
+  processar: limiteOperacionalSeguro("ENGINE_PRE_IMPORTER_BATCH_PROCESSAR", 40, 100),
+  validar: limiteOperacionalSeguro("ENGINE_PRE_IMPORTER_BATCH_VALIDAR", 40, 100),
+  importar: limiteOperacionalSeguro("ENGINE_PRE_IMPORTER_BATCH_IMPORTAR", 20, 60),
   distribuir: 10
 };
+
+function dimensionarLimitePreImporter(limiteBase = 20, totalClientes = 0, maximo = 100) {
+  const base = Number(limiteBase || 20);
+  const clientes = Math.max(1, Math.floor(Number(totalClientes || 1)));
+  const fator = clientes <= 1 ? 1 : Math.min(2.5, 1 + (Math.log2(clientes) / 4));
+  const dimensionado = Math.ceil((base * fator) / 5) * 5;
+  return Math.max(1, Math.min(dimensionado, maximo));
+}
 
 let proximoIdRodadaPerf = 1;
 const PERF_BACKGROUND_MIN_MS = Number(process.env.PERF_BACKGROUND_MIN_MS || 200);
@@ -278,8 +292,14 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       itensProcessados: { clientes: Array.isArray(clientesValidosProcessar) ? clientesValidosProcessar.length : 0 }
     });
 
+    const limiteProcessar = dimensionarLimitePreImporter(
+      limitesRodada.processar,
+      Array.isArray(clientesValidosProcessar) ? clientesValidosProcessar.length : 0,
+      100
+    );
+
     resumo.etapas.processar = await executarEtapaRastreada("processar", processarJobsPendentesEngine, {
-      limite: limitesRodada.processar,
+      limite: limiteProcessar,
       clientesValidos: clientesValidosProcessar
     }, { rodadaId });
 
@@ -297,8 +317,12 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       }
     });
 
+    const totalClientesValidar = Array.isArray(clientesValidosValidar) ? clientesValidosValidar.length : 0;
+    const limiteValidar = dimensionarLimitePreImporter(limitesRodada.validar, totalClientesValidar, 100);
+    const limiteImportarPadrao = dimensionarLimitePreImporter(limitesRodada.importar, totalClientesValidar, 60);
+
     resumo.etapas.validar = await executarEtapaRastreada("validar", validarJobsDiagnosticadosEngine, {
-      limite: limitesRodada.validar,
+      limite: limiteValidar,
       clientesValidos: clientesValidosValidar,
       integracoesPorCliente,
       marketplacesAtivosPorCliente
@@ -314,44 +338,44 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     });
 
     resumo.etapas.importar = await executarEtapaRastreada("importar_ml", importarJobsProntosEngine, {
-      limite: limitesRodada.importar,
+      limite: limitesRodada.importarMercadoLivre || limitesRodada.importarMl || limiteImportarPadrao,
       marketplace: "mercadolivre",
       deps: depsImportador
     }, { rodadaId });
 
     resumo.etapas.importarAmazon = await executarEtapaRastreada("importar_amazon", importarJobsProntosEngine, {
-      limite: limitesRodada.importarAmazon || limitesRodada.importar,
+      limite: limitesRodada.importarAmazon || limiteImportarPadrao,
       marketplace: "amazon",
       deps: depsImportador
     }, { rodadaId });
 
 
     resumo.etapas.importarShopee = await executarEtapaRastreada("importar_shopee", importarJobsProntosEngine, {
-      limite: limitesRodada.importarShopee || limitesRodada.importar,
+      limite: limitesRodada.importarShopee || limiteImportarPadrao,
       marketplace: "shopee",
       deps: depsImportador
     }, { rodadaId });
 
     resumo.etapas.importarAliExpress = await executarEtapaRastreada("importar_aliexpress", importarJobsProntosEngine, {
-      limite: limitesRodada.importarAliExpress || limitesRodada.importar,
+      limite: limitesRodada.importarAliExpress || limiteImportarPadrao,
       marketplace: "aliexpress",
       deps: depsImportador
     }, { rodadaId });
 
     resumo.etapas.importarAwin = await executarEtapaRastreada("importar_awin", importarJobsProntosEngine, {
-      limite: limitesRodada.importarAwin || limitesRodada.importar,
+      limite: limitesRodada.importarAwin || limiteImportarPadrao,
       marketplace: "awin",
       deps: depsImportador
     }, { rodadaId });
 
     resumo.etapas.importarKabum = await executarEtapaRastreada("importar_kabum", importarJobsProntosEngine, {
-      limite: limitesRodada.importarKabum || limitesRodada.importar,
+      limite: limitesRodada.importarKabum || limiteImportarPadrao,
       marketplace: "kabum",
       deps: depsImportador
     }, { rodadaId });
 
     resumo.etapas.importarMagalu = await executarEtapaRastreada("importar_magalu", importarJobsProntosEngine, {
-      limite: limitesRodada.importarMagalu || limitesRodada.importar,
+      limite: limitesRodada.importarMagalu || limiteImportarPadrao,
       marketplace: "magalu",
       deps: depsImportador
     }, { rodadaId });
@@ -491,5 +515,6 @@ function iniciarOrquestradorEngine(opcoes = {}) {
 
 module.exports = {
   iniciarOrquestradorEngine,
-  executarRodadaEngineOrquestrador
+  executarRodadaEngineOrquestrador,
+  dimensionarLimitePreImporter
 };

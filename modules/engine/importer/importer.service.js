@@ -381,11 +381,15 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
     filtros.push(`${marketplaceExprJob} = $${params.length}`);
   }
 
-  params.push(cotas.frescos);
-  const paramFrescos = params.length;
+  params.push(cotas.aguaNova);
+  const paramAguaNova = params.length;
+  params.push(cotas.frescaEmRisco);
+  const paramFrescaEmRisco = params.length;
+  params.push(cotas.frescaCirculavel);
+  const paramFrescaCirculavel = params.length;
   params.push(cotas.limpeza);
   const paramLimpeza = params.length;
-  params.push(cotas.limite);
+  params.push(cotas.totalSelecao);
   const paramLimite = params.length;
 
   const resultado = await queryEngine(
@@ -402,35 +406,93 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
               CASE
                 WHEN COALESCE(e.capturado_em, j.criado_em) < NOW() - INTERVAL '30 minutes' THEN 1
                 ELSE 0
-              END AS bucket_frescor_pre_importer
+              END AS bucket_frescor_pre_importer,
+              CASE
+                WHEN COALESCE(e.capturado_em, j.criado_em) < NOW() - INTERVAL '30 minutes' THEN 'expirada'
+                WHEN COALESCE(e.capturado_em, j.criado_em) >= NOW() - INTERVAL '5 minutes' THEN 'agua_nova'
+                WHEN COALESCE(e.capturado_em, j.criado_em) < NOW() - INTERVAL '20 minutes' THEN 'fresca_em_risco'
+                ELSE 'fresca_circulavel'
+              END AS lane_vazao_pre_importer
          FROM engine_jobs_cliente j
          LEFT JOIN engine_eventos_brutos e ON e.id = j.evento_id
         WHERE ${filtros.join(" AND ")}
      ),
-     frescos AS (
-       SELECT *, 0 AS bucket_selecao_pre_importer
+     agua_nova_ranked AS (
+       SELECT *,
+              ROW_NUMBER() OVER (
+                PARTITION BY COALESCE(NULLIF(TRIM(cliente_id), ''), 'workspace_desconhecido')
+                ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
+              ) AS workspace_rank_pre_importer
          FROM base
-        WHERE bucket_frescor_pre_importer = 0
-        ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
-        LIMIT $${paramFrescos}
+        WHERE lane_vazao_pre_importer = 'agua_nova'
+     ),
+     agua_nova AS (
+       SELECT *, 0 AS bucket_selecao_pre_importer
+         FROM agua_nova_ranked
+        ORDER BY workspace_rank_pre_importer ASC, COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
+        LIMIT $${paramAguaNova}
+     ),
+     fresca_em_risco_ranked AS (
+       SELECT *,
+              ROW_NUMBER() OVER (
+                PARTITION BY COALESCE(NULLIF(TRIM(cliente_id), ''), 'workspace_desconhecido')
+                ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
+              ) AS workspace_rank_pre_importer
+         FROM base
+        WHERE lane_vazao_pre_importer = 'fresca_em_risco'
+     ),
+     fresca_em_risco AS (
+       SELECT *, 1 AS bucket_selecao_pre_importer
+         FROM fresca_em_risco_ranked
+        ORDER BY workspace_rank_pre_importer ASC, COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
+        LIMIT $${paramFrescaEmRisco}
+     ),
+     fresca_circulavel_ranked AS (
+       SELECT *,
+              ROW_NUMBER() OVER (
+                PARTITION BY COALESCE(NULLIF(TRIM(cliente_id), ''), 'workspace_desconhecido')
+                ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
+              ) AS workspace_rank_pre_importer
+         FROM base
+        WHERE lane_vazao_pre_importer = 'fresca_circulavel'
+     ),
+     fresca_circulavel AS (
+       SELECT *, 2 AS bucket_selecao_pre_importer
+         FROM fresca_circulavel_ranked
+        ORDER BY workspace_rank_pre_importer ASC, COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
+        LIMIT $${paramFrescaCirculavel}
+     ),
+     limpeza_ranked AS (
+       SELECT *,
+              ROW_NUMBER() OVER (
+                PARTITION BY COALESCE(NULLIF(TRIM(cliente_id), ''), 'workspace_desconhecido')
+                ORDER BY origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
+              ) AS workspace_rank_pre_importer
+         FROM base
+        WHERE lane_vazao_pre_importer = 'expirada'
      ),
      limpeza AS (
-       SELECT *, 1 AS bucket_selecao_pre_importer
-         FROM base
-        WHERE bucket_frescor_pre_importer = 1
-        ORDER BY origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
+       SELECT *, 3 AS bucket_selecao_pre_importer
+         FROM limpeza_ranked
+        ORDER BY workspace_rank_pre_importer ASC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
         LIMIT $${paramLimpeza}
      )
      SELECT *
        FROM (
-         SELECT * FROM frescos
+         SELECT * FROM agua_nova
+         UNION ALL
+         SELECT * FROM fresca_em_risco
+         UNION ALL
+         SELECT * FROM fresca_circulavel
          UNION ALL
          SELECT * FROM limpeza
        ) selecionados
       ORDER BY bucket_selecao_pre_importer ASC,
+               workspace_rank_pre_importer ASC,
                COALESCE(prioridade, 0) DESC,
-               origem_comercial_pre_importer ASC,
-               atualizado_em ASC NULLS FIRST,
+               CASE WHEN lane_vazao_pre_importer = 'fresca_em_risco' THEN origem_comercial_pre_importer END ASC NULLS LAST,
+               CASE WHEN lane_vazao_pre_importer <> 'fresca_em_risco' THEN origem_comercial_pre_importer END DESC NULLS LAST,
+               atualizado_em DESC NULLS LAST,
                id ASC
       LIMIT $${paramLimite}`,
     params
