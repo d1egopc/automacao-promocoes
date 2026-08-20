@@ -43,9 +43,10 @@ const { buscarOfertasDistribuiveis } = require("../modules/engine/distributor/di
   assert(/PARTITION BY LOWER\(COALESCE\(o\.marketplace, ''\)\), j\.cliente_id/i.test(consultaOfertas.sql), "workspace nao pode monopolizar o topo do Distributor");
   assert(/PARTITION BY LOWER\(COALESCE\(o\.marketplace, ''\)\)/i.test(consultaOfertas.sql), "marketplace nao pode monopolizar a selecao global");
   assert(/ORDER BY ordem_workspace_marketplace ASC/i.test(consultaOfertas.sql), "fairness por workspace deve preceder prioridade global bruta");
-  assert(/COALESCE\(o\.prioridade,\s*o\.score,\s*0\)\s+DESC/i.test(consultaOfertas.sql), "prioridade deve ser a decisao operacional final e score apenas fallback");
+  assert(/COALESCE\(e\.capturado_em,\s*o\.criada_em,\s*o\.atualizada_em,\s*NOW\(\)\)\s+DESC/i.test(consultaOfertas.sql), "agua nova deve preceder FIFO antigo na selecao");
+  assert(/COALESCE\(o\.prioridade,\s*o\.score,\s*0\)\s+DESC/i.test(consultaOfertas.sql), "prioridade deve ranquear ofertas dentro da faixa fresca e score permanece fallback");
   assert(!/GREATEST/i.test(consultaOfertas.sql), "score alto nao pode anular prioridade deliberadamente reduzida");
-  assert(/o\.atualizada_em\s+ASC\s+NULLS\s+FIRST/i.test(consultaOfertas.sql), "antiguidade deve permanecer como desempate");
+  assert(!/o\.atualizada_em\s+ASC\s+NULLS\s+FIRST/i.test(consultaOfertas.sql), "FIFO antigo nao deve superar agua nova");
   assert(/o\.id\s+ASC/i.test(consultaOfertas.sql), "id deve permanecer como desempate deterministico");
   assert(/o\.status IN \('importada', 'oferta_criada'\)/i.test(consultaOfertas.sql), "somente ofertas validas importadas entram na esteira");
   assert(!/score\s*[<>]=?\s*\d+/i.test(consultaOfertas.sql), "score nao pode filtrar ou bloquear oferta valida");

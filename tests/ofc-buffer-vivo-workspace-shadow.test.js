@@ -225,6 +225,50 @@ function testarBaixaDiversidadeNaoMudaCadencia() {
   assert.strictEqual(buffer.capacidadePorOferta.coberturaMinutos, 10);
 }
 
+function testarCasosReaisComSlotUtilPassamSemSobrecarga() {
+  const casos = [
+    { ofertaId: "180083", marketplace: "aliexpress", categoria: "hardware" },
+    { ofertaId: "180067", marketplace: "aliexpress", categoria: "hardware" },
+    { ofertaId: "180088", marketplace: "mercadolivre", categoria: "diversos" },
+    { ofertaId: "179909", marketplace: "mercadolivre", categoria: "diversos" },
+    { ofertaId: "179916", marketplace: "shopee", categoria: "diversos" },
+    { ofertaId: "179917", marketplace: "mercadolivre", categoria: "diversos" }
+  ];
+
+  for (const caso of casos) {
+    const buffer = calcular({
+      workspaceId: `workspace_amostra_${caso.ofertaId}`,
+      ofertaId: caso.ofertaId,
+      marketplace: caso.marketplace,
+      categoria: caso.categoria,
+      capacidadePorDestino: [
+        destino({ destinoId: `${caso.marketplace}_wa_${caso.ofertaId}`, tipo: "whatsapp", marketplace: caso.marketplace, categoria: caso.categoria, slots10Min: 2 }),
+        destino({ destinoId: `${caso.marketplace}_tg_${caso.ofertaId}`, tipo: "telegram", marketplace: caso.marketplace, categoria: caso.categoria, slots10Min: 2 }),
+        destino({ destinoId: `${caso.marketplace}_dc_${caso.ofertaId}`, tipo: "discord", marketplace: caso.marketplace, categoria: caso.categoria, slots10Min: 2 })
+      ],
+      filaItens: [
+        itemFila({ id: `exp_${caso.ofertaId}`, status: "expirada_operacional", marketplace: caso.marketplace, categoria: caso.categoria }),
+        itemFila({ id: `env_${caso.ofertaId}`, status: "enviado", marketplace: caso.marketplace, categoria: caso.categoria })
+      ],
+      flowAtual: {
+        aceitarAgora: false,
+        motivo: "esteira_saturada",
+        nivelAlvo: 6,
+        bufferAtual: 8,
+        vagasDisponiveis: 0
+      },
+      saudeAgregada: { capacidade: 20, pressaoEsteiraViva: 8 }
+    });
+
+    assert.strictEqual(buffer.capacidadePorOferta.ofertaId, caso.ofertaId);
+    assert.strictEqual(buffer.capacidadePorOferta.destinosAptos, 3);
+    assert.strictEqual(buffer.bufferAtualUtil, 0);
+    assert.strictEqual(buffer.deficitBuffer, 6);
+    assert.strictEqual(buffer.capacidadePorOferta.aceitarPeloBufferVivo, true);
+    assert(buffer.itensIgnorados.every(item => item.motivo === "status_fora_buffer_vivo"));
+  }
+}
+
 function testarLogsShadowPresentes() {
   const raiz = path.join(__dirname, "..");
   const flow = fs.readFileSync(path.join(raiz, "modules", "engine", "flow-manager", "flow-manager.service.js"), "utf8");
@@ -248,6 +292,7 @@ testarMarketplaceECategoriaIsolamPressao();
 testarExpiradoNaoContaComoBufferUtil();
 testarSimulacaoMultiworkspaceSemStarvation();
 testarBaixaDiversidadeNaoMudaCadencia();
+testarCasosReaisComSlotUtilPassamSemSobrecarga();
 testarLogsShadowPresentes();
 
 console.log("ofc-buffer-vivo-workspace-shadow.test.js OK");

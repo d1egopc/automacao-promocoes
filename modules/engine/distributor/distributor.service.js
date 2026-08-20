@@ -689,14 +689,14 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
              j.metadata AS job_metadata, e.metadata AS evento_metadata,
              ROW_NUMBER() OVER (
                PARTITION BY LOWER(COALESCE(o.marketplace, '')), j.cliente_id
-               ORDER BY COALESCE(o.prioridade, o.score, 0) DESC,
-                        o.atualizada_em ASC NULLS FIRST,
+               ORDER BY COALESCE(e.capturado_em, o.criada_em, o.atualizada_em, NOW()) DESC,
+                        COALESCE(o.prioridade, o.score, 0) DESC,
                         o.id ASC
              ) AS ordem_workspace_marketplace,
              ROW_NUMBER() OVER (
                PARTITION BY LOWER(COALESCE(o.marketplace, ''))
-               ORDER BY COALESCE(o.prioridade, o.score, 0) DESC,
-                        o.atualizada_em ASC NULLS FIRST,
+               ORDER BY COALESCE(e.capturado_em, o.criada_em, o.atualizada_em, NOW()) DESC,
+                        COALESCE(o.prioridade, o.score, 0) DESC,
                         o.id ASC
              ) AS ordem_marketplace
         FROM engine_ofertas o
@@ -714,8 +714,8 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
       FROM candidatos_distribuiveis
      ORDER BY ordem_workspace_marketplace ASC,
               ordem_marketplace ASC,
+              COALESCE(evento_capturado_em, criada_em, atualizada_em, NOW()) DESC,
               COALESCE(prioridade, score, 0) DESC,
-              atualizada_em ASC NULLS FIRST,
               id ASC
      LIMIT $${params.length}`,
     params

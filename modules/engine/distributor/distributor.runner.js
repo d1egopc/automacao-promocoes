@@ -48,6 +48,15 @@ function metadataObjeto(valor = {}) {
   return valor && typeof valor === "object" ? valor : {};
 }
 
+function texto(valor = "") {
+  return String(valor ?? "").trim();
+}
+
+function numeroNaoNegativo(valor = 0) {
+  const n = Number(valor);
+  return Number.isFinite(n) ? Math.max(0, n) : 0;
+}
+
 function tipoOperacionalOferta(oferta = {}) {
   const metadata = metadataObjeto(oferta.metadata);
   const jobMetadata = metadataObjeto(oferta.job_metadata);
@@ -127,6 +136,18 @@ function criarResumoDistributorVivo(capacidadeAlvo = 0) {
   };
 }
 
+function criarResumoBufferVivoFuncional() {
+  return {
+    avaliacoes: 0,
+    admitidas: 0,
+    recusadas: 0,
+    overridesFlow: 0,
+    bloqueiosBuffer: 0,
+    reservasLiberadas: 0,
+    orcamentos: {}
+  };
+}
+
 function registrarResultadoDistributorVivo(resumo = null, oferta = {}, resultado = {}) {
   if (!resumo?.distributorVivo) return;
   const vivo = resumo.distributorVivo;
@@ -166,6 +187,27 @@ function logDistributorVivo(resumo = {}) {
   } catch (_) {}
 }
 
+function logBufferVivoFuncional(tag = "", payload = {}) {
+  try {
+    console.log(tag, JSON.stringify({
+      workspaceId: payload.workspaceId || "",
+      ofertaId: payload.ofertaId || null,
+      marketplace: payload.marketplace || "",
+      categoria: payload.categoria || "",
+      tipoFluxo: payload.tipoFluxo || "",
+      flowAceitarAgora: payload.flowAceitarAgora === true,
+      bufferVivoAceitarAgora: payload.bufferVivoAceitarAgora === true,
+      aceitarAgora: payload.aceitarAgora === true,
+      motivo: payload.motivo || "",
+      deficitBuffer: payload.deficitBuffer ?? null,
+      orcamentoDisponivelAntes: payload.orcamentoDisponivelAntes ?? null,
+      orcamentoConsumido: payload.orcamentoConsumido ?? null,
+      orcamentoRestante: payload.orcamentoRestante ?? null,
+      aplicouMudancas: payload.aplicouMudancas === true
+    }));
+  } catch (_) {}
+}
+
 async function registrarFlowManagerShadow(oferta = {}, validacao = {}, contexto = {}) {
   try {
     const avaliarFlow = contexto?.deps?.avaliarFluxoWorkspaceShadow || avaliarFluxoWorkspaceShadow;
@@ -200,6 +242,223 @@ async function registrarFlowManagerShadow(oferta = {}, validacao = {}, contexto 
       fallbackAplicado: true
     };
   }
+}
+
+function bufferVivoOferta(decisao = {}) {
+  const buffer = metadataObjeto(decisao.bufferVivoShadow);
+  const capacidade = metadataObjeto(buffer.capacidadePorOferta);
+  return { buffer, capacidade };
+}
+
+function chaveOrcamentoBufferVivo(decisao = {}) {
+  const { buffer, capacidade } = bufferVivoOferta(decisao);
+  const partes = [
+    texto(buffer.workspaceId || decisao.workspaceId),
+    texto(capacidade.tipoFluxo || decisao.tipoFluxo || "oferta_comum"),
+    texto(capacidade.marketplace || decisao.marketplace || "sem_marketplace").toLowerCase(),
+    texto(capacidade.categoria || decisao.categoria || "sem_categoria").toLowerCase(),
+    texto(capacidade.tipoMidia || decisao.tipoMidia || "sem_midia").toLowerCase()
+  ];
+  return partes.join("|");
+}
+
+function motivoFlowPermiteBufferVivo(motivo = "") {
+  const normalizado = texto(motivo).toLowerCase();
+  if (!normalizado) return false;
+  return /esteira|capacidade|buffer|saturad/.test(normalizado) &&
+    !/credito|crédito|destino|janela|horario|horário|sessao|sessão|integracao|integração|expirada|frescor/.test(normalizado);
+}
+
+function aplicarAutoridadeBufferVivo(decisao = {}, resumo = null) {
+  const { buffer, capacidade } = bufferVivoOferta(decisao);
+  if (!buffer || !capacidade || Object.keys(buffer).length === 0 || Object.keys(capacidade).length === 0) {
+    return { decisao, mudou: false, motivo: "buffer_vivo_indisponivel" };
+  }
+  if (!resumo) return { decisao, mudou: false, motivo: "resumo_indisponivel" };
+
+  if (!resumo.bufferVivoFuncional) resumo.bufferVivoFuncional = criarResumoBufferVivoFuncional();
+  const resumoVivo = resumo.bufferVivoFuncional;
+  resumoVivo.avaliacoes += 1;
+
+  const chave = chaveOrcamentoBufferVivo(decisao);
+  const deficitBuffer = Math.floor(numeroNaoNegativo(buffer.deficitBuffer ?? capacidade.deficitBuffer));
+  if (!resumoVivo.orcamentos[chave]) {
+    resumoVivo.orcamentos[chave] = {
+      workspaceId: texto(buffer.workspaceId || decisao.workspaceId),
+      marketplace: texto(capacidade.marketplace || decisao.marketplace),
+      categoria: texto(capacidade.categoria || decisao.categoria),
+      tipoFluxo: texto(capacidade.tipoFluxo || decisao.tipoFluxo),
+      deficitAtual: deficitBuffer,
+      consumido: 0
+    };
+  }
+
+  const orcamento = resumoVivo.orcamentos[chave];
+  orcamento.deficitAtual = deficitBuffer;
+  const disponivelAntes = Math.max(0, deficitBuffer - orcamento.consumido);
+  const bufferAceita = capacidade.aceitarPeloBufferVivo === true && deficitBuffer > 0;
+  const flowAceita = decisao.aceitarAgora === true;
+
+  const baseLog = {
+    workspaceId: orcamento.workspaceId,
+    ofertaId: decisao.ofertaId,
+    marketplace: orcamento.marketplace,
+    categoria: orcamento.categoria,
+    tipoFluxo: orcamento.tipoFluxo,
+    flowAceitarAgora: flowAceita,
+    bufferVivoAceitarAgora: bufferAceita,
+    deficitBuffer,
+    orcamentoDisponivelAntes: disponivelAntes,
+    orcamentoConsumido: orcamento.consumido
+  };
+
+  if (!bufferAceita) {
+    resumoVivo.recusadas += 1;
+    if (flowAceita) resumoVivo.bloqueiosBuffer += 1;
+    const motivo = flowAceita ? "buffer_vivo_sem_deficit_util" : (decisao.motivo || buffer.motivo || "buffer_vivo_sem_capacidade");
+    const ajustada = {
+      ...decisao,
+      aceitarAgora: false,
+      quantidadeAceita: 0,
+      motivo,
+      motivoFlowOriginal: decisao.motivo,
+      bufferVivoAutoridade: true,
+      bufferVivoOrcamento: {
+        chave,
+        deficitBuffer,
+        consumido: orcamento.consumido,
+        restante: disponivelAntes
+      }
+    };
+    logBufferVivoFuncional("[BUFFER-VIVO-FUNCIONAL-DECISAO]", {
+      ...baseLog,
+      aceitarAgora: false,
+      motivo,
+      orcamentoRestante: disponivelAntes,
+      aplicouMudancas: flowAceita
+    });
+    return { decisao: ajustada, mudou: flowAceita, motivo };
+  }
+
+  if (disponivelAntes <= 0) {
+    resumoVivo.recusadas += 1;
+    resumoVivo.bloqueiosBuffer += 1;
+    const ajustada = {
+      ...decisao,
+      aceitarAgora: false,
+      quantidadeAceita: 0,
+      motivo: "buffer_vivo_orcamento_consumido",
+      motivoFlowOriginal: decisao.motivo,
+      bufferVivoAutoridade: true,
+      bufferVivoOrcamento: {
+        chave,
+        deficitBuffer,
+        consumido: orcamento.consumido,
+        restante: 0
+      }
+    };
+    logBufferVivoFuncional("[BUFFER-VIVO-FUNCIONAL-DECISAO]", {
+      ...baseLog,
+      aceitarAgora: false,
+      motivo: "buffer_vivo_orcamento_consumido",
+      orcamentoRestante: 0,
+      aplicouMudancas: flowAceita
+    });
+    return { decisao: ajustada, mudou: flowAceita, motivo: "buffer_vivo_orcamento_consumido" };
+  }
+
+  if (!flowAceita && !motivoFlowPermiteBufferVivo(decisao.motivo)) {
+    resumoVivo.recusadas += 1;
+    logBufferVivoFuncional("[BUFFER-VIVO-FUNCIONAL-DECISAO]", {
+      ...baseLog,
+      aceitarAgora: false,
+      motivo: decisao.motivo || "flow_recusa_nao_substituivel",
+      orcamentoRestante: disponivelAntes,
+      aplicouMudancas: false
+    });
+    return { decisao, mudou: false, motivo: "flow_recusa_nao_substituivel" };
+  }
+
+  orcamento.consumido += 1;
+  resumoVivo.admitidas += 1;
+  if (!flowAceita) resumoVivo.overridesFlow += 1;
+  const ajustada = {
+    ...decisao,
+    aceitarAgora: true,
+    quantidadeAceita: 1,
+    motivo: flowAceita ? decisao.motivo : "capacidade_disponivel_buffer_vivo",
+    motivoFlowOriginal: decisao.motivo,
+    bufferVivoAutoridade: true,
+    bufferVivoOrcamento: {
+      chave,
+      deficitBuffer,
+      consumido: orcamento.consumido,
+      restante: Math.max(0, deficitBuffer - orcamento.consumido),
+      reservado: true
+    }
+  };
+  logBufferVivoFuncional("[BUFFER-VIVO-FUNCIONAL-DECISAO]", {
+    ...baseLog,
+    aceitarAgora: true,
+    motivo: ajustada.motivo,
+    orcamentoConsumido: orcamento.consumido,
+    orcamentoRestante: ajustada.bufferVivoOrcamento.restante,
+    aplicouMudancas: !flowAceita
+  });
+  return { decisao: ajustada, mudou: !flowAceita, motivo: ajustada.motivo };
+}
+
+function liberarReservaBufferVivo(decisao = {}, resumo = null, motivo = "") {
+  const chave = decisao.bufferVivoOrcamento?.chave;
+  const orcamentos = resumo?.bufferVivoFuncional?.orcamentos || {};
+  const orcamento = chave ? orcamentos[chave] : null;
+  if (!orcamento || decisao.bufferVivoOrcamento?.reservado !== true || orcamento.consumido <= 0) return;
+
+  orcamento.consumido = Math.max(0, Number(orcamento.consumido || 0) - 1);
+  resumo.bufferVivoFuncional.admitidas = Math.max(0, Number(resumo.bufferVivoFuncional.admitidas || 0) - 1);
+  if (decisao.bufferVivoDivergencia?.aceitarFlow === false || decisao.motivoFlowOriginal === "esteira_saturada") {
+    resumo.bufferVivoFuncional.overridesFlow = Math.max(0, Number(resumo.bufferVivoFuncional.overridesFlow || 0) - 1);
+  }
+  resumo.bufferVivoFuncional.reservasLiberadas += 1;
+  decisao.bufferVivoOrcamento.reservado = false;
+
+  logBufferVivoFuncional("[BUFFER-VIVO-FUNCIONAL-LIBERA-RESERVA]", {
+    workspaceId: orcamento.workspaceId,
+    ofertaId: decisao.ofertaId,
+    marketplace: orcamento.marketplace,
+    categoria: orcamento.categoria,
+    tipoFluxo: orcamento.tipoFluxo,
+    flowAceitarAgora: decisao.bufferVivoDivergencia?.aceitarFlow === true,
+    bufferVivoAceitarAgora: true,
+    aceitarAgora: false,
+    motivo: motivo || "admissao_nao_util",
+    deficitBuffer: orcamento.deficitAtual,
+    orcamentoConsumido: orcamento.consumido,
+    orcamentoRestante: Math.max(0, Number(orcamento.deficitAtual || 0) - Number(orcamento.consumido || 0)),
+    aplicouMudancas: false
+  });
+}
+
+async function registrarFlowManagerAceite(oferta = {}, decisao = {}, origem = "flow_manager") {
+  await registrarEtapaDistribuicao(oferta.job_id, "flow_manager", "ok", decisao.motivo || "capacidade_disponivel", {
+    fase: "distribuicao",
+    ofertaId: oferta.id,
+    clienteId: oferta.cliente_id,
+    marketplace: oferta.marketplace,
+    aceitarAgora: true,
+    nivelAlvo: decisao.nivelAlvo,
+    bufferAtual: decisao.bufferAtual,
+    vagasDisponiveis: decisao.vagasDisponiveis,
+    tipoFluxo: decisao.tipoFluxo,
+    ttlMs: decisao.ttlMs,
+    quantidadeAceita: decisao.quantidadeAceita ?? 1,
+    bufferVivoAutoridade: decisao.bufferVivoAutoridade === true,
+    bufferVivoOrcamento: decisao.bufferVivoOrcamento || null,
+    bufferVivoShadow: decisao.bufferVivoShadow || null,
+    bufferVivoDivergencia: decisao.bufferVivoDivergencia || null,
+    aplicouMudancas: false,
+    origem
+  });
 }
 
 function flowManagerAtivoParaOferta(oferta = {}, contexto = {}) {
@@ -499,8 +758,12 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     return reterOferta(oferta, validacao.motivo, validacao.detalhes || {}, resumo);
   }
 
-  const flow = await registrarFlowManagerShadow(oferta, validacao, contexto);
+  const flowOriginal = await registrarFlowManagerShadow(oferta, validacao, contexto);
   const flowAtivo = flowManagerAtivoParaOferta(oferta, contexto);
+  const flowAplicado = flowAtivo
+    ? aplicarAutoridadeBufferVivo(flowOriginal || {}, resumo).decisao
+    : flowOriginal;
+  const flow = flowAplicado;
 
   if (flowAtivo && flow?.aceitarAgora === false) {
     return finalizarFlowNaoAceita(oferta, {
@@ -510,8 +773,10 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
   }
 
   if (flowAtivo && flow?.aceitarAgora === true) {
+    await registrarFlowManagerAceite(oferta, flow);
     const frescor = avaliarFrescorComercialParaFila(oferta, flow, contexto);
     if (frescor?.expirada) {
+      liberarReservaBufferVivo(flow, resumo, "flow_expirada_frescor_comercial");
       return reterOferta(oferta, "flow_expirada_frescor_comercial", {
         origem: "flow_manager",
         resultadoDistribuicao: "expirada_frescor_comercial_pre_fila",
@@ -567,6 +832,7 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
         filaAlvo: gate.filaAlvo
       });
       if (classificacaoGate.definitivo) {
+        liberarReservaBufferVivo(flow, resumo, gate.motivo || "gate_absorcao_bloqueado");
         coberturaRadar.registrar("engine_distributor_retida", {
           ...contextoCoberturaDistributor(oferta, {
             destinoEncontrado: true,
@@ -590,6 +856,7 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
       }
 
       if (flowAtivo) {
+        liberarReservaBufferVivo(flow, resumo, gate.motivo || "gate_absorcao_bloqueado");
         return finalizarFlowNaoAceita(oferta, {
           ...(flow || {}),
           aceitarAgora: false,
@@ -612,6 +879,7 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
         escopo: "workspace"
       });
       await restaurarStatusComercialAposGate(oferta, gate.motivo || "gate_absorcao_bloqueado");
+      liberarReservaBufferVivo(flow, resumo, gate.motivo || "gate_absorcao_bloqueado");
       if (resumo) motivoAdicionar(resumo, gate.motivo || "gate_absorcao_bloqueado");
       coberturaRadar.registrar("engine_distributor_gate_bloqueado", {
         ...contextoCoberturaDistributor(oferta, {
@@ -641,6 +909,7 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
   });
 
   if (!fila.ok) {
+    liberarReservaBufferVivo(flow, resumo, fila.motivo || "erro_fila");
     if (fila.motivo === "duplicidade_fila") {
       coberturaRadar.registrar("engine_distributor_retida", {
         ...contextoCoberturaDistributor(oferta, {
@@ -823,6 +1092,25 @@ async function distribuirOfertasEngine({ limite = 10, marketplace = "", clienteI
       filaAntes: resumo.gateAtivo.filaAntes,
       filaDepois: resumo.gateAtivo.filaDepois,
       idadeMaximaEsteiraMs: resumo.gateAtivo.idadeMaximaEsteiraMs
+    }));
+  }
+  if (resumo.bufferVivoFuncional) {
+    console.log("[BUFFER-VIVO-FUNCIONAL-RESUMO]", JSON.stringify({
+      avaliacoes: resumo.bufferVivoFuncional.avaliacoes,
+      admitidas: resumo.bufferVivoFuncional.admitidas,
+      recusadas: resumo.bufferVivoFuncional.recusadas,
+      overridesFlow: resumo.bufferVivoFuncional.overridesFlow,
+      bloqueiosBuffer: resumo.bufferVivoFuncional.bloqueiosBuffer,
+      reservasLiberadas: resumo.bufferVivoFuncional.reservasLiberadas,
+      workspaces: Object.values(resumo.bufferVivoFuncional.orcamentos || {}).reduce((acc, item) => {
+        const workspaceId = item.workspaceId || "desconhecido";
+        acc[workspaceId] = acc[workspaceId] || { contextos: 0, deficitAtual: 0, consumido: 0 };
+        acc[workspaceId].contextos += 1;
+        acc[workspaceId].deficitAtual += Number(item.deficitAtual || 0);
+        acc[workspaceId].consumido += Number(item.consumido || 0);
+        return acc;
+      }, {}),
+      aplicouMudancas: resumo.bufferVivoFuncional.overridesFlow > 0 || resumo.bufferVivoFuncional.bloqueiosBuffer > 0
     }));
   }
   return resumo;

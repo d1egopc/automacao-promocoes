@@ -385,7 +385,9 @@ async function testarFlowShadowNaoAlteraDistributorAtual() {
     registrarFilaClienteAdicionada: async () => ({ ok: true })
   });
   mockModulo("../modules/engine/ofc/active-gate.service", {
-    decidirAbsorcaoWorkspace: async () => ({ ativo: false, permitir: true, quantidadeAceitaAgora: 1 })
+    decidirAbsorcaoWorkspace: async (...args) => typeof opcoes.decidirGate === "function"
+      ? opcoes.decidirGate(...args)
+      : ({ ativo: false, permitir: true, quantidadeAceitaAgora: 1 })
   });
 
   const runner = require("../modules/engine/distributor/distributor.runner");
@@ -465,7 +467,9 @@ async function testarFlowAtivoTemporarioReentraSemAdicionarFila() {
     registrarFilaClienteAdicionada: async () => ({ ok: true })
   });
   mockModulo("../modules/engine/ofc/active-gate.service", {
-    decidirAbsorcaoWorkspace: async () => ({ ativo: false, permitir: true, quantidadeAceitaAgora: 1 })
+    decidirAbsorcaoWorkspace: async (...args) => typeof opcoes.decidirGate === "function"
+      ? opcoes.decidirGate(...args)
+      : ({ ativo: false, permitir: true, quantidadeAceitaAgora: 1 })
   });
 
   const runner = require("../modules/engine/distributor/distributor.runner");
@@ -683,6 +687,71 @@ function ofertaDistribuivel(id, workspaceId, extra = {}) {
     status: "importada",
     metadata: {},
     ...extra
+  };
+}
+
+function decisaoFlowComBufferVivo(entradaFlow = {}, extra = {}) {
+  const workspaceId = extra.workspaceId || entradaFlow.workspaceId;
+  const marketplace = extra.marketplace || entradaFlow.marketplace || "mercadolivre";
+  const categoria = extra.categoria || entradaFlow.oferta?.categoria || "Gamer e Hardware";
+  const tipoFluxo = extra.tipoFluxo || "oferta_comum";
+  const deficitBuffer = extra.deficitBuffer ?? 1;
+  const bufferAceita = extra.bufferAceita ?? deficitBuffer > 0;
+  const flowAceita = extra.flowAceita === true;
+  const motivo = extra.motivo || (flowAceita ? "capacidade_disponivel" : "esteira_saturada");
+  return {
+    workspaceId,
+    ofertaId: entradaFlow.ofertaId,
+    marketplace,
+    categoria,
+    aceitarAgora: flowAceita,
+    motivo,
+    nivelAlvo: extra.nivelAlvo ?? 6,
+    bufferAtual: extra.bufferAtual ?? (flowAceita ? 0 : 8),
+    vagasDisponiveis: extra.vagasDisponiveis ?? (flowAceita ? 6 : 0),
+    tipoFluxo,
+    ttlMs: TTL_NORMAL_MS,
+    aplicouMudancas: false,
+    bufferVivoShadow: {
+      workspaceId,
+      estado: bufferAceita ? "ABAIXO_DO_ALVO" : "CHEIO",
+      bufferAlvo: extra.bufferAlvo ?? 6,
+      bufferAtualUtil: extra.bufferAtualUtil ?? (bufferAceita ? 0 : 6),
+      deficitBuffer,
+      slotsFuturosUtilizaveis: extra.slotsFuturosUtilizaveis ?? 6,
+      motivo: bufferAceita ? "capacidade_real_por_braco_disponivel" : "buffer_vivo_cheio",
+      capacidadePorOferta: {
+        ofertaId: entradaFlow.ofertaId,
+        workspaceId,
+        marketplace,
+        categoria,
+        tipoFluxo,
+        tipoMidia: "imagem",
+        destinosAptos: 1,
+        deficitBuffer,
+        bufferAtualUtil: extra.bufferAtualUtil ?? (bufferAceita ? 0 : 6),
+        slotsFuturosUtilizaveis: extra.slotsFuturosUtilizaveis ?? 6,
+        aceitarPeloBufferVivo: bufferAceita
+      },
+      capacidadePorDestino: [],
+      pressaoPorDestino: {},
+      pressaoPorMarketplace: {},
+      pressaoPorCategoria: {},
+      aplicouMudancas: false,
+      flowAtual: {
+        aceitarAgora: flowAceita,
+        motivo,
+        nivelAlvo: extra.nivelAlvo ?? 6,
+        bufferAtual: extra.bufferAtual ?? (flowAceita ? 0 : 8),
+        vagasDisponiveis: extra.vagasDisponiveis ?? (flowAceita ? 6 : 0)
+      }
+    },
+    bufferVivoDivergencia: {
+      divergente: bufferAceita !== flowAceita,
+      aceitarBufferVivo: bufferAceita,
+      aceitarFlow: flowAceita,
+      deficitBuffer
+    }
   };
 }
 
@@ -1112,6 +1181,144 @@ async function testarAceiteGeraFilaUmaUnicaVez() {
   assert.strictEqual(ctx.ofertas[0].status, "fila");
 }
 
+async function testarFase3APersisteBufferVivoShadowEmAceite() {
+  const ctx = prepararRunnerComEstado([
+    ofertaDistribuivel(701, D1)
+  ]);
+
+  const resultado = await ctx.runner.distribuirOfertasEngine({
+    limite: 1,
+    deps: {
+      flowManager: { ativo: true },
+      avaliarFluxoWorkspaceShadow: async entradaFlow =>
+        decisaoFlowComBufferVivo(entradaFlow, { flowAceita: true, deficitBuffer: 2 })
+    }
+  });
+
+  assert.strictEqual(resultado.adicionadasFila, 1);
+  const eventoFlow = ctx.etapas.find(item => item.etapa === "flow_manager" && item.status === "ok");
+  assert(eventoFlow, "aceite do Flow deve persistir etapa flow_manager");
+  assert(eventoFlow.detalhes.bufferVivoShadow, "aceite deve carregar bufferVivoShadow");
+  assert.strictEqual(eventoFlow.detalhes.bufferVivoShadow.aplicouMudancas, false);
+  assert(eventoFlow.detalhes.bufferVivoDivergencia);
+  assert.strictEqual(eventoFlow.detalhes.aplicouMudancas, false);
+}
+
+async function testarFase3BFlowSaturadoAdmitePorBufferVivoComOrcamento() {
+  const ctx = prepararRunnerComEstado([
+    ofertaDistribuivel(711, D1)
+  ]);
+
+  const resultado = await ctx.runner.distribuirOfertasEngine({
+    limite: 1,
+    deps: {
+      flowManager: { ativo: true },
+      avaliarFluxoWorkspaceShadow: async entradaFlow =>
+        decisaoFlowComBufferVivo(entradaFlow, { flowAceita: false, deficitBuffer: 1 })
+    }
+  });
+
+  assert.strictEqual(resultado.adicionadasFila, 1);
+  assert(ctx.statusMarcados.some(item => item.id === 711 && item.status === "fila"));
+  assert.strictEqual(resultado.bufferVivoFuncional.overridesFlow, 1);
+  const eventoFlow = ctx.etapas.find(item => item.etapa === "flow_manager" && item.status === "ok");
+  assert.strictEqual(eventoFlow.detalhes.bufferVivoAutoridade, true);
+  assert.strictEqual(eventoFlow.detalhes.bufferVivoOrcamento.consumido, 1);
+}
+
+async function testarFase3BDeficitBufferEhOrcamentoConsumivel() {
+  const ctx = prepararRunnerComEstado([
+    ofertaDistribuivel(721, D1),
+    ofertaDistribuivel(722, D1),
+    ofertaDistribuivel(723, D1)
+  ]);
+
+  const resultado = await ctx.runner.distribuirOfertasEngine({
+    limite: 3,
+    deps: {
+      flowManager: { ativo: true },
+      avaliarFluxoWorkspaceShadow: async entradaFlow =>
+        decisaoFlowComBufferVivo(entradaFlow, { flowAceita: false, deficitBuffer: 2 })
+    }
+  });
+
+  assert.strictEqual(resultado.adicionadasFila, 2);
+  assert.strictEqual(resultado.bufferVivoFuncional.admitidas, 2);
+  assert.strictEqual(resultado.bufferVivoFuncional.recusadas, 1);
+  assert.strictEqual(resultado.bufferVivoFuncional.overridesFlow, 2);
+  assert(ctx.statusMarcados.some(item => item.id === 723 && item.motivo === "flow_aguardando_buffer_vivo_orcamento_consumido"));
+}
+
+async function testarFase3BOrcamentoIsoladoPorWorkspace() {
+  const ctx = prepararRunnerComEstado([
+    ofertaDistribuivel(731, D1),
+    ofertaDistribuivel(732, D1),
+    ofertaDistribuivel(733, WOLF)
+  ]);
+
+  const resultado = await ctx.runner.distribuirOfertasEngine({
+    limite: 3,
+    deps: {
+      flowManager: { ativo: true },
+      avaliarFluxoWorkspaceShadow: async entradaFlow =>
+        decisaoFlowComBufferVivo(entradaFlow, { flowAceita: false, deficitBuffer: 1 })
+    }
+  });
+
+  assert.strictEqual(resultado.adicionadasFila, 2);
+  assert(ctx.statusMarcados.some(item => item.id === 731 && item.status === "fila"));
+  assert(ctx.statusMarcados.some(item => item.id === 733 && item.status === "fila"));
+  assert(ctx.statusMarcados.some(item => item.id === 732 && item.motivo === "flow_aguardando_buffer_vivo_orcamento_consumido"));
+}
+
+async function testarFase3BBufferVivoPodeRecusarFlowAceito() {
+  const ctx = prepararRunnerComEstado([
+    ofertaDistribuivel(741, D1)
+  ]);
+
+  const resultado = await ctx.runner.distribuirOfertasEngine({
+    limite: 1,
+    deps: {
+      flowManager: { ativo: true },
+      avaliarFluxoWorkspaceShadow: async entradaFlow =>
+        decisaoFlowComBufferVivo(entradaFlow, { flowAceita: true, bufferAceita: false, deficitBuffer: 0 })
+    }
+  });
+
+  assert.strictEqual(resultado.adicionadasFila, 0);
+  assert.strictEqual(resultado.bufferVivoFuncional.bloqueiosBuffer, 1);
+  assert(ctx.statusMarcados.some(item => item.id === 741 && item.motivo === "flow_aguardando_buffer_vivo_sem_deficit_util"));
+}
+
+async function testarFase3BLiberaReservaQuandoGateBloqueia() {
+  const ctx = prepararRunnerComEstado([
+    ofertaDistribuivel(751, D1)
+  ]);
+
+  const resultado = await ctx.runner.distribuirOfertasEngine({
+    limite: 1,
+    deps: {
+      flowManager: { ativo: true },
+      decidirAbsorcaoWorkspace: async () => ({
+        ativo: true,
+        permitir: false,
+        motivo: "esteira_saturada",
+        filaAlvo: 3,
+        pressaoEsteiraViva: 3,
+        capacidadeAtual: 0
+      }),
+      avaliarFluxoWorkspaceShadow: async entradaFlow =>
+        decisaoFlowComBufferVivo(entradaFlow, { flowAceita: true, deficitBuffer: 1 })
+    }
+  });
+
+  assert.strictEqual(resultado.adicionadasFila, 0);
+  assert.strictEqual(resultado.bufferVivoFuncional.admitidas, 0);
+  assert.strictEqual(resultado.bufferVivoFuncional.reservasLiberadas, 1);
+  const orcamento = Object.values(resultado.bufferVivoFuncional.orcamentos)[0];
+  assert.strictEqual(orcamento.consumido, 0);
+}
+
 (async () => {
   await testarWorkspaceFechadaRecusa();
   await testarWorkspaceSemSessaoRecusa();
@@ -1147,6 +1354,12 @@ async function testarAceiteGeraFilaUmaUnicaVez() {
   await testarReentradaVelhaNaoCriaFilaNemCredito();
   await testarFlowExpiradoPeloAvaliadorRetemTerminal();
   await testarAceiteGeraFilaUmaUnicaVez();
+  await testarFase3APersisteBufferVivoShadowEmAceite();
+  await testarFase3BFlowSaturadoAdmitePorBufferVivoComOrcamento();
+  await testarFase3BDeficitBufferEhOrcamentoConsumivel();
+  await testarFase3BOrcamentoIsoladoPorWorkspace();
+  await testarFase3BBufferVivoPodeRecusarFlowAceito();
+  await testarFase3BLiberaReservaQuandoGateBloqueia();
   console.log("optimus-flow-v1-shadow.test.js OK");
 })().catch(erro => {
   console.error(erro);
