@@ -1261,16 +1261,22 @@ function extrairDocumentoComercialCanonico({
     marketplace
   }) ? "" : beneficioTextoBruto;
   const instrucaoTexto = texto(instrucaoComercial);
-  const cupomTexto = normalizarCuponsSemanticos([
+  const cupomProtegidoRadar = oferta?.metadata?.precedenciaComercial?.camposProtegidos?.cupom === true;
+  const fontesCupom = [
     cupom.cupomCodigo,
     cupom.cupomTexto,
     oferta.cupom,
     oferta.cupomCodigo,
-    oferta.codigoCupom,
-    ofertaEntrada.cupom,
-    ofertaEntrada.cupomCodigo,
-    ofertaEntrada.codigoCupom
-  ]).join(" ou ");
+    oferta.codigoCupom
+  ];
+  if (!cupomProtegidoRadar) {
+    fontesCupom.push(
+      ofertaEntrada.cupom,
+      ofertaEntrada.cupomCodigo,
+      ofertaEntrada.codigoCupom
+    );
+  }
+  const cupomTexto = normalizarCuponsSemanticos(fontesCupom).join(" ou ");
 
   const documento = {
     tituloOriginal: tituloOriginal || null,

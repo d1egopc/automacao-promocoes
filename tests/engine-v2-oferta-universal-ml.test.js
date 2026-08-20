@@ -333,6 +333,68 @@ function ofertaMlAdapter(extras = {}) {
     }
   }
 
+  {
+    const { construirEspelhoComercialV24 } = require("../modules/ofc-v2/espelho-comercial");
+    const metadataProtegida = {
+      precedenciaComercial: {
+        politicaAutoridade: "radar_comercial_explicito_maior_que_api",
+        camposProtegidos: { cupom: true }
+      }
+    };
+    const { retorno: ofcProtegido } = await capturarLogs(() => construirEspelhoComercialV24({
+      job: { id: 14, evento_id: 24, cliente_id: "workspace_amazon", marketplace: "amazon" },
+      evento: {
+        texto_original: [
+          "RTX 5060",
+          "Por R$ 2.249",
+          "Cupons: TUDOAMAZON ou MAIS10",
+          "https://www.amazon.com.br/dp/B0TESTE"
+        ].join("\n")
+      },
+      oferta: {
+        marketplace: "amazon",
+        titulo: "RTX 5060",
+        preco: 2249,
+        cupom: "TUDOAMAZON ou MAIS10",
+        linkAfiliado: "https://amzn.to/rtx5060",
+        metadata: metadataProtegida
+      },
+      ofertaEntrada: {
+        cupom: "PAGINAAPI",
+        cupomCodigo: "PAGINAAPI"
+      },
+      metadata: metadataProtegida
+    }));
+
+    assert.strictEqual(ofcProtegido.documentoComercialCanonico.cupomTexto, "TUDOAMAZON ou MAIS10");
+    assert.ok(!ofcProtegido.templateEspelhoShadow.mensagem.includes("PAGINAAPI"));
+
+    const { retorno: ofcSemProtecao } = await capturarLogs(() => construirEspelhoComercialV24({
+      job: { id: 15, evento_id: 25, cliente_id: "workspace_amazon", marketplace: "amazon" },
+      evento: {
+        texto_original: [
+          "RTX 5060",
+          "Por R$ 2.249",
+          "Cupom TUDOAMAZON",
+          "https://www.amazon.com.br/dp/B0TESTE"
+        ].join("\n")
+      },
+      oferta: {
+        marketplace: "amazon",
+        titulo: "RTX 5060",
+        preco: 2249,
+        cupom: "TUDOAMAZON",
+        linkAfiliado: "https://amzn.to/rtx5060"
+      },
+      ofertaEntrada: {
+        cupom: "PAGINAAPI"
+      },
+      metadata: {}
+    }));
+
+    assert.strictEqual(ofcSemProtecao.documentoComercialCanonico.cupomTexto, "TUDOAMAZON ou PAGINAAPI");
+  }
+
   let metadataInserida = null;
   let metadataPersistida = null;
 
@@ -477,6 +539,14 @@ function ofertaMlAdapter(extras = {}) {
         status: "pendente"
       }
     })
+  });
+  mockModulo("../modules/engine/flow-manager/flow-manager.service", {
+    avaliarFluxoWorkspaceShadow: async () => ({ aceitarAgora: true, motivo: "flow_shadow_indisponivel" }),
+    avaliarFrescorComercialOferta: () => ({ expirada: false }),
+    flowManagerAtivoWorkspace: () => false
+  });
+  mockModulo("../modules/engine/ofc/active-gate.service", {
+    decidirAbsorcaoWorkspace: async () => ({ ativo: false, permitir: true, quantidadeAceitaAgora: 1 })
   });
 
   const distributor = require("../modules/engine/distributor/distributor.runner");
