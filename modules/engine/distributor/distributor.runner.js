@@ -309,6 +309,8 @@ async function reprogramarFlowTemporario(oferta = {}, decisao = {}, resumo = nul
     natureza: "temporaria",
     classificacaoOperacional: classificacao.tipo || "temporario",
     proximaTentativaEm,
+    bufferVivoShadow: decisao.bufferVivoShadow || null,
+    bufferVivoDivergencia: decisao.bufferVivoDivergencia || null,
     origem
   });
   await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "aguardando", "flow_reentrada_temporaria", {

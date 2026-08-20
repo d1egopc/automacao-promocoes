@@ -6,6 +6,10 @@ const {
   numeroIntervaloDestino
 } = require("./commercial-capacity.service");
 const { consultarEventosAbsorcaoPorWorkspace } = require("./absorption-gate.repository");
+const {
+  calcularBufferVivoWorkspace,
+  resumirDivergenciaBufferVivo
+} = require("./buffer-vivo-workspace.service");
 
 const BUCKET_STATUS = {
   PENDENTE_VIVO: "pendente_vivo",
@@ -724,6 +728,59 @@ function classificarEstadoEsteira({ janelaAbertaAgora, automacaoAtiva, destinosA
   return { estado: "LIVRE", motivo: "capacidade_dinamica_livre_para_agua_nova" };
 }
 
+function logBufferVivoGateShadow(bufferVivo = {}, divergencia = {}) {
+  try {
+    console.log("[BUFFER-VIVO-SHADOW]", JSON.stringify({
+      origem: "gate_absorcao_shadow",
+      workspaceId: String(bufferVivo.workspaceId || "").trim(),
+      estado: bufferVivo.estado,
+      bufferAlvo: bufferVivo.bufferAlvo,
+      bufferAtualUtil: bufferVivo.bufferAtualUtil,
+      deficitBuffer: bufferVivo.deficitBuffer,
+      slotsFuturosUtilizaveis: bufferVivo.slotsFuturosUtilizaveis,
+      motivo: bufferVivo.motivo,
+      capacidadeAgregada: divergencia.capacidadeAgregada,
+      aplicouMudancas: false
+    }));
+    console.log("[BUFFER-VIVO-CAPACIDADE-POR-BRACO]", JSON.stringify({
+      origem: "gate_absorcao_shadow",
+      workspaceId: String(bufferVivo.workspaceId || "").trim(),
+      capacidadePorOferta: bufferVivo.capacidadePorOferta || {},
+      capacidadePorDestino: lista(bufferVivo.capacidadePorDestino).map(item => ({
+        destinoId: item.destinoId,
+        nome: item.nome,
+        tipo: item.tipo,
+        aptoAgora: item.aptoAgora === true,
+        janelaAbertaAgora: item.janelaAbertaAgora === true,
+        integracaoApta: item.integracaoApta === true,
+        intervaloEfetivo: item.intervaloEfetivo,
+        slotsFuturosUtilizaveis: item.slotsFuturosUtilizaveis,
+        bufferAtualDestino: item.bufferAtualDestino,
+        deficitDestino: item.deficitDestino,
+        limiteDiarioRestante: item.limiteDiarioRestante,
+        proximoHorarioPermitido: item.proximoHorarioPermitido
+      })),
+      pressaoPorDestino: bufferVivo.pressaoPorDestino || {},
+      pressaoPorMarketplace: bufferVivo.pressaoPorMarketplace || {},
+      pressaoPorCategoria: bufferVivo.pressaoPorCategoria || {},
+      aplicouMudancas: false
+    }));
+    if (divergencia.divergente) {
+      console.log("[BUFFER-VIVO-DIVERGENCIA-FLOW]", JSON.stringify({
+        origem: "gate_absorcao_shadow",
+        workspaceId: String(bufferVivo.workspaceId || "").trim(),
+        divergencias: lista(divergencia.divergencias),
+        motivoBufferVivo: divergencia.motivoBufferVivo,
+        capacidadeAgregada: divergencia.capacidadeAgregada,
+        bufferAlvo: bufferVivo.bufferAlvo,
+        bufferAtualUtil: bufferVivo.bufferAtualUtil,
+        deficitBuffer: bufferVivo.deficitBuffer,
+        aplicouMudancas: false
+      }));
+    }
+  } catch (_) {}
+}
+
 function montarGateWorkspace({ clienteId = "", usuario = {}, destinos = [], fila = {}, eventos = {}, janelaMinutos = 15 } = {}) {
   const destinosResumo = avaliarDestinosWorkspace(destinos, janelaMinutos, fila.itens || []);
   const enviosUltimos15Min = numero(eventos.enviosConfirmados);
@@ -746,6 +803,20 @@ function montarGateWorkspace({ clienteId = "", usuario = {}, destinos = [], fila
     ? Math.max(0, capacidadeAbsorcaoAgora)
     : 0;
   const quantidadeQueRecusariaAgora = quantidadeQueAceitariaAgora > 0 ? 0 : 1;
+  const bufferVivoShadow = calcularBufferVivoWorkspace({
+    workspaceId: clienteId,
+    destinosResumo,
+    filaItens: fila.itens || [],
+    saudeAgregada: {
+      filaAlvo5Min: destinosResumo.filaAlvo5Min,
+      filaAlvo10Min: destinosResumo.filaAlvo10Min,
+      filaAlvo15Min: destinosResumo.filaAlvo15Min,
+      pressaoEsteiraViva,
+      capacidade: capacidadeAbsorcaoAgora
+    }
+  });
+  const bufferVivoDivergencia = resumirDivergenciaBufferVivo(bufferVivoShadow);
+  logBufferVivoGateShadow(bufferVivoShadow, bufferVivoDivergencia);
   const classificacao = classificarEstadoEsteira({
     ...destinosResumo,
     filaAlvo15Min: destinosResumo.filaAlvo15Min,
@@ -837,6 +908,8 @@ function montarGateWorkspace({ clienteId = "", usuario = {}, destinos = [], fila
     capacidadeTeorica: destinosResumo.capacidadeTeorica,
     capacidadeUtilizada,
     tempoEstimadoEsvaziarEsteira,
+    bufferVivoShadow,
+    bufferVivoDivergencia,
     quantidadeQueAceitariaAgora,
     quantidadeQueRecusariaAgora
   };

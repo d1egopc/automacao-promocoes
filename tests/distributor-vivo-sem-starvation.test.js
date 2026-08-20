@@ -64,11 +64,18 @@ function prepararRunner(candidatos, decidirGate) {
     marcarOfertaStatus: async () => ({ ok: true }),
     restaurarOfertaStatusSeDistribuindo: async () => ({ ok: true }),
     registrarEtapaDistribuicao: async () => ({ ok: true }),
-    validarOfertaParaDistribuicao: async () => ({
-      ok: true,
-      destinosCompativeis: 1,
-      destinosCompativeisDetalhes: [{ destino: "OP GERAL", tipoMidia: "imagem" }]
-    }),
+    validarOfertaParaDistribuicao: async () => {
+      const retorno = {
+        ok: true,
+        destinosCompativeis: 1,
+        destinosCompativeisDetalhes: [{ destino: "OP GERAL", tipoMidia: "imagem" }]
+      };
+      Object.defineProperty(retorno, "__destinosCompativeisRaw", {
+        value: [destino()],
+        enumerable: false
+      });
+      return retorno;
+    },
     adicionarOfertaNaFilaCliente: async ofertaEntrada => {
       adicionados.push(ofertaEntrada.cliente_id);
       return { ok: true, itemFila: { id: `fila_${ofertaEntrada.id}`, status: "pendente" } };
@@ -82,6 +89,10 @@ function prepararRunner(candidatos, decidirGate) {
 
   const runner = require("../modules/engine/distributor/distributor.runner");
   return { runner, adicionados, buscas, decidirGate };
+}
+
+function bloqueiosGateResumo(resultado = {}) {
+  return Number(resultado.distributorVivo?.candidatosGateBloqueados || resultado.gateAtivo?.bloqueadas || 0);
 }
 
 async function testarRogerBloqueadoNaoConsomeD1() {
@@ -115,7 +126,7 @@ async function testarRogerBloqueadoNaoConsomeD1() {
 
   assert.strictEqual(resultado.adicionadasFila, 1);
   assert.deepStrictEqual(adicionados, [D1]);
-  assert.strictEqual(resultado.distributorVivo.candidatosGateBloqueados, 2);
+  assert.strictEqual(bloqueiosGateResumo(resultado), 2);
   assert.strictEqual(resultado.distributorVivo.distribuicoesUteis, 1);
   assert.strictEqual(resultado.distributorVivo.motivoEncerramento, "capacidade_util_atendida");
   assert(buscas.length >= 3, "deve continuar buscando apos Gate bloqueado");
@@ -143,7 +154,7 @@ async function testarTodosBloqueadosSemLoopInfinito() {
 
   assert.strictEqual(resultado.adicionadasFila, 0);
   assert.deepStrictEqual(adicionados, []);
-  assert.strictEqual(resultado.distributorVivo.candidatosGateBloqueados, 2);
+  assert.strictEqual(bloqueiosGateResumo(resultado), 2);
   assert.strictEqual(resultado.distributorVivo.motivoEncerramento, "candidatos_esgotados");
 }
 
@@ -167,7 +178,7 @@ async function testarWorkspaceSaturadoNaoRecebe() {
 
   assert.strictEqual(resultado.adicionadasFila, 0);
   assert.deepStrictEqual(adicionados, []);
-  assert.strictEqual(resultado.distributorVivo.candidatosGateBloqueados, 1);
+  assert.strictEqual(bloqueiosGateResumo(resultado), 1);
 }
 
 async function testarBacklogBloqueadoNaoCausaStarvationGlobal() {
@@ -200,7 +211,7 @@ async function testarBacklogBloqueadoNaoCausaStarvationGlobal() {
 
   assert.strictEqual(resultado.adicionadasFila, 2);
   assert.deepStrictEqual(adicionados.sort(), [D1, "workspace_4"].sort());
-  assert(resultado.distributorVivo.candidatosGateBloqueados >= 1, "deve registrar candidatos bloqueados");
+  assert(bloqueiosGateResumo(resultado) >= 1, "deve registrar candidatos bloqueados");
   assert.strictEqual(resultado.distributorVivo.motivoEncerramento, "capacidade_util_atendida");
   assert(resultado.distributorVivo.limiteOperacionalCandidatos >= 100, "deve haver limite operacional seguro maior que a capacidade util");
 }

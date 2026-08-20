@@ -270,6 +270,12 @@ async function testarWorkspaceAptaComVagaAceita() {
   assert.strictEqual(decisao.bufferAtual, 0);
   assert.strictEqual(decisao.vagasDisponiveis, 2);
   assert.strictEqual(decisao.motivo, "capacidade_disponivel");
+  assert(decisao.bufferVivoShadow, "Flow deve calcular Buffer Vivo em shadow");
+  assert.strictEqual(decisao.bufferVivoShadow.aplicouMudancas, false);
+  assert.strictEqual(decisao.bufferVivoShadow.workspaceId, D1);
+  assert.strictEqual(decisao.bufferVivoShadow.bufferAlvo, 2);
+  assert.strictEqual(decisao.bufferVivoShadow.deficitBuffer, 2);
+  assert(decisao.bufferVivoDivergencia);
 }
 
 async function testarDestinoConsumiuUmaVagaAindaAceitaOfertaFresca() {

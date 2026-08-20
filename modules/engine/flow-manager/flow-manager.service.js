@@ -5,6 +5,10 @@ const {
   resumoFilaWorkspace,
   avaliarDestinosWorkspace
 } = require("../ofc/absorption-gate.service");
+const {
+  calcularBufferVivoWorkspace,
+  resumirDivergenciaBufferVivo
+} = require("../ofc/buffer-vivo-workspace.service");
 
 const COBERTURA_NORMAL_MINUTOS = 10;
 const COBERTURA_TURBO_MINUTOS = 5;
@@ -580,6 +584,71 @@ function logFlowShadow(decisao = {}) {
   } catch (_) {}
 }
 
+function logBufferVivoFlowShadow(bufferVivo = {}, divergencia = {}) {
+  try {
+    console.log("[BUFFER-VIVO-SHADOW]", JSON.stringify({
+      origem: "flow_manager",
+      workspaceId: texto(bufferVivo.workspaceId),
+      ofertaId: bufferVivo.capacidadePorOferta?.ofertaId ?? null,
+      marketplace: texto(bufferVivo.capacidadePorOferta?.marketplace),
+      categoria: texto(bufferVivo.capacidadePorOferta?.categoria),
+      estado: texto(bufferVivo.estado),
+      bufferAlvo: bufferVivo.bufferAlvo ?? null,
+      bufferAtualUtil: bufferVivo.bufferAtualUtil ?? null,
+      deficitBuffer: bufferVivo.deficitBuffer ?? null,
+      slotsFuturosUtilizaveis: bufferVivo.slotsFuturosUtilizaveis ?? null,
+      motivo: texto(bufferVivo.motivo),
+      flowAceitarAgora: divergencia.aceitarFlow,
+      bufferVivoAceitarAgora: divergencia.aceitarBufferVivo,
+      aplicouMudancas: false
+    }));
+    console.log("[BUFFER-VIVO-CAPACIDADE-POR-BRACO]", JSON.stringify({
+      origem: "flow_manager",
+      workspaceId: texto(bufferVivo.workspaceId),
+      ofertaId: bufferVivo.capacidadePorOferta?.ofertaId ?? null,
+      capacidadePorOferta: bufferVivo.capacidadePorOferta || {},
+      capacidadePorDestino: lista(bufferVivo.capacidadePorDestino).map(item => ({
+        destinoId: item.destinoId,
+        nome: item.nome,
+        tipo: item.tipo,
+        aptoAgora: item.aptoAgora === true,
+        janelaAbertaAgora: item.janelaAbertaAgora === true,
+        integracaoApta: item.integracaoApta === true,
+        intervaloEfetivo: item.intervaloEfetivo,
+        slotsFuturosUtilizaveis: item.slotsFuturosUtilizaveis,
+        bufferAtualDestino: item.bufferAtualDestino,
+        deficitDestino: item.deficitDestino,
+        limiteDiarioRestante: item.limiteDiarioRestante,
+        proximoHorarioPermitido: item.proximoHorarioPermitido
+      })),
+      pressaoPorDestino: bufferVivo.pressaoPorDestino || {},
+      pressaoPorMarketplace: bufferVivo.pressaoPorMarketplace || {},
+      pressaoPorCategoria: bufferVivo.pressaoPorCategoria || {},
+      aplicouMudancas: false
+    }));
+    if (divergencia.divergente) {
+      console.log("[BUFFER-VIVO-DIVERGENCIA-FLOW]", JSON.stringify({
+        origem: "flow_manager",
+        workspaceId: texto(bufferVivo.workspaceId),
+        ofertaId: bufferVivo.capacidadePorOferta?.ofertaId ?? null,
+        divergencias: lista(divergencia.divergencias),
+        aceitarFlow: divergencia.aceitarFlow,
+        aceitarBufferVivo: divergencia.aceitarBufferVivo,
+        motivoFlow: texto(divergencia.motivoFlow),
+        motivoBufferVivo: texto(divergencia.motivoBufferVivo),
+        nivelAlvoFlow: bufferVivo.flowAtual?.nivelAlvo ?? null,
+        bufferAtualFlow: bufferVivo.flowAtual?.bufferAtual ?? null,
+        vagasDisponiveisFlow: bufferVivo.flowAtual?.vagasDisponiveis ?? null,
+        bufferAlvo: bufferVivo.bufferAlvo,
+        bufferAtualUtil: bufferVivo.bufferAtualUtil,
+        deficitBuffer: bufferVivo.deficitBuffer,
+        capacidadeAgregada: divergencia.capacidadeAgregada,
+        aplicouMudancas: false
+      }));
+    }
+  } catch (_) {}
+}
+
 async function avaliarFluxoWorkspaceShadow(entrada = {}, opcoes = {}) {
   const agoraMs = Number(opcoes.agoraMs || Date.now());
   const workspaceId = texto(entrada.workspaceId || entrada.clienteId || entrada.oferta?.cliente_id);
@@ -672,6 +741,35 @@ async function avaliarFluxoWorkspaceShadow(entrada = {}, opcoes = {}) {
       motivosItensIgnorados: contarItensIgnoradosBuffer(bufferShadow.itensIgnorados),
       aplicouMudancas: false
     };
+    const bufferVivo = calcularBufferVivoWorkspace({
+      workspaceId,
+      ofertaId,
+      marketplace,
+      oferta,
+      tipoFluxo,
+      destinosCompativeis: destinos,
+      destinosResumo,
+      filaItens: fila.itens || [],
+      flowAtual: {
+        aceitarAgora,
+        motivo,
+        nivelAlvo,
+        bufferAtual,
+        vagasDisponiveis
+      },
+      saudeAgregada: {
+        filaAlvo5Min: destinosResumo.filaAlvo5Min,
+        filaAlvo10Min: destinosResumo.filaAlvo10Min,
+        filaAlvo15Min: destinosResumo.filaAlvo15Min,
+        pressaoEsteiraViva: fila.pressaoEsteiraViva,
+        capacidade: Math.max(0, limitarNaoNegativo(destinosResumo.filaAlvo15Min) - limitarNaoNegativo(fila.pressaoEsteiraViva))
+      },
+      agoraMs
+    });
+    const divergenciaBufferVivo = resumirDivergenciaBufferVivo(bufferVivo);
+    decisao.bufferVivoShadow = bufferVivo;
+    decisao.bufferVivoDivergencia = divergenciaBufferVivo;
+    logBufferVivoFlowShadow(bufferVivo, divergenciaBufferVivo);
     logFlowShadow(decisao);
     return decisao;
   } catch (erro) {
