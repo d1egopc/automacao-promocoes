@@ -437,6 +437,23 @@ function validarProdutoCanonicoAliExpress({ papelLink = "", principal = {}, conv
     produtoCanonicoPrincipal: produtoPrincipal.produtoId || ""
   };
 }
+
+function resgateConservadorAliExpressPermitido({ papelLink = "", urlAfiliada = "", urlOriginal = "", produtoCanonico = {} } = {}) {
+  const papel = texto(papelLink);
+  if (!["link_app", "link_pc", "link_moedas"].includes(papel)) return false;
+  if (produtoCanonico?.motivo !== "produto_canonico_pc_indisponivel") return false;
+  if (!urlOriginalAliExpressSegura(urlOriginal)) return false;
+  if (!urlAliExpressConvertidaSegura(urlAfiliada, urlOriginal)) return false;
+  return true;
+}
+
+function motivoResgateConservadorAliExpress(papelLink = "") {
+  const papel = texto(papelLink);
+  if (papel === "link_pc") return "cta_pc_workspace_convertido_sem_api_canonica";
+  if (papel === "link_moedas") return "cta_moedas_workspace_convertido_sem_api_canonica";
+  return "cta_app_workspace_convertido_sem_api_canonica";
+}
+
 function valorBooleanoProfundo(objeto = {}, chaves = []) {
   const pilha = [objeto];
   const visitados = new Set();
@@ -504,6 +521,15 @@ function avaliarConversaoAliExpressPorPapel({ papelLink = "", urlAfiliada = "", 
   }
 
   if (!produtoCanonico.ok) {
+    if (resgateConservadorAliExpressPermitido({ papelLink, urlAfiliada, urlOriginal, produtoCanonico })) {
+      return {
+        ...produtoCanonico,
+        renderizavel: true,
+        motivo: motivoResgateConservadorAliExpress(papelLink),
+        appValidado: papelLink === "link_app" || papelLink === "link_moedas",
+        resgateConservadorRadar: true
+      };
+    }
     return { ...produtoCanonico, renderizavel: false, motivo: produtoCanonico.motivo, appValidado: false };
   }
 

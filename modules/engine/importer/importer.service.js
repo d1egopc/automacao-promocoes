@@ -1353,7 +1353,8 @@ function encontrarRadarMirrorMensagem(oferta = {}, contexto = {}) {
   for (const radarMirror of fontes) {
     if (!radarMirror || typeof radarMirror !== "object") continue;
     const midia = objetoSeguro(radarMirror.midia);
-    const origemMidia = normalizarTexto(midia.imagemOrigem || radarMirror.imagemOrigem || "").toLowerCase();
+    const origemMidiaBruta = normalizarTexto(midia.imagemOrigem || radarMirror.imagemOrigem || "");
+    const origemMidia = origemMidiaBruta.toLowerCase();
     const imagemOriginal = normalizarTexto(
       midia.imagemOriginal ||
       radarMirror.imagemOriginal ||
@@ -1361,9 +1362,10 @@ function encontrarRadarMirrorMensagem(oferta = {}, contexto = {}) {
       radarMirror.imagem ||
       midia.imagemUrl ||
       radarMirror.imagemUrl ||
+      (/^https?:\/\//i.test(origemMidiaBruta) ? origemMidiaBruta : "") ||
       ""
     );
-    if (origemMidia === "mensagem" && imagemOriginal) {
+    if ((origemMidia === "mensagem" || /^https?:\/\//i.test(origemMidiaBruta)) && imagemOriginal) {
       return { radarMirror, midia, imagemOriginal };
     }
   }

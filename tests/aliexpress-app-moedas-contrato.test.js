@@ -355,6 +355,107 @@ async function testarFalhaConversaoMantemOcorrenciaAuditavel() {
   assert.strictEqual(produtos[1].motivoConversao, "falha_tecnica_conversao_link");
 }
 
+async function testarApiSemCanonicoPreservaAppPcConvertidosDoRadar() {
+  const app = "https://a.aliexpress.com/_appRadarSeguro";
+  const pc = "https://a.aliexpress.com/_pcRadarSeguro";
+  const appAfiliado = "https://s.click.aliexpress.com/e/_APPRESGATE";
+  const pcAfiliado = "https://s.click.aliexpress.com/e/_PCRESGATE";
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 181769, evento_id: 181769, cliente_id: "cliente_ali", marketplace: "aliexpress" },
+    evento: {
+      texto_original: [
+        "(Parcelado) Processador AMD Ryzen 7 9700X Novo",
+        "Por R$ 1.345",
+        "Cupom: LIBRETX9700X ou ISKANDAR6",
+        `Link APP: ${app}`,
+        `Link PC: ${pc}`
+      ].join("\n")
+    },
+    links: [
+      { url_original: app, metadata: { papelLink: "link_app", papelLinkMotivo: "contexto_link_app_aliexpress" } },
+      { url_original: pc, metadata: { papelLink: "link_pc", papelLinkMotivo: "contexto_link_pc_aliexpress" } }
+    ],
+    deps: {
+      getIntegracaoCliente: () => integracao(),
+      importarAliExpress: async (url, config = {}) => ({
+        marketplace: "aliexpress",
+        titulo: "Produto AliExpress",
+        precoAtual: "",
+        linkOriginal: url,
+        linkAfiliado: url === app ? appAfiliado : pcAfiliado,
+        imagem: "",
+        aviso: "Erro ao consultar API AliExpress",
+        erroTecnico: "aliexpress_manual_fallback_generico",
+        papelLink: config.contextoEngine?.papelLink || "",
+        metadata: {
+          papelLink: config.contextoEngine?.papelLink || "",
+          conversaoPapel: config.contextoEngine?.papelLink || "",
+          conversaoLinkAlternativo: true
+        }
+      })
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.preco, 1345);
+
+  const appConvertido = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_app");
+  const pcConvertido = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
+
+  assert.strictEqual(appConvertido.renderizavel, true);
+  assert.strictEqual(appConvertido.urlAfiliada, appAfiliado);
+  assert.strictEqual(appConvertido.motivoConversao, "cta_app_workspace_convertido_sem_api_canonica");
+  assert.strictEqual(pcConvertido.renderizavel, true);
+  assert.strictEqual(pcConvertido.urlAfiliada, pcAfiliado);
+  assert.strictEqual(pcConvertido.motivoConversao, "cta_pc_workspace_convertido_sem_api_canonica");
+}
+
+async function testarResgateConservadorNaoFabricaPcQuandoRadarTrouxeSoApp() {
+  const app = "https://a.aliexpress.com/_appUnico";
+  const appAfiliado = "https://s.click.aliexpress.com/e/_APPUNICO";
+
+  const resultado = await importarAliExpressEngine({
+    job: { id: 181903, evento_id: 181903, cliente_id: "cliente_ali", marketplace: "aliexpress" },
+    evento: {
+      texto_original: [
+        "Xeon E5 2690v4 X99 Processador CPU 2690 v4",
+        "Por R$ 96",
+        "Cupom: ISKANDAR1 ou BRGM1",
+        `Link APP: ${app}`
+      ].join("\n")
+    },
+    links: [
+      { url_original: app, metadata: { papelLink: "link_app", papelLinkMotivo: "contexto_link_app_aliexpress" } }
+    ],
+    deps: {
+      getIntegracaoCliente: () => integracao(),
+      importarAliExpress: async (url, config = {}) => ({
+        marketplace: "aliexpress",
+        titulo: "Produto AliExpress",
+        precoAtual: "",
+        linkOriginal: url,
+        linkAfiliado: appAfiliado,
+        imagem: "",
+        aviso: "Landing AliExpress convertida sem productId direto.",
+        papelLink: config.contextoEngine?.papelLink || "",
+        metadata: {
+          papelLink: config.contextoEngine?.papelLink || "",
+          conversaoPapel: config.contextoEngine?.papelLink || "",
+          conversaoLinkAlternativo: true
+        }
+      })
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  const links = resultado.metadata.linksClassificados.filter(item => item.renderizavel === true);
+  assert.strictEqual(links.length, 1);
+  assert.strictEqual(links[0].papelLink, "link_app");
+  assert.strictEqual(links[0].urlAfiliada, appAfiliado);
+  assert.ok(!resultado.metadata.linksClassificados.some(item => item.papelLink === "link_pc"));
+}
+
 (async () => {
   await testarPrecoRadarVenceApiELinkMoedasConverte();
   testarEspelhoUsaAfiliadaENaoOriginal();
@@ -363,6 +464,8 @@ async function testarFalhaConversaoMantemOcorrenciaAuditavel() {
   await testarAppDuplicadoReutilizaConversaoEPreservaOcorrencias();
   await testarProdutosDistintosNaoUsamAfiliadoGlobal();
   await testarFalhaConversaoMantemOcorrenciaAuditavel();
+  await testarApiSemCanonicoPreservaAppPcConvertidosDoRadar();
+  await testarResgateConservadorNaoFabricaPcQuandoRadarTrouxeSoApp();
   console.log("aliexpress-app-moedas-contrato.test.js OK");
 })().catch((erro) => {
   console.error(erro);

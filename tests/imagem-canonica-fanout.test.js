@@ -164,6 +164,34 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
   }
 
   {
+    limparModulo("../modules/engine/importer/importer.service");
+    const { materializarImagemRadarMirrorSeNecessario } = require("../modules/engine/importer/importer.service");
+    const fetchCount = { count: 0 };
+    const saveCount = { count: 0 };
+    const resultado = await materializarImagemRadarMirrorSeNecessario({
+      titulo: "AliExpress com imagem origem",
+      metadata: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: mmg("ali-imagem-origem")
+          }
+        }
+      }
+    }, {
+      fetchImpl: fetchImagemOk(fetchCount),
+      storage: storageDuravel(saveCount, "ali-imagem-origem-materializada"),
+      job: { id: 181766 }
+    });
+
+    assert.strictEqual(resultado.status, "materializada");
+    assert.strictEqual(fetchCount.count, 1);
+    assert.strictEqual(saveCount.count, 1);
+    assert.strictEqual(resultado.urlDuravel, url("ali-imagem-origem-materializada"));
+    assert.strictEqual(resultado.oferta.metadata.radarMirror.midia.imagemMaterializada, url("ali-imagem-origem-materializada"));
+    assert.strictEqual(resultado.oferta.metadata.radarMirror.midia.imagemEnviavel, url("ali-imagem-origem-materializada"));
+  }
+
+  {
     const fetchCount = { count: 0 };
     const { retorno, metadatas } = await fanoutComImagemCanonica({
       metadataEvento: {

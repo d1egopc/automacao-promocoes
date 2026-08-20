@@ -13,6 +13,23 @@ const {
   publicarOfertaConfirmadaVitrine
 } = require("../modules/vitrine/hook");
 
+const DateReal = Date;
+const TESTE_AGORA_MS = DateReal.parse("2026-08-18T15:30:00.000Z");
+
+class DateDeterministica extends DateReal {
+  constructor(...args) {
+    super(...(args.length ? args : [TESTE_AGORA_MS]));
+  }
+
+  static now() {
+    return TESTE_AGORA_MS;
+  }
+}
+
+DateDeterministica.UTC = DateReal.UTC;
+DateDeterministica.parse = DateReal.parse;
+global.Date = DateDeterministica;
+
 const raiz = path.resolve(__dirname, "..");
 const ler = (relativo) => fs.readFileSync(path.join(raiz, relativo), "utf8");
 
