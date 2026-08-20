@@ -4,6 +4,7 @@ const path = require("path");
 const vm = require("vm");
 const linksPuros = require("../modules/links");
 const destinosUtils = require("../utils/destinos");
+const destinosMultiAlvo = require("../utils/destinos-multialvo");
 const {
   resolverCadenciaDestino,
   resolverIntervaloConfiguradoCadencia
@@ -44,6 +45,7 @@ const sandbox = {
   URL,
   linksPuros,
   destinosUtils,
+  destinosMultiAlvo,
   process: { env: {} },
   console: {
     ...console,

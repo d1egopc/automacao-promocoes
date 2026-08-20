@@ -238,6 +238,7 @@ const {
 
 const filaOfertas = require("./utils/fila-ofertas");
 const destinosUtils = require("./utils/destinos");
+const destinosMultiAlvo = require("./utils/destinos-multialvo");
 const integracoesUtils = require("./utils/integracoes");
 const radarCupomMensagem = require("./utils/radar-cupom-mensagem");
 const {
@@ -2671,12 +2672,13 @@ function normalizarModoLinkDestino(valor = "") {
 
 function normalizarDestinoContrato(destino = {}) {
   if (!destino || typeof destino !== "object" || Array.isArray(destino)) return destino;
-  return destinosUtils.normalizarDestinoContratoCategorias({
+  const normalizado = destinosUtils.normalizarDestinoContratoCategorias({
     ...destino,
     templateId: normalizarTemplateIdDestinoContrato(destino.templateId),
     prioridadeCupomAtiva: destino.prioridadeCupomAtiva === true,
     modoLink: normalizarModoLinkDestino(destino.modoLink)
   });
+  return destinosMultiAlvo.aplicarContratoMultiAlvoDestino(normalizado);
 }
 
 function normalizarDestinosContrato(valor) {
@@ -2835,12 +2837,56 @@ async function normalizarDestinosContratoComDiscord(clienteId = "admin", destino
       continue;
     }
 
-    const validado = await validarDestinoDiscord({
-      clienteId,
-      destino,
-      conexoes,
-      httpClient: axios
-    });
+    const alvosDiscord = destinosMultiAlvo.normalizarAlvosDestino(destino);
+    const alvosValidados = [];
+    for (const alvo of alvosDiscord) {
+      const validadoAlvo = await validarDestinoDiscord({
+        clienteId,
+        destino: {
+          ...destino,
+          conexaoId: alvo.conexaoId || destino.conexaoId || destino.sessao || "",
+          sessao: alvo.conexaoId || destino.sessao || destino.conexaoId || "",
+          channelId: alvo.channelId,
+          canalId: alvo.channelId,
+          grupo: alvo.channelId,
+          channelName: alvo.nome || destino.channelName || destino.grupoNome || "",
+          grupoNome: alvo.nome || destino.grupoNome || destino.channelName || ""
+        },
+        conexoes,
+        httpClient: axios
+      });
+      alvosValidados.push({
+        tipo: "discord",
+        alvoId: validadoAlvo.channelId,
+        id: validadoAlvo.channelId,
+        channelId: validadoAlvo.channelId,
+        canalId: validadoAlvo.channelId,
+        conexaoId: validadoAlvo.conexaoId,
+        sessao: validadoAlvo.conexaoId,
+        nome: validadoAlvo.channelName || validadoAlvo.grupoNome || validadoAlvo.channelId
+      });
+    }
+
+    const primeiro = alvosValidados[0];
+    const validado = primeiro
+      ? {
+          ...destino,
+          tipo: "discord",
+          conexaoId: primeiro.conexaoId,
+          sessao: primeiro.conexaoId,
+          channelId: primeiro.channelId,
+          canalId: primeiro.channelId,
+          grupo: primeiro.channelId,
+          channelName: primeiro.nome,
+          grupoNome: primeiro.nome,
+          alvos: alvosValidados
+        }
+      : await validarDestinoDiscord({
+          clienteId,
+          destino,
+          conexoes,
+          httpClient: axios
+        });
     normalizados.push(normalizarDestinoContrato(validado));
   }
 
@@ -4934,6 +4980,11 @@ function destinoJaEnviadoFanout(oferta = {}, destino = {}) {
   const tipo = String(destino?.tipo || destino?.canal || "").trim().toLowerCase();
   const id = String(destino?.id || destino?.destinoId || "").trim();
 
+  const estadoFanout = obterDestinoEstadoFanout(oferta, destino);
+  if (estadoFanout?.snapshotAlvos?.length) {
+    return destinosMultiAlvo.destinoConcluidoPorAlvos(estadoFanout);
+  }
+
   const estadoEnviado = Array.isArray(oferta.destinosEstado)
     ? oferta.destinosEstado.some(item =>
         item?.estado === "enviado" &&
@@ -4947,6 +4998,13 @@ function destinoJaEnviadoFanout(oferta = {}, destino = {}) {
     const idEnviado = String(item?.id || item?.destinoId || "").trim();
     return destinoFanoutId(item) === chave || (tipoEnviado === tipo && id && idEnviado === id);
   });
+}
+
+function obterDestinoEstadoFanout(oferta = {}, destino = {}) {
+  const chave = destinoFanoutId(destino);
+  return Array.isArray(oferta.destinosEstado)
+    ? oferta.destinosEstado.find(item => String(item?.chave || "") === chave) || null
+    : null;
 }
 
 function registrarDestinoEstadoFanout(oferta = {}, destino = {}, estado = "aguardando", dados = {}) {
@@ -4969,7 +5027,13 @@ function registrarDestinoEstadoFanout(oferta = {}, destino = {}, estado = "aguar
     ...anterior,
     ...base,
     proximoEnvioPermitidoEm: dados.proximoEnvioPermitidoEm || "",
-    enviadoEm: estado === "enviado" ? agoraIso : (anterior.enviadoEm || "")
+    enviadoEm: estado === "enviado" ? agoraIso : (anterior.enviadoEm || ""),
+    snapshotAlvos: Array.isArray(dados.snapshotAlvos)
+      ? dados.snapshotAlvos
+      : (Array.isArray(anterior.snapshotAlvos) ? anterior.snapshotAlvos : undefined),
+    alvosEstado: Array.isArray(dados.alvosEstado)
+      ? dados.alvosEstado
+      : (Array.isArray(anterior.alvosEstado) ? anterior.alvosEstado : undefined)
   };
 
   if (index >= 0) {
@@ -4979,6 +5043,51 @@ function registrarDestinoEstadoFanout(oferta = {}, destino = {}, estado = "aguar
   }
 
   return proximo;
+}
+
+function garantirSnapshotAlvosFanout(oferta = {}, destino = {}) {
+  const alvos = destinosMultiAlvo.normalizarAlvosDestino(destino);
+  if (!alvos.length) return null;
+
+  const atual = obterDestinoEstadoFanout(oferta, destino);
+  if (atual?.snapshotAlvos?.length) {
+    const completo = destinosMultiAlvo.criarOuAtualizarSnapshotEstado(atual, destino);
+    atual.snapshotAlvos = completo.snapshotAlvos;
+    atual.alvosEstado = completo.alvosEstado;
+    return atual;
+  }
+
+  return registrarDestinoEstadoFanout(oferta, destino, "aguardando", {
+    motivo: "snapshot_alvos_criado",
+    snapshotAlvos: alvos,
+    alvosEstado: alvos.map(alvo => ({
+      alvoId: destinosMultiAlvo.chaveAlvo(alvo),
+      estado: "pendente",
+      tentativas: 0,
+      enviadoEm: "",
+      erro: ""
+    }))
+  });
+}
+
+function registrarResultadoAlvoFanout(oferta = {}, destino = {}, alvo = {}, resultado = {}) {
+  const estadoAtual = garantirSnapshotAlvosFanout(oferta, destino);
+  if (!estadoAtual) return null;
+
+  const proximo = destinosMultiAlvo.registrarResultadoAlvo(estadoAtual, alvo, resultado);
+  estadoAtual.snapshotAlvos = proximo.snapshotAlvos;
+  estadoAtual.alvosEstado = proximo.alvosEstado;
+  estadoAtual.estado = destinosMultiAlvo.estadoLogicoPorAlvos(proximo);
+  estadoAtual.motivo = resultado.ok ? "envio_confirmado" : (resultado.erro || resultado.motivo || "erro_envio");
+  estadoAtual.atualizadoEm = resultado.enviadoEm || resultado.data || new Date().toISOString();
+  if (estadoAtual.estado === "enviado") estadoAtual.enviadoEm = estadoAtual.atualizadoEm;
+  return estadoAtual;
+}
+
+function alvosPendentesFanout(oferta = {}, destino = {}) {
+  const estadoAtual = garantirSnapshotAlvosFanout(oferta, destino);
+  if (!estadoAtual) return [];
+  return destinosMultiAlvo.alvosPendentesEstado(estadoAtual);
 }
 
 function resumoDestinosEstadoFanout(oferta = {}) {
@@ -5600,6 +5709,7 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
   let tentouEnvio = false;
   let confirmouEnvio = false;
   let contextoFidelidadeExecutor = {};
+  let alvoAtualFanout = null;
 
   try {
     clienteId = String(clienteId || oferta.clienteId || "").trim();
@@ -5687,13 +5797,12 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     return { enviado: false, tentouEnvio: false, motivo: "sessao_offline" };
   }
 
-  const grupos = (destino.gruposWhatsapp || [])
-    .map(g => {
-      if (!g) return null;
-      if (typeof g === "string") return g;
-      return g.id || g.value || g.grupoId || null;
-    })
-    .filter(Boolean);
+  const grupos = alvosPendentesFanout(oferta, destino)
+    .map(alvo => ({
+      alvo,
+      grupo: alvo.grupoId || alvo.id || alvo.value || null
+    }))
+    .filter(item => item.grupo);
 
   if (!grupos.length) {
     logOptimus("WHATSAPP", "Destino sem grupos validos", {
@@ -5707,7 +5816,11 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     return { enviado: false, tentouEnvio: false, motivo: "sem_grupos" };
   }
 
-  for (const grupo of grupos) {
+  for (const itemAlvo of grupos) {
+    const alvoFanout = itemAlvo.alvo;
+    const grupo = itemAlvo.grupo;
+    alvoAtualFanout = alvoFanout;
+
     if (!usuarioTemCreditos(clienteId, 1)) {
       logOptimus("AVISO", "Sem creditos", { clienteId });
       registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
@@ -5859,12 +5972,20 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       conexaoId: destino.conexaoId || "",
       nome: destino.nome || "Destino",
       tipo: "whatsapp",
+      alvoId: destinosMultiAlvo.chaveAlvo(alvoFanout),
       grupo,
       creditos: 1,
       dataEnvio: new Date().toLocaleString("pt-BR", {
         timeZone: "America/Sao_Paulo"
       })
     });
+
+    registrarResultadoAlvoFanout(oferta, destino, alvoFanout, {
+      ok: true,
+      estado: "enviado",
+      enviadoEm: new Date().toISOString()
+    });
+    alvoAtualFanout = null;
 
     await new Promise(r => setTimeout(r, 3000));
   }
@@ -5885,72 +6006,135 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
         return { enviado: false, tentouEnvio: false, motivo: "discord_plano_indisponivel" };
       }
 
-      if (!usuarioTemCreditos(clienteId, 1)) {
-        logOptimus("AVISO", "Sem creditos", { clienteId });
-        registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
-          decisao: "bloqueado",
-          motivo: "sem_creditos",
-          filaRecebeu: true
-        });
-        return { enviado: false, tentouEnvio: false, motivo: "sem_creditos" };
+      const alvosDiscordPendentes = alvosPendentesFanout(oferta, destino);
+      if (!alvosDiscordPendentes.length) {
+        return { enviado: true, tentouEnvio: false, motivo: "alvos_concluidos" };
       }
 
-      let destinoDiscordValidado;
-      try {
-        destinoDiscordValidado = await validarDestinoDiscord({
+      let discordEnviado = false;
+      let ultimoResultadoDiscord = null;
+
+      for (const alvoDiscord of alvosDiscordPendentes) {
+        alvoAtualFanout = alvoDiscord;
+
+        if (!usuarioTemCreditos(clienteId, 1)) {
+          logOptimus("AVISO", "Sem creditos", { clienteId });
+          registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+            decisao: "bloqueado",
+            motivo: "sem_creditos",
+            filaRecebeu: true
+          });
+          return { enviado: false, tentouEnvio, parcial: discordEnviado, motivo: "sem_creditos" };
+        }
+
+        const destinoDiscordAlvo = {
+          ...destino,
+          conexaoId: alvoDiscord.conexaoId || destino.conexaoId || destino.sessao || "",
+          sessao: alvoDiscord.conexaoId || destino.sessao || destino.conexaoId || "",
+          channelId: alvoDiscord.channelId,
+          canalId: alvoDiscord.channelId,
+          grupo: alvoDiscord.channelId,
+          channelName: alvoDiscord.nome || destino.channelName || destino.grupoNome || "",
+          grupoNome: alvoDiscord.nome || destino.grupoNome || destino.channelName || ""
+        };
+
+        let destinoDiscordValidado;
+        try {
+          destinoDiscordValidado = await validarDestinoDiscord({
+            clienteId,
+            destino: destinoDiscordAlvo,
+            conexoes: listarConexoesDiscord(clienteId),
+            env: process.env,
+            httpClient: axios
+          });
+        } catch (erroValidacaoDiscord) {
+          const motivoDiscord = erroValidacaoDiscord?.message || "discord_destino_indisponivel";
+          registrarResultadoAlvoFanout(oferta, destino, alvoDiscord, {
+            ok: false,
+            estado: "falha",
+            erro: motivoDiscord
+          });
+          registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destinoDiscordAlvo, {
+            decisao: "bloqueado",
+            motivo: motivoDiscord,
+            filaRecebeu: true
+          });
+          alvoAtualFanout = null;
+          continue;
+        }
+
+        const imagemEnvioExecutor = avaliarImagemEnviavelExecutor(oferta, destinoDiscordValidado);
+        tentouEnvio = true;
+        registrarCoberturaExecutor("executor_inicio", oferta, clienteId, destinoDiscordValidado, {
+          decisao: "iniciado",
+          destinoId: destinoDiscordValidado.id || destinoDiscordValidado.destinoId || "",
+          channelId: destinoDiscordValidado.channelId || "",
+          tentativaEnvio: true,
+          filaRecebeu: true
+        });
+        fidelidadeObs.registrarExecutor("executor_entrada", {
+          ...contextoFidelidadeExecutor,
+          canal: "discord",
           clienteId,
-          destino,
-          conexoes: listarConexoesDiscord(clienteId),
+          destino: destinoDiscordValidado.nome || destinoDiscordValidado.id || "",
+          tipoMidia: destinoDiscordValidado.tipoMidia || "",
+          oferta,
+          imagem: oferta.imagem || "",
+          tentativaImagem: imagemEnvioExecutor.ok,
+          caiuParaTexto: !imagemEnvioExecutor.ok,
+          motivoTecnico: imagemEnvioExecutor.ok ? "" : imagemEnvioExecutor.motivo
+        });
+
+        const resultadoDiscord = await enviarDiscord({
+          channelId: destinoDiscordValidado.channelId,
+          mensagem,
+          imagemUrl: imagemEnvioExecutor.ok ? imagemEnvioExecutor.url : "",
           env: process.env,
           httpClient: axios
         });
-      } catch (erroValidacaoDiscord) {
-        const motivoDiscord = erroValidacaoDiscord?.message || "discord_destino_indisponivel";
-        registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
-          decisao: "bloqueado",
-          motivo: motivoDiscord,
-          filaRecebeu: true
-        });
-        return { enviado: false, tentouEnvio: false, motivo: motivoDiscord };
-      }
+        ultimoResultadoDiscord = resultadoDiscord;
 
-      const imagemEnvioExecutor = avaliarImagemEnviavelExecutor(oferta, destinoDiscordValidado);
-      tentouEnvio = true;
-      registrarCoberturaExecutor("executor_inicio", oferta, clienteId, destinoDiscordValidado, {
-        decisao: "iniciado",
-        destinoId: destinoDiscordValidado.id || destinoDiscordValidado.destinoId || "",
-        channelId: destinoDiscordValidado.channelId || "",
-        tentativaEnvio: true,
-        filaRecebeu: true
-      });
-      fidelidadeObs.registrarExecutor("executor_entrada", {
-        ...contextoFidelidadeExecutor,
-        canal: "discord",
-        clienteId,
-        destino: destinoDiscordValidado.nome || destinoDiscordValidado.id || "",
-        tipoMidia: destinoDiscordValidado.tipoMidia || "",
-        oferta,
-        imagem: oferta.imagem || "",
-        tentativaImagem: imagemEnvioExecutor.ok,
-        caiuParaTexto: !imagemEnvioExecutor.ok,
-        motivoTecnico: imagemEnvioExecutor.ok ? "" : imagemEnvioExecutor.motivo
-      });
+        if (!resultadoDiscord?.ok) {
+          const motivoDiscord = resultadoDiscord?.erro || "discord_nao_enviado";
+          registrarResultadoAlvoFanout(oferta, destino, alvoDiscord, {
+            ok: false,
+            estado: "falha",
+            erro: motivoDiscord
+          });
+          registrarCoberturaExecutor("executor_erro", oferta, clienteId, destinoDiscordValidado, {
+            decisao: "erro",
+            motivo: motivoDiscord,
+            tentativaEnvio: true,
+            erroEnvio: motivoDiscord,
+            filaRecebeu: true
+          });
+          fidelidadeObs.registrarExecutor("executor_resultado", {
+            ...contextoFidelidadeExecutor,
+            canal: "discord",
+            clienteId,
+            destino: destinoDiscordValidado.nome || destinoDiscordValidado.id || "",
+            tipoMidia: destinoDiscordValidado.tipoMidia || "",
+            oferta,
+            imagem: oferta.imagem || "",
+            tentativaImagem: imagemEnvioExecutor.ok,
+            caiuParaTexto: !imagemEnvioExecutor.ok,
+            resultado: "erro",
+            motivoTecnico: motivoDiscord
+          });
+          alvoAtualFanout = null;
+          continue;
+        }
 
-      const resultadoDiscord = await enviarDiscord({
-        channelId: destinoDiscordValidado.channelId,
-        mensagem,
-        imagemUrl: imagemEnvioExecutor.ok ? imagemEnvioExecutor.url : "",
-        env: process.env,
-        httpClient: axios
-      });
-
-      if (!resultadoDiscord?.ok) {
-        const motivoDiscord = resultadoDiscord?.erro || "discord_nao_enviado";
-        registrarCoberturaExecutor("executor_erro", oferta, clienteId, destinoDiscordValidado, {
-          decisao: "erro",
-          motivo: motivoDiscord,
+        debitarCreditos(clienteId, 1);
+        confirmouEnvio = true;
+        discordEnviado = true;
+        registrarCoberturaExecutor("executor_enviado", oferta, clienteId, destinoDiscordValidado, {
+          decisao: "enviado",
+          motivo: "envio_confirmado",
+          destinoId: destinoDiscordValidado.id || destinoDiscordValidado.destinoId || "",
+          channelId: destinoDiscordValidado.channelId || "",
           tentativaEnvio: true,
-          erroEnvio: motivoDiscord,
+          enviadoEm: resultadoDiscord.enviadoEm || new Date().toISOString(),
           filaRecebeu: true
         });
         fidelidadeObs.registrarExecutor("executor_resultado", {
@@ -5963,71 +6147,63 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           imagem: oferta.imagem || "",
           tentativaImagem: imagemEnvioExecutor.ok,
           caiuParaTexto: !imagemEnvioExecutor.ok,
-          resultado: "erro",
-          motivoTecnico: motivoDiscord
+          resultado: "enviado",
+          messageId: resultadoDiscord.messageId || "",
+          statusHttp: resultadoDiscord.statusHttp || null,
+          imagemEnviada: resultadoDiscord.imagemEnviada === true
         });
-        return { enviado: false, tentouEnvio: true, motivo: motivoDiscord, erro: motivoDiscord };
+
+        logOptimus("DISCORD", "Mensagem enviada", {
+          clienteId,
+          destino: destinoDiscordValidado.nome,
+          channelId: destinoDiscordValidado.channelId,
+          messageId: resultadoDiscord.messageId || ""
+        });
+
+        oferta.destinosEnviados = oferta.destinosEnviados || [];
+        oferta.destinosEnviados.push({
+          clienteId,
+          id: destinoDiscordValidado.id || "",
+          destinoId: destinoDiscordValidado.id || "",
+          conexaoId: destinoDiscordValidado.conexaoId || "",
+          nome: destinoDiscordValidado.nome || "Destino Discord",
+          tipo: "discord",
+          alvoId: destinosMultiAlvo.chaveAlvo(alvoDiscord),
+          channelId: destinoDiscordValidado.channelId || "",
+          channelName: destinoDiscordValidado.channelName || destinoDiscordValidado.grupoNome || "",
+          messageId: resultadoDiscord.messageId || "",
+          statusHttp: resultadoDiscord.statusHttp || null,
+          imagemEnviada: resultadoDiscord.imagemEnviada === true,
+          creditos: 1,
+          dataEnvio: new Date().toLocaleString("pt-BR", {
+            timeZone: "America/Sao_Paulo"
+          })
+        });
+
+        registrarResultadoAlvoFanout(oferta, destino, alvoDiscord, {
+          ok: true,
+          estado: "enviado",
+          enviadoEm: resultadoDiscord.enviadoEm || new Date().toISOString()
+        });
+        alvoAtualFanout = null;
       }
 
-      debitarCreditos(clienteId, 1);
-      confirmouEnvio = true;
-      registrarCoberturaExecutor("executor_enviado", oferta, clienteId, destinoDiscordValidado, {
-        decisao: "enviado",
-        motivo: "envio_confirmado",
-        destinoId: destinoDiscordValidado.id || destinoDiscordValidado.destinoId || "",
-        channelId: destinoDiscordValidado.channelId || "",
-        tentativaEnvio: true,
-        enviadoEm: resultadoDiscord.enviadoEm || new Date().toISOString(),
-        filaRecebeu: true
-      });
-      fidelidadeObs.registrarExecutor("executor_resultado", {
-        ...contextoFidelidadeExecutor,
-        canal: "discord",
-        clienteId,
-        destino: destinoDiscordValidado.nome || destinoDiscordValidado.id || "",
-        tipoMidia: destinoDiscordValidado.tipoMidia || "",
-        oferta,
-        imagem: oferta.imagem || "",
-        tentativaImagem: imagemEnvioExecutor.ok,
-        caiuParaTexto: !imagemEnvioExecutor.ok,
-        resultado: "enviado",
-        messageId: resultadoDiscord.messageId || "",
-        statusHttp: resultadoDiscord.statusHttp || null,
-        imagemEnviada: resultadoDiscord.imagemEnviada === true
-      });
-
-      logOptimus("DISCORD", "Mensagem enviada", {
-        clienteId,
-        destino: destinoDiscordValidado.nome,
-        channelId: destinoDiscordValidado.channelId,
-        messageId: resultadoDiscord.messageId || ""
-      });
-
-      oferta.destinosEnviados = oferta.destinosEnviados || [];
-      oferta.destinosEnviados.push({
-        clienteId,
-        id: destinoDiscordValidado.id || "",
-        destinoId: destinoDiscordValidado.id || "",
-        conexaoId: destinoDiscordValidado.conexaoId || "",
-        nome: destinoDiscordValidado.nome || "Destino Discord",
-        tipo: "discord",
-        channelId: destinoDiscordValidado.channelId || "",
-        channelName: destinoDiscordValidado.channelName || destinoDiscordValidado.grupoNome || "",
-        messageId: resultadoDiscord.messageId || "",
-        statusHttp: resultadoDiscord.statusHttp || null,
-        imagemEnviada: resultadoDiscord.imagemEnviada === true,
-        creditos: 1,
-        dataEnvio: new Date().toLocaleString("pt-BR", {
-          timeZone: "America/Sao_Paulo"
-        })
-      });
+      const estadoDiscord = obterDestinoEstadoFanout(oferta, destino);
+      if (destinosMultiAlvo.destinoEnviadoPorAlvos(estadoDiscord)) {
+        return {
+          enviado: true,
+          tentouEnvio: true,
+          messageId: ultimoResultadoDiscord?.messageId || "",
+          statusHttp: ultimoResultadoDiscord?.statusHttp || null,
+          imagemEnviada: ultimoResultadoDiscord?.imagemEnviada === true
+        };
+      }
 
       return {
-        enviado: true,
-        tentouEnvio: true,
-        messageId: resultadoDiscord.messageId || "",
-        statusHttp: resultadoDiscord.statusHttp || null,
-        imagemEnviada: resultadoDiscord.imagemEnviada === true
+        enviado: false,
+        tentouEnvio,
+        parcial: discordEnviado,
+        motivo: discordEnviado ? "alvos_pendentes" : "discord_nao_enviado"
       };
     }
 
@@ -6402,6 +6578,14 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       filaRecebeu: true
     });
 
+    if (alvoAtualFanout) {
+      registrarResultadoAlvoFanout(oferta, destino, alvoAtualFanout, {
+        ok: false,
+        estado: "falha",
+        erro: e.message || "erro_envio"
+      });
+    }
+
     if (String(destino?.tipo || "").toLowerCase() === "telegram") {
       logFilaTelegramDebug({
         clienteId,
@@ -6416,6 +6600,15 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
         vaiEnviar: false,
         resultado: e.message || "erro"
       });
+    }
+
+    const estadoMultiAlvo = obterDestinoEstadoFanout(oferta, destino);
+    if (
+      confirmouEnvio &&
+      estadoMultiAlvo?.snapshotAlvos?.length &&
+      !destinosMultiAlvo.destinoEnviadoPorAlvos(estadoMultiAlvo)
+    ) {
+      return { enviado: false, tentouEnvio: true, parcial: true, motivo: "alvos_pendentes", erro: e.message };
     }
 
     if (confirmouEnvio) {
@@ -7391,13 +7584,14 @@ for (const item of destinosOrdenados) {
   const tentouEnvioReal = resultadoTentouEnvio(resultadoEnvio);
   if (tentouEnvioReal) destinosTentadosDebug += 1;
   if (resultadoEnvio.enviado !== true) {
+    const parcialMultiAlvo = resultadoEnvio.parcial === true || resultadoEnvio.motivo === "alvos_pendentes";
     motivosSemEnvio.push(resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado");
-    registrarDestinoEstadoFanout(oferta, destino, tentouEnvioReal ? "erro_definitivo" : "aguardando", {
+    registrarDestinoEstadoFanout(oferta, destino, parcialMultiAlvo ? "aguardando" : (tentouEnvioReal ? "erro_definitivo" : "aguardando"), {
       motivo: resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado"
     });
     marcarFilaAlterada();
     registrarCoberturaExecutor(tentouEnvioReal ? "executor_erro" : "executor_ignorado", oferta, clienteId, destino, {
-      decisao: tentouEnvioReal ? "erro" : "ignorado",
+      decisao: parcialMultiAlvo ? "parcial" : (tentouEnvioReal ? "erro" : "ignorado"),
       motivo: motivoCoberturaDestino(resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado"),
       tentativaEnvio: tentouEnvioReal,
       erroEnvio: resultadoEnvio.erro || "",

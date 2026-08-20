@@ -18,6 +18,16 @@ function antes(deveVirAntes, deveVirDepois, mensagem) {
   assert.ok(inicio < fim, mensagem);
 }
 
+function antesDepoisDe(marcador, deveVirAntes, deveVirDepois, mensagem) {
+  const base = fonte.indexOf(marcador);
+  assert.ok(base >= 0, `marcador ausente: ${marcador}`);
+  const inicio = fonte.indexOf(deveVirAntes, base);
+  const fim = fonte.indexOf(deveVirDepois, base);
+  assert.ok(inicio >= 0, `trecho inicial ausente apos marcador: ${deveVirAntes}`);
+  assert.ok(fim >= 0, `trecho final ausente apos marcador: ${deveVirDepois}`);
+  assert.ok(inicio < fim, mensagem);
+}
+
 contem("function destinoFanoutId", "deve existir chave estavel por destino");
 contem("function registrarDestinoEstadoFanout", "deve persistir estado por braco");
 contem("function resumoDestinosEstadoFanout", "deve resumir estados por braco");
@@ -26,7 +36,7 @@ contem('motivo: "destino_compativel"', "destino compativel deve ser identificado
 contem('registrarDestinoEstadoFanout(oferta, destino, "aguardando"', "destino compativel nasce aguardando no loop efetivo");
 contem('registrarDestinoEstadoFanout(oferta, destino, "nao_compativel"', "destino rejeitado deve ser preservado como nao compativel");
 contem('registrarDestinoEstadoFanout(oferta, destino, "aguardando",', "gates temporarios devem manter braco aguardando");
-contem('registrarDestinoEstadoFanout(oferta, destino, tentouEnvioReal ? "erro_definitivo" : "aguardando"', "falha real deve virar erro definitivo e bloqueio sem tentativa deve aguardar");
+contem('parcialMultiAlvo ? "aguardando" : (tentouEnvioReal ? "erro_definitivo" : "aguardando")', "falha parcial multialvo deve aguardar retry e falha real comum deve virar erro definitivo");
 contem('registrarDestinoEstadoFanout(oferta, destino, "enviado"', "sucesso deve marcar braco enviado");
 contem("if (destinoJaEnviadoFanout(oferta, destino))", "destino ja enviado deve ser identificado na continuacao");
 contem("continue;", "destino ja enviado nao deve ser tentado novamente");
@@ -41,7 +51,8 @@ antes(
   "skip de destino ja enviado precisa acontecer antes da chamada de envio"
 );
 
-antes(
+antesDepoisDe(
+  "for (const item of destinosOrdenados)",
   'motivo: "destino_compativel"',
   "if (!destinoDentroHorario(destino))",
   "braco compativel precisa estar aguardando antes dos gates temporarios"
