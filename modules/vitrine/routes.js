@@ -2,6 +2,10 @@
 
 const express = require("express");
 const storage = require("./storage");
+const socialMediaStorage = require("../social/social-media-storage");
+
+const VITRINE_LOGO_UPLOAD_MIMES = ["image/jpeg", "image/png", "image/webp"];
+const VITRINE_LOGO_UPLOAD_MAX_BYTES = 7 * 1024 * 1024;
 
 function statusErro(erro) {
   return erro.statusCode || 500;
@@ -27,7 +31,10 @@ function criarRotasVitrine(deps = {}) {
   if (publico) {
     router.get("/v/:slug", (req, res) => {
       try {
-        const vitrine = storage.buscarVitrinePublicaPorSlug(req.params.slug, deps);
+        const vitrine = storage.buscarVitrinePublicaPorSlug(req.params.slug, deps, {
+          page: req.query.page,
+          limit: req.query.limit
+        });
         if (!vitrine) {
           return res.status(404).json({ ok: false, erro: "vitrine_nao_encontrada" });
         }
@@ -73,6 +80,57 @@ function criarRotasVitrine(deps = {}) {
       return res.status(statusErro(erro)).json(payloadErro(erro));
     }
   });
+
+  router.post(
+    "/vitrine/logo/upload",
+    express.raw({ type: VITRINE_LOGO_UPLOAD_MIMES, limit: VITRINE_LOGO_UPLOAD_MAX_BYTES }),
+    (req, res) => {
+      if (!exigirRecursoVitrine(req, res)) return;
+
+      try {
+        const clienteId = clienteAtual(req, deps);
+        const resultado = socialMediaStorage.salvar({
+          clienteId,
+          buffer: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
+          mimeType: req.headers["content-type"] || "",
+          nomeLogico: "vitrine_logo"
+        });
+        return res.json({
+          ok: true,
+          clienteId,
+          logoUrl: resultado.url,
+          midia: {
+            url: resultado.url,
+            mimeType: resultado.mimeType,
+            tipo: resultado.tipo,
+            bytes: resultado.bytes,
+            hash: String(resultado.hash || "").slice(0, 12)
+          }
+        });
+      } catch (erro) {
+        const codigo =
+          erro?.message === "social_media_arquivo_muito_grande"
+            ? "vitrine_logo_tamanho_excedido"
+            : erro?.message === "social_media_tipo_invalido"
+              ? "vitrine_logo_tipo_invalido"
+              : erro?.message === "social_media_arquivo_obrigatorio"
+                ? "vitrine_logo_arquivo_obrigatorio"
+                : erro?.message || "vitrine_logo_upload_falhou";
+        const status = erro?.message === "social_media_storage_nao_configurado" ? 501 : 400;
+        return res.status(status).json({ ok: false, erro: codigo, codigo });
+      }
+    },
+    (erro, req, res, next) => {
+      if (erro?.type === "entity.too.large") {
+        return res.status(413).json({
+          ok: false,
+          erro: "vitrine_logo_tamanho_excedido",
+          codigo: "vitrine_logo_tamanho_excedido"
+        });
+      }
+      return next(erro);
+    }
+  );
 
   router.put("/vitrine/config", (req, res) => {
     if (!exigirRecursoVitrine(req, res)) return;

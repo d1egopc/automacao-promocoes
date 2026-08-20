@@ -531,7 +531,7 @@ assert.strictEqual(storage.lerVitrineWorkspace("workspace-b", depsIsolamento).of
 
 const muitas = [];
 const agora = Date.now();
-for (let i = 0; i < 55; i += 1) {
+for (let i = 0; i < 105; i += 1) {
   muitas.push({
     id: `item-${i}`,
     titulo: `Item ${i}`,
@@ -539,10 +539,10 @@ for (let i = 0; i < 55; i += 1) {
     linksComerciais: [{ papel: "link_produto", urlOptimus: "https://go.optimuspromo.com.br/r/produto", renderizavel: true }]
   });
 }
-muitas.push({ id: "velho", titulo: "Velho", ultimoEnvioEm: new Date(agora - 25 * 60 * 60 * 1000).toISOString() });
+muitas.push({ id: "velho", titulo: "Velho", ultimoEnvioEm: new Date(agora - 73 * 60 * 60 * 1000).toISOString() });
 const retidas = storage.aplicarRetencaoOfertas(muitas, agora);
-assert.strictEqual(retidas.length, 50, "Retencao 50 continua valendo");
-assert.ok(!retidas.some(item => item.id === "velho"), "Retencao 24h continua valendo");
+assert.strictEqual(retidas.length, 100, "Retencao 100 continua valendo");
+assert.ok(!retidas.some(item => item.id === "velho"), "Retencao 72h continua valendo");
 
 const index = ler("index.js");
 assert.ok(index.includes('require("./modules/vitrine/hook")'), "index deve usar hook da Vitrine");

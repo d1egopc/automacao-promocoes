@@ -2,6 +2,7 @@
 
 const assert = require("assert");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const express = require("express");
 const criarRotasVitrine = require("../modules/vitrine/routes");
@@ -77,6 +78,45 @@ function request(app, metodo, url, body, headers = {}) {
   });
 }
 
+function requestRaw(app, metodo, url, body = Buffer.alloc(0), headers = {}) {
+  return new Promise((resolve, reject) => {
+    const server = app.listen(0, "127.0.0.1", () => {
+      const endereco = server.address();
+      const payload = Buffer.isBuffer(body) ? body : Buffer.from(String(body || ""));
+      const req = require("http").request({
+        hostname: "127.0.0.1",
+        port: endereco.port,
+        path: url,
+        method: metodo,
+        headers: {
+          "content-length": payload.length,
+          ...headers
+        }
+      }, (res) => {
+        let dados = "";
+        res.on("data", (chunk) => { dados += chunk; });
+        res.on("end", () => {
+          server.close();
+          resolve({
+            status: res.statusCode,
+            body: dados ? JSON.parse(dados) : null
+          });
+        });
+      });
+      req.on("error", (erro) => {
+        server.close();
+        reject(erro);
+      });
+      if (payload.length) req.write(payload);
+      req.end();
+    });
+  });
+}
+
+function png() {
+  return Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.alloc(16)]);
+}
+
 async function main() {
   assert.strictEqual(storage.normalizarSlug("Minha Vitrine Oficial"), "minha-vitrine-oficial");
   assert.throws(() => storage.normalizarSlug("admin"), /slug_reservado/);
@@ -128,7 +168,7 @@ async function main() {
 
   const agora = Date.now();
   const ofertas = [];
-  for (let i = 0; i < 55; i += 1) {
+  for (let i = 0; i < 110; i += 1) {
     ofertas.push({
       id: `oferta-${i}`,
       titulo: `Oferta ${i}`,
@@ -149,15 +189,20 @@ async function main() {
   ofertas.push({
     id: "velha",
     titulo: "Oferta velha",
-    ultimoEnvioEm: new Date(agora - 25 * 60 * 60 * 1000).toISOString()
+    ultimoEnvioEm: new Date(agora - 73 * 60 * 60 * 1000).toISOString()
   });
 
   const retidas = storage.aplicarRetencaoOfertas(ofertas, agora);
-  assert.strictEqual(retidas.length, storage.VITRINE_MAX_OFERTAS, "Retencao deve limitar a 50 ofertas");
-  assert.ok(!retidas.some((oferta) => oferta.id === "velha"), "Retencao deve remover ofertas acima de 24h");
+  assert.strictEqual(retidas.length, storage.VITRINE_MAX_OFERTAS, "Retencao deve limitar a 100 ofertas");
+  assert.ok(!retidas.some((oferta) => oferta.id === "velha"), "Retencao deve remover ofertas acima de 72h");
   assert.ok(!retidas.some((oferta) => oferta.clienteId || oferta.engineJobId || oferta.token), "Payload publico deve ser sanitizado");
   assert.strictEqual(retidas[0].linksComerciais.length, 1, "CTA comercial publico deve usar apenas redirect Optimus");
   assert.strictEqual(retidas[0].linksComerciais[0].url, "https://go.optimuspromo.com.br/r/abc123");
+  const pagina = storage.paginarOfertasPublicas(ofertas, { page: 2, limit: 20 });
+  assert.strictEqual(pagina.ofertas.length, 20, "Paginacao publica deve respeitar limit");
+  assert.strictEqual(pagina.pagination.page, 2);
+  assert.strictEqual(pagina.pagination.total, storage.VITRINE_MAX_OFERTAS);
+  assert.strictEqual(pagina.ofertas[0].id, "oferta-20", "Pagina 2 deve continuar ordenada por ofertas mais novas");
 
   const upsertDeps = criarDeps();
   storage.salvarConfigVitrine("cliente-upsert", { ativa: true, slug: "upsert", nomePublico: "Upsert" }, upsertDeps);
@@ -189,11 +234,58 @@ async function main() {
   assert.strictEqual(comRecurso.status, 200);
   assert.strictEqual(comRecurso.body.config.slug, "loja-a");
 
+  const storageDir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-vitrine-logo-"));
+  const envStorageDir = process.env.SOCIAL_MEDIA_STORAGE_DIR;
+  const envStorageBase = process.env.SOCIAL_MEDIA_PUBLIC_BASE_URL;
+  const envStorageMax = process.env.SOCIAL_MEDIA_MAX_BYTES;
+  try {
+    process.env.SOCIAL_MEDIA_STORAGE_DIR = storageDir;
+    process.env.SOCIAL_MEDIA_PUBLIC_BASE_URL = "https://cdn-media.optimus.test/social/midia/publica/";
+    process.env.SOCIAL_MEDIA_MAX_BYTES = String(7 * 1024 * 1024);
+
+    const logoUpload = await requestRaw(appAuth, "POST", "/vitrine/logo/upload", png(), {
+      "content-type": "image/png",
+      "x-cliente": "cliente-a",
+      "x-vitrine": "1"
+    });
+    assert.strictEqual(logoUpload.status, 200);
+    assert.ok(logoUpload.body.logoUrl.includes("/cliente-a/vitrine_logo_"), "Upload deve retornar logoUrl publica por workspace");
+
+    const logoSemRecurso = await requestRaw(appAuth, "POST", "/vitrine/logo/upload", png(), {
+      "content-type": "image/png",
+      "x-cliente": "cliente-a"
+    });
+    assert.strictEqual(logoSemRecurso.status, 403, "Upload de logo deve exigir recurso vitrine");
+
+    const logoTipoInvalido = await requestRaw(appAuth, "POST", "/vitrine/logo/upload", Buffer.from("gif89"), {
+      "content-type": "image/gif",
+      "x-cliente": "cliente-a",
+      "x-vitrine": "1"
+    });
+    assert.strictEqual(logoTipoInvalido.status, 400, "Upload deve aceitar somente JPEG/PNG/WebP");
+  } finally {
+    if (envStorageDir === undefined) delete process.env.SOCIAL_MEDIA_STORAGE_DIR;
+    else process.env.SOCIAL_MEDIA_STORAGE_DIR = envStorageDir;
+    if (envStorageBase === undefined) delete process.env.SOCIAL_MEDIA_PUBLIC_BASE_URL;
+    else process.env.SOCIAL_MEDIA_PUBLIC_BASE_URL = envStorageBase;
+    if (envStorageMax === undefined) delete process.env.SOCIAL_MEDIA_MAX_BYTES;
+    else process.env.SOCIAL_MEDIA_MAX_BYTES = envStorageMax;
+    fs.rmSync(storageDir, { recursive: true, force: true });
+  }
+
+  storage.salvarVitrineWorkspace("cliente-a", {
+    ...storage.lerVitrineWorkspace("cliente-a", deps),
+    ofertas
+  }, deps);
+
   const appPublico = express();
   appPublico.use(criarRotasVitrine({ publico: true, ...deps }));
-  const publicoOk = await request(appPublico, "GET", "/v/loja-a");
+  const publicoOk = await request(appPublico, "GET", "/v/loja-a?page=2&limit=20");
   assert.strictEqual(publicoOk.status, 200);
   assert.strictEqual(publicoOk.body.vitrine.slug, "loja-a");
+  assert.strictEqual(publicoOk.body.vitrine.ofertas.length, 20);
+  assert.strictEqual(publicoOk.body.vitrine.pagination.page, 2);
+  assert.strictEqual(publicoOk.body.vitrine.pagination.total, storage.VITRINE_MAX_OFERTAS);
 
   const publicoInativo = await request(appPublico, "GET", "/v/loja-inativa");
   assert.strictEqual(publicoInativo.status, 404);
@@ -211,6 +303,7 @@ async function main() {
   const routes = ler("modules/vitrine/routes.js");
   assert.ok(routes.includes('router.get("/v/:slug"'), "Endpoint publico GET /v/:slug deve existir");
   assert.ok(routes.includes('router.get("/vitrine"'), "GET autenticado /vitrine deve existir");
+  assert.ok(routes.includes('"/vitrine/logo/upload"'), "Upload de logo da Vitrine deve existir");
   assert.ok(routes.includes('router.put("/vitrine/config"'), "PUT autenticado /vitrine/config deve existir");
   assert.ok(routes.includes('usuarioTemRecurso(req, "vitrine")'), "Rotas autenticadas devem exigir recurso de plano vitrine");
   assert.ok(!routes.includes("Distributor") && !routes.includes("FANOUT") && !routes.includes("Executor"), "Vitrine nao deve tocar fluxo operacional");

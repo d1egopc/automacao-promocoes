@@ -2,8 +2,10 @@
 
 const ARQUIVO_VITRINE = "vitrine.json";
 const ARQUIVO_SLUGS = "vitrine-slugs.json";
-const VITRINE_RETENCAO_MS = 24 * 60 * 60 * 1000;
-const VITRINE_MAX_OFERTAS = 50;
+const VITRINE_RETENCAO_MS = 72 * 60 * 60 * 1000;
+const VITRINE_MAX_OFERTAS = 100;
+const VITRINE_LIMIT_PADRAO = 20;
+const VITRINE_LIMIT_MAXIMO = 50;
 
 const SLUGS_RESERVADOS = new Set([
   "admin",
@@ -407,6 +409,35 @@ function aplicarRetencaoOfertas(ofertas = [], agora = Date.now()) {
     .map(sanitizarOfertaPublica);
 }
 
+function normalizarPaginacao(opcoes = {}) {
+  const page = Math.max(1, Math.floor(Number(opcoes.page) || 1));
+  const limitBruto = Math.floor(Number(opcoes.limit) || VITRINE_LIMIT_PADRAO);
+  const limit = Math.max(1, Math.min(VITRINE_LIMIT_MAXIMO, limitBruto));
+  const offset = (page - 1) * limit;
+  return { page, limit, offset };
+}
+
+function paginarOfertasPublicas(ofertas = [], opcoes = {}) {
+  const retidas = aplicarRetencaoOfertas(ofertas);
+  const { page, limit, offset } = normalizarPaginacao(opcoes);
+  const total = retidas.length;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const pageFinal = Math.min(page, totalPages);
+  const offsetFinal = (pageFinal - 1) * limit;
+
+  return {
+    ofertas: retidas.slice(offsetFinal, offsetFinal + limit),
+    pagination: {
+      page: pageFinal,
+      limit,
+      total,
+      totalPages,
+      hasPrev: pageFinal > 1,
+      hasNext: pageFinal < totalPages
+    }
+  };
+}
+
 function chaveOferta(oferta = {}) {
   return texto(oferta.idPublico || oferta.ofertaId || oferta.id || oferta.linkAfiliado || oferta.titulo || "");
 }
@@ -447,8 +478,9 @@ function payloadConfig(config = {}) {
   };
 }
 
-function payloadPublico(vitrine = {}) {
+function payloadPublico(vitrine = {}, opcoes = {}) {
   const config = payloadConfig(vitrine.config || {});
+  const pagina = paginarOfertasPublicas(vitrine.ofertas || [], opcoes);
   return {
     slug: config.slug,
     nomePublico: config.nomePublico,
@@ -456,11 +488,12 @@ function payloadPublico(vitrine = {}) {
     descricao: config.descricao,
     links: config.links,
     atualizadoEm: config.atualizadoEm,
-    ofertas: aplicarRetencaoOfertas(vitrine.ofertas || [])
+    ofertas: pagina.ofertas,
+    pagination: pagina.pagination
   };
 }
 
-function buscarVitrinePublicaPorSlug(slugEntrada = "", deps = {}) {
+function buscarVitrinePublicaPorSlug(slugEntrada = "", deps = {}, opcoes = {}) {
   const slug = normalizarSlug(slugEntrada);
   const indice = lerIndiceSlugs(deps);
   const clienteId = indice.slugs[slug];
@@ -470,7 +503,7 @@ function buscarVitrinePublicaPorSlug(slugEntrada = "", deps = {}) {
   if (vitrine.config.ativa !== true) return null;
   if (vitrine.config.slug !== slug) return null;
 
-  return payloadPublico(vitrine);
+  return payloadPublico(vitrine, opcoes);
 }
 
 module.exports = {
@@ -479,6 +512,8 @@ module.exports = {
   SLUGS_RESERVADOS,
   VITRINE_MAX_OFERTAS,
   VITRINE_RETENCAO_MS,
+  VITRINE_LIMIT_MAXIMO,
+  VITRINE_LIMIT_PADRAO,
   aplicarRetencaoOfertas,
   buscarVitrinePublicaPorSlug,
   contemHtml,
@@ -488,6 +523,7 @@ module.exports = {
   normalizarUrlHttps,
   payloadConfig,
   payloadPublico,
+  paginarOfertasPublicas,
   salvarConfigVitrine,
   salvarVitrineWorkspace,
   sanitizarOfertaPublica,
