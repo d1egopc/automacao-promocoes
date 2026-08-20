@@ -7,7 +7,8 @@ const {
   metadataSanitizada,
   montarChaveIdempotencia,
   normalizarEventoComercial,
-  registrarEventoComercialSeguro
+  registrarEventoComercialSeguro,
+  registrarExecutorEnviado
 } = require("../modules/engine/ofc/commercial-events.service");
 const {
   calcularFluxoComercialShadow,
@@ -81,6 +82,58 @@ assert.strictEqual(
   });
   assert.strictEqual(falha.ok, false);
   assert.strictEqual(falha.motivo, "db_falhou");
+
+  const enviosPorBraco = [];
+  await registrarExecutorEnviado({
+    clienteId: "user_a",
+    oferta: {
+      engineOfertaId: 123,
+      engineJobId: 456,
+      id: "fila_1",
+      marketplace: "mercadolivre",
+      status: "enviado"
+    },
+    destinosEnviados: 2,
+    destinosDetalhes: [
+      {
+        workspaceId: "user_a",
+        destinoId: "whats_1",
+        canal: "whatsapp",
+        intervaloConfiguradoMin: 4,
+        intervaloEfetivoMin: 1.5,
+        turboAplicado: true,
+        ultimoEnvioEm: "2026-08-20T03:00:00.000Z",
+        proximoPermitidoEm: "2026-08-20T03:03:00.000Z",
+        selecionadoEm: "2026-08-20T02:59:59.000Z",
+        enviadoEm: "2026-08-20T03:00:00.000Z",
+        atrasoOperacionalMs: 1000
+      },
+      {
+        workspaceId: "user_a",
+        destinoId: "tg_1",
+        canal: "telegram",
+        intervaloConfiguradoMin: 4,
+        intervaloEfetivoMin: 4,
+        turboAplicado: false,
+        ultimoEnvioEm: "2026-08-20T03:00:01.000Z",
+        proximoPermitidoEm: "2026-08-20T03:04:01.000Z",
+        selecionadoEm: "2026-08-20T03:00:00.000Z",
+        enviadoEm: "2026-08-20T03:00:01.000Z",
+        atrasoOperacionalMs: 1000
+      }
+    ],
+    repositorio: async item => {
+      enviosPorBraco.push(item);
+      return { ok: true, inserido: true, id: enviosPorBraco.length };
+    }
+  });
+  assert.strictEqual(enviosPorBraco.length, 2);
+  assert.deepStrictEqual(enviosPorBraco.map(item => item.canal), ["whatsapp", "telegram"]);
+  assert.deepStrictEqual(enviosPorBraco.map(item => item.destinoId), ["whats_1", "tg_1"]);
+  assert.strictEqual(enviosPorBraco[0].metadata.intervaloEfetivoMin, 1.5);
+  assert.strictEqual(enviosPorBraco[0].metadata.turboAplicado, true);
+  assert.strictEqual(enviosPorBraco[0].metadata.atrasoOperacionalMs, 1000);
+  assert.strictEqual(enviosPorBraco[1].metadata.proximoPermitidoEm, "2026-08-20T03:04:01.000Z");
 
   const sqlExecutado = [];
   const schemaOk = await prepararSchemaEventosComerciaisSeguro({

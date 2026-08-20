@@ -5,6 +5,10 @@ const {
   destinoPossuiIntegracaoBasica,
   numeroIntervaloDestino
 } = require("./commercial-capacity.service");
+const {
+  destinoAceitaTurboCupom,
+  resolverCadenciaDestino
+} = require("../cadencia.service");
 const { consultarEventosAbsorcaoPorWorkspace } = require("./absorption-gate.repository");
 const {
   calcularBufferVivoWorkspace,
@@ -120,8 +124,6 @@ const TTL_ESTEIRA_MS = {
   comum: 30 * 60 * 1000,
   desconhecido: 30 * 60 * 1000
 };
-
-const INTERVALO_TURBO_PADRAO_MINUTOS = 2.5;
 
 function lista(valor) {
   return Array.isArray(valor) ? valor : [];
@@ -592,23 +594,7 @@ function limiteDiarioDestino(destino = {}) {
 }
 
 function turboAplicavelDestino(destino = {}) {
-  return Boolean(
-    destino.cupomTurbo === true ||
-    destino.cupom_turbo === true ||
-    destino.turboCupom === true ||
-    destino.turbo === true ||
-    normalizarTexto(destino.modoEnvio || destino.modo) === "cupomturbo"
-  );
-}
-
-function intervaloTurboDestino(destino = {}) {
-  return numeroPositivo(
-    destino.intervaloTurboMinutos ??
-    destino.intervaloCupomTurboMinutos ??
-    destino.turboIntervaloMinutos ??
-    destino.intervaloTurbo,
-    INTERVALO_TURBO_PADRAO_MINUTOS
-  );
+  return destinoAceitaTurboCupom(destino);
 }
 
 function integracaoAptaDestino(destino = {}) {
@@ -638,8 +624,12 @@ function capacidadeDestinoShadow(destino = {}, indice = 0, filaItens = []) {
   const destinoApto = janelaAbertaAgora && limiteOk;
   const intervaloNormal = numeroIntervaloDestino(destino);
   const turboAplicavel = destinoApto && turboAplicavelDestino(destino);
-  const intervaloTurbo = intervaloTurboDestino(destino);
-  const intervaloEfetivo = turboAplicavel ? intervaloTurbo : intervaloNormal;
+  const cadencia = resolverCadenciaDestino({
+    destino,
+    considerarTurboSemOferta: turboAplicavel
+  });
+  const intervaloTurbo = cadencia.intervaloTurboMin || cadencia.intervaloEfetivoMin;
+  const intervaloEfetivo = turboAplicavel ? cadencia.intervaloEfetivoMin : intervaloNormal;
   const filaVivaDestino = lista(filaItens).filter(item => itemVivoFila(item) && itemDestinadoAoDestino(item, destino, indice)).length;
 
   const slots5Min = destinoApto ? slotsCobertura(5, intervaloEfetivo) : 0;
@@ -659,6 +649,7 @@ function capacidadeDestinoShadow(destino = {}, indice = 0, filaItens = []) {
     intervaloTurbo: arredondar(intervaloTurbo, 2),
     turboAplicavel,
     intervaloEfetivo: arredondar(intervaloEfetivo, 2),
+    cadenciaModo: cadencia.modo,
     filaVivaDestino,
     slots5Min,
     slots10Min,
@@ -713,7 +704,7 @@ function avaliarDestinosWorkspace(destinos = [], janelaMinutos = 15, filaItens =
     filaAlvo: slots10Min,
     capacidadeTeorica: slots15Min,
     intervaloNormal: capacidadePorDestino.find(item => item.aptoAgora)?.intervaloNormal || null,
-    intervaloTurbo: capacidadePorDestino.find(item => item.turboAplicavel)?.intervaloTurbo || INTERVALO_TURBO_PADRAO_MINUTOS,
+    intervaloTurbo: capacidadePorDestino.find(item => item.turboAplicavel)?.intervaloTurbo || null,
     turboAplicavel: capacidadePorDestino.some(item => item.turboAplicavel)
   };
 }

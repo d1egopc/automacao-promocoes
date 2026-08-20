@@ -4,6 +4,10 @@ const path = require("path");
 const vm = require("vm");
 const linksPuros = require("../modules/links");
 const destinosUtils = require("../utils/destinos");
+const {
+  resolverCadenciaDestino,
+  resolverIntervaloConfiguradoCadencia
+} = require("../modules/engine/cadencia.service");
 
 const indexPath = path.join(__dirname, "..", "index.js");
 const fonte = fs.readFileSync(indexPath, "utf8");
@@ -35,6 +39,8 @@ const sandbox = {
     sandbox.salvouConfig += 1;
   },
   cupomFastLaneTipo: oferta => oferta.cupomReal ? "real_detectado" : (oferta.cupomProvavel ? "provavel" : ""),
+  resolverCadenciaDestino,
+  resolverIntervaloConfiguradoCadencia,
   URL,
   linksPuros,
   destinosUtils,
@@ -72,13 +78,13 @@ vm.runInContext([
 ].join("\n"), sandbox);
 
 function calcularIntervalo(destino, configCliente, oferta) {
-  const intervaloConfigurado = sandbox.resolverIntervaloConfiguradoDestino(destino, configCliente);
-  const ofertaTemCupomReal = sandbox.cupomFastLaneTipo(oferta) === "real_detectado";
-  const turbo = destino.prioridadeCupomAtiva === true && ofertaTemCupomReal
-    ? sandbox.intervaloTurboCupomMinutos(oferta)
-    : null;
-
-  return Number.isFinite(turbo) ? Math.max(3, turbo) : intervaloConfigurado;
+  return sandbox.resolverCadenciaDestino({
+    destino,
+    configCliente,
+    configGlobal: sandbox.config,
+    oferta,
+    cupomFastLaneTipo: sandbox.cupomFastLaneTipo
+  }).intervaloEfetivoMin;
 }
 
 assert.strictEqual(sandbox.normalizarDestinoContrato({ nome: "Antigo" }).prioridadeCupomAtiva, false);
@@ -189,10 +195,11 @@ assert.ok(resolucaoAliLinks.linkFinal.startsWith("https://go.optimuspromo.com.br
 assert.strictEqual(calcularIntervalo({ intervaloMinutos: 5, prioridadeCupomAtiva: false }, {}, { cupomReal: true }), 5);
 assert.strictEqual(calcularIntervalo({ intervaloMinutos: 7, prioridadeCupomAtiva: false }, {}, { cupomReal: true }), 7);
 assert.strictEqual(calcularIntervalo({ intervaloMinutos: 10, prioridadeCupomAtiva: false }, {}, { cupomReal: true }), 10);
-assert.strictEqual(calcularIntervalo({ intervaloMinutos: 8, prioridadeCupomAtiva: true }, {}, { cupomReal: true }), 3);
+assert.strictEqual(calcularIntervalo({ intervaloMinutos: 8, prioridadeCupomAtiva: true }, {}, { cupomReal: true }), 1.5);
 assert.strictEqual(calcularIntervalo({ intervaloMinutos: 8, prioridadeCupomAtiva: true }, {}, {}), 8);
 assert.strictEqual(calcularIntervalo({ intervaloMinutos: 8, prioridadeCupomAtiva: true }, {}, { cupomProvavel: true }), 8);
-assert.ok(calcularIntervalo({ intervaloMinutos: 8, prioridadeCupomAtiva: true }, {}, { cupomReal: true }) >= 3);
+assert.strictEqual(calcularIntervalo({ intervaloMinutos: 1, prioridadeCupomAtiva: false }, {}, {}), 2.5);
+assert.strictEqual(calcularIntervalo({ intervaloMinutos: 8, prioridadeCupomAtiva: true }, {}, { cupomReal: true }), 1.5);
 assert.strictEqual(calcularIntervalo({}, { intervaloMinutos: 7 }, {}), 7);
 assert.strictEqual(calcularIntervalo({}, { intervaloEnvioMinutos: 9 }, {}), 9);
 sandbox.config.intervaloEnvioMinutos = 11;
@@ -218,6 +225,8 @@ for (const trecho of requiredSnippets) {
 
 assert.ok(!/return\s+2\s*;/.test(extrairFuncao("intervaloTurboCupomMinutos")), "turbo nao pode retornar 2min");
 assert.ok(!/2\.5/.test(extrairFuncao("intervaloTurboCupomMinutos")), "turbo nao pode retornar 2.5min");
+assert.ok(fonte.includes("resolverCadenciaDestino"), "Executor deve consultar autoridade unica de cadencia");
+assert.ok(fonte.includes("destinosEnviadosTelemetria"), "executor_enviado deve carregar telemetria por braco");
 assert.ok(!/config\.intervaloMinutos\s*\|\|\s*2/.test(fonte), "fallback oculto para 2min nao pode existir");
 
 // Modelo de relogios independentes e erro sem atualizacao.

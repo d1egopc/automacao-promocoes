@@ -1,6 +1,9 @@
 const { readGlobalJson } = require("../../../utils/storage");
 const { listarClientesAtivos } = require("../../../utils/usuarios-atividade");
 const destinosUtils = require("../../../utils/destinos");
+const {
+  resolverIntervaloConfiguradoCadencia
+} = require("../cadencia.service");
 
 function lista(valor) {
   return Array.isArray(valor) ? valor : [];
@@ -21,17 +24,7 @@ function destinosDoCliente(mapa = {}, clienteId = "") {
 }
 
 function numeroIntervaloDestino(destino = {}) {
-  const candidatos = [
-    destino.intervaloMinutos,
-    destino.intervalo,
-    destino.intervaloEnvioMinutos,
-    destino.intervaloConfiguradoMinutos
-  ];
-  for (const candidato of candidatos) {
-    const numero = Number(candidato);
-    if (Number.isFinite(numero) && numero > 0) return numero;
-  }
-  return 5;
+  return resolverIntervaloConfiguradoCadencia(destino, {}, {});
 }
 
 function destinoPossuiIntegracaoBasica(destino = {}) {

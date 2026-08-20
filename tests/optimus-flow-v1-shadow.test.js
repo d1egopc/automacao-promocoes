@@ -219,7 +219,8 @@ async function testarTurboConsumidoLiberaVaga() {
   const filaTurboCheia = {
     [D1]: [
       itemFila({ id: "turbo_1", cupomTurbo: true }),
-      itemFila({ id: "turbo_2", cupomTurbo: true })
+      itemFila({ id: "turbo_2", cupomTurbo: true }),
+      itemFila({ id: "turbo_3", cupomTurbo: true })
     ]
   };
   const turboCheia = await avaliarFluxoWorkspaceShadow(
@@ -227,21 +228,22 @@ async function testarTurboConsumidoLiberaVaga() {
     opcoes(filaTurboCheia)
   );
   assert.strictEqual(turboCheia.tipoFluxo, "cupom_turbo");
-  assert.strictEqual(turboCheia.nivelAlvo, 2);
-  assert.strictEqual(turboCheia.bufferAtual, 2);
+  assert.strictEqual(turboCheia.nivelAlvo, 3);
+  assert.strictEqual(turboCheia.bufferAtual, 3);
   assert.strictEqual(turboCheia.aceitarAgora, false);
 
   const filaTurboConsumida = {
     [D1]: [
       itemFila({ id: "turbo_1", cupomTurbo: true, status: "enviado" }),
-      itemFila({ id: "turbo_2", cupomTurbo: true })
+      itemFila({ id: "turbo_2", cupomTurbo: true }),
+      itemFila({ id: "turbo_3", cupomTurbo: true })
     ]
   };
   const depoisConsumo = await avaliarFluxoWorkspaceShadow(
     entrada(D1, { destinosCompativeis, cupomTurbo: true, tipoOperacional: "cupom_turbo" }),
     opcoes(filaTurboConsumida)
   );
-  assert.strictEqual(depoisConsumo.bufferAtual, 1);
+  assert.strictEqual(depoisConsumo.bufferAtual, 2);
   assert.strictEqual(depoisConsumo.vagasDisponiveis, 1);
   assert.strictEqual(depoisConsumo.aceitarAgora, true);
 }

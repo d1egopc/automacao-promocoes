@@ -275,6 +275,10 @@ const {
   decidirStatusExecutorSemEnvio
 } = require("./modules/executor/destino-diagnostico");
 const {
+  resolverCadenciaDestino,
+  resolverIntervaloConfiguradoCadencia
+} = require("./modules/engine/cadencia.service");
+const {
   registrarExecutorEnviado,
   registrarExecutorErroFinal
 } = require("./modules/engine/ofc/commercial-events.service");
@@ -5436,18 +5440,17 @@ function destinoLimiteDiarioDisponivel(clienteId = "admin", destino = {}) {
 }
 
 function intervaloTurboCupomMinutos(oferta = {}) {
-  return cupomFastLaneTipo(oferta) === "real_detectado" ? 3 : null;
+  const cadencia = resolverCadenciaDestino({
+    destino: { prioridadeCupomAtiva: true },
+    configGlobal: config,
+    oferta,
+    cupomFastLaneTipo
+  });
+  return cadencia.turboAplicado ? cadencia.intervaloTurboMin : null;
 }
 
 function resolverIntervaloConfiguradoDestino(destino = {}, configCliente = {}) {
-  return (
-    numeroIntervaloValido(destino.intervaloMinutos) ||
-    numeroIntervaloValido(destino.intervalo) ||
-    numeroIntervaloValido(configCliente.intervaloMinutos) ||
-    numeroIntervaloValido(configCliente.intervaloEnvioMinutos) ||
-    numeroIntervaloValido(config.intervaloEnvioMinutos) ||
-    5
-  );
+  return resolverIntervaloConfiguradoCadencia(destino, configCliente, config);
 }
 
 function payloadIntervaloDestino(clienteId = "admin", destino = {}, oferta = {}, intervalo = {}, extras = {}) {
@@ -5471,16 +5474,20 @@ function payloadIntervaloDestino(clienteId = "admin", destino = {}, oferta = {},
 
 function intervaloDestinoInfo(clienteId = "admin", destino = {}, configCliente = {}, oferta = {}) {
   const chaveControle = destinoChaveControle(clienteId, destino);
-  const intervaloDestinoMin = resolverIntervaloConfiguradoDestino(destino, configCliente);
-  const prioridadeCupomAtiva = destino.prioridadeCupomAtiva === true;
   const agora = Date.now();
-  const ofertaTemCupomReal = cupomFastLaneTipo(oferta, agora) === "real_detectado";
-  const turboCupomMin = prioridadeCupomAtiva && ofertaTemCupomReal
-    ? intervaloTurboCupomMinutos(oferta)
-    : null;
-  const intervaloAplicadoMin = Number.isFinite(turboCupomMin)
-    ? Math.max(3, turboCupomMin)
-    : intervaloDestinoMin;
+  const cadencia = resolverCadenciaDestino({
+    destino,
+    configCliente,
+    configGlobal: config,
+    oferta,
+    cupomFastLaneTipo,
+    agoraMs: agora
+  });
+  const intervaloDestinoMin = cadencia.intervaloConfiguradoMin;
+  const prioridadeCupomAtiva = cadencia.turboElegivel === true;
+  const ofertaTemCupomReal = cadencia.cupomReal === true;
+  const turboCupomMin = cadencia.turboAplicado ? cadencia.intervaloTurboMin : null;
+  const intervaloAplicadoMin = cadencia.intervaloEfetivoMin;
   const intervaloMs = Math.max(0, intervaloAplicadoMin) * 60 * 1000;
   const controleCliente = controleIntervaloCliente(clienteId);
   const controlePersistido = controleCliente[chaveControle] || {};
@@ -5500,6 +5507,8 @@ function intervaloDestinoInfo(clienteId = "admin", destino = {}, configCliente =
     intervaloDestinoMin,
     intervaloAplicadoMin,
     turboCupomMin,
+    turboAplicado: cadencia.turboAplicado === true,
+    cadenciaModo: cadencia.modo,
     fastLaneCupomTipo: cupomFastLaneTipo(oferta, agora),
     ofertaTemCupomReal,
     prioridadeCupomAtiva,
@@ -5516,7 +5525,7 @@ function intervaloDestinoInfo(clienteId = "admin", destino = {}, configCliente =
 
   if (prioridadeCupomAtiva && ofertaTemCupomReal) {
     logFilaIntervalo("[FILA-CUPOM-INTERVALO-MINIMO]", payloadIntervaloDestino(clienteId, destino, oferta, info, {
-      minimoMinutos: 3
+      minimoMinutos: cadencia.intervaloTurboMin
     }));
   }
 
@@ -5557,6 +5566,32 @@ function atualizarUltimoEnvioDestino(clienteId = "admin", destino = {}, oferta =
     liberado: true,
     motivo: "envio_confirmado"
   }));
+
+  return registro;
+}
+
+function telemetriaCadenciaExecutorEnviado(clienteId = "admin", destino = {}, intervalo = {}, registro = {}, extras = {}) {
+  const selecionadoEm = extras.selecionadoEm || intervalo.tentativaEm || "";
+  const enviadoEm = extras.enviadoEm || registro.ultimoEnvioEm || "";
+  const selecionadoMs = Date.parse(selecionadoEm);
+  const enviadoMs = Date.parse(enviadoEm);
+  const atrasoOperacionalMs = Number.isFinite(selecionadoMs) && Number.isFinite(enviadoMs)
+    ? Math.max(0, enviadoMs - selecionadoMs)
+    : null;
+
+  return {
+    workspaceId: clienteId,
+    destinoId: destinoIdIntervalo(destino),
+    canal: canalDestinoIntervalo(destino),
+    intervaloConfiguradoMin: Number(intervalo.intervaloDestinoMin || 0),
+    intervaloEfetivoMin: Number(intervalo.intervaloAplicadoMin || 0),
+    turboAplicado: intervalo.turboAplicado === true,
+    ultimoEnvioEm: registro.ultimoEnvioEm || "",
+    proximoPermitidoEm: registro.proximoEnvioPermitidoEm || intervalo.proximoEnvioPermitidoEm || "",
+    selecionadoEm,
+    enviadoEm,
+    atrasoOperacionalMs
+  };
 }
 
 // ========================== ENVIO DESTINO INTELIGENTE ============================
@@ -7091,6 +7126,7 @@ console.log("[FILA-PROCESSANDO-RESERVADA]", JSON.stringify({
 salvarFilaSeAlterada(clienteId);
 
 let ofertaComercialConfirmadaVitrine = null;
+const destinosEnviadosTelemetria = [];
 
 for (const item of destinosOrdenados) {
   const destino = item.destino;
@@ -7278,17 +7314,21 @@ for (const item of destinosOrdenados) {
     continue;
   }
 
-  logFilaIntervalo("[FILA-DESTINO-LIBERADO]", payloadIntervaloDestino(clienteId, destino, oferta, intervalo));
+  const destinoSelecionadoEm = new Date().toISOString();
+  logFilaIntervalo("[FILA-DESTINO-LIBERADO]", payloadIntervaloDestino(clienteId, destino, oferta, intervalo, {
+    selecionadoEm: destinoSelecionadoEm
+  }));
   registrarCoberturaExecutor("destino_selecionado", oferta, clienteId, destino, {
     decisao: "selecionado",
     motivo: "destino_liberado",
     destinoEncontrado: true,
     filaRecebeu: true,
-    statusFilaAntes: oferta.status || ""
+    statusFilaAntes: oferta.status || "",
+    selecionadoEm: destinoSelecionadoEm
   });
 
   if (intervalo.fastLaneCupomTipo === "real_detectado") {
-    logOptimus("CUPOM", intervalo.prioridadeCupomAtiva ? "Cupom Turbo aplicado 3min" : "Cupom usando intervalo normal", {
+    logOptimus("CUPOM", intervalo.prioridadeCupomAtiva ? "Cupom Turbo aplicado" : "Cupom usando intervalo normal", {
       clienteId,
       destino: nomeDestino,
       cupom: oferta.cupom || "",
@@ -7398,7 +7438,17 @@ for (const item of destinosOrdenados) {
       motivo: "envio_confirmado"
     });
     marcarFilaAlterada();
-    atualizarUltimoEnvioDestino(clienteId, destino, oferta, intervalo);
+    const registroIntervaloDestino = atualizarUltimoEnvioDestino(clienteId, destino, oferta, intervalo);
+    destinosEnviadosTelemetria.push(telemetriaCadenciaExecutorEnviado(
+      clienteId,
+      destino,
+      intervalo,
+      registroIntervaloDestino,
+      {
+        selecionadoEm: destinoSelecionadoEm,
+        enviadoEm: registroIntervaloDestino.ultimoEnvioEm
+      }
+    ));
     logOptimus("DESTINO", "Enviado", {
       clienteId,
       destino: nomeDestino,
@@ -7598,7 +7648,8 @@ void publicarOfertaConfirmadaVitrine({
 void registrarExecutorEnviado({
   clienteId,
   oferta,
-  destinosEnviados: totalDestinosEnviadosFanout
+  destinosEnviados: totalDestinosEnviadosFanout,
+  destinosDetalhes: destinosEnviadosTelemetria
 });
 registrarCoberturaExecutor("executor_enviado", oferta, clienteId, {}, {
   decisao: "enviado",

@@ -24,7 +24,18 @@ const CHAVES_METADATA_PERMITIDAS = Object.freeze([
   "score",
   "prioridade",
   "erroTipo",
-  "origem"
+  "origem",
+  "workspaceId",
+  "destinoId",
+  "canal",
+  "intervaloConfiguradoMin",
+  "intervaloEfetivoMin",
+  "turboAplicado",
+  "ultimoEnvioEm",
+  "proximoPermitidoEm",
+  "selecionadoEm",
+  "enviadoEm",
+  "atrasoOperacionalMs"
 ]);
 
 function texto(valor = "", limite = 180) {
@@ -232,7 +243,42 @@ function registrarDistribuicaoFinal({ oferta = {}, itemFila = {} } = {}) {
   });
 }
 
-function registrarExecutorEnviado({ clienteId = "", oferta = {}, destinosEnviados = 0 } = {}) {
+function registrarExecutorEnviado({ clienteId = "", oferta = {}, destinosEnviados = 0, destinosDetalhes = [], repositorio = null } = {}) {
+  const opcoes = typeof repositorio === "function" ? { repositorio } : {};
+  const detalhes = Array.isArray(destinosDetalhes) ? destinosDetalhes.filter(Boolean) : [];
+  if (detalhes.length > 0) {
+    return Promise.all(detalhes.map(detalhe => registrarEventoComercialSeguro({
+      tipoEvento: TIPOS_EVENTO_COMERCIAL.EXECUTOR_ENVIADO,
+      clienteId,
+      workspaceId: detalhe.workspaceId || clienteId,
+      ofertaId: oferta.engineOfertaId || oferta.ofertaId || oferta.oferta_id || "",
+      jobId: oferta.engineJobId || oferta.jobId || oferta.job_id || "",
+      filaItemId: oferta.id || "",
+      destinoId: detalhe.destinoId || "",
+      canal: detalhe.canal || "",
+      marketplace: oferta.marketplace || oferta.mercado || "",
+      ocorridoEm: detalhe.enviadoEm || oferta.enviadoEm || oferta.dataEnvio || "",
+      origemPipeline: "executor",
+      metadata: {
+        status: "enviado",
+        motivo: "envio_confirmado",
+        statusFilaDepois: oferta.status || "enviado",
+        destinosEnviados,
+        workspaceId: detalhe.workspaceId || clienteId,
+        destinoId: detalhe.destinoId || "",
+        canal: detalhe.canal || "",
+        intervaloConfiguradoMin: detalhe.intervaloConfiguradoMin,
+        intervaloEfetivoMin: detalhe.intervaloEfetivoMin,
+        turboAplicado: detalhe.turboAplicado === true,
+        ultimoEnvioEm: detalhe.ultimoEnvioEm || "",
+        proximoPermitidoEm: detalhe.proximoPermitidoEm || "",
+        selecionadoEm: detalhe.selecionadoEm || "",
+        enviadoEm: detalhe.enviadoEm || "",
+        atrasoOperacionalMs: detalhe.atrasoOperacionalMs
+      }
+    }, opcoes)));
+  }
+
   return registrarEventoComercialSeguro({
     tipoEvento: TIPOS_EVENTO_COMERCIAL.EXECUTOR_ENVIADO,
     clienteId,
@@ -249,7 +295,7 @@ function registrarExecutorEnviado({ clienteId = "", oferta = {}, destinosEnviado
       statusFilaDepois: oferta.status || "enviado",
       destinosEnviados
     }
-  });
+  }, opcoes);
 }
 
 function registrarExecutorErroFinal({ clienteId = "", oferta = {}, motivo = "", destinosTentados = 0, destinosElegiveis = 0 } = {}) {

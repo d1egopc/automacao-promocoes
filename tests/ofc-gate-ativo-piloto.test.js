@@ -181,7 +181,7 @@ async function decisao(entrada = {}, opcoes = {}) {
     destinosCompativeis: [destino({ intervaloMinutos: 10, intervaloTurboMinutos: 2.5 })]
   });
   assert.strictEqual(turbo.cupomTurbo, true);
-  assert.strictEqual(turbo.filaAlvo, 2);
+  assert.strictEqual(turbo.filaAlvo, 3);
   assert.strictEqual(turbo.quantidadeAceitaAgora, 2);
 
   const turboSemEstoqueArtificial = await decisao({
@@ -192,7 +192,7 @@ async function decisao(entrada = {}, opcoes = {}) {
   }, {
     readClienteJson: () => [item("p1")]
   });
-  assert.strictEqual(turboSemEstoqueArtificial.quantidadeAceitaAgora, 1);
+  assert.strictEqual(turboSemEstoqueArtificial.quantidadeAceitaAgora, 2);
   assert.strictEqual(turboSemEstoqueArtificial.estadoDaEsteira, "LIMITADA");
 
   const falhaRoger = await decisao({}, {

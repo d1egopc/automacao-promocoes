@@ -150,10 +150,11 @@ assert.strictEqual(capacidadeNormal.capacidade15Min, 3);
 
 const capacidadeTurbo = capacidadeDestinoShadow(destinoTurbo, 0, []);
 assert.strictEqual(capacidadeTurbo.turboAplicavel, true);
-assert.strictEqual(capacidadeTurbo.intervaloEfetivo, 2.5);
-assert.strictEqual(capacidadeTurbo.slots5Min, 2);
-assert.strictEqual(capacidadeTurbo.slots10Min, 4);
-assert.strictEqual(capacidadeTurbo.slots15Min, 6);
+assert.strictEqual(capacidadeTurbo.intervaloEfetivo, 1.5);
+assert.strictEqual(capacidadeTurbo.cadenciaModo, "cadencia_v2");
+assert.strictEqual(capacidadeTurbo.slots5Min, 3);
+assert.strictEqual(capacidadeTurbo.slots10Min, 6);
+assert.strictEqual(capacidadeTurbo.slots15Min, 10);
 
 const capacidadeFechada = capacidadeDestinoShadow({ ...destinoApto, horarioInicio: "00:00", horarioFim: "00:01" }, 0, []);
 assert.strictEqual(capacidadeFechada.aptoAgora, false);
@@ -176,12 +177,12 @@ const gateLivre = montarGateWorkspace({
   janelaMinutos: 15
 });
 assert.strictEqual(gateLivre.estado, "LIVRE");
-assert.strictEqual(gateLivre.filaAlvo5Min, 3);
-assert.strictEqual(gateLivre.filaAlvo10Min, 6);
-assert.strictEqual(gateLivre.filaAlvo15Min, 9);
-assert.strictEqual(gateLivre.filaAlvo, 6);
-assert.strictEqual(gateLivre.capacidadeAbsorcaoAgora, 9);
-assert.strictEqual(gateLivre.quantidadeQueAceitariaAgora, 9);
+assert.strictEqual(gateLivre.filaAlvo5Min, 4);
+assert.strictEqual(gateLivre.filaAlvo10Min, 8);
+assert.strictEqual(gateLivre.filaAlvo15Min, 13);
+assert.strictEqual(gateLivre.filaAlvo, 8);
+assert.strictEqual(gateLivre.capacidadeAbsorcaoAgora, 13);
+assert.strictEqual(gateLivre.quantidadeQueAceitariaAgora, 13);
 assert.strictEqual(gateLivre.turboAplicavel, true);
 assert.strictEqual(gateLivre.aplicouMudancas, undefined);
 
