@@ -48,14 +48,13 @@ assert.deepStrictEqual(
 );
 
 assert.ok(
-  trechoSalvarPlano.includes("marketplaces: Array.isArray(body.marketplaces)") &&
-    trechoSalvarPlano.includes("? body.marketplaces"),
+  trechoSalvarPlano.includes("const marketplacesLiberadosPlano = Array.isArray(body.marketplaces)") &&
+    trechoSalvarPlano.includes("marketplaces: marketplacesLiberadosPlano"),
   "Admin deve conseguir gravar a lista dinamica de marketplaces do plano, incluindo magalu"
 );
 assert.ok(
-  trechoSalvarIntegracao.includes("const liberados = plano?.marketplaces || []") &&
-    trechoSalvarIntegracao.includes("!liberados.includes(marketplace)") &&
-    trechoSalvarIntegracao.includes("return res.status(403)"),
+  trechoSalvarIntegracao.includes("validarMarketplacePlanoReq(req, marketplace)") &&
+    trechoSalvarIntegracao.includes("payloadErroPlano"),
   "Backend deve continuar autoridade e bloquear integracao quando o plano nao libera o marketplace"
 );
 assert.ok(

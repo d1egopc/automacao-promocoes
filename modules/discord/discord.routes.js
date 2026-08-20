@@ -35,10 +35,22 @@ function erroRecursoDiscordPlano() {
   };
 }
 
+function payloadErroPlano(erro = {}) {
+  return {
+    ok: false,
+    codigo: erro.codigo || "limite_do_plano_atingido",
+    recurso: erro.recurso || "conexoes",
+    limite: Number.isFinite(Number(erro.limite)) ? Number(erro.limite) : undefined,
+    atual: Number.isFinite(Number(erro.atual)) ? Number(erro.atual) : undefined,
+    erro: erro.message || "Limite do plano atingido"
+  };
+}
+
 function criarRotasDiscord(deps = {}) {
   const router = express.Router();
   const getClienteId = deps.getClienteId || ((req) => req.clienteId || "admin");
   const usuarioTemRecurso = deps.usuarioTemRecurso || (() => false);
+  const validarCotaConexaoDiscord = deps.validarCotaConexaoDiscord || (() => undefined);
   const jwt = deps.jwt;
   const secret = deps.jwtSecret;
   const env = deps.env || process.env;
@@ -74,11 +86,17 @@ function criarRotasDiscord(deps = {}) {
         secret,
         httpClient,
         consumirStateDiscordOAuth: (clienteId, nonce) => consumirStateDiscordOAuth(clienteId, nonce, storageDeps),
-        salvarConexaoDiscord: (clienteId, dados) => salvarConexaoDiscord(clienteId, dados, storageDeps)
+        salvarConexaoDiscord: (clienteId, dados) => {
+          validarCotaConexaoDiscord(clienteId, dados?.guildId);
+          return salvarConexaoDiscord(clienteId, dados, storageDeps);
+        }
       });
 
       return res.redirect(302, DISCORD_CALLBACK_SUCESSO_URL);
     } catch (erro) {
+      if (erro?.codigo === "limite_do_plano_atingido") {
+        return res.status(403).json(payloadErroPlano(erro));
+      }
       return res.status(400).json({ ok: false, erro: erroMensagem(erro, "Falha ao conectar Discord") });
     }
   });

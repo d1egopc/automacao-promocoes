@@ -200,6 +200,13 @@ const {
   obterConfigDiscord
 } = require("./modules/discord/discord-oauth");
 const {
+  normalizarLimitesPlano,
+  normalizarListaMarketplaces,
+  dentroDoLimite,
+  limiteAtingido,
+  avaliarMarketplacePlano
+} = require("./utils/cotas-flexiveis-planos");
+const {
   iniciarManualV2Scheduler
 } = require("./modules/manual-v2/manual-scheduler.runner");
 const {
@@ -2742,6 +2749,154 @@ function payloadErroPlano(erro = {}, fallback = "Operacao indisponivel no plano"
   return payload;
 }
 
+function obterLimitesPlanoReq(req) {
+  return normalizarLimitesPlano(getPlanoUsuario(req) || {}, getUsuarioAtual(req) || {});
+}
+
+function obterLimitesPlanoCliente(clienteId) {
+  const usuario = obterUsuario(clienteId) || {};
+  const plano = getPlanoPorNome(usuario.plano) || {};
+  return normalizarLimitesPlano(plano, usuario);
+}
+
+function criarErroLimiteConexoesPlano(limite = 0, atual = 0) {
+  const erro = criarErroLimitePlano("conexoes", limite, atual);
+  erro.message = `Seu plano permite ate ${limite} conexao(oes).`;
+  return erro;
+}
+
+function criarErroLimiteMarketplacesPlano(limite = 0, atual = 0) {
+  const erro = criarErroLimitePlano("marketplaces", limite, atual);
+  erro.message = `Seu plano permite ate ${limite} marketplace(s) selecionado(s).`;
+  return erro;
+}
+
+function sessaoWhatsappContaParaCota(sessao = {}) {
+  const status = String(sessao.status || "").toLowerCase();
+  return sessao.ativo !== false && status !== "desativado" && status !== "inativo";
+}
+
+function listarSessoesWhatsappCota(clienteId) {
+  const ids = new Set();
+  for (const sessao of Object.values(sessoesMeta || {})) {
+    if (!sessaoWhatsappContaParaCota(sessao)) continue;
+    if (canalPertenceAoWorkspace(sessao, clienteId, { usuarios })) {
+      ids.add(String(sessao.id || sessao.nome || "").trim());
+    }
+  }
+  for (const id of Array.isArray(config.sessoesWhatsapp) ? config.sessoesWhatsapp : []) {
+    const item = { id, tipo: "whatsapp" };
+    if (canalPertenceAoWorkspace(item, clienteId, { usuarios })) {
+      ids.add(String(id || "").trim());
+    }
+  }
+  ids.delete("");
+  return Array.from(ids);
+}
+
+function listarTelegramsCota(clienteId, destinosOverride = null) {
+  const destinos = Array.isArray(destinosOverride)
+    ? destinosOverride
+    : listarTelegramsCliente(clienteId);
+  const chaves = new Set();
+  for (const destino of destinos) {
+    if (!destino || destino.ativo === false) continue;
+    const normalizado = telegramTemCredenciaisFila(destino);
+    if (!normalizado) continue;
+    const chave = normalizado.chatId || normalizado.id || chavesTelegramDestino(normalizado)[0];
+    if (chave) chaves.add(String(chave));
+  }
+  return Array.from(chaves);
+}
+
+function listarDiscordCota(clienteId) {
+  return listarConexoesDiscord(clienteId)
+    .filter((conexao) => conexao && conexao.ativo !== false && conexao.utilizavel !== false)
+    .map((conexao) => String(conexao.guildId || conexao.id || "").trim())
+    .filter(Boolean);
+}
+
+function contarConexoesWorkspace(clienteId, opcoes = {}) {
+  const whatsapp = listarSessoesWhatsappCota(clienteId);
+  const telegram = listarTelegramsCota(clienteId, opcoes.telegramDestinos);
+  const discord = Array.isArray(opcoes.discordIds)
+    ? opcoes.discordIds.filter(Boolean)
+    : listarDiscordCota(clienteId);
+  return {
+    whatsapp: whatsapp.length,
+    telegram: telegram.length,
+    discord: discord.length,
+    total: whatsapp.length + telegram.length + discord.length
+  };
+}
+
+function validarLimiteConexoesWorkspace(clienteId, limites, uso) {
+  const limite = Number(limites?.maxConexoes);
+  if (!Number.isFinite(limite)) return;
+  if (!dentroDoLimite(uso.total, limite)) {
+    throw criarErroLimiteConexoesPlano(limite, uso.total);
+  }
+}
+
+function validarNovaConexaoReq(req) {
+  if (isAdminMaster(req)) return;
+  const clienteId = getClienteId(req);
+  const limites = obterLimitesPlanoReq(req);
+  const uso = contarConexoesWorkspace(clienteId);
+  const limite = Number(limites.maxConexoes);
+  if (Number.isFinite(limite) && limiteAtingido(uso.total, limite)) {
+    throw criarErroLimiteConexoesPlano(limite, uso.total);
+  }
+}
+
+function validarCotaTelegramReq(req, destinosPretendidos = []) {
+  if (isAdminMaster(req)) return;
+  const clienteId = getClienteId(req);
+  const limites = obterLimitesPlanoReq(req);
+  const uso = contarConexoesWorkspace(clienteId, { telegramDestinos: destinosPretendidos });
+  validarLimiteConexoesWorkspace(clienteId, limites, uso);
+}
+
+function validarCotaDiscordCliente(clienteId, guildId = "") {
+  const usuario = obterUsuario(clienteId) || {};
+  if (usuario.papel === "admin_master") return;
+  const limites = obterLimitesPlanoCliente(clienteId);
+  const atuais = listarDiscordCota(clienteId);
+  const id = String(guildId || "").trim();
+  const discordIds = id && !atuais.includes(id) ? [id, ...atuais] : atuais;
+  const uso = contarConexoesWorkspace(clienteId, { discordIds });
+  validarLimiteConexoesWorkspace(clienteId, limites, uso);
+}
+
+function marketplacesSelecionadosCliente(clienteId) {
+  return Object.keys(integracoesPorCliente?.[clienteId] || {})
+    .map((item) => String(item || "").toLowerCase().trim())
+    .filter(Boolean);
+}
+
+function validarMarketplacePlanoReq(req, marketplace = "") {
+  if (isAdminMaster(req)) return;
+  const clienteId = getClienteId(req);
+  const plano = getPlanoUsuario(req) || {};
+  const liberados = normalizarListaMarketplaces(plano.marketplaces || []);
+  const mp = String(marketplace || "").toLowerCase().trim();
+  const limites = obterLimitesPlanoReq(req);
+  const selecionados = marketplacesSelecionadosCliente(clienteId);
+  const avaliacao = avaliarMarketplacePlano({
+    marketplace: mp,
+    liberados,
+    selecionados,
+    limite: Number(limites.maxMarketplacesSelecionados)
+  });
+  if (avaliacao.codigo === "recurso_nao_disponivel_no_plano") {
+    throw criarErroRecursoPlano("marketplaces");
+  }
+  if (avaliacao.ok) return;
+  if (avaliacao.codigo === "limite_do_plano_atingido") {
+    throw criarErroLimiteMarketplacesPlano(avaliacao.limite, avaliacao.atual);
+  }
+}
+
 function obterLimiteDestinosReq(req) {
   if (isAdminMaster(req)) return 999;
   const usuario = getUsuarioAtual(req);
@@ -3210,6 +3365,7 @@ function normalizarRecursosPlanosRuntime() {
 
   for (const plano of Object.values(planos)) {
     if (!plano || typeof plano !== "object") continue;
+    plano.limites = normalizarLimitesPlano(plano, {});
     if (!plano.recursos || typeof plano.recursos !== "object") {
       plano.recursos = {};
     }
@@ -8600,6 +8756,12 @@ app.post("/telegram", (req, res) => {
     ? mesclarDestinosTelegram(destinosAtuais, destinosRecebidos)
     : destinosAtuais;
 
+  try {
+    validarCotaTelegramReq(req, destinos);
+  } catch (erro) {
+    return res.status(erro.statusCode || 403).json(payloadErroPlano(erro));
+  }
+
   configsPorCliente[clienteId].telegram = {
     ...telegramAtual,
     ativo: true,
@@ -9431,18 +9593,34 @@ app.post("/admin/planos", (req, res) => {
     return !!fallback;
   };
 
+  const limitesNormalizadosAnteriores = normalizarLimitesPlano(planoAnterior, {});
+  const maxConexoes = numeroPlano(
+    limitesBody.maxConexoes ?? limitesBody.conexoes ?? limitesBody.sessoes,
+    numeroPlano(limitesNormalizadosAnteriores.maxConexoes, 0)
+  );
+  const marketplacesLiberadosPlano = Array.isArray(body.marketplaces)
+    ? body.marketplaces
+    : Array.isArray(planoAnterior.marketplaces)
+      ? planoAnterior.marketplaces
+      : [];
+  const maxMarketplacesSelecionados = numeroPlano(
+    limitesBody.maxMarketplacesSelecionados ?? limitesBody.marketplaces,
+    numeroPlano(
+      limitesNormalizadosAnteriores.maxMarketplacesSelecionados,
+      normalizarListaMarketplaces(marketplacesLiberadosPlano).length
+    )
+  );
+
   planos[nomePlano] = {
     nome: nomePlano,
     preco: String(body.preco ?? planoAnterior.preco ?? ""),
 
-    marketplaces: Array.isArray(body.marketplaces)
-      ? body.marketplaces
-      : Array.isArray(planoAnterior.marketplaces)
-        ? planoAnterior.marketplaces
-        : [],
+    marketplaces: marketplacesLiberadosPlano,
 
     limites: {
-      sessoes: numeroPlano(limitesBody.sessoes, numeroPlano(limitesAnteriores.sessoes, 0)),
+      sessoes: maxConexoes,
+      maxConexoes,
+      maxMarketplacesSelecionados,
       destinos: numeroPlano(limitesBody.destinos, numeroPlano(limitesAnteriores.destinos, 0)),
       enviosDia: numeroPlano(limitesBody.enviosDia, numeroPlano(limitesAnteriores.enviosDia, 0)),
       creditos: numeroPlano(
@@ -18955,6 +19133,7 @@ app.use("/templates-ofertas", criarRotasTemplatesClientes({
 app.use("/discord", criarRotasDiscord({
   getClienteId,
   usuarioTemRecurso,
+  validarCotaConexaoDiscord: validarCotaDiscordCliente,
   jwt,
   jwtSecret: JWT_SECRET,
   httpClient: axios
@@ -19423,10 +19602,7 @@ app.get("/me", (req, res) => {
 
   perf.etapaSync("renovar_creditos", () => renovarCreditosSeNecessario(usuario));
 
-  const sessoesUsuario = perf.etapaSync("sessoes", () => Object.values(sessoesMeta || {}).filter(s =>
-    String(s.id || "").startsWith(clienteId + "_") ||
-    (clienteId === "admin" && !String(s.id || "").includes("_"))
-  ));
+  const usoConexoes = perf.etapaSync("conexoes", () => contarConexoesWorkspace(clienteId));
 
   const destinosUsuario = perf.etapaSync("destinos", () => destinosPorCliente?.[clienteId] || {});
 
@@ -19444,6 +19620,9 @@ app.get("/me", (req, res) => {
 
   const planoAtual = perf.etapaSync("plano", () => getPlanoUsuario(req) || {});
 
+  const limitesPlanoAtual = perf.etapaSync("limites_plano", () => normalizarLimitesPlano(planoAtual, usuario));
+  const marketplacesSelecionados = perf.etapaSync("marketplaces_selecionados", () => marketplacesSelecionadosCliente(clienteId));
+
   const payload = perf.etapaSync("payload", () => ({
     ok: true,
     usuario: {
@@ -19456,12 +19635,19 @@ app.get("/me", (req, res) => {
       ativo: usuario.ativo,
       marketplacesLiberados: planoAtual.marketplaces || [],
       recursos: planoAtual.recursos || {},
-      limites: planoAtual.limites || {}
+      limites: limitesPlanoAtual
     },
     marketplacesLiberados: planoAtual.marketplaces || [],
     consumo: {
       enviosHoje,
-      sessoes: sessoesUsuario.length,
+      sessoes: usoConexoes.whatsapp,
+      conexoes: usoConexoes.total,
+      conexoesPorCanal: {
+        whatsapp: usoConexoes.whatsapp,
+        telegram: usoConexoes.telegram,
+        discord: usoConexoes.discord
+      },
+      marketplacesSelecionados: marketplacesSelecionados.length,
       destinos: Object.keys(destinosUsuario).length,
       ofertasNaFila: filaUsuario.filter(o => o.status === "pendente").length,
       ofertasEnviadas: filaUsuario.filter(o => o.status === "enviado").length
@@ -19474,7 +19660,8 @@ app.get("/me", (req, res) => {
   perf.fim({
     clienteId,
     statusCode: 200,
-    sessoes: sessoesUsuario.length,
+    sessoes: usoConexoes.whatsapp,
+    conexoes: usoConexoes.total,
     destinos: Object.keys(destinosUsuario).length,
     fila: filaUsuario.length
   });
@@ -20516,18 +20703,11 @@ app.post("/integracoes/:marketplace", (req, res) => {
   const clienteId = getClienteId(req);
   const marketplace = req.params.marketplace.toLowerCase();
 
-  const plano = getPlanoUsuario(req);
-
-if (!isAdminMaster(req)) {
-  const liberados = plano?.marketplaces || [];
-
-  if (!liberados.includes(marketplace)) {
-    return res.status(403).json({
-      ok: false,
-      erro: `Marketplace ${marketplace} não liberado no seu plano`
-    });
+  try {
+    validarMarketplacePlanoReq(req, marketplace);
+  } catch (erro) {
+    return res.status(erro.statusCode || 403).json(payloadErroPlano(erro));
   }
-}
 
   const payload = req.body?.credenciais || req.body;
 
@@ -23725,25 +23905,11 @@ app.post("/sessoes", (req, res) => {
     return res.status(403).json(payloadErroPlano(criarErroRecursoPlano("whatsapp")));
   }
 
-  const planoUsuario = getPlanoUsuario(req);
-
-  const limite = isAdminMaster(req)
-  ? 999
-  : Number(planoUsuario?.limites?.sessoes || 1);
-
- const sessoesCliente = Object.values(sessoesMeta)
-  .filter(s => canalPertenceAoWorkspace(s, clienteId, { usuarios }));
-
-  if (!isAdminMaster(req) && sessoesCliente.length >= limite) {
-  return res.status(403).json({
-    ok: false,
-    codigo: "limite_do_plano_atingido",
-    recurso: "sessoes",
-    limite,
-    atual: sessoesCliente.length,
-    erro: `Seu plano permite apenas ${limite} sessão(ões).`
-  });
-}
+  try {
+    validarNovaConexaoReq(req);
+  } catch (erro) {
+    return res.status(erro.statusCode || 403).json(payloadErroPlano(erro));
+  }
 
   try {
     const nome = req.body.nome || "WhatsApp";
@@ -23965,15 +24131,7 @@ app.post("/reset/:id", async (req, res) => {
 // ===================== FUNÇÃO LIMETE SESSÃO WHATSAPP ========================
 
 function obterLimiteSessoesCliente(clienteId) {
-  const usuario = obterUsuario(clienteId);
-  const nomePlano = String(usuario?.plano || "free").toLowerCase();
-  const plano = getPlanoPorNome(nomePlano);
-
-  return Number(
-    plano?.limites?.sessoes ||
-    usuario?.limites?.sessoes ||
-    1
-  );
+  return Number(obterLimitesPlanoCliente(clienteId).maxConexoes || 1);
 }
 
 function listarSessoesCliente(clienteId) {
@@ -24016,26 +24174,6 @@ app.post("/conectar", async (req, res) => {
 
   config.sessoesWhatsapp = config.sessoesWhatsapp || [];
 
- const limiteSessoes = isAdminMaster(req)
-  ? 999
-  : obterLimiteSessoesCliente(clienteId);
-
-const sessoesCliente = listarSessoesCliente(clienteId);
-
-if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
-
-
-    return res.status(403).json({
-      ok: false,
-      codigo: "limite_do_plano_atingido",
-      recurso: "sessoes",
-      erro: `Seu plano permite até ${limiteSessoes} sessão(ões) WhatsApp.`,
-      limite: limiteSessoes,
-      atual: sessoesCliente.length,
-      usadas: sessoesCliente.length
-    });
-  }
-
   const idRecebido = String(
     req.body?.id ||
     req.body?.sessaoId ||
@@ -24057,14 +24195,23 @@ if (!isAdminMaster(req) && sessoesCliente.length >= limiteSessoes) {
     });
   }
 
+  try {
+    validarNovaConexaoReq(req);
+  } catch (erro) {
+    return res.status(erro.statusCode || 403).json(payloadErroPlano(erro));
+  }
+
+  const usoConexoes = contarConexoesWorkspace(clienteId);
+  const limiteConexoes = obterLimitesPlanoReq(req).maxConexoes;
+
   config.sessoesWhatsapp.push(sessaoId);
   salvarConfig();
 
   console.log("[WHATSAPP]💾 Sesso WhatsApp salva para reconexo:", {
     clienteId,
     sessaoId,
-    limiteSessoes,
-    usadas: sessoesCliente.length + 1
+    limiteConexoes,
+    usadas: usoConexoes.total + 1
   });
 
   reconectarSessaoWhatsAppSeguro(sessaoId, { origem: "manual_conectar" });

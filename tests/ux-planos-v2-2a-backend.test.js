@@ -50,13 +50,13 @@ assert.ok(rotaDestinos.includes("payloadErroPlano"), "POST /destinos deve devolv
 const rotaSessoes = trechoEntre(indexFonte, 'app.post("/sessoes"', 'app.delete("/sessoes/:id"');
 assert.ok(rotaSessoes.includes('usuarioTemRecurso(req, "whatsapp")'), "POST /sessoes deve bloquear plano sem WhatsApp");
 assert.ok(rotaSessoes.includes('criarErroRecursoPlano("whatsapp")'), "POST /sessoes deve retornar recurso whatsapp estruturado");
-assert.ok(rotaSessoes.includes('codigo: "limite_do_plano_atingido"'), "POST /sessoes deve estruturar limite de sessoes");
-assert.ok(rotaSessoes.includes('recurso: "sessoes"'), "limite de sessoes deve continuar sendo contrato de sessoes WhatsApp");
+assert.ok(rotaSessoes.includes("validarNovaConexaoReq"), "POST /sessoes deve usar limite compartilhado de conexoes");
+assert.ok(rotaSessoes.includes("payloadErroPlano"), "POST /sessoes deve estruturar limite de conexoes");
 
 const rotaConectar = trechoEntre(indexFonte, 'app.post("/conectar"', 'app.post("/grupos/:id/refresh"');
 assert.ok(rotaConectar.includes('usuarioTemRecurso(req, "whatsapp")'), "POST /conectar deve bloquear plano sem WhatsApp");
-assert.ok(rotaConectar.includes('codigo: "limite_do_plano_atingido"'), "POST /conectar deve estruturar limite de sessoes");
-assert.ok(rotaConectar.includes("atual:"), "POST /conectar deve informar quantidade atual");
+assert.ok(rotaConectar.includes("validarNovaConexaoReq"), "POST /conectar deve usar limite compartilhado de conexoes");
+assert.ok(rotaConectar.includes("payloadErroPlano"), "POST /conectar deve estruturar limite de conexoes");
 
 assert.ok(discordRoutesFonte.includes("function erroRecursoDiscordPlano"), "rotas Discord devem ter payload estruturado local");
 assert.strictEqual(
