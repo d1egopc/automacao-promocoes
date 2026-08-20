@@ -87,8 +87,9 @@ assert(
   "Telegram deve ter aptidao propria, separada da sessao WhatsApp"
 );
 assert(
-  helpers.includes("Boolean(sessaoWhatsappDisponivel || telegramDisponivel || destinosOutros.length)"),
-  "workspace misto nao pode ser bloqueado por WhatsApp indisponivel se Telegram estiver apto"
+  helpers.includes("Boolean(sessaoWhatsappDisponivel || telegramDisponivel") &&
+    helpers.includes("destinosOutros.length"),
+  "workspace misto nao pode ser bloqueado por WhatsApp indisponivel se outro canal estiver apto"
 );
 assert(
   helpers.includes("proximaVerificacaoMs") &&

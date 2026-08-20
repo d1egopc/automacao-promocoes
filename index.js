@@ -43,6 +43,10 @@ const {
 const {
   motivoDistribuicaoDefinitivo
 } = require("./modules/engine/distributor/motivos-definitivos");
+const {
+  calcularScoreFilaViva,
+  ordenarOfertasFilaViva
+} = require("./modules/executor/fila-viva.service");
 
 const {
   farejarMercadoLivre: farejarMercadoLivreModulo,
@@ -1833,6 +1837,7 @@ function motivoPrincipalDiagnosticoFila(diagnostico = {}) {
     ["aguardando_proxima_tentativa", diagnostico.bloqueadasPorProximaTentativa],
     ["fora_horario", diagnostico.bloqueadasPorHorario],
     ["sem_destino_compativel", diagnostico.bloqueadasPorDestino],
+    ["sem_destino_liberado_agora", diagnostico.bloqueadasPorDestinoSemSlot],
     ["outros_motivos", diagnostico.bloqueadasPorOutrosMotivos]
   ];
 
@@ -1863,6 +1868,7 @@ function diagnosticarFilaCliente(clienteIdAlvo = null) {
     bloqueadasPorProximaTentativa: 0,
     bloqueadasPorHorario: 0,
     bloqueadasPorDestino: 0,
+    bloqueadasPorDestinoSemSlot: 0,
     bloqueadasPorOutrosMotivos: 0,
     motivoPrincipal: "sem_pendentes"
   };
@@ -1881,7 +1887,6 @@ function diagnosticarFilaCliente(clienteIdAlvo = null) {
       const proxima = Date.parse(oferta.proximaTentativaEnvioEm);
       if (Number.isFinite(proxima) && proxima > agora) {
         diagnostico.bloqueadasPorProximaTentativa += 1;
-        motivos.push("aguardando_proxima_tentativa");
       }
     }
 
@@ -1895,6 +1900,12 @@ function diagnosticarFilaCliente(clienteIdAlvo = null) {
       if (!analiseDestinos.compativeis.length) {
         diagnostico.bloqueadasPorDestino += 1;
         motivos.push("sem_destino_compativel");
+      } else {
+        const avaliacao = avaliarOfertaParaSelecaoFilaViva(oferta, clienteIdOferta, configClienteOferta, { agora });
+        if (!avaliacao.elegivel && avaliacao.motivo === "sem_destino_liberado_agora") {
+          diagnostico.bloqueadasPorDestinoSemSlot += 1;
+          motivos.push("sem_destino_liberado_agora");
+        }
       }
     } catch (e) {
       diagnostico.bloqueadasPorOutrosMotivos += 1;
@@ -1916,12 +1927,17 @@ function diagnosticarFilaCliente(clienteIdAlvo = null) {
       : NaN;
 
     if (configClienteOferta.automacaoAtiva !== true) bloqueadasConhecidas.add(indice);
-    if (Number.isFinite(proxima) && proxima > agora) bloqueadasConhecidas.add(indice);
     if (foraHorario) bloqueadasConhecidas.add(indice);
 
     try {
       const analiseDestinos = analisarDestinosCompativeisFila(clienteIdOferta, oferta, configClienteOferta);
       if (!analiseDestinos.compativeis.length) bloqueadasConhecidas.add(indice);
+      else {
+        const avaliacao = avaliarOfertaParaSelecaoFilaViva(oferta, clienteIdOferta, configClienteOferta, { agora });
+        if (!avaliacao.elegivel && avaliacao.motivo === "sem_destino_liberado_agora") {
+          bloqueadasConhecidas.add(indice);
+        }
+      }
     } catch {
       bloqueadasConhecidas.add(indice);
     }
@@ -1934,6 +1950,111 @@ function diagnosticarFilaCliente(clienteIdAlvo = null) {
   diagnostico.motivoPrincipal = motivoPrincipalDiagnosticoFila(diagnostico);
 
   return diagnostico;
+}
+
+function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin", configClienteOferta = config, opcoes = {}) {
+  const agora = Number(opcoes.agora || Date.now());
+
+  if (!oferta || oferta.status !== "pendente") {
+    return { elegivel: false, motivo: "status_nao_pendente" };
+  }
+
+  if (configClienteOferta.automacaoAtiva !== true) {
+    return { elegivel: false, motivo: "automacao_desligada" };
+  }
+
+  if (ofertaExpiradaParaEnvio(oferta, agora)) {
+    return { elegivel: false, motivo: "expirada" };
+  }
+
+  const analiseDestinos = analisarDestinosCompativeisFila(clienteIdOferta, oferta, configClienteOferta);
+  if (!analiseDestinos.compativeis.length) {
+    return {
+      elegivel: false,
+      motivo: "sem_destino_compativel",
+      destinosCompativeis: 0,
+      destinosLiberados: []
+    };
+  }
+
+  const disponibilidade = diagnosticarDisponibilidadeEnvioWorkspace(clienteIdOferta, {
+    configCliente: configClienteOferta,
+    oferta,
+    destinosCompativeis: analiseDestinos.compativeis
+  });
+
+  if (!disponibilidade.ok) {
+    return {
+      elegivel: false,
+      motivo: disponibilidade.motivo || "sem_integracao_funcional",
+      destinosCompativeis: analiseDestinos.compativeis.length,
+      destinosLiberados: []
+    };
+  }
+
+  const destinosLiberados = [];
+  let menorRestanteMs = Infinity;
+  let motivoBloqueio = "";
+
+  for (const item of analiseDestinos.compativeis) {
+    const destino = item.destino;
+
+    if (destinoJaEnviadoFanout(oferta, destino)) {
+      motivoBloqueio = motivoBloqueio || "fanout_destino_ja_enviado";
+      continue;
+    }
+
+    if (!destinoDentroHorario(destino)) {
+      motivoBloqueio = motivoBloqueio || "fora_horario";
+      continue;
+    }
+
+    const limite = destinoLimiteDiarioDisponivel(clienteIdOferta, destino);
+    if (!limite.ok) {
+      motivoBloqueio = motivoBloqueio || "limite_diario";
+      continue;
+    }
+
+    const intervalo = intervaloDestinoInfo(clienteIdOferta, destino, configClienteOferta, oferta);
+    menorRestanteMs = Math.min(menorRestanteMs, Number(intervalo.restanteMs || 0));
+
+    if (!intervalo.liberado) {
+      motivoBloqueio = motivoBloqueio || "intervalo";
+      continue;
+    }
+
+    destinosLiberados.push({
+      ...item,
+      intervalo
+    });
+  }
+
+  const ranking = calcularScoreFilaViva(oferta, {
+    agora,
+    destinosCompativeis: analiseDestinos.compativeis.length,
+    destinosDisponiveis: destinosLiberados.length
+  });
+
+  if (!destinosLiberados.length) {
+    return {
+      elegivel: false,
+      motivo: "sem_destino_liberado_agora",
+      motivoBloqueio: motivoBloqueio || "sem_destino_liberado_agora",
+      destinosCompativeis: analiseDestinos.compativeis.length,
+      destinosLiberados,
+      menorRestanteMs: Number.isFinite(menorRestanteMs) ? menorRestanteMs : 0,
+      ranking
+    };
+  }
+
+  return {
+    elegivel: true,
+    motivo: "destino_liberado",
+    oferta,
+    destinosCompativeis: analiseDestinos.compativeis.length,
+    destinosLiberados,
+    ranking
+  };
 }
 
 function selecionarProximaOfertaFila(clienteIdAlvo = null) {
@@ -1955,11 +2076,6 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
     if (!mesmoCliente) return false;
     if (o.status !== "pendente") return false;
 
-    if (o.proximaTentativaEnvioEm) {
-      const proxima = Date.parse(o.proximaTentativaEnvioEm);
-      if (Number.isFinite(proxima) && proxima > Date.now()) return false;
-    }
-
     const clienteIdOferta = o.clienteId || "admin";
     const configClienteOferta =
       configsPorCliente?.[clienteIdOferta] || config;
@@ -1968,19 +2084,76 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
   });
 
   let expirouAlguma = false;
+  const candidatosVivos = [];
+  const contadoresFilaViva = {
+    avaliadas: 0,
+    expiradas: 0,
+    semDestinoCompativel: 0,
+    semDestinoLiberadoAgora: 0,
+    outrosBloqueios: 0
+  };
+  const agora = Date.now();
 
   for (const oferta of ordenarPendentesPorPrioridade(pendentes)) {
-    if (ofertaExpiradaParaEnvio(oferta)) {
+    contadoresFilaViva.avaliadas += 1;
+
+    if (ofertaExpiradaParaEnvio(oferta, agora)) {
       marcarOfertaExpirada(oferta);
       expirouAlguma = true;
+      contadoresFilaViva.expiradas += 1;
       continue;
     }
 
-    if (expirouAlguma) {
-      salvarFila(oferta.clienteId || clienteIdAlvo || "admin");
+    const clienteIdOferta = oferta.clienteId || "admin";
+    const configClienteOferta = configsPorCliente?.[clienteIdOferta] || config;
+    const avaliacao = avaliarOfertaParaSelecaoFilaViva(oferta, clienteIdOferta, configClienteOferta, { agora });
+
+    if (avaliacao.elegivel) {
+      candidatosVivos.push(avaliacao);
+      continue;
     }
 
-    return oferta;
+    if (avaliacao.motivo === "sem_destino_compativel") {
+      contadoresFilaViva.semDestinoCompativel += 1;
+    } else if (avaliacao.motivo === "sem_destino_liberado_agora") {
+      contadoresFilaViva.semDestinoLiberadoAgora += 1;
+    } else {
+      contadoresFilaViva.outrosBloqueios += 1;
+    }
+  }
+
+  const selecionada = ordenarOfertasFilaViva(candidatosVivos, { agora })[0];
+
+  if (selecionada) {
+    if (expirouAlguma) {
+      salvarFila(selecionada.oferta.clienteId || clienteIdAlvo || "admin");
+    }
+
+    selecionada.oferta.filaVivaSelecao = {
+      selecionadaEm: new Date(agora).toISOString(),
+      lane: selecionada.ranking.lane,
+      scoreFinal: Number(selecionada.ranking.scoreFinal.toFixed(3)),
+      idadeMs: Math.round(selecionada.ranking.idadeMs),
+      destinosCompativeis: selecionada.destinosCompativeis,
+      destinosLiberados: selecionada.destinosLiberados.length
+    };
+
+    if (deveLogarThrottle(`fila-viva-selecao:${clienteLog}`)) {
+      console.log("[FILA-VIVA-SELECAO]", JSON.stringify({
+        clienteId: clienteLog,
+        ofertaId: selecionada.oferta.id || selecionada.oferta.engineOfertaId || selecionada.oferta.ofertaId || "",
+        titulo: selecionada.oferta.titulo || selecionada.oferta.nome || "",
+        marketplace: selecionada.oferta.marketplace || selecionada.oferta.mercado || "",
+        lane: selecionada.ranking.lane,
+        idadeMs: Math.round(selecionada.ranking.idadeMs),
+        scoreFinal: Number(selecionada.ranking.scoreFinal.toFixed(3)),
+        destinosCompativeis: selecionada.destinosCompativeis,
+        destinosLiberados: selecionada.destinosLiberados.length,
+        contadores: contadoresFilaViva
+      }));
+    }
+
+    return selecionada.oferta;
   }
 
   if (expirouAlguma) {
