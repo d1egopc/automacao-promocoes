@@ -208,6 +208,9 @@ const {
 } = require("./utils/cotas-flexiveis-planos");
 const saasFundacao = require("./utils/saas-fundacao");
 const {
+  criarAdminMasterEstrito
+} = require("./utils/admin-auth-estrito");
+const {
   iniciarManualV2Scheduler
 } = require("./modules/manual-v2/manual-scheduler.runner");
 const {
@@ -9520,7 +9523,14 @@ app.post("/cadastro", async (req, res) => {
   }
 });
 
-app.get("/admin/usuarios", (req, res) => {
+const exigirAdminMasterEstrito = criarAdminMasterEstrito({
+  jwt,
+  getJwtSecret: () => JWT_SECRET,
+  getUsuarios: () => usuarios,
+  usuarioEhAdminMaster
+});
+
+app.get("/admin/usuarios", exigirAdminMasterEstrito, (req, res) => {
   if (!isAdminMaster(req)) {
     return res.status(403).json({
       ok: false,
@@ -9534,7 +9544,7 @@ app.get("/admin/usuarios", (req, res) => {
   });
 });
 
-app.get("/admin/planos", (req, res) => {
+app.get("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
   if (!isAdminMaster(req)) {
     return res.status(403).json({
       ok: false,
@@ -9549,7 +9559,7 @@ return res.json({
  });
 });
 
-app.post("/admin/planos", (req, res) => {
+app.post("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
   if (!isAdminMaster(req)) {
     return res.status(403).json({
       ok: false,
@@ -9710,7 +9720,7 @@ function logAuditoriaExclusaoAdmin({
   }));
 }
 
-app.delete("/admin/planos/:nome", (req, res) => {
+app.delete("/admin/planos/:nome", exigirAdminMasterEstrito, (req, res) => {
   if (!isAdminMaster(req)) {
     logAuditoriaExclusaoAdmin({
       entidade: "plano",
@@ -9796,7 +9806,7 @@ app.delete("/admin/planos/:nome", (req, res) => {
   });
 });
 
-app.delete("/admin/usuarios/:id", (req, res) => {
+app.delete("/admin/usuarios/:id", exigirAdminMasterEstrito, (req, res) => {
   if (!isAdminMaster(req)) {
     logAuditoriaExclusaoAdmin({
       entidade: "workspace",
@@ -9890,7 +9900,7 @@ app.delete("/admin/usuarios/:id", (req, res) => {
   });
 });
 
-app.post("/admin/usuarios", async (req, res) => {
+app.post("/admin/usuarios", exigirAdminMasterEstrito, async (req, res) => {
   if (!isAdminMaster(req)) {
     return res.status(403).json({
       ok: false,
@@ -9962,7 +9972,7 @@ app.post("/admin/usuarios", async (req, res) => {
   });
 });
 
-app.put("/admin/usuarios/:id", async (req, res) => {
+app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
   if (!isAdminMaster(req)) {
     return res.status(403).json({
       ok: false,
@@ -10205,7 +10215,25 @@ if (body.pausarMadrugada != null) {
 // ===================== FUNCAO ADMIN MASTER ==============================
 
 function isAdminMaster(req) {
-  const clienteId = getClienteId(req);
+  if (req.usuario) {
+    return usuarioEhAdminMaster(req.usuario);
+  }
+
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+
+  if (!token) return false;
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, JWT_SECRET);
+  } catch {
+    return false;
+  }
+
+  const clienteId = String(decoded?.clienteId || "").trim();
+  if (!clienteId) return false;
+
   const usuario = usuarios.find(u => u.id === clienteId);
 
   return usuarioEhAdminMaster(usuario);
