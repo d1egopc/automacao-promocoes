@@ -9434,18 +9434,38 @@ app.get("/minha-config", (req, res) => {
   });
 });
 
+const CAMPOS_SECRETOS_USUARIO = new Set([
+  "senha",
+  "password",
+  "pass",
+  "senhaHash",
+  "passwordHash",
+  "tokenHash",
+  "accessToken",
+  "refreshToken",
+  "secret",
+  "segredo",
+  "codigo",
+  "token"
+]);
+
 function sanitizarUsuarioAdmin(usuario = {}) {
   if (!usuario || typeof usuario !== "object") return usuario;
-  const {
-    senha,
-    password,
-    pass,
-    senhaHash,
-    passwordHash,
-    hash,
-    ...seguro
-  } = usuario;
-  return seguro;
+
+  const sanitizar = (valor) => {
+    if (Array.isArray(valor)) return valor.map(sanitizar);
+    if (!valor || typeof valor !== "object") return valor;
+
+    const seguro = {};
+    for (const [chave, item] of Object.entries(valor)) {
+      if (CAMPOS_SECRETOS_USUARIO.has(chave)) continue;
+      if (chave === "hash" && typeof item === "string" && pareceHashBcrypt(item)) continue;
+      seguro[chave] = sanitizar(item);
+    }
+    return seguro;
+  };
+
+  return sanitizar(usuario);
 }
 
 function obterConfigSaasAtual() {
@@ -10602,6 +10622,8 @@ function auth(req, res, next) {
     req.path === "/" ||
     req.path === "/login" ||
     req.path === "/cadastro" ||
+    req.path === "/senha/recuperar" ||
+    req.path === "/senha/redefinir" ||
     req.path.startsWith("/public/") ||
     (req.method === "GET" && req.path === "/branding") ||
     (req.method === "GET" && req.path === "/discord/callback") ||
@@ -19639,6 +19661,212 @@ async function migrarSenhaLegadaSeNecessario(usuario = {}, senhaInformada = "", 
   });
   return true;
 }
+
+const RESPOSTA_RECUPERACAO_NEUTRA = {
+  ok: true,
+  mensagem: "Se o e-mail estiver cadastrado, enviaremos instrucoes para redefinir a senha."
+};
+const SENHA_RESET_EXPIRACAO_MS = 30 * 60 * 1000;
+
+const senhaRecuperacaoRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    ok: false,
+    erro: "Muitas tentativas. Tente novamente em alguns minutos."
+  }
+});
+
+function normalizarEmailAuth(email = "") {
+  return String(email || "").trim().toLowerCase();
+}
+
+function hashTokenRecuperacaoSenha(token = "") {
+  return crypto
+    .createHash("sha256")
+    .update(String(token || ""), "utf8")
+    .digest("hex");
+}
+
+function gerarTokenRecuperacaoSenhaSeguro() {
+  return crypto.randomBytes(32).toString("base64url");
+}
+
+function obterUsuarioPorEmailNormalizado(email = "") {
+  const alvo = normalizarEmailAuth(email);
+  if (!alvo) return null;
+  return usuarios.find(u => normalizarEmailAuth(u.email) === alvo) || null;
+}
+
+function usuarioElegivelRecuperacaoSenha(usuario = {}) {
+  if (!usuario || !usuario.id) return false;
+  if (usuario.ativo === false) return false;
+  return Boolean(usuario.email);
+}
+
+function sanitizarRecuperacaoSenha(usuario = {}) {
+  const reset = usuario?.senhaReset || {};
+  return {
+    solicitadoEm: reset.solicitadoEm || "",
+    expiraEm: reset.expiraEm || "",
+    usadoEm: reset.usadoEm || "",
+    email: normalizarEmailAuth(usuario.email)
+  };
+}
+
+function criarTokenRecuperacaoSenha(usuario = {}, {
+  agora = new Date(),
+  origem = "publico",
+  operador = "",
+  expiraEmTeste = ""
+} = {}) {
+  const token = gerarTokenRecuperacaoSenhaSeguro();
+  const iso = new Date(agora).toISOString();
+  const expiraTeste = expiraEmTeste ? new Date(expiraEmTeste) : null;
+  const expiraEm = expiraTeste && Number.isFinite(expiraTeste.getTime())
+    ? expiraTeste.toISOString()
+    : new Date(new Date(agora).getTime() + SENHA_RESET_EXPIRACAO_MS).toISOString();
+
+  usuario.senhaReset = {
+    tokenHash: hashTokenRecuperacaoSenha(token),
+    solicitadoEm: iso,
+    expiraEm,
+    usadoEm: "",
+    origem,
+    operador: String(operador || "").slice(0, 120)
+  };
+  usuario.senhaResetAtualizadoEm = iso;
+  salvarUsuarios();
+
+  console.log("[AUTH-SENHA-RECUPERACAO]", {
+    usuario: usuario.id || "",
+    email: normalizarEmailAuth(usuario.email),
+    origem,
+    expiraEm
+  });
+
+  return {
+    token,
+    expiraEm,
+    usuario
+  };
+}
+
+function solicitarRecuperacaoSenha(email = "", opcoes = {}) {
+  const usuario = obterUsuarioPorEmailNormalizado(email);
+  if (!usuarioElegivelRecuperacaoSenha(usuario)) {
+    console.log("[AUTH-SENHA-RECUPERACAO]", {
+      emailInformado: normalizarEmailAuth(email),
+      elegivel: false
+    });
+    return { criado: false, usuario: null };
+  }
+
+  const criado = criarTokenRecuperacaoSenha(usuario, opcoes);
+  return { criado: true, ...criado };
+}
+
+async function redefinirSenhaComToken({ token = "", novaSenha = "", agora = new Date() } = {}) {
+  const tokenTexto = String(token || "").trim();
+  const senhaTexto = String(novaSenha || "");
+
+  if (!tokenTexto) {
+    return { ok: false, status: 400, codigo: "token_obrigatorio", erro: "Token obrigatorio" };
+  }
+  if (senhaTexto.length < 8) {
+    return { ok: false, status: 400, codigo: "senha_minima", erro: "Senha deve ter pelo menos 8 caracteres" };
+  }
+
+  const tokenHash = hashTokenRecuperacaoSenha(tokenTexto);
+  const usuario = usuarios.find(u =>
+    u?.senhaReset?.tokenHash &&
+    u.senhaReset.tokenHash === tokenHash
+  );
+
+  if (!usuario || !usuario.senhaReset) {
+    return { ok: false, status: 400, codigo: "token_invalido", erro: "Token invalido ou expirado" };
+  }
+
+  if (usuario.senhaReset.usadoEm) {
+    return { ok: false, status: 400, codigo: "token_usado", erro: "Token invalido ou expirado" };
+  }
+
+  const expira = new Date(usuario.senhaReset.expiraEm || "");
+  if (!Number.isFinite(expira.getTime()) || expira <= new Date(agora)) {
+    usuario.senhaReset.usadoEm = usuario.senhaReset.usadoEm || new Date(agora).toISOString();
+    usuario.senhaResetExpiradoEm = usuario.senhaReset.usadoEm;
+    salvarUsuarios();
+    return { ok: false, status: 400, codigo: "token_expirado", erro: "Token invalido ou expirado" };
+  }
+
+  usuario.senhaHash = await gerarSenhaHash(senhaTexto);
+  delete usuario.senha;
+  delete usuario.password;
+  delete usuario.pass;
+  usuario.senhaRedefinidaEm = new Date(agora).toISOString();
+  usuario.senhaReset.usadoEm = usuario.senhaRedefinidaEm;
+  usuario.senhaReset.tokenHash = "";
+  salvarUsuarios();
+
+  console.log("[AUTH-SENHA-REDEFINIDA]", {
+    usuario: usuario.id || "",
+    email: normalizarEmailAuth(usuario.email)
+  });
+
+  return { ok: true, usuario };
+}
+
+app.post("/senha/recuperar", senhaRecuperacaoRateLimit, (req, res) => {
+  const email = normalizarEmailAuth(req.body?.email || req.body?.user || "");
+  solicitarRecuperacaoSenha(email, { origem: "publico" });
+  return res.json(RESPOSTA_RECUPERACAO_NEUTRA);
+});
+
+app.post("/senha/redefinir", senhaRecuperacaoRateLimit, async (req, res) => {
+  const resultado = await redefinirSenhaComToken({
+    token: req.body?.token,
+    novaSenha: req.body?.novaSenha || req.body?.senha
+  });
+
+  if (!resultado.ok) {
+    return res.status(resultado.status || 400).json({
+      ok: false,
+      codigo: resultado.codigo || "senha_redefinicao_invalida",
+      erro: resultado.erro || "Nao foi possivel redefinir a senha"
+    });
+  }
+
+  return res.json({
+    ok: true,
+    mensagem: "Senha redefinida com sucesso."
+  });
+});
+
+app.post("/admin/senha/recuperacao-teste", exigirAdminMasterEstrito, (req, res) => {
+  const email = normalizarEmailAuth(req.body?.email || "");
+  const resultado = solicitarRecuperacaoSenha(email, {
+    origem: "admin/teste",
+    operador: req.usuario?.id || req.usuario?.email || "",
+    expiraEmTeste: req.body?.expiraEmTeste || ""
+  });
+
+  if (!resultado.criado) {
+    return res.status(404).json({
+      ok: false,
+      codigo: "usuario_nao_elegivel",
+      erro: "Usuario nao encontrado ou nao elegivel"
+    });
+  }
+
+  return res.json({
+    ok: true,
+    tokenTeste: resultado.token,
+    expiraEm: resultado.expiraEm,
+    recuperacao: sanitizarRecuperacaoSenha(resultado.usuario)
+  });
+});
 
 app.post("/login", async (req, res) => {
   const perf = criarPerfTimer("PERF LOGIN", contextoPerfHttp(req));
