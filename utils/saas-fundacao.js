@@ -112,6 +112,7 @@ function assinaturaAutorizaCreditos(usuario = {}) {
     "ativa",
     "autorizada",
     "pagamento_confirmado",
+    "teste_ciclo_autorizado",
     "trial_autorizado",
     "ativa_legacy",
     "manual"
@@ -125,6 +126,10 @@ function adicionarDias(data, dias) {
 }
 
 function inicializarCreditosUsuario({ usuario = {}, plano = {}, agora = new Date(), origemCadastro = "admin" } = {}) {
+  if (usuario.creditosInicializadosEm) {
+    return usuario;
+  }
+
   const politica = politicaCreditosPlano(plano);
   const iso = new Date(agora).toISOString();
   usuario.creditosModelo = politica.creditosModelo;
@@ -146,6 +151,33 @@ function inicializarCreditosUsuario({ usuario = {}, plano = {}, agora = new Date
   usuario.proximaRenovacao = usuario.proximaRenovacao || (usuario.creditos > 0 ? adicionarDias(agora, politica.cicloDias).toISOString() : "");
   usuario.creditosInicializadosEm = usuario.creditosInicializadosEm || iso;
   return usuario;
+}
+
+function abrirCicloCreditosAutorizado(usuario = {}, plano = {}, {
+  agora = new Date(),
+  idempotencyKey = "",
+  assinaturaStatus = "teste_ciclo_autorizado"
+} = {}) {
+  const politica = politicaCreditosPlano(plano);
+  if (politica.creditosModelo !== "ciclo") {
+    return { alterou: false, motivo: "plano_nao_ciclico" };
+  }
+
+  const chave = texto(idempotencyKey);
+  if (chave && usuario.ultimoCicloCreditoIdempotencyKey === chave) {
+    return { alterou: false, motivo: "ciclo_ja_aberto" };
+  }
+
+  const iso = new Date(agora).toISOString();
+  usuario.assinaturaStatus = assinaturaStatus;
+  usuario.pagamentoUltimoStatus = assinaturaStatus;
+  usuario.creditosModelo = "ciclo";
+  usuario.creditos = politica.creditosPorCiclo;
+  usuario.cicloAtualInicio = iso;
+  usuario.proximaRenovacao = adicionarDias(agora, politica.cicloDias).toISOString();
+  usuario.creditosInicializadosEm = usuario.creditosInicializadosEm || iso;
+  usuario.ultimoCicloCreditoIdempotencyKey = chave || usuario.ultimoCicloCreditoIdempotencyKey || `ciclo:${iso}`;
+  return { alterou: true, motivo: "ciclo_aberto" };
 }
 
 function renovarCreditosPorPlano(usuario = {}, plano = {}, agora = new Date()) {
@@ -264,13 +296,29 @@ function contarVagasFreeBeta({ usuarios = [], planos = {}, maxContasFreeBeta = 0
   };
 }
 
-function validarCadastroPublico({ body = {}, planos = {}, usuarios = [], saasConfig = {} } = {}) {
+function buscarPlanoCadastro(planos = {}, planoNome = "") {
+  const alvo = textoLower(planoNome);
+  if (!alvo) return null;
+
+  const planoEntrada = Object.entries(planos || {}).find(([chave, p]) =>
+    textoLower(chave) === alvo ||
+    textoLower(p?.nome) === alvo ||
+    textoLower(p?.id) === alvo
+  );
+
+  if (!planoEntrada) return null;
+  return normalizarPlanoSaas(planoEntrada[1], planoEntrada[0]);
+}
+
+function validarCadastro({ body = {}, planos = {}, usuarios = [], saasConfig = {}, contexto = "publico" } = {}) {
   const nome = texto(body.nome);
   const email = textoLower(body.email);
   const senha = String(body.senha || "");
-  const planoNome = textoLower(body.plano || body.planoNome);
+  const planoNome = texto(body.plano || body.planoNome || body.planoId);
+  const contextoCadastro = textoLower(contexto || "publico") || "publico";
+  const publico = contextoCadastro === "publico";
 
-  if (!saasConfig.cadastroPublicoAtivo) {
+  if (publico && !saasConfig.cadastroPublicoAtivo) {
     return { ok: false, status: 403, codigo: "cadastro_publico_desativado", erro: "Cadastro publico desativado" };
   }
   if (!nome) return { ok: false, status: 400, codigo: "nome_obrigatorio", erro: "Nome obrigatorio" };
@@ -285,22 +333,19 @@ function validarCadastroPublico({ body = {}, planos = {}, usuarios = [], saasCon
     return { ok: false, status: 409, codigo: "email_ja_cadastrado", erro: "Email ja cadastrado" };
   }
 
-  const planoEntrada = Object.entries(planos || {}).find(([chave, p]) =>
-    textoLower(chave) === planoNome ||
-    textoLower(p?.nome) === planoNome ||
-    textoLower(p?.id) === planoNome
-  );
-  const plano = planoEntrada?.[1] || null;
-  const planoSaas = normalizarPlanoSaas(plano || {});
-  if (!plano || !planoSaas.visivelPublicamente) {
+  const planoSaas = buscarPlanoCadastro(planos, planoNome);
+  if (!planoSaas) {
     return { ok: false, status: 404, codigo: "plano_publico_nao_encontrado", erro: "Plano nao encontrado" };
   }
-  if (!planoSaas.contratavel || planoSaas.emBreve) {
+  if (publico && !planoSaas.visivelPublicamente) {
+    return { ok: false, status: 404, codigo: "plano_publico_nao_encontrado", erro: "Plano nao encontrado" };
+  }
+  if (publico && (!planoSaas.contratavel || planoSaas.emBreve)) {
     return { ok: false, status: 403, codigo: "plano_nao_contratavel", erro: "Plano indisponivel para contratacao" };
   }
 
   const politica = politicaCreditosPlano(planoSaas);
-  if (saasConfig.betaAtivo && politica.creditosModelo === "unicos") {
+  if (publico && saasConfig.betaAtivo && politica.creditosModelo === "unicos") {
     const vagas = contarVagasFreeBeta({
       usuarios,
       planos,
@@ -314,6 +359,10 @@ function validarCadastroPublico({ body = {}, planos = {}, usuarios = [], saasCon
   return { ok: true, nome, email, senha, plano: planoSaas };
 }
 
+function validarCadastroPublico(opcoes = {}) {
+  return validarCadastro({ ...opcoes, contexto: "publico" });
+}
+
 function restaurarArray(alvo = [], snapshot = []) {
   alvo.splice(0, alvo.length, ...snapshot);
 }
@@ -323,12 +372,39 @@ function restaurarObjeto(alvo = {}, snapshot = {}) {
   Object.assign(alvo, snapshot);
 }
 
+function criarSerializadorCadastro(chave = "cadastro_saas_v1") {
+  const emAndamento = new Set();
+  const chaveLock = texto(chave) || "cadastro_saas_v1";
+
+  return async function executarCadastroSerializado(fn) {
+    if (emAndamento.has(chaveLock)) {
+      const erro = new Error("Cadastro em andamento");
+      erro.statusCode = 409;
+      erro.codigo = "cadastro_em_andamento";
+      throw erro;
+    }
+
+    emAndamento.add(chaveLock);
+
+    try {
+      return await fn();
+    } finally {
+      emAndamento.delete(chaveLock);
+    }
+  };
+}
+
 async function executarCadastroAtomico({
   body = {},
   planos = {},
   usuarios = [],
   configsPorCliente = {},
   saasConfig = {},
+  contexto = "publico",
+  origemCadastro,
+  ativo = true,
+  autorizarCicloTeste = false,
+  idempotencyKey = "",
   gerarId,
   gerarSenhaHash,
   prepararConfig,
@@ -336,7 +412,8 @@ async function executarCadastroAtomico({
   salvarConfigsClientes,
   agora = new Date()
 } = {}) {
-  const validacao = validarCadastroPublico({ body, planos, usuarios, saasConfig });
+  const contextoCadastro = textoLower(contexto || "publico") || "publico";
+  const validacao = validarCadastro({ body, planos, usuarios, saasConfig, contexto: contextoCadastro });
   if (!validacao.ok) {
     const erro = new Error(validacao.erro || "Cadastro invalido");
     erro.statusCode = validacao.status || 400;
@@ -359,18 +436,31 @@ async function executarCadastroAtomico({
     senhaHash: await gerarSenhaHash(validacao.senha),
     papel: "cliente",
     plano: validacao.plano.nome,
-    ativo: true,
-    origemCadastro: "publico",
+    ativo: ativo !== false,
+    origemCadastro: origemCadastro || (contextoCadastro === "publico" ? "publico" : "admin/teste"),
     statusConta: "ativa",
     criadoEm: new Date(agora).toISOString()
   };
 
+  if (autorizarCicloTeste === true) {
+    novoUsuario.assinaturaStatus = "teste_ciclo_autorizado";
+    novoUsuario.pagamentoUltimoStatus = "teste_ciclo_autorizado";
+  }
+
   inicializarCreditosUsuario({
     usuario: novoUsuario,
     plano: validacao.plano,
-    origemCadastro: "publico",
+    origemCadastro: novoUsuario.origemCadastro,
     agora
   });
+
+  if (autorizarCicloTeste === true) {
+    abrirCicloCreditosAutorizado(novoUsuario, validacao.plano, {
+      agora,
+      idempotencyKey: idempotencyKey || `cadastro:${novoUsuario.id}`,
+      assinaturaStatus: "teste_ciclo_autorizado"
+    });
+  }
 
   try {
     usuarios.push(novoUsuario);
@@ -403,9 +493,13 @@ module.exports = {
   inicializarCreditosUsuario,
   renovarCreditosPorPlano,
   aplicarDebitoConta,
+  abrirCicloCreditosAutorizado,
   planosPublicos,
   sanitizarPlanoPublico,
   contarVagasFreeBeta,
+  buscarPlanoCadastro,
+  validarCadastro,
   validarCadastroPublico,
+  criarSerializadorCadastro,
   executarCadastroAtomico
 };

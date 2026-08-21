@@ -9476,21 +9476,58 @@ function payloadSaasConfigPublico() {
   };
 }
 
+const executarCadastroSaasSerializado = saasFundacao.criarSerializadorCadastro();
+
 async function executarCadastroPublicoAtomico(body = {}) {
-  const saasConfig = obterConfigSaasAtual();
-  const novoUsuario = await saasFundacao.executarCadastroAtomico({
-    body,
-    planos,
-    usuarios,
-    configsPorCliente,
-    saasConfig,
-    gerarId,
-    gerarSenhaHash,
-    prepararConfig: (configAtual) => aplicarArquiteturaComercialRioOficial(configAtual),
-    salvarUsuarios,
-    salvarConfigsClientes
+  return executarCadastroSaasSerializado(async () => {
+    const saasConfig = obterConfigSaasAtual();
+    const novoUsuario = await saasFundacao.executarCadastroAtomico({
+      body,
+      planos,
+      usuarios,
+      configsPorCliente,
+      saasConfig,
+      gerarId,
+      gerarSenhaHash,
+      prepararConfig: (configAtual) => aplicarArquiteturaComercialRioOficial(configAtual),
+      salvarUsuarios,
+      salvarConfigsClientes
+    });
+    return sanitizarUsuarioAdmin(novoUsuario);
   });
-  return sanitizarUsuarioAdmin(novoUsuario);
+}
+
+async function executarCadastroInternoAdminAtomico(body = {}, operador = {}) {
+  return executarCadastroSaasSerializado(async () => {
+    const emailChave = String(body.email || "").trim().toLowerCase();
+    const novoUsuario = await saasFundacao.executarCadastroAtomico({
+      body,
+      planos,
+      usuarios,
+      configsPorCliente,
+      saasConfig: obterConfigSaasAtual(),
+      contexto: "admin/teste",
+      origemCadastro: "admin/teste",
+      ativo: body.ativo !== false,
+      autorizarCicloTeste: body.autorizarCicloTeste === true,
+      idempotencyKey: String(body.idempotencyKey || `admin-cadastro:${emailChave || "sem_email"}`),
+      gerarId,
+      gerarSenhaHash,
+      prepararConfig: (configAtual) => aplicarArquiteturaComercialRioOficial(configAtual),
+      salvarUsuarios,
+      salvarConfigsClientes
+    });
+
+    console.log("[SAAS-CADASTRO-INTERNO]", {
+      operador: operador?.id || operador?.email || "",
+      usuario: novoUsuario.id,
+      plano: novoUsuario.plano || "",
+      origemCadastro: novoUsuario.origemCadastro || "",
+      autorizarCicloTeste: body.autorizarCicloTeste === true
+    });
+
+    return sanitizarUsuarioAdmin(novoUsuario);
+  });
 }
 
 app.get("/public/saas-config", (req, res) => {
@@ -9528,6 +9565,24 @@ const exigirAdminMasterEstrito = criarAdminMasterEstrito({
   getJwtSecret: () => JWT_SECRET,
   getUsuarios: () => usuarios,
   usuarioEhAdminMaster
+});
+
+app.post("/admin/cadastro-interno", exigirAdminMasterEstrito, async (req, res) => {
+  try {
+    const usuario = await executarCadastroInternoAdminAtomico(req.body || {}, req.usuario || {});
+    return res.status(201).json({
+      ok: true,
+      usuario
+    });
+  } catch (erro) {
+    return res.status(erro.statusCode || 500).json({
+      ok: false,
+      codigo: erro.codigo || "cadastro_interno_falhou",
+      erro: erro.statusCode && erro.statusCode < 500
+        ? erro.message
+        : "Falha ao criar conta"
+    });
+  }
 });
 
 app.get("/admin/usuarios", exigirAdminMasterEstrito, (req, res) => {
