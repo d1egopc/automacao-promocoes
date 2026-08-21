@@ -153,7 +153,40 @@ function trechoEntre(inicio, fim) {
     }
   ]);
   writeJson(path.join(dataDir, "planos.json"), {
-    pro: { nome: "pro", limites: { creditos: 100 }, recursos: {}, marketplaces: [] }
+    pro: { nome: "pro", limites: { creditos: 100 }, recursos: {}, marketplaces: [] },
+    beta: {
+      id: "plano_beta_google",
+      nome: "Beta Google",
+      visivelPublicamente: true,
+      contratavel: true,
+      emBreve: false,
+      creditosModelo: "unicos",
+      limites: { creditosUnicos: 321, maxConexoes: 2, destinos: 3 },
+      recursos: { whatsapp: true, telegram: true, discord: false },
+      marketplaces: ["amazon", "shopee"]
+    },
+    futuro: {
+      id: "plano_futuro_google",
+      nome: "Futuro Google",
+      visivelPublicamente: true,
+      contratavel: false,
+      emBreve: true,
+      creditosModelo: "unicos",
+      limites: { creditosUnicos: 111 },
+      recursos: {},
+      marketplaces: []
+    },
+    restrito: {
+      id: "plano_restrito_google",
+      nome: "Restrito Google",
+      visivelPublicamente: true,
+      contratavel: false,
+      emBreve: false,
+      creditosModelo: "unicos",
+      limites: { creditosUnicos: 222 },
+      recursos: {},
+      marketplaces: []
+    }
   });
   writeJson(path.join(dataDir, "configs_clientes.json"), {
     user_existente: { workspace: "preservado", nested: { valor: 1 } }
@@ -385,10 +418,154 @@ function trechoEntre(inicio, fim) {
     usuarios = readJson(path.join(dataDir, "usuarios.json"), []);
     assert.strictEqual(usuarios.length, antesUsuarios.length, "Google novo nao pode criar conta com cadastro publico OFF");
 
+    const adminToken = jwt.sign({ clienteId: "admin", papel: "admin_master" }, jwtSecret, { expiresIn: "5m" });
+    const abrirCadastro = await request({
+      method: "PUT",
+      port,
+      path: "/admin/saas-config",
+      token: adminToken,
+      body: { betaAtivo: true, cadastroPublicoAtivo: true, maxContasFreeBeta: 1 }
+    });
+    assert.strictEqual(abrirCadastro.status, 200, JSON.stringify(abrirCadastro.body));
+
+    const googleSemPlano = await request({
+      method: "POST",
+      port,
+      path: "/auth/google",
+      body: {
+        idToken: tokenGoogle({
+          privateKey,
+          kid,
+          clientId,
+          sub: "sub_sem_plano",
+          email: "sem-plano@teste.local"
+        })
+      }
+    });
+    assert.strictEqual(googleSemPlano.status, 400);
+    assert.strictEqual(googleSemPlano.body.codigo, "plano_obrigatorio");
+
+    const googleEmBreve = await request({
+      method: "POST",
+      port,
+      path: "/auth/google",
+      body: {
+        plano: "plano_futuro_google",
+        idToken: tokenGoogle({
+          privateKey,
+          kid,
+          clientId,
+          sub: "sub_futuro_google",
+          email: "futuro-google@teste.local"
+        })
+      }
+    });
+    assert.strictEqual(googleEmBreve.status, 403);
+    assert.strictEqual(googleEmBreve.body.codigo, "plano_nao_contratavel");
+
+    const googleNaoContratavel = await request({
+      method: "POST",
+      port,
+      path: "/auth/google",
+      body: {
+        plano: "plano_restrito_google",
+        idToken: tokenGoogle({
+          privateKey,
+          kid,
+          clientId,
+          sub: "sub_restrito_google",
+          email: "restrito-google@teste.local"
+        })
+      }
+    });
+    assert.strictEqual(googleNaoContratavel.status, 403);
+    assert.strictEqual(googleNaoContratavel.body.codigo, "plano_nao_contratavel");
+
+    const googleNovoElegivel = await request({
+      method: "POST",
+      port,
+      path: "/auth/google",
+      body: {
+        credential: tokenGoogle({
+          privateKey,
+          kid,
+          clientId,
+          sub: "sub_beta_google",
+          email: "beta-google@teste.local"
+        }),
+        plano: "plano_beta_google"
+      }
+    });
+    assert.strictEqual(googleNovoElegivel.status, 200, JSON.stringify(googleNovoElegivel.body));
+    assert.ok(googleNovoElegivel.body.token, "Google novo elegivel deve receber JWT");
+    assertSemSegredo(googleNovoElegivel.body, "Google novo elegivel");
+    usuarios = readJson(path.join(dataDir, "usuarios.json"), []);
+    const usuarioGoogleNovo = usuarios.find(u => u.email === "beta-google@teste.local");
+    assert.ok(usuarioGoogleNovo, "Google novo deve criar usuario");
+    assert.strictEqual(usuarios.filter(u => u.email === "beta-google@teste.local").length, 1, "Google novo cria um usuario unico");
+    assert.strictEqual(usuarioGoogleNovo.googleSub, "sub_beta_google");
+    assert.strictEqual(usuarioGoogleNovo.provedoresAuth.google.sub, "sub_beta_google");
+    assert.strictEqual(usuarioGoogleNovo.plano, "Beta Google");
+    assert.strictEqual(usuarioGoogleNovo.creditos, 321);
+    assert.strictEqual(usuarioGoogleNovo.creditosModelo, "unicos");
+    assert.ok(!usuarioGoogleNovo.senhaHash, "Google-only criado nao deve ter senhaHash");
+    const configsAposGoogle = readJson(path.join(dataDir, "configs_clientes.json"), {});
+    assert.ok(configsAposGoogle[usuarioGoogleNovo.id], "Google novo deve criar workspace/config");
+
+    const meGoogleNovo = await request({
+      method: "GET",
+      port,
+      path: "/me",
+      token: googleNovoElegivel.body.token
+    });
+    assert.strictEqual(meGoogleNovo.status, 200);
+    assert.strictEqual(meGoogleNovo.body.usuario.id, usuarioGoogleNovo.id);
+    assert.strictEqual(meGoogleNovo.body.usuario.creditos, 321);
+    assert.strictEqual(meGoogleNovo.body.usuario.limites.maxConexoes, 2);
+    assert.deepStrictEqual(meGoogleNovo.body.usuario.marketplacesLiberados, ["amazon", "shopee"]);
+    assert.strictEqual(meGoogleNovo.body.usuario.recursos.whatsapp, true);
+    assertSemSegredo(meGoogleNovo.body, "/me Google novo");
+
+    const googleNovoReentrada = await request({
+      method: "POST",
+      port,
+      path: "/auth/google",
+      body: {
+        credential: tokenGoogle({
+          privateKey,
+          kid,
+          clientId,
+          sub: "sub_beta_google",
+          email: "beta-google@teste.local"
+        }),
+        plano: "plano_beta_google"
+      }
+    });
+    assert.strictEqual(googleNovoReentrada.status, 200, "Google criado deve logar por sub sem duplicar");
+    usuarios = readJson(path.join(dataDir, "usuarios.json"), []);
+    assert.strictEqual(usuarios.filter(u => u.email === "beta-google@teste.local").length, 1, "Reentrada Google nao duplica usuario");
+
+    const googleVagaEsgotada = await request({
+      method: "POST",
+      port,
+      path: "/auth/google",
+      body: {
+        credential: tokenGoogle({
+          privateKey,
+          kid,
+          clientId,
+          sub: "sub_beta_google_dois",
+          email: "beta-google-dois@teste.local"
+        }),
+        plano: "plano_beta_google"
+      }
+    });
+    assert.strictEqual(googleVagaEsgotada.status, 403);
+    assert.strictEqual(googleVagaEsgotada.body.codigo, "vagas_beta_esgotadas");
+
     const adminSemToken = await request({ method: "GET", port, path: "/admin/usuarios" });
     assert.strictEqual(adminSemToken.status, 401, "Admin segue protegido");
 
-    const adminToken = jwt.sign({ clienteId: "admin", papel: "admin_master" }, jwtSecret, { expiresIn: "5m" });
     const adminUsuarios = await request({ method: "GET", port, path: "/admin/usuarios", token: adminToken });
     assert.strictEqual(adminUsuarios.status, 200);
     assertSemSegredo(adminUsuarios.body, "Admin usuarios Google");

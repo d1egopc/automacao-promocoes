@@ -9548,6 +9548,36 @@ async function executarCadastroPublicoAtomico(body = {}) {
   });
 }
 
+async function executarCadastroGooglePublicoAtomico(identidade = {}, body = {}) {
+  return executarCadastroSaasSerializado(async () => {
+    const usuarioExistente = resolverUsuarioGoogleExistente(identidade);
+    if (usuarioExistente) {
+      vincularGoogleUsuario(usuarioExistente, identidade);
+      salvarUsuarios();
+      return usuarioExistente;
+    }
+
+    const saasConfig = obterConfigSaasAtual();
+    return saasFundacao.executarCadastroAtomico({
+      body: {
+        ...body,
+        authProvider: "google",
+        nome: identidade.nome || identidade.email,
+        email: identidade.email,
+        identidadeGoogle: identidade
+      },
+      planos,
+      usuarios,
+      configsPorCliente,
+      saasConfig,
+      gerarId,
+      prepararConfig: (configAtual) => aplicarArquiteturaComercialRioOficial(configAtual),
+      salvarUsuarios,
+      salvarConfigsClientes
+    });
+  });
+}
+
 async function executarCadastroInternoAdminAtomico(body = {}, operador = {}) {
   return executarCadastroSaasSerializado(async () => {
     const emailChave = String(body.email || "").trim().toLowerCase();
@@ -20107,7 +20137,39 @@ function payloadLoginUsuario(usuario = {}, token = "") {
   };
 }
 
-async function autenticarGoogleOptimus(idToken = "") {
+function resolverUsuarioGoogleExistente(identidade = {}) {
+  const usuarioPorSub = encontrarUsuarioPorGoogleSub(identidade.sub);
+  const usuarioPorEmail = obterUsuarioPorEmailNormalizado(identidade.email);
+
+  let usuario = usuarioPorSub || usuarioPorEmail;
+
+  if (usuarioPorSub && usuarioPorEmail && usuarioPorSub.id !== usuarioPorEmail.id) {
+    const erro = new Error("Google ja vinculado a outra conta");
+    erro.codigo = "google_sub_conflitante";
+    erro.statusCode = 409;
+    throw erro;
+  }
+
+  if (!usuario) return null;
+
+  if (usuario.ativo === false) {
+    const erro = new Error("Usuario inativo");
+    erro.codigo = "usuario_inativo";
+    erro.statusCode = 403;
+    throw erro;
+  }
+
+  if (usuario.googleSub && usuario.googleSub !== identidade.sub) {
+    const erro = new Error("Conta ja vinculada a outro Google");
+    erro.codigo = "google_sub_divergente";
+    erro.statusCode = 409;
+    throw erro;
+  }
+
+  return usuario;
+}
+
+async function autenticarGoogleOptimus(idToken = "", body = {}) {
   const identidade = await validarGoogleIdToken(idToken);
   if (!identidade.sub || !identidade.email) {
     const erro = new Error("Token Google invalido");
@@ -20122,37 +20184,9 @@ async function autenticarGoogleOptimus(idToken = "") {
     throw erro;
   }
 
-  const usuarioPorSub = encontrarUsuarioPorGoogleSub(identidade.sub);
-  const usuarioPorEmail = obterUsuarioPorEmailNormalizado(identidade.email);
-
-  let usuario = usuarioPorSub || usuarioPorEmail;
-
-  if (usuarioPorSub && usuarioPorEmail && usuarioPorSub.id !== usuarioPorEmail.id) {
-    const erro = new Error("Google ja vinculado a outra conta");
-    erro.codigo = "google_sub_conflitante";
-    erro.statusCode = 409;
-    throw erro;
-  }
-
+  let usuario = resolverUsuarioGoogleExistente(identidade);
   if (!usuario) {
-    const erro = new Error("Cadastro publico desativado");
-    erro.codigo = "cadastro_publico_desativado";
-    erro.statusCode = 403;
-    throw erro;
-  }
-
-  if (usuario.ativo === false) {
-    const erro = new Error("Usuario inativo");
-    erro.codigo = "usuario_inativo";
-    erro.statusCode = 403;
-    throw erro;
-  }
-
-  if (usuario.googleSub && usuario.googleSub !== identidade.sub) {
-    const erro = new Error("Conta ja vinculada a outro Google");
-    erro.codigo = "google_sub_divergente";
-    erro.statusCode = 409;
-    throw erro;
+    usuario = await executarCadastroGooglePublicoAtomico(identidade, body);
   }
 
   vincularGoogleUsuario(usuario, identidade);
@@ -20170,7 +20204,7 @@ async function autenticarGoogleOptimus(idToken = "") {
 
 app.post("/auth/google", googleAuthRateLimit, async (req, res) => {
   try {
-    const payload = await autenticarGoogleOptimus(req.body?.idToken || req.body?.credential || "");
+    const payload = await autenticarGoogleOptimus(req.body?.idToken || req.body?.credential || "", req.body || {});
     return res.json(payload);
   } catch (erro) {
     return res.status(erro.statusCode || 401).json({

@@ -157,6 +157,28 @@ async function cadastrar(env, body, opcoes = {}) {
   };
   payloadSemSegredo(payloadMe);
 
+  const googleOnly = await cadastrar(env, {
+    authProvider: "google",
+    plano: "teste",
+    identidadeGoogle: {
+      sub: "sub_google_jornada",
+      email: "google-jornada@example.com",
+      nome: "Google Jornada",
+      emailVerificado: true
+    }
+  });
+  assert.strictEqual(googleOnly.email, "google-jornada@example.com");
+  assert.strictEqual(googleOnly.nome, "Google Jornada");
+  assert.strictEqual(googleOnly.googleSub, "sub_google_jornada");
+  assert.strictEqual(googleOnly.provedoresAuth.google.sub, "sub_google_jornada");
+  assert.strictEqual(googleOnly.creditos, 100);
+  assert.ok(!googleOnly.senhaHash, "conta Google-only nao deve persistir senhaHash artificial");
+  assert.deepStrictEqual(env.configsPorCliente[googleOnly.id], {
+    workspaceId: googleOnly.id,
+    arquiteturaComercial: "rio_oficial",
+    automacaoAtiva: false
+  });
+
   await assert.rejects(
     () => cadastrar(env, { nome: "Duplicado", email: "cliente@exemplo.com", senha: "12345678", plano: "Teste Dinamico" }),
     erro => erro.codigo === "email_ja_cadastrado",
@@ -214,6 +236,28 @@ async function cadastrar(env, body, opcoes = {}) {
   );
   assert.deepStrictEqual(envRollback.usuarios, [], "rollback nao deixa usuario pela metade");
   assert.deepStrictEqual(envRollback.configsPorCliente, {}, "rollback nao deixa workspace/config pela metade");
+
+  const envRollbackGoogle = criarAmbiente();
+  await assert.rejects(
+    () => cadastrar(envRollbackGoogle, {
+      authProvider: "google",
+      plano: "teste",
+      identidadeGoogle: {
+        sub: "sub_google_rollback",
+        email: "rollback-google@example.com",
+        nome: "Rollback Google",
+        emailVerificado: true
+      }
+    }, {
+      salvarConfigsClientes: () => {
+        throw new Error("falha_config_google");
+      }
+    }),
+    erro => erro.codigo === "cadastro_rollback_executado",
+    "falha no workspace Google deve acionar rollback"
+  );
+  assert.deepStrictEqual(envRollbackGoogle.usuarios, [], "rollback Google nao deixa usuario pela metade");
+  assert.deepStrictEqual(envRollbackGoogle.configsPorCliente, {}, "rollback Google nao deixa workspace/config pela metade");
 
   const usuarioCredito = { creditos: 5, creditosInicializadosEm: "2026-08-01T00:00:00.000Z" };
   saas.inicializarCreditosUsuario({ usuario: usuarioCredito, plano: env.planos.teste });

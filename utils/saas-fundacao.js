@@ -8,6 +8,17 @@ function textoLower(valor = "") {
   return texto(valor).toLowerCase();
 }
 
+function normalizarIdentidadeGoogle(identidade = {}) {
+  const fonte = identidade && typeof identidade === "object" ? identidade : {};
+  const email = textoLower(fonte.email);
+  return {
+    sub: texto(fonte.sub || fonte.googleSub),
+    email,
+    nome: texto(fonte.nome || fonte.name || (email ? email.split("@")[0] : "")),
+    emailVerificado: booleano(fonte.emailVerificado ?? fonte.email_verified, false)
+  };
+}
+
 function normalizarPlanoIdEstavel(valor = "") {
   return texto(valor);
 }
@@ -606,8 +617,15 @@ function buscarPlanoCadastro(planos = {}, planoNome = "") {
 }
 
 function validarCadastro({ body = {}, planos = {}, usuarios = [], saasConfig = {}, contexto = "publico" } = {}) {
-  const nome = texto(body.nome);
-  const email = textoLower(body.email);
+  const authProvider = textoLower(body.authProvider || body.origemAuth || "local") || "local";
+  const cadastroGoogle = authProvider === "google";
+  const identidadeGoogle = normalizarIdentidadeGoogle(body.identidadeGoogle || body.google || {});
+  const nome = cadastroGoogle
+    ? texto(body.nome || identidadeGoogle.nome)
+    : texto(body.nome);
+  const email = cadastroGoogle
+    ? textoLower(identidadeGoogle.email || body.email)
+    : textoLower(body.email);
   const senha = String(body.senha || "");
   const planoNome = texto(body.plano || body.planoNome || body.planoId);
   const contextoCadastro = textoLower(contexto || "publico") || "publico";
@@ -620,7 +638,14 @@ function validarCadastro({ body = {}, planos = {}, usuarios = [], saasConfig = {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { ok: false, status: 400, codigo: "email_invalido", erro: "Email invalido" };
   }
-  if (senha.length < 8) {
+  if (cadastroGoogle) {
+    if (!identidadeGoogle.sub || !identidadeGoogle.email) {
+      return { ok: false, status: 401, codigo: "google_identidade_incompleta", erro: "Token Google invalido" };
+    }
+    if (identidadeGoogle.emailVerificado !== true) {
+      return { ok: false, status: 403, codigo: "google_email_nao_verificado", erro: "Email Google nao verificado" };
+    }
+  } else if (senha.length < 8) {
     return { ok: false, status: 400, codigo: "senha_minima", erro: "Senha deve ter pelo menos 8 caracteres" };
   }
   if (!planoNome) return { ok: false, status: 400, codigo: "plano_obrigatorio", erro: "Plano obrigatorio" };
@@ -651,7 +676,7 @@ function validarCadastro({ body = {}, planos = {}, usuarios = [], saasConfig = {
     }
   }
 
-  return { ok: true, nome, email, senha, plano: planoSaas };
+  return { ok: true, nome, email, senha, plano: planoSaas, authProvider, identidadeGoogle };
 }
 
 function validarCadastroPublico(opcoes = {}) {
@@ -717,7 +742,8 @@ async function executarCadastroAtomico({
   }
 
   if (typeof gerarId !== "function") throw new Error("gerarId_obrigatorio");
-  if (typeof gerarSenhaHash !== "function") throw new Error("gerarSenhaHash_obrigatorio");
+  const cadastroGoogle = validacao.authProvider === "google";
+  if (!cadastroGoogle && typeof gerarSenhaHash !== "function") throw new Error("gerarSenhaHash_obrigatorio");
   if (typeof salvarUsuarios !== "function") throw new Error("salvarUsuarios_obrigatorio");
   if (typeof salvarConfigsClientes !== "function") throw new Error("salvarConfigsClientes_obrigatorio");
 
@@ -728,7 +754,6 @@ async function executarCadastroAtomico({
     id: gerarId(),
     nome: validacao.nome,
     email: validacao.email,
-    senhaHash: await gerarSenhaHash(validacao.senha),
     papel: "cliente",
     plano: validacao.plano.nome,
     ativo: ativo !== false,
@@ -736,6 +761,25 @@ async function executarCadastroAtomico({
     statusConta: "ativa",
     criadoEm: new Date(agora).toISOString()
   };
+
+  if (cadastroGoogle) {
+    novoUsuario.googleSub = validacao.identidadeGoogle.sub;
+    novoUsuario.googleEmail = validacao.identidadeGoogle.email;
+    novoUsuario.googleEmailVerificado = true;
+    novoUsuario.googleVinculadoEm = novoUsuario.criadoEm;
+    novoUsuario.googleUltimoLoginEm = novoUsuario.criadoEm;
+    novoUsuario.provedoresAuth = {
+      google: {
+        sub: validacao.identidadeGoogle.sub,
+        email: validacao.identidadeGoogle.email,
+        emailVerificado: true,
+        vinculadoEm: novoUsuario.criadoEm,
+        ultimoLoginEm: novoUsuario.criadoEm
+      }
+    };
+  } else {
+    novoUsuario.senhaHash = await gerarSenhaHash(validacao.senha);
+  }
 
   if (autorizarCicloTeste === true) {
     novoUsuario.assinaturaStatus = "teste_ciclo_autorizado";
