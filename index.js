@@ -9769,7 +9769,12 @@ app.get("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
 return res.json({
   ok: true,
   planos,
-  lista: Object.values(planos || {})
+  lista: Object.entries(planos || {}).map(([chave, plano]) => ({
+    ...(plano || {}),
+    id: plano?.id || chave,
+    chaveOriginal: chave
+  })),
+  conflitosIdentidade: saasFundacao.detectarConflitosIdentidadePlanos(planos)
  });
 });
 
@@ -9790,11 +9795,12 @@ app.post("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
     });
   }
 
-  const nomePlano = String(body.nome || "").trim();
-  const planoAnterior =
-    planos[nomePlano] ||
-    planos[nomePlano.toLowerCase()] ||
-    {};
+  const identidadePlano = saasFundacao.resolverIdentidadePlanoEdicao(planos, body);
+  const nomePlano = identidadePlano.nome;
+  const entradaAnterior = identidadePlano.entradaAnterior;
+  const chavePlano = identidadePlano.chavePlano;
+  const planoAnterior = identidadePlano.planoAnterior;
+  const idPlano = identidadePlano.id;
   const limitesBody = body.limites || {};
   const recursosBody = body.recursos || {};
   const limitesAnteriores = planoAnterior.limites || {};
@@ -9832,7 +9838,14 @@ app.post("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
     )
   );
 
-  planos[nomePlano] = {
+  const aliasesLegados = [
+    ...(Array.isArray(planoAnterior.aliasesLegados) ? planoAnterior.aliasesLegados : []),
+    entradaAnterior?.chave,
+    planoAnterior.nome
+  ].filter(Boolean);
+
+  planos[chavePlano] = {
+    id: idPlano,
     nome: nomePlano,
     preco: String(body.preco ?? planoAnterior.preco ?? ""),
     fraseComercial: String(body.fraseComercial ?? planoAnterior.fraseComercial ?? ""),
@@ -9847,6 +9860,7 @@ app.post("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
     emBreve: Object.prototype.hasOwnProperty.call(body, "emBreve")
       ? !!body.emBreve
       : !!planoAnterior.emBreve,
+    aliasesLegados: [...new Set(aliasesLegados)],
     creditosModelo: String(
       body.creditosModelo ??
       limitesBody.creditosModelo ??
@@ -9907,7 +9921,8 @@ app.post("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
 
   return res.json({
     ok: true,
-    plano: planos[nomePlano]
+    plano: planos[chavePlano],
+    chaveOriginal: chavePlano
   });
 });
 
@@ -10491,14 +10506,7 @@ function getPlanoUsuario(req) {
       .trim()
       .toLowerCase();
 
-  const planoEncontrado = Object.values(planos).find(
-    p =>
-      String(p.nome || "")
-        .trim()
-        .toLowerCase() === nomePlano
-  );
-
-  return planoEncontrado || null;
+  return saasFundacao.buscarEntradaPlano(planos, nomePlano)?.plano || null;
 }
 
 // ===================== FUNCAO RECURSOS ============================
@@ -10526,10 +10534,7 @@ function clienteTemRecursoPlano(clienteId = "admin", recurso = "") {
     return true;
   }
 
-  const nomePlano = String(usuario.plano || "").trim().toLowerCase();
-  const plano = Object.values(planos || {}).find(p =>
-    String(p?.nome || "").trim().toLowerCase() === nomePlano
-  );
+  const plano = saasFundacao.buscarEntradaPlano(planos, usuario.plano)?.plano || null;
 
   return plano?.recursos?.[recurso] === true;
 }
@@ -10540,10 +10545,7 @@ function clienteTemRecursoMensageiro(clienteId = "admin") {
   if (!usuario) return clienteId === "admin";
   if (usuarioEhAdminMaster(usuario)) return true;
 
-  const nomePlano = String(usuario.plano || "").trim().toLowerCase();
-  const plano = Object.values(planos || {}).find(p =>
-    String(p.nome || "").trim().toLowerCase() === nomePlano
-  );
+  const plano = saasFundacao.buscarEntradaPlano(planos, usuario.plano)?.plano || null;
 
   return plano?.recursos?.mensageiro === true;
 }
@@ -23444,18 +23446,7 @@ function getPlanoPorNome(nome = "") {
   const chave = normalizarTexto(nome || "");
   if (!chave) return null;
 
-  if (planos?.[chave]) {
-    return planos[chave];
-  }
-
-  const encontrado = Object.entries(planos || {}).find(([key, plano]) => {
-    return (
-      normalizarTexto(key) === chave ||
-      normalizarTexto(plano?.nome || "") === chave
-    );
-  });
-
-  return encontrado?.[1] || null;
+  return saasFundacao.buscarEntradaPlano(planos, chave)?.plano || null;
 }
 
 // =============== FUNCAO GERAR LINK AFILIADO SHOPEE ========================================

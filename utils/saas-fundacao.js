@@ -8,6 +8,58 @@ function textoLower(valor = "") {
   return texto(valor).toLowerCase();
 }
 
+function normalizarPlanoIdEstavel(valor = "") {
+  return texto(valor);
+}
+
+function chaveComparacaoPlano(valor = "") {
+  return textoLower(valor);
+}
+
+function aliasesPlano(plano = {}, chave = "") {
+  const fonte = plano && typeof plano === "object" ? plano : {};
+  const aliases = [
+    chave,
+    fonte.id,
+    fonte.planoId,
+    fonte.nome
+  ];
+
+  if (Array.isArray(fonte.aliasesLegados)) {
+    aliases.push(...fonte.aliasesLegados);
+  }
+
+  return [...new Set(
+    aliases
+      .map(chaveComparacaoPlano)
+      .filter(Boolean)
+  )];
+}
+
+function buscarEntradaPlano(planos = {}, identidade = "") {
+  const alvoExato = texto(identidade);
+  const alvo = chaveComparacaoPlano(identidade);
+  if (!alvoExato && !alvo) return null;
+
+  if (Object.prototype.hasOwnProperty.call(planos || {}, alvoExato)) {
+    return { chave: alvoExato, plano: planos[alvoExato] };
+  }
+
+  const idExato = Object.entries(planos || {}).find(([, plano]) =>
+    texto(plano?.id || plano?.planoId) === alvoExato
+  );
+  if (idExato) return { chave: idExato[0], plano: idExato[1] };
+
+  const direto = Object.entries(planos || {}).find(([chave]) => chaveComparacaoPlano(chave) === alvo);
+  if (direto) return { chave: direto[0], plano: direto[1] };
+
+  const porAlias = Object.entries(planos || {}).find(([chave, plano]) =>
+    aliasesPlano(plano, chave).includes(alvo)
+  );
+
+  return porAlias ? { chave: porAlias[0], plano: porAlias[1] } : null;
+}
+
 function numero(valor, fallback = 0) {
   const n = Number(valor);
   return Number.isFinite(n) ? n : fallback;
@@ -50,11 +102,70 @@ function normalizarPlanoSaas(plano = {}, chave = "") {
   };
 }
 
+function normalizarPlanoSaasComId(plano = {}, chave = "") {
+  const normalizado = normalizarPlanoSaas(plano, chave);
+  return {
+    ...normalizado,
+    id: normalizarPlanoIdEstavel(normalizado.id || chave || normalizado.nome)
+  };
+}
+
+function detectarConflitosIdentidadePlanos(planos = {}) {
+  const grupos = new Map();
+
+  for (const [chave, plano] of Object.entries(planos || {})) {
+    const normalizado = normalizarPlanoSaasComId(plano, chave);
+    for (const alias of aliasesPlano(normalizado, chave)) {
+      if (!grupos.has(alias)) grupos.set(alias, []);
+      grupos.get(alias).push({
+        chave,
+        id: normalizado.id,
+        nome: normalizado.nome
+      });
+    }
+  }
+
+  return [...grupos.entries()]
+    .map(([alias, entradas]) => ({
+      alias,
+      entradas: entradas.filter((entrada, indice, lista) =>
+        lista.findIndex((item) => item.chave === entrada.chave) === indice
+      )
+    }))
+    .filter((grupo) => grupo.entradas.length > 1);
+}
+
+function resolverIdentidadePlanoEdicao(planos = {}, body = {}) {
+  const nome = texto(body?.nome);
+  const identidade = texto(
+    body?.id ||
+    body?.planoId ||
+    body?.chaveOriginal ||
+    body?.identidadeOriginal ||
+    nome
+  );
+  const entradaAnterior =
+    buscarEntradaPlano(planos, identidade) ||
+    buscarEntradaPlano(planos, nome);
+  const chavePlano = entradaAnterior?.chave || normalizarPlanoIdEstavel(identidade || nome);
+  const planoAnterior = entradaAnterior?.plano || {};
+  const id = normalizarPlanoIdEstavel(planoAnterior.id || chavePlano || identidade || nome);
+
+  return {
+    nome,
+    identidade,
+    entradaAnterior,
+    chavePlano,
+    planoAnterior,
+    id
+  };
+}
+
 function normalizarPlanosSaasRuntime(planos = {}) {
   if (!planos || typeof planos !== "object") return planos;
   for (const [chave, plano] of Object.entries(planos)) {
     if (!plano || typeof plano !== "object") continue;
-    Object.assign(plano, normalizarPlanoSaas(plano, chave));
+    Object.assign(plano, normalizarPlanoSaasComId(plano, chave));
   }
   return planos;
 }
@@ -429,7 +540,7 @@ function aplicarDebitoConta(usuario = {}, plano = {}, quantidade = 1, agora = ne
 
 function planosPublicos(planos = {}) {
   return Object.entries(planos || {})
-    .map(([chave, plano]) => normalizarPlanoSaas(plano, chave))
+    .map(([chave, plano]) => normalizarPlanoSaasComId(plano, chave))
     .filter((plano) => plano.visivelPublicamente === true)
     .sort((a, b) => {
       const ordem = numero(a.ordem, 0) - numero(b.ordem, 0);
@@ -439,10 +550,11 @@ function planosPublicos(planos = {}) {
 }
 
 function sanitizarPlanoPublico(plano = {}) {
-  const p = normalizarPlanoSaas(plano);
+  const p = normalizarPlanoSaasComId(plano);
   const politica = politicaCreditosPlano(p);
   const limites = p.limites && typeof p.limites === "object" ? p.limites : {};
   return {
+    id: p.id,
     nome: p.nome,
     preco: p.preco,
     fraseComercial: p.fraseComercial,
@@ -476,12 +588,7 @@ function contarVagasFreeBeta({ usuarios = [], planos = {}, maxContasFreeBeta = 0
     if (!usuario || usuario.ativo === false) return false;
     if (textoLower(usuario.origemCadastro) !== "publico") return false;
     if (textoLower(usuario.statusConta) === "teste_esgotado") return false;
-    const planoEntrada = Object.entries(planos || {}).find(([chave, p]) =>
-      textoLower(chave) === textoLower(usuario.plano) ||
-      textoLower(p?.nome) === textoLower(usuario.plano) ||
-      textoLower(p?.id) === textoLower(usuario.plano)
-    );
-    const plano = planoEntrada?.[1] || null;
+    const plano = buscarEntradaPlano(planos, usuario.plano)?.plano || null;
     return politicaCreditosPlano(plano || {}).creditosModelo === "unicos";
   }).length;
 
@@ -493,17 +600,9 @@ function contarVagasFreeBeta({ usuarios = [], planos = {}, maxContasFreeBeta = 0
 }
 
 function buscarPlanoCadastro(planos = {}, planoNome = "") {
-  const alvo = textoLower(planoNome);
-  if (!alvo) return null;
-
-  const planoEntrada = Object.entries(planos || {}).find(([chave, p]) =>
-    textoLower(chave) === alvo ||
-    textoLower(p?.nome) === alvo ||
-    textoLower(p?.id) === alvo
-  );
-
+  const planoEntrada = buscarEntradaPlano(planos, planoNome);
   if (!planoEntrada) return null;
-  return normalizarPlanoSaas(planoEntrada[1], planoEntrada[0]);
+  return normalizarPlanoSaasComId(planoEntrada.plano, planoEntrada.chave);
 }
 
 function validarCadastro({ body = {}, planos = {}, usuarios = [], saasConfig = {}, contexto = "publico" } = {}) {
@@ -684,6 +783,12 @@ async function executarCadastroAtomico({
 module.exports = {
   normalizarSaasConfig,
   normalizarPlanoSaas,
+  normalizarPlanoSaasComId,
+  normalizarPlanoIdEstavel,
+  aliasesPlano,
+  buscarEntradaPlano,
+  detectarConflitosIdentidadePlanos,
+  resolverIdentidadePlanoEdicao,
   normalizarPlanosSaasRuntime,
   politicaCreditosPlano,
   inicializarCreditosUsuario,

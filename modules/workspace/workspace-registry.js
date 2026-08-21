@@ -72,7 +72,15 @@ function obterPlanoUsuario(usuario = {}, planos = {}) {
   if (!planoId) return null;
 
   if (planos[planoId]) return planos[planoId];
-  return Object.values(planos).find(plano => normalizarPlanoId(plano?.nome || plano?.id) === planoId) || null;
+  return Object.values(planos).find((plano) => {
+    const aliases = [
+      plano?.nome,
+      plano?.id,
+      plano?.planoId,
+      ...(Array.isArray(plano?.aliasesLegados) ? plano.aliasesLegados : [])
+    ];
+    return aliases.some((alias) => normalizarPlanoId(alias) === planoId);
+  }) || null;
 }
 
 function montarWorkspaces(fontes = {}) {
