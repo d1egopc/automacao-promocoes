@@ -23,7 +23,8 @@ const planoUnico = {
   visivelPublicamente: true,
   contratavel: true,
   creditosModelo: "unicos",
-  limites: { creditosUnicos: 300 }
+  limites: { creditosUnicos: 300 },
+  recursos: { whatsapp: true, social: false, admin_master: true, tokenInterno: true }
 };
 
 const planoCiclo = {
@@ -92,6 +93,11 @@ assert.strictEqual(
   saas.sanitizarPlanoPublico(planos.beta).creditos.creditosUnicos,
   300,
   "plano publico expoe apenas resumo publico de creditos"
+);
+assert.deepStrictEqual(
+  saas.sanitizarPlanoPublico(planos.beta).recursos,
+  { whatsapp: true },
+  "plano publico expoe apenas recursos publicos habilitados e remove chaves sensiveis"
 );
 
 const saasConfig = { cadastroPublicoAtivo: true, betaAtivo: true, maxContasFreeBeta: 1 };

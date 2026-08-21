@@ -72,6 +72,19 @@ function listaMarketplacesPublica(valor = []) {
   return [];
 }
 
+function recursosPublicos(valor = {}) {
+  if (!valor || typeof valor !== "object") return {};
+  return Object.entries(valor).reduce((acc, [chave, ativo]) => {
+    const id = texto(chave);
+    const idLower = textoLower(id);
+    if (!id) return acc;
+    if (idLower.includes("senha") || idLower.includes("token") || idLower.includes("secret") || idLower.includes("segredo")) return acc;
+    if (idLower.includes("admin") || idLower.includes("master")) return acc;
+    if (booleano(ativo, false)) acc[id] = true;
+    return acc;
+  }, {});
+}
+
 function politicaCreditosPlano(plano = {}) {
   const limites = plano?.limites && typeof plano.limites === "object" ? plano.limites : {};
   const modeloInformado = textoLower(plano.creditosModelo || limites.creditosModelo);
@@ -439,6 +452,7 @@ function sanitizarPlanoPublico(plano = {}) {
     contratavel: p.contratavel,
     emBreve: p.emBreve,
     marketplaces: listaMarketplacesPublica(p.marketplaces),
+    recursos: recursosPublicos(p.recursos),
     limites: {
       maxConexoes: limites.maxConexoes ?? limites.conexoes ?? limites.sessoes ?? null,
       maxMarketplacesSelecionados: limites.maxMarketplacesSelecionados ?? limites.marketplaces ?? null,
