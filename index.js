@@ -10621,6 +10621,7 @@ function auth(req, res, next) {
   if (
     req.path === "/" ||
     req.path === "/login" ||
+    req.path === "/auth/google" ||
     req.path === "/cadastro" ||
     req.path === "/senha/recuperar" ||
     req.path === "/senha/redefinir" ||
@@ -19868,6 +19869,247 @@ app.post("/admin/senha/recuperacao-teste", exigirAdminMasterEstrito, (req, res) 
   });
 });
 
+const GOOGLE_JWKS_URL = process.env.GOOGLE_JWKS_URL || "https://www.googleapis.com/oauth2/v3/certs";
+const GOOGLE_ISSUERS_VALIDOS = ["accounts.google.com", "https://accounts.google.com"];
+let googleJwksCache = { carregadoEm: 0, chaves: [] };
+
+const googleAuthRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    ok: false,
+    erro: "Muitas tentativas. Tente novamente em alguns minutos."
+  }
+});
+
+function getGoogleClientId() {
+  return String(process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_OAUTH_CLIENT_ID || "").trim();
+}
+
+function normalizarBooleanoGoogle(valor) {
+  return valor === true || String(valor || "").toLowerCase() === "true";
+}
+
+async function carregarGoogleJwks() {
+  if (process.env.GOOGLE_JWKS_JSON) {
+    const parsed = JSON.parse(process.env.GOOGLE_JWKS_JSON);
+    return Array.isArray(parsed.keys) ? parsed.keys : [];
+  }
+
+  const agora = Date.now();
+  if (googleJwksCache.chaves.length && agora - googleJwksCache.carregadoEm < 10 * 60 * 1000) {
+    return googleJwksCache.chaves;
+  }
+
+  const resposta = await fetch(GOOGLE_JWKS_URL);
+  if (!resposta.ok) {
+    throw new Error("google_jwks_indisponivel");
+  }
+
+  const jwks = await resposta.json();
+  const chaves = Array.isArray(jwks.keys) ? jwks.keys : [];
+  googleJwksCache = { carregadoEm: agora, chaves };
+  return chaves;
+}
+
+async function validarGoogleIdToken(idToken = "") {
+  const token = String(idToken || "").trim();
+  const clientId = getGoogleClientId();
+
+  if (!clientId) {
+    const erro = new Error("Google Client ID nao configurado");
+    erro.codigo = "google_client_id_nao_configurado";
+    erro.statusCode = 503;
+    throw erro;
+  }
+  if (!token) {
+    const erro = new Error("Token Google obrigatorio");
+    erro.codigo = "google_token_obrigatorio";
+    erro.statusCode = 400;
+    throw erro;
+  }
+
+  const decoded = jwt.decode(token, { complete: true });
+  if (!decoded?.header?.kid || decoded.header.alg !== "RS256") {
+    const erro = new Error("Token Google invalido");
+    erro.codigo = "google_token_invalido";
+    erro.statusCode = 401;
+    throw erro;
+  }
+
+  const chaves = await carregarGoogleJwks();
+  const jwk = chaves.find(chave => chave.kid === decoded.header.kid);
+  if (!jwk) {
+    const erro = new Error("Token Google invalido");
+    erro.codigo = "google_chave_nao_encontrada";
+    erro.statusCode = 401;
+    throw erro;
+  }
+
+  try {
+    const publicKey = crypto.createPublicKey({ key: jwk, format: "jwk" });
+    const payload = jwt.verify(token, publicKey, {
+      algorithms: ["RS256"],
+      audience: clientId,
+      issuer: GOOGLE_ISSUERS_VALIDOS
+    });
+
+    return {
+      sub: String(payload.sub || ""),
+      email: normalizarEmailAuth(payload.email || ""),
+      emailVerificado: normalizarBooleanoGoogle(payload.email_verified),
+      nome: String(payload.name || ""),
+      picture: String(payload.picture || ""),
+      issuer: String(payload.iss || ""),
+      audience: String(payload.aud || "")
+    };
+  } catch (e) {
+    const erro = new Error("Token Google invalido");
+    erro.codigo = e?.name === "TokenExpiredError"
+      ? "google_token_expirado"
+      : String(e?.message || "").includes("jwt audience invalid")
+        ? "google_audience_invalida"
+        : "google_token_invalido";
+    erro.statusCode = 401;
+    throw erro;
+  }
+}
+
+function encontrarUsuarioPorGoogleSub(googleSub = "") {
+  const sub = String(googleSub || "").trim();
+  if (!sub) return null;
+  return usuarios.find(usuario =>
+    String(usuario.googleSub || "") === sub ||
+    String(usuario.provedoresAuth?.google?.sub || "") === sub
+  ) || null;
+}
+
+function vincularGoogleUsuario(usuario = {}, identidade = {}) {
+  const agora = new Date().toISOString();
+  usuario.googleSub = usuario.googleSub || identidade.sub;
+  usuario.googleEmail = identidade.email;
+  usuario.googleEmailVerificado = identidade.emailVerificado === true;
+  usuario.provedoresAuth = usuario.provedoresAuth && typeof usuario.provedoresAuth === "object"
+    ? usuario.provedoresAuth
+    : {};
+  usuario.provedoresAuth.google = {
+    sub: identidade.sub,
+    email: identidade.email,
+    emailVerificado: identidade.emailVerificado === true,
+    vinculadoEm: usuario.provedoresAuth.google?.vinculadoEm || agora,
+    ultimoLoginEm: agora
+  };
+  usuario.googleVinculadoEm = usuario.googleVinculadoEm || agora;
+  usuario.googleUltimoLoginEm = agora;
+  return usuario;
+}
+
+function emitirJwtOptimusUsuario(usuario = {}) {
+  return jwt.sign(
+    {
+      clienteId: usuario.id,
+      papel: usuario.papel || "cliente",
+      plano: usuario.plano || ""
+    },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+}
+
+function payloadLoginUsuario(usuario = {}, token = "") {
+  return {
+    ok: true,
+    token,
+    usuario: {
+      id: usuario.id,
+      nome: usuario.nome,
+      email: usuario.email,
+      papel: usuario.papel,
+      plano: usuario.plano,
+      creditos: usuario.creditos,
+      ativo: usuario.ativo
+    }
+  };
+}
+
+async function autenticarGoogleOptimus(idToken = "") {
+  const identidade = await validarGoogleIdToken(idToken);
+  if (!identidade.sub || !identidade.email) {
+    const erro = new Error("Token Google invalido");
+    erro.codigo = "google_identidade_incompleta";
+    erro.statusCode = 401;
+    throw erro;
+  }
+  if (identidade.emailVerificado !== true) {
+    const erro = new Error("Email Google nao verificado");
+    erro.codigo = "google_email_nao_verificado";
+    erro.statusCode = 403;
+    throw erro;
+  }
+
+  const usuarioPorSub = encontrarUsuarioPorGoogleSub(identidade.sub);
+  const usuarioPorEmail = obterUsuarioPorEmailNormalizado(identidade.email);
+
+  let usuario = usuarioPorSub || usuarioPorEmail;
+
+  if (usuarioPorSub && usuarioPorEmail && usuarioPorSub.id !== usuarioPorEmail.id) {
+    const erro = new Error("Google ja vinculado a outra conta");
+    erro.codigo = "google_sub_conflitante";
+    erro.statusCode = 409;
+    throw erro;
+  }
+
+  if (!usuario) {
+    const erro = new Error("Cadastro publico desativado");
+    erro.codigo = "cadastro_publico_desativado";
+    erro.statusCode = 403;
+    throw erro;
+  }
+
+  if (usuario.ativo === false) {
+    const erro = new Error("Usuario inativo");
+    erro.codigo = "usuario_inativo";
+    erro.statusCode = 403;
+    throw erro;
+  }
+
+  if (usuario.googleSub && usuario.googleSub !== identidade.sub) {
+    const erro = new Error("Conta ja vinculada a outro Google");
+    erro.codigo = "google_sub_divergente";
+    erro.statusCode = 409;
+    throw erro;
+  }
+
+  vincularGoogleUsuario(usuario, identidade);
+  salvarUsuarios();
+
+  console.log("[AUTH-GOOGLE-LOGIN]", {
+    usuario: usuario.id || "",
+    email: normalizarEmailAuth(usuario.email),
+    vinculado: true
+  });
+
+  const token = emitirJwtOptimusUsuario(usuario);
+  return payloadLoginUsuario(usuario, token);
+}
+
+app.post("/auth/google", googleAuthRateLimit, async (req, res) => {
+  try {
+    const payload = await autenticarGoogleOptimus(req.body?.idToken || req.body?.credential || "");
+    return res.json(payload);
+  } catch (erro) {
+    return res.status(erro.statusCode || 401).json({
+      ok: false,
+      codigo: erro.codigo || "google_auth_falhou",
+      erro: erro.statusCode && erro.statusCode < 500
+        ? erro.message
+        : "Falha ao autenticar com Google"
+    });
+  }
+});
+
 app.post("/login", async (req, res) => {
   const perf = criarPerfTimer("PERF LOGIN", contextoPerfHttp(req));
   const { user, pass } = req.body || {};
@@ -19932,29 +20174,9 @@ app.post("/login", async (req, res) => {
 
   await perf.etapa("migracao_senha_legada", () => migrarSenhaLegadaSeNecessario(usuario, pass, diagnosticoSenha));
 
-  const token = perf.etapaSync("jwt", () => jwt.sign(
-    {
-      clienteId: usuario.id,
-      papel: usuario.papel || "cliente",
-      plano: usuario.plano || ""
-    },
-    JWT_SECRET,
-    { expiresIn: "7d" }
-  ));
+  const token = perf.etapaSync("jwt", () => emitirJwtOptimusUsuario(usuario));
 
-  const payload = perf.etapaSync("payload", () => ({
-    ok: true,
-    token,
-    usuario: {
-      id: usuario.id,
-      nome: usuario.nome,
-      email: usuario.email,
-      papel: usuario.papel,
-      plano: usuario.plano,
-      creditos: usuario.creditos,
-      ativo: usuario.ativo
-    }
-  }));
+  const payload = perf.etapaSync("payload", () => payloadLoginUsuario(usuario, token));
 
   perf.fim({ clienteId: usuario.id || "", usuarioEncontrado: true, senhaOk: true, statusCode: 200 });
   return res.json(payload);
