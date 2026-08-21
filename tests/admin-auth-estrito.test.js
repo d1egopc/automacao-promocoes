@@ -14,6 +14,8 @@ const fonteIndex = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8
 const rotasAdminLegadas = [
   { metodo: "get", rota: "/admin/usuarios", url: "/admin/usuarios" },
   { metodo: "get", rota: "/admin/planos", url: "/admin/planos" },
+  { metodo: "get", rota: "/admin/saas-config", url: "/admin/saas-config" },
+  { metodo: "put", rota: "/admin/saas-config", url: "/admin/saas-config", body: { betaAtivo: true, cadastroPublicoAtivo: false, maxContasFreeBeta: 5 } },
   { metodo: "post", rota: "/admin/planos", url: "/admin/planos", body: { nome: "Plano Teste" } },
   { metodo: "delete", rota: "/admin/planos/:nome", url: "/admin/planos/Plano%20Teste" },
   { metodo: "delete", rota: "/admin/usuarios/:id", url: "/admin/usuarios/user_teste" },
@@ -61,6 +63,8 @@ function criarAppAdminProtegida() {
 
   app.get("/admin/usuarios", authAdmin, (_req, res) => res.json({ ok: true, usuarios }));
   app.get("/admin/planos", authAdmin, (_req, res) => res.json({ ok: true, planos, lista: Object.values(planos) }));
+  app.get("/admin/saas-config", authAdmin, (_req, res) => res.json({ ok: true, config: { betaAtivo: false, cadastroPublicoAtivo: false, vagasFree: { max: 0, ocupadas: 0, disponiveis: 0 } } }));
+  app.put("/admin/saas-config", authAdmin, (req, res) => res.json({ ok: true, config: req.body }));
   app.post("/admin/planos", authAdmin, (req, res) => {
     planos[req.body.nome] = { nome: req.body.nome };
     res.json({ ok: true, plano: planos[req.body.nome] });

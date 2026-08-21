@@ -9496,6 +9496,37 @@ function payloadSaasConfigPublico() {
   };
 }
 
+function origemConfigSaasAtual() {
+  if (config.saas && typeof config.saas === "object") return "config.saas";
+  if (config.beta && typeof config.beta === "object") return "config.beta";
+  return "padrao";
+}
+
+function payloadSaasConfigAdmin() {
+  const saasConfig = obterConfigSaasAtual();
+  return {
+    ...payloadSaasConfigPublico(),
+    maxContasFreeBeta: saasConfig.maxContasFreeBeta,
+    origem: origemConfigSaasAtual()
+  };
+}
+
+function normalizarSaasConfigAdminInput(body = {}, atual = obterConfigSaasAtual()) {
+  const fonte = body && typeof body === "object" ? body : {};
+  const valor = (chave) =>
+    Object.prototype.hasOwnProperty.call(fonte, chave)
+      ? fonte[chave]
+      : atual[chave];
+
+  return saasFundacao.normalizarSaasConfig({
+    betaAtivo: valor("betaAtivo"),
+    cadastroPublicoAtivo: valor("cadastroPublicoAtivo"),
+    maxContasFreeBeta: valor("maxContasFreeBeta"),
+    textoBeta: valor("textoBeta"),
+    seloBeta: valor("seloBeta")
+  });
+}
+
 const executarCadastroSaasSerializado = saasFundacao.criarSerializadorCadastro();
 
 async function executarCadastroPublicoAtomico(body = {}) {
@@ -9653,6 +9684,46 @@ app.post("/admin/cadastro-interno", exigirAdminMasterEstrito, async (req, res) =
         : "Falha ao criar conta"
     });
   }
+});
+
+app.get("/admin/saas-config", exigirAdminMasterEstrito, (req, res) => {
+  if (!isAdminMaster(req)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Acesso restrito ao Admin Master"
+    });
+  }
+
+  return res.json({
+    ok: true,
+    config: payloadSaasConfigAdmin()
+  });
+});
+
+app.put("/admin/saas-config", exigirAdminMasterEstrito, (req, res) => {
+  if (!isAdminMaster(req)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Acesso restrito ao Admin Master"
+    });
+  }
+
+  const anterior = obterConfigSaasAtual();
+  const proxima = normalizarSaasConfigAdminInput(req.body || {}, anterior);
+  config.saas = proxima;
+  salvarConfig();
+
+  console.log("[SAAS-BETA-CONFIG]", {
+    operador: req.usuario?.id || req.usuario?.email || "",
+    betaAtivo: proxima.betaAtivo === true,
+    cadastroPublicoAtivo: proxima.cadastroPublicoAtivo === true,
+    maxContasFreeBeta: proxima.maxContasFreeBeta
+  });
+
+  return res.json({
+    ok: true,
+    config: payloadSaasConfigAdmin()
+  });
 });
 
 app.post("/admin/assinaturas/:usuarioId/pagamento-simulado", exigirAdminMasterEstrito, (req, res) => {
