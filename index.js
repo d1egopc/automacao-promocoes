@@ -206,6 +206,7 @@ const {
   limiteAtingido,
   avaliarMarketplacePlano
 } = require("./utils/cotas-flexiveis-planos");
+const saasFundacao = require("./utils/saas-fundacao");
 const {
   iniciarManualV2Scheduler
 } = require("./modules/manual-v2/manual-scheduler.runner");
@@ -2525,45 +2526,40 @@ function salvarUsuarios() {
 
 // ================= CREDITOS =================
 
-const CREDITOS_PLANO = {
-  free: 300,
-  starter: 2500,
-  pro: 7500,
-  enterprise: 9500
-};
-
 function obterUsuario(clienteId) {
   return usuarios.find(
     u => String(u.id) === String(clienteId)
   );
 }
 
+function obterPlanoUsuarioObjeto(usuario = {}) {
+  if (!usuario) return null;
+  return getPlanoPorNome(usuario.plano || "");
+}
+
 function renovarCreditosSeNecessario(usuario) {
   if (!usuario) return;
 
-  const hoje = new Date();
-
-  const mesAtual =
-    `${hoje.getFullYear()}-${hoje.getMonth() + 1}`;
-
-  if (usuario.mesCreditos === mesAtual) {
+  const plano = obterPlanoUsuarioObjeto(usuario);
+  if (!plano) {
+    console.log("[SAAS-CREDITOS] Plano nao encontrado; sem renovacao automatica", {
+      usuario: usuario.email,
+      plano: usuario.plano || ""
+    });
     return;
   }
 
-  const plano =
-    String(usuario.plano || "free").toLowerCase();
-
-  usuario.creditos =
-    CREDITOS_PLANO[plano] || 300;
-
-  usuario.mesCreditos = mesAtual;
+  const resultado = saasFundacao.renovarCreditosPorPlano(usuario, plano);
+  if (!resultado.alterou) return;
 
   salvarUsuarios();
 
-  console.log("[INFO] Crditos renovados:", {
+  console.log("[SAAS-CREDITOS] Estado de creditos atualizado:", {
     usuario: usuario.email,
-    plano,
-    creditos: usuario.creditos
+    plano: usuario.plano || "",
+    motivo: resultado.motivo,
+    creditos: usuario.creditos,
+    statusConta: usuario.statusConta || ""
   });
 }
 
@@ -2600,15 +2596,16 @@ function debitarCreditos(clienteId, quantidade = 1) {
     return false;
   }
 
-  usuario.creditos =
-    Number(usuario.creditos || 0) - quantidade;
+  const plano = obterPlanoUsuarioObjeto(usuario) || {};
+  saasFundacao.aplicarDebitoConta(usuario, plano, quantidade);
 
   salvarUsuarios();
 
   console.log("[INFO] Crditos debitados:", {
     usuario: usuario.email,
     restante: usuario.creditos,
-    debitado: quantidade
+    debitado: quantidade,
+    statusConta: usuario.statusConta || ""
   });
 
   return true;
@@ -3233,135 +3230,16 @@ function removerReferenciasSessao(ids = [], clienteId = null) {
 function criarPlanosPadrao() {
   if (Object.keys(planos || {}).length) return;
 
-  planos = {
+  console.log("[SAAS-PLANOS-AUDITORIA] Nenhum plano persistido encontrado; planos padrao nao sao recriados automaticamente. Admin Master e a autoridade comercial.");
+  return;
 
-    free: {
-      nome: "free",
 
-      marketplaces: [
-        "amazon",
-        "shopee"
-      ],
-
-      limites: {
-        sessoes: 1,
-        destinos: 2,
-        enviosDia: 50,
-        creditos: 300
-      },
-
-      recursos: {
-        buscaManual: true,
-        farejadorAutomatico: false,
-
-        whatsapp: true,
-        telegram: false,
-        discord: false,
-
-        multiSessao: false,
-
-        linkOptimus: false,
-        analytics: false,
-        cupomInteligente: false,
-        campanhas: true,
-        templatePersonalizado: false,
-        vitrine: false,
-        social: false
-      },
-
-      atualizadoEm: new Date().toISOString()
-    },
-
-    pro: {
-      nome: "pro",
-
-      marketplaces: [
-        "amazon",
-        "shopee",
-        "mercadolivre",
-        "aliexpress"
-      ],
-
-      limites: {
-        sessoes: 3,
-        destinos: 10,
-        enviosDia: 500,
-        creditos: 2500
-      },
-
-      recursos: {
-        buscaManual: true,
-        farejadorAutomatico: false,
-
-        whatsapp: true,
-        telegram: true,
-        discord: false,
-
-        multiSessao: true,
-
-        linkOptimus: true,
-        analytics: true,
-        cupomInteligente: true,
-        campanhas: false,
-        mensageiro: false,
-        templatePersonalizado: false,
-        vitrine: false,
-        social: false
-      },
-
-      atualizadoEm: new Date().toISOString()
-    },
-
-    premium: {
-      nome: "premium",
-
-      marketplaces: [
-        "amazon",
-        "shopee",
-        "mercadolivre",
-        "aliexpress",
-        "awin",
-        "magalu"
-      ],
-
-      limites: {
-        sessoes: 10,
-        destinos: 50,
-        enviosDia: 5000,
-        creditos: 9500
-      },
-
-      recursos: {
-        buscaManual: true,
-        farejadorAutomatico: true,
-
-        whatsapp: true,
-        telegram: true,
-        discord: false,
-
-        multiSessao: true,
-
-        linkOptimus: true,
-        analytics: true,
-        cupomInteligente: true,
-        adminAvancado: true,
-        campanhas: true,
-        templatePersonalizado: false,
-        vitrine: false,
-        social: false
-      },
-
-      atualizadoEm: new Date().toISOString()
-    }
-  };
-
-  salvarPlanos();
-
-  console.log("[OK]✅ Planos padro criados");
 }
 
 function normalizarRecursosPlanosRuntime() {
   if (!planos || typeof planos !== "object") return;
+
+  saasFundacao.normalizarPlanosSaasRuntime(planos);
 
   for (const plano of Object.values(planos)) {
     if (!plano || typeof plano !== "object") continue;
@@ -3374,6 +3252,34 @@ function normalizarRecursosPlanosRuntime() {
       plano.recursos.vitrine = false;
     }
   }
+}
+
+function auditarUsuariosComPlanoAusente() {
+  const planosExistentes = new Set(
+    Object.entries(planos || {}).flatMap(([chave, plano]) => [
+      normalizarTexto(chave),
+      normalizarTexto(plano?.nome || ""),
+      normalizarTexto(plano?.id || "")
+    ]).filter(Boolean)
+  );
+
+  const inconsistentes = (Array.isArray(usuarios) ? usuarios : [])
+    .filter(usuario => {
+      const planoUsuario = normalizarTexto(usuario?.plano || "");
+      return planoUsuario && !planosExistentes.has(planoUsuario);
+    })
+    .map(usuario => ({
+      id: usuario.id || "",
+      email: usuario.email || "",
+      plano: usuario.plano || ""
+    }));
+
+  if (!inconsistentes.length) return;
+
+  console.log("[SAAS-PLANOS-AUDITORIA] Usuarios apontam para plano inexistente; nenhuma correcao automatica aplicada", {
+    total: inconsistentes.length,
+    usuarios: inconsistentes.slice(0, 50)
+  });
 }
 
 // ================= FUNÇÃO CARREGA CONFIG =================
@@ -3449,6 +3355,7 @@ if (sessoesMeta && Object.keys(sessoesMeta).length) {
 
    criarPlanosPadrao();
    normalizarRecursosPlanosRuntime();
+   auditarUsuariosComPlanoAusente();
 
 
 if (!usuarios.length) {
@@ -7112,7 +7019,7 @@ const usuarioOferta =
   usuarios.find(u => String(u.id) === String(clienteId)) || null;
 
 const plano =
-  getPlanoPorNome(usuarioOferta?.plano || "free") || {};
+  getPlanoPorNome(usuarioOferta?.plano || "") || {};
 
 let enviouParaAlgumDestino = false;
 let destinosEnviadosCount = 0;
@@ -9524,6 +9431,95 @@ app.get("/minha-config", (req, res) => {
   });
 });
 
+function sanitizarUsuarioAdmin(usuario = {}) {
+  if (!usuario || typeof usuario !== "object") return usuario;
+  const {
+    senha,
+    password,
+    pass,
+    senhaHash,
+    passwordHash,
+    hash,
+    ...seguro
+  } = usuario;
+  return seguro;
+}
+
+function obterConfigSaasAtual() {
+  return saasFundacao.normalizarSaasConfig(config.saas || config.beta || {});
+}
+
+function contarVagasFreeBetaAtual(saasConfig = obterConfigSaasAtual()) {
+  return saasFundacao.contarVagasFreeBeta({
+    usuarios,
+    planos,
+    maxContasFreeBeta: saasConfig.maxContasFreeBeta
+  });
+}
+
+function payloadSaasConfigPublico() {
+  const saasConfig = obterConfigSaasAtual();
+  const vagas = contarVagasFreeBetaAtual(saasConfig);
+  return {
+    betaAtivo: saasConfig.betaAtivo,
+    cadastroPublicoAtivo: saasConfig.cadastroPublicoAtivo,
+    textoBeta: saasConfig.textoBeta,
+    seloBeta: saasConfig.seloBeta,
+    vagasFree: {
+      max: vagas.max,
+      ocupadas: vagas.ocupadas,
+      disponiveis: vagas.disponiveis
+    }
+  };
+}
+
+async function executarCadastroPublicoAtomico(body = {}) {
+  const saasConfig = obterConfigSaasAtual();
+  const novoUsuario = await saasFundacao.executarCadastroAtomico({
+    body,
+    planos,
+    usuarios,
+    configsPorCliente,
+    saasConfig,
+    gerarId,
+    gerarSenhaHash,
+    prepararConfig: (configAtual) => aplicarArquiteturaComercialRioOficial(configAtual),
+    salvarUsuarios,
+    salvarConfigsClientes
+  });
+  return sanitizarUsuarioAdmin(novoUsuario);
+}
+
+app.get("/public/saas-config", (req, res) => {
+  return res.json({
+    ok: true,
+    config: payloadSaasConfigPublico()
+  });
+});
+
+app.get("/public/planos", (req, res) => {
+  return res.json({
+    ok: true,
+    planos: saasFundacao.planosPublicos(planos).map(saasFundacao.sanitizarPlanoPublico)
+  });
+});
+
+app.post("/cadastro", async (req, res) => {
+  try {
+    const usuario = await executarCadastroPublicoAtomico(req.body || {});
+    return res.status(201).json({
+      ok: true,
+      usuario
+    });
+  } catch (erro) {
+    return res.status(erro.statusCode || 500).json({
+      ok: false,
+      codigo: erro.codigo || "cadastro_falhou",
+      erro: erro.message || "Falha ao criar conta"
+    });
+  }
+});
+
 app.get("/admin/usuarios", (req, res) => {
   if (!isAdminMaster(req)) {
     return res.status(403).json({
@@ -9534,7 +9530,7 @@ app.get("/admin/usuarios", (req, res) => {
 
   return res.json({
     ok: true,
-    usuarios
+    usuarios: usuarios.map(sanitizarUsuarioAdmin)
   });
 });
 
@@ -9579,6 +9575,7 @@ app.post("/admin/planos", (req, res) => {
   const recursosBody = body.recursos || {};
   const limitesAnteriores = planoAnterior.limites || {};
   const recursosAnteriores = planoAnterior.recursos || {};
+  const politicaCreditosAnterior = saasFundacao.politicaCreditosPlano(planoAnterior);
 
   const numeroPlano = (valor, fallback = 0) => {
     const numero = Number(valor);
@@ -9614,6 +9611,25 @@ app.post("/admin/planos", (req, res) => {
   planos[nomePlano] = {
     nome: nomePlano,
     preco: String(body.preco ?? planoAnterior.preco ?? ""),
+    fraseComercial: String(body.fraseComercial ?? planoAnterior.fraseComercial ?? ""),
+    selo: String(body.selo ?? planoAnterior.selo ?? ""),
+    ordem: numeroPlano(body.ordem, numeroPlano(planoAnterior.ordem, 0)),
+    visivelPublicamente: Object.prototype.hasOwnProperty.call(body, "visivelPublicamente")
+      ? !!body.visivelPublicamente
+      : !!planoAnterior.visivelPublicamente,
+    contratavel: Object.prototype.hasOwnProperty.call(body, "contratavel")
+      ? !!body.contratavel
+      : !!planoAnterior.contratavel,
+    emBreve: Object.prototype.hasOwnProperty.call(body, "emBreve")
+      ? !!body.emBreve
+      : !!planoAnterior.emBreve,
+    creditosModelo: String(
+      body.creditosModelo ??
+      limitesBody.creditosModelo ??
+      planoAnterior.creditosModelo ??
+      limitesAnteriores.creditosModelo ??
+      politicaCreditosAnterior.creditosModelo
+    ),
 
     marketplaces: marketplacesLiberadosPlano,
 
@@ -9626,6 +9642,22 @@ app.post("/admin/planos", (req, res) => {
       creditos: numeroPlano(
         limitesBody.creditos ?? limitesBody.creditosMes ?? body.creditos,
         numeroPlano(limitesAnteriores.creditos ?? limitesAnteriores.creditosMes, 0)
+      ),
+      creditosMes: numeroPlano(
+        limitesBody.creditosMes ?? limitesBody.creditos ?? body.creditos,
+        numeroPlano(limitesAnteriores.creditosMes ?? limitesAnteriores.creditos, 0)
+      ),
+      creditosUnicos: numeroPlano(
+        limitesBody.creditosUnicos ?? body.creditosUnicos,
+        numeroPlano(limitesAnteriores.creditosUnicos, politicaCreditosAnterior.creditosUnicos)
+      ),
+      creditosPorCiclo: numeroPlano(
+        limitesBody.creditosPorCiclo ?? body.creditosPorCiclo,
+        numeroPlano(limitesAnteriores.creditosPorCiclo, politicaCreditosAnterior.creditosPorCiclo)
+      ),
+      cicloDias: numeroPlano(
+        limitesBody.cicloDias ?? body.cicloDias,
+        numeroPlano(limitesAnteriores.cicloDias, politicaCreditosAnterior.cicloDias)
       )
     },
 
@@ -9858,7 +9890,7 @@ app.delete("/admin/usuarios/:id", (req, res) => {
   });
 });
 
-app.post("/admin/usuarios", (req, res) => {
+app.post("/admin/usuarios", async (req, res) => {
   if (!isAdminMaster(req)) {
     return res.status(403).json({
       ok: false,
@@ -9886,14 +9918,34 @@ app.post("/admin/usuarios", (req, res) => {
     });
   }
 
+  let senhaHash = "";
+  try {
+    senhaHash = await gerarSenhaHash(body.senha);
+  } catch (e) {
+    return res.status(400).json({
+      ok: false,
+      erro: "Senha invalida"
+    });
+  }
+
+  const planoNovoUsuario = getPlanoPorNome(body.plano || "") || {};
+  const politicaCreditos = saasFundacao.politicaCreditosPlano(planoNovoUsuario);
+
   const novoUsuario = {
     id: gerarId(),
     nome: body.nome,
     email: body.email.toLowerCase(),
-    senha: body.senha,
+    senhaHash,
     papel: body.papel || "cliente",
-    plano: body.plano || "free",
+    plano: body.plano || "",
     creditos: Number(body.creditos || 0),
+    creditosModelo: body.creditosModelo || politicaCreditos.creditosModelo,
+    statusConta: body.statusConta || "ativa",
+    assinaturaStatus: body.assinaturaStatus || "manual",
+    cicloAtualInicio: body.cicloAtualInicio || "",
+    proximaRenovacao: body.proximaRenovacao || "",
+    pagamentoUltimoStatus: body.pagamentoUltimoStatus || "",
+    origemCadastro: body.origemCadastro || "admin",
     ativo: true,
     criadoEm: new Date().toISOString()
   };
@@ -9906,11 +9958,11 @@ app.post("/admin/usuarios", (req, res) => {
 
   return res.json({
     ok: true,
-    usuario: novoUsuario
+    usuario: sanitizarUsuarioAdmin(novoUsuario)
   });
 });
 
-app.put("/admin/usuarios/:id", (req, res) => {
+app.put("/admin/usuarios/:id", async (req, res) => {
   if (!isAdminMaster(req)) {
     return res.status(403).json({
       ok: false,
@@ -9932,6 +9984,7 @@ app.put("/admin/usuarios/:id", (req, res) => {
   }
 
   const body = req.body || {};
+  const creditosAntes = Number(usuario.creditos ?? 0);
 
   usuario.nome = body.nome || usuario.nome;
 
@@ -9939,7 +9992,17 @@ app.put("/admin/usuarios/:id", (req, res) => {
     (body.email || usuario.email).toLowerCase();
 
   if (body.senha) {
-    usuario.senha = body.senha;
+    try {
+      usuario.senhaHash = await gerarSenhaHash(body.senha);
+      delete usuario.senha;
+      delete usuario.password;
+      delete usuario.pass;
+    } catch (e) {
+      return res.status(400).json({
+        ok: false,
+        erro: "Senha invalida"
+      });
+    }
   }
 
   usuario.plano = body.plano || usuario.plano;
@@ -9949,6 +10012,19 @@ app.put("/admin/usuarios/:id", (req, res) => {
   usuario.creditos = Number(
     body.creditos ?? usuario.creditos ?? 0
   );
+
+  if (usuario.creditos !== creditosAntes) {
+    usuario.auditoriaCreditos = Array.isArray(usuario.auditoriaCreditos)
+      ? usuario.auditoriaCreditos
+      : [];
+    usuario.auditoriaCreditos.push({
+      anterior: creditosAntes,
+      novo: usuario.creditos,
+      motivo: String(body.motivoCredito || body.motivo || "ajuste_admin").slice(0, 200),
+      operador: getClienteId(req) || "admin",
+      data: new Date().toISOString()
+    });
+  }
 
   if (typeof body.ativo === "boolean") {
     usuario.ativo = body.ativo;
@@ -9961,7 +10037,7 @@ app.put("/admin/usuarios/:id", (req, res) => {
 
   return res.json({
     ok: true,
-    usuario
+    usuario: sanitizarUsuarioAdmin(usuario)
   });
 });
 
@@ -10354,6 +10430,8 @@ function auth(req, res, next) {
   if (
     req.path === "/" ||
     req.path === "/login" ||
+    req.path === "/cadastro" ||
+    req.path.startsWith("/public/") ||
     (req.method === "GET" && req.path === "/branding") ||
     (req.method === "GET" && req.path === "/discord/callback") ||
     (req.method === "GET" && req.path === "/social/meta/callback") ||
@@ -10960,7 +11038,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
 
   const usuarioOferta =
     usuarios.find(u => String(u.id) === String(clienteId)) || null;
-  const plano = getPlanoPorNome(usuarioOferta?.plano || "free") || {};
+  const plano = getPlanoPorNome(usuarioOferta?.plano || "") || {};
 
   let enviouParaAlgumDestino = false;
   let destinosEnviadosCount = 0;
@@ -19286,6 +19364,14 @@ function pareceHashBcrypt(valor = "") {
   return /^\$2[aby]\$\d{2}\$/.test(String(valor || ""));
 }
 
+async function gerarSenhaHash(senhaInformada = "") {
+  const senha = String(senhaInformada || "");
+  if (!senha) {
+    throw new Error("senha_obrigatoria");
+  }
+  return bcrypt.hash(senha, 10);
+}
+
 async function diagnosticarSenhaUsuario(usuario = {}, senhaInformada = "") {
   const senha = String(senhaInformada || "");
   const camposTexto = [
@@ -19364,6 +19450,25 @@ async function verificarSenhaUsuario(usuario = {}, senhaInformada = "") {
   return diagnostico.ok === true;
 }
 
+async function migrarSenhaLegadaSeNecessario(usuario = {}, senhaInformada = "", diagnostico = {}) {
+  if (!usuario || diagnostico.textoPuroPassou !== true) return false;
+  if (usuario.senhaHash && pareceHashBcrypt(usuario.senhaHash)) return false;
+
+  usuario.senhaHash = await gerarSenhaHash(senhaInformada);
+
+  if (diagnostico.campoTextoUsado === "senha") delete usuario.senha;
+  if (diagnostico.campoTextoUsado === "password") delete usuario.password;
+  if (diagnostico.campoTextoUsado === "pass") delete usuario.pass;
+
+  usuario.senhaMigradaEm = new Date().toISOString();
+  salvarUsuarios();
+  console.log("[AUTH] Senha legada migrada para bcrypt", {
+    usuario: usuario.email || usuario.id || "",
+    campoTextoUsado: diagnostico.campoTextoUsado || ""
+  });
+  return true;
+}
+
 app.post("/login", async (req, res) => {
   const perf = criarPerfTimer("PERF LOGIN", contextoPerfHttp(req));
   const { user, pass } = req.body || {};
@@ -19426,11 +19531,13 @@ app.post("/login", async (req, res) => {
     return res.status(401).json({ erro: "Senha invÃ¡lida" });
   }
 
+  await perf.etapa("migracao_senha_legada", () => migrarSenhaLegadaSeNecessario(usuario, pass, diagnosticoSenha));
+
   const token = perf.etapaSync("jwt", () => jwt.sign(
     {
       clienteId: usuario.id,
       papel: usuario.papel || "cliente",
-      plano: usuario.plano || "free"
+      plano: usuario.plano || ""
     },
     JWT_SECRET,
     { expiresIn: "7d" }
@@ -22641,8 +22748,9 @@ const gerarLinkCurtoAliExpress = conversoresAfiliados.gerarLinkCurtoAliExpress;
 
 // ======================= FUNCAO PLANO NOME =========================================
 
-function getPlanoPorNome(nome = "free") {
-  const chave = normalizarTexto(nome || "free");
+function getPlanoPorNome(nome = "") {
+  const chave = normalizarTexto(nome || "");
+  if (!chave) return null;
 
   if (planos?.[chave]) {
     return planos[chave];
@@ -22655,7 +22763,7 @@ function getPlanoPorNome(nome = "free") {
     );
   });
 
-  return encontrado?.[1] || planos?.free || null;
+  return encontrado?.[1] || null;
 }
 
 // =============== FUNCAO GERAR LINK AFILIADO SHOPEE ========================================
