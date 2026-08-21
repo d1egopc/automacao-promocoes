@@ -125,6 +125,11 @@ function adicionarDias(data, dias) {
   return d;
 }
 
+function carenciaPagamentoDiasPlano(plano = {}) {
+  const limites = plano?.limites && typeof plano.limites === "object" ? plano.limites : {};
+  return Math.max(0, numero(plano.carenciaPagamentoDias ?? limites.carenciaPagamentoDias, 1));
+}
+
 function inicializarCreditosUsuario({ usuario = {}, plano = {}, agora = new Date(), origemCadastro = "admin" } = {}) {
   if (usuario.creditosInicializadosEm) {
     return usuario;
@@ -156,27 +161,36 @@ function inicializarCreditosUsuario({ usuario = {}, plano = {}, agora = new Date
 function abrirCicloCreditosAutorizado(usuario = {}, plano = {}, {
   agora = new Date(),
   idempotencyKey = "",
-  assinaturaStatus = "teste_ciclo_autorizado"
+  assinaturaStatus = "teste_ciclo_autorizado",
+  pagamentoId = ""
 } = {}) {
   const politica = politicaCreditosPlano(plano);
   if (politica.creditosModelo !== "ciclo") {
     return { alterou: false, motivo: "plano_nao_ciclico" };
   }
 
-  const chave = texto(idempotencyKey);
-  if (chave && usuario.ultimoCicloCreditoIdempotencyKey === chave) {
+  const chave = texto(idempotencyKey || pagamentoId);
+  if (chave && (
+    usuario.ultimoCicloCreditoIdempotencyKey === chave ||
+    usuario.ultimoCicloCreditoId === chave
+  )) {
     return { alterou: false, motivo: "ciclo_ja_aberto" };
   }
 
   const iso = new Date(agora).toISOString();
+  const fim = adicionarDias(agora, politica.cicloDias).toISOString();
   usuario.assinaturaStatus = assinaturaStatus;
   usuario.pagamentoUltimoStatus = assinaturaStatus;
   usuario.creditosModelo = "ciclo";
   usuario.creditos = politica.creditosPorCiclo;
+  usuario.planoAssinatura = usuario.planoAssinatura || plano.nome || usuario.plano || "";
   usuario.cicloAtualInicio = iso;
-  usuario.proximaRenovacao = adicionarDias(agora, politica.cicloDias).toISOString();
+  usuario.cicloAtualFim = fim;
+  usuario.proximaRenovacao = fim;
   usuario.creditosInicializadosEm = usuario.creditosInicializadosEm || iso;
   usuario.ultimoCicloCreditoIdempotencyKey = chave || usuario.ultimoCicloCreditoIdempotencyKey || `ciclo:${iso}`;
+  usuario.ultimoCicloCreditoId = chave || usuario.ultimoCicloCreditoId || usuario.ultimoCicloCreditoIdempotencyKey;
+  if (pagamentoId || chave) usuario.pagamentoUltimoId = texto(pagamentoId || chave);
   return { alterou: true, motivo: "ciclo_aberto" };
 }
 
@@ -195,10 +209,6 @@ function renovarCreditosPorPlano(usuario = {}, plano = {}, agora = new Date()) {
     return { alterou: false, motivo: "creditos_unicos_nao_renovam" };
   }
 
-  if (!assinaturaAutorizaCreditos(usuario)) {
-    return { alterou: false, motivo: "assinatura_nao_autorizada" };
-  }
-
   if (!usuario.assinaturaStatus) {
     usuario.assinaturaStatus = "ativa_legacy";
   }
@@ -206,19 +216,191 @@ function renovarCreditosPorPlano(usuario = {}, plano = {}, agora = new Date()) {
   if (!usuario.cicloAtualInicio || !usuario.proximaRenovacao) {
     const iso = new Date(agora).toISOString();
     usuario.cicloAtualInicio = usuario.cicloAtualInicio || iso;
-    usuario.proximaRenovacao = usuario.proximaRenovacao || adicionarDias(agora, politica.cicloDias).toISOString();
+    usuario.cicloAtualFim = usuario.cicloAtualFim || adicionarDias(agora, politica.cicloDias).toISOString();
+    usuario.proximaRenovacao = usuario.proximaRenovacao || usuario.cicloAtualFim;
     return { alterou: true, motivo: "ciclo_inicializado_sem_credito_novo" };
   }
 
   const proxima = new Date(usuario.proximaRenovacao);
+  if (Number.isFinite(proxima.getTime()) && proxima <= new Date(agora)) {
+    return processarVencimentoAssinatura(usuario, plano, agora);
+  }
+
+  if (!assinaturaAutorizaCreditos(usuario)) {
+    return { alterou: false, motivo: "assinatura_nao_autorizada" };
+  }
+
   if (!Number.isFinite(proxima.getTime()) || proxima > new Date(agora)) {
     return { alterou: false, motivo: "ciclo_vigente" };
   }
+}
 
-  usuario.creditos = politica.creditosPorCiclo;
-  usuario.cicloAtualInicio = new Date(agora).toISOString();
-  usuario.proximaRenovacao = adicionarDias(agora, politica.cicloDias).toISOString();
-  return { alterou: true, motivo: "ciclo_renovado" };
+function processarVencimentoAssinatura(usuario = {}, plano = {}, agora = new Date()) {
+  if (!usuario || !plano) return { alterou: false, motivo: "usuario_ou_plano_ausente" };
+  const politica = politicaCreditosPlano(plano);
+
+  usuario.creditosModelo = usuario.creditosModelo || politica.creditosModelo;
+
+  if (politica.creditosModelo === "unicos") {
+    if (Number(usuario.creditos || 0) <= 0 && usuario.statusConta !== "teste_esgotado") {
+      usuario.statusConta = "teste_esgotado";
+      usuario.testeEsgotadoEm = usuario.testeEsgotadoEm || new Date(agora).toISOString();
+      return { alterou: true, motivo: "teste_esgotado" };
+    }
+    return { alterou: false, motivo: "creditos_unicos_nao_renovam" };
+  }
+
+  const referenciaFim = usuario.proximaRenovacao || usuario.cicloAtualFim;
+  const vencimento = new Date(referenciaFim || "");
+  if (!Number.isFinite(vencimento.getTime())) {
+    return { alterou: false, motivo: "vencimento_ausente" };
+  }
+
+  const agoraData = new Date(agora);
+  if (vencimento > agoraData) {
+    return { alterou: false, motivo: "ciclo_vigente" };
+  }
+
+  const carenciaFim = adicionarDias(vencimento, carenciaPagamentoDiasPlano(plano));
+  usuario.pagamentoUltimoStatus = usuario.pagamentoUltimoStatus || "pagamento_pendente";
+
+  if (carenciaFim > agoraData) {
+    if (usuario.assinaturaStatus !== "pagamento_pendente") {
+      usuario.assinaturaStatus = "pagamento_pendente";
+      usuario.pagamentoPendenteDesde = usuario.pagamentoPendenteDesde || new Date(agora).toISOString();
+      return { alterou: true, motivo: "pagamento_pendente_carencia" };
+    }
+    return { alterou: false, motivo: "pagamento_pendente_carencia" };
+  }
+
+  const jaSuspensa = usuario.assinaturaStatus === "suspensa" && Number(usuario.creditos || 0) === 0;
+  usuario.assinaturaStatus = "suspensa";
+  usuario.pagamentoUltimoStatus = "vencido_sem_pagamento";
+  usuario.suspensoEm = usuario.suspensoEm || new Date(agora).toISOString();
+  usuario.creditos = 0;
+  return { alterou: !jaSuspensa, motivo: "assinatura_suspensa_sem_pagamento" };
+}
+
+function registrarAuditoriaAssinatura(usuario = {}, evento = {}) {
+  usuario.auditoriaAssinatura = Array.isArray(usuario.auditoriaAssinatura)
+    ? usuario.auditoriaAssinatura
+    : [];
+  usuario.auditoriaAssinatura.push({
+    tipo: texto(evento.tipo || "pagamento_simulado"),
+    estado: texto(evento.estado),
+    pagamentoId: texto(evento.pagamentoId),
+    plano: texto(evento.plano),
+    operador: texto(evento.operador),
+    resultado: texto(evento.resultado),
+    motivo: texto(evento.motivo).slice(0, 200),
+    data: new Date(evento.data || new Date()).toISOString()
+  });
+}
+
+function aplicarPagamentoSimulado(usuario = {}, plano = {}, {
+  estado = "",
+  pagamentoId = "",
+  agora = new Date(),
+  operador = ""
+} = {}) {
+  if (!usuario || !usuario.id) {
+    return { ok: false, status: 404, codigo: "usuario_nao_encontrado", erro: "Usuario nao encontrado" };
+  }
+  if (!plano || !plano.nome) {
+    return { ok: false, status: 404, codigo: "plano_nao_encontrado", erro: "Plano nao encontrado" };
+  }
+
+  const estadoNormalizado = textoLower(estado);
+  if (!["aprovado", "recusado", "pendente"].includes(estadoNormalizado)) {
+    return { ok: false, status: 400, codigo: "estado_pagamento_invalido", erro: "Estado de pagamento invalido" };
+  }
+
+  const politica = politicaCreditosPlano(plano);
+  if (politica.creditosModelo !== "ciclo") {
+    return { ok: false, status: 400, codigo: "plano_nao_ciclico", erro: "Plano nao participa de assinatura paga" };
+  }
+
+  const idPagamento = texto(pagamentoId);
+  if (estadoNormalizado === "aprovado" && !idPagamento) {
+    return { ok: false, status: 400, codigo: "pagamento_id_obrigatorio", erro: "pagamentoId obrigatorio" };
+  }
+
+  if (estadoNormalizado === "pendente") {
+    usuario.pagamentoUltimoStatus = estadoNormalizado;
+    if (idPagamento) usuario.pagamentoUltimoId = idPagamento;
+    usuario.assinaturaStatus = "pagamento_pendente";
+    registrarAuditoriaAssinatura(usuario, {
+      estado: estadoNormalizado,
+      pagamentoId: idPagamento,
+      plano: plano.nome,
+      operador,
+      resultado: "registrado",
+      motivo: "pagamento_pendente",
+      data: agora
+    });
+    return { ok: true, alterou: true, motivo: "pagamento_pendente", idempotente: false };
+  }
+
+  if (estadoNormalizado === "recusado") {
+    usuario.pagamentoUltimoStatus = estadoNormalizado;
+    if (idPagamento) usuario.pagamentoUltimoId = idPagamento;
+    usuario.assinaturaStatus = "pagamento_pendente";
+    registrarAuditoriaAssinatura(usuario, {
+      estado: estadoNormalizado,
+      pagamentoId: idPagamento,
+      plano: plano.nome,
+      operador,
+      resultado: "registrado",
+      motivo: "pagamento_recusado",
+      data: agora
+    });
+    return { ok: true, alterou: true, motivo: "pagamento_recusado", idempotente: false };
+  }
+
+  if (usuario.ultimoCicloCreditoId === idPagamento || usuario.ultimoCicloCreditoIdempotencyKey === idPagamento) {
+    registrarAuditoriaAssinatura(usuario, {
+      estado: estadoNormalizado,
+      pagamentoId: idPagamento,
+      plano: plano.nome,
+      operador,
+      resultado: "idempotente",
+      motivo: "pagamento_ja_processado",
+      data: agora
+    });
+    return { ok: true, alterou: false, motivo: "pagamento_ja_processado", idempotente: true };
+  }
+
+  const planoNome = plano.nome;
+  usuario.plano = planoNome;
+  usuario.planoAssinatura = planoNome;
+  usuario.statusConta = "ativa";
+  usuario.assinaturaStatus = "ativa";
+  usuario.pagamentoUltimoStatus = "aprovado";
+  usuario.creditosModelo = "ciclo";
+
+  const ciclo = abrirCicloCreditosAutorizado(usuario, plano, {
+    agora,
+    idempotencyKey: idPagamento,
+    pagamentoId: idPagamento,
+    assinaturaStatus: "ativa"
+  });
+  usuario.assinaturaStatus = "ativa";
+  usuario.pagamentoUltimoStatus = "aprovado";
+  usuario.pagamentoUltimoId = idPagamento;
+  usuario.ultimoCicloCreditoId = idPagamento;
+  usuario.ultimoCicloCreditoIdempotencyKey = idPagamento;
+
+  registrarAuditoriaAssinatura(usuario, {
+    estado: estadoNormalizado,
+    pagamentoId: idPagamento,
+    plano: planoNome,
+    operador,
+    resultado: ciclo.alterou ? "ciclo_aberto" : "idempotente",
+    motivo: ciclo.motivo,
+    data: agora
+  });
+
+  return { ok: true, alterou: ciclo.alterou, motivo: ciclo.motivo, idempotente: false };
 }
 
 function aplicarDebitoConta(usuario = {}, plano = {}, quantidade = 1, agora = new Date()) {
@@ -492,8 +674,10 @@ module.exports = {
   politicaCreditosPlano,
   inicializarCreditosUsuario,
   renovarCreditosPorPlano,
+  processarVencimentoAssinatura,
   aplicarDebitoConta,
   abrirCicloCreditosAutorizado,
+  aplicarPagamentoSimulado,
   planosPublicos,
   sanitizarPlanoPublico,
   contarVagasFreeBeta,

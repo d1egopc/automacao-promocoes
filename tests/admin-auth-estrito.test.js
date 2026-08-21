@@ -17,6 +17,7 @@ const rotasAdminLegadas = [
   { metodo: "post", rota: "/admin/planos", url: "/admin/planos", body: { nome: "Plano Teste" } },
   { metodo: "delete", rota: "/admin/planos/:nome", url: "/admin/planos/Plano%20Teste" },
   { metodo: "delete", rota: "/admin/usuarios/:id", url: "/admin/usuarios/user_teste" },
+  { metodo: "post", rota: "/admin/assinaturas/:usuarioId/pagamento-simulado", url: "/admin/assinaturas/user_teste/pagamento-simulado", body: { estado: "aprovado", pagamentoId: "pay_teste" } },
   { metodo: "post", rota: "/admin/usuarios", url: "/admin/usuarios", body: { id: "user_teste" } },
   { metodo: "put", rota: "/admin/usuarios/:id", url: "/admin/usuarios/user_teste", body: { creditos: 123 } }
 ];
@@ -80,6 +81,9 @@ function criarAppAdminProtegida() {
   app.delete("/admin/usuarios/:id", authAdmin, (req, res) => {
     const idx = usuarios.findIndex(u => u.id === req.params.id);
     if (idx >= 0) usuarios.splice(idx, 1);
+    res.json({ ok: true });
+  });
+  app.post("/admin/assinaturas/:usuarioId/pagamento-simulado", authAdmin, (_req, res) => {
     res.json({ ok: true });
   });
 

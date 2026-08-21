@@ -9530,6 +9530,56 @@ async function executarCadastroInternoAdminAtomico(body = {}, operador = {}) {
   });
 }
 
+function executarPagamentoSimuladoAssinaturaAdmin(usuarioId = "", body = {}, operador = {}) {
+  const usuario = usuarios.find(u => String(u.id) === String(usuarioId));
+  if (!usuario) {
+    const erro = new Error("Usuario nao encontrado");
+    erro.statusCode = 404;
+    erro.codigo = "usuario_nao_encontrado";
+    throw erro;
+  }
+
+  const planoNome = String(body.plano || body.planoAssinatura || usuario.planoAssinatura || usuario.plano || "").trim();
+  const plano = getPlanoPorNome(planoNome);
+  if (!plano) {
+    const erro = new Error("Plano nao encontrado");
+    erro.statusCode = 404;
+    erro.codigo = "plano_nao_encontrado";
+    throw erro;
+  }
+
+  const resultado = saasFundacao.aplicarPagamentoSimulado(usuario, plano, {
+    estado: body.estado || body.status || "",
+    pagamentoId: body.pagamentoId || body.idPagamento || "",
+    operador: operador?.id || operador?.email || "",
+    agora: body.agora ? new Date(body.agora) : new Date()
+  });
+
+  if (!resultado.ok) {
+    const erro = new Error(resultado.erro || "Pagamento simulado invalido");
+    erro.statusCode = resultado.status || 400;
+    erro.codigo = resultado.codigo || "pagamento_simulado_invalido";
+    throw erro;
+  }
+
+  salvarUsuarios();
+
+  console.log("[SAAS-PAGAMENTO-SIMULADO]", {
+    operador: operador?.id || operador?.email || "",
+    usuario: usuario.id,
+    plano: usuario.plano || "",
+    estado: String(body.estado || body.status || ""),
+    pagamentoId: body.pagamentoId || body.idPagamento || "",
+    motivo: resultado.motivo || "",
+    idempotente: resultado.idempotente === true
+  });
+
+  return {
+    resultado,
+    usuario: sanitizarUsuarioAdmin(usuario)
+  };
+}
+
 app.get("/public/saas-config", (req, res) => {
   return res.json({
     ok: true,
@@ -9581,6 +9631,24 @@ app.post("/admin/cadastro-interno", exigirAdminMasterEstrito, async (req, res) =
       erro: erro.statusCode && erro.statusCode < 500
         ? erro.message
         : "Falha ao criar conta"
+    });
+  }
+});
+
+app.post("/admin/assinaturas/:usuarioId/pagamento-simulado", exigirAdminMasterEstrito, (req, res) => {
+  try {
+    const resposta = executarPagamentoSimuladoAssinaturaAdmin(req.params.usuarioId, req.body || {}, req.usuario || {});
+    return res.json({
+      ok: true,
+      ...resposta
+    });
+  } catch (erro) {
+    return res.status(erro.statusCode || 500).json({
+      ok: false,
+      codigo: erro.codigo || "pagamento_simulado_falhou",
+      erro: erro.statusCode && erro.statusCode < 500
+        ? erro.message
+        : "Falha ao registrar pagamento simulado"
     });
   }
 });
@@ -10007,9 +10075,13 @@ app.post("/admin/usuarios", exigirAdminMasterEstrito, async (req, res) => {
     creditosModelo: body.creditosModelo || politicaCreditos.creditosModelo,
     statusConta: body.statusConta || "ativa",
     assinaturaStatus: body.assinaturaStatus || "manual",
+    planoAssinatura: body.planoAssinatura || body.plano || "",
     cicloAtualInicio: body.cicloAtualInicio || "",
+    cicloAtualFim: body.cicloAtualFim || "",
     proximaRenovacao: body.proximaRenovacao || "",
     pagamentoUltimoStatus: body.pagamentoUltimoStatus || "",
+    pagamentoUltimoId: body.pagamentoUltimoId || "",
+    ultimoCicloCreditoId: body.ultimoCicloCreditoId || "",
     origemCadastro: body.origemCadastro || "admin",
     ativo: true,
     criadoEm: new Date().toISOString()
@@ -10073,6 +10145,22 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
   usuario.plano = body.plano || usuario.plano;
 
   usuario.papel = body.papel || usuario.papel;
+
+  [
+    "statusConta",
+    "assinaturaStatus",
+    "planoAssinatura",
+    "cicloAtualInicio",
+    "cicloAtualFim",
+    "proximaRenovacao",
+    "pagamentoUltimoStatus",
+    "pagamentoUltimoId",
+    "ultimoCicloCreditoId"
+  ].forEach((campo) => {
+    if (body[campo] !== undefined) {
+      usuario[campo] = body[campo];
+    }
+  });
 
   usuario.creditos = Number(
     body.creditos ?? usuario.creditos ?? 0

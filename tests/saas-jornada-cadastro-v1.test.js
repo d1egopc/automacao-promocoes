@@ -227,7 +227,7 @@ async function cadastrar(env, body, opcoes = {}) {
   };
   assert.strictEqual(
     saas.renovarCreditosPorPlano(cicloPendente, env.planos.ciclo, new Date("2026-08-21T00:00:00.000Z")).motivo,
-    "assinatura_nao_autorizada",
+    "assinatura_suspensa_sem_pagamento",
     "data vencida sozinha nao pode gerar creditos"
   );
   assert.strictEqual(cicloPendente.creditos, 0);

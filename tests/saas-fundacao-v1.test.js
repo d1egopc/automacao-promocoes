@@ -73,8 +73,9 @@ const usuarioCicloAutorizado = {
   proximaRenovacao: "2026-08-01T00:00:00.000Z"
 };
 const renovacao = saas.renovarCreditosPorPlano(usuarioCicloAutorizado, planoCiclo, new Date("2026-08-20T00:00:00Z"));
-assert.strictEqual(renovacao.motivo, "ciclo_renovado");
-assert.strictEqual(usuarioCicloAutorizado.creditos, 900, "ciclo autorizado renova pelo plano");
+assert.strictEqual(renovacao.motivo, "assinatura_suspensa_sem_pagamento");
+assert.strictEqual(usuarioCicloAutorizado.creditos, 0, "data vencida sem pagamento confirmado nao renova creditos");
+assert.strictEqual(usuarioCicloAutorizado.assinaturaStatus, "suspensa");
 
 const planos = {
   beta: planoUnico,
