@@ -10332,10 +10332,18 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
         body
       });
     } else if (Object.prototype.hasOwnProperty.call(body, "creditos")) {
-      usuario.creditos = Number(body.creditos ?? usuario.creditos ?? 0);
+      saasFundacao.aplicarCreditoManualAdmin({
+        usuario,
+        plano: getPlanoPorNome(usuario.plano) || {},
+        quantidade: body.creditos
+      });
     }
   } else if (Object.prototype.hasOwnProperty.call(body, "creditos")) {
-    usuario.creditos = Number(body.creditos ?? usuario.creditos ?? 0);
+    saasFundacao.aplicarCreditoManualAdmin({
+      usuario,
+      plano: getPlanoPorNome(usuario.plano) || {},
+      quantidade: body.creditos
+    });
   }
 
   if (usuario.creditos !== creditosAntes) {

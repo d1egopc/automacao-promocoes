@@ -260,6 +260,89 @@ function adicionarDias(data, dias) {
   return d;
 }
 
+function dataValida(valor = "") {
+  const data = new Date(valor || "");
+  return Number.isFinite(data.getTime()) ? data : null;
+}
+
+function resolverExpiracaoCreditoAdminManual(usuario = {}, politica = {}, agora = new Date()) {
+  const agoraData = new Date(agora);
+  const datasCiclo = [usuario.proximaRenovacao, usuario.cicloAtualFim]
+    .map(dataValida)
+    .filter(data => data && data > agoraData)
+    .sort((a, b) => a.getTime() - b.getTime());
+
+  if (datasCiclo.length) return datasCiclo[0].toISOString();
+  return adicionarDias(agoraData, politica.cicloDias || 30).toISOString();
+}
+
+function creditoAdminManualAtivo(usuario = {}, agora = new Date()) {
+  if (!usuario || typeof usuario !== "object") return false;
+  if (usuario.creditosAdminManualAtivo !== true) return false;
+  if (Number(usuario.creditos || 0) <= 0) return false;
+
+  const expiraEm = dataValida(usuario.creditosAdminManualExpiraEm);
+  if (!expiraEm) return false;
+  return expiraEm > new Date(agora);
+}
+
+function encerrarCreditoAdminManual(usuario = {}, motivo = "", agora = new Date()) {
+  if (!usuario || typeof usuario !== "object") return usuario;
+  usuario.creditosAdminManualAtivo = false;
+  usuario.creditosAdminManualEncerradoEm = new Date(agora).toISOString();
+  usuario.creditosAdminManualEncerradoMotivo = texto(motivo || "encerrado");
+  return usuario;
+}
+
+function expirarCreditoAdminManualSeNecessario(usuario = {}, plano = {}, agora = new Date()) {
+  if (!usuario || typeof usuario !== "object") return { alterou: false, motivo: "usuario_ausente" };
+  if (usuario.creditosAdminManualAtivo !== true) return { alterou: false, motivo: "sem_credito_admin_manual" };
+
+  const expiraEm = dataValida(usuario.creditosAdminManualExpiraEm);
+  if (expiraEm && expiraEm > new Date(agora) && Number(usuario.creditos || 0) > 0) {
+    return { alterou: false, motivo: "credito_admin_manual_vigente" };
+  }
+
+  const saldoAntes = Number(usuario.creditos || 0);
+  usuario.creditos = 0;
+  usuario.creditosAdminManualAtivo = false;
+  usuario.creditosAdminManualExpiradoEm = new Date(agora).toISOString();
+  usuario.creditosAdminManualSaldoExpirado = Math.max(0, saldoAntes);
+
+  const politica = politicaCreditosPlano(plano);
+  if (politica.creditosModelo === "unicos") {
+    usuario.statusConta = "teste_esgotado";
+    usuario.testeEsgotadoEm = usuario.testeEsgotadoEm || new Date(agora).toISOString();
+  }
+
+  return { alterou: saldoAntes > 0, motivo: "credito_admin_manual_expirado" };
+}
+
+function aplicarCreditoManualAdmin({ usuario = {}, plano = {}, quantidade = 0, agora = new Date() } = {}) {
+  const politica = politicaCreditosPlano(plano);
+  const saldo = Math.max(0, numero(quantidade, 0));
+  const iso = new Date(agora).toISOString();
+
+  usuario.creditos = saldo;
+  usuario.creditosOverrideManualEm = iso;
+  usuario.creditosAdminManualEm = iso;
+  usuario.creditosAdminManualQuantidade = saldo;
+  usuario.creditosAdminManualAtivo = saldo > 0;
+
+  if (saldo > 0) {
+    usuario.creditosAdminManualExpiraEm = resolverExpiracaoCreditoAdminManual(usuario, politica, agora);
+    usuario.statusConta = "ativa";
+    if (politica.creditosModelo === "unicos") {
+      usuario.assinaturaStatus = "nao_aplicavel";
+    }
+  } else {
+    usuario.creditosAdminManualExpiraEm = "";
+    encerrarCreditoAdminManual(usuario, "saldo_manual_zero", agora);
+  }
+
+  return usuario;
+}
+
 function carenciaPagamentoDiasPlano(plano = {}) {
   const limites = plano?.limites && typeof plano.limites === "object" ? plano.limites : {};
   return Math.max(0, numero(plano.carenciaPagamentoDias ?? limites.carenciaPagamentoDias, 1));
@@ -340,8 +423,12 @@ function inicializarCreditosUsuarioAdminManual({ usuario = {}, plano = {}, body 
   }
 
   if (overrideManual) {
-    usuario.creditos = Math.max(0, numero(fonte.creditos, 0));
-    usuario.creditosOverrideManualEm = usuario.creditosOverrideManualEm || new Date(agora).toISOString();
+    aplicarCreditoManualAdmin({
+      usuario,
+      plano,
+      quantidade: fonte.creditos,
+      agora
+    });
   }
 
   return usuario;
@@ -360,8 +447,11 @@ function aplicarTrocaManualPlanoAdmin({ usuario = {}, plano = {}, planoIdentidad
   usuario.creditosModelo = politica.creditosModelo;
 
   if (overrideManual) {
-    usuario.creditos = Math.max(0, numero(body.creditos, 0));
-    usuario.creditosOverrideManualEm = usuario.creditosOverrideManualEm || new Date().toISOString();
+    aplicarCreditoManualAdmin({
+      usuario,
+      plano,
+      quantidade: body.creditos
+    });
   } else {
     usuario.creditos = politica.creditosModelo === "unicos"
       ? politica.creditosUnicos
@@ -407,6 +497,7 @@ function abrirCicloCreditosAutorizado(usuario = {}, plano = {}, {
 
   const iso = new Date(agora).toISOString();
   const fim = adicionarDias(agora, politica.cicloDias).toISOString();
+  encerrarCreditoAdminManual(usuario, "ciclo_autorizado", agora);
   usuario.assinaturaStatus = assinaturaStatus;
   usuario.pagamentoUltimoStatus = assinaturaStatus;
   usuario.creditosModelo = "ciclo";
@@ -425,6 +516,13 @@ function abrirCicloCreditosAutorizado(usuario = {}, plano = {}, {
 function renovarCreditosPorPlano(usuario = {}, plano = {}, agora = new Date()) {
   if (!usuario || !plano) return { alterou: false, motivo: "usuario_ou_plano_ausente" };
   const politica = politicaCreditosPlano(plano);
+  const creditoAdmin = expirarCreditoAdminManualSeNecessario(usuario, plano, agora);
+  if (creditoAdmin.motivo === "credito_admin_manual_vigente") {
+    return { alterou: false, motivo: "credito_admin_manual_vigente" };
+  }
+  if (creditoAdmin.motivo === "credito_admin_manual_expirado" && politica.creditosModelo === "unicos") {
+    return creditoAdmin;
+  }
 
   usuario.creditosModelo = usuario.creditosModelo || politica.creditosModelo;
 
@@ -634,6 +732,9 @@ function aplicarPagamentoSimulado(usuario = {}, plano = {}, {
 function aplicarDebitoConta(usuario = {}, plano = {}, quantidade = 1, agora = new Date()) {
   const restante = Number(usuario.creditos || 0) - Number(quantidade || 1);
   usuario.creditos = Math.max(0, restante);
+  if (usuario.creditosAdminManualAtivo === true && usuario.creditos <= 0) {
+    encerrarCreditoAdminManual(usuario, "saldo_admin_manual_esgotado", agora);
+  }
   const politica = politicaCreditosPlano(plano);
   if (politica.creditosModelo === "unicos" && usuario.creditos <= 0) {
     usuario.statusConta = "teste_esgotado";
@@ -931,6 +1032,8 @@ module.exports = {
   inicializarCreditosUsuario,
   creditoManualInformado,
   creditoManualInformadoEdicaoAdmin,
+  aplicarCreditoManualAdmin,
+  creditoAdminManualAtivo,
   inicializarCreditosUsuarioAdminManual,
   aplicarTrocaManualPlanoAdmin,
   renovarCreditosPorPlano,

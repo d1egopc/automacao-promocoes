@@ -189,6 +189,131 @@ assert.strictEqual(renovacao.motivo, "assinatura_suspensa_sem_pagamento");
 assert.strictEqual(usuarioCicloAutorizado.creditos, 0, "data vencida sem pagamento confirmado nao renova creditos");
 assert.strictEqual(usuarioCicloAutorizado.assinaturaStatus, "suspensa");
 
+const freeEsgotadoCreditoAdmin = {
+  id: "user_free_admin",
+  workspaceId: "workspace_free_admin",
+  plano: "Beta Teste",
+  creditos: 0,
+  statusConta: "teste_esgotado",
+  assinaturaStatus: "nao_aplicavel"
+};
+saas.aplicarCreditoManualAdmin({
+  usuario: freeEsgotadoCreditoAdmin,
+  plano: planoUnico,
+  quantidade: 500,
+  agora: new Date("2026-08-20T00:00:00Z")
+});
+assert.strictEqual(freeEsgotadoCreditoAdmin.creditos, 500, "Free esgotado + credito Admin deve receber saldo manual");
+assert.strictEqual(freeEsgotadoCreditoAdmin.statusConta, "ativa", "credito Admin deve retirar bloqueio operacional teste_esgotado");
+assert.strictEqual(freeEsgotadoCreditoAdmin.assinaturaStatus, "nao_aplicavel", "Free nao vira assinatura paga");
+assert.strictEqual(freeEsgotadoCreditoAdmin.plano, "Beta Teste", "credito Admin nao altera plano");
+assert.strictEqual(freeEsgotadoCreditoAdmin.workspaceId, "workspace_free_admin", "credito Admin preserva workspace");
+assert.strictEqual(
+  saas.renovarCreditosPorPlano(freeEsgotadoCreditoAdmin, planoUnico, new Date("2026-08-21T00:00:00Z")).motivo,
+  "credito_admin_manual_vigente",
+  "/me/renovador nao pode destruir concessao Admin vigente"
+);
+assert.strictEqual(freeEsgotadoCreditoAdmin.creditos, 500);
+saas.aplicarDebitoConta(freeEsgotadoCreditoAdmin, planoUnico, 500, new Date("2026-08-21T00:00:00Z"));
+assert.strictEqual(freeEsgotadoCreditoAdmin.creditos, 0, "debito consome credito Admin normalmente");
+assert.strictEqual(freeEsgotadoCreditoAdmin.statusConta, "teste_esgotado", "saldo Admin zerado volta a bloquear Free");
+
+const freeCreditoAdminExpirado = {
+  plano: "Beta Teste",
+  creditos: 120,
+  statusConta: "ativa",
+  assinaturaStatus: "nao_aplicavel",
+  creditosAdminManualAtivo: true,
+  creditosAdminManualExpiraEm: "2026-08-10T00:00:00.000Z"
+};
+assert.strictEqual(
+  saas.renovarCreditosPorPlano(freeCreditoAdminExpirado, planoUnico, new Date("2026-08-20T00:00:00Z")).motivo,
+  "credito_admin_manual_expirado",
+  "virada da validade Admin deve expirar saldo residual Free"
+);
+assert.strictEqual(freeCreditoAdminExpirado.creditos, 0);
+assert.strictEqual(freeCreditoAdminExpirado.creditosAdminManualAtivo, false);
+
+const proPendenteCreditoAdmin = {
+  plano: "Pro",
+  planoAssinatura: "Pro",
+  creditos: 0,
+  statusConta: "ativa",
+  assinaturaStatus: "pagamento_pendente",
+  pagamentoUltimoStatus: "pagamento_pendente",
+  cicloAtualInicio: "2026-08-01T00:00:00.000Z",
+  cicloAtualFim: "2026-08-31T00:00:00.000Z",
+  proximaRenovacao: "2026-08-31T00:00:00.000Z"
+};
+saas.aplicarCreditoManualAdmin({
+  usuario: proPendenteCreditoAdmin,
+  plano: planoPro,
+  quantidade: 500,
+  agora: new Date("2026-08-20T00:00:00Z")
+});
+assert.strictEqual(proPendenteCreditoAdmin.creditos, 500, "pagamento pendente + credito Admin deve operar com saldo");
+assert.strictEqual(proPendenteCreditoAdmin.assinaturaStatus, "pagamento_pendente", "credito Admin nao marca assinatura como paga");
+assert.strictEqual(
+  saas.renovarCreditosPorPlano(proPendenteCreditoAdmin, planoPro, new Date("2026-08-21T00:00:00Z")).motivo,
+  "credito_admin_manual_vigente",
+  "renovador deve respeitar credito Admin em pagamento pendente"
+);
+
+const proSuspensoCreditoAdmin = {
+  id: "user_pro_admin",
+  plano: "Pro",
+  planoAssinatura: "Pro",
+  creditos: 0,
+  statusConta: "ativa",
+  assinaturaStatus: "suspensa",
+  pagamentoUltimoStatus: "vencido_sem_pagamento",
+  cicloAtualInicio: "2026-07-01T00:00:00.000Z",
+  cicloAtualFim: "2026-08-01T00:00:00.000Z",
+  proximaRenovacao: "2026-08-01T00:00:00.000Z",
+  auditoriaAssinatura: [{ tipo: "pagamento_simulado", pagamentoId: "pay_antigo" }]
+};
+saas.aplicarCreditoManualAdmin({
+  usuario: proSuspensoCreditoAdmin,
+  plano: planoPro,
+  quantidade: 500,
+  agora: new Date("2026-08-20T00:00:00Z")
+});
+assert.strictEqual(proSuspensoCreditoAdmin.creditos, 500, "suspensa + credito Admin deve receber saldo");
+assert.strictEqual(proSuspensoCreditoAdmin.assinaturaStatus, "suspensa", "credito Admin nao simula pagamento");
+assert.strictEqual(proSuspensoCreditoAdmin.pagamentoUltimoStatus, "vencido_sem_pagamento", "credito Admin nao altera historico financeiro");
+assert.strictEqual(proSuspensoCreditoAdmin.auditoriaAssinatura.length, 1, "credito Admin nao cria evento financeiro falso");
+assert.strictEqual(
+  saas.renovarCreditosPorPlano(proSuspensoCreditoAdmin, planoPro, new Date("2026-08-20T00:01:00Z")).motivo,
+  "credito_admin_manual_vigente",
+  "renovador nao pode zerar imediatamente credito Admin em conta suspensa"
+);
+assert.strictEqual(proSuspensoCreditoAdmin.creditos, 500);
+assert.strictEqual(saas.creditoAdminManualAtivo(proSuspensoCreditoAdmin, new Date("2026-08-21T00:00:00Z")), true);
+
+assert.strictEqual(
+  saas.renovarCreditosPorPlano(proSuspensoCreditoAdmin, planoPro, new Date("2026-09-20T00:00:00Z")).motivo,
+  "assinatura_suspensa_sem_pagamento",
+  "virada da validade Admin deve voltar a respeitar vencimento financeiro"
+);
+assert.strictEqual(proSuspensoCreditoAdmin.creditos, 0, "saldo Admin residual expira");
+assert.strictEqual(proSuspensoCreditoAdmin.creditosAdminManualAtivo, false);
+
+saas.aplicarCreditoManualAdmin({
+  usuario: proSuspensoCreditoAdmin,
+  plano: planoPro,
+  quantidade: 500,
+  agora: new Date("2026-09-21T00:00:00Z")
+});
+const pagamentoAposCreditoAdmin = saas.aplicarPagamentoSimulado(proSuspensoCreditoAdmin, planoPro, {
+  estado: "aprovado",
+  pagamentoId: "pay_pos_credito_admin",
+  agora: new Date("2026-09-22T00:00:00Z")
+});
+assert.strictEqual(pagamentoAposCreditoAdmin.ok, true);
+assert.strictEqual(proSuspensoCreditoAdmin.creditos, 2000, "pagamento posterior repoe saldo do plano sem somar credito Admin");
+assert.strictEqual(proSuspensoCreditoAdmin.assinaturaStatus, "ativa");
+assert.strictEqual(proSuspensoCreditoAdmin.creditosAdminManualAtivo, false, "pagamento aprovado encerra janela Admin");
+
 const planos = {
   beta: planoUnico,
   futuro: { nome: "Ultimate Futuro", visivelPublicamente: true, contratavel: false, emBreve: true, ordem: 2 },
@@ -281,6 +406,7 @@ assert.ok(rotaPutUsuario.includes("anterior: creditosAntes"), "auditoria deve gu
 assert.ok(rotaPutUsuario.includes("novo: usuario.creditos"), "auditoria deve guardar novo saldo");
 assert.ok(rotaPutUsuario.includes("planoMudou"), "edicao Admin deve detectar troca de plano");
 assert.ok(rotaPutUsuario.includes("aplicarTrocaManualPlanoAdmin"), "troca manual de plano deve reutilizar helper central");
+assert.ok(rotaPutUsuario.includes("aplicarCreditoManualAdmin"), "ajuste manual de creditos deve reutilizar helper central de reativacao Admin");
 assert.ok(rotaPutUsuario.includes('Object.prototype.hasOwnProperty.call(body, "creditos")'), "edicao sem creditos nao deve forcar override silencioso");
 
 const helperPlano = trechoEntre(indexFonte, "function getPlanoPorNome", "// =============== FUNCAO GERAR LINK AFILIADO SHOPEE");
@@ -294,6 +420,8 @@ const blocoCreditos = trechoEntre(indexFonte, "// ================= CREDITOS ===
 assert.ok(!blocoCreditos.includes("CREDITOS_PLANO"), "creditos nao devem usar mapa estatico");
 assert.ok(blocoCreditos.includes("renovarCreditosPorPlano"), "renovacao deve vir do plano");
 assert.ok(blocoCreditos.includes("aplicarDebitoConta"), "debito deve atualizar status da conta");
+assert.ok(blocoCreditos.includes("function usuarioTemCreditos"), "gate de credito operacional deve continuar centralizado");
+assert.ok(blocoCreditos.includes("return Number(usuario.creditos || 0) >= quantidade"), "usuarioTemCreditos deve reconhecer saldo manual vigente");
 
 const blocoPublico = trechoEntre(indexFonte, 'app.get("/public/saas-config"', 'app.get("/admin/usuarios"');
 assert.ok(blocoPublico.includes('app.get("/public/planos"'), "deve expor planos publicos read-only");
