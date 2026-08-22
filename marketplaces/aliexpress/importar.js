@@ -283,8 +283,13 @@ function extrairProductIdAliExpressManual(urlEntrada = "") {
   }
 }
 
-const ALIEXPRESS_SHORTLINK_HOSTS = new Set(["a.aliexpress.com"]);
+const ALIEXPRESS_SHORTLINK_HOSTS = new Set(["a.aliexpress.com", "s.click.aliexpress.com"]);
 const ALIEXPRESS_HOSTS_OFICIAIS = new Set(["aliexpress.com", "a.aliexpress.com", "s.click.aliexpress.com"]);
+const ALIEXPRESS_IMAGEM_HOSTS_OFICIAIS = [
+  "alicdn.com",
+  "aliexpress-media.com",
+  "aliexpress.com"
+];
 const ALIEXPRESS_REDIRECT_TIMEOUT_MS = 5000;
 const ALIEXPRESS_REDIRECT_MAX = 5;
 
@@ -335,7 +340,9 @@ function urlAliExpressSegura(urlEntrada = "", { permitirShortlink = true } = {})
 function ehShortlinkAliExpress(urlEntrada = "") {
   try {
     const url = new URL(String(urlEntrada || ""));
-    return ALIEXPRESS_SHORTLINK_HOSTS.has(url.hostname.toLowerCase().replace(/^www\./, ""));
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (host === "a.aliexpress.com") return true;
+    return host === "s.click.aliexpress.com" && /^\/(?:e|s)\/_[a-z0-9]+/i.test(url.pathname);
   } catch {
     return false;
   }
@@ -429,6 +436,100 @@ function primeiroCampoAliExpress(objeto = {}, campos = []) {
   }
 
   return "";
+}
+
+function urlImagemAliExpressSegura(urlEntrada = "") {
+  const urlTexto = corrigirImagemUrl(htmlDecode(String(urlEntrada || "").trim()));
+  if (!urlTexto) return "";
+  try {
+    const url = new URL(urlTexto);
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (url.protocol !== "https:") return "";
+    if (hostPrivadoOuInseguro(host)) return "";
+    const hostPermitido = ALIEXPRESS_IMAGEM_HOSTS_OFICIAIS.some(permitido =>
+      host === permitido || host.endsWith(`.${permitido}`)
+    );
+    if (!hostPermitido) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function extrairImagemMetadataAliExpressHtml(html = "") {
+  const fonte = String(html || "");
+  const padroes = [
+    /<meta\b[^>]*(?:property|name)=["']og:image(?::secure_url)?["'][^>]*content=["']([^"']+)["'][^>]*>/i,
+    /<meta\b[^>]*content=["']([^"']+)["'][^>]*(?:property|name)=["']og:image(?::secure_url)?["'][^>]*>/i,
+    /<meta\b[^>]*(?:property|name)=["']twitter:image(?::src)?["'][^>]*content=["']([^"']+)["'][^>]*>/i,
+    /<meta\b[^>]*content=["']([^"']+)["'][^>]*(?:property|name)=["']twitter:image(?::src)?["'][^>]*>/i
+  ];
+
+  for (const padrao of padroes) {
+    const imagem = urlImagemAliExpressSegura(fonte.match(padrao)?.[1] || "");
+    if (imagem) return imagem;
+  }
+  return "";
+}
+
+async function buscarImagemMetadataAliExpressHtml(urlEntrada = "", opcoes = {}) {
+  const url = String(urlEntrada || "").trim();
+  const fetchFn = typeof opcoes.fetch === "function" ? opcoes.fetch : fetch;
+  const timeoutMs = Number(opcoes.timeoutMs || ALIEXPRESS_REDIRECT_TIMEOUT_MS);
+  if (!urlAliExpressSegura(url, { permitirShortlink: true })) {
+    return { imagem: "", origem: "", motivo: "url_html_insegura" };
+  }
+
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = controller
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+
+  try {
+    const response = await fetchFn(url, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller?.signal,
+      headers: {
+        "user-agent": "OptimusPromo/1.0 AliExpressImageMetadataResolver",
+        "accept": "text/html,application/xhtml+xml"
+      }
+    });
+    const final = response.url || url;
+    if (!urlAliExpressSegura(final, { permitirShortlink: true })) {
+      return { imagem: "", origem: "", motivo: "html_destino_inseguro" };
+    }
+    if (response.ok === false) {
+      return { imagem: "", origem: "", motivo: "html_status_invalido" };
+    }
+    if (typeof response.text !== "function") {
+      return { imagem: "", origem: "", motivo: "html_sem_texto" };
+    }
+    const html = await response.text();
+    const imagem = extrairImagemMetadataAliExpressHtml(html);
+    return imagem
+      ? { imagem, origem: "aliexpress_html_metadata", motivo: "metadata_imagem_oficial" }
+      : { imagem: "", origem: "", motivo: "metadata_imagem_ausente" };
+  } catch (erro) {
+    return {
+      imagem: "",
+      origem: "",
+      motivo: erro?.name === "AbortError" ? "timeout_metadata_imagem" : "erro_metadata_imagem"
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function deveBuscarImagemMetadataAliExpress({ expansaoShortlink = {}, urlCanonicaProduto = "" } = {}) {
+  if (!urlAliExpressSegura(urlCanonicaProduto, { permitirShortlink: true })) return false;
+  const motivo = expansaoShortlink?.motivo || "";
+  return ![
+    "redirect_destino_inseguro",
+    "url_shortlink_insegura",
+    "timeout_expansao_shortlink",
+    "erro_expansao_shortlink"
+  ].includes(motivo);
 }
 
 function extrairProdutosAliExpressResposta(data = {}) {
@@ -567,11 +668,20 @@ function produtoAliExpressGenerico(urlEntrada = "", aviso = "Erro ao consultar A
     cupom: "",
     linkOriginal: urlEntrada,
     linkAfiliado: extras.linkAfiliado || urlEntrada,
-    imagem: "",
+    imagem: extras.imagem || "",
+    imagemOrigem: extras.imagemOrigem || "",
     categoria: "AliExpress",
     aviso,
     erroTecnico: extras.erroTecnico || "aliexpress_manual_fallback_generico",
-    motivoErroAliExpress: extras.motivo || ""
+    motivoErroAliExpress: extras.motivo || "",
+    metadata: {
+      ...(extras.metadata || {}),
+      ...(extras.imagem ? {
+        imagemOrigem: extras.imagemOrigem || "aliexpress_html_metadata",
+        imagemFallbackConservador: true,
+        imagemFallbackMotivo: extras.imagemMotivo || ""
+      } : {})
+    }
   };
 }
 
@@ -676,10 +786,16 @@ async function importarAliExpress(urlEntrada, config = {}) {
   });
 
   if (!productId) {
+    const imagemMetadata = deveBuscarImagemMetadataAliExpress({ expansaoShortlink, urlCanonicaProduto })
+      ? await buscarImagemMetadataAliExpressHtml(urlCanonicaProduto)
+      : { imagem: "", origem: "", motivo: "metadata_nao_avaliada_shortlink_inseguro" };
     if (conversaoLinkAlternativo && urlAliExpressSegura(urlCanonicaProduto, { permitirShortlink: true })) {
       if (!appKey || !secret || !trackingId) {
         return produtoAliExpressGenerico(urlOriginal, "Erro ao consultar API AliExpress", {
-          motivo: "credenciais_incompletas"
+          motivo: "credenciais_incompletas",
+          imagem: imagemMetadata.imagem,
+          imagemOrigem: imagemMetadata.origem,
+          imagemMotivo: imagemMetadata.motivo
         });
       }
 
@@ -701,7 +817,8 @@ async function importarAliExpress(urlEntrada, config = {}) {
         cupom: "",
         linkOriginal: urlCanonicaProduto,
         linkAfiliado: linkFinal || linkAliCurto || "",
-        imagem: "",
+        imagem: imagemMetadata.imagem || "",
+        imagemOrigem: imagemMetadata.origem || "",
         categoria: "AliExpress",
         avisoCupom,
         aviso: "Landing AliExpress convertida sem productId direto.",
@@ -716,12 +833,18 @@ async function importarAliExpress(urlEntrada, config = {}) {
           productId: "",
           sourceValuesUsado: sourceValuesAfiliado,
           urlCanonicaProduto,
-          motivo: "landing_sem_product_id_convertida"
+          motivo: "landing_sem_product_id_convertida",
+          imagemOrigem: imagemMetadata.origem || "",
+          imagemFallbackConservador: Boolean(imagemMetadata.imagem),
+          imagemFallbackMotivo: imagemMetadata.motivo || ""
         }
       };
     }
 
     return produtoAliExpressGenerico(urlOriginal, "Erro ao consultar API AliExpress", {
+      imagem: imagemMetadata.imagem,
+      imagemOrigem: imagemMetadata.origem,
+      imagemMotivo: imagemMetadata.motivo,
       motivo: expansaoShortlink.motivo && expansaoShortlink.motivo !== "nao_shortlink_aliexpress"
         ? expansaoShortlink.motivo
         : "product_id_ausente"
@@ -823,5 +946,7 @@ module.exports = {
   importarAliExpress,
   extrairProductIdAliExpressManual,
   expandirShortlinkAliExpressSeguro,
+  extrairImagemMetadataAliExpressHtml,
+  buscarImagemMetadataAliExpressHtml,
   selecionarProdutoAliExpressPorId
 };

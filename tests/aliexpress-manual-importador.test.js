@@ -30,7 +30,8 @@ global.fetch = async function fetchMock(url, opcoes = {}) {
     headers: {
       get: (nome) => String(nome || "").toLowerCase() === "location" ? (proxima.location || "") : ""
     },
-    json: async () => proxima.data
+    json: async () => proxima.data,
+    text: async () => proxima.text || ""
   };
 };
 
@@ -122,6 +123,15 @@ function respostaRedirectLocation(location) {
   return {
     status: 302,
     location,
+    data: {}
+  };
+}
+
+function respostaHtml(urlFinal, html = "") {
+  return {
+    status: 200,
+    url: urlFinal,
+    text: html,
     data: {}
   };
 }
@@ -261,6 +271,64 @@ async function testarShortlinkExpandeExtraiProductIdEImagemChegaOfertaUniversal(
   assert.strictEqual(chamadas[1].params.product_ids, id);
 }
 
+async function testarSClickExpandeExtraiProductIdEImagem() {
+  const id = "1005011559438666";
+  const urlCanonica = `https://www.aliexpress.com/item/${id}.html?spm=a2g0o`;
+  resetar([
+    respostaRedirectFinal(urlCanonica),
+    respostaDetalhe(produtoAli(id, {
+      product_main_image_url: "//ae01.alicdn.com/sclick.jpg"
+    })),
+    respostaLink("https://s.click.aliexpress.com/e/_SHORTSCLICK")
+  ]);
+
+  const produto = await importarAliExpress("https://s.click.aliexpress.com/e/_abc123", config());
+
+  assert.strictEqual(produto.linkOriginal, urlCanonica);
+  assert.strictEqual(produto.imagem, "https://ae01.alicdn.com/sclick.jpg");
+  assert.strictEqual(chamadas[0].method, null);
+  assert.strictEqual(chamadas[0].url, "https://s.click.aliexpress.com/e/_abc123");
+  assert.strictEqual(chamadas[1].method, "aliexpress.affiliate.productdetail.get");
+  assert.strictEqual(chamadas[1].params.product_ids, id);
+}
+
+async function testarFallbackMetadataHtmlSemProductId() {
+  resetar([
+    respostaRedirectFinal("https://a.aliexpress.com/_semProductId"),
+    respostaHtml(
+      "https://a.aliexpress.com/_semProductId",
+      '<html><head><meta property="og:image" content="https://ae01.alicdn.com/k/fallback.jpg"></head></html>'
+    )
+  ]);
+
+  const produto = await importarAliExpress("https://a.aliexpress.com/_semProductId", config());
+
+  assert.strictEqual(produto.titulo, "Produto AliExpress");
+  assert.strictEqual(produto.imagem, "https://ae01.alicdn.com/k/fallback.jpg");
+  assert.strictEqual(produto.imagemOrigem, "aliexpress_html_metadata");
+  assert.strictEqual(produto.metadata.imagemFallbackConservador, true);
+  assert.strictEqual(produto.metadata.imagemFallbackMotivo, "metadata_imagem_oficial");
+  assert.strictEqual(chamadas.length, 2);
+  assert.strictEqual(chamadas[1].method, null);
+}
+
+async function testarFallbackMetadataNaoAceitaImagemExterna() {
+  resetar([
+    respostaRedirectFinal("https://a.aliexpress.com/_semProductId"),
+    respostaHtml(
+      "https://a.aliexpress.com/_semProductId",
+      '<html><head><meta name="twitter:image" content="https://example.com/falsa.jpg"></head></html>'
+    )
+  ]);
+
+  const produto = await importarAliExpress("https://a.aliexpress.com/_semProductId", config());
+
+  assert.strictEqual(produto.titulo, "Produto AliExpress");
+  assert.strictEqual(produto.imagem, "");
+  assert.strictEqual(produto.metadata.imagemFallbackConservador, undefined);
+  assert.strictEqual(chamadas.length, 2);
+}
+
 async function testarProductSmallImageUrlsComoSecundaria() {
   const id = "1005011559438000";
   resetar([
@@ -307,6 +375,7 @@ async function testarLandingMoedasSemProductIdConverteComoAlternativo() {
   const landing = "https://sale.aliexpress.com/coins-land.htm";
   resetar([
     respostaRedirectFinal(landing),
+    respostaHtml(landing),
     respostaLink("https://s.click.aliexpress.com/e/_COINSLANDING")
   ]);
 
@@ -322,8 +391,8 @@ async function testarLandingMoedasSemProductIdConverteComoAlternativo() {
   assert.strictEqual(produto.linkAfiliado, "https://s.click.aliexpress.com/e/_COINSLANDING");
   assert.strictEqual(produto.papelLink, "link_moedas");
   assert.strictEqual(produto.metadata.conversaoLinkAlternativo, true);
-  assert.strictEqual(chamadas[1].method, "aliexpress.affiliate.link.generate");
-  assert.strictEqual(chamadas[1].params.source_values, "https://a.aliexpress.com/_coinsLanding");
+  assert.strictEqual(chamadas[2].method, "aliexpress.affiliate.link.generate");
+  assert.strictEqual(chamadas[2].params.source_values, "https://a.aliexpress.com/_coinsLanding");
 }
 
 async function testarConversaoOcorrenciaUsaUrlOriginalComoSourceValues() {
@@ -506,6 +575,9 @@ async function testarClienteSemIntegracaoNaoContaminaOutroCliente() {
   await testarFallbackQueryComMesmoProductId();
   await testarQueryRejeitaProdutoDiferente();
   await testarShortlinkExpandeExtraiProductIdEImagemChegaOfertaUniversal();
+  await testarSClickExpandeExtraiProductIdEImagem();
+  await testarFallbackMetadataHtmlSemProductId();
+  await testarFallbackMetadataNaoAceitaImagemExterna();
   await testarProductSmallImageUrlsComoSecundaria();
   await testarProdutoSemImagemContinuaValido();
   await testarLandingMoedasSemProductIdConverteComoAlternativo();

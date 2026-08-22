@@ -2387,6 +2387,29 @@ function normalizarMarketplaceMemoria(valor = "") {
   return marketplace;
 }
 
+function imagemValidaParaPublicacao(valor = "") {
+  const validacao = imagemUrlValidaUniversal(valor);
+  return validacao.ok === true && !imagemUrlEfemeraUniversal(validacao.url || valor);
+}
+
+function avaliarGateQualidadeAliExpressImagem(oferta = {}, metadata = {}) {
+  const marketplace = normalizarMarketplaceMemoria(oferta.marketplace || metadata.marketplace || "");
+  if (marketplace !== "aliexpress") {
+    return { retida: false, motivo: "" };
+  }
+
+  if (imagemValidaParaPublicacao(oferta.imagem || metadata.imagem || "")) {
+    return { retida: false, motivo: "" };
+  }
+
+  return {
+    retida: true,
+    status: "retida_v2",
+    motivo: "aliexpress_imagem_ausente",
+    reprocessavel: true
+  };
+}
+
 function mapearOfertaMemoria(row = {}) {
   const inteligenciaV2 = row?.metadata?.inteligenciaUniversalV2 && typeof row.metadata.inteligenciaUniversalV2 === "object"
     ? row.metadata.inteligenciaUniversalV2
@@ -3107,9 +3130,30 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     };
   }
   const inteligenciaV2 = objetoSeguro(metadataFinal.inteligenciaUniversalV2);
-  const retidaV2 = inteligenciaV2.status === "retida" || sombraV2.ok === false;
+  const gateQualidadeAliExpressImagem = avaliarGateQualidadeAliExpressImagem(oferta, metadataFinal);
+  if (gateQualidadeAliExpressImagem.retida) {
+    metadataFinal = {
+      ...metadataFinal,
+      gateQualidade: {
+        ...objetoSeguro(metadataFinal.gateQualidade),
+        aliexpressImagem: gateQualidadeAliExpressImagem
+      }
+    };
+    console.log("[ALIEXPRESS-IMAGEM-GATE]", JSON.stringify({
+      jobId: job.id || null,
+      eventoId: job.evento_id || null,
+      workspaceId: job.cliente_id || job.clienteId || "",
+      marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",
+      status: gateQualidadeAliExpressImagem.status,
+      motivo: gateQualidadeAliExpressImagem.motivo,
+      reprocessavel: gateQualidadeAliExpressImagem.reprocessavel === true
+    }));
+  }
+  const retidaV2 = gateQualidadeAliExpressImagem.retida === true || inteligenciaV2.status === "retida" || sombraV2.ok === false;
   const statusPersistencia = retidaV2 ? "retida_v2" : "importada";
-  const motivoPersistencia = retidaV2
+  const motivoPersistencia = gateQualidadeAliExpressImagem.retida
+    ? gateQualidadeAliExpressImagem.motivo
+    : retidaV2
     ? (inteligenciaV2.motivoDecisao || inteligenciaV2.motivo || "retida_v2")
     : null;
   const resultadoComercialV24 = normalizarDadosComerciaisV24Seguro({ oferta, ofertaEntrada, job, evento });
@@ -3539,6 +3583,7 @@ module.exports = {
   marcarJobRetidaV2,
   marcarJobErroImportacao,
   normalizarOfertaImportada,
+  avaliarGateQualidadeAliExpressImagem,
   resolverCategoriaEngine,
   reclassificarCategoriaFinalEngine,
   buscarImagemCanonicaMercadoLivre,
