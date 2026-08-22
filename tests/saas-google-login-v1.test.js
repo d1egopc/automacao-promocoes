@@ -226,8 +226,10 @@ function trechoEntre(inicio, fim) {
       visivelPublicamente: true,
       contratavel: true,
       emBreve: false,
-      creditosModelo: "unicos",
-      limites: { creditosUnicos: 321, maxConexoes: 2, destinos: 3 },
+      entradaBeta: true,
+      renovacaoCreditos: "sem_renovacao",
+      creditosModelo: "ciclo",
+      limites: { creditosPorCiclo: 321, cicloDias: 30, maxConexoes: 2, destinos: 3 },
       recursos: { whatsapp: true, telegram: true, discord: false },
       marketplaces: ["amazon", "shopee"]
     },
@@ -263,8 +265,8 @@ function trechoEntre(inicio, fim) {
       visivelPublicamente: true,
       contratavel: false,
       emBreve: true,
-      creditosModelo: "unicos",
-      limites: { creditosUnicos: 111 },
+      creditosModelo: "ciclo",
+      limites: { creditosPorCiclo: 111, cicloDias: 30 },
       recursos: {},
       marketplaces: []
     },
@@ -274,8 +276,8 @@ function trechoEntre(inicio, fim) {
       visivelPublicamente: true,
       contratavel: false,
       emBreve: false,
-      creditosModelo: "unicos",
-      limites: { creditosUnicos: 222 },
+      creditosModelo: "ciclo",
+      limites: { creditosPorCiclo: 222, cicloDias: 30 },
       recursos: {},
       marketplaces: []
     }
@@ -526,7 +528,7 @@ function trechoEntre(inicio, fim) {
     });
     assert.strictEqual(adminCriaSemOverride.status, 200, JSON.stringify(adminCriaSemOverride.body));
     assert.strictEqual(adminCriaSemOverride.body.usuario.creditos, 321, "Admin sem override deve herdar creditos do plano");
-    assert.strictEqual(adminCriaSemOverride.body.usuario.creditosModelo, "unicos");
+    assert.strictEqual(adminCriaSemOverride.body.usuario.creditosModelo, "ciclo");
     const usuarioAdminSemOverride = readJson(path.join(dataDir, "usuarios.json"), []).find(u => u.email === "admin-free-sem-override@teste.local");
     assert.ok(usuarioAdminSemOverride, "Admin manual deve criar usuario");
     assert.ok(readJson(path.join(dataDir, "configs_clientes.json"), {})[usuarioAdminSemOverride.id], "Admin manual deve criar workspace");
@@ -830,7 +832,8 @@ function trechoEntre(inicio, fim) {
     assert.strictEqual(usuarioGoogleNovo.provedoresAuth.google.sub, "sub_beta_google");
     assert.strictEqual(usuarioGoogleNovo.plano, "Beta Google");
     assert.strictEqual(usuarioGoogleNovo.creditos, 321);
-    assert.strictEqual(usuarioGoogleNovo.creditosModelo, "unicos");
+    assert.strictEqual(usuarioGoogleNovo.creditosModelo, "ciclo");
+    assert.strictEqual(usuarioGoogleNovo.assinaturaStatus, "nao_aplicavel");
     assert.ok(!usuarioGoogleNovo.senhaHash, "Google-only criado nao deve ter senhaHash");
     const configsAposGoogle = readJson(path.join(dataDir, "configs_clientes.json"), {});
     assert.ok(configsAposGoogle[usuarioGoogleNovo.id], "Google novo deve criar workspace/config");

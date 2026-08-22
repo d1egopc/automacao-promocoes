@@ -98,8 +98,21 @@ function normalizarSaasConfig(config = {}) {
   };
 }
 
+function normalizarRenovacaoCreditos(valor = "", fallback = "pagamento") {
+  const v = textoLower(valor);
+  if (["sem_renovacao", "sem-renovacao", "sem renovacao", "sem renovação", "nao_renova", "nao-renova", "não renova", "manual"].includes(v)) {
+    return "sem_renovacao";
+  }
+  if (["pagamento", "pago", "cobranca", "cobrança", "assinatura", "recorrente"].includes(v)) {
+    return "pagamento";
+  }
+  return fallback === "sem_renovacao" ? "sem_renovacao" : "pagamento";
+}
+
 function normalizarPlanoSaas(plano = {}, chave = "") {
   const fonte = plano && typeof plano === "object" ? plano : {};
+  const limites = fonte.limites && typeof fonte.limites === "object" ? fonte.limites : {};
+  const entradaBeta = booleano(fonte.entradaBeta ?? limites.entradaBeta, false);
   return {
     ...fonte,
     nome: texto(fonte.nome || chave),
@@ -109,7 +122,12 @@ function normalizarPlanoSaas(plano = {}, chave = "") {
     ordem: numero(fonte.ordem, 0),
     visivelPublicamente: booleano(fonte.visivelPublicamente, false),
     contratavel: booleano(fonte.contratavel, false),
-    emBreve: booleano(fonte.emBreve, false)
+    emBreve: booleano(fonte.emBreve, false),
+    entradaBeta,
+    renovacaoCreditos: normalizarRenovacaoCreditos(
+      fonte.renovacaoCreditos ?? limites.renovacaoCreditos,
+      entradaBeta ? "sem_renovacao" : "pagamento"
+    )
   };
 }
 
@@ -231,13 +249,23 @@ function politicaCreditosPlano(plano = {}) {
   const creditosUnicos = Math.max(0, numero(plano.creditosUnicos ?? limites.creditosUnicos ?? creditosLegado, 0));
   const creditosPorCiclo = Math.max(0, numero(plano.creditosPorCiclo ?? limites.creditosPorCiclo ?? creditosLegado, 0));
   const cicloDias = Math.max(1, numero(plano.cicloDias ?? limites.cicloDias, 30));
+  const entradaBeta = booleano(plano.entradaBeta ?? limites.entradaBeta, false);
+  const renovacaoCreditos = normalizarRenovacaoCreditos(
+    plano.renovacaoCreditos ?? limites.renovacaoCreditos,
+    entradaBeta || creditosModelo === "unicos" ? "sem_renovacao" : "pagamento"
+  );
 
   return {
     creditosModelo,
     creditosUnicos,
     creditosPorCiclo,
-    cicloDias
+    cicloDias,
+    renovacaoCreditos
   };
+}
+
+function creditoSemRenovacao(politica = {}) {
+  return politica.creditosModelo === "unicos" || politica.renovacaoCreditos === "sem_renovacao";
 }
 
 function assinaturaAutorizaCreditos(usuario = {}) {
@@ -310,7 +338,7 @@ function expirarCreditoAdminManualSeNecessario(usuario = {}, plano = {}, agora =
   usuario.creditosAdminManualSaldoExpirado = Math.max(0, saldoAntes);
 
   const politica = politicaCreditosPlano(plano);
-  if (politica.creditosModelo === "unicos") {
+  if (creditoSemRenovacao(politica)) {
     usuario.statusConta = "teste_esgotado";
     usuario.testeEsgotadoEm = usuario.testeEsgotadoEm || new Date(agora).toISOString();
   }
@@ -332,7 +360,7 @@ function aplicarCreditoManualAdmin({ usuario = {}, plano = {}, quantidade = 0, a
   if (saldo > 0) {
     usuario.creditosAdminManualExpiraEm = resolverExpiracaoCreditoAdminManual(usuario, politica, agora);
     usuario.statusConta = "ativa";
-    if (politica.creditosModelo === "unicos") {
+    if (creditoSemRenovacao(politica)) {
       usuario.assinaturaStatus = "nao_aplicavel";
     }
   } else {
@@ -355,10 +383,11 @@ function inicializarCreditosUsuario({ usuario = {}, plano = {}, agora = new Date
 
   const politica = politicaCreditosPlano(plano);
   const iso = new Date(agora).toISOString();
+  const semRenovacao = creditoSemRenovacao(politica);
   usuario.creditosModelo = politica.creditosModelo;
   usuario.origemCadastro = usuario.origemCadastro || origemCadastro;
   usuario.statusConta = usuario.statusConta || "ativa";
-  usuario.assinaturaStatus = usuario.assinaturaStatus || (politica.creditosModelo === "ciclo" ? "pendente_pagamento" : "nao_aplicavel");
+  usuario.assinaturaStatus = usuario.assinaturaStatus || (politica.creditosModelo === "ciclo" && !semRenovacao ? "pendente_pagamento" : "nao_aplicavel");
   usuario.pagamentoUltimoStatus = usuario.pagamentoUltimoStatus || "";
 
   if (politica.creditosModelo === "unicos") {
@@ -366,6 +395,17 @@ function inicializarCreditosUsuario({ usuario = {}, plano = {}, agora = new Date
     usuario.creditosInicializadosEm = usuario.creditosInicializadosEm || iso;
     usuario.cicloAtualInicio = usuario.cicloAtualInicio || "";
     usuario.proximaRenovacao = usuario.proximaRenovacao || "";
+    return usuario;
+  }
+
+  if (semRenovacao) {
+    const fim = usuario.proximaRenovacao || usuario.cicloAtualFim || adicionarDias(agora, politica.cicloDias).toISOString();
+    usuario.creditos = politica.creditosPorCiclo;
+    usuario.cicloAtualInicio = usuario.cicloAtualInicio || iso;
+    usuario.cicloAtualFim = usuario.cicloAtualFim || fim;
+    usuario.proximaRenovacao = usuario.proximaRenovacao || fim;
+    usuario.pagamentoUltimoStatus = usuario.pagamentoUltimoStatus || "sem_renovacao";
+    usuario.creditosInicializadosEm = usuario.creditosInicializadosEm || iso;
     return usuario;
   }
 
@@ -402,7 +442,7 @@ function inicializarCreditosUsuarioAdminManual({ usuario = {}, plano = {}, body 
   if (autorizarCicloTeste) {
     usuario.assinaturaStatus = usuario.assinaturaStatus || "teste_ciclo_autorizado";
     usuario.pagamentoUltimoStatus = usuario.pagamentoUltimoStatus || "teste_ciclo_autorizado";
-  } else if (!overrideManual && politica.creditosModelo === "ciclo") {
+  } else if (!overrideManual && politica.creditosModelo === "ciclo" && !creditoSemRenovacao(politica)) {
     usuario.assinaturaStatus = usuario.assinaturaStatus || "manual";
     usuario.pagamentoUltimoStatus = usuario.pagamentoUltimoStatus || "manual";
   }
@@ -462,8 +502,9 @@ function aplicarTrocaManualPlanoAdmin({ usuario = {}, plano = {}, planoIdentidad
     usuario.statusConta = "ativa";
   }
 
-  if (politica.creditosModelo === "unicos") {
+  if (creditoSemRenovacao(politica)) {
     usuario.assinaturaStatus = "nao_aplicavel";
+    usuario.pagamentoUltimoStatus = usuario.pagamentoUltimoStatus || "sem_renovacao";
     return usuario;
   }
 
@@ -520,7 +561,7 @@ function renovarCreditosPorPlano(usuario = {}, plano = {}, agora = new Date()) {
   if (creditoAdmin.motivo === "credito_admin_manual_vigente") {
     return { alterou: false, motivo: "credito_admin_manual_vigente" };
   }
-  if (creditoAdmin.motivo === "credito_admin_manual_expirado" && politica.creditosModelo === "unicos") {
+  if (creditoAdmin.motivo === "credito_admin_manual_expirado" && creditoSemRenovacao(politica)) {
     return creditoAdmin;
   }
 
@@ -533,6 +574,10 @@ function renovarCreditosPorPlano(usuario = {}, plano = {}, agora = new Date()) {
       return { alterou: true, motivo: "teste_esgotado" };
     }
     return { alterou: false, motivo: "creditos_unicos_nao_renovam" };
+  }
+
+  if (politica.renovacaoCreditos === "sem_renovacao") {
+    return processarVencimentoSemRenovacao(usuario, politica, agora);
   }
 
   if (!usuario.assinaturaStatus) {
@@ -576,6 +621,10 @@ function processarVencimentoAssinatura(usuario = {}, plano = {}, agora = new Dat
     return { alterou: false, motivo: "creditos_unicos_nao_renovam" };
   }
 
+  if (politica.renovacaoCreditos === "sem_renovacao") {
+    return processarVencimentoSemRenovacao(usuario, politica, agora);
+  }
+
   const referenciaFim = usuario.proximaRenovacao || usuario.cicloAtualFim;
   const vencimento = new Date(referenciaFim || "");
   if (!Number.isFinite(vencimento.getTime())) {
@@ -605,6 +654,29 @@ function processarVencimentoAssinatura(usuario = {}, plano = {}, agora = new Dat
   usuario.suspensoEm = usuario.suspensoEm || new Date(agora).toISOString();
   usuario.creditos = 0;
   return { alterou: !jaSuspensa, motivo: "assinatura_suspensa_sem_pagamento" };
+}
+
+function processarVencimentoSemRenovacao(usuario = {}, politica = {}, agora = new Date()) {
+  const referenciaFim = usuario.proximaRenovacao || usuario.cicloAtualFim;
+  const vencimento = new Date(referenciaFim || "");
+  if (!Number.isFinite(vencimento.getTime())) {
+    return { alterou: false, motivo: "vencimento_ausente" };
+  }
+
+  const agoraData = new Date(agora);
+  if (vencimento > agoraData) {
+    return { alterou: false, motivo: "ciclo_vigente" };
+  }
+
+  const saldoAntes = Number(usuario.creditos || 0);
+  const jaEsgotado = usuario.statusConta === "teste_esgotado" && saldoAntes <= 0;
+  usuario.creditos = 0;
+  usuario.statusConta = "teste_esgotado";
+  usuario.assinaturaStatus = "nao_aplicavel";
+  usuario.pagamentoUltimoStatus = usuario.pagamentoUltimoStatus || "sem_renovacao";
+  usuario.creditosModelo = politica.creditosModelo || usuario.creditosModelo || "ciclo";
+  usuario.testeEsgotadoEm = usuario.testeEsgotadoEm || new Date(agora).toISOString();
+  return { alterou: !jaEsgotado || saldoAntes > 0, motivo: "ciclo_sem_renovacao_esgotado" };
 }
 
 function registrarAuditoriaAssinatura(usuario = {}, evento = {}) {
@@ -644,6 +716,9 @@ function aplicarPagamentoSimulado(usuario = {}, plano = {}, {
   const politica = politicaCreditosPlano(plano);
   if (politica.creditosModelo !== "ciclo") {
     return { ok: false, status: 400, codigo: "plano_nao_ciclico", erro: "Plano nao participa de assinatura paga" };
+  }
+  if (politica.renovacaoCreditos === "sem_renovacao") {
+    return { ok: false, status: 400, codigo: "plano_sem_renovacao", erro: "Plano nao participa de renovacao paga" };
   }
 
   const idPagamento = texto(pagamentoId);
@@ -736,7 +811,7 @@ function aplicarDebitoConta(usuario = {}, plano = {}, quantidade = 1, agora = ne
     encerrarCreditoAdminManual(usuario, "saldo_admin_manual_esgotado", agora);
   }
   const politica = politicaCreditosPlano(plano);
-  if (politica.creditosModelo === "unicos" && usuario.creditos <= 0) {
+  if (creditoSemRenovacao(politica) && usuario.creditos <= 0) {
     usuario.statusConta = "teste_esgotado";
     usuario.testeEsgotadoEm = usuario.testeEsgotadoEm || new Date(agora).toISOString();
   }
@@ -768,6 +843,8 @@ function sanitizarPlanoPublico(plano = {}) {
     visivelPublicamente: p.visivelPublicamente,
     contratavel: p.contratavel,
     emBreve: p.emBreve,
+    entradaBeta: p.entradaBeta === true,
+    renovacaoCreditos: politica.renovacaoCreditos,
     marketplaces: listaMarketplacesPublica(p.marketplaces),
     recursos: recursosPublicos(p.recursos),
     limites: {
@@ -793,8 +870,9 @@ function contarVagasFreeBeta({ usuarios = [], planos = {}, maxContasFreeBeta = 0
     if (!usuario || usuario.ativo === false) return false;
     if (textoLower(usuario.origemCadastro) !== "publico") return false;
     if (textoLower(usuario.statusConta) === "teste_esgotado") return false;
-    const plano = buscarEntradaPlano(planos, usuario.plano)?.plano || null;
-    return politicaCreditosPlano(plano || {}).creditosModelo === "unicos";
+    const entrada = buscarEntradaPlano(planos, usuario.plano);
+    const plano = entrada ? normalizarPlanoSaasComId(entrada.plano, entrada.chave) : null;
+    return plano?.entradaBeta === true;
   }).length;
 
   return {
@@ -858,8 +936,7 @@ function validarCadastro({ body = {}, planos = {}, usuarios = [], saasConfig = {
     return { ok: false, status: 403, codigo: "plano_nao_contratavel", erro: "Plano indisponivel para contratacao" };
   }
 
-  const politica = politicaCreditosPlano(planoSaas);
-  if (publico && saasConfig.betaAtivo && politica.creditosModelo === "unicos") {
+  if (publico && saasConfig.betaAtivo && planoSaas.entradaBeta === true) {
     const vagas = contarVagasFreeBeta({
       usuarios,
       planos,
@@ -1020,6 +1097,7 @@ async function executarCadastroAtomico({
 
 module.exports = {
   normalizarSaasConfig,
+  normalizarRenovacaoCreditos,
   normalizarPlanoSaas,
   normalizarPlanoSaasComId,
   normalizarPlanoIdEstavel,

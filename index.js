@@ -9867,6 +9867,18 @@ app.post("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
       normalizarListaMarketplaces(marketplacesLiberadosPlano).length
     )
   );
+  const entradaBeta = Object.prototype.hasOwnProperty.call(body, "entradaBeta")
+    ? !!body.entradaBeta
+    : Object.prototype.hasOwnProperty.call(limitesBody, "entradaBeta")
+      ? !!limitesBody.entradaBeta
+      : !!planoAnterior.entradaBeta;
+  const renovacaoCreditos = saasFundacao.normalizarRenovacaoCreditos(
+    body.renovacaoCreditos ??
+    limitesBody.renovacaoCreditos ??
+    planoAnterior.renovacaoCreditos ??
+    limitesAnteriores.renovacaoCreditos,
+    entradaBeta ? "sem_renovacao" : "pagamento"
+  );
 
   const aliasesLegados = [
     ...(Array.isArray(planoAnterior.aliasesLegados) ? planoAnterior.aliasesLegados : []),
@@ -9890,6 +9902,8 @@ app.post("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
     emBreve: Object.prototype.hasOwnProperty.call(body, "emBreve")
       ? !!body.emBreve
       : !!planoAnterior.emBreve,
+    entradaBeta,
+    renovacaoCreditos,
     aliasesLegados: [...new Set(aliasesLegados)],
     creditosModelo: String(
       body.creditosModelo ??
@@ -9926,7 +9940,9 @@ app.post("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
       cicloDias: numeroPlano(
         limitesBody.cicloDias ?? body.cicloDias,
         numeroPlano(limitesAnteriores.cicloDias, politicaCreditosAnterior.cicloDias)
-      )
+      ),
+      entradaBeta,
+      renovacaoCreditos
     },
 
     recursos: {

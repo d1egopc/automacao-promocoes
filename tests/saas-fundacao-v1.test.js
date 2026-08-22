@@ -22,8 +22,10 @@ const planoUnico = {
   nome: "Beta Teste",
   visivelPublicamente: true,
   contratavel: true,
-  creditosModelo: "unicos",
-  limites: { creditosUnicos: 300 },
+  entradaBeta: true,
+  renovacaoCreditos: "sem_renovacao",
+  creditosModelo: "ciclo",
+  limites: { creditosPorCiclo: 300, cicloDias: 30 },
   recursos: { whatsapp: true, social: false, admin_master: true, tokenInterno: true }
 };
 
@@ -55,23 +57,29 @@ const planoLegado = {
 
 assert.deepStrictEqual(
   saas.politicaCreditosPlano(planoLegado),
-  { creditosModelo: "ciclo", creditosUnicos: 123, creditosPorCiclo: 123, cicloDias: 30 },
+  { creditosModelo: "ciclo", creditosUnicos: 123, creditosPorCiclo: 123, cicloDias: 30, renovacaoCreditos: "pagamento" },
   "plano legado deve derivar creditos do proprio plano, nao de mapa fixo"
 );
 
 const usuarioUnico = { email: "beta@teste.local" };
-saas.inicializarCreditosUsuario({ usuario: usuarioUnico, plano: planoUnico, origemCadastro: "publico" });
-assert.strictEqual(usuarioUnico.creditos, 300, "Free/teste recebe creditos unicos iniciais");
-assert.strictEqual(usuarioUnico.creditosModelo, "unicos");
+saas.inicializarCreditosUsuario({
+  usuario: usuarioUnico,
+  plano: planoUnico,
+  origemCadastro: "publico",
+  agora: new Date("2026-08-01T00:00:00Z")
+});
+assert.strictEqual(usuarioUnico.creditos, 300, "Free Beta recebe creditos iniciais do ciclo gratuito");
+assert.strictEqual(usuarioUnico.creditosModelo, "ciclo");
 assert.strictEqual(usuarioUnico.assinaturaStatus, "nao_aplicavel");
+assert.strictEqual(usuarioUnico.proximaRenovacao, "2026-08-31T00:00:00.000Z");
 
 saas.aplicarDebitoConta(usuarioUnico, planoUnico, 300, new Date("2026-08-20T00:00:00Z"));
 assert.strictEqual(usuarioUnico.creditos, 0, "debito nao pode deixar saldo negativo");
-assert.strictEqual(usuarioUnico.statusConta, "teste_esgotado", "teste unico ao zerar fica esgotado");
+assert.strictEqual(usuarioUnico.statusConta, "teste_esgotado", "Beta ao zerar fica esgotado");
 assert.strictEqual(
-  saas.renovarCreditosPorPlano(usuarioUnico, planoUnico).motivo,
-  "creditos_unicos_nao_renovam",
-  "creditos unicos nao renovam"
+  saas.renovarCreditosPorPlano(usuarioUnico, planoUnico, new Date("2026-09-01T00:00:00Z")).motivo,
+  "ciclo_sem_renovacao_esgotado",
+  "ciclo Beta sem renovacao nao recarrega automaticamente"
 );
 
 const usuarioCicloPendente = {};
@@ -326,10 +334,12 @@ assert.deepStrictEqual(
   "GET publico deve considerar somente planos visiveis"
 );
 assert.strictEqual(
-  saas.sanitizarPlanoPublico(planos.beta).creditos.creditosUnicos,
+  saas.sanitizarPlanoPublico(planos.beta).creditos.creditosPorCiclo,
   300,
-  "plano publico expoe apenas resumo publico de creditos"
+  "plano publico expoe creditos do ciclo gratuito"
 );
+assert.strictEqual(saas.sanitizarPlanoPublico(planos.beta).entradaBeta, true, "plano publico expoe identidade estrutural Beta");
+assert.strictEqual(saas.sanitizarPlanoPublico(planos.beta).renovacaoCreditos, "sem_renovacao", "plano publico expoe politica estrutural de renovacao");
 assert.deepStrictEqual(
   saas.sanitizarPlanoPublico(planos.beta).recursos,
   { whatsapp: true },

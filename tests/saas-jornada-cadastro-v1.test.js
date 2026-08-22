@@ -27,8 +27,10 @@ function plano(nome, extra = {}) {
     emBreve: false,
     marketplaces: ["amazon", "shopee"],
     recursos: { whatsapp: true, telegram: true, discord: false },
-    limites: { maxConexoes: 2, destinos: 3, creditosUnicos: 100 },
-    creditosModelo: "unicos",
+    entradaBeta: true,
+    renovacaoCreditos: "sem_renovacao",
+    limites: { maxConexoes: 2, destinos: 3, creditosPorCiclo: 100, cicloDias: 30 },
+    creditosModelo: "ciclo",
     ...extra
   };
 }
@@ -41,7 +43,7 @@ function criarAmbiente() {
     interno: plano("Interno Restrito", {
       visivelPublicamente: false,
       contratavel: false,
-      limites: { creditosUnicos: 77 }
+      limites: { creditosPorCiclo: 77, cicloDias: 30 }
     }),
     futuro: plano("Plano Futuro", {
       visivelPublicamente: true,
@@ -49,6 +51,8 @@ function criarAmbiente() {
       emBreve: true
     }),
     ciclo: plano("Ciclo Loja", {
+      entradaBeta: false,
+      renovacaoCreditos: "pagamento",
       creditosModelo: "ciclo",
       limites: { creditosPorCiclo: 900, cicloDias: 30 },
       marketplaces: ["amazon"],
@@ -126,6 +130,7 @@ async function cadastrar(env, body, opcoes = {}) {
   assert.strictEqual(usuario.origemCadastro, "publico");
   assert.strictEqual(usuario.plano, "Teste Dinamico");
   assert.strictEqual(usuario.creditos, 100);
+  assert.strictEqual(usuario.creditosModelo, "ciclo");
   assert.ok(usuario.senhaHash, "senhaHash deve ser persistido");
   assert.ok(!usuario.senha, "senha plaintext nunca deve ser persistida");
   assert.ok(await bcrypt.compare("12345678", usuario.senhaHash), "senhaHash deve validar login futuro");
@@ -261,7 +266,7 @@ async function cadastrar(env, body, opcoes = {}) {
 
   const usuarioCredito = { creditos: 5, creditosInicializadosEm: "2026-08-01T00:00:00.000Z" };
   saas.inicializarCreditosUsuario({ usuario: usuarioCredito, plano: env.planos.teste });
-  assert.strictEqual(usuarioCredito.creditos, 5, "creditos unicos nao podem ser reinicializados por engano");
+  assert.strictEqual(usuarioCredito.creditos, 5, "creditos ja inicializados nao podem ser reinicializados por engano");
 
   const cicloPendente = {
     assinaturaStatus: "pendente_pagamento",
@@ -314,7 +319,8 @@ async function cadastrar(env, body, opcoes = {}) {
   }, {
     saasConfig: { cadastroPublicoAtivo: true, betaAtivo: true, maxContasFreeBeta: 1 }
   });
-  assert.strictEqual(beta.creditosModelo, "unicos");
+  assert.strictEqual(beta.creditosModelo, "ciclo");
+  assert.strictEqual(beta.assinaturaStatus, "nao_aplicavel");
   assert.strictEqual(
     saas.contarVagasFreeBeta({
       usuarios: envBeta.usuarios,

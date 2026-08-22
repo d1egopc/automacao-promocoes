@@ -39,18 +39,24 @@ assert.deepStrictEqual(configNormalizada, {
 }, "normalizacao SaaS/Beta deve preservar somente contrato publico global");
 
 const usuarios = [
-  { id: "u_publico_ok", ativo: true, origemCadastro: "publico", statusConta: "ativo", plano: "Teste Unico" },
-  { id: "u_esgotado", ativo: true, origemCadastro: "publico", statusConta: "teste_esgotado", plano: "Teste Unico" },
-  { id: "u_interno", ativo: true, origemCadastro: "admin/teste", statusConta: "ativo", plano: "Teste Unico" },
+  { id: "u_publico_ok", ativo: true, origemCadastro: "publico", statusConta: "ativo", plano: "Entrada Beta" },
+  { id: "u_esgotado", ativo: true, origemCadastro: "publico", statusConta: "teste_esgotado", plano: "Entrada Beta" },
+  { id: "u_interno", ativo: true, origemCadastro: "admin/teste", statusConta: "ativo", plano: "Entrada Beta" },
   { id: "u_ciclo", ativo: true, origemCadastro: "publico", statusConta: "ativo", plano: "Pago Ciclo" },
-  { id: "u_inativo", ativo: false, origemCadastro: "publico", statusConta: "ativo", plano: "Teste Unico" }
+  { id: "u_inativo", ativo: false, origemCadastro: "publico", statusConta: "ativo", plano: "Entrada Beta" }
 ];
 const planos = {
-  unico: { nome: "Teste Unico", creditosModelo: "unicos", limites: { creditosUnicos: 300 } },
-  ciclo: { nome: "Pago Ciclo", creditosModelo: "ciclo", limites: { creditosPorCiclo: 2000 } }
+  beta: {
+    nome: "Entrada Beta",
+    entradaBeta: true,
+    renovacaoCreditos: "sem_renovacao",
+    creditosModelo: "ciclo",
+    limites: { creditosPorCiclo: 300, cicloDias: 30 }
+  },
+  ciclo: { nome: "Pago Ciclo", creditosModelo: "ciclo", renovacaoCreditos: "pagamento", limites: { creditosPorCiclo: 2000 } }
 };
 const vagas = saas.contarVagasFreeBeta({ usuarios, planos, maxContasFreeBeta: 3 });
-assert.deepStrictEqual(vagas, { ocupadas: 1, disponiveis: 2, max: 3 }, "vaga Free Beta deve ser calculada por contrato unicos e ignorar teste esgotado");
+assert.deepStrictEqual(vagas, { ocupadas: 1, disponiveis: 2, max: 3 }, "vaga Free Beta deve ser calculada por entradaBeta e ignorar teste esgotado");
 
 const blocoConfig = trechoEntre("function obterConfigSaasAtual", "const executarCadastroSaasSerializado");
 assert.ok(blocoConfig.includes("config.saas || config.beta || {}"), "leitura deve reaproveitar config.saas e legado config.beta");
@@ -80,6 +86,7 @@ const blocoCadastro = trechoEntreFonte(saasFonte, "function validarCadastro", "f
 assert.ok(blocoCadastro.includes("!saasConfig.cadastroPublicoAtivo"), "cadastro publico deve continuar fechado pela flag global");
 assert.ok(blocoCadastro.includes("!planoSaas.visivelPublicamente"), "plano oculto continua fora da contratacao publica");
 assert.ok(blocoCadastro.includes("!planoSaas.contratavel || planoSaas.emBreve"), "plano nao contratavel/em breve continua bloqueado");
+assert.ok(blocoCadastro.includes("planoSaas.entradaBeta === true"), "vagas Beta devem usar identidade estrutural do plano");
 
 const blocoInterno = trechoEntre('app.post("/admin/cadastro-interno"', 'app.get("/admin/saas-config"');
 assert.ok(blocoInterno.includes("executarCadastroInternoAdminAtomico"), "cadastro interno Admin deve permanecer separado da flag publica");
