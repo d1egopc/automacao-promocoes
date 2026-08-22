@@ -419,6 +419,73 @@ function trechoEntre(inicio, fim) {
     assert.strictEqual(usuarios.length, antesUsuarios.length, "Google novo nao pode criar conta com cadastro publico OFF");
 
     const adminToken = jwt.sign({ clienteId: "admin", papel: "admin_master" }, jwtSecret, { expiresIn: "5m" });
+
+    const adminCriaSemOverride = await request({
+      method: "POST",
+      port,
+      path: "/admin/usuarios",
+      token: adminToken,
+      body: {
+        nome: "Admin Free Sem Override",
+        email: "admin-free-sem-override@teste.local",
+        senha: "AdminFree123",
+        plano: "plano_beta_google"
+      }
+    });
+    assert.strictEqual(adminCriaSemOverride.status, 200, JSON.stringify(adminCriaSemOverride.body));
+    assert.strictEqual(adminCriaSemOverride.body.usuario.creditos, 321, "Admin sem override deve herdar creditos do plano");
+    assert.strictEqual(adminCriaSemOverride.body.usuario.creditosModelo, "unicos");
+    const usuarioAdminSemOverride = readJson(path.join(dataDir, "usuarios.json"), []).find(u => u.email === "admin-free-sem-override@teste.local");
+    assert.ok(usuarioAdminSemOverride, "Admin manual deve criar usuario");
+    assert.ok(readJson(path.join(dataDir, "configs_clientes.json"), {})[usuarioAdminSemOverride.id], "Admin manual deve criar workspace");
+
+    const adminCriaOverride500 = await request({
+      method: "POST",
+      port,
+      path: "/admin/usuarios",
+      token: adminToken,
+      body: {
+        nome: "Admin Free Override",
+        email: "admin-free-override@teste.local",
+        senha: "AdminFree123",
+        plano: "plano_beta_google",
+        creditosOverrideManual: true,
+        creditos: 500
+      }
+    });
+    assert.strictEqual(adminCriaOverride500.status, 200, JSON.stringify(adminCriaOverride500.body));
+    assert.strictEqual(adminCriaOverride500.body.usuario.creditos, 500, "Admin com override explicito deve respeitar valor informado");
+
+    const adminCriaOverrideZero = await request({
+      method: "POST",
+      port,
+      path: "/admin/usuarios",
+      token: adminToken,
+      body: {
+        nome: "Admin Free Zero",
+        email: "admin-free-zero@teste.local",
+        senha: "AdminFree123",
+        plano: "plano_beta_google",
+        creditos: 0
+      }
+    });
+    assert.strictEqual(adminCriaOverrideZero.status, 200, JSON.stringify(adminCriaOverrideZero.body));
+    assert.strictEqual(adminCriaOverrideZero.body.usuario.creditos, 0, "Admin deve preservar override explicito zero");
+
+    const adminDuplicado = await request({
+      method: "POST",
+      port,
+      path: "/admin/usuarios",
+      token: adminToken,
+      body: {
+        nome: "Admin Duplicado",
+        email: "admin-free-zero@teste.local",
+        senha: "AdminFree123",
+        plano: "plano_beta_google"
+      }
+    });
+    assert.strictEqual(adminDuplicado.status, 400, "email duplicado deve continuar bloqueado");
+
     const abrirCadastro = await request({
       method: "PUT",
       port,

@@ -10198,7 +10198,6 @@ app.post("/admin/usuarios", exigirAdminMasterEstrito, async (req, res) => {
   }
 
   const planoNovoUsuario = getPlanoPorNome(body.plano || "") || {};
-  const politicaCreditos = saasFundacao.politicaCreditosPlano(planoNovoUsuario);
 
   const novoUsuario = {
     id: gerarId(),
@@ -10207,10 +10206,8 @@ app.post("/admin/usuarios", exigirAdminMasterEstrito, async (req, res) => {
     senhaHash,
     papel: body.papel || "cliente",
     plano: body.plano || "",
-    creditos: Number(body.creditos || 0),
-    creditosModelo: body.creditosModelo || politicaCreditos.creditosModelo,
     statusConta: body.statusConta || "ativa",
-    assinaturaStatus: body.assinaturaStatus || "manual",
+    assinaturaStatus: body.assinaturaStatus || "",
     planoAssinatura: body.planoAssinatura || body.plano || "",
     cicloAtualInicio: body.cicloAtualInicio || "",
     cicloAtualFim: body.cicloAtualFim || "",
@@ -10223,11 +10220,34 @@ app.post("/admin/usuarios", exigirAdminMasterEstrito, async (req, res) => {
     criadoEm: new Date().toISOString()
   };
 
-  usuarios.push(novoUsuario);
-  configsPorCliente[novoUsuario.id] = aplicarArquiteturaComercialRioOficial(configsPorCliente[novoUsuario.id]);
+  saasFundacao.inicializarCreditosUsuarioAdminManual({
+    usuario: novoUsuario,
+    plano: planoNovoUsuario,
+    body
+  });
 
-  salvarUsuarios();
-  salvarConfigsClientes();
+  const snapshotUsuarios = JSON.parse(JSON.stringify(usuarios));
+  const snapshotConfigs = JSON.parse(JSON.stringify(configsPorCliente));
+
+  try {
+    usuarios.push(novoUsuario);
+    configsPorCliente[novoUsuario.id] = aplicarArquiteturaComercialRioOficial(configsPorCliente[novoUsuario.id]);
+    salvarUsuarios();
+    salvarConfigsClientes();
+  } catch (e) {
+    usuarios.splice(0, usuarios.length, ...snapshotUsuarios);
+    Object.keys(configsPorCliente).forEach((chave) => delete configsPorCliente[chave]);
+    Object.assign(configsPorCliente, snapshotConfigs);
+    try {
+      salvarUsuarios();
+      salvarConfigsClientes();
+    } catch {}
+    return res.status(500).json({
+      ok: false,
+      codigo: "cadastro_rollback_executado",
+      erro: "Falha ao criar usuario"
+    });
+  }
 
   return res.json({
     ok: true,
@@ -23477,10 +23497,15 @@ const gerarLinkCurtoAliExpress = conversoresAfiliados.gerarLinkCurtoAliExpress;
 // ======================= FUNCAO PLANO NOME =========================================
 
 function getPlanoPorNome(nome = "") {
+  const identidade = String(nome || "").trim();
   const chave = normalizarTexto(nome || "");
-  if (!chave) return null;
+  if (!identidade && !chave) return null;
 
-  return saasFundacao.buscarEntradaPlano(planos, chave)?.plano || null;
+  return (
+    saasFundacao.buscarEntradaPlano(planos, identidade)?.plano ||
+    saasFundacao.buscarEntradaPlano(planos, chave)?.plano ||
+    null
+  );
 }
 
 // =============== FUNCAO GERAR LINK AFILIADO SHOPEE ========================================

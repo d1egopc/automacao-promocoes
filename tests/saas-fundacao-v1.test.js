@@ -67,6 +67,40 @@ saas.inicializarCreditosUsuario({ usuario: usuarioCicloPendente, plano: planoCic
 assert.strictEqual(usuarioCicloPendente.creditos, 0, "plano pago publico sem gateway nao nasce com credito");
 assert.strictEqual(usuarioCicloPendente.assinaturaStatus, "pendente_pagamento");
 
+const adminFreeSemOverride = { email: "admin-free@teste.local", origemCadastro: "admin" };
+saas.inicializarCreditosUsuarioAdminManual({
+  usuario: adminFreeSemOverride,
+  plano: planoUnico,
+  body: {}
+});
+assert.strictEqual(adminFreeSemOverride.creditos, 300, "Admin manual sem override deve herdar creditos unicos do plano");
+
+const adminFreeOverride = { email: "admin-override@teste.local", origemCadastro: "admin" };
+saas.inicializarCreditosUsuarioAdminManual({
+  usuario: adminFreeOverride,
+  plano: planoUnico,
+  body: { creditosOverrideManual: true, creditos: 500 }
+});
+assert.strictEqual(adminFreeOverride.creditos, 500, "Admin manual com override explicito deve respeitar credito informado");
+
+const adminFreeOverrideZero = { email: "admin-zero@teste.local", origemCadastro: "admin" };
+saas.inicializarCreditosUsuarioAdminManual({
+  usuario: adminFreeOverrideZero,
+  plano: planoUnico,
+  body: { creditos: 0 }
+});
+assert.strictEqual(adminFreeOverrideZero.creditos, 0, "Admin manual deve permitir override explicito para zero");
+
+const adminCicloAutorizado = { id: "admin_ciclo", email: "admin-ciclo@teste.local", origemCadastro: "admin" };
+saas.inicializarCreditosUsuarioAdminManual({
+  usuario: adminCicloAutorizado,
+  plano: planoCiclo,
+  body: { autorizarCicloTeste: true, idempotencyKey: "admin-ciclo-teste" },
+  agora: new Date("2026-08-20T00:00:00.000Z")
+});
+assert.strictEqual(adminCicloAutorizado.creditos, 900, "Admin manual autorizado deve abrir ciclo com creditos do plano");
+assert.strictEqual(adminCicloAutorizado.ultimoCicloCreditoId, "admin-ciclo-teste");
+
 const usuarioCicloAutorizado = {
   assinaturaStatus: "pagamento_confirmado",
   creditos: 10,
@@ -145,6 +179,18 @@ const rotaAdminUsuarios = trechoEntre(indexFonte, 'app.post("/admin/usuarios"', 
 assert.ok(rotaAdminUsuarios.includes("senhaHash"), "Admin deve persistir senhaHash");
 assert.ok(rotaAdminUsuarios.includes("await gerarSenhaHash"), "Admin deve hashear senha");
 assert.ok(!rotaAdminUsuarios.includes("senha: body.senha"), "Admin nao pode persistir senha em texto");
+assert.ok(
+  rotaAdminUsuarios.includes("inicializarCreditosUsuarioAdminManual"),
+  "Criacao manual Admin deve reutilizar helper central de creditos"
+);
+assert.ok(
+  !rotaAdminUsuarios.includes("creditos: Number(body.creditos || 0)"),
+  "Criacao manual Admin nao pode gravar zero silencioso antes de consultar plano"
+);
+assert.ok(
+  rotaAdminUsuarios.includes("cadastro_rollback_executado"),
+  "Criacao manual Admin deve preservar rollback em falha de persistencia"
+);
 
 const rotaLogin = trechoEntre(indexFonte, 'app.post("/login"', 'app.get("/",');
 assert.ok(rotaLogin.includes("migrarSenhaLegadaSeNecessario"), "login deve migrar senha legada apos sucesso");

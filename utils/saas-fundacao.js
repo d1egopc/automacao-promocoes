@@ -293,6 +293,47 @@ function inicializarCreditosUsuario({ usuario = {}, plano = {}, agora = new Date
   return usuario;
 }
 
+function creditoManualInformado(body = {}) {
+  const fonte = body && typeof body === "object" ? body : {};
+  return (
+    Object.prototype.hasOwnProperty.call(fonte, "creditos") ||
+    booleano(fonte.creditosOverrideManual, false) === true ||
+    booleano(fonte.creditosManual, false) === true
+  );
+}
+
+function inicializarCreditosUsuarioAdminManual({ usuario = {}, plano = {}, body = {}, agora = new Date() } = {}) {
+  const fonte = body && typeof body === "object" ? body : {};
+  const autorizarCicloTeste = booleano(fonte.autorizarCicloTeste, false);
+
+  if (autorizarCicloTeste) {
+    usuario.assinaturaStatus = usuario.assinaturaStatus || "teste_ciclo_autorizado";
+    usuario.pagamentoUltimoStatus = usuario.pagamentoUltimoStatus || "teste_ciclo_autorizado";
+  }
+
+  inicializarCreditosUsuario({
+    usuario,
+    plano,
+    origemCadastro: usuario.origemCadastro || "admin",
+    agora
+  });
+
+  if (autorizarCicloTeste) {
+    abrirCicloCreditosAutorizado(usuario, plano, {
+      agora,
+      idempotencyKey: texto(fonte.idempotencyKey || `admin-manual:${usuario.id || usuario.email || new Date(agora).toISOString()}`),
+      assinaturaStatus: "teste_ciclo_autorizado"
+    });
+  }
+
+  if (creditoManualInformado(fonte)) {
+    usuario.creditos = Math.max(0, numero(fonte.creditos, 0));
+    usuario.creditosOverrideManualEm = usuario.creditosOverrideManualEm || new Date(agora).toISOString();
+  }
+
+  return usuario;
+}
+
 function abrirCicloCreditosAutorizado(usuario = {}, plano = {}, {
   agora = new Date(),
   idempotencyKey = "",
@@ -836,6 +877,8 @@ module.exports = {
   normalizarPlanosSaasRuntime,
   politicaCreditosPlano,
   inicializarCreditosUsuario,
+  creditoManualInformado,
+  inicializarCreditosUsuarioAdminManual,
   renovarCreditosPorPlano,
   processarVencimentoAssinatura,
   aplicarDebitoConta,
