@@ -91,6 +91,15 @@ saas.inicializarCreditosUsuarioAdminManual({
 });
 assert.strictEqual(adminFreeOverrideZero.creditos, 0, "Admin manual deve permitir override explicito para zero");
 
+const adminLegadoSemOverride = { email: "admin-legado@teste.local", origemCadastro: "admin" };
+saas.inicializarCreditosUsuarioAdminManual({
+  usuario: adminLegadoSemOverride,
+  plano: planoLegado,
+  body: {}
+});
+assert.strictEqual(adminLegadoSemOverride.creditos, 123, "Admin manual sem override deve provisionar creditos do plano legado/ciclo");
+assert.strictEqual(adminLegadoSemOverride.assinaturaStatus, "manual");
+
 const adminCicloAutorizado = { id: "admin_ciclo", email: "admin-ciclo@teste.local", origemCadastro: "admin" };
 saas.inicializarCreditosUsuarioAdminManual({
   usuario: adminCicloAutorizado,

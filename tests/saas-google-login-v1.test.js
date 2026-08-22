@@ -165,6 +165,16 @@ function trechoEntre(inicio, fim) {
       recursos: { whatsapp: true, telegram: true, discord: false },
       marketplaces: ["amazon", "shopee"]
     },
+    free_real_admin: {
+      id: "plano_free_real_admin",
+      nome: "Free",
+      visivelPublicamente: true,
+      contratavel: true,
+      emBreve: false,
+      limites: { creditos: 300, creditosMes: 300, maxConexoes: 2, destinos: 3 },
+      recursos: { whatsapp: true, telegram: true, discord: false },
+      marketplaces: ["amazon", "shopee"]
+    },
     futuro: {
       id: "plano_futuro_google",
       nome: "Futuro Google",
@@ -438,6 +448,30 @@ function trechoEntre(inicio, fim) {
     const usuarioAdminSemOverride = readJson(path.join(dataDir, "usuarios.json"), []).find(u => u.email === "admin-free-sem-override@teste.local");
     assert.ok(usuarioAdminSemOverride, "Admin manual deve criar usuario");
     assert.ok(readJson(path.join(dataDir, "configs_clientes.json"), {})[usuarioAdminSemOverride.id], "Admin manual deve criar workspace");
+
+    const payloadFrontendToggleOff = {
+      nome: "Admin Free Real Toggle Off",
+      email: "admin-free-real-toggle-off@teste.local",
+      senha: "AdminFree123",
+      papel: "cliente",
+      plano: "plano_free_real_admin",
+      ativo: true
+    };
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(payloadFrontendToggleOff, "creditos") &&
+      !Object.prototype.hasOwnProperty.call(payloadFrontendToggleOff, "creditosOverrideManual"),
+      "Payload real do frontend com toggle desligado nao deve enviar creditos nem override"
+    );
+    const adminCriaFreeRealToggleOff = await request({
+      method: "POST",
+      port,
+      path: "/admin/usuarios",
+      token: adminToken,
+      body: payloadFrontendToggleOff
+    });
+    assert.strictEqual(adminCriaFreeRealToggleOff.status, 200, JSON.stringify(adminCriaFreeRealToggleOff.body));
+    assert.strictEqual(adminCriaFreeRealToggleOff.body.usuario.creditos, 300, "Admin toggle OFF deve herdar creditos do plano Free real/legado");
+    assert.strictEqual(adminCriaFreeRealToggleOff.body.usuario.assinaturaStatus, "manual", "Admin toggle OFF deve provisionar ciclo interno sem pagamento publico");
 
     const adminCriaOverride500 = await request({
       method: "POST",

@@ -305,10 +305,15 @@ function creditoManualInformado(body = {}) {
 function inicializarCreditosUsuarioAdminManual({ usuario = {}, plano = {}, body = {}, agora = new Date() } = {}) {
   const fonte = body && typeof body === "object" ? body : {};
   const autorizarCicloTeste = booleano(fonte.autorizarCicloTeste, false);
+  const overrideManual = creditoManualInformado(fonte);
+  const politica = politicaCreditosPlano(plano);
 
   if (autorizarCicloTeste) {
     usuario.assinaturaStatus = usuario.assinaturaStatus || "teste_ciclo_autorizado";
     usuario.pagamentoUltimoStatus = usuario.pagamentoUltimoStatus || "teste_ciclo_autorizado";
+  } else if (!overrideManual && politica.creditosModelo === "ciclo") {
+    usuario.assinaturaStatus = usuario.assinaturaStatus || "manual";
+    usuario.pagamentoUltimoStatus = usuario.pagamentoUltimoStatus || "manual";
   }
 
   inicializarCreditosUsuario({
@@ -326,7 +331,7 @@ function inicializarCreditosUsuarioAdminManual({ usuario = {}, plano = {}, body 
     });
   }
 
-  if (creditoManualInformado(fonte)) {
+  if (overrideManual) {
     usuario.creditos = Math.max(0, numero(fonte.creditos, 0));
     usuario.creditosOverrideManualEm = usuario.creditosOverrideManualEm || new Date(agora).toISOString();
   }
