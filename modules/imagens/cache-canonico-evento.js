@@ -575,6 +575,35 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
     return { ...cacheAtual, cacheHit: true };
   }
 
+  if (marketplace === "mercadolivre" && /^MLB\d+$/.test(texto(produtoId).toUpperCase())) {
+    const imagemImportador = texto(ofertaEnriquecida.imagem || ofertaEnriquecida.imagemUrl || "");
+    const imagemImportadorResolvida = resolverImagemUniversal({
+      imagem: imagemImportador,
+      imagemOrigem: ofertaEnriquecida.imagemOrigem || "importador_ml_mlb",
+      imagemConfianca: 120
+    });
+    if (imagemImportadorResolvida.imagem) {
+      const resultado = resultadoFinalDeImagemResolvida({
+        chave,
+        eventoId,
+        marketplace,
+        produtoId,
+        resolvida: {
+          ...imagemImportadorResolvida,
+          imagemOrigem: ofertaEnriquecida.imagemOrigem || "importador_ml_mlb",
+          imagemStatus: "importador_ml_mlb"
+        },
+        extra: {
+          materializacoes: Number(cacheAtual.materializacoes || 0),
+          ...(cacheAtual.radarMirrorMaterializacao ? { radarMirrorMaterializacao: cacheAtual.radarMirrorMaterializacao } : {}),
+          linkResolvido: ofertaEnriquecida.linkResolvidoImagem || ofertaEnriquecida.linkExpandido || ofertaEnriquecida.urlFinal || ""
+        }
+      });
+      cacheImagemCanonicaEvento.set(chave, resultado);
+      return { ...resultado, cacheHit: false };
+    }
+  }
+
   const ofertaImagem = montarOfertaImagemFinal(metadataEvento, ofertaEnriquecida);
   const resolvida = resolverImagemUniversal(ofertaImagem, {
     evento: { metadata: metadataEvento },

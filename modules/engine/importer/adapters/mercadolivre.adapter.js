@@ -209,10 +209,113 @@ function resolverCategoriaMercadoLivre(produto = {}) {
   }, produto.titulo || produto.nome || "");
 }
 
+function textoMercadoLivre(valor = "") {
+  return String(valor ?? "").trim();
+}
+
+function extrairMlbMercadoLivre(valor = "") {
+  const bruto = textoMercadoLivre(valor);
+  const match = bruto.match(/\bMLB-?(\d{5,})\b/i);
+  return match ? `MLB${match[1]}` : "";
+}
+
+function normalizarTextoIdentidadeMercadoLivre(valor = "") {
+  return textoMercadoLivre(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function tokensTituloMercadoLivre(valor = "") {
+  const stopwords = new Set([
+    "a", "as", "o", "os", "de", "da", "das", "do", "dos", "e", "em", "no", "na", "nos", "nas",
+    "com", "para", "por", "pra", "pro", "promocao", "promo", "cupom", "oferta", "gratis", "r"
+  ]);
+  return normalizarTextoIdentidadeMercadoLivre(valor)
+    .split(/\s+/)
+    .filter(token => token.length >= 3 && !stopwords.has(token));
+}
+
+function similaridadeTituloMercadoLivre(a = "", b = "") {
+  const tokensA = new Set(tokensTituloMercadoLivre(a));
+  const tokensB = new Set(tokensTituloMercadoLivre(b));
+  if (!tokensA.size || !tokensB.size) {
+    return { similaridade: 1, intersecao: 0, tokensA: tokensA.size, tokensB: tokensB.size };
+  }
+  let intersecao = 0;
+  for (const token of tokensA) {
+    if (tokensB.has(token)) intersecao += 1;
+  }
+  return {
+    similaridade: intersecao / Math.min(tokensA.size, tokensB.size),
+    intersecao,
+    tokensA: tokensA.size,
+    tokensB: tokensB.size
+  };
+}
+
+function numeroMercadoLivre(valor) {
+  if (typeof valor === "number" && Number.isFinite(valor)) return valor;
+  const texto = textoMercadoLivre(valor);
+  if (!texto) return null;
+  const limpo = texto
+    .replace(/[^\d,.-]/g, "")
+    .replace(/\.(?=\d{3}(?:\D|$))/g, "")
+    .replace(",", ".");
+  const numero = Number(limpo);
+  return Number.isFinite(numero) ? numero : null;
+}
+
+function extrairTituloRadarMercadoLivre(evento = {}) {
+  const radarMirror = objetoSeguro(objetoSeguro(evento.metadata).radarMirror);
+  const produto = objetoSeguro(radarMirror.produto);
+  return textoMercadoLivre(
+    produto.tituloCapturado ||
+    produto.titulo ||
+    radarMirror.tituloCapturado ||
+    radarMirror.titulo ||
+    ""
+  );
+}
+
+function extrairPrecoRadarMercadoLivre(evento = {}) {
+  const radarMirror = objetoSeguro(objetoSeguro(evento.metadata).radarMirror);
+  const preco = objetoSeguro(radarMirror.preco);
+  const comercial = objetoSeguro(radarMirror.comercial);
+  return numeroMercadoLivre(
+    preco.atualCapturado ??
+    comercial.precoAtual?.valor ??
+    comercial.precoAtual ??
+    evento.precoRadar ??
+    ""
+  );
+}
+
+function avaliarDivergenciaPrecoMercadoLivre(precoRadar, precoImportador) {
+  if (!Number.isFinite(precoRadar) || !Number.isFinite(precoImportador) || precoRadar <= 0 || precoImportador <= 0) {
+    return { divergente: false, percentual: 0, absoluto: 0 };
+  }
+  const absoluto = Math.abs(precoImportador - precoRadar);
+  const percentual = absoluto / Math.max(precoRadar, precoImportador);
+  return {
+    divergente: absoluto >= 10 && percentual >= 0.25,
+    percentual,
+    absoluto
+  };
+}
+
 function escolherLinkMercadoLivreDetalhado(links = [], evento = {}) {
   const candidatos = [];
 
   for (const link of Array.isArray(links) ? links : []) {
+    if (isMeliLa(link.url_original || link.urlOriginal || "")) {
+      candidatos.push({ url: link.url_original || link.urlOriginal, link, campo: "url_original_melila" });
+    }
+    if (isMeliLa(link.url_normalizada || link.urlNormalizada || "")) {
+      candidatos.push({ url: link.url_normalizada || link.urlNormalizada, link, campo: "url_normalizada_melila" });
+    }
     candidatos.push({ url: link.url_expandida, link, campo: "url_expandida" });
     candidatos.push({ url: link.url_normalizada, link, campo: "url_normalizada" });
     candidatos.push({ url: link.url_original, link, campo: "url_original" });
@@ -415,6 +518,79 @@ function escolherProdutoResolvido(resolucao = {}, urlOriginal = "") {
     .map(url => String(url || "").trim())
     .filter(isUrlProdutoMercadoLivre)
     .sort((a, b) => pesoUrlProdutoMercadoLivre(a) - pesoUrlProdutoMercadoLivre(b))[0] || "";
+}
+
+function avaliarIdentidadeCanonicaMercadoLivre({ urlOriginalEngine = "", linkEscolhido = {}, resolucaoProduto = {}, produto = {}, evento = {} } = {}) {
+  const link = linkEscolhido.link || {};
+  const urlExpandidaPrevia = textoMercadoLivre(link.url_expandida || link.urlExpandida || "");
+  const urlCanonicaRevalidada = textoMercadoLivre(resolucaoProduto.urlProduto || resolucaoProduto.linkExpandidoEngine || "");
+  const mlbExpandidaPrevia = extrairMlbMercadoLivre(urlExpandidaPrevia);
+  const mlbRevalidado = extrairMlbMercadoLivre(urlCanonicaRevalidada);
+  const mlbProduto = extrairMlbMercadoLivre([
+    produto.produtoIdDetectado,
+    produto.produtoId,
+    produto.itemId,
+    produto.urlFinal,
+    produto.linkExpandido,
+    produto.linkOriginal,
+    produto.permalink
+  ].filter(Boolean).join(" "));
+  const tituloRadar = extrairTituloRadarMercadoLivre(evento);
+  const tituloImportador = textoMercadoLivre(produto.titulo || produto.nome || "");
+  const precoRadar = extrairPrecoRadarMercadoLivre(evento);
+  const precoImportador = numeroMercadoLivre(produto.precoAtual || produto.preco);
+  const similaridade = similaridadeTituloMercadoLivre(tituloRadar, tituloImportador);
+  const preco = avaliarDivergenciaPrecoMercadoLivre(precoRadar, precoImportador);
+  const sinais = [];
+
+  if (mlbProduto && mlbRevalidado && mlbProduto !== mlbRevalidado) {
+    sinais.push("mlb_importador_diverge_revalidado");
+  }
+  if (mlbExpandidaPrevia && mlbRevalidado && mlbExpandidaPrevia !== mlbRevalidado) {
+    sinais.push("url_expandida_previa_diverge_shortlink_revalidado");
+  }
+  if (preco.divergente) sinais.push("preco_importador_diverge_radar");
+  if (
+    tituloRadar &&
+    tituloImportador &&
+    similaridade.tokensA >= 3 &&
+    similaridade.tokensB >= 3 &&
+    similaridade.similaridade < 0.25 &&
+    similaridade.intersecao <= 1
+  ) {
+    sinais.push("titulo_importador_baixa_similaridade_radar");
+  }
+
+  const inconsistente = Boolean(
+    sinais.includes("mlb_importador_diverge_revalidado") ||
+    (
+      isMeliLa(urlOriginalEngine) &&
+      sinais.includes("preco_importador_diverge_radar") &&
+      sinais.includes("titulo_importador_baixa_similaridade_radar")
+    )
+  );
+
+  return {
+    status: inconsistente ? "inconsistente" : "consistente",
+    motivo: inconsistente ? "mercadolivre_identidade_inconsistente" : "",
+    reprocessavel: inconsistente,
+    urlOriginal: urlOriginalEngine,
+    urlExpandidaPrevia,
+    urlCanonicaRevalidada,
+    mlbExpandidaPrevia,
+    mlbRevalidado,
+    mlbProduto,
+    corrigiuUrlExpandidaPrevia: Boolean(mlbExpandidaPrevia && mlbRevalidado && mlbExpandidaPrevia !== mlbRevalidado && mlbProduto === mlbRevalidado),
+    tituloRadar,
+    tituloImportador,
+    precoRadar,
+    precoImportador,
+    precoDivergenciaPercentual: Number(preco.percentual.toFixed(4)),
+    precoDivergenciaAbsoluta: Number(preco.absoluto.toFixed(2)),
+    tituloSimilaridade: Number(similaridade.similaridade.toFixed(4)),
+    tituloIntersecao: similaridade.intersecao,
+    sinais
+  };
 }
 
 async function resolverUrlProdutoMercadoLivreEngine(urlOriginalEngine = "", deps = {}, contexto = {}) {
@@ -628,6 +804,30 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     return { ok: false, motivo: "importador_sem_retorno", marketplace: "mercadolivre", linkOriginal: urlOriginalEngine };
   }
 
+  const identidadeCanonicaMl = avaliarIdentidadeCanonicaMercadoLivre({
+    urlOriginalEngine,
+    linkEscolhido,
+    resolucaoProduto,
+    produto,
+    evento
+  });
+
+  if (identidadeCanonicaMl.status === "inconsistente") {
+    console.log("[ENGINE-ML-IDENTIDADE-INCONSISTENTE]", JSON.stringify({
+      jobId: job.id || null,
+      eventoId: job.evento_id || null,
+      clienteId,
+      motivo: identidadeCanonicaMl.motivo,
+      sinais: identidadeCanonicaMl.sinais,
+      mlbExpandidaPrevia: identidadeCanonicaMl.mlbExpandidaPrevia,
+      mlbRevalidado: identidadeCanonicaMl.mlbRevalidado,
+      mlbProduto: identidadeCanonicaMl.mlbProduto,
+      precoRadar: identidadeCanonicaMl.precoRadar,
+      precoImportador: identidadeCanonicaMl.precoImportador,
+      tituloSimilaridade: identidadeCanonicaMl.tituloSimilaridade
+    }));
+  }
+
   const linkAfiliado = produto.linkAfiliado || produto.linkFinal || produto.link || "";
   if (!linkAfiliado) {
     console.log("[ENGINE-ML-LINK-AFILIADO-VAZIO]", {
@@ -764,6 +964,8 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
       imagemOrigemImportador: produto.imagemOrigem || "",
       expandiuMeliLa,
       resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
+      identidadeCanonicaMl,
+      revalidacaoMeliLa: identidadeCanonicaMl,
       camposProduto: Object.keys(produto || {}),
       linksClassificados: resumoLinksClassificados(linksConvertidosMercadoLivre, evento, "mercadolivre"),
       linksComerciais: linksConvertidosMercadoLivre,
@@ -777,7 +979,12 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
 }
 
 module.exports = {
-  importarMercadoLivreEngine
+  importarMercadoLivreEngine,
+  _test: {
+    avaliarIdentidadeCanonicaMercadoLivre,
+    escolherLinkMercadoLivreDetalhado,
+    extrairMlbMercadoLivre,
+    similaridadeTituloMercadoLivre
+  }
 };
-
 

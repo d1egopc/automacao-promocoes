@@ -2410,6 +2410,32 @@ function avaliarGateQualidadeAliExpressImagem(oferta = {}, metadata = {}) {
   };
 }
 
+function avaliarGateIdentidadeMercadoLivre(oferta = {}, metadata = {}) {
+  const marketplace = normalizarMarketplaceMemoria(oferta.marketplace || metadata.marketplace || "");
+  if (marketplace !== "mercadolivre") {
+    return { retida: false, motivo: "" };
+  }
+
+  const identidade = objetoSeguro(metadata.identidadeCanonicaMl || metadata.revalidacaoMeliLa);
+  if (identidade.status !== "inconsistente" && identidade.motivo !== "mercadolivre_identidade_inconsistente") {
+    return { retida: false, motivo: "" };
+  }
+
+  return {
+    retida: true,
+    status: "retida_v2",
+    motivo: "mercadolivre_identidade_inconsistente",
+    reprocessavel: true,
+    sinais: Array.isArray(identidade.sinais) ? identidade.sinais : [],
+    mlbExpandidaPrevia: identidade.mlbExpandidaPrevia || "",
+    mlbRevalidado: identidade.mlbRevalidado || "",
+    mlbProduto: identidade.mlbProduto || "",
+    precoRadar: identidade.precoRadar ?? null,
+    precoImportador: identidade.precoImportador ?? null,
+    tituloSimilaridade: identidade.tituloSimilaridade ?? null
+  };
+}
+
 function mapearOfertaMemoria(row = {}) {
   const inteligenciaV2 = row?.metadata?.inteligenciaUniversalV2 && typeof row.metadata.inteligenciaUniversalV2 === "object"
     ? row.metadata.inteligenciaUniversalV2
@@ -3131,6 +3157,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   }
   const inteligenciaV2 = objetoSeguro(metadataFinal.inteligenciaUniversalV2);
   const gateQualidadeAliExpressImagem = avaliarGateQualidadeAliExpressImagem(oferta, metadataFinal);
+  const gateIdentidadeMercadoLivre = avaliarGateIdentidadeMercadoLivre(oferta, metadataFinal);
   if (gateQualidadeAliExpressImagem.retida) {
     metadataFinal = {
       ...metadataFinal,
@@ -3149,10 +3176,34 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       reprocessavel: gateQualidadeAliExpressImagem.reprocessavel === true
     }));
   }
-  const retidaV2 = gateQualidadeAliExpressImagem.retida === true || inteligenciaV2.status === "retida" || sombraV2.ok === false;
+  if (gateIdentidadeMercadoLivre.retida) {
+    metadataFinal = {
+      ...metadataFinal,
+      gateQualidade: {
+        ...objetoSeguro(metadataFinal.gateQualidade),
+        mercadolivreIdentidade: gateIdentidadeMercadoLivre
+      }
+    };
+    console.log("[ML-IDENTIDADE-GATE]", JSON.stringify({
+      jobId: job.id || null,
+      eventoId: job.evento_id || null,
+      workspaceId: job.cliente_id || job.clienteId || "",
+      marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",
+      status: gateIdentidadeMercadoLivre.status,
+      motivo: gateIdentidadeMercadoLivre.motivo,
+      reprocessavel: gateIdentidadeMercadoLivre.reprocessavel === true,
+      sinais: gateIdentidadeMercadoLivre.sinais || [],
+      mlbExpandidaPrevia: gateIdentidadeMercadoLivre.mlbExpandidaPrevia || "",
+      mlbRevalidado: gateIdentidadeMercadoLivre.mlbRevalidado || "",
+      mlbProduto: gateIdentidadeMercadoLivre.mlbProduto || ""
+    }));
+  }
+  const retidaV2 = gateQualidadeAliExpressImagem.retida === true || gateIdentidadeMercadoLivre.retida === true || inteligenciaV2.status === "retida" || sombraV2.ok === false;
   const statusPersistencia = retidaV2 ? "retida_v2" : "importada";
   const motivoPersistencia = gateQualidadeAliExpressImagem.retida
     ? gateQualidadeAliExpressImagem.motivo
+    : gateIdentidadeMercadoLivre.retida
+    ? gateIdentidadeMercadoLivre.motivo
     : retidaV2
     ? (inteligenciaV2.motivoDecisao || inteligenciaV2.motivo || "retida_v2")
     : null;
@@ -3584,6 +3635,7 @@ module.exports = {
   marcarJobErroImportacao,
   normalizarOfertaImportada,
   avaliarGateQualidadeAliExpressImagem,
+  avaliarGateIdentidadeMercadoLivre,
   resolverCategoriaEngine,
   reclassificarCategoriaFinalEngine,
   buscarImagemCanonicaMercadoLivre,
