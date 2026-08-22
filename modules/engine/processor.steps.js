@@ -50,6 +50,13 @@ function clienteExiste(job = {}, contexto = {}) {
   return avaliarClienteEngine(job, contexto).ok;
 }
 
+function avaliacaoPermiteSkipCedo(avaliacao = {}) {
+  const motivos = Array.isArray(avaliacao.motivos) ? avaliacao.motivos : [];
+  const motivo = avaliacao.motivo || motivos[0] || "";
+  return ["workspace_inativo", "workspace_inexistente"].includes(motivo) ||
+    motivos.some(item => ["workspace_inativo", "workspace_inexistente"].includes(item));
+}
+
 function detectarMarketplaceJob(job = {}, evento = {}, links = []) {
   const direto = String(job.marketplace || job.marketplace_detectado || evento.marketplace_detectado || "").trim();
   if (direto) return direto;
@@ -92,6 +99,21 @@ async function processarJobEngine(job = {}, contexto = {}) {
     eventoId: job.evento_id,
     clienteId: job.cliente_id
   });
+
+  const avaliacaoClienteCedo = avaliarClienteEngine(job, contexto);
+  if (!avaliacaoClienteCedo.ok && avaliacaoPermiteSkipCedo(avaliacaoClienteCedo)) {
+    await registrarProcessamento(job.id, "validar_cliente", "erro", avaliacaoClienteCedo.motivo, {
+      clienteId: job.cliente_id,
+      motivos: avaliacaoClienteCedo.motivos || [],
+      skipCedo: true
+    });
+    return finalizarErro(job, avaliacaoClienteCedo.motivo || "workspace_nao_operacional", {
+      clienteId: job.cliente_id,
+      clientesValidosTotal: Array.isArray(contexto.clientesValidos) ? contexto.clientesValidos.length : 0,
+      motivos: avaliacaoClienteCedo.motivos || [],
+      skipCedo: true
+    }, "validar_cliente");
+  }
 
   const eventoResultado = await carregarEventoBruto(job.evento_id);
   await registrarProcessamento(job.id, "carregar_evento", eventoResultado.evento ? "ok" : "erro", eventoResultado.evento ? "evento_carregado" : "evento_nao_encontrado", {
@@ -164,5 +186,6 @@ module.exports = {
   processarJobEngine,
   detectarMarketplaceJob,
   clienteExiste,
-  avaliarClienteEngine
+  avaliarClienteEngine,
+  avaliacaoPermiteSkipCedo
 };

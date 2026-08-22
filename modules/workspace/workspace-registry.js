@@ -63,6 +63,44 @@ function carregarFontes(fontes = {}) {
   };
 }
 
+function listarWorkspaceIdsFisicos(opcoes = {}) {
+  const ids = Object.prototype.hasOwnProperty.call(opcoes, "clientesFisicos")
+    ? opcoes.clientesFisicos
+    : listClientes();
+  return lista(ids).map(normalizarId).filter(Boolean);
+}
+
+function listarUsuariosParaOrphans(opcoes = {}) {
+  if (Object.prototype.hasOwnProperty.call(opcoes, "usuarios")) {
+    return lista(opcoes.usuarios);
+  }
+  if (
+    opcoes.fontes &&
+    Object.prototype.hasOwnProperty.call(opcoes.fontes, "usuarios")
+  ) {
+    return lista(opcoes.fontes.usuarios);
+  }
+  return lista(readGlobalJson("usuarios.json", []));
+}
+
+function listarOrphanWorkspaces(opcoes = {}) {
+  const idsUsuarios = new Set(
+    listarUsuariosParaOrphans(opcoes).map(usuario => normalizarId(usuario?.id)).filter(Boolean)
+  );
+  const idsFisicos = listarWorkspaceIdsFisicos(opcoes);
+
+  return idsFisicos
+    .filter(workspaceId => !idsUsuarios.has(workspaceId))
+    .sort()
+    .map(workspaceId => ({
+      workspaceId,
+      classificacao: "orphan_workspace",
+      operacional: false,
+      motivo: "diretorio_sem_usuario_correspondente",
+      aplicouMudancas: false
+    }));
+}
+
 function normalizarPlanoId(valor = "") {
   return String(valor ?? "").trim().toLowerCase();
 }
@@ -124,6 +162,16 @@ function logResumo(workspaces = []) {
   }));
 }
 
+function logOrphanWorkspaces(orfaos = []) {
+  if (!orfaos.length) return;
+  console.log("[WORKSPACE-REGISTRY-ORPHAN]", JSON.stringify({
+    total: orfaos.length,
+    workspaces: orfaos.map(item => item.workspaceId).slice(0, 50),
+    classificacao: "orphan_workspace",
+    aplicouMudancas: false
+  }));
+}
+
 function logAvaliacao(workspace = {}, elegivelEngine = false, motivos = []) {
   console.log("[WORKSPACE-REGISTRY-AVALIACAO]", JSON.stringify({
     workspaceId: workspace.workspaceId || "",
@@ -137,7 +185,10 @@ function logAvaliacao(workspace = {}, elegivelEngine = false, motivos = []) {
 
 function listarWorkspaces(opcoes = {}) {
   const workspaces = montarWorkspaces(opcoes.fontes || opcoes);
-  if (opcoes.log !== false) logResumo(workspaces);
+  if (opcoes.log !== false) {
+    logResumo(workspaces);
+    logOrphanWorkspaces(listarOrphanWorkspaces(opcoes));
+  }
   return workspaces;
 }
 
@@ -181,6 +232,7 @@ function listarWorkspaceIdsElegiveisEngine(opcoes = {}) {
 module.exports = {
   avaliarWorkspaceParaEngine,
   carregarFontes,
+  listarOrphanWorkspaces,
   listarWorkspaceIdsElegiveisEngine,
   listarWorkspaces,
   listarWorkspacesComerciais,

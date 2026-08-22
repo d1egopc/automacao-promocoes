@@ -498,7 +498,11 @@ function sanitizarLogPayload(payload = {}) {
     "compactados",
     "removidos",
     "erros",
-    "failOpen"
+    "failOpen",
+    "classificacao",
+    "orphanWorkspaces",
+    "workspaces",
+    "workspaceClassificacao"
   ];
   const saida = {};
   for (const chave of permitido) {
@@ -603,6 +607,7 @@ function auditarFilaJson(opcoes = {}) {
   const agoraMs = Number(opcoes.agoraMs || Date.now());
   const limite = politica.loteLimite;
   const clientesDir = path.join(dataDir, "clientes");
+  const orfaos = new Set(detectarOrphanWorkspacesAutoClean({ ...opcoes, politica }).map(item => item.workspaceId));
   const registros = [];
   const resumoExtra = {
     filasInvalidas: 0,
@@ -613,7 +618,8 @@ function auditarFilaJson(opcoes = {}) {
     compactaveis: 0,
     removiveis: 0,
     integrais: 0,
-    bytesRecuperaveisCompactacao: 0
+    bytesRecuperaveisCompactacao: 0,
+    orphanWorkspaces: 0
   };
 
   if (!fsImpl.existsSync(clientesDir)) return criarResumoOrigem("fila_json", "fila_json", registros, limite);
@@ -621,6 +627,8 @@ function auditarFilaJson(opcoes = {}) {
   for (const workspaceId of fsImpl.readdirSync(clientesDir).sort()) {
     if (registros.length >= limite) break;
     if (SENSIVEL_RE.test(workspaceId)) continue;
+    const workspaceClassificacao = orfaos.has(workspaceId) ? "orphan_workspace" : "workspace_registrado";
+    if (workspaceClassificacao === "orphan_workspace") resumoExtra.orphanWorkspaces += 1;
     const filaPath = path.join(clientesDir, workspaceId, "fila.json");
     if (!fsImpl.existsSync(filaPath)) continue;
     let stats;
@@ -660,6 +668,8 @@ function auditarFilaJson(opcoes = {}) {
         acaoCompactacao: decisao.acao,
         bytesEstimados: bytesItem,
         bytesRecuperaveis: decisao.bytesRecuperaveis || 0,
+        workspaceId,
+        workspaceClassificacao,
         aplicouMudancas: false
       });
     }
@@ -1280,6 +1290,56 @@ function listarWorkspacesFila(dataDir, fsImpl = fs) {
   }
 }
 
+function lerUsuariosIdsAutoClean(dataDir, fsImpl = fs) {
+  const usuariosPath = path.join(dataDir, "usuarios.json");
+  try {
+    if (!fsImpl.existsSync(usuariosPath)) return null;
+    const usuarios = JSON.parse(fsImpl.readFileSync(usuariosPath, "utf8"));
+    return new Set(
+      (Array.isArray(usuarios) ? usuarios : [])
+        .map(usuario => String(usuario?.id || "").trim())
+        .filter(Boolean)
+    );
+  } catch {
+    return null;
+  }
+}
+
+function detectarOrphanWorkspacesAutoClean(opcoes = {}) {
+  const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
+  const dataDir = path.resolve(politica.dataDir || DEFAULT_DATA_DIR);
+  const fsImpl = opcoes.fs || fs;
+  const idsUsuarios = lerUsuariosIdsAutoClean(dataDir, fsImpl);
+  if (!idsUsuarios) return [];
+
+  return listarWorkspacesFila(dataDir, fsImpl)
+    .filter(workspaceId => !idsUsuarios.has(workspaceId))
+    .map(workspaceId => ({
+      origem: "orphan_workspace",
+      tipoRegistro: "orphan_workspace",
+      status: "orphan_workspace",
+      workspaceId,
+      classificacao: "orphan_workspace",
+      elegivel: false,
+      motivo: "diretorio_sem_usuario_correspondente",
+      aplicouMudancas: false
+    }));
+}
+
+function auditarOrphanWorkspaces(opcoes = {}) {
+  const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
+  const limite = politica.loteLimite;
+  const registros = detectarOrphanWorkspacesAutoClean({ ...opcoes, politica });
+  const resumo = criarResumoOrigem("orphan_workspace", "orphan_workspace", registros.slice(0, limite), limite);
+  return {
+    ...resumo,
+    classificacao: "orphan_workspace",
+    orphanWorkspaces: registros.length,
+    workspaces: registros.map(item => item.workspaceId).slice(0, limite),
+    aplicouMudancas: false
+  };
+}
+
 function escreverJsonAtomico(fsImpl, arquivo, dados) {
   const dir = path.dirname(arquivo);
   const tmp = path.join(dir, `.${path.basename(arquivo)}.autoclean-${process.pid}-${Date.now()}.tmp`);
@@ -1521,6 +1581,7 @@ async function executarAutoCleanShadow(opcoes = {}) {
 
   if (executarDb) origens.push(...await inventariarPostgres({ ...opcoes, politica }));
   if (executarArquivos) {
+    origens.push(auditarOrphanWorkspaces({ ...opcoes, politica }));
     origens.push(auditarFilaJson({ ...opcoes, politica }));
     origens.push(...inventariarArquivosPorCategoria({ ...opcoes, politica }));
     origens.push(memoriaComercialStatus({ ...opcoes, politica }));
@@ -1606,6 +1667,8 @@ module.exports = {
   executarFilaJsonAutoClean,
   executarArquivosAutoClean,
   executarCompactacaoFilaWorkspace,
+  auditarOrphanWorkspaces,
+  detectarOrphanWorkspacesAutoClean,
   coletarArquivosElegiveisAutoClean,
   auditarFilaJson,
   inventariarArquivosPorCategoria,

@@ -31,6 +31,8 @@ assert.ok(indexFonte.includes("function confirmacaoExclusaoValida"), "backend de
 assert.ok(indexFonte.includes("[ADMIN-EXCLUSAO]"), "backend deve registrar auditoria da exclusao");
 assert.ok(rotaExcluirUsuario.includes("confirmacaoExclusaoValida(req)"), "excluir usuario exige EXCLUIR no backend");
 assert.ok(rotaExcluirUsuario.includes('usuarioExcluir.papel === "admin_master"'), "admin_master nao pode ser excluido");
+assert.ok(rotaExcluirUsuario.includes("desmontarRuntimeExclusivoWorkspace(id)"), "exclusao deve desmontar runtime exclusivo do workspace");
+assert.ok(indexFonte.includes("[ADMIN-EXCLUSAO-RUNTIME-EXCLUSIVO]"), "teardown exclusivo deve ser telemetrado");
 assert.ok(rotaExcluirUsuario.includes("salvarUsuarios();"), "exclusao remove apenas registro de usuarios.json");
 assert.ok(!rotaExcluirUsuario.includes("delete configsPorCliente"), "exclusao de usuario nao apaga configuracoes");
 assert.ok(!rotaExcluirUsuario.includes("delete destinosPorCliente"), "exclusao de usuario nao apaga destinos");
@@ -38,6 +40,9 @@ assert.ok(!rotaExcluirUsuario.includes("delete integracoesPorCliente"), "exclusa
 assert.ok(!rotaExcluirUsuario.includes("salvarConfigsClientes"), "exclusao de usuario nao persiste remocao de configs");
 assert.ok(!rotaExcluirUsuario.includes("salvarDestinosClientes"), "exclusao de usuario nao persiste remocao de destinos");
 assert.ok(!rotaExcluirUsuario.includes("salvarIntegracoesPersistidas"), "exclusao de usuario nao persiste remocao de integracoes");
+assert.ok(!rotaExcluirUsuario.includes("limparJobsAntigosEngine"), "exclusao de usuario nao cancela jobs globais");
+assert.ok(!rotaExcluirUsuario.includes("executarRetencaoJobsPostgres"), "exclusao de usuario nao dispara retencao global de jobs");
+assert.ok(!rotaExcluirUsuario.includes("fs.rm"), "exclusao de usuario nao remove diretorio do cliente");
 
 assert.ok(rotaExcluirPlano.includes("confirmacaoExclusaoValida(req)"), "excluir plano exige EXCLUIR no backend");
 assert.ok(rotaExcluirPlano.includes("usuariosUsandoPlano.length > 0"), "plano em uso deve ser bloqueado");

@@ -3228,6 +3228,125 @@ function removerReferenciasSessao(ids = [], clienteId = null) {
   }
 }
 
+function sessaoPertenceAoWorkspaceExclusivo(sessaoId = "", meta = {}, clienteId = "") {
+  const id = String(sessaoId || "").trim();
+  const workspace = String(clienteId || "").trim();
+  if (!id || !workspace) return false;
+  if (String(meta?.workspaceId || meta?.clienteId || "").trim() === workspace) return true;
+  return id === workspace || id.startsWith(`${workspace}_`);
+}
+
+function listarSessoesExclusivasWorkspace(clienteId = "") {
+  const workspace = String(clienteId || "").trim();
+  if (!workspace) return [];
+
+  const ids = new Set();
+  const candidatos = [
+    ...Object.keys(sessoes || {}),
+    ...Object.keys(qrCodes || {}),
+    ...Object.keys(statusSessao || {}),
+    ...Object.keys(sessoesMeta || {}),
+    ...Object.keys(destinosPorSessao || {}),
+    ...Object.keys(gruposPorSessao || {})
+  ];
+
+  for (const id of candidatos) {
+    const meta = sessoesMeta?.[id] || {};
+    if (sessaoPertenceAoWorkspaceExclusivo(id, meta, workspace)) ids.add(id);
+  }
+
+  return [...ids].sort();
+}
+
+function apagarChaveObjeto(objeto = {}, chave = "") {
+  if (!objeto || !Object.prototype.hasOwnProperty.call(objeto, chave)) return 0;
+  delete objeto[chave];
+  return 1;
+}
+
+function apagarChaveMapa(mapa, chave = "") {
+  if (!mapa || typeof mapa.delete !== "function") return 0;
+  return mapa.delete(chave) ? 1 : 0;
+}
+
+function desmontarRuntimeExclusivoWorkspace(clienteId = "", opcoes = {}) {
+  const workspace = String(clienteId || "").trim();
+  const resultado = {
+    workspaceId: workspace,
+    classificacao: "workspace_excluido_runtime_exclusivo",
+    sessoesEncerradas: 0,
+    sessoesMarcadas: 0,
+    cachesMemoriaInvalidados: 0,
+    schedulersExclusivosEncerrados: 0,
+    aplicouMudancas: false,
+    erros: []
+  };
+
+  if (!workspace) return { ...resultado, motivo: "workspace_id_ausente" };
+
+  const sessoesWorkspace = listarSessoesExclusivasWorkspace(workspace);
+  for (const sessaoId of sessoesWorkspace) {
+    try {
+      const sock = sessoes?.[sessaoId];
+      if (sock && typeof sock.end === "function") {
+        sock.end();
+        resultado.sessoesEncerradas += 1;
+      } else if (sock && typeof sock.logout === "function" && opcoes.logoutRemoto === true) {
+        sock.logout();
+        resultado.sessoesEncerradas += 1;
+      }
+    } catch (erro) {
+      resultado.erros.push({ sessaoId, motivo: "encerrar_socket_falhou", erro: String(erro?.message || "erro").slice(0, 120) });
+    }
+
+    resultado.cachesMemoriaInvalidados += apagarChaveObjeto(sessoes, sessaoId);
+    resultado.cachesMemoriaInvalidados += apagarChaveObjeto(qrCodes, sessaoId);
+    resultado.cachesMemoriaInvalidados += apagarChaveObjeto(statusSessao, sessaoId);
+    resultado.cachesMemoriaInvalidados += apagarChaveObjeto(destinosPorSessao, sessaoId);
+    resultado.cachesMemoriaInvalidados += apagarChaveObjeto(gruposPorSessao, sessaoId);
+    resultado.cachesMemoriaInvalidados += apagarChaveObjeto(reconectando, sessaoId);
+    resultado.cachesMemoriaInvalidados += apagarChaveObjeto(inicializandoWhatsApp, sessaoId);
+    resultado.cachesMemoriaInvalidados += apagarChaveObjeto(tentativasReconexaoWhatsApp, sessaoId);
+    resultado.cachesMemoriaInvalidados += apagarChaveObjeto(ultimoMotivoDisconnectWhatsApp, sessaoId);
+    resultado.cachesMemoriaInvalidados += apagarChaveObjeto(geracoesSocketWhatsapp, sessaoId);
+
+    sessoesMeta[sessaoId] = {
+      ...(sessoesMeta[sessaoId] || { id: sessaoId, nome: sessaoId, tipo: "whatsapp" }),
+      workspaceId: workspace,
+      clienteId: workspace,
+      ativo: false,
+      status: "workspace_excluido",
+      workspaceExcluidoEm: new Date().toISOString()
+    };
+    resultado.sessoesMarcadas += 1;
+  }
+
+  removerReferenciasSessao(sessoesWorkspace, workspace);
+
+  resultado.cachesMemoriaInvalidados += apagarChaveObjeto(enviandoAgoraPorCliente, workspace);
+  resultado.cachesMemoriaInvalidados += apagarChaveObjeto(controleEnvio, workspace);
+  resultado.cachesMemoriaInvalidados += apagarChaveObjeto(controleIntervaloEnvioPorCliente, workspace);
+  resultado.cachesMemoriaInvalidados += apagarChaveMapa(cooldownSessaoIndisponivelPorWorkspace, workspace);
+  resultado.cachesMemoriaInvalidados += apagarChaveMapa(ultimoLogSessaoIndisponivelPorWorkspace, workspace);
+
+  if (sessoesWorkspace.length) salvarSessoesMeta();
+
+  resultado.aplicouMudancas = Boolean(sessoesWorkspace.length || resultado.cachesMemoriaInvalidados);
+  console.log("[ADMIN-EXCLUSAO-RUNTIME-EXCLUSIVO]", JSON.stringify({
+    workspaceId: workspace,
+    sessoesEncerradas: resultado.sessoesEncerradas,
+    sessoesMarcadas: resultado.sessoesMarcadas,
+    cachesMemoriaInvalidados: resultado.cachesMemoriaInvalidados,
+    schedulersExclusivosEncerrados: resultado.schedulersExclusivosEncerrados,
+    preservouDadosGlobais: true,
+    apagouDiretorioCliente: false,
+    cancelouJobsGlobais: false,
+    aplicouMudancas: resultado.aplicouMudancas
+  }));
+
+  return resultado;
+}
+
 // ================ FUNCAO CRIAR PLANO =====================
 
 function criarPlanosPadrao() {
@@ -10148,6 +10267,7 @@ app.delete("/admin/usuarios/:id", exigirAdminMasterEstrito, (req, res) => {
   }
 
   const antes = usuarios.length;
+  const teardownRuntime = desmontarRuntimeExclusivoWorkspace(id);
 
   usuarios = usuarios.filter(u => String(u.id) !== String(id));
 
@@ -10171,7 +10291,15 @@ app.delete("/admin/usuarios/:id", exigirAdminMasterEstrito, (req, res) => {
   return res.json({
     ok: true,
     mensagem: "Usuário excluído com sucesso",
-    id
+    id,
+    runtimeExclusivo: {
+      desmontado: teardownRuntime.aplicouMudancas === true,
+      sessoesEncerradas: teardownRuntime.sessoesEncerradas,
+      sessoesMarcadas: teardownRuntime.sessoesMarcadas,
+      cachesMemoriaInvalidados: teardownRuntime.cachesMemoriaInvalidados,
+      cancelouJobsGlobais: false,
+      apagouDiretorioCliente: false
+    }
   });
 });
 

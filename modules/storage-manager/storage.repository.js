@@ -923,6 +923,27 @@ async function listarWorkspaceIds(dataDir) {
     .sort((a, b) => a.localeCompare(b));
 }
 
+async function listarUsuarioIdsStorage(dataDir) {
+  try {
+    const usuariosPath = path.join(dataDir, "usuarios.json");
+    const usuarios = JSON.parse(await fs.promises.readFile(usuariosPath, "utf8"));
+    return new Set(
+      (Array.isArray(usuarios) ? usuarios : [])
+        .map(usuario => String(usuario?.id || "").trim())
+        .filter(Boolean)
+    );
+  } catch {
+    return null;
+  }
+}
+
+function classificacaoWorkspaceStorage(workspaceId = "", usuariosIds = null) {
+  if (!usuariosIds) return "workspace_indeterminado";
+  return usuariosIds.has(String(workspaceId || "").trim())
+    ? "workspace_registrado"
+    : "orphan_workspace";
+}
+
 function validarWorkspaceId(workspaceId) {
   const id = String(workspaceId || "").trim();
   if (!/^[A-Za-z0-9_-]{1,80}$/.test(id)) {
@@ -939,6 +960,7 @@ async function auditarWorkspaces(opcoesEntrada = {}) {
   const opcoes = criarOpcoesIncrementais({ ...opcoesEntrada, offset: decodeCursor(opcoesEntrada.cursor) });
   const dataDir = opcoes.dataDir;
   const workspaceIds = await listarWorkspaceIds(dataDir);
+  const usuariosIds = await listarUsuarioIdsStorage(dataDir);
   const selecionados = workspaceIds.slice(opcoes.offset, opcoes.offset + opcoes.limit);
   const itens = [];
   const errosSanitizados = [];
@@ -962,6 +984,8 @@ async function auditarWorkspaces(opcoesEntrada = {}) {
     if (filaStat.erro && filaStat.erro.erro !== "ENOENT") errosSanitizados.push(filaStat.erro);
     itens.push({
       workspaceId,
+      classificacao: classificacaoWorkspaceStorage(workspaceId, usuariosIds),
+      operacional: classificacaoWorkspaceStorage(workspaceId, usuariosIds) !== "orphan_workspace",
       tamanhoBytes: resumo.tamanhoBytes,
       tamanho: resumo.tamanho,
       tamanhoFilaBytes: filaStat.stats?.isFile() ? filaStat.stats.size : 0,
@@ -1080,6 +1104,7 @@ async function auditarWorkspaceIndividual(workspaceIdEntrada, opcoesEntrada = {}
   const dataDir = opcoes.dataDir;
   const workspaceId = validarWorkspaceId(workspaceIdEntrada);
   const ids = await listarWorkspaceIds(dataDir);
+  const usuariosIds = await listarUsuarioIdsStorage(dataDir);
   if (!ids.includes(workspaceId)) {
     const erro = new Error("workspace_nao_encontrado");
     erro.codigo = "workspace_nao_encontrado";
@@ -1102,6 +1127,8 @@ async function auditarWorkspaceIndividual(workspaceIdEntrada, opcoesEntrada = {}
     payload: {
       workspace: {
         workspaceId,
+        classificacao: classificacaoWorkspaceStorage(workspaceId, usuariosIds),
+        operacional: classificacaoWorkspaceStorage(workspaceId, usuariosIds) !== "orphan_workspace",
         caminho: `/data/clientes/${workspaceId}`,
         tamanhoBytes: resumoDir.tamanhoBytes,
         tamanho: resumoDir.tamanho,
@@ -1126,6 +1153,7 @@ async function auditarFilasIncremental(opcoesEntrada = {}) {
   const opcoes = criarOpcoesIncrementais({ ...opcoesEntrada, offset: decodeCursor(opcoesEntrada.cursor), maxFiles: 100 });
   const dataDir = opcoes.dataDir;
   const workspaceIds = await listarWorkspaceIds(dataDir);
+  const usuariosIds = await listarUsuarioIdsStorage(dataDir);
   const selecionados = workspaceIds.slice(opcoes.offset, opcoes.offset + opcoes.limit);
   const filas = [];
   const errosSanitizados = [];
@@ -1141,6 +1169,8 @@ async function auditarFilasIncremental(opcoesEntrada = {}) {
     processados += 1;
     if (resultado.erro) errosSanitizados.push(resultado.erro);
     if (resultado.resumo) {
+      resultado.resumo.classificacao = classificacaoWorkspaceStorage(workspaceId, usuariosIds);
+      resultado.resumo.operacional = resultado.resumo.classificacao !== "orphan_workspace";
       timeoutAtingido = timeoutAtingido || Boolean(resultado.resumo.timeoutAtingido);
       filas.push(resultado.resumo);
     }
