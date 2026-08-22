@@ -302,6 +302,14 @@ function creditoManualInformado(body = {}) {
   );
 }
 
+function creditoManualInformadoEdicaoAdmin(body = {}) {
+  const fonte = body && typeof body === "object" ? body : {};
+  return (
+    booleano(fonte.creditosOverrideManual, false) === true ||
+    booleano(fonte.creditosManual, false) === true
+  );
+}
+
 function inicializarCreditosUsuarioAdminManual({ usuario = {}, plano = {}, body = {}, agora = new Date() } = {}) {
   const fonte = body && typeof body === "object" ? body : {};
   const autorizarCicloTeste = booleano(fonte.autorizarCicloTeste, false);
@@ -334,6 +342,45 @@ function inicializarCreditosUsuarioAdminManual({ usuario = {}, plano = {}, body 
   if (overrideManual) {
     usuario.creditos = Math.max(0, numero(fonte.creditos, 0));
     usuario.creditosOverrideManualEm = usuario.creditosOverrideManualEm || new Date(agora).toISOString();
+  }
+
+  return usuario;
+}
+
+function aplicarTrocaManualPlanoAdmin({ usuario = {}, plano = {}, planoIdentidade = "", body = {} } = {}) {
+  const politica = politicaCreditosPlano(plano);
+  const overrideManual = creditoManualInformadoEdicaoAdmin(body);
+  const identidade = texto(planoIdentidade || plano?.id || plano?.planoId || plano?.nome || usuario.plano || "");
+
+  if (identidade) {
+    usuario.plano = identidade;
+    usuario.planoAssinatura = identidade;
+  }
+
+  usuario.creditosModelo = politica.creditosModelo;
+
+  if (overrideManual) {
+    usuario.creditos = Math.max(0, numero(body.creditos, 0));
+    usuario.creditosOverrideManualEm = usuario.creditosOverrideManualEm || new Date().toISOString();
+  } else {
+    usuario.creditos = politica.creditosModelo === "unicos"
+      ? politica.creditosUnicos
+      : politica.creditosPorCiclo;
+  }
+
+  if (!usuario.statusConta || textoLower(usuario.statusConta) === "teste_esgotado" || Number(usuario.creditos || 0) > 0) {
+    usuario.statusConta = "ativa";
+  }
+
+  if (politica.creditosModelo === "unicos") {
+    usuario.assinaturaStatus = "nao_aplicavel";
+    return usuario;
+  }
+
+  const statusAssinatura = textoLower(usuario.assinaturaStatus);
+  if (!["ativa", "manual", "teste_ciclo_autorizado"].includes(statusAssinatura)) {
+    usuario.assinaturaStatus = "manual";
+    usuario.pagamentoUltimoStatus = "manual";
   }
 
   return usuario;
@@ -883,7 +930,9 @@ module.exports = {
   politicaCreditosPlano,
   inicializarCreditosUsuario,
   creditoManualInformado,
+  creditoManualInformadoEdicaoAdmin,
   inicializarCreditosUsuarioAdminManual,
+  aplicarTrocaManualPlanoAdmin,
   renovarCreditosPorPlano,
   processarVencimentoAssinatura,
   aplicarDebitoConta,

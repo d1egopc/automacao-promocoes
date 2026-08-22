@@ -10278,6 +10278,10 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
 
   const body = req.body || {};
   const creditosAntes = Number(usuario.creditos ?? 0);
+  const planoAntes = String(usuario.plano || "").trim();
+  const planoInformado = Object.prototype.hasOwnProperty.call(body, "plano");
+  const planoNovoValor = planoInformado ? String(body.plano || "").trim() : planoAntes;
+  const planoMudou = planoInformado && !!planoNovoValor && planoNovoValor !== planoAntes;
 
   usuario.nome = body.nome || usuario.nome;
 
@@ -10318,9 +10322,21 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
     }
   });
 
-  usuario.creditos = Number(
-    body.creditos ?? usuario.creditos ?? 0
-  );
+  if (planoMudou) {
+    const planoNovoUsuario = getPlanoPorNome(usuario.plano);
+    if (planoNovoUsuario) {
+      saasFundacao.aplicarTrocaManualPlanoAdmin({
+        usuario,
+        plano: planoNovoUsuario,
+        planoIdentidade: usuario.plano,
+        body
+      });
+    } else if (Object.prototype.hasOwnProperty.call(body, "creditos")) {
+      usuario.creditos = Number(body.creditos ?? usuario.creditos ?? 0);
+    }
+  } else if (Object.prototype.hasOwnProperty.call(body, "creditos")) {
+    usuario.creditos = Number(body.creditos ?? usuario.creditos ?? 0);
+  }
 
   if (usuario.creditos !== creditosAntes) {
     usuario.auditoriaCreditos = Array.isArray(usuario.auditoriaCreditos)

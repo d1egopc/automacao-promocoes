@@ -150,6 +150,72 @@ function trechoEntre(inicio, fim) {
       papel: "cliente",
       plano: "pro",
       ativo: false
+    },
+    {
+      id: "user_free_esgotado",
+      nome: "Free Esgotado",
+      email: "free-esgotado@teste.local",
+      papel: "cliente",
+      plano: "plano_free_real_admin",
+      planoAssinatura: "plano_free_real_admin",
+      creditos: 0,
+      statusConta: "teste_esgotado",
+      assinaturaStatus: "nao_aplicavel",
+      ativo: true
+    },
+    {
+      id: "user_free_saldo",
+      nome: "Free Saldo",
+      email: "free-saldo@teste.local",
+      papel: "cliente",
+      plano: "plano_free_real_admin",
+      planoAssinatura: "plano_free_real_admin",
+      creditos: 120,
+      statusConta: "ativa",
+      assinaturaStatus: "nao_aplicavel",
+      ativo: true
+    },
+    {
+      id: "user_pro_residual",
+      nome: "Pro Residual",
+      email: "pro-residual@teste.local",
+      papel: "cliente",
+      plano: "plano_pro_admin",
+      planoAssinatura: "plano_pro_admin",
+      creditos: 1300,
+      statusConta: "ativa",
+      assinaturaStatus: "ativa",
+      cicloAtualInicio: "2026-08-01T00:00:00.000Z",
+      cicloAtualFim: "2026-08-31T00:00:00.000Z",
+      proximaRenovacao: "2026-08-31T00:00:00.000Z",
+      ativo: true
+    },
+    {
+      id: "user_ultimate_full",
+      nome: "Ultimate Full",
+      email: "ultimate-full@teste.local",
+      papel: "cliente",
+      plano: "plano_ultimate_admin",
+      planoAssinatura: "plano_ultimate_admin",
+      creditos: 4000,
+      statusConta: "ativa",
+      assinaturaStatus: "ativa",
+      cicloAtualInicio: "2026-08-01T00:00:00.000Z",
+      cicloAtualFim: "2026-08-31T00:00:00.000Z",
+      proximaRenovacao: "2026-08-31T00:00:00.000Z",
+      ativo: true
+    },
+    {
+      id: "user_sem_troca",
+      nome: "Sem Troca",
+      email: "sem-troca@teste.local",
+      papel: "cliente",
+      plano: "plano_pro_admin",
+      planoAssinatura: "plano_pro_admin",
+      creditos: 1500,
+      statusConta: "ativa",
+      assinaturaStatus: "ativa",
+      ativo: true
     }
   ]);
   writeJson(path.join(dataDir, "planos.json"), {
@@ -174,6 +240,22 @@ function trechoEntre(inicio, fim) {
       limites: { creditos: 300, creditosMes: 300, maxConexoes: 2, destinos: 3 },
       recursos: { whatsapp: true, telegram: true, discord: false },
       marketplaces: ["amazon", "shopee"]
+    },
+    pro_admin: {
+      id: "plano_pro_admin",
+      nome: "Pro Admin",
+      creditosModelo: "ciclo",
+      limites: { creditosPorCiclo: 2000, cicloDias: 30 },
+      recursos: {},
+      marketplaces: []
+    },
+    ultimate_admin: {
+      id: "plano_ultimate_admin",
+      nome: "Ultimate Admin",
+      creditosModelo: "ciclo",
+      limites: { creditosPorCiclo: 4000, cicloDias: 30 },
+      recursos: {},
+      marketplaces: []
     },
     futuro: {
       id: "plano_futuro_google",
@@ -519,6 +601,146 @@ function trechoEntre(inicio, fim) {
       }
     });
     assert.strictEqual(adminDuplicado.status, 400, "email duplicado deve continuar bloqueado");
+
+    const usuarioPersistido = (id) => readJson(path.join(dataDir, "usuarios.json"), []).find(u => u.id === id);
+    const datasPro = {
+      cicloAtualInicio: "2026-08-01T00:00:00.000Z",
+      cicloAtualFim: "2026-08-31T00:00:00.000Z",
+      proximaRenovacao: "2026-08-31T00:00:00.000Z"
+    };
+
+    const freeEsgotadoParaPro = await request({
+      method: "PUT",
+      port,
+      path: "/admin/usuarios/user_free_esgotado",
+      token: adminToken,
+      body: {
+        nome: "Free Esgotado",
+        email: "free-esgotado@teste.local",
+        papel: "cliente",
+        plano: "plano_pro_admin",
+        ativo: true
+      }
+    });
+    assert.strictEqual(freeEsgotadoParaPro.status, 200, JSON.stringify(freeEsgotadoParaPro.body));
+    assert.strictEqual(freeEsgotadoParaPro.body.usuario.creditos, 2000, "Free esgotado -> Pro deve receber saldo do plano");
+    assert.strictEqual(freeEsgotadoParaPro.body.usuario.statusConta, "ativa");
+    assert.strictEqual(freeEsgotadoParaPro.body.usuario.plano, "plano_pro_admin");
+    assert.strictEqual(freeEsgotadoParaPro.body.usuario.planoAssinatura, "plano_pro_admin");
+
+    const freeSaldoParaPro = await request({
+      method: "PUT",
+      port,
+      path: "/admin/usuarios/user_free_saldo",
+      token: adminToken,
+      body: {
+        nome: "Free Saldo",
+        email: "free-saldo@teste.local",
+        papel: "cliente",
+        plano: "plano_pro_admin",
+        ativo: true
+      }
+    });
+    assert.strictEqual(freeSaldoParaPro.status, 200, JSON.stringify(freeSaldoParaPro.body));
+    assert.strictEqual(freeSaldoParaPro.body.usuario.creditos, 2000, "Free saldo residual -> Pro nao pode somar saldo antigo");
+    assert.strictEqual(freeSaldoParaPro.body.usuario.planoAssinatura, "plano_pro_admin");
+
+    const proParaUltimate = await request({
+      method: "PUT",
+      port,
+      path: "/admin/usuarios/user_pro_residual",
+      token: adminToken,
+      body: {
+        nome: "Pro Residual",
+        email: "pro-residual@teste.local",
+        papel: "cliente",
+        plano: "plano_ultimate_admin",
+        ativo: true
+      }
+    });
+    assert.strictEqual(proParaUltimate.status, 200, JSON.stringify(proParaUltimate.body));
+    assert.strictEqual(proParaUltimate.body.usuario.creditos, 4000, "Pro -> Ultimate deve repor saldo do novo plano");
+    assert.strictEqual(proParaUltimate.body.usuario.planoAssinatura, "plano_ultimate_admin");
+    assert.deepStrictEqual({
+      cicloAtualInicio: proParaUltimate.body.usuario.cicloAtualInicio,
+      cicloAtualFim: proParaUltimate.body.usuario.cicloAtualFim,
+      proximaRenovacao: proParaUltimate.body.usuario.proximaRenovacao
+    }, datasPro, "Troca manual nao deve alterar datas do ciclo");
+
+    const ultimateParaPro = await request({
+      method: "PUT",
+      port,
+      path: "/admin/usuarios/user_ultimate_full",
+      token: adminToken,
+      body: {
+        nome: "Ultimate Full",
+        email: "ultimate-full@teste.local",
+        papel: "cliente",
+        plano: "plano_pro_admin",
+        ativo: true
+      }
+    });
+    assert.strictEqual(ultimateParaPro.status, 200, JSON.stringify(ultimateParaPro.body));
+    assert.strictEqual(ultimateParaPro.body.usuario.creditos, 2000, "Ultimate -> Pro deve repor saldo do novo plano");
+    assert.deepStrictEqual({
+      cicloAtualInicio: ultimateParaPro.body.usuario.cicloAtualInicio,
+      cicloAtualFim: ultimateParaPro.body.usuario.cicloAtualFim,
+      proximaRenovacao: ultimateParaPro.body.usuario.proximaRenovacao
+    }, datasPro, "Downgrade manual nao deve alterar datas do ciclo");
+
+    const trocaComOverride = await request({
+      method: "PUT",
+      port,
+      path: "/admin/usuarios/user_free_saldo",
+      token: adminToken,
+      body: {
+        nome: "Free Saldo",
+        email: "free-saldo@teste.local",
+        papel: "cliente",
+        plano: "plano_ultimate_admin",
+        creditosOverrideManual: true,
+        creditos: 0,
+        ativo: true
+      }
+    });
+    assert.strictEqual(trocaComOverride.status, 200, JSON.stringify(trocaComOverride.body));
+    assert.strictEqual(trocaComOverride.body.usuario.creditos, 0, "Override manual na troca deve respeitar zero");
+    assert.strictEqual(trocaComOverride.body.usuario.planoAssinatura, "plano_ultimate_admin");
+
+    const edicaoSemTroca = await request({
+      method: "PUT",
+      port,
+      path: "/admin/usuarios/user_sem_troca",
+      token: adminToken,
+      body: {
+        nome: "Sem Troca Editado",
+        email: "sem-troca@teste.local",
+        papel: "cliente",
+        plano: "plano_pro_admin",
+        ativo: true
+      }
+    });
+    assert.strictEqual(edicaoSemTroca.status, 200, JSON.stringify(edicaoSemTroca.body));
+    assert.strictEqual(edicaoSemTroca.body.usuario.creditos, 1500, "Edicao sem troca de plano nao deve recalcular creditos");
+
+    const ajusteManualSemTroca = await request({
+      method: "PUT",
+      port,
+      path: "/admin/usuarios/user_sem_troca",
+      token: adminToken,
+      body: {
+        nome: "Sem Troca Editado",
+        email: "sem-troca@teste.local",
+        papel: "cliente",
+        plano: "plano_pro_admin",
+        creditosOverrideManual: true,
+        creditos: 777,
+        ativo: true
+      }
+    });
+    assert.strictEqual(ajusteManualSemTroca.status, 200, JSON.stringify(ajusteManualSemTroca.body));
+    assert.strictEqual(ajusteManualSemTroca.body.usuario.creditos, 777, "Ajuste manual sem troca deve continuar funcionando");
+    assert.strictEqual(usuarioPersistido("user_sem_troca").creditos, 777);
 
     const abrirCadastro = await request({
       method: "PUT",

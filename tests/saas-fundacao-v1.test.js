@@ -35,6 +35,18 @@ const planoCiclo = {
   limites: { creditosPorCiclo: 900, cicloDias: 30 }
 };
 
+const planoPro = {
+  nome: "Pro",
+  creditosModelo: "ciclo",
+  limites: { creditosPorCiclo: 2000, cicloDias: 30 }
+};
+
+const planoUltimate = {
+  nome: "Ultimate",
+  creditosModelo: "ciclo",
+  limites: { creditosPorCiclo: 4000, cicloDias: 30 }
+};
+
 const planoLegado = {
   nome: "Legado Real",
   limites: { creditos: 123, sessoes: 2 },
@@ -109,6 +121,62 @@ saas.inicializarCreditosUsuarioAdminManual({
 });
 assert.strictEqual(adminCicloAutorizado.creditos, 900, "Admin manual autorizado deve abrir ciclo com creditos do plano");
 assert.strictEqual(adminCicloAutorizado.ultimoCicloCreditoId, "admin-ciclo-teste");
+
+const freeEsgotadoParaPro = {
+  plano: "Free",
+  planoAssinatura: "Free",
+  creditos: 0,
+  statusConta: "teste_esgotado",
+  assinaturaStatus: "nao_aplicavel"
+};
+saas.aplicarTrocaManualPlanoAdmin({
+  usuario: freeEsgotadoParaPro,
+  plano: planoPro,
+  planoIdentidade: "plano_pro"
+});
+assert.strictEqual(freeEsgotadoParaPro.plano, "plano_pro");
+assert.strictEqual(freeEsgotadoParaPro.planoAssinatura, "plano_pro");
+assert.strictEqual(freeEsgotadoParaPro.creditos, 2000, "Free esgotado -> Pro deve repor saldo do plano");
+assert.strictEqual(freeEsgotadoParaPro.statusConta, "ativa", "Troca para plano pago nao pode manter teste_esgotado");
+
+const freeSaldoParaPro = { plano: "Free", planoAssinatura: "Free", creditos: 120, statusConta: "ativa" };
+saas.aplicarTrocaManualPlanoAdmin({ usuario: freeSaldoParaPro, plano: planoPro, planoIdentidade: "plano_pro" });
+assert.strictEqual(freeSaldoParaPro.creditos, 2000, "Free com saldo residual -> Pro nao soma saldo antigo");
+
+const datasOriginais = {
+  cicloAtualInicio: "2026-08-01T00:00:00.000Z",
+  cicloAtualFim: "2026-08-31T00:00:00.000Z",
+  proximaRenovacao: "2026-08-31T00:00:00.000Z"
+};
+const proParaUltimate = {
+  plano: "Pro",
+  planoAssinatura: "Pro",
+  creditos: 1300,
+  statusConta: "ativa",
+  assinaturaStatus: "ativa",
+  ...datasOriginais
+};
+saas.aplicarTrocaManualPlanoAdmin({ usuario: proParaUltimate, plano: planoUltimate, planoIdentidade: "plano_ultimate" });
+assert.strictEqual(proParaUltimate.creditos, 4000, "Pro -> Ultimate deve sobrescrever saldo para novo plano");
+assert.deepStrictEqual({
+  cicloAtualInicio: proParaUltimate.cicloAtualInicio,
+  cicloAtualFim: proParaUltimate.cicloAtualFim,
+  proximaRenovacao: proParaUltimate.proximaRenovacao
+}, datasOriginais, "Troca manual nao deve alterar datas/ciclo");
+
+const ultimateParaPro = { plano: "Ultimate", planoAssinatura: "Ultimate", creditos: 4000, assinaturaStatus: "ativa", ...datasOriginais };
+saas.aplicarTrocaManualPlanoAdmin({ usuario: ultimateParaPro, plano: planoPro, planoIdentidade: "plano_pro" });
+assert.strictEqual(ultimateParaPro.creditos, 2000, "Ultimate -> Pro deve sobrescrever saldo para o plano menor");
+
+const trocaComOverrideZero = { plano: "Free", planoAssinatura: "Free", creditos: 0, statusConta: "teste_esgotado" };
+saas.aplicarTrocaManualPlanoAdmin({
+  usuario: trocaComOverrideZero,
+  plano: planoPro,
+  planoIdentidade: "plano_pro",
+  body: { creditosOverrideManual: true, creditos: 0 }
+});
+assert.strictEqual(trocaComOverrideZero.creditos, 0, "Override manual na troca deve respeitar zero explicito");
+assert.strictEqual(trocaComOverrideZero.statusConta, "ativa");
 
 const usuarioCicloAutorizado = {
   assinaturaStatus: "pagamento_confirmado",
@@ -211,6 +279,9 @@ const rotaPutUsuario = trechoEntre(indexFonte, 'app.put("/admin/usuarios/:id"', 
 assert.ok(rotaPutUsuario.includes("auditoriaCreditos"), "ajuste manual de creditos deve registrar auditoria");
 assert.ok(rotaPutUsuario.includes("anterior: creditosAntes"), "auditoria deve guardar saldo anterior");
 assert.ok(rotaPutUsuario.includes("novo: usuario.creditos"), "auditoria deve guardar novo saldo");
+assert.ok(rotaPutUsuario.includes("planoMudou"), "edicao Admin deve detectar troca de plano");
+assert.ok(rotaPutUsuario.includes("aplicarTrocaManualPlanoAdmin"), "troca manual de plano deve reutilizar helper central");
+assert.ok(rotaPutUsuario.includes('Object.prototype.hasOwnProperty.call(body, "creditos")'), "edicao sem creditos nao deve forcar override silencioso");
 
 const helperPlano = trechoEntre(indexFonte, "function getPlanoPorNome", "// =============== FUNCAO GERAR LINK AFILIADO SHOPEE");
 assert.ok(!helperPlano.includes("planos?.free"), "resolver plano nao deve cair em free hardcoded");
