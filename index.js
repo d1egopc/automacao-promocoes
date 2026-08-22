@@ -181,6 +181,7 @@ const criarRotasManualV2 = require("./modules/manual-v2/manual-offers.routes");
 const criarRotasDiscord = require("./modules/discord/discord.routes");
 const criarRotasAjudaContextual = require("./modules/ajuda-contextual/routes");
 const criarRotasVitrine = require("./modules/vitrine/routes");
+const criarRotasFinanceiroSimulado = require("./modules/financeiro/simulado.routes");
 const { publicarOfertaConfirmadaVitrine } = require("./modules/vitrine/hook");
 const {
   capturarOfertaComercialConfirmadaVitrine,
@@ -9892,6 +9893,13 @@ app.post("/admin/assinaturas/:usuarioId/pagamento-simulado", exigirAdminMasterEs
     });
   }
 });
+
+app.use("/admin/financeiro/simulado", exigirAdminMasterEstrito, criarRotasFinanceiroSimulado({
+  getUsuarios: () => usuarios,
+  getPlanos: () => planos,
+  salvarUsuarios: () => salvarUsuarios(),
+  isAdminMaster
+}));
 
 app.get("/admin/usuarios", exigirAdminMasterEstrito, (req, res) => {
   if (!isAdminMaster(req)) {
