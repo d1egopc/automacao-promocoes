@@ -182,6 +182,10 @@ const criarRotasDiscord = require("./modules/discord/discord.routes");
 const criarRotasAjudaContextual = require("./modules/ajuda-contextual/routes");
 const criarRotasVitrine = require("./modules/vitrine/routes");
 const criarRotasFinanceiroSimulado = require("./modules/financeiro/simulado.routes");
+const {
+  criarRotasFinanceiroMercadoPago,
+  criarWebhookMercadoPago
+} = require("./modules/financeiro/mercadopago.routes");
 const { publicarOfertaConfirmadaVitrine } = require("./modules/vitrine/hook");
 const {
   capturarOfertaComercialConfirmadaVitrine,
@@ -9899,6 +9903,17 @@ app.use("/admin/financeiro/simulado", exigirAdminMasterEstrito, criarRotasFinanc
   getPlanos: () => planos,
   salvarUsuarios: () => salvarUsuarios(),
   isAdminMaster
+}));
+
+app.use("/admin/financeiro/mercadopago", exigirAdminMasterEstrito, criarRotasFinanceiroMercadoPago({
+  getUsuarios: () => usuarios,
+  getPlanos: () => planos,
+  isAdminMaster
+}));
+
+app.use("/webhooks/mercadopago", criarWebhookMercadoPago({
+  getUsuarios: () => usuarios,
+  salvarUsuarios: () => salvarUsuarios()
 }));
 
 app.get("/admin/usuarios", exigirAdminMasterEstrito, (req, res) => {
