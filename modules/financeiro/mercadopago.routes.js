@@ -5,7 +5,8 @@ const {
   PROVIDER_MERCADOPAGO,
   criarCobrancaMercadoPagoPix,
   mercadoPagoConfig,
-  processarWebhookMercadoPago
+  processarWebhookMercadoPago,
+  reconciliarOrdersMercadoPagoPendentes
 } = require("./mercadopago.adapter");
 const { criarRepositorioFinanceiroPostgres } = require("./financeiro.repository");
 const { reconciliarLedgerFinanceiroPendente } = require("./financeiro.service");
@@ -33,9 +34,97 @@ function erroHttp(res, erro, fallback = "mercadopago_falhou") {
   return res.status(status).json(resposta);
 }
 
+async function executarReconciliacaoOrdersMercadoPago({
+  getUsuarios = () => [],
+  salvarUsuarios = () => {},
+  repositorio = criarRepositorioFinanceiroPostgres(),
+  client = null,
+  env = process.env,
+  limite = 10,
+  agora = new Date()
+} = {}) {
+  const resultado = await reconciliarOrdersMercadoPagoPendentes({
+    repositorio,
+    client,
+    env,
+    limite,
+    agora
+  });
+
+  let projecao = { ok: true, pulada: true };
+  if (resultado.aprovados > 0) {
+    projecao = await reconciliarLedgerFinanceiroPendente({
+      repositorio,
+      lerUsuarios: async () => getUsuarios(),
+      salvarUsuarios: async () => salvarUsuarios(),
+      limite: 20,
+      filtro: {
+        provider: PROVIDER_MERCADOPAGO
+      }
+    });
+  }
+
+  return {
+    ...resultado,
+    projecao
+  };
+}
+
+function iniciarSchedulerReconciliacaoMercadoPago({
+  getUsuarios = () => [],
+  salvarUsuarios = () => {},
+  repositorio = criarRepositorioFinanceiroPostgres(),
+  client = null,
+  env = process.env,
+  intervaloMs = Number(env.MERCADOPAGO_RECONCILIATION_INTERVAL_MS || 60000),
+  limite = Number(env.MERCADOPAGO_RECONCILIATION_BATCH || 10)
+} = {}) {
+  const config = mercadoPagoConfig(env);
+  if (env.MERCADOPAGO_RECONCILIATION_SCHEDULER === "false" || !config.configurado) {
+    return null;
+  }
+
+  let rodando = false;
+  const tick = async () => {
+    if (rodando) return;
+    rodando = true;
+    try {
+      const resultado = await executarReconciliacaoOrdersMercadoPago({
+        getUsuarios,
+        salvarUsuarios,
+        repositorio,
+        client,
+        env,
+        limite
+      });
+      if (resultado.processados || resultado.manuais || resultado.falhas || resultado.expirados) {
+        console.log("[MERCADOPAGO-RECONCILIACAO-SCHEDULER]", JSON.stringify({
+          processados: resultado.processados,
+          aprovados: resultado.aprovados,
+          manuais: resultado.manuais,
+          falhas: resultado.falhas,
+          expirados: resultado.expirados,
+          projecao: resultado.projecao?.ok === true
+        }));
+      }
+    } catch (erro) {
+      console.log("[MERCADOPAGO-RECONCILIACAO-SCHEDULER-ERRO]", {
+        codigo: erro.codigo || "mercadopago_reconciliacao_scheduler_falhou"
+      });
+    } finally {
+      rodando = false;
+    }
+  };
+
+  const timer = setInterval(tick, Math.max(30000, Number(intervaloMs) || 60000));
+  if (typeof timer.unref === "function") timer.unref();
+  return timer;
+}
+
 function criarRotasFinanceiroMercadoPago({
   getUsuarios = () => [],
   getPlanos = () => ({}),
+  salvarUsuarios = () => {},
   isAdminMaster = () => false,
   repositorio = criarRepositorioFinanceiroPostgres(),
   client = null,
@@ -117,6 +206,22 @@ function criarRotasFinanceiroMercadoPago({
     }
   });
 
+  router.post("/reconciliar-orders", async (req, res) => {
+    try {
+      const resultado = await executarReconciliacaoOrdersMercadoPago({
+        getUsuarios,
+        salvarUsuarios,
+        repositorio,
+        client,
+        env,
+        limite: req.body?.limite || 10
+      });
+      return res.json(resultado);
+    } catch (erro) {
+      return erroHttp(res, erro, "mercadopago_reconciliacao_orders_falhou");
+    }
+  });
+
   return router;
 }
 
@@ -172,6 +277,8 @@ function criarWebhookMercadoPago({
 }
 
 module.exports = {
+  executarReconciliacaoOrdersMercadoPago,
   criarRotasFinanceiroMercadoPago,
-  criarWebhookMercadoPago
+  criarWebhookMercadoPago,
+  iniciarSchedulerReconciliacaoMercadoPago
 };

@@ -20,6 +20,15 @@ const MERCADOPAGO_PIX_SANDBOX_PAYER = {
   firstName: "APRO",
   email: "test_user_br@testuser.com"
 };
+const MERCADOPAGO_RECONCILIATION_BACKOFF_MS = Object.freeze([
+  60 * 1000,
+  3 * 60 * 1000,
+  10 * 60 * 1000,
+  30 * 60 * 1000,
+  2 * 60 * 60 * 1000
+]);
+const MERCADOPAGO_RECONCILIATION_MAX_ATTEMPTS = 8;
+const MERCADOPAGO_RECONCILIATION_TTL_MS = 48 * 60 * 60 * 1000;
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -43,6 +52,10 @@ function idCurto() {
 
 function iso(data = new Date()) {
   return new Date(data).toISOString();
+}
+
+function adicionarMs(data = new Date(), ms = 0) {
+  return new Date(new Date(data).getTime() + Number(ms || 0));
 }
 
 function normalizarMoeda(valor = "") {
@@ -80,6 +93,90 @@ function metadataObjeto(valor = {}) {
     }
   }
   return {};
+}
+
+function reconciliationBackoffMs(tentativas = 0) {
+  const indice = Math.max(0, Math.min(MERCADOPAGO_RECONCILIATION_BACKOFF_MS.length - 1, numeroInteiro(tentativas, 0)));
+  return MERCADOPAGO_RECONCILIATION_BACKOFF_MS[indice];
+}
+
+function metadataReconciliacaoMercadoPago({
+  metadata = {},
+  orderId = "",
+  agora = new Date(),
+  status = "pending",
+  attempts = null,
+  nextAt = null,
+  lastError = ""
+} = {}) {
+  const atual = metadataObjeto(metadata);
+  const tentativas = attempts === null
+    ? numeroInteiro(atual.reconciliationAttempts, 0)
+    : Math.max(0, numeroInteiro(attempts, 0));
+  const proxima = nextAt === null
+    ? adicionarMs(agora, reconciliationBackoffMs(tentativas)).toISOString()
+    : nextAt;
+  return {
+    ...atual,
+    mpOrderId: texto(orderId || atual.mpOrderId),
+    reconciliationAttempts: tentativas,
+    reconciliationNextAt: texto(proxima),
+    reconciliationStatus: texto(status || atual.reconciliationStatus || "pending"),
+    lastReconciliationError: sanitizarTextoMercadoPago(lastError || "")
+  };
+}
+
+function metadataReconciliacaoAposTentativa({
+  payment = {},
+  status = "pending",
+  motivo = "",
+  agora = new Date()
+} = {}) {
+  const metadata = metadataObjeto(payment.metadata);
+  const attempts = numeroInteiro(metadata.reconciliationAttempts, 0) + 1;
+  const statusFinal = attempts >= MERCADOPAGO_RECONCILIATION_MAX_ATTEMPTS && status === "pending"
+    ? "exhausted"
+    : status;
+  return metadataReconciliacaoMercadoPago({
+    metadata,
+    orderId: metadata.mpOrderId,
+    agora,
+    status: statusFinal,
+    attempts,
+    nextAt: statusFinal === "pending"
+      ? adicionarMs(agora, reconciliationBackoffMs(attempts)).toISOString()
+      : "",
+    lastError: motivo
+  });
+}
+
+async function atualizarMetadataReconciliacaoPayment({ repositorio, payment = {}, metadata = {} } = {}) {
+  const paymentId = texto(payment.id);
+  if (!paymentId) return null;
+  if (typeof repositorio?.atualizarPaymentMetadata === "function") {
+    return repositorio.atualizarPaymentMetadata(paymentId, metadata);
+  }
+  if (typeof repositorio?.transacao === "function") {
+    return repositorio.transacao(async (tx) => {
+      if (typeof tx.atualizarPayment !== "function") return null;
+      return tx.atualizarPayment(paymentId, { metadata });
+    });
+  }
+  return null;
+}
+
+function reconciliationStatusParaResultado(resultado = {}) {
+  if (resultado.manual === true) return "manual_review";
+  if (["payment.approved", "payment.rejected", "payment.cancelled", "payment.refunded"].includes(resultado.type)) {
+    return "finalized";
+  }
+  return "pending";
+}
+
+function paymentExpiradoParaReconciliacao(payment = {}, agora = new Date(), ttlMs = MERCADOPAGO_RECONCILIATION_TTL_MS) {
+  const criado = new Date(payment.created_at || payment.createdAt || agora).getTime();
+  const atual = new Date(agora).getTime();
+  return Number.isFinite(criado) && atual - criado > Number(ttlMs || MERCADOPAGO_RECONCILIATION_TTL_MS);
 }
 
 function resolverProviderAmountCentsMercadoPago({ planSnapshot = {}, sandboxTeste = false } = {}) {
@@ -624,6 +721,23 @@ async function criarCobrancaMercadoPagoPix({
   });
   const idempotencyKey = idempotencyKeyOrder(ext);
   const order = await mpClient.criarOrder(orderBody, { idempotencyKey });
+  const metadataComOrder = metadataReconciliacaoMercadoPago({
+    metadata: metadataPayment,
+    orderId: order.id || "",
+    agora,
+    status: "pending",
+    attempts: 0,
+    lastError: ""
+  });
+  const paymentComOrder = await persistirMetadataPaymentMercadoPago({
+    repositorio,
+    payment: { ...payment, id: payment.id || paymentAtualizado?.id || cobranca.payment?.id },
+    metadata: metadataComOrder
+  });
+  payment.metadata = metadataComOrder;
+  if (paymentComOrder && typeof paymentComOrder === "object") {
+    payment.id = paymentComOrder.id || payment.id;
+  }
 
   const eventoCreated = await processarFinancialPaymentEvent({
     type: "payment.created",
@@ -660,42 +774,18 @@ async function criarCobrancaMercadoPagoPix({
   };
 }
 
-async function processarWebhookMercadoPago({
-  headers = {},
-  query = {},
-  body = {},
+async function processarOrderMercadoPago({
+  orderId = "",
+  origem = "webhook",
+  webhook = {},
+  expectedExternalPaymentId = "",
   repositorio = criarRepositorioFinanceiroPostgres(),
   client = null,
   env = process.env,
   agora = new Date()
 } = {}) {
   const config = mercadoPagoConfig(env);
-  const queryDataId = texto(query["data.id"] || query.data_id);
-  const bodyDataId = texto(body?.data?.id || body?.resource);
-  const dataId = texto(queryDataId || bodyDataId);
-  const xSignature = headers["x-signature"] || headers["X-Signature"];
-  const xRequestId = headers["x-request-id"] || headers["X-Request-Id"];
-  const assinatura = validarAssinaturaWebhookMercadoPago({
-    xSignature,
-    xRequestId,
-    dataId,
-    secret: config.webhookSecret
-  });
-  console.log("[MERCADOPAGO-WEBHOOK-ASSINATURA-DIAGNOSTICO]", JSON.stringify(
-    diagnosticoAssinaturaWebhookMercadoPago({
-      xSignature,
-      xRequestId,
-      dataId,
-      secret: config.webhookSecret,
-      queryDataIdPresente: Boolean(queryDataId),
-      bodyDataIdPresente: Boolean(bodyDataId),
-      codigo: assinatura.ok ? "ok" : assinatura.codigo,
-      manualValido: assinatura.manualValido,
-      sdkValido: assinatura.sdkValido
-    })
-  ));
-
-  if (!assinatura.ok) return { ok: false, statusHttp: 401, codigo: assinatura.codigo };
+  const dataId = texto(orderId);
   if (!dataId) return { ok: false, statusHttp: 400, codigo: "mercadopago_data_id_obrigatorio" };
   if (!config.configurado && !client) {
     return { ok: false, statusHttp: 503, codigo: "mercadopago_nao_configurado" };
@@ -706,6 +796,17 @@ async function processarWebhookMercadoPago({
   const externalReference = extrairExternalReference(order);
   if (!externalReference) {
     return { ok: true, manual: true, codigo: "mercadopago_external_reference_ausente", orderId: dataId };
+  }
+  const externalEsperado = texto(expectedExternalPaymentId);
+  if (externalEsperado && externalReference !== externalEsperado) {
+    return {
+      ok: true,
+      manual: true,
+      codigo: "mercadopago_external_reference_divergente",
+      externalPaymentId: externalEsperado,
+      externalReferenceRecebido: externalReference,
+      orderId: dataId
+    };
   }
 
   const payment = await repositorio.buscarPayment(PROVIDER_MERCADOPAGO, externalReference);
@@ -758,11 +859,13 @@ async function processarWebhookMercadoPago({
     };
   }
 
-  const providerEventId = providerEventIdWebhook({
-    webhook: { id: body.id, body, dataId, receivedAt: iso(agora) },
-    order,
-    mapeamento
-  });
+  const providerEventId = origem === "reconciliation"
+    ? `mp:reconciliation:${slug(order.id || dataId)}:${slug(mapeamento.status)}:${slug(mapeamento.statusDetail)}`
+    : providerEventIdWebhook({
+      webhook: { id: webhook.id, body: webhook.body, dataId, receivedAt: iso(agora) },
+      order,
+      mapeamento
+    });
   const resultado = await processarFinancialPaymentEvent({
     type: mapeamento.type,
     provider: PROVIDER_MERCADOPAGO,
@@ -772,17 +875,18 @@ async function processarWebhookMercadoPago({
     planoId: payment.plano_id || payment.planoId,
     amountCents: amountCentsOrder,
     currency: currencyOrder,
-    occurredAt: body.date_created || order.last_updated_date || null,
+    occurredAt: webhook.body?.date_created || order.last_updated_date || null,
     receivedAt: agora,
     metadata: {
       adapter: "mercadopago_pix_v1",
+      origem: origem === "reconciliation" ? "mercadopago_order_reconciliation" : "mercadopago_webhook",
       mpOrderId: order.id || dataId,
       mpStatus: mapeamento.status,
       mpStatusDetail: mapeamento.statusDetail,
       providerAmountCents: amountCentsOrder,
       commercialAmountCents: amountCentsPayment,
-      webhookId: body.id || "",
-      webhookAction: body.action || ""
+      webhookId: webhook.body?.id || "",
+      webhookAction: webhook.body?.action || ""
     }
   }, { repositorio, agora });
 
@@ -800,6 +904,169 @@ async function processarWebhookMercadoPago({
   };
 }
 
+async function reconciliarOrdersMercadoPagoPendentes({
+  repositorio = criarRepositorioFinanceiroPostgres(),
+  client = null,
+  env = process.env,
+  agora = new Date(),
+  limite = 10,
+  maxTentativas = MERCADOPAGO_RECONCILIATION_MAX_ATTEMPTS,
+  ttlMs = MERCADOPAGO_RECONCILIATION_TTL_MS
+} = {}) {
+  const config = mercadoPagoConfig(env);
+  if (!config.configurado && !client) {
+    return { ok: true, pulada: true, codigo: "mercadopago_nao_configurado", processados: 0 };
+  }
+  if (typeof repositorio?.listarPaymentsMercadoPagoParaReconciliacao !== "function") {
+    return { ok: false, codigo: "repositorio_reconciliacao_indisponivel" };
+  }
+
+  const payments = await repositorio.listarPaymentsMercadoPagoParaReconciliacao({
+    limite,
+    maxTentativas,
+    agora
+  });
+  const resumo = {
+    ok: true,
+    processados: 0,
+    aprovados: 0,
+    pendentes: 0,
+    manuais: 0,
+    expirados: 0,
+    falhas: 0,
+    resultados: []
+  };
+
+  for (const payment of payments) {
+    const metadata = metadataObjeto(payment.metadata);
+    const orderId = texto(metadata.mpOrderId);
+    if (!orderId) continue;
+
+    if (paymentExpiradoParaReconciliacao(payment, agora, ttlMs)) {
+      const expirado = metadataReconciliacaoAposTentativa({
+        payment,
+        status: "exhausted",
+        motivo: "mercadopago_reconciliacao_ttl_expirado",
+        agora
+      });
+      await atualizarMetadataReconciliacaoPayment({ repositorio, payment, metadata: expirado });
+      resumo.expirados += 1;
+      resumo.resultados.push({
+        externalPaymentId: payment.external_payment_id || payment.externalPaymentId,
+        orderId,
+        codigo: "mercadopago_reconciliacao_ttl_expirado"
+      });
+      continue;
+    }
+
+    try {
+      const resultado = await processarOrderMercadoPago({
+        orderId,
+        origem: "reconciliation",
+        expectedExternalPaymentId: payment.external_payment_id || payment.externalPaymentId,
+        repositorio,
+        client,
+        env,
+        agora
+      });
+      const statusReconciliacao = reconciliationStatusParaResultado(resultado);
+      const metadataAtualizada = metadataReconciliacaoAposTentativa({
+        payment,
+        status: statusReconciliacao,
+        motivo: resultado.codigo || resultado.resultado?.motivo || "",
+        agora
+      });
+      await atualizarMetadataReconciliacaoPayment({ repositorio, payment, metadata: metadataAtualizada });
+
+      resumo.processados += 1;
+      if (resultado.type === "payment.approved") resumo.aprovados += 1;
+      if (resultado.type === "payment.pending" || resultado.type === "payment.created") resumo.pendentes += 1;
+      if (resultado.manual === true) resumo.manuais += 1;
+      resumo.resultados.push({
+        externalPaymentId: resultado.externalPaymentId || payment.external_payment_id || payment.externalPaymentId,
+        orderId: resultado.orderId || orderId,
+        type: resultado.type || "",
+        codigo: resultado.codigo || resultado.resultado?.motivo || "ok",
+        manual: resultado.manual === true
+      });
+    } catch (e) {
+      const metadataFalha = metadataReconciliacaoAposTentativa({
+        payment,
+        status: "pending",
+        motivo: e.codigo || e.message || "mercadopago_reconciliacao_falhou",
+        agora
+      });
+      await atualizarMetadataReconciliacaoPayment({ repositorio, payment, metadata: metadataFalha });
+      resumo.falhas += 1;
+      resumo.resultados.push({
+        externalPaymentId: payment.external_payment_id || payment.externalPaymentId,
+        orderId,
+        codigo: sanitizarTextoMercadoPago(e.codigo || e.message || "mercadopago_reconciliacao_falhou")
+      });
+    }
+  }
+
+  if (resumo.processados || resumo.manuais || resumo.falhas || resumo.expirados) {
+    console.log("[MERCADOPAGO-RECONCILIACAO-ORDERS]", JSON.stringify({
+      processados: resumo.processados,
+      aprovados: resumo.aprovados,
+      pendentes: resumo.pendentes,
+      manuais: resumo.manuais,
+      expirados: resumo.expirados,
+      falhas: resumo.falhas
+    }));
+  }
+
+  return resumo;
+}
+
+async function processarWebhookMercadoPago({
+  headers = {},
+  query = {},
+  body = {},
+  repositorio = criarRepositorioFinanceiroPostgres(),
+  client = null,
+  env = process.env,
+  agora = new Date()
+} = {}) {
+  const config = mercadoPagoConfig(env);
+  const queryDataId = texto(query["data.id"] || query.data_id);
+  const bodyDataId = texto(body?.data?.id || body?.resource);
+  const dataId = texto(queryDataId || bodyDataId);
+  const xSignature = headers["x-signature"] || headers["X-Signature"];
+  const xRequestId = headers["x-request-id"] || headers["X-Request-Id"];
+  const assinatura = validarAssinaturaWebhookMercadoPago({
+    xSignature,
+    xRequestId,
+    dataId,
+    secret: config.webhookSecret
+  });
+  console.log("[MERCADOPAGO-WEBHOOK-ASSINATURA-DIAGNOSTICO]", JSON.stringify(
+    diagnosticoAssinaturaWebhookMercadoPago({
+      xSignature,
+      xRequestId,
+      dataId,
+      secret: config.webhookSecret,
+      queryDataIdPresente: Boolean(queryDataId),
+      bodyDataIdPresente: Boolean(bodyDataId),
+      codigo: assinatura.ok ? "ok" : assinatura.codigo,
+      manualValido: assinatura.manualValido,
+      sdkValido: assinatura.sdkValido
+    })
+  ));
+
+  if (!assinatura.ok) return { ok: false, statusHttp: 401, codigo: assinatura.codigo };
+  return processarOrderMercadoPago({
+    orderId: dataId,
+    origem: "webhook",
+    webhook: { id: body.id, body },
+    repositorio,
+    client,
+    env,
+    agora
+  });
+}
+
 module.exports = {
   PROVIDER_MERCADOPAGO,
   criarCobrancaMercadoPagoPix,
@@ -809,7 +1076,9 @@ module.exports = {
   mapearStatusMercadoPago,
   mercadoPagoConfig,
   montarOrderPix,
+  processarOrderMercadoPago,
   processarWebhookMercadoPago,
+  reconciliarOrdersMercadoPagoPendentes,
   sanitizarErroMercadoPago,
   validarAssinaturaWebhookMercadoPago
 };

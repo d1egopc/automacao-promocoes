@@ -184,7 +184,8 @@ const criarRotasVitrine = require("./modules/vitrine/routes");
 const criarRotasFinanceiroSimulado = require("./modules/financeiro/simulado.routes");
 const {
   criarRotasFinanceiroMercadoPago,
-  criarWebhookMercadoPago
+  criarWebhookMercadoPago,
+  iniciarSchedulerReconciliacaoMercadoPago
 } = require("./modules/financeiro/mercadopago.routes");
 const { publicarOfertaConfirmadaVitrine } = require("./modules/vitrine/hook");
 const {
@@ -9908,6 +9909,7 @@ app.use("/admin/financeiro/simulado", exigirAdminMasterEstrito, criarRotasFinanc
 app.use("/admin/financeiro/mercadopago", exigirAdminMasterEstrito, criarRotasFinanceiroMercadoPago({
   getUsuarios: () => usuarios,
   getPlanos: () => planos,
+  salvarUsuarios: () => salvarUsuarios(),
   isAdminMaster
 }));
 
@@ -9915,6 +9917,14 @@ app.use("/webhooks/mercadopago", criarWebhookMercadoPago({
   getUsuarios: () => usuarios,
   salvarUsuarios: () => salvarUsuarios()
 }));
+
+if (!global.__optimusMercadoPagoReconciliationScheduler) {
+  global.__optimusMercadoPagoReconciliationScheduler = true;
+  iniciarSchedulerReconciliacaoMercadoPago({
+    getUsuarios: () => usuarios,
+    salvarUsuarios: () => salvarUsuarios()
+  });
+}
 
 app.get("/admin/usuarios", exigirAdminMasterEstrito, (req, res) => {
   if (!isAdminMaster(req)) {

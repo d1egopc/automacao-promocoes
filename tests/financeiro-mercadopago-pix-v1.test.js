@@ -8,7 +8,10 @@ const http = require("http");
 const path = require("path");
 
 const financeiro = require("../modules/financeiro");
-const { criarRotasFinanceiroMercadoPago } = require("../modules/financeiro/mercadopago.routes");
+const {
+  criarRotasFinanceiroMercadoPago,
+  executarReconciliacaoOrdersMercadoPago
+} = require("../modules/financeiro/mercadopago.routes");
 
 function clone(valor) {
   return JSON.parse(JSON.stringify(valor));
@@ -45,6 +48,25 @@ class RepoMemoria {
 
   async buscarPayment(provider, externalPaymentId) {
     return this.state.payments.find((p) => p.provider === provider && p.external_payment_id === externalPaymentId) || null;
+  }
+
+  async listarPaymentsMercadoPagoParaReconciliacao({ limite = 10, maxTentativas = 8, agora = new Date() } = {}) {
+    const instante = new Date(agora).getTime();
+    return this.state.payments
+      .filter((p) => p.provider === "mercadopago")
+      .filter((p) => ["created", "pending"].includes(p.status))
+      .filter((p) => p.metadata?.mpOrderId)
+      .filter((p) => !["manual_review", "exhausted", "finalized"].includes(p.metadata?.reconciliationStatus))
+      .filter((p) => Number(p.metadata?.reconciliationAttempts || 0) < Number(maxTentativas || 8))
+      .filter((p) => !p.metadata?.reconciliationNextAt || new Date(p.metadata.reconciliationNextAt).getTime() <= instante)
+      .slice(0, Number(limite || 10));
+  }
+
+  async atualizarPaymentMetadata(paymentId, metadata = {}) {
+    const p = this.state.payments.find((item) => item.id === paymentId);
+    if (!p) return null;
+    p.metadata = clone(metadata);
+    return p;
   }
 
   async listarLedgerPendente(opcoes = {}) {
@@ -133,7 +155,8 @@ class RepoMemoria {
           status: payment.status || "created",
           plan_snapshot: clone(payment.planSnapshot),
           plan_snapshot_captured_at: payment.planSnapshotCapturedAt,
-          metadata: payment.metadata || {}
+          metadata: payment.metadata || {},
+          created_at: payment.createdAt || new Date("2026-08-22T10:00:00.000Z").toISOString()
         };
         state.payments.push(row);
         return row;
@@ -580,7 +603,12 @@ function fechar(server) {
       pixSandboxPredefined: true,
       sandboxTestAmountCents: 5000,
       providerAmountCents: 5000,
-      commercialAmountCents: 3490
+      commercialAmountCents: 3490,
+      mpOrderId: cobrancaSandbox.orderId,
+      reconciliationAttempts: 0,
+      reconciliationNextAt: "2026-08-22T10:01:00.000Z",
+      reconciliationStatus: "pending",
+      lastReconciliationError: ""
     },
     "metadata financeira preserva valor provider sandbox separado do valor comercial"
   );
@@ -830,6 +858,293 @@ function fechar(server) {
   await webhook({ repo, client, orderId: cobranca.orderId, bodyId: "wh_approved" });
   await webhook({ repo, client, orderId: cobranca.orderId, bodyId: "wh_approved_outro" });
   assert.strictEqual(repo.state.ledger.filter((l) => l.ledger_type === "cycle_credit").length, 1, "webhook repetido/outro approved nao duplica");
+
+  const repoWebhookPrimeiro = new RepoMemoria();
+  const clientWebhookPrimeiro = new FakeMercadoPagoClient();
+  const cobWebhookPrimeiro = await cobrarPix({
+    repo: repoWebhookPrimeiro,
+    client: clientWebhookPrimeiro,
+    externalPaymentId: "mp_webhook_primeiro"
+  });
+  await webhook({
+    repo: repoWebhookPrimeiro,
+    client: clientWebhookPrimeiro,
+    orderId: cobWebhookPrimeiro.orderId,
+    bodyId: "wh_webhook_primeiro",
+    patch: {
+      total_amount: "34.90",
+      currency_id: "BRL",
+      transactions: { payments: [{ amount: "34.90", status: "processed", status_detail: "accredited" }] }
+    }
+  });
+  const recAposWebhook = await financeiro.reconciliarOrdersMercadoPagoPendentes({
+    repo: repoWebhookPrimeiro,
+    repositorio: repoWebhookPrimeiro,
+    client: clientWebhookPrimeiro,
+    agora: new Date("2026-08-22T12:00:00.000Z")
+  });
+  assert.strictEqual(recAposWebhook.processados, 0, "webhook fechou primeiro: reconciliador nao reprocessa payment finalizado");
+  assert.strictEqual(repoWebhookPrimeiro.state.ledger.filter((l) => l.ledger_type === "cycle_credit").length, 1);
+
+  const repoRec = new RepoMemoria();
+  const clientRec = new FakeMercadoPagoClient();
+  const usuariosRec = [{ id: "cliente_1", creditos: 123, plano: "free_beta" }];
+  const cobRec = await cobrarPix({ repo: repoRec, client: clientRec, externalPaymentId: "mp_reconciliation_approved" });
+  clientRec.setOrder(cobRec.orderId, {
+    total_amount: "34.90",
+    currency_id: "BRL",
+    transactions: { payments: [{ amount: "34.90", status: "processed", status_detail: "accredited" }] }
+  });
+  const recApproved = await executarReconciliacaoOrdersMercadoPago({
+    getUsuarios: () => usuariosRec,
+    salvarUsuarios: async () => {},
+    repositorio: repoRec,
+    client: clientRec,
+    agora: new Date("2026-08-22T12:00:00.000Z")
+  });
+  assert.strictEqual(recApproved.aprovados, 1, "reconciliador processa Order processed/accredited");
+  assert.strictEqual(repoRec.state.payments[0].status, "approved");
+  assert.strictEqual(repoRec.state.ledger.filter((l) => l.ledger_type === "cycle_credit").length, 1, "reconciliador gera 1 cycle_credit");
+  assert.strictEqual(repoRec.state.ledger[0].idempotency_key, "cycle_credit:mercadopago:mp_reconciliation_approved");
+  assert.strictEqual(repoRec.state.ledger[0].projection_status, "projected", "helper de rota projeta ledger aprovado");
+  assert.strictEqual(usuariosRec[0].creditos, 2000, "projection substitui saldo pelo snapshot");
+  assert.strictEqual(usuariosRec[0].plano, "pro");
+  await webhook({
+    repo: repoRec,
+    client: clientRec,
+    orderId: cobRec.orderId,
+    bodyId: "wh_depois_reconciliation"
+  });
+  assert.strictEqual(repoRec.state.ledger.filter((l) => l.ledger_type === "cycle_credit").length, 1, "webhook posterior nao duplica credito");
+
+  const repoConc = new RepoMemoria();
+  const clientConc = new FakeMercadoPagoClient();
+  const cobConc = await cobrarPix({ repo: repoConc, client: clientConc, externalPaymentId: "mp_reconciliation_concorrente" });
+  clientConc.setOrder(cobConc.orderId, {
+    total_amount: "34.90",
+    currency_id: "BRL",
+    transactions: { payments: [{ amount: "34.90", status: "processed", status_detail: "accredited" }] }
+  });
+  await Promise.all([
+    financeiro.reconciliarOrdersMercadoPagoPendentes({
+      repositorio: repoConc,
+      client: clientConc,
+      agora: new Date("2026-08-22T12:00:00.000Z")
+    }),
+    financeiro.reconciliarOrdersMercadoPagoPendentes({
+      repositorio: repoConc,
+      client: clientConc,
+      agora: new Date("2026-08-22T12:00:00.000Z")
+    })
+  ]);
+  assert.strictEqual(repoConc.state.ledger.filter((l) => l.ledger_type === "cycle_credit").length, 1, "concorrencia de reconciliador gera 1 cycle_credit");
+
+  const repoPendingRec = new RepoMemoria();
+  const clientPendingRec = new FakeMercadoPagoClient();
+  await cobrarPix({ repo: repoPendingRec, client: clientPendingRec, externalPaymentId: "mp_reconciliation_pending" });
+  const pendingRec = await financeiro.reconciliarOrdersMercadoPagoPendentes({
+    repositorio: repoPendingRec,
+    client: clientPendingRec,
+    agora: new Date("2026-08-22T12:00:00.000Z")
+  });
+  assert.strictEqual(pendingRec.pendentes, 1, "Order pendente continua pending");
+  assert.strictEqual(repoPendingRec.state.payments[0].status, "pending");
+  assert.strictEqual(repoPendingRec.state.ledger.length, 0);
+  assert.strictEqual(repoPendingRec.state.payments[0].metadata.reconciliationAttempts, 1);
+  assert.strictEqual(repoPendingRec.state.payments[0].metadata.reconciliationNextAt, "2026-08-22T12:03:00.000Z", "backoff 1m -> 3m apos primeira tentativa");
+  const pendingAntesBackoff = await financeiro.reconciliarOrdersMercadoPagoPendentes({
+    repositorio: repoPendingRec,
+    client: clientPendingRec,
+    agora: new Date("2026-08-22T12:02:00.000Z")
+  });
+  assert.strictEqual(pendingAntesBackoff.processados, 0, "backoff impede polling agressivo");
+
+  repoPendingRec.state.payments[0].metadata.reconciliationAttempts = 7;
+  repoPendingRec.state.payments[0].metadata.reconciliationNextAt = "2026-08-22T12:00:00.000Z";
+  await financeiro.reconciliarOrdersMercadoPagoPendentes({
+    repositorio: repoPendingRec,
+    client: clientPendingRec,
+    agora: new Date("2026-08-22T12:10:00.000Z")
+  });
+  assert.strictEqual(repoPendingRec.state.payments[0].metadata.reconciliationAttempts, 8, "limite de tentativas e atingido");
+  assert.strictEqual(repoPendingRec.state.payments[0].metadata.reconciliationStatus, "exhausted", "payment nao fica job eterno");
+
+  const repoVelho = new RepoMemoria();
+  const clientVelho = new FakeMercadoPagoClient();
+  await cobrarPix({ repo: repoVelho, client: clientVelho, externalPaymentId: "mp_reconciliation_old" });
+  repoVelho.state.payments[0].created_at = "2026-08-20T10:00:00.000Z";
+  repoVelho.state.payments[0].metadata.reconciliationNextAt = "2026-08-22T12:00:00.000Z";
+  const velho = await financeiro.reconciliarOrdersMercadoPagoPendentes({
+    repositorio: repoVelho,
+    client: clientVelho,
+    agora: new Date("2026-08-23T12:00:00.000Z")
+  });
+  assert.strictEqual(velho.expirados, 1, "payment velho e marcado como expirado");
+  assert.strictEqual(repoVelho.state.payments[0].metadata.reconciliationStatus, "exhausted");
+
+  const repoRefDiverg = new RepoMemoria();
+  const clientRefDiverg = new FakeMercadoPagoClient();
+  await cobrarPix({ repo: repoRefDiverg, client: clientRefDiverg, externalPaymentId: "mp_reconciliation_ref_diverg" });
+  clientRefDiverg.setOrder(repoRefDiverg.state.payments[0].metadata.mpOrderId, {
+    external_reference: "mp_reconciliation_ref_outro"
+  });
+  const refDiverg = await financeiro.reconciliarOrdersMercadoPagoPendentes({
+    repositorio: repoRefDiverg,
+    client: clientRefDiverg,
+    agora: new Date("2026-08-22T12:00:00.000Z")
+  });
+  assert.strictEqual(refDiverg.manuais, 1, "external_reference divergente vai para manual_review");
+  assert.strictEqual(repoRefDiverg.state.payments[0].metadata.reconciliationStatus, "manual_review");
+  assert.strictEqual(repoRefDiverg.state.ledger.length, 0);
+
+  const repoRefOutroPayment = new RepoMemoria();
+  const clientRefOutroPayment = new FakeMercadoPagoClient();
+  const cobRefOrigem = await cobrarPix({
+    repo: repoRefOutroPayment,
+    client: clientRefOutroPayment,
+    externalPaymentId: "mp_reconciliation_ref_origem"
+  });
+  await cobrarPix({
+    repo: repoRefOutroPayment,
+    client: clientRefOutroPayment,
+    externalPaymentId: "mp_reconciliation_ref_outro_existente"
+  });
+  repoRefOutroPayment.state.payments[1].metadata.reconciliationStatus = "finalized";
+  clientRefOutroPayment.setOrder(cobRefOrigem.orderId, {
+    external_reference: "mp_reconciliation_ref_outro_existente",
+    total_amount: "34.90",
+    transactions: { payments: [{ amount: "34.90", status: "processed", status_detail: "accredited" }] }
+  });
+  const refOutroPayment = await financeiro.reconciliarOrdersMercadoPagoPendentes({
+    repositorio: repoRefOutroPayment,
+    client: clientRefOutroPayment,
+    agora: new Date("2026-08-22T12:00:00.000Z")
+  });
+  assert.strictEqual(refOutroPayment.manuais, 1, "external_reference de outro payment existente tambem vai para manual_review");
+  assert.strictEqual(repoRefOutroPayment.state.payments[0].metadata.reconciliationStatus, "manual_review");
+  assert.strictEqual(repoRefOutroPayment.state.payments.every((p) => p.status === "created"), true);
+  assert.strictEqual(repoRefOutroPayment.state.ledger.length, 0);
+
+  const repoValorDiverg = new RepoMemoria();
+  const clientValorDiverg = new FakeMercadoPagoClient();
+  await cobrarPix({ repo: repoValorDiverg, client: clientValorDiverg, externalPaymentId: "mp_reconciliation_valor_diverg" });
+  clientValorDiverg.setOrder(repoValorDiverg.state.payments[0].metadata.mpOrderId, {
+    total_amount: "35.90",
+    transactions: { payments: [{ amount: "35.90", status: "processed", status_detail: "accredited" }] }
+  });
+  const valorDiverg = await financeiro.reconciliarOrdersMercadoPagoPendentes({
+    repositorio: repoValorDiverg,
+    client: clientValorDiverg,
+    agora: new Date("2026-08-22T12:00:00.000Z")
+  });
+  assert.strictEqual(valorDiverg.manuais, 1, "valor divergente vai para manual_review");
+  assert.strictEqual(repoValorDiverg.state.payments[0].metadata.reconciliationStatus, "manual_review");
+
+  const repoMoedaDiverg = new RepoMemoria();
+  const clientMoedaDiverg = new FakeMercadoPagoClient();
+  await cobrarPix({ repo: repoMoedaDiverg, client: clientMoedaDiverg, externalPaymentId: "mp_reconciliation_moeda_diverg" });
+  clientMoedaDiverg.setOrder(repoMoedaDiverg.state.payments[0].metadata.mpOrderId, {
+    currency_id: "USD",
+    transactions: { payments: [{ amount: "34.90", status: "processed", status_detail: "accredited" }] }
+  });
+  const moedaDiverg = await financeiro.reconciliarOrdersMercadoPagoPendentes({
+    repositorio: repoMoedaDiverg,
+    client: clientMoedaDiverg,
+    agora: new Date("2026-08-22T12:00:00.000Z")
+  });
+  assert.strictEqual(moedaDiverg.manuais, 1, "moeda divergente vai para manual_review");
+  assert.strictEqual(repoMoedaDiverg.state.payments[0].metadata.reconciliationStatus, "manual_review");
+
+  const repoSandboxRec = new RepoMemoria();
+  const clientSandboxRec = new FakeMercadoPagoClient();
+  const cobSandboxRec = await cobrarPix({
+    repo: repoSandboxRec,
+    client: clientSandboxRec,
+    externalPaymentId: "mp_reconciliation_sandbox",
+    env: { MERCADOPAGO_ENV: "test" }
+  });
+  clientSandboxRec.setOrder(cobSandboxRec.orderId, {
+    total_amount: "50.00",
+    currency_id: "BRL",
+    transactions: { payments: [{ amount: "50.00", status: "processed", status_detail: "accredited" }] }
+  });
+  const sandboxRec = await financeiro.reconciliarOrdersMercadoPagoPendentes({
+    repositorio: repoSandboxRec,
+    client: clientSandboxRec,
+    env: { MERCADOPAGO_ENV: "test" },
+    agora: new Date("2026-08-22T12:00:00.000Z")
+  });
+  assert.strictEqual(sandboxRec.aprovados, 1, "sandbox reconciliador compara providerAmountCents=5000");
+  assert.strictEqual(repoSandboxRec.state.ledger[0].amount, 2000);
+
+  const repoRejectedRec = new RepoMemoria();
+  const clientRejectedRec = new FakeMercadoPagoClient();
+  const cobRejectedRec = await cobrarPix({ repo: repoRejectedRec, client: clientRejectedRec, externalPaymentId: "mp_reconciliation_rejected" });
+  clientRejectedRec.setOrder(cobRejectedRec.orderId, {
+    status: "failed",
+    status_detail: "failed",
+    transactions: { payments: [{ amount: "34.90", status: "failed", status_detail: "processing_error" }] }
+  });
+  const rejectedRec = await financeiro.reconciliarOrdersMercadoPagoPendentes({
+    repositorio: repoRejectedRec,
+    client: clientRejectedRec,
+    agora: new Date("2026-08-22T12:00:00.000Z")
+  });
+  assert.strictEqual(rejectedRec.resultados[0].type, "payment.rejected");
+  assert.strictEqual(repoRejectedRec.state.payments[0].status, "rejected");
+  assert.strictEqual(repoRejectedRec.state.ledger.length, 0);
+
+  const repoCancelledRec = new RepoMemoria();
+  const clientCancelledRec = new FakeMercadoPagoClient();
+  const cobCancelledRec = await cobrarPix({ repo: repoCancelledRec, client: clientCancelledRec, externalPaymentId: "mp_reconciliation_cancelled" });
+  clientCancelledRec.setOrder(cobCancelledRec.orderId, {
+    status: "expired",
+    status_detail: "expired",
+    transactions: { payments: [{ amount: "34.90", status: "expired", status_detail: "expired" }] }
+  });
+  const cancelledRec = await financeiro.reconciliarOrdersMercadoPagoPendentes({
+    repositorio: repoCancelledRec,
+    client: clientCancelledRec,
+    agora: new Date("2026-08-22T12:00:00.000Z")
+  });
+  assert.strictEqual(cancelledRec.resultados[0].type, "payment.cancelled");
+  assert.strictEqual(repoCancelledRec.state.payments[0].status, "cancelled");
+  assert.strictEqual(repoCancelledRec.state.ledger.length, 0);
+
+  const repoRefundRec = new RepoMemoria();
+  const clientRefundRec = new FakeMercadoPagoClient();
+  const cobRefundRec = await cobrarPix({ repo: repoRefundRec, client: clientRefundRec, externalPaymentId: "mp_reconciliation_refunded" });
+  clientRefundRec.setOrder(cobRefundRec.orderId, {
+    total_amount: "34.90",
+    currency_id: "BRL",
+    transactions: { payments: [{ amount: "34.90", status: "processed", status_detail: "accredited" }] }
+  });
+  await financeiro.reconciliarOrdersMercadoPagoPendentes({
+    repositorio: repoRefundRec,
+    client: clientRefundRec,
+    agora: new Date("2026-08-22T12:00:00.000Z")
+  });
+  clientRefundRec.setOrder(cobRefundRec.orderId, {
+    total_amount: "34.90",
+    currency_id: "BRL",
+    transactions: { payments: [{ amount: "34.90", status: "refunded", status_detail: "refunded" }] }
+  });
+  const refundRec = await financeiro.processarOrderMercadoPago({
+    orderId: cobRefundRec.orderId,
+    origem: "reconciliation",
+    repositorio: repoRefundRec,
+    client: clientRefundRec,
+    agora: new Date("2026-08-22T12:10:00.000Z")
+  });
+  assert.strictEqual(refundRec.type, "payment.refunded");
+  assert.strictEqual(repoRefundRec.state.ledger.some((l) => l.ledger_type === "refund_adjustment" && l.amount === -2000), true);
+
+  const repoSemEnvRec = new RepoMemoria();
+  const semEnvRec = await financeiro.reconciliarOrdersMercadoPagoPendentes({
+    repositorio: repoSemEnvRec,
+    env: {}
+  });
+  assert.strictEqual(semEnvRec.pulada, true, "ausencia de ENV nao derruba reconciliador");
 
   const repoExpired = new RepoMemoria();
   const clientExpired = new FakeMercadoPagoClient();

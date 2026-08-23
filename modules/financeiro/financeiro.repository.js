@@ -294,6 +294,45 @@ function criarRepositorioFinanceiroPostgres({ pool } = {}) {
       return resultado.resultado?.rows?.[0] || null;
     },
 
+    async listarPaymentsMercadoPagoParaReconciliacao({
+      limite = 10,
+      maxTentativas = 8,
+      agora = new Date()
+    } = {}) {
+      const resultado = await queryFinanceiro(
+        `SELECT *
+         FROM financial_payments
+         WHERE provider = 'mercadopago'
+           AND status IN ('created', 'pending')
+           AND metadata ? 'mpOrderId'
+           AND COALESCE(metadata->>'reconciliationStatus', 'pending') NOT IN ('manual_review', 'exhausted', 'finalized')
+           AND (
+             CASE
+               WHEN COALESCE(metadata->>'reconciliationAttempts', '') ~ '^[0-9]+$'
+                 THEN (metadata->>'reconciliationAttempts')::INTEGER
+               ELSE 0
+             END
+           ) < $1
+           AND (
+             COALESCE(metadata->>'reconciliationNextAt', '') = ''
+             OR (metadata->>'reconciliationNextAt')::TIMESTAMPTZ <= $2::TIMESTAMPTZ
+           )
+         ORDER BY created_at ASC
+         LIMIT $3`,
+        [
+          Math.max(1, Number(maxTentativas) || 8),
+          new Date(agora).toISOString(),
+          Math.max(1, Math.min(50, Number(limite) || 10))
+        ]
+      );
+      if (!resultado?.ok) return [];
+      return resultado.resultado?.rows || [];
+    },
+
+    async atualizarPaymentMetadata(paymentId, metadata = {}) {
+      return executarTransacaoFinanceira(async (tx) => tx.atualizarPayment(paymentId, { metadata }), { pool: pool || getFinanceiroPool });
+    },
+
     async listarLedgerPendente(opcoes = 50) {
       const filtros = typeof opcoes === "object" && opcoes !== null ? opcoes : { limite: opcoes };
       const limite = Math.max(1, Math.min(200, Number(filtros.limite) || 50));
