@@ -9,6 +9,10 @@ const { criarRepositorioFinanceiroPostgres } = require("./financeiro.repository"
 
 const PROVIDER_MERCADOPAGO = "mercadopago";
 const MERCADOPAGO_API_BASE = "https://api.mercadopago.com";
+const MERCADOPAGO_PIX_SANDBOX_PAYER = {
+  firstName: "APRO",
+  email: "test_user_br@testuser.com"
+};
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -346,7 +350,8 @@ function montarOrderPix({ payment = {}, planSnapshot = {}, usuario = {}, notific
   };
 
   if (sandboxTeste === true) {
-    body.payer.first_name = "APRO";
+    body.payer.email = MERCADOPAGO_PIX_SANDBOX_PAYER.email;
+    body.payer.first_name = MERCADOPAGO_PIX_SANDBOX_PAYER.firstName;
   }
 
   if (texto(notificationUrl)) body.notification_url = texto(notificationUrl);

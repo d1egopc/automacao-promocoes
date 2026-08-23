@@ -544,6 +544,11 @@ function fechar(server) {
     "APRO",
     "ambiente test deve enviar gatilho oficial de sandbox PIX"
   );
+  assert.strictEqual(
+    clientSandbox.calls[0].body.payer.email,
+    "test_user_br@testuser.com",
+    "ambiente test deve usar email oficial de sandbox PIX"
+  );
   assert.strictEqual(repoSandbox.state.ledger.length, 0, "sandbox PIX criado continua sem conceder credito");
 
   const repoProd = new RepoMemoria();
@@ -559,6 +564,11 @@ function fechar(server) {
     false,
     "ambiente production nao pode forcar APRO"
   );
+  assert.notStrictEqual(
+    clientProd.calls[0].body.payer.email,
+    "test_user_br@testuser.com",
+    "ambiente production nao pode usar email oficial de sandbox"
+  );
 
   const repoInject = new RepoMemoria();
   const clientInject = new FakeMercadoPagoClient();
@@ -566,13 +576,18 @@ function fechar(server) {
     repo: repoInject,
     client: clientInject,
     externalPaymentId: "mp_pay_inject",
-    env: { MERCADOPAGO_ENV: "production" },
-    usuario: { id: "cliente_1", email: "cliente@test.local", first_name: "APRO", firstName: "APRO", nome: "APRO" }
+    env: { MERCADOPAGO_ENV: "test" },
+    usuario: { id: "cliente_1", email: "cliente.real@test.local", first_name: "FAKE", firstName: "FAKE", nome: "FAKE" }
   });
   assert.strictEqual(
-    Object.prototype.hasOwnProperty.call(clientInject.calls[0].body.payer, "first_name"),
-    false,
-    "request/frontend nao consegue injetar first_name APRO fora do sandbox"
+    clientInject.calls[0].body.payer.first_name,
+    "APRO",
+    "request/frontend nao consegue alterar first_name oficial de sandbox"
+  );
+  assert.strictEqual(
+    clientInject.calls[0].body.payer.email,
+    "test_user_br@testuser.com",
+    "request/frontend nao consegue alterar email oficial de sandbox"
   );
 
   const replayCobranca = await cobrarPix({ repo, client, externalPaymentId: "mp_pay_pro" });
