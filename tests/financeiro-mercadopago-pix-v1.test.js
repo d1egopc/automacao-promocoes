@@ -708,6 +708,8 @@ function fechar(server) {
   assert.strictEqual(logAssinatura.includes("\"tsPresente\":true"), true);
   assert.strictEqual(logAssinatura.includes("\"v1Presente\":true"), true);
   assert.strictEqual(logAssinatura.includes("\"secretPresente\":true"), true);
+  assert.strictEqual(logAssinatura.includes("\"manualValido\":false"), true);
+  assert.strictEqual(logAssinatura.includes("\"sdkValido\":false"), true);
   assert.strictEqual(logAssinatura.includes("\"dataIdAlfanumerico\":true"), true);
   assert.strictEqual(logAssinatura.includes("\"requestIdPresente\":true"), true);
   assert.strictEqual(logAssinatura.includes("sha256_12"), true, "dataId normalizado e publicado apenas como hash curto");
@@ -738,41 +740,54 @@ function fechar(server) {
   assert.strictEqual(secretAusente.codigo, "mercadopago_webhook_secret_ausente");
 
   const assinaturaNumerica = assinatura("secret", "123456");
-  assert.strictEqual(
-    financeiro.validarAssinaturaWebhookMercadoPago({
-      xSignature: assinaturaNumerica["x-signature"],
-      xRequestId: assinaturaNumerica["x-request-id"],
-      dataId: "123456",
-      secret: "secret"
-    }).ok,
-    true,
-    "data.id numerico do simulador continua validando"
-  );
+  const validacaoNumerica = financeiro.validarAssinaturaWebhookMercadoPago({
+    xSignature: assinaturaNumerica["x-signature"],
+    xRequestId: assinaturaNumerica["x-request-id"],
+    dataId: "123456",
+    secret: "secret"
+  });
+  assert.strictEqual(validacaoNumerica.ok, true, "data.id numerico do simulador continua validando");
+  assert.strictEqual(validacaoNumerica.manualValido, true);
+  assert.strictEqual(validacaoNumerica.sdkValido, true);
+  assert.strictEqual(validacaoNumerica.autoridade, "sdk");
 
   const dataIdUppercase = "ORDTST01ABCDEF123456";
   const assinaturaUppercase = assinatura("secret", dataIdUppercase);
-  assert.strictEqual(
-    financeiro.validarAssinaturaWebhookMercadoPago({
-      xSignature: assinaturaUppercase["x-signature"],
-      xRequestId: assinaturaUppercase["x-request-id"],
-      dataId: dataIdUppercase,
-      secret: "secret"
-    }).ok,
-    true,
-    "data.id uppercase real-style valida preservando casing original"
-  );
+  const validacaoUppercase = financeiro.validarAssinaturaWebhookMercadoPago({
+    xSignature: assinaturaUppercase["x-signature"],
+    xRequestId: assinaturaUppercase["x-request-id"],
+    dataId: dataIdUppercase,
+    secret: "secret"
+  });
+  assert.strictEqual(validacaoUppercase.ok, true, "data.id uppercase real-style valida preservando casing original");
+  assert.strictEqual(validacaoUppercase.manualValido, true);
+  assert.strictEqual(validacaoUppercase.sdkValido, true);
+  assert.strictEqual(validacaoUppercase.autoridade, "sdk");
 
   const assinaturaLowercase = assinaturaComDataIdLowercase("secret", dataIdUppercase);
+  const validacaoLowercase = financeiro.validarAssinaturaWebhookMercadoPago({
+    xSignature: assinaturaLowercase["x-signature"],
+    xRequestId: assinaturaLowercase["x-request-id"],
+    dataId: dataIdUppercase,
+    secret: "secret"
+  });
   assert.strictEqual(
-    financeiro.validarAssinaturaWebhookMercadoPago({
-      xSignature: assinaturaLowercase["x-signature"],
-      xRequestId: assinaturaLowercase["x-request-id"],
-      dataId: dataIdUppercase,
-      secret: "secret"
-    }).codigo,
+    validacaoLowercase.codigo,
     "mercadopago_assinatura_invalida",
     "assinatura calculada sobre lowercase nao valida para data.id uppercase"
   );
+  assert.strictEqual(validacaoLowercase.manualValido, false);
+  assert.strictEqual(validacaoLowercase.sdkValido, false);
+
+  const validacaoSegredoErrado = financeiro.validarAssinaturaWebhookMercadoPago({
+    xSignature: assinaturaUppercase["x-signature"],
+    xRequestId: assinaturaUppercase["x-request-id"],
+    dataId: dataIdUppercase,
+    secret: "secret_errado"
+  });
+  assert.strictEqual(validacaoSegredoErrado.codigo, "mercadopago_assinatura_invalida");
+  assert.strictEqual(validacaoSegredoErrado.manualValido, false);
+  assert.strictEqual(validacaoSegredoErrado.sdkValido, false);
 
   const pending = await webhook({ repo, client, orderId: cobranca.orderId, bodyId: "wh_pending" });
   assert.strictEqual(pending.type, "payment.pending");

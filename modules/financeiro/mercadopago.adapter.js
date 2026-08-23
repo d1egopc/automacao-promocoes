@@ -1,6 +1,12 @@
 "use strict";
 
 const crypto = require("crypto");
+let WebhookSignatureValidator = null;
+try {
+  ({ WebhookSignatureValidator } = require("mercadopago"));
+} catch {
+  WebhookSignatureValidator = null;
+}
 const {
   criarCobrancaFinanceira,
   processarFinancialPaymentEvent
@@ -281,7 +287,9 @@ function diagnosticoAssinaturaWebhookMercadoPago({
   secret = "",
   queryDataIdPresente = false,
   bodyDataIdPresente = false,
-  codigo = ""
+  codigo = "",
+  manualValido = false,
+  sdkValido = false
 } = {}) {
   const assinatura = parseSignatureHeader(xSignature);
   const dataIdOriginal = texto(dataId);
@@ -294,13 +302,15 @@ function diagnosticoAssinaturaWebhookMercadoPago({
     tsPresente: Boolean(texto(assinatura.ts)),
     v1Presente: Boolean(texto(assinatura.v1)),
     secretPresente: Boolean(texto(secret)),
+    manualValido: manualValido === true,
+    sdkValido: sdkValido === true,
     dataIdAlfanumerico: Boolean(dataIdOriginal && /^[a-z0-9]+$/i.test(dataIdOriginal)),
     dataIdNormalizado: hashCurtoSeguro(dataIdOriginal),
     requestIdPresente: Boolean(texto(xRequestId))
   };
 }
 
-function validarAssinaturaWebhookMercadoPago({
+function validarAssinaturaManualWebhookMercadoPago({
   xSignature = "",
   xRequestId = "",
   dataId = "",
@@ -325,6 +335,104 @@ function validarAssinaturaWebhookMercadoPago({
   }
 
   return { ok: true };
+}
+
+function validarAssinaturaSdkWebhookMercadoPago({
+  xSignature = "",
+  xRequestId = "",
+  dataId = "",
+  secret = ""
+} = {}) {
+  if (!WebhookSignatureValidator || typeof WebhookSignatureValidator.validate !== "function") {
+    return { ok: false, codigo: "mercadopago_sdk_validator_indisponivel" };
+  }
+
+  try {
+    WebhookSignatureValidator.validate({
+      xSignature,
+      xRequestId,
+      dataId,
+      secret
+    });
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      codigo: "mercadopago_assinatura_invalida",
+      sdkErro: sanitizarTextoMercadoPago(e?.reason || e?.code || e?.name || "")
+    };
+  }
+}
+
+function validarAssinaturaWebhookMercadoPago({
+  xSignature = "",
+  xRequestId = "",
+  dataId = "",
+  secret = ""
+} = {}) {
+  const assinatura = parseSignatureHeader(xSignature);
+  const ts = assinatura.ts;
+  const hash = assinatura.v1;
+  const requestId = texto(xRequestId);
+  const id = texto(dataId);
+  const segredo = texto(secret);
+  const sdkDisponivel = Boolean(WebhookSignatureValidator && typeof WebhookSignatureValidator.validate === "function");
+
+  if (!segredo) {
+    return {
+      ok: false,
+      codigo: "mercadopago_webhook_secret_ausente",
+      manualValido: false,
+      sdkValido: false,
+      sdkDisponivel
+    };
+  }
+  if (!ts || !hash || !requestId || !id) {
+    return {
+      ok: false,
+      codigo: "mercadopago_assinatura_incompleta",
+      manualValido: false,
+      sdkValido: false,
+      sdkDisponivel
+    };
+  }
+
+  const manual = validarAssinaturaManualWebhookMercadoPago({ xSignature, xRequestId, dataId, secret });
+  const sdk = validarAssinaturaSdkWebhookMercadoPago({ xSignature, xRequestId, dataId, secret });
+  const sdkValido = sdk.ok === true;
+  const manualValido = manual.ok === true;
+
+  if (sdkValido) {
+    return {
+      ok: true,
+      codigo: "ok",
+      manualValido,
+      sdkValido,
+      sdkDisponivel,
+      autoridade: "sdk"
+    };
+  }
+
+  if (!sdkDisponivel && manualValido) {
+    return {
+      ok: true,
+      codigo: "ok",
+      manualValido,
+      sdkValido: false,
+      sdkDisponivel,
+      autoridade: "manual"
+    };
+  }
+
+  return {
+    ok: false,
+    codigo: sdk.codigo || manual.codigo || "mercadopago_assinatura_invalida",
+    manualValido,
+    sdkValido,
+    sdkDisponivel,
+    autoridade: sdkDisponivel ? "sdk" : "manual",
+    sdkErro: sdk.sdkErro || ""
+  };
 }
 
 function criarMercadoPagoHttpClient({
@@ -581,7 +689,9 @@ async function processarWebhookMercadoPago({
       secret: config.webhookSecret,
       queryDataIdPresente: Boolean(queryDataId),
       bodyDataIdPresente: Boolean(bodyDataId),
-      codigo: assinatura.ok ? "ok" : assinatura.codigo
+      codigo: assinatura.ok ? "ok" : assinatura.codigo,
+      manualValido: assinatura.manualValido,
+      sdkValido: assinatura.sdkValido
     })
   ));
 
