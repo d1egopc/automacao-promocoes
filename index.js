@@ -20362,6 +20362,48 @@ function payloadLoginUsuario(usuario = {}, token = "") {
   };
 }
 
+const ASSINATURA_STATUS_PAGAMENTO_INICIAL_PENDENTE = new Set([
+  "pendente_pagamento",
+  "pagamento_pendente",
+  "pending_payment"
+]);
+
+function resolverFinanceiroUsuarioMe(usuario = {}) {
+  const planoInformado = usuario.planoAssinatura || usuario.plano || "";
+  const entradaPlano = saasFundacao.buscarEntradaPlano(planos, planoInformado);
+  if (!entradaPlano?.plano) {
+    return {
+      requerAtivacaoPagamento: false,
+      planoId: String(planoInformado || ""),
+      motivo: ""
+    };
+  }
+
+  const plano = saasFundacao.normalizarPlanoSaasComId(entradaPlano.plano, entradaPlano.chave);
+  const politica = saasFundacao.politicaCreditosPlano(plano);
+  const statusAssinatura = String(usuario.assinaturaStatus || "").trim().toLowerCase();
+  const pagamentoUltimoStatus = String(usuario.pagamentoUltimoStatus || "").trim().toLowerCase();
+  const possuiCicloPagoAnterior = Boolean(
+    usuario.ultimoCicloCreditoId ||
+    usuario.ultimoCicloCreditoIdempotencyKey ||
+    pagamentoUltimoStatus === "aprovado"
+  );
+  const planoPagoPorPagamento =
+    plano.entradaBeta !== true &&
+    politica.renovacaoCreditos === "pagamento";
+
+  const requerAtivacaoPagamento =
+    planoPagoPorPagamento &&
+    !possuiCicloPagoAnterior &&
+    ASSINATURA_STATUS_PAGAMENTO_INICIAL_PENDENTE.has(statusAssinatura);
+
+  return {
+    requerAtivacaoPagamento,
+    planoId: plano.id || plano.nome || String(planoInformado || ""),
+    motivo: requerAtivacaoPagamento ? "pagamento_inicial_pendente" : ""
+  };
+}
+
 function resolverUsuarioGoogleExistente(identidade = {}) {
   const usuarioPorSub = encontrarUsuarioPorGoogleSub(identidade.sub);
   const usuarioPorEmail = obterUsuarioPorEmailNormalizado(identidade.email);
@@ -20690,12 +20732,21 @@ app.get("/me", (req, res) => {
       nome: usuario.nome,
       email: usuario.email,
       plano: usuario.plano,
+      planoAssinatura: usuario.planoAssinatura || usuario.plano || "",
+      assinaturaStatus: usuario.assinaturaStatus || "",
+      statusConta: usuario.statusConta || "",
+      creditosModelo: usuario.creditosModelo || "",
+      cicloAtualInicio: usuario.cicloAtualInicio || "",
+      cicloAtualFim: usuario.cicloAtualFim || "",
+      proximaRenovacao: usuario.proximaRenovacao || "",
+      pagamentoUltimoStatus: usuario.pagamentoUltimoStatus || "",
       creditos: usuario.creditos,
       papel: usuario.papel,
       ativo: usuario.ativo,
       marketplacesLiberados: planoAtual.marketplaces || [],
       recursos: planoAtual.recursos || {},
-      limites: limitesPlanoAtual
+      limites: limitesPlanoAtual,
+      financeiro: resolverFinanceiroUsuarioMe(usuario)
     },
     marketplacesLiberados: planoAtual.marketplaces || [],
     consumo: {
