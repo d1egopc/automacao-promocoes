@@ -321,7 +321,7 @@ async function cobrarPix({
   });
 }
 
-async function webhook({ repo, client, orderId, secret = "secret", bodyId = "wh_1", patch = {} } = {}) {
+async function webhook({ repo, client, orderId, secret = "secret", bodyId = "wh_1", patch = {}, env = {} } = {}) {
   if (Object.keys(patch).length) client.setOrder(orderId, patch);
   return financeiro.processarWebhookMercadoPago({
     headers: assinatura(secret, orderId),
@@ -334,7 +334,7 @@ async function webhook({ repo, client, orderId, secret = "secret", bodyId = "wh_
     },
     repositorio: repo,
     client,
-    env: { MERCADOPAGO_WEBHOOK_SECRET: secret },
+    env: { MERCADOPAGO_WEBHOOK_SECRET: secret, ...env },
     agora: new Date("2026-08-22T12:00:00.000Z")
   });
 }
@@ -523,8 +523,14 @@ function fechar(server) {
   assert.strictEqual(cobranca.pix.qrCode.includes("ORD_TEST_1"), true);
   assert.strictEqual(repo.state.ledger.length, 0, "criacao PIX nao concede credito");
   assert.strictEqual(client.calls[0].body.total_amount, "34.90");
+  assert.strictEqual(client.calls[0].body.transactions.payments[0].amount, "34.90");
   assert.strictEqual(client.calls[0].body.external_reference, "mp_pay_pro");
   assert.strictEqual(client.calls[0].idempotencyKey, "mp_order:mp_pay_pro");
+  assert.strictEqual(
+    Object.prototype.hasOwnProperty.call(client.calls[0].body, "country_code"),
+    false,
+    "country_code nao deve ser enviado no request de criacao PIX"
+  );
   assert.strictEqual(
     Object.prototype.hasOwnProperty.call(client.calls[0].body.payer, "first_name"),
     false,
@@ -533,12 +539,22 @@ function fechar(server) {
 
   const repoSandbox = new RepoMemoria();
   const clientSandbox = new FakeMercadoPagoClient();
-  await cobrarPix({
+  const cobrancaSandbox = await cobrarPix({
     repo: repoSandbox,
     client: clientSandbox,
     externalPaymentId: "mp_pay_sandbox",
     env: { MERCADOPAGO_ENV: "test" }
   });
+  assert.strictEqual(cobrancaSandbox.payment.amount_cents ?? cobrancaSandbox.payment.amountCents, 3490, "payment interno permanece com valor comercial");
+  assert.strictEqual(cobrancaSandbox.planSnapshot.amountCents, 3490, "snapshot permanece com valor comercial");
+  assert.strictEqual(cobrancaSandbox.planSnapshot.creditosPorCiclo, 2000, "snapshot permanece com creditos comerciais");
+  assert.strictEqual(clientSandbox.calls[0].body.total_amount, "50.00", "sandbox usa total_amount predefinido oficial");
+  assert.strictEqual(clientSandbox.calls[0].body.transactions.payments[0].amount, "50.00", "sandbox usa payment amount predefinido oficial");
+  assert.strictEqual(
+    Object.prototype.hasOwnProperty.call(clientSandbox.calls[0].body, "country_code"),
+    false,
+    "country_code nao deve ser enviado no request sandbox"
+  );
   assert.strictEqual(
     clientSandbox.calls[0].body.payer.first_name,
     "APRO",
@@ -549,7 +565,61 @@ function fechar(server) {
     "test_user_br@testuser.com",
     "ambiente test deve usar email oficial de sandbox PIX"
   );
+  assert.deepStrictEqual(
+    repoSandbox.state.payments[0].metadata,
+    {
+      adapter: "mercadopago_pix_v1",
+      origem: "financial_charge_v1",
+      mercadopagoEnv: "test",
+      pixSandboxPredefined: true,
+      sandboxTestAmountCents: 5000,
+      providerAmountCents: 5000,
+      commercialAmountCents: 3490
+    },
+    "metadata financeira preserva valor provider sandbox separado do valor comercial"
+  );
   assert.strictEqual(repoSandbox.state.ledger.length, 0, "sandbox PIX criado continua sem conceder credito");
+
+  const approvedSandbox = await webhook({
+    repo: repoSandbox,
+    client: clientSandbox,
+    orderId: cobrancaSandbox.orderId,
+    bodyId: "wh_sandbox_approved",
+    env: { MERCADOPAGO_ENV: "test" },
+    patch: {
+      total_amount: "50.00",
+      currency_id: "BRL",
+      transactions: { payments: [{ amount: "50.00", status: "processed", status_detail: "accredited" }] }
+    }
+  });
+  assert.strictEqual(approvedSandbox.type, "payment.approved", "sandbox webhook com 5000 passa validacao");
+  assert.strictEqual(repoSandbox.state.ledger.filter((l) => l.ledger_type === "cycle_credit").length, 1);
+  assert.strictEqual(repoSandbox.state.ledger[0].amount, 2000, "credito sandbox aprovado vem do snapshot, nao dos R$50");
+
+  const repoSandboxDiverg = new RepoMemoria();
+  const clientSandboxDiverg = new FakeMercadoPagoClient();
+  const cobrancaSandboxDiverg = await cobrarPix({
+    repo: repoSandboxDiverg,
+    client: clientSandboxDiverg,
+    externalPaymentId: "mp_pay_sandbox_diverg",
+    env: { MERCADOPAGO_ENV: "test" }
+  });
+  const divergSandbox = await webhook({
+    repo: repoSandboxDiverg,
+    client: clientSandboxDiverg,
+    orderId: cobrancaSandboxDiverg.orderId,
+    bodyId: "wh_sandbox_diverg",
+    env: { MERCADOPAGO_ENV: "test" },
+    patch: {
+      total_amount: "51.00",
+      currency_id: "BRL",
+      transactions: { payments: [{ amount: "51.00", status: "processed", status_detail: "accredited" }] }
+    }
+  });
+  assert.strictEqual(divergSandbox.manual, true, "sandbox webhook com valor diferente do providerAmountCents e bloqueado");
+  assert.strictEqual(divergSandbox.codigo, "mercadopago_valor_divergente");
+  assert.strictEqual(divergSandbox.esperado, 5000);
+  assert.strictEqual(repoSandboxDiverg.state.ledger.length, 0);
 
   const repoProd = new RepoMemoria();
   const clientProd = new FakeMercadoPagoClient();
@@ -559,6 +629,8 @@ function fechar(server) {
     externalPaymentId: "mp_pay_prod",
     env: { MERCADOPAGO_ENV: "production" }
   });
+  assert.strictEqual(clientProd.calls[0].body.total_amount, "34.90", "producao usa valor comercial do snapshot");
+  assert.strictEqual(clientProd.calls[0].body.transactions.payments[0].amount, "34.90", "producao nunca usa 50.00 de sandbox");
   assert.strictEqual(
     Object.prototype.hasOwnProperty.call(clientProd.calls[0].body.payer, "first_name"),
     false,

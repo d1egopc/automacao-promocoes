@@ -9,6 +9,7 @@ const { criarRepositorioFinanceiroPostgres } = require("./financeiro.repository"
 
 const PROVIDER_MERCADOPAGO = "mercadopago";
 const MERCADOPAGO_API_BASE = "https://api.mercadopago.com";
+const MERCADOPAGO_PIX_SANDBOX_AMOUNT_CENTS = 5000;
 const MERCADOPAGO_PIX_SANDBOX_PAYER = {
   firstName: "APRO",
   email: "test_user_br@testuser.com"
@@ -51,6 +52,33 @@ function valorParaCents(valor) {
   if (valor === undefined || valor === null || valor === "") return 0;
   const n = Number(String(valor).replace(",", "."));
   return Number.isFinite(n) ? Math.round(n * 100) : 0;
+}
+
+function numeroInteiro(valor, padrao = 0) {
+  const n = Number(valor);
+  return Number.isFinite(n) ? Math.trunc(n) : padrao;
+}
+
+function ambienteMercadoPagoTeste(env = {}) {
+  return textoLower(env.MERCADOPAGO_ENV) === "test";
+}
+
+function metadataObjeto(valor = {}) {
+  if (valor && typeof valor === "object" && !Array.isArray(valor)) return valor;
+  if (typeof valor === "string" && valor.trim()) {
+    try {
+      const parsed = JSON.parse(valor);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function resolverProviderAmountCentsMercadoPago({ planSnapshot = {}, sandboxTeste = false } = {}) {
+  if (sandboxTeste === true) return MERCADOPAGO_PIX_SANDBOX_AMOUNT_CENTS;
+  return numeroInteiro(planSnapshot.amountCents, 0);
 }
 
 function sanitizarTextoMercadoPago(valor = "") {
@@ -325,14 +353,13 @@ function criarMercadoPagoHttpClient({
   };
 }
 
-function montarOrderPix({ payment = {}, planSnapshot = {}, usuario = {}, notificationUrl = "", sandboxTeste = false } = {}) {
-  const amount = centsParaValor(planSnapshot.amountCents);
+function montarOrderPix({ payment = {}, planSnapshot = {}, usuario = {}, notificationUrl = "", sandboxTeste = false, providerAmountCents = null } = {}) {
+  const amount = centsParaValor(providerAmountCents ?? planSnapshot.amountCents);
   const body = {
     type: "online",
     processing_mode: "automatic",
     total_amount: amount,
     external_reference: payment.externalPaymentId,
-    country_code: "BRA",
     payer: {
       email: texto(usuario.email || usuario.emailUsuario || "test@testuser.com")
     },
@@ -358,6 +385,34 @@ function montarOrderPix({ payment = {}, planSnapshot = {}, usuario = {}, notific
   return body;
 }
 
+function metadataProviderMercadoPago({ metadata = {}, planSnapshot = {}, sandboxTeste = false, providerAmountCents = 0 } = {}) {
+  const base = {
+    ...metadata,
+    adapter: "mercadopago_pix_v1"
+  };
+  if (sandboxTeste !== true) return base;
+  return {
+    ...base,
+    mercadopagoEnv: "test",
+    pixSandboxPredefined: true,
+    sandboxTestAmountCents: MERCADOPAGO_PIX_SANDBOX_AMOUNT_CENTS,
+    providerAmountCents,
+    commercialAmountCents: numeroInteiro(planSnapshot.amountCents, 0)
+  };
+}
+
+async function persistirMetadataPaymentMercadoPago({ repositorio, payment = {}, metadata = {} } = {}) {
+  const paymentId = texto(payment.id);
+  if (!paymentId || typeof repositorio?.transacao !== "function") {
+    return { ...payment, metadata };
+  }
+  return repositorio.transacao(async (tx) => {
+    if (typeof tx.atualizarPayment !== "function") return { ...payment, metadata };
+    const atualizado = await tx.atualizarPayment(paymentId, { metadata });
+    return atualizado || { ...payment, metadata };
+  });
+}
+
 async function criarCobrancaMercadoPagoPix({
   clienteId = "",
   planoId = "",
@@ -371,6 +426,7 @@ async function criarCobrancaMercadoPagoPix({
   metadata = {}
 } = {}) {
   const config = mercadoPagoConfig(env);
+  const sandboxTeste = ambienteMercadoPagoTeste(env);
   if (!config.configurado && !client) {
     return { ok: false, codigo: "mercadopago_nao_configurado", status: "nao_configurado" };
   }
@@ -398,13 +454,30 @@ async function criarCobrancaMercadoPagoPix({
     externalPaymentId: ext
   };
   const planSnapshot = cobranca.planSnapshot;
+  const providerAmountCents = resolverProviderAmountCentsMercadoPago({ planSnapshot, sandboxTeste });
+  const metadataPayment = metadataProviderMercadoPago({
+    metadata: metadataObjeto(cobranca.payment?.metadata),
+    planSnapshot,
+    sandboxTeste,
+    providerAmountCents
+  });
+  const paymentAtualizado = await persistirMetadataPaymentMercadoPago({
+    repositorio,
+    payment: cobranca.payment,
+    metadata: metadataPayment
+  });
+  payment.metadata = metadataPayment;
+  if (paymentAtualizado && typeof paymentAtualizado === "object") {
+    payment.id = paymentAtualizado.id || payment.id;
+  }
   const mpClient = client || criarMercadoPagoHttpClient({ accessToken: config.accessToken });
   const orderBody = montarOrderPix({
     payment,
     planSnapshot,
     usuario,
     notificationUrl: env.MERCADOPAGO_WEBHOOK_URL,
-    sandboxTeste: textoLower(env.MERCADOPAGO_ENV) === "test"
+    sandboxTeste,
+    providerAmountCents
   });
   const idempotencyKey = idempotencyKeyOrder(ext);
   const order = await mpClient.criarOrder(orderBody, { idempotencyKey });
@@ -422,7 +495,9 @@ async function criarCobrancaMercadoPagoPix({
     metadata: {
       adapter: "mercadopago_pix_v1",
       mpOrderId: order.id || "",
-      idempotencyKey
+      idempotencyKey,
+      providerAmountCents,
+      commercialAmountCents: planSnapshot.amountCents
     }
   }, { repositorio, agora });
 
@@ -437,7 +512,7 @@ async function criarCobrancaMercadoPagoPix({
     idempotencyKey,
     pix: qr,
     planSnapshot,
-    payment: cobranca.payment,
+    payment,
     evento: eventoCreated
   };
 }
@@ -482,14 +557,21 @@ async function processarWebhookMercadoPago({
   const currencyOrder = extrairMoedaOrder(order);
   const amountCentsPayment = Number(payment.amount_cents ?? payment.amountCents);
   const currencyPayment = normalizarMoeda(payment.currency);
+  const metadataPayment = metadataObjeto(payment.metadata);
+  const usarValorProviderSandbox = ambienteMercadoPagoTeste(env) &&
+    metadataPayment.pixSandboxPredefined === true &&
+    numeroInteiro(metadataPayment.providerAmountCents, 0) > 0;
+  const amountCentsEsperado = usarValorProviderSandbox
+    ? numeroInteiro(metadataPayment.providerAmountCents, amountCentsPayment)
+    : amountCentsPayment;
 
-  if (amountCentsOrder !== amountCentsPayment) {
+  if (amountCentsOrder !== amountCentsEsperado) {
     return {
       ok: true,
       manual: true,
       codigo: "mercadopago_valor_divergente",
       externalPaymentId: externalReference,
-      esperado: amountCentsPayment,
+      esperado: amountCentsEsperado,
       recebido: amountCentsOrder
     };
   }
@@ -537,6 +619,8 @@ async function processarWebhookMercadoPago({
       mpOrderId: order.id || dataId,
       mpStatus: mapeamento.status,
       mpStatusDetail: mapeamento.statusDetail,
+      providerAmountCents: amountCentsOrder,
+      commercialAmountCents: amountCentsPayment,
       webhookId: body.id || "",
       webhookAction: body.action || ""
     }
