@@ -7,10 +7,7 @@ const path = require("path");
 const raiz = path.resolve(__dirname, "..");
 const index = fs.readFileSync(path.join(raiz, "index.js"), "utf8");
 const fundacao = fs.readFileSync(path.join(raiz, "utils", "saas-fundacao.js"), "utf8");
-
-const helperMatch = index.match(/function resolverFinanceiroUsuarioMe[\s\S]*?\n}\n/);
-assert.ok(helperMatch, "/me deve usar helper unico derivado para financeiro");
-const helper = helperMatch[0];
+const helper = fs.readFileSync(path.join(raiz, "utils", "saas-financeiro-estado.js"), "utf8");
 
 assert.ok(index.includes("planoAssinatura: usuario.planoAssinatura || usuario.plano || \"\""), "/me deve expor planoAssinatura sanitizado");
 assert.ok(index.includes("assinaturaStatus: usuario.assinaturaStatus || \"\""), "/me deve expor assinaturaStatus sanitizado");
@@ -21,6 +18,7 @@ assert.ok(index.includes("cicloAtualFim: usuario.cicloAtualFim || \"\""), "/me d
 assert.ok(index.includes("proximaRenovacao: usuario.proximaRenovacao || \"\""), "/me deve expor proximaRenovacao sanitizado");
 assert.ok(index.includes("pagamentoUltimoStatus: usuario.pagamentoUltimoStatus || \"\""), "/me deve expor pagamentoUltimoStatus sanitizado");
 assert.ok(index.includes("financeiro: resolverFinanceiroUsuarioMe(usuario)"), "/me deve expor financeiro derivado");
+assert.ok(index.includes("resolverFinanceiroUsuarioSaas"), "/me deve usar helper unico derivado para financeiro");
 
 assert.ok(helper.includes("saasFundacao.buscarEntradaPlano(planos, planoInformado)"), "Helper deve resolver plano pelo catalogo atual");
 assert.ok(helper.includes("saasFundacao.politicaCreditosPlano(plano)"), "Helper deve usar politica estrutural do plano");

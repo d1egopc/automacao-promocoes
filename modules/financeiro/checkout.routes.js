@@ -2,6 +2,7 @@
 
 const express = require("express");
 const { buscarEntradaPlano } = require("../../utils/saas-fundacao");
+const { resolverFinanceiroUsuarioSaas } = require("../../utils/saas-financeiro-estado");
 const { capturarPlanSnapshot } = require("./financeiro.service");
 const { criarRepositorioFinanceiroPostgres } = require("./financeiro.repository");
 const {
@@ -111,6 +112,13 @@ function respostaPaymentStatus({ payment = {}, projection = null, subscription =
   };
 }
 
+function financeiroUsuarioSanitizado({ usuario = {}, planos = {}, resolverFinanceiroUsuario = null } = {}) {
+  if (typeof resolverFinanceiroUsuario === "function") {
+    return resolverFinanceiroUsuario(usuario);
+  }
+  return resolverFinanceiroUsuarioSaas({ usuario, planos });
+}
+
 function respostaCobrancaCriada(resultado = {}, reutilizada = false) {
   const snapshot = objeto(resultado.planSnapshot);
   return {
@@ -152,7 +160,9 @@ function criarRotasCheckoutFinanceiro({
   repositorio = criarRepositorioFinanceiroPostgres(),
   client = null,
   env = process.env,
-  agora = () => new Date()
+  agora = () => new Date(),
+  renovarFinanceiroUsuario = null,
+  resolverFinanceiroUsuario = null
 } = {}) {
   const router = express.Router();
 
@@ -253,6 +263,10 @@ function criarRotasCheckoutFinanceiro({
       return erroHttp(res, "usuario_nao_autenticado", 401);
     }
 
+    if (typeof renovarFinanceiroUsuario === "function") {
+      renovarFinanceiroUsuario(usuario);
+    }
+
     return res.json({
       ok: true,
       clienteId: "self",
@@ -262,7 +276,13 @@ function criarRotasCheckoutFinanceiro({
       creditos: numeroInteiro(usuario.creditos, 0),
       cicloAtualInicio: texto(usuario.cicloAtualInicio),
       cicloAtualFim: texto(usuario.cicloAtualFim),
-      proximaRenovacao: texto(usuario.proximaRenovacao)
+      proximaRenovacao: texto(usuario.proximaRenovacao),
+      pagamentoUltimoStatus: texto(usuario.pagamentoUltimoStatus),
+      financeiro: financeiroUsuarioSanitizado({
+        usuario,
+        planos: getPlanos(),
+        resolverFinanceiroUsuario
+      })
     });
   });
 

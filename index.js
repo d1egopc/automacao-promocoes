@@ -215,6 +215,9 @@ const {
 } = require("./utils/cotas-flexiveis-planos");
 const saasFundacao = require("./utils/saas-fundacao");
 const {
+  resolverFinanceiroUsuarioSaas
+} = require("./utils/saas-financeiro-estado");
+const {
   criarAdminMasterEstrito
 } = require("./utils/admin-auth-estrito");
 const {
@@ -11015,7 +11018,9 @@ app.use(criarRotasVitrine({
 
 app.use(auth);
 app.use("/financeiro", criarRotasCheckoutFinanceiro({
-  getPlanos: () => planos
+  getPlanos: () => planos,
+  renovarFinanceiroUsuario: renovarCreditosSeNecessario,
+  resolverFinanceiroUsuario: resolverFinanceiroUsuarioMe
 }));
 app.use(criarRotasAjudaContextual({
   readGlobalJson,
@@ -20362,46 +20367,8 @@ function payloadLoginUsuario(usuario = {}, token = "") {
   };
 }
 
-const ASSINATURA_STATUS_PAGAMENTO_INICIAL_PENDENTE = new Set([
-  "pendente_pagamento",
-  "pagamento_pendente",
-  "pending_payment"
-]);
-
 function resolverFinanceiroUsuarioMe(usuario = {}) {
-  const planoInformado = usuario.planoAssinatura || usuario.plano || "";
-  const entradaPlano = saasFundacao.buscarEntradaPlano(planos, planoInformado);
-  if (!entradaPlano?.plano) {
-    return {
-      requerAtivacaoPagamento: false,
-      planoId: String(planoInformado || ""),
-      motivo: ""
-    };
-  }
-
-  const plano = saasFundacao.normalizarPlanoSaasComId(entradaPlano.plano, entradaPlano.chave);
-  const politica = saasFundacao.politicaCreditosPlano(plano);
-  const statusAssinatura = String(usuario.assinaturaStatus || "").trim().toLowerCase();
-  const pagamentoUltimoStatus = String(usuario.pagamentoUltimoStatus || "").trim().toLowerCase();
-  const possuiCicloPagoAnterior = Boolean(
-    usuario.ultimoCicloCreditoId ||
-    usuario.ultimoCicloCreditoIdempotencyKey ||
-    pagamentoUltimoStatus === "aprovado"
-  );
-  const planoPagoPorPagamento =
-    plano.entradaBeta !== true &&
-    politica.renovacaoCreditos === "pagamento";
-
-  const requerAtivacaoPagamento =
-    planoPagoPorPagamento &&
-    !possuiCicloPagoAnterior &&
-    ASSINATURA_STATUS_PAGAMENTO_INICIAL_PENDENTE.has(statusAssinatura);
-
-  return {
-    requerAtivacaoPagamento,
-    planoId: plano.id || plano.nome || String(planoInformado || ""),
-    motivo: requerAtivacaoPagamento ? "pagamento_inicial_pendente" : ""
-  };
+  return resolverFinanceiroUsuarioSaas({ usuario, planos });
 }
 
 function resolverUsuarioGoogleExistente(identidade = {}) {
