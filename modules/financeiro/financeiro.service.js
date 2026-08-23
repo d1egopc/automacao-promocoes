@@ -69,15 +69,19 @@ function amountCentsPlano(plano = {}) {
   return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : 0;
 }
 
-function validarPlanoPagoContratavel(plano = {}, planoId = "") {
+function validarPlanoPagoContratavel(plano = {}, planoId = "", opcoes = {}) {
   const normalizado = normalizarPlanoSaasComId(plano, planoId);
   const politica = politicaCreditosPlano(normalizado);
   const amountCents = amountCentsPlano(normalizado);
+  const permitirPlanoPagoEmBreveInterno = opcoes.permitirPlanoPagoEmBreveInterno === true;
 
   if (normalizado.entradaBeta === true || politica.renovacaoCreditos === "sem_renovacao") {
     return { ok: false, codigo: "plano_free_beta_nao_cobravel" };
   }
-  if (normalizado.visivelPublicamente !== true || normalizado.contratavel !== true || normalizado.emBreve === true) {
+  if (
+    !permitirPlanoPagoEmBreveInterno &&
+    (normalizado.visivelPublicamente !== true || normalizado.contratavel !== true || normalizado.emBreve === true)
+  ) {
     return { ok: false, codigo: "plano_nao_contratavel" };
   }
   if (politica.creditosModelo !== "ciclo" || politica.creditosPorCiclo <= 0) {
@@ -90,8 +94,8 @@ function validarPlanoPagoContratavel(plano = {}, planoId = "") {
   return { ok: true, normalizado, politica, amountCents };
 }
 
-function capturarPlanSnapshot(plano = {}, planoId = "", agora = new Date()) {
-  const validacao = validarPlanoPagoContratavel(plano, planoId);
+function capturarPlanSnapshot(plano = {}, planoId = "", agora = new Date(), opcoes = {}) {
+  const validacao = validarPlanoPagoContratavel(plano, planoId, opcoes);
   if (!validacao.ok) {
     const erro = new Error(validacao.codigo);
     erro.codigo = validacao.codigo;
@@ -121,7 +125,8 @@ async function criarCobrancaFinanceira({
   externalPaymentId = "",
   repositorio = criarRepositorioFinanceiroPostgres(),
   agora = new Date(),
-  metadata = {}
+  metadata = {},
+  permitirPlanoPagoEmBreveInterno = false
 } = {}) {
   const cliente = texto(clienteId);
   const planoIdentidade = texto(planoId);
@@ -133,7 +138,9 @@ async function criarCobrancaFinanceira({
 
   let snapshot;
   try {
-    snapshot = capturarPlanSnapshot(entrada.plano, entrada.chave, agora);
+    snapshot = capturarPlanSnapshot(entrada.plano, entrada.chave, agora, {
+      permitirPlanoPagoEmBreveInterno
+    });
   } catch (e) {
     return { ok: false, codigo: e.codigo || "plano_invalido_para_cobranca" };
   }

@@ -271,6 +271,26 @@ const planoPro = {
   limites: { creditosPorCiclo: 2000, cicloDias: 30 }
 };
 
+const planoProEmBreve = {
+  ...planoPro,
+  contratavel: false,
+  emBreve: true
+};
+
+const planoPagoSemValor = {
+  ...planoPro,
+  id: "pro_sem_valor",
+  preco: "R$ 0,00",
+  amountCents: 0
+};
+
+const planoPagoSemRenovacao = {
+  ...planoPro,
+  id: "pro_sem_renovacao",
+  entradaBeta: false,
+  renovacaoCreditos: "sem_renovacao"
+};
+
 function assinatura(secret, dataId, requestId = "req_1", ts = "1787423000") {
   const manifest = `id:${String(dataId).toLowerCase()};request-id:${requestId};ts:${ts};`;
   const v1 = crypto.createHmac("sha256", secret).update(manifest).digest("hex");
@@ -332,6 +352,50 @@ async function webhook({ repo, client, orderId, secret = "secret", bodyId = "wh_
   assert.strictEqual(free.ok, false);
   assert.strictEqual(free.codigo, "plano_free_beta_nao_cobravel", "Free nao gera Order");
   assert.strictEqual(repoFree.state.payments.length, 0);
+
+  const publicoEmBreve = await financeiro.criarCobrancaFinanceira({
+    clienteId: "cliente_1",
+    planoId: "pro",
+    planos: { pro: planoProEmBreve },
+    repositorio: new RepoMemoria(),
+    provider: "public_checkout"
+  });
+  assert.strictEqual(publicoEmBreve.ok, false);
+  assert.strictEqual(publicoEmBreve.codigo, "plano_nao_contratavel", "checkout publico futuro continua bloqueando plano Em breve");
+  assert.strictEqual(planoProEmBreve.contratavel, false, "teste interno nao altera disponibilidade publica do plano");
+  assert.strictEqual(planoProEmBreve.emBreve, true, "teste interno nao remove estado Em breve");
+
+  const repoEmBreve = new RepoMemoria();
+  const clientEmBreve = new FakeMercadoPagoClient();
+  const cobrancaEmBreve = await cobrarPix({
+    repo: repoEmBreve,
+    client: clientEmBreve,
+    plano: planoProEmBreve,
+    externalPaymentId: "mp_pay_pro_em_breve"
+  });
+  assert.strictEqual(cobrancaEmBreve.ok, true, "rota Admin/internal Mercado Pago pode cobrar plano pago Em breve");
+  assert.strictEqual(cobrancaEmBreve.planSnapshot.planoId, "pro");
+  assert.strictEqual(cobrancaEmBreve.planSnapshot.amountCents, 3490);
+  assert.strictEqual(cobrancaEmBreve.planSnapshot.creditosPorCiclo, 2000);
+  assert.strictEqual(repoEmBreve.state.ledger.length, 0, "criacao interna de PIX Em breve nao concede credito");
+
+  const semValor = await cobrarPix({
+    repo: new RepoMemoria(),
+    client: new FakeMercadoPagoClient(),
+    plano: planoPagoSemValor,
+    externalPaymentId: "mp_sem_valor"
+  });
+  assert.strictEqual(semValor.ok, false);
+  assert.strictEqual(semValor.codigo, "plano_sem_valor_pago", "plano pago sem preco continua recusado");
+
+  const semRenovacao = await cobrarPix({
+    repo: new RepoMemoria(),
+    client: new FakeMercadoPagoClient(),
+    plano: planoPagoSemRenovacao,
+    externalPaymentId: "mp_sem_renovacao"
+  });
+  assert.strictEqual(semRenovacao.ok, false);
+  assert.strictEqual(semRenovacao.codigo, "plano_free_beta_nao_cobravel", "plano sem renovacao por pagamento continua recusado");
 
   const repo = new RepoMemoria();
   const client = new FakeMercadoPagoClient();

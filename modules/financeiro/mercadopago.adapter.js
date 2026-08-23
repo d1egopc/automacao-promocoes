@@ -325,6 +325,7 @@ async function criarCobrancaMercadoPagoPix({
     externalPaymentId: ext,
     repositorio,
     agora,
+    permitirPlanoPagoEmBreveInterno: true,
     metadata: {
       ...metadata,
       adapter: "mercadopago_pix_v1"
