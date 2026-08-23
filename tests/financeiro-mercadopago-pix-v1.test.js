@@ -295,6 +295,12 @@ const planoPagoSemRenovacao = {
 };
 
 function assinatura(secret, dataId, requestId = "req_1", ts = "1787423000") {
+  const manifest = `id:${String(dataId)};request-id:${requestId};ts:${ts};`;
+  const v1 = crypto.createHmac("sha256", secret).update(manifest).digest("hex");
+  return { "x-signature": `ts=${ts},v1=${v1}`, "x-request-id": requestId };
+}
+
+function assinaturaComDataIdLowercase(secret, dataId, requestId = "req_1", ts = "1787423000") {
   const manifest = `id:${String(dataId).toLowerCase()};request-id:${requestId};ts:${ts};`;
   const v1 = crypto.createHmac("sha256", secret).update(manifest).digest("hex");
   return { "x-signature": `ts=${ts},v1=${v1}`, "x-request-id": requestId };
@@ -730,6 +736,43 @@ function fechar(server) {
     env: {}
   });
   assert.strictEqual(secretAusente.codigo, "mercadopago_webhook_secret_ausente");
+
+  const assinaturaNumerica = assinatura("secret", "123456");
+  assert.strictEqual(
+    financeiro.validarAssinaturaWebhookMercadoPago({
+      xSignature: assinaturaNumerica["x-signature"],
+      xRequestId: assinaturaNumerica["x-request-id"],
+      dataId: "123456",
+      secret: "secret"
+    }).ok,
+    true,
+    "data.id numerico do simulador continua validando"
+  );
+
+  const dataIdUppercase = "ORDTST01ABCDEF123456";
+  const assinaturaUppercase = assinatura("secret", dataIdUppercase);
+  assert.strictEqual(
+    financeiro.validarAssinaturaWebhookMercadoPago({
+      xSignature: assinaturaUppercase["x-signature"],
+      xRequestId: assinaturaUppercase["x-request-id"],
+      dataId: dataIdUppercase,
+      secret: "secret"
+    }).ok,
+    true,
+    "data.id uppercase real-style valida preservando casing original"
+  );
+
+  const assinaturaLowercase = assinaturaComDataIdLowercase("secret", dataIdUppercase);
+  assert.strictEqual(
+    financeiro.validarAssinaturaWebhookMercadoPago({
+      xSignature: assinaturaLowercase["x-signature"],
+      xRequestId: assinaturaLowercase["x-request-id"],
+      dataId: dataIdUppercase,
+      secret: "secret"
+    }).codigo,
+    "mercadopago_assinatura_invalida",
+    "assinatura calculada sobre lowercase nao valida para data.id uppercase"
+  );
 
   const pending = await webhook({ repo, client, orderId: cobranca.orderId, bodyId: "wh_pending" });
   assert.strictEqual(pending.type, "payment.pending");

@@ -285,7 +285,6 @@ function diagnosticoAssinaturaWebhookMercadoPago({
 } = {}) {
   const assinatura = parseSignatureHeader(xSignature);
   const dataIdOriginal = texto(dataId);
-  const dataIdNormalizado = dataIdOriginal.toLowerCase();
   return {
     codigo: texto(codigo) || "mercadopago_assinatura_desconhecida",
     queryDataIdPresente: queryDataIdPresente === true,
@@ -296,7 +295,7 @@ function diagnosticoAssinaturaWebhookMercadoPago({
     v1Presente: Boolean(texto(assinatura.v1)),
     secretPresente: Boolean(texto(secret)),
     dataIdAlfanumerico: Boolean(dataIdOriginal && /^[a-z0-9]+$/i.test(dataIdOriginal)),
-    dataIdNormalizado: hashCurtoSeguro(dataIdNormalizado),
+    dataIdNormalizado: hashCurtoSeguro(dataIdOriginal),
     requestIdPresente: Boolean(texto(xRequestId))
   };
 }
@@ -311,7 +310,7 @@ function validarAssinaturaWebhookMercadoPago({
   const ts = assinatura.ts;
   const hash = assinatura.v1;
   const requestId = texto(xRequestId);
-  const id = texto(dataId).toLowerCase();
+  const id = texto(dataId);
   const segredo = texto(secret);
 
   if (!segredo) return { ok: false, codigo: "mercadopago_webhook_secret_ausente" };
