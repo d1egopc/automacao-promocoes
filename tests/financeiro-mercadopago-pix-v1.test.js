@@ -335,7 +335,8 @@ async function cobrarPix({
   plano = planoPro,
   externalPaymentId = "mp_pay_pro",
   env = {},
-  usuario = { id: "cliente_1", email: "cliente@test.local" }
+  usuario = { id: "cliente_1", email: "cliente@test.local" },
+  permitirPlanoPagoEmBreveInterno = true
 } = {}) {
   return financeiro.criarCobrancaMercadoPagoPix({
     clienteId: "cliente_1",
@@ -346,7 +347,8 @@ async function cobrarPix({
     repositorio: repo,
     client,
     env,
-    agora: new Date("2026-08-22T10:00:00.000Z")
+    agora: new Date("2026-08-22T10:00:00.000Z"),
+    permitirPlanoPagoEmBreveInterno
   });
 }
 

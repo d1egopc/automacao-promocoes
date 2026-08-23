@@ -663,7 +663,8 @@ async function criarCobrancaMercadoPagoPix({
   client = null,
   env = process.env,
   agora = new Date(),
-  metadata = {}
+  metadata = {},
+  permitirPlanoPagoEmBreveInterno = false
 } = {}) {
   const config = mercadoPagoConfig(env);
   const sandboxTeste = ambienteMercadoPagoTeste(env);
@@ -680,7 +681,7 @@ async function criarCobrancaMercadoPagoPix({
     externalPaymentId: ext,
     repositorio,
     agora,
-    permitirPlanoPagoEmBreveInterno: true,
+    permitirPlanoPagoEmBreveInterno,
     metadata: {
       ...metadata,
       adapter: "mercadopago_pix_v1"

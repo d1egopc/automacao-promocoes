@@ -182,6 +182,7 @@ const criarRotasDiscord = require("./modules/discord/discord.routes");
 const criarRotasAjudaContextual = require("./modules/ajuda-contextual/routes");
 const criarRotasVitrine = require("./modules/vitrine/routes");
 const criarRotasFinanceiroSimulado = require("./modules/financeiro/simulado.routes");
+const criarRotasCheckoutFinanceiro = require("./modules/financeiro/checkout.routes");
 const {
   criarRotasFinanceiroMercadoPago,
   criarWebhookMercadoPago,
@@ -11013,6 +11014,9 @@ app.use(criarRotasVitrine({
 }));
 
 app.use(auth);
+app.use("/financeiro", criarRotasCheckoutFinanceiro({
+  getPlanos: () => planos
+}));
 app.use(criarRotasAjudaContextual({
   readGlobalJson,
   writeGlobalJson,

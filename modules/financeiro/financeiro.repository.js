@@ -294,6 +294,70 @@ function criarRepositorioFinanceiroPostgres({ pool } = {}) {
       return resultado.resultado?.rows?.[0] || null;
     },
 
+    async buscarPaymentCliente(provider, externalPaymentId, clienteId) {
+      const resultado = await queryFinanceiro(
+        `SELECT *
+         FROM financial_payments
+         WHERE provider = $1
+           AND external_payment_id = $2
+           AND cliente_id = $3`,
+        [provider, externalPaymentId, clienteId]
+      );
+      if (!resultado?.ok) return null;
+      return resultado.resultado?.rows?.[0] || null;
+    },
+
+    async buscarPaymentPendenteClientePlano({
+      provider = "mercadopago",
+      clienteId = "",
+      planoId = "",
+      janelaMs = 30 * 60 * 1000,
+      agora = new Date()
+    } = {}) {
+      const desde = new Date(new Date(agora).getTime() - Math.max(60 * 1000, Number(janelaMs) || 30 * 60 * 1000)).toISOString();
+      const resultado = await queryFinanceiro(
+        `SELECT *
+         FROM financial_payments
+         WHERE provider = $1
+           AND cliente_id = $2
+           AND plano_id = $3
+           AND status IN ('created', 'pending')
+           AND metadata ? 'mpOrderId'
+           AND COALESCE(metadata->>'mpOrderId', '') <> ''
+           AND COALESCE(metadata->>'reconciliationStatus', 'pending') NOT IN ('manual_review', 'exhausted', 'finalized')
+           AND created_at >= $4::TIMESTAMPTZ
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [provider, clienteId, planoId, desde]
+      );
+      if (!resultado?.ok) return null;
+      return resultado.resultado?.rows?.[0] || null;
+    },
+
+    async buscarSubscriptionCliente(clienteId) {
+      const resultado = await queryFinanceiro(
+        `SELECT *
+         FROM financial_subscriptions
+         WHERE cliente_id = $1`,
+        [clienteId]
+      );
+      if (!resultado?.ok) return null;
+      return resultado.resultado?.rows?.[0] || null;
+    },
+
+    async obterProjectionPayment(paymentId) {
+      const resultado = await queryFinanceiro(
+        `SELECT projection_status, projection_attempts, projected_at
+         FROM financial_credit_ledger
+         WHERE payment_id = $1
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [paymentId]
+      );
+      if (!resultado?.ok) return null;
+      return resultado.resultado?.rows?.[0] || null;
+    },
+
     async listarPaymentsMercadoPagoParaReconciliacao({
       limite = 10,
       maxTentativas = 8,

@@ -181,6 +181,7 @@ function criarRotasFinanceiroMercadoPago({
         repositorio,
         client,
         env,
+        permitirPlanoPagoEmBreveInterno: true,
         metadata: {
           operador: req.usuario?.id || req.usuario?.email || "",
           origem: "admin_financeiro_mercadopago_pix"
