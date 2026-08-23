@@ -26,12 +26,23 @@ function objeto(valor = {}) {
   return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
 }
 
-function erroHttp(res, codigo = "checkout_pix_falhou", status = 400) {
-  return res.status(status).json({
+function erroHttp(res, erro = "checkout_pix_falhou", status = 400) {
+  const codigo = typeof erro === "object" && erro
+    ? erro.codigo || "checkout_pix_falhou"
+    : texto(erro) || "checkout_pix_falhou";
+  const statusHttp = typeof erro === "object" && erro
+    ? erro.statusCode || erro.status || status
+    : status;
+  const resposta = {
     ok: false,
     codigo,
-    erro: status >= 500 ? "Falha ao iniciar checkout PIX" : codigo
-  });
+    erro: statusHttp >= 500 ? "Falha ao iniciar checkout PIX" : codigo
+  };
+  if (codigo === "mercadopago_api_falhou" && erro?.detalheMercadoPago) {
+    resposta.statusMercadoPago = Number(erro.status) || Number(erro.detalheMercadoPago.status) || statusHttp;
+    resposta.detalheMercadoPago = erro.detalheMercadoPago;
+  }
+  return res.status(statusHttp).json(resposta);
 }
 
 async function executarComLockCheckout(chave = "", fn = async () => null) {
@@ -226,7 +237,7 @@ function criarRotasCheckoutFinanceiro({
         return res.status(201).json(respostaCobrancaCriada(resultado, false));
       });
     } catch (e) {
-      return erroHttp(res, e.codigo || "checkout_pix_falhou", e.statusCode || e.status || 500);
+      return erroHttp(res, e, e.statusCode || e.status || 500);
     }
   });
 

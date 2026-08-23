@@ -230,6 +230,36 @@ function sanitizarErroMercadoPago(payload = null, status = 0) {
   return detalhe;
 }
 
+function emailBasicoValidoMercadoPago(valor = "") {
+  const email = texto(valor);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function sanitizarRequestMercadoPago(path = "", body = null, headers = {}) {
+  if (path !== "/v1/orders" || !body || typeof body !== "object") {
+    return {};
+  }
+  const pagamento = body.transactions?.payments?.[0] || {};
+  return {
+    type: texto(body.type),
+    processing_mode: texto(body.processing_mode),
+    total_amount: texto(body.total_amount),
+    payment_amount: texto(pagamento.amount),
+    payment_method: {
+      id: texto(pagamento.payment_method?.id),
+      type: texto(pagamento.payment_method?.type)
+    },
+    payer: {
+      emailPresente: Boolean(texto(body.payer?.email)),
+      emailValido: emailBasicoValidoMercadoPago(body.payer?.email),
+      firstNamePresente: Boolean(texto(body.payer?.first_name))
+    },
+    externalReferencePresente: Boolean(texto(body.external_reference)),
+    xIdempotencyKeyPresente: Boolean(texto(headers["X-Idempotency-Key"] || headers["x-idempotency-key"])),
+    notificationUrlPresente: Boolean(texto(body.notification_url))
+  };
+}
+
 function mercadoPagoConfig(env = process.env) {
   const accessToken = texto(env.MERCADOPAGO_ACCESS_TOKEN);
   const webhookSecret = texto(env.MERCADOPAGO_WEBHOOK_SECRET);
@@ -567,11 +597,13 @@ function criarMercadoPagoHttpClient({
     }
     if (!resposta.ok) {
       const detalheMercadoPago = sanitizarErroMercadoPago(payload, resposta.status);
+      const requestMercadoPago = sanitizarRequestMercadoPago(path, body, headers);
       console.warn("[MERCADOPAGO-API-ERRO-SEGURO]", JSON.stringify({
         status: resposta.status,
         method,
         endpoint: path,
-        detalheMercadoPago
+        detalheMercadoPago,
+        requestMercadoPago
       }));
       const erro = new Error("mercadopago_api_falhou");
       erro.codigo = "mercadopago_api_falhou";

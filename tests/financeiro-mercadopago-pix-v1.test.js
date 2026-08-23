@@ -416,7 +416,20 @@ function fechar(server) {
       })
     });
     await assert.rejects(
-      () => clientHttp.criarOrder({ teste: true }, { idempotencyKey: "idem_400" }),
+      () => clientHttp.criarOrder({
+        type: "online",
+        processing_mode: "automatic",
+        total_amount: "2.00",
+        external_reference: "mp_pay_cliente_1_pro_teste",
+        payer: { email: "cliente.real@test.local" },
+        notification_url: "https://go.optimuspromo.com.br/webhooks/mercadopago",
+        transactions: {
+          payments: [{
+            amount: "2.00",
+            payment_method: { id: "pix", type: "bank_transfer" }
+          }]
+        }
+      }, { idempotencyKey: "idem_400" }),
       (erro) => {
         assert.strictEqual(erro.codigo, "mercadopago_api_falhou");
         assert.strictEqual(erro.status, 400);
@@ -440,6 +453,15 @@ function fechar(server) {
     );
     const logSeguro = warnings.join("\n");
     assert.strictEqual(logSeguro.includes("[MERCADOPAGO-API-ERRO-SEGURO]"), true, "telemetria sanitizada registrada");
+    assert.strictEqual(logSeguro.includes('"requestMercadoPago"'), true, "telemetria inclui shape seguro do request");
+    assert.strictEqual(logSeguro.includes('"total_amount":"2.00"'), true, "telemetria confirma total_amount");
+    assert.strictEqual(logSeguro.includes('"payment_amount":"2.00"'), true, "telemetria confirma amount do pagamento");
+    assert.strictEqual(logSeguro.includes('"id":"pix"'), true, "telemetria confirma metodo pix");
+    assert.strictEqual(logSeguro.includes('"type":"bank_transfer"'), true, "telemetria confirma tipo bank_transfer");
+    assert.strictEqual(logSeguro.includes('"emailPresente":true'), true, "telemetria confirma payer.email presente sem expor email");
+    assert.strictEqual(logSeguro.includes('"emailValido":true'), true, "telemetria confirma formato basico do email");
+    assert.strictEqual(logSeguro.includes('"xIdempotencyKeyPresente":true'), true, "telemetria confirma idempotency key");
+    assert.strictEqual(logSeguro.includes('"notificationUrlPresente":true'), true, "telemetria confirma notification_url");
     assert.strictEqual(logSeguro.includes("APP_USR_TOKEN_SECRETO"), false, "telemetria nao vaza access token");
     assert.strictEqual(logSeguro.includes("cliente.real@test.local"), false, "telemetria nao vaza email completo");
     assert.strictEqual(logSeguro.includes("000201010212"), false, "telemetria nao vaza QR");

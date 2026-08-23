@@ -258,6 +258,18 @@ class FakeMercadoPagoClient {
   }
 }
 
+class FakeMercadoPagoClientFalha {
+  constructor(erro) {
+    this.calls = [];
+    this.erro = erro;
+  }
+
+  async criarOrder(body, { idempotencyKey } = {}) {
+    this.calls.push({ body: clone(body), idempotencyKey });
+    throw this.erro;
+  }
+}
+
 const planoFree = {
   id: "free_beta",
   nome: "Free Beta",
@@ -460,6 +472,43 @@ function fechar(server) {
         body: { planoId }
       });
       assert.strictEqual(bloqueado.body.codigo, codigo, `${planoId} deve ser bloqueado`);
+    }
+
+    const erroMercadoPago = new Error("mercadopago_api_falhou");
+    erroMercadoPago.codigo = "mercadopago_api_falhou";
+    erroMercadoPago.status = 400;
+    erroMercadoPago.detalheMercadoPago = {
+      status: 400,
+      message: "invalid payer [email_mascarado]",
+      error: "bad_request",
+      code: "invalid_order",
+      cause: [{ code: "invalid_payer", description: "payer.email [email_mascarado] rejeitado" }]
+    };
+    const repoFalha = new RepoMemoria();
+    const envFalha = criarApp({
+      repo: repoFalha,
+      client: new FakeMercadoPagoClientFalha(erroMercadoPago),
+      usuarios: [{ id: "user_falha", nome: "Falha", email: "falha@test.local", ativo: true, plano: "free_beta", creditos: 300 }],
+      planos
+    });
+    const serverFalha = await escutar(envFalha.app);
+    try {
+      const falha = await request(serverFalha, "POST", "/financeiro/checkout/pix", {
+        clienteId: "user_falha",
+        body: { planoId: "pro" }
+      });
+      assert.strictEqual(falha.status, 400, "checkout publico preserva status Mercado Pago");
+      assert.strictEqual(falha.body.codigo, "mercadopago_api_falhou");
+      assert.strictEqual(falha.body.statusMercadoPago, 400);
+      assert.deepStrictEqual(falha.body.detalheMercadoPago, erroMercadoPago.detalheMercadoPago);
+      const serializadoFalha = JSON.stringify(falha.body);
+      assert.strictEqual(serializadoFalha.includes("falha@test.local"), false, "checkout publico nao vaza email completo");
+      assert.strictEqual(repoFalha.state.payments.length, 1, "payment interno permanece auditavel");
+      assert.strictEqual(repoFalha.state.payments[0].metadata?.mpOrderId, undefined, "falha externa nao cria mpOrderId");
+      assert.strictEqual(repoFalha.state.events.length, 0, "falha externa nao cria evento financeiro");
+      assert.strictEqual(repoFalha.state.ledger.length, 0, "falha externa nao cria ledger");
+    } finally {
+      await fechar(serverFalha);
     }
 
     const ext = aposCancelado.body.externalPaymentId;
