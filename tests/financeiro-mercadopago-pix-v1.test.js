@@ -666,16 +666,70 @@ function fechar(server) {
   assert.strictEqual(replayCobranca.ok, true);
   assert.strictEqual(client.calls[1].idempotencyKey, "mp_order:mp_pay_pro", "idempotencia de criacao deriva da cobranca interna");
 
-  const invalido = await financeiro.processarWebhookMercadoPago({
-    headers: { "x-signature": "ts=1,v1=00", "x-request-id": "req_1" },
+  const logsWebhook = [];
+  const logOriginal = console.log;
+  console.log = (...args) => logsWebhook.push(args.join(" "));
+  const assinaturaInvalida = "ts=1704908010,v1=1111111111111111111111111111111111111111111111111111111111111111";
+  const segredoWebhook = "SUPER_SECRET_WEBHOOK";
+  const dataIdAlfanumericoTeste = "ORDTST01M0QKD7X6KABB3C2J7VDEEG0F";
+  let invalido;
+  try {
+    invalido = await financeiro.processarWebhookMercadoPago({
+      headers: { "x-signature": assinaturaInvalida, "x-request-id": "req_1" },
+      query: { "data.id": dataIdAlfanumericoTeste },
+      body: {
+        id: "wh_invalido",
+        data: { id: dataIdAlfanumericoTeste },
+        email: "cliente.real@test.local",
+        token: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.assinatura"
+      },
+      repositorio: repo,
+      client,
+      env: { MERCADOPAGO_WEBHOOK_SECRET: segredoWebhook }
+    });
+  } finally {
+    console.log = logOriginal;
+  }
+  assert.strictEqual(invalido.ok, false);
+  assert.strictEqual(invalido.codigo, "mercadopago_assinatura_invalida");
+  const logAssinatura = logsWebhook.join("\n");
+  assert.strictEqual(logAssinatura.includes("[MERCADOPAGO-WEBHOOK-ASSINATURA-DIAGNOSTICO]"), true, "telemetria segura de assinatura e registrada");
+  assert.strictEqual(logAssinatura.includes("\"codigo\":\"mercadopago_assinatura_invalida\""), true, "codigo final da validacao aparece");
+  assert.strictEqual(logAssinatura.includes("\"queryDataIdPresente\":true"), true);
+  assert.strictEqual(logAssinatura.includes("\"bodyDataIdPresente\":true"), true);
+  assert.strictEqual(logAssinatura.includes("\"xSignaturePresente\":true"), true);
+  assert.strictEqual(logAssinatura.includes("\"xRequestIdPresente\":true"), true);
+  assert.strictEqual(logAssinatura.includes("\"tsPresente\":true"), true);
+  assert.strictEqual(logAssinatura.includes("\"v1Presente\":true"), true);
+  assert.strictEqual(logAssinatura.includes("\"secretPresente\":true"), true);
+  assert.strictEqual(logAssinatura.includes("\"dataIdAlfanumerico\":true"), true);
+  assert.strictEqual(logAssinatura.includes("\"requestIdPresente\":true"), true);
+  assert.strictEqual(logAssinatura.includes("sha256_12"), true, "dataId normalizado e publicado apenas como hash curto");
+  assert.strictEqual(logAssinatura.includes(segredoWebhook), false, "secret nao pode aparecer");
+  assert.strictEqual(logAssinatura.includes(assinaturaInvalida), false, "x-signature completa nao pode aparecer");
+  assert.strictEqual(logAssinatura.includes("1111111111111111111111111111111111111111111111111111111111111111"), false, "v1 nao pode aparecer");
+  assert.strictEqual(logAssinatura.includes("cliente.real@test.local"), false, "body/email nao pode aparecer");
+  assert.strictEqual(logAssinatura.includes("eyJhbGciOiJIUzI1NiJ9"), false, "JWT nao pode aparecer");
+
+  const incompleta = await financeiro.processarWebhookMercadoPago({
+    headers: { "x-signature": "ts=1704908010", "x-request-id": "" },
     query: { "data.id": cobranca.orderId },
-    body: { id: "wh_invalido", data: { id: cobranca.orderId } },
+    body: {},
     repositorio: repo,
     client,
     env: { MERCADOPAGO_WEBHOOK_SECRET: "secret" }
   });
-  assert.strictEqual(invalido.ok, false);
-  assert.strictEqual(invalido.codigo, "mercadopago_assinatura_invalida");
+  assert.strictEqual(incompleta.codigo, "mercadopago_assinatura_incompleta");
+
+  const secretAusente = await financeiro.processarWebhookMercadoPago({
+    headers: { "x-signature": assinaturaInvalida, "x-request-id": "req_1" },
+    query: { "data.id": cobranca.orderId },
+    body: {},
+    repositorio: repo,
+    client,
+    env: {}
+  });
+  assert.strictEqual(secretAusente.codigo, "mercadopago_webhook_secret_ausente");
 
   const pending = await webhook({ repo, client, orderId: cobranca.orderId, bodyId: "wh_pending" });
   assert.strictEqual(pending.type, "payment.pending");

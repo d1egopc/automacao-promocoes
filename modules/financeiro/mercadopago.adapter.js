@@ -265,6 +265,42 @@ function safeEqualHex(a = "", b = "") {
   return aa.length > 0 && aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
 }
 
+function hashCurtoSeguro(valor = "") {
+  const normalizado = texto(valor);
+  if (!normalizado) return null;
+  return {
+    sha256_12: crypto.createHash("sha256").update(normalizado).digest("hex").slice(0, 12),
+    tamanho: normalizado.length
+  };
+}
+
+function diagnosticoAssinaturaWebhookMercadoPago({
+  xSignature = "",
+  xRequestId = "",
+  dataId = "",
+  secret = "",
+  queryDataIdPresente = false,
+  bodyDataIdPresente = false,
+  codigo = ""
+} = {}) {
+  const assinatura = parseSignatureHeader(xSignature);
+  const dataIdOriginal = texto(dataId);
+  const dataIdNormalizado = dataIdOriginal.toLowerCase();
+  return {
+    codigo: texto(codigo) || "mercadopago_assinatura_desconhecida",
+    queryDataIdPresente: queryDataIdPresente === true,
+    bodyDataIdPresente: bodyDataIdPresente === true,
+    xSignaturePresente: Boolean(texto(xSignature)),
+    xRequestIdPresente: Boolean(texto(xRequestId)),
+    tsPresente: Boolean(texto(assinatura.ts)),
+    v1Presente: Boolean(texto(assinatura.v1)),
+    secretPresente: Boolean(texto(secret)),
+    dataIdAlfanumerico: Boolean(dataIdOriginal && /^[a-z0-9]+$/i.test(dataIdOriginal)),
+    dataIdNormalizado: hashCurtoSeguro(dataIdNormalizado),
+    requestIdPresente: Boolean(texto(xRequestId))
+  };
+}
+
 function validarAssinaturaWebhookMercadoPago({
   xSignature = "",
   xRequestId = "",
@@ -527,13 +563,28 @@ async function processarWebhookMercadoPago({
   agora = new Date()
 } = {}) {
   const config = mercadoPagoConfig(env);
-  const dataId = texto(query["data.id"] || query.data_id || body?.data?.id || body?.resource);
+  const queryDataId = texto(query["data.id"] || query.data_id);
+  const bodyDataId = texto(body?.data?.id || body?.resource);
+  const dataId = texto(queryDataId || bodyDataId);
+  const xSignature = headers["x-signature"] || headers["X-Signature"];
+  const xRequestId = headers["x-request-id"] || headers["X-Request-Id"];
   const assinatura = validarAssinaturaWebhookMercadoPago({
-    xSignature: headers["x-signature"] || headers["X-Signature"],
-    xRequestId: headers["x-request-id"] || headers["X-Request-Id"],
+    xSignature,
+    xRequestId,
     dataId,
     secret: config.webhookSecret
   });
+  console.log("[MERCADOPAGO-WEBHOOK-ASSINATURA-DIAGNOSTICO]", JSON.stringify(
+    diagnosticoAssinaturaWebhookMercadoPago({
+      xSignature,
+      xRequestId,
+      dataId,
+      secret: config.webhookSecret,
+      queryDataIdPresente: Boolean(queryDataId),
+      bodyDataIdPresente: Boolean(bodyDataId),
+      codigo: assinatura.ok ? "ok" : assinatura.codigo
+    })
+  ));
 
   if (!assinatura.ok) return { ok: false, statusHttp: 401, codigo: assinatura.codigo };
   if (!dataId) return { ok: false, statusHttp: 400, codigo: "mercadopago_data_id_obrigatorio" };
