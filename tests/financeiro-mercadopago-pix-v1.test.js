@@ -277,16 +277,23 @@ function assinatura(secret, dataId, requestId = "req_1", ts = "1787423000") {
   return { "x-signature": `ts=${ts},v1=${v1}`, "x-request-id": requestId };
 }
 
-async function cobrarPix({ repo, client, plano = planoPro, externalPaymentId = "mp_pay_pro" } = {}) {
+async function cobrarPix({
+  repo,
+  client,
+  plano = planoPro,
+  externalPaymentId = "mp_pay_pro",
+  env = {},
+  usuario = { id: "cliente_1", email: "cliente@test.local" }
+} = {}) {
   return financeiro.criarCobrancaMercadoPagoPix({
     clienteId: "cliente_1",
     planoId: plano.id,
     planos: { [plano.id]: plano },
-    usuario: { id: "cliente_1", email: "cliente@test.local" },
+    usuario,
     externalPaymentId,
     repositorio: repo,
     client,
-    env: {},
+    env,
     agora: new Date("2026-08-22T10:00:00.000Z")
   });
 }
@@ -338,6 +345,55 @@ async function webhook({ repo, client, orderId, secret = "secret", bodyId = "wh_
   assert.strictEqual(client.calls[0].body.total_amount, "34.90");
   assert.strictEqual(client.calls[0].body.external_reference, "mp_pay_pro");
   assert.strictEqual(client.calls[0].idempotencyKey, "mp_order:mp_pay_pro");
+  assert.strictEqual(
+    Object.prototype.hasOwnProperty.call(client.calls[0].body.payer, "first_name"),
+    false,
+    "ENV ausente nao deve acionar gatilho APRO implicitamente"
+  );
+
+  const repoSandbox = new RepoMemoria();
+  const clientSandbox = new FakeMercadoPagoClient();
+  await cobrarPix({
+    repo: repoSandbox,
+    client: clientSandbox,
+    externalPaymentId: "mp_pay_sandbox",
+    env: { MERCADOPAGO_ENV: "test" }
+  });
+  assert.strictEqual(
+    clientSandbox.calls[0].body.payer.first_name,
+    "APRO",
+    "ambiente test deve enviar gatilho oficial de sandbox PIX"
+  );
+  assert.strictEqual(repoSandbox.state.ledger.length, 0, "sandbox PIX criado continua sem conceder credito");
+
+  const repoProd = new RepoMemoria();
+  const clientProd = new FakeMercadoPagoClient();
+  await cobrarPix({
+    repo: repoProd,
+    client: clientProd,
+    externalPaymentId: "mp_pay_prod",
+    env: { MERCADOPAGO_ENV: "production" }
+  });
+  assert.strictEqual(
+    Object.prototype.hasOwnProperty.call(clientProd.calls[0].body.payer, "first_name"),
+    false,
+    "ambiente production nao pode forcar APRO"
+  );
+
+  const repoInject = new RepoMemoria();
+  const clientInject = new FakeMercadoPagoClient();
+  await cobrarPix({
+    repo: repoInject,
+    client: clientInject,
+    externalPaymentId: "mp_pay_inject",
+    env: { MERCADOPAGO_ENV: "production" },
+    usuario: { id: "cliente_1", email: "cliente@test.local", first_name: "APRO", firstName: "APRO", nome: "APRO" }
+  });
+  assert.strictEqual(
+    Object.prototype.hasOwnProperty.call(clientInject.calls[0].body.payer, "first_name"),
+    false,
+    "request/frontend nao consegue injetar first_name APRO fora do sandbox"
+  );
 
   const replayCobranca = await cobrarPix({ repo, client, externalPaymentId: "mp_pay_pro" });
   assert.strictEqual(replayCobranca.ok, true);

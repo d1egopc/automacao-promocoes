@@ -267,7 +267,7 @@ function criarMercadoPagoHttpClient({
   };
 }
 
-function montarOrderPix({ payment = {}, planSnapshot = {}, usuario = {}, notificationUrl = "" } = {}) {
+function montarOrderPix({ payment = {}, planSnapshot = {}, usuario = {}, notificationUrl = "", sandboxTeste = false } = {}) {
   const amount = centsParaValor(planSnapshot.amountCents);
   const body = {
     type: "online",
@@ -290,6 +290,10 @@ function montarOrderPix({ payment = {}, planSnapshot = {}, usuario = {}, notific
       ]
     }
   };
+
+  if (sandboxTeste === true) {
+    body.payer.first_name = "APRO";
+  }
 
   if (texto(notificationUrl)) body.notification_url = texto(notificationUrl);
   return body;
@@ -339,7 +343,8 @@ async function criarCobrancaMercadoPagoPix({
     payment,
     planSnapshot,
     usuario,
-    notificationUrl: env.MERCADOPAGO_WEBHOOK_URL
+    notificationUrl: env.MERCADOPAGO_WEBHOOK_URL,
+    sandboxTeste: textoLower(env.MERCADOPAGO_ENV) === "test"
   });
   const idempotencyKey = idempotencyKeyOrder(ext);
   const order = await mpClient.criarOrder(orderBody, { idempotencyKey });
