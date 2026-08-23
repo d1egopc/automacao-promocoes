@@ -522,6 +522,111 @@ function fechar(server) {
     await fechar(serverErro);
   }
 
+  const repoDiagnostico = new RepoMemoria();
+  const clientDiagnostico = new FakeMercadoPagoClient();
+  let sdkFactoryChamadas = 0;
+  const appDiagnostico = express();
+  appDiagnostico.use(express.json());
+  appDiagnostico.use("/", criarRotasFinanceiroMercadoPago({
+    getUsuarios: () => [{ id: "user_4ap7aetj", email: "cliente.real@test.local" }],
+    getPlanos: () => ({ pro: { ...planoPro, preco: "R$ 2,00" } }),
+    isAdminMaster: () => true,
+    repositorio: repoDiagnostico,
+    sdkOrderClientFactory: ({ accessToken }) => {
+      sdkFactoryChamadas += 1;
+      assert.strictEqual(accessToken, "APP_USR_TOKEN_PRODUCAO_FAKE");
+      return clientDiagnostico;
+    },
+    env: {
+      MERCADOPAGO_ACCESS_TOKEN: "APP_USR_TOKEN_PRODUCAO_FAKE",
+      MERCADOPAGO_ENV: "production",
+      MERCADOPAGO_WEBHOOK_URL: "https://go.optimuspromo.com.br/webhooks/mercadopago"
+    }
+  }));
+  const serverDiagnostico = await escutar(appDiagnostico);
+  try {
+    const porta = serverDiagnostico.address().port;
+    const respostaEscopo = await fetch(`http://127.0.0.1:${porta}/pix/cobrancas-sdk-diagnostico`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clienteId: "outro", planoId: "pro" })
+    });
+    const bodyEscopo = await respostaEscopo.json();
+    assert.strictEqual(respostaEscopo.status, 400);
+    assert.strictEqual(bodyEscopo.codigo, "mercadopago_sdk_diagnostico_escopo_invalido");
+    assert.strictEqual(clientDiagnostico.calls.length, 0, "escopo invalido nao chama SDK");
+
+    const respostaDiag = await fetch(`http://127.0.0.1:${porta}/pix/cobrancas-sdk-diagnostico`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clienteId: "user_4ap7aetj", planoId: "pro" })
+    });
+    const bodyDiag = await respostaDiag.json();
+    assert.strictEqual(respostaDiag.status, 201);
+    assert.strictEqual(bodyDiag.ok, true);
+    assert.strictEqual(bodyDiag.externalPaymentId, "mp_pay_user_4ap7aetj_pro_sdk_order_diagnostico_v1");
+    assert.strictEqual(bodyDiag.planSnapshot.amountCents, 200, "diagnostico usa valor oficial do plano/snapshot");
+    assert.strictEqual(bodyDiag.planSnapshot.creditosPorCiclo, 2000);
+    assert.strictEqual(bodyDiag.pix, undefined, "rota diagnostica nao retorna QR/copia-e-cola bruto");
+    assert.strictEqual(bodyDiag.pixPresente.qrCode, true);
+    assert.strictEqual(sdkFactoryChamadas, 1, "rota diagnostica usa client SDK injetado uma vez");
+    assert.strictEqual(clientDiagnostico.calls.length, 1, "uma unica chamada SDK foi feita");
+    assert.strictEqual(clientDiagnostico.calls[0].body.total_amount, "2.00");
+    assert.strictEqual(clientDiagnostico.calls[0].body.transactions.payments[0].amount, "2.00");
+    assert.strictEqual(clientDiagnostico.calls[0].body.notification_url, "https://go.optimuspromo.com.br/webhooks/mercadopago");
+    assert.strictEqual(repoDiagnostico.state.ledger.length, 0, "criacao diagnostica nao concede credito");
+
+    const respostaReplay = await fetch(`http://127.0.0.1:${porta}/pix/cobrancas-sdk-diagnostico`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clienteId: "user_4ap7aetj", planoId: "pro" })
+    });
+    const bodyReplay = await respostaReplay.json();
+    assert.strictEqual(respostaReplay.status, 409);
+    assert.strictEqual(bodyReplay.codigo, "mercadopago_sdk_diagnostico_ja_executado");
+    assert.strictEqual(clientDiagnostico.calls.length, 1, "replay diagnostico nao chama SDK novamente");
+
+    const respostaMinimoEscopo = await fetch(`http://127.0.0.1:${porta}/pix/orders-minimo-producao-diagnostico`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clienteId: "outro", planoId: "pro" })
+    });
+    const bodyMinimoEscopo = await respostaMinimoEscopo.json();
+    assert.strictEqual(respostaMinimoEscopo.status, 400);
+    assert.strictEqual(bodyMinimoEscopo.codigo, "mercadopago_order_minimo_escopo_invalido");
+    assert.strictEqual(clientDiagnostico.calls.length, 1, "escopo invalido do minimo nao chama SDK");
+
+    const respostaMinimo = await fetch(`http://127.0.0.1:${porta}/pix/orders-minimo-producao-diagnostico`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clienteId: "user_4ap7aetj", planoId: "pro" })
+    });
+    const bodyMinimo = await respostaMinimo.json();
+    assert.strictEqual(respostaMinimo.status, 201);
+    assert.strictEqual(bodyMinimo.ok, true);
+    assert.strictEqual(bodyMinimo.externalReference, "mp_order_min_user_4ap7aetj_pro_suporte_minimo_v1");
+    assert.strictEqual(bodyMinimo.orderId, "ORD_TEST_2");
+    assert.strictEqual(bodyMinimo.pixPresente.qrCode, true);
+    assert.strictEqual(bodyMinimo.pixPresente.ticketUrl, true);
+    assert.strictEqual(sdkFactoryChamadas, 2, "rota minima usa SDK oficial injetado");
+    assert.strictEqual(clientDiagnostico.calls.length, 2, "rota minima faz somente uma chamada extra ao SDK");
+    assert.strictEqual(clientDiagnostico.calls[1].idempotencyKey, "mp-order-min-user-4ap7aetj-pro-suporte-minimo-v1");
+    assert.strictEqual(clientDiagnostico.calls[1].body.type, "online");
+    assert.strictEqual(clientDiagnostico.calls[1].body.processing_mode, "automatic");
+    assert.strictEqual(clientDiagnostico.calls[1].body.total_amount, 2);
+    assert.strictEqual(typeof clientDiagnostico.calls[1].body.total_amount, "number");
+    assert.strictEqual(clientDiagnostico.calls[1].body.transactions.payments[0].amount, 2);
+    assert.strictEqual(typeof clientDiagnostico.calls[1].body.transactions.payments[0].amount, "number");
+    assert.strictEqual(clientDiagnostico.calls[1].body.transactions.payments[0].payment_method.id, "pix");
+    assert.strictEqual(clientDiagnostico.calls[1].body.transactions.payments[0].payment_method.type, "bank_transfer");
+    assert.strictEqual(clientDiagnostico.calls[1].body.payer.email, "cliente.real@test.local");
+    assert.ok(!("notification_url" in clientDiagnostico.calls[1].body), "payload minimo nao envia notification_url");
+    assert.strictEqual(repoDiagnostico.state.ledger.length, 0, "rota minima nao concede credito");
+    assert.strictEqual(repoDiagnostico.state.payments.length, 1, "rota minima nao cria payment financeiro");
+  } finally {
+    await fechar(serverDiagnostico);
+  }
+
   const publicoEmBreve = await financeiro.criarCobrancaFinanceira({
     clienteId: "cliente_1",
     planoId: "pro",

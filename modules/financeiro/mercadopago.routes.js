@@ -15,6 +15,100 @@ function texto(valor = "") {
   return String(valor ?? "").trim();
 }
 
+function resumoPixSeguro(order = {}) {
+  const payments = order?.transactions?.payments;
+  const primeiroPagamento = Array.isArray(payments) ? payments[0] : null;
+  const metodo = primeiroPagamento?.payment_method || {};
+  return {
+    qrCode: Boolean(metodo.qr_code || metodo.qrCode || primeiroPagamento?.qr_code || primeiroPagamento?.qrCode),
+    copiaECola: Boolean(metodo.qr_code || metodo.qrCode || primeiroPagamento?.qr_code || primeiroPagamento?.qrCode),
+    ticketUrl: Boolean(metodo.ticket_url || metodo.ticketUrl || primeiroPagamento?.ticket_url || primeiroPagamento?.ticketUrl)
+  };
+}
+
+function statusErroSdkMercadoPago(erro = {}) {
+  return Number(
+    erro.status ||
+    erro.statusCode ||
+    erro.httpStatus ||
+    erro.apiResponse?.status ||
+    erro.apiResponse?.statusCode ||
+    erro.response?.status ||
+    0
+  ) || 0;
+}
+
+function payloadErroSdkMercadoPago(erro = {}) {
+  const candidatos = [
+    erro.payload,
+    erro.apiResponse?.content,
+    erro.apiResponse?.data,
+    erro.response?.data,
+    erro.response?.body,
+    erro.cause,
+    erro
+  ];
+  for (const candidato of candidatos) {
+    if (candidato && typeof candidato === "object") return candidato;
+  }
+  return { message: texto(erro.message || "mercadopago_api_falhou") };
+}
+
+function sanitizarErroMercadoPagoLocal(payload = {}, status = 0) {
+  const seguro = {
+    status: Number(status) || Number(payload.status) || 0
+  };
+  for (const campo of ["message", "error", "code"]) {
+    if (payload[campo]) seguro[campo] = texto(payload[campo]).replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]");
+  }
+  if (Array.isArray(payload.cause)) {
+    seguro.cause = payload.cause.map((item) => ({
+      code: texto(item?.code),
+      description: texto(item?.description).replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
+    }));
+  }
+  return seguro;
+}
+
+function criarMercadoPagoSdkOrderClientLocal({ accessToken = "" } = {}) {
+  if (!texto(accessToken)) {
+    const erro = new Error("mercadopago_nao_configurado");
+    erro.codigo = "mercadopago_nao_configurado";
+    throw erro;
+  }
+
+  let MercadoPagoConfig = null;
+  let MercadoPagoOrder = null;
+  try {
+    ({ MercadoPagoConfig, Order: MercadoPagoOrder } = require("mercadopago"));
+  } catch {
+    const erro = new Error("mercadopago_sdk_indisponivel");
+    erro.codigo = "mercadopago_sdk_indisponivel";
+    throw erro;
+  }
+
+  const sdkClient = new MercadoPagoConfig({ accessToken });
+  const orderClient = new MercadoPagoOrder(sdkClient);
+  return {
+    async criarOrder(body, { idempotencyKey } = {}) {
+      try {
+        return await orderClient.create({
+          body,
+          requestOptions: { idempotencyKey }
+        });
+      } catch (erroOriginal) {
+        const status = statusErroSdkMercadoPago(erroOriginal);
+        const detalheMercadoPago = sanitizarErroMercadoPagoLocal(payloadErroSdkMercadoPago(erroOriginal), status);
+        const erro = new Error("mercadopago_api_falhou");
+        erro.codigo = "mercadopago_api_falhou";
+        erro.status = status;
+        erro.detalheMercadoPago = detalheMercadoPago;
+        throw erro;
+      }
+    }
+  };
+}
+
 function erroHttp(res, erro, fallback = "mercadopago_falhou") {
   const codigo = erro?.codigo || fallback;
   const status = erro?.statusCode || erro?.status || (
@@ -128,6 +222,7 @@ function criarRotasFinanceiroMercadoPago({
   isAdminMaster = () => false,
   repositorio = criarRepositorioFinanceiroPostgres(),
   client = null,
+  sdkOrderClientFactory = criarMercadoPagoSdkOrderClientLocal,
   env = process.env
 } = {}) {
   const router = express.Router();
@@ -204,6 +299,153 @@ function criarRotasFinanceiroMercadoPago({
       });
     } catch (erro) {
       return erroHttp(res, erro, "mercadopago_pix_cobranca_falhou");
+    }
+  });
+
+  router.post("/pix/cobrancas-sdk-diagnostico", async (req, res) => {
+    try {
+      const body = req.body || {};
+      const clienteId = texto(body.clienteId);
+      const planoId = texto(body.planoId);
+      const externalPaymentId = "mp_pay_user_4ap7aetj_pro_sdk_order_diagnostico_v1";
+
+      if (clienteId !== "user_4ap7aetj" || planoId !== "pro") {
+        return res.status(400).json({
+          ok: false,
+          codigo: "mercadopago_sdk_diagnostico_escopo_invalido"
+        });
+      }
+
+      const existente = typeof repositorio.buscarPayment === "function"
+        ? await repositorio.buscarPayment(PROVIDER_MERCADOPAGO, externalPaymentId)
+        : null;
+      if (existente) {
+        return res.status(409).json({
+          ok: false,
+          codigo: "mercadopago_sdk_diagnostico_ja_executado",
+          externalPaymentId,
+          orderId: texto(existente.metadata?.mpOrderId || ""),
+          status: existente.status || ""
+        });
+      }
+
+      const usuario = getUsuarios().find((u) => texto(u?.id || u?.clienteId || u?.usuarioId) === clienteId);
+      if (!usuario) {
+        return res.status(404).json({
+          ok: false,
+          codigo: "usuario_nao_encontrado",
+          erro: "Usuario nao encontrado"
+        });
+      }
+
+      const config = mercadoPagoConfig(env);
+      const sdkClient = sdkOrderClientFactory({ accessToken: config.accessToken });
+      const resultado = await criarCobrancaMercadoPagoPix({
+        clienteId,
+        planoId,
+        planos: getPlanos(),
+        usuario,
+        externalPaymentId,
+        repositorio,
+        client: sdkClient,
+        env,
+        permitirPlanoPagoEmBreveInterno: false,
+        metadata: {
+          operador: req.usuario?.id || req.usuario?.email || "",
+          origem: "admin_financeiro_mercadopago_sdk_order_diagnostico"
+        }
+      });
+
+      if (!resultado.ok) {
+        return res.status(/nao_configurado/.test(resultado.codigo || "") ? 503 : 400).json(resultado);
+      }
+
+      return res.status(201).json({
+        ok: true,
+        provider: resultado.provider,
+        externalPaymentId: resultado.externalPaymentId,
+        orderId: resultado.orderId,
+        status: resultado.status,
+        statusDetail: resultado.statusDetail,
+        pixPresente: {
+          qrCode: !!resultado.pix?.qrCode,
+          copiaECola: !!resultado.pix?.copiaECola,
+          ticketUrl: !!resultado.pix?.ticketUrl
+        },
+        planSnapshot: resultado.planSnapshot
+      });
+    } catch (erro) {
+      return erroHttp(res, erro, "mercadopago_sdk_diagnostico_falhou");
+    }
+  });
+
+  router.post("/pix/orders-minimo-producao-diagnostico", async (req, res) => {
+    try {
+      const body = req.body || {};
+      const clienteId = texto(body.clienteId);
+      const planoId = texto(body.planoId);
+      const externalReference = "mp_order_min_user_4ap7aetj_pro_suporte_minimo_v1";
+      const idempotencyKey = "mp-order-min-user-4ap7aetj-pro-suporte-minimo-v1";
+
+      if (clienteId !== "user_4ap7aetj" || planoId !== "pro") {
+        return res.status(400).json({
+          ok: false,
+          codigo: "mercadopago_order_minimo_escopo_invalido"
+        });
+      }
+
+      const usuario = getUsuarios().find((u) => texto(u?.id || u?.clienteId || u?.usuarioId) === clienteId);
+      if (!usuario) {
+        return res.status(404).json({
+          ok: false,
+          codigo: "usuario_nao_encontrado",
+          erro: "Usuario nao encontrado"
+        });
+      }
+
+      const config = mercadoPagoConfig(env);
+      if (!config.configurado && !client) {
+        return res.status(503).json({
+          ok: false,
+          codigo: "mercadopago_nao_configurado"
+        });
+      }
+
+      const mpClient = client || sdkOrderClientFactory({ accessToken: config.accessToken });
+      const orderBody = {
+        type: "online",
+        processing_mode: "automatic",
+        total_amount: 2.00,
+        external_reference: externalReference,
+        payer: {
+          email: texto(usuario.email || usuario.emailUsuario)
+        },
+        transactions: {
+          payments: [
+            {
+              amount: 2.00,
+              payment_method: {
+                id: "pix",
+                type: "bank_transfer"
+              }
+            }
+          ]
+        }
+      };
+
+      const order = await mpClient.criarOrder(orderBody, { idempotencyKey });
+
+      return res.status(201).json({
+        ok: true,
+        provider: PROVIDER_MERCADOPAGO,
+        externalReference,
+        orderId: texto(order.id || order.order_id || ""),
+        status: texto(order.status || ""),
+        statusDetail: texto(order.status_detail || order.statusDetail || ""),
+        pixPresente: resumoPixSeguro(order)
+      });
+    } catch (erro) {
+      return erroHttp(res, erro, "mercadopago_order_minimo_diagnostico_falhou");
     }
   });
 
