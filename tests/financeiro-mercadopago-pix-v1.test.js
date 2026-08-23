@@ -2,10 +2,13 @@
 
 const assert = require("assert");
 const crypto = require("crypto");
+const express = require("express");
 const fs = require("fs");
+const http = require("http");
 const path = require("path");
 
 const financeiro = require("../modules/financeiro");
+const { criarRotasFinanceiroMercadoPago } = require("../modules/financeiro/mercadopago.routes");
 
 function clone(valor) {
   return JSON.parse(JSON.stringify(valor));
@@ -336,7 +339,83 @@ async function webhook({ repo, client, orderId, secret = "secret", bodyId = "wh_
   });
 }
 
+function escutar(app) {
+  return new Promise((resolve) => {
+    const server = http.createServer(app);
+    server.listen(0, "127.0.0.1", () => resolve(server));
+  });
+}
+
+function fechar(server) {
+  return new Promise((resolve, reject) => {
+    server.close((erro) => erro ? reject(erro) : resolve());
+  });
+}
+
 (async () => {
+  const warnings = [];
+  const warnOriginal = console.warn;
+  console.warn = (...args) => warnings.push(args.join(" "));
+  try {
+    const clientHttp = financeiro.criarMercadoPagoHttpClient({
+      accessToken: "APP_USR_TOKEN_SECRETO",
+      fetchImpl: async (url, options = {}) => ({
+        ok: false,
+        status: 400,
+        async text() {
+          return JSON.stringify({
+            message: "Invalid payer cliente.real@test.local Authorization Bearer APP_USR_TOKEN_SECRETO",
+            error: "bad_request",
+            code: "invalid_order",
+            access_token: "APP_USR_TOKEN_SECRETO",
+            qr_code: "00020101021226880014br.gov.bcb.pix2566pix.example.invalid/chave-super-longa",
+            cause: [
+              {
+                code: "invalid_payer",
+                description: "payer.email cliente.real@test.local rejeitado; Authorization: Bearer APP_USR_TOKEN_SECRETO"
+              }
+            ],
+            recebido: {
+              authorization: options.headers?.authorization,
+              jwt: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.assinatura"
+            },
+            endpoint: url
+          });
+        }
+      })
+    });
+    await assert.rejects(
+      () => clientHttp.criarOrder({ teste: true }, { idempotencyKey: "idem_400" }),
+      (erro) => {
+        assert.strictEqual(erro.codigo, "mercadopago_api_falhou");
+        assert.strictEqual(erro.status, 400);
+        assert.strictEqual(erro.detalheMercadoPago.status, 400);
+        assert.strictEqual(erro.detalheMercadoPago.message.includes("Invalid payer"), true, "message segura aparece");
+        assert.strictEqual(erro.detalheMercadoPago.message.includes("[email_mascarado]"), true, "email completo e mascarado");
+        assert.strictEqual(erro.detalheMercadoPago.error, "bad_request");
+        assert.strictEqual(erro.detalheMercadoPago.code, "invalid_order");
+        assert.deepStrictEqual(erro.detalheMercadoPago.cause, [
+          {
+            code: "invalid_payer",
+            description: "payer.email [email_mascarado] rejeitado; authorization:[redacted]"
+          }
+        ]);
+        const serializado = JSON.stringify(erro.detalheMercadoPago);
+        assert.strictEqual(serializado.includes("APP_USR_TOKEN_SECRETO"), false, "token nao aparece no detalhe");
+        assert.strictEqual(serializado.includes("cliente.real@test.local"), false, "email completo nao aparece no detalhe");
+        assert.strictEqual(serializado.includes("000201010212"), false, "QR/copia-e-cola nao aparece no detalhe");
+        return true;
+      }
+    );
+    const logSeguro = warnings.join("\n");
+    assert.strictEqual(logSeguro.includes("[MERCADOPAGO-API-ERRO-SEGURO]"), true, "telemetria sanitizada registrada");
+    assert.strictEqual(logSeguro.includes("APP_USR_TOKEN_SECRETO"), false, "telemetria nao vaza access token");
+    assert.strictEqual(logSeguro.includes("cliente.real@test.local"), false, "telemetria nao vaza email completo");
+    assert.strictEqual(logSeguro.includes("000201010212"), false, "telemetria nao vaza QR");
+  } finally {
+    console.warn = warnOriginal;
+  }
+
   const semEnv = await financeiro.criarCobrancaMercadoPagoPix({
     clienteId: "cliente_1",
     planoId: "pro",
@@ -352,6 +431,43 @@ async function webhook({ repo, client, orderId, secret = "secret", bodyId = "wh_
   assert.strictEqual(free.ok, false);
   assert.strictEqual(free.codigo, "plano_free_beta_nao_cobravel", "Free nao gera Order");
   assert.strictEqual(repoFree.state.payments.length, 0);
+
+  const erroRota = new Error("mercadopago_api_falhou");
+  erroRota.codigo = "mercadopago_api_falhou";
+  erroRota.status = 400;
+  erroRota.detalheMercadoPago = {
+    status: 400,
+    message: "invalid payment method",
+    error: "bad_request",
+    code: "invalid_payment_method",
+    cause: [{ code: "invalid_payment_method", description: "payment_method.id invalido" }]
+  };
+  const appErro = express();
+  appErro.use(express.json());
+  appErro.use("/", criarRotasFinanceiroMercadoPago({
+    getUsuarios: () => [{ id: "cliente_1", email: "cliente@test.local" }],
+    getPlanos: () => ({ pro: planoPro }),
+    isAdminMaster: () => true,
+    repositorio: new RepoMemoria(),
+    client: { criarOrder: async () => { throw erroRota; } },
+    env: {}
+  }));
+  const serverErro = await escutar(appErro);
+  try {
+    const porta = serverErro.address().port;
+    const respostaErro = await fetch(`http://127.0.0.1:${porta}/pix/cobrancas`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clienteId: "cliente_1", planoId: "pro" })
+    });
+    const bodyErro = await respostaErro.json();
+    assert.strictEqual(respostaErro.status, 400, "status HTTP Mercado Pago preservado na rota Admin");
+    assert.strictEqual(bodyErro.codigo, "mercadopago_api_falhou");
+    assert.strictEqual(bodyErro.statusMercadoPago, 400);
+    assert.deepStrictEqual(bodyErro.detalheMercadoPago, erroRota.detalheMercadoPago);
+  } finally {
+    await fechar(serverErro);
+  }
 
   const publicoEmBreve = await financeiro.criarCobrancaFinanceira({
     clienteId: "cliente_1",

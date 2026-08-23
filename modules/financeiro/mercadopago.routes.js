@@ -21,11 +21,16 @@ function erroHttp(res, erro, fallback = "mercadopago_falhou") {
       /nao_encontrado/.test(codigo) ? 404 :
         /obrigatorio|invalido|nao_cobravel|nao_contratavel|sem_/.test(codigo) ? 400 : 500
   );
-  return res.status(status).json({
+  const resposta = {
     ok: false,
     codigo,
     erro: status < 500 ? (erro?.message || codigo) : "Falha no Mercado Pago"
-  });
+  };
+  if (codigo === "mercadopago_api_falhou" && erro?.detalheMercadoPago) {
+    resposta.statusMercadoPago = Number(erro.status) || Number(erro.detalheMercadoPago.status) || status;
+    resposta.detalheMercadoPago = erro.detalheMercadoPago;
+  }
+  return res.status(status).json(resposta);
 }
 
 function criarRotasFinanceiroMercadoPago({

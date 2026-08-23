@@ -49,6 +49,52 @@ function valorParaCents(valor) {
   return Number.isFinite(n) ? Math.round(n * 100) : 0;
 }
 
+function sanitizarTextoMercadoPago(valor = "") {
+  const bruto = texto(valor);
+  if (!bruto) return "";
+  return bruto
+    .replace(/authorization\s*[:=]\s*(?:Bearer\s+)?[^\s,;}]+/gi, "authorization:[redacted]")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[jwt_mascarado]")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email_mascarado]")
+    .replace(/000201[0-9A-Za-z./:+-]{30,}/g, "[pix_mascarado]")
+    .slice(0, 500);
+}
+
+function sanitizarCauseMercadoPago(cause) {
+  const causas = Array.isArray(cause) ? cause : (cause ? [cause] : []);
+  return causas.slice(0, 10).map((item) => {
+    if (item && typeof item === "object") {
+      return {
+        code: sanitizarTextoMercadoPago(item.code || item.error_code || ""),
+        description: sanitizarTextoMercadoPago(item.description || item.message || "")
+      };
+    }
+    return {
+      code: "",
+      description: sanitizarTextoMercadoPago(item)
+    };
+  }).filter((item) => item.code || item.description);
+}
+
+function sanitizarErroMercadoPago(payload = null, status = 0) {
+  const origem = payload && typeof payload === "object" ? payload : { message: payload };
+  const detalhe = {
+    status: Number(status) || Number(origem.status) || 0
+  };
+
+  const message = sanitizarTextoMercadoPago(origem.message || origem.mensagem || origem.raw || "");
+  const error = sanitizarTextoMercadoPago(origem.error || origem.errorType || "");
+  const code = sanitizarTextoMercadoPago(origem.code || origem.error_code || origem.status_code || "");
+  const cause = sanitizarCauseMercadoPago(origem.cause || origem.causes);
+
+  if (message) detalhe.message = message;
+  if (error) detalhe.error = error;
+  if (code) detalhe.code = code;
+  if (cause.length) detalhe.cause = cause;
+  return detalhe;
+}
+
 function mercadoPagoConfig(env = process.env) {
   const accessToken = texto(env.MERCADOPAGO_ACCESS_TOKEN);
   const webhookSecret = texto(env.MERCADOPAGO_WEBHOOK_SECRET);
@@ -248,10 +294,18 @@ function criarMercadoPagoHttpClient({
       payload = { raw: textoResposta };
     }
     if (!resposta.ok) {
+      const detalheMercadoPago = sanitizarErroMercadoPago(payload, resposta.status);
+      console.warn("[MERCADOPAGO-API-ERRO-SEGURO]", JSON.stringify({
+        status: resposta.status,
+        method,
+        endpoint: path,
+        detalheMercadoPago
+      }));
       const erro = new Error("mercadopago_api_falhou");
       erro.codigo = "mercadopago_api_falhou";
       erro.status = resposta.status;
       erro.payload = payload;
+      erro.detalheMercadoPago = detalheMercadoPago;
       throw erro;
     }
     return payload || {};
@@ -507,5 +561,6 @@ module.exports = {
   mercadoPagoConfig,
   montarOrderPix,
   processarWebhookMercadoPago,
+  sanitizarErroMercadoPago,
   validarAssinaturaWebhookMercadoPago
 };
