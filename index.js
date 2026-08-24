@@ -18,6 +18,9 @@ const coberturaRadar = require("./modules/radar/cobertura-v1");
 const {
   criarRotasTelemetria
 } = require("./modules/telemetria/telemetria.routes");
+const {
+  criarRotasObservabilidadeAdmin
+} = require("./modules/observabilidade/admin.routes");
 
 const {
   initEngineDatabase,
@@ -11138,6 +11141,12 @@ app.use(criarRotasVitrine({
   writeGlobalJson,
   getClienteId,
   usuarioTemRecurso
+}));
+app.use("/admin/observabilidade", criarRotasObservabilidadeAdmin({
+  isAdminMaster: (req) => req.usuario?.papel === "admin_master",
+  getUsuarios: () => usuarios,
+  getConfigsPorCliente: () => configsPorCliente,
+  getIntegracoesPorCliente: () => integracoesPorCliente
 }));
 app.get("/admin/config/links-optimus", responderAdminConfigLinksOptimus);
 app.put("/admin/config/links-optimus", salvarAdminConfigLinksOptimus);
