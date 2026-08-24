@@ -15,8 +15,17 @@ assert.ok(
   "backend bloqueia titulo IA sem recurso oficial tituloIa"
 );
 assert.ok(
+  indexSource.includes('if (isAdminMaster(req)) return;') &&
+    indexSource.includes('!usuarioTemRecurso(req, "tituloIa")'),
+  "backend aceita titulo IA quando a feature oficial permite"
+);
+assert.ok(
   indexSource.includes('tituloIa: booleanPlano("tituloIa", recursosAnteriores.tituloIa)'),
   "edicao de plano preserva/cria recurso tituloIa"
+);
+assert.ok(
+  !/tituloIa[\s\S]{0,160}\b(free|gratis|grátis|pro|ultimate)\b|\b(free|gratis|grátis|pro|ultimate)\b[\s\S]{0,160}tituloIa/i.test(indexSource),
+  "backend nao hardcoda nome de plano para tituloIa"
 );
 assert.ok(
   rendererSource.includes("const ofertaApresentacao = {") &&
