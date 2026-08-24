@@ -1,0 +1,277 @@
+const assert = require("assert");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-copy-local-v2-"));
+process.env.DATA_DIR = dataDir;
+
+const { CATEGORIAS_OPTIMUS } = require("../marketplaces/inteligencia/categorias-globais");
+const copy = require("../modules/copy-inteligente");
+const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
+
+function planoTituloIa(ativo = true) {
+  return { recursos: { tituloIa: ativo, templatePersonalizado: true, copyIaGenerativa: false } };
+}
+
+function ofertaBase(extra = {}) {
+  return {
+    id: "local_v2_base",
+    engineOfertaId: "local_v2_base",
+    clienteId: "cliente_local_v2",
+    marketplace: "amazon",
+    titulo: "Produto Original Oficial",
+    nome: "Produto Original Oficial",
+    categoria: "Diversos",
+    precoAtual: 100,
+    precoOriginal: 129.9,
+    cupom: "",
+    linkAfiliado: "https://go.example/local-v2",
+    imagem: "https://img.example/local-v2.jpg",
+    ...extra
+  };
+}
+
+function resolver(oferta, extra = {}) {
+  return copy.resolverCopyLocalV2({
+    oferta,
+    destino: { id: "destino_local_v2", tipo: "whatsapp", tituloOferta: "ia", ...(extra.destino || {}) },
+    clienteId: extra.clienteId || "cliente_local_v2",
+    plano: extra.plano || planoTituloIa(true),
+    ttlMs: extra.ttlMs,
+    banco: extra.banco
+  });
+}
+
+function renderizar(oferta, destino = {}, plano = planoTituloIa(true)) {
+  return montarMensagemOferta(oferta, {
+    clienteId: "cliente_local_v2",
+    destino: { id: "destino_local_v2", tipo: "whatsapp", tituloOferta: "ia", ...destino },
+    plano
+  });
+}
+
+copy.limparCacheCopyLocalV2();
+copy.limparCacheCopyInteligente();
+
+assert.deepStrictEqual(copy.categoriasSemFamiliaCopyV2(), [], "100% categorias oficiais possuem familia");
+for (const categoria of CATEGORIAS_OPTIMUS) {
+  assert.ok(copy.CATEGORIA_PARA_FAMILIA_V2[categoria], `categoria oficial mapeada: ${categoria}`);
+}
+assert.strictEqual(copy.familiaDaCategoriaCopyV2("Diversos"), "oportunidade", "Diversos -> oportunidade");
+assert.strictEqual(copy.familiaDaCategoriaCopyV2("Climatização e Ventilação"), "climatizacao", "Climatizacao preservada");
+assert.strictEqual(copy.resolverFamiliaOfertaCopyLocalV2(ofertaBase({ categoria: "Casa" })).familia, "casa", "alias legado Casa -> familia casa");
+
+const casosFamilia = [
+  ["gamer", ofertaBase({ id: "fam_gamer", engineOfertaId: "fam_gamer", categoria: "Gamer e Hardware" }), "gamer"],
+  ["beleza", ofertaBase({ id: "fam_beleza", engineOfertaId: "fam_beleza", categoria: "Perfumaria, Farmácia e Beleza" }), "beleza"],
+  ["cabelo", ofertaBase({ id: "fam_cabelo", engineOfertaId: "fam_cabelo", categoria: "Perfumaria, Farmácia e Beleza", titulo: "Escova secadora para cabelo" }), "beleza"],
+  ["casa", ofertaBase({ id: "fam_casa", engineOfertaId: "fam_casa", categoria: "Casa, Móveis e Decoração" }), "casa"],
+  ["cozinha", ofertaBase({ id: "fam_cozinha", engineOfertaId: "fam_cozinha", categoria: "Casa, Móveis e Decoração", titulo: "Panela antiaderente para cozinha" }), "casa"],
+  ["bebe", ofertaBase({ id: "fam_bebe", engineOfertaId: "fam_bebe", categoria: "Bebês e Acessórios" }), "bebe"],
+  ["pet", ofertaBase({ id: "fam_pet", engineOfertaId: "fam_pet", categoria: "Pet Shop e Fazendinha" }), "pet"],
+  ["pesca", ofertaBase({ id: "fam_pesca", engineOfertaId: "fam_pesca", categoria: "Pesca e Camping", titulo: "Vara de pesca carbono" }), "pesca_camping"],
+  ["automotivo", ofertaBase({ id: "fam_auto", engineOfertaId: "fam_auto", categoria: "Automotivo" }), "automotivo"],
+  ["ferramentas", ofertaBase({ id: "fam_ferramentas", engineOfertaId: "fam_ferramentas", categoria: "Ferramentas" }), "ferramentas"],
+  ["moda", ofertaBase({ id: "fam_moda", engineOfertaId: "fam_moda", categoria: "Roupas e Moda Feminina" }), "moda"],
+  ["audio/TV", ofertaBase({ id: "fam_audio", engineOfertaId: "fam_audio", categoria: "Audio TV" }), "audio_tv"],
+  ["celulares", ofertaBase({ id: "fam_cel", engineOfertaId: "fam_cel", categoria: "Celulares e Smartphones" }), "celulares"],
+  ["computadores", ofertaBase({ id: "fam_pc", engineOfertaId: "fam_pc", categoria: "Computadores e Notebook" }), "computadores"],
+  ["perifericos", ofertaBase({ id: "fam_perif", engineOfertaId: "fam_perif", categoria: "Periféricos" }), "perifericos"],
+  ["games", ofertaBase({ id: "fam_games", engineOfertaId: "fam_games", categoria: "Games e Console" }), "games"],
+  ["brinquedos", ofertaBase({ id: "fam_brinquedos", engineOfertaId: "fam_brinquedos", categoria: "Brinquedos e Artigos Infantis" }), "brinquedos"],
+  ["limpeza", ofertaBase({ id: "fam_limpeza", engineOfertaId: "fam_limpeza", categoria: "Limpeza" }), "limpeza"],
+  ["climatizacao", ofertaBase({ id: "fam_clima", engineOfertaId: "fam_clima", categoria: "Climatização e Ventilação" }), "climatizacao"],
+  ["iluminacao", ofertaBase({ id: "fam_luz", engineOfertaId: "fam_luz", categoria: "Iluminação e Elétrica" }), "iluminacao"]
+];
+
+for (const [nome, oferta, familiaEsperada] of casosFamilia) {
+  const res = resolver(oferta);
+  assert.strictEqual(res.ok, true, `${nome}: resolve copy local`);
+  assert.strictEqual(res.familia, familiaEsperada, `${nome}: familia correta`);
+  assert.ok(res.tituloIa && res.fonte === copy.FONTE_COPY_LOCAL_V2, `${nome}: usa banco local`);
+}
+
+assert.strictEqual(resolver(ofertaBase({ id: "sub_cabelo", engineOfertaId: "sub_cabelo", categoria: "Perfumaria, Farmácia e Beleza", titulo: "Shampoo hidratante" })).subcontexto, "cabelo", "subcontexto cabelo seguro");
+assert.strictEqual(resolver(ofertaBase({ id: "sub_setup", engineOfertaId: "sub_setup", categoria: "Gamer e Hardware", titulo: "Teclado mecanico gamer" })).subcontexto, "setup", "subcontexto setup seguro");
+assert.strictEqual(resolver(ofertaBase({ id: "sub_limpeza", engineOfertaId: "sub_limpeza", categoria: "Limpeza", titulo: "Robo aspirador inteligente" })).subcontexto, "limpeza_pratica", "subcontexto limpeza seguro");
+assert.strictEqual(resolver(ofertaBase({ id: "sub_ambiguo", engineOfertaId: "sub_ambiguo", categoria: "Periféricos", titulo: "Monitor Full HD" })).subcontexto, "", "termo ambiguo nao especializa");
+
+copy.limparCacheCopyLocalV2();
+const semCupom = resolver(ofertaBase({ id: "sem_cupom", engineOfertaId: "sem_cupom", categoria: "Diversos" }), {
+  banco: [{ id: "danger_cupom", texto: "Tem cupom nessa oferta", familia: "qualquer", intencoes: ["cupom"], exige: ["cupom"], proibe: [], palavrasContexto: [], peso: 1, ativo: true }]
+});
+assert.strictEqual(semCupom.ok, false, "sem cupom nao usa frase de cupom");
+
+const cupom = resolver(ofertaBase({ id: "cupom_real", engineOfertaId: "cupom_real", cupom: "PROMO10" }));
+assert.strictEqual(cupom.intencao, "cupom", "cupom real vence familia");
+assert.ok(/cupom/i.test(cupom.tituloIa), "cupom real pode usar frase de cupom");
+
+const resgate = resolver(ofertaBase({ id: "resgate_real", engineOfertaId: "resgate_real", cupom: "PROMO10", linkResgate: "https://shopee.test/resgate" }));
+assert.strictEqual(resgate.intencao, "resgate", "resgate real vence cupom");
+assert.ok(/resgat|beneficio/i.test(resgate.tituloIa), "resgate real usa frase compativel");
+
+const semResgate = resolver(ofertaBase({ id: "sem_resgate", engineOfertaId: "sem_resgate" }), {
+  banco: [{ id: "danger_resgate", texto: "Tem beneficio pra resgatar nessa", familia: "qualquer", intencoes: ["resgate"], exige: ["resgate"], proibe: [], palavrasContexto: [], peso: 1, ativo: true }]
+});
+assert.strictEqual(semResgate.ok, false, "sem resgate nao usa frase de resgate");
+
+const frete = resolver(ofertaBase({ id: "frete_true", engineOfertaId: "frete_true", freteGratis: true }));
+assert.strictEqual(frete.intencao, "frete_gratis", "frete gratis verdadeiro tem intencao propria");
+assert.ok(/frete/i.test(frete.tituloIa), "frete gratis verdadeiro permite frase de frete");
+
+const freteFalso = resolver(ofertaBase({ id: "frete_false", engineOfertaId: "frete_false", freteGratis: false }), {
+  banco: [{ id: "danger_frete", texto: "Frete gratis ajuda bastante", familia: "qualquer", intencoes: ["frete_gratis"], exige: ["freteGratis"], proibe: [], palavrasContexto: [], peso: 1, ativo: true }]
+});
+assert.strictEqual(freteFalso.ok, false, "frete falso ou ausente nao usa frete gratis");
+
+assert.strictEqual(resolver(ofertaBase({ id: "economia_real", engineOfertaId: "economia_real", descontoPercentual: 15 })).intencao, "economia", "desconto oficial tem precedencia");
+assert.strictEqual(resolver(ofertaBase({ id: "parcelamento_real", engineOfertaId: "parcelamento_real", parcelamento: "10x sem juros" })).intencao, "parcelamento", "parcelamento tem intencao propria");
+assert.strictEqual(resolver(ofertaBase({ id: "beneficio_real", engineOfertaId: "beneficio_real", beneficioTexto: "Beneficio no app" })).intencao, "beneficio", "beneficio comprovado tem precedencia");
+
+copy.limparCacheCopyLocalV2();
+const ofertaFanout = ofertaBase({ id: "fanout_local_v2", engineOfertaId: "fanout_local_v2", categoria: "Gamer e Hardware" });
+const fanoutA = resolver(ofertaFanout);
+const fanoutB = resolver(ofertaFanout);
+assert.strictEqual(fanoutA.tituloIa, fanoutB.tituloIa, "fanout IA reutiliza mesma copy");
+assert.strictEqual(fanoutB.cacheHit, true, "fanout IA gera cache hit");
+const originalFanout = renderizar(ofertaFanout, { tituloOferta: "original" });
+assert.ok(originalFanout.includes("Produto Original Oficial"), "destino original permanece original");
+assert.ok(!originalFanout.includes(fanoutA.tituloIa), "destino original nao usa Local V2");
+
+copy.limparCacheCopyLocalV2();
+for (let i = 0; i < copy.MAX_CACHE_COPY_LOCAL_V2 + 5; i += 1) {
+  copy.salvarCacheCopyLocalV2(`local_cache_${i}`, { tituloIa: `Copy ${i}`, ok: true }, 60 * 1000);
+}
+assert.ok(copy.tamanhoCacheCopyLocalV2() <= copy.MAX_CACHE_COPY_LOCAL_V2, "cache local respeita limite");
+copy.salvarCacheCopyLocalV2("local_expirada", { tituloIa: "Velha", ok: true }, 1000);
+copy.removerExpiradasCopyLocalV2(Date.now() + 2000);
+assert.strictEqual(copy.lerCacheCopyLocalV2("local_expirada"), null, "cache local remove expiradas");
+
+copy.limparCacheCopyLocalV2();
+const antiA = resolver(ofertaBase({ id: "anti_a", engineOfertaId: "anti_a", categoria: "Diversos", titulo: "Oferta anti A" }));
+const antiB = resolver(ofertaBase({ id: "anti_b", engineOfertaId: "anti_b", categoria: "Diversos", titulo: "Oferta anti B" }));
+assert.notStrictEqual(antiA.tituloIa, antiB.tituloIa, "anti-repeticao evita repeticao imediata quando ha alternativa");
+
+function bancoOportunidade(qtd) {
+  return Array.from({ length: qtd }, (_, index) => ({
+    id: `anti_pool_${qtd}_${index + 1}`,
+    texto: `Frase segura ${qtd} ${index + 1}`,
+    familia: "oportunidade",
+    intencoes: ["oportunidade"],
+    exige: [],
+    proibe: [],
+    palavrasContexto: [],
+    peso: 1,
+    ativo: true
+  }));
+}
+
+function resolverSequenciaAntiRepeticao({ qtdFrases, total = 30, clienteId = `cliente_anti_${qtdFrases}`, banco = bancoOportunidade(qtdFrases), categoria = "Diversos", titulo = "Oferta anti repeticao" } = {}) {
+  copy.limparCacheCopyLocalV2();
+  const saidas = [];
+  for (let i = 0; i < total; i += 1) {
+    const res = resolver(ofertaBase({
+      id: `${clienteId}_${i}`,
+      engineOfertaId: `${clienteId}_${i}`,
+      categoria,
+      titulo: `${titulo} ${i}`
+    }), { clienteId, banco });
+    assert.strictEqual(res.ok, true, `sequencia anti ${qtdFrases}: resolve item ${i}`);
+    saidas.push(res.tituloIa);
+  }
+  return saidas;
+}
+
+function contarRepeticoesImediatas(saidas = []) {
+  return saidas.filter((item, index) => index > 0 && item === saidas[index - 1]).length;
+}
+
+const seqUmaFrase = resolverSequenciaAntiRepeticao({ qtdFrases: 1 });
+assert.ok(contarRepeticoesImediatas(seqUmaFrase) > 0, "1 frase permite repeticao por falta de alternativa");
+const seqDuasFrases = resolverSequenciaAntiRepeticao({ qtdFrases: 2 });
+assert.strictEqual(contarRepeticoesImediatas(seqDuasFrases), 0, "2 frases alternam sem repeticao imediata");
+const seqTresFrases = resolverSequenciaAntiRepeticao({ qtdFrases: 3 });
+assert.strictEqual(contarRepeticoesImediatas(seqTresFrases), 0, "3 frases nao repetem imediatamente");
+assert.ok(new Set(seqTresFrases).size >= 3, "3 frases distribuem uso sem travar no historico");
+
+copy.limparCacheCopyLocalV2();
+const seqGamer = [];
+for (let i = 0; i < 30; i += 1) {
+  const res = resolver(ofertaBase({
+    id: `anti_gamer_${i}`,
+    engineOfertaId: `anti_gamer_${i}`,
+    categoria: "Gamer e Hardware",
+    titulo: `Produto gamer sequencial ${i}`
+  }));
+  assert.strictEqual(res.ok, true, `gamer anti-repeticao resolve item ${i}`);
+  seqGamer.push(res.tituloIa);
+}
+assert.strictEqual(contarRepeticoesImediatas(seqGamer), 0, "familia gamer nao repete imediatamente em 30 ofertas");
+assert.ok(new Set(seqGamer).size >= 3, "familia gamer distribui entre frases elegiveis");
+assert.ok(copy.ultimasFrasesCopyLocalV2("cliente_local_v2:gamer:familia").length <= copy.LIMITE_HISTORICO_COPY_LOCAL_V2, "historico maximo continua limitado");
+
+copy.limparCacheCopyLocalV2();
+const bancoWorkspace = bancoOportunidade(2);
+const workspaceA1 = resolver(ofertaBase({ id: "workspace_anti", engineOfertaId: "workspace_anti", categoria: "Diversos", titulo: "Oferta workspace" }), { clienteId: "workspace_a", banco: bancoWorkspace });
+const workspaceA2 = resolver(ofertaBase({ id: "workspace_anti_2", engineOfertaId: "workspace_anti_2", categoria: "Diversos", titulo: "Oferta workspace 2" }), { clienteId: "workspace_a", banco: bancoWorkspace });
+const workspaceB1 = resolver(ofertaBase({ id: "workspace_anti", engineOfertaId: "workspace_anti", categoria: "Diversos", titulo: "Oferta workspace" }), { clienteId: "workspace_b", banco: bancoWorkspace });
+assert.notStrictEqual(workspaceA1.tituloIa, workspaceA2.tituloIa, "workspace A evita repeticao imediata");
+assert.strictEqual(copy.ultimasFrasesCopyLocalV2("workspace_a:oportunidade:oportunidade").length, 2, "workspace A mantem seu historico");
+assert.deepStrictEqual(copy.ultimasFrasesCopyLocalV2("workspace_b:oportunidade:oportunidade"), [workspaceB1.tituloIa], "workspace B nao herda historico do workspace A");
+
+const perigosa = resolver(ofertaBase({ id: "perigosa", engineOfertaId: "perigosa", categoria: "Diversos" }), {
+  banco: [
+    { id: "danger", texto: "Ultimas unidades pra garantir", familia: "oportunidade", intencoes: ["oportunidade"], exige: [], proibe: [], palavrasContexto: [], peso: 1, ativo: true }
+  ]
+});
+assert.strictEqual(perigosa.ok, false, "validator rejeita frase perigosa do banco");
+assert.strictEqual(resolver(ofertaBase({ id: "banco_vazio", engineOfertaId: "banco_vazio" }), { banco: [] }).ok, false, "banco vazio falha sem bloquear");
+assert.strictEqual(resolver(ofertaBase({ id: "exception_ttl", engineOfertaId: "exception_ttl" }), { ttlMs: Symbol("ttl") }).ok, false, "exception interna cai segura");
+
+const semFeature = resolver(ofertaBase({ id: "sem_feature", engineOfertaId: "sem_feature" }), { plano: planoTituloIa(false) });
+assert.strictEqual(semFeature.ok, false, "feature ausente bloqueia Local V2");
+const destinoOriginal = resolver(ofertaBase({ id: "destino_original", engineOfertaId: "destino_original" }), { destino: { tituloOferta: "original" } });
+assert.strictEqual(destinoOriginal.ok, false, "destino original nao chama copy local");
+
+const explicit = renderizar(ofertaBase({ id: "explicit", engineOfertaId: "explicit", tituloIa: "Titulo IA Explicito" }));
+assert.ok(explicit.includes("Titulo IA Explicito"), "tituloIa explicito preserva precedencia homologada");
+
+const msgLocal = renderizar(ofertaBase({ id: "render_local", engineOfertaId: "render_local", tituloIa: "", categoria: "Gamer e Hardware" }));
+assert.ok(/setup|upgrade/i.test(msgLocal), "destino IA usa Banco Local V2 quando nao ha tituloIa explicito");
+
+const snapshot = JSON.parse(JSON.stringify(ofertaFanout));
+renderizar(ofertaFanout, { tituloOferta: "ia" });
+assert.deepStrictEqual(ofertaFanout, snapshot, "Local V2 nao muta oferta compartilhada");
+
+const originalLocal = copy.resolverCopyLocalV2;
+const originalV1 = copy.resolverCopyInteligente;
+copy.resolverCopyLocalV2 = () => ({ ok: false, tituloIa: "", motivoFallback: "local_forcado" });
+const fallbackV1 = renderizar(ofertaBase({ id: "fallback_v1", engineOfertaId: "fallback_v1", cupom: "PROMO10", tituloIa: "" }));
+assert.ok(/cupom/i.test(fallbackV1), "fallback Local V2 -> V1 funciona");
+copy.resolverCopyInteligente = () => ({ ok: false, tituloIa: "", motivoFallback: "v1_forcado" });
+const fallbackOriginal = renderizar(ofertaBase({ id: "fallback_original", engineOfertaId: "fallback_original", categoria: "Gamer e Hardware", tituloIa: "" }));
+assert.ok(fallbackOriginal.includes("Produto Original Oficial"), "fallback Local V2 -> V1 -> Original funciona");
+copy.resolverCopyLocalV2 = originalLocal;
+copy.resolverCopyInteligente = originalV1;
+
+for (const marketplace of ["mercadolivre", "shopee", "amazon", "aliexpress", "awin", "kabum"]) {
+  const msg = renderizar(ofertaBase({ id: `mk_${marketplace}`, engineOfertaId: `mk_${marketplace}`, marketplace, categoria: "Casa, Móveis e Decoração", tituloIa: "" }));
+  assert.ok(msg.includes("R$ 100,00"), `marketplace ${marketplace} preserva preco`);
+  assert.ok(msg.includes("https://go.example/local-v2"), `marketplace ${marketplace} preserva link`);
+}
+
+const sourceLocal = fs.readFileSync(path.join(__dirname, "..", "modules", "copy-inteligente", "copy-local-v2.service.js"), "utf8");
+assert.ok(!/\b(?:fetch|axios|openai|gemini|claude|anthropic|provider)\b/i.test(sourceLocal), "Local V2 nao usa chamada externa/provider");
+assert.ok(!sourceLocal.includes("oferta.titulo =") && !sourceLocal.includes("oferta.nome ="), "Local V2 nao muta titulo/nome");
+
+const resumo = copy.resumoBancoAssociativoV2();
+assert.ok(resumo.total >= 95, "banco associativo tem aproximadamente 100 frases");
+assert.ok(resumo.porIntencao.familia >= 60, "maioria das frases e contextual por familia");
+assert.ok(resumo.porIntencao.oportunidade >= 10, "ha bloco de oportunidades genericas");
+assert.ok(
+  ["cupom", "resgate", "beneficio", "economia", "frete_gratis", "parcelamento"].every(k => resumo.porIntencao[k] >= 1),
+  "ha frases comerciais condicionais"
+);
+
+console.log("copy-inteligente-local-v2.test.js OK");

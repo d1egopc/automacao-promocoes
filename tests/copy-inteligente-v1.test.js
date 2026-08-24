@@ -195,11 +195,16 @@ assert.strictEqual(camposComerciais.categoria, "Casa", "categoria intacta no obj
 assert.strictEqual(camposComerciais.score, 99, "score intacto no objeto");
 
 const originalService = copy.resolverCopyInteligente;
+const originalLocalV2Service = copy.resolverCopyLocalV2;
+copy.resolverCopyLocalV2 = () => {
+  throw new Error("falha simulada local v2");
+};
 copy.resolverCopyInteligente = () => {
   throw new Error("falha simulada");
 };
 const fallbackErro = renderizar(ofertaBase({ id: "copy_erro", engineOfertaId: "copy_erro", categoria: "Gamer e Hardware" }));
 assert.ok(fallbackErro.includes("Produto Original Oficial"), "erro do motor cai para original");
 copy.resolverCopyInteligente = originalService;
+copy.resolverCopyLocalV2 = originalLocalV2Service;
 
 console.log("copy-inteligente-v1.test.js OK");

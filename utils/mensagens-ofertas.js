@@ -96,6 +96,32 @@ function resolverTituloApresentacaoOferta(oferta = {}, destino = {}, opcoes = {}
     };
   }
 
+  let copyLocalV2Resolvida = null;
+  try {
+    copyLocalV2Resolvida = copyInteligente.resolverCopyLocalV2({
+      oferta,
+      destino,
+      clienteId: opcoes.clienteId || oferta.clienteId || "admin",
+      plano: opcoes.plano || {}
+    });
+  } catch (err) {
+    copyLocalV2Resolvida = {
+      ok: false,
+      motivoFallback: "copy_local_v2_erro"
+    };
+  }
+  if (copyLocalV2Resolvida?.ok && tituloApresentacaoValido(copyLocalV2Resolvida.tituloIa)) {
+    return {
+      titulo: copyLocalV2Resolvida.tituloIa,
+      modo: "ia",
+      usouTituloIa: true,
+      fallbackOriginal: false,
+      intencao: copyLocalV2Resolvida.intencao || "",
+      fonte: copyLocalV2Resolvida.fonte || "banco_associativo_local_v2",
+      cacheHit: copyLocalV2Resolvida.cacheHit === true
+    };
+  }
+
   let copyResolvida = null;
   try {
     copyResolvida = copyInteligente.resolverCopyInteligente({
@@ -127,7 +153,7 @@ function resolverTituloApresentacaoOferta(oferta = {}, destino = {}, opcoes = {}
     modo: "ia",
     usouTituloIa: false,
     fallbackOriginal: true,
-    motivo: copyResolvida?.motivoFallback || "titulo_ia_indisponivel"
+    motivo: copyResolvida?.motivoFallback || copyLocalV2Resolvida?.motivoFallback || "titulo_ia_indisponivel"
   };
 }
 
