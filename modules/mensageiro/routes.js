@@ -72,6 +72,24 @@ function mensageiroPermitido(req, clienteId) {
   );
 }
 
+async function otimizarImagensComandos(comandos = []) {
+  if (!Array.isArray(comandos)) return [];
+
+  return Promise.all(comandos.map(async (comando) => {
+    const resposta = comando?.resposta && typeof comando.resposta === "object"
+      ? comando.resposta
+      : {};
+
+    return {
+      ...comando,
+      resposta: {
+        ...resposta,
+        imagem: await otimizarBase64(resposta.imagem)
+      }
+    };
+  }));
+}
+
 router.get("/config", (req, res) => {
   const clienteId = getClienteId(req);
 
@@ -235,6 +253,11 @@ const despedidaEnvio = dados.despedidaEnvio !== undefined
   : dados.despedida?.envio !== undefined
     ? dados.despedida.envio
     : configAtualMensageiro.despedidaEnvio;
+const comandosPayload = dados.comandos !== undefined
+  ? await otimizarImagensComandos(dados.comandos)
+  : dados.mensageiro?.comandos !== undefined
+    ? await otimizarImagensComandos(dados.mensageiro.comandos)
+    : configAtualMensageiro.comandos;
 
 const atualizado = setMensageiroCliente(clienteId, {
   ativo: dados.ativo === undefined
@@ -269,6 +292,7 @@ const atualizado = setMensageiroCliente(clienteId, {
 
   boasVindasEnvio,
   despedidaEnvio,
+  comandos: comandosPayload,
 
   atendimento: atendimentoNormalizado
 });
@@ -289,7 +313,6 @@ if (atendimentoPayload !== undefined) {
 }
 
 module.exports = criarRotasMensageiro;
-
 
 
 

@@ -26642,6 +26642,14 @@ registrarListenerUnicoSocket({
         coberturaTraceId
       });
 
+      await mensageiro.tratarMensagemGrupoComando({
+        clienteId: clienteIdMensageiro,
+        sessaoId: id,
+        sock,
+        mensagem,
+        planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
+      });
+
       await mensageiro.tratarMensagemPrivadaAtendimento({
         clienteId: clienteIdMensageiro,
         sessaoId: id,

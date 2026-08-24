@@ -12,6 +12,8 @@ const {
 } = require("../../utils/usuarios-atividade");
 
 const COOLDOWN_ATENDIMENTO_MS = 10 * 60 * 1000;
+const COOLDOWN_COMANDO_MIN_MS = 5 * 1000;
+const DEDUPE_COMANDO_MS = 10 * 60 * 1000;
 
 function mensageiroAtivo(clienteId) {
   const config = getMensageiroCliente(clienteId);
@@ -239,6 +241,40 @@ function montarPayloadGrupoMensageiro({ imagem = "", texto = "", modoGrupo = "im
   return texto ? { payload: { text: texto }, tipo: "texto" } : null;
 }
 
+function montarPayloadComandoGrupo({ resposta = {}, mencionarAutor = false, participante = "" } = {}) {
+  const tipo = ["texto", "imagem", "imagem_texto"].includes(resposta?.tipo)
+    ? resposta.tipo
+    : "texto";
+  const mencaoSegura = mencionarAutor === true &&
+    typeof participante === "string" &&
+    (participante.endsWith("@s.whatsapp.net") || participante.endsWith("@lid"));
+  const numeroMencao = mencaoSegura ? participante.split("@")[0] : "";
+  const textoBase = String(resposta?.texto || "");
+  const textoFinal = mencaoSegura && textoBase
+    ? `@${numeroMencao} ${textoBase}`
+    : textoBase;
+
+  const envio = montarPayloadGrupoMensageiro({
+    imagem: resposta?.imagem || "",
+    texto: textoFinal,
+    modoGrupo: tipo
+  });
+
+  if (!envio) return null;
+  if (mencaoSegura && (envio.payload.text || envio.payload.caption)) {
+    envio.payload.mentions = [participante];
+  }
+
+  return envio;
+}
+
+function respostaComandoSemMencao(resposta = {}) {
+  return {
+    ...resposta,
+    texto: String(resposta?.texto || "")
+  };
+}
+
 function agendarExclusaoMensagemTemporaria({
   sock,
   grupoId,
@@ -246,7 +282,8 @@ function agendarExclusaoMensagemTemporaria({
   segundos,
   clienteId,
   sessaoId,
-  acao
+  acao,
+  participante = ""
 }) {
   if (!mensagemKey) return;
 
@@ -272,6 +309,16 @@ function agendarExclusaoMensagemTemporaria({
           sessaoId,
           grupoId,
           acao
+        });
+        registrarHistoricoSeguro(clienteId, {
+          tipo: acao === "add" ? "boas_vindas" : "despedida",
+          origem: "grupo",
+          contato: participante,
+          grupo: grupoId,
+          resultado: "removida",
+          status: "removida",
+          resumo: acao === "add" ? "Boas-vindas removida" : "Despedida removida",
+          detalhe: "Mensagem temporária apagada no grupo"
         });
       })
       .catch((e) => {
@@ -763,6 +810,223 @@ async function tratarMensagemAtendimentoV1({
   }
 }
 
+function comandoGrupoPermitido(config = {}, comando = {}, grupoId = "") {
+  if (!grupoPermitido(config.clienteId, grupoId)) return false;
+
+  const gruposComando = Array.isArray(comando.grupos)
+    ? comando.grupos
+    : [];
+
+  if (!gruposComando.length) return true;
+
+  return gruposComando.includes(grupoId);
+}
+
+function encontrarComandoGrupo(texto = "", comandos = []) {
+  const textoNormalizado = normalizarTextoMensagem(texto);
+  if (!textoNormalizado || !Array.isArray(comandos)) return null;
+
+  for (const comando of comandos) {
+    if (comando?.ativo === false) continue;
+    const correspondencia = comando?.correspondencia === "inicia" ? "inicia" : "exato";
+    const gatilhos = Array.isArray(comando?.gatilhos) ? comando.gatilhos : [];
+
+    for (const gatilho of gatilhos) {
+      const gatilhoNormalizado = normalizarTextoMensagem(gatilho);
+      if (!gatilhoNormalizado) continue;
+
+      const encontrou = correspondencia === "inicia"
+        ? textoNormalizado === gatilhoNormalizado || textoNormalizado.startsWith(`${gatilhoNormalizado} `)
+        : textoNormalizado === gatilhoNormalizado;
+
+      if (encontrou) return { comando, gatilho: gatilhoNormalizado };
+    }
+  }
+
+  return null;
+}
+
+function extrairParticipanteGrupoMensagem(mensagem = {}) {
+  return normalizarJidMensageiro(
+    mensagem?.key?.participant ||
+    mensagem?.participant ||
+    mensagem?.key?.senderPn ||
+    mensagem?.senderPn ||
+    ""
+  );
+}
+
+function nomeContatoHistorico(participante = "", mensagem = {}) {
+  const nome = String(mensagem?.pushName || mensagem?.verifiedBizName || "").trim();
+  if (nome) return nome;
+  return String(participante || "").split("@")[0] || "Participante";
+}
+
+function chaveCooldownComando({ clienteId = "", sessaoId = "", grupoId = "", comandoId = "", participante = "", escopo = "" } = {}) {
+  if (escopo === "participante") {
+    return `cmd:${escopo}:${clienteId}:${sessaoId}:${comandoId}:${participante || "*"}`;
+  }
+
+  return `cmd:${escopo}:${clienteId}:${sessaoId}:${grupoId}:${comandoId}:${participante || "*"}`;
+}
+
+function comandoEmCooldown(chave, cooldownMs) {
+  const agora = Date.now();
+  const ultimo = eventosMensageiroRecentes.get(chave) || 0;
+  return agora - ultimo < cooldownMs;
+}
+
+function marcarCooldownComando(chaves = []) {
+  const agora = Date.now();
+  for (const chave of chaves) {
+    eventosMensageiroRecentes.set(chave, agora);
+  }
+}
+
+async function tratarMensagemGrupoComando({
+  clienteId,
+  sessaoId,
+  sock,
+  mensagem,
+  planoLiberado = false
+} = {}) {
+  try {
+    if (!usuarioAtivo(clienteId)) {
+      logUsuarioInativoIgnorado({ clienteId, fluxo: "mensageiro_bot_comandos" });
+      return false;
+    }
+
+    if (planoLiberado !== true) return false;
+    if (mensagem?.key?.fromMe) return false;
+
+    const grupoId = normalizarJidMensageiro(mensagem?.key?.remoteJid || "");
+    if (!jidGrupoWhatsapp(grupoId)) return false;
+
+    const config = getMensageiroCliente(clienteId);
+    if (config?.ativo !== true) return false;
+    if (config.sessaoId && config.sessaoId !== sessaoId) return false;
+    if (!grupoPermitido(clienteId, grupoId)) return false;
+
+    const texto = extrairTextoMensagemAtendimento(mensagem);
+    const encontrado = encontrarComandoGrupo(texto, config.comandos);
+    if (!encontrado) return false;
+
+    const { comando, gatilho } = encontrado;
+    if (!comandoGrupoPermitido({ ...config, clienteId }, comando, grupoId)) return false;
+
+    const participante = extrairParticipanteGrupoMensagem(mensagem);
+    const messageId = String(mensagem?.key?.id || "");
+    const chaveDedupe = `cmd:dedupe:${clienteId}:${sessaoId}:${grupoId}:${comando.id}:${messageId}`;
+    if (messageId && comandoEmCooldown(chaveDedupe, DEDUPE_COMANDO_MS)) return true;
+
+    const cooldownGrupoMs = Math.max(
+      COOLDOWN_COMANDO_MIN_MS,
+      Number(comando.cooldownSegundos || 30) * 1000
+    );
+    const cooldownParticipanteMs = Math.max(
+      COOLDOWN_COMANDO_MIN_MS,
+      Number(comando.cooldownParticipanteSegundos || 60) * 1000
+    );
+    const chaveGrupo = chaveCooldownComando({
+      clienteId,
+      sessaoId,
+      grupoId,
+      comandoId: comando.id,
+      escopo: "grupo"
+    });
+    const chaveParticipante = chaveCooldownComando({
+      clienteId,
+      sessaoId,
+      grupoId,
+      comandoId: comando.id,
+      participante,
+      escopo: "participante"
+    });
+
+    if (comandoEmCooldown(chaveGrupo, cooldownGrupoMs) || comandoEmCooldown(chaveParticipante, cooldownParticipanteMs)) {
+      registrarHistoricoSeguro(clienteId, {
+        tipo: "comando",
+        origem: "grupo",
+        contato: participante,
+        contatoNome: nomeContatoHistorico(participante, mensagem),
+        grupo: grupoId,
+        grupoNome: grupoId,
+        mensagemRecebida: texto,
+        comandoId: comando.id,
+        comandoNome: comando.nome,
+        resultado: "cooldown",
+        status: "cooldown",
+        resumo: `${nomeContatoHistorico(participante, mensagem)} usou ${gatilho}`,
+        detalhe: "Resposta automática em cooldown"
+      });
+      if (messageId) eventosMensageiroRecentes.set(chaveDedupe, Date.now());
+      return true;
+    }
+
+    const envioComMencao = montarPayloadComandoGrupo({
+      resposta: comando.resposta,
+      mencionarAutor: comando.mencionarAutor,
+      participante
+    });
+    if (!envioComMencao) return false;
+
+    let envioFinal = envioComMencao;
+    try {
+      await sock.sendMessage(grupoId, envioComMencao.payload);
+    } catch (e) {
+      if (!envioComMencao.payload?.mentions?.length) throw e;
+      envioFinal = montarPayloadComandoGrupo({
+        resposta: respostaComandoSemMencao(comando.resposta),
+        mencionarAutor: false,
+        participante
+      });
+      if (!envioFinal) throw e;
+      await sock.sendMessage(grupoId, envioFinal.payload);
+    }
+
+    marcarCooldownComando([chaveGrupo, chaveParticipante]);
+    if (messageId) eventosMensageiroRecentes.set(chaveDedupe, Date.now());
+
+    registrarHistoricoSeguro(clienteId, {
+      tipo: "comando",
+      origem: "grupo",
+      contato: participante,
+      contatoNome: nomeContatoHistorico(participante, mensagem),
+      grupo: grupoId,
+      grupoNome: grupoId,
+      mensagemRecebida: texto,
+      comandoId: comando.id,
+      comandoNome: comando.nome,
+      respostaEnviada: [`${envioFinal.tipo}:${String(comando.resposta?.texto || comando.resposta?.imagem || "").slice(0, 80)}`],
+      resultado: "enviado",
+      status: "enviado",
+      resumo: `${nomeContatoHistorico(participante, mensagem)} usou ${gatilho}`,
+      detalhe: `Resposta automática enviada • ${grupoId}`
+    });
+
+    logMensageiroJson("[MENSAGEIRO-COMANDO-ENVIADO]", {
+      clienteId,
+      sessaoId,
+      grupoId,
+      participante,
+      comandoId: comando.id,
+      comandoNome: comando.nome,
+      tipo: envioFinal.tipo,
+      mencao: Boolean(envioFinal.payload?.mentions?.length)
+    });
+
+    return true;
+  } catch (e) {
+    logMensageiroJson("[MENSAGEIRO-COMANDO-ERRO]", {
+      clienteId,
+      sessaoId,
+      grupoId: mensagem?.key?.remoteJid || "",
+      erro: e?.message || String(e || "erro_desconhecido")
+    });
+    return false;
+  }
+}
+
 async function tratarMensagemPrivadaAtendimento({
   clienteId,
   sessaoId,
@@ -974,6 +1238,25 @@ eventosMensageiroRecentes.set(
       temporaria: envioEvento.mensagemTemporaria === true
     });
 
+    registrarHistoricoSeguro(clienteId, {
+      tipo: acao === "add" ? "boas_vindas" : "despedida",
+      origem: "grupo",
+      contato: participante,
+      contatoNome: numero,
+      grupo: grupoId,
+      grupoNome: grupoId,
+      mensagemRecebida: "",
+      respostaEnviada: [envioGrupo.tipo],
+      resultado: "enviado",
+      status: "enviado",
+      resumo: acao === "add"
+        ? `${numero} entrou no grupo`
+        : `${numero} saiu do grupo`,
+      detalhe: envioEvento.mensagemTemporaria
+        ? `${acao === "add" ? "Boas-vindas" : "Despedida"} enviada no grupo • removida após ${envioEvento.apagarAposSegundos}s`
+        : `${acao === "add" ? "Boas-vindas" : "Despedida"} enviada no grupo`
+    });
+
     if (envioEvento.mensagemTemporaria && mensagemEnviada?.key) {
       agendarExclusaoMensagemTemporaria({
         sock,
@@ -982,7 +1265,8 @@ eventosMensageiroRecentes.set(
         segundos: envioEvento.apagarAposSegundos,
         clienteId,
         sessaoId,
-        acao
+        acao,
+        participante
       });
     }
   } else {
@@ -1006,6 +1290,24 @@ eventosMensageiroRecentes.set(
       conteudoPreview: textoFinal.slice(0, 120)
     });
     await sock.sendMessage(destinoPrivado, envioPrivado.payload);
+
+    registrarHistoricoSeguro(clienteId, {
+      tipo: acao === "add" ? "boas_vindas" : "despedida",
+      origem: "privado",
+      contato: participante,
+      contatoNome: numero,
+      grupo: grupoId,
+      grupoNome: grupoId,
+      respostaEnviada: [envioPrivado.tipo],
+      resultado: "enviado",
+      status: "enviado",
+      resumo: acao === "add"
+        ? `${numero} entrou no grupo`
+        : `${numero} saiu do grupo`,
+      detalhe: acao === "add"
+        ? "Boas-vindas enviada no privado"
+        : "Despedida enviada no privado"
+    });
   }
 
       logMensageiroJson("[MENSAGEIRO-ENVIADO]", {
@@ -1040,6 +1342,7 @@ module.exports = {
   aplicarDelayAtendimento,
 
   tratarEventoGrupoMensageiro,
+  tratarMensagemGrupoComando,
   tratarMensagemPrivadaAtendimento,
 
   getMensageiroCliente,

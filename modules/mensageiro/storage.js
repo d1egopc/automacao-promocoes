@@ -16,6 +16,8 @@ const ESCOPOS_ATENDIMENTO = new Set(["privado", "grupo", "ambos"]);
 const MODOS_GATILHO_ATENDIMENTO = new Set(["todas", "qualquer"]);
 const DESTINOS_MENSAGEM_GRUPO = new Set(["privado", "grupo"]);
 const MODOS_MENSAGEM_GRUPO = new Set(["texto", "imagem", "imagem_texto"]);
+const CORRESPONDENCIAS_COMANDO = new Set(["exato", "inicia"]);
+const TIPOS_RESPOSTA_COMANDO = new Set(["texto", "imagem", "imagem_texto"]);
 
 let mensageiroPorCliente = {};
 
@@ -104,7 +106,8 @@ function normalizarConfigMensageiro(clienteId, config = {}) {
         : []
     },
     boasVindasEnvio: normalizarEnvioMensageiro(config.boasVindasEnvio),
-    despedidaEnvio: normalizarEnvioMensageiro(config.despedidaEnvio)
+    despedidaEnvio: normalizarEnvioMensageiro(config.despedidaEnvio),
+    comandos: normalizarComandosMensageiro(config.comandos)
   };
 }
 
@@ -155,6 +158,8 @@ function criarConfigPadraoMensageiro(clienteId) {
     boasVindasEnvio: criarEnvioPadraoMensageiro(),
     despedidaEnvio: criarEnvioPadraoMensageiro(),
 
+    comandos: [],
+
     atendimento: criarAtendimentoPadraoMensageiro(),
 
     criadoEm: new Date().toISOString(),
@@ -178,10 +183,10 @@ function criarConfigAtendimentoPadrao(clienteId) {
 }
 
 function normalizarListaPalavras(lista = []) {
-  if (!Array.isArray(lista)) return [];
+  const itens = Array.isArray(lista) ? lista : [lista];
 
   const vistas = new Set();
-  return lista
+  return itens
     .map(item => String(item || "").trim())
     .filter(Boolean)
     .filter(item => {
@@ -189,6 +194,57 @@ function normalizarListaPalavras(lista = []) {
       if (vistas.has(chave)) return false;
       vistas.add(chave);
       return true;
+    });
+}
+
+function normalizarRespostaComando(resposta = {}) {
+  const raw = resposta && typeof resposta === "object" ? resposta : {};
+  const tipo = TIPOS_RESPOSTA_COMANDO.has(raw.tipo)
+    ? raw.tipo
+    : "texto";
+
+  return {
+    tipo,
+    texto: String(raw.texto || raw.mensagem || raw.conteudo || "").slice(0, 4000),
+    imagem: String(raw.imagem || raw.imagemUrl || raw.url || "")
+  };
+}
+
+function normalizarComandoMensageiro(comando = {}, index = 0) {
+  const raw = comando && typeof comando === "object" ? comando : {};
+  const gatilhos = normalizarListaPalavras(raw.gatilhos || raw.gatilho || raw.palavras);
+  const correspondencia = CORRESPONDENCIAS_COMANDO.has(raw.correspondencia)
+    ? raw.correspondencia
+    : "exato";
+
+  return {
+    id: String(raw.id || `cmd_${Date.now()}_${index}`),
+    ativo: raw.ativo !== false,
+    nome: String(raw.nome || `Comando ${index + 1}`).trim(),
+    gatilhos,
+    correspondencia,
+    grupos: normalizarListaPalavras(raw.grupos),
+    mencionarAutor: raw.mencionarAutor === true,
+    resposta: normalizarRespostaComando(raw.resposta || {}),
+    cooldownSegundos: Math.max(5, Math.min(3600, Number(raw.cooldownSegundos || 30) || 30)),
+    cooldownParticipanteSegundos: Math.max(
+      5,
+      Math.min(3600, Number(raw.cooldownParticipanteSegundos || 60) || 60)
+    )
+  };
+}
+
+function normalizarComandosMensageiro(comandos = []) {
+  if (!Array.isArray(comandos)) return [];
+
+  return comandos
+    .map(normalizarComandoMensageiro)
+    .filter(comando => comando.nome && comando.gatilhos.length)
+    .filter(comando => {
+      const { tipo, texto, imagem } = comando.resposta || {};
+      if (tipo === "texto") return Boolean(texto);
+      if (tipo === "imagem") return Boolean(imagem);
+      return Boolean(texto || imagem);
     });
 }
 
@@ -236,23 +292,33 @@ function normalizarHistoricoAtendimento(historico = []) {
 
   return historico
     .slice(-HISTORICO_ATENDIMENTO_MAX)
-    .map((evento, index) => ({
-      id: String(evento?.id || `hist_${Date.now()}_${index}`),
-      data: evento?.data || new Date().toISOString(),
-      origem: String(evento?.origem || ""),
-      contato: String(evento?.contato || evento?.jid || ""),
-      grupo: String(evento?.grupo || ""),
-      mensagemRecebida: String(evento?.mensagemRecebida || evento?.mensagem || "").slice(0, 500),
-      gatilhoId: String(evento?.gatilhoId || ""),
-      gatilhoNome: String(evento?.gatilhoNome || evento?.gatilhoAcionado || ""),
-      respostaEnviada: Array.isArray(evento?.respostaEnviada)
+    .map((evento, index) => {
+      const respostaEnviada = Array.isArray(evento?.respostaEnviada)
         ? evento.respostaEnviada.map(item => String(item || "")).filter(Boolean)
         : String(evento?.respostaEnviada || "").trim()
           ? [String(evento.respostaEnviada)]
-          : [],
-      status: String(evento?.status || "registrado"),
-      erro: String(evento?.erro || "")
-    }));
+          : [];
+
+      return {
+        id: String(evento?.id || `hist_${Date.now()}_${index}`),
+        data: evento?.data || new Date().toISOString(),
+        tipo: String(evento?.tipo || "atendimento"),
+        origem: String(evento?.origem || ""),
+        contato: String(evento?.contato || evento?.jid || ""),
+        contatoNome: String(evento?.contatoNome || evento?.nomeContato || ""),
+        grupo: String(evento?.grupo || ""),
+        grupoNome: String(evento?.grupoNome || evento?.nomeGrupo || ""),
+        mensagemRecebida: String(evento?.mensagemRecebida || evento?.mensagem || "").slice(0, 500),
+        gatilhoId: String(evento?.gatilhoId || evento?.comandoId || ""),
+        gatilhoNome: String(evento?.gatilhoNome || evento?.comandoNome || evento?.gatilhoAcionado || ""),
+        respostaEnviada,
+        status: String(evento?.status || evento?.resultado || "registrado"),
+        resultado: String(evento?.resultado || evento?.status || "registrado"),
+        resumo: String(evento?.resumo || ""),
+        detalhe: String(evento?.detalhe || ""),
+        erro: String(evento?.erro || "")
+      };
+    });
 }
 
 function normalizarConfigAtendimentoCliente(clienteId, config = {}) {
