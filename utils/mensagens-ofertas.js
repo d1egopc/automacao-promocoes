@@ -13,6 +13,7 @@ const { resolverTemplateMensagem } = require("../modules/templates-clientes/reso
 const { prepararDadosOficiaisTemplate } = require("../modules/templates-clientes/dados-oficiais");
 const fidelidadeObs = require("../modules/fidelidade/observabilidade-v1");
 const { selecionarTemplateEspelhoPiloto } = require("../modules/ofc-v2/espelho-piloto");
+const copyInteligente = require("../modules/copy-inteligente");
 
 function normalizarTextoLocal(valor = "") {
   return String(valor || "").trim();
@@ -57,7 +58,11 @@ function primeiroTituloIaValido(oferta = {}) {
   return "";
 }
 
-function resolverTituloApresentacaoOferta(oferta = {}, destino = {}) {
+function tituloIaLiberadoRender(opcoes = {}) {
+  return opcoes?.plano?.recursos?.tituloIa === true;
+}
+
+function resolverTituloApresentacaoOferta(oferta = {}, destino = {}, opcoes = {}) {
   const original = tituloApresentacaoValido(oferta.titulo) ||
     tituloApresentacaoValido(oferta.nome) ||
     "Oferta";
@@ -71,6 +76,16 @@ function resolverTituloApresentacaoOferta(oferta = {}, destino = {}) {
     };
   }
 
+  if (!tituloIaLiberadoRender(opcoes)) {
+    return {
+      titulo: original,
+      modo: "ia",
+      usouTituloIa: false,
+      fallbackOriginal: true,
+      motivo: "feature_tituloIa_indisponivel"
+    };
+  }
+
   const tituloIa = primeiroTituloIaValido(oferta);
   if (tituloIa) {
     return {
@@ -81,12 +96,38 @@ function resolverTituloApresentacaoOferta(oferta = {}, destino = {}) {
     };
   }
 
+  let copyResolvida = null;
+  try {
+    copyResolvida = copyInteligente.resolverCopyInteligente({
+      oferta,
+      destino,
+      clienteId: opcoes.clienteId || oferta.clienteId || "admin",
+      plano: opcoes.plano || {}
+    });
+  } catch (err) {
+    copyResolvida = {
+      ok: false,
+      motivoFallback: "copy_inteligente_erro"
+    };
+  }
+  if (copyResolvida?.ok && tituloApresentacaoValido(copyResolvida.tituloIa)) {
+    return {
+      titulo: copyResolvida.tituloIa,
+      modo: "ia",
+      usouTituloIa: true,
+      fallbackOriginal: false,
+      intencao: copyResolvida.intencao || "",
+      fonte: copyResolvida.fonte || "copy_inteligente_v1",
+      cacheHit: copyResolvida.cacheHit === true
+    };
+  }
+
   return {
     titulo: original,
     modo: "ia",
     usouTituloIa: false,
     fallbackOriginal: true,
-    motivo: "titulo_ia_indisponivel"
+    motivo: copyResolvida?.motivoFallback || "titulo_ia_indisponivel"
   };
 }
 
@@ -487,9 +528,16 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
   const destino = opcoes.destino || {};
   let resolucaoTemplate = null;
   let espelhoPilotoResultado = null;
-  const tituloApresentacao = resolverTituloApresentacaoOferta(oferta, destino);
-  const ofertaApresentacao = {
+  const ofertaComFatosBase = aplicarFatosOfcV24ComoEntrada({
     ...oferta,
+    clienteId
+  });
+  const tituloApresentacao = resolverTituloApresentacaoOferta(ofertaComFatosBase, destino, {
+    ...opcoes,
+    clienteId
+  });
+  const ofertaApresentacao = {
+    ...ofertaComFatosBase,
     clienteId,
     titulo: tituloApresentacao.titulo
   };
@@ -698,6 +746,7 @@ module.exports = {
   montarLinhaParcelamento,
   montarLegendaOferta,
   montarLegendaShopee,
+  tituloIaLiberadoRender,
   parsePreco: normalizarPreco,
   formatarDesconto: montarLinhaDesconto,
   precoTemVariacao,

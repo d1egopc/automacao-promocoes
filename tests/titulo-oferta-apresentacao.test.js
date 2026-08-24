@@ -27,11 +27,11 @@ function ofertaBase(marketplace = "amazon") {
   };
 }
 
-function renderizar(oferta, destino = {}) {
+function renderizar(oferta, destino = {}, opcoes = {}) {
   return montarMensagemOferta(oferta, {
     clienteId: "cliente_titulo_oferta",
     destino: { tipo: "whatsapp", ...destino },
-    plano: { recursos: { templatePersonalizado: true } }
+    plano: { recursos: { templatePersonalizado: true, tituloIa: opcoes.tituloIa === true } }
   });
 }
 
@@ -54,13 +54,20 @@ assert.ok(
   "fallback original usa nome quando titulo falta"
 );
 
-const mensagemIa = renderizar(original, { tituloOferta: "ia" });
+const mensagemIaSemFeature = renderizar(original, { tituloOferta: "ia" });
+assert.ok(mensagemIaSemFeature.includes("Produto Original Oficial"), "destino IA sem feature usa titulo original");
+assert.ok(!mensagemIaSemFeature.includes("Titulo IA Curto"), "destino IA sem feature nao usa tituloIa");
+
+const mensagemIa = renderizar(original, { tituloOferta: "ia" }, { tituloIa: true });
 assert.ok(mensagemIa.includes("Titulo IA Curto"), "destino IA usa tituloIa valido");
 assert.ok(!mensagemIa.includes("Produto Original Oficial"), "titulo original nao substitui tituloIa valido");
 
 for (const tituloIa of ["", " ", "undefined", "null", "NaN"]) {
-  const mensagem = renderizar({ ...ofertaBase(), tituloIa }, { tituloOferta: "ia" });
-  assert.ok(mensagem.includes("Produto Original Oficial"), `titulo IA invalido cai para original: ${tituloIa}`);
+  const mensagem = renderizar({ ...ofertaBase(), tituloIa }, { tituloOferta: "ia" }, { tituloIa: true });
+  assert.ok(
+    mensagem.includes("Produto Original Oficial") || mensagem.includes("Tem cupom nessa oferta") || mensagem.includes("Opa, essa veio com cupom"),
+    `titulo IA invalido cai para original ou motor seguro: ${tituloIa}`
+  );
 }
 
 for (const trecho of ["R$ 100,00", "PROMO10", "https://go.example/oferta"]) {
@@ -71,7 +78,7 @@ for (const trecho of ["R$ 100,00", "PROMO10", "https://go.example/oferta"]) {
 assert.deepStrictEqual(original, snapshotOriginal, "renderer nao muta oferta/fila compartilhada");
 
 const mensagemFanoutOriginal = renderizar(original, { id: "destino_original", tituloOferta: "original" });
-const mensagemFanoutIa = renderizar(original, { id: "destino_ia", tituloOferta: "ia" });
+const mensagemFanoutIa = renderizar(original, { id: "destino_ia", tituloOferta: "ia" }, { tituloIa: true });
 assert.ok(mensagemFanoutOriginal.includes("Produto Original Oficial"), "fanout destino original mantem original");
 assert.ok(mensagemFanoutIa.includes("Titulo IA Curto"), "fanout destino IA usa IA sem mutar a oferta");
 assert.deepStrictEqual(original, snapshotOriginal, "fanout nao muta objeto compartilhado");
@@ -90,18 +97,22 @@ const template = criarTemplate("cliente_titulo_oferta", {
 const mensagemPersonalizadaIa = renderizar(ofertaBase(), {
   templateId: template.id,
   tituloOferta: "ia"
-});
+}, { tituloIa: true });
 assert.ok(mensagemPersonalizadaIa.includes("Titulo IA Curto"), "template personalizado recebe copia com titulo IA");
 assert.ok(mensagemPersonalizadaIa.includes("PROMO10"), "template personalizado preserva cupom");
 assert.ok(mensagemPersonalizadaIa.includes("https://go.example/oferta"), "template personalizado preserva link");
 
 for (const marketplace of ["mercadolivre", "shopee", "amazon", "aliexpress", "awin", "kabum"]) {
-  const mensagem = renderizar(ofertaBase(marketplace), { tituloOferta: "ia" });
+  const mensagem = renderizar(ofertaBase(marketplace), { tituloOferta: "ia" }, { tituloIa: true });
   assert.ok(mensagem.includes("Titulo IA Curto"), `marketplace ${marketplace} aceita apresentacao IA`);
 }
 
 assert.deepStrictEqual(
-  resolverTituloApresentacaoOferta({ titulo: "Original", tituloIa: "IA" }, { tituloOferta: "ia" }),
+  resolverTituloApresentacaoOferta(
+    { titulo: "Original", tituloIa: "IA" },
+    { tituloOferta: "ia" },
+    { plano: { recursos: { tituloIa: true } } }
+  ),
   { titulo: "IA", modo: "ia", usouTituloIa: true, fallbackOriginal: false },
   "resolver expõe decisao IA sem efeito colateral"
 );
