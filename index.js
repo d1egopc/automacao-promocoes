@@ -21668,6 +21668,172 @@ function logKabumManual(dados = {}) {
   });
 }
 
+const AMAZON_COOKIES_AB_ASINS = [
+  "B07NQ9PFKN",
+  "B0H9BVBNZW",
+  "B09LZ2GRD2"
+];
+
+const AMAZON_COOKIES_AB_COOKIE_LIXO =
+  "session-id=000-0000000-0000000; ubid-acbbr=000-0000000-0000000; at-main=INVALIDO; x-main=INVALIDO";
+
+function modoAmazonCookies(config = {}) {
+  const credenciais = config?.credenciais || {};
+  const modo = String(config?.modo || credenciais.modo || "cookies").toLowerCase();
+  return modo !== "api";
+}
+
+function selecionarAsinAmazonCookiesAb(req) {
+  const solicitado = String(req.query.asin || "").trim().toUpperCase();
+  if (AMAZON_COOKIES_AB_ASINS.includes(solicitado)) return solicitado;
+  return AMAZON_COOKIES_AB_ASINS[0];
+}
+
+function criarImportadorAmazonCookiesAb(sinal = {}) {
+  return criarImportarAmazon({
+    extrairJsonLd,
+    extrairMeta,
+    htmlDecode,
+    limparPreco,
+    corrigirImagemUrl,
+    limparLinkAmazon,
+    gerarLinkOptimus,
+    extrairCuponsAmazonDoHtml,
+    detectarAvisoCupomAmazon,
+    escolherCupomParaOfertaAmazon,
+    registrarSucessoIntegracao: (_clienteId, _marketplace, detalhes = {}) => {
+      sinal.tipo = "sucesso";
+      sinal.codigo = String(detalhes.codigo || "cookie_valido");
+    },
+    registrarAlertaIntegracao: (_clienteId, _marketplace, alerta = {}) => {
+      sinal.tipo = "alerta";
+      sinal.codigo = String(alerta.tipo || alerta.codigo || "falha_teste");
+    }
+  });
+}
+
+async function executarComTimeoutAmazonCookiesAb(tarefa, timeoutMs = 25000) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      tarefa(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          const erro = new Error("timeout");
+          erro.name = "AbortError";
+          reject(erro);
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function medirProvaAmazonCookiesAb(clienteId = "admin", config = {}) {
+  const inicio = Date.now();
+  const sinal = {};
+  const importarAmazonAb = criarImportadorAmazonCookiesAb(sinal);
+  const asin = String(config?.credenciais?.asinTeste || AMAZON_COOKIES_AB_ASINS[0]).trim().toUpperCase();
+  const url = `https://www.amazon.com.br/dp/${encodeURIComponent(asin)}`;
+
+  try {
+    await executarComTimeoutAmazonCookiesAb(() => importarAmazonAb(url, {
+      ...config,
+      modo: "cookies",
+      linksOptimus: {
+        ...(config.linksOptimus || {}),
+        ativo: false
+      },
+      contextoEngine: {
+        ...(config.contextoEngine || {}),
+        clienteId,
+        origem: "auditoria_ab_amazon_cookies"
+      }
+    }));
+
+    const codigo = String(sinal.codigo || "sem_prova_cookie");
+    const resultado = sinal.tipo === "sucesso" && codigo === "cookie_valido"
+      ? "saudavel"
+      : sinal.tipo === "alerta" && codigo === "cookie_expirado"
+        ? "invalida"
+        : "desconhecida";
+
+    return {
+      resultado,
+      codigo,
+      duracaoMs: Date.now() - inicio
+    };
+  } catch (e) {
+    return {
+      resultado: "desconhecida",
+      codigo: e?.name === "AbortError" ? "timeout" : "erro_rede",
+      duracaoMs: Date.now() - inicio
+    };
+  }
+}
+
+app.get("/integracoes/amazon/cookies/ab", async (req, res) => {
+  if (!isAdminMaster(req)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Acesso restrito ao Admin Master"
+    });
+  }
+
+  const clienteId = String(req.query.clienteId || getClienteId(req) || "").trim();
+  const config = getIntegracaoCliente(clienteId, "amazon");
+  const credenciais = config?.credenciais || {};
+
+  if (!config || !modoAmazonCookies(config)) {
+    return res.status(400).json({
+      ok: false,
+      erro: "Amazon Cookies nao configurada para este workspace"
+    });
+  }
+
+  const cookiesReais = String(credenciais.cookies || credenciais.cookie || "").trim();
+  if (!cookiesReais) {
+    return res.status(400).json({
+      ok: false,
+      erro: "Cookies Amazon ausentes"
+    });
+  }
+
+  const asin = selecionarAsinAmazonCookiesAb(req);
+  const configBase = {
+    ...config,
+    modo: "cookies",
+    credenciais: {
+      ...credenciais,
+      asinTeste: asin
+    }
+  };
+  const real = await medirProvaAmazonCookiesAb(clienteId, configBase);
+  const lixo = await medirProvaAmazonCookiesAb(clienteId, {
+    ...configBase,
+    credenciais: {
+      ...configBase.credenciais,
+      cookies: AMAZON_COOKIES_AB_COOKIE_LIXO,
+      cookie: AMAZON_COOKIES_AB_COOKIE_LIXO
+    }
+  });
+  const diferenciou = real.resultado === "saudavel" && lixo.resultado !== "saudavel";
+
+  return res.json({
+    ok: true,
+    marketplace: "amazon",
+    modo: "cookies",
+    prova: {
+      operacao: "importador_amazon_readonly",
+      asin
+    },
+    real,
+    lixo,
+    diferenciou
+  });
+});
+
 //============= ROTA INTEGRACOES =======================================
 
 app.get("/integracoes/alertas", (req, res) => {
