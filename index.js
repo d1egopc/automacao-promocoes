@@ -27081,6 +27081,10 @@ app.listen(PORT, () => {
   console.log("[API]🟢🧠 API ONLINE NA PORTA " + PORT);
   iniciarManualV2SchedulerOperacional();
   iniciarManualV2RetentionOperacional();
+  mensageiro.iniciarSchedulerProgramacoesMensageiro({
+    getSock: (sessaoId) => sessoes[sessaoId],
+    getStatusSessao: (sessaoId) => statusSessao[sessaoId] || ""
+  });
 
 decairConfiancaCupons();
 

@@ -18,6 +18,8 @@ const DESTINOS_MENSAGEM_GRUPO = new Set(["privado", "grupo"]);
 const MODOS_MENSAGEM_GRUPO = new Set(["texto", "imagem", "imagem_texto"]);
 const CORRESPONDENCIAS_COMANDO = new Set(["exato", "inicia"]);
 const TIPOS_RESPOSTA_COMANDO = new Set(["texto", "imagem", "imagem_texto"]);
+const TIPOS_PROGRAMACAO = new Set(["horario", "intervalo"]);
+const TIPOS_CONTEUDO_PROGRAMACAO = new Set(["texto", "imagem", "imagem_texto"]);
 
 let mensageiroPorCliente = {};
 
@@ -107,7 +109,8 @@ function normalizarConfigMensageiro(clienteId, config = {}) {
     },
     boasVindasEnvio: normalizarEnvioMensageiro(config.boasVindasEnvio),
     despedidaEnvio: normalizarEnvioMensageiro(config.despedidaEnvio),
-    comandos: normalizarComandosMensageiro(config.comandos)
+    comandos: normalizarComandosMensageiro(config.comandos),
+    programacoes: normalizarProgramacoesMensageiro(config.programacoes)
   };
 }
 
@@ -159,6 +162,7 @@ function criarConfigPadraoMensageiro(clienteId) {
     despedidaEnvio: criarEnvioPadraoMensageiro(),
 
     comandos: [],
+    programacoes: [],
 
     atendimento: criarAtendimentoPadraoMensageiro(),
 
@@ -246,6 +250,88 @@ function normalizarComandosMensageiro(comandos = []) {
       if (tipo === "imagem") return Boolean(imagem);
       return Boolean(texto || imagem);
     });
+}
+
+function normalizarHorarioMensageiro(valor = "") {
+  const texto = String(valor || "").trim();
+  const match = texto.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return "";
+
+  const horas = Math.max(0, Math.min(23, Number(match[1]) || 0));
+  const minutos = Math.max(0, Math.min(59, Number(match[2]) || 0));
+  return `${String(horas).padStart(2, "0")}:${String(minutos).padStart(2, "0")}`;
+}
+
+function normalizarDataMensageiro(valor = "") {
+  const texto = String(valor || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(texto) ? texto : "";
+}
+
+function normalizarConteudoProgramacao(conteudo = {}, index = 0) {
+  const raw = conteudo && typeof conteudo === "object" ? conteudo : {};
+  const tipo = TIPOS_CONTEUDO_PROGRAMACAO.has(raw.tipo)
+    ? raw.tipo
+    : "texto";
+
+  return {
+    id: String(raw.id || `conteudo_${Date.now()}_${index}`),
+    tipo,
+    texto: String(raw.texto || raw.mensagem || raw.conteudo || "").slice(0, 4000),
+    imagem: String(raw.imagem || raw.imagemUrl || raw.url || "")
+  };
+}
+
+function conteudoProgramacaoValido(conteudo = {}) {
+  if (conteudo.tipo === "texto") return Boolean(conteudo.texto);
+  if (conteudo.tipo === "imagem") return Boolean(conteudo.imagem);
+  return Boolean(conteudo.texto || conteudo.imagem);
+}
+
+function normalizarProgramacaoMensageiro(programacao = {}, index = 0) {
+  const raw = programacao && typeof programacao === "object" ? programacao : {};
+  const tipo = TIPOS_PROGRAMACAO.has(raw.tipo) ? raw.tipo : "horario";
+  const conteudosRaw = Array.isArray(raw.conteudos)
+    ? raw.conteudos
+    : raw.conteudo
+      ? [raw.conteudo]
+      : raw.resposta
+        ? [raw.resposta]
+        : [];
+  const conteudos = conteudosRaw
+    .map(normalizarConteudoProgramacao)
+    .filter(conteudoProgramacaoValido);
+  const intervaloMinutos = Math.max(10, Math.min(1440, Number(raw.intervaloMinutos || 30) || 30));
+  const indiceAtual = Math.max(0, Number(raw.indiceAtual || 0) || 0);
+
+  return {
+    id: String(raw.id || `prog_${Date.now()}_${index}`),
+    ativo: raw.ativo !== false,
+    nome: String(raw.nome || `Programacao ${index + 1}`).trim(),
+    tipo,
+    grupos: normalizarListaPalavras(raw.grupos),
+    horario: normalizarHorarioMensageiro(raw.horario),
+    data: normalizarDataMensageiro(raw.data),
+    intervaloMinutos,
+    janelaInicio: normalizarHorarioMensageiro(raw.janelaInicio),
+    janelaFim: normalizarHorarioMensageiro(raw.janelaFim),
+    timezone: String(raw.timezone || "America/Sao_Paulo"),
+    conteudos,
+    indiceAtual: conteudos.length ? indiceAtual % conteudos.length : 0,
+    nextRunAt: raw.nextRunAt ? String(raw.nextRunAt) : "",
+    ultimoEnvioEm: raw.ultimoEnvioEm ? String(raw.ultimoEnvioEm) : "",
+    processandoEm: raw.processandoEm ? String(raw.processandoEm) : "",
+    lockAte: raw.lockAte ? String(raw.lockAte) : "",
+    status: String(raw.status || "pendente"),
+    ultimoRunId: raw.ultimoRunId ? String(raw.ultimoRunId) : ""
+  };
+}
+
+function normalizarProgramacoesMensageiro(programacoes = []) {
+  if (!Array.isArray(programacoes)) return [];
+
+  return programacoes
+    .map(normalizarProgramacaoMensageiro)
+    .filter(programacao => programacao.nome && programacao.conteudos.length);
 }
 
 function normalizarRespostaAtendimento(resposta = {}, index = 0) {
@@ -450,13 +536,19 @@ function setMensageiroCliente(clienteId, dados = {}) {
   return mensageiroPorCliente[clienteId];
 }
 
+function listarClientesMensageiro() {
+  return Object.keys(mensageiroPorCliente || {});
+}
+
 module.exports = {
   carregarMensageiro,
   salvarMensageiro,
   getMensageiroCliente,
   setMensageiroCliente,
+  listarClientesMensageiro,
   getAtendimentoConfigCliente,
   setAtendimentoConfigCliente,
   registrarHistoricoAtendimento,
-  normalizarConfigAtendimentoCliente
+  normalizarConfigAtendimentoCliente,
+  normalizarProgramacoesMensageiro
 };

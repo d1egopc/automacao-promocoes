@@ -90,6 +90,18 @@ async function otimizarImagensComandos(comandos = []) {
   }));
 }
 
+async function otimizarImagensProgramacoes(programacoes = []) {
+  if (!Array.isArray(programacoes)) return [];
+
+  return Promise.all(programacoes.map(async (programacao) => ({
+    ...programacao,
+    conteudos: await Promise.all((Array.isArray(programacao?.conteudos) ? programacao.conteudos : []).map(async (conteudo) => ({
+      ...conteudo,
+      imagem: await otimizarBase64(conteudo?.imagem)
+    })))
+  })));
+}
+
 router.get("/config", (req, res) => {
   const clienteId = getClienteId(req);
 
@@ -258,6 +270,11 @@ const comandosPayload = dados.comandos !== undefined
   : dados.mensageiro?.comandos !== undefined
     ? await otimizarImagensComandos(dados.mensageiro.comandos)
     : configAtualMensageiro.comandos;
+const programacoesPayload = dados.programacoes !== undefined
+  ? await otimizarImagensProgramacoes(dados.programacoes)
+  : dados.mensageiro?.programacoes !== undefined
+    ? await otimizarImagensProgramacoes(dados.mensageiro.programacoes)
+    : configAtualMensageiro.programacoes;
 
 const atualizado = setMensageiroCliente(clienteId, {
   ativo: dados.ativo === undefined
@@ -293,6 +310,7 @@ const atualizado = setMensageiroCliente(clienteId, {
   boasVindasEnvio,
   despedidaEnvio,
   comandos: comandosPayload,
+  programacoes: programacoesPayload,
 
   atendimento: atendimentoNormalizado
 });
@@ -313,6 +331,5 @@ if (atendimentoPayload !== undefined) {
 }
 
 module.exports = criarRotasMensageiro;
-
 
 
