@@ -307,6 +307,21 @@ async function testeAmazonManualProvaAutenticada() {
   assert.strictEqual(semLink.ok, false);
   assert.strictEqual(semLink.codigo, "falha_teste");
   assert.strictEqual(semLink.saude.status, "desconhecida");
+
+  let gerarLinkAmazonChamadoNoModoApi = false;
+  const api = await testarIntegracaoMarketplace("workspace_a", "amazon", {
+    modo: "api",
+    credenciais: { appId: "app", accessKey: "ak", secretKey: "sk" }
+  }, {
+    gerarLinkAmazon: () => {
+      gerarLinkAmazonChamadoNoModoApi = true;
+      return "https://www.amazon.com.br/dp/B07PGL2ZSL?tag=tag-20";
+    }
+  });
+  assert.strictEqual(gerarLinkAmazonChamadoNoModoApi, false);
+  assert.strictEqual(api.ok, false);
+  assert.strictEqual(api.codigo, "teste_paapi_nao_disponivel");
+  assert.strictEqual(api.saude.status, "desconhecida");
 }
 
 async function testeShopee() {

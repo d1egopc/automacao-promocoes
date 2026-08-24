@@ -229,12 +229,13 @@ function amazonTemLoginInequivoco(urlFinal = "", html = "") {
 async function testarAmazonComProvaAutenticada(clienteId = "admin", config = {}, deps = {}) {
   const c = credenciais(config);
   const modo = String(config?.modo || c.modo || "cookies").toLowerCase();
+  if (modo === "api") return null;
+
   const tagId = tagAmazon(config);
   const cookies = valorTexto(c, ["cookies", "cookie"]);
   const asin = valorTexto(c, ["asinTeste", "asin"]) || ASIN_TESTE_AMAZON;
 
   if (!tagId) return resultado("amazon", "tag_ausente", { faltandoTag: true, modo }, false);
-  if (modo === "api") return null;
   if (!cookies) return resultado("amazon", "cookie_ausente", { faltandoCookies: true, modo }, false);
 
   const linkBase = `https://www.amazon.com.br/dp/${encodeURIComponent(asin)}`;
