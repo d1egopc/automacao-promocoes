@@ -135,6 +135,11 @@ const fanoutA = resolver(ofertaFanout);
 const fanoutB = resolver(ofertaFanout);
 assert.strictEqual(fanoutA.tituloIa, fanoutB.tituloIa, "fanout IA reutiliza mesma copy");
 assert.strictEqual(fanoutB.cacheHit, true, "fanout IA gera cache hit");
+for (let i = 0; i < 20; i += 1) {
+  const fanoutDestino = resolver(ofertaFanout, { destino: { id: `destino_fanout_${i}`, tituloOferta: "ia" } });
+  assert.strictEqual(fanoutDestino.tituloIa, fanoutA.tituloIa, `fanout 20 destinos reutiliza copy ${i}`);
+  assert.strictEqual(fanoutDestino.cacheHit, true, `fanout 20 destinos cache hit ${i}`);
+}
 const originalFanout = renderizar(ofertaFanout, { tituloOferta: "original" });
 assert.ok(originalFanout.includes("Produto Original Oficial"), "destino original permanece original");
 assert.ok(!originalFanout.includes(fanoutA.tituloIa), "destino original nao usa Local V2");
@@ -187,6 +192,71 @@ function contarRepeticoesImediatas(saidas = []) {
   return saidas.filter((item, index) => index > 0 && item === saidas[index - 1]).length;
 }
 
+const categoriasRotacaoComercial = [
+  "Gamer e Hardware",
+  "Perfumaria, Farmácia e Beleza",
+  "Diversos",
+  "Casa, Móveis e Decoração",
+  "Eletrônicos",
+  "Celulares e Smartphones",
+  "Computadores e Notebook",
+  "Pet Shop e Fazendinha",
+  "Ferramentas",
+  "Bebidas"
+];
+
+copy.limparCacheCopyLocalV2();
+const seqCupom50 = [];
+for (let i = 0; i < 50; i += 1) {
+  const res = resolver(ofertaBase({
+    id: `cupom_50_${i}`,
+    engineOfertaId: `cupom_50_${i}`,
+    categoria: categoriasRotacaoComercial[i % categoriasRotacaoComercial.length],
+    titulo: `Oferta com cupom ${i}`,
+    cupom: `PROMO${i}`
+  }), { clienteId: "workspace_cupom_50" });
+  assert.strictEqual(res.intencao, "cupom", `cupom 50 item ${i}: intencao correta`);
+  assert.ok(/cupom/i.test(res.tituloIa), `cupom 50 item ${i}: frase de cupom`);
+  assert.ok(!/resgate/i.test(res.tituloIa), `cupom 50 item ${i}: nao mistura resgate`);
+  seqCupom50.push(res.tituloIa);
+}
+assert.strictEqual(contarRepeticoesImediatas(seqCupom50), 0, "50 ofertas com cupom nao repetem imediatamente");
+assert.ok(new Set(seqCupom50).size >= 15, "50 ofertas com cupom usam sacola ampla");
+assert.ok(copy.ultimasFrasesCopyLocalV2("workspace_cupom_50:cupom").length <= copy.LIMITE_HISTORICO_COPY_LOCAL_V2, "historico cupom global continua limitado");
+
+copy.limparCacheCopyLocalV2();
+const seqCupomFamilias = ["Gamer e Hardware", "Perfumaria, Farmácia e Beleza", "Diversos", "Casa, Móveis e Decoração", "Eletrônicos"].map((categoria, index) =>
+  resolver(ofertaBase({
+    id: `cupom_familia_${index}`,
+    engineOfertaId: `cupom_familia_${index}`,
+    categoria,
+    titulo: `Oferta cupom familia ${index}`,
+    cupom: `FAM${index}`
+  }), { clienteId: "workspace_cupom_familias" }).tituloIa
+);
+assert.strictEqual(contarRepeticoesImediatas(seqCupomFamilias), 0, "cupom nao repete imediatamente ao mudar familia");
+assert.strictEqual(copy.ultimasFrasesCopyLocalV2("workspace_cupom_familias:cupom").length, 5, "cupom usa historico workspace:intencao");
+
+copy.limparCacheCopyLocalV2();
+const seqResgate30 = [];
+for (let i = 0; i < 30; i += 1) {
+  const res = resolver(ofertaBase({
+    id: `resgate_30_${i}`,
+    engineOfertaId: `resgate_30_${i}`,
+    categoria: categoriasRotacaoComercial[i % categoriasRotacaoComercial.length],
+    titulo: `Oferta com resgate ${i}`,
+    cupom: `APP${i}`,
+    linkResgate: `https://resgate.example/${i}`
+  }), { clienteId: "workspace_resgate_30" });
+  assert.strictEqual(res.intencao, "resgate", `resgate 30 item ${i}: intencao correta`);
+  assert.ok(/resgat|beneficio/i.test(res.tituloIa), `resgate 30 item ${i}: frase de resgate`);
+  assert.ok(!/cupom/i.test(res.tituloIa), `resgate 30 item ${i}: nao mistura cupom`);
+  seqResgate30.push(res.tituloIa);
+}
+assert.strictEqual(contarRepeticoesImediatas(seqResgate30), 0, "30 ofertas com resgate nao repetem imediatamente");
+assert.ok(new Set(seqResgate30).size >= 15, "30 ofertas com resgate usam sacola ampla");
+assert.ok(copy.ultimasFrasesCopyLocalV2("workspace_resgate_30:resgate").length <= copy.LIMITE_HISTORICO_COPY_LOCAL_V2, "historico resgate global continua limitado");
+
 const seqUmaFrase = resolverSequenciaAntiRepeticao({ qtdFrases: 1 });
 assert.ok(contarRepeticoesImediatas(seqUmaFrase) > 0, "1 frase permite repeticao por falta de alternativa");
 const seqDuasFrases = resolverSequenciaAntiRepeticao({ qtdFrases: 2 });
@@ -219,6 +289,14 @@ const workspaceB1 = resolver(ofertaBase({ id: "workspace_anti", engineOfertaId: 
 assert.notStrictEqual(workspaceA1.tituloIa, workspaceA2.tituloIa, "workspace A evita repeticao imediata");
 assert.strictEqual(copy.ultimasFrasesCopyLocalV2("workspace_a:oportunidade:oportunidade").length, 2, "workspace A mantem seu historico");
 assert.deepStrictEqual(copy.ultimasFrasesCopyLocalV2("workspace_b:oportunidade:oportunidade"), [workspaceB1.tituloIa], "workspace B nao herda historico do workspace A");
+
+copy.limparCacheCopyLocalV2();
+resolver(ofertaBase({ id: "hist_gamer_1", engineOfertaId: "hist_gamer_1", categoria: "Gamer e Hardware", titulo: "Produto gamer historico 1" }), { clienteId: "workspace_contextual" });
+resolver(ofertaBase({ id: "hist_gamer_2", engineOfertaId: "hist_gamer_2", categoria: "Gamer e Hardware", titulo: "Produto gamer historico 2" }), { clienteId: "workspace_contextual" });
+resolver(ofertaBase({ id: "hist_beleza_1", engineOfertaId: "hist_beleza_1", categoria: "Perfumaria, Farmácia e Beleza", titulo: "Perfume historico 1" }), { clienteId: "workspace_contextual" });
+assert.strictEqual(copy.ultimasFrasesCopyLocalV2("workspace_contextual:gamer:familia").length, 2, "familia gamer mantem historico proprio");
+assert.strictEqual(copy.ultimasFrasesCopyLocalV2("workspace_contextual:beleza:familia").length, 1, "familia beleza mantem historico proprio");
+assert.deepStrictEqual(copy.ultimasFrasesCopyLocalV2("workspace_contextual:cupom"), [], "historico contextual nao usa chave comercial");
 
 const perigosa = resolver(ofertaBase({ id: "perigosa", engineOfertaId: "perigosa", categoria: "Diversos" }), {
   banco: [

@@ -16,6 +16,14 @@ const TTL_COPY_LOCAL_V2_MS = 45 * 60 * 1000;
 const MAX_CACHE_COPY_LOCAL_V2 = 1000;
 const LIMITE_HISTORICO_COPY_LOCAL_V2 = 20;
 const FONTE_COPY_LOCAL_V2 = "banco_associativo_local_v2";
+const INTENCOES_COMERCIAIS_GLOBAIS_COPY_LOCAL_V2 = Object.freeze([
+  "cupom",
+  "resgate",
+  "beneficio",
+  "economia",
+  "frete_gratis",
+  "parcelamento"
+]);
 
 const cacheLocalV2 = new Map();
 const historicoLocalV2 = new Map();
@@ -336,6 +344,15 @@ function escolherFrasePonderadaCopyLocalV2({ frases = [], chaveOferta = "", hist
   return escolhida;
 }
 
+function historicoKeyCopyLocalV2({ clienteId = "admin", familia = "", intencao = "" } = {}) {
+  const workspace = texto(clienteId) || "admin";
+  const intencaoNormalizada = texto(intencao);
+  if (INTENCOES_COMERCIAIS_GLOBAIS_COPY_LOCAL_V2.includes(intencaoNormalizada)) {
+    return `${workspace}:${intencaoNormalizada}`;
+  }
+  return `${workspace}:${familia}:${intencaoNormalizada}`;
+}
+
 function chaveCacheCopyLocalV2({ clienteId = "admin", oferta = {}, sinais = {}, categoriaOficial = "", familia = "", intencao = "", subcontexto = "" } = {}) {
   const chaveOferta = chaveSinais(clienteId, oferta, sinais);
   if (!chaveOferta) return "";
@@ -394,7 +411,7 @@ function resolverCopyLocalV2({ oferta = {}, destino = {}, clienteId = "admin", p
       return fallbackLocalV2("frase_segura_indisponivel", contexto);
     }
 
-    const historicoKey = `${texto(clienteId) || "admin"}:${familia}:${contexto.intencao}`;
+    const historicoKey = historicoKeyCopyLocalV2({ clienteId, familia, intencao: contexto.intencao });
     const frase = escolherFrasePonderadaCopyLocalV2({
       frases,
       chaveOferta: `${cacheKey || chaveSinais(clienteId, oferta, sinais)}:${familia}:${contexto.intencao}:${subcontexto}`,
@@ -446,6 +463,7 @@ module.exports = {
   TTL_COPY_LOCAL_V2_MS,
   MAX_CACHE_COPY_LOCAL_V2,
   LIMITE_HISTORICO_COPY_LOCAL_V2,
+  INTENCOES_COMERCIAIS_GLOBAIS_COPY_LOCAL_V2,
   FONTE_COPY_LOCAL_V2,
   hashLocalV2,
   categoriaOficialCopyLocalV2,
@@ -458,6 +476,7 @@ module.exports = {
   filtrarFrasesCopyLocalV2,
   chaveCacheCopyLocalV2,
   escolherFrasePonderadaCopyLocalV2,
+  historicoKeyCopyLocalV2,
   ultimasFrasesCopyLocalV2,
   lerCacheCopyLocalV2,
   salvarCacheCopyLocalV2,

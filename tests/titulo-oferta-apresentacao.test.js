@@ -65,9 +65,12 @@ assert.ok(!mensagemIa.includes("Produto Original Oficial"), "titulo original nao
 for (const tituloIa of ["", " ", "undefined", "null", "NaN"]) {
   const mensagem = renderizar({ ...ofertaBase(), tituloIa }, { tituloOferta: "ia" }, { tituloIa: true });
   assert.ok(
-    mensagem.includes("Produto Original Oficial") || mensagem.includes("Tem cupom nessa oferta") || mensagem.includes("Opa, essa veio com cupom"),
+    mensagem.includes("Produto Original Oficial") || mensagem.toLowerCase().includes("cupom"),
     `titulo IA invalido cai para original ou motor seguro: ${tituloIa}`
   );
+  if (tituloIa.trim()) {
+    assert.ok(!mensagem.includes(tituloIa.trim()), `titulo IA invalido nao deve ser usado: ${tituloIa}`);
+  }
 }
 
 for (const trecho of ["R$ 100,00", "PROMO10", "https://go.example/oferta"]) {
