@@ -15,7 +15,10 @@ const {
   setMensageiroCliente,
   getAtendimentoConfigCliente,
   setAtendimentoConfigCliente,
-  encontrarGatilhoAtendimento
+  encontrarGatilhoAtendimento,
+  validarPerfisMensageiro,
+  listarSessoesMensageiro,
+  listarGruposSessaoMensageiro
 } = deps;
 
 function normalizarAtendimentoMensageiro(dados = {}) {
@@ -100,6 +103,63 @@ async function otimizarImagensProgramacoes(programacoes = []) {
       imagem: await otimizarBase64(conteudo?.imagem)
     })))
   })));
+}
+
+async function otimizarImagensPerfis(perfis = []) {
+  if (!Array.isArray(perfis)) return [];
+
+  return Promise.all(perfis.map(async (perfil) => {
+    const modulos = perfil?.modulos && typeof perfil.modulos === "object" ? perfil.modulos : {};
+    const boasVindas = modulos.boasVindas && typeof modulos.boasVindas === "object" ? modulos.boasVindas : {};
+    const despedida = modulos.despedida && typeof modulos.despedida === "object" ? modulos.despedida : {};
+    const boasVindasConfig = boasVindas.configuracao && typeof boasVindas.configuracao === "object" ? boasVindas.configuracao : {};
+    const despedidaConfig = despedida.configuracao && typeof despedida.configuracao === "object" ? despedida.configuracao : {};
+
+    return {
+      ...perfil,
+      modulos: {
+        ...modulos,
+        boasVindas: {
+          ...boasVindas,
+          configuracao: {
+            ...boasVindasConfig,
+            imagem: await otimizarBase64(boasVindasConfig.imagem)
+          }
+        },
+        despedida: {
+          ...despedida,
+          configuracao: {
+            ...despedidaConfig,
+            imagem: await otimizarBase64(despedidaConfig.imagem)
+          }
+        }
+      }
+    };
+  }));
+}
+
+function montarContextoValidacaoPerfis(clienteId, perfis = [], configAtual = {}) {
+  const sessoesValidas = typeof listarSessoesMensageiro === "function"
+    ? listarSessoesMensageiro(clienteId)
+    : [];
+  const gruposPorSessao = {};
+  const sessoes = new Set([
+    ...perfis.map(perfil => String(perfil?.sessaoId || perfil?.sessaoWhatsappId || perfil?.sessaoGruposId || "").trim()),
+    String(configAtual.sessaoGruposId || configAtual.sessaoWhatsappId || configAtual.sessaoId || "").trim()
+  ].filter(Boolean));
+
+  for (const sessaoId of sessoes) {
+    if (typeof listarGruposSessaoMensageiro === "function") {
+      const grupos = listarGruposSessaoMensageiro(clienteId, sessaoId);
+      if (Array.isArray(grupos) && grupos.length) gruposPorSessao[sessaoId] = grupos;
+    }
+    const sessaoAtual = String(configAtual.sessaoGruposId || configAtual.sessaoWhatsappId || configAtual.sessaoId || "").trim();
+    if (!gruposPorSessao[sessaoId] && sessaoId === sessaoAtual && Array.isArray(configAtual.grupos)) {
+      gruposPorSessao[sessaoId] = configAtual.grupos;
+    }
+  }
+
+  return { sessoesValidas, gruposPorSessao };
 }
 
 router.get("/config", (req, res) => {
@@ -221,6 +281,7 @@ router.get("/", (req, res) => {
 
 
 router.post("/", async (req, res) => {
+  try {
 
   const clienteId = getClienteId(req);
 
@@ -275,6 +336,18 @@ const programacoesPayload = dados.programacoes !== undefined
   : dados.mensageiro?.programacoes !== undefined
     ? await otimizarImagensProgramacoes(dados.mensageiro.programacoes)
     : configAtualMensageiro.programacoes;
+const perfisPayload = dados.perfis !== undefined
+  ? await otimizarImagensPerfis(dados.perfis)
+  : dados.mensageiro?.perfis !== undefined
+    ? await otimizarImagensPerfis(dados.mensageiro.perfis)
+    : configAtualMensageiro.perfis;
+
+if (typeof validarPerfisMensageiro === "function") {
+  validarPerfisMensageiro(
+    perfisPayload,
+    montarContextoValidacaoPerfis(clienteId, perfisPayload, configAtualMensageiro)
+  );
+}
 
 const atualizado = setMensageiroCliente(clienteId, {
   ativo: dados.ativo === undefined
@@ -309,6 +382,7 @@ const atualizado = setMensageiroCliente(clienteId, {
 
   boasVindasEnvio,
   despedidaEnvio,
+  perfis: perfisPayload,
   comandos: comandosPayload,
   programacoes: programacoesPayload,
 
@@ -325,11 +399,17 @@ if (atendimentoPayload !== undefined) {
       clienteId,
       mensageiro: atualizado
     });
+  } catch (erro) {
+    return res.status(erro.statusCode || 500).json({
+      ok: false,
+      erro: erro.message || "Erro ao salvar mensageiro",
+      codigo: erro.code || "erro_mensageiro"
+    });
+  }
   });
 
   return router;
 }
 
 module.exports = criarRotasMensageiro;
-
 

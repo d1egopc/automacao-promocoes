@@ -19746,7 +19746,17 @@ app.use("/mensageiro", criarRotasMensageiro({
   setMensageiroCliente: mensageiro.setMensageiroCliente,
   getAtendimentoConfigCliente: mensageiro.getAtendimentoConfigCliente,
   setAtendimentoConfigCliente: mensageiro.setAtendimentoConfigCliente,
-  encontrarGatilhoAtendimento: mensageiro.encontrarGatilhoAtendimento
+  encontrarGatilhoAtendimento: mensageiro.encontrarGatilhoAtendimento,
+  validarPerfisMensageiro: mensageiro.validarPerfisMensageiro,
+  listarSessoesMensageiro: (clienteId) => listarSessoesWhatsappCliente(clienteId),
+  listarGruposSessaoMensageiro: (clienteId, sessaoId) => {
+    const idNormalizado = normalizarSessaoId(clienteId, sessaoId);
+    return (
+      gruposPorSessao[sessaoId] ||
+      gruposPorSessao[idNormalizado] ||
+      []
+    );
+  }
 }));
 
 // =============== ROTA DO SOCIAL MODULE =================

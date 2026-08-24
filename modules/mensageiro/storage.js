@@ -20,6 +20,15 @@ const CORRESPONDENCIAS_COMANDO = new Set(["exato", "inicia"]);
 const TIPOS_RESPOSTA_COMANDO = new Set(["texto", "imagem", "imagem_texto"]);
 const TIPOS_PROGRAMACAO = new Set(["horario", "intervalo"]);
 const TIPOS_CONTEUDO_PROGRAMACAO = new Set(["texto", "imagem", "imagem_texto"]);
+const MAX_PERFIS_MENSAGEIRO = Number(process.env.MAX_PERFIS_MENSAGEIRO || 4) || 4;
+const PERFIL_LEGADO_ID = "__legado__";
+const MODULOS_PERFIL_MENSAGEIRO = new Set([
+  "boasVindas",
+  "despedida",
+  "comandos",
+  "programacoes",
+  "gerente"
+]);
 
 let mensageiroPorCliente = {};
 
@@ -109,6 +118,7 @@ function normalizarConfigMensageiro(clienteId, config = {}) {
     },
     boasVindasEnvio: normalizarEnvioMensageiro(config.boasVindasEnvio),
     despedidaEnvio: normalizarEnvioMensageiro(config.despedidaEnvio),
+    perfis: normalizarPerfisMensageiro(config.perfis),
     comandos: normalizarComandosMensageiro(config.comandos),
     programacoes: normalizarProgramacoesMensageiro(config.programacoes)
   };
@@ -161,6 +171,7 @@ function criarConfigPadraoMensageiro(clienteId) {
     boasVindasEnvio: criarEnvioPadraoMensageiro(),
     despedidaEnvio: criarEnvioPadraoMensageiro(),
 
+    perfis: [],
     comandos: [],
     programacoes: [],
 
@@ -169,6 +180,14 @@ function criarConfigPadraoMensageiro(clienteId) {
     criadoEm: new Date().toISOString(),
     atualizadoEm: new Date().toISOString()
   };
+}
+
+function erroContratoMensageiro(code, message, extra = {}) {
+  const erro = new Error(message || code);
+  erro.code = code;
+  erro.statusCode = 400;
+  Object.assign(erro, extra);
+  return erro;
 }
 
 function criarConfigAtendimentoPadrao(clienteId) {
@@ -225,6 +244,7 @@ function normalizarComandoMensageiro(comando = {}, index = 0) {
     id: String(raw.id || `cmd_${Date.now()}_${index}`),
     ativo: raw.ativo !== false,
     nome: String(raw.nome || `Comando ${index + 1}`).trim(),
+    perfilId: raw.perfilId ? String(raw.perfilId).trim() : "",
     gatilhos,
     correspondencia,
     grupos: normalizarListaPalavras(raw.grupos),
@@ -307,6 +327,7 @@ function normalizarProgramacaoMensageiro(programacao = {}, index = 0) {
     id: String(raw.id || `prog_${Date.now()}_${index}`),
     ativo: raw.ativo !== false,
     nome: String(raw.nome || `Programacao ${index + 1}`).trim(),
+    perfilId: raw.perfilId ? String(raw.perfilId).trim() : "",
     tipo,
     grupos: normalizarListaPalavras(raw.grupos),
     horario: normalizarHorarioMensageiro(raw.horario),
@@ -323,6 +344,221 @@ function normalizarProgramacaoMensageiro(programacao = {}, index = 0) {
     lockAte: raw.lockAte ? String(raw.lockAte) : "",
     status: String(raw.status || "pendente"),
     ultimoRunId: raw.ultimoRunId ? String(raw.ultimoRunId) : ""
+  };
+}
+
+function normalizarConfigMensagemPerfil(raw = {}, fallback = {}) {
+  const fonte = raw && typeof raw === "object" ? raw : {};
+  return {
+    mensagem: String(fonte.mensagem || fonte.texto || fallback.mensagem || "").slice(0, 4000),
+    imagem: String(fonte.imagem || fallback.imagem || ""),
+    envio: normalizarEnvioMensageiro(fonte.envio || fallback.envio)
+  };
+}
+
+function normalizarModuloMensagemPerfil(raw = {}, fallback = {}) {
+  const fonte = raw && typeof raw === "object" ? raw : {};
+  return {
+    ativo: fonte.ativo === undefined ? fallback.ativo === true : fonte.ativo === true,
+    configuracao: normalizarConfigMensagemPerfil(fonte.configuracao || fonte, fallback.configuracao || {})
+  };
+}
+
+function normalizarModuloSimplesPerfil(raw = {}, ativoPadrao = false) {
+  const fonte = raw && typeof raw === "object" ? raw : {};
+  return {
+    ativo: fonte.ativo === undefined ? ativoPadrao === true : fonte.ativo === true
+  };
+}
+
+function normalizarModulosPerfilMensageiro(modulos = {}, fallback = {}) {
+  const raw = modulos && typeof modulos === "object" ? modulos : {};
+  return {
+    boasVindas: normalizarModuloMensagemPerfil(raw.boasVindas, fallback.boasVindas),
+    despedida: normalizarModuloMensagemPerfil(raw.despedida, fallback.despedida),
+    comandos: normalizarModuloSimplesPerfil(raw.comandos, fallback.comandos?.ativo === true),
+    programacoes: normalizarModuloSimplesPerfil(raw.programacoes, fallback.programacoes?.ativo === true),
+    gerente: {
+      ...normalizarModuloSimplesPerfil(raw.gerente, fallback.gerente?.ativo === true),
+      configuracao: raw.gerente?.configuracao && typeof raw.gerente.configuracao === "object"
+        ? { ...raw.gerente.configuracao }
+        : {}
+    }
+  };
+}
+
+function normalizarPerfilMensageiro(perfil = {}, index = 0) {
+  const raw = perfil && typeof perfil === "object" ? perfil : {};
+  const agora = new Date().toISOString();
+  const id = String(raw.id || `perfil_${Date.now()}_${index}`).trim();
+  const nome = String(raw.nome || `Perfil ${index + 1}`).trim().slice(0, 80);
+
+  return {
+    id,
+    nome,
+    ativo: raw.ativo !== false,
+    sessaoId: String(raw.sessaoId || raw.sessaoWhatsappId || raw.sessaoGruposId || "").trim(),
+    grupos: normalizarListaPalavras(raw.grupos || raw.gruposIds),
+    modulos: normalizarModulosPerfilMensageiro(raw.modulos || {}),
+    criadoEm: raw.criadoEm ? String(raw.criadoEm) : agora,
+    atualizadoEm: raw.atualizadoEm ? String(raw.atualizadoEm) : agora,
+    removidoEm: raw.removidoEm ? String(raw.removidoEm) : ""
+  };
+}
+
+function normalizarPerfisMensageiro(perfis = []) {
+  if (!Array.isArray(perfis)) return [];
+
+  return perfis
+    .map(normalizarPerfilMensageiro)
+    .filter(perfil => perfil.id && perfil.nome);
+}
+
+function criarPerfilLegadoVirtual(config = {}) {
+  return {
+    id: PERFIL_LEGADO_ID,
+    nome: "Legado",
+    legado: true,
+    ativo: true,
+    sessaoId: String(config.sessaoGruposId || config.sessaoWhatsappId || config.sessaoId || ""),
+    grupos: normalizarListaPalavras(config.grupos),
+    modulos: {
+      boasVindas: {
+        ativo: config.boasVindasAtivo === true,
+        configuracao: {
+          mensagem: String(config.mensagemBoasVindas || ""),
+          imagem: String(config.imagemBoasVindas || ""),
+          envio: normalizarEnvioMensageiro(config.boasVindasEnvio)
+        }
+      },
+      despedida: {
+        ativo: config.despedidaAtivo === true,
+        configuracao: {
+          mensagem: String(config.mensagemDespedida || ""),
+          imagem: String(config.imagemDespedida || ""),
+          envio: normalizarEnvioMensageiro(config.despedidaEnvio)
+        }
+      },
+      comandos: { ativo: true },
+      programacoes: { ativo: true },
+      gerente: { ativo: false, configuracao: {} }
+    }
+  };
+}
+
+function normalizarSet(valores = []) {
+  if (valores instanceof Set) return valores;
+  if (!Array.isArray(valores)) return new Set();
+  return new Set(valores.map(item => String(item?.id || item || "").trim()).filter(Boolean));
+}
+
+function validarPerfisMensageiro(perfis = [], opcoes = {}) {
+  const lista = normalizarPerfisMensageiro(perfis);
+  const ativos = lista.filter(perfil => perfil.ativo && !perfil.removidoEm);
+  const sessoesValidas = normalizarSet(opcoes.sessoesValidas);
+  const gruposPorSessao = opcoes.gruposPorSessao && typeof opcoes.gruposPorSessao === "object"
+    ? opcoes.gruposPorSessao
+    : {};
+
+  if (lista.length > MAX_PERFIS_MENSAGEIRO) {
+    throw erroContratoMensageiro(
+      "limite_perfis_mensageiro",
+      `Limite de ${MAX_PERFIS_MENSAGEIRO} perfis do Mensageiro atingido.`,
+      { max: MAX_PERFIS_MENSAGEIRO }
+    );
+  }
+
+  const gruposAtivos = new Map();
+  for (const perfil of ativos) {
+    if (!perfil.sessaoId) {
+      throw erroContratoMensageiro("sessao_invalida", "Perfil do Mensageiro precisa de uma sessao valida.", { perfilId: perfil.id });
+    }
+    if (sessoesValidas.size && !sessoesValidas.has(perfil.sessaoId)) {
+      throw erroContratoMensageiro("sessao_invalida", "Sessao do perfil nao pertence ao workspace.", { perfilId: perfil.id });
+    }
+
+    const gruposValidosSessao = normalizarSet(gruposPorSessao[perfil.sessaoId]);
+    for (const grupoId of perfil.grupos) {
+      if (gruposValidosSessao.size && !gruposValidosSessao.has(grupoId)) {
+        throw erroContratoMensageiro("grupo_fora_da_sessao", "Grupo do perfil nao pertence a sessao informada.", {
+          perfilId: perfil.id,
+          grupoId
+        });
+      }
+      const dono = gruposAtivos.get(grupoId);
+      if (dono && dono.perfilId !== perfil.id) {
+        throw erroContratoMensageiro("grupo_duplicado_em_perfis", "Grupo duplicado em perfis ativos do Mensageiro.", {
+          grupoId,
+          perfilId: perfil.id,
+          conflitoPerfilId: dono.perfilId
+        });
+      }
+      gruposAtivos.set(grupoId, { perfilId: perfil.id, sessaoId: perfil.sessaoId });
+    }
+  }
+
+  return lista;
+}
+
+function resolverPerfilMensageiro({ clienteId, sessaoId = "", grupoId = "", modulo = "", config } = {}) {
+  const base = config || getMensageiroCliente(clienteId);
+  const perfisAtivos = normalizarPerfisMensageiro(base.perfis)
+    .filter(perfil => perfil.ativo && !perfil.removidoEm);
+  const moduloSolicitado = String(modulo || "").trim();
+
+  if (!perfisAtivos.length) {
+    const legado = criarPerfilLegadoVirtual(base);
+    return {
+      ok: true,
+      legado: true,
+      perfil: legado,
+      perfilId: legado.id,
+      perfilNome: legado.nome,
+      codigo: "perfil_legado"
+    };
+  }
+
+  const candidatos = perfisAtivos.filter(perfil => {
+    if (sessaoId && perfil.sessaoId !== sessaoId) return false;
+    if (grupoId && !perfil.grupos.includes(grupoId)) return false;
+    if (moduloSolicitado && MODULOS_PERFIL_MENSAGEIRO.has(moduloSolicitado)) {
+      const moduloConfig = perfil.modulos?.[moduloSolicitado];
+      if (!moduloConfig || moduloConfig.ativo !== true) return false;
+    }
+    return true;
+  });
+
+  if (candidatos.length === 1) {
+    return {
+      ok: true,
+      legado: false,
+      perfil: candidatos[0],
+      perfilId: candidatos[0].id,
+      perfilNome: candidatos[0].nome,
+      codigo: "perfil_resolvido"
+    };
+  }
+
+  if (candidatos.length > 1) {
+    console.log("[MENSAGEIRO][PERFIS] conflito sanitizado", {
+      clienteId,
+      sessaoId,
+      grupoId,
+      modulo: moduloSolicitado,
+      perfis: candidatos.map(perfil => perfil.id)
+    });
+    return {
+      ok: false,
+      codigo: "grupo_duplicado_em_perfis",
+      erro: "Mais de um perfil ativo corresponde a este grupo.",
+      perfis: candidatos.map(perfil => ({ id: perfil.id, nome: perfil.nome }))
+    };
+  }
+
+  return {
+    ok: false,
+    codigo: "perfil_nao_encontrado",
+    erro: "Nenhum perfil ativo corresponde a este grupo."
   };
 }
 
@@ -394,6 +630,8 @@ function normalizarHistoricoAtendimento(historico = []) {
         contatoNome: String(evento?.contatoNome || evento?.nomeContato || ""),
         grupo: String(evento?.grupo || ""),
         grupoNome: String(evento?.grupoNome || evento?.nomeGrupo || ""),
+        perfilId: String(evento?.perfilId || ""),
+        perfilNome: String(evento?.perfilNome || ""),
         mensagemRecebida: String(evento?.mensagemRecebida || evento?.mensagem || "").slice(0, 500),
         gatilhoId: String(evento?.gatilhoId || evento?.comandoId || ""),
         gatilhoNome: String(evento?.gatilhoNome || evento?.comandoNome || evento?.gatilhoAcionado || ""),
@@ -523,6 +761,7 @@ function getMensageiroCliente(clienteId) {
 
 function setMensageiroCliente(clienteId, dados = {}) {
   const atual = getMensageiroCliente(clienteId);
+  if (dados.perfis !== undefined) validarPerfisMensageiro(dados.perfis);
 
   mensageiroPorCliente[clienteId] = normalizarConfigMensageiro(clienteId, {
     ...atual,
@@ -550,5 +789,11 @@ module.exports = {
   setAtendimentoConfigCliente,
   registrarHistoricoAtendimento,
   normalizarConfigAtendimentoCliente,
-  normalizarProgramacoesMensageiro
+  normalizarProgramacoesMensageiro,
+  normalizarPerfisMensageiro,
+  validarPerfisMensageiro,
+  criarPerfilLegadoVirtual,
+  resolverPerfilMensageiro,
+  MAX_PERFIS_MENSAGEIRO,
+  PERFIL_LEGADO_ID
 };
