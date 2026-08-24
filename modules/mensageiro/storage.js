@@ -20,8 +20,27 @@ const CORRESPONDENCIAS_COMANDO = new Set(["exato", "inicia"]);
 const TIPOS_RESPOSTA_COMANDO = new Set(["texto", "imagem", "imagem_texto"]);
 const TIPOS_PROGRAMACAO = new Set(["horario", "intervalo"]);
 const TIPOS_CONTEUDO_PROGRAMACAO = new Set(["texto", "imagem", "imagem_texto"]);
+const TIPOS_REGRA_GERENTE = new Set([
+  "palavras_proibidas",
+  "palavroes",
+  "links_externos",
+  "convite_whatsapp",
+  "divulgacao",
+  "flood",
+  "repeticao",
+  "excesso_mensagens",
+  "midia_bloqueada"
+]);
+const ACOES_REGRA_GERENTE = new Set([
+  "apagar",
+  "apagar_avisar",
+  "remover_imediato",
+  "avisos_depois_remover"
+]);
+const TIPOS_MIDIA_GERENTE = new Set(["imagem", "video", "audio", "documento", "sticker"]);
 const MAX_PERFIS_MENSAGEIRO = Number(process.env.MAX_PERFIS_MENSAGEIRO || 4) || 4;
 const PERFIL_LEGADO_ID = "__legado__";
+const INFRACOES_GERENTE_FILE = "mensageiro-gerente-infracoes.json";
 const MODULOS_PERFIL_MENSAGEIRO = new Set([
   "boasVindas",
   "despedida",
@@ -371,6 +390,128 @@ function normalizarModuloSimplesPerfil(raw = {}, ativoPadrao = false) {
   };
 }
 
+function criarConfiguracaoGerentePadrao() {
+  return {
+    regras: [],
+    isentarAdmins: true,
+    isentarDono: true,
+    autorizados: [],
+    moderadores: [],
+    resetInfracoesDias: 30,
+    avisoTemporario: true,
+    apagarAvisoAposSegundos: 20
+  };
+}
+
+function normalizarTipoRegraGerente(tipo = "") {
+  const valor = String(tipo || "").trim().toLowerCase();
+  const mapa = {
+    palavras: "palavras_proibidas",
+    palavra: "palavras_proibidas",
+    palavra_proibida: "palavras_proibidas",
+    palavras_proibida: "palavras_proibidas",
+    palavras_proibidas: "palavras_proibidas",
+    palavroes: "palavroes",
+    palavrões: "palavroes",
+    palavrao: "palavroes",
+    palavrão: "palavroes",
+    links: "links_externos",
+    link_externo: "links_externos",
+    links_externos: "links_externos",
+    convite: "convite_whatsapp",
+    convite_whatsapp: "convite_whatsapp",
+    links_whatsapp: "convite_whatsapp",
+    link_grupo_whatsapp: "convite_whatsapp",
+    divulgacao: "divulgacao",
+    divulgação: "divulgacao",
+    flood: "flood",
+    repeticao: "repeticao",
+    repetição: "repeticao",
+    excesso: "excesso_mensagens",
+    excesso_mensagens: "excesso_mensagens",
+    midia: "midia_bloqueada",
+    mídia: "midia_bloqueada",
+    midia_bloqueada: "midia_bloqueada",
+    mídia_bloqueada: "midia_bloqueada"
+  };
+  return TIPOS_REGRA_GERENTE.has(mapa[valor] || valor) ? (mapa[valor] || valor) : "";
+}
+
+function normalizarListaMidiasGerente(lista = []) {
+  return normalizarListaPalavras(lista)
+    .map(item => {
+      const valor = String(item || "").toLowerCase();
+      if (valor === "vídeo") return "video";
+      if (valor === "áudio") return "audio";
+      if (valor === "imagem") return "imagem";
+      if (valor === "document") return "documento";
+      return valor;
+    })
+    .filter(item => TIPOS_MIDIA_GERENTE.has(item));
+}
+
+function normalizarParametrosRegraGerente(parametros = {}) {
+  const raw = parametros && typeof parametros === "object" ? parametros : {};
+  return {
+    ...raw,
+    palavras: normalizarListaPalavras(raw.palavras || raw.termos || raw.lista || raw.palavroes),
+    dominiosPermitidos: normalizarListaPalavras(raw.dominiosPermitidos || raw.whitelist || raw.dominiosAutorizados)
+      .map(item => item.toLowerCase()),
+    maxMensagens: Math.max(2, Math.min(50, Number(raw.maxMensagens || raw.limite || 5) || 5)),
+    janelaSegundos: Math.max(3, Math.min(3600, Number(raw.janelaSegundos || raw.janela || 10) || 10)),
+    repeticoes: Math.max(2, Math.min(20, Number(raw.repeticoes || raw.limiteRepeticoes || 3) || 3)),
+    minCaracteres: Math.max(1, Math.min(200, Number(raw.minCaracteres || 8) || 8)),
+    tiposMidia: normalizarListaMidiasGerente(raw.tiposMidia || raw.midias || raw.tipos)
+  };
+}
+
+function normalizarRegraGerente(regra = {}, index = 0) {
+  const raw = regra && typeof regra === "object" ? regra : {};
+  const tipo = normalizarTipoRegraGerente(raw.tipo);
+  const acao = ACOES_REGRA_GERENTE.has(raw.acao) ? raw.acao : "apagar_avisar";
+  const parametros = normalizarParametrosRegraGerente(raw.parametros || {});
+
+  return {
+    id: String(raw.id || `gerente_regra_${Date.now()}_${index}`).trim(),
+    ativo: raw.ativo === true,
+    nome: String(raw.nome || raw.titulo || tipo || `Regra ${index + 1}`).trim().slice(0, 100),
+    tipo,
+    parametros,
+    acao,
+    limiteInfracoes: Math.max(1, Math.min(4, Number(raw.limiteInfracoes || 3) || 3)),
+    avisoTexto: String(raw.avisoTexto || "").slice(0, 1000),
+    temporizarAviso: raw.temporizarAviso === undefined ? undefined : raw.temporizarAviso === true,
+    apagarAvisoAposSegundos: Math.max(
+      1,
+      Math.min(3600, Number(raw.apagarAvisoAposSegundos || 20) || 20)
+    )
+  };
+}
+
+function normalizarConfiguracaoGerente(raw = {}) {
+  const fonte = raw && typeof raw === "object" ? raw : {};
+  const padrao = criarConfiguracaoGerentePadrao();
+
+  return {
+    ...padrao,
+    regras: Array.isArray(fonte.regras)
+      ? fonte.regras
+        .map(normalizarRegraGerente)
+        .filter(regra => regra.id && regra.tipo)
+      : [],
+    isentarAdmins: fonte.isentarAdmins === undefined ? true : fonte.isentarAdmins === true,
+    isentarDono: fonte.isentarDono === undefined ? true : fonte.isentarDono === true,
+    autorizados: normalizarListaPalavras(fonte.autorizados),
+    moderadores: normalizarListaPalavras(fonte.moderadores),
+    resetInfracoesDias: Math.max(1, Math.min(3650, Number(fonte.resetInfracoesDias || 30) || 30)),
+    avisoTemporario: fonte.avisoTemporario === undefined ? true : fonte.avisoTemporario === true,
+    apagarAvisoAposSegundos: Math.max(
+      1,
+      Math.min(3600, Number(fonte.apagarAvisoAposSegundos || 20) || 20)
+    )
+  };
+}
+
 function normalizarModulosPerfilMensageiro(modulos = {}, fallback = {}) {
   const raw = modulos && typeof modulos === "object" ? modulos : {};
   return {
@@ -380,9 +521,7 @@ function normalizarModulosPerfilMensageiro(modulos = {}, fallback = {}) {
     programacoes: normalizarModuloSimplesPerfil(raw.programacoes, fallback.programacoes?.ativo === true),
     gerente: {
       ...normalizarModuloSimplesPerfil(raw.gerente, fallback.gerente?.ativo === true),
-      configuracao: raw.gerente?.configuracao && typeof raw.gerente.configuracao === "object"
-        ? { ...raw.gerente.configuracao }
-        : {}
+      configuracao: normalizarConfiguracaoGerente(raw.gerente?.configuracao || fallback.gerente?.configuracao || {})
     }
   };
 }
@@ -738,6 +877,167 @@ function registrarHistoricoAtendimento(clienteId, evento = {}) {
   });
 }
 
+function criarChaveInfracaoGerente({
+  clienteId = "",
+  perfilId = "",
+  sessaoId = "",
+  grupoId = "",
+  participante = "",
+  regraId = ""
+} = {}) {
+  return [
+    clienteIdSeguro(clienteId),
+    String(perfilId || ""),
+    String(sessaoId || ""),
+    String(grupoId || ""),
+    String(participante || ""),
+    String(regraId || "")
+  ].join(":");
+}
+
+function normalizarInfracaoGerente(infracao = {}, index = 0) {
+  const raw = infracao && typeof infracao === "object" ? infracao : {};
+  const clienteId = String(raw.clienteId || "");
+  const perfilId = String(raw.perfilId || "");
+  const sessaoId = String(raw.sessaoId || "");
+  const grupoId = String(raw.grupoId || "");
+  const participante = String(raw.participante || "");
+  const regraId = String(raw.regraId || "");
+
+  return {
+    id: String(raw.id || criarChaveInfracaoGerente({ clienteId, perfilId, sessaoId, grupoId, participante, regraId }) || `infracao_${index}`),
+    clienteId,
+    perfilId,
+    perfilNome: String(raw.perfilNome || ""),
+    sessaoId,
+    grupoId,
+    grupoNome: String(raw.grupoNome || ""),
+    participante,
+    participanteNome: String(raw.participanteNome || ""),
+    regraId,
+    regraNome: String(raw.regraNome || ""),
+    tipoRegra: String(raw.tipoRegra || ""),
+    contador: Math.max(0, Number(raw.contador || 0) || 0),
+    primeiraInfracaoEm: raw.primeiraInfracaoEm ? String(raw.primeiraInfracaoEm) : "",
+    ultimaInfracaoEm: raw.ultimaInfracaoEm ? String(raw.ultimaInfracaoEm) : "",
+    ultimoMotivo: String(raw.ultimoMotivo || ""),
+    ultimaMensagemId: String(raw.ultimaMensagemId || ""),
+    status: String(raw.status || "ativa"),
+    removidoEm: raw.removidoEm ? String(raw.removidoEm) : "",
+    resetEm: raw.resetEm ? String(raw.resetEm) : ""
+  };
+}
+
+function lerArquivoInfracoesGerente(clienteId) {
+  const dados = readClienteJson(clienteId, INFRACOES_GERENTE_FILE, { versao: 1, infracoes: [] });
+  const infracoes = Array.isArray(dados.infracoes) ? dados.infracoes : [];
+  return {
+    versao: 1,
+    infracoes: infracoes.map(normalizarInfracaoGerente)
+  };
+}
+
+function salvarArquivoInfracoesGerente(clienteId, dados = {}) {
+  const payload = {
+    versao: 1,
+    infracoes: Array.isArray(dados.infracoes)
+      ? dados.infracoes.map(normalizarInfracaoGerente)
+      : []
+  };
+  writeClienteJson(clienteId, INFRACOES_GERENTE_FILE, payload);
+  return payload;
+}
+
+function listarInfracoesGerenteCliente(clienteId, filtro = {}) {
+  const dados = lerArquivoInfracoesGerente(clienteId);
+  return dados.infracoes.filter(infracao => {
+    if (filtro.perfilId && infracao.perfilId !== filtro.perfilId) return false;
+    if (filtro.grupoId && infracao.grupoId !== filtro.grupoId) return false;
+    if (filtro.participante && infracao.participante !== filtro.participante) return false;
+    if (filtro.regraId && infracao.regraId !== filtro.regraId) return false;
+    return true;
+  });
+}
+
+function registrarInfracaoGerente(clienteId, evento = {}, opcoes = {}) {
+  const agora = new Date().toISOString();
+  const resetDias = Math.max(1, Number(opcoes.resetInfracoesDias || 30) || 30);
+  const chave = criarChaveInfracaoGerente({ clienteId, ...evento });
+  const dados = lerArquivoInfracoesGerente(clienteId);
+  const infracoes = dados.infracoes.filter(item => item.id !== chave);
+  const existente = dados.infracoes.find(item => item.id === chave);
+  const expirada = existente?.ultimaInfracaoEm
+    ? Date.now() - new Date(existente.ultimaInfracaoEm).getTime() > resetDias * 24 * 60 * 60 * 1000
+    : false;
+  const base = expirada ? null : existente;
+  const contador = Math.max(0, Number(base?.contador || 0) || 0) + 1;
+  const atualizada = normalizarInfracaoGerente({
+    ...(base || {}),
+    ...evento,
+    id: chave,
+    clienteId,
+    contador,
+    primeiraInfracaoEm: base?.primeiraInfracaoEm || agora,
+    ultimaInfracaoEm: agora,
+    status: evento.status || "ativa",
+    removidoEm: evento.removidoEm || base?.removidoEm || "",
+    resetEm: expirada ? agora : base?.resetEm || ""
+  });
+
+  salvarArquivoInfracoesGerente(clienteId, {
+    infracoes: [...infracoes, atualizada]
+  });
+
+  return atualizada;
+}
+
+function zerarInfracaoGerenteCliente(clienteId, filtro = {}) {
+  const dados = lerArquivoInfracoesGerente(clienteId);
+  const agora = new Date().toISOString();
+  let alterou = false;
+  const infracoes = dados.infracoes.map(infracao => {
+    const corresponde =
+      (!filtro.id || infracao.id === filtro.id) &&
+      (!filtro.perfilId || infracao.perfilId === filtro.perfilId) &&
+      (!filtro.grupoId || infracao.grupoId === filtro.grupoId) &&
+      (!filtro.participante || infracao.participante === filtro.participante) &&
+      (!filtro.regraId || infracao.regraId === filtro.regraId);
+    if (!corresponde) return infracao;
+    alterou = true;
+    return normalizarInfracaoGerente({
+      ...infracao,
+      contador: 0,
+      status: "zerada",
+      resetEm: agora
+    });
+  });
+
+  if (alterou) salvarArquivoInfracoesGerente(clienteId, { infracoes });
+  return listarInfracoesGerenteCliente(clienteId, filtro);
+}
+
+function atualizarInfracaoGerenteCliente(clienteId, filtro = {}, patch = {}) {
+  const dados = lerArquivoInfracoesGerente(clienteId);
+  let alterou = false;
+  const infracoes = dados.infracoes.map(infracao => {
+    const corresponde =
+      (!filtro.id || infracao.id === filtro.id) &&
+      (!filtro.perfilId || infracao.perfilId === filtro.perfilId) &&
+      (!filtro.grupoId || infracao.grupoId === filtro.grupoId) &&
+      (!filtro.participante || infracao.participante === filtro.participante) &&
+      (!filtro.regraId || infracao.regraId === filtro.regraId);
+    if (!corresponde) return infracao;
+    alterou = true;
+    return normalizarInfracaoGerente({
+      ...infracao,
+      ...patch
+    });
+  });
+
+  if (alterou) salvarArquivoInfracoesGerente(clienteId, { infracoes });
+  return listarInfracoesGerenteCliente(clienteId, filtro);
+}
+
 function getMensageiroCliente(clienteId) {
   if (!mensageiroPorCliente[clienteId]) {
     mensageiroPorCliente[clienteId] =
@@ -791,6 +1091,11 @@ module.exports = {
   normalizarConfigAtendimentoCliente,
   normalizarProgramacoesMensageiro,
   normalizarPerfisMensageiro,
+  normalizarConfiguracaoGerente,
+  listarInfracoesGerenteCliente,
+  registrarInfracaoGerente,
+  zerarInfracaoGerenteCliente,
+  atualizarInfracaoGerenteCliente,
   validarPerfisMensageiro,
   criarPerfilLegadoVirtual,
   resolverPerfilMensageiro,

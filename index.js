@@ -19748,6 +19748,8 @@ app.use("/mensageiro", criarRotasMensageiro({
   setAtendimentoConfigCliente: mensageiro.setAtendimentoConfigCliente,
   encontrarGatilhoAtendimento: mensageiro.encontrarGatilhoAtendimento,
   validarPerfisMensageiro: mensageiro.validarPerfisMensageiro,
+  listarInfracoesGerenteCliente: mensageiro.listarInfracoesGerenteCliente,
+  zerarInfracaoGerenteCliente: mensageiro.zerarInfracaoGerenteCliente,
   listarSessoesMensageiro: (clienteId) => listarSessoesWhatsappCliente(clienteId),
   listarGruposSessaoMensageiro: (clienteId, sessaoId) => {
     const idNormalizado = normalizarSessaoId(clienteId, sessaoId);
@@ -26652,13 +26654,23 @@ registrarListenerUnicoSocket({
         coberturaTraceId
       });
 
-      await mensageiro.tratarMensagemGrupoComando({
+      const resultadoGerente = await mensageiro.tratarMensagemGrupoGerente({
         clienteId: clienteIdMensageiro,
         sessaoId: id,
         sock,
         mensagem,
         planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
       });
+
+      if (resultadoGerente?.bloqueada !== true) {
+        await mensageiro.tratarMensagemGrupoComando({
+          clienteId: clienteIdMensageiro,
+          sessaoId: id,
+          sock,
+          mensagem,
+          planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
+        });
+      }
 
       await mensageiro.tratarMensagemPrivadaAtendimento({
         clienteId: clienteIdMensageiro,

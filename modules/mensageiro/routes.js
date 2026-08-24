@@ -17,6 +17,8 @@ const {
   setAtendimentoConfigCliente,
   encontrarGatilhoAtendimento,
   validarPerfisMensageiro,
+  listarInfracoesGerenteCliente,
+  zerarInfracaoGerenteCliente,
   listarSessoesMensageiro,
   listarGruposSessaoMensageiro
 } = deps;
@@ -226,6 +228,60 @@ router.get("/historico", (req, res) => {
   });
 });
 
+router.get("/gerente/infracoes", (req, res) => {
+  const clienteId = getClienteId(req);
+
+  if (!mensageiroPermitido(req, clienteId)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Mensageiro não disponível no seu plano"
+    });
+  }
+
+  const infracoes = typeof listarInfracoesGerenteCliente === "function"
+    ? listarInfracoesGerenteCliente(clienteId, {
+      perfilId: String(req.query?.perfilId || ""),
+      grupoId: String(req.query?.grupoId || ""),
+      participante: String(req.query?.participante || ""),
+      regraId: String(req.query?.regraId || "")
+    })
+    : [];
+
+  return res.json({
+    ok: true,
+    clienteId,
+    infracoes
+  });
+});
+
+router.post("/gerente/infracoes/reset", (req, res) => {
+  const clienteId = getClienteId(req);
+
+  if (!mensageiroPermitido(req, clienteId)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Mensageiro não disponível no seu plano"
+    });
+  }
+
+  const filtro = {
+    id: String(req.body?.id || ""),
+    perfilId: String(req.body?.perfilId || ""),
+    grupoId: String(req.body?.grupoId || ""),
+    participante: String(req.body?.participante || ""),
+    regraId: String(req.body?.regraId || "")
+  };
+  const infracoes = typeof zerarInfracaoGerenteCliente === "function"
+    ? zerarInfracaoGerenteCliente(clienteId, filtro)
+    : [];
+
+  return res.json({
+    ok: true,
+    clienteId,
+    infracoes
+  });
+});
+
 router.post("/testar-gatilho", (req, res) => {
   const clienteId = getClienteId(req);
 
@@ -412,4 +468,3 @@ if (atendimentoPayload !== undefined) {
 }
 
 module.exports = criarRotasMensageiro;
-

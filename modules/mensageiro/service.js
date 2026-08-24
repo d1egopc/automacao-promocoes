@@ -311,13 +311,17 @@ function agendarExclusaoMensagemTemporaria({
           acao
         });
         registrarHistoricoSeguro(clienteId, {
-          tipo: acao === "add" ? "boas_vindas" : "despedida",
+          tipo: acao === "gerente_aviso" ? "moderacao" : acao === "add" ? "boas_vindas" : "despedida",
           origem: "grupo",
           contato: participante,
           grupo: grupoId,
           resultado: "removida",
           status: "removida",
-          resumo: acao === "add" ? "Boas-vindas removida" : "Despedida removida",
+          resumo: acao === "gerente_aviso"
+            ? "Aviso de moderação removido"
+            : acao === "add"
+              ? "Boas-vindas removida"
+              : "Despedida removida",
           detalhe: "Mensagem temporária apagada no grupo"
         });
       })
@@ -1340,6 +1344,7 @@ module.exports = {
   executarRespostaRapida,
   executarRespostaAtendimento,
   aplicarDelayAtendimento,
+  agendarExclusaoMensagemTemporaria,
 
   tratarEventoGrupoMensageiro,
   tratarMensagemGrupoComando,
