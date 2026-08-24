@@ -55,6 +55,40 @@ async function capturarLogs(fn) {
   }
 }
 
+async function comFetchMock(respostas, fn) {
+  const original = global.fetch;
+  const chamadas = [];
+  global.fetch = async (url, opcoes) => {
+    chamadas.push({ url: String(url), opcoes });
+    const resposta = respostas.shift();
+    if (!resposta) throw new Error("fetch inesperado: " + url);
+    if (typeof resposta === "function") return resposta(url, opcoes);
+    return resposta;
+  };
+  try {
+    const retorno = await fn(chamadas);
+    return { chamadas, retorno };
+  } finally {
+    global.fetch = original;
+  }
+}
+
+function respostaHtml(status = 200, html = "", url = "https://produto.mercadolivre.com.br/MLB123456") {
+  return {
+    status,
+    url,
+    text: async () => html
+  };
+}
+
+function respostaJson(status = 200, dados = {}) {
+  return {
+    status,
+    url: "https://api.mercadolibre.com/items/MLB123456",
+    json: async () => dados
+  };
+}
+
 function possuiLog(logs, tag) {
   return logs.some(args => String(args[0] || "") === tag);
 }
@@ -452,7 +486,146 @@ function ofertaMlAdapter(extras = {}) {
   assert(possuiLog(logsGravacao, "[ENGINE-V2-INTELIGENCIA-APLICADA]"));
   assert(possuiLog(logsGravacao, "[ENGINE-V2-AFILIACAO-CONCLUIDA]"));
 
+  {
+    const { retorno: gravacaoComImagem, chamadas } = await comFetchMock([], () => importerService.gravarOfertaEngine(
+      { id: 311, evento_id: 211, cliente_id: "workspace_ml", marketplace: "mercadolivre" },
+      {
+        id: 211,
+        origem: "radar",
+        origem_tipo: "whatsapp",
+        grupo_id: "grupo@g.us",
+        texto_original: "Jaqueta Puffer Hering https://meli.la/2Ud5obn"
+      },
+      {
+        id: 411,
+        url_original: "https://meli.la/2Ud5obn",
+        url_expandida: "https://produto.mercadolivre.com.br/MLB-123456-jaqueta-puffer",
+        marketplace_detectado: "mercadolivre"
+      },
+      ofertaMlAdapter()
+    ));
+
+    assert.strictEqual(gravacaoComImagem.ok, true);
+    assert.strictEqual(chamadas.length, 0);
+  }
+
+  {
+    const imagemFallback = "https://http2.mlstatic.com/D_NQ_NP_API-MLB.jpg";
+    const { retorno: gravacaoSemImagem, chamadas } = await comFetchMock([
+      respostaHtml(404, "<html>not found</html>"),
+      respostaJson(200, {
+        pictures: [{ secure_url: imagemFallback }]
+      })
+    ], () => importerService.gravarOfertaEngine(
+      { id: 312, evento_id: 212, cliente_id: "workspace_ml", marketplace: "mercadolivre" },
+      {
+        id: 212,
+        origem: "radar",
+        origem_tipo: "whatsapp",
+        grupo_id: "grupo@g.us",
+        texto_original: "Jaqueta Puffer Hering https://produto.mercadolivre.com.br/MLB123456"
+      },
+      {
+        id: 412,
+        url_original: "https://produto.mercadolivre.com.br/MLB123456",
+        url_expandida: "https://produto.mercadolivre.com.br/MLB123456",
+        marketplace_detectado: "mercadolivre"
+      },
+      ofertaMlAdapter({
+        imagem: "",
+        imagemOrigem: "",
+        linkOriginal: "https://produto.mercadolivre.com.br/MLB123456",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB123456",
+        produtoIdDetectado: "MLB123456",
+        metadata: {
+          adapter: "mercadolivre",
+          produto: { produtoId: "MLB123456" }
+        }
+      }),
+      {
+        getIntegracaoCliente: (clienteId, marketplace) => {
+          assert.strictEqual(clienteId, "workspace_ml");
+          assert.strictEqual(marketplace, "mercadolivre");
+          return { credenciais: { accessToken: "token_ml_valido" } };
+        }
+      }
+    ));
+
+    assert.strictEqual(gravacaoSemImagem.ok, true);
+    assert.strictEqual(chamadas.length, 2);
+    assert.strictEqual(chamadas[1].url, "https://api.mercadolibre.com/items/MLB123456");
+    assert.strictEqual(chamadas[1].opcoes.headers.Authorization, "Bearer token_ml_valido");
+    assert.strictEqual(metadataPersistida.ofertaUniversal.midia.imagemPrincipal, imagemFallback);
+  }
+
+  {
+    const { retorno: gravacaoFallbackSemDeps, chamadas } = await comFetchMock([
+      respostaHtml(404, "<html>not found</html>")
+    ], () => importerService.gravarOfertaEngine(
+      { id: 313, evento_id: 213, cliente_id: "workspace_ml", marketplace: "mercadolivre" },
+      {
+        id: 213,
+        origem: "radar",
+        origem_tipo: "whatsapp",
+        grupo_id: "grupo@g.us",
+        texto_original: "Jaqueta Puffer Hering https://produto.mercadolivre.com.br/MLB123456"
+      },
+      {
+        id: 413,
+        url_original: "https://produto.mercadolivre.com.br/MLB123456",
+        url_expandida: "https://produto.mercadolivre.com.br/MLB123456",
+        marketplace_detectado: "mercadolivre"
+      },
+      ofertaMlAdapter({
+        imagem: "",
+        imagemOrigem: "",
+        linkOriginal: "https://produto.mercadolivre.com.br/MLB123456",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB123456",
+        produtoIdDetectado: "MLB123456",
+        metadata: {
+          adapter: "mercadolivre",
+          produto: { produtoId: "MLB123456" }
+        }
+      })
+    ));
+
+    assert.strictEqual(gravacaoFallbackSemDeps.ok, true);
+    assert.strictEqual(chamadas.length, 1);
+  }
+
+  {
+    const { retorno: gravacaoAmazon, chamadas } = await comFetchMock([], () => importerService.gravarOfertaEngine(
+      { id: 314, evento_id: 214, cliente_id: "workspace_ml", marketplace: "amazon" },
+      {
+        id: 214,
+        origem: "radar",
+        origem_tipo: "whatsapp",
+        grupo_id: "grupo@g.us",
+        texto_original: "Oferta Amazon https://www.amazon.com.br/dp/B000000001"
+      },
+      {
+        id: 414,
+        url_original: "https://www.amazon.com.br/dp/B000000001",
+        url_expandida: "https://www.amazon.com.br/dp/B000000001",
+        marketplace_detectado: "amazon"
+      },
+      {
+        ok: true,
+        marketplace: "amazon",
+        titulo: "Oferta Amazon",
+        preco: 99,
+        imagem: "",
+        linkOriginal: "https://www.amazon.com.br/dp/B000000001",
+        linkAfiliado: "https://amzn.to/oferta"
+      }
+    ));
+
+    assert.strictEqual(gravacaoAmazon.ok, true);
+    assert.strictEqual(chamadas.length, 0);
+  }
+
   limparModulo("../modules/engine/importer/importer.runner");
+  let depsRecebidasNaGravacao = null;
   mockModulo("../modules/engine/importer/importer.service", {
     tentarMarcarImportando: async () => ({ ok: true }),
     registrarEtapaImportacao: async () => ({ ok: true }),
@@ -472,7 +645,10 @@ function ofertaMlAdapter(extras = {}) {
         marketplace_detectado: "mercadolivre"
       }]
     }),
-    gravarOfertaEngine: async () => ({ ok: true, ofertaId: 702 }),
+    gravarOfertaEngine: async (_job, _evento, _link, _oferta, deps) => {
+      depsRecebidasNaGravacao = deps;
+      return { ok: true, ofertaId: 702 };
+    },
     marcarJobOfertaCriada: async () => ({ ok: true }),
     marcarJobRetidaV2: async () => ({ ok: true }),
     marcarJobErroImportacao: async () => ({ ok: true })
@@ -492,9 +668,14 @@ function ofertaMlAdapter(extras = {}) {
     cliente_id: "workspace_ml",
     marketplace: "mercadolivre",
     metadata: {}
+  }, {
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { accessToken: "token_ml_valido" } })
+    }
   }));
   assert.strictEqual(importacao.ok, true);
   assert.strictEqual(importacao.ofertaId, 702);
+  assert.strictEqual(typeof depsRecebidasNaGravacao.getIntegracaoCliente, "function");
   assert(possuiLog(logsImportacao, "[ENGINE-V2-IMPORTACAO-CONCLUIDA]"));
 
   limparModulo("../modules/engine/distributor/distributor.runner");

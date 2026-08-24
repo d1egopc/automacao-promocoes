@@ -2810,7 +2810,7 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
   }
 }
 
-async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrada = {}) {
+async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrada = {}, deps = {}) {
   const fidelidadeTraceIdPrincipal = fidelidadeObs.flagAtiva()
     ? fidelidadeObs.resolverFidelidadeTraceId(ofertaEntrada, ofertaEntrada.metadata, evento, evento.metadata, job, link)
     : "";
@@ -2996,10 +2996,13 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   }
 
   if (!oferta.imagem && normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre") {
+    const getIntegracaoCliente = typeof deps.getIntegracaoCliente === "function"
+      ? deps.getIntegracaoCliente
+      : null;
     imagemCanonica = await buscarImagemCanonicaMercadoLivre(oferta, {
       clienteId: job.cliente_id || job.clienteId || "",
       job,
-      getIntegracaoCliente: deps.getIntegracaoCliente
+      ...(getIntegracaoCliente ? { getIntegracaoCliente } : {})
     });
     if (imagemCanonica.imagem) {
       oferta.imagem = imagemCanonica.imagem;

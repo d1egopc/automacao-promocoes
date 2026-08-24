@@ -248,7 +248,7 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
   });
 
   const linkPrincipal = escolherLinkPrincipalOferta(linksResultado.links, eventoResultado.evento, marketplace);
-  const gravacao = await gravarOfertaEngine(job, eventoResultado.evento, linkPrincipal, resultadoAdapter);
+  const gravacao = await gravarOfertaEngine(job, eventoResultado.evento, linkPrincipal, resultadoAdapter, contexto.deps || {});
   await registrarEtapaImportacao(job.id, "oferta_gravada", gravacao.ok ? "ok" : "erro", gravacao.ok ? "oferta_gravada" : (gravacao.motivo || "oferta_gravacao_falhou"), {
     ofertaId: gravacao.ofertaId || null,
     erro: gravacao.erro || ""
