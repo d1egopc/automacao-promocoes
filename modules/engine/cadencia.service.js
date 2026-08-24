@@ -29,6 +29,82 @@ function textoNormalizado(valor = "") {
   return String(valor || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
 
+function objetoSeguro(valor = {}) {
+  if (!valor || typeof valor !== "object" || Array.isArray(valor)) return {};
+  return valor;
+}
+
+function arraySeguro(valor = []) {
+  return Array.isArray(valor) ? valor : [];
+}
+
+function urlValidaCadencia(valor = "") {
+  const textoUrl = String(valor || "").trim();
+  if (!textoUrl) return false;
+  try {
+    const url = new URL(textoUrl);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch (_) {
+    return false;
+  }
+}
+
+function papelResgateCadencia(valor = "") {
+  const papel = textoNormalizado(valor).replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+  return papel === "link_resgate" || papel === "resgate";
+}
+
+function tipoResgateCadencia(valor = "") {
+  const tipo = textoNormalizado(valor).replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+  return tipo === "resgate";
+}
+
+function linkResgateShopeeRenderizavelCadencia(item = {}) {
+  const link = objetoSeguro(item);
+  if (!link || !Object.keys(link).length) return false;
+
+  const papelResgate = papelResgateCadencia(link.papel || link.papelLink || link.role || "");
+  const tipoResgate = tipoResgateCadencia(link.tipo || link.tipoLink || "");
+  if (!papelResgate || !tipoResgate) return false;
+
+  const statusConversao = textoNormalizado(link.conversaoStatus || link.statusConversao || link.status || "");
+  const renderizavel = link.renderizavel === true || link.seguro === true || statusConversao === "convertida";
+  if (!renderizavel) return false;
+
+  return [
+    link.urlAfiliadaWorkspace,
+    link.urlAfiliada,
+    link.urlOptimus,
+    link.renderizarUrl,
+    link.urlFinal,
+    link.url,
+    link.urlOriginal,
+    link.original
+  ].some(urlValidaCadencia);
+}
+
+function linksResgateShopeeCadencia(oferta = {}) {
+  const metadata = objetoSeguro(oferta.metadata);
+  const integridadeComercial = objetoSeguro(metadata.integridadeComercial);
+  const contratoComercialFinal = objetoSeguro(oferta.contratoComercialFinal);
+
+  return [
+    ...arraySeguro(oferta.linksComerciais),
+    ...arraySeguro(oferta.linksResgate),
+    ...arraySeguro(metadata.linksComerciais),
+    ...arraySeguro(metadata.linksResgate),
+    ...arraySeguro(integridadeComercial.linksComerciais),
+    ...arraySeguro(contratoComercialFinal.linksComerciais),
+    ...arraySeguro(contratoComercialFinal.linksResgate)
+  ];
+}
+
+function linkResgateShopeeValidoParaCadencia(oferta = {}) {
+  if (textoNormalizado(oferta.marketplace) !== "shopee") return false;
+
+  return linksResgateShopeeCadencia(oferta).some(linkResgateShopeeRenderizavelCadencia);
+}
+
 function modoCadenciaAtivo(configGlobal = {}, configCliente = {}) {
   const candidato = textoNormalizado(
     configCliente.modoCadencia ||
@@ -78,7 +154,7 @@ function destinoAceitaTurboCupom(destino = {}) {
 
 function cupomFastLaneReal(oferta = {}, cupomFastLaneTipo = null, agoraMs = Date.now()) {
   if (typeof cupomFastLaneTipo === "function") {
-    return cupomFastLaneTipo(oferta, agoraMs) === "real_detectado";
+    return cupomFastLaneTipo(oferta, agoraMs) === "real_detectado" || linkResgateShopeeValidoParaCadencia(oferta);
   }
   return Boolean(
     oferta.cupomReal === true ||
@@ -86,7 +162,8 @@ function cupomFastLaneReal(oferta = {}, cupomFastLaneTipo = null, agoraMs = Date
     oferta.cupomTurbo === true ||
     oferta.cupom_turbo === true ||
     oferta.tipoFluxo === "cupom_turbo" ||
-    oferta.tipoOperacional === "cupom_turbo"
+    oferta.tipoOperacional === "cupom_turbo" ||
+    linkResgateShopeeValidoParaCadencia(oferta)
   );
 }
 
@@ -131,5 +208,6 @@ module.exports = {
   numeroIntervaloValido,
   resolverIntervaloConfiguradoCadencia,
   destinoAceitaTurboCupom,
+  linkResgateShopeeValidoParaCadencia,
   resolverCadenciaDestino
 };
