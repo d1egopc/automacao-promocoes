@@ -33,6 +33,9 @@ const {
   executarRetencaoJobsPostgres,
   distribuirOfertasEngine
 } = require("./modules/engine");
+const {
+  queryEngine
+} = require("./modules/engine/database");
 
 const {
   iniciarOrquestradorEngine
@@ -21668,12 +21671,6 @@ function logKabumManual(dados = {}) {
   });
 }
 
-const AMAZON_COOKIES_AB_ASINS = [
-  "B07NQ9PFKN",
-  "B0H9BVBNZW",
-  "B09LZ2GRD2"
-];
-
 const AMAZON_COOKIES_AB_COOKIE_LIXO =
   "session-id=000-0000000-0000000; ubid-acbbr=000-0000000-0000000; at-main=INVALIDO; x-main=INVALIDO";
 
@@ -21683,10 +21680,73 @@ function modoAmazonCookies(config = {}) {
   return modo !== "api";
 }
 
-function selecionarAsinAmazonCookiesAb(req) {
-  const solicitado = String(req.query.asin || "").trim().toUpperCase();
-  if (AMAZON_COOKIES_AB_ASINS.includes(solicitado)) return solicitado;
-  return AMAZON_COOKIES_AB_ASINS[0];
+function sanitizarUrlAmazonCookiesAb(url = "") {
+  try {
+    const u = new URL(String(url || ""));
+    const paramsPermitidos = new URLSearchParams();
+    for (const chave of ["tag", "linkCode", "language", "th"]) {
+      const valor = u.searchParams.get(chave);
+      if (valor) paramsPermitidos.set(chave, valor);
+    }
+    const query = paramsPermitidos.toString();
+    return `${u.origin}${u.pathname}${query ? `?${query}` : ""}`;
+  } catch {
+    return "";
+  }
+}
+
+function urlAmazonCookiesAbValida(url = "") {
+  try {
+    const u = new URL(String(url || ""));
+    const host = u.hostname.toLowerCase();
+    return (host === "amazon.com.br" || host.endsWith(".amazon.com.br") || host === "amzn.to") &&
+      /\/dp\/|\/gp\/product\/|amzn\.to/i.test(`${host}${u.pathname}`);
+  } catch {
+    return false;
+  }
+}
+
+async function obterUrlAmazonCookiesAb(req) {
+  const urlSolicitada = String(req.query.url || req.query.link || "").trim();
+  if (urlSolicitada) {
+    return urlAmazonCookiesAbValida(urlSolicitada)
+      ? {
+          ok: true,
+          url: urlSolicitada,
+          origem: "url_informada",
+          urlSanitizada: sanitizarUrlAmazonCookiesAb(urlSolicitada)
+        }
+      : { ok: false, erro: "URL Amazon de prova invalida" };
+  }
+
+  const eventoId = String(req.query.eventoId || "").trim();
+  if (!eventoId) return { ok: false, erro: "eventoId ou url de prova obrigatorio" };
+  if (!/^\d+$/.test(eventoId)) return { ok: false, erro: "eventoId invalido" };
+
+  const resultado = await queryEngine(
+    `SELECT url_expandida, url_original
+       FROM engine_links
+      WHERE evento_id = $1
+        AND marketplace_detectado = 'amazon'
+      ORDER BY id ASC
+      LIMIT 1`,
+    [eventoId]
+  );
+
+  if (!resultado.ok) return { ok: false, erro: "evento_indisponivel" };
+
+  const linha = resultado.resultado?.rows?.[0] || null;
+  const url = String(linha?.url_expandida || linha?.url_original || "").trim();
+  if (!url) return { ok: false, erro: "evento_sem_link_amazon" };
+  if (!urlAmazonCookiesAbValida(url)) return { ok: false, erro: "evento_sem_url_amazon_produto" };
+
+  return {
+    ok: true,
+    url,
+    origem: "evento_engine",
+    eventoId,
+    urlSanitizada: sanitizarUrlAmazonCookiesAb(url)
+  };
 }
 
 function criarImportadorAmazonCookiesAb(sinal = {}) {
@@ -21730,12 +21790,19 @@ async function executarComTimeoutAmazonCookiesAb(tarefa, timeoutMs = 25000) {
   }
 }
 
-async function medirProvaAmazonCookiesAb(clienteId = "admin", config = {}) {
+async function medirProvaAmazonCookiesAb(clienteId = "admin", config = {}, urlProva = "") {
   const inicio = Date.now();
   const sinal = {};
   const importarAmazonAb = criarImportadorAmazonCookiesAb(sinal);
-  const asin = String(config?.credenciais?.asinTeste || AMAZON_COOKIES_AB_ASINS[0]).trim().toUpperCase();
-  const url = `https://www.amazon.com.br/dp/${encodeURIComponent(asin)}`;
+  const url = String(urlProva || "").trim();
+
+  if (!urlAmazonCookiesAbValida(url)) {
+    return {
+      resultado: "desconhecida",
+      codigo: "url_prova_invalida",
+      duracaoMs: Date.now() - inicio
+    };
+  }
 
   try {
     await executarComTimeoutAmazonCookiesAb(() => importarAmazonAb(url, {
@@ -21748,16 +21815,14 @@ async function medirProvaAmazonCookiesAb(clienteId = "admin", config = {}) {
       contextoEngine: {
         ...(config.contextoEngine || {}),
         clienteId,
-        origem: "auditoria_ab_amazon_cookies"
+        origem: "auditoria_ab_amazon_cookie_expirado"
       }
     }));
 
     const codigo = String(sinal.codigo || "sem_prova_cookie");
-    const resultado = sinal.tipo === "sucesso" && codigo === "cookie_valido"
-      ? "saudavel"
-      : sinal.tipo === "alerta" && codigo === "cookie_expirado"
-        ? "invalida"
-        : "desconhecida";
+    const resultado = sinal.tipo === "alerta" && codigo === "cookie_expirado"
+      ? "invalida"
+      : "desconhecida";
 
     return {
       resultado,
@@ -21831,16 +21896,22 @@ app.get("/integracoes/amazon/cookies/ab", async (req, res) => {
     });
   }
 
-  const asin = selecionarAsinAmazonCookiesAb(req);
+  const provaUrl = await obterUrlAmazonCookiesAb(req);
+  if (!provaUrl.ok) {
+    return res.status(400).json({
+      ok: false,
+      erro: provaUrl.erro || "url_prova_indisponivel"
+    });
+  }
+
   const configBase = {
     ...config,
     modo: "cookies",
     credenciais: {
-      ...credenciais,
-      asinTeste: asin
+      ...credenciais
     }
   };
-  const real = await medirProvaAmazonCookiesAb(clienteId, configBase);
+  const real = await medirProvaAmazonCookiesAb(clienteId, configBase, provaUrl.url);
   const lixo = await medirProvaAmazonCookiesAb(clienteId, {
     ...configBase,
     credenciais: {
@@ -21848,16 +21919,18 @@ app.get("/integracoes/amazon/cookies/ab", async (req, res) => {
       cookies: AMAZON_COOKIES_AB_COOKIE_LIXO,
       cookie: AMAZON_COOKIES_AB_COOKIE_LIXO
     }
-  });
-  const diferenciou = real.resultado === "saudavel" && lixo.resultado !== "saudavel";
+  }, provaUrl.url);
+  const diferenciou = real.resultado !== "invalida" && lixo.resultado === "invalida";
 
   return res.json({
     ok: true,
     marketplace: "amazon",
     modo: "cookies",
     prova: {
-      operacao: "importador_amazon_readonly",
-      asin
+      operacao: "importador_amazon_readonly_cookie_expirado",
+      origem: provaUrl.origem,
+      eventoId: provaUrl.eventoId || null,
+      url: provaUrl.urlSanitizada
     },
     real,
     lixo,

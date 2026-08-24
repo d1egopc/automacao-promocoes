@@ -24,14 +24,17 @@ assert.ok(trecho.includes("Amazon nao configurada para este workspace"), "Amazon
 assert.ok(trecho.includes("!modoAmazonCookies(config)"), "Endpoint A/B nao deve atingir Amazon API");
 assert.ok(trecho.includes("Amazon em modo API; A/B Cookies nao executado"), "Amazon API deve ser bloqueada sem executar A/B cookies");
 assert.ok(trecho.includes("AMAZON_COOKIES_AB_COOKIE_LIXO"), "Endpoint A/B deve comparar contra cookie lixo controlado");
-assert.ok(trecho.includes("medirProvaAmazonCookiesAb(clienteId, configBase)"), "Endpoint A/B deve medir cookies reais");
+assert.ok(trecho.includes("obterUrlAmazonCookiesAb(req)"), "Endpoint A/B deve exigir URL/evento real de prova");
+assert.ok(trecho.includes("url_prova_indisponivel"), "Endpoint A/B deve falhar sem URL/evento real de prova");
+assert.ok(trecho.includes("medirProvaAmazonCookiesAb(clienteId, configBase, provaUrl.url)"), "Endpoint A/B deve medir cookies reais na URL de prova");
 assert.ok(trecho.includes("medirProvaAmazonCookiesAb(clienteId, {"), "Endpoint A/B deve medir cookie lixo com a mesma operacao");
-assert.ok(trecho.includes('diferenciou = real.resultado === "saudavel" && lixo.resultado !== "saudavel"'), "Diferenciacao deve exigir real saudavel e lixo nao saudavel");
+assert.ok(trecho.includes('diferenciou = real.resultado !== "invalida" && lixo.resultado === "invalida"'), "Diferenciacao deve exigir real sem cookie_expirado e lixo invalido");
 assert.ok(!trecho.includes("getClienteId(req)"), "Endpoint A/B nao deve cair no workspace do chamador");
 assert.ok(!trecho.includes("registrarSucessoIntegracao"), "Endpoint A/B nao pode registrar sucesso de saude");
 assert.ok(!trecho.includes("registrarAlertaIntegracao"), "Endpoint A/B nao pode registrar alerta de saude");
 assert.ok(!trecho.includes("salvarIntegracoesPersistidas"), "Endpoint A/B nao pode persistir integracoes");
 assert.ok(!trecho.includes("salvarResultadoTesteIntegracao"), "Endpoint A/B nao pode persistir ultimo teste");
+assert.ok(!trecho.includes("AMAZON_COOKIES_AB_ASINS"), "Endpoint A/B nao deve usar ASIN fixo generico");
 const payloadResposta = trecho.slice(trecho.indexOf("return res.json({"));
 assert.ok(!payloadResposta.includes("cookiesReais"), "Endpoint A/B nao pode retornar cookies reais");
 assert.ok(!payloadResposta.includes("credenciais"), "Endpoint A/B nao pode retornar credenciais");
@@ -53,8 +56,14 @@ assert.ok(helper.includes("criarImportarAmazon({"), "A/B deve reutilizar o impor
 assert.ok(helper.includes('sinal.tipo = "sucesso"'), "A/B deve capturar sucesso em memoria");
 assert.ok(helper.includes('sinal.tipo = "alerta"'), "A/B deve capturar alerta em memoria");
 assert.ok(helper.includes('ativo: false'), "A/B deve desativar Link Optimus para nao criar persistencia auxiliar");
-assert.ok(helper.includes('codigo === "cookie_valido"'), "A/B deve considerar positivo somente cookie_valido real do importador");
+assert.ok(!helper.includes('codigo === "cookie_valido"'), "A/B novo nao pode homologar por cookie_valido publico");
 assert.ok(helper.includes('codigo === "cookie_expirado"'), "A/B deve considerar invalido somente cookie_expirado real do importador");
 assert.ok(!helper.includes("registrarResultadoSaudeIntegracao"), "Helper A/B nao pode persistir saude");
+
+assert.ok(fonte.includes("function obterUrlAmazonCookiesAb"), "Helper deve resolver URL real por evento/url");
+assert.ok(fonte.includes("queryEngine("), "Helper deve conseguir buscar URL real em engine_links por eventoId");
+assert.ok(fonte.includes("urlAmazonCookiesAbValida"), "Helper deve validar que a prova e Amazon produto");
+assert.ok(fonte.includes("eventoId ou url de prova obrigatorio"), "Helper nao deve permitir prova sem URL/evento");
+assert.ok(!fonte.includes("AMAZON_COOKIES_AB_ASINS"), "A/B nao deve usar ASIN fixo generico");
 
 console.log("amazon-cookies-ab-readonly.test.cjs ok");
