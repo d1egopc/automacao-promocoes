@@ -118,7 +118,7 @@ async function testeMercadoLivre() {
 
 async function testeAmazon() {
   mockFetchSequencial([
-    resposta({ text: '<span id="productTitle">Produto</span>' })
+    resposta({ url: "https://www.amazon.com.br/dp/B07PGL2ZSL?tag=tag-20", text: '<span id="productTitle">Produto</span>' })
   ]);
   const ok = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
@@ -261,42 +261,28 @@ async function testeMercadoLivreManualConversorOficial() {
 async function testeAmazonManualProvaAutenticada() {
   const gerarLinkAmazon = criarGerarLinkAmazon({});
 
-  const chamadasImportadorOk = [];
-  const chamadasFetchOk = mockFetchSequencial([]);
-  const okImportador = await testarIntegracaoMarketplace("workspace_a", "amazon", {
+  const chamadasOk = mockFetchSequencial([
+    resposta({
+      url: "https://www.amazon.com.br/dp/B07PGL2ZSL?tag=tag-20",
+      text: '<html><span id="productTitle">Produto</span></html>'
+    })
+  ]);
+  let importadorChamado = false;
+  const ok = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
     credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
   }, {
     gerarLinkAmazon,
-    importarAmazon: async (url, config) => {
-      chamadasImportadorOk.push({ url, config });
-      return {
-        titulo: "Produto Real Amazon",
-        precoAtual: "99,90",
-        imagem: "https://m.media-amazon.com/images/I/produto.jpg",
-        linkAfiliado: url
-      };
+    importarAmazon: async () => {
+      importadorChamado = true;
+      return {};
     }
   });
-  assert.strictEqual(okImportador.ok, true);
-  assert.strictEqual(okImportador.codigo, "cookie_valido");
-  assert.strictEqual(okImportador.saude.status, "saudavel");
-  assert.strictEqual(okImportador.detalhes.prova, "importador_oficial_amazon");
-  assert.strictEqual(chamadasImportadorOk.length, 1);
-  assert.strictEqual(chamadasImportadorOk[0].config.contextoEngine.origem, "teste_manual_integracao");
-  assert.strictEqual(chamadasFetchOk.length, 0);
-
-  const chamadasOk = mockFetchSequencial([
-    resposta({ text: '<html><span id="productTitle">Produto</span></html>' })
-  ]);
-  const ok = await testarIntegracaoMarketplace("workspace_a", "amazon", {
-    modo: "cookies",
-    credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
-  }, { gerarLinkAmazon });
   assert.strictEqual(ok.ok, true);
   assert.strictEqual(ok.codigo, "cookie_valido");
   assert.strictEqual(ok.saude.status, "saudavel");
-  assert.strictEqual(ok.detalhes.prova, "produto_autenticado_com_tag");
+  assert.strictEqual(ok.detalhes.prova, "produto_amazon_get_autenticado");
+  assert.strictEqual(importadorChamado, false);
   assert.ok(chamadasOk[0].url.includes("tag=tag-20"));
 
   mockFetchSequencial([
@@ -354,15 +340,11 @@ async function testeAmazonManualProvaAutenticada() {
 
   const erroTimeout = new Error("timeout");
   erroTimeout.name = "AbortError";
+  mockFetchSequencial([erroTimeout]);
   const timeout = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
     credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
-  }, {
-    gerarLinkAmazon,
-    importarAmazon: async () => {
-      throw erroTimeout;
-    }
-  });
+  }, { gerarLinkAmazon });
   assert.strictEqual(timeout.codigo, "falha_teste");
   assert.strictEqual(timeout.saude.status, "desconhecida");
   assert.strictEqual(timeout.detalhes.motivo, "timeout");
