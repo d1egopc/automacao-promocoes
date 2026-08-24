@@ -14,6 +14,8 @@ const HISTORICO_ATENDIMENTO_MAX = 200;
 const TIPOS_RESPOSTA_ATENDIMENTO = new Set(["texto", "imagemUrl", "videoUrl", "arquivoUrl", "link"]);
 const ESCOPOS_ATENDIMENTO = new Set(["privado", "grupo", "ambos"]);
 const MODOS_GATILHO_ATENDIMENTO = new Set(["todas", "qualquer"]);
+const DESTINOS_MENSAGEM_GRUPO = new Set(["privado", "grupo"]);
+const MODOS_MENSAGEM_GRUPO = new Set(["texto", "imagem", "imagem_texto"]);
 
 let mensageiroPorCliente = {};
 
@@ -44,6 +46,35 @@ function criarAtendimentoPadraoMensageiro() {
   };
 }
 
+function criarEnvioPadraoMensageiro() {
+  return {
+    destino: "privado",
+    modoGrupo: "imagem_texto",
+    mensagemTemporaria: false,
+    apagarAposSegundos: 20
+  };
+}
+
+function normalizarEnvioMensageiro(envio = {}) {
+  const atual = envio && typeof envio === "object" ? envio : {};
+  const apagarAposSegundos = Math.max(
+    1,
+    Math.min(3600, Number(atual.apagarAposSegundos || 20) || 20)
+  );
+
+  return {
+    ...criarEnvioPadraoMensageiro(),
+    destino: DESTINOS_MENSAGEM_GRUPO.has(atual.destino)
+      ? atual.destino
+      : "privado",
+    modoGrupo: MODOS_MENSAGEM_GRUPO.has(atual.modoGrupo)
+      ? atual.modoGrupo
+      : "imagem_texto",
+    mensagemTemporaria: atual.mensagemTemporaria === true,
+    apagarAposSegundos
+  };
+}
+
 function normalizarConfigMensageiro(clienteId, config = {}) {
   const padrao = criarConfigPadraoMensageiro(clienteId);
   const atendimentoAtual =
@@ -71,7 +102,9 @@ function normalizarConfigMensageiro(clienteId, config = {}) {
       respostasRapidas: Array.isArray(atendimentoAtual.respostasRapidas)
         ? atendimentoAtual.respostasRapidas
         : []
-    }
+    },
+    boasVindasEnvio: normalizarEnvioMensageiro(config.boasVindasEnvio),
+    despedidaEnvio: normalizarEnvioMensageiro(config.despedidaEnvio)
   };
 }
 
@@ -118,6 +151,9 @@ function criarConfigPadraoMensageiro(clienteId) {
     imagemDespedida: "",
 
     grupos: [],
+
+    boasVindasEnvio: criarEnvioPadraoMensageiro(),
+    despedidaEnvio: criarEnvioPadraoMensageiro(),
 
     atendimento: criarAtendimentoPadraoMensageiro(),
 
@@ -358,4 +394,3 @@ module.exports = {
   registrarHistoricoAtendimento,
   normalizarConfigAtendimentoCliente
 };
-

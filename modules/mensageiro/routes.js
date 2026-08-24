@@ -225,6 +225,16 @@ const sessaoGruposId = dados.sessaoGruposId === undefined && dados.sessaoWhatsap
 const atendimentoNormalizado = atendimentoPayload === undefined
   ? configAtualMensageiro.atendimento
   : normalizarAtendimentoMensageiro(atendimentoPayload);
+const boasVindasEnvio = dados.boasVindasEnvio !== undefined
+  ? dados.boasVindasEnvio
+  : dados.boasVindas?.envio !== undefined
+    ? dados.boasVindas.envio
+    : configAtualMensageiro.boasVindasEnvio;
+const despedidaEnvio = dados.despedidaEnvio !== undefined
+  ? dados.despedidaEnvio
+  : dados.despedida?.envio !== undefined
+    ? dados.despedida.envio
+    : configAtualMensageiro.despedidaEnvio;
 
 const atualizado = setMensageiroCliente(clienteId, {
   ativo: dados.ativo === undefined
@@ -257,6 +267,9 @@ const atualizado = setMensageiroCliente(clienteId, {
       ? dados.grupos
       : [],
 
+  boasVindasEnvio,
+  despedidaEnvio,
+
   atendimento: atendimentoNormalizado
 });
 
@@ -276,7 +289,6 @@ if (atendimentoPayload !== undefined) {
 }
 
 module.exports = criarRotasMensageiro;
-
 
 
 

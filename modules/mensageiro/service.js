@@ -181,6 +181,113 @@ function logMensageiroJson(tag, dados = {}) {
   console.log(`${tag} ${JSON.stringify(dados)}`);
 }
 
+function resolverEnvioGrupoMensageiro(config = {}, acao = "") {
+  const envio = acao === "add"
+    ? config.boasVindasEnvio
+    : config.despedidaEnvio;
+
+  return {
+    destino: envio?.destino === "grupo" ? "grupo" : "privado",
+    modoGrupo: ["texto", "imagem", "imagem_texto"].includes(envio?.modoGrupo)
+      ? envio.modoGrupo
+      : "imagem_texto",
+    mensagemTemporaria: envio?.mensagemTemporaria === true,
+    apagarAposSegundos: Math.max(
+      1,
+      Math.min(3600, Number(envio?.apagarAposSegundos || 20) || 20)
+    )
+  };
+}
+
+function montarTextoEventoMensageiro(mensagem = "", { numero = "", grupoId = "", acao = "" } = {}) {
+  return String(mensagem || "")
+    .replaceAll("{numero}", numero)
+    .replaceAll("{grupo}", grupoId)
+    .replaceAll("{acao}", acao);
+}
+
+function montarPayloadImagemMensageiro(imagem = "", caption = "") {
+  const imagemStr = String(imagem || "");
+  if (!imagemStr) return null;
+
+  const payload = imagemStr.startsWith("data:image")
+    ? { image: Buffer.from((imagemStr.split(",")[1] || ""), "base64") }
+    : { image: { url: imagemStr } };
+
+  if (caption) payload.caption = caption;
+  return payload;
+}
+
+function montarPayloadPrivadoMensageiro({ imagem = "", texto = "" } = {}) {
+  const payloadImagem = montarPayloadImagemMensageiro(imagem, texto);
+  if (payloadImagem) return { payload: payloadImagem, tipo: "imagem" };
+  return { payload: { text: texto }, tipo: "texto" };
+}
+
+function montarPayloadGrupoMensageiro({ imagem = "", texto = "", modoGrupo = "imagem_texto" } = {}) {
+  if (modoGrupo === "texto") {
+    return texto ? { payload: { text: texto }, tipo: "texto" } : null;
+  }
+
+  if (modoGrupo === "imagem") {
+    const payloadImagem = montarPayloadImagemMensageiro(imagem, "");
+    return payloadImagem ? { payload: payloadImagem, tipo: "imagem" } : null;
+  }
+
+  const payloadImagem = montarPayloadImagemMensageiro(imagem, texto);
+  if (payloadImagem) return { payload: payloadImagem, tipo: "imagem_texto" };
+  return texto ? { payload: { text: texto }, tipo: "texto" } : null;
+}
+
+function agendarExclusaoMensagemTemporaria({
+  sock,
+  grupoId,
+  mensagemKey,
+  segundos,
+  clienteId,
+  sessaoId,
+  acao
+}) {
+  if (!mensagemKey) return;
+
+  const apagarAposSegundos = Math.max(1, Number(segundos || 20) || 20);
+  logMensageiroJson("[mensagem_temporaria_agendada]", {
+    clienteId,
+    sessaoId,
+    grupoId,
+    acao,
+    apagarAposSegundos
+  });
+
+  const timer = setTimeout(() => {
+    Promise.resolve()
+      .then(async () => {
+        if (!sock || typeof sock.sendMessage !== "function") {
+          throw new Error("socket_indisponivel");
+        }
+
+        await sock.sendMessage(grupoId, { delete: mensagemKey });
+        logMensageiroJson("[mensagem_temporaria_apagada]", {
+          clienteId,
+          sessaoId,
+          grupoId,
+          acao
+        });
+      })
+      .catch((e) => {
+        logMensageiroJson("[mensagem_temporaria_falha_delete]", {
+          clienteId,
+          sessaoId,
+          grupoId,
+          acao,
+          erro: e?.message || String(e || "erro_desconhecido")
+        });
+      });
+  }, apagarAposSegundos * 1000);
+
+  if (typeof timer.unref === "function") timer.unref();
+}
+
 function normalizarJidMensageiro(valor = "") {
   return String(valor || "").trim();
 }
@@ -795,6 +902,10 @@ async function tratarEventoGrupoMensageiro({
       acao === "add"
         ? config.imagemBoasVindas
         : config.imagemDespedida;
+    const envioEvento = resolverEnvioGrupoMensageiro(config, acao);
+    const eventoLogGrupo = acao === "add"
+      ? "[boas_vindas_grupo_enviada]"
+      : "[despedida_grupo_enviada]";
 
 for (const participante of participantes) {
 
@@ -805,18 +916,7 @@ for (const participante of participantes) {
 
   const numero = String(participante).split("@")[0];
   const jidOriginal = normalizarJidMensageiro(participante);
-  const destinoPrivado =
-    await resolverJidPrivadoMensageiro(sock, jidOriginal, { clienteId, sessaoId }) ||
-    jidOriginal;
-
-  if (!destinoPrivado || destinoPrivado === "status@broadcast" || destinoPrivado.endsWith("@newsletter") || destinoPrivado.endsWith("@g.us")) {
-    continue;
-  }
-
-  const textoFinal = String(mensagem || "")
-    .replaceAll("{numero}", numero)
-    .replaceAll("{grupo}", grupoId)
-    .replaceAll("{acao}", acao);
+  const textoFinal = montarTextoEventoMensageiro(mensagem, { numero, grupoId, acao });
 
     // ANTI DUPLICAÇÃO
 const chaveEvento =
@@ -839,52 +939,74 @@ eventosMensageiroRecentes.set(
   agora
 );
 
-      if (imagem) {
-  const imagemStr = String(imagem);
+  let jidFinalEnviado = "";
 
-  if (imagemStr.startsWith("data:image")) {
-    const base64 = imagemStr.split(",")[1];
-    const buffer = Buffer.from(base64, "base64");
+  if (envioEvento.destino === "grupo") {
+    if (!jidGrupoWhatsapp(grupoId)) continue;
+    jidFinalEnviado = grupoId;
+
+    const envioGrupo = montarPayloadGrupoMensageiro({
+      imagem,
+      texto: textoFinal,
+      modoGrupo: envioEvento.modoGrupo
+    });
+    if (!envioGrupo) continue;
 
     logMensageiroJson("[MENSAGEIRO-ENVIO-TENTANDO]", {
       clienteId,
       sessaoId,
       jidOriginal,
-      jidFinal: destinoPrivado,
-      tipo: "imagem",
+      jidFinal: grupoId,
+      tipo: envioGrupo.tipo,
+      destino: "grupo",
       conteudoPreview: textoFinal.slice(0, 120)
     });
-    await sock.sendMessage(destinoPrivado, {
-      image: buffer,
-      caption: textoFinal
+
+    const mensagemEnviada = await sock.sendMessage(grupoId, envioGrupo.payload);
+
+    logMensageiroJson(eventoLogGrupo, {
+      clienteId,
+      sessaoId,
+      grupoId,
+      participante,
+      acao,
+      tipo: envioGrupo.tipo,
+      temporaria: envioEvento.mensagemTemporaria === true
     });
+
+    if (envioEvento.mensagemTemporaria && mensagemEnviada?.key) {
+      agendarExclusaoMensagemTemporaria({
+        sock,
+        grupoId,
+        mensagemKey: mensagemEnviada.key,
+        segundos: envioEvento.apagarAposSegundos,
+        clienteId,
+        sessaoId,
+        acao
+      });
+    }
   } else {
+    const destinoPrivado =
+      await resolverJidPrivadoMensageiro(sock, jidOriginal, { clienteId, sessaoId }) ||
+      jidOriginal;
+
+    if (!destinoPrivado || destinoPrivado === "status@broadcast" || destinoPrivado.endsWith("@newsletter") || destinoPrivado.endsWith("@g.us")) {
+      continue;
+    }
+    jidFinalEnviado = destinoPrivado;
+
+    const envioPrivado = montarPayloadPrivadoMensageiro({ imagem, texto: textoFinal });
+
     logMensageiroJson("[MENSAGEIRO-ENVIO-TENTANDO]", {
       clienteId,
       sessaoId,
       jidOriginal,
       jidFinal: destinoPrivado,
-      tipo: "imagem",
+      tipo: envioPrivado.tipo,
       conteudoPreview: textoFinal.slice(0, 120)
     });
-    await sock.sendMessage(destinoPrivado, {
-      image: { url: imagemStr },
-      caption: textoFinal
-    });
+    await sock.sendMessage(destinoPrivado, envioPrivado.payload);
   }
-} else {
-  logMensageiroJson("[MENSAGEIRO-ENVIO-TENTANDO]", {
-    clienteId,
-    sessaoId,
-    jidOriginal,
-    jidFinal: destinoPrivado,
-    tipo: "texto",
-    conteudoPreview: textoFinal.slice(0, 120)
-  });
-  await sock.sendMessage(destinoPrivado, {
-    text: textoFinal
-  });
-}
 
       logMensageiroJson("[MENSAGEIRO-ENVIADO]", {
         clienteId,
@@ -892,7 +1014,8 @@ eventosMensageiroRecentes.set(
         grupoId,
         participante,
         jidOriginal,
-        jidFinal: destinoPrivado,
+        jidFinal: jidFinalEnviado,
+        destino: envioEvento.destino,
         acao
       });
     }
