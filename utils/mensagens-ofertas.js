@@ -26,6 +26,70 @@ function textoMensagemExistenteLocal(valor = "") {
   return texto;
 }
 
+function normalizarTituloOfertaDestino(valor = "") {
+  return String(valor || "").trim().toLowerCase() === "ia" ? "ia" : "original";
+}
+
+function tituloApresentacaoValido(valor = "") {
+  return textoMensagemExistenteLocal(valor);
+}
+
+function primeiroTituloIaValido(oferta = {}) {
+  const metadata = oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
+  const candidatos = [
+    oferta.tituloIa,
+    oferta.tituloIA,
+    oferta.tituloInteligente,
+    oferta.copy?.tituloIa,
+    oferta.copyInteligente?.tituloIa,
+    metadata.tituloIa,
+    metadata.tituloIA,
+    metadata.tituloInteligente,
+    metadata.copy?.tituloIa,
+    metadata.copyInteligente?.tituloIa
+  ];
+
+  for (const candidato of candidatos) {
+    const titulo = tituloApresentacaoValido(candidato);
+    if (titulo) return titulo;
+  }
+
+  return "";
+}
+
+function resolverTituloApresentacaoOferta(oferta = {}, destino = {}) {
+  const original = tituloApresentacaoValido(oferta.titulo) ||
+    tituloApresentacaoValido(oferta.nome) ||
+    "Oferta";
+
+  if (normalizarTituloOfertaDestino(destino?.tituloOferta) !== "ia") {
+    return {
+      titulo: original,
+      modo: "original",
+      usouTituloIa: false,
+      fallbackOriginal: false
+    };
+  }
+
+  const tituloIa = primeiroTituloIaValido(oferta);
+  if (tituloIa) {
+    return {
+      titulo: tituloIa,
+      modo: "ia",
+      usouTituloIa: true,
+      fallbackOriginal: false
+    };
+  }
+
+  return {
+    titulo: original,
+    modo: "ia",
+    usouTituloIa: false,
+    fallbackOriginal: true,
+    motivo: "titulo_ia_indisponivel"
+  };
+}
+
 function resolverMensagemExistente(oferta = {}, opcoes = {}, ofertaOficial = {}) {
   const metadata = oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
   const metadataOficial = ofertaOficial.metadata && typeof ofertaOficial.metadata === "object" ? ofertaOficial.metadata : {};
@@ -423,10 +487,13 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
   const destino = opcoes.destino || {};
   let resolucaoTemplate = null;
   let espelhoPilotoResultado = null;
-  const ofertaEntradaComFatosOfc = aplicarFatosOfcV24ComoEntrada({
+  const tituloApresentacao = resolverTituloApresentacaoOferta(oferta, destino);
+  const ofertaApresentacao = {
     ...oferta,
-    clienteId
-  });
+    clienteId,
+    titulo: tituloApresentacao.titulo
+  };
+  const ofertaEntradaComFatosOfc = aplicarFatosOfcV24ComoEntrada(ofertaApresentacao);
   const ofertaOficial = montarOfertaRenderizacaoOficial(ofertaEntradaComFatosOfc);
   const fidelidadeTraceIdPrincipal = fidelidadeObs.flagAtiva()
     ? fidelidadeObs.resolverFidelidadeTraceId(oferta, oferta.metadata, ofertaOficial, ofertaOficial.metadata)
@@ -623,6 +690,8 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
 
 module.exports = {
   montarMensagemOferta,
+  resolverTituloApresentacaoOferta,
+  normalizarTituloOfertaDestino,
   formatarPreco,
   cortarTitulo,
   montarLinhaCupom,

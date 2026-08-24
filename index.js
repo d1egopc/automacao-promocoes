@@ -2694,13 +2694,18 @@ function normalizarModoLinkDestino(valor = "") {
   return linksPuros.normalizarModoLinkDestino(valor);
 }
 
+function normalizarTituloOfertaDestino(valor = "") {
+  return String(valor || "").trim().toLowerCase() === "ia" ? "ia" : "original";
+}
+
 function normalizarDestinoContrato(destino = {}) {
   if (!destino || typeof destino !== "object" || Array.isArray(destino)) return destino;
   const normalizado = destinosUtils.normalizarDestinoContratoCategorias({
     ...destino,
     templateId: normalizarTemplateIdDestinoContrato(destino.templateId),
     prioridadeCupomAtiva: destino.prioridadeCupomAtiva === true,
-    modoLink: normalizarModoLinkDestino(destino.modoLink)
+    modoLink: normalizarModoLinkDestino(destino.modoLink),
+    tituloOferta: normalizarTituloOfertaDestino(destino.tituloOferta)
   });
   return destinosMultiAlvo.aplicarContratoMultiAlvoDestino(normalizado);
 }
@@ -2734,6 +2739,10 @@ function recursoDestinoPlano(destino = {}) {
 
 function idDestinoPlano(destino = {}) {
   return String(destino?.id || destino?.destinoId || destino?.nome || "").trim();
+}
+
+function destinoUsaTituloIa(destino = {}) {
+  return normalizarTituloOfertaDestino(destino?.tituloOferta) === "ia";
 }
 
 function criarErroRecursoPlano(recurso = "") {
@@ -2931,6 +2940,10 @@ function validarRecursosDestinosPlano(req, destinos = [], destinosAtuais = []) {
   );
 
   for (const destino of destinos) {
+    if (destinoUsaTituloIa(destino) && !usuarioTemRecurso(req, "tituloIa")) {
+      throw criarErroRecursoPlano("tituloIa");
+    }
+
     const recurso = recursoDestinoPlano(destino);
     if (!["whatsapp", "telegram", "discord"].includes(recurso)) continue;
     if (usuarioTemRecurso(req, recurso)) continue;
@@ -10215,6 +10228,7 @@ app.post("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
       campanhas: booleanPlano("campanhas", recursosAnteriores.campanhas),
       mensageiro: booleanPlano("mensageiro", recursosAnteriores.mensageiro),
       templatePersonalizado: booleanPlano("templatePersonalizado", recursosAnteriores.templatePersonalizado),
+      tituloIa: booleanPlano("tituloIa", recursosAnteriores.tituloIa),
       whatsapp: booleanPlano("whatsapp", recursosAnteriores.whatsapp),
       telegram: booleanPlano("telegram", recursosAnteriores.telegram),
       discord: booleanPlano("discord", recursosAnteriores.discord),
