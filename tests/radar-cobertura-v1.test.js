@@ -465,6 +465,9 @@ function mockModulo(relativo, exports) {
 
   {
     limparModulo("../modules/engine/distributor/distributor.runner");
+    limparModulo("../modules/engine/ofc/active-gate.service");
+    limparModulo("../modules/engine/flow-manager/flow-manager.service");
+    limparModulo("../modules/engine/ofc/commercial-events.service");
     mockModulo("../modules/engine/distributor/distributor.service", {
       limitarDistribuicao: valor => Number(valor || 10),
       buscarOfertasDistribuiveis: async () => ({
@@ -488,6 +491,25 @@ function mockModulo(relativo, exports) {
         destinosCompativeisDetalhes: [{ destino: "OP Geral", tipoMidia: "imagem" }]
       }),
       adicionarOfertaNaFilaCliente: async () => ({ ok: true, itemFila: { id: "fila_1", imagem: "https://img.test/p.jpg" } })
+    });
+    mockModulo("../modules/engine/ofc/active-gate.service", {
+      decidirAbsorcaoWorkspace: async () => ({ ativo: false, permitir: true })
+    });
+    mockModulo("../modules/engine/flow-manager/flow-manager.service", {
+      avaliarFluxoWorkspaceShadow: async () => ({
+        aceitarAgora: true,
+        motivo: "flow_shadow_indisponivel",
+        tipoFluxo: "oferta_comum",
+        ttlMs: 30 * 60 * 1000
+      }),
+      avaliarFrescorComercialOferta: () => ({ expirada: false }),
+      flowManagerAtivoWorkspace: () => false,
+      TTL_NORMAL_MS: 30 * 60 * 1000,
+      TTL_TURBO_MS: 10 * 60 * 1000
+    });
+    mockModulo("../modules/engine/ofc/commercial-events.service", {
+      registrarFilaClienteAdicionada: async () => ({ ok: true }),
+      registrarDistribuicaoFinal: async () => ({ ok: true })
     });
     const distributor = require("../modules/engine/distributor/distributor.runner");
     const trace = "cov_distributor_unico";

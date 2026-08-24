@@ -7,6 +7,9 @@ const TIPOS_EVENTO_COMERCIAL = Object.freeze({
   OFERTA_UNIVERSAL_CRIADA: "oferta_universal_criada",
   DISTRIBUICAO_FINAL: "distribuicao_final",
   FILA_CLIENTE_ADICIONADA: "fila_cliente_adicionada",
+  DESTINO_CANDIDATO: "destino_candidato",
+  DESTINO_SELECIONADO: "destino_selecionado",
+  DESTINO_REJEITADO: "destino_rejeitado",
   EXECUTOR_ENVIADO: "executor_enviado",
   EXECUTOR_ERRO_FINAL: "executor_erro_final"
 });
@@ -25,9 +28,24 @@ const CHAVES_METADATA_PERMITIDAS = Object.freeze([
   "prioridade",
   "erroTipo",
   "origem",
+  "eventoId",
   "workspaceId",
   "destinoId",
+  "destinoTipo",
+  "destinoNomeSanitizado",
   "canal",
+  "decisao",
+  "motivoCodigo",
+  "categoriaOferta",
+  "categoriaDestino",
+  "marketplacePermitido",
+  "dentroJanela",
+  "cooldownAtivo",
+  "maxDiaAtingido",
+  "sessaoStatus",
+  "destinoAtivo",
+  "destinosTotal",
+  "destinosCompativeis",
   "intervaloConfiguradoMin",
   "intervaloEfetivoMin",
   "turboAplicado",
@@ -35,7 +53,8 @@ const CHAVES_METADATA_PERMITIDAS = Object.freeze([
   "proximoPermitidoEm",
   "selecionadoEm",
   "enviadoEm",
-  "atrasoOperacionalMs"
+  "atrasoOperacionalMs",
+  "observabilidadeVersao"
 ]);
 
 function texto(valor = "", limite = 180) {
@@ -54,6 +73,89 @@ function numeroOuNull(valor) {
 function inteiroOuNull(valor) {
   const numero = numeroOuNull(valor);
   return numero === null ? null : Math.trunc(numero);
+}
+
+function normalizarMotivoDestino(motivo = "") {
+  const chave = texto(motivo, 120).toLowerCase();
+  const mapa = {
+    marketplace: "marketplace_nao_permitido",
+    marketplace_nao_permitido: "marketplace_nao_permitido",
+    retida_marketplace_nao_marcado: "marketplace_nao_permitido",
+    categoria: "categoria_nao_permitida",
+    categoria_incompativel: "categoria_nao_permitida",
+    categoria_nao_permitida: "categoria_nao_permitida",
+    retida_categoria_nao_marcada: "categoria_nao_permitida",
+    fora_horario: "fora_janela",
+    fora_da_janela: "fora_janela",
+    fora_janela: "fora_janela",
+    fora_janela_global: "fora_janela",
+    intervalo: "cooldown",
+    intervalo_aguardando: "cooldown",
+    intervalo_nao_atingido: "cooldown",
+    repetida_no_executor_2h: "cooldown",
+    cooldown: "cooldown",
+    limite_diario: "max_dia",
+    max_dia: "max_dia",
+    max_por_dia: "max_dia",
+    max_dia_atingido: "max_dia",
+    capacidade: "capacidade",
+    esteira_saturada: "capacidade",
+    gate_absorcao_bloqueado: "capacidade",
+    gate_bloqueado_piloto: "capacidade",
+    duplicidade: "duplicidade",
+    duplicidade_fila: "duplicidade",
+    duplicata: "duplicidade",
+    sem_destino_compativel: "sem_destino_elegivel",
+    retida_sem_destino_compativel: "sem_destino_elegivel",
+    sem_destino_elegivel: "sem_destino_elegivel",
+    perfil_nao_elegivel: "perfil_nao_elegivel",
+    automacao_desligada: "automacao_inativa",
+    automacao_inativa: "automacao_inativa",
+    destino_inativo: "destino_inativo",
+    sessao_indisponivel: "sessao_offline",
+    sessao_offline: "sessao_offline",
+    sessao_fechada: "sessao_offline",
+    sessao_closed: "sessao_offline",
+    sessao_invalida: "sessao_invalida",
+    integracao_ausente: "sessao_invalida",
+    destino_compativel: "destino_compativel",
+    destino_liberado: "destino_liberado",
+    envio_confirmado: "envio_confirmado"
+  };
+  return mapa[chave] || "nao_determinado";
+}
+
+function extrairOfertaIdObservabilidade(oferta = {}) {
+  return oferta.engineOfertaId || oferta.ofertaId || oferta.oferta_id || "";
+}
+
+function extrairJobIdObservabilidade(oferta = {}) {
+  return oferta.engineJobId || oferta.jobId || oferta.job_id || "";
+}
+
+function extrairEventoIdObservabilidade(oferta = {}) {
+  return oferta.engineEventoId || oferta.eventoId || oferta.evento_id || oferta.eventoEngineId || "";
+}
+
+function extrairDestinoIdObservabilidade(destino = {}) {
+  return textoId(
+    destino.id ||
+    destino.destinoId ||
+    destino.chatId ||
+    destino.channelId ||
+    destino.webhookId ||
+    destino.conexaoId ||
+    destino.nome ||
+    ""
+  );
+}
+
+function extrairDestinoTipoObservabilidade(destino = {}) {
+  return textoId(destino.tipo || destino.canal || "", 60).toLowerCase();
+}
+
+function destinoNomeSanitizado(destino = {}) {
+  return texto(destino.nome || destino.name || destino.titulo || destino.label || "", 80);
 }
 
 function metadataSanitizada(metadata = {}) {
@@ -243,6 +345,78 @@ function registrarDistribuicaoFinal({ oferta = {}, itemFila = {} } = {}) {
   });
 }
 
+function registrarDecisaoDestinoComercial({
+  clienteId = "",
+  oferta = {},
+  destino = {},
+  decisao = "",
+  motivo = "",
+  categoriaOferta = "",
+  categoriaDestino = "",
+  marketplacePermitido,
+  dentroJanela,
+  cooldownAtivo,
+  maxDiaAtingido,
+  sessaoStatus = "",
+  destinosTotal,
+  destinosCompativeis,
+  selecionadoEm = "",
+  proximoPermitidoEm = "",
+  repositorio = null
+} = {}) {
+  const decisaoNormalizada = textoId(decisao, 40).toLowerCase();
+  const tipoEventoPorDecisao = {
+    candidato: TIPOS_EVENTO_COMERCIAL.DESTINO_CANDIDATO,
+    selecionado: TIPOS_EVENTO_COMERCIAL.DESTINO_SELECIONADO,
+    rejeitado: TIPOS_EVENTO_COMERCIAL.DESTINO_REJEITADO
+  };
+  const tipoEvento = tipoEventoPorDecisao[decisaoNormalizada];
+  if (!tipoEvento) {
+    return Promise.resolve({ ok: false, motivo: "decisao_destino_invalida" });
+  }
+
+  const destinoId = extrairDestinoIdObservabilidade(destino);
+  const destinoTipo = extrairDestinoTipoObservabilidade(destino);
+  const motivoCodigo = normalizarMotivoDestino(motivo);
+  const opcoes = typeof repositorio === "function" ? { repositorio } : {};
+
+  return registrarEventoComercialSeguro({
+    tipoEvento,
+    clienteId,
+    workspaceId: clienteId,
+    ofertaId: extrairOfertaIdObservabilidade(oferta),
+    jobId: extrairJobIdObservabilidade(oferta),
+    filaItemId: oferta.id || oferta.filaItemId || "",
+    destinoId,
+    canal: destinoTipo,
+    marketplace: oferta.marketplace || oferta.mercado || "",
+    origemPipeline: "executor_destinos",
+    metadata: {
+      status: decisaoNormalizada,
+      motivo: motivoCodigo,
+      eventoId: extrairEventoIdObservabilidade(oferta),
+      destinoId,
+      destinoTipo,
+      destinoNomeSanitizado: destinoNomeSanitizado(destino),
+      decisao: decisaoNormalizada,
+      motivoCodigo,
+      categoriaOferta: categoriaOferta || oferta.categoria || oferta.categoriaProduto || "",
+      categoriaDestino: categoriaDestino || destino.categoria || destino.categoriaId || "",
+      marketplacePermitido,
+      dentroJanela,
+      cooldownAtivo,
+      maxDiaAtingido,
+      sessaoStatus,
+      destinoAtivo: destino?.ativo !== false,
+      destinosTotal,
+      destinosCompativeis,
+      proximoPermitidoEm,
+      selecionadoEm,
+      observabilidadeVersao: "v2.1"
+    }
+  }, opcoes);
+}
+
 function registrarExecutorEnviado({ clienteId = "", oferta = {}, destinosEnviados = 0, destinosDetalhes = [], repositorio = null } = {}) {
   const opcoes = typeof repositorio === "function" ? { repositorio } : {};
   const detalhes = Array.isArray(destinosDetalhes) ? destinosDetalhes.filter(Boolean) : [];
@@ -329,6 +503,8 @@ module.exports = {
   registrarOfertaUniversalCriada,
   registrarFilaClienteAdicionada,
   registrarDistribuicaoFinal,
+  registrarDecisaoDestinoComercial,
   registrarExecutorEnviado,
-  registrarExecutorErroFinal
+  registrarExecutorErroFinal,
+  normalizarMotivoDestino
 };

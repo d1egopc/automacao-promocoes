@@ -304,6 +304,7 @@ const {
   resolverIntervaloConfiguradoCadencia
 } = require("./modules/engine/cadencia.service");
 const {
+  registrarDecisaoDestinoComercial,
   registrarExecutorEnviado,
   registrarExecutorErroFinal
 } = require("./modules/engine/ofc/commercial-events.service");
@@ -6895,6 +6896,28 @@ function registrarCoberturaExecutor(etapa = "", oferta = {}, clienteId = "admin"
   });
 }
 
+function registrarDecisaoDestinoObservabilidade(decisao = "", oferta = {}, clienteId = "admin", destino = {}, dados = {}) {
+  const analise = dados.analise && typeof dados.analise === "object" ? dados.analise : {};
+  return registrarDecisaoDestinoComercial({
+    clienteId,
+    oferta,
+    destino,
+    decisao,
+    motivo: dados.motivo || analise.motivo || "",
+    categoriaOferta: dados.categoriaOferta || analise.categoriaOferta || oferta.categoria || oferta.categoriaProduto || "",
+    categoriaDestino: dados.categoriaDestino || analise.categoriaDestino || destino.categoria || destino.categoriaId || "",
+    marketplacePermitido: dados.marketplacePermitido,
+    dentroJanela: dados.dentroJanela,
+    cooldownAtivo: dados.cooldownAtivo,
+    maxDiaAtingido: dados.maxDiaAtingido,
+    sessaoStatus: dados.sessaoStatus || "",
+    destinosTotal: dados.destinosTotal,
+    destinosCompativeis: dados.destinosCompativeis,
+    selecionadoEm: dados.selecionadoEm || "",
+    proximoPermitidoEm: dados.proximoEnvioPermitidoEm || dados.proximoPermitidoEm || ""
+  });
+}
+
 function motivoCoberturaDestino(motivo = "") {
   const chave = String(motivo || "").trim();
   const mapa = {
@@ -7199,6 +7222,13 @@ const fastLaneCupomTipo = cupomFastLaneTipo(oferta);
 oferta.destinosEstado = Array.isArray(oferta.destinosEstado) ? oferta.destinosEstado : [];
 
 for (const itemCompativel of destinosCompativeis) {
+  void registrarDecisaoDestinoObservabilidade("candidato", oferta, clienteId, itemCompativel.destino, {
+    analise: itemCompativel.analise,
+    motivo: "destino_compativel",
+    marketplacePermitido: true,
+    destinosTotal: analiseDestinosFila.destinosInteligentes?.length || 0,
+    destinosCompativeis: destinosCompativeis.length
+  });
   registrarCoberturaExecutor("destino_candidato", oferta, clienteId, itemCompativel.destino, {
     decisao: "candidato",
     motivo: "destino_compativel",
@@ -7233,6 +7263,13 @@ for (const itemRejeitado of analiseDestinosFila.rejeitados) {
   const analise = itemRejeitado.analise;
   const nomeDestino = destinoNomeLog(destino);
   const motivoDestinoRejeitado = motivoCoberturaDestino(analise.motivo || "nao_compativel");
+  void registrarDecisaoDestinoObservabilidade("rejeitado", oferta, clienteId, destino, {
+    analise,
+    motivo: analise.motivo || motivoDestinoRejeitado,
+    marketplacePermitido: analise.motivo === "marketplace" ? false : undefined,
+    destinosTotal: analiseDestinosFila.destinosInteligentes?.length || 0,
+    destinosCompativeis: destinosCompativeis.length
+  });
   registrarDestinoEstadoFanout(oferta, destino, "nao_compativel", {
     motivo: motivoDestinoRejeitado
   });
@@ -7302,6 +7339,11 @@ for (const itemRejeitado of analiseDestinosFila.rejeitados) {
 
 if (!destinosCompativeis.length) {
   resumoFila.motivoPulo = analiseDestinosFila.motivoRetencao || "sem_destino_compativel";
+  void registrarDecisaoDestinoObservabilidade("rejeitado", oferta, clienteId, {}, {
+    motivo: analiseDestinosFila.motivoRetencao || "sem_destino_compativel",
+    destinosTotal: analiseDestinosFila.destinosInteligentes?.length || 0,
+    destinosCompativeis: 0
+  });
   marcarOfertaRetida(oferta, analiseDestinosFila.motivoRetencao, {
     clienteId,
     marketplace: oferta.marketplace || oferta.mercado || "",
@@ -7609,6 +7651,13 @@ for (const item of destinosOrdenados) {
       filaRecebeu: true,
       statusFilaAntes: oferta.status || ""
     });
+    void registrarDecisaoDestinoObservabilidade("rejeitado", oferta, clienteId, destino, {
+      analise: item.analise,
+      motivo: "fora_horario",
+      dentroJanela: false,
+      destinosTotal: analiseDestinosFila.destinosInteligentes?.length || 0,
+      destinosCompativeis: destinosCompativeis.length
+    });
     if (String(destino.tipo || "").toLowerCase() === "telegram") {
       logFilaTelegramDebug({
         clienteId,
@@ -7658,6 +7707,13 @@ for (const item of destinosOrdenados) {
       destinoEncontrado: true,
       filaRecebeu: true,
       statusFilaAntes: oferta.status || ""
+    });
+    void registrarDecisaoDestinoObservabilidade("rejeitado", oferta, clienteId, destino, {
+      analise: item.analise,
+      motivo: "limite_diario",
+      maxDiaAtingido: true,
+      destinosTotal: analiseDestinosFila.destinosInteligentes?.length || 0,
+      destinosCompativeis: destinosCompativeis.length
     });
     if (String(destino.tipo || "").toLowerCase() === "telegram") {
       logFilaTelegramDebug({
@@ -7713,6 +7769,14 @@ for (const item of destinosOrdenados) {
       statusFilaAntes: oferta.status || "",
       proximoEnvioPermitidoEm: intervalo.proximoEnvioPermitidoEm || ""
     });
+    void registrarDecisaoDestinoObservabilidade("rejeitado", oferta, clienteId, destino, {
+      analise: item.analise,
+      motivo: "intervalo",
+      cooldownAtivo: true,
+      destinosTotal: analiseDestinosFila.destinosInteligentes?.length || 0,
+      destinosCompativeis: destinosCompativeis.length,
+      proximoEnvioPermitidoEm: intervalo.proximoEnvioPermitidoEm || ""
+    });
     if (String(destino.tipo || "").toLowerCase() === "telegram") {
       logFilaTelegramDebug({
         clienteId,
@@ -7741,6 +7805,17 @@ for (const item of destinosOrdenados) {
     destinoEncontrado: true,
     filaRecebeu: true,
     statusFilaAntes: oferta.status || "",
+    selecionadoEm: destinoSelecionadoEm
+  });
+  void registrarDecisaoDestinoObservabilidade("selecionado", oferta, clienteId, destino, {
+    analise: item.analise,
+    motivo: "destino_liberado",
+    marketplacePermitido: true,
+    dentroJanela: true,
+    cooldownAtivo: false,
+    maxDiaAtingido: false,
+    destinosTotal: analiseDestinosFila.destinosInteligentes?.length || 0,
+    destinosCompativeis: destinosCompativeis.length,
     selecionadoEm: destinoSelecionadoEm
   });
 
