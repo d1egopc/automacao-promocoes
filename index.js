@@ -21885,6 +21885,7 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
       const resultadoTeste = await testarIntegracaoMarketplace(clienteId, marketplace, config || {}, {
         gerarLinkAfiliadoMercadoLivre,
         gerarLinkAmazon: conversoresAfiliados.gerarLinkAmazon,
+        importarAmazon: importarAmazonManualV2ComWorkspace,
         obterSaudeIntegracaoAtual
       });
       const integracaoIdResultado = resultadoTeste.integracaoId || resultadoTeste.saude?.integracaoId || "";

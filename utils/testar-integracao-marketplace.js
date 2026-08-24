@@ -28,6 +28,8 @@ MENSAGENS.afiliado_ok = MENSAGENS.ok;
 MENSAGENS.cookie_valido = MENSAGENS.ok;
 
 const TIMEOUT_TESTE_MS = Number(process.env.OPTIMUS_INTEGRACOES_TEST_TIMEOUT_MS || 12000);
+const TIMEOUT_TESTE_AMAZON_COOKIES_MS = Number(process.env.OPTIMUS_INTEGRACOES_AMAZON_COOKIES_TEST_TIMEOUT_MS || 25000);
+const TIMEOUT_PROVA_IMPORTADOR_AMAZON_MS = Math.min(20000, TIMEOUT_TESTE_AMAZON_COOKIES_MS);
 const URLS_TESTE_MERCADOLIVRE = [
   "https://www.mercadolivre.com.br/processador-amd-ryzen-5-5500-36ghz-42ghz-max-turbo-cache-16mb-am4/p/MLB19444510",
   "https://www.mercadolivre.com.br/roteador-huawei-wifi-ax2s-5-ghz-wi-fi-6-harmonyos-mesh-easymeshvisualizacao-de-diagnosticos-do-wi-fi-controle-parental-branco/p/MLB20704214",
@@ -206,10 +208,21 @@ async function testarMercadoLivreComConversorOficial(clienteId = "admin", config
 
 function amazonTemProvaProduto(html = "") {
   const texto = String(html || "");
+  const jsonLdProduto = /<script[^>]+type=["']application\/ld\+json["'][^>]*>[\s\S]{0,20000}?(?:"@type"\s*:\s*(?:"Product"|\[\s*"Product")|"name"\s*:|"image"\s*:|"offers"\s*:)/i.test(texto);
+  const tituloMeta = /<(?:meta|META)[^>]+(?:property|name)=["'](?:og:title|twitter:title)["'][^>]+content=["'][^"']{4,}["']/i.test(texto) ||
+    /<(?:meta|META)[^>]+content=["'][^"']{4,}["'][^>]+(?:property|name)=["'](?:og:title|twitter:title)["']/i.test(texto);
+  const canonicalProduto = /<link[^>]+rel=["']canonical["'][^>]+href=["'][^"']*(?:\/dp\/|\/gp\/product\/)[A-Z0-9]{10}/i.test(texto) ||
+    /<link[^>]+href=["'][^"']*(?:\/dp\/|\/gp\/product\/)[A-Z0-9]{10}[^"']*["'][^>]+rel=["']canonical["']/i.test(texto);
+  const asinProduto = /\b(?:data-asin|name|id)=["'](?:ASIN|asin|[A-Z0-9]{10})["']/i.test(texto) ||
+    /"asin"\s*:\s*"[A-Z0-9]{10}"/i.test(texto);
+
   return /id=["']productTitle["']/i.test(texto) ||
-    /<script[^>]+type=["']application\/ld\+json["'][^>]*>/i.test(texto) ||
-    /property=["']og:title["']/i.test(texto) ||
-    /data-a-dynamic-image=["'][^"']+["']/i.test(texto);
+    /id=["']title(?:_feature_div)?["']/i.test(texto) ||
+    jsonLdProduto ||
+    tituloMeta ||
+    /data-a-dynamic-image=["'][^"']+["']/i.test(texto) ||
+    /id=["']landingImage["']/i.test(texto) ||
+    (canonicalProduto && asinProduto);
 }
 
 function amazonTemBloqueioTransitorio(texto = "") {
@@ -224,6 +237,44 @@ function amazonTemLoginInequivoco(urlFinal = "", html = "") {
   const lower = `${urlFinal}\n${html}`.toLowerCase();
   return /\/ap\/signin|sign-in|signin|login/i.test(String(urlFinal || "")) ||
     lower.includes("iniciar sess");
+}
+
+function amazonProdutoImportadoTemProvaReal(produto = {}, tagId = "") {
+  const titulo = String(produto?.titulo || produto?.nome || "").trim();
+  const tituloGenerico = !titulo ||
+    /^produto amazon$/i.test(titulo) ||
+    /(?:sign[\s-]?in|login|captcha|robot check|amazon\.com\.br\s*:?\s*)/i.test(titulo);
+  const linkAfiliado = String(produto?.linkAfiliado || produto?.linkFinal || produto?.link || "").trim();
+  const temTag = tagId && (
+    linkAfiliado.includes(`tag=${encodeURIComponent(tagId)}`) ||
+    linkAfiliado.includes(`tag=${tagId}`)
+  );
+  const temSinalProduto = Boolean(
+    produto?.imagem ||
+    produto?.precoAtual ||
+    produto?.preco ||
+    produto?.precoOriginal ||
+    produto?.precoAntigo ||
+    produto?.categoria
+  );
+
+  return Boolean(!tituloGenerico && temTag && temSinalProduto);
+}
+
+function comTimeoutProva(promise, timeoutMs = TIMEOUT_TESTE_AMAZON_COOKIES_MS) {
+  let timer = null;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const erro = new Error("timeout");
+        erro.name = "AbortError";
+        reject(erro);
+      }, Math.max(1000, timeoutMs));
+    })
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 async function testarAmazonComProvaAutenticada(clienteId = "admin", config = {}, deps = {}) {
@@ -251,6 +302,47 @@ async function testarAmazonComProvaAutenticada(clienteId = "admin", config = {},
     return resultado("amazon", "falha_teste", { modo, motivo: "link_afiliado_nao_gerado" }, false);
   }
 
+  const inicioTeste = Date.now();
+  if (typeof deps.importarAmazon === "function") {
+    try {
+      const produto = await comTimeoutProva(deps.importarAmazon(linkAfiliado, {
+        ...config,
+        credenciais: {
+          ...(config?.credenciais || {}),
+          ...c,
+          cookies,
+          tag: tagId
+        },
+        clienteId,
+        contextoEngine: {
+          ...(config?.contextoEngine || {}),
+          clienteId,
+          origem: "teste_manual_integracao"
+        }
+      }), TIMEOUT_PROVA_IMPORTADOR_AMAZON_MS);
+
+      if (amazonProdutoImportadoTemProvaReal(produto, tagId)) {
+        return resultado("amazon", "cookie_valido", {
+          modo,
+          linkAfiliado: produto.linkAfiliado || produto.linkFinal || produto.link || linkAfiliado,
+          prova: "importador_oficial_amazon",
+          tempoMaximoMs: TIMEOUT_TESTE_AMAZON_COOKIES_MS
+        }, true);
+      }
+    } catch (e) {
+      const motivo = erroTransitorio(e);
+      if (motivo === "timeout") {
+        return resultado("amazon", "falha_teste", {
+          modo,
+          motivo,
+          prova: "importador_oficial_amazon",
+          tempoMaximoMs: TIMEOUT_TESTE_AMAZON_COOKIES_MS
+        }, false);
+      }
+    }
+  }
+
+  const restanteMs = Math.max(1000, TIMEOUT_TESTE_AMAZON_COOKIES_MS - (Date.now() - inicioTeste));
   try {
     const response = await fetchComTimeout(linkAfiliado, {
       method: "GET",
@@ -260,15 +352,16 @@ async function testarAmazonComProvaAutenticada(clienteId = "admin", config = {},
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
         Cookie: cookies
       }
-    });
+    }, restanteMs);
 
     const html = await response.text().catch(() => "");
     const urlFinal = response.url || "";
     const lower = `${urlFinal}\n${html}`.toLowerCase();
     const statusHttp = Number(response.status);
+    const contentType = typeof response.headers?.get === "function" ? String(response.headers.get("content-type") || "") : "";
 
     if ([429, 500, 502, 503, 504].includes(statusHttp) || amazonTemBloqueioTransitorio(lower)) {
-      return resultado("amazon", "falha_teste", { modo, httpStatus: response.status, motivo: "bloqueio_transitorio" }, false);
+      return resultado("amazon", "falha_teste", { modo, httpStatus: response.status, motivo: "bloqueio_transitorio", urlFinal }, false);
     }
 
     const loginInequivoco = amazonTemLoginInequivoco(urlFinal, html);
@@ -282,18 +375,19 @@ async function testarAmazonComProvaAutenticada(clienteId = "admin", config = {},
     }
 
     if (!response.ok) {
-      return resultado("amazon", "falha_teste", { modo, httpStatus: response.status, urlFinal }, false);
+      return resultado("amazon", "falha_teste", { modo, httpStatus: response.status, urlFinal, contentType }, false);
     }
 
     if (!amazonTemProvaProduto(html)) {
-      return resultado("amazon", "falha_teste", { modo, httpStatus: response.status, motivo: "html_sem_prova_produto" }, false);
+      return resultado("amazon", "falha_teste", { modo, httpStatus: response.status, motivo: "html_sem_prova_produto", urlFinal, contentType }, false);
     }
 
     return resultado("amazon", "cookie_valido", {
       modo,
       linkAfiliado,
       httpStatus: response.status,
-      prova: "produto_autenticado_com_tag"
+      prova: "produto_autenticado_com_tag",
+      tempoMaximoMs: TIMEOUT_TESTE_AMAZON_COOKIES_MS
     }, true);
   } catch (e) {
     return resultado("amazon", "falha_teste", { modo, motivo: erroTransitorio(e) }, false);
