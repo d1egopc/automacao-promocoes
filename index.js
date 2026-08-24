@@ -21773,6 +21773,16 @@ async function medirProvaAmazonCookiesAb(clienteId = "admin", config = {}) {
   }
 }
 
+function obterClienteIdAmazonCookiesAb(req) {
+  return String(req.query.clienteId || req.query.workspaceId || "").trim();
+}
+
+function workspaceExisteAmazonCookiesAb(clienteId = "") {
+  const alvo = String(clienteId || "").trim();
+  if (!alvo) return false;
+  return usuarios.some(usuario => String(usuario?.id || "") === alvo);
+}
+
 app.get("/integracoes/amazon/cookies/ab", async (req, res) => {
   if (!isAdminMaster(req)) {
     return res.status(403).json({
@@ -21781,14 +21791,35 @@ app.get("/integracoes/amazon/cookies/ab", async (req, res) => {
     });
   }
 
-  const clienteId = String(req.query.clienteId || getClienteId(req) || "").trim();
+  const clienteId = obterClienteIdAmazonCookiesAb(req);
+  if (!clienteId) {
+    return res.status(400).json({
+      ok: false,
+      erro: "clienteId/workspaceId alvo obrigatorio"
+    });
+  }
+
+  if (!workspaceExisteAmazonCookiesAb(clienteId)) {
+    return res.status(404).json({
+      ok: false,
+      erro: "Workspace alvo nao encontrado"
+    });
+  }
+
   const config = getIntegracaoCliente(clienteId, "amazon");
   const credenciais = config?.credenciais || {};
 
-  if (!config || !modoAmazonCookies(config)) {
+  if (!config) {
     return res.status(400).json({
       ok: false,
-      erro: "Amazon Cookies nao configurada para este workspace"
+      erro: "Amazon nao configurada para este workspace"
+    });
+  }
+
+  if (!modoAmazonCookies(config)) {
+    return res.status(400).json({
+      ok: false,
+      erro: "Amazon em modo API; A/B Cookies nao executado"
     });
   }
 
