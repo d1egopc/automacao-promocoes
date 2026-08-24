@@ -21882,7 +21882,11 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
         marketplace
       }));
 
-      const resultadoTeste = await testarIntegracaoMarketplace(clienteId, marketplace, config || {});
+      const resultadoTeste = await testarIntegracaoMarketplace(clienteId, marketplace, config || {}, {
+        gerarLinkAfiliadoMercadoLivre,
+        gerarLinkAmazon: conversoresAfiliados.gerarLinkAmazon,
+        obterSaudeIntegracaoAtual
+      });
       const integracaoIdResultado = resultadoTeste.integracaoId || resultadoTeste.saude?.integracaoId || "";
       const credencialFingerprint = credencialFingerprintIntegracao(marketplace, config || {}, {
         integracaoId: integracaoIdResultado

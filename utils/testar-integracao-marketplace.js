@@ -24,8 +24,16 @@ const MENSAGENS = {
 MENSAGENS.teste_paapi_nao_disponivel = "Teste real PA-API ainda nao disponivel.";
 MENSAGENS.teste_magalu_nao_disponivel = "Teste real Magalu ainda nao disponivel.";
 MENSAGENS.programa_invalido = "Programa de afiliado invalido ou indisponivel.";
+MENSAGENS.afiliado_ok = MENSAGENS.ok;
+MENSAGENS.cookie_valido = MENSAGENS.ok;
 
 const TIMEOUT_TESTE_MS = Number(process.env.OPTIMUS_INTEGRACOES_TEST_TIMEOUT_MS || 12000);
+const URLS_TESTE_MERCADOLIVRE = [
+  "https://www.mercadolivre.com.br/processador-amd-ryzen-5-5500-36ghz-42ghz-max-turbo-cache-16mb-am4/p/MLB19444510",
+  "https://www.mercadolivre.com.br/roteador-huawei-wifi-ax2s-5-ghz-wi-fi-6-harmonyos-mesh-easymeshvisualizacao-de-diagnosticos-do-wi-fi-controle-parental-branco/p/MLB20704214",
+  "https://produto.mercadolivre.com.br/MLB6801238036"
+];
+const ASIN_TESTE_AMAZON = "B07PGL2ZSL";
 const ALIEXPRESS_ITEM_URL_RE = /^https?:\/\/(?:[\w-]+\.)?aliexpress\.[\w.]+\/item\/\d+\.html/i;
 const ALIEXPRESS_SHORT_URL_RE = /^https?:\/\/a\.aliexpress\.com\/_[a-z0-9]+/i;
 
@@ -108,6 +116,187 @@ async function fetchComTimeout(url, opcoes = {}, timeoutMs = TIMEOUT_TESTE_MS) {
 
 function erroTransitorio(e = {}) {
   return e?.name === "AbortError" ? "timeout" : "erro_rede";
+}
+
+function primeiroValorTexto(...valores) {
+  return valores
+    .map(valor => String(valor || "").trim())
+    .find(Boolean) || "";
+}
+
+function urlsTesteMercadoLivre(config = {}) {
+  const c = credenciais(config);
+  const configurada = primeiroValorTexto(
+    valorTexto(c, ["urlTeste", "linkTeste"]),
+    process.env.MERCADOLIVRE_HEALTHCHECK_URL,
+    process.env.MERCADOLIVRE_URL_TESTE
+  );
+  return [
+    configurada,
+    ...URLS_TESTE_MERCADOLIVRE
+  ].filter((url, indice, lista) =>
+    /^https?:\/\//i.test(url) && lista.indexOf(url) === indice
+  ).slice(0, 3);
+}
+
+function linkAfiliadoMercadoLivreValido(link = "") {
+  return /^https?:\/\/meli\.la\//i.test(String(link || "").trim());
+}
+
+function saudeManualIndicaCredencialInvalida(saude = {}) {
+  if (!saude || saude.status !== "invalida") return false;
+  const codigo = String(saude.codigo || "").toLowerCase();
+  const motivo = String(saude.detalhes?.motivo || "").toLowerCase();
+  const statusHttp = Number(saude.detalhes?.httpStatus || saude.detalhes?.statusHttp || 0);
+  if (motivo.includes("csrf") || statusHttp === 429) return false;
+  return ["cookie_expirado", "cookie_invalido", "cookies_invalidos", "credencial_invalida"].includes(codigo) ||
+    [401, 403, 407, 419].includes(statusHttp);
+}
+
+async function testarMercadoLivreComConversorOficial(clienteId = "admin", config = {}, deps = {}) {
+  const c = credenciais(config);
+  const cookies = valorTexto(c, ["cookies", "cookie"]);
+  const tagId = tagMercadoLivre(config);
+  const gerarLinkAfiliadoMercadoLivre = deps.gerarLinkAfiliadoMercadoLivre;
+
+  if (!tagId) return resultado("mercadolivre", "tag_ausente", { faltandoTag: true }, false);
+  if (!cookies) return resultado("mercadolivre", "cookie_ausente", { faltandoCookies: true }, false);
+  if (typeof gerarLinkAfiliadoMercadoLivre !== "function") return null;
+
+  try {
+    const urlsTeste = urlsTesteMercadoLivre(config);
+    for (const urlTeste of urlsTeste) {
+      const linkAfiliado = await gerarLinkAfiliadoMercadoLivre(urlTeste, config, {
+        clienteId,
+        origem: "teste_manual_integracao"
+      });
+
+      if (linkAfiliadoMercadoLivreValido(linkAfiliado)) {
+        return resultado("mercadolivre", "afiliado_ok", {
+          linkAfiliado,
+          urlTeste,
+          prova: "conversor_oficial"
+        }, true);
+      }
+
+      const saudeAtual = typeof deps.obterSaudeIntegracaoAtual === "function"
+        ? deps.obterSaudeIntegracaoAtual(clienteId, "mercadolivre", config)
+        : null;
+      if (saudeManualIndicaCredencialInvalida(saudeAtual)) {
+        return resultado("mercadolivre", "cookie_expirado", {
+          urlTeste,
+          prova: "conversor_oficial",
+          codigoSaude: saudeAtual.codigo || "",
+          httpStatus: saudeAtual.detalhes?.httpStatus || null
+        }, false);
+      }
+    }
+
+    return resultado("mercadolivre", "falha_teste", {
+      motivo: "conversor_oficial_sem_link_afiliado",
+      prova: "conversor_oficial"
+    }, false);
+  } catch (e) {
+    return resultado("mercadolivre", "falha_teste", {
+      motivo: erroTransitorio(e),
+      prova: "conversor_oficial"
+    }, false);
+  }
+}
+
+function amazonTemProvaProduto(html = "") {
+  const texto = String(html || "");
+  return /id=["']productTitle["']/i.test(texto) ||
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>/i.test(texto) ||
+    /property=["']og:title["']/i.test(texto) ||
+    /data-a-dynamic-image=["'][^"']+["']/i.test(texto);
+}
+
+function amazonTemBloqueioTransitorio(texto = "") {
+  const lower = String(texto || "").toLowerCase();
+  return lower.includes("captcha") ||
+    lower.includes("robot check") ||
+    lower.includes("automated access") ||
+    lower.includes("digite os caracteres");
+}
+
+function amazonTemLoginInequivoco(urlFinal = "", html = "") {
+  const lower = `${urlFinal}\n${html}`.toLowerCase();
+  return /\/ap\/signin|sign-in|signin|login/i.test(String(urlFinal || "")) ||
+    lower.includes("iniciar sess");
+}
+
+async function testarAmazonComProvaAutenticada(clienteId = "admin", config = {}, deps = {}) {
+  const c = credenciais(config);
+  const modo = String(config?.modo || c.modo || "cookies").toLowerCase();
+  const tagId = tagAmazon(config);
+  const cookies = valorTexto(c, ["cookies", "cookie"]);
+  const asin = valorTexto(c, ["asinTeste", "asin"]) || ASIN_TESTE_AMAZON;
+
+  if (!tagId) return resultado("amazon", "tag_ausente", { faltandoTag: true, modo }, false);
+  if (modo === "api") return null;
+  if (!cookies) return resultado("amazon", "cookie_ausente", { faltandoCookies: true, modo }, false);
+
+  const linkBase = `https://www.amazon.com.br/dp/${encodeURIComponent(asin)}`;
+  const linkAfiliado = typeof deps.gerarLinkAmazon === "function"
+    ? deps.gerarLinkAmazon(clienteId, linkBase, config)
+    : (() => {
+        const url = new URL(linkBase);
+        url.searchParams.set("tag", tagId);
+        return url.toString();
+      })();
+
+  if (!linkAfiliado || (!linkAfiliado.includes(`tag=${encodeURIComponent(tagId)}`) && !linkAfiliado.includes(`tag=${tagId}`))) {
+    return resultado("amazon", "falha_teste", { modo, motivo: "link_afiliado_nao_gerado" }, false);
+  }
+
+  try {
+    const response = await fetchComTimeout(linkAfiliado, {
+      method: "GET",
+      headers: {
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+        Cookie: cookies
+      }
+    });
+
+    const html = await response.text().catch(() => "");
+    const urlFinal = response.url || "";
+    const lower = `${urlFinal}\n${html}`.toLowerCase();
+    const statusHttp = Number(response.status);
+
+    if ([429, 500, 502, 503, 504].includes(statusHttp) || amazonTemBloqueioTransitorio(lower)) {
+      return resultado("amazon", "falha_teste", { modo, httpStatus: response.status, motivo: "bloqueio_transitorio" }, false);
+    }
+
+    const loginInequivoco = amazonTemLoginInequivoco(urlFinal, html);
+    const authInequivoca = loginInequivoco ||
+      [401, 419].includes(statusHttp) ||
+      (statusHttp === 403 &&
+        /cookie expirad|sess[aã]o expirada|credencial|invalid credentials|unauthorized|forbidden|fa[cç]a login|entre na sua conta/i.test(lower));
+
+    if (authInequivoca) {
+      return resultado("amazon", "cookie_expirado", { modo, httpStatus: response.status, urlFinal }, false);
+    }
+
+    if (!response.ok) {
+      return resultado("amazon", "falha_teste", { modo, httpStatus: response.status, urlFinal }, false);
+    }
+
+    if (!amazonTemProvaProduto(html)) {
+      return resultado("amazon", "falha_teste", { modo, httpStatus: response.status, motivo: "html_sem_prova_produto" }, false);
+    }
+
+    return resultado("amazon", "cookie_valido", {
+      modo,
+      linkAfiliado,
+      httpStatus: response.status,
+      prova: "produto_autenticado_com_tag"
+    }, true);
+  } catch (e) {
+    return resultado("amazon", "falha_teste", { modo, motivo: erroTransitorio(e) }, false);
+  }
 }
 
 function urlAliExpressValida(url = "") {
@@ -289,7 +478,10 @@ function textoLoginMl(texto = "") {
   );
 }
 
-async function testarMercadoLivre(config = {}) {
+async function testarMercadoLivre(config = {}, clienteId = "admin", deps = {}) {
+  const provaOficial = await testarMercadoLivreComConversorOficial(clienteId, config, deps);
+  if (provaOficial) return provaOficial;
+
   const c = credenciais(config);
   const cookies = valorTexto(c, ["cookies", "cookie"]);
   const tagId = tagMercadoLivre(config);
@@ -369,7 +561,10 @@ async function testarMercadoLivre(config = {}) {
   }
 }
 
-async function testarAmazon(config = {}) {
+async function testarAmazon(config = {}, clienteId = "admin", deps = {}) {
+  const provaAutenticada = await testarAmazonComProvaAutenticada(clienteId, config, deps);
+  if (provaAutenticada) return provaAutenticada;
+
   const c = credenciais(config);
   const modo = String(config?.modo || c.modo || "cookies").toLowerCase();
   const tagId = tagAmazon(config);
@@ -861,7 +1056,7 @@ async function testarAliExpress(config = {}) {
   }
 }
 
-async function testarIntegracaoMarketplace(clienteId = "admin", marketplace = "", integracao = {}) {
+async function testarIntegracaoMarketplace(clienteId = "admin", marketplace = "", integracao = {}, deps = {}) {
   const mp = normalizarMarketplace(marketplace);
   const config = integracao || {};
 
@@ -869,8 +1064,8 @@ async function testarIntegracaoMarketplace(clienteId = "admin", marketplace = ""
     return resultado(mp, "credencial_ausente", { clienteId, motivo: "integracao_nao_configurada" }, false);
   }
 
-  if (mp === "mercadolivre") return testarMercadoLivre(config);
-  if (mp === "amazon") return testarAmazon(config);
+  if (mp === "mercadolivre") return testarMercadoLivre(config, clienteId, deps);
+  if (mp === "amazon") return testarAmazon(config, clienteId, deps);
   if (mp === "shopee") return testarShopee(config);
   if (mp === "awin") return testarAwin(config, "awin");
   if (mp === "kabum") return testarAwin(config, "kabum");

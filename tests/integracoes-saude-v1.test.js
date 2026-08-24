@@ -161,6 +161,154 @@ async function testeAmazon() {
   assert.strictEqual(paapi.codigo, "teste_paapi_nao_disponivel");
 }
 
+async function testeMercadoLivreManualConversorOficial() {
+  const chamadasMlFetch = [];
+  let sucessoRegistrado = null;
+  const gerarLinkAfiliadoMercadoLivre = criarGerarLinkMercadoLivre({
+    fetch: async (url, opcoes) => {
+      chamadasMlFetch.push({ url, opcoes });
+      return resposta({ json: { short_url: "https://meli.la/prova-real" } });
+    },
+    buscarCsrfTokenMercadoLivre: async (cookies, contexto) => {
+      assert.strictEqual(cookies, "cookie-secreto");
+      assert.strictEqual(contexto.clienteId, "workspace_a");
+      assert.strictEqual(contexto.origem, "teste_manual_integracao");
+      return "csrf-ok";
+    },
+    tipoUrlMercadoLivreAfiliado: () => "produto",
+    logMlAfiliadoFalhaDetalhe: () => {},
+    registrarAlertaMercadoLivre: () => {},
+    limparAlertaIntegracao: () => {},
+    registrarSucessoIntegracao: (clienteId, marketplace, detalhes) => {
+      sucessoRegistrado = { clienteId, marketplace, detalhes };
+    }
+  });
+
+  const ok = await testarIntegracaoMarketplace("workspace_a", "mercadolivre", {
+    credenciais: { tag: "tag-ok", cookies: "cookie-secreto" }
+  }, { gerarLinkAfiliadoMercadoLivre });
+  assert.strictEqual(chamadasMlFetch.length, 1);
+  assert.ok(chamadasMlFetch[0].url.includes("/affiliate-program/api/v2/stripe/user/links"));
+  assert.ok(JSON.parse(chamadasMlFetch[0].opcoes.body).url.includes("mercadolivre.com.br"));
+  assert.strictEqual(JSON.parse(chamadasMlFetch[0].opcoes.body).tag, "tag-ok");
+  assert.strictEqual(ok.ok, true);
+  assert.strictEqual(ok.codigo, "afiliado_ok");
+  assert.strictEqual(ok.saude.status, "saudavel");
+  assert.strictEqual(ok.detalhes.prova, "conversor_oficial");
+  assert.strictEqual(sucessoRegistrado.clienteId, "workspace_a");
+  assert.strictEqual(sucessoRegistrado.marketplace, "mercadolivre");
+  assert.strictEqual(sucessoRegistrado.detalhes.codigo, "afiliado_ok");
+
+  const invalida = await testarIntegracaoMarketplace("workspace_a", "mercadolivre", {
+    credenciais: { tag: "tag-ok", cookies: "cookie-secreto" }
+  }, {
+    gerarLinkAfiliadoMercadoLivre: async () => "",
+    obterSaudeIntegracaoAtual: () => ({
+      status: "invalida",
+      codigo: "cookie_invalido",
+      detalhes: { httpStatus: 401 }
+    })
+  });
+  assert.strictEqual(invalida.ok, false);
+  assert.strictEqual(invalida.codigo, "cookie_expirado");
+  assert.strictEqual(invalida.saude.status, "invalida");
+
+  const transitoria = await testarIntegracaoMarketplace("workspace_a", "mercadolivre", {
+    credenciais: { tag: "tag-ok", cookies: "cookie-secreto" }
+  }, {
+    gerarLinkAfiliadoMercadoLivre: async () => {
+      const erro = new Error("timeout");
+      erro.name = "AbortError";
+      throw erro;
+    }
+  });
+  assert.strictEqual(transitoria.ok, false);
+  assert.strictEqual(transitoria.codigo, "falha_teste");
+  assert.strictEqual(transitoria.saude.status, "desconhecida");
+  assert.strictEqual(transitoria.detalhes.motivo, "timeout");
+
+  const csrfInconclusivo = await testarIntegracaoMarketplace("workspace_a", "mercadolivre", {
+    credenciais: { tag: "tag-ok", cookies: "cookie-secreto" }
+  }, {
+    gerarLinkAfiliadoMercadoLivre: async () => "",
+    obterSaudeIntegracaoAtual: () => ({
+      status: "invalida",
+      codigo: "cookie_invalido",
+      detalhes: { httpStatus: 403, motivo: "csrf_nao_encontrado" }
+    })
+  });
+  assert.strictEqual(csrfInconclusivo.codigo, "falha_teste");
+  assert.strictEqual(csrfInconclusivo.saude.status, "desconhecida");
+
+  const semLink = await testarIntegracaoMarketplace("workspace_a", "mercadolivre", {
+    credenciais: { tag: "tag-ok", cookies: "cookie-secreto" }
+  }, {
+    gerarLinkAfiliadoMercadoLivre: async () => "https://www.mercadolivre.com.br/link-nao-afiliado"
+  });
+  assert.strictEqual(semLink.ok, false);
+  assert.strictEqual(semLink.codigo, "falha_teste");
+  assert.strictEqual(semLink.saude.status, "desconhecida");
+}
+
+async function testeAmazonManualProvaAutenticada() {
+  const gerarLinkAmazon = criarGerarLinkAmazon({});
+
+  const chamadasOk = mockFetchSequencial([
+    resposta({ text: '<html><span id="productTitle">Produto</span></html>' })
+  ]);
+  const ok = await testarIntegracaoMarketplace("workspace_a", "amazon", {
+    modo: "cookies",
+    credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
+  }, { gerarLinkAmazon });
+  assert.strictEqual(ok.ok, true);
+  assert.strictEqual(ok.codigo, "cookie_valido");
+  assert.strictEqual(ok.saude.status, "saudavel");
+  assert.strictEqual(ok.detalhes.prova, "produto_autenticado_com_tag");
+  assert.ok(chamadasOk[0].url.includes("tag=tag-20"));
+
+  mockFetchSequencial([
+    resposta({ status: 200, url: "https://www.amazon.com.br/ap/signin", text: "login" })
+  ]);
+  const invalida = await testarIntegracaoMarketplace("workspace_a", "amazon", {
+    modo: "cookies",
+    credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
+  }, { gerarLinkAmazon });
+  assert.strictEqual(invalida.ok, false);
+  assert.strictEqual(invalida.codigo, "cookie_expirado");
+  assert.strictEqual(invalida.saude.status, "invalida");
+
+  mockFetchSequencial([
+    resposta({ ok: false, status: 503, text: "indisponivel" })
+  ]);
+  const transitoria = await testarIntegracaoMarketplace("workspace_a", "amazon", {
+    modo: "cookies",
+    credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
+  }, { gerarLinkAmazon });
+  assert.strictEqual(transitoria.codigo, "falha_teste");
+  assert.strictEqual(transitoria.saude.status, "desconhecida");
+
+  mockFetchSequencial([
+    resposta({ text: "<html>pagina sem prova de produto</html>" })
+  ]);
+  const semProvaProduto = await testarIntegracaoMarketplace("workspace_a", "amazon", {
+    modo: "cookies",
+    credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
+  }, { gerarLinkAmazon });
+  assert.strictEqual(semProvaProduto.ok, false);
+  assert.strictEqual(semProvaProduto.codigo, "falha_teste");
+  assert.strictEqual(semProvaProduto.saude.status, "desconhecida");
+
+  const semLink = await testarIntegracaoMarketplace("workspace_a", "amazon", {
+    modo: "cookies",
+    credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
+  }, {
+    gerarLinkAmazon: () => ""
+  });
+  assert.strictEqual(semLink.ok, false);
+  assert.strictEqual(semLink.codigo, "falha_teste");
+  assert.strictEqual(semLink.saude.status, "desconhecida");
+}
+
 async function testeShopee() {
   mockFetchSequencial([
     resposta({
@@ -991,6 +1139,8 @@ async function main() {
   try {
     await testeMercadoLivre();
     await testeAmazon();
+    await testeMercadoLivreManualConversorOficial();
+    await testeAmazonManualProvaAutenticada();
     await testeShopee();
     await testeShopeeSensorPassivoFalhaQualificada();
     await testeAliExpress();
