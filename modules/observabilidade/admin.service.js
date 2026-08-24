@@ -11,6 +11,9 @@ const LIMITE_EVENTOS_PADRAO = 50;
 const LIMITE_EVENTOS_MAX = 100;
 const LIMITE_PROBLEMAS_PADRAO = 50;
 const LIMITE_PROBLEMAS_MAX = 100;
+const LIMITE_MENSAGEIRO_EVENTOS_PADRAO = 50;
+const LIMITE_MENSAGEIRO_EVENTOS_MAX = 100;
+const HISTORICO_MENSAGEIRO_ANALISE_MAX = 200;
 const CHAVES_SENSIVEIS = /senha|password|hash|cookie|cookies|token|secret|segredo|authorization|credencial|credential|clientSecret|access|refresh|jwt|headers|html|payload|imagem|image|base64|jid|telefone|phone/i;
 
 function agoraIso() {
@@ -51,6 +54,10 @@ function limiteEventos(valor) {
 
 function limiteProblemas(valor) {
   return inteiroLimitado(valor, LIMITE_PROBLEMAS_PADRAO, 1, LIMITE_PROBLEMAS_MAX);
+}
+
+function limiteMensageiroEventos(valor) {
+  return inteiroLimitado(valor, LIMITE_MENSAGEIRO_EVENTOS_PADRAO, 1, LIMITE_MENSAGEIRO_EVENTOS_MAX);
 }
 
 function cursorParaData(cursor = "") {
@@ -191,6 +198,12 @@ function identificadorOperacionalSeguro(valor = "") {
   if (!pareceJidOuTelefone(v)) return v;
   const hash = crypto.createHash("sha256").update(v).digest("hex").slice(0, 16);
   return `hash_${hash}`;
+}
+
+function hashOperacional(valor = "") {
+  const v = texto(valor, 180);
+  if (!v) return null;
+  return `hash_${crypto.createHash("sha256").update(v).digest("hex").slice(0, 16)}`;
 }
 
 async function consultarAtividadeWorkspaces(clienteIds = [], opcoes = {}) {
@@ -580,6 +593,231 @@ async function consultarResumoWorkspaceObservabilidade(clienteId = "", opcoes = 
   };
 }
 
+function moduloEventoMensageiro(evento = {}) {
+  const tipo = textoLower(evento.tipo, 80);
+  if (tipo === "boas_vindas") return "boasVindas";
+  if (tipo === "despedida") return "despedida";
+  if (tipo === "comando") return "comandos";
+  if (tipo === "programacao") return "programacoes";
+  if (tipo === "moderacao") return "gerente";
+  return "desconhecido";
+}
+
+function statusEventoMensageiro(evento = {}) {
+  return textoLower(evento.status || evento.resultado || "registrado", 80) || "registrado";
+}
+
+function resultadoEventoMensageiro(evento = {}) {
+  return textoLower(evento.resultado || evento.status || "registrado", 80) || "registrado";
+}
+
+function dataEventoMensageiro(evento = {}) {
+  const data = new Date(evento.data || evento.ocorridoEm || evento.atualizadoEm || 0);
+  return Number.isFinite(data.getTime()) ? data : null;
+}
+
+function tipoEventoMensageiroSanitizado(evento = {}) {
+  const modulo = moduloEventoMensageiro(evento);
+  const status = statusEventoMensageiro(evento);
+  const resultado = resultadoEventoMensageiro(evento);
+  const origem = textoLower(evento.origem, 40);
+  if (modulo === "boasVindas") return status === "removida" ? "mensagem_temporaria_apagada" : origem === "grupo" ? "boas_vindas_grupo_enviada" : "boas_vindas_privado_enviada";
+  if (modulo === "despedida") return status === "removida" ? "mensagem_temporaria_apagada" : origem === "grupo" ? "despedida_grupo_enviada" : "despedida_privado_enviada";
+  if (modulo === "comandos") {
+    if (status === "cooldown" || resultado === "cooldown") return "comando_cooldown";
+    if (status === "erro" || resultado === "erro") return "comando_erro";
+    return "comando_executado";
+  }
+  if (modulo === "programacoes") {
+    if (resultado === "pulada_restart" || status === "pulada_restart") return "programacao_pulada_restart";
+    if (resultado === "sessao_indisponivel") return "programacao_sessao_offline";
+    if (status === "erro" || resultado === "erro") return "programacao_erro";
+    return "programacao_enviada";
+  }
+  if (modulo === "gerente") {
+    if (status === "removida" && resultado === "removida") return "mensagem_temporaria_apagada";
+    if (resultado === "participante_removido") return "gerente_participante_removido";
+    if (resultado === "mensagem_removida") return "gerente_mensagem_apagada";
+    if (resultado === "sem_permissao_admin") return "gerente_sem_permissao";
+    if (resultado === "delete_falhou") return "gerente_delete_falhou";
+    if (resultado === "aviso_falhou" || resultado === "remocao_falhou" || status === "erro") return "gerente_erro";
+    if (resultado === "isento") return "gerente_ignorado";
+    return "gerente_aviso_enviado";
+  }
+  return "mensageiro_evento";
+}
+
+function motivoMensageiro(evento = {}) {
+  const modulo = moduloEventoMensageiro(evento);
+  const status = statusEventoMensageiro(evento);
+  const resultado = resultadoEventoMensageiro(evento);
+  if (modulo === "programacoes" && resultado === "sessao_indisponivel") return "mensageiro_sessao_offline";
+  if (modulo === "programacoes" && (resultado === "pulada_restart" || status === "pulada_restart")) return "mensageiro_programacao_pulada";
+  if (modulo === "programacoes" && (status === "erro" || resultado === "erro")) return "mensageiro_programacao_erro";
+  if (modulo === "comandos" && (status === "erro" || resultado === "erro")) return "mensageiro_comando_erro";
+  if (modulo === "gerente" && resultado === "sem_permissao_admin") return "mensageiro_gerente_sem_permissao";
+  if (modulo === "gerente" && resultado === "delete_falhou") return "mensageiro_delete_falhou";
+  if (modulo === "gerente" && (resultado === "aviso_falhou" || resultado === "remocao_falhou" || status === "erro")) return "mensageiro_gerente_erro";
+  return "";
+}
+
+function eventoMensageiroSanitizado(evento = {}) {
+  return {
+    tipo: tipoEventoMensageiroSanitizado(evento),
+    modulo: moduloEventoMensageiro(evento),
+    status: statusEventoMensageiro(evento),
+    perfilId: hashOperacional(evento.perfilId || evento.gatilhoId || evento.comandoId || ""),
+    perfilNome: texto(evento.perfilNome || "", 80) || null,
+    grupoLabel: identificadorOperacionalSeguro(evento.grupoNome || evento.grupo || ""),
+    motivoCodigo: motivoMensageiro(evento) || null,
+    ocorridoEm: dataEventoMensageiro(evento)?.toISOString() || null
+  };
+}
+
+function adicionarProblemaMensageiro(mapa, codigo = "", quantidade = 1, ultimoOcorridoEm = null) {
+  const motivoCodigo = texto(codigo || "mensageiro_nao_determinado", 100) || "mensageiro_nao_determinado";
+  const atual = mapa.get(motivoCodigo) || { motivoCodigo, quantidade: 0, primeiroOcorridoEm: null, ultimoOcorridoEm: null };
+  atual.quantidade += Math.max(1, Number(quantidade) || 1);
+  if (ultimoOcorridoEm) {
+    if (!atual.primeiroOcorridoEm || ultimoOcorridoEm < atual.primeiroOcorridoEm) atual.primeiroOcorridoEm = ultimoOcorridoEm;
+    if (!atual.ultimoOcorridoEm || ultimoOcorridoEm > atual.ultimoOcorridoEm) atual.ultimoOcorridoEm = ultimoOcorridoEm;
+  }
+  mapa.set(motivoCodigo, atual);
+}
+
+function incrementarModuloMensageiro(modulos, evento = {}) {
+  const modulo = moduloEventoMensageiro(evento);
+  const status = statusEventoMensageiro(evento);
+  const resultado = resultadoEventoMensageiro(evento);
+  const ocorridoEm = dataEventoMensageiro(evento)?.toISOString() || null;
+  const alvo = modulos[modulo];
+  if (!alvo) return;
+  if (ocorridoEm && (!alvo.ultimoEventoEm || ocorridoEm > alvo.ultimoEventoEm)) alvo.ultimoEventoEm = ocorridoEm;
+  if (modulo === "boasVindas" || modulo === "despedida") {
+    alvo.eventos += 1;
+    if (status === "erro" || resultado === "erro") alvo.erros += 1;
+  } else if (modulo === "comandos") {
+    if (status === "cooldown" || resultado === "cooldown") alvo.bloqueiosCooldown += 1;
+    else if (status === "erro" || resultado === "erro") alvo.erros += 1;
+    else alvo.execucoes += 1;
+  } else if (modulo === "programacoes") {
+    if (resultado === "pulada_restart" || status === "pulada_restart" || status === "fora_janela") alvo.puladas += 1;
+    else if (status === "erro" || resultado === "erro" || resultado === "sessao_indisponivel") alvo.erros += 1;
+    else alvo.executadas += 1;
+  } else if (modulo === "gerente") {
+    if (resultado === "participante_removido") alvo.remocoes += 1;
+    if (resultado === "mensagem_removida" || status === "removida" || status === "removido") alvo.mensagensApagadas += 1;
+    if (resultado.includes("aviso")) alvo.avisos += 1;
+    if (status === "erro" || resultado.includes("falhou")) alvo.erros += 1;
+    if (resultado !== "isento") alvo.moderacoes += 1;
+  }
+}
+
+function statusSessaoMensageiro(sessaoId = "", opcoes = {}) {
+  if (!sessaoId || typeof opcoes.getStatusSessao !== "function") return "desconhecida";
+  return textoLower(opcoes.getStatusSessao(sessaoId) || "desconhecida", 60) || "desconhecida";
+}
+
+function sessaoAbertaMensageiro(status = "") {
+  return ["open", "aberto", "conectado", "connected"].includes(textoLower(status, 60));
+}
+
+function classificarSaudeMensageiro({ ativo, eventosNormais, problemas, erros }) {
+  if (!ativo) return { status: "desligado", sinais: [{ codigo: "mensageiro_desligado", quantidade: 0 }] };
+  const sinais = problemas.map(problema => ({ codigo: problema.motivoCodigo, quantidade: problema.quantidade }));
+  if (eventosNormais > 0) sinais.push({ codigo: "mensageiro_atividade_recente", quantidade: eventosNormais });
+  if (erros > 0) sinais.push({ codigo: "mensageiro_erros_recentemente", quantidade: erros });
+  if (problemas.some(item => item.motivoCodigo === "mensageiro_sessao_offline")) return { status: "atencao", sinais };
+  if (erros >= 3) return { status: "critico", sinais };
+  if (problemas.length) return { status: "atencao", sinais };
+  if (eventosNormais > 0) return { status: "saudavel", sinais };
+  return { status: "sem_dados", sinais: [{ codigo: "mensageiro_sem_atividade_na_janela", quantidade: 0 }] };
+}
+
+async function consultarMensageiroWorkspaceObservabilidade(clienteId = "", opcoes = {}) {
+  const workspace = resolverWorkspace(clienteId, opcoes);
+  if (!workspace) return { ok: false, erro: "workspace_nao_encontrado" };
+  const janelaMinutos = janelaPermitida(opcoes.janelaMinutos);
+  const limit = limiteMensageiroEventos(opcoes.limit);
+  try {
+    const config = typeof opcoes.getMensageiroCliente === "function" ? opcoes.getMensageiroCliente(workspace.clienteId) || {} : {};
+    const atendimento = typeof opcoes.getAtendimentoConfigCliente === "function" ? opcoes.getAtendimentoConfigCliente(workspace.clienteId) || {} : {};
+    const historicoBruto = Array.isArray(atendimento.historico) ? atendimento.historico : [];
+    const agora = opcoes.agora instanceof Date ? opcoes.agora : new Date();
+    const inicioJanela = new Date(agora.getTime() - janelaMinutos * 60 * 1000);
+    const historicoJanela = historicoBruto
+      .slice(-HISTORICO_MENSAGEIRO_ANALISE_MAX)
+      .filter(evento => {
+        const data = dataEventoMensageiro(evento);
+        return data && data >= inicioJanela && data <= agora;
+      })
+      .sort((a, b) => (dataEventoMensageiro(b)?.getTime() || 0) - (dataEventoMensageiro(a)?.getTime() || 0));
+    const perfis = Array.isArray(config.perfis) ? config.perfis : [];
+    const perfisAtivos = perfis.filter(perfil => perfil?.ativo !== false && !perfil?.removidoEm);
+    const comandos = Array.isArray(config.comandos) ? config.comandos : [];
+    const programacoes = Array.isArray(config.programacoes) ? config.programacoes : [];
+    const sessoes = [...new Set([config.sessaoId, config.sessaoWhatsappId, config.sessaoGruposId, ...perfis.map(perfil => perfil?.sessaoId)].map(item => texto(item, 120)).filter(Boolean))];
+    const sessoesSanitizadas = sessoes.map(sessaoId => ({ sessaoId: hashOperacional(sessaoId), status: statusSessaoMensageiro(sessaoId, opcoes) }));
+    const modulos = {
+      boasVindas: { ativo: config.boasVindasAtivo === true || perfisAtivos.some(perfil => perfil.modulos?.boasVindas?.ativo === true), eventos: 0, erros: 0, ultimoEventoEm: null },
+      despedida: { ativo: config.despedidaAtivo === true || perfisAtivos.some(perfil => perfil.modulos?.despedida?.ativo === true), eventos: 0, erros: 0, ultimoEventoEm: null },
+      comandos: { ativos: comandos.filter(comando => comando?.ativo !== false).length, execucoes: 0, bloqueiosCooldown: 0, erros: 0, ultimoEventoEm: null },
+      programacoes: { ativas: programacoes.filter(programacao => programacao?.ativo === true).length, executadas: 0, puladas: 0, erros: 0, ultimoEventoEm: null },
+      gerente: { perfisAtivos: perfisAtivos.filter(perfil => perfil.modulos?.gerente?.ativo === true).length, moderacoes: 0, mensagensApagadas: 0, avisos: 0, remocoes: 0, erros: 0, infracoesAtivas: 0, ultimoEventoEm: null }
+    };
+    const problemasMapa = new Map();
+    for (const evento of historicoJanela) {
+      incrementarModuloMensageiro(modulos, evento);
+      const motivo = motivoMensageiro(evento);
+      if (motivo) adicionarProblemaMensageiro(problemasMapa, motivo, 1, dataEventoMensageiro(evento)?.toISOString() || null);
+    }
+    if (config.ativo === true && perfis.length > 0 && perfisAtivos.length === 0) adicionarProblemaMensageiro(problemasMapa, "mensageiro_sem_perfil_ativo", 1, agora.toISOString());
+    if (config.ativo === true && sessoesSanitizadas.some(sessao => sessao.status !== "desconhecida" && !sessaoAbertaMensageiro(sessao.status))) adicionarProblemaMensageiro(problemasMapa, "mensageiro_sessao_offline", 1, agora.toISOString());
+    if (typeof opcoes.listarInfracoesGerenteCliente === "function") {
+      try {
+        const infracoes = opcoes.listarInfracoesGerenteCliente(workspace.clienteId, {}) || [];
+        modulos.gerente.infracoesAtivas = Array.isArray(infracoes) ? infracoes.filter(item => item?.status !== "zerada").length : 0;
+      } catch {
+        adicionarProblemaMensageiro(problemasMapa, "mensageiro_gerente_erro", 1, agora.toISOString());
+      }
+    }
+    const problemas = [...problemasMapa.values()].sort((a, b) => b.quantidade - a.quantidade).slice(0, 10);
+    const erros = modulos.boasVindas.erros + modulos.despedida.erros + modulos.comandos.erros + modulos.programacoes.erros + modulos.gerente.erros;
+    const saude = classificarSaudeMensageiro({ ativo: config.ativo === true, eventosNormais: Math.max(0, historicoJanela.length - erros), problemas, erros });
+    return {
+      ok: true,
+      readOnly: true,
+      geradoEm: agoraIso(),
+      janelaMinutos,
+      ativo: config.ativo === true,
+      saude,
+      perfis: {
+        total: perfis.length,
+        ativos: perfisAtivos.length,
+        grupos: perfisAtivos.reduce((total, perfil) => total + (Array.isArray(perfil.grupos) ? perfil.grupos.length : 0), 0),
+        sessoes: sessoesSanitizadas,
+        modulosHabilitados: {
+          boasVindas: modulos.boasVindas.ativo,
+          despedida: modulos.despedida.ativo,
+          comandos: modulos.comandos.ativos,
+          programacoes: modulos.programacoes.ativas,
+          gerente: modulos.gerente.perfisAtivos
+        }
+      },
+      modulos,
+      problemas,
+      eventosRecentes: historicoJanela.slice(0, limit).map(eventoMensageiroSanitizado),
+      fontes: {
+        config: "mensageiro.json sanitizado",
+        historico: "mensageiro-config.json historico limitado",
+        infracoes: "mensageiro-gerente-infracoes.json agregado"
+      }
+    };
+  } catch (e) {
+    return { ok: false, readOnly: true, erro: "mensageiro_observabilidade_indisponivel", motivo: texto(e?.message || "erro_interno", 160) };
+  }
+}
+
 function adicionarFiltro(params, filtros, sql, valor) {
   const v = texto(valor, 120);
   if (!v) return;
@@ -738,6 +976,7 @@ module.exports = {
   LIMITE_WORKSPACES_MAX,
   buscarWorkspacesObservabilidade,
   consultarResumoWorkspaceObservabilidade,
+  consultarMensageiroWorkspaceObservabilidade,
   consultarProblemasObservabilidade,
   consultarEventosWorkspaceObservabilidade,
   rastrearEventoObservabilidade,

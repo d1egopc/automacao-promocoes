@@ -11146,7 +11146,11 @@ app.use("/admin/observabilidade", criarRotasObservabilidadeAdmin({
   isAdminMaster: (req) => req.usuario?.papel === "admin_master",
   getUsuarios: () => usuarios,
   getConfigsPorCliente: () => configsPorCliente,
-  getIntegracoesPorCliente: () => integracoesPorCliente
+  getIntegracoesPorCliente: () => integracoesPorCliente,
+  getMensageiroCliente: mensageiro.getMensageiroCliente,
+  getAtendimentoConfigCliente: mensageiro.getAtendimentoConfigCliente,
+  listarInfracoesGerenteCliente: mensageiro.listarInfracoesGerenteCliente,
+  getStatusSessao: (sessaoId) => statusSessao[sessaoId] || ""
 }));
 app.get("/admin/config/links-optimus", responderAdminConfigLinksOptimus);
 app.put("/admin/config/links-optimus", salvarAdminConfigLinksOptimus);

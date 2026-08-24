@@ -28,7 +28,11 @@ function depsConsulta(opcoes = {}) {
     query: opcoes.query,
     usuarios: typeof opcoes.getUsuarios === "function" ? opcoes.getUsuarios() : [],
     configsPorCliente: typeof opcoes.getConfigsPorCliente === "function" ? opcoes.getConfigsPorCliente() : {},
-    integracoesPorCliente: typeof opcoes.getIntegracoesPorCliente === "function" ? opcoes.getIntegracoesPorCliente() : {}
+    integracoesPorCliente: typeof opcoes.getIntegracoesPorCliente === "function" ? opcoes.getIntegracoesPorCliente() : {},
+    getMensageiroCliente: opcoes.getMensageiroCliente,
+    getAtendimentoConfigCliente: opcoes.getAtendimentoConfigCliente,
+    listarInfracoesGerenteCliente: opcoes.listarInfracoesGerenteCliente,
+    getStatusSessao: opcoes.getStatusSessao
   };
 }
 
@@ -66,6 +70,19 @@ function criarRotasObservabilidadeAdmin(opcoes = {}) {
         janelaMinutos: req.query.janelaMinutos
       });
       return res.status(resultado.ok ? 200 : 404).json(resultado);
+    } catch (e) {
+      return erroObservabilidade(res, e);
+    }
+  });
+
+  router.get("/workspaces/:clienteId/mensageiro", autenticarAdmin, async (req, res) => {
+    try {
+      const resultado = await service.consultarMensageiroWorkspaceObservabilidade(req.params.clienteId, {
+        ...depsConsulta(opcoes),
+        janelaMinutos: req.query.janelaMinutos,
+        limit: req.query.limit
+      });
+      return res.status(resultado.ok ? 200 : resultado.erro === "workspace_nao_encontrado" ? 404 : 503).json(resultado);
     } catch (e) {
       return erroObservabilidade(res, e);
     }
