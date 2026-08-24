@@ -117,39 +117,45 @@ async function testeMercadoLivre() {
 }
 
 async function testeAmazon() {
-  mockFetchSequencial([
-    resposta({ url: "https://www.amazon.com.br/dp/B07PGL2ZSL?tag=tag-20", text: '<span id="productTitle">Produto</span>' })
-  ]);
   const ok = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
     credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
+  }, {
+    importarAmazonTesteManual: async () => ({
+      linkAfiliado: "https://www.amazon.com.br/dp/B07NQ9PFKN?tag=tag-20"
+    })
   });
   assert.strictEqual(ok.saude.status, "saudavel");
 
-  mockFetchSequencial([
-    resposta({ status: 200, url: "https://www.amazon.com.br/ap/signin", text: "login" })
-  ]);
   const expirada = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
     credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
+  }, {
+    importarAmazonTesteManual: async (_url, _config, opcoes = {}) => {
+      opcoes.sinal.tipo = "alerta";
+      opcoes.sinal.codigo = "cookie_expirado";
+      return {};
+    }
   });
   assert.strictEqual(expirada.saude.status, "invalida");
 
-  mockFetchSequencial([
-    resposta({ status: 200, text: "captcha robot check" })
-  ]);
   const captcha = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
     credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
+  }, {
+    importarAmazonTesteManual: async () => {
+      throw new Error("captcha robot check");
+    }
   });
   assert.strictEqual(captcha.saude.status, "desconhecida");
 
-  mockFetchSequencial([
-    resposta({ ok: false, status: 403, text: "captcha robot check suspicious traffic" })
-  ]);
   const captcha403 = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
     credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
+  }, {
+    importarAmazonTesteManual: async () => {
+      throw new Error("captcha robot check suspicious traffic");
+    }
   });
   assert.strictEqual(captcha403.saude.status, "desconhecida");
 
@@ -259,128 +265,141 @@ async function testeMercadoLivreManualConversorOficial() {
 }
 
 async function testeAmazonManualProvaAutenticada() {
-  const gerarLinkAmazon = criarGerarLinkAmazon({});
+  const urlsChamadas = [];
+  const importarAmazonTesteManual = async (url, config, opcoes = {}) => {
+    urlsChamadas.push(url);
+    if (config?.credenciais?.cookies === "cookie-lixo") {
+      opcoes.sinal.tipo = "alerta";
+      opcoes.sinal.codigo = "cookie_expirado";
+      return {};
+    }
+    opcoes.sinal.tipo = "sucesso";
+    opcoes.sinal.codigo = "cookie_valido";
+    return {
+      linkAfiliado: "https://www.amazon.com.br/dp/B07NQ9PFKN?tag=tag-20"
+    };
+  };
 
-  const chamadasOk = mockFetchSequencial([
-    resposta({
-      url: "https://www.amazon.com.br/dp/B07PGL2ZSL?tag=tag-20",
-      text: '<html><span id="productTitle">Produto</span></html>'
-    })
-  ]);
-  let importadorChamado = false;
   const ok = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
     credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
   }, {
-    gerarLinkAmazon,
-    importarAmazon: async () => {
-      importadorChamado = true;
-      return {};
-    }
+    importarAmazonTesteManual
   });
   assert.strictEqual(ok.ok, true);
   assert.strictEqual(ok.codigo, "cookie_valido");
   assert.strictEqual(ok.saude.status, "saudavel");
-  assert.strictEqual(ok.detalhes.prova, "produto_amazon_get_autenticado");
-  assert.strictEqual(importadorChamado, false);
-  assert.ok(chamadasOk[0].url.includes("tag=tag-20"));
+  assert.strictEqual(ok.detalhes.prova, "conversao_real_amazon");
+  assert.strictEqual(ok.detalhes.linkAfiliado, undefined);
+  assert.ok(urlsChamadas[0].includes("amazon.com.br/dp/"));
 
-  mockFetchSequencial([
-    resposta({
-      text: '<html><head><link rel="canonical" href="https://www.amazon.com.br/dp/B07PGL2ZSL"></head><body data-asin="B07PGL2ZSL"></body></html>'
-    })
-  ]);
-  const canonical = await testarIntegracaoMarketplace("workspace_a", "amazon", {
+  const lixo = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
-    credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
-  }, { gerarLinkAmazon });
-  assert.strictEqual(canonical.ok, true);
-  assert.strictEqual(canonical.saude.status, "saudavel");
+    credenciais: { tag: "tag-20", cookies: "cookie-lixo" }
+  }, {
+    importarAmazonTesteManual
+  });
+  assert.strictEqual(lixo.ok, false);
+  assert.strictEqual(lixo.codigo, "cookie_expirado");
+  assert.strictEqual(lixo.saude.status, "invalida");
+  assert.strictEqual(urlsChamadas[1], urlsChamadas[0]);
 
-  mockFetchSequencial([
-    resposta({ status: 200, url: "https://www.amazon.com.br/ap/signin", text: "login" })
-  ]);
   const invalida = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
     credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
-  }, { gerarLinkAmazon });
+  }, {
+    importarAmazonTesteManual: async (_url, _config, opcoes = {}) => {
+      opcoes.sinal.tipo = "alerta";
+      opcoes.sinal.codigo = "cookie_expirado";
+      return {};
+    }
+  });
   assert.strictEqual(invalida.ok, false);
   assert.strictEqual(invalida.codigo, "cookie_expirado");
   assert.strictEqual(invalida.saude.status, "invalida");
 
-  mockFetchSequencial([
-    resposta({ ok: false, status: 503, text: "indisponivel" })
-  ]);
   const transitoria = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
     credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
-  }, { gerarLinkAmazon });
+  }, {
+    importarAmazonTesteManual: async () => {
+      const erro = new Error("timeout");
+      erro.name = "AbortError";
+      throw erro;
+    }
+  });
   assert.strictEqual(transitoria.codigo, "falha_teste");
   assert.strictEqual(transitoria.saude.status, "desconhecida");
+  assert.strictEqual(transitoria.detalhes.motivo, "timeout");
 
-  mockFetchSequencial([
-    resposta({ ok: false, status: 429, text: "rate limit" })
-  ]);
   const rateLimit = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
     credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
-  }, { gerarLinkAmazon });
+  }, {
+    importarAmazonTesteManual: async () => {
+      throw new Error("rate limit");
+    }
+  });
   assert.strictEqual(rateLimit.codigo, "falha_teste");
   assert.strictEqual(rateLimit.saude.status, "desconhecida");
 
-  const erroRede = new Error("socket hang up");
-  mockFetchSequencial([erroRede]);
   const rede = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
     credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
-  }, { gerarLinkAmazon });
+  }, {
+    importarAmazonTesteManual: async () => {
+      throw new Error("socket hang up");
+    }
+  });
   assert.strictEqual(rede.codigo, "falha_teste");
   assert.strictEqual(rede.saude.status, "desconhecida");
   assert.strictEqual(rede.detalhes.motivo, "erro_rede");
 
-  const erroTimeout = new Error("timeout");
-  erroTimeout.name = "AbortError";
-  mockFetchSequencial([erroTimeout]);
   const timeout = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
     credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
-  }, { gerarLinkAmazon });
+  }, {
+    importarAmazonTesteManual: async () => {
+      const erro = new Error("timeout");
+      erro.name = "AbortError";
+      throw erro;
+    }
+  });
   assert.strictEqual(timeout.codigo, "falha_teste");
   assert.strictEqual(timeout.saude.status, "desconhecida");
   assert.strictEqual(timeout.detalhes.motivo, "timeout");
 
-  mockFetchSequencial([
-    resposta({ text: "<html>pagina sem prova de produto</html>" })
-  ]);
-  const semProvaProduto = await testarIntegracaoMarketplace("workspace_a", "amazon", {
+  const semLinkAfiliado = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
     credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
-  }, { gerarLinkAmazon });
-  assert.strictEqual(semProvaProduto.ok, false);
-  assert.strictEqual(semProvaProduto.codigo, "falha_teste");
-  assert.strictEqual(semProvaProduto.saude.status, "desconhecida");
+  }, {
+    importarAmazonTesteManual: async () => ({ linkAfiliado: "https://www.amazon.com.br/dp/B07NQ9PFKN" })
+  });
+  assert.strictEqual(semLinkAfiliado.ok, false);
+  assert.strictEqual(semLinkAfiliado.codigo, "falha_teste");
+  assert.strictEqual(semLinkAfiliado.saude.status, "desconhecida");
 
   const semLink = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "cookies",
     credenciais: { tag: "tag-20", cookies: "cookie-secreto" }
   }, {
-    gerarLinkAmazon: () => ""
+    importarAmazonTesteManual: async () => ({})
   });
   assert.strictEqual(semLink.ok, false);
   assert.strictEqual(semLink.codigo, "falha_teste");
   assert.strictEqual(semLink.saude.status, "desconhecida");
 
-  let gerarLinkAmazonChamadoNoModoApi = false;
+  let importadorChamadoNoModoApi = false;
   const api = await testarIntegracaoMarketplace("workspace_a", "amazon", {
     modo: "api",
     credenciais: { appId: "app", accessKey: "ak", secretKey: "sk" }
   }, {
-    gerarLinkAmazon: () => {
-      gerarLinkAmazonChamadoNoModoApi = true;
-      return "https://www.amazon.com.br/dp/B07PGL2ZSL?tag=tag-20";
+    importarAmazonTesteManual: async () => {
+      importadorChamadoNoModoApi = true;
+      return {};
     }
   });
-  assert.strictEqual(gerarLinkAmazonChamadoNoModoApi, false);
+  assert.strictEqual(importadorChamadoNoModoApi, false);
   assert.strictEqual(api.ok, false);
   assert.strictEqual(api.codigo, "teste_paapi_nao_disponivel");
   assert.strictEqual(api.saude.status, "desconhecida");

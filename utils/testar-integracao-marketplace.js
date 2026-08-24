@@ -35,6 +35,11 @@ const URLS_TESTE_MERCADOLIVRE = [
   "https://produto.mercadolivre.com.br/MLB6801238036"
 ];
 const ASIN_TESTE_AMAZON = "B07PGL2ZSL";
+const URLS_TESTE_AMAZON = [
+  "https://www.amazon.com.br/dp/B07NQ9PFKN",
+  `https://www.amazon.com.br/dp/${ASIN_TESTE_AMAZON}`,
+  "https://www.amazon.com.br/dp/B09LZ2GRD2"
+];
 const ALIEXPRESS_ITEM_URL_RE = /^https?:\/\/(?:[\w-]+\.)?aliexpress\.[\w.]+\/item\/\d+\.html/i;
 const ALIEXPRESS_SHORT_URL_RE = /^https?:\/\/a\.aliexpress\.com\/_[a-z0-9]+/i;
 
@@ -110,28 +115,6 @@ async function fetchComTimeout(url, opcoes = {}, timeoutMs = TIMEOUT_TESTE_MS) {
       ...opcoes,
       ...(controller ? { signal: controller.signal } : {})
     });
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-async function fetchTextoComTimeout(url, opcoes = {}, timeoutMs = TIMEOUT_TESTE_MS) {
-  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const timer = controller
-    ? setTimeout(() => controller.abort(), Math.max(1000, timeoutMs))
-    : null;
-
-  try {
-    const response = await fetch(url, {
-      ...opcoes,
-      redirect: opcoes.redirect || "follow",
-      ...(controller ? { signal: controller.signal } : {})
-    });
-    const html = await response.text().catch((e) => {
-      if (controller?.signal?.aborted) throw e;
-      return "";
-    });
-    return { response, html };
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -233,48 +216,52 @@ async function testarMercadoLivreComConversorOficial(clienteId = "admin", config
   }
 }
 
-function escaparRegExp(valor = "") {
-  return String(valor || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function urlProdutoAmazonValida(url = "") {
+  try {
+    const u = new URL(String(url || ""));
+    const host = u.hostname.toLowerCase();
+    return (host === "amazon.com.br" || host.endsWith(".amazon.com.br")) &&
+      /\/(?:dp|gp\/product)\/[A-Z0-9]{10}/i.test(u.pathname);
+  } catch {
+    return false;
+  }
 }
 
-function amazonTemProvaProduto(html = "", asin = "", urlFinal = "") {
-  const texto = String(html || "");
-  const asinEsperado = String(asin || "").trim().toUpperCase();
-  const asinRe = asinEsperado ? new RegExp(escaparRegExp(asinEsperado), "i") : null;
-  const jsonLdProduto = /<script[^>]+type=["']application\/ld\+json["'][^>]*>[\s\S]{0,20000}?(?:"@type"\s*:\s*(?:"Product"|\[\s*"Product")|"name"\s*:|"image"\s*:|"offers"\s*:)/i.test(texto);
-  const tituloMeta = /<(?:meta|META)[^>]+(?:property|name)=["'](?:og:title|twitter:title)["'][^>]+content=["'][^"']{4,}["']/i.test(texto) ||
-    /<(?:meta|META)[^>]+content=["'][^"']{4,}["'][^>]+(?:property|name)=["'](?:og:title|twitter:title)["']/i.test(texto);
-  const canonicalProduto = asinEsperado
-    ? new RegExp(`<link[^>]+rel=["']canonical["'][^>]+href=["'][^"']*(?:/dp/|/gp/product/)${escaparRegExp(asinEsperado)}(?:[/?#"'&]|$)`, "i").test(texto) ||
-      new RegExp(`<link[^>]+href=["'][^"']*(?:/dp/|/gp/product/)${escaparRegExp(asinEsperado)}(?:[/?#"'&]|$)[^"']*["'][^>]+rel=["']canonical["']`, "i").test(texto)
-    : /<link[^>]+rel=["']canonical["'][^>]+href=["'][^"']*(?:\/dp\/|\/gp\/product\/)[A-Z0-9]{10}/i.test(texto) ||
-      /<link[^>]+href=["'][^"']*(?:\/dp\/|\/gp\/product\/)[A-Z0-9]{10}[^"']*["'][^>]+rel=["']canonical["']/i.test(texto);
-  const asinProduto = /\b(?:data-asin|name|id)=["'](?:ASIN|asin|[A-Z0-9]{10})["']/i.test(texto) ||
-    /"asin"\s*:\s*"[A-Z0-9]{10}"/i.test(texto);
-  const asinEsperadoPresente = !asinRe || asinRe.test(`${urlFinal}\n${texto}`);
-  const marcadorProduto = /id=["']productTitle["']/i.test(texto) ||
-    /id=["']title(?:_feature_div)?["']/i.test(texto) ||
-    jsonLdProduto ||
-    tituloMeta ||
-    /data-a-dynamic-image=["'][^"']+["']/i.test(texto) ||
-    /id=["']landingImage["']/i.test(texto) ||
-    (canonicalProduto && asinProduto);
-
-  return Boolean(marcadorProduto && asinEsperadoPresente);
+function urlsTesteAmazon(config = {}) {
+  const c = credenciais(config);
+  const configurada = primeiroValorTexto(
+    valorTexto(c, ["urlTeste", "linkTeste", "healthCheckUrl", "urlProdutoTeste", "produtoTesteUrl"]),
+    process.env.AMAZON_HEALTHCHECK_URL,
+    process.env.AMAZON_URL_TESTE
+  );
+  return [
+    configurada,
+    ...URLS_TESTE_AMAZON
+  ].filter((url, indice, lista) =>
+    urlProdutoAmazonValida(url) && lista.indexOf(url) === indice
+  ).slice(0, 3);
 }
 
-function amazonTemBloqueioTransitorio(texto = "") {
-  const lower = String(texto || "").toLowerCase();
-  return lower.includes("captcha") ||
-    lower.includes("robot check") ||
-    lower.includes("automated access") ||
-    lower.includes("digite os caracteres");
+function linkAfiliadoAmazonValido(link = "", tagId = "") {
+  const valor = String(link || "").trim();
+  const tag = String(tagId || "").trim();
+  if (!/^https?:\/\//i.test(valor) || !tag) return false;
+
+  try {
+    const u = new URL(valor);
+    const host = u.hostname.toLowerCase();
+    const amazon = host === "amazon.com.br" || host.endsWith(".amazon.com.br");
+    const produto = /\/(?:dp|gp\/product)\/[A-Z0-9]{10}/i.test(u.pathname);
+    const tagRetornada = u.searchParams.get("tag") || "";
+    return amazon && produto && (tagRetornada === tag || tagRetornada === encodeURIComponent(tag));
+  } catch {
+    return false;
+  }
 }
 
-function amazonTemLoginInequivoco(urlFinal = "", html = "") {
-  const lower = `${urlFinal}\n${html}`.toLowerCase();
-  return /\/ap\/signin|sign-in|signin|login/i.test(String(urlFinal || "")) ||
-    lower.includes("iniciar sess");
+function sinalAmazonCookieExpirado(sinal = {}) {
+  const codigo = String(sinal.codigo || "").toLowerCase();
+  return sinal.tipo === "alerta" && ["cookie_expirado", "cookie_invalido", "cookies_invalidos"].includes(codigo);
 }
 
 async function testarAmazonComProvaAutenticada(clienteId = "admin", config = {}, deps = {}) {
@@ -284,73 +271,67 @@ async function testarAmazonComProvaAutenticada(clienteId = "admin", config = {},
 
   const tagId = tagAmazon(config);
   const cookies = valorTexto(c, ["cookies", "cookie"]);
-  const asin = valorTexto(c, ["asinTeste", "asin"]) || ASIN_TESTE_AMAZON;
+  const importarAmazonTesteManual = deps.importarAmazonTesteManual || deps.importarAmazon;
 
   if (!tagId) return resultado("amazon", "tag_ausente", { faltandoTag: true, modo }, false);
   if (!cookies) return resultado("amazon", "cookie_ausente", { faltandoCookies: true, modo }, false);
-
-  const linkBase = `https://www.amazon.com.br/dp/${encodeURIComponent(asin)}`;
-  const linkAfiliado = typeof deps.gerarLinkAmazon === "function"
-    ? deps.gerarLinkAmazon(clienteId, linkBase, config)
-    : (() => {
-        const url = new URL(linkBase);
-        url.searchParams.set("tag", tagId);
-        return url.toString();
-      })();
-
-  if (!linkAfiliado || (!linkAfiliado.includes(`tag=${encodeURIComponent(tagId)}`) && !linkAfiliado.includes(`tag=${tagId}`))) {
-    return resultado("amazon", "falha_teste", { modo, motivo: "link_afiliado_nao_gerado" }, false);
-  }
-
-  try {
-    const { response, html } = await fetchTextoComTimeout(linkAfiliado, {
-      method: "GET",
-      headers: {
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
-        Cookie: cookies
-      }
-    }, TIMEOUT_TESTE_AMAZON_COOKIES_MS);
-
-    const urlFinal = response.url || "";
-    const lower = `${urlFinal}\n${html}`.toLowerCase();
-    const statusHttp = Number(response.status);
-    const contentType = typeof response.headers?.get === "function" ? String(response.headers.get("content-type") || "") : "";
-
-    if ([429, 500, 502, 503, 504].includes(statusHttp) || amazonTemBloqueioTransitorio(lower)) {
-      return resultado("amazon", "falha_teste", { modo, httpStatus: response.status, motivo: "bloqueio_transitorio", urlFinal }, false);
-    }
-
-    const loginInequivoco = amazonTemLoginInequivoco(urlFinal, html);
-    const authInequivoca = loginInequivoco ||
-      [401, 419].includes(statusHttp) ||
-      (statusHttp === 403 &&
-        /cookie expirad|sess[aã]o expirada|credencial|invalid credentials|unauthorized|forbidden|fa[cç]a login|entre na sua conta/i.test(lower));
-
-    if (authInequivoca) {
-      return resultado("amazon", "cookie_expirado", { modo, httpStatus: response.status, urlFinal }, false);
-    }
-
-    if (!response.ok) {
-      return resultado("amazon", "falha_teste", { modo, httpStatus: response.status, urlFinal, contentType }, false);
-    }
-
-    if (!amazonTemProvaProduto(html, asin, urlFinal)) {
-      return resultado("amazon", "falha_teste", { modo, httpStatus: response.status, motivo: "html_sem_prova_produto", urlFinal, contentType }, false);
-    }
-
-    return resultado("amazon", "cookie_valido", {
+  if (typeof importarAmazonTesteManual !== "function") {
+    return resultado("amazon", "falha_teste", {
       modo,
-      linkAfiliado,
-      httpStatus: response.status,
-      prova: "produto_amazon_get_autenticado",
-      asin,
-      tempoMaximoMs: TIMEOUT_TESTE_AMAZON_COOKIES_MS
-    }, true);
-  } catch (e) {
-    return resultado("amazon", "falha_teste", { modo, motivo: erroTransitorio(e) }, false);
+      motivo: "importador_amazon_indisponivel",
+      prova: "conversao_real_amazon"
+    }, false);
   }
+
+  let ultimoMotivo = "conversao_sem_link_afiliado";
+  for (const urlTeste of urlsTesteAmazon(config)) {
+    const sinal = {};
+    try {
+      const produto = await importarAmazonTesteManual(urlTeste, {
+        ...config,
+        modo: "cookies",
+        linksOptimus: {
+          ...(config.linksOptimus || {}),
+          ativo: false
+        },
+        contextoEngine: {
+          ...(config.contextoEngine || {}),
+          clienteId,
+          origem: "teste_manual_integracao_amazon"
+        }
+      }, { sinal });
+
+      if (sinalAmazonCookieExpirado(sinal)) {
+        return resultado("amazon", "cookie_expirado", {
+          modo,
+          urlTeste,
+          codigoSaude: sinal.codigo || "",
+          prova: "conversao_real_amazon"
+        }, false);
+      }
+
+      const linkAfiliado = valorTexto(produto || {}, ["linkAfiliado", "linkFinal", "link"]);
+      if (linkAfiliadoAmazonValido(linkAfiliado, tagId)) {
+        return resultado("amazon", "cookie_valido", {
+          modo,
+          linkAfiliado,
+          urlTeste,
+          prova: "conversao_real_amazon",
+          tempoMaximoMs: TIMEOUT_TESTE_AMAZON_COOKIES_MS
+        }, true);
+      }
+
+      ultimoMotivo = "conversao_sem_link_afiliado";
+    } catch (e) {
+      ultimoMotivo = erroTransitorio(e);
+    }
+  }
+
+  return resultado("amazon", "falha_teste", {
+    modo,
+    motivo: ultimoMotivo,
+    prova: "conversao_real_amazon"
+  }, false);
 }
 
 function urlAliExpressValida(url = "") {

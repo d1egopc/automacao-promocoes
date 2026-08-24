@@ -3878,6 +3878,32 @@ const importarAmazon = criarImportarAmazon({
   registrarAlertaIntegracao: (...args) => registrarAlertaIntegracao(...args)
 });
 
+function importarAmazonTesteManualReadOnly(url, config = {}, opcoes = {}) {
+  const sinal = opcoes?.sinal || {};
+  const importarAmazonManual = criarImportarAmazon({
+    extrairJsonLd,
+    extrairMeta,
+    htmlDecode,
+    limparPreco,
+    corrigirImagemUrl,
+    limparLinkAmazon,
+    gerarLinkOptimus,
+    extrairCuponsAmazonDoHtml,
+    detectarAvisoCupomAmazon,
+    escolherCupomParaOfertaAmazon,
+    registrarSucessoIntegracao: (_clienteId, _marketplace, detalhes = {}) => {
+      sinal.tipo = "sucesso";
+      sinal.codigo = String(detalhes.codigo || "cookie_valido");
+    },
+    registrarAlertaIntegracao: (_clienteId, _marketplace, alerta = {}) => {
+      sinal.tipo = "alerta";
+      sinal.codigo = String(alerta.tipo || alerta.codigo || "falha_teste");
+    }
+  });
+
+  return importarAmazonManual(url, config);
+}
+
 const importarShopee = criarImportarShopee({
   limparPreco,
   htmlDecode,
@@ -22155,6 +22181,7 @@ app.post("/integracoes/:marketplace/test", async (req, res) => {
       const resultadoTeste = await testarIntegracaoMarketplace(clienteId, marketplace, config || {}, {
         gerarLinkAfiliadoMercadoLivre,
         gerarLinkAmazon: conversoresAfiliados.gerarLinkAmazon,
+        importarAmazonTesteManual: importarAmazonTesteManualReadOnly,
         obterSaudeIntegracaoAtual
       });
       const integracaoIdResultado = resultadoTeste.integracaoId || resultadoTeste.saude?.integracaoId || "";
