@@ -604,13 +604,21 @@ function fechar(server) {
     const bodyMinimo = await respostaMinimo.json();
     assert.strictEqual(respostaMinimo.status, 201);
     assert.strictEqual(bodyMinimo.ok, true);
-    assert.strictEqual(bodyMinimo.externalReference, "mp_order_min_user_4ap7aetj_pro_suporte_minimo_v1");
+    assert.match(bodyMinimo.externalReference, /^mp_diag_\d{14}_[a-f0-9]{12}$/);
     assert.strictEqual(bodyMinimo.orderId, "ORD_TEST_2");
     assert.strictEqual(bodyMinimo.pixPresente.qrCode, true);
     assert.strictEqual(bodyMinimo.pixPresente.ticketUrl, true);
     assert.strictEqual(sdkFactoryChamadas, 2, "rota minima usa SDK oficial injetado");
     assert.strictEqual(clientDiagnostico.calls.length, 2, "rota minima faz somente uma chamada extra ao SDK");
-    assert.strictEqual(clientDiagnostico.calls[1].idempotencyKey, "mp-order-min-user-4ap7aetj-pro-suporte-minimo-v1");
+    assert.match(clientDiagnostico.calls[1].idempotencyKey, /^mp-diag-[0-9a-f-]{36}$/);
+    assert.strictEqual(clientDiagnostico.calls[1].idempotencyKey.length, bodyMinimo.idempotencyKeyLength);
+    assert.ok(bodyMinimo.idempotencyKeyLength >= 1 && bodyMinimo.idempotencyKeyLength <= 64);
+    assert.strictEqual(typeof bodyMinimo.idempotencyKeyFingerprint, "string");
+    assert.strictEqual(bodyMinimo.idempotencyKeyFingerprint.length, 12);
+    assert.strictEqual(clientDiagnostico.calls[1].body.external_reference, bodyMinimo.externalReference);
+    assert.strictEqual(bodyMinimo.amountType, "number");
+    assert.strictEqual(bodyMinimo.totalAmountType, "number");
+    assert.strictEqual(bodyMinimo.payerEmailTipo, "real");
     assert.strictEqual(clientDiagnostico.calls[1].body.type, "online");
     assert.strictEqual(clientDiagnostico.calls[1].body.processing_mode, "automatic");
     assert.strictEqual(clientDiagnostico.calls[1].body.total_amount, 2);
@@ -623,8 +631,85 @@ function fechar(server) {
     assert.ok(!("notification_url" in clientDiagnostico.calls[1].body), "payload minimo nao envia notification_url");
     assert.strictEqual(repoDiagnostico.state.ledger.length, 0, "rota minima nao concede credito");
     assert.strictEqual(repoDiagnostico.state.payments.length, 1, "rota minima nao cria payment financeiro");
+
+    const respostaMinimo2 = await fetch(`http://127.0.0.1:${porta}/pix/orders-minimo-producao-diagnostico`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clienteId: "user_4ap7aetj", planoId: "pro" })
+    });
+    const bodyMinimo2 = await respostaMinimo2.json();
+    assert.strictEqual(respostaMinimo2.status, 201);
+    assert.notStrictEqual(bodyMinimo2.externalReference, bodyMinimo.externalReference, "duas execucoes geram external_reference unico");
+    assert.notStrictEqual(clientDiagnostico.calls[2].idempotencyKey, clientDiagnostico.calls[1].idempotencyKey, "duas execucoes geram idempotency unica");
+    assert.ok(bodyMinimo2.idempotencyKeyLength <= 64);
   } finally {
     await fechar(serverDiagnostico);
+  }
+
+  const erroSdkDiagnostico = new Error("mercadopago_api_falhou");
+  erroSdkDiagnostico.status = 400;
+  erroSdkDiagnostico.apiResponse = {
+    status: 400,
+    headers: {
+      "x-request-id": "mp_req_diag_123",
+      "content-type": "application/json",
+      authorization: "Bearer APP_USR_TOKEN_NAO_SAIR"
+    },
+    content: {
+      message: "Invalid payer cliente.real@test.local Authorization Bearer APP_USR_TOKEN_NAO_SAIR",
+      error: "bad_request",
+      code: "invalid_properties",
+      cause: [{ code: "invalid_payer", description: "payer.email cliente.real@test.local" }],
+      details: [{ field: "payer.email", issue: "invalid cliente.real@test.local" }],
+      errors: [{ code: "property_value", message: "Authorization Bearer APP_USR_TOKEN_NAO_SAIR" }],
+      access_token: "APP_USR_TOKEN_NAO_SAIR"
+    }
+  };
+  const appDiagnosticoErro = express();
+  appDiagnosticoErro.use(express.json());
+  appDiagnosticoErro.use("/", criarRotasFinanceiroMercadoPago({
+    getUsuarios: () => [{ id: "user_4ap7aetj", email: "cliente.real@test.local" }],
+    getPlanos: () => ({ pro: { ...planoPro, preco: "R$ 2,00" } }),
+    isAdminMaster: () => true,
+    repositorio: new RepoMemoria(),
+    sdkOrderClientFactory: () => ({
+      criarOrder: async () => {
+        throw erroSdkDiagnostico;
+      }
+    }),
+    env: {
+      MERCADOPAGO_ACCESS_TOKEN: "APP_USR_TOKEN_PRODUCAO_FAKE",
+      MERCADOPAGO_ENV: "production"
+    }
+  }));
+  const serverDiagnosticoErro = await escutar(appDiagnosticoErro);
+  try {
+    const porta = serverDiagnosticoErro.address().port;
+    const respostaErroDiag = await fetch(`http://127.0.0.1:${porta}/pix/orders-minimo-producao-diagnostico`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clienteId: "user_4ap7aetj", planoId: "pro" })
+    });
+    const bodyErroDiag = await respostaErroDiag.json();
+    assert.strictEqual(respostaErroDiag.status, 400);
+    assert.match(bodyErroDiag.externalReference, /^mp_diag_\d{14}_[a-f0-9]{12}$/);
+    assert.ok(bodyErroDiag.idempotencyKeyLength <= 64);
+    assert.strictEqual(bodyErroDiag.xRequestId, "mp_req_diag_123");
+    assert.strictEqual(bodyErroDiag.detalheMercadoPago.xRequestId, "mp_req_diag_123");
+    assert.strictEqual(bodyErroDiag.detalheMercadoPago.headers["x-request-id"], "mp_req_diag_123");
+    assert.strictEqual(bodyErroDiag.detalheMercadoPago.headers["content-type"], "application/json");
+    assert.strictEqual(bodyErroDiag.detalheMercadoPago.headers.authorization, undefined);
+    assert.strictEqual(bodyErroDiag.detalheMercadoPago.code, "invalid_properties");
+    assert.strictEqual(bodyErroDiag.detalheMercadoPago.error, "bad_request");
+    assert.strictEqual(Array.isArray(bodyErroDiag.detalheMercadoPago.cause), true);
+    assert.strictEqual(Array.isArray(bodyErroDiag.detalheMercadoPago.details), true);
+    assert.strictEqual(Array.isArray(bodyErroDiag.detalheMercadoPago.errors), true);
+    const serializadoErroDiag = JSON.stringify(bodyErroDiag);
+    assert.strictEqual(serializadoErroDiag.includes("APP_USR_TOKEN_NAO_SAIR"), false, "diagnostico nao vaza token");
+    assert.strictEqual(serializadoErroDiag.includes("cliente.real@test.local"), false, "diagnostico nao vaza email completo");
+    assert.strictEqual(serializadoErroDiag.includes("Authorization Bearer"), false, "diagnostico nao vaza authorization");
+  } finally {
+    await fechar(serverDiagnosticoErro);
   }
 
   const publicoEmBreve = await financeiro.criarCobrancaFinanceira({

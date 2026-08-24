@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("crypto");
 const express = require("express");
 const {
   PROVIDER_MERCADOPAGO,
@@ -13,6 +14,63 @@ const { reconciliarLedgerFinanceiroPendente } = require("./financeiro.service");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
+}
+
+function textoSeguroMercadoPago(valor = "") {
+  return texto(valor)
+    .replace(/authorization\s*[:=]\s*(?:Bearer\s+)?[^\s,;}]+/gi, "authorization:[redacted]")
+    .replace(/authorization\s+bearer\s+[^\s,;}]+/gi, "authorization:[redacted]")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/APP_(?:USR|TEST|PUBLIC)_[A-Za-z0-9._~+/=-]+/gi, "[mp_token]")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]");
+}
+
+function sanitizarValorMercadoPagoLocal(valor, profundidade = 0) {
+  if (profundidade > 6) return "[max_depth]";
+  if (valor === null || valor === undefined) return valor;
+  if (typeof valor === "string") return textoSeguroMercadoPago(valor);
+  if (typeof valor === "number" || typeof valor === "boolean") return valor;
+  if (Array.isArray(valor)) {
+    return valor.slice(0, 20).map((item) => sanitizarValorMercadoPagoLocal(item, profundidade + 1));
+  }
+  if (typeof valor === "object") {
+    const seguro = {};
+    for (const [chave, item] of Object.entries(valor)) {
+      const chaveNormalizada = texto(chave).toLowerCase();
+      if (/authorization|access_token|client_secret|secret|cookie|token/.test(chaveNormalizada)) {
+        seguro[chave] = "[redacted]";
+        continue;
+      }
+      seguro[chave] = sanitizarValorMercadoPagoLocal(item, profundidade + 1);
+    }
+    return seguro;
+  }
+  return textoSeguroMercadoPago(valor);
+}
+
+function lerHeaderSeguroMercadoPago(headers = {}, nome = "") {
+  if (!headers || !nome) return "";
+  if (typeof headers.get === "function") return texto(headers.get(nome));
+  return texto(headers[nome] || headers[nome.toLowerCase()] || headers[nome.toUpperCase()]);
+}
+
+function headersSegurosMercadoPago(headers = {}) {
+  const seguro = {};
+  for (const nome of ["x-request-id", "content-type", "retry-after"]) {
+    const valor = lerHeaderSeguroMercadoPago(headers, nome);
+    if (valor) seguro[nome] = textoSeguroMercadoPago(valor);
+  }
+  return seguro;
+}
+
+function headersErroSdkMercadoPago(erro = {}) {
+  return (
+    erro.headers ||
+    erro.apiResponse?.headers ||
+    erro.apiResponse?.response?.headers ||
+    erro.response?.headers ||
+    {}
+  );
 }
 
 function resumoPixSeguro(order = {}) {
@@ -58,14 +116,10 @@ function sanitizarErroMercadoPagoLocal(payload = {}, status = 0) {
   const seguro = {
     status: Number(status) || Number(payload.status) || 0
   };
-  for (const campo of ["message", "error", "code"]) {
-    if (payload[campo]) seguro[campo] = texto(payload[campo]).replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]");
-  }
-  if (Array.isArray(payload.cause)) {
-    seguro.cause = payload.cause.map((item) => ({
-      code: texto(item?.code),
-      description: texto(item?.description).replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
-    }));
+  for (const campo of ["message", "error", "code", "cause", "details", "errors"]) {
+    if (payload[campo] !== undefined) {
+      seguro[campo] = sanitizarValorMercadoPagoLocal(payload[campo]);
+    }
   }
   return seguro;
 }
@@ -98,15 +152,50 @@ function criarMercadoPagoSdkOrderClientLocal({ accessToken = "" } = {}) {
         });
       } catch (erroOriginal) {
         const status = statusErroSdkMercadoPago(erroOriginal);
+        const headersSeguros = headersSegurosMercadoPago(headersErroSdkMercadoPago(erroOriginal));
         const detalheMercadoPago = sanitizarErroMercadoPagoLocal(payloadErroSdkMercadoPago(erroOriginal), status);
+        if (Object.keys(headersSeguros).length) detalheMercadoPago.headers = headersSeguros;
+        if (headersSeguros["x-request-id"]) detalheMercadoPago.xRequestId = headersSeguros["x-request-id"];
         const erro = new Error("mercadopago_api_falhou");
         erro.codigo = "mercadopago_api_falhou";
         erro.status = status;
         erro.detalheMercadoPago = detalheMercadoPago;
+        erro.xRequestId = headersSeguros["x-request-id"] || "";
         throw erro;
       }
     }
   };
+}
+
+function fingerprintCurto(valor = "") {
+  return crypto.createHash("sha256").update(texto(valor)).digest("hex").slice(0, 12);
+}
+
+function gerarIdsDiagnosticoOrderMinimo(agora = new Date()) {
+  const runId = crypto.randomUUID();
+  const uuidCompacto = runId.replace(/-/g, "");
+  const timestamp = new Date(agora).toISOString().replace(/\D/g, "").slice(0, 14);
+  const externalReference = `mp_diag_${timestamp}_${uuidCompacto.slice(0, 12)}`;
+  const idempotencyKey = `mp-diag-${runId}`;
+  return {
+    runId,
+    externalReference,
+    idempotencyKey,
+    idempotencyKeyLength: idempotencyKey.length,
+    idempotencyKeyFingerprint: fingerprintCurto(idempotencyKey)
+  };
+}
+
+function validarIdempotencyDiagnostico(idempotencyKey = "") {
+  const tamanho = texto(idempotencyKey).length;
+  return tamanho >= 1 && tamanho <= 64;
+}
+
+function classificarEmailPagadorMercadoPago(email = "") {
+  const normalizado = texto(email).toLowerCase();
+  if (!normalizado || normalizado === "test@testuser.com") return "fallback_test";
+  if (normalizado === "test_user_br@testuser.com") return "testuser";
+  return "real";
 }
 
 function erroHttp(res, erro, fallback = "mercadopago_falhou") {
@@ -380,12 +469,13 @@ function criarRotasFinanceiroMercadoPago({
   });
 
   router.post("/pix/orders-minimo-producao-diagnostico", async (req, res) => {
+    let diagnostico = null;
     try {
       const body = req.body || {};
       const clienteId = texto(body.clienteId);
       const planoId = texto(body.planoId);
-      const externalReference = "mp_order_min_user_4ap7aetj_pro_suporte_minimo_v1";
-      const idempotencyKey = "mp-order-min-user-4ap7aetj-pro-suporte-minimo-v1";
+      diagnostico = gerarIdsDiagnosticoOrderMinimo();
+      const { externalReference, idempotencyKey } = diagnostico;
 
       if (clienteId !== "user_4ap7aetj" || planoId !== "pro") {
         return res.status(400).json({
@@ -433,19 +523,61 @@ function criarRotasFinanceiroMercadoPago({
         }
       };
 
+      if (!validarIdempotencyDiagnostico(idempotencyKey)) {
+        return res.status(500).json({
+          ok: false,
+          codigo: "mercadopago_order_minimo_idempotency_invalida",
+          externalReference,
+          idempotencyKeyLength: diagnostico.idempotencyKeyLength,
+          idempotencyKeyFingerprint: diagnostico.idempotencyKeyFingerprint
+        });
+      }
+
       const order = await mpClient.criarOrder(orderBody, { idempotencyKey });
 
       return res.status(201).json({
         ok: true,
         provider: PROVIDER_MERCADOPAGO,
         externalReference,
+        idempotencyKeyLength: diagnostico.idempotencyKeyLength,
+        idempotencyKeyFingerprint: diagnostico.idempotencyKeyFingerprint,
+        amountType: typeof orderBody.transactions.payments[0].amount,
+        totalAmountType: typeof orderBody.total_amount,
+        payerEmailTipo: classificarEmailPagadorMercadoPago(orderBody.payer.email),
         orderId: texto(order.id || order.order_id || ""),
         status: texto(order.status || ""),
         statusDetail: texto(order.status_detail || order.statusDetail || ""),
         pixPresente: resumoPixSeguro(order)
       });
     } catch (erro) {
-      return erroHttp(res, erro, "mercadopago_order_minimo_diagnostico_falhou");
+      const codigo = erro?.codigo || "mercadopago_order_minimo_diagnostico_falhou";
+      const statusSdk = statusErroSdkMercadoPago(erro);
+      const status = erro?.statusCode || erro?.status || statusSdk || (
+        /nao_configurado/.test(codigo) ? 503 :
+          /nao_encontrado/.test(codigo) ? 404 :
+            /obrigatorio|invalido|nao_cobravel|nao_contratavel|sem_/.test(codigo) ? 400 : 500
+      );
+      const headersSeguros = headersSegurosMercadoPago(headersErroSdkMercadoPago(erro));
+      const detalheMercadoPago = erro?.detalheMercadoPago || (
+        statusSdk ? sanitizarErroMercadoPagoLocal(payloadErroSdkMercadoPago(erro), status) : undefined
+      );
+      if (detalheMercadoPago && Object.keys(headersSeguros).length && !detalheMercadoPago.headers) {
+        detalheMercadoPago.headers = headersSeguros;
+      }
+      if (detalheMercadoPago && headersSeguros["x-request-id"] && !detalheMercadoPago.xRequestId) {
+        detalheMercadoPago.xRequestId = headersSeguros["x-request-id"];
+      }
+      return res.status(status).json({
+        ok: false,
+        codigo,
+        erro: status < 500 ? (erro?.message || codigo) : "Falha no Mercado Pago",
+        statusMercadoPago: detalheMercadoPago ? (Number(erro.status) || Number(detalheMercadoPago.status) || status) : undefined,
+        detalheMercadoPago,
+        xRequestId: erro?.xRequestId || detalheMercadoPago?.xRequestId || detalheMercadoPago?.headers?.["x-request-id"] || "",
+        externalReference: diagnostico?.externalReference || "",
+        idempotencyKeyLength: diagnostico?.idempotencyKeyLength || 0,
+        idempotencyKeyFingerprint: diagnostico?.idempotencyKeyFingerprint || ""
+      });
     }
   });
 
