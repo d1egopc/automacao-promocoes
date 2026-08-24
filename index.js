@@ -3403,6 +3403,9 @@ function normalizarRecursosPlanosRuntime() {
     if (!Object.prototype.hasOwnProperty.call(plano.recursos, "vitrine")) {
       plano.recursos.vitrine = false;
     }
+    if (!Object.prototype.hasOwnProperty.call(plano.recursos, "copyIaGenerativa")) {
+      plano.recursos.copyIaGenerativa = false;
+    }
   }
 }
 
@@ -10229,6 +10232,7 @@ app.post("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
       mensageiro: booleanPlano("mensageiro", recursosAnteriores.mensageiro),
       templatePersonalizado: booleanPlano("templatePersonalizado", recursosAnteriores.templatePersonalizado),
       tituloIa: booleanPlano("tituloIa", recursosAnteriores.tituloIa),
+      copyIaGenerativa: booleanPlano("copyIaGenerativa", recursosAnteriores.copyIaGenerativa),
       whatsapp: booleanPlano("whatsapp", recursosAnteriores.whatsapp),
       telegram: booleanPlano("telegram", recursosAnteriores.telegram),
       discord: booleanPlano("discord", recursosAnteriores.discord),
