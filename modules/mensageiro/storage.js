@@ -252,6 +252,26 @@ function normalizarListaPalavras(lista = []) {
     });
 }
 
+function temPropriedade(objeto = {}, chave = "") {
+  return Boolean(objeto && typeof objeto === "object" && Object.prototype.hasOwnProperty.call(objeto, chave));
+}
+
+function alcanceGruposConfigurado(raw = {}, grupos = []) {
+  if (!raw || typeof raw !== "object") return false;
+  if (raw.gruposConfigurados === true || raw.gruposConfigurado === true) return true;
+  if (raw.alcanceConfigurado === true || raw.gruposEscopoConfigurado === true) return true;
+  return temPropriedade(raw, "grupos") && Array.isArray(raw.grupos) && grupos.length > 0;
+}
+
+function aplicarAlcanceGrupos(raw = {}, destino = {}) {
+  const grupos = normalizarListaPalavras(raw?.grupos);
+  return {
+    ...destino,
+    grupos,
+    gruposConfigurados: alcanceGruposConfigurado(raw, grupos)
+  };
+}
+
 function normalizarRespostaComando(resposta = {}) {
   const raw = resposta && typeof resposta === "object" ? resposta : {};
   const tipo = TIPOS_RESPOSTA_COMANDO.has(raw.tipo)
@@ -272,14 +292,13 @@ function normalizarComandoMensageiro(comando = {}, index = 0) {
     ? raw.correspondencia
     : "exato";
 
-  return {
+  return aplicarAlcanceGrupos(raw, {
     id: String(raw.id || `cmd_${Date.now()}_${index}`),
     ativo: raw.ativo !== false,
     nome: String(raw.nome || `Comando ${index + 1}`).trim(),
     perfilId: raw.perfilId ? String(raw.perfilId).trim() : "",
     gatilhos,
     correspondencia,
-    grupos: normalizarListaPalavras(raw.grupos),
     mencionarAutor: raw.mencionarAutor === true,
     resposta: normalizarRespostaComando(raw.resposta || {}),
     cooldownSegundos: Math.max(5, Math.min(3600, Number(raw.cooldownSegundos || 30) || 30)),
@@ -287,7 +306,7 @@ function normalizarComandoMensageiro(comando = {}, index = 0) {
       5,
       Math.min(3600, Number(raw.cooldownParticipanteSegundos || 60) || 60)
     )
-  };
+  });
 }
 
 function normalizarComandosMensageiro(comandos = []) {
@@ -355,13 +374,12 @@ function normalizarProgramacaoMensageiro(programacao = {}, index = 0) {
   const intervaloMinutos = Math.max(10, Math.min(1440, Number(raw.intervaloMinutos || 30) || 30));
   const indiceAtual = Math.max(0, Number(raw.indiceAtual || 0) || 0);
 
-  return {
+  return aplicarAlcanceGrupos(raw, {
     id: String(raw.id || `prog_${Date.now()}_${index}`),
     ativo: raw.ativo !== false,
     nome: String(raw.nome || `Programacao ${index + 1}`).trim(),
     perfilId: raw.perfilId ? String(raw.perfilId).trim() : "",
     tipo,
-    grupos: normalizarListaPalavras(raw.grupos),
     horario: normalizarHorarioMensageiro(raw.horario),
     data: normalizarDataMensageiro(raw.data),
     intervaloMinutos,
@@ -376,7 +394,7 @@ function normalizarProgramacaoMensageiro(programacao = {}, index = 0) {
     lockAte: raw.lockAte ? String(raw.lockAte) : "",
     status: String(raw.status || "pendente"),
     ultimoRunId: raw.ultimoRunId ? String(raw.ultimoRunId) : ""
-  };
+  });
 }
 
 function normalizarConfigMensagemPerfil(raw = {}, fallback = {}) {
@@ -401,6 +419,19 @@ function normalizarModuloSimplesPerfil(raw = {}, ativoPadrao = false) {
   return {
     ativo: fonte.ativo === undefined ? ativoPadrao === true : fonte.ativo === true
   };
+}
+
+function normalizarModuloAlcancePerfil(raw = {}, ativoPadrao = false, fallback = {}) {
+  const fonte = raw && typeof raw === "object" ? raw : {};
+  const fallbackFonte = fallback && typeof fallback === "object" ? fallback : {};
+  const fonteAlcance = temPropriedade(fonte, "grupos") ||
+    fonte.gruposConfigurados === true ||
+    fonte.gruposConfigurado === true ||
+    fonte.alcanceConfigurado === true ||
+    fonte.gruposEscopoConfigurado === true
+    ? fonte
+    : fallbackFonte;
+  return aplicarAlcanceGrupos(fonteAlcance, normalizarModuloSimplesPerfil(fonte, ativoPadrao));
 }
 
 function criarConfiguracaoGerentePadrao() {
@@ -530,10 +561,10 @@ function normalizarModulosPerfilMensageiro(modulos = {}, fallback = {}) {
   return {
     boasVindas: normalizarModuloMensagemPerfil(raw.boasVindas, fallback.boasVindas),
     despedida: normalizarModuloMensagemPerfil(raw.despedida, fallback.despedida),
-    comandos: normalizarModuloSimplesPerfil(raw.comandos, fallback.comandos?.ativo === true),
+    comandos: normalizarModuloAlcancePerfil(raw.comandos, fallback.comandos?.ativo === true, fallback.comandos),
     programacoes: normalizarModuloSimplesPerfil(raw.programacoes, fallback.programacoes?.ativo === true),
     gerente: {
-      ...normalizarModuloSimplesPerfil(raw.gerente, fallback.gerente?.ativo === true),
+      ...normalizarModuloAlcancePerfil(raw.gerente, fallback.gerente?.ativo === true, fallback.gerente),
       configuracao: normalizarConfiguracaoGerente(raw.gerente?.configuracao || fallback.gerente?.configuracao || {})
     }
   };
@@ -604,6 +635,18 @@ function normalizarSet(valores = []) {
   return new Set(valores.map(item => String(item?.id || item || "").trim()).filter(Boolean));
 }
 
+function moduloPossuiAlcanceProprio(modulo = {}) {
+  return Boolean(modulo && typeof modulo === "object" && modulo.gruposConfigurados === true);
+}
+
+function gruposAlcanceModuloPerfil(perfil = {}, modulo = "") {
+  const moduloConfig = perfil?.modulos?.[modulo];
+  if (moduloPossuiAlcanceProprio(moduloConfig)) {
+    return Array.isArray(moduloConfig.grupos) ? moduloConfig.grupos : [];
+  }
+  return Array.isArray(perfil?.grupos) ? perfil.grupos : [];
+}
+
 function validarPerfisMensageiro(perfis = [], opcoes = {}) {
   const lista = normalizarPerfisMensageiro(perfis);
   const ativos = lista.filter(perfil => perfil.ativo && !perfil.removidoEm);
@@ -647,6 +690,24 @@ function validarPerfisMensageiro(perfis = [], opcoes = {}) {
       }
       gruposAtivos.set(grupoId, { perfilId: perfil.id, sessaoId: perfil.sessaoId });
     }
+
+    const alcancesModulares = [
+      ["gerente", perfil.modulos?.gerente],
+      ["comandos", perfil.modulos?.comandos]
+    ];
+    for (const [modulo, moduloConfig] of alcancesModulares) {
+      if (!moduloPossuiAlcanceProprio(moduloConfig)) continue;
+      const gruposModulo = Array.isArray(moduloConfig.grupos) ? moduloConfig.grupos : [];
+      for (const grupoId of gruposModulo) {
+        if (gruposValidosSessao.size && !gruposValidosSessao.has(grupoId)) {
+          throw erroContratoMensageiro("grupo_fora_da_sessao", "Grupo do modulo nao pertence a sessao informada.", {
+            perfilId: perfil.id,
+            modulo,
+            grupoId
+          });
+        }
+      }
+    }
   }
 
   return lista;
@@ -672,10 +733,12 @@ function resolverPerfilMensageiro({ clienteId, sessaoId = "", grupoId = "", modu
 
   const candidatos = perfisAtivos.filter(perfil => {
     if (sessaoId && perfil.sessaoId !== sessaoId) return false;
-    if (grupoId && !perfil.grupos.includes(grupoId)) return false;
     if (moduloSolicitado && MODULOS_PERFIL_MENSAGEIRO.has(moduloSolicitado)) {
       const moduloConfig = perfil.modulos?.[moduloSolicitado];
       if (!moduloConfig || moduloConfig.ativo !== true) return false;
+      if (grupoId && !gruposAlcanceModuloPerfil(perfil, moduloSolicitado).includes(grupoId)) return false;
+    } else if (grupoId && !perfil.grupos.includes(grupoId)) {
+      return false;
     }
     return true;
   });
@@ -1185,6 +1248,8 @@ module.exports = {
   validarPerfisMensageiro,
   criarPerfilLegadoVirtual,
   resolverPerfilMensageiro,
+  moduloPossuiAlcanceProprio,
+  gruposAlcanceModuloPerfil,
   MAX_PERFIS_MENSAGEIRO,
   PERFIL_LEGADO_ID
 };

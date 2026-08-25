@@ -33,6 +33,7 @@ function configurar(comandos, extras = {}) {
     sessaoWhatsappId: "sessao_bot",
     sessaoGruposId: "sessao_bot",
     grupos: ["grupo_1@g.us", "grupo_2@g.us"],
+    perfis: [],
     comandos,
     ...extras
   });
@@ -71,6 +72,23 @@ const comandoPix = {
   cooldownParticipanteSegundos: 5
 };
 
+function perfilComandos({ grupos = ["grupo_1@g.us"], comandosGrupos = [], comandosGruposConfigurados = false } = {}) {
+  return {
+    id: "perfil_cmd",
+    nome: "Perfil Comandos",
+    ativo: true,
+    sessaoId: "sessao_bot",
+    grupos,
+    modulos: {
+      boasVindas: { ativo: false, configuracao: { mensagem: "", imagem: "", envio: { destino: "privado" } } },
+      despedida: { ativo: false, configuracao: { mensagem: "", imagem: "", envio: { destino: "privado" } } },
+      comandos: { ativo: true, grupos: comandosGrupos, gruposConfigurados: comandosGruposConfigurados },
+      programacoes: { ativo: true },
+      gerente: { ativo: false, configuracao: { regras: [] } }
+    }
+  };
+}
+
 (async () => {
   configurar([comandoPix]);
 
@@ -82,6 +100,27 @@ const comandoPix = {
 
   sock = await disparar({ grupo: "grupo_nao_monitorado@g.us" });
   assert.strictEqual(sock.envios.length, 0, "grupo nao monitorado nao dispara");
+
+  configurar([{ ...comandoPix, id: "cmd_especifico", grupos: ["grupo_2@g.us"], gruposConfigurados: true }], {
+    grupos: ["grupo_1@g.us"],
+    perfis: [perfilComandos({ grupos: ["grupo_1@g.us"], comandosGrupos: ["grupo_1@g.us"], comandosGruposConfigurados: true })]
+  });
+  sock = await disparar({ grupo: "grupo_2@g.us", id: "cmd_grupo_especifico" });
+  assert.strictEqual(sock.envios.length, 1, "comando.grupos especifico tem prioridade sobre modulo e legado");
+
+  configurar([{ ...comandoPix, id: "cmd_modulo_padrao", grupos: [], gruposConfigurados: false }], {
+    grupos: ["grupo_1@g.us"],
+    perfis: [perfilComandos({ grupos: [], comandosGrupos: ["grupo_2@g.us"], comandosGruposConfigurados: true })]
+  });
+  sock = await disparar({ grupo: "grupo_2@g.us", id: "cmd_modulo_grupo" });
+  assert.strictEqual(sock.envios.length, 1, "perfil.modulos.comandos.grupos funciona como padrao");
+
+  configurar([{ ...comandoPix, id: "cmd_modulo_vazio", grupos: [], gruposConfigurados: false }], {
+    grupos: ["grupo_1@g.us"],
+    perfis: [perfilComandos({ grupos: ["grupo_1@g.us"], comandosGrupos: [], comandosGruposConfigurados: true })]
+  });
+  sock = await disparar({ grupo: "grupo_1@g.us", id: "cmd_modulo_vazio" });
+  assert.strictEqual(sock.envios.length, 0, "perfil.modulos.comandos.grupos=[] explicito bloqueia o Bot");
 
   configurar([{ ...comandoPix, ativo: false }]);
   sock = await disparar({ id: "msg_desativado" });

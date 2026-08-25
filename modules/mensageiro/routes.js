@@ -24,7 +24,9 @@ const {
   referenciaGrupoGerente,
   listarSessoesMensageiro,
   listarGruposSessaoMensageiro,
-  getSockMensageiro
+  getSockMensageiro,
+  moduloPossuiAlcanceProprio,
+  gruposAlcanceModuloPerfil
 } = deps;
 
 function normalizarAtendimentoMensageiro(dados = {}) {
@@ -147,7 +149,15 @@ async function montarStatusGerentePerfil({ clienteId, perfil = {}, sessoesValida
       .filter(grupo => grupo.grupoId)
       .map(grupo => [grupo.grupoId, grupo])
   );
-  const gruposPerfil = Array.isArray(perfil?.grupos) ? perfil.grupos.map(item => String(item || "").trim()).filter(Boolean) : [];
+  const gerenteTemAlcanceProprio = typeof moduloPossuiAlcanceProprio === "function"
+    ? moduloPossuiAlcanceProprio(gerente)
+    : gerente?.gruposConfigurados === true;
+  const gruposAlcance = typeof gruposAlcanceModuloPerfil === "function"
+    ? gruposAlcanceModuloPerfil(perfil, "gerente")
+    : gerenteTemAlcanceProprio
+      ? (Array.isArray(gerente?.grupos) ? gerente.grupos : [])
+      : (Array.isArray(perfil?.grupos) ? perfil.grupos : []);
+  const gruposPerfil = Array.isArray(gruposAlcance) ? gruposAlcance.map(item => String(item || "").trim()).filter(Boolean) : [];
   const motivosPorGrupo = new Map(
     ultimosMotivos
       .filter(item => item?.perfilId === perfil?.id)
@@ -337,6 +347,49 @@ function montarContextoValidacaoPerfis(clienteId, perfis = [], configAtual = {})
   }
 
   return { sessoesValidas, gruposPorSessao };
+}
+
+function erroContratoMensageiroRoutes(code, message, extra = {}) {
+  const erro = new Error(message || code);
+  erro.code = code;
+  erro.statusCode = 400;
+  Object.assign(erro, extra);
+  return erro;
+}
+
+function validarAlcanceServicosMensageiro({ comandos = [], programacoes = [], perfis = [], contexto = {}, configAtual = {} } = {}) {
+  const gruposPorSessao = contexto.gruposPorSessao && typeof contexto.gruposPorSessao === "object"
+    ? contexto.gruposPorSessao
+    : {};
+  const perfisPorId = new Map((Array.isArray(perfis) ? perfis : [])
+    .filter(perfil => perfil?.id)
+    .map(perfil => [String(perfil.id), perfil]));
+  const sessaoPadrao = String(configAtual.sessaoGruposId || configAtual.sessaoWhatsappId || configAtual.sessaoId || "").trim();
+  const grupoPermitido = (sessaoId, grupoId) => {
+    const catalogo = gruposPorSessao[sessaoId];
+    if (!Array.isArray(catalogo) || !catalogo.length) return true;
+    return new Set(catalogo.map(item => String(item?.id || item || "").trim()).filter(Boolean)).has(grupoId);
+  };
+  const validarLista = (lista, tipo) => {
+    for (const item of Array.isArray(lista) ? lista : []) {
+      if (item?.gruposConfigurados !== true) continue;
+      const perfil = item.perfilId ? perfisPorId.get(String(item.perfilId)) : null;
+      const sessaoId = String(perfil?.sessaoId || sessaoPadrao || "").trim();
+      for (const grupoId of Array.isArray(item.grupos) ? item.grupos : []) {
+        if (!grupoPermitido(sessaoId, String(grupoId || "").trim())) {
+          throw erroContratoMensageiroRoutes("grupo_fora_da_sessao", "Grupo do servico nao pertence a sessao informada.", {
+            tipo,
+            id: item.id,
+            perfilId: item.perfilId || "",
+            grupoId
+          });
+        }
+      }
+    }
+  };
+
+  validarLista(comandos, "comando");
+  validarLista(programacoes, "programacao");
 }
 
 router.get("/config", (req, res) => {
@@ -643,12 +696,20 @@ const perfisPayload = dados.perfis !== undefined
     ? await otimizarImagensPerfis(dados.mensageiro.perfis)
     : configAtualMensageiro.perfis;
 
+const contextoValidacao = montarContextoValidacaoPerfis(clienteId, perfisPayload, configAtualMensageiro);
 if (typeof validarPerfisMensageiro === "function") {
   validarPerfisMensageiro(
     perfisPayload,
-    montarContextoValidacaoPerfis(clienteId, perfisPayload, configAtualMensageiro)
+    contextoValidacao
   );
 }
+validarAlcanceServicosMensageiro({
+  comandos: comandosPayload,
+  programacoes: programacoesPayload,
+  perfis: perfisPayload,
+  contexto: contextoValidacao,
+  configAtual: configAtualMensageiro
+});
 
 const atualizado = setMensageiroCliente(clienteId, {
   ativo: dados.ativo === undefined

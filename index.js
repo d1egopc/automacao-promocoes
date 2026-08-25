@@ -19858,6 +19858,8 @@ app.use("/mensageiro", criarRotasMensageiro({
   zerarInfracaoGerenteCliente: mensageiro.zerarInfracaoGerenteCliente,
   listarUltimosMotivosGerenteCliente: mensageiro.listarUltimosMotivosGerenteCliente,
   referenciaGrupoGerente: mensageiro.referenciaGrupoGerente,
+  moduloPossuiAlcanceProprio: mensageiro.moduloPossuiAlcanceProprio,
+  gruposAlcanceModuloPerfil: mensageiro.gruposAlcanceModuloPerfil,
   listarSessoesMensageiro: (clienteId) => listarSessoesWhatsappCliente(clienteId),
   listarGruposSessaoMensageiro: (clienteId, sessaoId) => {
     const idNormalizado = normalizarSessaoId(clienteId, sessaoId);

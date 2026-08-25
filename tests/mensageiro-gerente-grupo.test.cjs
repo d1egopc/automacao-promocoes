@@ -52,6 +52,8 @@ function perfilGerente(patch = {}) {
       programacoes: { ativo: true },
       gerente: {
         ativo: patch.gerenteAtivo === undefined ? true : patch.gerenteAtivo,
+        grupos: patch.gerenteGrupos || [],
+        gruposConfigurados: patch.gerenteGruposConfigurados === true,
         configuracao: {
           regras: patch.regras || [regra("r_palavra")],
           isentarAdmins: patch.isentarAdmins === undefined ? true : patch.isentarAdmins,
@@ -290,6 +292,14 @@ async function consultarStatusGerente({ perfilId = "perfil_gerente", sock = cria
   configurar({ perfis: [perfilGerente({ sessaoId: "sessao_errada" })] });
   ctx = await processar();
   assert.strictEqual(ctx.sock.envios.length, 0, "sessao errada nao age");
+
+  configurar({ perfis: [perfilGerente({ grupos: [], gerenteGrupos: [grupoId], gerenteGruposConfigurados: true, regras: [regra("r_gerente_alcance", { acao: "apagar" })] })] });
+  ctx = await processar({ msg: mensagem({ texto: "proibido", id: "gerente_alcance_proprio" }) });
+  assert.strictEqual(ctx.resultado.bloqueada, true, "gerente.grupos proprio funciona sem depender de perfil.grupos");
+
+  configurar({ perfis: [perfilGerente({ grupos: [grupoId], gerenteGrupos: [], gerenteGruposConfigurados: true })] });
+  ctx = await processar({ msg: mensagem({ texto: "proibido", id: "gerente_vazio_explicito" }) });
+  assert.strictEqual(ctx.sock.envios.length, 0, "gerente.grupos=[] explicito nao modera grupo algum");
 
   configurar({ perfis: [perfilGerente({ ativo: false })] });
   let statusGerente = await consultarStatusGerente();

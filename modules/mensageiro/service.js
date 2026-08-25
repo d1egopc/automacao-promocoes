@@ -4,7 +4,10 @@ const {
   getMensageiroCliente,
   setMensageiroCliente,
   getAtendimentoConfigCliente,
-  registrarHistoricoAtendimento
+  registrarHistoricoAtendimento,
+  resolverPerfilMensageiro,
+  moduloPossuiAlcanceProprio,
+  gruposAlcanceModuloPerfil
 } = require("./storage");
 const {
   usuarioAtivo,
@@ -814,16 +817,47 @@ async function tratarMensagemAtendimentoV1({
   }
 }
 
-function comandoGrupoPermitido(config = {}, comando = {}, grupoId = "") {
-  if (!grupoPermitido(config.clienteId, grupoId)) return false;
+function comandoPossuiAlcanceProprio(comando = {}) {
+  return Boolean(comando && typeof comando === "object" && comando.gruposConfigurados === true);
+}
 
-  const gruposComando = Array.isArray(comando.grupos)
-    ? comando.grupos
-    : [];
+function comandoGrupoPermitido(config = {}, comando = {}, grupoId = "", sessaoId = "") {
+  const gruposComando = Array.isArray(comando.grupos) ? comando.grupos : [];
+  if (comandoPossuiAlcanceProprio(comando)) return gruposComando.includes(grupoId);
 
-  if (!gruposComando.length) return true;
+  const perfis = Array.isArray(config.perfis) ? config.perfis : [];
+  const perfilComando = comando.perfilId
+    ? perfis.find(perfil => perfil?.id === comando.perfilId && perfil?.ativo !== false && !perfil?.removidoEm)
+    : null;
+  const resolucao = perfilComando
+    ? { ok: true, legado: false, perfil: perfilComando }
+    : resolverPerfilMensageiro({
+      clienteId: config.clienteId,
+      sessaoId,
+      grupoId,
+      modulo: "comandos",
+      config
+    });
+  const perfil = resolucao?.ok && resolucao.legado !== true ? resolucao.perfil : null;
+  const perfilModuloConfigurado = perfil || perfis.find(item =>
+    item?.ativo !== false &&
+    !item?.removidoEm &&
+    (!sessaoId || item?.sessaoId === sessaoId) &&
+    item?.modulos?.comandos?.ativo === true &&
+    moduloPossuiAlcanceProprio(item?.modulos?.comandos)
+  );
+  const moduloComandos = perfilModuloConfigurado?.modulos?.comandos;
 
-  return gruposComando.includes(grupoId);
+  if (moduloPossuiAlcanceProprio(moduloComandos)) {
+    return gruposAlcanceModuloPerfil(perfilModuloConfigurado, "comandos").includes(grupoId);
+  }
+
+  if (perfil) {
+    const gruposPerfil = Array.isArray(perfil.grupos) ? perfil.grupos : [];
+    return !gruposPerfil.length || gruposPerfil.includes(grupoId);
+  }
+
+  return grupoPermitido(config.clienteId, grupoId);
 }
 
 function encontrarComandoGrupo(texto = "", comandos = []) {
@@ -909,14 +943,13 @@ async function tratarMensagemGrupoComando({
     const config = getMensageiroCliente(clienteId);
     if (config?.ativo !== true) return false;
     if (config.sessaoId && config.sessaoId !== sessaoId) return false;
-    if (!grupoPermitido(clienteId, grupoId)) return false;
 
     const texto = extrairTextoMensagemAtendimento(mensagem);
     const encontrado = encontrarComandoGrupo(texto, config.comandos);
     if (!encontrado) return false;
 
     const { comando, gatilho } = encontrado;
-    if (!comandoGrupoPermitido({ ...config, clienteId }, comando, grupoId)) return false;
+    if (!comandoGrupoPermitido({ ...config, clienteId }, comando, grupoId, sessaoId)) return false;
 
     const participante = extrairParticipanteGrupoMensagem(mensagem);
     const messageId = String(mensagem?.key?.id || "");

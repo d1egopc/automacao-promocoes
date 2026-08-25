@@ -2,6 +2,7 @@ const {
   getMensageiroCliente,
   setMensageiroCliente,
   listarClientesMensageiro,
+  moduloPossuiAlcanceProprio,
   registrarHistoricoAtendimento
 } = require("./storage");
 const {
@@ -166,6 +167,26 @@ function grupoPermitidoConfig(config = {}, grupoId = "") {
   return grupos.includes(grupoId);
 }
 
+function programacaoPossuiAlcanceProprio(programacao = {}) {
+  return Boolean(programacao && typeof programacao === "object" && programacao.gruposConfigurados === true);
+}
+
+function gruposPermitidosProgramacao(config = {}, programacao = {}) {
+  if (programacaoPossuiAlcanceProprio(programacao)) {
+    return Array.isArray(programacao.grupos) ? programacao.grupos : [];
+  }
+
+  const perfil = Array.isArray(config.perfis) && programacao.perfilId
+    ? config.perfis.find(item => item?.id === programacao.perfilId && item?.ativo !== false && !item?.removidoEm)
+    : null;
+  const moduloProgramacoes = perfil?.modulos?.programacoes;
+  if (moduloPossuiAlcanceProprio(moduloProgramacoes)) {
+    return Array.isArray(moduloProgramacoes.grupos) ? moduloProgramacoes.grupos : [];
+  }
+
+  return Array.isArray(config.grupos) ? config.grupos : [];
+}
+
 async function processarProgramacao({ clienteId, programacao, deps = {}, agora = new Date() }) {
   if (!programacao?.ativo) return false;
   if (!usuarioAtivo(clienteId)) {
@@ -258,10 +279,10 @@ async function processarProgramacao({ clienteId, programacao, deps = {}, agora =
     const envio = montarPayloadProgramacao(conteudo);
     if (!envio) throw new Error("conteudo_programacao_invalido");
 
-    const gruposProgramacao = Array.isArray(programacao.grupos) && programacao.grupos.length
-      ? programacao.grupos
-      : (Array.isArray(config.grupos) ? config.grupos : []);
-    const gruposValidos = [...new Set(gruposProgramacao)].filter(grupoId => grupoPermitidoConfig(config, grupoId));
+    const gruposProgramacao = gruposPermitidosProgramacao(config, programacao);
+    const gruposValidos = programacaoPossuiAlcanceProprio(programacao)
+      ? [...new Set(gruposProgramacao)]
+      : [...new Set(gruposProgramacao)].filter(grupoId => grupoPermitidoConfig(config, grupoId));
     if (!gruposValidos.length) {
       const nextRunAt = calcularProximoRunAt(programacao, agora);
       atualizarProgramacao(clienteId, programacao.id, {

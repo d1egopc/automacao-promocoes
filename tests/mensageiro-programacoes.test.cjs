@@ -25,12 +25,12 @@ function criarSock({ falharGrupos = [] } = {}) {
 }
 
 function baseProgramacao(patch = {}) {
-  return {
+  const programacao = {
     id: patch.id || "prog_1",
     ativo: patch.ativo === undefined ? true : patch.ativo,
     nome: patch.nome || "Bom dia",
     tipo: patch.tipo || "intervalo",
-    grupos: patch.grupos || ["grupo_1@g.us"],
+    grupos: patch.grupos === undefined ? ["grupo_1@g.us"] : patch.grupos,
     horario: patch.horario || "08:00",
     data: patch.data || "",
     intervaloMinutos: patch.intervaloMinutos === undefined ? 30 : patch.intervaloMinutos,
@@ -45,6 +45,8 @@ function baseProgramacao(patch = {}) {
     lockAte: patch.lockAte || "",
     status: patch.status || "pendente"
   };
+  if (patch.gruposConfigurados !== undefined) programacao.gruposConfigurados = patch.gruposConfigurados;
+  return programacao;
 }
 
 function configurar(programacoes, extras = {}) {
@@ -119,9 +121,19 @@ function forcarDue(id, nextRunAt = "2026-08-24T14:59:00.000Z") {
   prog = storage.getMensageiroCliente("cliente_prog").programacoes.find((p) => p.id === "janela");
   assert.ok(prog.nextRunAt.startsWith("2026-08-24T11:00:00"), "fora da janela calcula proximo inicio");
 
-  configurar([baseProgramacao({ id: "grupo_bloqueado", grupos: ["grupo_fora@g.us"], nextRunAt: "2026-08-24T14:59:00.000Z" })], { grupos: ["grupo_1@g.us"] });
+  const programacaoLegadaSemGrupos = baseProgramacao({ id: "grupo_bloqueado", nextRunAt: "2026-08-24T14:59:00.000Z" });
+  delete programacaoLegadaSemGrupos.grupos;
+  configurar([programacaoLegadaSemGrupos], { grupos: ["grupo_1@g.us"] });
   sock = await rodar();
-  assert.strictEqual(sock.envios.length, 0, "grupo nao permitido nao recebe");
+  assert.deepStrictEqual(sock.envios.map((e) => e.jid), ["grupo_1@g.us"], "propriedade ausente usa fallback legado");
+
+  configurar([baseProgramacao({ id: "grupo_vazio", grupos: [], gruposConfigurados: true, nextRunAt: "2026-08-24T14:59:00.000Z" })], { grupos: ["grupo_1@g.us"] });
+  sock = await rodar();
+  assert.strictEqual(sock.envios.length, 0, "programacao.grupos=[] explicito nao envia");
+
+  configurar([baseProgramacao({ id: "grupo_proprio", grupos: ["grupo_2@g.us"], gruposConfigurados: true, nextRunAt: "2026-08-24T14:59:00.000Z" })], { grupos: ["grupo_1@g.us"] });
+  sock = await rodar();
+  assert.deepStrictEqual(sock.envios.map((e) => e.jid), ["grupo_2@g.us"], "programacao.grupos proprio nao depende de config.grupos");
 
   configurar([baseProgramacao({ id: "multi", grupos: ["grupo_1@g.us", "grupo_2@g.us"], nextRunAt: "2026-08-24T14:59:00.000Z" })]);
   sock = await rodar();
