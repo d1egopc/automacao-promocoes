@@ -563,7 +563,7 @@ function criarRotasFinanceiroMercadoPago({
       const orderBody = {
         type: "online",
         processing_mode: "automatic",
-        total_amount: 2.00,
+        total_amount: "2.00",
         external_reference: externalReference,
         payer: {
           email: texto(usuario.email || usuario.emailUsuario)
@@ -571,7 +571,7 @@ function criarRotasFinanceiroMercadoPago({
         transactions: {
           payments: [
             {
-              amount: 2.00,
+              amount: "2.00",
               payment_method: {
                 id: "pix",
                 type: "bank_transfer"

@@ -617,15 +617,19 @@ function fechar(server) {
     assert.strictEqual(typeof bodyMinimo.idempotencyKeyFingerprint, "string");
     assert.strictEqual(bodyMinimo.idempotencyKeyFingerprint.length, 12);
     assert.strictEqual(clientDiagnostico.calls[1].body.external_reference, bodyMinimo.externalReference);
-    assert.strictEqual(bodyMinimo.amountType, "number");
-    assert.strictEqual(bodyMinimo.totalAmountType, "number");
+    assert.strictEqual(bodyMinimo.amountType, "string");
+    assert.strictEqual(bodyMinimo.totalAmountType, "string");
     assert.strictEqual(bodyMinimo.payerEmailTipo, "real");
     assert.strictEqual(clientDiagnostico.calls[1].body.type, "online");
     assert.strictEqual(clientDiagnostico.calls[1].body.processing_mode, "automatic");
-    assert.strictEqual(clientDiagnostico.calls[1].body.total_amount, 2);
-    assert.strictEqual(typeof clientDiagnostico.calls[1].body.total_amount, "number");
-    assert.strictEqual(clientDiagnostico.calls[1].body.transactions.payments[0].amount, 2);
-    assert.strictEqual(typeof clientDiagnostico.calls[1].body.transactions.payments[0].amount, "number");
+    assert.strictEqual(clientDiagnostico.calls[1].body.total_amount, "2.00");
+    assert.strictEqual(typeof clientDiagnostico.calls[1].body.total_amount, "string");
+    assert.strictEqual(clientDiagnostico.calls[1].body.transactions.payments[0].amount, "2.00");
+    assert.strictEqual(typeof clientDiagnostico.calls[1].body.transactions.payments[0].amount, "string");
+    assert.strictEqual(
+      clientDiagnostico.calls[1].body.transactions.payments[0].amount,
+      clientDiagnostico.calls[1].body.total_amount
+    );
     assert.strictEqual(clientDiagnostico.calls[1].body.transactions.payments[0].payment_method.id, "pix");
     assert.strictEqual(clientDiagnostico.calls[1].body.transactions.payments[0].payment_method.type, "bank_transfer");
     assert.strictEqual(clientDiagnostico.calls[1].body.payer.email, "cliente.real@test.local");
