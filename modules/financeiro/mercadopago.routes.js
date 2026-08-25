@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const express = require("express");
 const {
   PROVIDER_MERCADOPAGO,
+  criarMercadoPagoHttpClient,
   criarCobrancaMercadoPagoPix,
   mercadoPagoConfig,
   processarWebhookMercadoPago,
@@ -18,11 +19,15 @@ function texto(valor = "") {
 
 function textoSeguroMercadoPago(valor = "") {
   return texto(valor)
+    .replace(/(set-cookie|cookie)\s*[:=]\s*[^,;}]+/gi, "$1:[redacted]")
     .replace(/authorization\s*[:=]\s*(?:Bearer\s+)?[^\s,;}]+/gi, "authorization:[redacted]")
     .replace(/authorization\s+bearer\s+[^\s,;}]+/gi, "authorization:[redacted]")
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
     .replace(/APP_(?:USR|TEST|PUBLIC)_[A-Za-z0-9._~+/=-]+/gi, "[mp_token]")
-    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]");
+    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[jwt]")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
+    .replace(/(?:\+?55\s*)?(?:\(?\d{2}\)?\s*)?9?\d{4}[-\s]?\d{4}/g, "[telefone]")
+    .slice(0, 4096);
 }
 
 function sanitizarValorMercadoPagoLocal(valor, profundidade = 0) {
@@ -56,7 +61,7 @@ function lerHeaderSeguroMercadoPago(headers = {}, nome = "") {
 
 function headersSegurosMercadoPago(headers = {}) {
   const seguro = {};
-  for (const nome of ["x-request-id", "content-type", "retry-after"]) {
+  for (const nome of ["x-request-id", "content-type", "retry-after", "x-correlation-id", "x-trace-id"]) {
     const valor = lerHeaderSeguroMercadoPago(headers, nome);
     if (valor) seguro[nome] = textoSeguroMercadoPago(valor);
   }
@@ -66,6 +71,7 @@ function headersSegurosMercadoPago(headers = {}) {
 function headersErroSdkMercadoPago(erro = {}) {
   return (
     erro.headers ||
+    erro.headersDiagnostico ||
     erro.apiResponse?.headers ||
     erro.apiResponse?.response?.headers ||
     erro.response?.headers ||
@@ -87,6 +93,7 @@ function resumoPixSeguro(order = {}) {
 function statusErroSdkMercadoPago(erro = {}) {
   return Number(
     erro.status ||
+    erro.statusMercadoPago ||
     erro.statusCode ||
     erro.httpStatus ||
     erro.apiResponse?.status ||
@@ -99,6 +106,8 @@ function statusErroSdkMercadoPago(erro = {}) {
 function payloadErroSdkMercadoPago(erro = {}) {
   const candidatos = [
     erro.payload,
+    erro.payloadMercadoPagoSanitizado,
+    erro.payloadMercadoPago,
     erro.apiResponse?.content,
     erro.apiResponse?.data,
     erro.response?.data,
@@ -122,6 +131,54 @@ function sanitizarErroMercadoPagoLocal(payload = {}, status = 0) {
     }
   }
   return seguro;
+}
+
+function copiarDiagnosticoMercadoPagoLocal(destino, origem = {}) {
+  if (!destino || !origem) return destino;
+  for (const campo of [
+    "statusMercadoPago",
+    "statusTextMercadoPago",
+    "payloadMercadoPago",
+    "payloadMercadoPagoSanitizado",
+    "rawBodyPresente",
+    "rawBodySanitizado",
+    "headersDiagnostico",
+    "headerNamesRecebidos",
+    "xRequestId"
+  ]) {
+    if (origem[campo] !== undefined) destino[campo] = origem[campo];
+  }
+  return destino;
+}
+
+function primeiroDefinidoMercadoPago(...valores) {
+  return valores.find((valor) => valor !== undefined && valor !== null && valor !== "");
+}
+
+function montarDiagnosticoOrderMinimoMercadoPago({ erro = {}, detalheMercadoPago = null, headersSeguros = {}, status = 0 } = {}) {
+  const payload = erro.payloadMercadoPagoSanitizado || erro.payloadMercadoPago || detalheMercadoPago || {};
+  const headersPermitidos = erro.headersDiagnostico || headersSeguros || {};
+  const xRequestId = primeiroDefinidoMercadoPago(
+    erro.xRequestId,
+    detalheMercadoPago?.xRequestId,
+    headersPermitidos["x-request-id"]
+  ) || "";
+  return {
+    status: Number(erro.statusMercadoPago) || Number(erro.status) || Number(detalheMercadoPago?.status) || Number(status) || 0,
+    statusText: textoSeguroMercadoPago(erro.statusTextMercadoPago || ""),
+    code: primeiroDefinidoMercadoPago(detalheMercadoPago?.code, payload.code, payload.error_code),
+    error: primeiroDefinidoMercadoPago(detalheMercadoPago?.error, payload.error, payload.errorType),
+    message: primeiroDefinidoMercadoPago(detalheMercadoPago?.message, payload.message, payload.mensagem, erro.message),
+    cause: primeiroDefinidoMercadoPago(detalheMercadoPago?.cause, payload.cause, payload.causes),
+    details: primeiroDefinidoMercadoPago(detalheMercadoPago?.details, payload.details),
+    errors: primeiroDefinidoMercadoPago(detalheMercadoPago?.errors, payload.errors),
+    rawBodyPresente: erro.rawBodyPresente,
+    rawBodySanitizado: erro.rawBodySanitizado,
+    payloadMercadoPagoSanitizado: erro.payloadMercadoPagoSanitizado,
+    xRequestId,
+    headersPermitidos,
+    headerNamesRecebidos: Array.isArray(erro.headerNamesRecebidos) ? erro.headerNamesRecebidos : []
+  };
 }
 
 function criarMercadoPagoSdkOrderClientLocal({ accessToken = "" } = {}) {
@@ -161,6 +218,7 @@ function criarMercadoPagoSdkOrderClientLocal({ accessToken = "" } = {}) {
         erro.status = status;
         erro.detalheMercadoPago = detalheMercadoPago;
         erro.xRequestId = headersSeguros["x-request-id"] || "";
+        copiarDiagnosticoMercadoPagoLocal(erro, erroOriginal);
         throw erro;
       }
     }
@@ -501,7 +559,7 @@ function criarRotasFinanceiroMercadoPago({
         });
       }
 
-      const mpClient = client || sdkOrderClientFactory({ accessToken: config.accessToken });
+      const mpClient = client || criarMercadoPagoHttpClient({ accessToken: config.accessToken });
       const orderBody = {
         type: "online",
         processing_mode: "automatic",
@@ -567,13 +625,32 @@ function criarRotasFinanceiroMercadoPago({
       if (detalheMercadoPago && headersSeguros["x-request-id"] && !detalheMercadoPago.xRequestId) {
         detalheMercadoPago.xRequestId = headersSeguros["x-request-id"];
       }
+      const diagnosticoMercadoPago = montarDiagnosticoOrderMinimoMercadoPago({
+        erro,
+        detalheMercadoPago,
+        headersSeguros,
+        status
+      });
       return res.status(status).json({
         ok: false,
         codigo,
         erro: status < 500 ? (erro?.message || codigo) : "Falha no Mercado Pago",
-        statusMercadoPago: detalheMercadoPago ? (Number(erro.status) || Number(detalheMercadoPago.status) || status) : undefined,
+        status: diagnosticoMercadoPago.status,
+        statusText: diagnosticoMercadoPago.statusText,
+        code: diagnosticoMercadoPago.code,
+        error: diagnosticoMercadoPago.error,
+        message: diagnosticoMercadoPago.message,
+        cause: diagnosticoMercadoPago.cause,
+        details: diagnosticoMercadoPago.details,
+        errors: diagnosticoMercadoPago.errors,
+        rawBodyPresente: diagnosticoMercadoPago.rawBodyPresente,
+        rawBodySanitizado: diagnosticoMercadoPago.rawBodySanitizado,
+        payloadMercadoPagoSanitizado: diagnosticoMercadoPago.payloadMercadoPagoSanitizado,
+        headersPermitidos: diagnosticoMercadoPago.headersPermitidos,
+        headerNamesRecebidos: diagnosticoMercadoPago.headerNamesRecebidos,
+        statusMercadoPago: detalheMercadoPago ? (Number(erro.statusMercadoPago) || Number(erro.status) || Number(detalheMercadoPago.status) || status) : undefined,
         detalheMercadoPago,
-        xRequestId: erro?.xRequestId || detalheMercadoPago?.xRequestId || detalheMercadoPago?.headers?.["x-request-id"] || "",
+        xRequestId: diagnosticoMercadoPago.xRequestId,
         externalReference: diagnostico?.externalReference || "",
         idempotencyKeyLength: diagnostico?.idempotencyKeyLength || 0,
         idempotencyKeyFingerprint: diagnostico?.idempotencyKeyFingerprint || ""

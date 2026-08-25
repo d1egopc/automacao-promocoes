@@ -532,6 +532,7 @@ function fechar(server) {
     getPlanos: () => ({ pro: { ...planoPro, preco: "R$ 2,00" } }),
     isAdminMaster: () => true,
     repositorio: repoDiagnostico,
+    client: clientDiagnostico,
     sdkOrderClientFactory: ({ accessToken }) => {
       sdkFactoryChamadas += 1;
       assert.strictEqual(accessToken, "APP_USR_TOKEN_PRODUCAO_FAKE");
@@ -608,7 +609,7 @@ function fechar(server) {
     assert.strictEqual(bodyMinimo.orderId, "ORD_TEST_2");
     assert.strictEqual(bodyMinimo.pixPresente.qrCode, true);
     assert.strictEqual(bodyMinimo.pixPresente.ticketUrl, true);
-    assert.strictEqual(sdkFactoryChamadas, 2, "rota minima usa SDK oficial injetado");
+    assert.strictEqual(sdkFactoryChamadas, 1, "rota minima usa client HTTP/injetado sem acionar SDK factory");
     assert.strictEqual(clientDiagnostico.calls.length, 2, "rota minima faz somente uma chamada extra ao SDK");
     assert.match(clientDiagnostico.calls[1].idempotencyKey, /^mp-diag-[0-9a-f-]{36}$/);
     assert.strictEqual(clientDiagnostico.calls[1].idempotencyKey.length, bodyMinimo.idempotencyKeyLength);
@@ -665,6 +666,23 @@ function fechar(server) {
       access_token: "APP_USR_TOKEN_NAO_SAIR"
     }
   };
+  erroSdkDiagnostico.statusMercadoPago = 400;
+  erroSdkDiagnostico.statusTextMercadoPago = "Bad Request";
+  erroSdkDiagnostico.rawBodyPresente = true;
+  erroSdkDiagnostico.rawBodySanitizado = "{\"code\":\"invalid_properties\",\"message\":\"Invalid payer [email]\"}";
+  erroSdkDiagnostico.payloadMercadoPagoSanitizado = {
+    message: "Invalid payer [email]",
+    error: "bad_request",
+    code: "invalid_properties",
+    cause: [{ code: "invalid_payer", description: "payer.email [email]" }],
+    details: [{ field: "payer.email", issue: "invalid [email]" }],
+    errors: [{ code: "property_value", message: "authorization:[redacted]" }]
+  };
+  erroSdkDiagnostico.headersDiagnostico = {
+    "x-request-id": "mp_req_diag_123",
+    "content-type": "application/json"
+  };
+  erroSdkDiagnostico.headerNamesRecebidos = ["content-type", "x-request-id"];
   const appDiagnosticoErro = express();
   appDiagnosticoErro.use(express.json());
   appDiagnosticoErro.use("/", criarRotasFinanceiroMercadoPago({
@@ -672,11 +690,11 @@ function fechar(server) {
     getPlanos: () => ({ pro: { ...planoPro, preco: "R$ 2,00" } }),
     isAdminMaster: () => true,
     repositorio: new RepoMemoria(),
-    sdkOrderClientFactory: () => ({
+    client: {
       criarOrder: async () => {
         throw erroSdkDiagnostico;
       }
-    }),
+    },
     env: {
       MERCADOPAGO_ACCESS_TOKEN: "APP_USR_TOKEN_PRODUCAO_FAKE",
       MERCADOPAGO_ENV: "production"
@@ -704,6 +722,18 @@ function fechar(server) {
     assert.strictEqual(Array.isArray(bodyErroDiag.detalheMercadoPago.cause), true);
     assert.strictEqual(Array.isArray(bodyErroDiag.detalheMercadoPago.details), true);
     assert.strictEqual(Array.isArray(bodyErroDiag.detalheMercadoPago.errors), true);
+    assert.strictEqual(bodyErroDiag.status, 400);
+    assert.strictEqual(bodyErroDiag.statusText, "Bad Request");
+    assert.strictEqual(bodyErroDiag.code, "invalid_properties");
+    assert.strictEqual(bodyErroDiag.error, "bad_request");
+    assert.strictEqual(bodyErroDiag.message, "Invalid payer [email]");
+    assert.strictEqual(bodyErroDiag.rawBodyPresente, true);
+    assert.strictEqual(bodyErroDiag.rawBodySanitizado.includes("invalid_properties"), true);
+    assert.deepStrictEqual(bodyErroDiag.headersPermitidos, {
+      "x-request-id": "mp_req_diag_123",
+      "content-type": "application/json"
+    });
+    assert.deepStrictEqual(bodyErroDiag.headerNamesRecebidos, ["content-type", "x-request-id"]);
     const serializadoErroDiag = JSON.stringify(bodyErroDiag);
     assert.strictEqual(serializadoErroDiag.includes("APP_USR_TOKEN_NAO_SAIR"), false, "diagnostico nao vaza token");
     assert.strictEqual(serializadoErroDiag.includes("cliente.real@test.local"), false, "diagnostico nao vaza email completo");
@@ -711,6 +741,146 @@ function fechar(server) {
   } finally {
     await fechar(serverDiagnosticoErro);
   }
+
+  async function postOrderMinimoDiagnosticoComClient(client) {
+    const app = express();
+    app.use(express.json());
+    app.use("/", criarRotasFinanceiroMercadoPago({
+      getUsuarios: () => [{ id: "user_4ap7aetj", email: "cliente.real@test.local" }],
+      getPlanos: () => ({ pro: { ...planoPro, preco: "R$ 2,00" } }),
+      isAdminMaster: () => true,
+      repositorio: new RepoMemoria(),
+      client,
+      env: {
+        MERCADOPAGO_ACCESS_TOKEN: "APP_USR_TOKEN_PRODUCAO_FAKE",
+        MERCADOPAGO_ENV: "production"
+      }
+    }));
+    const server = await escutar(app);
+    try {
+      const porta = server.address().port;
+      const resposta = await fetch(`http://127.0.0.1:${porta}/pix/orders-minimo-producao-diagnostico`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ clienteId: "user_4ap7aetj", planoId: "pro" })
+      });
+      return {
+        statusHttp: resposta.status,
+        body: await resposta.json()
+      };
+    } finally {
+      await fechar(server);
+    }
+  }
+
+  let textoLidoJson = 0;
+  const clientFetchJson = financeiro.criarMercadoPagoHttpClient({
+    accessToken: "APP_USR_TOKEN_PRODUCAO_FAKE",
+    fetchImpl: async () => ({
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+      headers: {
+        "x-request-id": "mp-123",
+        "content-type": "application/json",
+        "x-trace-id": "trace-456"
+      },
+      async text() {
+        textoLidoJson += 1;
+        return JSON.stringify({
+          code: "property_type",
+          message: "invalid value",
+          details: [{ field: "total_amount" }]
+        });
+      }
+    })
+  });
+  const resultadoFetchJson = await postOrderMinimoDiagnosticoComClient(clientFetchJson);
+  assert.strictEqual(resultadoFetchJson.statusHttp, 400);
+  assert.strictEqual(textoLidoJson, 1, "body JSON de erro e lido uma unica vez");
+  assert.strictEqual(resultadoFetchJson.body.status, 400);
+  assert.strictEqual(resultadoFetchJson.body.statusText, "Bad Request");
+  assert.strictEqual(resultadoFetchJson.body.code, "property_type");
+  assert.strictEqual(resultadoFetchJson.body.message, "invalid value");
+  assert.deepStrictEqual(resultadoFetchJson.body.details, [{ field: "total_amount" }]);
+  assert.strictEqual(resultadoFetchJson.body.xRequestId, "mp-123");
+  assert.deepStrictEqual(resultadoFetchJson.body.headersPermitidos, {
+    "x-request-id": "mp-123",
+    "content-type": "application/json",
+    "x-trace-id": "trace-456"
+  });
+  assert.deepStrictEqual(resultadoFetchJson.body.headerNamesRecebidos, ["content-type", "x-request-id", "x-trace-id"]);
+  assert.deepStrictEqual(resultadoFetchJson.body.payloadMercadoPagoSanitizado, {
+    code: "property_type",
+    message: "invalid value",
+    details: [{ field: "total_amount" }]
+  });
+
+  let textoLidoTexto = 0;
+  const clientFetchTexto = financeiro.criarMercadoPagoHttpClient({
+    accessToken: "APP_USR_TOKEN_PRODUCAO_FAKE",
+    fetchImpl: async () => ({
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+      headers: {
+        "content-type": "text/plain",
+        "x-correlation-id": "corr-789"
+      },
+      async text() {
+        textoLidoTexto += 1;
+        return "invalid payer cliente.real@test.local Authorization Bearer APP_USR_TOKEN_PRODUCAO_FAKE";
+      }
+    })
+  });
+  const resultadoFetchTexto = await postOrderMinimoDiagnosticoComClient(clientFetchTexto);
+  assert.strictEqual(resultadoFetchTexto.statusHttp, 400);
+  assert.strictEqual(textoLidoTexto, 1, "body texto de erro e lido uma unica vez");
+  assert.strictEqual(resultadoFetchTexto.body.rawBodyPresente, true);
+  assert.strictEqual(resultadoFetchTexto.body.rawBodySanitizado.includes("invalid payer"), true);
+  assert.strictEqual(resultadoFetchTexto.body.rawBodySanitizado.includes("cliente.real@test.local"), false);
+  assert.strictEqual(resultadoFetchTexto.body.rawBodySanitizado.includes("APP_USR_TOKEN_PRODUCAO_FAKE"), false);
+  assert.strictEqual(resultadoFetchTexto.body.payloadMercadoPagoSanitizado, null);
+  assert.deepStrictEqual(resultadoFetchTexto.body.headersPermitidos, {
+    "content-type": "text/plain",
+    "x-correlation-id": "corr-789"
+  });
+
+  const clientFetchHeadersSecretos = financeiro.criarMercadoPagoHttpClient({
+    accessToken: "APP_USR_TOKEN_PRODUCAO_FAKE",
+    fetchImpl: async () => ({
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+      headers: {
+        "x-request-id": "mp-secret",
+        "retry-after": "3",
+        "set-cookie": "session=nao_sair",
+        cookie: "cookie=nao_sair",
+        authorization: "Bearer APP_USR_TOKEN_NAO_SAIR",
+        "x-correlation-id": "corr-secret"
+      },
+      async text() {
+        return JSON.stringify({
+          error: "bad_request",
+          message: "falha Authorization Bearer APP_USR_TOKEN_NAO_SAIR",
+          errors: [{ message: "cookie=nao_sair" }]
+        });
+      }
+    })
+  });
+  const resultadoFetchHeadersSecretos = await postOrderMinimoDiagnosticoComClient(clientFetchHeadersSecretos);
+  assert.strictEqual(resultadoFetchHeadersSecretos.statusHttp, 400);
+  assert.deepStrictEqual(resultadoFetchHeadersSecretos.body.headersPermitidos, {
+    "x-request-id": "mp-secret",
+    "retry-after": "3",
+    "x-correlation-id": "corr-secret"
+  });
+  assert.deepStrictEqual(resultadoFetchHeadersSecretos.body.headerNamesRecebidos, ["retry-after", "x-correlation-id", "x-request-id"]);
+  const serializadoHeadersSecretos = JSON.stringify(resultadoFetchHeadersSecretos.body);
+  assert.strictEqual(serializadoHeadersSecretos.includes("APP_USR_TOKEN_NAO_SAIR"), false);
+  assert.strictEqual(serializadoHeadersSecretos.includes("session=nao_sair"), false);
+  assert.strictEqual(serializadoHeadersSecretos.includes("cookie=nao_sair"), false);
 
   const publicoEmBreve = await financeiro.criarCobrancaFinanceira({
     clienteId: "cliente_1",

@@ -29,6 +29,14 @@ const MERCADOPAGO_RECONCILIATION_BACKOFF_MS = Object.freeze([
 ]);
 const MERCADOPAGO_RECONCILIATION_MAX_ATTEMPTS = 8;
 const MERCADOPAGO_RECONCILIATION_TTL_MS = 48 * 60 * 60 * 1000;
+const MERCADOPAGO_RAW_BODY_DIAGNOSTICO_MAX = 4096;
+const MERCADOPAGO_HEADERS_DIAGNOSTICO_PERMITIDOS = Object.freeze([
+  "x-request-id",
+  "content-type",
+  "retry-after",
+  "x-correlation-id",
+  "x-trace-id"
+]);
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -184,16 +192,125 @@ function resolverProviderAmountCentsMercadoPago({ planSnapshot = {}, sandboxTest
   return numeroInteiro(planSnapshot.amountCents, 0);
 }
 
-function sanitizarTextoMercadoPago(valor = "") {
+function sanitizarTextoMercadoPago(valor = "", limite = 500) {
   const bruto = texto(valor);
   if (!bruto) return "";
   return bruto
+    .replace(/(set-cookie|cookie)\s*[:=]\s*[^,;}]+/gi, "$1:[redacted]")
     .replace(/authorization\s*[:=]\s*(?:Bearer\s+)?[^\s,;}]+/gi, "authorization:[redacted]")
+    .replace(/authorization\s+bearer\s+[^\s,;}]+/gi, "authorization:[redacted]")
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/APP_(?:USR|TEST|PUBLIC)_[A-Za-z0-9._~+/=-]+/gi, "[mp_token]")
     .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[jwt_mascarado]")
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email_mascarado]")
+    .replace(/(?:\+?55\s*)?(?:\(?\d{2}\)?\s*)?9?\d{4}[-\s]?\d{4}/g, "[telefone_mascarado]")
     .replace(/000201[0-9A-Za-z./:+-]{30,}/g, "[pix_mascarado]")
-    .slice(0, 500);
+    .slice(0, Math.max(0, Number(limite) || 500));
+}
+
+function sanitizarValorDiagnosticoMercadoPago(valor, profundidade = 0) {
+  if (profundidade > 6) return "[max_depth]";
+  if (valor === null || valor === undefined) return valor;
+  if (typeof valor === "string") return sanitizarTextoMercadoPago(valor, MERCADOPAGO_RAW_BODY_DIAGNOSTICO_MAX);
+  if (typeof valor === "number" || typeof valor === "boolean") return valor;
+  if (Array.isArray(valor)) {
+    return valor.slice(0, 20).map((item) => sanitizarValorDiagnosticoMercadoPago(item, profundidade + 1));
+  }
+  if (typeof valor === "object") {
+    const seguro = {};
+    for (const [chave, item] of Object.entries(valor)) {
+      const chaveNormalizada = textoLower(chave);
+      if (/authorization|access_token|client_secret|secret|cookie|token/.test(chaveNormalizada)) {
+        seguro[chave] = "[redacted]";
+        continue;
+      }
+      seguro[chave] = sanitizarValorDiagnosticoMercadoPago(item, profundidade + 1);
+    }
+    return seguro;
+  }
+  return sanitizarTextoMercadoPago(valor, MERCADOPAGO_RAW_BODY_DIAGNOSTICO_MAX);
+}
+
+function lerHeaderMercadoPago(headers = {}, nome = "") {
+  if (!headers || !nome) return "";
+  if (typeof headers.get === "function") return texto(headers.get(nome));
+  return texto(headers[nome] || headers[nome.toLowerCase()] || headers[nome.toUpperCase()]);
+}
+
+function listarNomesHeadersMercadoPago(headers = {}) {
+  const nomes = new Set();
+  if (headers && typeof headers.forEach === "function") {
+    headers.forEach((valor, chave) => {
+      const nome = textoLower(chave);
+      if (nome && !/authorization|cookie|set-cookie|access_token|client_secret|secret|token/.test(nome)) nomes.add(nome);
+    });
+  } else if (headers && typeof headers === "object") {
+    for (const chave of Object.keys(headers)) {
+      const nome = textoLower(chave);
+      if (nome && !/authorization|cookie|set-cookie|access_token|client_secret|secret|token/.test(nome)) nomes.add(nome);
+    }
+  }
+  return [...nomes].sort();
+}
+
+function headersDiagnosticoMercadoPago(headers = {}) {
+  const permitidos = {};
+  for (const nome of MERCADOPAGO_HEADERS_DIAGNOSTICO_PERMITIDOS) {
+    const valor = lerHeaderMercadoPago(headers, nome);
+    if (valor) permitidos[nome] = sanitizarTextoMercadoPago(valor);
+  }
+  return {
+    headersPermitidos: permitidos,
+    headerNamesRecebidos: listarNomesHeadersMercadoPago(headers)
+  };
+}
+
+function prepararDiagnosticoRespostaMercadoPago(resposta = {}, textoResposta = "") {
+  const rawOriginal = String(textoResposta ?? "");
+  const rawBodySanitizado = sanitizarTextoMercadoPago(rawOriginal, MERCADOPAGO_RAW_BODY_DIAGNOSTICO_MAX);
+  let payloadMercadoPago = null;
+  let payloadMercadoPagoSanitizado = null;
+  let jsonValido = false;
+  if (rawOriginal) {
+    try {
+      payloadMercadoPago = JSON.parse(rawOriginal);
+      payloadMercadoPagoSanitizado = sanitizarValorDiagnosticoMercadoPago(payloadMercadoPago);
+      jsonValido = true;
+    } catch {
+      payloadMercadoPago = { raw: rawOriginal };
+    }
+  }
+  const headersDiagnostico = headersDiagnosticoMercadoPago(resposta.headers || {});
+  return {
+    statusMercadoPago: Number(resposta.status) || 0,
+    statusTextMercadoPago: sanitizarTextoMercadoPago(resposta.statusText || ""),
+    rawBodyPresente: rawOriginal.length > 0,
+    rawBodySanitizado,
+    payloadMercadoPago,
+    payloadMercadoPagoSanitizado,
+    jsonValido,
+    headersDiagnostico: headersDiagnostico.headersPermitidos,
+    headerNamesRecebidos: headersDiagnostico.headerNamesRecebidos,
+    xRequestId: headersDiagnostico.headersPermitidos["x-request-id"] || ""
+  };
+}
+
+function copiarDiagnosticoMercadoPago(destino, origem = {}) {
+  if (!destino || !origem) return destino;
+  for (const campo of [
+    "statusMercadoPago",
+    "statusTextMercadoPago",
+    "payloadMercadoPago",
+    "payloadMercadoPagoSanitizado",
+    "rawBodyPresente",
+    "rawBodySanitizado",
+    "headersDiagnostico",
+    "headerNamesRecebidos",
+    "xRequestId"
+  ]) {
+    if (origem[campo] !== undefined) destino[campo] = origem[campo];
+  }
+  return destino;
 }
 
 function sanitizarCauseMercadoPago(cause) {
@@ -589,27 +706,29 @@ function criarMercadoPagoHttpClient({
       body: body === undefined ? undefined : JSON.stringify(body)
     });
     const textoResposta = await resposta.text();
-    let payload = null;
-    try {
-      payload = textoResposta ? JSON.parse(textoResposta) : null;
-    } catch {
-      payload = { raw: textoResposta };
-    }
+    const diagnosticoResposta = prepararDiagnosticoRespostaMercadoPago(resposta, textoResposta);
+    const payload = diagnosticoResposta.payloadMercadoPago;
     if (!resposta.ok) {
       const detalheMercadoPago = sanitizarErroMercadoPago(payload, resposta.status);
       const requestMercadoPago = sanitizarRequestMercadoPago(path, body, headers);
       console.warn("[MERCADOPAGO-API-ERRO-SEGURO]", JSON.stringify({
         status: resposta.status,
+        statusText: diagnosticoResposta.statusTextMercadoPago,
         method,
         endpoint: path,
         detalheMercadoPago,
-        requestMercadoPago
+        requestMercadoPago,
+        headersDiagnostico: diagnosticoResposta.headersDiagnostico,
+        headerNamesRecebidos: diagnosticoResposta.headerNamesRecebidos,
+        rawBodyPresente: diagnosticoResposta.rawBodyPresente,
+        jsonValido: diagnosticoResposta.jsonValido
       }));
       const erro = new Error("mercadopago_api_falhou");
       erro.codigo = "mercadopago_api_falhou";
       erro.status = resposta.status;
       erro.payload = payload;
       erro.detalheMercadoPago = detalheMercadoPago;
+      copiarDiagnosticoMercadoPago(erro, diagnosticoResposta);
       throw erro;
     }
     return payload || {};
