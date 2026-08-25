@@ -422,7 +422,6 @@ function fechar(server) {
         total_amount: "2.00",
         external_reference: "mp_pay_cliente_1_pro_teste",
         payer: { email: "cliente.real@test.local" },
-        notification_url: "https://go.optimuspromo.com.br/webhooks/mercadopago",
         transactions: {
           payments: [{
             amount: "2.00",
@@ -461,7 +460,7 @@ function fechar(server) {
     assert.strictEqual(logSeguro.includes('"emailPresente":true'), true, "telemetria confirma payer.email presente sem expor email");
     assert.strictEqual(logSeguro.includes('"emailValido":true'), true, "telemetria confirma formato basico do email");
     assert.strictEqual(logSeguro.includes('"xIdempotencyKeyPresente":true'), true, "telemetria confirma idempotency key");
-    assert.strictEqual(logSeguro.includes('"notificationUrlPresente":true'), true, "telemetria confirma notification_url");
+    assert.strictEqual(logSeguro.includes('"notificationUrlPresente":false'), true, "telemetria confirma ausencia de notification_url");
     assert.strictEqual(logSeguro.includes("APP_USR_TOKEN_SECRETO"), false, "telemetria nao vaza access token");
     assert.strictEqual(logSeguro.includes("cliente.real@test.local"), false, "telemetria nao vaza email completo");
     assert.strictEqual(logSeguro.includes("000201010212"), false, "telemetria nao vaza QR");
@@ -574,7 +573,7 @@ function fechar(server) {
     assert.strictEqual(clientDiagnostico.calls.length, 1, "uma unica chamada SDK foi feita");
     assert.strictEqual(clientDiagnostico.calls[0].body.total_amount, "2.00");
     assert.strictEqual(clientDiagnostico.calls[0].body.transactions.payments[0].amount, "2.00");
-    assert.strictEqual(clientDiagnostico.calls[0].body.notification_url, "https://go.optimuspromo.com.br/webhooks/mercadopago");
+    assert.strictEqual("notification_url" in clientDiagnostico.calls[0].body, false, "Orders API diagnostica nao envia notification_url");
     assert.strictEqual(repoDiagnostico.state.ledger.length, 0, "criacao diagnostica nao concede credito");
 
     const respostaReplay = await fetch(`http://127.0.0.1:${porta}/pix/cobrancas-sdk-diagnostico`, {
@@ -940,7 +939,13 @@ function fechar(server) {
   assert.strictEqual(cobranca.pix.qrCode.includes("ORD_TEST_1"), true);
   assert.strictEqual(repo.state.ledger.length, 0, "criacao PIX nao concede credito");
   assert.strictEqual(client.calls[0].body.total_amount, "34.90");
+  assert.strictEqual(typeof client.calls[0].body.total_amount, "string");
   assert.strictEqual(client.calls[0].body.transactions.payments[0].amount, "34.90");
+  assert.strictEqual(typeof client.calls[0].body.transactions.payments[0].amount, "string");
+  assert.strictEqual("notification_url" in client.calls[0].body, false, "checkout comercial nao envia notification_url no body Orders");
+  assert.strictEqual(client.calls[0].body.payer.email, "cliente@test.local");
+  assert.strictEqual(client.calls[0].body.transactions.payments[0].payment_method.id, "pix");
+  assert.strictEqual(client.calls[0].body.transactions.payments[0].payment_method.type, "bank_transfer");
   assert.strictEqual(client.calls[0].body.external_reference, "mp_pay_pro");
   assert.strictEqual(client.calls[0].idempotencyKey, "mp_order:mp_pay_pro");
   assert.strictEqual(

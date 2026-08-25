@@ -395,6 +395,13 @@ function fechar(server) {
     assert.strictEqual(pro.body.pix.qrCode.startsWith("000201"), true);
     assert.strictEqual(env.repo.state.payments[0].cliente_id, "user_a");
     assert.strictEqual(env.client.calls[0].body.total_amount, "34.90");
+    assert.strictEqual(typeof env.client.calls[0].body.total_amount, "string");
+    assert.strictEqual(env.client.calls[0].body.transactions.payments[0].amount, "34.90");
+    assert.strictEqual(typeof env.client.calls[0].body.transactions.payments[0].amount, "string");
+    assert.strictEqual("notification_url" in env.client.calls[0].body, false, "checkout publico nao envia notification_url no body Orders");
+    assert.strictEqual(env.client.calls[0].body.payer.email, "ana@test.local");
+    assert.strictEqual(env.client.calls[0].body.transactions.payments[0].payment_method.id, "pix");
+    assert.strictEqual(env.client.calls[0].body.transactions.payments[0].payment_method.type, "bank_transfer");
 
     const duplo = await request(server, "POST", "/financeiro/checkout/pix", {
       clienteId: "user_a",

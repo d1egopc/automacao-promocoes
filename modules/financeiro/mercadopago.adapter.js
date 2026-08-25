@@ -772,7 +772,6 @@ function montarOrderPix({ payment = {}, planSnapshot = {}, usuario = {}, notific
     body.payer.first_name = MERCADOPAGO_PIX_SANDBOX_PAYER.firstName;
   }
 
-  if (texto(notificationUrl)) body.notification_url = texto(notificationUrl);
   return body;
 }
 
