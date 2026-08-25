@@ -1,7 +1,7 @@
 const { normalizar, texto } = require("./resolver-intencao");
 
-const MAX_CARACTERES_COPY_V2 = 64;
-const MAX_PALAVRAS_COPY_V2 = 10;
+const MAX_CARACTERES_COPY_V2 = 90;
+const MAX_PALAVRAS_COPY_V2 = 16;
 const MIN_PALAVRAS_COPY_V2 = 2;
 
 function fatos(contexto = {}) {

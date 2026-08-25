@@ -316,7 +316,7 @@ const explicit = renderizar(ofertaBase({ id: "explicit", engineOfertaId: "explic
 assert.ok(explicit.includes("Titulo IA Explicito"), "tituloIa explicito preserva precedencia homologada");
 
 const msgLocal = renderizar(ofertaBase({ id: "render_local", engineOfertaId: "render_local", tituloIa: "", categoria: "Gamer e Hardware" }));
-assert.ok(/setup|upgrade/i.test(msgLocal), "destino IA usa Banco Local V2 quando nao ha tituloIa explicito");
+assert.ok(!msgLocal.includes("Produto Original Oficial"), "destino IA usa Banco Local V2 quando nao ha tituloIa explicito");
 
 const snapshot = JSON.parse(JSON.stringify(ofertaFanout));
 renderizar(ofertaFanout, { tituloOferta: "ia" });
@@ -344,12 +344,99 @@ assert.ok(!/\b(?:fetch|axios|openai|gemini|claude|anthropic|provider)\b/i.test(s
 assert.ok(!sourceLocal.includes("oferta.titulo =") && !sourceLocal.includes("oferta.nome ="), "Local V2 nao muta titulo/nome");
 
 const resumo = copy.resumoBancoAssociativoV2();
-assert.ok(resumo.total >= 95, "banco associativo tem aproximadamente 100 frases");
-assert.ok(resumo.porIntencao.familia >= 60, "maioria das frases e contextual por familia");
+assert.strictEqual(copy.BANCO_ASSOCIATIVO_V2_BASE.length, 196, "as 196 frases antigas continuam preservadas como base");
+assert.strictEqual(copy.EXPANSAO_HUMANA_V21.length, 675, "Copy Local V2.1 adiciona 675 frases humanas");
+assert.strictEqual(resumo.total, 871, "banco associativo V2.1 totaliza 871 frases ativas");
+assert.strictEqual(copy.MAX_CARACTERES_COPY_V2, 90, "validator V2.1 aceita ate 90 caracteres");
+assert.strictEqual(copy.MAX_PALAVRAS_COPY_V2, 16, "validator V2.1 aceita ate 16 palavras");
+assert.ok(resumo.porIntencao.familia >= 700, "maioria das frases e contextual por familia");
 assert.ok(resumo.porIntencao.oportunidade >= 10, "ha bloco de oportunidades genericas");
 assert.ok(
   ["cupom", "resgate", "beneficio", "economia", "frete_gratis", "parcelamento"].every(k => resumo.porIntencao[k] >= 1),
   "ha frases comerciais condicionais"
 );
+
+const idsBanco = new Set();
+const textosBanco = new Set();
+const tomBanco = {};
+const eixoBanco = {};
+const familiasExpandidas = {};
+const proibidasSemProva = /\b(?:ultimas unidades|ultima unidade|estoque acabando|vai acabar|menor preco|melhor preco|frete gratis|cupom|resgate|cashback|exclusivo|corre|urgente|so hoje|ultima chance|desconto|economia|parcelamento|beneficio)\b/i;
+
+for (const fraseBanco of copy.BANCO_ASSOCIATIVO_V2) {
+  assert.ok(fraseBanco.id && fraseBanco.texto, `frase valida tem id/texto: ${fraseBanco.id}`);
+  assert.ok(!idsBanco.has(fraseBanco.id), `id unico: ${fraseBanco.id}`);
+  assert.ok(!textosBanco.has(fraseBanco.texto), `texto unico: ${fraseBanco.texto}`);
+  idsBanco.add(fraseBanco.id);
+  textosBanco.add(fraseBanco.texto);
+
+  const fatosPermitidos = {
+    cupom: fraseBanco.exige.includes("cupom"),
+    resgate: fraseBanco.exige.includes("resgate"),
+    freteGratis: fraseBanco.exige.includes("freteGratis"),
+    descontoOficial: fraseBanco.exige.includes("desconto"),
+    beneficioSeguro: fraseBanco.exige.includes("beneficio"),
+    parcelamento: fraseBanco.exige.includes("parcelamento")
+  };
+  const validacao = copy.validarCopyV2({
+    textoGerado: fraseBanco.texto,
+    contexto: { fatosPermitidos }
+  });
+  assert.strictEqual(validacao.valida, true, `frase passa validator: ${fraseBanco.id} (${validacao.motivoCodigo})`);
+
+  if (fraseBanco.id.includes("_v21_")) {
+    assert.ok(fraseBanco.tom === "curta" || fraseBanco.tom === "media", `frase nova tem tom: ${fraseBanco.id}`);
+    assert.ok(fraseBanco.eixo, `frase nova tem eixo: ${fraseBanco.id}`);
+    assert.ok(!proibidasSemProva.test(fraseBanco.texto), `frase nova nao inventa alegacao comercial: ${fraseBanco.id}`);
+    tomBanco[fraseBanco.tom] = (tomBanco[fraseBanco.tom] || 0) + 1;
+    eixoBanco[fraseBanco.eixo] = (eixoBanco[fraseBanco.eixo] || 0) + 1;
+    familiasExpandidas[fraseBanco.familia] = (familiasExpandidas[fraseBanco.familia] || 0) + 1;
+  }
+}
+
+for (const fraseAntiga of copy.BANCO_ASSOCIATIVO_V2_BASE) {
+  assert.ok(idsBanco.has(fraseAntiga.id), `frase antiga preservada: ${fraseAntiga.id}`);
+  assert.ok(textosBanco.has(fraseAntiga.texto), `texto antigo preservado: ${fraseAntiga.id}`);
+}
+
+for (const [familia, totalNovas] of Object.entries(familiasExpandidas)) {
+  assert.strictEqual(totalNovas, 25, `familia ${familia} recebeu 25 frases novas`);
+}
+assert.ok(tomBanco.curta >= 200 && tomBanco.media >= 400, "novas frases misturam tom curto e medio");
+assert.ok(Object.keys(eixoBanco).length >= 6, "novas frases distribuem eixos de linguagem");
+
+copy.limparCacheCopyLocalV2();
+for (const categoria of CATEGORIAS_OPTIMUS) {
+  const res = resolver(ofertaBase({
+    id: `categoria_v21_${categoria}`,
+    engineOfertaId: `categoria_v21_${categoria}`,
+    categoria,
+    titulo: `Produto seguro categoria ${categoria}`
+  }), { clienteId: `workspace_categoria_v21_${categoria}` });
+  assert.strictEqual(res.ok, true, `categoria oficial resolve: ${categoria}`);
+  assert.strictEqual(res.categoriaOficial, categoria, `categoria oficial preservada: ${categoria}`);
+  assert.ok(res.tituloIa, `categoria oficial gera copy: ${categoria}`);
+}
+
+const familiasOficiais = Object.values(copy.CATEGORIA_PARA_FAMILIA_V2);
+for (const familia of [...new Set(familiasOficiais)]) {
+  const frasesFamilia = copy.BANCO_ASSOCIATIVO_V2.filter(item => item.familia === familia && item.intencoes.includes(familia === "oportunidade" ? "oportunidade" : "familia"));
+  assert.ok(frasesFamilia.some(item => item.id.includes("_v21_")), `familia ${familia} tem frase V2.1 elegivel`);
+}
+
+copy.limparCacheCopyLocalV2();
+const seqGamerExpandida = [];
+for (let i = 0; i < 45; i += 1) {
+  const res = resolver(ofertaBase({
+    id: `gamer_v21_${i}`,
+    engineOfertaId: `gamer_v21_${i}`,
+    categoria: "Gamer e Hardware",
+    titulo: `Produto gamer variado ${i}`
+  }), { clienteId: "workspace_gamer_v21" });
+  assert.strictEqual(res.ok, true, `gamer V2.1 resolve item ${i}`);
+  seqGamerExpandida.push(res.tituloIa);
+}
+assert.strictEqual(contarRepeticoesImediatas(seqGamerExpandida), 0, "banco expandido gamer nao repete imediatamente");
+assert.ok(new Set(seqGamerExpandida).size >= 20, "banco expandido amplia variedade gamer");
 
 console.log("copy-inteligente-local-v2.test.js OK");
