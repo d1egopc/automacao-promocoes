@@ -12,6 +12,7 @@ const {
   logUsuarioInativoIgnorado
 } = require("../../utils/usuarios-atividade");
 const { agendarExclusaoMensagemTemporaria } = require("./service");
+const { resolverBotAdminGerente } = require("./gerente-identidade");
 
 const JANELAS_GERENTE_MS = 10 * 60 * 1000;
 const resultadosMensagemGerente = new Map();
@@ -247,16 +248,6 @@ function encontrarViolacaoDeterministica({ regras, texto, tipoMidia, contexto })
   return null;
 }
 
-function obterJidProprio(sock) {
-  return normalizarJid(
-    sock?.user?.id ||
-    sock?.user?.jid ||
-    sock?.authState?.creds?.me?.id ||
-    sock?.authState?.creds?.me?.jid ||
-    ""
-  );
-}
-
 async function obterPermissoesGrupo({ sock, grupoId, participante }) {
   if (!sock || typeof sock.groupMetadata !== "function") {
     return { ok: false, codigo: "metadata_indisponivel" };
@@ -264,18 +255,17 @@ async function obterPermissoesGrupo({ sock, grupoId, participante }) {
 
   const metadata = await sock.groupMetadata(grupoId);
   const participantes = Array.isArray(metadata?.participants) ? metadata.participants : [];
-  const jidProprio = obterJidProprio(sock);
-  const bot = participantes.find(item => jidEquivalente(item?.id, jidProprio));
+  const bot = resolverBotAdminGerente(sock, metadata);
   const alvo = participantes.find(item => jidEquivalente(item?.id, participante));
 
-  if (!bot || !alvo) return { ok: false, codigo: "participante_nao_confirmado" };
+  if (!bot.botEncontrado || !alvo) return { ok: false, codigo: "participante_nao_confirmado" };
 
   return {
     ok: true,
-    botAdmin: bot.admin === "admin" || bot.admin === "superadmin",
+    botAdmin: bot.botAdmin,
     alvoAdmin: alvo.admin === "admin" || alvo.admin === "superadmin",
     alvoDono: alvo.admin === "superadmin",
-    botAdminTipo: bot.admin || "",
+    botAdminTipo: bot.adminTipo || "",
     alvoAdminTipo: alvo.admin || ""
   };
 }
@@ -732,6 +722,7 @@ module.exports = {
     extrairUrls,
     extrairConvitesWhatsapp,
     normalizarTexto,
+    resolverBotAdminGerente,
     resultadosMensagemGerente,
     janelasGerente
   }

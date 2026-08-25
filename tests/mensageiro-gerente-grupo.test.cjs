@@ -11,6 +11,9 @@ const { writeGlobalJson } = require("../utils/storage");
 const storage = require("../modules/mensageiro/storage");
 const mensageiro = require("../modules/mensageiro");
 const criarRotasMensageiro = require("../modules/mensageiro/routes");
+const {
+  resolverBotAdminGerente
+} = require("../modules/mensageiro/gerente-identidade");
 
 writeGlobalJson("usuarios.json", [{ id: "cliente_gerente", ativo: true }]);
 
@@ -85,11 +88,25 @@ function configurar({ perfis = [perfilGerente()], grupos = [grupoId], ativo = tr
   });
 }
 
-function criarSock({ botAdmin = true, alvoAdmin = false, alvoDono = false, falharDelete = false, falharMetadata = false } = {}) {
+function criarSock({
+  botAdmin = true,
+  alvoAdmin = false,
+  alvoDono = false,
+  falharDelete = false,
+  falharMetadata = false,
+  botUser = null,
+  botParticipant = null,
+  authState = null
+} = {}) {
   const envios = [];
   const remocoes = [];
+  const participanteBot = botParticipant ? { ...botParticipant } : { id: botJid };
+  if (participanteBot.admin === undefined) {
+    participanteBot.admin = botAdmin ? "admin" : null;
+  }
   return {
-    user: { id: botJid },
+    user: botUser || { id: botJid },
+    ...(authState ? { authState } : {}),
     envios,
     remocoes,
     async groupMetadata(jid) {
@@ -98,7 +115,7 @@ function criarSock({ botAdmin = true, alvoAdmin = false, alvoDono = false, falha
       return {
         id: jid,
         participants: [
-          { id: botJid, admin: botAdmin ? "admin" : null },
+          participanteBot,
           { id: participante, admin: alvoDono ? "superadmin" : alvoAdmin ? "admin" : null },
           { id: "5511888888888@s.whatsapp.net", admin: null }
         ]
@@ -182,6 +199,79 @@ async function consultarStatusGerente({ perfilId = "perfil_gerente", sock = cria
 }
 
 (async () => {
+  let diagnosticoBot = resolverBotAdminGerente(
+    { user: { id: botJid } },
+    { participants: [{ id: botJid, admin: "admin" }] }
+  );
+  assert.deepStrictEqual(
+    { encontrado: diagnosticoBot.botEncontrado, admin: diagnosticoBot.botAdmin, tipo: diagnosticoBot.tipoAliasMatch },
+    { encontrado: true, admin: true, tipo: "id" },
+    "bot PN + participant PN detecta admin"
+  );
+
+  const botLid = "123456789012345@lid";
+  diagnosticoBot = resolverBotAdminGerente(
+    { user: { id: botJid } },
+    { participants: [{ id: botLid, jid: botJid, lid: botLid, admin: "admin" }] }
+  );
+  assert.deepStrictEqual(
+    { encontrado: diagnosticoBot.botEncontrado, admin: diagnosticoBot.botAdmin, tipo: diagnosticoBot.tipoAliasMatch },
+    { encontrado: true, admin: true, tipo: "jid" },
+    "bot PN + participant LID com participant.jid PN detecta admin"
+  );
+
+  diagnosticoBot = resolverBotAdminGerente(
+    { user: { id: botLid } },
+    { participants: [{ id: botJid, jid: botJid, lid: botLid, admin: "admin" }] }
+  );
+  assert.deepStrictEqual(
+    { encontrado: diagnosticoBot.botEncontrado, admin: diagnosticoBot.botAdmin, tipo: diagnosticoBot.tipoAliasMatch },
+    { encontrado: true, admin: true, tipo: "lid" },
+    "bot LID + participant PN com participant.lid LID detecta admin"
+  );
+
+  diagnosticoBot = resolverBotAdminGerente(
+    {
+      user: { id: "nao_match@s.whatsapp.net", jid: botJid, lid: botLid },
+      authState: { creds: { me: { id: "outro@s.whatsapp.net", jid: botJid, lid: botLid } } }
+    },
+    { participants: [{ id: botLid, jid: botJid, lid: botLid, admin: "admin" }] }
+  );
+  assert.strictEqual(diagnosticoBot.botAdmin, true, "bot com aliases multiplos detecta admin uma vez");
+
+  diagnosticoBot = resolverBotAdminGerente(
+    { user: { id: botJid } },
+    { participants: [{ id: botJid, admin: "superadmin" }] }
+  );
+  assert.strictEqual(diagnosticoBot.botAdmin, true, "participant superadmin detecta admin");
+
+  diagnosticoBot = resolverBotAdminGerente(
+    { user: { id: botJid } },
+    { participants: [{ id: botJid, admin: null }] }
+  );
+  assert.strictEqual(diagnosticoBot.botEncontrado, true, "participant sem admin ainda e encontrado");
+  assert.strictEqual(diagnosticoBot.botAdmin, false, "participant sem admin nao vira admin");
+
+  diagnosticoBot = resolverBotAdminGerente(
+    { user: { id: botJid } },
+    { participants: [{ id: botLid, lid: botLid, admin: "admin" }] }
+  );
+  assert.strictEqual(diagnosticoBot.botEncontrado, false, "aliases nao relacionados nao fazem match");
+  assert.strictEqual(diagnosticoBot.botAdmin, false, "aliases nao relacionados nao viram admin");
+
+  diagnosticoBot = resolverBotAdminGerente(
+    { user: { id: botJid } },
+    { participants: [{ id: "5511777777777@s.whatsapp.net", admin: "admin" }] }
+  );
+  assert.strictEqual(diagnosticoBot.botEncontrado, false, "metadata sem bot nao encontra admin");
+
+  diagnosticoBot = resolverBotAdminGerente(
+    { user: { id: botJid } },
+    { participants: [{ id: botJid }] }
+  );
+  assert.strictEqual(diagnosticoBot.botEncontrado, true, "ausencia de lid/jid opcional nao quebra");
+  assert.strictEqual(diagnosticoBot.botAdmin, false, "ausencia de admin opcional nao vira admin");
+
   configurar({ perfis: [] });
   let ctx = await processar();
   assert.strictEqual(ctx.resultado.bloqueada, false, "perfil legado nao ativa Gerente");
@@ -226,6 +316,30 @@ async function consultarStatusGerente({ perfilId = "perfil_gerente", sock = cria
   statusGerente = await consultarStatusGerente();
   assert.strictEqual(statusGerente.estado, "pronto_para_moderar", "status operacional mostra pronto quando admin");
   assert.strictEqual(statusGerente.perfis[0].grupos[0].grupoId, undefined, "diagnostico nao expoe JID bruto");
+
+  configurar({ perfis: [perfilGerente({ regras: [regra("r_alias_jid", { acao: "apagar" })] })] });
+  const sockBotPnGrupoLid = criarSock({
+    botUser: { id: botJid },
+    botParticipant: { id: botLid, jid: botJid, lid: botLid, admin: "admin" }
+  });
+  statusGerente = await consultarStatusGerente({ sock: sockBotPnGrupoLid });
+  assert.strictEqual(statusGerente.estado, "pronto_para_moderar", "status detecta admin por participant.jid");
+  assert.strictEqual(statusGerente.perfis[0].grupos[0].botEncontrado, true, "status informa bot encontrado sem JID bruto");
+  assert.strictEqual(statusGerente.perfis[0].grupos[0].botAdmin, true, "status informa bot admin sem JID bruto");
+  assert.strictEqual(statusGerente.perfis[0].grupos[0].tipoAliasMatch, "jid", "status informa tipo de alias sem valor bruto");
+  ctx = await processar({ sock: sockBotPnGrupoLid, msg: mensagem({ texto: "proibido", id: "bot_pn_grupo_lid" }) });
+  assert.strictEqual(ctx.resultado.bloqueada, true, "runtime tambem detecta admin por participant.jid");
+
+  configurar({ perfis: [perfilGerente({ regras: [regra("r_alias_lid", { acao: "apagar" })] })] });
+  const sockBotLidGrupoPn = criarSock({
+    botUser: { id: botLid },
+    botParticipant: { id: botJid, jid: botJid, lid: botLid, admin: "admin" }
+  });
+  statusGerente = await consultarStatusGerente({ sock: sockBotLidGrupoPn });
+  assert.strictEqual(statusGerente.estado, "pronto_para_moderar", "status detecta admin por participant.lid");
+  assert.strictEqual(statusGerente.perfis[0].grupos[0].tipoAliasMatch, "lid", "status informa alias lid sem valor bruto");
+  ctx = await processar({ sock: sockBotLidGrupoPn, msg: mensagem({ texto: "proibido", id: "bot_lid_grupo_pn" }) });
+  assert.strictEqual(ctx.resultado.bloqueada, true, "runtime tambem detecta admin por participant.lid");
 
   configurar();
   ctx = await processar({ msg: mensagem({ fromMe: true }) });

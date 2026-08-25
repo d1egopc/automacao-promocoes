@@ -6,7 +6,10 @@ const express = require("express");
 
 const { criarRotasObservabilidadeAdmin } = require("../modules/observabilidade/admin.routes");
 
-const agora = new Date("2026-08-24T12:00:00.000Z");
+const agora = new Date();
+function minutosAtras(minutos) {
+  return new Date(agora.getTime() - minutos * 60 * 1000).toISOString();
+}
 const usuarios = [
   { id: "admin", papel: "admin_master", nome: "Admin", ativo: true },
   { id: "cliente_a", papel: "cliente", nome: "Cliente A", ativo: true },
@@ -51,7 +54,7 @@ const historicos = {
   cliente_a: {
     historico: [
       {
-        data: "2026-08-24T11:59:00.000Z",
+        data: minutosAtras(1),
         tipo: "comando",
         origem: "grupo",
         contato: "5511888888888@s.whatsapp.net",
@@ -66,7 +69,7 @@ const historicos = {
         resultado: "enviado"
       },
       {
-        data: "2026-08-24T11:58:00.000Z",
+        data: minutosAtras(2),
         tipo: "programacao",
         origem: "grupo",
         grupo: "5511999999999-123@g.us",
@@ -78,7 +81,7 @@ const historicos = {
         resultado: "sessao_indisponivel"
       },
       {
-        data: "2026-08-24T11:57:00.000Z",
+        data: minutosAtras(3),
         tipo: "moderacao",
         origem: "grupo",
         perfilId: "perfil_a",
@@ -90,7 +93,7 @@ const historicos = {
         resultado: "mensagem_removida"
       },
       {
-        data: "2026-08-24T11:56:00.000Z",
+        data: minutosAtras(4),
         tipo: "boas_vindas",
         origem: "grupo",
         grupo: "5511999999999-123@g.us",
@@ -98,7 +101,7 @@ const historicos = {
         resultado: "enviado"
       },
       {
-        data: "2026-08-24T11:55:00.000Z",
+        data: minutosAtras(5),
         tipo: "despedida",
         origem: "privado",
         contato: "5511666666666@s.whatsapp.net",

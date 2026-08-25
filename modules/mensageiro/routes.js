@@ -3,6 +3,7 @@ const express = require("express");
 const {
   otimizarBase64
 } = require("./imagem");
+const { resolverBotAdminGerente } = require("./gerente-identidade");
 
 function criarRotasMensageiro(deps = {}) {
   const router = express.Router();
@@ -94,44 +95,37 @@ function normalizarGrupoStatusGerente(grupo = {}) {
   };
 }
 
-function normalizarJidBaseGerente(jid = "") {
-  return String(jid || "").split(":")[0].trim();
-}
-
-function participanteAdminGerente(participante = {}) {
-  const admin = String(participante?.admin || "").toLowerCase();
-  return admin === "admin" || admin === "superadmin";
-}
-
-function botEhAdminMetadataGerente(sock, metadata = {}) {
-  const participantes = Array.isArray(metadata?.participants) ? metadata.participants : [];
-  const idsBot = new Set([
-    normalizarJidBaseGerente(sock?.user?.id || ""),
-    normalizarJidBaseGerente(sock?.user?.jid || ""),
-    normalizarJidBaseGerente(sock?.authState?.creds?.me?.id || ""),
-    normalizarJidBaseGerente(sock?.authState?.creds?.me?.jid || "")
-  ].filter(Boolean));
-  const bot = participantes.find(participante => idsBot.has(normalizarJidBaseGerente(participante?.id || participante?.jid || "")));
-  return participanteAdminGerente(bot);
-}
-
 async function resolverPermissaoAdminGerente({ clienteId, sessaoId, grupoId }) {
   if (typeof getSockMensageiro !== "function") {
-    return { estado: "metadata_indisponivel", permissao: "nao_verificado" };
+    return { estado: "metadata_indisponivel", permissao: "nao_verificado", metadataObtida: false };
   }
   const sessao = getSockMensageiro(clienteId, sessaoId);
   const sock = sessao?.sock || sessao;
   if (!sock || typeof sock.groupMetadata !== "function") {
-    return { estado: "metadata_indisponivel", permissao: "nao_verificado" };
+    return { estado: "metadata_indisponivel", permissao: "nao_verificado", metadataObtida: false };
   }
   try {
     const metadata = await sock.groupMetadata(grupoId);
-    const botAdmin = botEhAdminMetadataGerente(sock, metadata);
-    return botAdmin
-      ? { estado: "bot_admin", permissao: "administrador" }
-      : { estado: "bot_sem_admin", permissao: "sem_permissao" };
+    const bot = resolverBotAdminGerente(sock, metadata);
+    return bot.botAdmin
+      ? {
+        estado: "bot_admin",
+        permissao: "administrador",
+        metadataObtida: true,
+        botEncontrado: bot.botEncontrado,
+        botAdmin: bot.botAdmin,
+        tipoAliasMatch: bot.tipoAliasMatch
+      }
+      : {
+        estado: "bot_sem_admin",
+        permissao: "sem_permissao",
+        metadataObtida: true,
+        botEncontrado: bot.botEncontrado,
+        botAdmin: false,
+        tipoAliasMatch: bot.tipoAliasMatch
+      };
   } catch {
-    return { estado: "metadata_indisponivel", permissao: "nao_verificado" };
+    return { estado: "metadata_indisponivel", permissao: "nao_verificado", metadataObtida: false };
   }
 }
 
@@ -167,6 +161,10 @@ async function montarStatusGerentePerfil({ clienteId, perfil = {}, sessoesValida
     let estado = "pronto_para_moderar";
     let permissao = "nao_verificado";
     let admin = false;
+    let metadataObtida = false;
+    let botEncontrado = false;
+    let botAdmin = false;
+    let tipoAliasMatch = "";
 
     if (perfil?.ativo !== true) {
       estado = "perfil_inativo";
@@ -188,6 +186,10 @@ async function montarStatusGerentePerfil({ clienteId, perfil = {}, sessoesValida
       const permissaoAdmin = await resolverPermissaoAdminGerente({ clienteId, sessaoId, grupoId });
       permissao = permissaoAdmin.permissao;
       admin = permissaoAdmin.estado === "bot_admin";
+      metadataObtida = permissaoAdmin.metadataObtida === true;
+      botEncontrado = permissaoAdmin.botEncontrado === true;
+      botAdmin = permissaoAdmin.botAdmin === true;
+      tipoAliasMatch = permissaoAdmin.tipoAliasMatch || "";
       estados.push(permissaoAdmin.estado);
       estado = admin ? "pronto_para_moderar" : permissaoAdmin.estado;
       if (admin) estados.push("pronto_para_moderar");
@@ -202,6 +204,10 @@ async function montarStatusGerentePerfil({ clienteId, perfil = {}, sessoesValida
       regrasAtivas,
       permissao,
       admin,
+      metadataObtida,
+      botEncontrado,
+      botAdmin,
+      tipoAliasMatch,
       estado,
       estados: [...new Set(estados)],
       ultimoMotivo: ultimo?.codigo || "",
