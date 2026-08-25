@@ -408,10 +408,10 @@ function normalizarConfigMensagemPerfil(raw = {}, fallback = {}) {
 
 function normalizarModuloMensagemPerfil(raw = {}, fallback = {}) {
   const fonte = raw && typeof raw === "object" ? raw : {};
-  return {
+  return aplicarAlcanceGrupos(fonte, {
     ativo: fonte.ativo === undefined ? fallback.ativo === true : fonte.ativo === true,
     configuracao: normalizarConfigMensagemPerfil(fonte.configuracao || fonte, fallback.configuracao || {})
-  };
+  });
 }
 
 function normalizarModuloSimplesPerfil(raw = {}, ativoPadrao = false) {
@@ -608,6 +608,8 @@ function criarPerfilLegadoVirtual(config = {}) {
     modulos: {
       boasVindas: {
         ativo: config.boasVindasAtivo === true,
+        grupos: normalizarListaPalavras(config.grupos),
+        gruposConfigurados: false,
         configuracao: {
           mensagem: String(config.mensagemBoasVindas || ""),
           imagem: String(config.imagemBoasVindas || ""),
@@ -616,6 +618,8 @@ function criarPerfilLegadoVirtual(config = {}) {
       },
       despedida: {
         ativo: config.despedidaAtivo === true,
+        grupos: normalizarListaPalavras(config.grupos),
+        gruposConfigurados: false,
         configuracao: {
           mensagem: String(config.mensagemDespedida || ""),
           imagem: String(config.imagemDespedida || ""),
@@ -692,6 +696,8 @@ function validarPerfisMensageiro(perfis = [], opcoes = {}) {
     }
 
     const alcancesModulares = [
+      ["boasVindas", perfil.modulos?.boasVindas],
+      ["despedida", perfil.modulos?.despedida],
       ["gerente", perfil.modulos?.gerente],
       ["comandos", perfil.modulos?.comandos]
     ];

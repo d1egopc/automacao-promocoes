@@ -44,6 +44,39 @@ function configurar(dados = {}) {
   });
 }
 
+function perfilMensagem({
+  grupos = ["grupo_monitorado@g.us"],
+  boasVindasGrupos,
+  boasVindasGruposConfigurados = false,
+  despedidaGrupos,
+  despedidaGruposConfigurados = false
+} = {}) {
+  return {
+    id: "perfil_msg",
+    nome: "Perfil mensagem",
+    ativo: true,
+    sessaoId: "sessao_mensageiro",
+    grupos,
+    modulos: {
+      boasVindas: {
+        ativo: true,
+        grupos: boasVindasGrupos || [],
+        gruposConfigurados: boasVindasGruposConfigurados,
+        configuracao: { mensagem: "", imagem: "", envio: { destino: "privado" } }
+      },
+      despedida: {
+        ativo: true,
+        grupos: despedidaGrupos || [],
+        gruposConfigurados: despedidaGruposConfigurados,
+        configuracao: { mensagem: "", imagem: "", envio: { destino: "privado" } }
+      },
+      comandos: { ativo: true, grupos: [], gruposConfigurados: false },
+      programacoes: { ativo: true },
+      gerente: { ativo: false, grupos: [], gruposConfigurados: false, configuracao: { regras: [] } }
+    }
+  };
+}
+
 async function disparar({ action = "add", participante = "5511999999999@s.whatsapp.net", grupo = "grupo_monitorado@g.us", sock = criarSock() } = {}) {
   await mensageiro.tratarEventoGrupoMensageiro({
     clienteId: "cliente_mensageiro",
@@ -79,6 +112,57 @@ function sleep(ms) {
   assert.strictEqual(sock.envios.length, 1, "grupo monitorado deve receber mensagem");
   assert.strictEqual(sock.envios[0].jid, "grupo_monitorado@g.us", "modo grupo envia no grupo");
   assert.deepStrictEqual(sock.envios[0].payload, { text: "Bem-vindo 5511000000004" }, "grupo texto deve montar payload correto");
+
+  configurar({
+    grupos: ["grupo_legado@g.us"],
+    perfis: [perfilMensagem({ grupos: ["grupo_legado@g.us"], boasVindasGrupos: ["grupo_bv@g.us"], boasVindasGruposConfigurados: true })],
+    boasVindasEnvio: { destino: "grupo", modoGrupo: "texto", mensagemTemporaria: false, apagarAposSegundos: 20 }
+  });
+  sock = await disparar({ participante: "5511000000010@s.whatsapp.net", grupo: "grupo_bv@g.us" });
+  assert.strictEqual(sock.envios.length, 1, "boas-vindas usa alcance proprio do modulo");
+  sock = await disparar({ participante: "5511000000011@s.whatsapp.net", grupo: "grupo_legado@g.us" });
+  assert.strictEqual(sock.envios.length, 0, "boas-vindas nao herda perfil.grupos quando tem alcance proprio");
+
+  configurar({
+    perfis: [perfilMensagem({ boasVindasGrupos: [], boasVindasGruposConfigurados: true })],
+    boasVindasEnvio: { destino: "grupo", modoGrupo: "texto", mensagemTemporaria: false, apagarAposSegundos: 20 }
+  });
+  sock = await disparar({ participante: "5511000000012@s.whatsapp.net" });
+  assert.strictEqual(sock.envios.length, 0, "boas-vindas grupos=[] explicito nao envia");
+
+  configurar({
+    perfis: [perfilMensagem({ grupos: ["grupo_monitorado@g.us"] })],
+    boasVindasEnvio: { destino: "grupo", modoGrupo: "texto", mensagemTemporaria: false, apagarAposSegundos: 20 }
+  });
+  sock = await disparar({ participante: "5511000000013@s.whatsapp.net" });
+  assert.strictEqual(sock.envios.length, 1, "boas-vindas sem alcance proprio usa fallback do perfil");
+  sock = await disparar({ participante: "5511000000014@s.whatsapp.net", grupo: "grupo_fora@g.us" });
+  assert.strictEqual(sock.envios.length, 0, "boas-vindas fallback nao envia em grupo fora");
+
+  configurar({
+    grupos: ["grupo_legado@g.us"],
+    perfis: [perfilMensagem({ grupos: ["grupo_legado@g.us"], despedidaGrupos: ["grupo_dp@g.us"], despedidaGruposConfigurados: true })],
+    despedidaEnvio: { destino: "privado", modoGrupo: "imagem_texto", mensagemTemporaria: false, apagarAposSegundos: 20 }
+  });
+  sock = await disparar({ action: "remove", participante: "5511000000015@s.whatsapp.net", grupo: "grupo_dp@g.us" });
+  assert.strictEqual(sock.envios.length, 1, "despedida usa alcance proprio do modulo");
+  assert.strictEqual(sock.envios[0].jid, "5511000000015@s.whatsapp.net", "despedida com alcance proprio preserva envio PV");
+  sock = await disparar({ action: "remove", participante: "5511000000016@s.whatsapp.net", grupo: "grupo_legado@g.us" });
+  assert.strictEqual(sock.envios.length, 0, "despedida nao herda perfil.grupos quando tem alcance proprio");
+
+  configurar({
+    perfis: [perfilMensagem({ despedidaGrupos: [], despedidaGruposConfigurados: true })]
+  });
+  sock = await disparar({ action: "remove", participante: "5511000000017@s.whatsapp.net" });
+  assert.strictEqual(sock.envios.length, 0, "despedida grupos=[] explicito nao envia");
+
+  configurar({
+    perfis: [perfilMensagem({ grupos: ["grupo_monitorado@g.us"] })]
+  });
+  sock = await disparar({ action: "remove", participante: "5511000000018@s.whatsapp.net" });
+  assert.strictEqual(sock.envios.length, 1, "despedida sem alcance proprio usa fallback do perfil");
+  sock = await disparar({ action: "remove", participante: "5511000000019@s.whatsapp.net", grupo: "grupo_fora@g.us" });
+  assert.strictEqual(sock.envios.length, 0, "despedida fallback nao envia em grupo fora");
 
   const imagemBase64 = `data:image/png;base64,${Buffer.from("fake-image").toString("base64")}`;
   configurar({

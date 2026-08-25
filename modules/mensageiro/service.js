@@ -52,6 +52,33 @@ function grupoPermitido(clienteId, grupoId) {
   return config.grupos.includes(grupoId);
 }
 
+function moduloEventoGrupoMensageiro(acao = "") {
+  if (acao === "add") return "boasVindas";
+  if (acao === "remove" || acao === "leave") return "despedida";
+  return "";
+}
+
+function grupoPermitidoModuloMensagem({ clienteId, config = {}, sessaoId = "", grupoId = "", acao = "" } = {}) {
+  const modulo = moduloEventoGrupoMensageiro(acao);
+  if (!modulo) return false;
+
+  const perfis = Array.isArray(config.perfis)
+    ? config.perfis.filter(perfil => perfil?.ativo !== false && !perfil?.removidoEm)
+    : [];
+
+  if (!perfis.length) return grupoPermitido(clienteId, grupoId);
+
+  const resolucao = resolverPerfilMensageiro({
+    clienteId,
+    sessaoId,
+    grupoId,
+    modulo,
+    config
+  });
+
+  return Boolean(resolucao?.ok && resolucao.legado !== true);
+}
+
 function obterMensagemBoasVindas(clienteId) {
   return (
     getMensageiroCliente(clienteId)
@@ -1189,10 +1216,9 @@ async function tratarEventoGrupoMensageiro({
     const participantes = evento.participants || [];
     const acao = evento.action;
 
-    if (!grupoPermitido(clienteId, grupoId)) return;
-
     if (acao === "add" && !config.boasVindasAtivo) return;
     if ((acao === "remove" || acao === "leave") && !config.despedidaAtivo) return;
+    if (!grupoPermitidoModuloMensagem({ clienteId, config, sessaoId, grupoId, acao })) return;
 
     const mensagem =
       acao === "add"
