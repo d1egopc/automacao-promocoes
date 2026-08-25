@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const {
   getClienteJsonPath,
   readClienteJson,
@@ -41,6 +42,7 @@ const TIPOS_MIDIA_GERENTE = new Set(["imagem", "video", "audio", "documento", "s
 const MAX_PERFIS_MENSAGEIRO = Number(process.env.MAX_PERFIS_MENSAGEIRO || 4) || 4;
 const PERFIL_LEGADO_ID = "__legado__";
 const INFRACOES_GERENTE_FILE = "mensageiro-gerente-infracoes.json";
+const OPERACIONAL_GERENTE_FILE = "mensageiro-gerente-operacional.json";
 const MODULOS_PERFIL_MENSAGEIRO = new Set([
   "boasVindas",
   "despedida",
@@ -59,6 +61,17 @@ function garantirDiretorio(dir) {
 
 function clienteIdSeguro(clienteId) {
   return String(clienteId || "admin").replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function referenciaGerenteId(valor = "", prefixo = "id") {
+  const texto = String(valor || "").trim();
+  if (!texto) return "";
+  const hash = crypto.createHash("sha256").update(texto).digest("hex").slice(0, 16);
+  return `${prefixo}_${hash}`;
+}
+
+function referenciaGrupoGerente(grupoId = "") {
+  return referenciaGerenteId(grupoId, "grupo");
 }
 
 function getDiretorioCliente(clienteId) {
@@ -1038,6 +1051,76 @@ function atualizarInfracaoGerenteCliente(clienteId, filtro = {}, patch = {}) {
   return listarInfracoesGerenteCliente(clienteId, filtro);
 }
 
+function normalizarMotivoOperacionalGerente(motivo = {}, index = 0) {
+  const raw = motivo && typeof motivo === "object" ? motivo : {};
+  const perfilId = String(raw.perfilId || "");
+  const sessaoId = String(raw.sessaoId || "");
+  const grupoId = String(raw.grupoId || "");
+  const codigo = String(raw.codigo || "indefinido").replace(/[^a-z0-9_:-]/gi, "_").slice(0, 80);
+  const timestamp = raw.timestamp ? String(raw.timestamp) : new Date().toISOString();
+  const id = String(raw.id || [
+    perfilId || "sem_perfil",
+    sessaoId || "sem_sessao",
+    grupoId || "sem_grupo"
+  ].join(":") || `motivo_${index}`);
+
+  return {
+    id,
+    clienteId: clienteIdSeguro(raw.clienteId || ""),
+    perfilId,
+    sessaoId,
+    grupoId,
+    codigo,
+    timestamp
+  };
+}
+
+function lerArquivoOperacionalGerente(clienteId) {
+  const dados = readClienteJson(clienteId, OPERACIONAL_GERENTE_FILE, { versao: 1, motivos: [] });
+  const motivos = Array.isArray(dados.motivos) ? dados.motivos : [];
+  return {
+    versao: 1,
+    motivos: motivos.map(normalizarMotivoOperacionalGerente)
+  };
+}
+
+function salvarArquivoOperacionalGerente(clienteId, dados = {}) {
+  const motivos = Array.isArray(dados.motivos)
+    ? dados.motivos.map(normalizarMotivoOperacionalGerente).slice(-300)
+    : [];
+  const payload = { versao: 1, motivos };
+  writeClienteJson(clienteId, OPERACIONAL_GERENTE_FILE, payload);
+  return payload;
+}
+
+function listarUltimosMotivosGerenteCliente(clienteId, filtro = {}) {
+  const dados = lerArquivoOperacionalGerente(clienteId);
+  return dados.motivos.filter(motivo => {
+    if (filtro.perfilId && motivo.perfilId !== filtro.perfilId) return false;
+    if (filtro.sessaoId && motivo.sessaoId !== filtro.sessaoId) return false;
+    if (filtro.grupoId && motivo.grupoId !== filtro.grupoId) return false;
+    return true;
+  });
+}
+
+function registrarUltimoMotivoGerente(clienteId, evento = {}) {
+  const perfilId = String(evento.perfilId || "");
+  const sessaoId = String(evento.sessaoId || "");
+  const grupoId = referenciaGrupoGerente(evento.grupoId || evento.grupoRef || "");
+  const motivo = normalizarMotivoOperacionalGerente({
+    clienteId,
+    perfilId,
+    sessaoId,
+    grupoId,
+    codigo: evento.codigo,
+    timestamp: new Date().toISOString()
+  });
+  const dados = lerArquivoOperacionalGerente(clienteId);
+  const motivos = dados.motivos.filter(item => item.id !== motivo.id);
+  salvarArquivoOperacionalGerente(clienteId, { motivos: [...motivos, motivo] });
+  return motivo;
+}
+
 function getMensageiroCliente(clienteId) {
   if (!mensageiroPorCliente[clienteId]) {
     mensageiroPorCliente[clienteId] =
@@ -1096,6 +1179,9 @@ module.exports = {
   registrarInfracaoGerente,
   zerarInfracaoGerenteCliente,
   atualizarInfracaoGerenteCliente,
+  listarUltimosMotivosGerenteCliente,
+  registrarUltimoMotivoGerente,
+  referenciaGrupoGerente,
   validarPerfisMensageiro,
   criarPerfilLegadoVirtual,
   resolverPerfilMensageiro,

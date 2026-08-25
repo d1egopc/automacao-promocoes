@@ -3,7 +3,9 @@ const {
   resolverPerfilMensageiro,
   registrarHistoricoAtendimento,
   registrarInfracaoGerente,
-  atualizarInfracaoGerenteCliente
+  atualizarInfracaoGerenteCliente,
+  registrarUltimoMotivoGerente,
+  referenciaGrupoGerente
 } = require("./storage");
 const {
   usuarioAtivo,
@@ -324,6 +326,40 @@ function registrarHistoricoGerente(clienteId, evento = {}) {
   }
 }
 
+function logGerenteOperacional(tag, dados = {}) {
+  try {
+    console.log(tag, JSON.stringify({
+      clienteId: String(dados.clienteId || ""),
+      sessaoId: String(dados.sessaoId || ""),
+      grupoRef: referenciaGrupoGerente(dados.grupoId || ""),
+      perfilId: String(dados.perfilId || ""),
+      regraId: String(dados.regraId || ""),
+      tipoRegra: String(dados.tipoRegra || ""),
+      acao: String(dados.acao || ""),
+      codigo: String(dados.codigo || ""),
+      erro: dados.erro ? String(dados.erro).slice(0, 180) : ""
+    }));
+  } catch {}
+}
+
+function registrarMotivoOperacionalGerente(clienteId, evento = {}, tag = "[GERENTE-GATE]") {
+  if (!eventoTemGrupo(evento)) return;
+  try {
+    registrarUltimoMotivoGerente(clienteId, evento);
+  } catch (e) {
+    logGerenteOperacional("[GERENTE-DIAGNOSTICO-ERRO]", {
+      ...evento,
+      clienteId,
+      erro: e?.message || "erro_diagnostico"
+    });
+  }
+  logGerenteOperacional(tag, { ...evento, clienteId });
+}
+
+function eventoTemGrupo(evento = {}) {
+  return Boolean(String(evento.grupoId || "").trim());
+}
+
 function resultadoGerente(patch = {}) {
   return {
     processada: false,
@@ -376,6 +412,18 @@ async function tratarMensagemGrupoGerente({
 
     const grupoId = normalizarJid(mensagem?.key?.remoteJid || "");
     if (!jidGrupo(grupoId)) return resultadoGerente({ codigo: "nao_grupo" });
+    const registrarOperacional = (codigo, extras = {}, tag = "[GERENTE-GATE]") => {
+      registrarMotivoOperacionalGerente(clienteId, {
+        sessaoId,
+        grupoId,
+        codigo,
+        ...extras
+      }, tag);
+    };
+    const retornarOperacional = (codigo, patch = {}, extras = {}, tag = "[GERENTE-GATE]") => {
+      registrarOperacional(codigo, extras, tag);
+      return resultadoGerente({ codigo, ...patch });
+    };
 
     const messageId = String(mensagem?.key?.id || "");
     const chaveResultado = messageId ? `gerente:msg:${clienteId}:${sessaoId}:${grupoId}:${messageId}` : "";
@@ -383,13 +431,13 @@ async function tratarMensagemGrupoGerente({
     if (resultadoAnterior) return resultadoAnterior.resultado;
 
     const participante = extrairParticipante(mensagem);
-    if (!participante) return resultadoGerente({ codigo: "participante_nao_resolvido" });
+    if (!participante) return retornarOperacional("participante_nao_resolvido");
     if (!mensagem?.key || !mensagem.key.id || !mensagem.key.remoteJid) {
-      return resultadoGerente({ codigo: "key_incompleta" });
+      return retornarOperacional("key_incompleta");
     }
 
     const config = getMensageiroCliente(clienteId);
-    if (config?.ativo !== true) return resultadoGerente({ codigo: "mensageiro_inativo" });
+    if (config?.ativo !== true) return retornarOperacional("mensageiro_inativo");
 
     const resolucao = resolverPerfilMensageiro({
       clienteId,
@@ -399,18 +447,19 @@ async function tratarMensagemGrupoGerente({
       config
     });
     if (!resolucao?.ok || resolucao.legado === true) {
-      return resultadoGerente({ codigo: resolucao?.codigo || "perfil_nao_resolvido" });
+      return retornarOperacional(resolucao?.codigo || "perfil_nao_resolvido");
     }
 
     const perfil = resolucao.perfil || {};
     const gerente = perfil.modulos?.gerente || {};
-    if (gerente.ativo !== true) return resultadoGerente({ codigo: "gerente_inativo" });
+    if (gerente.ativo !== true) return retornarOperacional("gerente_inativo", {}, { perfilId: perfil.id });
+    registrarOperacional("gerente_ativo", { perfilId: perfil.id });
 
     const configuracao = gerente.configuracao || {};
     const regrasAtivas = Array.isArray(configuracao.regras)
       ? configuracao.regras.filter(regraAtiva)
       : [];
-    if (!regrasAtivas.length) return resultadoGerente({ codigo: "sem_regras_ativas" });
+    if (!regrasAtivas.length) return retornarOperacional("sem_regras_ativas", {}, { perfilId: perfil.id });
 
     const texto = extrairTextoMensagem(mensagem);
     const tipoMidia = extrairTipoMidia(mensagem);
@@ -421,11 +470,19 @@ async function tratarMensagemGrupoGerente({
       tipoMidia,
       contexto
     });
-    if (!violacao) return resultadoGerente({ processada: true, codigo: "sem_violacao" });
+    if (!violacao) return retornarOperacional("sem_violacao", { processada: true }, { perfilId: perfil.id });
 
     const regra = violacao.regra;
+    registrarOperacional("violacao_detectada", {
+      perfilId: perfil.id,
+      regraId: regra.id,
+      tipoRegra: regra.tipo,
+      acao: regra.acao
+    }, "[GERENTE-REGRA-MATCH]");
     const permissao = await obterPermissoesGrupo({ sock, grupoId, participante });
-    if (!permissao.ok) return resultadoGerente({ processada: true, codigo: permissao.codigo || "metadata_indisponivel" });
+    if (!permissao.ok) {
+      return retornarOperacional(permissao.codigo || "metadata_indisponivel", { processada: true }, { perfilId: perfil.id });
+    }
 
     const isencao = participanteIsento({ participante, permissao, configuracao });
     if (isencao) {
@@ -443,10 +500,11 @@ async function tratarMensagemGrupoGerente({
         resumo: `🛡️ ${nomeParticipante(participante, mensagem)} • isento`,
         detalhe: `Regra ignorada por isencao: ${isencao}`
       });
-      return resultadoGerente({ processada: true, codigo: `isento_${isencao}` });
+      return retornarOperacional(`isento_${isencao}`, { processada: true }, { perfilId: perfil.id });
     }
 
     if (!permissao.botAdmin) {
+      registrarOperacional("bot_sem_admin", { perfilId: perfil.id }, "[GERENTE-SEM-ADMIN]");
       registrarHistoricoGerente(clienteId, {
         contato: participante,
         contatoNome: nomeParticipante(participante, mensagem),
@@ -463,10 +521,24 @@ async function tratarMensagemGrupoGerente({
       });
       return resultadoGerente({ processada: true, codigo: "bot_sem_admin" });
     }
+    registrarOperacional("bot_admin", { perfilId: perfil.id });
 
     try {
       await sock.sendMessage(grupoId, { delete: mensagem.key });
+      registrarOperacional("delete_ok", {
+        perfilId: perfil.id,
+        regraId: regra.id,
+        tipoRegra: regra.tipo,
+        acao: regra.acao
+      }, "[GERENTE-DELETE-OK]");
     } catch (e) {
+      registrarOperacional("delete_falhou", {
+        perfilId: perfil.id,
+        regraId: regra.id,
+        tipoRegra: regra.tipo,
+        acao: regra.acao,
+        erro: e?.message || "delete_falhou"
+      }, "[GERENTE-DELETE-ERRO]");
       registrarHistoricoGerente(clienteId, {
         contato: participante,
         contatoNome: nomeParticipante(participante, mensagem),
@@ -502,6 +574,14 @@ async function tratarMensagemGrupoGerente({
         ultimaMensagemId: messageId
       }, { resetInfracoesDias: configuracao.resetInfracoesDias })
       : null;
+    if (deveContar) {
+      registrarOperacional("infracao_registrada", {
+        perfilId: perfil.id,
+        regraId: regra.id,
+        tipoRegra: regra.tipo,
+        acao: regra.acao
+      }, "[GERENTE-INFRACAO]");
+    }
     const contador = infracao?.contador || 1;
     const deveRemover =
       regra.acao === "remover_imediato" ||
@@ -521,7 +601,20 @@ async function tratarMensagemGrupoGerente({
       });
       try {
         await enviarAvisoGerente({ sock, grupoId, participante, texto: textoAviso, clienteId, sessaoId, regra, configuracao });
+        registrarOperacional("aviso_ok", {
+          perfilId: perfil.id,
+          regraId: regra.id,
+          tipoRegra: regra.tipo,
+          acao: regra.acao
+        }, "[GERENTE-AVISO-OK]");
       } catch (e) {
+        registrarOperacional("aviso_falhou", {
+          perfilId: perfil.id,
+          regraId: regra.id,
+          tipoRegra: regra.tipo,
+          acao: regra.acao,
+          erro: e?.message || "aviso_falhou"
+        }, "[GERENTE-AVISO-ERRO]");
         registrarHistoricoGerente(clienteId, {
           contato: participante,
           contatoNome: nomeParticipante(participante, mensagem),
@@ -544,6 +637,12 @@ async function tratarMensagemGrupoGerente({
       try {
         await sock.groupParticipantsUpdate(grupoId, [participante], "remove");
         removeu = true;
+        registrarOperacional("remocao_ok", {
+          perfilId: perfil.id,
+          regraId: regra.id,
+          tipoRegra: regra.tipo,
+          acao: regra.acao
+        });
         if (infracao?.id) {
           atualizarInfracaoGerenteCliente(clienteId, { id: infracao.id }, {
             status: "removido",
@@ -551,6 +650,13 @@ async function tratarMensagemGrupoGerente({
           });
         }
       } catch (e) {
+        registrarOperacional("remocao_falhou", {
+          perfilId: perfil.id,
+          regraId: regra.id,
+          tipoRegra: regra.tipo,
+          acao: regra.acao,
+          erro: e?.message || "remocao_falhou"
+        });
         registrarHistoricoGerente(clienteId, {
           contato: participante,
           contatoNome: nomeParticipante(participante, mensagem),
@@ -601,12 +707,18 @@ async function tratarMensagemGrupoGerente({
     if (chaveResultado) {
       resultadosMensagemGerente.set(chaveResultado, { ts: Date.now(), resultado: resultadoFinal });
     }
+    registrarOperacional(resultadoFinal.codigo, {
+      perfilId: perfil.id,
+      regraId: regra.id,
+      tipoRegra: regra.tipo,
+      acao: regra.acao
+    });
     return resultadoFinal;
   } catch (e) {
     console.log("[MENSAGEIRO-GERENTE-ERRO]", JSON.stringify({
       clienteId,
       sessaoId,
-      grupoId: mensagem?.key?.remoteJid || "",
+      grupoRef: referenciaGrupoGerente(mensagem?.key?.remoteJid || ""),
       erro: e?.message || String(e || "erro_desconhecido")
     }));
     return resultadoGerente({ codigo: "erro_interno" });

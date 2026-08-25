@@ -19856,6 +19856,8 @@ app.use("/mensageiro", criarRotasMensageiro({
   validarPerfisMensageiro: mensageiro.validarPerfisMensageiro,
   listarInfracoesGerenteCliente: mensageiro.listarInfracoesGerenteCliente,
   zerarInfracaoGerenteCliente: mensageiro.zerarInfracaoGerenteCliente,
+  listarUltimosMotivosGerenteCliente: mensageiro.listarUltimosMotivosGerenteCliente,
+  referenciaGrupoGerente: mensageiro.referenciaGrupoGerente,
   listarSessoesMensageiro: (clienteId) => listarSessoesWhatsappCliente(clienteId),
   listarGruposSessaoMensageiro: (clienteId, sessaoId) => {
     const idNormalizado = normalizarSessaoId(clienteId, sessaoId);
@@ -19864,6 +19866,17 @@ app.use("/mensageiro", criarRotasMensageiro({
       gruposPorSessao[idNormalizado] ||
       []
     );
+  },
+  getSockMensageiro: (clienteId, sessaoId) => {
+    const id = String(sessaoId || "").trim();
+    const idNormalizado = normalizarSessaoId(clienteId, id);
+    const candidatos = [id, idNormalizado, `${clienteId}_${id}`].filter(Boolean);
+    for (const candidato of candidatos) {
+      const meta = sessoesMeta?.[candidato] || {};
+      if (!canalPertenceAoWorkspace(meta, clienteId, { usuarios })) continue;
+      if (sessoes[candidato]) return sessoes[candidato];
+    }
+    return null;
   }
 }));
 

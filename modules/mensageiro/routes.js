@@ -19,8 +19,11 @@ const {
   validarPerfisMensageiro,
   listarInfracoesGerenteCliente,
   zerarInfracaoGerenteCliente,
+  listarUltimosMotivosGerenteCliente,
+  referenciaGrupoGerente,
   listarSessoesMensageiro,
-  listarGruposSessaoMensageiro
+  listarGruposSessaoMensageiro,
+  getSockMensageiro
 } = deps;
 
 function normalizarAtendimentoMensageiro(dados = {}) {
@@ -75,6 +78,172 @@ function mensageiroPermitido(req, clienteId) {
     clienteId === "admin" ||
     usuarioTemRecurso(req, "mensageiro")
   );
+}
+
+function normalizarTextoCurto(valor = "", limite = 120) {
+  return String(valor || "").replace(/\s+/g, " ").trim().slice(0, limite);
+}
+
+function normalizarGrupoStatusGerente(grupo = {}) {
+  const raw = grupo && typeof grupo === "object" ? grupo : {};
+  const grupoId = String(raw.grupoId || raw.id || raw.jid || raw.remoteJid || raw.value || "").trim();
+  return {
+    grupoId,
+    grupoRef: typeof referenciaGrupoGerente === "function" ? referenciaGrupoGerente(grupoId) : grupoId,
+    nome: normalizarTextoCurto(raw.nome || raw.name || raw.subject || raw.titulo || raw.label || "Grupo sem nome")
+  };
+}
+
+function normalizarJidBaseGerente(jid = "") {
+  return String(jid || "").split(":")[0].trim();
+}
+
+function participanteAdminGerente(participante = {}) {
+  const admin = String(participante?.admin || "").toLowerCase();
+  return admin === "admin" || admin === "superadmin";
+}
+
+function botEhAdminMetadataGerente(sock, metadata = {}) {
+  const participantes = Array.isArray(metadata?.participants) ? metadata.participants : [];
+  const idsBot = new Set([
+    normalizarJidBaseGerente(sock?.user?.id || ""),
+    normalizarJidBaseGerente(sock?.user?.jid || ""),
+    normalizarJidBaseGerente(sock?.authState?.creds?.me?.id || ""),
+    normalizarJidBaseGerente(sock?.authState?.creds?.me?.jid || "")
+  ].filter(Boolean));
+  const bot = participantes.find(participante => idsBot.has(normalizarJidBaseGerente(participante?.id || participante?.jid || "")));
+  return participanteAdminGerente(bot);
+}
+
+async function resolverPermissaoAdminGerente({ clienteId, sessaoId, grupoId }) {
+  if (typeof getSockMensageiro !== "function") {
+    return { estado: "metadata_indisponivel", permissao: "nao_verificado" };
+  }
+  const sessao = getSockMensageiro(clienteId, sessaoId);
+  const sock = sessao?.sock || sessao;
+  if (!sock || typeof sock.groupMetadata !== "function") {
+    return { estado: "metadata_indisponivel", permissao: "nao_verificado" };
+  }
+  try {
+    const metadata = await sock.groupMetadata(grupoId);
+    const botAdmin = botEhAdminMetadataGerente(sock, metadata);
+    return botAdmin
+      ? { estado: "bot_admin", permissao: "administrador" }
+      : { estado: "bot_sem_admin", permissao: "sem_permissao" };
+  } catch {
+    return { estado: "metadata_indisponivel", permissao: "nao_verificado" };
+  }
+}
+
+async function montarStatusGerentePerfil({ clienteId, perfil = {}, sessoesValidas = [], ultimosMotivos = [] } = {}) {
+  const gerente = perfil?.modulos?.gerente || {};
+  const configuracao = gerente.configuracao || {};
+  const regras = Array.isArray(configuracao.regras) ? configuracao.regras : [];
+  const regrasAtivas = regras.filter(regra => regra?.ativo === true).length;
+  const sessaoId = String(perfil?.sessaoId || perfil?.sessaoWhatsappId || perfil?.sessaoGruposId || "").trim();
+  const sessaoExiste = !Array.isArray(sessoesValidas) || !sessoesValidas.length
+    ? Boolean(sessaoId)
+    : sessoesValidas.some(sessao => String(sessao?.id || sessao?.sessaoId || "") === sessaoId);
+  const gruposCatalogo = typeof listarGruposSessaoMensageiro === "function"
+    ? listarGruposSessaoMensageiro(clienteId, sessaoId)
+    : [];
+  const gruposPorId = new Map(
+    (Array.isArray(gruposCatalogo) ? gruposCatalogo : [])
+      .map(normalizarGrupoStatusGerente)
+      .filter(grupo => grupo.grupoId)
+      .map(grupo => [grupo.grupoId, grupo])
+  );
+  const gruposPerfil = Array.isArray(perfil?.grupos) ? perfil.grupos.map(item => String(item || "").trim()).filter(Boolean) : [];
+  const motivosPorGrupo = new Map(
+    ultimosMotivos
+      .filter(item => item?.perfilId === perfil?.id)
+      .map(item => [String(item.grupoId || ""), item])
+  );
+
+  const grupos = [];
+  for (const grupoId of gruposPerfil) {
+    const catalogo = gruposPorId.get(grupoId) || normalizarGrupoStatusGerente({ id: grupoId, nome: "Grupo selecionado" });
+    const estados = [];
+    let estado = "pronto_para_moderar";
+    let permissao = "nao_verificado";
+    let admin = false;
+
+    if (perfil?.ativo !== true) {
+      estado = "perfil_inativo";
+      estados.push("perfil_inativo");
+    } else if (!sessaoExiste) {
+      estado = "sessao_divergente";
+      estados.push("sessao_divergente");
+    } else if (!gruposPerfil.includes(grupoId)) {
+      estado = "grupo_fora_do_perfil";
+      estados.push("grupo_fora_do_perfil");
+    } else if (gerente.ativo !== true) {
+      estado = "gerente_inativo";
+      estados.push("gerente_inativo");
+    } else if (!regrasAtivas) {
+      estado = "sem_regras_ativas";
+      estados.push("gerente_ativo", "sem_regras_ativas");
+    } else {
+      estados.push("gerente_ativo");
+      const permissaoAdmin = await resolverPermissaoAdminGerente({ clienteId, sessaoId, grupoId });
+      permissao = permissaoAdmin.permissao;
+      admin = permissaoAdmin.estado === "bot_admin";
+      estados.push(permissaoAdmin.estado);
+      estado = admin ? "pronto_para_moderar" : permissaoAdmin.estado;
+      if (admin) estados.push("pronto_para_moderar");
+    }
+
+    const ultimo = motivosPorGrupo.get(catalogo.grupoRef) || null;
+    grupos.push({
+      grupoRef: catalogo.grupoRef,
+      nome: catalogo.nome,
+      sessaoId,
+      gerenteAtivo: gerente.ativo === true,
+      regrasAtivas,
+      permissao,
+      admin,
+      estado,
+      estados: [...new Set(estados)],
+      ultimoMotivo: ultimo?.codigo || "",
+      ultimoMotivoEm: ultimo?.timestamp || ""
+    });
+  }
+
+  const semPermissao = grupos.filter(grupo => grupo.estado === "bot_sem_admin").length;
+  const naoVerificados = grupos.filter(grupo => grupo.estado === "metadata_indisponivel").length;
+  const prontos = grupos.filter(grupo => grupo.estado === "pronto_para_moderar").length;
+  const estadoResumo = gerente.ativo !== true
+    ? "gerente_inativo"
+    : perfil?.ativo !== true
+      ? "perfil_inativo"
+      : !regrasAtivas
+        ? "sem_regras_ativas"
+        : semPermissao
+          ? "bot_sem_admin"
+          : naoVerificados
+            ? "metadata_indisponivel"
+            : prontos
+              ? "pronto_para_moderar"
+              : "grupo_fora_do_perfil";
+
+  return {
+    perfilId: String(perfil?.id || ""),
+    perfilNome: normalizarTextoCurto(perfil?.nome || "Perfil"),
+    gerenteAtivo: gerente.ativo === true,
+    perfilAtivo: perfil?.ativo === true,
+    sessaoId,
+    regrasAtivas,
+    gruposSelecionados: gruposPerfil.length,
+    estado: estadoResumo,
+    permissaoResumo: semPermissao
+      ? "sem_permissao"
+      : naoVerificados
+        ? "nao_verificado"
+        : prontos
+          ? "administrador"
+          : "nao_verificado",
+    grupos
+  };
 }
 
 async function otimizarImagensComandos(comandos = []) {
@@ -251,6 +420,76 @@ router.get("/gerente/infracoes", (req, res) => {
     ok: true,
     clienteId,
     infracoes
+  });
+});
+
+router.get("/gerente/status", async (req, res) => {
+  const clienteId = getClienteId(req);
+
+  if (!mensageiroPermitido(req, clienteId)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Mensageiro não disponível no seu plano"
+    });
+  }
+
+  const config = getMensageiroCliente(clienteId);
+  const perfilId = String(req.query?.perfilId || "");
+  const perfis = Array.isArray(config?.perfis) ? config.perfis.filter(perfil => !perfil?.removidoEm) : [];
+  const perfisAlvo = perfilId
+    ? perfis.filter(perfil => String(perfil?.id || "") === perfilId)
+    : perfis;
+  const sessoesValidas = typeof listarSessoesMensageiro === "function"
+    ? listarSessoesMensageiro(clienteId)
+    : [];
+  const ultimosMotivos = typeof listarUltimosMotivosGerenteCliente === "function"
+    ? listarUltimosMotivosGerenteCliente(clienteId, perfilId ? { perfilId } : {})
+    : [];
+
+  if (perfilId && !perfisAlvo.length) {
+    return res.json({
+      ok: true,
+      clienteId,
+      estado: "perfil_nao_encontrado",
+      resumo: {
+        gerenteAtivo: false,
+        regrasAtivas: 0,
+        gruposSelecionados: 0,
+        permissaoResumo: "nao_verificado"
+      },
+      perfis: []
+    });
+  }
+
+  const statusPerfis = [];
+  for (const perfil of perfisAlvo) {
+    statusPerfis.push(await montarStatusGerentePerfil({
+      clienteId,
+      perfil,
+      sessoesValidas,
+      ultimosMotivos
+    }));
+  }
+
+  const resumoBase = statusPerfis.find(item => item.perfilId === perfilId) || statusPerfis[0] || null;
+  return res.json({
+    ok: true,
+    clienteId,
+    estado: resumoBase?.estado || "perfil_nao_encontrado",
+    resumo: resumoBase
+      ? {
+        gerenteAtivo: resumoBase.gerenteAtivo,
+        regrasAtivas: resumoBase.regrasAtivas,
+        gruposSelecionados: resumoBase.gruposSelecionados,
+        permissaoResumo: resumoBase.permissaoResumo
+      }
+      : {
+        gerenteAtivo: false,
+        regrasAtivas: 0,
+        gruposSelecionados: 0,
+        permissaoResumo: "nao_verificado"
+      },
+    perfis: statusPerfis
   });
 });
 

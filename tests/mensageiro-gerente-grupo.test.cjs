@@ -2,6 +2,7 @@ const assert = require("assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const express = require("express");
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-mensageiro-gerente-"));
 process.env.DATA_DIR = dataDir;
@@ -9,6 +10,7 @@ process.env.DATA_DIR = dataDir;
 const { writeGlobalJson } = require("../utils/storage");
 const storage = require("../modules/mensageiro/storage");
 const mensageiro = require("../modules/mensageiro");
+const criarRotasMensageiro = require("../modules/mensageiro/routes");
 
 writeGlobalJson("usuarios.json", [{ id: "cliente_gerente", ativo: true }]);
 
@@ -141,8 +143,42 @@ function infracoes(filtro = {}) {
   return storage.listarInfracoesGerenteCliente(clienteId, filtro);
 }
 
+function ultimosMotivos(filtro = {}) {
+  return storage.listarUltimosMotivosGerenteCliente(clienteId, filtro);
+}
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function consultarStatusGerente({ perfilId = "perfil_gerente", sock = criarSock() } = {}) {
+  const app = express();
+  app.use(express.json());
+  app.use("/mensageiro", criarRotasMensageiro({
+    getClienteId: () => clienteId,
+    usuarioTemRecurso: () => true,
+    getMensageiroCliente: storage.getMensageiroCliente,
+    setMensageiroCliente: storage.setMensageiroCliente,
+    getAtendimentoConfigCliente: storage.getAtendimentoConfigCliente,
+    setAtendimentoConfigCliente: storage.setAtendimentoConfigCliente,
+    validarPerfisMensageiro: storage.validarPerfisMensageiro,
+    listarInfracoesGerenteCliente: storage.listarInfracoesGerenteCliente,
+    zerarInfracaoGerenteCliente: storage.zerarInfracaoGerenteCliente,
+    listarUltimosMotivosGerenteCliente: storage.listarUltimosMotivosGerenteCliente,
+    referenciaGrupoGerente: storage.referenciaGrupoGerente,
+    listarSessoesMensageiro: () => [{ id: sessaoId, nome: "Sessao Teste" }],
+    listarGruposSessaoMensageiro: () => [{ id: grupoId, nome: "Grupo Teste" }],
+    getSockMensageiro: () => sock
+  }));
+  const server = app.listen(0);
+  try {
+    const porta = server.address().port;
+    const resp = await fetch(`http://127.0.0.1:${porta}/mensageiro/gerente/status?perfilId=${encodeURIComponent(perfilId)}`);
+    assert.strictEqual(resp.status, 200);
+    return resp.json();
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
 }
 
 (async () => {
@@ -155,6 +191,7 @@ function sleep(ms) {
   configurar({ perfis: [perfilGerente({ gerenteAtivo: false })] });
   ctx = await processar();
   assert.strictEqual(ctx.sock.envios.length, 0, "Gerente inativo nao age");
+  assert.strictEqual(ultimosMotivos().at(-1)?.codigo, "perfil_nao_encontrado", "fluxo de mensagem registra gate sem modulo Gerente ativo");
 
   configurar({ perfis: [perfilGerente({ grupos: ["outro@g.us"] })] });
   ctx = await processar();
@@ -163,6 +200,32 @@ function sleep(ms) {
   configurar({ perfis: [perfilGerente({ sessaoId: "sessao_errada" })] });
   ctx = await processar();
   assert.strictEqual(ctx.sock.envios.length, 0, "sessao errada nao age");
+
+  configurar({ perfis: [perfilGerente({ ativo: false })] });
+  let statusGerente = await consultarStatusGerente();
+  assert.strictEqual(statusGerente.estado, "perfil_inativo", "status operacional mostra perfil OFF");
+
+  configurar({ perfis: [perfilGerente({ gerenteAtivo: false })] });
+  statusGerente = await consultarStatusGerente();
+  assert.strictEqual(statusGerente.estado, "gerente_inativo", "status operacional mostra Gerente OFF");
+
+  configurar({ perfis: [perfilGerente({ regras: [] })] });
+  statusGerente = await consultarStatusGerente();
+  assert.strictEqual(statusGerente.estado, "sem_regras_ativas", "status operacional mostra ausencia de regras");
+
+  configurar({ perfis: [perfilGerente({ grupos: [] })] });
+  statusGerente = await consultarStatusGerente();
+  assert.strictEqual(statusGerente.estado, "grupo_fora_do_perfil", "status operacional mostra ausencia de grupo no perfil");
+
+  configurar();
+  statusGerente = await consultarStatusGerente({ sock: criarSock({ botAdmin: false }) });
+  assert.strictEqual(statusGerente.estado, "bot_sem_admin", "status operacional mostra bot sem admin");
+  assert.strictEqual(statusGerente.perfis[0].grupos[0].permissao, "sem_permissao", "permissao sem admin fica explicita");
+
+  configurar();
+  statusGerente = await consultarStatusGerente();
+  assert.strictEqual(statusGerente.estado, "pronto_para_moderar", "status operacional mostra pronto quando admin");
+  assert.strictEqual(statusGerente.perfis[0].grupos[0].grupoId, undefined, "diagnostico nao expoe JID bruto");
 
   configurar();
   ctx = await processar({ msg: mensagem({ fromMe: true }) });
@@ -189,6 +252,10 @@ function sleep(ms) {
   assert.strictEqual(ctx.resultado.bloqueada, true, "palavra proibida gera acao");
   assert.strictEqual(ctx.sock.envios[0].payload.delete, msgPalavra.key, "delete usa exatamente a key original");
   assert.ok(infracoes().some(item => item.regraId === "r_palavra"), "apagar + avisar registra infracao");
+  const arquivoOperacional = path.join(dataDir, "clientes", clienteId, "mensageiro-gerente-operacional.json");
+  const diagnosticoOperacional = fs.readFileSync(arquivoOperacional, "utf8");
+  assert.strictEqual(diagnosticoOperacional.includes("isso e proibido"), false, "diagnostico operacional nao persiste conteudo da mensagem");
+  assert.strictEqual(diagnosticoOperacional.includes(grupoId), false, "diagnostico operacional nao persiste JID bruto do grupo");
 
   configurar({ perfis: [perfilGerente({ regras: [regra("r_p", { tipo: "palavroes", parametros: { palavras: ["lixo"] } })] })] });
   ctx = await processar({ msg: mensagem({ texto: "palavra lixo aqui", id: "palavrao" }) });
